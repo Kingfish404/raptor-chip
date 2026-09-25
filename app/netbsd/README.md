@@ -4,7 +4,7 @@ This directory builds NetBSD with the official NetBSD `build.sh` cross-build fra
 
 ## Prerequisites
 
-The host needs Git, GNU make, GCC/G++, QEMU, and standard POSIX build tools. Configure the local VPN proxy before fetching sources:
+The host needs Git, GNU make, GCC/G++, QEMU, and standard POSIX build tools. If your environment requires a proxy, set its actual address before fetching sources (the following localhost port is only an example):
 
 ```sh
 export http_proxy="http://localhost:9091"
@@ -47,7 +47,7 @@ The RV32 QEMU boot now reaches `root on dk1`. RV32 currently limits managed memo
 
 ## NEMU
 
-The release `riscv32.img` and `riscv64.img` files are GPT disks, not flat RAM images. Their sizes are about 1.1 GiB and 1.4 GiB, while the current simulator RAM window is 128 MiB. The Makefile therefore builds a small OpenSBI plus NetBSD flat payload and attaches the GPT disk separately:
+The release `riscv32.img` and `riscv64.img` files are GPT disks, not flat RAM images. Their sizes are about 1.1 GiB and 1.4 GiB, while the NetBSD helper generates a 128 MiB DTB and uses NEMU Linux profiles with 128 MiB RAM. The C++ RTL simulator has a 256 MiB backing window (`sim/include/common.h`). The Makefile therefore builds a small OpenSBI plus NetBSD flat payload and attaches the GPT disk separately:
 
 ```sh
 make nemu-run-rv32

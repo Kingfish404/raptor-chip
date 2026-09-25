@@ -1,6 +1,6 @@
 # sim/tb — DPI-free SystemVerilog testbench
 
-A self-contained, DPI-free SystemVerilog harness for the Raptor tapeout chip. It replaces the C++/DPI memory model used by the main `sim` Verilator flow (`sim/csrc/mem/*.cc`, `sim/rtl/rapt_npc_soc.sv`) with a pure-SystemVerilog AXI4 slave + MMIO model, so the *same* harness runs under commercial simulators (VCS / Xcelium / Questa) and Verilator, in both RTL and gate-level (post-layout) modes. Functionality and the MMIO map are kept byte-for-byte consistent with the existing `sim`.
+A self-contained, DPI-free SystemVerilog harness for the Raptor tapeout chip. It replaces the C++/DPI memory model used by the main `sim` Verilator flow (`sim/csrc/mem/*.cc`, `sim/rtl/rapt_npc_soc.sv`) with a pure-SystemVerilog AXI4 slave + MMIO model, so the *same* harness runs under commercial simulators (VCS / Xcelium / Questa) and Verilator, in both RTL and gate-level (post-layout) modes. The harness shares the core memory regions and trap conventions with `sim`, but implements only a subset of its peripherals; it is not a byte-for-byte substitute for the C++ platform.
 
 ## Files
 
@@ -10,7 +10,7 @@ A self-contained, DPI-free SystemVerilog harness for the Raptor tapeout chip. It
 
 ## The three flows
 
-1. **RTL Verilator alignment** (`make verilator`) — cross-checks the RTL against the C++ `sim`. Termination is by the AM `ebreak` GOOD/BAD TRAP convention (`RAPT_TB_EBREAK_HALT`), matching `sim`.
+1. **RTL Verilator alignment** (`make verilator`) — runs the RTL through the SV memory model; compare results with C++ `sim` separately. Termination is by the AM `ebreak` GOOD/BAD TRAP convention (`RAPT_TB_EBREAK_HALT`), matching `sim`.
 2. **Commercial RTL** (`make vcs` / `make xrun` / `make vsim`) — same RTL, same plusargs, under Synopsys VCS, Cadence Xcelium, or Siemens Questa.
 3. **Gate-level / post-sim** (`make vcs-gls` / `make xrun-gls`) — the `soc_pad` post-layout netlist with SDF back-annotation (`RAPT_TB_GLS` + `RAPT_TB_SDF`). The DUT exposes bit-blasted rnp pad pins. Termination is by the `sifive,test` **finisher** MMIO (0x0010_0000), since the gate netlist has no RTL hierarchy to tap for `ebreak`.
 
@@ -35,10 +35,15 @@ CLINT and PLIC live *inside* the chip, so they never appear on this bus; only th
 | `sifive,test` finisher  | `0x0010_0000` | write `0x5555`=PASS, `0x3333`=FAIL, `0x7777`=RESET |
 | on-chip SRAM window     | `0x0f00_0000` |                                                    |
 | NS16550 serial          | `0x1000_0000` | TX console + LSR/IIR polling                       |
+| LiteX UART             | `0xf000_1800` | TX console, TX-ready / RX-empty status; no host RX |
 | MROM (reset trampoline) | `0x2000_0000` | `PC_INIT`; jumps to `0x8000_0000`                  |
 | FLASH                   | `0x3000_0000` |                                                    |
 | PMEM (main memory)      | `0x8000_0000` | program image                                      |
 | SDRAM                   | `0xa000_0000` |                                                    |
+
+NS16550 RX returns zero and its IIR reports no pending interrupt; the LiteX UART
+always reports RX empty. There is no virtio disk, SDHCI or network model here.
+Use the C++ simulator for workloads requiring those platform devices.
 
 Storage uses sparse associative byte arrays, so the large PMEM/FLASH windows are not pre-allocated. Reads return the word **aligned down** to the `XLEN/8` boundary (matching the reference `pmem_read`); the chip's LSU/L1 perform sub-word extraction.
 

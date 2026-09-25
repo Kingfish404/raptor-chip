@@ -24,7 +24,7 @@ all variables.
 git clone https://github.com/Kingfish404/raptor-chip
 cd raptor-chip
 
-# One-line setup (installs all dependencies)
+# Install the common development toolchain (FPGA/PDK setup is separate)
 make setup
 
 # Show all available targets
@@ -66,7 +66,7 @@ make menuconfig-rv32           # interactive Kconfig
 ### RV64 Mode
 
 The core supports RV64 via the compile-time switch `-DRAPT_RV64`. Switching between
-RV32 and RV64 automatically invalidates the build cache — no manual `make clean` needed.
+RV32 and RV64 selects separate configuration and model caches — no manual `make clean` needed.
 
 ```shell
 make build-rv64
@@ -79,13 +79,16 @@ make run-rv32 VFLAGS="-DRAPT_RV64" ARGS="-b -n"
 ## 4. Benchmarks
 
 ```shell
-# NPC standalone
-make coremark-rv32        ARGS="-b -n"
-make microbench-rv32      ARGS="-b -n"
+# NPC without differential checking
+make coremark-rv32 DIFFTEST=0 ARGS="-b -n"
+make microbench-rv32 DIFFTEST=0 ARGS="-b -n"
 
-# NPC with difftest (vs NEMU reference model)
+# NPC with difftest (default; vs NEMU reference model)
 make coremark-rv32 DIFFTEST=1     ARGS="-b -n"
 make microbench-rv32 DIFFTEST=1   ARGS="-b -n"
+
+# Optional compiler preset (baseline is the default)
+make coremark-rv64 BENCH_OPT=optimized
 
 # Reproducible random memory-delay simulation (also supports -rv64)
 make coremark-rv32 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=1
@@ -109,7 +112,7 @@ Recorded IPC history: **[Performance Iterations](./perf-iterations.md)**. Early 
 make app-hello-rv32                        # hello world
 make app-coremark-rv32    ARGS="-b -n"     # CoreMark on pk
 make app-embench-rv32     ARGS="-b -n"     # Embench-IoT
-make app-pk-build                           # build OpenSBI + pk
+make app-pk-build                           # build riscv-pk
 make app-clean
 ```
 
@@ -145,8 +148,12 @@ See [`fpga/litex/README.md`](../fpga/litex/README.md) and [`fpga/gowin-tang-nano
 ```shell
 make pack     # pack all SV into one file
 make lint     # Verilator lint (RV32)
-make sta      # static timing analysis (yosys-opensta)
-make clean    # clean all build artifacts
+make sta MEMORY=sram XLEN=32  # SRAM macro STA (placeholder libs if absent)
+make sta-check MEMORY=dff XLEN=64 # RTL elaboration only
+make format FORMAT_SCOPE=all  # includes tracked HDL and SV testbenches
+make format-check FORMAT_SCOPE=all # no file changes
+make regression-plan         # preview CoreMark/STA/FPGA regression commands
+make clean    # clean NEMU, selected sim profile, generated RTL, verify and app outputs
 ```
 
 ## Command Reference
@@ -169,10 +176,13 @@ make clean    # clean all build artifacts
 | FPGA (LiteX)                    | `make -C fpga/litex help`              |
 | FPGA (Tang Nano 20K)            | `make fpga-syn` / `make fpga-pnr`      |
 | Pack SV / Lint / STA            | `make pack` / `make lint` / `make sta` |
-| Clean all                       | `make clean`                           |
+| Clean selected build outputs    | `make clean`                           |
 
 Key overridable variables: `ARGS` (runtime), `VFLAGS` (RTL defines), `IMG` (custom binary),
-`MAINARGS` (benchmark mode).
+`MAINARGS` (benchmark mode), `DIFFTEST=0|1`, `BENCH_OPT=baseline|optimized`,
+`SIM_RANDOM_DELAY` / `SIM_RANDOM_SEED`, `FORMAT_SCOPE=all|hdl`, and
+`MEMORY=sram|dff` / `XLEN=32|64` for STA. See the
+[simulator and STA usage](../sim/README.md).
 
 ## Manual Workflow
 

@@ -8,6 +8,8 @@
 #include <array>
 #include <recovery_metrics.h>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 #include <unistd.h>
 #include <fcntl.h>
@@ -52,8 +54,29 @@ struct RobDispatchMetrics
 static RobDispatchMetrics rob_dispatch_metrics = {};
 // Mirrors rapt_pkg::DOMAIN_BRANCH and rapt_iq's simulation-only reason codes.
 static constexpr unsigned BranchDomain = 1;
+static constexpr unsigned MemoryDomain = 4;
 static std::array<uint64_t, 7> branch_capacity_reasons = {};
 static std::array<uint64_t, RtlConfig::IntegerIssuePorts + 1> alq_issue_histogram = {};
+struct RobHeadStallMetrics {
+  std::array<uint64_t, 4> state{};
+  std::array<uint64_t, RtlConfig::ExecutionDomains> dispatch_domain{};
+  std::array<uint64_t, RtlConfig::ExecutionDomains> execute_domain{};
+  uint64_t empty = 0, store_wait = 0, drain_wait = 0;
+};
+static RobHeadStallMetrics rob_head_stalls = {};
+struct IoqHeadStallMetrics {
+  uint64_t samples = 0, missing = 0, load = 0, store = 0, atomic = 0;
+  uint64_t pr1_busy = 0, pr2_busy = 0, addr_unready = 0;
+  uint64_t complete = 0, request_head = 0, issueable = 0, older_blocked = 0;
+  uint64_t miss_wait = 0, store_check_wait = 0, completion_ready = 0;
+};
+static IoqHeadStallMetrics ioq_head_stalls = {};
+struct L1dWritebackMetrics {
+  std::array<uint64_t, 6> state{}; // IDLE, SCAN, READ, CAPTURE, WAIT, CLEAN.
+  uint64_t dirty = 0, hold = 0, global_request = 0, drain_request = 0;
+  uint64_t local_store_ready = 0, backend_drain = 0;
+};
+static L1dWritebackMetrics l1d_writeback = {};
 using ControlRecoveryMetrics = RecoveryMetrics<RtlConfig::ROBEntries,
     RtlConfig::CfAllocate, RtlConfig::CfResolve, RtlConfig::CfMispredict,
     RtlConfig::CfRetire, RtlConfig::CfTrap>;
@@ -63,6 +86,113 @@ struct RecoveryHeadMetrics {
   uint64_t ready = 0, empty = 0;
 };
 static RecoveryHeadMetrics recovery_head;
+struct BranchHotspot {
+  uint64_t total = 0, misses = 0, conditional = 0, jal = 0, jalr = 0;
+  uint32_t inst = 0;
+  std::unordered_map<word_t, uint64_t> targets;
+};
+static std::unordered_map<word_t, BranchHotspot> branch_hotspots;
+
+enum class ShadowKind : uint8_t { Bimodal, Gshare, Local, TournamentGshare, TournamentLocal };
+static constexpr unsigned ShadowMaxEntries = 1024;
+struct ShadowDirectionPredictor {
+  const char *name;
+  ShadowKind kind;
+  unsigned table_size, history_bits, local_history_size;
+  bool xor_local;
+  std::array<uint8_t, ShadowMaxEntries> bimodal, candidate, chooser, actual_chooser;
+  std::array<uint16_t, ShadowMaxEntries> local_history;
+  uint64_t global_history, total, misses, actual_hybrid_misses, rescues, hurts;
+};
+static ShadowDirectionPredictor shadow_predictors[] = {
+    {.name = "bimodal-256", .kind = ShadowKind::Bimodal, .table_size = 256},
+    {.name = "gshare-256-h4", .kind = ShadowKind::Gshare, .table_size = 256, .history_bits = 4},
+    {.name = "gshare-256-h8", .kind = ShadowKind::Gshare, .table_size = 256, .history_bits = 8},
+    {.name = "gshare-512-h9", .kind = ShadowKind::Gshare, .table_size = 512, .history_bits = 9},
+    {.name = "gshare-1024-h10", .kind = ShadowKind::Gshare, .table_size = 1024, .history_bits = 10},
+    {.name = "local-64x64-h6", .kind = ShadowKind::Local, .table_size = 64,
+     .history_bits = 6, .local_history_size = 64},
+    {.name = "local-256x256-h8", .kind = ShadowKind::Local, .table_size = 256,
+     .history_bits = 8, .local_history_size = 256},
+    {.name = "local-xor-256x256-h8", .kind = ShadowKind::Local, .table_size = 256,
+     .history_bits = 8, .local_history_size = 256, .xor_local = true},
+    {.name = "tourn-bim-gshare-256-h8", .kind = ShadowKind::TournamentGshare,
+     .table_size = 256, .history_bits = 8},
+    {.name = "tourn-bim-local-64-h6", .kind = ShadowKind::TournamentLocal, .table_size = 64,
+     .history_bits = 6, .local_history_size = 64},
+    {.name = "tourn-bim-local-256-h8", .kind = ShadowKind::TournamentLocal,
+     .table_size = 256, .history_bits = 8, .local_history_size = 256},
+};
+
+static void reset_shadow_predictors()
+{
+  for (auto &predictor : shadow_predictors) {
+    predictor.bimodal.fill(1);
+    predictor.candidate.fill(1);
+    predictor.chooser.fill(0);
+    predictor.actual_chooser.fill(0);
+    predictor.local_history.fill(0);
+    predictor.global_history = predictor.total = predictor.misses = 0;
+    predictor.actual_hybrid_misses = predictor.rescues = predictor.hurts = 0;
+  }
+}
+
+static void update_shadow_counter(uint8_t &counter, bool taken)
+{
+  if (taken && counter != 3) ++counter;
+  if (!taken && counter != 0) --counter;
+}
+
+static void sample_shadow_predictor(ShadowDirectionPredictor &predictor, word_t pc, bool taken,
+                                    bool actual_mispredict)
+{
+  const unsigned table_mask = predictor.table_size - 1;
+  const unsigned history_mask = (1U << predictor.history_bits) - 1;
+  const unsigned pc_index = (pc >> 1) & table_mask;
+  const unsigned gshare_index = (pc_index ^ (predictor.global_history & history_mask)) & table_mask;
+  unsigned local_index = 0;
+  if (predictor.local_history_size) {
+    const unsigned local_pc_index = (pc >> 1) & (predictor.local_history_size - 1);
+    local_index = predictor.local_history[local_pc_index] & history_mask;
+    if (predictor.xor_local) local_index ^= pc_index;
+    local_index &= table_mask;
+  }
+  const bool bimodal_prediction = predictor.bimodal[pc_index] >= 2;
+  const bool gshare_prediction = predictor.candidate[gshare_index] >= 2;
+  const bool local_prediction = predictor.candidate[local_index] >= 2;
+  bool prediction = bimodal_prediction;
+  if (predictor.kind == ShadowKind::Gshare) prediction = gshare_prediction;
+  if (predictor.kind == ShadowKind::Local) prediction = local_prediction;
+  if (predictor.kind == ShadowKind::TournamentGshare)
+    prediction = predictor.chooser[pc_index] >= 2 ? gshare_prediction : bimodal_prediction;
+  if (predictor.kind == ShadowKind::TournamentLocal)
+    prediction = predictor.chooser[pc_index] >= 2 ? local_prediction : bimodal_prediction;
+  const bool shadow_mispredict = prediction != taken;
+  const bool use_shadow = predictor.actual_chooser[pc_index] >= 2;
+  ++predictor.total;
+  predictor.misses += shadow_mispredict;
+  predictor.actual_hybrid_misses += use_shadow ? shadow_mispredict : actual_mispredict;
+  predictor.rescues += actual_mispredict && !shadow_mispredict;
+  predictor.hurts += !actual_mispredict && shadow_mispredict;
+  if (actual_mispredict != shadow_mispredict)
+    update_shadow_counter(predictor.actual_chooser[pc_index], !shadow_mispredict);
+
+  update_shadow_counter(predictor.bimodal[pc_index], taken);
+  if (predictor.kind == ShadowKind::Gshare || predictor.kind == ShadowKind::TournamentGshare)
+    update_shadow_counter(predictor.candidate[gshare_index], taken);
+  if (predictor.kind == ShadowKind::Local || predictor.kind == ShadowKind::TournamentLocal)
+    update_shadow_counter(predictor.candidate[local_index], taken);
+  if (predictor.kind == ShadowKind::TournamentGshare && bimodal_prediction != gshare_prediction)
+    update_shadow_counter(predictor.chooser[pc_index], gshare_prediction == taken);
+  if (predictor.kind == ShadowKind::TournamentLocal && bimodal_prediction != local_prediction)
+    update_shadow_counter(predictor.chooser[pc_index], local_prediction == taken);
+  if (predictor.local_history_size) {
+    const unsigned local_pc_index = (pc >> 1) & (predictor.local_history_size - 1);
+    predictor.local_history[local_pc_index] =
+        ((predictor.local_history[local_pc_index] << 1) | taken) & history_mask;
+  }
+  predictor.global_history = ((predictor.global_history << 1) | taken) & history_mask;
+}
 
 // One histogram per line keeps the periodic perf dump readable:
 // [bin0 bin1 ...].
@@ -132,9 +262,14 @@ void perf_reset_counters()
   dispatch_metrics = {};
   rob_dispatch_metrics = {};
   branch_capacity_reasons = {};
+  rob_head_stalls = {};
+  ioq_head_stalls = {};
+  l1d_writeback = {};
   alq_issue_histogram = {};
   recovery_metrics = {};
   recovery_head = {};
+  branch_hotspots.clear();
+  reset_shadow_predictors();
   sampler_state = {};
 }
 
@@ -224,6 +359,18 @@ void perf_sample_per_cycle()
     return;
   }
   pmu.active_cycle++;
+  const unsigned wb_state = VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__wb_state);
+  if (wb_state < l1d_writeback.state.size()) ++l1d_writeback.state[wb_state];
+  l1d_writeback.dirty += VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__dirty_any);
+  l1d_writeback.hold += VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__wb_hold);
+  l1d_writeback.global_request +=
+      VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__wb_global_request);
+  l1d_writeback.drain_request +=
+      VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__wb_drain_request);
+  l1d_writeback.local_store_ready +=
+      VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__local_store_ready);
+  l1d_writeback.backend_drain +=
+      VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__writeback_drain);
   if (recovery_metrics.pending_wrong()) {
     if (!VERILOG_ROU(pmu_cf_head_busy)) ++recovery_head.empty;
     else if (!VERILOG_ROU(pmu_cf_head_waiting)) ++recovery_head.ready;
@@ -299,10 +446,40 @@ void perf_sample_per_cycle()
   bool wb_valid = *(uint8_t *)&VERILOG_BACKEND(cmu__DOT__valid);
   const uint32_t retire_count = VERILOG_BACKEND(cmu__DOT__retire_count);
   for (uint32_t slot = 0; slot < retire_count; ++slot)
+  {
+    const bool conditional = VERILOG_BACKEND(cmu__DOT__ben_slots)[slot];
+    const bool jal = VERILOG_BACKEND(cmu__DOT__jen_slots)[slot];
+    const bool jalr = VERILOG_BACKEND(cmu__DOT__jren_slots)[slot];
+    const bool mispredict = VERILOG_BACKEND(cmu__DOT__mispredict_slots)[slot];
+    if (conditional || jal || jalr)
+    {
+      const word_t pc = VERILOG_BACKEND(cmu__DOT__rpc_slots)[slot];
+      auto &hotspot = branch_hotspots[pc];
+      ++hotspot.total;
+      hotspot.misses += mispredict;
+      hotspot.conditional += conditional;
+      hotspot.jal += jal && !jalr;
+      hotspot.jalr += jalr;
+      hotspot.inst = VERILOG_BACKEND(cmu__DOT__inst_slots)[slot];
+      ++hotspot.targets[VERILOG_BACKEND(cmu__DOT__npc_slots)[slot]];
+    }
+    if (conditional)
+    {
+      const word_t pc = VERILOG_BACKEND(cmu__DOT__rpc_slots)[slot];
+      const word_t npc = VERILOG_BACKEND(cmu__DOT__npc_slots)[slot];
+      const uint32_t inst = VERILOG_BACKEND(cmu__DOT__inst_slots)[slot];
+      const uint32_t immediate_bits = ((inst >> 31) << 12) | (((inst >> 7) & 1) << 11)
+          | (((inst >> 25) & 0x3f) << 5) | (((inst >> 8) & 0xf) << 1);
+      const int64_t immediate = static_cast<int16_t>(immediate_bits << 3) >> 3;
+      const bool taken = npc == pc + immediate;
+      for (auto &predictor : shadow_predictors)
+        sample_shadow_predictor(predictor, pc, taken, mispredict);
+    }
     sample_branch(true, VERILOG_BACKEND(cmu__DOT__ben_slots)[slot],
                   VERILOG_BACKEND(cmu__DOT__jen_slots)[slot],
                   VERILOG_BACKEND(cmu__DOT__jren_slots)[slot],
                   VERILOG_BACKEND(cmu__DOT__mispredict_slots)[slot]);
+  }
   bool ifu_hazard = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__ifu_hazard);
   bool ifu_fetch_fire = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_fetch_fire);
   uint32_t ifu_fetch_slots = VERILOG_FRONTEND(ifu__DOT__pmu_fetch_slots);
@@ -325,14 +502,14 @@ void perf_sample_per_cycle()
   bool ifu_response_after_redirect = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_ifu_response_after_redirect);
   bool ifu_response_after_l1i_gap = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_ifu_response_after_l1i_gap);
   bool ifu_response_bypass_candidate = *(uint8_t *)&VERILOG_FRONTEND(ifu__DOT__pmu_ifu_response_bypass_candidate);
-  bool l1i_refill_active = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_refill_active);
-  bool l1i_sram_warmup = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_sram_warmup);
-  bool l1i_tag_miss = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_tag_miss);
-  bool l1i_nextword_miss = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_nextword_miss);
-  bool l1i_refill_start_line_miss = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_refill_start_line_miss);
-  bool l1i_refill_start_current_hole = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_refill_start_current_hole);
-  bool l1i_refill_start_next_line_miss = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_refill_start_next_line_miss);
-  bool l1i_refill_start_next_hole = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__pmu_l1i_refill_start_next_hole);
+  bool l1i_refill_active = *(uint8_t *)&VERILOG_CPU(memory_subsystem__DOT__l1i_cache__DOT__pmu_l1i_refill_active);
+  bool l1i_sram_warmup = *(uint8_t *)&VERILOG_CPU(memory_subsystem__DOT__l1i_cache__DOT__pmu_l1i_sram_warmup);
+  bool l1i_tag_miss = *(uint8_t *)&VERILOG_CPU(memory_subsystem__DOT__l1i_cache__DOT__pmu_l1i_tag_miss);
+  bool l1i_nextword_miss = *(uint8_t *)&VERILOG_CPU(memory_subsystem__DOT__l1i_cache__DOT__pmu_l1i_nextword_miss);
+  bool l1i_refill_start_line_miss = *(uint8_t *)&VERILOG_CPU(memory_subsystem__DOT__l1i_cache__DOT__pmu_l1i_refill_start_line_miss);
+  bool l1i_refill_start_current_hole = *(uint8_t *)&VERILOG_CPU(memory_subsystem__DOT__l1i_cache__DOT__pmu_l1i_refill_start_current_hole);
+  bool l1i_refill_start_next_line_miss = *(uint8_t *)&VERILOG_CPU(memory_subsystem__DOT__l1i_cache__DOT__pmu_l1i_refill_start_next_line_miss);
+  bool l1i_refill_start_next_hole = *(uint8_t *)&VERILOG_CPU(memory_subsystem__DOT__l1i_cache__DOT__pmu_l1i_refill_start_next_hole);
   bool fqu_full = *(uint8_t *)&VERILOG_FRONTEND(fqu__DOT__pmu_full);
   uint8_t fqu_count = *(uint8_t *)&VERILOG_FRONTEND(fqu__DOT__pmu_count);
 
@@ -344,13 +521,13 @@ void perf_sample_per_cycle()
   bool exu_ioq_valid = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__pmu_ioq_any_valid);
   bool exu_ioq_full = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__pmu_ioq_all_full);
   bool exu_ioq_valid_found = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_valid_found);
-  uint8_t l1d_state = *(uint8_t *)&VERILOG_CPU(l1d_cache__DOT__l1d_state);
-  bool lsu_l1d_hit = *(uint8_t *)&VERILOG_CPU(l1d_cache__DOT__tag_hit);
+  uint8_t l1d_state = *(uint8_t *)&VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__l1d_state);
+  bool lsu_l1d_hit = *(uint8_t *)&VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__tag_hit);
   bool lsu_fwd_hit = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_sq__DOT__fwd_hit);
   bool lsu_load_in_sq = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_sq__DOT__load_in_sq);
   bool lsu_raddr_valid = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_sq__DOT__raddr_valid);
   bool wbu_valid = *(uint8_t *)&VERILOG_BACKEND(cmu__DOT__valid);
-  uint8_t l1i_state = *(uint8_t *)&VERILOG_CPU(l1i_cache__DOT__l1i_state);
+  uint8_t l1i_state = *(uint8_t *)&VERILOG_CPU(memory_subsystem__DOT__l1i_cache__DOT__l1i_state);
   if (ifu_fetch_fire)
   {
     pmu.ifu_fetch_cnt++;
@@ -441,6 +618,59 @@ void perf_sample_per_cycle()
   if (!wbu_valid)
   {
     pmu.wbu_stall_cycle++;
+    const bool head_busy = VERILOG_ROU(pmu_head_busy);
+    const unsigned head_state = VERILOG_ROU(pmu_head_state);
+    const unsigned head_domain = VERILOG_ROU(pmu_head_domain);
+    if (!head_busy) {
+      ++rob_head_stalls.empty;
+    } else {
+      assert(head_state < rob_head_stalls.state.size());
+      ++rob_head_stalls.state[head_state];
+      if (head_state == 3) { // rapt_pkg::ROB_DP
+        assert(head_domain < rob_head_stalls.dispatch_domain.size());
+        ++rob_head_stalls.dispatch_domain[head_domain];
+      }
+      if (head_state == 2) { // rapt_pkg::ROB_EX
+        assert(head_domain < rob_head_stalls.execute_domain.size());
+        ++rob_head_stalls.execute_domain[head_domain];
+        if (head_domain == MemoryDomain) {
+          const unsigned ioq_head = VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_head);
+          const unsigned head_mask = 1U << ioq_head;
+          const unsigned ioq_valid = VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_valid);
+          const unsigned ioq_ren = VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_ren);
+          const unsigned ioq_wen = VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_wen);
+          const unsigned ioq_atom = VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_atom);
+          ++ioq_head_stalls.samples;
+          ioq_head_stalls.missing += (ioq_valid & head_mask) == 0;
+          ioq_head_stalls.load += (ioq_ren & head_mask) != 0;
+          ioq_head_stalls.store += (ioq_wen & head_mask) != 0;
+          ioq_head_stalls.atomic += (ioq_atom & head_mask) != 0;
+          ioq_head_stalls.pr1_busy +=
+              VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_pr1)[ioq_head] != 0;
+          ioq_head_stalls.pr2_busy +=
+              VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_pr2)[ioq_head] != 0;
+          ioq_head_stalls.addr_unready +=
+              (VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_addr_ready) & head_mask) == 0;
+          ioq_head_stalls.complete +=
+              (VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_complete) & head_mask) != 0;
+          ioq_head_stalls.request_head +=
+              VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__load_req_valid_q)
+              && VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__load_req_idx_q) == ioq_head;
+          ioq_head_stalls.issueable +=
+              (VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_load_issue_vec) & head_mask) != 0;
+          ioq_head_stalls.older_blocked +=
+              (VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_older_memory_blk) & head_mask) != 0;
+          ioq_head_stalls.miss_wait +=
+              (VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_miss_wait) & head_mask) != 0;
+          ioq_head_stalls.store_check_wait += (ioq_wen & head_mask)
+              && !VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__head_store_check_valid_q);
+          ioq_head_stalls.completion_ready +=
+              VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_valid_found);
+        }
+      }
+      rob_head_stalls.store_wait += VERILOG_ROU(pmu_head_store_wait) ? 1 : 0;
+      rob_head_stalls.drain_wait += VERILOG_ROU(pmu_head_drain_wait) ? 1 : 0;
+    }
   }
 
   // -------------------------------------------------------------------
@@ -565,7 +795,7 @@ void perf_sample_per_cycle()
   }
   sampler_state.prev_l1d_state = l1d_state;
   // tlb & page table walk sample
-  char stlb_mmu = *(char *)&VERILOG_CPU(l1d_cache__DOT__stlb_mmu);
+  char stlb_mmu = *(char *)&VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__stlb_mmu);
   bool i_ptw = (l1i_state == 0b100); // PTWAIT
   pmu.itlb_ptw_count += entering_i_ptw ? 1 : 0;
   if (i_ptw)
@@ -717,6 +947,47 @@ void perf()
       percentage(pmu.bpu_cnt - pmu.bpu_fail_cnt, pmu.bpu_cnt),
       pmu.bpu_b_fail, pmu.bpu_j_fail, pmu.bpu_jr_fail,
       pmu.call_inst_cnt, pmu.ret_inst_cnt);
+  Log("Shadow direction predictors (commit-stream misses/branches/rate):");
+  for (const auto &predictor : shadow_predictors)
+    Log("  %-28s %llu/%llu (%4.1f%%); actual-hybrid=%llu rescue/hurt=%llu/%llu",
+        predictor.name,
+        static_cast<unsigned long long>(predictor.misses),
+        static_cast<unsigned long long>(predictor.total),
+        percentage(predictor.misses, predictor.total),
+        static_cast<unsigned long long>(predictor.actual_hybrid_misses),
+        static_cast<unsigned long long>(predictor.rescues),
+        static_cast<unsigned long long>(predictor.hurts));
+  std::vector<std::pair<word_t, BranchHotspot>> sorted_branch_hotspots(
+      branch_hotspots.begin(), branch_hotspots.end());
+  std::sort(sorted_branch_hotspots.begin(), sorted_branch_hotspots.end(),
+            [](const auto &lhs, const auto &rhs) {
+              if (lhs.second.misses != rhs.second.misses)
+                return lhs.second.misses > rhs.second.misses;
+              return lhs.first < rhs.first;
+            });
+  Log("BPU miss hotspots (pc/inst/miss/total/rate/type-counts b,j,jr):");
+  for (std::size_t index = 0; index < std::min<std::size_t>(16, sorted_branch_hotspots.size()); ++index)
+  {
+    const auto &[pc, hotspot] = sorted_branch_hotspots[index];
+    std::vector<std::pair<word_t, uint64_t>> sorted_targets(hotspot.targets.begin(),
+                                                            hotspot.targets.end());
+    std::sort(sorted_targets.begin(), sorted_targets.end(), [](const auto &lhs, const auto &rhs) {
+      return lhs.second > rhs.second;
+    });
+    const word_t top_target = sorted_targets.empty() ? 0 : sorted_targets[0].first;
+    const uint64_t top_target_count = sorted_targets.empty() ? 0 : sorted_targets[0].second;
+    Log("  %016llx/%08x: %llu/%llu (%4.1f%%), %llu,%llu,%llu; targets=%zu "
+        "top=%016llx/%llu",
+        static_cast<unsigned long long>(pc), hotspot.inst,
+        static_cast<unsigned long long>(hotspot.misses),
+        static_cast<unsigned long long>(hotspot.total),
+        percentage(hotspot.misses, hotspot.total),
+        static_cast<unsigned long long>(hotspot.conditional),
+        static_cast<unsigned long long>(hotspot.jal),
+        static_cast<unsigned long long>(hotspot.jalr), hotspot.targets.size(),
+        static_cast<unsigned long long>(top_target),
+        static_cast<unsigned long long>(top_target_count));
+  }
   Log("hazard cycle of ifu_sys: %6lld,%2.0f%%, rou_cycle: %6lld,%2.0f%% (structural)",
       pmu.ifu_sys_hazard_cycle, percentage(pmu.ifu_sys_hazard_cycle, pmu.active_cycle),
       pmu.rou_hazard_cycle, percentage(pmu.rou_hazard_cycle, pmu.active_cycle));
@@ -834,6 +1105,41 @@ void perf()
       (double)pmu.commit_2_cycle, percentage(pmu.commit_2_cycle, pmu.active_cycle));
   Log("3+ commits: %lld cycles (%2.1f%%)", pmu.commit_wide_cycle,
       percentage(pmu.commit_wide_cycle, pmu.active_cycle));
+  Log("ROB head zero-retire roots: empty=%llu states[CM,WB,EX,DP]=[%s]",
+      static_cast<unsigned long long>(rob_head_stalls.empty),
+      compact_histogram(rob_head_stalls.state).c_str());
+  Log("ROB head waiting domains: dispatch=[%s] execute=[%s]; WB store=%llu drain=%llu",
+      compact_histogram(rob_head_stalls.dispatch_domain).c_str(),
+      compact_histogram(rob_head_stalls.execute_domain).c_str(),
+      static_cast<unsigned long long>(rob_head_stalls.store_wait),
+      static_cast<unsigned long long>(rob_head_stalls.drain_wait));
+  Log("IOQ head during memory EX stalls: samples=%llu missing=%llu load/store/atomic=%llu/%llu/%llu",
+      static_cast<unsigned long long>(ioq_head_stalls.samples),
+      static_cast<unsigned long long>(ioq_head_stalls.missing),
+      static_cast<unsigned long long>(ioq_head_stalls.load),
+      static_cast<unsigned long long>(ioq_head_stalls.store),
+      static_cast<unsigned long long>(ioq_head_stalls.atomic));
+  Log("IOQ head roots (overlap): pr1/pr2=%llu/%llu addr_unready=%llu complete=%llu "
+      "req_head=%llu issueable=%llu older_block=%llu miss_wait=%llu check_wait=%llu ready=%llu",
+      static_cast<unsigned long long>(ioq_head_stalls.pr1_busy),
+      static_cast<unsigned long long>(ioq_head_stalls.pr2_busy),
+      static_cast<unsigned long long>(ioq_head_stalls.addr_unready),
+      static_cast<unsigned long long>(ioq_head_stalls.complete),
+      static_cast<unsigned long long>(ioq_head_stalls.request_head),
+      static_cast<unsigned long long>(ioq_head_stalls.issueable),
+      static_cast<unsigned long long>(ioq_head_stalls.older_blocked),
+      static_cast<unsigned long long>(ioq_head_stalls.miss_wait),
+      static_cast<unsigned long long>(ioq_head_stalls.store_check_wait),
+      static_cast<unsigned long long>(ioq_head_stalls.completion_ready));
+  Log("L1D WB states [idle scan read capture wait clean]=[%s]; dirty=%llu hold=%llu "
+      "global_req=%llu drain_req=%llu local_store_ready=%llu backend_drain=%llu",
+      compact_histogram(l1d_writeback.state).c_str(),
+      static_cast<unsigned long long>(l1d_writeback.dirty),
+      static_cast<unsigned long long>(l1d_writeback.hold),
+      static_cast<unsigned long long>(l1d_writeback.global_request),
+      static_cast<unsigned long long>(l1d_writeback.drain_request),
+      static_cast<unsigned long long>(l1d_writeback.local_store_ready),
+      static_cast<unsigned long long>(l1d_writeback.backend_drain));
 
   // -------------------------------------------------------------------
   // Rename / dispatch status mix.

@@ -7,9 +7,11 @@
 // verilator lint_off DECLFILENAME
 // verilator lint_off UNUSEDSIGNAL
 module raptSoC #(
-    parameter int XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN,
+    parameter bit L1dWriteBack = 1'b0
 ) (
     input  clock,
+    output logic writeback_error_o,
     // Device writes are reported before a later SC may complete. Pending
     // holds SC while the platform drains a finite batch of notifications.
     input logic external_write_valid_i = 1'b0,
@@ -180,7 +182,10 @@ module raptSoC #(
     end
   end
 
-  rapt cpu (
+  rapt #(
+      .L1dWriteBack(L1dWriteBack)
+  ) cpu (
+      .writeback_error_o(writeback_error_o),
       .external_write_valid_i,
       .external_write_pending_i,
       .external_write_first_i,

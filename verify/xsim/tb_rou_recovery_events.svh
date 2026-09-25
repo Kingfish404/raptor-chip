@@ -4,7 +4,7 @@
 bit cf_identity[`RAPT_ROB_SIZE];
 always @(posedge clock) begin
   automatic logic [4:0] expected[`RAPT_ROB_SIZE] = '{default:'0};
-  automatic bit head_busy = !reset && dut_rou.rob_entry[dut_rou.h0].busy;
+  automatic bit head_busy = !reset && dut_rou.rob_entry_busy[dut_rou.h0];
   automatic bit head_waiting = head_busy && dut_rou.rob_entry[dut_rou.h0].state != rapt_pkg::ROB_WB;
   automatic int unsigned head_domain = reset ? 0 : int'(dut_rou.uop_pl[dut_rou.h0].schedule.domain);
   if (reset) cf_identity = '{default:0};
@@ -19,7 +19,7 @@ always @(posedge clock) begin
           && completion[p].rd == completion_owner.rd[completion[p].dest]
           && cf_identity[completion[p].dest]) begin
         expected[completion[p].dest] |= 5'(rapt_pkg::CfResolve);
-        if (completion[p].mispredict && !completion[p].trap)
+        if (dut_rou.completion_mispredict[p] && !completion[p].trap)
           expected[completion[p].dest] |= 5'(rapt_pkg::CfMispredict);
       end
       for (int s = 0; s < rapt_pkg::DispatchWidth; s++)

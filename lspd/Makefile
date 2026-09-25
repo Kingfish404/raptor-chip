@@ -3,6 +3,10 @@ SHELL := /bin/bash
 
 .DEFAULT_GOAL := help
 
+.PHONY: fpga-syn
+fpga-syn:
+	+$(MAKE) -C syn fpga-syn SRAM_MODE=flops $(filter-out $@,$(MAKECMDGOALS))
+
 .PHONY: help list parallel-info doctor syn sta ppa ppa-summary profile-summary ppa-summary-all-pdks ppa-all-pdks ppa-all ppa-matrix pd-doctor floorplan place cts route pnr viz pd-summary pnr-all clean clean-pnr
 
 help list parallel-info doctor syn sta ppa ppa-summary profile-summary ppa-summary-all-pdks ppa-all-pdks ppa-all ppa-matrix clean:

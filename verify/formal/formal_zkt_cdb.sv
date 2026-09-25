@@ -22,25 +22,25 @@ module formal_zkt_cdb (
   logic integer_occupied, fp_occupied;
   always_ff @(posedge clock) begin
     past_valid <= 1;
-    if (!past_valid) assume(reset);
+    if (!past_valid) assume (reset);
     if (reset) begin
       integer_occupied <= 0;
       fp_occupied <= 0;
     end else begin
-      if (!fp_occupied) integer_occupied <= 0;
-      fp_occupied <= fp_public.valid && wb_fpu_accept;
-      if (integer_public.valid && wb_integer_system_accept) integer_occupied <= 1;
+      integer_occupied <= integer_public.valid && wb_integer_system_accept;
+      if (!integer_occupied) fp_occupied <= 0;
+      if (fp_public.valid && wb_fpu_accept) fp_occupied <= 1;
     end
     if (past_valid && !reset) begin
-      assume(!(integer_public.valid && wb_integer_system_accept) || !integer_occupied);
-      assume(!(fp_public.valid && wb_fpu_accept) || !fp_occupied);
-      assert(enable0 == enable1);
-      assert(fp_ready0 == fp_ready1);
-      assert(out0.valid == out1.valid);
-      if (out0.valid) assert(control0 == control1);
-      cover(out0.valid && out0.result != out1.result);
-      cover(integer_occupied && fp_occupied);
-      cover(enable0 && !out0.valid);
+      assume (!(fp_public.valid && wb_fpu_accept) || !fp_occupied);
+      assert (enable0 == enable1);
+      assert (fp_ready0 == fp_ready1);
+      assert (out0.valid == out1.valid);
+      if (out0.valid) assert (control0 == control1);
+      cover (out0.valid && out0.result != out1.result);
+      cover (integer_occupied && fp_occupied);
+      cover (integer_occupied && integer_public.valid && wb_integer_system_accept);
+      cover (enable0 && !out0.valid);
     end
   end
   always_comb begin
@@ -68,7 +68,8 @@ module formal_zkt_cdb (
       .wb_integer_system_accept,
       .wb_fpu_accept,
       .wb_shared(out0),
-      .integer_system_issue_enable(enable0), .fpu_completion_ready(fp_ready0)
+      .integer_system_issue_enable(enable0),
+      .fpu_completion_ready(fp_ready0)
   );
   rapt_cdb_arb right_dut (
       .clock,
@@ -80,6 +81,7 @@ module formal_zkt_cdb (
       .wb_integer_system_accept,
       .wb_fpu_accept,
       .wb_shared(out1),
-      .integer_system_issue_enable(enable1), .fpu_completion_ready(fp_ready1)
+      .integer_system_issue_enable(enable1),
+      .fpu_completion_ready(fp_ready1)
   );
 endmodule

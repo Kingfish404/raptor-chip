@@ -45,7 +45,7 @@ class WidthMappingTest(unittest.TestCase):
                     ROOT / "hdl/configs/default/rapt_config.svh", rv64
                 )
                 self.assertEqual(cfg["RAPT_ROB_SIZE"], 32)
-                self.assertEqual(cfg["RAPT_PHY_SIZE"], 128)
+                self.assertEqual(cfg["RAPT_PHY_SIZE"], 64)
 
     def test_cache_capacity_is_invariant_across_xlen(self) -> None:
         # Byte capacities from the shipped presets, independent of the
@@ -53,7 +53,7 @@ class WidthMappingTest(unittest.TestCase):
         expected = {
             "small": (512, 256, 16),
             "default": (16384, 16384, 64),
-            "middle": (256, 256, 16),
+            "middle": (1024, 256, 16),
             "large": (32768, 8192, 64),
             "formal": (32, 32, 16),
         }
@@ -75,7 +75,13 @@ class WidthMappingTest(unittest.TestCase):
             "middle": (2, 2, 2, 2, 2),
             "large": (2, 2, 2, 2, 2),
             "formal": (2, 2, 2, 2, 2),
+            "default-w4": (4, 4, 4, 4, 4),
         }
+        self.assertEqual(
+            set(expected),
+            {path.parent.name for path in
+             (ROOT / "hdl/configs").glob("*/rapt_config.svh")},
+        )
         for preset, parameters in expected.items():
             with self.subTest(preset=preset):
                 cfg = parse_rapt_config(
@@ -88,6 +94,9 @@ class WidthMappingTest(unittest.TestCase):
                 )
                 self.assertEqual(cfg["RAPT_INTEGER_ISSUE_PORTS"], parameters[4])
                 self.assertEqual(cfg["RAPT_INTEGER_SYSTEM_PORT"], 0)
+                self.assertNotIn("RAPT_ISSUE_WIDTH", cfg)
+                self.assertFalse(cfg["RAPT_DUAL_ISSUE"])
+                self.assertFalse(cfg["RAPT_DUAL_COMMIT"])
 
     def test_mixed_widths_remain_independent(self) -> None:
         u = derive_uarch(minimal_cfg(
@@ -227,7 +236,7 @@ class WidthMappingTest(unittest.TestCase):
         expected = {
             "small": 2,
             "default": 8,
-            "middle": 2,
+            "middle": 4,
             "large": 16,
         }
         for preset, fetch_q in expected.items():

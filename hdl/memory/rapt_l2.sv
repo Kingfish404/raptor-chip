@@ -249,6 +249,9 @@ module rapt_l2 #(
 
   logic r_hit_beat_fire;
   logic [XLEN-1:0] r_next_addr;
+  logic cache_install;
+  logic [IndexBits-1:0] install_idx;
+  logic [TagBits-1:0] install_tag;
   assign r_next_addr = (r_burst == 2'b01) ? r_addr + (XLEN'(1) << r_size) : r_addr;
   logic [IndexBits-1:0] data_sram_raddr;
   assign r_hit_beat_fire = (rs == R_HIT) && r_hit_q && (!rs_rvalid || axi_s.rready);
@@ -294,10 +297,6 @@ module rapt_l2 #(
   // ---------------------------------------------------------------------
   // Cache write port (drive on fill completion)
   // ---------------------------------------------------------------------
-  logic cache_install;
-  logic [IndexBits-1:0] install_idx;
-  logic [TagBits-1:0] install_tag;
-
   // ---------------------------------------------------------------------
   // Posted Write Buffer (PWB)
   // ---------------------------------------------------------------------

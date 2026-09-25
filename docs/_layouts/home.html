@@ -28,11 +28,12 @@
       </div>
       <div class="hero-stage" id="explore">
         <div id="uarch-diagram" class="uarch-frame"></div>
-        <div class="stage-controls">
-          <button type="button" data-uarch-flow>Pause</button>
-          <span class="muted">pipeline block diagram</span>
+        <div class="stage-bar">
+          <div class="stage-controls">
+            <button type="button" data-uarch-flow>Pause</button>
+          </div>
+          <div class="stage-legend" id="uarch-legend"></div>
         </div>
-        <div class="stage-legend" id="uarch-legend"></div>
         <aside class="stage-inspect" id="uarch-inspect">
           <p class="muted">Click a block for its source. Tokens are RV32 CoreMark (matrix / list / CRC / UART MMIO).</p>
         </aside>

@@ -387,7 +387,9 @@ module tb_bus_read_ownership;
     l1i_bus.arvalid = 0;
     tick(2);
     if (`RAPT_L1D_MSHRS > 0) begin
-      @(negedge clock); reset = 0; mem.rd_req_ready = 0;
+      @(negedge clock);
+      reset = 0;
+      mem.rd_req_ready = 0;
       l1d_bus.ar_mshr = 1;
       l1d_bus.ar_mshr_id = 0;
       submit_l1d(XLEN'('h80008000), 0);
@@ -396,7 +398,8 @@ module tb_bus_read_ownership;
       mem.rd_req_ready = 1;
       expect_issue(4'd8, XLEN'('h80008000));
       expect_issue(4'd9, XLEN'('h80009000));
-      @(negedge clock); mem.rd_req_ready = 0;
+      @(negedge clock);
+      mem.rd_req_ready = 0;
       // A flush cannot drop issued bus owners; responses may return out of order.
       cmu_bcast.flush_pipe = 1;
       tick(1);

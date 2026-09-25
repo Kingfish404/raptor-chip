@@ -1,8 +1,8 @@
 `include "rapt.svh"
 
 // One-at-a-time FMUL/FMA endpoint with one shared significand multiplier.
-// FMUL captures the product in stage 2; FMA captures it in stage 1. Their
-// original four/six-cycle pipelines, rounding and flags remain independent.
+// FMUL and FMA capture the product in stage 2. Their four/eight-cycle
+// pipelines, rounding and flags remain independent.
 // No arbitration/retry latency: a request is accepted only when both are idle.
 module rapt_fpu_mul_fma #(
     parameter bit TARGET_DOUBLE = 1'b0

@@ -1261,6 +1261,7 @@ XSIM_L2_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_l2.sv"
 
 XSIM_L1D_SOURCES := \
+	"$(RAPTOR_HOME)/hdl/memory/rapt_l1d_writeback.sv" \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_l1d_mshr.sv" \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_cache_fill_select.sv" \
 	"$(RAPTOR_HOME)/hdl/memory/rapt_cache_plru.sv" \
@@ -1337,6 +1338,8 @@ XSIM_ROU_SOURCES := \
 	"$(RAPTOR_HOME)/hdl/backend/rapt_recovery_pending.sv" \
 	"$(RAPTOR_HOME)/hdl/backend/rapt_dispatch_admit.sv" \
 	"$(RAPTOR_HOME)/hdl/backend/rapt_rob_dispatch_select.sv" \
+	"$(RAPTOR_HOME)/hdl/backend/rapt_operand_spill.sv" \
+	"$(RAPTOR_HOME)/hdl/backend/rapt_operand_value_spill.sv" \
 	"$(RAPTOR_HOME)/hdl/common/rapt_stream_queue.sv" \
 	"$(RAPTOR_HOME)/hdl/common/rapt_rank_select.sv" \
 	"$(RAPTOR_HOME)/hdl/backend/rapt_rou.sv" \
@@ -1527,11 +1530,17 @@ VERILATOR_DIRECTED_TARGETS := \
 	verilator-sq-forward-ring-rv32 \
 	verilator-sq-forward-ring-rv64 \
 	verilator-l1d-data \
+	verilator-l1d-writeback \
 	verilator-l1d-tags \
 	verilator-alu-zbb-strlen \
 	verilator-l2 \
 	verilator-l1d-byte-rom \
 	verilator-l1d-store-coherence \
+	verilator-l1d-writeback-rv32 \
+	verilator-l1d-writeback-rv64 \
+	verilator-l1d-writeback-line-rv32 \
+	verilator-l1d-writeback-line-rv64 \
+	verilator-l1d-writeback-bscan-rv64 \
 	verilator-l1d-flush-ordered \
 	verilator-l1d-cmo-permissions \
 	verilator-l1d-pmp-shared-rv32 \
@@ -1567,6 +1576,12 @@ VERILATOR_DIRECTED_TARGETS := \
 	verilator-lsu-cbo-zero \
 	verilator-lsu-sq-random \
 	verilator-ioq \
+	verilator-ioq-fast-load-next-head-rv32 \
+	verilator-ioq-fast-load-next-head-rv64 \
+	verilator-mshr-cache-rv32 \
+	verilator-mshr-cache-rv64 \
+	verilator-mshr-ioq-rv32 \
+	verilator-mshr-ioq-rv64 \
 	verilator-clint \
 	verilator-plic-gateway \
 	verilator-muldiv-flush-reuse \
@@ -1584,8 +1599,15 @@ VERILATOR_DIRECTED_TARGETS := \
 	verilator-frontend-recovery \
 	verilator-rename-random \
 	verilator-issue-select \
+	verilator-port-priority \
+	verilator-iq-cdb-wake-rv32 \
+	verilator-iq-cdb-wake-rv64 \
+	verilator-iq-port-priority-rv32 \
+	verilator-iq-port-priority-rv64 \
 	verilator-dispatch-admit \
 	verilator-rob-dispatch-select \
+	verilator-operand-spill \
+	verilator-operand-value-spill \
 	verilator-dispatch-compact \
 	verilator-recovery-pending \
 	verilator-completion-guard \
@@ -1593,13 +1615,19 @@ VERILATOR_DIRECTED_TARGETS := \
 	verilator-completion-stage-rv64 \
 	verilator-fmax-boundaries-rv32 \
 	verilator-fmax-boundaries-rv64 \
+	verilator-cdb-streaming-rv32 \
+	verilator-cdb-streaming-rv64 \
 	verilator-iq-reclaim-random \
 	verilator-ras \
 	verilator-ras-pipeline \
 	verilator-btb-storage-rv32 \
 	verilator-btb-storage-rv64 \
 	verilator-predict-history \
-	verilator-predict-history-pipeline
+	verilator-predict-history-pipeline \
+	verilator-cache-stream-wb-rv32 \
+	verilator-cache-stream-wb-rv64 \
+	verilator-cache-stream-wb-l2-rv32 \
+	verilator-cache-stream-wb-l2-rv64
 
 # $(1)=build/log stem, $(2)=top/testbench, $(3)=DUT sources,
 # $(4)=XSim-style defines (`-d NAME`, translated to `-DNAME`),
@@ -1960,12 +1988,29 @@ verilator-sq-forward-ring-rv32 verilator-sq-forward-ring-rv64:
 	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_store_queue_forward_ring,"$(RAPTOR_HOME)/hdl/backend/lsu/rapt_sq_forward.sv",$(if $(findstring rv64,$@),-d RAPT_RV64),)
 verilator-l1d-data:
 	$(call VERILATOR_DIRECTED_RUN,l1d_data,tb_l1d_data,"$(RAPTOR_HOME)/hdl/memory/rapt_sram_1rw.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_l1d_data.sv",,)
+.PHONY: verilator-l1d-writeback
+verilator-l1d-writeback:
+	$(call VERILATOR_DIRECTED_RUN,l1d_writeback,tb_writeback,"$(RAPTOR_HOME)/hdl/memory/rapt_l1d_writeback.sv",,)
 verilator-l1d-tags:
 	$(call VERILATOR_DIRECTED_RUN,l1d_tags,tb_l1d_tags,"$(RAPTOR_HOME)/hdl/memory/rapt_cache_plru.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_cache_fill_select.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_l1d_tags.sv",,)
 verilator-l1d-byte-rom:
 	$(call VERILATOR_DIRECTED_RUN,l1d_byte_rom,tb_l1d_byte_rom,$(XSIM_L1D_SOURCES),,)
 verilator-l1d-store-coherence:
 	$(call VERILATOR_DIRECTED_RUN,l1d_store_coherence,tb_l1d_store_coherence,$(XSIM_L1D_SOURCES),,+BUS_DELAY_MAX=$(VERILATOR_DIRECTED_DELAY) +SEED=$(VERILATOR_DIRECTED_SEED))
+.PHONY: verilator-l1d-writeback-rv32 verilator-l1d-writeback-rv64
+.PHONY: verilator-l1d-writeback-line-rv32 verilator-l1d-writeback-line-rv64
+WB_LINE_REFILL ?= 0
+verilator-l1d-writeback-rv32 verilator-l1d-writeback-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1 -GLineRefill=$(WB_LINE_REFILL)
+verilator-l1d-writeback-rv32 verilator-l1d-writeback-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l1d_store_coherence,$(XSIM_L1D_SOURCES),$(if $(findstring rv64,$@),-d RAPT_RV64),+BUS_DELAY_MAX=$(VERILATOR_DIRECTED_DELAY) +SEED=$(VERILATOR_DIRECTED_SEED))
+verilator-l1d-writeback-line-rv32 verilator-l1d-writeback-line-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1 -GLineRefill=1
+verilator-l1d-writeback-line-rv32 verilator-l1d-writeback-line-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l1d_store_coherence,$(XSIM_L1D_SOURCES),$(if $(findstring rv64,$@),-d RAPT_RV64),+BUS_DELAY_MAX=$(VERILATOR_DIRECTED_DELAY) +SEED=$(VERILATOR_DIRECTED_SEED))
+.PHONY: verilator-l1d-writeback-bscan-rv64
+L1D_BSCAN_TRACE ?= 0
+verilator-l1d-writeback-bscan-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1 -GLineRefill=1 --trace
+verilator-l1d-writeback-bscan-rv64:
+	$(call VERILATOR_DIRECTED_RUN,l1d_writeback_bscan_rv64,tb_l1d_store_coherence,$(XSIM_L1D_SOURCES),-d RAPT_RV64,+MIN_WB_B $(if $(filter 1,$(L1D_BSCAN_TRACE)),+TRACE_WB_B +WAVE_FILE=$(VERILATOR_DIRECTED_BUILD_DIR)/l1d_writeback_bscan_rv64/wave.vcd,))
 verilator-l1d-flush-ordered:
 	$(call VERILATOR_DIRECTED_RUN,l1d_flush_ordered,tb_l1d_flush_ordered,$(XSIM_L1D_SOURCES),-d RAPT_ASSERT_EN,)
 verilator-l1d-cmo-permissions:
@@ -2441,6 +2486,12 @@ verilator-dispatch-admit:
 
 verilator-rob-dispatch-select:
 	$(call VERILATOR_DIRECTED_RUN,rob_dispatch_select,tb_rob_dispatch_select,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/common/rapt_rank_select.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_rob_dispatch_select.sv",,+SEED=$(VERILATOR_DIRECTED_SEED))
+.PHONY: verilator-operand-spill
+verilator-operand-spill:
+	$(call VERILATOR_DIRECTED_RUN,operand_spill,tb_operand_spill,"$(RAPTOR_HOME)/hdl/backend/rapt_operand_spill.sv",-d RAPT_ASSERT_EN,+SEED=$(VERILATOR_DIRECTED_SEED))
+.PHONY: verilator-operand-value-spill
+verilator-operand-value-spill:
+	$(call VERILATOR_DIRECTED_RUN,operand_value_spill,tb_operand_value_spill,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_operand_spill.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_operand_value_spill.sv",-d RAPT_ASSERT_EN,+SEED=$(VERILATOR_DIRECTED_SEED))
 .PHONY: verilator-dispatch-compact
 verilator-dispatch-compact:
 	$(call VERILATOR_DIRECTED_RUN,dispatch_compact,tb_dispatch_compact,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/common/rapt_rank_select.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_dpu.sv",-d RAPT_ASSERT_EN,+SEED=$(VERILATOR_DIRECTED_SEED))
@@ -2664,6 +2715,16 @@ verilator-ioq-store-stage-rv32:
 	$(call VERILATOR_DIRECTED_RUN,ioq_store_stage_rv32,tb_ioq_store_stage,$(XSIM_IOQ_SOURCES),-d RAPT_ASSERT_EN,)
 verilator-ioq-store-stage-rv64:
 	$(call VERILATOR_DIRECTED_RUN,ioq_store_stage_rv64,tb_ioq_store_stage,$(XSIM_IOQ_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN,)
+.PHONY: verilator-ioq-mem-context-rv32 verilator-ioq-mem-context-rv64
+verilator-ioq-mem-context-rv32:
+	$(call VERILATOR_DIRECTED_RUN,ioq_mem_context_rv32,tb_ioq_mem_context,$(XSIM_IOQ_SOURCES),-d RAPT_ASSERT_EN,)
+verilator-ioq-mem-context-rv64:
+	$(call VERILATOR_DIRECTED_RUN,ioq_mem_context_rv64,tb_ioq_mem_context,$(XSIM_IOQ_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN,)
+.PHONY: verilator-lsu-mem-context-rv32 verilator-lsu-mem-context-rv64
+verilator-lsu-mem-context-rv32:
+	$(call VERILATOR_DIRECTED_RUN,lsu_mem_context_rv32,tb_lsu_mem_context,$(XSIM_LSU_SOURCES),-d RAPT_ASSERT_EN,)
+verilator-lsu-mem-context-rv64:
+	$(call VERILATOR_DIRECTED_RUN,lsu_mem_context_rv64,tb_lsu_mem_context,$(XSIM_LSU_SOURCES),-d RAPT_RV64 -d RAPT_ASSERT_EN,)
 .PHONY: verilator-ioq-readonly-pma-rv32 verilator-ioq-readonly-pma-rv64
 verilator-ioq-readonly-pma-rv32:
 	$(call VERILATOR_DIRECTED_RUN,ioq_readonly_pma_rv32,tb_ioq_readonly_pma,$(XSIM_IOQ_SOURCES),-d RAPT_ASSERT_EN,)
@@ -3347,6 +3408,10 @@ verilator-l1d-16k-rv32 verilator-l1d-16k-rv64:
 	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l1d_16k,$(XSIM_L1D_SOURCES),-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
 
 .PHONY: verilator-cache-stream-rv32 verilator-cache-stream-rv64 verilator-cache-stream-l2-rv32 verilator-cache-stream-l2-rv64 verilator-cache-stream-rnp-rv32
+.PHONY: verilator-cache-stream-wb-rv32 verilator-cache-stream-wb-rv64 verilator-cache-stream-wb-l2-rv32 verilator-cache-stream-wb-l2-rv64
+verilator-cache-stream-wb-rv32 verilator-cache-stream-wb-rv64 verilator-cache-stream-wb-l2-rv32 verilator-cache-stream-wb-l2-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1
+verilator-cache-stream-wb-rv32 verilator-cache-stream-wb-rv64 verilator-cache-stream-wb-l2-rv32 verilator-cache-stream-wb-l2-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_cache_stream,$(XSIM_L1D_SOURCES) "$(RAPTOR_HOME)/hdl/memory/rapt_bus.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_axi_master.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_l2.sv" "$(RAPTOR_HOME)/hdl/perip/wrap_rnp.sv",-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64) $(if $(findstring -l2-,$@),-d RAPT_L2_EN),)
 verilator-cache-stream-rv32 verilator-cache-stream-rv64 verilator-cache-stream-l2-rv32 verilator-cache-stream-l2-rv64 verilator-cache-stream-rnp-rv32:
 	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_cache_stream,$(XSIM_L1D_SOURCES) "$(RAPTOR_HOME)/hdl/memory/rapt_bus.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_axi_master.sv" "$(RAPTOR_HOME)/hdl/memory/rapt_l2.sv" "$(RAPTOR_HOME)/hdl/perip/wrap_rnp.sv",-d RAPT_ASSERT_EN $(if $(findstring -rnp-,$@),-d RAPT_TEST_RNP) $(if $(findstring rv64,$@),-d RAPT_RV64) $(if $(findstring -l2-,$@),-d RAPT_L2_EN),)
 
@@ -3355,10 +3420,34 @@ verilator-ioq-address-stage-rv32 verilator-ioq-address-stage-rv64: VERILATOR_DIR
 verilator-ioq-address-stage-rv32 verilator-ioq-address-stage-rv64:
 	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_ioq_address_stage,$(XSIM_IOQ_SOURCES),-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
 
+.PHONY: verilator-ioq-fast-load-next-head-rv32 verilator-ioq-fast-load-next-head-rv64
+verilator-ioq-fast-load-next-head-rv32 verilator-ioq-fast-load-next-head-rv64: VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 1
+verilator-ioq-fast-load-next-head-rv32 verilator-ioq-fast-load-next-head-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_ioq_fast_load_next_head,$(XSIM_IOQ_SOURCES),-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
+
+.PHONY: verilator-cdb-streaming-rv32 verilator-cdb-streaming-rv64
+.PHONY: verilator-port-priority
+verilator-port-priority verilator-cdb-streaming-rv32 verilator-cdb-streaming-rv64: VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 1
+verilator-port-priority:
+	$(call VERILATOR_DIRECTED_RUN,port_priority,tb_port_priority,"$(RAPTOR_HOME)/hdl/common/rapt_issue_select.sv",,)
+
+.PHONY: verilator-iq-cdb-wake-rv32 verilator-iq-cdb-wake-rv64
+verilator-iq-cdb-wake-rv32 verilator-iq-cdb-wake-rv64: VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 1
+verilator-iq-cdb-wake-rv32 verilator-iq-cdb-wake-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_iq_cdb_wake,$(IQ_RECLAIM_SOURCES),-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
+
+.PHONY: verilator-iq-port-priority-rv32 verilator-iq-port-priority-rv64
+verilator-iq-port-priority-rv32 verilator-iq-port-priority-rv64: VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 1
+verilator-iq-port-priority-rv32 verilator-iq-port-priority-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_iq_reclaim_random,$(IQ_RECLAIM_SOURCES),-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64) -d RAPT_INTEGER_ISSUE_PORTS=3 -d RAPT_INTEGER_SYSTEM_PORT=1 -GLastIssuePort=1 -GReclaimOnIssue=0,+SEED=$(VERILATOR_DIRECTED_SEED))
+
+verilator-cdb-streaming-rv32 verilator-cdb-streaming-rv64:
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_cdb_streaming,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_cdb_arb.sv",-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
+
 .PHONY: verilator-fmax-boundaries-rv32 verilator-fmax-boundaries-rv64
 verilator-fmax-boundaries-rv32 verilator-fmax-boundaries-rv64: VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 1
 verilator-fmax-boundaries-rv32 verilator-fmax-boundaries-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_fmax_boundaries,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_rou.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_iq.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_cdb_arb.sv",-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
+	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_fmax_boundaries,"$(RAPTOR_HOME)/hdl/rapt_pkg.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_operand_spill.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_operand_value_spill.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_rou.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_iq.sv" "$(RAPTOR_HOME)/hdl/backend/rapt_cdb_arb.sv",-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
 
 .PHONY: verilator-mshr-cache-rv32 verilator-mshr-cache-rv64
 verilator-mshr-cache-rv32 verilator-mshr-cache-rv64: VERILATOR_DIRECTED_FLAGS = --binary --timing --assert -j 1

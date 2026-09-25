@@ -793,8 +793,10 @@ format: ## Format tracked HDL/SystemVerilog (FORMAT_SCOPE=hdl|all)
 format-check: ## Check formatting without changing files (FORMAT_SCOPE=hdl|all)
 format format-check:
 	@command -v $(VERIBLE_FORMAT) >/dev/null || { echo "ERROR: $(VERIBLE_FORMAT) not found"; exit 1; }
-	@$(VERIBLE_FORMAT) --flagfile="$(VERIBLE_FLAGS)" --failsafe_success=false \
-		$(if $(filter format-check,$@),--verify,--inplace) $(VERIBLE_FORMAT_SOURCES)
+	@set -e; for source in $(VERIBLE_FORMAT_SOURCES); do \
+		$(VERIBLE_FORMAT) --flagfile="$(VERIBLE_FLAGS)" --failsafe_success=false \
+			$(if $(filter format-check,$@),--verify,--inplace) "$$source"; \
+	done
 
 pack: ## Pack all SV files into one
 	$(MAKE) -C $(NSIM_HOME) pack VFLAGS="$(VFLAGS)"

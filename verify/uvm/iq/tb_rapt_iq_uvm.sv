@@ -26,6 +26,9 @@ module tb_rapt_iq_uvm;
   assign completion[2] = '0;
   assign completion[3] = exu_ioq_bcast;
   assign completion[4] = exu_wb_mul;
+  for (genvar p = 5; p < rapt_pkg::CompletionPorts; p++) begin : g_extra_completion
+    assign completion[p] = '0;
+  end
 
   load_fast_if load_fast ();
   rapt_pkg::issue_packet_t iss;

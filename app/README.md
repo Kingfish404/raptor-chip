@@ -11,6 +11,10 @@ make -C verify mmio-spi-read-mask-check mmio-virtio-mask-check
 
 ## Quick Start
 
+Unless a command explicitly uses `-C` or says otherwise, run it from `app/`
+(`cd app` from the repository root). RV32/RV64 convenience targets build the
+matching simulator; lower-level `*-sim` targets assume a suitable configuration.
+
 ```bash
 # Build everything
 make all
@@ -60,7 +64,7 @@ app/
 │   └── hello/        #   Minimal hello world
 ├── demos/            # Interactive demo programs
 ├── benchmarks/       # Performance benchmarks
-│   ├── coremark/     #   CoreMark (auto-cloned from EEMBC)
+│   ├── coremark/     #   CoreMark (sources from AM am-kernels; prepare with root setup)
 │   ├── embench/      #   Embench-IoT (auto-cloned)
 │   └── llm/          #   Fixed-point LLM operator/infer/train benchmarks
 ├── lib/              # Picolibc I/O stubs (Linux toolchain only)
@@ -130,11 +134,11 @@ All programs are standard static RISC-V ELFs. They can run on any RISC-V Linux u
 sudo apt install qemu-user qemu-user-binfmt
 
 # RV32
-qemu-riscv32 app/build/rv32/demos/mandelbrot.elf
+qemu-riscv32 build/rv32/demos/mandelbrot.elf
 
 # RV64
 make demos-build ISA64=1
-qemu-riscv64 app/build/rv64/demos/mandelbrot.elf
+qemu-riscv64 build/rv64/demos/mandelbrot.elf
 ```
 
 When using the newlib toolchain (`riscv64-unknown-elf-gcc`), programs link against riscv-pk syscall stubs. For the Linux toolchain (`riscv64-linux-gnu-gcc`), QEMU's Linux user-mode emulation handles syscalls natively.
@@ -145,13 +149,13 @@ Programs run on the Raptor NPC simulator via riscv-pk proxy kernel:
 
 ```bash
 # Run a single test on NPC
-make pk-run USER_ELF=app/build/rv32/tests/isa/rv_add.elf
+make pk-run USER_ELF=build/rv32/tests/isa/rv_add.elf
 
 # Run all tests on NPC
 make tests-sim ARGS="-b -n"
 
-# Run all tests on NPC with difftest (from project root)
-make app-tests-rv32 DIFFTEST=1 ARGS="-b -n"
+# Run all tests on NPC with difftest (invoke root from app/)
+make -C .. app-tests-rv32 DIFFTEST=1 ARGS="-b -n"
 ```
 
 ## Running on NEMU (via pk)
@@ -160,7 +164,7 @@ The same pk+ELF images can also run on NEMU (software ISS). Use the explicit `*-
 
 ```bash
 # Run a single test on NEMU
-make nemu-run USER_ELF=app/build/rv32/tests/isa/rv_add.elf ARGS="-b"
+make nemu-run USER_ELF=build/rv32/tests/isa/rv_add.elf ARGS="-b"
 
 # Run all tests on NEMU
 make tests-nemu ARGS="-b"

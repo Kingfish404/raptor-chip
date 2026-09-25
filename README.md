@@ -21,7 +21,7 @@ Profiles:   RVI20U32; RVA22S64 supported (default config, RV64)
 RV64/default extensions: Zkt, Svinval, Svpbmt (required by RVA22S64)
 
 Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID; burst-capable reads (up to 8 outstanding), one outstanding write with independent AW/W handshakes (single-beat ordinary stores, multi-beat Zicboz `CBO.ZERO`)
-Default uarch: dual issue / dual commit, ROB=32, ALQ=8 (2 issue ports), BRQ=4, MDQ=4, FPQ=4, IOQ=8, SQ=16, integer PRF=128, FPR=32 x 64-bit, L1I=8 KiB, L1D=8 KiB (both 4-way), 64 B cache lines, optional L2 passthrough/cache stage
+Default uarch: dual issue / dual commit, ROB=32, ALQ=8 (2 issue ports), BRQ=4, MDQ=4, FPQ=4, IOQ=8, SQ=16, integer PRF=64, FPR=32 x 64-bit, L1I=16 KiB, L1D=16 KiB (both 4-way), 64 B cache lines, optional L2 passthrough/cache stage
 
 Verifying:  RISCOF (riscv-arch-test), full-core F/D directed/differential tests, RVFI, SVA
 ```
@@ -64,12 +64,12 @@ flowchart TD
   subgraph MEM["Memory Subsystem"]
     direction TD
     subgraph IMEM["I-side · IF0 (0-bubble seq fetch)"]
-      L1I["L1I 8 KiB 4-way (banked SRAM)"]
+      L1I["L1I 16 KiB 4-way (banked SRAM)"]
       ITLB["ITLB (default 16 entries, FA)"]
       IPTW["IPTW (Sv32 2-lvl / Sv39 3-lvl)"]
     end
     subgraph DMEM["D-side · IS/EX-WB (2-cyc hit, 3-cyc load-use)"]
-      L1D["L1D 8 KiB 4-way (banked SRAM, VIPT, write-through)"]
+      L1D["L1D 16 KiB 4-way (banked SRAM, VIPT, write-through)"]
       DTLB["DTLB (default 16 entries, replicated load/store views)"]
       DPTW["DPTW (Sv32/Sv39, Svade)"]
     end
@@ -115,7 +115,7 @@ Suggest install `tmux` for better terminal management. [`surfer`][^surfer] for w
 [^colima]: https://github.com/abiosoft/colima
 
 ```shell
-# One-line setup (installs all dependencies)
+# Install the common development toolchain (FPGA/PDK setup is separate)
 make setup
 # or if just want to setup RTL workspace
 make setup-rtl
@@ -166,7 +166,7 @@ make menuconfig-rv32
 
 #### RV64 Mode
 
-The processor supports RV64 via a compile-time switch (`-DRAPT_RV64`). Switching between RV32 and RV64 automatically invalidates the build cache, no manual `make clean` needed.
+The processor supports RV64 via a compile-time switch (`-DRAPT_RV64`). RV32 and RV64 use separate configuration and model caches; no manual `make clean` is needed. See [simulator builds](sim/README.md).
 
 ```shell
 # Build and run in RV64 mode (convenience targets)
@@ -182,7 +182,7 @@ make run-rv32 VFLAGS="-DRAPT_RV64" ARGS="-b -n"
 # Run riscv32
 make coremark-rv32 ARGS="-b -n"
 make microbench-rv32 ARGS="-b -n"
-# Run with difftest (vs NEMU reference)
+# Difftest is enabled by default; explicitly select it (vs NEMU reference)
 make coremark-rv32 DIFFTEST=1 ARGS="-b -n"
 make microbench-rv32 DIFFTEST=1 ARGS="-b -n"
 # Run sim with reproducible random AXI memory delays (also supports -rv64)
@@ -206,7 +206,7 @@ make app-hello-rv32
 make app-coremark-rv32 ARGS="-b -n"
 # Build and run Embench-IoT on NPC
 make app-embench-rv32 ARGS="-b -n"
-# Build riscv-pk (opensbi + pk)
+# Build riscv-pk (separate from the OpenSBI/Linux flow)
 make app-pk-build
 # Clean app build artifacts
 make app-clean
@@ -244,7 +244,7 @@ make verify-riscof-classic-nemu
 make verify-riscof
 # Verilator line/toggle coverage
 make verify-coverage
-# Run everything
+# Run the lightweight fuzz + signature suites
 make verify-light
 # See verify/README.md for SVA, formal (RVFI), and ACT4 details
 ```
@@ -266,9 +266,9 @@ make embench                        # build + run all Embench-IoT benches
 make linux32                        # build + run Linux payload in sim (make linux64 for RV64)
 
 # Tang Mega 138K Pro hardware flow
-make fpga-build                     # synth + P&R bitstream
-make fpga-load                      # load to SRAM (volatile)
-make fpga-flash                     # write to external SPI flash
+make fpga-build BOARD=tang_mega_138k_pro # synth + P&R bitstream
+make fpga-load BOARD=tang_mega_138k_pro  # load to SRAM (volatile)
+make fpga-flash BOARD=tang_mega_138k_pro # write to external SPI flash
 make fpga-console                   # open UART console
 
 # MLK-CU07-KU15P OpenSBI/Linux over MIG DDR and BIOS serialboot
@@ -295,8 +295,8 @@ cd $NEMU_HOME && make riscv32_linux_defconfig && make && make run
 
 # 2. build and run NPC
 cd $RAPTOR_HOME/hdl/chisel && make verilog
-cd $NSIM_HOME && make o2_defconfig && make && make run
-cd $NSIM_HOME && make o2linux_defconfig && make && make run
+cd $NSIM_HOME && make o2_difftest_defconfig && make && make run
+cd $NSIM_HOME && make o2linux_difftest_defconfig && make && make run
 cd $NSIM_HOME && make menuconfig && make ARCH=riscv32-npc run
 
 # 3. build and run the program you want
@@ -321,7 +321,7 @@ cd $RAPTOR_HOME/abstract-machine/app/am-kernels/benchmarks/microbench && \
 # ARGS="-b -n" is optional, -b is for batch mode [default], -n is for no wave trace
 
 ## package all sv files into one
-cd sim && make pack
+cd "$NSIM_HOME" && make pack
 ```
 
 ## Run OpenSBI & Linux Kernel

@@ -11,6 +11,9 @@ module tb_predict_history;
       .PhrBits(1)
   ) one (
       .*,
+      .execute_recover(1'b0),
+      .execute_ghr('0),
+      .execute_phr('0),
       .correct(correct[0])
   );
   formal_predict_history #(
@@ -18,10 +21,16 @@ module tb_predict_history;
       .PhrBits(3)
   ) odd (
       .*,
+      .execute_recover(1'b0),
+      .execute_ghr('0),
+      .execute_phr('0),
       .correct(correct[1])
   );
   formal_predict_history standard (
       .*,
+      .execute_recover(1'b0),
+      .execute_ghr('0),
+      .execute_phr('0),
       .correct(correct[2])
   );
   int seed;
@@ -90,6 +99,9 @@ module tb_predict_history_pipeline;
   idu_rnu_if idu_rnu ();
   idu_bpu_if idu_bpu ();
   rapt_recovery_if recovery ();
+  logic execute_recover = 0;
+  logic [63:0] execute_ghr = 0, snapshot_ghr;
+  logic [7:0] execute_phr = 0, snapshot_phr;
   rapt_idu idu (.*);
   rapt_cmu cmu (.*);
   rapt_bpu bpu (.*);
@@ -235,16 +247,37 @@ module tb_predict_history_pipeline;
     iss.op2 = 0;
     #1;
     check(wb_branch.btaken && wb_branch.npc == 'h4004 && !wb_branch.mispredict,
-          "matching direction");
+          "branch pipe resolves actual direction and target");
     iss.uop.execute.branch.predicted_taken = 0;
     #1;
-    check(wb_branch.mispredict, "same-PC wrong direction must repair history");
+    check(wb_branch.btaken && wb_branch.npc == 'h4004 && !wb_branch.mispredict,
+          "prediction comparison must not remain in the branch pipe");
     iss.op2 = 1;
     #1;
     check(!wb_branch.btaken && !wb_branch.mispredict, "matching not-taken direction");
     iss.uop.execute.branch.predicted_taken = 1;
     #1;
-    check(wb_branch.mispredict, "wrong taken hint with same next PC");
+    check(!wb_branch.btaken && !wb_branch.mispredict,
+          "prediction comparison belongs to the ROB checkpoint target file");
+
+    // Completion-time recovery must repair fetch+decode watermarks combinationally
+    // so the redirected fetch query does not keep younger speculative GHR bits.
+    ifu_bpu.history_valid = 1;
+    ifu_bpu.history_taken = 1;
+    tick(1);
+    ifu_bpu.history_valid = 0;
+    execute_ghr = 64'ha;
+    execute_phr = 8'h5;
+    execute_recover = 1;
+    #1;
+    check(bpu.dirp_read_ghr == 64'ha && bpu.dirp_read_phr == 8'h5,
+          "execute-recovery query uses checkpointed history");
+    tick(1);
+    execute_recover = 0;
+    check(
+        bpu.gshare == 64'ha && bpu.u_history.decode_ghr == 64'ha
+              && bpu.phr == 8'h5 && bpu.u_history.decode_phr == 8'h5,
+        "execute-recovery overwrites fetch and decode watermarks");
     $display("PASS: history IDU/BPU/CMU boundaries, trap/clear, and branch direction metadata");
     $finish;
   end

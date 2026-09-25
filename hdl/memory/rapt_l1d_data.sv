@@ -19,6 +19,7 @@ module rapt_l1d_data #(
     input logic [WordBits-1:0] write_word,
     input logic [WayBits-1:0] write_way,
     input logic [Xlen-1:0] write_data,
+    input logic [Xlen/8-1:0] write_strobe = '1,
     input logic write_line = 1'b0,
     input logic [LineWords-1:0] write_mask = '0,
     input logic [LineWords*Xlen-1:0] write_line_data = '0,
@@ -66,7 +67,8 @@ module rapt_l1d_data #(
         assign byte_enable[word_idx*WordBytes+:WordBytes] =
             {WordBytes{write_valid && write_way == WayBits'(way)
                        && (write_line ? write_mask[BaseWord+word_idx]
-                           : write_word == WordBits'(BaseWord + word_idx))}};
+                   : write_word == WordBits'(BaseWord + word_idx))}}
+          & (write_line ? {WordBytes{1'b1}} : write_strobe);
         assign bank_wdata[word_idx*Xlen+:Xlen] = write_line
             ? write_line_data[(BaseWord+word_idx)*Xlen+:Xlen] : write_data;
         assign read_data[way][BaseWord+word_idx] = bank_data[word_idx*Xlen+:Xlen];

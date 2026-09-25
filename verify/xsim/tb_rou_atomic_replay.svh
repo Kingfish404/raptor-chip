@@ -8,12 +8,20 @@ logic [XLEN-1:0] replay_data, replay_flag;
 logic replay_young_retired;
 logic [XLEN-1:0] replay_retired_value, replay_watch_pc;
 logic [XLEN-1:0] replay_prf[1<<PLEN]; // fixture physical register scoreboard
+rapt_pkg::mem_context_t replay_context;
+assign replay_context = '{mmu_en: csr_bcast.dmmu_en,
+    eff_priv: (csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv) ? csr_bcast.mpp : csr_bcast.priv,
+    sum: csr_bcast.sum, mxr: csr_bcast.mxr, pbmte: csr_bcast.menvcfg_pbmte,
+    asid: csr_bcast.satp_asid, version: 8'd0};
+assign replay_pipe.rcontext = replay_context;
+assign replay_pipe.rcontext_b = replay_context;
 `include "tb_pmp_state_defaults.svh"
 rapt_lsu_sq #(.SQ_SIZE(4)) replay_sq (
   .clock(clock), .reset(reset), .cmu_bcast(cmu_bcast),
   .lsu_l1d(replay_l1d), .exu_lsu(replay_pipe),
   .exu_ioq_bcast(completion[3]), .completion_accept(1'b1),
   .sq_acquire(replay_acquire), .sq_waddr_hi('0), .sq_waddr_third('0), .sq_wpbmt('0),
+  .sq_context(replay_context),
   .rou_lsu(rou_lsu), .csr_bcast(csr_bcast), .pmp_state(pmp_state),
   .pmu_sq_full(replay_sq_full)
 );

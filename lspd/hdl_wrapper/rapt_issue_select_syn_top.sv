@@ -4,7 +4,8 @@ module rapt_issue_select_syn_top #(
     parameter int Entries = 16,
     parameter int Ports = 4,
     parameter bit InOrder = 0,
-    parameter bit Rebalance = 1
+    parameter bit Rebalance = 1,
+    parameter int LastPort = Ports - 1
 ) (
     input logic clock,
     input logic [Entries-1:0] valid,
@@ -20,7 +21,8 @@ module rapt_issue_select_syn_top #(
       .Entries(Entries),
       .Ports(Ports),
       .InOrder(InOrder),
-      .Rebalance(Rebalance)
+      .Rebalance(Rebalance),
+      .LastPort(LastPort)
   ) dut (
       .valid,
       .ready,

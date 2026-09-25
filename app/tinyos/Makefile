@@ -268,10 +268,7 @@ xv6-sim-image: xv6-nsim-prepare ## Build xv6 kernel.bin and fs.img without runni
 	@test -f "$(XV6_SIM_DIR)/kernel/kernel.bin" && test -f "$(XV6_SIM_DIR)/fs.img"
 	@echo "Built xv6 kernel: $(XV6_SIM_DIR)/kernel/kernel.bin  disk: $(XV6_SIM_DIR)/fs.img"
 
-# Difftest variant: assumes caller (top-level Makefile) already configured
-# sim with o2_difftest_defconfig (rebuilt with VFLAGS=-DRAPT_RV64) and
-# built the NEMU RV64 reference shared object. Bypasses run-rv64 (which
-# would clobber the difftest config) by invoking sim's run target directly.
+# NEMU uses its standalone tiny-OS profile; sim difftest is selected via DIFFTEST.
 _xv6-cli-nemu: xv6-nsim-prepare ## Boot xv6-riscv on NEMU [RV64/Sv39]
 	$(call xv6-run-body,_xv6-cli-nemu,xv6-nemu-fs,run-nemu64,NEMU64_DEFCONFIG=riscv64_tinyos_defconfig,$(NEMU_LIMIT_ARGS))
 

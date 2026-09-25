@@ -755,8 +755,10 @@ module rapt_csr #(
                 ? (pmpcfg_r[pidx + 4'd1][`RAPT_PMPCFG_L_]
                    && (pmpcfg_r[pidx + 4'd1][`RAPT_PMPCFG_A_] == `RAPT_PMP_A_TOR))
                 : 1'b0;
-            if (int'(pidx) < `RAPT_PMP_NUM && !self_locked && !tor_locked) begin
-              pmpaddr_r[pidx] <= rou_csr.csr_wdata[PMPAddrW-1:0];
+            for (int pi = 0; pi < `RAPT_PMP_NUM; pi++) begin
+              if (pidx == 4'(pi) && !self_locked && !tor_locked) begin
+                pmpaddr_r[pi] <= rou_csr.csr_wdata[PMPAddrW-1:0];
+              end
             end
           end else if (waddr_reg == MEDELEG) begin
             csr[waddr_reg] <= (rou_csr.csr_wdata & `RAPT_CSR_MEDELEG_WMASK);

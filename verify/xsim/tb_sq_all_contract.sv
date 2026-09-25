@@ -800,7 +800,8 @@ module tb_sq_write_error;
     exu_ioq_bcast.sq_waddr=addr;
     sq_waddr_hi=Base+XLEN'(XLEN/8);
     sq_waddr_third=Base+8;
-    exu_ioq_bcast.sq_wdata='h12345678;
+    exu_ioq_bcast.sq_wdata = (kind == 1 && XLEN == 64)
+        ? XLEN'(64'h1234_5678_9abc_def0) : XLEN'('h1234_5678);
     exu_ioq_bcast.sq_wdata64='h123456789abcdef0;
     exu_ioq_bcast.sq_fp64=kind==1;
     exu_ioq_bcast.alu=kind==2 ? {1'b0,`RAPT_CBO_ZERO_WALU}

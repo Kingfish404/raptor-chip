@@ -133,7 +133,7 @@ def main():
         ("checkpoint-no-map", "rapt_rename_checkpoint", "hdl/frontend/rapt_rename_checkpoint.sv", "MapEntries=0"),
         ("checkpoint-no-rename", "rapt_rename_checkpoint", "hdl/frontend/rapt_rename_checkpoint.sv", "RenameWidth=0"),
         ("checkpoint-no-resolve", "rapt_rename_checkpoint", "hdl/frontend/rapt_rename_checkpoint.sv", "ResolvePorts=0"),
-        ("checkpoint-short-map", "rapt_rename_checkpoint", "hdl/frontend/rapt_rename_checkpoint.sv", "MapBits=6"),
+        ("checkpoint-short-map", "rapt_rename_checkpoint", "hdl/frontend/rapt_rename_checkpoint.sv", "PhysRegs=128 -GMapBits=6"),
         ("checkpoint-short-id", "rapt_rename_checkpoint", "hdl/frontend/rapt_rename_checkpoint.sv", "Entries=8 -GCheckpointBits=2"),
     ]:
         if args.only and top not in {"stream": ("rapt_stream_queue",), "checkpoint": ("rapt_rename_checkpoint",), "issue": ("rapt_issue_select",), "execution": (), "lsu": (), "integration": ()}[args.only]:

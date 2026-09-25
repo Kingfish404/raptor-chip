@@ -7,7 +7,7 @@
 module rapt_ioq_store_check #(
     parameter int XLEN = `RAPT_XLEN
 ) (
-    csr_bcast_if.in csr_bcast,
+    input rapt_pkg::mem_context_t store_context,
     pmp_state_if.in pmp_state,
     input logic [XLEN-1:0] store_addr,
     input logic [3:0] store_size_m1,
@@ -21,9 +21,7 @@ module rapt_ioq_store_check #(
   logic [1:0] ioq_store_eff_priv;
   logic       pmp_store_bare_fault;
   logic       pmp_load_bare_fault;
-  assign ioq_store_eff_priv = (csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv)
-                              ? csr_bcast.mpp
-                              : csr_bcast.priv;
+  assign ioq_store_eff_priv = store_context.eff_priv;
   // Use the architectural width supplied by the owner: RV32 FSD is eight
   // bytes even though its integer store encoding is SW. CMO passes one byte
   // for its operand permission check; block-zero capability is checked by IOQ.
@@ -69,7 +67,7 @@ module rapt_ioq_store_check #(
       && pma_fault_offset != 8 ? pma_fault_offset : 4'd0;
   assign store_bare_pmp_trap = store_valid
                                && !store_mmu
-                               && !csr_bcast.dmmu_en
+                               && !store_context.mmu_en
                                && ((cmo_mgmt
                                       ? (pmp_store_bare_fault && pmp_load_bare_fault)
                                       : pmp_store_bare_fault)

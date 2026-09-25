@@ -5,6 +5,7 @@ logic [XLEN-1:0] sq_waddr_hi;
 logic [XLEN-1:0] sq_waddr_third;
 logic [2:0][1:0] sq_wpbmt;
 logic sq_acquire;
+rapt_pkg::mem_context_t sq_context;
 
 cmu_bcast_if cmu_bcast();
 `ifdef RAPT_LSU_TB_CMU
@@ -14,9 +15,21 @@ rapt_cmu cmu(.clock, .reset, .rou_cmu, .cmu_bcast);
 lsu_l1d_if lsu_l1d();
 lsu_pipe_if exu_lsu();
 rapt_pkg::completion_t exu_ioq_bcast;
+logic sq_handoff_valid;
+assign sq_handoff_valid = exu_ioq_bcast.valid && exu_ioq_bcast.wen
+    && !exu_ioq_bcast.trap && exu_lsu.stq_ready && !cmu_bcast.flush_pipe
+    && exu_ioq_bcast.alu[4:0] != `RAPT_CBO_MGMT_WALU;
 rou_lsu_if rou_lsu();
 csr_bcast_if csr_bcast();
 pmp_state_if pmp_state();
+`ifndef TB_LSU_MANUAL_CONTEXT
+assign exu_lsu.rcontext = '{mmu_en: csr_bcast.dmmu_en,
+    eff_priv: (csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv) ? csr_bcast.mpp : csr_bcast.priv,
+    sum: csr_bcast.sum, mxr: csr_bcast.mxr,
+    pbmte: csr_bcast.menvcfg_pbmte, asid: csr_bcast.satp_asid, version: 8'd0};
+assign exu_lsu.rcontext_b = exu_lsu.rcontext;
+assign sq_context = exu_lsu.rcontext;
+`endif
 
 rapt_lsu_sq #(.SQ_SIZE(LsuTbSqSize)) dut (
     .clock,
@@ -25,9 +38,14 @@ rapt_lsu_sq #(.SQ_SIZE(LsuTbSqSize)) dut (
     .exu_lsu,
     .exu_ioq_bcast,
     .completion_accept(1'b1),
+    .sq_handoff_valid(sq_handoff_valid),
+    .sq_handoff_vaddr(exu_ioq_bcast.tval),
+    .sq_handoff_alu(exu_ioq_bcast.alu[4:0]),
+    .sq_handoff_fp64(1'b0),
     .sq_waddr_hi,
     .sq_waddr_third,
     .sq_wpbmt,
+    .sq_context,
     .sq_acquire,
     .rou_lsu,
     .csr_bcast,

@@ -25,6 +25,7 @@ module rapt_l1d_mshr #(
     input logic lookup_valid,
     cache_hit,
     input logic [Xlen-1:0] lookup_addr,
+    input logic [7:0] lookup_version,
     output logic lookup_ready,
     lookup_error,
     lookup_wait,
@@ -47,6 +48,7 @@ module rapt_l1d_mshr #(
   localparam int IdBits = Entries > 1 ? $clog2(Entries) : 1;
   logic [Entries-1:0] valid, sent, done, killed, consumed, installed;
   logic [Xlen-1:OffsetBits] tag[Entries];
+  logic [7:0] version[Entries];
   logic [Xlen-1:0] data[Entries][Words];
   logic [Words-1:0] errors[Entries], received[Entries], waiting[Entries];
   logic [Entries-1:0] kill_line;
@@ -78,7 +80,9 @@ module rapt_l1d_mshr #(
     free_id = 0;
     req_id = 0;
     for (int i = Entries - 1; i >= 0; i--) begin
-      if (valid[i] && !killed[i] && !kill_line[i] && tag[i] == lookup_addr[Xlen-1:OffsetBits]) begin
+      if (valid[i] && !killed[i] && !kill_line[i]
+          && tag[i] == lookup_addr[Xlen-1:OffsetBits]
+          && version[i] == lookup_version) begin
         match_found = 1;
         match_id = 2'(i);
       end
@@ -146,6 +150,7 @@ module rapt_l1d_mshr #(
         consumed[IdBits'(free_id)] <= 0;
         killed[IdBits'(free_id)] <= 0;
         tag[IdBits'(free_id)] <= lookup_addr[Xlen-1:OffsetBits];
+        version[IdBits'(free_id)] <= lookup_version;
         beat[IdBits'(free_id)] <= '0;
         errors[IdBits'(free_id)] <= '0;
         received[IdBits'(free_id)] <= '0;

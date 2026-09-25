@@ -12,6 +12,9 @@ module rapt_bus #(
     parameter int XLEN = `RAPT_XLEN
 ) (
     input clock,
+    input logic coherent_ready = 1'b1,
+    output logic coherent_request,
+    output logic coherent_write,
 
     // Internal memory transaction port
     mem_link_if.master mem,
@@ -138,6 +141,30 @@ module rapt_bus #(
   // address multiple times. Gate the push to one capture per (arvalid window,
   // araddr) pair using a captured flag plus last-pushed-address register.
   logic l1i_push, l1d_push;
+  // Only instruction-side PTW reads require D-cache writeback coherence.
+  // Ordinary instruction refills may see old code until FENCE.I retires;
+  // that instruction drains the D-cache and invalidates L1I before refetch.
+  logic [15:0] coherent_reads;
+  logic coherent_read_done;
+  logic l1i_arvalid_q;
+  assign coherent_read_done = mem.rd_rsp_valid && mem.rd_rsp_last && mem.rd_rsp_id == 4'(TLBI);
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      coherent_reads <= '0;
+      l1i_arvalid_q  <= 1'b0;
+    end else begin
+      // Register the PTW drain request: a direct valid -> drain -> memory-idle
+      // -> IO-authorize -> valid path would form a combinational loop.
+      l1i_arvalid_q <= l1i_bus.arvalid && l1i_bus.ar_ptw;
+      case ({
+        l1i_push && l1i_bus.ar_ptw, coherent_read_done
+      })
+        2'b10: coherent_reads <= coherent_reads + 1'b1;
+        2'b01: if (coherent_reads != 0) coherent_reads <= coherent_reads - 1'b1;
+        default: coherent_reads <= coherent_reads;
+      endcase
+    end
+  end
   logic l1i_captured;
   logic [XLEN-1:0] l1i_last_push_addr;
   logic l1i_last_push_ptw;
@@ -145,7 +172,8 @@ module rapt_bus #(
   assign l1i_new_request = !l1i_captured
                          || (l1i_bus.araddr != l1i_last_push_addr)
                          || (l1i_bus.ar_ptw != l1i_last_push_ptw);
-  assign l1i_push       = l1i_bus.arvalid && !l1i_q_full && l1i_new_request;
+  assign l1i_push       = l1i_bus.arvalid && !l1i_q_full && l1i_new_request
+      && (!l1i_bus.ar_ptw || coherent_ready);
   assign l1d_push       = l1d_bus.arvalid && !l1d_bus.ar_mshr && !l1d_slot_busy;
   assign l1i_bus.rready = l1i_push;
   assign l1d_bus.rready = l1d_push || miss_push;
@@ -177,7 +205,8 @@ module rapt_bus #(
   assign rd_skid_available = !rd_skid_valid || mem.rd_req_ready;
   assign source_l1d = l1d_slot_busy && !l1d_slot_held;
   assign source_miss = !source_l1d && miss_available;
-  assign source_l1i = !source_l1d && !source_miss && !l1i_q_empty;
+  assign source_l1i = !source_l1d && !source_miss && !l1i_q_empty
+      && (!l1i_q_ptw[l1i_q_rdptr] || coherent_ready);
   assign source_valid = source_l1d || source_miss || source_l1i;
   assign take_miss = rd_skid_available && source_miss;
   assign take_l1d = rd_skid_available && source_l1d;
@@ -365,7 +394,12 @@ module rapt_bus #(
   logic store_awvalid;
   logic store_wvalid;
 
-  assign store_bridge = l1i_bus.awvalid ? (l1i_bus.aw_ptw ? TLBI : L1I)
+  assign coherent_request = l1i_arvalid_q || l1i_bus.awvalid
+      || coherent_reads != 0
+      || (write_state == WR_WAIT && store_source inside {L1I, TLBI});
+  assign coherent_write = l1i_bus.awvalid
+      || (write_state == WR_WAIT && store_source inside {L1I, TLBI});
+  assign store_bridge = l1i_bus.awvalid && coherent_ready ? (l1i_bus.aw_ptw ? TLBI : L1I)
                                         : (l1d_bus.aw_ptw ? TLBD : L1D);
   assign store_awaddr = (store_bridge inside {L1I, TLBI}) ? l1i_bus.awaddr : l1d_bus.awaddr;
   assign store_wdata = (store_bridge inside {L1I, TLBI}) ? l1i_bus.wdata : l1d_bus.wdata;

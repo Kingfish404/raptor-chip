@@ -44,7 +44,7 @@ make fpga-netboot-rv64-test
 make fpga-netboot-host-restore
 ```
 
-Replace `rv64` with `rv32` throughout for RV32. `load` only programs the FPGA; enter `netboot` yourself at the BIOS prompt. Build, load and boot are separate. The profile uses `RAPT_CONFIG=default` unless another preset is selected, for example `make fpga-netboot-rv64-build RAPT_CONFIG=small`. Repeat the same `RAPT_CONFIG` for all subsequent build/load/test steps. Host setup/restore is shared across presets and does not require a build or FPGA tools. The profile fixes 50 MHz, MIG DDR, BIOS, CM005 gigabit Ethernet and full Linux initialization. BIOS stops at `litex>` after initialization; choose `sdcardboot` or the exact namespaced `netboot` command printed by `serve` manually. The profile does not automatically shrink the CPU to make routing pass. A routing/timing failure means no board acceptance.
+Replace `rv64` with `rv32` throughout for RV32. `load` only programs the FPGA; enter `netboot` yourself at the BIOS prompt. Build, load and boot are separate. The profile uses `RAPT_CONFIG=default` unless another preset is selected, for example `make fpga-netboot-rv64-build RAPT_CONFIG=small`. Repeat the same `RAPT_CONFIG` for all subsequent build/load/test steps. Host setup/restore is shared across presets and does not require a build or FPGA tools. The profile fixes 50 MHz for both RV64 and RV32, plus MIG DDR, BIOS, CM005 gigabit Ethernet and full Linux initialization. BIOS stops at `litex>` after initialization; choose `sdcardboot` or the exact namespaced `netboot` command printed by `serve` manually. The profile does not automatically shrink the CPU to make routing pass. A routing/timing failure means no board acceptance.
 
 | Target suffix | Effect |
 | --- | --- |

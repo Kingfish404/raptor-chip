@@ -38,7 +38,12 @@ module rapt_lsu #(
   logic [XLEN-1:0] sq_waddr_hi;
   logic [XLEN-1:0] sq_waddr_third;
   logic [2:0][1:0] sq_wpbmt;
+  rapt_pkg::mem_context_t sq_context;
   logic sq_acquire;
+  logic sq_handoff_valid;
+  logic [XLEN-1:0] sq_handoff_vaddr;
+  logic [4:0] sq_handoff_alu;
+  logic sq_handoff_fp64;
 
   rapt_pmp_state pmp_state_regs (
       .clock(clock),
@@ -73,9 +78,14 @@ module rapt_lsu #(
       .fpr          (fpr),
       .exu_ioq_bcast(exu_ioq_bcast),
       .wb_accept   (wb_accept),
+      .sq_handoff_valid(sq_handoff_valid),
+      .sq_handoff_vaddr(sq_handoff_vaddr),
+      .sq_handoff_alu(sq_handoff_alu),
+      .sq_handoff_fp64(sq_handoff_fp64),
       .sq_waddr_hi  (sq_waddr_hi),
       .sq_waddr_third(sq_waddr_third),
       .sq_wpbmt(sq_wpbmt),
+      .sq_context(sq_context),
       .sq_acquire(sq_acquire),
       .load_fast    (load_fast),
       .pmu_ioq_full (pmu_ioq_full_unused)
@@ -92,9 +102,14 @@ module rapt_lsu #(
       .exu_lsu      (exu_lsu),
       .exu_ioq_bcast(exu_ioq_bcast),
       .completion_accept(wb_accept),
+      .sq_handoff_valid(sq_handoff_valid),
+      .sq_handoff_vaddr(sq_handoff_vaddr),
+      .sq_handoff_alu(sq_handoff_alu),
+      .sq_handoff_fp64(sq_handoff_fp64),
       .sq_waddr_hi  (sq_waddr_hi),
       .sq_waddr_third(sq_waddr_third),
       .sq_wpbmt(sq_wpbmt),
+      .sq_context(sq_context),
       .sq_acquire(sq_acquire),
       .rou_lsu      (rou_lsu),
       .csr_bcast    (csr_bcast),

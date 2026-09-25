@@ -1,7 +1,12 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
 `include "rapt_soc_if.svh"
-module tb_cache_stream;
+module tb_cache_stream #(
+    parameter bit WriteBack = 0
+);
+  logic coherent_ready, coherent_request, coherent_write;
+  logic writeback_error, writeback_idle;
+  logic writeback_drain = 0;
 `ifdef RAPT_TEST_RNP
   localparam bit Rnp = 1;
 `else
@@ -25,7 +30,9 @@ module tb_cache_stream;
   rou_cmu_if rou_cmu ();
   mem_link_if mem ();
   axi4_if cpu_axi (), axi ();
-  rapt_l1d dut (
+  rapt_l1d #(
+      .WriteBack(WriteBack)
+  ) dut (
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -33,6 +40,9 @@ module tb_cache_stream;
       .*
   );
   rapt_bus bus_dut (
+      .coherent_ready,
+      .coherent_request,
+      .coherent_write,
       .clock,
       .reset,
       .cmu_bcast,
@@ -173,6 +183,8 @@ module tb_cache_stream;
 
   logic [XLEN-1:0] ram[Words];
   logic rd_busy, wr_busy, b_wait;
+  logic hold_read_response = 1'b0;
+  logic hold_write_response = 1'b0;
   logic [XLEN-1:0] rd_addr, wr_addr;
   logic [7:0] rd_left, wr_left;
   logic [2:0] rd_size, wr_size;
@@ -235,7 +247,7 @@ module tb_cache_stream;
         axi.rvalid <= 0;
         read_beats++;
       end
-      if (rd_busy && (!axi.rvalid || axi.rready) && rng[3]) begin
+      if (rd_busy && (!axi.rvalid || axi.rready) && rng[3] && !hold_read_response) begin
         axi.rvalid<=1;
         axi.rid<=rd_id;
         axi.rdata<=ram[index_of(rd_addr)];
@@ -270,7 +282,7 @@ module tb_cache_stream;
       end
       if (b_wait) begin
         if (b_delay != 0) b_delay <= b_delay - 1;
-        else begin
+        else if (!hold_write_response) begin
           b_wait<=0;
           axi.bvalid<=1;
           axi.bid<=wr_id;
@@ -290,6 +302,65 @@ module tb_cache_stream;
       if (lsu_l1d.idle && !rd_busy && !axi.rvalid && !wr_busy && !b_wait && !axi.bvalid) return;
     end
     $fatal(1, "cache stream did not drain");
+  endtask
+  task automatic writeback_response_ownership_race;
+    logic [XLEN-1:0] expected;
+    int requests_before, responses_before, beats_before;
+    requests_before = write_requests;
+    responses_before = responses;
+    beats_before = write_beats;
+    expected = XLEN == 64 ? XLEN'('hcafebabe13572468) : XLEN'('h1357a568);
+    hold_write_response = 1;
+
+    // Dirty a resident word with a partial-store RMW, then issue a
+    // write-through partial miss and hold its B response.  A drain requested
+    // in that window must not mistake the older store response for a WB beat.
+    @(negedge clock);
+    lsu_l1d.waddr = XLEN'('h80000000) + (XLEN == 64 ? XLEN'(4) : XLEN'(1));
+    lsu_l1d.wdata = XLEN == 64 ? XLEN'('hcafebabe) : XLEN'('ha5);
+    lsu_l1d.walu = XLEN == 64 ? 8'h0f : 8'h01;
+    lsu_l1d.wvalid = 1;
+    #1;
+    if (!lsu_l1d.wready || l1d_bus.wvalid) $fatal(1, "partial WB store was not accepted locally");
+    @(posedge clock);
+    @(negedge clock);
+    lsu_l1d.waddr = XLEN'('h8000e000);
+    lsu_l1d.wdata = XLEN'('h5a);
+    lsu_l1d.walu = 8'h01;
+
+    for (int cycle = 0; cycle < 10000 && write_beats == beats_before; cycle++) @(negedge clock);
+    if (write_beats == beats_before || !b_wait || lsu_l1d.wready)
+      $fatal(1, "write-through setup did not reach a held B response");
+    writeback_drain = 1;
+    repeat (16) begin
+      @(negedge clock);
+      if (!dut.dirty_any || dut.wb_valid || lsu_l1d.wready)
+        $fatal(1, "WB stole or bypassed an older L1D store response");
+    end
+
+    hold_write_response = 0;
+    for (int cycle = 0; cycle < 10000 && !lsu_l1d.wready; cycle++) @(negedge clock);
+    if (!lsu_l1d.wready || lsu_l1d.werr || dut.wb_valid)
+      $fatal(1, "older L1D store response was not returned to its owner");
+    @(posedge clock);
+    @(negedge clock);
+    lsu_l1d.wvalid = 0;
+    for (int cycle = 0; cycle < 10000 && !writeback_idle; cycle++) @(negedge clock);
+    if (!writeback_idle || writeback_error || ram[0] != expected
+        || write_requests - requests_before != 2 || responses - responses_before != 2)
+      $fatal(
+          1,
+          "WB response ownership race failed data=%h expected=%h aw=%0d b=%0d",
+          ram[0],
+          expected,
+          write_requests - requests_before,
+          responses - responses_before
+      );
+    writeback_drain = 0;
+    load(XLEN'('h80000000), expected, 1);
+    lsu_l1d.waddr = XLEN'('h80000000);
+    lsu_l1d.walu = 8'({WordBytes{1'b1}});
+    $display("PASS: WB preserves older store response ownership RV%0d", XLEN);
   endtask
   task automatic load(input logic [XLEN-1:0] addr, input logic [XLEN-1:0] expected,
                       input bit hot = 0, input bit early = 0);
@@ -529,6 +600,120 @@ module tb_cache_stream;
     load(XLEN'('h80000000) + XLEN'(offset), ram[offset/WordBytes]);
     for (int offset = 0; offset < CapacityBytes; offset += WordBytes)
     load(XLEN'('h80000000) + XLEN'(offset), ram[offset/WordBytes], 1);
+    if (WriteBack) begin
+      idle();
+      @(negedge clock);
+      lsu_l1d.waddr = XLEN'('h80000000);
+      lsu_l1d.wdata = XLEN'('h76543210);
+      lsu_l1d.walu = 8'({WordBytes{1'b1}});
+      lsu_l1d.wvalid = 1;
+      #1;
+      if (!lsu_l1d.wready || l1d_bus.wvalid) $fatal(1, "WB store not local");
+      @(negedge clock);
+      lsu_l1d.wvalid = 0;
+      repeat (4) @(negedge clock);
+      load(XLEN'('h80000000), XLEN'('h76543210), 1);
+      if (writeback_idle || ram[0] == XLEN'('h76543210))
+        $fatal(1, "WB store did not retain dirty ownership");
+      // A plain instruction refill does not imply FENCE.I. It may read the
+      // old backing value while a dirty D-cache line remains private.
+      @(negedge clock);
+      l1i_bus.araddr = XLEN'('h80000000);
+      l1i_bus.arburst = 0;
+      l1i_bus.ar_ptw = 0;
+      l1i_bus.arvalid = 1;
+      #1;
+      if (coherent_request || coherent_ready || !l1i_bus.rready)
+        $fatal(1, "plain I-side refill incorrectly waited for dirty D-cache drain");
+      @(posedge clock);
+      @(negedge clock);
+      l1i_bus.arvalid = 0;
+      for (int cycle = 0; cycle < 10000 && !l1i_bus.rvalid; cycle++) @(negedge clock);
+      if (!l1i_bus.rvalid || l1i_bus.rerr || l1i_bus.rdata != ram[0]
+          || writeback_idle || ram[0] == XLEN'('h76543210))
+        $fatal(1, "plain I-side refill did not preserve the dirty D-cache owner");
+      @(posedge clock);
+      @(negedge clock);
+
+      // FENCE.I retirement requests this drain before L1I invalidation.
+      writeback_drain = 1;
+      for (int cycle = 0; cycle < 10000 && !writeback_idle; cycle++) @(negedge clock);
+      if (!writeback_idle || ram[0] != XLEN'('h76543210))
+        $fatal(1, "FENCE.I-style drain did not publish the dirty instruction line");
+      writeback_drain = 0;
+      l1i_bus.arvalid = 1;
+      #1;
+      if (!l1i_bus.rready) $fatal(1, "post-drain instruction refill was not accepted");
+      @(posedge clock);
+      @(negedge clock);
+      l1i_bus.arvalid = 0;
+      for (int cycle = 0; cycle < 10000 && !l1i_bus.rvalid; cycle++) @(negedge clock);
+      if (!l1i_bus.rvalid || l1i_bus.rerr || l1i_bus.rdata != XLEN'('h76543210))
+        $fatal(1, "post-drain instruction refill returned stale data");
+      @(posedge clock);
+      @(negedge clock);
+
+      // A PTW read, unlike a plain refill, is coherent with committed D-side
+      // page-table writes and retains the outstanding-read order barrier.
+      hold_read_response = 1;
+      l1i_bus.araddr = XLEN'('h8000f000);
+      l1i_bus.ar_ptw = 1;
+      l1i_bus.arvalid = 1;
+      #1;
+      if (!l1i_bus.rready) $fatal(1, "cold I-side PTW read was not captured");
+      @(posedge clock);
+      @(negedge clock);
+      l1i_bus.arvalid = 0;
+      lsu_l1d.wdata = XLEN'('h13572468);
+      lsu_l1d.wvalid = 1;
+      repeat (16) begin
+        #1;
+        if (lsu_l1d.wready || l1d_bus.wvalid)
+          $fatal(1, "D-side store overtook outstanding I-side read");
+        @(negedge clock);
+      end
+      hold_read_response = 0;
+      for (int cycle = 0; cycle < 10000 && !l1i_bus.ptw_rvalid; cycle++) @(negedge clock);
+      if (!l1i_bus.ptw_rvalid || l1i_bus.ptw_rerr || l1i_bus.rdata != ram[index_of(
+              XLEN'('h8000f000)
+          )])
+        $fatal(1, "cold I-side PTW read response mismatch");
+      l1i_bus.ar_ptw = 0;
+      for (int cycle = 0; cycle < 10000 && !lsu_l1d.wready; cycle++) @(negedge clock);
+      if (!lsu_l1d.wready || l1d_bus.wvalid)
+        $fatal(1, "D-side store did not resume locally after I-side response");
+      @(negedge clock);
+      lsu_l1d.wvalid = 0;
+      repeat (4) @(negedge clock);
+      load(XLEN'('h80000000), XLEN'('h13572468), 1);
+      writeback_drain = 1;
+      for (int cycle = 0; cycle < 10000 && !writeback_idle; cycle++) @(negedge clock);
+      if (!writeback_idle || writeback_error || ram[0] != XLEN'('h13572468))
+        $fatal(1, "WB AXI drain after I-side coherence failed");
+      writeback_drain = 0;
+      $display("PASS: WB FENCE.I publication, PTW ordering and AXI drain RV%0d", XLEN);
+      writeback_response_ownership_race();
+      @(negedge clock);
+      lsu_l1d.wdata = XLEN'('h24681357);
+      lsu_l1d.wvalid = 1;
+      #1;
+      if (!lsu_l1d.wready) $fatal(1, "error-path WB store not accepted");
+      @(negedge clock);
+      lsu_l1d.wvalid = 0;
+      repeat (4) @(negedge clock);
+      write_error = 1;
+      writeback_drain = 1;
+      for (int cycle = 0; cycle < 10000 && !writeback_error; cycle++) @(negedge clock);
+      if (!writeback_error) $fatal(1, "AXI B error did not reach WB");
+      write_error = 0;
+      repeat (32) begin
+        @(negedge clock);
+        if (!writeback_error || writeback_idle || !dut.dirty_any
+            || l1d_bus.wvalid || l1d_bus.arvalid)
+          $fatal(1, "AXI WB error did not preserve fail-stop");
+      end
+      $display("PASS: WB AXI error fail-stop RV%0d", XLEN);
+    end
     $display("PASS: capacity %0d bytes, every refilled word hot; RNP=%0d", CapacityBytes, Rnp);
     $display(
         "PASS: cache stream RV%0d full-line refill, hot words, set CBO across L2, ZERO one AW/B, delayed/error B, fill kill/error, NA4/TOR/NAPOT boundary fallback",

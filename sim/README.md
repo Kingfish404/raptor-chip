@@ -1,6 +1,6 @@
 # Simulator builds and configuration
 
-From the repository root, `make run-rv32` and `make run-rv64` configure, build, and run the built-in smoke program with difftest. Use `IMG=/absolute/path.bin` for another program. `NPC_DEFCONFIG` defaults to `o2_difftest_defconfig`.
+From the repository root, `make run-rv32` and `make run-rv64` configure, build, and run the built-in smoke program with difftest. Use `IMG=/absolute/path.bin` for another program. `DIFFTEST=1` is the default and selects `o2_difftest_defconfig`; `DIFFTEST=0` selects `o2_defconfig` and disables the runtime reference. An explicit `NPC_DEFCONFIG` overrides the profile choice.
 
 ## Independent builds
 
@@ -24,8 +24,13 @@ sim/build/<profile>/
 For example, after preparing both NEMU reference libraries, these simulator builds/runs can execute concurrently:
 
 ```sh
-make run-rv32 BUILD_PROFILE=smoke32 BUILD_ROOT=/tmp/raptor-sim-builds &
-make run-rv64 BUILD_PROFILE=smoke64 BUILD_ROOT=/tmp/raptor-sim-builds &
+make verilog
+make build-nemu32-ref
+make build-nemu64-ref
+make run-rv32 BUILD_PROFILE=smoke32 BUILD_ROOT=/tmp/raptor-sim-builds \
+  DIFF_REF_SO="-d $PWD/nemu/build/riscv32-nemu-interpreter-so" &
+make run-rv64 BUILD_PROFILE=smoke64 BUILD_ROOT=/tmp/raptor-sim-builds \
+  DIFF_REF_SO="-d $PWD/nemu/build/riscv64-nemu-interpreter-so" &
 wait
 ```
 
@@ -46,9 +51,17 @@ Kconfig contents and effective compiler/Verilator options select the model cache
 
 `run` and `run_log` execute in the selected `run-riscv*` directory. `IMG`, `DISK`, `SDCARD`, and MROM paths are resolved before changing directories. Use absolute paths for file arguments embedded directly in `ARGS`.
 
-## DFF-only static timing analysis
+Long simulations print a progress heartbeat every 60 seconds by default.
+Set `NSIM_HEARTBEAT_SECONDS=300` for fewer lines, or `=0` to suppress the
+wall-clock heartbeat. `NSIM_PROGRESS_CYCLES` separately controls the periodic
+LightSSS snapshot interval (default 40 million cycles); its progress line
+remains enabled when the heartbeat is suppressed.
 
-`make sta` retains the SRAM-macro flow. From the repository root (or with `make -C sim`), use the memory-model parameter for behavioral memories expanded into standard-cell flip-flops and selection logic:
+## Static timing analysis
+
+`make sta` defaults to `MEMORY=sram`, `XLEN=32`, `STA_PLATFORM=nangate45` and `CLK_FREQ_MHZ=50`. `sta-detail` adds detailed paths; `sta-check` only checks RTL elaboration. SRAM timing libraries are selected by `SRAM_PLATFORM` (defaults to the normalized STA platform). Missing libraries trigger placeholder generation; a successful default run does not establish characterized SRAM timing. See [OpenRAM integration](sram/README.md) for real macro libraries.
+
+For DFF-only analysis, from the repository root (or with `make -C sim`), use the memory-model parameter for behavioral memories expanded into standard-cell flip-flops and selection logic:
 
 ```sh
 make sta MEMORY=dff

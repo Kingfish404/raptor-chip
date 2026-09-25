@@ -23,13 +23,13 @@ make -C sim/sram/test clean
 
 1. **Configs** — Each macro shape in `SHAPES` has a `rapt_sram_*_1rw_sky130.py` declaring the right `word_size` / `num_words` / `write_size`.
 2. **Blackbox V** — Each shape has one `(* blackbox *) module` whose port widths match the shape (addr = ⌈log₂(depth)⌉, wmask = width/write_size).
-3. **RTL macro path** — The `RAPT_USE_SRAM_MACRO` branch in `rapt_sram_1rw.sv` instantiates each single-port shape with all seven ports (`clk0/csb0/web0/wmask0/addr0/din0/dout0`) connected, under the correct `DEPTH=={D} && DATA_WIDTH=={W}` guard, and falls back to `$fatal` on unsupported shapes.
-4. **Stub Liberty** — `gen_stub_lib.py` produces parseable `.lib` files with: `is_macro_cell:true`, `dont_touch:true`, all required pins/buses at the right widths, ≥6 setup arcs and ≥6 hold arcs on the inputs, and a `cell_rise`/`cell_fall` arc from `clk1` to `dout1`. Area is positive and within a factor of two of `depth × width × 2.0 × 1.3`.
+3. **RTL macro path** — The `RAPT_USE_SRAM_MACRO` branch in `rapt_sram_1rw.sv` instantiates each single-port shape with all seven ports (`clk0/csb0/web0/wmask0/addr0/din0/dout0`) connected, under the correct `DEPTH=={D} && DATA_WIDTH=={W}` guard, and instantiates the undefined `rapt_unsupported_sram_shape` on unsupported shapes so hierarchy checking fails.
+4. **Stub Liberty** — `gen_stub_lib.py` produces parseable `.lib` files with: `is_macro_cell:true`, `dont_touch:true`, all required pins/buses at the right widths, ≥5 setup arcs and ≥5 hold arcs on the inputs, and a `cell_rise`/`cell_fall` arc from `clk0` to `dout0`. Area is positive and within a factor of two of `depth × width × 2.0 × 1.3`.
 5. **Cross-consistency** — The set of macro names declared in the blackbox V matches `SHAPES` exactly (no orphans, no missing).
 
 ## What `make sta-smoke` verifies (needs yosys + slang + OpenSTA)
 
-Generates stubs if needed, preprocesses `fixtures/rapt_sram_test_top.sv` (a 1-instance wrapper around the L1I 32×32 shape), and drives the `third_party/yosys-opensta` flow with `EXTRA_LIB_FILES` set to the stub Liberty. The flow imports macro port definitions from Liberty before reading RTL; loading the same macro again as a Verilog blackbox would duplicate the module. Then it asserts:
+Generates stubs if needed, preprocesses `fixtures/rapt_sram_test_top.sv` (a 1-instance wrapper around a registered 32×32 shape (current default L1I data banks use 64×32)), and drives the `third_party/yosys-opensta` flow with `EXTRA_LIB_FILES` set to the stub Liberty. The flow imports macro port definitions from Liberty before reading RTL; loading the same macro again as a Verilog blackbox would duplicate the module. Then it asserts:
 
 - Yosys produced a synthesised netlist.
 - The macro instance (`rapt_openram_1rw_32x32`) survives synthesis (i.e. the blackbox was preserved, not flattened).

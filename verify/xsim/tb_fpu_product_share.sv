@@ -95,7 +95,7 @@ module fpu_product_share_check #(
       if (take) begin
         assert (countdown == 0 && !expect_result)
         else $fatal(1, "overlapping acceptance");
-        countdown = is_fma ? 5 : 3;  // Capture edge is stage 1 of six/four.
+        countdown = is_fma ? 7 : 3;  // Capture edge is stage 1 of eight/four.
         if (is_fma) accepted_fma++;
         else accepted_mul++;
       end

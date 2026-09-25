@@ -17,9 +17,14 @@ module rapt_iq #(
     parameter type                    CompletionT     = rapt_pkg::completion_t,
     parameter unsigned                IQ_SIZE         = 8,
     parameter int unsigned            NumIssuePorts   = 1,
+    parameter int unsigned            LastIssuePort   = NumIssuePorts - 1,
     parameter bit                     IN_ORDER_ISSUE  = 1'b0,
     parameter bit                     RebalancePorts  = Cfg.issue_rebalance,
     parameter bit                     ReclaimOnIssue  = Cfg.iq_reclaim_on_issue,
+    // Same-cycle CDB operand wake. Mask must exclude any completion port
+    // this queue produces combinationally (BRQ skips the branch port).
+    parameter bit                     ComboCdbWake    = 1'b0,
+    parameter logic [31:0]            ComboWakePorts  = 32'hFFFF_FFFF,
     parameter unsigned                ROB_SIZE        = Cfg.rob_entries,
     parameter unsigned                PLEN            = rapt_pkg::index_bits(Cfg.phys_regs),
     parameter unsigned                RLEN            = rapt_pkg::index_bits(Cfg.arch_regs),
@@ -42,14 +47,18 @@ module rapt_iq #(
 
     // Slow CDB wakeup sources (all value-producing pipes, incl. our own)
 
+    // Same-cycle wake producers. Must not include a packet this queue
+    // combinationally generates. Tied off when ComboCdbWake is 0.
+    input CompletionT combo_source[NumCompletions] = '{default: '0},
+
     // Fast load-use tag wakeup
     load_fast_if.sink load_fast,
 
     // Execution availability per attached function-unit port.
     input logic [NumIssuePorts-1:0] issue_enable,
 
-    // Issue ports: combinational view of the oldest ready entries.
-    // op1/op2 have the fast-confirm MEM-result bypass already applied.
+    // Issue ports: combinational view of the oldest registered-ready entries.
+    // Fast-confirmed operands become eligible on the following cycle.
     output IssueT issue[NumIssuePorts],
 
     // Occupancy (PMU aggregation) + PMU full pulse
@@ -171,6 +180,23 @@ module rapt_iq #(
     end
   endfunction
 
+  function automatic logic combo_wb_hit(input logic [PLEN-1:0] pr);
+    combo_wb_hit = 1'b0;
+    for (int p = 0; p < NWB; p++) begin
+      combo_wb_hit |= ComboWakePorts[p] && (pr != '0) && combo_source[p].valid
+          && (combo_source[p].prd == pr);
+    end
+  endfunction
+
+  function automatic logic [XLEN-1:0] combo_wb_val(input logic [PLEN-1:0] pr,
+                                                   input logic [XLEN-1:0] dflt);
+    combo_wb_val = dflt;
+    for (int p = NWB - 1; p >= 0; p--) begin
+      if (ComboWakePorts[p] && (pr != '0) && combo_source[p].valid && (combo_source[p].prd == pr))
+        combo_wb_val = combo_source[p].result;
+    end
+  endfunction
+
   function automatic logic completion_hit(input logic [ROBLen-1:0] dep,
                                           input logic [GenBits-1:0] generation);
     completion_hit = 1'b0;
@@ -200,13 +226,6 @@ module rapt_iq #(
         && load_fast.confirmed_generation == generation;
   endfunction
 
-  function automatic logic [XLEN-1:0] fast_confirm_value(input logic [PLEN-1:0] pr,
-                                                         input logic [ROBLen-1:0] dest,
-                                                         input logic [GenBits-1:0] generation);
-    return load_fast.confirmed_prd == pr && load_fast.confirmed_dest == dest
-        && load_fast.confirmed_generation == generation ? load_fast.result : '0;
-  endfunction
-
   function automatic logic fast_rebusy_match(input logic is_fast, input logic [PLEN-1:0] pr,
                                              input logic [ROBLen-1:0] dest,
                                              input logic [GenBits-1:0] generation);
@@ -224,10 +243,13 @@ module rapt_iq #(
   logic [IQ_SIZE-1:0] pr1_fast_rebusy, pr2_fast_rebusy;
   logic [IQ_SIZE-1:0] pr1_fast_wake, pr2_fast_wake;
   logic [IQ_SIZE-1:0] pr1_slow_hit, pr2_slow_hit;
+  logic [IQ_SIZE-1:0] pr1_combo_hit, pr2_combo_hit;
   logic [XLEN-1:0] pr1_slow_val[IQ_SIZE];
   logic [XLEN-1:0] pr2_slow_val[IQ_SIZE];
+  logic [XLEN-1:0] pr1_combo_val[IQ_SIZE];
+  logic [XLEN-1:0] pr2_combo_val[IQ_SIZE];
   logic [IQ_SIZE-1:0] pr_ready;
-  logic [IQ_SIZE-1:0] iq_free_vec, iq_ready_vec;
+  logic [IQ_SIZE-1:0] iq_ready_vec;
 
   always_comb begin
     for (int i = 0; i < IQ_SIZE; i++) begin
@@ -243,11 +265,19 @@ module rapt_iq #(
       pr2_fast_wake[i] = iq_pr2_busy[i] && fast_wake_match(iq_pr2[i]);
       pr1_slow_hit[i] = iq_pr1_busy[i] && wb_hit(iq_pr1[i]);
       pr2_slow_hit[i] = iq_pr2_busy[i] && wb_hit(iq_pr2[i]);
+      pr1_combo_hit[i] = iq_pr1_busy[i] && combo_wb_hit(iq_pr1[i]);
+      pr2_combo_hit[i] = iq_pr2_busy[i] && combo_wb_hit(iq_pr2[i]);
       pr1_slow_val[i] = wb_val(iq_pr1[i], iq_vj[i]);
       pr2_slow_val[i] = wb_val(iq_pr2[i], iq_vk[i]);
-      pr_ready[i] = ~(iq_pr1_busy[i] | iq_pr2_busy[i]) && !dependencies_busy(i) &&
-          (!iq_pr1_fast[i] || pr1_fast_confirm[i]) && (!iq_pr2_fast[i] || pr2_fast_confirm[i]);
-      iq_free_vec[i] = !iq_valid[i];
+      pr1_combo_val[i] = combo_wb_val(iq_pr1[i], iq_vj[i]);
+      pr2_combo_val[i] = combo_wb_val(iq_pr2[i], iq_vk[i]);
+      // A load confirmation owns the operand only after this clock edge.
+      // Do not let L1D response control run through issue selection, execute,
+      // ROU dispatch, and the next IOQ request in the same cycle.
+      pr_ready[i] = !dependencies_busy(i)
+          && (!iq_pr1_busy[i] || (ComboCdbWake && pr1_combo_hit[i]))
+          && (!iq_pr2_busy[i] || (ComboCdbWake && pr2_combo_hit[i]))
+          && !iq_pr1_fast[i] && !iq_pr2_fast[i];
       iq_ready_vec[i] = iq_valid[i] && pr_ready[i];
     end
   end
@@ -309,6 +339,8 @@ module rapt_iq #(
   // Selection owns only identities. Data capture, wakeup and payload muxing
   // remain local to IQ, so arbitration policy can evolve independently.
   logic [IQ_SIZE-1:0] selected[NumIssuePorts];
+  logic [IQ_SIZE-1:0] selected_data[NumIssuePorts];
+  logic [IQ_SIZE-1:0] claimed_data, baseline_claimed_data;
   logic [NumIssuePorts-1:0] port_mask[IQ_SIZE];
   for (genvar e = 0; e < IQ_SIZE; e++) begin : g_port_mask
     assign port_mask[e] = NumIssuePorts'(iq_uop[e].schedule.issue_ports);
@@ -321,20 +353,28 @@ module rapt_iq #(
   // keeps the cancel-aware view used by the PMU/capacity observations.
   assign select_valid_nc = iq_valid & {IQ_SIZE{!reset && !cmu_bcast.flush_pipe}};
   assign select_valid = select_valid_nc & ~cancelled;
+  assign claimed = claimed_data & {IQ_SIZE{!reset && !cmu_bcast.flush_pipe}};
+  assign baseline_claimed = baseline_claimed_data
+      & {IQ_SIZE{!reset && !cmu_bcast.flush_pipe}};
+  for (genvar port_index = 0; port_index < NumIssuePorts; port_index++) begin : g_transfer_gate
+    assign selected[port_index] = selected_data[port_index]
+        & {IQ_SIZE{!reset && !cmu_bcast.flush_pipe}};
+  end
   rapt_issue_select #(
       .Entries(IQ_SIZE),
       .Ports(NumIssuePorts),
+      .LastPort(LastIssuePort),
       .InOrder(IN_ORDER_ISSUE),
       .Rebalance(RebalancePorts)
   ) selector (
-      .valid(select_valid_nc),
+      .valid(iq_valid),
       .ready(pr_ready),
       .older(age_mat),
       .compatible(port_mask),
       .enabled(issue_enable),
-      .selected(selected),
-      .claimed(claimed),
-      .baseline_claimed(baseline_claimed)
+      .selected(selected_data),
+      .claimed(claimed_data),
+      .baseline_claimed(baseline_claimed_data)
   );
   // Registered observations share the issue edge, never the next-cycle view.
 `ifndef SYNTHESIS
@@ -376,8 +416,8 @@ module rapt_iq #(
         baseline_claimed & ~cancelled));
     pmu_reclaim_allocations <= reset || cmu_bcast.flush_pipe ? 0 : reclaim_allocations;
   end
-  // Keep stored payload selection separate from fast-confirm bypass. The
-  // latter still checks the selected physical/ROB/generation identity below.
+  // Fast confirmations update the stored operands at the edge; issue only
+  // reads those registered values on a subsequent cycle.
   localparam int StoredPayloadBits = $bits(UopT) + 2 * XLEN + ROBLen + GenBits + PLEN;
   logic [StoredPayloadBits-1:0] stored_payload[IQ_SIZE];
   for (genvar e = 0; e < IQ_SIZE; e++) begin : g_stored_payload
@@ -415,7 +455,7 @@ module rapt_iq #(
                       data_select == selected[p])
     end else begin : g_selected_data
       // Unordered/multiport selection still owns the payload identity.
-      assign data_select = (|selected[p]) ? selected[p] : IQ_SIZE'(1);
+      assign data_select = (|selected_data[p]) ? selected_data[p] : IQ_SIZE'(1);
     end
     assign index = oh2bin(data_select);
     for (genvar b = 0; b < StoredPayloadBits; b++) begin : g_payload_bit
@@ -430,12 +470,10 @@ module rapt_iq #(
     // Cancellation gates only this valid bit; the selected identity and
     // payload above do not depend on the recovery transaction.
     assign issue[p].valid = |selected[p] && !cancelled[index];
-    assign issue[p].op1 = pr1_fast_confirm[index] ? fast_confirm_value(
-        iq_pr1[index], iq_pr1_fast_dest[index], iq_pr1_fast_generation[index]
-    ) : stored_op1;
-    assign issue[p].op2 = pr2_fast_confirm[index] ? fast_confirm_value(
-        iq_pr2[index], iq_pr2_fast_dest[index], iq_pr2_fast_generation[index]
-    ) : stored_op2;
+    assign issue[p].op1 = (ComboCdbWake && pr1_combo_hit[index])
+        ? pr1_combo_val[index] : stored_op1;
+    assign issue[p].op2 = (ComboCdbWake && pr2_combo_hit[index])
+        ? pr2_combo_val[index] : stored_op2;
     `RAPT_SVA_IMPLY(clock, reset, IQ_SELECT_ONEHOT, issue[p].valid, $onehot(selected[p]))
     for (genvar q = p + 1; q < NumIssuePorts; q++) begin : g_disjoint
       `RAPT_SVA(clock, reset, IQ_SELECT_DISJOINT, (selected[p] & selected[q]) == '0)
@@ -465,15 +503,9 @@ module rapt_iq #(
           // A confirmed speculative wake has priority over an ordinary CDB
           // hit, matching the operand-state machine below.  Rename guarantees
           // that both cannot name different producers for the same operand.
-          if (pr1_fast_confirm[i])
-            iq_vj[i] <= fast_confirm_value(
-                iq_pr1[i], iq_pr1_fast_dest[i], iq_pr1_fast_generation[i]
-            );
+          if (pr1_fast_confirm[i]) iq_vj[i] <= load_fast.result;
           else if (pr1_slow_hit[i]) iq_vj[i] <= pr1_slow_val[i];
-          if (pr2_fast_confirm[i])
-            iq_vk[i] <= fast_confirm_value(
-                iq_pr2[i], iq_pr2_fast_dest[i], iq_pr2_fast_generation[i]
-            );
+          if (pr2_fast_confirm[i]) iq_vk[i] <= load_fast.result;
           else if (pr2_slow_hit[i]) iq_vk[i] <= pr2_slow_val[i];
         end
       end
@@ -528,14 +560,6 @@ module rapt_iq #(
           // a late completion nor a fast confirmation can recreate validity.
           iq_valid[i] <= 1'b0;
         end else if (iq_valid[i] && pr_ready[i]) begin
-          // Fast-confirm data capture for an entry that became fully ready
-          // this cycle (woken between ready computation and the clock edge).
-          if (pr1_fast_confirm[i]) begin
-            iq_pr1_fast[i] <= 1'b0;
-          end
-          if (pr2_fast_confirm[i]) begin
-            iq_pr2_fast[i] <= 1'b0;
-          end
           // Issue clear: entries selected on either port free this cycle
           // (dedicated WB ports, never back-pressured).  Only the valid bit
           // and the operand-tracking bits are cleared; payload arrays keep

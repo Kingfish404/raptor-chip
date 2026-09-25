@@ -16,6 +16,7 @@ CORE_UTILIZATION ?= 40
 CORE_ASPECT_RATIO ?= 1.0
 PLACE_DENSITY ?= 0.60
 PNR_MODE ?= standard
+PNR_THREADS ?= 1
 IMG_WIDTH ?= 1600
 IMG_HEIGHT ?= 1600
 PYTHON ?= python3
@@ -103,6 +104,7 @@ parallel-info: ## Show detected resources and automatic parallelism
 	@echo "available memory MB: $(MEM_AVAILABLE_MB)"
 	@echo "memory per job MB  : $(JOB_MEMORY_MB)"
 	@echo "parallel jobs      : $(PARALLEL_JOBS)"
+	@echo "threads per PNR job: $(PNR_THREADS)"
 
 doctor: ## Check OpenROAD, rendering tools, and selected platform files
 	@test -x "$(OPENROAD)" || { echo "missing OpenROAD: $(OPENROAD)"; exit 1; }
@@ -152,7 +154,7 @@ finish: stage ## Resume from routing and generate final outputs and reports
 	@$(MAKE) --no-print-directory pnr
 
 pnr: stage ## Run floorplan, placement, CTS, routing, extraction, and reports
-	@echo "[pnr] module=$(MODULE) top=$(TOP) pdk=$(PDK) config=$(RAPT_CONFIG) target=$(CLK_FREQ_MHZ)MHz mode=$(PNR_MODE)"
+	@echo "[pnr] module=$(MODULE) top=$(TOP) pdk=$(PDK) config=$(RAPT_CONFIG) target=$(CLK_FREQ_MHZ)MHz mode=$(PNR_MODE) threads=$(PNR_THREADS)"
 	@cd '$(FLOW_ROOT)' && \
 		PROJ_PATH='$(FLOW_ROOT)' PLATFORM='$(PLATFORM)' DESIGN='$(TOP)' \
 		RESULT_DIR='$(FLOW_INPUT_DIR)' NETLIST_SYN_V='$(TOP).netlist.v' \
@@ -161,7 +163,7 @@ pnr: stage ## Run floorplan, placement, CTS, routing, extraction, and reports
 		CORE_ASPECT_RATIO='$(CORE_ASPECT_RATIO)' PLACE_DENSITY='$(PLACE_DENSITY)' \
 		$(TIME) -o '$(BUILD_DIR)/pnr.profile' \
 			-f 'status=%x\nelapsed_sec=%e\nuser_sec=%U\nsystem_sec=%S\nmax_rss_kb=%M' \
-			'$(OPENROAD)' -exit 'scripts/$(PNR_SCRIPT)' 2>&1 | tee '$(BUILD_DIR)/pnr.log'
+			'$(OPENROAD)' -threads '$(PNR_THREADS)' -exit 'scripts/$(PNR_SCRIPT)' 2>&1 | tee '$(BUILD_DIR)/pnr.log'
 	@test -f '$(FINAL_ODB)'
 	@$(PYTHON) scripts/collect_metrics.py --result-dir '$(BUILD_DIR)' \
 		--top '$(TOP)' --period-ns '$(PERIOD_NS)' --output '$(BUILD_DIR)/pnr_metrics.txt'

@@ -48,7 +48,9 @@ module rapt_ieu_pipe_alu #(
       ? jump_target
       : iss.uop.pc + (iss.uop.c ? 2 : 4);
   assign wb_alu.btaken = 1'b0;
-  assign wb_alu.mispredict = (wb_alu.npc != iss.uop.pnpc);
+  // IDU corrects non-control predictions before rename. Jump predictions are
+  // checked centrally at completion by the ROB checkpoint target file.
+  assign wb_alu.mispredict = 1'b0;
   assign wb_alu.difftest_skip = 1'b0;
   // ALU never produces CSR / trap / MEM sideband (unified completion sideband tie-offs).
   assign wb_alu.csr_wen = 1'b0;

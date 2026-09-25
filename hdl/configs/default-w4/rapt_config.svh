@@ -2,8 +2,9 @@
 `define RAPT_CONFIG_SVH
 
 /**
- * wide4 preset: same window/cache/BPU as `default`, but all four ordered
- * stage widths and the integer issue-port count are raised to 4.
+ * default-w4 preset: same window/cache geometry/BPU as `default`, but all four
+ * ordered stage widths and the integer issue-port count are raised to 4.
+ * L1D MSHR capacity also grows from 2 to 4 to serve the wider load stream.
  *
  * Rationale: the 2026-09-14 gem5 grid search (`sim/gsim/grid_search.py`)
  * ranked width+port scaling as the dominant ROI (4-wide + 4 ALU ports:
@@ -120,16 +121,6 @@
 `define RAPT_FETCH_LOOKAHEAD
 `endif
 
-// Deprecated compatibility markers for historical modules/testbenches. The
-// active IFU/IDU/RNU/ROU path uses the independent widths above, not A/B mode.
-`define RAPT_DUAL_COMMIT
-`define RAPT_DUAL_ISSUE
-`ifdef RAPT_DUAL_ISSUE
-`define RAPT_ISSUE_WIDTH 2
-`else
-`define RAPT_ISSUE_WIDTH 1
-`endif
-
 `ifdef RAPT_I_EXTENSION
 `define RAPT_REG_SIZE 32 // 32 registers
 `else
@@ -164,6 +155,9 @@
 `define RAPT_L1D_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
 `define RAPT_L1D_LEN 6
 `define RAPT_L1D_N_WAYS 4
+`ifndef RAPT_L1D_MSHRS
+`define RAPT_L1D_MSHRS 4
+`endif
 
 // Fully-associative translation caches.  The data-side arrays are replicated
 // for simultaneous load/store lookup and receive the same fills.

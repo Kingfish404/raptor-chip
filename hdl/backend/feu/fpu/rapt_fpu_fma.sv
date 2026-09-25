@@ -1,13 +1,15 @@
 `include "rapt_fp_ops.svh"
 
-// Six-stage, one-operation-at-a-time IEEE-754 fused multiply-add unit.
+// Eight-stage, one-operation-at-a-time IEEE-754 fused multiply-add unit.
 //
-// Stage 1: decode/normalize operands and calculate the mantissa product.
-// Stage 2: align the product/addend in the fixed-point work window.
-// Stage 3: calculate the signed sum with a parallel-prefix adder.
-// Stage 4: apply the discarded-bit correction and form the magnitude.
-// Stage 5: calculate the leading-one position.
-// Stage 6: normalize, round, and pack the architectural result.
+// Stage 1: decode and normalize operands.
+// Stage 2: calculate the mantissa product from registered operands.
+// Stage 3: align the product/addend in the fixed-point work window.
+// Stage 4: calculate the signed sum with a parallel-prefix adder.
+// Stage 5: apply the discarded-bit correction and form the magnitude.
+// Stage 6: calculate the leading-one position.
+// Stage 7: normalize and extract rounding information.
+// Stage 8: round and pack the architectural result.
 //
 // The unit deliberately exposes a ready/valid boundary. The FPU execution
 // pipe holds the ROB metadata while this unit is occupied and writes the FPR
@@ -103,7 +105,7 @@ module rapt_fpu_fma #(
   );
 endmodule
 
-// Product is consumed in the original first pipeline stage.
+// Product is consumed after operand normalization in the second pipeline stage.
 module rapt_fpu_fma_pipeline #(
     parameter bit TARGET_DOUBLE = 1'b0
 ) (
@@ -165,7 +167,16 @@ module rapt_fpu_fma_pipeline #(
     end
   endfunction
 
-  logic s1_valid_q, align_valid_q, s2_valid_q, s3_valid_q, s4_valid_q, s5_valid_q;
+  logic
+      normalize_valid_q, s1_valid_q, align_valid_q, s2_valid_q, s3_valid_q, s4_valid_q, s5_valid_q;
+  logic round_valid_q;
+  logic [MantBits-1:0] round_retained_c, round_retained_q;
+  logic signed [13:0] round_exponent_c, round_exponent_q;
+  logic round_up_c, round_up_q, round_inexact_c, round_inexact_q;
+  logic round_tiny_c, round_tiny_q, round_active_q, round_sign_q;
+  logic [2:0] round_mode_q;
+  logic [63:0] round_result_q, packed_result_c;
+  logic [4:0] round_flags_q, packed_flags_c;
 
   logic [MantBits-1:0] s1_mant_a_q, s1_mant_b_q, s1_mant_c_q;
   logic [ProductBits-1:0] s1_product_q;
@@ -262,16 +273,17 @@ module rapt_fpu_fma_pipeline #(
   function automatic logic [MantBits-1:0] normalize_subnormal(
       input logic [FracBits-1:0] fraction, output logic signed [13:0] exponent_adjust);
     logic [MantBits-1:0] normalized;
-    integer index;
+    logic [$clog2(MantBits)-1:0] shift_count;
     begin
-      normalized = '0;
-      exponent_adjust = MinExp;
-      for (index = FracBits - 1; index >= 0; index = index - 1) begin
-        if (fraction[index] && normalized == '0) begin
-          normalized = {1'b0, fraction} << (MantBits - index - 1);
-          exponent_adjust = MinExp - FracBits + index;
+      normalized = {1'b0, fraction};
+      shift_count = '0;
+      for (int stage = $clog2(MantBits) - 1; stage >= 0; stage--) begin
+        if ((normalized >> (MantBits - (1 << stage))) == '0) begin
+          normalized = normalized << (1 << stage);
+          shift_count[stage] = 1'b1;
         end
       end
+      exponent_adjust = fraction == '0 ? MinExp : MinExp - int'(shift_count);
       normalize_subnormal = normalized;
     end
   endfunction
@@ -357,9 +369,9 @@ module rapt_fpu_fma_pipeline #(
     end
   end
 
-  assign product_a = mant_a_c;
-  assign product_b = mant_b_c;
-  assign product_valid = valid && ready;
+  assign product_a = s1_mant_a_q;
+  assign product_b = s1_mant_b_q;
+  assign product_valid = normalize_valid_q;
   assign product_c = product;
 
   always_comb begin
@@ -531,14 +543,12 @@ module rapt_fpu_fma_pipeline #(
   always_comb begin
     logic [WorkBits-1:0] magnitude_aligned;
     logic [FracBits:0] retained;
-    logic [FracBits+1:0] rounded;
     logic result_sign;
-    logic guard_bit, sticky_bit, inexact, round_up, invalid;
+    logic guard_bit, sticky_bit, inexact, round_up;
     logic tiny_after_rounding;
     logic precision_guard, precision_sticky, precision_up;
     logic [FracBits:0] precision_retained;
     logic signed [13:0] exponent_value;
-    logic [10:0] result_exponent;
     integer shift_amount;
     integer index;
 
@@ -546,19 +556,16 @@ module rapt_fpu_fma_pipeline #(
     stage4_flags_c = s4_special_flags_q;
     result_sign = s4_result_sign_q;
     retained = '0;
-    rounded = '0;
     guard_bit = 1'b0;
     sticky_bit = s4_sticky_q;
     inexact = 1'b0;
     round_up = 1'b0;
-    invalid = 1'b0;
     tiny_after_rounding = 1'b0;
     precision_guard = 1'b0;
     precision_sticky = s4_sticky_q;
     precision_up = 1'b0;
     precision_retained = '0;
     exponent_value = '0;
-    result_exponent = '0;
     shift_amount = 0;
     magnitude_aligned = '0;
 
@@ -628,55 +635,80 @@ module rapt_fpu_fma_pipeline #(
         3'b100: round_up = guard_bit;
         default: round_up = 1'b0;
       endcase
-      rounded = {1'b0, retained} + round_up;
+    end
+    round_retained_c = retained;
+    round_exponent_c = exponent_value;
+    round_up_c = round_up;
+    round_inexact_c = inexact;
+    round_tiny_c = tiny_after_rounding;
+  end
+
+  always_comb begin
+    logic [FracBits:0] retained;
+    logic [FracBits+1:0] rounded;
+    logic signed [13:0] exponent_value;
+    logic [10:0] result_exponent;
+    logic result_sign, inexact, tiny_after_rounding;
+    packed_result_c = round_result_q;
+    packed_flags_c = round_flags_q;
+    retained = round_retained_q;
+    exponent_value = round_exponent_q;
+    result_sign = round_sign_q;
+    inexact = round_inexact_q;
+    tiny_after_rounding = round_tiny_q;
+    rounded = '0;
+    result_exponent = '0;
+    if (round_active_q) begin
+      rounded = {1'b0, retained} + round_up_q;
       if (rounded[FracBits+1]) begin
         retained = rounded[FracBits+1:1];
         exponent_value = exponent_value + 1;
       end else begin
         retained = rounded[FracBits:0];
       end
-      invalid = 1'b0;
       if (exponent_value > MaxExp) begin
-        stage4_flags_c[2] = 1'b1;
-        stage4_flags_c[0] = 1'b1;
-        if (s4_rounding_mode_q == 3'b001
-          || (s4_rounding_mode_q == 3'b010 && !result_sign)
-          || (s4_rounding_mode_q == 3'b011 && result_sign))
-          stage4_result_c = TARGET_DOUBLE
+        packed_flags_c[2] = 1'b1;
+        packed_flags_c[0] = 1'b1;
+        if (round_mode_q == 3'b001
+          || (round_mode_q == 3'b010 && !result_sign)
+          || (round_mode_q == 3'b011 && result_sign))
+          packed_result_c = TARGET_DOUBLE
             ? {result_sign, 11'h7fe, 52'hf_ffff_ffff_ffff}
             : {32'hffff_ffff, result_sign, 8'hfe, 23'h7f_ffff};
         else
-          stage4_result_c = TARGET_DOUBLE
+          packed_result_c = TARGET_DOUBLE
             ? {result_sign, 11'h7ff, 52'b0}
             : {32'hffff_ffff, result_sign, 8'hff, 23'b0};
       end else if (exponent_value < MinExp
           || (exponent_value == MinExp && !retained[FracBits])) begin
-        stage4_result_c = TARGET_DOUBLE
+        packed_result_c = TARGET_DOUBLE
           ? {result_sign, 11'b0, retained[51:0]}
           : {32'hffff_ffff, result_sign, 8'b0, retained[22:0]};
-        stage4_flags_c[1] = inexact && tiny_after_rounding;
-        stage4_flags_c[0] = inexact;
+        packed_flags_c[1] = inexact && tiny_after_rounding;
+        packed_flags_c[0] = inexact;
       end else begin
         result_exponent = exponent_value + ExpBias;
-        stage4_result_c = TARGET_DOUBLE
+        packed_result_c = TARGET_DOUBLE
           ? {result_sign, result_exponent, retained[51:0]}
           : {32'hffff_ffff, result_sign, result_exponent[7:0], retained[22:0]};
-        stage4_flags_c[1] = inexact && tiny_after_rounding;
-        stage4_flags_c[0] = inexact;
+        packed_flags_c[1] = inexact && tiny_after_rounding;
+        packed_flags_c[0] = inexact;
       end
     end
   end
 
   always_comb s4_leading_one_c = find_leading_one(s3_magnitude_q);
 
-  assign ready = !(s1_valid_q || align_valid_q || s2_valid_q
-    || s3_valid_q || s4_valid_q || s5_valid_q);
+  assign ready = !(normalize_valid_q || s1_valid_q || align_valid_q || s2_valid_q
+    || s3_valid_q || s4_valid_q || round_valid_q || s5_valid_q);
   assign result = result_q;
   assign flags = flags_q;
   assign result_valid = s5_valid_q;
 
   always_ff @(posedge clock) begin
     if (reset || flush) begin
+      normalize_valid_q <= 1'b0;
+      round_valid_q <= 1'b0;
       s1_valid_q <= 1'b0;
       align_valid_q <= 1'b0;
       s2_valid_q <= 1'b0;
@@ -686,17 +718,19 @@ module rapt_fpu_fma_pipeline #(
       // Result/flags are meaningful only with result_valid; keep payload
       // unreset so reset/flush only cancels the valid pipeline.
     end else begin
-      s5_valid_q <= s4_valid_q;
+      s5_valid_q <= round_valid_q;
+      round_valid_q <= s4_valid_q;
       s4_valid_q <= s3_valid_q;
       s3_valid_q <= s2_valid_q;
       s2_valid_q <= align_valid_q;
       align_valid_q <= s1_valid_q;
-      s1_valid_q <= valid && ready;
+      s1_valid_q <= normalize_valid_q;
+      normalize_valid_q <= valid && ready;
+      if (normalize_valid_q) s1_product_q <= product_c;
       if (valid && ready) begin
         s1_mant_a_q <= mant_a_c;
         s1_mant_b_q <= mant_b_c;
         s1_mant_c_q <= mant_c_c;
-        s1_product_q <= product_c;
         s1_exp_a_q <= exponent_a_c;
         s1_exp_b_q <= exponent_b_c;
         s1_exp_c_q <= exponent_c_c;
@@ -758,8 +792,20 @@ module rapt_fpu_fma_pipeline #(
         s4_rounding_mode_q <= s3_rounding_mode_q;
       end
       if (s4_valid_q) begin
-        result_q <= stage4_result_c;
-        flags_q <= stage4_flags_c;
+        round_retained_q <= round_retained_c;
+        round_exponent_q <= round_exponent_c;
+        round_up_q <= round_up_c;
+        round_inexact_q <= round_inexact_c;
+        round_tiny_q <= round_tiny_c;
+        round_active_q <= !s4_special_q && s4_leading_one_q != 0;
+        round_sign_q <= s4_result_sign_q;
+        round_mode_q <= s4_rounding_mode_q;
+        round_result_q <= stage4_result_c;
+        round_flags_q <= stage4_flags_c;
+      end
+      if (round_valid_q) begin
+        result_q <= packed_result_c;
+        flags_q <= packed_flags_c;
       end
     end
   end

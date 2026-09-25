@@ -15,13 +15,12 @@ ROOT = Path(__file__).resolve().parents[2]
 DEPENDENCIES = ('rapt_pkg.sv', 'common/rapt_stream_queue.sv',
                 'common/rapt_rank_select.sv', 'frontend/rapt_rename_checkpoint.sv',
                 'frontend/rapt_rename_admit.sv')
-REQUIRED = {'free_q', 'map_snapshot', 'rat_snapshot', 'checkpoint_allocate_map',
-            'checkpoint_allocate_free', 'checkpoints.valid_q', 'idu_rnu.ready',
+REQUIRED = {'free_q', 'map_snapshot', 'rat_snapshot', 'checkpoints.valid_q', 'idu_rnu.ready',
             'rnu_rou.slot', 'rnu_rou.valid', 'rnu_rou.empty',
             'rnu_rou.checkpoint', 'rnu_rou.checkpoint_valid',
             'rnq.head', 'rnq.tail', 'rename_pipe.head', 'rename_pipe.tail'}
 STATE_FAMILIES = ('map_q', 'rat_q', 'rnq.storage', 'rename_pipe.storage',
-                  'checkpoints.map_q', 'checkpoints.free_q', 'checkpoints.older_q')
+                  'checkpoints.older_q')
 
 
 def audit(log):

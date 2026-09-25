@@ -6,6 +6,8 @@ ifeq ($(LITEX_CONFIG_PHASE),profile)
 
 # Private board capability table. User-facing board selection remains in the
 # main Makefile; these values only drive derived configuration.
+# RV64 uses a common 30 MHz bring-up target; RV32 retains each board's existing
+# Linux clock.
 BOARD_tang_mega_138k_pro_VENDOR              := gowin
 BOARD_tang_mega_138k_pro_PY                  := tang_mega_138k_pro.py
 BOARD_tang_mega_138k_pro_BITNAME             := sipeed_tang_mega_138k_pro.fs
@@ -14,7 +16,8 @@ BOARD_tang_mega_138k_pro_UART                :=
 BOARD_tang_mega_138k_pro_DEVICE              :=
 BOARD_tang_mega_138k_pro_PART                :=
 BOARD_tang_mega_138k_pro_DEFAULT_SYS_CLK     := 10000000
-BOARD_tang_mega_138k_pro_LINUX_SYS_CLK       := 10000000
+BOARD_tang_mega_138k_pro_LINUX32_SYS_CLK     := 10000000
+BOARD_tang_mega_138k_pro_LINUX64_SYS_CLK     := 30000000
 BOARD_tang_mega_138k_pro_DEFAULT_RAPT_CONFIG := default
 BOARD_tang_mega_138k_pro_HAS_LITEDRAM        := 0
 BOARD_tang_mega_138k_pro_HAS_MIG             := 0
@@ -34,14 +37,15 @@ BOARD_mlk_cu08_ku15p_UART                := /dev/ttyUSB1
 BOARD_mlk_cu08_ku15p_DEVICE              := xcku15p
 BOARD_mlk_cu08_ku15p_PART                := xcku15p-ffva1156-2-e
 BOARD_mlk_cu08_ku15p_DEFAULT_SYS_CLK     := 10000000
-BOARD_mlk_cu08_ku15p_LINUX_SYS_CLK       := 50000000
+BOARD_mlk_cu08_ku15p_LINUX32_SYS_CLK     := 50000000
+BOARD_mlk_cu08_ku15p_LINUX64_SYS_CLK     := 30000000
 BOARD_mlk_cu08_ku15p_DEFAULT_RAPT_CONFIG := default
 BOARD_mlk_cu08_ku15p_HAS_LITEDRAM        := 1
 BOARD_mlk_cu08_ku15p_LINUX_WITH_LITEDRAM := 0
 BOARD_mlk_cu08_ku15p_LITEDRAM_SIZE       := 0x40000000
 BOARD_mlk_cu08_ku15p_HAS_MIG             := 1
 BOARD_mlk_cu08_ku15p_LINUX_WITH_MIG      := 1
-BOARD_mlk_cu08_ku15p_MIG_TCL             := scripts/ku15p_ddr4_mig.tcl
+BOARD_mlk_cu08_ku15p_MIG_TCL             := scripts/ku15p_cu08_ddr4_mig.tcl
 BOARD_mlk_cu08_ku15p_HAS_SDCARD          := 1
 BOARD_mlk_cu08_ku15p_DEFAULT_WITH_SDCARD := 1
 BOARD_mlk_cu08_ku15p_LINUX_WITH_SDCARD   := 1
@@ -56,7 +60,8 @@ BOARD_mlk_cu07_ku15p_UART                := /dev/ttyUSB0
 BOARD_mlk_cu07_ku15p_DEVICE              := xcku15p
 BOARD_mlk_cu07_ku15p_PART                := xcku15p-ffva1156-2-e
 BOARD_mlk_cu07_ku15p_DEFAULT_SYS_CLK     := 10000000
-BOARD_mlk_cu07_ku15p_LINUX_SYS_CLK       := 50000000
+BOARD_mlk_cu07_ku15p_LINUX32_SYS_CLK     := 50000000
+BOARD_mlk_cu07_ku15p_LINUX64_SYS_CLK     := 30000000
 BOARD_mlk_cu07_ku15p_DEFAULT_RAPT_CONFIG := default
 BOARD_mlk_cu07_ku15p_HAS_LITEDRAM        := 1
 BOARD_mlk_cu07_ku15p_LINUX_WITH_LITEDRAM := 0
@@ -78,7 +83,8 @@ BOARD_alinx_axau15_UART                :=
 BOARD_alinx_axau15_DEVICE              := xcau15p
 BOARD_alinx_axau15_PART                := xcau15p-ffvb676-2-i
 BOARD_alinx_axau15_DEFAULT_SYS_CLK     := 25000000
-BOARD_alinx_axau15_LINUX_SYS_CLK       := 60000000
+BOARD_alinx_axau15_LINUX32_SYS_CLK     := 60000000
+BOARD_alinx_axau15_LINUX64_SYS_CLK     := 30000000
 BOARD_alinx_axau15_DEFAULT_RAPT_CONFIG := small
 BOARD_alinx_axau15_HAS_LITEDRAM        := 0
 BOARD_alinx_axau15_HAS_MIG             := 1
@@ -98,7 +104,8 @@ BOARD_xilinx_vcu118_UART                :=
 BOARD_xilinx_vcu118_DEVICE              := xcvu9p
 BOARD_xilinx_vcu118_PART                := xcvu9p-flga2104-2-e
 BOARD_xilinx_vcu118_DEFAULT_SYS_CLK     := 75000000
-BOARD_xilinx_vcu118_LINUX_SYS_CLK       := 50000000
+BOARD_xilinx_vcu118_LINUX32_SYS_CLK     := 50000000
+BOARD_xilinx_vcu118_LINUX64_SYS_CLK     := 30000000
 BOARD_xilinx_vcu118_DEFAULT_RAPT_CONFIG := default
 BOARD_xilinx_vcu118_HAS_LITEDRAM        := 1
 BOARD_xilinx_vcu118_LINUX_WITH_LITEDRAM := 0
@@ -368,6 +375,7 @@ _FPGA_HASH_COMMON_INPUTS = $(PACK_SV) $(FPGA_PY) $(LITEX_DIR)/Makefile \
 	$(wildcard $(LITEX_DIR)/cores/cpu/raptor/*.h $(LITEX_DIR)/cores/cpu/raptor/*.S) \
 	$(if $(filter mlk_cu07_ku15p mlk_cu08_ku15p,$(FPGA_BOARD)),$(LITEX_DIR)/ku15p_soc.py $(LITEX_DIR)/scripts/vivado_retry_timing.tcl,) \
 	$(if $(filter mlk_cu08_ku15p,$(FPGA_BOARD)),$(LITEX_DIR)/mlk_cu08_ku15p_platform.py,) \
+	$(if $(filter mlk_cu08_ku15p,$(FPGA_BOARD)),$(LITEX_DIR)/scripts/ku15p_ddr4_mig.tcl,) \
 	$(if $(WITH_MIG_FLAG),$(LITEX_DIR)/$(BOARD_$(FPGA_BOARD)_MIG_TCL),)
 ifeq ($(BOOT_MODE),custom)
 _FPGA_HASH_INPUTS = $(_FPGA_HASH_COMMON_INPUTS) $(FW_FPGA_BIN)

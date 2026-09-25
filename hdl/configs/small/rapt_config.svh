@@ -58,13 +58,6 @@
 `define RAPT_COMMIT_WIDTH 1
 `endif
 
-// Deprecated compatibility value for historical standalone rename helpers.
-`ifdef RAPT_DUAL_ISSUE
-`define RAPT_ISSUE_WIDTH 2
-`else
-`define RAPT_ISSUE_WIDTH 1
-`endif
-
 `ifdef RAPT_I_EXTENSION
 `define RAPT_REG_SIZE 32 // 32 registers
 `else

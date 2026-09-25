@@ -17,6 +17,13 @@ module tb_half_store_visibility;
   rou_lsu_if rou_lsu ();
   csr_bcast_if csr_bcast ();
   pmp_state_if pmp_state ();
+  rapt_pkg::mem_context_t test_context;
+  assign test_context = '{mmu_en: csr_bcast.dmmu_en,
+      eff_priv: (csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv) ? csr_bcast.mpp : csr_bcast.priv,
+      sum: csr_bcast.sum, mxr: csr_bcast.mxr, pbmte: csr_bcast.menvcfg_pbmte,
+      asid: csr_bcast.satp_asid, version: 8'd0};
+  assign exu_lsu.rcontext = test_context;
+  assign exu_lsu.rcontext_b = test_context;
 
   rapt_lsu_sq #(
       .SQ_SIZE(LsuTbSqSize)
@@ -30,6 +37,7 @@ module tb_half_store_visibility;
       .sq_waddr_hi,
       .sq_waddr_third,
       .sq_wpbmt,
+      .sq_context(test_context),
       .sq_acquire(1'b0),
       .rou_lsu,
       .csr_bcast,
@@ -47,6 +55,7 @@ module tb_half_store_visibility;
 l1d_bus_if l1d_bus ();
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
+  assign exu_l1d.mem_context = test_context;
   rou_cmu_if rou_cmu ();
   rapt_l1d #(
       .LineRefill(0)

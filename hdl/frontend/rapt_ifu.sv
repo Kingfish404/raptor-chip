@@ -88,6 +88,17 @@ module rapt_ifu #(
       default: return 1'b0;
     endcase
   endfunction
+  // A synchronous BTB prediction only belongs to the packet's first PC.
+  // Conditional branches have the auxiliary direction predictor and direct
+  // jumps derive their target from the immediate, but a later JALR has neither.
+  // End the packet before it so the next request can query the BTB at its PC.
+  function automatic logic request_indirect(input logic [15:0] first);
+    case (first[1:0])
+      2'b11: return first[6:0] == `RAPT_OP_JALR__;
+      2'b10: return first[15:13] == 3'b100 && first[6:2] == 0;
+      default: return 1'b0;
+    endcase
+  endfunction
   logic [15:0] request_halfword[6];
   logic [2:0] request_offset[Width+1];
   logic request_stopped[Width+1];
@@ -110,10 +121,15 @@ module rapt_ifu #(
   for (genvar s = 0; s < Width; s++) begin : g_request_boundary
     wire [2:0] step = request_offset[s] < 3'(RequestHalfwords)
         && request_halfword[request_offset[s]][1:0] != 2'b11 ? 3'd1 : 3'd2;
+    wire split_before_indirect = request_offset[s] != 0
+        && request_offset[s] < 3'(RequestHalfwords)
+        && request_indirect(request_halfword[request_offset[s]]);
     assign request_offset[s+1] = !request_stopped[s] && request_offset[s] < 3'(RequestHalfwords)
+        && !split_before_indirect
         && {1'b0, request_offset[s]} + {1'b0, step} <= 4'(RequestHalfwords)
         ? request_offset[s] + step : request_offset[s];
     assign request_stopped[s+1] = request_stopped[s]
+        || split_before_indirect
         || (request_offset[s] < 3'(RequestHalfwords)
             && request_control(request_halfword[request_offset[s]]));
   end
@@ -223,6 +239,8 @@ module rapt_ifu #(
     fetched_count = 0;
     nextpc = response.pc;
     for (int s = 0; s < Width; s++) begin
+      automatic logic split_before_indirect;
+      split_before_indirect = s != 0 && expanded[s][6:0] == `RAPT_OP_JALR__;
       fetched[s] = '0;
       fetched[s].inst = raw[s];
       fetched[s].pc = candidate_pc[s];
@@ -230,8 +248,12 @@ module rapt_ifu #(
       fetched[s].predicted_taken = is_cond[s] && s == 0 && response.predicted_taken;
       if (s == 0 && response.predicted_taken) fetched[s].pnpc = response.predicted_npc;
 `ifdef RAPT_FETCH_LOOKAHEAD
-      if (s != 0 && is_cond[s] && ifu_bpu.aux_taken) fetched[s].pnpc = cond_target[s];
-      if (s != 0 && is_cond[s]) fetched[s].predicted_taken = ifu_bpu.aux_taken;
+      if (s != 0 && is_cond[s]) begin
+        if (ifu_bpu.aux_taken) fetched[s].pnpc = cond_target[s];
+        fetched[s].predicted_taken = ifu_bpu.aux_taken;
+        fetched[s].auxiliary = 1'b1;
+        fetched[s].auxiliary_index = ifu_bpu.aux_index;
+      end
 `endif
       if (s != 0 && expanded[s][6:0] == `RAPT_OP_JAL___) begin
         automatic logic [20:0] immediate;
@@ -243,12 +265,12 @@ module rapt_ifu #(
       fetched[s].trap  = s == 0 && response.trap;
       fetched[s].tval  = response.tval;
       fetched[s].cause = response.cause;
-      if (!stopped && available[s]) begin
+      if (!stopped && available[s] && !split_before_indirect) begin
         fetched_count++;
         nextpc = fetched[s].pnpc;
         response_stop |= is_serial[s] || fetched[s].trap;
       end
-      stopped |= !available[s] || is_control[s] || is_serial[s]
+      stopped |= !available[s] || split_before_indirect || is_control[s] || is_serial[s]
           || (s == 0 && (response.predicted_taken || response.trap));
     end
   end

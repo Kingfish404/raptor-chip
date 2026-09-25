@@ -28,6 +28,11 @@ module rapt_rnu #(
     rnu_rou_if.master rnu_rou,
     rapt_recovery_if.sink recovery,
     checkpoint_release_if.sink checkpoint_release,
+    input logic [63:0] snapshot_ghr = '0,
+    input logic [7:0] snapshot_phr = '0,
+    output logic history_restore,
+    output logic [63:0] restore_ghr,
+    output logic [7:0] restore_phr,
     output logic [PLEN-1:0] map_snapshot[RNUM],
     output logic [PLEN-1:0] rat_snapshot[RNUM]
 );
@@ -59,11 +64,10 @@ module rapt_rnu #(
   logic [CheckpointEntries-1:0] checkpoint_available, checkpoint_live;
   logic checkpoint_found[RenameWidth], checkpoint_allocate_valid[RenameWidth];
   logic [CheckpointBits-1:0] checkpoint_index[RenameWidth], checkpoint_allocate_id[RenameWidth];
-  logic [PLEN-1:0] checkpoint_allocate_map[RenameWidth][RNUM];
-  logic [PNUM-1:0] checkpoint_allocate_free[RenameWidth];
   logic checkpoint_restore_hit;
-  logic [PLEN-1:0] checkpoint_restore_map[RNUM];
-  logic [PNUM-1:0] checkpoint_restore_free;
+  logic [63:0] checkpoint_restore_ghr, checkpoint_allocate_ghr[RenameWidth];
+  logic [7:0] checkpoint_restore_phr, checkpoint_allocate_phr[RenameWidth];
+  logic checkpoint_restore_conditional, checkpoint_allocate_conditional[RenameWidth];
   int allocation_rank;
   int checkpoint_rank;
   logic destination_needed[RenameWidth], checkpoint_needed[RenameWidth];
@@ -103,9 +107,6 @@ module rapt_rnu #(
       .Entries(CheckpointEntries),
       .RenameWidth(RenameWidth),
       .ResolvePorts(ResolvePorts),
-      .MapEntries(RNUM),
-      .PhysRegs(PNUM),
-      .MapBits(PLEN),
       .CheckpointBits(CheckpointBits)
   ) checkpoints (
       .clock(clock),
@@ -114,17 +115,27 @@ module rapt_rnu #(
       .available(checkpoint_available),
       .allocate_valid(checkpoint_allocate_valid),
       .allocate_id(checkpoint_allocate_id),
-      .allocate_map(checkpoint_allocate_map),
-      .allocate_free(checkpoint_allocate_free),
+      .allocate_ghr(checkpoint_allocate_ghr),
+      .allocate_phr(checkpoint_allocate_phr),
+      .allocate_conditional(checkpoint_allocate_conditional),
       .release_valid(checkpoint_release.valid),
       .release_id(checkpoint_release.checkpoint),
       .restore_valid(recovery.redirect_valid && recovery.checkpoint_valid),
       .restore_id(recovery.checkpoint),
       .restore_hit(checkpoint_restore_hit),
-      .restore_map(checkpoint_restore_map),
-      .restore_free(checkpoint_restore_free),
+      .restore_ghr(checkpoint_restore_ghr),
+      .restore_phr(checkpoint_restore_phr),
+      .restore_conditional(checkpoint_restore_conditional),
       .live(checkpoint_live)
   );
+  assign history_restore = checkpoint_restore_hit;
+  always_comb begin
+    restore_ghr = checkpoint_restore_ghr;
+    restore_phr = checkpoint_restore_phr;
+    // Decode GHR records only conditionals. A mispredicted conditional has
+    // the wrong last taken bit in the rename snapshot; jumps keep it.
+    if (checkpoint_restore_conditional) restore_ghr[0] = ~checkpoint_restore_ghr[0];
+  end
   if (!(idu_rnu.Width == DecodeWidth && rnu_rou.Width == RenameWidth)) begin : g_invalid_config_0
     $error("Invalid rapt_rnu configuration");
   end
@@ -150,7 +161,8 @@ module rapt_rnu #(
       .ItemT(decoded_t),
       .Depth(RIQ_SIZE),
       .InWidth(DecodeWidth),
-      .OutWidth(RenameWidth)
+      .OutWidth(RenameWidth),
+      .ReclaimSameCycle(1'b0)
   ) rnq (
       .clock(clock),
       .reset(reset),
@@ -167,7 +179,8 @@ module rapt_rnu #(
       .ItemT(renamed_t),
       .Depth(2 * RenameWidth),
       .InWidth(RenameWidth),
-      .OutWidth(RenameWidth)
+      .OutWidth(RenameWidth),
+      .ReclaimSameCycle(1'b0)
   ) rename_pipe (
       .clock(clock),
       .reset(reset),
@@ -218,39 +231,14 @@ module rapt_rnu #(
       .checkpoint_stall(pmu_checkpoint_stall)
   );
 
-  // Shared retirement view for next-state and every checkpoint snapshot.
-  // Allocation still reads free_q, never these same-cycle releases.
+  // Allocation reads free_q, never these same-cycle releases. The committed
+  // RAT is the only rename recovery source after the precise ROB flush.
   always_comb begin
     free_after_commit = free_q;
     for (int c = 0; c < CommitWidth; c++)
     if (rou_cmu.slot[c].valid && rou_cmu.slot[c].rd != 0)
       free_after_commit[rou_cmu.slot[c].prs] = 1'b1;
   end
-  // Snapshots depend on accepted rename tags, not on another slot's snapshot.
-  // Each generated map entry has one owner and youngest-accepted-writer priority.
-  for (genvar s = 0; s < RenameWidth; s++) begin : g_checkpoint_snapshot
-    always_comb begin
-      checkpoint_allocate_free[s] = free_after_commit;
-      for (int prior = 0; prior <= s; prior++)
-      if (renamed_valid[prior] && candidate[prior].uop.rd != 0)
-        checkpoint_allocate_free[s][renamed[prior].prd] = 1'b0;
-      checkpoint_allocate_free[s][0] = 1'b0;
-    end
-    for (genvar r = 0; r < RNUM; r++) begin : g_map_entry
-      if (r == 0) begin : g_zero
-        assign checkpoint_allocate_map[s][r] = '0;
-      end else begin : g_mapping
-        always_comb begin
-          checkpoint_allocate_map[s][r] = map_q[r];
-          for (int prior = 0; prior <= s; prior++)
-          if (renamed_valid[prior] && candidate[prior].uop.rd != 0
-                && int'(candidate[prior].uop.rd) == r)
-            checkpoint_allocate_map[s][r] = renamed[prior].prd;
-        end
-      end
-    end
-  end
-
   always_comb begin
     for (int r = 0; r < RNUM; r++) begin
       rat_next[r] = rat_q[r];
@@ -296,14 +284,11 @@ module rapt_rnu #(
       renamed[s].checkpoint = CheckpointBits'(checkpoint_chosen);
       checkpoint_allocate_valid[s] = renamed[s].checkpoint_valid;
       checkpoint_allocate_id[s] = renamed[s].checkpoint;
+      checkpoint_allocate_ghr[s] = snapshot_ghr;
+      checkpoint_allocate_phr[s] = snapshot_phr;
+      checkpoint_allocate_conditional[s] = candidate[s].uop.execute.branch.conditional;
       if (renamed[s].checkpoint_valid) checkpoint_rank++;
 
-    end
-    if (checkpoint_restore_hit) begin
-      // Registers allocated after the branch become free; registers released
-      // meanwhile by older retirement remain free as well.
-      free_next = checkpoint_restore_free | free_next;
-      for (int r = 0; r < RNUM; r++) map_next[r] = checkpoint_restore_map[r];
     end
     if (cmu_bcast.flush_pipe) begin
       // All speculative identities, including those buffered before ROB,

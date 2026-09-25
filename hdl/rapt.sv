@@ -26,6 +26,7 @@
 module rapt #(
     parameter int XLEN   = `RAPT_XLEN,
     parameter int MemoryReadCredits = 8,
+    parameter bit L1dWriteBack = 1'b0,
     // Number of hart contexts in this cluster. Currently fixed at 1; the
     // value is threaded through CSR `mhartid`, the CLINT msip/mtimecmp
     // arrays, and PLIC NCTX so that scaling to N>1 only requires (a) a
@@ -37,6 +38,7 @@ module rapt #(
     /* verilator lint_on UNUSEDPARAM */
 ) (
     input clock,
+    output logic writeback_error_o,
     // Device writes are reported before a later SC may complete. Pending
     // holds SC while the platform drains a finite batch of notifications.
     input logic external_write_valid_i = 1'b0,
@@ -252,14 +254,19 @@ module rapt #(
   // ------------------------------------------------------------------
   rapt_core #(
       .XLEN(XLEN),
-      .MemoryReadCredits(MemoryReadCredits)
+      .MemoryReadCredits(MemoryReadCredits),
+      .L1dWriteBack(L1dWriteBack)
   ) core (
+      .writeback_error_o(writeback_error_o),
       .external_write_valid_i(external_write_valid_i),
       .external_write_pending_i(external_write_pending_i),
       .external_write_first_i(external_write_first_i),
       .external_write_last_i(external_write_last_i),
 
       .clock(clock),
+
+      // L1D eviction-store errors are sticky and exported for platform-level
+      // fatal-error handling; the cache remains blocked until reset.
 
       .io_master(core_axi),
 

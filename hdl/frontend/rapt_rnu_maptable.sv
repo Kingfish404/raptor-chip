@@ -3,11 +3,13 @@
 
 // Register Map Table - maintains speculative (MAP) and committed (RAT) rename maps.
 // On flush, MAP is restored from RAT (with one possible in-flight commit applied).
-// Dual-issue: 2 speculative write ports, 6 read ports. Slot B is younger and wins
-// on same-address conflicts. RAW dependency between slots is handled in RNU (bypass).
+// Legacy A/B helper: at most 2 speculative write ports and 6 read ports.
+// RenameWidth selects whether slot B participates; the integrated RNU handles
+// wider widths. Slot B wins same-address conflicts, and RNU handles RAW bypass.
 module rapt_rnu_maptable #(
     parameter unsigned RNUM = `RAPT_REG_SIZE,
-    parameter unsigned PLEN = `RAPT_PHY_LEN
+    parameter unsigned PLEN = `RAPT_PHY_LEN,
+    parameter unsigned RenameWidth = `RAPT_RENAME_WIDTH
 ) (
     input clock,
     input reset,
@@ -68,9 +70,7 @@ module rapt_rnu_maptable #(
   // ---- Speculative Map (MAP) ----
   logic [PLEN-1:0] map[RNUM];
   logic [RNUM-1:0] map_wen_oh;
-`ifdef RAPT_DUAL_ISSUE
   logic [RNUM-1:0] map_wen_b_oh;
-`endif
 
   // (rat_wen_oh / rat_wen_b_oh are decoded once above, next to the RAT write,
   //  and reused here for the flush-restore.)
@@ -78,10 +78,8 @@ module rapt_rnu_maptable #(
   always_comb begin
     map_wen_oh = '0;
     if (mt.map_wen_a) map_wen_oh[mt.map_waddr_a] = 1'b1;
-`ifdef RAPT_DUAL_ISSUE
     map_wen_b_oh = '0;
-    if (mt.map_wen_b) map_wen_b_oh[mt.map_waddr_b] = 1'b1;
-`endif
+    if (RenameWidth > 1 && mt.map_wen_b) map_wen_b_oh[mt.map_waddr_b] = 1'b1;
   end
 
   always_ff @(posedge clock) begin
@@ -103,17 +101,11 @@ module rapt_rnu_maptable #(
     end else begin
       // One next-state mux per entry. Slot B is younger and wins WAW.
       for (integer i = 0; i < RNUM; i = i + 1) begin
-`ifdef RAPT_DUAL_ISSUE
         if (map_wen_b_oh[i]) begin
           map[i] <= mt.map_wdata_b;
         end else if (map_wen_oh[i]) begin
           map[i] <= mt.map_wdata_a;
         end
-`else
-        if (map_wen_oh[i]) begin
-          map[i] <= mt.map_wdata_a;
-        end
-`endif
       end
     end
   end
@@ -123,14 +115,12 @@ module rapt_rnu_maptable #(
   assign mt.map_rdata_b = map[mt.map_raddr_b];
   assign mt.map_rdata_c = map[mt.map_raddr_c];
 
-`ifdef RAPT_DUAL_ISSUE
   // Speculative read ports: slot B (rs1_b, rs2_b, rd_old_b)
   // Note: RAW dependency bypass (slot B seeing slot A's write) is done in RNU,
   // not here. These reads return the pre-write maptable state.
   assign mt.map_rdata_d = map[mt.map_raddr_d];
   assign mt.map_rdata_e = map[mt.map_raddr_e];
   assign mt.map_rdata_f = map[mt.map_raddr_f];
-`endif
 
   // Expose full MAP and RAT for debug
   genvar gi;

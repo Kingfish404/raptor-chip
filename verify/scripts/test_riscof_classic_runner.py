@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+import types
 import unittest
 import sys
 from unittest.mock import patch
@@ -13,7 +14,22 @@ ROOT = Path(__file__).resolve().parents[2]
 PLUGIN = ROOT / "verify/riscof/classic/plugins/raptor/riscof_raptor.py"
 spec = importlib.util.spec_from_file_location("classic_raptor", PLUGIN)
 module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
+
+# Unit-test the runner without requiring the external RISCOF package.  The
+# workflow installs the pinned package before invoking the actual plugin, but
+# these tests only exercise helpers and fail-closed simulator handling.
+riscof = types.ModuleType("riscof")
+riscof.__path__ = []
+riscof_utils = types.ModuleType("riscof.utils")
+riscof_template = types.ModuleType("riscof.pluginTemplate")
+riscof_template.pluginTemplate = type("pluginTemplate", (), {})
+riscof.utils = riscof_utils
+with patch.dict(sys.modules, {
+        "riscof": riscof,
+        "riscof.utils": riscof_utils,
+        "riscof.pluginTemplate": riscof_template,
+}):
+    spec.loader.exec_module(module)
 
 
 class RunnerTest(unittest.TestCase):

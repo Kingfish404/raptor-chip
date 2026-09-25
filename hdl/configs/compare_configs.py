@@ -28,10 +28,6 @@ def parse_defines(cfg_path: Path) -> Dict[str, str]:
     return macros
 
 
-def is_enabled(macros: Dict[str, str], name: str) -> bool:
-    return name in macros
-
-
 def as_int(macros: Dict[str, str], name: str, default: int = 0) -> int:
     value = macros.get(name)
     if value is None:
@@ -53,8 +49,11 @@ def l1_size_kib(macros: Dict[str, str], prefix: str, line_bytes: int) -> str:
     return f"{total} B"
 
 
-def format_bool(enabled: bool) -> str:
-    return "on" if enabled else "off"
+def l1_geometry(macros: Dict[str, str], prefix: str) -> str:
+    line_bytes = as_int(macros, "RAPT_CACHE_LINE_BYTES", 64)
+    sets = 1 << as_int(macros, f"{prefix}_LEN")
+    ways = as_int(macros, f"{prefix}_N_WAYS", 1)
+    return f"{sets} x {ways} x {line_bytes}B ({l1_size_kib(macros, prefix, line_bytes)})"
 
 
 def build_rows(macros: Dict[str, Dict[str, str]], names: List[str]) -> List[List[str]]:
@@ -65,26 +64,12 @@ def build_rows(macros: Dict[str, Dict[str, str]], names: List[str]) -> List[List
 
     rows.append([
         "L1I (S x W x CL)",
-        *[
-            (
-                f"{1 << as_int(col(n), 'RAPT_L1I_LEN')} x "
-                f"{as_int(col(n), 'RAPT_L1I_N_WAYS', 1)} x 16B "
-                f"({l1_size_kib(col(n), 'RAPT_L1I', 16)})"
-            )
-            for n in names
-        ],
+        *[l1_geometry(col(n), "RAPT_L1I") for n in names],
     ])
 
     rows.append([
         "L1D (S x W x CL)",
-        *[
-            (
-                f"{1 << as_int(col(n), 'RAPT_L1D_LEN')} x "
-                f"{as_int(col(n), 'RAPT_L1D_N_WAYS', 1)} x 8B "
-                f"({l1_size_kib(col(n), 'RAPT_L1D', 8)})"
-            )
-            for n in names
-        ],
+        *[l1_geometry(col(n), "RAPT_L1D") for n in names],
     ])
 
     rows.append([
@@ -127,11 +112,20 @@ def build_rows(macros: Dict[str, Dict[str, str]], names: List[str]) -> List[List
     ])
 
     rows.append([
-        "Dual issue/commit",
+        "Decode / rename / dispatch / commit",
         *[
-            f"{format_bool(is_enabled(col(n), 'RAPT_DUAL_ISSUE'))}/{format_bool(is_enabled(col(n), 'RAPT_DUAL_COMMIT'))}"
+            " / ".join(str(as_int(col(n), f"RAPT_{stage}_WIDTH"))
+                       for stage in ("DECODE", "RENAME", "DISPATCH", "COMMIT"))
             for n in names
         ],
+    ])
+    rows.append([
+        "Integer issue ports",
+        *[str(as_int(col(n), "RAPT_INTEGER_ISSUE_PORTS", 2)) for n in names],
+    ])
+    rows.append([
+        "L1D MSHRs",
+        *[str(as_int(col(n), "RAPT_L1D_MSHRS")) for n in names],
     ])
 
     return rows

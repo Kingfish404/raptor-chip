@@ -8,8 +8,9 @@ ABI = $(if $(filter 64,$(XLEN)),lp64,ilp32)
 FLAGS = -march=rv$(XLEN)ima_zicsr -mabi=$(ABI) -mcmodel=medany -mno-relax \
         -O2 -g -ffreestanding -fno-builtin -fno-pic -msmall-data-limit=0 \
         -Wall -Wextra -Werror -DROUNDS=$(ROUNDS) -DSAMPLES=$(SAMPLES)
-.PHONY: build run-rv32 run-rv64 FORCE
+.PHONY: build probe-wb run-rv32 run-rv64 FORCE
 build: $(BUILD_DIR)/pipeline.bin $(BUILD_DIR)/pipeline.dis
+probe-wb: $(BUILD_DIR)/probe_wb.bin
 $(BUILD_DIR)/pipeline.elf: start.S kernels.S main.c link.ld FORCE
 	@mkdir -p $(BUILD_DIR)
 	$(CROSS_COMPILE)gcc $(FLAGS) -nostdlib -nostartfiles -static -Wl,--no-relax \
@@ -18,6 +19,12 @@ $(BUILD_DIR)/pipeline.bin: $(BUILD_DIR)/pipeline.elf
 	$(CROSS_COMPILE)objcopy -O binary $< $@
 $(BUILD_DIR)/pipeline.dis: $(BUILD_DIR)/pipeline.elf
 	$(CROSS_COMPILE)objdump -d $< > $@
+$(BUILD_DIR)/probe_wb.elf: start.S kernels.S probe_wb.c link.ld FORCE
+	@mkdir -p $(BUILD_DIR)
+	$(CROSS_COMPILE)gcc $(FLAGS) -nostdlib -nostartfiles -static -Wl,--no-relax \
+		-Wl,-T,link.ld start.S kernels.S probe_wb.c -o $@
+$(BUILD_DIR)/probe_wb.bin: $(BUILD_DIR)/probe_wb.elf
+	$(CROSS_COMPILE)objcopy -O binary $< $@
 # NPC and MROM must be existing, matching artifacts. Never rewrites sim/.config.
 run-rv32 run-rv64:
 	@test -n "$(NPC)" -a -n "$(MROM)" -a -n "$(OUTPUT)" || \

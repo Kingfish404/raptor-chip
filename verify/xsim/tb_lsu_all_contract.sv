@@ -141,6 +141,71 @@ module tb_lsu_atomic_acquire;
 endmodule
 
 
+module tb_lsu_mem_context;
+  localparam int XLEN = `RAPT_XLEN;
+  localparam int LsuTbSqSize = `RAPT_SQ_SIZE;
+  `define TB_LSU_MANUAL_CONTEXT
+  `include "tb_lsu_harness.svh"
+  `undef TB_LSU_MANUAL_CONTEXT
+
+  initial begin
+    init_lsu_inputs(1'b1, 32'h12345678, `RAPT_ALU_LW__);
+    exu_lsu.rcontext = '{mmu_en: 1'b0, eff_priv: `RAPT_PRIV_M,
+        sum: 1'b0, mxr: 1'b0, pbmte: 1'b0, asid: 9'd0, version: 8'd7};
+    exu_lsu.rcontext_b = exu_lsu.rcontext;
+    sq_context = exu_lsu.rcontext;
+    tick(3);
+    reset = 1'b0;
+    exu_ioq_bcast.valid = 1'b1;
+    exu_ioq_bcast.wen = 1'b1;
+    exu_ioq_bcast.alu = XLEN == 64 ? `RAPT_SD_WSTRB : `RAPT_SW_WSTRB;
+    exu_ioq_bcast.tval = XLEN'('h8000_1000);
+    exu_ioq_bcast.sq_waddr = XLEN'('h8000_1000);
+    exu_ioq_bcast.sq_wdata = XLEN'('h1234_5678);
+    tick(1);
+    exu_ioq_bcast.valid = 1'b0;
+    exu_ioq_bcast.wen = 1'b0;
+    csr_bcast.dmmu_en = 1'b1;
+    csr_bcast.menvcfg_pbmte = 1'b1;
+    csr_bcast.priv = `RAPT_PRIV_U;
+    exu_lsu.rvalid = 1'b1;
+    exu_lsu.raddr = XLEN'('h8000_1000);
+    exu_lsu.ralu = XLEN == 64 ? `RAPT_ALU_LD__ : `RAPT_ALU_LW__;
+    #1;
+    check(
+        dut.sq_valid[0] && !dut.sq_entry_context[0].mmu_en
+          && dut.sq_entry_context[0].version == 8'd7,
+        "resident SQ store resampled CSR mode");
+    check(exu_lsu.rready && exu_lsu.rdata == XLEN'('h1234_5678) && !lsu_l1d.rvalid,
+          "SQ forwarding used live CSR instead of held load context");
+
+    // A committed store survives a serializing flush, but its old VA may no
+    // longer identify the same physical word for a new translation context.
+    exu_lsu.rvalid = 1'b0;
+    rou_lsu.valid = 1'b1;
+    rou_lsu.store = 1'b1;
+    rou_lsu.dest = '0;
+    rou_lsu.sq_vaddr = XLEN'('h8000_1000);
+    cmu_bcast.flush_pipe = 1'b1;
+    tick(1);
+    rou_lsu.valid = 1'b0;
+    rou_lsu.store = 1'b0;
+    cmu_bcast.flush_pipe = 1'b0;
+    check(dut.sq_valid[0] && dut.sq_committed[0] && dut.sq_stale_context[0],
+          "flush lost committed store or its stale-context marker");
+    exu_lsu.rcontext = '{mmu_en: 1'b1, eff_priv: `RAPT_PRIV_U,
+        sum: 1'b0, mxr: 1'b0, pbmte: 1'b0, asid: 9'd1, version: 8'd8};
+    exu_lsu.rvalid = 1'b1;
+    exu_lsu.ordered = 1'b0;
+    #1;
+    check(!exu_lsu.rready && !lsu_l1d.rvalid,
+          "new-context load forwarded or bypassed a retained old-context store");
+    $display("PASS: SQ forwarding and resident store retain context XLEN=%0d", XLEN);
+    $finish;
+  end
+endmodule
+
+
 // ---- tb_lsu_atomic_release ----
 `include "rapt.svh"
 `include "rapt_if.svh"
@@ -232,6 +297,13 @@ module tb_lsu_axi_io_order;
   rou_lsu_if rou_lsu ();
   csr_bcast_if csr_bcast ();
   pmp_state_if pmp_state ();
+  rapt_pkg::mem_context_t test_context;
+  assign test_context = '{mmu_en: csr_bcast.dmmu_en,
+      eff_priv: (csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv) ? csr_bcast.mpp : csr_bcast.priv,
+      sum: csr_bcast.sum, mxr: csr_bcast.mxr, pbmte: csr_bcast.menvcfg_pbmte,
+      asid: csr_bcast.satp_asid, version: 8'd0};
+  assign exu_lsu.rcontext = test_context;
+  assign exu_lsu.rcontext_b = test_context;
 
   rapt_lsu_sq #(
       .SQ_SIZE(LsuTbSqSize)
@@ -242,9 +314,14 @@ module tb_lsu_axi_io_order;
       .exu_lsu,
       .exu_ioq_bcast,
       .completion_accept(1'b1),
+      .sq_handoff_valid(1'b0),
+      .sq_handoff_vaddr('0),
+      .sq_handoff_alu('0),
+      .sq_handoff_fp64(1'b0),
       .sq_waddr_hi,
       .sq_waddr_third,
       .sq_wpbmt,
+      .sq_context(test_context),
       .sq_acquire(1'b0),
       .rou_lsu,
       .csr_bcast,
@@ -262,6 +339,7 @@ module tb_lsu_axi_io_order;
 l1d_bus_if l1d_bus ();
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
+  assign exu_l1d.mem_context = test_context;
   rou_cmu_if rou_cmu ();
   rapt_l1d #(
       .LineRefill(0)
@@ -491,7 +569,8 @@ l1d_bus_if l1d_bus ();
       tick(2);
       if (region == 4) warm_cache();
       address=region==0 ? XLEN'('h10000000) : XLEN'('h80001000);
-      expected_cache=region==0 || region==3 ? 0 : region==1 || region==4 ? 15 : 2;
+      // AXI master deliberately clears AxCACHE[0] on writes.
+      expected_cache=region==0 || region==3 ? 0 : region==1 || region==4 ? 14 : 2;
       exu_ioq_bcast='0;
       exu_ioq_bcast.valid=1;
       exu_ioq_bcast.wen=1;
@@ -817,6 +896,13 @@ module tb_lsu_l1d_io_split;
   rou_lsu_if rou_lsu ();
   csr_bcast_if csr_bcast ();
   pmp_state_if pmp_state ();
+  rapt_pkg::mem_context_t test_context;
+  assign test_context = '{mmu_en: csr_bcast.dmmu_en,
+      eff_priv: (csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv) ? csr_bcast.mpp : csr_bcast.priv,
+      sum: csr_bcast.sum, mxr: csr_bcast.mxr, pbmte: csr_bcast.menvcfg_pbmte,
+      asid: csr_bcast.satp_asid, version: 8'd0};
+  assign exu_lsu.rcontext = test_context;
+  assign exu_lsu.rcontext_b = test_context;
 
   rapt_lsu_sq #(
       .SQ_SIZE(LsuTbSqSize)
@@ -827,9 +913,14 @@ module tb_lsu_l1d_io_split;
       .exu_lsu,
       .exu_ioq_bcast,
       .completion_accept(1'b1),
+      .sq_handoff_valid(1'b0),
+      .sq_handoff_vaddr('0),
+      .sq_handoff_alu('0),
+      .sq_handoff_fp64(1'b0),
       .sq_waddr_hi,
       .sq_waddr_third,
       .sq_wpbmt,
+      .sq_context(test_context),
       .sq_acquire(1'b0),
       .rou_lsu,
       .csr_bcast,
@@ -847,6 +938,7 @@ module tb_lsu_l1d_io_split;
 l1d_bus_if l1d_bus ();
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
+  assign exu_l1d.mem_context = test_context;
   rou_cmu_if rou_cmu ();
   rapt_l1d #(
       .LineRefill(0)

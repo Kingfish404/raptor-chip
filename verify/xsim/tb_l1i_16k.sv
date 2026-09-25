@@ -117,7 +117,8 @@ module tb_l1i_16k;
       fetch('h80000000 + LineBytes * line, 0);
       fetch('h80000000 + LineBytes / 2 + LineBytes * line, 0);
     end
-    for (int word_idx = 0; word_idx < CapacityBytes / 4; word_idx++) fetch('h80000000 + 4 * word_idx, 1);
+    for (int word_idx = 0; word_idx < CapacityBytes / 4; word_idx++)
+    fetch('h80000000 + 4 * word_idx, 1);
     begin
       int before_reads;
       before_reads = reads;

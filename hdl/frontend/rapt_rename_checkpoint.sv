@@ -1,7 +1,8 @@
 `include "rapt.svh"
 
-// Rename checkpoint state.  The caller computes post-slot MAP/free snapshots;
-// this module owns allocation lifetime and control-flow ancestry.
+// Control-flow checkpoint lifetime, ancestry, and predictor history. Rename
+// stays fenced after a redirect and the precise retirement flush rebuilds
+// MAP/free from the committed RAT; no speculative rename snapshot is needed.
 //
 // Correct resolution clears the released ID from every live ancestry mask.
 // That detail makes ID reuse safe: an older checkpoint incarnation cannot make
@@ -10,10 +11,9 @@ module rapt_rename_checkpoint #(
     parameter int unsigned Entries = rapt_pkg::CoreConfig.branch_checkpoints,
     parameter int unsigned RenameWidth = rapt_pkg::RenameWidth,
     parameter int unsigned ResolvePorts = rapt_pkg::CompletionPorts,
-    parameter int unsigned MapEntries = rapt_pkg::CoreConfig.arch_regs,
-    parameter int unsigned PhysRegs = rapt_pkg::CoreConfig.phys_regs,
-    parameter int unsigned MapBits = rapt_pkg::index_bits(PhysRegs),
-    parameter int unsigned CheckpointBits = rapt_pkg::index_bits(Entries)
+    parameter int unsigned CheckpointBits = rapt_pkg::index_bits(Entries),
+    parameter int unsigned GhrBits = 64,
+    parameter int unsigned PhrBits = 8
 ) (
     input logic clock,
     input logic reset,
@@ -22,48 +22,64 @@ module rapt_rename_checkpoint #(
     output logic [Entries-1:0] available,
     input logic allocate_valid[RenameWidth],
     input logic [CheckpointBits-1:0] allocate_id[RenameWidth],
-    input logic [MapBits-1:0] allocate_map[RenameWidth][MapEntries],
-    input logic [PhysRegs-1:0] allocate_free[RenameWidth],
+    input logic [GhrBits-1:0] allocate_ghr[RenameWidth] = '{default: '0},
+    input logic [PhrBits-1:0] allocate_phr[RenameWidth] = '{default: '0},
+    input logic allocate_conditional[RenameWidth] = '{default: 1'b0},
 
     input logic release_valid[ResolvePorts],
     input logic [CheckpointBits-1:0] release_id[ResolvePorts],
     input logic restore_valid,
     input logic [CheckpointBits-1:0] restore_id,
     output logic restore_hit,
-    output logic [MapBits-1:0] restore_map[MapEntries],
-    output logic [PhysRegs-1:0] restore_free,
+    output logic [GhrBits-1:0] restore_ghr,
+    output logic [PhrBits-1:0] restore_phr,
+    output logic restore_conditional,
     output logic [Entries-1:0] live
 );
   logic [Entries-1:0] valid_q;
   logic [Entries-1:0] older_q[Entries];
-  logic [MapBits-1:0] map_q[Entries][MapEntries];
-  logic [PhysRegs-1:0] free_q[Entries];
+  logic [GhrBits-1:0] ghr_q[Entries];
+  logic [PhrBits-1:0] phr_q[Entries];
+  logic conditional_q[Entries];
   logic [Entries-1:0] release_mask;
   logic [Entries-1:0] allocate_older[RenameWidth];
 
   if (!(Entries > 0 && RenameWidth > 0 && ResolvePorts > 0)) begin : g_invalid_config_0
     $error("Invalid rapt_rename_checkpoint configuration");
   end
-  if (!(MapEntries > 0 && PhysRegs > MapEntries)) begin : g_invalid_config_1
-    $error("Invalid rapt_rename_checkpoint configuration");
-  end
-  if (MapBits < rapt_pkg::index_bits(
-          PhysRegs
-      ) || CheckpointBits < rapt_pkg::index_bits(
-          Entries
-      )) begin : g_invalid_index_width
+  if (CheckpointBits < rapt_pkg::index_bits(Entries)) begin : g_invalid_index_width
     $error("Invalid rapt_rename_checkpoint configuration: insufficient index width");
   end
 
   assign available = ~valid_q;
   assign live = valid_q;
   assign restore_hit = restore_valid && int'(restore_id) < Entries && valid_q[restore_id];
+  // Decode the restore and allocation targets once into one-hot vectors. The
+  // per-entry storage below then keys off a wire bit instead of repeating a
+  // full wide compare for every entry, which keeps the entry enable cone flat
+  // in `Entries`.
+  logic [Entries-1:0] restore_target;
+  logic [Entries-1:0] allocate_target[RenameWidth];
   always_comb begin
-    restore_free = '0;
-    for (int r = 0; r < MapEntries; r++) restore_map[r] = '0;
+    restore_target = '0;
+    if (restore_valid && int'(restore_id) < Entries) restore_target[restore_id] = 1'b1;
+  end
+  for (genvar s = 0; s < RenameWidth; s++) begin : g_allocate_decode
+    always_comb begin
+      allocate_target[s] = '0;
+      if (allocate_valid[s] && int'(allocate_id[s]) < Entries)
+        allocate_target[s][allocate_id[s]] = 1'b1;
+    end
+  end
+
+  always_comb begin
+    restore_ghr = '0;
+    restore_phr = '0;
+    restore_conditional = 1'b0;
     if (restore_hit) begin
-      restore_free = free_q[restore_id];
-      for (int r = 0; r < MapEntries; r++) restore_map[r] = map_q[restore_id][r];
+      restore_ghr = ghr_q[restore_id];
+      restore_phr = phr_q[restore_id];
+      restore_conditional = conditional_q[restore_id];
     end
   end
 
@@ -90,15 +106,16 @@ module rapt_rename_checkpoint #(
         valid_q[e] <= 1'b0;
         older_q[e] <= '0;
       end else begin
-        if ((restore_hit && (e == int'(restore_id) || older_q[e][restore_id])) || release_mask[e])
+        if ((restore_hit && (restore_target[e] || older_q[e][restore_id])) || release_mask[e])
           valid_q[e] <= 1'b0;
-        older_q[e] <= older_q[e] & ~release_mask;
+        if (|release_mask) older_q[e] <= older_q[e] & ~release_mask;
         for (int s = 0; s < RenameWidth; s++) begin
-          if (allocate_valid[s] && int'(allocate_id[s]) == e) begin
+          if (allocate_target[s][e]) begin
             valid_q[e] <= 1'b1;
             older_q[e] <= allocate_older[s];
-            free_q[e] <= allocate_free[s];
-            map_q[e] <= allocate_map[s];
+            ghr_q[e] <= allocate_ghr[s];
+            phr_q[e] <= allocate_phr[s];
+            conditional_q[e] <= allocate_conditional[s];
           end
         end
       end

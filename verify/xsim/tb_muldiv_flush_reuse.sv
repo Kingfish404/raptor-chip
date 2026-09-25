@@ -26,6 +26,9 @@ module tb_muldiv_flush_reuse #(
   assign completion[2] = '0;
   assign completion[3] = exu_ioq_bcast;
   assign completion[4] = exu_wb_mul;
+  for (genvar p = 5; p < rapt_pkg::CompletionPorts; p++) begin : g_extra_completion
+    assign completion[p] = '0;
+  end
 
   rapt_ieu_muldiv #(
       .MDQ_SIZE(MdqSize)
@@ -49,29 +52,17 @@ module tb_muldiv_flush_reuse #(
     begin
       init_cmu_bcast_defaults();
 
-      dispatch[0].uop = '0;
-      dispatch[0].op1 = '0;
-      dispatch[0].op2 = '0;
-      dispatch[0].pr1 = '0;
-      dispatch[0].pr2 = '0;
-      dispatch[0].prd = '0;
-      dispatch[0].prs = '0;
-      dispatch[0].dest = '0;
-
-`ifdef RAPT_DUAL_ISSUE
-      dispatch[1].uop = '0;
-      dispatch[1].op1 = '0;
-      dispatch[1].op2 = '0;
-      dispatch[1].pr1 = '0;
-      dispatch[1].pr2 = '0;
-      dispatch[1].prd = '0;
-      dispatch[1].prs = '0;
-      dispatch[1].dest = '0;
-
-`endif
-
-      disp.accept[0] = 1'b0;
-      disp.accept[1] = 1'b0;
+      for (int s = 0; s < rapt_pkg::DispatchWidth; s++) begin
+        dispatch[s].uop = '0;
+        dispatch[s].op1 = '0;
+        dispatch[s].op2 = '0;
+        dispatch[s].pr1 = '0;
+        dispatch[s].pr2 = '0;
+        dispatch[s].prd = '0;
+        dispatch[s].prs = '0;
+        dispatch[s].dest = '0;
+        disp.accept[s] = 1'b0;
+      end
       disp.rs_idx[1] = '0;
 
       exu_rou.valid = 1'b0;

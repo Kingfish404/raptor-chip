@@ -57,6 +57,9 @@
 `define RAPT_RIQ_SIZE 8
 `define RAPT_IIQ_SIZE 8
 `define RAPT_ROB_SIZE 32
+`ifndef RAPT_OPERAND_SPILL_ENTRIES
+`define RAPT_OPERAND_SPILL_ENTRIES 16
+`endif
 
 // Scheduler: RS / IOQ to feed both ALU pipes plus pipelined MUL.
 `define RAPT_RS_SIZE 8
@@ -100,16 +103,6 @@
 `endif
 `ifndef RAPT_FETCH_LOOKAHEAD
 `define RAPT_FETCH_LOOKAHEAD
-`endif
-
-// Deprecated compatibility markers for historical modules/testbenches. The
-// active IFU/IDU/RNU/ROU path uses the independent widths above, not A/B mode.
-`define RAPT_DUAL_COMMIT
-`define RAPT_DUAL_ISSUE
-`ifdef RAPT_DUAL_ISSUE
-`define RAPT_ISSUE_WIDTH 2
-`else
-`define RAPT_ISSUE_WIDTH 1
 `endif
 
 `ifdef RAPT_I_EXTENSION

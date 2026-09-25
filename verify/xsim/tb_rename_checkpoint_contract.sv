@@ -5,9 +5,6 @@ module tb_rename_checkpoint;
   localparam int Entries = 4;
   localparam int Width = 3;
   localparam int Ports = 2;
-  localparam int MapEntries = 4;
-  localparam int PhysRegs = 8;
-  localparam int MapBits = 3;
   localparam int CheckpointBits = 2;
 
   logic clock = 0, reset = 1, flush = 0;
@@ -15,22 +12,21 @@ module tb_rename_checkpoint;
   logic [Entries-1:0] available, live;
   logic allocate_valid[Width];
   logic [CheckpointBits-1:0] allocate_id[Width];
-  logic [MapBits-1:0] allocate_map[Width][MapEntries];
-  logic [PhysRegs-1:0] allocate_free[Width];
+  logic [63:0] allocate_ghr[Width];
+  logic [7:0] allocate_phr[Width];
+  logic allocate_conditional[Width];
   logic release_valid[Ports];
   logic [CheckpointBits-1:0] release_id[Ports];
   logic restore_valid, restore_hit;
   logic [CheckpointBits-1:0] restore_id;
-  logic [MapBits-1:0] restore_map[MapEntries];
-  logic [PhysRegs-1:0] restore_free;
+  logic [63:0] restore_ghr;
+  logic [7:0] restore_phr;
+  logic restore_conditional;
 
   rapt_rename_checkpoint #(
       .Entries(Entries),
       .RenameWidth(Width),
       .ResolvePorts(Ports),
-      .MapEntries(MapEntries),
-      .PhysRegs(PhysRegs),
-      .MapBits(MapBits),
       .CheckpointBits(CheckpointBits)
   ) dut (
       .*
@@ -39,8 +35,9 @@ module tb_rename_checkpoint;
   task automatic idle;
     allocate_valid = '{default: 0};
     allocate_id = '{default: '0};
-    allocate_map = '{default: '0};
-    allocate_free = '{default: '0};
+    allocate_ghr = '{default: '0};
+    allocate_phr = '{default: '0};
+    allocate_conditional = '{default: 0};
     release_valid = '{default: 0};
     release_id = '{default: '0};
     restore_valid = 0;
@@ -48,8 +45,9 @@ module tb_rename_checkpoint;
   endtask
 
   task automatic set_snapshot(input int slot, input int seed);
-    allocate_free[slot] = 8'(8'h80 >> (seed % 4));
-    for (int r = 0; r < MapEntries; r++) allocate_map[slot][r] = MapBits'(seed + r);
+    allocate_ghr[slot] = 64'h8000_0000_0000_0000 | 64'(seed);
+    allocate_phr[slot] = 8'h80 | 8'(seed);
+    allocate_conditional[slot] = 1'(seed);
   endtask
 
   task automatic tick;
@@ -100,11 +98,10 @@ module tb_rename_checkpoint;
     restore_valid = 1;
     restore_id = 0;
     #1;
-    assert (restore_hit && restore_free == (8'(8'h80 >> 1)))
-    else $fatal(1, "restore snapshot selection");
-    for (int r = 0; r < MapEntries; r++)
-    assert (restore_map[r] == MapBits'(5 + r))
-    else $fatal(1, "restore MAP payload");
+    assert (restore_hit)
+    else $fatal(1, "restore checkpoint selection");
+    assert (restore_ghr == 64'h8000_0000_0000_0005 && restore_phr == 8'h85 && restore_conditional)
+    else $fatal(1, "restore history payload after ID reuse");
     tick();
     assert (live == 4'b0010)
     else $fatal(1, "ABA-safe restore killed older checkpoint");
@@ -112,6 +109,8 @@ module tb_rename_checkpoint;
     // replay is intentionally idempotent after the checkpoint is consumed.
     assert (!restore_hit)
     else $fatal(1, "consumed restore remained live");
+    assert (restore_ghr == '0 && restore_phr == '0 && !restore_conditional)
+    else $fatal(1, "consumed restore leaked history payload");
     tick();
     assert (live == 4'b0010)
     else $fatal(1, "restore replay changed live set");
@@ -272,7 +271,7 @@ module tb_rename_checkpoint_pipeline;
     reset = 0;
 
     // An older x3 writer makes architectural p3 stale but not free until that
-    // instruction commits after the branch snapshot is taken.
+    // instruction commits after the branch checkpoint is allocated.
     send_group(1, arch_reg_t'(3), 0, '0, 0);
     wait_observed(1);
     older = observed.pop_front();
@@ -309,12 +308,14 @@ module tb_rename_checkpoint_pipeline;
     #1;
     assert (dut.pmu_recovery_fence)
     else $fatal(1, "recovery PMU fence probe");
-    assert (map_snapshot[1] == branch.prd && map_snapshot[2] == phys_reg_t'(2)
-            && map_snapshot[3] == older.prd && map_snapshot[4] == phys_reg_t'(4))
-    else $fatal(1, "post-branch MAP restore failed");
-    assert (dut.free_q[younger.prd] && dut.free_q[queued_prd]
+    // No selective rename restore is needed: recovery.pending fences both
+    // queues until retirement flush rebuilds MAP/free from the committed RAT.
+    assert (map_snapshot[1] == branch.prd && map_snapshot[2] == younger.prd
+            && map_snapshot[3] == older.prd && map_snapshot[4] == queued_prd)
+    else $fatal(1, "fenced MAP changed before retirement flush");
+    assert (!dut.free_q[younger.prd] && !dut.free_q[queued_prd]
             && dut.free_q[older.prs] && !dut.free_q[branch.prd])
-    else $fatal(1, "restore free-set union failed");
+    else $fatal(1, "fenced free set changed before retirement flush");
     assert (!rnu_rou.valid[0] && !idu_rnu.ready[0])
     else $fatal(1, "recovery did not flush/fence rename queues");
     assert (rat_snapshot[3] == older.prd)
@@ -335,7 +336,8 @@ module tb_rename_checkpoint_pipeline;
         assert (!idu_rnu.ready[s] && !rnu_rou.valid[s])
         else $fatal(1, "pending fence depended on redirect pulse");
       end
-      assert (map_snapshot[1] == branch.prd && map_snapshot[5] == phys_reg_t'(5)
+      assert (map_snapshot[1] == branch.prd && map_snapshot[2] == younger.prd
+              && map_snapshot[4] == queued_prd && map_snapshot[5] == phys_reg_t'(5)
               && observed.size() == 0)
       else $fatal(1, "wrong-path work escaped or mutated MAP while pending");
     end
@@ -385,7 +387,7 @@ module tb_rename_checkpoint_pipeline;
     else $fatal(1, "released checkpoint was not safely reused");
 
     $display(
-        "PASS: XLEN=%0d RNU checkpoint snapshots, free union, persistent queue fence, payload, capacity backpressure, reuse",
+        "PASS: XLEN=%0d RNU history checkpoint, deferred MAP/free rebuild, persistent queue fence, payload, capacity backpressure, reuse",
         $bits(xlen_t));
     $finish;
   end

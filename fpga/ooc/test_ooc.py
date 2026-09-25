@@ -67,7 +67,9 @@ module rapt_core #(parameter int XLEN = 32) (input clock); endmodule
                              'data_if.slave data,' if name == 'rapt_backend' else '')
                 body = ("assign data.payload[0]=8'h12; assign data.payload[1]=8'hab;" if name == 'rapt_frontend' else
                         'assign data.ready[0]=1; assign data.ready[1]=0;' if name == 'rapt_backend' else '')
-                source += f'''module {name} #(parameter int XLEN = 32) (
+                parameters = ('parameter int XLEN = 32, parameter bit WriteBack = 1\'b0'
+                              if name == 'rapt_l1d' else 'parameter int XLEN = 32')
+                source += f'''module {name} #({parameters}) (
 input logic clock, {interface} output logic empty_o);
 {body}
 assign empty_o = 1'b0;
@@ -78,6 +80,14 @@ endmodule
             run(HERE / 'export.py', pack, output)
             manifest = json.loads((output / 'manifest.json').read_text())
             self.assertEqual(manifest['widths']['rapt_frontend__data__payload'], [16, 2])
+            self.assertEqual(manifest['blocks']['rapt_l1d']['parameters']['WriteBack'], 0)
+            overridden = root / 'overridden'
+            run(HERE / 'export.py', '--parameter', 'rapt_l1d.WriteBack=1', pack, overridden)
+            overridden_manifest = json.loads((overridden / 'manifest.json').read_text())
+            self.assertEqual(overridden_manifest['blocks']['rapt_l1d']['parameters']['WriteBack'], 1)
+            self.assertIn('rapt_l1d_impl #(.WriteBack(1)) impl',
+                          (overridden / 'partitions.sv').read_text())
+            self.assertIn('if (WriteBack != 1)', (overridden / 'blackboxes.sv').read_text())
             tb = '''module adapter_test;
 wire [15:0] payload; wire empty;
 rapt_frontend_ooc dut(.clock(1'b0),.data__ready(2'b01),.data__payload(payload),.empty_o(empty));
@@ -98,6 +108,11 @@ endmodule
                 before = manifest['blocks'][name]['source_sha256']
                 after = changed['blocks'][name]['source_sha256']
                 self.assertEqual(before == after, name != 'rapt_backend')
+
+            invalid = run(HERE / 'export.py', '--parameter', 'rapt_l1d.Unknown=1',
+                          pack, root / 'invalid', check=False)
+            self.assertNotEqual(invalid.returncode, 0)
+            self.assertIn('Unknown parameter override', invalid.stderr)
 
     def test_synthesis_comment_pragmas_cannot_hide_from_dependency_hashes(self):
         with tempfile.TemporaryDirectory() as tmp:

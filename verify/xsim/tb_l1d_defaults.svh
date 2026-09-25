@@ -1,5 +1,15 @@
 `include "tb_core_bcast_defaults.svh"
 
+// Legacy directed tests drive the architectural CSR model directly. Mirror
+// it onto the new request-owned sideband; ownership-specific tests may use a
+// dedicated harness that holds this context while changing the CSR source.
+assign lsu_l1d.rcontext = '{mmu_en: csr_bcast.dmmu_en,
+    eff_priv: (csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv) ? csr_bcast.mpp : csr_bcast.priv,
+    sum: csr_bcast.sum, mxr: csr_bcast.mxr, pbmte: csr_bcast.menvcfg_pbmte,
+    asid: csr_bcast.satp_asid, version: 8'd0};
+assign lsu_l1d.rcontext_b = lsu_l1d.rcontext;
+assign exu_l1d.mem_context = lsu_l1d.rcontext;
+
 task automatic init_l1d_inputs;
   begin
     lsu_l1d.raddr = '0;

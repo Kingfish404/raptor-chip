@@ -11,6 +11,7 @@ interface lsu_pipe_if #(
 );
   logic rvalid;
   logic [XLEN-1:0] raddr;
+  rapt_pkg::mem_context_t rcontext;
   logic [4:0] ralu;
   logic atomic_lock;
   logic atomic_release; // atomic read must wait for older SQ writes to complete
@@ -31,23 +32,25 @@ interface lsu_pipe_if #(
   logic stq_ready;
   logic rvalid_b;
   logic [XLEN-1:0] raddr_b;
+  rapt_pkg::mem_context_t rcontext_b;
   logic [4:0] ralu_b;
   logic [XLEN-1:0] rdata_b;
   logic rready_b;
+  logic rretry_b;
 
   modport master(
-      output rvalid, raddr, ralu, atomic_lock, atomic_release, ordered, pc,
+      output rvalid, raddr, rcontext, ralu, atomic_lock, atomic_release, ordered, pc,
       output fp_rdata64_req,
       input rdata, fp_rdata64, fp_rdata64_valid, trap, cause, tval, difftest_skip, rready, rretry, rmiss, miss_wake, stq_ready,
-      output rvalid_b, raddr_b, ralu_b,
-      input rdata_b, rready_b
+      output rvalid_b, raddr_b, rcontext_b, ralu_b,
+      input rdata_b, rready_b, rretry_b
   );
   modport slave(
-      input rvalid, raddr, ralu, atomic_lock, atomic_release, ordered, pc,
+      input rvalid, raddr, rcontext, ralu, atomic_lock, atomic_release, ordered, pc,
       output rdata, fp_rdata64, fp_rdata64_valid, trap, cause, tval, difftest_skip, rready, rretry, rmiss, miss_wake, stq_ready,
       input fp_rdata64_req,
-      input rvalid_b, raddr_b, ralu_b,
-      output rdata_b, rready_b
+      input rvalid_b, raddr_b, rcontext_b, ralu_b,
+      output rdata_b, rready_b, rretry_b
   );
 endinterface
 
@@ -55,6 +58,7 @@ interface lsu_l1d_mmu_if #(
     parameter int XLEN = `RAPT_XLEN
 );
   logic mmu_en;
+  rapt_pkg::mem_context_t mem_context;
   logic [XLEN-1:0] vaddr;
   logic [4:0] walu;
   // Cache-block management is authorized by load OR store permission and
@@ -74,11 +78,11 @@ interface lsu_l1d_mmu_if #(
   logic ready;
 
   modport master(
-      output mmu_en, vaddr, walu, cmo_mgmt, valid, misaligned, reservation_clear,
+      output mmu_en, mem_context, vaddr, walu, cmo_mgmt, valid, misaligned, reservation_clear,
       input paddr, pbmt, trap, cause, reservation, reservation_valid, reservation_size_m1, reservation_blocked, ready
   );
   modport slave(
-      input mmu_en, vaddr, walu, cmo_mgmt, valid, misaligned, reservation_clear,
+      input mmu_en, mem_context, vaddr, walu, cmo_mgmt, valid, misaligned, reservation_clear,
       output paddr, pbmt, trap, cause, reservation, reservation_valid, reservation_size_m1, reservation_blocked, ready
   );
 endinterface

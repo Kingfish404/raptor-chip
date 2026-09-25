@@ -3,6 +3,19 @@ package rapt_pkg;
   `include "rapt.svh"
   `include "rapt_types.svh"
 
+  // Control sampled when an LSU operation acquires ownership. The version
+  // distinguishes address-space epochs; SATP root and PMP tables remain
+  // centralized and are changed only across the pipeline flush barrier.
+  typedef struct packed {
+    logic mmu_en;
+    logic [1:0] eff_priv;
+    logic sum;
+    logic mxr;
+    logic pbmte;
+    logic [8:0] asid;
+    logic [7:0] version;
+  } mem_context_t;
+
   // RISC-V implicit return-stack hints, applied to expanded instructions.
   // Different link registers on JALR denote pop-then-push (coroutine switch).
   typedef struct packed {logic push, pop;} ras_action_t;
@@ -29,6 +42,7 @@ package rapt_pkg;
     int unsigned rob_entries;
     int unsigned rename_entries;
     int unsigned dispatch_entries;
+    int unsigned operand_spill_entries;
     int unsigned iq_entries;
     int unsigned ioq_entries;
     int unsigned sq_entries;
@@ -56,6 +70,7 @@ package rapt_pkg;
       rob_entries: `RAPT_ROB_SIZE,
       rename_entries: `RAPT_RIQ_SIZE,
       dispatch_entries: `RAPT_IIQ_SIZE,
+      operand_spill_entries: `RAPT_OPERAND_SPILL_ENTRIES,
       iq_entries: `RAPT_RS_SIZE,
       ioq_entries: `RAPT_IOQ_SIZE,
       sq_entries: `RAPT_SQ_SIZE,
@@ -233,6 +248,8 @@ package rapt_pkg;
     logic [31:0] inst;
     xlen_t pc, pnpc;
     logic trap, predicted_taken;
+    logic auxiliary;
+    logic [$clog2(`RAPT_PHT_SIZE)-1:0] auxiliary_index;
     xlen_t cause, tval;
   } fetch_slot_t;
   typedef struct packed {
@@ -316,7 +333,6 @@ package rapt_pkg;
     // Architectural register
     logic [RLENPkg-1:0] rd;
     rob_state_t         state;
-    logic               busy;
     rob_generation_t    generation;
 
     // Branch / jump resolution (WB-written)
@@ -333,14 +349,11 @@ package rapt_pkg;
 
     // CSR (WB-written)
     logic               csr_wen;
-    logic [XLENPkg-1:0] csr_wdata;
     logic               fp_flags_valid;
     logic [4:0]         fp_flags;
 
     // Trap (WB-mutable by EXU port-A and IOQ)
     logic               trap;
-    logic [XLENPkg-1:0] tval;
-    logic [XLENPkg-1:0] cause;
 
     // Difftest
     logic difftest_skip;

@@ -33,6 +33,11 @@
 extern int boot_from_flash;
 extern int ftracedepth_max;
 FILE *pc_trace = NULL, *bpu_trace = NULL, *mem_trace = NULL;
+// Optional request trace for verify/subsystem. Open before executing the first
+// instruction so vaddr_read/write can record that instruction's accesses.
+FILE *subsystem_mem_trace = NULL;
+static FILE *subsystem_inst_trace = NULL;
+static bool subsystem_trace_checked = false;
 size_t pc_continue_cnt = 1;
 
 CPU_state cpu = {};
@@ -241,12 +246,34 @@ static void trace_and_difftest(Decode *_this, vaddr_t dnpc)
 
 static void exec_once(Decode *s, vaddr_t pc)
 {
+  if (!subsystem_trace_checked)
+  {
+    const char *prefix = getenv("RAPT_SUBSYSTEM_TRACE_PREFIX");
+    subsystem_trace_checked = true;
+    if (prefix != NULL && prefix[0] != '\0')
+    {
+      char path[4096];
+      int n = snprintf(path, sizeof(path), "%s.inst", prefix);
+      Assert(n > 0 && (size_t)n < sizeof(path), "Subsystem trace path too long");
+      subsystem_inst_trace = fopen(path, "w");
+      Assert(subsystem_inst_trace != NULL, "Cannot open '%s'", path);
+      n = snprintf(path, sizeof(path), "%s.mem", prefix);
+      Assert(n > 0 && (size_t)n < sizeof(path), "Subsystem trace path too long");
+      subsystem_mem_trace = fopen(path, "w");
+      Assert(subsystem_mem_trace != NULL, "Cannot open '%s'", path);
+    }
+  }
   cpu.cpc = pc;
   s->pc = pc;
   s->snpc = pc;
   s->epc = pc; /* preserve executing PC for lazy itrace_format (s->pc gets
                 * clobbered to dnpc by decode_exec) */
   isa_exec_once(s);
+  if (subsystem_inst_trace != NULL)
+  {
+    fprintf(subsystem_inst_trace, FMT_WORD_NO_PREFIX " %08x " FMT_WORD_NO_PREFIX "\n",
+            s->epc, s->isa.inst, s->dnpc);
+  }
   if (boot_from_flash)
   {
     if (pc_trace == NULL)
@@ -329,6 +356,27 @@ static void execute(uint64_t n)
     exec_once(&s, cpu.pc);
 
     g_nr_guest_inst++;
+    if (getenv("NEMU_PC_DEBUG") != NULL)
+    {
+      static uint64_t u_inst = 0, s_inst = 0, m_inst = 0;
+      if (cpu.priv == PRV_U) u_inst++;
+      else if (cpu.priv == PRV_S) s_inst++;
+      else m_inst++;
+      if ((g_nr_guest_inst & 0xffffffu) == 0)
+        fprintf(stderr, "[pc] inst=%" PRIu64 " pc=" FMT_WORD " priv=%u m=%" PRIu64 " s=%" PRIu64 " u=%" PRIu64 "\n",
+                g_nr_guest_inst, cpu.pc, cpu.priv, m_inst, s_inst, u_inst);
+      static int itrace_dumps = 0;
+      static uint64_t itrace_next = 0x1000000000ull;
+      if (getenv("NEMU_ITRACE_AT") != NULL && itrace_dumps < 8 &&
+          g_nr_guest_inst >= itrace_next)
+      {
+        itrace_dumps++;
+        itrace_next += 0x1000000000ull;
+        fprintf(stderr, "[itrace] at inst=%" PRIu64 "\n", g_nr_guest_inst);
+        cpu_show_itrace();
+        fflush(stdout);
+      }
+    }
     nemu_periodic_save();
     trace_and_difftest(&s, cpu.pc);
     if (nemu_state.state != NEMU_RUNNING)

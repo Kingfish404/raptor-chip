@@ -18,9 +18,18 @@ IO_DELAY_FRAC ?= 0.20
 OUTPUT_LOAD_FF ?= 5.0
 EXTRA_DEFINES ?=
 SRAM_MODE ?= macro
+SYNTH_SHARE ?= 1
+ifeq ($(filter $(SYNTH_SHARE),0 1),)
+$(error SYNTH_SHARE must be 0 or 1)
+endif
 SRAM_PLATFORM ?= sky130
 PYTHON ?= python3
 TIME ?= /usr/bin/time
+VIVADO ?= vivado
+FPGA_PART ?= xcku15p-ffva1156-2-e
+FPGA_THREADS ?= 4
+FPGA_XLEN ?= 64
+FPGA_BUILD_DIR ?= $(abspath ../fpga/build/$(RAPT_CONFIG)/$(FPGA_PART)/rv$(FPGA_XLEN)/$(MODULE)/$(CLK_FREQ_MHZ)MHz)
 
 NPROC := $(shell nproc 2>/dev/null || echo 1)
 MEM_AVAILABLE_MB := $(shell awk '/MemAvailable:/ { print int($$2 / 1024) }' /proc/meminfo 2>/dev/null || echo 0)
@@ -161,6 +170,36 @@ $(SRAM_STAMP): $(SRAM_DIR)/Makefile $(SRAM_DIR)/scripts/gen_stub_lib.py $(SRAM_B
 
 syn: $(NETLIST) ## Synthesize MODULE and write its mapped netlist
 
+.PHONY: fpga-syn
+fpga-syn: ## Run module-level Vivado OOC synthesis (SRAM_MODE=flops)
+	@test '$(SRAM_MODE)' = flops || { echo 'FPGA synthesis requires SRAM_MODE=flops (behavioral memories)'; exit 1; }
+	@test '$(FPGA_XLEN)' = 32 -o '$(FPGA_XLEN)' = 64 || { echo 'FPGA_XLEN must be 32 or 64'; exit 1; }
+	@mkdir -p '$(FPGA_BUILD_DIR)'
+	@flock -n '$(FPGA_BUILD_DIR)/.lock' $(MAKE) --no-print-directory fpga-syn-locked
+
+.PHONY: fpga-syn-locked
+fpga-syn-locked:
+	@printf 'status incomplete\n' > '$(FPGA_BUILD_DIR)/status.txt'
+	@command -v $(VIVADO) >/dev/null
+	@printf 'module=%s\ntop=%s\nconfig=%s\nxlen=%s\npart=%s\nperiod_ns=%s\nio_delay_frac=%s\nthreads=%s\ndefines=%s\n' \
+		'$(MODULE)' '$(TOP)' '$(RAPT_CONFIG)' '$(FPGA_XLEN)' '$(FPGA_PART)' '$(PERIOD_NS)' '$(IO_DELAY_FRAC)' '$(FPGA_THREADS)' \
+		'$(EXTRA_DEFINES) $(if $(filter 64,$(FPGA_XLEN)),-DRAPT_RV64) -DRAPT_FPGA_DSP=1' > '$(FPGA_BUILD_DIR)/run_config.txt'
+	@sha256sum $(SYNTH_SV_FILES) $(HDL_HEADERS) $(LSPD_DIR)/modules.mk $(abspath Makefile) $(abspath scripts/fpga_synth.tcl) > '$(FPGA_BUILD_DIR)/source_manifest.sha256'
+	@$(YOSYS) -V > '$(FPGA_BUILD_DIR)/tools.txt'
+	@$(VIVADO) -version >> '$(FPGA_BUILD_DIR)/tools.txt'
+	@$(TIME) -o '$(FPGA_BUILD_DIR)/export.profile' -f 'status=%x\nelapsed_sec=%e\nmax_rss_kb=%M' \
+		$(YOSYS) -Q -T -m slang -p 'read_slang $(SLANG_FLAGS) $(if $(filter 64,$(FPGA_XLEN)),-DRAPT_RV64) -DRAPT_FPGA_DSP=1 --top $(TOP) $(SYNTH_SV_FILES); hierarchy -check -top $(TOP); select -assert-none t:$$check t:$$assert t:$$assume t:$$cover; proc; opt; bwmuxmap; check -assert; write_verilog $(FPGA_BUILD_DIR)/elaborated.v' \
+		> '$(FPGA_BUILD_DIR)/export.log' 2>&1 || { tail -60 '$(FPGA_BUILD_DIR)/export.log'; exit 1; }
+	@FPGA_TOP='$(TOP)' FPGA_OUT='$(abspath $(FPGA_BUILD_DIR))' FPGA_PART='$(FPGA_PART)' FPGA_THREADS='$(FPGA_THREADS)' \
+	 FPGA_CLOCK='$(CLOCK_PORT)' FPGA_PERIOD='$(PERIOD_NS)' FPGA_IO_FRAC='$(IO_DELAY_FRAC)' \
+	 $(TIME) -o '$(FPGA_BUILD_DIR)/synth.profile' -f 'status=%x\nelapsed_sec=%e\nmax_rss_kb=%M' \
+		sh -c "cd '$(abspath $(FPGA_BUILD_DIR))' && exec $(VIVADO) -mode batch -nojournal -log vivado.log -source '$(abspath scripts/fpga_synth.tcl)'" \
+		> '$(FPGA_BUILD_DIR)/console.log' 2>&1 || { tail -60 '$(FPGA_BUILD_DIR)/console.log'; exit 1; }
+	@sha256sum --check --status '$(FPGA_BUILD_DIR)/source_manifest.sha256' || { echo 'Sources changed during synthesis'; exit 1; }
+	@sha256sum '$(FPGA_BUILD_DIR)/elaborated.v' '$(FPGA_BUILD_DIR)/synth.dcp' > '$(FPGA_BUILD_DIR)/artifacts.sha256'
+	@printf 'status ok\n' > '$(FPGA_BUILD_DIR)/status.txt'
+	@echo '[fpga-syn] PASS $(MODULE) RV$(FPGA_XLEN): $(FPGA_BUILD_DIR)'
+
 # Do not leave a newly generated target reusable after a failed source check.
 .DELETE_ON_ERROR:
 
@@ -179,6 +218,7 @@ $(SYNTH_CONFIG_STAMP): FORCE
 		'$(PERIOD_NS)' '$(EXTRA_DEFINES)' \
 		'$(SRAM_MODE)' '$(SRAM_PLATFORM)' \
 		> $@.tmp
+	@printf 'synth_share=%s\n' '$(SYNTH_SHARE)' >> $@.tmp
 	@if ! cmp -s $@.tmp $@; then mv $@.tmp $@; else rm -f $@.tmp; fi
 
 $(NETLIST): $(HDL_SV) $(HDL_HEADERS) scripts/synth.tcl $(LSPD_DIR)/modules.mk Makefile $(SYNTH_CONFIG_STAMP) $(SRAM_PREREQUISITES)
@@ -196,6 +236,7 @@ $(NETLIST): $(HDL_SV) $(HDL_HEADERS) scripts/synth.tcl $(LSPD_DIR)/modules.mk Ma
 	 YS_PLATFORM_DIR='$(PLATFORM_DIR)' \
 	 YS_FOUNDRY_PATH='$(FOUNDRY_PATH)' \
 	 YS_PERIOD_NS='$(PERIOD_NS)' \
+	 YS_SYNTH_SHARE='$(SYNTH_SHARE)' \
 	 $(TIME) -o '$(BUILD_DIR)/synth.profile' \
 	 	-f 'status=%x\nelapsed_sec=%e\nuser_sec=%U\nsystem_sec=%S\nmax_rss_kb=%M' \
 	 	$(YOSYS) -m slang -p 'tcl scripts/synth.tcl' 2>&1 | tee $(BUILD_DIR)/synth.log
@@ -205,10 +246,10 @@ $(NETLIST): $(HDL_SV) $(HDL_HEADERS) scripts/synth.tcl $(LSPD_DIR)/modules.mk Ma
 
 sta: $(NETLIST) ## Run static timing and vectorless power analysis
 	@echo "[sta] module=$(MODULE) pdk=$(PDK) period=$(PERIOD_NS)ns"
-	@printf 'module=%s\ntop=%s\npdk=%s\nconfig=%s\nclock_mhz=%s\nperiod_ns=%s\nio_delay_frac=%s\noutput_load_ff=%s\nextra_defines=%s\nsram_mode=%s\nsram_platform=%s\n' \
+	@printf 'module=%s\ntop=%s\npdk=%s\nconfig=%s\nclock_mhz=%s\nperiod_ns=%s\nio_delay_frac=%s\noutput_load_ff=%s\nextra_defines=%s\nsram_mode=%s\nsram_platform=%s\nsynth_share=%s\n' \
 		'$(MODULE)' '$(TOP)' '$(PDK)' '$(RAPT_CONFIG)' '$(CLK_FREQ_MHZ)' \
 		'$(PERIOD_NS)' '$(IO_DELAY_FRAC)' '$(OUTPUT_LOAD_FF)' '$(EXTRA_DEFINES)' \
-		'$(SRAM_MODE)' '$(SRAM_PLATFORM)' \
+		'$(SRAM_MODE)' '$(SRAM_PLATFORM)' '$(SYNTH_SHARE)' \
 		> $(BUILD_DIR)/run_config.txt
 	@STA_TOP='$(TOP)' \
 	 STA_NETLIST='$(NETLIST)' \

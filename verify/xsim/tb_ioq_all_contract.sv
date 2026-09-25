@@ -12,8 +12,8 @@ module tb_ioq_acquire_publish;
   // new flag; any previously sampled data must not survive an acquire.
   always @(negedge clock) begin
     exu_lsu.rready=!pending_path || (amo_path ? exu_lsu.raddr!=XLEN'('h80002000) : !exu_lsu.atomic_lock) || published;
-    exu_lsu.rdata=XLEN'(published);
-    exu_lsu.rdata_b=XLEN'(published);
+    exu_lsu.rdata = XLEN'(published);
+    exu_lsu.rdata_b = XLEN'(published);
   end
   always @(posedge clock)
     if (!reset && exu_ioq_bcast.valid) begin
@@ -23,57 +23,57 @@ module tb_ioq_acquire_publish;
       end
       if (exu_ioq_bcast.dest == 4) begin
         check(observed_atomic, "younger completion appeared before atomic completion");
-        data_result=exu_ioq_bcast.result;
-        observed_data=1;
+        data_result   = exu_ioq_bcast.result;
+        observed_data = 1;
       end
     end
   task automatic scenario(input bit aq);
     reset = 1;
     init_ioq_inputs(0);
-    exu_lsu.rready=1;
-    exu_lsu.rready_b=1;
-    published=0;
-    observed_atomic=0;
-    observed_data=0;
-    data_result='1;
+    exu_lsu.rready = 1;
+    exu_lsu.rready_b = 1;
+    published = 0;
+    observed_atomic = 0;
+    observed_data = 0;
+    data_result = '1;
     tick(3);
     reset = 0;
     tick(1);
-    dispatch[0]='0;
-    dispatch[0].uop.pc=XLEN'('h80000000);
-    dispatch[0].uop.pnpc=XLEN'('h80000004);
+    dispatch[0] = '0;
+    dispatch[0].uop.pc = XLEN'('h80000000);
+    dispatch[0].uop.pnpc = XLEN'('h80000004);
     dispatch[0].uop.inst=(amo_path ? 32'h000322af : 32'h100322af) | (32'(aq)<<26); // AMOADD.W or LR.W
-    dispatch[0].uop.execute.memory.load=1;
-    dispatch[0].uop.execute.memory.atomic=1;
-    dispatch[0].uop.execute.memory.store=amo_path;
-    dispatch[0].uop.execute.int_op.alu=amo_path ? `RAPT_ATO_ADD_ : `RAPT_ATO_LR__;
-    dispatch[0].uop.execute.int_op.word=1;
-    dispatch[0].pr1=pending_path ? 0 : 9;
-    dispatch[0].op1=XLEN'('h80002000);
-    dispatch[0].prd=10;
-    dispatch[0].dest=3;
-    cmu_bcast.rob_head=3;
-    disp.accept[0]=1;
+    dispatch[0].uop.execute.memory.load = 1;
+    dispatch[0].uop.execute.memory.atomic = 1;
+    dispatch[0].uop.execute.memory.store = amo_path;
+    dispatch[0].uop.execute.int_op.alu = amo_path ? `RAPT_ATO_ADD_ : `RAPT_ATO_LR__;
+    dispatch[0].uop.execute.int_op.word = 1;
+    dispatch[0].pr1 = pending_path ? 0 : 9;
+    dispatch[0].op1 = XLEN'('h80002000);
+    dispatch[0].prd = 10;
+    dispatch[0].dest = 3;
+    cmu_bcast.rob_head = 3;
+    disp.accept[0] = 1;
     tick(1);
-    disp.accept[0]=0;
-    dispatch[0]='0;
-    dispatch[0].uop.pc=XLEN'('h80000004);
-    dispatch[0].uop.pnpc=XLEN'('h80000008);
-    dispatch[0].uop.inst=32'h00042383;
-    dispatch[0].uop.execute.memory.load=1;
-    dispatch[0].uop.execute.int_op.alu=`RAPT_ALU_LW__;
-    dispatch[0].op1=XLEN'('h80001000);
-    dispatch[0].prd=11;
-    dispatch[0].dest=4;
-    disp.accept[0]=1;
+    disp.accept[0] = 0;
+    dispatch[0] = '0;
+    dispatch[0].uop.pc = XLEN'('h80000004);
+    dispatch[0].uop.pnpc = XLEN'('h80000008);
+    dispatch[0].uop.inst = 32'h00042383;
+    dispatch[0].uop.execute.memory.load = 1;
+    dispatch[0].uop.execute.int_op.alu = `RAPT_ALU_LW__;
+    dispatch[0].op1 = XLEN'('h80001000);
+    dispatch[0].prd = 11;
+    dispatch[0].dest = 4;
+    disp.accept[0] = 1;
     tick(1);
     disp.accept[0] = 0;
     tick(8);
-    published=1;
-    exu_rou='0;
-    exu_rou.valid=1;
-    exu_rou.prd=9;
-    exu_rou.result=XLEN'('h80002000);
+    published = 1;
+    exu_rou = '0;
+    exu_rou.valid = 1;
+    exu_rou.prd = 9;
+    exu_rou.result = XLEN'('h80002000);
     tick(1);
     exu_rou.valid = 0;
     tick(16);
@@ -84,12 +84,114 @@ module tb_ioq_acquire_publish;
     else check(data_result == 0 || data_result == 1, "invalid relaxed load value");
   endtask
   initial begin
-    pending_path=$test$plusargs("PENDING");
-    amo_path=$test$plusargs("AMO");
+    pending_path = $test$plusargs("PENDING");
+    amo_path = $test$plusargs("AMO");
     scenario(0);
     scenario(1);
     $display("PASS: acquire publication XLEN=%0d AMO=%0d PENDING=%0d", XLEN, amo_path,
              pending_path);
+    $finish;
+  end
+endmodule
+
+
+// An accepted operation owns its control mode even if the architectural CSR
+// source changes before its held request/translation completes.
+module tb_ioq_mem_context;
+  localparam int XLEN = `RAPT_XLEN;
+  `include "tb_ioq_harness.svh"
+  initial begin
+    init_ioq_inputs(0);
+    csr_bcast.priv = `RAPT_PRIV_S;
+    csr_bcast.sum = 1'b1;
+    csr_bcast.mxr = 1'b0;
+    tick(3);
+    reset = 0;
+    dispatch[0] = '0;
+    dispatch[0].uop.execute.memory.load = 1'b1;
+    dispatch[0].uop.execute.int_op.alu = `RAPT_ALU_LW__;
+    dispatch[0].op1 = XLEN'('h8000_1000);
+    dispatch[0].dest = 3;
+    disp.accept[0] = 1'b1;
+    tick(1);
+    disp.accept[0] = 1'b0;
+    csr_bcast.dmmu_en = 1'b1;
+    csr_bcast.priv = `RAPT_PRIV_M;
+    csr_bcast.sum = 1'b0;
+    csr_bcast.mxr = 1'b1;
+    csr_bcast.satp_asid = 9'h12a;
+    for (int c = 0; c < 4; c++) begin
+      #1;
+      check(exu_lsu.rvalid, "held load request disappeared");
+      check(!exu_lsu.rcontext.mmu_en && exu_lsu.rcontext.eff_priv == `RAPT_PRIV_S
+            && exu_lsu.rcontext.sum && !exu_lsu.rcontext.mxr && exu_lsu.rcontext.asid == '0,
+            "held load resampled CSR mode");
+      tick(1);
+    end
+    cmu_bcast.flush_pipe = 1'b1;
+    tick(1);
+    cmu_bcast.flush_pipe = 1'b0;
+    check(!exu_lsu.rvalid, "flush did not cancel old load context");
+    check(dut.mem_context_version_q == 8'd1, "serializing flush did not advance context");
+
+    // Branch recovery preserves the address space. A trap and a fence do not.
+    cmu_bcast.ben = 1'b1;
+    cmu_bcast.flush_pipe = 1'b1;
+    tick(1);
+    cmu_bcast.flush_pipe = 1'b0;
+    cmu_bcast.ben = 1'b0;
+    check(dut.mem_context_version_q == 8'd1, "branch flush changed context version");
+    cmu_bcast.ben = 1'b1;
+    cmu_bcast.time_trap = 1'b1;
+    cmu_bcast.flush_pipe = 1'b1;
+    tick(1);
+    cmu_bcast.flush_pipe = 1'b0;
+    cmu_bcast.time_trap = 1'b0;
+    cmu_bcast.ben = 1'b0;
+    check(dut.mem_context_version_q == 8'd2, "trap did not advance context version");
+    cmu_bcast.fence_time = 1'b1;
+    tick(1);
+    cmu_bcast.fence_time = 1'b0;
+    check(dut.mem_context_version_q == 8'd3, "fence did not advance context version");
+    disp.accept[0] = 1'b1;
+    tick(1);
+    disp.accept[0] = 1'b0;
+    for (int c = 0; c < 8 && !exu_lsu.rvalid; c++) tick(1);
+    check(
+        exu_lsu.rvalid && exu_lsu.rcontext.version == 8'd3
+          && exu_lsu.rcontext.mmu_en && exu_lsu.rcontext.asid == 9'h12a
+          && exu_lsu.rcontext.eff_priv == `RAPT_PRIV_M,
+        "post-fence load did not capture the new context version and mode");
+
+    // A translated store must still use its captured PA after a later CSR
+    // broadcast changes to Bare mode while the mock translation is pending.
+    reset = 1'b1;
+    init_ioq_inputs(1);
+    csr_bcast.dmmu_en = 1'b1;
+    tick(3);
+    reset = 1'b0;
+    dispatch[0] = '0;
+    dispatch[0].uop.execute.memory.store = 1'b1;
+    dispatch[0].uop.execute.int_op.alu = `RAPT_SW_WSTRB;
+    dispatch[0].op1 = XLEN'('h4000_1000);
+    dispatch[0].op2 = XLEN'('h55);
+    dispatch[0].dest = 4;
+    cmu_bcast.rob_head = 4;
+    disp.accept[0] = 1'b1;
+    tick(1);
+    disp.accept[0] = 1'b0;
+    csr_bcast.dmmu_en = 1'b0;
+    for (int c = 0; c < 12 && !exu_l1d.mmu_en; c++) tick(1);
+    check(exu_l1d.mmu_en && exu_l1d.mem_context.mmu_en, "store translation lost captured MMU mode");
+    exu_l1d.paddr = XLEN'('h8000_2000);
+    exu_l1d.ready = 1'b1;
+    tick(1);
+    exu_l1d.ready = 1'b0;
+    for (int c = 0; c < 12 && !exu_ioq_bcast.valid; c++) tick(1);
+    check(exu_ioq_bcast.valid && !exu_ioq_bcast.trap, "translated store did not complete");
+    check(exu_ioq_bcast.sq_waddr == XLEN'('h8000_2000),
+          "SQ address used live Bare mode instead of captured PA");
+    $display("PASS: IOQ load/store context survives CSR source changes XLEN=%0d", XLEN);
     $finish;
   end
 endmodule
@@ -101,8 +203,33 @@ endmodule
 module tb_ioq_amo_fault;
   localparam int XLEN = `RAPT_XLEN;
   `include "tb_ioq_harness.svh"
+  int trace_kind, trace_cause;
+  bit trace_store_fault;
+  wire trace_load_valid = exu_lsu.rvalid;
+  wire trace_load_ready = exu_lsu.rready;
+  wire trace_load_trap = exu_lsu.trap;
+  wire trace_complete_valid = exu_ioq_bcast.valid;
+  wire trace_complete_trap = exu_ioq_bcast.trap;
+  wire [XLEN-1:0] trace_complete_cause = exu_ioq_bcast.cause;
+  string amo_trace;
+  initial
+    if ($value$plusargs("IOQ_AMO_TRACE=%s", amo_trace)) begin
+      $dumpfile(amo_trace);
+      $dumpvars(0, tb_ioq_amo_fault);
+    end
   task automatic run_case(input int kind, input bit store_fault, input int cause);
     logic [XLEN-1:0] expected;
+    bit completion_seen, completion_trap, completion_wen;
+    logic [XLEN-1:0] completion_cause, completion_tval, completion_npc;
+    trace_kind = kind;
+    trace_store_fault = store_fault;
+    trace_cause = cause;
+    completion_seen = 0;
+    completion_trap = 0;
+    completion_wen = 0;
+    completion_cause = '0;
+    completion_tval = '0;
+    completion_npc = '0;
     reset = 1;
     init_ioq_inputs(0);
     csr_bcast.dmmu_en = 1;
@@ -115,8 +242,9 @@ module tb_ioq_amo_fault;
     dispatch[0].uop.execute.memory.load = 1;
     dispatch[0].uop.execute.memory.store = kind == 2;
     dispatch[0].uop.execute.memory.atomic = kind != 0;
-    dispatch[0].uop.execute.int_op.alu = kind == 0 ? `RAPT_ALU_LW__
-        : kind == 1 ? `RAPT_ATO_LR__ : `RAPT_ATO_ADD_;
+    dispatch[0].uop.execute.int_op.alu = kind == 0 ?
+    `RAPT_ALU_LW__
+    : kind == 1 ? `RAPT_ATO_LR__ : `RAPT_ATO_ADD_;
     dispatch[0].uop.execute.int_op.word = 1;
     dispatch[0].op1 = 'h40000000;
     dispatch[0].op2 = 1;
@@ -133,41 +261,69 @@ module tb_ioq_amo_fault;
       end
       exu_l1d.ready = 1;
       exu_l1d.paddr = 'h80001000;
-      exu_l1d.trap = store_fault;
+      exu_l1d.trap  = store_fault;
       exu_l1d.cause = XLEN'(cause);
+      #1;
+      if (exu_ioq_bcast.valid) begin
+        completion_seen  = 1;
+        completion_trap  = exu_ioq_bcast.trap;
+        completion_wen   = exu_ioq_bcast.wen;
+        completion_cause = exu_ioq_bcast.cause;
+        completion_tval  = exu_ioq_bcast.tval;
+        completion_npc   = exu_ioq_bcast.npc;
+      end
       tick(1);
       exu_l1d.ready = 0;
-      exu_l1d.trap = 0;
+      exu_l1d.trap  = 0;
     end
     if (!store_fault) begin
       for (int c = 0; c < 20 && !exu_lsu.rvalid; c++) tick(1);
       check(exu_lsu.rvalid, "missing read request");
       exu_lsu.rready = 1;
-      exu_lsu.trap = 1;
-      exu_lsu.cause = XLEN'(cause);
-      exu_lsu.tval = 'h40000000;
+      exu_lsu.trap   = 1;
+      exu_lsu.cause  = XLEN'(cause);
+      exu_lsu.tval   = 'h40000000;
+      #1;
+      if (exu_ioq_bcast.valid) begin
+        completion_seen  = 1;
+        completion_trap  = exu_ioq_bcast.trap;
+        completion_wen   = exu_ioq_bcast.wen;
+        completion_cause = exu_ioq_bcast.cause;
+        completion_tval  = exu_ioq_bcast.tval;
+        completion_npc   = exu_ioq_bcast.npc;
+      end
       tick(1);
       exu_lsu.rready = 0;
-      exu_lsu.trap = 0;
+      exu_lsu.trap   = 0;
     end
     expected = XLEN'(cause);
     if (kind == 2 && !store_fault) begin
       case (cause)
-        4: expected = 6;
-        5: expected = 7;
+        4:  expected = 6;
+        5:  expected = 7;
         13: expected = 15;
       endcase
     end
-    for (int c = 0; c < 20 && !exu_ioq_bcast.valid; c++) begin
+    for (int c = 0; c < 20 && !completion_seen; c++) begin
+      #1;
+      if (exu_ioq_bcast.valid) begin
+        completion_seen  = 1;
+        completion_trap  = exu_ioq_bcast.trap;
+        completion_wen   = exu_ioq_bcast.wen;
+        completion_cause = exu_ioq_bcast.cause;
+        completion_tval  = exu_ioq_bcast.tval;
+        completion_npc   = exu_ioq_bcast.npc;
+        break;
+      end
       check(!exu_ioq_bcast.wen, "pending fault allocated a store queue entry");
       if (store_fault) check(!exu_lsu.rvalid, "write-denied AMO issued a read");
       tick(1);
     end
-    check(exu_ioq_bcast.valid && exu_ioq_bcast.trap, "fault lost at completion");
-    check(exu_ioq_bcast.cause == expected, "wrong fault class");
-    check(exu_ioq_bcast.tval == 'h40000000, "fault VA lost");
-    check(exu_ioq_bcast.npc == csr_bcast.tvec, "fault completion missed trap target");
-    check(!exu_ioq_bcast.wen, "fault allocated a store queue entry");
+    check(completion_seen && completion_trap, "fault lost at completion");
+    check(completion_cause == expected, "wrong fault class");
+    check(completion_tval == 'h40000000, "fault VA lost");
+    check(completion_npc == csr_bcast.tvec, "fault completion missed trap target");
+    check(!completion_wen, "fault allocated a store queue entry");
     check(!exu_lsu.rvalid, "faulting AMO issued another read");
     tick(3);
   endtask
@@ -201,21 +357,21 @@ module tb_ioq_atomic_release;
       tick(3);
       reset = 0;
       tick(1);
-      dispatch[0]='0;
-      dispatch[0].uop.pc=XLEN'('h80000000);
-      dispatch[0].uop.pnpc=XLEN'('h80000004);
+      dispatch[0] = '0;
+      dispatch[0].uop.pc = XLEN'('h80000000);
+      dispatch[0].uop.pnpc = XLEN'('h80000004);
       dispatch[0].uop.inst=(kind==0 ? 32'h100022af : kind==1 ? 32'h000022af : 32'h00002283) | (32'(flags)<<25);
-      dispatch[0].uop.execute.memory.load=1;
-      dispatch[0].uop.execute.memory.store=kind==1;
-      dispatch[0].uop.execute.memory.atomic=kind!=2;
-      dispatch[0].uop.execute.int_op.word=1;
+      dispatch[0].uop.execute.memory.load = 1;
+      dispatch[0].uop.execute.memory.store = kind == 1;
+      dispatch[0].uop.execute.memory.atomic = kind != 2;
+      dispatch[0].uop.execute.int_op.word = 1;
       dispatch[0].uop.execute.int_op.alu=kind==0 ? `RAPT_ATO_LR__ : kind==1 ? `RAPT_ATO_ADD_ : `RAPT_ALU_LW__;
-      dispatch[0].op1=XLEN'('h80002000);
-      dispatch[0].op2=1;
-      dispatch[0].dest=3;
-      dispatch[0].prd=4;
-      cmu_bcast.rob_head=3;
-      disp.accept[0]=1;
+      dispatch[0].op1 = XLEN'('h80002000);
+      dispatch[0].op2 = 1;
+      dispatch[0].dest = 3;
+      dispatch[0].prd = 4;
+      cmu_bcast.rob_head = 3;
+      disp.accept[0] = 1;
       tick(1);
       disp.accept[0] = 0;
       repeat (8) if (!exu_lsu.rvalid) tick(1);
@@ -256,19 +412,19 @@ module tb_ioq_atomic_pma;
       tick(3);
       reset = 0;
       tick(1);
-      dispatch[0]='0;
-      dispatch[0].uop.pc=XLEN'('h80000000);
-      dispatch[0].uop.pnpc=XLEN'('h80000004);
-      dispatch[0].uop.execute.memory.store=1;
-      dispatch[0].uop.execute.memory.load=(sc == 0);
-      dispatch[0].uop.execute.memory.atomic=1;
-      dispatch[0].uop.execute.int_op.alu=(sc != 0) ? `RAPT_ATO_SC__ : `RAPT_ATO_ADD_;
-      dispatch[0].uop.execute.int_op.word=1;
-      dispatch[0].op1=(translated != 0) ? XLEN'('h40000000) : XLEN'('h02000000);
-      dispatch[0].op2=1;
-      dispatch[0].dest=3;
-      cmu_bcast.rob_head=3;
-      disp.accept[0]=1;
+      dispatch[0] = '0;
+      dispatch[0].uop.pc = XLEN'('h80000000);
+      dispatch[0].uop.pnpc = XLEN'('h80000004);
+      dispatch[0].uop.execute.memory.store = 1;
+      dispatch[0].uop.execute.memory.load = (sc == 0);
+      dispatch[0].uop.execute.memory.atomic = 1;
+      dispatch[0].uop.execute.int_op.alu = (sc != 0) ? `RAPT_ATO_SC__ : `RAPT_ATO_ADD_;
+      dispatch[0].uop.execute.int_op.word = 1;
+      dispatch[0].op1 = (translated != 0) ? XLEN'('h40000000) : XLEN'('h02000000);
+      dispatch[0].op2 = 1;
+      dispatch[0].dest = 3;
+      cmu_bcast.rob_head = 3;
+      disp.accept[0] = 1;
       tick(1);
       disp.accept[0] = 0;
       if (translated != 0) begin
@@ -276,8 +432,8 @@ module tb_ioq_atomic_pma;
           check(!exu_lsu.rvalid, "AMO read before store translation");
           tick(1);
         end
-        exu_l1d.paddr='h02000000;
-        exu_l1d.ready=1;
+        exu_l1d.paddr = 'h02000000;
+        exu_l1d.ready = 1;
         tick(1);
         exu_l1d.ready = 0;
       end
@@ -318,30 +474,30 @@ module tb_ioq_data_span;
       reset = 0;
       tick(1);
       boundary=region==0 ? XLEN'('h0f002000) : region==1 ? XLEN'('h90000000) : XLEN'('ha2000000);
-      bytes=1<<width;
-      dispatch[0]='0;
-      dispatch[0].uop.pc=XLEN'('h80000000);
-      dispatch[0].uop.pnpc=XLEN'('h80000004);
-      dispatch[0].uop.execute.memory.store=1;
+      bytes = 1 << width;
+      dispatch[0] = '0;
+      dispatch[0].uop.pc = XLEN'('h80000000);
+      dispatch[0].uop.pnpc = XLEN'('h80000004);
+      dispatch[0].uop.execute.memory.store = 1;
       case (width)
-        0: dispatch[0].uop.execute.int_op.alu=`RAPT_SB_WSTRB;
-        1: dispatch[0].uop.execute.int_op.alu=`RAPT_SH_WSTRB;
-        2: dispatch[0].uop.execute.int_op.alu=`RAPT_SW_WSTRB;
+        0: dispatch[0].uop.execute.int_op.alu = `RAPT_SB_WSTRB;
+        1: dispatch[0].uop.execute.int_op.alu = `RAPT_SH_WSTRB;
+        2: dispatch[0].uop.execute.int_op.alu = `RAPT_SW_WSTRB;
         3: begin
 `ifdef RAPT_RV64
           dispatch[0].uop.execute.int_op.alu = `RAPT_SD_WSTRB;
 `else
-          dispatch[0].uop.execute.int_op.alu=`RAPT_SW_WSTRB;
-          dispatch[0].uop.execute.fp.valid=1;
-          dispatch[0].uop.execute.fp.op=`RAPT_FP_OP_FSD;
+          dispatch[0].uop.execute.int_op.alu = `RAPT_SW_WSTRB;
+          dispatch[0].uop.execute.fp.valid = 1;
+          dispatch[0].uop.execute.fp.op = `RAPT_FP_OP_FSD;
 `endif
         end
       endcase
-      dispatch[0].op1=boundary-XLEN'(crossing!=0 ? 1 : bytes);
-      dispatch[0].op2=1;
-      dispatch[0].dest=3;
-      cmu_bcast.rob_head=3;
-      disp.accept[0]=1;
+      dispatch[0].op1 = boundary - XLEN'(crossing != 0 ? 1 : bytes);
+      dispatch[0].op2 = 1;
+      dispatch[0].dest = 3;
+      cmu_bcast.rob_head = 3;
+      disp.accept[0] = 1;
       tick(1);
       disp.accept[0] = 0;
       for (int c = 0; c < 20; c++) begin
@@ -369,30 +525,30 @@ module tb_ioq_data_span;
       tick(3);
       reset = 0;
       tick(1);
-      dispatch[0]='0;
-      dispatch[0].uop.pc=XLEN'('h80000000);
-      dispatch[0].uop.pnpc=XLEN'('h80000004);
-      dispatch[0].uop.execute.memory.store=1;
-      dispatch[0].uop.execute.int_op.alu=`RAPT_SW_WSTRB;
-      dispatch[0].op1='h40000fff;
-      dispatch[0].op2=1;
-      dispatch[0].dest=3;
-      cmu_bcast.rob_head=3;
-      disp.accept[0]=1;
+      dispatch[0] = '0;
+      dispatch[0].uop.pc = XLEN'('h80000000);
+      dispatch[0].uop.pnpc = XLEN'('h80000004);
+      dispatch[0].uop.execute.memory.store = 1;
+      dispatch[0].uop.execute.int_op.alu = `RAPT_SW_WSTRB;
+      dispatch[0].op1 = 'h40000fff;
+      dispatch[0].op2 = 1;
+      dispatch[0].dest = 3;
+      cmu_bcast.rob_head = 3;
+      disp.accept[0] = 1;
       tick(1);
       disp.accept[0] = 0;
       for (int c = 0; c < 20 && !exu_l1d.mmu_en; c++) tick(1);
       #1;
       check(exu_l1d.mmu_en && exu_l1d.vaddr == 'h40000fff, "missing first translation");
-      exu_l1d.paddr='h0f001fff;
-      exu_l1d.ready=1;
+      exu_l1d.paddr = 'h0f001fff;
+      exu_l1d.ready = 1;
       tick(1);
       exu_l1d.ready = 0;
       #1;
       check(exu_l1d.mmu_en && exu_l1d.vaddr == 'h40001000, "missing second translation");
       check(!exu_ioq_bcast.valid, "store escaped before second translation");
-      exu_l1d.paddr=hole!=0 ? XLEN'('h0f002000) : XLEN'('h80001000);
-      exu_l1d.ready=1;
+      exu_l1d.paddr = hole != 0 ? XLEN'('h0f002000) : XLEN'('h80001000);
+      exu_l1d.ready = 1;
       tick(1);
       exu_l1d.ready = 0;
       for (int c = 0; c < 20; c++) begin
@@ -427,6 +583,13 @@ module tb_ioq_overlap;
   `include "tb_ioq_harness.svh"
   int cases = 0;
   initial begin
+    string trace_path;
+    bit minimal;
+    minimal = $test$plusargs("IOQ_OVERLAP_MINIMAL");
+    if ($value$plusargs("IOQ_OVERLAP_TRACE=%s", trace_path)) begin
+      $dumpfile(trace_path);
+      $dumpvars(0, tb_ioq_overlap);
+    end
     for (int mode = 0; mode < 2; mode++)
     for (int boundary = 0; boundary < 2; boundary++)
     for (int sw = 0; sw < 4; sw++)
@@ -436,9 +599,12 @@ module tb_ioq_overlap;
     for (int shift = -1; shift < 3; shift++) begin
       automatic logic [XLEN-1:0] sa, la, base_addr;
       automatic logic overlaps = 0;
-      base_addr = boundary!=0 ? XLEN'('h80000ff8) : XLEN'('h80000040);
+      if (minimal && (mode != 0 || boundary != 0 || sw != 0 || lw != 0 || so != 0
+                      || lo != 0 || (shift != -1 && shift != 0)))
+        continue;
+      base_addr = boundary != 0 ? XLEN'('h80000ff8) : XLEN'('h80000040);
       sa = base_addr + XLEN'(so);
-      la = base_addr + XLEN'(int'(shift*(XLEN/8)+lo));
+      la = base_addr + XLEN'(int'(shift * (XLEN / 8) + lo));
       if (mode != 0) la += XLEN'('h3000);
       // Oracle enumerates bytes of both operations, independently of
       // RTL modular word-range arithmetic. Same word is conservative.
@@ -452,50 +618,57 @@ module tb_ioq_overlap;
       reset = 1;
       init_ioq_inputs(mode != 0);
       tick(2);
-      reset=0;
-      csr_bcast.menvcfg_pbmte=0;
-      csr_bcast.dmmu_en=mode!=0;
-      dispatch[0]='0;
-      dispatch[1]='0;
-      dispatch[0].uop.execute.memory.store=1;
-      dispatch[0].op1=sa;
-      dispatch[0].pr2=1; // retain older store
-      dispatch[0].dest=3;
-      cmu_bcast.rob_head=3;
+      reset = 0;
+      csr_bcast.menvcfg_pbmte = 0;
+      csr_bcast.dmmu_en = mode != 0;
+      dispatch[0] = '0;
+      dispatch[1] = '0;
+      dispatch[0].uop.execute.memory.store = 1;
+      dispatch[0].uop.imm = 12;
+      dispatch[0].op1 = sa - 12;
+      dispatch[0].pr1 = 2;  // keep the older store address genuinely unprepared
+      dispatch[0].pr2 = 1;  // retain older store
+      dispatch[0].dest = 3;
+      cmu_bcast.rob_head = 3;
       case (sw)
-        0: dispatch[0].uop.execute.int_op.alu=`RAPT_SB_WSTRB;
-        1: dispatch[0].uop.execute.int_op.alu=`RAPT_SH_WSTRB;
-        2: dispatch[0].uop.execute.int_op.alu=`RAPT_SW_WSTRB;
+        0: dispatch[0].uop.execute.int_op.alu = `RAPT_SB_WSTRB;
+        1: dispatch[0].uop.execute.int_op.alu = `RAPT_SH_WSTRB;
+        2: dispatch[0].uop.execute.int_op.alu = `RAPT_SW_WSTRB;
         3: begin
-          dispatch[0].uop.execute.int_op.alu=XLEN==32 ? `RAPT_SW_WSTRB : `RAPT_SD_WSTRB;
-          dispatch[0].uop.execute.fp.valid=1;
-          dispatch[0].uop.execute.fp.op=`RAPT_FP_OP_FSD;
+          dispatch[0].uop.execute.int_op.alu = XLEN == 32 ? `RAPT_SW_WSTRB : `RAPT_SD_WSTRB;
+          dispatch[0].uop.execute.fp.valid = 1;
+          dispatch[0].uop.execute.fp.op = `RAPT_FP_OP_FSD;
         end
       endcase
-      dispatch[1].uop.execute.memory.load=1;
-      dispatch[1].op1=la;
-      dispatch[1].dest=4;
+      dispatch[1].uop.execute.memory.load = 1;
+      dispatch[1].uop.imm = 8;
+      dispatch[1].op1 = la - 8;
+      dispatch[1].dest = 4;
       case (lw)
-        0: dispatch[1].uop.execute.int_op.alu=`RAPT_ALU_LBU_;
-        1: dispatch[1].uop.execute.int_op.alu=`RAPT_ALU_LHU_;
-        2: dispatch[1].uop.execute.int_op.alu=`RAPT_ALU_LW__;
+        0: dispatch[1].uop.execute.int_op.alu = `RAPT_ALU_LBU_;
+        1: dispatch[1].uop.execute.int_op.alu = `RAPT_ALU_LHU_;
+        2: dispatch[1].uop.execute.int_op.alu = `RAPT_ALU_LW__;
         3: begin
-          dispatch[1].uop.execute.int_op.alu=`RAPT_ALU_LD__;
-          dispatch[1].uop.execute.fp.valid=1;
-          dispatch[1].uop.execute.fp.op=`RAPT_FP_OP_FLD;
+          dispatch[1].uop.execute.int_op.alu = `RAPT_ALU_LD__;
+          dispatch[1].uop.execute.fp.valid = 1;
+          dispatch[1].uop.execute.fp.op = `RAPT_FP_OP_FLD;
         end
       endcase
-      disp.accept[0]=1;
-      disp.accept[1]=1;
+      disp.accept[0] = 1;
+      disp.accept[1] = 1;
       tick(1);
-      disp.accept[0]=0;
-      disp.accept[1]=0;
+      disp.accept[0] = 0;
+      disp.accept[1] = 0;
       #1;
       check(dut.ioq_valid[0] && dut.ioq_valid[1], "pair not allocated");
-      check(!dut.ioq_addr_ready[0] && !dut.ioq_addr_ready[1]
-            && !exu_lsu.rvalid, "unprepared address issued");
+      check(!dut.ioq_addr_ready[0] && dut.ioq_addr_ready[1] && !exu_lsu.rvalid,
+            "unprepared address issued");
       check(dut.ioq_older_memory_blk[1], "unprepared older store must block");
+      exu_rou.valid = 1;
+      exu_rou.prd = 2;
+      exu_rou.result = sa - 12;
       tick(1);
+      exu_rou.valid = 0;
       check(dut.ioq_addr_ready[0] && dut.ioq_addr_ready[1], "address preparation stalled");
       if (dut.ioq_older_memory_blk[1] !== overlaps)
         $fatal(
@@ -598,6 +771,20 @@ module tb_ioq_pending_lock;
 
   `include "tb_ioq_harness.svh"
 
+  bit sampled_load_bcast;
+  logic [31:0] sampled_load_result;
+  logic [4:0] sampled_load_dest;
+  logic [5:0] sampled_load_prd;
+
+  task automatic sample_load_broadcast;
+    if (exu_ioq_bcast.valid) begin
+      sampled_load_bcast = 1'b1;
+      sampled_load_result = exu_ioq_bcast.result;
+      sampled_load_dest = exu_ioq_bcast.dest;
+      sampled_load_prd = exu_ioq_bcast.prd;
+    end
+  endtask
+
   task automatic drive_sc(input logic [31:0] addr, input logic [31:0] data,
                           input logic reservation_is_valid, input logic [31:0] expected_result);
     begin
@@ -630,8 +817,8 @@ module tb_ioq_pending_lock;
     end
   endtask
 
-  task automatic drive_load(input logic [31:0] addr, input logic [4:0] dest,
-                            input logic [5:0] prd, input logic [31:0] offset = '0);
+  task automatic drive_load(input logic [31:0] addr, input logic [4:0] dest, input logic [5:0] prd,
+                            input logic [31:0] offset = '0);
     begin
       dispatch[0].uop = '0;
       dispatch[0].uop.pc = 32'h2000_0100 + {25'h0, dest, 2'b00};
@@ -704,13 +891,25 @@ module tb_ioq_pending_lock;
   task automatic expect_load_broadcast(input logic [31:0] data, input string msg);
     bit found;
     begin
-      found = 1'b0;
-      for (int wait_cycle = 0; wait_cycle < 8; wait_cycle++) begin
-        if (!found && exu_ioq_bcast.valid) begin
+      found = sampled_load_bcast;
+      if (found) check(sampled_load_result == data, {msg, " broadcast data mismatch"});
+      sampled_load_bcast = 1'b0;
+      #1;
+      if (!found && exu_ioq_bcast.valid) begin
+        check(exu_ioq_bcast.result == data, {msg, " broadcast data mismatch"});
+        sampled_load_dest = exu_ioq_bcast.dest;
+        sampled_load_prd = exu_ioq_bcast.prd;
+        found = 1'b1;
+      end
+      for (int wait_cycle = 0; wait_cycle < 8 && !found; wait_cycle++) begin
+        tick(1);
+        #1;
+        if (exu_ioq_bcast.valid) begin
           check(exu_ioq_bcast.result == data, {msg, " broadcast data mismatch"});
+          sampled_load_dest = exu_ioq_bcast.dest;
+          sampled_load_prd = exu_ioq_bcast.prd;
           found = 1'b1;
         end
-        if (!found) tick(1);
       end
       if (!found) fail({msg, " did not broadcast after LSU completion"});
     end
@@ -718,10 +917,12 @@ module tb_ioq_pending_lock;
 
   task automatic complete_lsu_load(input logic [31:0] data);
     begin
-      exu_lsu.rdata = data;
+      exu_lsu.rdata  = data;
       exu_lsu.rready = 1'b1;
       for (int wait_cycle = 0; wait_cycle < 16; wait_cycle++) begin
         if (exu_lsu.rvalid) begin
+          #1;
+          sample_load_broadcast();
           tick(1);
           exu_lsu.rready = 1'b0;
           return;
@@ -735,14 +936,22 @@ module tb_ioq_pending_lock;
 
   task automatic complete_fast_load(input logic [31:0] data, input logic [5:0] expected_prd);
     begin
-      exu_lsu.rdata = data;
+      exu_lsu.rdata  = data;
       exu_lsu.rready = 1'b1;
       for (int wait_cycle = 0; wait_cycle < 16; wait_cycle++) begin
         if (exu_lsu.rvalid) begin
           #1;
-          check(load_fast.valid, "head integer load did not emit fast wake");
-          check(!load_fast.rebusy, "head integer load emitted rebusy on return");
-          check(load_fast.prd == $bits(load_fast.prd)'(expected_prd), "fast-wake physical destination mismatch");
+          if (exu_ioq_bcast.valid) begin
+            check(exu_ioq_bcast.result == data, "head load live broadcast data mismatch");
+            check(exu_ioq_bcast.prd == $bits(exu_ioq_bcast.prd)'(expected_prd),
+                  "head load live broadcast physical destination mismatch");
+          end else begin
+            check(load_fast.valid, "head integer load did not emit fast wake");
+            check(!load_fast.rebusy, "head integer load emitted rebusy on return");
+            check(load_fast.prd == $bits(load_fast.prd)'(expected_prd),
+                  "fast-wake physical destination mismatch");
+          end
+          sample_load_broadcast();
           tick(1);
           exu_lsu.rready = 1'b0;
           return;
@@ -773,7 +982,7 @@ module tb_ioq_pending_lock;
       check(!exu_lsu.rvalid, "flushed IOQ load still drove an LSU request");
       check(!exu_ioq_bcast.valid, "flushed IOQ load broadcast during flush");
 
-      exu_lsu.rdata = 32'hdead_beef;
+      exu_lsu.rdata  = 32'hdead_beef;
       exu_lsu.rready = 1'b1;
       tick(1);
       exu_lsu.rready = 1'b0;
@@ -786,8 +995,8 @@ module tb_ioq_pending_lock;
       wait_for_addr(32'hc000_4000);
       complete_fast_load(32'h1234_abcd, 6'd10);
       expect_load_broadcast(32'h1234_abcd, "post-flush reused load");
-      check(exu_ioq_bcast.dest == 5'd8, "post-flush reused load broadcast a stale ROB destination");
-      check(exu_ioq_bcast.prd == 10,
+      check(sampled_load_dest == 5'd8, "post-flush reused load broadcast a stale ROB destination");
+      check(sampled_load_prd == 10,
             "post-flush reused load broadcast a stale physical destination");
     end
   endtask
@@ -807,7 +1016,7 @@ module tb_ioq_pending_lock;
     tick(2);
     reset = 1'b0;
     tick(2);
-    csr_bcast.dmmu_en = 1'b1;
+    csr_bcast.dmmu_en  = 1'b1;
 
     // Keep an older translating store at the IOQ/ROB head, then issue a
     // non-aliasing younger MMU load.  Its physical address (and therefore MMIO
@@ -815,7 +1024,7 @@ module tb_ioq_pending_lock;
     // MMIO it waits for ordered=1, so the held request must be promoted only
     // after both the IOQ and ROB heads advance to it.
     cmu_bcast.rob_head = 5'd11;
-    exu_lsu.stq_ready = 1'b0;
+    exu_lsu.stq_ready  = 1'b0;
     drive_store(32'hc000_0000, 5'd11);
     drive_load(32'hc000_0800, 5'd12, 6'd12);
     wait_for_addr(32'hc000_0800);
@@ -865,12 +1074,9 @@ module tb_ioq_pending_lock;
 `ifdef RAPT_LSU_HUM
     #1;
     check(dut.ioq_valid[1], "second MMU load was not resident in IOQ entry 1");
-    check(!dut.ioq_load_issue_vec[1] && !exu_lsu.rvalid_b,
-          "unprepared MMU load became issue-eligible");
-    tick(1);
-    check(dut.ioq_load_issue_vec[1], "second MMU load was not issue-eligible");
     check(!exu_lsu.rvalid_b, "HUM B request bypassed its request register");
     tick(1);
+    check(dut.ioq_addr_ready[1], "second MMU load address was not prepared");
     check(exu_lsu.rvalid_b, "registered HUM B request missing after capture");
 `endif
     for (int i = 0; i < 8; i++) begin
@@ -885,14 +1091,20 @@ module tb_ioq_pending_lock;
     exu_lsu.rdata_b = 32'haaaa_5555;
     exu_lsu.rready = 1'b1;
     exu_lsu.rready_b = 1'b1;
+    #1;
+    sample_load_broadcast();
     tick(1);
-    exu_lsu.rready = 1'b0;
+    exu_lsu.rready   = 1'b0;
     exu_lsu.rready_b = 1'b0;
 `else
     complete_lsu_load(32'h1111_2222);
 `endif
     expect_load_broadcast(32'h1111_2222, "first load");
 
+`ifdef RAPT_LSU_HUM
+    #1;
+    sample_load_broadcast();
+`endif
     tick(1);
 `ifdef RAPT_LSU_HUM
     expect_load_broadcast(32'haaaa_5555, "simultaneous HUM load");
@@ -926,25 +1138,25 @@ module tb_ioq_plic_width;
       tick(3);
       reset = 0;
       tick(1);
-      dispatch[0]='0;
-      dispatch[0].uop.pc=XLEN'('h80000000);
-      dispatch[0].uop.pnpc=XLEN'('h80000004);
-      dispatch[0].uop.execute.memory.store=1;
+      dispatch[0] = '0;
+      dispatch[0].uop.pc = XLEN'('h80000000);
+      dispatch[0].uop.pnpc = XLEN'('h80000004);
+      dispatch[0].uop.execute.memory.store = 1;
       case (width)
-        0:dispatch[0].uop.execute.int_op.alu=`RAPT_SB_WSTRB;
-        1:dispatch[0].uop.execute.int_op.alu=`RAPT_SH_WSTRB;
-        2:dispatch[0].uop.execute.int_op.alu=`RAPT_SW_WSTRB;
+        0: dispatch[0].uop.execute.int_op.alu = `RAPT_SB_WSTRB;
+        1: dispatch[0].uop.execute.int_op.alu = `RAPT_SH_WSTRB;
+        2: dispatch[0].uop.execute.int_op.alu = `RAPT_SW_WSTRB;
         3: begin
-          dispatch[0].uop.execute.int_op.alu=XLEN==64 ? `RAPT_SD_WSTRB : `RAPT_SW_WSTRB;
-          dispatch[0].uop.execute.fp.valid=1;
-          dispatch[0].uop.execute.fp.op=`RAPT_FP_OP_FSD;
+          dispatch[0].uop.execute.int_op.alu = XLEN == 64 ? `RAPT_SD_WSTRB : `RAPT_SW_WSTRB;
+          dispatch[0].uop.execute.fp.valid = 1;
+          dispatch[0].uop.execute.fp.op = `RAPT_FP_OP_FSD;
         end
       endcase
-      dispatch[0].op1=translated!=0 ? XLEN'('h40000000) : XLEN'('h0c000000);
-      dispatch[0].op2=0;
-      dispatch[0].dest=3;
-      cmu_bcast.rob_head=3;
-      disp.accept[0]=1;
+      dispatch[0].op1 = translated != 0 ? XLEN'('h40000000) : XLEN'('h0c000000);
+      dispatch[0].op2 = 0;
+      dispatch[0].dest = 3;
+      cmu_bcast.rob_head = 3;
+      disp.accept[0] = 1;
       tick(1);
       disp.accept[0] = 0;
       if (translated != 0) begin
@@ -953,8 +1165,8 @@ module tb_ioq_plic_width;
         for (int c = 0; c < 20 && !exu_l1d.mmu_en; c++) tick(1);
         #1;
         check(exu_l1d.mmu_en, "missing store translation request");
-        exu_l1d.paddr='h0c000000;
-        exu_l1d.ready=1;
+        exu_l1d.paddr = 'h0c000000;
+        exu_l1d.ready = 1;
         tick(1);
         exu_l1d.ready = 0;
       end
@@ -992,20 +1204,21 @@ module tb_ioq_readonly_pma;
       tick(3);
       reset = 0;
       tick(1);
-      dispatch[0]='0;
-      dispatch[0].uop.pc=XLEN'('h80000000);
-      dispatch[0].uop.pnpc=XLEN'('h80000004);
-      dispatch[0].uop.execute.memory.store=1;
-      dispatch[0].uop.execute.memory.load=kind==1;
-      dispatch[0].uop.execute.memory.atomic=kind==1;
-      dispatch[0].uop.execute.int_op.alu=kind==0 ? `RAPT_ALU_SW__
-          : kind==1 ? `RAPT_ATO_ADD_ : {1'b0,`RAPT_CBO_ZERO_WALU};
-      dispatch[0].uop.execute.int_op.word=1;
-      dispatch[0].op1=region==0 ? XLEN'('h20001000) : XLEN'('h30001000);
-      dispatch[0].op2=1;
-      dispatch[0].dest=3;
-      cmu_bcast.rob_head=3;
-      disp.accept[0]=1;
+      dispatch[0] = '0;
+      dispatch[0].uop.pc = XLEN'('h80000000);
+      dispatch[0].uop.pnpc = XLEN'('h80000004);
+      dispatch[0].uop.execute.memory.store = 1;
+      dispatch[0].uop.execute.memory.load = kind == 1;
+      dispatch[0].uop.execute.memory.atomic = kind == 1;
+      dispatch[0].uop.execute.int_op.alu = kind == 0 ?
+      `RAPT_ALU_SW__
+      : kind == 1 ? `RAPT_ATO_ADD_ : {1'b0, `RAPT_CBO_ZERO_WALU};
+      dispatch[0].uop.execute.int_op.word = 1;
+      dispatch[0].op1 = region == 0 ? XLEN'('h20001000) : XLEN'('h30001000);
+      dispatch[0].op2 = 1;
+      dispatch[0].dest = 3;
+      cmu_bcast.rob_head = 3;
+      disp.accept[0] = 1;
       tick(1);
       disp.accept[0] = 0;
       for (int c = 0; c < 20; c++) begin
@@ -1031,7 +1244,7 @@ endmodule
 module tb_ioq_reservation_extent;
   localparam int XLEN = `RAPT_XLEN;
   `include "tb_ioq_harness.svh"
-  int cases=0;
+  int cases = 0;
   bit success;
   initial begin
     for (int lrbytes = 4; lrbytes <= XLEN / 8; lrbytes += 4)
@@ -1043,22 +1256,22 @@ module tb_ioq_reservation_extent;
       tick(3);
       reset = 0;
       tick(1);
-      exu_l1d.reservation=XLEN'('h80001000);
-      exu_l1d.reservation_valid=1;
-      exu_l1d.reservation_size_m1=4'(lrbytes-1);
-      dispatch[0]='0;
-      dispatch[0].uop.inst=32'h180022af | (32'(flags)<<25);
-      dispatch[0].uop.pc=XLEN'('h80000000);
-      dispatch[0].uop.pnpc=XLEN'('h80000004);
-      dispatch[0].uop.execute.memory.store=1;
-      dispatch[0].uop.execute.memory.atomic=1;
-      dispatch[0].uop.execute.int_op.alu=`RAPT_ATO_SC__;
-      dispatch[0].uop.execute.int_op.word=scbytes==4;
-      dispatch[0].op1=XLEN'('h80001000)+XLEN'(different==2 ? 64 : different*scbytes);
-      dispatch[0].op2=XLEN'('h55);
-      dispatch[0].dest=3;
-      cmu_bcast.rob_head=3;
-      disp.accept[0]=1;
+      exu_l1d.reservation = XLEN'('h80001000);
+      exu_l1d.reservation_valid = 1;
+      exu_l1d.reservation_size_m1 = 4'(lrbytes - 1);
+      dispatch[0] = '0;
+      dispatch[0].uop.inst = 32'h180022af | (32'(flags) << 25);
+      dispatch[0].uop.pc = XLEN'('h80000000);
+      dispatch[0].uop.pnpc = XLEN'('h80000004);
+      dispatch[0].uop.execute.memory.store = 1;
+      dispatch[0].uop.execute.memory.atomic = 1;
+      dispatch[0].uop.execute.int_op.alu = `RAPT_ATO_SC__;
+      dispatch[0].uop.execute.int_op.word = scbytes == 4;
+      dispatch[0].op1 = XLEN'('h80001000) + XLEN'(different == 2 ? 64 : different * scbytes);
+      dispatch[0].op2 = XLEN'('h55);
+      dispatch[0].dest = 3;
+      cmu_bcast.rob_head = 3;
+      disp.accept[0] = 1;
       tick(1);
       disp.accept[0] = 0;
       for (int c = 0; c < 20 && !exu_ioq_bcast.valid; c++) tick(1);
@@ -1115,12 +1328,12 @@ module tb_ioq_sc_external;
       .payload_match
   );
   initial begin
-    owner_live='1;
-    owner_executing='1;
+    owner_live = '1;
+    owner_executing = '1;
     foreach (owner_generation[i]) begin
-      owner_generation[i]='0;
-      owner_prd[i]='0;
-      owner_rd[i]='0;
+      owner_generation[i] = '0;
+      owner_prd[i] = '0;
+      owner_rd[i] = '0;
     end
     for (int invalidate = 0; invalidate < 2; invalidate++) begin
       reset = 1;
@@ -1128,21 +1341,21 @@ module tb_ioq_sc_external;
       tick(3);
       reset = 0;
       tick(1);
-      exu_l1d.reservation=XLEN'('h80001000);
-      exu_l1d.reservation_valid=1;
-      exu_l1d.reservation_blocked=1;
-      dispatch[0]='0;
-      dispatch[0].uop.pc=XLEN'('h80000000);
-      dispatch[0].uop.pnpc=XLEN'('h80000004);
-      dispatch[0].uop.execute.memory.store=1;
-      dispatch[0].uop.execute.memory.atomic=1;
-      dispatch[0].uop.execute.int_op.alu=`RAPT_ATO_SC__;
-      dispatch[0].uop.execute.int_op.word=1;
-      dispatch[0].op1=XLEN'('h80001000);
-      dispatch[0].op2=XLEN'('h55);
-      dispatch[0].dest=3;
-      cmu_bcast.rob_head=3;
-      disp.accept[0]=1;
+      exu_l1d.reservation = XLEN'('h80001000);
+      exu_l1d.reservation_valid = 1;
+      exu_l1d.reservation_blocked = 1;
+      dispatch[0] = '0;
+      dispatch[0].uop.pc = XLEN'('h80000000);
+      dispatch[0].uop.pnpc = XLEN'('h80000004);
+      dispatch[0].uop.execute.memory.store = 1;
+      dispatch[0].uop.execute.memory.atomic = 1;
+      dispatch[0].uop.execute.int_op.alu = `RAPT_ATO_SC__;
+      dispatch[0].uop.execute.int_op.word = 1;
+      dispatch[0].op1 = XLEN'('h80001000);
+      dispatch[0].op2 = XLEN'('h55);
+      dispatch[0].dest = 3;
+      cmu_bcast.rob_head = 3;
+      disp.accept[0] = 1;
       tick(1);
       disp.accept[0] = 0;
       repeat (5) begin
@@ -1150,8 +1363,8 @@ module tb_ioq_sc_external;
               "SC completed or consumed reservation before notification drain");
         tick(1);
       end
-      exu_l1d.reservation_valid=(invalidate==0);
-      exu_l1d.reservation_blocked=0;
+      exu_l1d.reservation_valid   = (invalidate == 0);
+      exu_l1d.reservation_blocked = 0;
       #1;
       check(exu_ioq_bcast.valid && !exu_ioq_bcast.trap, "SC did not resume");
       check(exu_ioq_bcast.result == XLEN'(invalidate), "SC status did not reflect invalidation");
@@ -1167,25 +1380,25 @@ module tb_ioq_sc_external;
         tick(3);
         reset = 0;
         tick(1);
-        owner_live='1;
-        owner_executing='1;
-        owner_generation[3]='0;
+        owner_live = '1;
+        owner_executing = '1;
+        owner_generation[3] = '0;
         if (rejection == 1) owner_generation[3] = 1;
         if (rejection == 2) owner_live[3] = 0;
         if (rejection == 3) owner_executing[3] = 0;
-        exu_l1d.reservation=XLEN'('h80001000);
-        exu_l1d.reservation_valid=1;
-        exu_l1d.reservation_blocked=0;
-        dispatch[0]='0;
-        dispatch[0].uop.execute.memory.store=1;
-        dispatch[0].uop.execute.memory.atomic=1;
-        dispatch[0].uop.execute.int_op.alu=`RAPT_ATO_SC__;
-        dispatch[0].uop.execute.int_op.word=1;
-        dispatch[0].op1=XLEN'('h80001000);
-        dispatch[0].op2=XLEN'('h55);
-        dispatch[0].dest=3;
-        cmu_bcast.rob_head=3;
-        disp.accept[0]=1;
+        exu_l1d.reservation = XLEN'('h80001000);
+        exu_l1d.reservation_valid = 1;
+        exu_l1d.reservation_blocked = 0;
+        dispatch[0] = '0;
+        dispatch[0].uop.execute.memory.store = 1;
+        dispatch[0].uop.execute.memory.atomic = 1;
+        dispatch[0].uop.execute.int_op.alu = `RAPT_ATO_SC__;
+        dispatch[0].uop.execute.int_op.word = 1;
+        dispatch[0].op1 = XLEN'('h80001000);
+        dispatch[0].op2 = XLEN'('h55);
+        dispatch[0].dest = 3;
+        cmu_bcast.rob_head = 3;
+        disp.accept[0] = 1;
         tick(1);
         disp.accept[0] = 0;
         for (int c = 0; c < 20 && !exu_ioq_bcast.valid; c++) tick(1);
@@ -1237,16 +1450,17 @@ module tb_ioq_store_pbmt;
     dispatch[0].uop.pc = 'h20000000;
     dispatch[0].uop.pnpc = 'h20000004;
     dispatch[0].uop.execute.memory.store = 1;
-    dispatch[0].uop.execute.int_op.alu = size == 1 ? `RAPT_SB_WSTRB
-      : size == 2 ? `RAPT_SH_WSTRB : size == 4 ? `RAPT_SW_WSTRB : `RAPT_SD_WSTRB;
+    dispatch[0].uop.execute.int_op.alu = size == 1 ?
+    `RAPT_SB_WSTRB
+    : size == 2 ? `RAPT_SH_WSTRB : size == 4 ? `RAPT_SW_WSTRB : `RAPT_SD_WSTRB;
     if (XLEN == 32 && size == 8) begin
       dispatch[0].uop.execute.fp.valid = 1;
       dispatch[0].uop.execute.fp.op = `RAPT_FP_OP_FSD;
     end
-    dispatch[0].op1 = va;
-    dispatch[0].op2 = 'h12345678;
+    dispatch[0].op1  = va;
+    dispatch[0].op2  = 'h12345678;
     dispatch[0].dest = 3;
-    disp.accept[0] = 1;
+    disp.accept[0]   = 1;
     tick(1);
     disp.accept[0] = 0;
     exu_lsu.stq_ready = 0;
@@ -1257,7 +1471,7 @@ module tb_ioq_store_pbmt;
     tick(3);
     check(!exu_ioq_bcast.valid, "store completed before translation");
     exu_l1d.paddr = PagePA + XLEN'(offset);
-    exu_l1d.pbmt = 2'(attr0);
+    exu_l1d.pbmt  = 2'(attr0);
     exu_l1d.ready = 1;
     tick(1);
     exu_l1d.ready = 0;
@@ -1272,17 +1486,17 @@ module tb_ioq_store_pbmt;
         cmu_bcast.flush_pipe = 0;
       end
       exu_l1d.paddr = NextPA;
-      exu_l1d.pbmt = 2'(attr1);
-      exu_l1d.trap = second_fault;
+      exu_l1d.pbmt  = 2'(attr1);
+      exu_l1d.trap  = second_fault;
       exu_l1d.cause = `RAPT_CAUSE_STORE_PAGE_FAULT;
       exu_l1d.ready = 1;
       tick(1);
       exu_l1d.ready = 0;
-      exu_l1d.trap = 0;
+      exu_l1d.trap  = 0;
     end
     // Subsequent unrelated translation traffic cannot replace resident attrs.
     exu_l1d.paddr = '1;
-    exu_l1d.pbmt = 3;
+    exu_l1d.pbmt  = 3;
     tick(3);
     exu_lsu.stq_ready = 1;
     #1;
@@ -1296,7 +1510,7 @@ module tb_ioq_store_pbmt;
         check(exu_ioq_bcast.sq_waddr == PagePA + XLEN'(offset), "first PA changed");
         beats = ((offset % (XLEN / 8)) + size + XLEN / 8 - 1) / (XLEN / 8);
         for (int beat = 0; beat < beats; beat++) begin
-          beatva = (va & ~XLEN'(XLEN/8-1)) + XLEN'(beat*(XLEN/8));
+          beatva = (va & ~XLEN'(XLEN / 8 - 1)) + XLEN'(beat * (XLEN / 8));
           expected_pa = (beatva[XLEN-1:12] == va[XLEN-1:12] ? PagePA : NextPA)
                         + XLEN'(beatva[11:0]);
           if (beat == 1) check(sq_waddr_hi == expected_pa, "middle-beat PA wrong");
@@ -1326,6 +1540,16 @@ endmodule
 module tb_ioq_store_stage;
   localparam int XLEN = `RAPT_XLEN;
   `include "tb_ioq_harness.svh"
+  wire payload_accept = disp.accept[0];
+  wire [XLEN-1:0] payload_op1 = dispatch[0].op1;
+  wire [XLEN-1:0] payload_stable_op1 = dispatch[0].stable_op1;
+  wire payload_stable_op1_valid = dispatch[0].stable_op1_valid;
+  string store_trace;
+  initial
+    if ($value$plusargs("IOQ_STORE_TRACE=%s", store_trace)) begin
+      $dumpfile(store_trace);
+      $dumpvars(0, tb_ioq_store_stage);
+    end
   task automatic boot;
     reset = 1;
     init_ioq_inputs(0);
@@ -1336,16 +1560,18 @@ module tb_ioq_store_stage;
   endtask
   task automatic enqueue(input logic [XLEN-1:0] addr, input int dest, input int generation,
                          input int dependency);
-    dispatch[0]='0;
-    dispatch[0].uop.pc=XLEN'('h80000000)+XLEN'(dest*4);
-    dispatch[0].uop.execute.memory.store=1;
-    dispatch[0].uop.execute.int_op.alu=`RAPT_SW_WSTRB;
-    dispatch[0].op1=addr;
-    dispatch[0].op2=XLEN'('h1234);
-    dispatch[0].pr1=$bits(dispatch[0].pr1)'(dependency);
-    dispatch[0].dest=$bits(dispatch[0].dest)'(dest);
-    dispatch[0].generation=$bits(dispatch[0].generation)'(generation);
-    disp.accept[0]=1;
+    dispatch[0] = '0;
+    dispatch[0].uop.pc = XLEN'('h80000000) + XLEN'(dest * 4);
+    dispatch[0].uop.execute.memory.store = 1;
+    dispatch[0].uop.execute.int_op.alu = `RAPT_SW_WSTRB;
+    dispatch[0].op1 = addr;
+    dispatch[0].stable_op1 = addr;
+    dispatch[0].stable_op1_valid = (dependency == 0);
+    dispatch[0].op2 = XLEN'('h1234);
+    dispatch[0].pr1 = $bits(dispatch[0].pr1)'(dependency);
+    dispatch[0].dest = $bits(dispatch[0].dest)'(dest);
+    dispatch[0].generation = $bits(dispatch[0].generation)'(generation);
+    disp.accept[0] = 1;
     tick(1);
     disp.accept[0] = 0;
   endtask
@@ -1361,15 +1587,16 @@ module tb_ioq_store_stage;
   initial begin
     boot();
     enqueue(XLEN'('h20000000), 3, 2, 7);
+    check(!dut.head_store_check_valid_q, "unready dispatch entered store precheck");
     repeat (3) begin
       check(!exu_ioq_bcast.valid && !exu_ioq_bcast.wen && !exu_l1d.valid,
             "unready address escaped into a store stage");
       tick(1);
     end
-    exu_rou='0;
-    exu_rou.valid=1;
-    exu_rou.prd=7;
-    exu_rou.result=XLEN'('h80001000);
+    exu_rou = '0;
+    exu_rou.valid = 1;
+    exu_rou.prd = 7;
+    exu_rou.result = XLEN'('h80001000);
     tick(1);
     exu_rou.valid = 0;
     tick(3);
@@ -1379,18 +1606,22 @@ module tb_ioq_store_stage;
     exu_lsu.stq_ready = 1;
     #1;
     expect_store(XLEN'('h80001000), 3, 2);
-    check(!exu_ioq_bcast.valid, "new head reused previous permission state");
+    // The previous head may precheck the new head on its completion edge.
+    // If it does, the registered check must belong to the new address.
+    if (exu_ioq_bcast.valid)
+      check(dut.head_store_check_valid_q && dut.head_store_check_tval_q == XLEN'('h80002000),
+            "new head reused previous permission state");
     expect_store(XLEN'('h80002000), 4, 5);
     for (int stage = 0; stage < 3; stage++) begin
       boot();
       enqueue(XLEN'('h20001000), 3, 2, 0);
       tick(stage);
-      cmu_bcast.flush_pipe=1;
-      exu_l1d.ready=1;
+      cmu_bcast.flush_pipe = 1;
+      exu_l1d.ready = 1;
       tick(1);
-      cmu_bcast.flush_pipe=0;
-      exu_l1d.ready=0;
-      exu_lsu.stq_ready=1;
+      cmu_bcast.flush_pipe = 0;
+      exu_l1d.ready = 0;
+      exu_lsu.stq_ready = 1;
       repeat (3) begin
         check(!exu_ioq_bcast.valid && !exu_l1d.valid,
               "flushed store stage produced a stale request/completion");
@@ -1399,6 +1630,111 @@ module tb_ioq_store_stage;
       enqueue(XLEN'('h80003000), 3, 6, 0);
       expect_store(XLEN'('h80003000), 3, 6);
     end
+    // Stable and freshly bypassed ROU sources both stop at the IOQ address
+    // register.  Permission checking starts only after allocation owns it.
+    for (int stable_source = 0; stable_source < 2; stable_source++) begin
+      boot();
+      dispatch[0] = '0;
+      dispatch[0].uop.pc = XLEN'('h80000040);
+      dispatch[0].uop.execute.memory.store = 1;
+      dispatch[0].uop.execute.int_op.alu = `RAPT_SW_WSTRB;
+      dispatch[0].op1 = XLEN'('h80004000);
+      dispatch[0].stable_op1 = XLEN'('h80004000);
+      dispatch[0].stable_op1_valid = 1'(stable_source);
+      dispatch[0].pr1 = '0;
+      dispatch[0].pr2 = '0;
+      dispatch[0].dest = 5;
+      #1;
+      check(!dut.head_store_check_valid_q, "store was checked before address allocation");
+      disp.accept[0] = 1;
+      tick(1);
+      disp.accept[0] = 0;
+      #1;
+      check(!dut.head_store_check_valid_q,
+            "dispatch-to-PMP path crossed the address-register boundary");
+      tick(2);
+      check(dut.head_store_check_valid_q && dut.head_store_check_tval_q == XLEN'('h80004000),
+            "registered address did not reach the resident store checker");
+    end
+    // The resident checker retains CBO management's R-or-W PMP policy.
+    for (int cmo_mgmt = 0; cmo_mgmt < 2; cmo_mgmt++) begin
+      boot();
+      pmp_state.pmp_mode_na4[0] = 1'b1;
+      pmp_state.pmp_raw_addr[0] = 'h20001000;
+      pmp_state.pmp_cfg_l[0] = 1'b1;
+      pmp_state.pmp_cfg_r[0] = 1'b1;
+      dispatch[0] = '0;
+      dispatch[0].uop.execute.memory.store = 1'b1;
+      dispatch[0].uop.execute.int_op.alu = cmo_mgmt ? `RAPT_CBO_MGMT_WALU : `RAPT_SW_WSTRB;
+      dispatch[0].op1 = XLEN'('h80004000);
+      dispatch[0].stable_op1 = XLEN'('h80004000);
+      dispatch[0].stable_op1_valid = 1'b1;
+      disp.accept[0] = 1'b1;
+      tick(1);
+      disp.accept[0] = 1'b0;
+      #1;
+      check(!dut.head_store_check_valid_q, "CBO permission result bypassed the address register");
+      tick(2);
+      check(dut.head_store_check_valid_q && dut.head_store_check_fault_q == !cmo_mgmt,
+            "resident store checker changed CBO PMP policy");
+    end
+    // Credit is an owned-entry count, not a combinational view of the head
+    // completion.  Releasing one full-queue entry publishes exactly one
+    // credit on the following cycle; flush restores every credit.
+    boot();
+    for (int e = 0; e < $bits(dut.ioq_valid); e++) begin
+      check(disp.ready[0], "IOQ lost a credit before reaching capacity");
+      enqueue(XLEN'('h80005000) + XLEN'(e * 4), e + 1, e + 1, 0);
+    end
+    check(!disp.ready[0] && !disp.ready[1] && dut.ioq_free_q == 0,
+          "full IOQ advertised a stale dispatch credit");
+    exu_lsu.stq_ready = 1;
+    #1;
+    check(exu_ioq_bcast.valid && !disp.ready[0],
+          "head completion leaked into same-cycle dispatch ready");
+    tick(1);
+    check(disp.ready[0] && !disp.ready[1] && dut.ioq_free_q == 1,
+          "retired head did not publish exactly one registered credit");
+    cmu_bcast.flush_pipe = 1;
+    tick(1);
+    cmu_bcast.flush_pipe = 0;
+    #1;
+    check(int'(dut.ioq_free_q) == $bits(dut.ioq_valid) && disp.ready[0] && disp.ready[1],
+          "flush did not restore dispatch credit ownership");
+    // The following store may be selected for permission checking only
+    // after its data wake is registered.  Neither same-cycle CDB wake nor a
+    // live response from the older load may steer the PMP/tval input mux.
+    boot();
+    dispatch[0] = '0;
+    dispatch[0].uop.execute.memory.load = 1'b1;
+    dispatch[0].uop.execute.int_op.alu = `RAPT_ALU_LW__;
+    dispatch[0].op1 = XLEN'('h80006000);
+    disp.accept[0] = 1'b1;
+    tick(1);
+    disp.accept[0] = 1'b0;
+    dispatch[0] = '0;
+    dispatch[0].uop.execute.memory.store = 1'b1;
+    dispatch[0].uop.execute.int_op.alu = `RAPT_SW_WSTRB;
+    dispatch[0].op1 = XLEN'('h80007000);
+    dispatch[0].pr2 = $bits(dispatch[0].pr2)'(7);
+    disp.accept[0] = 1'b1;
+    tick(1);
+    disp.accept[0] = 1'b0;
+    #1;
+    check(!dut.store_check_lookahead, "unready successor entered store lookahead");
+    exu_rou.valid = 1'b1;
+    exu_rou.prd = $bits(exu_rou.prd)'(7);
+    exu_rou.result = XLEN'('h1234);
+    #1;
+    check(!dut.store_check_lookahead, "same-cycle CDB wake steered the store permission checker");
+    tick(1);
+    exu_rou.valid = 1'b0;
+    #1;
+    check(dut.store_check_lookahead, "registered successor wake did not enable store lookahead");
+    exu_lsu.rready = 1'b1;
+    #1;
+    check(dut.store_check_lookahead, "live L1D completion changed store checker ownership");
+    exu_lsu.rready = 1'b0;
     $display("PASS: IOQ store stages preserve wakeup, identity, backpressure and flush ownership");
     $finish;
   end
@@ -1422,20 +1758,20 @@ module tb_ioq_zero_pma;
       tick(3);
       reset = 0;
       tick(1);
-      dispatch[0]='0;
-      dispatch[0].uop.pc='h80000000;
-      dispatch[0].uop.pnpc='h80000004;
-      dispatch[0].uop.execute.memory.store=1;
-      dispatch[0].uop.execute.memory.load=0;
-      dispatch[0].uop.execute.memory.atomic=0;
-      dispatch[0].uop.execute.int_op.alu={1'b0,`RAPT_CBO_ZERO_WALU};
-      dispatch[0].uop.execute.int_op.word=1;
+      dispatch[0] = '0;
+      dispatch[0].uop.pc = 'h80000000;
+      dispatch[0].uop.pnpc = 'h80000004;
+      dispatch[0].uop.execute.memory.store = 1;
+      dispatch[0].uop.execute.memory.load = 0;
+      dispatch[0].uop.execute.memory.atomic = 0;
+      dispatch[0].uop.execute.int_op.alu = {1'b0, `RAPT_CBO_ZERO_WALU};
+      dispatch[0].uop.execute.int_op.word = 1;
       dispatch[0].op1=translated ? XLEN'('h40000000) : (ram ? XLEN'('h8fffffc0) : XLEN'('h02000000));
       dispatch[0].op1 += XLEN'(offset * 63);
-      dispatch[0].op2=1;
-      dispatch[0].dest=3;
-      cmu_bcast.rob_head=3;
-      disp.accept[0]=1;
+      dispatch[0].op2 = 1;
+      dispatch[0].dest = 3;
+      cmu_bcast.rob_head = 3;
+      disp.accept[0] = 1;
       tick(1);
       disp.accept[0] = 0;
       if (translated) begin
@@ -1443,9 +1779,9 @@ module tb_ioq_zero_pma;
           check(!exu_lsu.rvalid, "CBO.ZERO issued a read before translation");
           tick(1);
         end
-        exu_l1d.paddr=(ram ? XLEN'('h8fffffc0) : XLEN'('h02000000))+XLEN'(offset*63);
-        exu_l1d.pbmt=2'(attr);
-        exu_l1d.ready=1;
+        exu_l1d.paddr = (ram ? XLEN'('h8fffffc0) : XLEN'('h02000000)) + XLEN'(offset * 63);
+        exu_l1d.pbmt  = 2'(attr);
+        exu_l1d.ready = 1;
         tick(1);
         exu_l1d.ready = 0;
       end
@@ -1514,9 +1850,11 @@ module tb_ioq_address_stage;
     exu_rou.result = XLEN'('h80000040);
     tick(1);
     exu_rou.valid = 0;
-    check(dut.ioq_addr_ready == '0, "wakeup bypassed address stage");
+    check(dut.ioq_addr_ready[0] && !exu_lsu.rvalid,
+          "wakeup did not capture the registered address");
     tick(1);
-    check(dut.ioq_addr_ready[0], "woken operand failed address preparation");
+    check(dut.ioq_addr_ready[0] && exu_lsu.rvalid && exu_lsu.raddr == XLEN'('h8000004c),
+          "address/request register did not present rvalid on the prepare cycle");
     expect_request(XLEN'('h8000004c));
     flush_queue();
     // Reuse slot zero with a dispatch-time completion and a different base.
@@ -1525,7 +1863,10 @@ module tb_ioq_address_stage;
     exu_rou.result = XLEN'('h80000100);
     enqueue(9, XLEN'('hdead0000));
     exu_rou.valid = 0;
-    check(!dut.ioq_addr_ready[0], "reallocated slot inherited ready state");
+    check(!dut.ioq_addr_ready[0] && !exu_lsu.rvalid, "reallocated slot inherited ready state");
+    tick(1);
+    check(dut.ioq_addr_ready[0] && exu_lsu.rvalid && exu_lsu.raddr == XLEN'('h8000010c),
+          "dispatch snoop added an extra idle cycle before rvalid");
     expect_request(XLEN'('h8000010c));
     flush_queue();
     enqueue(0, XLEN'('h80000200));
@@ -1540,19 +1881,86 @@ module tb_ioq_address_stage;
     for (int n = 0; n <= `RAPT_IOQ_SIZE; n++) begin
       automatic int owner;
       owner = int'(dut.ioq_tail_a);
-      enqueue(0, XLEN'('h80000400 + n*16));
-      check(!dut.ioq_addr_ready[owner], "completed slot retained address readiness");
-      expect_request(XLEN'('h8000040c + n*16));
+      enqueue(0, XLEN'('h80000400 + n * 16));
+      check(dut.ioq_addr_ready[owner], "ready dispatch did not prepare reused slot");
+      expect_request(XLEN'('h8000040c + n * 16));
       exu_lsu.rready = 1;
-      exu_lsu.rdata = XLEN'(n);
+      exu_lsu.rdata  = XLEN'(n);
+      #1;
+      check(exu_ioq_bcast.valid && exu_ioq_bcast.result == XLEN'(n),
+            "direct head completion missing");
       tick(1);
       exu_lsu.rready = 0;
-      for (int c = 0; c < 8 && !exu_ioq_bcast.valid; c++) tick(1);
-      check(exu_ioq_bcast.valid && exu_ioq_bcast.result == XLEN'(n), "completion missing");
-      tick(1);
-      check(!dut.ioq_valid[owner] && !dut.ioq_addr_ready[owner], "completion retained address owner");
+      check(!dut.ioq_valid[owner] && !dut.ioq_addr_ready[owner],
+            "completion retained address owner");
     end
-    $display("PASS: IOQ address preparation wakeup, dispatch snoop, flush, reuse and backpressure XLEN=%0d", XLEN);
+    $display(
+        "PASS: IOQ address preparation wakeup, dispatch snoop, flush, reuse and backpressure XLEN=%0d",
+        XLEN);
+    $finish;
+  end
+endmodule
+
+
+// Consecutive cacheable integer loads: the younger load returns the cycle
+// the older head broadcasts, so it is not yet the IOQ head. Fast-wake must
+// still fire; the next-cycle CDB packet is that younger load.
+module tb_ioq_fast_load_next_head;
+  localparam int XLEN = `RAPT_XLEN;
+  `include "tb_ioq_harness.svh"
+  task automatic enqueue_load(input logic [XLEN-1:0] addr, input logic [4:0] dest,
+                              input int unsigned prd);
+    dispatch[0] = '0;
+    dispatch[0].uop.execute.memory.load = 1;
+    dispatch[0].uop.execute.int_op.alu = `RAPT_ALU_LW__;
+    dispatch[0].uop.rd = dest;
+    dispatch[0].op1 = addr;
+    dispatch[0].prd = $bits(dispatch[0].prd)'(prd);
+    dispatch[0].dest = dest;
+    disp.accept[0] = 1;
+    tick(1);
+    disp.accept[0] = 0;
+  endtask
+  initial begin
+    bit saw_head_wake;
+    bit saw_next_head_wake;
+    bit saw_younger_broadcast;
+    init_ioq_inputs(0);
+    tick(3);
+    reset = 0;
+    enqueue_load(XLEN'('h80001000), 5'd3, 10);
+    enqueue_load(XLEN'('h80001004), 5'd4, 11);
+    exu_lsu.rready = 1;
+    exu_lsu.rdata = XLEN'('h1111_1111);
+    saw_head_wake = 0;
+    saw_next_head_wake = 0;
+    saw_younger_broadcast = 0;
+    for (int c = 0; c < 16; c++) begin
+      #1;
+      if (exu_lsu.rvalid && load_fast.valid && !load_fast.rebusy && load_fast.prd == $bits(
+              load_fast.prd
+          )'(10))
+        saw_head_wake = 1;
+      if (exu_ioq_bcast.valid && exu_ioq_bcast.prd == $bits(
+              exu_ioq_bcast.prd
+          )'(10) && exu_lsu.rvalid && load_fast.valid && !load_fast.rebusy &&
+              load_fast.prd == $bits(
+              load_fast.prd
+          )'(11))
+        saw_next_head_wake = 1;
+      if (exu_ioq_bcast.valid && exu_ioq_bcast.prd == $bits(
+              exu_ioq_bcast.prd
+          )'(11) && exu_ioq_bcast.result == XLEN'('h2222_2222))
+        saw_younger_broadcast = 1;
+      if (exu_ioq_bcast.valid && exu_ioq_bcast.prd == $bits(exu_ioq_bcast.prd)'(10))
+        exu_lsu.rdata = XLEN'('h2222_2222);
+      tick(1);
+    end
+    check(!saw_head_wake, "direct-completing head load redundantly fast-woke");
+    check(saw_next_head_wake == (`RAPT_IOQ_FAST_LOAD_NEXT_HEAD != 0),
+          "next-head fast-wake did not match the configured policy");
+    check(saw_younger_broadcast, "younger load did not confirm on CDB after next-head wake");
+    $display("PASS: IOQ next-head fast-load wake and confirm XLEN=%0d", XLEN);
     $finish;
   end
 endmodule

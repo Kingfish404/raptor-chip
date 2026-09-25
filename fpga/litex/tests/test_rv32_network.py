@@ -18,6 +18,7 @@ class RV32NetworkTest(unittest.TestCase):
                 self.assertEqual(command[3], target)
                 args = dict(arg.split("=", 1) for arg in command[4:])
                 self.assertEqual(args["VARIANT"], "linux32")
+                self.assertEqual(args["SYS_CLK"], "50000000")
                 self.assertEqual(args["RAPT_CONFIG"], "default")
                 self.assertEqual(args["ETH_SPEED"], "1000")
                 self.assertEqual(args["FMC_SLOT"], "c")

@@ -18,11 +18,14 @@
 #include <memory/paddr.h>
 #include <memory/tlb.h>
 #include <cpu/icache.h>
+#include <inttypes.h>
 
 extern jmp_buf exec_jmp_buf;
 extern int cause;
 
 extern FILE *mem_trace;
+extern FILE *subsystem_mem_trace;
+extern uint64_t g_nr_guest_inst;
 
 /* PMP check (implemented in src/isa/<isa>/system/pmp.c) */
 bool pmp_check(paddr_t addr, int size, uint32_t priv,
@@ -30,6 +33,21 @@ bool pmp_check(paddr_t addr, int size, uint32_t priv,
 extern word_t pmp_last_fault_addr;
 
 word_t g_vaddr = 0;
+
+static word_t subsystem_log_read(vaddr_t addr, int len, word_t data)
+{
+  if (subsystem_mem_trace != NULL)
+    fprintf(subsystem_mem_trace, "%" PRIu64 " " FMT_WORD_NO_PREFIX " r " FMT_WORD_NO_PREFIX " %d " FMT_WORD_NO_PREFIX "\n",
+            g_nr_guest_inst, cpu.cpc, addr, len, data);
+  return data;
+}
+
+static void subsystem_log_write(vaddr_t addr, int len, word_t data)
+{
+  if (subsystem_mem_trace != NULL)
+    fprintf(subsystem_mem_trace, "%" PRIu64 " " FMT_WORD_NO_PREFIX " w " FMT_WORD_NO_PREFIX " %d " FMT_WORD_NO_PREFIX "\n",
+            g_nr_guest_inst, cpu.cpc, addr, len, data);
+}
 
 /* Software TLB arrays: direct-mapped, separate per access type */
 soft_tlb_entry_t soft_tlb_ifetch[SOFT_TLB_ENTRIES];
@@ -283,7 +301,7 @@ word_t vaddr_read_piece(vaddr_t addr, int len, int original_len, bool original_m
     g_vaddr = addr;
     cpu.rpaddr = lo;
     cpu.rdata = value;
-    return value;
+    return subsystem_log_read(addr, len, value);
   }
   /* Misaligned ordinary loads are allowed (Zicclsm). The rapt RTL LSU
    * splits misaligned beats via the MA_HI / LS_S_HI_V FSM, and the
@@ -318,7 +336,7 @@ word_t vaddr_read_piece(vaddr_t addr, int len, int original_len, bool original_m
       }
       cpu.rpaddr = paddr;
       cpu.rdata = paddr_read(paddr, len);
-      return cpu.rdata;
+      return subsystem_log_read(addr, len, cpu.rdata);
     }
     paddr = isa_mmu_translate_attrs(addr, len, MEM_TYPE_READ, &pbmt);
     soft_tlb_refill_attrs(soft_tlb_load, addr, paddr, pbmt);
@@ -336,7 +354,7 @@ word_t vaddr_read_piece(vaddr_t addr, int len, int original_len, bool original_m
   }
   cpu.rpaddr = paddr;
   cpu.rdata = paddr_read(paddr, len);
-  return cpu.rdata;
+  return subsystem_log_read(addr, len, cpu.rdata);
 }
 
 word_t vaddr_read(vaddr_t addr, int len)
@@ -363,6 +381,7 @@ void vaddr_write(vaddr_t addr, int len, word_t data)
     }
     g_vaddr = addr;
     cpu.pwaddr = lo;
+    subsystem_log_write(addr, len, data);
     return;
   }
   /* Misaligned ordinary stores are allowed (Zicclsm); see vaddr_read note. */
@@ -400,6 +419,7 @@ void vaddr_write(vaddr_t addr, int len, word_t data)
         cpu.reservation = 0;
         cpu.reservation_bytes = 0;
       }
+      subsystem_log_write(addr, len, data);
       return;
     }
     paddr = isa_mmu_translate_attrs(addr, len, MEM_TYPE_WRITE, &pbmt);
@@ -423,6 +443,7 @@ void vaddr_write(vaddr_t addr, int len, word_t data)
     cpu.reservation = 0;
     cpu.reservation_bytes = 0;
   }
+  subsystem_log_write(addr, len, data);
 }
 
 /* Zicbom management operations check the addressed byte as a data access with

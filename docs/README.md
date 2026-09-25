@@ -27,13 +27,13 @@ Repository: <https://github.com/Kingfish404/raptor-chip>
 | Interrupts           | CLINT (`mtime`, `mtimecmp`, `msip`) + PLIC (31 sources, M/S contexts)                                   |
 | Ordered widths       | Decode 2 / Rename 2 / Dispatch 2 / Commit 2 by default; independently parameterized                    |
 | Integer execution    | 2 physical integer issue/ALU ports by default; CSR/system on port 0                                     |
-| Queues               | ROB 32, ALQ 8, BRQ 4, MDQ 4, FPQ 4, IOQ 8, unified SQ 16                                               |
+| Queues               | ROB 32, ALQ 8, BRQ 4, MDQ 4, FPQ 1, IOQ 8, unified SQ 16                                               |
 | Register state       | 64-entry integer PRF (including 32 architectural mappings) + 32 × 64-bit FPR bank                        |
 | Writeback            | CDB ×5 (integer ports + branch + memory + MUL/DIV)                                                      |
 | BPU                  | TAGE direction predictor + 2-way BTB (128) + 4-entry RSB                                                |
 | L1I / L1D            | 16 KiB 4-way each (64 sets × 64 B × 4), banked SRAM; L1D write-through                                    |
 | L2                   | Optional 16 KiB direct-mapped; default preset leaves the stage as passthrough                           |
-| Bus                  | AXI4, XLEN-bit data/addr, 4-bit ID; up to 8 reads, one single-beat write                                |
+| Bus                  | AXI4, XLEN-bit data/addr, 4-bit ID; up to 8 reads, one outstanding write (ordinary stores single-beat; CBO.ZERO multi-beat)                                |
 | Debug                | RISC-V Debug Module / JTAG DTM bring-up ports at cluster top                                            |
 | Verification         | Difftest against NEMU; RVFI/riscv-formal; SVA                                                           |
 
@@ -67,7 +67,7 @@ See [Performance Iterations](./perf-iterations.md) for the recorded IPC history 
 ```
 raptor-chip/
 ├── Makefile              top-level driver
-├── env.sh                environment variables (auto-sourced by Makefile)
+├── env.sh                environment variables for direct shell workflows
 ├── hdl/                   SystemVerilog RTL
 │   ├── chisel/            Chisel decoder generator
 │   ├── rapt.sv           cluster-level top (core + CLINT + PLIC + router + debug)

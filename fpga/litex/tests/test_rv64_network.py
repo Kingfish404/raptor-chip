@@ -29,6 +29,7 @@ class RV64NetworkTest(unittest.TestCase):
             self.assertEqual(cmd[3], target)
             args = dict(arg.split("=", 1) for arg in cmd[4:])
             self.assertEqual(args["VARIANT"], "linux64")
+            self.assertEqual(args["SYS_CLK"], "30000000")
             self.assertEqual(args["LINUX_IMG"], args["LINUX_FPGA_PAYLOAD"])
             self.assertEqual(args["LINUX_FPGA_INIT"], "full")
             self.assertEqual(args["WITH_ETHERNET"], "1")

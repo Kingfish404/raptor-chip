@@ -8,7 +8,9 @@ module rapt_l1d_access #(
     parameter int XLEN = `RAPT_XLEN,
     parameter bit ShareLoadWalk = 1'b0
 ) (
-    csr_bcast_if.in csr_bcast,
+    input rapt_pkg::mem_context_t load_context,
+    input rapt_pkg::mem_context_t store_context,
+    input rapt_pkg::mem_context_t ptw_context,
     pmp_state_if.in pmp_state,
     input logic [XLEN-1:0] load_addr,
     input logic [XLEN-1:0] store_addr,
@@ -37,15 +39,12 @@ module rapt_l1d_access #(
   // --- PMP checks for loads and MMU-mode stores ---
   // Effective privilege for load/store obeys MSTATUS.MPRV: when MPRV=1 and
   // current privilege is M, accesses use MPP for PMP checks.
-  logic [1:0] eff_priv;
-  assign eff_priv = (csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv)
-                    ? csr_bcast.mpp : csr_bcast.priv;
+  logic [1:0] check_priv[3];
 
   // The controller supplies the active request's transfer size, not the
   // next LSU request. Addresses here are physical; this block has no state.
   // Treat loads from unmapped physical addresses as access faults (bus error).
-  assign load_unmapped_fault = !rapt_pkg::addr_data_span_capable(
-      load_addr, load_size_m1, 1'b0);
+  assign load_unmapped_fault = !rapt_pkg::addr_data_span_capable(load_addr, load_size_m1, 1'b0);
 
   // Store PMP (MMU path): store_addr is the translated physical address
   // (meaningful once stlb_hit or immediately after ptw_done).
@@ -116,16 +115,18 @@ module rapt_l1d_access #(
   /* verilator lint_on UNUSEDSIGNAL */
 
   // Perm-fault signals evaluated against currently-visible PTEs.
-  assign pf_load_tlb  = tlb_hit  && pte_fault_data(dtlb_pte,  1'b0, 1'b0, eff_priv,
-                                                    csr_bcast.sum, csr_bcast.mxr);
+  assign pf_load_tlb  = tlb_hit  && pte_fault_data(dtlb_pte,  1'b0, 1'b0,
+                                                    load_context.eff_priv,
+                                                    load_context.sum, load_context.mxr);
   assign pf_store_tlb = stlb_hit && pte_fault_data(dstlb_pte, 1'b1,
-                                                    cmo_mgmt, eff_priv,
-                                                    csr_bcast.sum, csr_bcast.mxr);
-  assign pf_load_ptw  = pte_fault_data(ptw_result_pte, 1'b0, 1'b0, eff_priv,
-                                        csr_bcast.sum, csr_bcast.mxr);
+                                                    cmo_mgmt, store_context.eff_priv,
+                                                    store_context.sum, store_context.mxr);
+  assign pf_load_ptw  = pte_fault_data(ptw_result_pte, 1'b0, 1'b0,
+                                        ptw_context.eff_priv,
+                                        ptw_context.sum, ptw_context.mxr);
   assign pf_store_ptw = pte_fault_data(ptw_result_pte, 1'b1,
-                                        cmo_mgmt, eff_priv,
-                                        csr_bcast.sum, csr_bcast.mxr);
+                                        cmo_mgmt, ptw_context.eff_priv,
+                                        ptw_context.sum, ptw_context.mxr);
 
   // Sv32 reads four-byte PTEs; Sv39 reads eight-byte PTEs. PMP must cover
   // the complete implicit read, including its upper half on RV64.
@@ -143,6 +144,10 @@ module rapt_l1d_access #(
       ? 4'(XLEN / 8 - 1) : load_size_m1;
   assign check_size_m1[StoreCheck] = store_size_m1;
   assign check_size_m1[WalkCheck] = 4'(XLEN / 8 - 1);
+  assign check_priv[LoadCheck] = ShareLoadWalk && ptw_check_active
+      ? ptw_context.eff_priv : load_context.eff_priv;
+  assign check_priv[StoreCheck] = store_context.eff_priv;
+  assign check_priv[WalkCheck] = ptw_context.eff_priv;
   assign pmp_load_fault = check_fault[LoadCheck];
   assign pmp_store_fault_mmu_w = check_fault[StoreCheck];
   assign pmp_store_fault_mmu_r = check_read_fault[StoreCheck];
@@ -160,7 +165,7 @@ module rapt_l1d_access #(
     ) u_check (
         .addr(check_addr[port_idx]),
         .size_m1(check_size_m1[port_idx]),
-        .priv(eff_priv),
+        .priv(check_priv[port_idx]),
         .op_r(port_idx != StoreCheck),
         .op_w(port_idx == StoreCheck),
         .op_x(1'b0),

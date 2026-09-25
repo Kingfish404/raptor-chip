@@ -1,12 +1,9 @@
 // Independent transition-system miter for rename checkpoint lifetime,
-// ancestry clearing, snapshots, and restore selection.
+// ancestry clearing, history snapshots, and restore selection.
 module formal_rename_checkpoint #(
     parameter int Entries = 4,
     parameter int RenameWidth = 2,
     parameter int ResolvePorts = 2,
-    parameter int MapEntries = 4,
-    parameter int PhysRegs = 8,
-    parameter int MapBits = PhysRegs > 1 ? $clog2(PhysRegs) : 1,
     parameter int CheckpointBits = Entries > 1 ? $clog2(Entries) : 1
 ) (
     input logic clock,
@@ -14,8 +11,9 @@ module formal_rename_checkpoint #(
     flush,
     input logic allocate_valid[RenameWidth],
     input logic [CheckpointBits-1:0] allocate_id[RenameWidth],
-    input logic [MapBits-1:0] allocate_map[RenameWidth][MapEntries],
-    input logic [PhysRegs-1:0] allocate_free[RenameWidth],
+    input logic [63:0] allocate_ghr[RenameWidth],
+    input logic [7:0] allocate_phr[RenameWidth],
+    input logic allocate_conditional[RenameWidth],
     input logic release_valid[ResolvePorts],
     input logic [CheckpointBits-1:0] release_id[ResolvePorts],
     input logic restore_valid,
@@ -24,15 +22,13 @@ module formal_rename_checkpoint #(
 );
   logic [Entries-1:0] available, live;
   logic restore_hit;
-  logic [MapBits-1:0] restore_map[MapEntries];
-  logic [PhysRegs-1:0] restore_free;
+  logic [63:0] restore_ghr;
+  logic [7:0] restore_phr;
+  logic restore_conditional;
   rapt_rename_checkpoint #(
       .Entries(Entries),
       .RenameWidth(RenameWidth),
       .ResolvePorts(ResolvePorts),
-      .MapEntries(MapEntries),
-      .PhysRegs(PhysRegs),
-      .MapBits(MapBits),
       .CheckpointBits(CheckpointBits)
   ) dut (
       .*
@@ -40,15 +36,17 @@ module formal_rename_checkpoint #(
 
   logic [Entries-1:0] ref_valid, next_valid;
   logic [Entries-1:0] ref_older[Entries], next_older[Entries];
-  logic [MapBits-1:0] ref_map[Entries][MapEntries], next_map[Entries][MapEntries];
-  logic [PhysRegs-1:0] ref_free[Entries], next_free[Entries];
+  logic [63:0] ref_ghr[Entries], next_ghr[Entries];
+  logic [7:0] ref_phr[Entries], next_phr[Entries];
+  logic ref_conditional[Entries], next_conditional[Entries];
 
   always_comb begin
     next_valid = ref_valid;
     for (int e = 0; e < Entries; e++) begin
       next_older[e] = ref_older[e];
-      next_free[e] = ref_free[e];
-      for (int r = 0; r < MapEntries; r++) next_map[e][r] = ref_map[e][r];
+      next_ghr[e] = ref_ghr[e];
+      next_phr[e] = ref_phr[e];
+      next_conditional[e] = ref_conditional[e];
     end
     if (restore_valid) begin
       for (int e = 0; e < Entries; e++)
@@ -67,8 +65,9 @@ module formal_rename_checkpoint #(
       if (release_valid[p]) next_older[allocate_id[s]][release_id[p]] = 0;
       for (int prior = 0; prior < s; prior++)
       if (allocate_valid[prior]) next_older[allocate_id[s]][allocate_id[prior]] = 1;
-      next_free[allocate_id[s]] = allocate_free[s];
-      for (int r = 0; r < MapEntries; r++) next_map[allocate_id[s]][r] = allocate_map[s][r];
+      next_ghr[allocate_id[s]] = allocate_ghr[s];
+      next_phr[allocate_id[s]] = allocate_phr[s];
+      next_conditional[allocate_id[s]] = allocate_conditional[s];
     end
     if (reset || flush) begin
       next_valid = '0;
@@ -80,8 +79,9 @@ module formal_rename_checkpoint #(
     ref_valid <= next_valid;
     for (int e = 0; e < Entries; e++) begin
       ref_older[e] <= next_older[e];
-      ref_free[e] <= next_free[e];
-      for (int r = 0; r < MapEntries; r++) ref_map[e][r] <= next_map[e][r];
+      ref_ghr[e] <= next_ghr[e];
+      ref_phr[e] <= next_phr[e];
+      ref_conditional[e] <= next_conditional[e];
     end
   end
 
@@ -90,14 +90,18 @@ module formal_rename_checkpoint #(
     for (int e = 0; e < Entries; e++) begin
       correct &= dut.older_q[e] == ref_older[e];
       if (ref_valid[e]) begin
-        correct &= dut.free_q[e] == ref_free[e];
-        for (int r = 0; r < MapEntries; r++) correct &= dut.map_q[e][r] == ref_map[e][r];
+        correct &= dut.ghr_q[e] == ref_ghr[e];
+        correct &= dut.phr_q[e] == ref_phr[e];
+        correct &= dut.conditional_q[e] == ref_conditional[e];
       end
     end
     correct &= restore_hit == (restore_valid && ref_valid[restore_id]);
     if (restore_valid && ref_valid[restore_id]) begin
-      correct &= restore_free == ref_free[restore_id];
-      for (int r = 0; r < MapEntries; r++) correct &= restore_map[r] == ref_map[restore_id][r];
+      correct &= restore_ghr == ref_ghr[restore_id];
+      correct &= restore_phr == ref_phr[restore_id];
+      correct &= restore_conditional == ref_conditional[restore_id];
+    end else begin
+      correct &= restore_ghr == '0 && restore_phr == '0 && !restore_conditional;
     end
   end
 

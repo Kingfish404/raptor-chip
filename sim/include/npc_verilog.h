@@ -54,8 +54,16 @@
 // rapt_clint is inlined by Verilator, so its registers are reached via the
 // __DOT__ name from the parent `rapt` cell (`cpu`).
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _raptSoC))
+#if __has_include(CONCAT_HEAD(CONCAT(TOP_NAME, _rapt)))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_core))
+#elif __has_include(CONCAT_HEAD(CONCAT(TOP_NAME, _rapt__Lz1)))
+// An explicit L1dWriteBack=1 top parameter specializes these generated classes.
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt__Lz1))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_core__Lz1))
+#else
+#error Unsupported Verilator rapt hierarchy
+#endif
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_backend))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_rou))
 #define VERILOG_CPU(m) (top->rootp->raptSoC->cpu->core->m)

@@ -47,14 +47,25 @@
 #define VIRTIO_MMIO_DEVICE_DESC_HIGH 0x0a4u
 #define VIRTIO_MMIO_CONFIG_CAPACITY_LOW 0x100u
 #define VIRTIO_MMIO_CONFIG_CAPACITY_HIGH 0x104u
+#define VIRTIO_MMIO_CONFIG_SIZE_MAX 0x108u
+#define VIRTIO_MMIO_CONFIG_SEG_MAX 0x10cu
+
+/* Advertised block features (low 32 bits).  VIRTIO_F_VERSION_1 lives in
+ * select register 1, bit 0. */
+#define VIRTIO_BLK_F_SIZE_MAX (1u << 1)
+#define VIRTIO_BLK_F_SEG_MAX (1u << 2)
+#define VIRTIO_BLK_FEATURES_LOW (VIRTIO_BLK_F_SIZE_MAX | VIRTIO_BLK_F_SEG_MAX)
+#define VIRTIO_BLK_MAX_SIZE 0x100000u
+#define VIRTIO_BLK_SEG_MAX 128u
 
 #define VIRTIO_CONFIG_S_DRIVER_OK 4u
 #define VRING_DESC_F_NEXT 1u
 #define VIRTIO_BLK_T_IN 0u
 #define VIRTIO_BLK_T_OUT 1u
+#define VIRTIO_BLK_T_GET_ID 8u
 #define VIRTIO_BLK_STATUS_OK 0u
 #define VIRTIO_BLK_STATUS_IOERR 1u
-#define VIRTIO_QUEUE_NUM_MAX 8u
+#define VIRTIO_QUEUE_NUM_MAX 256u
 #define VIRTIO_SECTOR_SIZE 512u
 
 typedef struct
@@ -195,16 +206,11 @@ static bool write_used_elem(uint16_t id, uint32_t len)
     return guest_mem_write(blk.device_addr + 2, &used_idx, sizeof(used_idx));
 }
 
-static void complete_request(uint16_t head, uint32_t used_len, uint8_t status)
+static void finish_request(uint16_t head, uint32_t used_len)
 {
-    virtq_desc_t desc0, desc1, desc2;
-    if (!read_desc(head, &desc0))
-        return;
-    if (!(desc0.flags & VRING_DESC_F_NEXT) || !read_desc(desc0.next, &desc1))
-        return;
-    if (!(desc1.flags & VRING_DESC_F_NEXT) || !read_desc(desc1.next, &desc2))
-        return;
-    guest_mem_write(desc2.addr, &status, 1);
+    static uint32_t debug_count = 0;
+    if (getenv("NEMU_DISK_DEBUG") != NULL)
+        fprintf(stderr, "[disk] done head=%u used_len=%u (#%u)\n", head, used_len, debug_count++);
     if (write_used_elem(head, used_len))
     {
         blk.interrupt_status |= 1u;
@@ -212,61 +218,111 @@ static void complete_request(uint16_t head, uint32_t used_len, uint8_t status)
     }
 }
 
+/* A virtio-blk request is a descriptor chain of the form
+ *   [header][data...][status]
+ * where the data portion may span an arbitrary number of chained
+ * descriptors (NetBSD does this for multi-page transfers).  Walk the whole
+ * chain instead of assuming exactly one data descriptor, otherwise large
+ * reads are only partially filled and the guest sees corrupt filesystems. */
 static void process_one(uint16_t head)
 {
-    virtq_desc_t desc0, desc1, desc2;
+    virtq_desc_t desc0, desc, status_desc;
     virtio_blk_req_t req;
     uint8_t status = VIRTIO_BLK_STATUS_OK;
     uint32_t used_len = 0;
+    bool io_ok = true;
+    bool have_status = false;
+    size_t disk_off = 0;
+    size_t remaining = 0;
 
-    if (!read_desc(head, &desc0) || !(desc0.flags & VRING_DESC_F_NEXT) ||
-        !read_desc(desc0.next, &desc1) || !(desc1.flags & VRING_DESC_F_NEXT) ||
-        !read_desc(desc1.next, &desc2) ||
-        desc0.len < sizeof(req) || !guest_mem_read(desc0.addr, &req, sizeof(req)))
+    if (!read_desc(head, &desc0) || desc0.len < sizeof(req) ||
+        !(desc0.flags & VRING_DESC_F_NEXT) ||
+        !guest_mem_read(desc0.addr, &req, sizeof(req)))
     {
-        complete_request(head, 0, VIRTIO_BLK_STATUS_IOERR);
+        finish_request(head, 0);
         return;
     }
 
-    uint64_t disk_off = req.sector * VIRTIO_SECTOR_SIZE;
-    if (disk_off >= blk.disk_size)
+    uint64_t byte_off = req.sector * (uint64_t)VIRTIO_SECTOR_SIZE;
+    if (byte_off < blk.disk_size)
     {
-        status = VIRTIO_BLK_STATUS_IOERR;
+        disk_off = (size_t)byte_off;
+        remaining = blk.disk_size - disk_off;
     }
     else
     {
-        size_t avail = blk.disk_size - (size_t)disk_off;
-        size_t count = desc1.len <= avail ? desc1.len : avail;
+        io_ok = false;
+    }
+
+    memset(&status_desc, 0, sizeof(status_desc));
+    if (getenv("NEMU_DISK_DEBUG") != NULL)
+        fprintf(stderr, "[disk] req type=%u sector=%llu head=%u\n", req.type,
+                (unsigned long long)req.sector, head);
+    uint16_t idx = desc0.next;
+    for (uint32_t guard = 0; guard <= VIRTIO_QUEUE_NUM_MAX; guard++)
+    {
+        if (!read_desc(idx, &desc))
+        {
+            io_ok = false;
+            break;
+        }
+        if (!(desc.flags & VRING_DESC_F_NEXT))
+        {
+            /* The final descriptor in the chain carries the status byte. */
+            status_desc = desc;
+            have_status = true;
+            break;
+        }
+
+        uint32_t len = desc.len;
         if (req.type == VIRTIO_BLK_T_IN)
         {
-            guest_mem_write(desc1.addr, blk.disk + disk_off, count);
-            if (count < desc1.len)
+            uint32_t n = (len <= remaining) ? len : (uint32_t)remaining;
+            guest_mem_write(desc.addr, blk.disk + disk_off, n);
+            if (n < len)
             {
                 uint8_t zero = 0;
-                for (uint32_t i = (uint32_t)count; i < desc1.len; i++)
-                    guest_mem_write(desc1.addr + i, &zero, 1);
+                for (uint32_t i = n; i < len; i++)
+                    guest_mem_write(desc.addr + i, &zero, 1);
             }
-            used_len = desc1.len;
+            used_len += len;
+            disk_off += n;
+            remaining -= n;
         }
         else if (req.type == VIRTIO_BLK_T_OUT)
         {
-            if (count != desc1.len)
-                status = VIRTIO_BLK_STATUS_IOERR;
-            else
-                guest_mem_read(desc1.addr, blk.disk + disk_off, count);
+            uint32_t n = (len <= remaining) ? len : (uint32_t)remaining;
+            if (n != len)
+                io_ok = false;
+            guest_mem_read(desc.addr, blk.disk + disk_off, n);
+            disk_off += n;
+            remaining -= n;
+        }
+        else if (req.type == VIRTIO_BLK_T_GET_ID)
+        {
+            static const char id[20] = "NEMU-VIRTIO-BLK";
+            uint32_t n = len < sizeof(id) ? len : (uint32_t)sizeof(id);
+            guest_mem_write(desc.addr, id, n);
+            if (n < len)
+            {
+                uint8_t zero = 0;
+                for (uint32_t i = n; i < len; i++)
+                    guest_mem_write(desc.addr + i, &zero, 1);
+            }
+            used_len += len;
         }
         else
         {
-            status = VIRTIO_BLK_STATUS_IOERR;
+            io_ok = false;
         }
+        idx = desc.next;
     }
 
-    guest_mem_write(desc2.addr, &status, 1);
-    if (write_used_elem(head, used_len))
-    {
-        blk.interrupt_status |= 1u;
-        plic_raise_irq(VIRTIO_BLK_IRQ);
-    }
+    if (!io_ok)
+        status = VIRTIO_BLK_STATUS_IOERR;
+    if (have_status)
+        guest_mem_write(status_desc.addr, &status, 1);
+    finish_request(head, used_len);
 }
 
 static void service_queue(void)
@@ -283,6 +339,9 @@ static void service_queue(void)
     uint16_t avail_idx = 0;
     if (!guest_mem_read(blk.driver_addr + 2, &avail_idx, sizeof(avail_idx)))
         return;
+
+    if (getenv("NEMU_DISK_DEBUG") != NULL && avail_idx != blk.last_avail_idx)
+        fprintf(stderr, "[disk] notify avail=%u last=%u qnum=%u\n", avail_idx, blk.last_avail_idx, qnum);
 
     while (blk.last_avail_idx != avail_idx)
     {
@@ -309,7 +368,12 @@ static uint32_t read_reg32(uint32_t base)
     case VIRTIO_MMIO_VENDOR_ID:
         return 0x554d4551u;
     case VIRTIO_MMIO_DEVICE_FEATURES:
-        return 0u;
+        /* Selector 1 exposes the high 32 feature bits; advertise
+         * VIRTIO_F_VERSION_1 (bit 32) so modern (MMIO-v2) guests such as
+         * NetBSD accept the device instead of failing feature negotiation.
+         * Selector 0 advertises SIZE_MAX/SEG_MAX so the guest sizes its DMA
+         * maps correctly instead of assuming a single-segment payload. */
+        return (blk.device_features_sel == 1) ? 1u : VIRTIO_BLK_FEATURES_LOW;
     case VIRTIO_MMIO_QUEUE_NUM_MAX:
         return enabled() && blk.queue_sel == 0 ? VIRTIO_QUEUE_NUM_MAX : 0u;
     case VIRTIO_MMIO_QUEUE_READY:
@@ -322,6 +386,10 @@ static uint32_t read_reg32(uint32_t base)
         return (uint32_t)(blk.disk_size / VIRTIO_SECTOR_SIZE);
     case VIRTIO_MMIO_CONFIG_CAPACITY_HIGH:
         return (uint32_t)((blk.disk_size / VIRTIO_SECTOR_SIZE) >> 32);
+    case VIRTIO_MMIO_CONFIG_SIZE_MAX:
+        return VIRTIO_BLK_MAX_SIZE;
+    case VIRTIO_MMIO_CONFIG_SEG_MAX:
+        return VIRTIO_BLK_SEG_MAX;
     default:
         return 0;
     }

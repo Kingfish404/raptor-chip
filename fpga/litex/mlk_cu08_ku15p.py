@@ -11,6 +11,7 @@ BOARD = KU15PBoard(
     cm005_rx_tuned=True,
     bare_hold_uncertainty=0.050,
     default_fmc_slot="c",
+    mig_tcl="ku15p_cu08_ddr4_mig.tcl",
 )
 
 

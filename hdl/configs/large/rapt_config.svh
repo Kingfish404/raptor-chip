@@ -36,6 +36,13 @@
 `define RAPT_RIQ_SIZE 16
 `define RAPT_IIQ_SIZE 16
 `define RAPT_ROB_SIZE 32
+`ifndef RAPT_OPERAND_SPILL_ENTRIES
+`define RAPT_OPERAND_SPILL_ENTRIES 16
+`endif
+
+// Control-flow speculation depth. The shared default is the area-lean 16;
+// this preset keeps the wider array for deep misprediction recovery.
+`define RAPT_BRANCH_CHECKPOINTS 32
 
 // Scheduler: wider RS / IOQ to feed both ALU pipes plus pipelined MUL.
 `define RAPT_RS_SIZE 16
@@ -64,16 +71,6 @@
 `endif
 `ifndef RAPT_FETCH_LOOKAHEAD
 `define RAPT_FETCH_LOOKAHEAD
-`endif
-
-// Deprecated compatibility markers for historical modules/testbenches.
-`define RAPT_DUAL_COMMIT
-`define RAPT_DUAL_ISSUE
-
-`ifdef RAPT_DUAL_ISSUE
-`define RAPT_ISSUE_WIDTH 2
-`else
-`define RAPT_ISSUE_WIDTH 1
 `endif
 
 `ifdef RAPT_I_EXTENSION
@@ -107,6 +104,9 @@
 `define RAPT_L1D_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
 `define RAPT_L1D_LEN 6
 `define RAPT_L1D_N_WAYS 2
+`ifndef RAPT_L1D_MSHRS
+`define RAPT_L1D_MSHRS 4
+`endif
 
 `define RAPT_ITLB_ENTRIES 32
 `define RAPT_DTLB_ENTRIES 32

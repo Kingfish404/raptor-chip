@@ -2,7 +2,12 @@
 
 module tb_store_queue_forward_ring;
   logic [3:0] done;
-  sq_forward_ring_case #(.Entries(2), .ReadPorts(1)) two_slots (done[0]);
+  sq_forward_ring_case #(
+      .Entries(2),
+      .ReadPorts(1)
+  ) two_slots (
+      done[0]
+  );
   sq_forward_ring_case #(.Entries(4)) four_slots (done[1]);
   sq_forward_ring_case #(.Entries(16)) default_slots (done[2]);
   sq_forward_ring_case #(.Entries(32)) large_queue (done[3]);
@@ -38,7 +43,13 @@ module sq_forward_ring_case #(
   logic [3:0] load_size_m1[ReadPorts];
   logic [ReadPorts-1:0] conflict, forward_valid;
   logic [Xlen-1:0] forward_data[ReadPorts];
-  rapt_sq_forward #(.Xlen(Xlen), .Entries(Entries), .ReadPorts(ReadPorts)) dut (.*);
+  rapt_sq_forward #(
+      .Xlen(Xlen),
+      .Entries(Entries),
+      .ReadPorts(ReadPorts)
+  ) dut (
+      .*
+  );
 
   logic [31:0] rng = 32'h54a31b07;
   int checks = 0;
@@ -68,15 +79,14 @@ module sq_forward_ring_case #(
   endfunction
   // Enumerate bytes, then compare their machine-word addresses. This does not
   // reuse the DUT's span arithmetic, modular subtraction or priority masks.
-  function automatic bit alias_bytes(input logic [Xlen-1:0] saddr, laddr,
-                                      input int sbytes, lbytes, input bit page_only);
+  function automatic bit alias_bytes(input logic [Xlen-1:0] saddr, laddr, input int sbytes, lbytes,
+                                     input bit page_only);
     for (int s = 0; s < sbytes; s++) begin
       for (int l = 0; l < lbytes; l++) begin
         logic [Xlen-1:0] sa, la;
         sa = saddr + Xlen'(s);
         la = laddr + Xlen'(l);
-        if (page_only ? sa[11:Off] == la[11:Off] : sa[Xlen-1:Off] == la[Xlen-1:Off])
-          return 1;
+        if (page_only ? sa[11:Off] == la[11:Off] : sa[Xlen-1:Off] == la[Xlen-1:Off]) return 1;
       end
     end
     return 0;
@@ -97,9 +107,15 @@ module sq_forward_ring_case #(
       for (int age = 0; age < Entries; age++) begin
         int e;
         e = (int'(head) + age) % Entries;
-        if (valid[e] && (simple_mask || alias_bytes(store_addr[e], load_addr[p],
-            store_bytes(store_alu[e], store_fp64[e]), int'(load_size_m1[p]) + 1,
-            mmu_enabled || stale_context[e]))) begin
+        if (valid[e] && (simple_mask || alias_bytes(
+                store_addr[e],
+                load_addr[p],
+                store_bytes(
+                    store_alu[e], store_fp64[e]
+                ),
+                int'(load_size_m1[p]) + 1,
+                mmu_enabled || stale_context[e]
+            ))) begin
           expected_conflict = 1;
           expected_valid = !stale_context[e] && load_fits
               && store_addr[e][Xlen-1:Off] == load_addr[p][Xlen-1:Off]
@@ -107,8 +123,15 @@ module sq_forward_ring_case #(
           expected_data = store_data[e];
         end
       end
-      if (zero_pending || (alloc_valid && alias_bytes(alloc_addr, load_addr[p],
-          store_bytes(alloc_alu, alloc_fp64), int'(load_size_m1[p]) + 1, mmu_enabled))) begin
+      if (zero_pending || (alloc_valid && alias_bytes(
+              alloc_addr,
+              load_addr[p],
+              store_bytes(
+                  alloc_alu, alloc_fp64
+              ),
+              int'(load_size_m1[p]) + 1,
+              mmu_enabled
+          ))) begin
         expected_conflict = 1;
         expected_valid = 0;
       end
@@ -116,9 +139,21 @@ module sq_forward_ring_case #(
       // selected alias value across partial, stale, allocation and CBO blocks.
       if (conflict[p] !== expected_conflict || forward_valid[p] !== expected_valid
           || forward_data[p] !== expected_data)
-        $fatal(1, "Entries=%0d check=%0d port=%0d head=%0d valid=%h got=%b/%b/%h expected=%b/%b/%h",
-               Entries, checks, p, head, valid, conflict[p], forward_valid[p], forward_data[p],
-               expected_conflict, expected_valid, expected_data);
+        $fatal(
+            1,
+            "Entries=%0d check=%0d port=%0d head=%0d valid=%h got=%b/%b/%h expected=%b/%b/%h",
+            Entries,
+            checks,
+            p,
+            head,
+            valid,
+            conflict[p],
+            forward_valid[p],
+            forward_data[p],
+            expected_conflict,
+            expected_valid,
+            expected_data
+        );
     end
     checks++;
   endtask
@@ -198,7 +233,8 @@ module sq_forward_ring_case #(
       alloc_fp64 = 1'(random_word());
       check(0);
     end
-    $display("PASS: SQ ring Entries=%0d ReadPorts=%0d checks=%0d seed=54a31b07", Entries, ReadPorts, checks);
+    $display("PASS: SQ ring Entries=%0d ReadPorts=%0d checks=%0d seed=54a31b07", Entries,
+             ReadPorts, checks);
     done = 1;
   end
 endmodule

@@ -15,7 +15,9 @@
 #define FB_ADDR__ (MMIO_BASE + 0x1000000)
 #define AUDIO_SBUF_ADDR (MMIO_BASE + 0x1200000)
 
+#ifndef SERIAL_PORT
 #define SERIAL_PORT (0x10000000)
+#endif
 #define RTC_ADDR_ (0x0200BFF8)
 
 extern char _pmem_start;

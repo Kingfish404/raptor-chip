@@ -65,7 +65,11 @@ module rapt_store_beats #(
 
   assign ma_wstrb_wide = {{(XLEN/8){1'b0}}, ma_wstrb_lo} << ma_w_off;
   assign ma_w_shift    = {{($clog2(2*XLEN)-OFFW-3){1'b0}}, waddr[OFFW-1:0], 3'b000};
-  assign ma_wdata_wide = (wfp64 ? (2*XLEN)'(wdata64) : (2*XLEN)'(wdata)) << ma_w_shift;
+`ifdef RAPT_RV64
+  assign ma_wdata_wide = (2 * XLEN)'(wdata) << ma_w_shift;
+`else
+  assign ma_wdata_wide = (wfp64 ? (2 * XLEN)'(wdata64) : (2 * XLEN)'(wdata)) << ma_w_shift;
+`endif
   assign ma_wdata_lo   = ma_wdata_wide[XLEN-1:0];
   assign ma_wdata_hi   = ma_wdata_wide[2*XLEN-1:XLEN];
   // The IOQ pre-translates the next virtual page when the original store

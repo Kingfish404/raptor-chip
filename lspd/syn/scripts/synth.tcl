@@ -31,7 +31,11 @@ select -assert-none {t:$check} {t:$assert} {t:$assume} {t:$cover}
 # missing functional driver. Ordinary opt removes transient frontend mux loops.
 opt
 check -assert
-synth -top $top
+set synth_args [list -top $top]
+if {[info exists ::env(YS_SYNTH_SHARE)] && $::env(YS_SYNTH_SHARE) eq "0"} {
+    lappend synth_args -noshare
+}
+synth {*}$synth_args
 opt -purge
 
 set dont_use_args {}

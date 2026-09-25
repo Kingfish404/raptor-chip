@@ -29,18 +29,19 @@ const TOKEN_COLOR = {
 const SHELLS = new Set(["rapt", "rapt_core", "rapt_frontend", "rapt_backend"]);
 
 const SPINE = [
+  ["rapt_bpu", "rapt_l1i"],
   ["rapt_l1i", "rapt_ifu"],
-  ["rapt_bpu", "rapt_ifu"],
   ["rapt_ifu", "rapt_fqu"],
   ["rapt_fqu", "rapt_idu"],
   ["rapt_idu", "rapt_rnu"],
-  ["rapt_prf", "rapt_rnu"],
   ["rapt_rnu", "rapt_rou"],
   ["rapt_rou", "rapt_dpu"],
   ["rapt_dpu", "rapt_ieu"],
+  ["rapt_dpu", "rapt_ieu_muldiv"],
   ["rapt_dpu", "rapt_feu"],
   ["rapt_dpu", "rapt_lsu"],
   ["rapt_ieu", "rapt_cdb_arb"],
+  ["rapt_ieu_muldiv", "rapt_cdb_arb"],
   ["rapt_feu", "rapt_cdb_arb"],
   ["rapt_lsu", "rapt_cdb_arb"],
   ["rapt_cdb_arb", "rapt_cmu"],
@@ -50,15 +51,15 @@ const SPINE = [
   ["rapt_l2", "rapt_axi_master"],
   ["rapt_axi_master", "soc_pmem"],
   ["rapt_axi_master", "rapt_router"],
-  ["rapt_router", "soc_uart"],
-  ["rapt_router", "rapt_clint"],
   ["rapt_router", "rapt_plic"],
+  ["rapt_router", "soc_uart"],
+  ["rapt_plic", "rapt_clint"],
+  ["rapt_router", "rapt_dm"],
 ];
 
-const GROUPS = [
-  { label: "Pipeline", ids: ["rapt_bpu", "rapt_l1i", "rapt_ifu", "rapt_fqu", "rapt_idu", "rapt_rnu", "rapt_prf", "rapt_fpr", "rapt_pmp_state", "rapt_rou", "rapt_dpu", "rapt_ieu", "rapt_feu", "rapt_lsu", "rapt_cdb_arb", "rapt_cmu", "rapt_csr"] },
-  { label: "Memory and peripherals", ids: ["rapt_l1d", "rapt_bus", "rapt_l2", "rapt_axi_master", "soc_pmem", "rapt_router", "soc_uart", "rapt_clint", "rapt_plic", "rapt_dm"] },
-];
+const FRONTEND_IDS = ["rapt_bpu", "rapt_l1i", "rapt_ifu", "rapt_fqu", "rapt_idu", "rapt_rnu", "rapt_prf", "rapt_fpr", "rapt_pmp_state"];
+const BACKEND_IDS = ["rapt_rou", "rapt_dpu", "rapt_ieu", "rapt_ieu_muldiv", "rapt_feu", "rapt_lsu", "rapt_cdb_arb", "rapt_cmu", "rapt_csr"];
+const MEMORY_IDS = ["rapt_l1d", "rapt_bus", "rapt_l2", "rapt_axi_master", "soc_pmem", "rapt_router", "soc_uart", "rapt_clint", "rapt_plic", "rapt_dm"];
 
 function el(name, attrs = {}, children = []) {
   const node = document.createElementNS(NS, name);
@@ -82,14 +83,40 @@ function boxOf(n) {
   };
 }
 
-function port(n, toward) {
+function sidePoint(n, side) {
   const b = boxOf(n);
-  const dx = toward.x - n.x;
-  const dy = toward.z - n.z;
-  if (Math.abs(dx) >= Math.abs(dy)) {
-    return { x: b.cx + Math.sign(dx || 1) * b.w / 2, y: b.cy };
+  if (side === "left") return { x: b.x, y: b.cy };
+  if (side === "right") return { x: b.x + b.w, y: b.cy };
+  if (side === "top") return { x: b.cx, y: b.y };
+  return { x: b.cx, y: b.y + b.h };
+}
+
+function route(a, b) {
+  const A = boxOf(a);
+  const B = boxOf(b);
+  const dx = B.cx - A.cx;
+  const dy = B.cy - A.cy;
+  const sameRow = Math.abs(dy) < Math.min(A.h, B.h) * 0.45;
+  const sameCol = Math.abs(dx) < Math.min(A.w, B.w) * 0.45;
+  if (sameRow) {
+    const dir = dx >= 0 ? "right" : "left";
+    return [sidePoint(a, dir), sidePoint(b, dx >= 0 ? "left" : "right")];
   }
-  return { x: b.cx, y: b.cy + Math.sign(dy || 1) * b.h / 2 };
+  if (sameCol) {
+    const dir = dy >= 0 ? "bottom" : "top";
+    return [sidePoint(a, dir), sidePoint(b, dy >= 0 ? "top" : "bottom")];
+  }
+  const nearColumn = Math.abs(dx) < Math.max(A.w, B.w) * 1.8;
+  if (nearColumn) {
+    const xGutter = dx >= 0 ? (A.x + A.w + B.x) / 2 : (B.x + B.w + A.x) / 2;
+    const start = sidePoint(a, dx >= 0 ? "right" : "left");
+    const end = sidePoint(b, dx >= 0 ? "left" : "right");
+    return [start, { x: xGutter, y: start.y }, { x: xGutter, y: end.y }, end];
+  }
+  const start = sidePoint(a, dy >= 0 ? "bottom" : "top");
+  const end = sidePoint(b, dy >= 0 ? "top" : "bottom");
+  const gutterY = dy >= 0 ? (A.y + A.h + B.y) / 2 : (B.y + B.h + A.y) / 2;
+  return [start, { x: start.x, y: gutterY }, { x: end.x, y: gutterY }, end];
 }
 
 export function createUarchView(root, data, hooks = {}) {
@@ -141,9 +168,9 @@ export function createUarchView(root, data, hooks = {}) {
     ]),
   );
 
-  GROUPS.forEach((g) => {
-    const boxes = g.ids.map((id) => byId[id]).filter((n) => n?.sx);
-    if (!boxes.length) return;
+  function bounds(ids, padX, padTop, padBottom) {
+    const boxes = ids.map((id) => byId[id]).filter((n) => n?.sx);
+    if (!boxes.length) return null;
     let x0 = Infinity;
     let y0 = Infinity;
     let x1 = -Infinity;
@@ -155,35 +182,35 @@ export function createUarchView(root, data, hooks = {}) {
       x1 = Math.max(x1, b.x + b.w);
       y1 = Math.max(y1, b.y + b.h);
     });
+    return {
+      x: x0 - padX,
+      y: y0 - padTop,
+      width: x1 - x0 + padX * 2,
+      height: y1 - y0 + padTop + padBottom,
+      labelX: x0,
+      labelY: y0 - 4,
+    };
+  }
+  function frame(ids, label, cls, padX, padTop, padBottom) {
+    const b = bounds(ids, padX, padTop, padBottom);
+    if (!b) return;
     svg.append(
-      el("rect", {
-        class: "uarch-group",
-        x: x0 - 8,
-        y: y0 - 16,
-        width: x1 - x0 + 16,
-        height: y1 - y0 + 22,
-        rx: 8,
-      }),
-      el("text", { class: "uarch-group-label", x: x0, y: y0 - 4 }, [g.label]),
+      el("rect", { class: cls, x: b.x, y: b.y, width: b.width, height: b.height, rx: 8 }),
+      el("text", { class: "uarch-group-label", x: b.labelX, y: b.labelY }, [label]),
     );
-  });
+  }
+  frame([...FRONTEND_IDS, ...BACKEND_IDS], "Pipeline", "uarch-group uarch-group-outer", 16, 28, 12);
+  frame(FRONTEND_IDS, "Frontend", "uarch-group", 8, 16, 8);
+  frame(BACKEND_IDS, "Backend", "uarch-group", 8, 16, 8);
+  frame(MEMORY_IDS, "Memory", "uarch-group", 8, 16, 8);
 
   SPINE.forEach(([from, to]) => {
     const a = byId[from];
     const b = byId[to];
     if (!a?.sx || !b?.sx) return;
-    const p1 = port(a, b);
-    const p2 = port(b, a);
-    svg.append(
-      el("line", {
-        class: "uarch-edge",
-        x1: p1.x,
-        y1: p1.y,
-        x2: p2.x,
-        y2: p2.y,
-        markerEnd: "url(#uarch-arrow)",
-      }),
-    );
+    const pts = route(a, b);
+    const d = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
+    svg.append(el("path", { class: "uarch-edge", d, "marker-end": "url(#uarch-arrow)" }));
   });
 
   nodes.forEach((n) => {

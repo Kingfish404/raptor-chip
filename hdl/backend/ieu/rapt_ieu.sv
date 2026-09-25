@@ -11,7 +11,7 @@ module rapt_ieu #(
     parameter int unsigned NumCompletions = Cfg.completion_ports,
     parameter type CompletionT = rapt_pkg::completion_t,
     parameter unsigned ALQ_SIZE = Cfg.iq_entries,
-    parameter unsigned BRQ_SIZE = 4,
+    parameter unsigned BRQ_SIZE = 8,
     parameter unsigned MDQ_SIZE = 4,
     parameter unsigned ROB_SIZE = Cfg.rob_entries,
     parameter unsigned PLEN     = rapt_pkg::index_bits(Cfg.phys_regs),
@@ -33,7 +33,6 @@ module rapt_ieu #(
 
     load_fast_if.sink load_fast,
     input logic integer_system_issue_enable,
-    output logic integer_system_inflight,
     exu_csr_if.master exu_csr,
     output CompletionT wb_integer_raw[NumIntegerPorts],
     output CompletionT wb_branch,
@@ -45,23 +44,18 @@ module rapt_ieu #(
   IssueT iss_branch;
   IssueT alq_issue[NumIntegerPorts];
   IssueT alq_execute[NumIntegerPorts];
-  logic [NumIntegerPorts-1:0] execute_occupied;
-  assign integer_system_inflight = execute_occupied[IntegerSystemPort];
+  // Issue select is already registered in the IQ. Another execute flop
+  // delayed every integer producer (including load-use consumers) by a
+  // cycle. Apply selective recovery combinationally on the selected packet.
   for (genvar p = 0; p < NumIntegerPorts; p++) begin : g_execute_stage
-    rapt_execute_stage #(
-        .IssueT(IssueT),
-        .ROB_SIZE(ROB_SIZE)
-    ) stage (
-        .clock,
-        .reset,
-        .flush(cmu_bcast.flush_pipe),
-        .cancel_valid,
-        .cancel_head,
-        .cancel_owner,
-        .selected(alq_issue[p]),
-        .execute(alq_execute[p]),
-        .occupied(execute_occupied[p])
-    );
+    logic younger;
+    assign younger = ((alq_issue[p].dest < cancel_head) == (cancel_owner < cancel_head))
+        ? alq_issue[p].dest > cancel_owner : alq_issue[p].dest < cancel_head;
+    always_comb begin
+      alq_execute[p] = alq_issue[p];
+      alq_execute[p].valid = alq_issue[p].valid && !reset && !cmu_bcast.flush_pipe
+          && !(cancel_valid && younger);
+    end
   end
   IssueT brq_issue[1];
   logic [NumIntegerPorts-1:0] integer_issue_enable;
@@ -106,6 +100,10 @@ module rapt_ieu #(
       .CompletionT(CompletionT),
       .IQ_SIZE  (ALQ_SIZE),
       .NumIssuePorts(NumIntegerPorts),
+      // The system/FP shared completion path has an extra result register.
+      // Keep it available for throughput and system-only uops, but route the
+      // oldest ready general ALU uop to a lower-latency simple port first.
+      .LastIssuePort(IntegerSystemPort),
       .ROB_SIZE (ROB_SIZE),
       .PLEN     (PLEN),
       .RLEN     (RLEN),

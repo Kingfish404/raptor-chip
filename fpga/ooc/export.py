@@ -8,6 +8,8 @@ import re
 import subprocess
 from pathlib import Path
 P = argparse.ArgumentParser()
+P.add_argument('--parameter', action='append', default=[], metavar='BLOCK.PARAM=INTEGER',
+               help='Specialize a block parameter to match its value in the exported top')
 P.add_argument('pack', type=Path)
 P.add_argument('output', type=Path)
 a = P.parse_args()
@@ -25,6 +27,15 @@ for comment in re.findall(r'/\*.*?\*/|//[^\n]*', text, re.S):
         raise ValueError('Unsupported synthesis comment pragma; use SystemVerilog attributes in the preprocessed pack')
 clean = re.sub('/\\*.*?\\*/|//[^\\n]*', '', text, flags=re.S)
 blocks = ['rapt_frontend', 'rapt_backend', 'rapt_l1i', 'rapt_l1d']
+parameter_overrides = {block: {} for block in blocks}
+for override in a.parameter:
+    match = re.fullmatch(r'(\w+)\.(\w+)=(0[xX][0-9a-fA-F]+|\d+)', override)
+    if not match or match[1] not in parameter_overrides:
+        raise ValueError(f'Invalid parameter override: {override}')
+    block, name, raw_value = match.groups()
+    if name in parameter_overrides[block]:
+        raise ValueError(f'Duplicate parameter override: {block}.{name}')
+    parameter_overrides[block][name] = int(raw_value, 0)
 modules = {m[1]: m[0] for m in re.finditer('\\bmodule\\s+(\\w+)\\b.*?endmodule', clean, re.S)}
 globals_text = '\n'.join((m[0] for m in re.finditer('\\b(package|interface)\\s+.*?end(?:package|interface)', clean, re.S)))
 
@@ -54,7 +65,9 @@ for block in blocks:
     param_names = []
     for decl in params.split(','):
         decl = decl.strip()
-        pm = re.fullmatch('parameter\\s+(?:(?:int|integer)(?:\\s+unsigned)?|unsigned)\\s+(\\w+)\\s*=\\s*(.*)', decl, re.S)
+        pm = re.fullmatch(
+            r'parameter\s+(?:(?:int|integer|bit|logic)(?:\s+(?:signed|unsigned))?'
+            r'|signed|unsigned)\s+(\w+)\s*=\s*(.*)', decl, re.S)
         if not pm:
             raise ValueError(f'Unsupported parameter: {decl}')
         param_names.append(pm[1])
@@ -113,6 +126,11 @@ sizes = {m[1]: (int(m[2]), int(m[3])) for m in re.finditer('WIDTH (\\w+) (\\d+) 
 parameter_values = {b: {} for b in blocks}
 for m in re.finditer('PARAM (\\w+) (\\w+) (\\d+)', out):
     parameter_values[m[1]][m[2]] = int(m[3])
+for block, overrides in parameter_overrides.items():
+    unknown = overrides.keys() - parameter_values[block].keys()
+    if unknown:
+        raise ValueError(f'Unknown parameter override: {block}.{sorted(unknown)[0]}')
+    parameter_values[block].update(overrides)
 wrappers = []
 bridges = []
 renamed = text
@@ -147,7 +165,11 @@ for block, rec in info.items():
                     lhs, rhs = (rhs, lhs)
                 assigns.append(f'assign {lhs} = {rhs};')
     wrapper = f'module {block}_ooc(\n' + ',\n'.join(flat) + '\n);\n'
-    wrappers.append(wrapper + '\n'.join(local + assigns) + f'\n{block}_impl impl(' + ', '.join(conn) + ');\nendmodule\n')
+    overrides = parameter_overrides[block]
+    specialization = (' #(' + ', '.join(f'.{name}({value})' for name, value in overrides.items()) + ')'
+                      if overrides else '')
+    wrappers.append(wrapper + '\n'.join(local + assigns) + f'\n{block}_impl{specialization} impl('
+                    + ', '.join(conn) + ');\nendmodule\n')
     (a.output / f'{block}_stub.sv').write_text('(* black_box *) ' + wrapper + 'endmodule\n')
     checks = '\n'.join((f'initial if ({name} != {value}) $error("OOC export parameter mismatch: {block}.{name}");' for name, value in parameter_values[block].items()))
     rec['parameters'] = parameter_values[block]

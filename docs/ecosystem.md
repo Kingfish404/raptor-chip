@@ -23,7 +23,7 @@ Simulators, FPGA boards, ASIC flow, software stack, and memory maps.
 | **NPC**     | Verilator, cycle-accurate, waveform      | `make run-rv32`, `sim/`    |
 | **raptSoC** | SystemVerilog NPC top + AXI memory model | `sim/rtl/rapt_npc_soc.sv`  |
 
-NPC is the primary development simulator. NEMU acts as the difftest reference for every commit.
+NPC is the primary development simulator. With `DIFFTEST=1` (the default), NEMU checks retired architectural state; intentional MMIO/interrupt skip paths are handled by the differential-test protocol.
 
 ## FPGA Targets
 

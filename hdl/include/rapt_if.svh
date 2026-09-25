@@ -22,6 +22,7 @@ interface lsu_l1d_if #(
     parameter int L1D_LEN = `RAPT_L1D_LEN
 );
   logic [XLEN-1:0] raddr;
+  rapt_pkg::mem_context_t rcontext;
   logic [4:0] ralu;
   logic rvalid;
   logic idle; // No L1D owner, PTW, maintenance, or incoming request.
@@ -54,10 +55,14 @@ interface lsu_l1d_if #(
   // cacheable hit, otherwise simply never fires rready_b (the load retries
   // via A later, where traps/PMP are raised).  No trap/cause on B.
   logic [XLEN-1:0] raddr_b;
+  rapt_pkg::mem_context_t rcontext_b;
   logic [4:0] ralu_b;
   logic rvalid_b;
   logic [XLEN-1:0] rdata_b;
   logic rready_b;
+  // Best-effort probe rejected without completing the load. The IOQ releases
+  // B ownership and leaves the entry eligible for the precise A path.
+  logic rretry_b;
 
   logic [XLEN-1:0] waddr;
   // Translation attribute of this committed store beat, held with its PA.
@@ -72,18 +77,18 @@ interface lsu_l1d_if #(
   logic werr; // Failed committed write beat, qualified by wready.
 
   modport master(
-      output raddr, ralu, rvalid, rmisaligned, rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1, atomic_lock, ordered, replay_allowed,
+      output raddr, rcontext, ralu, rvalid, rmisaligned, rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1, atomic_lock, ordered, replay_allowed,
       input idle, rdata, trap, cause, difftest_skip, rready, rretry, rmiss, miss_wake,
-      output raddr_b, ralu_b, rvalid_b,
-      input rdata_b, rready_b,
+      output raddr_b, rcontext_b, ralu_b, rvalid_b,
+      input rdata_b, rready_b, rretry_b,
       output waddr, wpbmt, walu, wzero, wvalid, wdata,
       input wready, werr
   );
   modport slave(
-      input raddr, ralu, rvalid, rmisaligned, rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1, atomic_lock, ordered, replay_allowed,
+      input raddr, rcontext, ralu, rvalid, rmisaligned, rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1, atomic_lock, ordered, replay_allowed,
       output idle, rdata, trap, cause, difftest_skip, rready, rretry, rmiss, miss_wake,
-      input raddr_b, ralu_b, rvalid_b,
-      output rdata_b, rready_b,
+      input raddr_b, rcontext_b, ralu_b, rvalid_b,
+      output rdata_b, rready_b, rretry_b,
       input waddr, wpbmt, walu, wzero, wvalid, wdata,
       output wready, werr
   );

@@ -7,7 +7,8 @@ module rapt_stream_queue #(
     parameter type ItemT = logic [31:0],
     parameter int Depth = 8,
     parameter int InWidth = 2,
-    parameter int OutWidth = 2
+    parameter int OutWidth = 2,
+    parameter bit ReclaimSameCycle = 1'b1
 ) (
     input logic clock,
     reset,
@@ -47,8 +48,12 @@ module rapt_stream_queue #(
     for (int s = 0; s < OutWidth; s++)
     if (s == pop_count && out_valid[s] && out_ready[s]) pop_count++;
   end
+  // ReclaimSameCycle preserves the normal full-rate queue contract.  Pipeline
+  // boundaries that participate in a wider ready/flush feedback path can turn
+  // it off so readiness depends only on registered occupancy.
   for (genvar s = 0; s < InWidth; s++) begin : g_ready
-    assign in_ready[s] = !flush && !reset && s < Depth - int'(occupancy) + pop_count;
+    assign in_ready[s] = !flush && !reset
+        && s < Depth - int'(occupancy) + (ReclaimSameCycle ? pop_count : 0);
     assign push_index[s] = PtrBits'(advance(int'(tail), s));
   end
   always_comb begin

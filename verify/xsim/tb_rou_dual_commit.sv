@@ -82,6 +82,8 @@ module tb_rou_dual_commit #(
   rou_csr_if rou_csr ();
   rou_lsu_if rou_lsu ();
   logic tb_sq_ready, tb_sq_empty;
+  logic tb_writeback_idle = 1'b1;
+  logic tb_writeback_drain;
 `ifndef RAPT_TEST_ATOMIC_REPLAY
   assign rou_lsu.sq_ready = tb_sq_ready;
   assign rou_lsu.sq_empty = tb_sq_empty;
@@ -92,6 +94,8 @@ module tb_rou_dual_commit #(
       .ScanEntries(rapt_pkg::DispatchWidth),
       .ValidateCompletionInputs(1'b1)
   ) dut_rou (
+      .writeback_idle(tb_writeback_idle),
+      .writeback_drain(tb_writeback_drain),
       .completion(completion),
       .completion_owner(completion_owner),
       .clock(clock),
@@ -166,44 +170,23 @@ rapt_cmu dut_cmu (
       dm_haltreq = 1'b0;
       force_stale_generation = 1'b0;
 
-      rnu_rou.slot[0].uop = '0;
-      rnu_rou.slot[0].pr1 = '0;
-      rnu_rou.slot[0].pr2 = '0;
-      rnu_rou.slot[0].prd = '0;
-      rnu_rou.slot[0].prs = '0;
-      rnu_rou.slot[0].op1 = '0;
-      rnu_rou.slot[0].op2 = '0;
-      rnu_rou.valid[0] = 1'b0;
-      rnu_rou.checkpoint_valid[0] = 1'b0;
-      rnu_rou.checkpoint[0] = '0;
-`ifdef RAPT_DUAL_ISSUE
-      rnu_rou.slot[1].uop = '0;
-      rnu_rou.slot[1].pr1 = '0;
-      rnu_rou.slot[1].pr2 = '0;
-      rnu_rou.slot[1].prd = '0;
-      rnu_rou.slot[1].prs = '0;
-      rnu_rou.slot[1].op1 = '0;
-      rnu_rou.slot[1].op2 = '0;
-      rnu_rou.valid[1] = 1'b0;
-      rnu_rou.checkpoint_valid[1] = 1'b0;
-      rnu_rou.checkpoint[1] = '0;
-`endif
-
-      exu_prf.pv1[0] = '0;
-      exu_prf.pv2[0] = '0;
-      exu_prf.pv1_valid[0] = 1'b1;
-      exu_prf.pv2_valid[0] = 1'b1;
-`ifdef RAPT_DUAL_ISSUE
-      exu_prf.pv1[1] = '0;
-      exu_prf.pv2[1] = '0;
-      exu_prf.pv1_valid[1] = 1'b1;
-      exu_prf.pv2_valid[1] = 1'b1;
-`endif
-
-      dispatch_ready[0] = 1'b1;
-`ifdef RAPT_DUAL_ISSUE
-      dispatch_ready[1] = 1'b1;
-`endif
+      for (int s = 0; s < rapt_pkg::RenameWidth; s++) begin
+        rnu_rou.slot[s].uop = '0;
+        rnu_rou.slot[s].pr1 = '0;
+        rnu_rou.slot[s].pr2 = '0;
+        rnu_rou.slot[s].prd = '0;
+        rnu_rou.slot[s].prs = '0;
+        rnu_rou.slot[s].op1 = '0;
+        rnu_rou.slot[s].op2 = '0;
+        rnu_rou.valid[s] = 1'b0;
+        rnu_rou.checkpoint_valid[s] = 1'b0;
+        rnu_rou.checkpoint[s] = '0;
+        exu_prf.pv1[s] = '0;
+        exu_prf.pv2[s] = '0;
+        exu_prf.pv1_valid[s] = 1'b1;
+        exu_prf.pv2_valid[s] = 1'b1;
+      end
+      for (int s = 0; s < rapt_pkg::DispatchWidth; s++) dispatch_ready[s] = 1'b1;
 
       exu_rou.pc = '0;
       exu_rou.npc = '0;
@@ -418,8 +401,23 @@ rapt_cmu dut_cmu (
       tick(1);
       rnu_rou.valid[0] = 1'b0;
       #1;
+      check(dut_rou.uoq_uops[dut_rou.deq_index[0]].pnpc == '0,
+            "predicted target remained in UOQ payload");
+      if (u.execute.branch.conditional || u.execute.branch.jump || u.execute.branch.indirect) begin
+        check(dut_rou.predicted_npc[rapt_pkg::branch_checkpoint_t'(expected_dest)] == u.pnpc,
+              "checkpoint target was not captured on rename acceptance");
+        check(
+            dut_rou.predicted_taken[rapt_pkg::branch_checkpoint_t'(expected_dest)]
+              == u.execute.branch.predicted_taken,
+            "checkpoint direction was not captured on rename acceptance");
+      end
       check(dispatch_valid[0], "ROU did not present dispatch after enqueue");
       check(dispatch[0].dest == expected_dest, "ROU dispatch dest mismatch");
+      check(dispatch[0].uop.pnpc == '0, "predicted target leaked into execution queue");
+      check(!dispatch[0].uop.execute.branch.predicted_taken,
+            "predicted direction leaked into execution queue");
+      check(dispatch[0].stable_op1_valid && dispatch[0].stable_op1 == dispatch[0].op1,
+            "ready ROU operand was not marked stable for store precheck");
       tick(1);
       #1;
       check(!dispatch_valid[0], "ROU dispatch valid did not drop after accept");
@@ -444,7 +442,7 @@ rapt_cmu dut_cmu (
       tick(1);
       #1;
       check(
-          dut_rou.rob_entry[expected_dest].busy && dut_rou.rob_entry[expected_dest].state == ROB_DP,
+          dut_rou.rob_entry_busy[expected_dest] && dut_rou.rob_entry[expected_dest].state == ROB_DP,
           "uop did not enter ROB-backed dispatch buffer");
     end
   endtask
@@ -519,6 +517,8 @@ rapt_cmu dut_cmu (
             "dependent merge-test uop was not presented to its endpoint");
       check(dispatch[0].pr1 == '0 && dispatch[0].op1 == 32'hcafe_babe,
             "same-cycle completion was not merged at ROB dispatch output");
+      check(!dispatch[0].stable_op1_valid,
+            "same-cycle CDB bypass entered stable store-precheck operand");
       tick(1);
       clear_writebacks();
       exu_prf.pv1_valid[0] = 1'b1;
@@ -677,6 +677,83 @@ rapt_cmu dut_cmu (
     end
   endtask
 
+  task automatic expect_checkpoint_direction_mismatch;
+    rapt_pkg::uop_t branch_uop;
+    logic [XLEN-1:0] branch_pc;
+    begin
+      reset_dut();
+      branch_pc = XLEN'('h8000_3000);
+      branch_uop = make_branch_uop(branch_pc, 32'h0000_0263);
+      // The branch target equals fall-through. Address equality alone must
+      // not hide a wrong direction and corrupt speculative history.
+      branch_uop.execute.branch.predicted_taken = 1'b1;
+      dispatch_one(branch_uop, '0, '0, RobW'(0));
+      exu_rou.dest = RobW'(0);
+      exu_rou.npc = branch_pc + XLEN'(4);
+      exu_rou.btaken = 1'b0;
+      exu_rou.mispredict = 1'b0;
+      exu_rou.valid = 1'b1;
+      tick(1);
+      clear_writebacks();
+      #1;
+      check(dut_rou.rob_entry[0].mispredict, "ROB missed direction error with matching next PC");
+      check(recovery.pending && recovery.redirect_valid && recovery.target == branch_pc + XLEN'(4),
+            "ROB did not redirect wrong-direction branch");
+
+      reset_dut();
+      branch_uop = make_branch_uop(branch_pc, 32'h0000_0263);
+      branch_uop.execute.branch.predicted_taken = 1'b1;
+      dispatch_one(branch_uop, '0, '0, RobW'(0));
+      exu_rou.dest = RobW'(0);
+      exu_rou.npc = branch_pc + XLEN'('h100);
+      exu_rou.btaken = 1'b1;
+      exu_rou.mispredict = 1'b0;
+      exu_rou.valid = 1'b1;
+      tick(1);
+      clear_writebacks();
+      #1;
+      check(
+          dut_rou.rob_entry[0].mispredict && recovery.pending
+            && recovery.target == branch_pc + XLEN'('h100),
+          "ROB missed target error after execution reported no prediction result");
+    end
+  endtask
+
+  task automatic expect_dual_checkpoint_capture;
+    rapt_pkg::uop_t branch0, branch1;
+    begin
+      reset_dut();
+      branch0 = make_branch_uop(XLEN'('h8000_4000), 32'h0000_0263);
+      branch1 = make_branch_uop(XLEN'('h8000_4004), 32'h0000_0263);
+      branch0.pnpc = XLEN'('h8000_4020);
+      branch1.pnpc = XLEN'('h8000_4040);
+      branch0.execute.branch.predicted_taken = 1'b1;
+      branch1.execute.branch.predicted_taken = 1'b0;
+      rnu_rou.slot[0] = '0;
+      rnu_rou.slot[1] = '0;
+      rnu_rou.slot[0].uop = branch0;
+      rnu_rou.slot[1].uop = branch1;
+      rnu_rou.checkpoint_valid[0] = 1'b1;
+      rnu_rou.checkpoint_valid[1] = 1'b1;
+      rnu_rou.checkpoint[0] = rapt_pkg::branch_checkpoint_t'(0);
+      rnu_rou.checkpoint[1] = rapt_pkg::branch_checkpoint_t'(1);
+      rnu_rou.valid[0] = 1'b1;
+      rnu_rou.valid[1] = 1'b1;
+      #1;
+      check(rnu_rou.ready[0] && rnu_rou.ready[1], "dual checkpoint input not accepted");
+      tick(1);
+      rnu_rou.valid[0] = 1'b0;
+      rnu_rou.valid[1] = 1'b0;
+      #1;
+      check(dut_rou.predicted_npc[0] == branch0.pnpc && dut_rou.predicted_npc[1] == branch1.pnpc,
+            "dual rename capture aliased checkpoint targets");
+      check(dut_rou.predicted_taken[0] && !dut_rou.predicted_taken[1],
+            "dual rename capture aliased checkpoint directions");
+      check(dut_rou.uoq_uops[0].pnpc == '0 && dut_rou.uoq_uops[1].pnpc == '0,
+            "dual rename capture retained per-uop targets");
+    end
+  endtask
+
   task automatic expect_rob_wrap_reuse_and_sret;
     localparam int WrapIterations = 4 * `RAPT_ROB_SIZE;
     logic [XLEN-1:0] pc;
@@ -733,6 +810,111 @@ rapt_cmu dut_cmu (
             "post-wrap SRET registered the wrong redirect target");
       tick(1);
       check(!rou_cmu.flush_redirect, "post-wrap SRET redirect did not clear");
+    end
+  endtask
+
+  task automatic expect_oldest_exception_cause;
+    logic [XLEN-1:0] older_cause, younger_cause, older_tval, younger_tval;
+    begin
+      reset_dut();
+      older_cause = XLEN'('hfedc_ba98_7654_3210);
+      younger_cause = XLEN'('h1234_5678_9abc_def0);
+      older_tval = XLEN'('hfedc_0000_8765_4321);
+      younger_tval = XLEN'('h1234_0000_abcdef09);
+      dispatch_one(make_alu_uop(XLEN'('h8002_9000), 32'h0010_0093, 5'd1), PLEN'(33), PLEN'(1),
+                   RobW'(0));
+      dispatch_one(make_alu_uop(XLEN'('h8002_9004), 32'h0020_0113, 5'd2), PLEN'(34), PLEN'(2),
+                   RobW'(1));
+
+      // Out-of-order faults retain the oldest cause, not the first arrival.
+      exu_rou.dest = RobW'(1);
+      exu_rou.trap = 1'b1;
+      exu_rou.cause = younger_cause;
+      exu_rou.tval = younger_tval;
+      exu_rou.valid = 1'b1;
+      tick(1);
+      clear_writebacks();
+      check(!commit_fire && dut_rou.oldest_exception_owner == RobW'(1),
+            "younger fault was not held behind the executing head");
+
+      exu_rou.dest = RobW'(0);
+      exu_rou.trap = 1'b1;
+      exu_rou.cause = older_cause;
+      exu_rou.tval = older_tval;
+      exu_rou.valid = 1'b1;
+      tick(1);
+      clear_writebacks();
+      #1;
+      check(commit_fire && rou_csr.valid && rou_csr.trap,
+            "older fault did not reach precise retirement");
+      check(rou_csr.cause == older_cause, "oldest synchronous exception lost its full-width cause");
+      check(rou_csr.tval == older_tval, "oldest synchronous exception lost its full-width tval");
+      tick(1);
+      check(!dut_rou.oldest_exception_valid, "oldest exception record survived its flush");
+
+      reset_dut();
+      for (int i = 0; i < `RAPT_ROB_SIZE - 1; i++) begin
+        logic [XLEN-1:0] pc;
+        pc = XLEN'('h8002_a000) + XLEN'(i * 4);
+        dispatch_one(make_alu_uop(pc, 32'h0010_0093, 5'd1), PLEN'(33), PLEN'(1), RobW'(i));
+        writeback_alu_one(RobW'(i), pc + XLEN'(4));
+        check(commit_fire, "wrap setup did not retire its ALU owner");
+        tick(1);
+      end
+      check(rou_cmu.rob_head == RobW'(`RAPT_ROB_SIZE - 1),
+            "wrap setup did not reach the final ROB entry");
+      dispatch_one(make_alu_uop(XLEN'('h8002_b000), 32'h0010_0093, 5'd1), PLEN'(33), PLEN'(1),
+                   RobW'(`RAPT_ROB_SIZE - 1));
+      dispatch_one(make_alu_uop(XLEN'('h8002_b004), 32'h0020_0113, 5'd2), PLEN'(34), PLEN'(2),
+                   RobW'(0));
+      exu_rou.dest = RobW'(0);
+      exu_rou.trap = 1'b1;
+      exu_rou.cause = younger_cause;
+      exu_rou.tval = younger_tval;
+      exu_rou.valid = 1'b1;
+      tick(1);
+      clear_writebacks();
+      exu_rou.dest = RobW'(`RAPT_ROB_SIZE - 1);
+      exu_rou.trap = 1'b1;
+      exu_rou.cause = older_cause;
+      exu_rou.tval = older_tval;
+      exu_rou.valid = 1'b1;
+      tick(1);
+      clear_writebacks();
+      #1;
+      check(commit_fire && rou_csr.cause == older_cause,
+            "wrapped oldest exception lost to the younger slot-zero fault");
+      check(rou_csr.tval == older_tval,
+            "wrapped oldest exception tval lost to the younger slot-zero fault");
+      tick(1);
+    end
+  endtask
+
+  task automatic expect_single_csr_payload;
+    rapt_pkg::uop_t csr_uop;
+    logic [XLEN-1:0] payload;
+    begin
+      reset_dut();
+      csr_uop = make_alu_uop(XLEN'('h8002_8000), 32'h3000_1073, 5'd0);
+      csr_uop.execute.sys.valid = 1'b1;
+      csr_uop.imm = XLEN'('h300);
+      payload = XLEN'('hfedc_ba98_7654_3210);
+      dispatch_one(csr_uop, '0, '0, RobW'(0));
+
+      exu_rou.dest = RobW'(0);
+      exu_rou.npc = csr_uop.pc + XLEN'(4);
+      exu_rou.csr_wen = 1'b1;
+      exu_rou.csr_wdata = payload;
+      exu_rou.valid = 1'b1;
+      tick(1);
+      clear_writebacks();
+      #1;
+      check(commit_fire && rou_csr.valid && rou_csr.csr_wen,
+            "serial CSR write did not reach the commit interface");
+      check(rou_csr.csr_addr == 12'h300 && rou_csr.csr_wdata == payload,
+            "serial CSR write lost its full-width payload");
+      tick(1);
+      check(dut_rou.csr_wdata_q == '0, "CSR payload survived the commit flush");
     end
   endtask
 
@@ -895,7 +1077,7 @@ rapt_cmu dut_cmu (
       check(rou_cmu.slot[0].pc == 32'h8004_0004, "pending branch retired from the wrong ROB entry");
       tick(1);
       check(!dut_rou.recovery_pending, "full flush did not clear recovery request");
-      check(!dut_rou.rob_entry[2].busy, "full flush did not clear pending wrong-path uop");
+      check(!dut_rou.rob_entry_busy[2], "full flush did not clear pending wrong-path uop");
       check(dut_rou.rob_tail == '0 && dut_rou.rob_head == '0,
             "full flush did not reopen the base ROB identity");
 
@@ -1071,7 +1253,13 @@ rapt_cmu dut_cmu (
       check(!commit_fire, "FENCE retired while older stores remain in SQ");
       tick(3);
       check(!commit_fire, "FENCE stopped waiting for the SQ to drain");
+      check(tb_writeback_drain, "FENCE did not request writeback while SQ drains");
+      tb_writeback_idle = 1'b0;
       tb_sq_empty = 1'b1;
+      tick(3);
+      check(!commit_fire, "FENCE retired before dirty writeback completed");
+      check(tb_writeback_drain, "FENCE dropped writeback drain before completion");
+      tb_writeback_idle = 1'b1;
       #1;
       check(commit_fire && rou_cmu.flush_pipe, "FENCE did not retire after SQ drain");
       tick(1);
@@ -1208,9 +1396,7 @@ rapt_cmu dut_cmu (
   endtask
 
   initial begin
-`ifndef RAPT_DUAL_COMMIT
-    fail("tb_rou_dual_commit requires RAPT_DUAL_COMMIT enabled");
-`endif
+    if (rapt_pkg::CommitWidth < 2) fail("tb_rou_dual_commit requires commit width >= 2");
 
 `ifdef RAPT_TEST_EXCEPTION_RD
     run_exception_rd();
@@ -1230,6 +1416,8 @@ rapt_cmu dut_cmu (
     expect_basic_dual_commit();
     expect_slot0_store_blocks_dual();
     expect_slot1_branch_serializes_flush();
+    expect_checkpoint_direction_mismatch();
+    expect_dual_checkpoint_capture();
     expect_correct_branch_releases_checkpoint();
     expect_cross_domain_dispatch_bypass();
     expect_dispatch_edge_writeback_merge();
@@ -1238,6 +1426,8 @@ rapt_cmu dut_cmu (
     expect_recovery_identity_reuse();
     expect_stale_generation_is_rejected();
     expect_rob_wrap_reuse_and_sret();
+    expect_oldest_exception_cause();
+    expect_single_csr_payload();
     expect_stale_csr_wen_is_not_exposed();
     expect_full_width_retirement();
     expect_cbo_zero_commit_with_resident_sq();

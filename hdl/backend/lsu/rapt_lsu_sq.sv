@@ -17,9 +17,14 @@ module rapt_lsu_sq #(
     lsu_pipe_if.slave exu_lsu,
     input CompletionT exu_ioq_bcast,
     input logic completion_accept,
+    input logic sq_handoff_valid,
+    input logic [XLEN-1:0] sq_handoff_vaddr,
+    input logic [4:0] sq_handoff_alu,
+    input logic sq_handoff_fp64,
     input logic [XLEN-1:0] sq_waddr_hi,
     input logic [XLEN-1:0] sq_waddr_third,
     input logic [2:0][1:0] sq_wpbmt,
+    input rapt_pkg::mem_context_t sq_context,
     input logic sq_acquire,
     rou_lsu_if.in rou_lsu,
 
@@ -127,8 +132,11 @@ module rapt_lsu_sq #(
   logic [XLEN-1:WordOffBits] sq_paddr_hi[SQ_SIZE];
   logic [XLEN-1:WordOffBits] sq_paddr_third[SQ_SIZE];
   logic [2:0][1:0] sq_pbmt[SQ_SIZE];
+  rapt_pkg::mem_context_t sq_entry_context[SQ_SIZE];
   logic [XLEN-1:0] sq_wdata[SQ_SIZE];
+`ifndef RAPT_RV64
   logic [63:0] sq_wdata64[SQ_SIZE];
+`endif
   logic sq_fp64[SQ_SIZE];
   // A2: SQ full state tracker (for pmu_sq_full rising-edge detection)
   logic sq_full_r;
@@ -175,7 +183,11 @@ module rapt_lsu_sq #(
   logic [4:0] walu;
   assign wvalid = sq_valid[sq_head] && sq_committed[sq_head];
   assign wdata  = sq_wdata[sq_head];
+`ifdef RAPT_RV64
+  assign wdata64 = sq_wdata[sq_head];
+`else
   assign wdata64 = sq_wdata64[sq_head];
+`endif
   assign wfp64 = sq_fp64[sq_head];
   assign waddr  = sq_paddr[sq_head];
   assign walu   = sq_alu[sq_head];
@@ -292,8 +304,11 @@ module rapt_lsu_sq #(
           sq_paddr_hi[sq_tail] <= sq_waddr_hi[XLEN-1:WordOffBits];
           sq_paddr_third[sq_tail] <= sq_waddr_third[XLEN-1:WordOffBits];
           sq_pbmt[sq_tail] <= sq_wpbmt;
+          sq_entry_context[sq_tail] <= sq_context;
           sq_wdata[sq_tail] <= exu_ioq_bcast.sq_wdata;
+`ifndef RAPT_RV64
           sq_wdata64[sq_tail] <= exu_ioq_bcast.sq_wdata64;
+`endif
           sq_fp64[sq_tail] <= exu_ioq_bcast.sq_fp64;
           sq_tail <= sq_tail + 1'b1;
         end
@@ -335,8 +350,8 @@ module rapt_lsu_sq #(
   // Conservatively disable forwarding while any typed store is resident.
   logic sq_has_typed_store;
   always_comb begin
-    sq_has_typed_store = (csr_bcast.menvcfg_pbmte && csr_bcast.dmmu_en)
-                      || (sq_alloc_fire && (|sq_wpbmt));
+    sq_has_typed_store = (exu_lsu.rcontext.pbmte && exu_lsu.rcontext.mmu_en)
+                      || (sq_handoff_valid && (|sq_wpbmt));
     for (int i = 0; i < SQ_SIZE; i++) sq_has_typed_store |= sq_valid[i] && (|sq_pbmt[i]);
   end
   logic [XLEN-1:0] sq_fwd_data;
@@ -368,11 +383,11 @@ module rapt_lsu_sq #(
       .store_alu(sq_alu),
       .full_store_mask(FullStoreWstrb),
       .store_fp64(sq_fp64),
-      .mmu_enabled(csr_bcast.dmmu_en),
-      .alloc_valid(sq_alloc_fire),
-      .alloc_addr(exu_ioq_bcast.tval),
-      .alloc_alu(exu_ioq_bcast.alu[4:0]),
-      .alloc_fp64(exu_ioq_bcast.sq_fp64),
+      .mmu_enabled(exu_lsu.rcontext.mmu_en),
+      .alloc_valid(sq_handoff_valid),
+      .alloc_addr(sq_handoff_vaddr),
+      .alloc_alu(sq_handoff_alu),
+      .alloc_fp64(sq_handoff_fp64),
       .load_addr(forward_addr),
       .conflict(forward_conflict),
       .load_size_m1(forward_size_m1),
@@ -446,9 +461,10 @@ module rapt_lsu_sq #(
   // this window.  Mirrors the IOQ's `dmmu_en ||` bypass: with the MMU on,
   // raddr is virtual and the physical cacheability is unknown here.
   logic mmio_ordered;
-  assign mmio_ordered = !csr_bcast.dmmu_en && !rapt_pkg::addr_cacheable(raddr);
+  assign mmio_ordered = !exu_lsu.rcontext.mmu_en && !rapt_pkg::addr_cacheable(raddr);
   logic mmio_load_blocked;
-  assign mmio_load_blocked = (mmio_ordered || (csr_bcast.menvcfg_pbmte && csr_bcast.dmmu_en))
+  assign mmio_load_blocked = (mmio_ordered || (exu_lsu.rcontext.pbmte
+      && exu_lsu.rcontext.mmu_en))
                           && !((sq_valid == '0) && (state_store == LS_S_V));
   // LR must reach L1D to establish a physical-address reservation. If an
   // older same-address store is still in the SQ, wait for it to drain rather
@@ -459,7 +475,7 @@ module rapt_lsu_sq #(
   logic pmp_load_fault_raw;
   // Virtual addresses cannot be checked against physical PMP entries.
   // Translated fragments receive their PA checks in L1D.
-  assign pmp_load_fault_lsu = !csr_bcast.dmmu_en && pmp_load_fault_raw;
+  assign pmp_load_fault_lsu = !exu_lsu.rcontext.mmu_en && pmp_load_fault_raw;
   // Only engage the split for requests that actually reach the cache
   // (no SQ forward/conflict).  Forwarded loads keep the single-shot path;
   // the full load footprint has already been checked against the SQ.
@@ -509,7 +525,7 @@ module rapt_lsu_sq #(
     || ((ralu_b == `RAPT_ALU_LW__) && (raddr_b[1:0] != 2'b00))
     || ma_span_rv64_b;
   logic mmio_ordered_b;
-  assign mmio_ordered_b = !csr_bcast.dmmu_en && !rapt_pkg::addr_cacheable(raddr_b);
+  assign mmio_ordered_b = !exu_lsu.rcontext_b.mmu_en && !rapt_pkg::addr_cacheable(raddr_b);
 
   // B has no trap response. Check its own complete physical byte range
   // before either SQ forwarding or L1D admission; denied loads remain in
@@ -525,7 +541,7 @@ module rapt_lsu_sq #(
   ) u_pmp_load_b (
       .addr(raddr_b),
       .size_m1(b_size_m1),
-      .priv(lsu_eff_priv),
+      .priv(exu_lsu.rcontext_b.eff_priv),
       .op_r(1'b1),
       .op_w(1'b0),
       .op_x(1'b0),
@@ -542,7 +558,7 @@ module rapt_lsu_sq #(
       .fault(b_pmp_fault),
       .fault_lo_o()
   );
-  assign b_bare_fault = !csr_bcast.dmmu_en && (b_pmp_fault || !rapt_pkg::addr_data_span_capable(
+  assign b_bare_fault = !exu_lsu.rcontext_b.mmu_en && (b_pmp_fault || !rapt_pkg::addr_data_span_capable(
       raddr_b, b_size_m1, 1'b0
   ));
 
@@ -581,16 +597,21 @@ module rapt_lsu_sq #(
   // A downstream ready cannot complete a locally blocked query. Qualify it
   // with the admitted B request, including SQ alias and alignment checks.
   assign exu_lsu.rready_b = fwd_hit_b || (lsu_l1d.rvalid_b && lsu_l1d.rready_b);
+  assign exu_lsu.rretry_b = exu_lsu.rvalid_b && !fwd_hit_b
+                         && (exu_lsu.rcontext_b.mmu_en || sq_has_acquire || sq_has_typed_store
+                             || load_in_sq_b || ma_span_b || mmio_ordered_b || b_bare_fault
+                             || (lsu_l1d.rvalid_b && lsu_l1d.rretry_b));
 `else
   assign lsu_l1d.rvalid_b = 1'b0;
   assign lsu_l1d.raddr_b  = '0;
   assign lsu_l1d.ralu_b   = '0;
   assign exu_lsu.rdata_b  = '0;
   assign exu_lsu.rready_b = 1'b0;
+  assign exu_lsu.rretry_b = 1'b0;
   /* verilator lint_off UNUSEDSIGNAL */
   logic _unused_hum_lsu;
   assign _unused_hum_lsu = exu_lsu.rvalid_b ^ (^exu_lsu.raddr_b)
-                         ^ (^exu_lsu.ralu_b) ^ lsu_l1d.rready_b
+                         ^ (^exu_lsu.ralu_b) ^ lsu_l1d.rready_b ^ lsu_l1d.rretry_b
                          ^ (^lsu_l1d.rdata_b);
   /* verilator lint_on UNUSEDSIGNAL */
 `endif
@@ -600,8 +621,7 @@ module rapt_lsu_sq #(
   // L1D's PMP sees only those beat addresses and cannot
   // detect a partial-region violation that straddles a PMP boundary.
   // Check the un-split access here so partial matches trap correctly.
-  assign lsu_eff_priv = (csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv)
-                        ? csr_bcast.mpp : csr_bcast.priv;
+  assign lsu_eff_priv = exu_lsu.rcontext.eff_priv;
 
   // ==========================================================================
   //  Misaligned store support
@@ -830,6 +850,8 @@ module rapt_lsu_sq #(
   end
 
   assign lsu_l1d.raddr = ma_req_addr;
+  assign lsu_l1d.rcontext = exu_lsu.rcontext;
+  assign lsu_l1d.rcontext_b = exu_lsu.rcontext_b;
   assign lsu_l1d.ralu = ma_req_alu;
   assign lsu_l1d.rmisaligned = |(raddr & XLEN'(lsu_load_size_m1));
   assign lsu_l1d.rvalid = !lr_alignment_fault && ((ma_state == MA_HI) || (ma_state == MA_X)
@@ -974,6 +996,10 @@ module rapt_lsu_sq #(
   `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_COMMIT_ON_FLUSH_MATCH,
                   (sq_commit_fire && (cmu_bcast.flush_pipe || cmu_bcast.fence_time)),
                   (sq_valid[sq_cmt] && !sq_committed[sq_cmt] && sq_dest[sq_cmt] == rou_lsu.dest))
+`ifdef RAPT_RV64
+  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_FSD_DATA_ALIAS, sq_alloc_fire && exu_ioq_bcast.sq_fp64,
+                  exu_ioq_bcast.sq_wdata == exu_ioq_bcast.sq_wdata64)
+`endif
 
   // COMMIT_ORDER: the entry being commit-marked must exist, be speculative,
   // and belong to the store the ROB is retiring (stores commit in order, so
@@ -987,7 +1013,7 @@ module rapt_lsu_sq #(
   // Consequent extracted so the SVA macro argument stays short and the
   // formatter cannot rejoin it past the column limit.
   logic sq_commit_addr_page_offset_ok;
-  assign sq_commit_addr_page_offset_ok = csr_bcast.dmmu_en
+  assign sq_commit_addr_page_offset_ok = sq_entry_context[sq_cmt].mmu_en
       ? (sq_vaddr[sq_cmt][PageOffBits-1:WordOffBits]
           == rou_lsu.sq_vaddr[PageOffBits-1:WordOffBits])
       : (sq_vaddr[sq_cmt][XLEN-1:WordOffBits]

@@ -94,11 +94,12 @@ def check_package(package, *, bits=64):
 def make_command(action, package, *, bits=64):
     if bits not in (32, 64):
         raise ValueError("network profile requires RV32 or RV64")
+    sys_clk = 30_000_000 if bits == 64 else 50_000_000
     target = {"image": f"fpga-img-rv{bits}", "build": "fpga-build", "load": "fpga-load"}[action]
     payload = package.resolve() / "fw_payload.bin"
     return ["make", "-C", str(LITEX), target,
             f"VARIANT=linux{bits}", "FPGA_BOARD=mlk_cu08_ku15p", "FPGA_AUTO_DETECT=0",
-            "RAPT_CONFIG=default", "SYS_CLK=50000000", "WITH_MIG=1",
+            "RAPT_CONFIG=default", f"SYS_CLK={sys_clk}", "WITH_MIG=1",
             "CROSS=riscv64-linux-gnu-",
             "WITH_LITEDRAM=0", "WITH_SDCARD=1", "WITH_ETHERNET=1",
             "ETH_SPEED=1000", "FMC_SLOT=c", "ETH_PORT=a", "BOOT_MODE=bios",
@@ -128,7 +129,9 @@ def main(*, bits=64, default_package=DEFAULT_PACKAGE):
             raise ValueError("LiteX venv missing; install separately with make setup")
         print(f"PASS: RV{bits} Buildroot payload {manifest['files']['fw_payload.bin']}")
         print("PASS: LiteEth/FPU, eth0 DHCP, gateway/DNS, image layout and BIOS hook")
-        print(f"Profile: CU08 FMC_C/ETHA (oversampling RX), RV{bits} default, 50 MHz, 1000 Mb/s, manual BIOS boot")
+        sys_clk_mhz = 30 if bits == 64 else 50
+        print(f"Profile: CU08 FMC_C/ETHA (oversampling RX), RV{bits} default, "
+              f"{sys_clk_mhz} MHz, 1000 Mb/s, manual BIOS boot")
         print("Not validated: routed timing, SD contents, PHY link or board Linux networking.")
         if args.action == "check":
             return 0

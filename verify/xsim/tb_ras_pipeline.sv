@@ -15,7 +15,16 @@ module tb_ras_pipeline;
   rapt_recovery_if recovery ();
   rapt_idu idu (.*);
   rapt_cmu cmu (.*);
-  rapt_bpu #(.RSB_SIZE(3)) bpu (.*);
+  rapt_bpu #(
+      .RSB_SIZE(3)
+  ) bpu (
+      .execute_recover(1'b0),
+      .execute_ghr('0),
+      .execute_phr('0),
+      .snapshot_ghr(),
+      .snapshot_phr(),
+      .*
+  );
   `include "tb_common.svh"
   `include "tb_core_bcast_defaults.svh"
 

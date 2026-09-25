@@ -54,7 +54,7 @@ def main():
             command = (
                 f"read_slang {includes} --single-unit -DFORMAL --top formal_rename_checkpoint "
                 f"-GEntries={entries} -GRenameWidth={width} -GResolvePorts={ports} "
-                f"-GMapEntries=3 -GPhysRegs=6 {' '.join(map(str, sources))}; "
+                f"{' '.join(map(str, sources))}; "
                 "select -assert-none t:$assert; chformal -assume -lower; "
                 "prep -top formal_rename_checkpoint; flatten; memory_map; opt; "
                 "sat -verify -tempinduct -seq 2 -maxsteps 8 -set-at 1 reset 1 "
@@ -72,15 +72,14 @@ def main():
             command = (
                 f"read_slang {includes} --single-unit -DSYNTHESIS --top rapt_rename_checkpoint "
                 f"-GEntries={entries} -GRenameWidth=4 -GResolvePorts=5 "
-                f"-GMapEntries=32 -GPhysRegs=128 -GMapBits=7 {PACKAGE} {DUT}; "
+                f"{PACKAGE} {DUT}; "
                 "select -assert-none t:$check t:$assert t:$assume t:$cover; "
                 "synth -top rapt_rename_checkpoint -noabc; abc -g simple; clean; stat; ltp -noff"
             )
             output = run_yosys(command, args.output / f"{name}.log", args.timeout)
             row = {
                 "checkpoint_entries": entries, "rename_width": 4, "resolve_ports": 5,
-                "map_entries": 32, "physical_registers": 128,
-                "state_bits": entries * (32 * 7 + 128 + entries) + entries,
+                "state_bits": entries * (entries + 74),
                 "generic_cells": int(re.findall(r"^\s*(\d+) cells\s*$", output, re.M)[-1]),
                 "topological_depth": int(re.findall(
                     r"Longest topological path .*\(length=(\d+)\)", output)[-1]),

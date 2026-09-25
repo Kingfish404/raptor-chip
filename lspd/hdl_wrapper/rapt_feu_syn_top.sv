@@ -6,7 +6,7 @@
 module rapt_feu_syn_top #(
     parameter int unsigned NumSlots = rapt_pkg::DispatchWidth,
     parameter int unsigned NumCompletions = rapt_pkg::CoreConfig.completion_ports,
-    parameter int unsigned FPQ_SIZE = 4
+    parameter int unsigned FPQ_SIZE = 1
 ) (
     input logic clock,
     reset,

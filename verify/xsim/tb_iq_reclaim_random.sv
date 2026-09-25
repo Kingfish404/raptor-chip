@@ -6,7 +6,8 @@ module tb_iq_reclaim_random #(
     parameter bit InOrder = 0,
     parameter bit CheckOperandIndependence = 0,
     parameter bit ReclaimOnIssue = 1,
-    parameter int Ports = rapt_pkg::IntegerIssuePorts
+    parameter int Ports = rapt_pkg::IntegerIssuePorts,
+    parameter int LastIssuePort = Ports - 1
 );
   import rapt_pkg::*;
   logic clock = 0, reset = 1;
@@ -22,6 +23,7 @@ module tb_iq_reclaim_random #(
   rapt_iq #(
       .IQ_SIZE(Entries),
       .NumIssuePorts(Ports),
+      .LastIssuePort(LastIssuePort),
       .IN_ORDER_ISSUE(InOrder),
       .RebalancePorts(Rebalance),
       .ReclaimOnIssue(ReclaimOnIssue)
@@ -52,6 +54,7 @@ module tb_iq_reclaim_random #(
     rapt_iq #(
         .IQ_SIZE(Entries),
         .NumIssuePorts(Ports),
+        .LastIssuePort(LastIssuePort),
         .IN_ORDER_ISSUE(InOrder),
         .RebalancePorts(Rebalance),
         .ReclaimOnIssue(ReclaimOnIssue)
@@ -167,7 +170,9 @@ module tb_iq_reclaim_random #(
         end
       end
       // Independent age-number scheduler; no DUT age/selected state is read.
-      for (int p = 0; p < Ports; p++) begin
+      for (int rank = 0; rank < Ports; rank++) begin
+        int p;
+        p = rank == Ports - 1 ? LastIssuePort : rank < LastIssuePort ? rank : rank + 1;
         best = -1;
         for (int e = 0; e < Entries; e++)
         if(!cmu_bcast.flush_pipe && model[e].valid && !selected[e]

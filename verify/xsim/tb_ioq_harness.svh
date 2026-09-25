@@ -4,6 +4,10 @@ logic pmu_ioq_full;
 logic [`RAPT_XLEN-1:0] sq_waddr_hi, sq_waddr_third;
 logic [2:0][1:0] sq_wpbmt;
 logic sq_acquire;
+logic sq_handoff_valid;
+logic [`RAPT_XLEN-1:0] sq_handoff_vaddr;
+logic [4:0] sq_handoff_alu;
+logic sq_handoff_fp64;
 
 cmu_bcast_if cmu_bcast();
 csr_bcast_if csr_bcast();
@@ -23,6 +27,9 @@ assign completion[1] = exu_rou_b;
 assign completion[2] = '0;
 assign completion[3] = exu_ioq_bcast;
 assign completion[4] = exu_wb_mul;
+for (genvar p = 5; p < rapt_pkg::CompletionPorts; p++) begin : g_extra_completion
+  assign completion[p] = '0;
+end
 
 load_fast_if load_fast();
 
@@ -45,6 +52,10 @@ rapt_lsu_ioq dut (
 `else
     .wb_accept(1'b1),
 `endif
+    .sq_handoff_valid,
+    .sq_handoff_vaddr,
+    .sq_handoff_alu,
+    .sq_handoff_fp64,
     .sq_waddr_hi,
     .sq_waddr_third,
     .sq_wpbmt,
@@ -64,28 +75,17 @@ task automatic init_ioq_inputs(input logic dmmu_en);
     init_cmu_bcast_defaults();
     init_csr_bcast_defaults(`RAPT_PRIV_M, XLEN'(32'h2000_0000), dmmu_en);
     init_pmp_state_defaults(1'b0);
-    dispatch[0].uop = '0;
-    dispatch[0].op1 = '0;
-    dispatch[0].op2 = '0;
-    dispatch[0].pr1 = '0;
-    dispatch[0].pr2 = '0;
-    dispatch[0].prd = '0;
-    dispatch[0].prs = '0;
-    dispatch[0].dest = '0;
-
-`ifdef RAPT_DUAL_ISSUE
-    dispatch[1].uop = '0;
-    dispatch[1].op1 = '0;
-    dispatch[1].op2 = '0;
-    dispatch[1].pr1 = '0;
-    dispatch[1].pr2 = '0;
-    dispatch[1].prd = '0;
-    dispatch[1].prs = '0;
-    dispatch[1].dest = '0;
-
-`endif
-    disp.accept[0] = 1'b0;
-    disp.accept[1] = 1'b0;
+    for (int s = 0; s < rapt_pkg::DispatchWidth; s++) begin
+      dispatch[s].uop = '0;
+      dispatch[s].op1 = '0;
+      dispatch[s].op2 = '0;
+      dispatch[s].pr1 = '0;
+      dispatch[s].pr2 = '0;
+      dispatch[s].prd = '0;
+      dispatch[s].prs = '0;
+      dispatch[s].dest = '0;
+      disp.accept[s] = 1'b0;
+    end
     exu_rou.pc = '0;
     exu_rou.npc = '0;
     exu_rou.btaken = 1'b0;
@@ -125,6 +125,7 @@ task automatic init_ioq_inputs(input logic dmmu_en);
     exu_lsu.miss_wake = 1'b0;
     exu_lsu.rdata_b = '0;
     exu_lsu.rready_b = 1'b0;
+    exu_lsu.rretry_b = 1'b0;
     exu_lsu.stq_ready = 1'b1;
     exu_l1d.paddr = '0;
     exu_l1d.pbmt = '0;

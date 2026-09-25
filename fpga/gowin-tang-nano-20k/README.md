@@ -1,5 +1,8 @@
 # Tang Nano 20K (Gowin GW2AR-18) RISC-V
 
+This is the legacy Tang Nano example. Run its commands from
+`fpga/gowin-tang-nano-20k/`; the maintained Raptor SoC flow is [LiteX](../litex/README.md).
+
 ## Hardware
 - __[Tango Nano 20K-Aliexpress](https://www.aliexpress.com/item/1005005581148230.html)__ (38.77 $) or [Tang Nano 20K FPGA-淘宝网](https://item.taobao.com/item.htm?id=717932028073) (169 RMB)
   - or [Tang Nano 9K FPGA-淘宝网](https://item.taobao.com/item.htm?id=666055424174) (89-108 RMB)
@@ -40,8 +43,12 @@ MENU > Project > Configuration > Synthesize > General:
 - Tools:
   - [openFPGALoader: universal utility for programming FPGA — openFPGALoader: universal utility for programming FPGA latest documentation](https://trabucayre.github.io/openFPGALoader/)
 - Program device:
-  - `make program_flash` or `openFPGALoader -b tangnano20k -f impl/syn/fpga.fs` for open-source tools
-  - `make program_sdram` or `openFPGALoader -b tangnano20k impl/syn/fpga.fs` for open-source tools
+  - `openFPGALoader -b tangnano20k -f impl/syn/fpga.fs` for the open-source `pnr` output (persistent flash)
+  - `openFPGALoader -b tangnano20k impl/syn/fpga.fs` for the open-source `pnr` output (volatile load)
+The Make targets `program_flash` / `program_sdram` currently select
+`impl/pnr/fpga.fs`, which differs from the open-source flow's `impl/syn/fpga.fs`.
+Use the explicit commands above for that flow.
+
 - Using usb to connect the card via `tty` (e.g. `/dev/ttyUSB1`), list of `tty` tools:
   - Serial Monitor: [Serial Monitor - Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=ms-vscode.vscode-serial-monitor) (vscode extension)
   - minicom: [Debian -- Details of package minicom in sid](https://packages.debian.org/sid/minicom) (`brew install minicom`)

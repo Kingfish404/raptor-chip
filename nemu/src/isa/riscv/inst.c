@@ -24,6 +24,9 @@
 #include <cpu/difftest.h>
 #include <cpu/icache.h>
 #include <memory/tlb.h>
+#include <memory/vaddr.h>
+#include <stdlib.h>
+#include <stdio.h>
 
 #define R(i) gpr(i)
 #define CSR(i) sr(i)
@@ -863,6 +866,27 @@ static int decode_exec(Decode *s)
 
   INSTPAT_CASE(0b11100, grp_system) // SYSTEM (ecall, ebreak, sfence.vma, mret, sret, wfi, CSRs)
   INSTPAT("0000000 00000 00000 000 00000 11100 11", ecall, N,
+          if (cpu.priv == PRV_U && getenv("NEMU_SYSCALL_DEBUG") != NULL)
+          {
+              long t6 = (long)R(31);
+              if (t6 == 5 || t6 == 33 || t6 == 56 || t6 == 59)
+              {
+                  char pbuf[80];
+                  int i;
+                  for (i = 0; i < 79; i++)
+                  {
+                      word_t ch = vaddr_read(R(10) + i, 1);
+                      if (ch == 0)
+                          break;
+                      pbuf[i] = (char)ch;
+                  }
+                  pbuf[i] = '\0';
+                  fprintf(stderr, "[sys] ecall t6=%ld path='%s'\n", t6, pbuf);
+              }
+              else
+                  fprintf(stderr, "[sys] ecall pc=" FMT_WORD " t6=%ld a0=%ld a1=%ld a2=%ld\n",
+                          s->pc, t6, (long)R(10), (long)R(11), (long)R(12));
+          }
           s->dnpc = isa_raise_intr(
               ((cpu.priv == PRV_U) ? MCA_ENV_CAL_UMO : ((cpu.priv == PRV_S) ? MCA_ENV_CAL_SMO : MCA_ENV_CAL_MMO)),
               s->pc));

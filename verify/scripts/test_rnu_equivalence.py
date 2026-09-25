@@ -39,7 +39,7 @@ class AuditTest(unittest.TestCase):
 
     def test_missing_observation(self):
         with self.assertRaises(ValueError):
-            audit(fixture().replace('-> checkpoint_allocate_free\n', '-> wrong\n'))
+            audit(fixture().replace('-> checkpoints.valid_q\n', '-> wrong\n'))
 
     def test_missing_state(self):
         with self.assertRaises(ValueError):

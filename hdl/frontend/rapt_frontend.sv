@@ -16,7 +16,12 @@ module rapt_frontend #(
     rapt_recovery_if.sink recovery,
     ifu_l1i_if.master ifu_l1i,
     idu_rnu_if.master idu_rnu,
-    output logic empty_o
+    output logic empty_o,
+    output logic [63:0] snapshot_ghr,
+    output logic [7:0] snapshot_phr,
+    input logic history_restore = 1'b0,
+    input logic [63:0] restore_ghr = '0,
+    input logic [7:0] restore_phr = '0
 );
   ifu_idu_if ifu_fqu ();
   ifu_idu_if fqu_idu ();
@@ -29,6 +34,11 @@ module rapt_frontend #(
 
       .ifu_bpu(ifu_bpu),
       .idu_bpu(idu_bpu),
+      .execute_recover(history_restore),
+      .execute_ghr(restore_ghr),
+      .execute_phr(restore_phr),
+      .snapshot_ghr(snapshot_ghr),
+      .snapshot_phr(snapshot_phr),
 
       .reset(reset)
   );

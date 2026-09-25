@@ -18,8 +18,8 @@ For the default config (see [hdl/configs/default/rapt_config.svh](../../hdl/conf
 
 | Shape (depth × width) | Use site                        | Instances                                    |
 | --------------------- | ------------------------------- | -------------------------------------------- |
-| `32 × 32`             | `rapt_l1i.sv` data banks        | `L1I_N_WAYS × L1I_LINE_SIZE` = `4 × 16` = 64 |
-| `32 × 128` | `rapt_l1d_data.sv` data subarrays (RV32/RV64) | `L1D_N_WAYS × subarrays/way` = `4 × 4` = 16 |
+| `64 × 32`             | `rapt_l1i.sv` data banks        | `L1I_N_WAYS × L1I_LINE_SIZE` = `4 × 16` = 64 |
+| `64 × 128` | `rapt_l1d_data.sv` data subarrays (RV32/RV64) | `L1D_N_WAYS × subarrays/way` = `4 × 4` = 16 |
 
 All macros are **single-port (1RW)** since the RTL was migrated to [rapt_sram_1rw.sv](../../hdl/memory/rapt_sram_1rw.sv): the cache controllers time-multiplex reads and writes onto the shared port. Legacy 1R1W configs are kept for reference; the current Makefile explicitly selects its 1RW config list, so overriding `PORTS` alone does not select a legacy build.
 
@@ -36,19 +36,21 @@ Each shape becomes one OpenRAM-compiled macro under `build/<PLATFORM>/macro/<ope
 ## Workflow
 
 ```shell
-# 1. one-off: install OpenRAM dependencies (Docker is recommended)
+# 1. print setup guidance, then install the listed dependencies separately
 make -C sim/sram setup
 
 # 2. generate macros for default config (sky130 PDK)
 make -C sim/sram all PLATFORM=sky130
 
 # 3. run STA with real SRAM macros in the loop
-make -C sim sta MEMORY=sram STA_PLATFORM=sky130hd CLK_FREQ_MHZ=50
+make -C sim sta MEMORY=sram STA_PLATFORM=sky130hd SRAM_PLATFORM=sky130 CLK_FREQ_MHZ=50
 ```
 
 The `sta MEMORY=sram` target defines `RAPT_USE_SRAM_MACRO`, so [rapt_sram_1rw.sv](../../hdl/memory/rapt_sram_1rw.sv) instantiates the OpenRAM blackbox declared in [wrappers/rapt_sram_blackbox.v](wrappers/rapt_sram_blackbox.v) instead of the flop array. Yosys then leaves the macros as blackboxes; OpenSTA picks up the OpenRAM-produced `.lib` files and reports real cache timing.
 
-With `RAPT_USE_SRAM_MACRO`, unregistered shapes intentionally fail elaboration through `rapt_unsupported_sram_shape`; add the matching macro contract rather than hiding the error with another blackbox. Without this define, the wrapper uses its synchronous behavioral model. Generated placeholder Liberty files allow flow checks but do not constitute characterized SRAM timing.
+With `RAPT_USE_SRAM_MACRO`, unregistered shapes intentionally fail elaboration through `rapt_unsupported_sram_shape`; add the matching macro contract rather than hiding the error with another blackbox. Without this define, the wrapper uses its synchronous behavioral model. Generated placeholder Liberty files allow flow checks but do not constitute characterized SRAM timing. `sta` automatically calls `sram-ensure-libs`; if any selected macro library is missing, it generates the complete placeholder set in that platform directory. Keep characterized sets complete and separate from placeholder sets. The standalone OpenRAM compiler defaults to `PLATFORM=sky130`, while whole-core STA defaults to NanGate45 and normalizes `sky130` to `sky130hd`; explicitly pass `SRAM_PLATFORM=sky130` to use the compiled Sky130 set above.
+
+`stubs` also writes the `.ok` stamps used by `all`. To replace placeholders with characterized macros, use a fresh platform output directory or deliberately remove the placeholder set with `make -C sim/sram clean PLATFORM=sky130` before running `all PLATFORM=sky130`. Cleaning removes that platform's macro artifacts.
 
 ## Adding a new shape
 

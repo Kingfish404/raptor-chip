@@ -3,11 +3,13 @@
 
 // Free List - manages allocation and deallocation of physical registers.
 // Implemented as a circular FIFO. Tracks in-flight count for flush recovery.
-// Dual-issue: supports 2 simultaneous allocations per cycle.
+// Legacy A/B helper: supports at most 2 allocations per cycle. RenameWidth
+// selects whether slot B participates; the integrated RNU handles wider widths.
 module rapt_rnu_freelist #(
     parameter unsigned RNUM = `RAPT_REG_SIZE,
     parameter unsigned PNUM = `RAPT_PHY_SIZE,
     parameter unsigned PLEN = `RAPT_PHY_LEN,
+    parameter unsigned RenameWidth = `RAPT_RENAME_WIDTH,
     /* verilator lint_off UNUSEDPARAM */
     parameter unsigned RLEN = `RAPT_REG_LEN
     /* verilator lint_on UNUSEDPARAM */
@@ -28,15 +30,14 @@ module rapt_rnu_freelist #(
   logic do_alloc_a;
   assign do_alloc_a = fl.alloc_req_a && !fl.alloc_empty_a;
 
-`ifdef RAPT_DUAL_ISSUE
   // Allocation port B: reads from head+1 when A also allocates, head when only B allocates
   assign fl.alloc_pr_b    = do_alloc_a ? fifo[head[PLEN-1:0] + 1] : fifo[head[PLEN-1:0]];
   // Empty for slot B: need 2 free entries when both allocate, 1 when only B allocates
-  assign fl.alloc_empty_b = do_alloc_a ? ((head == tail) || (head + 1 == tail)) : (head == tail);
+  assign fl.alloc_empty_b = (RenameWidth < 2) ||
+                            (do_alloc_a ? ((head == tail) || (head + 1 == tail)) : (head == tail));
 
   logic do_alloc_b;
   assign do_alloc_b = fl.alloc_req_b && !fl.alloc_empty_b;
-`endif
 
   // Dealloc write decode: per-entry one-hot (FPGA-robust, like the PRF).
   //   - slot A writes fifo[tail]
@@ -72,7 +73,6 @@ module rapt_rnu_freelist #(
                          + (fl.flush_rd_b != 0 ? 1 : 0);
         inflight_pr_num <= '0;
       end else begin
-`ifdef RAPT_DUAL_ISSUE
         if (do_alloc_a && do_alloc_b) begin
           head <= head + 2;
         end else if (do_alloc_a || do_alloc_b) begin
@@ -84,16 +84,6 @@ module rapt_rnu_freelist #(
             + (do_alloc_b ? 1 : 0)
             - (fl.dealloc_req_a ? 1 : 0)
             - (fl.dealloc_req_b ? 1 : 0);
-`else
-        if (do_alloc_a) begin
-          head <= head + 1;
-        end
-        // Update in-flight count: +1 for alloc, -1 per dealloc
-        inflight_pr_num <= inflight_pr_num
-            + (do_alloc_a ? 1 : 0)
-            - (fl.dealloc_req_a ? 1 : 0)
-            - (fl.dealloc_req_b ? 1 : 0);
-`endif
       end
 
       // --- Tail pointer + per-entry FIFO write (dealloc always proceeds) ---

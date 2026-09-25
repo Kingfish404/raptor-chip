@@ -78,16 +78,6 @@
 `define RAPT_FETCH_LOOKAHEAD
 `endif
 
-// Deprecated compatibility markers for historical modules/testbenches.
-`define RAPT_DUAL_COMMIT
-`define RAPT_DUAL_ISSUE
-
-`ifdef RAPT_DUAL_ISSUE
-`define RAPT_ISSUE_WIDTH 2
-`else
-`define RAPT_ISSUE_WIDTH 1
-`endif
-
 // Full 32-entry architectural register file (rv32i, not rv32e).
 `define RAPT_REG_SIZE 32
 `define RAPT_REG_LEN $clog2(`RAPT_REG_SIZE)

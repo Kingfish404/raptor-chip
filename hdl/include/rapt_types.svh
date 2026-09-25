@@ -60,6 +60,8 @@
   typedef struct packed { \
   UopT uop; \
   WordT op1; \
+  WordT stable_op1; \
+  logic stable_op1_valid; \
   WordT op2; \
   PhysT pr1; \
   PhysT pr2; \

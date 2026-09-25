@@ -11,6 +11,8 @@ module rapt_backend #(
     parameter int XLEN = `RAPT_XLEN
 ) (
     input logic clock,
+    input logic writeback_idle = 1'b1,
+    output logic writeback_drain,
     idu_rnu_if.slave idu_rnu,
     cmu_bcast_if cmu_bcast,
     csr_bcast_if csr_bcast,
@@ -34,6 +36,11 @@ module rapt_backend #(
     input logic dbg_gpr_we_i,
     input logic [4:0] dbg_gpr_addr_i,
     input logic [XLEN-1:0] dbg_gpr_wdata_i,
+    input logic [63:0] snapshot_ghr = '0,
+    input logic [7:0] snapshot_phr = '0,
+    output logic history_restore,
+    output logic [63:0] restore_ghr,
+    output logic [7:0] restore_phr,
 `ifdef RAPT_RVFI
     // RISC-V Formal Interface (RVFI) outputs -- NRET=CommitWidth channels
     output [rapt_pkg::CommitWidth-1:0] rvfi_valid,
@@ -86,9 +93,9 @@ module rapt_backend #(
   rou_csr_if rou_csr ();
 
   dpu_iq_if disp_alq ();
-  dpu_iq_if #(.RS_SIZE(4)) disp_brq ();
+  dpu_iq_if #(.RS_SIZE(8)) disp_brq ();
   dpu_iq_if #(.RS_SIZE(4)) disp_mdq ();
-  dpu_iq_if #(.RS_SIZE(4)) disp_fpq ();
+  dpu_iq_if #(.RS_SIZE(1)) disp_fpq ();
   dpu_ioq_if disp_ioq ();
 
   // Unified completion topology: a parameterized integer-port array followed
@@ -132,24 +139,33 @@ module rapt_backend #(
   assign completion_candidate[CandidateMemory] = exu_ioq_bcast;
   assign completion_candidate[CandidateMul] = exu_wb_mul;
   rapt_pkg::completion_t fast_load_candidate;
-  always_comb begin
-    for (int cdb = 0; cdb < rapt_pkg::CompletionPorts; cdb++) completion_accepted[cdb] = '0;
-    for (int integer_port = 0; integer_port < IntegerIssuePorts; integer_port++) begin
-      if (integer_port == IntegerSystemPort) begin
-        completion_accepted[integer_port] = wb_integer_shared;
-      end else begin
+  // Keep each physical CDB slot on its own combinational writer so a
+  // branch-queue CDB wake cannot see the branch packet it is producing.
+  for (
+      genvar integer_port = 0; integer_port < IntegerIssuePorts; integer_port++
+  ) begin : g_integer_accept
+    if (integer_port == IntegerSystemPort) begin : g_shared
+      assign completion_accepted[integer_port] = wb_integer_shared;
+    end else begin : g_simple
+      always_comb begin
         completion_accepted[integer_port] = wb_integer_raw[integer_port];
         completion_accepted[integer_port].valid = wb_integer_raw[integer_port].valid
             && completion_candidate_accept[CandidateIntegerBase+integer_port];
       end
     end
+  end
+  always_comb begin
     completion_accepted[IntegerIssuePorts] = wb_branch;
-    completion_accepted[IntegerIssuePorts+1] = exu_ioq_bcast;
-    completion_accepted[IntegerIssuePorts+2] = exu_wb_mul;
     completion_accepted[IntegerIssuePorts].valid = wb_branch.valid
         && completion_candidate_accept[CandidateBranch];
+  end
+  always_comb begin
+    completion_accepted[IntegerIssuePorts+1] = exu_ioq_bcast;
     completion_accepted[IntegerIssuePorts+1].valid = exu_ioq_bcast.valid
         && completion_candidate_accept[CandidateMemory];
+  end
+  always_comb begin
+    completion_accepted[IntegerIssuePorts+2] = exu_wb_mul;
     completion_accepted[IntegerIssuePorts+2].valid = exu_wb_mul.valid
         && completion_candidate_accept[CandidateMul];
   end
@@ -188,17 +204,13 @@ module rapt_backend #(
     load_fast_accepted.confirmed_rd = load_fast_raw.confirmed_rd;
     load_fast_accepted.result = load_fast_raw.result;
   end
-  // Non-integer producers retain the completion timing boundary. Integer
-  // producers already register execution below. All ROB/PRF/IQ consumers
-  // observe the same accepted packet; no unvalidated early forwarding.
-  // An accepted owner remains ROB_EX until this packet arrives. Early
-  // recovery does not free owners; precise flush clears both ROB and stage.
-  // Only validity needs reset, keeping wide payloads out of the reset tree.
+  // Integer execute already registers the issue packet. Memory completion is
+  // the IOQ broadcast the cycle after L1D `rready`. Branch compare is
+  // combinational from the already-registered BRQ issue packet; a fabric
+  // register here delayed recovery and ROB complete by a cycle. Mul/div stay
+  // registered because that FU is already pipelined.
   for (genvar p = 0; p < rapt_pkg::CompletionPorts; p++) begin : g_completion_stage
-    if (p < IntegerIssuePorts) begin : g_integer
-      // Integer execute already registers the full completion packet. Keep
-      // acceptance/owner validation, but avoid registering it a second time
-      // before all ROB/PRF/IQ consumers see the same accepted result.
+    if (p != IntegerIssuePorts + 2) begin : g_same_cycle
       assign completion[p] = completion_accepted[p];
     end else begin : g_registered
       rapt_completion_stage stage (
@@ -210,22 +222,31 @@ module rapt_backend #(
       );
     end
   end
-  // Delay the complete fast-load protocol, not just confirmed/result: an
-  // early wake must retain its one-cycle lead over its confirm or rebusy.
-  always_ff @(posedge clock) begin
-    load_fast.valid <= load_fast_accepted.valid && !reset && !cmu_bcast.flush_pipe;
-    load_fast.confirmed <= load_fast_accepted.confirmed && !reset && !cmu_bcast.flush_pipe;
-    load_fast.rebusy <= load_fast_accepted.rebusy;
-    load_fast.prd <= load_fast_accepted.prd;
-    load_fast.dest <= load_fast_accepted.dest;
-    load_fast.generation <= load_fast_accepted.generation;
-    load_fast.rd <= load_fast_accepted.rd;
-    load_fast.confirmed_prd <= load_fast_accepted.confirmed_prd;
-    load_fast.confirmed_dest <= load_fast_accepted.confirmed_dest;
-    load_fast.confirmed_generation <= load_fast_accepted.confirmed_generation;
-    load_fast.confirmed_rd <= load_fast_accepted.confirmed_rd;
-    load_fast.result <= load_fast_accepted.result;
+  // Fast-load wake is combinational with IOQ `rready`; confirm is the
+  // registered IOQ broadcast the next cycle. Do not re-register the pair.
+  always_comb begin
+    load_fast.valid = load_fast_accepted.valid && !reset && !cmu_bcast.flush_pipe;
+    load_fast.confirmed = load_fast_accepted.confirmed && !reset
+        && !cmu_bcast.flush_pipe;
+    load_fast.rebusy = load_fast_accepted.rebusy;
+    load_fast.prd = load_fast_accepted.prd;
+    load_fast.dest = load_fast_accepted.dest;
+    load_fast.generation = load_fast_accepted.generation;
+    load_fast.rd = load_fast_accepted.rd;
+    load_fast.confirmed_prd = load_fast_accepted.confirmed_prd;
+    load_fast.confirmed_dest = load_fast_accepted.confirmed_dest;
+    load_fast.confirmed_generation = load_fast_accepted.confirmed_generation;
+    load_fast.confirmed_rd = load_fast_accepted.confirmed_rd;
+    load_fast.result = load_fast_accepted.result;
   end
+  `RAPT_SVA_IMPLY(clock, reset, MEMORY_COMPLETION_SAME_CYCLE,
+                  completion_accepted[IntegerIssuePorts+1].valid,
+                  completion[IntegerIssuePorts+1] == completion_accepted[IntegerIssuePorts+1])
+  `RAPT_SVA_IMPLY(clock, reset, BRANCH_COMPLETION_SAME_CYCLE,
+                  completion_accepted[IntegerIssuePorts].valid,
+                  completion[IntegerIssuePorts] == completion_accepted[IntegerIssuePorts])
+  `RAPT_SVA_IMPLY(clock, reset, FAST_LOAD_WAKE_SAME_CYCLE,
+                  load_fast_accepted.valid && !cmu_bcast.flush_pipe, load_fast.valid)
   `RAPT_SVA_NEXT(clock, reset, FAST_LOAD_STAGE_FLUSH, cmu_bcast.flush_pipe,
                  !load_fast.valid && !load_fast.confirmed)
   // Consequent extracted so the SVA macro argument stays short and the
@@ -279,7 +300,7 @@ module rapt_backend #(
                     completion_candidate_payload_match[p])
   end
   logic integer_system_issue_enable;
-  logic integer_system_inflight, fpu_completion_ready;
+  logic fpu_completion_ready;
   logic fpu_issue_enable;
 
   exu_prf_if exu_prf ();
@@ -355,6 +376,11 @@ module rapt_backend #(
       .rnu_rou(rnu_rou),
       .recovery(recovery),
       .checkpoint_release(checkpoint_release),
+      .snapshot_ghr(snapshot_ghr),
+      .snapshot_phr(snapshot_phr),
+      .history_restore(history_restore),
+      .restore_ghr(restore_ghr),
+      .restore_phr(restore_phr),
 
       .map_snapshot(rnu_map_snapshot),
       .rat_snapshot(rnu_rat_snapshot),
@@ -372,6 +398,8 @@ module rapt_backend #(
   );
 
   rapt_rou rou (
+      .writeback_idle(writeback_idle),
+      .writeback_drain(writeback_drain),
       .completion(completion),
       .completion_owner(completion_owner),
       .clock(clock),
@@ -511,7 +539,6 @@ module rapt_backend #(
 
       .load_fast(load_fast),
       .integer_system_issue_enable(integer_system_issue_enable),
-      .integer_system_inflight(integer_system_inflight),
       .exu_csr(exu_csr),
       .wb_integer_raw(wb_integer_raw),
       .wb_branch(wb_branch),
@@ -546,7 +573,6 @@ module rapt_backend #(
       .cancel_valid(recovery.redirect_valid),
       .cancel_head(recovery.head),
       .cancel_owner(recovery.owner),
-      .integer_system_inflight(integer_system_inflight),
       .fpu_completion_ready(fpu_completion_ready),
       .clock(clock),
       .reset(reset),

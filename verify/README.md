@@ -7,7 +7,7 @@ M-extension privilege/edge regression: `make -C verify rva22s64-m-privileged-edg
 
 Unified verification infrastructure for the Raptor Chip RISC-V processor. Full-core tests use the Verilator simulator (`sim/`); differential tests use NEMU. Module, formal, ACT4/Sail and UVM checks have separate harnesses and references. Each target defines its own tool and configuration requirements.
 
-Software test sources live in `app/tests/baremetal/` (freestanding RISC-V programs and shared headers) and `app/tests/host/` (native simulator/reference tests). Build rules, runners, linker scripts and generated vectors stay in `verify`. C++ drivers coupled to RTL testbenches stay with their `xsim` or `vpu` harnesses. Existing Make target names and output locations are preserved.
+Software test sources live in `app/tests/baremetal/` (freestanding RISC-V programs and shared headers) and `app/tests/host/` (native simulator/reference tests). Build rules, runners, linker scripts and generated vectors stay in `verify`. C++ drivers coupled to RTL testbenches stay with their `xsim` or `vpu` harnesses. Use the current targets below; simulator and STA artifacts follow the profile-isolation rules in `sim/README.md`.
 
 ## Maintaining verification drivers
 
@@ -430,7 +430,7 @@ The absent-CSR checks include OpenSBI's exact `csrr a0, 0x320` probe and registe
 
 ### Default four-way L1 capacity checks
 
-The default preset uses 32 sets × 64 B × 4 ways for each L1, with tree-PLRU replacement and a 2 KiB per-way span that keeps every index bit inside the Sv32/Sv39 page offset.
+The default preset uses 64 sets × 64 B × 4 ways = 16 KiB for each L1, with tree-PLRU replacement and a 4 KiB per-way span that keeps every index bit inside the Sv32/Sv39 page offset.
 
 ```sh
 make -C verify verilator-l1i-16k-rv32 verilator-l1i-16k-rv64 \
@@ -574,7 +574,8 @@ Do not run another NEMU configuration, AM build, formatter, or RTL generator in
 the same checkout during this regression. A checkout lock prevents two instances
 of this runner from overlapping; existing standalone Make targets do not use it.
 Dependencies/toolchains must already be provisioned through the existing setup
-flows. This command does not run toolchain installation targets.
+flows. Run `make verilog` before starting concurrent lanes when the shared Chisel
+decoders are missing or stale; decoder generation is not isolated by the lane directories. This command does not run toolchain installation targets.
 
 A new `/tmp/raptor-chip-regression-*` directory holds independent logs, build
 outputs, `summary.txt`, `summary.json`, the post-format tracked source diff and
@@ -598,3 +599,38 @@ exit code, duration, reason, log path, Git HEAD, tracked-diff hash and untracked
 benchmark flag invalidation. `make -C verify sta-flow-check sta-entrypoints-test`
 checks the isolated SRAM/DFF runner and offline STA preflight. These checks do
 not run synthesis, simulation workloads or FPGA builds.
+
+### HDL review validation
+
+Local results with Verilator 5.052 and the existing dirty worktree:
+
+| Check | Configuration | Result |
+| --- | --- | --- |
+| `make -C verify verilator-directed` | Default target matrix | All 98 checks passed |
+| `make -C verify riscof-classic RISCOF_CLASSIC_TIMEOUT=600 JOBS=2` | small-riscof, RV32 | 1276/1276 passed |
+| `make build-rv32 build-rv64` | default | Passed |
+| `make -C verify sigtest fuzz` | default, each ISA=rv32/rv64; SEED=42 FUZZ_NUM=20 FUZZ_LEN=200 MEM_RANDOM_DELAY=31 MEM_RANDOM_SEED=42 TIMEOUT=60; separate BUILD_DIR per ISA | Each: 5 signatures and 20 differential fuzz cases passed |
+| `make cpu-tests-rv32 cpu-tests-rv64 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=42 ARGS="-b -n -t 120"` | default | Passed |
+| `make microbench-rv32 microbench-rv64 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=42 ARGS="-b -n -t 900" MAINARGS=test` | default | Both XLENs reported MicroBench PASS and GOOD TRAP |
+| `make -C verify coverage-build coverage-run-fuzz coverage-run-sigtest coverage-report` | small RV32; SEED=42 FUZZ_NUM=20 FUZZ_LEN=200 TIMEOUT=60 COV_LINE_MIN=50.0; sequential stages | HDL line 67.8%, branch 64.1%; line gate passed |
+| `make -C verify issue-select-prove predict-history-prove rename-checkpoint-prove` | Existing parameter matrices | 5 selector, 4 history and 3 checkpoint cases passed |
+| `sby -f zkt_cdb.sby` from `verify/formal`, using the repository OSS CAD environment | RV32/RV64, depth 12 | BMC and cover passed; not an unbounded proof |
+| `make sta-check XLEN=32 RAPT_CONFIG=small` and XLEN=64 | slang elaboration | Passed |
+| `make sta XLEN=32 RAPT_CONFIG=small` | SRAM, nangate45, 50 MHz | Passed; reported slack +18.04 ns and estimated Fmax 164.83 MHz |
+| `make sta XLEN=64 RAPT_CONFIG=small` | SRAM, nangate45, 50 MHz | Passed; 647,977 cells, 980,189.79 um2, 93.0 mW, slack +18.04 ns and estimated Fmax 146.98 MHz |
+| Linux RV32 kernel-entry workflow | default, difftest enabled | `Linux version 6.18.51` observed; `check_linux_boot.py --success-marker "Linux version"` passed |
+| `make -C verify make-targets-test sta-flow-check sta-entrypoints-test` | Local tools | 18 tests passed |
+| `make format FORMAT_SCOPE=all` then `make format-check FORMAT_SCOPE=all`; `git diff --check` | Tracked sources; new CDB/priority test files also formatted separately | Passed |
+
+The Linux simulation was interrupted with SIGINT after reaching the entry marker;
+the make command consequently returned nonzero. This is kernel-entry evidence,
+not a complete userspace boot or completion of the 40-million-instruction run.
+STA uses the existing SRAM model and is not physical signoff.
+
+Strict `make lint` / `make lint-rv64` remain nonzero (269 / 264 warnings).
+Both elaborate successfully with `LINT_EXTRA=-Wno-fatal`, retaining diagnostics;
+that result must not be reported as strict lint passing. The full PDK/FPGA,
+LiteX, RV32E and OS workflow matrices have not been established by this run.
+Local command logs are under `/tmp/raptor-review-*.log`; they are temporary,
+not committed validation artifacts. This record is not an unconditional
+submission-ready declaration.

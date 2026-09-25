@@ -21,16 +21,25 @@
 `define RAPT_ISSUE_REBALANCE 0
 `endif
 `ifndef RAPT_IQ_RECLAIM_ON_ISSUE
-// Keep execution readiness out of dispatch capacity. An issued entry becomes
-// available on the following cycle; override to 1 for the throughput ablation.
-`define RAPT_IQ_RECLAIM_ON_ISSUE 0
+// Same-edge vacancy: an issued slot may be reallocated this cycle. Override
+// to 0 to keep issue-select out of the dispatch-capacity path.
+`define RAPT_IQ_RECLAIM_ON_ISSUE 1
+`endif
+
+// Speculative IOQ fast load-use wake for the entry right behind the IOQ head.
+// A plain current-head hit now completes directly, so consecutive loads no
+// longer need this path. Keep the rarer next-head speculation opt-in until its
+// recovery behavior is covered beyond targeted IOQ tests.
+`ifndef RAPT_IOQ_FAST_LOAD_NEXT_HEAD
+`define RAPT_IOQ_FAST_LOAD_NEXT_HEAD 0
 `endif
 
 // Register cache responses before instruction packing and auxiliary prediction.
-// The request side predicts the next packet independently so sequential hits
-// can still deliver a packet every cycle. Override to 0 for latency/PPA studies.
+// Keep the extra stage opt-in: it reduces fetch timing pressure, but costs enough
+// latency to miss the default CoreMark target. FPGA presets may enable it after
+// timing evaluation.
 `ifndef RAPT_FETCH_RESPONSE_STAGE
-`define RAPT_FETCH_RESPONSE_STAGE 1
+`define RAPT_FETCH_RESPONSE_STAGE 0
 `endif
 
 // Physical integer issue topology is independent of every ordered pipeline
@@ -58,12 +67,22 @@
 `define RAPT_ROB_DISPATCH_BUFFERED 1
 `endif
 
+// Wide integer operand values for ROB_DP owners live in a compact spill bank,
+// not in every ROB slot. Presets declare the intended physical depth; this
+// fallback keeps out-of-tree configurations buildable while preserving at
+// least one full dispatch group.
+`ifndef RAPT_OPERAND_SPILL_ENTRIES
+`define RAPT_OPERAND_SPILL_ENTRIES \
+  ((`RAPT_ROB_SIZE <= (2 * `RAPT_DISPATCH_WIDTH)) \
+    ? `RAPT_ROB_SIZE : (`RAPT_ROB_SIZE / 2))
+`endif
+
 // Number of oldest ROB_DP owners exposed to the capacity-aware dispatch
 // router each cycle.  This is deliberately independent of dispatch width:
 // the router may look past several blocked domains while still admitting at
 // most RAPT_DISPATCH_WIDTH uops into execution queues.
 `ifndef RAPT_STEER_SCAN_ENTRIES
-`define RAPT_STEER_SCAN_ENTRIES 4
+`define RAPT_STEER_SCAN_ENTRIES ((`RAPT_ROB_SIZE < 16) ? `RAPT_ROB_SIZE : 16)
 `endif
 
 // ROB slot numbers are recycled.  Carry an allocation generation beside the
@@ -80,6 +99,15 @@
 // resolution.  They are a distinct resource from ROB entries: capacity
 // pressure stops at the ordered rename boundary instead of silently dropping
 // recovery state.
+//
+// Cost is deliberately kept bounded in this count. Every entry stores a
+// full architectural MAP/free snapshot, a GHR/PHR history snapshot, and an
+// `Entries`-wide control-flow ancestry mask, while restore reads all of them
+// through an `Entries`-way mux cone. The ancestry mask alone makes the array
+// quadratic, and the restore cone is linear in width times entries. Sixteen
+// entries hold the array at half the 32-entry flip-flop count and halve the
+// restore mux depth on FPGA. Override to a larger power of two in a preset
+// that trades area for deeper control-flow speculation.
 `ifndef RAPT_BRANCH_CHECKPOINTS
 `define RAPT_BRANCH_CHECKPOINTS 16
 `endif
@@ -91,21 +119,10 @@
 `define RAPT_CACHE_SRAMLEN 128
 `endif
 
-// Stage widths are independent elaboration choices. Current presets declare
-// them directly; the legacy issue-width fallback exists only for out-of-tree
-// configurations. Ordered slot-control algorithms never select A/B variants.
-// Cache lookahead is a separate physical capability, not a slot count.
-`ifdef RAPT_DUAL_ISSUE
-`ifndef RAPT_FETCH_LOOKAHEAD
-`define RAPT_FETCH_LOOKAHEAD
-`endif
-`endif
+// Stage widths are independent elaboration choices. Cache lookahead is a
+// separate physical capability, not a slot count.
 `ifndef RAPT_DECODE_WIDTH
-`ifdef RAPT_ISSUE_WIDTH
-`define RAPT_DECODE_WIDTH `RAPT_ISSUE_WIDTH
-`else
 `define RAPT_DECODE_WIDTH 1
-`endif
 `endif
 `ifndef RAPT_RENAME_WIDTH
 `define RAPT_RENAME_WIDTH `RAPT_DECODE_WIDTH
@@ -114,11 +131,7 @@
 `define RAPT_DISPATCH_WIDTH `RAPT_RENAME_WIDTH
 `endif
 `ifndef RAPT_COMMIT_WIDTH
-`ifdef RAPT_DUAL_COMMIT
-`define RAPT_COMMIT_WIDTH 2
-`else
 `define RAPT_COMMIT_WIDTH 1
-`endif
 `endif
 
 // Implemented physical-address width, independent of register/data XLEN.

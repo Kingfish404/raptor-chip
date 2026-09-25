@@ -24,6 +24,8 @@ RV32 使用 `run-rv32` 及对应的 RV32 NPC/MROM。输出目录不可复用已�
 
 运行生成 ELF、bin、反汇编、link map、原始日志、`measurements.csv`、`summary.json` 和 `manifest.json`。Manifest 保存程序、simulator、MROM、benchmark 源码 SHA256、运行命令及 delay/seed。现有 simulator 的 RTL 配置/版本需由使用者核实并填写 label；工作区 HEAD 不能证明已有 simulator 的源码版本。默认不启用差分：每项做结果校验并要求 GOOD TRAP，但这不是完整 ISA/访存排序验证。
 
+RV64 write-back 的整机 store 保留探针可单独构建：`make -C app/benchmarks/pipeline probe-wb XLEN=64 ROUNDS=1 BUILD_DIR=/tmp/pipeline-wb-probe`。用现有 RV64 NPC 和 MROM 运行 `probe_wb.bin`；它依次输出初始化读值、同地址密集 store 的读值、同一 cache line 八个 word 的即时与延迟读值，共 18 行十六进制数。正常结果为首行 0、后续全为 7，失败返回非零。此探针不能替代差分或完整内存排序验证。
+
 ## 测试矩阵
 
 | 测试 | 测量意图 |

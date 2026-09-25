@@ -86,18 +86,18 @@ static void dump_pipeline_stall_state()
       "AXI rd_out=%u req=%u resp=%u; bus l1d_busy=%u issued=%u "
       "mmio=%u skid=%u source=%u",
       (unsigned)VERILOG_FRONTEND(ifu__DOT__held_count),
-      (unsigned)VERILOG_CPU(l1i_cache__DOT__l1i_state),
-      (unsigned)VERILOG_CPU(l1i_cache__DOT__u_iptw__DOT__state),
-      (unsigned)VERILOG_CPU(l1d_cache__DOT__l1d_state),
-      (unsigned)VERILOG_CPU(l1d_cache__DOT__u_dptw__DOT__state),
-      (unsigned)VERILOG_CPU(axi_master__DOT__read_outstanding),
-      (unsigned)VERILOG_CPU(axi_master__DOT__read_request_fire),
-      (unsigned)VERILOG_CPU(axi_master__DOT__read_response_fire),
-      (unsigned)VERILOG_CPU(bus__DOT__l1d_slot_busy),
-      (unsigned)VERILOG_CPU(bus__DOT__l1d_slot_issued),
-      (unsigned)VERILOG_CPU(bus__DOT__l1d_slot_mmio),
-      (unsigned)VERILOG_CPU(bus__DOT__rd_skid_valid),
-      (unsigned)VERILOG_CPU(bus__DOT__source_valid));
+      (unsigned)VERILOG_CPU(memory_subsystem__DOT__l1i_cache__DOT__l1i_state),
+      (unsigned)VERILOG_CPU(memory_subsystem__DOT__l1i_cache__DOT__u_iptw__DOT__state),
+      (unsigned)VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__l1d_state),
+      (unsigned)VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__u_dptw__DOT__state),
+      (unsigned)VERILOG_CPU(memory_subsystem__DOT__axi_master__DOT__read_outstanding),
+      (unsigned)VERILOG_CPU(memory_subsystem__DOT__axi_master__DOT__read_request_fire),
+      (unsigned)VERILOG_CPU(memory_subsystem__DOT__axi_master__DOT__read_response_fire),
+      (unsigned)VERILOG_CPU(memory_subsystem__DOT__bus__DOT__l1d_slot_busy),
+      (unsigned)VERILOG_CPU(memory_subsystem__DOT__bus__DOT__l1d_slot_issued),
+      (unsigned)VERILOG_CPU(memory_subsystem__DOT__bus__DOT__l1d_slot_mmio),
+      (unsigned)VERILOG_CPU(memory_subsystem__DOT__bus__DOT__rd_skid_valid),
+      (unsigned)VERILOG_CPU(memory_subsystem__DOT__bus__DOT__source_valid));
   Log("stall state: IOQ valid=%02x complete=%02x mmu=%02x head=%u tail=%u "
       "issue=%u req_valid=%u req_idx=%u at_rob_head=%u; "
       "ALQ valid=%02x ready=%02x p1busy=%02x p2busy=%02x; BRQ valid=%x",
@@ -286,6 +286,16 @@ void cpu_exec(uint64_t n)
         progress_interval = v;
     }
   }
+  // Wall-clock heartbeat is independent of the cycle-based LightSSS snapshots.
+  // Set this to 0 to suppress heartbeat logs while retaining snapshots.
+  uint64_t heartbeat_interval_us = 60000000;
+  if (const char *iv = getenv("NSIM_HEARTBEAT_SECONDS"))
+  {
+    char *end = nullptr;
+    unsigned long long seconds = strtoull(iv, &end, 0);
+    if (end != iv && *end == '\0' && seconds <= UINT64_MAX / 1000000ull)
+      heartbeat_interval_us = seconds * 1000000ull;
+  }
   while (!contextp->gotFinish() && npc.state == NPC_RUNNING && n-- > 0)
   {
     cpu_exec_one_cycle();
@@ -325,7 +335,8 @@ void cpu_exec(uint64_t n)
         serial_tick();
         // Poll the host clock in batches, independently of the much less
         // frequent LightSSS snapshots. Slow simulations still report life.
-        timed_progress = get_time() - last_progress_time >= 5000000;
+        timed_progress = heartbeat_interval_us != 0
+            && get_time() - last_progress_time >= heartbeat_interval_us;
     }
     const bool snapshot_progress = progress_cycle % progress_interval == 0;
     // The guest console and these diagnostics share the merged CI log, but the

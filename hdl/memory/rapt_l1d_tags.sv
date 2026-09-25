@@ -10,7 +10,8 @@ module rapt_l1d_tags #(
     parameter int L1D_LINE_SIZE = 2 ** L1D_LINE_LEN,
     parameter int L1D_N_WAYS = `RAPT_L1D_N_WAYS,
     parameter int L1dTagW = `RAPT_PADDR_BITS - L1D_LEN - L1D_LINE_LEN - $clog2(`RAPT_XLEN / 8),
-    parameter int L1dWayW = L1D_N_WAYS > 1 ? $clog2(L1D_N_WAYS) : 1
+    parameter int L1dWayW = L1D_N_WAYS > 1 ? $clog2(L1D_N_WAYS) : 1,
+    parameter bit WriteBack = 1'b0
 ) (
     input logic clock,
     input logic reset,
@@ -42,10 +43,58 @@ module rapt_l1d_tags #(
     input logic [L1dTagW-1:0] l1d_tag_u,
     input logic [L1D_LEN-1:0] l1d_idx,
     input logic [L1D_LINE_LEN-1:0] l1d_off,
-    input logic [L1dWayW-1:0] l1d_way
+    input logic [L1dWayW-1:0] l1d_way,
+    input logic update_dirty = 1'b0,
+    input logic [L1D_LEN-1:0] inspect_set = '0,
+    input logic [L1dWayW-1:0] inspect_way = '0,
+    input logic clean_valid = 1'b0,
+    input logic [L1D_LINE_SIZE-1:0] clean_mask = '0,
+    output logic [L1dTagW-1:0] inspect_tag,
+    output logic [L1D_LINE_SIZE-1:0] inspect_dirty,
+    output logic dirty_any,
+    output logic update_blocked
 );
   logic [L1D_LINE_SIZE-1:0] l1d_valid[L1D_N_WAYS][L1D_SIZE];
   logic [L1dTagW-1:0] l1d_tag[L1D_N_WAYS][L1D_SIZE];
+  logic [L1D_LINE_SIZE-1:0] dirty[L1D_N_WAYS][L1D_SIZE];
+  logic [L1D_N_WAYS-1:0] dirty_conflict;
+  logic [L1D_N_WAYS-1:0] update_tag_match;
+  logic clear_blocked;
+  logic update_allowed;
+
+  assign inspect_tag = l1d_tag[inspect_way][inspect_set];
+  assign inspect_dirty = dirty[inspect_way][inspect_set];
+  assign update_allowed = !update_blocked;
+  assign update_blocked = WriteBack && (clear_blocked || |dirty_conflict);
+
+  always_comb begin
+    dirty_any = 1'b0;
+    clear_blocked = 1'b0;
+    for (int way = 0; way < L1D_N_WAYS; way++) begin
+      for (int set_idx = 0; set_idx < L1D_SIZE; set_idx++) begin
+        dirty_any |= |dirty[way][set_idx];
+        clear_blocked |= clear_set[set_idx] && |dirty[way][set_idx];
+      end
+    end
+  end
+
+  for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_dirty_conflict
+    always_comb begin
+      dirty_conflict[way] = 1'b0;
+      if (l1d_update && |dirty[way][l1d_idx]) begin
+        if (l1d_valid_u) begin
+          if (l1d_way == L1dWayW'(way))
+            dirty_conflict[way] = !update_tag_match[way]
+              || line_update
+                || (!line_update && !update_dirty && dirty[way][l1d_idx][l1d_off]);
+          else dirty_conflict[way] = update_tag_match[way];
+        end else
+          dirty_conflict[way] = (l1d_inv_all_ways || l1d_way == L1dWayW'(way))
+              && update_tag_match[way]
+              && dirty[way][l1d_idx][l1d_off];
+      end
+    end
+  end
 
   if (!(L1D_LEN > 0 && L1D_LINE_LEN > 0 && L1dTagW > 0
         && L1D_SIZE == 2 ** L1D_LEN && L1D_LINE_SIZE == 2 ** L1D_LINE_LEN
@@ -82,7 +131,7 @@ module rapt_l1d_tags #(
     assign read_set[1] = waddr_idx;
     assign update_set[0] = addr_idx;
     assign update_set[1] = l1d_idx;
-    assign update_valid = {l1d_update && l1d_valid_u && !(|clear_set), load_hit};
+    assign update_valid = {l1d_update && l1d_valid_u && !(|clear_set) && update_allowed, load_hit};
     assign update_way[1] = l1d_way;
     always_comb begin
       update_way[0] = '0;
@@ -146,7 +195,6 @@ module rapt_l1d_tags #(
 
   // Only one set can be updated per cycle. Select its tags before comparing,
   // rather than broadcasting the incoming tag into one comparator per set.
-  logic [L1D_N_WAYS-1:0] update_tag_match;
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_update_match
     assign update_tag_match[way] = l1d_tag[way][l1d_idx] == l1d_tag_u;
   end
@@ -156,9 +204,10 @@ module rapt_l1d_tags #(
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_way_state
     for (genvar set_idx = 0; set_idx < L1D_SIZE; set_idx++) begin : g_set_state
       always_ff @(posedge clock) begin
-        if (reset || clear_set[set_idx]) begin
+        if (reset || (clear_set[set_idx] && update_allowed)) begin
           l1d_valid[way][set_idx] <= '0;
-        end else if (!(|clear_set) && l1d_update && l1d_idx == L1D_LEN'(set_idx)) begin
+        end else if (!(|clear_set) && l1d_update && update_allowed
+                     && l1d_idx == L1D_LEN'(set_idx)) begin
           if (l1d_valid_u) begin
             if (l1d_way == L1dWayW'(way)) begin
               if (line_update) l1d_valid[way][set_idx] <= line_mask;
@@ -168,14 +217,37 @@ module rapt_l1d_tags #(
               // Scrub the entire duplicate line, including other offsets.
               l1d_valid[way][set_idx] <= '0;
             end
-          end else if (l1d_inv_all_ways || l1d_way == L1dWayW'(way)) begin
+          end else if ((l1d_inv_all_ways || l1d_way == L1dWayW'(way))
+                       && (!WriteBack || update_tag_match[way])) begin
             l1d_valid[way][set_idx][l1d_off] <= 1'b0;
           end
         end
         // Tags need no reset; their corresponding valid bits gate use.
-        if (!reset && !(|clear_set) && l1d_update && l1d_valid_u
+        if (!reset && !(|clear_set) && l1d_update && l1d_valid_u && update_allowed
             && l1d_idx == L1D_LEN'(set_idx) && l1d_way == L1dWayW'(way))
           l1d_tag[way][set_idx] <= l1d_tag_u;
+      end
+      if (WriteBack) begin : g_dirty_state
+        always_ff @(posedge clock) begin
+          if (reset || (clear_set[set_idx] && update_allowed)) dirty[way][set_idx] <= '0;
+          else begin
+            if (clean_valid && inspect_set == L1D_LEN'(set_idx) && inspect_way == L1dWayW'(way))
+              dirty[way][set_idx] <= dirty[way][set_idx] & ~clean_mask;
+            if (!(|clear_set) && l1d_update && l1d_valid_u && update_allowed
+                && l1d_idx == L1D_LEN'(set_idx) && l1d_way == L1dWayW'(way)) begin
+              if (line_update) dirty[way][set_idx] <= update_dirty ? line_mask : '0;
+              else if (!update_tag_match[way])
+                dirty[way][set_idx] <= update_dirty ? L1D_LINE_SIZE'(1) << l1d_off : '0;
+              else if (update_dirty) dirty[way][set_idx][l1d_off] <= 1'b1;
+            end
+          end
+        end
+`ifndef SYNTHESIS
+        assert property (@(posedge clock) disable iff (reset)
+          (dirty[way][set_idx] & ~l1d_valid[way][set_idx]) == '0);
+`endif
+      end else begin : g_no_dirty
+        assign dirty[way][set_idx] = '0;
       end
     end
   end

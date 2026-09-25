@@ -15,7 +15,7 @@ The integration expects source trees at:
 - `app/tinyos/xv6-riscv`
 - `app/tinyos/egos-2000`
 
-These directories are treated as upstream source checkouts. The sim targets export a clean copy of each checkout's `HEAD` into `app/build/tinyos-sim-src/`. NPC/sim and NEMU use upstream-compatible QEMU device paths, so no tinyos OS patches are required.
+These directories are treated as upstream source checkouts. The sim targets copy the current source working trees, including local edits, into `app/build/tinyos-sim-src/`; they do not export Git `HEAD`. Egos preparation applies `patches/egos-2000/*.patch` to its build copy. Xv6 preparation copies the source and optionally appends `XV6_EXTRA_CFLAGS`; it does not add an A/D-management patch. NPC/sim and NEMU use QEMU-compatible device paths.
 
 Use:
 
@@ -27,7 +27,7 @@ make -C app tinyos-sync
 
 ### Output & Debugging
 
-`os-cli-nsim OS=egos` boots the upstream egos QEMU image path without an egos patch: `tools/egos.bin` is loaded as the boot image and `tools/disk.img` is attached through sim's QEMU-compatible SDHCI model at `0x40000000` with PCI ECAM at `0x30008000`. `os-cli-nemu OS=egos` uses the same image pair through NEMU's optional `--sdcard` path.
+`os-cli-nsim OS=egos` boots the egos QEMU image path after the build-copy preparation described above: `tools/egos.bin` is loaded as the boot image and `tools/disk.img` is attached through sim's QEMU-compatible SDHCI model at `0x40000000` with PCI ECAM at `0x30008000`. `os-cli-nemu OS=egos` uses the same image pair through NEMU's optional `--sdcard` path.
 
 On NPC/sim, egos keeps its upstream translation prompt. Enter `0` to boot with Sv32 page-table translation and exercise the RTL hardware PTW, or enter `1` to boot with egos' software TLB path. UART RX is wired through the simulator, so bounded smoke tests can pipe the selection and simple shell input, for example:
 
@@ -38,9 +38,9 @@ printf '1\n' | make -C app os-cli-nsim OS=egos ARGS="-b -n" MAX_INST=20000000 TI
 
 Short bounded runs may end with the simulator's timeout/max-instruction BAD TRAP after the egos shell is reached. Check the preceding egos log and PTW counters: `Page table translation is chosen` plus nonzero ITLB/STLB/LTLB PTW counts means the hardware PTW path was active before the artificial limit stopped the run.
 
-`os-cli-nsim OS=xv6` builds an unpatched temporary copy of upstream xv6-riscv as an RV64/Sv39 kernel, objcopies `kernel/kernel` to `kernel/kernel.bin`, copies `fs.img` to a temporary disk, and passes that image to sim through `DISK=...` / `--disk`. The sim virtio-blk model keeps writes in memory, so repeated bounded debug runs do not mutate the source `fs.img`.
+`os-cli-nsim OS=xv6` builds a temporary copy of the selected xv6-riscv working tree as an RV64/Sv39 kernel, objcopies `kernel/kernel` to `kernel/kernel.bin`, copies `fs.img` to a temporary disk, and passes that image to sim through `DISK=...` / `--disk`. The sim virtio-blk model keeps writes in memory, so repeated bounded debug runs do not mutate the source `fs.img`.
 
-The current xv6 path has passed the former paging and device blockers without requiring xv6 source patches on sim/NEMU: hardware PTW A/D writeback lets xv6 run with Sv39 leaf PTEs, the sim virtio-blk model serves `fs.img`, RV64 CLINT/PLIC internal MMIO obeys AXI byte lane semantics, and the sim 16550 model raises TX-empty interrupts so xv6's `uartwrite()` can wake after each byte. A cold bounded run reaches the shell prompt with a 12M cycle/instruction-limit window:
+The RTL implements Svade: PTW raises a page fault when a required A/D bit is clear and does not write it back. The selected xv6 tree must pre-set the required A/D bits or handle those faults in software. The helper does not supply that adaptation. The sim virtio-blk, CLINT/PLIC and UART models provide the device paths, but their presence does not establish a successful boot for the current RTL and OS source. The following bounded command and console transcript are a historical smoke example; revalidate them with a Svade-compatible source tree:
 
 ```bash
 make -C app/tinyos cli-nsim OS=xv6 SYNC=0 ARGS="-b -n" MAX_INST=12000000 TIMEOUT=120

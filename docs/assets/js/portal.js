@@ -180,6 +180,61 @@ function bootNav() {
     const open = links.classList.toggle("is-open");
     btn.setAttribute("aria-expanded", String(open));
   });
+  const here = location.pathname.replace(/\/index\.html$/, "/").replace(/\/$/, "") || "/";
+  links?.querySelectorAll("a").forEach((a) => {
+    let path = "";
+    try {
+      path = new URL(a.getAttribute("href"), location.href).pathname;
+    } catch {
+      return;
+    }
+    path = path.replace(/\/index\.html$/, "/").replace(/\/$/, "") || "/";
+    if (path === here) a.setAttribute("aria-current", "page");
+  });
+}
+
+function bootCopyButtons() {
+  document.querySelectorAll("main.article .highlight").forEach((block) => {
+    if (block.querySelector(".copy-code")) return;
+    const pre = block.querySelector("pre");
+    if (!pre) return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "copy-code";
+    button.textContent = "Copy";
+    button.addEventListener("click", async () => {
+      const text = pre.innerText;
+      try {
+        await navigator.clipboard.writeText(text);
+        button.textContent = "Copied";
+      } catch {
+        button.textContent = "Failed";
+      }
+      window.setTimeout(() => {
+        button.textContent = "Copy";
+      }, 1400);
+    });
+    block.append(button);
+  });
+}
+
+function bootHeadingLinks() {
+  document.querySelectorAll("main.article h2, main.article h3").forEach((heading) => {
+    if (!heading.id) {
+      heading.id = heading.textContent
+        .trim()
+        .toLowerCase()
+        .replace(/[^\w]+/g, "-")
+        .replace(/^-|-$/g, "");
+    }
+    if (heading.querySelector(".heading-link")) return;
+    const link = document.createElement("a");
+    link.className = "heading-link";
+    link.href = `#${heading.id}`;
+    link.textContent = "#";
+    link.setAttribute("aria-label", `Link to ${heading.textContent.trim()}`);
+    heading.append(link);
+  });
 }
 
 function wireTerm(term) {
@@ -212,7 +267,9 @@ async function main() {
   bootTheme();
   bootNav();
   bootToc();
+  bootHeadingLinks();
   wrapTables();
+  bootCopyButtons();
   bootMermaid();
   if (!portalUrl) return;
   const data = await fetch(portalUrl).then((r) => {
@@ -236,8 +293,9 @@ async function main() {
           slider.max = Math.max(n - 1, 0);
           slider.value = String(c);
         }
-        const play = document.querySelector("[data-cycle-play]");
-        if (play) play.textContent = playing ? "Pause" : "Play";
+        document.querySelectorAll("[data-cycle-play], [data-uarch-flow]").forEach((play) => {
+          play.textContent = playing ? "Pause" : "Play";
+        });
       },
     });
     document.querySelector("[data-uarch-flow]")?.addEventListener("click", () => {

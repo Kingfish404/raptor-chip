@@ -49,8 +49,8 @@ module tb_iq_type_family;
   dpu_iq_if #(.RS_SIZE(4)) disp ();
   logic [2:0] occupancy;
   int issued_count = 0;
-  // Compare the complete new output against the pre-refactor indexed read,
-  // including invalid outputs and the fast-confirm identity-qualified bypass.
+  // Compare the complete output against the indexed registered-payload read,
+  // including invalid outputs. Fast confirmation is captured at the edge.
   always @(negedge clock) begin
     #2;
     for (int p = 0; p < 3; p++) begin
@@ -59,12 +59,8 @@ module tb_iq_type_family;
       for (int e = 0; e < 4; e++) if (dut.selected[p][e]) idx |= e;
       legacy.valid=|dut.selected[p];
       legacy.uop=dut.iq_uop[idx];
-      legacy.op1=dut.pr1_fast_confirm[idx] ? (
-          load_fast.confirmed_prd==dut.iq_pr1[idx] && load_fast.confirmed_dest==dut.iq_pr1_fast_dest[idx]
-          && load_fast.confirmed_generation==dut.iq_pr1_fast_generation[idx] ? load_fast.result : '0) : dut.iq_vj[idx];
-      legacy.op2=dut.pr2_fast_confirm[idx] ? (
-          load_fast.confirmed_prd==dut.iq_pr2[idx] && load_fast.confirmed_dest==dut.iq_pr2_fast_dest[idx]
-          && load_fast.confirmed_generation==dut.iq_pr2_fast_generation[idx] ? load_fast.result : '0) : dut.iq_vk[idx];
+      legacy.op1=dut.iq_vj[idx];
+      legacy.op2=dut.iq_vk[idx];
       legacy.dest=dut.iq_dest[idx];
       legacy.generation=dut.iq_generation[idx];
       legacy.prd=dut.iq_prd[idx];
@@ -224,9 +220,12 @@ module tb_iq_type_family;
     else $fatal(1, "wrong-ROB-slot confirmation released operand");
     load_fast.confirmed_dest = 7'h55;
     tick();
+    assert (issued_count == 2)
+    else $fatal(1, "fast confirmation issued before operand register capture");
     load_fast.confirmed = 0;
+    tick();
     assert (issued_count == 3 && issued[2].op1 == 64'h1234_5678_abcd_ef01)
-    else $fatal(1, "early confirmation bypass");
+    else $fatal(1, "registered fast confirmation did not issue");
 
     allocate_a(9'h188, 1);
     load_fast.valid = 1;

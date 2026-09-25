@@ -16,6 +16,28 @@ from prepare_private_bios import prepare
 
 
 class BuildIsolationTest(unittest.TestCase):
+    def test_linux_fpga_default_clock_follows_xlen(self):
+        rv32_clocks = {
+            "tang_mega_138k_pro": "10000000",
+            "mlk_cu08_ku15p": "50000000",
+            "mlk_cu07_ku15p": "50000000",
+            "alinx_axau15": "60000000",
+            "xilinx_vcu118": "50000000",
+        }
+        extra = (".PHONY: fpga-clock-config\n"
+                 "fpga-clock-config:\n"
+                 "\t@printf '%s\\n' 'SYS_CLK=$(SYS_CLK)'\n")
+        for board, rv32_clock in rv32_clocks.items():
+            for variant, expected in (("linux32", rv32_clock),
+                                      ("linux64", "30000000")):
+                with self.subTest(board=board, variant=variant):
+                    result = subprocess.run(
+                        ["make", "--no-print-directory", "-f", "Makefile", "-f", "-",
+                         "fpga-clock-config", f"FPGA_BOARD={board}", "FPGA_AUTO_DETECT=0",
+                         f"VARIANT={variant}"], cwd=LITEX, input=extra, text=True,
+                        capture_output=True, check=True)
+                    self.assertEqual(result.stdout.strip(), f"SYS_CLK={expected}")
+
     def test_selected_vivado_used_for_build_and_load(self):
         with tempfile.TemporaryDirectory(prefix='raptor-chip-vivado-', dir='/tmp') as tmp:
             root = Path(tmp)

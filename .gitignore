@@ -66,6 +66,7 @@
 /docs.*/
 /syn/
 /lspd/syn/build/
+/lspd/syn/.Xil/
 Makefile.local
 
 # ---- Re-ignore: build / simulation outputs (these may contain *.cpp/*.h

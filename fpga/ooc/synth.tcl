@@ -15,7 +15,11 @@ close $fd
 if {$block eq "merge"} {
     read_verilog -sv blackboxes.sv
     read_xdc constraints.xdc
-    synth_design -top rapt -part $part -mode out_of_context -resource_sharing off -no_lc -fanout_limit 24
+    # Keep Vivado's normal resource sharing, LUT combining, and fanout policy.
+    # Forcing all three off/low inflated this large RV64 design and produced a
+    # dense placement that the router could not complete at a loose 20 ns
+    # target.
+    synth_design -top rapt -part $part -mode out_of_context
     if {[llength [get_clocks clock]] != 1} {error "Missing OOC clock constraint"}
     foreach name {rapt_frontend rapt_backend rapt_l1i rapt_l1d} {
         set cells [get_cells -hier -filter "REF_NAME == ${name}_ooc"]
@@ -35,6 +39,7 @@ if {$block eq "merge"} {
     set unresolved [get_cells -hier -filter {IS_BLACKBOX == 1}]
     if {[llength $unresolved] != 0} {error "Unresolved blackboxes: $unresolved"}
     opt_design
+    report_drc -file merge_drc.rpt
     if {$route eq "1"} {
         place_design
         route_design
@@ -47,7 +52,7 @@ if {$block eq "merge"} {
     if {$block ni {rapt_frontend rapt_backend rapt_l1i rapt_l1d}} {error "Unknown block $block"}
     read_verilog -sv partitions.sv
     read_xdc -mode out_of_context constraints.xdc
-    synth_design -top ${block}_ooc -part $part -mode out_of_context -resource_sharing off -no_lc -fanout_limit 24
+    synth_design -top ${block}_ooc -part $part -mode out_of_context
     if {[llength [get_clocks clock]] != 1} {error "Missing OOC clock constraint"}
     report_utilization -file ${block}_utilization.rpt
     report_timing_summary -file ${block}_timing.rpt

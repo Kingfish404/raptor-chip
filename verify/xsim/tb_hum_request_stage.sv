@@ -49,8 +49,6 @@ module tb_hum_request_stage;
     enqueue(2, XLEN'('h80003000));
     check(!exu_lsu.rvalid_b, "B bypassed its request register");
     tick(1);
-    check(!exu_lsu.rvalid_b, "B bypassed address preparation");
-    tick(1);
     check(exu_lsu.rvalid_b && exu_lsu.raddr_b == XLEN'('h80003000),
           "B did not capture the ready younger load");
 
@@ -73,23 +71,24 @@ module tb_hum_request_stage;
     exu_lsu.rready_b = 0;
     check(dut.ioq_complete[2] && !dut.ioq_complete[1],
           "B completed the live selector instead of the captured owner");
-    check(!exu_lsu.rvalid_b, "B reissued on completion edge");
-    tick(1);
     check(exu_lsu.rvalid_b && exu_lsu.raddr_b == XLEN'('h80002000),
           "B did not refill with the newly ready older load");
+    tick(1);
+    check(exu_lsu.rvalid_b && exu_lsu.raddr_b == XLEN'('h80002000),
+          "B refill changed under backpressure");
 
     exu_lsu.rready=1;
     exu_lsu.rdata=XLEN'('h11112222);
     exu_lsu.rready_b=1;
     exu_lsu.rdata_b=XLEN'('h33334444);
-    tick(1);
-    exu_lsu.rready=0;
-    exu_lsu.rready_b=0;
-    check(!exu_lsu.rvalid_b, "B outlived completed A miss");
+    #1;
     check(
         exu_ioq_bcast.valid && exu_ioq_bcast.dest == 0 && exu_ioq_bcast.result == XLEN'('h11112222),
         "A head response missing");
     tick(1);
+    exu_lsu.rready=0;
+    exu_lsu.rready_b=0;
+    check(!exu_lsu.rvalid_b, "B outlived completed A miss");
     check(
         exu_ioq_bcast.valid && exu_ioq_bcast.dest == 1 && exu_ioq_bcast.result == XLEN'('h33334444),
         "wrong simultaneous B result");
@@ -100,9 +99,9 @@ module tb_hum_request_stage;
     tick(1);
     check(!exu_ioq_bcast.valid, "duplicate completion");
 
-    // Flush a captured, unaccepted B request; late ready must not complete
-    // or resurrect either entry. Exercise the same request-stage boundary
-    // again with A returning before B is accepted.
+    // A flushed B owner must ignore a late response. If A instead completes
+    // while B is still pending, B becomes the IOQ head and completes directly
+    // without being cancelled and replayed through A.
     for (int scenario = 0; scenario < 2; scenario++) begin
       cmu_bcast.flush_pipe = 1;
       tick(1);
@@ -111,22 +110,35 @@ module tb_hum_request_stage;
       enqueue(0, XLEN'('h80004000));
       await_a(XLEN'('h80004000));
       enqueue(1, XLEN'('h80005000));
-      tick(2);
+      tick(1);
       check(exu_lsu.rvalid_b, "second B request missing");
       if (scenario == 0) cmu_bcast.flush_pipe = 1;
       else exu_lsu.rready = 1;
       tick(1);
       cmu_bcast.flush_pipe=0;
       exu_lsu.rready=0;
-      check(!exu_lsu.rvalid_b, "cancelled B request remained active");
-      exu_lsu.rready_b = 1;
-      tick(1);
-      exu_lsu.rready_b = 0;
-      check(!dut.ioq_complete[1], "late B response completed cancelled probe");
-      if (scenario == 0) check(!exu_ioq_bcast.valid, "flush resurrected completion");
-      else
-        check(exu_lsu.rvalid && exu_lsu.raddr == XLEN'('h80005000),
-              "failed B probe did not retry through A");
+      if (scenario == 0) begin
+        check(!exu_lsu.rvalid_b, "flushed B request remained active");
+        exu_lsu.rready_b = 1;
+        tick(1);
+        exu_lsu.rready_b = 0;
+        check(!dut.ioq_complete[1], "late B response completed flushed probe");
+        check(!exu_ioq_bcast.valid, "flush resurrected completion");
+      end else begin
+        check(exu_lsu.rvalid_b && exu_lsu.raddr_b == XLEN'('h80005000),
+              "B owner was cancelled when it became the IOQ head");
+        exu_lsu.rdata_b = XLEN'('h2468ace0);
+        exu_lsu.rready_b = 1;
+        #1;
+        check(
+            exu_ioq_bcast.valid && exu_ioq_bcast.dest == 1
+              && exu_ioq_bcast.result == XLEN'('h2468ace0),
+            "head B response did not complete directly");
+        tick(1);
+        exu_lsu.rready_b = 0;
+        check(!dut.ioq_complete[1], "head B response was redundantly captured");
+        check(!exu_ioq_bcast.valid, "head B completion was duplicated");
+      end
     end
     cmu_bcast.flush_pipe = 1;
     tick(1);
@@ -146,10 +158,12 @@ module tb_hum_request_stage;
     check(exu_lsu.fp_rdata64_req, "FLD fallback lost its 64-bit request");
     exu_lsu.fp_rdata64=64'hfedcba9876543210;
     exu_lsu.rready=1;
-    tick(1);
-    exu_lsu.rready = 0;
+    #1;
     check(fpr.ioq_wvalid && fpr.ioq_waddr == 5, "FLD fallback lost FPR write identity");
     check(fpr.ioq_wdata == 64'hfedcba9876543210, "FLD fallback lost FPR data");
+    tick(1);
+    exu_lsu.rready = 0;
+    check(!fpr.ioq_wvalid, "FLD fallback write was duplicated");
     $display("PASS: registered HUM ownership/backpressure/flush/FP64 XLEN=%0d", XLEN);
     $finish;
   end

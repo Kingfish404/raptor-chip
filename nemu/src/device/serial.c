@@ -404,6 +404,13 @@ __attribute__((__unused__)) static void serial_io_handler_ns16550(uint32_t offse
     }
     break;
   case UART_MSR:
+    if (!is_write)
+    {
+      /* A real terminal asserts DCD/DSR/CTS. NetBSD's tty layer treats the
+       * lack of DCD as "no carrier" and blocks in ttyopen() until the
+       * carrier appears, so an open of the console would hang forever. */
+      val = UART_MSR_DCD | UART_MSR_DSR | UART_MSR_CTS;
+    }
     break;
   case UART_SCR:
     if (is_write)

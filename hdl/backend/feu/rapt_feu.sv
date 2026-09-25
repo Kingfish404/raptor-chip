@@ -11,7 +11,9 @@ module rapt_feu #(
     parameter int unsigned NumSlots = Cfg.dispatch_width,
     parameter int unsigned NumCompletions = Cfg.completion_ports,
     parameter type CompletionT = rapt_pkg::completion_t,
-    parameter unsigned FPQ_SIZE = 4,
+    // ROU allocates each FP instruction alone into an empty ROB and blocks
+    // younger admission until it retires; one pending FPQ entry is sufficient.
+    parameter unsigned FPQ_SIZE = 1,
     parameter unsigned ROB_SIZE = Cfg.rob_entries,
     parameter unsigned PLEN     = rapt_pkg::index_bits(Cfg.phys_regs),
     parameter unsigned RLEN     = rapt_pkg::index_bits(Cfg.arch_regs),
@@ -125,14 +127,10 @@ module rapt_feu #(
   logic fp_int_to_single_w_ready, fp_int_to_single_l_ready;
   logic fp_int_to_double_w_valid, fp_int_to_double_l_valid;
   logic fp_int_to_single_w_valid, fp_int_to_single_l_valid;
-  logic [63:0] fp_single_to_int_w_result, fp_single_to_int_l_result;
-  logic [63:0] fp_double_to_int_w_result, fp_double_to_int_l_result;
-  logic [4:0] fp_single_to_int_w_flags, fp_single_to_int_l_flags;
-  logic [4:0] fp_double_to_int_w_flags, fp_double_to_int_l_flags;
-  logic fp_single_to_int_w_ready, fp_single_to_int_l_ready;
-  logic fp_double_to_int_w_ready, fp_double_to_int_l_ready;
-  logic fp_single_to_int_w_valid, fp_single_to_int_l_valid;
-  logic fp_double_to_int_w_valid, fp_double_to_int_l_valid;
+  logic [63:0] fp_single_to_int_result, fp_double_to_int_result;
+  logic [4:0] fp_single_to_int_flags, fp_double_to_int_flags;
+  logic fp_single_to_int_ready, fp_double_to_int_ready;
+  logic fp_single_to_int_valid, fp_double_to_int_valid;
   logic [63:0] fp_half_to_fp_result, fp_fp_to_half_result;
   logic [4:0] fp_half_to_fp_flags, fp_fp_to_half_flags;
   logic fp_half_to_fp_ready, fp_half_to_fp_valid;
@@ -191,7 +189,7 @@ module rapt_feu #(
   logic [$clog2(ROB_SIZE)-1:0] fp_pending_dest_q;
   logic [`RAPT_PHY_LEN-1:0] fp_pending_prd_q;
   logic [`RAPT_REG_LEN-1:0] fp_pending_rd_q;
-  logic [XLEN-1:0] fp_pending_pc_q, fp_pending_pnpc_q;
+  logic [XLEN-1:0] fp_pending_pc_q;
   logic fp_pending_c_q;
   logic fp_pending_to_gpr_q;
   logic [4:0] fp_pending_frd_q;
@@ -298,10 +296,8 @@ module rapt_feu #(
           : fp_int_to_double_l ? fp_int_to_double_l_ready
           : fp_int_to_single_w ? fp_int_to_single_w_ready
           : fp_int_to_single_l ? fp_int_to_single_l_ready
-          : fp_single_to_int_w ? fp_single_to_int_w_ready
-          : fp_single_to_int_l ? fp_single_to_int_l_ready
-          : fp_double_to_int_w ? fp_double_to_int_w_ready
-          : fp_double_to_int_l ? fp_double_to_int_l_ready
+          : (fp_single_to_int_w || fp_single_to_int_l) ? fp_single_to_int_ready
+          : (fp_double_to_int_w || fp_double_to_int_l) ? fp_double_to_int_ready
           : fp_half_to_fp ? fp_half_to_fp_ready
           : fp_fp_to_half_ready;
 
@@ -412,24 +408,24 @@ module rapt_feu #(
         fp_pending_flags = fp_int_to_single_l_flags;
       end
       FP_PENDING_SINGLE_TO_INT_W: begin
-        fp_pending_result_valid = fp_single_to_int_w_valid;
-        fp_pending_result = fp_single_to_int_w_result;
-        fp_pending_flags = fp_single_to_int_w_flags;
+        fp_pending_result_valid = fp_single_to_int_valid;
+        fp_pending_result = fp_single_to_int_result;
+        fp_pending_flags = fp_single_to_int_flags;
       end
       FP_PENDING_SINGLE_TO_INT_L: begin
-        fp_pending_result_valid = fp_single_to_int_l_valid;
-        fp_pending_result = fp_single_to_int_l_result;
-        fp_pending_flags = fp_single_to_int_l_flags;
+        fp_pending_result_valid = fp_single_to_int_valid;
+        fp_pending_result = fp_single_to_int_result;
+        fp_pending_flags = fp_single_to_int_flags;
       end
       FP_PENDING_DOUBLE_TO_INT_W: begin
-        fp_pending_result_valid = fp_double_to_int_w_valid;
-        fp_pending_result = fp_double_to_int_w_result;
-        fp_pending_flags = fp_double_to_int_w_flags;
+        fp_pending_result_valid = fp_double_to_int_valid;
+        fp_pending_result = fp_double_to_int_result;
+        fp_pending_flags = fp_double_to_int_flags;
       end
       FP_PENDING_DOUBLE_TO_INT_L: begin
-        fp_pending_result_valid = fp_double_to_int_l_valid;
-        fp_pending_result = fp_double_to_int_l_result;
-        fp_pending_flags = fp_double_to_int_l_flags;
+        fp_pending_result_valid = fp_double_to_int_valid;
+        fp_pending_result = fp_double_to_int_result;
+        fp_pending_flags = fp_double_to_int_flags;
       end
       FP_PENDING_HALF_TO_FP: begin
         fp_pending_result_valid = fp_half_to_fp_valid;
@@ -481,7 +477,6 @@ module rapt_feu #(
       fp_pending_prd_q <= iss.prd;
       fp_pending_rd_q <= iss.uop.rd;
       fp_pending_pc_q <= iss.uop.pc;
-      fp_pending_pnpc_q <= iss.uop.pnpc;
       fp_pending_c_q <= iss.uop.c;
       fp_pending_to_gpr_q <= fp_to_int_launch;
       fp_pending_frd_q <= fp_rd;
@@ -701,61 +696,35 @@ module rapt_feu #(
       .flags(fp_mul_d_flags),
       .result_valid(fp_mul_d_valid)
   );
-  rapt_fpu_single_to_int_w u_fpu_single_to_int_w (
+  rapt_fpu_single_to_int_w u_fpu_single_to_int (
       .clock(clock),
       .reset(reset),
       .flush(cmu_bcast.flush_pipe),
-      .valid(fp_to_int_launch && fp_single_to_int_w),
-      .ready(fp_single_to_int_w_ready),
+      .valid(fp_to_int_launch && (fp_single_to_int_w || fp_single_to_int_l)),
+      .ready(fp_single_to_int_ready),
       .operand(fp_operand_a),
-      .unsigned_result(iss.uop.execute.fp.op == `RAPT_FP_OP_FCVT_WU_S),
-      .int64_target(1'b0),
+      .unsigned_result(iss.uop.execute.fp.op == `RAPT_FP_OP_FCVT_WU_S
+          || iss.uop.execute.fp.op == `RAPT_FP_OP_FCVT_LU_S),
+      .int64_target(fp_single_to_int_l),
       .rounding_mode(fp_rounding_mode),
-      .result(fp_single_to_int_w_result),
-      .flags(fp_single_to_int_w_flags),
-      .result_valid(fp_single_to_int_w_valid)
+      .result(fp_single_to_int_result),
+      .flags(fp_single_to_int_flags),
+      .result_valid(fp_single_to_int_valid)
   );
-  rapt_fpu_single_to_int_w u_fpu_single_to_int_l (
+  rapt_fpu_double_to_int_w u_fpu_double_to_int (
       .clock(clock),
       .reset(reset),
       .flush(cmu_bcast.flush_pipe),
-      .valid(fp_to_int_launch && fp_single_to_int_l),
-      .ready(fp_single_to_int_l_ready),
+      .valid(fp_to_int_launch && (fp_double_to_int_w || fp_double_to_int_l)),
+      .ready(fp_double_to_int_ready),
       .operand(fp_operand_a),
-      .unsigned_result(iss.uop.execute.fp.op == `RAPT_FP_OP_FCVT_LU_S),
-      .int64_target(1'b1),
+      .unsigned_result(iss.uop.execute.fp.op == `RAPT_FP_OP_FCVT_WU_D
+          || iss.uop.execute.fp.op == `RAPT_FP_OP_FCVT_LU_D),
+      .int64_target(fp_double_to_int_l),
       .rounding_mode(fp_rounding_mode),
-      .result(fp_single_to_int_l_result),
-      .flags(fp_single_to_int_l_flags),
-      .result_valid(fp_single_to_int_l_valid)
-  );
-  rapt_fpu_double_to_int_w u_fpu_double_to_int_w (
-      .clock(clock),
-      .reset(reset),
-      .flush(cmu_bcast.flush_pipe),
-      .valid(fp_to_int_launch && fp_double_to_int_w),
-      .ready(fp_double_to_int_w_ready),
-      .operand(fp_operand_a),
-      .unsigned_result(iss.uop.execute.fp.op == `RAPT_FP_OP_FCVT_WU_D),
-      .int64_target(1'b0),
-      .rounding_mode(fp_rounding_mode),
-      .result(fp_double_to_int_w_result),
-      .flags(fp_double_to_int_w_flags),
-      .result_valid(fp_double_to_int_w_valid)
-  );
-  rapt_fpu_double_to_int_w u_fpu_double_to_int_l (
-      .clock(clock),
-      .reset(reset),
-      .flush(cmu_bcast.flush_pipe),
-      .valid(fp_to_int_launch && fp_double_to_int_l),
-      .ready(fp_double_to_int_l_ready),
-      .operand(fp_operand_a),
-      .unsigned_result(iss.uop.execute.fp.op == `RAPT_FP_OP_FCVT_LU_D),
-      .int64_target(1'b1),
-      .rounding_mode(fp_rounding_mode),
-      .result(fp_double_to_int_l_result),
-      .flags(fp_double_to_int_l_flags),
-      .result_valid(fp_double_to_int_l_valid)
+      .result(fp_double_to_int_result),
+      .flags(fp_double_to_int_flags),
+      .result_valid(fp_double_to_int_valid)
   );
 
   assign fpr.alu_wvalid = wb_accept && ((fp_complete && !fp_pending_to_gpr_q)
@@ -766,7 +735,7 @@ module rapt_feu #(
         && !fp_fmv_x_h));
   assign fpr.alu_waddr = fp_pending_q ? fp_pending_frd_q : fp_rd;
   assign fpr.alu_wdata = fp_pending_q ? fp_pending_result
-    : fp_minmax ? fp_compare_result : fp_single_to_int_w ? fp_single_to_int_w_result
+    : fp_minmax ? fp_compare_result : fp_single_to_int_w ? fp_single_to_int_result
     : fp_fmv_h_x ? {48'hffff_ffff_ffff, iss.op1[15:0]}
     : iss.uop.execute.fp.op == `RAPT_FP_OP_FMV_W_X ? {32'hffff_ffff, iss.op1[31:0]}
     : iss.uop.execute.fp.op == `RAPT_FP_OP_FMV_D_X ? iss.op1 : fp_sgnj_result;
@@ -780,14 +749,14 @@ module rapt_feu #(
     : fp_fmv_x_h ? {{(XLEN-16){fp_operand_a[15]}}, fp_operand_a[15:0]}
     : fp_compare ? fp_compare_result[XLEN-1:0]
     : fp_classify ? {{(XLEN-10){1'b0}}, fp_classify_result}
-    : fp_single_to_int_w ? fp_single_to_int_w_result[XLEN-1:0]
-    : fp_single_to_int_l ? fp_single_to_int_l_result[XLEN-1:0]
-    : fp_double_to_int_w ? fp_double_to_int_w_result[XLEN-1:0]
-    : fp_double_to_int_l ? fp_double_to_int_l_result[XLEN-1:0] : '0);
+    : (fp_single_to_int_w || fp_single_to_int_l) ? fp_single_to_int_result[XLEN-1:0]
+    : (fp_double_to_int_w || fp_double_to_int_l) ? fp_double_to_int_result[XLEN-1:0] : '0);
   assign wb_fpu.npc = fp_pending_q
         ? fp_pending_pc_q + (fp_pending_c_q ? 2 : 4)
         : iss.uop.pc + (iss.uop.c ? 2 : 4);
-  assign wb_fpu.mispredict = wb_fpu.npc != (fp_pending_q ? fp_pending_pnpc_q : iss.uop.pnpc);
+  // FP instructions are not control flow; IDU already repaired any false
+  // fetch prediction before they entered rename.
+  assign wb_fpu.mispredict = 1'b0;
   assign wb_fpu.prd = fp_pending_q ? fp_pending_prd_q : iss.prd;
   assign wb_fpu.rd = fp_pending_q ? fp_pending_rd_q : iss.uop.rd;
   assign wb_fpu.pc = fp_pending_q ? fp_pending_pc_q : iss.uop.pc;
@@ -796,9 +765,8 @@ module rapt_feu #(
     || fp_single_to_int_l || fp_double_to_int_w || fp_double_to_int_l
         ) && iss.valid && !fp_trap);
   assign wb_fpu.fp_flags = fp_pending_q ? fp_pending_flags
-        : (fp_double_to_int_l ? fp_double_to_int_l_flags
-    : fp_double_to_int_w ? fp_double_to_int_w_flags : fp_single_to_int_l ? fp_single_to_int_l_flags
-    : fp_single_to_int_w ? fp_single_to_int_w_flags
+        : ((fp_double_to_int_w || fp_double_to_int_l) ? fp_double_to_int_flags
+    : (fp_single_to_int_w || fp_single_to_int_l) ? fp_single_to_int_flags
     : (fp_minmax || fp_compare) ? fp_compare_flags : divsqrt_flags);
   assign wb_fpu.trap = fp_pending_q ? 1'b0 : fp_trap;
   assign wb_fpu.tval = fp_pending_q ? '0

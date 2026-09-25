@@ -13,9 +13,11 @@
 // reaching the trap/commit logic.
 module rapt_core #(
     parameter int XLEN = `RAPT_XLEN,
-    parameter int MemoryReadCredits = 8
+    parameter int MemoryReadCredits = 8,
+    parameter bit L1dWriteBack = 1'b0
 ) (
     input clock,
+    output logic writeback_error_o,
     // Device writes are reported before a later SC may complete. Pending
     // holds SC while the platform drains a finite batch of notifications.
     input logic external_write_valid_i = 1'b0,
@@ -102,12 +104,13 @@ module rapt_core #(
   csr_bcast_if csr_bcast ();
   rapt_recovery_if recovery ();
   pmp_update_if pmp_update ();
-  pmp_state_if pmp_fetch_state ();
   lsu_l1d_if lsu_l1d ();
   lsu_l1d_mmu_if exu_l1d ();
-  l1i_bus_if l1i_bus ();
-  l1d_bus_if l1d_bus ();
+  logic memory_data_idle;
   logic frontend_empty, backend_empty, sq_empty;
+  logic history_restore;
+  logic [63:0] snapshot_ghr, restore_ghr;
+  logic [7:0] snapshot_phr, restore_phr;
 
   rapt_frontend #(
       .XLEN(XLEN)
@@ -119,18 +122,32 @@ module rapt_core #(
       .recovery(recovery),
       .ifu_l1i(ifu_l1i),
       .idu_rnu(idu_rnu),
-      .empty_o(frontend_empty)
+      .empty_o(frontend_empty),
+      .snapshot_ghr(snapshot_ghr),
+      .snapshot_phr(snapshot_phr),
+      .history_restore(history_restore),
+      .restore_ghr(restore_ghr),
+      .restore_phr(restore_phr)
   );
 
+  logic cache_writeback_idle;
+  logic cache_writeback_drain;
   rapt_backend #(
       .XLEN(XLEN)
   ) backend (
+      .writeback_idle(cache_writeback_idle),
+      .writeback_drain(cache_writeback_drain),
       .clock(clock),
       .reset(reset),
       .idu_rnu(idu_rnu),
       .cmu_bcast(cmu_bcast),
       .csr_bcast(csr_bcast),
       .recovery(recovery),
+      .snapshot_ghr(snapshot_ghr),
+      .snapshot_phr(snapshot_phr),
+      .history_restore(history_restore),
+      .restore_ghr(restore_ghr),
+      .restore_phr(restore_phr),
       .pmp_update(pmp_update),
       .lsu_l1d(lsu_l1d),
       .exu_l1d(exu_l1d),
@@ -176,13 +193,6 @@ module rapt_core #(
 `endif
   );
 
-  rapt_pmp_state pmp_fetch_state_regs (
-      .clock(clock),
-      .reset(reset),
-      .update(pmp_update),
-      .state(pmp_fetch_state)
-  );
-
   logic ifetch_io_authorized, ifetch_io_start;
   logic [XLEN-1:0] ifetch_io_owner_pc;
   rapt_ifetch_io_guard #(
@@ -197,87 +207,35 @@ module rapt_core #(
       .frontier_advance(commit_fire_o || cmu_bcast.time_trap),
       .blocked(ifu_l1i.cancel || cmu_bcast.fence_time || dm_haltreq_i),
       .pipeline_empty(frontend_empty && backend_empty),
-      .memory_idle(sq_empty && lsu_l1d.idle && l1d_bus.idle),
+      .memory_idle(sq_empty && memory_data_idle),
       .io_start(ifetch_io_start),
       .authorized(ifetch_io_authorized)
   );
-  rapt_l1i l1i_cache (
-      .io_authorized(ifetch_io_authorized),
-      .io_start(ifetch_io_start),
-      .io_owner_pc(ifetch_io_owner_pc),
+  rapt_memory #(
+      .XLEN(XLEN),
+      .MemoryReadCredits(MemoryReadCredits),
+      .L1dWriteBack(L1dWriteBack)
+  ) memory_subsystem (
       .clock(clock),
-
-      .cmu_bcast(cmu_bcast),
-
+      .reset(reset),
       .ifu_l1i(ifu_l1i),
-      .l1i_bus(l1i_bus),
-
+      .lsu_l1d(lsu_l1d),
+      .exu_l1d(exu_l1d),
+      .cmu_bcast(cmu_bcast),
       .csr_bcast(csr_bcast),
-      .pmp_state(pmp_fetch_state),
-
-      .reset(reset)
-  );
-
-  rapt_l1d l1d_cache (
+      .pmp_update(pmp_update),
+      .io_master(io_master),
+      .ifetch_io_authorized_i(ifetch_io_authorized),
+      .ifetch_io_start_o(ifetch_io_start),
+      .ifetch_io_owner_pc_o(ifetch_io_owner_pc),
+      .data_idle_o(memory_data_idle),
+      .writeback_idle_o(cache_writeback_idle),
+      .writeback_drain_i(cache_writeback_drain),
+      .writeback_error_o(writeback_error_o),
       .external_write_valid_i(external_write_valid_i),
       .external_write_pending_i(external_write_pending_i),
       .external_write_first_i(external_write_first_i),
-      .external_write_last_i(external_write_last_i),
-
-      .clock(clock),
-
-      .cmu_bcast(cmu_bcast),
-
-      .lsu_l1d(lsu_l1d),
-      .l1d_bus(l1d_bus),
-
-      .csr_bcast(csr_bcast),
-      .pmp_update(pmp_update),
-
-      .exu_l1d(exu_l1d),
-
-      .reset(reset)
-  );
-
-  // L2 cache sits between the L1 bus arbiter and the external AXI4 master
-  // port. When RAPT_L2_EN is not defined the L2 collapses to a pure
-  // passthrough; the external AXI interface is unchanged.
-  mem_link_if memory_link ();
-  axi4_if l2_axi ();
-
-  rapt_bus bus (
-      .clock(clock),
-
-      .mem(memory_link),
-
-      .l1i_bus(l1i_bus),
-      .l1d_bus(l1d_bus),
-
-      .csr_bcast(csr_bcast),
-      .cmu_bcast(cmu_bcast),
-
-      .reset(reset)
-  );
-
-  rapt_axi_master #(
-      .XLEN(XLEN),
-      .MAX_READ_OUTSTANDING(MemoryReadCredits)
-  ) axi_master (
-      .clock(clock),
-      .reset(reset),
-
-      .mem(memory_link),
-      .axi(l2_axi)
-  );
-
-  rapt_l2 l2 (
-      .cbo_inval_i(cmu_bcast.cbo_inval),
-      .cbo_block_i(cmu_bcast.cbo_block),
-      .clock(clock),
-      .reset(reset),
-
-      .axi_s(l2_axi),
-      .axi_m(io_master)
+      .external_write_last_i(external_write_last_i)
   );
 
 endmodule

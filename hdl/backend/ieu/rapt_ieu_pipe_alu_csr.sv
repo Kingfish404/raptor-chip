@@ -55,7 +55,9 @@ module rapt_ieu_pipe_alu_csr #(
     : iss.uop.execute.sys.mret ? exu_csr.mepc
     : iss.uop.execute.sys.sret ? exu_csr.sepc
     : iss.uop.execute.branch.jump ? jump_target : iss.uop.pc + (iss.uop.c ? 2 : 4);
-  assign wb_alu_csr.mispredict = wb_alu_csr.npc != iss.uop.pnpc;
+  // Control-flow target checking is centralized in the ROB. System returns
+  // serialize at commit and redirect through the CSR/CMU path.
+  assign wb_alu_csr.mispredict = 1'b0;
   assign wb_alu_csr.prd = iss.prd;
   assign wb_alu_csr.rd = iss.uop.rd;
   assign wb_alu_csr.pc = iss.uop.pc;

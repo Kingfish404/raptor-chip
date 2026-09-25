@@ -15,10 +15,10 @@
  * fork() to keep a "rewind point" a short distance behind the live run.
  *
  * Mechanism:
- *   - At every periodic `cpu_exec progress` print, the simulator fork()s a
+ *   - At every cycle-based `cpu_exec progress` point, the simulator fork()s a
  *     throwaway snapshot child that immediately blocks. The parent keeps
  *     simulating. Only one snapshot child is alive at a time.
- *   - When the parent reaches the NEXT progress print without an error, the
+ *   - When the parent reaches the NEXT cycle-based point without an error, the
  *     window was clean: the previous child is reaped and a fresh snapshot is
  *     forked at the new (closer) point.
  *   - When the parent hits a difftest divergence, the still-blocked child

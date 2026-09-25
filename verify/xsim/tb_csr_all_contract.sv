@@ -1687,7 +1687,7 @@ module tb_csr_pmp_lock;
           continue;
         end
         expect_csr(12'h3b0 + 12'(a), expected);
-        if (replica.pmp_raw_addr[a] !== (`RAPT_PADDR_BITS-2)'(expected))
+        if (replica.pmp_raw_addr[a] !== (`RAPT_PADDR_BITS - 2)'(expected))
           $fatal(
               1,
               "PMP address replica mismatch entry=%0d mode=%0d lock=%0d addr=%0d",

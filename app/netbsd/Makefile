@@ -38,13 +38,18 @@ NETBSD_RV32_SIM_DIR ?= $(NETBSD_SIM_DIR)/rv32
 NETBSD_RV64_SIM_DIR ?= $(NETBSD_SIM_DIR)/rv64
 NETBSD_RV32_KERNEL_BIN ?= $(NETBSD_RV32_SIM_DIR)/netbsd-GENERIC.bin
 NETBSD_RV64_KERNEL_BIN ?= $(NETBSD_RV64_SIM_DIR)/netbsd-GENERIC64.bin
-NETBSD_RV32_DTB     ?= $(NETBSD_RV32_SIM_DIR)/qemu-virt.dtb
-NETBSD_RV64_DTB     ?= $(NETBSD_RV64_SIM_DIR)/qemu-virt.dtb
+NETBSD_RV32_DTB     ?= $(NETBSD_RV32_SIM_DIR)/netbsd-nemu-rv32.dtb
+NETBSD_RV64_DTB     ?= $(NETBSD_RV64_SIM_DIR)/netbsd-nemu-rv64.dtb
 NETBSD_RV32_PAYLOAD_ELF ?= $(NETBSD_RV32_SIM_DIR)/opensbi/platform/generic/firmware/fw_payload.elf
 NETBSD_RV64_PAYLOAD_ELF ?= $(NETBSD_RV64_SIM_DIR)/opensbi/platform/generic/firmware/fw_payload.elf
 NETBSD_RV32_PAYLOAD ?= $(NETBSD_RV32_SIM_DIR)/opensbi/platform/generic/firmware/fw_payload.bin
 NETBSD_RV64_PAYLOAD ?= $(NETBSD_RV64_SIM_DIR)/opensbi/platform/generic/firmware/fw_payload.bin
 NETBSD_OPENSBI_SRC  ?= $(RAPTOR_HOME)/third_party/riscv-software-src/opensbi
+NETBSD_DTS_DIR      ?= $(RAPTOR_HOME)/linux/dts
+NETBSD_RV32_DTS     ?= $(NETBSD_DTS_DIR)/netbsd-nemu-rv32.dts
+NETBSD_RV64_DTS     ?= $(NETBSD_DTS_DIR)/netbsd-nemu-rv64.dts
+# OpenSBI's PMP setup trips clang 23's -Wunused-but-set-global under -Werror.
+NETBSD_OPENSBI_CFLAGS ?= -Wno-error=unused-but-set-global
 NETBSD_OPENSBI_RV32_QEMU_DIR ?= $(NETBSD_BUILD_DIR)/opensbi-rv32-qemu
 NETBSD_OPENSBI_RV32_QEMU_BIOS ?= $(NETBSD_OPENSBI_RV32_QEMU_DIR)/platform/generic/firmware/fw_dynamic.bin
 NETBSD_OPENSBI_RV64_QEMU_DIR ?= $(NETBSD_BUILD_DIR)/opensbi-rv64-qemu
@@ -54,7 +59,7 @@ NETBSD_NEMU_ROM_DIR ?= $(RAPTOR_HOME)/nemu/src/memory/rom
 .PHONY: help check check-images fetch list-arch tools tools-rv32 tools-rv64 \
 	build-rv32 build-rv64 rv32 rv64 sim-payload-rv32 sim-payload-rv64 \
 	opensbi-rv32-qemu opensbi-rv64-qemu nemu-prepare-rv32 nemu-prepare-rv64 \
-	nemu-run-rv32 nemu-run-rv64 qemu-rv32 qemu-rv64 clean
+	nemu-run-rv32 nemu-run-rv64 sim-run-rv32 sim-run-rv64 qemu-rv32 qemu-rv64 clean
 
 help: ## Show NetBSD build targets
 	@echo "Usage: make <target> [VAR=value ...]"
@@ -75,6 +80,8 @@ help: ## Show NetBSD build targets
 	@echo "  nemu-prepare-rv64  Generate NEMU RV64 QEMU DTB alias"
 	@echo "  nemu-run-rv32  Build and run NEMU RV32 with NetBSD disk"
 	@echo "  nemu-run-rv64  Build and run NEMU RV64 with NetBSD disk"
+	@echo "  sim-run-rv32   Build and run the RTL simulator (RV32) with NetBSD"
+	@echo "  sim-run-rv64   Build and run the RTL simulator (RV64) with NetBSD"
 	@echo "  qemu-rv32   Run NetBSD RV32 under QEMU"
 	@echo "  qemu-rv64   Run NetBSD RV64 under QEMU"
 	@echo
@@ -99,7 +106,7 @@ check-images: ## Check NetBSD image formats and backend memory limits
 	rv32_kernel_size=$$(stat -c%s "$(NETBSD_RV32_KERNEL)"); \
 	rv64_kernel_size=$$(stat -c%s "$(NETBSD_RV64_KERNEL)"); \
 	printf '%s\n' 'backend compatibility:'; \
-	printf '  NEMU/RTL sim RAM IMG window: 128 MiB (0x08000000)\n'; \
+	printf '  NetBSD DTB/NEMU Linux profile RAM: 128 MiB; RTL sim backing RAM: 256 MiB\n'; \
 	printf '  NetBSD RV32 kernel: %s bytes, disk: %s bytes\n' "$$rv32_kernel_size" "$$rv32_disk_size"; \
 	printf '  NetBSD RV64 kernel: %s bytes, disk: %s bytes\n' "$$rv64_kernel_size" "$$rv64_disk_size"; \
 	printf '%s\n' '  NEMU/RTL sim: use fw_payload.bin as IMG and the GPT image via --disk; do not pass the GPT image as IMG.'; \
@@ -208,19 +215,20 @@ $(NETBSD_RV64_KERNEL_BIN): $(NETBSD_RV64_KERNEL_GZ)
 	gzip -dc $< > $(NETBSD_RV64_KERNEL)
 	$(NETBSD_OBJCOPY) -O binary $(NETBSD_RV64_KERNEL) $@
 
-$(NETBSD_RV32_DTB):
+$(NETBSD_RV32_DTB): $(NETBSD_RV32_DTS)
 	@mkdir -p $(dir $@)
-	qemu-system-riscv32 -M virt,dumpdtb=$@ -m 128M -bios none
+	dtc -I dts -O dtb -o $@ $<
 
-$(NETBSD_RV64_DTB):
+$(NETBSD_RV64_DTB): $(NETBSD_RV64_DTS)
 	@mkdir -p $(dir $@)
-	qemu-system-riscv64 -M virt,dumpdtb=$@ -m 128M -bios none
+	dtc -I dts -O dtb -o $@ $<
 
 $(NETBSD_RV32_PAYLOAD_ELF) $(NETBSD_RV32_PAYLOAD): $(NETBSD_RV32_KERNEL_BIN) $(NETBSD_RV32_DTB)
 	@mkdir -p $(NETBSD_RV32_SIM_DIR)/opensbi
 	$(MAKE) -C $(NETBSD_OPENSBI_SRC) LLVM=1 \
 		PLATFORM_RISCV_ISA=rv32imac_zicsr_zifencei \
 		PLATFORM_RISCV_XLEN=32 PLATFORM=generic FW_PAYLOAD=y \
+		platform-cflags-y="$(NETBSD_OPENSBI_CFLAGS)" \
 		FW_PAYLOAD_PATH=$(abspath $(NETBSD_RV32_KERNEL_BIN)) \
 		FW_FDT_PATH=$(abspath $(NETBSD_RV32_DTB)) \
 		FW_PAYLOAD_OFFSET=0x200000 FW_PAYLOAD_FDT_OFFSET=0x2200000 \
@@ -232,6 +240,7 @@ $(NETBSD_RV64_PAYLOAD_ELF) $(NETBSD_RV64_PAYLOAD): $(NETBSD_RV64_KERNEL_BIN) $(N
 	$(MAKE) -C $(NETBSD_OPENSBI_SRC) LLVM=1 \
 		PLATFORM_RISCV_ISA=rv64imac_zicsr_zifencei \
 		PLATFORM_RISCV_XLEN=64 PLATFORM=generic FW_PAYLOAD=y \
+		platform-cflags-y="$(NETBSD_OPENSBI_CFLAGS)" \
 		FW_PAYLOAD_PATH=$(abspath $(NETBSD_RV64_KERNEL_BIN)) \
 		FW_FDT_PATH=$(abspath $(NETBSD_RV64_DTB)) \
 		FW_PAYLOAD_OFFSET=0x200000 FW_PAYLOAD_FDT_OFFSET=0x2200000 \
@@ -275,16 +284,35 @@ opensbi-rv64-qemu: ## Build RV64 OpenSBI firmware compatible with QEMU virt
 nemu-run-rv32: sim-payload-rv32 nemu-prepare-rv32 ## Build and run NEMU RV32 with NetBSD disk
 	@test -f $(NETBSD_RV32_DISK_GZ) || { echo "error: missing $(NETBSD_RV32_DISK_GZ); run make build-rv32 first"; exit 1; }
 	gzip -dkf $(NETBSD_RV32_DISK_GZ)
-	$(MAKE) -C $(RAPTOR_HOME)/nemu NEMU_HOME=$(RAPTOR_HOME)/nemu riscv32_linux_device_defconfig
+	$(MAKE) -C $(RAPTOR_HOME)/nemu NEMU_HOME=$(RAPTOR_HOME)/nemu riscv32_netbsd_defconfig
 	$(MAKE) -C $(RAPTOR_HOME)/nemu NEMU_HOME=$(RAPTOR_HOME)/nemu -j$(NPROC)
 	cd $(RAPTOR_HOME)/nemu && NEMU_HOME=$(RAPTOR_HOME)/nemu ./build/riscv32-nemu-interpreter -b --disk=$(abspath $(NETBSD_RV32_DISK)) $(abspath $(NETBSD_RV32_PAYLOAD))
 
 nemu-run-rv64: sim-payload-rv64 nemu-prepare-rv64 ## Build and run NEMU RV64 with NetBSD disk
 	@test -f $(NETBSD_RV64_DISK_GZ) || { echo "error: missing $(NETBSD_RV64_DISK_GZ); run make build-rv64 first"; exit 1; }
 	gzip -dkf $(NETBSD_RV64_DISK_GZ)
-	$(MAKE) -C $(RAPTOR_HOME)/nemu NEMU_HOME=$(RAPTOR_HOME)/nemu riscv64_linux_device_defconfig
+	$(MAKE) -C $(RAPTOR_HOME)/nemu NEMU_HOME=$(RAPTOR_HOME)/nemu riscv64_netbsd_defconfig
 	$(MAKE) -C $(RAPTOR_HOME)/nemu NEMU_HOME=$(RAPTOR_HOME)/nemu -j$(NPROC)
 	cd $(RAPTOR_HOME)/nemu && NEMU_HOME=$(RAPTOR_HOME)/nemu ./build/riscv64-nemu-interpreter -b --disk=$(abspath $(NETBSD_RV64_DISK)) $(abspath $(NETBSD_RV64_PAYLOAD))
+
+# The RTL simulator takes its boot device tree from the MROM (and the payload
+# embeds the same NetBSD DTS), so pass DT_SOURCE explicitly.  The default
+# spike-rv{32,64}ima.dts trees have a 10 MHz console and no virtio-blk node.
+sim-run-rv32: $(NETBSD_RV32_PAYLOAD) ## Build and run RV32 NetBSD on the RTL simulator
+	@test -f $(NETBSD_RV32_DISK) || gzip -dkf $(NETBSD_RV32_DISK_GZ)
+	$(MAKE) -C $(RAPTOR_HOME)/sim run \
+		DT_SOURCE=$(abspath $(NETBSD_RV32_DTS)) \
+		IMG=$(abspath $(NETBSD_RV32_PAYLOAD)) \
+		DISK=$(abspath $(NETBSD_RV32_DISK)) \
+		ARGS="--trap-on-ebreak $(ARGS)" VFLAGS="$(VFLAGS)"
+
+sim-run-rv64: $(NETBSD_RV64_PAYLOAD) ## Build and run RV64 NetBSD on the RTL simulator
+	@test -f $(NETBSD_RV64_DISK) || gzip -dkf $(NETBSD_RV64_DISK_GZ)
+	$(MAKE) -C $(RAPTOR_HOME)/sim run \
+		DT_SOURCE=$(abspath $(NETBSD_RV64_DTS)) \
+		IMG=$(abspath $(NETBSD_RV64_PAYLOAD)) \
+		DISK=$(abspath $(NETBSD_RV64_DISK)) \
+		ARGS="--trap-on-ebreak $(ARGS)" VFLAGS="-DRAPT_RV64"
 
 qemu-rv32: opensbi-rv32-qemu ## Build prerequisites and run NetBSD RV32 under QEMU
 	@test -f $(NETBSD_RV32_KERNEL_GZ) || { echo "error: missing $(NETBSD_RV32_KERNEL_GZ); run make build-rv32 first"; exit 1; }

@@ -1,8 +1,14 @@
 # Friendly module name -> synthesizable SystemVerilog top and clock port.
 # Core hierarchy blocks and selected scalable leaves for isolated comparison.
-MODULES := core bpu ifu fqu stream_queue l1i idu rnu rename_checkpoint rou prf fpr dpu dispatch_select dispatch_steer issue_select muldiv_fu ieu feu cmu csr lsu l1d bus axi l2
+MODULES := core frontend backend memory bpu ifu fqu stream_queue l1i idu rnu rename_checkpoint rou prf fpr dpu dispatch_select dispatch_steer issue_select muldiv_fu ieu feu cmu csr lsu l1d bus axi l2
+MODULES += recovery_pending
+
+TOP_recovery_pending := rapt_recovery_pending
 
 TOP_core := rapt_core
+TOP_frontend := rapt_frontend
+TOP_backend := rapt_backend_syn_top
+TOP_memory := rapt_memory
 TOP_bpu  := rapt_bpu
 TOP_ifu  := rapt_ifu
 TOP_fqu  := rapt_fqu

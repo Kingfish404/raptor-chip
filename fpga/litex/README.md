@@ -74,7 +74,7 @@ make fpga-netboot-rv64-build
 make fpga-netboot-rv64-load
 ```
 
-Run load only after a successful build and when the board is available. This profile fixes CU08 and 50 MHz, defaults to `RAPT_CONFIG=default`, and supports other presets through e.g. `RAPT_CONFIG=small`. It uses MIG DDR, manual SD boot, CM005 FMC_C/ETHA gigabit, full Linux initialization, Vivado 8 threads and Explore routing. DTB offset/address are `0x04000000`/`0x83f00000`. Both targets use the same parameters; load requires the matching build stamp and an existing, passing timing report. It does not rebuild or program flash.
+Run load only after a successful build and when the board is available. This profile fixes CU08, with RV32 at 50 MHz and RV64 at 30 MHz, defaults to `RAPT_CONFIG=default`, and supports other presets through e.g. `RAPT_CONFIG=small`. It uses MIG DDR, manual SD boot, CM005 FMC_C/ETHA gigabit, full Linux initialization, Vivado 8 threads and Explore routing. DTB offset/address are `0x04000000`/`0x83f00000`. Matching build and load targets use the same parameters; load requires the matching build stamp and an existing, passing timing report. It does not rebuild or program flash.
 
 Outputs and workflow locks are isolated by preset and XLEN at `build/netboot-<RAPT_CONFIG>/rv32/{build,soc,netboot}` and `build/netboot-<RAPT_CONFIG>/rv64/{build,soc,netboot}`; they do not reuse the earlier compact temporary candidates. Use `make fpga-netboot-rv32-info` (or `rv64-info`) to see resolved paths. Do **not** substitute bare `make fpga-load` for the paired target.
 
@@ -84,7 +84,7 @@ The default payloads are downloaded by the paired `build` target when absent: `l
 
 Ethernet itself is **opt-in**: `WITH_ETHERNET=0` is the default, even with `VARIANT=linux32` or `linux64`. The 1000 Mb/s default above applies only when Ethernet is enabled. BIOS registers `netboot` only when its generated CSR header defines `CSR_ETHMAC_BASE`. A BIOS without that command cannot be repaired by connecting a cable or starting a TFTP server.
 
-Run the following in one Bash or Zsh session, starting at the repository root. Complete `make setup` once and put Vivado on `PATH` first. Reserve the board before loading it; do not run this against another session's active build or board test. These commands use the CU08 FMC_C / ETHA connection, 50 MHz CPU, MIG DDR, SD support and the `default` RTL preset; they do not write flash or SD.
+Run the following in one Bash or Zsh session, starting at the repository root. Complete `make setup` once and put Vivado on `PATH` first. Reserve the board before loading it; do not run this against another session's active build or board test. These commands use the CU08 FMC_C / ETHA connection, MIG DDR, SD support and the `default` RTL preset; RV32 runs at 50 MHz and RV64 at 30 MHz. They do not write flash or SD.
 
 ```sh
 cd fpga/litex
@@ -93,18 +93,20 @@ cd fpga/litex
 cu08_net() {
     make FPGA_BOARD=mlk_cu08_ku15p FPGA_AUTO_DETECT=0 \
         VARIANT="$fpga_variant" RAPT_CONFIG=default BOOT_MODE=bios \
-        SYS_CLK=50000000 WITH_MIG=1 WITH_LITEDRAM=0 WITH_SDCARD=1 \
+        SYS_CLK="$fpga_sys_clk" WITH_MIG=1 WITH_LITEDRAM=0 WITH_SDCARD=1 \
         WITH_ETHERNET=1 ETH_SPEED=1000 FMC_SLOT=c ETH_PORT=a "$@"
 }
 
 # RV32: build, inspect the printed paths, check freshness/timing, then load.
 fpga_variant=linux32
+fpga_sys_clk=50000000
 cu08_net fpga-build && cu08_net info && \
     cu08_net fpga-bitstream-current && cu08_net fpga-timing-ok && \
     cu08_net fpga-load
 
 # RV64 alternative: run when ready to replace the RV32 image on the board.
 # fpga_variant=linux64
+# fpga_sys_clk=30000000
 # cu08_net fpga-build && cu08_net info && \
 #     cu08_net fpga-bitstream-current && cu08_net fpga-timing-ok && \
 #     cu08_net fpga-load
@@ -267,7 +269,7 @@ Notes:
 
 ## KU15P Linux FPGA Flow (Vivado MIG)
 
-Linux-oriented KU15P bitstream: `VARIANT=linux32`, LiteX BIOS, on-board 4 GB DDR4 via Xilinx MIG mapped as `main_ram` at `0x80000000` (1 GiB AXI window). On the KU15P, the board-aware Linux profile selects `BOOT_MODE=bios WITH_MIG=1 WITH_SDCARD=1 INTEGRATED_MAIN_RAM_SIZE=0`, `SYS_CLK=50000000` (50 MHz), `UART_BAUD=115200`, and the `default` Raptor preset. The KU15P external-DDR build sets `RAPT_PMEM_BYTES` to the mapped DDR size and defaults `LINUX_FPGA_RAM_SIZE` to that size (1 GiB, `0x80000000..0xbfffffff`). Other platforms retain the default 256 MiB PMEM classifier. MMIO still starts at `0xc0000000`; DDR windows larger than 1 GiB are rejected. Rebuild both gateware and the Linux boot artifacts when upgrading from the old 256 MiB map: a new DTB must not be used with the old classifier. This configuration does not by itself establish board-level 1 GiB memory-test or Linux stress-test success. The legacy LiteDRAM path is still available via `WITH_LITEDRAM=1`. `make fpga-build VARIANT=linux32 FPGA_BOARD=mlk_cu07_ku15p` only succeeds if the Vivado timing report meets constraints; the default bitstream lands under `build/mlk_cu07_ku15p/bios-linux32-mig-sdcard-default-<config-hash>/gateware/`.
+Linux-oriented KU15P bitstream: `VARIANT=linux32` or `VARIANT=linux64`, LiteX BIOS, on-board 4 GB DDR4 via Xilinx MIG mapped as `main_ram` at `0x80000000` (1 GiB AXI window). On the KU15P, the board-aware Linux profile selects `BOOT_MODE=bios WITH_MIG=1 WITH_SDCARD=1 INTEGRATED_MAIN_RAM_SIZE=0`, `SYS_CLK=50000000` (50 MHz) for RV32 or `SYS_CLK=30000000` (30 MHz) for RV64, `UART_BAUD=115200`, and the `default` Raptor preset. The KU15P external-DDR build sets `RAPT_PMEM_BYTES` to the mapped DDR size and defaults `LINUX_FPGA_RAM_SIZE` to that size (1 GiB, `0x80000000..0xbfffffff`). Other platforms retain the default 256 MiB PMEM classifier. MMIO still starts at `0xc0000000`; DDR windows larger than 1 GiB are rejected. Rebuild both gateware and the Linux boot artifacts when upgrading from the old 256 MiB map: a new DTB must not be used with the old classifier. This configuration does not by itself establish board-level 1 GiB memory-test or Linux stress-test success. The legacy LiteDRAM path is still available via `WITH_LITEDRAM=1`. `make fpga-build VARIANT=linux32 FPGA_BOARD=mlk_cu07_ku15p` only succeeds if the Vivado timing report meets constraints; the default bitstream lands under `build/mlk_cu07_ku15p/bios-linux32-mig-sdcard-default-<config-hash>/gateware/`.
 
 KU15P BIOS builds now stop at `litex>` after hardware initialization. Enter `sdcardboot` to boot from SD, the namespaced `netboot` command from `serve` for Ethernet, or `serialboot` for a serial upload. This applies to the fixed netboot and RV64 network profiles as well. `BOOT_MODE=bios` selects the firmware; `CONFIG_BIOS_NO_BOOT` disables its automatic startup sequence while preserving these commands. Automatic boot cannot be enabled: `--sdcard-autoboot` is rejected. Private BIOS sources also disable startup dispatch regardless of generated constants, while preserving interactive boot commands. Rebuild and load the matching bitstream to apply this policy: an existing `.bit` embeds the old BIOS and does not change when only the Python/Makefile sources do.
 

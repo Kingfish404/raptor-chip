@@ -1,0 +1,54 @@
+/*
+ * NetBSD netboot device tree for the NEMU / RTL-sim platform (RV64).
+ *
+ * The QEMU-derived device tree advertises a PCIe ECAM bridge and eight
+ * virtio-mmio transports.  NEMU and the RTL simulator only implement a single
+ * virtio-mmio block device, so the guest panics in pci_configure_bus() before
+ * it can mount its root filesystem.  This tree describes exactly the devices
+ * the simulators model: ns16550a console, CLINT, PLIC, one virtio-mmio block
+ * device plus the NEMU-only virtio-net / virtio-rng transports.
+ *
+ * The console is clocked at 3.6864 MHz (the QEMU/MC16550 default) so that
+ * NetBSD's comparam() baud-rate tolerance check accepts 115200 8N1.  With a
+ * 10 MHz reference the divisor is off by 8.5% and comopen() returns EINVAL,
+ * which leaves CLOCAL unset and makes init() block forever in ttyopen().
+ */
+/include/ "spike-rv64gc.dts"
+
+/ {
+	chosen {
+		stdout-path = "/soc/ns16550@10000000";
+		bootargs = "root=dk1";
+		/* Boot-time entropy; mirrors the deterministic sim seed. */
+		rng-seed = [72 61 70 74 6f 72 2d 63 68 69 70 2d 72 76 36 34
+		            2d 6e 65 74 62 73 64 2d 6e 65 6d 75 2d 73 65 65
+		            64 2d 64 65 74 65 72 6d 69 6e 69 73 74 69 63 21];
+	};
+
+	soc {
+		ns16550@10000000 {
+			clock-frequency = <0x384000>;
+		};
+
+		virtio_blk@10001000 {
+			compatible = "virtio,mmio";
+			reg = <0x00 0x10001000 0x00 0x1000>;
+			interrupt-parent = <&plic0>;
+			interrupts = <0x01>;
+		};
+
+		virtio_net@10002000 {
+			compatible = "virtio,mmio";
+			reg = <0x00 0x10002000 0x00 0x1000>;
+			interrupt-parent = <&plic0>;
+			interrupts = <0x02>;
+		};
+
+		virtio_rng@10003000 {
+			compatible = "virtio,mmio";
+			reg = <0x00 0x10003000 0x00 0x1000>;
+			interrupt-parent = <&plic0>;
+			interrupts = <0x03>;
+		};
+	};
+};

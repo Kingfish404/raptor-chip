@@ -29,18 +29,21 @@
 `define RAPT_RSB_SIZE 2
 `define RAPT_BPU_DIRP_TAGE
 
-// Compact OoO window, with queue depths at least as large as small.
-`define RAPT_RIQ_SIZE 2
-`define RAPT_IIQ_SIZE 2
-`define RAPT_ROB_SIZE 4
-// Match small's common default without exceeding the ROB capacity.
-`define RAPT_STEER_SCAN_ENTRIES 4
+// Half of default's OoO queue capacities, no smaller than small.
+`define RAPT_RIQ_SIZE 4
+`define RAPT_IIQ_SIZE 4
+`define RAPT_ROB_SIZE 16
+`ifndef RAPT_OPERAND_SPILL_ENTRIES
+`define RAPT_OPERAND_SPILL_ENTRIES 8
+`endif
+// Half of default's steering scan window, within the ROB capacity.
+`define RAPT_STEER_SCAN_ENTRIES 8
 
 `define RAPT_RS_SIZE 4
 `define RAPT_IOQ_SIZE 4
 
-// Unified SQ: one queue from execute to drain, matching small's capacity.
-`define RAPT_SQ_SIZE 4
+// Unified SQ: one queue from execute to drain, half of default's capacity.
+`define RAPT_SQ_SIZE 8
 
 // Authoritative ordered-stage widths and independent cache lookahead.
 `ifndef RAPT_INTEGER_ISSUE_PORTS
@@ -63,16 +66,6 @@
 `endif
 `ifndef RAPT_FETCH_LOOKAHEAD
 `define RAPT_FETCH_LOOKAHEAD
-`endif
-
-// Deprecated compatibility markers for historical modules/testbenches.
-`define RAPT_DUAL_COMMIT
-`define RAPT_DUAL_ISSUE
-
-`ifdef RAPT_DUAL_ISSUE
-`define RAPT_ISSUE_WIDTH 2
-`else
-`define RAPT_ISSUE_WIDTH 1
 `endif
 
 `ifdef RAPT_I_EXTENSION

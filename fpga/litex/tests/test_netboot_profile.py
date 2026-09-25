@@ -95,7 +95,7 @@ class NetbootProfileTest(unittest.TestCase):
 
     def test_conflicting_fixed_settings_fail(self):
         for setting in ('FPGA_BOARD=xilinx_vcu118', 'BOARD=mlk_cu07_ku15p',
-                        'VARIANT=linux32', 'VARIANT=', 'SYS_CLK=75000000',
+                        'VARIANT=linux32', 'VARIANT=', 'SYS_CLK=30000000',
                         'WITH_ETHERNET=0', 'BOOT_MODE=custom',
                         'RAPT_PACK_VFLAGS=-DRAPT_ROB_SIZE=8'):
             with self.subTest(setting=setting), self.assertRaises(subprocess.CalledProcessError) as error:

@@ -49,6 +49,8 @@ module rapt_idu #(
     idu_bpu.history_valid = 0;
     idu_bpu.history_taken = 0;
     idu_bpu.history_pc_bit = 0;
+    idu_bpu.history_auxiliary = 0;
+    idu_bpu.history_auxiliary_index = '0;
     for (int s = 0; s < Width; s++) begin
       automatic logic is_control;
       automatic logic direct_jump;
@@ -74,6 +76,8 @@ module rapt_idu #(
           idu_bpu.history_valid = 1;
           idu_bpu.history_taken = decoded[s].uop.execute.branch.predicted_taken;
           idu_bpu.history_pc_bit = slots[s].pc[1];
+          idu_bpu.history_auxiliary = slots[s].auxiliary;
+          idu_bpu.history_auxiliary_index = slots[s].auxiliary_index;
         end
         if (!decoded[s].uop.trap && (ras_actions[s].push || ras_actions[s].pop)) ras_slot = s;
         if (!decoded[s].uop.trap && corrected != slots[s].pnpc) begin

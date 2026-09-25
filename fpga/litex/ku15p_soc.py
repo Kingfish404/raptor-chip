@@ -51,6 +51,7 @@ class KU15PBoard:
     cm005_rx_tuned: bool = False
     bare_hold_uncertainty: float = 0.250
     default_fmc_slot: str = "a"
+    mig_tcl: str = "ku15p_ddr4_mig.tcl"
 
 
 def configure_ku15p_timing(platform, board, with_litedram=False, with_mig=False):
@@ -260,7 +261,7 @@ class AXIInitGate(LiteXModule):
 
 
 class KU15PDDR4MIG(LiteXModule):
-    def __init__(self, platform):
+    def __init__(self, platform, mig_tcl):
         self.bus = axi.AXIInterface(
             data_width=512,
             address_width=32,
@@ -274,6 +275,10 @@ class KU15PDDR4MIG(LiteXModule):
         pads = platform.request("ddram")
         refclk = platform.request("clk100_ddr")
         platform.add_period_constraint(refclk.p, 1e9 / 100e6)
+        # LiteX inlines add_ip() Tcl into the generated project script, so a
+        # board override must be inserted before the shared MIG script.
+        if mig_tcl != "ku15p_ddr4_mig.tcl":
+            platform.add_ip(os.path.join(_here, "scripts", mig_tcl))
         platform.add_ip(os.path.join(_here, "scripts", "ku15p_ddr4_mig.tcl"))
 
         mig_bus = axi.AXIInterface(
@@ -605,7 +610,7 @@ class RaptorKU15PSoC(SoCCore):
                         txdata=pads.tx_data, txctl=pads.tx_ctl)
 
         if with_mig:
-            self.ddr4_mig = KU15PDDR4MIG(platform)
+            self.ddr4_mig = KU15PDDR4MIG(platform, board.mig_tcl)
             mig_ready_sys = Signal()
             self.specials += MultiReg(self.ddr4_mig.init_done, mig_ready_sys, "sys")
             self.cpu.cpu_params["i_reset"] = (ResetSignal("sys") | self.cpu.reset

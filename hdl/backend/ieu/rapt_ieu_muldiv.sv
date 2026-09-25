@@ -68,7 +68,6 @@ module rapt_ieu_muldiv #(
   logic [MDQ_SIZE-1:0] mdq_c;
   logic [MDQ_SIZE-1:0] mdq_word;
   logic [         4:0] mdq_alu     [MDQ_SIZE];
-  logic [    XLEN-1:0] mdq_pnpc    [MDQ_SIZE];
 
   // === Unified CDB view for operand wakeup ===
   // All sources use one typed completion array.
@@ -225,9 +224,7 @@ module rapt_ieu_muldiv #(
 
   // === Writeback (CDB) ===
   // Driven straight from the FU's registered outputs; entry payload is
-  // looked up by tag. MUL/DIV never redirects on its own, but a BTB alias
-  // may have predicted a bogus target, so mispredict still compares
-  // against the carried pnpc.
+  // looked up by tag. IDU canonicalizes non-control next-PC before rename.
   logic [XLEN-1:0] wb_npc;
   assign wb_npc = mdq_pc[fu_out_tag] + (mdq_c[fu_out_tag] ? 'h2 : 'h4);
 
@@ -240,7 +237,7 @@ module rapt_ieu_muldiv #(
   assign exu_wb_mul.pc = mdq_pc[fu_out_tag];
   assign exu_wb_mul.npc = wb_npc;
   assign exu_wb_mul.btaken = 1'b0;
-  assign exu_wb_mul.mispredict = (wb_npc != mdq_pnpc[fu_out_tag]);
+  assign exu_wb_mul.mispredict = 1'b0;
   // Pure arithmetic pipe: no CSR / trap / MEM sideband (tie-offs).
   assign exu_wb_mul.csr_wen = 1'b0;
   assign exu_wb_mul.csr_wdata = '0;
@@ -264,7 +261,7 @@ module rapt_ieu_muldiv #(
       mdq_issued   <= '0;
       mdq_pr1_busy <= '0;
       mdq_pr2_busy <= '0;
-      // Payload arrays (vj/vk/pc/alu/pnpc/...), pr1/pr2, and the age
+      // Payload arrays (vj/vk/pc/alu/...), pr1/pr2, and the age
       // matrix are intentionally NOT reset: every read is gated by
       // mdq_valid[]/busy bits (FU input is qualified by sel_found, the
       // wakeup snoop lives inside `if (mdq_valid[i])`), and allocation
@@ -290,7 +287,6 @@ module rapt_ieu_muldiv #(
         mdq_c[e]        <= dispatch[alloc_slot[e]].uop.c;
         mdq_word[e]     <= dispatch[alloc_slot[e]].uop.execute.int_op.word;
         mdq_alu[e]      <= dispatch[alloc_slot[e]].uop.execute.int_op.alu[4:0];
-        mdq_pnpc[e]     <= dispatch[alloc_slot[e]].uop.pnpc;
       end
       // ---- Resident operand wakeup (skip slots being allocated) ----
       for (int i = 0; i < MDQ_SIZE; i++) begin

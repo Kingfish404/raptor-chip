@@ -10,6 +10,9 @@ module rapt_predict_history #(
     clear,
     flush,
     decode_recover,
+    input logic execute_recover = 1'b0,
+    input logic [GhrBits-1:0] execute_ghr = '0,
+    input logic [PhrBits-1:0] execute_phr = '0,
     input logic fetch_valid,
     fetch_taken,
     fetch_pc_bit,
@@ -23,16 +26,19 @@ module rapt_predict_history #(
     decode_ghr,
     commit_ghr,
     query_ghr,
+    snapshot_ghr,
     output logic [PhrBits-1:0] fetch_phr,
     decode_phr,
     commit_phr,
-    query_phr
+    query_phr,
+    snapshot_phr
 );
   typedef struct packed {
     logic [GhrBits-1:0] ghr;
     logic [PhrBits-1:0] phr;
   } history_t;
   history_t fetched, decoded, committed, next_fetch, next_decode, next_commit;
+  history_t decode_snapshot;
   function automatic history_t append(input history_t old, input logic valid, input logic taken,
                                       input logic pc_bit);
     history_t result;
@@ -50,6 +56,10 @@ module rapt_predict_history #(
     if (flush) begin
       next_decode = next_commit;
       next_fetch = next_commit;
+    end else if (execute_recover) begin
+      next_decode.ghr = execute_ghr;
+      next_decode.phr = execute_phr;
+      next_fetch = next_decode;
     end else if (decode_recover) next_fetch = next_decode;
     if (reset || clear) begin
       next_commit = '0;
@@ -57,6 +67,11 @@ module rapt_predict_history #(
       next_fetch = '0;
     end
   end
+  // Rename snapshots the post-decode watermark, including this cycle's
+  // accepted control-flow edge, before execute-recovery overwrites it.
+  assign decode_snapshot = append(decoded, decode_valid, decode_taken, decode_pc_bit);
+  assign snapshot_ghr = decode_snapshot.ghr;
+  assign snapshot_phr = decode_snapshot.phr;
   // The next PC request is issued on the same edge as acceptance/recovery.
   // Feed its predictor read the post-event history, including the current CFU.
   assign query_ghr = next_fetch.ghr;

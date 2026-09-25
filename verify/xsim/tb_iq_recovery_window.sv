@@ -297,11 +297,8 @@ module iq_recovery_window_case #(
       load_fast.valid = mode == 2;
       load_fast.rebusy = mode == 2;
       #1;
-      assert (issue[0].valid == (mode == 0))
+      assert (!issue[0].valid)
       else $fatal(1, "cancel/confirm/rebusy eligibility mismatch mode=%0d", mode);
-      if (mode == 0)
-        assert (int'(issue[0].dest) == 6 && issue[0].op1 == Value)
-        else $fatal(1, "older fast-confirm bypass lost identity or value");
       for (int p = 1; p < Ports; p++)
       assert (!issue[p].valid)
       else $fatal(1, "younger fast-confirmed consumer escaped cancellation");
@@ -310,6 +307,11 @@ module iq_recovery_window_case #(
       load_fast.valid = 0;
       load_fast.rebusy = 0;
       if (mode == 0) begin
+        load_fast.confirmed = 0;
+        #1;
+        assert (issue[0].valid && int'(issue[0].dest) == 6 && issue[0].op1 == Value)
+        else $fatal(1, "older fast confirmation was not registered");
+        tick();
         // A repeated confirmation after removal must not recreate either uop.
         repeat (2) tick();
       end else begin
@@ -318,9 +320,9 @@ module iq_recovery_window_case #(
         load_fast.confirmed = 1;
         load_fast.confirmed_generation = rob_generation_t'(3);
         #1;
+        assert (!issue[0].valid)
+        else $fatal(1, "confirmation bypassed the operand register");
         if (mode == 2) begin
-          assert (!issue[0].valid)
-          else $fatal(1, "confirm resurrected a rebusied fast wake");
           tick();
           load_fast.confirmed = 0;
           completion[0].valid = 1;
@@ -328,6 +330,9 @@ module iq_recovery_window_case #(
           completion[0].result = Value;
           tick();
           completion[0].valid = 0;
+        end else begin
+          tick();
+          load_fast.confirmed = 0;
         end
         #1;
         assert (issue[0].valid && int'(issue[0].dest) == 6 && issue[0].op1 == Value)

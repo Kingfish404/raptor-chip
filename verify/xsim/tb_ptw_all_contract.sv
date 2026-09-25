@@ -466,6 +466,22 @@ module tb_ptw_pmp_span;
   localparam int XLEN = `RAPT_XLEN;
   logic [XLEN-1:0] PteAddr = XLEN'('h80000008);
   csr_bcast_if csr_bcast ();
+  rapt_pkg::mem_context_t d_check_context;
+  assign d_check_context = '{
+          mmu_en: csr_bcast.dmmu_en,
+          eff_priv:
+          (
+          csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv
+          ) ?
+          csr_bcast.mpp
+          :
+          csr_bcast.priv,
+          sum: csr_bcast.sum,
+          mxr: csr_bcast.mxr,
+          pbmte: csr_bcast.menvcfg_pbmte,
+          asid: csr_bcast.satp_asid,
+          version: 8'd0
+      };
   pmp_state_if pmp_state ();
   logic i_fault, d_fault;
   rapt_l1i_access #(
@@ -494,7 +510,9 @@ module tb_ptw_pmp_span;
   rapt_l1d_access #(
       .XLEN(XLEN)
   ) d_access (
-      .csr_bcast,
+      .load_context(d_check_context),
+      .store_context(d_check_context),
+      .ptw_context(d_check_context),
       .pmp_state,
       .load_addr(PteAddr),
       .store_addr(PteAddr),

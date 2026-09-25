@@ -3,6 +3,22 @@
 module tb_data_page_permissions;
   localparam int XLEN = `RAPT_XLEN;
   csr_bcast_if csr_bcast ();
+  rapt_pkg::mem_context_t check_context;
+  assign check_context = '{
+          mmu_en: csr_bcast.dmmu_en,
+          eff_priv:
+          (
+          csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv
+          ) ?
+          csr_bcast.mpp
+          :
+          csr_bcast.priv,
+          sum: csr_bcast.sum,
+          mxr: csr_bcast.mxr,
+          pbmte: csr_bcast.menvcfg_pbmte,
+          asid: csr_bcast.satp_asid,
+          version: 8'd0
+      };
   pmp_state_if pmp_state ();
   logic tlb_hit, stlb_hit;
   logic [6:0] dtlb_pte, dstlb_pte, ptw_result_pte;
@@ -12,7 +28,9 @@ module tb_data_page_permissions;
   rapt_l1d_access #(
       .XLEN(XLEN)
   ) dut (
-      .csr_bcast,
+      .load_context(check_context),
+      .store_context(check_context),
+      .ptw_context(check_context),
       .pmp_state,
       .load_addr(XLEN'('h80000000)),
       .store_addr(XLEN'('h80001000)),

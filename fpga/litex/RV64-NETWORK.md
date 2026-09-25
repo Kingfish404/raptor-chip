@@ -6,7 +6,7 @@ still required: no RV64 routed-timing or board-network PASS is implied.
 
 ## Included configuration
 
-- CU08, `VARIANT=linux64`, `RAPT_CONFIG=default`, 50 MHz, MIG, SD card.
+- CU08, `VARIANT=linux64`, `RAPT_CONFIG=default`, 30 MHz, MIG, SD card.
 - CM005 FMC_C/ETHA (CU08 short edge), fixed 1000 Mb/s full-duplex advertisement.
   This uses the gigabit oversampling receiver and common-source-clock DDR TX; full-SoC timing and board
   traffic validation are required. Confirm the FMC IO supply is 1.8 V.

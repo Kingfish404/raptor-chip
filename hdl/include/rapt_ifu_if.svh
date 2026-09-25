@@ -26,6 +26,7 @@ interface ifu_bpu_if #(
   logic            aux_query;
   logic [XLEN-1:0] aux_pc;
   logic            aux_taken;
+  logic [$clog2(PHT_SIZE)-1:0] aux_index;
 `endif
 
 `ifdef RAPT_FETCH_LOOKAHEAD
@@ -33,14 +34,14 @@ interface ifu_bpu_if #(
       output pc, nextpc, pc_update,
       output history_valid, history_taken, history_pc_bit,
       output aux_query, aux_pc,
-      input aux_taken,
+      input aux_taken, aux_index,
       input npc, taken
   );
   modport in(
       input pc, nextpc, pc_update,
       input history_valid, history_taken, history_pc_bit,
       input aux_query, aux_pc,
-      output aux_taken,
+      output aux_taken, aux_index,
       output npc, taken
   );
 `else
@@ -72,7 +73,8 @@ endinterface
 // so we let the alias persist and pay the IDU resteer cost on each hit
 // (rare in practice -- empirically ~1 event over a CoreMark run).
 interface idu_bpu_if #(
-    parameter int XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN,
+    parameter int PHT_SIZE = `RAPT_PHT_SIZE
 );
   logic            train_en;     // 1-cycle pulse aligned with ifu_idu.resteer
   logic [XLEN-1:0] train_pc;     // PC of the offending instruction
@@ -85,15 +87,19 @@ interface idu_bpu_if #(
   logic [XLEN-1:0] push_addr;
   logic [XLEN-1:0] ras_addr;
   logic history_valid, history_taken, history_pc_bit, history_recover;
+  logic history_auxiliary;
+  logic [$clog2(PHT_SIZE)-1:0] history_auxiliary_index;
 
   modport out(
       output train_en, train_pc, train_target, train_type, push_en, pop_en, push_addr,
       output history_valid, history_taken, history_pc_bit, history_recover,
+      output history_auxiliary, history_auxiliary_index,
       input ras_valid, ras_addr
   );
   modport in(
       input train_en, train_pc, train_target, train_type, push_en, pop_en, push_addr,
       input history_valid, history_taken, history_pc_bit, history_recover,
+      input history_auxiliary, history_auxiliary_index,
       output ras_valid, ras_addr
   );
 endinterface

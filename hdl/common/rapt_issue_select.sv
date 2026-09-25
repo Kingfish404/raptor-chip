@@ -8,7 +8,10 @@ module rapt_issue_select #(
     parameter int Entries = 8,
     parameter int Ports = 2,
     parameter bit InOrder = 0,
-    parameter bit Rebalance = 1
+    parameter bit Rebalance = 1,
+    // Static arbitration order only; compatibility and physical port identity
+    // are unchanged. Defer a higher-latency port when another can execute a uop.
+    parameter int LastPort = Ports - 1
 ) (
     input logic [Entries-1:0] valid,
     input logic [Entries-1:0] ready,
@@ -42,14 +45,15 @@ module rapt_issue_select #(
       assign port_compatible[p][e] = compatible[e][p];
     end
   end
-  for (genvar p = 0; p < Ports; p++) begin : g_greedy
+  for (genvar rank = 0; rank < Ports; rank++) begin : g_greedy
+    localparam int p = rank == Ports - 1 ? LastPort : rank < LastPort ? rank : rank + 1;
     // Explicit stage-local wires preserve the forward-only dependency even
     // when a simulator schedules an unpacked array as a single object.
     logic [Entries-1:0] candidates, grant, used_before, used_after;
-    if (p == 0) begin : g_first
+    if (rank == 0) begin : g_first
       assign used_before = '0;
     end else begin : g_later
-      assign used_before = g_greedy[p-1].used_after;
+      assign used_before = g_greedy[rank-1].used_after;
     end
     for (genvar e = 0; e < Entries; e++) begin : g_candidate
       assign candidates[e] = valid[e] && ready[e] && !used_before[e] && compatible[e][p];
@@ -120,7 +124,7 @@ module rapt_issue_select #(
     end
     assign claimed = g_greedy[Ports-1].used_after;
   end
-  if (!(Entries > 0 && Ports > 0)) begin : g_invalid_config_0
+  if (!(Entries > 0 && Ports > 0 && LastPort >= 0 && LastPort < Ports)) begin : g_invalid_config_0
     $error("Invalid rapt_issue_select configuration");
   end
 endmodule

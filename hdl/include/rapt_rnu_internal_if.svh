@@ -7,7 +7,8 @@
 // RNU Internal Interfaces - connect RNU sub-modules (freelist, maptable).
 // PRF interfaces have been removed: PRF now accepts source interfaces
 // (typed completion messages, rou_cmu_if, cmu_bcast_if) directly.
-// For multi-issue, scale read/write port counts via ISSUE_WIDTH parameter.
+// Legacy two-slot helpers use fixed A/B ports. The integrated RNU uses
+// width-parameterized interfaces instead.
 // ============================================================================
 
 // ----------------------------------------------------------------------------
@@ -29,12 +30,10 @@ interface rnu_fl_if #(
   logic [PLEN-1:0]  alloc_pr_a;
   logic             alloc_empty_a;
 
-`ifdef RAPT_DUAL_ISSUE
   // Allocate port B (dual issue: second rename slot)
   logic             alloc_req_b;
   logic [PLEN-1:0]  alloc_pr_b;
   logic             alloc_empty_b;  // true if < 2 free registers
-`endif
 
   // Deallocate port A (commit slot A -> freelist)
   logic             dealloc_req_a;
@@ -44,7 +43,6 @@ interface rnu_fl_if #(
   logic             dealloc_req_b;
   logic [PLEN-1:0]  dealloc_pr_b;
 
-`ifdef RAPT_DUAL_ISSUE
   modport master(
       output flush_pipe, flush_rd_a, flush_rd_b,
       output alloc_req_a,
@@ -63,22 +61,6 @@ interface rnu_fl_if #(
       input dealloc_req_a, dealloc_pr_a,
       input dealloc_req_b, dealloc_pr_b
   );
-`else
-  modport master(
-      output flush_pipe, flush_rd_a, flush_rd_b,
-      output alloc_req_a,
-      input alloc_pr_a, alloc_empty_a,
-      output dealloc_req_a, dealloc_pr_a,
-      output dealloc_req_b, dealloc_pr_b
-  );
-  modport slave(
-      input flush_pipe, flush_rd_a, flush_rd_b,
-      input alloc_req_a,
-      output alloc_pr_a, alloc_empty_a,
-      input dealloc_req_a, dealloc_pr_a,
-      input dealloc_req_b, dealloc_pr_b
-  );
-`endif
 endinterface
 
 // ----------------------------------------------------------------------------
@@ -111,7 +93,6 @@ interface rnu_mt_if #(
   logic [RLEN-1:0]  map_raddr_c;
   logic [PLEN-1:0]  map_rdata_c;
 
-`ifdef RAPT_DUAL_ISSUE
   // Speculative rename write B (dual issue: younger instruction)
   logic             map_wen_b;
   logic [RLEN-1:0]  map_waddr_b;
@@ -128,7 +109,6 @@ interface rnu_mt_if #(
   // Speculative read port F (slot B rd old mapping -> prs_b for ROB)
   logic [RLEN-1:0]  map_raddr_f;
   logic [PLEN-1:0]  map_rdata_f;
-`endif
 
   // Committed write A (commit slot A)
   logic             rat_wen_a;
@@ -140,7 +120,6 @@ interface rnu_mt_if #(
   logic [RLEN-1:0]  rat_waddr_b;
   logic [PLEN-1:0]  rat_wdata_b;
 
-`ifdef RAPT_DUAL_ISSUE
   modport master(
       output flush_pipe,
       output map_wen_a, map_waddr_a, map_wdata_a,
@@ -179,32 +158,6 @@ interface rnu_mt_if #(
       input rat_wen_a, rat_waddr_a, rat_wdata_a,
       input rat_wen_b, rat_waddr_b, rat_wdata_b
   );
-`else
-  modport master(
-      output flush_pipe,
-      output map_wen_a, map_waddr_a, map_wdata_a,
-      output map_raddr_a,
-      input map_rdata_a,
-      output map_raddr_b,
-      input map_rdata_b,
-      output map_raddr_c,
-      input map_rdata_c,
-      output rat_wen_a, rat_waddr_a, rat_wdata_a,
-      output rat_wen_b, rat_waddr_b, rat_wdata_b
-  );
-  modport slave(
-      input flush_pipe,
-      input map_wen_a, map_waddr_a, map_wdata_a,
-      input map_raddr_a,
-      output map_rdata_a,
-      input map_raddr_b,
-      output map_rdata_b,
-      input map_raddr_c,
-      output map_rdata_c,
-      input rat_wen_a, rat_waddr_a, rat_wdata_a,
-      input rat_wen_b, rat_waddr_b, rat_wdata_b
-  );
-`endif
 endinterface
 
 `endif  // RAPT_RNU_INTERNAL_IF_SVH

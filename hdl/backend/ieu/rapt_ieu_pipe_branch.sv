@@ -49,18 +49,9 @@ module rapt_ieu_pipe_branch #(
       ? branch_target
       : iss.uop.pc + (iss.uop.c ? 2 : 4);
   assign wb_branch.btaken = branch_taken;
-  // Direction is independent metadata: a branch targeting its fall-through can
-  // have the right next PC but the wrong speculative history bit.
-  // If direction differs, recovery is unconditional. Otherwise the predicted
-  // direction selects the same address as branch_taken. Compare addresses
-  // independently of the operand-dependent branch decision, avoiding an
-  // actual-next-PC mux followed by an XLEN-wide comparison on that path.
-  logic predicted_target_mismatch;
-  assign predicted_target_mismatch = iss.uop.execute.branch.predicted_taken
-      ? (branch_target != iss.uop.pnpc)
-      : ((iss.uop.pc + (iss.uop.c ? 2 : 4)) != iss.uop.pnpc);
-  assign wb_branch.mispredict = predicted_target_mismatch
-      || branch_taken != iss.uop.execute.branch.predicted_taken;
+  // Prediction checking belongs to the ROB checkpoint target file. This
+  // execution pipe only resolves direction and the actual next PC.
+  assign wb_branch.mispredict = 1'b0;
   assign wb_branch.difftest_skip = 1'b0;
   // Branch pipe never writes rd nor produces CSR / trap / MEM sideband (unified
   // completion sideband tie-offs; keeps the no-PRF-write-port / no-bypass-entry

@@ -830,7 +830,7 @@ fpga-bitstream-current fpga-bitstream-warn:
 		if [ "$$level" = ERR ]; then exit 1; fi; \
 	fi
 
-fpga-load: fpga-bitstream-warn
+fpga-load: fpga-bitstream-current
 	@echo "[INFO] FPGA board: $(FPGA_BOARD) (source=$(FPGA_BOARD_SOURCE), vendor=$(FPGA_VENDOR), device=$(if $(FPGA_DEVICE),$(FPGA_DEVICE),n/a))"
 	$(call _require_file,$(FPGA_BITSTREAM),$(FPGA_BITSTREAM) not found — run 'make fpga-build' first.)
 	@$(FPGA_LOAD_TOOL_CHECK)

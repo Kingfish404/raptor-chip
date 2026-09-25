@@ -2,7 +2,7 @@
 // Completion uses the producer's unchanged identity, without fixture enrichment.
 completion_t fp_irq_wb;
 logic fp_irq_accept, fp_irq_issue_enable;
-dpu_iq_if #(.RS_SIZE(4)) fp_irq_queue();
+dpu_iq_if #(.RS_SIZE(1)) fp_irq_queue();
 load_fast_if fp_irq_fast();
 fpr_if fp_irq_fpr();
 integer fp_irq_writes = 0;
@@ -44,7 +44,7 @@ rapt_completion_guard #(.Entries(`RAPT_ROB_SIZE), .IndexBits(RobW),
 always @(posedge clock) if (!reset) begin
   if (fp_irq_queue.accept[0]) fp_irq_enqueued <= fp_irq_enqueued + 1;
   if (fp_irq_fpr.alu_wvalid) fp_irq_writes <= fp_irq_writes + 1;
-  if (commit_fire && dut_rou.uop_pl[dut_rou.rob_head].execute.fp.valid)
+  if (commit_fire && dut_rou.rob_fp_valid[dut_rou.rob_head])
     fp_irq_retired <= fp_irq_retired + 1;
   if (cmu_bcast.flush_pipe)
     check(!fp_irq_feu.iss.valid && !fp_irq_wb.valid && !fp_irq_fpr.alu_wvalid,

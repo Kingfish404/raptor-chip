@@ -6,6 +6,22 @@ module tb_l1d_pmp_shared;
   localparam int N = `RAPT_PMP_NUM;
   localparam int PteSizeM1 = XLEN / 8 - 1;
   csr_bcast_if csr_bcast ();
+  rapt_pkg::mem_context_t check_context;
+  assign check_context = '{
+          mmu_en: csr_bcast.dmmu_en,
+          eff_priv:
+          (
+          csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv
+          ) ?
+          csr_bcast.mpp
+          :
+          csr_bcast.priv,
+          sum: csr_bcast.sum,
+          mxr: csr_bcast.mxr,
+          pbmte: csr_bcast.menvcfg_pbmte,
+          asid: csr_bcast.satp_asid,
+          version: 8'd0
+      };
   pmp_state_if pmp_state ();
   logic [XLEN-1:0] load_addr, store_addr, ptw_addr;
   logic [3:0] load_size_m1;
@@ -26,7 +42,9 @@ module tb_l1d_pmp_shared;
         .XLEN(XLEN),
         .ShareLoadWalk(g != 0)
     ) dut (
-        .csr_bcast,
+        .load_context(check_context),
+        .store_context(check_context),
+        .ptw_context(check_context),
         .pmp_state,
         .load_addr,
         .store_addr,

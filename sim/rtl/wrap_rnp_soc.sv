@@ -4,9 +4,11 @@
 
 /* verilator lint_off DECLFILENAME */
 module rng_chip #(
-    parameter int XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN,
+    parameter bit L1dWriteBack = 1'b0
 ) (
     input clock,
+    output logic writeback_error_o,
 
     // rnp
     input  logic [XLEN-1:0] rnp_mdata,
@@ -131,8 +133,10 @@ module rng_chip #(
 
   // The single-word RNP adapter can track only one read at a time.
   rapt #(
+      .L1dWriteBack(L1dWriteBack),
       .MemoryReadCredits(1)
   ) cpu (
+      .writeback_error_o(writeback_error_o),
       .clock            (clock),
       .io_interrupt     (1'h0),
       .ext_irq_i        (ext_irq_pulse_q[`RAPT_PLIC_NDEV:1]),
@@ -190,9 +194,11 @@ endmodule
 // verilator lint_off DECLFILENAME
 // verilator lint_off UNUSEDSIGNAL
 module wrapSoC #(
-    parameter int XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN,
+    parameter bit L1dWriteBack = 1'b0
 ) (
     input clock,
+    output logic writeback_error_o,
     input reset
 );
   // rnp
@@ -271,7 +277,10 @@ module wrapSoC #(
   logic [1:0] auto_master_out_rresp_soc;
   logic auto_master_out_rlast_soc;
 
-  rng_chip chip (
+  rng_chip #(
+      .L1dWriteBack(L1dWriteBack)
+  ) chip (
+      .writeback_error_o(writeback_error_o),
       .clock(clock),
       .reset(reset),
       .rnp_mdata(rnp_mdata),

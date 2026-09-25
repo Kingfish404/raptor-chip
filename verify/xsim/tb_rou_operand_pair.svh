@@ -16,6 +16,7 @@ if (CheckOperandIndependence) begin : g_operand_pair
   execution_domain_t shadow_candidate_domain[DispatchWidth];
   logic shadow_dispatch_valid[DispatchWidth];
   logic shadow_halted, shadow_commit_fire, shadow_pmu_rob_full;
+  logic shadow_writeback_drain;
   logic [XLEN-1:0] shadow_halt_pc;
   assign shadow_rnu_rou.empty = rnu_rou.empty;
   assign shadow_rou_lsu.sq_ready = rou_lsu.sq_ready;
@@ -42,6 +43,8 @@ if (CheckOperandIndependence) begin : g_operand_pair
       .ScanEntries(rapt_pkg::DispatchWidth),
       .ValidateCompletionInputs(1'b1)
   ) shadow (
+      .writeback_idle(tb_writeback_idle),
+      .writeback_drain(shadow_writeback_drain),
       .completion(shadow_completion),
       .completion_owner(shadow_completion_owner),
       .clock(clock),
@@ -76,7 +79,27 @@ if (CheckOperandIndependence) begin : g_operand_pair
   always @(posedge clock) if (!reset) begin
     assert ({commit_fire, halted, halt_pc, pmu_rob_full} ==
         {shadow_commit_fire, shadow_halted, shadow_halt_pc, shadow_pmu_rob_full})
-      else $fatal(1, "operand-dependent ROU commit/halt/capacity");
+      else
+        $fatal(
+            1,
+            "operand-dependent ROU commit/halt/capacity: commit=%0b/%0b halted=%0b/%0b halt_pc=%h/%h full=%0b/%0b head=%0d/%0d count=%0d/%0d state=%0d/%0d busy=%0b/%0b",
+            commit_fire,
+            shadow_commit_fire,
+            halted,
+            shadow_halted,
+            halt_pc,
+            shadow_halt_pc,
+            pmu_rob_full,
+            shadow_pmu_rob_full,
+            dut_rou.rob_head,
+            shadow.rob_head,
+            dut_rou.commit_count,
+            shadow.commit_count,
+            dut_rou.rob_entry[dut_rou.rob_head].state,
+            shadow.rob_entry[shadow.rob_head].state,
+            dut_rou.rob_entry_busy[dut_rou.rob_head],
+            shadow.rob_entry_busy[shadow.rob_head]
+        );
     for (int s = 0; s < RenameWidth; s++) begin
       assert (rnu_rou.ready[s] == shadow_rnu_rou.ready[s]
           && exu_prf.pr1[s] == shadow_exu_prf.pr1[s]
@@ -99,7 +122,11 @@ if (CheckOperandIndependence) begin : g_operand_pair
           assert (a.op2 == ~b.op2) else $fatal(1, "paired ROU ready op2 variation lost");
           paired_ready_operands++;
         end
-        a.op1 = '0; a.op2 = '0; b.op1 = '0; b.op2 = '0;
+        if (a.stable_op1_valid)
+          assert (a.stable_op1 == ~b.stable_op1)
+          else $fatal(1, "paired ROU stable op1 variation lost");
+        a.op1 = '0; a.op2 = '0; a.stable_op1 = '0;
+        b.op1 = '0; b.op2 = '0; b.stable_op1 = '0;
         assert (a == b) else $fatal(1, "operand-dependent ROU dispatch identity");
         if (dispatch_ready[s]) paired_dispatches++;
       end

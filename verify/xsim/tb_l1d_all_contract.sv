@@ -142,6 +142,12 @@ module tb_l1d_cmo_permissions;
 
   logic clock = 1'b0;
   logic reset = 1'b1;
+  logic coherent_request = 1'b0;
+  logic coherent_write = 1'b0;
+  logic coherent_ready;
+  logic writeback_error;
+  logic writeback_idle;
+  logic writeback_drain = 1'b0;
   cmu_bcast_if cmu_bcast ();
   lsu_l1d_if lsu_l1d ();
   l1d_bus_if l1d_bus ();
@@ -273,6 +279,7 @@ module tb_l1d_data;
         logic [WordBits-1:0] write_word = '0;
         logic [WayBits-1:0] write_way = '0;
         logic [Xlen-1:0] write_data = '0;
+        logic [Xlen/8-1:0] write_strobe = '1;
         wire read_valid;
         wire [1:0] read_index;
         wire [Xlen-1:0] read_data[Ways][Words];
@@ -285,12 +292,15 @@ module tb_l1d_data;
             .WordBits(WordBits),
             .Ways(Ways)
         ) dut (
-            .write_line(1'b0), .write_mask('0), .write_line_data('0),
+            .write_line(1'b0),
+            .write_mask('0),
+            .write_line_data('0),
             .*
         );
 
         task automatic step(input bit wr, input int set_idx, input int way, input int word_idx,
-                            input logic [63:0] data, input bit rst = 1'b0);
+                            input logic [63:0] data, input bit rst = 1'b0,
+                            input logic [Xlen/8-1:0] strobe = '1);
           @(negedge clock);
           reset = rst;
           write_valid = wr;
@@ -299,8 +309,12 @@ module tb_l1d_data;
           write_way = WayBits'(way);
           write_word = WordBits'(word_idx);
           write_data = Xlen'(data);
+          write_strobe = strobe;
           @(posedge clock);
-          if (wr) model[way][set_idx][word_idx] = Xlen'(data);
+          if (wr)
+            for (int byte_idx = 0; byte_idx < Xlen / 8; byte_idx++)
+              if (strobe[byte_idx])
+                model[way][set_idx][word_idx][byte_idx*8+:8] = data[byte_idx*8+:8];
           #1;
           if (read_valid !== (!rst && !wr)) $fatal(1, "case %0d: read-valid contract", CaseId);
           if (!rst && !wr) begin
@@ -334,7 +348,7 @@ module tb_l1d_data;
             rng ^= rng >> 7;
             rng ^= rng << 17;
             step(rng[0], int'(rng[2:1]), int'(rng[4:3]) % Ways, int'(rng[7:5]) % Words, rng,
-                 cycle_idx % 97 == 0);
+                 cycle_idx % 97 == 0, (Xlen / 8)'(rng[15:8]));
           end
           // Reset must not erase SRAM, and the next read must recover validity.
           step(0, 0, 0, 0, '0, 1);
@@ -547,6 +561,12 @@ module tb_l1d_io_size;
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
       .external_write_last_i('0),
+      .coherent_request(1'b0),
+      .coherent_write(1'b0),
+      .coherent_ready(),
+      .writeback_error(),
+      .writeback_idle(),
+      .writeback_drain(1'b0),
       .*
   );
   always #5 clock = ~clock;
@@ -689,6 +709,12 @@ module tb_l1d_load_pbmt;
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
       .external_write_last_i('0),
+      .coherent_request(1'b0),
+      .coherent_write(1'b0),
+      .coherent_ready(),
+      .writeback_error(),
+      .writeback_idle(),
+      .writeback_drain(1'b0),
       .*
   );
   always #5 clock = ~clock;
@@ -863,6 +889,12 @@ module tb_l1d_load_footprint;
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
       .external_write_last_i('0),
+      .coherent_request(1'b0),
+      .coherent_write(1'b0),
+      .coherent_ready(),
+      .writeback_error(),
+      .writeback_idle(),
+      .writeback_drain(1'b0),
       .*
   );
   `include "tb_common.svh"
@@ -935,6 +967,22 @@ endmodule
 module tb_l1d_page_permissions;
   localparam int XLEN = `RAPT_XLEN;
   csr_bcast_if csr_bcast ();
+  rapt_pkg::mem_context_t check_context;
+  assign check_context = '{
+          mmu_en: csr_bcast.dmmu_en,
+          eff_priv:
+          (
+          csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv
+          ) ?
+          csr_bcast.mpp
+          :
+          csr_bcast.priv,
+          sum: csr_bcast.sum,
+          mxr: csr_bcast.mxr,
+          pbmte: csr_bcast.menvcfg_pbmte,
+          asid: csr_bcast.satp_asid,
+          version: 8'd0
+      };
   pmp_state_if pmp_state ();
   logic tlb_hit, stlb_hit;
   logic [6:0] dtlb_pte, dstlb_pte, ptw_result_pte;
@@ -942,7 +990,9 @@ module tb_l1d_page_permissions;
   rapt_l1d_access #(
       .XLEN(XLEN)
   ) dut (
-      .csr_bcast(csr_bcast),
+      .load_context(check_context),
+      .store_context(check_context),
+      .ptw_context(check_context),
       .pmp_state(pmp_state),
       .load_addr(XLEN'('h80000000)),
       .store_addr(XLEN'('h80000000)),
@@ -1050,7 +1100,17 @@ module tb_l1d_permission_stage;
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
-  rapt_l1d #(.LineRefill(0)) dut (.*);
+  rapt_l1d #(
+      .LineRefill(0)
+  ) dut (
+      .coherent_request(1'b0),
+      .coherent_write(1'b0),
+      .coherent_ready(),
+      .writeback_error(),
+      .writeback_idle(),
+      .writeback_drain(1'b0),
+      .*
+  );
   `include "tb_common.svh"
   `include "tb_l1d_defaults.svh"
   localparam logic [XLEN-1:0] PA = XLEN'('h80001000);
@@ -1093,6 +1153,10 @@ module tb_l1d_permission_stage;
     lsu_l1d.rvalid=0;
     lsu_l1d.atomic_lock=0;
   endtask
+  localparam logic [2:0] StLdCheck = 3'b011;
+  localparam logic [2:0] StLdA = 3'b001;
+  localparam int OffBits = $clog2(XLEN / 8);
+  localparam int IdxLo = `RAPT_L1D_LINE_LEN + OffBits;
   initial begin
     for (int bytes = 4; bytes <= XLEN / 8; bytes += 4) begin
       for (int scenario = 0; scenario < 5; scenario++) begin
@@ -1111,29 +1175,30 @@ module tb_l1d_permission_stage;
         lsu_l1d.ralu=bytes==8 ? 5'b00011 : 5'b00010;
         lsu_l1d.atomic_lock=1;
         lsu_l1d.rvalid=1;
-        tick(1);
-        // Use the explicit state encoding: hierarchical enum-item references
-        // trigger an internal error in Verilator 5.052 for this forced test.
-        check(dut.l1d_state == 3'b011, $sformatf(
-              "request did not reach permission stage: state=%0d scenario=%0d",
-              dut.l1d_state,
-              scenario
-              ));
-        check(!l1d_bus.arvalid && !lsu_l1d.rready,
-              "permission stage exposed a request or completion");
         if (scenario >= 3) begin
-          // Inject a pending denied PTW request to exercise arbitration even
-          // before recovery clears that request. Real PTW sequencing is
-          // covered by the separate PTW error/kill tests.
+          // Checker is busy before capture, so the load must wait rather
+          // than consume the PTW permission result.
           force dut.ptw_arvalid = 1'b1;
           force dut.ptw_araddr = '0;
+        end
+        tick(1);
+        if (scenario >= 3) begin
           #1;
+          check(dut.l1d_state == StLdCheck, $sformatf(
+                "busy checker did not hold the load: state=%0d", dut.l1d_state));
           check(dut.pmp_load_fault, "shared read checker did not select denied PTW");
+          check(!l1d_bus.arvalid && !lsu_l1d.rready && !lsu_l1d.trap,
+                "PTW permission result escaped into load completion");
           repeat (3) begin
             tick(1);
-            check(dut.l1d_state == 3'b011 && !lsu_l1d.rready && !lsu_l1d.trap,
+            check(dut.l1d_state == StLdCheck && !lsu_l1d.rready && !lsu_l1d.trap,
                   "PTW permission result escaped into load completion");
           end
+        end else begin
+          check(dut.l1d_state != StLdCheck, $sformatf(
+                "permitted load waited in a permission bubble: state=%0d", dut.l1d_state));
+          check(dut.l1d_state == StLdA || lsu_l1d.rready || l1d_bus.arvalid,
+                "permitted load did not reach the post-SRAM cycle");
         end
         if (scenario == 2 || scenario == 4) begin
           cmu_bcast.flush_pipe=1;
@@ -1156,8 +1221,7 @@ module tb_l1d_permission_stage;
             release dut.ptw_araddr;
             #1;
           end
-          // A one-cycle event must be remembered after it is withdrawn,
-          // even though no memory request has yet left the permission stage.
+          // A one-cycle event must be remembered after it is withdrawn.
           event_at(scenario == 0 ? PA : PA + 64, scenario == 0 ? PA : PA + 64);
           tick(1);
           external_write_valid_i = 0;
@@ -1181,6 +1245,38 @@ module tb_l1d_permission_stage;
         cases++;
       end
     end
+    // Permitted cacheable hit: complete on the post-SRAM cycle, no LD_CHECK.
+    boot();
+    begin
+      automatic int idx, off;
+      idx = int'(PA[`RAPT_L1D_LEN+IdxLo-1:IdxLo]);
+      off = int'(PA[IdxLo-1:OffBits]);
+      dut.u_tags.l1d_tag[0][idx] = PA[`RAPT_PADDR_BITS-1:`RAPT_L1D_LEN+IdxLo];
+      dut.u_tags.l1d_valid[0][idx][off] = 1'b1;
+    end
+    lsu_l1d.raddr = PA;
+    lsu_l1d.ralu = 5'b00010;
+    lsu_l1d.rvalid = 1;
+    tick(1);
+    check(dut.l1d_state != StLdCheck, "cacheable hit waited in a permission bubble");
+    check(lsu_l1d.rready && !l1d_bus.arvalid && !lsu_l1d.trap,
+          "permitted cacheable hit did not complete on the post-SRAM cycle");
+    lsu_l1d.rvalid = 0;
+    tick(1);
+    cases++;
+    // S-mode with no matching PMP: deny before data AR or rready.
+    boot();
+    csr_bcast.priv = `RAPT_PRIV_S;
+    lsu_l1d.raddr = PA;
+    lsu_l1d.ralu = 5'b00010;
+    lsu_l1d.rvalid = 1;
+    tick(1);
+    check(!lsu_l1d.rready && !lsu_l1d.trap && !(l1d_bus.arvalid && !l1d_bus.ar_ptw),
+          "denied load issued a completion or data AR");
+    for (int n = 0; n < 8 && !lsu_l1d.trap; n++) tick(1);
+    check(lsu_l1d.trap && lsu_l1d.cause == `RAPT_CAUSE_LOAD_ACC_FAULT, "denied load did not trap");
+    check(!(l1d_bus.arvalid && !l1d_bus.ar_ptw), "denied load issued a data AR");
+    cases++;
     $display("PASS: L1D permission-stage event/cancel/retry XLEN=%0d cases=%0d", XLEN, cases);
     $finish;
   end
@@ -1208,6 +1304,12 @@ module tb_l1d_plic_width;
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
       .external_write_last_i('0),
+      .coherent_request(1'b0),
+      .coherent_write(1'b0),
+      .coherent_ready(),
+      .writeback_error(),
+      .writeback_idle(),
+      .writeback_drain(1'b0),
       .*
   );
   `include "tb_common.svh"
@@ -1298,6 +1400,12 @@ module tb_l1d_pma;
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
       .external_write_last_i('0),
+      .coherent_request(1'b0),
+      .coherent_write(1'b0),
+      .coherent_ready(),
+      .writeback_error(),
+      .writeback_idle(),
+      .writeback_drain(1'b0),
       .*
   );
   `include "tb_common.svh"
@@ -1415,6 +1523,12 @@ module tb_l1d_ptw_axi_error;
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
       .external_write_last_i('0),
+      .coherent_request(1'b0),
+      .coherent_write(1'b0),
+      .coherent_ready(),
+      .writeback_error(),
+      .writeback_idle(),
+      .writeback_drain(1'b0),
       .*
   );
   rapt_bus #(
@@ -1662,6 +1776,12 @@ module tb_l1d_ptw_error;
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
       .external_write_last_i('0),
+      .coherent_request(1'b0),
+      .coherent_write(1'b0),
+      .coherent_ready(),
+      .writeback_error(),
+      .writeback_idle(),
+      .writeback_drain(1'b0),
       .*
   );
   `include "tb_common.svh"
@@ -1836,6 +1956,12 @@ module tb_l1d_ptw_pma;
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
       .external_write_last_i('0),
+      .coherent_request(1'b0),
+      .coherent_write(1'b0),
+      .coherent_ready(),
+      .writeback_error(),
+      .writeback_idle(),
+      .writeback_drain(1'b0),
       .*
   );
   `include "tb_common.svh"
@@ -1918,6 +2044,12 @@ module tb_l1d_read_error;
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
       .external_write_last_i('0),
+      .coherent_request(1'b0),
+      .coherent_write(1'b0),
+      .coherent_ready(),
+      .writeback_error(),
+      .writeback_idle(),
+      .writeback_drain(1'b0),
       .*
   );
   `include "tb_common.svh"
@@ -2065,10 +2197,11 @@ endmodule
 module tb_l1d_replacement;
   logic clock = 0, reset = 1, fence_time = 0;
   logic [1:0] clear_set = '0;
-  logic addr_idx = 0, waddr_idx = 1, probe_idx = 0, l1d_idx = 0;
+  logic addr_idx = 0, waddr_idx = 1, fill_idx = 1, probe_idx = 0, l1d_idx = 0;
   logic addr_offset = 0, waddr_offset = 0, probe_offset = 0, l1d_off = 0;
-  logic [3:0] addr_tag = 15, waddr_tag = 15, probe_tag = 15, l1d_tag_u = 0;
-  logic load_hit = 0, load_replace = 0, store_replace = 0;
+  logic [3:0] addr_tag = 15, waddr_tag = 15, fill_tag = 15, probe_tag = 15;
+  logic [3:0] l1d_tag_u = 0;
+  logic load_hit = 0, load_replace = 0, store_replace = 0, fill_probe = 0;
   logic l1d_update = 0, l1d_valid_u = 1, l1d_inv_all_ways = 0;
   logic [1:0] l1d_way = 0;
   wire [3:0] load_way_hit, probe_way_hit;
@@ -2081,7 +2214,19 @@ module tb_l1d_replacement;
       .L1D_N_WAYS(4),
       .L1dTagW(4)
   ) dut (
-      .line_update(1'b0), .line_mask('0),
+      .update_dirty(1'b0),
+      .inspect_set('0),
+      .inspect_way('0),
+      .clean_valid(1'b0),
+      .clean_mask('0),
+      .inspect_tag(),
+      .inspect_dirty(),
+      .dirty_any(),
+      .update_blocked(),
+      .line_update(1'b0),
+      .line_mask('0),
+      .waddr_idx(fill_probe ? fill_idx : waddr_idx),
+      .waddr_tag(fill_probe ? fill_tag : waddr_tag),
       .*
   );
   task automatic tick;
@@ -2092,6 +2237,7 @@ module tb_l1d_replacement;
   initial begin
     tick();
     reset = 0;
+    fill_idx = 1;
     // Populate both sets with distinct live tags; writes also mark MRU paths.
     for (int s = 0; s < 2; s++) begin
       for (int way = 0; way < 4; way++) begin
@@ -2111,7 +2257,11 @@ module tb_l1d_replacement;
     addr_tag = 15;
     #1;
     if (ld_fill_way != 2 || store_fill_way != 0)
-      $fatal(1, "load and store victim queries used the same set");
+      $fatal(1, "load and write-side victim queries used the same set");
+    fill_probe = 1;
+    #1;
+    if (ld_fill_way != 2 || store_fill_way != 0)
+      $fatal(1, "refill probe changed the load-side victim");
     // Fill set 1 / way 0 while load lookup remains on set 0.
     l1d_update = 1;
     l1d_idx = 1;
@@ -2120,7 +2270,8 @@ module tb_l1d_replacement;
     tick();
     l1d_update = 0;
     #1;
-    if (ld_fill_way != 2 || store_fill_way != 2) $fatal(1, "fill did not update its own set/way");
+    if (ld_fill_way != 2 || store_fill_way != 2) $fatal(1, "refill did not update its own set/way");
+    fill_probe = 0;
     // Unfilled offset 1: all lines remain occupied, so retain PLRU victim 2.
     addr_offset = 1;
     waddr_offset = 1;
@@ -2131,7 +2282,14 @@ module tb_l1d_replacement;
     addr_tag = 3;
     waddr_tag = 2;
     #1;
-    if (ld_fill_way != 3 || store_fill_way != 2) $fatal(1, "partial matching line was not reused");
+    if (ld_fill_way != 3 || store_fill_way != 2)
+      $fatal(1, "partial matching line was not reused by load/store probes");
+    fill_tag = 1;
+    fill_probe = 1;
+    #1;
+    if (ld_fill_way != 3 || store_fill_way != 1)
+      $fatal(1, "refill did not reuse a partial matching line independently of load");
+    fill_probe = 0;
     fence_time = 1;
     clear_set = '1;
     tick();
@@ -2141,7 +2299,7 @@ module tb_l1d_replacement;
     if (ld_fill_way != 0 || store_fill_way != 0)
       $fatal(1, "stale invalid tag influenced replacement");
     $display(
-        "PASS: L1D independent-set replacement, fill ownership, invalid-zero, partial-tag reuse");
+        "PASS: L1D independent load/store/refill replacement, invalid-zero, partial-tag reuse");
     $finish;
   end
   initial begin
@@ -2167,7 +2325,17 @@ module tb_l1d_reservation_external;
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
-  rapt_l1d #(.LineRefill(0)) dut (.*);
+  rapt_l1d #(
+      .LineRefill(0)
+  ) dut (
+      .coherent_request(1'b0),
+      .coherent_write(1'b0),
+      .coherent_ready(),
+      .writeback_error(),
+      .writeback_idle(),
+      .writeback_drain(1'b0),
+      .*
+  );
   `include "tb_common.svh"
   `include "tb_l1d_defaults.svh"
   localparam logic [XLEN-1:0] PA = XLEN'('h80001000);
@@ -2404,19 +2572,27 @@ endmodule
 `include "rapt.svh"
 `include "rapt_if.svh"
 
-module tb_l1d_store_coherence;
-  localparam int XLEN = 32;
+module tb_l1d_store_coherence #(
+    parameter bit WriteBack = 1'b0,
+    parameter bit LineRefill = 1'b0
+);
+  logic coherent_request = 0, coherent_write = 0;
+  logic coherent_ready, writeback_error, writeback_idle;
+  logic writeback_drain = 0;
+  localparam int XLEN = `RAPT_XLEN;
   localparam logic [31:0] TestAddr = 32'h8000_0000;
-  localparam int ConflictShift = `RAPT_L1D_LEN + `RAPT_L1D_LINE_LEN + 2;
+  localparam int ConflictShift = `RAPT_L1D_LEN + `RAPT_L1D_LINE_LEN + $clog2(XLEN / 8);
   localparam int ConflictLines = `RAPT_L1D_N_WAYS + 2;
   localparam int RandomOps = 2000;
+  localparam int BackingWords = (1 << `RAPT_L1D_LINE_LEN) * (XLEN / 32);
 
   logic clock = 1'b0;
   logic reset = 1'b1;
   logic bus_rd_pending;
   logic [31:0] bus_rd_addr;
+  int bus_rd_remaining;
   int bus_rd_delay;
-  logic [31:0] mem_word[ConflictLines][4];
+  logic [31:0] mem_word[ConflictLines][BackingWords];
   logic [31:0] expected_word[ConflictLines][4];
   int bus_read_count;
   int configured_seed = 32'h1d5a_2026;
@@ -2429,6 +2605,7 @@ module tb_l1d_store_coherence;
   int configured_bus_delay_max = 63;
   int requested_bus_delay_max;
   int max_bus_read_delay;
+  int random_max_bus_read_delay;
 
   cmu_bcast_if cmu_bcast ();
   lsu_l1d_if lsu_l1d ();
@@ -2439,8 +2616,15 @@ module tb_l1d_store_coherence;
   rou_cmu_if rou_cmu ();
 
   rapt_l1d #(
-      .LineRefill(0)
+      .WriteBack(WriteBack),
+      .LineRefill(LineRefill)
   ) dut (
+      .coherent_request(coherent_request),
+      .coherent_write(coherent_write),
+      .coherent_ready(coherent_ready),
+      .writeback_error(writeback_error),
+      .writeback_idle(writeback_idle),
+      .writeback_drain(writeback_drain),
       .clock(clock),
       .cmu_bcast(cmu_bcast),
       .lsu_l1d(lsu_l1d),
@@ -2466,7 +2650,7 @@ module tb_l1d_store_coherence;
         #1;
         if (lsu_l1d.rready) begin
           check(!lsu_l1d.trap, "L1D trapped on cacheable word read");
-          check(lsu_l1d.rdata == expected, $sformatf(
+          check(lsu_l1d.rdata[(int'(addr[2:0])&(XLEN/8-1))*8+:32] == expected, $sformatf(
                 "word mismatch got=%08x expected=%08x", lsu_l1d.rdata, expected));
           @(posedge clock);
           @(negedge clock);
@@ -2481,7 +2665,7 @@ module tb_l1d_store_coherence;
   endtask
 
   task automatic write_store(input logic [31:0] addr, input logic [31:0] data,
-                             input logic [4:0] walu, input int settle_cycles);
+                             input logic [7:0] walu, input int settle_cycles);
     begin
       @(negedge clock);
       lsu_l1d.waddr = addr;
@@ -2489,7 +2673,7 @@ module tb_l1d_store_coherence;
       lsu_l1d.wzero = 0;
       lsu_l1d.wdata = data;
       lsu_l1d.wvalid = 1'b1;
-      for (int wait_cycle = 0; wait_cycle < 64; wait_cycle++) begin
+      for (int wait_cycle = 0; wait_cycle < (WriteBack ? 4096 : 64); wait_cycle++) begin
         #1;
         if (lsu_l1d.wready) begin
           @(posedge clock);
@@ -2500,12 +2684,251 @@ module tb_l1d_store_coherence;
         end
         @(negedge clock);
       end
-      fail($sformatf("timed out waiting for write addr=%08x", addr));
+      fail($sformatf(
+           "timed out waiting for write addr=%08x state=%0d wb_state=%0d dirty=%b busy=%b valid=%b hold=%b local=%b bus_idle=%b bus_wready=%b",
+           addr,
+           dut.l1d_state,
+           dut.wb_state,
+           dut.dirty_any,
+           dut.wb_busy,
+           dut.wb_valid,
+           dut.wb_hold,
+           dut.local_store,
+           l1d_bus.idle,
+           l1d_bus.wready
+           ));
     end
   endtask
 
   task automatic write_word(input logic [31:0] addr, input logic [31:0] data);
     write_store(addr, data, `RAPT_SW_WSTRB, 4);
+  endtask
+
+  task automatic store_check_drain_policy;
+    check(dut.dirty_any && dut.wb_state == 3'd0,
+          "bare store-check test needs an idle dirty write-back cache");
+    @(negedge clock);
+    exu_l1d.valid = 1'b1;
+    exu_l1d.mmu_en = 1'b0;
+    #1;
+    check(!dut.wb_global_request && !dut.wb_hold,
+          "bare store address check requested a global dirty-line drain");
+    tick(2);
+    check(dut.wb_state == 3'd0 && dut.dirty_any,
+          "bare store address check started a write-back scan");
+    exu_l1d.vaddr = XLEN'(TestAddr);
+    exu_l1d.mem_context.asid = '0;
+    dut.u_dstlb.valid[0] = 1'b1;
+    dut.u_dstlb.vtags[0] = $bits(dut.u_dstlb.vtags[0])'(TestAddr >> 12);
+    dut.u_dstlb.asids[0] = '0;
+    dut.u_dstlb.ptes[0] = 7'b1100011;
+    exu_l1d.mmu_en = 1'b1;
+    #1;
+    check(dut.stlb_hit && !dut.wb_global_request && !dut.wb_hold,
+          "hot store TLB lookup requested a global dirty-line drain");
+    dut.u_dstlb.valid[0] = 1'b0;
+    #1;
+    check(dut.wb_global_request && dut.wb_hold,
+          "store TLB miss lost its page-table coherence drain");
+    exu_l1d.valid = 1'b0;
+    exu_l1d.mmu_en = 1'b0;
+    lsu_l1d.raddr = XLEN'(TestAddr);
+    csr_bcast.dmmu_en = 1'b1;
+    dut.u_dtlb.valid[0] = 1'b1;
+    dut.u_dtlb.vtags[0] = $bits(dut.u_dtlb.vtags[0])'(TestAddr >> 12);
+    dut.u_dtlb.asids[0] = '0;
+    dut.u_dtlb.ptes[0] = 7'b1100011;
+    lsu_l1d.rvalid = 1'b1;
+    #1;
+    check(dut.tlb_hit && !dut.wb_global_request && !dut.wb_hold,
+          "hot load TLB lookup requested a global dirty-line drain");
+    dut.u_dtlb.valid[0] = 1'b0;
+    #1;
+    check(dut.wb_global_request && dut.wb_hold, $sformatf(
+          "load TLB miss lost page-table drain state=%0d hit=%b miss=%b req=%b hold=%b dirty=%b",
+          dut.l1d_state,
+          dut.tlb_hit,
+          dut.load_tlb_miss,
+          dut.wb_global_request,
+          dut.wb_hold,
+          dut.dirty_any
+          ));
+    lsu_l1d.rvalid = 1'b0;
+    csr_bcast.dmmu_en = 1'b0;
+  endtask
+
+  task automatic concurrent_partial_store(input logic [4:0] store_mask,
+                                          input logic [31:0] expected);
+    for (int wait_cycle = 0; wait_cycle < 4096; wait_cycle++) begin
+      if (lsu_l1d.idle && writeback_idle) break;
+      tick(1);
+    end
+    check(lsu_l1d.idle && writeback_idle, "concurrent test did not reach idle");
+    @(negedge clock);
+    lsu_l1d.raddr = TestAddr;
+    lsu_l1d.ralu = `RAPT_ALU_LW__;
+    lsu_l1d.rvalid = 1;
+    lsu_l1d.waddr = TestAddr;
+    lsu_l1d.walu = store_mask;
+    lsu_l1d.wdata = 32'h7654_abcd;
+    lsu_l1d.wvalid = 1;
+    #1;
+    check(lsu_l1d.wready && !l1d_bus.wvalid, "concurrent partial store was not accepted locally");
+    @(posedge clock);
+    @(negedge clock);
+    lsu_l1d.wvalid = 0;
+    for (int wait_cycle = 0; wait_cycle < 4096; wait_cycle++) begin
+      #1;
+      if (lsu_l1d.rready) begin
+        check(!lsu_l1d.trap && lsu_l1d.rdata[31:0] == expected,
+              "concurrent load lost locally accepted partial store");
+        @(posedge clock);
+        @(negedge clock);
+        lsu_l1d.rvalid = 0;
+        tick(2);
+        check(!writeback_idle && dut.dirty_any, "dirty hit unexpectedly drained cache");
+        tick(512);
+        check(!writeback_idle && dut.dirty_any && !l1d_bus.wvalid,
+              "idle cache unexpectedly started background writeback");
+        writeback_drain = 1;
+        for (int drain_cycle = 0; drain_cycle < 4096; drain_cycle++) begin
+          if (writeback_idle) break;
+          tick(1);
+        end
+        check(writeback_idle, "explicit writeback drain timed out");
+        writeback_drain = 0;
+        check(mem_word[0][0] == expected, "concurrent partial store not written back");
+        return;
+      end
+      @(negedge clock);
+    end
+    fail("concurrent partial store/load timed out");
+  endtask
+
+  task automatic targeted_writeback_error(input bit store_miss, input bit inject_error,
+                                          input bit partial_miss = 0);
+    logic [XLEN-1:0] held_addr, held_data;
+    logic [31:0] original_word[`RAPT_L1D_N_WAYS];
+    @(negedge clock);
+    reset = 1;
+    init_l1d_inputs();
+    coherent_request = 0;
+    coherent_write = 0;
+    writeback_drain = 0;
+    tick(5);
+    reset = 0;
+    tick(2);
+    for (int line_idx = 0; line_idx < `RAPT_L1D_N_WAYS; line_idx++) begin
+      original_word[line_idx] = mem_word[line_idx][0];
+      read_word(TestAddr + (line_idx << ConflictShift), original_word[line_idx]);
+    end
+    for (int wait_cycle = 0; wait_cycle < 4096 && !lsu_l1d.idle; wait_cycle++) tick(1);
+    check(lsu_l1d.idle, "target error setup refill did not finish");
+    for (int line_idx = 0; line_idx < `RAPT_L1D_N_WAYS; line_idx++) begin
+      write_word(TestAddr + (line_idx << ConflictShift), ~original_word[line_idx]);
+    end
+    @(negedge clock);
+    l1d_bus.wready = 0;
+    if (partial_miss) begin
+      lsu_l1d.waddr = TestAddr + (`RAPT_L1D_N_WAYS << ConflictShift);
+      lsu_l1d.walu = 8'h01;
+      lsu_l1d.wdata = 8'hab;
+      lsu_l1d.wvalid = 1;
+      #1;
+      check(l1d_bus.wvalid && l1d_bus.awaddr == lsu_l1d.waddr && !dut.wb_busy,
+            "partial miss drained unrelated dirty data");
+      l1d_bus.werr = inject_error;
+      l1d_bus.wready = 1;
+      #1;
+      check(lsu_l1d.wready && lsu_l1d.werr == inject_error,
+            "partial miss response did not reach LSU");
+      @(posedge clock);
+      @(negedge clock);
+      lsu_l1d.wvalid = 0;
+      l1d_bus.werr = 0;
+      tick(4);
+      check(dut.dirty_any && !writeback_error, "partial miss lost dirty ownership");
+      for (int line_idx = 0; line_idx < `RAPT_L1D_N_WAYS; line_idx++) begin
+        check(mem_word[line_idx][0] == original_word[line_idx],
+              "partial miss wrote unrelated dirty data back");
+        read_word(TestAddr + (line_idx << ConflictShift), ~original_word[line_idx]);
+      end
+      check(
+          mem_word[`RAPT_L1D_N_WAYS][0][7:0]
+        == (inject_error ? 8'(32'h1111_1111 * `RAPT_L1D_N_WAYS) : 8'hab),
+          "partial miss backing data mismatch");
+      $display("PASS: partial miss dirty isolation error=%0d XLEN=%0d", inject_error, XLEN);
+      return;
+    end
+    if (store_miss) begin
+      lsu_l1d.waddr = TestAddr + (`RAPT_L1D_N_WAYS << ConflictShift);
+      lsu_l1d.walu = 8'({XLEN / 8{1'b1}});
+      lsu_l1d.wdata = '1;
+      lsu_l1d.wvalid = 1;
+    end else begin
+      lsu_l1d.raddr = TestAddr + (`RAPT_L1D_N_WAYS << ConflictShift);
+      lsu_l1d.ralu = `RAPT_ALU_LW__;
+      lsu_l1d.rvalid = 1;
+    end
+    for (int wait_cycle = 0; wait_cycle < 4096 && !l1d_bus.wvalid; wait_cycle++) tick(1);
+    check(l1d_bus.wvalid && dut.wb_targeted, "miss did not start targeted writeback");
+    held_addr = l1d_bus.awaddr;
+    held_data = l1d_bus.wdata;
+    repeat (32) begin
+      tick(1);
+      check(l1d_bus.wvalid && l1d_bus.awaddr == held_addr && l1d_bus.wdata == held_data,
+            "targeted writeback payload changed under backpressure");
+      check(!lsu_l1d.rready && !lsu_l1d.wready && !l1d_bus.arvalid,
+            "miss escaped before targeted writeback response");
+    end
+    @(negedge clock);
+    if (!inject_error) begin
+      coherent_request = 1;
+      tick(2);
+      check(!coherent_ready, "coherence escaped blocked targeted writeback");
+      @(negedge clock);
+      l1d_bus.wready = 1;
+      for (int wait_cycle = 0; wait_cycle < 4096 && !coherent_ready; wait_cycle++) tick(1);
+      check(coherent_ready && !dut.dirty_any && !writeback_error,
+            "targeted writeback did not upgrade to global coherence drain");
+      for (int line_idx = 0; line_idx < `RAPT_L1D_N_WAYS; line_idx++) begin
+        check(mem_word[line_idx][0] == ~original_word[line_idx],
+              "coherence released before unrelated dirty data reached memory");
+      end
+      @(negedge clock);
+      coherent_request = 0;
+      if (store_miss) begin
+        #1;
+        check(lsu_l1d.wready, "store did not resume after coherence drain");
+        @(posedge clock);
+        @(negedge clock);
+        lsu_l1d.wvalid = 0;
+        tick(4);
+        read_word(TestAddr + (`RAPT_L1D_N_WAYS << ConflictShift), '1);
+      end else begin
+        lsu_l1d.rvalid = 0;
+        read_word(TestAddr + (`RAPT_L1D_N_WAYS << ConflictShift), mem_word[`RAPT_L1D_N_WAYS][0]);
+      end
+      $display("PASS: targeted coherence upgrade store_miss=%0d XLEN=%0d", store_miss, XLEN);
+      return;
+    end
+    l1d_bus.werr = 1;
+    l1d_bus.wready = 1;
+    tick(1);
+    @(negedge clock);
+    l1d_bus.werr = 0;
+    repeat (64) begin
+      tick(1);
+      check(writeback_error && dut.dirty_any && dut.wb_busy && !writeback_idle,
+            "targeted error lost dirty ownership");
+      check(!l1d_bus.wvalid && !l1d_bus.arvalid && !lsu_l1d.rready && !lsu_l1d.wready,
+            "targeted error retried or completed the blocked miss");
+    end
+    for (int line_idx = 0; line_idx < `RAPT_L1D_N_WAYS; line_idx++) begin
+      check(mem_word[line_idx][0] == original_word[line_idx],
+            "failed targeted writeback changed memory");
+    end
+    $display("PASS: targeted writeback fail-stop store_miss=%0d XLEN=%0d", store_miss, XLEN);
   endtask
 
   function automatic int backing_line(input logic [31:0] addr);
@@ -2527,9 +2950,17 @@ module tb_l1d_store_coherence;
   endfunction
 
   assign l1d_bus.rready = !reset && l1d_bus.arvalid && !bus_rd_pending;
+  // This direct model completes writes in the request cycle and has no
+  // write-response owner to retain between cycles.
+  assign l1d_bus.idle = 1'b1;
 
   always_ff @(posedge clock) begin : fake_memory_bus
     if (reset) begin
+      for (int line_idx = 0; line_idx < ConflictLines; line_idx++) begin
+        for (int word_idx = 0; word_idx < BackingWords; word_idx++) begin
+          mem_word[line_idx][word_idx] <= 32'h1111_1111 * line_idx;
+        end
+      end
       mem_word[0][0] <= 32'h1122_3344;
       mem_word[0][1] <= 32'h5566_7788;
       mem_word[0][2] <= 32'h99aa_bbcc;
@@ -2542,6 +2973,7 @@ module tb_l1d_store_coherence;
       bus_read_count <= 0;
       bus_rd_pending <= 1'b0;
       bus_rd_addr <= '0;
+      bus_rd_remaining <= 0;
       bus_rd_delay <= 0;
       max_bus_read_delay <= 0;
       l1d_bus.rdata <= '0;
@@ -2551,14 +2983,22 @@ module tb_l1d_store_coherence;
       l1d_bus.rerr <= 1'b0;
     end else begin
       l1d_bus.rvalid <= 1'b0;
-      l1d_bus.rdata <= mem_word[backing_line(bus_rd_addr)][bus_rd_addr[3:2]];
+      for (int lane = 0; lane < XLEN / 32; lane++) begin
+        l1d_bus.rdata[lane*32+:32] <= mem_word[
+            backing_line(bus_rd_addr)][((int'(bus_rd_addr>>2)%BackingWords)&~(XLEN/32-1))+lane];
+      end
       l1d_bus.rlast <= 1'b1;
       l1d_bus.difftest_skip <= 1'b0;
       l1d_bus.rerr <= 1'b0;
 
       if (bus_rd_pending && bus_rd_delay == 0) begin
         l1d_bus.rvalid <= 1'b1;
-        bus_rd_pending <= 1'b0;
+        l1d_bus.rlast <= bus_rd_remaining == 0;
+        bus_rd_pending <= bus_rd_remaining != 0;
+        if (bus_rd_remaining != 0) begin
+          bus_rd_remaining <= bus_rd_remaining - 1;
+          bus_rd_addr <= bus_rd_addr + XLEN / 8;
+        end
       end else if (bus_rd_pending) begin
         bus_rd_delay <= bus_rd_delay - 1;
       end
@@ -2567,6 +3007,7 @@ module tb_l1d_store_coherence;
         check(l1d_bus.araddr >= TestAddr && backing_line(l1d_bus.araddr) < ConflictLines,
               "unexpected read address");
         bus_rd_addr <= l1d_bus.araddr;
+        bus_rd_remaining <= int'(l1d_bus.arlen);
         bus_rd_pending <= 1'b1;
         bus_rd_delay <= selected_bus_read_delay;
         if (selected_bus_read_delay > max_bus_read_delay) begin
@@ -2574,13 +3015,14 @@ module tb_l1d_store_coherence;
         end
         bus_read_count <= bus_read_count + 1;
       end
-      if (l1d_bus.wvalid && l1d_bus.wready) begin
+      if (l1d_bus.wvalid && l1d_bus.wready && !l1d_bus.werr) begin
         check(l1d_bus.awaddr >= TestAddr && backing_line(l1d_bus.awaddr) < ConflictLines,
               "unexpected write address");
-        for (int byte_idx = 0; byte_idx < 4; byte_idx++) begin
-          if (l1d_bus.wstrb[byte_idx] && (byte_idx + l1d_bus.awaddr[1:0]) < 4) begin
-            mem_word[backing_line(l1d_bus.awaddr)][l1d_bus.awaddr[3:2]]
-                [(byte_idx+l1d_bus.awaddr[1:0])*8+:8] <= l1d_bus.wdata[byte_idx*8+:8];
+        for (int byte_idx = 0; byte_idx < XLEN / 8; byte_idx++) begin
+          if (l1d_bus.wstrb[byte_idx]) begin
+            mem_word[backing_line(l1d_bus.awaddr)][(int'(l1d_bus.awaddr%(BackingWords*4))+byte_idx)/
+                                                   4][((int'(l1d_bus.awaddr[1:0])+byte_idx)%4)*8+:8]
+                <= l1d_bus.wdata[byte_idx*8+:8];
           end
         end
       end
@@ -2588,6 +3030,12 @@ module tb_l1d_store_coherence;
   end
 
   initial begin
+    string trace_file;
+    if ($test$plusargs("TRACE_WB_B")) begin
+      if (!$value$plusargs("WAVE_FILE=%s", trace_file)) trace_file = "/tmp/raptor-l1d-wb-bscan.vcd";
+      $dumpfile(trace_file);
+      $dumpvars(0, tb_l1d_store_coherence);
+    end
     if ($value$plusargs("SEED=%d", requested_seed)) configured_seed = requested_seed;
     if ($value$plusargs("BUS_DELAY_MAX=%d", requested_bus_delay_max)) begin
       configured_bus_delay_max = requested_bus_delay_max;
@@ -2602,11 +3050,55 @@ module tb_l1d_store_coherence;
     reset = 1'b0;
     tick(2);
 
+    if ($test$plusargs("MIN_WB_B")) begin
+      check(WriteBack && XLEN == 64, "minimal writeback B payload requires RV64 WB");
+      write_store(TestAddr + 16, 32'd9, 8'hff, 0);
+      write_store(TestAddr + 64 + 16, 32'd5, 8'hff, 0);
+      write_store(TestAddr + 128 + 16, 32'd3, 8'hff, 0);
+      tick(2);
+      writeback_drain = 1'b1;
+      for (int scan_cycle = 0; scan_cycle < 4096; scan_cycle++) begin
+        @(negedge clock);
+        if (dut.wb_state == 3'd1 && dut.wb_set == 1) break;
+      end
+      check(dut.wb_state == 3'd1 && dut.wb_set == 1,
+            "minimal payload did not reach writeback scan of set 1");
+      lsu_l1d.raddr_b = TestAddr + 16;
+      lsu_l1d.ralu_b = `RAPT_ALU_LW__;
+      lsu_l1d.rvalid_b = 1'b1;
+      @(posedge clock);
+      @(negedge clock);
+      #1;
+      check(!lsu_l1d.rready_b, "minimal payload: B load consumed writeback-owned SRAM data");
+      lsu_l1d.rvalid_b = 1'b0;
+      for (int drain_cycle = 0; drain_cycle < 4096 && !writeback_idle; drain_cycle++) tick(1);
+      check(writeback_idle, "minimal payload: writeback drain timed out");
+      writeback_drain = 1'b0;
+      @(negedge clock);
+      lsu_l1d.rvalid_b = 1'b1;
+      for (int b_cycle = 0; b_cycle < 16; b_cycle++) begin
+        #1;
+        if (lsu_l1d.rready_b) begin
+          check(lsu_l1d.rdata_b[31:0] == 32'd9,
+                "minimal payload: B load returned wrong value after writeback");
+          break;
+        end
+        @(negedge clock);
+      end
+      check(lsu_l1d.rready_b, "minimal payload: B load did not recover after writeback");
+      @(posedge clock);
+      @(negedge clock);
+      lsu_l1d.rvalid_b = 1'b0;
+      $display("PASS: minimal writeback B contention XLEN=%0d", XLEN);
+      $finish;
+    end
+
     read_word(TestAddr + 32'd4, 32'h5566_7788);
     read_word(TestAddr, 32'h1122_3344);
     read_word(TestAddr + 32'd8, 32'h99aa_bbcc);
     read_word(TestAddr + 32'd4, 32'h5566_7788);
     write_word(TestAddr, 32'ha5c3_5a3c);
+    if (WriteBack) store_check_drain_policy();
     read_word(TestAddr, 32'ha5c3_5a3c);
     read_word(TestAddr + 32'd4, 32'h5566_7788);
     read_word(TestAddr + 32'd8, 32'h99aa_bbcc);
@@ -2711,12 +3203,316 @@ module tb_l1d_store_coherence;
     check(random_loads > 500, "insufficient randomized L1D load coverage");
     check(random_stores > 1000, "insufficient randomized L1D store coverage");
     check(random_fences > 10, "insufficient randomized L1D fence coverage");
+    random_max_bus_read_delay = max_bus_read_delay;
     check(max_bus_read_delay >= configured_bus_delay_max - 3,
           "insufficient long-latency L1D response coverage");
 
+    if (WriteBack) begin
+      int written_lines;
+      logic [31:0] original_word[`RAPT_L1D_N_WAYS];
+      writeback_drain = 1;
+      for (int drain_cycle = 0; drain_cycle < 4096; drain_cycle++) begin
+        if (writeback_idle) break;
+        tick(1);
+      end
+      check(writeback_idle, "initial writeback drain timed out");
+      writeback_drain = 0;
+      cmu_bcast.fence_time = 1;
+      tick(1);
+      cmu_bcast.fence_time = 0;
+      tick(512);
+      if (LineRefill) begin
+        @(negedge clock);
+        lsu_l1d.raddr = TestAddr;
+        lsu_l1d.ralu = `RAPT_ALU_LW__;
+        lsu_l1d.rvalid = 1;
+        for (int wait_cycle = 0; wait_cycle < 512; wait_cycle++) begin
+          #1;
+          if (l1d_bus.arvalid) break;
+          @(negedge clock);
+        end
+        check(l1d_bus.arvalid, "overlap load did not reach refill request");
+        lsu_l1d.waddr = TestAddr;
+        lsu_l1d.walu = 8'({XLEN / 8{1'b1}});
+        lsu_l1d.wdata = XLEN'({expected_word[0][1], expected_word[0][0]});
+        lsu_l1d.wvalid = 1;
+        for (int wait_cycle = 0; wait_cycle < 4096; wait_cycle++) begin
+          #1;
+          check(!lsu_l1d.wready, "overlap store completed before load");
+          if (lsu_l1d.rready) break;
+          @(negedge clock);
+        end
+        check(lsu_l1d.rready && !lsu_l1d.trap, "local store blocked refill");
+        check(lsu_l1d.rdata[31:0] == expected_word[0][0], "overlap load data mismatch");
+        @(posedge clock);
+        @(negedge clock);
+        lsu_l1d.rvalid = 0;
+        for (int wait_cycle = 0; wait_cycle < 4096; wait_cycle++) begin
+          #1;
+          if (lsu_l1d.wready) break;
+          @(negedge clock);
+        end
+        check(lsu_l1d.wready && !l1d_bus.wvalid, "overlap store did not complete locally");
+        @(posedge clock);
+        @(negedge clock);
+        lsu_l1d.wvalid = 0;
+        tick(4);
+        read_word(TestAddr, expected_word[0][0]);
+        writeback_drain = 1;
+        for (int drain_cycle = 0; drain_cycle < 4096 && !writeback_idle; drain_cycle++) tick(1);
+        check(writeback_idle, "overlap cleanup drain timed out");
+        writeback_drain = 0;
+        cmu_bcast.fence_time = 1;
+        tick(1);
+        cmu_bcast.fence_time = 0;
+        tick(512);
+        $display("PASS: local store overlaps pending line refill XLEN=%0d", XLEN);
+      end
+      @(negedge clock);
+      lsu_l1d.waddr = TestAddr;
+      lsu_l1d.walu = 8'({XLEN / 8{1'b1}});
+      lsu_l1d.wdata = XLEN'(64'h7654_3210_abcd_1234);
+      lsu_l1d.wvalid = 1;
+      #1;
+      check(lsu_l1d.wready && !l1d_bus.wvalid, "cold full-word store was not allocated locally");
+      @(posedge clock);
+      @(negedge clock);
+      lsu_l1d.wvalid = 0;
+      tick(4);
+      check(mem_word[0][0] == expected_word[0][0], "cold full-word store wrote through");
+      expected_word[0][0] = 32'habcd_1234;
+      if (XLEN == 64) expected_word[0][1] = 32'h7654_3210;
+      read_word(TestAddr, expected_word[0][0]);
+      if (XLEN == 64) read_word(TestAddr + 4, expected_word[0][1]);
+      begin
+        logic [31:0] backing_before;
+        backing_before = mem_word[0][0];
+        read_word(TestAddr + XLEN / 8, expected_word[0][XLEN/32]);
+        if (!LineRefill) begin
+          check(dut.dirty_any && !writeback_idle && mem_word[0][0] == backing_before,
+                "same-tag word refill unnecessarily drained dirty data");
+        end
+        read_word(TestAddr, expected_word[0][0]);
+      end
+      writeback_drain = 1;
+      for (int drain_cycle = 0; drain_cycle < 4096 && !writeback_idle; drain_cycle++) tick(1);
+      check(writeback_idle && mem_word[0][0] == expected_word[0][0],
+            "cold allocation drain lost low word");
+      if (XLEN == 64)
+        check(mem_word[0][1] == expected_word[0][1], "cold allocation drain lost high word");
+      writeback_drain = 0;
+      for (int line_idx = 0; line_idx < `RAPT_L1D_N_WAYS; line_idx++) begin
+        read_word(TestAddr + (line_idx << ConflictShift), expected_word[line_idx][0]);
+      end
+      for (int wait_cycle = 0; wait_cycle < 4096 && !lsu_l1d.idle; wait_cycle++) tick(1);
+      check(lsu_l1d.idle, "victim setup refill did not finish");
+      for (int line_idx = 0; line_idx < `RAPT_L1D_N_WAYS; line_idx++) begin
+        original_word[line_idx] = mem_word[line_idx][0];
+        expected_word[line_idx][0] = ~original_word[line_idx];
+        write_word(TestAddr + (line_idx << ConflictShift), expected_word[line_idx][0]);
+        check(mem_word[line_idx][0] == original_word[line_idx],
+              "resident store unexpectedly reached memory");
+      end
+      read_word(TestAddr + (`RAPT_L1D_N_WAYS << ConflictShift), expected_word[`RAPT_L1D_N_WAYS][0]);
+      written_lines = 0;
+      for (int line_idx = 0; line_idx < `RAPT_L1D_N_WAYS; line_idx++) begin
+        if (mem_word[line_idx][0] == expected_word[line_idx][0]) written_lines++;
+        else
+          check(mem_word[line_idx][0] == original_word[line_idx],
+                "victim writeback corrupted unrelated backing word");
+      end
+      check(written_lines == 1, "load miss did not write exactly one dirty victim");
+      if (`RAPT_L1D_N_WAYS > 1)
+        check(dut.dirty_any && !writeback_idle, "victim drain cleaned unrelated dirty lines");
+      writeback_drain = 1;
+      for (int drain_cycle = 0; drain_cycle < 4096 && !writeback_idle; drain_cycle++) tick(1);
+      check(writeback_idle, "post-victim explicit drain timed out");
+      writeback_drain = 0;
+      cmu_bcast.fence_time = 1;
+      tick(1);
+      cmu_bcast.fence_time = 0;
+      tick(512);
+      for (int line_idx = 0; line_idx < `RAPT_L1D_N_WAYS; line_idx++) begin
+        read_word(TestAddr + (line_idx << ConflictShift), expected_word[line_idx][0]);
+      end
+      for (int wait_cycle = 0; wait_cycle < 4096 && !lsu_l1d.idle; wait_cycle++) tick(1);
+      check(lsu_l1d.idle, "store victim setup refill did not finish");
+      for (int line_idx = 0; line_idx < `RAPT_L1D_N_WAYS; line_idx++) begin
+        original_word[line_idx] = mem_word[line_idx][0];
+        expected_word[line_idx][0] = ~original_word[line_idx];
+        write_word(TestAddr + (line_idx << ConflictShift), expected_word[line_idx][0]);
+      end
+      @(negedge clock);
+      lsu_l1d.waddr = TestAddr + (`RAPT_L1D_N_WAYS << ConflictShift);
+      lsu_l1d.walu = 8'({XLEN / 8{1'b1}});
+      lsu_l1d.wdata = XLEN'(64'h1020_3040_5060_7080);
+      lsu_l1d.wvalid = 1;
+      for (int wait_cycle = 0; wait_cycle < 4096; wait_cycle++) begin
+        #1;
+        if (lsu_l1d.wready) break;
+        @(negedge clock);
+      end
+      check(lsu_l1d.wready && !l1d_bus.wvalid, "store victim did not resume local allocation");
+      @(posedge clock);
+      @(negedge clock);
+      lsu_l1d.wvalid = 0;
+      tick(4);
+      written_lines = 0;
+      for (int line_idx = 0; line_idx < `RAPT_L1D_N_WAYS; line_idx++) begin
+        if (mem_word[line_idx][0] == expected_word[line_idx][0]) written_lines++;
+        else
+          check(mem_word[line_idx][0] == original_word[line_idx],
+                "store victim corrupted unrelated backing word");
+      end
+      check(written_lines == 1, "store miss did not write exactly one dirty victim");
+      check(mem_word[`RAPT_L1D_N_WAYS][0] == expected_word[`RAPT_L1D_N_WAYS][0],
+            "store victim allocation wrote new data through");
+      expected_word[`RAPT_L1D_N_WAYS][0] = 32'h5060_7080;
+      if (XLEN == 64) expected_word[`RAPT_L1D_N_WAYS][1] = 32'h1020_3040;
+      read_word(TestAddr + (`RAPT_L1D_N_WAYS << ConflictShift), expected_word[`RAPT_L1D_N_WAYS][0]);
+      writeback_drain = 1;
+      for (int drain_cycle = 0; drain_cycle < 4096 && !writeback_idle; drain_cycle++) tick(1);
+      check(writeback_idle, "post-store-victim drain timed out");
+      for (int line_idx = 0; line_idx <= `RAPT_L1D_N_WAYS; line_idx++) begin
+        check(mem_word[line_idx][0] == expected_word[line_idx][0],
+              "store victim sequence lost dirty data");
+      end
+      if (XLEN == 64)
+        check(mem_word[`RAPT_L1D_N_WAYS][1] == expected_word[`RAPT_L1D_N_WAYS][1],
+              "store victim sequence lost upper word");
+      writeback_drain = 0;
+      read_word(TestAddr, expected_word[0][0]);
+      expected_word[0][0][7:0] = 8'hcd;
+      concurrent_partial_store(`RAPT_SB_WSTRB, expected_word[0][0]);
+      expected_word[0][0][15:0] = 16'habcd;
+      concurrent_partial_store(`RAPT_SH_WSTRB, expected_word[0][0]);
+      if (BackingWords > 4) begin
+        read_word(TestAddr + 4 * (BackingWords - 1), 32'b0);
+        write_word(TestAddr + 4 * (BackingWords - 1), 32'h5a3c_c3a5);
+        read_word(TestAddr + 4 * (BackingWords - 1), 32'h5a3c_c3a5);
+      end
+      // Exercise rapid full-width hits to one word and then several words in
+      // the same dirty line. A store miss to each distinct line cannot cover
+      // an overwrite lost by the local write-back hit path.
+      for (int burst = 0; burst < 4; burst++)
+      write_store(TestAddr + 16, 32'(8 + burst), XLEN == 64 ? 8'hff : 8'h0f, 0);
+      read_word(TestAddr + 16, 32'd11);
+      for (int word_idx = 0; word_idx < 6; word_idx++)
+      write_store(TestAddr + 16 + word_idx * (XLEN / 8), 32'(48 + word_idx),
+                  XLEN == 64 ? 8'hff : 8'h0f, 0);
+      for (int word_idx = 0; word_idx < 6; word_idx++)
+      read_word(TestAddr + 16 + word_idx * (XLEN / 8), 32'(48 + word_idx));
+      // Match the whole-core failure pattern: 64 same-word stores followed
+      // by 64 stores cycling through all eight words of one cache line.
+      if (XLEN == 64) begin
+        for (int burst = 0; burst < 64; burst++) write_store(TestAddr + 16, 32'd7, 8'hff, 0);
+        for (int burst = 0; burst < 64; burst++)
+        write_store(TestAddr + 8 * (burst % 8), 32'd7, 8'hff, 0);
+        for (int word_idx = 0; word_idx < 8; word_idx++) read_word(TestAddr + 8 * word_idx, 32'd7);
+        // SQ keeps wvalid asserted and presents the next committed store
+        // immediately after each handshake. Do not insert the gap used by
+        // write_store(), which can hide a back-to-back writeback bug.
+        @(negedge clock);
+        lsu_l1d.wvalid = 1'b1;
+        lsu_l1d.wzero = 1'b0;
+        lsu_l1d.walu = 8'hff;
+        lsu_l1d.wdata = 64'd7;
+        for (int burst = 0; burst < 64; burst++) begin
+          lsu_l1d.waddr = TestAddr + 8 * (burst % 8);
+          for (int wait_cycle = 0; wait_cycle < 4096; wait_cycle++) begin
+            #1;
+            if (lsu_l1d.wready) break;
+            @(negedge clock);
+          end
+          check(lsu_l1d.wready, "continuous local store stalled");
+          @(posedge clock);
+          @(negedge clock);
+        end
+        lsu_l1d.wvalid = 1'b0;
+        for (int word_idx = 0; word_idx < 8; word_idx++) read_word(TestAddr + 8 * word_idx, 32'd7);
+        writeback_drain = 1'b1;
+        for (int drain_cycle = 0; drain_cycle < 4096 && !writeback_idle; drain_cycle++) tick(1);
+        check(writeback_idle, "dense-line writeback drain timed out");
+        writeback_drain = 1'b0;
+        cmu_bcast.fence_time = 1'b1;
+        tick(1);
+        cmu_bcast.fence_time = 1'b0;
+        for (int word_idx = 0; word_idx < 8; word_idx++) begin
+          check(mem_word[0][2*word_idx] == 32'd7, "dense-line writeback lost backing data");
+          read_word(TestAddr + 8 * word_idx, 32'd7);
+        end
+        // In the core, the ROB raises drain while older committed SQ stores
+        // are still arriving. Change the value so a lost update stays visible.
+        writeback_drain = 1'b1;
+        @(negedge clock);
+        lsu_l1d.wvalid = 1'b1;
+        lsu_l1d.wdata = 64'd9;
+        for (int burst = 0; burst < 64; burst++) begin
+          lsu_l1d.waddr = TestAddr + 8 * (burst % 8);
+          for (int wait_cycle = 0; wait_cycle < 4096; wait_cycle++) begin
+            #1;
+            if (lsu_l1d.wready) break;
+            @(negedge clock);
+          end
+          check(lsu_l1d.wready, "store stalled during writeback drain");
+          @(posedge clock);
+          @(negedge clock);
+        end
+        lsu_l1d.wvalid = 1'b0;
+        for (int drain_cycle = 0; drain_cycle < 4096 && !writeback_idle; drain_cycle++) tick(1);
+        check(writeback_idle, "overlapped writeback drain timed out");
+        writeback_drain = 1'b0;
+        cmu_bcast.fence_time = 1'b1;
+        tick(1);
+        cmu_bcast.fence_time = 1'b0;
+        for (int word_idx = 0; word_idx < 8; word_idx++) begin
+          check(mem_word[0][2*word_idx] == 32'd9, "overlapped drain lost backing data");
+          read_word(TestAddr + 8 * word_idx, 32'd9);
+        end
+        expected_word[0][0] = 32'd9;
+      end
+      read_word(TestAddr, expected_word[0][0]);
+      write_store(TestAddr, 32'h0000_005a, `RAPT_SB_WSTRB, 0);
+      cmu_bcast.fence_time = 1;
+      tick(1);
+      cmu_bcast.fence_time = 0;
+      expected_word[0][0][7:0] = 8'h5a;
+      read_word(TestAddr, expected_word[0][0]);
+      @(negedge clock);
+      l1d_bus.wready = 0;
+      write_store(TestAddr, 32'h1234_abcd, `RAPT_SW_WSTRB, 0);
+      check(mem_word[0][0] == expected_word[0][0], "dirty store reached memory before B");
+      coherent_request = 1;
+      cmu_bcast.fence_time = 1;
+      tick(1);
+      cmu_bcast.fence_time = 0;
+      tick(512);
+      check(!coherent_ready && !writeback_idle, "drain released before B response");
+      check(l1d_bus.wvalid && l1d_bus.wdata[31:0] == 32'h1234_abcd,
+            "writeback payload lost under backpressure");
+      @(negedge clock);
+      l1d_bus.werr = 1;
+      l1d_bus.wready = 1;
+      tick(1);
+      @(negedge clock);
+      l1d_bus.werr = 0;
+      tick(512);
+      check(writeback_error && !writeback_idle && !coherent_ready,
+            "writeback error did not hold maintenance");
+      check(dut.dirty_any && dut.wb_busy && !l1d_bus.wvalid,
+            "writeback error lost dirty ownership or retried");
+      check(mem_word[0][0] == expected_word[0][0], "failed write changed backing memory");
+      targeted_writeback_error(0, 1);
+      targeted_writeback_error(1, 1);
+      targeted_writeback_error(0, 0);
+      targeted_writeback_error(1, 0);
+      targeted_writeback_error(1, 0, 1);
+      targeted_writeback_error(1, 1, 1);
+    end
+
     $write("PASS: L1D coherence random seed=%0d loads=%0d stores=%0d ", configured_seed,
            random_loads, random_stores);
-    $display("fences=%0d max_delay=%0d", random_fences, max_bus_read_delay);
+    $display("fences=%0d max_delay=%0d", random_fences, random_max_bus_read_delay);
     $finish;
   end
 endmodule
@@ -2744,6 +3540,12 @@ module tb_l1d_store_pbmt;
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
       .external_write_last_i('0),
+      .coherent_request(1'b0),
+      .coherent_write(1'b0),
+      .coherent_ready(),
+      .writeback_error(),
+      .writeback_idle(),
+      .writeback_drain(1'b0),
       .*
   );
   always #5 clock = ~clock;
@@ -2872,19 +3674,99 @@ module tb_l1d_tags;
       logic [Words-1:0] valid_model[Ways][4];
       logic [1:0] tag_model[Ways][4];
       logic [63:0] rng = 64'hcafe0123456789ab ^ 64'(CaseId);
+      logic update_dirty = 1'b0, clean_valid = 1'b0, line_update = 1'b0;
+      logic [Words-1:0] clean_mask = '0, line_mask = '0;
+      wire [1:0] inspect_tag;
+      wire [Words-1:0] inspect_dirty;
+      wire dirty_any, update_blocked;
+      wire [Words-1:0] observed_valid = dut.l1d_valid[0][0];
+      wire [Words-1:0] observed_dirty = dut.dirty[0][0];
 
       rapt_l1d_tags #(
           .L1D_LEN(2),
           .L1D_LINE_LEN(WordBits),
           .L1D_N_WAYS(Ways),
-          .L1dTagW(2)
+          .L1dTagW(2),
+          .WriteBack(1'b1)
       ) dut (
+          .inspect_set(l1d_idx),
+          .inspect_way(l1d_way),
           .fence_time(|clear_set),
-          .line_update(1'b0), .line_mask('0),
           .*
       );
 
-      // Behavioral reference preserves the original whole-array update order.
+      task automatic dirty_tick;
+        @(posedge clock);
+        #1;
+        if (|(observed_dirty & ~observed_valid))
+          $fatal(1, "case %0d: dirty word without valid data", CaseId);
+        @(negedge clock);
+      endtask
+
+      task automatic check_dirty_ownership;
+        @(negedge clock);
+        reset = 1'b1;
+        dirty_tick();
+        reset = 1'b0;
+        clear_set = '0;
+        l1d_update = 1'b1;
+        l1d_valid_u = 1'b1;
+        l1d_inv_all_ways = 1'b0;
+        l1d_way = '0;
+        l1d_idx = '0;
+        l1d_off = '0;
+        l1d_tag_u = 2'd1;
+        update_dirty = 1'b1;
+        dirty_tick();
+        if (inspect_dirty !== Words'(1) || !dirty_any)
+          $fatal(1, "case %0d: store did not acquire dirty ownership", CaseId);
+        clean_valid = 1'b1;
+        clean_mask = '1;
+        dirty_tick();
+        if (inspect_dirty !== Words'(1))
+          $fatal(1, "case %0d: simultaneous store lost dirty ownership", CaseId);
+        clean_valid = 1'b0;
+        update_dirty = 1'b0;
+        l1d_tag_u = 2'd2;
+        #1;
+        if (!update_blocked) $fatal(1, "case %0d: dirty replacement allowed", CaseId);
+        dirty_tick();
+        if (inspect_tag !== 2'd1 || inspect_dirty !== Words'(1))
+          $fatal(1, "case %0d: dirty replacement corrupted metadata", CaseId);
+        l1d_tag_u = 2'd1;
+        line_update = 1'b1;
+        line_mask = '1;
+        #1;
+        if (!update_blocked) $fatal(1, "case %0d: refill overwrote dirty word", CaseId);
+        dirty_tick();
+        line_update = 1'b0;
+        l1d_valid_u = 1'b0;
+        #1;
+        if (!update_blocked) $fatal(1, "case %0d: dirty invalidation allowed", CaseId);
+        dirty_tick();
+        l1d_update = 1'b0;
+        clear_set = 4'b0001;
+        dirty_tick();
+        if (inspect_dirty !== Words'(1) || !update_blocked)
+          $fatal(1, "case %0d: maintenance discarded dirty word", CaseId);
+        clean_valid = 1'b1;
+        dirty_tick();
+        if (dirty_any || update_blocked)
+          $fatal(1, "case %0d: ownership transfer did not unblock maintenance", CaseId);
+        clean_valid = 1'b0;
+        dirty_tick();
+        if (observed_valid !== '0) $fatal(1, "case %0d: clean line not invalidated", CaseId);
+        clear_set = '0;
+        l1d_update = 1'b1;
+        l1d_valid_u = 1'b1;
+        l1d_tag_u = 2'd2;
+        dirty_tick();
+        if (inspect_tag !== 2'd2 || inspect_dirty !== '0)
+          $fatal(1, "case %0d: clean replacement failed", CaseId);
+      endtask
+
+      // Behavioral reference mirrors tag-qualified write-back invalidation:
+      // a stale address must not invalidate an unrelated dirty resident line.
       task automatic update_model;
         if (reset) begin
           foreach (valid_model[w, s]) valid_model[w][s] = '0;
@@ -2899,8 +3781,10 @@ module tb_l1d_tags;
               if (w != int'(l1d_way) && tag_model[w][l1d_idx] == l1d_tag_u)
                 valid_model[w][l1d_idx] = '0;
             end else if (l1d_inv_all_ways) begin
-              for (int w = 0; w < Ways; w++) valid_model[w][l1d_idx][l1d_off] = 1'b0;
-            end else valid_model[l1d_way][l1d_idx][l1d_off] = 1'b0;
+              for (int w = 0; w < Ways; w++)
+              if (tag_model[w][l1d_idx] == l1d_tag_u) valid_model[w][l1d_idx][l1d_off] = 1'b0;
+            end else if (tag_model[l1d_way][l1d_idx] == l1d_tag_u)
+              valid_model[l1d_way][l1d_idx][l1d_off] = 1'b0;
           end
           foreach (valid_model[w, s]) if (clear_set[s]) valid_model[w][s] = '0;
         end
@@ -2965,6 +3849,7 @@ module tb_l1d_tags;
           #1;
           check_lookup();
         end
+        check_dirty_ownership();
         done[CaseId] = 1'b1;
       end
     end
@@ -2972,7 +3857,7 @@ module tb_l1d_tags;
 
   initial begin
     wait (&done);
-    $display("PASS: L1D tags: 6 geometries, 4000 reference-checked cycles each");
+    $display("PASS: L1D tags: 6 geometries, 4000 random cycles and dirty ownership checks");
     $finish;
   end
   initial begin
@@ -3004,6 +3889,12 @@ module tb_l1d_trap_owner;
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
       .external_write_last_i('0),
+      .coherent_request(1'b0),
+      .coherent_write(1'b0),
+      .coherent_ready(),
+      .writeback_error(),
+      .writeback_idle(),
+      .writeback_drain(1'b0),
       .*
   );
   `include "tb_common.svh"
@@ -3133,6 +4024,12 @@ module tb_l1d_write_error;
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
       .external_write_last_i('0),
+      .coherent_request(1'b0),
+      .coherent_write(1'b0),
+      .coherent_ready(),
+      .writeback_error(),
+      .writeback_idle(),
+      .writeback_drain(1'b0),
       .*
   );
   `include "tb_common.svh"

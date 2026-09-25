@@ -119,15 +119,13 @@ module rapt_pmp_permissions #(
   // addr_hi_w directly via (addr + size_m1) >> 2 to avoid carrying the
   // unused byte-offset bits of the sum.
   logic [PADDR_BITS-1:0] addr_phys;
-  logic [PADDR_BITS-1:0] addr_hi_phys;
   logic [PADDR_BITS:0] addr_end;
   logic [PMPAddrBits-1:0] addr_lo_w;
   logic [PMPAddrBits-1:0] addr_hi_w;
   assign addr_phys = addr[PADDR_BITS-1:0];
   assign addr_end = {1'b0, addr_phys} + (PADDR_BITS+1)'(size_m1);
-  assign addr_hi_phys = addr_end[PADDR_BITS-1:0];
   assign addr_lo_w = addr_phys[PADDR_BITS-1:2];
-  assign addr_hi_w = addr_hi_phys[PADDR_BITS-1:2];
+  assign addr_hi_w = addr_end[PADDR_BITS-1:2];
   // At most sixteen bytes visit at most two aligned eight-word blocks.
   // Test a region start with wide equality and three-bit comparisons rather
   // than cascading full physical-address magnitude comparators after addr_hi.
@@ -155,17 +153,14 @@ module rapt_pmp_permissions #(
         : (tor_before_lo[i] && !raw_start_inside[i]);
   end
   for (genvar i = 0; i < N; i++) begin : gen_entry
-    logic [PMPAddrBits-1:0] tor_lo;
     logic [PMPAddrBits-1:0] napot_base;
     logic match_tor_lo, match_na4_lo, match_napot_lo;
     logic match_tor_hi, match_na4_hi, match_napot_hi;
     logic tor_start_inside, na4_start_inside, napot_start_inside;
     if (i == 0) begin : gen_first_tor
-      assign tor_lo = '0;
       assign match_tor_lo = tor_before_lo[i];
       assign match_tor_hi = tor_before_hi[i];
     end else begin : gen_next_tor
-      assign tor_lo = pmp_raw_addr[i-1];
       assign match_tor_lo = !tor_before_lo[i-1] && tor_before_lo[i];
       assign match_tor_hi = !tor_before_hi[i-1] && tor_before_hi[i];
     end
@@ -185,7 +180,7 @@ module rapt_pmp_permissions #(
       assign tor_start_inside = (pmp_raw_addr[i] != '0)
           && ((addr_lo_w == '0) || addr_end[PADDR_BITS]);
     end else begin : gen_nonzero_tor_start
-      assign tor_start_inside = (tor_lo < pmp_raw_addr[i]) && raw_start_inside[i-1];
+      assign tor_start_inside = (pmp_raw_addr[i-1] < pmp_raw_addr[i]) && raw_start_inside[i-1];
     end
     assign na4_start_inside = raw_start_inside[i];
     assign napot_start_inside = start_inside(napot_base);
