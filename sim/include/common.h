@@ -246,6 +246,9 @@ typedef struct
   // Append-only timer checkpoint observations; preserve the reference ABI.
   word_t *menvcfgh;
   uint64_t *stimecmp;
+  // EPC storage pointers are local to NPC. Keep them after the NEMU ABI prefix.
+  word_t *sepc_half_q;
+  word_t *mepc_half_q;
 } NPCState;
 
 typedef struct

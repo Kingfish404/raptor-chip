@@ -110,7 +110,7 @@ HEIGHT:480
 
 ### 运行库
 
-* `libc`: C运行库, 移植自newlib 3.3.0, 同时包含最小的手写C++运行库(但不支持libstdc++)
+* `libc`: C运行库, 移植自newlib 3.3.0, 同时包含最小的C++运行库(但不支持libstdc++)
 * `libos`: 系统调用接口
 * `compiler-rt`: 移植自llvm, 主要用于在32位ISA上提供64位除法的支持
 * `libfixedptc`: 提供定点数计算的支持, 包含`sin`, `pow`, `log`等初等函数功能, 可以替代范围不大的浮点数

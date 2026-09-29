@@ -11,22 +11,29 @@ Welcome to the Raptor Project! Here is an all-in-one repository for exploring, d
 Core description: **Super-scalar, out-of-order RISC-V core** with register renaming, a 32-entry ROB, six execution paths fed by five scheduler classes over five unified writeback CDB ports, TAGE branch prediction, and a unified speculative/committed store queue. The scalar F/D unit has a dedicated FPQ and architectural 32 x 64-bit FPR bank, and shares CDB0 with the ALU-CSR pipe. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 (RV32) / Sv39 (RV64) virtual memory (MMU/TLB/PTW), 8 usable PMP entries (TOR/NA4/NAPOT; 16 CSR slots, upper eight read-only zero), LR/SC + AMO atomics, compressed instructions (RVC), CLINT/PLIC interrupts, a RISC-V Debug Module / JTAG DTM bring-up path, and Linux v6.18.x flows via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
 
 ```
-Core name:  raptor-falcon (M/S/U + Sv32/Sv39 + PMP, Linux-capable)
-ISA:        rv32/rv64 imafdc_zba_zbb_zbs_zfhmin_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_zca_zcb_zcmop
-Modes:      Machine, Supervisor, User
-MMU:        riscv,sv32 (RV32) / riscv,sv39 (RV64) / riscv,none (Bare)
+RV64 (default config, -DRAPT_RV64)
+ISA summary: rv64imafdc_zba_zbb_zbs_zfhmin_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_zkt_zca_zcb_zcmop_svinval_svpbmt
+Profile:     RVA22S64 implementation target; full-profile validation remains open
+Modes:       Machine, Supervisor, User
+MMU:         Sv39 / Bare; Svade; Svpbmt page attributes
+
+RV32 (default config, without -DRAPT_RV64)
+ISA summary: rv32imafdc_zba_zbb_zbs_zfhmin_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_zca_zcb_zcmop_svinval
+Profile:     RVI20U32; additional ISA and supervisor features listed above
+Modes:       Machine, Supervisor, User
+MMU:         Sv32 / Bare; Svade
+
+Core name:  raptor-falcon (Linux-capable)
 PMP:        8 usable entries, TOR / NA4 / NAPOT, L-bit lockable
 Interrupts: CLINT (mtime, mtimecmp, msip) + PLIC (31 sources, M/S contexts)
-Profiles:   RVI20U32; RVA22S64 supported (default config, RV64)
-RV64/default extensions: Zkt, Svinval, Svpbmt (required by RVA22S64)
 
 Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID; burst-capable reads (up to 8 outstanding), one outstanding write with independent AW/W handshakes (single-beat ordinary stores, multi-beat Zicboz `CBO.ZERO`)
-Default uarch: dual issue / dual commit, ROB=32, ALQ=8 (2 issue ports), BRQ=4, MDQ=4, FPQ=4, IOQ=8, SQ=16, integer PRF=64, FPR=32 x 64-bit, L1I=16 KiB, L1D=16 KiB (both 4-way), 64 B cache lines, optional L2 passthrough/cache stage
+Default uarch: dual issue / dual commit, ROB=32, ALQ=8 (2 issue ports), BRQ=8, MDQ=4, FPQ=1, IOQ=8, SQ=16, integer PRF=64, FPR=32 x 64-bit, L1I=16 KiB, L1D=16 KiB (both 4-way), 64 B cache lines, optional L2 passthrough/cache stage
 
 Verifying:  RISCOF (riscv-arch-test), full-core F/D directed/differential tests, RVFI, SVA
 ```
 
-The shared RV32/RV64 ISA list above is not a complete profile inventory. For RV64/default, Zkt provides data-independent execution latency for the instructions covered by its specification; it does not imply AES/SHA instruction support. Svinval implements translation invalidation using a conservative full SFENCE.VMA operation, and Svpbmt carries page-based memory types through the Sv39 translation, cache, and bus paths. The three extensions are declared in the [RV64 supervisor verification configuration](verify/riscof/raptor-rv64s/raptor-rv64s.yaml). Validation results apply to their recorded source snapshots and configurations; they do not automatically transfer to later RTL changes or other presets.
+The ISA summaries list implemented extensions, not complete profile requirement inventories. For RV64/default, Zkt provides data-independent execution latency for the instructions covered by its specification; it does not imply AES/SHA instruction support. Svinval implements translation invalidation using a conservative full SFENCE.VMA operation in both XLEN modes. Svpbmt carries page-based memory types through the RV64 Sv39 translation, cache, and bus paths; Sv32 has no PBMT field. The [RV64 supervisor verification configuration](verify/riscof/raptor-rv64s/raptor-rv64s.yaml) declares these extensions, while the [RVA22S64 requirement ledger](verify/riscof/raptor-rv64s/requirements.json) records acceptance separately: Zkt and Svinval are accepted for recorded frozen configurations; Svpbmt remains partially covered with open acceptance gates. Validation results do not automatically transfer to later RTL changes or other configs, and the RV64 Zkt acceptance does not establish an RV32 Zkt claim.
 
 The F/D/Zfhmin implementation covers scalar floating-point load/store, arithmetic, FMA, divide/square-root, conversion, comparison/classification, rounding modes, accrued exception flags, and binary16 load/store, transfer, and conversion. The compressed subset includes the C-extension floating-point memory forms required with F/D (C.FLW/C.FSW on RV32 and C.FLD/C.FSD plus their stack-pointer forms on RV32/RV64).
 
@@ -43,17 +50,18 @@ flowchart TD
     RSB["RSB (4 entries)"]
     TAGE["TAGE (default DIRP)"]
   end
-  subgraph FE["Frontend (default decode/rename widths: 2/2)"]
+  subgraph FE["Frontend (default decode width: 2)"]
     BPU["BPU (TAGE/BTB/RSB)"]
     IFU["IFU (instruction prefix + held suffix)"]
     IDU["IDU (DecodeWidth slots)"]
-    RNU["RNU (RenameWidth slots, integrated MAP/RAT/free bitmap + checkpoints)"]
   end
-  subgraph BE["Backend (default dispatch/commit widths: 2/2)"]
-    ROU["ROU (UOQ + ROB 32)"]
+  subgraph BE["Backend (default rename/dispatch/commit widths: 2/2/2)"]
+    RNU["RNU (RenameWidth slots, integrated MAP/RAT/free bitmap + checkpoints)"]
+    RBUF["Renamed-packet buffer (2 entries)"]
+    ROU["ROU (UOQ 8 + ROB 32 + operand spill 16)"]
     DPU{{"DPU dispatch router"}}
-    IEU["IEU: ALQ 8 + BRQ 4 + MDQ 4"]
-    FEU["FEU: FPQ 4 + scalar F/D/Zfhmin"]
+    IEU["IEU: ALQ 8 + BRQ 8 + MDQ 4"]
+    FEU["FEU: FPQ 1 + scalar F/D/Zfhmin"]
     LSU["LSU: IOQ 8 + SQ 16"]
     CDB(("CDB ×5"))
     PRF["PRF (2 × RenameWidth reads, CompletionPorts writes; default 4R/5W)"]
@@ -63,12 +71,12 @@ flowchart TD
   end
   subgraph MEM["Memory Subsystem"]
     direction TD
-    subgraph IMEM["I-side · IF0 (0-bubble seq fetch)"]
+    subgraph IMEM["I-side · synchronous SRAM with sequential pre-read"]
       L1I["L1I 16 KiB 4-way (banked SRAM)"]
       ITLB["ITLB (default 16 entries, FA)"]
       IPTW["IPTW (Sv32 2-lvl / Sv39 3-lvl)"]
     end
-    subgraph DMEM["D-side · IS/EX-WB (2-cyc hit, 3-cyc load-use)"]
+    subgraph DMEM["D-side · registered cache access; configurable response stage"]
       L1D["L1D 16 KiB 4-way (banked SRAM, VIPT, write-through)"]
       DTLB["DTLB (default 16 entries, replicated load/store views)"]
       DPTW["DPTW (Sv32/Sv39, Svade)"]
@@ -76,7 +84,8 @@ flowchart TD
     PMPC["PMP ×8 (TOR/NA4/NAPOT): fetch + ld/st + PTW checks"]
     BUS["BUS (mem_link arbiter, request IDs, L1D > L1I)"]
     AXIM["AXI4 master (up to 8 reads, independent AW/W)"]
-    L2["L2 (optional, 16 KiB DM / passthrough)"]
+    L2["L2 (default bypass; default-l2: 512 KiB, 8-way)"]
+    RBUF_AXI["AXI R buffer (2 entries with L2 write-back; default bypass)"]
     RTR["cluster AXI router (1 master / 3 targets)"]
     CLINT["CLINT (mtime / mtimecmp / msip)"]
     PLIC["PLIC (31 sources, M/S contexts)"]
@@ -85,7 +94,7 @@ flowchart TD
   BPU --- IFU
   IFU --> IDU --> RNU
   IDU -."Early Resteer".-> IFU
-  RNU --> ROU --> DPU
+  RNU --> RBUF --> ROU --> DPU
   DPU --> IEU & FEU & LSU
   IEU & FEU & LSU --> CDB
   CDB -->|"writeback + wakeup"| ROU & PRF
@@ -94,6 +103,7 @@ flowchart TD
   ROU --> CMU
   ROU -."store commit".-> LSU
   CMU -."flush / BPU train".-> FE
+  CMU -."retirement / recovery".-> RNU
   CSR --- IEU
   IFU --- L1I
   L1I --- ITLB
@@ -103,16 +113,11 @@ flowchart TD
   DTLB -."miss".-> DPTW
   PMPC -.-> L1I & L1D & IPTW & DPTW
   L1I & L1D & IPTW & DPTW --> BUS
-  BUS -->|mem_link| AXIM --> L2 --> RTR
+  BUS -->|mem_link| AXIM --> L2 --> RBUF_AXI --> RTR
   RTR --> CLINT & PLIC & EXT
 ```
 
 ## Setup & Quick Start
-
-Suggest install `tmux` for better terminal management. [`surfer`][^surfer] for wave viewer. [`colima`][^colima] for Linux container.
-
-[^surfer]: https://surfer-project.org/
-[^colima]: https://github.com/abiosoft/colima
 
 ```shell
 # Install the common development toolchain (FPGA/PDK setup is separate)
@@ -182,13 +187,9 @@ make run-rv32 VFLAGS="-DRAPT_RV64" ARGS="-b -n"
 # Run riscv32
 make coremark-rv32 ARGS="-b -n"
 make microbench-rv32 ARGS="-b -n"
-# Difftest is enabled by default; explicitly select it (vs NEMU reference)
-make coremark-rv32 DIFFTEST=1 ARGS="-b -n"
-make microbench-rv32 DIFFTEST=1 ARGS="-b -n"
 # Run sim with reproducible random AXI memory delays (also supports -rv64)
 make coremark-rv32 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=1
 make microbench-rv32 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=42
-make cpu-tests-rv64 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=1
 # Run on ysyxSoC
 make coremark-ysyxsoc ARGS="-b -n"
 make microbench-ysyxsoc ARGS="-b -n"
@@ -208,8 +209,6 @@ make app-coremark-rv32 ARGS="-b -n"
 make app-embench-rv32 ARGS="-b -n"
 # Build riscv-pk (separate from the OpenSBI/Linux flow)
 make app-pk-build
-# Clean app build artifacts
-make app-clean
 ```
 
 ### 5. Linux Kernel Boot
@@ -226,8 +225,6 @@ make linux-boot-rv32
 # See detailed instructions
 # docs/linux_kernel.md, linux/README.md
 ```
-
-The two GC NEMU targets enable a virtio-mmio NIC by default. It uses libslirp for unprivileged outbound NAT (guest DHCP `10.0.2.15`, gateway `10.0.2.2`, DNS `10.0.2.3`); install the libslirp development package if it is not already available (`libslirp-dev` on Debian/Ubuntu).
 
 ### 6. Verification
 
@@ -324,7 +321,7 @@ cd $RAPTOR_HOME/abstract-machine/app/am-kernels/benchmarks/microbench && \
 cd "$NSIM_HOME" && make pack
 ```
 
-## Run OpenSBI & Linux Kernel
+## Run Linux Kernel
 
 See [Linux Kernel](./docs/linux_kernel.md)
 

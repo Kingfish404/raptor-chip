@@ -81,8 +81,7 @@ int main(void) { flush_cpu_dcache(); assert(count == 64 && fences == 2); }
                     self.assertEqual(dis.count("\tfence"), 2)
 
     def test_sweep_covers_set_selection_contract(self):
-        # Raptor's current CBO compares only address bits 11:6, invalidates
-        # all ways, and clears higher physical colors together.
+        # L1D uses page-offset bits 11:6 to select a set and clears all ways.
         blocks = range(0, 4096, 64)
         for line_bytes in (4, 8, 16, 32, 64, 128):
             for sets in (1, 2, 4, 16, 64, 128, 256):

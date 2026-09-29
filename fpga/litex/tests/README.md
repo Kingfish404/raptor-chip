@@ -20,7 +20,11 @@ Build-isolation host checks (temporary outputs only; no synthesis or board acces
 fpga/litex/.venv/bin/python -B fpga/litex/tests/test_build_isolation.py
 ```
 
-Checks parallel RV32/RV64 default/small preprocessing, cache reuse, Make/CPU pack-path agreement, configuration-specific output paths, read-only Make configuration evaluation with auto-detection disabled, and private BIOS copies.
+Checks parallel RV32/RV64 default/small preprocessing, cache reuse, Make/CPU
+pack-content agreement, immutable LiteX RTL snapshots across source changes,
+rejection of input edits between the RTL and macro exports with the last complete outputs preserved,
+configuration-specific output paths, read-only Make configuration evaluation
+with auto-detection disabled, and private BIOS copies.
 
 KU15P DDR/PMA host checks (no shared RTL packing or board access):
 

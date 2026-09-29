@@ -53,33 +53,11 @@ module tb_l2_ordered_mmio;
     end
   endtask
 
-  task automatic expect_posted_b(input logic [IdW-1:0] id);
-    bit seen;
-    begin
-      seen = 1'b0;
-      for (int wait_cycle = 0; wait_cycle < 64 && !seen; wait_cycle++) begin
-        if (axi_s.bvalid) begin
-          if (axi_s.bid !== id) fail("posted B id mismatch");
-          if (axi_s.bresp !== 2'b00) fail("posted B resp mismatch");
-          axi_s.bready = 1'b1;
-          tick(1);
-          axi_s.bready = 1'b0;
-          seen = 1'b1;
-        end else begin
-          tick(1);
-        end
-      end
-      if (!seen) fail("timed out waiting for posted B");
-    end
-  endtask
+  `include "tb_l2_posted_tasks.svh"
 
-  task automatic send_posted_write(input logic [XLEN-1:0] addr, input logic [XLEN-1:0] data,
-                                   input logic [IdW-1:0] id);
-    begin
-      send_l2_aw(addr, id);
-      send_l2_w_full(data);
-      expect_posted_b(id);
-    end
+  task automatic wait_l2_ready;
+    for (int warmup = 0; warmup < (1 << `RAPT_L2_LEN) + 64 && !axi_s.awready; warmup++) tick(1);
+    check(axi_s.awready, "L2 directory reset wipe did not complete");
   endtask
 
   initial begin
@@ -93,7 +71,7 @@ module tb_l2_ordered_mmio;
     init_l2_axi(1'b1);
     tick(5);
     reset = 1'b0;
-    tick(2);
+    wait_l2_ready();
 
     send_l2_ar_len(32'h8000_2000, 4'h5, 8'd1, 2'b01);
     accept_l2_downstream_ar(downstream_id, downstream_addr, downstream_len);
@@ -156,7 +134,7 @@ module tb_l2_ordered_mmio;
     init_l2_axi(1'b0);
     tick(2);
     reset = 1'b0;
-    tick(2);
+    wait_l2_ready();
 
     send_posted_write(32'h8000_0000, 32'h1111_0000, 4'h2);
     send_posted_write(32'h8000_0004, 32'h2222_0000, 4'h2);

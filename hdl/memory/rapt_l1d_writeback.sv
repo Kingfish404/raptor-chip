@@ -24,7 +24,8 @@ module rapt_l1d_writeback #(
 );
   localparam int ByteBits = $clog2(Xlen / 8);
   localparam int LineBits = WordBits + ByteBits;
-  logic [Xlen-1:0] line_addr;
+  // Every capture is rounded down to a cache line. Keep only its line number.
+  logic [Xlen-1:LineBits] line_addr_q;
   logic [LineWords-1:0] dirty;
   logic [LineWords*Xlen-1:0] data;
   logic [WordBits-1:0] word_index;
@@ -45,7 +46,7 @@ module rapt_l1d_writeback #(
   assign busy = |dirty;
   assign capture_ready = !busy;
   assign write_valid = busy && !error;
-  assign write_addr = line_addr | (Xlen'(word_index) << ByteBits);
+  assign write_addr = {line_addr_q, word_index, {ByteBits{1'b0}}};
   assign write_data = data[word_index*Xlen+:Xlen];
 
   always_ff @(posedge clock) begin
@@ -54,7 +55,7 @@ module rapt_l1d_writeback #(
       error <= 1'b0;
     end else begin
       if (capture_valid && capture_ready) begin
-        line_addr <= {capture_addr[Xlen-1:LineBits], {LineBits{1'b0}}};
+        line_addr_q <= capture_addr[Xlen-1:LineBits];
         dirty <= capture_dirty;
         data <= capture_data;
         error <= 1'b0;

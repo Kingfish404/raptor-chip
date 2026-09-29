@@ -39,6 +39,8 @@ module rapt_idu #(
   // Resolve only accepted instructions. The redirect is generated from this
   // registered stage, so flushing FQU cannot form a valid->redirect loop.
   always_comb begin
+    automatic logic control_seen;
+    control_seen = 1'b0;
     prefix = !reset && !cmu_bcast.flush_pipe && !cmu_bcast.sys_resume
         && !recovery.pending;
     consumed = 0;
@@ -68,7 +70,7 @@ module rapt_idu #(
         corrected = (idu_bpu.ras_addr + decoded[s].uop.imm) & ~XLEN'(1);
       idu_rnu.slot[s] = decoded[s];
       idu_rnu.slot[s].uop.pnpc = corrected;
-      idu_rnu.valid[s] = prefix && s < 32'(count);
+      idu_rnu.valid[s] = prefix && s < 32'(count) && !(`RAPT_FETCH_BRANCH_FOLLOWER && is_control && control_seen);
       accept[s] = idu_rnu.valid[s] && idu_rnu.ready[s];
       if (accept[s]) begin
         consumed++;
@@ -86,7 +88,10 @@ module rapt_idu #(
           redirect_slot = s;
         end
       end
-      prefix = prefix && accept[s] && !redirect && !is_control && !decoded[s].uop.trap;
+      prefix = prefix && accept[s] && !redirect && !decoded[s].uop.trap
+          && (!is_control || (`RAPT_FETCH_BRANCH_FOLLOWER && decoded[s].uop.execute.branch.conditional
+              && !decoded[s].uop.execute.branch.predicted_taken));
+      if (accept[s] && is_control) control_seen = 1'b1;
     end
   end
   always_comb begin

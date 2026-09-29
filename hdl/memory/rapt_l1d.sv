@@ -4,7 +4,7 @@
 
 /* verilator lint_off PINCONNECTEMPTY */
 module rapt_l1d #(
-    parameter bit WriteBack = 1'b0,
+    parameter bit WriteBack = `RAPT_L1D_WRITEBACK,
     parameter bit LineRefill = 1,
     parameter int L1D_LINE_LEN = `RAPT_L1D_LINE_LEN,
     parameter int unsigned L1D_LINE_SIZE = 2 ** L1D_LINE_LEN,
@@ -18,6 +18,23 @@ module rapt_l1d #(
     input logic coherent_request = 1'b0,
     input logic coherent_write = 1'b0,
     output logic coherent_ready,
+    input logic probe_valid_i = 1'b0,
+    input logic [XLEN-1:0] probe_addr_i = '0,
+    output logic probe_ready_o,
+    output logic probe_release_valid_o,
+    output logic [XLEN-1:0] probe_release_addr_o,
+    output logic [XLEN-1:0] probe_release_data_o,
+    input logic probe_release_ready_i = 1'b0,
+    output logic release_valid_o,
+    output logic [XLEN-1:0] release_addr_o,
+    output logic [XLEN-1:0] release_data_o,
+    output logic release_has_data_o,
+    output logic release_mask_o,
+    output logic release_last_o,
+    input logic release_ready_i = 1'b0,
+    input logic release_ack_i = 1'b0,
+    input logic probe_window_i = 1'b0,
+    output logic writeback_bus_pending_o,
     output logic writeback_error,
     output logic writeback_idle,
     input logic writeback_drain = 1'b0,
@@ -194,6 +211,16 @@ module rapt_l1d #(
   localparam unsigned L1dWayW = L1D_N_WAYS > 1 ? $clog2(L1D_N_WAYS) : 1;
   logic [L1D_SIZE-1:0] fence_clear_set;
   logic [L1D_SIZE-1:0] maintenance_set;
+  logic [L1D_LEN-1:0] probe_set;
+  logic [L1dTagW-1:0] probe_tag;
+  logic probe_clearing;
+  logic local_cbo_line_clear, line_clearing;
+  logic [L1D_LEN-1:0] line_clear_set;
+  logic [L1dTagW-1:0] line_clear_tag;
+  logic [L1D_N_WAYS-1:0] probe_dirty_way;
+  logic [L1dWayW-1:0] probe_dirty_selected_way;
+  logic probe_dirty_request;
+  logic wb_hold, probe_wb_hold;
   logic zero_complete;
   logic cacheable_w;
   logic ptw_awvalid;
@@ -207,18 +234,49 @@ module rapt_l1d #(
   // bits below bit 6. Index bits above the page offset are also ignored: a
   // larger custom geometry clears all possible physical colors safely.
   localparam unsigned L1dLineOffset = L1D_LINE_LEN + L1dOffsetBits;
+  // The CBO broadcast omits address bits [5:0]. Reconstruct them before
+  // slicing by cache-line geometry, which can start below bit 6 for 16-byte
+  // lines (small, middle and formal presets).
+  logic [XLEN-1:0] cbo_addr;
+  assign cbo_addr = {cmu_bcast.cbo_block, 6'b0};
+`ifdef RAPT_L2_EN
+  localparam bit L2Inclusive = 1'b1;
+  localparam bit L2Release = `RAPT_L2_N_WAYS == 8 && `RAPT_L2_LEN == 10
+      && `RAPT_CACHE_LINE_BYTES == 64
+      && ((1 << `RAPT_L2_LINE_LEN) * XLEN == 512);
+`else
+  localparam bit L2Inclusive = 1'b0;
+  localparam bit L2Release   = 1'b0;
+`endif
+  assign probe_set = probe_addr_i[L1dLineOffset+:L1D_LEN];
+  assign probe_tag = probe_addr_i[L1dLineOffset+L1D_LEN+:L1dTagW];
+  assign local_cbo_line_clear = WriteBack && L2Inclusive && cmu_bcast.cbo_inval;
+  assign probe_clearing = probe_valid_i && !probe_wb_hold && !local_cbo_line_clear;
+  assign probe_dirty_request = WriteBack && probe_valid_i && |probe_dirty_way;
+  always_comb begin
+    probe_dirty_selected_way = '0;
+    for (int way = L1D_N_WAYS - 1; way >= 0; way--)
+    if (probe_dirty_way[way]) probe_dirty_selected_way = L1dWayW'(way);
+  end
   localparam logic [11:0] CboIndexMask = 12'((L1D_SIZE - 1) << L1dLineOffset) & 12'hfc0;
   for (genvar s = 0; s < L1D_SIZE; s++) begin : g_maintenance_set
     assign maintenance_set[s] = cmu_bcast.fence_time
       || (WriteBack && (coherent_write || ptw_awvalid
         || (lsu_l1d.wvalid && lsu_l1d.wready && !cacheable_w)))
-      || (cmu_bcast.cbo_inval
+      || (!(WriteBack && L2Inclusive) && cmu_bcast.cbo_inval
         && (12'(s << L1dLineOffset) & CboIndexMask)
-            == ({cmu_bcast.cbo_block, 6'b0} & CboIndexMask))
+            == (cbo_addr[11:0] & CboIndexMask))
         || (zero_complete && ((s >> (L1dLineOffset < 6 ? 6-L1dLineOffset : 0))
             == (int'(waddr_idx) >> (L1dLineOffset < 6 ? 6-L1dLineOffset : 0))));
   end
-  assign fence_clear_busy = cmu_bcast.fence_time || cmu_bcast.cbo_inval || |fence_clear_set;
+  assign fence_clear_busy = cmu_bcast.fence_time || cmu_bcast.cbo_inval
+      || probe_valid_i || |fence_clear_set;
+  // The L2 holds its probe until the exact physical line has been cleared by
+  // the tag array. The registered response prevents an early replacement.
+  always_ff @(posedge clock) begin
+    if (reset) probe_ready_o <= 1'b0;
+    else probe_ready_o <= probe_clearing;
+  end
 
   logic refill_line, demand_done;
   logic [L1D_LINE_LEN-1:0] refill_word;
@@ -349,17 +407,21 @@ module rapt_l1d #(
   logic [     L1dWayW-1:0] ld_fill_way_r;  // registered fill way for load miss
   logic [    L1D_SIZE-1:0] d_replace_bit;  // random replacement toggle per set (2-way only)
 
-  typedef enum logic [2:0] {
+  typedef enum logic [3:0] {
     WB_IDLE,
     WB_SCAN,
     WB_READ,
     WB_CAPTURE,
     WB_WAIT,
-    WB_CLEAN
+    WB_CLEAN,
+    WB_RELEASE_SEND,
+    WB_RELEASE_ACK,
+    WB_RELEASE_CLEAR
   } wb_state_t;
   wb_state_t wb_state;
   logic dirty_any, wb_busy, wb_valid, wb_capture_ready, wb_blocked;
-  logic update_dirty, local_store, local_store_ready, wb_hold;
+  logic update_dirty, local_store, local_store_ready;
+  logic lsu_bus_write_pending_q;
   logic [L1D_LEN-1:0] wb_set;
   logic [L1dWayW-1:0] wb_way;
   logic [L1dWayW-1:0] ld_fill_way;
@@ -368,8 +430,21 @@ module rapt_l1d #(
   logic [L1D_LEN-1:0] tag_store_idx;
   logic [L1dTagW-1:0] tag_store_tag;
   logic [L1dTagW-1:0] wb_tag;
-  logic [L1D_LINE_SIZE-1:0] wb_dirty;
+  logic [L1D_LINE_SIZE-1:0] wb_dirty, wb_valid_words;
   logic [L1D_LINE_SIZE*XLEN-1:0] wb_line_data;
+  logic [L1D_LINE_SIZE*XLEN-1:0] release_line_q;
+  logic [L1D_LINE_SIZE-1:0] release_mask_q;
+  logic [XLEN-1:0] release_line_addr_q;
+  logic [L1D_LINE_LEN-1:0] release_word_q;
+  logic wb_release_mode, release_clearing;
+  assign release_clearing = wb_state == WB_RELEASE_CLEAR;
+  assign line_clearing = release_clearing || probe_clearing || local_cbo_line_clear;
+  assign line_clear_set = release_clearing ? wb_set
+      : local_cbo_line_clear ? cbo_addr[L1dLineOffset+:L1D_LEN] : probe_set;
+  assign line_clear_tag = release_clearing
+      ? release_line_addr_q[L1dLineOffset+L1D_LEN+:L1dTagW]
+      : local_cbo_line_clear ? cbo_addr[L1dLineOffset+L1D_LEN+:L1dTagW]
+      : probe_tag;
   logic [XLEN-1:0] wb_addr, wb_data;
   logic l1d_rmw;
   logic [XLEN-1:0] data_bank_rdata[L1D_N_WAYS][L1D_LINE_SIZE];
@@ -377,29 +452,61 @@ module rapt_l1d #(
   localparam logic [7:0] FullStoreWstrb = 8'({XLEN / 8{1'b1}});
   logic [L1dWayW-1:0] store_hit_way, store_fill_way;
   logic wb_global_request, wb_victim_request, wb_targeted;
+  logic wb_global_dirty;
+  logic wb_probe_mode;
+  logic wb_start;
   logic store_allocate, wb_store_probe, wb_store_victim;
   logic [L1D_LEN-1:0] wb_probe_set;
   logic [L1dWayW-1:0] wb_probe_way;
   assign store_allocate = cacheable_w && !lsu_l1d.wzero
       && lsu_l1d.walu == FullStoreWstrb && lsu_l1d.waddr[L1dOffsetBits-1:0] == '0;
   assign wb_store_probe = l1d_state == IDLE && lsu_l1d.wvalid && store_allocate;
-  assign wb_probe_set = wb_store_probe ? waddr_idx : addr_idx;
-  assign wb_probe_way = wb_store_probe ? store_fill_way : ld_fill_way;
-  assign wb_store_victim = wb_store_probe && !hit_w && |wb_dirty && wb_tag != waddr_tag;
-  assign wb_global_request = writeback_drain || coherent_request || fence_clear_busy
+  assign wb_probe_set = probe_dirty_request ? probe_set : wb_store_probe ? waddr_idx : addr_idx;
+  assign wb_probe_way = probe_dirty_request ? probe_dirty_selected_way
+      : wb_store_probe ? store_fill_way : ld_fill_way;
+  assign wb_store_victim = wb_store_probe && !hit_w
+      && (L2Release ? |wb_valid_words : |wb_dirty) && wb_tag != waddr_tag;
+  assign wb_global_request = !probe_valid_i && (writeback_drain || coherent_request
+      || cmu_bcast.fence_time || |fence_clear_set
+      || (!L2Inclusive && cmu_bcast.cbo_inval)
       || (lsu_l1d.wvalid && (!cacheable_w || lsu_l1d.wzero))
       // A hot TLB lookup, like a bare-mode address check, does not read page
       // tables. Only an actual walk needs dirty PTEs published to memory.
       || (l1d_state == IDLE && (store_tlb_miss
         || (lsu_l1d.rcontext.mmu_en && load_tlb_miss)))
       || (l1d_state == LD_A && (!cacheable_r || l1d_atomic_lock))
-      || ptw_busy;
+      || ptw_busy);
   assign wb_victim_request = l1d_state == LD_A && !load_perm_denied_q
-      && cacheable_r && !(|load_way_hit) && |wb_dirty
+      && cacheable_r && !(|load_way_hit)
+      && (L2Release ? |wb_valid_words : |wb_dirty)
       && (line_read_request || wb_tag != addr_tag);
-  assign wb_drain_request = wb_global_request || wb_victim_request || wb_store_victim;
-  assign wb_hold = WriteBack && ((dirty_any && wb_drain_request) || wb_busy || wb_state != WB_IDLE || writeback_error
+  assign wb_drain_request = probe_valid_i ? probe_dirty_request
+      : wb_global_request || wb_victim_request || wb_store_victim;
+  // A global drain with no dirty words must not displace a clean victim
+  // release. Otherwise WB_SCAN immediately returns to IDLE and retries the
+  // same scan forever while the waiting load remains held in LD_A.
+  assign wb_global_dirty = wb_global_request && dirty_any;
+  // Reserve the L2 read/CBO port only when this writeback can actually start.
+  // A request blocked by an existing L2 probe/window or an unfinished bus
+  // transaction cannot make progress yet; advertising it as pending there
+  // would keep the very transaction it waits for from completing.
+  assign wb_start = wb_state == WB_IDLE && wb_drain_request
+      && (dirty_any || (L2Release && (wb_victim_request || wb_store_victim)))
+      && (probe_dirty_request || !probe_window_i)
+      && (l1d_bus.idle || probe_dirty_request)
+      && !l1d_update && !l1d_rmw && !local_store_ready
+      && (probe_dirty_request || l1d_state == IDLE || l1d_state == LD_A
+          || l1d_state == PTWAIT);
+  assign writeback_bus_pending_o = WriteBack && !probe_valid_i
+      && ((wb_state != WB_IDLE && !wb_probe_mode) || wb_start);
+  // A Probe can clear a clean copy before an unstarted voluntary Release.
+  // Keep that Release hold on ordinary requests: a Probe of another line
+  // must not let a waiting miss overwrite its own dirty victim.
+  assign probe_wb_hold = WriteBack && ((dirty_any && wb_drain_request)
+      || wb_busy || wb_state != WB_IDLE || writeback_error
       || (update_dirty && (l1d_update || l1d_rmw)));
+  assign wb_hold = probe_wb_hold
+      || (WriteBack && L2Release && (wb_victim_request || wb_store_victim));
   // Idle/ready must depend only on registered writeback state and dirty data.
   // wb_hold also contains the current drain request; feeding it into these
   // outputs creates request -> hold -> ready/idle -> request loops across the
@@ -409,21 +516,38 @@ module rapt_l1d #(
   assign coherent_ready = !WriteBack || (!dirty_any && !wb_busy && wb_state == WB_IDLE
       && !writeback_error && !l1d_update && !l1d_rmw
       && l1d_state == IDLE && !ptw_busy);
-  assign local_store = WriteBack && cacheable_w && !lsu_l1d.wzero
-      && (hit_w || (store_allocate && !wb_store_victim));
+  // Once a store is offered to the bus, its response retains ownership even
+  // if a pending cache update makes that address a hit before B returns.
+  always_ff @(posedge clock) begin
+    if (reset) lsu_bus_write_pending_q <= 1'b0;
+    else if (lsu_l1d.wvalid && lsu_l1d.wready) lsu_bus_write_pending_q <= 1'b0;
+    else if (l1d_bus.awvalid && !wb_valid && !ptw_awvalid) lsu_bus_write_pending_q <= 1'b1;
+  end
+  assign local_store = WriteBack && !lsu_bus_write_pending_q && cacheable_w && !lsu_l1d.wzero
+      && (hit_w || (!L2Inclusive && store_allocate && !wb_store_victim));
   assign local_store_ready = lsu_l1d.wvalid && local_store && l1d_state == IDLE && wb_state == WB_IDLE
       && !writeback_error && !l1d_update && !l1d_rmw && !ptw_busy
       && !coherent_request && !fence_clear_busy;
   for (genvar word_idx = 0; word_idx < L1D_LINE_SIZE; word_idx++) begin : g_wb_data
     assign wb_line_data[word_idx*XLEN+:XLEN] = data_bank_rdata[wb_way][word_idx];
   end
+  assign probe_release_valid_o = wb_probe_mode && wb_valid;
+  assign probe_release_addr_o = wb_addr;
+  assign probe_release_data_o = wb_data;
+  assign release_valid_o = wb_state == WB_RELEASE_SEND;
+  assign release_addr_o = release_line_addr_q
+      | (XLEN'(release_word_q) << L1dOffsetBits);
+  assign release_data_o = release_line_q[release_word_q*XLEN+:XLEN];
+  assign release_has_data_o = |release_mask_q;
+  assign release_mask_o = release_mask_q[release_word_q];
+  assign release_last_o = !release_has_data_o || &release_word_q;
   rapt_l1d_writeback #(
       .Xlen(XLEN),
       .LineWords(L1D_LINE_SIZE)
   ) writeback (
       .clock(clock),
       .reset(reset),
-      .capture_valid(WriteBack && wb_state == WB_CAPTURE),
+      .capture_valid(WriteBack && wb_state == WB_CAPTURE && !wb_release_mode),
       .capture_ready(wb_capture_ready),
       .capture_addr(XLEN'({wb_tag, wb_set, {L1dLineOffset{1'b0}}})),
       .capture_dirty(wb_dirty),
@@ -434,25 +558,32 @@ module rapt_l1d #(
       .write_valid(wb_valid),
       .write_addr(wb_addr),
       .write_data(wb_data),
-      .write_ready(l1d_bus.wready),
-      .write_error(l1d_bus.werr)
+      .write_ready(wb_probe_mode ? probe_release_ready_i : l1d_bus.wready),
+      .write_error(!wb_probe_mode && l1d_bus.werr)
   );
   always_ff @(posedge clock) begin
     if (reset) begin
       wb_state <= WB_IDLE;
       wb_targeted <= 0;
+      wb_probe_mode <= 1'b0;
+      wb_release_mode <= 1'b0;
       wb_set <= '0;
       wb_way <= '0;
+      release_line_q <= '0;
+      release_mask_q <= '0;
+      release_line_addr_q <= '0;
+      release_word_q <= '0;
     end else if (WriteBack) begin
       case (wb_state)
         WB_IDLE:
-        if (dirty_any && wb_drain_request && l1d_bus.idle && !l1d_update && !l1d_rmw
-          && !local_store_ready
-          && (l1d_state == IDLE || l1d_state == LD_A || l1d_state == PTWAIT)) begin
-          wb_targeted <= !wb_global_request;
-          wb_set <= wb_global_request ? '0 : wb_probe_set;
-          wb_way <= wb_global_request ? '0 : wb_probe_way;
-          wb_state <= wb_global_request ? WB_SCAN : WB_READ;
+        if (wb_start) begin
+          wb_probe_mode <= probe_dirty_request;
+          wb_release_mode <= L2Release && !probe_dirty_request
+              && !wb_global_dirty && (wb_victim_request || wb_store_victim);
+          wb_targeted <= probe_dirty_request || !wb_global_dirty;
+          wb_set <= wb_global_dirty ? '0 : wb_probe_set;
+          wb_way <= wb_global_dirty ? '0 : wb_probe_way;
+          wb_state <= wb_global_dirty ? WB_SCAN : WB_READ;
         end
         WB_SCAN: begin
           if (!dirty_any) wb_state <= WB_IDLE;
@@ -464,9 +595,29 @@ module rapt_l1d #(
           end else wb_way <= wb_way + 1'b1;
         end
         WB_READ: wb_state <= WB_CAPTURE;
-        WB_CAPTURE: if (wb_capture_ready) wb_state <= WB_WAIT;
+        WB_CAPTURE:
+        if (wb_release_mode) begin
+          release_line_q <= wb_line_data;
+          release_mask_q <= wb_dirty;
+          release_line_addr_q <= XLEN'({wb_tag, wb_set, {L1dLineOffset{1'b0}}});
+          release_word_q <= '0;
+          wb_state <= WB_RELEASE_SEND;
+        end else if (wb_capture_ready) wb_state <= WB_WAIT;
         WB_WAIT: if (!wb_busy && !writeback_error) wb_state <= WB_CLEAN;
-        WB_CLEAN: wb_state <= wb_targeted ? WB_IDLE : WB_SCAN;
+        WB_CLEAN: begin
+          wb_state <= wb_release_mode ? WB_RELEASE_CLEAR
+              : wb_targeted ? WB_IDLE : WB_SCAN;
+          wb_probe_mode <= 1'b0;
+        end
+        WB_RELEASE_SEND: if (release_valid_o && release_ready_i) begin
+          if (release_last_o) wb_state <= WB_RELEASE_ACK;
+          else release_word_q <= release_word_q + 1'b1;
+        end
+        WB_RELEASE_ACK: if (release_ack_i) wb_state <= WB_CLEAN;
+        WB_RELEASE_CLEAR: begin
+          wb_release_mode <= 1'b0;
+          wb_state <= WB_IDLE;
+        end
         default: wb_state <= WB_IDLE;
       endcase
     end
@@ -566,7 +717,7 @@ module rapt_l1d #(
       : sram_raddr_fallback;
 
   // Data-array ownership includes SRAM geometry and read-valid tracking.
-  logic sram_read_valid_r;
+  wire [L1D_N_WAYS-1:0][L1D_LINE_SIZE-1:0] sram_word_valid;
   logic [L1D_LEN-1:0] sram_read_idx_r;
   rapt_l1d_data #(
       .Xlen(XLEN),
@@ -586,8 +737,10 @@ module rapt_l1d #(
       .write_line(line_update),
       .write_mask(line_update_mask),
       .write_line_data(line_update_data),
-      .read_valid(sram_read_valid_r),
+      .read_valid(),
       .read_index(sram_read_idx_r),
+      .read_word_valid(sram_word_valid),
+      .read_word_index(),
       .read_data(data_bank_rdata)
   );
 
@@ -752,6 +905,7 @@ module rapt_l1d #(
       .clean_valid(WriteBack && wb_state == WB_CLEAN),
       .clean_mask('1),
       .inspect_tag(wb_tag),
+      .inspect_valid(wb_valid_words),
       .inspect_dirty(wb_dirty),
       .dirty_any(dirty_any),
       .update_blocked(wb_blocked),
@@ -759,6 +913,10 @@ module rapt_l1d #(
       .reset(reset),
       .fence_time(cmu_bcast.fence_time),
       .clear_set(wb_hold ? '0 : fence_clear_set),
+      .clear_line_valid(line_clearing),
+      .clear_line_idx(line_clear_set),
+      .clear_line_tag(line_clear_tag),
+      .clear_line_dirty_way(probe_dirty_way),
       .addr_idx(addr_idx),
       .addr_offset(addr_offset),
       .addr_tag(addr_tag),
@@ -807,11 +965,15 @@ module rapt_l1d #(
   assign tag_store_idx = mshr_fill_ready ? mshr_fill_idx : waddr_idx;
   assign tag_store_tag = mshr_fill_ready ? mshr_fill_tag : waddr_tag;
 
-  // A load may consume SRAM data only when every way/subarray completed a
-  // read for its index. Writes invalidate that shared correspondence; LD_A
-  // then holds the request while the following free cycle re-reads it.
+  // A tag miss needs no SRAM data. On a hit, only the matching way and word's
+  // bank must have read this set; unrelated banks can read during a write.
+  logic [L1D_N_WAYS-1:0] load_way_data_ready;
+  for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_load_bank_ready
+    assign load_way_data_ready[way] = sram_word_valid[way][addr_offset]
+        && sram_read_idx_r == addr_idx;
+  end
   logic l1d_sram_busy;
-  assign l1d_sram_busy = l1d_update || !sram_read_valid_r || (sram_read_idx_r != addr_idx);
+  assign l1d_sram_busy = l1d_update || |(load_way_hit & ~load_way_data_ready);
   assign tag_hit = (l1d_state == LD_A) && !load_perm_denied_q
     && cacheable_r && !(l1d_atomic_lock && mshr_busy)
     && !l1d_sram_busy
@@ -874,13 +1036,18 @@ module rapt_l1d #(
   assign b_tag = b_addr_r[PADDR_BITS-1:L1D_LEN+L1D_LINE_LEN+L1dOffsetBits];
   assign b_idx = b_addr_r[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits];
   assign b_off = b_addr_r[L1D_LINE_LEN+L1dOffsetBits-1:L1dOffsetBits];
-  assign b_sram_ready = sram_read_valid_r && sram_read_idx_r == b_idx && !wb_hold;
+  logic [L1D_N_WAYS-1:0] b_way_data_ready;
+  for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_b_bank_ready
+    assign b_way_data_ready[way] = sram_word_valid[way][b_off] && sram_read_idx_r == b_idx;
+  end
+  assign b_sram_ready = |(b_way_hit & b_way_data_ready) && !wb_hold;
 
   logic [XLEN-1:0] b_way_data_masked[L1D_N_WAYS];
   logic [XLEN-1:0] b_data;
   generate
     for (genvar w = 0; w < L1D_N_WAYS; w++) begin : gen_b_ao
-      assign b_way_data_masked[w] = b_way_hit[w] ? data_bank_rdata[w][b_off] : '0;
+      assign b_way_data_masked[w] = b_way_hit[w] && b_way_data_ready[w]
+          ? data_bank_rdata[w][b_off] : '0;
     end
   endgenerate
   always_comb begin
@@ -1029,11 +1196,13 @@ module rapt_l1d #(
   assign mis_align_store = 1'b0;
 
   // read channel: PTW takes priority over cache miss reads
+  // A true tag miss needs no SRAM data. A hit whose bank did not read still
+  // waits in LD_A; keep that bank-ready path off the miss AR request.
   assign legacy_arvalid = !wb_hold && (ptw_arvalid
     ? !pmp_ptw_fault
     : (l1d_state == LD_A) && !load_perm_denied_q
-      && !tag_hit && !mshr_eligible && !mshr_busy
-      && !l1d_sram_busy
+      && (!cacheable_r || !(|load_way_hit)) && !mshr_eligible && !mshr_busy
+      && !l1d_update
       && (cacheable_r || lsu_l1d.ordered)
       && !cmu_bcast.flush_pipe
       && (!line_read_request || !lsu_l1d.wvalid || local_store));
@@ -1087,13 +1256,13 @@ module rapt_l1d #(
   assign l1d_bus.wzero = !wb_valid && !ptw_wvalid && lsu_l1d.wzero;
   assign l1d_bus.noallocate = mshr_select || ptw_arvalid || !refill_safe;
   assign l1d_bus.arlen = (mshr_select || (!ptw_arvalid && line_read_request)) ? 8'(L1D_LINE_SIZE-1) : 8'd0;
-  assign l1d_bus.awvalid = wb_valid || (!wb_hold && (ptw_awvalid ? 1'b1
+  assign l1d_bus.awvalid = (wb_valid && !wb_probe_mode) || (!wb_hold && (ptw_awvalid ? 1'b1
       : lsu_l1d.wvalid && !local_store && !mshr_busy && !(l1d_state == LD_D && refill_line)));
   assign l1d_bus.awaddr = wb_valid ? wb_addr : ptw_awvalid ? ptw_awaddr : lsu_l1d.waddr;
   assign l1d_bus.aw_ptw = !wb_valid && ptw_awvalid;
   assign l1d_bus.wpbmt = (wb_valid || ptw_awvalid) ? 2'b00 : lsu_l1d.wpbmt;
   assign l1d_bus.wstrb = wb_valid ? FullStoreWstrb : ptw_wvalid ? ptw_wstrb : lsu_l1d.walu;
-  assign l1d_bus.wvalid = wb_valid || (!wb_hold && (ptw_wvalid ? 1'b1
+  assign l1d_bus.wvalid = (wb_valid && !wb_probe_mode) || (!wb_hold && (ptw_wvalid ? 1'b1
       : lsu_l1d.wvalid && !local_store && !mshr_busy && !(l1d_state == LD_D && refill_line)));
   assign l1d_bus.wdata = wb_valid ? wb_data : ptw_wvalid ? ptw_wdata : lsu_l1d.wdata;
 
@@ -1172,6 +1341,8 @@ module rapt_l1d #(
     end else begin
       if (ptw_req) ptw_context_q <= ptw_request_context;
       fence_clear_set <= WriteBack && wb_hold ? fence_clear_set | maintenance_set : maintenance_set;
+      if (probe_valid_i && l1d_state == LD_D && addr_idx == probe_set && addr_tag == probe_tag)
+        load_killed <= 1'b1;
       if (external_hits_reservation) begin
         reservation_valid <= 1'b0;
       end
@@ -1471,12 +1642,15 @@ module rapt_l1d #(
       // same cycle (e.g. load-fill completes, then store write-through arrives
       // next cycle while l1d_update is still high), the SET's NBA wins and the
       // new update is not lost.
-      if (|fence_clear_set && !wb_hold) begin
+      if ((|fence_clear_set && !wb_hold) || line_clearing) begin
         // Never replay a pending fill into a set just invalidated. Updates
         // to other sets remain pending while the tag clear port is occupied.
-        if (fence_clear_set[l1d_idx]) begin
+        if (fence_clear_set[l1d_idx]
+            || (line_clearing && l1d_idx == line_clear_set
+                && l1d_tag_u == line_clear_tag)) begin
           l1d_rmw <= 0;
           l1d_update <= 0;
+          update_dirty <= 0;
           line_update <= 0;
           l1d_inv_all_ways <= 0;
         end
@@ -1492,6 +1666,7 @@ module rapt_l1d #(
       // l1d_update SET: request a new SRAM + tag/valid write next cycle.
       // Textually last so its NBA to l1d_update wins over the CLEAR above.
       if ((|fence_clear_set && !(WriteBack && update_dirty && l1d_rmw))
+          || line_clearing || probe_valid_i
           || (wb_hold && !local_store_ready && !l1d_rmw)) begin
         // Clear takes priority over every new tag/data update below.
       end else if (l1d_rmw) begin
@@ -1571,7 +1746,10 @@ module rapt_l1d #(
       end else if (l1d_state == LD_D) begin
         if ((refill_line || lsu_l1d.rvalid) && legacy_rvalid && !l1d_bus.rerr
             && !load_killed && !cmu_bcast.flush_pipe) begin
-          if (cacheable_r) begin
+          // The BOOM-layout L2 does not allocate a scalar read marked
+          // noallocate. Keep the L1 inclusive by installing only full-line
+          // refills; the scalar response still completes the demand.
+          if (cacheable_r && (!L2Release || refill_line)) begin
             l1d_update <= 1'b1;
             l1d_data_u <= l1d_bus.rdata;
             l1d_valid_u <= 1'b1;

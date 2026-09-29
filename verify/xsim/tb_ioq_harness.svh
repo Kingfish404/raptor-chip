@@ -4,6 +4,7 @@ logic pmu_ioq_full;
 logic [`RAPT_XLEN-1:0] sq_waddr_hi, sq_waddr_third;
 logic [2:0][1:0] sq_wpbmt;
 logic sq_acquire;
+rapt_pkg::mem_context_t sq_context;
 logic sq_handoff_valid;
 logic [`RAPT_XLEN-1:0] sq_handoff_vaddr;
 logic [4:0] sq_handoff_alu;
@@ -22,13 +23,12 @@ lsu_l1d_mmu_if exu_l1d();
 fpr_if fpr();
 rapt_pkg::completion_t exu_ioq_bcast;
 rapt_pkg::completion_t completion[rapt_pkg::CompletionPorts];
-assign completion[0] = exu_rou;
-assign completion[1] = exu_rou_b;
-assign completion[2] = '0;
-assign completion[3] = exu_ioq_bcast;
-assign completion[4] = exu_wb_mul;
-for (genvar p = 5; p < rapt_pkg::CompletionPorts; p++) begin : g_extra_completion
-  assign completion[p] = '0;
+for (genvar p = 0; p < rapt_pkg::CompletionPorts; p++) begin : g_completion
+  if (p == 0) assign completion[p] = exu_rou;
+  else if (p == 1) assign completion[p] = exu_rou_b;
+  else if (p == rapt_pkg::IntegerIssuePorts + 1) assign completion[p] = exu_ioq_bcast;
+  else if (p == rapt_pkg::IntegerIssuePorts + 2) assign completion[p] = exu_wb_mul;
+  else assign completion[p] = '0;
 end
 
 load_fast_if load_fast();
@@ -60,6 +60,7 @@ rapt_lsu_ioq dut (
     .sq_waddr_third,
     .sq_wpbmt,
     .sq_acquire,
+    .sq_context,
     .load_fast(load_fast),
     .pmu_ioq_full(pmu_ioq_full)
 );

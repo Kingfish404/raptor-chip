@@ -47,6 +47,8 @@ class RegressionTest(unittest.TestCase):
             self.assertEqual(len(plan['parallel_lanes']['coremark']), 4)
             sta = plan['parallel_lanes']['sta']
             self.assertNotEqual(sta[0]['command'], sta[1]['command'])
+            self.assertIn('RAPT_CONFIG=small', sta[0]['command'])
+            self.assertIn('STA_REPORT_ONLY=1', sta[0]['command'])
             self.assertIn(f'STA_WORK_DIR={output}/sta-rv64', sta[1]['command'])
 
     def test_lane_failure_dependencies(self):
@@ -92,15 +94,26 @@ class RegressionTest(unittest.TestCase):
             self.assertTrue(all(x['status'] == 'PASS' for x in summary['results']))
 
     def test_lanes_overlap_only_after_format(self):
-        barrier = threading.Barrier(3, timeout=3)
+        barrier = threading.Barrier(2, timeout=3)
         finished = []
-        first = {'coremark-nemu32', 'sta-rv32', 'fpga-build'}
+        first = {'coremark-nemu32', 'fpga-build'}
+        state_lock = threading.Lock()
+        active_eda = [None]
 
         def runner(step, *_):
             if step.name in first:
                 self.assertEqual(finished[:1], ['format'])
-                barrier.wait()  # All three lanes must be running concurrently.
+                barrier.wait()  # CoreMark overlaps one EDA lane.
+            lane = ('fpga' if step.name.startswith('fpga-')
+                    else 'sta' if step.check == 'sta' else None)
+            if lane:
+                with state_lock:
+                    self.assertIn(active_eda[0], (None, lane))
+                    active_eda[0] = lane
             finished.append(step.name)
+            if step.name in ('sta-rv64', 'fpga-timing-ok'):
+                with state_lock:
+                    active_eda[0] = None
             return dict(r.asdict(step), status='PASS', exit_code=0, seconds=0,
                         reason='', log=None)
 

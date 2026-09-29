@@ -32,13 +32,17 @@ CONFIGS := \
   rapt_sram_16x32_1rw \
 	rapt_sram_16x64_1rw \
 	rapt_sram_512x32_1rw \
+	rapt_sram_1024x22_1rw \
+	rapt_sram_1024x32_1rw \
+	rapt_sram_1024x64_1rw \
 	rapt_sram_2x128_1rw \
 	rapt_sram_8x128_1rw \
 	rapt_sram_16x128_1rw \
 	rapt_sram_32x128_1rw \
 	rapt_sram_64x128_1rw \
 	rapt_sram_2048x32_1rw \
-	rapt_sram_2048x64_1rw
+	rapt_sram_2048x64_1rw \
+	rapt_sram_4096x64_1rw
 
 CONFIG_FILES := $(foreach c,$(CONFIGS),$(CONFIG_DIR)/$(c)_$(PLATFORM).py)
 # rapt_sram_32x32_1rw -> rapt_openram_1rw_32x32
@@ -100,7 +104,7 @@ endif
 all: $(STAMPS) ## Compile all SRAM macros for $(PLATFORM) via OpenRAM
 
 # ---------------------------------------------------------------------------
-# `stubs` — hand-written behavioural Liberty + Verilog placeholders so the
+# `stubs` — behavioural Liberty + Verilog placeholders so the
 # STA flow can close the loop *without* a working OpenRAM/PDK install. The
 # numbers are conservative single-cycle estimates, NOT silicon-grade. Swap
 # in real OpenRAM output (`make all`) before quoting final timing.
@@ -116,13 +120,17 @@ STUB_SHAPES := \
   rapt_openram_1rw_16x32,16,32,8 \
 	rapt_openram_1rw_16x64,16,64,8 \
 	rapt_openram_1rw_512x32,512,32,8 \
+	rapt_openram_1rw_1024x22,1024,22,22 \
+	rapt_openram_1rw_1024x32,1024,32,8 \
+	rapt_openram_1rw_1024x64,1024,64,8 \
 	rapt_openram_1rw_2x128,2,128,8 \
 	rapt_openram_1rw_8x128,8,128,8 \
 	rapt_openram_1rw_16x128,16,128,8 \
 	rapt_openram_1rw_32x128,32,128,8 \
 	rapt_openram_1rw_64x128,64,128,8 \
 	rapt_openram_1rw_2048x32,2048,32,8 \
-	rapt_openram_1rw_2048x64,2048,64,8
+	rapt_openram_1rw_2048x64,2048,64,8 \
+	rapt_openram_1rw_4096x64,4096,64,8
 
 stubs: ## Generate behavioural Liberty/Verilog stubs (no OpenRAM/PDK needed)
 	@mkdir -p $(MACRO_DIR)

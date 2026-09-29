@@ -40,7 +40,7 @@ For FPGA targets, the Makefile asks Vivado Hardware Manager for attached Xilinx 
 
 Vivado load and flash scripts require exactly one JTAG device matching the board's registered part. They never fall back to the first device in the chain, so a KU15P bitstream cannot accidentally be assigned to an AU15P.
 
-`fpga-load` warns when the saved bitstream input hash differs from the current inputs or its stamp is missing, then continues loading the existing bitstream. Missing bitstream files and failed timing checks still stop loading. `fpga-flash` requires a matching input hash.
+`fpga-load` and `fpga-flash` require a bitstream whose saved input hash matches the current inputs. Missing bitstream files or failed timing checks also stop loading.
 
 ## CM005 Ethernet on CU07/CU08
 
@@ -74,7 +74,7 @@ make fpga-netboot-rv64-build
 make fpga-netboot-rv64-load
 ```
 
-Run load only after a successful build and when the board is available. This profile fixes CU08, with RV32 at 50 MHz and RV64 at 30 MHz, defaults to `RAPT_CONFIG=default`, and supports other presets through e.g. `RAPT_CONFIG=small`. It uses MIG DDR, manual SD boot, CM005 FMC_C/ETHA gigabit, full Linux initialization, Vivado 8 threads and Explore routing. DTB offset/address are `0x04000000`/`0x83f00000`. Matching build and load targets use the same parameters; load requires the matching build stamp and an existing, passing timing report. It does not rebuild or program flash.
+Run load only after a successful build and when the board is available. This profile fixes CU08, runs both RV32 and RV64 at 50 MHz, defaults to `RAPT_CONFIG=default`, and supports other presets through e.g. `RAPT_CONFIG=small`. It uses MIG DDR, manual SD boot, CM005 FMC_C/ETHA gigabit, full Linux initialization, Vivado 8 threads and Explore routing. DTB offset/address are `0x04000000`/`0x83f00000`. Matching build and load targets use the same parameters; load requires the matching build stamp and an existing, passing timing report. It does not rebuild or program flash.
 
 Outputs and workflow locks are isolated by preset and XLEN at `build/netboot-<RAPT_CONFIG>/rv32/{build,soc,netboot}` and `build/netboot-<RAPT_CONFIG>/rv64/{build,soc,netboot}`; they do not reuse the earlier compact temporary candidates. Use `make fpga-netboot-rv32-info` (or `rv64-info`) to see resolved paths. Do **not** substitute bare `make fpga-load` for the paired target.
 
@@ -112,7 +112,7 @@ cu08_net fpga-build && cu08_net info && \
 #     cu08_net fpga-load
 ```
 
-Do not continue if the build fails, freshness differs, or timing is unverified. Require an existing matching timing report that explicitly meets constraints; `fpga-timing-ok` currently warns and returns success when its report is missing. The helper only holds command arguments in your shell; in a new terminal, define it and select `fpga_variant` again. If you change a preset, clock, `RAPT_PACK_VFLAGS`, `EXTRA_FLAGS`, route directive or other build setting, keep that change identical throughout build/check/load. Do not replace the final command with bare `make fpga-load`: it can select a different configuration's existing image. Enabling Ethernet only at load time cannot change an old image.
+Do not continue if the build fails, freshness differs, or timing is unverified. `fpga-timing-ok` requires an existing report that explicitly meets timing constraints; use `fpga-build-force` with the same profile if a cached bitstream lacks its report. The helper only holds command arguments in your shell; in a new terminal, define it and select `fpga_variant` again. If you change a preset, clock, `RAPT_PACK_VFLAGS`, `EXTRA_FLAGS`, route directive or other build setting, keep that change identical throughout build/check/load. Use the same configuration for `fpga-load`; selecting different arguments can target a different build directory. Enabling Ethernet only at load time cannot change an old image.
 
 #### Custom build directories or an existing bitstream
 
@@ -142,7 +142,7 @@ litex> help
 
 Expect `netboot` with the description `Boot via Ethernet (TFTP)`. If absent:
 
-1. Check the exact build/load commands for `WITH_ETHERNET=1` and identical board, variant, preset and directory settings. Read any stale-bitstream warning.
+1. Check the exact build/load commands for `WITH_ETHERNET=1` and identical board, variant, preset and directory settings. Resolve any bitstream freshness error.
 2. Inspect `<FPGA_DIR>/software/include/generated/csr.h` for `#define CSR_ETHMAC_BASE`. If absent, that generated SoC has no Ethernet MAC exposed to BIOS. Rebuild with Ethernet enabled; regenerating BIOS alone does not update the ROM in the existing `.bit`.
 3. If the macro exists but the running BIOS lacks `netboot`, verify that you loaded the matching new `.bit`, not an older/default-directory image or the flash image restored by a power cycle. Keep the build and UART logs.
 

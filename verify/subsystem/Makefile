@@ -12,6 +12,9 @@ TRACE_PREFIX ?= $(BUILD_DIR)/coremark-rv$(XLEN)-$(TRACE_INSTS)
 VERILATOR ?= verilator
 VERILATOR_JOBS ?= 2
 FE_MAX_CYCLES ?= 1000000
+EXTRA_DEFINES ?=
+BPU_REPORT_DIR ?= $(BUILD_DIR)/bpu
+BPU_BASELINE ?=
 
 ifeq ($(XLEN),64)
 RV_DEFINE := -DRAPT_RV64
@@ -19,13 +22,17 @@ endif
 
 PKG := $(HDL_HOME)/rapt_pkg.sv
 RTL := $(shell find $(HDL_HOME) -name '*.sv' ! -name rapt_pkg.sv)
+HEADERS := $(HDL_HOME)/configs/$(CONFIG)/rapt_config.svh \
+              $(shell find $(HDL_HOME)/include -name '*.svh') \
+              $(RAPTOR_HOME)/verify/xsim/tb_core_bcast_defaults.svh
 INCLUDES := -I$(HDL_HOME)/configs/$(CONFIG) -I$(HDL_HOME)/include \
             -I$(HDL_HOME)/include/dpic_mock -I$(HDL_HOME)/include/npc \
             -I$(RAPTOR_HOME)/verify/xsim
 SV_FLAGS := --binary --timing --assert -Wno-fatal -j $(VERILATOR_JOBS) \
-            --timescale 1ns/1ps $(RV_DEFINE) $(INCLUDES)
+            --timescale 1ns/1ps $(RV_DEFINE) $(EXTRA_DEFINES) $(INCLUDES)
 
-.PHONY: trace fe be mem structure all
+.PHONY: trace fe bpu be mem structure all FORCE
+FORCE:
 trace:
 	@mkdir -p $(dir $(TRACE_PREFIX))
 	@cd $(NEMU_HOME) && \
@@ -38,7 +45,12 @@ trace:
 	  --output $(TRACE_PREFIX).meta.json
 	@echo "Trace: $(TRACE_PREFIX).inst $(TRACE_PREFIX).mem"
 
-$(BUILD_DIR)/fe/Vtb_frontend_trace: $(PKG) $(RTL) tb_frontend_trace.sv
+$(BUILD_DIR)/build.args: FORCE
+	@mkdir -p $(BUILD_DIR)
+	@printf '%s\n' 'CONFIG=$(CONFIG) XLEN=$(XLEN) EXTRA_DEFINES=$(EXTRA_DEFINES) VERILATOR=$(VERILATOR)' \
+	  | cmp -s - $@ || printf '%s\n' 'CONFIG=$(CONFIG) XLEN=$(XLEN) EXTRA_DEFINES=$(EXTRA_DEFINES) VERILATOR=$(VERILATOR)' > $@
+
+$(BUILD_DIR)/fe/Vtb_frontend_trace: $(PKG) $(RTL) $(HEADERS) tb_frontend_trace.sv $(BUILD_DIR)/build.args
 	@mkdir -p $(BUILD_DIR)/fe
 	@$(VERILATOR) $(SV_FLAGS) --top-module tb_frontend_trace \
 	  $(PKG) $(RTL) tb_frontend_trace.sv --Mdir $(BUILD_DIR)/fe \
@@ -49,7 +61,23 @@ fe: $(BUILD_DIR)/fe/Vtb_frontend_trace
 	  +TRACE=$(abspath $(TRACE_PREFIX)).inst +MAX_CYCLES=$(FE_MAX_CYCLES) \
 	  $(FE_ARGS) | tee $(BUILD_DIR)/fe/run.log
 
-$(BUILD_DIR)/mem/Vtb_memory_trace: $(PKG) $(RTL) tb_memory_trace.sv tb_axi_image.sv $(RAPTOR_HOME)/sim/tb/rapt_tb_mem.sv
+# The BPU view reuses the real FE replay and its compiled executable. The
+# detailed counters live in the testbench, so no production RTL is added.
+bpu: $(BUILD_DIR)/fe/Vtb_frontend_trace
+	@mkdir -p $(BPU_REPORT_DIR)
+	@set -e -o pipefail; $(BUILD_DIR)/fe/Vtb_frontend_trace +IMG=$(abspath $(IMG)) \
+	  +TRACE=$(abspath $(TRACE_PREFIX)).inst +MAX_CYCLES=$(FE_MAX_CYCLES) \
+	  +BPU_EVENTS=$(BPU_REPORT_DIR)/events.csv \
+	  $(FE_ARGS) | tee $(BPU_REPORT_DIR)/run.log
+	@python3 bpu_report.py --log $(BPU_REPORT_DIR)/run.log \
+	  --events $(BPU_REPORT_DIR)/events.csv \
+	  --trace $(abspath $(TRACE_PREFIX)).inst --image $(abspath $(IMG)) \
+	  --xlen $(XLEN) --config $(CONFIG) --defines="$(EXTRA_DEFINES)" \
+	  --executable $(BUILD_DIR)/fe/Vtb_frontend_trace \
+	  $(if $(BPU_BASELINE),--baseline $(BPU_BASELINE),) \
+	  --output $(BPU_REPORT_DIR)/summary.json
+
+$(BUILD_DIR)/mem/Vtb_memory_trace: $(PKG) $(RTL) $(HEADERS) tb_memory_trace.sv tb_axi_image.sv $(RAPTOR_HOME)/sim/tb/rapt_tb_mem.sv $(BUILD_DIR)/build.args
 	@mkdir -p $(BUILD_DIR)/mem
 	@$(VERILATOR) $(SV_FLAGS) --top-module tb_memory_trace \
 	  $(PKG) $(RTL) $(RAPTOR_HOME)/sim/tb/rapt_tb_mem.sv tb_axi_image.sv tb_memory_trace.sv \
@@ -62,7 +90,7 @@ mem: $(BUILD_DIR)/mem/Vtb_memory_trace
 	  +MEM_TRACE=$(abspath $(TRACE_PREFIX)).mem $(MEM_ARGS) \
 	  | tee $(BUILD_DIR)/mem/run.log
 
-$(BUILD_DIR)/be/Vtb_backend_trace: $(PKG) $(RTL) tb_backend_trace.sv tb_axi_image.sv $(RAPTOR_HOME)/sim/tb/rapt_tb_mem.sv
+$(BUILD_DIR)/be/Vtb_backend_trace: $(PKG) $(RTL) $(HEADERS) tb_backend_trace.sv tb_axi_image.sv $(RAPTOR_HOME)/sim/tb/rapt_tb_mem.sv $(BUILD_DIR)/build.args
 	@mkdir -p $(BUILD_DIR)/be
 	@$(VERILATOR) $(SV_FLAGS) --top-module tb_backend_trace \
 	  $(PKG) $(RTL) $(RAPTOR_HOME)/sim/tb/rapt_tb_mem.sv tb_axi_image.sv tb_backend_trace.sv \
@@ -82,5 +110,5 @@ all: trace
 structure:
 	@set -e; for module in frontend backend memory; do \
 	  $(MAKE) -C $(RAPTOR_HOME)/lspd/syn structure-check MODULE=$$module \
-	    RAPT_CONFIG=$(CONFIG) EXTRA_DEFINES=$(if $(filter 64,$(XLEN)),-DRAPT_RV64); \
+	    RAPT_CONFIG=$(CONFIG) EXTRA_DEFINES="$(if $(filter 64,$(XLEN)),-DRAPT_RV64) $(EXTRA_DEFINES)"; \
 	done

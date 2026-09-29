@@ -743,6 +743,10 @@ endif
 	fi; \
 	$(call _run_litex_target,$(_FPGA_FLAGS) --build) && \
 	FINAL_HASH=$$($(_FPGA_HASH_COMMAND)) && \
+	if [ "$$FINAL_HASH" != "$$NEW_HASH" ]; then \
+		echo "[ERR] FPGA inputs changed during build; refusing to stamp this bitstream as current." >&2; \
+		exit 1; \
+	fi && \
 	printf '%s' "$$FINAL_HASH" > $(FPGA_STAMP)
 	@$(MAKE) --no-print-directory fpga-reports-index $(_FPGA_REPORTS_INDEX_ARGS)
 	@echo ""
@@ -790,9 +794,9 @@ fpga-timing-ok:
 ifeq ($(FPGA_VENDOR),vivado)
 	@rpt="$(FPGA_BUILD_DIR)/$(FPGA_TIMINGRPT)"; \
 	if [ ! -f "$$rpt" ]; then \
-		echo "[WARN] Vivado timing report not found: $$rpt"; \
-		echo "[WARN] Timing status is unverified; skipping timing check. Run 'make fpga-build' to generate the report."; \
-		exit 0; \
+		echo "[ERR] Vivado timing report not found: $$rpt"; \
+		echo "[ERR] Timing status is unverified. Run 'make fpga-build-force' with the same profile to regenerate the report."; \
+		exit 1; \
 	fi; \
 	if grep -q "Timing constraints are not met" "$$rpt"; then \
 		echo "[ERR] Vivado timing constraints are not met; refusing hardware load/flash/upload."; \

@@ -43,15 +43,14 @@ See [`fpga/litex/README.md`](../fpga/litex/README.md) for the LiteX BIOS + Linux
 
 - **Synthesis**: [Yosys](https://github.com/YosysHQ/yosys) with
   [yosys-slang](https://github.com/povik/yosys-slang) front-end for SystemVerilog.
-- **STA**: [yosys-opensta](https://github.com/Kingfish404/yosys-opensta) — open-source
+- **STA**: [yosys-opensta](https://github.com/Kingfish404/yosys-opensta) - open-source
   static timing analysis (`make sta`).
 - **PDK**: open-source cell libraries; PPA results published under
   [openppa](https://github.com/Kingfish404/openppa).
 
-See **[PROFILE.md](./PROFILE.md)** for archived Freq / Power / Area results,
-[Performance Iterations](./perf-iterations.md) for recorded configuration-specific
-measurements, and
-**[REFERENCE.md](./REFERENCE.md)** for the PPA benchmark framework.
+See **[REFERENCE.md](./REFERENCE.md)** for the PPA benchmark framework.
+Record the source revision, configuration, XLEN, memory model, and constraints
+with each timing or area measurement.
 
 ## Software Stack
 
@@ -70,15 +69,15 @@ measurements, and
 
 | Device             | Range                       |
 | ------------------ | --------------------------- |
-| Finisher           | `0x0010_0000 – 0x0010_0fff` |
-| CLINT              | `0x0200_0000 – 0x020b_ffff` |
-| PLIC               | `0x0c00_0000 – 0x0cff_ffff` |
-| SRAM               | `0x0f00_0000 – 0x0f00_1fff` |
-| UART / peripherals | `0x1000_0000 – 0x1001_1fff` |
-| MROM               | `0x2000_0000 – 0x2000_ffff` |
-| Flash              | `0x3000_0000 – 0x3fff_ffff` |
-| PMEM (main memory) | `0x8000_0000 – 0x8fff_ffff` |
-| SDRAM              | `0xa000_0000 – 0xa1ff_ffff` |
+| Finisher           | `0x0010_0000 - 0x0010_0fff` |
+| CLINT              | `0x0200_0000 - 0x020b_ffff` |
+| PLIC               | `0x0c00_0000 - 0x0cff_ffff` |
+| SRAM               | `0x0f00_0000 - 0x0f00_1fff` |
+| UART / peripherals | `0x1000_0000 - 0x1001_1fff` |
+| MROM               | `0x2000_0000 - 0x2000_ffff` |
+| Flash              | `0x3000_0000 - 0x3fff_ffff` |
+| PMEM (main memory) | `0x8000_0000 - 0x8fff_ffff` |
+| SDRAM              | `0xa000_0000 - 0xa1ff_ffff` |
 
 Reset vector `PC_INIT` = `0x2000_0000` (MROM).
 
@@ -122,8 +121,8 @@ Source: [`hw/riscv/virt.c`](https://github.com/qemu/qemu/blob/master/hw/riscv/vi
 
 ## Upstream & Related Projects
 
-- [NJU-ProjectN/NEMU](https://github.com/NJU-ProjectN/nemu) — reference ISS.
-- [NJU-ProjectN/abstract-machine](https://github.com/NJU-ProjectN/abstract-machine) — AM runtime.
-- [riscv-software-src/opensbi](https://github.com/riscv-software-src/opensbi) — SBI firmware.
-- [enjoy-digital/litex](https://github.com/enjoy-digital/litex) — FPGA SoC framework.
-- [OpenXiangShan/XiangShan](https://github.com/OpenXiangShan/XiangShan) — inspirational reference.
+- [NJU-ProjectN/NEMU](https://github.com/NJU-ProjectN/nemu) - reference ISS.
+- [NJU-ProjectN/abstract-machine](https://github.com/NJU-ProjectN/abstract-machine) - AM runtime.
+- [riscv-software-src/opensbi](https://github.com/riscv-software-src/opensbi) - SBI firmware.
+- [enjoy-digital/litex](https://github.com/enjoy-digital/litex) - FPGA SoC framework.
+- [OpenXiangShan/XiangShan](https://github.com/OpenXiangShan/XiangShan) - inspirational reference.

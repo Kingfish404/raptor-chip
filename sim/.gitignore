@@ -17,6 +17,7 @@
 !scripts/build_cache.py
 !scripts/sta.py
 !*.sv
+!*.svh
 !gsim/*.json
 !ysyxsoc/setup.py
 

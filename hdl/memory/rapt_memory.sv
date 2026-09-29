@@ -6,7 +6,7 @@
 module rapt_memory #(
     parameter int XLEN = `RAPT_XLEN,
     parameter int MemoryReadCredits = 8,
-    parameter bit L1dWriteBack = 1'b0
+    parameter bit L1dWriteBack = `RAPT_L1D_WRITEBACK
 ) (
     input logic clock,
     input logic reset,
@@ -34,7 +34,16 @@ module rapt_memory #(
   l1d_bus_if l1d_bus ();
   mem_link_if memory_link ();
   axi4_if l2_axi ();
+  axi4_if l2_outer_axi ();
   logic cache_coherent_ready, cache_coherent_request, cache_coherent_write;
+  logic l2_probe_valid, l2_probe_ready;
+  logic [XLEN-1:0] l2_probe_addr;
+  logic l2_probe_release_valid, l2_probe_release_ready;
+  logic [XLEN-1:0] l2_probe_release_addr, l2_probe_release_data;
+  logic l2_release_valid, l2_release_ready, l2_release_ack;
+  logic l2_release_has_data, l2_release_mask, l2_release_last;
+  logic [XLEN-1:0] l2_release_addr, l2_release_data;
+  logic l2_probe_window, l1d_writeback_bus_pending;
   logic data_idle_q;
 
   // IO instruction fetches need a quiescent data side, but the live bus-idle
@@ -75,6 +84,23 @@ module rapt_memory #(
       .coherent_ready(cache_coherent_ready),
       .coherent_request(cache_coherent_request),
       .coherent_write(cache_coherent_write),
+      .probe_valid_i(l2_probe_valid),
+      .probe_addr_i(l2_probe_addr),
+      .probe_ready_o(l2_probe_ready),
+      .probe_release_valid_o(l2_probe_release_valid),
+      .probe_release_addr_o(l2_probe_release_addr),
+      .probe_release_data_o(l2_probe_release_data),
+      .probe_release_ready_i(l2_probe_release_ready),
+      .release_valid_o(l2_release_valid),
+      .release_addr_o(l2_release_addr),
+      .release_data_o(l2_release_data),
+      .release_has_data_o(l2_release_has_data),
+      .release_mask_o(l2_release_mask),
+      .release_last_o(l2_release_last),
+      .release_ready_i(l2_release_ready),
+      .release_ack_i(l2_release_ack),
+      .probe_window_i(l2_probe_window),
+      .writeback_bus_pending_o(l1d_writeback_bus_pending),
       .writeback_error(writeback_error_o),
       .writeback_idle(writeback_idle_o),
       .writeback_drain(writeback_drain_i),
@@ -118,7 +144,38 @@ module rapt_memory #(
       .reset(reset),
       .cbo_inval_i(cmu_bcast.cbo_inval),
       .cbo_block_i(cmu_bcast.cbo_block),
+      .probe_valid_o(l2_probe_valid),
+      .probe_addr_o(l2_probe_addr),
+      .probe_ready_i(l2_probe_ready),
+      .probe_release_valid_i(l2_probe_release_valid),
+      .probe_release_addr_i(l2_probe_release_addr),
+      .probe_release_data_i(l2_probe_release_data),
+      .probe_release_ready_o(l2_probe_release_ready),
+      .release_valid_i(l2_release_valid),
+      .release_addr_i(l2_release_addr),
+      .release_data_i(l2_release_data),
+      .release_has_data_i(l2_release_has_data),
+      .release_mask_i(l2_release_mask),
+      .release_last_i(l2_release_last),
+      .release_ready_o(l2_release_ready),
+      .release_ack_o(l2_release_ack),
+      .l1d_writeback_pending_i(l1d_writeback_bus_pending),
+      .probe_window_o(l2_probe_window),
       .axi_s(l2_axi),
-      .axi_m(io_master)
+      .axi_m(l2_outer_axi)
+  );
+
+  rapt_axi_r_buffer #(
+      .XLEN(XLEN),
+`ifdef RAPT_L2_STORE_WRITEBACK
+      .Enable(1'b1)
+`else
+      .Enable(1'b0)
+`endif
+  ) outer_r_buffer (
+      .clock,
+      .reset,
+      .upstream(l2_outer_axi),
+      .downstream(io_master)
   );
 endmodule

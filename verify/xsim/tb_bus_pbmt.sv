@@ -101,9 +101,13 @@ module tb_bus_pbmt;
   endtask
   task automatic write_case(input int attr, input bit data_first);
     logic [3:0] expected;
-    // Cacheable core writes retain allocation but cannot be acknowledged
-    // by an intermediate buffer: downstream errors belong to this owner.
+    // The BOOM-layout L2 accepts bufferable cacheable writes; other presets
+    // retain a final-destination response for this store owner.
+`ifdef RAPT_L2_STORE_WRITEBACK
+    expected = attr == 0 ? 4'hf : attr == 1 ? 4'h2 : 4'h0;
+`else
     expected = attr == 0 ? 4'he : attr == 1 ? 4'h2 : 4'h0;
+`endif
     l1d_bus.awaddr = 'h80000000;
     l1d_bus.wdata = 'h12345678;
     l1d_bus.wstrb = 8'h0f;

@@ -24,6 +24,7 @@ module rapt_iq #(
     // Same-cycle CDB operand wake. Mask must exclude any completion port
     // this queue produces combinationally (BRQ skips the branch port).
     parameter bit                     ComboCdbWake    = 1'b0,
+    parameter bit                     ConfirmCdbWake  = 1'b0,
     parameter logic [31:0]            ComboWakePorts  = 32'hFFFF_FFFF,
     parameter unsigned                ROB_SIZE        = Cfg.rob_entries,
     parameter unsigned                PLEN            = rapt_pkg::index_bits(Cfg.phys_regs),
@@ -251,35 +252,44 @@ module rapt_iq #(
   logic [IQ_SIZE-1:0] pr_ready;
   logic [IQ_SIZE-1:0] iq_ready_vec;
 
-  always_comb begin
-    for (int i = 0; i < IQ_SIZE; i++) begin
-      pr1_fast_confirm[i] = fast_confirm_match(iq_pr1_fast[i], iq_pr1[i], iq_pr1_fast_dest[i],
+  for (genvar i = 0; i < IQ_SIZE; i++) begin : g_wake_view
+    assign pr1_fast_confirm[i] = fast_confirm_match(iq_pr1_fast[i], iq_pr1[i], iq_pr1_fast_dest[i],
                                                iq_pr1_fast_generation[i]);
-      pr2_fast_confirm[i] = fast_confirm_match(iq_pr2_fast[i], iq_pr2[i], iq_pr2_fast_dest[i],
+    assign pr2_fast_confirm[i] = fast_confirm_match(iq_pr2_fast[i], iq_pr2[i], iq_pr2_fast_dest[i],
                                                iq_pr2_fast_generation[i]);
-      pr1_fast_rebusy[i] = fast_rebusy_match(iq_pr1_fast[i], iq_pr1[i], iq_pr1_fast_dest[i],
+    assign pr1_fast_rebusy[i] = fast_rebusy_match(iq_pr1_fast[i], iq_pr1[i], iq_pr1_fast_dest[i],
                                              iq_pr1_fast_generation[i]);
-      pr2_fast_rebusy[i] = fast_rebusy_match(iq_pr2_fast[i], iq_pr2[i], iq_pr2_fast_dest[i],
+    assign pr2_fast_rebusy[i] = fast_rebusy_match(iq_pr2_fast[i], iq_pr2[i], iq_pr2_fast_dest[i],
                                              iq_pr2_fast_generation[i]);
-      pr1_fast_wake[i] = iq_pr1_busy[i] && fast_wake_match(iq_pr1[i]);
-      pr2_fast_wake[i] = iq_pr2_busy[i] && fast_wake_match(iq_pr2[i]);
-      pr1_slow_hit[i] = iq_pr1_busy[i] && wb_hit(iq_pr1[i]);
-      pr2_slow_hit[i] = iq_pr2_busy[i] && wb_hit(iq_pr2[i]);
-      pr1_combo_hit[i] = iq_pr1_busy[i] && combo_wb_hit(iq_pr1[i]);
-      pr2_combo_hit[i] = iq_pr2_busy[i] && combo_wb_hit(iq_pr2[i]);
-      pr1_slow_val[i] = wb_val(iq_pr1[i], iq_vj[i]);
-      pr2_slow_val[i] = wb_val(iq_pr2[i], iq_vk[i]);
-      pr1_combo_val[i] = combo_wb_val(iq_pr1[i], iq_vj[i]);
-      pr2_combo_val[i] = combo_wb_val(iq_pr2[i], iq_vk[i]);
-      // A load confirmation owns the operand only after this clock edge.
-      // Do not let L1D response control run through issue selection, execute,
-      // ROU dispatch, and the next IOQ request in the same cycle.
-      pr_ready[i] = !dependencies_busy(i)
-          && (!iq_pr1_busy[i] || (ComboCdbWake && pr1_combo_hit[i]))
-          && (!iq_pr2_busy[i] || (ComboCdbWake && pr2_combo_hit[i]))
-          && !iq_pr1_fast[i] && !iq_pr2_fast[i];
-      iq_ready_vec[i] = iq_valid[i] && pr_ready[i];
+    assign pr1_fast_wake[i] = iq_pr1_busy[i] && fast_wake_match(iq_pr1[i]);
+    assign pr2_fast_wake[i] = iq_pr2_busy[i] && fast_wake_match(iq_pr2[i]);
+    assign pr1_slow_hit[i] = iq_pr1_busy[i] && wb_hit(iq_pr1[i]);
+    assign pr2_slow_hit[i] = iq_pr2_busy[i] && wb_hit(iq_pr2[i]);
+    assign pr1_combo_hit[i] = iq_pr1_busy[i] && combo_wb_hit(iq_pr1[i]);
+    assign pr2_combo_hit[i] = iq_pr2_busy[i] && combo_wb_hit(iq_pr2[i]);
+    assign pr1_slow_val[i] = wb_val(iq_pr1[i], iq_vj[i]);
+    assign pr2_slow_val[i] = wb_val(iq_pr2[i], iq_vk[i]);
+    assign pr1_combo_val[i] = combo_wb_val(iq_pr1[i], iq_vj[i]);
+    assign pr2_combo_val[i] = combo_wb_val(iq_pr2[i], iq_vk[i]);
+  end
+  // Keep selector eligibility separate from CDB value capture. A simulator
+  // schedules all outputs of an always_comb together; mixing readiness with
+  // our own completion data creates an apparent issue -> execute -> CDB ->
+  // ready loop even when ComboCdbWake is disabled.
+  for (genvar i = 0; i < IQ_SIZE; i++) begin : g_operand_ready
+    logic registers_ready;
+    // A load confirmation updates the stored operand at the edge. The fast
+    // tag must clear before selection can consume that registered value.
+    if (ComboCdbWake) begin : g_combo_wake
+      assign registers_ready = (!iq_pr1_busy[i] || pr1_combo_hit[i])
+          && (!iq_pr2_busy[i] || pr2_combo_hit[i]);
+    end else begin : g_registered_wake
+      assign registers_ready = !iq_pr1_busy[i] && !iq_pr2_busy[i];
     end
+    assign pr_ready[i] = !dependencies_busy(i) && registers_ready
+        && (!iq_pr1_fast[i] || (ConfirmCdbWake && pr1_fast_confirm[i]))
+        && (!iq_pr2_fast[i] || (ConfirmCdbWake && pr2_fast_confirm[i]));
+    assign iq_ready_vec[i] = iq_valid[i] && pr_ready[i];
   end
 
   int alloc_slot[IQ_SIZE];
@@ -470,9 +480,11 @@ module rapt_iq #(
     // Cancellation gates only this valid bit; the selected identity and
     // payload above do not depend on the recovery transaction.
     assign issue[p].valid = |selected[p] && !cancelled[index];
-    assign issue[p].op1 = (ComboCdbWake && pr1_combo_hit[index])
+    assign issue[p].op1 = (ConfirmCdbWake && pr1_fast_confirm[index])
+        ? load_fast.result : (ComboCdbWake && pr1_combo_hit[index])
         ? pr1_combo_val[index] : stored_op1;
-    assign issue[p].op2 = (ComboCdbWake && pr2_combo_hit[index])
+    assign issue[p].op2 = (ConfirmCdbWake && pr2_fast_confirm[index])
+        ? load_fast.result : (ComboCdbWake && pr2_combo_hit[index])
         ? pr2_combo_val[index] : stored_op2;
     `RAPT_SVA_IMPLY(clock, reset, IQ_SELECT_ONEHOT, issue[p].valid, $onehot(selected[p]))
     for (genvar q = p + 1; q < NumIssuePorts; q++) begin : g_disjoint
@@ -559,21 +571,15 @@ module rapt_iq #(
           // Payload/wakeup metadata remain don't-care while invalid. Neither
           // a late completion nor a fast confirmation can recreate validity.
           iq_valid[i] <= 1'b0;
-        end else if (iq_valid[i] && pr_ready[i]) begin
-          // Issue clear: entries selected on either port free this cycle
-          // (dedicated WB ports, never back-pressured).  Only the valid bit
-          // and the operand-tracking bits are cleared; payload arrays keep
-          // their old values (don't-care once invalid).
-          if (claimed[i]) begin
-            iq_valid[i]    <= 1'b0;
-            iq_pr1_busy[i] <= 1'b0;
-            iq_pr2_busy[i] <= 1'b0;
-            iq_pr1_fast[i] <= 1'b0;
-            iq_pr2_fast[i] <= 1'b0;
-
-            for (int d = 0; d < NumDependencies; d++) iq_dep_busy[d][i] <= 1'b0;
-
-          end
+        end else if (iq_valid[i] && claimed[i]) begin
+          // A ready entry that loses port arbitration still captures wakeup.
+          // Only an accepted issue may suppress the operand state update.
+          iq_valid[i]    <= 1'b0;
+          iq_pr1_busy[i] <= 1'b0;
+          iq_pr2_busy[i] <= 1'b0;
+          iq_pr1_fast[i] <= 1'b0;
+          iq_pr2_fast[i] <= 1'b0;
+          for (int d = 0; d < NumDependencies; d++) iq_dep_busy[d][i] <= 1'b0;
         end else if (iq_valid[i]) begin
           // Operand wakeup. Per tag, fast-wake and slow-hit are mutually
           // exclusive (unique producer), so arm order beyond the fast

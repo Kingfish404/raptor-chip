@@ -5,7 +5,7 @@
 // may warm the target-side instruction path immediately, while all mutable
 // IFU/FQU/IDU stream state remains empty until the precise cleanup fence drops.
 module tb_frontend_recovery;
-  localparam int XLEN = 32;
+  localparam int XLEN = `RAPT_XLEN;
   localparam logic [XLEN-1:0] RecoveryTarget = 32'h8000_3000;
 
   logic clock = 0, reset = 1;
@@ -92,6 +92,12 @@ module tb_frontend_recovery;
     ifu_l1i.inst_n2 = 32'h0001_0001;
     ifu_l1i.inst_n1_valid = 1'b1;
     ifu_l1i.inst_n2_valid = 1'b1;
+`ifdef RAPT_FETCH_WIDE
+    ifu_l1i.inst_n3 = '0;
+    ifu_l1i.inst_n4 = '0;
+    ifu_l1i.inst_n3_valid = 1'b0;
+    ifu_l1i.inst_n4_valid = 1'b0;
+`endif
     ifu_l1i.trap = 1'b0;
     ifu_l1i.cause = '0;
     ifu_l1i.tval = '0;
@@ -143,6 +149,50 @@ module tb_frontend_recovery;
       end
       assert (target_seen)
       else $fatal(1, "target stream did not resume after recovery release");
+    end
+
+    // Same-context commit redirect keeps the flush-cycle prefetch. The next
+    // cycle must accept the already-valid target response instead of cancelling it.
+    begin : same_context_redirect
+      localparam logic [XLEN-1:0] SameContextTarget = 32'h8000_4000;
+      cmu_bcast.cpc = SameContextTarget;
+      cmu_bcast.flush_pipe = 1'b1;
+      cmu_bcast.fetch_context_stable = 1'b0;
+      #1;
+      assert (ifu_l1i.prefetch_valid && ifu_l1i.prefetch_pc == SameContextTarget)
+      else $fatal(1, "same-context flush did not prefetch its target");
+      tick();
+      cmu_bcast.flush_pipe = 1'b0;
+      cmu_bcast.flush_redirect = 1'b1;
+      cmu_bcast.fetch_context_stable = 1'b1;
+      cmu_bcast.redirect_pc = SameContextTarget;
+      #1;
+      assert (ifu.pc_ifu == SameContextTarget && !ifu.redirect_event && ifu.recv_ready)
+      else $fatal(1, "same-context redirect cancelled the prefetched target");
+      tick();
+      assert (ifu.held_count != 0 && ifu.held[0].pc == SameContextTarget)
+      else $fatal(1, "same-context redirect did not accept the target instruction");
+      cmu_bcast.flush_redirect = 1'b0;
+      cmu_bcast.fetch_context_stable = 1'b0;
+    end
+
+    // Privilege and translation redirects still discard the flush-cycle response.
+    begin : context_change_redirect
+      localparam logic [XLEN-1:0] PrivTarget = 32'h8000_5000;
+      cmu_bcast.cpc = PrivTarget;
+      cmu_bcast.flush_pipe = 1'b1;
+      #1;
+      tick();
+      cmu_bcast.flush_pipe = 1'b0;
+      cmu_bcast.flush_redirect = 1'b1;
+      cmu_bcast.fetch_context_stable = 1'b0;
+      cmu_bcast.redirect_pc = PrivTarget;
+      #1;
+      assert (ifu.redirect_event && !ifu.recv_ready)
+      else $fatal(1, "context-changing redirect accepted a fetch response");
+      tick();
+      assert (ifu.held_count == 0)
+      else $fatal(1, "context-changing redirect repopulated the IFU");
     end
     $display("PASS: unified recovery redirects once, fences IFU/FQU/IDU, and resumes at target");
     $finish;

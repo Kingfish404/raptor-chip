@@ -164,11 +164,14 @@ package rapt_pkg;
   localparam int unsigned DispatchStopRecovery = 10;
   localparam int unsigned DispatchStopCount = 11;
   typedef logic [index_bits(DispatchStopCount)-1:0] dispatch_stop_t;
+  // The fixed branch queue participates in the same dispatch index fabric.
+  // Small ALQ/IOQ presets must still encode all eight BRQ slots.
+  localparam int unsigned BranchQueueEntries = 8;
   localparam int unsigned QueueIndexBits = index_bits(
       (CoreConfig.iq_entries > CoreConfig.ioq_entries ? CoreConfig.iq_entries
-          : CoreConfig.ioq_entries) > 4
+          : CoreConfig.ioq_entries) > BranchQueueEntries
       ? (CoreConfig.iq_entries > CoreConfig.ioq_entries ? CoreConfig.iq_entries
-          : CoreConfig.ioq_entries) : 4
+          : CoreConfig.ioq_entries) : BranchQueueEntries
   );
   typedef logic [IntegerIssuePorts-1:0] integer_port_mask_t;
   function automatic integer_port_mask_t integer_system_port_mask();
@@ -337,7 +340,8 @@ package rapt_pkg;
 
     // Branch / jump resolution (WB-written)
     logic               btaken;
-    logic [XLENPkg-1:0] npc;
+    // Every completed next PC is an instruction address (IALIGN=16).
+    logic [XLENPkg-1:1] npc;
     // 1-bit BPU mispredict flag (dispatch-init 0; WB sets when computed
     // npc != predicted pnpc). Replaces an XLEN-wide `pnpc` field that was
     // only ever consumed for the `npc != pnpc` comparison at commit.

@@ -1,11 +1,14 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
+`include "tb_l1d_unused_release_ports.svh"
 module tb_cbo_set;
   localparam int LineBytes = `RAPT_CACHE_LINE_BYTES;
   localparam int WayBytes = LineBytes * (1 << `RAPT_L1D_LEN);
   localparam int Capacity = WayBytes * `RAPT_L1D_N_WAYS;
   localparam int XLEN = `RAPT_XLEN;
   logic clock = 0, reset = 1;
+  logic coherent_request = 0, coherent_write = 0, writeback_drain = 0;
+  logic coherent_ready, writeback_error, writeback_idle;
   always #5 clock = ~clock;
   cmu_bcast_if cmu_bcast ();
   lsu_l1d_if lsu_l1d ();
@@ -21,6 +24,7 @@ module tb_cbo_set;
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
       .external_write_last_i('0),
+      `TB_L1D_UNUSED_RELEASE_PORTS,
       .*
   );
   `include "tb_l1d_defaults.svh"
@@ -44,7 +48,7 @@ module tb_cbo_set;
         if (lsu_l1d.trap || lsu_l1d.rdata != word_at(addr))
           $fatal(1, "load addr=%h got=%h expected=%h", addr, lsu_l1d.rdata, word_at(addr));
         if (clear_with_fill) begin
-          cmu_bcast.cbo_block = addr[11:6];
+          cmu_bcast.cbo_block = addr[XLEN-1:6];
           cmu_bcast.cbo_inval = 1;
         end
         @(posedge clock);
@@ -72,7 +76,7 @@ module tb_cbo_set;
   endtask
   task automatic invalidate(input logic [XLEN-1:0] va);
     @(negedge clock);
-    cmu_bcast.cbo_block = va[11:6];
+    cmu_bcast.cbo_block = va[XLEN-1:6];
     cmu_bcast.cbo_inval = 1;
     cmu_bcast.flush_pipe = 1;
     @(negedge clock);

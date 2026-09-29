@@ -58,7 +58,7 @@
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_core))
 #elif __has_include(CONCAT_HEAD(CONCAT(TOP_NAME, _rapt__Lz1)))
-// An explicit L1dWriteBack=1 top parameter specializes these generated classes.
+// A write-back top parameter (including default-l2's default) specializes these classes.
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt__Lz1))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_core__Lz1))
 #else
@@ -100,7 +100,8 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->mcounte = csr + MCOUNTE;
 
   npc->sscratch = csr + SSCRATCH;
-  npc->sepc___ = csr + SEPC___;
+  npc->sepc___ = (word_t *)&VERILOG_BACKEND(csrs__DOT__sepc_value);
+  npc->sepc_half_q = (word_t *)&VERILOG_BACKEND(csrs__DOT__sepc_half_q);
   npc->scause_ = csr + SCAUSE_;
   npc->stval__ = csr + STVAL__;
   npc->sip____ = csr + SIP____;
@@ -127,7 +128,10 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
 
   npc->mstatush = csr + MSTATUSH;
   npc->mscratch = csr + MSCRATCH;
-  npc->mepc___ = csr + MEPC___;
+  // EPC storage is halfword-packed in RTL; observe the architectural value.
+  // Keep the state pointer for checkpoint restore, which must write storage.
+  npc->mepc___ = (word_t *)&VERILOG_BACKEND(csrs__DOT__mepc_value);
+  npc->mepc_half_q = (word_t *)&VERILOG_BACKEND(csrs__DOT__mepc_half_q);
   npc->mcause_ = csr + MCAUSE_;
   npc->mtval__ = csr + MTVAL__;
   npc->mip____ = (word_t *)&VERILOG_BACKEND(csrs__DOT__csr_mip_shadow);

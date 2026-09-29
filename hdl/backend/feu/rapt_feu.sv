@@ -189,7 +189,8 @@ module rapt_feu #(
   logic [$clog2(ROB_SIZE)-1:0] fp_pending_dest_q;
   logic [`RAPT_PHY_LEN-1:0] fp_pending_prd_q;
   logic [`RAPT_REG_LEN-1:0] fp_pending_rd_q;
-  logic [XLEN-1:0] fp_pending_pc_q;
+  logic [XLEN-1:1] fp_pending_pc_q;
+  wire [XLEN-1:0] fp_pending_pc = {fp_pending_pc_q, 1'b0};
   logic fp_pending_c_q;
   logic fp_pending_to_gpr_q;
   logic [4:0] fp_pending_frd_q;
@@ -476,7 +477,7 @@ module rapt_feu #(
       fp_pending_generation_q <= iss.generation;
       fp_pending_prd_q <= iss.prd;
       fp_pending_rd_q <= iss.uop.rd;
-      fp_pending_pc_q <= iss.uop.pc;
+      fp_pending_pc_q <= iss.uop.pc[XLEN-1:1];
       fp_pending_c_q <= iss.uop.c;
       fp_pending_to_gpr_q <= fp_to_int_launch;
       fp_pending_frd_q <= fp_rd;
@@ -752,14 +753,14 @@ module rapt_feu #(
     : (fp_single_to_int_w || fp_single_to_int_l) ? fp_single_to_int_result[XLEN-1:0]
     : (fp_double_to_int_w || fp_double_to_int_l) ? fp_double_to_int_result[XLEN-1:0] : '0);
   assign wb_fpu.npc = fp_pending_q
-        ? fp_pending_pc_q + (fp_pending_c_q ? 2 : 4)
+        ? fp_pending_pc + (fp_pending_c_q ? 2 : 4)
         : iss.uop.pc + (iss.uop.c ? 2 : 4);
   // FP instructions are not control flow; IDU already repaired any false
   // fetch prediction before they entered rename.
   assign wb_fpu.mispredict = 1'b0;
   assign wb_fpu.prd = fp_pending_q ? fp_pending_prd_q : iss.prd;
   assign wb_fpu.rd = fp_pending_q ? fp_pending_rd_q : iss.uop.rd;
-  assign wb_fpu.pc = fp_pending_q ? fp_pending_pc_q : iss.uop.pc;
+  assign wb_fpu.pc = fp_pending_q ? fp_pending_pc : iss.uop.pc;
   assign wb_fpu.fp_flags_valid = fp_complete
     || ((fp_minmax || fp_compare || fp_single_to_int_w
     || fp_single_to_int_l || fp_double_to_int_w || fp_double_to_int_l

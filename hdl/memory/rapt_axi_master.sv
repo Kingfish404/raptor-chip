@@ -162,12 +162,14 @@ module rapt_axi_master #(
         write_id <= mem.wr_req_id;
         write_addr <= mem.wr_req_zero ? {mem.wr_req_addr[XLEN-1:6], 6'b0} : mem.wr_req_addr;
         write_size <= mem.wr_req_zero ? 3'($clog2(XLEN/8)) : write_cover_size;
-        // The SQ/MBERR path must observe the real downstream B response.
-        // Allowing an intermediate cache to acknowledge a bufferable write
-        // early loses a later error (there is no separate late-error channel).
-        // Retain normal cache/allocation attributes, but require completion
-        // at the final destination rather than a posted intermediate B.
+        // The BOOM-layout L2 owns cacheable store completion and needs the
+        // bufferable attribute to perform local write-back/allocate. Other
+        // presets retain the final-destination B response for SQ/MBERR.
+`ifdef RAPT_L2_STORE_WRITEBACK
+        write_cache <= rapt_pkg::axi_cache_attr(mem.wr_req_addr, mem.wr_req_pbmt);
+`else
         write_cache <= rapt_pkg::axi_cache_attr(mem.wr_req_addr, mem.wr_req_pbmt) & 4'b1110;
+`endif
         write_data <= mem.wr_req_zero ? '0 : mem.wr_req_data << (write_addr_offset * 8);
         write_strb <= mem.wr_req_zero ? '1 : mem.wr_req_strb << write_addr_offset;
       end else begin

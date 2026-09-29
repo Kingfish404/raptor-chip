@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a hand-written behavioral Liberty .lib and a synthesizable .v
+"""Generate a behavioral Liberty .lib and a synthesizable .v
 for a raptor-chip 1R1W cache SRAM macro.
 
 This is a *placeholder* for OpenRAM output. It lets `make sta MEMORY=sram` close

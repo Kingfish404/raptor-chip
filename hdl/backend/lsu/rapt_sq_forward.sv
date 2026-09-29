@@ -6,6 +6,7 @@ module rapt_sq_forward #(
     parameter int Xlen = `RAPT_XLEN,
     parameter int Entries = `RAPT_SQ_SIZE,
     parameter int ReadPorts = 2,
+    parameter bit NarrowForward = `RAPT_SQ_NARROW_FORWARD,
     parameter int IndexBits = $clog2(Entries)
 ) (
     input logic [IndexBits-1:0] head,
@@ -17,6 +18,7 @@ module rapt_sq_forward #(
     input logic store_fp64[Entries],
     input logic [7:0] full_store_mask,
     input logic mmu_enabled,
+    input logic [ReadPorts-1:0] narrow_allowed = '1,
     input logic alloc_valid,
     input logic [Xlen-1:0] alloc_addr,
     input logic [4:0] alloc_alu,
@@ -71,6 +73,15 @@ module rapt_sq_forward #(
     return ((borrow_word ? next_block : same_block) && delta <= span)
         || ((reverse_borrow ? previous_block : same_block) && reverse_delta <= load_span);
   endfunction
+  function automatic logic [3:0] store_size_m1(input logic [4:0] alu);
+    case (alu)
+      `RAPT_SB_WSTRB: return 0;
+      `RAPT_SH_WSTRB: return 1;
+      `RAPT_SW_WSTRB: return 3;
+      `RAPT_SD_WSTRB: return 7;
+      default: return 0;
+    endcase
+  endfunction
   logic [1:0] store_words[Entries], alloc_words;
   for (genvar entry_idx = 0; entry_idx < Entries; entry_idx++) begin : g_span
     assign store_words[entry_idx] = store_span(
@@ -107,8 +118,18 @@ module rapt_sq_forward #(
       assign eligible[entry_idx] = !stale_context[entry_idx]
           && load_words == 0
           && store_addr[entry_idx][Xlen-1:OffsetBits] == load_addr[port_idx][Xlen-1:OffsetBits]
-          && store_addr[entry_idx][OffsetBits-1:0] == '0
-          && 8'(store_alu[entry_idx]) == full_store_mask;
+          && ((store_addr[entry_idx][OffsetBits-1:0] == '0
+                  && 8'(store_alu[entry_idx]) == full_store_mask)
+              || (NarrowForward && !mmu_enabled && narrow_allowed[port_idx] && !store_fp64[entry_idx]
+                  && store_words[entry_idx] == 0
+                  && (store_alu[entry_idx] inside {`RAPT_SB_WSTRB, `RAPT_SH_WSTRB,
+                                                  `RAPT_SW_WSTRB, `RAPT_SD_WSTRB})
+                  && store_addr[entry_idx][OffsetBits-1:0]
+                      <= load_addr[port_idx][OffsetBits-1:0]
+                  && (5'(load_addr[port_idx][OffsetBits-1:0])
+                        + 5'(load_size_m1[port_idx]))
+                      <= (5'(store_addr[entry_idx][OffsetBits-1:0])
+                            + 5'(store_size_m1(store_alu[entry_idx])))));
       if (entry_idx == Entries - 1) begin : g_last
         assign before_head[entry_idx] = 1'b0;
         assign winner[entry_idx] = candidates[entry_idx];
@@ -133,7 +154,9 @@ module rapt_sq_forward #(
     always_comb begin
       forward_data[port_idx] = '0;
       for (int entry_idx = 0; entry_idx < Entries; entry_idx++) begin
-        forward_data[port_idx] |= store_data[entry_idx] & {Xlen{winner[entry_idx]}};
+        forward_data[port_idx] |= (NarrowForward
+            ? store_data[entry_idx] << (store_addr[entry_idx][OffsetBits-1:0] * 8)
+            : store_data[entry_idx]) & {Xlen{winner[entry_idx]}};
       end
     end
   end

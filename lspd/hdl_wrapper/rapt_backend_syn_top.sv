@@ -45,13 +45,13 @@ module rapt_backend_syn_top #(
       cmu_bcast.jren, cmu_bcast.btaken, cmu_bcast.atomic_retired,
       cmu_bcast.call, cmu_bcast.ret, cmu_bcast.rvc, cmu_bcast.fence_time,
       cmu_bcast.fence_i, cmu_bcast.cbo_inval, cmu_bcast.cbo_block,
-      cmu_bcast.flush_pipe, cmu_bcast.flush_redirect, cmu_bcast.sys_resume,
+      cmu_bcast.flush_pipe, cmu_bcast.flush_redirect, cmu_bcast.fetch_context_stable, cmu_bcast.sys_resume,
       cmu_bcast.time_trap, cmu_bcast.redirect_pc, cmu_bcast.rob_head} =
      {cmu_internal.rpc, cmu_internal.cpc, cmu_internal.ben, cmu_internal.jen,
       cmu_internal.jren, cmu_internal.btaken, cmu_internal.atomic_retired,
       cmu_internal.call, cmu_internal.ret, cmu_internal.rvc, cmu_internal.fence_time,
       cmu_internal.fence_i, cmu_internal.cbo_inval, cmu_internal.cbo_block,
-      cmu_internal.flush_pipe, cmu_internal.flush_redirect, cmu_internal.sys_resume,
+      cmu_internal.flush_pipe, cmu_internal.flush_redirect, cmu_internal.fetch_context_stable, cmu_internal.sys_resume,
       cmu_internal.time_trap, cmu_internal.redirect_pc, cmu_internal.rob_head};
   assign {csr_bcast.priv, csr_bcast.satp_ppn, csr_bcast.satp_asid, csr_bcast.immu_en,
       csr_bcast.dmmu_en, csr_bcast.mtvec, csr_bcast.tvec, csr_bcast.timer_int_en,

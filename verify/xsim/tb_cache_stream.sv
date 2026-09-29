@@ -12,13 +12,58 @@ module tb_cache_stream #(
 `else
   localparam bit Rnp = 0;
 `endif
+`ifdef RAPT_L2_STORE_WRITEBACK
+  localparam bit L2WriteBack = !Rnp;
+`else
+  localparam bit L2WriteBack = 0;
+`endif
   localparam int XLEN = `RAPT_XLEN;
   localparam int WordBytes = XLEN / 8;
   localparam int LineBytes = `RAPT_CACHE_LINE_BYTES;
   localparam int DemandIndex = LineBytes / WordBytes > 3 ? 3 : LineBytes / WordBytes - 1;
   localparam int CapacityBytes = (1 << `RAPT_L1D_LEN) * LineBytes * `RAPT_L1D_N_WAYS;
-  localparam int Words = 65536 / WordBytes;
+  localparam int Words = (L2WriteBack ? 1048576 : 65536) / WordBytes;
+  logic probe_valid_i, probe_ready_o;
+  logic hold_probe_ack = 0;
+  logic [XLEN-1:0] probe_addr_i;
+  logic probe_release_valid_o, probe_release_ready_i;
+  logic [XLEN-1:0] probe_release_addr_o, probe_release_data_o;
+  logic release_valid_o, release_ready_i, release_ack_i;
+  logic release_has_data_o, release_mask_o, release_last_o;
+  logic [XLEN-1:0] release_addr_o, release_data_o;
+  int clean_releases = 0, dirty_releases = 0, release_acks = 0;
+  always @(posedge clock)
+    if (!reset) begin
+      if (release_valid_o && release_ready_i && release_last_o) begin
+        if (release_has_data_o) dirty_releases++;
+        else clean_releases++;
+      end
+      if (release_ack_i) begin
+        release_acks++;
+`ifdef RAPT_L2_EN
+`ifndef RAPT_TEST_RNP
+        if (g_l2.l2.dir_write_clients !== 1'b0 || g_l2.l2.dir_write_state !== 2'b11)
+          $fatal(1, "ReleaseAck did not move ownership to L2 Tip");
+`endif
+`endif
+      end
+`ifdef RAPT_L2_EN
+`ifndef RAPT_TEST_RNP
+      if (g_l2.l2.dir_client_mark && g_l2.l2.dir_write_ready && g_l2.l2.dir_write_state !== 2'b10)
+        $fatal(1, "D-client acquire did not move L2 state to Trunk");
+`endif
+`endif
+    end
+  logic probe_window_i, writeback_bus_pending_o;
+  logic l2_probe_valid, inject_probe_valid = 1'b0;
+  logic [XLEN-1:0] l2_probe_addr, inject_probe_addr = '0;
+  bit watch_real_probe = 0, saw_real_probe = 0;
   logic clock = 0, reset = 1;
+  assign probe_valid_i = inject_probe_valid || l2_probe_valid;
+  assign probe_addr_i = inject_probe_valid ? inject_probe_addr : l2_probe_addr;
+  always @(posedge clock)
+    if (watch_real_probe && l2_probe_valid && l2_probe_addr == XLEN'('h80000000))
+      saw_real_probe <= 1'b1;
   always #5 clock = ~clock;
   cmu_bcast_if cmu_bcast ();
   csr_bcast_if csr_bcast ();
@@ -29,7 +74,7 @@ module tb_cache_stream #(
   l1i_bus_if l1i_bus ();
   rou_cmu_if rou_cmu ();
   mem_link_if mem ();
-  axi4_if cpu_axi (), axi ();
+  axi4_if cpu_axi (), l2_outer_axi (), axi ();
   rapt_l1d #(
       .WriteBack(WriteBack)
   ) dut (
@@ -58,6 +103,12 @@ module tb_cache_stream #(
       .axi(cpu_axi)
   );
   if (Rnp) begin : g_rnp
+    assign l2_probe_valid = 1'b0;
+    assign l2_probe_addr = '0;
+    assign probe_release_ready_i = 1'b0;
+    assign release_ready_i = 1'b0;
+    assign release_ack_i = 1'b0;
+    assign probe_window_i = 1'b0;
     logic [31:0] rnp_mdata, rnp_cdata;
     logic rnp_arvalid, rnp_arready, rnp_rvalid, rnp_rready;
     logic rnp_awvalid, rnp_awready, rnp_wvalid, rnp_wready, rnp_bvalid, rnp_bready;
@@ -162,20 +213,44 @@ module tb_cache_stream #(
         .clock,
         .reset,
         .axi_s(cpu_axi),
-        .axi_m(axi),
+        .axi_m(l2_outer_axi),
         .cbo_inval_i(cmu_bcast.cbo_inval),
-        .cbo_block_i(cmu_bcast.cbo_block)
+        .cbo_block_i(cmu_bcast.cbo_block),
+        .probe_valid_o(l2_probe_valid),
+        .probe_addr_o(l2_probe_addr),
+        .probe_ready_i(probe_ready_o && !hold_probe_ack),
+        .probe_release_valid_i(probe_release_valid_o),
+        .probe_release_addr_i(probe_release_addr_o),
+        .probe_release_data_i(probe_release_data_o),
+        .probe_release_ready_o(probe_release_ready_i),
+        .release_valid_i(release_valid_o),
+        .release_addr_i(release_addr_o),
+        .release_data_i(release_data_o),
+        .release_has_data_i(release_has_data_o),
+        .release_mask_i(release_mask_o),
+        .release_last_i(release_last_o),
+        .release_ready_o(release_ready_i),
+        .release_ack_o(release_ack_i),
+        .l1d_writeback_pending_i(writeback_bus_pending_o),
+        .probe_window_o(probe_window_i)
+    );
+    rapt_axi_r_buffer #(
+        .XLEN(XLEN),
+        .Enable(L2WriteBack)
+    ) outer_r_buffer (
+        .clock,
+        .reset,
+        .upstream(l2_outer_axi),
+        .downstream(axi)
     );
 `ifdef RAPT_L2_EN
     initial begin
-      if ($bits(
-              l2.line_tag[0][0]
-          ) != `RAPT_PADDR_BITS -
+      if (l2.BoomBankedStore ? l2.TagBits != 18 : l2.TagBits != `RAPT_PADDR_BITS -
           `RAPT_L2_LEN
           - `RAPT_L2_LINE_LEN - $clog2(
               XLEN / 8
           ))
-        $fatal(1, "L2 tag stores non-physical, index or offset bits");
+        $fatal(1, "L2 tag width differs from its configured physical geometry");
     end
 `endif
   end
@@ -303,6 +378,138 @@ module tb_cache_stream #(
     end
     $fatal(1, "cache stream did not drain");
   endtask
+  task automatic store_response_hit_transition;
+    logic [XLEN-1:0] base;
+    base = XLEN'('h80078000);
+    @(negedge clock);
+    lsu_l1d.waddr = base;
+    lsu_l1d.wdata = XLEN'('h11112222);
+    lsu_l1d.walu = 8'({WordBytes{1'b1}});
+    lsu_l1d.wvalid = 1;
+    for (int n = 0; n < 10000 && !lsu_l1d.wready; n++) @(negedge clock);
+    if (!lsu_l1d.wready) $fatal(1, "first cold store timed out");
+    @(posedge clock);
+    @(negedge clock);
+    lsu_l1d.wdata = XLEN'('h33334444);
+    for (int n = 0; n < 10000; n++) begin
+      #1;
+      if (lsu_l1d.wready) break;
+      @(negedge clock);
+    end
+    if (!lsu_l1d.wready) $fatal(1, "second same-word store timed out");
+    @(posedge clock);
+    @(negedge clock);
+    lsu_l1d.waddr = base + XLEN'(LineBytes);
+    lsu_l1d.wdata = XLEN'('h55556666);
+    for (int n = 0; n < 10000; n++) begin
+      #1;
+      if (lsu_l1d.wready) break;
+      @(negedge clock);
+    end
+    if (!lsu_l1d.wready) $fatal(1, "third different-line store timed out");
+    @(posedge clock);
+    @(negedge clock);
+    lsu_l1d.wvalid = 0;
+    idle();
+    load(base + XLEN'(LineBytes + WordBytes), ram[index_of(base+XLEN'(LineBytes+WordBytes))]);
+    load(base + XLEN'(LineBytes), XLEN'('h55556666));
+    load(base, XLEN'('h33334444));
+    $display("PASS: store response retains ownership across miss-to-hit transition RV%0d", XLEN);
+  endtask
+  task automatic clean_probe_with_pending_victim;
+    logic [XLEN-1:0] base;
+    base = XLEN'('h8007c100);
+    @(negedge clock);
+    lsu_l1d.waddr = base;
+    lsu_l1d.wdata = XLEN'('h11227788);
+    lsu_l1d.walu = 8'({WordBytes{1'b1}});
+    lsu_l1d.wvalid = 1;
+    for (int n = 0; n < 10000 && !lsu_l1d.wready; n++) @(negedge clock);
+    if (!lsu_l1d.wready) $fatal(1, "partial clean-line setup timed out");
+    @(posedge clock);
+    @(negedge clock);
+    lsu_l1d.wvalid = 0;
+    idle();
+    fork
+      instruction_read(base + XLEN'(2 * WordBytes));
+      begin
+        bit instruction_accepted;
+        instruction_accepted = 0;
+        for (int cycle = 0; cycle < 10000 && !instruction_accepted; cycle++) begin
+          @(posedge clock);
+          instruction_accepted = cpu_axi.arvalid && cpu_axi.arready && cpu_axi.arid == 1;
+        end
+        if (!instruction_accepted) $fatal(1, "owner-Get test did not issue its I-side request");
+        // This miss proposes releasing the clean partial L1D line on the
+        // edge that the earlier I-side Get enters its owner Probe state.
+        load(base + XLEN'(WordBytes), ram[index_of(base+XLEN'(WordBytes))]);
+      end
+    join
+    load(base, XLEN'('h11227788));
+    $display("PASS: clean owner Probe bypasses an unstarted voluntary victim Release RV%0d", XLEN);
+  endtask
+  task automatic store_word_for_probe_test(input logic [XLEN-1:0] addr, input logic [XLEN-1:0] data,
+                                           input bit require_local = 0);
+    @(negedge clock);
+    lsu_l1d.waddr = addr;
+    lsu_l1d.wdata = data;
+    lsu_l1d.walu = 8'({WordBytes{1'b1}});
+    lsu_l1d.wvalid = 1;
+    for (int cycle = 0; cycle < 10000; cycle++) begin
+      #1;
+      if (lsu_l1d.wready) break;
+      @(negedge clock);
+    end
+    if (!lsu_l1d.wready) $fatal(1, "probe test store timed out addr=%h", addr);
+    if (require_local && !dut.local_store_ready)
+      $fatal(1, "other-victim setup store did not dirty locally addr=%h", addr);
+    @(posedge clock);
+    @(negedge clock);
+    lsu_l1d.wvalid = 0;
+    idle();
+    repeat (3) @(negedge clock);
+  endtask
+  task automatic clean_probe_with_other_dirty_victim;
+    logic [XLEN-1:0] probe_line, victim_line;
+    probe_line = XLEN'('h8007d100);
+    victim_line = XLEN'('h8007d200);
+    store_word_for_probe_test(probe_line, XLEN'('h11223344));
+    idle();
+    store_word_for_probe_test(victim_line, XLEN'('h22334455));
+    idle();
+    store_word_for_probe_test(victim_line, XLEN'('h55667788), 1);
+    idle();
+    if (!dut.dirty_any) $fatal(1, "other-victim setup did not dirty its L1D copy");
+    hold_probe_ack = 1;
+    fork
+      begin
+        bit probe_seen;
+        probe_seen = 0;
+        for (int cycle = 0; cycle < 10000 && !probe_seen; cycle++) begin
+          @(posedge clock);
+          probe_seen = l2_probe_valid;
+        end
+        if (!probe_seen) $fatal(1, "other-victim test did not issue its Probe");
+        repeat (12) @(posedge clock);
+        @(negedge clock);
+        hold_probe_ack = 0;
+      end
+      instruction_read(probe_line + XLEN'(2 * WordBytes));
+      begin
+        bit instruction_accepted;
+        instruction_accepted = 0;
+        for (int cycle = 0; cycle < 10000 && !instruction_accepted; cycle++) begin
+          @(posedge clock);
+          instruction_accepted = cpu_axi.arvalid && cpu_axi.arready && cpu_axi.arid == 1;
+        end
+        if (!instruction_accepted) $fatal(1, "other-victim test did not issue its I-side request");
+        load(victim_line + XLEN'(WordBytes), ram[index_of(victim_line+XLEN'(WordBytes))]);
+      end
+    join
+    load(victim_line, XLEN'('h55667788));
+    load(probe_line, XLEN'('h11223344));
+    $display("PASS: clean Probe preserves a different dirty victim's Release ordering RV%0d", XLEN);
+  endtask
   task automatic writeback_response_ownership_race;
     logic [XLEN-1:0] expected;
     int requests_before, responses_before, beats_before;
@@ -390,9 +597,32 @@ module tb_cache_stream #(
     end
     $fatal(1, "load timed out addr=%h", addr);
   endtask
-  task automatic invalidate(input logic [11:6] block_id);
+  task automatic instruction_read(input logic [XLEN-1:0] addr);
+    bit accepted;
+    accepted = 0;
     @(negedge clock);
-    cmu_bcast.cbo_block=block_id;
+    l1i_bus.araddr = addr;
+    l1i_bus.arburst = 0;
+    l1i_bus.ar_ptw = 0;
+    l1i_bus.arvalid = 1;
+    for (int cycle = 0; cycle < 10000 && !accepted; cycle++) begin
+      #1;
+      if (l1i_bus.rready) accepted = 1;
+      @(negedge clock);
+    end
+    if (!accepted) $fatal(1, "I-side request was not accepted addr=%h", addr);
+    l1i_bus.arvalid = 0;
+    for (int cycle = 0; cycle < 10000 && !l1i_bus.rvalid; cycle++) @(negedge clock);
+    if (!l1i_bus.rvalid) $fatal(1, "I-side response timed out addr=%h", addr);
+    if (l1i_bus.rerr || l1i_bus.rdata != ram[index_of(addr)])
+      $fatal(1, "I-side refill failed addr=%h data=%h", addr, l1i_bus.rdata);
+    @(posedge clock);
+    @(negedge clock);
+    idle();
+  endtask
+  task automatic invalidate(input logic [XLEN-1:0] address);
+    @(negedge clock);
+    cmu_bcast.cbo_block=address[XLEN-1:6];
     cmu_bcast.cbo_inval=1;
     cmu_bcast.flush_pipe=1;
     @(negedge clock);
@@ -418,14 +648,17 @@ module tb_cache_stream #(
       cmu_bcast.cbo_inval=0;
       cmu_bcast.flush_pipe=0;
       if (!maintenance_sent && write_beats > w0) begin
-        cmu_bcast.cbo_block=addr[11:6];
+        cmu_bcast.cbo_block=addr[XLEN-1:6];
         cmu_bcast.cbo_inval=1;
         cmu_bcast.flush_pipe=1;
         maintenance_sent=1;
       end
       #1;
       if (lsu_l1d.wready) begin
-        if (lsu_l1d.werr != fail_b || write_beats - w0 != 64 / WordBytes)
+        if (L2WriteBack) begin
+          if (lsu_l1d.werr || write_requests != aw0 || write_beats != w0 || responses != b0)
+            $fatal(1, "BOOM L2 ZERO did not allocate locally");
+        end else if (lsu_l1d.werr != fail_b || write_beats - w0 != 64 / WordBytes)
           $fatal(1, "ZERO completed before complete burst/B");
         @(posedge clock);
         @(negedge clock);
@@ -433,7 +666,18 @@ module tb_cache_stream #(
         lsu_l1d.wzero=0;
         write_error=0;
         idle();
-        if(write_requests-aw0!=(Rnp ? 64/WordBytes : 1) || responses-b0!=(Rnp ? 64/WordBytes : 1))
+        if (L2WriteBack) begin
+          if (write_requests != aw0 || write_beats != w0 || responses != b0)
+            $fatal(1, "BOOM L2 ZERO unexpectedly wrote external memory");
+          // Publish the dirty line through CBO so later capacity checks also
+          // compare against the backing memory rather than a private L2 copy.
+          invalidate(addr);
+          for (int cycle = 0; cycle < 10000 && responses == b0; cycle++) @(negedge clock);
+          if (write_requests - aw0 != 1 || write_beats - w0 != LineBytes / WordBytes
+              || responses - b0 != 1)
+            $fatal(1, "BOOM L2 ZERO CBO did not write back one line");
+          idle();
+        end else if(write_requests-aw0!=(Rnp ? 64/WordBytes : 1) || responses-b0!=(Rnp ? 64/WordBytes : 1))
           $fatal(1, "ZERO not one AW/B transaction");
         return;
       end
@@ -455,7 +699,7 @@ module tb_cache_stream #(
         // Word zero was already read from RAM. A pending L2 install must be
         // followed by the queued CBO clear before a new request can hit it.
         ram[index_of(base)]=XLEN'('h77aa55cc);
-        cmu_bcast.cbo_block=base[11:6];
+        cmu_bcast.cbo_block=base[XLEN-1:6];
         cmu_bcast.cbo_inval=1;
         cmu_bcast.flush_pipe=1;
         #1;
@@ -497,7 +741,7 @@ module tb_cache_stream #(
   endtask
   task automatic pmp_boundary(input int kind);
     logic [XLEN-1:0] base;
-    int entry_id;
+    int entry_id, requests_before;
     base=XLEN'('h80005000);
     entry_id=kind==1 ? 1 : 0;
     @(negedge clock);
@@ -528,11 +772,17 @@ module tb_cache_stream #(
     pmp_update.mode_napot[entry_id]=kind==2;
     @(negedge clock);
     pmp_update.cfg_we = 0;
-    invalidate(base[11:6]);
+    invalidate(base);
     idle();
     check_narrow = 1;
     load(base, ram[index_of(base)]);
     if (last_l1_len != 0) $fatal(1, "internal PMP boundary did not select word fallback");
+    if (WriteBack && L2WriteBack) begin
+      requests_before = l1_requests;
+      load(base, ram[index_of(base)]);
+      if (l1_requests == requests_before)
+        $fatal(1, "L1D cached a scalar no-allocate read absent from inclusive L2");
+    end
     check_narrow = 0;
     @(negedge clock);
     pmp_update.cfg_we='1;
@@ -543,7 +793,7 @@ module tb_cache_stream #(
     pmp_update.cfg_l=0;
     @(negedge clock);
     pmp_update.cfg_we = 0;
-    invalidate(base[11:6]);
+    invalidate(base);
     idle();
     load(base, ram[index_of(base)]);
     if (last_l1_len != 8'(LineBytes / WordBytes - 1))
@@ -575,10 +825,11 @@ module tb_cache_stream #(
     load(XLEN'('h80000000) + XLEN'(i * WordBytes), ram[i], 1);
     load(XLEN'('h80000040), ram[64/WordBytes]);
     load(XLEN'('h80001000), ram[4096/WordBytes]);
-    // DMA-style memory change: clear both physical L2 colors selected by VA.
+    // DMA-style memory change: clean both physical cache blocks explicitly.
     ram[0]=XLEN'('h55667788);
     ram[4096/WordBytes]=XLEN'('h33445566);
-    invalidate(0);
+    invalidate(XLEN'('h80000000));
+    invalidate(XLEN'('h80001000));
     idle();
     load(XLEN'('h80000000), ram[0]);
     load(XLEN'('h80001000), ram[4096/WordBytes]);
@@ -586,7 +837,7 @@ module tb_cache_stream #(
     zero_block(XLEN'('h8000003f), 0);
     for (int i = 0; i < 64 / WordBytes; i++) load(XLEN'('h80000000) + XLEN'(i * WordBytes), 0);
     load(XLEN'('h80000040), ram[64/WordBytes], 1);
-    zero_block(XLEN'('h80001000), !Rnp);
+    zero_block(XLEN'('h80001000), !Rnp && !L2WriteBack);
     load(XLEN'('h80001000), 0);
     cancelled_fill();
     if (!Rnp) errored_fill();
@@ -600,7 +851,239 @@ module tb_cache_stream #(
     load(XLEN'('h80000000) + XLEN'(offset), ram[offset/WordBytes]);
     for (int offset = 0; offset < CapacityBytes; offset += WordBytes)
     load(XLEN'('h80000000) + XLEN'(offset), ram[offset/WordBytes], 1);
-    if (WriteBack) begin
+    if (!WriteBack && !Rnp && L2WriteBack) begin
+      int before_probe_req;
+      load(XLEN'('h80000000), ram[0], 1);
+      load(XLEN'('h80001000), ram[4096/WordBytes], 1);
+      before_probe_req = l1_requests;
+      @(negedge clock);
+      inject_probe_addr = XLEN'('h80000000);
+      inject_probe_valid = 1'b1;
+      for (int cycle = 0; cycle < 16 && !probe_ready_o; cycle++) @(negedge clock);
+      if (!probe_ready_o) $fatal(1, "L1D did not acknowledge the L2 back-invalidation");
+      inject_probe_valid = 1'b0;
+      idle();
+      load(XLEN'('h80001000), ram[4096/WordBytes], 1);
+      if (l1_requests != before_probe_req)
+        $fatal(1, "L2 probe invalidated another physical line in the same L1D set");
+      load(XLEN'('h80000000), ram[0]);
+      if (l1_requests != before_probe_req + 1)
+        $fatal(1, "L1D retained a resident word after L2 back-invalidation");
+      // Keep this D line resident while instruction requests fill competing
+      // L2 ways. Exercise the actual directory-triggered probe path.
+      watch_real_probe = 1;
+      for (int i = 0; i < 256 && !saw_real_probe; i++)
+      instruction_read(XLEN'('h80000000) + XLEN'(((i % 15) + 1) * 65536));
+      watch_real_probe = 0;
+      if (!saw_real_probe) $fatal(1, "L2 replacement never probed the resident L1D line");
+      before_probe_req = l1_requests;
+      load(XLEN'('h80000000), ram[0]);
+      if (l1_requests != before_probe_req + 1)
+        $fatal(1, "actual L2 replacement left a stale L1D copy");
+    end
+    if (WriteBack && L2WriteBack) begin
+      int before_probe_req;
+      int clean_before, dirty_before, ack_before;
+      store_response_hit_transition();
+      clean_probe_with_pending_victim();
+      clean_probe_with_other_dirty_victim();
+      clean_before = clean_releases;
+      ack_before = release_acks;
+      for (int i = 0; i < `RAPT_L1D_N_WAYS + 2; i++)
+      load(XLEN'('h80050000 + i * 4096), ram[index_of(XLEN'('h80050000+i*4096))]);
+      if (clean_releases <= clean_before || release_acks <= ack_before)
+        $fatal(1, "clean L1D victim did not complete Release/ReleaseAck");
+
+      // Retire a dirty L1D victim through ReleaseData. The outer RAM stays
+      // stale while the L2 supplies the updated word on the next miss.
+      for (int i = 0; i < `RAPT_L1D_N_WAYS; i++)
+      load(XLEN'('h80068000 + i * 4096), ram[index_of(XLEN'('h80068000+i*4096))]);
+      @(negedge clock);
+      lsu_l1d.waddr = XLEN'('h80068000);
+      lsu_l1d.wdata = XLEN'('h6a5a55a6);
+      lsu_l1d.walu = 8'({WordBytes{1'b1}});
+      lsu_l1d.wvalid = 1;
+      for (int cycle = 0; cycle < 10000 && !lsu_l1d.wready; cycle++) @(negedge clock);
+      if (!lsu_l1d.wready || l1d_bus.wvalid) $fatal(1, "dirty victim setup did not stay local");
+      @(negedge clock);
+      lsu_l1d.wvalid = 0;
+      dirty_before = dirty_releases;
+      ack_before = release_acks;
+      for (
+          int i = `RAPT_L1D_N_WAYS; i < `RAPT_L1D_N_WAYS + 16 && dirty_releases == dirty_before; i++
+      )
+      load(XLEN'('h80068000 + i * 4096), ram[index_of(XLEN'('h80068000+i*4096))]);
+      if (dirty_releases == dirty_before || release_acks <= ack_before)
+        $fatal(1, "dirty L1D victim did not complete ReleaseData/ReleaseAck");
+      if (ram[index_of(XLEN'('h80068000))] == XLEN'('h6a5a55a6))
+        $fatal(1, "dirty L1D victim bypassed L2 write-back policy");
+      // Force a scalar no-allocate read while that dirty line exists only
+      // in L2. It must hit the L2 copy rather than stale outer RAM, and it
+      // must not install an L1D line absent from a full-line refill.
+      @(negedge clock);
+      pmp_update.addr_we = 1;
+      pmp_update.addr_idx = 0;
+      pmp_update.raw_addr = $bits(pmp_update.raw_addr)'((XLEN'('h80068000)
+          + XLEN'(LineBytes / 2)) >> 2);
+      pmp_update.napot_mask = 1;
+      @(negedge clock);
+      pmp_update.addr_we = 0;
+      pmp_update.cfg_we = '1;
+      pmp_update.cfg_r = 0;
+      pmp_update.cfg_w = 0;
+      pmp_update.cfg_x = 0;
+      pmp_update.cfg_l = 0;
+      pmp_update.mode_off = '1;
+      pmp_update.mode_tor = 0;
+      pmp_update.mode_na4 = 0;
+      pmp_update.mode_napot = 0;
+      pmp_update.cfg_l[0] = 1;
+      pmp_update.mode_off[0] = 0;
+      pmp_update.mode_na4[0] = 1;
+      @(negedge clock);
+      pmp_update.cfg_we = 0;
+      load(XLEN'('h80068000), XLEN'('h6a5a55a6));
+      if (last_l1_len != 0) $fatal(1, "dirty L2 read did not use scalar fallback");
+      ack_before = l1_requests;
+      load(XLEN'('h80068000), XLEN'('h6a5a55a6));
+      if (l1_requests == ack_before) $fatal(1, "scalar L1D fallback unexpectedly installed a line");
+      @(negedge clock);
+      pmp_update.cfg_we = '1;
+      pmp_update.mode_off = '1;
+      pmp_update.mode_na4 = 0;
+      pmp_update.cfg_l = 0;
+      @(negedge clock);
+      pmp_update.cfg_we = 0;
+      load(XLEN'('h80068000), XLEN'('h6a5a55a6));
+      $display("PASS: clean/dirty voluntary L1D Release and ReleaseAck RV%0d", XLEN);
+
+      load(XLEN'('h80000000), ram[0]);
+      idle();
+      @(negedge clock);
+      lsu_l1d.waddr = XLEN'('h80000000);
+      lsu_l1d.wdata = XLEN'('h76543210);
+      lsu_l1d.walu = 8'({WordBytes{1'b1}});
+      lsu_l1d.wvalid = 1;
+      for (int cycle = 0; cycle < 10000 && !lsu_l1d.wready; cycle++) @(negedge clock);
+      if (!lsu_l1d.wready || l1d_bus.wvalid) $fatal(1, "L1D WB store did not stay local");
+      @(negedge clock);
+      lsu_l1d.wvalid = 0;
+      load(XLEN'('h80000000), XLEN'('h76543210), 1);
+      if (ram[0] == XLEN'('h76543210)) $fatal(1, "dirty L1D store reached outer memory early");
+      watch_real_probe = 1;
+      for (int i = 0; i < 256 && !saw_real_probe; i++)
+      instruction_read(XLEN'('h80000000) + XLEN'(((i % 15) + 1) * 65536));
+      watch_real_probe = 0;
+      if (!saw_real_probe || ram[0] != XLEN'('h76543210))
+        $fatal(1, "dirty L1D line was not released and written back on L2 replacement");
+      before_probe_req = l1_requests;
+      load(XLEN'('h80000000), XLEN'('h76543210));
+      if (l1_requests != before_probe_req + 1)
+        $fatal(1, "L2 replacement retained a dirty L1D copy");
+
+      @(negedge clock);
+      lsu_l1d.wdata = XLEN'('h13572468);
+      lsu_l1d.wvalid = 1;
+      for (int cycle = 0; cycle < 10000 && !lsu_l1d.wready; cycle++) @(negedge clock);
+      if (!lsu_l1d.wready || l1d_bus.wvalid) $fatal(1, "second L1D WB store not local");
+      @(negedge clock);
+      lsu_l1d.wvalid = 0;
+      load(XLEN'('h80000000), XLEN'('h13572468), 1);
+      invalidate(XLEN'('h80000000));
+      for (int cycle = 0; cycle < 10000 && ram[0] != XLEN'('h13572468); cycle++) @(negedge clock);
+      if (ram[0] != XLEN'('h13572468))
+        $fatal(1, "dirty L1D line was not released and written back on L2 CBO");
+      before_probe_req = l1_requests;
+      load(XLEN'('h80000000), XLEN'('h13572468));
+      if (l1_requests != before_probe_req + 1) $fatal(1, "L2 CBO retained a dirty L1D copy");
+      // A full-word L1D store miss first obtains L2 ownership, then installs
+      // the word locally. Its next local hit can become dirty safely.
+      @(negedge clock);
+      lsu_l1d.waddr = XLEN'('h80020040);
+      lsu_l1d.wdata = XLEN'('h11223344);
+      lsu_l1d.wvalid = 1;
+      for (int cycle = 0; cycle < 10000 && !lsu_l1d.wready; cycle++) @(negedge clock);
+      if (!lsu_l1d.wready) $fatal(1, "L1D store miss was not admitted by L2");
+      @(negedge clock);
+      lsu_l1d.wvalid = 0;
+      load(XLEN'('h80020040), XLEN'('h11223344), 1);
+      @(negedge clock);
+      lsu_l1d.wdata = XLEN'('h44332211);
+      lsu_l1d.wvalid = 1;
+      for (int cycle = 0; cycle < 10000 && !lsu_l1d.wready; cycle++) @(negedge clock);
+      if (!lsu_l1d.wready || l1d_bus.wvalid)
+        $fatal(1, "L1D store hit did not retain dirty ownership");
+      @(negedge clock);
+      lsu_l1d.wvalid = 0;
+      invalidate(XLEN'('h80020040));
+      for (
+          int cycle = 0;
+          cycle < 10000 && ram[index_of(XLEN'('h80020040))] != XLEN'('h44332211);
+          cycle++
+      )
+      @(negedge clock);
+      if (ram[index_of(XLEN'('h80020040))] != XLEN'('h44332211))
+        $fatal(1, "store-miss owner was absent from L2 CBO probe");
+      // A CBO can arrive on the same cycle as an ordinary L1D dirty drain.
+      // The CBO must let that write enter L2 before scanning the directory.
+      load(XLEN'('h80020040), XLEN'('h44332211));
+      @(negedge clock);
+      lsu_l1d.wdata = XLEN'('h55aa55aa);
+      lsu_l1d.wvalid = 1;
+      for (int cycle = 0; cycle < 10000 && !lsu_l1d.wready; cycle++) @(negedge clock);
+      if (!lsu_l1d.wready || l1d_bus.wvalid) $fatal(1, "drain-race store was not local");
+      @(negedge clock);
+      lsu_l1d.wvalid = 0;
+      writeback_drain = 1;
+      cmu_bcast.cbo_block = XLEN'('h80020040) >> 6;
+      cmu_bcast.cbo_inval = 1;
+      cmu_bcast.flush_pipe = 1;
+      @(negedge clock);
+      cmu_bcast.cbo_inval = 0;
+      cmu_bcast.flush_pipe = 0;
+      for (int cycle = 0; cycle < 10000 && !writeback_idle; cycle++) @(negedge clock);
+      if (!writeback_idle) $fatal(1, "L1D writeback and L2 CBO deadlocked");
+      writeback_drain = 0;
+      for (
+          int cycle = 0;
+          cycle < 10000 && ram[index_of(XLEN'('h80020040))] != XLEN'('h55aa55aa);
+          cycle++
+      )
+      @(negedge clock);
+      if (ram[index_of(XLEN'('h80020040))] != XLEN'('h55aa55aa))
+        $fatal(1, "L2 CBO lost an overlapping L1D writeback");
+      // The same ownership rule applies when the L2 line was first filled by
+      // the I side and the D store finds it already resident.
+      instruction_read(XLEN'('h80030080));
+      @(negedge clock);
+      lsu_l1d.waddr = XLEN'('h80030080);
+      lsu_l1d.wdata = XLEN'('h12345678);
+      lsu_l1d.wvalid = 1;
+      for (int cycle = 0; cycle < 10000 && !lsu_l1d.wready; cycle++) @(negedge clock);
+      if (!lsu_l1d.wready) $fatal(1, "L1D store miss to resident L2 line stalled");
+      @(negedge clock);
+      lsu_l1d.wvalid = 0;
+      load(XLEN'('h80030080), XLEN'('h12345678), 1);
+      @(negedge clock);
+      lsu_l1d.wdata = XLEN'('h87654321);
+      lsu_l1d.wvalid = 1;
+      for (int cycle = 0; cycle < 10000 && !lsu_l1d.wready; cycle++) @(negedge clock);
+      if (!lsu_l1d.wready || l1d_bus.wvalid)
+        $fatal(1, "L1D local store hit after L2 hit was not dirty");
+      @(negedge clock);
+      lsu_l1d.wvalid = 0;
+      invalidate(XLEN'('h80030080));
+      for (
+          int cycle = 0;
+          cycle < 10000 && ram[index_of(XLEN'('h80030080))] != XLEN'('h87654321);
+          cycle++
+      )
+      @(negedge clock);
+      if (ram[index_of(XLEN'('h80030080))] != XLEN'('h87654321))
+        $fatal(1, "store-hit owner was absent from L2 CBO probe");
+      $display("PASS: dirty L1D release on L2 eviction and CBO RV%0d", XLEN);
+    end
+    if (WriteBack && !L2WriteBack) begin
       idle();
       @(negedge clock);
       lsu_l1d.waddr = XLEN'('h80000000);
@@ -715,9 +1198,16 @@ module tb_cache_stream #(
       $display("PASS: WB AXI error fail-stop RV%0d", XLEN);
     end
     $display("PASS: capacity %0d bytes, every refilled word hot; RNP=%0d", CapacityBytes, Rnp);
-    $display(
-        "PASS: cache stream RV%0d full-line refill, hot words, set CBO across L2, ZERO one AW/B, delayed/error B, fill kill/error, NA4/TOR/NAPOT boundary fallback",
-        XLEN);
+    if (L2WriteBack)
+      $display(
+          "PASS: cache stream RV%0d full-line refill, hot words, ZERO local allocate/CBO writeback, fill kill/error, PMP boundary fallback",
+          XLEN
+      );
+    else
+      $display(
+          "PASS: cache stream RV%0d full-line refill, hot words, set CBO across L2, ZERO one AW/B, delayed/error B, fill kill/error, NA4/TOR/NAPOT boundary fallback",
+          XLEN
+      );
     $finish;
   end
   initial begin

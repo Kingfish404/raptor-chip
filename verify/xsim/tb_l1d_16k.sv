@@ -1,5 +1,6 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
+`include "tb_l1d_unused_release_ports.svh"
 module tb_l1d_16k;
   localparam int XLEN = `RAPT_XLEN;
   localparam int Sets = 2 ** `RAPT_L1D_LEN;
@@ -25,6 +26,13 @@ module tb_l1d_16k;
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
       .external_write_last_i('0),
+      .coherent_request(1'b0),
+      .coherent_write(1'b0),
+      .coherent_ready(),
+      .writeback_error(),
+      .writeback_idle(),
+      .writeback_drain(1'b0),
+      `TB_L1D_UNUSED_RELEASE_PORTS,
       .*
   );
   `include "tb_l1d_defaults.svh"

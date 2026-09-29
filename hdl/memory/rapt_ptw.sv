@@ -74,8 +74,9 @@ module rapt_ptw #(
   logic [38:12] vtag_q;
   assign vpn1 = vtag_q[29:21];
   assign vpn0 = vtag_q[20:12];
-  // Sv39 PTE addresses are 56-bit physical addresses aligned to eight bytes.
-  // Keep the page number and PTE index, not XLEN padding or constant offset.
+  // Sv39 encodes PTE addresses with up to 56 bits. Keep the architectural
+  // page number and PTE index here; the requester rejects addresses outside
+  // the implemented platform PA range before issuing a bus transaction.
   logic [55:3] pte_word_addr;
   logic req_store_q;
   logic pbmte_q;

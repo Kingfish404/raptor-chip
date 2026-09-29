@@ -22,7 +22,8 @@ module rapt_ras #(
     output logic [Xlen-1:0] top_addr
 );
   typedef struct packed {
-    logic [Depth-1:0][Xlen-1:0] data;
+    // RISC-V instruction addresses are at least halfword aligned.
+    logic [Depth-1:0][Xlen-1:1] data;
     logic [IndexBits-1:0] next_index;
     logic [CountBits-1:0] count;
   } state_t;
@@ -41,7 +42,7 @@ module rapt_ras #(
       result.count = result.count - 1'b1;
     end
     if (push) begin
-      result.data[result.next_index] = addr;
+      result.data[result.next_index] = addr[Xlen-1:1];
       result.next_index = result.next_index == IndexBits'(Depth - 1)
           ? '0 : result.next_index + 1'b1;
       if (result.count < CountBits'(Depth)) result.count = result.count + 1'b1;
@@ -51,7 +52,8 @@ module rapt_ras #(
 
   assign next_committed = advance(committed, commit_push, commit_pop, commit_addr);
   assign top_valid = speculative.count != 0;
-  assign top_addr = top_valid ? speculative.data[previous(speculative.next_index)] : '0;
+  assign top_addr = top_valid
+      ? {speculative.data[previous(speculative.next_index)], 1'b0} : '0;
   always_ff @(posedge clock) begin
     // Payload is intentionally unreset. Count hides every dead entry, and a
     // push writes its address before making it live. Keep both complete data

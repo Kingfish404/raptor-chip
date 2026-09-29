@@ -39,11 +39,15 @@ module tb_ifu_l1i_stream;
       .response_pending_o()
   );
   function automatic logic [15:0] half_at(input int unsigned addr);
+`ifdef RAPT_TEST_ALL_32
+    return addr[1] ? 16'h0000 : 16'h0013;  // ADDI x0,x0,0 at every aligned word.
+`else
     case ((addr >> 1) & 3)
       1: return 16'h0093; // ADDI x1,x0,imm starts at halfword offset 2.
       2: return 16'(((addr>>3)&1023)<<4);
       default: return 16'h0001; // C.NOP
     endcase
+`endif
   endfunction
   function automatic logic [31:0] word_at(input int unsigned addr);
     return {half_at(addr + 2), half_at(addr)};
@@ -64,13 +68,21 @@ module tb_ifu_l1i_stream;
       l1i_bus.rvalid = 1;
     end
   end
-  int cycles = 0, delivered = 0, compressed = 0, fullword = 0;
+  int cycles = 0, delivered = 0, compressed = 0, fullword = 0, wide_packets = 0;
+`ifdef RAPT_TEST_ALL_32
+  int n3_responses = 0, four_fetched = 0;
+`endif
   int unsigned expected_pc;
   logic checking=0;
   always @(posedge clock) begin
     if (!reset) begin
       cycles++;
       if (checking && !cmu_bcast.flush_pipe && !recovery.pending) begin
+`ifdef RAPT_TEST_ALL_32
+        if (ifu_l1i.valid && ifu_l1i.inst_n3_valid) n3_responses++;
+        if (dut.recv_ready && dut.fetched_count == 4) four_fetched++;
+        if (ifu_idu.valid[3] && ifu_idu.ready[3]) wide_packets++;
+`endif
         for (int slot = 0; slot < `RAPT_DECODE_WIDTH; slot++) begin
           if (ifu_idu.valid[slot] && ifu_idu.ready[slot]) begin
             if (ifu_idu.slot[slot].pc != XLEN'(expected_pc))
@@ -116,8 +128,12 @@ module tb_ifu_l1i_stream;
     start_count=delivered;
     while (delivered - start_count < 120) begin
       // Prefix ready masks include stalls and partial held-group acceptance.
+`ifdef RAPT_TEST_ALL_32
+      ifu_idu.ready = '{default: 1};
+`else
       for (int slot = 0; slot < `RAPT_DECODE_WIDTH; slot++)
       ifu_idu.ready[slot] = (slot < (cycles % 5));
+`endif
       @(negedge clock);
     end
     checking = 0;
@@ -147,11 +163,29 @@ module tb_ifu_l1i_stream;
     l1i_bus.ptw_werr=0;
     repeat (4) @(negedge clock);
     reset = 0;
+`ifdef RAPT_TEST_ALL_32
+    segment('h80000000, 0);
+    if (wide_packets == 0 || fullword < 120)
+      $fatal(
+          1,
+          "no 4x32 cache-hit packet wide=%0d fullword=%0d n3=%0d fetched=%0d",
+          wide_packets,
+          fullword,
+          n3_responses,
+          four_fetched
+      );
+`else
     for (int n = 0; n < 9; n++)
     segment('h80000000 + n * 4096 + (n % 3 == 0 ? 2 : n % 3 == 1 ? 62 : 4090), n % 3);
     if (compressed == 0 || fullword == 0) $fatal(1, "missing instruction length coverage");
+`endif
+`ifdef RAPT_TEST_ALL_32
+    $display("PASS: IFU/L1I 4x32 RV%0d delivered=%0d wide_packets=%0d", XLEN, delivered,
+             wide_packets);
+`else
     $display("PASS: IFU/L1I stream RV%0d segments=9 delivered=%0d compressed=%0d fullword=%0d",
              XLEN, delivered, compressed, fullword);
+`endif
     $finish;
   end
   initial begin

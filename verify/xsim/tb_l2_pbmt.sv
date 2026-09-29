@@ -55,34 +55,7 @@ module tb_l2_pbmt;
     end
   endtask
 
-  task automatic expect_posted_b(input logic [IdW-1:0] id);
-    bit seen;
-    begin
-      seen = 1'b0;
-      for (int wait_cycle = 0; wait_cycle < 64 && !seen; wait_cycle++) begin
-        if (axi_s.bvalid) begin
-          if (axi_s.bid !== id) fail("posted B id mismatch");
-          if (axi_s.bresp !== 2'b00) fail("posted B resp mismatch");
-          axi_s.bready = 1'b1;
-          tick(1);
-          axi_s.bready = 1'b0;
-          seen = 1'b1;
-        end else begin
-          tick(1);
-        end
-      end
-      if (!seen) fail("timed out waiting for posted B");
-    end
-  endtask
-
-  task automatic send_posted_write(input logic [XLEN-1:0] addr, input logic [XLEN-1:0] data,
-                                   input logic [IdW-1:0] id);
-    begin
-      send_l2_aw(addr, id);
-      send_l2_w_full(data);
-      expect_posted_b(id);
-    end
-  endtask
+  `include "tb_l2_posted_tasks.svh"
 
   task automatic wait_ar_attr(input logic [3:0] cache_attr, input logic [7:0] len);
     for (int c = 0; c < 64; c++) begin
@@ -115,7 +88,12 @@ module tb_l2_pbmt;
           attr = nc ? 4'h2 : 4'h0;
           tick(4);
           reset = 0;
+          // The 512 KiB preset clears one directory set per cycle after
+          // reset, as the inclusive-cache reference does. Wait for the
+          // public AXI ready signal instead of assuming a fixed warmup.
+          for (int warmup = 0; warmup < (1 << `RAPT_L2_LEN) + 64 && !axi_s.awready; warmup++)
           tick(1);
+          check(axi_s.awready, "L2 directory reset wipe did not complete");
           if (hot) begin
             send_l2_ar('h80000000, 5);
             wait_ar_attr(4'hf, 8'(L2LineBeats - 1));

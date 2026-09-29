@@ -44,6 +44,9 @@ SHAPES = [
     ("rapt_openram_1rw_16x32", 16, 32, 8),
     ("rapt_openram_1rw_16x64", 16, 64, 8),
     ("rapt_openram_1rw_512x32", 512, 32, 8),
+    ("rapt_openram_1rw_1024x22", 1024, 22, 22),
+    ("rapt_openram_1rw_1024x32", 1024, 32, 8),
+    ("rapt_openram_1rw_1024x64", 1024, 64, 8),
     ("rapt_openram_1rw_2x128", 2, 128, 8),
     ("rapt_openram_1rw_8x128", 8, 128, 8),
     ("rapt_openram_1rw_16x128", 16, 128, 8),
@@ -51,6 +54,7 @@ SHAPES = [
     ("rapt_openram_1rw_64x128", 64, 128, 8),
     ("rapt_openram_1rw_2048x32", 2048, 32, 8),
     ("rapt_openram_1rw_2048x64", 2048, 64, 8),
+    ("rapt_openram_1rw_4096x64", 4096, 64, 8),
 ]
 
 BLACKBOX_V = SRAM / "wrappers" / "rapt_sram_blackbox.v"

@@ -1,8 +1,7 @@
 `include "rapt.svh"
 // L1D word-write / line-read data array, built from <=128-bit 1RW SRAMs.
-// A write reserves the entire array's port for the cycle, even though only
-// one way/subarray is enabled. Read data is usable only when read_valid is
-// set and read_index matches the consumer's requested set.
+// A write reserves only its selected way/subarray. Other banks read on the
+// same edge; each bank reports which set its output currently represents.
 module rapt_l1d_data #(
     parameter int Xlen = 32,
     parameter int SetBits = 4,
@@ -25,6 +24,8 @@ module rapt_l1d_data #(
     input logic [LineWords*Xlen-1:0] write_line_data = '0,
     output logic read_valid,
     output logic [SetBits-1:0] read_index,
+    output wire [Ways-1:0][LineWords-1:0] read_word_valid,
+    output wire [SetBits-1:0] read_word_index[Ways][LineWords],
     output wire [Xlen-1:0] read_data[Ways][LineWords]
 );
   localparam int WordBytes = Xlen / 8;
@@ -41,17 +42,16 @@ module rapt_l1d_data #(
     $error("Invalid rapt_l1d_data configuration");
   end
 
-  // SRAM writes/disabled banks may hold different old read addresses.
-  // Only an all-bank read establishes a common, consumable index again.
+  // Preserve the all-bank contract for clients that require a complete line.
   always_ff @(posedge clock) begin
     if (reset) begin
       read_valid <= 1'b0;
-    end else if (write_valid) begin
-      read_valid <= 1'b0;
     end else begin
-      read_valid <= 1'b1;
-      read_index <= read_addr;
+      read_valid <= !write_valid;
     end
+    // All banks that do read in this cycle use the same address. Reuse this
+    // register for their index instead of storing an index in every bank.
+    if (!reset) read_index <= read_addr;
   end
 
   for (genvar way = 0; way < Ways; way++) begin : g_way
@@ -59,7 +59,13 @@ module rapt_l1d_data #(
       localparam int BaseWord = bank * SubarrayWords;
       wire [SubarrayBytes-1:0] byte_enable;
       wire [SubarrayBytes*8-1:0] bank_data, bank_wdata;
-      wire bank_write = |byte_enable;
+      wire  bank_write = |byte_enable;
+      logic bank_read_valid;
+
+      always_ff @(posedge clock) begin
+        if (reset || bank_write) bank_read_valid <= 1'b0;
+        else bank_read_valid <= 1'b1;
+      end
 
       // Each generated word owns its byte-enable and read-data slice.
       // Replication distributes the same full-word payload to every lane.
@@ -71,6 +77,8 @@ module rapt_l1d_data #(
           & (write_line ? {WordBytes{1'b1}} : write_strobe);
         assign bank_wdata[word_idx*Xlen+:Xlen] = write_line
             ? write_line_data[(BaseWord+word_idx)*Xlen+:Xlen] : write_data;
+        assign read_word_valid[way][BaseWord+word_idx] = bank_read_valid;
+        assign read_word_index[way][BaseWord+word_idx] = read_index;
         assign read_data[way][BaseWord+word_idx] = bank_data[word_idx*Xlen+:Xlen];
       end
 
@@ -80,7 +88,7 @@ module rapt_l1d_data #(
           .USE_BWE(1)
       ) u_sram (
           .clock(clock),
-          .en(bank_write || !write_valid),
+          .en(1'b1),
           .wen(bank_write),
           .addr(bank_write ? write_addr : read_addr),
           .rdata(bank_data),

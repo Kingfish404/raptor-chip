@@ -116,7 +116,9 @@ module rapt_dm #(
   // access_register; the running core never sees these via csrr/csrw
   // (no architectural Debug Mode entry implemented yet).
   logic [    31:0] dcsr_q;  // dcsr is fixed 32-bit per spec
-  logic [XLEN-1:0] dpc_q;
+  logic [XLEN-1:1] dpc_q;
+  wire [XLEN-1:0] dpc_value = {dpc_q, 1'b0};
+  wire [XLEN-1:0] dpc_wdata = XLEN'(data0_q);
   logic [XLEN-1:0] dscratch0_q;
   logic [XLEN-1:0] dscratch1_q;
 
@@ -185,7 +187,7 @@ module rapt_dm #(
     if (cmd_is_gpr) reg_rdata = dbg_gpr_rdata_i;
     else if (cmd_is_misa) reg_rdata = `RAPT_MISA;
     else if (cmd_is_dcsr) reg_rdata = XLEN'(dcsr_q);
-    else if (cmd_is_dpc) reg_rdata = dpc_q;
+    else if (cmd_is_dpc) reg_rdata = dpc_value;
     else if (cmd_is_dscr0) reg_rdata = dscratch0_q;
     else if (cmd_is_dscr1) reg_rdata = dscratch1_q;
     // cmd_is_trig_raz: zero (default).
@@ -284,7 +286,7 @@ module rapt_dm #(
           // data0 -> register. GPR writes are sourced via dbg_gpr_we_o
           // below; CSR-class targets latch here.
           if (cmd_is_dcsr) dcsr_q <= data0_q;
-          else if (cmd_is_dpc) dpc_q <= XLEN'(data0_q);
+          else if (cmd_is_dpc) dpc_q <= dpc_wdata[XLEN-1:1];
           else if (cmd_is_dscr0) dscratch0_q <= XLEN'(data0_q);
           else if (cmd_is_dscr1) dscratch1_q <= XLEN'(data0_q);
           // cmd_is_misa: read-only, silently dropped (spec allows either).
@@ -306,7 +308,7 @@ module rapt_dm #(
       if (halted_i) dm_halt_state_q <= 1'b1;
       // On the rising edge of halted_i (entering halt), capture the
       // resume PC into dpc so OpenOCD/GDB can read it back.
-      if (halted_i && !dm_halt_state_q) dpc_q <= halt_pc_i;
+      if (halted_i && !dm_halt_state_q) dpc_q <= halt_pc_i[XLEN-1:1];
       if (dmi_req && dmi_wr && dmi_addr == AddrDmcontrol && dmi_wdata[30] && !dmi_wdata[31]) begin
         // resumereq=1 with haltreq=0 -> release the core. If dcsr.step=1
         // arm a single-step: the first commit_fire after release will

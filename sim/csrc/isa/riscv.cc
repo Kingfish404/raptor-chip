@@ -168,6 +168,8 @@ int isa_load_uarch_state(const char *filename)
 
     fscanf(fp, "    \"sscratch\": \"" FMT_WORD "\",\n", (npc.sscratch));
     fscanf(fp, "    \"sepc\": \"" FMT_WORD "\",\n", (npc.sepc___));
+    if (npc.sepc_half_q != NULL)
+        *npc.sepc_half_q = *npc.sepc___ >> 1;
     fscanf(fp, "    \"scause\": \"" FMT_WORD "\",\n", (npc.scause_));
     fscanf(fp, "    \"stval\": \"" FMT_WORD "\",\n", (npc.stval__));
     fscanf(fp, "    \"sip\": \"" FMT_WORD "\",\n", (npc.sip____));
@@ -181,6 +183,8 @@ int isa_load_uarch_state(const char *filename)
 
     fscanf(fp, "    \"mscratch\": \"" FMT_WORD "\",\n", (npc.mscratch));
     fscanf(fp, "    \"mepc\": \"" FMT_WORD "\",\n", (npc.mepc___));
+    if (npc.mepc_half_q != NULL)
+        *npc.mepc_half_q = *npc.mepc___ >> 1;
     fscanf(fp, "    \"mcause\": \"" FMT_WORD "\",\n", (npc.mcause_));
     fscanf(fp, "    \"mtval\": \"" FMT_WORD "\",\n", (npc.mtval__));
     fscanf(fp, "    \"mip\": \"" FMT_WORD "\",\n", (npc.mip____));

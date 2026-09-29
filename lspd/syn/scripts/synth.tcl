@@ -35,6 +35,11 @@ set synth_args [list -top $top]
 if {[info exists ::env(YS_SYNTH_SHARE)] && $::env(YS_SYNTH_SHARE) eq "0"} {
     lappend synth_args -noshare
 }
+if {[info exists ::env(YS_SYNTH_GENERIC_ABC)] && $::env(YS_SYNTH_GENERIC_ABC) eq "0"} {
+    # The later liberty ABC pass still maps cells and checks the same timing target.
+    # Skip synth's extra generic ABC pass for large composition blocks.
+    lappend synth_args -noabc
+}
 synth {*}$synth_args
 opt -purge
 
@@ -58,6 +63,9 @@ if {[info exists LATCH_MAP_FILE] && $LATCH_MAP_FILE ne ""} {
 dfflibmap {*}$liberty_args {*}$dont_use_args
 opt -undriven
 set abc_args {}
+if {[info exists ::env(YS_SYNTH_ABC_SCRIPT)] && $::env(YS_SYNTH_ABC_SCRIPT) eq "fast"} {
+    lappend abc_args -script scripts/abc_fast.script
+}
 if {[info exists ABC_DRIVER_CELL] && [info exists ABC_LOAD_IN_FF]} {
     set abc_constr "$out/abc.constr"
     set constr_file [open $abc_constr w]

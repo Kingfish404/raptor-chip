@@ -6,6 +6,7 @@
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_pkg))
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <recovery_metrics.h>
 #include <string>
 #include <unordered_map>
@@ -901,8 +902,178 @@ void perf_sample_per_inst(uint32_t inst)
   }
 }
 
+// Keep the periodic and final PMU reports bounded. Set RAPTOR_PMU_VERBOSE=1
+// when the full probe breakdown is needed for a focused investigation.
+static void perf_compact()
+{
+  const auto u = [](uint64_t value) { return static_cast<unsigned long long>(value); };
+  const uint64_t time_clint = *(uint64_t *)&VERILOG_CLINT(mtime);
+  const long long time_clint_us = time_clint / RAPT_MTIME_FREQ_MHZ;
+  Log("#inst: %lld, cycle: %lld, IPC: %2.3f, CLINT: %lld (us), %2.3f MIPS",
+      pmu.instr_cnt, pmu.active_cycle,
+      pmu.active_cycle ? (double)pmu.instr_cnt / pmu.active_cycle : 0.0,
+      time_clint_us, time_clint_us ? (double)pmu.instr_cnt / time_clint_us : 0.0);
+  Log("Stalls (cycles/pct_active, overlapping): IFU=%lld/%.1f%% EX|RS=%lld/%.1f%% "
+      "EX|IoQ=%lld/%.1f%% L1D=%lld/%.1f%% SQ=%lld/%.1f%% no-commit=%lld/%.1f%%",
+      pmu.ifu_stall_cycle, percentage(pmu.ifu_stall_cycle, pmu.active_cycle),
+      pmu.exu_ooo_stall_cycle, percentage(pmu.exu_ooo_stall_cycle, pmu.active_cycle),
+      pmu.exu_ioq_stall_cycle, percentage(pmu.exu_ioq_stall_cycle, pmu.active_cycle),
+      pmu.lsu_l1d_stall_cycle, percentage(pmu.lsu_l1d_stall_cycle, pmu.active_cycle),
+      pmu.lsu_sq_stall_cycle, percentage(pmu.lsu_sq_stall_cycle, pmu.active_cycle),
+      pmu.wbu_stall_cycle, percentage(pmu.wbu_stall_cycle, pmu.active_cycle));
+  Log("BPU Success: %lld, Fail: %lld, Rate: %2.1f%% (b: %lld, j: %lld, jr: %lld), call: %lld, ret: %lld",
+      pmu.bpu_cnt - pmu.bpu_fail_cnt, pmu.bpu_fail_cnt,
+      percentage(pmu.bpu_cnt - pmu.bpu_fail_cnt, pmu.bpu_cnt),
+      pmu.bpu_b_fail, pmu.bpu_j_fail, pmu.bpu_jr_fail,
+      pmu.call_inst_cnt, pmu.ret_inst_cnt);
+  std::vector<std::pair<word_t, BranchHotspot>> hotspots(branch_hotspots.begin(), branch_hotspots.end());
+  std::sort(hotspots.begin(), hotspots.end(), [](const auto &lhs, const auto &rhs) {
+    if (lhs.second.misses != rhs.second.misses) return lhs.second.misses > rhs.second.misses;
+    return lhs.first < rhs.first;
+  });
+  for (std::size_t index = 0; index < std::min<std::size_t>(4, hotspots.size()); ++index)
+  {
+    const auto &[pc, hotspot] = hotspots[index];
+    const auto top_target = std::max_element(hotspot.targets.begin(), hotspot.targets.end(),
+        [](const auto &lhs, const auto &rhs) {
+          if (lhs.second != rhs.second) return lhs.second < rhs.second;
+          return lhs.first > rhs.first;
+        });
+    Log("BPU hotspot %zu: pc=%016llx inst=%08x misses=%llu/%llu (%.1f%%) "
+        "b/j/jr=%llu/%llu/%llu targets=%zu top=%016llx/%llu",
+        index + 1, u(pc), hotspot.inst, u(hotspot.misses), u(hotspot.total),
+        percentage(hotspot.misses, hotspot.total), u(hotspot.conditional),
+        u(hotspot.jal), u(hotspot.jalr), hotspot.targets.size(),
+        top_target == hotspot.targets.end() ? 0ull : u(top_target->first),
+        top_target == hotspot.targets.end() ? 0ull : u(top_target->second));
+  }
+  Log("Rename checkpoints: pool full %lld cycles, allocation stalls %lld cycles, occupancy avg %.3f, peak %lld; recovery fence %lld cycles",
+      pmu.rename_checkpoint_full_cycle, pmu.rename_checkpoint_stall_cycle,
+      pmu.active_cycle ? (double)pmu.rename_checkpoint_occupancy_sum / pmu.active_cycle : 0.0,
+      pmu.rename_checkpoint_peak, pmu.rename_recovery_fence_cycle);
+  Log("Commit flush: branch %lld, non-branch %lld; branch recovery: %lld completed, "
+      "%lld wait cycles (%4.2f cycles/completed), %lld overlaps",
+      pmu.branch_flush_events, pmu.nonbranch_flush_events,
+      pmu.branch_recovery_completed, pmu.branch_recovery_wait_cycles,
+      pmu.branch_recovery_completed
+          ? (double)pmu.branch_recovery_wait_cycles / pmu.branch_recovery_completed : 0.0,
+      pmu.branch_recovery_overlap_events);
+  report_recovery_metrics();
+  Log("IFU stalls: total=%lld no-response=%lld redirect=%lld serializing=%lld; "
+      "FQU full=%lld buffered=%lld avg=%.2f",
+      pmu.ifu_stall_cycle, pmu.ifu_icache_miss_cycle, pmu.ifu_flush_cycle,
+      pmu.ifu_empty_cycle, pmu.fqu_full_cycle, pmu.fqu_buffered_cycle,
+      pmu.active_cycle ? (double)pmu.fqu_occupancy_sum / pmu.active_cycle : 0.0);
+  Log("deliveries: %lld, instructions: %lld, avg/delivery: %4.2f, multi-slot deliveries: %lld (%2.1f%%)",
+      pmu.ifu_fetch_cnt, pmu.ifu_fetch_inst_cnt,
+      pmu.ifu_fetch_cnt ? (double)pmu.ifu_fetch_inst_cnt / pmu.ifu_fetch_cnt : 0.0,
+      pmu.ifu_multi_fetch_cnt, percentage(pmu.ifu_multi_fetch_cnt, pmu.ifu_fetch_cnt));
+  Log("Fetch probes (overlapping): BPU-taken %lld (%2.1f%%), first-control %lld (%2.1f%%), "
+      "aux-conditional %lld (%2.1f%%), next-word unavailable %lld (%2.1f%%), downstream blocked %lld (%2.1f%%)",
+      pmu.ifu_fetch_bpu_taken_cnt, percentage(pmu.ifu_fetch_bpu_taken_cnt, pmu.ifu_fetch_cnt),
+      pmu.ifu_fetch_first_control_cnt, percentage(pmu.ifu_fetch_first_control_cnt, pmu.ifu_fetch_cnt),
+      pmu.ifu_fetch_aux_conditional_cnt, percentage(pmu.ifu_fetch_aux_conditional_cnt, pmu.ifu_fetch_cnt),
+      pmu.ifu_fetch_n1_unavailable_cnt, percentage(pmu.ifu_fetch_n1_unavailable_cnt, pmu.ifu_fetch_cnt),
+      pmu.ifu_fetch_downstream_blocked_cycle,
+      percentage(pmu.ifu_fetch_downstream_blocked_cycle, pmu.active_cycle));
+  Log("ALQ selection: ready-entry cycles %lld, issued %lld, rebalance extra issues %lld; "
+      "reclaim_allocations=%lld; issue_histogram=[%s]; extra_port_issues_ge2=%lld",
+      pmu.alq_ready_entry_cycles, pmu.alq_issued, pmu.alq_rebalance_gain,
+      pmu.alq_reclaim_allocations, compact_histogram(alq_issue_histogram).c_str(),
+      pmu.alq_extra_port_issues);
+  uint64_t dispatch_cycles = 0, unfilled_slots = 0, zero_progress_cycles = 0;
+  uint64_t histogram_cycles = 0, histogram_instructions = 0, endpoint_cycles = 0;
+  std::string dispatch_stops;
+  for (unsigned reason = 0; reason < RtlConfig::DispatchStopCount; ++reason)
+  {
+    dispatch_cycles += dispatch_metrics.cycles[reason];
+    unfilled_slots += dispatch_metrics.unfilled_slots[reason];
+    zero_progress_cycles += dispatch_metrics.zero_progress_cycles[reason];
+    if (reason) dispatch_stops += ' ';
+    dispatch_stops += std::string(dispatch_reason_name(reason)) + "="
+        + std::to_string(dispatch_metrics.cycles[reason]) + "/"
+        + std::to_string(dispatch_metrics.unfilled_slots[reason]) + "/"
+        + std::to_string(dispatch_metrics.zero_progress_cycles[reason]);
+  }
+  for (unsigned width = 0; width <= RtlConfig::DispatchWidth; ++width)
+  {
+    histogram_cycles += dispatch_metrics.histogram[width];
+    histogram_instructions += width * dispatch_metrics.histogram[width];
+  }
+  for (unsigned domain = 0; domain < RtlConfig::ExecutionDomains; ++domain)
+    endpoint_cycles += dispatch_metrics.endpoint_cycles[domain];
+  assert(dispatch_cycles == (uint64_t)pmu.active_cycle && histogram_cycles == dispatch_cycles);
+  assert(histogram_instructions == dispatch_metrics.accepted);
+  assert(zero_progress_cycles == dispatch_metrics.histogram[0]);
+  assert(endpoint_cycles == dispatch_metrics.cycles[RtlConfig::DispatchStopEndpoint]);
+  assert(unfilled_slots + dispatch_metrics.accepted == RtlConfig::DispatchWidth * dispatch_cycles);
+  uint64_t blocked_cycles = 0, pending_cycles = 0, pending_sum = 0;
+  uint64_t pending_peak = 0, pending_domain_sum = 0, branch_classified = 0;
+  for (const auto count : rob_dispatch_metrics.blocked_domains) blocked_cycles += count;
+  for (unsigned index = 0; index <= RtlConfig::ROBEntries; ++index)
+  {
+    const uint64_t count = rob_dispatch_metrics.pending_histogram[index];
+    pending_cycles += count;
+    pending_sum += index * count;
+    if (count) pending_peak = index;
+  }
+  for (const auto count : rob_dispatch_metrics.pending_domain_sum) pending_domain_sum += count;
+  for (const auto count : branch_capacity_reasons) branch_classified += count;
+  assert(blocked_cycles == rob_dispatch_metrics.oldest_blocked_cycles);
+  assert(pending_cycles == static_cast<uint64_t>(pmu.active_cycle));
+  assert(pending_sum == rob_dispatch_metrics.pending_sum);
+  assert(pending_peak == rob_dispatch_metrics.pending_peak);
+  assert(pending_domain_sum == rob_dispatch_metrics.pending_sum);
+  assert(branch_classified == rob_dispatch_metrics.blocked_domains[BranchDomain]);
+  assert(pmu.instr_cnt == pmu.ld_inst_cnt + pmu.st_inst_cnt + pmu.alu_inst_cnt +
+      pmu.b_inst_cnt + pmu.csr_inst_cnt + pmu.other_inst_cnt +
+      pmu.jal_inst_cnt + pmu.jalr_inst_cnt);
+  Log("Dispatch stops (cycles/unfilled_slots/zero_progress_cycles): %s", dispatch_stops.c_str());
+  Log("Dispatch histogram: [%s]", compact_histogram(dispatch_metrics.histogram).c_str());
+  Log("Dispatch endpoint domains: cycles [%s] (index from 0)",
+      compact_histogram(dispatch_metrics.endpoint_cycles).c_str());
+  Log("Dispatch accounting: cycles %" PRIu64 ", width %u, accepted %" PRIu64 ", unfilled %" PRIu64,
+      dispatch_cycles, RtlConfig::DispatchWidth, dispatch_metrics.accepted, unfilled_slots);
+  Log("ROB dispatch steering: candidates %" PRIu64 ", accepted %" PRIu64
+      ", bypass %" PRIu64 ", oldest blocked %" PRIu64
+      ", pending avg %.3f, peak %" PRIu64,
+      rob_dispatch_metrics.candidates, rob_dispatch_metrics.accepted,
+      rob_dispatch_metrics.bypass, rob_dispatch_metrics.oldest_blocked_cycles,
+      pmu.active_cycle ? (double)rob_dispatch_metrics.pending_sum / pmu.active_cycle : 0.0,
+      rob_dispatch_metrics.pending_peak);
+  Log("ROB dispatch blocked domains: cycles [%s] (index from 0)",
+      compact_histogram(rob_dispatch_metrics.blocked_domains).c_str());
+  Log("ROB dispatch pending histogram 0..%u: [%s]", RtlConfig::ROBEntries,
+      compact_histogram(rob_dispatch_metrics.pending_histogram).c_str());
+  Log("ROB dispatch pending domains 0..%u: instruction-cycles [%s], peak [%s]",
+      RtlConfig::ExecutionDomains - 1,
+      compact_histogram(rob_dispatch_metrics.pending_domain_sum).c_str(),
+      compact_histogram(rob_dispatch_metrics.pending_domain_peak).c_str());
+  Log("L1I: %lld refill starts, %lld refill-FSM service cycles, %4.2f cycles/start; "
+      "%lld response consumes, %lld delivered packets",
+      pmu.l1i_cache_miss_cnt, pmu.l1i_cache_miss_cycle,
+      pmu.l1i_cache_miss_cnt
+          ? (double)pmu.l1i_cache_miss_cycle / pmu.l1i_cache_miss_cnt : 0.0,
+      pmu.ifu_fetch_response_cnt, pmu.ifu_fetch_cnt);
+  const long long l1d_total = pmu.l1d_cache_hit_cnt + pmu.l1d_cache_miss_cnt;
+  const double l1d_miss_rate = percentage(pmu.l1d_cache_miss_cnt, l1d_total);
+  const double l1d_miss_penalty = pmu.l1d_cache_miss_cnt
+      ? (double)pmu.l1d_cache_miss_cycle / pmu.l1d_cache_miss_cnt : 0.0;
+  Log("L1D load: hits=%lld(%.1f%%) misses=%lld(%.1f%%) miss_cycles=%lld "
+      "miss_avg=%.2f amat=%.2f (cycles/access)",
+      pmu.l1d_cache_hit_cnt, percentage(pmu.l1d_cache_hit_cnt, l1d_total),
+      pmu.l1d_cache_miss_cnt, l1d_miss_rate, pmu.l1d_cache_miss_cycle,
+      l1d_miss_penalty,
+      l1d_total ? 1.0 + l1d_miss_rate / 100.0 * l1d_miss_penalty : 0.0);
+}
+
 void perf()
 {
+  if (const char *verbose = std::getenv("RAPTOR_PMU_VERBOSE"); !verbose || std::string(verbose) != "1")
+  {
+    perf_compact();
+    return;
+  }
   Log("======== Instruction Analysis ========");
   uint64_t time_clint = *(uint64_t *)&VERILOG_CLINT(mtime);
   // Convert mtime (ticking at RAPT_MTIME_FREQ_MHZ) to microseconds.
@@ -966,7 +1137,7 @@ void perf()
               return lhs.first < rhs.first;
             });
   Log("BPU miss hotspots (pc/inst/miss/total/rate/type-counts b,j,jr):");
-  for (std::size_t index = 0; index < std::min<std::size_t>(16, sorted_branch_hotspots.size()); ++index)
+  for (std::size_t index = 0; index < std::min<std::size_t>(4, sorted_branch_hotspots.size()); ++index)
   {
     const auto &[pc, hotspot] = sorted_branch_hotspots[index];
     std::vector<std::pair<word_t, uint64_t>> sorted_targets(hotspot.targets.begin(),

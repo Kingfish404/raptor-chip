@@ -71,7 +71,8 @@ class BuildIsolationTest(unittest.TestCase):
                       VARIANT="linux32", RAPT_CONFIG="default", SYS_CLK="50000000",
                       BUILD_DIR=str(root))
         values.update(changes)
-        names = ("PACK_SV", "FPGA_DIR", "FW_LINUX_FPGA_DIR", "RAPT_PACK_VFLAGS", "SIM_DIR")
+        names = ("PACK_SV", "FPGA_DIR", "FW_LINUX_FPGA_DIR", "RAPT_PACK_VFLAGS", "SIM_DIR",
+                 "_FPGA_FLAGS")
         extra = ".PHONY: isolation-config\nisolation-config:\n" + "".join(
             f"\t@printf '%s\\n' '{name}=$({name})'\n" for name in names)
         env = {k: v for k, v in os.environ.items()
@@ -118,6 +119,20 @@ class BuildIsolationTest(unittest.TestCase):
                          "-DRAPT_CORE_CLOCK_MHZ=50", "-DRAPT_PMEM_BYTES=1073741824"):
                 self.assertIn(flag, custom["RAPT_PACK_VFLAGS"])
 
+    def test_synthesis_directive_isolates_implementation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for variant in ("linux32", "linux64"):
+                with self.subTest(variant=variant):
+                    base = self.config(Path(tmp), VARIANT=variant)
+                    runtime = self.config(Path(tmp), VARIANT=variant,
+                                          VIVADO_SYNTH_DIRECTIVE="RuntimeOptimized")
+                    self.assertNotEqual(base["FPGA_DIR"], runtime["FPGA_DIR"])
+                    for key in ("PACK_SV", "FW_LINUX_FPGA_DIR", "SIM_DIR"):
+                        self.assertEqual(base[key], runtime[key])
+                    self.assertIn("--vivado-synth-directive=default", base["_FPGA_FLAGS"])
+                    self.assertIn("--vivado-synth-directive=RuntimeOptimized",
+                                  runtime["_FPGA_FLAGS"])
+
     @unittest.skipUnless(shutil.which("verilator"), "requires Verilator preprocessing")
     def test_make_and_cpu_adapter_use_same_pack(self):
         sys.path.insert(0, str(LITEX / "cores"))
@@ -138,7 +153,10 @@ class BuildIsolationTest(unittest.TestCase):
                 with patch.dict(os.environ, {"RAPT_CONFIG": "default", "RAPT_PACK_ROOT": str(root / "rtl"),
                                              "RAPT_PACK_VFLAGS": values["RAPT_PACK_VFLAGS"]}):
                     Raptor.add_sources(platform, variant, pmem_size=0x40000000)
-                platform.add_source.assert_called_once_with(values["PACK_SV"])
+                source = Path(platform.add_source.call_args.args[0])
+                stable = Path(values["PACK_SV"])
+                self.assertEqual(source.parent.parent, stable.parent / "snapshots")
+                self.assertEqual(source.read_bytes(), stable.read_bytes())
                 self.assertFalse((root / ".rapt_config_stamp").exists())
                 self.assertFalse((root / ".rapt_pack_vflags_stamp").exists())
 
@@ -217,6 +235,15 @@ class BuildIsolationTest(unittest.TestCase):
             ok = subprocess.run(command, capture_output=True, text=True, check=True)
             output = Path(ok.stdout.strip()).parent
             names = ("rapt_pack.sv", "rapt_pack.svh", ".signature")
+            first_snapshot = Path(subprocess.run(command + ["--immutable"], capture_output=True,
+                                                 text=True, check=True).stdout.strip())
+            first_bytes = first_snapshot.read_bytes()
+            source.write_text('`include "rapt_config.svh"\nmodule top; logic changed; endmodule\n')
+            second_snapshot = Path(subprocess.run(command + ["--immutable"], capture_output=True,
+                                                  text=True, check=True).stdout.strip())
+            self.assertNotEqual(first_snapshot, second_snapshot)
+            self.assertEqual(first_snapshot.read_bytes(), first_bytes)
+            self.assertNotEqual(second_snapshot.read_bytes(), first_bytes)
             before = {n: (output / n).read_bytes() for n in names}
             source.write_text('`include "missing_test_header.svh"\n')
             failed = subprocess.run(command, capture_output=True, text=True)
@@ -224,6 +251,47 @@ class BuildIsolationTest(unittest.TestCase):
             self.assertIn("missing_test_header.svh", failed.stderr)
             self.assertNotIn("Traceback", failed.stderr)
             self.assertEqual(before, {n: (output / n).read_bytes() for n in names})
+
+    @unittest.skipUnless(shutil.which("verilator"), "requires Verilator preprocessing")
+    def test_source_edit_during_pack_keeps_last_complete_outputs(self):
+        import isolated_pack
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = root / "repo"
+            (repo / "hdl/configs/default").mkdir(parents=True)
+            (repo / "hdl/generated").mkdir()
+            header = repo / "hdl/configs/default/rapt_config.svh"
+            header.write_text("`define TEST_WIDTH 32\n")
+            (repo / "hdl/rapt_pkg.sv").write_text("package rapt_pkg; endpackage\n")
+            source = repo / "hdl/top.sv"
+            source.write_text('`include "rapt_config.svh"\nmodule top; endmodule\n')
+            for name in ("rapt_idu_decoder.sv", "rapt_idu_decoder_c.sv"):
+                (repo / "hdl/generated" / name).write_text("// fixture\n")
+            output_root = root / "output"
+            output = isolated_pack.pack(repo, output_root, "default", "").parent
+            names = ("rapt_pack.sv", "rapt_pack.svh", ".signature")
+            before = {name: (output / name).read_bytes() for name in names}
+            source.write_text('`include "rapt_config.svh"\nmodule top; logic changed; endmodule\n')
+            run = subprocess.run
+            calls = 0
+
+            def edit_after_export(*args, **kwargs):
+                nonlocal calls
+                result = run(*args, **kwargs)
+                calls += 1
+                if calls == 1:
+                    header.write_text("`define TEST_WIDTH 64\n")
+                return result
+
+            with patch.object(isolated_pack.subprocess, "run", side_effect=edit_after_export):
+                with self.assertRaisesRegex(RuntimeError, "RTL inputs changed during preprocessing"):
+                    isolated_pack.pack(repo, output_root, "default", "", immutable=True)
+            self.assertEqual(calls, 2)
+            self.assertEqual(before, {name: (output / name).read_bytes() for name in names})
+            self.assertFalse((output / "snapshots").exists())
+            repaired = isolated_pack.pack(repo, output_root, "default", "", immutable=True)
+            self.assertIn("`define TEST_WIDTH 64\n", repaired.with_suffix(".svh").read_text())
 
     def test_conflicting_variant_rejected_before_pack(self):
         sys.path.insert(0, str(LITEX / "cores"))

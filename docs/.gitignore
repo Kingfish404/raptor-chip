@@ -1,6 +1,7 @@
 !assets/**
 !_layouts/**
 !_includes/**
+!scripts/*.py
 
 # Jekyll / local preview artifacts
 _site/

@@ -16,6 +16,7 @@ task automatic init_cmu_bcast_defaults;
     cmu_bcast.fence_i = 1'b0;
     cmu_bcast.flush_pipe = 1'b0;
     cmu_bcast.flush_redirect = 1'b0;
+    cmu_bcast.fetch_context_stable = 1'b0;
     cmu_bcast.redirect_pc = '0;
     cmu_bcast.sys_resume = 1'b0;
     cmu_bcast.time_trap = 1'b0;

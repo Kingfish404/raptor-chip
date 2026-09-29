@@ -9,6 +9,7 @@ module tb_backend_trace;
   localparam int XLEN = `RAPT_XLEN;
   localparam int MaxTrace = 200000;
   localparam int MaxImage = 262144;
+  localparam int SecondSlot = rapt_pkg::CommitWidth > 1 ? 1 : 0;
   localparam logic [XLEN-1:0] ImageBase = XLEN'('h80000000);
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
@@ -146,6 +147,27 @@ module tb_backend_trace;
     int fd, status, max_insts, max_cycles;
     int accepted, committed, front_stall, commit_empty, flushes, next_feed_index;
     int loads, stores, axi_reads, axi_writes, last_progress;
+    int commit_slots[rapt_pkg::CommitWidth+1];
+    int head_empty, head_dispatch, head_execute, head_writeback;
+    int head_store_wait, head_drain_wait, rename_stall, operand_stall;
+    int dispatch_stops[rapt_pkg::DispatchStopCount];
+    int head_wait_domain[rapt_pkg::ExecutionDomains];
+    int ioq_full_cycles, head_wait_ioq_full, rob_stop_ioq_full;
+    int second_empty, second_dispatch, second_execute, second_writeback;
+    int store_first_second_wb, store_first_second_plain_wb;
+    int second_wait_domain[rapt_pkg::ExecutionDomains];
+    int load_b_hits, load_b_retries, load_a_misses, load_a_retries, wake_next_requests;
+    int head_mem_l1d_state[8];
+    int head_mem_ioq_empty, head_mem_operand_wait, head_mem_addr_wait;
+    int head_mem_no_a_request, head_mem_a_request, head_mem_b_request;
+    int head_mem_ioq_load, head_mem_ioq_store, head_mem_ioq_complete;
+    int head_mem_idle_no_a, head_mem_idle_a, head_mem_no_a_issue_ready;
+    int head_mem_a_owner_head, head_mem_a_owner_younger;
+    int early_load_complete_events, early_load_wait_cycles, early_load_broadcasts;
+    int early_bcast_next_dependent, early_bcast_next_request_slot;
+    int early_bcast_next_b_request_slot;
+    logic [rapt_pkg::CoreConfig.ioq_entries-1:0] last_ioq_complete;
+    int committed_this_cycle;
     logic [XLEN-1:0] pc_value, npc_value;
     logic [31:0] inst_value;
     if (!$value$plusargs("IMG=%s", image_path)) $fatal(1, "+IMG required");
@@ -188,11 +210,60 @@ module tb_backend_trace;
     axi_reads = 0;
     axi_writes = 0;
     last_progress = 0;
+    foreach (commit_slots[s]) commit_slots[s] = 0;
+    foreach (dispatch_stops[s]) dispatch_stops[s] = 0;
+    foreach (head_wait_domain[s]) head_wait_domain[s] = 0;
+    foreach (second_wait_domain[s]) second_wait_domain[s] = 0;
+    head_empty = 0;
+    head_dispatch = 0;
+    head_execute = 0;
+    head_writeback = 0;
+    head_store_wait = 0;
+    head_drain_wait = 0;
+    rename_stall = 0;
+    operand_stall = 0;
+    ioq_full_cycles = 0;
+    head_wait_ioq_full = 0;
+    rob_stop_ioq_full = 0;
+    second_empty = 0;
+    second_dispatch = 0;
+    second_execute = 0;
+    second_writeback = 0;
+    store_first_second_wb = 0;
+    store_first_second_plain_wb = 0;
+    load_b_hits = 0;
+    load_b_retries = 0;
+    load_a_misses = 0;
+    load_a_retries = 0;
+    wake_next_requests = 0;
+    foreach (head_mem_l1d_state[s]) head_mem_l1d_state[s] = 0;
+    head_mem_ioq_empty = 0;
+    head_mem_operand_wait = 0;
+    head_mem_addr_wait = 0;
+    head_mem_no_a_request = 0;
+    head_mem_a_request = 0;
+    head_mem_b_request = 0;
+    head_mem_ioq_load = 0;
+    head_mem_ioq_store = 0;
+    head_mem_ioq_complete = 0;
+    head_mem_idle_no_a = 0;
+    head_mem_idle_a = 0;
+    head_mem_no_a_issue_ready = 0;
+    head_mem_a_owner_head = 0;
+    head_mem_a_owner_younger = 0;
+    early_load_complete_events = 0;
+    early_load_wait_cycles = 0;
+    early_load_broadcasts = 0;
+    early_bcast_next_dependent = 0;
+    early_bcast_next_request_slot = 0;
+    early_bcast_next_b_request_slot = 0;
+    last_ioq_complete = '0;
     repeat (5) @(negedge clock);
     reset = 0;
     while (commit_index < trace_count && cycles < max_cycles) begin
       @(posedge clock);
       // Retire is the source of truth for a trace after any precise flush.
+      committed_this_cycle = 0;
       for (int s = 0; s < rapt_pkg::CommitWidth; s++) begin
         if (dut.rou_cmu.slot[s].valid) begin
           if (dut.rou_cmu.slot[s].pc != trace_pc[commit_index])
@@ -213,9 +284,119 @@ module tb_backend_trace;
             );
           commit_index++;
           committed++;
+          committed_this_cycle++;
           last_progress = cycles;
         end
       end
+      commit_slots[committed_this_cycle]++;
+      if (committed_this_cycle == 1 && rapt_pkg::CommitWidth > 1) begin
+        if (dut.rou.rob_entry[dut.rou.commit_index[0]].wen
+            && dut.rou.rob_entry_busy[dut.rou.commit_index[SecondSlot]]
+            && dut.rou.rob_entry[dut.rou.commit_index[SecondSlot]].state == rapt_pkg::ROB_WB) begin
+          store_first_second_wb++;
+          if (!dut.rou.rob_entry[dut.rou.commit_index[SecondSlot]].wen
+              && !dut.rou.rob_control_flow[dut.rou.commit_index[SecondSlot]]
+              && !dut.rou.rob_serializing[dut.rou.commit_index[SecondSlot]]
+              && !dut.rou.rob_atomic[dut.rou.commit_index[SecondSlot]]
+              && !dut.rou.rob_entry[dut.rou.commit_index[SecondSlot]].trap
+              && !dut.rou.rob_entry[dut.rou.commit_index[SecondSlot]].mispredict
+              && !dut.rou.rob_entry[dut.rou.commit_index[SecondSlot]].difftest_skip)
+            store_first_second_plain_wb++;
+        end
+        if (!dut.rou.rob_entry_busy[dut.rou.commit_index[SecondSlot]]) second_empty++;
+        else
+          case (dut.rou.rob_entry[dut.rou.commit_index[SecondSlot]].state)
+            rapt_pkg::ROB_DP: second_dispatch++;
+            rapt_pkg::ROB_EX: begin
+              second_execute++;
+              if (int'(dut.rou.uop_pl[dut.rou.commit_index[SecondSlot]].schedule.domain)
+                  < rapt_pkg::ExecutionDomains)
+                second_wait_domain[int'(dut.rou.uop_pl[dut.rou.commit_index[SecondSlot]].schedule.domain)]++;
+            end
+            rapt_pkg::ROB_WB: second_writeback++;
+            default: second_empty++;
+          endcase
+      end
+      if (!dut.rou.pmu_head_busy) head_empty++;
+      else
+        case (dut.rou.pmu_head_state)
+          rapt_pkg::ROB_DP: head_dispatch++;
+          rapt_pkg::ROB_EX: head_execute++;
+          rapt_pkg::ROB_WB: head_writeback++;
+          default: head_empty++;
+        endcase
+      if (dut.rou.pmu_head_store_wait) head_store_wait++;
+      if (dut.rou.pmu_head_drain_wait) head_drain_wait++;
+      if (dut.lsu.u_ioq.pmu_ioq_all_full) ioq_full_cycles++;
+      for (int e = 0; e < rapt_pkg::CoreConfig.ioq_entries; e++) begin
+        if (dut.lsu.u_ioq.ioq_valid[e] && dut.lsu.u_ioq.ioq_complete[e]
+            && dut.lsu.u_ioq.ioq_ren[e] && !dut.lsu.u_ioq.ioq_wen[e]
+            && !dut.lsu.u_ioq.ioq_atom[e] && !dut.lsu.u_ioq.ioq_load_trap[e]
+            && !dut.lsu.u_ioq.ioq_load_skip[e] && !dut.lsu.u_ioq.ioq_fp_valid[e]
+            && e != int'(dut.lsu.u_ioq.ioq_head)) begin
+          early_load_wait_cycles++;
+          if (!last_ioq_complete[e]) early_load_complete_events++;
+        end
+      end
+      last_ioq_complete = dut.lsu.u_ioq.ioq_complete;
+      if (dut.lsu.u_ioq.early_bcast_issue && dut.lsu.u_ioq.wb_accept) begin
+        int next_idx;
+        early_load_broadcasts++;
+        next_idx = (int'(dut.lsu.u_ioq.early_bcast_idx) + 1) % rapt_pkg::CoreConfig.ioq_entries;
+        if (dut.lsu.u_ioq.ioq_valid[next_idx] && dut.lsu.u_ioq.ioq_ren[next_idx]
+            && !dut.lsu.u_ioq.ioq_wen[next_idx] && !dut.lsu.u_ioq.ioq_atom[next_idx]
+            && dut.lsu.u_ioq.ioq_pr1[next_idx] != '0
+            && dut.lsu.u_ioq.ioq_fwd1_hit[next_idx]
+            && dut.lsu.u_ioq.ioq_pr2[next_idx] == '0) begin
+          early_bcast_next_dependent++;
+          if (!dut.lsu.u_ioq.ioq_issue_found
+              && (!dut.lsu.u_ioq.load_req_valid_q || dut.lsu.u_ioq.exu_lsu.rready
+                  || dut.lsu.u_ioq.exu_lsu.rretry || dut.lsu.u_ioq.exu_lsu.rmiss))
+            early_bcast_next_request_slot++;
+          if (dut.lsu.u_ioq.a_req_holds && !dut.lsu.u_ioq.b_issue_found
+              && (!dut.lsu.u_ioq.b_req_valid_q || dut.lsu.u_ioq.exu_lsu.rready_b
+                  || dut.lsu.u_ioq.exu_lsu.rretry_b))
+            early_bcast_next_b_request_slot++;
+        end
+      end
+      if (dut.rou.pmu_head_busy && dut.rou.pmu_head_state != rapt_pkg::ROB_WB
+          && int'(dut.rou.pmu_head_domain) < rapt_pkg::ExecutionDomains) begin
+        head_wait_domain[int'(dut.rou.pmu_head_domain)]++;
+        if (dut.lsu.u_ioq.pmu_ioq_all_full) head_wait_ioq_full++;
+        if (dut.rou.pmu_head_domain == rapt_pkg::DOMAIN_MEMORY) begin
+          head_mem_l1d_state[int'(memory_env.l1d_cache.l1d_state)]++;
+          if (memory_env.l1d_cache.l1d_state == 0) begin
+            if (dut.lsu.u_ioq.load_req_valid_q) head_mem_idle_a++;
+            else head_mem_idle_no_a++;
+          end
+          if (!dut.lsu.u_ioq.ioq_valid[dut.lsu.u_ioq.ioq_head]) head_mem_ioq_empty++;
+          else if (dut.lsu.u_ioq.ioq_pr1[dut.lsu.u_ioq.ioq_head] != '0
+                   || dut.lsu.u_ioq.ioq_pr2[dut.lsu.u_ioq.ioq_head] != '0)
+            head_mem_operand_wait++;
+          else if (!dut.lsu.u_ioq.ioq_addr_ready[dut.lsu.u_ioq.ioq_head]) head_mem_addr_wait++;
+          else if (!dut.lsu.u_ioq.load_req_valid_q) head_mem_no_a_request++;
+          else head_mem_a_request++;
+          if (dut.lsu.u_ioq.ioq_ren[dut.lsu.u_ioq.ioq_head]) head_mem_ioq_load++;
+          if (dut.lsu.u_ioq.ioq_wen[dut.lsu.u_ioq.ioq_head]) head_mem_ioq_store++;
+          if (dut.lsu.u_ioq.ioq_complete[dut.lsu.u_ioq.ioq_head]) head_mem_ioq_complete++;
+          if (!dut.lsu.u_ioq.load_req_valid_q && dut.lsu.u_ioq.ioq_issue_found)
+            head_mem_no_a_issue_ready++;
+          if (dut.lsu.u_ioq.load_req_valid_q) begin
+            if (dut.lsu.u_ioq.load_req_idx_q == dut.lsu.u_ioq.ioq_head) head_mem_a_owner_head++;
+            else head_mem_a_owner_younger++;
+          end
+`ifdef RAPT_LSU_HUM
+          if (dut.lsu.u_ioq.b_req_valid_q) head_mem_b_request++;
+`endif
+        end
+      end
+      if (dut.rnu_rou.valid[0] && !dut.rnu_rou.ready[0]) rename_stall++;
+      if (dut.rnu_operand.valid[0] && !dut.rnu_operand.ready[0]) operand_stall++;
+      if (int'(dut.rou.pmu_dispatch_reason) < rapt_pkg::DispatchStopCount)
+        dispatch_stops[int'(dut.rou.pmu_dispatch_reason)]++;
+      if (dut.rou.pmu_dispatch_reason == rapt_pkg::DispatchStopRob
+          && dut.lsu.u_ioq.pmu_ioq_all_full)
+        rob_stop_ioq_full++;
       next_feed_index = feed_index;
       if (cmu_bcast.flush_pipe || cmu_bcast.sys_resume) begin
         flushes++;
@@ -231,6 +412,11 @@ module tb_backend_trace;
       if (idu_rnu.valid[0] && !idu_rnu.ready[0]) front_stall++;
       if (!commit_fire) commit_empty++;
       if (lsu_l1d.rvalid && lsu_l1d.rready) loads++;
+      if (lsu_l1d.rvalid && lsu_l1d.rmiss) load_a_misses++;
+      if (lsu_l1d.rvalid && lsu_l1d.rretry) load_a_retries++;
+      if (lsu_l1d.rvalid_b && lsu_l1d.rready_b) load_b_hits++;
+      if (lsu_l1d.rvalid_b && lsu_l1d.rretry_b) load_b_retries++;
+      if (dut.lsu.u_ioq.wake_next_req_valid) wake_next_requests++;
       if (lsu_l1d.wvalid && lsu_l1d.wready) stores++;
       if (axi.rvalid && axi.rready) axi_reads++;
       if (axi.wvalid && axi.wready) axi_writes++;
@@ -255,6 +441,49 @@ module tb_backend_trace;
         committed, cycles, real'(committed) / cycles,
         1.0 - real'(committed) / (cycles * rapt_pkg::CommitWidth), accepted, front_stall,
         commit_empty, flushes, loads, stores, axi_reads, axi_writes);
+    for (int s = 0; s <= rapt_pkg::CommitWidth; s++)
+    $display("PROFILE: commit_slots[%0d]=%0d", s, commit_slots[s]);
+    $display(
+        "PROFILE: head_empty=%0d head_dispatch=%0d head_execute=%0d head_writeback=%0d head_store_wait=%0d head_drain_wait=%0d rename_stall=%0d operand_stall=%0d",
+        head_empty, head_dispatch, head_execute, head_writeback, head_store_wait, head_drain_wait,
+        rename_stall, operand_stall);
+    for (int s = 0; s < rapt_pkg::DispatchStopCount; s++)
+    if (dispatch_stops[s] != 0) $display("PROFILE: dispatch_stop[%0d]=%0d", s, dispatch_stops[s]);
+    for (int s = 0; s < rapt_pkg::ExecutionDomains; s++)
+    if (head_wait_domain[s] != 0)
+      $display("PROFILE: head_wait_domain[%0d]=%0d", s, head_wait_domain[s]);
+    $display("PROFILE: ioq_full=%0d head_wait_ioq_full=%0d rob_stop_ioq_full=%0d", ioq_full_cycles,
+             head_wait_ioq_full, rob_stop_ioq_full);
+    $display(
+        "PROFILE: second_empty=%0d second_dispatch=%0d second_execute=%0d second_writeback=%0d",
+        second_empty, second_dispatch, second_execute, second_writeback);
+    $display("PROFILE: store_first_second_wb=%0d store_first_second_plain_wb=%0d",
+             store_first_second_wb, store_first_second_plain_wb);
+    for (int s = 0; s < rapt_pkg::ExecutionDomains; s++)
+    if (second_wait_domain[s] != 0)
+      $display("PROFILE: second_wait_domain[%0d]=%0d", s, second_wait_domain[s]);
+    $display(
+        "PROFILE: load_a_done=%0d load_a_misses=%0d load_a_retries=%0d load_b_hits=%0d load_b_retries=%0d",
+        loads, load_a_misses, load_a_retries, load_b_hits, load_b_retries);
+    $display("PROFILE: wake_next_requests=%0d", wake_next_requests);
+    $display(
+        "PROFILE: younger_completed_loads=%0d younger_wait_entry_cycles=%0d early_broadcasts=%0d",
+        early_load_complete_events, early_load_wait_cycles, early_load_broadcasts);
+    $display("PROFILE: early_next_dependent=%0d early_next_a_slot=%0d early_next_b_slot=%0d",
+             early_bcast_next_dependent, early_bcast_next_request_slot,
+             early_bcast_next_b_request_slot);
+    for (int s = 0; s < 8; s++)
+    if (head_mem_l1d_state[s] != 0)
+      $display("PROFILE: head_memory_l1d_state[%0d]=%0d", s, head_mem_l1d_state[s]);
+    $display(
+        "PROFILE: head_memory_ioq_empty=%0d operand_wait=%0d addr_wait=%0d no_a_request=%0d a_request=%0d b_request=%0d",
+        head_mem_ioq_empty, head_mem_operand_wait, head_mem_addr_wait, head_mem_no_a_request,
+        head_mem_a_request, head_mem_b_request);
+    $display(
+        "PROFILE: head_memory_load=%0d store=%0d complete=%0d idle_no_a=%0d idle_a=%0d no_a_issue_ready=%0d a_owner_head=%0d a_owner_younger=%0d",
+        head_mem_ioq_load, head_mem_ioq_store, head_mem_ioq_complete, head_mem_idle_no_a,
+        head_mem_idle_a, head_mem_no_a_issue_ready, head_mem_a_owner_head,
+        head_mem_a_owner_younger);
     $finish;
   end
 endmodule

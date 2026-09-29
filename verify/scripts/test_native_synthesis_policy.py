@@ -29,7 +29,10 @@ class NativePolicyTest(unittest.TestCase):
                     if line.strip() and not line.lstrip().startswith('#')]
         self.assertEqual(commands.count('check -assert'), 2)
         self.assertNotIn('check', commands)
-        self.assertLess(commands.index('check -assert'), commands.index('synth -top $top'))
+        # The driver builds its argument list first, then expands it at the
+        # synthesis call.  Check ordering against that call so the policy test
+        # remains valid when more options are added to synth_args.
+        self.assertLess(commands.index('check -assert'), commands.index('synth {*}$synth_args'))
         self.assertLess(commands.index('check -assert'), commands.index('opt -undriven'))
         self.assertGreater(max(i for i,c in enumerate(commands) if c=='check -assert'),
                            commands.index('setundef -zero'))

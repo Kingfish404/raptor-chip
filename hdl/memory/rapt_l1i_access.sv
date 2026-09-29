@@ -5,7 +5,8 @@
 // refill/PTW sequencing remain in the instruction-cache controller.
 module rapt_l1i_access #(
     parameter int XLEN = `RAPT_XLEN,
-    parameter bit Lookahead = 1'b1
+    parameter bit Lookahead = 1'b1,
+    parameter bit WideLookahead = 1'b0
 ) (
     csr_bcast_if.in csr_bcast,
     pmp_state_if.in pmp_state,
@@ -13,6 +14,8 @@ module rapt_l1i_access #(
     ptw_araddr,
     lookahead_n1_addr,
     lookahead_n2_addr,
+    lookahead_n3_addr,
+    lookahead_n4_addr,
     input logic sram_data_ready,
     is_c,
     tlb_hit,
@@ -24,7 +27,9 @@ module rapt_l1i_access #(
     pmp_fetch_fault_lo,
     pmp_iptw_fault,
     output wire pmp_n1_fetch_fault,
-    pmp_n2_fetch_fault
+    pmp_n2_fetch_fault,
+    pmp_n3_fetch_fault,
+    pmp_n4_fetch_fault
 );
   // Sv32/Sv39 fetch permission check: execute must be allowed for current priv.
   // itlb_pte = {D,A,G,U,X,W,R}; only X/U/A bits influence fetch fault.
@@ -48,16 +53,18 @@ module rapt_l1i_access #(
   assign pf_fetch_ptw = pte_fault_fetch(ptw_result_pte, csr_bcast.priv);
 
 
-  localparam int Checks = Lookahead ? 4 : 2;
-  wire [XLEN-1:0] addr[4];
-  wire [3:0] fault;
+  localparam int Checks = WideLookahead ? 6 : Lookahead ? 4 : 2;
+  wire [XLEN-1:0] addr[6];
+  wire [5:0] fault;
   /* verilator lint_off UNUSEDSIGNAL */
-  wire [3:0] fault_lo;
+  wire [5:0] fault_lo;
   /* verilator lint_on UNUSEDSIGNAL */
   assign addr[0] = pc_ifu;
   assign addr[1] = ptw_araddr;
   assign addr[2] = lookahead_n1_addr;
   assign addr[3] = lookahead_n2_addr;
+  assign addr[4] = lookahead_n3_addr;
+  assign addr[5] = lookahead_n4_addr;
   assign pmp_fetch_pmp_fault = fault[0];
   assign pmp_fetch_fault_lo = fault_lo[0];
   // The existing access-fault output combines PMP with the platform's PTE
@@ -68,7 +75,12 @@ module rapt_l1i_access #(
       || (Lookahead && !rapt_pkg::addr_executable(lookahead_n1_addr, 4'd3));
   assign pmp_n2_fetch_fault = fault[3]
       || (Lookahead && !rapt_pkg::addr_executable(lookahead_n2_addr, 4'd3));
-  for (genvar port_idx = 0; port_idx < 4; port_idx++) begin : g_check
+  assign pmp_n3_fetch_fault = fault[4]
+      || (WideLookahead && !rapt_pkg::addr_executable(lookahead_n3_addr, 4'd3));
+  // The wide window consumes only the low halfword of n4.
+  assign pmp_n4_fetch_fault = fault[5]
+      || (WideLookahead && !rapt_pkg::addr_executable(lookahead_n4_addr, 4'd1));
+  for (genvar port_idx = 0; port_idx < 6; port_idx++) begin : g_check
     if (port_idx < Checks) begin : g_active
       // SRAM readiness and instruction length arrive after the address. Do
       // not put that late select ahead of the PMP end-address arithmetic and
@@ -89,7 +101,7 @@ module rapt_l1i_access #(
         ) u_pmp (
             .addr(addr[port_idx]),
             .size_m1(port_idx == 1 ? 4'(XLEN / 8 - 1)
-                : (port_idx == 0 && size_idx == 0 ? 4'd1 : 4'd3)),
+                : ((port_idx == 0 && size_idx == 0) || port_idx == 5 ? 4'd1 : 4'd3)),
             .priv(csr_bcast.priv),
             .op_r(port_idx == 1),
             .op_w(1'b0),

@@ -97,7 +97,9 @@ class NetbootProfileTest(unittest.TestCase):
         for setting in ('FPGA_BOARD=xilinx_vcu118', 'BOARD=mlk_cu07_ku15p',
                         'VARIANT=linux32', 'VARIANT=', 'SYS_CLK=30000000',
                         'WITH_ETHERNET=0', 'BOOT_MODE=custom',
-                        'RAPT_PACK_VFLAGS=-DRAPT_ROB_SIZE=8'):
+                        'VIVADO_SYNTH_DIRECTIVE=default',
+                        'RAPT_PACK_VFLAGS=-DRAPT_ROB_SIZE=8',
+                        'RAPT_PACK_VFLAGS='):
             with self.subTest(setting=setting), self.assertRaises(subprocess.CalledProcessError) as error:
                 self.expand('fpga-netboot-rv64-build', setting)
             self.assertIn('conflicts with netboot', error.exception.stderr)
@@ -135,9 +137,13 @@ class NetbootProfileTest(unittest.TestCase):
                 self.assertEqual(settings["WITH_ETHERNET"], "1")
                 self.assertEqual(settings["EXTRA_FLAGS"], "")
                 self.assertEqual(settings["VIVADO_ROUTE_DIRECTIVE"], "Explore")
+                self.assertEqual(settings["VIVADO_SYNTH_DIRECTIVE"],
+                                 "RuntimeOptimized" if xlen == 64 else "default")
                 self.assertEqual(settings["SYS_CLK"], "50000000")
                 self.assertEqual(settings["RAPT_CONFIG"], "default")
-                self.assertEqual(settings["RAPT_PACK_VFLAGS"], "")
+                self.assertEqual(settings["RAPT_PACK_VFLAGS"],
+                                 "-DRAPT_FETCH_RESPONSE_STAGE=1 -DRAPT_IOQ_LOAD_RESPONSE_STAGE=1"
+                                 if xlen == 64 else "")
                 self.assertIn(f"/rv{xlen}/soc", settings["FPGA_DIR"])
 
     def test_paths_and_fixed_settings(self):

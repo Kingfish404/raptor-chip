@@ -1,0 +1,9 @@
+strash;
+dc2;
+&get -n;
+&nf {D};
+&put;
+buffer;
+upsize {D};
+dnsize {D};
+stime -p;

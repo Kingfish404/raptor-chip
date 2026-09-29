@@ -75,10 +75,10 @@ static uint64_t tfp_inst = UINT64_MAX;
 
 static void dump_pipeline_stall_state()
 {
-  Log("stall state: ROB head=%u tail=%u busy=%016llx head_valid=%u "
+  Log("stall state: ROB head=%u tail=%u busy=%s head_valid=%u "
       "UOQ valid=%02x head=%u tail=%u",
       (unsigned)VERILOG_ROU(rob_head), (unsigned)VERILOG_ROU(rob_tail),
-      (unsigned long long)VERILOG_ROU(rob_entry_busy),
+      VL_TO_STRING(VERILOG_ROU(rob_entry_busy)).c_str(),
       (unsigned)VERILOG_ROU(head0_valid),
       (unsigned)VERILOG_ROU(uoq_valid),
       (unsigned)VERILOG_ROU(uoq_head), (unsigned)VERILOG_ROU(uoq_tail));

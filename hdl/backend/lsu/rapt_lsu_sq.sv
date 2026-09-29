@@ -370,6 +370,11 @@ module rapt_lsu_sq #(
   assign load_in_sq = forward_conflict[0];
   assign sq_fwd_ok = forward_valid[0];
   assign sq_fwd_data = forward_data[0];
+  logic [ForwardPorts-1:0] narrow_allowed;
+  for (genvar p = 0; p < ForwardPorts; p++) begin : g_narrow_context
+    if (p == 0) assign narrow_allowed[p] = !exu_lsu.rcontext.mmu_en;
+    else assign narrow_allowed[p] = !exu_lsu.rcontext_b.mmu_en;
+  end
   rapt_sq_forward #(
       .Xlen(XLEN),
       .Entries(SQ_SIZE),
@@ -384,6 +389,7 @@ module rapt_lsu_sq #(
       .full_store_mask(FullStoreWstrb),
       .store_fp64(sq_fp64),
       .mmu_enabled(exu_lsu.rcontext.mmu_en),
+      .narrow_allowed(narrow_allowed),
       .alloc_valid(sq_handoff_valid),
       .alloc_addr(sq_handoff_vaddr),
       .alloc_alu(sq_handoff_alu),
@@ -469,10 +475,12 @@ module rapt_lsu_sq #(
   // LR must reach L1D to establish a physical-address reservation. If an
   // older same-address store is still in the SQ, wait for it to drain rather
   // than completing LR through the ordinary load-forwarding path.
-  assign fwd_hit = !exu_lsu.atomic_lock
-                && !ma_span && !mmio_ordered && !sq_has_typed_store && load_in_sq && sq_fwd_ok;
   logic pmp_load_fault_lsu;
   logic pmp_load_fault_raw;
+  assign fwd_hit = !exu_lsu.atomic_lock
+                && !ma_span && !mmio_ordered && !sq_has_typed_store && load_in_sq && sq_fwd_ok
+                && (exu_lsu.rcontext.mmu_en || (!pmp_load_fault_raw
+                    && rapt_pkg::addr_data_span_capable(raddr, lsu_load_size_m1, 1'b0)));
   // Virtual addresses cannot be checked against physical PMP entries.
   // Translated fragments receive their PA checks in L1D.
   assign pmp_load_fault_lsu = !exu_lsu.rcontext.mmu_en && pmp_load_fault_raw;

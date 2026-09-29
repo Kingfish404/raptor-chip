@@ -1,6 +1,10 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
 
+`ifndef RAPT_BPU_AUX_PC_HASH
+`define RAPT_BPU_AUX_PC_HASH 0
+`endif
+
 `ifdef RAPT_BPU_DIRP_TAGE
 `define RAPT_BPU_DIRP_MODULE rapt_bpu_tage
 `elsif RAPT_BPU_DIRP_GSHARE
@@ -69,6 +73,7 @@ module rapt_bpu #(
   logic [BTB_TAG_LEN-1:0] rbtb_tag;
   logic btb_tag_match;
   logic taken;
+  logic dirp_aux_taken;
   logic rbtaken;
 
 `ifdef RAPT_FETCH_LOOKAHEAD
@@ -93,14 +98,18 @@ module rapt_bpu #(
   logic [PHT_LEN-1:0] aux_track_index[AuxTrackSize];
   logic aux_track_enqueue, aux_track_dequeue, aux_track_train;
   assign aux_pht_idx = ifu_bpu.aux_pc[PHT_LEN:1];
-  assign aux_gshare_idx = aux_pht_idx ^ gshare[PHT_LEN-1:0];
+  // Selected presets fold a higher PC slice into the auxiliary gshare index.
+  // This changes only the index logic; table capacity is unchanged.
+  assign aux_gshare_idx = aux_pht_idx ^ gshare[PHT_LEN-1:0]
+      ^ (`RAPT_BPU_AUX_PC_HASH ? ifu_bpu.aux_pc[PHT_LEN+8:9] : PHT_LEN'(0));
   assign aux_pht_update_idx = cmu_bcast.rpc[PHT_LEN:1];
   assign aux_gshare_update_idx = aux_track_index[aux_track_head];
   assign aux_bim_taken = aux_pht[aux_pht_idx][1];
   assign aux_gshare_taken = aux_gshare[aux_gshare_idx][1];
   assign ifu_bpu.aux_index = aux_gshare_idx;
   assign ifu_bpu.aux_taken = ifu_bpu.aux_query
-      && (aux_chooser[aux_pht_idx][1] ? aux_gshare_taken : aux_bim_taken);
+      && (`RAPT_BPU_AUX_TAGE ? dirp_aux_taken
+          : (aux_chooser[aux_pht_idx][1] ? aux_gshare_taken : aux_bim_taken));
   assign aux_track_enqueue = idu_bpu.history_valid;
   assign aux_track_dequeue = cmu_bcast.ben && aux_track_count != 0;
   assign aux_track_train = aux_track_dequeue && aux_track_is_aux[aux_track_head];
@@ -174,6 +183,16 @@ module rapt_bpu #(
       .PHR_LEN(PHR_LEN),
       .DEPTH  (PHT_SIZE)
   ) u_dirp (
+`ifdef RAPT_BPU_DIRP_TAGE
+`ifdef RAPT_FETCH_LOOKAHEAD
+      .aux_pc(ifu_bpu.aux_pc),
+`else
+      .aux_pc('0),
+`endif
+      .aux_ghr(gshare),
+      .aux_phr(phr),
+      .aux_taken(dirp_aux_taken),
+`endif
       .clock         (clock),
       .reset         (reset),
       .ren           (ifu_bpu.pc_update),
@@ -189,6 +208,10 @@ module rapt_bpu #(
       .update_mispred(dirp_update_mispred),
       .init          (cmu_bcast.fence_time)
   );
+
+`ifndef RAPT_BPU_DIRP_TAGE
+  assign dirp_aux_taken = 1'b0;
+`endif
 
   // BTB (synchronous read, separate entry/type writes)
   logic [XLEN-1:1] btb_rd_target;
@@ -206,9 +229,7 @@ module rapt_bpu #(
   assign cmu_wen_entry = cmu_bcast.flush_pipe && (cmu_bcast.jen || cmu_bcast.jren || rbtaken);
   assign cmu_wen_type  = cmu_bcast.jren || cmu_bcast.jen || (cmu_bcast.ben && rbtaken);
   // RETU identifies a return/coroutine target; IDU supplies RAS repair/training.
-  assign cmu_wd_type   = cmu_bcast.ret  ? RETU :
-                         cmu_bcast.jren ? INDR :
-                         cmu_bcast.jen  ? DIRE : COND;
+  assign cmu_wd_type   = cmu_bcast.ret ? RETU : cmu_bcast.jren ? INDR : cmu_bcast.jen ? DIRE : COND;
   assign cmu_wd_full   = cpc[XLEN-1:1];
   assign cmu_waddr     = rbtb_idx;
   assign cmu_wd_tag    = rbtb_tag;
@@ -319,7 +340,7 @@ module rapt_bpu #(
       endcase
       if (aux_track_enqueue) begin
         aux_track_is_aux[aux_track_tail] <= idu_bpu.history_auxiliary;
-        aux_track_index[aux_track_tail] <= idu_bpu.history_auxiliary_index;
+        aux_track_index[aux_track_tail]  <= idu_bpu.history_auxiliary_index;
       end
     end
   end
@@ -371,7 +392,7 @@ module rapt_bpu #(
   assign rsb_push_addr = rpc + (cmu_bcast.rvc ? XLEN'(2) : XLEN'(4));
   rapt_ras #(
       .Depth(RSB_SIZE),
-      .Xlen(XLEN)
+      .Xlen (XLEN)
   ) u_ras (
       .clock(clock),
       .reset(reset),

@@ -60,14 +60,14 @@ function renderInspect(node) {
     node.kind || "",
   ]
     .filter(Boolean)
-    .join(" · ");
+    .join(" | ");
   el.innerHTML = `
-    <strong>${node.short} · ${node.id}</strong>
+    <strong>${node.short} | ${node.id}</strong>
     <p>${node.summary || "No module comment captured."}</p>
     ${model ? `<p class="muted">${model}</p>` : ""}
     ${node.model_note ? `<p class="muted">${node.model_note}</p>` : ""}
-    <p class="muted">${node.file}${node.parent ? " · parent " + node.parent : ""}</p>
-    <p><a href="${href}">source</a> · <a href="uarch.html">µarch manual</a></p>`;
+    <p class="muted">${node.file}${node.parent ? " | parent " + node.parent : ""}</p>
+    <p><a href="${href}">source</a> | <a href="uarch.html">uarch manual</a></p>`;
 }
 
 function wrapTables() {
@@ -141,7 +141,7 @@ function bootExplore(data) {
           fp: "#c77dff",
           mmio: "#d9480f",
         }[i.domain] || "inherit";
-        return `<li style="color:${color}"><code>${i.asm}</code> · ${i.domain}${i.kernel ? " / " + i.kernel : ""}</li>`;
+        return `<li style="color:${color}"><code>${i.asm}</code> | ${i.domain}${i.kernel ? " / " + i.kernel : ""}</li>`;
       })
       .join("");
   }
@@ -288,7 +288,7 @@ async function main() {
         const label = document.getElementById("cycle-readout");
         const slider = document.getElementById("cycle-slider");
         const ipc = data.trace?.ipc;
-        if (label) label.textContent = `cycle ${c}/${Math.max(n - 1, 0)}${ipc != null ? ` · IPC ${ipc}` : ""}`;
+        if (label) label.textContent = `cycle ${c}/${Math.max(n - 1, 0)}${ipc != null ? ` | IPC ${ipc}` : ""}`;
         if (slider) {
           slider.max = Math.max(n - 1, 0);
           slider.value = String(c);

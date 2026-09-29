@@ -1,3 +1,5 @@
+`include "tb_l1d_unused_release_ports.svh"
+
 // ---- tb_l1d_byte_rom ----
 `include "rapt.svh"
 `include "rapt_if.svh"
@@ -130,7 +132,6 @@ module tb_l1d_byte_rom;
   end
 endmodule
 
-
 // ---- tb_l1d_cmo_permissions ----
 `include "rapt.svh"
 `include "rapt_if.svh"
@@ -163,6 +164,7 @@ module tb_l1d_cmo_permissions;
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
       .external_write_last_i('0),
+      `TB_L1D_UNUSED_RELEASE_PORTS,
       .*
   );
   always #5 clock = ~clock;
@@ -273,6 +275,8 @@ module tb_l1d_data;
         localparam int WayBits = Ways > 1 ? $clog2(Ways) : 1;
         localparam int WordBits = line_idx == 0 ? 1 : 3;
         localparam int Words = 1 << WordBits;
+        localparam int MaxSubarrayWords = `RAPT_CACHE_SRAMLEN / Xlen;
+        localparam int SubarrayWords = Words < MaxSubarrayWords ? Words : MaxSubarrayWords;
         localparam int CaseId = width_idx * 6 + way_idx * 2 + line_idx;
         logic reset = 1'b1, write_valid = 1'b0;
         logic [1:0] read_addr = '0, write_addr = '0;
@@ -282,8 +286,11 @@ module tb_l1d_data;
         logic [Xlen/8-1:0] write_strobe = '1;
         wire read_valid;
         wire [1:0] read_index;
+        wire [Ways-1:0][Words-1:0] read_word_valid;
+        wire [1:0] read_word_index[Ways][Words];
         wire [Xlen-1:0] read_data[Ways][Words];
         logic [Xlen-1:0] model[Ways][4][Words];
+        bit model_ready = 1'b0;
         logic [63:0] rng = 64'h123456789abcdef0 ^ 64'(CaseId);
 
         rapt_l1d_data #(
@@ -300,11 +307,11 @@ module tb_l1d_data;
 
         task automatic step(input bit wr, input int set_idx, input int way, input int word_idx,
                             input logic [63:0] data, input bit rst = 1'b0,
-                            input logic [Xlen/8-1:0] strobe = '1);
+                            input logic [Xlen/8-1:0] strobe = '1, input int read_set_idx = -1);
           @(negedge clock);
           reset = rst;
           write_valid = wr;
-          read_addr = 2'(set_idx);
+          read_addr = 2'(read_set_idx < 0 ? set_idx : read_set_idx);
           write_addr = 2'(set_idx);
           write_way = WayBits'(way);
           write_word = WordBits'(word_idx);
@@ -318,10 +325,10 @@ module tb_l1d_data;
           #1;
           if (read_valid !== (!rst && !wr)) $fatal(1, "case %0d: read-valid contract", CaseId);
           if (!rst && !wr) begin
-            if (read_index !== 2'(set_idx)) $fatal(1, "case %0d: read index", CaseId);
+            if (read_index !== read_addr) $fatal(1, "case %0d: read index", CaseId);
             for (int w = 0; w < Ways; w++)
             for (int word_offset = 0; word_offset < Words; word_offset++)
-            if (read_data[w][word_offset] !== model[w][set_idx][word_offset])
+            if (read_data[w][word_offset] !== model[w][int'(read_addr)][word_offset])
               $fatal(
                   1,
                   "case %0d: SRAM mismatch set=%0d way=%0d word=%0d",
@@ -330,6 +337,27 @@ module tb_l1d_data;
                   w,
                   word_offset
               );
+          end
+          for (int w = 0; w < Ways; w++) begin
+            for (int word_offset = 0; word_offset < Words; word_offset++) begin
+              bit bank_wrote;
+              bank_wrote = wr && w == way && (|strobe)
+                  && word_offset / SubarrayWords == word_idx / SubarrayWords;
+              if (read_word_valid[w][word_offset] !== (!rst && !bank_wrote))
+                $fatal(1, "case %0d: bank read-valid way=%0d word=%0d", CaseId, w, word_offset);
+              if (!rst && !bank_wrote) begin
+                if (read_word_index[w][word_offset] !== read_addr)
+                  $fatal(1, "case %0d: bank read index way=%0d word=%0d", CaseId, w, word_offset);
+                if (model_ready && read_data[w][word_offset] !== model[w][int'(read_addr)][word_offset])
+                  $fatal(
+                      1,
+                      "case %0d: parallel bank read mismatch way=%0d word=%0d",
+                      CaseId,
+                      w,
+                      word_offset
+                  );
+              end
+            end
           end
         endtask
 
@@ -343,12 +371,13 @@ module tb_l1d_data;
           for (int word_idx = 0; word_idx < Words; word_idx++)
           step(1, set_idx, way, word_idx,
                64'hfedcba9876543210 ^ 64'(set_idx * 256 + way * 16 + word_idx));
+          model_ready = 1'b1;
           for (int cycle_idx = 0; cycle_idx < 2000; cycle_idx++) begin
             rng ^= rng << 13;
             rng ^= rng >> 7;
             rng ^= rng << 17;
             step(rng[0], int'(rng[2:1]), int'(rng[4:3]) % Ways, int'(rng[7:5]) % Words, rng,
-                 cycle_idx % 97 == 0, (Xlen / 8)'(rng[15:8]));
+                 cycle_idx % 97 == 0, (Xlen / 8)'(rng[15:8]), int'(rng[17:16]));
           end
           // Reset must not erase SRAM, and the next read must recover validity.
           step(0, 0, 0, 0, '0, 1);
@@ -567,6 +596,7 @@ module tb_l1d_io_size;
       .writeback_error(),
       .writeback_idle(),
       .writeback_drain(1'b0),
+      `TB_L1D_UNUSED_RELEASE_PORTS,
       .*
   );
   always #5 clock = ~clock;
@@ -715,6 +745,23 @@ module tb_l1d_load_pbmt;
       .writeback_error(),
       .writeback_idle(),
       .writeback_drain(1'b0),
+      .probe_valid_i(1'b0),
+      .probe_addr_i('0),
+      .probe_ready_o(),
+      .probe_release_valid_o(),
+      .probe_release_addr_o(),
+      .probe_release_data_o(),
+      .probe_release_ready_i(1'b0),
+      .release_valid_o(),
+      .release_addr_o(),
+      .release_data_o(),
+      .release_has_data_o(),
+      .release_mask_o(),
+      .release_last_o(),
+      .release_ready_i(1'b0),
+      .release_ack_i(1'b0),
+      .probe_window_i(1'b0),
+      .writeback_bus_pending_o(),
       .*
   );
   always #5 clock = ~clock;
@@ -895,6 +942,7 @@ module tb_l1d_load_footprint;
       .writeback_error(),
       .writeback_idle(),
       .writeback_drain(1'b0),
+      `TB_L1D_UNUSED_RELEASE_PORTS,
       .*
   );
   `include "tb_common.svh"
@@ -1109,6 +1157,7 @@ module tb_l1d_permission_stage;
       .writeback_error(),
       .writeback_idle(),
       .writeback_drain(1'b0),
+      `TB_L1D_UNUSED_RELEASE_PORTS,
       .*
   );
   `include "tb_common.svh"
@@ -1310,6 +1359,7 @@ module tb_l1d_plic_width;
       .writeback_error(),
       .writeback_idle(),
       .writeback_drain(1'b0),
+      `TB_L1D_UNUSED_RELEASE_PORTS,
       .*
   );
   `include "tb_common.svh"
@@ -1406,6 +1456,7 @@ module tb_l1d_pma;
       .writeback_error(),
       .writeback_idle(),
       .writeback_drain(1'b0),
+      `TB_L1D_UNUSED_RELEASE_PORTS,
       .*
   );
   `include "tb_common.svh"
@@ -1529,6 +1580,7 @@ module tb_l1d_ptw_axi_error;
       .writeback_error(),
       .writeback_idle(),
       .writeback_drain(1'b0),
+      `TB_L1D_UNUSED_RELEASE_PORTS,
       .*
   );
   rapt_bus #(
@@ -1782,6 +1834,7 @@ module tb_l1d_ptw_error;
       .writeback_error(),
       .writeback_idle(),
       .writeback_drain(1'b0),
+      `TB_L1D_UNUSED_RELEASE_PORTS,
       .*
   );
   `include "tb_common.svh"
@@ -1962,6 +2015,7 @@ module tb_l1d_ptw_pma;
       .writeback_error(),
       .writeback_idle(),
       .writeback_drain(1'b0),
+      `TB_L1D_UNUSED_RELEASE_PORTS,
       .*
   );
   `include "tb_common.svh"
@@ -2050,6 +2104,7 @@ module tb_l1d_read_error;
       .writeback_error(),
       .writeback_idle(),
       .writeback_drain(1'b0),
+      `TB_L1D_UNUSED_RELEASE_PORTS,
       .*
   );
   `include "tb_common.svh"
@@ -2214,12 +2269,17 @@ module tb_l1d_replacement;
       .L1D_N_WAYS(4),
       .L1dTagW(4)
   ) dut (
+      .clear_line_valid(1'b0),
+      .clear_line_idx('0),
+      .clear_line_tag('0),
+      .clear_line_dirty_way(),
       .update_dirty(1'b0),
       .inspect_set('0),
       .inspect_way('0),
       .clean_valid(1'b0),
       .clean_mask('0),
       .inspect_tag(),
+      .inspect_valid(),
       .inspect_dirty(),
       .dirty_any(),
       .update_blocked(),
@@ -2334,6 +2394,7 @@ module tb_l1d_reservation_external;
       .writeback_error(),
       .writeback_idle(),
       .writeback_drain(1'b0),
+      `TB_L1D_UNUSED_RELEASE_PORTS,
       .*
   );
   `include "tb_common.svh"
@@ -3546,6 +3607,7 @@ module tb_l1d_store_pbmt;
       .writeback_error(),
       .writeback_idle(),
       .writeback_drain(1'b0),
+      `TB_L1D_UNUSED_RELEASE_PORTS,
       .*
   );
   always #5 clock = ~clock;
@@ -3689,8 +3751,13 @@ module tb_l1d_tags;
           .L1dTagW(2),
           .WriteBack(1'b1)
       ) dut (
+          .clear_line_valid(1'b0),
+          .clear_line_idx('0),
+          .clear_line_tag('0),
+          .clear_line_dirty_way(),
           .inspect_set(l1d_idx),
           .inspect_way(l1d_way),
+          .inspect_valid(),
           .fence_time(|clear_set),
           .*
       );
@@ -3895,6 +3962,7 @@ module tb_l1d_trap_owner;
       .writeback_error(),
       .writeback_idle(),
       .writeback_drain(1'b0),
+      `TB_L1D_UNUSED_RELEASE_PORTS,
       .*
   );
   `include "tb_common.svh"
@@ -4030,6 +4098,7 @@ module tb_l1d_write_error;
       .writeback_error(),
       .writeback_idle(),
       .writeback_drain(1'b0),
+      `TB_L1D_UNUSED_RELEASE_PORTS,
       .*
   );
   `include "tb_common.svh"

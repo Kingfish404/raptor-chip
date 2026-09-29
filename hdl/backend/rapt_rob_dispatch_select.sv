@@ -67,8 +67,11 @@ module rapt_rob_dispatch_select #(
       physical_index = physical_sum >= (IndexBits + 1)'(Entries)
           ? physical_sum - (IndexBits + 1)'(Entries) : physical_sum;
       if (age_found[rank]) begin
-        candidate_valid[selected] = 1'b1;
-        candidate_index[selected] = physical_index[IndexBits-1:0];
+        // The rank selector's found vector is already a compact prefix.
+        // Preserve that rank directly; dynamically indexing by a second
+        // prefix count builds a redundant compaction mux on every lane.
+        candidate_valid[rank] = 1'b1;
+        candidate_index[rank] = physical_index[IndexBits-1:0];
         selected++;
       end
     end

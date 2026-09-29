@@ -31,6 +31,8 @@ def main() -> None:
     parser.add_argument("--platform", required=True)
     parser.add_argument("--frequency", type=float, required=True)
     parser.add_argument("--memory", choices=("dff", "sram"), default="dff")
+    parser.add_argument("--report-only", action="store_true",
+                        help="skip large SDC/SDF/timing-model/netlist exports")
     parser.add_argument("--lib", action="append", type=Path, default=[])
     parser.add_argument("--detail", action="store_true")
     args = parser.parse_args()
@@ -51,6 +53,8 @@ def main() -> None:
     # RESULT_DIR, DESIGN, or EXTRA_LIB_FILES) into this independent backend.
     env = {k: v for k, v in os.environ.items()
            if not k.startswith("MAKE") and k != "MFLAGS"}
+    if args.report_only:
+        env["STA_REPORT_ONLY"] = "1"
     frequency = format(args.frequency, "g")
     print(f"{args.memory.upper()} STA workspace: {work}", flush=True)
     command = ["make", "-j1", "-C", str(work), "sta",

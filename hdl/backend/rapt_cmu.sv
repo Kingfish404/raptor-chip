@@ -71,6 +71,7 @@ module rapt_cmu #(
   assign cmu_bcast.fence_i = rou_cmu.fence_i;
   assign cmu_bcast.flush_pipe = rou_cmu.flush_pipe;
   assign cmu_bcast.flush_redirect = rou_cmu.flush_redirect;
+  assign cmu_bcast.fetch_context_stable = rou_cmu.fetch_context_stable;
   assign cmu_bcast.redirect_pc = rou_cmu.redirect_pc;
   assign cmu_bcast.sys_resume = rou_cmu.sys_resume;
   assign cmu_bcast.rob_head = rou_cmu.rob_head;

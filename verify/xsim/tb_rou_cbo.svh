@@ -2,11 +2,12 @@
 // after a successful, current-generation completion and older SQ drain.
 task automatic expect_cbo_maintenance;
   rapt_pkg::uop_t u, branch_u;
-  logic [XLEN-1:0] va;
+  logic [XLEN-1:0] va, pa;
   for (int op = 0; op < 3; op++) begin
     for (int fault = 0; fault < 2; fault++) begin
       reset_dut();
       va = XLEN'('h45678abd);
+      pa = XLEN'('h81234abd);
       u = make_alu_uop(XLEN'('h80002000), (32'(op) << 20) | 32'h0000a00f, '0);
       u.execute.sys.fence = 1;
       dispatch_one(u, '0, '0, RobW'(0));
@@ -20,6 +21,7 @@ task automatic expect_cbo_maintenance;
             "stale CBO completion caused maintenance");
       exu_ioq_bcast.dest = 0; exu_ioq_bcast.npc = u.pnpc;
       exu_ioq_bcast.tval = va; exu_ioq_bcast.wen = 0;
+      exu_ioq_bcast.sq_waddr = pa;
       exu_ioq_bcast.trap = 1'(fault);
       exu_ioq_bcast.cause = XLEN'(`RAPT_CAUSE_STORE_PAGE_FAULT);
       exu_ioq_bcast.valid = 1;
@@ -42,7 +44,7 @@ task automatic expect_cbo_maintenance;
         check(!cmu_bcast.fence_time && !cmu_bcast.fence_i, "CBO flushed cache/TLB globally");
         check(cmu_bcast.cbo_inval == (op != 1), "INVAL/FLUSH/CLEAN maintenance kind wrong");
         if (op != 1)
-          check(cmu_bcast.cbo_block == va[11:6], "CBO lost accepted completion VA");
+          check(cmu_bcast.cbo_block == pa[XLEN-1:6], "CBO lost accepted physical address");
       end
       tick(1); tick(3);
       check(!cmu_bcast.cbo_inval && !cmu_bcast.fence_time, "CBO maintenance repeated after retirement");

@@ -38,6 +38,7 @@ module sq_forward_ring_case #(
   logic store_fp64[Entries];
   logic [7:0] full_store_mask;
   logic mmu_enabled, alloc_valid, alloc_fp64;
+  logic [ReadPorts-1:0] narrow_allowed = '1;
   logic [Xlen-1:0] alloc_addr, load_addr[ReadPorts];
   logic [4:0] alloc_alu;
   logic [3:0] load_size_m1[ReadPorts];
@@ -46,7 +47,8 @@ module sq_forward_ring_case #(
   rapt_sq_forward #(
       .Xlen(Xlen),
       .Entries(Entries),
-      .ReadPorts(ReadPorts)
+      .ReadPorts(ReadPorts),
+      .NarrowForward(0)
   ) dut (
       .*
   );

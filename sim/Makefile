@@ -478,6 +478,7 @@ sta sta-detail: sta-check sta-deps $(if $(filter sram,$(MEMORY)),sram-ensure-lib
 	python3 "$(NSIM_HOME)/scripts/sta.py" --backend "$(YOSYS_OPENSTA)" \
 		--work-dir "$(STA_WORK_DIR)/backend" --rtl "$(STA_WORK_DIR)/rtl/$(STA_PACK_NAME)" \
 		--platform "$(STA_PLATFORM)" --frequency "$(CLK_FREQ_MHZ)" --memory "$(MEMORY)" \
+		$(if $(filter 1,$(STA_REPORT_ONLY)),--report-only,) \
 		$(if $(filter sram,$(MEMORY)),$(foreach lib,$(RAPT_SRAM_LIBS),--lib "$(lib)"),) \
 		$(if $(filter sta-detail,$@),--detail,)
 

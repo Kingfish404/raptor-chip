@@ -52,6 +52,8 @@ module ras_case #(
       spec_addr = (spec_addr << 32) | Xlen'(random_word());
       commit_addr = (commit_addr << 32) | Xlen'(random_word());
     end
+    spec_addr[0] = 1'b0;
+    commit_addr[0] = 1'b0;
     if (reset || clear) begin
       spec_model.delete();
       commit_model.delete();

@@ -2,8 +2,11 @@
 # Core hierarchy blocks and selected scalable leaves for isolated comparison.
 MODULES := core frontend backend memory bpu ifu fqu stream_queue l1i idu rnu rename_checkpoint rou prf fpr dpu dispatch_select dispatch_steer issue_select muldiv_fu ieu feu cmu csr lsu l1d bus axi l2
 MODULES += recovery_pending
+MODULES += l2_data_array l2_refill_mshrs
 
 TOP_recovery_pending := rapt_recovery_pending
+TOP_l2_refill_mshrs := rapt_l2_refill_mshrs
+TOP_l2_data_array := rapt_l2_data_array
 
 TOP_core := rapt_core
 TOP_frontend := rapt_frontend

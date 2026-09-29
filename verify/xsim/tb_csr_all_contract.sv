@@ -45,57 +45,8 @@ module tb_csr_architectural;
       .wb_alu_csr(wb)
   );
   `include "tb_core_bcast_defaults.svh"
-  task automatic clear_commit;
-    rou_csr.valid = 0;
-    rou_csr.retire_count = 0;
-    rou_csr.csr_wen = 0;
-    rou_csr.csr_wdata = 0;
-    rou_csr.csr_addr = 0;
-    rou_csr.pc = 0;
-    rou_csr.ecall = 0;
-    rou_csr.ebreak = 0;
-    rou_csr.mret = 0;
-    rou_csr.sret = 0;
-    rou_csr.trap = 0;
-    rou_csr.tval = 0;
-    rou_csr.cause = 0;
-    rou_csr.fp_flags_valid = 0;
-    rou_csr.fp_flags = 0;
-    rou_csr.fp_dirty = 0;
-  endtask
-  task automatic operation(input logic [11:0] addr, input logic [2:0] op,
-                           input logic [XLEN-1:0] operand, output logic [XLEN-1:0] result);
-    @(negedge clock);
-    iss = '0;
-    iss.valid = 1;
-    iss.op1 = operand;
-    // This helper uses x0 for read-only zero masks and x1 otherwise.
-    // Explicit non-x0 zero masks are covered by tb_csr_write_intent.
-    iss.uop.inst[19:15] = operand == 0 ? 5'd0 : 5'd1;
-    iss.uop.imm = XLEN'(addr);
-    iss.uop.execute.sys.valid = 1;
-    iss.uop.execute.sys.csr_csw = op;
-    #1;
-    result = wb.result;
-    if (!wb.valid) $fatal(1, "CSR execution did not produce completion");
-    rou_csr.valid = 1;
-    rou_csr.csr_addr = addr;
-    rou_csr.csr_wen = wb.csr_wen;
-    rou_csr.csr_wdata = wb.csr_wdata;
-    @(posedge clock);
-    @(negedge clock);
-    clear_commit();
-    iss = '0;
-  endtask
-  task automatic write_csr(input logic [11:0] addr, input logic [XLEN-1:0] value);
-    logic [XLEN-1:0] ignored;
-    operation(addr, 3'b001, value, ignored);
-  endtask
-  task automatic expect_csr(input logic [11:0] addr, input logic [XLEN-1:0] value);
-    logic [XLEN-1:0] actual;
-    operation(addr, 3'b010, 0, actual);
-    if (actual !== value) $fatal(1, "CSR %h expected %h, got %h", addr, value, actual);
-  endtask
+  `include "tb_csr_clear_commit.svh"
+  `include "tb_csr_execute_tasks.svh"
   // Exercise architecturally reachable MPRV/MPP states before and after
   // MRET. Returning below M clears MPRV; returning to M retains MPRV while
   // MPP becomes U, so subsequent data translation may become enabled.
@@ -439,57 +390,8 @@ module tb_csr_bus_error;
       .wb_alu_csr(wb)
   );
   `include "tb_core_bcast_defaults.svh"
-  task automatic clear_commit;
-    rou_csr.valid = 0;
-    rou_csr.retire_count = 0;
-    rou_csr.csr_wen = 0;
-    rou_csr.csr_wdata = 0;
-    rou_csr.csr_addr = 0;
-    rou_csr.pc = 0;
-    rou_csr.ecall = 0;
-    rou_csr.ebreak = 0;
-    rou_csr.mret = 0;
-    rou_csr.sret = 0;
-    rou_csr.trap = 0;
-    rou_csr.tval = 0;
-    rou_csr.cause = 0;
-    rou_csr.fp_flags_valid = 0;
-    rou_csr.fp_flags = 0;
-    rou_csr.fp_dirty = 0;
-  endtask
-  task automatic operation(input logic [11:0] addr, input logic [2:0] op,
-                           input logic [XLEN-1:0] operand, output logic [XLEN-1:0] result);
-    @(negedge clock);
-    iss = '0;
-    iss.valid = 1;
-    iss.op1 = operand;
-    // This helper uses x0 for read-only zero masks and x1 otherwise.
-    // Explicit non-x0 zero masks are covered by tb_csr_write_intent.
-    iss.uop.inst[19:15] = operand == 0 ? 5'd0 : 5'd1;
-    iss.uop.imm = XLEN'(addr);
-    iss.uop.execute.sys.valid = 1;
-    iss.uop.execute.sys.csr_csw = op;
-    #1;
-    result = wb.result;
-    if (!wb.valid) $fatal(1, "CSR execution did not produce completion");
-    rou_csr.valid = 1;
-    rou_csr.csr_addr = addr;
-    rou_csr.csr_wen = wb.csr_wen;
-    rou_csr.csr_wdata = wb.csr_wdata;
-    @(posedge clock);
-    @(negedge clock);
-    clear_commit();
-    iss = '0;
-  endtask
-  task automatic write_csr(input logic [11:0] addr, input logic [XLEN-1:0] value);
-    logic [XLEN-1:0] ignored;
-    operation(addr, 3'b001, value, ignored);
-  endtask
-  task automatic expect_csr(input logic [11:0] addr, input logic [XLEN-1:0] value);
-    logic [XLEN-1:0] actual;
-    operation(addr, 3'b010, 0, actual);
-    if (actual !== value) $fatal(1, "CSR %h expected %h, got %h", addr, value, actual);
-  endtask
+  `include "tb_csr_clear_commit.svh"
+  `include "tb_csr_execute_tasks.svh"
   task automatic error_event(input logic [XLEN-1:0] addr, input logic [7:0] mask);
     @(negedge clock);
     store_error_i=1;
@@ -618,57 +520,8 @@ module tb_csr_contract;
       .wb_alu_csr(wb)
   );
   `include "tb_core_bcast_defaults.svh"
-  task automatic clear_commit;
-    rou_csr.valid = 0;
-    rou_csr.retire_count = 0;
-    rou_csr.csr_wen = 0;
-    rou_csr.csr_wdata = 0;
-    rou_csr.csr_addr = 0;
-    rou_csr.pc = 0;
-    rou_csr.ecall = 0;
-    rou_csr.ebreak = 0;
-    rou_csr.mret = 0;
-    rou_csr.sret = 0;
-    rou_csr.trap = 0;
-    rou_csr.tval = 0;
-    rou_csr.cause = 0;
-    rou_csr.fp_flags_valid = 0;
-    rou_csr.fp_flags = 0;
-    rou_csr.fp_dirty = 0;
-  endtask
-  task automatic operation(input logic [11:0] addr, input logic [2:0] op,
-                           input logic [XLEN-1:0] operand, output logic [XLEN-1:0] result);
-    @(negedge clock);
-    iss = '0;
-    iss.valid = 1;
-    iss.op1 = operand;
-    // This helper uses x0 for read-only zero masks and x1 otherwise.
-    // Explicit non-x0 zero masks are covered by tb_csr_write_intent.
-    iss.uop.inst[19:15] = operand == 0 ? 5'd0 : 5'd1;
-    iss.uop.imm = XLEN'(addr);
-    iss.uop.execute.sys.valid = 1;
-    iss.uop.execute.sys.csr_csw = op;
-    #1;
-    result = wb.result;
-    if (!wb.valid) $fatal(1, "CSR execution did not produce completion");
-    rou_csr.valid = 1;
-    rou_csr.csr_addr = addr;
-    rou_csr.csr_wen = wb.csr_wen;
-    rou_csr.csr_wdata = wb.csr_wdata;
-    @(posedge clock);
-    @(negedge clock);
-    clear_commit();
-    iss = '0;
-  endtask
-  task automatic write_csr(input logic [11:0] addr, input logic [XLEN-1:0] value);
-    logic [XLEN-1:0] ignored;
-    operation(addr, 3'b001, value, ignored);
-  endtask
-  task automatic expect_csr(input logic [11:0] addr, input logic [XLEN-1:0] value);
-    logic [XLEN-1:0] actual;
-    operation(addr, 3'b010, 0, actual);
-    if (actual !== value) $fatal(1, "CSR %h expected %h, got %h", addr, value, actual);
-  endtask
+  `include "tb_csr_clear_commit.svh"
+  `include "tb_csr_execute_tasks.svh"
   function automatic bit selected(input string name);
     string requested = "identity_time";
     void'($value$plusargs("CASE=%s", requested));
@@ -1109,24 +962,7 @@ module tb_csr_counter_priority;
       .s_int_pending(),
       .s_int_cause()
   );
-  task automatic clear_commit;
-    rou_csr.valid = 0;
-    rou_csr.retire_count = 0;
-    rou_csr.csr_wen = 0;
-    rou_csr.csr_wdata = 0;
-    rou_csr.csr_addr = 0;
-    rou_csr.pc = 0;
-    rou_csr.ecall = 0;
-    rou_csr.ebreak = 0;
-    rou_csr.mret = 0;
-    rou_csr.sret = 0;
-    rou_csr.trap = 0;
-    rou_csr.tval = 0;
-    rou_csr.cause = 0;
-    rou_csr.fp_flags_valid = 0;
-    rou_csr.fp_flags = 0;
-    rou_csr.fp_dirty = 0;
-  endtask
+  `include "tb_csr_clear_commit.svh"
 
   int checks = 0;
   task automatic read_counter(input logic [11:0] addr, output logic [63:0] value);
@@ -1263,57 +1099,8 @@ module tb_csr_envcfg_warl;
       .wb_alu_csr(wb)
   );
   `include "tb_core_bcast_defaults.svh"
-  task automatic clear_commit;
-    rou_csr.valid = 0;
-    rou_csr.retire_count = 0;
-    rou_csr.csr_wen = 0;
-    rou_csr.csr_wdata = 0;
-    rou_csr.csr_addr = 0;
-    rou_csr.pc = 0;
-    rou_csr.ecall = 0;
-    rou_csr.ebreak = 0;
-    rou_csr.mret = 0;
-    rou_csr.sret = 0;
-    rou_csr.trap = 0;
-    rou_csr.tval = 0;
-    rou_csr.cause = 0;
-    rou_csr.fp_flags_valid = 0;
-    rou_csr.fp_flags = 0;
-    rou_csr.fp_dirty = 0;
-  endtask
-  task automatic operation(input logic [11:0] addr, input logic [2:0] op,
-                           input logic [XLEN-1:0] operand, output logic [XLEN-1:0] result);
-    @(negedge clock);
-    iss = '0;
-    iss.valid = 1;
-    iss.op1 = operand;
-    // This helper uses x0 for read-only zero masks and x1 otherwise.
-    // Explicit non-x0 zero masks are covered by tb_csr_write_intent.
-    iss.uop.inst[19:15] = operand == 0 ? 5'd0 : 5'd1;
-    iss.uop.imm = XLEN'(addr);
-    iss.uop.execute.sys.valid = 1;
-    iss.uop.execute.sys.csr_csw = op;
-    #1;
-    result = wb.result;
-    if (!wb.valid) $fatal(1, "CSR execution did not produce completion");
-    rou_csr.valid = 1;
-    rou_csr.csr_addr = addr;
-    rou_csr.csr_wen = wb.csr_wen;
-    rou_csr.csr_wdata = wb.csr_wdata;
-    @(posedge clock);
-    @(negedge clock);
-    clear_commit();
-    iss = '0;
-  endtask
-  task automatic write_csr(input logic [11:0] addr, input logic [XLEN-1:0] value);
-    logic [XLEN-1:0] ignored;
-    operation(addr, 3'b001, value, ignored);
-  endtask
-  task automatic expect_csr(input logic [11:0] addr, input logic [XLEN-1:0] value);
-    logic [XLEN-1:0] actual;
-    operation(addr, 3'b010, 0, actual);
-    if (actual !== value) $fatal(1, "CSR %h expected %h, got %h", addr, value, actual);
-  endtask
+  `include "tb_csr_clear_commit.svh"
+  `include "tb_csr_execute_tasks.svh"
   // Independent table of the implementation's legal CBIE normalization.
   function automatic logic [7:0] low_expected(input logic [7:0] value);
     case (value[5:4])
@@ -1433,58 +1220,9 @@ module tb_csr_pmp_address;
       .wb_alu_csr(wb)
   );
   `include "tb_core_bcast_defaults.svh"
-  task automatic clear_commit;
-    rou_csr.valid = 0;
-    rou_csr.retire_count = 0;
-    rou_csr.csr_wen = 0;
-    rou_csr.csr_wdata = 0;
-    rou_csr.csr_addr = 0;
-    rou_csr.pc = 0;
-    rou_csr.ecall = 0;
-    rou_csr.ebreak = 0;
-    rou_csr.mret = 0;
-    rou_csr.sret = 0;
-    rou_csr.trap = 0;
-    rou_csr.tval = 0;
-    rou_csr.cause = 0;
-    rou_csr.fp_flags_valid = 0;
-    rou_csr.fp_flags = 0;
-    rou_csr.fp_dirty = 0;
-  endtask
-  task automatic operation(input logic [11:0] addr, input logic [2:0] op,
-                           input logic [XLEN-1:0] operand, output logic [XLEN-1:0] result);
-    @(negedge clock);
-    iss = '0;
-    iss.valid = 1;
-    iss.op1 = operand;
-    // This helper uses x0 for read-only zero masks and x1 otherwise.
-    // Explicit non-x0 zero masks are covered by tb_csr_write_intent.
-    iss.uop.inst[19:15] = operand == 0 ? 5'd0 : 5'd1;
-    iss.uop.imm = XLEN'(addr);
-    iss.uop.execute.sys.valid = 1;
-    iss.uop.execute.sys.csr_csw = op;
-    #1;
-    result = wb.result;
-    if (!wb.valid) $fatal(1, "CSR execution did not produce completion");
-    rou_csr.valid = 1;
-    rou_csr.csr_addr = addr;
-    rou_csr.csr_wen = wb.csr_wen;
-    rou_csr.csr_wdata = wb.csr_wdata;
-    @(posedge clock);
-    @(negedge clock);
-    clear_commit();
-    iss = '0;
-  endtask
-  task automatic write_csr(input logic [11:0] addr, input logic [XLEN-1:0] value);
-    logic [XLEN-1:0] ignored;
-    operation(addr, 3'b001, value, ignored);
-  endtask
-  task automatic expect_csr(input logic [11:0] addr, input logic [XLEN-1:0] value);
-    logic [XLEN-1:0] actual;
-    operation(addr, 3'b010, 0, actual);
-    if (actual !== value) $fatal(1, "CSR %h expected %h, got %h", addr, value, actual);
-  endtask
-  pmp_state_if replica ();
+  `include "tb_csr_clear_commit.svh"
+  `include "tb_csr_execute_tasks.svh"
+pmp_state_if replica ();
   rapt_pmp_state replica_dut (
       .clock,
       .reset,
@@ -1598,58 +1336,9 @@ module tb_csr_pmp_lock;
       .wb_alu_csr(wb)
   );
   `include "tb_core_bcast_defaults.svh"
-  task automatic clear_commit;
-    rou_csr.valid = 0;
-    rou_csr.retire_count = 0;
-    rou_csr.csr_wen = 0;
-    rou_csr.csr_wdata = 0;
-    rou_csr.csr_addr = 0;
-    rou_csr.pc = 0;
-    rou_csr.ecall = 0;
-    rou_csr.ebreak = 0;
-    rou_csr.mret = 0;
-    rou_csr.sret = 0;
-    rou_csr.trap = 0;
-    rou_csr.tval = 0;
-    rou_csr.cause = 0;
-    rou_csr.fp_flags_valid = 0;
-    rou_csr.fp_flags = 0;
-    rou_csr.fp_dirty = 0;
-  endtask
-  task automatic operation(input logic [11:0] addr, input logic [2:0] op,
-                           input logic [XLEN-1:0] operand, output logic [XLEN-1:0] result);
-    @(negedge clock);
-    iss = '0;
-    iss.valid = 1;
-    iss.op1 = operand;
-    // This helper uses x0 for read-only zero masks and x1 otherwise.
-    // Explicit non-x0 zero masks are covered by tb_csr_write_intent.
-    iss.uop.inst[19:15] = operand == 0 ? 5'd0 : 5'd1;
-    iss.uop.imm = XLEN'(addr);
-    iss.uop.execute.sys.valid = 1;
-    iss.uop.execute.sys.csr_csw = op;
-    #1;
-    result = wb.result;
-    if (!wb.valid) $fatal(1, "CSR execution did not produce completion");
-    rou_csr.valid = 1;
-    rou_csr.csr_addr = addr;
-    rou_csr.csr_wen = wb.csr_wen;
-    rou_csr.csr_wdata = wb.csr_wdata;
-    @(posedge clock);
-    @(negedge clock);
-    clear_commit();
-    iss = '0;
-  endtask
-  task automatic write_csr(input logic [11:0] addr, input logic [XLEN-1:0] value);
-    logic [XLEN-1:0] ignored;
-    operation(addr, 3'b001, value, ignored);
-  endtask
-  task automatic expect_csr(input logic [11:0] addr, input logic [XLEN-1:0] value);
-    logic [XLEN-1:0] actual;
-    operation(addr, 3'b010, 0, actual);
-    if (actual !== value) $fatal(1, "CSR %h expected %h, got %h", addr, value, actual);
-  endtask
-  pmp_state_if replica ();
+  `include "tb_csr_clear_commit.svh"
+  `include "tb_csr_execute_tasks.svh"
+pmp_state_if replica ();
   rapt_pmp_state replica_dut (
       .clock,
       .reset,
@@ -1773,58 +1462,9 @@ module tb_csr_pmp_warl;
       .wb_alu_csr(wb)
   );
   `include "tb_core_bcast_defaults.svh"
-  task automatic clear_commit;
-    rou_csr.valid = 0;
-    rou_csr.retire_count = 0;
-    rou_csr.csr_wen = 0;
-    rou_csr.csr_wdata = 0;
-    rou_csr.csr_addr = 0;
-    rou_csr.pc = 0;
-    rou_csr.ecall = 0;
-    rou_csr.ebreak = 0;
-    rou_csr.mret = 0;
-    rou_csr.sret = 0;
-    rou_csr.trap = 0;
-    rou_csr.tval = 0;
-    rou_csr.cause = 0;
-    rou_csr.fp_flags_valid = 0;
-    rou_csr.fp_flags = 0;
-    rou_csr.fp_dirty = 0;
-  endtask
-  task automatic operation(input logic [11:0] addr, input logic [2:0] op,
-                           input logic [XLEN-1:0] operand, output logic [XLEN-1:0] result);
-    @(negedge clock);
-    iss = '0;
-    iss.valid = 1;
-    iss.op1 = operand;
-    // This helper uses x0 for read-only zero masks and x1 otherwise.
-    // Explicit non-x0 zero masks are covered by tb_csr_write_intent.
-    iss.uop.inst[19:15] = operand == 0 ? 5'd0 : 5'd1;
-    iss.uop.imm = XLEN'(addr);
-    iss.uop.execute.sys.valid = 1;
-    iss.uop.execute.sys.csr_csw = op;
-    #1;
-    result = wb.result;
-    if (!wb.valid) $fatal(1, "CSR execution did not produce completion");
-    rou_csr.valid = 1;
-    rou_csr.csr_addr = addr;
-    rou_csr.csr_wen = wb.csr_wen;
-    rou_csr.csr_wdata = wb.csr_wdata;
-    @(posedge clock);
-    @(negedge clock);
-    clear_commit();
-    iss = '0;
-  endtask
-  task automatic write_csr(input logic [11:0] addr, input logic [XLEN-1:0] value);
-    logic [XLEN-1:0] ignored;
-    operation(addr, 3'b001, value, ignored);
-  endtask
-  task automatic expect_csr(input logic [11:0] addr, input logic [XLEN-1:0] value);
-    logic [XLEN-1:0] actual;
-    operation(addr, 3'b010, 0, actual);
-    if (actual !== value) $fatal(1, "CSR %h expected %h, got %h", addr, value, actual);
-  endtask
-  pmp_state_if replica ();
+  `include "tb_csr_clear_commit.svh"
+  `include "tb_csr_execute_tasks.svh"
+pmp_state_if replica ();
   rapt_pmp_state replica_dut (
       .clock,
       .reset,
@@ -2028,88 +1668,7 @@ module tb_csr_sret_roundtrip;
 
   `include "tb_common.svh"
 
-  task automatic clear_request;
-    begin
-      rou_csr.pc = '0;
-      rou_csr.csr_wen = 1'b0;
-      rou_csr.csr_wdata = '0;
-      rou_csr.csr_addr = '0;
-      rou_csr.ecall = 1'b0;
-      rou_csr.ebreak = 1'b0;
-      rou_csr.mret = 1'b0;
-      rou_csr.sret = 1'b0;
-      rou_csr.trap = 1'b0;
-      rou_csr.tval = '0;
-      rou_csr.cause = '0;
-      rou_csr.valid = 1'b0;
-      rou_csr.retire_count = 1'b0;
-    end
-  endtask
-
-  task automatic write_csr(input logic [11:0] address, input logic [XLEN-1:0] data);
-    begin
-      @(negedge clock);
-      rou_csr.csr_addr = address;
-      rou_csr.csr_wdata = data;
-      rou_csr.csr_wen = 1'b1;
-      rou_csr.valid = 1'b1;
-      @(posedge clock);
-      @(negedge clock);
-      clear_request();
-    end
-  endtask
-
-  task automatic pulse_control(input logic do_ecall, input logic do_mret, input logic do_sret,
-                               input logic [XLEN-1:0] pc);
-    begin
-      @(negedge clock);
-      rou_csr.pc = pc;
-      rou_csr.ecall = do_ecall;
-      rou_csr.mret = do_mret;
-      rou_csr.sret = do_sret;
-      rou_csr.valid = 1'b1;
-      @(posedge clock);
-      @(negedge clock);
-      clear_request();
-    end
-  endtask
-
-  task automatic check_csr_zero(input logic [11:0] address, input string name);
-    begin
-      exu_csr.raddr = address;
-      #1;
-      check(exu_csr.rdata === '0, $sformatf(
-            "%s reset value is not deterministic zero: %x", name, exu_csr.rdata));
-    end
-  endtask
-
-  task automatic set_stce(input bit enable);
-`ifdef RAPT_RV64
-    write_csr(`RAPT_CSR_MENVCFG, XLEN'(enable) << 63);
-`else
-    write_csr(`RAPT_CSR_MENVCFGH, XLEN'(enable) << 31);
-`endif
-    check(csr_bcast.menvcfg_stce == enable, "STCE broadcast did not track the CSR");
-  endtask
-
-  task automatic write_stimecmp(input logic [63:0] value);
-`ifdef RAPT_RV64
-    write_csr(`RAPT_CSR_STIMECMP, value);
-`else
-    write_csr(`RAPT_CSR_STIMECMPH, '1);
-    write_csr(`RAPT_CSR_STIMECMP, value[31:0]);
-    write_csr(`RAPT_CSR_STIMECMPH, value[63:32]);
-`endif
-  endtask
-
-  task automatic check_stip(input bit expected);
-    exu_csr.raddr = `RAPT_CSR_MIP____;
-    #1;
-    check(exu_csr.rdata[5] == expected, "mip.STIP source/read-only behavior is wrong");
-    exu_csr.raddr = `RAPT_CSR_SIP____;
-    #1;
-    check(exu_csr.rdata[5] == expected, "delegated sip.STIP disagrees with mip");
-  endtask
+  `include "tb_csr_control_tasks.svh"
 
   initial begin
     clear_request();
@@ -2360,88 +1919,7 @@ module tb_csr_trap_payload;
 
   `include "tb_common.svh"
 
-  task automatic clear_request;
-    begin
-      rou_csr.pc = '0;
-      rou_csr.csr_wen = 1'b0;
-      rou_csr.csr_wdata = '0;
-      rou_csr.csr_addr = '0;
-      rou_csr.ecall = 1'b0;
-      rou_csr.ebreak = 1'b0;
-      rou_csr.mret = 1'b0;
-      rou_csr.sret = 1'b0;
-      rou_csr.trap = 1'b0;
-      rou_csr.tval = '0;
-      rou_csr.cause = '0;
-      rou_csr.valid = 1'b0;
-      rou_csr.retire_count = 1'b0;
-    end
-  endtask
-
-  task automatic write_csr(input logic [11:0] address, input logic [XLEN-1:0] data);
-    begin
-      @(negedge clock);
-      rou_csr.csr_addr = address;
-      rou_csr.csr_wdata = data;
-      rou_csr.csr_wen = 1'b1;
-      rou_csr.valid = 1'b1;
-      @(posedge clock);
-      @(negedge clock);
-      clear_request();
-    end
-  endtask
-
-  task automatic pulse_control(input logic do_ecall, input logic do_mret, input logic do_sret,
-                               input logic [XLEN-1:0] pc);
-    begin
-      @(negedge clock);
-      rou_csr.pc = pc;
-      rou_csr.ecall = do_ecall;
-      rou_csr.mret = do_mret;
-      rou_csr.sret = do_sret;
-      rou_csr.valid = 1'b1;
-      @(posedge clock);
-      @(negedge clock);
-      clear_request();
-    end
-  endtask
-
-  task automatic check_csr_zero(input logic [11:0] address, input string name);
-    begin
-      exu_csr.raddr = address;
-      #1;
-      check(exu_csr.rdata === '0, $sformatf(
-            "%s reset value is not deterministic zero: %x", name, exu_csr.rdata));
-    end
-  endtask
-
-  task automatic set_stce(input bit enable);
-`ifdef RAPT_RV64
-    write_csr(`RAPT_CSR_MENVCFG, XLEN'(enable) << 63);
-`else
-    write_csr(`RAPT_CSR_MENVCFGH, XLEN'(enable) << 31);
-`endif
-    check(csr_bcast.menvcfg_stce == enable, "STCE broadcast did not track the CSR");
-  endtask
-
-  task automatic write_stimecmp(input logic [63:0] value);
-`ifdef RAPT_RV64
-    write_csr(`RAPT_CSR_STIMECMP, value);
-`else
-    write_csr(`RAPT_CSR_STIMECMPH, '1);
-    write_csr(`RAPT_CSR_STIMECMP, value[31:0]);
-    write_csr(`RAPT_CSR_STIMECMPH, value[63:32]);
-`endif
-  endtask
-
-  task automatic check_stip(input bit expected);
-    exu_csr.raddr = `RAPT_CSR_MIP____;
-    #1;
-    check(exu_csr.rdata[5] == expected, "mip.STIP source/read-only behavior is wrong");
-    exu_csr.raddr = `RAPT_CSR_SIP____;
-    #1;
-    check(exu_csr.rdata[5] == expected, "delegated sip.STIP disagrees with mip");
-  endtask
+  `include "tb_csr_control_tasks.svh"
 
   task automatic expect_value(input logic [11:0] addr, input logic [XLEN-1:0] value);
     exu_csr.raddr = addr;

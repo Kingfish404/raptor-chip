@@ -55,11 +55,20 @@ The maintenance inventory for `scripts`, `tests` and `experimental` is kept in `
 - The issue-selection, atomic, load/store, checkpoint, prediction-history and LR families use one shared source per family. The original top names remain separate and the Make macros select the corresponding `*_contract.sv` file; this is source consolidation, not a reduction of scenario coverage.
 - All remaining L1D, IOQ, LSU and CSR TB modules are stored in `tb_l1d_all_contract.sv`, `tb_ioq_all_contract.sv`, `tb_lsu_all_contract.sv` and `tb_csr_all_contract.sv`. The top-level module passed by each existing target still selects one scenario; the shared source is only a physical organization boundary.
 - Router, PTW and SQ scenarios use the same arrangement in `tb_router_all_contract.sv`, `tb_ptw_all_contract.sv` and `tb_sq_all_contract.sv`. Existing top names continue to select one scenario per build.
+- CSR execution/control, L1I epoch, IOQ store and L2 posted-write tasks use module-local `*_tasks.svh` helpers (plus `tb_csr_clear_commit.svh`). These headers intentionally have no include guards: each test module receives its own tasks. Keep scenario-specific assertions and handshakes in the original test modules.
 
 - `tb_ioq_acquire_publish.sv` covers LR by default and AMOADD with `+AMO`; `+PENDING` selects response blocking. Both relaxed and acquire scenarios run in each invocation. Existing `verilator-ioq-acquire-publish-rv32/-rv64` and `verilator-ioq-amo-acquire-publish-rv32/-rv64` targets remain available; the AMO targets supply `+AMO`. Set `IOQ_ACQUIRE_PLUSARGS=+PENDING` as needed.
 - `app/tests/baremetal/plic_access_width.S` covers loads by default and stores with `PLIC_WIDTH_STORE=1`. `PLIC_WIDTH_CASE=0..4` and `PLIC_WIDTH_TRANSLATED=0/1` retain the width and translation matrix. `scripts/plic_access_width.py` selects both directions and keeps separate results for each scenario.
 
 ## Quick Start
+
+Run `python3 verify/scripts/test_debug_observers.py` from the repository root to
+elaborate the optional NPC AXI/speculation/LRSC observers in RV32/RV64 and the
+RV32 pin-level heartbeat/commit probes with `small` and `middle`. This requires
+Verilator and checks that diagnostic hierarchy references still resolve; it is
+not a functional or timing regression. `RAPT_SPEC_OBSERVE` requires
+`RAPT_AXI_OBSERVE`; `RAPT_LRSC_OBSERVE` is independent. Event formats remain
+compatible with the existing AXI, wrong-path and LR/SC checkers.
 
 CLINT byte-address checks are available through `rva22s64-clint-subword-run`, `rva22s64-clint-subword-write-run`, `rva22s64-clint-subword-time-run`, and `rva22s64-clint-subword-msip-run`. Select `RVA22S64_XLEN=32` or `64` and the matching simulator/reference paths. Set `RVA22S64_TEST_CPPFLAGS=-DCLINT_SUBWORD_TRANSLATED=1` to exercise real Sv32/Sv39 walks with MPRV effective S-mode. The write probe uses word reads to check every modified and preserved byte independently of subword reads. `verilator-router-clint-subword-rv32/-rv64` covers the real router, all natural widths and byte offsets, masks, AW/W timing and response backpressure.
 
@@ -443,6 +452,36 @@ These checks fill and read every word of each cache, require all four same-set l
 
 `make -C verify verilator-cache-stream-rv32 verilator-cache-stream-rv64 verilator-cache-stream-l2-rv32 verilator-cache-stream-l2-rv64` runs the complete L1D/bus/AXI/optional-L2 path with randomized ready stalls. Tests check early critical-word completion, every resident word across full L1D capacity, CBO set colors and pending fills, 64-byte ZERO AW/W/B counts and delayed/error B, cancelled/error refills, and NA4/TOR/NAPOT boundary word fallback at both cache levels. Repeat with `XSIM_RAPT_CONFIG=small` to cover 16-byte lines. `verilator-cache-stream-rnp-rv32` checks the word-serial RNP bridge: the core keeps one burst owner, while the external RNP side uses one transaction per word and has no error-response encoding.
 
+The BOOM-style write-back preset has a separate L1D/L2 ownership regression: `make -C verify verilator-cache-stream-wb-l2-rv32 verilator-cache-stream-wb-l2-rv64 XSIM_RAPT_CONFIG=default-l2`. It checks dirty L1D releases on L2 eviction and CBO, D-side ownership after a store miss or a resident L2 hit, and an overlapping L1D write-back/CBO. `default-l2` also selects L1D write-back for the top-level core; the streaming targets explicitly set their `WriteBack` test parameter to exercise both policies.
+
+`make -C verify verilator-l2-release-admission-rv32 verilator-l2-release-admission-rv64 XSIM_RAPT_CONFIG=default-l2` checks that a ReleaseData reserves L2 admission from its first beat through gaps between beats and ReleaseAck, then checks the released data remains resident.
+
+`make -C verify verilator-l2-release-probe-rv32 verilator-l2-release-probe-rv64 XSIM_RAPT_CONFIG=default-l2` checks C Release pre-emption while an ordinary victim or CBO waits for Probe. Cases cover dirty data, clean Release, partial word masks, different-tag metadata isolation, and failed outer writeback preserving already-acknowledged ReleaseData. The owner withholds Probe Ack until ReleaseAck; the old ordinary and CBO paths deadlocked in this case.
+
+`make -C verify verilator-l2-owned-read-rv32 verilator-l2-owned-read-rv64 XSIM_RAPT_CONFIG=default-l2` checks twelve owner-Get coherence cases: primary scalar, INCR, FIXED and WRAP reads; clean and dirty Probe Ack; C Release pre-emption; scalar and burst secondary reads; and ordered ownership regrants. It checks dirty data and backpressure, and counts directory reads to verify metadata reuse for equal-tag secondaries and line-local burst beats. A dirty different-tag secondary replacement must be written back before reloading the original tag. The old primary and secondary paths returned stale data before owner Probe; an early reuse candidate also skipped this replacement writeback.
+
+`make -C verify verilator-l2-release-buffer-rv32 verilator-l2-release-buffer-rv64` checks the two Release lists and their shared lowest-free beat pool. It fills both lists with dirty lines, retires one, checks that the other retains its data, and verifies reuse of the freed entries.
+
+`make -C verify verilator-l2-data-array` checks the four-bank data-array geometry and port priority. It also holds a full-line SourceD read between its two row accesses while a SourceC read uses a shared bank, then checks that SourceD retains its first row.
+
+`make -C verify verilator-l2-put-list-rv32 verilator-l2-put-list-rv64` checks the BOOM-sized 40-list/40-beat shared pool, multibeat lists, concurrent push/pop, and full-pool backpressure. `make -C verify verilator-l2-put-buffer-rv32 verilator-l2-put-buffer-rv64 XSIM_RAPT_CONFIG=default-l2` checks the connected single-beat path: all 40 slots, backpressure at slot 41, older-write ordering against an MMIO read, and all 40 ordered write responses.
+
+`make -C verify verilator-l2-secondary-buffer verilator-l2-mshr-scheduler verilator-l2-mshr-frontend` checks the standalone RV64 21-queue/33-entry secondary request buffer, five ordinary plus BC/C reserved MSHR scheduler, and their joined admission/replay fabric. `verilator-l2-secondary-buffer-rv32` checks the RV32 15-queue/35-entry geometry. The scheduler checks same-set priority, reserved-slot pre-emption, C/B/A replay order, bypass on reload, directory-read conflicts and round-robin resource gating. The fabric also checks queued tags and payload ordering. The live L2 uses the secondary queue for same-set requests and different-tag replay; its Release head occupies the reserved C scheduling slot. General BC/C nested metadata forwarding remains incomplete.
+
+`make -C verify verilator-l2-refill-mshrs-rv32 verilator-l2-refill-mshrs-rv64` checks five RV32 or seven RV64 collector contexts, slot-to-AXI-ID remapping, interleaved R beats, sticky errors and metadata retention. `make -C verify verilator-l2-mshr-concurrent-rv32 verilator-l2-mshr-concurrent-rv64 XSIM_RAPT_CONFIG=default-l2` checks three RV32 or five RV64 simultaneous clean read misses through the live L2 and scalar critical-word return before line completion. The live test also checks same-line secondary buffering, FIFO order, restored IDs, and D-side ownership. Different-tag same-set replay and the reserved C Release path have separate directed regressions; the BC slot has no outer B traffic in this last-level configuration.
+
+`make -C verify verilator-l2-line-local-put-rv32 verilator-l2-line-local-put-rv64 XSIM_RAPT_CONFIG=default-l2` checks that bufferable cacheable FIXED, INCR, valid WRAP, and narrow bursts within one line allocate locally. It covers a short masked miss, repeated narrow beats merged into one fetched word, resident address wrapping, local B, untouched-word preservation, and a failed refill returning an error B without installing the line. The associative regressions check a resident short partial burst on this local path.
+
+`make -C verify verilator-l2-cross-line-put-rv32 verilator-l2-cross-line-put-rv64 XSIM_RAPT_CONFIG=default-l2` checks that bufferable cacheable INCR and valid WRAP bursts crossing cache-line boundaries allocate and commit one line at a time. It covers a resident first segment followed by a miss, a narrow boundary write, two full lines without an outer read, a 48-beat burst beyond Put-pool capacity, a three-segment RV64 WRAP that revisits its first line, a second-segment error after the first commits, and a failed refill that drains through WLAST before returning an error B.
+
+`make -C verify verilator-l2-forwarded-error-rv32 verilator-l2-forwarded-error-rv64 XSIM_RAPT_CONFIG=default-l2` checks cacheable forwarded bursts that cannot allocate locally. Resident hit beats are journaled until the matching outer B: an error preserves the old target and older dirty data, while success replays a masked two-beat write before returning B. A legal 256-beat byte-wide INCR burst over four resident lines exercises every journal entry and the shared 40-beat Put pool concurrently. The test checks that no cached byte commits before B and that the first and last words contain the complete replayed data.
+
+`make -C verify verilator-l2-forwarded-client-rv32 verilator-l2-forwarded-client-rv64 XSIM_RAPT_CONFIG=default-l2` checks cacheable non-bufferable scalar and burst writes to resident lines held by the D client. Both paths must issue Probe, hold the successful B until Probe Ack, clear the client owner, preserve unrelated dirty ProbeAckData, and return the updated resident data after B. The two-beat same-line burst permits one Probe; a boundary-crossing burst requires a separate Probe and Ack for each owned line. The test also holds Probe Ack until an unrelated clean C Release receives ReleaseAck while either forwarded path waits for outer B, preventing a Release/Probe wait cycle. C must also finish between the first and last W beats of an active forwarded burst while the next W is stalled. A same-line dirty ReleaseData must commit before the forwarded scalar store and retain its unrelated dirty word; the burst case checks the same ordering when C arrives between W beats. A failed outer B must return an error without probing or changing the old resident data and ownership.
+
+`make -C verify verilator-axi-r-buffer-rv32 verilator-axi-r-buffer-rv64 XSIM_RAPT_CONFIG=default-l2` checks the two-entry outer AXI R buffer, including full backpressure, alternating IDs, error/last fields, sustained one-beat-per-cycle delivery, and AR/AW/W/B passthrough. The write-back L1D/L2 cache-stream targets also instantiate the buffer, matching the `rapt_memory` integration.
+
+`make -C verify verilator-l2-pbmt-boom-rv32 verilator-l2-pbmt-boom-rv64 XSIM_RAPT_CONFIG=default-l2` checks PBMT NC/IO bypass against a hot cacheable alias, preservation of AXI cache attributes and real outer B responses, no allocation for a cold typed write, and alias invalidation after a failed typed write. The older `verilator-l2-pbmt*` targets exercise the legacy posted external DDR-write policy and should be run with the legacy geometry.
+
 Legacy word-response L1D fixtures explicitly select `.LineRefill(0)` to retain their individual-word and partial-line scenarios; production defaults to full line refill. The streaming tests above exercise the production default.
 
 The UVM runner accepts `--l2` with `--top axi`, separating build directories and result names from L2-disabled runs. For example:
@@ -634,3 +673,13 @@ LiteX, RV32E and OS workflow matrices have not been established by this run.
 Local command logs are under `/tmp/raptor-review-*.log`; they are temporary,
 not committed validation artifacts. This record is not an unconditional
 submission-ready declaration.
+# w4 latency and prediction regression
+
+Run `make -C verify w4-scaling` (or
+`python3 verify/scripts/test_w4_scaling.py --build-dir /tmp/w4-scaling`).
+This uses the production `default-w4` preset in RV32 and RV64, with assertions,
+and checks unselected IQ wake retention, confirmed load wake, fresh-address load
+requests, store permission precheck, byte coverage and per-port MMU/PMP store
+forwarding, both fetch response stages, recovery, MUL/DIV reuse, and TAGE auxiliary
+reads at both 8/7 and 10/9 index widths. Logs and `results.json` are saved under
+the build directory. `--filter tb_tage` restricts the Python runner to predictor tests.

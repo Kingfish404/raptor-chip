@@ -183,7 +183,7 @@
           "source_manifest": "/tmp/raptor-rva22s64-phase109/review/source-manifest.json",
           "artifact_manifest": "build/rva22s64/evidence/phase109-final-manifest.json",
           "supporting_archive": "build/rva22s64/evidence/phase108-final.tar.gz",
-          "invalidation_rule": "Reaudit XLEN/preset, decoder generators/handwritten legality, ALU operation encodings, multiply/divide, rename/issue/completion/commit/flush, or test/reference selection changes. Does not transfer to alternate slow-M or other presets."
+          "invalidation_rule": "Reaudit XLEN/preset, decoder generators and RTL legality, ALU operation encodings, multiply/divide, rename/issue/completion/commit/flush, or test/reference selection changes. Does not transfer to alternate slow-M or other presets."
         }
       ]
     },
@@ -250,7 +250,7 @@
           "basis": "All 8 original independent instruction tests selected and pass; original source/ELF/Sail signature hashes revalidated; independent assembled decode-to-ALU math covers all instruction families, boundaries and seeded operands in M/S/U; immediate legality/register-field enumeration and precise core trap controls; final affected regression and archive verified. Engineering verification, not exhaustive arithmetic formal proof.",
           "artifact_manifest": "build/rva22s64/evidence/phase110-final-manifest.json",
           "source_manifest": "/tmp/raptor-rva22s64-phase110/review/source-manifest.json",
-          "invalidation_rule": "Reaudit configuration/XLEN, generator or handwritten decode, ALU selectors/word handling, rename/issue/completion/retirement and test/reference changes."
+          "invalidation_rule": "Reaudit configuration/XLEN, generator or direct RTL decode, ALU selectors/word handling, rename/issue/completion/retirement and test/reference changes."
         }
       ]
     },
@@ -318,7 +318,7 @@
           "review": "docs.agent/isa/rva22s64/bit-review.md",
           "scope": "Phase111 frozen RV64/default single hart little-endian L2 off; 227-file manifest and explicit simulator config overlays, with later workspace drift recorded separately",
           "basis": "B 1.0.0 24-instruction clause/source review; phase110 independent arithmetic/immediate evidence carried with unchanged generated decode/ALU/backend/Chisel hashes; phase111 re-execution of all 24 Zbb within 40 independent bit ELFs; 798768 ZEXT.H native/compressed module cases, 42 directed/Make-entry core runs, 156 differential and 24 DMA; original RV64 M/S/U failures retained; complete archive verified",
-          "invalidation": "Reopen for configuration/XLEN, generated or handwritten decode, ALU/word semantics, rename/issue/completion/retirement, input/reference or platform changes; no universal arithmetic/whole-core formal proof or other-preset acceptance"
+          "invalidation": "Reopen for configuration/XLEN, generated or direct RTL decode, ALU/word semantics, rename/issue/completion/retirement, input/reference or platform changes; no universal arithmetic/whole-core formal proof or other-preset acceptance"
         }
       ]
     },
@@ -385,7 +385,7 @@
           "basis": "All 8 original independent instruction tests selected and pass; original source/ELF/Sail signature hashes revalidated; independent assembled decode-to-ALU math covers all instruction families, boundaries and seeded operands in M/S/U; immediate legality/register-field enumeration and precise core trap controls; final affected regression and archive verified. Engineering verification, not exhaustive arithmetic formal proof.",
           "artifact_manifest": "build/rva22s64/evidence/phase110-final-manifest.json",
           "source_manifest": "/tmp/raptor-rva22s64-phase110/review/source-manifest.json",
-          "invalidation_rule": "Reaudit configuration/XLEN, generator or handwritten decode, ALU selectors/word handling, rename/issue/completion/retirement and test/reference changes."
+          "invalidation_rule": "Reaudit configuration/XLEN, generator or direct RTL decode, ALU selectors/word handling, rename/issue/completion/retirement and test/reference changes."
         }
       ]
     },
@@ -440,7 +440,7 @@
         "basis": "Complete base-C expansion/register/immediate/HINT and privilege/FS review (1127424 checks), independent GNU compressed roundtrip, 37 original same-DUT upstream Zca/Zcd tests with archived independently reproduced Sail signatures, precise illegal boundary probes from phase112/113, 12 new cross-page and 60 breakpoint/link runs, actual fetch/L1I fault modules, negative checker controls, clause mapping and verified persistent archive. No new Sail run or universal formal proof claimed.",
         "artifact_manifest": "build/rva22s64/evidence/phase114-final-manifest.json",
         "supporting_archive": "build/rva22s64/evidence/phase113-final.tar.gz",
-        "invalidation_rule": "Reaudit XLEN/preset, generated and handwritten decode, compressed length/PC, fetch, execution/retirement, CSR traps, LSU/FP integration, platform or reference/input changes. Separate I/F/D, PMA/RVWMO/progress, system and physical gates remain open."
+        "invalidation_rule": "Reaudit XLEN/preset, generated and direct RTL decode, compressed length/PC, fetch, execution/retirement, CSR traps, LSU/FP integration, platform or reference/input changes. Separate I/F/D, PMA/RVWMO/progress, system and physical gates remain open."
       },
       "notes": [
         "recovery183 connected current IFU/L1I: both XLEN 9 segments/1084 accepted instructions passed; delayed memory, partial ready, precise/recovery/FENCE.I redirects, mixed instruction lengths. Bare M, no self-modification or whole-core acceptance; existing acceptance_basis unchanged.",
@@ -2563,7 +2563,7 @@
         "basis": "Phase120 exhaustive actual decoder/register/TVM matrix, precise core permission selfchecks, negative TVM-gating control, actual PTW/L1I maintenance composition and 48 superpage runs; phase121 36 leaf mapping, 72 ASID/global and six warmed-data/page-retry runs on the same frozen cores; fresh fixed independent Sail executes unchanged data/page-retry ELF; structural dispatch/SQ/commit/TLB/PTW composition argument for batched/nonconsecutive sequences; persistent archives and provenance verified. Engineering verification, not whole-core universal formal proof.",
         "artifact_manifest": "build/rva22s64/evidence/phase121-final-manifest.json",
         "supporting_archive": "build/rva22s64/evidence/phase120-final.tar.gz",
-        "invalidation_rule": "Reaudit configuration/XLEN/H/L2, decoder generators/handwritten legality, dispatch/ROB/commit/recovery, SQ/write-response contract, L1I/L1D/TLB/PTW maintenance/cancellation, platform or reference/input changes. No complete Sv39/PMA/RVWMO/progress/system/physical acceptance is implied."
+        "invalidation_rule": "Reaudit configuration/XLEN/H/L2, decoder generators and RTL legality, dispatch/ROB/commit/recovery, SQ/write-response contract, L1I/L1D/TLB/PTW maintenance/cancellation, platform or reference/input changes. No complete Sv39/PMA/RVWMO/progress/system/physical acceptance is implied."
       },
       "notes": [
         "recovery185 28 configurations x delays0/63 seed42 =56/56 passed on recovery184; cross-page fetch, leaf mapping replacement, ASID/global/split invalidation and Sv39 superpage replacement. Exact manifests audited; no full requirement acceptance change."

@@ -5,7 +5,7 @@
 /* verilator lint_off DECLFILENAME */
 module rng_chip #(
     parameter int XLEN = `RAPT_XLEN,
-    parameter bit L1dWriteBack = 1'b0
+    parameter bit L1dWriteBack = `RAPT_L1D_WRITEBACK
 ) (
     input clock,
     output logic writeback_error_o,
@@ -195,7 +195,7 @@ endmodule
 // verilator lint_off UNUSEDSIGNAL
 module wrapSoC #(
     parameter int XLEN = `RAPT_XLEN,
-    parameter bit L1dWriteBack = 1'b0
+    parameter bit L1dWriteBack = `RAPT_L1D_WRITEBACK
 ) (
     input clock,
     output logic writeback_error_o,

@@ -34,7 +34,8 @@ const SPINE = [
   ["rapt_ifu", "rapt_fqu"],
   ["rapt_fqu", "rapt_idu"],
   ["rapt_idu", "rapt_rnu"],
-  ["rapt_rnu", "rapt_rou"],
+  ["rapt_rnu", "rapt_operand_stage"],
+  ["rapt_operand_stage", "rapt_rou"],
   ["rapt_rou", "rapt_dpu"],
   ["rapt_dpu", "rapt_ieu"],
   ["rapt_dpu", "rapt_ieu_muldiv"],
@@ -45,11 +46,18 @@ const SPINE = [
   ["rapt_feu", "rapt_cdb_arb"],
   ["rapt_lsu", "rapt_cdb_arb"],
   ["rapt_cdb_arb", "rapt_cmu"],
+  ["rapt_lsu", "rapt_lsu_sq"],
+  ["rapt_lsu_sq", "rapt_l1d"],
   ["rapt_lsu", "rapt_l1d"],
+  ["rapt_l1d", "rapt_l1d_mshr"],
+  ["rapt_l1i", "rapt_tlb"],
+  ["rapt_l1d", "rapt_tlb"],
+  ["rapt_tlb", "rapt_ptw"],
+  ["rapt_ptw", "rapt_bus"],
   ["rapt_l1d", "rapt_bus"],
-  ["rapt_bus", "rapt_l2"],
-  ["rapt_l2", "rapt_axi_master"],
-  ["rapt_axi_master", "soc_pmem"],
+  ["rapt_bus", "rapt_axi_master"],
+  ["rapt_axi_master", "rapt_l2"],
+  ["rapt_l2", "soc_pmem"],
   ["rapt_axi_master", "rapt_router"],
   ["rapt_router", "rapt_plic"],
   ["rapt_router", "soc_uart"],
@@ -57,9 +65,9 @@ const SPINE = [
   ["rapt_router", "rapt_dm"],
 ];
 
-const FRONTEND_IDS = ["rapt_bpu", "rapt_l1i", "rapt_ifu", "rapt_fqu", "rapt_idu", "rapt_rnu", "rapt_prf", "rapt_fpr", "rapt_pmp_state"];
-const BACKEND_IDS = ["rapt_rou", "rapt_dpu", "rapt_ieu", "rapt_ieu_muldiv", "rapt_feu", "rapt_lsu", "rapt_cdb_arb", "rapt_cmu", "rapt_csr"];
-const MEMORY_IDS = ["rapt_l1d", "rapt_bus", "rapt_l2", "rapt_axi_master", "soc_pmem", "rapt_router", "soc_uart", "rapt_clint", "rapt_plic", "rapt_dm"];
+const FRONTEND_IDS = ["rapt_bpu", "rapt_l1i", "rapt_ifu", "rapt_fqu", "rapt_idu"];
+const BACKEND_IDS = ["rapt_rnu", "rapt_operand_stage", "rapt_prf", "rapt_fpr", "rapt_rou", "rapt_dpu", "rapt_ieu", "rapt_ieu_muldiv", "rapt_feu", "rapt_lsu", "rapt_lsu_sq", "rapt_cdb_arb", "rapt_cmu", "rapt_csr"];
+const MEMORY_IDS = ["rapt_l1d", "rapt_l1d_mshr", "rapt_tlb", "rapt_ptw", "rapt_pmp_state", "rapt_bus", "rapt_l2", "rapt_axi_master", "soc_pmem", "rapt_router", "soc_uart", "rapt_clint", "rapt_plic", "rapt_dm"];
 
 function el(name, attrs = {}, children = []) {
   const node = document.createElementNS(NS, name);
@@ -268,7 +276,7 @@ export function createUarchView(root, data, hooks = {}) {
         rec.n.latency != null ? `${rec.n.latency} cyc` : "",
       ]
         .filter(Boolean)
-        .join(" · ");
+        .join(" | ");
       rec.dots.replaceChildren(
         ...occ.slice(0, 8).map((idx, k) => {
           const inst = insns[idx];
@@ -306,7 +314,7 @@ export function createUarchView(root, data, hooks = {}) {
   const legend = document.getElementById("uarch-legend");
   if (legend) {
     const ipc = data.trace?.ipc;
-    legend.textContent = `pipeline block diagram · occupancy = contract-cycle model${ipc != null ? ` · IPC ${ipc}` : ""}`;
+    legend.textContent = `pipeline block diagram | occupancy = illustrative model${ipc != null ? ` | model IPC ${ipc}` : ""}`;
   }
 
   return {

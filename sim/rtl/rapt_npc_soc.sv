@@ -8,7 +8,7 @@
 // verilator lint_off UNUSEDSIGNAL
 module raptSoC #(
     parameter int XLEN = `RAPT_XLEN,
-    parameter bit L1dWriteBack = 1'b0
+    parameter bit L1dWriteBack = `RAPT_L1D_WRITEBACK
 ) (
     input  clock,
     output logic writeback_error_o,
@@ -72,16 +72,16 @@ module raptSoC #(
     else begin
       axi_observe_cycle <= axi_observe_cycle + 1;
 `ifdef RAPT_SPEC_OBSERVE
-      if (cpu.core.l1i_cache.slow_active)
+      if (cpu.core.memory_subsystem.l1i_cache.slow_active)
         $display(
             "IFETCH_OBS %0d STATE %h %h %h %h %h %h",
             axi_observe_cycle,
             cpu.core.ifetch_io_owner_pc,
-            cpu.core.l1i_cache.u_word_fetch.state,
-            cpu.core.l1i_cache.slow_read_pbmt,
+            cpu.core.memory_subsystem.l1i_cache.u_word_fetch.state,
+            cpu.core.memory_subsystem.l1i_cache.slow_read_pbmt,
             cpu.core.ifetch_io_authorized,
-            cpu.core.l1i_cache.slow_cancel,
-            cpu.core.l1i_cache.u_word_fetch.io_owned
+            cpu.core.memory_subsystem.l1i_cache.slow_cancel,
+            cpu.core.memory_subsystem.l1i_cache.u_word_fetch.io_owned
         );
       if (cpu.core.ifetch_io_start)
         $display("IFETCH_OBS %0d START %h", axi_observe_cycle, cpu.core.ifetch_io_owner_pc);

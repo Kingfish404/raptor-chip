@@ -14,7 +14,7 @@
 module rapt_core #(
     parameter int XLEN = `RAPT_XLEN,
     parameter int MemoryReadCredits = 8,
-    parameter bit L1dWriteBack = 1'b0
+    parameter bit L1dWriteBack = `RAPT_L1D_WRITEBACK
 ) (
     input clock,
     output logic writeback_error_o,

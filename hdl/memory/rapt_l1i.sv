@@ -314,7 +314,10 @@ module rapt_l1i #(
   localparam int PendingBits = $clog2(IFQ_SIZE + 1) + 1;
   logic [PendingBits-1:0] cache_pending;
   logic cache_issue, cache_return, cache_orphan, cache_cancel;
-  assign cache_cancel = invalid_l1i || cmu_bcast.flush_pipe || cmu_bcast.flush_redirect;
+  // Same-context flush_redirect repeats the flush_pipe prefetch PC. Keep that
+  // read. Privilege, SATP, PMP, fence.i, and sfence still cancel here.
+  wire flush_redirect_kills_fetch = cmu_bcast.flush_redirect && !cmu_bcast.fetch_context_stable;
+  assign cache_cancel = invalid_l1i || cmu_bcast.flush_pipe || flush_redirect_kills_fetch;
   logic [1:0] itlb_pbmt;
 
   assign hit = !slow_active && !slow_select && (!invalid_l1i && !wait_invalid)
@@ -339,7 +342,7 @@ module rapt_l1i #(
   assign slow_select = (ifu_l1i.pc[11:0] == 12'hffe)
       || (mmu_en && tlb_hit && itlb_pbmt != 0);
   assign slow_cancel = ifu_l1i.cancel || invalid_l1i || cmu_bcast.flush_pipe
-      || cmu_bcast.flush_redirect || cmu_bcast.fence_time
+      || flush_redirect_kills_fetch || cmu_bcast.fence_time
       || (slow_active && io_owner_pc != ifu_l1i.pc);
   assign slow_request = slow_select && !slow_active && l1i_state == IDLE
       && !ptw_busy && cache_pending == 0 && ifq_valid == 0
@@ -581,8 +584,15 @@ module rapt_l1i #(
   logic [XLEN-1:0] lookahead_n1_addr, lookahead_n2_addr;
   logic pmp_n1_fetch_fault, pmp_n2_fetch_fault;
 `endif
+`ifdef RAPT_FETCH_WIDE
+  logic [XLEN-1:0] lookahead_n3_addr, lookahead_n4_addr;
+  logic pmp_n3_fetch_fault, pmp_n4_fetch_fault;
+`endif
   rapt_l1i_access #(
       .XLEN(XLEN),
+`ifdef RAPT_FETCH_WIDE
+      .WideLookahead(1'b1),
+`endif
 `ifdef RAPT_FETCH_LOOKAHEAD
       .Lookahead(1'b1)
 `else
@@ -607,12 +617,23 @@ module rapt_l1i #(
       .lookahead_n1_addr,
       .lookahead_n2_addr(lookahead_n2_addr),
       .pmp_n1_fetch_fault(pmp_n1_fetch_fault),
-      .pmp_n2_fetch_fault
+      .pmp_n2_fetch_fault,
 `else
       .lookahead_n1_addr('0),
       .lookahead_n2_addr('0),
       .pmp_n1_fetch_fault(),
-      .pmp_n2_fetch_fault()
+      .pmp_n2_fetch_fault(),
+`endif
+`ifdef RAPT_FETCH_WIDE
+      .lookahead_n3_addr,
+      .lookahead_n4_addr,
+      .pmp_n3_fetch_fault,
+      .pmp_n4_fetch_fault
+`else
+      .lookahead_n3_addr('0),
+      .lookahead_n4_addr('0),
+      .pmp_n3_fetch_fault(),
+      .pmp_n4_fetch_fault()
 `endif
   );
 
@@ -842,6 +863,55 @@ module rapt_l1i #(
       && n2_same_line_as_next4
       && (!mmu_en || lookahead_n2_addr[XLEN-1:12] == pc_ifu[XLEN-1:12])
       && hit_n2 && sram_n2_ready;
+`ifdef RAPT_FETCH_WIDE
+  // The extra banks are read in parallel with n1/n2. Only words in the line
+  // covered by the existing next4 tag mirror may enter the wide window.
+  logic [L1I_LINE_LEN-1:0] addr_offset_n3, addr_offset_n4;
+  logic [L1I_N_WAYS-1:0] way_hit_n3, way_hit_n4;
+  logic [L1iWayW-1:0] hit_n3_way_sel, hit_n4_way_sel;
+  logic hit_n3, hit_n4, sram_n3_ready, sram_n4_ready;
+  logic n3_same_line_as_next4, n4_same_line_as_next4;
+  assign lookahead_n3_addr = {pc_ifu[XLEN-1:2], 2'b00} + XLEN'(12);
+  assign lookahead_n4_addr = {pc_ifu[XLEN-1:2], 2'b00} + XLEN'(16);
+  assign addr_offset_n3 = addr_offset + L1I_LINE_LEN'(3);
+  assign addr_offset_n4 = addr_offset + L1I_LINE_LEN'(4);
+  for (genvar w = 0; w < L1I_N_WAYS; w++) begin : g_way_hit_wide
+    assign way_hit_n3[w] = tag_valid_next4[w]
+        && tag_rdata_next4[w] == addr_tag_next4
+        && l1i_valid[w][addr_idx_next4][addr_offset_n3];
+    assign way_hit_n4[w] = tag_valid_next4[w]
+        && tag_rdata_next4[w] == addr_tag_next4
+        && l1i_valid[w][addr_idx_next4][addr_offset_n4];
+  end
+  always_comb begin
+    hit_n3_way_sel = '0;
+    hit_n4_way_sel = '0;
+    for (int w = int'(L1I_N_WAYS) - 1; w >= 0; w--) begin
+      if (way_hit_n3[w]) hit_n3_way_sel = L1iWayW'(w);
+      if (way_hit_n4[w]) hit_n4_way_sel = L1iWayW'(w);
+    end
+  end
+  assign hit_n3 = |way_hit_n3;
+  assign hit_n4 = |way_hit_n4;
+  assign sram_n3_ready = addr_valid_r && data_bank_rvalid_d1[hit_n3_way_sel][addr_offset_n3]
+      && data_bank_raddr_d1[hit_n3_way_sel][addr_offset_n3] == addr_idx_next4;
+  assign sram_n4_ready = addr_valid_r && data_bank_rvalid_d1[hit_n4_way_sel][addr_offset_n4]
+      && data_bank_raddr_d1[hit_n4_way_sel][addr_offset_n4] == addr_idx_next4;
+  assign n3_same_line_as_next4 = pc_ifu_next4[XLEN-1:L1I_LINE_LEN+2]
+      == lookahead_n3_addr[XLEN-1:L1I_LINE_LEN+2];
+  assign n4_same_line_as_next4 = pc_ifu_next4[XLEN-1:L1I_LINE_LEN+2]
+      == lookahead_n4_addr[XLEN-1:L1I_LINE_LEN+2];
+  assign ifu_l1i.inst_n3 = data_bank_rdata[hit_n3_way_sel][addr_offset_n3];
+  assign ifu_l1i.inst_n4 = data_bank_rdata[hit_n4_way_sel][addr_offset_n4];
+  assign ifu_l1i.inst_n3_valid = !slow_active && !slow_select && !pmp_n3_fetch_fault
+      && n3_same_line_as_next4
+      && (!mmu_en || lookahead_n3_addr[XLEN-1:12] == pc_ifu[XLEN-1:12])
+      && hit_n3 && sram_n3_ready;
+  assign ifu_l1i.inst_n4_valid = !slow_active && !slow_select && !pmp_n4_fetch_fault
+      && n4_same_line_as_next4
+      && (!mmu_en || lookahead_n4_addr[XLEN-1:12] == pc_ifu[XLEN-1:12])
+      && hit_n4 && sram_n4_ready;
+`endif
 `endif
 
   // Virtual address zero is valid: resolve every enabled-MMU TLB miss through
@@ -849,7 +919,7 @@ module rapt_l1i #(
   assign ptw_req = !slow_active && !slow_select && !cache_orphan && (l1i_state == IDLE)
       && mmu_en && !tlb_hit
       && !invalid_l1i && !wait_invalid
-      && !cmu_bcast.flush_pipe && !cmu_bcast.flush_redirect
+      && !cmu_bcast.flush_pipe && !flush_redirect_kills_fetch
       && !ptw_busy;
 
   // Before SRAM data is ready, conservatively check four bytes; once decoded,
@@ -882,7 +952,7 @@ module rapt_l1i #(
       unique case (l1i_state)
         IDLE: begin
           if (!slow_select && !slow_active && !cache_orphan && !invalid_l1i && !wait_invalid
-              && !cmu_bcast.flush_pipe && !cmu_bcast.flush_redirect) begin
+              && !cmu_bcast.flush_pipe && !flush_redirect_kills_fetch) begin
             if (mmu_en) begin
               if (tlb_hit) begin
                 if (pf_fetch_tlb) begin
@@ -1150,7 +1220,8 @@ module rapt_l1i #(
     end
   end
 
-  `RAPT_SVA_IMPLY(clock, reset, L1I_REDIRECT_BLOCKS_PTW_REQUEST, cmu_bcast.flush_redirect, !ptw_req)
+  `RAPT_SVA_IMPLY(clock, reset, L1I_REDIRECT_BLOCKS_PTW_REQUEST, flush_redirect_kills_fetch,
+                  !ptw_req)
 
 endmodule
 /* verilator lint_on PINCONNECTEMPTY */

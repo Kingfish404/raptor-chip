@@ -56,7 +56,7 @@ module tb_memory_trace;
   byte mem_op[MaxTrace];
   int inst_count, mem_count, inst_limit, mem_limit;
   int i_index, d_index;
-  bit independent;
+  bit independent, hot_bandwidth;
   logic d_eligible;
 
   function automatic logic [4:0] load_alu(input int bytes);
@@ -73,17 +73,23 @@ module tb_memory_trace;
     d_eligible = independent;
     if (!independent && i_index > 0 && d_index < mem_limit)
       d_eligible = mem_seq[d_index] <= inst_seq[i_index-1];
-    ifu_l1i.pc = i_index < inst_limit ? inst_pc[i_index] : 'h80000000;
-    ifu_l1i.invalid = 0;
-    ifu_l1i.consumed = !reset && i_index < inst_limit && ifu_l1i.valid;
+    ifu_l1i.pc = hot_bandwidth ? XLEN'('h80000000)
+        : i_index < inst_limit ? inst_pc[i_index] : XLEN'('h80000000);
+    ifu_l1i.invalid = hot_bandwidth;
+    ifu_l1i.consumed = !hot_bandwidth && !reset && i_index < inst_limit && ifu_l1i.valid;
     ifu_l1i.cancel = 0;
     ifu_l1i.prefetch_pc = '0;
     ifu_l1i.prefetch_valid = 0;
 
-    lsu_l1d.raddr = d_index < mem_limit ? mem_addr[d_index] : '0;
-    lsu_l1d.ralu = d_index < mem_limit ? load_alu(mem_size[d_index]) : '0;
-    lsu_l1d.rvalid = !reset && d_index < mem_limit && d_eligible
-        && mem_op[d_index] == "r";
+    lsu_l1d.raddr = hot_bandwidth ? XLEN'('h80000000)
+        : d_index < mem_limit ? mem_addr[d_index] : '0;
+    lsu_l1d.rcontext = '0;
+    lsu_l1d.rcontext.eff_priv = 2'b11;
+    lsu_l1d.rcontext_b = lsu_l1d.rcontext;
+    lsu_l1d.ralu = hot_bandwidth ? `RAPT_ALU_LW__
+        : d_index < mem_limit ? load_alu(mem_size[d_index]) : '0;
+    lsu_l1d.rvalid = !reset && (hot_bandwidth || (d_index < mem_limit && d_eligible
+        && mem_op[d_index] == "r"));
     lsu_l1d.rmisaligned = 0;
     lsu_l1d.rcheck_valid = 0;
     lsu_l1d.rcheck_offset = '0;
@@ -92,18 +98,19 @@ module tb_memory_trace;
     lsu_l1d.atomic_lock = 0;
     lsu_l1d.ordered = 0;
     lsu_l1d.replay_allowed = 0;
-    lsu_l1d.raddr_b = '0;
-    lsu_l1d.ralu_b = '0;
-    lsu_l1d.rvalid_b = 0;
+    lsu_l1d.raddr_b = hot_bandwidth ? XLEN'('h80000000) : '0;
+    lsu_l1d.ralu_b = hot_bandwidth ? `RAPT_ALU_LW__ : '0;
+    lsu_l1d.rvalid_b = hot_bandwidth && !reset;
     lsu_l1d.waddr = d_index < mem_limit ? mem_addr[d_index] : '0;
     lsu_l1d.wpbmt = 0;
     lsu_l1d.walu = d_index < mem_limit ? 8'((1 << mem_size[d_index]) - 1) : '0;
     lsu_l1d.wzero = 0;
-    lsu_l1d.wvalid = !reset && d_index < mem_limit && d_eligible
+    lsu_l1d.wvalid = !hot_bandwidth && !reset && d_index < mem_limit && d_eligible
         && mem_op[d_index] == "w";
     lsu_l1d.wdata = d_index < mem_limit ? mem_data[d_index] : '0;
 
     exu_l1d.mmu_en = 0;
+    exu_l1d.mem_context = lsu_l1d.rcontext;
     exu_l1d.vaddr = '0;
     exu_l1d.walu = '0;
     exu_l1d.cmo_mgmt = 0;
@@ -117,8 +124,14 @@ module tb_memory_trace;
   initial begin : run
     string inst_path, mem_path;
     int fd, status, cycles, max_cycles, max_insts, max_mem, next_i, next_d;
+    int hot_cycles, hot_a, hot_b, hot_b_retries;
+    logic [XLEN-1:0] hot_value;
+    bit hot_value_valid;
     int source_seq, event_seq, cutoff_seq, dependency_wait;
     int inst_skipped, mem_skipped;
+    int d_event_start, d_service_cycles;
+    int read_service_cycles, write_service_cycles;
+    int read_latency[17], write_latency[17];
     int read_count, write_count, read_bytes, write_bytes;
     int i_stall, d_stall, axi_ar, axi_aw, axi_r, axi_w, axi_b, axi_read_bytes, axi_write_bytes;
     int axi_i_ar, axi_d_ar, axi_i_r, axi_d_r, axi_i_read_bytes, axi_d_read_bytes;
@@ -132,6 +145,8 @@ module tb_memory_trace;
     if (!$value$plusargs("MAX_INSTS=%d", max_insts)) max_insts = 20000;
     if (!$value$plusargs("MAX_MEM=%d", max_mem)) max_mem = 10000;
     independent = $test$plusargs("INDEPENDENT");
+    hot_bandwidth = $test$plusargs("HOT_BANDWIDTH");
+    if (!$value$plusargs("HOT_CYCLES=%d", hot_cycles)) hot_cycles = 10000;
     fd = $fopen(inst_path, "r");
     if (!fd) $fatal(1, "cannot open %s", inst_path);
     inst_count = 0;
@@ -212,6 +227,11 @@ module tb_memory_trace;
     write_count = 0;
     read_bytes = 0;
     write_bytes = 0;
+    d_event_start = 0;
+    read_service_cycles = 0;
+    write_service_cycles = 0;
+    foreach (read_latency[n]) read_latency[n] = 0;
+    foreach (write_latency[n]) write_latency[n] = 0;
     i_stall = 0;
     d_stall = 0;
     dependency_wait = 0;
@@ -230,6 +250,32 @@ module tb_memory_trace;
     axi_d_read_bytes = 0;
     repeat (5) @(negedge clock);
     reset = 0;
+    if (hot_bandwidth) begin
+      hot_a = 0;
+      hot_b = 0;
+      hot_b_retries = 0;
+      hot_value = '0;
+      hot_value_valid = 0;
+      repeat (hot_cycles) begin
+        @(posedge clock);
+        if (lsu_l1d.rvalid && lsu_l1d.rready) begin
+          if (hot_value_valid && lsu_l1d.rdata != hot_value) $fatal(1, "hot D A data changed");
+          hot_value = lsu_l1d.rdata;
+          hot_value_valid = 1;
+          hot_a++;
+        end
+        if (lsu_l1d.rvalid_b && lsu_l1d.rready_b) begin
+          if (!hot_value_valid || lsu_l1d.rdata_b != hot_value) $fatal(1, "hot D B data mismatch");
+          hot_b++;
+        end
+        if (lsu_l1d.rvalid_b && lsu_l1d.rretry_b) hot_b_retries++;
+        if (lsu_l1d.trap) $fatal(1, "hot D load trapped");
+        @(negedge clock);
+      end
+      $display("PASS: MEM hot D cycles=%0d A=%0d B=%0d B_retries=%0d d_per_cycle=%0f", hot_cycles,
+               hot_a, hot_b, hot_b_retries, real'(hot_a + hot_b) / hot_cycles);
+      $finish;
+    end
     while ((i_index < inst_limit || d_index < mem_limit) && cycles < max_cycles) begin
       @(posedge clock);
       next_i = i_index;
@@ -258,11 +304,19 @@ module tb_memory_trace;
             );
           read_count++;
           read_bytes += mem_size[d_index];
+          d_service_cycles = cycles - d_event_start + 1;
+          read_service_cycles += d_service_cycles;
+          read_latency[d_service_cycles<16?d_service_cycles : 16]++;
+          d_event_start = cycles + 1;
           next_d++;
         end else if (lsu_l1d.wvalid && lsu_l1d.wready) begin
           if (lsu_l1d.werr) $fatal(1, "committed store failed");
           write_count++;
           write_bytes += mem_size[d_index];
+          d_service_cycles = cycles - d_event_start + 1;
+          write_service_cycles += d_service_cycles;
+          write_latency[d_service_cycles<16?d_service_cycles : 16]++;
+          d_event_start = cycles + 1;
           next_d++;
         end else begin
           d_stall++;
@@ -304,9 +358,19 @@ module tb_memory_trace;
         write_count, read_bytes, write_bytes, i_stall, d_stall, dependency_wait, axi_ar, axi_aw,
         axi_r, axi_w, axi_b, axi_read_bytes, axi_write_bytes,
         real'(axi_read_bytes + axi_write_bytes) / cycles, inst_skipped, mem_skipped, independent);
+    $display("PROFILE: D service cycles read=%0d write=%0d", read_service_cycles,
+             write_service_cycles);
+    for (int n = 1; n <= 16; n++) begin
+      if (read_latency[n] != 0) $display("PROFILE: D read latency[%0d]=%0d", n, read_latency[n]);
+      if (write_latency[n] != 0) $display("PROFILE: D write latency[%0d]=%0d", n, write_latency[n]);
+    end
+`ifndef RAPT_L2_EN
     $display(
         "MEM traffic split: i_ar=%0d d_ar=%0d i_r=%0d d_r=%0d i_read_bytes=%0d d_read_bytes=%0d",
         axi_i_ar, axi_d_ar, axi_i_r, axi_d_r, axi_i_read_bytes, axi_d_read_bytes);
+`else
+    $display("MEM traffic split: external AXI IDs are remapped by L2; aggregate only");
+`endif
     $finish;
   end
 endmodule

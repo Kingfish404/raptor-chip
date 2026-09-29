@@ -141,6 +141,50 @@ Elapsed time was 14386.42 seconds. Reports are in
 not routed timing; the log's earlier memory-thrashing warnings did not prevent
 completion.
 
+The isolated seven-context L2 outer refill collector passed RV64 `default-l2`
+KU15P OOC synthesis at 50 MHz on 2026-09-25. Its setup/hold slack is
++11.163/+0.090 ns with zero TNS; it uses 542 LUTs (96 LUTRAMs) and 563 FFs.
+The source manifest matched the workspace sources when measured; subsequent L2
+integration edits make this report historical. Reports are under
+`fpga/build/default-l2/xcku15p-ffva1156-2-e/rv64/l2_refill_mshrs/50MHz/`.
+The collector now participates in the live L2's five normal clean read misses,
+but the isolated result does not prove timing for the modified L2, memory
+subsystem or LiteX SoC.
+
+An earlier RV64 `default-l2` L2 revision, including five live clean-miss MSHRs
+and same-line secondary read queues, passed KU15P 50 MHz OOC synthesis on
+2026-09-25. Setup/hold slack is +9.167/+0.039 ns with zero TNS; utilization is
+21,904 LUTs (672 LUTRAMs), 13,230 FFs, 8 RAMB36 and 16 URAM. The live L2 now
+also queues different-tag same-set reads and reloads its MSHR after directory
+lookup; its RTL differs from the recorded source manifest. Reports are under
+`fpga/build/default-l2/xcku15p-ffva1156-2-e/rv64/l2/50MHz/`. This is
+historical unrouted single-block evidence; the revised L2, `default-l2` memory,
+and full LiteX SoC timing remain unmeasured for the live RTL.
+
+The revised L2 with same-set different-tag MSHR replay passed a separate RV64
+`default-l2` KU15P 50 MHz OOC synthesis on 2026-09-25. Setup/hold slack is
++8.622/+0.039 ns with zero TNS; it uses 22,734 LUTs (740 LUTRAMs), 13,283 FFs,
+8 RAMB36 and 16 URAM. Its 174-file source manifest matched the workspace at
+measurement time. The output is under
+`fpga/build/default-l2-replay/xcku15p-ffva1156-2-e/rv64/l2/50MHz/`.
+This remains a post-synthesis single-block result. The matching `memory`
+subsystem and routed LiteX SoC have no completed 50 MHz result for this RTL.
+The L2 data array subsequently changed from sixteen 4096x64 SRAM banks to
+four logical 16384x64 banks with BOOM's row mapping. The result above is now
+historical. The matching old `memory` OOC run was stopped during Vivado timing
+optimization before it produced timing or utilization reports; the new bank
+layout needs fresh L2, memory and routed SoC measurements.
+
+The four-bank L2 revision passed a new RV64 `default-l2` KU15P 50 MHz OOC
+synthesis on 2026-09-25. Setup/hold slack is +9.417/+0.042 ns with zero TNS;
+it uses 22,651 LUTs (740 LUTRAMs), 13,801 FFs and 136 RAMB36 blocks. Vivado
+mapped the 512 KiB data store to BRAM rather than URAM in this revision. The
+source manifest matched all current RTL and flow inputs at measurement time.
+Reports are under
+`fpga/build/default-l2-four-bank/xcku15p-ffva1156-2-e/rv64/l2/50MHz/`.
+The corresponding `memory` subsystem OOC and routed LiteX SoC measurements
+remain pending for this revision.
+
 The optional `SYNTH_SHARE=0` setting disables Yosys SAT resource sharing via
 `synth -noshare`. The default remains `SYNTH_SHARE=1`, and the value is tracked in
 the synthesis configuration stamp so changing it rebuilds the netlist. New STA
@@ -212,7 +256,7 @@ make -C lspd ppa-all PDK=sky130 JOB_MEMORY_MB=8192
 
 Large cache/core configurations can consume substantially more memory than small frontend blocks. Reduce `PARALLEL_JOBS` or increase `JOB_MEMORY_MB` when running `core`, `l1i`, `l1d`, and enabled `l2` together.
 
-Supported module names are `core`, `bpu`, `ifu`, `fqu`, `stream_queue`, `l1i`, `idu`, `rnu`, `rename_checkpoint`, `rou`, `prf`, `fpr`, `dpu`, `dispatch_select`, `dispatch_steer`, `issue_select`, `muldiv_fu`, `ieu`, `feu`, `cmu`, `csr`, `lsu`, `l1d`, `bus`, `axi`, and `l2`. `dpu` isolates K-to-W domain/token compaction; `dispatch_select` isolates ROB rotation/rank and acceptance accounting; `dispatch_steer` combines both with indexed domain lookup and selected physical identities, but not the wide operand payload read. `issue_select` exposes the combinational issue-selection cone with a clock port used only as an IO timing reference; it inserts no pipeline registers. `muldiv_fu` exposes the complete `rapt_ieu_mul` arithmetic unit, including both multiply and divide paths, with native independent operands, operation, word mode, tag, and handshake ports. It excludes the MDQ and completion arbiter. For the RV64 four-entry MDQ tag shape, use `EXTRA_DEFINES='-DRAPT_RV64 -GTAG_W=2'`; select `SRAM_MODE=flops` because this leaf contains no SRAM. A full-unit worst path can be in the multiplier and need not describe divider-specific timing. Use `make -C lspd list` to show the corresponding RTL top modules.
+Supported module names are `core`, `bpu`, `ifu`, `fqu`, `stream_queue`, `l1i`, `idu`, `rnu`, `rename_checkpoint`, `rou`, `prf`, `fpr`, `dpu`, `dispatch_select`, `dispatch_steer`, `issue_select`, `muldiv_fu`, `ieu`, `feu`, `cmu`, `csr`, `lsu`, `l1d`, `bus`, `axi`, `l2`, and `l2_refill_mshrs`. `dpu` isolates K-to-W domain/token compaction; `dispatch_select` isolates ROB rotation/rank and acceptance accounting; `dispatch_steer` combines both with indexed domain lookup and selected physical identities, but not the wide operand payload read. `issue_select` exposes the combinational issue-selection cone with a clock port used only as an IO timing reference; it inserts no pipeline registers. `muldiv_fu` exposes the complete `rapt_ieu_mul` arithmetic unit, including both multiply and divide paths, with native independent operands, operation, word mode, tag, and handshake ports. It excludes the MDQ and completion arbiter. For the RV64 four-entry MDQ tag shape, use `EXTRA_DEFINES='-DRAPT_RV64 -GTAG_W=2'`; select `SRAM_MODE=flops` because this leaf contains no SRAM. A full-unit worst path can be in the multiplier and need not describe divider-specific timing. Use `make -C lspd list` to show the corresponding RTL top modules.
 
 Module-only synthesis adapters live in `lspd/hdl_wrapper/`. Only the selected top's adapter is parsed, so an unrelated stale wrapper cannot invalidate a module's report after an interface refactor. They do not enter the product `hdl/` tree, simulator pack, or tapeout RTL file list. DPU retains its `stimulus` / `response` adapter. IEU, FEU and LSU expose independent typed dispatch and completion arrays plus native interface ports; their queue grants and capacity outputs are flattened per slot with queue-specific index widths. They add no output reduction or correlated stimulus fan-in to the measured logic. Select XLEN/ROB/payload types through the preset and `-DRAPT_RV64`, not independent wrapper width overrides. FPR A/B/C names denote three operands, not dispatch lanes.
 
@@ -278,6 +322,14 @@ make -C lspd ppa MODULE=l1d RAPT_CONFIG=small PDK=nangate45 SRAM_MODE=flops
 ```
 
 The generated `sram_model.txt` identifies which mode and model platform were used for an individual result. `SRAM_PLATFORM=sky130` currently selects the abstract model shape set; it does not imply that the selected standard-cell PDK contains characterized Sky130 SRAM macros.
+
+For a large composition top, `SYNTH_GENERIC_ABC=0` skips the generic ABC pass inside Yosys `synth`. `SYNTH_ABC_SCRIPT=fast` selects `scripts/abc_fast.script` for the later Liberty mapping; it still runs OpenSTA. Both options are recorded in `run_config.txt`. The fast script trades mapping quality for a shorter Backend run, so compare area, timing, and power only against runs with the same options:
+
+```sh
+make -C lspd/syn ppa MODULE=backend RAPT_CONFIG=default PDK=nangate45 \
+  CLK_FREQ_MHZ=50 SYNTH_SHARE=0 SYNTH_GENERIC_ABC=0 SYNTH_ABC_SCRIPT=fast \
+  EXTRA_DEFINES=-DRAPT_RV64
+```
 
 Report generation is separate from synthesis and STA so existing build results can be summarized without rerunning evaluation. Generate one PDK report with:
 

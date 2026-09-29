@@ -56,7 +56,7 @@ module tb_frontend_trace;
   endfunction
 
   always_comb begin
-    ifu_l1i.valid = !reset && gap_left == 0;
+    ifu_l1i.valid   = !reset && gap_left == 0;
     // L1I returns a 32-bit window beginning at PC, including the next
     // aligned word's low half when PC[1] is set.
     ifu_l1i.inst_n0 = image_word(ifu_l1i.pc);
@@ -65,19 +65,33 @@ module tb_frontend_trace;
     ifu_l1i.inst_n2 = image_word((ifu_l1i.pc & ~XLEN'(3)) + XLEN'(8));
     ifu_l1i.inst_n1_valid = ifu_l1i.valid;
     ifu_l1i.inst_n2_valid = ifu_l1i.valid;
+`ifdef RAPT_FETCH_WIDE
+    ifu_l1i.inst_n3 = image_word((ifu_l1i.pc & ~XLEN'(3)) + XLEN'(12));
+    ifu_l1i.inst_n4 = image_word((ifu_l1i.pc & ~XLEN'(3)) + XLEN'(16));
+    ifu_l1i.inst_n3_valid = ifu_l1i.valid;
+    ifu_l1i.inst_n4_valid = ifu_l1i.valid;
 `endif
-    ifu_l1i.trap = 0;
+`endif
+    ifu_l1i.trap  = 0;
     ifu_l1i.cause = '0;
-    ifu_l1i.tval = '0;
+    ifu_l1i.tval  = '0;
   end
 
   `include "tb_core_bcast_defaults.svh"
 
   initial begin : run
     string image_path, trace_path;
+    string bpu_events_path;
     int fd, status, idx, cycles, delivered, correct, redirects, last_progress;
+    int bpu_events_fd;
     int empty_cycles, gap_cycles, blocked_cycles, mismatches, control_count;
     int cond_misses, indirect_misses, direct_misses, noncontrol_misses, serial_count;
+    int bp_cond, bp_cond_aux, bp_cond_primary, bp_cond_raw_miss, bp_cond_dir_miss;
+    int bp_cond_ambiguous, bp_cond_ambiguous_miss;
+    int bp_cond_target_miss, bp_cond_aux_miss, bp_cond_primary_miss;
+    int bp_direct, bp_direct_raw_miss, bp_indirect, bp_indirect_raw_miss;
+    int bp_return, bp_return_raw_miss, bp_raw_noncontrol_steer;
+    int bp_decode_repairs, bp_decode_repairs_correct;
     int flushing;
     logic [XLEN-1:0] pc_value, npc_value;
     logic [31:0] inst_value;
@@ -85,6 +99,12 @@ module tb_frontend_trace;
 
     if (!$value$plusargs("IMG=%s", image_path)) $fatal(1, "+IMG required");
     if (!$value$plusargs("TRACE=%s", trace_path)) $fatal(1, "+TRACE required");
+    bpu_events_fd = 0;
+    if ($value$plusargs("BPU_EVENTS=%s", bpu_events_path)) begin
+      bpu_events_fd = $fopen(bpu_events_path, "w");
+      if (bpu_events_fd == 0) $fatal(1, "cannot open BPU event output %s", bpu_events_path);
+      $fwrite(bpu_events_fd, "index,pc,kind,aux,pred_taken,actual_taken,raw_miss,final_miss\n");
+    end
     if (!$value$plusargs("SINK_WIDTH=%d", sink_width)) sink_width = rapt_pkg::DecodeWidth;
     if (!$value$plusargs("FETCH_GAP=%d", fetch_gap)) fetch_gap = 0;
     if (!$value$plusargs("FEEDBACK_DELAY=%d", feedback_delay)) feedback_delay = 4;
@@ -104,11 +124,11 @@ module tb_frontend_trace;
     ) && trace_count < MaxTrace) begin
       status = $fscanf(fd, "%h %h %h\n", pc_value, inst_value, npc_value);
       if (status == 3 && pc_value >= ImageBase && pc_value < ImageBase + XLEN'(image_size)) begin
-        trace_pc[trace_count] = pc_value;
+        trace_pc[trace_count]   = pc_value;
         // NEMU expands C instructions in its execution record. Read original
         // bytes so sequential length and predictor training match the DUT.
         trace_inst[trace_count] = image_word(pc_value);
-        trace_npc[trace_count] = npc_value;
+        trace_npc[trace_count]  = npc_value;
         trace_count++;
       end
     end
@@ -141,6 +161,25 @@ module tb_frontend_trace;
     direct_misses = 0;
     noncontrol_misses = 0;
     serial_count = 0;
+    bp_cond = 0;
+    bp_cond_aux = 0;
+    bp_cond_primary = 0;
+    bp_cond_raw_miss = 0;
+    bp_cond_dir_miss = 0;
+    bp_cond_ambiguous = 0;
+    bp_cond_ambiguous_miss = 0;
+    bp_cond_target_miss = 0;
+    bp_cond_aux_miss = 0;
+    bp_cond_primary_miss = 0;
+    bp_direct = 0;
+    bp_direct_raw_miss = 0;
+    bp_indirect = 0;
+    bp_indirect_raw_miss = 0;
+    bp_return = 0;
+    bp_return_raw_miss = 0;
+    bp_raw_noncontrol_steer = 0;
+    bp_decode_repairs = 0;
+    bp_decode_repairs_correct = 0;
     empty_cycles = 0;
     gap_cycles = 0;
     blocked_cycles = 0;
@@ -192,8 +231,18 @@ module tb_frontend_trace;
           delivered++;
           if (idu_rnu.slot[s].uop.pc == trace_pc[idx]) begin
             logic [XLEN-1:0] sequential_pc;
+            logic [XLEN-1:0] raw_pnpc;
             bit control, mismatch, serial;
+            bit raw_mismatch, actual_taken, is_conditional, is_direct, is_indirect;
+            rapt_pkg::ras_action_t ras_action;
             sequential_pc = trace_pc[idx] + XLEN'((trace_inst[idx][1:0] == 2'b11) ? 4 : 2);
+            raw_pnpc = dut.idu.slots[s].pnpc;
+            raw_mismatch = raw_pnpc != trace_npc[idx];
+            actual_taken = trace_npc[idx] != sequential_pc;
+            is_conditional = idu_rnu.slot[s].uop.execute.branch.conditional;
+            is_direct = idu_rnu.slot[s].uop.execute.branch.jump;
+            is_indirect = idu_rnu.slot[s].uop.execute.branch.indirect;
+            ras_action = rapt_pkg::ras_action(idu_rnu.slot[s].uop.inst);
             control = idu_rnu.slot[s].uop.execute.branch.conditional
                 || idu_rnu.slot[s].uop.execute.branch.jump
                 || idu_rnu.slot[s].uop.execute.branch.indirect;
@@ -201,6 +250,49 @@ module tb_frontend_trace;
                 || idu_rnu.slot[s].uop.execute.sys.fence_i
                 || idu_rnu.slot[s].uop.execute.sys.fence;
             mismatch = idu_rnu.slot[s].uop.pnpc != trace_npc[idx];
+            if (raw_pnpc != idu_rnu.slot[s].uop.pnpc) begin
+              bp_decode_repairs++;
+              if (!mismatch) bp_decode_repairs_correct++;
+            end
+            if (is_conditional) begin
+              bp_cond++;
+              if (raw_mismatch) bp_cond_raw_miss++;
+              if (dut.idu.slots[s].auxiliary) begin
+                bp_cond_aux++;
+                if (raw_mismatch) bp_cond_aux_miss++;
+              end else begin
+                bp_cond_primary++;
+                if (raw_mismatch) bp_cond_primary_miss++;
+              end
+              if (trace_pc[idx] + idu_rnu.slot[s].uop.imm == sequential_pc) begin
+                bp_cond_ambiguous++;
+                if (raw_mismatch) bp_cond_ambiguous_miss++;
+              end else if (dut.idu.slots[s].predicted_taken != actual_taken) bp_cond_dir_miss++;
+              else if (raw_mismatch) bp_cond_target_miss++;
+            end else if (is_indirect) begin
+              bp_indirect++;
+              if (raw_mismatch) bp_indirect_raw_miss++;
+              if (ras_action.pop) begin
+                bp_return++;
+                if (raw_mismatch) bp_return_raw_miss++;
+              end
+            end else if (is_direct) begin
+              bp_direct++;
+              if (raw_mismatch) bp_direct_raw_miss++;
+            end else if (raw_pnpc != sequential_pc) bp_raw_noncontrol_steer++;
+            if (bpu_events_fd != 0 && control)
+              $fwrite(
+                  bpu_events_fd,
+                  "%0d,%h,%0d,%0d,%0d,%0d,%0d,%0d\n",
+                  idx,
+                  trace_pc[idx],
+                  is_conditional ? 0 : is_indirect ? (ras_action.pop ? 3 : 2) : 1,
+                  dut.idu.slots[s].auxiliary,
+                  dut.idu.slots[s].predicted_taken,
+                  actual_taken,
+                  raw_mismatch,
+                  mismatch
+              );
             if (control || mismatch || serial) begin
               if ((event_tail + 1) % MaxEvents == event_head)
                 $fatal(1, "feedback event queue overflow");
@@ -262,12 +354,20 @@ module tb_frontend_trace;
       if (did_fetch && fetch_gap > 0) gap_left = fetch_gap;
     end
     if (idx < trace_count) $fatal(1, "FE trace timeout at %0d/%0d", idx, trace_count);
+    if (bpu_events_fd != 0) $fclose(bpu_events_fd);
     $display(
         "PASS: FE trace=%s instructions=%0d cycles=%0d delivered=%0d correct=%0d uops_per_cycle=%0f width_loss=%0f redirects=%0d mismatches=%0d controls=%0d cond_misses=%0d indirect_misses=%0d direct_misses=%0d noncontrol_misses=%0d serial=%0d empty_cycles=%0d gap_cycles=%0d blocked_cycles=%0d",
         trace_path, idx, cycles, delivered, correct, real'(correct) / cycles,
         1.0 - real'(correct) / (cycles * rapt_pkg::DecodeWidth), redirects, mismatches,
         control_count, cond_misses, indirect_misses, direct_misses, noncontrol_misses,
         serial_count, empty_cycles, gap_cycles, blocked_cycles);
+    $display(
+        "BPU: cond=%0d cond_raw_miss=%0d cond_dir_miss=%0d cond_target_miss=%0d cond_ambiguous=%0d cond_ambiguous_miss=%0d cond_primary=%0d cond_primary_miss=%0d cond_aux=%0d cond_aux_miss=%0d direct=%0d direct_raw_miss=%0d indirect=%0d indirect_raw_miss=%0d returns=%0d return_raw_miss=%0d noncontrol_steer=%0d decode_repairs=%0d decode_repairs_correct=%0d feedback_delay=%0d sink_width=%0d fetch_gap=%0d",
+        bp_cond, bp_cond_raw_miss, bp_cond_dir_miss, bp_cond_target_miss, bp_cond_ambiguous,
+        bp_cond_ambiguous_miss, bp_cond_primary, bp_cond_primary_miss, bp_cond_aux,
+        bp_cond_aux_miss, bp_direct, bp_direct_raw_miss, bp_indirect, bp_indirect_raw_miss,
+        bp_return, bp_return_raw_miss, bp_raw_noncontrol_steer, bp_decode_repairs,
+        bp_decode_repairs_correct, feedback_delay, sink_width, fetch_gap);
     $finish;
   end
 endmodule

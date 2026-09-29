@@ -10,8 +10,8 @@
 // port shared by read and write (csb0 low = selected, web0 low = write,
 // web0 high = read).
 //
-// All macros are byte-write-enabled with write_size=8 (one mask bit per
-// 8-bit lane of the data word).
+// Data macros use byte-write enables (write_size=8). The 1024x22 directory
+// macro uses a single full-word write enable (write_size=22).
 
 /* verilator lint_off DECLFILENAME */
 /* verilator lint_off UNUSEDSIGNAL */
@@ -93,6 +93,36 @@ module rapt_openram_1rw_512x32 (
 endmodule
 
 (* blackbox *)
+module rapt_openram_1rw_1024x22 (
+    input wire clk0, csb0, web0,
+    input wire [0:0] wmask0,
+    input wire [9:0] addr0,
+    input wire [21:0] din0,
+    output wire [21:0] dout0
+);
+endmodule
+
+(* blackbox *)
+module rapt_openram_1rw_1024x32 (
+    input wire clk0, csb0, web0,
+    input wire [3:0] wmask0,
+    input wire [9:0] addr0,
+    input wire [31:0] din0,
+    output wire [31:0] dout0
+);
+endmodule
+
+(* blackbox *)
+module rapt_openram_1rw_1024x64 (
+    input wire clk0, csb0, web0,
+    input wire [7:0] wmask0,
+    input wire [9:0] addr0,
+    input wire [63:0] din0,
+    output wire [63:0] dout0
+);
+endmodule
+
+(* blackbox *)
 module rapt_openram_1rw_2x128 (
     input wire clk0, csb0, web0,
     input wire [15:0] wmask0,
@@ -157,6 +187,16 @@ module rapt_openram_1rw_2048x64 (
     input wire clk0, csb0, web0,
     input wire [7:0] wmask0,
     input wire [10:0] addr0,
+    input wire [63:0] din0,
+    output wire [63:0] dout0
+);
+endmodule
+
+(* blackbox *)
+module rapt_openram_1rw_4096x64 (
+    input wire clk0, csb0, web0,
+    input wire [7:0] wmask0,
+    input wire [11:0] addr0,
     input wire [63:0] din0,
     output wire [63:0] dout0
 );

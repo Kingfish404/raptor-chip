@@ -1,3 +1,9 @@
+# Use the same fixed netboot profile from the repository root and fpga/litex.
+# Keep its argument validation and build/load serialization in one place.
+ifneq ($(filter fpga-netboot-%,$(MAKECMDGOALS)),)
+include $(dir $(lastword $(MAKEFILE_LIST)))fpga/litex/mk/netboot-profile.mk
+else
+
 # ============================================================================
 # Environment variables (auto-sourced from env.sh, no manual `source` needed)
 # ============================================================================
@@ -344,13 +350,16 @@ $(AM_KERNELS):
 MAINARGS ?= test ## Benchmark arguments (test/train/ref)
 
 coremark-nemu32: $(AM_KERNELS) build-nemu32 ## Run CoreMark on NEMU (riscv32)
-	@set -o pipefail; $(COREMARK_MAKE) ARCH=riscv32-nemu run ARGS="$(ARGS)" $(call tee_nemu,coremark-nemu32)
+	+@set -o pipefail; $(COREMARK_MAKE) ARCH=riscv32-nemu run ARGS="$(ARGS)" $(call tee_nemu,coremark-nemu32)
 
 microbench-nemu32: $(AM_KERNELS) build-nemu32 ## Run MicroBench on NEMU (riscv32)
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=riscv32-nemu run ARGS="$(ARGS)" mainargs=$(MAINARGS) $(call tee_nemu,microbench-nemu32-$(MAINARGS))
 
+# The generic RV64 NEMU profile treats EBREAK as a guest breakpoint. AM's
+# termination ABI uses EBREAK as a host exit, so use its CoreMark profile.
+coremark-nemu64: NEMU64_DEFCONFIG := riscv64_coremark_defconfig
 coremark-nemu64: $(AM_KERNELS) build-nemu64 ## Run CoreMark on NEMU (riscv64)
-	@set -o pipefail; $(COREMARK_MAKE) ARCH=riscv64-nemu run ARGS="$(ARGS)" $(call tee_nemu,coremark-nemu64)
+	+@set -o pipefail; $(COREMARK_MAKE) ARCH=riscv64-nemu run ARGS="$(ARGS)" $(call tee_nemu,coremark-nemu64)
 
 microbench-nemu64: $(AM_KERNELS) build-nemu64 ## Run MicroBench on NEMU (riscv64)
 	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/microbench ARCH=riscv64-nemu run ARGS="$(ARGS)" mainargs=$(MAINARGS) $(call tee_nemu,microbench-nemu64-$(MAINARGS))
@@ -494,7 +503,7 @@ linux-ticket-spinlock-repro-rv32: build-rv32 repro-tests-build ## Run Linux tick
 COREMARK_MAKE = $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc -f Makefile -f $(RAPTOR_HOME)/verify/benchmark-build.mk
 
 coremark-rv32: $(AM_KERNELS) build-rv32 ## Run CoreMark on NPC
-	@set -o pipefail; $(COREMARK_MAKE) ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=$(MAINARGS) $(call tee_npc,coremark-rv32)
+	+@set -o pipefail; $(COREMARK_MAKE) ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=$(MAINARGS) $(call tee_npc,coremark-rv32)
 	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-rv32.log)
 
 microbench-rv32: $(AM_KERNELS) build-rv32 ## Run MicroBench on NPC
@@ -503,7 +512,7 @@ microbench-rv32: $(AM_KERNELS) build-rv32 ## Run MicroBench on NPC
 # --- RV64 benchmark targets ---
 coremark-rv64: VFLAGS := -DRAPT_RV64
 coremark-rv64: $(AM_KERNELS) build-rv64 ## Run CoreMark on NPC (riscv64)
-	@set -o pipefail; $(COREMARK_MAKE) ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(call tee_npc,coremark-rv64)
+	+@set -o pipefail; $(COREMARK_MAKE) ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(call tee_npc,coremark-rv64)
 	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-rv64.log)
 
 microbench-rv64: VFLAGS := -DRAPT_RV64
@@ -788,7 +797,8 @@ FORMAT_SCOPE := $(strip $(FORMAT_SCOPE))
 ifeq ($(filter $(FORMAT_SCOPE),hdl all),)
 $(error FORMAT_SCOPE must be hdl or all)
 endif
-VERIBLE_FORMAT_SOURCES = $(if $(filter hdl,$(FORMAT_SCOPE)),$(HDL_FORMAT_SOURCES),$(ALL_SV_FORMAT_SOURCES))
+# A removed source remains in the index until staged; format existing files only.
+VERIBLE_FORMAT_SOURCES = $(wildcard $(if $(filter hdl,$(FORMAT_SCOPE)),$(HDL_FORMAT_SOURCES),$(ALL_SV_FORMAT_SOURCES)))
 format: ## Format tracked HDL/SystemVerilog (FORMAT_SCOPE=hdl|all)
 format-check: ## Check formatting without changing files (FORMAT_SCOPE=hdl|all)
 format format-check:
@@ -933,19 +943,21 @@ verify-light: ## Run lightweight fuzz and signature tests
 REGRESSION_JOBS ?= 3
 REGRESSION_TOOL_JOBS ?= 4
 REGRESSION_TIMEOUT ?= 14400
+REGRESSION_STA_PRESET ?= small
 REGRESSION_BOARD ?= mlk_cu08_ku15p
 REGRESSION_XLENS ?= 32 64
 REGRESSION_SUITES ?= format coremark sta fpga
 REGRESSION_ITERATIONS ?= 2
 REGRESSION_OUTPUT ?=
 REGRESSION_OPTIONS = --preset "$(RAPT_CONFIG)" --board "$(REGRESSION_BOARD)" \
+	--sta-preset "$(REGRESSION_STA_PRESET)" \
 	--platform "$(strip $(STA_PLATFORM))" --clock-mhz "$(strip $(CLK_FREQ_MHZ))" \
 	--jobs "$(REGRESSION_JOBS)" --tool-jobs "$(REGRESSION_TOOL_JOBS)" \
 	--timeout "$(REGRESSION_TIMEOUT)" --iterations "$(REGRESSION_ITERATIONS)" \
 	--xlens $(REGRESSION_XLENS) --suites $(REGRESSION_SUITES) \
 	$(if $(REGRESSION_OUTPUT),--output "$(REGRESSION_OUTPUT)",)
 
-regression: ## Format, then run CoreMark/STA/FPGA lanes with isolated logs and a JSON summary
+regression: ## Format, then run CoreMark and serialized FPGA/STA lanes with logs and a JSON summary
 	python3 $(VERIFY_HOME)/scripts/regression.py $(REGRESSION_OPTIONS)
 
 regression-plan: ## Print regression commands and concurrency without running any submake
@@ -1244,3 +1256,4 @@ ysyxsoc-setup: ## Fetch and generate the pinned, unmodified upstream ysyxSoC
 	verify-verilator verilog ysyxsoc-setup
 
 endif # Guard: root-only targets
+endif # Fixed netboot profile

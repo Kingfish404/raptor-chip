@@ -1,5 +1,6 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
+`include "tb_l1d_unused_release_ports.svh"
 module tb_mshr_cache;
   localparam int XLEN  = `RAPT_XLEN;
   localparam int Words = `RAPT_CACHE_LINE_BYTES / (XLEN / 8);
@@ -24,6 +25,7 @@ module tb_mshr_cache;
       .writeback_error(),
       .writeback_idle(),
       .writeback_drain(1'b0),
+      `TB_L1D_UNUSED_RELEASE_PORTS,
       .*
   );
   `include "tb_l1d_defaults.svh"

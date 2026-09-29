@@ -358,12 +358,17 @@ interface cmu_bcast_if #(
 
   logic fence_time;
   logic fence_i;
-  // CBO block within the 4 KiB page; translation preserves these VA bits.
+  // Physical cache-block address after translation and permission checks.
   logic cbo_inval;
-  logic [11:6] cbo_block;
+  logic [XLEN-1:6] cbo_block;
 
   logic flush_pipe;
   logic flush_redirect;
+  // Set with flush_redirect when the retiring instruction did not change
+  // fetch translation or privilege. Fetch may keep the prefetch started on
+  // flush_pipe. Leave this clear for traps, privilege returns, fence.i,
+  // sfence.vma, and satp/PMP writes; those redirects still cancel fetch.
+  logic fetch_context_stable;
   logic sys_resume;
   logic time_trap;
 
@@ -377,13 +382,13 @@ interface cmu_bcast_if #(
 
   modport in(
       input rpc, cpc, ben, jen, jren, btaken, atomic_retired, call, ret, rvc,
-      input fence_time, fence_i, cbo_inval, cbo_block, flush_pipe, flush_redirect, sys_resume, time_trap,
+      input fence_time, fence_i, cbo_inval, cbo_block, flush_pipe, flush_redirect, fetch_context_stable, sys_resume, time_trap,
       input redirect_pc,
       input rob_head
   );
   modport out(
       output rpc, cpc, ben, jen, jren, btaken, atomic_retired, call, ret, rvc,
-      output fence_time, fence_i, cbo_inval, cbo_block, flush_pipe, flush_redirect, sys_resume, time_trap,
+      output fence_time, fence_i, cbo_inval, cbo_block, flush_pipe, flush_redirect, fetch_context_stable, sys_resume, time_trap,
       output redirect_pc,
       output rob_head
   );

@@ -65,10 +65,17 @@ module tb_ifu_stream_events;
     ifu_l1i.inst_n2 = 32'h00010001;
     ifu_l1i.inst_n1_valid = 1;
     ifu_l1i.inst_n2_valid = 1;
+`ifdef RAPT_FETCH_WIDE
+    ifu_l1i.inst_n3 = '0;
+    ifu_l1i.inst_n4 = '0;
+    ifu_l1i.inst_n3_valid = 0;
+    ifu_l1i.inst_n4_valid = 0;
+`endif
     repeat (3) tick();
     reset = 0;
     accept_packet();
-    assert (dut.held_count == 1 && dut.pmu_fetch_response_consume && dut.pmu_fetch_first_control)
+    assert (dut.held_count == (`RAPT_FETCH_BRANCH_FOLLOWER ? 4 : 1)
+        && dut.pmu_fetch_response_consume && dut.pmu_fetch_first_control)
     else $fatal(1, "registered fetch/control event was lost after PC advanced");
     assert (history_events == 1 && !last_history_taken && !ifu_idu.slot[0].predicted_taken)
     else $fatal(1, "not-taken branch/BTB miss must enter history once");
@@ -80,7 +87,7 @@ module tb_ifu_stream_events;
     ifu_l1i.valid = 0;
     ifu_idu.ready = '{default: 1};
     tick();
-    assert (dut.pmu_fetch_slots == 1 && dut.pmu_fetch_fire)
+    assert (dut.pmu_fetch_slots == (`RAPT_FETCH_BRANCH_FOLLOWER ? 4 : 1) && dut.pmu_fetch_fire)
     else $fatal(1, "held instruction delivery not counted");
     // Four compressed instructions; consume a two-instruction prefix and
     // verify suffix PCs and counters survive the partial handshake.

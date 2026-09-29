@@ -22,6 +22,14 @@ SYNTH_SHARE ?= 1
 ifeq ($(filter $(SYNTH_SHARE),0 1),)
 $(error SYNTH_SHARE must be 0 or 1)
 endif
+SYNTH_GENERIC_ABC ?= 1
+ifeq ($(filter $(SYNTH_GENERIC_ABC),0 1),)
+$(error SYNTH_GENERIC_ABC must be 0 or 1)
+endif
+SYNTH_ABC_SCRIPT ?= default
+ifeq ($(filter $(SYNTH_ABC_SCRIPT),default fast),)
+$(error SYNTH_ABC_SCRIPT must be default or fast)
+endif
 SRAM_PLATFORM ?= sky130
 PYTHON ?= python3
 TIME ?= /usr/bin/time
@@ -219,13 +227,15 @@ $(SYNTH_CONFIG_STAMP): FORCE
 		'$(SRAM_MODE)' '$(SRAM_PLATFORM)' \
 		> $@.tmp
 	@printf 'synth_share=%s\n' '$(SYNTH_SHARE)' >> $@.tmp
+	@printf 'synth_generic_abc=%s\n' '$(SYNTH_GENERIC_ABC)' >> $@.tmp
+	@printf 'synth_abc_script=%s\n' '$(SYNTH_ABC_SCRIPT)' >> $@.tmp
 	@if ! cmp -s $@.tmp $@; then mv $@.tmp $@; else rm -f $@.tmp; fi
 
-$(NETLIST): $(HDL_SV) $(HDL_HEADERS) scripts/synth.tcl $(LSPD_DIR)/modules.mk Makefile $(SYNTH_CONFIG_STAMP) $(SRAM_PREREQUISITES)
+$(NETLIST): $(HDL_SV) $(HDL_HEADERS) scripts/synth.tcl scripts/abc_fast.script $(LSPD_DIR)/modules.mk Makefile $(SYNTH_CONFIG_STAMP) $(SRAM_PREREQUISITES)
 	@mkdir -p $(BUILD_DIR)
 	@echo "[syn] module=$(MODULE) top=$(TOP) pdk=$(PDK) config=$(RAPT_CONFIG) target=$(CLK_FREQ_MHZ)MHz sram=$(SRAM_MODE)"
 	@printf 'mode=%s\nmodel=%s\nplatform=%s\n' '$(SRAM_MODE)' '$(if $(filter macro,$(SRAM_MODE)),abstract-liberty,logic-mapped)' '$(if $(filter macro,$(SRAM_MODE)),$(SRAM_PLATFORM),none)' > $(BUILD_DIR)/sram_model.txt
-	@sha256sum $(SYNTH_SV_FILES) $(HDL_HEADERS) $(abspath scripts/synth.tcl) \
+	@sha256sum $(SYNTH_SV_FILES) $(HDL_HEADERS) $(abspath scripts/synth.tcl) $(abspath scripts/abc_fast.script) \
 		$(LSPD_DIR)/modules.mk $(abspath Makefile) \
 		> $(BUILD_DIR)/source_manifest.sha256
 	@YS_TOP='$(TOP)' \
@@ -237,6 +247,8 @@ $(NETLIST): $(HDL_SV) $(HDL_HEADERS) scripts/synth.tcl $(LSPD_DIR)/modules.mk Ma
 	 YS_FOUNDRY_PATH='$(FOUNDRY_PATH)' \
 	 YS_PERIOD_NS='$(PERIOD_NS)' \
 	 YS_SYNTH_SHARE='$(SYNTH_SHARE)' \
+	 YS_SYNTH_GENERIC_ABC='$(SYNTH_GENERIC_ABC)' \
+	 YS_SYNTH_ABC_SCRIPT='$(SYNTH_ABC_SCRIPT)' \
 	 $(TIME) -o '$(BUILD_DIR)/synth.profile' \
 	 	-f 'status=%x\nelapsed_sec=%e\nuser_sec=%U\nsystem_sec=%S\nmax_rss_kb=%M' \
 	 	$(YOSYS) -m slang -p 'tcl scripts/synth.tcl' 2>&1 | tee $(BUILD_DIR)/synth.log
@@ -246,10 +258,10 @@ $(NETLIST): $(HDL_SV) $(HDL_HEADERS) scripts/synth.tcl $(LSPD_DIR)/modules.mk Ma
 
 sta: $(NETLIST) ## Run static timing and vectorless power analysis
 	@echo "[sta] module=$(MODULE) pdk=$(PDK) period=$(PERIOD_NS)ns"
-	@printf 'module=%s\ntop=%s\npdk=%s\nconfig=%s\nclock_mhz=%s\nperiod_ns=%s\nio_delay_frac=%s\noutput_load_ff=%s\nextra_defines=%s\nsram_mode=%s\nsram_platform=%s\nsynth_share=%s\n' \
+	@printf 'module=%s\ntop=%s\npdk=%s\nconfig=%s\nclock_mhz=%s\nperiod_ns=%s\nio_delay_frac=%s\noutput_load_ff=%s\nextra_defines=%s\nsram_mode=%s\nsram_platform=%s\nsynth_share=%s\nsynth_generic_abc=%s\nsynth_abc_script=%s\n' \
 		'$(MODULE)' '$(TOP)' '$(PDK)' '$(RAPT_CONFIG)' '$(CLK_FREQ_MHZ)' \
 		'$(PERIOD_NS)' '$(IO_DELAY_FRAC)' '$(OUTPUT_LOAD_FF)' '$(EXTRA_DEFINES)' \
-		'$(SRAM_MODE)' '$(SRAM_PLATFORM)' '$(SYNTH_SHARE)' \
+		'$(SRAM_MODE)' '$(SRAM_PLATFORM)' '$(SYNTH_SHARE)' '$(SYNTH_GENERIC_ABC)' '$(SYNTH_ABC_SCRIPT)' \
 		> $(BUILD_DIR)/run_config.txt
 	@STA_TOP='$(TOP)' \
 	 STA_NETLIST='$(NETLIST)' \

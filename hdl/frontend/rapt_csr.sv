@@ -112,6 +112,15 @@ module rapt_csr #(
 
   logic [1:0] priv_mode;
   logic [XLEN-1:0] csr[64];
+  // mepc/sepc must be halfword aligned with the C extension. Store only the
+  // implemented address bits and restore bit 0 at CSR/interface boundaries.
+  logic [XLEN-1:1] mepc_half_q, sepc_half_q;
+  // Difftest observes these full-width values through Verilator. Keep
+  // them materialized in the generated model, not only as optimized aliases.
+  logic [XLEN-1:0] mepc_value /* verilator public_flat_rd */;
+  logic [XLEN-1:0] sepc_value /* verilator public_flat_rd */;
+  assign mepc_value = {mepc_half_q, 1'b0};
+  assign sepc_value = {sepc_half_q, 1'b0};
   logic mstatus_mie;
   csr_t waddr_reg, raddr_reg;
   logic [R_W-1:0] raddr;
@@ -323,7 +332,7 @@ module rapt_csr #(
       SENVCFG:   exu_csr.rdata = csr[SENVCFG];
       MCOUNTE:   exu_csr.rdata = csr[MCOUNTE];
       SSCRATC:   exu_csr.rdata = csr[SSCRATC];
-      SEPC___:   exu_csr.rdata = csr[SEPC___];
+      SEPC___:   exu_csr.rdata = sepc_value;
       SCAUSE_:   exu_csr.rdata = csr[SCAUSE_];
       STVAL__:   exu_csr.rdata = csr[STVAL__];
       SIP____:   exu_csr.rdata = mip_eff & csr[MIDELEG] & XLEN'(`RAPT_CSR_SIP_RMASK);
@@ -340,7 +349,7 @@ module rapt_csr #(
       MENVCFGH:  exu_csr.rdata = csr[MENVCFGH];
       MSTATUSH:  exu_csr.rdata = csr[MSTATUSH];
       MSCRATCH:  exu_csr.rdata = csr[MSCRATCH];
-      MEPC___:   exu_csr.rdata = csr[MEPC___];
+      MEPC___:   exu_csr.rdata = mepc_value;
       MCAUSE_:   exu_csr.rdata = csr[MCAUSE_];
       MTVAL__:   exu_csr.rdata = csr[MTVAL__];
       MIP____:   exu_csr.rdata = mip_eff;
@@ -386,8 +395,8 @@ module rapt_csr #(
     if (raddr == `RAPT_CSR_MBERR_ADDR) exu_csr.rdata = bus_error_addr;
   end
 
-  assign exu_csr.mepc = csr[MEPC___];
-  assign exu_csr.sepc = csr[SEPC___];
+  assign exu_csr.mepc = mepc_value;
+  assign exu_csr.sepc = sepc_value;
   assign exu_csr.mtvec = csr[MTVEC__];
 
   assign mstatus_mie = csr[MSTATUS][`RAPT_CSR_MSTATUS_MIE_];
@@ -651,7 +660,7 @@ module rapt_csr #(
     if (reset) begin
       priv_mode <= `RAPT_PRIV_M;
       csr[MCAUSE_] <= RESET_VAL;
-      csr[MEPC___] <= RESET_VAL;
+      mepc_half_q <= RESET_VAL[XLEN-1:1];
       csr[MTVEC__] <= RESET_VAL;
       csr[MSTATUS] <= RESET_VAL | `RAPT_CSR_MSTATUS_HW;
       csr[SSTATUS] <= `RAPT_CSR_SSTATUS_HW;
@@ -659,7 +668,7 @@ module rapt_csr #(
       csr[SIE____] <= '0;
       csr[STVEC__] <= '0;
       csr[SSCRATC] <= '0;
-      csr[SEPC___] <= '0;
+      sepc_half_q <= '0;
       csr[SCAUSE_] <= '0;
       csr[STVAL__] <= '0;
       csr[SIP____] <= '0;
@@ -816,7 +825,8 @@ module rapt_csr #(
             // WARL: mepc/sepc bit [0] is always 0 per RISC-V priv spec.
             // With C-ext, bit [1] is writable (2-byte alignment). Without C,
             // hardware may also clear bit [1] but keeping it is spec-legal.
-            csr[waddr_reg] <= {rou_csr.csr_wdata[XLEN-1:1], 1'b0};
+            if (waddr_reg == MEPC___) mepc_half_q <= rou_csr.csr_wdata[XLEN-1:1];
+            else sepc_half_q <= rou_csr.csr_wdata[XLEN-1:1];
           end else if (waddr_reg == SATP___) begin
             // WARL on satp.MODE: per RISC-V Priv Sec.10.6.1, "If satp is written
             // with an unsupported MODE, the entire write has no effect; no
@@ -845,7 +855,7 @@ module rapt_csr #(
         if (rou_csr.ecall) begin
           if (ecall_deleg) begin
             // Delegate to S-mode
-            csr[SEPC___] <= rou_csr.pc;
+            sepc_half_q <= rou_csr.pc[XLEN-1:1];
             csr[SCAUSE_] <= priv_mode == `RAPT_PRIV_S ? `RAPT_CAUSE_ECALL_S : `RAPT_CAUSE_ECALL_U;
             csr[STVAL__] <= 0;
             csr[MSTATUS][`RAPT_CSR_MSTATUS_SPIE] <= csr[MSTATUS][`RAPT_CSR_MSTATUS_SIE_];
@@ -865,7 +875,7 @@ module rapt_csr #(
             csr[MSTATUS][`RAPT_CSR_MSTATUS_MPP_] <= priv_mode;
             csr[MSTATUS][`RAPT_CSR_MSTATUS_MPIE] <= mstatus_mie;
             csr[MSTATUS][`RAPT_CSR_MSTATUS_MIE_] <= 1'b0;
-            csr[MEPC___] <= rou_csr.pc;
+            mepc_half_q <= rou_csr.pc[XLEN-1:1];
             csr[MTVAL__] <= 0;
           end
         end else if (rou_csr.mret) begin
@@ -886,7 +896,7 @@ module rapt_csr #(
         end else if (rou_csr.ebreak) begin
           if (ebreak_deleg) begin
             // Delegate to S-mode
-            csr[SEPC___] <= rou_csr.pc;
+            sepc_half_q <= rou_csr.pc[XLEN-1:1];
             csr[SCAUSE_] <= `RAPT_CAUSE_BREAKPOINT;
             csr[STVAL__] <= rou_csr.pc;
             csr[MSTATUS][`RAPT_CSR_MSTATUS_SPIE] <= csr[MSTATUS][`RAPT_CSR_MSTATUS_SIE_];
@@ -903,13 +913,13 @@ module rapt_csr #(
             csr[MSTATUS][`RAPT_CSR_MSTATUS_MPP_] <= priv_mode;
             csr[MSTATUS][`RAPT_CSR_MSTATUS_MPIE] <= mstatus_mie;
             csr[MSTATUS][`RAPT_CSR_MSTATUS_MIE_] <= 1'b0;
-            csr[MEPC___] <= rou_csr.pc;
+            mepc_half_q <= rou_csr.pc[XLEN-1:1];
             csr[MTVAL__] <= rou_csr.pc;
           end
         end else if (rou_csr.trap) begin
           if (smode_handle) begin
             csr[STVAL__] <= rou_csr.tval;
-            csr[SEPC___] <= rou_csr.pc;
+            sepc_half_q <= rou_csr.pc[XLEN-1:1];
             csr[SCAUSE_] <= rou_csr.cause;
 
             csr[MSTATUS][`RAPT_CSR_MSTATUS_SIE_] <= 'h0;
@@ -929,7 +939,7 @@ module rapt_csr #(
             csr[MSTATUS][`RAPT_CSR_MSTATUS_MPIE] <= mstatus_mie;
             csr[MSTATUS][`RAPT_CSR_MSTATUS_MIE_] <= 1'b0;
 
-            csr[MEPC___] <= rou_csr.pc;
+            mepc_half_q <= rou_csr.pc[XLEN-1:1];
             csr[MTVAL__] <= rou_csr.tval;
             priv_mode <= `RAPT_PRIV_M;
           end

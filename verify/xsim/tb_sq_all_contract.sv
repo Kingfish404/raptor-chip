@@ -339,13 +339,15 @@ module tb_sq_forward_ports;
   logic alloc_fp64 = 0;
   logic [7:0] full_store_mask = `RAPT_SW_WSTRB;
   logic mmu_enabled = 0, alloc_valid = 0;
+  logic [2:0] narrow_allowed = '1;
   logic [Xlen-1:0] alloc_addr = '0;
   logic [4:0] alloc_alu = '0;
   wire [2:0] conflict, forward_valid;
   wire [Xlen-1:0] forward_data[3];
   rapt_sq_forward #(
       .Entries(4),
-      .ReadPorts(3)
+      .ReadPorts(3),
+      .NarrowForward(0)
   ) dut (
       .*
   );

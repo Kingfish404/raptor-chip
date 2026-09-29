@@ -93,7 +93,7 @@ module rapt_backend #(
   rou_csr_if rou_csr ();
 
   dpu_iq_if disp_alq ();
-  dpu_iq_if #(.RS_SIZE(8)) disp_brq ();
+  dpu_iq_if #(.RS_SIZE(rapt_pkg::BranchQueueEntries)) disp_brq ();
   dpu_iq_if #(.RS_SIZE(4)) disp_mdq ();
   dpu_iq_if #(.RS_SIZE(1)) disp_fpq ();
   dpu_ioq_if disp_ioq ();
@@ -150,25 +150,47 @@ module rapt_backend #(
       always_comb begin
         completion_accepted[integer_port] = wb_integer_raw[integer_port];
         completion_accepted[integer_port].valid = wb_integer_raw[integer_port].valid
-            && completion_candidate_accept[CandidateIntegerBase+integer_port];
+            && g_completion_guard[CandidateIntegerBase+integer_port].accepted;
       end
     end
   end
   always_comb begin
     completion_accepted[IntegerIssuePorts] = wb_branch;
     completion_accepted[IntegerIssuePorts].valid = wb_branch.valid
-        && completion_candidate_accept[CandidateBranch];
+        && g_completion_guard[CandidateBranch].accepted;
   end
   always_comb begin
     completion_accepted[IntegerIssuePorts+1] = exu_ioq_bcast;
     completion_accepted[IntegerIssuePorts+1].valid = exu_ioq_bcast.valid
-        && completion_candidate_accept[CandidateMemory];
+        && g_completion_guard[CandidateMemory].accepted;
   end
   always_comb begin
     completion_accepted[IntegerIssuePorts+2] = exu_wb_mul;
     completion_accepted[IntegerIssuePorts+2].valid = exu_wb_mul.valid
-        && completion_candidate_accept[CandidateMul];
+        && g_completion_guard[CandidateMul].accepted;
   end
+
+  // Dedicated external wake view: no branch producer is on this input.
+  rapt_pkg::completion_t branch_wake[rapt_pkg::CompletionPorts];
+  rapt_pkg::completion_t memory_wake;
+  always_comb begin
+    memory_wake = exu_ioq_bcast;
+    memory_wake.valid = exu_ioq_bcast.valid
+        && g_completion_guard[CandidateMemory].accepted;
+  end
+  for (genvar p = 0; p < IntegerIssuePorts; p++) begin : g_branch_wake
+    if (p == IntegerSystemPort) assign branch_wake[p] = wb_integer_shared;
+    else begin
+      always_comb begin
+        branch_wake[p] = wb_integer_raw[p];
+        branch_wake[p].valid = wb_integer_raw[p].valid
+            && g_completion_guard[CandidateIntegerBase+p].accepted;
+      end
+    end
+  end
+  assign branch_wake[IntegerIssuePorts] = '0;
+  assign branch_wake[IntegerIssuePorts+1] = memory_wake;
+  assign branch_wake[IntegerIssuePorts+2] = '0;
 
   load_fast_if load_fast_raw ();
   load_fast_if load_fast_accepted ();
@@ -183,9 +205,9 @@ module rapt_backend #(
     fast_load_candidate.rd = load_fast_raw.rd;
 
     fast_load_confirm_reject = load_fast_raw.confirmed
-        && !completion_candidate_accept[CandidateMemory];
+        && !g_completion_guard[CandidateMemory].accepted;
     load_fast_accepted.valid = (load_fast_raw.valid
-        && (load_fast_raw.rebusy || completion_candidate_accept[CandidateFastLoad]))
+        && (load_fast_raw.rebusy || g_completion_guard[CandidateFastLoad].accepted))
         || fast_load_confirm_reject;
     load_fast_accepted.rebusy = load_fast_raw.rebusy || fast_load_confirm_reject;
     load_fast_accepted.prd = fast_load_confirm_reject ? load_fast_raw.confirmed_prd
@@ -197,20 +219,18 @@ module rapt_backend #(
     load_fast_accepted.rd = fast_load_confirm_reject ? load_fast_raw.confirmed_rd
         : load_fast_raw.rd;
     load_fast_accepted.confirmed = load_fast_raw.confirmed
-        && completion_candidate_accept[CandidateMemory];
+        && g_completion_guard[CandidateMemory].accepted;
     load_fast_accepted.confirmed_prd = load_fast_raw.confirmed_prd;
     load_fast_accepted.confirmed_dest = load_fast_raw.confirmed_dest;
     load_fast_accepted.confirmed_generation = load_fast_raw.confirmed_generation;
     load_fast_accepted.confirmed_rd = load_fast_raw.confirmed_rd;
     load_fast_accepted.result = load_fast_raw.result;
   end
-  // Integer execute already registers the issue packet. Memory completion is
-  // the IOQ broadcast the cycle after L1D `rready`. Branch compare is
-  // combinational from the already-registered BRQ issue packet; a fabric
-  // register here delayed recovery and ROB complete by a cycle. Mul/div stay
-  // registered because that FU is already pipelined.
+  // Simple ALU and branch results come from stored IQ operands and selection.
+  // Memory may broadcast its accepted response in the same cycle. MUL/DIV
+  // already registers its result; an optional bypass avoids a second register.
   for (genvar p = 0; p < rapt_pkg::CompletionPorts; p++) begin : g_completion_stage
-    if (p != IntegerIssuePorts + 2) begin : g_same_cycle
+    if (p != IntegerIssuePorts + 2 || `RAPT_MDQ_LIVE_WAKE) begin : g_same_cycle
       assign completion[p] = completion_accepted[p];
     end else begin : g_registered
       rapt_completion_stage stage (
@@ -270,6 +290,8 @@ module rapt_backend #(
     $error("Invalid rapt_core configuration");
   end
   for (genvar p = 0; p < CompletionCandidates; p++) begin : g_completion_guard
+    logic accepted;
+    assign completion_candidate_accept[p] = accepted;
     rapt_completion_guard #(
         .Entries(rapt_pkg::CoreConfig.rob_entries),
         .IndexBits(rapt_pkg::ROBIndexBits),
@@ -288,7 +310,7 @@ module rapt_backend #(
         .owner_generation(completion_owner.generation),
         .owner_prd(completion_owner.prd),
         .owner_rd(completion_owner.rd),
-        .accept(completion_candidate_accept[p]),
+        .accept(accepted),
         .identity_match(completion_candidate_identity_match[p]),
         .payload_match(completion_candidate_payload_match[p])
     );
@@ -524,6 +546,8 @@ module rapt_backend #(
   );
 
   rapt_ieu ieu (
+      .branch_wake(branch_wake),
+      .memory_wake(memory_wake),
       .cancel_valid(recovery.redirect_valid),
       .cancel_head(recovery.head),
       .cancel_owner(recovery.owner),
@@ -563,7 +587,7 @@ module rapt_backend #(
       .load_fast(load_fast),
       .fpr(fpr),
       .wb_fpu(wb_fpu),
-      .wb_accept(completion_candidate_accept[CandidateFpu]),
+      .wb_accept(g_completion_guard[CandidateFpu].accepted),
       .completion_ready(fpu_completion_ready),
       .issue_enable(fpu_issue_enable)
   );
@@ -580,9 +604,9 @@ module rapt_backend #(
       .fpu_issue_enable(fpu_issue_enable),
       .wb_integer_system_raw(wb_integer_raw[IntegerSystemPort]),
       .wb_fpu(wb_fpu),
-      .wb_integer_system_accept(completion_candidate_accept[CandidateIntegerBase
-          +IntegerSystemPort]),
-      .wb_fpu_accept(completion_candidate_accept[CandidateFpu]),
+      .wb_integer_system_accept(g_completion_guard[CandidateIntegerBase
+          +IntegerSystemPort].accepted),
+      .wb_fpu_accept(g_completion_guard[CandidateFpu].accepted),
       .wb_shared(wb_integer_shared),
       .integer_system_issue_enable(integer_system_issue_enable)
   );
@@ -635,7 +659,7 @@ module rapt_backend #(
       .disp_ioq(disp_ioq),
 
       .exu_ioq_bcast(exu_ioq_bcast),
-      .wb_accept(completion_candidate_accept[CandidateMemory]),
+      .wb_accept(g_completion_guard[CandidateMemory].accepted),
       .rou_lsu(rou_lsu),
       .csr_bcast(csr_bcast),
       .pmp_update(pmp_update),

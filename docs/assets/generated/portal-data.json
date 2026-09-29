@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-25T09:25:53Z",
+  "generated_at": "2026-09-29T09:26:49Z",
   "sources": {
     "rtl": "hdl/",
     "config": "hdl/configs/default/rapt_config.svh",
@@ -9,6 +9,7 @@
   "config": {
     "preset": "hdl/configs/default/rapt_config.svh",
     "macros": {
+      "RAPT_ALQ_LOAD_WAKE": "0",
       "RAPT_ALU_ADD_": "'b00000",
       "RAPT_ALU_ADD_UW": "'b111101",
       "RAPT_ALU_ANDN": "'b100011",
@@ -86,8 +87,10 @@
       "RAPT_ATO_SC__": "'b00001",
       "RAPT_ATO_SWAP": "'b00010",
       "RAPT_ATO_XOR_": "'b00100",
+      "RAPT_BPU_AUX_TAGE": "0",
       "RAPT_BPU_DIRP_TAGE": "1",
       "RAPT_BRANCH_CHECKPOINTS": "16",
+      "RAPT_BRQ_CDB_WAKE": "0",
       "RAPT_BTB_SIZE": "128",
       "RAPT_BTB_WAYS": "2",
       "RAPT_BUS_ERROR_IRQ": "16",
@@ -242,6 +245,7 @@
       "RAPT_F5_AMO_LR": "5'b00010",
       "RAPT_F5_AMO_SC": "5'b00011",
       "RAPT_F7_SFENCE_VMA": "7'b0001001",
+      "RAPT_FETCH_BRANCH_FOLLOWER": "0",
       "RAPT_FETCH_LOOKAHEAD": "1",
       "RAPT_FETCH_RESPONSE_STAGE": "0",
       "RAPT_FPGA_DSP": "0",
@@ -250,8 +254,16 @@
       "RAPT_INST_WFI": "32'h10500073",
       "RAPT_INTEGER_ISSUE_PORTS": "2",
       "RAPT_INTEGER_SYSTEM_PORT": "0",
+      "RAPT_IOQ_EARLY_LOAD_BCAST": "1",
+      "RAPT_IOQ_EARLY_LOAD_STORES": "1",
       "RAPT_IOQ_FAST_LOAD_NEXT_HEAD": "0",
+      "RAPT_IOQ_FORWARD_REQUEST": "0",
+      "RAPT_IOQ_LIVE_EARLY_BCAST": "1",
+      "RAPT_IOQ_LOAD_RESPONSE_STAGE": "0",
       "RAPT_IOQ_SIZE": "8",
+      "RAPT_IOQ_STORE_PRECHECK": "0",
+      "RAPT_IOQ_WAKE_NEXT_B_REQUEST": "1",
+      "RAPT_IOQ_WAKE_NEXT_REQUEST": "1",
       "RAPT_IQ_RECLAIM_ON_ISSUE": "1",
       "RAPT_ISSUE_REBALANCE": "0",
       "RAPT_ITLB_ENTRIES": "16",
@@ -259,6 +271,7 @@
       "RAPT_L1D_LEN": "6",
       "RAPT_L1D_MSHRS": "2",
       "RAPT_L1D_N_WAYS": "4",
+      "RAPT_L1D_WRITEBACK": "0",
       "RAPT_L1I_LEN": "6",
       "RAPT_L1I_N_WAYS": "4",
       "RAPT_L1I_REFILL_WORDS": "8",
@@ -266,6 +279,7 @@
       "RAPT_L2_N_WAYS": "1",
       "RAPT_LAMBDA": "1",
       "RAPT_LSU_HUM": "1",
+      "RAPT_MDQ_LIVE_WAKE": "0",
       "RAPT_MISA": "'h4014112f",
       "RAPT_M_EXTENSION": "'h1",
       "RAPT_M_FAST": "'h1",
@@ -323,16 +337,20 @@
       "RAPT_ROB_DISPATCH_BUFFERED": "1",
       "RAPT_ROB_GENERATION_BITS": "4",
       "RAPT_ROB_SIZE": "32",
+      "RAPT_ROU_STORE_FOLLOWER": "1",
       "RAPT_RSB_SIZE": "4",
       "RAPT_RS_SIZE": "8",
       "RAPT_SB_WSTRB": "'b00001",
       "RAPT_SD_WSTRB": "'b11111",
       "RAPT_SH_WSTRB": "'b00011",
       "RAPT_SIGN_EXTEND": "1",
+      "RAPT_SQ_NARROW_FORWARD": "0",
       "RAPT_SQ_SIZE": "16",
-      "RAPT_STEER_SCAN_ENTRIES": "`RAPT_ROB_SIZE",
+      "RAPT_STEER_SCAN_ENTRIES": "((`RAPT_ROB_SIZE < 16) ? `RAPT_ROB_SIZE : 16)",
       "RAPT_SVH": "1",
       "RAPT_SW_WSTRB": "'b01111",
+      "RAPT_TAGE_BIM_BITS": "8",
+      "RAPT_TAGE_INDEX_BITS": "7",
       "RAPT_TVEC_MODE_DIRECT": "2'b00",
       "RAPT_TVEC_MODE_VECTORED": "2'b01",
       "RAPT_WSTRB_SB": "'b00000001",
@@ -362,7 +380,12 @@
       "itlb_entries": 16,
       "dtlb_entries": 16,
       "branch_checkpoints": 16,
-      "steer_scan_entries": 4,
+      "steer_scan_entries": 16,
+      "rnq_entries": 8,
+      "uoq_entries": 8,
+      "operand_spill_entries": 16,
+      "store_follower": 1,
+      "load_response_stage": 0,
       "cache_line_bytes": 64,
       "l1i_kib": 16,
       "l1d_kib": 16,
@@ -372,7 +395,9 @@
       "dirp": "TAGE",
       "pmp_usable": 8,
       "pmp_csr_slots": 16,
-      "fetch_response_stage": 1,
+      "fetch_response_stage": 0,
+      "iq_reclaim_on_issue": 1,
+      "l1d_mshrs": 2,
       "m_fast": 1,
       "fpq_entries": 1,
       "brq_entries": 8,
@@ -380,8 +405,8 @@
     },
     "sources": {
       "brq_entries": {
-        "file": "hdl/backend/ieu/rapt_ieu.sv",
-        "parameter": "BRQ_SIZE"
+        "file": "hdl/rapt_pkg.sv",
+        "parameter": "BranchQueueEntries (rapt_ieu.BRQ_SIZE)"
       },
       "mdq_entries": {
         "file": "hdl/backend/ieu/rapt_ieu.sv",
@@ -490,6 +515,67 @@
       "instances": []
     },
     {
+      "id": "rapt_fpu_fma",
+      "file": "hdl/backend/feu/fpu/rapt_fpu_fma.sv",
+      "domain": "feu",
+      "stage": null,
+      "summary": "A technology-independent parallel-prefix adder prevents wide FMA sums from degrading into a linear ripple-carry chain in standard-cell synthesis.  The prefix network has O(log2(WIDTH)) logic depth and intentionally drops carry out, matching SystemVerilog's fixed-width addition se",
+      "params": {},
+      "instances": [
+        {
+          "type": "rapt_fpu_fma_pipeline",
+          "name": "u_pipeline",
+          "ports": [
+            "clock",
+            "reset",
+            "flush",
+            "valid",
+            "ready",
+            "op",
+            "operand_a",
+            "operand_b",
+            "operand_c",
+            "rounding_mode",
+            "result",
+            "flags",
+            "result_valid",
+            "product_a",
+            "product_b",
+            "product",
+            "product_valid"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rapt_fpu_fma_pipeline",
+      "file": "hdl/backend/feu/fpu/rapt_fpu_fma.sv",
+      "domain": "feu",
+      "stage": null,
+      "summary": "A technology-independent parallel-prefix adder prevents wide FMA sums from degrading into a linear ripple-carry chain in standard-cell synthesis.  The prefix network has O(log2(WIDTH)) logic depth and intentionally drops carry out, matching SystemVerilog's fixed-width addition se",
+      "params": {},
+      "instances": [
+        {
+          "type": "rapt_fpu_prefix_adder",
+          "name": "u_total_adder",
+          "ports": [
+            "lhs",
+            "rhs",
+            "sum"
+          ]
+        },
+        {
+          "type": "rapt_fpu_prefix_adder",
+          "name": "u_magnitude_adder",
+          "ports": [
+            "lhs",
+            "rhs",
+            "sum"
+          ]
+        }
+      ]
+    },
+    {
       "id": "rapt_fpu_fp_to_half",
       "file": "hdl/backend/feu/fpu/rapt_fpu_fp_to_half.sv",
       "domain": "feu",
@@ -546,6 +632,15 @@
           ]
         }
       ]
+    },
+    {
+      "id": "rapt_fpu_mul_pipeline",
+      "file": "hdl/backend/feu/fpu/rapt_fpu_mul.sv",
+      "domain": "feu",
+      "stage": null,
+      "summary": "Four-stage, one-operation-at-a-time IEEE-754 multiplier. Stage 1: decode/classify and normalize input significands. Stage 2: calculate the full-precision significand product. Stage 3: normalize the product and form guard/round/sticky bits. Stage 4: round, pack, and raise flags. S",
+      "params": {},
+      "instances": []
     },
     {
       "id": "rapt_fpu_mul_fma",
@@ -980,7 +1075,7 @@
         "NumCompletions": "Cfg.completion_ports",
         "CompletionT": "rapt_pkg::completion_t",
         "ALQ_SIZE": "Cfg.iq_entries",
-        "BRQ_SIZE": "8",
+        "BRQ_SIZE": "rapt_pkg::BranchQueueEntries",
         "MDQ_SIZE": "4",
         "ROB_SIZE": "Cfg.rob_entries",
         "PLEN": "rapt_pkg::index_bits(Cfg.phys_regs",
@@ -988,46 +1083,6 @@
         "XLEN": "Cfg.xlen"
       },
       "instances": [
-        {
-          "type": "rapt_iq",
-          "name": "u_alq",
-          "ports": [
-            "cancel_valid",
-            "cancel_head",
-            "cancel_owner",
-            "completion",
-            "clock",
-            "reset",
-            "cmu_bcast",
-            "dispatch",
-            "disp",
-            "load_fast",
-            "issue_enable",
-            "issue",
-            "occ_o",
-            "pmu_iq_full"
-          ]
-        },
-        {
-          "type": "rapt_iq",
-          "name": "u_brq",
-          "ports": [
-            "cancel_valid",
-            "cancel_head",
-            "cancel_owner",
-            "completion",
-            "clock",
-            "reset",
-            "cmu_bcast",
-            "dispatch",
-            "disp",
-            "load_fast",
-            "issue_enable",
-            "issue",
-            "occ_o",
-            "pmu_iq_full"
-          ]
-        },
         {
           "type": "rapt_ieu_pipe_alu_csr",
           "name": "u_pipe_alu_csr",
@@ -1405,6 +1460,7 @@
             "full_store_mask",
             "store_fp64",
             "mmu_enabled",
+            "narrow_allowed",
             "alloc_valid",
             "alloc_addr",
             "alloc_alu",
@@ -1709,6 +1765,8 @@
           "type": "rapt_ieu",
           "name": "ieu",
           "ports": [
+            "branch_wake",
+            "memory_wake",
             "cancel_valid",
             "cancel_head",
             "cancel_owner",
@@ -2022,6 +2080,18 @@
       ]
     },
     {
+      "id": "rapt_execute_stage",
+      "file": "hdl/backend/rapt_iq.sv",
+      "domain": "backend",
+      "stage": 4,
+      "summary": "Data-capture issue queue. Dispatch slots express program order at allocation; execution ports have independent availability and capability masks. A uop has no persistent association with its original dispatch slot. Payload transport is opaque; only register and completion depende",
+      "params": {
+        "IssueT": "rapt_pkg::issue_packet_t",
+        "ROB_SIZE": "rapt_pkg::CoreConfig.rob_entries"
+      },
+      "instances": []
+    },
+    {
       "id": "rapt_operand_spill",
       "file": "hdl/backend/rapt_operand_spill.sv",
       "domain": "backend",
@@ -2277,6 +2347,17 @@
           ]
         }
       ]
+    },
+    {
+      "id": "rapt_operand_stage",
+      "file": "hdl/backend/rapt_rou.sv",
+      "domain": "backend",
+      "stage": null,
+      "summary": "Re-Order Unit (ROU) - dispatch queue + reorder buffer + commit. Sub-sections: 1. Dispatch Queue (UOQ)   - buffers renamed uops before ROB allocation 2. ROB Dispatch Buffer    - independently steers allocated owners to domains 3. Reorder Buffer (ROB)   - tracks in-flight instructi",
+      "params": {
+        "Width": "rapt_pkg::RenameWidth"
+      },
+      "instances": []
     },
     {
       "id": "rapt_rvfi",
@@ -3865,8 +3946,8 @@
         "GHR_LEN": "64",
         "PHR_LEN": "8",
         "DEPTH": "`RAPT_PHT_SIZE",
-        "BIM_LEN": "8",
-        "IDX_LEN": "7"
+        "BIM_LEN": "`RAPT_TAGE_BIM_BITS",
+        "IDX_LEN": "`RAPT_TAGE_INDEX_BITS"
       },
       "instances": []
     },
@@ -4316,6 +4397,18 @@
       "instances": []
     },
     {
+      "id": "rapt_axi_r_buffer",
+      "file": "hdl/memory/rapt_axi_r_buffer.sv",
+      "domain": "memory",
+      "stage": null,
+      "summary": "Register the outer AXI R channel before it enters the cache hierarchy. Two entries let a ready consumer accept one beat on every cycle while rready to the memory controller depends only on registered occupancy.",
+      "params": {
+        "XLEN": "`RAPT_XLEN",
+        "ID_W": "4"
+      },
+      "instances": []
+    },
+    {
       "id": "rapt_bus",
       "file": "hdl/memory/rapt_bus.sv",
       "domain": "memory",
@@ -4503,6 +4596,8 @@
             "write_line_data",
             "read_valid",
             "read_index",
+            "read_word_valid",
+            "read_word_index",
             "read_data"
           ]
         },
@@ -4588,6 +4683,7 @@
             "clean_valid",
             "clean_mask",
             "inspect_tag",
+            "inspect_valid",
             "inspect_dirty",
             "dirty_any",
             "update_blocked",
@@ -4598,14 +4694,13 @@
             "clear_line_valid",
             "clear_line_idx",
             "clear_line_tag",
+            "clear_line_dirty_way",
             "addr_idx",
             "addr_offset",
             "addr_tag",
             "waddr_idx",
             "waddr_offset",
-            "waddr_tag",
-            "probe_idx",
-            "probe_offset"
+            "waddr_tag"
           ]
         },
         {
@@ -4683,7 +4778,7 @@
       "file": "hdl/memory/rapt_l1d_data.sv",
       "domain": "memory",
       "stage": null,
-      "summary": "L1D word-write / line-read data array, built from <=128-bit 1RW SRAMs. A write reserves the entire array's port for the cycle, even though only one way/subarray is enabled. Read data is usable only when read_valid is set and read_index matches the consumer's requested set.",
+      "summary": "L1D word-write / line-read data array, built from <=128-bit 1RW SRAMs. A write reserves only its selected way/subarray. Other banks read on the same edge; each bank reports which set its output currently represents.",
       "params": {
         "Xlen": "32",
         "SetBits": "4",
@@ -4953,7 +5048,11 @@
             "lookahead_n1_addr",
             "lookahead_n2_addr",
             "pmp_n1_fetch_fault",
-            "pmp_n2_fetch_fault"
+            "pmp_n2_fetch_fault",
+            "lookahead_n3_addr",
+            "lookahead_n4_addr",
+            "pmp_n3_fetch_fault",
+            "pmp_n4_fetch_fault"
           ]
         },
         {
@@ -5090,6 +5189,29 @@
       },
       "instances": [
         {
+          "type": "rapt_l2_release_buffer",
+          "name": "u_release_buffer",
+          "ports": [
+            "push_valid",
+            "push_ready",
+            "push_addr",
+            "push_data",
+            "push_has_data",
+            "push_mask",
+            "push_last",
+            "busy_o",
+            "head_valid",
+            "head_complete",
+            "head_pop",
+            "head_addr",
+            "head_has_data",
+            "head_word",
+            "head_word_valid",
+            "head_data",
+            "head_mask"
+          ]
+        },
+        {
           "type": "rapt_l2_directory",
           "name": "u_directory",
           "ports": [
@@ -5120,6 +5242,84 @@
           ]
         },
         {
+          "type": "rapt_l2_mshr_frontend",
+          "name": "u_secondary_reads",
+          "ports": [
+            "request_valid",
+            "request_ready",
+            "request_prio",
+            "request_set",
+            "request_tag",
+            "request_payload",
+            "mshr_valid",
+            "mshr_set",
+            "mshr_tag",
+            "mshr_block_b",
+            "mshr_block_c",
+            "mshr_nest_b",
+            "mshr_nest_c",
+            "schedule_request",
+            "schedule_resources_ready",
+            "schedule_reload",
+            "allocate_valid",
+            "allocate_index",
+            "schedule_valid",
+            "schedule_index",
+            "schedule_onehot",
+            "schedule_stalled",
+            "reload_valid",
+            "reload_from_request"
+          ]
+        },
+        {
+          "type": "rapt_l2_refill_mshrs",
+          "name": "u_refills",
+          "ports": [
+            "alloc_valid",
+            "alloc_ready",
+            "alloc_reload",
+            "alloc_slot",
+            "retry_valid",
+            "retry_slot",
+            "alloc_addr",
+            "alloc_inner_id",
+            "alloc_inner_len",
+            "alloc_inner_size",
+            "alloc_inner_burst",
+            "alloc_cache",
+            "outer_arvalid",
+            "outer_arready",
+            "outer_araddr",
+            "outer_arid",
+            "outer_arlen",
+            "outer_arsize",
+            "outer_arburst",
+            "outer_arcache",
+            "outer_rvalid",
+            "outer_rready",
+            "outer_store_ready",
+            "outer_rid"
+          ]
+        },
+        {
+          "type": "rapt_l2_put_buffer",
+          "name": "u_put_buffer",
+          "ports": [
+            "push_valid",
+            "push_ready",
+            "push_list",
+            "push_data",
+            "push_mask",
+            "push_last",
+            "pop_valid",
+            "pop_list",
+            "pop_data",
+            "pop_mask",
+            "pop_last",
+            "list_valid"
+          ]
+        },
+        {
           "type": "rapt_l2_data_array",
           "name": "u_data_array",
           "ports": [
@@ -5130,16 +5330,23 @@
             "read_way",
             "read_chunk",
             "read_result_valid",
+            "source_c_read_valid",
+            "source_c_read_ready",
+            "source_c_read_set",
+            "source_c_read_way",
+            "source_c_read_chunk",
+            "source_c_result_valid",
+            "source_c_read_data",
+            "sink_d_write_valid",
+            "sink_d_write_ready",
+            "sink_d_write_set",
+            "sink_d_write_way",
+            "sink_d_write_chunk",
+            "sink_d_write_data",
+            "sink_d_write_mask",
             "write_line_valid",
-            "write_line_set",
-            "write_line_way",
-            "write_line_data",
-            "write_word_valid",
-            "write_word_set",
-            "write_word_way",
-            "write_word_chunk",
-            "write_word_data",
-            "write_word_mask"
+            "write_line_busy",
+            "write_line_set"
           ]
         }
       ]
@@ -5149,7 +5356,7 @@
       "file": "hdl/memory/rapt_l2_data_array.sv",
       "domain": "memory",
       "stage": null,
-      "summary": "Medium BOOM L2 data geometry: 16 single-port 4096 x 64 SRAM banks. bank={set[0],chunk[2:0]}, row={way[2:0],set[9:1]}. A hit reads one 64-bit chunk; a masked line update reads all eight chunks of its parity together. A refill writes all eight chunks in its parity.",
+      "summary": "Medium BOOM data geometry: four 16384 x 64 single-port SRAM banks. bank=chunk[1:0], row={way[2:0],set[9:0],chunk[2]}. Bank priority is SinkC > SourceC > live SinkD > buffered line write > SourceD-write > SourceD-read. A displaced buffered beat retries.",
       "params": {},
       "instances": []
     },
@@ -5166,6 +5373,123 @@
         "ClientBits": "1",
         "WayBits": "(Ways <= 1",
         "EntryBits": "TagBits + ClientBits + 3"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_l2_mshr_frontend",
+      "file": "hdl/memory/rapt_l2_mshr_frontend.sv",
+      "domain": "memory",
+      "stage": null,
+      "summary": "BOOM-sized miss admission and secondary replay fabric. The seven MSHR state machines supply their status and schedule requests; this module arbitrates them and keeps their 21 secondary queues in 33 shared entries. A secondary entry omits the set because its target MSHR already ow",
+      "params": {
+        "NumMshrs": "7",
+        "NumEntries": "33",
+        "SetBits": "10",
+        "TagBits": "18",
+        "PayloadBits": "64",
+        "MshrBits": "(NumMshrs <= 1",
+        "QueueBits": "$clog2(3 * NumMshrs"
+      },
+      "instances": [
+        {
+          "type": "rapt_l2_secondary_buffer",
+          "name": "u_secondary",
+          "ports": [
+            "push_valid",
+            "push_ready",
+            "push_index",
+            "push_data",
+            "pop_valid",
+            "pop_index",
+            "pop_data",
+            "queue_valid"
+          ]
+        },
+        {
+          "type": "rapt_l2_mshr_scheduler",
+          "name": "u_scheduler",
+          "ports": []
+        }
+      ]
+    },
+    {
+      "id": "rapt_l2_mshr_scheduler",
+      "file": "hdl/memory/rapt_l2_mshr_scheduler.sv",
+      "domain": "memory",
+      "stage": null,
+      "summary": "BOOM inclusive-cache MSHR allocation and round-robin schedule selection. Five ordinary A slots and the dedicated BC/C slots share one set-conflict table. The secondary request payloads reside in rapt_l2_secondary_buffer.",
+      "params": {
+        "NumMshrs": "7",
+        "SetBits": "10",
+        "TagBits": "18",
+        "NormalMshrs": "NumMshrs - 2",
+        "MshrBits": "(NumMshrs <= 1",
+        "QueueBits": "$clog2(3 * NumMshrs"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_l2_put_buffer",
+      "file": "hdl/memory/rapt_l2_put_buffer.sv",
+      "domain": "memory",
+      "stage": null,
+      "summary": "BOOM SinkA's non-flowing put ListBuffer: forty lists share forty beats. A list may hold multiple beats; the caller owns list allocation and retires a list after its last beat has been popped. A full pool does not accept a push merely because another list pops on the same edge.",
+      "params": {
+        "Xlen": "64",
+        "NumLists": "40",
+        "NumBeats": "40",
+        "ListBits": "$clog2(NumLists",
+        "BeatBits": "$clog2(NumBeats"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_l2_refill_mshrs",
+      "file": "hdl/memory/rapt_l2_refill_mshrs.sv",
+      "domain": "memory",
+      "stage": null,
+      "summary": "Independent outer-memory refill contexts for BOOM's seven L2 MSHRs. The outer AXI ID is the context index; the original inner ID is retained for response routing. Different fills may return interleaved beats.",
+      "params": {
+        "XLEN": "64",
+        "ID_W": "4",
+        "LineBytes": "64",
+        "NumMshrs": "7",
+        "MshrBits": "(NumMshrs <= 1",
+        "LineWords": "LineBytes / (XLEN / 8",
+        "WordBits": "(LineWords <= 1"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_l2_release_buffer",
+      "file": "hdl/memory/rapt_l2_release_buffer.sv",
+      "domain": "memory",
+      "stage": null,
+      "summary": "Two in-flight L1D release lists share BOOM's lowest-free beat pool. RV64 has 16 shared beats and RV32 has 32. Keep beats until ReleaseAck so a failed nested refill can replay the same ReleaseData without a new C.",
+      "params": {
+        "Xlen": "64",
+        "LineBytes": "64",
+        "LineWords": "LineBytes / (Xlen / 8",
+        "WordBits": "$clog2(LineWords",
+        "PoolBeats": "2 * LineWords",
+        "EntryBits": "$clog2(PoolBeats"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_l2_secondary_buffer",
+      "file": "hdl/memory/rapt_l2_secondary_buffer.sv",
+      "domain": "memory",
+      "stage": null,
+      "summary": "BOOM inclusive-cache Scheduler uses one shared 33-entry ListBuffer with three virtual request lists for each of its seven MSHRs (A, B and C). The queue is non-flowing: a push into an empty list becomes visible after the clock edge, and a full buffer cannot reuse a simultaneously ",
+      "params": {
+        "NumMshrs": "7",
+        "NumEntries": "33",
+        "DataBits": "64",
+        "NumQueues": "3 * NumMshrs",
+        "QueueBits": "(NumQueues <= 1",
+        "EntryBits": "(NumEntries <= 1"
       },
       "instances": []
     },
@@ -5218,19 +5542,22 @@
             "probe_valid_i",
             "probe_addr_i",
             "probe_ready_o",
+            "probe_release_valid_o",
+            "probe_release_addr_o",
+            "probe_release_data_o",
+            "probe_release_ready_i",
+            "release_valid_o",
+            "release_addr_o",
+            "release_data_o",
+            "release_has_data_o",
+            "release_mask_o",
+            "release_last_o",
+            "release_ready_i",
+            "release_ack_i",
+            "probe_window_i",
+            "writeback_bus_pending_o",
             "writeback_error",
-            "writeback_idle",
-            "writeback_drain",
-            "external_write_valid_i",
-            "external_write_pending_i",
-            "external_write_first_i",
-            "external_write_last_i",
-            "cmu_bcast",
-            "lsu_l1d",
-            "l1d_bus",
-            "csr_bcast",
-            "pmp_update",
-            "exu_l1d"
+            "writeback_idle"
           ]
         },
         {
@@ -5270,8 +5597,30 @@
             "probe_valid_o",
             "probe_addr_o",
             "probe_ready_i",
+            "probe_release_valid_i",
+            "probe_release_addr_i",
+            "probe_release_data_i",
+            "probe_release_ready_o",
+            "release_valid_i",
+            "release_addr_i",
+            "release_data_i",
+            "release_has_data_i",
+            "release_mask_i",
+            "release_last_i",
+            "release_ready_o",
+            "release_ack_o",
+            "l1d_writeback_pending_i",
+            "probe_window_o",
             "axi_s",
             "axi_m"
+          ]
+        },
+        {
+          "type": "rapt_axi_r_buffer",
+          "name": "outer_r_buffer",
+          "ports": [
+            "upstream",
+            "downstream"
           ]
         }
       ]
@@ -5297,6 +5646,70 @@
       "summary": "",
       "params": {
         "N": "`RAPT_PMP_NUM"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_pmp_permissions",
+      "file": "hdl/memory/rapt_pmp.sv",
+      "domain": "memory",
+      "stage": 7,
+      "summary": "",
+      "params": {
+        "XLEN": "`RAPT_XLEN",
+        "PADDR_BITS": "`RAPT_PADDR_BITS"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_pmp",
+      "file": "hdl/memory/rapt_pmp.sv",
+      "domain": "memory",
+      "stage": 7,
+      "summary": "",
+      "params": {
+        "XLEN": "`RAPT_XLEN",
+        "PADDR_BITS": "`RAPT_PADDR_BITS"
+      },
+      "instances": [
+        {
+          "type": "rapt_pmp_permissions",
+          "name": "check_permissions",
+          "ports": [
+            "addr",
+            "size_m1",
+            "priv",
+            "op_r",
+            "op_w",
+            "op_x",
+            "pmp_raw_addr",
+            "pmp_napot_mask",
+            "pmp_cfg_r",
+            "pmp_cfg_w",
+            "pmp_cfg_x",
+            "pmp_cfg_l",
+            "pmp_mode_off",
+            "pmp_mode_tor",
+            "pmp_mode_na4",
+            "pmp_mode_napot",
+            "fault",
+            "fault_lo_o",
+            "fault_read_o",
+            "fault_write_o"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rapt_pmp_line_uniform",
+      "file": "hdl/memory/rapt_pmp.sv",
+      "domain": "memory",
+      "stage": null,
+      "summary": "",
+      "params": {
+        "XLEN": "`RAPT_XLEN",
+        "PADDR_BITS": "`RAPT_PADDR_BITS",
+        "LineOffset": "6"
       },
       "instances": []
     },
@@ -5351,6 +5764,19 @@
         },
         {
           "type": "rapt_openram_1rw_1024x64",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        },
+        {
+          "type": "rapt_openram_1rw_4096x64",
           "name": "u_sram",
           "ports": [
             "clk0",
@@ -5447,7 +5873,36 @@
       "instances": []
     },
     {
+      "id": "rnp2axi",
+      "file": "hdl/perip/wrap_rnp.sv",
+      "domain": "cluster",
+      "stage": null,
+      "summary": "",
+      "params": {
+        "XLEN": "32"
+      },
+      "instances": []
+    },
+    {
+      "id": "wrap_rnp",
+      "file": "hdl/perip/wrap_rnp.sv",
+      "domain": "cluster",
+      "stage": null,
+      "summary": "",
+      "params": {},
+      "instances": []
+    },
+    {
       "id": "wrap_ysyxsoc",
+      "file": "hdl/perip/wrap_ysyxsoc.sv",
+      "domain": "cluster",
+      "stage": null,
+      "summary": "",
+      "params": {},
+      "instances": []
+    },
+    {
+      "id": "ysyx_00000000",
       "file": "hdl/perip/wrap_ysyxsoc.sv",
       "domain": "cluster",
       "stage": null,
@@ -5806,13 +6261,43 @@
         "domain": "feu",
         "stage": 8,
         "summary": "A technology-independent parallel-prefix adder prevents wide FMA sums from degrading into a linear ripple-carry chain in standard-cell synthesis.  The prefix network has O(log2(WIDTH)) logic depth and intentionally drops carry out, matching SystemVerilog's fixed-width addition se",
-        "parent": null,
+        "parent": "rapt_fpu_fma_pipeline",
         "display": false,
         "x": 8.0,
         "y": 0.0,
         "z": 1.34,
         "h": 6,
         "child_count": 0
+      },
+      {
+        "id": "rapt_fpu_fma",
+        "short": "fpu_fma",
+        "file": "hdl/backend/feu/fpu/rapt_fpu_fma.sv",
+        "domain": "feu",
+        "stage": 8,
+        "summary": "A technology-independent parallel-prefix adder prevents wide FMA sums from degrading into a linear ripple-carry chain in standard-cell synthesis.  The prefix network has O(log2(WIDTH)) logic depth and intentionally drops carry out, matching SystemVerilog's fixed-width addition se",
+        "parent": "rapt_vpu_fma",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 1.56,
+        "h": 6,
+        "child_count": 1
+      },
+      {
+        "id": "rapt_fpu_fma_pipeline",
+        "short": "fpu_fma_pipeline",
+        "file": "hdl/backend/feu/fpu/rapt_fpu_fma.sv",
+        "domain": "feu",
+        "stage": 8,
+        "summary": "A technology-independent parallel-prefix adder prevents wide FMA sums from degrading into a linear ripple-carry chain in standard-cell synthesis.  The prefix network has O(log2(WIDTH)) logic depth and intentionally drops carry out, matching SystemVerilog's fixed-width addition se",
+        "parent": "rapt_fpu_fma",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 1.78,
+        "h": 6,
+        "child_count": 2
       },
       {
         "id": "rapt_fpu_fp_to_half",
@@ -5825,7 +6310,7 @@
         "display": false,
         "x": 4.0,
         "y": 0.0,
-        "z": 1.56,
+        "z": 0.9,
         "h": 6,
         "child_count": 0
       },
@@ -5840,7 +6325,7 @@
         "display": false,
         "x": 4.0,
         "y": 0.0,
-        "z": 1.78,
+        "z": 1.12,
         "h": 6,
         "child_count": 0
       },
@@ -5855,7 +6340,7 @@
         "display": false,
         "x": 4.0,
         "y": 0.0,
-        "z": 0.9,
+        "z": 1.34,
         "h": 6,
         "child_count": 0
       },
@@ -5870,7 +6355,22 @@
         "display": false,
         "x": 8.0,
         "y": 0.0,
-        "z": 1.12,
+        "z": 1.56,
+        "h": 6,
+        "child_count": 1
+      },
+      {
+        "id": "rapt_fpu_mul_pipeline",
+        "short": "fpu_mul_pipeline",
+        "file": "hdl/backend/feu/fpu/rapt_fpu_mul.sv",
+        "domain": "feu",
+        "stage": 8,
+        "summary": "Four-stage, one-operation-at-a-time IEEE-754 multiplier. Stage 1: decode/classify and normalize input significands. Stage 2: calculate the full-precision significand product. Stage 3: normalize the product and form guard/round/sticky bits. Stage 4: round, pack, and raise flags. S",
+        "parent": "rapt_fpu_mul",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 1.78,
         "h": 6,
         "child_count": 0
       },
@@ -5885,9 +6385,9 @@
         "display": false,
         "x": 4.0,
         "y": 0.0,
-        "z": 1.34,
+        "z": 0.9,
         "h": 6,
-        "child_count": 0
+        "child_count": 2
       },
       {
         "id": "rapt_fpu_sgnj",
@@ -5900,7 +6400,7 @@
         "display": false,
         "x": 4.0,
         "y": 0.0,
-        "z": 1.56,
+        "z": 1.12,
         "h": 6,
         "child_count": 0
       },
@@ -5915,7 +6415,7 @@
         "display": false,
         "x": 8.0,
         "y": 0.0,
-        "z": 1.78,
+        "z": 1.34,
         "h": 6,
         "child_count": 0
       },
@@ -5928,11 +6428,11 @@
         "summary": "Floating-point execution unit. Floating-point loads/stores remain in the LSU; this unit owns the FP issue queue, scalar arithmetic, conversions, flags and FPR writes.",
         "parent": "rapt_backend",
         "display": true,
-        "x": 63.4,
+        "x": 70.9,
         "y": 0.0,
         "z": 12.7,
         "h": 1,
-        "child_count": 19,
+        "child_count": 20,
         "sx": 6.8,
         "sz": 4.4,
         "sy": 0.28,
@@ -5950,18 +6450,18 @@
         "summary": "",
         "parent": "rapt_backend",
         "display": true,
-        "x": 63.4,
+        "x": 70.9,
         "y": 0.0,
         "z": 2.2,
         "h": 8,
-        "child_count": 6,
+        "child_count": 4,
         "sx": 6.8,
         "sz": 4.4,
         "sy": 0.508,
-        "latency": 2,
+        "latency": 1,
         "capacity": 16,
         "kind": "queue",
-        "model_note": "ALQ 8 + BRQ 8; +1 registered IQ vacancy"
+        "model_note": "ALQ 8 + BRQ 8; same-edge reuse=1"
       },
       {
         "id": "rapt_ieu_alu",
@@ -6002,7 +6502,7 @@
         "summary": "MUL/DIV pipeline (4th execution pipe): private issue queue + MUL/DIV FU + dedicated CDB writeback port. Phase 1 of the execution-engine decoupling: carve the multiplier out of the unified RS so MUL/DIV uops no longer occupy RS entries for their whole latency nor consume an ALU-CS",
         "parent": "rapt_ieu",
         "display": true,
-        "x": 63.4,
+        "x": 70.9,
         "y": 0.0,
         "z": 7.45,
         "h": 6,
@@ -6088,7 +6588,7 @@
         "y": 0.0,
         "z": -0.18,
         "h": 6,
-        "child_count": 0
+        "child_count": 1
       },
       {
         "id": "rapt_lsu",
@@ -6099,18 +6599,18 @@
         "summary": "",
         "parent": "rapt_backend",
         "display": true,
-        "x": 63.4,
+        "x": 70.9,
         "y": 0.0,
         "z": 17.95,
         "h": 16,
         "child_count": 3,
         "sx": 6.8,
         "sz": 4.4,
-        "sy": 0.652,
+        "sy": 0.364,
         "latency": 1,
-        "capacity": 24,
+        "capacity": 8,
         "kind": "queue",
-        "model_note": "IOQ 8 + unified SQ 16"
+        "model_note": "IOQ 8: address, store-order, and issue"
       },
       {
         "id": "rapt_lsu_ioq",
@@ -6129,18 +6629,25 @@
       },
       {
         "id": "rapt_lsu_sq",
-        "short": "lsu_sq",
+        "short": "SQ",
         "file": "hdl/backend/lsu/rapt_lsu_sq.sv",
         "domain": "lsu",
         "stage": 4,
         "summary": "",
         "parent": "rapt_lsu",
-        "display": false,
-        "x": 4.0,
+        "display": true,
+        "x": 63.4,
         "y": 0.0,
-        "z": 0.26,
+        "z": 17.95,
         "h": 6,
-        "child_count": 2
+        "child_count": 4,
+        "sx": 6.8,
+        "sz": 4.4,
+        "sy": 0.508,
+        "latency": 1,
+        "capacity": 16,
+        "kind": "queue",
+        "model_note": "unified SQ 16; drains after commit"
       },
       {
         "id": "rapt_sq_forward",
@@ -6153,7 +6660,7 @@
         "display": false,
         "x": 8.0,
         "y": 0.0,
-        "z": 0.48,
+        "z": 0.26,
         "h": 6,
         "child_count": 0
       },
@@ -6168,7 +6675,7 @@
         "display": false,
         "x": 8.0,
         "y": 0.0,
-        "z": -0.4,
+        "z": 0.48,
         "h": 6,
         "child_count": 0
       },
@@ -6185,7 +6692,7 @@
         "y": 0.0,
         "z": 0.0,
         "h": 22,
-        "child_count": 19
+        "child_count": 20
       },
       {
         "id": "rapt_cdb_arb",
@@ -6196,18 +6703,18 @@
         "summary": "",
         "parent": "rapt_backend",
         "display": true,
-        "x": 70.9,
+        "x": 78.4,
         "y": 0.0,
         "z": 2.2,
         "h": 6,
         "child_count": 0,
         "sx": 6.8,
         "sz": 4.4,
-        "sy": 0.31,
+        "sy": 0.28,
         "latency": 1,
-        "capacity": 5,
+        "capacity": 1,
         "kind": "stage",
-        "model_note": "CDB arbiter"
+        "model_note": "one shared integer-system / scalar-FP completion port"
       },
       {
         "id": "rapt_cmu",
@@ -6218,7 +6725,7 @@
         "summary": "",
         "parent": "rapt_backend",
         "display": true,
-        "x": 70.9,
+        "x": 78.4,
         "y": 0.0,
         "z": 7.45,
         "h": 2,
@@ -6315,7 +6822,7 @@
         "summary": "Capacity-aware dispatch compactor. The ROB exposes an age-ordered candidate window that may be wider than the physical dispatch bandwidth.  This router skips candidates whose target domain is full, preserves age among every candidate it can accept, and compacts at most NumSlots w",
         "parent": "rapt_backend",
         "display": true,
-        "x": 55.9,
+        "x": 63.4,
         "y": 0.0,
         "z": 2.2,
         "h": 2,
@@ -6366,6 +6873,21 @@
         "child_count": 1
       },
       {
+        "id": "rapt_execute_stage",
+        "short": "execute_stage",
+        "file": "hdl/backend/rapt_iq.sv",
+        "domain": "backend",
+        "stage": 4,
+        "summary": "Data-capture issue queue. Dispatch slots express program order at allocation; execution ports have independent availability and capability masks. A uop has no persistent association with its original dispatch slot. Payload transport is opaque; only register and completion depende",
+        "parent": "rapt_feu",
+        "display": false,
+        "x": 4.0,
+        "y": 0.0,
+        "z": 0.44,
+        "h": 6,
+        "child_count": 0
+      },
+      {
         "id": "rapt_operand_spill",
         "short": "operand_spill",
         "file": "hdl/backend/rapt_operand_spill.sv",
@@ -6376,7 +6898,7 @@
         "display": false,
         "x": 8.0,
         "y": 0.0,
-        "z": 0.44,
+        "z": 0.66,
         "h": 6,
         "child_count": 0
       },
@@ -6391,7 +6913,7 @@
         "display": false,
         "x": 3.0,
         "y": 0.0,
-        "z": 0.66,
+        "z": 0.88,
         "h": 6,
         "child_count": 1
       },
@@ -6428,7 +6950,7 @@
         "display": false,
         "x": 5.0,
         "y": 0.0,
-        "z": 0.88,
+        "z": 0.0,
         "h": 6,
         "child_count": 0
       },
@@ -6443,7 +6965,7 @@
         "display": false,
         "x": 3.0,
         "y": 0.0,
-        "z": 0.0,
+        "z": 0.22,
         "h": 6,
         "child_count": 0
       },
@@ -6458,7 +6980,7 @@
         "display": false,
         "x": 3.0,
         "y": 0.0,
-        "z": 0.22,
+        "z": 0.44,
         "h": 6,
         "child_count": 1
       },
@@ -6471,7 +6993,7 @@
         "summary": "Re-Order Unit (ROU) - dispatch queue + reorder buffer + commit. Sub-sections: 1. Dispatch Queue (UOQ)   - buffers renamed uops before ROB allocation 2. ROB Dispatch Buffer    - independently steers allocated owners to domains 3. Reorder Buffer (ROB)   - tracks in-flight instructi",
         "parent": "rapt_backend",
         "display": true,
-        "x": 48.4,
+        "x": 55.9,
         "y": 0.0,
         "z": 4.825,
         "h": 32,
@@ -6482,7 +7004,29 @@
         "latency": 1,
         "capacity": 32,
         "kind": "queue",
-        "model_note": "ROB 32 entries"
+        "model_note": "ROB 32; UOQ 8; pending operands in a separate spill bank"
+      },
+      {
+        "id": "rapt_operand_stage",
+        "short": "UOQ",
+        "file": "hdl/backend/rapt_rou.sv",
+        "domain": "backend",
+        "stage": 4,
+        "summary": "Re-Order Unit (ROU) - dispatch queue + reorder buffer + commit. Sub-sections: 1. Dispatch Queue (UOQ)   - buffers renamed uops before ROB allocation 2. ROB Dispatch Buffer    - independently steers allocated owners to domains 3. Reorder Buffer (ROB)   - tracks in-flight instructi",
+        "parent": "rapt_backend",
+        "display": true,
+        "x": 48.4,
+        "y": 0.0,
+        "z": 2.2,
+        "h": 6,
+        "child_count": 0,
+        "sx": 6.8,
+        "sz": 4.4,
+        "sy": 0.28,
+        "latency": 1,
+        "capacity": 2,
+        "kind": "queue",
+        "model_note": "renamed-packet buffer before the ROU operand-reading UOQ"
       },
       {
         "id": "rapt_rvfi",
@@ -6495,7 +7039,7 @@
         "display": false,
         "x": 6.0,
         "y": 0.0,
-        "z": 0.44,
+        "z": 0.66,
         "h": 6,
         "child_count": 0
       },
@@ -6647,7 +7191,7 @@
         "y": 0.0,
         "z": 2.08,
         "h": 6,
-        "child_count": 0
+        "child_count": 1
       },
       {
         "id": "rapt_vpu_fp_arith",
@@ -7205,7 +7749,7 @@
         "summary": "",
         "parent": "rapt_backend",
         "display": true,
-        "x": 70.9,
+        "x": 78.4,
         "y": 0.0,
         "z": 12.7,
         "h": 6,
@@ -7249,11 +7793,11 @@
         "child_count": 1,
         "sx": 6.8,
         "sz": 4.4,
-        "sy": 0.364,
+        "sy": 0.292,
         "latency": 1,
-        "capacity": 8,
+        "capacity": 4,
         "kind": "queue",
-        "model_note": "fetch queue between IFU and decode"
+        "model_note": "fetch stream queue; DEPTH=2 times decode width"
       },
       {
         "id": "rapt_frontend",
@@ -7324,10 +7868,10 @@
         "sx": 6.8,
         "sz": 4.4,
         "sy": 0.28,
-        "latency": 2,
+        "latency": 1,
         "capacity": 2,
         "kind": "stage",
-        "model_note": "fetch window; FETCH_RESPONSE_STAGE=1"
+        "model_note": "fetch window; FETCH_RESPONSE_STAGE=0"
       },
       {
         "id": "rapt_rename_admit",
@@ -7379,7 +7923,7 @@
         "latency": 1,
         "capacity": 2,
         "kind": "stage",
-        "model_note": "rename + checkpoints"
+        "model_note": "RNQ plus rename_pipe and checkpoints"
       },
       {
         "id": "rapt_rnu_freelist",
@@ -7464,6 +8008,21 @@
         "model_note": "AXI4 master"
       },
       {
+        "id": "rapt_axi_r_buffer",
+        "short": "axi_r_buffer",
+        "file": "hdl/memory/rapt_axi_r_buffer.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "Register the outer AXI R channel before it enters the cache hierarchy. Two entries let a ready consumer accept one beat on every cycle while rready to the memory controller depends only on registered occupancy.",
+        "parent": "rapt_memory",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 1.4,
+        "h": 6,
+        "child_count": 0
+      },
+      {
         "id": "rapt_bus",
         "short": "BUS",
         "file": "hdl/memory/rapt_bus.sv",
@@ -7496,7 +8055,7 @@
         "display": false,
         "x": 8.0,
         "y": 0.0,
-        "z": 1.4,
+        "z": 1.62,
         "h": 6,
         "child_count": 0
       },
@@ -7511,7 +8070,7 @@
         "display": false,
         "x": 8.0,
         "y": 0.0,
-        "z": 1.62,
+        "z": 1.84,
         "h": 6,
         "child_count": 0
       },
@@ -7526,9 +8085,9 @@
         "display": false,
         "x": 0.0,
         "y": 0.0,
-        "z": 1.84,
+        "z": 2.06,
         "h": 6,
-        "child_count": 1
+        "child_count": 2
       },
       {
         "id": "rapt_ifetch_word",
@@ -7541,7 +8100,7 @@
         "display": false,
         "x": 0.0,
         "y": 0.0,
-        "z": 2.06,
+        "z": 2.28,
         "h": 6,
         "child_count": 0
       },
@@ -7558,14 +8117,14 @@
         "y": 0.0,
         "z": 23.2,
         "h": 16,
-        "child_count": 8,
+        "child_count": 9,
         "sx": 6.8,
         "sz": 4.4,
         "sy": 0.508,
         "latency": 2,
         "capacity": 16,
         "kind": "cache",
-        "model_note": "16 KiB 4-way D$; hit latency 2"
+        "model_note": "16 KiB 4-way D$; hit from registered access"
       },
       {
         "id": "rapt_l1d_access",
@@ -7578,9 +8137,9 @@
         "display": false,
         "x": 7.0,
         "y": 0.0,
-        "z": 2.28,
+        "z": 1.4,
         "h": 6,
-        "child_count": 0
+        "child_count": 1
       },
       {
         "id": "rapt_l1d_data",
@@ -7588,29 +8147,36 @@
         "file": "hdl/memory/rapt_l1d_data.sv",
         "domain": "memory",
         "stage": 7,
-        "summary": "L1D word-write / line-read data array, built from <=128-bit 1RW SRAMs. A write reserves the entire array's port for the cycle, even though only one way/subarray is enabled. Read data is usable only when read_valid is set and read_index matches the consumer's requested set.",
+        "summary": "L1D word-write / line-read data array, built from <=128-bit 1RW SRAMs. A write reserves only its selected way/subarray. Other banks read on the same edge; each bank reports which set its output currently represents.",
         "parent": "rapt_l1d",
         "display": false,
         "x": 7.0,
         "y": 0.0,
-        "z": 1.4,
+        "z": 1.62,
         "h": 6,
         "child_count": 0
       },
       {
         "id": "rapt_l1d_mshr",
-        "short": "l1d_mshr",
+        "short": "MSHR",
         "file": "hdl/memory/rapt_l1d_mshr.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "Physical-line miss table and refill buffers. Requests replay through L1D (including translation/PMP) before consuming data; no speculative ROB tags are retained here. Completed lines stay until replaced or invalidated.",
         "parent": null,
-        "display": false,
-        "x": 8.0,
+        "display": true,
+        "x": 63.4,
         "y": 0.0,
-        "z": 1.62,
+        "z": 23.2,
         "h": 6,
-        "child_count": 0
+        "child_count": 0,
+        "sx": 6.8,
+        "sz": 4.4,
+        "sy": 0.28,
+        "latency": 1,
+        "capacity": 2,
+        "kind": "queue",
+        "model_note": "L1D miss status holding registers"
       },
       {
         "id": "rapt_l1d_tags",
@@ -7655,7 +8221,7 @@
         "y": 0.0,
         "z": 2.2,
         "h": 16,
-        "child_count": 10,
+        "child_count": 11,
         "sx": 6.8,
         "sz": 4.4,
         "sy": 0.508,
@@ -7677,7 +8243,7 @@
         "y": 0.0,
         "z": 2.28,
         "h": 6,
-        "child_count": 0
+        "child_count": 1
       },
       {
         "id": "rapt_l1i_data",
@@ -7722,14 +8288,14 @@
         "y": 0.0,
         "z": 23.2,
         "h": 6,
-        "child_count": 2,
+        "child_count": 6,
         "sx": 6.8,
         "sz": 4.4,
-        "sy": 0.508,
-        "latency": 1,
-        "capacity": 16,
+        "sy": 0.28,
+        "latency": 0,
+        "capacity": 0,
         "kind": "cache",
-        "model_note": "optional L2; default passthrough +1"
+        "model_note": "default combinational passthrough; default-l2 enables 512 KiB / 8 ways"
       },
       {
         "id": "rapt_l2_data_array",
@@ -7737,7 +8303,7 @@
         "file": "hdl/memory/rapt_l2_data_array.sv",
         "domain": "memory",
         "stage": 8,
-        "summary": "Medium BOOM L2 data geometry: 16 single-port 4096 x 64 SRAM banks. bank={set[0],chunk[2:0]}, row={way[2:0],set[9:1]}. A hit reads one 64-bit chunk; a masked line update reads all eight chunks of its parity together. A refill writes all eight chunks in its parity.",
+        "summary": "Medium BOOM data geometry: four 16384 x 64 single-port SRAM banks. bank=chunk[1:0], row={way[2:0],set[9:0],chunk[2]}. Bank priority is SinkC > SourceC > live SinkD > buffered line write > SourceD-write > SourceD-read. A displaced buffered beat retries.",
         "parent": "rapt_l2",
         "display": false,
         "x": 8.0,
@@ -7762,6 +8328,96 @@
         "child_count": 0
       },
       {
+        "id": "rapt_l2_mshr_frontend",
+        "short": "l2_mshr_frontend",
+        "file": "hdl/memory/rapt_l2_mshr_frontend.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "BOOM-sized miss admission and secondary replay fabric. The seven MSHR state machines supply their status and schedule requests; this module arbitrates them and keeps their 21 secondary queues in 33 shared entries. A secondary entry omits the set because its target MSHR already ow",
+        "parent": "rapt_l2",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 2.28,
+        "h": 6,
+        "child_count": 2
+      },
+      {
+        "id": "rapt_l2_mshr_scheduler",
+        "short": "l2_mshr_scheduler",
+        "file": "hdl/memory/rapt_l2_mshr_scheduler.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "BOOM inclusive-cache MSHR allocation and round-robin schedule selection. Five ordinary A slots and the dedicated BC/C slots share one set-conflict table. The secondary request payloads reside in rapt_l2_secondary_buffer.",
+        "parent": "rapt_l2_mshr_frontend",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 1.4,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_l2_put_buffer",
+        "short": "l2_put_buffer",
+        "file": "hdl/memory/rapt_l2_put_buffer.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "BOOM SinkA's non-flowing put ListBuffer: forty lists share forty beats. A list may hold multiple beats; the caller owns list allocation and retires a list after its last beat has been popped. A full pool does not accept a push merely because another list pops on the same edge.",
+        "parent": "rapt_l2",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 1.62,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_l2_refill_mshrs",
+        "short": "l2_refill_mshrs",
+        "file": "hdl/memory/rapt_l2_refill_mshrs.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "Independent outer-memory refill contexts for BOOM's seven L2 MSHRs. The outer AXI ID is the context index; the original inner ID is retained for response routing. Different fills may return interleaved beats.",
+        "parent": "rapt_l2",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 1.84,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_l2_release_buffer",
+        "short": "l2_release_buffer",
+        "file": "hdl/memory/rapt_l2_release_buffer.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "Two in-flight L1D release lists share BOOM's lowest-free beat pool. RV64 has 16 shared beats and RV32 has 32. Keep beats until ReleaseAck so a failed nested refill can replay the same ReleaseData without a new C.",
+        "parent": "rapt_l2",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 2.06,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_l2_secondary_buffer",
+        "short": "l2_secondary_buffer",
+        "file": "hdl/memory/rapt_l2_secondary_buffer.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "BOOM inclusive-cache Scheduler uses one shared 33-entry ListBuffer with three virtual request lists for each of its seven MSHRs (A, B and C). The queue is non-flowing: a push into an empty list becomes visible after the clock edge, and a full buffer cannot reuse a simultaneously ",
+        "parent": "rapt_l2_mshr_frontend",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 2.28,
+        "h": 6,
+        "child_count": 0
+      },
+      {
         "id": "rapt_memory",
         "short": "memory",
         "file": "hdl/memory/rapt_memory.sv",
@@ -7772,9 +8428,9 @@
         "display": false,
         "x": 3.0,
         "y": 0.0,
-        "z": 2.28,
+        "z": 1.4,
         "h": 6,
-        "child_count": 6
+        "child_count": 7
       },
       {
         "id": "rapt_plru",
@@ -7787,7 +8443,7 @@
         "display": false,
         "x": 8.0,
         "y": 0.0,
-        "z": 1.4,
+        "z": 1.62,
         "h": 6,
         "child_count": 0
       },
@@ -7800,9 +8456,9 @@
         "summary": "",
         "parent": "rapt_lsu",
         "display": true,
-        "x": 3.4,
+        "x": 70.9,
         "y": 0.0,
-        "z": 7.45,
+        "z": 23.2,
         "h": 6,
         "child_count": 0,
         "sx": 6.8,
@@ -7811,37 +8467,96 @@
         "latency": 1,
         "capacity": 8,
         "kind": "stage",
-        "model_note": "8 usable PMP entries"
+        "model_note": "8 usable PMP entries; checks fetch, data, and PTW"
       },
       {
-        "id": "rapt_ptw",
-        "short": "ptw",
-        "file": "hdl/memory/rapt_ptw.sv",
+        "id": "rapt_pmp_permissions",
+        "short": "pmp_permissions",
+        "file": "hdl/memory/rapt_pmp.sv",
         "domain": "memory",
         "stage": 7,
-        "summary": "Page-table walker. RV32 uses Sv32 two-level page tables. RV64 uses the Sv39 three-level format expected by upstream xv6-riscv. Permission checks against the access type and current privilege are performed by the requesters (L1I/L1D) using the returned PTE flags.  RVA20S64 mandate",
-        "parent": "rapt_ifetch_translate",
-        "display": false,
-        "x": 7.0,
-        "y": 0.0,
-        "z": 1.62,
-        "h": 6,
-        "child_count": 0
-      },
-      {
-        "id": "rapt_tlb",
-        "short": "tlb",
-        "file": "hdl/memory/rapt_tlb.sv",
-        "domain": "memory",
-        "stage": 7,
-        "summary": "Fully-associative TLB for Sv32/Sv39 page translation with ASID support. Both configurations implement ASIDLEN=9; the RV64 satp WARL logic clears the seven unimplemented high ASID bits on write. Combinational lookup, sequential fill, invalid-first round-robin replacement.",
-        "parent": "rapt_l1d",
+        "summary": "",
+        "parent": "rapt_ioq_store_check",
         "display": false,
         "x": 7.0,
         "y": 0.0,
         "z": 1.84,
         "h": 6,
         "child_count": 0
+      },
+      {
+        "id": "rapt_pmp",
+        "short": "pmp",
+        "file": "hdl/memory/rapt_pmp.sv",
+        "domain": "memory",
+        "stage": 7,
+        "summary": "",
+        "parent": "rapt_lsu_sq",
+        "display": false,
+        "x": 7.0,
+        "y": 0.0,
+        "z": 2.06,
+        "h": 6,
+        "child_count": 1
+      },
+      {
+        "id": "rapt_pmp_line_uniform",
+        "short": "pmp_line_uniform",
+        "file": "hdl/memory/rapt_pmp.sv",
+        "domain": "memory",
+        "stage": 7,
+        "summary": "",
+        "parent": "rapt_l1d",
+        "display": false,
+        "x": 7.0,
+        "y": 0.0,
+        "z": 2.28,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_ptw",
+        "short": "PTW",
+        "file": "hdl/memory/rapt_ptw.sv",
+        "domain": "memory",
+        "stage": 7,
+        "summary": "Page-table walker. RV32 uses Sv32 two-level page tables. RV64 uses the Sv39 three-level format expected by upstream xv6-riscv. Permission checks against the access type and current privilege are performed by the requesters (L1I/L1D) using the returned PTE flags.  RVA20S64 mandate",
+        "parent": "rapt_ifetch_translate",
+        "display": true,
+        "x": 55.9,
+        "y": 0.0,
+        "z": 23.2,
+        "h": 6,
+        "child_count": 0,
+        "sx": 6.8,
+        "sz": 4.4,
+        "sy": 0.28,
+        "latency": 1,
+        "capacity": 1,
+        "kind": "stage",
+        "model_note": "Sv32/Sv39 page-table walk"
+      },
+      {
+        "id": "rapt_tlb",
+        "short": "TLB",
+        "file": "hdl/memory/rapt_tlb.sv",
+        "domain": "memory",
+        "stage": 7,
+        "summary": "Fully-associative TLB for Sv32/Sv39 page translation with ASID support. Both configurations implement ASIDLEN=9; the RV64 satp WARL logic clears the seven unimplemented high ASID bits on write. Combinational lookup, sequential fill, invalid-first round-robin replacement.",
+        "parent": "rapt_l1d",
+        "display": true,
+        "x": 48.4,
+        "y": 0.0,
+        "z": 23.2,
+        "h": 6,
+        "child_count": 0,
+        "sx": 6.8,
+        "sz": 4.4,
+        "sy": 0.508,
+        "latency": 1,
+        "capacity": 16,
+        "kind": "cache",
+        "model_note": "ITLB and DTLB instances of rapt_tlb"
       },
       {
         "id": "rapt_clint",
@@ -7983,7 +8698,7 @@
         "domain": "memory",
         "stage": 8,
         "summary": "Cacheable PMEM window at 0x80000000 from rapt_pkg::addr_mapped.",
-        "parent": "rapt_axi_master",
+        "parent": "rapt_l2",
         "display": true,
         "x": 37.15,
         "y": 0.0,
@@ -8040,6 +8755,120 @@
           "result",
           "flags",
           "result_valid"
+        ]
+      },
+      {
+        "from": "rapt_fpu_fma",
+        "to": "rapt_fpu_fma_pipeline",
+        "instance": "u_pipeline",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "flush",
+          "valid",
+          "ready",
+          "op",
+          "operand_a",
+          "operand_b",
+          "operand_c",
+          "rounding_mode",
+          "result",
+          "flags"
+        ]
+      },
+      {
+        "from": "rapt_fpu_fma_pipeline",
+        "to": "rapt_fpu_prefix_adder",
+        "instance": "u_total_adder",
+        "kind": "instance",
+        "ports": [
+          "lhs",
+          "rhs",
+          "sum"
+        ]
+      },
+      {
+        "from": "rapt_fpu_fma_pipeline",
+        "to": "rapt_fpu_prefix_adder",
+        "instance": "u_magnitude_adder",
+        "kind": "instance",
+        "ports": [
+          "lhs",
+          "rhs",
+          "sum"
+        ]
+      },
+      {
+        "from": "rapt_fpu_mul",
+        "to": "rapt_fpu_mul_pipeline",
+        "instance": "u_pipeline",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "flush",
+          "valid",
+          "ready",
+          "operand_a",
+          "operand_b",
+          "rounding_mode",
+          "result",
+          "flags",
+          "result_valid",
+          "product_a"
+        ]
+      },
+      {
+        "from": "rapt_fpu_mul_fma",
+        "to": "rapt_fpu_mul_pipeline",
+        "instance": "u_mul",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "flush",
+          "valid",
+          "ready",
+          "operand_a",
+          "operand_b",
+          "rounding_mode",
+          "result",
+          "flags",
+          "result_valid",
+          "product_a"
+        ]
+      },
+      {
+        "from": "rapt_fpu_mul_fma",
+        "to": "rapt_fpu_fma_pipeline",
+        "instance": "u_fma",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "flush",
+          "valid",
+          "ready",
+          "op",
+          "operand_a",
+          "operand_b",
+          "operand_c",
+          "rounding_mode",
+          "result",
+          "flags"
+        ]
+      },
+      {
+        "from": "rapt_feu",
+        "to": "rapt_execute_stage",
+        "instance": "execute_stage",
+        "kind": "instance",
+        "ports": [
+          "flush",
+          "selected",
+          "execute",
+          "occupied"
         ]
       },
       {
@@ -8388,46 +9217,6 @@
       },
       {
         "from": "rapt_ieu",
-        "to": "rapt_iq",
-        "instance": "u_alq",
-        "kind": "instance",
-        "ports": [
-          "cancel_valid",
-          "cancel_head",
-          "cancel_owner",
-          "completion",
-          "clock",
-          "reset",
-          "cmu_bcast",
-          "dispatch",
-          "disp",
-          "load_fast",
-          "issue_enable",
-          "issue"
-        ]
-      },
-      {
-        "from": "rapt_ieu",
-        "to": "rapt_iq",
-        "instance": "u_brq",
-        "kind": "instance",
-        "ports": [
-          "cancel_valid",
-          "cancel_head",
-          "cancel_owner",
-          "completion",
-          "clock",
-          "reset",
-          "cmu_bcast",
-          "dispatch",
-          "disp",
-          "load_fast",
-          "issue_enable",
-          "issue"
-        ]
-      },
-      {
-        "from": "rapt_ieu",
         "to": "rapt_ieu_pipe_alu_csr",
         "instance": "u_pipe_alu_csr",
         "kind": "instance",
@@ -8518,6 +9307,26 @@
           "op",
           "word",
           "out_r"
+        ]
+      },
+      {
+        "from": "rapt_ioq_store_check",
+        "to": "rapt_pmp_permissions",
+        "instance": "u_pmp_store_cbo",
+        "kind": "instance",
+        "ports": [
+          "addr",
+          "size_m1",
+          "priv",
+          "op_r",
+          "op_w",
+          "op_x",
+          "pmp_raw_addr",
+          "pmp_napot_mask",
+          "pmp_cfg_r",
+          "pmp_cfg_w",
+          "pmp_cfg_x",
+          "pmp_cfg_l"
         ]
       },
       {
@@ -8616,9 +9425,49 @@
           "full_store_mask",
           "store_fp64",
           "mmu_enabled",
+          "narrow_allowed",
           "alloc_valid",
-          "alloc_addr",
-          "alloc_alu"
+          "alloc_addr"
+        ]
+      },
+      {
+        "from": "rapt_lsu_sq",
+        "to": "rapt_pmp",
+        "instance": "u_pmp_load_b",
+        "kind": "instance",
+        "ports": [
+          "addr",
+          "size_m1",
+          "priv",
+          "op_r",
+          "op_w",
+          "op_x",
+          "pmp_raw_addr",
+          "pmp_napot_mask",
+          "pmp_cfg_r",
+          "pmp_cfg_w",
+          "pmp_cfg_x",
+          "pmp_cfg_l"
+        ]
+      },
+      {
+        "from": "rapt_lsu_sq",
+        "to": "rapt_pmp",
+        "instance": "u_pmp_load_lsu",
+        "kind": "instance",
+        "ports": [
+          "addr",
+          "size_m1",
+          "priv",
+          "op_r",
+          "op_w",
+          "op_x",
+          "pmp_raw_addr",
+          "pmp_napot_mask",
+          "pmp_cfg_r",
+          "pmp_cfg_w",
+          "pmp_cfg_x",
+          "pmp_cfg_l"
         ]
       },
       {
@@ -8692,6 +9541,17 @@
           "history_restore",
           "restore_ghr",
           "restore_phr"
+        ]
+      },
+      {
+        "from": "rapt_backend",
+        "to": "rapt_operand_stage",
+        "instance": "operand_read_stage",
+        "kind": "instance",
+        "ports": [
+          "flush",
+          "upstream",
+          "downstream"
         ]
       },
       {
@@ -8823,6 +9683,8 @@
         "instance": "ieu",
         "kind": "instance",
         "ports": [
+          "branch_wake",
+          "memory_wake",
           "cancel_valid",
           "cancel_head",
           "cancel_owner",
@@ -8832,9 +9694,7 @@
           "cmu_bcast",
           "csr_bcast",
           "dispatch",
-          "disp_alq",
-          "disp_brq",
-          "disp_mdq"
+          "disp_alq"
         ]
       },
       {
@@ -9663,6 +10523,26 @@
         ]
       },
       {
+        "from": "rapt_vpu_fma",
+        "to": "rapt_fpu_fma",
+        "instance": "u_fma",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "flush",
+          "valid",
+          "ready",
+          "op",
+          "operand_a",
+          "operand_b",
+          "operand_c",
+          "rounding_mode",
+          "result",
+          "flags"
+        ]
+      },
+      {
         "from": "rapt_vpu_fp_arith",
         "to": "rapt_vpu_fma",
         "instance": "u_fma",
@@ -10239,6 +11119,26 @@
       },
       {
         "from": "rapt_ifetch_translate",
+        "to": "rapt_pmp",
+        "instance": "u_pmp",
+        "kind": "instance",
+        "ports": [
+          "addr",
+          "size_m1",
+          "priv",
+          "op_r",
+          "op_w",
+          "op_x",
+          "pmp_raw_addr",
+          "pmp_napot_mask",
+          "pmp_cfg_r",
+          "pmp_cfg_w",
+          "pmp_cfg_x",
+          "pmp_cfg_l"
+        ]
+      },
+      {
+        "from": "rapt_ifetch_translate",
         "to": "rapt_ptw",
         "instance": "u_ptw",
         "kind": "instance",
@@ -10267,6 +11167,17 @@
           "reset",
           "update",
           "state"
+        ]
+      },
+      {
+        "from": "rapt_l1d",
+        "to": "rapt_pmp_line_uniform",
+        "instance": "u_refill_pmp",
+        "kind": "instance",
+        "ports": [
+          "addr",
+          "state",
+          "uniform_o"
         ]
       },
       {
@@ -10381,12 +11292,12 @@
           "clean_valid",
           "clean_mask",
           "inspect_tag",
+          "inspect_valid",
           "inspect_dirty",
           "dirty_any",
           "update_blocked",
           "clock",
-          "reset",
-          "fence_time"
+          "reset"
         ]
       },
       {
@@ -10407,6 +11318,26 @@
           "store_walu",
           "cmo_mgmt",
           "tlb_hit"
+        ]
+      },
+      {
+        "from": "rapt_l1d_access",
+        "to": "rapt_pmp_permissions",
+        "instance": "u_check",
+        "kind": "instance",
+        "ports": [
+          "addr",
+          "size_m1",
+          "priv",
+          "op_r",
+          "op_w",
+          "op_x",
+          "pmp_raw_addr",
+          "pmp_napot_mask",
+          "pmp_cfg_r",
+          "pmp_cfg_w",
+          "pmp_cfg_x",
+          "pmp_cfg_l"
         ]
       },
       {
@@ -10511,6 +11442,17 @@
           "priv",
           "satp_ppn",
           "pmp_state"
+        ]
+      },
+      {
+        "from": "rapt_l1i",
+        "to": "rapt_pmp_line_uniform",
+        "instance": "u_l2_pmp",
+        "kind": "instance",
+        "ports": [
+          "addr",
+          "state",
+          "uniform_o"
         ]
       },
       {
@@ -10629,6 +11571,46 @@
         ]
       },
       {
+        "from": "rapt_l1i_access",
+        "to": "rapt_pmp",
+        "instance": "u_pmp",
+        "kind": "instance",
+        "ports": [
+          "addr",
+          "size_m1",
+          "priv",
+          "op_r",
+          "op_w",
+          "op_x",
+          "pmp_raw_addr",
+          "pmp_napot_mask",
+          "pmp_cfg_r",
+          "pmp_cfg_w",
+          "pmp_cfg_x",
+          "pmp_cfg_l"
+        ]
+      },
+      {
+        "from": "rapt_l2",
+        "to": "rapt_l2_release_buffer",
+        "instance": "u_release_buffer",
+        "kind": "instance",
+        "ports": [
+          "push_valid",
+          "push_ready",
+          "push_addr",
+          "push_data",
+          "push_has_data",
+          "push_mask",
+          "push_last",
+          "busy_o",
+          "head_valid",
+          "head_complete",
+          "head_pop",
+          "head_addr"
+        ]
+      },
+      {
         "from": "rapt_l2",
         "to": "rapt_l2_directory",
         "instance": "u_directory",
@@ -10650,6 +11632,66 @@
       },
       {
         "from": "rapt_l2",
+        "to": "rapt_l2_mshr_frontend",
+        "instance": "u_secondary_reads",
+        "kind": "instance",
+        "ports": [
+          "request_valid",
+          "request_ready",
+          "request_prio",
+          "request_set",
+          "request_tag",
+          "request_payload",
+          "mshr_valid",
+          "mshr_set",
+          "mshr_tag",
+          "mshr_block_b",
+          "mshr_block_c",
+          "mshr_nest_b"
+        ]
+      },
+      {
+        "from": "rapt_l2",
+        "to": "rapt_l2_refill_mshrs",
+        "instance": "u_refills",
+        "kind": "instance",
+        "ports": [
+          "alloc_valid",
+          "alloc_ready",
+          "alloc_reload",
+          "alloc_slot",
+          "retry_valid",
+          "retry_slot",
+          "alloc_addr",
+          "alloc_inner_id",
+          "alloc_inner_len",
+          "alloc_inner_size",
+          "alloc_inner_burst",
+          "alloc_cache"
+        ]
+      },
+      {
+        "from": "rapt_l2",
+        "to": "rapt_l2_put_buffer",
+        "instance": "u_put_buffer",
+        "kind": "instance",
+        "ports": [
+          "push_valid",
+          "push_ready",
+          "push_list",
+          "push_data",
+          "push_mask",
+          "push_last",
+          "pop_valid",
+          "pop_list",
+          "pop_data",
+          "pop_mask",
+          "pop_last",
+          "list_valid"
+        ]
+      },
+      {
+        "from": "rapt_l2",
         "to": "rapt_l2_data_array",
         "instance": "u_data_array",
         "kind": "instance",
@@ -10661,12 +11703,35 @@
           "read_way",
           "read_chunk",
           "read_result_valid",
-          "write_line_valid",
-          "write_line_set",
-          "write_line_way",
-          "write_line_data",
-          "write_word_valid"
+          "source_c_read_valid",
+          "source_c_read_ready",
+          "source_c_read_set",
+          "source_c_read_way",
+          "source_c_read_chunk"
         ]
+      },
+      {
+        "from": "rapt_l2_mshr_frontend",
+        "to": "rapt_l2_secondary_buffer",
+        "instance": "u_secondary",
+        "kind": "instance",
+        "ports": [
+          "push_valid",
+          "push_ready",
+          "push_index",
+          "push_data",
+          "pop_valid",
+          "pop_index",
+          "pop_data",
+          "queue_valid"
+        ]
+      },
+      {
+        "from": "rapt_l2_mshr_frontend",
+        "to": "rapt_l2_mshr_scheduler",
+        "instance": "u_scheduler",
+        "kind": "instance",
+        "ports": []
       },
       {
         "from": "rapt_memory",
@@ -10712,10 +11777,10 @@
           "probe_valid_i",
           "probe_addr_i",
           "probe_ready_o",
-          "writeback_error",
-          "writeback_idle",
-          "writeback_drain",
-          "external_write_valid_i"
+          "probe_release_valid_o",
+          "probe_release_addr_o",
+          "probe_release_data_o",
+          "probe_release_ready_i"
         ]
       },
       {
@@ -10761,8 +11826,41 @@
           "probe_valid_o",
           "probe_addr_o",
           "probe_ready_i",
-          "axi_s",
-          "axi_m"
+          "probe_release_valid_i",
+          "probe_release_addr_i",
+          "probe_release_data_i",
+          "probe_release_ready_o",
+          "release_valid_i"
+        ]
+      },
+      {
+        "from": "rapt_memory",
+        "to": "rapt_axi_r_buffer",
+        "instance": "outer_r_buffer",
+        "kind": "instance",
+        "ports": [
+          "upstream",
+          "downstream"
+        ]
+      },
+      {
+        "from": "rapt_pmp",
+        "to": "rapt_pmp_permissions",
+        "instance": "check_permissions",
+        "kind": "instance",
+        "ports": [
+          "addr",
+          "size_m1",
+          "priv",
+          "op_r",
+          "op_w",
+          "op_x",
+          "pmp_raw_addr",
+          "pmp_napot_mask",
+          "pmp_cfg_r",
+          "pmp_cfg_w",
+          "pmp_cfg_x",
+          "pmp_cfg_l"
         ]
       },
       {
@@ -10968,8 +12066,13 @@
       },
       {
         "from": "rapt_rnu",
-        "to": "rapt_rou",
+        "to": "rapt_operand_stage",
         "label": "renamed uop"
+      },
+      {
+        "from": "rapt_operand_stage",
+        "to": "rapt_rou",
+        "label": "UOQ / PRF read"
       },
       {
         "from": "rapt_rou",
@@ -10994,7 +12097,7 @@
       {
         "from": "rapt_ieu",
         "to": "rapt_cdb_arb",
-        "label": "CDB"
+        "label": "system-port result"
       },
       {
         "from": "rapt_feu",
@@ -11002,9 +12105,14 @@
         "label": "CDB"
       },
       {
+        "from": "rapt_ieu",
+        "to": "rapt_rou",
+        "label": "guarded integer / branch / MUL-DIV"
+      },
+      {
         "from": "rapt_lsu",
-        "to": "rapt_cdb_arb",
-        "label": "CDB"
+        "to": "rapt_rou",
+        "label": "guarded memory completion"
       },
       {
         "from": "rapt_cdb_arb",
@@ -11032,27 +12140,22 @@
         "label": "fill"
       },
       {
-        "from": "rapt_lsu",
-        "to": "rapt_bus",
-        "label": "uncached / miss"
-      },
-      {
         "from": "rapt_bus",
-        "to": "rapt_l2",
+        "to": "rapt_axi_master",
         "label": "unified"
       },
       {
-        "from": "rapt_l2",
-        "to": "rapt_axi_master",
+        "from": "rapt_axi_master",
+        "to": "rapt_l2",
         "label": "AXI"
       },
       {
-        "from": "rapt_axi_master",
+        "from": "rapt_l2",
         "to": "rapt_router",
         "label": "cluster"
       },
       {
-        "from": "rapt_axi_master",
+        "from": "rapt_l2",
         "to": "soc_pmem",
         "label": "PMEM 0x80000000"
       },
@@ -11075,20 +12178,23 @@
   },
   "model": {
     "notes": [
-      "IFU includes RAPT_FETCH_RESPONSE_STAGE=1.",
-      "Issue occupancy uses registered vacancy (RAPT_IQ_RECLAIM_ON_ISSUE=0) as +1.",
-      "L1D hit = 2 cycles from docs/perf-iterations.md (SRAM design).",
-      "RAPT_M_FAST makes integer mul 1 cycle; this is not a divider model.",
-      "PMEM/UART cycles are abstract PMA-window costs, not FPGA/board measurements."
+      "Default RAPT_FETCH_RESPONSE_STAGE=0: no extra IFU response register (docs/uarch.md).",
+      "Default RAPT_IQ_RECLAIM_ON_ISSUE=1: an issued queue slot may be reused on that edge.",
+      "RNQ and rename_pipe are inside RNU. rapt_operand_stage buffers renamed packets; ROU owns the operand-reading UOQ.",
+      "Default integer, branch, and memory completions bypass the common register; MUL/DIV retains it. Scalar FP has local result buffering.",
+      "L1D hit returns from the registered access state. ITLB/DTLB are rapt_tlb; misses use rapt_ptw.",
+      "Default L1D has 2 MSHRs. L2 is passthrough unless RAPT_L2_EN is set.",
+      "PMEM/UART cycle costs are abstract PMA-window delays, not board measurements.",
+      "Animation uses simplified queues, one completion delay, and conservative retirement; it omits redirects, replay, and actual ALU bypass timing. Model IPC is not RTL IPC."
     ],
     "gap": 0.42,
     "cycle_seconds": 0.18
   },
   "trace": {
     "kind": "contract-cycle",
-    "cycles": 77,
+    "cycles": 53,
     "committed": 63,
-    "ipc": 0.818,
+    "ipc": 1.189,
     "widths": {
       "decode": 2,
       "rename": 2,
@@ -11116,8 +12222,8 @@
         "t": 1,
         "occ": {
           "rapt_l1i": [
-            0,
-            1
+            2,
+            3
           ],
           "rapt_ifu": [
             0,
@@ -11129,10 +12235,14 @@
         "t": 2,
         "occ": {
           "rapt_l1i": [
+            4,
+            5
+          ],
+          "rapt_ifu": [
             2,
             3
           ],
-          "rapt_ifu": [
+          "rapt_fqu": [
             0,
             1
           ]
@@ -11142,14 +12252,18 @@
         "t": 3,
         "occ": {
           "rapt_l1i": [
-            2,
-            3
+            6,
+            7
           ],
           "rapt_ifu": [
+            4,
+            5
+          ],
+          "rapt_fqu": [
             2,
             3
           ],
-          "rapt_fqu": [
+          "rapt_idu": [
             0,
             1
           ]
@@ -11159,14 +12273,22 @@
         "t": 4,
         "occ": {
           "rapt_l1i": [
+            8,
+            9
+          ],
+          "rapt_ifu": [
+            6,
+            7
+          ],
+          "rapt_fqu": [
             4,
             5
           ],
-          "rapt_ifu": [
+          "rapt_idu": [
             2,
             3
           ],
-          "rapt_idu": [
+          "rapt_rnu": [
             0,
             1
           ]
@@ -11176,18 +12298,26 @@
         "t": 5,
         "occ": {
           "rapt_l1i": [
-            4,
-            5
+            10,
+            11
           ],
           "rapt_ifu": [
+            8,
+            9
+          ],
+          "rapt_fqu": [
+            6,
+            7
+          ],
+          "rapt_idu": [
             4,
             5
           ],
-          "rapt_fqu": [
+          "rapt_rnu": [
             2,
             3
           ],
-          "rapt_rnu": [
+          "rapt_prf": [
             0,
             1
           ]
@@ -11197,18 +12327,30 @@
         "t": 6,
         "occ": {
           "rapt_l1i": [
+            12,
+            13
+          ],
+          "rapt_ifu": [
+            10,
+            11
+          ],
+          "rapt_fqu": [
+            8,
+            9
+          ],
+          "rapt_idu": [
             6,
             7
           ],
-          "rapt_ifu": [
+          "rapt_rnu": [
             4,
             5
           ],
-          "rapt_idu": [
+          "rapt_prf": [
             2,
             3
           ],
-          "rapt_prf": [
+          "rapt_rou": [
             0,
             1
           ]
@@ -11218,24 +12360,38 @@
         "t": 7,
         "occ": {
           "rapt_l1i": [
-            6,
-            7
+            14,
+            15
           ],
           "rapt_ifu": [
+            12,
+            13
+          ],
+          "rapt_fqu": [
+            10,
+            11
+          ],
+          "rapt_idu": [
+            8,
+            9
+          ],
+          "rapt_rnu": [
             6,
             7
           ],
-          "rapt_fqu": [
+          "rapt_prf": [
             4,
             5
           ],
-          "rapt_rnu": [
+          "rapt_rou": [
+            0,
+            1,
             2,
             3
           ],
-          "rapt_rou": [
-            0,
-            1
+          "rapt_ieu": [
+            1,
+            0
           ]
         }
       },
@@ -11243,26 +12399,40 @@
         "t": 8,
         "occ": {
           "rapt_l1i": [
+            16,
+            17
+          ],
+          "rapt_ifu": [
+            14,
+            15
+          ],
+          "rapt_fqu": [
+            12,
+            13
+          ],
+          "rapt_idu": [
+            10,
+            11
+          ],
+          "rapt_rnu": [
             8,
             9
           ],
-          "rapt_ifu": [
+          "rapt_prf": [
             6,
             7
           ],
-          "rapt_idu": [
+          "rapt_rou": [
+            0,
+            1,
+            2,
+            3,
             4,
             5
           ],
-          "rapt_prf": [
-            2,
-            3
-          ],
-          "rapt_rou": [
-            0,
-            1
-          ],
           "rapt_ieu": [
+            2,
+            3,
             1,
             0
           ]
@@ -11272,30 +12442,44 @@
         "t": 9,
         "occ": {
           "rapt_l1i": [
-            8,
-            9
+            18,
+            19
           ],
           "rapt_ifu": [
-            8,
-            9
+            16,
+            17
           ],
           "rapt_fqu": [
-            6,
-            7
+            14,
+            15
+          ],
+          "rapt_idu": [
+            12,
+            13
           ],
           "rapt_rnu": [
-            4,
-            5
+            10,
+            11
+          ],
+          "rapt_prf": [
+            8,
+            9
           ],
           "rapt_rou": [
             0,
             1,
             2,
-            3
+            3,
+            4,
+            5,
+            6,
+            7
           ],
           "rapt_ieu": [
-            1,
-            0
+            4,
+            5,
+            2,
+            3
           ]
         }
       },
@@ -11303,33 +12487,47 @@
         "t": 10,
         "occ": {
           "rapt_l1i": [
+            20,
+            21
+          ],
+          "rapt_ifu": [
+            18,
+            19
+          ],
+          "rapt_fqu": [
+            16,
+            17
+          ],
+          "rapt_idu": [
+            14,
+            15
+          ],
+          "rapt_rnu": [
+            12,
+            13
+          ],
+          "rapt_prf": [
             10,
             11
           ],
-          "rapt_ifu": [
+          "rapt_rou": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
             8,
             9
           ],
-          "rapt_idu": [
+          "rapt_ieu": [
             6,
-            7
-          ],
-          "rapt_prf": [
+            7,
             4,
             5
           ],
-          "rapt_rou": [
-            0,
-            1,
-            2,
-            3
-          ],
-          "rapt_ieu": [
-            2,
-            3
-          ],
-          "rapt_cdb_arb": [
-            1,
+          "rapt_cmu": [
             0
           ]
         }
@@ -11338,32 +12536,49 @@
         "t": 11,
         "occ": {
           "rapt_l1i": [
-            10,
-            11
+            22,
+            23
           ],
           "rapt_ifu": [
+            20,
+            21
+          ],
+          "rapt_fqu": [
+            18,
+            19
+          ],
+          "rapt_idu": [
+            16,
+            17
+          ],
+          "rapt_rnu": [
+            14,
+            15
+          ],
+          "rapt_prf": [
+            12,
+            13
+          ],
+          "rapt_rou": [
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
             10,
             11
           ],
-          "rapt_fqu": [
+          "rapt_ieu": [
             8,
-            9
-          ],
-          "rapt_rnu": [
+            9,
             6,
             7
           ],
-          "rapt_rou": [
-            0,
+          "rapt_cmu": [
             1,
-            2,
-            3,
-            4,
-            5
-          ],
-          "rapt_ieu": [
-            2,
-            3
+            2
           ]
         }
       },
@@ -11371,38 +12586,51 @@
         "t": 12,
         "occ": {
           "rapt_l1i": [
+            24,
+            25
+          ],
+          "rapt_ifu": [
+            22,
+            23
+          ],
+          "rapt_fqu": [
+            20,
+            21
+          ],
+          "rapt_idu": [
+            18,
+            19
+          ],
+          "rapt_rnu": [
+            16,
+            17
+          ],
+          "rapt_prf": [
+            14,
+            15
+          ],
+          "rapt_rou": [
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
             12,
             13
           ],
-          "rapt_ifu": [
+          "rapt_ieu": [
             10,
-            11
-          ],
-          "rapt_idu": [
             8,
             9
           ],
-          "rapt_prf": [
-            6,
-            7
-          ],
-          "rapt_rou": [
-            1,
-            2,
-            3,
-            4,
-            5
-          ],
-          "rapt_ieu": [
-            4,
-            5
-          ],
-          "rapt_cdb_arb": [
-            2,
-            3
+          "rapt_lsu": [
+            11
           ],
           "rapt_cmu": [
-            0
+            3,
+            4
           ]
         }
       },
@@ -11410,36 +12638,54 @@
         "t": 13,
         "occ": {
           "rapt_l1i": [
-            12,
-            13
+            26,
+            27
           ],
           "rapt_ifu": [
-            12,
-            13
+            24,
+            25
           ],
           "rapt_fqu": [
-            10,
-            11
+            22,
+            23
+          ],
+          "rapt_idu": [
+            20,
+            21
           ],
           "rapt_rnu": [
-            8,
-            9
+            18,
+            19
+          ],
+          "rapt_prf": [
+            16,
+            17
           ],
           "rapt_rou": [
-            2,
-            3,
-            4,
-            5,
-            6,
-            7
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15
           ],
           "rapt_ieu": [
-            4,
-            5
+            13,
+            10
+          ],
+          "rapt_lsu": [
+            12,
+            11
+          ],
+          "rapt_l1d": [
+            11
           ],
           "rapt_cmu": [
-            0,
-            1
+            5,
+            6
           ]
         }
       },
@@ -11447,38 +12693,58 @@
         "t": 14,
         "occ": {
           "rapt_l1i": [
-            14,
-            15
+            28,
+            29
           ],
           "rapt_ifu": [
-            12,
-            13
+            26,
+            27
+          ],
+          "rapt_fqu": [
+            24,
+            25
           ],
           "rapt_idu": [
-            10,
-            11
+            22,
+            23
+          ],
+          "rapt_rnu": [
+            20,
+            21
           ],
           "rapt_prf": [
-            8,
-            9
+            18,
+            19
           ],
           "rapt_rou": [
-            4,
-            5,
-            6,
-            7
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17
           ],
           "rapt_ieu": [
-            6,
-            7
+            14,
+            13
           ],
-          "rapt_cdb_arb": [
-            4,
-            5
+          "rapt_ieu_muldiv": [
+            15
+          ],
+          "rapt_l1d": [
+            11,
+            12
+          ],
+          "rapt_lsu": [
+            11,
+            12
           ],
           "rapt_cmu": [
-            2,
-            3
+            7,
+            8
           ]
         }
       },
@@ -11486,702 +12752,62 @@
         "t": 15,
         "occ": {
           "rapt_l1i": [
-            14,
-            15
+            30,
+            31
           ],
           "rapt_ifu": [
-            14,
-            15
+            28,
+            29
           ],
           "rapt_fqu": [
-            12,
-            13
+            26,
+            27
+          ],
+          "rapt_idu": [
+            24,
+            25
           ],
           "rapt_rnu": [
-            10,
-            11
+            22,
+            23
+          ],
+          "rapt_prf": [
+            20,
+            21
           ],
           "rapt_rou": [
-            4,
-            5,
-            6,
-            7,
-            8,
-            9
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19
           ],
           "rapt_ieu": [
-            6,
-            7
+            16,
+            17,
+            14
+          ],
+          "rapt_l1d": [
+            12
+          ],
+          "rapt_lsu": [
+            12
+          ],
+          "rapt_ieu_muldiv": [
+            15
           ],
           "rapt_cmu": [
-            2,
-            3
+            9,
+            10
           ]
         }
       },
       {
         "t": 16,
-        "occ": {
-          "rapt_l1i": [
-            16,
-            17
-          ],
-          "rapt_ifu": [
-            14,
-            15
-          ],
-          "rapt_idu": [
-            12,
-            13
-          ],
-          "rapt_prf": [
-            10,
-            11
-          ],
-          "rapt_rou": [
-            6,
-            7,
-            8,
-            9
-          ],
-          "rapt_ieu": [
-            8,
-            9
-          ],
-          "rapt_cdb_arb": [
-            6,
-            7
-          ],
-          "rapt_cmu": [
-            4,
-            5
-          ]
-        }
-      },
-      {
-        "t": 17,
-        "occ": {
-          "rapt_l1i": [
-            16,
-            17
-          ],
-          "rapt_ifu": [
-            16,
-            17
-          ],
-          "rapt_fqu": [
-            14,
-            15
-          ],
-          "rapt_rnu": [
-            12,
-            13
-          ],
-          "rapt_rou": [
-            6,
-            7,
-            8,
-            9,
-            10,
-            11
-          ],
-          "rapt_ieu": [
-            8,
-            9
-          ],
-          "rapt_cmu": [
-            4,
-            5
-          ]
-        }
-      },
-      {
-        "t": 18,
-        "occ": {
-          "rapt_l1i": [
-            18,
-            19
-          ],
-          "rapt_ifu": [
-            16,
-            17
-          ],
-          "rapt_idu": [
-            14,
-            15
-          ],
-          "rapt_prf": [
-            12,
-            13
-          ],
-          "rapt_rou": [
-            8,
-            9,
-            10,
-            11
-          ],
-          "rapt_ieu": [
-            10
-          ],
-          "rapt_lsu": [
-            11
-          ],
-          "rapt_cdb_arb": [
-            8,
-            9
-          ],
-          "rapt_cmu": [
-            6,
-            7
-          ]
-        }
-      },
-      {
-        "t": 19,
-        "occ": {
-          "rapt_l1i": [
-            18,
-            19
-          ],
-          "rapt_ifu": [
-            18,
-            19
-          ],
-          "rapt_fqu": [
-            16,
-            17
-          ],
-          "rapt_rnu": [
-            14,
-            15
-          ],
-          "rapt_rou": [
-            8,
-            9,
-            10,
-            11,
-            12,
-            13
-          ],
-          "rapt_ieu": [
-            10
-          ],
-          "rapt_l1d": [
-            11
-          ],
-          "rapt_lsu": [
-            11
-          ],
-          "rapt_cmu": [
-            6,
-            7
-          ]
-        }
-      },
-      {
-        "t": 20,
-        "occ": {
-          "rapt_l1i": [
-            20,
-            21
-          ],
-          "rapt_ifu": [
-            18,
-            19
-          ],
-          "rapt_idu": [
-            16,
-            17
-          ],
-          "rapt_prf": [
-            14,
-            15
-          ],
-          "rapt_rou": [
-            10,
-            11,
-            12,
-            13
-          ],
-          "rapt_ieu": [
-            13
-          ],
-          "rapt_lsu": [
-            12,
-            11
-          ],
-          "rapt_l1d": [
-            11
-          ],
-          "rapt_cdb_arb": [
-            10
-          ],
-          "rapt_cmu": [
-            8,
-            9
-          ]
-        }
-      },
-      {
-        "t": 21,
-        "occ": {
-          "rapt_l1i": [
-            20,
-            21
-          ],
-          "rapt_ifu": [
-            20,
-            21
-          ],
-          "rapt_fqu": [
-            18,
-            19
-          ],
-          "rapt_rnu": [
-            16,
-            17
-          ],
-          "rapt_rou": [
-            10,
-            11,
-            12,
-            13,
-            14,
-            15
-          ],
-          "rapt_ieu": [
-            13
-          ],
-          "rapt_l1d": [
-            12
-          ],
-          "rapt_lsu": [
-            12
-          ],
-          "rapt_cdb_arb": [
-            11
-          ],
-          "rapt_cmu": [
-            8,
-            9
-          ]
-        }
-      },
-      {
-        "t": 22,
-        "occ": {
-          "rapt_l1i": [
-            22,
-            23
-          ],
-          "rapt_ifu": [
-            20,
-            21
-          ],
-          "rapt_idu": [
-            18,
-            19
-          ],
-          "rapt_prf": [
-            16,
-            17
-          ],
-          "rapt_rou": [
-            11,
-            12,
-            13,
-            14,
-            15
-          ],
-          "rapt_ieu": [
-            14
-          ],
-          "rapt_ieu_muldiv": [
-            15
-          ],
-          "rapt_l1d": [
-            12
-          ],
-          "rapt_lsu": [
-            12
-          ],
-          "rapt_cdb_arb": [
-            13
-          ],
-          "rapt_cmu": [
-            9,
-            10
-          ]
-        }
-      },
-      {
-        "t": 23,
-        "occ": {
-          "rapt_l1i": [
-            22,
-            23
-          ],
-          "rapt_ifu": [
-            22,
-            23
-          ],
-          "rapt_fqu": [
-            20,
-            21
-          ],
-          "rapt_rnu": [
-            18,
-            19
-          ],
-          "rapt_rou": [
-            12,
-            13,
-            14,
-            15,
-            16,
-            17
-          ],
-          "rapt_ieu": [
-            14
-          ],
-          "rapt_ieu_muldiv": [
-            15
-          ],
-          "rapt_cdb_arb": [
-            12
-          ],
-          "rapt_cmu": [
-            10,
-            11
-          ]
-        }
-      },
-      {
-        "t": 24,
-        "occ": {
-          "rapt_l1i": [
-            24,
-            25
-          ],
-          "rapt_ifu": [
-            22,
-            23
-          ],
-          "rapt_idu": [
-            20,
-            21
-          ],
-          "rapt_prf": [
-            18,
-            19
-          ],
-          "rapt_rou": [
-            12,
-            13,
-            14,
-            15,
-            16,
-            17
-          ],
-          "rapt_ieu": [
-            16,
-            17
-          ],
-          "rapt_cdb_arb": [
-            14,
-            15
-          ],
-          "rapt_cmu": [
-            10,
-            11
-          ]
-        }
-      },
-      {
-        "t": 25,
-        "occ": {
-          "rapt_l1i": [
-            24,
-            25
-          ],
-          "rapt_ifu": [
-            24,
-            25
-          ],
-          "rapt_fqu": [
-            22,
-            23
-          ],
-          "rapt_rnu": [
-            20,
-            21
-          ],
-          "rapt_rou": [
-            14,
-            15,
-            16,
-            17,
-            18,
-            19
-          ],
-          "rapt_ieu": [
-            16,
-            17
-          ],
-          "rapt_cmu": [
-            12,
-            13
-          ]
-        }
-      },
-      {
-        "t": 26,
-        "occ": {
-          "rapt_l1i": [
-            26,
-            27
-          ],
-          "rapt_ifu": [
-            24,
-            25
-          ],
-          "rapt_idu": [
-            22,
-            23
-          ],
-          "rapt_prf": [
-            20,
-            21
-          ],
-          "rapt_rou": [
-            16,
-            17,
-            18,
-            19
-          ],
-          "rapt_ieu": [
-            19
-          ],
-          "rapt_lsu": [
-            18
-          ],
-          "rapt_cdb_arb": [
-            16,
-            17
-          ],
-          "rapt_cmu": [
-            14,
-            15
-          ]
-        }
-      },
-      {
-        "t": 27,
-        "occ": {
-          "rapt_l1i": [
-            26,
-            27
-          ],
-          "rapt_ifu": [
-            26,
-            27
-          ],
-          "rapt_fqu": [
-            24,
-            25
-          ],
-          "rapt_rnu": [
-            22,
-            23
-          ],
-          "rapt_rou": [
-            16,
-            17,
-            18,
-            19,
-            20,
-            21
-          ],
-          "rapt_ieu": [
-            19
-          ],
-          "rapt_l1d": [
-            18
-          ],
-          "rapt_lsu": [
-            18
-          ],
-          "rapt_cmu": [
-            14,
-            15
-          ]
-        }
-      },
-      {
-        "t": 28,
-        "occ": {
-          "rapt_l1i": [
-            28,
-            29
-          ],
-          "rapt_ifu": [
-            26,
-            27
-          ],
-          "rapt_idu": [
-            24,
-            25
-          ],
-          "rapt_prf": [
-            22,
-            23
-          ],
-          "rapt_rou": [
-            18,
-            19,
-            20,
-            21
-          ],
-          "rapt_ieu": [
-            20,
-            21
-          ],
-          "rapt_l1d": [
-            18
-          ],
-          "rapt_lsu": [
-            18
-          ],
-          "rapt_cdb_arb": [
-            19
-          ],
-          "rapt_cmu": [
-            16,
-            17
-          ]
-        }
-      },
-      {
-        "t": 29,
-        "occ": {
-          "rapt_l1i": [
-            28,
-            29
-          ],
-          "rapt_ifu": [
-            28,
-            29
-          ],
-          "rapt_fqu": [
-            26,
-            27
-          ],
-          "rapt_rnu": [
-            24,
-            25
-          ],
-          "rapt_rou": [
-            18,
-            19,
-            20,
-            21,
-            22,
-            23
-          ],
-          "rapt_ieu": [
-            20,
-            21
-          ],
-          "rapt_cdb_arb": [
-            18
-          ],
-          "rapt_cmu": [
-            16,
-            17
-          ]
-        }
-      },
-      {
-        "t": 30,
-        "occ": {
-          "rapt_l1i": [
-            30,
-            31
-          ],
-          "rapt_ifu": [
-            28,
-            29
-          ],
-          "rapt_idu": [
-            26,
-            27
-          ],
-          "rapt_prf": [
-            24,
-            25
-          ],
-          "rapt_rou": [
-            18,
-            19,
-            20,
-            21,
-            22,
-            23
-          ],
-          "rapt_ieu": [
-            23,
-            22
-          ],
-          "rapt_cdb_arb": [
-            20,
-            21
-          ],
-          "rapt_cmu": [
-            16,
-            17
-          ]
-        }
-      },
-      {
-        "t": 31,
-        "occ": {
-          "rapt_l1i": [
-            30,
-            31
-          ],
-          "rapt_ifu": [
-            30,
-            31
-          ],
-          "rapt_fqu": [
-            28,
-            29
-          ],
-          "rapt_rnu": [
-            26,
-            27
-          ],
-          "rapt_rou": [
-            19,
-            20,
-            21,
-            22,
-            23,
-            24,
-            25
-          ],
-          "rapt_ieu": [
-            23,
-            22
-          ],
-          "rapt_cmu": [
-            17,
-            18
-          ]
-        }
-      },
-      {
-        "t": 32,
         "occ": {
           "rapt_l1i": [
             32,
@@ -12191,7 +12817,127 @@
             30,
             31
           ],
+          "rapt_fqu": [
+            28,
+            29
+          ],
           "rapt_idu": [
+            26,
+            27
+          ],
+          "rapt_rnu": [
+            24,
+            25
+          ],
+          "rapt_prf": [
+            22,
+            23
+          ],
+          "rapt_rou": [
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21
+          ],
+          "rapt_ieu": [
+            19,
+            16,
+            17
+          ],
+          "rapt_lsu": [
+            18
+          ],
+          "rapt_cdb_arb": [
+            15
+          ],
+          "rapt_cmu": [
+            10,
+            11
+          ]
+        }
+      },
+      {
+        "t": 17,
+        "occ": {
+          "rapt_l1i": [
+            34,
+            35
+          ],
+          "rapt_ifu": [
+            32,
+            33
+          ],
+          "rapt_fqu": [
+            30,
+            31
+          ],
+          "rapt_idu": [
+            28,
+            29
+          ],
+          "rapt_rnu": [
+            26,
+            27
+          ],
+          "rapt_prf": [
+            24,
+            25
+          ],
+          "rapt_rou": [
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23
+          ],
+          "rapt_ieu": [
+            20,
+            21,
+            19
+          ],
+          "rapt_l1d": [
+            18
+          ],
+          "rapt_lsu": [
+            18
+          ],
+          "rapt_cmu": [
+            12,
+            13
+          ]
+        }
+      },
+      {
+        "t": 18,
+        "occ": {
+          "rapt_l1i": [
+            36,
+            37
+          ],
+          "rapt_ifu": [
+            34,
+            35
+          ],
+          "rapt_fqu": [
+            32,
+            33
+          ],
+          "rapt_idu": [
+            30,
+            31
+          ],
+          "rapt_rnu": [
             28,
             29
           ],
@@ -12200,6 +12946,11 @@
             27
           ],
           "rapt_rou": [
+            16,
+            17,
+            18,
+            19,
+            20,
             21,
             22,
             23,
@@ -12207,12 +12958,171 @@
             25
           ],
           "rapt_ieu": [
+            23,
+            22,
+            20,
+            21
+          ],
+          "rapt_l1d": [
+            18
+          ],
+          "rapt_lsu": [
+            18
+          ],
+          "rapt_cmu": [
+            14,
+            15
+          ]
+        }
+      },
+      {
+        "t": 19,
+        "occ": {
+          "rapt_l1i": [
+            38,
+            39
+          ],
+          "rapt_ifu": [
+            36,
+            37
+          ],
+          "rapt_fqu": [
+            34,
+            35
+          ],
+          "rapt_idu": [
+            32,
+            33
+          ],
+          "rapt_rnu": [
+            30,
+            31
+          ],
+          "rapt_prf": [
+            28,
+            29
+          ],
+          "rapt_rou": [
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27
+          ],
+          "rapt_ieu": [
+            25,
+            24,
+            23,
+            22
+          ],
+          "rapt_cmu": [
+            16,
+            17
+          ]
+        }
+      },
+      {
+        "t": 20,
+        "occ": {
+          "rapt_l1i": [
+            40,
+            41
+          ],
+          "rapt_ifu": [
+            38,
+            39
+          ],
+          "rapt_fqu": [
+            36,
+            37
+          ],
+          "rapt_idu": [
+            34,
+            35
+          ],
+          "rapt_rnu": [
+            32,
+            33
+          ],
+          "rapt_prf": [
+            30,
+            31
+          ],
+          "rapt_rou": [
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29
+          ],
+          "rapt_ieu": [
+            26,
+            27,
             25,
             24
           ],
-          "rapt_cdb_arb": [
+          "rapt_cmu": [
+            17,
+            18
+          ]
+        }
+      },
+      {
+        "t": 21,
+        "occ": {
+          "rapt_l1i": [
+            42,
+            43
+          ],
+          "rapt_ifu": [
+            40,
+            41
+          ],
+          "rapt_fqu": [
+            38,
+            39
+          ],
+          "rapt_idu": [
+            36,
+            37
+          ],
+          "rapt_rnu": [
+            34,
+            35
+          ],
+          "rapt_prf": [
+            32,
+            33
+          ],
+          "rapt_rou": [
+            21,
+            22,
             23,
-            22
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31
+          ],
+          "rapt_ieu": [
+            29,
+            28,
+            26,
+            27
           ],
           "rapt_cmu": [
             19,
@@ -12221,75 +13131,50 @@
         }
       },
       {
-        "t": 33,
+        "t": 22,
         "occ": {
           "rapt_l1i": [
-            32,
-            33
+            44,
+            45
           ],
           "rapt_ifu": [
-            32,
-            33
+            42,
+            43
           ],
           "rapt_fqu": [
-            30,
-            31
+            40,
+            41
+          ],
+          "rapt_idu": [
+            38,
+            39
           ],
           "rapt_rnu": [
-            28,
-            29
+            36,
+            37
           ],
-          "rapt_rou": [
-            22,
-            23,
-            24,
-            25,
-            26,
-            27
-          ],
-          "rapt_ieu": [
-            25,
-            24
-          ],
-          "rapt_cmu": [
-            20,
-            21
-          ]
-        }
-      },
-      {
-        "t": 34,
-        "occ": {
-          "rapt_l1i": [
+          "rapt_prf": [
             34,
             35
           ],
-          "rapt_ifu": [
-            32,
-            33
-          ],
-          "rapt_idu": [
-            30,
-            31
-          ],
-          "rapt_prf": [
-            28,
-            29
-          ],
           "rapt_rou": [
             23,
             24,
             25,
             26,
-            27
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33
           ],
           "rapt_ieu": [
-            26,
-            27
-          ],
-          "rapt_cdb_arb": [
-            25,
-            24
+            30,
+            31,
+            29,
+            28
           ],
           "rapt_cmu": [
             21,
@@ -12298,75 +13183,52 @@
         }
       },
       {
-        "t": 35,
+        "t": 23,
         "occ": {
           "rapt_l1i": [
-            34,
-            35
+            46,
+            47
           ],
           "rapt_ifu": [
-            34,
-            35
+            44,
+            45
           ],
           "rapt_fqu": [
-            32,
-            33
+            42,
+            43
+          ],
+          "rapt_idu": [
+            40,
+            41
           ],
           "rapt_rnu": [
-            30,
-            31
+            38,
+            39
           ],
-          "rapt_rou": [
-            24,
-            25,
-            26,
-            27,
-            28,
-            29
-          ],
-          "rapt_ieu": [
-            26,
-            27
-          ],
-          "rapt_cmu": [
-            22,
-            23
-          ]
-        }
-      },
-      {
-        "t": 36,
-        "occ": {
-          "rapt_l1i": [
+          "rapt_prf": [
             36,
             37
           ],
-          "rapt_ifu": [
-            34,
-            35
-          ],
-          "rapt_idu": [
-            32,
-            33
-          ],
-          "rapt_prf": [
-            30,
-            31
-          ],
           "rapt_rou": [
             25,
             26,
             27,
             28,
-            29
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35
           ],
           "rapt_ieu": [
-            29,
-            28
+            33,
+            31,
+            30
           ],
-          "rapt_cdb_arb": [
-            26,
-            27
+          "rapt_lsu": [
+            32
           ],
           "rapt_cmu": [
             23,
@@ -12375,153 +13237,131 @@
         }
       },
       {
-        "t": 37,
+        "t": 24,
         "occ": {
           "rapt_l1i": [
-            36,
-            37
+            48,
+            49
           ],
           "rapt_ifu": [
-            36,
-            37
+            46,
+            47
           ],
           "rapt_fqu": [
-            34,
-            35
+            44,
+            45
+          ],
+          "rapt_idu": [
+            42,
+            43
           ],
           "rapt_rnu": [
-            32,
-            33
+            40,
+            41
+          ],
+          "rapt_prf": [
+            38,
+            39
           ],
           "rapt_rou": [
-            26,
             27,
             28,
             29,
             30,
-            31
-          ],
-          "rapt_ieu": [
-            29,
-            28
-          ],
-          "rapt_cmu": [
-            24,
-            25
-          ]
-        }
-      },
-      {
-        "t": 38,
-        "occ": {
-          "rapt_l1i": [
-            38,
-            39
-          ],
-          "rapt_ifu": [
+            31,
+            32,
+            33,
+            34,
+            35,
             36,
             37
           ],
-          "rapt_idu": [
+          "rapt_lsu": [
             34,
             35
-          ],
-          "rapt_prf": [
-            32,
-            33
-          ],
-          "rapt_rou": [
-            28,
-            29,
-            30,
-            31
-          ],
-          "rapt_ieu": [
-            30,
-            31
-          ],
-          "rapt_cdb_arb": [
-            29,
-            28
-          ],
-          "rapt_cmu": [
-            26,
-            27
-          ]
-        }
-      },
-      {
-        "t": 39,
-        "occ": {
-          "rapt_l1i": [
-            38,
-            39
-          ],
-          "rapt_ifu": [
-            38,
-            39
-          ],
-          "rapt_fqu": [
-            36,
-            37
-          ],
-          "rapt_rnu": [
-            34,
-            35
-          ],
-          "rapt_rou": [
-            28,
-            29,
-            30,
-            31,
-            32,
-            33
-          ],
-          "rapt_ieu": [
-            31,
-            30
-          ],
-          "rapt_cmu": [
-            26,
-            27
-          ]
-        }
-      },
-      {
-        "t": 40,
-        "occ": {
-          "rapt_l1i": [
-            40,
-            41
-          ],
-          "rapt_ifu": [
-            38,
-            39
-          ],
-          "rapt_idu": [
-            36,
-            37
-          ],
-          "rapt_prf": [
-            34,
-            35
-          ],
-          "rapt_rou": [
-            29,
-            30,
-            31,
-            32,
-            33
           ],
           "rapt_ieu": [
             33,
             31
           ],
-          "rapt_lsu": [
+          "soc_pmem": [
             32
           ],
-          "rapt_cdb_arb": [
-            30
+          "rapt_l1d": [
+            32
+          ],
+          "rapt_bus": [
+            32
+          ],
+          "rapt_axi_master": [
+            32
+          ],
+          "rapt_cmu": [
+            25,
+            26
+          ]
+        }
+      },
+      {
+        "t": 25,
+        "occ": {
+          "rapt_l1i": [
+            50,
+            51
+          ],
+          "rapt_ifu": [
+            48,
+            49
+          ],
+          "rapt_fqu": [
+            46,
+            47
+          ],
+          "rapt_idu": [
+            44,
+            45
+          ],
+          "rapt_rnu": [
+            42,
+            43
+          ],
+          "rapt_prf": [
+            40,
+            41
+          ],
+          "rapt_rou": [
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39
+          ],
+          "rapt_lsu": [
+            35,
+            36,
+            37
+          ],
+          "soc_pmem": [
+            32,
+            34
+          ],
+          "rapt_l1d": [
+            32,
+            34
+          ],
+          "rapt_bus": [
+            32,
+            34
+          ],
+          "rapt_axi_master": [
+            32,
+            34
           ],
           "rapt_cmu": [
             27,
@@ -12530,100 +13370,70 @@
         }
       },
       {
-        "t": 41,
+        "t": 26,
         "occ": {
           "rapt_l1i": [
-            40,
-            41
+            52,
+            53
           ],
           "rapt_ifu": [
-            40,
-            41
+            50,
+            51
           ],
           "rapt_fqu": [
-            38,
-            39
+            48,
+            49
+          ],
+          "rapt_idu": [
+            46,
+            47
           ],
           "rapt_rnu": [
-            36,
-            37
+            44,
+            45
           ],
-          "rapt_rou": [
-            30,
-            31,
-            32,
-            33,
-            34,
-            35
-          ],
-          "rapt_ieu": [
-            33
-          ],
-          "soc_pmem": [
-            32
-          ],
-          "rapt_l1d": [
-            32
-          ],
-          "rapt_bus": [
-            32
-          ],
-          "rapt_axi_master": [
-            32
-          ],
-          "rapt_cdb_arb": [
-            31
-          ],
-          "rapt_cmu": [
-            28,
-            29
-          ]
-        }
-      },
-      {
-        "t": 42,
-        "occ": {
-          "rapt_l1i": [
+          "rapt_prf": [
             42,
             43
           ],
-          "rapt_ifu": [
-            40,
-            41
-          ],
-          "rapt_idu": [
-            38,
-            39
-          ],
-          "rapt_prf": [
-            36,
-            37
-          ],
           "rapt_rou": [
             31,
             32,
             33,
             34,
-            35
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41
           ],
           "rapt_lsu": [
+            36,
+            37,
+            38,
+            39
+          ],
+          "soc_pmem": [
+            32,
             34,
             35
           ],
-          "soc_pmem": [
-            32
-          ],
           "rapt_l1d": [
-            32
+            32,
+            34,
+            35
           ],
           "rapt_bus": [
-            32
+            32,
+            34,
+            35
           ],
           "rapt_axi_master": [
-            32
-          ],
-          "rapt_cdb_arb": [
-            33
+            32,
+            34,
+            35
           ],
           "rapt_cmu": [
             29,
@@ -12632,408 +13442,29 @@
         }
       },
       {
-        "t": 43,
+        "t": 27,
         "occ": {
           "rapt_l1i": [
-            42,
-            43
+            54,
+            55
           ],
           "rapt_ifu": [
-            42,
-            43
+            52,
+            53
           ],
           "rapt_fqu": [
-            40,
-            41
-          ],
-          "rapt_rnu": [
-            38,
-            39
-          ],
-          "rapt_rou": [
-            32,
-            33,
-            34,
-            35,
-            36,
-            37
-          ],
-          "rapt_lsu": [
-            35
-          ],
-          "soc_pmem": [
-            32,
-            34
-          ],
-          "rapt_l1d": [
-            32,
-            34
-          ],
-          "rapt_bus": [
-            32,
-            34
-          ],
-          "rapt_axi_master": [
-            32,
-            34
-          ],
-          "rapt_cmu": [
-            30,
-            31
-          ]
-        }
-      },
-      {
-        "t": 44,
-        "occ": {
-          "rapt_l1i": [
-            44,
-            45
-          ],
-          "rapt_ifu": [
-            42,
-            43
+            50,
+            51
           ],
           "rapt_idu": [
-            40,
-            41
-          ],
-          "rapt_prf": [
-            38,
-            39
-          ],
-          "rapt_rou": [
-            32,
-            33,
-            34,
-            35,
-            36,
-            37
-          ],
-          "rapt_lsu": [
-            36,
-            37
-          ],
-          "soc_pmem": [
-            32,
-            34,
-            35
-          ],
-          "rapt_l1d": [
-            32,
-            34,
-            35
-          ],
-          "rapt_bus": [
-            32,
-            34,
-            35
-          ],
-          "rapt_axi_master": [
-            32,
-            34,
-            35
-          ],
-          "rapt_cmu": [
-            30,
-            31
-          ]
-        }
-      },
-      {
-        "t": 45,
-        "occ": {
-          "rapt_l1i": [
-            44,
-            45
-          ],
-          "rapt_ifu": [
-            44,
-            45
-          ],
-          "rapt_fqu": [
-            42,
-            43
-          ],
-          "rapt_rnu": [
-            40,
-            41
-          ],
-          "rapt_rou": [
-            32,
-            33,
-            34,
-            35,
-            36,
-            37,
-            38,
-            39
-          ],
-          "rapt_lsu": [
-            37
-          ],
-          "soc_pmem": [
-            32,
-            34,
-            35,
-            36
-          ],
-          "rapt_l1d": [
-            32,
-            34,
-            35,
-            36
-          ],
-          "rapt_bus": [
-            32,
-            34,
-            35,
-            36
-          ],
-          "rapt_axi_master": [
-            32,
-            34,
-            35,
-            36
-          ],
-          "rapt_cmu": [
-            30,
-            31
-          ]
-        }
-      },
-      {
-        "t": 46,
-        "occ": {
-          "rapt_l1i": [
-            46,
-            47
-          ],
-          "rapt_ifu": [
-            44,
-            45
-          ],
-          "rapt_idu": [
-            42,
-            43
-          ],
-          "rapt_prf": [
-            40,
-            41
-          ],
-          "rapt_rou": [
-            32,
-            33,
-            34,
-            35,
-            36,
-            37,
-            38,
-            39
-          ],
-          "rapt_lsu": [
-            38,
-            39
-          ],
-          "soc_pmem": [
-            32,
-            34,
-            35,
-            36,
-            37
-          ],
-          "rapt_l1d": [
-            32,
-            34,
-            35,
-            36,
-            37
-          ],
-          "rapt_bus": [
-            32,
-            34,
-            35,
-            36,
-            37
-          ],
-          "rapt_axi_master": [
-            32,
-            34,
-            35,
-            36,
-            37
-          ],
-          "rapt_cmu": [
-            30,
-            31
-          ]
-        }
-      },
-      {
-        "t": 47,
-        "occ": {
-          "rapt_l1i": [
-            46,
-            47
-          ],
-          "rapt_ifu": [
-            46,
-            47
-          ],
-          "rapt_fqu": [
-            44,
-            45
-          ],
-          "rapt_rnu": [
-            42,
-            43
-          ],
-          "rapt_rou": [
-            32,
-            33,
-            34,
-            35,
-            36,
-            37,
-            38,
-            39,
-            40,
-            41
-          ],
-          "rapt_lsu": [
-            39
-          ],
-          "soc_pmem": [
-            32,
-            34,
-            35,
-            36,
-            37,
-            38
-          ],
-          "rapt_l1d": [
-            32,
-            34,
-            35,
-            36,
-            37,
-            38
-          ],
-          "rapt_bus": [
-            32,
-            34,
-            35,
-            36,
-            37,
-            38
-          ],
-          "rapt_axi_master": [
-            32,
-            34,
-            35,
-            36,
-            37,
-            38
-          ],
-          "rapt_cmu": [
-            30,
-            31
-          ]
-        }
-      },
-      {
-        "t": 48,
-        "occ": {
-          "rapt_l1i": [
             48,
             49
           ],
-          "rapt_ifu": [
+          "rapt_rnu": [
             46,
             47
-          ],
-          "rapt_idu": [
-            44,
-            45
           ],
           "rapt_prf": [
-            42,
-            43
-          ],
-          "rapt_rou": [
-            32,
-            33,
-            34,
-            35,
-            36,
-            37,
-            38,
-            39,
-            40,
-            41
-          ],
-          "rapt_ieu": [
-            40,
-            41
-          ],
-          "soc_pmem": [
-            32,
-            34,
-            35,
-            36,
-            37,
-            38,
-            39
-          ],
-          "rapt_l1d": [
-            32,
-            34,
-            35,
-            36,
-            37,
-            38,
-            39
-          ],
-          "rapt_bus": [
-            32,
-            34,
-            35,
-            36,
-            37,
-            38,
-            39
-          ],
-          "rapt_axi_master": [
-            32,
-            34,
-            35,
-            36,
-            37,
-            38,
-            39
-          ],
-          "rapt_cmu": [
-            30,
-            31
-          ]
-        }
-      },
-      {
-        "t": 49,
-        "occ": {
-          "rapt_l1i": [
-            48,
-            49
-          ],
-          "rapt_ifu": [
-            48,
-            49
-          ],
-          "rapt_fqu": [
-            46,
-            47
-          ],
-          "rapt_rnu": [
             44,
             45
           ],
@@ -13052,43 +13483,124 @@
             43
           ],
           "rapt_ieu": [
+            40,
+            41
+          ],
+          "rapt_lsu": [
+            37,
+            38,
+            39
+          ],
+          "soc_pmem": [
+            32,
+            34,
+            35,
+            36
+          ],
+          "rapt_l1d": [
+            32,
+            34,
+            35,
+            36
+          ],
+          "rapt_bus": [
+            32,
+            34,
+            35,
+            36
+          ],
+          "rapt_axi_master": [
+            32,
+            34,
+            35,
+            36
+          ],
+          "rapt_cmu": [
+            30,
+            31
+          ]
+        }
+      },
+      {
+        "t": 28,
+        "occ": {
+          "rapt_l1i": [
+            56,
+            57
+          ],
+          "rapt_ifu": [
+            54,
+            55
+          ],
+          "rapt_fqu": [
+            52,
+            53
+          ],
+          "rapt_idu": [
+            50,
+            51
+          ],
+          "rapt_rnu": [
+            48,
+            49
+          ],
+          "rapt_prf": [
+            46,
+            47
+          ],
+          "rapt_rou": [
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
             41,
+            42,
+            43,
+            44,
+            45
+          ],
+          "rapt_ieu": [
+            43,
+            41,
+            42,
             40
           ],
+          "rapt_lsu": [
+            38,
+            39
+          ],
           "soc_pmem": [
+            32,
             34,
             35,
             36,
-            37,
-            38,
-            39
+            37
           ],
           "rapt_l1d": [
+            32,
             34,
             35,
             36,
-            37,
-            38,
-            39
+            37
           ],
           "rapt_bus": [
+            32,
             34,
             35,
             36,
-            37,
-            38,
-            39
+            37
           ],
           "rapt_axi_master": [
+            32,
             34,
             35,
             36,
-            37,
-            38,
-            39
-          ],
-          "rapt_cdb_arb": [
-            32
+            37
           ],
           "rapt_cmu": [
             30,
@@ -13097,251 +13609,36 @@
         }
       },
       {
-        "t": 50,
+        "t": 29,
         "occ": {
           "rapt_l1i": [
+            58,
+            59
+          ],
+          "rapt_ifu": [
+            56,
+            57
+          ],
+          "rapt_fqu": [
+            54,
+            55
+          ],
+          "rapt_idu": [
+            52,
+            53
+          ],
+          "rapt_rnu": [
             50,
             51
           ],
-          "rapt_ifu": [
+          "rapt_prf": [
             48,
             49
-          ],
-          "rapt_idu": [
-            46,
-            47
-          ],
-          "rapt_prf": [
-            44,
-            45
           ],
           "rapt_rou": [
             32,
             33,
             34,
-            35,
-            36,
-            37,
-            38,
-            39,
-            40,
-            41,
-            42,
-            43
-          ],
-          "rapt_ieu": [
-            43,
-            42,
-            41
-          ],
-          "soc_pmem": [
-            34,
-            35,
-            36,
-            37,
-            38,
-            39
-          ],
-          "rapt_l1d": [
-            34,
-            35,
-            36,
-            37,
-            38,
-            39
-          ],
-          "rapt_bus": [
-            34,
-            35,
-            36,
-            37,
-            38,
-            39
-          ],
-          "rapt_axi_master": [
-            34,
-            35,
-            36,
-            37,
-            38,
-            39
-          ],
-          "rapt_cdb_arb": [
-            40
-          ],
-          "rapt_cmu": [
-            30,
-            31
-          ]
-        }
-      },
-      {
-        "t": 51,
-        "occ": {
-          "rapt_l1i": [
-            50,
-            51
-          ],
-          "rapt_ifu": [
-            50,
-            51
-          ],
-          "rapt_fqu": [
-            48,
-            49
-          ],
-          "rapt_rnu": [
-            46,
-            47
-          ],
-          "rapt_rou": [
-            34,
-            35,
-            36,
-            37,
-            38,
-            39,
-            40,
-            41,
-            42,
-            43,
-            44,
-            45
-          ],
-          "soc_pmem": [
-            35,
-            36,
-            37,
-            38,
-            39
-          ],
-          "rapt_l1d": [
-            35,
-            36,
-            37,
-            38,
-            39
-          ],
-          "rapt_bus": [
-            35,
-            36,
-            37,
-            38,
-            39
-          ],
-          "rapt_axi_master": [
-            35,
-            36,
-            37,
-            38,
-            39
-          ],
-          "rapt_ieu": [
-            43,
-            42
-          ],
-          "rapt_cdb_arb": [
-            34,
-            41
-          ],
-          "rapt_cmu": [
-            32,
-            33
-          ]
-        }
-      },
-      {
-        "t": 52,
-        "occ": {
-          "rapt_l1i": [
-            52,
-            53
-          ],
-          "rapt_ifu": [
-            50,
-            51
-          ],
-          "rapt_idu": [
-            48,
-            49
-          ],
-          "rapt_prf": [
-            46,
-            47
-          ],
-          "rapt_rou": [
-            34,
-            35,
-            36,
-            37,
-            38,
-            39,
-            40,
-            41,
-            42,
-            43,
-            44,
-            45
-          ],
-          "rapt_ieu": [
-            44,
-            45
-          ],
-          "soc_pmem": [
-            36,
-            37,
-            38,
-            39
-          ],
-          "rapt_l1d": [
-            36,
-            37,
-            38,
-            39
-          ],
-          "rapt_bus": [
-            36,
-            37,
-            38,
-            39
-          ],
-          "rapt_axi_master": [
-            36,
-            37,
-            38,
-            39
-          ],
-          "rapt_cdb_arb": [
-            35,
-            43,
-            42
-          ],
-          "rapt_cmu": [
-            32,
-            33
-          ]
-        }
-      },
-      {
-        "t": 53,
-        "occ": {
-          "rapt_l1i": [
-            52,
-            53
-          ],
-          "rapt_ifu": [
-            52,
-            53
-          ],
-          "rapt_fqu": [
-            50,
-            51
-          ],
-          "rapt_rnu": [
-            48,
-            49
-          ],
-          "rapt_rou": [
             35,
             36,
             37,
@@ -13356,123 +13653,87 @@
             46,
             47
           ],
-          "soc_pmem": [
-            37,
-            38,
-            39
-          ],
-          "rapt_l1d": [
-            37,
-            38,
-            39
-          ],
-          "rapt_bus": [
-            37,
-            38,
-            39
-          ],
-          "rapt_axi_master": [
-            37,
-            38,
-            39
-          ],
           "rapt_ieu": [
-            44,
-            45
-          ],
-          "rapt_cdb_arb": [
-            36
-          ],
-          "rapt_cmu": [
-            33,
-            34
-          ]
-        }
-      },
-      {
-        "t": 54,
-        "occ": {
-          "rapt_l1i": [
-            54,
-            55
-          ],
-          "rapt_ifu": [
-            52,
-            53
-          ],
-          "rapt_idu": [
-            50,
-            51
-          ],
-          "rapt_prf": [
-            48,
-            49
-          ],
-          "rapt_rou": [
-            36,
-            37,
-            38,
-            39,
-            40,
-            41,
-            42,
-            43,
             44,
             45,
-            46,
-            47
+            42,
+            43,
+            41
           ],
-          "rapt_ieu": [
-            46,
-            47
+          "rapt_lsu": [
+            39
           ],
           "soc_pmem": [
-            38,
-            39
+            32,
+            34,
+            35,
+            36,
+            37,
+            38
           ],
           "rapt_l1d": [
-            38,
-            39
+            32,
+            34,
+            35,
+            36,
+            37,
+            38
           ],
           "rapt_bus": [
-            38,
-            39
+            32,
+            34,
+            35,
+            36,
+            37,
+            38
           ],
           "rapt_axi_master": [
-            38,
-            39
-          ],
-          "rapt_cdb_arb": [
+            32,
+            34,
+            35,
+            36,
             37,
-            44,
-            45
+            38
           ],
           "rapt_cmu": [
-            34,
-            35
+            30,
+            31
           ]
         }
       },
       {
-        "t": 55,
+        "t": 30,
         "occ": {
           "rapt_l1i": [
-            54,
-            55
+            60,
+            61
           ],
           "rapt_ifu": [
+            58,
+            59
+          ],
+          "rapt_fqu": [
+            56,
+            57
+          ],
+          "rapt_idu": [
             54,
             55
           ],
-          "rapt_fqu": [
+          "rapt_rnu": [
             52,
             53
           ],
-          "rapt_rnu": [
+          "rapt_prf": [
             50,
             51
           ],
           "rapt_rou": [
+            32,
+            33,
+            34,
+            35,
+            36,
             37,
             38,
             39,
@@ -13487,99 +13748,89 @@
             48,
             49
           ],
+          "rapt_ieu": [
+            46,
+            47,
+            44,
+            45,
+            42
+          ],
           "soc_pmem": [
+            32,
+            34,
+            35,
+            36,
+            37,
+            38,
             39
           ],
           "rapt_l1d": [
+            32,
+            34,
+            35,
+            36,
+            37,
+            38,
             39
           ],
           "rapt_bus": [
+            32,
+            34,
+            35,
+            36,
+            37,
+            38,
             39
           ],
           "rapt_axi_master": [
+            32,
+            34,
+            35,
+            36,
+            37,
+            38,
             39
           ],
-          "rapt_ieu": [
-            46,
-            47
-          ],
-          "rapt_cdb_arb": [
-            38
-          ],
           "rapt_cmu": [
-            35,
-            36
+            30,
+            31
           ]
         }
       },
       {
-        "t": 56,
+        "t": 31,
         "occ": {
           "rapt_l1i": [
-            56,
-            57
+            62
           ],
           "rapt_ifu": [
-            54,
-            55
-          ],
-          "rapt_idu": [
-            52,
-            53
-          ],
-          "rapt_prf": [
-            50,
-            51
-          ],
-          "rapt_rou": [
-            38,
-            39,
-            40,
-            41,
-            42,
-            43,
-            44,
-            45,
-            46,
-            47,
-            48,
-            49
-          ],
-          "rapt_ieu": [
-            48,
-            49
-          ],
-          "rapt_cdb_arb": [
-            39,
-            46,
-            47
-          ],
-          "rapt_cmu": [
-            36,
-            37
-          ]
-        }
-      },
-      {
-        "t": 57,
-        "occ": {
-          "rapt_l1i": [
-            56,
-            57
-          ],
-          "rapt_ifu": [
-            56,
-            57
+            60,
+            61
           ],
           "rapt_fqu": [
+            58,
+            59
+          ],
+          "rapt_idu": [
+            56,
+            57
+          ],
+          "rapt_rnu": [
             54,
             55
           ],
-          "rapt_rnu": [
+          "rapt_prf": [
             52,
             53
           ],
           "rapt_rou": [
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
             39,
             40,
             41,
@@ -13596,80 +13847,85 @@
           ],
           "rapt_ieu": [
             48,
-            49
-          ],
-          "rapt_cmu": [
-            37,
-            38
-          ]
-        }
-      },
-      {
-        "t": 58,
-        "occ": {
-          "rapt_l1i": [
-            58,
-            59
-          ],
-          "rapt_ifu": [
-            56,
-            57
-          ],
-          "rapt_idu": [
-            54,
-            55
-          ],
-          "rapt_prf": [
-            52,
-            53
-          ],
-          "rapt_rou": [
-            41,
-            42,
-            43,
-            44,
-            45,
-            46,
-            47,
-            48,
             49,
-            50,
-            51
+            46,
+            47
           ],
-          "rapt_ieu": [
-            50,
-            51
+          "soc_pmem": [
+            32,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39
           ],
-          "rapt_cdb_arb": [
-            48,
-            49
+          "rapt_l1d": [
+            32,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39
+          ],
+          "rapt_bus": [
+            32,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39
+          ],
+          "rapt_axi_master": [
+            32,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39
           ],
           "rapt_cmu": [
-            39,
-            40
+            30,
+            31
           ]
         }
       },
       {
-        "t": 59,
+        "t": 32,
         "occ": {
-          "rapt_l1i": [
-            58,
-            59
-          ],
           "rapt_ifu": [
-            58,
-            59
+            62
           ],
           "rapt_fqu": [
+            60,
+            61
+          ],
+          "rapt_idu": [
+            58,
+            59
+          ],
+          "rapt_rnu": [
             56,
             57
           ],
-          "rapt_rnu": [
+          "rapt_prf": [
             54,
             55
           ],
           "rapt_rou": [
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
             42,
             43,
             44,
@@ -13685,80 +13941,78 @@
           ],
           "rapt_ieu": [
             50,
-            51
+            51,
+            48,
+            49
+          ],
+          "soc_pmem": [
+            34,
+            35,
+            36,
+            37,
+            38,
+            39
+          ],
+          "rapt_l1d": [
+            34,
+            35,
+            36,
+            37,
+            38,
+            39
+          ],
+          "rapt_bus": [
+            34,
+            35,
+            36,
+            37,
+            38,
+            39
+          ],
+          "rapt_axi_master": [
+            34,
+            35,
+            36,
+            37,
+            38,
+            39
           ],
           "rapt_cmu": [
-            40,
-            41
+            30,
+            31
           ]
         }
       },
       {
-        "t": 60,
+        "t": 33,
         "occ": {
-          "rapt_l1i": [
-            60,
-            61
-          ],
-          "rapt_ifu": [
-            58,
-            59
+          "rapt_fqu": [
+            62
           ],
           "rapt_idu": [
-            56,
-            57
-          ],
-          "rapt_prf": [
-            54,
-            55
-          ],
-          "rapt_rou": [
-            43,
-            44,
-            45,
-            46,
-            47,
-            48,
-            49,
-            50,
-            51,
-            52,
-            53
-          ],
-          "rapt_ieu": [
-            52,
-            53
-          ],
-          "rapt_cdb_arb": [
-            50,
-            51
-          ],
-          "rapt_cmu": [
-            41,
-            42
-          ]
-        }
-      },
-      {
-        "t": 61,
-        "occ": {
-          "rapt_l1i": [
             60,
             61
           ],
-          "rapt_ifu": [
-            60,
-            61
-          ],
-          "rapt_fqu": [
+          "rapt_rnu": [
             58,
             59
           ],
-          "rapt_rnu": [
+          "rapt_prf": [
             56,
             57
           ],
           "rapt_rou": [
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
             45,
             46,
             47,
@@ -13773,7 +14027,512 @@
           ],
           "rapt_ieu": [
             52,
+            53,
+            50,
+            51
+          ],
+          "soc_pmem": [
+            35,
+            36,
+            37,
+            38,
+            39
+          ],
+          "rapt_l1d": [
+            35,
+            36,
+            37,
+            38,
+            39
+          ],
+          "rapt_bus": [
+            35,
+            36,
+            37,
+            38,
+            39
+          ],
+          "rapt_axi_master": [
+            35,
+            36,
+            37,
+            38,
+            39
+          ],
+          "rapt_cmu": [
+            32,
+            33
+          ]
+        }
+      },
+      {
+        "t": 34,
+        "occ": {
+          "rapt_idu": [
+            62
+          ],
+          "rapt_rnu": [
+            60,
+            61
+          ],
+          "rapt_prf": [
+            58,
+            59
+          ],
+          "rapt_rou": [
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57
+          ],
+          "rapt_ieu": [
+            54,
+            55,
+            52,
             53
+          ],
+          "soc_pmem": [
+            36,
+            37,
+            38,
+            39
+          ],
+          "rapt_l1d": [
+            36,
+            37,
+            38,
+            39
+          ],
+          "rapt_bus": [
+            36,
+            37,
+            38,
+            39
+          ],
+          "rapt_axi_master": [
+            36,
+            37,
+            38,
+            39
+          ],
+          "rapt_cmu": [
+            33,
+            34
+          ]
+        }
+      },
+      {
+        "t": 35,
+        "occ": {
+          "rapt_rnu": [
+            62
+          ],
+          "rapt_prf": [
+            60,
+            61
+          ],
+          "rapt_rou": [
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59
+          ],
+          "rapt_ieu": [
+            56,
+            57,
+            54,
+            55
+          ],
+          "soc_pmem": [
+            37,
+            38,
+            39
+          ],
+          "rapt_l1d": [
+            37,
+            38,
+            39
+          ],
+          "rapt_bus": [
+            37,
+            38,
+            39
+          ],
+          "rapt_axi_master": [
+            37,
+            38,
+            39
+          ],
+          "rapt_cmu": [
+            34,
+            35
+          ]
+        }
+      },
+      {
+        "t": 36,
+        "occ": {
+          "rapt_prf": [
+            62
+          ],
+          "rapt_rou": [
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61
+          ],
+          "rapt_ieu": [
+            58,
+            59,
+            56,
+            57
+          ],
+          "soc_pmem": [
+            38,
+            39
+          ],
+          "rapt_l1d": [
+            38,
+            39
+          ],
+          "rapt_bus": [
+            38,
+            39
+          ],
+          "rapt_axi_master": [
+            38,
+            39
+          ],
+          "rapt_cmu": [
+            35,
+            36
+          ]
+        }
+      },
+      {
+        "t": 37,
+        "occ": {
+          "rapt_rou": [
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62
+          ],
+          "rapt_ieu": [
+            60,
+            58,
+            59
+          ],
+          "rapt_lsu": [
+            61
+          ],
+          "soc_pmem": [
+            39
+          ],
+          "rapt_l1d": [
+            39
+          ],
+          "rapt_bus": [
+            39
+          ],
+          "rapt_axi_master": [
+            39
+          ],
+          "rapt_cmu": [
+            36,
+            37
+          ]
+        }
+      },
+      {
+        "t": 38,
+        "occ": {
+          "rapt_rou": [
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62
+          ],
+          "rapt_ieu": [
+            62,
+            60
+          ],
+          "soc_uart": [
+            61
+          ],
+          "rapt_lsu": [
+            61
+          ],
+          "rapt_bus": [
+            61
+          ],
+          "rapt_router": [
+            61
+          ],
+          "rapt_cmu": [
+            37,
+            38
+          ]
+        }
+      },
+      {
+        "t": 39,
+        "occ": {
+          "rapt_rou": [
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62
+          ],
+          "soc_uart": [
+            61
+          ],
+          "rapt_lsu": [
+            61
+          ],
+          "rapt_bus": [
+            61
+          ],
+          "rapt_router": [
+            61
+          ],
+          "rapt_ieu": [
+            62
+          ],
+          "rapt_cmu": [
+            39,
+            40
+          ]
+        }
+      },
+      {
+        "t": 40,
+        "occ": {
+          "rapt_rou": [
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62
+          ],
+          "soc_uart": [
+            61
+          ],
+          "rapt_lsu": [
+            61
+          ],
+          "rapt_bus": [
+            61
+          ],
+          "rapt_router": [
+            61
+          ],
+          "rapt_cmu": [
+            40,
+            41
+          ]
+        }
+      },
+      {
+        "t": 41,
+        "occ": {
+          "rapt_rou": [
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62
+          ],
+          "soc_uart": [
+            61
+          ],
+          "rapt_lsu": [
+            61
+          ],
+          "rapt_bus": [
+            61
+          ],
+          "rapt_router": [
+            61
+          ],
+          "rapt_cmu": [
+            41,
+            42
+          ]
+        }
+      },
+      {
+        "t": 42,
+        "occ": {
+          "rapt_rou": [
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62
           ],
           "rapt_cmu": [
             43,
@@ -13782,23 +14541,8 @@
         }
       },
       {
-        "t": 62,
+        "t": 43,
         "occ": {
-          "rapt_l1i": [
-            62
-          ],
-          "rapt_ifu": [
-            60,
-            61
-          ],
-          "rapt_idu": [
-            58,
-            59
-          ],
-          "rapt_prf": [
-            56,
-            57
-          ],
           "rapt_rou": [
             47,
             48,
@@ -13808,15 +14552,14 @@
             52,
             53,
             54,
-            55
-          ],
-          "rapt_ieu": [
-            54,
-            55
-          ],
-          "rapt_cdb_arb": [
-            52,
-            53
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62
           ],
           "rapt_cmu": [
             45,
@@ -13825,22 +14568,8 @@
         }
       },
       {
-        "t": 63,
+        "t": 44,
         "occ": {
-          "rapt_l1i": [
-            62
-          ],
-          "rapt_ifu": [
-            62
-          ],
-          "rapt_fqu": [
-            60,
-            61
-          ],
-          "rapt_rnu": [
-            58,
-            59
-          ],
           "rapt_rou": [
             49,
             50,
@@ -13850,11 +14579,12 @@
             54,
             55,
             56,
-            57
-          ],
-          "rapt_ieu": [
-            54,
-            55
+            57,
+            58,
+            59,
+            60,
+            61,
+            62
           ],
           "rapt_cmu": [
             47,
@@ -13863,19 +14593,8 @@
         }
       },
       {
-        "t": 64,
+        "t": 45,
         "occ": {
-          "rapt_ifu": [
-            62
-          ],
-          "rapt_idu": [
-            60,
-            61
-          ],
-          "rapt_prf": [
-            58,
-            59
-          ],
           "rapt_rou": [
             51,
             52,
@@ -13883,15 +14602,12 @@
             54,
             55,
             56,
-            57
-          ],
-          "rapt_ieu": [
-            56,
-            57
-          ],
-          "rapt_cdb_arb": [
-            54,
-            55
+            57,
+            58,
+            59,
+            60,
+            61,
+            62
           ],
           "rapt_cmu": [
             49,
@@ -13900,15 +14616,8 @@
         }
       },
       {
-        "t": 65,
+        "t": 46,
         "occ": {
-          "rapt_fqu": [
-            62
-          ],
-          "rapt_rnu": [
-            60,
-            61
-          ],
           "rapt_rou": [
             53,
             54,
@@ -13916,11 +14625,10 @@
             56,
             57,
             58,
-            59
-          ],
-          "rapt_ieu": [
-            56,
-            57
+            59,
+            60,
+            61,
+            62
           ],
           "rapt_cmu": [
             51,
@@ -13929,29 +14637,17 @@
         }
       },
       {
-        "t": 66,
+        "t": 47,
         "occ": {
-          "rapt_idu": [
-            62
-          ],
-          "rapt_prf": [
-            60,
-            61
-          ],
           "rapt_rou": [
             55,
             56,
             57,
             58,
-            59
-          ],
-          "rapt_ieu": [
-            58,
-            59
-          ],
-          "rapt_cdb_arb": [
-            56,
-            57
+            59,
+            60,
+            61,
+            62
           ],
           "rapt_cmu": [
             53,
@@ -13960,195 +14656,39 @@
         }
       },
       {
-        "t": 67,
+        "t": 48,
         "occ": {
-          "rapt_rnu": [
-            62
-          ],
           "rapt_rou": [
-            56,
             57,
             58,
             59,
             60,
-            61
-          ],
-          "rapt_ieu": [
-            58,
-            59
-          ],
-          "rapt_cmu": [
-            54,
-            55
-          ]
-        }
-      },
-      {
-        "t": 68,
-        "occ": {
-          "rapt_prf": [
+            61,
             62
           ],
-          "rapt_rou": [
-            58,
-            59,
-            60,
-            61
-          ],
-          "rapt_ieu": [
-            60
-          ],
-          "rapt_lsu": [
-            61
-          ],
-          "rapt_cdb_arb": [
-            58,
-            59
-          ],
           "rapt_cmu": [
-            56,
-            57
+            55,
+            56
           ]
         }
       },
       {
-        "t": 69,
+        "t": 49,
         "occ": {
           "rapt_rou": [
-            58,
             59,
             60,
             61,
             62
           ],
-          "rapt_ieu": [
-            60
-          ],
-          "soc_uart": [
-            61
-          ],
-          "rapt_lsu": [
-            61
-          ],
-          "rapt_bus": [
-            61
-          ],
-          "rapt_router": [
-            61
-          ],
           "rapt_cmu": [
-            56,
-            57
+            57,
+            58
           ]
         }
       },
       {
-        "t": 70,
-        "occ": {
-          "rapt_rou": [
-            60,
-            61,
-            62
-          ],
-          "rapt_ieu": [
-            62
-          ],
-          "soc_uart": [
-            61
-          ],
-          "rapt_lsu": [
-            61
-          ],
-          "rapt_bus": [
-            61
-          ],
-          "rapt_router": [
-            61
-          ],
-          "rapt_cdb_arb": [
-            60
-          ],
-          "rapt_cmu": [
-            58,
-            59
-          ]
-        }
-      },
-      {
-        "t": 71,
-        "occ": {
-          "rapt_rou": [
-            60,
-            61,
-            62
-          ],
-          "soc_uart": [
-            61
-          ],
-          "rapt_lsu": [
-            61
-          ],
-          "rapt_bus": [
-            61
-          ],
-          "rapt_router": [
-            61
-          ],
-          "rapt_ieu": [
-            62
-          ],
-          "rapt_cmu": [
-            58,
-            59
-          ]
-        }
-      },
-      {
-        "t": 72,
-        "occ": {
-          "rapt_rou": [
-            61,
-            62
-          ],
-          "soc_uart": [
-            61
-          ],
-          "rapt_lsu": [
-            61
-          ],
-          "rapt_bus": [
-            61
-          ],
-          "rapt_router": [
-            61
-          ],
-          "rapt_cdb_arb": [
-            62
-          ],
-          "rapt_cmu": [
-            59,
-            60
-          ]
-        }
-      },
-      {
-        "t": 73,
-        "occ": {
-          "rapt_rou": [
-            61,
-            62
-          ],
-          "rapt_cdb_arb": [
-            61
-          ],
-          "rapt_cmu": [
-            59,
-            60
-          ]
-        }
-      },
-      {
-        "t": 74,
+        "t": 50,
         "occ": {
           "rapt_rou": [
             61,
@@ -14161,7 +14701,7 @@
         }
       },
       {
-        "t": 75,
+        "t": 51,
         "occ": {
           "rapt_rou": [
             62
@@ -14173,7 +14713,7 @@
         }
       },
       {
-        "t": 76,
+        "t": 52,
         "occ": {
           "rapt_cmu": [
             61,
@@ -14994,16 +15534,20 @@
         "label": "\"RNU (RenameWidth slots, integrated MAP/RAT/free bitmap + checkpoints)"
       },
       {
+        "id": "RBUF",
+        "label": "\"Renamed-packet buffer (2 entries)"
+      },
+      {
         "id": "ROU",
-        "label": "\"ROU (UOQ + ROB 32)"
+        "label": "\"ROU (UOQ 8 + ROB 32 + operand spill 16)"
       },
       {
         "id": "IEU",
-        "label": "\"IEU: ALQ 8 + BRQ 4 + MDQ 4"
+        "label": "\"IEU: ALQ 8 + BRQ 8 + MDQ 4"
       },
       {
         "id": "FEU",
-        "label": "\"FEU: FPQ 4 + scalar F/D/Zfhmin"
+        "label": "\"FEU: FPQ 1 + scalar F/D/Zfhmin"
       },
       {
         "id": "LSU",
@@ -15059,7 +15603,11 @@
       },
       {
         "id": "L2",
-        "label": "\"L2 (optional, 16 KiB DM / passthrough)"
+        "label": "\"L2 (default bypass; default-l2: 512 KiB, 8-way)"
+      },
+      {
+        "id": "RBUF_AXI",
+        "label": "\"AXI R buffer (2 entries with L2 write-back; default bypass)"
       },
       {
         "id": "RTR",
@@ -15105,6 +15653,12 @@
       },
       {
         "from": "RNU",
+        "to": "RBUF",
+        "kind": "data",
+        "label": ""
+      },
+      {
+        "from": "RBUF",
         "to": "ROU",
         "kind": "data",
         "label": ""
@@ -15190,6 +15744,12 @@
       {
         "from": "CMU",
         "to": "FE",
+        "kind": "control",
+        "label": ""
+      },
+      {
+        "from": "CMU",
+        "to": "RNU",
         "kind": "control",
         "label": ""
       },
@@ -15297,6 +15857,12 @@
       },
       {
         "from": "L2",
+        "to": "RBUF_AXI",
+        "kind": "data",
+        "label": ""
+      },
+      {
+        "from": "RBUF_AXI",
         "to": "RTR",
         "kind": "data",
         "label": ""
@@ -15994,8 +16560,8 @@
           "rapt_lsu",
           "rapt_l1d",
           "rapt_bus",
-          "rapt_l2",
           "rapt_axi_master",
+          "rapt_l2",
           "soc_pmem",
           "rapt_cdb_arb",
           "rapt_rou",
@@ -16039,8 +16605,8 @@
           "rapt_lsu",
           "rapt_l1d",
           "rapt_bus",
-          "rapt_l2",
           "rapt_axi_master",
+          "rapt_l2",
           "soc_pmem",
           "rapt_cdb_arb",
           "rapt_rou",
@@ -16064,8 +16630,8 @@
           "rapt_lsu",
           "rapt_l1d",
           "rapt_bus",
-          "rapt_l2",
           "rapt_axi_master",
+          "rapt_l2",
           "soc_pmem",
           "rapt_cdb_arb",
           "rapt_rou",
@@ -16089,8 +16655,8 @@
           "rapt_lsu",
           "rapt_l1d",
           "rapt_bus",
-          "rapt_l2",
           "rapt_axi_master",
+          "rapt_l2",
           "soc_pmem",
           "rapt_cdb_arb",
           "rapt_rou",
@@ -16114,8 +16680,8 @@
           "rapt_lsu",
           "rapt_l1d",
           "rapt_bus",
-          "rapt_l2",
           "rapt_axi_master",
+          "rapt_l2",
           "soc_pmem",
           "rapt_cdb_arb",
           "rapt_rou",
@@ -16139,8 +16705,8 @@
           "rapt_lsu",
           "rapt_l1d",
           "rapt_bus",
-          "rapt_l2",
           "rapt_axi_master",
+          "rapt_l2",
           "soc_pmem",
           "rapt_cdb_arb",
           "rapt_rou",
@@ -16164,8 +16730,8 @@
           "rapt_lsu",
           "rapt_l1d",
           "rapt_bus",
-          "rapt_l2",
           "rapt_axi_master",
+          "rapt_l2",
           "soc_pmem",
           "rapt_cdb_arb",
           "rapt_rou",
@@ -16609,6 +17175,7 @@
           "rapt_lsu",
           "rapt_bus",
           "rapt_axi_master",
+          "rapt_l2",
           "rapt_router",
           "soc_uart",
           "rapt_cdb_arb",
@@ -16647,16 +17214,9 @@
   },
   "docs": [
     {
-      "file": "docs/PROFILE.md",
-      "name": "PROFILE.md",
-      "title": "Performance Profile",
-      "url": "PROFILE.html",
-      "summary": "\u4f7f\u7528`am-kernels`\u4e2d\u7684`microbench`\u6d4b\u8bd5\u7a0b\u5e8f\u8fdb\u884c\u6027\u80fd\u6d4b\u8bd5."
-    },
-    {
       "file": "docs/README.md",
       "name": "README.md",
-      "title": "Raptor \u2014 RISC-V Processor Core",
+      "title": "Raptor - RISC-V Processor Core",
       "url": "overview.html",
       "summary": "The published homepage is an interactive product surface: a 2D pipeline block diagram extracted from the SystemVerilog tree, plus a documentation shell whose `make` commands come from the repository Makefile. This page i"
     },
@@ -16679,7 +17239,7 @@
       "name": "getting-started.md",
       "title": "Quick Start",
       "url": "getting-started.html",
-      "summary": "Build and simulate Raptor in a few commands. Run everything from the **project root** \u2014 `source env.sh` is not required, the Makefile exports all variables."
+      "summary": "Build and simulate Raptor in a few commands. Run everything from the **project root** - `source env.sh` is not required, the Makefile exports all variables."
     },
     {
       "file": "docs/linux_kernel.md",
@@ -16689,32 +17249,18 @@
       "summary": "Raptor boots Linux through an OpenSBI `fw_payload.bin` image:"
     },
     {
-      "file": "docs/perf-iterations.md",
-      "name": "perf-iterations.md",
-      "title": "Performance Iterations",
-      "url": "perf-iterations.html",
-      "summary": "Legacy Version: [PROFILE.md](./PROFILE.md)"
-    },
-    {
-      "file": "docs/subsystem-trace-results.md",
-      "name": "subsystem-trace-results.md",
-      "title": "FE / BE / MEM isolated experiment: initial results",
-      "url": "subsystem-trace-results.html",
-      "summary": "Date: 2026-09-23. RTL base commit: `d2eed1e3`, with uncommitted workspace changes. Preset `default`, write-through L1D, L2 disabled, Verilator 5.052. NEMU trace length is 20,000 executed instructions including five reset"
-    },
-    {
       "file": "docs/uarch.md",
       "name": "uarch.md",
       "title": "Microarchitecture",
       "url": "uarch.html",
-      "summary": "Each `E` marks a clock edge that captures instruction state; `E0` is the registered fetch PC. Logic between two edges belongs to the following stage. These examples assume ready operands, available queues, L1 hits, no re"
+      "summary": "The ordered instruction path contains the following registered storage. Arrows show data flow; they do not assign a fixed cycle cost to a queue or execution unit."
     },
     {
       "file": "docs/vpu.md",
       "name": "vpu.md",
       "title": "Standalone Raptor VPU",
       "url": "vpu.html",
-      "summary": "Status: standalone implementation and selected verification complete, 2026-09-06. The component implements the baseline RVV 1.0 instruction families, including integer/fixed-point/permutation, vector configuration/CSRs, "
+      "summary": "Implementation: standalone VPU, not wired into the scalar core. Verification snapshot: selected acceptance reported on 2026-09-06; the test counts, source-current audits and PPA figures below refer to their recorded sour"
     }
   ],
   "github": "https://github.com/Kingfish404/raptor-chip",

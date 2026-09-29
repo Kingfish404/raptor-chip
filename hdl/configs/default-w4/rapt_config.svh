@@ -2,22 +2,18 @@
 `define RAPT_CONFIG_SVH
 
 /**
- * default-w4 preset: same window/cache geometry/BPU as `default`, but all four
- * ordered stage widths and the integer issue-port count are raised to 4.
- * L1D MSHR capacity also grows from 2 to 4 to serve the wider load stream.
+ * default-w4 preset: four decode, rename, dispatch, commit and integer issue
+ * lanes, with the default preset's early load and store-follower paths.
+ * Cache geometry/BPU match default; L1D has four MSHRs.
  *
- * Rationale: the 2026-09-14 gem5 grid search (`sim/gsim/grid_search.py`)
- * ranked width+port scaling as the dominant ROI (4-wide + 4 ALU ports:
- * ~+31% geomean IPC over CoreMark + an Embench subset), while growing
- * ROB/IQ/SQ beyond the default values bought nothing. This preset measures
- * that claim on the real RTL and prices it with STA.
+ * ROB 64 provides sixteen full dispatch groups; ALQ/IOQ 16 provide four.
+ * RNQ/UOQ retain two full groups because neither queue reclaims space on the
+ * admission edge. Operand spill 32 matches half the ROB; PHY 128 covers the
+ * architectural mappings, ROB writers and renamed work before allocation.
  *
- * Width 4 is already exercised by the width-refinement evaluation matrix
- * (Decode/Rename/Dispatch/Commit 4/4/4/4 elaborated and NEMU-diffed with
- * execution resources unchanged).
- *
- * ROB stays 32; PHY remains 128 (default now uses 64). The larger free
- * pool also covers renamed writers buffered before ROB allocation.
+ * These capacities are an evaluation starting point, not a measured optimum.
+ * Earlier CoreMark runs used ROB 32 and ALQ/IOQ 8. Keep capacities and fast
+ * paths overrideable for separate performance and physical-cost comparisons.
  */
 /**
  * Architecture (arch) Parameters
@@ -57,10 +53,15 @@
 `define RAPT_M_FAST 'h1
 
 // Branch predictor
-`define RAPT_PHT_SIZE 256
-`define RAPT_BTB_SIZE 128
+`define RAPT_PHT_SIZE 1024
+`ifdef RAPT_RV64
+`ifndef RAPT_BPU_AUX_PC_HASH
+`define RAPT_BPU_AUX_PC_HASH 1
+`endif
+`endif
+`define RAPT_BTB_SIZE 256
 `define RAPT_BTB_WAYS 2
-`define RAPT_RSB_SIZE 4
+`define RAPT_RSB_SIZE 16
 
 // Direction-predictor (DIRP). The default is TAGE for the best IPC;
 // alternatives are kept for ablation / low-area builds.
@@ -73,26 +74,88 @@
 // Shared RV32/RV64 OoO window sizing for simulation and FPGA.
 // ROB is the primary in-flight window; PHY must cover 32 arch regs plus the
 // worst case of ROB_SIZE in-flight register writers (power of 2 required).
+`ifndef RAPT_RIQ_SIZE
 `define RAPT_RIQ_SIZE 8
+`endif
+`ifndef RAPT_IIQ_SIZE
 `define RAPT_IIQ_SIZE 8
-`define RAPT_ROB_SIZE 32
+`endif
+`ifndef RAPT_ROB_SIZE
+`define RAPT_ROB_SIZE 64
+`endif
+`ifndef RAPT_OPERAND_SPILL_ENTRIES
+`define RAPT_OPERAND_SPILL_ENTRIES (`RAPT_ROB_SIZE / 2)
+`endif
 
-// Scheduler: RS / IOQ to feed both ALU pipes plus pipelined MUL.
-`define RAPT_RS_SIZE 8
+// ALQ is shared by all four integer issue ports; IOQ feeds the scalar LSU.
+`ifndef RAPT_RS_SIZE
+`define RAPT_RS_SIZE 16
+`endif
 `ifndef RAPT_IOQ_SIZE
-`define RAPT_IOQ_SIZE 8
+`define RAPT_IOQ_SIZE 16
 `endif
 
 // Unified SQ (Phase A): one queue holds a store from execute to drain
 // (committed coloring), replacing the former split STQ(8)+SQ(8).  16 entries
 // preserve the former aggregate capacity and move toward the Phase A target.
+`ifndef RAPT_SQ_SIZE
 `define RAPT_SQ_SIZE 16
+`endif
 
 // Hit-under-miss (Phase A2): while a load miss waits on the bus refill, the
 // idle L1D SRAM read port serves a second best-effort load (B channel).
 // Bare-mode only; B completes only on a clean cacheable hit or SQ forward,
 // everything else retries via the trap-owning A channel.
 `define RAPT_LSU_HUM
+
+// Match the default preset's load wakeup and store-following retirement paths.
+`ifndef RAPT_IOQ_EARLY_LOAD_BCAST
+`define RAPT_IOQ_EARLY_LOAD_BCAST 1
+`endif
+`ifndef RAPT_IOQ_LIVE_EARLY_BCAST
+`define RAPT_IOQ_LIVE_EARLY_BCAST 1
+`endif
+`ifndef RAPT_IOQ_EARLY_LOAD_STORES
+`define RAPT_IOQ_EARLY_LOAD_STORES 1
+`endif
+`ifndef RAPT_IOQ_WAKE_NEXT_B_REQUEST
+`define RAPT_IOQ_WAKE_NEXT_B_REQUEST 1
+`endif
+`ifndef RAPT_ROU_STORE_FOLLOWER
+`define RAPT_ROU_STORE_FOLLOWER 1
+`endif
+
+`ifndef RAPT_ALQ_LOAD_WAKE
+`define RAPT_ALQ_LOAD_WAKE 1
+`endif
+`ifndef RAPT_BRQ_CDB_WAKE
+`define RAPT_BRQ_CDB_WAKE 1
+`endif
+`ifndef RAPT_IOQ_FORWARD_REQUEST
+`define RAPT_IOQ_FORWARD_REQUEST 1
+`endif
+`ifndef RAPT_IOQ_STORE_PRECHECK
+`define RAPT_IOQ_STORE_PRECHECK 1
+`endif
+`ifndef RAPT_MDQ_LIVE_WAKE
+`define RAPT_MDQ_LIVE_WAKE 1
+`endif
+`ifndef RAPT_SQ_NARROW_FORWARD
+`define RAPT_SQ_NARROW_FORWARD 1
+`endif
+`ifndef RAPT_FETCH_BRANCH_FOLLOWER
+`define RAPT_FETCH_BRANCH_FOLLOWER 1
+`endif
+`ifndef RAPT_TAGE_BIM_BITS
+`define RAPT_TAGE_BIM_BITS 10
+`endif
+`ifndef RAPT_TAGE_INDEX_BITS
+`define RAPT_TAGE_INDEX_BITS 9
+`endif
+
+`ifndef RAPT_BPU_AUX_TAGE
+`define RAPT_BPU_AUX_TAGE 1
+`endif
 
 // RVFI: RISC-V Formal Interface for formal verification.
 // Adds RVFI output ports to the core; enable only for riscv-formal checks.
@@ -120,6 +183,9 @@
 `ifndef RAPT_FETCH_LOOKAHEAD
 `define RAPT_FETCH_LOOKAHEAD
 `endif
+// Read a complete four-instruction window on cache hits, including an
+// unaligned 32-bit instruction at the end of the window.
+`define RAPT_FETCH_WIDE
 
 `ifdef RAPT_I_EXTENSION
 `define RAPT_REG_SIZE 32 // 32 registers

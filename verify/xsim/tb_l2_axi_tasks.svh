@@ -2,7 +2,7 @@ task automatic init_l2_axi(input bit upstream_bready_init);
   begin
     axi_s.arcache = 4'hf;
     axi_s.arburst = 2'b01;
-    axi_s.arsize = 3'($clog2(XLEN/8));
+    axi_s.arsize = 3'($clog2(XLEN / 8));
     axi_s.arlen = 8'd0;
     axi_s.arid = '0;
     axi_s.araddr = '0;
@@ -11,7 +11,7 @@ task automatic init_l2_axi(input bit upstream_bready_init);
 
     axi_s.awcache = 4'hf;
     axi_s.awburst = 2'b01;
-    axi_s.awsize = 3'($clog2(XLEN/8));
+    axi_s.awsize = 3'($clog2(XLEN / 8));
     axi_s.awlen = 8'd0;
     axi_s.awid = '0;
     axi_s.awaddr = '0;
@@ -38,14 +38,15 @@ task automatic init_l2_axi(input bit upstream_bready_init);
 endtask
 
 
-task automatic send_l2_aw(input logic [XLEN-1:0] addr, input logic [IdW-1:0] id, input logic [3:0] cache_attr = 4'hf);
+task automatic send_l2_aw(input logic [XLEN-1:0] addr, input logic [IdW-1:0] id,
+                          input logic [3:0] cache_attr = 4'hf);
   bit accepted;
   begin
     axi_s.awaddr = addr;
     axi_s.awcache = cache_attr;
     axi_s.awid = id;
     axi_s.awlen = 8'd0;
-    axi_s.awsize = 3'($clog2(XLEN/8));
+    axi_s.awsize = 3'($clog2(XLEN / 8));
     axi_s.awburst = 2'b01;
     axi_s.awvalid = 1'b1;
     accepted = 1'b0;
@@ -74,30 +75,27 @@ task automatic send_l2_w(input logic [XLEN-1:0] data, input logic [XLEN/8-1:0] s
     if (!accepted) fail("timed out waiting for upstream W ready");
     #1;
     axi_s.wvalid = 1'b0;
-    axi_s.wstrb = '0;
+    axi_s.wstrb  = '0;
   end
 endtask
 
 task automatic send_l2_w_full(input logic [XLEN-1:0] data);
   begin
-    send_l2_w(data, {(XLEN / 8){1'b1}});
+    send_l2_w(data, {(XLEN / 8) {1'b1}});
   end
 endtask
 
-task automatic send_l2_ar_len(
-    input logic [XLEN-1:0] addr,
-    input logic [IdW-1:0] id,
-    input logic [7:0] len,
-    input logic [1:0] burst,
-    input logic [3:0] cache_attr = 4'hf
-);
+task automatic send_l2_ar_len(input logic [XLEN-1:0] addr, input logic [IdW-1:0] id,
+                              input logic [7:0] len, input logic [1:0] burst,
+                              input logic [3:0] cache_attr = 4'hf,
+                              input logic [2:0] size = 3'($clog2(XLEN / 8)));
   bit accepted;
   begin
     axi_s.araddr = addr;
     axi_s.arcache = cache_attr;
     axi_s.arid = id;
     axi_s.arlen = len;
-    axi_s.arsize = 3'($clog2(XLEN/8));
+    axi_s.arsize = size;
     axi_s.arburst = burst;
     axi_s.arvalid = 1'b1;
     accepted = 1'b0;
@@ -111,19 +109,16 @@ task automatic send_l2_ar_len(
   end
 endtask
 
-task automatic send_l2_ar(input logic [XLEN-1:0] addr, input logic [IdW-1:0] id, input logic [3:0] cache_attr = 4'hf);
+task automatic send_l2_ar(input logic [XLEN-1:0] addr, input logic [IdW-1:0] id,
+                          input logic [3:0] cache_attr = 4'hf);
   begin
     send_l2_ar_len(addr, id, 8'd0, 2'b01, cache_attr);
   end
 endtask
 
 task automatic accept_l2_downstream_write(
-    output logic [IdW-1:0] id_seen,
-    output logic [XLEN-1:0] addr_seen,
-    output logic [XLEN-1:0] data_seen,
-    output logic [XLEN/8-1:0] strb_seen,
-    output logic last_seen
-);
+    output logic [IdW-1:0] id_seen, output logic [XLEN-1:0] addr_seen,
+    output logic [XLEN-1:0] data_seen, output logic [XLEN/8-1:0] strb_seen, output logic last_seen);
   bit accepted;
   begin
     axi_m.awready = 1'b1;
@@ -133,7 +128,7 @@ task automatic accept_l2_downstream_write(
       accepted = axi_m.awvalid;
     end
     if (!accepted) fail("timed out waiting for downstream AW valid");
-    id_seen = axi_m.awid;
+    id_seen   = axi_m.awid;
     addr_seen = axi_m.awaddr;
     #1;
     axi_m.awready = 1'b0;
@@ -167,15 +162,12 @@ task automatic return_l2_downstream_b(input logic [IdW-1:0] id, input logic [1:0
     if (!accepted) fail("timed out waiting for downstream B ready");
     #1;
     axi_m.bvalid = 1'b0;
-    axi_m.bresp = 2'b00;
+    axi_m.bresp  = 2'b00;
   end
 endtask
 
 task automatic accept_l2_downstream_ar(
-    output logic [IdW-1:0] id_seen,
-    output logic [XLEN-1:0] addr_seen,
-    output logic [7:0] len_seen
-);
+    output logic [IdW-1:0] id_seen, output logic [XLEN-1:0] addr_seen, output logic [7:0] len_seen);
   bit accepted;
   begin
     axi_m.arready = 1'b1;
@@ -185,24 +177,21 @@ task automatic accept_l2_downstream_ar(
       accepted = axi_m.arvalid;
     end
     if (!accepted) fail("timed out waiting for downstream AR valid");
-    id_seen = axi_m.arid;
+    id_seen   = axi_m.arid;
     addr_seen = axi_m.araddr;
-    len_seen = axi_m.arlen;
+    len_seen  = axi_m.arlen;
     #1;
     axi_m.arready = 1'b0;
   end
 endtask
 
-task automatic return_l2_downstream_r(
-    input logic [IdW-1:0] id,
-    input logic [XLEN-1:0] data,
-    input logic last
-);
+task automatic return_l2_downstream_r(input logic [IdW-1:0] id, input logic [XLEN-1:0] data,
+                                      input logic last, input logic [1:0] resp = 2'b00);
   bit accepted;
   begin
     axi_m.rid = id;
     axi_m.rdata = data;
-    axi_m.rresp = 2'b00;
+    axi_m.rresp = resp;
     axi_m.rlast = last;
     axi_m.rvalid = 1'b1;
     accepted = 1'b0;
@@ -213,6 +202,7 @@ task automatic return_l2_downstream_r(
     if (!accepted) fail("timed out waiting for downstream R ready");
     #1;
     axi_m.rvalid = 1'b0;
-    axi_m.rlast = 1'b1;
+    axi_m.rlast  = 1'b1;
+    axi_m.rresp  = 2'b00;
   end
 endtask

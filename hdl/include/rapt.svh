@@ -6,6 +6,9 @@
 `ifndef RAPT_L1D_MSHRS
 `define RAPT_L1D_MSHRS 0
 `endif
+`ifndef RAPT_L1D_WRITEBACK
+`define RAPT_L1D_WRITEBACK 0
+`endif
 
 // FPGA builds may map the integer product into DSPs. Generic/ASIC builds
 // retain the fabric inference policy; arithmetic and valid/tag latency agree.
@@ -34,12 +37,79 @@
 `define RAPT_IOQ_FAST_LOAD_NEXT_HEAD 0
 `endif
 
+// Let a load woken by the retiring IOQ head enter the registered A request
+// stage on the same edge. The switch supports matched timing/area A/B runs.
+`ifndef RAPT_IOQ_WAKE_NEXT_REQUEST
+`define RAPT_IOQ_WAKE_NEXT_REQUEST 1
+`endif
+`ifndef RAPT_IOQ_EARLY_LOAD_BCAST
+`define RAPT_IOQ_EARLY_LOAD_BCAST 0
+`endif
+// Capture load responses before completion, wakeup and request selection.
+// This also disables speculative live response wakeups across this boundary.
+`ifndef RAPT_IOQ_LOAD_RESPONSE_STAGE
+`define RAPT_IOQ_LOAD_RESPONSE_STAGE 0
+`endif
+// Bypass a younger load's captured data register on the accepted response edge.
+`ifndef RAPT_IOQ_LIVE_EARLY_BCAST
+`define RAPT_IOQ_LIVE_EARLY_BCAST 0
+`endif
+// Permit early broadcast past a store only when the existing IOQ overlap
+// checker proves the younger load independent of every older store.
+`ifndef RAPT_IOQ_EARLY_LOAD_STORES
+`define RAPT_IOQ_EARLY_LOAD_STORES 0
+`endif
+// Let an accepted younger load broadcast prepare its dependent's B request
+// register while the A request remains occupied.
+`ifndef RAPT_IOQ_WAKE_NEXT_B_REQUEST
+`define RAPT_IOQ_WAKE_NEXT_B_REQUEST 0
+`endif
+
+// Allow one non-special follower to retire after the group's sole store.
+// The scalar SQ commit endpoint still admits only one store per cycle.
+`ifndef RAPT_ROU_STORE_FOLLOWER
+`define RAPT_ROU_STORE_FOLLOWER 0
+`endif
+
 // Register cache responses before instruction packing and auxiliary prediction.
 // Keep the extra stage opt-in: it reduces fetch timing pressure, but costs enough
 // latency to miss the default CoreMark target. FPGA presets may enable it after
 // timing evaluation.
 `ifndef RAPT_FETCH_RESPONSE_STAGE
 `define RAPT_FETCH_RESPONSE_STAGE 0
+`endif
+
+// Optional latency optimizations; presets select the validated paths.
+`ifndef RAPT_ALQ_LOAD_WAKE
+`define RAPT_ALQ_LOAD_WAKE 0
+`endif
+`ifndef RAPT_BRQ_CDB_WAKE
+`define RAPT_BRQ_CDB_WAKE 0
+`endif
+`ifndef RAPT_IOQ_FORWARD_REQUEST
+`define RAPT_IOQ_FORWARD_REQUEST 0
+`endif
+`ifndef RAPT_IOQ_STORE_PRECHECK
+`define RAPT_IOQ_STORE_PRECHECK 0
+`endif
+`ifndef RAPT_MDQ_LIVE_WAKE
+`define RAPT_MDQ_LIVE_WAKE 0
+`endif
+`ifndef RAPT_SQ_NARROW_FORWARD
+`define RAPT_SQ_NARROW_FORWARD 0
+`endif
+`ifndef RAPT_FETCH_BRANCH_FOLLOWER
+`define RAPT_FETCH_BRANCH_FOLLOWER 0
+`endif
+`ifndef RAPT_TAGE_BIM_BITS
+`define RAPT_TAGE_BIM_BITS 8
+`endif
+`ifndef RAPT_TAGE_INDEX_BITS
+`define RAPT_TAGE_INDEX_BITS 7
+`endif
+
+`ifndef RAPT_BPU_AUX_TAGE
+`define RAPT_BPU_AUX_TAGE 0
 `endif
 
 // Physical integer issue topology is independent of every ordered pipeline
@@ -138,21 +208,21 @@
 // Cache tags omit bits above this width as well as their index/line offset.
 // Keep full request VAs until translation/PMA checks have rejected invalid
 // addresses; narrowing a tag must never turn an unmapped address into a hit.
-// Preserve every implemented pmpaddr bit through broadcast/range matching;
-// mapped regions remain defined by PMA (not by this width alone).
+// Sv39 retains its architectural PPN encoding, while the platform rejects
+// addresses outside this implemented physical-address range.
 `ifndef RAPT_PADDR_BITS
 `ifdef RAPT_RV64
-`define RAPT_PADDR_BITS 56
+`define RAPT_PADDR_BITS 47
 `else
 `define RAPT_PADDR_BITS 32
 `endif
 `endif
 
-// Architectural pmpaddr CSR width. RV64 reserves bits 63:54, independently
-// of XLEN. The default RV64 checker retains all 54 raw address bits.
+// Implemented pmpaddr width follows the platform PA width (pmpaddr stores
+// address bits [PADDR_BITS-1:2]). Unimplemented high CSR bits read as zero.
 `ifndef RAPT_PMPADDR_BITS
 `ifdef RAPT_RV64
-`define RAPT_PMPADDR_BITS 54
+`define RAPT_PMPADDR_BITS (`RAPT_PADDR_BITS - 2)
 `else
 `define RAPT_PMPADDR_BITS 32
 `endif

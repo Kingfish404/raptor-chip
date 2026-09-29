@@ -29,10 +29,15 @@ module rapt_bpu_tage #(
     /* verilator lint_off UNUSEDPARAM */
     parameter int DEPTH   = `RAPT_PHT_SIZE,
     /* verilator lint_on UNUSEDPARAM */
-    parameter int BIM_LEN = 8,
-    parameter int IDX_LEN = 7
+    parameter int BIM_LEN = `RAPT_TAGE_BIM_BITS,
+    parameter int IDX_LEN = `RAPT_TAGE_INDEX_BITS,
+    parameter bit AuxRead = `RAPT_BPU_AUX_TAGE
 ) (
-    `RAPT_BPU_DIRP_PORTS
+    `RAPT_BPU_DIRP_PORTS,
+    input logic [XLEN-1:0] aux_pc = '0,
+    input logic [GHR_LEN-1:0] aux_ghr = '0,
+    input logic [PHR_LEN-1:0] aux_phr = '0,
+    output logic aux_taken
 );
   /* verilator lint_off UNUSEDSIGNAL */
   /* verilator lint_off UNUSEDPARAM */
@@ -96,8 +101,8 @@ module rapt_bpu_tage #(
   // ---------------- Folded-history helpers ----------------
   // Combinationally fold the low `HIST` bits of `ghr` into `W` bits via XOR.
   // Yosys/Verilator unroll cleanly for fixed parameters.
-  function automatic logic [6:0] fold_h1_idx(input logic [GHR_LEN-1:0] g);
-    logic [6:0] r;
+  function automatic logic [IDX_LEN-1:0] fold_h1_idx(input logic [GHR_LEN-1:0] g);
+    logic [IDX_LEN-1:0] r;
     r = '0;
     for (int i = 0; i < Hist1; i++) r[i%IDX_LEN] = r[i%IDX_LEN] ^ g[i];
     return r;
@@ -108,8 +113,8 @@ module rapt_bpu_tage #(
     for (int i = 0; i < Hist1; i++) r[i%TagLen1] = r[i%TagLen1] ^ g[i];
     return r;
   endfunction
-  function automatic logic [6:0] fold_h2_idx(input logic [GHR_LEN-1:0] g);
-    logic [6:0] r;
+  function automatic logic [IDX_LEN-1:0] fold_h2_idx(input logic [GHR_LEN-1:0] g);
+    logic [IDX_LEN-1:0] r;
     r = '0;
     for (int i = 0; i < Hist2; i++) r[i%IDX_LEN] = r[i%IDX_LEN] ^ g[i];
     return r;
@@ -120,8 +125,8 @@ module rapt_bpu_tage #(
     for (int i = 0; i < Hist2; i++) r[i%TagLen2] = r[i%TagLen2] ^ g[i];
     return r;
   endfunction
-  function automatic logic [6:0] fold_h3_idx(input logic [GHR_LEN-1:0] g);
-    logic [6:0] r;
+  function automatic logic [IDX_LEN-1:0] fold_h3_idx(input logic [GHR_LEN-1:0] g);
+    logic [IDX_LEN-1:0] r;
     r = '0;
     for (int i = 0; i < Hist3; i++) r[i%IDX_LEN] = r[i%IDX_LEN] ^ g[i];
     return r;
@@ -281,6 +286,74 @@ module rapt_bpu_tage #(
   assign rd_taken = (any_tagged_hit && provider_weak && (use_alt_ctr >= 0))
                   ? alt_pred : provider_pred;
 
+  if (AuxRead) begin : g_auxiliary_read
+    // A packet contains at most one conditional branch. The auxiliary
+    // position uses the pre-packet fetch history and the same trained tables.
+    logic [BIM_LEN-1:0] aux_rd_bim_idx;
+    logic [IDX_LEN-1:0] aux_rd_t1_idx, aux_rd_t2_idx, aux_rd_t3_idx;
+    logic [TagLen1-1:0] aux_rd_t1_tag;
+    logic [TagLen2-1:0] aux_rd_t2_tag;
+    logic [TagLen3-1:0] aux_rd_t3_tag;
+    logic aux_hit1, aux_hit2, aux_hit3;
+    logic aux_bim_taken, aux_t1_taken, aux_t2_taken, aux_t3_taken;
+
+    assign aux_rd_bim_idx = bim_idx(aux_pc);
+    assign aux_rd_t1_idx = t1_idx(aux_pc, aux_ghr, aux_phr);
+    assign aux_rd_t2_idx = t2_idx(aux_pc, aux_ghr, aux_phr);
+    assign aux_rd_t3_idx = t3_idx(aux_pc, aux_ghr, aux_phr);
+    assign aux_rd_t1_tag = t1_tag_of(aux_pc, aux_ghr, aux_phr);
+    assign aux_rd_t2_tag = t2_tag_of(aux_pc, aux_ghr, aux_phr);
+    assign aux_rd_t3_tag = t3_tag_of(aux_pc, aux_ghr, aux_phr);
+
+    assign aux_hit1 = t1_valid[aux_rd_t1_idx] && (t1_tag[aux_rd_t1_idx] == aux_rd_t1_tag);
+    assign aux_hit2 = t2_valid[aux_rd_t2_idx] && (t2_tag[aux_rd_t2_idx] == aux_rd_t2_tag);
+    assign aux_hit3 = t3_valid[aux_rd_t3_idx] && (t3_tag[aux_rd_t3_idx] == aux_rd_t3_tag);
+
+    assign aux_bim_taken = bim[aux_rd_bim_idx][1];
+    assign aux_t1_taken = ~t1_ctr[aux_rd_t1_idx][CtrBits-1];  // sign bit 0 => >=0 => taken
+    assign aux_t2_taken = ~t2_ctr[aux_rd_t2_idx][CtrBits-1];
+    assign aux_t3_taken = ~t3_ctr[aux_rd_t3_idx][CtrBits-1];
+
+    // Provider = longest matching table; else bimodal.
+    // use_alt_on_na: when provider ctr is weakly correct (|ctr| <= 1, i.e. ctr
+    // is 0 or -1 with 3-bit signed encoding) and the global confidence counter
+    // says alt has historically been better, return alt-pred.
+    logic                         aux_provider_weak;
+    logic                         aux_provider_pred;
+    logic                         aux_alt_pred;
+    logic signed [   CtrBits-1:0] aux_prov_ctr;
+
+    always_comb begin : aux_provider_select
+      if (aux_hit3) begin
+        aux_prov_ctr      = t3_ctr[aux_rd_t3_idx];
+        aux_provider_pred = aux_t3_taken;
+        aux_alt_pred      = aux_hit2 ? aux_t2_taken : aux_hit1 ? aux_t1_taken : aux_bim_taken;
+      end else if (aux_hit2) begin
+        aux_prov_ctr      = t2_ctr[aux_rd_t2_idx];
+        aux_provider_pred = aux_t2_taken;
+        aux_alt_pred      = aux_hit1 ? aux_t1_taken : aux_bim_taken;
+      end else if (aux_hit1) begin
+        aux_prov_ctr      = t1_ctr[aux_rd_t1_idx];
+        aux_provider_pred = aux_t1_taken;
+        aux_alt_pred      = aux_bim_taken;
+      end else begin
+        aux_prov_ctr      = '0;
+        aux_provider_pred = aux_bim_taken;
+        aux_alt_pred      = aux_bim_taken;
+      end
+    end
+    // "Weak" = ctr in {-1, 0}. With CtrBits=3 signed, those are the two
+    // values closest to the decision boundary (sign bit flip).
+    assign aux_provider_weak = (aux_prov_ctr == 3'sd0) || (aux_prov_ctr == -3'sd1);
+
+    logic aux_any_tagged_hit;
+    assign aux_any_tagged_hit = aux_hit1 || aux_hit2 || aux_hit3;
+    assign aux_taken = (aux_any_tagged_hit && aux_provider_weak && (use_alt_ctr >= 0))
+                  ? aux_alt_pred : aux_provider_pred;
+
+  end else begin : g_no_auxiliary_read
+    assign aux_taken = 1'b0;
+  end
   // ---------------- Update path (commit) ----------------
   logic [BIM_LEN-1:0] up_bim_idx;
   logic [IDX_LEN-1:0] up_t1_idx, up_t2_idx, up_t3_idx;

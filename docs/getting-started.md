@@ -5,7 +5,7 @@ title: Quick Start
 # Quick Start
 
 Build and simulate Raptor in a few commands. Run everything from the
-**project root** — `source env.sh` is not required, the Makefile exports
+**project root** - `source env.sh` is not required, the Makefile exports
 all variables.
 
 ## Prerequisites
@@ -13,10 +13,7 @@ all variables.
 - Linux (Ubuntu 22.04+) or macOS. On macOS some targets require a Linux container
   (e.g. [`colima`](https://github.com/abiosoft/colima)).
 - `git`, `make`, a C/C++ toolchain, Python 3, a RISC-V GCC toolchain.
-- Optional but recommended:
-  - [`verilator`](https://verilator.org/) — RTL simulator (installed by `make setup`).
-  - [`surfer`](https://surfer-project.org/) — waveform viewer.
-  - [`tmux`](https://github.com/tmux/tmux) — nicer terminal multiplexing.
+- [`verilator`](https://verilator.org/), RTL simulator (installed by `make setup`).
 
 ## 1. Install Dependencies
 
@@ -58,7 +55,7 @@ make build-rv32
 make run-rv32
 
 # Common runtime flags
-make run-rv32 ARGS="-b -n"     # -b batch mode (default) · -n no wave trace
+make run-rv32 ARGS="-b -n"     # -b batch mode (default) | -n no wave trace
 make run-rv32 IMG=path/to.bin  # load a custom image
 make menuconfig-rv32           # interactive Kconfig
 ```
@@ -66,7 +63,7 @@ make menuconfig-rv32           # interactive Kconfig
 ### RV64 Mode
 
 The core supports RV64 via the compile-time switch `-DRAPT_RV64`. Switching between
-RV32 and RV64 selects separate configuration and model caches — no manual `make clean` needed.
+RV32 and RV64 selects separate configuration and model caches - no manual `make clean` needed.
 
 ```shell
 make build-rv64
@@ -104,7 +101,8 @@ make coremark-nemu32       ARGS="-b -n"
 make microbench-nemu32     ARGS="-b -n"
 ```
 
-Recorded IPC history: **[Performance Iterations](./perf-iterations.md)**. Early PPA tables: **[PROFILE](./PROFILE.md)** (legacy archive).
+For reproducible comparisons, record the source revision, HDL preset, XLEN,
+benchmark binary, compiler options, and memory-delay settings with each result.
 
 ## 5. Apps on riscv-pk
 

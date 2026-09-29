@@ -305,7 +305,7 @@ _FPGA_CONFIG_VARS := FPGA_BOARD VARIANT RAPT_CONFIG RAPT_PACK_VFLAGS BOOT_MODE \
 	SYS_CLK UART_BAUD INTEGRATED_MAIN_RAM_SIZE WITH_LED_CHASER \
 	WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE WITH_SDCARD \
 	WITH_ETHERNET FMC_SLOT ETH_PORT ETH_SPEED EXTRA_FLAGS \
-	VIVADO_JOBS VIVADO_INCREMENTAL VIVADO_ROUTE_DIRECTIVE \
+	VIVADO_JOBS VIVADO_INCREMENTAL VIVADO_ROUTE_DIRECTIVE VIVADO_SYNTH_DIRECTIVE \
 	FW_FPGA_BIN FW_LINUX_CONFIG_ID
 FPGA_CONFIG_ID := $(call _build_identity,$(_FPGA_CONFIG_VARS))
 FPGA_DIR       := $(BUILD_DIR)/$(FPGA_BOARD)/$(FPGA_FLAVOR)-$(FPGA_CONFIG_ID)
@@ -322,6 +322,7 @@ VIVADO := $(strip $(VIVADO))
 VIVADO_JOBS := $(strip $(VIVADO_JOBS))
 VIVADO_INCREMENTAL := $(strip $(VIVADO_INCREMENTAL))
 VIVADO_ROUTE_DIRECTIVE := $(strip $(VIVADO_ROUTE_DIRECTIVE))
+VIVADO_SYNTH_DIRECTIVE := $(strip $(VIVADO_SYNTH_DIRECTIVE))
 OFL := $(strip $(OFL))
 OFL_CABLE := $(strip $(OFL_CABLE))
 
@@ -360,6 +361,7 @@ endif
 _FPGA_FLAGS = --output-dir=$(FPGA_DIR) \
 	--cpu-variant=$(VARIANT) --sys-clk-freq=$(SYS_CLK) \
 	--vivado-max-threads=$(VIVADO_JOBS) --vivado-route-directive=$(VIVADO_ROUTE_DIRECTIVE) $(VIVADO_INCREMENTAL_FLAG) \
+	--vivado-synth-directive=$(VIVADO_SYNTH_DIRECTIVE) \
 	--uart-baudrate=$(UART_BAUD) \
 	$(_FPGA_BOOT_FLAGS) \
 	$(_MAIN_RAM_FLAG) \
@@ -367,7 +369,7 @@ _FPGA_FLAGS = --output-dir=$(FPGA_DIR) \
 	$(WITH_MIG_FLAG) $(MIG_SIZE_FLAG) $(WITH_SDCARD_FLAG) $(WITH_ETHERNET_FLAG) $(EXTRA_FLAGS)
 
 FPGA_STAMP := $(FPGA_DIR)/.bitstream_stamp
-_FPGA_HASH_COMMON_INPUTS = $(PACK_SV) $(FPGA_PY) $(LITEX_DIR)/Makefile \
+_FPGA_HASH_COMMON_INPUTS = $(PACK_SV) $(RTL_SOURCES) $(FPGA_PY) $(LITEX_DIR)/Makefile \
 	$(LITEX_DIR)/scripts/isolated_pack.py $(LITEX_DIR)/scripts/build_identity.py \
 	$(if $(filter 1 yes true on,$(WITH_ETHERNET)),$(LITEX_DIR)/cm005.py $(LITEX_DIR)/cm005_oversample.py $(LITEX_DIR)/scripts/check_cm005_aperture.tcl,) \
 	$(LITEX_DIR)/mk/config.mk $(LITEX_DIR)/mk/recipes.mk \
@@ -392,7 +394,8 @@ _FPGA_HASH_INPUTS = $(_FPGA_HASH_COMMON_INPUTS) \
 	$(if $(filter 1,$(LINUX_FPGA_PROFILE)),$(FW_LINUX_FPGA_BIN) $(FW_LINUX_FPGA_SEEDED_DTB) $(FW_LINUX_FPGA_RNG_SEED) $(LINUX_FPGA_PAYLOAD),)
 endif
 # Keep this as a shell command instead of a parse-time value: LiteX finalization
-# can refresh PACK_SV, so fpga-build must recompute the stamp after generation.
+# can refresh PACK_SV, and raw RTL may change while Vivado is running. The
+# before/after hashes must agree before a bitstream can be marked current.
 _FPGA_HASH_COMMAND = { cat $(_FPGA_HASH_INPUTS) 2>/dev/null; printf '%s' '$(_FPGA_FLAGS)'; printf '%s' '$(RAPT_PACK_VFLAGS)'; } | shasum 2>/dev/null | cut -d' ' -f1
 
 GOWIN_REPORTS_INDEX_SRC  := $(LITEX_DIR)/scripts/reports_index.html

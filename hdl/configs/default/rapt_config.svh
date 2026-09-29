@@ -39,6 +39,11 @@
 
 // Branch predictor
 `define RAPT_PHT_SIZE 256
+`ifdef RAPT_RV64
+`ifndef RAPT_BPU_AUX_PC_HASH
+`define RAPT_BPU_AUX_PC_HASH 1
+`endif
+`endif
 `define RAPT_BTB_SIZE 128
 `define RAPT_BTB_WAYS 2
 `define RAPT_RSB_SIZE 4
@@ -77,6 +82,24 @@
 // Bare-mode only; B completes only on a clean cacheable hit or SQ forward,
 // everything else retries via the trap-owning A channel.
 `define RAPT_LSU_HUM
+
+// Ordered load completion and dependent wakeup paths for the dual-issue core.
+// Keep overrides available for controlled ablation and other configurations.
+`ifndef RAPT_IOQ_EARLY_LOAD_BCAST
+`define RAPT_IOQ_EARLY_LOAD_BCAST 1
+`endif
+`ifndef RAPT_IOQ_LIVE_EARLY_BCAST
+`define RAPT_IOQ_LIVE_EARLY_BCAST 1
+`endif
+`ifndef RAPT_IOQ_EARLY_LOAD_STORES
+`define RAPT_IOQ_EARLY_LOAD_STORES 1
+`endif
+`ifndef RAPT_IOQ_WAKE_NEXT_B_REQUEST
+`define RAPT_IOQ_WAKE_NEXT_B_REQUEST 1
+`endif
+`ifndef RAPT_ROU_STORE_FOLLOWER
+`define RAPT_ROU_STORE_FOLLOWER 1
+`endif
 
 // RVFI: RISC-V Formal Interface for formal verification.
 // Adds RVFI output ports to the core; enable only for riscv-formal checks.

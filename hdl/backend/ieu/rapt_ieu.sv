@@ -11,7 +11,7 @@ module rapt_ieu #(
     parameter int unsigned NumCompletions = Cfg.completion_ports,
     parameter type CompletionT = rapt_pkg::completion_t,
     parameter unsigned ALQ_SIZE = Cfg.iq_entries,
-    parameter unsigned BRQ_SIZE = 8,
+    parameter unsigned BRQ_SIZE = rapt_pkg::BranchQueueEntries,
     parameter unsigned MDQ_SIZE = 4,
     parameter unsigned ROB_SIZE = Cfg.rob_entries,
     parameter unsigned PLEN     = rapt_pkg::index_bits(Cfg.phys_regs),
@@ -19,6 +19,8 @@ module rapt_ieu #(
     parameter unsigned XLEN     = Cfg.xlen
 ) (
     input CompletionT completion[NumCompletions],
+    input CompletionT branch_wake[NumCompletions] = '{default: '0},
+    input CompletionT memory_wake = '0,
     input clock,
     input reset,
     input logic cancel_valid,
@@ -44,9 +46,9 @@ module rapt_ieu #(
   IssueT iss_branch;
   IssueT alq_issue[NumIntegerPorts];
   IssueT alq_execute[NumIntegerPorts];
-  // Issue select is already registered in the IQ. Another execute flop
-  // delayed every integer producer (including load-use consumers) by a
-  // cycle. Apply selective recovery combinationally on the selected packet.
+  // The IQ stores operands; selection and the simple ALU execute in one cycle.
+  // External load bypass may feed this execute path. Integer results must not
+  // feed the same ALQ selector combinationally. Gate cancelled issue packets.
   for (genvar p = 0; p < NumIntegerPorts; p++) begin : g_execute_stage
     logic younger;
     assign younger = ((alq_issue[p].dest < cancel_head) == (cancel_owner < cancel_head))
@@ -91,6 +93,12 @@ module rapt_ieu #(
   end
   assign pmu_ooo_full = (occ_alq == ($clog2(ALQ_SIZE) + 1)'(ALQ_SIZE));
 
+  CompletionT alq_combo[NumCompletions];
+  for (genvar p = 0; p < NumCompletions; p++) begin : g_alq_combo
+    if (p == NumIntegerPorts + 1) assign alq_combo[p] = memory_wake;
+    else assign alq_combo[p] = '0;
+  end
+
   rapt_iq #(
       .SlotT(SlotT),
       .NumSlots(NumSlots),
@@ -99,6 +107,9 @@ module rapt_ieu #(
       .NumCompletions(NumCompletions),
       .CompletionT(CompletionT),
       .IQ_SIZE  (ALQ_SIZE),
+      .ComboCdbWake(`RAPT_ALQ_LOAD_WAKE),
+      .ComboWakePorts(32'(1) << (NumIntegerPorts + 1)),
+      .ConfirmCdbWake(`RAPT_ALQ_LOAD_WAKE),
       .NumIssuePorts(NumIntegerPorts),
       // The system/FP shared completion path has an extra result register.
       // Keep it available for throughput and system-only uops, but route the
@@ -109,6 +120,7 @@ module rapt_ieu #(
       .RLEN     (RLEN),
       .XLEN     (XLEN)
   ) u_alq (
+      .combo_source(alq_combo),
       .cancel_valid(cancel_valid),
       .cancel_head(cancel_head),
       .cancel_owner(cancel_owner),
@@ -134,11 +146,15 @@ module rapt_ieu #(
       .NumCompletions(NumCompletions),
       .CompletionT(CompletionT),
       .IQ_SIZE (BRQ_SIZE),
+      .ComboCdbWake(`RAPT_BRQ_CDB_WAKE),
+      .ConfirmCdbWake(`RAPT_BRQ_CDB_WAKE),
+      .ComboWakePorts(~(32'(1) << NumIntegerPorts)),
       .ROB_SIZE(ROB_SIZE),
       .PLEN    (PLEN),
       .RLEN    (RLEN),
       .XLEN    (XLEN)
   ) u_brq (
+      .combo_source(branch_wake),
       .cancel_valid(cancel_valid),
       .cancel_head(cancel_head),
       .cancel_owner(cancel_owner),

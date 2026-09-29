@@ -127,6 +127,10 @@ interface ifu_l1i_if #(
   // upper halfword at pc+6.
   logic [31:0] inst_n2;
   logic        inst_n2_valid;
+`ifdef RAPT_FETCH_WIDE
+  logic [31:0] inst_n3, inst_n4;
+  logic inst_n3_valid, inst_n4_valid;
+`endif
 `endif
   logic trap;
   logic [XLEN-1:0] cause;
@@ -134,6 +138,20 @@ interface ifu_l1i_if #(
   logic valid;
 
 `ifdef RAPT_FETCH_LOOKAHEAD
+`ifdef RAPT_FETCH_WIDE
+  modport master(
+      output pc, invalid, consumed, cancel, prefetch_pc, prefetch_valid,
+      input inst_n0, inst_n1, inst_n1_valid, inst_n2, inst_n2_valid,
+      input inst_n3, inst_n3_valid, inst_n4, inst_n4_valid,
+      input trap, cause, tval, valid
+  );
+  modport slave(
+      input pc, invalid, consumed, cancel, prefetch_pc, prefetch_valid,
+      output inst_n0, inst_n1, inst_n1_valid, inst_n2, inst_n2_valid,
+      output inst_n3, inst_n3_valid, inst_n4, inst_n4_valid,
+      output trap, cause, tval, valid
+  );
+`else
   modport master(
       output pc, invalid, consumed, cancel, prefetch_pc, prefetch_valid,
       input inst_n0, inst_n1, inst_n1_valid, inst_n2, inst_n2_valid,
@@ -144,6 +162,7 @@ interface ifu_l1i_if #(
       output inst_n0, inst_n1, inst_n1_valid, inst_n2, inst_n2_valid,
       output trap, cause, tval, valid
   );
+`endif
 `else
   modport master(
       output pc, invalid, consumed, cancel, prefetch_pc, prefetch_valid,

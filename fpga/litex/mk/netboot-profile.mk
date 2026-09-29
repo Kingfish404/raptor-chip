@@ -56,13 +56,14 @@ _nb_args = $(call _nb_fixed,FPGA_BOARD,mlk_cu08_ku15p) $(call _nb_fixed,FPGA_AUT
  $(call _nb_fixed,WITH_SDCARD,1) $(call _nb_fixed,WITH_ETHERNET,1) $(call _nb_fixed,ETH_SPEED,1000) $(call _nb_fixed,FMC_SLOT,c) $(call _nb_fixed,ETH_PORT,a) \
  $(call _nb_fixed,BOOT_MODE,bios) $(call _nb_fixed,EXTRA_FLAGS,) $(call _nb_fixed,LINUX_FPGA_INIT,full) \
  $(call _nb_quote,CROSS=$(CROSS)) \
- $(call _nb_fixed,RAPT_PACK_VFLAGS,) \
+ $(call _nb_quote,$(call _nb_fixed,RAPT_PACK_VFLAGS,$(if $(filter 64,$(_nb_xlen)),-DRAPT_FETCH_RESPONSE_STAGE=1 -DRAPT_IOQ_LOAD_RESPONSE_STAGE=1,))) \
  $(call _nb_fixed,LINUX_ISA,rv$(_nb_xlen)imafdc_zicbom_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs) \
  $(call _nb_quote,LINUX_IMG=$(_nb_payload)) $(call _nb_quote,LINUX_FPGA_PAYLOAD=$(_nb_payload)) \
  $(call _nb_fixed,LINUX_FPGA_DTB_OFFSET,0x4000000) $(call _nb_fixed,LINUX_FPGA_DTB_ADDR,0x83f00000) \
  $(call _nb_quote,BUILD_DIR=$(_nb_dir)/build) $(call _nb_quote,FPGA_DIR=$(_nb_dir)/soc) \
  $(call _nb_fixed,FPGA_FLAVOR_SUFFIX,$(RAPT_CONFIG)-no-ila) \
- $(call _nb_quote,VIVADO_JOBS=$(VIVADO_JOBS)) $(call _nb_fixed,VIVADO_ROUTE_DIRECTIVE,Explore) $(call _nb_quote,VIVADO=$(VIVADO))
+ $(call _nb_quote,VIVADO_JOBS=$(VIVADO_JOBS)) $(call _nb_fixed,VIVADO_ROUTE_DIRECTIVE,Explore) \
+ $(call _nb_fixed,VIVADO_SYNTH_DIRECTIVE,$(if $(filter 64,$(_nb_xlen)),RuntimeOptimized,default)) $(call _nb_quote,VIVADO=$(VIVADO))
 
 NETBOOT_PYTHON ?= $(_NETBOOT_LITEX)/.venv/bin/python3
 NETBOOT_INTERFACE ?=

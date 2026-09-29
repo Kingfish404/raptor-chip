@@ -1489,8 +1489,10 @@ bool checkpoint_load_post_trampoline_tick(word_t committed_pc)
     *npc.minstret = loaded_snap.minstret;
   if (npc.minstreth != NULL)
     *npc.minstreth = loaded_snap.minstreth;
+  if (npc.mepc_half_q != NULL)
+    *npc.mepc_half_q = loaded_snap.mepc >> 1;
   if (npc.mepc___ != NULL)
-    *npc.mepc___ = loaded_snap.mepc;
+    *npc.mepc___ = loaded_snap.mepc & ~(word_t)1;
 
   resume_pmu_cycle_base = current_pmu_cycle();
   resume_pmu_instr_base = current_pmu_instr();

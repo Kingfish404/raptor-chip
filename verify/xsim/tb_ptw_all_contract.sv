@@ -494,6 +494,8 @@ module tb_ptw_pmp_span;
       .ptw_araddr(PteAddr),
       .lookahead_n1_addr('0),
       .lookahead_n2_addr('0),
+      .lookahead_n3_addr('0),
+      .lookahead_n4_addr('0),
       .sram_data_ready(1'b0),
       .is_c(1'b0),
       .tlb_hit(1'b0),
@@ -505,7 +507,9 @@ module tb_ptw_pmp_span;
       .pmp_fetch_fault_lo(),
       .pmp_iptw_fault(i_fault),
       .pmp_n1_fetch_fault(),
-      .pmp_n2_fetch_fault()
+      .pmp_n2_fetch_fault(),
+      .pmp_n3_fetch_fault(),
+      .pmp_n4_fetch_fault()
   );
   rapt_l1d_access #(
       .XLEN(XLEN)

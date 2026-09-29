@@ -9,7 +9,18 @@ module tb_tage_read_storage;
   logic [63:0] r_ghr = 0, update_ghr = 0;
   logic [7:0] r_phr = 0, update_phr = 0;
   logic rd_taken, update_en = 0, update_taken = 0, update_mispred = 0;
-  rapt_bpu_tage #(.XLEN(XLEN)) dut (.*);
+  logic [XLEN-1:0] aux_pc = '0;
+  logic [63:0] aux_ghr = '0;
+  logic [7:0] aux_phr = '0;
+  logic aux_taken;
+  rapt_bpu_tage #(
+      .XLEN(XLEN),
+      .BIM_LEN(8),
+      .IDX_LEN(7),
+      .AuxRead(0)
+  ) dut (
+      .*
+  );
   logic [XLEN-1:0] sampled_pc = 0;
   logic [63:0] sampled_ghr = 0;
   logic [7:0] sampled_phr = 0;

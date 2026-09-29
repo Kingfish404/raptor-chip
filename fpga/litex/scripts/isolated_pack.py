@@ -16,11 +16,28 @@ def key(config, flags):
     return config + "-" + hashlib.sha256(json.dumps(shlex.split(flags)).encode()).hexdigest()[:20]
 
 
-def pack(repo, root, config, flags):
-    output = root / key(config, flags)
-    config_dir = repo / "hdl/configs" / config
-    if not (config_dir / "rapt_config.svh").is_file():
-        raise ValueError(f"Unknown RTL preset: {config}")
+def immutable_copy(output):
+    names = ("rapt_pack.sv", "rapt_pack.svh")
+    digest = hashlib.sha256()
+    for name in names:
+        digest.update(name.encode())
+        digest.update((output / name).read_bytes())
+    snapshot = output / "snapshots" / digest.hexdigest()
+    snapshot.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        source = output / name
+        target = snapshot / name
+        try:
+            # Both files live on one filesystem. Replacing the mutable cache
+            # later leaves this inode, and an active Vivado reader, intact.
+            os.link(source, target)
+        except FileExistsError:
+            if target.read_bytes() != source.read_bytes():
+                raise RuntimeError(f"Packed RTL snapshot collision: {target}")
+    return snapshot / "rapt_pack.sv"
+
+
+def pack_inputs(repo, config_dir, flags):
     # Same package-first source set as sim/Makefile: no upstream SoC models,
     # and only the two supported generated instruction decoders.
     sources = sorted(p for p in (repo / "hdl").rglob("*.sv") if "generated" not in p.relative_to(repo / "hdl").parts)
@@ -39,22 +56,37 @@ def pack(repo, root, config, flags):
     for source in sources + headers:
         digest.update(str(source).encode())
         digest.update(source.read_bytes())
-    signature = digest.hexdigest()
+    return command, digest.hexdigest()
+
+
+def pack(repo, root, config, flags, *, immutable=False):
+    output = root / key(config, flags)
+    config_dir = repo / "hdl/configs" / config
+    if not (config_dir / "rapt_config.svh").is_file():
+        raise ValueError(f"Unknown RTL preset: {config}")
     output.mkdir(parents=True, exist_ok=True)
     with (output / ".lock").open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        command, signature = pack_inputs(repo, config_dir, flags)
         stamp = output / ".signature"
-        if stamp.exists() and stamp.read_text() == signature and all((output / n).is_file() for n in ("rapt_pack.sv", "rapt_pack.svh")):
-            return output / "rapt_pack.sv"
-        with tempfile.TemporaryDirectory(dir=output) as tmp:
-            for name, extra in (("rapt_pack.sv", []), ("rapt_pack.svh", ["--dump-defines"])):
-                with (Path(tmp) / name).open("wb") as dest:
-                    subprocess.run(command[:1] + extra + command[1:], stdout=dest, check=True)
-            for name in ("rapt_pack.sv", "rapt_pack.svh"):
-                os.replace(Path(tmp) / name, output / name)
-            (Path(tmp) / "signature").write_text(signature)
-            os.replace(Path(tmp) / "signature", stamp)
-    return output / "rapt_pack.sv"
+        current = stamp.exists() and stamp.read_text() == signature and all(
+            (output / n).is_file() for n in ("rapt_pack.sv", "rapt_pack.svh")
+        )
+        if not current:
+            with tempfile.TemporaryDirectory(dir=output) as tmp:
+                for name, extra in (("rapt_pack.sv", []), ("rapt_pack.svh", ["--dump-defines"])):
+                    with (Path(tmp) / name).open("wb") as dest:
+                        subprocess.run(command[:1] + extra + command[1:], stdout=dest, check=True)
+                # Both exports must describe the same source revision. The
+                # immutable snapshot protects consumers after publication;
+                # this check protects publication from an in-flight edit.
+                if pack_inputs(repo, config_dir, flags)[1] != signature:
+                    raise RuntimeError("RTL inputs changed during preprocessing; retry the build")
+                for name in ("rapt_pack.sv", "rapt_pack.svh"):
+                    os.replace(Path(tmp) / name, output / name)
+                (Path(tmp) / "signature").write_text(signature)
+                os.replace(Path(tmp) / "signature", stamp)
+        return immutable_copy(output) if immutable else output / "rapt_pack.sv"
 
 
 def main():
@@ -64,11 +96,14 @@ def main():
     parser.add_argument("--config", required=True)
     parser.add_argument("--flags", default="")
     parser.add_argument("--path-only", action="store_true")
+    parser.add_argument("--immutable", action="store_true")
     args = parser.parse_args()
     if args.path_only:
+        if args.immutable:
+            parser.error("--path-only cannot select an immutable snapshot")
         print(args.root / key(args.config, args.flags) / "rapt_pack.sv")
     else:
-        print(pack(args.repo, args.root, args.config, args.flags))
+        print(pack(args.repo, args.root, args.config, args.flags, immutable=args.immutable))
 
 
 if __name__ == "__main__":
@@ -80,3 +115,6 @@ if __name__ == "__main__":
         print(f"RTL preprocessing failed (exit {exc.returncode}); see the Verilator diagnostics above.",
               file=sys.stderr)
         sys.exit(exc.returncode or 1)
+    except (RuntimeError, ValueError) as exc:
+        print(f"RTL export failed: {exc}", file=sys.stderr)
+        sys.exit(1)

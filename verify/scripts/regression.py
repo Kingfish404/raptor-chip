@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -20,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CANCELLED = threading.Event()
 PROCESSES = set()
 PROCESS_LOCK = threading.RLock()
+EDA_LANE_LOCK = threading.Lock()
 
 
 def cancel(signum, _frame):
@@ -47,9 +49,9 @@ def positive(value):
 
 
 def plan(args, work):
-    def make(directory, target, *settings, jobs=None):
+    def make(directory, target, *settings, jobs=None, preset=None):
         return [args.make, '-C', str(ROOT / directory), f'-j{jobs or args.tool_jobs}', target,
-                f'RAPT_CONFIG={args.preset}', f'NPROC={args.tool_jobs}',
+                f'RAPT_CONFIG={preset or args.preset}', f'NPROC={args.tool_jobs}',
                 f'VERILATOR_JOBS={args.tool_jobs}', 'VERILATOR_THREADS=1',
                 *settings]
 
@@ -70,7 +72,9 @@ def plan(args, work):
             f'BUILD_ROOT={work}/sta-rv{x}/pack',
             f'STA_WORK_DIR={work}/sta-rv{x}', 'MEMORY=sram', f'XLEN={x}',
             f'VFLAGS={"-DRAPT_RV64" if x == 64 else ""}',
-            f'STA_PLATFORM={args.platform}', f'CLK_FREQ_MHZ={args.clock_mhz}', jobs=1), 'sta')
+            f'STA_PLATFORM={args.platform}', f'CLK_FREQ_MHZ={args.clock_mhz}',
+            'STA_REPORT_ONLY=1', jobs=1,
+            preset=args.sta_preset), 'sta')
             for x in args.xlens]
     if 'fpga' in args.suites:
         settings = [f'BOARD={args.board}', 'FPGA_AUTO_DETECT=0',
@@ -78,6 +82,11 @@ def plan(args, work):
         lanes['fpga'] = [Step(t, make('fpga/litex', t, *settings),
                              'fpga-timing' if t == 'fpga-timing-ok' else 'exit')
                          for t in ('fpga-build', 'fpga-timing-ok')]
+    if 'fpga' in lanes and 'sta' in lanes:
+        fpga = lanes.pop('fpga')
+        sta = lanes.pop('sta')
+        lanes['fpga'] = fpga
+        lanes['sta'] = sta
     return formats, lanes
 
 
@@ -160,15 +169,28 @@ def run_step(step, work, timeout):
 
 def run_lane(steps, work, timeout, runner=None):
     runner = runner or run_step
-    results = []
-    for step in steps:
-        # Only timing depends on a successful bitstream build. Independent
-        # CoreMark/STA configurations still run after earlier failures.
-        if step.name == 'fpga-timing-ok' and results[-1]['status'] != 'PASS':
-            results.append(dict(asdict(step), status='SKIP', exit_code=None, seconds=0,
-                                reason='fpga-build failed', log=None))
-        else:
-            results.append(runner(step, work, timeout))
+    def run_steps():
+        results = []
+        for step in steps:
+            # Only timing depends on a successful bitstream build.
+            if step.name == 'fpga-timing-ok' and results[-1]['status'] != 'PASS':
+                results.append(dict(asdict(step), status='SKIP', exit_code=None, seconds=0,
+                                    reason='fpga-build failed', log=None))
+            else:
+                results.append(runner(step, work, timeout))
+        return results
+
+    is_eda = any(step.check == 'sta' or step.name.startswith('fpga-') for step in steps)
+    if is_eda:
+        # Full-chip ABC and Vivado builds are both memory and disk intensive.
+        with EDA_LANE_LOCK:
+            results = run_steps()
+    else:
+        results = run_steps()
+
+    if (steps and steps[0].name == 'fpga-build'
+            and all(result['status'] == 'PASS' for result in results)):
+        shutil.rmtree(work / 'fpga', ignore_errors=True)
     return results
 
 
@@ -177,6 +199,8 @@ def main(argv=None):
     parser.add_argument('--plan', action='store_true')
     parser.add_argument('--make', default='make')
     parser.add_argument('--preset', default='default')
+    parser.add_argument('--sta-preset', default='small',
+                        help='RTL configuration for STA; defaults to the CI STA preset')
     parser.add_argument('--board', default='mlk_cu08_ku15p')
     parser.add_argument('--platform', default='nangate45')
     parser.add_argument('--clock-mhz', type=positive, default=50)

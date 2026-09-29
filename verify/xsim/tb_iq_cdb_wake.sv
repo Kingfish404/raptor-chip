@@ -1,10 +1,12 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
 
-// BRQ-style queue: a waiting operand must issue the cycle its producer
-// appears on CDB, with the CDB value on op1. Tag-only fast-wake without a
-// matching CDB packet still must not issue.
-module tb_iq_cdb_wake;
+// Compare BRQ-style same-cycle wake with ALQ-style registered wake. Both
+// consume the producer's CDB value, but only ComboCdbWake may issue before
+// the capture edge. A fast tag alone must not make an operand ready.
+module tb_iq_cdb_wake #(
+    parameter bit ComboCdbWake = 1'b1
+);
   import rapt_pkg::*;
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
@@ -19,7 +21,7 @@ module tb_iq_cdb_wake;
   rapt_iq #(
       .IQ_SIZE(4),
       .NumIssuePorts(1),
-      .ComboCdbWake(1'b1)
+      .ComboCdbWake(ComboCdbWake)
   ) dut (
       .cancel_valid(1'b0),
       .cancel_head('0),
@@ -87,13 +89,21 @@ module tb_iq_cdb_wake;
     completion[0].dest = 7;
     completion[0].generation = 1;
     #1;
-    if (!issue[0].valid) $fatal(1, "CDB wake did not issue this cycle");
+    if (ComboCdbWake) begin
+      if (!issue[0].valid) $fatal(1, "CDB wake did not issue this cycle");
+    end else begin
+      if (issue[0].valid) $fatal(1, "registered wake issued before the capture edge");
+      tick();
+      completion[0].valid = 0;
+      #1;
+      if (!issue[0].valid) $fatal(1, "registered wake did not issue after the capture edge");
+    end
     if (issue[0].op1 != $bits(issue[0].op1)'('h1234_5678))
       $fatal(1, "CDB value missing on issue op1");
     if (issue[0].op2 != $bits(issue[0].op2)'('h1111)) $fatal(1, "ready op2 was overwritten");
     if (issue[0].dest != 3) $fatal(1, "issue identity changed");
 
-    $display("PASS: IQ ComboCdbWake same-cycle CDB operand XLEN=%0d", `RAPT_XLEN);
+    $display("PASS: IQ CDB operand wake ComboCdbWake=%0d XLEN=%0d", ComboCdbWake, `RAPT_XLEN);
     $finish;
   end
 endmodule

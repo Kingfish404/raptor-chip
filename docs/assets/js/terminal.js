@@ -102,7 +102,7 @@ export function createTerminal(root, data, hooks = {}) {
       const display = nodes.filter((n) => n.display);
       write(
         display
-          .map((n) => `${(n.parent || "—").padEnd(22)} → ${n.id}`)
+          .map((n) => `${(n.parent || "-").padEnd(22)} -> ${n.id}`)
           .join("\n"),
       );
     },
@@ -161,7 +161,7 @@ export function createTerminal(root, data, hooks = {}) {
           for (const c of list.slice(0, 24)) {
             write(`  ${c.name.padEnd(22)} ${escapeHtml(c.description)}`);
           }
-          if (list.length > 24) write(`  … ${list.length - 24} more. make <target>`, "dim");
+          if (list.length > 24) write(`  ... ${list.length - 24} more. make <target>`, "dim");
         }
         return;
       }
@@ -193,7 +193,7 @@ export function createTerminal(root, data, hooks = {}) {
       write(`${node.id}`, "ok");
       write(`file     ${node.file}`);
       write(`domain   ${node.domain}`);
-      write(`parent   ${node.parent || "—"}`);
+      write(`parent   ${node.parent || "-"}`);
       if (node.summary) write(escapeHtml(node.summary));
       hooks.focusModule?.(node.id);
     },

@@ -111,6 +111,12 @@ module tb_ifu_response_stage;
     ifu_l1i.inst_n0 = word_at(ifu_l1i.pc);
     ifu_l1i.inst_n1 = word_at({ifu_l1i.pc[XLEN-1:2], 2'b00} + 4);
     ifu_l1i.inst_n2 = word_at({ifu_l1i.pc[XLEN-1:2], 2'b00} + 8);
+`ifdef RAPT_FETCH_WIDE
+    ifu_l1i.inst_n3 = word_at({ifu_l1i.pc[XLEN-1:2], 2'b00} + 12);
+    ifu_l1i.inst_n4 = word_at({ifu_l1i.pc[XLEN-1:2], 2'b00} + 16);
+    ifu_l1i.inst_n3_valid = !(phase inside {1,3}) || rng[4];
+    ifu_l1i.inst_n4_valid = !(phase inside {1,3}) || rng[5];
+`endif
     ifu_l1i.inst_n1_valid = !(phase inside {1,3}) || rng[2];
     ifu_l1i.inst_n2_valid = !(phase inside {1,3}) || rng[3];
     ifu_l1i.valid = cache_enabled && (!(phase inside {1,3}) || rng[1:0] != 0);

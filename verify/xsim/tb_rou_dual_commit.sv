@@ -404,8 +404,10 @@ rapt_cmu dut_cmu (
       check(dut_rou.uoq_uops[dut_rou.deq_index[0]].pnpc == '0,
             "predicted target remained in UOQ payload");
       if (u.execute.branch.conditional || u.execute.branch.jump || u.execute.branch.indirect) begin
-        check(dut_rou.predicted_npc[rapt_pkg::branch_checkpoint_t'(expected_dest)] == u.pnpc,
-              "checkpoint target was not captured on rename acceptance");
+        check(
+            dut_rou.predicted_npc[rapt_pkg::branch_checkpoint_t'(expected_dest)]
+                  == u.pnpc[XLEN-1:1],
+            "checkpoint target was not captured on rename acceptance");
         check(
             dut_rou.predicted_taken[rapt_pkg::branch_checkpoint_t'(expected_dest)]
               == u.execute.branch.predicted_taken,
@@ -631,17 +633,28 @@ rapt_cmu dut_cmu (
 
       check(commit_fire, "slot0 store did not assert commit_fire");
       check(rou_cmu.slot[0].valid, "slot0 store missing slot0 commit");
-      check(!rou_cmu.slot[1].valid, "slot0 store incorrectly dual committed");
+      if (`RAPT_ROU_STORE_FOLLOWER) begin
+        check(rou_cmu.slot[1].valid, "slot0 store missing plain follower");
+        check(rou_cmu.slot[1].pc == 32'h8000_1004, "store follower pc mismatch");
+        check(dut_cmu.count == 2, "CMU lost store follower retirement");
+      end else begin
+        check(!rou_cmu.slot[1].valid, "slot0 store incorrectly dual committed");
+      end
       check(rou_lsu.valid, "slot0 store did not drive LSU commit valid");
       check(rou_lsu.store, "slot0 store did not drive LSU store");
       check(rou_lsu.dest == RobW'(0), "slot0 store owner mismatch");
 
       tick(1);
-      check(rou_cmu.rob_head == RobW'(1), "ROB head did not advance by 1 for slot0 store");
-      check(rou_cmu.slot[0].valid, "slot1 should commit after slot0 store retires");
-      check(!rou_cmu.slot[1].valid, "single remaining slot unexpectedly dual committed");
-      tick(1);
-      check(rou_cmu.rob_head == RobW'(2), "ROB head did not retire slot1 after store");
+      if (`RAPT_ROU_STORE_FOLLOWER) begin
+        check(rou_cmu.rob_head == RobW'(2), "ROB head did not advance by 2 for store pair");
+        check(!rou_cmu.slot[0].valid, "store follower committed twice");
+      end else begin
+        check(rou_cmu.rob_head == RobW'(1), "ROB head did not advance by 1 for slot0 store");
+        check(rou_cmu.slot[0].valid, "slot1 should commit after slot0 store retires");
+        check(!rou_cmu.slot[1].valid, "single remaining slot unexpectedly dual committed");
+        tick(1);
+        check(rou_cmu.rob_head == RobW'(2), "ROB head did not retire slot1 after store");
+      end
     end
   endtask
 
@@ -745,8 +758,10 @@ rapt_cmu dut_cmu (
       rnu_rou.valid[0] = 1'b0;
       rnu_rou.valid[1] = 1'b0;
       #1;
-      check(dut_rou.predicted_npc[0] == branch0.pnpc && dut_rou.predicted_npc[1] == branch1.pnpc,
-            "dual rename capture aliased checkpoint targets");
+      check(
+          dut_rou.predicted_npc[0] == branch0.pnpc[XLEN-1:1]
+                && dut_rou.predicted_npc[1] == branch1.pnpc[XLEN-1:1],
+          "dual rename capture aliased checkpoint targets");
       check(dut_rou.predicted_taken[0] && !dut_rou.predicted_taken[1],
             "dual rename capture aliased checkpoint directions");
       check(dut_rou.uoq_uops[0].pnpc == '0 && dut_rou.uoq_uops[1].pnpc == '0,

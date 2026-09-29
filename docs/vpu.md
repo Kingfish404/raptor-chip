@@ -4,7 +4,10 @@ title: Standalone VPU
 
 # Standalone Raptor VPU
 
-Status: standalone implementation and selected verification complete, 2026-09-06.
+Implementation: standalone VPU, not wired into the scalar core.
+Verification snapshot: selected acceptance reported on 2026-09-06; the test
+counts, source-current audits and PPA figures below refer to their recorded
+sources. The 2026-09-29 documentation review did not rerun those gates.
 The component implements the baseline RVV 1.0 instruction families, including
 integer/fixed-point/permutation, vector configuration/CSRs, memory and FP32/FP64.
 Verification covers the 375-entry catalog (627 expanded variants), differential
@@ -219,7 +222,7 @@ walks, S-mode translation, Linux, interrupts, or physical MMIO devices. The bus
 scoreboard separately checks external effect counts; the Spike adapter never
 copies DUT stores back into the reference array.
 
-The additional handwritten integer model snapshots source registers before
+The additional integer reference model snapshots source registers before
 updating destinations and remains enabled alongside Spike. The current pinned
 reference preserves the inactive/tail elements exercised here, matching the
 DUT's permitted undisturbed policy. The pinned reference also preserves the mask-result bits exercised here. Other
@@ -242,7 +245,7 @@ With RV64, VLEN=128, ELEN=64, BankBits=64 and Banks=2, the 1,584-instruction
 arithmetic workload reduced summed command latency from 66,682 to 65,450 cycles
 (1.848%). The metric runs from command acceptance to completion availability and
 includes fixed test authorization delays; it excludes host VRF inspection and
-is not application IPC. Both variants passed the handwritten and Spike checks.
+is not application IPC. Both variants passed the integer reference model and Spike checks.
 The comparison script requires identical source fingerprints, hardware settings
 apart from this switch, reference fingerprints and command/data workload hashes.
 The result is recorded in `verify/build/vpu/optimization-64-128-64-64-2-spike.json`.
@@ -326,11 +329,18 @@ Currently executable instruction families:
 | Carry/borrow | vadc, vmadc: vector/vector, scalar and immediate forms; vsbc, vmsbc: vector/vector and scalar forms; optional carry-in for mask results |
 | Merge and move | vmerge.vvm/vxm/vim; vmv.v.v/v.x/v.i |
 | Memory | Unit-stride, strided, ordered/unordered indexed, segment, whole-register, mask and unit-stride FOF loads |
+| Integer reductions and transfers | Sum/min/max/logical reductions; whole-register moves; scalar/vector transfers; vid |
+| Mask scans and permutation | vcpop/vfirst, first-bit mask prefixes, viota, compression, integer slides and gathers |
+| FP32/FP64 arithmetic | Single-width and widening arithmetic, FMA, divide/sqrt, min/max, sign injection, classification and comparisons |
+| FP conversion and routing | Format and integer conversions, reciprocal estimates, merge/broadcast, scalar transfers and slide1 |
+| FP reductions | Ordered/unordered sums, min/max, and FP32-to-FP64 widening sums |
 
 Supported integer instructions honor the legal SEW/LMUL combinations, register
 group alignment, masking and VSTART. Tail and inactive elements are preserved,
-including in agnostic modes. Other vector families currently raise illegal
-instruction; their implementation remains part of the target below.
+including in agnostic modes. The later sections describe the integrated
+reduction, permutation and FP families above. Reserved encodings, unsupported
+parameter/width combinations, and optional extensions outside this baseline
+raise illegal instruction.
 
 ### Fixed-point arithmetic and saturation ownership
 
@@ -2326,7 +2336,7 @@ Validation for the split:
 - ELEN32: 32,975 numerical commands and 32 reset boundaries.
 - ELEN64: 33,005 numerical commands and 96 reset boundaries.
 - Each ELEN additionally passes 768 mock-service requests spanning all three
-  operations, request stalls of 0–7 cycles, response delays of 0–7 cycles,
+  operations, request stalls of 0-7 cycles, response delays of 0-7 cycles,
   masked entries, held completions, 192 injected error commands and two reset
   boundaries. This test checks the controller contract independently of FP math.
 - Builds enable assertions and strict RTL warnings with the existing scoped
@@ -2497,7 +2507,7 @@ comparisons; see the source-current acceptance audit below.
 
 `test_encoding_top.h` adds a real-top instruction-admission sweep using the
 independent pinned Spike adapter. It enumerates all 64 funct6 values, seven
-data-processing funct3 forms (0–6), both vm values and every 5-bit selector,
+data-processing funct3 forms (0-6), both vm values and every 5-bit selector,
 with vd=8, vs2=16, LMUL=1, VL=2 and FRM=RNE. Every case starts from freshly
 initialized VRF/configuration state. Scalar inputs and FP scalar inputs are
 fixed. The selector is exercised in its vector-source, scalar-source or
@@ -2642,8 +2652,8 @@ At VLEN128, all proof components pass for XLEN32/ELEN32/TagBits2 and
 XLEN64/ELEN64/TagBits10. The projections pair 754/1,218 total DUT register bits
 across the two instances and compare 377/609 next-state bits respectively.
 The ledger component detects all four removed identity comparisons. Two
-additional mutations—capturing response data without acceptance and consuming
-fault without acceptance—both produce counterexamples in the isolation check.
+additional mutations-capturing response data without acceptance and consuming
+fault without acceptance-both produce counterexamples in the isolation check.
 
 ```sh
 python3 verify/vpu/memory_response_isolation.py
@@ -2686,12 +2696,12 @@ workload. Timing uses a mock numeric service, not the integrated FP datapath.
 Backpressure is generated per case, but the two modes do not necessarily see
 identical cycle-by-cycle stalls.
 
-| XLEN / VLEN / ELEN | Cycles, cache 0 → 1 | VRF reads, cache 0 → 1 | Matching fingerprint |
+| XLEN / VLEN / ELEN | Cycles, cache 0 -> 1 | VRF reads, cache 0 -> 1 | Matching fingerprint |
 | --- | ---: | ---: | --- |
-| 64 / 128 / 64 | 105578 → 81998 | 12237 → 7043 | `0f2c5bcc122d6184` |
-| 32 / 128 / 32 | 52740 → 41047 | 5889 → 3300 | `c99814e5b16523a9` |
-| 32 / 256 / 64 | 198502 → 150079 | 23838 → 13055 | `b3ce6ddef892a023` |
-| 64 / 512 / 64 | 384128 → 286736 | 46956 → 25227 | `535e27a561adcc7b` |
+| 64 / 128 / 64 | 105578 -> 81998 | 12237 -> 7043 | `0f2c5bcc122d6184` |
+| 32 / 128 / 32 | 52740 -> 41047 | 5889 -> 3300 | `c99814e5b16523a9` |
+| 32 / 256 / 64 | 198502 -> 150079 | 23838 -> 13055 | `b3ce6ddef892a023` |
+| 64 / 512 / 64 | 384128 -> 286736 | 46956 -> 25227 | `535e27a561adcc7b` |
 
 All eight leaf source manifests matched the worktree when this record was
 written. Build directories end in `fp-reduce-engine-XLEN-VLEN-ELEN-cacheN`.
@@ -3092,10 +3102,10 @@ the enabled FP reduction mask cache.
 Both selected mappings completed with Yosys 0.64, source hashes matching the
 worktree and mapped-netlist hashes recorded in their summaries:
 
-| XLEN / VLEN / ELEN / BankBits / Banks | LUT1–6 cells | FDRE + FDSE | DSP48E2 | CARRY4 | VRF RAM primitives |
+| XLEN / VLEN / ELEN / BankBits / Banks | LUT1-6 cells | FDRE + FDSE | DSP48E2 | CARRY4 | VRF RAM primitives |
 | --- | ---: | ---: | ---: | ---: | --- |
-| 32 / 128 / 32 / 64 / 1 | 34647 | 5380 | 8 | 3182 | 64 × RAM64X1S |
-| 64 / 128 / 64 / 64 / 2 | 60738 | 9790 | 22 | 5232 | 16 × RAM32M16 |
+| 32 / 128 / 32 / 64 / 1 | 34647 | 5380 | 8 | 3182 | 64 x RAM64X1S |
+| 64 / 128 / 64 / 64 / 2 | 60738 | 9790 | 22 | 5232 | 16 x RAM32M16 |
 
 The LUT column excludes distributed RAM, wide muxes and inverter cells. Raw
 counts for every primitive are retained in the JSON summaries. VRF data maps
@@ -3145,7 +3155,7 @@ The old source is frozen as `verify/vpu/rapt_vpu_alu_baseline.sv`.
 `formal_alu_equivalence.sv` compares every output bit for all binary values of
 both 64-bit operands, funct6, SEW and mask controls, without assumptions.
 The Yosys SAT proof passed. `alu_opt_check.py` records the proof and maps both
-versions with the same xcup/no-I/O/no-clock-buffer flow. Leaf LUT1–6 counts
+versions with the same xcup/no-I/O/no-clock-buffer flow. Leaf LUT1-6 counts
 fell from 6,361 to 2,079 (about 67.3%); CARRY4 counts changed from 128 to 118.
 These leaf numbers alone do not establish full-VPU resource savings or timing.
 
@@ -3168,10 +3178,10 @@ the sole synthesis-source change. Current vendor-primitive provenance checks
 also passed. In the same xcup flow, with VLEN=128, BankBits=64, default core
 identity/metadata widths and OPT_READS=1:
 
-| XLEN / ELEN / Banks | LUT1–6 before → after | LUT reduction | FF before → after | DSP48E2 before → after |
+| XLEN / ELEN / Banks | LUT1-6 before -> after | LUT reduction | FF before -> after | DSP48E2 before -> after |
 | --- | ---: | ---: | ---: | ---: |
-| 32 / 32 / 1 | 34647 → 31102 | 10.23% | 5380 → 5380 | 8 → 8 |
-| 64 / 64 / 2 | 60738 → 57110 | 5.97% | 9790 → 9790 | 22 → 22 |
+| 32 / 32 / 1 | 34647 -> 31102 | 10.23% | 5380 -> 5380 | 8 -> 8 |
+| 64 / 64 / 2 | 60738 -> 57110 | 5.97% | 9790 -> 9790 | 22 -> 22 |
 
 VRF remains 64 RAM64X1S in the first configuration and 16 RAM32M16 in the
 second. The complete metric dictionaries and proof/netlist fingerprints are
@@ -3349,7 +3359,7 @@ On 2026-09-06, all three encoding suites passed through `rapt_vpu_core`
 | 64 | memory-encoding | 32768 | 5539 | 27184 | 45 | 163840 |
 
 The current arithmetic scan covers every supported SEW, vs2=0/16, all funct6
-values, forms 0–6, VM values and five-bit selectors, comparing the entire VRF.
+values, forms 0-6, VM values and five-bit selectors, comparing the entire VRF.
 It fixes LMUL=1, VL=2, vd=8 and FRM=RNE. Configuration cases cover all upper
 12-bit encoding patterns at selected scalar identities, VTYPE low bytes,
 unsupported upper bits, AVL boundaries and disabled-vector admission. Memory
@@ -3368,7 +3378,7 @@ Reproduce with `make -C verify/vpu top CORE_ADAPTER=1 DIFF=1`, the pinned
 `SPIKE_BUILD`, the parameters above and `TOP_SUITE=encoding`,
 `TOP_SUITE=config-encoding` or `TOP_SUITE=memory-encoding`.
 
-## Selected source-current acceptance audit
+## Selected acceptance audit (recorded snapshot)
 
 Run from the repository root:
 
@@ -3379,7 +3389,8 @@ python3 verify/vpu/test_check_acceptance.py
 
 The first command audits existing completed artifacts and writes
 `verify/build/vpu/acceptance.json`; it does not rebuild or rerun the underlying
-simulations, proofs or mappings. All 30 selected gates pass:
+simulations, proofs or mappings. At the recorded acceptance snapshot, all 30
+selected gates passed:
 
 - CORE_ADAPTER=1 full, context, store-completion, geometry and catalog Spike suites for both
   XLEN/ELEN/Banks=32/32/1 and 64/64/2, with VLEN=128, BankBits=64 and OPT_READS=1.
@@ -3402,14 +3413,14 @@ netlist fingerprint, primitive checker and installed primitive library hashes.
 The owner/adapter proofs and all eight previous top suites were refreshed after
 the catalog-suite addition. Both new catalog runs completed successfully.
 The memory isolation proof, ALU proof and optimized maps already matched
-current sources. The second command passes the baseline
+the sources at that snapshot. The second command passed the baseline
 audit, then verifies rejection of stale source hashes, an incomplete run log,
 an incorrect reference revision, wrong VLEN and wrong bank width using isolated
 copies of evidence. All five negative checks pass; original artifacts are not altered.
 
 This is a selected evidence audit, not complete V ISA compliance, whole-VPU
 formal verification, scalar LSU integration or physical timing acceptance.
-Other historical results below retain their original configuration and scope;
+Other historical results in this document retain their original configuration and scope;
 they do not become source-current merely because these 30 gates pass.
 
 ## Verification scope and subsequent integration work

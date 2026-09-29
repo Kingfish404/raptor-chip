@@ -42,6 +42,9 @@ module tb_l1i_width_window #(
     end
   end
   int n2_seen = 0;
+`ifdef RAPT_FETCH_WIDE
+  int n3_seen = 0, n4_seen = 0;
+`endif
   task automatic check_pc(input int unsigned pc);
     int unsigned base;
     logic [31:0] assembled, first_word, next_word;
@@ -75,6 +78,18 @@ module tb_l1i_width_window #(
                   )
               );
           end
+`ifdef RAPT_FETCH_WIDE
+          if (ifu_l1i.inst_n3_valid) begin
+            n3_seen++;
+            assert (ifu_l1i.inst_n3 == word_at(base + 12))
+            else $fatal(1, "n3 crossed a line with stale tag/data pc=%h", pc);
+          end
+          if (ifu_l1i.inst_n4_valid) begin
+            n4_seen++;
+            assert (ifu_l1i.inst_n4 == word_at(base + 16))
+            else $fatal(1, "n4 crossed a line with stale tag/data pc=%h", pc);
+          end
+`endif
         end
       end
     end
@@ -108,8 +123,21 @@ module tb_l1i_width_window #(
     check_pc('h8000003e);
     check_pc('h80000040);
     check_pc('h80000034);
+`ifdef RAPT_FETCH_WIDE
+    check_pc('h80000030);
+    check_pc('h80000032);
+`endif
     assert (n2_seen > 0)
     else $fatal(1, "no valid third-word coverage");
+`ifdef RAPT_FETCH_WIDE
+    assert (n3_seen > 0 && n4_seen > 0)
+    else $fatal(1, "wide fetch window never became valid");
+    @(negedge clock);
+    ifu_l1i.pc = 'h80000032;
+    #1;
+    assert (!ifu_l1i.inst_n4_valid)
+    else $fatal(1, "wide fetch crossed a line without a second tag mirror");
+`endif
     // A locked no-execute NA4 at the third word must suppress lookahead,
     // even though primary and second-word permissions still allow fetching.
     @(negedge clock);
@@ -118,9 +146,21 @@ module tb_l1i_width_window #(
     pmp_state.pmp_cfg_l[0] = 1;
     pmp_state.pmp_cfg_x[0] = 0;
     pmp_state.pmp_raw_addr[0] = `RAPT_PMPADDR_BITS'('h8000003c >> 2);
+    ifu_l1i.pc = 'h80000034;
     #1;
     assert (!ifu_l1i.inst_n2_valid)
     else $fatal(1, "third-word PMP bypass");
+`ifdef RAPT_FETCH_WIDE
+    ifu_l1i.pc = 'h80000030;
+    #1;
+    assert (!ifu_l1i.inst_n3_valid)
+    else $fatal(1, "fourth-word PMP bypass");
+    pmp_state.pmp_raw_addr[0] = `RAPT_PMPADDR_BITS'('h80000010 >> 2);
+    ifu_l1i.pc = 'h80000000;
+    #1;
+    assert (!ifu_l1i.inst_n4_valid)
+    else $fatal(1, "fifth-word PMP bypass");
+`endif
     $display("PASS: third-word line boundary, halfword alignment, whole-word PMP gating");
     $finish;
   end

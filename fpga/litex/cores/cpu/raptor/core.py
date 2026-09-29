@@ -164,7 +164,8 @@ class Raptor(CPU):
         from pathlib import Path
 
         # The Make prerequisite and direct Python entry share this isolated
-        # preset/defines cache, without modifying simulator configuration.
+        # preset/defines cache. Give LiteX a content-addressed hard link so
+        # another build cannot replace the RTL while Vivado is reading it.
         env_vflags = os.environ.get("RAPT_PACK_VFLAGS", "")
         if not any(flag == "-DRAPT_FPGA_DSP" or flag.startswith("-DRAPT_FPGA_DSP=")
                    for flag in env_vflags.split()):
@@ -190,7 +191,7 @@ class Raptor(CPU):
         # Allow the integrator to pick an RTL config preset (hdl/configs/<name>/).
         env_config = os.environ.get("RAPT_CONFIG", "") or "default"
         root = Path(os.environ.get("RAPT_PACK_ROOT", os.path.join(raptor_home, "fpga/litex/build/rtl")))
-        pack_sv = pack(Path(raptor_home), root, env_config, env_vflags)
+        pack_sv = pack(Path(raptor_home), root, env_config, env_vflags, immutable=True)
         platform.add_source(str(pack_sv))
 
     def add_software_packages(self, builder):

@@ -131,6 +131,46 @@ module rapt_sram_1rw #(
           .din0(wdata),
           .dout0(rdata)
       );
+    end else if (DEPTH == 1024 && DATA_WIDTH == 22) begin : g_1024x22
+      if (USE_BWE) begin : g_unsupported_bwe
+        rapt_unsupported_sram_shape #(
+            .DEPTH(DEPTH),
+            .DATA_WIDTH(DATA_WIDTH),
+            .USE_BWE(USE_BWE)
+        ) u_unsupported_sram_shape ();
+        assign rdata = 'x;
+      end else begin : g_full_word
+        // The directory stores one 22-bit BOOM metadata entry per word.
+        rapt_openram_1rw_1024x22 u_sram (
+            .clk0(clock),
+            .csb0(~en),
+            .web0(~wen),
+            .wmask0(1'b1),
+            .addr0(addr),
+            .din0(wdata),
+            .dout0(rdata)
+        );
+      end
+    end else if (DEPTH == 1024 && DATA_WIDTH == 32) begin : g_1024x32
+      rapt_openram_1rw_1024x32 u_sram (
+          .clk0(clock),
+          .csb0(~en),
+          .web0(~wen),
+          .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+          .addr0(addr),
+          .din0(wdata),
+          .dout0(rdata)
+      );
+    end else if (DEPTH == 1024 && DATA_WIDTH == 64) begin : g_1024x64
+      rapt_openram_1rw_1024x64 u_sram (
+          .clk0(clock),
+          .csb0(~en),
+          .web0(~wen),
+          .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+          .addr0(addr),
+          .din0(wdata),
+          .dout0(rdata)
+      );
     end else if (DEPTH == 2 && DATA_WIDTH == 128) begin : g_2x128
       rapt_openram_1rw_2x128 u_sram (
           .clk0(clock),
@@ -201,6 +241,34 @@ module rapt_sram_1rw #(
           .din0(wdata),
           .dout0(rdata)
       );
+    end else if (DEPTH == 4096 && DATA_WIDTH == 64) begin : g_4096x64
+      rapt_openram_1rw_4096x64 u_sram (
+          .clk0(clock),
+          .csb0(~en),
+          .web0(~wen),
+          .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+          .addr0(addr),
+          .din0(wdata),
+          .dout0(rdata)
+      );
+    end else if (DEPTH == 16384 && DATA_WIDTH == 64) begin : g_16384x64
+      logic [1:0] read_segment;
+      logic [63:0] segment_rdata[4];
+      always_ff @(posedge clock) begin
+        if (en && !wen) read_segment <= addr[13:12];
+      end
+      for (genvar segment = 0; segment < 4; segment++) begin : g_segment
+        rapt_openram_1rw_4096x64 u_sram (
+            .clk0(clock),
+            .csb0(~(en && addr[13:12] == 2'(segment))),
+            .web0(~wen),
+            .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+            .addr0(addr[11:0]),
+            .din0(wdata),
+            .dout0(segment_rdata[segment])
+        );
+      end
+      assign rdata = segment_rdata[read_segment];
     end else begin : g_unsupported
       rapt_unsupported_sram_shape #(
           .DEPTH(DEPTH),

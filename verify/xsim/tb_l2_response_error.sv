@@ -4,6 +4,11 @@ module tb_l2_response_error;
   localparam int XLEN = `RAPT_XLEN;
   localparam int IdW = 4;
   localparam int LineBeats = 64 / (XLEN / 8);
+`ifdef RAPT_TEST_BOOM_L2
+  localparam int TestL2Len = `RAPT_L2_LEN;
+`else
+  localparam int TestL2Len = 2;
+`endif
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
   axi4_if #(
@@ -17,7 +22,7 @@ module tb_l2_response_error;
   rapt_l2 #(
       .XLEN(XLEN),
       .ID_W(IdW),
-      .L2_LEN(2),
+      .L2_LEN(TestL2Len),
       .L2_LINE_LEN($clog2(LineBeats))
   ) dut (
       .clock(clock),
@@ -25,6 +30,18 @@ module tb_l2_response_error;
       .axi_s(axi_s),
       .axi_m(axi_m)
   );
+`ifdef RAPT_TEST_BOOM_L2
+  int b_lookups = 0;
+  int scalar_commits = 0;
+  always @(posedge clock) if (!reset && dut.dir_error_lookup_request) b_lookups++;
+  always @(posedge clock) begin
+    if (!reset && dut.forward_scalar_commit) begin
+      scalar_commits++;
+      check(dut.g_boom_directory.u_directory.write_dirty,
+            "successful forwarded scalar write was not marked dirty");
+    end
+  end
+`endif
   `include "tb_common.svh"
   `include "tb_l2_axi_tasks.svh"
 
@@ -77,6 +94,8 @@ module tb_l2_response_error;
     init_l2_axi(1);
     tick(4);
     reset = 0;
+    for (int warmup = 0; warmup < (1 << TestL2Len) + 64 && !axi_s.awready; warmup++) tick(1);
+    check(axi_s.awready, "L2 directory reset wipe timed out");
     tick(2);
     // Queue the next request while an early-restarted miss is still filling.
     // Its SRAM lookup must not coincide with the preceding line install.
@@ -155,8 +174,18 @@ module tb_l2_response_error;
       logic [XLEN-1:0] addr, data;
       logic [XLEN/8-1:0] strb;
       logic last;
-      // A full-word cache-hit write updates the snoop SRAM before B arrives.
-      // On failure that speculative cached copy must not survive the response.
+`ifdef RAPT_TEST_BOOM_L2
+      // Keep an older dirty word in the line. Failed forwarded writes must
+      // preserve both this word and the original value at their own address.
+      axi_s.bready = 0;
+      send_l2_aw(XLEN'('h80000000 + 3 * (XLEN / 8)), 4'h7, 4'hf);
+      send_l2_w_full(XLEN'('hfeed));
+      for (int i = 0; i < 80 && !axi_s.bvalid; i++) tick(1);
+      check(axi_s.bvalid && axi_s.bresp == 2'b00, "older dirty write did not complete");
+      axi_s.bready = 1;
+      tick(1);
+`endif
+      // A non-bufferable cacheable write waits for the real outer B.
       axi_s.bready = 0;
       send_l2_aw(XLEN'('h80000000), 4'h6, 4'he);
       send_l2_w_full(XLEN'('hdeadbeef));
@@ -164,21 +193,57 @@ module tb_l2_response_error;
       check(!axi_s.bvalid, "non-bufferable write completed before downstream B");
       accept_l2_downstream_write(id, addr, data, strb, last);
       return_l2_downstream_b(id, 2'b10);
+`ifdef RAPT_TEST_BOOM_L2
+      check(b_lookups == 0, "failed forwarded write changed the directory");
+      check(scalar_commits == 0, "failed forwarded write changed the cache bank");
+`endif
       check(axi_s.bvalid && axi_s.bresp == 2'b10, "write error was not forwarded");
       axi_s.bready = 1;
       tick(2);
       axi_s.rready = 0;
       send_l2_ar_len(XLEN'('h80000000), 4'h5, 0, 1);
+`ifdef RAPT_TEST_BOOM_L2
+      for (int i = 0; i < 80 && !axi_s.rvalid; i++) tick(1);
+      check(axi_s.rvalid && axi_s.rresp == 0 && axi_s.rdata == XLEN'('h100) && !axi_m.arvalid,
+            "failed forwarded write lost the original cached word");
+      axi_s.rready = 1;
+      tick(2);
+      axi_s.rready = 0;
+      send_l2_ar_len(XLEN'('h80000000 + 3 * (XLEN / 8)), 4'h5, 0, 1);
+      for (int i = 0; i < 80 && !axi_s.rvalid; i++) tick(1);
+      check(axi_s.rvalid && axi_s.rdata == XLEN'('hfeed) && !axi_m.arvalid,
+            "failed forwarded write lost older dirty data");
+`else
       fill(-1, 0);
       for (int i = 0; i < 80 && !axi_s.rvalid; i++) tick(1);
       check(axi_s.rvalid && axi_s.rresp == 0 && axi_s.rdata == XLEN'('h100),
             "failed cache-hit write poisoned a later read");
+`endif
       axi_s.rready = 1;
       tick(2);
+`ifdef RAPT_TEST_BOOM_L2
+      axi_s.bready = 0;
+      send_l2_aw(XLEN'('h80000000), 4'h8, 4'he);
+      send_l2_w(XLEN'('h55), (XLEN / 8)'(1));
+      accept_l2_downstream_write(id, addr, data, strb, last);
+      check(strb == (XLEN / 8)'(1), "forwarded byte mask changed");
+      return_l2_downstream_b(id, 2'b00);
+      check(b_lookups != 0, "successful forwarded write skipped its directory lookup");
+      check(scalar_commits == 1, "successful forwarded write did not commit exactly once");
+      check(axi_s.bvalid && axi_s.bresp == 2'b00, "successful forwarded B missing");
+      axi_s.bready = 1;
+      tick(2);
+      axi_s.rready = 0;
+      send_l2_ar_len(XLEN'('h80000000), 4'h5, 0, 1);
+      for (int i = 0; i < 80 && !axi_s.rvalid; i++) tick(1);
+      check(axi_s.rvalid && axi_s.rdata == XLEN'('h155) && !axi_m.arvalid,
+            "successful forwarded write did not update the resident line");
+      axi_s.rready = 1;
+      tick(2);
+`endif
     end
-    $display(
-        "PASS: L2 refill SLVERR/DECERR, burst/backpressure, retry and failed-write invalidation RV%0d",
-        XLEN);
+    $display("PASS: L2 refill errors, burst/backpressure, retry and forwarded scalar B RV%0d",
+             XLEN);
     $finish;
   end
   initial begin

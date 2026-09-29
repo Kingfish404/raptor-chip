@@ -21,10 +21,19 @@ module rapt_ifu #(
     output logic response_pending_o,
     input logic reset
 );
-  logic [XLEN-1:0] pc_ifu, nextpc, redirect_pc;
+  logic [XLEN-1:1] pc_ifu_q;
+  wire [XLEN-1:0] pc_ifu = {pc_ifu_q, 1'b0};
+  logic [XLEN-1:0] nextpc, redirect_pc;
   rapt_pkg::fetch_slot_t held[Width], fetched[Width];
-  logic [15:0] halfword[6];
-  logic half_valid[6];
+`ifdef RAPT_FETCH_WIDE
+  localparam int WindowHalfwords = 8;
+`else
+  localparam int WindowHalfwords = 6;
+`endif
+  localparam int OffsetBits = $clog2(WindowHalfwords + 1);
+  localparam int WindowIndexBits = $clog2(WindowHalfwords);
+  logic [15:0] halfword[WindowHalfwords];
+  logic half_valid[WindowHalfwords];
   localparam int CountBits = (Width > 0) ? $clog2(Width + 1) : 1;
   logic [CountBits-1:0] held_count;
   // Keep combinational indexing/arithmetic wide; narrow only bounded state.
@@ -43,6 +52,10 @@ module rapt_ifu #(
     logic [XLEN-1:0] pc;
     logic [31:0] inst_n0, inst_n1, inst_n2;
     logic inst_n1_valid, inst_n2_valid;
+`ifdef RAPT_FETCH_WIDE
+    logic [31:0] inst_n3, inst_n4;
+    logic inst_n3_valid, inst_n4_valid;
+`endif
     logic trap;
     logic [XLEN-1:0] cause, tval;
     logic predicted_taken;
@@ -61,6 +74,12 @@ module rapt_ifu #(
     live_response.inst_n2 = ifu_l1i.inst_n2;
     live_response.inst_n1_valid = ifu_l1i.inst_n1_valid;
     live_response.inst_n2_valid = ifu_l1i.inst_n2_valid;
+`ifdef RAPT_FETCH_WIDE
+    live_response.inst_n3 = ifu_l1i.inst_n3;
+    live_response.inst_n4 = ifu_l1i.inst_n4;
+    live_response.inst_n3_valid = ifu_l1i.inst_n3_valid;
+    live_response.inst_n4_valid = ifu_l1i.inst_n4_valid;
+`endif
 `endif
     live_response.trap = ifu_l1i.trap;
     live_response.cause = ifu_l1i.cause;
@@ -99,8 +118,8 @@ module rapt_ifu #(
       default: return 1'b0;
     endcase
   endfunction
-  logic [15:0] request_halfword[6];
-  logic [2:0] request_offset[Width+1];
+  logic [15:0] request_halfword[WindowHalfwords];
+  logic [OffsetBits-1:0] request_offset[Width+1];
   logic request_stopped[Width+1];
   assign request_halfword[0] = live_response.inst_n0[15:0];
   assign request_halfword[1] = live_response.inst_n0[31:16];
@@ -110,28 +129,39 @@ module rapt_ifu #(
       : live_response.inst_n1[31:16];
   assign request_halfword[4] = pc_ifu[1] ? live_response.inst_n2[31:16]
       : live_response.inst_n2[15:0];
+`ifdef RAPT_FETCH_WIDE
+  assign request_halfword[5] = pc_ifu[1] ? live_response.inst_n3[15:0]
+      : live_response.inst_n2[31:16];
+  assign request_halfword[6] = pc_ifu[1] ? live_response.inst_n3[31:16]
+      : live_response.inst_n3[15:0];
+  assign request_halfword[7] = pc_ifu[1] ? live_response.inst_n4[15:0]
+      : live_response.inst_n3[31:16];
+`else
   assign request_halfword[5] = live_response.inst_n2[31:16];
+`endif
 `ifdef RAPT_FETCH_LOOKAHEAD
-  localparam int RequestHalfwords = 6;
+  localparam int RequestHalfwords = WindowHalfwords;
 `else
   localparam int RequestHalfwords = 2;
 `endif
   assign request_offset[0] = 0;
   assign request_stopped[0] = 1'b0;
   for (genvar s = 0; s < Width; s++) begin : g_request_boundary
-    wire [2:0] step = request_offset[s] < 3'(RequestHalfwords)
-        && request_halfword[request_offset[s]][1:0] != 2'b11 ? 3'd1 : 3'd2;
+    wire [OffsetBits-1:0] step = request_offset[s] < OffsetBits'(RequestHalfwords)
+        && request_halfword[WindowIndexBits'(request_offset[s])][1:0] != 2'b11
+        ? OffsetBits'(1) : OffsetBits'(2);
     wire split_before_indirect = request_offset[s] != 0
-        && request_offset[s] < 3'(RequestHalfwords)
-        && request_indirect(request_halfword[request_offset[s]]);
-    assign request_offset[s+1] = !request_stopped[s] && request_offset[s] < 3'(RequestHalfwords)
+        && request_offset[s] < OffsetBits'(RequestHalfwords)
+        && request_indirect(request_halfword[WindowIndexBits'(request_offset[s])]);
+    assign request_offset[s+1] = !request_stopped[s]
+        && request_offset[s] < OffsetBits'(RequestHalfwords)
         && !split_before_indirect
-        && {1'b0, request_offset[s]} + {1'b0, step} <= 4'(RequestHalfwords)
+        && {1'b0, request_offset[s]} + {1'b0, step} <= (OffsetBits+1)'(RequestHalfwords)
         ? request_offset[s] + step : request_offset[s];
     assign request_stopped[s+1] = request_stopped[s]
         || split_before_indirect
-        || (request_offset[s] < 3'(RequestHalfwords)
-            && request_control(request_halfword[request_offset[s]]));
+        || (request_offset[s] < OffsetBits'(RequestHalfwords)
+            && request_control(request_halfword[WindowIndexBits'(request_offset[s])]));
   end
   assign request_nextpc = ifu_bpu.taken ? ifu_bpu.npc
       : pc_ifu + XLEN'({request_offset[Width], 1'b0});
@@ -166,15 +196,27 @@ module rapt_ifu #(
   assign halfword[2]   = response.pc[1] ? response.inst_n1[31:16] : response.inst_n1[15:0];
   assign halfword[3]   = response.pc[1] ? response.inst_n2[15:0] : response.inst_n1[31:16];
   assign halfword[4]   = response.pc[1] ? response.inst_n2[31:16] : response.inst_n2[15:0];
-  assign halfword[5]   = response.inst_n2[31:16];
+`ifdef RAPT_FETCH_WIDE
+  assign halfword[5]   = response.pc[1] ? response.inst_n3[15:0] : response.inst_n2[31:16];
+  assign halfword[6]   = response.pc[1] ? response.inst_n3[31:16] : response.inst_n3[15:0];
+  assign halfword[7]   = response.pc[1] ? response.inst_n4[15:0] : response.inst_n3[31:16];
+`else
+  assign halfword[5] = response.inst_n2[31:16];
+`endif
   assign half_valid[1] = response_valid && (!response.pc[1] || response.inst_n1_valid);
   assign half_valid[2] = response.inst_n1_valid;
   assign half_valid[3] = response.pc[1] ? response.inst_n2_valid : response.inst_n1_valid;
   assign half_valid[4] = response.inst_n2_valid;
+`ifdef RAPT_FETCH_WIDE
+  assign half_valid[5] = response.pc[1] ? response.inst_n3_valid : response.inst_n2_valid;
+  assign half_valid[6] = response.inst_n3_valid;
+  assign half_valid[7] = response.pc[1] ? response.inst_n4_valid : response.inst_n3_valid;
+`else
   assign half_valid[5] = !response.pc[1] && response.inst_n2_valid;
+`endif
 `else
   assign half_valid[1] = response_valid;
-  for (genvar h = 2; h < 6; h++) begin : g_halfword_fill
+  for (genvar h = 2; h < WindowHalfwords; h++) begin : g_halfword_fill
     assign halfword[h]   = '0;
     assign half_valid[h] = 1'b0;
   end
@@ -182,10 +224,11 @@ module rapt_ifu #(
   assign offset[0] = 0;
   for (genvar s = 0; s < Width; s++) begin : g_boundary
     logic compressed;
-    assign compressed = offset[s] < 6 && halfword[offset[s]][1:0] != 2'b11;
+    assign compressed = offset[s] < WindowHalfwords && halfword[offset[s]][1:0] != 2'b11;
     assign offset[s+1] = offset[s] + (compressed ? 1 : 2);
-    assign raw[s] = offset[s] >= 6 ? '0 : compressed ? {16'b0,halfword[offset[s]]}
-        : offset[s]+1 < 6 ? {halfword[offset[s]+1],halfword[offset[s]]} : '0;
+    assign raw[s] = offset[s] >= WindowHalfwords ? '0
+        : compressed ? {16'b0,halfword[offset[s]]}
+        : offset[s]+1 < WindowHalfwords ? {halfword[offset[s]+1],halfword[offset[s]]} : '0;
     logic [31:0] decompressed;
     rapt_idu_decoder_c decompressor (
         .io_cinst(raw[s][15:0]),
@@ -196,7 +239,7 @@ module rapt_ifu #(
     // L1I.valid guarantees a complete first instruction even on a straddle;
     // later lookahead instructions require every contributing word's validity.
     assign available[s] = s == 0 ? response_valid
-        : offset[s+1] <= 6 && half_valid[offset[s]]
+        : offset[s+1] <= WindowHalfwords && half_valid[offset[s]]
           && (compressed || half_valid[offset[s]+1]);
     assign candidate_pc[s] = response.pc + XLEN'(2 * offset[s]);
     assign sequential[s] = response.pc + XLEN'(2 * offset[s+1]);
@@ -234,6 +277,8 @@ module rapt_ifu #(
   assign ifu_bpu.aux_pc = candidate_pc[secondary_index];
 `endif
   always_comb begin
+    automatic logic control_seen;
+    control_seen = 1'b0;
     stopped = 1'b0;
     response_stop = 1'b0;
     fetched_count = 0;
@@ -265,16 +310,23 @@ module rapt_ifu #(
       fetched[s].trap  = s == 0 && response.trap;
       fetched[s].tval  = response.tval;
       fetched[s].cause = response.cause;
-      if (!stopped && available[s] && !split_before_indirect) begin
+      if (!stopped && available[s] && !split_before_indirect
+          && !(`RAPT_FETCH_BRANCH_FOLLOWER && is_control[s] && control_seen)) begin
         fetched_count++;
         nextpc = fetched[s].pnpc;
         response_stop |= is_serial[s] || fetched[s].trap;
       end
-      stopped |= !available[s] || split_before_indirect || is_control[s] || is_serial[s]
+      stopped |= !available[s] || split_before_indirect || is_serial[s]
+          || (is_control[s] && (!`RAPT_FETCH_BRANCH_FOLLOWER || control_seen))
+          || (is_control[s] && (!is_cond[s] || fetched[s].predicted_taken))
           || (s == 0 && (response.predicted_taken || response.trap));
+      control_seen |= is_control[s];
     end
   end
-  assign redirect_event = cmu_bcast.flush_pipe || cmu_bcast.flush_redirect
+  // A same-context commit redirect repeats the PC already prefetched on
+  // flush_pipe. Do not cancel that fill or rewrite pc_ifu a second time.
+  assign redirect_event = cmu_bcast.flush_pipe
+      || (cmu_bcast.flush_redirect && !cmu_bcast.fetch_context_stable)
       || cmu_bcast.sys_resume || recovery.redirect_valid || ifu_idu.resteer;
   assign redirect_pc = cmu_bcast.flush_redirect ? cmu_bcast.redirect_pc
       : (cmu_bcast.flush_pipe || cmu_bcast.sys_resume) ? cmu_bcast.cpc
@@ -339,7 +391,7 @@ module rapt_ifu #(
 `endif
   always_ff @(posedge clock) begin
     if (reset) begin
-      pc_ifu <= XLEN'(`RAPT_PC_INIT);
+      pc_ifu_q <= XLEN'(`RAPT_PC_INIT) >> 1;
       held_count <= 0;
       blocked <= 1'b0;
 `ifndef SYNTHESIS
@@ -369,8 +421,8 @@ module rapt_ifu #(
       // Address generation runs ahead of the response/packing stage. A
       // correction has priority over a speculative next-packet request.
       if (ResponseStage) begin
-        if (response_redirect) pc_ifu <= nextpc;
-        else if (capture_response) pc_ifu <= request_nextpc;
+        if (response_redirect) pc_ifu_q <= nextpc[XLEN-1:1];
+        else if (capture_response) pc_ifu_q <= request_nextpc[XLEN-1:1];
       end
 `ifndef SYNTHESIS
       pmu_fetch_multi_fire <= consumed > 1;
@@ -398,11 +450,11 @@ module rapt_ifu #(
           && nextpc != response.pc + XLEN'(2 * offset[fetched_count]);
 `endif
       if (redirect_event) begin
-        pc_ifu <= redirect_pc;
+        pc_ifu_q <= redirect_pc[XLEN-1:1];
         held_count <= 0;
         blocked <= 1'b0;
       end else if (recv_ready) begin
-        if (!ResponseStage) pc_ifu <= nextpc;
+        if (!ResponseStage) pc_ifu_q <= nextpc[XLEN-1:1];
         held_count <= CountBits'(fetched_count);
         for (int s = 0; s < Width; s++) begin
           held[s] <= fetched[s];
@@ -421,6 +473,10 @@ module rapt_ifu #(
   `RAPT_SVA(clock, reset, IFU_COUNT_BOUNDS, consumed <= 32'(held_count) && fetched_count <= Width)
   `RAPT_SVA_IMPLY(clock, reset, IFU_RECOVERY_NO_RESPONSE_ACCEPT, recovery.pending,
                   !recv_ready && !ifu_bpu.history_valid)
+  `RAPT_SVA_IMPLY(clock, reset, IFU_STABLE_REDIRECT_KEEPS_PC,
+                  cmu_bcast.flush_redirect && cmu_bcast.fetch_context_stable,
+                  cmu_bcast.redirect_pc == $past(cmu_bcast.cpc)
+                  && pc_ifu == cmu_bcast.redirect_pc && !redirect_event)
   `RAPT_SVA_IMPLY(clock, reset, IFU_RECOVERY_NO_STREAM_OUTPUT, recovery.pending, !ifu_idu.valid[0])
   `RAPT_SVA_IMPLY(clock, reset, IFU_RESPONSE_NO_WRONG_PACKET, response_redirect,
                   !capture_response && ifu_l1i.cancel)

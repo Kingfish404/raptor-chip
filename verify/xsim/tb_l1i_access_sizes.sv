@@ -47,6 +47,8 @@ module tb_l1i_access_sizes;
         .ptw_araddr(addr[1]),
         .lookahead_n1_addr(addr[2]),
         .lookahead_n2_addr(addr[3]),
+        .lookahead_n3_addr('0),
+        .lookahead_n4_addr('0),
         .sram_data_ready,
         .is_c,
         .tlb_hit,
@@ -58,7 +60,9 @@ module tb_l1i_access_sizes;
         .pmp_fetch_fault_lo(fetch_fault_lo[look]),
         .pmp_iptw_fault(ptw_fault[look]),
         .pmp_n1_fetch_fault(n1_fault[look]),
-        .pmp_n2_fetch_fault(n2_fault[look])
+        .pmp_n2_fetch_fault(n2_fault[look]),
+        .pmp_n3_fetch_fault(),
+        .pmp_n4_fetch_fault()
     );
   end
   for (genvar p = 0; p < 4; p++) begin : g_reference

@@ -180,7 +180,8 @@ module rapt_ieu_muldiv #(
   logic [MDQ_SIZE-1:0] mdq_elig_vec;
   always_comb begin
     for (int i = 0; i < MDQ_SIZE; i++) begin
-      mdq_elig_vec[i] = mdq_valid[i] && !mdq_issued[i] && !mdq_pr1_busy[i] && !mdq_pr2_busy[i];
+      mdq_elig_vec[i] = mdq_valid[i] && !mdq_issued[i] && (!mdq_pr1_busy[i] || (`RAPT_MDQ_LIVE_WAKE && mdq_fwd1_hit[i]))
+          && (!mdq_pr2_busy[i] || (`RAPT_MDQ_LIVE_WAKE && mdq_fwd2_hit[i]));
     end
   end
 
@@ -204,8 +205,8 @@ module rapt_ieu_muldiv #(
       .clock(clock),
       .reset(reset),
       .flush(cmu_bcast.flush_pipe),
-      .in_a(mdq_vj[sel_idx]),
-      .in_b(mdq_vk[sel_idx]),
+      .in_a((`RAPT_MDQ_LIVE_WAKE && mdq_fwd1_hit[sel_idx]) ? mdq_fwd1_val[sel_idx] : mdq_vj[sel_idx]),
+      .in_b((`RAPT_MDQ_LIVE_WAKE && mdq_fwd2_hit[sel_idx]) ? mdq_fwd2_val[sel_idx] : mdq_vk[sel_idx]),
       .in_op(mdq_alu[sel_idx]),
       .in_word(mdq_word[sel_idx]),
       .in_tag(sel_idx),
