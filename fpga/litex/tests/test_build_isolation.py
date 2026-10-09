@@ -1,6 +1,7 @@
 """Config/pack isolation checks. No synthesis, board access or shared outputs."""
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -10,6 +11,9 @@ import tempfile
 import unittest
 
 LITEX = Path(__file__).resolve().parents[1]
+# CU08 MIG RAM size from the platform contract, not a copied literal.
+KU15P_RAM = int(json.loads((LITEX.parents[1] / 'hdl/configs/memory_map.json').read_text())
+                ['profiles']['ku15p_mig']['ram_size'], 0)
 REPO = LITEX.parents[1]
 sys.path.insert(0, str(LITEX / "scripts"))
 from prepare_private_bios import prepare
@@ -116,8 +120,22 @@ class BuildIsolationTest(unittest.TestCase):
             # timing or PMEM additions in Make's prerequisite pack.
             custom = self.config(root, VARIANT="linux64", RAPT_PACK_VFLAGS="-DMY_CONFIG=1")
             for flag in ("-DMY_CONFIG=1", "-DRAPT_LINUX", "-DRAPT_RV64",
-                         "-DRAPT_CORE_CLOCK_MHZ=50", "-DRAPT_PMEM_BYTES=1073741824"):
+                         "-DRAPT_CORE_CLOCK_MHZ=50", f"-DRAPT_PMEM_BYTES={KU15P_RAM}"):
                 self.assertIn(flag, custom["RAPT_PACK_VFLAGS"])
+
+    def test_final_wns_gate_isolates_implementation_and_reaches_cli(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = self.config(Path(tmp), VIVADO_SYS_SETUP_MARGIN_NS="1.0")
+            revised = self.config(Path(tmp), VIVADO_SYS_SETUP_MARGIN_NS="1.0",
+                                  VIVADO_SYS_FINAL_WNS_NS="0.3")
+            zero = self.config(Path(tmp), VIVADO_SYS_FINAL_WNS_NS="0")
+            self.assertNotEqual(base["FPGA_DIR"], revised["FPGA_DIR"])
+            self.assertIn("--vivado-sys-setup-margin-ns=1.0", revised["_FPGA_FLAGS"])
+            self.assertIn("--vivado-sys-final-wns-ns=0.3", revised["_FPGA_FLAGS"])
+            self.assertIn("--vivado-sys-final-wns-ns=0", zero["_FPGA_FLAGS"])
+            self.assertNotIn("--vivado-sys-final-wns-ns", base["_FPGA_FLAGS"])
+            for key in ("PACK_SV", "FW_LINUX_FPGA_DIR", "SIM_DIR"):
+                self.assertEqual(base[key], revised[key])
 
     def test_synthesis_directive_isolates_implementation(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -152,7 +170,7 @@ class BuildIsolationTest(unittest.TestCase):
                 platform = Mock()
                 with patch.dict(os.environ, {"RAPT_CONFIG": "default", "RAPT_PACK_ROOT": str(root / "rtl"),
                                              "RAPT_PACK_VFLAGS": values["RAPT_PACK_VFLAGS"]}):
-                    Raptor.add_sources(platform, variant, pmem_size=0x40000000)
+                    Raptor.add_sources(platform, variant, pmem_size=KU15P_RAM)
                 source = Path(platform.add_source.call_args.args[0])
                 stable = Path(values["PACK_SV"])
                 self.assertEqual(source.parent.parent, stable.parent / "snapshots")

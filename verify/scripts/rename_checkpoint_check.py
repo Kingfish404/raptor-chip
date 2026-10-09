@@ -11,19 +11,12 @@ from pathlib import Path
 import re
 import subprocess
 
+from yosys_common import run_yosys
+
 ROOT = Path(__file__).resolve().parents[2]
 DUT = ROOT / "hdl/frontend/rapt_rename_checkpoint.sv"
 REFERENCE = ROOT / "verify/formal/formal_rename_checkpoint.sv"
 PACKAGE = ROOT / "hdl/rapt_pkg.sv"
-
-
-def run_yosys(command, log, timeout):
-    with log.open("w") as stream:
-        subprocess.run(
-            ["yosys", "-Q", "-T", "-m", "slang", "-p", command],
-            stdout=stream, stderr=subprocess.STDOUT, check=True, timeout=timeout, cwd=ROOT
-        )
-    return log.read_text()
 
 
 def main():

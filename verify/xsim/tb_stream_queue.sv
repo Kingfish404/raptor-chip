@@ -3,7 +3,8 @@
 module stream_queue_case #(
     parameter int Depth = 7,
     InWidth = 3,
-    OutWidth = 4
+    OutWidth = 4,
+    parameter bit ReclaimSameCycle = 1'b1
 ) (
     input  logic clock,
     output logic done
@@ -19,7 +20,8 @@ module stream_queue_case #(
       .ItemT(int unsigned),
       .Depth(Depth),
       .InWidth(InWidth),
-      .OutWidth(OutWidth)
+      .OutWidth(OutWidth),
+      .ReclaimSameCycle(ReclaimSameCycle)
   ) dut (
       .*
   );
@@ -73,7 +75,7 @@ module stream_queue_case #(
       pops   = 0;
       for (int s = 0; s < OutWidth; s++) if (!flush && s < model.size() && out_ready[s]) pops++;
       for (int s = 0; s < InWidth; s++) begin
-        assert (in_ready[s] == (!flush && s < Depth - model.size() + pops))
+        assert (in_ready[s] == (!flush && s < Depth - model.size() + (ReclaimSameCycle ? pops : 0)))
         else $fatal(1, "input capacity/full reclaim mismatch");
       end
       pops = 0;
@@ -120,7 +122,7 @@ module tb_stream_queue #(
 );
   logic clock = 0;
   always #5 clock = ~clock;
-  logic [5:0] done;
+  logic [6:0] done;
   wire sweep_done;
   if (SweepDepth > 0) begin : g_sweep
     wire [SweepDepth-1:0] depth_done;
@@ -191,6 +193,15 @@ module tb_stream_queue #(
   ) wide (
       clock,
       done[4]
+  );
+  stream_queue_case #(
+      .Depth(8),
+      .InWidth(4),
+      .OutWidth(4),
+      .ReclaimSameCycle(1'b0)
+  ) wide_registered_capacity (
+      clock,
+      done[6]
   );
   initial begin
     wait ((&done) && sweep_done);

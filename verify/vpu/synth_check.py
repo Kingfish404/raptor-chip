@@ -58,7 +58,7 @@ def main():
             if leaf == "csr":
                 sources.insert(0, VPU / "rapt_vpu_vtype.sv")
             if leaf.startswith("top"):
-                sources = [ROOT / "hdl/memory/rapt_sram_1rw.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_fma.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_divsqrt.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_convert_narrow.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_int_to_fp.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv"] + sorted(VPU.glob("*.sv"))
+                sources = [ROOT / "hdl/sram/rapt_sram_1rw.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_fma.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_divsqrt.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_convert_narrow.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_int_to_fp.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv"] + sorted(VPU.glob("*.sv"))
                 params = dict(XLEN=xlen, VLEN=vlen, ELEN=elen, BankBits=max(64, bank_bits), Banks=banks,
                               OptimizeOperandReads=int(leaf in ("top", "top_core")))
             elif leaf in ("fp_reduce_engine", "fp_reduce_engine_baseline"):
@@ -76,7 +76,7 @@ def main():
             elif leaf == "move":
                 params = dict(VLEN=vlen)
             elif leaf == "vrf":
-                sources.insert(0, ROOT / "hdl/memory/rapt_sram_1rw.sv")
+                sources.insert(0, ROOT / "hdl/sram/rapt_sram_1rw.sv")
                 params = dict(VLEN=vlen, BankBits=bank_bits, Banks=banks)
             elif leaf.startswith("muldiv"):
                 params = dict(EarlyOut=int(leaf=="muldiv"))

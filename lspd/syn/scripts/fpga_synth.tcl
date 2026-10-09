@@ -14,8 +14,12 @@ puts $constraints [format {set_input_delay %s -clock module_clock $inputs} [expr
 puts $constraints [format {set_output_delay %s -clock module_clock [all_outputs]} [expr {$period * $fraction}]]
 close $constraints
 read_xdc [file join $out module.xdc]
+set synth_directive default
+if {[info exists ::env(FPGA_SYNTH_DIRECTIVE)]} {
+    set synth_directive $::env(FPGA_SYNTH_DIRECTIVE)
+}
 synth_design -top $::env(FPGA_TOP) -part $::env(FPGA_PART) -mode out_of_context \
-    -resource_sharing off -no_lc -fanout_limit 24
+    -directive $synth_directive -resource_sharing off -no_lc -fanout_limit 24
 if {[llength [get_cells -quiet -hier -filter {IS_BLACKBOX == 1}]]} {
     error "Unresolved black boxes after synthesis"
 }

@@ -9,6 +9,11 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <errno.h>
+#ifdef RAPT_LARGE_PMEM
+#include <sys/mman.h>
+#include <unistd.h>
+#include <vector>
+#endif
 
 extern NPCState npc;
 extern PMUState pmu;
@@ -109,7 +114,9 @@ typedef struct
 static const ckpt_region_t kRegions[] = {
     {"mem_pmem.bin", MBASE, MSIZE, 0},
     {"mem_mrom.bin", MROM_BASE, MROM_SIZE, 0},
+#ifndef RAPT_LARGE_PMEM
     {"mem_sdram.bin", SDRAM_BASE, SDRAM_SIZE, 1},
+#endif
     {"mem_sram.bin", SRAM_BASE, SRAM_SIZE, 1},
     {"mem_flash.bin", FLASH_BASE, FLASH_SIZE, 1},
 };
@@ -416,6 +423,17 @@ static void write_region(const char *dir, const ckpt_region_t *r)
 
   const size_t chunk = CKPT_CHUNK_SIZE;
   const size_t total = r->size;
+#ifdef RAPT_LARGE_PMEM
+  long page_size = 0;
+  std::vector<unsigned char> resident;
+  if (r->base == MBASE) {
+    page_size = sysconf(_SC_PAGESIZE);
+    if (page_size > 0) {
+      resident.resize((total + (size_t)page_size - 1) / (size_t)page_size);
+      if (mincore(host, total, resident.data()) != 0) resident.clear();
+    }
+  }
+#endif
   size_t nz_chunks = 0;
   size_t bin_bytes = 0;
 
@@ -427,6 +445,15 @@ static void write_region(const char *dir, const ckpt_region_t *r)
   for (size_t off = 0; off < total; off += chunk)
   {
     size_t this_chunk = (off + chunk <= total) ? chunk : (total - off);
+#ifdef RAPT_LARGE_PMEM
+    if (!resident.empty()) {
+      bool any_resident = false;
+      for (size_t page = off / (size_t)page_size;
+           page <= (off + this_chunk - 1) / (size_t)page_size; ++page)
+        any_resident |= (resident[page] & 1u) != 0;
+      if (!any_resident) continue;
+    }
+#endif
     if (region_all_zero(host + off, this_chunk))
       continue;
 
@@ -491,6 +518,32 @@ struct SqOverlayByte
   uint8_t *host;
   uint8_t original;
 };
+
+static size_t overlay_pending_axi(SqOverlayByte *bytes)
+{
+  size_t count = 0;
+  for (unsigned entry = 0; entry < 2; ++entry)
+  {
+    word_t addr, data;
+    uint8_t strb;
+    if (!cpu_read_axi_write_snapshot(entry != 0, &addr, &data, &strb))
+      continue;
+    // AXI data/strobes are already lane-shifted, including narrow writes
+    // whose AWADDR is unaligned. Only cacheable main memory is relevant.
+    word_t base = addr & ~(word_t)(sizeof(word_t) - 1);
+    if (base < MBASE || base - MBASE >= MSIZE)
+      continue;
+    for (unsigned lane = 0; lane < sizeof(word_t); ++lane)
+    {
+      if (!(strb & (1u << lane)))
+        continue;
+      uint8_t *host = guest_to_host(base + lane);
+      bytes[count++] = {host, *host};
+      *host = uint8_t(data >> (lane * 8));
+    }
+  }
+  return count;
+}
 
 static bool overlay_committed_sq(SqOverlayByte *bytes, size_t *byte_count)
 {
@@ -607,8 +660,8 @@ bool checkpoint_save_tick(void)
   }
 
   /* Save at an architectural ROB boundary. Committed stores still buffered in
-   * an idle SQ are overlaid into the memory image below; accepted stores and
-   * MMIO stores must drain normally before the snapshot can proceed. */
+   * the SQ or posted AXI buffers are overlaid into the memory image below;
+   * complex SQ stores must drain normally before the snapshot can proceed. */
   bool rob_q = (npc.rob_empty != NULL) ? (*npc.rob_empty != 0) : true;
   bool sq_q = true;
   if (!(rob_q && sq_q))
@@ -634,14 +687,26 @@ bool checkpoint_save_tick(void)
         (unsigned long long)quiesce_wait_cycles);
   }
 
+  // Posted writes have left the SQ but may not have reached the slave's W
+  // handshake/DPI write. Apply stage, skid, then SQ so younger bytes win.
+  // Restore loads this memory image and resets the AXI master/bus, so these
+  // buffered writes are not replayed. Undo both overlays if execution resumes.
+  SqOverlayByte axi_overlay[2 * sizeof(word_t)];
+  size_t axi_count = overlay_pending_axi(axi_overlay);
   SqOverlayByte overlay[32 * sizeof(word_t)];
   size_t overlay_count = 0;
   if (!overlay_committed_sq(overlay, &overlay_count))
+  {
+    restore_sq_overlay(axi_overlay, axi_count);
     return false;
+  }
+  if (axi_count > 0)
+    Log("checkpoint: overlaid %zu pending AXI bytes into memory image", axi_count);
   if (overlay_count > 0)
     Log("checkpoint: overlaid %zu committed SQ bytes into memory image", overlay_count);
   do_save();
   restore_sq_overlay(overlay, overlay_count);
+  restore_sq_overlay(axi_overlay, axi_count);
   return save_exit_after ? true : false;
 }
 
@@ -952,7 +1017,10 @@ static void load_region(const char *dir, const ckpt_region_t *r)
   }
 
   /* Zero region first; sparse load only writes the listed chunks. */
-  memset(host, 0, r->size);
+#ifdef RAPT_LARGE_PMEM
+  if (r->base != MBASE || madvise(host, r->size, MADV_DONTNEED) != 0)
+#endif
+    memset(host, 0, r->size);
 
   FILE *fbin = fopen(bin_path, "rb");
   if (!fbin)

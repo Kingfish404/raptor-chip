@@ -32,7 +32,7 @@
 /* ============================================================
  * LiteX liteuart CSR layout (see build/.../csr.csv).
  * ============================================================ */
-#define UART_BASE 0xf0001800u
+#define UART_BASE 0x11001800u
 #define UART_RXTX (UART_BASE + 0x00)
 #define UART_TXFULL (UART_BASE + 0x04)
 #define UART_RXEMPTY (UART_BASE + 0x08)
@@ -363,7 +363,7 @@ static void app_info(void)
     uart_puts("ISA       : rv32imac_zicsr (FPGA build)\n");
     uart_puts("ROM base  : 0x20000000  size 32 KB\n");
     uart_puts("SRAM base : 0x0f000000  size  8 KB\n");
-    uart_puts("UART base : 0xf0001800  (LiteX liteuart)\n");
+    uart_puts("UART base : 0x11001800  (LiteX liteuart)\n");
     uart_puts(".data     : ");
     uart_put_hex32((uint32_t)(uintptr_t)_sdata);
     uart_puts(" - ");

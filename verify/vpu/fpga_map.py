@@ -31,7 +31,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     summary = out/'summary.json'
     summary.unlink(missing_ok=True)
-    sources = [ROOT/'hdl/memory/rapt_sram_1rw.sv']
+    sources = [ROOT/'hdl/sram/rapt_sram_1rw.sv']
     sources += [ROOT/f'hdl/backend/feu/fpu/rapt_fpu_{name}.sv' for name in (
         'fma','divsqrt','convert_narrow','int_to_fp','single_to_int_w')]
     sources += sorted((ROOT/'hdl/backend/vpu').glob('*.sv'))

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 import os
 import sys
+import math
 
 _here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_here, "cores"))
@@ -54,8 +55,25 @@ class KU15PBoard:
     mig_tcl: str = "ku15p_ddr4_mig.tcl"
 
 
-def configure_ku15p_timing(platform, board, with_litedram=False, with_mig=False):
+def ku15p_final_setup_command(sys_setup_margin_ns, sys_final_wns_ns=None):
+    """Keep implementation tightening separate from the final setup gate."""
+    if not math.isfinite(sys_setup_margin_ns) or sys_setup_margin_ns < 0:
+        raise ValueError("System setup margin must be finite and nonnegative")
+    if sys_final_wns_ns is not None and (
+            not math.isfinite(sys_final_wns_ns) or sys_final_wns_ns < 0):
+        raise ValueError("Final system WNS must be finite and nonnegative")
+    if sys_setup_margin_ns:
+        suffix = "" if sys_final_wns_ns is None else f" {sys_final_wns_ns:.6f}"
+        return "raptor_restore_sys_setup_margin {build_name}" + suffix
+    if sys_final_wns_ns is not None:
+        return f"raptor_check_sys_setup_wns {sys_final_wns_ns:.6f}"
+    return None
+
+
+def configure_ku15p_timing(platform, board, with_litedram=False, with_mig=False,
+                          sys_setup_margin_ns=0.0, sys_final_wns_ns=None):
     """Shared implementation policy for CLI builds and peripheral STA."""
+    final_command = ku15p_final_setup_command(sys_setup_margin_ns, sys_final_wns_ns)
     # A scalar implicit net on a cache lookup port can silently discard the
     # address. Reject that mismatch without changing unrelated width warnings.
     platform.toolchain.pre_synthesis_commands.add(
@@ -64,6 +82,13 @@ def configure_ku15p_timing(platform, board, with_litedram=False, with_mig=False)
     hold = 0.050 if with_litedram or with_mig else board.bare_hold_uncertainty
     platform.toolchain.pre_optimize_commands.add(
         f"set_clock_uncertainty -hold {hold:.3f} [all_clocks]")
+    if final_command is not None:
+        margin_tcl = os.path.join(_here, "scripts", "vivado_setup_margin.tcl")
+        platform.toolchain.pre_optimize_commands.add(
+            f'source "{margin_tcl}"')
+    if sys_setup_margin_ns:
+        platform.toolchain.pre_optimize_commands.add(
+            f"raptor_apply_sys_setup_margin {sys_setup_margin_ns:.6f}")
     # LiteX MultiReg CDC synchronizers are emitted as plain
     # xilinxmultiregimpl* flop pairs and carry no ASYNC_REG attribute. Mark
     # them so the placer keeps each synchronizer stage together; each domain
@@ -392,7 +417,7 @@ class RaptorKU15PSoC(SoCCore):
         with_litedram=False,
         litedram_size=0x40000000,
         with_mig=False,
-        mig_size=0x40000000,
+        mig_size=0x80000000,
         with_sdcard=False,
         sdcard_autoboot=False,
         with_ethernet=False,
@@ -419,6 +444,7 @@ class RaptorKU15PSoC(SoCCore):
         kwargs.setdefault("integrated_rom_size", 0x8000)
         kwargs.setdefault("integrated_sram_size", 0x2000)
         kwargs.setdefault("integrated_main_ram_size", 0)
+        kwargs["bus_data_width"] = 64
         # Tighten the wishbone interconnect timeout so an access to an unmapped
         # address raises wb.err quickly (mirrors the Tang Mega SoC).
         kwargs.setdefault("bus_timeout", 4096)
@@ -434,8 +460,10 @@ class RaptorKU15PSoC(SoCCore):
 
         if with_mig or with_litedram:
             self.cpu.pmem_size = mig_size if with_mig else litedram_size
-            if not 0 < self.cpu.pmem_size <= 0x40000000 or self.cpu.pmem_size & (self.cpu.pmem_size - 1):
-                raise ValueError("KU15P DDR window must be a power of two up to 1 GiB; MMIO starts at 0xc0000000")
+            if not 0 < self.cpu.pmem_size <= 0x80000000 or self.cpu.pmem_size & (self.cpu.pmem_size - 1):
+                raise ValueError("KU15P DDR window must be a power of two up to 2 GiB")
+        elif kwargs["integrated_main_ram_size"]:
+            self.cpu.pmem_size = kwargs["integrated_main_ram_size"]
 
         if eth_speed not in (100, 1000):
             raise ValueError("CM005 speed must be 100 or 1000 Mb/s")
@@ -471,7 +499,7 @@ class RaptorKU15PSoC(SoCCore):
                 ~self.crg.ethpll.locked |
                 (0 if with_litedram else self.crg.cd_cm005_ready.rst))
             # Keep packet SRAM in Raptor's noncached external I/O aperture.
-            self.mem_map["ethmac"] = 0xe0000000
+            self.mem_map["ethmac"] = 0x18000000
             # Detect SFD before byte-to-word conversion: the physical PHY
             # can present a shortened preamble. A 32-bit preamble checker
             # only finds SFD at word boundaries and discards such frames.
@@ -715,7 +743,7 @@ def main(board):
     )
     parser.add_target_argument(
         "--mig-size",
-        default=0x40000000,
+        default=0x80000000,
         type=lambda value: int(value, 0),
         help="Mapped DDR4 MIG main_ram size in bytes.",
     )
@@ -745,6 +773,14 @@ def main(board):
         "--vivado-incremental",
         action="store_true",
         help="Reuse the previous routed checkpoint for incremental implementation.",
+    )
+    parser.add_target_argument(
+        "--vivado-sys-setup-margin-ns", type=float, default=0.0,
+        help="Extra system setup margin during implementation; restore original constraints for final reports.",
+    )
+    parser.add_target_argument(
+        "--vivado-sys-final-wns-ns", type=float, default=None,
+        help="Minimum final system WNS under original constraints; defaults to the implementation margin.",
     )
     parser.set_defaults(cpu_type="raptor", cpu_variant="linux32")
 
@@ -814,7 +850,8 @@ def main(board):
     # 0.050 ns. Emit after synthesis and before implementation, when generated
     # clocks exist. Actual timing margins must be checked per build.
     # No curly braces: the toolchain str.format()s these command strings.
-    configure_ku15p_timing(soc.platform, board, args.with_litedram, args.with_mig)
+    configure_ku15p_timing(soc.platform, board, args.with_litedram, args.with_mig,
+                          args.vivado_sys_setup_margin_ns, args.vivado_sys_final_wns_ns)
 
     # High-fanout net replication (mirrors the Gowin/Tang synth_maxfan=24 that
     # makes the same RTL boot there). Limiting synth fanout forces Vivado to
@@ -855,6 +892,12 @@ def main(board):
         str(toolchain_argdict.get("vivado_synth_directive") or "default")
         + KU15P_SYNTH_OPTIONS
     )
+    final_setup_command = ku15p_final_setup_command(
+        args.vivado_sys_setup_margin_ns, args.vivado_sys_final_wns_ns)
+    if final_setup_command is not None:
+        # Retry routing under the extra setup margin first. The final checkpoint
+        # and reports then return to the original clock/hold/jitter constraints.
+        soc.platform.toolchain.bitstream_commands.append(final_setup_command)
     if soc.cm005_oversampled_rx:
         # A MIG timing retry can change routing. Check the final layout, not
         # merely the initial routed candidate before that retry.

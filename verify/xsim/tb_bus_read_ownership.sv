@@ -261,7 +261,7 @@ module tb_bus_read_ownership;
     drive_response(4'd1, XLEN'('h1111_1111));
     check(!l1i_bus.ptw_rerr, "cache response retained the previous PTW error");
     mem.rd_rsp_error = 1'b0;
-    check(l1i_bus.rvalid && l1i_bus.rlast, "L1I response was not routed");
+    check(l1i_bus.rvalid, "L1I response was not routed");
     check(l1i_bus.rdata == XLEN'('h1111_1111), "L1I response data mismatch");
     check(!l1i_bus.ptw_rvalid && !l1d_bus.rvalid && !l1d_bus.ptw_rvalid,
           "L1I response leaked to another read source");

@@ -107,7 +107,9 @@ class LinuxTest(unittest.TestCase):
             (root / 'kernel.config').write_text(''.join(f'CONFIG_{v}=y\n' for v in options))
             for bits in (32, 64):
                 with patch('pack_netboot.verify', return_value={'profile': 'fpga', 'bits': bits}), \
-                     patch('pack_netboot.run', side_effect=[f'rv{bits}i'.encode(), b'80000000 40000000']):
+                     patch('pack_netboot.run', return_value=f'rv{bits}i'.encode()), \
+                     patch('netboot_distro.run', return_value=b'80000000 80000000' if bits == 64
+                           else b'80000000 40000000'):
                     with self.assertRaisesRegex(ValueError, 'RISCV_ISA_ZICBOM'):
                         pack(root, root / 'soc.dtb', root / 'csr.json', root / 'bundle')
 

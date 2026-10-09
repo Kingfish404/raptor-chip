@@ -43,9 +43,8 @@ class Raptor(CPU):
     gcc_triple = CPU_GCC_TRIPLE_RISCV32
     linker_output_format = "elf32-littleriscv"
     nop = "nop"
-    # I/O region: 0xc0000000-0xffffffff (CSR, peripherals).
-    # main_ram at 0x80000000 must NOT be in io_regions (it's cacheable RAM).
-    io_regions = {0xC000_0000: 0x4000_0000}  # Origin, Length
+    # Low peripheral aperture. RAM may occupy 0x80000000-0xffffffff.
+    io_regions = {0x1000_0000: 0x1000_0000}  # Origin, Length
 
     # Memory Mapping (ROM at 0x20000000 matches RTL RAPT_PC_INIT).
     @property
@@ -54,7 +53,7 @@ class Raptor(CPU):
             "rom": 0x2000_0000,
             "sram": 0x0F00_0000,
             "main_ram": 0x8000_0000,
-            "csr": 0xF000_0000,
+            "csr": 0x1100_0000,
         }
 
     # GCC Flags.
@@ -170,14 +169,17 @@ class Raptor(CPU):
         if not any(flag == "-DRAPT_FPGA_DSP" or flag.startswith("-DRAPT_FPGA_DSP=")
                    for flag in env_vflags.split()):
             env_vflags = (env_vflags + " -DRAPT_FPGA_DSP=1").strip()
+        if not any(flag == "-DRAPT_FPGA_LUTRAM" or flag.startswith("-DRAPT_FPGA_LUTRAM=")
+                   for flag in env_vflags.split()):
+            env_vflags = (env_vflags + " -DRAPT_FPGA_LUTRAM=1").strip()
         if variant == "linux32" and any(
             flag == "-DRAPT_RV64" or flag.startswith("-DRAPT_RV64=")
             for flag in env_vflags.split()
         ):
             raise ValueError("VARIANT=linux32 conflicts with RAPT_PACK_VFLAGS defining RAPT_RV64")
         if pmem_size is not None:
-            if not 0 < pmem_size <= 0x40000000 or pmem_size & (pmem_size - 1):
-                raise ValueError("PMEM size must be a power of two up to 1 GiB (MMIO starts at 0xc0000000)")
+            if not 0 < pmem_size <= 0x80000000 or pmem_size & (pmem_size - 1):
+                raise ValueError("PMEM size must be a power of two up to 2 GiB")
             # Board geometry is authoritative, including for direct Python builds.
             wanted = f"-DRAPT_PMEM_BYTES={pmem_size}"
             if [f for f in env_vflags.split() if f.startswith("-DRAPT_PMEM_BYTES=")] != [wanted]:

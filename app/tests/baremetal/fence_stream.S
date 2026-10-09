@@ -1,6 +1,7 @@
 /* Executed FENCE/FENCE.TSO streams in M/S/U with delayed memory responses.
  * Checks decode, retirement, register preservation and liveness. A single
  * hart's final values do not prove external memory ordering; see composed TB. */
+#include "raptor_platform.h"
 #ifndef TEST_PRIV
 #define TEST_PRIV 3
 #endif
@@ -45,7 +46,7 @@ _start:
 .endm
 run:
 #ifdef TEST_MSIP
-  li s0, 0x02000000 /* CLINT MSIP; interrupts remain disabled. */
+  li s0, RAPTOR_CLINT_BASE /* CLINT MSIP; interrupts remain disabled. */
 #else
   la s0, area
 #endif

@@ -17,10 +17,7 @@ task automatic init_inputs;
     l1i_bus.rvalid = 1'b0;
     l1i_bus.ptw_rerr = 0;
     l1i_bus.ptw_rvalid = 1'b0;
-    l1i_bus.rlast = 1'b1;
     l1i_bus.rerr = 1'b0;
-    l1i_bus.wready = 1'b0;
-    l1i_bus.werr = 1'b0;
     l1i_bus.ptw_wready = 1'b0;
     l1i_bus.ptw_werr = 1'b0;
 

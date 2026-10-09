@@ -210,7 +210,7 @@ egos-sim-image: egos-nsim-prepare ## Build egos binary for NPC/sim/NEMU
 	@echo "Built egos image: $(EGOS_SIM_IMAGE)  sdcard: $(EGOS_SIM_SDCARD)"
 
 # KU15P RAM-disk image: single flat binary with embedded disk.img.
-# Uses PLATFORM_KU15P to fix UART=0xF0001800, CLINT=0x02000000, and embeds
+# Uses PLATFORM_KU15P to fix UART=0x11001800, CLINT=0x02000000, and embeds
 # disk.img above the egos runtime region (KU15P_FLASH_BASE, default 0x80800000
 # = FLASH_ROM_BASE; overridable). The result is uploaded via Linux/MIG BIOS
 # serialboot to 0x80000000.

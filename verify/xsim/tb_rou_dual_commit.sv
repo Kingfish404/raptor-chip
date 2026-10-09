@@ -1,10 +1,12 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
+`include "rapt_soc.svh"
 
 module tb_rou_dual_commit #(
     parameter bit CheckOperandIndependence = 0
 );
-  localparam int CandidateBits = rapt_pkg::index_bits(rapt_pkg::DispatchWidth);
+  localparam int ScanEntries   = rapt_pkg::SteerScanEntries;
+  localparam int CandidateBits = rapt_pkg::index_bits(ScanEntries);
 
   import rapt_pkg::*;
 
@@ -32,17 +34,40 @@ module tb_rou_dual_commit #(
   rapt_recovery_if recovery ();
   checkpoint_release_if checkpoint_release ();
   exu_prf_if exu_prf ();
+  // Checks below use per-slot views: dispatch_valid[s]/dispatch[s] describe
+  // the uop selected into slot s, and dispatch_ready[s] is its endpoint.
   rapt_pkg::dispatch_slot_t dispatch[rapt_pkg::DispatchWidth];
   logic dispatch_valid[rapt_pkg::DispatchWidth];
   logic dispatch_ready[rapt_pkg::DispatchWidth];
-  rapt_pkg::execution_domain_t candidate_domain[rapt_pkg::DispatchWidth];
+  rapt_pkg::execution_domain_t candidate_domain[ScanEntries];
+  logic candidate_valid[ScanEntries];
+  logic candidate_ready[ScanEntries];
   logic selected_valid[rapt_pkg::DispatchWidth];
-  logic [rapt_pkg::index_bits(rapt_pkg::DispatchWidth)-1:0]
-      selected_candidate[rapt_pkg::DispatchWidth];
-  for (genvar s = 0; s < rapt_pkg::DispatchWidth; s++) begin : g_select_identity
-    assign selected_valid[s] = dispatch_valid[s];
-    assign selected_candidate[s] = CandidateBits'(s);
+  logic [CandidateBits-1:0] selected_candidate[rapt_pkg::DispatchWidth];
+  // Oldest-first selector: slot s takes the s-th valid candidate lane.
+  always_comb begin
+    int slot;
+    slot = 0;
+    for (int s = 0; s < rapt_pkg::DispatchWidth; s++) begin
+      selected_valid[s] = 1'b0;
+      selected_candidate[s] = '0;
+    end
+    for (int c = 0; c < ScanEntries; c++) begin
+      candidate_ready[c] = 1'b0;
+      if (candidate_valid[c] && slot < rapt_pkg::DispatchWidth) begin
+        selected_valid[slot] = 1'b1;
+        selected_candidate[slot] = CandidateBits'(c);
+        candidate_ready[c] = dispatch_ready[slot];
+        slot++;
+      end
+    end
   end
+  for (genvar s = 0; s < rapt_pkg::DispatchWidth; s++) begin : g_slot_view
+    assign dispatch_valid[s] = selected_valid[s];
+  end
+  function automatic logic slot_fire(input int s);
+    return selected_valid[s] && dut_rou.endpoint_fire[selected_candidate[s]];
+  endfunction
   rapt_pkg::completion_t exu_rou;
   rapt_pkg::completion_t exu_rou_b;
   rapt_pkg::completion_t exu_rou_c;
@@ -91,7 +116,6 @@ module tb_rou_dual_commit #(
   cmu_bcast_if cmu_bcast ();
 
   rapt_rou #(
-      .ScanEntries(rapt_pkg::DispatchWidth),
       .ValidateCompletionInputs(1'b1)
   ) dut_rou (
       .writeback_idle(tb_writeback_idle),
@@ -105,8 +129,8 @@ module tb_rou_dual_commit #(
       .exu_prf(exu_prf),
       .dispatch(dispatch),
       .candidate_domain(candidate_domain),
-      .candidate_valid(dispatch_valid),
-      .candidate_ready(dispatch_ready),
+      .candidate_valid(candidate_valid),
+      .candidate_ready(candidate_ready),
       .selected_valid(selected_valid),
       .selected_candidate(selected_candidate),
 
@@ -463,7 +487,7 @@ rapt_cmu dut_cmu (
             "oldest blocked branch was not first steering candidate");
       check(dispatch_valid[1] && dispatch[1].dest == RobW'(1),
             "younger integer uop was not exposed as a steering candidate");
-      check(!dut_rou.endpoint_fire[0] && dut_rou.endpoint_fire[1],
+      check(!slot_fire(0) && slot_fire(1),
             "ready younger domain did not bypass blocked older domain");
       tick(1);
       #1;
@@ -633,28 +657,16 @@ rapt_cmu dut_cmu (
 
       check(commit_fire, "slot0 store did not assert commit_fire");
       check(rou_cmu.slot[0].valid, "slot0 store missing slot0 commit");
-      if (`RAPT_ROU_STORE_FOLLOWER) begin
-        check(rou_cmu.slot[1].valid, "slot0 store missing plain follower");
-        check(rou_cmu.slot[1].pc == 32'h8000_1004, "store follower pc mismatch");
-        check(dut_cmu.count == 2, "CMU lost store follower retirement");
-      end else begin
-        check(!rou_cmu.slot[1].valid, "slot0 store incorrectly dual committed");
-      end
+      check(rou_cmu.slot[1].valid, "slot0 store missing plain follower");
+      check(rou_cmu.slot[1].pc == 32'h8000_1004, "store follower pc mismatch");
+      check(dut_cmu.count == 2, "CMU lost store follower retirement");
       check(rou_lsu.valid, "slot0 store did not drive LSU commit valid");
       check(rou_lsu.store, "slot0 store did not drive LSU store");
       check(rou_lsu.dest == RobW'(0), "slot0 store owner mismatch");
 
       tick(1);
-      if (`RAPT_ROU_STORE_FOLLOWER) begin
-        check(rou_cmu.rob_head == RobW'(2), "ROB head did not advance by 2 for store pair");
-        check(!rou_cmu.slot[0].valid, "store follower committed twice");
-      end else begin
-        check(rou_cmu.rob_head == RobW'(1), "ROB head did not advance by 1 for slot0 store");
-        check(rou_cmu.slot[0].valid, "slot1 should commit after slot0 store retires");
-        check(!rou_cmu.slot[1].valid, "single remaining slot unexpectedly dual committed");
-        tick(1);
-        check(rou_cmu.rob_head == RobW'(2), "ROB head did not retire slot1 after store");
-      end
+      check(rou_cmu.rob_head == RobW'(2), "ROB head did not advance by 2 for store pair");
+      check(!rou_cmu.slot[0].valid, "store follower committed twice");
     end
   endtask
 
@@ -1410,10 +1422,15 @@ rapt_cmu dut_cmu (
     check(!halted && !dispatch_valid[0], "stale pre-debug uop survived resume");
   endtask
 
+  `include "tb_rou_fence_commit.svh"
+
   initial begin
     if (rapt_pkg::CommitWidth < 2) fail("tb_rou_dual_commit requires commit width >= 2");
 
-`ifdef RAPT_TEST_EXCEPTION_RD
+`ifdef RAPT_TEST_FENCE_COMMIT
+    run_fence_commit_tests();
+    $finish;
+`elsif RAPT_TEST_EXCEPTION_RD
     run_exception_rd();
     $finish;
 `elsif RAPT_TEST_FP_IRQ_BOUNDARY

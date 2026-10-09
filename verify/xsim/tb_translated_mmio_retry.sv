@@ -126,6 +126,7 @@ module tb_translated_mmio_retry;
     disp_ioq.accept[0] = 0;
     disp_ioq.accept[1] = 0;
     fpr.ioq_rdata = 0;
+    fpr.ioq_rvalid = 1'b1;
     rou_lsu.store = 0;
     rou_lsu.dest = 0;
     rou_lsu.sq_vaddr = 0;

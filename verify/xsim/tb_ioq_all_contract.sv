@@ -145,15 +145,56 @@ module tb_ioq_completion_kill;
 
     fresh(1'b1);
     for (int c = 0; c < 20 && !exu_ioq_bcast.valid; c++) tick(1);
-    check(exu_ioq_bcast.valid && sq_handoff_valid, "checked store missing");
+    check(exu_ioq_bcast.valid && sq_handoff_valid && sq_forward_pending, "checked store missing");
     check(!load_fast.confirmed, "store entered fast-load confirmation path");
     cmu_bcast.flush_pipe = 1'b1;
     #1;
     check(!exu_ioq_bcast.valid && !sq_handoff_valid, "flush leaked store handoff");
+    check(sq_forward_pending, "flush steered the combinational store-conflict hint");
     tick(1);
     cmu_bcast.flush_pipe = 1'b0;
     tick(2);
-    check(!exu_ioq_bcast.valid && !sq_handoff_valid, "flushed store completed later");
+    check(!exu_ioq_bcast.valid && !sq_handoff_valid && !sq_forward_pending,
+          "flushed store completed later");
+
+    // Select a younger B response while the older A request is still held.
+    // Cancellation must suppress every transfer without steering its payload
+    // back to the unrelated head entry before the invalidation edge.
+    fresh(1'b0);
+    dispatch[0] = '0;
+    dispatch[0].uop.pc = XLEN'('h80000004);
+    dispatch[0].uop.execute.memory.load = 1'b1;
+    dispatch[0].uop.execute.int_op.alu = `RAPT_ALU_LW__;
+    dispatch[0].uop.rd = 4;
+    dispatch[0].op1 = XLEN'('h80002000);
+    dispatch[0].prd = 11;
+    dispatch[0].dest = 4;
+    disp.accept[0] = 1'b1;
+    tick(1);
+    disp.accept[0] = 1'b0;
+    for (int c = 0; c < 20 && !exu_lsu.rvalid_b; c++) tick(1);
+    check(exu_lsu.rvalid_b, "younger response cancellation request missing");
+    exu_lsu.rdata_b = XLEN'('h12345678);
+    exu_lsu.rready_b = 1'b1;
+    #1;
+    if (`RAPT_IOQ_LOAD_RESPONSE_STAGE) begin
+      tick(1);
+      exu_lsu.rready_b = 1'b0;
+    end
+    check(exu_ioq_bcast.valid && exu_ioq_bcast.dest == 4,
+          "younger response missing before cancellation");
+    cmu_bcast.flush_pipe = 1'b1;
+    #1;
+    check(!exu_ioq_bcast.valid && !fpr.ioq_wvalid && !load_fast.confirmed,
+          "cancelled younger response caused a transfer");
+    check(exu_ioq_bcast.dest == 4 && exu_ioq_bcast.result == XLEN'('h12345678),
+          "flush steered the unqualified completion payload");
+    tick(1);
+    cmu_bcast.flush_pipe = 1'b0;
+    exu_lsu.rready_b = 1'b0;
+    tick(2);
+    check(!exu_ioq_bcast.valid && !exu_lsu.rvalid && !exu_lsu.rvalid_b,
+          "cancelled younger response or request reappeared");
     $display("PASS: IOQ load/store completion kill XLEN=%0d", XLEN);
     $finish;
   end
@@ -218,10 +259,10 @@ module tb_ioq_early_load_bcast;
     for (int c = 0; c < 20 && !exu_lsu.rvalid_b; c++) tick(1);
     check(exu_lsu.rvalid && exu_lsu.raddr == XLEN'('h80001000), "older A request missing");
     check(exu_lsu.rvalid_b && exu_lsu.raddr_b == XLEN'('h80002000), "younger B request missing");
-    exu_lsu.rdata_b = XLEN'('h12345678);
+    exu_lsu.rdata_b  = XLEN'('h12345678);
     exu_lsu.rready_b = 1'b1;
     #1;
-    if ((!`RAPT_IOQ_LOAD_RESPONSE_STAGE && `RAPT_IOQ_LIVE_EARLY_BCAST)) begin
+    if (!`RAPT_IOQ_LOAD_RESPONSE_STAGE) begin
       check(
           exu_ioq_bcast.valid && exu_ioq_bcast.dest == 4
             && exu_ioq_bcast.result == XLEN'('h12345678),
@@ -229,7 +270,7 @@ module tb_ioq_early_load_bcast;
     end
     tick(1);
     exu_lsu.rready_b = 1'b0;
-    if ((!`RAPT_IOQ_LOAD_RESPONSE_STAGE && `RAPT_IOQ_LIVE_EARLY_BCAST)) begin
+    if (!`RAPT_IOQ_LOAD_RESPONSE_STAGE) begin
       check(!exu_ioq_bcast.valid, "live younger result broadcast twice");
     end else begin
       check(
@@ -241,7 +282,7 @@ module tb_ioq_early_load_bcast;
     check(dut.ioq_head == 0, "early broadcast removed the older IOQ head");
     tick(1);
     check(!exu_ioq_bcast.valid, "younger result broadcast twice while older load waited");
-    exu_lsu.rdata = XLEN'('h87654321);
+    exu_lsu.rdata  = XLEN'('h87654321);
     exu_lsu.rready = 1'b1;
     #1;
     capture_response_stage(0);
@@ -261,15 +302,15 @@ module tb_ioq_early_load_bcast;
     for (int c = 0; c < 20 && !exu_lsu.rvalid_b; c++) tick(1);
     check(exu_lsu.rvalid_b && exu_lsu.raddr_b == XLEN'('h80004000),
           "second younger B request missing");
-    exu_lsu.rdata_b = XLEN'('h55667788);
+    exu_lsu.rdata_b  = XLEN'('h55667788);
     exu_lsu.rready_b = 1'b1;
     #1;
-    if ((!`RAPT_IOQ_LOAD_RESPONSE_STAGE && `RAPT_IOQ_LIVE_EARLY_BCAST))
+    if (!`RAPT_IOQ_LOAD_RESPONSE_STAGE)
       check(exu_ioq_bcast.valid && exu_ioq_bcast.dest == 6,
             "second younger load did not broadcast on response edge");
     tick(1);
     exu_lsu.rready_b = 1'b0;
-    if ((!`RAPT_IOQ_LOAD_RESPONSE_STAGE && `RAPT_IOQ_LIVE_EARLY_BCAST))
+    if (!`RAPT_IOQ_LOAD_RESPONSE_STAGE)
       check(!exu_ioq_bcast.valid, "second live younger result broadcast twice");
     else
       check(exu_ioq_bcast.valid && exu_ioq_bcast.dest == 6,
@@ -282,7 +323,7 @@ module tb_ioq_early_load_bcast;
     enqueue_load(XLEN'('h80005000), 5'd7, 14);
     for (int c = 0; c < 12 && !exu_lsu.rvalid; c++) tick(1);
     check(exu_lsu.rvalid && exu_lsu.raddr == XLEN'('h80005000), "post-flush load request missing");
-    exu_lsu.rdata = XLEN'('haabbccdd);
+    exu_lsu.rdata  = XLEN'('haabbccdd);
     exu_lsu.rready = 1'b1;
     #1;
     capture_response_stage(0);
@@ -291,103 +332,100 @@ module tb_ioq_early_load_bcast;
         "stale early mark suppressed the post-flush owner");
     tick(1);
     exu_lsu.rready = 1'b0;
-    if (`RAPT_IOQ_WAKE_NEXT_B_REQUEST) begin
-      reset = 1'b1;
-      init_ioq_inputs(1'b0);
-      tick(3);
-      reset = 1'b0;
-      enqueue_load(XLEN'('h80001000), 5'd3, 10);
-      enqueue_load(XLEN'('h80002000), 5'd4, 11);
-      dispatch[0] = '0;
-      dispatch[0].uop.pc = XLEN'('h80000014);
-      dispatch[0].uop.execute.memory.load = 1'b1;
-      dispatch[0].uop.execute.int_op.alu = `RAPT_ALU_LW__;
-      dispatch[0].uop.rd = 5;
-      dispatch[0].pr1 = 11;
-      dispatch[0].prd = 12;
-      dispatch[0].dest = 5;
-      disp.accept[0] = 1'b1;
-      tick(1);
-      disp.accept[0] = 1'b0;
-      for (int c = 0; c < 20 && !exu_lsu.rvalid_b; c++) tick(1);
-      check(exu_lsu.rvalid_b && exu_lsu.raddr_b == XLEN'('h80002000),
-            "seed B request for dependent wake missing");
-      exu_lsu.rdata_b = XLEN'('h80003000);
-      exu_lsu.rready_b = 1'b1;
-      #1;
-      capture_response_stage(1);
-      check(exu_ioq_bcast.valid && exu_ioq_bcast.dest == 4,
-            "seed B response did not broadcast to dependent");
-      tick(1);
-      exu_lsu.rready_b = 1'b0;
-      check(exu_lsu.rvalid_b && exu_lsu.raddr_b == XLEN'('h80003000),
-            "dependent B request was not prepared on wake edge");
-      exu_lsu.rdata_b = XLEN'('h12345678);
-      exu_lsu.rready_b = 1'b1;
-      #1;
-      capture_response_stage(1);
+    reset = 1'b1;
+    init_ioq_inputs(1'b0);
+    tick(3);
+    reset = 1'b0;
+    exu_lsu.stq_ready = 1'b0;
+    exu_l1d.ready = 1'b1;
+    enqueue_store(XLEN'('h80001000), 5'd8);
+    enqueue_load(XLEN'('h80002000), 5'd9, 15);
+    for (int c = 0; c < 20 && !exu_lsu.rvalid; c++) tick(1);
+    check(exu_lsu.rvalid && exu_lsu.raddr == XLEN'('h80002000),
+          "disjoint younger load did not issue behind held store");
+    check(!dut.ioq_older_memory_blk[1], "disjoint store was classified as an alias");
+    exu_lsu.rdata  = XLEN'('hdeadbeef);
+    exu_lsu.rready = 1'b1;
+    #1;
+    if (!`RAPT_IOQ_LOAD_RESPONSE_STAGE)
       check(
-          exu_ioq_bcast.valid && exu_ioq_bcast.dest == 5
-            && exu_ioq_bcast.result == XLEN'('h12345678),
-          "dependent B response lost its CDB owner or data");
-      tick(1);
-      exu_lsu.rready_b = 1'b0;
-      exu_lsu.rdata = XLEN'('h87654321);
-      exu_lsu.rready = 1'b1;
-      tick(1);
-      exu_lsu.rready = 1'b0;
-      tick(2);
-      check(!exu_ioq_bcast.valid, "dependent B load broadcast twice at ordered removal");
-    end
-    if (`RAPT_IOQ_EARLY_LOAD_STORES) begin
+          exu_ioq_bcast.valid && exu_ioq_bcast.dest == 9
+            && exu_ioq_bcast.result == XLEN'('hdeadbeef),
+          "disjoint younger load missed response-edge CDB");
+    tick(1);
+    exu_lsu.rready = 1'b0;
+    if (`RAPT_IOQ_LOAD_RESPONSE_STAGE)
+      check(exu_ioq_bcast.valid && exu_ioq_bcast.dest == 9,
+            "disjoint younger load did not broadcast");
+    else check(!exu_ioq_bcast.valid, "disjoint younger load broadcast twice");
+    // Retire the captured younger response before making the older store
+    // eligible: changing stq_ready before this edge changes CDB arbitration.
+    if (`RAPT_IOQ_LOAD_RESPONSE_STAGE) tick(1);
+    exu_lsu.stq_ready = 1'b1;
+    #1;
+    check(exu_ioq_bcast.valid && exu_ioq_bcast.dest == 8,
+          "older store did not retain IOQ removal priority");
+    tick(1);
+    check(!exu_ioq_bcast.valid, "disjoint younger load replayed after store removal");
+
+    reset = 1'b1;
+    init_ioq_inputs(1'b0);
+    tick(3);
+    reset = 1'b0;
+    exu_lsu.stq_ready = 1'b0;
+    exu_l1d.ready = 1'b1;
+    enqueue_store(XLEN'('h80001000), 5'd10);
+    enqueue_load(XLEN'('h80001000), 5'd11, 16);
+    tick(5);
+    check(dut.ioq_older_memory_blk[1] && !exu_lsu.rvalid && !exu_lsu.rvalid_b,
+          "overlapping younger load issued before held store");
+
+    if (`RAPT_IOQ_LOAD_RESPONSE_STAGE) begin
+      // A fault can appear after the ordered prefix was registered. Keep a
+      // disjoint younger completion behind the held store for that cycle.
       reset = 1'b1;
       init_ioq_inputs(1'b0);
       tick(3);
       reset = 1'b0;
       exu_lsu.stq_ready = 1'b0;
       exu_l1d.ready = 1'b1;
-      enqueue_store(XLEN'('h80001000), 5'd8);
-      enqueue_load(XLEN'('h80002000), 5'd9, 15);
+      enqueue_store(XLEN'('h80001000), 5'd12);
+      enqueue_load(XLEN'('h80002000), 5'd13, 17);
       for (int c = 0; c < 20 && !exu_lsu.rvalid; c++) tick(1);
       check(exu_lsu.rvalid && exu_lsu.raddr == XLEN'('h80002000),
-            "disjoint younger load did not issue behind held store");
-      check(!dut.ioq_older_memory_blk[1], "disjoint store was classified as an alias");
-      exu_lsu.rdata = XLEN'('hdeadbeef);
+            "late-fault younger load request missing");
+      exu_lsu.rdata  = XLEN'('h11223344);
       exu_lsu.rready = 1'b1;
-      #1;
-      if ((!`RAPT_IOQ_LOAD_RESPONSE_STAGE && `RAPT_IOQ_LIVE_EARLY_BCAST))
-        check(
-            exu_ioq_bcast.valid && exu_ioq_bcast.dest == 9
-              && exu_ioq_bcast.result == XLEN'('hdeadbeef),
-            "disjoint younger load missed response-edge CDB");
       tick(1);
       exu_lsu.rready = 1'b0;
-      if (!(!`RAPT_IOQ_LOAD_RESPONSE_STAGE && `RAPT_IOQ_LIVE_EARLY_BCAST))
-        check(exu_ioq_bcast.valid && exu_ioq_bcast.dest == 9,
-              "disjoint younger load did not broadcast");
-      else check(!exu_ioq_bcast.valid, "disjoint younger load broadcast twice");
-      // Retire the captured younger response before making the older store
-      // eligible: changing stq_ready before this edge changes CDB arbitration.
-      if (`RAPT_IOQ_LOAD_RESPONSE_STAGE) tick(1);
-      exu_lsu.stq_ready = 1'b1;
+      check(dut.ioq_complete[1] && !dut.early_order_block_q[1],
+            "late-fault setup did not leave the registered prefix clear");
+      dut.ioq_trap[0] = 1'b1;
       #1;
-      check(exu_ioq_bcast.valid && exu_ioq_bcast.dest == 8,
-            "older store did not retain IOQ removal priority");
-      tick(1);
-      check(!exu_ioq_bcast.valid, "disjoint younger load replayed after store removal");
-
-      reset = 1'b1;
-      init_ioq_inputs(1'b0);
-      tick(3);
-      reset = 1'b0;
-      exu_lsu.stq_ready = 1'b0;
-      exu_l1d.ready = 1'b1;
-      enqueue_store(XLEN'('h80001000), 5'd10);
-      enqueue_load(XLEN'('h80001000), 5'd11, 16);
-      tick(5);
-      check(dut.ioq_older_memory_blk[1] && !exu_lsu.rvalid && !exu_lsu.rvalid_b,
-            "overlapping younger load issued before held store");
+      check(!dut.early_bcast_issue, "late older fault let younger load broadcast");
+      dut.ioq_trap[0] = 1'b0;
+      #1;
+      check(dut.early_bcast_issue, "clearing late fault did not release younger load");
+      $display("PASS: late older fault blocks early IOQ broadcast XLEN=%0d", XLEN);
     end
+    // Emulate a fault arriving after the ordered-prefix register sampled.
+    // The younger completion must still wait behind that older fault.
+    reset = 1'b1;
+    init_ioq_inputs(1'b0);
+    tick(3);
+    reset = 1'b0;
+    enqueue_load(XLEN'('h80001000), 5'd12, 20);
+    enqueue_load(XLEN'('h80002000), 5'd13, 21);
+    enqueue_load(XLEN'('h80003000), 5'd14, 22);
+    tick(2);
+    check(dut.ioq_valid[0] && dut.ioq_valid[1] && dut.ioq_valid[2] && !dut.early_order_block_q[2],
+          "fault window setup failed");
+    force dut.ioq_complete[2] = 1'b1;
+    force dut.ioq_load_trap[1] = 1'b1;
+    #1;
+    check(!dut.early_bcast_issue, "younger load bypassed newly arrived older fault");
+    release dut.ioq_complete[2];
+    release dut.ioq_load_trap[1];
     $display("PASS: early IOQ load CDB is ordered for removal and unique XLEN=%0d", XLEN);
     $finish;
   end
@@ -445,23 +483,33 @@ module tb_ioq_b_wake_alias;
     for (int c = 0; c < 20 && !exu_lsu.rvalid_b; c++) tick(1);
     check(exu_lsu.rvalid && exu_lsu.raddr == XLEN'('h8000_1000), "held A request missing");
     check(exu_lsu.rvalid_b && exu_lsu.raddr_b == XLEN'('h8000_2000), "seed B request missing");
-    exu_lsu.rdata_b = Target;
+    exu_lsu.rdata_b  = Target;
     exu_lsu.rready_b = 1'b1;
     #1;
-    check(dut.early_bcast_issue && dut.b_wake_addr == Target,
-          "dependent load did not wake with forwarded address");
+    if (`RAPT_IOQ_LOAD_RESPONSE_STAGE) begin
+      check(!dut.early_bcast_issue, "registered B response broadcast before capture");
+      tick(1);
+      exu_lsu.rready_b = 1'b0;
+      #1;
+    end
+    check(dut.early_bcast_issue, "dependent load's producer did not broadcast");
     check(!dut.ioq_addr_ready[3] && !dut.ioq_older_memory_blk[3],
-          "resident address unexpectedly resolved before B wake");
-    check(dut.b_wake_valid == !aliases, "B wake used stale resident address");
-    tick(1);
-    exu_lsu.rready_b = 1'b0;
-    #1;
+          "resident address unexpectedly resolved before the producer wake");
+    if (!`RAPT_IOQ_LOAD_RESPONSE_STAGE) begin
+      tick(1);
+      exu_lsu.rready_b = 1'b0;
+      #1;
+    end
     if (aliases) begin
-      check(!exu_lsu.rvalid_b && dut.ioq_older_memory_blk[3],
-            "aliased dependent load escaped ahead of older store");
+      for (int c = 0; c < 3; c++) begin
+        check(!exu_lsu.rvalid_b && (!dut.ioq_addr_ready[3] || dut.ioq_older_memory_blk[3]),
+              "aliased dependent load escaped ahead of older store");
+        tick(1);
+      end
     end else begin
+      for (int c = 0; c < 4 && !exu_lsu.rvalid_b; c++) tick(1);
       check(exu_lsu.rvalid_b && exu_lsu.raddr_b == Target,
-            "disjoint older store blocked dependent B wake");
+            "disjoint older store blocked dependent B request");
     end
   endtask
 
@@ -482,8 +530,8 @@ module tb_ioq_mem_context;
   initial begin
     init_ioq_inputs(0);
     csr_bcast.priv = `RAPT_PRIV_S;
-    csr_bcast.sum = 1'b1;
-    csr_bcast.mxr = 1'b0;
+    csr_bcast.sum  = 1'b1;
+    csr_bcast.mxr  = 1'b0;
     tick(3);
     reset = 0;
     dispatch[0] = '0;
@@ -494,6 +542,8 @@ module tb_ioq_mem_context;
     disp.accept[0] = 1'b1;
     tick(1);
     disp.accept[0] = 1'b0;
+    for (int c = 0; c < 8 && !exu_lsu.rvalid; c++) tick(1);
+    check(exu_lsu.rvalid, "initial load request missing");
     csr_bcast.dmmu_en = 1'b1;
     csr_bcast.priv = `RAPT_PRIV_M;
     csr_bcast.sum = 1'b0;
@@ -1325,10 +1375,9 @@ module tb_ioq_pending_lock;
             check(exu_ioq_bcast.prd == $bits(exu_ioq_bcast.prd)'(expected_prd),
                   "head load live broadcast physical destination mismatch");
           end else begin
-            check(load_fast.valid, "head integer load did not emit fast wake");
-            check(!load_fast.rebusy, "head integer load emitted rebusy on return");
-            check(load_fast.prd == $bits(load_fast.prd)'(expected_prd),
-                  "fast-wake physical destination mismatch");
+            // A registered response completes from captured state; queues wake
+            // from that completion, never from a speculative fast-wake pair.
+            check(!load_fast.valid && !load_fast.rebusy, "unexpected fast-load wake");
           end
           sample_load_broadcast();
           tick(1);
@@ -1338,7 +1387,7 @@ module tb_ioq_pending_lock;
         tick(1);
       end
       exu_lsu.rready = 1'b0;
-      fail("timed out waiting for fast LSU load handshake");
+      fail("timed out waiting for LSU load handshake");
     end
   endtask
 
@@ -1738,19 +1787,79 @@ module tb_ioq_sc_external;
       tick(1);
       disp.accept[0] = 0;
       repeat (5) begin
-        check(!exu_ioq_bcast.valid && !exu_l1d.reservation_clear,
+        check(!exu_ioq_bcast.valid && !sq_handoff_valid && !exu_l1d.reservation_clear,
               "SC completed or consumed reservation before notification drain");
         tick(1);
       end
       exu_l1d.reservation_valid   = (invalidate == 0);
       exu_l1d.reservation_blocked = 0;
       #1;
+      for (int c = 0; c < 20 && !exu_ioq_bcast.valid; c++) tick(1);
       check(exu_ioq_bcast.valid && !exu_ioq_bcast.trap, "SC did not resume");
       check(exu_ioq_bcast.result == XLEN'(invalidate), "SC status did not reflect invalidation");
       check(exu_ioq_bcast.wen == (invalidate == 0), "SC store allocation eligibility incorrect");
       check(exu_l1d.reservation_clear, "completed SC did not consume reservation");
       tick(1);
       check(!exu_ioq_bcast.valid, "SC completed twice");
+    end
+    // A notification can arrive after the decision is ready but before its
+    // accepting edge. Neither a successful SC nor its reservation clear may
+    // escape; the decision after draining must reflect the new valid state.
+    for (int stalled = 0; stalled < 2; stalled++)
+    for (int invalidate = 0; invalidate < 2; invalidate++) begin
+      reset = 1;
+      init_ioq_inputs(0);
+      tick(3);
+      reset = 0;
+      tick(1);
+      exu_l1d.reservation = XLEN'('h80001000);
+      exu_l1d.reservation_valid = 1;
+      dispatch[0] = '0;
+      dispatch[0].uop.execute.memory.store = 1;
+      dispatch[0].uop.execute.memory.atomic = 1;
+      dispatch[0].uop.execute.int_op.alu = `RAPT_ATO_SC__;
+      dispatch[0].uop.execute.int_op.word = 1;
+      dispatch[0].op1 = XLEN'('h80001000);
+      dispatch[0].op2 = XLEN'('h55);
+      dispatch[0].dest = 3;
+      cmu_bcast.rob_head = 3;
+      disp.accept[0] = 1;
+      tick(1);
+      disp.accept[0] = 0;
+      for (int c = 0; c < 20 && !exu_ioq_bcast.valid; c++) tick(1);
+      check(exu_ioq_bcast.valid && exu_ioq_bcast.result == '0,
+            "SC decision was not prepared before late notification");
+      exu_l1d.reservation_blocked = 1;
+      exu_l1d.reservation_valid = (invalidate == 0);
+      exu_lsu.stq_ready = (stalled == 0);
+      #1;
+      check(!exu_ioq_bcast.valid && !sq_handoff_valid && !exu_l1d.reservation_clear,
+            "late notification did not block SC side effects");
+      if (stalled == 0)
+        check(sq_forward_pending, "notification steered the prepared SC conflict hint");
+      tick(1);
+
+      check(!sq_forward_pending, "notification retained the stale SC conflict hint");
+      exu_l1d.reservation_blocked = 0;
+      #1;
+
+      check(!exu_ioq_bcast.valid, "SC reused a decision from before notification drain");
+      if (stalled != 0) begin
+        repeat (3) begin
+          tick(1);
+          check(!exu_ioq_bcast.valid && !sq_handoff_valid && !exu_l1d.reservation_clear,
+                "SC escaped SQ backpressure after notification drain");
+        end
+        exu_lsu.stq_ready = 1;
+        #1;
+      end
+      for (int c = 0; c < 20 && !exu_ioq_bcast.valid; c++) tick(1);
+      check(exu_ioq_bcast.valid && exu_ioq_bcast.result == XLEN'(invalidate),
+            "SC did not resample reservation after late notification");
+      check(exu_ioq_bcast.wen == (invalidate == 0) && exu_l1d.reservation_clear,
+            "SC side effects did not match resampled decision");
+      tick(1);
+      check(!exu_ioq_bcast.valid, "resampled SC completed twice");
     end
     for (int flushing = 0; flushing < 2; flushing++) begin
       for (int rejection = 0; rejection < 4; rejection++) begin
@@ -1795,7 +1904,7 @@ module tb_ioq_sc_external;
         check(!exu_ioq_bcast.valid, "accepted/stale/flushed candidate not removed");
       end
     end
-    $display("PASS: SC notification and actual completion guard, XLEN=%0d cases=10", XLEN);
+    $display("PASS: SC notification and actual completion guard, XLEN=%0d cases=14", XLEN);
     $finish;
   end
 endmodule
@@ -1852,12 +1961,12 @@ module tb_ioq_store_pbmt;
     check(!exu_ioq_bcast.valid, "store completed before translation");
     exu_l1d.paddr = PagePA + XLEN'(offset);
     exu_l1d.pbmt  = 2'(attr0);
-    exu_l1d.trap = first_fault;
+    exu_l1d.trap  = first_fault;
     exu_l1d.cause = `RAPT_CAUSE_STORE_PAGE_FAULT;
     exu_l1d.ready = 1;
     tick(1);
     exu_l1d.ready = 0;
-    exu_l1d.trap = 0;
+    exu_l1d.trap  = 0;
     if (first_fault) check(!exu_l1d.mmu_en, "first-page fault issued a second request");
     if (crosses && !first_fault) begin
       check(exu_l1d.mmu_en && exu_l1d.vaddr == PageVA + 4096, "missing second-page translation");
@@ -2066,96 +2175,85 @@ module tb_ioq_store_stage;
     #1;
     check(int'(dut.ioq_free_q) == $bits(dut.ioq_valid) && disp.ready[0] && disp.ready[1],
           "flush did not restore dispatch credit ownership");
-    if (`RAPT_IOQ_STORE_PRECHECK) begin
-      // An address-ready ordinary store can cache permission independently
-      // of its data. Neither current CDB data nor the older load response may
-      // change the selected address, and no store effect precedes data capture.
-      boot();
-      dispatch[0] = '0;
-      dispatch[0].uop.execute.memory.load = 1'b1;
-      dispatch[0].uop.execute.int_op.alu = `RAPT_ALU_LW__;
-      dispatch[0].op1 = XLEN'('h80006000);
-      disp.accept[0] = 1'b1;
-      tick(1);
-      disp.accept[0] = 1'b0;
-      dispatch[0] = '0;
-      dispatch[0].uop.execute.memory.store = 1'b1;
-      dispatch[0].uop.execute.int_op.alu = `RAPT_SW_WSTRB;
-      dispatch[0].op1 = XLEN'('h80007000);
-      dispatch[0].pr2 = $bits(dispatch[0].pr2)'(7);
-      disp.accept[0] = 1'b1;
-      tick(1);
-      disp.accept[0] = 1'b0;
-      #1;
-      check(dut.store_check_selected && dut.store_check_idx == dut.ioq_head + 1'b1,
-            "address-ready successor was not selected for precheck");
-      check(dut.store_check_vaddr == XLEN'('h80007000), "wrong precheck address");
-      exu_rou.valid = 1'b1;
-      exu_rou.prd = $bits(exu_rou.prd)'(7);
-      exu_rou.result = XLEN'('h1234);
-      #1;
-      check(dut.store_check_vaddr == XLEN'('h80007000),
-            "same-cycle store-data wake changed permission address");
-      exu_rou.valid = 1'b0;
-      tick(1);
-      check(dut.store_prechecked[dut.ioq_head+1'b1], "precheck did not retain owner");
-      exu_lsu.rready = 1'b1;
-      tick(1);
-      exu_lsu.rready = 1'b0;
-      #1;
-      check(dut.head_store_check_valid_q && !exu_ioq_bcast.valid && !sq_handoff_valid,
-            "permission-ready store escaped while data was unavailable");
-      exu_rou.valid = 1'b1;
-      exu_rou.prd = $bits(exu_rou.prd)'(7);
-      exu_rou.result = XLEN'('h1234);
-      #1;
-      check(!exu_ioq_bcast.valid && !sq_handoff_valid,
-            "store-data CDB bypass crossed the registered handoff boundary");
-      exu_lsu.stq_ready = 1'b1;
-      tick(1);
-      exu_rou.valid = 1'b0;
-      #1;
-      check(
-          exu_ioq_bcast.valid && sq_handoff_valid && !exu_ioq_bcast.trap
-          && exu_ioq_bcast.sq_waddr == XLEN'('h80007000)
-          && exu_ioq_bcast.sq_wdata == XLEN'('h1234),
-          "prechecked store lost registered data or address ownership");
-    end else begin
-      // The following store may be selected for permission checking only
-      // after its data wake is registered.  Neither same-cycle CDB wake nor a
-      // live response from the older load may steer the PMP/tval input mux.
-      boot();
-      dispatch[0] = '0;
-      dispatch[0].uop.execute.memory.load = 1'b1;
-      dispatch[0].uop.execute.int_op.alu = `RAPT_ALU_LW__;
-      dispatch[0].op1 = XLEN'('h80006000);
-      disp.accept[0] = 1'b1;
-      tick(1);
-      disp.accept[0] = 1'b0;
-      dispatch[0] = '0;
-      dispatch[0].uop.execute.memory.store = 1'b1;
-      dispatch[0].uop.execute.int_op.alu = `RAPT_SW_WSTRB;
-      dispatch[0].op1 = XLEN'('h80007000);
-      dispatch[0].pr2 = $bits(dispatch[0].pr2)'(7);
-      disp.accept[0] = 1'b1;
-      tick(1);
-      disp.accept[0] = 1'b0;
-      #1;
-      check(!dut.store_check_lookahead, "unready successor entered store lookahead");
-      exu_rou.valid = 1'b1;
-      exu_rou.prd = $bits(exu_rou.prd)'(7);
-      exu_rou.result = XLEN'('h1234);
-      #1;
-      check(!dut.store_check_lookahead, "same-cycle CDB wake steered the store permission checker");
-      tick(1);
-      exu_rou.valid = 1'b0;
-      #1;
-      check(dut.store_check_lookahead, "registered successor wake did not enable store lookahead");
-      exu_lsu.rready = 1'b1;
-      #1;
-      check(dut.store_check_lookahead, "live L1D completion changed store checker ownership");
-      exu_lsu.rready = 1'b0;
-    end
+    // An address-ready ordinary store can cache permission independently
+    // of its data. Neither current CDB data nor the older load response may
+    // change the selected address, and no store effect precedes data capture.
+    boot();
+    dispatch[0] = '0;
+    dispatch[0].uop.execute.memory.load = 1'b1;
+    dispatch[0].uop.execute.int_op.alu = `RAPT_ALU_LW__;
+    dispatch[0].op1 = XLEN'('h80006000);
+    disp.accept[0] = 1'b1;
+    tick(1);
+    disp.accept[0] = 1'b0;
+    dispatch[0] = '0;
+    dispatch[0].uop.execute.memory.store = 1'b1;
+    dispatch[0].uop.execute.int_op.alu = `RAPT_SW_WSTRB;
+    dispatch[0].op1 = XLEN'('h80007000);
+    dispatch[0].pr2 = $bits(dispatch[0].pr2)'(7);
+    disp.accept[0] = 1'b1;
+    tick(1);
+    disp.accept[0] = 1'b0;
+    #1;
+    check(dut.store_check_selected && dut.store_check_idx == dut.ioq_head + 1'b1,
+          "address-ready successor was not selected for precheck");
+    check(dut.store_check_vaddr == XLEN'('h80007000), "wrong precheck address");
+    exu_rou.valid = 1'b1;
+    exu_rou.prd = $bits(exu_rou.prd)'(7);
+    exu_rou.result = XLEN'('h1234);
+    #1;
+    check(dut.store_check_vaddr == XLEN'('h80007000),
+          "same-cycle store-data wake changed permission address");
+    exu_rou.valid = 1'b0;
+    tick(1);
+    check(dut.store_prechecked[dut.ioq_head+1'b1], "precheck did not retain owner");
+    exu_lsu.rready = 1'b1;
+    tick(1);
+    exu_lsu.rready = 1'b0;
+    #1;
+    check(dut.head_store_check_valid_q && !exu_ioq_bcast.valid && !sq_handoff_valid,
+          "permission-ready store escaped while data was unavailable");
+    exu_rou.valid = 1'b1;
+    exu_rou.prd = $bits(exu_rou.prd)'(7);
+    exu_rou.result = XLEN'('h1234);
+    #1;
+    check(!exu_ioq_bcast.valid && !sq_handoff_valid,
+          "store-data CDB bypass crossed the registered handoff boundary");
+    exu_lsu.stq_ready = 1'b1;
+    tick(1);
+    exu_rou.valid = 1'b0;
+    #1;
+    check(
+        exu_ioq_bcast.valid && sq_handoff_valid && !exu_ioq_bcast.trap
+        && exu_ioq_bcast.sq_waddr == XLEN'('h80007000)
+        && exu_ioq_bcast.sq_wdata == XLEN'('h1234),
+        "prechecked store lost registered data or address ownership");
+    // A floating-point store may hand off only after the synchronous FPR
+    // response belongs to this head, even when permission and SQ are ready.
+    boot();
+    fpr.ioq_rvalid = 1'b0;
+    fpr.ioq_rdata = 64'h1234_5678_9abc_def0;
+    dispatch[0] = '0;
+    dispatch[0].uop.execute.memory.store = 1'b1;
+    dispatch[0].uop.execute.int_op.alu = XLEN == 64 ? `RAPT_SD_WSTRB : `RAPT_SW_WSTRB;
+    dispatch[0].uop.execute.fp.valid = 1'b1;
+    dispatch[0].uop.execute.fp.op = `RAPT_FP_OP_FSD;
+    dispatch[0].op1 = XLEN'('h80008000);
+    dispatch[0].stable_op1 = dispatch[0].op1;
+    dispatch[0].stable_op1_valid = 1'b1;
+    dispatch[0].dest = 3;
+    disp.accept[0] = 1'b1;
+    tick(1);
+    disp.accept[0] = 1'b0;
+    exu_lsu.stq_ready = 1'b1;
+    tick(4);
+    check(!exu_ioq_bcast.valid && !sq_handoff_valid,
+          "FP store escaped before its FPR read completed");
+    fpr.ioq_rvalid = 1'b1;
+    #1;
+    check(exu_ioq_bcast.valid && sq_handoff_valid,
+          "FP store did not resume after its FPR read completed");
+    expect_store(XLEN'('h80008000), 3, 0);
     $display("PASS: IOQ store stages preserve wakeup, identity, backpressure and flush ownership");
     $finish;
   end
@@ -2232,11 +2330,12 @@ endmodule
 module tb_ioq_address_stage;
   localparam int XLEN = `RAPT_XLEN;
   `include "tb_ioq_harness.svh"
-  task automatic enqueue(input int dependency, input logic [XLEN-1:0] base_addr);
+  task automatic enqueue_offset(input int dependency, input logic [XLEN-1:0] base_addr,
+                                input logic [XLEN-1:0] offset);
     dispatch[0] = '0;
     dispatch[0].uop.execute.memory.load = 1;
     dispatch[0].uop.execute.int_op.alu = `RAPT_ALU_LW__;
-    dispatch[0].uop.imm = 12;
+    dispatch[0].uop.imm = offset;
     dispatch[0].op1 = base_addr;
     dispatch[0].pr1 = $bits(dispatch[0].pr1)'(dependency);
     dispatch[0].dest = 3;
@@ -2244,6 +2343,9 @@ module tb_ioq_address_stage;
     disp.accept[0] = 1;
     tick(1);
     disp.accept[0] = 0;
+  endtask
+  task automatic enqueue(input int dependency, input logic [XLEN-1:0] base_addr);
+    enqueue_offset(dependency, base_addr, XLEN'(12));
   endtask
   task automatic expect_request(input logic [XLEN-1:0] addr);
     for (int n = 0; n < 8 && !exu_lsu.rvalid; n++) tick(1);
@@ -2269,13 +2371,17 @@ module tb_ioq_address_stage;
     exu_rou.valid = 1;
     exu_rou.prd = 7;
     exu_rou.result = XLEN'('h80000040);
+    exu_rou_b.valid = 1;
+    exu_rou_b.prd = 7;
+    exu_rou_b.result = XLEN'('h80000140);
     tick(1);
-    exu_rou.valid = 0;
-    check(dut.ioq_addr_ready[0] && !exu_lsu.rvalid,
-          "wakeup did not capture the registered address");
+    exu_rou.valid   = 0;
+    exu_rou_b.valid = 0;
+    check(dut.ioq_addr_ready[0] && (!exu_lsu.rvalid || exu_lsu.raddr == XLEN'('h8000004c)),
+          "port-zero CDB priority or registered address was lost");
     tick(1);
     check(dut.ioq_addr_ready[0] && exu_lsu.rvalid && exu_lsu.raddr == XLEN'('h8000004c),
-          "address/request register did not present rvalid on the prepare cycle");
+          "address/request register did not present rvalid after preparation");
     expect_request(XLEN'('h8000004c));
     flush_queue();
     // A returning head load supplies the next load's base. The next A
@@ -2304,7 +2410,7 @@ module tb_ioq_address_stage;
     check(exu_lsu.rvalid && exu_lsu.raddr == XLEN'('h80000200),
           "older pointer load was not issued");
     exu_lsu.rready = 1;
-    exu_lsu.rdata = XLEN'('h80000800);
+    exu_lsu.rdata  = XLEN'('h80000800);
     #1;
     if (`RAPT_IOQ_LOAD_RESPONSE_STAGE) begin
       check(!exu_ioq_bcast.valid && !load_fast.valid, "load bypassed response stage");
@@ -2312,14 +2418,21 @@ module tb_ioq_address_stage;
       exu_lsu.rready = 0;
       #1;
     end
-    check(exu_ioq_bcast.valid && exu_ioq_bcast.prd == $bits(exu_ioq_bcast.prd
-          )'(7) && dut.wake_next_req_valid, "dependent next-head load missed return-edge handoff");
+    check(exu_ioq_bcast.valid && exu_ioq_bcast.prd == $bits(exu_ioq_bcast.prd)'(7),
+          "dependent next-head load lost its pointer completion");
+
+    // Memory-port results do not forward into the request register (this
+    // keeps the load response off the next request's cycle); the dependent
+    // load captures its base on the wake edge and issues from its prepared
+    // address instead.
+    check(!dut.wake_next_req_valid, "load result forwarded into the next request");
     tick(1);
     exu_lsu.rready = 0;
+    for (int n = 0; n < 4 && !exu_lsu.rvalid; n++) tick(1);
     check(exu_lsu.rvalid && exu_lsu.raddr == XLEN'('h8000080c),
-          "dependent request added a cycle or used a stale pointer");
+          "dependent request used a stale pointer");
     exu_lsu.rready = 1;
-    exu_lsu.rdata = XLEN'('h1234);
+    exu_lsu.rdata  = XLEN'('h1234);
     tick(1);
     exu_lsu.rready = 0;
     flush_queue();
@@ -2329,10 +2442,11 @@ module tb_ioq_address_stage;
     exu_rou.result = XLEN'('h80000100);
     enqueue(9, XLEN'('hdead0000));
     exu_rou.valid = 0;
-    check(!dut.ioq_addr_ready[0] && !exu_lsu.rvalid, "reallocated slot inherited ready state");
+    check(!exu_lsu.rvalid && (!dut.ioq_addr_ready[0] || dut.ioq_eff_addr[0] == XLEN'('h8000010c)),
+          "reallocated slot inherited a stale prepared address");
     tick(1);
     check(dut.ioq_addr_ready[0] && exu_lsu.rvalid && exu_lsu.raddr == XLEN'('h8000010c),
-          "dispatch snoop added an extra idle cycle before rvalid");
+          "dispatch snoop lost its prepared request");
     expect_request(XLEN'('h8000010c));
     flush_queue();
     enqueue(0, XLEN'('h80000200));
@@ -2342,6 +2456,21 @@ module tb_ioq_address_stage;
     check(!exu_lsu.rvalid && dut.ioq_addr_ready == '0, "flushed preparation issued");
     enqueue(0, XLEN'('h80000300));
     expect_request(XLEN'('h8000030c));
+    flush_queue();
+    // Zero-offset loads use the same prepared-address boundary.
+    enqueue_offset(0, XLEN'('h80000380), '0);
+    check(dut.ioq_addr_ready[0], "zero-offset ready dispatch did not prepare address");
+    expect_request(XLEN'('h80000380));
+    flush_queue();
+    enqueue_offset(10, XLEN'('hdead0000), '0);
+    check(!dut.ioq_addr_ready[0] && !exu_lsu.rvalid, "zero-offset dependent load issued");
+    exu_rou.valid = 1;
+    exu_rou.prd = 10;
+    exu_rou.result = XLEN'('h800003c0);
+    tick(1);
+    exu_rou.valid = 0;
+    check(dut.ioq_addr_ready[0], "zero-offset wakeup did not prepare address");
+    expect_request(XLEN'('h800003c0));
     flush_queue();
     // Wrap the queue through normal completion, without reset/flush reuse.
     for (int n = 0; n <= `RAPT_IOQ_SIZE; n++) begin
@@ -2369,70 +2498,6 @@ module tb_ioq_address_stage;
     $display(
         "PASS: IOQ address preparation wakeup, dispatch snoop, flush, reuse and backpressure XLEN=%0d",
         XLEN);
-    $finish;
-  end
-endmodule
-
-
-// Consecutive cacheable integer loads: the younger load returns the cycle
-// the older head broadcasts, so it is not yet the IOQ head. Fast-wake must
-// still fire; the next-cycle CDB packet is that younger load.
-module tb_ioq_fast_load_next_head;
-  localparam int XLEN = `RAPT_XLEN;
-  `include "tb_ioq_harness.svh"
-  task automatic enqueue_load(input logic [XLEN-1:0] addr, input logic [4:0] dest,
-                              input int unsigned prd);
-    dispatch[0] = '0;
-    dispatch[0].uop.execute.memory.load = 1;
-    dispatch[0].uop.execute.int_op.alu = `RAPT_ALU_LW__;
-    dispatch[0].uop.rd = dest;
-    dispatch[0].op1 = addr;
-    dispatch[0].prd = $bits(dispatch[0].prd)'(prd);
-    dispatch[0].dest = dest;
-    disp.accept[0] = 1;
-    tick(1);
-    disp.accept[0] = 0;
-  endtask
-  initial begin
-    bit saw_head_wake;
-    bit saw_next_head_wake;
-    bit saw_younger_broadcast;
-    init_ioq_inputs(0);
-    tick(3);
-    reset = 0;
-    enqueue_load(XLEN'('h80001000), 5'd3, 10);
-    enqueue_load(XLEN'('h80001004), 5'd4, 11);
-    exu_lsu.rready = 1;
-    exu_lsu.rdata = XLEN'('h1111_1111);
-    saw_head_wake = 0;
-    saw_next_head_wake = 0;
-    saw_younger_broadcast = 0;
-    for (int c = 0; c < 16; c++) begin
-      #1;
-      if (exu_lsu.rvalid && load_fast.valid && !load_fast.rebusy && load_fast.prd == $bits(
-              load_fast.prd
-          )'(10))
-        saw_head_wake = 1;
-      if (exu_ioq_bcast.valid && exu_ioq_bcast.prd == $bits(
-              exu_ioq_bcast.prd
-          )'(10) && exu_lsu.rvalid && load_fast.valid && !load_fast.rebusy &&
-              load_fast.prd == $bits(
-              load_fast.prd
-          )'(11))
-        saw_next_head_wake = 1;
-      if (exu_ioq_bcast.valid && exu_ioq_bcast.prd == $bits(
-              exu_ioq_bcast.prd
-          )'(11) && exu_ioq_bcast.result == XLEN'('h2222_2222))
-        saw_younger_broadcast = 1;
-      if (exu_ioq_bcast.valid && exu_ioq_bcast.prd == $bits(exu_ioq_bcast.prd)'(10))
-        exu_lsu.rdata = XLEN'('h2222_2222);
-      tick(1);
-    end
-    check(!saw_head_wake, "direct-completing head load redundantly fast-woke");
-    check(saw_next_head_wake == (`RAPT_IOQ_FAST_LOAD_NEXT_HEAD != 0),
-          "next-head fast-wake did not match the configured policy");
-    check(saw_younger_broadcast, "younger load did not confirm on CDB after next-head wake");
-    $display("PASS: IOQ next-head fast-load wake and confirm XLEN=%0d", XLEN);
     $finish;
   end
 endmodule
@@ -2506,15 +2571,15 @@ module tb_ioq_store_translation_snapshot;
     // Flush an outstanding second request, then reuse the emptied queue.
     enqueue(XLEN'('h40000fff), 7);
     for (int c = 0; c < 20 && !exu_l1d.mmu_en; c++) tick(1);
-    exu_l1d.ready=1;
-    exu_l1d.paddr=XLEN'('h80001fff);
+    exu_l1d.ready = 1;
+    exu_l1d.paddr = XLEN'('h80001fff);
     tick(1);
     exu_l1d.ready = 0;
     check(exu_l1d.mmu_en && exu_l1d.vaddr == XLEN'('h40001000), "missing pre-flush second request");
     cmu_bcast.flush_pipe = 1;
     tick(1);
-    cmu_bcast.flush_pipe=0;
-    exu_l1d.ready=1;
+    cmu_bcast.flush_pipe = 0;
+    exu_l1d.ready = 1;
     tick(1);
     exu_l1d.ready = 0;
     check(!exu_l1d.valid && !exu_ioq_bcast.valid, "late response resurrected flushed owner");
@@ -2637,7 +2702,7 @@ module tb_ioq_load_response_stage;
       enqueue(3, XLEN'('h80001000));
       wait_a();
       exu_lsu.rready = 1;
-      exu_lsu.rdata = XLEN'('h3333);
+      exu_lsu.rdata  = XLEN'('h3333);
       no_live_response();
       if (captured) tick(1);
       cmu_bcast.flush_pipe = 1;
@@ -2650,7 +2715,7 @@ module tb_ioq_load_response_stage;
       check(!exu_ioq_bcast.valid, "flushed response reappeared");
       enqueue(5, XLEN'('h80003000));
       wait_a();
-      exu_lsu.rdata = XLEN'('h5555);
+      exu_lsu.rdata  = XLEN'('h5555);
       exu_lsu.rready = 1;
       no_live_response();
       tick(1);

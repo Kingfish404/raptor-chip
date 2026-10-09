@@ -1,0 +1,39 @@
+/* Generated from hdl/configs/memory_map.json by verify/scripts/gen_platform_header.py.
+ * Do not edit: change the JSON and run `make memory-map-header`. */
+#ifndef RAPTOR_PLATFORM_H
+#define RAPTOR_PLATFORM_H
+
+#define RAPTOR_FINISHER_BASE 0x00100000
+#define RAPTOR_FINISHER_SIZE 0x00001000
+#define RAPTOR_CLINT_BASE 0x02000000
+#define RAPTOR_CLINT_SIZE 0x000c0000
+#define RAPTOR_PLIC_BASE 0x0c000000
+#define RAPTOR_PLIC_SIZE 0x01000000
+#define RAPTOR_SRAM_BASE 0x0f000000
+#define RAPTOR_SRAM_SIZE 0x00002000
+#define RAPTOR_NS16550_BASE 0x10000000
+#define RAPTOR_NS16550_SIZE 0x00000100
+#define RAPTOR_VIRTIO_BASE 0x10001000
+#define RAPTOR_VIRTIO_SIZE 0x00001000
+#define RAPTOR_LITEX_CSR_BASE 0x11000000
+#define RAPTOR_LITEX_CSR_SIZE 0x01000000
+#define RAPTOR_LITEX_UART_BASE 0x11001800
+#define RAPTOR_LITEX_UART_SIZE 0x00000100
+#define RAPTOR_LITEETH_BUFFERS_BASE 0x18000000
+#define RAPTOR_LITEETH_BUFFERS_SIZE 0x01000000
+#define RAPTOR_MROM_BASE 0x20000000
+#define RAPTOR_MROM_SIZE 0x00010000
+#define RAPTOR_VGA_BASE 0x21000000
+#define RAPTOR_VGA_SIZE 0x00200000
+#define RAPTOR_FLASH_BASE 0x30000000
+#define RAPTOR_FLASH_SIZE 0x10000000
+#define RAPTOR_MAIN_RAM_BASE 0x80000000
+#define RAPTOR_MAIN_RAM_MAX_SIZE 0x80000000
+
+/* NPC leaves this mapped device aperture unbacked: accesses get DECERR. */
+#define RAPTOR_UNBACKED_DEVICE_BASE RAPTOR_VGA_BASE
+
+/* Sv32/Sv39 leaf PTE that maps the 4 KiB page holding physical address pa. */
+#define RAPTOR_PTE(pa, flags) ((((pa) >> 12) << 10) | (flags))
+
+#endif

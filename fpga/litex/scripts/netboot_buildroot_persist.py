@@ -11,7 +11,8 @@ import shutil
 import stat
 
 from add_linux_sdcard_dts import sdcard_node
-from netboot_distro import ADDRESSES, LITEX, persistence_bootargs, require, run, sha
+from netboot_distro import (ADDRESSES, LITEX, persistence_bootargs, require, require_linux_ram,
+                            run, sha)
 
 
 def build(package, soc, csr, runtime, output, work, data_selector='LABEL=RAPTOR_DATA', persist_logs=False):
@@ -27,8 +28,7 @@ def build(package, soc, csr, runtime, output, work, data_selector='LABEL=RAPTOR_
         require(f'CONFIG_{option}=y\n' in config, f'kernel lacks {option}')
     require(run('fdtget', '-t', 's', soc, '/cpus/cpu@0', 'riscv,isa-base').strip() == f'rv{bits}i'.encode(),
             'DTB XLEN mismatch')
-    require(run('fdtget', '-t', 'x', soc, '/memory@80000000', 'reg').strip() == b'80000000 40000000',
-            'requires the 1 GiB RAM map')
+    require_linux_ram(soc, bits)
     require(not output.exists(), 'output must be new')
     work.mkdir(parents=True, exist_ok=False)
     files = work / 'files'

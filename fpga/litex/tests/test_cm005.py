@@ -398,7 +398,7 @@ class CM005Test(unittest.TestCase):
                         integrated_main_ram_size=0 if dram else 0x10000)
                     Builder(soc, output_dir=tmp, compile_software=False).build(run=False)
                 csr = json.loads((pathlib.Path(tmp) / "csr.json").read_text())
-                self.assertEqual(csr["memories"]["ethmac"]["base"], 0xe0000000)
+                self.assertEqual(csr["memories"]["ethmac"]["base"], 0x18000000)
                 self.assertIn("interrupts = <4>;", ethernet_node(csr))
                 phy = csr["csr_bases"]["ethphy"]
                 for register, offset in (("crg_reset", 0), ("mdio_w", 4), ("mdio_r", 8)):

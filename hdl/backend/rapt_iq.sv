@@ -19,8 +19,9 @@ module rapt_iq #(
     parameter int unsigned            NumIssuePorts   = 1,
     parameter int unsigned            LastIssuePort   = NumIssuePorts - 1,
     parameter bit                     IN_ORDER_ISSUE  = 1'b0,
-    parameter bit                     RebalancePorts  = Cfg.issue_rebalance,
-    parameter bit                     ReclaimOnIssue  = Cfg.iq_reclaim_on_issue,
+    parameter bit                     RebalancePorts  = 1'b0,
+    parameter bit                     UniformSimplePorts = 1'b0,
+    parameter bit                     ReclaimOnIssue  = 1'b0,
     // Same-cycle CDB operand wake. Mask must exclude any completion port
     // this queue produces combinationally (BRQ skips the branch port).
     parameter bit                     ComboCdbWake    = 1'b0,
@@ -71,15 +72,49 @@ module rapt_iq #(
   localparam unsigned IQLen = (IQ_SIZE > 1) ? $clog2(IQ_SIZE) : 1;
   localparam unsigned ROBLen = $clog2(ROB_SIZE);
   localparam unsigned GenBits = $bits(dispatch[0].generation);
+  localparam bit BankUop = `RAPT_FPGA_LUTRAM && IQ_SIZE >= 16 && NumIssuePorts > 1;
+  int alloc_slot[IQ_SIZE];
 
   UopT iq_uop[IQ_SIZE];
+  logic [NumIssuePorts-1:0] iq_issue_ports[IQ_SIZE];
+  logic [IQLen-1:0] issue_data_index[NumIssuePorts];
+  UopT banked_issue_uop[NumIssuePorts];
+  if (BankUop) begin : g_banked_uop
+    localparam int UopBits  = $bits(UopT);
+    localparam int LaneBits = NumSlots > 1 ? $clog2(NumSlots) : 1;
+    logic [LaneBits-1:0] lane_q[IQ_SIZE];
+    logic [UopBits-1:0] bank_read[NumIssuePorts][NumSlots];
+    for (genvar e = 0; e < IQ_SIZE; e++) begin : g_lane
+      always_ff @(posedge clock)
+        if (!(reset || cmu_bcast.flush_pipe) && alloc_slot[e] >= 0)
+          lane_q[e] <= LaneBits'(alloc_slot[e]);
+    end
+    for (genvar a = 0; a < NumSlots; a++) begin : g_write_lane
+      for (genvar p = 0; p < NumIssuePorts; p++) begin : g_read_copy
+        (* ram_style = "distributed" *) logic [UopBits-1:0] words[IQ_SIZE];
+        always_ff @(posedge clock)
+          if (!(reset || cmu_bcast.flush_pipe) && disp.accept[a])
+            words[disp.rs_idx[a]] <= UopBits'(dispatch[a].uop);
+        assign bank_read[p][a] = words[issue_data_index[p]];
+      end
+    end
+    for (genvar p = 0; p < NumIssuePorts; p++) begin : g_select
+      assign banked_issue_uop[p] = UopT'(bank_read[p][lane_q[issue_data_index[p]]]);
+    end
+  end
 `ifndef SYNTHESIS
 `ifdef VERILATOR
   // Stable, unpacked debug view for the simulator's hang diagnostics. This
   // is a read-only projection, not separately stored execution payload.
   logic [XLEN-1:0] iq_pc[IQ_SIZE];
   for (genvar i = 0; i < IQ_SIZE; i++) begin : g_iq_pc_probe
-    assign iq_pc[i] = iq_uop[i].pc;
+    if (BankUop) begin : g_banked_probe
+      always_ff @(posedge clock)
+        if (!(reset || cmu_bcast.flush_pipe) && alloc_slot[i] >= 0)
+          iq_pc[i] <= dispatch[alloc_slot[i]].uop.pc;
+    end else begin : g_flop_probe
+      assign iq_pc[i] = iq_uop[i].pc;
+    end
   end
 `endif
 `endif
@@ -292,7 +327,6 @@ module rapt_iq #(
     assign iq_ready_vec[i] = iq_valid[i] && pr_ready[i];
   end
 
-  int alloc_slot[IQ_SIZE];
   logic [IQ_SIZE-1:0] claimed, baseline_claimed, select_valid, select_valid_nc;
   always_comb begin
     automatic logic [IQ_SIZE-1:0] remaining;
@@ -353,7 +387,8 @@ module rapt_iq #(
   logic [IQ_SIZE-1:0] claimed_data, baseline_claimed_data;
   logic [NumIssuePorts-1:0] port_mask[IQ_SIZE];
   for (genvar e = 0; e < IQ_SIZE; e++) begin : g_port_mask
-    assign port_mask[e] = NumIssuePorts'(iq_uop[e].schedule.issue_ports);
+    assign port_mask[e] = BankUop ? iq_issue_ports[e]
+        : NumIssuePorts'(iq_uop[e].schedule.issue_ports);
   end
   // The selector sees architectural validity only: the recovery transaction
   // must not fan into the wide payload mux through the selected identity.
@@ -374,6 +409,7 @@ module rapt_iq #(
       .Entries(IQ_SIZE),
       .Ports(NumIssuePorts),
       .LastPort(LastIssuePort),
+      .UniformSimplePorts(UniformSimplePorts),
       .InOrder(IN_ORDER_ISSUE),
       .Rebalance(RebalancePorts)
   ) selector (
@@ -386,6 +422,14 @@ module rapt_iq #(
       .claimed(claimed_data),
       .baseline_claimed(baseline_claimed_data)
   );
+  if (UniformSimplePorts && NumIssuePorts > 1 && !IN_ORDER_ISSUE && !RebalancePorts) begin : g_uniform_ports
+    localparam int FirstSimplePort = LastIssuePort == 0 ? 1 : 0;
+    for (genvar e = 0; e < IQ_SIZE; e++) begin : g_entry
+      wire uniform_mask = ((port_mask[e] ^ {NumIssuePorts{port_mask[e][FirstSimplePort]}})
+          & ~(NumIssuePorts'(1) << LastIssuePort)) == '0;
+      `RAPT_SVA_IMPLY(clock, reset, UNIFORM_SIMPLE_PORTS, iq_valid[e], uniform_mask)
+    end
+  end
   // Registered observations share the issue edge, never the next-cycle view.
 `ifndef SYNTHESIS
   // Mutually exclusive observation of the FIRST allocation token only.
@@ -428,12 +472,25 @@ module rapt_iq #(
   end
   // Fast confirmations update the stored operands at the edge; issue only
   // reads those registered values on a subsequent cycle.
-  localparam int StoredPayloadBits = $bits(UopT) + 2 * XLEN + ROBLen + GenBits + PLEN;
+  localparam int StoredPayloadBits = (BankUop ? 0 : $bits(
+      UopT
+  )) + 2 * XLEN + ROBLen + GenBits + PLEN;
   logic [StoredPayloadBits-1:0] stored_payload[IQ_SIZE];
+  logic [XLEN-1:0] entry_op1[IQ_SIZE], entry_op2[IQ_SIZE];
+  for (genvar e = 0; e < IQ_SIZE; e++) begin : g_entry_operand
+    assign entry_op1[e] = (ConfirmCdbWake && pr1_fast_confirm[e]) ? load_fast.result
+        : (ComboCdbWake && pr1_combo_hit[e]) ? pr1_combo_val[e] : iq_vj[e];
+    assign entry_op2[e] = (ConfirmCdbWake && pr2_fast_confirm[e]) ? load_fast.result
+        : (ComboCdbWake && pr2_combo_hit[e]) ? pr2_combo_val[e] : iq_vk[e];
+  end
   for (genvar e = 0; e < IQ_SIZE; e++) begin : g_stored_payload
-    assign stored_payload[e] = {
-      iq_uop[e], iq_vj[e], iq_vk[e], iq_dest[e], iq_generation[e], iq_prd[e]
-    };
+    if (BankUop) begin : g_banked
+      assign stored_payload[e] = {iq_vj[e], iq_vk[e], iq_dest[e], iq_generation[e], iq_prd[e]};
+    end else begin : g_flops
+      assign stored_payload[e] = {
+        iq_uop[e], iq_vj[e], iq_vk[e], iq_dest[e], iq_generation[e], iq_prd[e]
+      };
+    end
   end
   for (genvar p = 0; p < NumIssuePorts; p++) begin : g_issue
     logic [IQLen-1:0] index;
@@ -468,24 +525,37 @@ module rapt_iq #(
       assign data_select = (|selected_data[p]) ? selected_data[p] : IQ_SIZE'(1);
     end
     assign index = oh2bin(data_select);
-    for (genvar b = 0; b < StoredPayloadBits; b++) begin : g_payload_bit
-      logic [IQ_SIZE-1:0] column;
-      for (genvar e = 0; e < IQ_SIZE; e++) begin : g_column_entry
-        assign column[e] = stored_payload[e][b];
-      end
-      assign payload[b] = |(data_select & column);
+    assign issue_data_index[p] = index;
+    // Share the encoded selector across the wide payload bus.
+    assign payload = stored_payload[index];
+    if (BankUop) begin : g_banked_payload
+      assign {stored_op1, stored_op2, issue[p].dest,
+          issue[p].generation, issue[p].prd} = payload;
+      assign issue[p].uop = banked_issue_uop[p];
+    end else begin : g_flop_payload
+      assign {issue[p].uop, stored_op1, stored_op2, issue[p].dest,
+          issue[p].generation, issue[p].prd} = payload;
     end
-    assign {issue[p].uop, stored_op1, stored_op2, issue[p].dest,
-        issue[p].generation, issue[p].prd} = payload;
     // Cancellation gates only this valid bit; the selected identity and
     // payload above do not depend on the recovery transaction.
     assign issue[p].valid = |selected[p] && !cancelled[index];
-    assign issue[p].op1 = (ConfirmCdbWake && pr1_fast_confirm[index])
-        ? load_fast.result : (ComboCdbWake && pr1_combo_hit[index])
-        ? pr1_combo_val[index] : stored_op1;
-    assign issue[p].op2 = (ConfirmCdbWake && pr2_fast_confirm[index])
-        ? load_fast.result : (ComboCdbWake && pr2_combo_hit[index])
-        ? pr2_combo_val[index] : stored_op2;
+    // Resolve every entry's operand (confirmed fast load, same-cycle wake or
+    // stored value) in parallel, then reduce with the one-hot selection. The
+    // late select drives only the final AND-OR instead of an encoded index
+    // that steers further per-entry muxes.
+    if (ComboCdbWake || ConfirmCdbWake) begin : g_wake_operands
+      always_comb begin
+        issue[p].op1 = '0;
+        issue[p].op2 = '0;
+        for (int e = 0; e < IQ_SIZE; e++) begin
+          issue[p].op1 |= {XLEN{data_select[e]}} & entry_op1[e];
+          issue[p].op2 |= {XLEN{data_select[e]}} & entry_op2[e];
+        end
+      end
+    end else begin : g_stored_operands
+      assign issue[p].op1 = stored_op1;
+      assign issue[p].op2 = stored_op2;
+    end
     `RAPT_SVA_IMPLY(clock, reset, IQ_SELECT_ONEHOT, issue[p].valid, $onehot(selected[p]))
     for (genvar q = p + 1; q < NumIssuePorts; q++) begin : g_disjoint
       `RAPT_SVA(clock, reset, IQ_SELECT_DISJOINT, (selected[p] & selected[q]) == '0)
@@ -539,7 +609,9 @@ module rapt_iq #(
           // Allocation owns the new identity, even when the former resident
           // is cancelled. A younger incoming is accepted-and-discarded.
           iq_valid[i] <= !younger_than_cancel(dispatch[alloc_slot[i]].dest);
-          iq_uop[i] <= dispatch[alloc_slot[i]].uop;
+          if (BankUop)
+            iq_issue_ports[i] <= NumIssuePorts'(dispatch[alloc_slot[i]].uop.schedule.issue_ports);
+          else iq_uop[i] <= dispatch[alloc_slot[i]].uop;
 
           iq_dest[i] <= dispatch[alloc_slot[i]].dest;
           iq_generation[i] <= dispatch[alloc_slot[i]].generation;

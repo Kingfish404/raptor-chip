@@ -7,7 +7,7 @@ the *contract* between the four pieces of the integration:
     1. sim/sram/configs/*.py            - macro shape definitions
     2. sim/sram/wrappers/rapt_sram_blackbox.v - Yosys blackbox declarations
     3. sim/sram/scripts/gen_stub_lib.py - placeholder Liberty/Verilog
-    4. hdl/memory/rapt_sram_1rw.sv      - RTL macro instantiations
+    4. hdl/sram/rapt_sram_1rw.sv      - RTL macro instantiations
 
 If any of these drift out of sync (port width changes, missing pin,
 shape removed from one file but not another), STA would either fail to
@@ -59,7 +59,7 @@ SHAPES = [
 
 BLACKBOX_V = SRAM / "wrappers" / "rapt_sram_blackbox.v"
 STUB_GEN   = SRAM / "scripts" / "gen_stub_lib.py"
-RTL_SRAM   = RAPTOR / "hdl" / "memory" / "rapt_sram_1rw.sv"
+RTL_SRAM   = RAPTOR / "hdl" / "sram" / "rapt_sram_1rw.sv"
 CONFIG_DIR = SRAM / "configs"
 
 

@@ -24,7 +24,8 @@
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt__M1))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_core__M1))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_backend))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_rou))
+// The symbol header includes the actual parameter-specialized ROU class.
+#include CONCAT_HEAD(CONCAT(TOP_NAME, __Syms))
 #define VERILOG_CPU(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->adapter->cpu->core->m)
 #define VERILOG_BACKEND(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->adapter->cpu->core->backend->m)
 #define VERILOG_FRONTEND(m) VERILOG_CPU(CONCAT(frontend__DOT__, m))
@@ -65,7 +66,8 @@
 #error Unsupported Verilator rapt hierarchy
 #endif
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_backend))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_rou))
+// The symbol header includes the actual parameter-specialized ROU class.
+#include CONCAT_HEAD(CONCAT(TOP_NAME, __Syms))
 #define VERILOG_CPU(m) (top->rootp->raptSoC->cpu->core->m)
 #define VERILOG_BACKEND(m) (top->rootp->raptSoC->cpu->core->backend->m)
 #define VERILOG_FRONTEND(m) VERILOG_CPU(CONCAT(frontend__DOT__, m))
@@ -77,6 +79,8 @@
 #endif
 
 #endif
+
+#define VERILOG_AXI_MASTER(m) VERILOG_CPU(CONCAT(memory_subsystem__DOT__axi_master__DOT__, m))
 
 static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
 {
@@ -141,7 +145,7 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->minstret = csr + MINSTRET;
   npc->minstreth = csr + MINSTRETH;
 
-  npc->fpr = (uint64_t *)&VERILOG_BACKEND(fpr_bank__DOT__regs);
+  npc->fpr = (uint64_t *)&VERILOG_BACKEND(fpr_bank__DOT__monitor_regs);
   npc->fcsr = (uint32_t *)(csr + FCSR);
 
   npc->clint_mtime = (uint64_t *)&VERILOG_CLINT(mtime);

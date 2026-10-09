@@ -6,7 +6,7 @@
 
 /* ---- Platform addresses (raptor NPC SoC, see rapt_soc.svh). ---- */
 #ifdef RAPT_LITEX_FPGA
-#define UART_BASE 0xf0001800UL
+#define UART_BASE 0x11001800UL
 #define UART_TXFULL (UART_BASE + 0x4UL)
 #else
 #define UART_BASE 0x10000000UL

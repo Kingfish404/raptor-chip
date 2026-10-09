@@ -14,16 +14,16 @@ from add_linux_ethernet_dts import ethernet_node
 class EthernetDTTest(unittest.TestCase):
     def setUp(self):
         self.csr = {
-            "csr_bases": {"ethmac": 0xf0002800, "ethphy": 0xf0003000},
+            "csr_bases": {"ethmac": 0x11002800, "ethphy": 0x11003000},
             "constants": {"ethmac_interrupt": 3, "ethmac_rx_slots": 2,
                           "ethmac_tx_slots": 2, "ethmac_slot_size": 2048},
-            "memories": {"ethmac": {"base": 0xc1000000, "size": 8192}},
+            "memories": {"ethmac": {"base": 0x18000000, "size": 8192}},
         }
 
     def test_irq_and_regions(self):
         node = ethernet_node(self.csr)
         self.assertIn("interrupts = <4>;", node)
-        self.assertIn("<0xc1000000 0x2000>", node)
+        self.assertIn("<0x18000000 0x2000>", node)
         self.assertIn("litex,slot-size = <2048>;", node)
 
     def test_rejects_invalid_contract(self):

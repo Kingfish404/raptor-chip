@@ -46,10 +46,33 @@ make fpga-netboot-host-restore
 
 Replace `rv64` with `rv32` throughout for RV32. `load` only programs the FPGA; enter `netboot` yourself at the BIOS prompt. Build, load and boot are separate. The profile uses `RAPT_CONFIG=default` unless another preset is selected, for example `make fpga-netboot-rv64-build RAPT_CONFIG=small`. Repeat the same `RAPT_CONFIG` for all subsequent build/load/test steps. Host setup/restore is shared across presets and does not require a build or FPGA tools. The profile fixes 50 MHz for both RV64 and RV32, plus MIG DDR, BIOS, CM005 gigabit Ethernet and full Linux initialization. BIOS stops at `litex>` after initialization; choose `sdcardboot` or the exact namespaced `netboot` command printed by `serve` manually. The profile does not automatically shrink the CPU to make routing pass. A routing/timing failure means no board acceptance.
 
+Builds automatically write an offline HTML dashboard alongside the Vivado reports
+at `fpga/litex/build/netboot-<RAPT_CONFIG>/rvXX/soc/gateware/index.html`
+(paths here are relative to the repository root). The build prints the path;
+`fpga-netboot-rvXX-info` also includes `reports_index`. For example:
+
+```sh
+time make fpga-netboot-rv64-build FPGA_BOARD=mlk_cu08_ku15p RAPT_CONFIG=default-w3
+# Open fpga/litex/build/netboot-default-w3/rv64/soc/gateware/index.html
+# Refresh existing reports without synthesis, downloads or board access:
+make fpga-netboot-rv64-reports FPGA_BOARD=mlk_cu08_ku15p RAPT_CONFIG=default-w3
+```
+
+The dashboard includes resource usage bars (LUTs, registers, RAM, DSPs and IO),
+timing, clocks, power, DRC and embedded hierarchical/raw reports. Resource and
+timing summaries identify their stage; synthesis data is used when later reports
+are unavailable. A failed synthesis/implementation attempt also generates a
+dashboard if its gateware directory exists, while preserving the build failure.
+Its warning calls out incomplete or potentially older reports; an HTML report
+does not establish a successful bitstream. A manual refresh summarizes the files
+currently present. With `NETBOOT_BUILD_ROOT`, the dashboard instead lives at
+`<NETBOOT_BUILD_ROOT>/<RAPT_CONFIG>/rvXX/soc/gateware/index.html`.
+
 | Target suffix | Effect |
 | --- | --- |
 | `check` | Read-only tool, release-presence, UART-path and interface preflight; no acceptance claim |
 | `info` | Resolve exact Make firmware, payload and output paths |
+| `reports` | Refresh the offline HTML dashboard from existing Vivado reports, without rebuilding |
 | `build` | Preserve the last good bitstream, acquire a missing release, build/check timing, publish a verified generation, then package Linux artifacts |
 | `bundle` | Validate/package completed firmware; repeat calls reuse an identical SHA256-addressed bundle |
 | `serve` | Deploy only `/srv/tftp/raptor-netboot/rvXX/<digest>/`; verify actual TFTP reads; reuse a working daemon or start one in foreground |

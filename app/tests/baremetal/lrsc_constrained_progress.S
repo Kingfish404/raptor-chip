@@ -2,6 +2,7 @@
  * No interrupt or software retry-limit escape is counted as success. The
  * simulator timeout is an external test budget, not an ISA latency bound.
  */
+#include "raptor_platform.h"
 #ifndef TEST_PRIV
 #define TEST_PRIV 3
 #endif
@@ -108,7 +109,7 @@ _start:
   ori t1, t1, 1
   sd t1, 16(t0)
   la t0, vm_ram0_l0
-  li t1, ((0x0f000000 >> 2) | 0xc7 | USER_PTE)
+  li t1, RAPTOR_PTE(RAPTOR_SRAM_BASE, 0xc7 | USER_PTE)
   sd t1, 0(t0)
   la t0, vm_ram1_l0
   li t1, ((0x80400000 >> 2) | 0xc7 | USER_PTE)
@@ -141,7 +142,7 @@ region:
   beq s0, t0, base_ready
   li s1, 0x40400000
 #else
-  li s1, 0x0f000000
+  li s1, RAPTOR_SRAM_BASE
   beqz s0, base_ready
   li s1, 0x80400000
   li t0, 1
@@ -182,12 +183,12 @@ increment:
   addi s0, s0, 1
   li t0, 3
   bne s0, t0, region
-  li t0, 0x00100000
+  li t0, RAPTOR_FINISHER_BASE
   li t1, 0x5555
   sw t1, 0(t0)
 1: j 1b
 fail:
-  li t0, 0x00100000
+  li t0, RAPTOR_FINISHER_BASE
   li t1, 0x3333
   sw t1, 0(t0)
 2: j 2b

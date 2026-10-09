@@ -1,5 +1,6 @@
 /* mtime is a writable 64-bit MMIO counter. Check high fields, allowing
  * the low counter bits to advance between software accesses. */
+#include "raptor_platform.h"
 .option norvc
 .option norelax
 .section .text
@@ -9,7 +10,7 @@ _start:
   csrw mie, zero
   la t0, fail
   csrw mtvec, t0
-  li s0, 0x0200bff8
+  li s0, (RAPTOR_CLINT_BASE + 0xbff8)
   li t0, 0x12345678
   sw t0, 4(s0)
   li t1, 0x34560000

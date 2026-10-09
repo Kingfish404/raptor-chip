@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "address_bits": 32,
+  "regions": {
+    "finisher": {"base": "0x00100000", "size": "0x00001000"},
+    "clint": {"base": "0x02000000", "size": "0x000c0000"},
+    "plic": {"base": "0x0c000000", "size": "0x01000000"},
+    "sram": {"base": "0x0f000000", "size": "0x00002000"},
+    "ns16550": {"base": "0x10000000", "size": "0x00000100"},
+    "virtio": {"base": "0x10001000", "size": "0x00001000"},
+    "litex_csr": {"base": "0x11000000", "size": "0x01000000"},
+    "litex_uart": {"base": "0x11001800", "size": "0x00000100"},
+    "liteeth_buffers": {"base": "0x18000000", "size": "0x01000000"},
+    "mrom": {"base": "0x20000000", "size": "0x00010000"},
+    "vga": {"base": "0x21000000", "size": "0x00200000"},
+    "flash": {"base": "0x30000000", "size": "0x10000000"},
+    "main_ram": {"base": "0x80000000", "max_size": "0x80000000"}
+  },
+  "profiles": {
+    "ku15p_mig": {"ram_size": "0x80000000", "rv32_linux_size": "0x40000000"},
+    "ku15p_litedram": {"ram_size": "0x40000000"},
+    "axau15_mig": {"ram_size": "0x40000000"},
+    "vcu118_litedram": {"ram_size": "0x40000000"},
+    "vcu118_integrated": {"ram_size": "0x00080000"},
+    "tang_integrated": {"ram_size": "0x00080000"},
+    "litex_sim_default": {"ram_size": "0x04000000"},
+    "npc_default": {"ram_size": "0x10000000"},
+    "npc_large": {"ram_size": "0x80000000"},
+    "nemu_large": {"ram_size": "0x80000000"}
+  }
+}

@@ -2,27 +2,27 @@
 `define RAPT_CONFIG_SVH
 
 /**
- * wide preset: same window/cache geometry/BPU as `default`, but all four
- * ordered stage widths and the integer issue-port count are raised to 4.
- * L1D MSHR capacity also grows from 2 to 4 to serve the wider load stream.
+ * default-w3 experimental preset: three decode, rename, dispatch and commit
+ * lanes with two integer issue ports. Cache geometry, predictor capacity and
+ * queue depths follow default-w4; early load/store-follower paths are retained.
  *
- * Rationale: the 2026-09-14 gem5 grid search (`sim/gsim/grid_search.py`)
- * ranked width+port scaling as the dominant ROI (4-wide + 4 ALU ports:
- * ~+31% geomean IPC over CoreMark + an Embench subset), while growing
- * ROB/IQ/SQ beyond the default values bought nothing. This preset measures
- * that claim on the real RTL and prices it with STA.
+ * The 10-lane dispatch window contains four ranked ROB owners, three carried
+ * allocations and three live allocations. ROB/PHY remain 32/64. RNQ/UOQ and
+ * operand spill each hold eight entries; the rename pipeline holds six.
  *
- * Width 4 is already exercised by the width-refinement evaluation matrix
- * (Decode/Rename/Dispatch/Commit 4/4/4/4 elaborated and NEMU-diffed with
- * execution resources unchanged).
+ * Three-lane stream queues use the current flop-payload implementation even
+ * when RAPT_FPGA_STREAM_BRAM is enabled; its banked path requires power-of-two
+ * widths of at least four. A smaller ordered width is not a measured PPA gain.
  *
- * ROB stays 32; PHY remains 128 (default now uses 64). The larger free
- * pool also covers renamed writers buffered before ROB allocation.
+ * Use RAPT_CONFIG=default-w3 for simulation and ordinary FPGA module flows.
+ * The fixed RV64 netboot flow currently gives only default-w4 unregistered
+ * fetch/load responses and an extra 1 ns setup margin. Its other-preset policy
+ * also applies here; align build flags/constraints before PPA comparisons.
+ * Performance and whole-board timing/utilization require separate validation.
  */
 /**
  * Architecture (arch) Parameters
  * @param RAPT_XLEN: Width of an integer register in bits
- * @param RAPT_I_EXTENSION: I Extension
  * @param RAPT_M_EXTENSION: M Extension
  */
 // To select RV64: define RAPT_RV64 via compiler flag (-DRAPT_RV64)
@@ -34,7 +34,6 @@
 `define RAPT_XLEN 32
 `define RAPT_MISA 'h4014112f
 `endif
-`define RAPT_I_EXTENSION 'h1
 `define RAPT_M_EXTENSION 'h1
 
 /**
@@ -57,15 +56,10 @@
 `define RAPT_M_FAST 'h1
 
 // Branch predictor
-`define RAPT_PHT_SIZE 256
-`ifdef RAPT_RV64
-`ifndef RAPT_BPU_AUX_PC_HASH
-`define RAPT_BPU_AUX_PC_HASH 1
-`endif
-`endif
-`define RAPT_BTB_SIZE 128
+`define RAPT_PHT_SIZE 1024
+`define RAPT_BTB_SIZE 256
 `define RAPT_BTB_WAYS 2
-`define RAPT_RSB_SIZE 4
+`define RAPT_RSB_SIZE 16
 
 // Direction-predictor (DIRP). The default is TAGE for the best IPC;
 // alternatives are kept for ablation / low-area builds.
@@ -76,14 +70,30 @@
 `define RAPT_BPU_DIRP_TAGE
 
 // Shared RV32/RV64 OoO window sizing for simulation and FPGA.
-// ROB is the primary in-flight window; PHY must cover 32 arch regs plus the
-// worst case of ROB_SIZE in-flight register writers (power of 2 required).
+// ROB is the primary in-flight window. With RAPT_FETCH_LOOKAHEAD, ROB_SIZE must
+// be a power of two (the BPU tracks 2 * ROB_SIZE predictions). PHY only has to
+// exceed the 32 arch regs; 32 + ROB_SIZE avoids rename stalls on free registers.
+`ifndef RAPT_RIQ_SIZE
 `define RAPT_RIQ_SIZE 8
+`endif
+`ifndef RAPT_IIQ_SIZE
 `define RAPT_IIQ_SIZE 8
+`endif
+`ifndef RAPT_ROB_SIZE
 `define RAPT_ROB_SIZE 32
+`endif
+`ifndef RAPT_STEER_SCAN_ENTRIES
+`define RAPT_STEER_SCAN_ENTRIES 10
+`endif
 
-// Scheduler: RS / IOQ to feed both ALU pipes plus pipelined MUL.
+`ifndef RAPT_OPERAND_SPILL_ENTRIES
+`define RAPT_OPERAND_SPILL_ENTRIES 8
+`endif
+
+// ALQ is shared by both integer issue ports; IOQ feeds the scalar LSU.
+`ifndef RAPT_RS_SIZE
 `define RAPT_RS_SIZE 8
+`endif
 `ifndef RAPT_IOQ_SIZE
 `define RAPT_IOQ_SIZE 8
 `endif
@@ -91,7 +101,9 @@
 // Unified SQ (Phase A): one queue holds a store from execute to drain
 // (committed coloring), replacing the former split STQ(8)+SQ(8).  16 entries
 // preserve the former aggregate capacity and move toward the Phase A target.
+`ifndef RAPT_SQ_SIZE
 `define RAPT_SQ_SIZE 16
+`endif
 
 // Hit-under-miss (Phase A2): while a load miss waits on the bus refill, the
 // idle L1D SRAM read port serves a second best-effort load (B channel).
@@ -99,45 +111,56 @@
 // everything else retries via the trap-owning A channel.
 `define RAPT_LSU_HUM
 
+// Retain early load completion and store-following retirement paths.
+`ifndef RAPT_IOQ_LOAD_RESPONSE_STAGE
+`define RAPT_IOQ_LOAD_RESPONSE_STAGE 0
+`endif
+
+`ifndef RAPT_TAGE_BIM_BITS
+`define RAPT_TAGE_BIM_BITS 10
+`endif
+`ifndef RAPT_TAGE_INDEX_BITS
+`define RAPT_TAGE_INDEX_BITS 10
+`endif
+
 // RVFI: RISC-V Formal Interface for formal verification.
 // Adds RVFI output ports to the core; enable only for riscv-formal checks.
 // `define RAPT_RVFI
 
 // Ordered stage widths are authoritative and independently overrideable.
 `ifndef RAPT_INTEGER_ISSUE_PORTS
-`define RAPT_INTEGER_ISSUE_PORTS 4
+`define RAPT_INTEGER_ISSUE_PORTS 2
 `endif
 `ifndef RAPT_INTEGER_SYSTEM_PORT
 `define RAPT_INTEGER_SYSTEM_PORT 0
 `endif
 `ifndef RAPT_DECODE_WIDTH
-`define RAPT_DECODE_WIDTH 4
+`define RAPT_DECODE_WIDTH 3
 `endif
 `ifndef RAPT_RENAME_WIDTH
-`define RAPT_RENAME_WIDTH 4
+`define RAPT_RENAME_WIDTH 3
 `endif
 `ifndef RAPT_DISPATCH_WIDTH
-`define RAPT_DISPATCH_WIDTH 4
+`define RAPT_DISPATCH_WIDTH 3
 `endif
 `ifndef RAPT_COMMIT_WIDTH
-`define RAPT_COMMIT_WIDTH 4
+`define RAPT_COMMIT_WIDTH 3
 `endif
 `ifndef RAPT_FETCH_LOOKAHEAD
 `define RAPT_FETCH_LOOKAHEAD
 `endif
+// Keep the eight-halfword lookahead window; the IFU emits at most three
+// instructions per cycle and retains any unconsumed suffix.
+`define RAPT_FETCH_WIDE
 
-`ifdef RAPT_I_EXTENSION
 `define RAPT_REG_SIZE 32 // 32 registers
-`else
-`define RAPT_REG_SIZE 16 // 16 registers
-`endif
 
 `define RAPT_REG_LEN $clog2(`RAPT_REG_SIZE) // Register Length
 
 // Shared simulation/FPGA default. Explicit overrides remain available for
 // parameterized verification; PHY must still cover the configured ROB.
 `ifndef RAPT_PHY_SIZE
-`define RAPT_PHY_SIZE 128 // physical register number (must be power of 2)
+`define RAPT_PHY_SIZE 64 // total physical registers, including architectural mappings
 `endif
 `define RAPT_PHY_LEN $clog2(`RAPT_PHY_SIZE)
 

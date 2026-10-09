@@ -48,11 +48,12 @@ def patch_payload(payload, destination, base):
 def validate_layout(symbols, stage, payload, dtb, ram_size, kernel_end):
     base = symbols['MAIN_RAM']
     require(base == 0x80000000 and symbols['_start'] == base, 'unsupported stage0 entry/RAM base')
-    require(0 < ram_size <= 0x40000000, 'RAM must fit the current 1 GiB PMA window')
+    require(0 < ram_size <= 0x80000000 and base + ram_size <= 0x100000000,
+            'RAM must fit the 32-bit Raptor PMEM window')
     require(symbols['PAYLOAD_SIZE'] == len(payload), 'stage0 PAYLOAD_SIZE differs from release')
     require(symbols['DTB_SIZE'] == len(dtb), 'stage0 DTB_SIZE differs from seeded DTB')
     require(symbols['STAGE0_SRAM'] == 0x0f000000, 'unsupported stage0 SRAM address')
-    require(symbols['UART_RXTX'] == 0xf0001800, 'unsupported stage0 UART address')
+    require(symbols['UART_RXTX'] == 0x11001800, 'unsupported stage0 UART address')
     require(0 < symbols['_reloc_end'] - symbols['_reloc_start'] <= 0x1000,
             'relocation routine exceeds conservative 4 KiB SRAM budget')
     require(base <= symbols['_reloc_start'] < symbols['_reloc_end'] <= base + len(stage),
@@ -113,6 +114,8 @@ def prepare(firmware, package, xlen, cross):
                 'only current single-cell Raptor DT memory format is supported')
         ram = [int(v, 16) for v in prop('/memory@80000000', 'reg', 'x').split()]
         require(len(ram) == 2 and ram[0] == 0x80000000, 'unsupported DTB memory map')
+        require(xlen == 64 or ram[1] <= 0x40000000,
+                'RV32 Linux DTB must advertise no more than 1 GiB')
         seed = [int(v, 16) for v in prop('/chosen', 'rng-seed', 'bx').split()]
         require(len(seed) == 32 and any(seed), 'DTB lacks a populated 32-byte development RNG seed')
         timebase = int(prop('/cpus', 'timebase-frequency', 'u'))

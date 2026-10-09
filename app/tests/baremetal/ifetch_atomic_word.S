@@ -4,6 +4,7 @@
  * Old: addi a0,a1,1 => 11; new: addi a0,a2,2 => 22.
  * Mixed halfwords use a0/a3 and yield 101/202, both forbidden by this test.
  */
+#include "raptor_platform.h"
 #ifndef TEST_PRIV
 #define TEST_PRIV 3
 #endif
@@ -86,12 +87,12 @@ next:
   add t0, s3, s4
   li t1, 1024
   bne t0, t1, fail
-  li t0, 0x100000
+  li t0, RAPTOR_FINISHER_BASE
   li t1, 0x5555
   sw t1, 0(t0)
 1: j 1b
 fail:
-  li t0, 0x100000
+  li t0, RAPTOR_FINISHER_BASE
   li t1, 0x3333
   sw t1, 0(t0)
 2: j 2b

@@ -37,6 +37,27 @@ def require(condition, message):
     if not condition:
         raise ValueError(message)
 
+def require_linux_ram(soc, bits):
+    """Check the DTB RAM node against hdl/configs/memory_map.json for this XLEN.
+
+    Payload placement assumes at least 1 GiB from the RAM base; RV32 Linux may
+    advertise only the profiles' rv32_linux_size, RV64 up to the full window.
+    """
+    memory_map = json.loads((LITEX.parents[1] / 'hdl/configs/memory_map.json').read_text())
+    main = memory_map['regions']['main_ram']
+    base, limit = int(main['base'], 0), int(main['max_size'], 0)
+    if bits == 32:
+        limit = min([limit] + [int(p['rv32_linux_size'], 0) for p in memory_map['profiles'].values()
+                               if 'rv32_linux_size' in p])
+    cells = [int(c, 16) for c in run('fdtget', '-t', 'x', soc, f'/memory@{base:x}', 'reg').split()]
+    require(len(cells) in (2, 4), 'unsupported /memory reg encoding')
+    if len(cells) == 4:
+        cells = [cells[0] << 32 | cells[1], cells[2] << 32 | cells[3]]
+    require(cells[0] == base and 0x40000000 <= cells[1] <= limit,
+            f'DTB RAM must start at {base:#x} with 1 GiB..{limit:#x} for RV{bits}')
+    return cells[1]
+
+
 
 def persistence_bootargs(selector, logs=False):
     require(re.fullmatch(r'(LABEL|UUID)=[a-zA-Z0-9_-]+', selector), 'invalid data selector')
@@ -71,8 +92,12 @@ def build(package, kernel, soc, output, work, sd_csr=None, persistence_runtime=N
             require(f'CONFIG_{option}=y\n' in config, f'persistent SD kernel lacks {option}')
     require(run('fdtget', '-t', 's', soc, '/cpus/cpu@0', 'riscv,isa-base').strip() == b'rv64i',
             'DTB must be RV64')
-    require(run('fdtget', '-t', 'x', soc, '/memory@80000000', 'reg').strip() == b'80000000 40000000',
-            'this test layout requires the 1 GiB FPGA RAM map')
+    memory_reg = run('fdtget', '-t', 'x', soc, '/memory@80000000', 'reg').split()
+    require(len(memory_reg) == 2 and memory_reg[0] == b'80000000',
+            'DTB must expose a single RAM window at 0x80000000')
+    ram_size = int(memory_reg[1], 16)
+    require(ram_size in (0x40000000, 0x80000000),
+            'RV64 distro netboot requires a 1 GiB or 2 GiB FPGA RAM map')
     work.mkdir(parents=True, exist_ok=False)
     root = work / 'root'
     root.mkdir()
@@ -92,9 +117,9 @@ def build(package, kernel, soc, output, work, sd_csr=None, persistence_runtime=N
     shutil.copyfile(work / rootfs_name, files / rootfs_name)
     shutil.copyfile(soc, files / 'soc.dtb')
     size = (files / rootfs_name).stat().st_size
-    require(0x88000000 + size < 0xc0000000, 'initramfs exceeds FPGA RAM')
-    require((work / 'rootfs.cpio').stat().st_size + size < 700 * 1024 * 1024,
-            'RAM root leaves insufficient headroom in 1 GiB')
+    require(0x88000000 + size < 0x80000000 + ram_size, 'initramfs exceeds FPGA RAM')
+    require((work / 'rootfs.cpio').stat().st_size + size < ram_size - 324 * 1024 * 1024,
+            'RAM root leaves insufficient headroom')
     require((files / 'Image').stat().st_size < 0x83f00000 - 0x80200000, 'kernel overlaps DTB')
     image = (files / 'Image').read_bytes()[:64]
     require(image[56:60] == b'RSC\x05', 'invalid RISC-V Image header')
@@ -116,6 +141,7 @@ def build(package, kernel, soc, output, work, sd_csr=None, persistence_runtime=N
     run(cross + 'objcopy', '-O', 'binary', work / 'stage0.elf', files / 'stage0.bin')
     require((files / 'stage0.bin').stat().st_size < 4096, 'trampoline too large')
     record = {'schema': 'raptor-distro-netboot-v1', 'xlen': 64, 'distro': manifest['variant'],
+              'ram_size': ram_size,
               'startup_cmo_policy': 'menvcfg-cbie3-cbcfe1',
               'board_validated': False, 'rootfs_persistent': False, 'source': str(package),
               'source_manifest_sha256': sha(package / 'manifest.json'),

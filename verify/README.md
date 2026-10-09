@@ -11,6 +11,12 @@ Software test sources live in `app/tests/baremetal/` (freestanding RISC-V progra
 
 ## Maintaining verification drivers
 
+`make -C verify config-macro-check` audits unused/undefined preset macros and exactly one direction predictor; it also runs in `script-unittests`.
+
+Directed module rules name only their testbench top and any non-RTL helpers. RTL resolves by module name: `rapt_pkg.sv` compiles first and every other `hdl/` file is a Verilator `-v` library (`XSIM_RTL_LIBRARY`; the xsim flow compiles `XSIM_RTL_ALL`). Adding, splitting or renaming RTL therefore needs no rule edits, and testbench stubs take precedence over library modules. All rules share `VERILATOR_DIRECTED_FLAGS` (warnings are not fatal; `make lint` owns lint); a rule appends only what it needs, such as `-G` parameters or `-CFLAGS -O0`. Guest programs compile with `GUEST_CPPFLAGS` (script runners through the exported `CPATH`) and take platform addresses from `app/lib/raptor_platform.h`. The RVA22S64 directed programs are one `RVA22S64_CASES` table (`RVA22S64_RV64_CASES` marks RV64-only sources); `make -C verify rva22s64-directed RVA22S64_XLEN=32|64 RVA22S64_NPC=...` runs them all; RVA22S64 and SQ-checkpoint targets pick the MROM from their own XLEN, so `ISA` need not match.
+
+New directed module checks that run in both XLEN modes should be one `verilator-<name>-rv32 verilator-<name>-rv64` rule using `VERILATOR_DIRECTED_XLEN_RUN`. The target name selects `RAPT_RV64` and the build stem, so the two modes cannot drift apart. `make -C verify script-unittests` runs tool-free helper-script unit tests that have no dedicated check target.
+
 `make -C verify sim-build-isolation-check` tests build-local simulator Kconfig and option-keyed caches. See [simulator configuration and parallel builds](../sim/README.md) for profile selection, cache reuse, and remaining NEMU/tool concurrency limits.
 
 `make -C verify yosys-sq-span-equivalence` uses Yosys SAT to prove the actual SQ address-span helper against full-width modular subtraction for RV32/RV64. Addresses, both two-bit spans and the page-offset-only selector are unconstrained; page and XLEN wrap are included. The proof adapter extracts the RTL helper and translates its single return to a function-result assignment for Yosys. This is a combinational helper proof, not a full SQ lifecycle proof or FPGA STA.
@@ -27,7 +33,7 @@ Binary16 conversion checks use `make -C verify/xsim/fpu/half run flush`. Use sep
 
 `make -C verify verilator-ifu-response-stage-rv32 verilator-ifu-response-stage-rv64` checks response capture, sustained delivery, mixed 16/32-bit instruction streams, branch/history event conservation, randomized cache availability and downstream backpressure, fault metadata stability, and recovery with both IFU buffers full. It also checks that a buffered response blocks instruction IO authorization when successive dynamic requests have the same PC. The address-driven scoreboard supports width overrides and `RAPT_FETCH_RESPONSE_STAGE=0` comparisons.
 
-`make -C verify verilator-iq-deferred-reclaim-rv32 verilator-iq-deferred-reclaim-rv64` checks registered vacancy admission with randomized allocation, wakeup, issue and flush. It rejects same-edge reuse of a resident issue slot. The existing reclaim tests retain coverage of the optional `RAPT_IQ_RECLAIM_ON_ISSUE=1` mode.
+`make -C verify verilator-iq-deferred-reclaim-rv32 verilator-iq-deferred-reclaim-rv64` checks registered vacancy admission with randomized allocation, wakeup, issue and flush. It rejects same-edge reuse of a resident issue slot. This is the integrated `rapt_iq` mode (`ReclaimOnIssue=0`) for every preset; the other reclaim tests exercise the module's optional same-edge mode (`ReclaimOnIssue=1`).
 
 `make -C verify verilator-hum-request-stage-rv32 verilator-hum-request-stage-rv64` checks the registered hit-under-miss B request with the default preset (`XSIM_RAPT_CONFIG=default`, HUM enabled). It covers capture latency, payload and owner stability while an older candidate wakes, simultaneous A/B responses, flush/late response rejection, fallback after A completes, and FLD fallback through A with a full 64-bit FPR write. These are IOQ contract tests, not Linux or FPGA timing acceptance.
 
@@ -47,17 +53,17 @@ The maintenance inventory for `scripts`, `tests` and `experimental` is kept in `
 
 ## Parameterized test scenarios
 
-- `tb_csr_contract.sv` shares one CSR/IEU fixture. Select `+CASE=identity_time` (default), `trap_storage`, `stimecmp`, `fp_aliases`, `status_fields`, `satp_warl`, or `tvec_routes`. Each invocation runs one scenario in a fresh process with its own assertions and timeout. Unknown names fail. The existing named CSR Make targets select the corresponding case for RV32/RV64.
+- `tb_csr_all_contract.sv` contains the `tb_csr_contract` top, which shares one CSR/IEU fixture. Select `+CASE=identity_time` (default), `trap_storage`, `stimecmp`, `fp_aliases`, `status_fields`, `satp_warl`, or `tvec_routes`. Each invocation runs one scenario in a fresh process with its own assertions and timeout. Unknown names fail. The existing named CSR Make targets select the corresponding case for RV32/RV64.
 - `app/tests/baremetal/zero_pma.S` tests device CBO.ZERO rejection by default; `PMA_READONLY=1` selects ROM/flash write protection. The existing `rva22s64-zero-pma-run` and `rva22s64-readonly-pma-run` targets retain separate images and result directories. Both scenarios include translated accesses and the RAM recovery/neighbor-block checks.
-- `tb_l1d_pma.sv` covers the LR PMA denial and SRAM-hole load/LR/store scenarios. The original `verilator-l1d-lr-pma-*` targets run the default mode; `verilator-l1d-sram-pma-*` supplies `+SRAM`. The two targets retain separate output names while sharing the fixture and the bus/reservation assertions.
+- The `tb_l1d_pma` top in `tb_l1d_all_contract.sv` covers the LR PMA denial and SRAM-hole load/LR/store scenarios. The original `verilator-l1d-lr-pma-*` targets run the default mode; `verilator-l1d-sram-pma-*` supplies `+SRAM`. The two targets retain separate output names while sharing the fixture and the bus/reservation assertions.
 - The ten `tb_idu_*.sv` scenarios share `tb_idu_contract.sv`. Original top-level names and Make targets remain unchanged; the build macros read the shared source while elaborating only the selected top. Assertions and counters therefore remain isolated per scenario.
-- `tb_router_clint_subword.sv` and `tb_router_clint_width.sv` share `tb_router_clint_contract.sv`; the original top names and targets remain separate, so the subword and native-width matrices still run independently.
+- The `tb_router_clint_subword` and `tb_router_clint_width` tops share `tb_router_all_contract.sv`; the original top names and targets remain separate, so the subword and native-width matrices still run independently.
 - The issue-selection, atomic, load/store, checkpoint, prediction-history and LR families use one shared source per family. The original top names remain separate and the Make macros select the corresponding `*_contract.sv` file; this is source consolidation, not a reduction of scenario coverage.
 - All remaining L1D, IOQ, LSU and CSR TB modules are stored in `tb_l1d_all_contract.sv`, `tb_ioq_all_contract.sv`, `tb_lsu_all_contract.sv` and `tb_csr_all_contract.sv`. The top-level module passed by each existing target still selects one scenario; the shared source is only a physical organization boundary.
 - Router, PTW and SQ scenarios use the same arrangement in `tb_router_all_contract.sv`, `tb_ptw_all_contract.sv` and `tb_sq_all_contract.sv`. Existing top names continue to select one scenario per build.
 - CSR execution/control, L1I epoch, IOQ store and L2 posted-write tasks use module-local `*_tasks.svh` helpers (plus `tb_csr_clear_commit.svh`). These headers intentionally have no include guards: each test module receives its own tasks. Keep scenario-specific assertions and handshakes in the original test modules.
 
-- `tb_ioq_acquire_publish.sv` covers LR by default and AMOADD with `+AMO`; `+PENDING` selects response blocking. Both relaxed and acquire scenarios run in each invocation. Existing `verilator-ioq-acquire-publish-rv32/-rv64` and `verilator-ioq-amo-acquire-publish-rv32/-rv64` targets remain available; the AMO targets supply `+AMO`. Set `IOQ_ACQUIRE_PLUSARGS=+PENDING` as needed.
+- The `tb_ioq_acquire_publish` top in `tb_ioq_all_contract.sv` covers LR by default and AMOADD with `+AMO`; `+PENDING` selects response blocking. Both relaxed and acquire scenarios run in each invocation. Existing `verilator-ioq-acquire-publish-rv32/-rv64` and `verilator-ioq-amo-acquire-publish-rv32/-rv64` targets remain available; the AMO targets supply `+AMO`. Set `IOQ_ACQUIRE_PLUSARGS=+PENDING` as needed.
 - `app/tests/baremetal/plic_access_width.S` covers loads by default and stores with `PLIC_WIDTH_STORE=1`. `PLIC_WIDTH_CASE=0..4` and `PLIC_WIDTH_TRANSLATED=0/1` retain the width and translation matrix. `scripts/plic_access_width.py` selects both directions and keeps separate results for each scenario.
 
 ## Quick Start
@@ -78,12 +84,11 @@ PLIC supported-access checks use `scripts/plic_access_width.py`. Supply `--xlen 
 
 ```bash
 # Prerequisites: ensure simulator + NEMU are built
-make -C .. build-rv32              # Build NPC simulator
-make -C .. build-rv32    # Enable difftest config
+make -C .. build-rv32              # Build NPC simulator (difftest config by default)
 make -C .. build-nemu32-ref        # Build NEMU reference SO
 
 # Run all lightweight tests
-make all                            # fuzz + sigtest
+make light                          # fuzz + sigtest
 
 # Individual targets
 make fuzz                           # Random instruction fuzzing
@@ -99,22 +104,32 @@ make coverage                       # Verilator line/toggle coverage
 ```
 verify/
 ├── uvm/                # Whole-chip and module-level UVM verification
+│   ├── chip/             # Complete-chip UVM top and self-checking firmware
+│   ├── csr/              # CSR UVM environment
 │   └── iq/               # Issue-queue UVM environment
-├── scripts/            # Test generation and orchestration scripts
+├── scripts/            # Test generation, orchestration and checker scripts (+ their test_*.py)
 ├── riscof/             # ACT4 compliance testing
 │   ├── raptor-rv32gc/    # RV32GC test config, UDB config, model macros
 │   ├── raptor-rv64gc/    # RV64 M-mode instruction projection
 │   ├── raptor-rv64s/     # RV64 supervisor projection and requirement ledger
+│   ├── raptor_dut/       # ACT4 DUT runner plugin
+│   ├── nemu_ref/         # ACT4 NEMU reference plugin
+│   ├── classic/          # Legacy RISCOF config (Sail reference)
+│   ├── classic-nemu/     # Legacy RISCOF config (NEMU reference)
 │   └── riscv-arch-test/  # ACT4 repo (cloned on setup, gitignored)
 ├── formal/             # Formal verification (SymbiYosys)
 │   ├── rvfi/             # Raptor riscv-formal config (project-owned)
 │   │   ├── checks.cfg     # riscv-formal check configuration
 │   │   └── wrapper.sv     # RVFI wrapper with unconstrained AXI4
 │   ├── riscv-formal/     # riscv-formal repo (auto-cloned, gitignored)
-│   ├── bus.sby           # AXI bus formal property
-│   └── ieu_mul.sby       # IEU multiplier formal property
-├── xsim/               # Module-level SystemVerilog testbenches
+│   ├── *.sby             # Per-block SymbiYosys tasks (bus, PMP, PLIC, CLINT, ...)
+│   └── formal_*.sv       # Property harnesses
+├── xsim/               # Module-level SystemVerilog testbenches (tb_*.sv)
 │   └── fpu/              # Verilator FPU arithmetic/conversion tests
+├── subsystem/          # Frontend/backend/memory trace tops (see subsystem/README.md)
+├── jtag/               # Debug Module / JTAG DTM smoke (see jtag/README.md)
+├── vpu/                # Standalone VPU verification (outputs in build/vpu)
+├── riscv-dv-target/    # riscv-dv target settings for Raptor
 └── build/              # Generated artifacts (gitignored)
 ```
 
@@ -249,7 +264,7 @@ Each coordinate writes `*.delayN-seedS.run.log` next to its generated binary, so
 
 The pyflow backend cannot currently generate random exceptions reliably: its EBREAK templates are unregistered, subprogram callstack state is uninitialized, and illegal-instruction constraints fail to solve. The exception stress target therefore uses pyflow's generated M-mode trap harness and long random stream, then injects 256 register-free `0xffffffff` illegal instructions at `main`. This exercises `mcause`/`mepc`, trap-frame save/restore, and `mret` without depending on those broken upstream paths.
 
-The first run clones pinned revision `b7a0b4b0b51346a3c64f159f81ea262d867c14a9` and creates an isolated Python 3.11 environment under `verify/build/`. Python 3.10-3.12 is required because the upstream `pyvsc` dependency does not currently build on Python 3.14.
+The first run clones pinned revision `b7a0b4b0b51346a3c64f159f81ea262d867c14a9` and creates an isolated Python 3.11 environment under `verify/build/`. Python 3.10 or 3.11 is required because the pinned dependencies still import `imp`, removed in Python 3.12. Setup uses an installed 3.11/3.10 interpreter or provisions a local 3.11 interpreter with `uv` if neither is available.
 
 The upstream Python backend does not implement page-table creation, page-table sections, or page-fault handlers (these functions are `TODO` in `pygen/pygen_src/riscv_asm_program_gen.py`). Run `make riscv-dv-mmu` for a fail-fast capability check. Full Sv32/MMU generation requires riscv-dv's SV/UVM backend and one of its supported simulators (VCS, Questa, Xcelium, or Riviera-PRO); none is installed in the current open-source tool environment.
 
@@ -315,7 +330,7 @@ make -C formal formal_rvfi
 make -C formal formal_rvfi_clean
 ```
 
-**Engine:** Uses `abc bmc3` (AIGER-based BMC) instead of SMT-based solvers to avoid a false-positive combinational loop detection in the `write_smt2` backend. Each check takes ~70 seconds with depth 5.
+**Engine:** Uses `abc bmc3` (AIGER-based BMC) instead of SMT-based solvers to avoid a false-positive combinational loop detection in the `write_smt2` backend. `checks.cfg` uses depth 8 for instruction checks and final depth 10 for register, forward/backward PC, uniqueness, and causality checks. Shallow bounds can pass vacuously before retirement is reachable; runtime depends on the check and bound.
 
 **Configuration files** (`formal/rvfi/`):
 - `checks.cfg` — ISA, nret, solver, depth, yosys-slang script
@@ -446,7 +461,7 @@ make -C verify verilator-l1i-16k-rv32 verilator-l1i-16k-rv64 \
   verilator-l1d-16k-rv32 verilator-l1d-16k-rv64
 ```
 
-These checks fill and read every word of each cache, require all four same-set lines to remain resident without external reads, introduce a conflicting tag beyond the whole capacity, check neighboring-set preservation, and invalidate/refill all sets. They derive sets/ways/capacity/stride from the selected preset, require 64 B lines and at least two sets and ways, and enable assertions with fatal warnings. The store-coherence test derives its conflict stride and working-set size from the selected preset, preserving eviction coverage as associativity changes. These are functional checks; FPGA utilization and timing require synthesis and implementation of the chosen SoC configuration.
+These checks fill and read every word of each cache, require all four same-set lines to remain resident without external reads, introduce a conflicting tag beyond the whole capacity, check neighboring-set preservation, and invalidate/refill all sets. They derive sets/ways/capacity/stride from the selected preset, require 64 B lines and at least two sets and ways, and enable assertions; compiler warnings are nonfatal by default (`-Wno-fatal`). The store-coherence test derives its conflict stride and working-set size from the selected preset, preserving eviction coverage as associativity changes. These are functional checks; FPGA utilization and timing require synthesis and implementation of the chosen SoC configuration.
 
 ### Streaming cache transactions
 
@@ -518,12 +533,12 @@ python3 verify/scripts/test_uart_platform.py
 ```
 
 独立编译生产 NEMU/sim 串口模型，覆盖 RV32/RV64 的 NS16550 RX IRQ10、CU08
-LiteUART `0xf0001800` 与旧 egos `0xf0001000` alias 的收发和共享状态、sim CSR 写掩码。
+LiteUART `0x11001800` 的收发、旧高地址 alias 拒绝，以及 sim CSR 写掩码。
 同时编译规范 DTS，检查 NS16550 interrupt cell 与 NEMU Linux presets 一致。
 仅提供宿主环境/MMIO 注册/IRQ 接收端桩，不修改共享 `.config`，不加载 FPGA。
 这不是完整 Linux/RTL/PLIC 集成回归，也不验证 LiteUART 完整事件中断仿真。
 
-整核入口 `mmio-transaction-check` 同时检查 LiteUART 新旧地址，每个地址覆盖
+整核入口 `mmio-transaction-check` 检查 LiteUART 低地址，每个地址覆盖
 总线延迟 0/7/63、随机种子 1/42，核对 AXI 响应及实际发送字节；
 `mmio-uart-read-check` 检查 NS16550 byte lane 和 read-to-clear 副作用。
 `mmio-uart-irq-check` 向 stdin 注入 `K`，由裸机程序检查 M-mode 外部中断、

@@ -19,7 +19,7 @@ Repository: <https://github.com/Kingfish404/raptor-chip>
 
 | Item                 | Value                                                                                                   |
 | -------------------- | ------------------------------------------------------------------------------------------------------- |
-| ISA                  | `rv32/64imafdc_zba_zbb_zbs_zfhmin_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_zca_zcb_zcmop` |
+| ISA                  | `rv32/64imafdc_zba_zbb_zbc_zbs_zfhmin_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_zca_zcb_zcmop` |
 | RV64 extras          | Zkt and Svpbmt on default RV64; Svinval decode is shared by RV32/RV64                                                |
 | Privilege modes      | M, S, U                                                                                                 |
 | MMU                  | Sv32 (RV32) / Sv39 (RV64) / Bare                                                                        |
@@ -30,10 +30,10 @@ Repository: <https://github.com/Kingfish404/raptor-chip>
 | Queues               | ROB 32, ALQ 8, BRQ 8, MDQ 4, FPQ 1, IOQ 8, unified SQ 16                                               |
 | Register state       | 64-entry integer PRF (including 32 architectural mappings) + 32 x 64-bit FPR bank                        |
 | Writeback            | CDB x5 (integer ports + branch + memory + MUL/DIV)                                                      |
-| BPU                  | TAGE direction predictor + 2-way BTB (128) + 4-entry RSB                                                |
+| BPU                  | TAGE direction predictor (1024 bimodal + 3 x 1024 tagged) + 2-way BTB (128) + 16-entry RAS               |
 | L1I / L1D            | 16 KiB 4-way each (64 sets x 64 B x 4), banked SRAM; L1D write-through                                    |
 | L2                   | Default bypass; `default-l2` enables 512 KiB, eight ways with L1D write-back                           |
-| Bus                  | AXI4, XLEN-bit data/addr, 4-bit ID; up to 8 reads, one outstanding write (ordinary stores single-beat; CBO.ZERO multi-beat)                                |
+| Bus                  | AXI4, XLEN-bit data/addr, 4-bit ID; up to 8 reads; up to 4 posted cacheable writes without L2, otherwise one (ordinary stores single-beat; CBO.ZERO multi-beat) |
 | Debug                | RISC-V Debug Module / JTAG DTM bring-up ports at cluster top                                            |
 | Verification         | Difftest against NEMU; RVFI/riscv-formal; SVA                                                           |
 
@@ -74,6 +74,9 @@ raptor-chip/
 |   |-- frontend/         IFU, FQU, IDU, RNU, BPU, CSR
 |   |-- backend/          PRF, ROU, DPU, IEU, FEU, LSU, CMU
 |   |-- memory/           L1I/L1D, optional L2, TLB, PTW, AXI4 bus
+|   |-- common/           stream queue, issue/rank selectors
+|   |-- sram/             1RW/2RW SRAM wrappers (behavioral or macro)
+|   |-- configs/          microarchitecture presets (rapt_config.svh)
 |   |-- perip/            CLINT, PLIC, debug module, JTAG DTM, DPI wrappers
 |   |-- include/          type macros, interfaces, DPI-C
 |   `-- generated/        Chisel-generated decoders

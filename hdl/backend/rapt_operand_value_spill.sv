@@ -50,11 +50,12 @@ module rapt_operand_value_spill #(
     logic [PhysBits-1:0] pr1;
     logic [PhysBits-1:0] pr2;
   } value_payload_t;
-
-  value_payload_t allocate_payload[AllocateWidth];
-  value_payload_t read_payload[ReadPorts];
-  logic update_valid[SpillEntries], entry_valid[SpillEntries];
-  value_payload_t update_payload[SpillEntries], entry_payload[SpillEntries];
+  typedef struct packed {
+    logic [Xlen-1:0] op1;
+    logic [Xlen-1:0] op2;
+    logic [PhysBits-1:0] pr1;
+    logic [PhysBits-1:0] pr2;
+  } value_state_t;
 
   function automatic logic completion_hit(input logic [PhysBits-1:0] tag);
     completion_hit = 1'b0;
@@ -63,57 +64,145 @@ module rapt_operand_value_spill #(
     end
   endfunction
 
-  // Completion port zero has priority if hostile inputs present duplicate
-  // destinations, matching the existing ROU wb_val behavior.
+  // Completion port zero wins duplicate destinations.
   function automatic logic [Xlen-1:0] completion_value(input logic [PhysBits-1:0] tag,
-                                                       input logic [Xlen-1:0] fallback);
-    completion_value = fallback;
+                                                       input logic [Xlen-1:0] dflt);
+    localparam int PortBits = CompletionPorts > 1 ? $clog2(CompletionPorts) : 1;
+    logic [PortBits-1:0] index;
+    logic found;
+    index = '0;
+    found = 1'b0;
     for (int p = CompletionPorts - 1; p >= 0; p--) begin
-      if (tag != '0 && completion_valid[p] && completion_prd[p] == tag)
-        completion_value = completion_result[p];
-    end
-  endfunction
-
-  for (genvar a = 0; a < AllocateWidth; a++) begin : g_allocate_payload
-    assign allocate_payload[a] = '{
-            uop: allocate_uop[a],
-            op1: allocate_op1[a],
-            op2: allocate_op2[a],
-            pr1: allocate_pr1[a],
-            pr2: allocate_pr2[a]
-        };
-  end
-  for (genvar p = 0; p < ReadPorts; p++) begin : g_read_payload
-    assign read_uop[p] = read_payload[p].uop;
-    assign read_op1[p] = read_payload[p].op1;
-    assign read_op2[p] = read_payload[p].op2;
-    assign read_pr1[p] = read_payload[p].pr1;
-    assign read_pr2[p] = read_payload[p].pr2;
-  end
-
-  for (genvar e = 0; e < SpillEntries; e++) begin : g_completion_update
-    always_comb begin
-      update_payload[e] = entry_payload[e];
-      update_valid[e] = 1'b0;
-      if (entry_valid[e]) begin
-        update_valid[e] = completion_hit(entry_payload[e].pr1)
-            || completion_hit(entry_payload[e].pr2);
-        update_payload[e].op1 = completion_value(entry_payload[e].pr1, entry_payload[e].op1);
-        update_payload[e].op2 = completion_value(entry_payload[e].pr2, entry_payload[e].op2);
-        if (completion_hit(entry_payload[e].pr1)) update_payload[e].pr1 = '0;
-        if (completion_hit(entry_payload[e].pr2)) update_payload[e].pr2 = '0;
+      if (tag != '0 && completion_valid[p] && completion_prd[p] == tag) begin
+        index = PortBits'(p);
+        found = 1'b1;
       end
     end
-  end
+    return found ? completion_result[index] : dflt;
+  endfunction
 
-  rapt_operand_spill #(
-      .PayloadT(value_payload_t),
-      .Entries(SpillEntries),
-      .AllocateWidth(AllocateWidth),
-      .ReleaseWidth(ReleaseWidth),
-      .ReadPorts(ReadPorts),
-      .IndexBits(SpillBits)
-  ) storage (
-      .*
-  );
+  if (`RAPT_FPGA_LUTRAM) begin : g_lutram
+    // Keep mutable operands and waiting tags in the compact flop bank.
+    value_state_t allocate_payload[AllocateWidth];
+    value_state_t read_payload[ReadPorts];
+    value_state_t update_payload[SpillEntries], entry_payload[SpillEntries];
+    logic update_valid[SpillEntries], entry_valid[SpillEntries];
+    for (genvar a = 0; a < AllocateWidth; a++) begin : g_allocate
+      assign allocate_payload[a] = '{
+              op1: allocate_op1[a],
+              op2: allocate_op2[a],
+              pr1: allocate_pr1[a],
+              pr2: allocate_pr2[a]
+          };
+    end
+    for (genvar p = 0; p < ReadPorts; p++) begin : g_read
+      assign read_op1[p] = read_payload[p].op1;
+      assign read_op2[p] = read_payload[p].op2;
+      assign read_pr1[p] = read_payload[p].pr1;
+      assign read_pr2[p] = read_payload[p].pr2;
+    end
+    for (genvar e = 0; e < SpillEntries; e++) begin : g_completion
+      always_comb begin
+        update_payload[e] = entry_payload[e];
+        update_valid[e] = 1'b0;
+        if (entry_valid[e]) begin
+          update_valid[e] = completion_hit(entry_payload[e].pr1)
+              || completion_hit(entry_payload[e].pr2);
+          update_payload[e].op1 = completion_value(entry_payload[e].pr1, entry_payload[e].op1);
+          update_payload[e].op2 = completion_value(entry_payload[e].pr2, entry_payload[e].op2);
+          if (completion_hit(entry_payload[e].pr1)) update_payload[e].pr1 = '0;
+          if (completion_hit(entry_payload[e].pr2)) update_payload[e].pr2 = '0;
+        end
+      end
+    end
+    rapt_operand_spill #(
+        .PayloadT(value_state_t),
+        .Entries(SpillEntries),
+        .AllocateWidth(AllocateWidth),
+        .ReleaseWidth(ReleaseWidth),
+        .ReadPorts(ReadPorts),
+        .IndexBits(SpillBits)
+    ) storage (
+        .*
+    );
+
+    // Each allocation lane owns one write port. Copies give every read lane
+    // an independent asynchronous read port without multiplying write ports.
+    localparam int UopBits  = $bits(UopT);
+    localparam int LaneBits = AllocateWidth > 1 ? $clog2(AllocateWidth) : 1;
+    logic [LaneBits-1:0] uop_lane_q[SpillEntries];
+    logic uop_write[AllocateWidth];
+    logic [UopBits-1:0] bank_read[ReadPorts][AllocateWidth];
+    for (genvar a = 0; a < AllocateWidth; a++) begin : g_write_lane
+      assign uop_write[a] = allocate_valid[a] && allocate_ready[a];
+      for (genvar p = 0; p < ReadPorts; p++) begin : g_read_copy
+        (* ram_style = "distributed" *) logic [UopBits-1:0] words[SpillEntries];
+        always_ff @(posedge clock)
+          if (!(reset || flush) && uop_write[a])
+            words[allocate_index[a]] <= UopBits'(allocate_uop[a]);
+        assign bank_read[p][a] = words[read_index[p]];
+      end
+    end
+    for (genvar e = 0; e < SpillEntries; e++) begin : g_lane
+      always_ff @(posedge clock) begin
+        if (!(reset || flush)) begin
+          for (int a = 0; a < AllocateWidth; a++)
+          if (uop_write[a] && allocate_index[a] == SpillBits'(e)) uop_lane_q[e] <= LaneBits'(a);
+        end
+      end
+    end
+    for (genvar p = 0; p < ReadPorts; p++) begin : g_select
+      always_comb begin
+        read_uop[p] = '0;
+        if (int'(read_index[p]) < SpillEntries)
+          read_uop[p] = UopT'(bank_read[p][uop_lane_q[read_index[p]]]);
+      end
+    end
+  end else begin : g_flops
+    // ASIC/default path retains the original single compact flop bank.
+    value_payload_t allocate_payload[AllocateWidth];
+    value_payload_t read_payload[ReadPorts];
+    value_payload_t update_payload[SpillEntries], entry_payload[SpillEntries];
+    logic update_valid[SpillEntries], entry_valid[SpillEntries];
+    for (genvar a = 0; a < AllocateWidth; a++) begin : g_allocate
+      assign allocate_payload[a] = '{
+              uop: allocate_uop[a],
+              op1: allocate_op1[a],
+              op2: allocate_op2[a],
+              pr1: allocate_pr1[a],
+              pr2: allocate_pr2[a]
+          };
+    end
+    for (genvar p = 0; p < ReadPorts; p++) begin : g_read
+      assign read_uop[p] = read_payload[p].uop;
+      assign read_op1[p] = read_payload[p].op1;
+      assign read_op2[p] = read_payload[p].op2;
+      assign read_pr1[p] = read_payload[p].pr1;
+      assign read_pr2[p] = read_payload[p].pr2;
+    end
+    for (genvar e = 0; e < SpillEntries; e++) begin : g_completion
+      always_comb begin
+        update_payload[e] = entry_payload[e];
+        update_valid[e] = 1'b0;
+        if (entry_valid[e]) begin
+          update_valid[e] = completion_hit(entry_payload[e].pr1)
+              || completion_hit(entry_payload[e].pr2);
+          update_payload[e].op1 = completion_value(entry_payload[e].pr1, entry_payload[e].op1);
+          update_payload[e].op2 = completion_value(entry_payload[e].pr2, entry_payload[e].op2);
+          if (completion_hit(entry_payload[e].pr1)) update_payload[e].pr1 = '0;
+          if (completion_hit(entry_payload[e].pr2)) update_payload[e].pr2 = '0;
+        end
+      end
+    end
+    rapt_operand_spill #(
+        .PayloadT(value_payload_t),
+        .Entries(SpillEntries),
+        .AllocateWidth(AllocateWidth),
+        .ReleaseWidth(ReleaseWidth),
+        .ReadPorts(ReadPorts),
+        .IndexBits(SpillBits)
+    ) storage (
+        .*
+    );
+  end
 endmodule

@@ -8,6 +8,9 @@ module rapt_ieu_mul #(
     input clock,
     input reset,
     input flush,
+    // A tag may be reused on the next edge: cancellation clears all valid
+    // owners here and suppresses a same-cycle output for that tag.
+    input logic [(1 << TAG_W)-1:0] cancel_tags,
     input [XLEN-1:0] in_a,
     input [XLEN-1:0] in_b,
     input [4:0] in_op,
@@ -23,8 +26,10 @@ module rapt_ieu_mul #(
 `ifdef RAPT_M_FAST
   // Hybrid fast MUL + iterative DIV/REM:
   //   MUL/MULH/MULHSU/MULHU: fully pipelined (2-cycle latency, 1/cycle throughput)
-  //   DIV/DIVU/REM/REMU: iterative restoring divider, operand bits + 1 cycles
-  //   (32 bits for RV64 W forms, otherwise XLEN; serial).
+  //   DIV/DIVU/REM/REMU: iterative restoring divider. One normalization cycle
+  //   skips the dividend's leading zero bits (their quotient bits are zero),
+  //   then two restoring steps retire per cycle: about
+  //   2 + ceil(significant dividend bits / 2) cycles, serial.
   //
   // MUL and DIV datapaths are split: MUL has its own 2-stage pipe (m1_*, m2_*)
   // with tag pass-through; DIV runs serial in (div_*) state and blocks new
@@ -45,6 +50,30 @@ module rapt_ieu_mul #(
   logic [$clog2(XLEN+1)-1:0] div_counter;
   logic [               1:0] div_sign;
   logic                      div_active;
+  logic                      div_norm;
+
+  // Leading zeros of the aligned dividend magnitude (XLEN for zero).
+  function automatic logic [$clog2(XLEN+1)-1:0] div_clz(input logic [XLEN-1:0] value);
+    div_clz = $clog2(XLEN + 1)'(XLEN);
+    for (int i = 0; i < XLEN; i++) if (value[i]) div_clz = $clog2(XLEN + 1)'(XLEN - 1 - i);
+  endfunction
+  logic [$clog2(XLEN+1)-1:0] div_lz;
+  logic [$clog2(XLEN+1):0] div_start;
+  logic [XLEN-1:0] div_normalized;
+  assign div_lz = div_clz(div_dividend_shifted);
+  assign div_start = {1'b0, div_counter} + {1'b0, div_lz};
+  assign div_normalized = div_dividend_shifted << div_lz;
+
+  // Two cascaded restoring steps. The second is skipped on an odd final bit.
+  logic div_q1, div_q2, div_two;
+  logic [XLEN:0] div_r1, div_r2;
+  assign div_two = int'(div_counter) + 1 < XLEN;
+  assign div_q1 = div_remainder >= {1'b0, div_divisor};
+  assign div_r1 = ((div_q1 ? div_remainder - {1'b0, div_divisor} : div_remainder) << 1)
+      + {{XLEN{1'b0}}, div_dividend_shifted[XLEN-1]};
+  assign div_q2 = div_r1 >= {1'b0, div_divisor};
+  assign div_r2 = ((div_q2 ? div_r1 - {1'b0, div_divisor} : div_r1) << 1)
+      + {{XLEN{1'b0}}, div_dividend_shifted[XLEN-2]};
 
   logic [XLEN-1:0] div_q_signed, div_r_signed;
   assign div_q_signed = (div_sign == 2'b00 || div_sign == 2'b11) ? div_quotient : -div_quotient;
@@ -173,16 +202,16 @@ module rapt_ieu_mul #(
   assign in_ready = !div_active;
 
   logic accept_mul, accept_div;
-  assign accept_mul = in_valid && in_ready && !in_is_div;
-  assign accept_div = in_valid && in_ready && in_is_div;
+  assign accept_mul = in_valid && in_ready && !in_is_div && !cancel_tags[in_tag];
+  assign accept_div = in_valid && in_ready && in_is_div && !cancel_tags[in_tag];
 
   // ---- Output mux (DIV has priority; see note above) ----
   always_comb begin
-    if (div_out_valid) begin
+    if (div_out_valid && !cancel_tags[div_out_tag]) begin
       out_r     = div_out_r;
       out_tag   = div_out_tag;
       out_valid = 1'b1;
-    end else if (m2_v) begin
+    end else if (m2_v && !cancel_tags[m2_tag]) begin
       out_r     = m2_r;
       out_tag   = m2_tag;
       out_valid = 1'b1;
@@ -207,6 +236,7 @@ module rapt_ieu_mul #(
       m1_v          <= 1'b0;
       m2_v          <= 1'b0;
       div_active    <= 1'b0;
+      div_norm      <= 1'b0;
       div_out_valid <= 1'b0;
       div_counter   <= '0;
     end else begin
@@ -223,7 +253,7 @@ module rapt_ieu_mul #(
       end
 
       // ===== MUL stage-1 -> stage-2 =====
-      if (m1_v) begin
+      if (m1_v && !cancel_tags[m1_tag]) begin
         m2_r   <= mul_r_comb;
         m2_tag <= m1_tag;
         m2_v   <= 1'b1;
@@ -240,13 +270,32 @@ module rapt_ieu_mul #(
         div_tag              <= in_tag;
 
         div_quotient         <= 0;
-        div_remainder        <= {{XLEN{1'b0}}, div_aligned_a[XLEN-1]};
+        div_remainder        <= '0;
         div_divisor          <= abs_b;
-        div_dividend_shifted <= div_aligned_a << 1;
+        div_dividend_shifted <= div_aligned_a;
         div_counter          <= (XLEN > 32 && in_word) ? $clog2(XLEN+1)'(XLEN - 32) : '0;
         div_sign             <= {div_input_a[XLEN-1], div_input_b[XLEN-1]};
         div_active           <= 1'b1;
+        div_norm             <= 1'b1;
         div_out_valid        <= 1'b0;
+      end else if (div_active && cancel_tags[div_tag]) begin
+        // Abort only this divider owner; older pipelined MULs remain live.
+        div_active <= 1'b0;
+        div_norm <= 1'b0;
+        div_out_valid <= 1'b0;
+      end else if (div_active && div_norm) begin
+        // Leading dividend zeros keep a zero partial remainder and produce
+        // zero quotient bits (a zero divisor's result is overridden below).
+        // Start at the first significant bit, exactly where the bit-serial
+        // loop would first leave a zero remainder.
+        div_norm <= 1'b0;
+        if (div_start >= ($clog2(XLEN + 1) + 1)'(XLEN)) begin
+          div_counter <= $clog2(XLEN + 1)'(XLEN);
+        end else begin
+          div_counter          <= div_start[$clog2(XLEN+1)-1:0];
+          div_remainder        <= {{XLEN{1'b0}}, div_normalized[XLEN-1]};
+          div_dividend_shifted <= div_normalized << 1;
+        end
       end else if (div_active) begin
         if (div_counter == XLEN[$clog2(XLEN+1)-1:0]) begin
           // Division complete: apply sign correction and emit
@@ -284,16 +333,13 @@ module rapt_ieu_mul #(
             default: div_out_r <= 0;
           endcase
         end else begin
-          // One iteration of restoring division
-          if (div_remainder >= {{1'b0}, div_divisor}) begin
-            div_quotient <= div_quotient | ('b1 << (XLEN[$clog2(XLEN+1)-1:0] - 1 - div_counter));
-            div_remainder <= ((div_remainder - {{1'b0}, div_divisor}) << 1)
-                           + {{XLEN{1'b0}}, div_dividend_shifted[XLEN-1]};
-          end else begin
-            div_remainder <= (div_remainder << 1) + {{XLEN{1'b0}}, div_dividend_shifted[XLEN-1]};
-          end
-          div_dividend_shifted <= div_dividend_shifted << 1;
-          div_counter          <= div_counter + 1;
+          // Two restoring iterations (one on the final odd bit).
+          div_quotient <= div_quotient
+              | (XLEN'(div_q1) << (XLEN[$clog2(XLEN+1)-1:0] - 1 - div_counter))
+              | (XLEN'(div_two && div_q2) << (XLEN[$clog2(XLEN+1)-1:0] - 2 - div_counter));
+          div_remainder <= div_two ? div_r2 : div_r1;
+          div_dividend_shifted <= div_two ? div_dividend_shifted << 2 : div_dividend_shifted << 1;
+          div_counter <= div_counter + (div_two ? 2 : 1);
         end
       end else begin
         // No DIV pending: clear any held DIV emission after one cycle.
@@ -312,7 +358,7 @@ module rapt_ieu_mul #(
   logic valid;
   logic [TAG_W-1:0] tag_r;
 
-  assign out_valid = valid;
+  assign out_valid = valid && !cancel_tags[tag_r];
   assign out_tag   = tag_r;
   assign in_ready  = (op == 0 && !valid);
 
@@ -336,7 +382,11 @@ module rapt_ieu_mul #(
       op      <= 0;
       valid   <= 0;
       counter <= 0;
-    end else if (in_valid && in_ready) begin
+    end else if ((op != 0 || valid) && cancel_tags[tag_r]) begin
+      op <= 0;
+      valid <= 0;
+      counter <= 0;
+    end else if (in_valid && in_ready && !cancel_tags[in_tag]) begin
       op <= in_op;
       word_r <= in_word;
       tag_r <= in_tag;

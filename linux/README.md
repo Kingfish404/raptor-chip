@@ -119,5 +119,5 @@ This path uses OpenSBI's standalone `fw_payload.bin`. `fw_dynamic.bin` would nee
 UART 平台约定：规范 Spike 派生 DTS 与 QEMU virt 均使用 NS16550 IRQ10，NEMU
 Linux presets 显式选择 `CONFIG_SERIAL_PLIC_IRQ=10`。更新后需重新配置/构建 NEMU
 及 ROM/DTB，已有二进制不会自动改变。自定义旧平台需要 IRQ1 时必须显式设置，
-并匹配其专用 DTB。sim/NEMU 的 CU08 LiteUART 地址为 `0xf0001800`；`0xf0001000`
-仅作为旧 egos 兼容 alias，不能据此把实际 FPGA 的 timer0 当作 UART。
+并匹配其专用 DTB。sim/NEMU 的 CU08 LiteUART 地址为 `0x11001800`；旧的
+`0xf0001000` 和 `0xf0001800` UART alias 已撤销，不能据此把实际 FPGA 的 timer0 当作 UART。

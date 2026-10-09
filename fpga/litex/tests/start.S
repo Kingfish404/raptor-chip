@@ -36,8 +36,8 @@ _start:
  * produce a final line even if main()'s return path is weird. */
 .globl _puts_raw
 _puts_raw:
-    li      t0, 0xf0001800      /* UART RXTX  */
-    li      t1, 0xf0001804      /* UART TXFULL */
+    li      t0, 0x11001800      /* UART RXTX  */
+    li      t1, 0x11001804      /* UART TXFULL */
 .Lpr_loop:
     lbu     t2, 0(a0)
     beqz    t2, .Lpr_done

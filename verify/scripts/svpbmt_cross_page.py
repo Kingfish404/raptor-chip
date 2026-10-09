@@ -12,20 +12,50 @@ from svpbmt_axi_check import parse_trace
 
 def check_case(text, first, second, a, b):
     reads, writes = parse_trace(text)
-    selected_r = [r for r in reads if first <= r['addr'] < second+4096]
-    selected_w = [r for r in writes if first <= r['addr'] < second+4096]
-    assert second == first+8192, 'fixture must have a physical gap'
-    for r in selected_r+selected_w:
-        assert r['addr'] in (first+4088, second), 'wrong physical fragment / accessed gap'
-        assert r['length'] == 0 and r['size'] == 3 and 'done' in r, 'fragment burst/size/completion'
-        attr = a if r['addr'] == first+4088 else b
+    assert first % 4096 == 0 and second == first+8192, 'fixture must have a physical gap'
+    assert a in (0, 1, 2) and b in (0, 1, 2), 'invalid fixture PBMT'
+
+    def end_address(r):
+        # The fixture uses scalar FIXED transfers and INCR refills. Include
+        # every beat, including a burst that starts before the mapped pages.
+        assert r['burst'] in (0, 1), 'unexpected AXI burst type'
+        width = 1 << r['size']
+        count = r['length'] + 1 if r['burst'] == 1 else 1
+        return (r['addr'] & -width) + width * count
+
+    selected_r = [r for r in reads if end_address(r) > first and r['addr'] < second+4096]
+    selected_w = [r for r in writes if end_address(r) > first and r['addr'] < second+4096]
+    fragments = ((first, first+4088, a), (second, second, b))
+
+    def check_fragment(r, read):
+        end = end_address(r)
+        page = next(((base, addr, attr) for base, addr, attr in fragments
+                     if base <= r['addr'] and end <= base+4096), None)
+        assert page is not None, 'wrong physical fragment / accessed gap'
+        _, addr, attr = page
         assert attr != 2, 'misaligned access reached IO memory'
-        assert r['cache'] == (15 if attr == 0 else 2), 'fragment lost PBMT'
+        # Cacheable reads allocate (0xf); write-through stores use 0xe.
+        cache = (15 if read else 14) if attr == 0 else 2
+        assert r['cache'] == cache, 'fragment lost PBMT'
+        assert r['size'] == 3 and 'done' in r, 'fragment size/completion'
+        # PMA RAM reads may refill the 64-byte line containing this fragment.
+        # NC reads and all write-through stores must remain scalar. Checking
+        # the expected line as well as page containment rejects wrong fragments.
+        if read and attr == 0 and r['length'] == 7:
+            assert r['burst'] == 1, 'refill must increment'
+            assert r['addr'] == (addr & -64) and end == (addr & -64)+64, 'wrong refill line'
+        else:
+            assert r['addr'] == addr and r['length'] == 0, 'fragment address/burst'
+        return addr
+
+    read_fragments = [check_fragment(r, True) for r in selected_r]
+    for r in selected_w:
+        check_fragment(r, False)
     if 2 in (a,b):
         assert not selected_w, 'faulting store partially wrote memory'
         # The first non-IO fragment of a load may be read before discovering
         # the second-page access fault. Do not require rollback of that read.
-        assert all(r['addr'] == first+4088 for r in selected_r), 'faulting load read second page'
+        assert all(addr == first+4088 for addr in read_fragments), 'faulting load read second page'
         assert len(selected_r) <= 1, 'faulting load repeated first fragment'
     else:
         assert Counter(r['addr'] for r in selected_w) == Counter({first+4088:1, second:1}), 'split store count'
@@ -39,7 +69,7 @@ def check_case(text, first, second, a, b):
         # Initial load is cold. The second load may hit PMA, but NC must issue
         # again; check both per-fragment properties instead of global counts.
         for addr, attr in [(first+4088,a),(second,b)]:
-            n = sum(r['addr']==addr for r in selected_r)
+            n = read_fragments.count(addr)
             assert n in ((2,) if attr == 1 else (1,2)), 'split load cache/bypass count'
     return dict(data_reads=len(selected_r), data_writes=len(selected_w))
 

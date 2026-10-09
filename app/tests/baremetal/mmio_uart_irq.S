@@ -1,4 +1,5 @@
 /* Feed one 'K' on stdin. Verify real M-mode delivery and PLIC source 10. */
+#include "raptor_platform.h"
 .option norvc
 .section .text
 .globl _start
@@ -6,12 +7,12 @@ _start:
   csrw mie, zero
   la t0, trap
   csrw mtvec, t0
-  li s0, 0x10000000
-  li s1, 0x0c200004
-  li t0, 0x0c000028
+  li s0, RAPTOR_NS16550_BASE
+  li s1, (RAPTOR_PLIC_BASE + 0x200004)
+  li t0, (RAPTOR_PLIC_BASE + 0x28)
   li t1, 1
   sw t1, 0(t0)
-  li t0, 0x0c002000
+  li t0, (RAPTOR_PLIC_BASE + 0x2000)
   li t1, 1024
   sw t1, 0(t0)
   sw zero, -4(s1)
@@ -57,7 +58,7 @@ fail:
   li t1, 0x13333
 finish:
   fence iorw, iorw
-  li t0, 0x100000
+  li t0, RAPTOR_FINISHER_BASE
   sw t1, 0(t0)
 4:
   j 4b

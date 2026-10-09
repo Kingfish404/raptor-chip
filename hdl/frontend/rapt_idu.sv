@@ -51,8 +51,6 @@ module rapt_idu #(
     idu_bpu.history_valid = 0;
     idu_bpu.history_taken = 0;
     idu_bpu.history_pc_bit = 0;
-    idu_bpu.history_auxiliary = 0;
-    idu_bpu.history_auxiliary_index = '0;
     for (int s = 0; s < Width; s++) begin
       automatic logic is_control;
       automatic logic direct_jump;
@@ -70,7 +68,7 @@ module rapt_idu #(
         corrected = (idu_bpu.ras_addr + decoded[s].uop.imm) & ~XLEN'(1);
       idu_rnu.slot[s] = decoded[s];
       idu_rnu.slot[s].uop.pnpc = corrected;
-      idu_rnu.valid[s] = prefix && s < 32'(count) && !(`RAPT_FETCH_BRANCH_FOLLOWER && is_control && control_seen);
+      idu_rnu.valid[s] = prefix && s < 32'(count) && !(is_control && control_seen);
       accept[s] = idu_rnu.valid[s] && idu_rnu.ready[s];
       if (accept[s]) begin
         consumed++;
@@ -78,8 +76,6 @@ module rapt_idu #(
           idu_bpu.history_valid = 1;
           idu_bpu.history_taken = decoded[s].uop.execute.branch.predicted_taken;
           idu_bpu.history_pc_bit = slots[s].pc[1];
-          idu_bpu.history_auxiliary = slots[s].auxiliary;
-          idu_bpu.history_auxiliary_index = slots[s].auxiliary_index;
         end
         if (!decoded[s].uop.trap && (ras_actions[s].push || ras_actions[s].pop)) ras_slot = s;
         if (!decoded[s].uop.trap && corrected != slots[s].pnpc) begin
@@ -89,7 +85,7 @@ module rapt_idu #(
         end
       end
       prefix = prefix && accept[s] && !redirect && !decoded[s].uop.trap
-          && (!is_control || (`RAPT_FETCH_BRANCH_FOLLOWER && decoded[s].uop.execute.branch.conditional
+          && (!is_control || (decoded[s].uop.execute.branch.conditional
               && !decoded[s].uop.execute.branch.predicted_taken));
       if (accept[s] && is_control) control_seen = 1'b1;
     end

@@ -107,6 +107,15 @@ module rapt_ifu #(
       default: return 1'b0;
     endcase
   endfunction
+`ifdef RAPT_FETCH_LOOKAHEAD
+  function automatic logic request_conditional(input logic [15:0] first);
+    case (first[1:0])
+      2'b11: return first[6:0] == `RAPT_OP_B_TYPE_;
+      2'b01: return first[15:13] inside {3'b110, 3'b111};
+      default: return 1'b0;
+    endcase
+  endfunction
+`endif
   // A synchronous BTB prediction only belongs to the packet's first PC.
   // Conditional branches have the auxiliary direction predictor and direct
   // jumps derive their target from the immediate, but a later JALR has neither.
@@ -163,6 +172,23 @@ module rapt_ifu #(
         || (request_offset[s] < OffsetBits'(RequestHalfwords)
             && request_control(request_halfword[WindowIndexBits'(request_offset[s])]));
   end
+`ifdef RAPT_FETCH_LOOKAHEAD
+  logic [XLEN-1:0] aux_pc_live, aux_pc_q;
+  // A queried non-first conditional is the first control instruction in the
+  // response. Capture its PC alongside the response so the auxiliary table
+  // read cannot feed back into its own address through packet packing.
+  always_comb begin
+    aux_pc_live = pc_ifu;
+    for (int s = 1; s < Width; s++) begin
+      if (!request_stopped[s] && request_offset[s] < OffsetBits'(RequestHalfwords)
+          && request_conditional(
+              request_halfword[WindowIndexBits'(request_offset[s])]
+          ))
+        aux_pc_live = pc_ifu + XLEN'({request_offset[s], 1'b0});
+    end
+  end
+  always_ff @(posedge clock) if (capture_response) aux_pc_q <= aux_pc_live;
+`endif
   assign request_nextpc = ifu_bpu.taken ? ifu_bpu.npc
       : pc_ifu + XLEN'({request_offset[Width], 1'b0});
   assign response_redirect = ResponseStage && recv_ready
@@ -215,7 +241,9 @@ module rapt_ifu #(
   assign half_valid[5] = !response.pc[1] && response.inst_n2_valid;
 `endif
 `else
-  assign half_valid[1] = response_valid;
+  // L1I.valid covers only the first instruction: a compressed first halfword at
+  // pc[1]=1 does not wait for the following word that supplies halfword 1.
+  assign half_valid[1] = response_valid && !response.pc[1];
   for (genvar h = 2; h < WindowHalfwords; h++) begin : g_halfword_fill
     assign halfword[h]   = '0;
     assign half_valid[h] = 1'b0;
@@ -263,18 +291,22 @@ module rapt_ifu #(
     secondary_index = 0;
     for (int s = 1; s < Width; s++) begin
       automatic logic before_control;
-      before_control = available[s] && !response.predicted_taken && !response.trap;
+      // Choose the address from instruction boundaries alone. Availability,
+      // cancellation and prediction validity gate its use, not the TAGE read
+      // address; otherwise a late cancel traverses the entire auxiliary table.
+      before_control = 1'b1;
       for (int older = 0; older < s; older++)
-      before_control &= available[older] && !is_control[older] && !is_serial[older];
+      before_control &= !is_control[older] && !is_serial[older];
       if (before_control && is_cond[s]) begin
-        secondary_query = 1'b1;
         secondary_index = s;
+        secondary_query = available[s] && !response.predicted_taken && !response.trap;
+        for (int older = 0; older < s; older++) secondary_query &= available[older];
       end
     end
   end
 `ifdef RAPT_FETCH_LOOKAHEAD
   assign ifu_bpu.aux_query = secondary_query;
-  assign ifu_bpu.aux_pc = candidate_pc[secondary_index];
+  assign ifu_bpu.aux_pc = ResponseStage ? aux_pc_q : candidate_pc[secondary_index];
 `endif
   always_comb begin
     automatic logic control_seen;
@@ -311,13 +343,13 @@ module rapt_ifu #(
       fetched[s].tval  = response.tval;
       fetched[s].cause = response.cause;
       if (!stopped && available[s] && !split_before_indirect
-          && !(`RAPT_FETCH_BRANCH_FOLLOWER && is_control[s] && control_seen)) begin
+          && !(is_control[s] && control_seen)) begin
         fetched_count++;
         nextpc = fetched[s].pnpc;
         response_stop |= is_serial[s] || fetched[s].trap;
       end
       stopped |= !available[s] || split_before_indirect || is_serial[s]
-          || (is_control[s] && (!`RAPT_FETCH_BRANCH_FOLLOWER || control_seen))
+          || (is_control[s] && control_seen)
           || (is_control[s] && (!is_cond[s] || fetched[s].predicted_taken))
           || (s == 0 && (response.predicted_taken || response.trap));
       control_seen |= is_control[s];
@@ -358,7 +390,6 @@ module rapt_ifu #(
     end
   end
   assign ifu_hazard = blocked;
-  assign ifu_bpu.pc = pc_ifu;
   assign ifu_bpu.nextpc = redirect_event ? redirect_pc
       : !ResponseStage || response_redirect ? nextpc : request_nextpc;
   assign ifu_bpu.pc_update = redirect_event

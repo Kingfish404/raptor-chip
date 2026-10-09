@@ -184,7 +184,7 @@ def main() -> None:
         if not binary.stat().st_mode & 0o111:
             raise PermissionError(f"profile is not executable: {binary}")
 
-    reference = ROOT / "nemu/build/riscv32-nemu-interpreter-so"
+    reference = ROOT / "nemu/build/ref/riscv32_ref_defconfig/riscv32-nemu-interpreter-so"
     boot = ROOT / "sim/csrc/mem/mrom-data/build/rv32-spike-rv32ima/mrom-data.bin"
     args.output.mkdir(parents=True, exist_ok=True)
     result = {

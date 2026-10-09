@@ -1,0 +1,13 @@
+# module	config	xlen	min_ramb36	min_lutram
+bpu	default-w4	64	2	0
+bpu	default-l2	64	2	0
+fpr	default-w4	*	4	0
+fpr	default-l2	*	4	0
+rnu	default-w4	64	64	0
+l1i	default-w4	*	32	0
+l1i	default-l2	*	32	0
+l1d	default-w4	32	32	350
+l1d	default-w4	64	32	600
+l1d	default-l2	*	32	0
+memory	default-w4	*	64	0
+memory	default-l2	*	64	0

@@ -105,7 +105,9 @@ module raptSoC #(
         $display(
             "SPEC_OBS %0d REDIRECT %h %h",
             axi_observe_cycle,
-            cpu.core.backend.rou.uop_pl[cpu.core.recovery.owner].pc,
+            {
+              cpu.core.backend.rou.uop_pl[cpu.core.recovery.owner].pc, 1'b0
+            },
             cpu.core.recovery.target
         );
       if (cpu.core.cmu_bcast.flush_pipe) $display("SPEC_OBS %0d FLUSH", axi_observe_cycle);
@@ -311,11 +313,17 @@ module rapt_npc_soc #(
     input reset
 );
   // AXI4 response encoding
-  localparam logic [1:0] AXIRespOKAY = 2'b00;
+  localparam logic [1:0] AXIRespOKAY   = 2'b00;
   localparam logic [1:0] AXIRespDecerr = 2'b11;
   // AXI4 burst type encoding (FIXED/INCR exercised; WRAP folded into INCR by
   // burst_next_addr below — no current master uses WRAP).
   localparam logic [1:0] AXIBurstFixed = 2'b00;
+
+`ifdef RAPT_LARGE_PMEM
+  localparam bit LargePmem = 1'b1;
+`else
+  localparam bit LargePmem = 1'b0;
+`endif
 
   localparam logic [XLEN-1:0] AlignMask = ~XLEN'(int'(XLEN / 8 - 1));
 
@@ -342,12 +350,10 @@ module rapt_npc_soc #(
     || (a >= 32'h10000000 && a < 32'h10012000)  // serial / peripherals
     || (a >= 32'h20000000 && a < 32'h20010000)  // MROM
     || (a >= 32'h30000000 && a < 32'h40000000)  // FLASH
-    || (a >= 32'h80000000 && a < 32'h90000000)  // PMEM (main memory, 256 MiB)
-    || (a >= 32'ha0000000 && a < 32'ha2000000)  // SDRAM
-    || (a >= 32'hf0001800 && a < 32'hf0001900)  // LiteX UART (CU08 CSR map)
-    || (a >= 32'hf0001000 && a < 32'hf0001100)  // LiteX UART (legacy egos alias)
-    || (a >= 32'hf0008000 && a < 32'hf0008100)  // LiteX SPI SD-card controller
-    || (a >= 32'hf0010000 && a < 32'hf0020000));  // CLINT alias (egos HARDWARE)
+    || (a >= 32'h80000000 && (LargePmem || a < 32'h90000000))  // PMEM
+    || (!LargePmem && a >= 32'ha0000000 && a < 32'ha2000000)  // legacy SDRAM
+    || (a >= 32'h11000000 && a < 32'h12000000)  // LiteX CSR banks
+    || (a >= 32'h18000000 && a < 32'h19000000));  // LiteEth buffers
   endfunction
 
   // INCR/FIXED address step. WRAP not exercised by current masters; emulated as INCR.

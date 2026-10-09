@@ -123,13 +123,19 @@ module tb_ifu_response_stage;
     ifu_l1i.trap = phase == 2;
     ifu_l1i.cause = fault_cause;
     ifu_l1i.tval = fault_tval;
-    ifu_bpu.taken = force_self_prediction || predicted_taken(ifu_bpu.pc);
-    ifu_bpu.npc = force_self_prediction ? Base : following(ifu_bpu.pc);
+    ifu_bpu.taken = force_self_prediction || predicted_taken(dut.pc_ifu);
+    ifu_bpu.npc = force_self_prediction ? Base : following(dut.pc_ifu);
     ifu_bpu.aux_taken = ifu_bpu.aux_query && predicted_taken(ifu_bpu.aux_pc);
   end
   always @(posedge clock) begin
     if (!reset) begin
       cycles++;
+`ifdef RAPT_FETCH_LOOKAHEAD
+      if (`RAPT_FETCH_RESPONSE_STAGE && ifu_bpu.aux_query) begin
+        assert (ifu_bpu.aux_pc == dut.candidate_pc[dut.secondary_index])
+        else $fatal(1, "registered auxiliary PC does not match the buffered branch PC");
+      end
+`endif
       if (checking) begin
         if (ifu_bpu.history_valid) histories++;
         for (int s = 0; s < Width; s++) begin

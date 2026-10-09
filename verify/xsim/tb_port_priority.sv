@@ -1,6 +1,7 @@
 module port_priority_case #(
     parameter int Ports = 2,
-    LastPort = 0
+    LastPort = 0,
+    parameter bit UniformSimplePorts = 0
 ) (
     output logic done = 0
 );
@@ -14,6 +15,7 @@ module port_priority_case #(
       .Entries(Entries),
       .Ports(Ports),
       .LastPort(LastPort),
+      .UniformSimplePorts(UniformSimplePorts),
       .Rebalance(0)
   ) dut (
       .valid,
@@ -41,6 +43,10 @@ module port_priority_case #(
       for (int e = 0; e < Entries; e++) begin
         random_next();
         compatible[e] = Ports'(random_state);
+        if (UniformSimplePorts) begin
+          compatible[e] = {Ports{random_state[0]}};
+          compatible[e][LastPort] = random_state[1];
+        end
         for (int o = 0; o < Entries; o++) older[o][e] = o < e;
       end
       used = '0;
@@ -76,21 +82,25 @@ module port_priority_case #(
       assert (claimed === used && baseline === used)
       else $fatal(1, "claim mismatch");
     end
-    $display("PASS: static port priority Ports=%0d LastPort=%0d", Ports, LastPort);
+    $display("PASS: static port priority Ports=%0d LastPort=%0d UniformSimplePorts=%0d", Ports,
+             LastPort, UniformSimplePorts);
     done = 1;
   end
 endmodule
 
 module tb_port_priority;
-  wire [9:0] done;
-  for (genvar n = 1; n <= 4; n++) begin : g_ports
-    for (genvar last = 0; last < n; last++) begin : g_last
-      port_priority_case #(
-          .Ports(n),
-          .LastPort(last)
-      ) test (
-          .done(done[n*(n-1)/2+last])
-      );
+  wire [19:0] done;
+  for (genvar uniform_ports = 0; uniform_ports < 2; uniform_ports++) begin : g_uniform
+    for (genvar n = 1; n <= 4; n++) begin : g_ports
+      for (genvar last = 0; last < n; last++) begin : g_last
+        port_priority_case #(
+            .Ports(n),
+            .LastPort(last),
+            .UniformSimplePorts(uniform_ports != 0)
+        ) test (
+            .done(done[uniform_ports*10+n*(n-1)/2+last])
+        );
+      end
     end
   end
   initial begin

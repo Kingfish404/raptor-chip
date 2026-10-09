@@ -1,3 +1,4 @@
+#include "raptor_platform.h"
 #ifndef PLIC_WIDTH_TRANSLATED
 #define PLIC_WIDTH_TRANSLATED 0
 #endif
@@ -23,7 +24,7 @@
   li t1, 0x8000000000000000
 #else
   /* VA 0x40000000 -> PA 0x0c000000, identity-map the test's RAM. */
-  li t1, 0x030000cf
+  li t1, RAPTOR_PTE(RAPTOR_PLIC_BASE, 0xcf)
   sw t1, 1024(t0)
   li t1, 0x200000cf
   li t2, 2048

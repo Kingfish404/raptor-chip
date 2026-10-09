@@ -1,5 +1,6 @@
 /* PMA fault/recovery matrix: default device CBO.ZERO; PMA_READONLY=1
  * selects ROM/flash store, AMO and CBO.ZERO protection. */
+#include "raptor_platform.h"
 #ifndef PMA_READONLY
 #define PMA_READONLY 0
 #endif
@@ -28,15 +29,15 @@ _start:
   csrw menvcfg, t0
   li s7, 0
 #if PMA_READONLY
-  li s9, 0x20001000
+  li s9, (RAPTOR_MROM_BASE + 0x1000)
   jal ra, test_readonly
-  li s9, 0x30001000
+  li s9, (RAPTOR_FLASH_BASE + 0x1000)
   jal ra, test_readonly
   li t0, 6
 #else
-  li s9, 0x02000000
+  li s9, RAPTOR_CLINT_BASE
   jal ra, test_zero_fault
-  li s9, 0x10000000
+  li s9, RAPTOR_NS16550_BASE
   jal ra, test_zero_fault
   li t0, 4
 #endif
@@ -64,9 +65,9 @@ _start:
   sw t0, 1024(s0)
 #endif
 #if PMA_READONLY
-  li t0, 0x080004cf /* MROM 0x20001000, V/R/W/X/A/D */
+  li t0, RAPTOR_PTE(RAPTOR_MROM_BASE + 0x1000, 0xcf) /* MROM 0x20001000, V/R/W/X/A/D */
 #else
-  li t0, 0x008000cf /* CLINT 0x02000000, V/R/W/X/A/D */
+  li t0, RAPTOR_PTE(RAPTOR_CLINT_BASE, 0xcf) /* CLINT 0x02000000, V/R/W/X/A/D */
 #endif
   la t1, level0
   REG_S t0, 0(t1)

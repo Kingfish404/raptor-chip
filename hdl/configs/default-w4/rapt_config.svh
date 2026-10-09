@@ -2,23 +2,25 @@
 `define RAPT_CONFIG_SVH
 
 /**
- * default-w4 preset: four decode, rename, dispatch, commit and integer issue
- * lanes, with the default preset's early load and store-follower paths.
- * Cache geometry/BPU match default; L1D has four MSHRs.
+ * default-w4 preset: four decode, rename, dispatch and commit lanes and two
+ * integer issue lanes, with the default preset's early load and
+ * store-follower paths.
+ * Cache geometry matches default; L1D has four MSHRs. TAGE tagged tables
+ * have 1,024 entries each.
  *
- * ROB 64 provides sixteen full dispatch groups; ALQ/IOQ 16 provide four.
- * RNQ/UOQ retain two full groups because neither queue reclaims space on the
- * admission edge. Operand spill 32 matches half the ROB; PHY 128 covers the
- * architectural mappings, ROB writers and renamed work before allocation.
+ * ROB 32 provides eight full dispatch groups; ALQ/IOQ 8 provide two.
+ * Two integer ports limit execution and completion-broadcast replication.
+ * The 12-lane dispatch window retains four ranked owners, four carried
+ * allocations and four live allocations. RNQ/UOQ and operand spill each
+ * retain two full groups. PHY 64 covers architectural mappings, ROB writers
+ * and renamed work before allocation.
  *
- * These capacities are an evaluation starting point, not a measured optimum.
- * Earlier CoreMark runs used ROB 32 and ALQ/IOQ 8. Keep capacities and fast
- * paths overrideable for separate performance and physical-cost comparisons.
+ * Capacities and fast paths remain overrideable for performance and physical
+ * cost comparisons.
  */
 /**
  * Architecture (arch) Parameters
  * @param RAPT_XLEN: Width of an integer register in bits
- * @param RAPT_I_EXTENSION: I Extension
  * @param RAPT_M_EXTENSION: M Extension
  */
 // To select RV64: define RAPT_RV64 via compiler flag (-DRAPT_RV64)
@@ -30,7 +32,6 @@
 `define RAPT_XLEN 32
 `define RAPT_MISA 'h4014112f
 `endif
-`define RAPT_I_EXTENSION 'h1
 `define RAPT_M_EXTENSION 'h1
 
 /**
@@ -54,11 +55,6 @@
 
 // Branch predictor
 `define RAPT_PHT_SIZE 1024
-`ifdef RAPT_RV64
-`ifndef RAPT_BPU_AUX_PC_HASH
-`define RAPT_BPU_AUX_PC_HASH 1
-`endif
-`endif
 `define RAPT_BTB_SIZE 256
 `define RAPT_BTB_WAYS 2
 `define RAPT_RSB_SIZE 16
@@ -72,8 +68,9 @@
 `define RAPT_BPU_DIRP_TAGE
 
 // Shared RV32/RV64 OoO window sizing for simulation and FPGA.
-// ROB is the primary in-flight window; PHY must cover 32 arch regs plus the
-// worst case of ROB_SIZE in-flight register writers (power of 2 required).
+// ROB is the primary in-flight window. With RAPT_FETCH_LOOKAHEAD, ROB_SIZE must
+// be a power of two (the BPU tracks 2 * ROB_SIZE predictions). PHY only has to
+// exceed the 32 arch regs; 32 + ROB_SIZE avoids rename stalls on free registers.
 `ifndef RAPT_RIQ_SIZE
 `define RAPT_RIQ_SIZE 8
 `endif
@@ -81,18 +78,22 @@
 `define RAPT_IIQ_SIZE 8
 `endif
 `ifndef RAPT_ROB_SIZE
-`define RAPT_ROB_SIZE 64
+`define RAPT_ROB_SIZE 32
 `endif
-`ifndef RAPT_OPERAND_SPILL_ENTRIES
-`define RAPT_OPERAND_SPILL_ENTRIES (`RAPT_ROB_SIZE / 2)
+`ifndef RAPT_STEER_SCAN_ENTRIES
+`define RAPT_STEER_SCAN_ENTRIES 12
 `endif
 
-// ALQ is shared by all four integer issue ports; IOQ feeds the scalar LSU.
+`ifndef RAPT_OPERAND_SPILL_ENTRIES
+`define RAPT_OPERAND_SPILL_ENTRIES 8
+`endif
+
+// ALQ is shared by all three integer issue ports; IOQ feeds the scalar LSU.
 `ifndef RAPT_RS_SIZE
-`define RAPT_RS_SIZE 16
+`define RAPT_RS_SIZE 8
 `endif
 `ifndef RAPT_IOQ_SIZE
-`define RAPT_IOQ_SIZE 16
+`define RAPT_IOQ_SIZE 8
 `endif
 
 // Unified SQ (Phase A): one queue holds a store from execute to drain
@@ -108,53 +109,16 @@
 // everything else retries via the trap-owning A channel.
 `define RAPT_LSU_HUM
 
-// Match the default preset's load wakeup and store-following retirement paths.
-`ifndef RAPT_IOQ_EARLY_LOAD_BCAST
-`define RAPT_IOQ_EARLY_LOAD_BCAST 1
-`endif
-`ifndef RAPT_IOQ_LIVE_EARLY_BCAST
-`define RAPT_IOQ_LIVE_EARLY_BCAST 1
-`endif
-`ifndef RAPT_IOQ_EARLY_LOAD_STORES
-`define RAPT_IOQ_EARLY_LOAD_STORES 1
-`endif
-`ifndef RAPT_IOQ_WAKE_NEXT_B_REQUEST
-`define RAPT_IOQ_WAKE_NEXT_B_REQUEST 1
-`endif
-`ifndef RAPT_ROU_STORE_FOLLOWER
-`define RAPT_ROU_STORE_FOLLOWER 1
+// Retain early load completion and store-following retirement paths.
+`ifndef RAPT_IOQ_LOAD_RESPONSE_STAGE
+`define RAPT_IOQ_LOAD_RESPONSE_STAGE 0
 `endif
 
-`ifndef RAPT_ALQ_LOAD_WAKE
-`define RAPT_ALQ_LOAD_WAKE 1
-`endif
-`ifndef RAPT_BRQ_CDB_WAKE
-`define RAPT_BRQ_CDB_WAKE 1
-`endif
-`ifndef RAPT_IOQ_FORWARD_REQUEST
-`define RAPT_IOQ_FORWARD_REQUEST 1
-`endif
-`ifndef RAPT_IOQ_STORE_PRECHECK
-`define RAPT_IOQ_STORE_PRECHECK 1
-`endif
-`ifndef RAPT_MDQ_LIVE_WAKE
-`define RAPT_MDQ_LIVE_WAKE 1
-`endif
-`ifndef RAPT_SQ_NARROW_FORWARD
-`define RAPT_SQ_NARROW_FORWARD 1
-`endif
-`ifndef RAPT_FETCH_BRANCH_FOLLOWER
-`define RAPT_FETCH_BRANCH_FOLLOWER 1
-`endif
 `ifndef RAPT_TAGE_BIM_BITS
 `define RAPT_TAGE_BIM_BITS 10
 `endif
 `ifndef RAPT_TAGE_INDEX_BITS
-`define RAPT_TAGE_INDEX_BITS 9
-`endif
-
-`ifndef RAPT_BPU_AUX_TAGE
-`define RAPT_BPU_AUX_TAGE 1
+`define RAPT_TAGE_INDEX_BITS 10
 `endif
 
 // RVFI: RISC-V Formal Interface for formal verification.
@@ -163,7 +127,7 @@
 
 // Ordered stage widths are authoritative and independently overrideable.
 `ifndef RAPT_INTEGER_ISSUE_PORTS
-`define RAPT_INTEGER_ISSUE_PORTS 4
+`define RAPT_INTEGER_ISSUE_PORTS 2
 `endif
 `ifndef RAPT_INTEGER_SYSTEM_PORT
 `define RAPT_INTEGER_SYSTEM_PORT 0
@@ -187,18 +151,14 @@
 // unaligned 32-bit instruction at the end of the window.
 `define RAPT_FETCH_WIDE
 
-`ifdef RAPT_I_EXTENSION
 `define RAPT_REG_SIZE 32 // 32 registers
-`else
-`define RAPT_REG_SIZE 16 // 16 registers
-`endif
 
 `define RAPT_REG_LEN $clog2(`RAPT_REG_SIZE) // Register Length
 
 // Shared simulation/FPGA default. Explicit overrides remain available for
 // parameterized verification; PHY must still cover the configured ROB.
 `ifndef RAPT_PHY_SIZE
-`define RAPT_PHY_SIZE 128 // physical register number (must be power of 2)
+`define RAPT_PHY_SIZE 64 // total physical registers, including architectural mappings
 `endif
 `define RAPT_PHY_LEN $clog2(`RAPT_PHY_SIZE)
 

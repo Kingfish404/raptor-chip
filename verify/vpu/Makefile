@@ -54,7 +54,7 @@ vrf:
 	@mkdir -p $(VRF_BUILD)
 	$(VERILATOR) $(FLAGS) --top-module tb_vpu_vrf --Mdir $(VRF_BUILD) \
 	  -GVLEN=$(VLEN) -GBankBits=$(BANK_BITS) -GBanks=$(BANKS) \
-	  $(ROOT)/hdl/memory/rapt_sram_1rw.sv $(VPU)/rapt_vpu_vrf.sv \
+	  $(ROOT)/hdl/sram/rapt_sram_1rw.sv $(VPU)/rapt_vpu_vrf.sv \
 	  $(CURDIR)/tb_vpu_vrf.sv >$(VRF_BUILD)/build.log 2>&1 \
 	  || { cat $(VRF_BUILD)/build.log; exit 1; }
 	$(VRF_BUILD)/Vtb_vpu_vrf | tee $(VRF_BUILD)/run.log
@@ -90,7 +90,7 @@ endif
 	  -GOptimizeOperandReads=$(OPT_READS) \
 	  -CFLAGS '-DTEST_XLEN=$(XLEN) -DTEST_VLEN=$(VLEN) -DTEST_ELEN=$(ELEN) -DTEST_OPT_READS=$(OPT_READS) -DTEST_CORE_ADAPTER=$(CORE_ADAPTER)' \
 	  $(DIFF_FLAGS) \
-	  $(ROOT)/hdl/memory/rapt_sram_1rw.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_fma.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_divsqrt.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_convert_narrow.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_int_to_fp.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv $(wildcard $(VPU)/*.sv) $(CURDIR)/test_vpu.cpp \
+	  $(ROOT)/hdl/sram/rapt_sram_1rw.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_fma.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_divsqrt.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_convert_narrow.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_int_to_fp.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv $(wildcard $(VPU)/*.sv) $(CURDIR)/test_vpu.cpp \
 	  >$(TOP_BUILD)/build.log 2>&1 || { cat $(TOP_BUILD)/build.log; exit 1; }
 	$(TOP_BUILD)/Vrapt_vpu $(if $(filter-out full,$(TOP_SUITE)),--$(TOP_SUITE),) | tee $(TOP_BUILD)/run.log
 

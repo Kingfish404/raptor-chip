@@ -10,14 +10,14 @@
 #include <stdarg.h>
 
 /* ---- LiteX UART CSR (memory-mapped) ----
- * Default LiteX CSR base = 0xf0000000, UART is typically the first peripheral.
+ * Raptor LiteX CSR base = 0x11000000; UART occupies slot 3 at 0x11001800.
  * CSR registers are 32-bit aligned, 8-bit values in bits [7:0].
  *
  * These addresses match the default LiteX SoC configuration.
  * If your SoC has different CSR layout, override UART_BASE via -D flag.
  */
 #ifndef UART_BASE
-#define UART_BASE 0xf0001800UL
+#define UART_BASE 0x11001800UL
 #endif
 
 #define UART_RXTX   (*(volatile uint32_t *)(UART_BASE + 0x00))

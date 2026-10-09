@@ -2,6 +2,7 @@
  * C.EBREAK and EBREAK at both IALIGN=16 positions, M/S/U origins, optionally
  * delegated to S. No EBREAK tval value is assumed by this test.
  */
+#include "raptor_platform.h"
 #ifndef BREAK_PRIV
 #define BREAK_PRIV 3
 #endif
@@ -138,12 +139,12 @@ finish:
   bne s9, t0, fail
   li t0, 2
   bne s10, t0, fail
-  li t0, 0x100000
+  li t0, RAPTOR_FINISHER_BASE
   li t1, 0x5555
   sw t1, 0(t0)
 1: j 1b
 fail:
-  li t0, 0x100000
+  li t0, RAPTOR_FINISHER_BASE
   li t1, 0x3333
   sw t1, 0(t0)
 2: j 2b

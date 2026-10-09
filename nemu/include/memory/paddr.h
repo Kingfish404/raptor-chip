@@ -27,7 +27,9 @@ static const uint64_t CONFIG_ROM_BASE = 0x00001000;
 #define CONFIG_ROM_SIZE 0x0000f000
 
 static const uint64_t CONFIG_SDRAM_BASE = 0xa0000000;
-#ifdef CONFIG_RAPTOR_MEMORY_MAP
+#ifdef CONFIG_RAPTOR_PMEM_2G
+#define CONFIG_SDRAM_SIZE 0
+#elif defined(CONFIG_RAPTOR_MEMORY_MAP)
 #define CONFIG_SDRAM_SIZE 0x02000000
 #else
 #define CONFIG_SDRAM_SIZE 0x20000000
@@ -74,7 +76,12 @@ static inline bool in_pmem(paddr_t addr)
 
 static inline bool in_sdram(paddr_t addr)
 {
+#ifdef CONFIG_RAPTOR_PMEM_2G
+  (void)addr;
+  return false;
+#else
   return addr >= CONFIG_SDRAM_BASE && addr < CONFIG_SDRAM_BASE + CONFIG_SDRAM_SIZE;
+#endif
 }
 
 static inline bool in_sram(paddr_t addr)

@@ -3,7 +3,7 @@
 # Memory map (must agree with link.ld and the LiteX FPGA SoC):
 #   ROM   : 0x20000000  (32 KB, integrated_rom)
 #   SRAM  : 0x0f000000  (8 KB,  integrated_sram — stack + .data + .bss)
-#   UART  : 0xf0001800  (LiteX liteuart CSR base)
+#   UART  : 0x11001800  (LiteX liteuart CSR base)
 #
 # Reset-vector code path:
 #   1. Set up sp at the top of SRAM.

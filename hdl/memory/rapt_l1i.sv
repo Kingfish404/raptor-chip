@@ -737,6 +737,7 @@ module rapt_l1i #(
       .clock(clock),
       .reset(reset),
       .read_addr(data_bank_raddr),
+      .read_focus_word(sram_read_offset),
       .write_valid(l1i_fill_en),
       .write_set(idx_fetch),
       .write_word(offset_fetch),

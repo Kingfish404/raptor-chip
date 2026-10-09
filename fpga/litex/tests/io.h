@@ -2,7 +2,7 @@
  * Tiny I/O helpers for Raptor LiteX microbenchmarks.
  *
  * Everything inline so there's no linker graph to worry about.
- *   - putchar  -> LiteX sim UART at 0xf0001800 (TXFULL at 0xf0001804)
+ *   - putchar  -> LiteX sim UART at 0x11001800 (TXFULL at 0x11001804)
  *   - rdcycle  -> standard Zicntr cycle CSR (32-bit read pair for RV32)
  *   - print_*  -> minimal no-libc string/dec formatting
  */
@@ -11,8 +11,8 @@
 
 #include <stdint.h>
 
-#define UART_RXTX    0xf0001800u
-#define UART_TXFULL  0xf0001804u
+#define UART_RXTX    0x11001800u
+#define UART_TXFULL  0x11001804u
 
 static inline void putc_uart(char c) {
     volatile uint32_t *txfull = (volatile uint32_t *)UART_TXFULL;

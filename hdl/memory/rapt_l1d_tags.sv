@@ -60,14 +60,63 @@ module rapt_l1d_tags #(
     output logic update_blocked
 );
   logic [L1D_LINE_SIZE-1:0] l1d_valid[L1D_N_WAYS][L1D_SIZE];
+  logic update_allowed;
+  // Retain the generic flop layout and its stable verification view.
   logic [L1dTagW-1:0] l1d_tag[L1D_N_WAYS][L1D_SIZE];
+  logic [L1dTagW-1:0] tag_addr_data[L1D_N_WAYS];
+  logic [L1dTagW-1:0] tag_waddr_data[L1D_N_WAYS];
+  logic [L1dTagW-1:0] tag_probe_data[L1D_N_WAYS];
+  logic [L1dTagW-1:0] tag_update_data[L1D_N_WAYS];
+  logic [L1dTagW-1:0] tag_clear_data[L1D_N_WAYS];
+  logic [L1dTagW-1:0] tag_inspect_data[L1D_N_WAYS];
+  logic [L1D_N_WAYS-1:0] tag_write, clear_tag_match;
+  for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_tag_storage
+    assign tag_write[way] = !reset && !(|clear_set) && !clear_line_valid
+        && l1d_update && l1d_valid_u && update_allowed && l1d_way == L1dWayW'(way);
+    assign clear_tag_match[way] = tag_clear_data[way] == clear_line_tag;
+    if (`RAPT_FPGA_LUTRAM) begin : g_lutram
+      // One write per way, replicated for each independent asynchronous read.
+      (* ram_style = "distributed" *) logic [L1dTagW-1:0] addr_words[L1D_SIZE];
+      (* ram_style = "distributed" *) logic [L1dTagW-1:0] waddr_words[L1D_SIZE];
+      (* ram_style = "distributed" *) logic [L1dTagW-1:0] probe_words[L1D_SIZE];
+      (* ram_style = "distributed" *) logic [L1dTagW-1:0] update_words[L1D_SIZE];
+      (* ram_style = "distributed" *) logic [L1dTagW-1:0] clear_words[L1D_SIZE];
+      (* ram_style = "distributed" *) logic [L1dTagW-1:0] inspect_words[L1D_SIZE];
+      always_ff @(posedge clock)
+        if (tag_write[way]) begin
+          addr_words[l1d_idx] <= l1d_tag_u;
+          waddr_words[l1d_idx] <= l1d_tag_u;
+          probe_words[l1d_idx] <= l1d_tag_u;
+          update_words[l1d_idx] <= l1d_tag_u;
+          clear_words[l1d_idx] <= l1d_tag_u;
+          inspect_words[l1d_idx] <= l1d_tag_u;
+        end
+      assign tag_addr_data[way] = addr_words[addr_idx];
+      assign tag_waddr_data[way] = waddr_words[waddr_idx];
+      assign tag_probe_data[way] = probe_words[probe_idx];
+      assign tag_update_data[way] = update_words[l1d_idx];
+      assign tag_clear_data[way] = clear_words[clear_line_idx];
+      assign tag_inspect_data[way] = inspect_words[inspect_set];
+    end else begin : g_flops
+      for (genvar set_idx = 0; set_idx < L1D_SIZE; set_idx++) begin : g_set
+        always_ff @(posedge clock)
+          if (tag_write[way] && l1d_idx == L1D_LEN'(set_idx))
+            l1d_tag[way][set_idx] <= l1d_tag_u;
+      end
+      assign tag_addr_data[way] = l1d_tag[way][addr_idx];
+      assign tag_waddr_data[way] = l1d_tag[way][waddr_idx];
+      assign tag_probe_data[way] = l1d_tag[way][probe_idx];
+      assign tag_update_data[way] = l1d_tag[way][l1d_idx];
+      assign tag_clear_data[way] = l1d_tag[way][clear_line_idx];
+      assign tag_inspect_data[way] = l1d_tag[way][inspect_set];
+    end
+  end
   logic [L1D_LINE_SIZE-1:0] dirty[L1D_N_WAYS][L1D_SIZE];
   logic [L1D_N_WAYS-1:0] dirty_conflict;
   logic [L1D_N_WAYS-1:0] update_tag_match;
   logic clear_blocked;
-  logic update_allowed;
 
-  assign inspect_tag = l1d_tag[inspect_way][inspect_set];
+  assign inspect_tag = tag_inspect_data[inspect_way];
   assign inspect_valid = l1d_valid[inspect_way][inspect_set];
   assign inspect_dirty = dirty[inspect_way][inspect_set];
   assign update_allowed = !update_blocked;
@@ -115,7 +164,7 @@ module rapt_l1d_tags #(
   logic [L1D_N_WAYS-1:0] way_tag_match;
   generate
     for (genvar w = 0; w < L1D_N_WAYS; w++) begin : gen_line_tag_cmp
-      assign way_tag_match[w] = (l1d_tag[w][addr_idx] == addr_tag);
+      assign way_tag_match[w] = (tag_addr_data[w] == addr_tag);
       assign load_way_hit[w] = l1d_valid[w][addr_idx][addr_offset] & way_tag_match[w];
     end
   endgenerate
@@ -165,9 +214,9 @@ module rapt_l1d_tags #(
 
 
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_probe
-    assign probe_way_hit[way] = (l1d_tag[way][probe_idx] == probe_tag)
+    assign probe_way_hit[way] = (tag_probe_data[way] == probe_tag)
                                & l1d_valid[way][probe_idx][probe_offset];
-    assign clear_line_dirty_way[way] = (l1d_tag[way][clear_line_idx] == clear_line_tag)
+    assign clear_line_dirty_way[way] = clear_tag_match[way]
                                     && (|dirty[way][clear_line_idx]);
   end
 
@@ -175,7 +224,7 @@ module rapt_l1d_tags #(
   logic [L1D_N_WAYS-1:0] way_whit;
   generate
     for (genvar w = 0; w < L1D_N_WAYS; w++) begin : gen_line_wtag_cmp
-      assign way_wtag_match[w] = (l1d_tag[w][waddr_idx] == waddr_tag);
+      assign way_wtag_match[w] = (tag_waddr_data[w] == waddr_tag);
       assign way_whit[w] = l1d_valid[w][waddr_idx][waddr_offset] & way_wtag_match[w];
     end
   endgenerate
@@ -205,7 +254,7 @@ module rapt_l1d_tags #(
   // Only one set can be updated per cycle. Select its tags before comparing,
   // rather than broadcasting the incoming tag into one comparator per set.
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_update_match
-    assign update_tag_match[way] = l1d_tag[way][l1d_idx] == l1d_tag_u;
+    assign update_tag_match[way] = tag_update_data[way] == l1d_tag_u;
   end
 
   // Each line has one state writer. Clear dominates install/invalidate;
@@ -215,7 +264,7 @@ module rapt_l1d_tags #(
       always_ff @(posedge clock) begin
         if (reset || (clear_set[set_idx] && update_allowed)
             || (clear_line_valid && clear_line_idx == L1D_LEN'(set_idx)
-                && l1d_tag[way][set_idx] == clear_line_tag
+                && clear_tag_match[way]
                 && (!WriteBack || !(|dirty[way][set_idx])))) begin
           l1d_valid[way][set_idx] <= '0;
         end else if (!(|clear_set) && !clear_line_valid && l1d_update && update_allowed
@@ -234,17 +283,12 @@ module rapt_l1d_tags #(
             l1d_valid[way][set_idx][l1d_off] <= 1'b0;
           end
         end
-        // Tags need no reset; their corresponding valid bits gate use.
-        if (!reset && !(|clear_set) && !clear_line_valid
-            && l1d_update && l1d_valid_u && update_allowed
-            && l1d_idx == L1D_LEN'(set_idx) && l1d_way == L1dWayW'(way))
-          l1d_tag[way][set_idx] <= l1d_tag_u;
       end
       if (WriteBack) begin : g_dirty_state
         always_ff @(posedge clock) begin
           if (reset || (clear_set[set_idx] && update_allowed)
               || (clear_line_valid && clear_line_idx == L1D_LEN'(set_idx)
-                  && l1d_tag[way][set_idx] == clear_line_tag
+                  && clear_tag_match[way]
                   && !(|dirty[way][set_idx])))
             dirty[way][set_idx] <= '0;
           else begin

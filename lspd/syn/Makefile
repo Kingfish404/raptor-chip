@@ -37,7 +37,9 @@ VIVADO ?= vivado
 FPGA_PART ?= xcku15p-ffva1156-2-e
 FPGA_THREADS ?= 4
 FPGA_XLEN ?= 64
+FPGA_SYNTH_DIRECTIVE ?= default
 FPGA_BUILD_DIR ?= $(abspath ../fpga/build/$(RAPT_CONFIG)/$(FPGA_PART)/rv$(FPGA_XLEN)/$(MODULE)/$(CLK_FREQ_MHZ)MHz)
+FPGA_LUTRAM_DEFINE := $(if $(filter -DRAPT_FPGA_LUTRAM -DRAPT_FPGA_LUTRAM=%,$(EXTRA_DEFINES)),,-DRAPT_FPGA_LUTRAM=1)
 
 NPROC := $(shell nproc 2>/dev/null || echo 1)
 MEM_AVAILABLE_MB := $(shell awk '/MemAvailable:/ { print int($$2 / 1024) }' /proc/meminfo 2>/dev/null || echo 0)
@@ -69,7 +71,7 @@ SYNTH_CONFIG_STAMP := $(BUILD_DIR)/.synth_config
 SRAM_DIR := $(RAPT_HOME)/sim/sram
 SRAM_BLACKBOX := $(SRAM_DIR)/wrappers/rapt_sram_blackbox.v
 SRAM_STAMP := $(SRAM_DIR)/build/$(SRAM_PLATFORM)/.lspd-stubs.ok
-SRAM_LIB_FILES = $(shell $(MAKE) -s -C $(SRAM_DIR) print-libs PLATFORM=$(SRAM_PLATFORM))
+SRAM_LIB_FILES = $(shell $(MAKE) --no-print-directory -s -C $(SRAM_DIR) print-libs PLATFORM=$(SRAM_PLATFORM))
 
 TOP_WRAPPER := $(wildcard $(HDL_WRAPPER_DIR)/$(TOP).sv)
 HDL_SV := $(HDL_ROOT)/rapt_pkg.sv \
@@ -189,20 +191,21 @@ fpga-syn: ## Run module-level Vivado OOC synthesis (SRAM_MODE=flops)
 fpga-syn-locked:
 	@printf 'status incomplete\n' > '$(FPGA_BUILD_DIR)/status.txt'
 	@command -v $(VIVADO) >/dev/null
-	@printf 'module=%s\ntop=%s\nconfig=%s\nxlen=%s\npart=%s\nperiod_ns=%s\nio_delay_frac=%s\nthreads=%s\ndefines=%s\n' \
+	@printf 'module=%s\ntop=%s\nconfig=%s\nxlen=%s\npart=%s\nperiod_ns=%s\nio_delay_frac=%s\nthreads=%s\nsynth_directive=%s\ndefines=%s\n' \
 		'$(MODULE)' '$(TOP)' '$(RAPT_CONFIG)' '$(FPGA_XLEN)' '$(FPGA_PART)' '$(PERIOD_NS)' '$(IO_DELAY_FRAC)' '$(FPGA_THREADS)' \
-		'$(EXTRA_DEFINES) $(if $(filter 64,$(FPGA_XLEN)),-DRAPT_RV64) -DRAPT_FPGA_DSP=1' > '$(FPGA_BUILD_DIR)/run_config.txt'
-	@sha256sum $(SYNTH_SV_FILES) $(HDL_HEADERS) $(LSPD_DIR)/modules.mk $(abspath Makefile) $(abspath scripts/fpga_synth.tcl) > '$(FPGA_BUILD_DIR)/source_manifest.sha256'
+		'$(FPGA_SYNTH_DIRECTIVE)' '$(EXTRA_DEFINES) $(if $(filter 64,$(FPGA_XLEN)),-DRAPT_RV64) -DRAPT_FPGA_DSP=1 $(FPGA_LUTRAM_DEFINE)' > '$(FPGA_BUILD_DIR)/run_config.txt'
+	@sha256sum $(SYNTH_SV_FILES) $(HDL_HEADERS) $(LSPD_DIR)/modules.mk $(abspath Makefile) $(abspath scripts/fpga_synth.tcl) $(abspath scripts/check_fpga_ram_mapping.py) $(abspath fpga_ram_expectations.tsv) > '$(FPGA_BUILD_DIR)/source_manifest.sha256'
 	@$(YOSYS) -V > '$(FPGA_BUILD_DIR)/tools.txt'
 	@$(VIVADO) -version >> '$(FPGA_BUILD_DIR)/tools.txt'
 	@$(TIME) -o '$(FPGA_BUILD_DIR)/export.profile' -f 'status=%x\nelapsed_sec=%e\nmax_rss_kb=%M' \
-		$(YOSYS) -Q -T -m slang -p 'read_slang $(SLANG_FLAGS) $(if $(filter 64,$(FPGA_XLEN)),-DRAPT_RV64) -DRAPT_FPGA_DSP=1 --top $(TOP) $(SYNTH_SV_FILES); hierarchy -check -top $(TOP); select -assert-none t:$$check t:$$assert t:$$assume t:$$cover; proc; opt; bwmuxmap; check -assert; write_verilog $(FPGA_BUILD_DIR)/elaborated.v' \
+		$(YOSYS) -Q -T -m slang -p 'read_slang $(SLANG_FLAGS) $(if $(filter 64,$(FPGA_XLEN)),-DRAPT_RV64) -DRAPT_FPGA_DSP=1 $(FPGA_LUTRAM_DEFINE) --top $(TOP) $(SYNTH_SV_FILES); hierarchy -check -top $(TOP); select -assert-none t:$$check t:$$assert t:$$assume t:$$cover; proc; opt; bwmuxmap; check -assert; write_verilog $(FPGA_BUILD_DIR)/elaborated.v' \
 		> '$(FPGA_BUILD_DIR)/export.log' 2>&1 || { tail -60 '$(FPGA_BUILD_DIR)/export.log'; exit 1; }
 	@FPGA_TOP='$(TOP)' FPGA_OUT='$(abspath $(FPGA_BUILD_DIR))' FPGA_PART='$(FPGA_PART)' FPGA_THREADS='$(FPGA_THREADS)' \
-	 FPGA_CLOCK='$(CLOCK_PORT)' FPGA_PERIOD='$(PERIOD_NS)' FPGA_IO_FRAC='$(IO_DELAY_FRAC)' \
+	 FPGA_CLOCK='$(CLOCK_PORT)' FPGA_PERIOD='$(PERIOD_NS)' FPGA_IO_FRAC='$(IO_DELAY_FRAC)' FPGA_SYNTH_DIRECTIVE='$(FPGA_SYNTH_DIRECTIVE)' \
 	 $(TIME) -o '$(FPGA_BUILD_DIR)/synth.profile' -f 'status=%x\nelapsed_sec=%e\nmax_rss_kb=%M' \
 		sh -c "cd '$(abspath $(FPGA_BUILD_DIR))' && exec $(VIVADO) -mode batch -nojournal -log vivado.log -source '$(abspath scripts/fpga_synth.tcl)'" \
 		> '$(FPGA_BUILD_DIR)/console.log' 2>&1 || { tail -60 '$(FPGA_BUILD_DIR)/console.log'; exit 1; }
+	@python3 scripts/check_fpga_ram_mapping.py --manifest fpga_ram_expectations.tsv --report '$(FPGA_BUILD_DIR)/utilization.rpt' --module '$(MODULE)' --config '$(RAPT_CONFIG)' --xlen '$(FPGA_XLEN)' --top '$(TOP)' --defines='$(EXTRA_DEFINES) $(FPGA_LUTRAM_DEFINE)'
 	@sha256sum --check --status '$(FPGA_BUILD_DIR)/source_manifest.sha256' || { echo 'Sources changed during synthesis'; exit 1; }
 	@sha256sum '$(FPGA_BUILD_DIR)/elaborated.v' '$(FPGA_BUILD_DIR)/synth.dcp' > '$(FPGA_BUILD_DIR)/artifacts.sha256'
 	@printf 'status ok\n' > '$(FPGA_BUILD_DIR)/status.txt'

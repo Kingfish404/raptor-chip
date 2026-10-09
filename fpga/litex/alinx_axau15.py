@@ -259,12 +259,14 @@ class RaptorAlinxAXAU15SoC(SoCCore):
         kwargs.setdefault("integrated_rom_size", 0x8000)
         kwargs.setdefault("integrated_sram_size", 0x2000)
         kwargs.setdefault("integrated_main_ram_size", 0)
+        kwargs["bus_data_width"] = 64
         kwargs.setdefault("bus_timeout", 4096)
 
         if with_mig and kwargs.get("integrated_main_ram_size", 0) != 0:
             raise ValueError("--with-mig requires --integrated-main-ram-size=0")
 
         SoCCore.__init__(self, platform, sys_clk_freq, **kwargs)
+        self.cpu.pmem_size = (mig_size if with_mig else kwargs["integrated_main_ram_size"]) or None
         self.add_config("BIOS_NO_BOOT")
         self.crg = _CRG(platform, sys_clk_freq)
 

@@ -9,7 +9,7 @@
 
 #include <deque>
 
-#define LITEX_SPI_BASE 0xf0008000u
+#define LITEX_SPI_BASE 0x11008000u
 #define LITEX_SPI_SIZE 0x100u
 
 #define LITEX_SPI_CONTROL 0x00u

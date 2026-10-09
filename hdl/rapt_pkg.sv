@@ -52,10 +52,6 @@ package rapt_pkg;
     int unsigned commit_width;
     int unsigned integer_issue_ports;
     int unsigned integer_system_port;
-    bit issue_rebalance;
-    bit iq_reclaim_on_issue;
-    bit recovery_dispatch_fence;
-    bit rob_dispatch_buffered;
     int unsigned steer_scan_entries;
     int unsigned rob_generation_bits;
     int unsigned branch_checkpoints;
@@ -80,10 +76,6 @@ package rapt_pkg;
       commit_width: `RAPT_COMMIT_WIDTH,
       integer_issue_ports: `RAPT_INTEGER_ISSUE_PORTS,
       integer_system_port: `RAPT_INTEGER_SYSTEM_PORT,
-      issue_rebalance: `RAPT_ISSUE_REBALANCE,
-      iq_reclaim_on_issue: `RAPT_IQ_RECLAIM_ON_ISSUE,
-      recovery_dispatch_fence: `RAPT_RECOVERY_DISPATCH_FENCE,
-      rob_dispatch_buffered: `RAPT_ROB_DISPATCH_BUFFERED,
       steer_scan_entries: `RAPT_STEER_SCAN_ENTRIES,
       rob_generation_bits: `RAPT_ROB_GENERATION_BITS,
       branch_checkpoints: `RAPT_BRANCH_CHECKPOINTS,
@@ -374,6 +366,7 @@ package rapt_pkg;
 `else
   localparam logic [31:0] PmemBytes = 32'h10000000;
 `endif
+  localparam logic [63:0] PmemEnd = 64'h80000000 + 64'(PmemBytes);
   function automatic logic [XLENPkg-1:0] canonical_addr(input logic [XLENPkg-1:0] addr);
     return (XLENPkg == 64) ? XLENPkg'({32'b0, addr[31:0]}) : addr;
   endfunction
@@ -391,6 +384,12 @@ package rapt_pkg;
     return (addr == zero_extended) || (addr == ones_extended);
   endfunction
 
+  function automatic logic addr_in_pmem(input logic [XLENPkg-1:0] addr);
+    logic [XLENPkg-1:0] a;
+    a = canonical_addr(addr);
+    return addr_upper_valid(addr) && 64'(a) >= 64'h80000000 && 64'(a) < PmemEnd;
+  endfunction
+
   function automatic logic addr_cacheable(input logic [XLENPkg-1:0] addr);
     logic [XLENPkg-1:0] a;
     a = canonical_addr(addr);
@@ -400,9 +399,17 @@ package rapt_pkg;
     || (a >= XLENPkg'(SramBase) && a < XLENPkg'(SramBase + SramBytes))
     || (a >= 'h20000000 && a < 'h20010000)  // mrom (64KB)
     || (a >= 'h30000000 && a < 'h40000000)  // flash
-    || (a >= XLENPkg'(32'h80000000) && a < XLENPkg'(32'h80000000 + PmemBytes))  // PMEM
+    || addr_in_pmem(
+        addr
+    )  // PMEM
     || (a >= XLENPkg'(32'ha0000000) && a < XLENPkg'(32'ha2000000))  // sdram
     );
+  endfunction
+
+  // True when base + any signed 12-bit immediate stays inside cacheable PMEM.
+  function automatic logic addr_pmem_offset_safe(input logic [XLENPkg-1:0] base);
+    return addr_upper_valid(base) && 64'(canonical_addr(base)) >= 64'h80000800 &&
+        64'(canonical_addr(base)) < PmemEnd - 64'h800;
   endfunction
 
   // Physical execute PMA for this platform: RAM/ROM/flash support fetch;
@@ -464,12 +471,13 @@ package rapt_pkg;
     || (a >= 'h20000000 && a < 'h20010000)  // MROM
     || (a >= 'h21000000 && a < 'h21200000)  // VGA
     || (a >= 'h30000000 && a < 'h40000000)  // FLASH
-    || (a >= XLENPkg'(32'h80000000) && a < XLENPkg'(32'h80000000 + PmemBytes))  // PMEM
-    || (a >= XLENPkg'(32'ha0000000) && a < XLENPkg'(32'ha2000000))  // SDRAM
-    || (a >= XLENPkg'(32'hf0008000) && a < XLENPkg'(32'hf0008100))  // LiteX SPI SD-card controller
-    || (a >= XLENPkg'(32'hf0001000) && a < XLENPkg'(32'hf0001100))  // LiteX UART (egos HARDWARE)
-    || (a >= XLENPkg'(32'hf0010000) && a < XLENPkg'(32'hf0020000))  // CLINT alias (egos HARDWARE)
-    || (a >= XLENPkg'(32'hc0000000)));  // raptSoC MMIO window
+    || (a >= 'h11000000 && a < 'h12000000)  // LiteX CSR banks
+    || (a >= 'h18000000 && a < 'h19000000)  // LiteEth packet SRAM
+    || addr_in_pmem(
+        addr
+    )  // PMEM
+    || (PmemBytes < 32'h80000000 && a >= XLENPkg'(32'ha0000000)
+        && a < XLENPkg'(32'ha2000000)));  // legacy simulator SDRAM
   endfunction
 
   // Device PMA is independent of page-based cache/order overrides. Physical
@@ -581,13 +589,10 @@ package rapt_pkg;
     || (a >= 'h00100000 && a <= 'h00100fff)  // finisher (sifive,test)
     || (a >= 'h02000000 && a <= 'h020bffff)  // CLINT (mtime / mtimecmp / msip)
     || (a >= 'h0c000000 && a <= 'h0cffffff)  // PLIC (claim/complete RMW)
-    || (a >= XLENPkg'(32'hf0008000) && a <= XLENPkg'(32'hf00080ff))  // LiteX SPI SD-card controller
-    || (a >= XLENPkg'(32'hf0001000) && a <= XLENPkg'(32'hf00010ff))  // LiteX UART (egos HARDWARE)
-    || (a >= XLENPkg'(32'hf0010000) && a <= XLENPkg'(32'hf001ffff))  // CLINT alias (egos HARDWARE)
-    || (a >= 'h10001000 && a <= 'h10001fff)  // uart
-    || (a >= 'h10002000 && a <= 'h1000200f)  // gpio
-    || (a >= 'h21000000 && a <= 'h211fffff)  // vga
-    || (a >= XLENPkg'(32'hc0000000)));  // raptSoC memory-mapped I/O
+    || (a >= 'h10000000 && a < 'h10011000)  // simulator UART / VirtIO / peripherals
+    || (a >= 'h11000000 && a < 'h12000000)  // LiteX CSR banks
+    || (a >= 'h18000000 && a < 'h19000000)  // LiteEth packet SRAM
+    || (a >= 'h21000000 && a < 'h21200000));  // VGA
   endfunction
 
 endpackage

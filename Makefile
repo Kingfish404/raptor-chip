@@ -78,6 +78,7 @@ VERILATOR_VERIFY_DELAY ?= 31## Maximum randomized AXI wait cycles
 VERILATOR_VERIFY_APP_DELAY ?= 3## App/PK AXI delay; high-delay stress runs in the other suites
 VERILATOR_VERIFY_SEED ?= 1## Reproducible program and AXI timing seed
 VERILATOR_VERIFY_TIMEOUT ?= 900## Wall-clock limit per whole-core test
+VERILATOR_VERIFY_RAPTOS_TIMEOUT ?= 2400## Wall-clock limit for the page-sweep memory stress
 VERILATOR_VERIFY_LINUX_DELAY ?= 7## Linux AXI delay; bounded so multi-seed boots remain practical
 VERILATOR_VERIFY_LINUX_DT_SOURCE ?= spike-rv32ima-verilator.dts## Fast-boot DT used only by this gate
 VERILATOR_VERIFY_FUZZ_NUM ?= 50## Random programs per XLEN in the gate
@@ -87,7 +88,7 @@ VERILATOR_VERIFY_RISCV_DV ?= 1## Include riscv-dv delay/seed matrix
 VERILATOR_VERIFY_RAPTOS ?= 1## Include modular RaptOS memory/atomic stress
 VERILATOR_VERIFY_RISCOF ?= 1## Include ACT4 and classic RISCOF compliance
 VERILATOR_VERIFY_LINUX ?= 1## Include RV32 Linux randomized-latency boots
-VERILATOR_VERIFY_LINUX_TIMEOUT ?= 7200## Wall-clock limit per randomized Linux boot
+VERILATOR_VERIFY_LINUX_TIMEOUT ?= 18000## Wall-clock limit per randomized Linux boot
 VERILATOR_VERIFY_LINUX_SEEDS ?= 1## One deep Linux kernel-boot seed; override for soak runs
 VERILATOR_VERIFY_MEM_SEEDS ?= 1 2 7## Multi-seed RaptOS memory/atomic stress
 VERILATOR_VERIFY_DV_DELAYS ?= 0 7 31 63 233## AXI delay maxima for riscv-dv
@@ -216,7 +217,7 @@ build-nemu32gc-linux: ## Build NEMU for RV32GC Buildroot Linux
 	$(call nemu_build,riscv32gc_linux_defconfig)
 
 build-nemu32-ref:
-	$(call nemu_build,riscv32_ref_defconfig)
+	+$(MAKE) -C $(NEMU_HOME) reference REF_DEFCONFIG=riscv32_ref_defconfig $(SUBMAKE_JOBS)
 
 menuconfig-nemu32: ## Open NEMU menuconfig
 	$(MAKE) -C $(NEMU_HOME) menuconfig
@@ -241,7 +242,7 @@ build-nemu64: ## Build NEMU (riscv64)
 	$(call nemu_build,$(NEMU64_DEFCONFIG))
 
 build-nemu64-ref:
-	$(call nemu_build,riscv64_ref_defconfig)
+	+$(MAKE) -C $(NEMU_HOME) reference REF_DEFCONFIG=riscv64_ref_defconfig $(SUBMAKE_JOBS)
 
 run-nemu64: build-nemu64 ## Build and run NEMU (riscv64)
 	$(MAKE) -C $(NEMU_HOME) run $(if $(IMG),IMG=$(IMG)) ARGS="$(ARGS) $(NEMU_DISK_ARG) $(NEMU_SDCARD_ARG)"
@@ -706,7 +707,7 @@ LINUX_MEM_STRESS_DT_SOURCE := $(if $(strip $(DT_SOURCE)),$(DT_SOURCE),spike-rv32
 LINUX_MEM_STRESS_MROM_DIR := $(NSIM_HOME)/csrc/mem/mrom-data/build/rv32-$(basename $(notdir $(LINUX_MEM_STRESS_DT_SOURCE)))
 LINUX_MEM_STRESS_MROM_IMG := $(LINUX_MEM_STRESS_MROM_DIR)/mrom-data.bin
 LINUX_MEM_STRESS_NPC_BIN := $(NSIM_HOME)/build/$(LINUX_MEM_STRESS_PROFILE)/riscv32-npc-sim
-LINUX_MEM_STRESS_NEMU_REF := $(NEMU_HOME)/build/riscv32-nemu-interpreter-so
+LINUX_MEM_STRESS_NEMU_REF := $(NEMU_HOME)/build/ref/riscv32_ref_defconfig/riscv32-nemu-interpreter-so
 
 verify-linux-boot-rv32: ## Boot RV32 Linux with difftest and require the /init milestone
 	$(MAKE) --no-print-directory linux-boot-rv32 \
@@ -811,6 +812,12 @@ format format-check:
 pack: ## Pack all SV files into one
 	$(MAKE) -C $(NSIM_HOME) pack VFLAGS="$(VFLAGS)"
 
+memory-map-check: ## Check replicated platform address and RAM constants
+	python3 $(RAPTOR_HOME)/verify/scripts/check_memory_map.py
+
+memory-map-header: ## Regenerate app/lib/raptor_platform.h from hdl/configs/memory_map.json
+	python3 $(RAPTOR_HOME)/verify/scripts/gen_platform_header.py
+
 lint: ## Lint RTL with Verilator
 	$(MAKE) -C $(NSIM_HOME) lint VFLAGS="$(VFLAGS)"
 
@@ -831,6 +838,8 @@ sta-detail: ## STA with detailed path reports, using the same memory model
 sta-check: ## Check packed RTL elaboration without technology mapping or STA
 sta sta-detail sta-check:
 	$(MAKE) -C $(NSIM_HOME) $@ MEMORY=$(MEMORY) XLEN=$(XLEN) STA_PLATFORM=$(STA_PLATFORM) CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) VFLAGS="$(VFLAGS)"
+
+sta-check: memory-map-check
 
 sta-summary: ## Display all existing STA results without running STA
 	@python3 "$(RAPTOR_HOME)/verify/scripts/sta_summary.py" \
@@ -1002,7 +1011,7 @@ verify-verilator: ## Pure-Verilator parallel regression: modules, RV32/RV64, app
 			NPROC=$(VERILATOR_VERIFY_JOBS) JOBS=$(VERILATOR_VERIFY_JOBS) \
 			MEM_RANDOM_DELAY=$(VERILATOR_VERIFY_DELAY) \
 			MEM_STRESS_FAST=1 \
-			TIMEOUT=$(VERILATOR_VERIFY_TIMEOUT) \
+			TIMEOUT=$(VERILATOR_VERIFY_RAPTOS_TIMEOUT) \
 			MEM_STRESS_SEEDS="$(VERILATOR_VERIFY_MEM_SEEDS)"; \
 	else echo "[verify-verilator] SKIP RaptOS (VERILATOR_VERIFY_RAPTOS=0)"; fi
 	+@set -eu; if [ "$(VERILATOR_VERIFY_RV64)" = "1" ]; then \

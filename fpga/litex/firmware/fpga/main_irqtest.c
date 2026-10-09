@@ -31,7 +31,7 @@
 #include <stdint.h>
 
 /* LiteUART CSR layout (matches main.c). */
-#define UART_BASE         0xf0001800u
+#define UART_BASE         0x11001800u
 #define UART_RXTX         (UART_BASE + 0x00)
 #define UART_TXFULL       (UART_BASE + 0x04)
 #define UART_RXEMPTY      (UART_BASE + 0x08)

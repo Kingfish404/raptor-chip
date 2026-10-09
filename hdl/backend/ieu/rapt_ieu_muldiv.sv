@@ -36,6 +36,10 @@ module rapt_ieu_muldiv #(
     input CompletionT completion[NumCompletions],
     input clock,
     input reset,
+    // Validated oldest-owner event; all cancellation takes effect on this edge.
+    input logic cancel_valid,
+    input logic [$clog2(ROB_SIZE)-1:0] cancel_head,
+    input logic [$clog2(ROB_SIZE)-1:0] cancel_owner,
 
     cmu_bcast_if.in cmu_bcast,
 
@@ -68,6 +72,20 @@ module rapt_ieu_muldiv #(
   logic [MDQ_SIZE-1:0] mdq_c;
   logic [MDQ_SIZE-1:0] mdq_word;
   logic [         4:0] mdq_alu     [MDQ_SIZE];
+
+  // FU tags name MDQ slots. The FU removes every matching pipeline/divider
+  // owner on the cancellation edge, before a freed slot can be allocated again.
+  logic [(1 << MDQLen)-1:0] cancel_tags;
+  function automatic logic cancelled(input logic [$clog2(ROB_SIZE)-1:0] dest);
+    logic older;
+    older = ((dest < cancel_head) == (cancel_owner < cancel_head))
+        ? dest < cancel_owner : dest >= cancel_head;
+    return cancel_valid && dest != cancel_owner && !older;
+  endfunction
+  always_comb begin
+    cancel_tags = '0;
+    for (int e = 0; e < MDQ_SIZE; e++) cancel_tags[e] = mdq_valid[e] && cancelled(mdq_dest[e]);
+  end
 
   // === Unified CDB view for operand wakeup ===
   // All sources use one typed completion array.
@@ -180,8 +198,8 @@ module rapt_ieu_muldiv #(
   logic [MDQ_SIZE-1:0] mdq_elig_vec;
   always_comb begin
     for (int i = 0; i < MDQ_SIZE; i++) begin
-      mdq_elig_vec[i] = mdq_valid[i] && !mdq_issued[i] && (!mdq_pr1_busy[i] || (`RAPT_MDQ_LIVE_WAKE && mdq_fwd1_hit[i]))
-          && (!mdq_pr2_busy[i] || (`RAPT_MDQ_LIVE_WAKE && mdq_fwd2_hit[i]));
+      mdq_elig_vec[i] = mdq_valid[i] && !cancel_tags[i] && !mdq_issued[i] && (!mdq_pr1_busy[i] || mdq_fwd1_hit[i])
+          && (!mdq_pr2_busy[i] || mdq_fwd2_hit[i]);
     end
   end
 
@@ -205,8 +223,9 @@ module rapt_ieu_muldiv #(
       .clock(clock),
       .reset(reset),
       .flush(cmu_bcast.flush_pipe),
-      .in_a((`RAPT_MDQ_LIVE_WAKE && mdq_fwd1_hit[sel_idx]) ? mdq_fwd1_val[sel_idx] : mdq_vj[sel_idx]),
-      .in_b((`RAPT_MDQ_LIVE_WAKE && mdq_fwd2_hit[sel_idx]) ? mdq_fwd2_val[sel_idx] : mdq_vk[sel_idx]),
+      .cancel_tags(cancel_tags),
+      .in_a(mdq_fwd1_hit[sel_idx] ? mdq_fwd1_val[sel_idx] : mdq_vj[sel_idx]),
+      .in_b(mdq_fwd2_hit[sel_idx] ? mdq_fwd2_val[sel_idx] : mdq_vk[sel_idx]),
       .in_op(mdq_alu[sel_idx]),
       .in_word(mdq_word[sel_idx]),
       .in_tag(sel_idx),
@@ -272,7 +291,7 @@ module rapt_ieu_muldiv #(
     end else begin
       for (int e = 0; e < MDQ_SIZE; e++)
       if (alloc_slot[e] >= 0) begin
-        mdq_valid[e]    <= 1'b1;
+        mdq_valid[e]    <= !cancelled(dispatch[alloc_slot[e]].dest);
         mdq_issued[e]   <= 1'b0;
         mdq_vj[e]       <= wake_val(dispatch[alloc_slot[e]].pr1, dispatch[alloc_slot[e]].op1);
         mdq_vk[e]       <= wake_val(dispatch[alloc_slot[e]].pr2, dispatch[alloc_slot[e]].op2);
@@ -314,6 +333,17 @@ module rapt_ieu_muldiv #(
       if (fu_out_valid) begin
         mdq_valid[fu_out_tag]  <= 1'b0;
         mdq_issued[fu_out_tag] <= 1'b0;
+      end
+
+      // No same-edge reuse: admission reads registered mdq_valid. A matching
+      // in-flight FU owner is removed on this same edge by cancel_tags.
+      for (int e = 0; e < MDQ_SIZE; e++) begin
+        if (cancel_tags[e]) begin
+          mdq_valid[e] <= 1'b0;
+          mdq_issued[e] <= 1'b0;
+          mdq_pr1_busy[e] <= 1'b0;
+          mdq_pr2_busy[e] <= 1'b0;
+        end
       end
 
       // New entries are younger than residents and ordered by dispatch slot.

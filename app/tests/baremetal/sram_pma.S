@@ -1,4 +1,5 @@
 /* Only 8 KiB SRAM exists. Deny its old 64 KiB tail, then use the last block. */
+#include "raptor_platform.h"
 #if __riscv_xlen == 64
 #define REG_S sd
 #define SATP_MODE 0x8000000000000000
@@ -148,7 +149,7 @@ machine_trap:
   csrw mepc, s11
   mret
 restore_ram:
-  li t0, 0x0f001000
+  li t0, (RAPTOR_SRAM_BASE + 0x1000)
   srli t0, t0, 2
   ori t0, t0, 0xcf
   la t1, level0

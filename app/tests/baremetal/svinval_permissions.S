@@ -1,4 +1,5 @@
 /* Svinval M/S/U and TVM transitions; independent precise illegal-trap checks. */
+#include "raptor_platform.h"
 .option norvc
 .option norelax
 #ifndef SINVAL_PRIV
@@ -70,7 +71,7 @@ next:
   li t0, 2
   blt s0, t0, enter
   bnez s6, fail
-  li t0, 0x100000
+  li t0, RAPTOR_FINISHER_BASE
   li t1, 0x5555
   sw t1, 0(t0)
 1: j 1b
@@ -109,7 +110,7 @@ finish_mode:
   csrw mepc, t3
   mret
 fail:
-  li t0, 0x100000
+  li t0, RAPTOR_FINISHER_BASE
   li t1, 0x3333
   sw t1, 0(t0)
 2: j 2b

@@ -4,64 +4,12 @@
 `include "rapt.svh"
 
 // ============================================================================
-// RNU Internal Interfaces - connect RNU sub-modules (freelist, maptable).
+// Map table interface for the standalone formal verification helper.
 // PRF interfaces have been removed: PRF now accepts source interfaces
 // (typed completion messages, rou_cmu_if, cmu_bcast_if) directly.
 // Legacy two-slot helpers use fixed A/B ports. The integrated RNU uses
 // width-parameterized interfaces instead.
 // ============================================================================
-
-// ----------------------------------------------------------------------------
-// Free List interface
-// Manages physical register allocation (rename) and deallocation (commit).
-// Dual-issue: two allocation ports (alloc_req/alloc_pr, alloc_req_b/alloc_pr_b).
-// ----------------------------------------------------------------------------
-interface rnu_fl_if #(
-    parameter unsigned PLEN = `RAPT_PHY_LEN,
-    parameter unsigned RLEN = `RAPT_REG_LEN
-);
-  // Flush recovery
-  logic             flush_pipe;
-  logic [RLEN-1:0]  flush_rd_a;
-  logic [RLEN-1:0]  flush_rd_b;
-
-  // Allocate port A (rename stage -> freelist)
-  logic             alloc_req_a;
-  logic [PLEN-1:0]  alloc_pr_a;
-  logic             alloc_empty_a;
-
-  // Allocate port B (dual issue: second rename slot)
-  logic             alloc_req_b;
-  logic [PLEN-1:0]  alloc_pr_b;
-  logic             alloc_empty_b;  // true if < 2 free registers
-
-  // Deallocate port A (commit slot A -> freelist)
-  logic             dealloc_req_a;
-  logic [PLEN-1:0]  dealloc_pr_a;
-
-  // Deallocate port B (commit slot B, dual commit)
-  logic             dealloc_req_b;
-  logic [PLEN-1:0]  dealloc_pr_b;
-
-  modport master(
-      output flush_pipe, flush_rd_a, flush_rd_b,
-      output alloc_req_a,
-      input alloc_pr_a, alloc_empty_a,
-      output alloc_req_b,
-      input alloc_pr_b, alloc_empty_b,
-      output dealloc_req_a, dealloc_pr_a,
-      output dealloc_req_b, dealloc_pr_b
-  );
-  modport slave(
-      input flush_pipe, flush_rd_a, flush_rd_b,
-      input alloc_req_a,
-      output alloc_pr_a, alloc_empty_a,
-      input alloc_req_b,
-      output alloc_pr_b, alloc_empty_b,
-      input dealloc_req_a, dealloc_pr_a,
-      input dealloc_req_b, dealloc_pr_b
-  );
-endinterface
 
 // ----------------------------------------------------------------------------
 // Map Table interface

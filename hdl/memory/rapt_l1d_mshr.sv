@@ -63,11 +63,14 @@ module rapt_l1d_mshr #(
     fill_id = '0;
     for (int i = Entries - 1; i >= 0; i--) begin
       kill_line[i] = invalidate_line && tag[i] == invalidate_addr[Xlen-1:OffsetBits];
-      if (valid[i] && done[i] && !killed[i] && !installed[i] && !invalidate && !kill_line[i]) begin
+      if (valid[i] && done[i] && !killed[i] && !installed[i] && !kill_line[i]) begin
         fill_valid = 1;
         fill_id = IdBits'(i);
       end
     end
+    // Cancellation gates the transfer, not the refill payload selection.
+    // Keeping it out of fill_id avoids a flush-to-tag-array address path.
+    fill_valid &= !invalidate;
     fill_addr = {tag[fill_id], {OffsetBits{1'b0}}};
     fill_mask = ~errors[fill_id];
     for (int w = 0; w < Words; w++) fill_data[w*Xlen+:Xlen] = data[fill_id][w];

@@ -23,6 +23,14 @@ XLEN := $(strip $(XLEN))
 ifeq ($(filter $(XLEN),32 64),)
 $(error XLEN must be 32 or 64)
 endif
+SIM_MEM_PROFILE ?= default
+SIM_MEM_PROFILE := $(strip $(SIM_MEM_PROFILE))
+ifeq ($(filter $(SIM_MEM_PROFILE),default large),)
+$(error SIM_MEM_PROFILE must be default or large)
+endif
+ifeq ($(SIM_MEM_PROFILE),large)
+override VFLAGS += -DRAPT_LARGE_PMEM -DRAPT_PMEM_BYTES=2147483648
+endif
 ifeq ($(XLEN),64)
 ifeq ($(findstring DRAPT_RV64,$(VFLAGS)),)
 override VFLAGS += -DRAPT_RV64
@@ -52,7 +60,7 @@ endif
 SIM_PLATFORM ?= sim
 SIM_PLATFORM := $(strip $(SIM_PLATFORM))
 BUILD_ROOT ?= ./build
-BUILD_PROFILE ?= $(RAPT_CONFIG)$(if $(filter ysyxsoc,$(SIM_PLATFORM)),-ysyxsoc,)
+BUILD_PROFILE ?= $(RAPT_CONFIG)$(if $(filter ysyxsoc,$(SIM_PLATFORM)),-ysyxsoc,)$(if $(filter large,$(SIM_MEM_PROFILE)),-pmem2g,)
 BUILD_PROFILE := $(strip $(BUILD_PROFILE))
 BUILD_DIR = $(BUILD_ROOT)/$(BUILD_PROFILE)
 ISA_NAME = $(if $(findstring DRAPT_RV64,$(VFLAGS)),riscv64,riscv32)
@@ -99,6 +107,9 @@ VERILATOR_THREADS := $(if $(VERILATOR_THREADS),$(VERILATOR_THREADS),1)
 SIM_PLATFORM ?= sim
 SIM_PLATFORM := $(strip $(SIM_PLATFORM))
 ifeq ($(SIM_PLATFORM),ysyxsoc)
+ifeq ($(SIM_MEM_PROFILE),large)
+$(error SIM_MEM_PROFILE=large is only supported for SIM_PLATFORM=sim)
+endif
 ifneq (,$(findstring DRAPT_RV64,$(VFLAGS)))
 $(error ysyxSoC has a 32-bit CPU interface; use SIM_PLATFORM=sim for RV64)
 endif
@@ -163,6 +174,9 @@ SIM_CXX_WARNING_FLAGS += -Wno-error=maybe-uninitialized
 endif
 CXXFLAGS = $(SIM_CXX_WARNING_FLAGS) \
 	$(call remove_quote,$(CONFIG_CC_OPT))
+ifeq ($(SIM_MEM_PROFILE),large)
+CXXFLAGS += -DRAPT_LARGE_PMEM
+endif
 LDFLAGS = -lreadline -ldl
 # Verilator FST includes lz4.h and links -llz4. Homebrew may keep lz4 in its
 # own keg, so its headers and libraries are not necessarily on compiler paths.
@@ -257,7 +271,10 @@ $(SOC_VSRC):
 	@exit 1
 endif
 
-all: $(BIN) ## Build NPC simulator
+memory-map-check:
+	python3 $(RAPTOR_HOME)/verify/scripts/check_memory_map.py
+
+all: memory-map-check $(BIN) ## Build NPC simulator
 
 INCFLAGS = $(addprefix -I, $(INC_PATH))
 CXXFLAGS += $(PLATFORM_CFLAGS) -g $(INCFLAGS) -DTOP_NAME="\"V$(VTARGET)\""
@@ -296,11 +313,11 @@ $(BIN): $(MODEL_BIN) sim-publish-force
 	@python3 "$(NSIM_HOME)/scripts/build_cache.py" publish "$(MODEL_BIN)" "$@"
 
 ifeq ($(ISA64),1)
-NEMU_REF_DEFCONFIG := riscv64_ref_defconfig
-NEMU_REF_SO := $(abspath $(NEMU_HOME)/build/riscv64-nemu-interpreter-so)
+NEMU_REF_DEFCONFIG := $(if $(filter large,$(SIM_MEM_PROFILE)),riscv64_ref_2g_defconfig,riscv64_ref_defconfig)
+NEMU_REF_SO := $(abspath $(NEMU_HOME)/build/ref/$(NEMU_REF_DEFCONFIG)/riscv64-nemu-interpreter-so)
 else
-NEMU_REF_DEFCONFIG := riscv32_ref_defconfig
-NEMU_REF_SO := $(abspath $(NEMU_HOME)/build/riscv32-nemu-interpreter-so)
+NEMU_REF_DEFCONFIG := $(if $(filter large,$(SIM_MEM_PROFILE)),riscv32_ref_2g_defconfig,riscv32_ref_defconfig)
+NEMU_REF_SO := $(abspath $(NEMU_HOME)/build/ref/$(NEMU_REF_DEFCONFIG)/riscv32-nemu-interpreter-so)
 endif
 
 # Default difftest runs need a matching NEMU reference. Leave an explicit
@@ -320,8 +337,7 @@ endif
 
 .PHONY: nemu-reference
 nemu-reference:
-	+$(MAKE) -C $(NEMU_HOME) $(NEMU_REF_DEFCONFIG)
-	+$(MAKE) -C $(NEMU_HOME) $(SUBMAKE_JOBS)
+	+$(MAKE) -C $(NEMU_HOME) reference REF_DEFCONFIG=$(NEMU_REF_DEFCONFIG) $(SUBMAKE_JOBS)
 
 SIM_RANDOM_DELAY ?= 0
 SIM_RANDOM_SEED ?= 1
@@ -526,7 +542,7 @@ pack-sram-synth-check: synth-frontend-check pack-sram ## Check packed RTL agains
 	yosys -Q -T -m slang -l $(BUILD_DIR)/pack-sram-synth-check.log -p \
 		'read_slang --top rapt $(abspath $(BUILD_DIR)/rapt_pack_sram.sv) $(RAPT_SRAM_BB_V); hierarchy -check -top rapt; select -assert-none t:$$check t:$$assert t:$$assume t:$$cover'
 
-lint: ## Lint RTL with Verilator
+lint: memory-map-check ## Lint RTL with Verilator
 	$(VERILATOR) --lint-only -Wall $(LINT_EXTRA) $(SIM_ASSERT_FLAGS) $(VSRCS) $(INCFLAGS) $(SIM_VFLAGS) --top-module $(VTARGET)
 
 VSRCS_LINT = $(filter-out $(abspath $(VSRC_PATH)/generated/%), $(VSRCS))

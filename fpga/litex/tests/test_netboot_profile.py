@@ -16,7 +16,7 @@ class NetbootProfileTest(unittest.TestCase):
     def test_help_declarations(self):
         text = (LITEX / "Makefile").read_text()
         for xlen in (32, 64):
-            for operation in ("build", "load", "info", "check", "bundle", "serve", "test", "console"):
+            for operation in ("build", "load", "info", "reports", "check", "bundle", "serve", "test", "console"):
                 self.assertIn(f"fpga-netboot-rv{xlen}-{operation}: ## ", text)
 
     def test_removed_run_is_rejected_for_both_architectures(self):
@@ -52,7 +52,7 @@ class NetbootProfileTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
             for xlen in (32, 64):
                 locks = []
-                for config in ('default', 'small', 'middle'):
+                for config in ('default', 'small', 'middle', 'default-w3'):
                     overrides = (f'RAPT_CONFIG={config}', f'VARIANT=linux{xlen}',
                                  'FPGA_BOARD=mlk_cu08_ku15p')
                     settings = self.expand(f'fpga-netboot-rv{xlen}-build', *overrides,
@@ -63,7 +63,7 @@ class NetbootProfileTest(unittest.TestCase):
                     self.assertEqual(settings['FPGA_FLAVOR_SUFFIX'], f'{config}-no-ila')
                     self.assertEqual(settings['BUILD_DIR'], str(root / f'rv{xlen}/build'))
                     self.assertEqual(settings['FPGA_DIR'], str(root / f'rv{xlen}/soc'))
-                    for operation in ('load', 'info', 'check', 'bundle', 'serve', 'test', 'console'):
+                    for operation in ('load', 'info', 'reports', 'check', 'bundle', 'serve', 'test', 'console'):
                         self.assertEqual(self.expand(f'fpga-netboot-rv{xlen}-{operation}',
                                                      *overrides, with_root=True)[0][1], settings)
                     locks.append(pathlib.Path(tmp) / root.name / f'rv{xlen}/netboot/workflow.lock')
@@ -98,6 +98,8 @@ class NetbootProfileTest(unittest.TestCase):
                         'VARIANT=linux32', 'VARIANT=', 'SYS_CLK=30000000',
                         'WITH_ETHERNET=0', 'BOOT_MODE=custom',
                         'VIVADO_SYNTH_DIRECTIVE=default',
+                        'VIVADO_SYS_SETUP_MARGIN_NS=1.0',
+                        'VIVADO_SYS_FINAL_WNS_NS=0.3',
                         'RAPT_PACK_VFLAGS=-DRAPT_ROB_SIZE=8',
                         'RAPT_PACK_VFLAGS='):
             with self.subTest(setting=setting), self.assertRaises(subprocess.CalledProcessError) as error:
@@ -137,6 +139,8 @@ class NetbootProfileTest(unittest.TestCase):
                 self.assertEqual(settings["WITH_ETHERNET"], "1")
                 self.assertEqual(settings["EXTRA_FLAGS"], "")
                 self.assertEqual(settings["VIVADO_ROUTE_DIRECTIVE"], "Explore")
+                self.assertEqual(settings["VIVADO_SYS_SETUP_MARGIN_NS"], "0")
+                self.assertEqual(settings["VIVADO_SYS_FINAL_WNS_NS"], "")
                 self.assertEqual(settings["VIVADO_SYNTH_DIRECTIVE"],
                                  "RuntimeOptimized" if xlen == 64 else "default")
                 self.assertEqual(settings["SYS_CLK"], "50000000")
@@ -156,6 +160,24 @@ class NetbootProfileTest(unittest.TestCase):
         self.assertEqual(settings["FPGA_DIR"], "/tmp/netboot path/default/rv32/soc")
         self.assertEqual(settings["LINUX_IMG"], "/tmp/payload path/fw.bin")
         self.assertEqual(settings["VIVADO"], "/opt/tool path/vivado")
+
+    def test_w4_performance_profile_is_shared_by_all_operations(self):
+        for xlen in (32, 64):
+            with self.subTest(xlen=xlen):
+                prefix = f"fpga-netboot-rv{xlen}-"
+                settings = self.expand(prefix + "build", "RAPT_CONFIG=default-w4")[0][1]
+                self.assertEqual(settings["RAPT_PACK_VFLAGS"],
+                                 "-DRAPT_FETCH_RESPONSE_STAGE=0" if xlen == 64 else "")
+                self.assertEqual(settings["VIVADO_SYNTH_DIRECTIVE"], "default")
+                self.assertEqual(settings["VIVADO_SYS_SETUP_MARGIN_NS"],
+                                 "1.0" if xlen == 64 else "0")
+                self.assertEqual(settings["VIVADO_SYS_FINAL_WNS_NS"],
+                                 "0.3" if xlen == 64 else "")
+                self.assertEqual(settings["SYS_CLK"], "50000000")
+                self.assertEqual(settings["RAPT_CONFIG"], "default-w4")
+                for operation in ("load", "info", "check", "bundle", "serve", "test", "console"):
+                    self.assertEqual(self.expand(prefix + operation,
+                                                 "RAPT_CONFIG=default-w4")[0][1], settings)
 
 
 if __name__ == "__main__":

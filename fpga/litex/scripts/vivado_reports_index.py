@@ -153,11 +153,17 @@ def parse_table_row(report_text: str, label: str) -> list[str] | None:
     return None
 
 
+RESOURCE_LABELS = (
+    "CLB", "CLB LUTs", "CLB Registers", "Slice LUTs", "Slice Registers",
+    "LUT as Memory", "Block RAM Tile", "URAM", "DSPs", "Bonded IOB", "BUFGCE", "MMCM",
+)
+
+
 def parse_utilization(report_text: str) -> dict[str, dict[str, str]]:
     utilization: dict[str, dict[str, str]] = {}
-    for label in ("CLB", "CLB LUTs", "CLB Registers", "Block RAM Tile", "DSPs", "BUFGCE", "MMCM"):
+    for label in RESOURCE_LABELS:
         cells = parse_table_row(report_text, label)
-        if cells and len(cells) >= 6:
+        if cells and len(cells) >= 5:
             utilization[label] = {"used": cells[1], "available": cells[-2], "util": cells[-1]}
     return utilization
 
@@ -230,8 +236,10 @@ def make_card(label: str, value: str, detail: str, level: str = "good") -> str:
 
 
 def render_overview(reports: list[Report], gateware_dir: Path) -> str:
-    timing_report = find_report(reports, "_timing.rpt")
-    utilization_report = find_report(reports, "_utilization_place.rpt")
+    routed_timing = find_report(reports, "_timing.rpt")
+    timing_report = routed_timing or find_report(reports, "_timing_synth.rpt")
+    utilization_report = (find_report(reports, "_utilization_place.rpt")
+                          or find_report(reports, "_utilization_synth.rpt"))
     power_report = find_report(reports, "_power.rpt")
     drc_report = find_report(reports, "_drc.rpt")
     route_report = find_report(reports, "_route_status.rpt")
@@ -264,15 +272,32 @@ def render_overview(reports: list[Report], gateware_dir: Path) -> str:
         cards.append(make_card("Control Sets", control_sets, "total control sets", "neutral"))
 
     resource_rows = []
-    for label in ("CLB", "CLB LUTs", "CLB Registers", "Block RAM Tile", "DSPs", "BUFGCE", "MMCM"):
+    for label in RESOURCE_LABELS:
         item = utilization.get(label)
         if item:
+            used = as_float(item['used'].replace(',', ''))
+            available = as_float(item['available'].replace(',', ''))
+            meter = ""
+            if used is not None and available is not None and available > 0:
+                percent = min(100.0, max(0.0, 100.0 * used / available))
+                meter = (f'<meter min="0" max="100" low="60" high="85" optimum="0" '
+                         f'value="{percent:.4f}" aria-label="{html.escape(label)} utilization">'
+                         f'{html.escape(item["util"])}%</meter>')
             resource_rows.append(
                 "<tr>"
                 f"<td>{html.escape(label)}</td><td>{html.escape(item['used'])}</td>"
-                f"<td>{html.escape(item['available'])}</td><td>{html.escape(item['util'])}%</td>"
+                f"<td>{html.escape(item['available'])}</td><td>{html.escape(item['util'])}%{meter}</td>"
                 "</tr>"
             )
+
+    sources = " ".join(
+        f'{label}: <a href="#{html.escape(report.report_id)}">{html.escape(report.title)}</a>.'
+        for label, report in (("Resources", utilization_report), ("Timing", timing_report))
+        if report is not None
+    )
+    incomplete = ("" if routed_timing else
+                  '<p class="notice">No post-route timing report is available. '
+                  'These partial results do not establish a completed build or timing closure.</p>')
 
     clock_rows = []
     for clock in clocks:
@@ -294,6 +319,7 @@ def render_overview(reports: list[Report], gateware_dir: Path) -> str:
     return f"""
       <section class=\"overview active\" id=\"overview\">
         <div class=\"section-head\"><h2>Overview</h2><span>{html.escape(str(gateware_dir))}</span></div>
+        {incomplete}<p class=\"sources\">{sources}</p>
         <div class=\"cards\">{''.join(cards) or '<p class=\"empty\">No parsed summary metrics found.</p>'}</div>
         <div class=\"tables\">
           <section><h3>Build Metadata</h3><table>{meta_rows or '<tr><td>No metadata found</td></tr>'}</table></section>
@@ -338,9 +364,13 @@ def render_report_sections(reports: list[Report]) -> str:
     return "".join(sections)
 
 
-def render_html(title: str, gateware_dir: Path, reports: list[Report]) -> str:
+def render_html(title: str, gateware_dir: Path, reports: list[Report],
+                build_failed: bool = False) -> str:
     generated_at = datetime_module.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     report_ids_json = json.dumps(["overview"] + [report.report_id for report in reports])
+    failure = ('<p class="notice">Build failed. Available reports may be incomplete or include '
+               'files from an earlier run; check the dates in the report headers.</p>'
+               if build_failed else "")
     return f"""<!DOCTYPE html>
 <html lang=\"en\">
 <head>
@@ -386,12 +416,16 @@ def render_html(title: str, gateware_dir: Path, reports: list[Report]) -> str:
     .bits {{ margin: 0; padding-left: 18px; }}
     pre {{ margin: 0; padding: 16px; min-height: calc(100vh - 130px); overflow: auto; border-radius: 8px; background: var(--code-bg); color: var(--code-ink); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, \"Liberation Mono\", monospace; tab-size: 2; }}
     .empty {{ color: var(--muted); margin: 0; }}
+    meter {{ display: block; width: 110px; height: 16px; }}
+    .sources {{ color: var(--muted); line-height: 1.5; }}
+    .sources a {{ color: var(--accent); }}
+    .notice {{ padding: 12px; border: 1px solid #d4a72c; border-radius: 8px; background: #fff8c5; line-height: 1.5; }}
     @media (max-width: 760px) {{ header {{ align-items: flex-start; flex-direction: column; }} header span {{ white-space: normal; }} .shell {{ grid-template-columns: 1fr; }} nav {{ position: relative; top: 0; height: auto; max-height: 40vh; border-right: 0; border-bottom: 1px solid var(--line); }} main {{ padding: 12px; }} }}
   </style>
 </head>
 <body>
   <header><h1>{html.escape(title)}</h1><span>Generated {html.escape(generated_at)} from {html.escape(str(gateware_dir))}</span></header>
-  <div class=\"shell\"><nav>{render_nav(reports)}</nav><main>{render_overview(reports, gateware_dir)}{render_report_sections(reports)}</main></div>
+  <div class=\"shell\"><nav>{render_nav(reports)}</nav><main>{failure}{render_overview(reports, gateware_dir)}{render_report_sections(reports)}</main></div>
   <script>
     (function () {{
       const reportIds = {report_ids_json};
@@ -420,6 +454,7 @@ def main() -> int:
     parser.add_argument("gateware_dir", type=Path, help="Vivado gateware build directory containing .rpt files")
     parser.add_argument("--output", type=Path, default=None, help="Output HTML path, defaults to <gateware_dir>/index.html")
     parser.add_argument("--title", default="Vivado Build Reports", help="Dashboard title")
+    parser.add_argument("--build-failed", action="store_true", help="Mark reports from a failed build attempt")
     args = parser.parse_args()
 
     gateware_dir = args.gateware_dir.resolve()
@@ -429,12 +464,9 @@ def main() -> int:
         return 1
 
     reports = collect_reports(gateware_dir)
-    if not reports:
-        print(f"error: no Vivado .rpt files found under {gateware_dir}", file=sys.stderr)
-        return 1
-
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(render_html(args.title, gateware_dir, reports), encoding="utf-8")
+    output_path.write_text(render_html(args.title, gateware_dir, reports, args.build_failed),
+                           encoding="utf-8")
     print(f"[INFO] Vivado reports index: {output_path}")
     print(f"[INFO] Embedded reports: {len(reports)}")
     return 0

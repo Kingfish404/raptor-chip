@@ -1,10 +1,11 @@
 /* Exercise actual NS16550 byte lanes and read-to-clear IIR behavior. */
+#include "raptor_platform.h"
 .option norvc
 .section .text
 .globl _start
 _start:
   csrw mie, zero
-  li t0, 0x10000000
+  li t0, RAPTOR_NS16550_BASE
   li t1, 3
   sb t1, 3(t0)             /* LCR: DLAB clear */
   sb zero, 2(t0)           /* FIFO disabled */

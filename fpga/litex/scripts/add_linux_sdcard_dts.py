@@ -28,8 +28,8 @@ def sdcard_node(csr):
     regions = []
     for _, first, size, members in groups:
         base = address(first)
-        if not 0xc0000000 <= base < base + size <= 0x100000000:
-            raise ValueError('SD registers must be in the uncached I/O aperture')
+        if not 0x11000000 <= base < base + size <= 0x12000000:
+            raise ValueError('SD registers must be in the LiteX CSR aperture')
         for name, (offset, width) in members.items():
             if address(name) != base + offset or registers['sdcard_' + name]['size'] != width:
                 raise ValueError('unsupported LiteSDCard register layout: ' + name)

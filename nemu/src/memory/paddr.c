@@ -20,6 +20,9 @@
 #include <memory/tlb.h>
 #include <device/mmio.h>
 #include <cpu/difftest.h>
+#ifdef CONFIG_RAPTOR_PMEM_2G
+#include <sys/mman.h>
+#endif
 
 extern jmp_buf exec_jmp_buf;
 extern int cause;
@@ -32,7 +35,9 @@ static uint8_t *pmem = NULL;
 static uint8_t pmem[CONFIG_MSIZE] PG_ALIGN = {};
 #endif
 static uint8_t rom[CONFIG_ROM_SIZE] PG_ALIGN = {};
+#ifndef CONFIG_RAPTOR_PMEM_2G
 static uint8_t sdram[CONFIG_SDRAM_SIZE] PG_ALIGN = {};
+#endif
 static uint8_t sram[CONFIG_SRAM_SIZE] PG_ALIGN = {};
 static uint8_t mrom[CONFIG_MROM_SIZE] PG_ALIGN = {};
 static uint8_t flash[CONFIG_FLASH_SIZE] PG_ALIGN = {};
@@ -186,7 +191,11 @@ uint8_t *guest_to_host(paddr_t paddr)
   if (in_rom(paddr))
     return rom + paddr - CONFIG_ROM_BASE;
   if (in_sdram(paddr))
+#ifndef CONFIG_RAPTOR_PMEM_2G
     return sdram + paddr - CONFIG_SDRAM_BASE;
+#else
+    Assert(0, "separate SDRAM is disabled by the 2 GiB PMEM profile");
+#endif
   if (in_sram(paddr))
     return sram + paddr - CONFIG_SRAM_BASE;
   if (in_mrom(paddr))
@@ -227,8 +236,14 @@ static void out_of_bound(paddr_t addr)
 void init_mem()
 {
 #if defined(CONFIG_PMEM_MALLOC)
+#ifdef CONFIG_RAPTOR_PMEM_2G
+  pmem = mmap(NULL, CONFIG_MSIZE, PROT_READ | PROT_WRITE,
+              MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  assert(pmem != MAP_FAILED);
+#else
   pmem = malloc(CONFIG_MSIZE);
   assert(pmem);
+#endif
 #endif
   IFDEF(CONFIG_MEM_RANDOM, memset(pmem, rand(), CONFIG_MSIZE));
   Log("physical memory area [" FMT_PADDR ", " FMT_PADDR "]", PMEM_LEFT, PMEM_RIGHT);
@@ -287,9 +302,8 @@ static bool ref_paddr_is_io(paddr_t addr)
   return (addr >= 0x02000000 && addr < 0x020c0000) ||
       (addr >= 0x0c000000 && addr < 0x0d000000) ||
       (addr >= 0x10000000 && addr < 0x10000100) ||
-      (addr >= 0xf0001000 && addr < 0xf0001100) ||  // LiteX UART
-      (addr >= 0xf0008000 && addr < 0xf0008100) ||  // LiteX SPI SD
-      (addr >= 0xf0010000 && addr < 0xf0020000) ||  // CLINT alias (egos HARDWARE)
+      (addr >= 0x11001800 && addr < 0x11001900) ||  // LiteX UART
+      (addr >= 0x11008000 && addr < 0x11008100) ||  // LiteX SPI SD
       (0);
 }
 
@@ -351,7 +365,8 @@ word_t paddr_read(paddr_t addr, int len)
    * the sdhci controller at 0x40000000. The write path (paddr_write)
    * also excludes them; keep the read path symmetric so MMIO reads are
    * not silently satisfied from a zeroed backing buffer. */
-  if (likely(in_pmem(addr) || in_sdram(addr) || in_sram(addr)))
+  if (likely(paddr_is_memory_span(addr, len) &&
+             (in_pmem(addr) || in_sdram(addr) || in_sram(addr))))
   {
     return pmem_read(addr, len);
   }
@@ -359,7 +374,8 @@ word_t paddr_read(paddr_t addr, int len)
   if (mmio_map_contains(addr))
     return mmio_read(addr, len);
 #endif
-  if (in_rom(addr) || in_mrom(addr) || in_flash(addr))
+  if (paddr_is_memory_span(addr, len) &&
+      (in_rom(addr) || in_mrom(addr) || in_flash(addr)))
   {
     return pmem_read(addr, len);
   }
@@ -380,7 +396,8 @@ void paddr_write(paddr_t addr, int len, word_t data)
   printf("paddr_w: " FMT_PADDR ", size: %d, data: " FMT_WORD "\n", addr, len, data);
 #endif
 
-  if (likely(in_pmem(addr) || in_sdram(addr) || in_sram(addr)))
+  if (likely(paddr_is_memory_span(addr, len) &&
+             (in_pmem(addr) || in_sdram(addr) || in_sram(addr))))
   {
     pmem_write(addr, len, data);
     return;

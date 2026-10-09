@@ -25,10 +25,10 @@ def main():
     for name in ('npc','reference','mrom'):
         if getattr(args,name) is None: continue
         p=getattr(args,name).resolve();report['inputs'][name]={'path':str(p),'sha256':sha(p)}
-    for name in (('mmio_uart_irq',) if args.uart_irq else ('mmio_uart_read',) if args.uart_read else ('mmio_finisher','mmio_litex_uart','mmio_litex_uart_hw')):
+    for name in (('mmio_uart_irq',) if args.uart_irq else ('mmio_uart_read',) if args.uart_read else ('mmio_finisher','mmio_litex_uart')):
         d=out/name;d.mkdir(exist_ok=True)
-        source='mmio_litex_uart' if name=='mmio_litex_uart_hw' else name
-        uart_base=0xf0001800 if name=='mmio_litex_uart_hw' else 0xf0001000
+        source=name
+        uart_base=0x11001800
         cmd=['riscv64-elf-gcc',f'-DUART_BASE={uart_base}',f'-march=rv{args.xlen}imac_zicsr_zifencei',
              '-mabi='+('lp64' if args.xlen==64 else 'ilp32'),'-nostdlib','-nostartfiles','-static',
              '-Wl,--no-relax','-T',str(root/'verify/scripts/fuzz_link.ld'),str(root/f'app/tests/baremetal/{source}.S'),'-o',str(d/'test.elf')]

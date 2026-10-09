@@ -41,7 +41,7 @@ class NetbootTest(unittest.TestCase):
         return {'MAIN_RAM': 0x80000000, '_start': 0x80000000,
                 'PAYLOAD_SRC': 0x80100000, 'PAYLOAD_SIZE': 256,
                 'DTB_SRC': 0x84000000, 'DTB_DEST': 0x83f00000, 'DTB_SIZE': 64,
-                'STAGE0_SRAM': 0x0f000000, 'UART_RXTX': 0xf0001800,
+                'STAGE0_SRAM': 0x0f000000, 'UART_RXTX': 0x11001800,
                 '_reloc_start': 0x80000020, '_reloc_end': 0x80000080}
 
     def test_layout_guards(self):
@@ -54,6 +54,16 @@ class NetbootTest(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 netboot.validate_layout({**original, key: value}, bytes(256), bytes(256), bytes(64),
                                         0x40000000, 0x82000000)
+
+    def test_two_gib_layout_at_physical_limit(self):
+        symbols = {**self.symbols(), 'DTB_SRC': 0xffffffc0,
+                   'DTB_DEST': 0xffe00000}
+        netboot.validate_layout(symbols, bytes(256), bytes(256), bytes(64),
+                                0x80000000, 0x82000000)
+        with self.assertRaisesRegex(ValueError, 'outside RAM'):
+            netboot.validate_layout({**symbols, 'DTB_SRC': 0xffffffe0},
+                                    bytes(256), bytes(256), bytes(64),
+                                    0x80000000, 0x82000000)
 
     def test_dtb_source_clobber_rejected(self):
         with self.assertRaisesRegex(ValueError, 'overwrites DTB'):

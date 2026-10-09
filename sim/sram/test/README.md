@@ -7,7 +7,7 @@ These tests validate that the four moving parts of the OpenRAM SRAM integration 
 | Macro shape configs   | `sim/sram/configs/rapt_sram_*_1rw_sky130.py`  |
 | Yosys blackbox decls  | `sim/sram/wrappers/rapt_sram_blackbox.v`      |
 | Stub `.lib` generator | `sim/sram/scripts/gen_stub_lib.py`            |
-| RTL instantiation     | `hdl/memory/rapt_sram_1rw.sv`                 |
+| RTL instantiation     | `hdl/sram/rapt_sram_1rw.sv`                 |
 
 If any of these drift (e.g. port width change in the blackbox without a matching Liberty update) STA will either fail to elaborate or silently mis-map the pins. The tests catch that early.
 

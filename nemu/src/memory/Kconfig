@@ -11,6 +11,14 @@ config RAPTOR_MEMORY_MAP
     Select this for the Raptor reference model; native virt configurations
     keep their existing memory layout unless explicitly selected.
 
+config RAPTOR_PMEM_2G
+  bool "Use Raptor's 2 GiB contiguous RAM window"
+  depends on RAPTOR_MEMORY_MAP && PMEM_MALLOC
+  default n
+  help
+    Map 0x80000000-0xffffffff as one RAM region. The legacy SDRAM window
+    at 0xa0000000 is disabled. Use a matching 2 GiB simulator profile.
+
 config ROM
   bool "Enable ROM"
   default y

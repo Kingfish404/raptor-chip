@@ -1,5 +1,6 @@
 /* Synchronous exceptions do not retire. Snapshot immediately before each
  * attempt, then read instret as the handler's first instruction. */
+#include "raptor_platform.h"
 #ifndef INSTRET_PRIV
 #define INSTRET_PRIV 3
 #endif
@@ -63,12 +64,12 @@ body:
   lw a5, 0(s3)
 #endif
 992:
-  li s3, 0x20001000
+  li s3, (RAPTOR_MROM_BASE + 0x1000)
   prepare 7
   sw zero, 0(s3)
 992:
   bnez s5, fail
-  li s5, 0x02000000 /* non-executable CLINT */
+  li s5, RAPTOR_CLINT_BASE /* non-executable CLINT */
   la s11, after_fetch
   li s4, 1
   li s6, 2 /* snapshot CSR and JALR retire; failed target fetch does not */
@@ -84,7 +85,7 @@ after_fetch:
   csrr s1, instret
   addi s0, s0, 2
   bne s0, s1, fail
-  li t0, 0x100000
+  li t0, RAPTOR_FINISHER_BASE
   li t1, 0x5555
   sw t1, 0(t0)
 1: j 1b
@@ -107,7 +108,7 @@ handler:
   addi s10, s10, 1
   mret
 fail:
-  li t0, 0x100000
+  li t0, RAPTOR_FINISHER_BASE
   li t1, 0x3333
   sw t1, 0(t0)
 2: j 2b

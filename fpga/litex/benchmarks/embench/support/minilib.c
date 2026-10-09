@@ -12,7 +12,7 @@
 
 /* ---- LiteX UART CSR (memory-mapped) ---- */
 #ifndef UART_BASE
-#define UART_BASE 0xf0001800UL
+#define UART_BASE 0x11001800UL
 #endif
 
 #define UART_RXTX (*(volatile uint32_t *)(UART_BASE + 0x00))

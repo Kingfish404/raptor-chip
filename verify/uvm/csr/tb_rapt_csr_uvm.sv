@@ -51,7 +51,7 @@ module tb_rapt_csr_uvm;
     rou_csr.retire_count = tb_if.retire_a;
     exu_csr.raddr = `RAPT_CSR_STVEC__;
     tb_if.sepc = exu_csr.sepc;
-    tb_if.mtvec = exu_csr.mtvec;
+    tb_if.mtvec = csr_bcast.mtvec;
     tb_if.stvec = exu_csr.rdata;
     tb_if.priv = csr_bcast.priv;
   end

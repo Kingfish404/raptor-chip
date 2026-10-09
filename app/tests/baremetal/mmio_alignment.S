@@ -1,4 +1,5 @@
 /* Physical device PMA forbids splitting an ordinary misaligned access. */
+#include "raptor_platform.h"
 #ifndef ACCESS_BYTES
 #define ACCESS_BYTES 4
 #endif
@@ -61,7 +62,7 @@ _start:
   ori t1, t1, 1
   STORE t1, 0(t0)
   la t0, leaf
-  li t1, 0x3c0004cf
+  li t1, RAPTOR_PTE(RAPTOR_LITEX_UART_BASE, 0xcf)
 #if __riscv_xlen == 64
   li t2, PAGE_TYPE
   slli t2, t2, 61
@@ -89,9 +90,9 @@ _start:
 access_test:
   li s0, 0
 #if TRANSLATED
-  li s1, 0x40000001
+  li s1, 0x40000801
 #else
-  li s1, 0xf0001001
+  li s1, RAPTOR_LITEX_UART_BASE + 1
 #endif
   li s2, 5
   la s3, bad_load

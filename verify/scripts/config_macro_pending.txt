@@ -1,0 +1,2 @@
+# Exact default-w4 findings awaiting its owner's edits: preset kind macro # reason.
+# Keep empty when default-w4 passes; stale entries fail the check.

@@ -14,6 +14,17 @@ config RV_ASID_BITS
     Set to 9 for the Raptor reference model. Unimplemented high ASID
     bits read as zero; MODE and PPN retain their existing WARL behavior.
 
+config RV_PMPADDR_BITS
+  int "Implemented RV64 pmpaddr bits"
+  depends on RV64
+  range 1 54
+  default 54
+  help
+    pmpaddr holds physical-address bits [N+1:2]. The architectural maximum
+    for RV64 is 54 (56-bit physical addresses). Set to 45 for the Raptor
+    reference model, whose RTL implements 47 physical-address bits
+    (RAPT_PADDR_BITS). Unimplemented high bits read as zero.
+
 config RVE
   bool "Use E extension"
   default n

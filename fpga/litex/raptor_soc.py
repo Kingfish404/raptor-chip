@@ -81,6 +81,7 @@ class RaptorSoC(SoCCore):
         # OpenSBI generic platform relocates FDT to _fw_start + 0x2200000 (~34 MB),
         # so we need at least 36 MB.  64 MB leaves headroom for kernel payloads.
         kwargs.setdefault("integrated_main_ram_size", 0x400_0000)
+        kwargs["bus_data_width"] = 64
 
         # Set defaults (don't override if already provided by CLI).
         kwargs.setdefault("ident", "Raptor LiteX SoC")
@@ -92,6 +93,7 @@ class RaptorSoC(SoCCore):
 
         # SoCCore (includes CPU, bus, SRAM, UART, timer).
         SoCCore.__init__(self, platform, sys_clk_freq, **kwargs)
+        self.cpu.pmem_size = kwargs["integrated_main_ram_size"]
         self.add_config("BIOS_NO_BOOT")
 
         # Sim CRG.

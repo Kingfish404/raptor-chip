@@ -1,5 +1,6 @@
 /* 32-bit mtimecmp updates must preserve the other half and control MTIP
  * on both XLENs. Exercise real trap entry and return, not only readback. */
+#include "raptor_platform.h"
 .option norvc
 .option norelax
 .section .text
@@ -14,7 +15,7 @@ _start:
   la t0, timer
 #endif
   csrw mtvec, t0
-  li s0, 0x02004000
+  li s0, (RAPTOR_CLINT_BASE + 0x4000)
   li s1, 0
   li t0, -1
 #if __riscv_xlen == 64

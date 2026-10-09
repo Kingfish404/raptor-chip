@@ -81,6 +81,31 @@ module rapt_ieu #(
   // every issue event on the same architectural edge.
   always_ff @(posedge clock) pmu_alq_extra_port_count <= pmu_alq_extra_port_count_next;
 
+  // ROU admits one serializing system instruction at a time. Capture its
+  // CSR address on ALQ admission, before wake/issue arbitration. The CSR value
+  // is still read live at execution; counters and read-modify-write data are
+  // not sampled early. This removes the ALQ-select -> CSR-address decode path.
+  logic [NumSlots-1:0] csr_dispatch_valid;
+  logic [11:0] csr_dispatch_addr, csr_read_addr_q;
+  for (genvar s = 0; s < NumSlots; s++) begin : g_csr_address
+    assign csr_dispatch_valid[s] = disp_alq.accept[s] && dispatch[s].uop.execute.sys.valid;
+  end
+  always_comb begin
+    csr_dispatch_addr = '0;
+    for (int s = 0; s < NumSlots; s++)
+    csr_dispatch_addr |= {12{csr_dispatch_valid[s]}} & dispatch[s].uop.imm[11:0];
+  end
+  always_ff @(posedge clock) begin
+    if (reset || cmu_bcast.flush_pipe) csr_read_addr_q <= '0;
+    else if (|csr_dispatch_valid) csr_read_addr_q <= csr_dispatch_addr;
+  end
+  `RAPT_SVA_IMPLY(clock, reset || cmu_bcast.flush_pipe, CSR_DISPATCH_ONE, 1'b1,
+                  $onehot0(csr_dispatch_valid))
+  `RAPT_SVA_IMPLY(
+      clock, reset || cmu_bcast.flush_pipe, CSR_ISSUE_ADDRESS,
+      alq_execute[IntegerSystemPort].valid && alq_execute[IntegerSystemPort].uop.execute.sys.valid,
+      csr_read_addr_q == alq_execute[IntegerSystemPort].uop.imm[11:0])
+
   logic [$clog2(ALQ_SIZE):0] occ_alq;
   logic [$clog2(BRQ_SIZE):0] occ_brq;
   logic pmu_alq_full_unused;
@@ -107,14 +132,18 @@ module rapt_ieu #(
       .NumCompletions(NumCompletions),
       .CompletionT(CompletionT),
       .IQ_SIZE  (ALQ_SIZE),
-      .ComboCdbWake(`RAPT_ALQ_LOAD_WAKE),
+      // Integer queues wake from accepted completions on the next edge; a
+      // same-cycle load wake would chain the L1D response, integer select,
+      // ALU and the global result broadcast in one cycle.
+      .ComboCdbWake(1'b0),
       .ComboWakePorts(32'(1) << (NumIntegerPorts + 1)),
-      .ConfirmCdbWake(`RAPT_ALQ_LOAD_WAKE),
+      .ConfirmCdbWake(1'b0),
       .NumIssuePorts(NumIntegerPorts),
-      // The system/FP shared completion path has an extra result register.
+      // The system/FP shared completion path buffers contending results.
       // Keep it available for throughput and system-only uops, but route the
-      // oldest ready general ALU uop to a lower-latency simple port first.
+      // oldest ready general ALU uop to a simple port before the shared port.
       .LastIssuePort(IntegerSystemPort),
+      .UniformSimplePorts(1'b1),
       .ROB_SIZE (ROB_SIZE),
       .PLEN     (PLEN),
       .RLEN     (RLEN),
@@ -146,8 +175,9 @@ module rapt_ieu #(
       .NumCompletions(NumCompletions),
       .CompletionT(CompletionT),
       .IQ_SIZE (BRQ_SIZE),
-      .ComboCdbWake(`RAPT_BRQ_CDB_WAKE),
-      .ConfirmCdbWake(`RAPT_BRQ_CDB_WAKE),
+      // Branches read operands captured at the queue edge.
+      .ComboCdbWake(1'b0),
+      .ConfirmCdbWake(1'b0),
       .ComboWakePorts(~(32'(1) << NumIntegerPorts)),
       .ROB_SIZE(ROB_SIZE),
       .PLEN    (PLEN),
@@ -175,11 +205,13 @@ module rapt_ieu #(
   for (genvar p = 0; p < NumIntegerPorts; p++) begin : g_integer_port
     if (p == IntegerSystemPort) begin : g_system
       rapt_ieu_pipe_alu_csr #(
+          .UseDispatchCsrAddress(1'b1),
           .ROB_SIZE(ROB_SIZE),
           .XLEN    (XLEN)
       ) u_pipe_alu_csr (
           .cmu_bcast (cmu_bcast),
           .iss       (alq_execute[p]),
+          .csr_read_addr(csr_read_addr_q),
           .csr_bcast (csr_bcast),
           .exu_csr   (exu_csr),
           .wb_alu_csr(wb_integer_raw[p])
@@ -213,6 +245,9 @@ module rapt_ieu #(
       .RLEN    (RLEN),
       .XLEN    (XLEN)
   ) u_muldiv (
+      .cancel_valid(cancel_valid),
+      .cancel_head(cancel_head),
+      .cancel_owner(cancel_owner),
       .completion(completion),
       .clock        (clock),
       .reset        (reset),

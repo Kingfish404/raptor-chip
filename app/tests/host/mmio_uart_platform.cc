@@ -20,19 +20,19 @@ int main() {
     init_litex_uart();
     litex_uart_inited = true; // no host terminal setup in this unit test
     word_t value = 0;
-    for (paddr_t base : {paddr_t(0xf0001800u), paddr_t(0xf0001000u)}) {
-        const auto *map = find_mmio_map(base);
-        assert(map && map->handler);
-        map->handler(base + 0x14, 3, 15, true, nullptr);
-        map->handler(base + 0x14, 0, 15, false, &value);
-        assert(value == (word_t(3) << ((0x14 & (sizeof(word_t)-1))*8)));
-        map->handler(base, 'A', 15, true, nullptr); // one byte per CSR write
-        map->handler(base, 'Z', 0, true, nullptr);  // masked write must not print
-    }
-    const auto *hw = find_mmio_map(0xf0001800u);
-    hw->handler(0xf0001800u, 0, 15, false, &value);
+    const paddr_t base = 0x11001800u;
+    const auto *hw = find_mmio_map(base);
+    assert(hw && hw->handler);
+    assert(find_mmio_map(0xf0001800u) == nullptr);
+    assert(find_mmio_map(0xf0001000u) == nullptr);
+    hw->handler(base + 0x14, 3, 15, true, nullptr);
+    hw->handler(base + 0x14, 0, 15, false, &value);
+    assert(value == (word_t(3) << ((0x14 & (sizeof(word_t)-1))*8)));
+    hw->handler(base, 'A', 15, true, nullptr);
+    hw->handler(base, 'Z', 0, true, nullptr);
+    hw->handler(base, 0, 15, false, &value);
     assert(value == 'X');
-    hw->handler(0xf0001808u, 0, 15, false, &value);
+    hw->handler(base + 8, 0, 15, false, &value);
     assert(value == 1);
-    puts("PASS: UART IRQ10, CU08/egos aliases, RX and CSR lane masking");
+    puts("PASS: UART IRQ10, low LiteX CSR, RX and lane masking");
 }

@@ -3,11 +3,13 @@
 
 /**
  * default-w8 evaluation preset: eight decode, rename, dispatch, commit and
- * integer issue lanes. Cache geometry/predictor match default-w4; L1D retains
- * its four MSHRs. ROB 128 provides sixteen full dispatch groups, ALQ/IOQ 32
- * provide four, and SQ 32 buffers stores behind the scalar drain endpoint.
- * Operand spill 64 matches half the ROB; PHY 256 covers architectural
- * mappings, ROB writers and renamed work before allocation.
+ * integer issue lanes. Cache geometry matches default-w4; branch-predictor
+ * tables keep the default sizes. L1D retains its four MSHRs. ROB 64 provides
+ * eight full dispatch groups, ALQ/IOQ 16 provide two, and SQ 16 matches the
+ * scalar store commit/drain endpoint, which does not widen with the core.
+ * Operand spill 32 provides four groups. PHY 128 covers the 32 architectural
+ * mappings plus the ROB and nearly all renamed work before allocation; at most
+ * 136 destinations can be live, and a short stall is safe.
  *
  * RNQ and UOQ grow from 8 to 16 entries because neither queue has empty
  * fall-through or same-cycle reclaim. An 8-entry queue with an 8-wide input
@@ -17,13 +19,13 @@
  * memory dependency and commit bubbles exposed by the wider backend.
  * RAPT_FETCH_WIDE supplies at most four full 32-bit instructions per fetch
  * response, so sustained eight-instruction frontend throughput is unavailable.
- * Capacities are an evaluation starting point, not a measured optimum.
- * Earlier CoreMark runs used ROB 32, ALQ/IOQ 8, SQ 16 and PHY 128.
+ * Capacities are an evaluation starting point, not a measured optimum. RV32
+ * CoreMark ROI cycles were unchanged when PHY 256 and SQ 32 were reduced to
+ * PHY 128 and SQ 16 (2026-10-06).
  */
 /**
  * Architecture (arch) Parameters
  * @param RAPT_XLEN: Width of an integer register in bits
- * @param RAPT_I_EXTENSION: I Extension
  * @param RAPT_M_EXTENSION: M Extension
  */
 // To select RV64: define RAPT_RV64 via compiler flag (-DRAPT_RV64)
@@ -35,12 +37,11 @@
 `define RAPT_XLEN 32
 `define RAPT_MISA 'h4014112f
 `endif
-`define RAPT_I_EXTENSION 'h1
 `define RAPT_M_EXTENSION 'h1
 
 /**
  * Microarchitecture (uarch) Parameters
- * @param RAPT_M_FAST: M Extension Fast Mode (one cycle)
+ * @param RAPT_M_FAST: Pipelined multiply (2-cycle latency, 1/cycle throughput); iterative divide
  *
  * @param L1I_LINE_LEN: L1I Line Length
  * @param L1I_LEN: L1I Length (Size)
@@ -59,9 +60,6 @@
 
 // Branch predictor
 `define RAPT_PHT_SIZE 256
-`ifndef RAPT_BPU_AUX_PC_HASH
-`define RAPT_BPU_AUX_PC_HASH 1
-`endif
 `define RAPT_BTB_SIZE 128
 `define RAPT_BTB_WAYS 2
 `define RAPT_RSB_SIZE 4
@@ -70,62 +68,34 @@
 // alternatives are kept for ablation / low-area builds.
 //   RAPT_BPU_DIRP_TAGE     — bimodal base + 3 tagged tables, history 8/16/64
 //   RAPT_BPU_DIRP_GSHARE   — PC XOR GHR indexed 2-bit counters
-//   RAPT_BPU_DIRP_BIMODAL  — PC-only 2-bit counters (default if none set)
+//   RAPT_BPU_DIRP_BIMODAL  — PC-only 2-bit counters
 //   RAPT_BPU_DIRP_STATIC   — always-not-taken (control reference)
 `define RAPT_BPU_DIRP_TAGE
 
 // Shared RV32/RV64 OoO window sizing for simulation and FPGA.
-// ROB is the primary in-flight window; PHY must cover 32 arch regs plus the
-// worst case of ROB_SIZE in-flight register writers (power of 2 required).
-`ifndef RAPT_RIQ_SIZE
+// ROB is the primary in-flight window. With RAPT_FETCH_LOOKAHEAD, ROB_SIZE must
+// be a power of two (the BPU tracks 2 * ROB_SIZE predictions). PHY only has to
+// exceed the 32 arch regs; 32 + ROB_SIZE avoids rename stalls on free registers.
 `define RAPT_RIQ_SIZE 16
-`endif
-`ifndef RAPT_IIQ_SIZE
 `define RAPT_IIQ_SIZE 16
-`endif
 `ifndef RAPT_ROB_SIZE
-`define RAPT_ROB_SIZE 128
+`define RAPT_ROB_SIZE 64
 `endif
-`ifndef RAPT_OPERAND_SPILL_ENTRIES
-`define RAPT_OPERAND_SPILL_ENTRIES (`RAPT_ROB_SIZE / 2)
-`endif
+`define RAPT_OPERAND_SPILL_ENTRIES 32
 
 // ALQ is shared by all eight integer issue ports; IOQ feeds the scalar LSU.
-`ifndef RAPT_RS_SIZE
-`define RAPT_RS_SIZE 32
-`endif
-`ifndef RAPT_IOQ_SIZE
-`define RAPT_IOQ_SIZE 32
-`endif
+`define RAPT_RS_SIZE 16
+`define RAPT_IOQ_SIZE 16
 
-// One queue holds each store from execution through committed drain. More
-// entries absorb wider bursts; the scalar commit/drain bandwidth is unchanged.
-`ifndef RAPT_SQ_SIZE
-`define RAPT_SQ_SIZE 32
-`endif
+// One queue holds each store from execution through committed drain. Commit
+// and drain remain one store per cycle, so the default-w4 depth suffices.
+`define RAPT_SQ_SIZE 16
 
 // Hit-under-miss (Phase A2): while a load miss waits on the bus refill, the
 // idle L1D SRAM read port serves a second best-effort load (B channel).
 // Bare-mode only; B completes only on a clean cacheable hit or SQ forward,
 // everything else retries via the trap-owning A channel.
 `define RAPT_LSU_HUM
-
-// Match the default preset's load wakeup and store-following retirement paths.
-`ifndef RAPT_IOQ_EARLY_LOAD_BCAST
-`define RAPT_IOQ_EARLY_LOAD_BCAST 1
-`endif
-`ifndef RAPT_IOQ_LIVE_EARLY_BCAST
-`define RAPT_IOQ_LIVE_EARLY_BCAST 1
-`endif
-`ifndef RAPT_IOQ_EARLY_LOAD_STORES
-`define RAPT_IOQ_EARLY_LOAD_STORES 1
-`endif
-`ifndef RAPT_IOQ_WAKE_NEXT_B_REQUEST
-`define RAPT_IOQ_WAKE_NEXT_B_REQUEST 1
-`endif
-`ifndef RAPT_ROU_STORE_FOLLOWER
-`define RAPT_ROU_STORE_FOLLOWER 1
-`endif
 
 // RVFI: RISC-V Formal Interface for formal verification.
 // Adds RVFI output ports to the core; enable only for riscv-formal checks.
@@ -150,26 +120,18 @@
 `ifndef RAPT_COMMIT_WIDTH
 `define RAPT_COMMIT_WIDTH 8
 `endif
-`ifndef RAPT_FETCH_LOOKAHEAD
 `define RAPT_FETCH_LOOKAHEAD
-`endif
 // Reuse the available wide fetch window; its 8 halfwords cannot supply
 // eight 32-bit instructions in a single response.
 `define RAPT_FETCH_WIDE
 
-`ifdef RAPT_I_EXTENSION
 `define RAPT_REG_SIZE 32 // 32 registers
-`else
-`define RAPT_REG_SIZE 16 // 16 registers
-`endif
 
 `define RAPT_REG_LEN $clog2(`RAPT_REG_SIZE) // Register Length
 
 // Shared simulation/FPGA default. Explicit overrides remain available for
 // parameterized verification; PHY must still cover the configured ROB.
-`ifndef RAPT_PHY_SIZE
-`define RAPT_PHY_SIZE 256 // physical register number (must be power of 2)
-`endif
+`define RAPT_PHY_SIZE 128 // total physical registers, including architectural mappings
 `define RAPT_PHY_LEN $clog2(`RAPT_PHY_SIZE)
 
 // Cache line size is a byte-level configuration. Keep it invariant across
@@ -183,9 +145,7 @@
 `define RAPT_L1I_N_WAYS 4
 // Refill 32 B per L1I miss (8 x RV32 words). This covers most sequential
 // fetch sectors while avoiding the request pressure of a full-line refill.
-`ifndef RAPT_L1I_REFILL_WORDS
 `define RAPT_L1I_REFILL_WORDS 8
-`endif
 
 // L1D (64 B line * 64 sets * 4-way = 16 KiB, VIPT-safe for RV32/RV64).
 `define RAPT_L1D_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
@@ -202,11 +162,11 @@
 
 // L2 unified cache (between rapt_bus and io_master).
 // `define RAPT_L2_EN  // disabled to isolate STA bottleneck
-// 16 KiB direct-mapped (256 sets x 64B).  Multi-way support reserved.
+// 16 KiB direct-mapped (256 sets x 64B).
 `define RAPT_L2_LEN 8            // 256 sets
 // 64-byte line (16 x 4B @ RV32, 8 x 8B @ RV64).
 `define RAPT_L2_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
-`define RAPT_L2_N_WAYS 1         // direct-mapped (multi-way support reserved)
+`define RAPT_L2_N_WAYS 1         // direct-mapped
 
 // Cache SRAM subarray width in bits (matches CVW CACHE_SRAMLEN=128).
 // Reduces SRAM instance count and address fanout vs per-word (32-bit) banks.

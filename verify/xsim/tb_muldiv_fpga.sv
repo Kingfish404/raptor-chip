@@ -11,13 +11,17 @@ module tb_muldiv_fpga;
   logic in_word = 0, in_valid = 0, in_ready, out_valid;
   logic [3:0] in_tag = 0, out_tag;
 `ifdef RAPT_GATE_NETLIST
-  rapt_ieu_mul dut (.*);
+  rapt_ieu_mul dut (
+      .cancel_tags('0),
+      .*
+  );
 `else
   rapt_ieu_mul #(
       .XLEN(X),
       .TAG_W(4),
       .UseDsp(1)
   ) dut (
+      .cancel_tags('0),
       .*
   );
 `endif

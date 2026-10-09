@@ -5,6 +5,9 @@
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef RAPT_LARGE_PMEM
+#include <sys/mman.h>
+#endif
 
 void difftest_skip_ref();
 void npc_abort();
@@ -27,8 +30,6 @@ extern VerilatedContext *contextp;
 #define NS16550_SIZE 0x100u
 #define VIRTIO_BLK_BASE 0x10001000u
 #define VIRTIO_BLK_SIZE 0x1000u
-#define LITEUART_BASE 0x10011800u
-#define LITEUART_SIZE 0x100u
 #define QEMU_SDHCI_PCI_ECAM_BASE 0x30008000u
 #define QEMU_SDHCI_PCI_ECAM_SIZE 0x1000u
 #define QEMU_SDHCI_BASE 0x40000000u
@@ -36,8 +37,14 @@ extern VerilatedContext *contextp;
 
 static struct
 {
+#ifdef RAPT_LARGE_PMEM
+  uint8_t *pmem;
+#else
   uint8_t pmem[MSIZE];
+#endif
+#ifndef RAPT_LARGE_PMEM
   uint8_t sdram[SDRAM_SIZE];
+#endif
   uint8_t sram[SRAM_SIZE];
   uint8_t mrom[MROM_SIZE];
   uint8_t flash[FLASH_SIZE];
@@ -76,7 +83,10 @@ typedef struct
 static paddr_t canonical_paddr(paddr_t addr)
 {
 #ifdef CONFIG_ISA64
-  return (paddr_t)((uint32_t)addr);
+  const paddr_t upper = addr >> 32;
+  if (upper != 0 && upper != 0xffffffffu)
+    return 0x100000000ull;
+  return (paddr_t)(uint32_t)addr;
 #else
   return addr;
 #endif
@@ -84,7 +94,9 @@ static paddr_t canonical_paddr(paddr_t addr)
 
 static host_map_t host_maps[] = {
     {"pmem", MBASE, MSIZE, memory.pmem, "main memory / QEMU virt DRAM"},
+#ifndef RAPT_LARGE_PMEM
     {"sdram", SDRAM_BASE, SDRAM_SIZE, memory.sdram, "external SDRAM window"},
+#endif
     {"sram", SRAM_BASE, SRAM_SIZE, memory.sram, "on-chip SRAM window"},
     {"mrom", MROM_BASE, MROM_SIZE, memory.mrom, "mask ROM / boot trampoline"},
     {"flash", FLASH_BASE, FLASH_SIZE, memory.flash, "flash image mirror"},
@@ -92,7 +104,8 @@ static host_map_t host_maps[] = {
 
 static bool map_contains(paddr_t addr, paddr_t base, paddr_t size)
 {
-  return addr >= base && addr < base + size;
+  return (uint64_t)addr >= (uint64_t)base &&
+         (uint64_t)addr < (uint64_t)base + (uint64_t)size;
 }
 
 static const host_map_t *find_host_map(paddr_t addr)
@@ -174,13 +187,10 @@ static void sdhci_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, 
 }
 
 // egos-2000 HARDWARE platform peripherals (LiteX-style).
-#define LITEX_SPI_HW_BASE 0xf0008000u
+#define LITEX_SPI_HW_BASE 0x11008000u
 #define LITEX_SPI_HW_SIZE 0x100u
-#define LITEX_UART_HW_BASE 0xf0001800u
-#define LITEX_UART_EGOS_BASE 0xf0001000u
+#define LITEX_UART_HW_BASE 0x11001800u
 #define LITEX_UART_HW_SIZE 0x100u
-#define CLINT_HW_BASE 0xf0010000u
-#define CLINT_HW_SIZE 0x10000u
 
 static void litex_spi_hw_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data)
 {
@@ -190,16 +200,15 @@ static void litex_spi_hw_handle(paddr_t addr, word_t wdata, char wmask, bool is_
 
 static void litex_uart_hw_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data)
 {
-  const paddr_t base = addr >= LITEX_UART_HW_BASE ? LITEX_UART_HW_BASE : LITEX_UART_EGOS_BASE;
   void mmio_litex_uart_handle(paddr_t offset, word_t wdata, bool is_write, word_t *data);
   if (!is_write) {
-    mmio_litex_uart_handle(addr - base, wdata, false, data);
+    mmio_litex_uart_handle(addr - LITEX_UART_HW_BASE, wdata, false, data);
     return;
   }
   // LiteX UART CSRs carry an 8-bit value in the low byte of each 32-bit word.
   for (unsigned i = 0; i < sizeof(word_t); i++)
     if (((uint8_t)wmask & (1u << i)) && ((addr + i) & 3u) == 0)
-      mmio_litex_uart_handle(addr - base + i,
+      mmio_litex_uart_handle(addr - LITEX_UART_HW_BASE + i,
                             (wdata >> (8*i)) & 0xff, true, nullptr);
 }
 
@@ -211,21 +220,13 @@ static mmio_map_t mmio_maps[] = {
     {"virtio-blk", VIRTIO_BLK_BASE, VIRTIO_BLK_SIZE, "QEMU virtio-mmio block device", true, virtio_blk_handle},
     {"sdhci-pci-ecam", QEMU_SDHCI_PCI_ECAM_BASE, QEMU_SDHCI_PCI_ECAM_SIZE, "QEMU SDHCI PCI ECAM stub", true, sdhci_handle},
     {"sdhci", QEMU_SDHCI_BASE, QEMU_SDHCI_SIZE, "QEMU SDHCI SD-card controller", true, sdhci_handle},
-    {"liteuart0", LITEUART_BASE, LITEUART_SIZE, "LiteX UART sink", false, NULL},
     // egos-2000 HARDWARE platform: LiteX SPI master driving an SD card. NEMU
     // does not model the device, so loads/stores must be skipped on REF.
     {"litex-spi", LITEX_SPI_HW_BASE, LITEX_SPI_HW_SIZE,
      "egos-2000 HARDWARE LiteX SPI SD controller", true, litex_spi_hw_handle},
-    // CU08 and legacy egos share one UART state. Keep REF skip for host input.
+    // Keep REF skip for host input.
     {"litex-uart-hw", LITEX_UART_HW_BASE, LITEX_UART_HW_SIZE,
      "CU08 LiteX UART", true, litex_uart_hw_handle},
-    {"litex-uart-egos", LITEX_UART_EGOS_BASE, LITEX_UART_HW_SIZE,
-     "legacy egos LiteX UART alias", true, litex_uart_hw_handle},
-    // egos-2000 HARDWARE platform: CLINT alias at 0xf0010000. We don't model
-    // it (the real CLINT lives at QEMU_CLINT_BASE) but accesses must be
-    // silently absorbed and skipped on REF.
-    {"clint-hw", CLINT_HW_BASE, CLINT_HW_SIZE,
-     "egos-2000 HARDWARE CLINT alias sink", true, NULL},
 };
 
 static const mmio_map_t *find_mmio_map(paddr_t addr)
@@ -436,11 +437,7 @@ static void log_watched_write(word_t addr, word_t data, char wmask,
 
 extern "C" void pmem_read(word_t raddr, unsigned char rsize, word_t *rdata)
 {
-#ifdef CONFIG_ISA64
-  // Canonicalise RV64 sign-extended physical addresses (0xffffffff8xxxxxxx)
-  raddr = (word_t)((uint32_t)raddr);
-#endif
-  word_t addr = raddr;
+  word_t addr = (word_t)canonical_paddr((paddr_t)raddr);
   word_t data = 0;
   // AXI SIZE describes bytes selected starting at the transaction address.
   // MMIO handlers receive a mask relative to that address, just like writes.
@@ -495,11 +492,14 @@ extern "C" void pmem_read(word_t raddr, unsigned char rsize, word_t *rdata)
 
 extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
 {
-#ifdef CONFIG_ISA64
-  waddr = (word_t)((uint32_t)waddr);
-#endif
+  const uint64_t physical = (uint64_t)canonical_paddr((paddr_t)waddr);
   uint8_t mask = (uint8_t)wmask;
   if (mask == 0) return;
+  // A malformed beat must never wrap a selected byte from the end of the
+  // 32-bit physical map back to address zero.
+  for (unsigned i = 0; i < sizeof(word_t); i++)
+    if ((mask & (1u << i)) && physical + i >= 0x100000000ull) return;
+  waddr = (word_t)physical;
   // Normalize the first selected lane. Handlers receive byte enables relative
   // to this address; holes remain holes, not separate device transactions.
   while ((mask & 1u) == 0) {
@@ -568,8 +568,24 @@ void vaddr_show(vaddr_t addr, int n)
   printf("\n");
 }
 
+void init_memory_backing()
+{
+#ifdef RAPT_LARGE_PMEM
+  if (memory.pmem != nullptr) return;
+  memory.pmem = (uint8_t *)mmap(NULL, MSIZE, PROT_READ | PROT_WRITE,
+                                MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (memory.pmem == MAP_FAILED)
+  {
+    perror("mmap 2 GiB PMEM");
+    abort();
+  }
+  host_maps[0].host = memory.pmem;
+#endif
+}
+
 void init_mem()
 {
+  init_memory_backing();
   void init_serial();
   init_serial();
   void init_virtio_blk();

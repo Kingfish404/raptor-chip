@@ -53,6 +53,30 @@ bool cpu_read_sq_snapshot_control(uint32_t *valid, uint32_t *committed,
   return true;
 }
 
+bool cpu_read_axi_write_snapshot(bool skid, word_t *addr, word_t *data, uint8_t *strb)
+{
+  if (!(skid ? VERILOG_AXI_MASTER(write_skid_valid) : VERILOG_AXI_MASTER(write_w_pending)))
+    return false;
+  const auto &request = skid ? VERILOG_AXI_MASTER(write_skid) : VERILOG_AXI_MASTER(write_stage);
+  // Verilator packs write_request_t from its LSB: strb, data, cache, size,
+  // addr, id (4 bits in rapt_memory), zero. Extract across 32-bit limbs.
+  constexpr unsigned lanes = sizeof(word_t), bits = lanes * 8;
+  auto field = [&](unsigned low, unsigned width) {
+    word_t value = 0;
+    for (unsigned bit = 0; bit < width; ++bit)
+      value |= word_t((request[(low + bit) / 32] >> ((low + bit) % 32)) & 1) << bit;
+    return value;
+  };
+  // Zero bursts cannot be posted (rapt_bus.posted_eligible excludes wzero).
+  // They must drain through the existing SQ quiesce path; never overlay MMIO.
+  if (field(lanes + 2 * bits + 7 + 4, 1) || !(field(lanes + bits, 4) & 4))
+    return false;
+  *addr = field(lanes + bits + 7, bits);
+  *data = field(lanes, bits);
+  *strb = uint8_t(field(0, lanes));
+  return true;
+}
+
 #ifdef CONFIG_ITRACE
 static char iringbuf[MAX_IRING_SIZE][128] = {};
 static word_t iringbuf_rpc[MAX_IRING_SIZE] = {};

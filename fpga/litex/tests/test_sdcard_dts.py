@@ -21,7 +21,7 @@ def csr_fixture():
         names.extend((prefix + '_dma_' + name, base + offset, size) for name, offset, size in
                      [('base', 0, 2), ('length', 8, 1), ('enable', 12, 1), ('done', 16, 1), ('loop', 20, 1)])
     for name, offset, size in names:
-        registers['sdcard_' + name] = {'addr': 0xf0002000 + offset, 'size': size}
+        registers['sdcard_' + name] = {'addr': 0x11002000 + offset, 'size': size}
     return {'csr_registers': registers, 'constants': {'config_clock_frequency': 50000000}}
 
 
@@ -53,8 +53,8 @@ class SdcardDtsTest(unittest.TestCase):
                         with self.assertRaisesRegex(ValueError, 'MMC'):
                             ensure_sdcard_dtb(added, csr, reused)
                     for node, prop, value in (
-                        ('/soc/mmc@f0002000', 'dma-coherent', []),
-                        ('/soc/mmc@f0002000', 'clocks', ['dead']),
+                        ('/soc/mmc@11002000', 'dma-coherent', []),
+                        ('/soc/mmc@11002000', 'clocks', ['dead']),
                         ('/sd-regulator', 'regulator-min-microvolt', ['1']),
                     ):
                         shutil.copyfile(added, reused)
@@ -64,13 +64,13 @@ class SdcardDtsTest(unittest.TestCase):
 
     def test_current_layout_polling_and_separate_dma_resources(self):
         node = sdcard_node(csr_fixture())
-        self.assertIn('<0xf0002048 0x20>, <0xf0002068 0x20>', node)
+        self.assertIn('<0x11002048 0x20>, <0x11002068 0x20>', node)
         self.assertIn('clock-frequency = <50000000>', node)
         self.assertNotIn('interrupts =', node)
         self.assertNotIn('dma-coherent;', node)
 
     def test_unknown_dma_layout_rejected(self):
-        for field, value in [('addr', 0xf0002050), ('size', 1)]:
+        for field, value in [('addr', 0x11002050), ('size', 1)]:
             csr = copy.deepcopy(csr_fixture())
             csr['csr_registers']['sdcard_block2mem_dma_base'][field] = value
             with self.assertRaisesRegex(ValueError, 'layout'):
@@ -80,7 +80,7 @@ class SdcardDtsTest(unittest.TestCase):
         csr = csr_fixture()
         for register in csr['csr_registers'].values():
             register['addr'] -= 0x70000000
-        with self.assertRaisesRegex(ValueError, 'uncached'):
+        with self.assertRaisesRegex(ValueError, 'CSR aperture'):
             sdcard_node(csr)
         csr = csr_fixture()
         csr['constants']['config_clock_frequency'] = 0

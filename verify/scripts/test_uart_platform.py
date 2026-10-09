@@ -55,7 +55,7 @@ void add_mmio_map(const char *, paddr_t, void *, uint32_t, io_callback_t);
                     self.assertEqual(compiled.returncode,0,compiled.stderr)
                     result = subprocess.run([str(binary)],input=b'',capture_output=True,check=True)
                     self.assertIn(b'PASS:',result.stdout)
-                    self.assertEqual(result.stderr,b'AA')
+                    self.assertEqual(result.stderr,b'A')
 
     def test_all_canonical_uart_dtbs_and_linux_presets(self):
         with tempfile.TemporaryDirectory(prefix='raptor-chip-uart-dtb-',dir='/tmp') as tmp:

@@ -89,14 +89,20 @@ module rapt_tb_mem #(
   localparam logic [31:0] SramSize = 32'h0000_2000;
   localparam logic [31:0] SerialBase = 32'h1000_0000;  // NS16550 (QEMU / non-KU15P)
   localparam logic [31:0] SerialSize = 32'h0000_0100;
-  localparam logic [31:0] LiteXUartBase = 32'hF000_1800;  // LiteX UART (KU15P / HARDWARE)
+  localparam logic [31:0] LiteXUartBase = 32'h1100_1800;  // LiteX UART (KU15P / HARDWARE)
   localparam logic [31:0] LiteXUartSize = 32'h0000_0020;
   localparam logic [31:0] MromBase = 32'h2000_0000;
   localparam logic [31:0] MromSize = 32'h0001_0000;
   localparam logic [31:0] FlashBase = 32'h3000_0000;
   localparam logic [31:0] FlashSize = 32'h1000_0000;
   localparam logic [31:0] PmemBase = 32'h8000_0000;
-  localparam logic [31:0] PmemSize = 32'h0800_0000;
+`ifdef RAPT_LARGE_PMEM
+  localparam logic [31:0] PmemSize      = 32'h8000_0000;
+  localparam bit          SeparateSdram = 1'b0;
+`else
+  localparam logic [31:0] PmemSize      = 32'h0800_0000;
+  localparam bit          SeparateSdram = 1'b1;
+`endif
   localparam logic [31:0] SdramBase = 32'ha000_0000;
   localparam logic [31:0] SdramSize = 32'h0200_0000;
   localparam logic [31:0] SyscallArgBase = 32'h8030_1000;
@@ -154,13 +160,13 @@ module rapt_tb_mem #(
 
   function automatic logic in_region(input logic [31:0] a, input logic [31:0] base,
                                      input logic [31:0] size);
-    return (a >= base) && (a < (base + size));
+    return 64'(a) >= 64'(base) && 64'(a) < 64'(base) + 64'(size);
   endfunction
 
   function automatic logic is_mem(input logic [31:0] a);
     return in_region(a, SramBase, SramSize) || in_region(a, MromBase, MromSize) ||
         in_region(a, FlashBase, FlashSize) || in_region(a, PmemBase, PmemSize) ||
-        in_region(a, SdramBase, SdramSize);
+        (SeparateSdram && in_region(a, SdramBase, SdramSize));
   endfunction
 
   function automatic logic is_serial(input logic [31:0] a);
@@ -281,7 +287,7 @@ module rapt_tb_mem #(
         end
       end
     end else if (is_litex_uart(a)) begin
-      // LiteX UART (KU15P): offsets relative to 0xF0001800.
+      // LiteX UART (KU15P): offsets relative to 0x11001800.
       //   +0x00  RXTX: write = TX data byte
       //   +0x04  TXFULL: read only, ignored on write
       //   +0x10  EVPEND: write 1 to ack TX/RX event — ignored in sim
@@ -315,7 +321,7 @@ module rapt_tb_mem #(
       endcase
       d[a[1:0]*8+:8] = b;
     end else if (is_litex_uart(a)) begin
-      // LiteX UART (0xF0001800).  Raptor reports mvendorid=666, so egos runs
+      // LiteX UART (0x11001800).  Raptor reports mvendorid=666, so egos runs
       // the HARDWARE path: TXFULL at +0x04 must read 0 (TX ready), and RXEMPTY
       // at +0x08 reads 1 because this testbench has no host input source.
       case (a[4:2])

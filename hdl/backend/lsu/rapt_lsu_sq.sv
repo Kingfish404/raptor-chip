@@ -17,10 +17,9 @@ module rapt_lsu_sq #(
     lsu_pipe_if.slave exu_lsu,
     input CompletionT exu_ioq_bcast,
     input logic completion_accept,
-    input logic sq_handoff_valid,
-    input logic [XLEN-1:0] sq_handoff_vaddr,
+    // Unqualified conflict hint; allocation uses the accepted completion.
+    input logic sq_forward_pending,
     input logic [4:0] sq_handoff_alu,
-    input logic sq_handoff_fp64,
     input logic [XLEN-1:0] sq_waddr_hi,
     input logic [XLEN-1:0] sq_waddr_third,
     input logic [2:0][1:0] sq_wpbmt,
@@ -124,6 +123,9 @@ module rapt_lsu_sq #(
   /* verilator lint_on UNUSEDSIGNAL */
 `endif
   logic [XLEN-1:0] sq_vaddr[SQ_SIZE];  // virtual : forwarding comparison
+  // Neighbouring CAM block numbers, computed once when the store enters.
+  localparam int SqBlockLsb = $clog2(XLEN / 8) + 2;
+  logic [XLEN-SqBlockLsb-1:0] sq_next_block[SQ_SIZE], sq_prev_block[SQ_SIZE];
   logic [XLEN-1:0] sq_paddr[SQ_SIZE];  // physical: bus write-through
   // IOQ supplies word-aligned later beats, including across page boundaries.
   // Store only their word addresses; reconstruct constant byte-offset bits
@@ -300,6 +302,8 @@ module rapt_lsu_sq #(
           sq_dest[sq_tail] <= exu_ioq_bcast.dest;
 `endif
           sq_vaddr[sq_tail] <= exu_ioq_bcast.tval;      // virtual (forwarding)
+          sq_next_block[sq_tail] <= exu_ioq_bcast.tval[XLEN-1:SqBlockLsb] + 1'b1;
+          sq_prev_block[sq_tail] <= exu_ioq_bcast.tval[XLEN-1:SqBlockLsb] - 1'b1;
           sq_paddr[sq_tail] <= exu_ioq_bcast.sq_waddr;  // physical (drain)
           sq_paddr_hi[sq_tail] <= sq_waddr_hi[XLEN-1:WordOffBits];
           sq_paddr_third[sq_tail] <= sq_waddr_third[XLEN-1:WordOffBits];
@@ -351,7 +355,7 @@ module rapt_lsu_sq #(
   logic sq_has_typed_store;
   always_comb begin
     sq_has_typed_store = (exu_lsu.rcontext.pbmte && exu_lsu.rcontext.mmu_en)
-                      || (sq_handoff_valid && (|sq_wpbmt));
+                      || (sq_forward_pending && (|sq_wpbmt));
     for (int i = 0; i < SQ_SIZE; i++) sq_has_typed_store |= sq_valid[i] && (|sq_pbmt[i]);
   end
   logic [XLEN-1:0] sq_fwd_data;
@@ -378,22 +382,23 @@ module rapt_lsu_sq #(
   rapt_sq_forward #(
       .Xlen(XLEN),
       .Entries(SQ_SIZE),
-      .ReadPorts(ForwardPorts)
+      .ReadPorts(ForwardPorts),
+      .PrecomputedBlocks(1'b1)
   ) u_forward (
       .head(sq_head),
       .valid(sq_valid),
       .stale_context(sq_stale_context),
       .store_addr(sq_vaddr),
+      .store_next_block(sq_next_block),
+      .store_prev_block(sq_prev_block),
       .store_data(sq_wdata),
       .store_alu(sq_alu),
       .full_store_mask(FullStoreWstrb),
       .store_fp64(sq_fp64),
       .mmu_enabled(exu_lsu.rcontext.mmu_en),
       .narrow_allowed(narrow_allowed),
-      .alloc_valid(sq_handoff_valid),
-      .alloc_addr(sq_handoff_vaddr),
+      .alloc_valid(sq_forward_pending),
       .alloc_alu(sq_handoff_alu),
-      .alloc_fp64(sq_handoff_fp64),
       .load_addr(forward_addr),
       .conflict(forward_conflict),
       .load_size_m1(forward_size_m1),
@@ -477,13 +482,30 @@ module rapt_lsu_sq #(
   // than completing LR through the ordinary load-forwarding path.
   logic pmp_load_fault_lsu;
   logic pmp_load_fault_raw;
+  // The live PMP comparison of the A request address is only needed by SQ
+  // forwarding and the misaligned split; ordinary L1D loads use L1D's own
+  // registered check. Keep the 16-entry comparison off the response path
+  // and decide from a register: M-mode with every entry off cannot fault.
+  // Otherwise a request held from the previous cycle uses that cycle's check
+  // of the same (stable) address; a new request that needs the decision
+  // waits one cycle.
+  logic pmp_load_decided, pmp_load_fault_dec;
+  logic req_held_q, pmp_fault_q;
+  wire pmp_bypass = lsu_eff_priv == `RAPT_PRIV_M && (&pmp_state.pmp_mode_off);
+  always_ff @(posedge clock) begin
+    if (reset || cmu_bcast.flush_pipe) req_held_q <= 1'b0;
+    else req_held_q <= exu_lsu.rvalid && !(exu_lsu.rready || exu_lsu.rretry || exu_lsu.rmiss);
+    pmp_fault_q <= pmp_load_fault_raw;
+  end
+  assign pmp_load_decided = exu_lsu.rcontext.mmu_en || pmp_bypass || req_held_q;
+  assign pmp_load_fault_dec = !pmp_bypass && pmp_fault_q;
   assign fwd_hit = !exu_lsu.atomic_lock
                 && !ma_span && !mmio_ordered && !sq_has_typed_store && load_in_sq && sq_fwd_ok
-                && (exu_lsu.rcontext.mmu_en || (!pmp_load_fault_raw
+                && (exu_lsu.rcontext.mmu_en || (pmp_load_decided && !pmp_load_fault_dec
                     && rapt_pkg::addr_data_span_capable(raddr, lsu_load_size_m1, 1'b0)));
   // Virtual addresses cannot be checked against physical PMP entries.
   // Translated fragments receive their PA checks in L1D.
-  assign pmp_load_fault_lsu = !exu_lsu.rcontext.mmu_en && pmp_load_fault_raw;
+  assign pmp_load_fault_lsu = !exu_lsu.rcontext.mmu_en && pmp_load_fault_dec;
   // Only engage the split for requests that actually reach the cache
   // (no SQ forward/conflict).  Forwarded loads keep the single-shot path;
   // the full load footprint has already been checked against the SQ.
@@ -494,7 +516,7 @@ module rapt_lsu_sq #(
       && |(raddr & XLEN'(lsu_load_size_m1));
   logic ma_load_req;
   assign ma_load_req = !lr_alignment_fault && raddr_valid && ma_span && !fwd_hit
-      && !load_in_sq && !pmp_load_fault_lsu;
+      && !load_in_sq && pmp_load_decided && !pmp_load_fault_lsu;
 
   // ==========================================================================
   //  Hit-under-miss B channel (Phase A2, RAPT_LSU_HUM)
@@ -535,38 +557,21 @@ module rapt_lsu_sq #(
   logic mmio_ordered_b;
   assign mmio_ordered_b = !exu_lsu.rcontext_b.mmu_en && !rapt_pkg::addr_cacheable(raddr_b);
 
-  // B has no trap response. Check its own complete physical byte range
-  // before either SQ forwarding or L1D admission; denied loads remain in
-  // the IOQ and retry through A, which reports the architectural exception.
-  // With translation enabled this address is virtual. The existing L1D
-  // B contract rejects untranslated requests; do not PMP-check a VA here.
+  // B has no trap response. Check its complete physical byte range before
+  // either SQ forwarding or L1D admission; denied loads remain in the IOQ
+  // and retry through A, which reports the architectural exception. With
+  // translation enabled this address is virtual; the L1D B contract rejects
+  // untranslated requests. B is served only when PMP provably cannot fault
+  // (M-mode, every entry off), which keeps a live PMP comparison off B's
+  // response path; otherwise it retries through A's precise check.
   logic [3:0] b_size_m1;
-  logic b_pmp_fault, b_bare_fault;
+  logic b_bare_fault;
   assign b_size_m1 = (4'd1 << ralu_b[1:0]) - 4'd1;
   assign forward_size_m1[1] = b_size_m1;
-  rapt_pmp #(
-      .XLEN(XLEN)
-  ) u_pmp_load_b (
-      .addr(raddr_b),
-      .size_m1(b_size_m1),
-      .priv(exu_lsu.rcontext_b.eff_priv),
-      .op_r(1'b1),
-      .op_w(1'b0),
-      .op_x(1'b0),
-      .pmp_raw_addr(pmp_state.pmp_raw_addr),
-      .pmp_napot_mask(pmp_state.pmp_napot_mask),
-      .pmp_cfg_r(pmp_state.pmp_cfg_r),
-      .pmp_cfg_w(pmp_state.pmp_cfg_w),
-      .pmp_cfg_x(pmp_state.pmp_cfg_x),
-      .pmp_cfg_l(pmp_state.pmp_cfg_l),
-      .pmp_mode_off(pmp_state.pmp_mode_off),
-      .pmp_mode_tor(pmp_state.pmp_mode_tor),
-      .pmp_mode_na4(pmp_state.pmp_mode_na4),
-      .pmp_mode_napot(pmp_state.pmp_mode_napot),
-      .fault(b_pmp_fault),
-      .fault_lo_o()
-  );
-  assign b_bare_fault = !exu_lsu.rcontext_b.mmu_en && (b_pmp_fault || !rapt_pkg::addr_data_span_capable(
+  logic b_pmp_fault_eff;
+  assign b_pmp_fault_eff = !(exu_lsu.rcontext_b.eff_priv == `RAPT_PRIV_M
+      && (&pmp_state.pmp_mode_off));
+  assign b_bare_fault = !exu_lsu.rcontext_b.mmu_en && (b_pmp_fault_eff || !rapt_pkg::addr_data_span_capable(
       raddr_b, b_size_m1, 1'b0
   ));
 
@@ -778,7 +783,7 @@ module rapt_lsu_sq #(
   // Raise the pre-split PMP trap on the cycle the request is seen, so the
   // IOQ retires the load as a trap without touching the cache.
   logic lsu_pmp_trap;
-  assign lsu_pmp_trap = raddr_valid && ma_span && pmp_load_fault_lsu
+  assign lsu_pmp_trap = raddr_valid && ma_span && pmp_load_decided && pmp_load_fault_lsu
                      && !fwd_hit && !load_in_sq
                      && (ma_state == MA_IDLE);
   assign exu_lsu.trap = (lr_alignment_fault || lsu_pmp_trap) ? 1'b1
@@ -865,6 +870,8 @@ module rapt_lsu_sq #(
   assign lsu_l1d.rvalid = !lr_alignment_fault && ((ma_state == MA_HI) || (ma_state == MA_X)
                        || (raddr_valid && !load_in_sq
                                        && !mmio_load_blocked
+                                       // A split's first beat waits for its PMP decision.
+                                       && (!ma_span || pmp_load_decided)
                                        && (ma_state == MA_IDLE)));
   assign lsu_l1d.atomic_lock = exu_lsu.atomic_lock;
   assign lsu_l1d.ordered = exu_lsu.ordered && sq_all_empty;
@@ -980,6 +987,9 @@ module rapt_lsu_sq #(
   assign lsu_l1d.wvalid = (state_store == LS_S_V && wvalid)
                        || (state_store == LS_S_HI_V)
                        || (state_store == LS_S_X_V);
+  // Another committed store is queued behind the draining head.
+  assign lsu_l1d.wmore = sq_valid[int'(sq_head) == SQ_SIZE - 1 ? 0 : int'(sq_head) + 1]
+      && sq_committed[int'(sq_head) == SQ_SIZE - 1 ? 0 : int'(sq_head) + 1];
   assign lsu_l1d.wdata  = cbo_zero_active ? '0
                        : (state_store == LS_S_HI_V) ? ma_wdata_hi
                        : (state_store == LS_S_X_V)  ? ma_wdata_third

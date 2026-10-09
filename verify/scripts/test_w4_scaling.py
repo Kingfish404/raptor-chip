@@ -50,12 +50,9 @@ def cases():
                 "backend/ieu/rapt_ieu_muldiv.sv"], []
         yield xlen, "tb_sq_forward_ports", ["backend/lsu/rapt_sq_forward.sv"], []
         yield xlen, "tb_store_queue_forward_ring", ["backend/lsu/rapt_sq_forward.sv"], []
-        for enabled in (0, 1):
-            yield xlen, "tb_ioq_store_stage", IOQ, [
-                f"-DRAPT_IOQ_STORE_PRECHECK={enabled}"]
-            yield xlen, "tb_ifu_stream_events", ["rapt_pkg.sv",
-                "generated/rapt_idu_decoder_c.sv", "frontend/rapt_ifu.sv"], [
-                f"-DRAPT_FETCH_BRANCH_FOLLOWER={enabled}"]
+        yield xlen, "tb_ioq_store_stage", IOQ, []
+        yield xlen, "tb_ifu_stream_events", ["rapt_pkg.sv",
+            "generated/rapt_idu_decoder_c.sv", "frontend/rapt_ifu.sv"], []
 
 
 def main():

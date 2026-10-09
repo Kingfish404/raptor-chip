@@ -148,7 +148,6 @@ module tb_predict_history_pipeline;
     ifu_idu.valid = '{default:0};
     idu_rnu.ready = '{default:1};
     iss = '0;
-    ifu_bpu.pc = 0;
     ifu_bpu.nextpc = 0;
     ifu_bpu.pc_update = 1;
     ifu_bpu.history_valid = 0;

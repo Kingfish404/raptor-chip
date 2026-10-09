@@ -23,7 +23,7 @@ ifeq ($(ISA),rv32)
   TEST_NAME := fp_moves_rv32
 	NPC_NEMU_F_DEFCONFIG := riscv32_ref_defconfig
 	NPC_NEMU_D_DEFCONFIG := riscv32_ref_defconfig
-	NPC_DIFF_REF_SO := $(NEMU_HOME)/build/riscv32-nemu-interpreter-so
+	NPC_DIFF_REF_SO := $(NEMU_HOME)/build/ref/riscv32_ref_defconfig/riscv32-nemu-interpreter-so
 	NPC_VFLAGS := -DRAPT_ASSERT_EN
 else
 	NEMU_DEFCONFIG := riscv64$(if $(filter 1,$(DIFFTEST)),_difftest,)_defconfig
@@ -36,7 +36,7 @@ else
   TEST_NAME := fp_moves
 	NPC_NEMU_F_DEFCONFIG := riscv64_ref_defconfig
 	NPC_NEMU_D_DEFCONFIG := riscv64_ref_defconfig
-	NPC_DIFF_REF_SO := $(NEMU_HOME)/build/riscv64-nemu-interpreter-so
+	NPC_DIFF_REF_SO := $(NEMU_HOME)/build/ref/riscv64_ref_defconfig/riscv64-nemu-interpreter-so
 	NPC_VFLAGS := -DRAPT_RV64 -DRAPT_ASSERT_EN
 endif
 

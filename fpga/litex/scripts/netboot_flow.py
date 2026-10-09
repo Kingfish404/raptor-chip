@@ -247,6 +247,16 @@ def validate_timing_coverage(report):
                 f'Final timing coverage is missing or incomplete: {check}')
 
 
+def final_timing_passed(report):
+    """The publication timing acceptance, as a predicate instead of a failure."""
+    try:
+        validate_timing_coverage(report)
+    except RuntimeError:
+        return False
+    return ('Timing constraints are not met' not in report and
+            re.search(r'(?:All user specified )?Timing constraints are met', report, re.I) is not None)
+
+
 def validate_network_delta(before, after, lldp_drops=0):
     for key in ('rx_errors', 'tx_errors', 'tx_dropped'):
         require(after[key] == before[key], f'Network counter increased: {key}')
@@ -371,13 +381,17 @@ class Flow:
         require(report.is_file(),
                 'No final timing report; build this exact profile successfully before loading')
         validate_timing_coverage(report.read_text())
-        self.make('fpga-bitstream-current')
+        # Source freshness only warns: concurrent edits must not block a
+        # completed build. Bitstream integrity and timing remain hard gates.
+        self.make('fpga-bitstream-warn')
         self.make('fpga-timing-ok')
         if not building:
             receipt = self.work / 'build.json'
             require(receipt.is_file(), 'No completed workflow build receipt; run the matching -build target')
             record = json.loads(receipt.read_text())
-            require(record['source'] == source_identity(self.make_args), 'Sources changed since workflow build')
+            if record['source'] != source_identity(self.make_args):
+                print(f"[WARN] Sources changed since workflow build (built from {record['source'][:12]})",
+                      file=sys.stderr)
             require(record['bit_sha256'] == self.bit_hash(), 'Bitstream changed since workflow build')
 
     def bit_hash(self):
@@ -458,9 +472,18 @@ class Flow:
             source = record['source']
             expected_bit = record['bit_sha256']
         else:
+            # An unstamped or timing-failed output is not a completed build:
+            # there is nothing to preserve, and the new build replaces it.
             stamp = live / '.bitstream_stamp'
-            require(stamp.is_file() and stamp.read_text().strip(),
-                    'No completed legacy build stamp; refusing to archive an unfinished bitstream')
+            if not (stamp.is_file() and stamp.read_text().strip()):
+                print('[WARN] Leftover bitstream has no completed build stamp; not archiving it',
+                      file=sys.stderr)
+                return
+            report = live / 'gateware/mlk_cu08_ku15p_timing.rpt'
+            if not (report.is_file() and final_timing_passed(report.read_text())):
+                print('[WARN] Leftover bitstream did not pass final timing; not archiving it',
+                      file=sys.stderr)
+                return
             source = stamp.read_text().strip()
             expected_bit = self.bit_hash()
         self.publish_bitstream(source, expected_bit=expected_bit)
@@ -811,7 +834,10 @@ class Flow:
     def run(self):
         action = self.args.action
         if action == 'info':
-            print(json.dumps(self.context, indent=2))
+            print(json.dumps({**self.context, 'reports_index': str(
+                Path(self.context['soc']) / 'gateware/index.html')}, indent=2))
+        elif action == 'reports':
+            self.make('fpga-reports-index')
         elif action == 'check':
             require(importlib.util.find_spec('serial') is not None, 'Install pyserial in NETBOOT_PYTHON environment')
             for tool in ('verilator', 'dtc', 'fdtget', self.context['cross'] + 'gcc', self.context['cross'] + 'nm', self.context['cross'] + 'objcopy'):
@@ -827,10 +853,17 @@ class Flow:
             before = source_identity(self.make_args)
             self.make('fpga-build')
             self.gate(building=True)
-            require(before == source_identity(self.make_args), 'Sources changed during build; receipt withheld, rebuild stable sources')
+            changed = before != source_identity(self.make_args)
+            if changed:
+                print('[WARN] Sources changed during build; the receipt records the pre-build '
+                      f'identity {before[:12]}', file=sys.stderr)
             self.publish_bitstream(before)
+            # The receipt covers the hardware; a later bundle failure is a
+            # software step that `-bundle` can retry without rebuilding.
+            save(self.work / 'build.json', {'source': before, 'bit_sha256': self.bit_hash(),
+                                            'sources_changed_during_build': changed,
+                                            'time': time.time()})
             self.prepare_bundle()
-            save(self.work / 'build.json', {'source': before, 'bit_sha256': self.bit_hash(), 'time': time.time()})
         elif action == 'bundle':
             self.prepare_bundle()
         elif action == 'load':
@@ -859,7 +892,7 @@ class Flow:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=('info', 'check', 'build', 'bundle', 'load', 'serve', 'test', 'console', 'host-setup', 'host-restore'))
+    parser.add_argument('action', choices=('info', 'reports', 'check', 'build', 'bundle', 'load', 'serve', 'test', 'console', 'host-setup', 'host-restore'))
     parser.add_argument('--xlen', type=int, choices=(32, 64), required=True)
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--state-root', type=Path, default=LITEX / 'build/netboot-default')

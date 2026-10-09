@@ -1,5 +1,6 @@
 /* PLIC 1.0 claim is independent of threshold. Completion checks the full
  * source ID and the destination context's enable mask, not claim ownership. */
+#include "raptor_platform.h"
 #ifndef PLIC_CASE
 #define PLIC_CASE 0
 #endif
@@ -12,10 +13,10 @@ _start:
   csrw mie, zero
   la t0, fail
   csrw mtvec, t0
-  li s0, 0x0c000004
-  li s1, 0x0c002000
-  li s2, 0x0c001000
-  li s3, 0x0c200004
+  li s0, (RAPTOR_PLIC_BASE + 0x4)
+  li s1, (RAPTOR_PLIC_BASE + 0x2000)
+  li s2, (RAPTOR_PLIC_BASE + 0x1000)
+  li s3, (RAPTOR_PLIC_BASE + 0x200004)
   li t0, 2
   sw t0, 0(s0)
   sw t0, 0(s1)
@@ -33,7 +34,7 @@ _start:
   li t0, 33
   sw t0, 0(s3)
 #elif PLIC_CASE == 2
-  li s4, 0x0c201004
+  li s4, (RAPTOR_PLIC_BASE + 0x201004)
   li t0, 1
   sw t0, 0(s4)
 #endif

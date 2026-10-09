@@ -12,13 +12,13 @@ Core description: **Super-scalar, out-of-order RISC-V core** with register renam
 
 ```
 RV64 (default config, -DRAPT_RV64)
-ISA summary: rv64imafdc_zba_zbb_zbs_zfhmin_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_zkt_zca_zcb_zcmop_svinval_svpbmt
+ISA summary: rv64imafdc_zba_zbb_zbc_zbs_zfhmin_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_zkt_zca_zcb_zcmop_svinval_svpbmt
 Profile:     RVA22S64 implementation target; full-profile validation remains open
 Modes:       Machine, Supervisor, User
 MMU:         Sv39 / Bare; Svade; Svpbmt page attributes
 
 RV32 (default config, without -DRAPT_RV64)
-ISA summary: rv32imafdc_zba_zbb_zbs_zfhmin_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_zca_zcb_zcmop_svinval
+ISA summary: rv32imafdc_zba_zbb_zbc_zbs_zfhmin_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_zca_zcb_zcmop_svinval
 Profile:     RVI20U32; additional ISA and supervisor features listed above
 Modes:       Machine, Supervisor, User
 MMU:         Sv32 / Bare; Svade
@@ -27,7 +27,7 @@ Core name:  raptor-falcon (Linux-capable)
 PMP:        8 usable entries, TOR / NA4 / NAPOT, L-bit lockable
 Interrupts: CLINT (mtime, mtimecmp, msip) + PLIC (31 sources, M/S contexts)
 
-Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID; burst-capable reads (up to 8 outstanding), one outstanding write with independent AW/W handshakes (single-beat ordinary stores, multi-beat Zicboz `CBO.ZERO`)
+Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID; burst-capable reads (up to 8 outstanding), up to 4 posted cacheable writes with write-through L1D and no L2; other writes wait for B responses, with independent AW/W handshakes (single-beat ordinary stores, multi-beat Zicboz `CBO.ZERO`)
 Default uarch: dual issue / dual commit, ROB=32, ALQ=8 (2 issue ports), BRQ=8, MDQ=4, FPQ=1, IOQ=8, SQ=16, integer PRF=64, FPR=32 x 64-bit, L1I=16 KiB, L1D=16 KiB (both 4-way), 64 B cache lines, optional L2 passthrough/cache stage
 
 Verifying:  RISCOF (riscv-arch-test), full-core F/D directed/differential tests, RVFI, SVA
@@ -47,7 +47,7 @@ flowchart TD
     direction TD
     BTB["BTB (2-way SA, 128 entries)"]
     PHT["PHT (2-bit, 256 entries)"]
-    RSB["RSB (4 entries)"]
+    RSB["RSB (16 entries)"]
     TAGE["TAGE (default DIRP)"]
   end
   subgraph FE["Frontend (default decode width: 2)"]
@@ -57,7 +57,7 @@ flowchart TD
   end
   subgraph BE["Backend (default rename/dispatch/commit widths: 2/2/2)"]
     RNU["RNU (RenameWidth slots, integrated MAP/RAT/free bitmap + checkpoints)"]
-    RBUF["Renamed-packet buffer (2 entries)"]
+    RBUF["rename_pipe (2 × RenameWidth) + operand stage"]
     ROU["ROU (UOQ 8 + ROB 32 + operand spill 16)"]
     DPU{{"DPU dispatch router"}}
     IEU["IEU: ALQ 8 + BRQ 8 + MDQ 4"]

@@ -141,6 +141,19 @@ module rapt_fpu_fma_pipeline #(
   localparam int LeadingGroupBits = 16;
   localparam int LeadingGroups = WorkBits / LeadingGroupBits;
 
+  // Form the discarded-bit window before reducing it. A loop with a running
+  // sticky OR makes each bit depend on the previous bit in FPGA synthesis.
+  function automatic logic discarded_nonzero(input logic [WorkBits-1:0] magnitude,
+                                             input integer shift_amount);
+    logic [WorkBits-1:0] mask;
+    mask = '0;
+    if (shift_amount > 1) begin
+      if (shift_amount > WorkBits) mask = '1;
+      else mask = {WorkBits{1'b1}} >> (WorkBits + 1 - shift_amount);
+    end
+    return |(magnitude & mask);
+  endfunction
+
   function automatic logic [LeadingBits-1:0] find_leading_one(input logic [WorkBits-1:0] value);
     logic [LeadingGroups-1:0] group_nonzero;
     logic group_found;
@@ -550,7 +563,6 @@ module rapt_fpu_fma_pipeline #(
     logic [FracBits:0] precision_retained;
     logic signed [13:0] exponent_value;
     integer shift_amount;
-    integer index;
 
     stage4_result_c = s4_special_result_q;
     stage4_flags_c = s4_special_flags_q;
@@ -592,8 +604,7 @@ module rapt_fpu_fma_pipeline #(
         : s4_magnitude_q >> shift_amount;
       precision_retained = magnitude_aligned[MantBits-1:0];
       precision_guard = shift_amount > 0 ? s4_magnitude_q[shift_amount-1] : 1'b0;
-      for (index = 0; index < WorkBits; index = index + 1)
-      if (index < shift_amount - 1) precision_sticky |= s4_magnitude_q[index];
+      precision_sticky |= discarded_nonzero(s4_magnitude_q, shift_amount);
       case (s4_rounding_mode_q)
         3'b000: precision_up = precision_guard && (precision_sticky || precision_retained[0]);
         3'b001: precision_up = 1'b0;
@@ -622,9 +633,7 @@ module rapt_fpu_fma_pipeline #(
         retained = magnitude_aligned[MantBits-1:0];
         guard_bit = shift_amount > 0
           ? s4_magnitude_q[shift_amount - 1] : 1'b0;
-        if (shift_amount > 1)
-          for (index = 0; index < WorkBits; index = index + 1)
-          if (index < shift_amount - 1) sticky_bit = sticky_bit || s4_magnitude_q[index];
+        sticky_bit |= discarded_nonzero(s4_magnitude_q, shift_amount);
       end
       inexact = guard_bit || sticky_bit;
       case (s4_rounding_mode_q)

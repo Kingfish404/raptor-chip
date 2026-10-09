@@ -6,9 +6,8 @@ logic [2:0][1:0] sq_wpbmt;
 logic sq_acquire;
 rapt_pkg::mem_context_t sq_context;
 logic sq_handoff_valid;
-logic [`RAPT_XLEN-1:0] sq_handoff_vaddr;
+logic sq_forward_pending;
 logic [4:0] sq_handoff_alu;
-logic sq_handoff_fp64;
 
 cmu_bcast_if cmu_bcast();
 csr_bcast_if csr_bcast();
@@ -53,9 +52,8 @@ rapt_lsu_ioq dut (
     .wb_accept(1'b1),
 `endif
     .sq_handoff_valid,
-    .sq_handoff_vaddr,
+    .sq_forward_pending,
     .sq_handoff_alu,
-    .sq_handoff_fp64,
     .sq_waddr_hi,
     .sq_waddr_third,
     .sq_wpbmt,
@@ -137,6 +135,7 @@ task automatic init_ioq_inputs(input logic dmmu_en);
     exu_l1d.reservation_size_m1 = 4'd3;
     exu_l1d.reservation_blocked = 1'b0;
     fpr.ioq_rdata = '0;
+    fpr.ioq_rvalid = 1'b1;  // Fixture supplies an already sampled FPR value.
     exu_l1d.ready = 1'b0;
   end
 endtask

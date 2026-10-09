@@ -1,4 +1,9 @@
 /* Broad external PMA windows may contain no target on this NPC platform. */
+#include "raptor_platform.h"
+/* Two distinct physical addresses in a mapped device aperture that NPC leaves
+ * unbacked, so every access completes with an AXI DECERR. */
+#define DEVICE_HOLE_A RAPTOR_UNBACKED_DEVICE_BASE
+#define DEVICE_HOLE_B (RAPTOR_UNBACKED_DEVICE_BASE + 0x100000)
 #if __riscv_xlen == 64
 #define REG_S sd
 #define SATP_MODE 0x8000000000000000
@@ -40,9 +45,9 @@ _start:
   half_plic_seed
 #endif
   li s7, 0
-  li s9, 0xc0001000
+  li s9, DEVICE_HOLE_B
   jal ra, test_error
-  li s9, 0x21000000
+  li s9, DEVICE_HOLE_A
   jal ra, test_error
   li t0, BARE_FAULT_COUNT
   bne s7, t0, fail
@@ -69,9 +74,9 @@ _start:
   sw t0, 1024(s0)
 #endif
   la t1, level0
-  li t0, 0x300004cf
+  li t0, RAPTOR_PTE(DEVICE_HOLE_B, 0xcf)
   REG_S t0, 0(t1)
-  li t0, 0x084000cf
+  li t0, RAPTOR_PTE(DEVICE_HOLE_A, 0xcf)
   REG_S t0, (__riscv_xlen / 8)(t1)
   srli t0, s0, 12
   li t1, SATP_MODE

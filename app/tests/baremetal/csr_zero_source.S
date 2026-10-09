@@ -1,6 +1,7 @@
 /* CSRRS/CSRRC with a non-x0 zero source still write. The explicit minstret
  * write overrides this instruction's implicit increment; x0/uimm=0 do not.
  */
+#include "raptor_platform.h"
 .option norvc
 .option norelax
 .section .text
@@ -39,12 +40,12 @@ _start:
   csrrwi s0, minstret, 0
   csrr s1, minstret
   bnez s1, fail
-  li t0, 0x100000
+  li t0, RAPTOR_FINISHER_BASE
   li t1, 0x5555
   sw t1, 0(t0)
 1: j 1b
 fail:
-  li t0, 0x100000
+  li t0, RAPTOR_FINISHER_BASE
   li t1, 0x3333
   sw t1, 0(t0)
 2: j 2b

@@ -10,6 +10,7 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[2]
 SELECTOR = ROOT / "hdl/common/rapt_issue_select.sv"
 FORMAL = ROOT / "verify/formal/formal_issue_select.sv"
+UNIFORM_FORMAL = ROOT / "verify/formal/formal_issue_select_uniform.sv"
 
 
 def main():
@@ -17,9 +18,11 @@ def main():
     parser.add_argument("--mode", choices=["prove", "synth", "all"], default="all")
     parser.add_argument("--output", type=Path, default=ROOT / "verify/build/issue-select")
     parser.add_argument("--timeout", type=int, default=300)
-    parser.add_argument("--matrix", choices=["baseline", "port-scaling"], default="baseline",
-                        help="port-scaling holds Entries=16 while varying Ports")
+    parser.add_argument("--matrix", choices=["baseline", "port-scaling", "uniform"], default="baseline",
+                        help="port-scaling varies Ports; uniform proves shared simple-port capabilities")
     args = parser.parse_args()
+    if args.matrix == "uniform" and args.mode != "prove":
+        parser.error("the uniform matrix requires --mode prove")
     args.output.mkdir(parents=True, exist_ok=True)
     report = args.output / "results.json"
     report.write_text(json.dumps({"complete": False}) + "\n")
@@ -27,7 +30,7 @@ def main():
         "complete": False, "mode": args.mode, "matrix": args.matrix,
         "yosys_version": subprocess.check_output(["yosys", "-V"], text=True).strip(),
         "source_sha256": {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
-                          for p in [SELECTOR, FORMAL]},
+                          for p in [SELECTOR, FORMAL, UNIFORM_FORMAL]},
         "mapping": "synth -noabc; abc -g simple; clean; stat; ltp -noff (no technology library)",
         "proofs": [], "generic_synthesis": [],
     }
@@ -45,17 +48,30 @@ def main():
     save()
 
     if args.mode in ("prove", "all"):
-        for entries, ports, ordered in [(1, 1, 0), (4, 2, 0), (4, 3, 0), (4, 3, 1), (7, 4, 0)]:
-            name = f"prove-{entries}-{ports}-{ordered}"
-            commands = (f"read_slang --single-unit --top formal_issue_select "
-                        f"-GEntries={entries} -GPorts={ports} -GInOrder={ordered} {SELECTOR} {FORMAL}; "
+        if args.matrix == "uniform":
+            cases = [(1, 1, 0), (4, 2, 0), (4, 2, 1), (5, 3, 2)]
+            cases += [(8, 4, last) for last in range(4)]
+            top = "formal_issue_select_uniform"
+            option = "LastPort"
+        else:
+            cases = [(1, 1, 0), (4, 2, 0), (4, 3, 0), (4, 3, 1), (7, 4, 0)]
+            top = "formal_issue_select"
+            option = "InOrder"
+        for entries, ports, setting in cases:
+            name = (f"prove-uniform-{entries}-{ports}-last{setting}" if args.matrix == "uniform"
+                    else f"prove-{entries}-{ports}-{setting}")
+            commands = (f"read_slang --single-unit --top {top} "
+                        f"-GEntries={entries} -GPorts={ports} -G{option}={setting} "
+                        f"{SELECTOR} {FORMAL} {UNIFORM_FORMAL}; "
                         "select -assert-none t:$check t:$assert t:$assume t:$cover; "
-                        "prep -top formal_issue_select; flatten; memory_map; opt; "
+                        f"prep -top {top}; flatten; memory_map; opt; "
                         "sat -verify -prove correct 1 -set-def-inputs")
             output = run(name, commands)
             if "SAT proof finished - no model found: SUCCESS!" not in output:
                 raise RuntimeError(f"{name}: missing proof success marker")
-            results["proofs"].append({"entries": entries, "ports": ports, "in_order": ordered,
+            setting_name = "last_port" if args.matrix == "uniform" else "in_order"
+            results["proofs"].append({"entries": entries, "ports": ports, setting_name: setting,
+                                      "uniform_simple_ports": args.matrix == "uniform",
                                       "contracts_proven": True})
             save()
             print(f"PASS: {name}", flush=True)
@@ -78,7 +94,7 @@ def main():
                 save()
                 print(json.dumps(row), flush=True)
     current_hashes = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
-                      for p in [SELECTOR, FORMAL]}
+                      for p in [SELECTOR, FORMAL, UNIFORM_FORMAL]}
     if current_hashes != results["source_sha256"]:
         raise RuntimeError("source changed during issue-selector evaluation")
     results["complete"] = True

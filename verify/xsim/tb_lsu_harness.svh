@@ -15,10 +15,12 @@ rapt_cmu cmu(.clock, .reset, .rou_cmu, .cmu_bcast);
 lsu_l1d_if lsu_l1d();
 lsu_pipe_if exu_lsu();
 rapt_pkg::completion_t exu_ioq_bcast;
-logic sq_handoff_valid;
-assign sq_handoff_valid = exu_ioq_bcast.valid && exu_ioq_bcast.wen
+logic sq_forward_pending;
+`ifndef TB_LSU_MANUAL_FORWARD
+assign sq_forward_pending = exu_ioq_bcast.valid && exu_ioq_bcast.wen
     && !exu_ioq_bcast.trap && exu_lsu.stq_ready && !cmu_bcast.flush_pipe
     && exu_ioq_bcast.alu[4:0] != `RAPT_CBO_MGMT_WALU;
+`endif
 rou_lsu_if rou_lsu();
 csr_bcast_if csr_bcast();
 pmp_state_if pmp_state();
@@ -38,10 +40,8 @@ rapt_lsu_sq #(.SQ_SIZE(LsuTbSqSize)) dut (
     .exu_lsu,
     .exu_ioq_bcast,
     .completion_accept(1'b1),
-    .sq_handoff_valid(sq_handoff_valid),
-    .sq_handoff_vaddr(exu_ioq_bcast.tval),
+    .sq_forward_pending(sq_forward_pending),
     .sq_handoff_alu(exu_ioq_bcast.alu[4:0]),
-    .sq_handoff_fp64(1'b0),
     .sq_waddr_hi,
     .sq_waddr_third,
     .sq_wpbmt,
@@ -76,7 +76,8 @@ task automatic init_lsu_inputs(
     init_cmu_bcast_defaults();
 `endif
     init_csr_bcast_defaults(`RAPT_PRIV_M, '0, 1'b0);
-    init_pmp_state_defaults(1'b0);
+    // Reset state: every PMP entry is OFF, so M-mode decides in the request cycle.
+    init_pmp_state_defaults(1'b1);
     exu_lsu.rvalid = 1'b0;
     exu_lsu.raddr = '0;
     exu_lsu.ralu = `RAPT_ALU_LW__;
@@ -108,6 +109,9 @@ task automatic init_lsu_inputs(
     exu_ioq_bcast.cause = '0;
     exu_ioq_bcast.difftest_skip = 1'b0;
     exu_ioq_bcast.valid = 1'b0;
+`ifdef TB_LSU_MANUAL_FORWARD
+    sq_forward_pending = 1'b0;
+`endif
     rou_lsu.store = 1'b0;
     rou_lsu.dest = '0;
     rou_lsu.sq_vaddr = '0;

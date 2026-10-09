@@ -44,6 +44,9 @@ module sq_forward_ring_case #(
   logic [3:0] load_size_m1[ReadPorts];
   logic [ReadPorts-1:0] conflict, forward_valid;
   logic [Xlen-1:0] forward_data[ReadPorts];
+  // Precomputed neighbour blocks are unused unless PrecomputedBlocks is set.
+  logic [Xlen-$clog2(Xlen/8)-3:0] store_next_block[Entries] = '{default: '0};
+  logic [Xlen-$clog2(Xlen/8)-3:0] store_prev_block[Entries] = '{default: '0};
   rapt_sq_forward #(
       .Xlen(Xlen),
       .Entries(Entries),
@@ -125,15 +128,8 @@ module sq_forward_ring_case #(
           expected_data = store_data[e];
         end
       end
-      if (zero_pending || (alloc_valid && alias_bytes(
-              alloc_addr,
-              load_addr[p],
-              store_bytes(
-                  alloc_alu, alloc_fp64
-              ),
-              int'(load_size_m1[p]) + 1,
-              mmu_enabled
-          ))) begin
+      // An impending allocation blocks every port regardless of address.
+      if (zero_pending || alloc_valid) begin
         expected_conflict = 1;
         expected_valid = 0;
       end

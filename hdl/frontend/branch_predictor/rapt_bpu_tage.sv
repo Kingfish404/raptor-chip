@@ -31,7 +31,7 @@ module rapt_bpu_tage #(
     /* verilator lint_on UNUSEDPARAM */
     parameter int BIM_LEN = `RAPT_TAGE_BIM_BITS,
     parameter int IDX_LEN = `RAPT_TAGE_INDEX_BITS,
-    parameter bit AuxRead = `RAPT_BPU_AUX_TAGE
+    parameter bit AuxRead = 1'b1
 ) (
     `RAPT_BPU_DIRP_PORTS,
     input logic [XLEN-1:0] aux_pc = '0,
@@ -78,23 +78,27 @@ module rapt_bpu_tage #(
 
   // ---------------- Storage ----------------
   // Bimodal base (2-bit saturating counter; MSB = taken)
-  logic        [        1:0] bim     [BimSize];
+  (* ram_style = "distributed" *) logic [1:0] bim_data[BimSize];
+  logic [BimSize-1:0] bim_valid;
+  function automatic logic [1:0] bim_value(input logic [BIM_LEN-1:0] index);
+    return bim_valid[index] ? bim_data[index] : 2'b01;
+  endfunction
 
   // Tagged table 1
-  logic        [TagLen1-1:0] t1_tag  [TabSize];
-  logic signed [CtrBits-1:0] t1_ctr  [TabSize];
+  (* ram_style = "distributed" *) logic [TagLen1-1:0] t1_tag  [TabSize];
+  (* ram_style = "distributed" *) logic signed [CtrBits-1:0] t1_ctr  [TabSize];
   logic                      t1_u    [TabSize];
   logic                      t1_valid[TabSize];
 
   // Tagged table 2
-  logic        [TagLen2-1:0] t2_tag  [TabSize];
-  logic signed [CtrBits-1:0] t2_ctr  [TabSize];
+  (* ram_style = "distributed" *) logic [TagLen2-1:0] t2_tag  [TabSize];
+  (* ram_style = "distributed" *) logic signed [CtrBits-1:0] t2_ctr  [TabSize];
   logic                      t2_u    [TabSize];
   logic                      t2_valid[TabSize];
 
   // Tagged table 3
-  logic        [TagLen3-1:0] t3_tag  [TabSize];
-  logic signed [CtrBits-1:0] t3_ctr  [TabSize];
+  (* ram_style = "distributed" *) logic [TagLen3-1:0] t3_tag  [TabSize];
+  (* ram_style = "distributed" *) logic signed [CtrBits-1:0] t3_ctr  [TabSize];
   logic                      t3_u    [TabSize];
   logic                      t3_valid[TabSize];
 
@@ -243,7 +247,7 @@ module rapt_bpu_tage #(
   assign hit2 = t2_valid[rd_t2_idx] && (t2_tag[rd_t2_idx] == rd_t2_tag);
   assign hit3 = t3_valid[rd_t3_idx] && (t3_tag[rd_t3_idx] == rd_t3_tag);
 
-  assign bim_taken = bim[rd_bim_idx][1];
+  assign bim_taken = bim_taken_at(rd_bim_idx);
   assign t1_taken = ~t1_ctr[rd_t1_idx][CtrBits-1];  // sign bit 0 => >=0 => taken
   assign t2_taken = ~t2_ctr[rd_t2_idx][CtrBits-1];
   assign t3_taken = ~t3_ctr[rd_t3_idx][CtrBits-1];
@@ -309,7 +313,7 @@ module rapt_bpu_tage #(
     assign aux_hit2 = t2_valid[aux_rd_t2_idx] && (t2_tag[aux_rd_t2_idx] == aux_rd_t2_tag);
     assign aux_hit3 = t3_valid[aux_rd_t3_idx] && (t3_tag[aux_rd_t3_idx] == aux_rd_t3_tag);
 
-    assign aux_bim_taken = bim[aux_rd_bim_idx][1];
+    assign aux_bim_taken = bim_taken_at(aux_rd_bim_idx);
     assign aux_t1_taken = ~t1_ctr[aux_rd_t1_idx][CtrBits-1];  // sign bit 0 => >=0 => taken
     assign aux_t2_taken = ~t2_ctr[aux_rd_t2_idx][CtrBits-1];
     assign aux_t3_taken = ~t3_ctr[aux_rd_t3_idx][CtrBits-1];
@@ -389,19 +393,19 @@ module rapt_bpu_tage #(
       up_provider_taken = ~t3_ctr[up_t3_idx][CtrBits-1];
       up_alt_taken      = up_hit2 ? ~t2_ctr[up_t2_idx][CtrBits-1]
                         : up_hit1 ? ~t1_ctr[up_t1_idx][CtrBits-1]
-                                  : bim[up_bim_idx][1];
+                                  : bim_taken_at(up_bim_idx);
     end else if (up_hit2) begin
       up_prov_ctr       = t2_ctr[up_t2_idx];
       up_provider_taken = ~t2_ctr[up_t2_idx][CtrBits-1];
-      up_alt_taken      = up_hit1 ? ~t1_ctr[up_t1_idx][CtrBits-1] : bim[up_bim_idx][1];
+      up_alt_taken      = up_hit1 ? ~t1_ctr[up_t1_idx][CtrBits-1] : bim_taken_at(up_bim_idx);
     end else if (up_hit1) begin
       up_prov_ctr       = t1_ctr[up_t1_idx];
       up_provider_taken = ~t1_ctr[up_t1_idx][CtrBits-1];
-      up_alt_taken      = bim[up_bim_idx][1];
+      up_alt_taken      = bim_taken_at(up_bim_idx);
     end else begin
       up_prov_ctr       = '0;
-      up_provider_taken = bim[up_bim_idx][1];
-      up_alt_taken      = bim[up_bim_idx][1];
+      up_provider_taken = bim_taken_at(up_bim_idx);
+      up_alt_taken      = bim_taken_at(up_bim_idx);
     end
   end
   assign up_provider_weak = (up_prov_ctr == 3'sd0) || (up_prov_ctr == -3'sd1);
@@ -435,113 +439,105 @@ module rapt_bpu_tage #(
   assign alloc_t3_ok = (up_provider < 2'd3) && (t3_u[up_t3_idx] == 1'b0);
   assign do_alloc    = update_en && update_mispred;
 
-  // ---------------- Sequential writes ----------------
+  // Keep each table payload on one unreset write port. Valid bits supply
+  // reset semantics; allocation initializes a tag/counter before it is read.
+  logic alloc_t1, alloc_t2, alloc_t3;
+  assign alloc_t1 = do_alloc && alloc_t1_ok;
+  assign alloc_t2 = do_alloc && !alloc_t1_ok && alloc_t2_ok;
+  assign alloc_t3 = do_alloc && !alloc_t1_ok && !alloc_t2_ok && alloc_t3_ok;
+  always_ff @(posedge clock) begin
+    if (!(reset || init) && update_en) begin
+      bim_data[up_bim_idx] <= bim_update(bim_value(up_bim_idx), update_taken);
+      if (alloc_t1) t1_tag[up_t1_idx] <= up_t1_tag;
+      if (alloc_t1 || up_hit1)
+        t1_ctr[up_t1_idx] <= alloc_t1 ? (update_taken ? CtrInitT : CtrInitN) : ctr_update(
+            t1_ctr[up_t1_idx], update_taken
+        );
+      if (alloc_t2) t2_tag[up_t2_idx] <= up_t2_tag;
+      if (alloc_t2 || up_hit2)
+        t2_ctr[up_t2_idx] <= alloc_t2 ? (update_taken ? CtrInitT : CtrInitN) : ctr_update(
+            t2_ctr[up_t2_idx], update_taken
+        );
+      if (alloc_t3) t3_tag[up_t3_idx] <= up_t3_tag;
+      if (alloc_t3 || up_hit3)
+        t3_ctr[up_t3_idx] <= alloc_t3 ? (update_taken ? CtrInitT : CtrInitN) : ctr_update(
+            t3_ctr[up_t3_idx], update_taken
+        );
+    end
+  end
+
+  // Resettable table metadata has fixed physical destinations. Decode a
+  // single addressed update per table before the per-entry write enables.
+  for (genvar e = 0; e < BimSize; e++) begin : g_bim_valid
+    always_ff @(posedge clock) begin
+      if (reset || init) bim_valid[e] <= 1'b0;
+      else if (update_en && up_bim_idx == BIM_LEN'(e)) bim_valid[e] <= 1'b1;
+    end
+  end
+  logic no_allocation;
+  assign no_allocation = do_alloc && !(alloc_t1_ok || alloc_t2_ok || alloc_t3_ok);
+  logic useful_t1, clear_t1;
+  assign useful_t1 = up_hit1 && up_provider == 2'd1
+      && t1_taken_at(up_t1_idx) != bim_taken_at(up_bim_idx)
+      && t1_taken_at(up_t1_idx) == update_taken;
+  assign clear_t1 = alloc_t1 || (no_allocation && up_provider < 2'd1);
+  for (genvar e = 0; e < TabSize; e++) begin : g_t1_metadata
+    always_ff @(posedge clock) begin
+      if (reset || init) begin
+        t1_valid[e] <= 1'b0;
+        t1_u[e] <= 1'b0;
+      end else if (update_en) begin
+        if (alloc_t1 && up_t1_idx == IDX_LEN'(e)) t1_valid[e] <= 1'b1;
+        if (u_clear_pulse) t1_u[e] <= 1'b0;
+        else if ((useful_t1 || clear_t1) && up_t1_idx == IDX_LEN'(e)) t1_u[e] <= !clear_t1;
+      end
+    end
+  end
+  logic useful_t2, clear_t2;
+  assign useful_t2 = up_hit2 && up_provider == 2'd2
+      && t2_taken_at(up_t2_idx) != bim_taken_at(up_bim_idx)
+      && t2_taken_at(up_t2_idx) == update_taken;
+  assign clear_t2 = alloc_t2 || (no_allocation && up_provider < 2'd2);
+  for (genvar e = 0; e < TabSize; e++) begin : g_t2_metadata
+    always_ff @(posedge clock) begin
+      if (reset || init) begin
+        t2_valid[e] <= 1'b0;
+        t2_u[e] <= 1'b0;
+      end else if (update_en) begin
+        if (alloc_t2 && up_t2_idx == IDX_LEN'(e)) t2_valid[e] <= 1'b1;
+        if (u_clear_pulse) t2_u[e] <= 1'b0;
+        else if ((useful_t2 || clear_t2) && up_t2_idx == IDX_LEN'(e)) t2_u[e] <= !clear_t2;
+      end
+    end
+  end
+  logic useful_t3, clear_t3;
+  assign useful_t3 = up_hit3 && up_provider == 2'd3
+      && t3_taken_at(up_t3_idx) != bim_taken_at(up_bim_idx)
+      && t3_taken_at(up_t3_idx) == update_taken;
+  assign clear_t3 = alloc_t3 || (no_allocation && up_provider < 2'd3);
+  for (genvar e = 0; e < TabSize; e++) begin : g_t3_metadata
+    always_ff @(posedge clock) begin
+      if (reset || init) begin
+        t3_valid[e] <= 1'b0;
+        t3_u[e] <= 1'b0;
+      end else if (update_en) begin
+        if (alloc_t3 && up_t3_idx == IDX_LEN'(e)) t3_valid[e] <= 1'b1;
+        if (u_clear_pulse) t3_u[e] <= 1'b0;
+        else if ((useful_t3 || clear_t3) && up_t3_idx == IDX_LEN'(e)) t3_u[e] <= !clear_t3;
+      end
+    end
+  end
   always_ff @(posedge clock) begin
     if (reset || init) begin
-      for (int i = 0; i < BimSize; i++) bim[i] <= 2'b01;
-      for (int i = 0; i < TabSize; i++) begin
-        // t*_tag / t*_ctr payload is valid-gated: every read (hit1..hit3,
-        // update/alt-pred paths) is qualified by t*_valid[i] or up_hit*,
-        // and allocation rewrites the pair together with the valid bit.
-        // u stays on the reset network because the allocation probes
-        // (alloc_t*_ok) read it without a valid gate.
-        t1_u[i]     <= 1'b0;
-        t1_valid[i] <= 1'b0;
-        t2_u[i]     <= 1'b0;
-        t2_valid[i] <= 1'b0;
-        t3_u[i]     <= 1'b0;
-        t3_valid[i] <= 1'b0;
-      end
-      u_age_cnt   <= '0;
+      u_age_cnt <= '0;
       use_alt_ctr <= '0;
-    end else begin
-      if (update_en) begin
-        // Aging counter ticks per update event (not per clock), matching
-        // gem5's "every 2^log_u_reset_period updates" semantics.
-        u_age_cnt <= u_age_cnt + 1'b1;
-        if (u_clear_pulse) begin
-          for (int i = 0; i < TabSize; i++) begin
-            t1_u[i] <= 1'b0;
-            t2_u[i] <= 1'b0;
-            t3_u[i] <= 1'b0;
-          end
-          u_age_cnt <= '0;
-        end
-
-        // -- Direction counter update --
-        // The bimodal base is trained on every branch: it is both the cold
-        // fallback and alternate predictor for weak tagged-table providers.
-        // Tagged hits additionally update their matching entry.
-        bim[up_bim_idx] <= bim_update(bim[up_bim_idx], update_taken);
-        if (up_hit1) t1_ctr[up_t1_idx] <= ctr_update(t1_ctr[up_t1_idx], update_taken);
-        if (up_hit2) t2_ctr[up_t2_idx] <= ctr_update(t2_ctr[up_t2_idx], update_taken);
-        if (up_hit3) t3_ctr[up_t3_idx] <= ctr_update(t3_ctr[up_t3_idx], update_taken);
-
-        // -- use_alt_on_na update: only when the provider is weak AND
-        //    provider/alt disagree. Increment when alt was correct, decrement
-        //    when provider was correct. Saturating signed counter.
-        if ((up_hit1 || up_hit2 || up_hit3) && up_provider_weak &&
-            (up_provider_taken != up_alt_taken)) begin
-          if (up_alt_taken == update_taken) begin
-            if (use_alt_ctr != UseAltMax) use_alt_ctr <= use_alt_ctr + 1;
-          end else begin
-            if (use_alt_ctr != UseAltMin) use_alt_ctr <= use_alt_ctr - 1;
-          end
-        end
-
-        // -- u-bit update: provider was "useful" when its direction
-        //    differed from bimodal alt-pred and matched the actual outcome.
-        //    Suppressed during u_clear_pulse to avoid multi-write on the
-        //    same array element (global clear below already resets all u-bits).
-        if (up_hit1 && (up_provider == 2'd1) && (t1_taken_at(
-                up_t1_idx
-            ) != bim_taken_at(
-                up_bim_idx
-            )) && (t1_taken_at(
-                up_t1_idx
-            ) == update_taken) && !u_clear_pulse)
-          t1_u[up_t1_idx] <= 1'b1;
-        if (up_hit2 && (up_provider == 2'd2) && (t2_taken_at(
-                up_t2_idx
-            ) != bim_taken_at(
-                up_bim_idx
-            )) && (t2_taken_at(
-                up_t2_idx
-            ) == update_taken) && !u_clear_pulse)
-          t2_u[up_t2_idx] <= 1'b1;
-        if (up_hit3 && (up_provider == 2'd3) && (t3_taken_at(
-                up_t3_idx
-            ) != bim_taken_at(
-                up_bim_idx
-            )) && (t3_taken_at(
-                up_t3_idx
-            ) == update_taken) && !u_clear_pulse)
-          t3_u[up_t3_idx] <= 1'b1;
-
-        // -- Allocation on mispredict --
-        if (do_alloc) begin
-          if (alloc_t1_ok) begin
-            t1_tag[up_t1_idx]   <= up_t1_tag;
-            t1_ctr[up_t1_idx]   <= update_taken ? CtrInitT : CtrInitN;
-            t1_u[up_t1_idx]     <= 1'b0;
-            t1_valid[up_t1_idx] <= 1'b1;
-          end else if (alloc_t2_ok) begin
-            t2_tag[up_t2_idx]   <= up_t2_tag;
-            t2_ctr[up_t2_idx]   <= update_taken ? CtrInitT : CtrInitN;
-            t2_u[up_t2_idx]     <= 1'b0;
-            t2_valid[up_t2_idx] <= 1'b1;
-          end else if (alloc_t3_ok) begin
-            t3_tag[up_t3_idx]   <= up_t3_tag;
-            t3_ctr[up_t3_idx]   <= update_taken ? CtrInitT : CtrInitN;
-            t3_u[up_t3_idx]     <= 1'b0;
-            t3_valid[up_t3_idx] <= 1'b1;
-          end else begin
-            // No allocation possible: decrement u in eligible tables to free slots.
-            if (up_provider < 2'd1) t1_u[up_t1_idx] <= 1'b0;
-            if (up_provider < 2'd2) t2_u[up_t2_idx] <= 1'b0;
-            if (up_provider < 2'd3) t3_u[up_t3_idx] <= 1'b0;
-          end
-        end
+    end else if (update_en) begin
+      u_age_cnt <= u_clear_pulse ? '0 : u_age_cnt + 1'b1;
+      if ((up_hit1 || up_hit2 || up_hit3) && up_provider_weak
+          && (up_provider_taken != up_alt_taken)) begin
+        if (up_alt_taken == update_taken) begin
+          if (use_alt_ctr != UseAltMax) use_alt_ctr <= use_alt_ctr + 1;
+        end else if (use_alt_ctr != UseAltMin) use_alt_ctr <= use_alt_ctr - 1;
       end
     end
   end
@@ -558,7 +554,7 @@ module rapt_bpu_tage #(
     return ~t3_ctr[i][CtrBits-1];
   endfunction
   function automatic logic bim_taken_at(input logic [BIM_LEN-1:0] i);
-    return bim[i][1];
+    return bim_valid[i] && bim_data[i][1];
   endfunction
 
   /* verilator lint_on UNUSEDSIGNAL */

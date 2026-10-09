@@ -7,6 +7,7 @@ module tb_l1i_data_integrity;
   logic clock = 0, reset = 1, write_valid = 0;
   always #5 clock = ~clock;
   logic [SetBits-1:0] read_addr[Words], write_set;
+  logic [WordBits-1:0] read_focus_word;
   logic [WordBits-1:0] write_word;
   logic [WayBits-1:0] write_way;
   logic [31:0] write_data, read_data[Ways][Words];
@@ -34,7 +35,14 @@ module tb_l1i_data_integrity;
     for (int way = 0; way < Ways; way++)
       for (int word_idx = 0; word_idx < Words; word_idx++) begin
         bit bank_write;
-        bank_write = write_valid && int'(write_way) == way && int'(write_word) == word_idx;
+        int read_set;
+        int bank_base;
+        bank_base = WordBits >= 3 ? (word_idx / 4) * 4 : word_idx;
+        read_set = WordBits >= 3 && (int'(read_focus_word) / 4) == (word_idx / 4)
+                 ? int'(read_addr[read_focus_word]) : int'(read_addr[bank_base]);
+        bank_write = write_valid && int'(write_way) == way
+                     && (WordBits >= 3 ? (int'(write_word) / 4) == (word_idx / 4)
+                                       : int'(write_word) == word_idx);
         if (read_valid[way][word_idx] !== !(reset || bank_write))
           $fatal(
               1,
@@ -45,18 +53,18 @@ module tb_l1i_data_integrity;
               bank_write
           );
         if (!reset && !bank_write) begin
-          if (read_index[way][word_idx] !== read_addr[word_idx])
+          if (read_index[way][word_idx] !== SetBits'(read_set))
             $fatal(1, "read index ownership lost");
-          if (known[way][word_idx][read_addr[word_idx]]) begin
-            if (read_data[way][word_idx] !== expected[way][word_idx][read_addr[word_idx]])
+          if (known[way][word_idx][read_set]) begin
+            if (read_data[way][word_idx] !== expected[way][word_idx][read_set])
               $fatal(
                   1,
                   "torn/stale word way=%0d word=%0d set=%0d got=%h expected=%h",
                   way,
                   word_idx,
-                  read_addr[word_idx],
+                  read_set,
                   read_data[way][word_idx],
-                  expected[way][word_idx][read_addr[word_idx]]
+                  expected[way][word_idx][read_set]
               );
             checks++;
           end
@@ -79,6 +87,7 @@ module tb_l1i_data_integrity;
     write_word=0;
     write_set=0;
     write_data=0;
+    read_focus_word=0;
     foreach (read_addr[i]) read_addr[i] = 0;
     step();
     reset = 0;
@@ -101,6 +110,7 @@ module tb_l1i_data_integrity;
     for (int cycle = 0; cycle < 20000; cycle++) begin
       reset = (cycle % 127) == 0;
       foreach (read_addr[i]) read_addr[i] = SetBits'(random_word());
+      read_focus_word = WordBits'(random_word());
       write_valid=(random_word()&3)!=0;
       write_way=WayBits'(random_word()%Ways);
       write_word=WordBits'(random_word());

@@ -1,9 +1,6 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
 
-`ifndef RAPT_BPU_AUX_PC_HASH
-`define RAPT_BPU_AUX_PC_HASH 0
-`endif
 
 `ifdef RAPT_BPU_DIRP_TAGE
 `define RAPT_BPU_DIRP_MODULE rapt_bpu_tage
@@ -11,8 +8,10 @@
 `define RAPT_BPU_DIRP_MODULE rapt_bpu_gshare
 `elsif RAPT_BPU_DIRP_BIMODAL
 `define RAPT_BPU_DIRP_MODULE rapt_bpu_pht
-`else
+`elsif RAPT_BPU_DIRP_STATIC
 `define RAPT_BPU_DIRP_MODULE rapt_bpu_static
+`else
+`error "Select a RAPT_BPU_DIRP_TAGE, GSHARE, BIMODAL or STATIC predictor"
 `endif
 
 /* verilator lint_off UNUSEDPARAM */
@@ -77,42 +76,11 @@ module rapt_bpu #(
   logic rbtaken;
 
 `ifdef RAPT_FETCH_LOOKAHEAD
-  // Side predictor for a packet's non-first conditional branch. Unlike the
-  // synchronous primary TAGE/BTB path, this table is read combinationally
-  // because its position is only known after the L1I response arrives. The target
-  // remains a static branch immediate in IFU, so no second BTB port is needed.
-  logic [1:0] aux_pht[PHT_SIZE];
-  logic [1:0] aux_gshare[PHT_SIZE];
-  logic [1:0] aux_chooser[PHT_SIZE];
-  logic [PHT_LEN-1:0] aux_pht_idx;
-  logic [PHT_LEN-1:0] aux_gshare_idx;
-  logic [PHT_LEN-1:0] aux_pht_update_idx;
-  logic [PHT_LEN-1:0] aux_gshare_update_idx;
-  logic aux_bim_taken, aux_gshare_taken;
-  localparam int AuxTrackSize = 2 * `RAPT_ROB_SIZE;
-  localparam int AuxTrackPtrBits = $clog2(AuxTrackSize);
-  localparam int AuxTrackCountBits = $clog2(AuxTrackSize + 1);
-  logic [AuxTrackPtrBits-1:0] aux_track_head, aux_track_tail;
-  logic [AuxTrackCountBits-1:0] aux_track_count;
-  logic aux_track_is_aux[AuxTrackSize];
-  logic [PHT_LEN-1:0] aux_track_index[AuxTrackSize];
-  logic aux_track_enqueue, aux_track_dequeue, aux_track_train;
-  assign aux_pht_idx = ifu_bpu.aux_pc[PHT_LEN:1];
-  // Selected presets fold a higher PC slice into the auxiliary gshare index.
-  // This changes only the index logic; table capacity is unchanged.
-  assign aux_gshare_idx = aux_pht_idx ^ gshare[PHT_LEN-1:0]
-      ^ (`RAPT_BPU_AUX_PC_HASH ? ifu_bpu.aux_pc[PHT_LEN+8:9] : PHT_LEN'(0));
-  assign aux_pht_update_idx = cmu_bcast.rpc[PHT_LEN:1];
-  assign aux_gshare_update_idx = aux_track_index[aux_track_head];
-  assign aux_bim_taken = aux_pht[aux_pht_idx][1];
-  assign aux_gshare_taken = aux_gshare[aux_gshare_idx][1];
-  assign ifu_bpu.aux_index = aux_gshare_idx;
-  assign ifu_bpu.aux_taken = ifu_bpu.aux_query
-      && (`RAPT_BPU_AUX_TAGE ? dirp_aux_taken
-          : (aux_chooser[aux_pht_idx][1] ? aux_gshare_taken : aux_bim_taken));
-  assign aux_track_enqueue = idu_bpu.history_valid;
-  assign aux_track_dequeue = cmu_bcast.ben && aux_track_count != 0;
-  assign aux_track_train = aux_track_dequeue && aux_track_is_aux[aux_track_head];
+  // A packet's non-first conditional branch is predicted by TAGE's auxiliary
+  // read port (its position is known only after the L1I response arrives).
+  // Its target remains a static branch immediate in IFU.
+  assign ifu_bpu.aux_index = '0;
+  assign ifu_bpu.aux_taken = ifu_bpu.aux_query && dirp_aux_taken;
 `endif
 
   logic [XLEN-1:0] rpc;
@@ -309,78 +277,6 @@ module rapt_bpu #(
 
   assign ifu_bpu.taken = taken;
   assign ifu_bpu.npc = npc;
-
-`ifdef RAPT_FETCH_LOOKAHEAD
-  if (AuxTrackSize < 2 || (AuxTrackSize & (AuxTrackSize - 1)) != 0) begin : g_bad_aux_track_size
-    $error("Auxiliary predictor tracking size must be a power of two");
-  end
-  always_ff @(posedge clock) begin
-    if (reset || cmu_bcast.fence_time || cmu_bcast.flush_pipe || cmu_bcast.sys_resume) begin
-      aux_track_head  <= '0;
-      aux_track_tail  <= '0;
-      aux_track_count <= '0;
-    end else begin
-      case ({
-        aux_track_enqueue, aux_track_dequeue
-      })
-        2'b10: begin
-          aux_track_tail  <= aux_track_tail + 1'b1;
-          aux_track_count <= aux_track_count + 1'b1;
-        end
-        2'b01: begin
-          aux_track_head  <= aux_track_head + 1'b1;
-          aux_track_count <= aux_track_count - 1'b1;
-        end
-        2'b11: begin
-          aux_track_head <= aux_track_head + 1'b1;
-          aux_track_tail <= aux_track_tail + 1'b1;
-        end
-        default: begin
-        end
-      endcase
-      if (aux_track_enqueue) begin
-        aux_track_is_aux[aux_track_tail] <= idu_bpu.history_auxiliary;
-        aux_track_index[aux_track_tail]  <= idu_bpu.history_auxiliary_index;
-      end
-    end
-  end
-
-  `RAPT_SVA_IMPLY(clock, reset || cmu_bcast.fence_time, AUX_TRACK_NOT_FULL,
-                  aux_track_enqueue && !aux_track_dequeue, aux_track_count < AuxTrackSize)
-  `RAPT_SVA_IMPLY(clock, reset || cmu_bcast.fence_time, AUX_TRACK_COMMIT_PRESENT, cmu_bcast.ben,
-                  aux_track_count != 0)
-
-  always_ff @(posedge clock) begin
-    if (reset || cmu_bcast.fence_time) begin
-      for (int i = 0; i < PHT_SIZE; i++) begin
-        aux_pht[i] <= WN;
-        aux_gshare[i] <= WN;
-        aux_chooser[i] <= SN;
-      end
-    end else if (aux_track_train) begin
-      if (rbtaken) begin
-        if (aux_pht[aux_pht_update_idx] != ST)
-          aux_pht[aux_pht_update_idx] <= aux_pht[aux_pht_update_idx] + 1'b1;
-        if (aux_gshare[aux_gshare_update_idx] != ST)
-          aux_gshare[aux_gshare_update_idx] <= aux_gshare[aux_gshare_update_idx] + 1'b1;
-      end else begin
-        if (aux_pht[aux_pht_update_idx] != SN)
-          aux_pht[aux_pht_update_idx] <= aux_pht[aux_pht_update_idx] - 1'b1;
-        if (aux_gshare[aux_gshare_update_idx] != SN)
-          aux_gshare[aux_gshare_update_idx] <= aux_gshare[aux_gshare_update_idx] - 1'b1;
-      end
-      if (aux_pht[aux_pht_update_idx][1] != aux_gshare[aux_gshare_update_idx][1]) begin
-        if (aux_gshare[aux_gshare_update_idx][1] == rbtaken) begin
-          if (aux_chooser[aux_pht_update_idx] != ST)
-            aux_chooser[aux_pht_update_idx] <= aux_chooser[aux_pht_update_idx] + 1'b1;
-        end else if (aux_chooser[aux_pht_update_idx] != SN) begin
-          aux_chooser[aux_pht_update_idx] <= aux_chooser[aux_pht_update_idx] - 1'b1;
-        end
-      end
-    end
-  end
-
-`endif
 
   assign rpc = cmu_bcast.rpc;
   assign rbtaken = cmu_bcast.btaken;

@@ -26,12 +26,12 @@ For separate frontend/backend/cache synthesis and checkpoint linking, see [the c
 ```bash
 # Install LiteX environment
 make setup
-# Build the real-FPGA bitstream
-make fpga-build
-# Load it to the connected board over USB
-make fpga-load
+# Build a BIOS bitstream using Tang's integrated main RAM
+make fpga-build FPGA_BOARD=tang_mega_138k_pro VARIANT=linux32 BOOT_MODE=bios
+# Load the same configuration to the connected board over USB
+make fpga-load FPGA_BOARD=tang_mega_138k_pro VARIANT=linux32 BOOT_MODE=bios
 # Open the UART console
-make fpga-console
+make fpga-console FPGA_BOARD=tang_mega_138k_pro
 ```
 
 ## FPGA Auto-Detection
@@ -63,6 +63,13 @@ make fpga-load FPGA_BOARD=mlk_cu08_ku15p VARIANT=linux32 \
 
 #### Recommended: fixed current board-validation profile
 
+The default-w4 RV64 profile targets 50 MHz, adds 1 ns of system setup
+uncertainty during implementation, and requires at least +0.3 ns final system
+WNS after restoring the original constraints. Generic KU15P builds can set
+`VIVADO_SYS_SETUP_MARGIN_NS` and `VIVADO_SYS_FINAL_WNS_NS` separately. Leaving
+the latter empty retains the implementation-margin requirement. This setup
+gate does not replace full timing, utilization, functional, or board validation.
+
 For the full default configuration, use these paired targets from `fpga/litex`:
 
 ```sh
@@ -78,7 +85,7 @@ Run load only after a successful build and when the board is available. This pro
 
 Outputs and workflow locks are isolated by preset and XLEN at `build/netboot-<RAPT_CONFIG>/rv32/{build,soc,netboot}` and `build/netboot-<RAPT_CONFIG>/rv64/{build,soc,netboot}`; they do not reuse the earlier compact temporary candidates. Use `make fpga-netboot-rv32-info` (or `rv64-info`) to see resolved paths. Do **not** substitute bare `make fpga-load` for the paired target.
 
-The default payloads are downloaded by the paired `build` target when absent: `linux/build/linux-riscv-rv32-qemu-rv32-buildroot-v6.18.50/fw_payload.bin` and `linux/build/linux-riscv-rv64-qemu-rv64-fast-buildroot-v6.18.50/fw_payload.bin`. Repeat `RAPT_CONFIG` for build/load/test steps. Host setup/restore shares `NETBOOT_STATE_ROOT` (default `build/netboot-default`) across presets. Supported location/tool overrides are `NETBOOT_BUILD_ROOT`, `NETBOOT_STATE_ROOT`, `NETBOOT_PAYLOAD_RV32`, `NETBOOT_PAYLOAD_RV64`, `VIVADO`, `VIVADO_JOBS`, and `CROSS`; use absolute paths for custom build/payload locations and repeat them for all workflow steps, or put them in ignored `netboot.local.mk`. Custom build outputs use `<NETBOOT_BUILD_ROOT>/<RAPT_CONFIG>/rvXX/`; older custom-root builds need rebuilding in this layout. Conflicting fixed board/variant/hardware overrides fail explicitly. Use the manual flow below for a different hardware configuration. Do not mix fixed-profile and ordinary targets in the same Make invocation. For the complete flow, including explicit host setup, namespaced TFTP deployment, manual BIOS netboot, Linux startup and network checks, see [NETBOOT.md](NETBOOT.md#fixed-cu08-end-to-end-targets). In short, after build use `make fpga-netboot-host-setup`, `make fpga-netboot-rv64-serve`, `make fpga-netboot-rv64-load` and `make fpga-netboot-rv64-console`; manually enter the namespaced `netboot` command printed by `serve` at `litex>`. After Linux starts, close the console and use `make fpga-netboot-rv64-test` (substitute `rv32` throughout as needed). Restore recorded host changes with `make fpga-netboot-host-restore` when finished. Never boot an RV32 SD payload on RV64.
+The default payloads are downloaded by the paired `build` target when absent: `linux/build/linux-riscv-rv32-qemu-rv32-buildroot-v6.18.50/fw_payload.bin` and `linux/build/linux-riscv-rv64-qemu-rv64-fast-buildroot-v6.18.50/fw_payload.bin`. Repeat `RAPT_CONFIG` for build/load/test steps. Host setup/restore shares `NETBOOT_STATE_ROOT` (default `build/netboot-default`) across presets. Supported location/tool overrides are `NETBOOT_BUILD_ROOT`, `NETBOOT_STATE_ROOT`, `NETBOOT_PAYLOAD_RV32`, `NETBOOT_PAYLOAD_RV64`, `VIVADO`, `VIVADO_JOBS`, and `CROSS`; use absolute paths for custom build/payload locations and repeat them for all workflow steps, or put them in ignored `netboot.local.mk`. Custom build outputs use `<NETBOOT_BUILD_ROOT>/<RAPT_CONFIG>/rvXX/`; older custom-root builds need rebuilding in this layout. Conflicting fixed board/variant/hardware overrides fail explicitly. Use the manual flow below for a different hardware configuration. Do not mix fixed-profile and ordinary targets in the same Make invocation. For the complete flow, including explicit host setup, namespaced TFTP deployment, manual BIOS netboot, Linux startup and network checks, see [NETBOOT.md](NETBOOT.md#fixed-cu08-end-to-end-targets). In short, after build use `make fpga-netboot-host-setup`, `make fpga-netboot-rv64-serve`, `make fpga-netboot-rv64-load` and `make fpga-netboot-rv64-console`; manually enter the namespaced `netboot` command printed by `serve` at `litex>`. After Linux starts, close the console and use `make fpga-netboot-rv64-test` (substitute `rv32` throughout as needed). Restore recorded host changes with `make fpga-netboot-host-restore` when finished. Never boot an RV32 SD payload on RV64. Source edits during or after a netboot build do not block it: the stamp and `build.json` record the pre-build input identity (with `sources_changed_during_build`), and `load` warns about stale sources. The bitstream hash and timing checks remain hard failures.
 
 #### Manual configurable flow
 
@@ -245,8 +252,8 @@ source /opt/Xilinx/2025.2/Vivado/settings64.sh
 export XILINXD_LICENSE_FILE=$HOME/.Xilinx/License.lic
 
 # Build the verified BIOS bitstream (synth + P&R via Vivado), then load it:
-make fpga-build FPGA_BOARD=mlk_cu07_ku15p BOOT_MODE=bios
-make fpga-load FPGA_BOARD=mlk_cu07_ku15p BOOT_MODE=bios
+make fpga-build FPGA_BOARD=mlk_cu07_ku15p BOOT_MODE=bios RAPT_CONFIG=default
+make fpga-load FPGA_BOARD=mlk_cu07_ku15p BOOT_MODE=bios RAPT_CONFIG=default
 
 # Open the BIOS console. Press reset if the BIOS banner already timed out.
 make fpga-console FPGA_BOARD=mlk_cu07_ku15p UART_PORT=/dev/ttyUSB0
@@ -256,20 +263,20 @@ make main-fpga FPGA_BOARD=mlk_cu07_ku15p UART_PORT=/dev/ttyUSB0
 make coremark-fpga FPGA_BOARD=mlk_cu07_ku15p UART_PORT=/dev/ttyUSB0 COREMARK_ITERATIONS=1000
 
 # Persist to the on-board QSPI flash:
-make fpga-flash FPGA_BOARD=mlk_cu07_ku15p BOOT_MODE=bios RAPT_CONFIG=small
+make fpga-flash FPGA_BOARD=mlk_cu07_ku15p BOOT_MODE=bios RAPT_CONFIG=default
 ```
 
 Expected: `fpga-build` writes `mlk_cu07_ku15p.bit` under the configuration-specific `FPGA_DIR/gateware/` printed by `make info`, plus a zero-error report dashboard (`.../index.html`); BIOS reaches `litex>` after a passing memtest; `main-fpga` reports `memtest: PASS`; `coremark-fpga` prints `Correct operation validated` + an `Iterations/Sec` line.
 
 Notes:
 - `RAPT_CONFIG` defaults to `default`; override it explicitly when reproducing a build made with another preset.
-- `BOOT_MODE=custom` (default) boots `firmware/fpga` from ROM; `BOOT_MODE=bios` boots the LiteX BIOS and is required for serialboot uploads.
+- `BOOT_MODE=bios` is the default for Linux FPGA profiles, including this CU07 `linux32` flow, and is required for serialboot uploads. Other profiles default to `BOOT_MODE=custom`, which boots `firmware/fpga` from ROM.
 - Board pins come from `third_party/security-hw-fpga/board/mlk-cu07-ku15p/`. `UART_PORT` defaults to `/dev/ttyUSB0`; override with `UART_PORT=/dev/ttyUSBx`.
 - `fpga-load`/`fpga-flash` drive Vivado in batch mode (`scripts/vivado_load.tcl`, `scripts/vivado_flash.tcl`).
 
 ## KU15P Linux FPGA Flow (Vivado MIG)
 
-Linux-oriented KU15P bitstream: `VARIANT=linux32` or `VARIANT=linux64`, LiteX BIOS, on-board 4 GB DDR4 via Xilinx MIG mapped as `main_ram` at `0x80000000` (1 GiB AXI window). On the KU15P, the board-aware Linux profile selects `BOOT_MODE=bios WITH_MIG=1 WITH_SDCARD=1 INTEGRATED_MAIN_RAM_SIZE=0`, `SYS_CLK=50000000` (50 MHz) for RV32 or `SYS_CLK=30000000` (30 MHz) for RV64, `UART_BAUD=115200`, and the `default` Raptor preset. The KU15P external-DDR build sets `RAPT_PMEM_BYTES` to the mapped DDR size and defaults `LINUX_FPGA_RAM_SIZE` to that size (1 GiB, `0x80000000..0xbfffffff`). Other platforms retain the default 256 MiB PMEM classifier. MMIO still starts at `0xc0000000`; DDR windows larger than 1 GiB are rejected. Rebuild both gateware and the Linux boot artifacts when upgrading from the old 256 MiB map: a new DTB must not be used with the old classifier. This configuration does not by itself establish board-level 1 GiB memory-test or Linux stress-test success. The legacy LiteDRAM path is still available via `WITH_LITEDRAM=1`. `make fpga-build VARIANT=linux32 FPGA_BOARD=mlk_cu07_ku15p` only succeeds if the Vivado timing report meets constraints; the default bitstream lands under `build/mlk_cu07_ku15p/bios-linux32-mig-sdcard-default-<config-hash>/gateware/`.
+Linux-oriented KU15P bitstream: `VARIANT=linux32` or `VARIANT=linux64`, LiteX BIOS, on-board 4 GB DDR4 via Xilinx MIG mapped as a 2 GiB `main_ram` window at `0x80000000..0xffffffff`. The board-aware Linux profile selects `BOOT_MODE=bios WITH_MIG=1 WITH_SDCARD=1 INTEGRATED_MAIN_RAM_SIZE=0`, `SYS_CLK=50000000` (50 MHz) for RV32 or `SYS_CLK=30000000` (30 MHz) for RV64, `UART_BAUD=115200`, and the `default` Raptor preset. Both XLENs decode the full hardware window, while RV32 Linux advertises only the lower 1 GiB until high memory is supported; RV64 Linux advertises 2 GiB. The CPU uses a 64-bit Wishbone system bus for both XLENs. LiteX CSR begins at `0x11000000`, including the UART at `0x11001800`, and LiteEth buffers begin at `0x18000000`. The address and capacity contract is in `hdl/configs/memory_map.json`; `make memory-map-check` checks the constants used by RTL, LiteX, firmware, simulator and NEMU. Rebuild gateware and Linux boot artifacts together when changing the memory map. The legacy LiteDRAM path remains at 1 GiB via `WITH_LITEDRAM=1`. This configuration has not yet established board-level memory tests or Linux stress tests. `make fpga-build VARIANT=linux32 FPGA_BOARD=mlk_cu07_ku15p` only succeeds if the Vivado timing report meets constraints; the default bitstream lands under `build/mlk_cu07_ku15p/bios-linux32-mig-sdcard-default-<config-hash>/gateware/`.
 
 KU15P BIOS builds now stop at `litex>` after hardware initialization. Enter `sdcardboot` to boot from SD, the namespaced `netboot` command from `serve` for Ethernet, or `serialboot` for a serial upload. This applies to the fixed netboot and RV64 network profiles as well. `BOOT_MODE=bios` selects the firmware; `CONFIG_BIOS_NO_BOOT` disables its automatic startup sequence while preserving these commands. Automatic boot cannot be enabled: `--sdcard-autoboot` is rejected. Private BIOS sources also disable startup dispatch regardless of generated constants, while preserving interactive boot commands. Rebuild and load the matching bitstream to apply this policy: an existing `.bit` embeds the old BIOS and does not change when only the Python/Makefile sources do.
 
@@ -313,18 +320,22 @@ LiteSDCard DMA is not coherent with Raptor's write-through L1D. Current `cbo.inv
 
 ### SD Card Boot Image
 
-Build the Linux image from this directory:
+Build the Linux image from this directory. The temporary `fpga-image-path` query prints the resolved `FW_LINUX_FPGA_IMAGE` with FPGA profile defaults; use the same board, preset, XLEN and any other configuration overrides as the image build:
 
 ```bash
-make fpga-img-rv32 RAPT_CONFIG=default
-sha256sum build/firmware/linux-fpga/rv32/linux-fpga.img
+make fpga-img-rv32 FPGA_BOARD=mlk_cu07_ku15p VARIANT=linux32 RAPT_CONFIG=default
+image32=$(make --no-print-directory --eval='fpga-image-path:;@echo $(FW_LINUX_FPGA_IMAGE)' \
+    fpga-image-path FPGA_BOARD=mlk_cu07_ku15p VARIANT=linux32 RAPT_CONFIG=default)
+sha256sum "$image32"
 
 # RV64 image (linux64 RTL, LP64 stage0, RV64 Linux payload, Sv39 DTB):
-make fpga-img-rv64 RAPT_CONFIG=default
-sha256sum build/firmware/linux-fpga/rv64/linux-fpga.img
+make fpga-img-rv64 FPGA_BOARD=mlk_cu07_ku15p VARIANT=linux64 RAPT_CONFIG=default
+image64=$(make --no-print-directory --eval='fpga-image-path:;@echo $(FW_LINUX_FPGA_IMAGE)' \
+    fpga-image-path FPGA_BOARD=mlk_cu07_ku15p VARIANT=linux64 RAPT_CONFIG=default)
+sha256sum "$image64"
 ```
 
-On its first image build, the development flow obtains 32 bytes from the host CSPRNG and stores them as `build/firmware/linux-fpga/rv32/rng-seed.bin`. Image assembly replaces the all-zero `/chosen/rng-seed` template with that value. Linux trusts and consumes the seed during early boot, so a full Buildroot boot does not stop indefinitely in `seed_rng()`/`getrandom()` before `ssh-keygen -A`. The seed itself is never printed; the build log only prints a short SHA-256 fingerprint. Delete `rng-seed.bin` and rebuild to rotate it.
+On its first image build, the development flow obtains 32 bytes from the host CSPRNG and stores them as `rng-seed.bin` beside the configuration-specific image. Image assembly replaces the all-zero `/chosen/rng-seed` template with that value. Linux trusts and consumes the seed during early boot, so a full Buildroot boot does not stop indefinitely in `seed_rng()`/`getrandom()` before `ssh-keygen -A`. The seed itself is never printed; the build log only prints a short SHA-256 fingerprint. Delete `rng-seed.bin` and rebuild to rotate it.
 
 For convenient FPGA development, repeated SD boots reuse this build-directory seed. This is sufficient to avoid CRNG startup stalls, but it is not a production entropy design: cloned images can produce related or repeated secrets. A deployed standalone design needs a reviewed FPGA hardware RNG or persistent seed rotation. Never commit or hard-code the generated seed in DTS.
 
@@ -356,9 +367,9 @@ lsblk -p -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINTS,RM,MODEL,TRAN /dev/sdX
 sudo umount /dev/sdX1 2>/dev/null || true
 sudo mkdir -p /mnt/raptor-sd
 sudo mount /dev/sdX1 /mnt/raptor-sd
-sudo cp -f build/firmware/linux-fpga/rv32/linux-fpga.img /mnt/raptor-sd/boot.bin
+sudo cp -f "$image32" /mnt/raptor-sd/boot.bin
 sync
-sha256sum build/firmware/linux-fpga/rv32/linux-fpga.img
+sha256sum "$image32"
 sudo sha256sum /mnt/raptor-sd/boot.bin
 sudo umount /mnt/raptor-sd
 sudo eject /dev/sdX
@@ -367,8 +378,8 @@ sudo eject /dev/sdX
 For RV64, keep the same mount, sync, destination checksum, unmount, and eject steps, but replace the image copy and source checksum commands with:
 
 ```bash
-sudo cp -f build/firmware/linux-fpga/rv64/linux-fpga.img /mnt/raptor-sd/boot.bin
-sha256sum build/firmware/linux-fpga/rv64/linux-fpga.img
+sudo cp -f "$image64" /mnt/raptor-sd/boot.bin
+sha256sum "$image64"
 ```
 
 The two SHA-256 values must match. `filesystem mount failed (FatFs error 13)` means `FR_NO_FILESYSTEM`: FatFs did not find a supported FAT volume. Check the partition first; a valid exFAT filesystem still produces this BIOS error because exFAT is disabled:
@@ -469,7 +480,7 @@ The workflow sections above document the common paths. Run `make help` for the g
 
 ## FPGA Firmware Upload (via BIOS serialboot)
 
-The `main-fpga`, `irqtest-fpga`, `coremark-fpga`, and `app-llm-*-fpga` targets iterate firmware without rebuilding the bitstream: firmware is compiled to main_ram (`0x80000000`) and uploaded via BIOS serialboot. Prerequisites: a loaded/flashed BIOS bitstream (`make fpga FPGA_BOARD=mlk_cu07_ku15p BOOT_MODE=bios RAPT_CONFIG=small`), `INTEGRATED_MAIN_RAM_SIZE > 0` (default 512 KB), and UART @ 115200. Uploads use `litex_term --safe` by default; set `SERIALBOOT_SAFE=0` for the faster multi-frame mode.
+The `main-fpga`, `irqtest-fpga`, `coremark-fpga`, and `app-llm-*-fpga` targets iterate firmware without rebuilding the bitstream: firmware is compiled to main_ram (`0x80000000`) and uploaded via BIOS serialboot. Prerequisites: a loaded/flashed BIOS bitstream (`make fpga FPGA_BOARD=mlk_cu07_ku15p BOOT_MODE=bios RAPT_CONFIG=small`), usable `main_ram` (integrated RAM requires `INTEGRATED_MAIN_RAM_SIZE > 0`; CU07 defaults to external MIG RAM with `INTEGRATED_MAIN_RAM_SIZE=0`, as does the optional LiteDRAM path), and UART @ 115200. Uploads use `litex_term --safe` by default; set `SERIALBOOT_SAFE=0` for the faster multi-frame mode.
 
 `fpga-egos-upload` also uses the standard `litex_term`/LiteX BIOS serialboot path. It uploads one compact bundle at `0x82000000` instead of the legacy 12 MiB sparse flat image. A 92-byte stage0 clears the egos runtime area, copies the kernel to `0x80000000` and `disk.img` to `0x80800000`, executes `fence.i`, and jumps to egos. The serial transfer is about 4.07 MiB while the runtime memory layout remains unchanged.
 

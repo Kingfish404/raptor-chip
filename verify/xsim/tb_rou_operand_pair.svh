@@ -13,8 +13,8 @@ if (CheckOperandIndependence) begin : g_operand_pair
   rou_lsu_if shadow_rou_lsu();
   completion_t shadow_completion[CompletionPorts];
   dispatch_slot_t shadow_dispatch[DispatchWidth];
-  execution_domain_t shadow_candidate_domain[DispatchWidth];
-  logic shadow_dispatch_valid[DispatchWidth];
+  execution_domain_t shadow_candidate_domain[ScanEntries];
+  logic shadow_dispatch_valid[ScanEntries];
   logic shadow_halted, shadow_commit_fire, shadow_pmu_rob_full;
   logic shadow_writeback_drain;
   logic [XLEN-1:0] shadow_halt_pc;
@@ -40,7 +40,6 @@ if (CheckOperandIndependence) begin : g_operand_pair
     shadow_completion[p].result = ~completion[p].result;
   end
   rapt_rou #(
-      .ScanEntries(rapt_pkg::DispatchWidth),
       .ValidateCompletionInputs(1'b1)
   ) shadow (
       .writeback_idle(tb_writeback_idle),
@@ -55,7 +54,7 @@ if (CheckOperandIndependence) begin : g_operand_pair
       .dispatch(shadow_dispatch),
       .candidate_domain(shadow_candidate_domain),
       .candidate_valid(shadow_dispatch_valid),
-      .candidate_ready(dispatch_ready),
+      .candidate_ready(candidate_ready),
       .selected_valid(selected_valid),
       .selected_candidate(selected_candidate),
 

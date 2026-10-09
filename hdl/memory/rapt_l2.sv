@@ -504,8 +504,10 @@ module rapt_l2 #(
     return rapt_pkg::addr_upper_valid(
         a
     ) && (!BoomBankedStore || (64'(physical) >> (TagLsb + TagBits)) == '0) &&
-        ((physical >= XLEN'('h80000000) && physical < XLEN'('h80000000) + XLEN'(rapt_pkg::PmemBytes)
-         ) || (physical >= XLEN'('ha0000000) && physical < XLEN'('ha2000000)));
+        (rapt_pkg::addr_in_pmem(
+        a
+    ) || (rapt_pkg::PmemBytes < 32'h80000000 && physical >= XLEN'('ha0000000) &&
+          physical < XLEN'('ha2000000)));
   endfunction
 
   function automatic logic cacheable_line(input logic [XLEN-1:0] a);

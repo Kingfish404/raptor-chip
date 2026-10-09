@@ -75,13 +75,16 @@ interface lsu_l1d_if #(
   logic [XLEN-1:0] wdata;
   logic wready;
   logic werr; // Failed committed write beat, qualified by wready.
+  // Another committed store waits behind this one. A lone store keeps the
+  // synchronous drain so that younger same-address loads can still forward.
+  logic wmore;
 
   modport master(
       output raddr, rcontext, ralu, rvalid, rmisaligned, rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1, atomic_lock, ordered, replay_allowed,
       input idle, rdata, trap, cause, difftest_skip, rready, rretry, rmiss, miss_wake,
       output raddr_b, rcontext_b, ralu_b, rvalid_b,
       input rdata_b, rready_b, rretry_b,
-      output waddr, wpbmt, walu, wzero, wvalid, wdata,
+      output waddr, wpbmt, walu, wzero, wvalid, wdata, wmore,
       input wready, werr
   );
   modport slave(
@@ -89,7 +92,7 @@ interface lsu_l1d_if #(
       output idle, rdata, trap, cause, difftest_skip, rready, rretry, rmiss, miss_wake,
       input raddr_b, rcontext_b, ralu_b, rvalid_b,
       output rdata_b, rready_b, rretry_b,
-      input waddr, wpbmt, walu, wzero, wvalid, wdata,
+      input waddr, wpbmt, walu, wzero, wvalid, wdata, wmore,
       output wready, werr
   );
 endinterface
@@ -111,7 +114,6 @@ interface l1i_bus_if #(
   logic rvalid;
   logic ptw_rvalid;
   logic ptw_rerr;
-  logic rlast;
   // Bus-error indicator: AXI rresp != OKAY for the routed response beat.
   // Asserted in the same cycle as `rvalid`; treat as fetch access-fault.
   logic rerr;
@@ -122,23 +124,21 @@ interface l1i_bus_if #(
   logic wvalid;
   logic [XLEN-1:0] wdata;
   logic [7:0] wstrb;
-  logic wready;
-  logic werr;
   logic aw_ptw;
   logic ptw_wready;
   logic ptw_werr;
 
   modport master(
       output arvalid, noallocate, rpbmt, araddr, arburst, ar_ptw,
-      input rready, rdata, rvalid, ptw_rvalid, ptw_rerr, rlast, rerr,
+      input rready, rdata, rvalid, ptw_rvalid, ptw_rerr, rerr,
       output awvalid, awaddr, wvalid, wdata, wstrb, aw_ptw,
-      input wready, werr, ptw_wready, ptw_werr
+      input ptw_wready, ptw_werr
   );
   modport slave(
       input arvalid, noallocate, rpbmt, araddr, arburst, ar_ptw,
-      output rready, rdata, rvalid, ptw_rvalid, ptw_rerr, rlast, rerr,
+      output rready, rdata, rvalid, ptw_rvalid, ptw_rerr, rerr,
       input awvalid, awaddr, wvalid, wdata, wstrb, aw_ptw,
-      output wready, werr, ptw_wready, ptw_werr
+      output ptw_wready, ptw_werr
   );
 endinterface
 
@@ -182,29 +182,40 @@ interface l1d_bus_if #(
   logic wready;
   // Bus-error indicator on the write response channel (AXI bresp != OKAY).
   // Asserted in the same cycle as the store handshake (`wready` pulse).
-  // Currently logged only -- store access-faults are caught in IOQ via
-  // bare-mode PMA / PMP / MMU PMP before reaching the bus, so a runtime
-  // werr indicates a configuration mismatch worth flagging in waves.
+  // Updates CSR bus-error diagnostic state and, when enabled, requests
+  // a machine interrupt. IOQ checks PMA / PMP / MMU permissions before
+  // stores reach the bus; this reports a later bus response error.
   logic werr;
   logic aw_ptw;
   logic ptw_wready;
   logic ptw_werr;
+  // Posted write-through stores. `wpost` says the L1D can complete this
+  // store's handshake now, so the bus may acknowledge it at AXI acceptance.
+  // `posted_busy` covers accepted stores still waiting for B; a failed B
+  // reports the line that may hold the intended but unwritten value. All
+  // three outputs are inactive at zero for buses without posting.
+  logic wpost;
+  // Another committed store waits behind this one (from lsu_l1d.wmore).
+  logic wmore;
+  logic posted_busy;
+  logic posted_error;
+  logic [XLEN-1:0] posted_error_addr;
 
   modport master(
       output arvalid, ar_mshr, ar_mshr_id, araddr, arlen, noallocate, rstrb, rpbmt, ar_ptw,
       input rready,
       input idle, rdata, rvalid, r_mshr, r_mshr_id, ptw_rvalid, ptw_rerr, rlast, difftest_skip, rerr,
 
-      output awvalid, awaddr, wvalid, wzero, wdata, wstrb, wpbmt, aw_ptw,
-      input wready, werr, ptw_wready, ptw_werr
+      output awvalid, awaddr, wvalid, wzero, wdata, wstrb, wpbmt, aw_ptw, wpost, wmore,
+      input wready, werr, ptw_wready, ptw_werr, posted_busy, posted_error, posted_error_addr
   );
   modport slave(
       input arvalid, ar_mshr, ar_mshr_id, araddr, arlen, noallocate, rstrb, rpbmt, ar_ptw,
       output rready,
       output idle, rdata, rvalid, r_mshr, r_mshr_id, ptw_rvalid, ptw_rerr, rlast, difftest_skip, rerr,
 
-      input awvalid, awaddr, wvalid, wzero, wdata, wstrb, wpbmt, aw_ptw,
-      output wready, werr, ptw_wready, ptw_werr
+      input awvalid, awaddr, wvalid, wzero, wdata, wstrb, wpbmt, aw_ptw, wpost, wmore,
+      output wready, werr, ptw_wready, ptw_werr, posted_busy, posted_error, posted_error_addr
   );
 endinterface
 

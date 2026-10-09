@@ -36,7 +36,7 @@ BUILD_DIR   := $(JTAG_DIR)/build
 RISCV_TESTS_REPO := $(JTAG_DIR)/riscv-tests
 RISCV_TESTS_URL  := https://github.com/riscv-software-src/riscv-tests.git
 
-.PHONY: help selftest openocd-server openocd-scan openocd-smoke openocd-halt-reg gdb-smoke debug-tests-setup debug-tests clean
+.PHONY: help selftest openocd-server openocd-smoke openocd-halt-reg gdb-smoke debug-tests-setup debug-tests clean
 
 JTAG_PORT       ?= 9824
 NSIM_BIN        ?=

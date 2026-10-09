@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-29T09:26:49Z",
+  "generated_at": "2026-10-06T19:09:24Z",
   "sources": {
     "rtl": "hdl/",
     "config": "hdl/configs/default/rapt_config.svh",
@@ -87,7 +87,7 @@
       "RAPT_ATO_SC__": "'b00001",
       "RAPT_ATO_SWAP": "'b00010",
       "RAPT_ATO_XOR_": "'b00100",
-      "RAPT_BPU_AUX_TAGE": "0",
+      "RAPT_BPU_AUX_TAGE": "1",
       "RAPT_BPU_DIRP_TAGE": "1",
       "RAPT_BRANCH_CHECKPOINTS": "16",
       "RAPT_BRQ_CDB_WAKE": "0",
@@ -245,23 +245,35 @@
       "RAPT_F5_AMO_LR": "5'b00010",
       "RAPT_F5_AMO_SC": "5'b00011",
       "RAPT_F7_SFENCE_VMA": "7'b0001001",
-      "RAPT_FETCH_BRANCH_FOLLOWER": "0",
+      "RAPT_FETCH_BRANCH_FOLLOWER": "1",
       "RAPT_FETCH_LOOKAHEAD": "1",
       "RAPT_FETCH_RESPONSE_STAGE": "0",
       "RAPT_FPGA_DSP": "0",
+      "RAPT_FPGA_LUTRAM": "0",
+      "RAPT_FPGA_STREAM_BRAM": "`RAPT_FPGA_LUTRAM",
+      "RAPT_FQU_GROUPS": "2",
+      "RAPT_FQU_RECLAIM_SAME_CYCLE": "1",
       "RAPT_IIQ_SIZE": "8",
       "RAPT_INST_FENCE_I": "32'h0000100f",
       "RAPT_INST_WFI": "32'h10500073",
       "RAPT_INTEGER_ISSUE_PORTS": "2",
       "RAPT_INTEGER_SYSTEM_PORT": "0",
+      "RAPT_IOQ_DIRECT_DISPATCH_REQUEST": "1",
       "RAPT_IOQ_EARLY_LOAD_BCAST": "1",
       "RAPT_IOQ_EARLY_LOAD_STORES": "1",
+      "RAPT_IOQ_EARLY_ORDER_STAGE": "1",
+      "RAPT_IOQ_EARLY_OVERLAP_STAGE": "1",
       "RAPT_IOQ_FAST_LOAD_NEXT_HEAD": "0",
-      "RAPT_IOQ_FORWARD_REQUEST": "0",
+      "RAPT_IOQ_FORWARD_MEMORY_ONLY": "0",
+      "RAPT_IOQ_FORWARD_NO_MEMORY": "0",
+      "RAPT_IOQ_FORWARD_REQUEST": "1",
+      "RAPT_IOQ_FORWARD_STORE_FREE": "0",
       "RAPT_IOQ_LIVE_EARLY_BCAST": "1",
       "RAPT_IOQ_LOAD_RESPONSE_STAGE": "0",
+      "RAPT_IOQ_OVERLAP_STAGE": "0",
+      "RAPT_IOQ_SC_DECISION_STAGE": "0",
       "RAPT_IOQ_SIZE": "8",
-      "RAPT_IOQ_STORE_PRECHECK": "0",
+      "RAPT_IOQ_STORE_PRECHECK": "1",
       "RAPT_IOQ_WAKE_NEXT_B_REQUEST": "1",
       "RAPT_IOQ_WAKE_NEXT_REQUEST": "1",
       "RAPT_IQ_RECLAIM_ON_ISSUE": "1",
@@ -279,7 +291,10 @@
       "RAPT_L2_N_WAYS": "1",
       "RAPT_LAMBDA": "1",
       "RAPT_LSU_HUM": "1",
-      "RAPT_MDQ_LIVE_WAKE": "0",
+      "RAPT_LSU_PMP_STAGE": "0",
+      "RAPT_MDQ_LIVE_WAKE": "1",
+      "RAPT_MEMORY_COMPLETION_STAGE": "0",
+      "RAPT_MEMORY_COMPLETION_TRUSTED": "0",
       "RAPT_MISA": "'h4014112f",
       "RAPT_M_EXTENSION": "'h1",
       "RAPT_M_FAST": "'h1",
@@ -317,6 +332,7 @@
       "RAPT_PMP_A_TOR": "2'd1",
       "RAPT_PMP_CSR_NUM": "16",
       "RAPT_PMP_NUM": "8",
+      "RAPT_POSTED_WRITES": "4",
       "RAPT_PRIV_M": "2'h3",
       "RAPT_PRIV_S": "2'h1",
       "RAPT_PRIV_U": "2'h0",
@@ -334,23 +350,25 @@
       "RAPT_REG_SIZE": "32",
       "RAPT_RENAME_WIDTH": "2",
       "RAPT_RIQ_SIZE": "8",
+      "RAPT_ROB_COMPLETION_STAGE": "0",
       "RAPT_ROB_DISPATCH_BUFFERED": "1",
+      "RAPT_ROB_DISPATCH_WINDOW": "0",
       "RAPT_ROB_GENERATION_BITS": "4",
       "RAPT_ROB_SIZE": "32",
       "RAPT_ROU_STORE_FOLLOWER": "1",
-      "RAPT_RSB_SIZE": "4",
+      "RAPT_RSB_SIZE": "16",
       "RAPT_RS_SIZE": "8",
       "RAPT_SB_WSTRB": "'b00001",
       "RAPT_SD_WSTRB": "'b11111",
       "RAPT_SH_WSTRB": "'b00011",
       "RAPT_SIGN_EXTEND": "1",
-      "RAPT_SQ_NARROW_FORWARD": "0",
+      "RAPT_SQ_NARROW_FORWARD": "1",
       "RAPT_SQ_SIZE": "16",
       "RAPT_STEER_SCAN_ENTRIES": "((`RAPT_ROB_SIZE < 16) ? `RAPT_ROB_SIZE : 16)",
       "RAPT_SVH": "1",
       "RAPT_SW_WSTRB": "'b01111",
-      "RAPT_TAGE_BIM_BITS": "8",
-      "RAPT_TAGE_INDEX_BITS": "7",
+      "RAPT_TAGE_BIM_BITS": "10",
+      "RAPT_TAGE_INDEX_BITS": "10",
       "RAPT_TVEC_MODE_DIRECT": "2'b00",
       "RAPT_TVEC_MODE_VECTORED": "2'b01",
       "RAPT_WSTRB_SB": "'b00000001",
@@ -376,7 +394,7 @@
       "pht_entries": 256,
       "btb_entries": 128,
       "btb_ways": 2,
-      "rsb_entries": 4,
+      "rsb_entries": 16,
       "itlb_entries": 16,
       "dtlb_entries": 16,
       "branch_checkpoints": 16,
@@ -1089,6 +1107,7 @@
           "ports": [
             "cmu_bcast",
             "iss",
+            "csr_read_addr",
             "csr_bcast",
             "exu_csr",
             "wb_alu_csr"
@@ -1350,6 +1369,7 @@
             "exu_ioq_bcast",
             "wb_accept",
             "sq_handoff_valid",
+            "sq_forward_pending",
             "sq_handoff_vaddr",
             "sq_handoff_alu",
             "sq_handoff_fp64",
@@ -1358,8 +1378,7 @@
             "sq_wpbmt",
             "sq_context",
             "sq_acquire",
-            "load_fast",
-            "pmu_ioq_full"
+            "load_fast"
           ]
         },
         {
@@ -1372,7 +1391,7 @@
             "exu_lsu",
             "exu_ioq_bcast",
             "completion_accept",
-            "sq_handoff_valid",
+            "sq_forward_pending",
             "sq_handoff_vaddr",
             "sq_handoff_alu",
             "sq_handoff_fp64",
@@ -1419,6 +1438,16 @@
           ]
         },
         {
+          "type": "rapt_ioq_overlap",
+          "name": "forward_overlap_check",
+          "ports": [
+            "addr",
+            "span",
+            "page_only",
+            "overlap"
+          ]
+        },
+        {
           "type": "rapt_ioq_store_check",
           "name": "u_store_check",
           "ports": [
@@ -1455,6 +1484,8 @@
             "valid",
             "stale_context",
             "store_addr",
+            "store_next_block",
+            "store_prev_block",
             "store_data",
             "store_alu",
             "full_store_mask",
@@ -1645,6 +1676,7 @@
           "type": "rapt_rou",
           "name": "rou",
           "ports": [
+            "operand_wake",
             "writeback_idle",
             "writeback_drain",
             "completion",
@@ -1667,8 +1699,7 @@
             "s_int_pending",
             "s_int_cause",
             "rou_cmu",
-            "rou_csr",
-            "rou_lsu"
+            "rou_csr"
           ]
         },
         {
@@ -2036,9 +2067,26 @@
       "file": "hdl/backend/rapt_fpr.sv",
       "domain": "backend",
       "stage": 3,
-      "summary": "Architectural FPR storage for scalar F/D execution. FPR width is fixed at 64 for both RV32 and RV64 so S values can be NaN-boxed in the same bank used by D operations.",
+      "summary": "Architectural registers f0..f31 remain writable, and all words are 64 bits in RV32 and RV64 so single-precision results keep their NaN box. Two fixed 32x64 replicas: bank 0 reads FMA rs1/rs2, bank 1 reads FMA rs3 and the IOQ store operand. Both ports read on a read cycle; both re",
       "params": {},
-      "instances": []
+      "instances": [
+        {
+          "type": "rapt_sram_2rw",
+          "name": "u_sram",
+          "ports": [
+            "a_en",
+            "a_wen",
+            "a_addr",
+            "a_wdata",
+            "a_rdata",
+            "b_en",
+            "b_wen",
+            "b_addr",
+            "b_wdata",
+            "b_rdata"
+          ]
+        }
+      ]
     },
     {
       "id": "rapt_iq",
@@ -2129,6 +2177,11 @@
           "type": "rapt_operand_spill",
           "name": "storage",
           "ports": []
+        },
+        {
+          "type": "rapt_operand_spill",
+          "name": "storage",
+          "ports": []
         }
       ]
     },
@@ -2200,6 +2253,21 @@
           ]
         }
       ]
+    },
+    {
+      "id": "rapt_rob_dispatch_window",
+      "file": "hdl/backend/rapt_rob_dispatch_window.sv",
+      "domain": "backend",
+      "stage": null,
+      "summary": "Registered ROB dispatch window. This retimes rapt_rob_dispatch_select's age ranking across the clock edge: at the end of each cycle the oldest pending owners that were not accepted are ranked and captured together with their immutable steering payload (domain and spill slot). The",
+      "params": {
+        "Entries": "rapt_pkg::ROBEntries",
+        "Width": "rapt_pkg::DispatchWidth",
+        "ScanEntries": "3 * Width",
+        "IndexBits": "rapt_pkg::index_bits(Entries",
+        "PayloadBits": "1"
+      },
+      "instances": []
     },
     {
       "id": "rapt_rou",
@@ -2324,6 +2392,33 @@
             "accepted",
             "count",
             "stop_reason"
+          ]
+        },
+        {
+          "type": "rapt_rob_dispatch_window",
+          "name": "select",
+          "ports": [
+            "clock",
+            "reset",
+            "flush",
+            "pending",
+            "eligible",
+            "head",
+            "entry_payload",
+            "incoming_valid",
+            "incoming_index",
+            "incoming_payload",
+            "endpoint_ready",
+            "candidate_valid",
+            "candidate_index",
+            "candidate_payload",
+            "candidate_incoming",
+            "candidate_source_slot",
+            "accepted",
+            "candidate_count",
+            "accepted_count",
+            "bypass_count",
+            "oldest_blocked"
           ]
         },
         {
@@ -4047,7 +4142,7 @@
       "stage": 1,
       "summary": "Flatten fetch packets into an ordered stream; decode can regroup across original fetch boundaries. Prediction and fault metadata stays per instruction.",
       "params": {
-        "DEPTH": "2",
+        "DEPTH": "`RAPT_FQU_GROUPS",
         "XLEN": "`RAPT_XLEN",
         "FetchWidth": "rapt_pkg::DecodeWidth",
         "DecodeWidth": "rapt_pkg::DecodeWidth"
@@ -4392,7 +4487,8 @@
       "params": {
         "XLEN": "`RAPT_XLEN",
         "ID_W": "4",
-        "MAX_READ_OUTSTANDING": "8"
+        "MAX_READ_OUTSTANDING": "8",
+        "MAX_WRITE_OUTSTANDING": "1"
       },
       "instances": []
     },
@@ -4415,7 +4511,9 @@
       "stage": 8,
       "summary": "",
       "params": {
-        "XLEN": "`RAPT_XLEN"
+        "XLEN": "`RAPT_XLEN",
+        "PostedWrites": "0",
+        "PostedAckDelay": "`RAPT_POSTED_ACK_DELAY"
       },
       "instances": []
     },
@@ -5097,6 +5195,7 @@
             "clock",
             "reset",
             "read_addr",
+            "read_focus_word",
             "write_valid",
             "write_set",
             "write_word",
@@ -5150,7 +5249,7 @@
       "file": "hdl/memory/rapt_l1i_data.sv",
       "domain": "memory",
       "stage": null,
-      "summary": "Independent word banks let a fetch window straddle adjacent cache sets. Ways share the presented read address; each bank owns its read validity.",
+      "summary": "Independently addressed banks let a fetch window straddle adjacent sets. Ways share each bank's read address; each way owns its read validity.",
       "params": {
         "SetBits": "4",
         "WordBits": "2",
@@ -5501,7 +5600,8 @@
       "summary": "",
       "params": {
         "XLEN": "`RAPT_XLEN",
-        "MemoryReadCredits": "8"
+        "MemoryReadCredits": "8",
+        "PostedWrites": "L1dWriteBack ? 0 : `RAPT_POSTED_WRITES"
       },
       "instances": [
         {
@@ -5723,85 +5823,6 @@
         "XLEN": "`RAPT_XLEN"
       },
       "instances": []
-    },
-    {
-      "id": "rapt_sram_1rw",
-      "file": "hdl/memory/rapt_sram_1rw.sv",
-      "domain": "memory",
-      "stage": null,
-      "summary": "",
-      "params": {
-        "ADDR_WIDTH": "7",
-        "DATA_WIDTH": "32",
-        "INST_ID": "0"
-      },
-      "instances": [
-        {
-          "type": "rapt_openram_1rw_1024x22",
-          "name": "u_sram",
-          "ports": [
-            "clk0",
-            "csb0",
-            "web0",
-            "wmask0",
-            "addr0",
-            "din0",
-            "dout0"
-          ]
-        },
-        {
-          "type": "rapt_openram_1rw_1024x32",
-          "name": "u_sram",
-          "ports": [
-            "clk0",
-            "csb0",
-            "web0",
-            "wmask0",
-            "addr0",
-            "din0",
-            "dout0"
-          ]
-        },
-        {
-          "type": "rapt_openram_1rw_1024x64",
-          "name": "u_sram",
-          "ports": [
-            "clk0",
-            "csb0",
-            "web0",
-            "wmask0",
-            "addr0",
-            "din0",
-            "dout0"
-          ]
-        },
-        {
-          "type": "rapt_openram_1rw_4096x64",
-          "name": "u_sram",
-          "ports": [
-            "clk0",
-            "csb0",
-            "web0",
-            "wmask0",
-            "addr0",
-            "din0",
-            "dout0"
-          ]
-        },
-        {
-          "type": "rapt_openram_1rw_4096x64",
-          "name": "u_sram",
-          "ports": [
-            "clk0",
-            "csb0",
-            "web0",
-            "wmask0",
-            "addr0",
-            "din0",
-            "dout0"
-          ]
-        }
-      ]
     },
     {
       "id": "rapt_tlb",
@@ -6143,6 +6164,97 @@
       "summary": "",
       "params": {
         "XLEN": "`RAPT_XLEN"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_sram_1rw",
+      "file": "hdl/sram/rapt_sram_1rw.sv",
+      "domain": "core",
+      "stage": null,
+      "summary": "",
+      "params": {
+        "ADDR_WIDTH": "7",
+        "DATA_WIDTH": "32",
+        "INST_ID": "0"
+      },
+      "instances": [
+        {
+          "type": "rapt_openram_1rw_1024x22",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        },
+        {
+          "type": "rapt_openram_1rw_1024x32",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        },
+        {
+          "type": "rapt_openram_1rw_1024x64",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        },
+        {
+          "type": "rapt_openram_1rw_4096x64",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        },
+        {
+          "type": "rapt_openram_1rw_4096x64",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rapt_sram_2rw",
+      "file": "hdl/sram/rapt_sram_2rw.sv",
+      "domain": "core",
+      "stage": null,
+      "summary": "Two independent, clocked read/write ports sharing one memory array. Each enabled port either writes at the rising edge or registers a read result at that edge. Read outputs hold when their port is idle or writes. The caller must avoid same-address cross-port accesses when either ",
+      "params": {
+        "ADDR_WIDTH": "5",
+        "DATA_WIDTH": "64"
       },
       "instances": []
     }
@@ -6625,7 +6737,7 @@
         "y": 0.0,
         "z": 0.04,
         "h": 6,
-        "child_count": 2
+        "child_count": 3
       },
       {
         "id": "rapt_lsu_sq",
@@ -6841,14 +6953,14 @@
         "file": "hdl/backend/rapt_fpr.sv",
         "domain": "backend",
         "stage": 3,
-        "summary": "Architectural FPR storage for scalar F/D execution. FPR width is fixed at 64 for both RV32 and RV64 so S values can be NaN-boxed in the same bank used by D operations.",
+        "summary": "Architectural registers f0..f31 remain writable, and all words are 64 bits in RV32 and RV64 so single-precision results keep their NaN box. Two fixed 32x64 replicas: bank 0 reads FMA rs1/rs2, bank 1 reads FMA rs3 and the IOQ store operand. Both ports read on a read cycle; both re",
         "parent": "rapt_backend",
         "display": true,
         "x": 33.4,
         "y": 0.0,
         "z": 7.45,
         "h": 12,
-        "child_count": 0,
+        "child_count": 1,
         "sx": 6.8,
         "sz": 4.4,
         "sy": 0.796,
@@ -6915,7 +7027,7 @@
         "y": 0.0,
         "z": 0.88,
         "h": 6,
-        "child_count": 1
+        "child_count": 2
       },
       {
         "id": "rapt_prf",
@@ -6985,6 +7097,21 @@
         "child_count": 1
       },
       {
+        "id": "rapt_rob_dispatch_window",
+        "short": "rob_dispatch_window",
+        "file": "hdl/backend/rapt_rob_dispatch_window.sv",
+        "domain": "backend",
+        "stage": 3,
+        "summary": "Registered ROB dispatch window. This retimes rapt_rob_dispatch_select's age ranking across the clock edge: at the end of each cycle the oldest pending owners that were not accepted are ranked and captured together with their immutable steering payload (domain and spill slot). The",
+        "parent": "rapt_rou",
+        "display": false,
+        "x": 3.0,
+        "y": 0.0,
+        "z": 0.66,
+        "h": 6,
+        "child_count": 0
+      },
+      {
         "id": "rapt_rou",
         "short": "ROU",
         "file": "hdl/backend/rapt_rou.sv",
@@ -6997,7 +7124,7 @@
         "y": 0.0,
         "z": 4.825,
         "h": 32,
-        "child_count": 6,
+        "child_count": 7,
         "sx": 6.8,
         "sz": 9.65,
         "sy": 0.796,
@@ -7008,7 +7135,7 @@
       },
       {
         "id": "rapt_operand_stage",
-        "short": "UOQ",
+        "short": "OPS",
         "file": "hdl/backend/rapt_rou.sv",
         "domain": "backend",
         "stage": 4,
@@ -7039,7 +7166,7 @@
         "display": false,
         "x": 6.0,
         "y": 0.0,
-        "z": 0.66,
+        "z": 0.88,
         "h": 6,
         "child_count": 0
       },
@@ -8251,7 +8378,7 @@
         "file": "hdl/memory/rapt_l1i_data.sv",
         "domain": "memory",
         "stage": 0,
-        "summary": "Independent word banks let a fetch window straddle adjacent cache sets. Ways share the presented read address; each bank owns its read validity.",
+        "summary": "Independently addressed banks let a fetch window straddle adjacent sets. Ways share each bank's read address; each way owns its read validity.",
         "parent": "rapt_l1i",
         "display": false,
         "x": 0.0,
@@ -8692,6 +8819,21 @@
         "model_note": "cluster device router"
       },
       {
+        "id": "rapt_sram_2rw",
+        "short": "sram_2rw",
+        "file": "hdl/sram/rapt_sram_2rw.sv",
+        "domain": "core",
+        "stage": 3,
+        "summary": "Two independent, clocked read/write ports sharing one memory array. Each enabled port either writes at the rising edge or registers a read result at that edge. Read outputs hold when their port is idle or writes. The caller must avoid same-address cross-port accesses when either ",
+        "parent": "rapt_fpr",
+        "display": false,
+        "x": 3.0,
+        "y": 0.0,
+        "z": 0.24,
+        "h": 6,
+        "child_count": 0
+      },
+      {
         "id": "soc_pmem",
         "short": "PMEM",
         "file": "hdl/rapt_pkg.sv",
@@ -8719,7 +8861,7 @@
         "file": "hdl/rapt_pkg.sv",
         "domain": "cluster",
         "stage": 9,
-        "summary": "MMIO UART/GPIO window at 0x10000000 from rapt_pkg::addr_mapped; LiteX UART also at 0xf0001000.",
+        "summary": "MMIO UART/GPIO window at 0x10000000 from rapt_pkg::addr_mapped; LiteX UART at 0x11001800.",
         "parent": "rapt_router",
         "display": true,
         "x": 3.4,
@@ -9223,6 +9365,7 @@
         "ports": [
           "cmu_bcast",
           "iss",
+          "csr_read_addr",
           "csr_bcast",
           "exu_csr",
           "wb_alu_csr"
@@ -9373,7 +9516,7 @@
           "exu_lsu",
           "exu_ioq_bcast",
           "completion_accept",
-          "sq_handoff_valid",
+          "sq_forward_pending",
           "sq_handoff_vaddr",
           "sq_handoff_alu",
           "sq_handoff_fp64",
@@ -9385,6 +9528,18 @@
         "from": "rapt_lsu_ioq",
         "to": "rapt_ioq_overlap",
         "instance": "overlap_check",
+        "kind": "instance",
+        "ports": [
+          "addr",
+          "span",
+          "page_only",
+          "overlap"
+        ]
+      },
+      {
+        "from": "rapt_lsu_ioq",
+        "to": "rapt_ioq_overlap",
+        "instance": "forward_overlap_check",
         "kind": "instance",
         "ports": [
           "addr",
@@ -9420,14 +9575,14 @@
           "valid",
           "stale_context",
           "store_addr",
+          "store_next_block",
+          "store_prev_block",
           "store_data",
           "store_alu",
           "full_store_mask",
           "store_fp64",
           "mmu_enabled",
-          "narrow_allowed",
-          "alloc_valid",
-          "alloc_addr"
+          "narrow_allowed"
         ]
       },
       {
@@ -9560,6 +9715,7 @@
         "instance": "rou",
         "kind": "instance",
         "ports": [
+          "operand_wake",
           "writeback_idle",
           "writeback_drain",
           "completion",
@@ -9570,8 +9726,7 @@
           "checkpoint_release",
           "exu_prf",
           "dispatch",
-          "candidate_domain",
-          "candidate_valid"
+          "candidate_domain"
         ]
       },
       {
@@ -9821,6 +9976,24 @@
         ]
       },
       {
+        "from": "rapt_fpr",
+        "to": "rapt_sram_2rw",
+        "instance": "u_sram",
+        "kind": "instance",
+        "ports": [
+          "a_en",
+          "a_wen",
+          "a_addr",
+          "a_wdata",
+          "a_rdata",
+          "b_en",
+          "b_wen",
+          "b_addr",
+          "b_wdata",
+          "b_rdata"
+        ]
+      },
+      {
         "from": "rapt_iq",
         "to": "rapt_issue_select",
         "instance": "selector",
@@ -9945,6 +10118,26 @@
           "endpoint_ready",
           "eligible",
           "accepted"
+        ]
+      },
+      {
+        "from": "rapt_rou",
+        "to": "rapt_rob_dispatch_window",
+        "instance": "select",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "flush",
+          "pending",
+          "eligible",
+          "head",
+          "entry_payload",
+          "incoming_valid",
+          "incoming_index",
+          "incoming_payload",
+          "endpoint_ready",
+          "candidate_valid"
         ]
       },
       {
@@ -11560,6 +11753,7 @@
           "clock",
           "reset",
           "read_addr",
+          "read_focus_word",
           "write_valid",
           "write_set",
           "write_word",
@@ -15535,7 +15729,7 @@
       },
       {
         "id": "RBUF",
-        "label": "\"Renamed-packet buffer (2 entries)"
+        "label": "\"rename_pipe (2 \u00d7 RenameWidth) + operand stage"
       },
       {
         "id": "ROU",
@@ -17214,6 +17408,13 @@
   },
   "docs": [
     {
+      "file": "docs/PROFILE.md",
+      "name": "PROFILE.md",
+      "title": "Performance Profile",
+      "url": "PROFILE.html",
+      "summary": "\u4f7f\u7528`am-kernels`\u4e2d\u7684`microbench`\u6d4b\u8bd5\u7a0b\u5e8f\u8fdb\u884c\u6027\u80fd\u6d4b\u8bd5."
+    },
+    {
       "file": "docs/README.md",
       "name": "README.md",
       "title": "Raptor - RISC-V Processor Core",
@@ -17249,11 +17450,18 @@
       "summary": "Raptor boots Linux through an OpenSBI `fw_payload.bin` image:"
     },
     {
+      "file": "docs/perf-iterations.md",
+      "name": "perf-iterations.md",
+      "title": "Performance Iterations",
+      "url": "perf-iterations.html",
+      "summary": "Legacy Version: [PROFILE.md](./PROFILE.md)"
+    },
+    {
       "file": "docs/uarch.md",
       "name": "uarch.md",
       "title": "Microarchitecture",
       "url": "uarch.html",
-      "summary": "The ordered instruction path contains the following registered storage. Arrows show data flow; they do not assign a fixed cycle cost to a queue or execution unit."
+      "summary": "Each `E` marks a clock edge that captures instruction state; `E0` is the registered fetch PC. Logic between two edges belongs to the following stage. These examples assume ready operands, available queues, L1 hits, no re"
     },
     {
       "file": "docs/vpu.md",

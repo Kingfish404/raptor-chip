@@ -67,12 +67,12 @@ windows when comparing width or latency knobs.
 ## BPU accuracy experiment
 
 Run `trace` once for each image/XLEN, then reuse the exact image and `.inst`
-file for each candidate. For example, to compare the RV64 default auxiliary
-index with the original mapping:
+file for each candidate. For example, to compare the RV64 default frontend
+with a registered fetch response:
 
 ```sh
 make -C verify/subsystem bpu XLEN=64 CONFIG=default \
-  BUILD_DIR=/tmp/bpu-base EXTRA_DEFINES=-DRAPT_BPU_AUX_PC_HASH=0 \
+  BUILD_DIR=/tmp/bpu-base EXTRA_DEFINES=-DRAPT_FETCH_RESPONSE_STAGE=1 \
   TRACE_PREFIX=/absolute/path/to/coremark-rv64-100k \
   FE_ARGS='+SINK_WIDTH=2 +FEEDBACK_DELAY=4'
 make -C verify/subsystem bpu XLEN=64 CONFIG=default \
@@ -154,7 +154,7 @@ Local experiment archives under `docs.agent/evaluation/` are not distributed
 with Git. Initial CoreMark and Embench CRC32 measurements, source provenance, traffic
 splits and limitations are recorded in
 [the subsystem results](../../docs.agent/evaluation/subsystem-trace-results.md).
-The current 2026-09-25 default, wide and L2 reassessment is in
+The current 2026-09-25 default, four-lane and L2 reassessment is in
 [the efficiency results](../../docs.agent/evaluation/subsystem-efficiency-2026-09-25.md).
 The default backend stall breakdown, load-use optimization and matched A/B results are in
 [the backend utilization report](../../docs.agent/evaluation/backend-utilization-2026-09-26.md).

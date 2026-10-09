@@ -15,7 +15,6 @@
 `define RAPT_XLEN 32
 `define RAPT_MISA 'h4014112f
 `endif
-`define RAPT_I_EXTENSION 'h1
 `define RAPT_M_EXTENSION 'h1
 
 // ---------- Microarchitecture (uarch) ----------
@@ -32,7 +31,9 @@
 // OoO window — halve all queue depths to relieve CLS / clock-routing pressure.
 `define RAPT_RIQ_SIZE 2
 `define RAPT_IIQ_SIZE 2
+`ifndef RAPT_ROB_SIZE
 `define RAPT_ROB_SIZE 4
+`endif
 
 `define RAPT_RS_SIZE 4
 `define RAPT_IOQ_SIZE 4
@@ -58,15 +59,13 @@
 `define RAPT_COMMIT_WIDTH 1
 `endif
 
-`ifdef RAPT_I_EXTENSION
 `define RAPT_REG_SIZE 32 // 32 registers
-`else
-`define RAPT_REG_SIZE 16 // 16 registers
-`endif
 
 `define RAPT_REG_LEN $clog2(`RAPT_REG_SIZE) // Register Length
 
-`define RAPT_PHY_SIZE 64 // physical register number (must be power of 2)
+// 48 covers the 32 architectural mappings plus every destination that ROB 4
+// and the one-wide rename/UOQ buffers can hold (at most 41).
+`define RAPT_PHY_SIZE 48 // total physical registers, including architectural mappings
 `define RAPT_PHY_LEN $clog2(`RAPT_PHY_SIZE)
 
 // Keep a smaller, but XLEN-independent, line for low-area builds.
@@ -76,9 +75,7 @@
 `define RAPT_L1I_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / 4)
 `define RAPT_L1I_LEN 5
 `define RAPT_L1I_N_WAYS 1
-`ifndef RAPT_L1I_REFILL_WORDS
 `define RAPT_L1I_REFILL_WORDS 4
-`endif
 
 // L1D
 `define RAPT_SQ_SIZE 4
@@ -88,5 +85,10 @@
 
 `define RAPT_ITLB_ENTRIES 4
 `define RAPT_DTLB_ENTRIES 4
+
+// Geometry for an explicit command-line L2 enable; L2 remains disabled here.
+`define RAPT_L2_LEN 8
+`define RAPT_L2_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
+`define RAPT_L2_N_WAYS 1
 
 `endif

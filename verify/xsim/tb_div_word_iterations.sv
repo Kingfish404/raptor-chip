@@ -1,8 +1,6 @@
 `include "rapt.svh"
 
-module tb_div_word_iterations #(
-    parameter int WordLatency = 33
-);
+module tb_div_word_iterations;
   localparam int X = `RAPT_XLEN;
   logic clock = 0, reset = 1, flush = 0;
   always #5 clock = ~clock;
@@ -16,6 +14,7 @@ module tb_div_word_iterations #(
       .XLEN(X),
       .TAG_W(8)
   ) dut (
+      .cancel_tags('0),
       .*
   );
 
@@ -55,6 +54,22 @@ module tb_div_word_iterations #(
     return (X > 32 && word_op) ? X'($signed(result_bits[31:0])) : result_bits;
   endfunction
 
+  // Accept edge, one normalization edge, two restoring bits per edge from the
+  // dividend magnitude's first significant bit, then the completion edge.
+  function automatic int expected_latency(logic [X-1:0] a, logic [4:0] op, bit word_op);
+    logic [X-1:0] aa;
+    int bits;
+    bit signed_op;
+    signed_op = op == `RAPT_ALU_DIV___ || op == `RAPT_ALU_REM___;
+    aa = a;
+    if (X > 32 && word_op) aa = signed_op ? X'($signed(a[31:0])) : X'(a[31:0]);
+    if (signed_op && aa[X-1]) aa = -aa;
+    if (X > 32 && word_op) aa = aa & X'(32'hffff_ffff);
+    bits = 0;
+    for (int i = 0; i < X; i++) if (aa[i]) bits = i + 1;
+    return 2 + (bits + 1) / 2;
+  endfunction
+
   task automatic check_div(logic [X-1:0] a, b, logic [4:0] op, bit word_op);
     logic [X-1:0] expected;
     int latency;
@@ -70,7 +85,7 @@ module tb_div_word_iterations #(
     in_valid = 1;
     tick();
     in_valid = 0;
-    latency = (X > 32 && word_op) ? WordLatency : X + 1;
+    latency = expected_latency(a, op, word_op);
     for (int c = 1; c <= latency; c++) begin
       tick();
       assert (out_valid == (c == latency))
@@ -94,6 +109,8 @@ module tb_div_word_iterations #(
     tested++;
   endtask
 
+  // Flush `iterations` edges after acceptance; the flush edge itself is the
+  // next one, so `iterations == latency - 1` races the completion edge.
   task automatic kill_div(input int iterations);
     @(negedge clock);
     in_a = X'(32'h8000_0000);
@@ -134,11 +151,17 @@ module tb_div_word_iterations #(
         foreach (edge_values[a])
         foreach (edge_values[b]) check_div(edge_values[a], edge_values[b], operations[o], 1'(w));
         repeat (100) check_div(X'(random_bits()), X'(random_bits()), operations[o], 1'(w));
+        // Vary dividend and divisor magnitudes so every normalization
+        // distance and odd/even remaining-bit count is exercised.
+        repeat (200)
+        check_div(X'(random_bits()) >> (random_bits() % X),
+                  X'(random_bits()) >> (random_bits() % X), operations[o], 1'(w));
       end
     end
     kill_div(1);
-    kill_div(16);
-    kill_div(32);  // Flush wins on the 32-iteration schedule's completion edge.
+    kill_div(8);
+    // Flush wins on the completion edge of the 32-bit magnitude schedule.
+    kill_div(expected_latency(X'(32'h8000_0000), `RAPT_ALU_REM___, (X > 32)) - 1);
     $display("PASS: divider arithmetic/tag/latency/flush XLEN=%0d cases=%0d", X, tested);
     $finish;
   end

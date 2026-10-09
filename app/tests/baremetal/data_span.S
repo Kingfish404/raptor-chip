@@ -1,4 +1,5 @@
 /* Data accesses beginning inside SRAM must not escape its physical backing. */
+#include "raptor_platform.h"
 #if __riscv_xlen == 64
 #define REG_S sd
 #define SATP_MODE 0x8000000000000000
@@ -30,7 +31,7 @@ _start:
   li t0, 0x6000
   csrw mstatus, t0
   li s7, 0
-  li s0, 0x0f001ff0
+  li s0, (RAPTOR_SRAM_BASE + 0x1ff0)
   li t1, 16
   li t2, 0x5a
 fill:
@@ -39,12 +40,12 @@ fill:
   addi t1, t1, -1
   bnez t1, fill
   /* Positive unaligned word fully inside SRAM, across an XLEN-word boundary. */
-  li s0, 0x0f001ff7
+  li s0, (RAPTOR_SRAM_BASE + 0x1ff7)
   li t2, 0x5a5a5a5a
   sw t2, 0(s0)
   lw t3, 0(s0)
   bne t2, t3, fail
-  li s9, 0x0f001fff
+  li s9, (RAPTOR_SRAM_BASE + 0x1fff)
   li s10, 0x0f002000
   fault_access sh, t2, 7
   fault_access sw, t2, 7
@@ -55,7 +56,7 @@ fill:
   fault_access fsd, f0, 7
 #endif
   /* Failed stores must not have altered even the mapped tail byte. */
-  li s0, 0x0f001ff0
+  li s0, (RAPTOR_SRAM_BASE + 0x1ff0)
   li t1, 16
   li t2, 0x5a
 check_tail:
@@ -100,7 +101,7 @@ check_tail:
   sw t0, 1024(s0)
 #endif
   la t1, level0
-  li t0, 0x03c004cf
+  li t0, RAPTOR_PTE(RAPTOR_SRAM_BASE + 0x1000, 0xcf)
   REG_S t0, 0(t1)
   la t0, next_page
   srli t0, t0, 2

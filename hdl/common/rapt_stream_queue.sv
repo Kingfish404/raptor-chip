@@ -22,7 +22,12 @@ module rapt_stream_queue #(
     output logic [$clog2(Depth+1)-1:0] occupancy
 );
   localparam int PtrBits = rapt_pkg::index_bits(Depth);
-  ItemT storage[Depth];
+  // Registered-capacity boundaries avoid a combinational ready path through
+  // the banked RAM prefetch. Equal power-of-two lane counts give each bank at
+  // most one read and one write per cycle. Other queues retain flop storage.
+  localparam bit BlockPayload = `RAPT_FPGA_STREAM_BRAM && !ReclaimSameCycle &&
+      InWidth == OutWidth && InWidth >= 4 && Depth >= 2 * InWidth &&
+      (Depth & (Depth - 1)) == 0 && (InWidth & (InWidth - 1)) == 0;
   logic [PtrBits-1:0] head, tail;
   logic [PtrBits-1:0] push_index[InWidth];
   int unsigned push_count, pop_count;
@@ -40,7 +45,6 @@ module rapt_stream_queue #(
     $error("Invalid rapt_stream_queue configuration");
   end
   for (genvar s = 0; s < OutWidth; s++) begin : g_read
-    assign out_data[s]  = storage[advance(int'(head), s)];
     assign out_valid[s] = !flush && !reset && int'(occupancy) > s;
   end
   always_comb begin
@@ -72,14 +76,60 @@ module rapt_stream_queue #(
       occupancy <= $clog2(Depth + 1)'(int'(occupancy) + push_count - pop_count);
     end
   end
-  // Each entry owns its storage update. Accepted slots have distinct indices;
-  // enqueue replaces a reclaimed entry after its old value is consumed.
-  // Data is intentionally not reset: occupancy owns validity.
-  for (genvar e = 0; e < Depth; e++) begin : g_entry
-    always_ff @(posedge clock) begin
-      if (!reset && !flush) begin
-        for (int s = 0; s < InWidth; s++)
-        if (s < push_count && push_index[s] == PtrBits'(e)) storage[e] <= in_data[s];
+  if (BlockPayload) begin : g_block_payload
+    localparam int Banks = InWidth;
+    localparam int BankBits = $clog2(Banks);
+    localparam int Rows = Depth / Banks;
+    localparam int RowBits = $clog2(Rows);
+    localparam int ItemBits = $bits(ItemT);
+    logic [PtrBits-1:0] next_head;
+    logic [ItemBits-1:0] bank_data[Banks];
+    // Read the next visible group on this edge so outputs still have the
+    // original queue's cycle latency. Forward a same-address enqueue because
+    // the block RAM's read-during-write result is vendor dependent.
+    assign next_head = (reset || flush) ? '0 : head + PtrBits'(pop_count);
+    for (genvar b = 0; b < Banks; b++) begin : g_bank
+      (* ram_style = "block" *) logic [ItemBits-1:0] words[Rows];
+      logic [BankBits-1:0] read_slot, write_slot;
+      logic [PtrBits-1:0] read_index, write_index;
+      logic [RowBits-1:0] read_row, write_row;
+      logic [ItemBits-1:0] read_q, forward_q;
+      logic write_en, forward_q_valid, collision;
+      assign read_slot = BankBits'(b) - next_head[BankBits-1:0];
+      assign read_index = next_head + PtrBits'(read_slot);
+      assign read_row = read_index[PtrBits-1:BankBits];
+      assign write_slot = BankBits'(b) - tail[BankBits-1:0];
+      assign write_index = tail + PtrBits'(write_slot);
+      assign write_row = write_index[PtrBits-1:BankBits];
+      assign write_en = !reset && !flush && int'(write_slot) < push_count;
+      assign collision = write_en && read_row == write_row;
+      always_ff @(posedge clock) begin
+        read_q <= words[read_row];
+        if (write_en) words[write_row] <= ItemBits'(in_data[write_slot]);
+      end
+      always_ff @(posedge clock) begin
+        if (reset || flush) forward_q_valid <= 1'b0;
+        else forward_q_valid <= collision;
+        if (collision) forward_q <= ItemBits'(in_data[write_slot]);
+      end
+      assign bank_data[b] = forward_q_valid ? forward_q : read_q;
+    end
+    for (genvar s = 0; s < OutWidth; s++) begin : g_output
+      assign out_data[s] = ItemT'(bank_data[BankBits'(head[BankBits-1:0]+BankBits'(s))]);
+    end
+  end else begin : g_flop_payload
+    // Each entry owns its storage update. Accepted slots have distinct indices;
+    // enqueue replaces a reclaimed entry after its old value is consumed.
+    ItemT storage[Depth];
+    for (genvar s = 0; s < OutWidth; s++) begin : g_read
+      assign out_data[s] = storage[advance(int'(head), s)];
+    end
+    for (genvar e = 0; e < Depth; e++) begin : g_entry
+      always_ff @(posedge clock) begin
+        if (!reset && !flush) begin
+          for (int s = 0; s < InWidth; s++)
+          if (s < push_count && push_index[s] == PtrBits'(e)) storage[e] <= in_data[s];
+        end
       end
     end
   end

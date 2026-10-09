@@ -10,7 +10,7 @@
 #include <stdint.h>
 
 #ifndef UART_BASE
-#define UART_BASE 0xf0001800UL
+#define UART_BASE 0x11001800UL
 #endif
 
 #ifndef RAPT_RUNTIME_WAIT_TXFULL

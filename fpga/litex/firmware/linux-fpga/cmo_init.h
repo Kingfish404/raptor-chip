@@ -4,7 +4,7 @@
  * Do not disable Zicbom or pretend that external DMA is coherent.
  */
 #ifndef RAPT_UART_BASE
-#define RAPT_UART_BASE 0xf0001800
+#define RAPT_UART_BASE 0x11001800
 #endif
 .macro raptor_enable_cmo
     csrrci t5, mstatus, 8 /* keep asynchronous IRQs out of the CSR probe */

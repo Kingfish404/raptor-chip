@@ -1,5 +1,6 @@
 /* Save at checkpoint_time; the resumed stream must see the persisted CLINT
  * through both MMIO and architectural time, including timer pending state. */
+#include "raptor_platform.h"
 .option norvc
 .option norelax
 .section .text
@@ -9,8 +10,8 @@ _start:
   csrw mie, zero
   la t0, fail
   csrw mtvec, t0
-  li s0, 0x0200bff8
-  li s1, 0x02004000
+  li s0, (RAPTOR_CLINT_BASE + 0xbff8)
+  li s1, (RAPTOR_CLINT_BASE + 0x4000)
   li t0, -1
   sw t0, 0(s1)
   li t0, 1

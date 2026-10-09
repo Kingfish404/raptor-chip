@@ -267,7 +267,11 @@ module rapt_l1d #(
         && (12'(s << L1dLineOffset) & CboIndexMask)
             == (cbo_addr[11:0] & CboIndexMask))
         || (zero_complete && ((s >> (L1dLineOffset < 6 ? 6-L1dLineOffset : 0))
-            == (int'(waddr_idx) >> (L1dLineOffset < 6 ? 6-L1dLineOffset : 0))));
+            == (int'(waddr_idx) >> (L1dLineOffset < 6 ? 6-L1dLineOffset : 0))))
+        // A failed posted store already updated a resident copy at acceptance.
+        // Drop that set; write-through lines hold no other dirty state.
+        || (!WriteBack && l1d_bus.posted_error
+        && 32'(s) == 32'(l1d_bus.posted_error_addr[L1D_LEN+L1dLineOffset-1:L1dLineOffset]));
   end
   assign fence_clear_busy = cmu_bcast.fence_time || cmu_bcast.cbo_inval
       || probe_valid_i || |fence_clear_set;
@@ -308,9 +312,11 @@ module rapt_l1d #(
   // Keep narrow ROM/SRAM/device bridges on their established word protocol.
   // A RAM burst stays in one physical PMA range and one translated page.
   function automatic logic refill_ram(input logic [XLEN-1:0] first, input logic [XLEN-1:0] last);
-    return (rapt_pkg::canonical_addr(first) >= XLEN'('h80000000) &&
-            rapt_pkg::canonical_addr(last) < XLEN'('h80000000) + XLEN'(rapt_pkg::PmemBytes)) ||
-        (rapt_pkg::canonical_addr(first) >= XLEN'('ha0000000) &&
+    return (rapt_pkg::addr_in_pmem(first) && rapt_pkg::addr_in_pmem(last) &&
+            rapt_pkg::canonical_addr(first) <= rapt_pkg::canonical_addr(last)) ||
+        (rapt_pkg::PmemBytes < 32'h80000000 && rapt_pkg::addr_upper_valid(first) &&
+         rapt_pkg::addr_upper_valid(last) && rapt_pkg::canonical_addr(first) >= XLEN'('ha0000000) &&
+         rapt_pkg::canonical_addr(first) <= rapt_pkg::canonical_addr(last) &&
          rapt_pkg::canonical_addr(last) < XLEN'('ha2000000));
   endfunction
 
@@ -511,8 +517,10 @@ module rapt_l1d #(
   // wb_hold also contains the current drain request; feeding it into these
   // outputs creates request -> hold -> ready/idle -> request loops across the
   // bus, frontend cancellation, and retirement fence logic.
-  assign writeback_idle = !WriteBack || (!dirty_any && !wb_busy && wb_state == WB_IDLE
-      && !writeback_error && !l1d_update && !l1d_rmw);
+  // Posted write-through stores have left the SQ before their B response;
+  // ordering points that drain the SQ must also wait for those responses.
+  assign writeback_idle = (!WriteBack || (!dirty_any && !wb_busy && wb_state == WB_IDLE
+      && !writeback_error && !l1d_update && !l1d_rmw)) && !l1d_bus.posted_busy;
   assign coherent_ready = !WriteBack || (!dirty_any && !wb_busy && wb_state == WB_IDLE
       && !writeback_error && !l1d_update && !l1d_rmw
       && l1d_state == IDLE && !ptw_busy);
@@ -962,8 +970,13 @@ module rapt_l1d #(
       && (l1d_state == IDLE || l1d_state == LD_CHECK);
   assign mshr_fill_idx = mshr_fill_addr[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits];
   assign mshr_fill_tag = mshr_fill_addr[PADDR_BITS-1:L1D_LEN+L1D_LINE_LEN+L1dOffsetBits];
-  assign tag_store_idx = mshr_fill_ready ? mshr_fill_idx : waddr_idx;
-  assign tag_store_tag = mshr_fill_ready ? mshr_fill_tag : waddr_tag;
+  // A valid store always owns this probe; a refill is consumed only when
+  // mshr_fill_ready holds, which already excludes stores. Choose the inactive
+  // refill probe early so flush/arbitration cannot traverse the tag lookup.
+  // Keep writeback and MSHR-disabled configurations on the original store port.
+  wire tag_probe_fill = !WriteBack && (`RAPT_L1D_MSHRS > 0) && !lsu_l1d.wvalid;
+  assign tag_store_idx = tag_probe_fill ? mshr_fill_idx : waddr_idx;
+  assign tag_store_tag = tag_probe_fill ? mshr_fill_tag : waddr_tag;
 
   // A tag miss needs no SRAM data. On a hit, only the matching way and word's
   // bank must have read this set; unrelated banks can read during a write.
@@ -1284,6 +1297,17 @@ module rapt_l1d #(
       && !ptw_wvalid && l1d_bus.wready && !mshr_busy && !l1d_rmw && !fence_clear_busy
       && !(l1d_state == LD_D && refill_line));
   assign lsu_l1d.werr = lsu_l1d.wready && !local_store_ready && l1d_bus.werr;
+  // The bus may acknowledge this store at AXI acceptance only when every
+  // non-bus condition of the synchronous `wready` above already holds, and
+  // its hit/miss decision is final: a completed refill may still be
+  // installing its tag (`l1d_update`/`line_update`). A synchronous store
+  // would observe that line by its B response; a posted one must not miss
+  // it and leave the stale refill resident.
+  assign l1d_bus.wmore = lsu_l1d.wmore;
+  assign l1d_bus.wpost = !WriteBack && cacheable_w && !lsu_l1d.wzero && !wb_hold
+      && !local_store && !ptw_awvalid && !ptw_wvalid && !mshr_busy && !l1d_rmw
+      && !l1d_update && !line_update
+      && !fence_clear_busy && !(l1d_state == LD_D && refill_line);
 
   // store address translation: stlb_hit uses TLB, otherwise wait for PTW
   assign store_paddr = XLEN'({ptw_result_ptag, exu_l1d.vaddr[11:0]});
@@ -1309,6 +1333,16 @@ module rapt_l1d #(
       && !pf_store_ptw
       && !pmp_store_fault_mmu
       && !store_unmapped_fault_mmu && !store_io_size_fault));
+
+  // Fill acceptance requires !l1d_update. Preload the wide line payload
+  // while this update buffer is vacant; the original line_update control
+  // publishes it. Pending updates retain their payload until consumption.
+  always_ff @(posedge clock) begin
+    if (!l1d_update) begin
+      line_update_mask <= mshr_fill_mask;
+      line_update_data <= mshr_fill_data;
+    end
+  end
 
   always_ff @(posedge clock) begin
     if (reset) begin
@@ -1735,8 +1769,6 @@ module rapt_l1d #(
       end else if (mshr_fill_ready) begin
         l1d_update <= 1'b1;
         line_update <= 1'b1;
-        line_update_mask <= mshr_fill_mask;
-        line_update_data <= mshr_fill_data;
         l1d_valid_u <= 1'b1;
         l1d_tag_u <= mshr_fill_tag;
         l1d_idx <= mshr_fill_idx;

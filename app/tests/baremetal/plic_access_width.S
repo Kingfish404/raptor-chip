@@ -29,10 +29,10 @@ _start:
   half_plic_seed
 #endif
   plic_width_translation_setup
-  li s0, (0x0c000004 + PLIC_VA_DELTA)
-  li s1, (0x0c002000 + PLIC_VA_DELTA)
-  li s2, (0x0c001000 + PLIC_VA_DELTA)
-  li s3, (0x0c200004 + PLIC_VA_DELTA)
+  li s0, (RAPTOR_PLIC_BASE + 0x4 + PLIC_VA_DELTA)
+  li s1, (RAPTOR_PLIC_BASE + 0x2000 + PLIC_VA_DELTA)
+  li s2, (RAPTOR_PLIC_BASE + 0x1000 + PLIC_VA_DELTA)
+  li s3, (RAPTOR_PLIC_BASE + 0x200004 + PLIC_VA_DELTA)
   li t0, 2
   sw t0, 0(s0)
   sw t0, 0(s1)

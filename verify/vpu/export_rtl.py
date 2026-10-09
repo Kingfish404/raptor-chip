@@ -11,7 +11,7 @@ ROOT=Path(__file__).resolve().parents[2]
 def export(destination):
     # Refuse existing directories so repeated exports cannot overwrite edits.
     destination.mkdir(parents=True,exist_ok=False)
-    rtl=[ROOT/'hdl/memory/rapt_sram_1rw.sv']+[
+    rtl=[ROOT/'hdl/sram/rapt_sram_1rw.sv']+[
         ROOT/f'hdl/backend/feu/fpu/rapt_fpu_{name}.sv'
         for name in ('fma','divsqrt','convert_narrow','int_to_fp','single_to_int_w')]
     rtl+=sorted((ROOT/'hdl/backend/vpu').glob('*.sv'))

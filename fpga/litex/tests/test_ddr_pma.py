@@ -43,17 +43,18 @@ class DDRPMATest(unittest.TestCase):
 
     def test_pack_override(self):
         for variant in ("linux32", "linux64"):
-            with self.subTest(variant=variant), patch.dict(os.environ, {
-                "RAPT_PACK_VFLAGS": "-DRAPT_PMEM_BYTES=268435456",
-            }), patch("isolated_pack.pack", return_value=pathlib.Path("/private/rapt_pack.sv")) as run:
-                Raptor.add_sources(Mock(), variant, pmem_size=0x40000000)
-                flags = run.call_args.args[3]
-                self.assertIn("-DRAPT_PMEM_BYTES=1073741824", flags)
-                self.assertEqual(flags.count("-DRAPT_PMEM_BYTES="), 1)
-                self.assertEqual("-DRAPT_RV64" in flags, variant == "linux64")
+            for capacity in (0x40000000, 0x80000000):
+                with self.subTest(variant=variant, capacity=capacity), patch.dict(os.environ, {
+                    "RAPT_PACK_VFLAGS": "-DRAPT_PMEM_BYTES=268435456",
+                }), patch("isolated_pack.pack", return_value=pathlib.Path("/private/rapt_pack.sv")) as run:
+                    Raptor.add_sources(Mock(), variant, pmem_size=capacity)
+                    flags = run.call_args.args[3]
+                    self.assertIn(f"-DRAPT_PMEM_BYTES={capacity}", flags)
+                    self.assertEqual(flags.count("-DRAPT_PMEM_BYTES="), 1)
+                    self.assertEqual("-DRAPT_RV64" in flags, variant == "linux64")
 
     def test_invalid_window(self):
-        for size in (0, -1, 0x30000000, 0x80000000):
+        for size in (0, -1, 0x30000000, 0x100000000):
             with self.subTest(size=size), patch("isolated_pack.pack") as run:
                 with self.assertRaises(ValueError):
                     Raptor.add_sources(Mock(), pmem_size=size)
@@ -71,35 +72,39 @@ class DDRPMATest(unittest.TestCase):
         # Evaluate only the real capacity fragment; the full Makefile has
         # parse-time build-stamp writes and board-detection side effects.
         source = (LITEX / "Makefile").read_text()
-        fragment = source.split("# Match the shared KU15P target's PMA override", 1)[1]
-        fragment = fragment.split("export RAPT_PACK_VFLAGS", 1)[0]
-        fragment = fragment[fragment.index("KU15P_PMEM_SIZE :="):]
+        fragment = source.split("_WITH_EXTERNAL_MAIN_RAM :=", 1)[1]
+        fragment = "_WITH_EXTERNAL_MAIN_RAM :=" + fragment.split("export RAPT_PACK_VFLAGS", 1)[0]
         ram = next(line for line in source.splitlines() if line.startswith("LINUX_FPGA_RAM_SIZE ?="))
         recipe = '\nall:\n\t@echo $(LINUX_FPGA_RAM_SIZE)\n\t@echo $(RAPT_PACK_VFLAGS)\n'
-        for board in ("mlk_cu07_ku15p", "mlk_cu08_ku15p", "tang_mega_138k_pro"):
-            for mig, dram in ((0, 0), (1, 0), (0, 1)):
-                with self.subTest(board=board, mig=mig, dram=dram):
-                    result = subprocess.run([
-                        "make", "--no-print-directory", "-f", "-",
-                        f"FPGA_BOARD={board}", f"WITH_MIG={mig}", f"WITH_LITEDRAM={dram}",
-                        "MIG_SIZE=0x40000000", "LITEDRAM_SIZE=0x40000000",
-                    ], input=fragment + ram + recipe, text=True, capture_output=True, check=True,
-                       env={k: v for k, v in os.environ.items()
-                            if k not in ("MAKEFLAGS", "MAKEOVERRIDES", "RAPT_PACK_VFLAGS", "LINUX_FPGA_RAM_SIZE")})
-                    enabled = board.startswith("mlk_cu") and (mig or dram)
-                    self.assertEqual(result.stdout.splitlines()[0].strip(),
-                                     "0x40000000" if enabled else "0x10000000")
-                    self.assertEqual("-DRAPT_PMEM_BYTES=1073741824" in result.stdout, bool(enabled))
+        for xlen, mig, dram, size, expected_linux in (
+            (32, 1, 0, '0x80000000', '0x40000000'),
+            (64, 1, 0, '0x80000000', '0x80000000'),
+            (32, 1, 0, '0x40000000', '0x40000000'),
+            (32, 0, 1, '0x40000000', '0x40000000'),
+            (32, 0, 0, '0x80000', '0x80000'),
+        ):
+            with self.subTest(xlen=xlen, mig=mig, dram=dram, size=size):
+                result = subprocess.run([
+                    "make", "--no-print-directory", "-f", "-",
+                    f"LINUX_XLEN={xlen}", f"WITH_MIG={mig}", f"WITH_LITEDRAM={dram}",
+                    f"MIG_SIZE={size}", f"LITEDRAM_SIZE={size}",
+                    f"INTEGRATED_MAIN_RAM_SIZE={size if not (mig or dram) else '0'}",
+                ], input=fragment + ram + recipe, text=True, capture_output=True, check=True,
+                   env={k: v for k, v in os.environ.items()
+                        if k not in ("MAKEFLAGS", "MAKEOVERRIDES", "RAPT_PACK_VFLAGS", "LINUX_FPGA_RAM_SIZE")})
+                self.assertEqual(result.stdout.splitlines()[0].strip(), expected_linux)
+                self.assertIn(f"-DRAPT_PMEM_BYTES={int(size, 0)}", result.stdout)
 
     @unittest.skipUnless(shutil.which("dtc"), "dtc is required")
-    def test_one_gib_device_tree(self):
+    def test_linux_device_tree_ram_caps(self):
         template = (LITEX / "firmware/linux-fpga/litex-soc.dts.in").read_text()
-        for xlen, mmu in ((32, "sv32"), (64, "sv39")):
+        for xlen, mmu, memory_size in ((32, "sv32", "0x40000000"),
+                                       (64, "sv39", "0x80000000")):
             with self.subTest(xlen=xlen):
                 values = {
                     "MODEL": "KU15P DDR test", "TIMEBASE": "50000000",
-                    "MEM_SIZE": "0x40000000", "BOOTARGS": "console=liteuart0,115200",
-                    "UART_BASE": "0xf0001800", "UART_UNIT_ADDR": "f0001800",
+                    "MEM_SIZE": memory_size, "BOOTARGS": "console=liteuart0,115200",
+                    "UART_BASE": "0x11001800", "UART_UNIT_ADDR": "11001800",
                     "CBOM_BLOCK_SIZE": "64", "RISCV_ISA": f"rv{xlen}ima",
                     "RISCV_ISA_BASE": f"rv{xlen}i", "RISCV_ISA_EXTENSIONS": '"i", "m", "a"',
                     "RISCV_MMU": mmu,
@@ -112,7 +117,7 @@ class DDRPMATest(unittest.TestCase):
                 decoded = subprocess.run(["dtc", "-I", "dtb", "-O", "dts"],
                                          input=dtb, capture_output=True, check=True).stdout.decode()
                 memory = decoded.split("memory@80000000 {", 1)[1].split("};", 1)[0]
-                self.assertIn("reg = <0x80000000 0x40000000>;", memory)
+                self.assertIn(f"reg = <0x80000000 {memory_size}>;", memory)
 
 
 if __name__ == "__main__":

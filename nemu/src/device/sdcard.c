@@ -176,7 +176,7 @@ static void load_sdcard_image(const char *path)
 }
 
 // ---------------------------------------------------------------------------
-// LiteX SPI SD-card controller (egos HARDWARE platform), at 0xF0008000.
+// LiteX SPI SD-card controller (egos HARDWARE platform), at 0x11008000.
 // Mirrors sim/csrc/mem/mmio-litex-spi.cc. Reuses sdcard_image loaded
 // above so a single --sdcard image serves both QEMU SDHCI and LiteX SPI.
 // Register layout:
@@ -187,7 +187,7 @@ static void load_sdcard_image(const char *path)
 //   0x10 CS      (bit 0 selected)
 //   0x18 CLKDIV
 // ---------------------------------------------------------------------------
-#define LITEX_SPI_BASE     0xF0008000u
+#define LITEX_SPI_BASE     0x11008000u
 #define LITEX_SPI_SIZE     0x100u
 #define LITEX_SPI_CONTROL  0x00u
 #define LITEX_SPI_STATUS   0x04u

@@ -1,4 +1,5 @@
 /* Check Raptor backing boundaries independently from the reference map. */
+#include "raptor_platform.h"
 .option norvc
 .option norelax
 .section .text
@@ -20,7 +21,7 @@ _start:
   lw t3, 0(s9)
   bne t2, t3, fail
   /* The final flash word is backed, despite the following page being a hole. */
-  li s9, 0x3ffffffc
+  li s9, (RAPTOR_FLASH_BASE + RAPTOR_FLASH_SIZE - 4)
   lw t3, 0(s9)
   li s9, 0xa2000000
   jal ra, bad_load

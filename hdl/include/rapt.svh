@@ -9,6 +9,12 @@
 `ifndef RAPT_L1D_WRITEBACK
 `define RAPT_L1D_WRITEBACK 0
 `endif
+// Write-through L1D stores that may retire to the bus before their AXI B
+// response. Applied only without L2 and with a write-through L1D; zero
+// restores B-synchronous store completion.
+`ifndef RAPT_POSTED_WRITES
+`define RAPT_POSTED_WRITES 4
+`endif
 
 // FPGA builds may map the integer product into DSPs. Generic/ASIC builds
 // retain the fabric inference policy; arithmetic and valid/tag latency agree.
@@ -16,59 +22,23 @@
 `define RAPT_FPGA_DSP 0
 `endif
 
-// Bounded port reassignment policy; independent of ordered stage widths.
-// Off by default: current CSR/system operations serialize, and the
-// measured workloads do not justify the extra select-path logic. Custom
-// heterogeneous execution domains may enable it after timing evaluation.
-`ifndef RAPT_ISSUE_REBALANCE
-`define RAPT_ISSUE_REBALANCE 0
-`endif
-`ifndef RAPT_IQ_RECLAIM_ON_ISSUE
-// Same-edge vacancy: an issued slot may be reallocated this cycle. Override
-// to 0 to keep issue-select out of the dispatch-capacity path.
-`define RAPT_IQ_RECLAIM_ON_ISSUE 1
+// FPGA builds bank wide, immutable issue payloads into distributed RAM.
+// Generic and ASIC builds retain the existing flop implementation.
+`ifndef RAPT_FPGA_LUTRAM
+`define RAPT_FPGA_LUTRAM 0
 `endif
 
-// Speculative IOQ fast load-use wake for the entry right behind the IOQ head.
-// A plain current-head hit now completes directly, so consecutive loads no
-// longer need this path. Keep the rarer next-head speculation opt-in until its
-// recovery behavior is covered beyond targeted IOQ tests.
-`ifndef RAPT_IOQ_FAST_LOAD_NEXT_HEAD
-`define RAPT_IOQ_FAST_LOAD_NEXT_HEAD 0
+// FPGA stream queues with registered-capacity flow control may use synchronous
+// block RAM when their geometry provides one read/write port per bank. This
+// follows the FPGA memory switch by default, but can be disabled separately.
+`ifndef RAPT_FPGA_STREAM_BRAM
+`define RAPT_FPGA_STREAM_BRAM `RAPT_FPGA_LUTRAM
 `endif
 
-// Let a load woken by the retiring IOQ head enter the registered A request
-// stage on the same edge. The switch supports matched timing/area A/B runs.
-`ifndef RAPT_IOQ_WAKE_NEXT_REQUEST
-`define RAPT_IOQ_WAKE_NEXT_REQUEST 1
-`endif
-`ifndef RAPT_IOQ_EARLY_LOAD_BCAST
-`define RAPT_IOQ_EARLY_LOAD_BCAST 0
-`endif
 // Capture load responses before completion, wakeup and request selection.
 // This also disables speculative live response wakeups across this boundary.
 `ifndef RAPT_IOQ_LOAD_RESPONSE_STAGE
 `define RAPT_IOQ_LOAD_RESPONSE_STAGE 0
-`endif
-// Bypass a younger load's captured data register on the accepted response edge.
-`ifndef RAPT_IOQ_LIVE_EARLY_BCAST
-`define RAPT_IOQ_LIVE_EARLY_BCAST 0
-`endif
-// Permit early broadcast past a store only when the existing IOQ overlap
-// checker proves the younger load independent of every older store.
-`ifndef RAPT_IOQ_EARLY_LOAD_STORES
-`define RAPT_IOQ_EARLY_LOAD_STORES 0
-`endif
-// Let an accepted younger load broadcast prepare its dependent's B request
-// register while the A request remains occupied.
-`ifndef RAPT_IOQ_WAKE_NEXT_B_REQUEST
-`define RAPT_IOQ_WAKE_NEXT_B_REQUEST 0
-`endif
-
-// Allow one non-special follower to retire after the group's sole store.
-// The scalar SQ commit endpoint still admits only one store per cycle.
-`ifndef RAPT_ROU_STORE_FOLLOWER
-`define RAPT_ROU_STORE_FOLLOWER 0
 `endif
 
 // Register cache responses before instruction packing and auxiliary prediction.
@@ -79,37 +49,12 @@
 `define RAPT_FETCH_RESPONSE_STAGE 0
 `endif
 
-// Optional latency optimizations; presets select the validated paths.
-`ifndef RAPT_ALQ_LOAD_WAKE
-`define RAPT_ALQ_LOAD_WAKE 0
-`endif
-`ifndef RAPT_BRQ_CDB_WAKE
-`define RAPT_BRQ_CDB_WAKE 0
-`endif
-`ifndef RAPT_IOQ_FORWARD_REQUEST
-`define RAPT_IOQ_FORWARD_REQUEST 0
-`endif
-`ifndef RAPT_IOQ_STORE_PRECHECK
-`define RAPT_IOQ_STORE_PRECHECK 0
-`endif
-`ifndef RAPT_MDQ_LIVE_WAKE
-`define RAPT_MDQ_LIVE_WAKE 0
-`endif
-`ifndef RAPT_SQ_NARROW_FORWARD
-`define RAPT_SQ_NARROW_FORWARD 0
-`endif
-`ifndef RAPT_FETCH_BRANCH_FOLLOWER
-`define RAPT_FETCH_BRANCH_FOLLOWER 0
-`endif
+// TAGE base-predictor and tagged-table index widths.
 `ifndef RAPT_TAGE_BIM_BITS
 `define RAPT_TAGE_BIM_BITS 8
 `endif
 `ifndef RAPT_TAGE_INDEX_BITS
 `define RAPT_TAGE_INDEX_BITS 7
-`endif
-
-`ifndef RAPT_BPU_AUX_TAGE
-`define RAPT_BPU_AUX_TAGE 0
 `endif
 
 // Physical integer issue topology is independent of every ordered pipeline
@@ -123,20 +68,6 @@
 `define RAPT_INTEGER_SYSTEM_PORT 0
 `endif
 
-// Stop allocating younger work after a registered misprediction request.
-// Recovery itself remains retirement-triggered until selective repair exists.
-`ifndef RAPT_RECOVERY_DISPATCH_FENCE
-`define RAPT_RECOVERY_DISPATCH_FENCE 1
-`endif
-
-// Split ordered ROB allocation from execution-domain queue admission. Pending
-// ROB owners may steer independently across domains, so a full BRQ/IOQ does
-// not unnecessarily block an unrelated integer or multiply uop behind it.
-// Serializing operations still allocate alone at an empty ROB boundary.
-`ifndef RAPT_ROB_DISPATCH_BUFFERED
-`define RAPT_ROB_DISPATCH_BUFFERED 1
-`endif
-
 // Wide integer operand values for ROB_DP owners live in a compact spill bank,
 // not in every ROB slot. Presets declare the intended physical depth; this
 // fallback keeps out-of-tree configurations buildable while preserving at
@@ -147,12 +78,12 @@
     ? `RAPT_ROB_SIZE : (`RAPT_ROB_SIZE / 2))
 `endif
 
-// Number of oldest ROB_DP owners exposed to the capacity-aware dispatch
-// router each cycle.  This is deliberately independent of dispatch width:
-// the router may look past several blocked domains while still admitting at
-// most RAPT_DISPATCH_WIDTH uops into execution queues.
+// Dispatch window lanes: ranked ROB_DP owners plus one group of carried and
+// one group of live allocations. Ranked lanes let the router look past
+// blocked domains while still admitting at most RAPT_DISPATCH_WIDTH uops.
 `ifndef RAPT_STEER_SCAN_ENTRIES
-`define RAPT_STEER_SCAN_ENTRIES ((`RAPT_ROB_SIZE < 16) ? `RAPT_ROB_SIZE : 16)
+`define RAPT_STEER_SCAN_ENTRIES \
+  (2 * `RAPT_DISPATCH_WIDTH + ((`RAPT_ROB_SIZE < 8) ? `RAPT_ROB_SIZE : 8))
 `endif
 
 // ROB slot numbers are recycled.  Carry an allocation generation beside the
@@ -176,7 +107,7 @@
 // through an `Entries`-way mux cone. The ancestry mask alone makes the array
 // quadratic, and the restore cone is linear in width times entries. Sixteen
 // entries hold the array at half the 32-entry flip-flop count and halve the
-// restore mux depth on FPGA. Override to a larger power of two in a preset
+// restore mux depth on FPGA. Override with a larger count in a preset
 // that trades area for deeper control-flow speculation.
 `ifndef RAPT_BRANCH_CHECKPOINTS
 `define RAPT_BRANCH_CHECKPOINTS 16
@@ -283,16 +214,6 @@
 `define RAPT_INST_WFI 32'h10500073
 
 // Page-table entry bits (Sv32 / Sv39 share the low-bit layout).
-`define RAPT_PTE_V_BIT 0
-`define RAPT_PTE_R_BIT 1
-`define RAPT_PTE_W_BIT 2
-`define RAPT_PTE_X_BIT 3
-`define RAPT_PTE_U_BIT 4
-`define RAPT_PTE_G_BIT 5
-`define RAPT_PTE_A_BIT 6
-`define RAPT_PTE_D_BIT 7
-`define RAPT_PTE_A_MASK 32'h0000_0040
-`define RAPT_PTE_D_MASK 32'h0000_0080
 
 `define RAPT_CSR_CSW_NONE 3'b000
 `define RAPT_CTR_SEL_NONE 3'b000
@@ -310,9 +231,6 @@
 `define RAPT_OP_RW_TYPE 7'b0111011
 `define RAPT_OP_IW_TYPE 7'b0011011
 
-`define RAPT_SIGN_EXTEND(x, l, n) ({{n-l{x[l-1]}}, x})
-`define RAPT_ZERO_EXTEND(x, l, n) ({{n-l{1'b0}}, x})
-`define RAPT_LAMBDA(x) (x)
 
 `define RAPT_ALU_ILL_ 'b01001
 
@@ -418,10 +336,6 @@
 `define RAPT_ATO_MINU 'b01100
 `define RAPT_ATO_MAXU 'b01010
 
-`define RAPT_WSTRB_SB 'b00000001
-`define RAPT_WSTRB_SH 'b00000011
-`define RAPT_WSTRB_SW 'b00001111
-`define RAPT_WSTRB_SD 'b11111111
 
 // Privilege Levels
 `define RAPT_PRIV_U 2'h0

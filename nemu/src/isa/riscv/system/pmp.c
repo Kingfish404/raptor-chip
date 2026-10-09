@@ -78,6 +78,10 @@ static inline word_t pmp_addr(int i)
 
 static inline void pmp_addr_set(int i, word_t v)
 {
+#ifdef CONFIG_RV64
+  /* WARL: only the implemented physical-address bits are retained. */
+  v &= ((word_t)1 << CONFIG_RV_PMPADDR_BITS) - 1;
+#endif
   cpu.sr[CSR_PMPADDR0 + i] = v;
 }
 

@@ -224,7 +224,9 @@ void print_nemu_memory_map(FILE *out)
       {"mrom", CONFIG_MROM_BASE, CONFIG_MROM_SIZE, "mask ROM window"},
       {"flash", CONFIG_FLASH_BASE, CONFIG_FLASH_SIZE, "flash image mirror"},
       {"pmem", CONFIG_MBASE, CONFIG_MSIZE, "main memory / QEMU virt DRAM"},
+#ifndef CONFIG_RAPTOR_PMEM_2G
       {"sdram", CONFIG_SDRAM_BASE, CONFIG_SDRAM_SIZE, "external SDRAM window"},
+#endif
   };
   print_map_entries_sorted(out, "mem", mem_entries, sizeof(mem_entries) / sizeof(mem_entries[0]));
 #ifdef CONFIG_DEVICE

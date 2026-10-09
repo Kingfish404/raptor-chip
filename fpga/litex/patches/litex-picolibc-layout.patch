@@ -1,0 +1,118 @@
+diff --git a/litex/soc/software/common.mak b/litex/soc/software/common.mak
+index f2e13a7..5c750f2 100644
+--- a/litex/soc/software/common.mak
++++ b/litex/soc/software/common.mak
+@@ -50,7 +50,14 @@ DEPFLAGS += -MD -MP
+ 
+ # Toolchain options
+ #
+-INCLUDES = -I$(PICOLIBC_DIRECTORY)/libc/include \
++ifneq ($(wildcard $(PICOLIBC_DIRECTORY)/newlib/libc/include/inttypes.h),)
++PICOLIBC_INCLUDE_DIR = $(PICOLIBC_DIRECTORY)/newlib/libc/include
++PICOLIBC_STDIO_DIR   = $(PICOLIBC_DIRECTORY)/newlib/libc/tinystdio
++else
++PICOLIBC_INCLUDE_DIR = $(PICOLIBC_DIRECTORY)/libc/include
++PICOLIBC_STDIO_DIR   =
++endif
++INCLUDES = -I$(PICOLIBC_INCLUDE_DIR) $(if $(PICOLIBC_STDIO_DIR),-I$(PICOLIBC_STDIO_DIR)) \
+            -I$(LIBBASE_DIRECTORY) \
+            -I$(SOC_DIRECTORY)/software/include \
+            -I$(SOC_DIRECTORY)/software \
+@@ -68,7 +75,8 @@ CXX_INCLUDES = -I$(LIBBASE_DIRECTORY) \
+                -I$(BUILDINC_DIRECTORY)/../libc \
+                -I$(CPU_DIRECTORY) \
+                $(CXX_STANDARD_INCLUDES) \
+-               -isystem $(PICOLIBC_DIRECTORY)/libc/include
++               -isystem $(PICOLIBC_INCLUDE_DIR) \
++               $(if $(PICOLIBC_STDIO_DIR),-isystem $(PICOLIBC_STDIO_DIR))
+ BASEFLAGS = $(DEPFLAGS) -Os $(CPUFLAGS) -g3 -no-pie -fomit-frame-pointer -Wall \
+             -fno-builtin -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
+             -ffunction-sections -fdata-sections
+diff --git a/litex/soc/software/libc/Makefile b/litex/soc/software/libc/Makefile
+index 0adcc03..c99679c 100644
+--- a/litex/soc/software/libc/Makefile
++++ b/litex/soc/software/libc/Makefile
+@@ -67,6 +67,13 @@ PICO_MESON_FLAGS = \
+ $(PICOLIBC_SRC_DIR): $(MESON_CROSS_FILE)
+ 	$(RM) -r $(PICOLIBC_SRC_DIR)
+ 	cp -a $(PICOLIBC_DIRECTORY) $(BUILDINC_DIRECTORY)/../picolibc_src
++	# Newer pythondata-software-picolibc stores libc/libm under newlib/.
++	# Keep the existing minimal source list and include paths usable with
++	# either package layout without altering the package installation.
++	if [ -d "$(PICOLIBC_SRC_DIR)/newlib/libc" ] && [ ! -e "$(PICOLIBC_SRC_DIR)/libc" ]; then \
++		ln -s newlib/libc "$(PICOLIBC_SRC_DIR)/libc"; \
++		ln -s newlib/libm "$(PICOLIBC_SRC_DIR)/libm"; \
++	fi
+ 
+ 	if [ -d "$(LIBC_DIRECTORY)/$(CPUFAMILY)" ]; then \
+ 		cp $(LIBC_DIRECTORY)/$(CPUFAMILY)/* $(BUILDINC_DIRECTORY)/../picolibc_src/libc/machine/$(CPUFAMILY)/ ;\
+@@ -95,6 +102,7 @@ MINIMAL_PICOLIBC_CFLAGS = \
+ 	-I$(PICOLIBC_SRC_DIR)/libc/locale \
+ 	-I$(PICOLIBC_SRC_DIR)/libc/machine/$(CPUFAMILY) \
+ 	-I$(PICOLIBC_SRC_DIR)/libc/stdio \
++	-I$(PICOLIBC_SRC_DIR)/libc/tinystdio \
+ 	-I$(PICOLIBC_SRC_DIR)/libc/stdlib \
+ 	-I$(PICOLIBC_SRC_DIR)/libc/string \
+ 	-I$(PICOLIBC_SRC_DIR)/libc/include \
+@@ -117,6 +125,12 @@ MINIMAL_PICOLIBC_CFLAGS = \
+ 	-Wno-return-type \
+ 	-D_LIBC
+ 
++ifneq ($(wildcard $(PICOLIBC_DIRECTORY)/newlib/libc/tinystdio/fgetc.c),)
++MINIMAL_PICOLIBC_STDIO_DIR = $(PICOLIBC_SRC_DIR)/libc/tinystdio
++else
++MINIMAL_PICOLIBC_STDIO_DIR = $(PICOLIBC_SRC_DIR)/libc/stdio
++endif
++
+ MINIMAL_PICOLIBC_SRCS = \
+ 	$(PICOLIBC_SRC_DIR)/libc/ctype/ctype_.c \
+ 	$(PICOLIBC_SRC_DIR)/libc/errno/errno.c \
+@@ -124,13 +138,11 @@ MINIMAL_PICOLIBC_SRCS = \
+ 	$(PICOLIBC_SRC_DIR)/libc/string/strncpy.c \
+ 	$(PICOLIBC_SRC_DIR)/libc/string/strncmp.c \
+ 	$(PICOLIBC_SRC_DIR)/libc/string/strnlen.c \
+-	$(PICOLIBC_SRC_DIR)/libc/stdio/fgetc.c \
+-	$(PICOLIBC_SRC_DIR)/libc/stdio/fputc.c \
+-	$(PICOLIBC_SRC_DIR)/libc/stdio/fputs.c \
+-	$(PICOLIBC_SRC_DIR)/libc/stdio/printf.c \
+-	$(PICOLIBC_SRC_DIR)/libc/stdio/puts.c \
+-	$(PICOLIBC_SRC_DIR)/libc/stdio/strtoul.c \
+-	$(PICOLIBC_SRC_DIR)/libc/stdio/strtoull.c \
++	$(MINIMAL_PICOLIBC_STDIO_DIR)/fgetc.c \
++	$(MINIMAL_PICOLIBC_STDIO_DIR)/fputc.c \
++	$(MINIMAL_PICOLIBC_STDIO_DIR)/fputs.c \
++	$(MINIMAL_PICOLIBC_STDIO_DIR)/printf.c \
++	$(MINIMAL_PICOLIBC_STDIO_DIR)/puts.c \
+ 	$(PICOLIBC_SRC_DIR)/libc/stdlib/lldiv.c \
+ 	$(PICOLIBC_SRC_DIR)/libc/machine/riscv/memcpy-asm.S \
+ 	$(PICOLIBC_SRC_DIR)/libc/machine/riscv/memmove.S \
+@@ -139,18 +151,22 @@ MINIMAL_PICOLIBC_SRCS = \
+ 	$(PICOLIBC_SRC_DIR)/libc/machine/riscv/strcpy.c \
+ 	$(PICOLIBC_SRC_DIR)/libc/machine/riscv/strlen.c
+ 
++MINIMAL_PICOLIBC_SRCS += \
++	$(MINIMAL_PICOLIBC_STDIO_DIR)/strtoul.c \
++	$(MINIMAL_PICOLIBC_STDIO_DIR)/strtoull.c
++
+ ifeq ($(PICOLIBC_FORMAT),integer)
+-MINIMAL_PICOLIBC_SRCS += $(PICOLIBC_SRC_DIR)/libc/stdio/vfiprintf.c
++MINIMAL_PICOLIBC_SRCS += $(MINIMAL_PICOLIBC_STDIO_DIR)/vfiprintf.c
+ else ifeq ($(PICOLIBC_FORMAT),float)
+ MINIMAL_PICOLIBC_SRCS += \
+-	$(PICOLIBC_SRC_DIR)/libc/stdio/vffprintf.c \
+-	$(PICOLIBC_SRC_DIR)/libc/stdio/ftoa_engine.c \
+-	$(PICOLIBC_SRC_DIR)/libc/stdio/ftox_engine.c
++	$(MINIMAL_PICOLIBC_STDIO_DIR)/vffprintf.c \
++	$(MINIMAL_PICOLIBC_STDIO_DIR)/ftoa_engine.c \
++	$(MINIMAL_PICOLIBC_STDIO_DIR)/ftox_engine.c
+ else
+ MINIMAL_PICOLIBC_SRCS += \
+-	$(PICOLIBC_SRC_DIR)/libc/stdio/vfprintf.c \
+-	$(PICOLIBC_SRC_DIR)/libc/stdio/dtoa_engine.c \
+-	$(PICOLIBC_SRC_DIR)/libc/stdio/dtox_engine.c \
++	$(MINIMAL_PICOLIBC_STDIO_DIR)/vfprintf.c \
++	$(MINIMAL_PICOLIBC_STDIO_DIR)/dtoa_engine.c \
++	$(MINIMAL_PICOLIBC_STDIO_DIR)/dtox_engine.c \
+ 	$(PICOLIBC_SRC_DIR)/libm/machine/riscv/s_fpclassify.c
+ endif
+ 

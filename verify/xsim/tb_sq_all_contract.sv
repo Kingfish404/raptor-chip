@@ -344,6 +344,9 @@ module tb_sq_forward_ports;
   logic [4:0] alloc_alu = '0;
   wire [2:0] conflict, forward_valid;
   wire [Xlen-1:0] forward_data[3];
+  // Precomputed neighbour blocks are unused unless PrecomputedBlocks is set.
+  logic [Xlen-$clog2(Xlen/8)-3:0] store_next_block[4] = '{default: '0};
+  logic [Xlen-$clog2(Xlen/8)-3:0] store_prev_block[4] = '{default: '0};
   rapt_sq_forward #(
       .Entries(4),
       .ReadPorts(3),
@@ -439,7 +442,7 @@ module tb_sq_forward_ports;
     for (int offset = 0; offset < Xlen / 8; offset++)
     for (int delta = -1; delta <= 3; delta++) begin
       logic [Xlen-1:0] base_addr;
-      logic [2:0] expected;
+      logic [2:0] expected, expected_alloc;
       base_addr = boundary == 0 ? Xlen'('h80001000)
           : boundary == 1 ? Xlen'('h80002000) - Xlen'(Xlen/8)
                           : {Xlen{1'b1}} << Off;
@@ -455,6 +458,7 @@ module tb_sq_forward_ports;
       endcase
       store_fp64[3] = size == 3;
       expected = '0;
+      expected_alloc = '0;
       for (int p = 0; p < 3; p++) begin
         load_addr[p] = base_addr + Xlen'(delta) * Xlen'(Xlen / 8) + Xlen'(p) * Xlen'(4096);
         for (int b = 0; b < (1 << size); b++) begin
@@ -463,6 +467,8 @@ module tb_sq_forward_ports;
           expected[p] |= mode != 0
               ? byte_addr[11:Off] == load_addr[p][11:Off]
               : byte_addr[Xlen-1:Off] == load_addr[p][Xlen-1:Off];
+          // The same-cycle allocation hint blocks every port.
+          expected_alloc[p] = 1'b1;
         end
       end
       #1;
@@ -483,7 +489,7 @@ module tb_sq_forward_ports;
         alloc_alu = store_alu[3];
         alloc_fp64 = store_fp64[3];
         #1;
-        if (conflict !== expected || forward_valid !== 0)
+        if (conflict !== expected_alloc || forward_valid !== 0)
           $fatal(
               1,
               "allocation span mode=%0d boundary=%0d size=%0d offset=%0d delta=%0d",
@@ -536,7 +542,7 @@ module tb_sq_forward_ports;
       #1;
       foreach (load_addr[p]) begin
         automatic logic expected_conflict = 0;
-        automatic logic page_only = mmu_enabled || (allocation==0 && context_kind==2);
+        automatic logic page_only = mmu_enabled || context_kind==2;
         for (int byte_idx = 0; byte_idx < bytes_count; byte_idx++) begin
           automatic logic [Xlen-1:0] byte_addr = store_addr[0] + Xlen'(byte_idx);
           for (int lb = 0; lb < (1 << load_width); lb++) begin
@@ -546,6 +552,8 @@ module tb_sq_forward_ports;
               expected_conflict = 1;
           end
         end
+        // An impending allocation blocks every port regardless of address.
+        if (allocation != 0) expected_conflict = 1;
         if (conflict[p] !== expected_conflict)
           $fatal(
               1,
@@ -594,9 +602,10 @@ module tb_sq_forward_ports;
         for (int b = 0; b < (1 << size); b++) begin
           logic [Xlen-1:0] byte_addr;
           byte_addr = load_addr[p] + Xlen'(b);
-          expected[p] |= (mode == 1 || (mode == 2 && allocation == 0))
+          // An impending allocation blocks every port regardless of address.
+          expected[p] |= allocation != 0 || (mode != 0
               ? byte_addr[11:Off] == store_addr[0][11:Off]
-              : byte_addr[Xlen-1:Off] == store_addr[0][Xlen-1:Off];
+              : byte_addr[Xlen-1:Off] == store_addr[0][Xlen-1:Off]);
         end
       end
       #1;

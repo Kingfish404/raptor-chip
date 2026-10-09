@@ -35,7 +35,7 @@ CLINT and PLIC live *inside* the chip, so they never appear on this bus; only th
 | `sifive,test` finisher  | `0x0010_0000` | write `0x5555`=PASS, `0x3333`=FAIL, `0x7777`=RESET |
 | on-chip SRAM window     | `0x0f00_0000` |                                                    |
 | NS16550 serial          | `0x1000_0000` | TX console + LSR/IIR polling                       |
-| LiteX UART             | `0xf000_1800` | TX console, TX-ready / RX-empty status; no host RX |
+| LiteX UART             | `0x1100_1800` | TX console, TX-ready / RX-empty status; no host RX |
 | MROM (reset trampoline) | `0x2000_0000` | `PC_INIT`; jumps to `0x8000_0000`                  |
 | FLASH                   | `0x3000_0000` |                                                    |
 | PMEM (main memory)      | `0x8000_0000` | program image                                      |

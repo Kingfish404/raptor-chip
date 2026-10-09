@@ -50,6 +50,9 @@ void checkpoint_note_commit(word_t committed_pc);
 bool cpu_read_sq_snapshot_control(uint32_t *valid, uint32_t *committed,
                                   uint8_t *capacity, uint8_t *head);
 
+/* Read an unconsumed cacheable AXI write, stage first and then skid. */
+bool cpu_read_axi_write_snapshot(bool skid, word_t *addr, word_t *data, uint8_t *strb);
+
 /* Configure load: read checkpoint dir and stash arch state to inject after
  * reset. Memory regions are loaded into the host buffers and an MROM
  * trampoline is generated. */

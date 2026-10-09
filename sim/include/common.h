@@ -38,10 +38,17 @@ typedef word_t vaddr_t;
 #endif
 
 #define MBASE 0x80000000
+#ifdef RAPT_LARGE_PMEM
+#define MSIZE 0x80000000u
+#if defined(CONFIG_SOFT_MMIO)
+#error RAPT_LARGE_PMEM conflicts with legacy software MMIO at 0xa0000000
+#endif
+#else
 #define MSIZE 0x10000000
+#endif
 
 #define PSRAM_BASE 0x80000000
-#define PSRAM_SIZE 0x10000000
+#define PSRAM_SIZE MSIZE
 
 #define SDRAM_BASE 0xa0000000
 #define SDRAM_SIZE 0x02000000

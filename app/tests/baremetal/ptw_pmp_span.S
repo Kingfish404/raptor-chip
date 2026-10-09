@@ -1,6 +1,7 @@
 /* A first-match PMP region covering only half of an Sv39 PTE must reject
  * instruction/load/store/AMO translation. Sv32 PTEs fit in that same NA4.
  * A second pass expands the entry to NAPOT8 and must succeed on both XLENs. */
+#include "raptor_platform.h"
 #if __riscv_xlen == 64
 #define REG_S sd
 #define SATP_MODE 0x8000000000000000
@@ -61,7 +62,7 @@ enter_supervisor:
 #ifdef PTW_PMA_TEST
   /* First point the final table at CLINT, then restore ordinary RAM.
    * All PMP entries permit access: failure must come from physical PMA. */
-  li t0, 0x02000000
+  li t0, RAPTOR_CLINT_BASE
   beqz s5, 2f
   la t0, level0
 2:srli t0, t0, 2

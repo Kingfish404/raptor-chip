@@ -102,7 +102,7 @@ module tb_zfhmin_decode_slot;
       end
     end
     if (checks != 1179744) $fatal(1, "unexpected count %0d", checks);
-    $display("PASS RV%0d Zfhmin decode slot checks=%0d legal=%0d traps=%0d", X, checks,
+    $display("PASS: RV%0d Zfhmin decode slot checks=%0d legal=%0d traps=%0d", X, checks,
              legal_checks, trap_checks);
     $finish;
   end

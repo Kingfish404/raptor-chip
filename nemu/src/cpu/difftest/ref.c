@@ -18,6 +18,9 @@
 #include <cpu/cpu.h>
 #include <difftest-def.h>
 #include <memory/paddr.h>
+#ifdef CONFIG_RAPTOR_PMEM_2G
+#include <sys/mman.h>
+#endif
 #include <memory/vaddr.h>
 
 extern CPU_state cpu;
@@ -138,6 +141,15 @@ typedef struct
 
 __EXPORT void difftest_memcpy(paddr_t addr, void *buf, size_t n, bool direction)
 {
+  const uint64_t last64 = (uint64_t)addr + n - 1;
+  Assert(n > 0 && last64 >= (uint64_t)addr && last64 <= UINT32_MAX,
+         "DIFFTEST memory copy exceeds the 32-bit physical map");
+  const paddr_t last = (paddr_t)last64;
+  Assert((in_pmem(addr) && in_pmem(last)) ||
+         (in_sram(addr) && in_sram(last)) ||
+         (in_mrom(addr) && in_mrom(last)) ||
+         (in_flash(addr) && in_flash(last)),
+         "DIFFTEST memory copy crosses a mapped region");
   if (direction == DIFFTEST_TO_REF)
   {
     if (in_pmem(addr) || in_sram(addr) || in_mrom(addr) || in_flash(addr))
@@ -157,6 +169,15 @@ __EXPORT void difftest_memcpy(paddr_t addr, void *buf, size_t n, bool direction)
     Assert(0, "DIFFTEST_TO_DUT invalid address: " FMT_PADDR, addr);
   }
 }
+
+#ifdef CONFIG_RAPTOR_PMEM_2G
+__EXPORT void difftest_reset_pmem(void)
+{
+  uint8_t *base = guest_to_host(PMEM_LEFT);
+  Assert(madvise(base, CONFIG_MSIZE, MADV_DONTNEED) == 0,
+         "failed to discard 2 GiB reference PMEM before checkpoint resync");
+}
+#endif
 
 __EXPORT void difftest_regcpy(void *dut, bool direction)
 {

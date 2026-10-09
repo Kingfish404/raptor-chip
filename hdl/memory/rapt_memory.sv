@@ -6,7 +6,12 @@
 module rapt_memory #(
     parameter int XLEN = `RAPT_XLEN,
     parameter int MemoryReadCredits = 8,
-    parameter bit L1dWriteBack = `RAPT_L1D_WRITEBACK
+    parameter bit L1dWriteBack = `RAPT_L1D_WRITEBACK,
+`ifdef RAPT_L2_EN
+    parameter int PostedWrites = 0
+`else
+    parameter int PostedWrites = L1dWriteBack ? 0 : `RAPT_POSTED_WRITES
+`endif
 ) (
     input logic clock,
     input logic reset,
@@ -116,7 +121,10 @@ module rapt_memory #(
       .exu_l1d(exu_l1d)
   );
 
-  rapt_bus bus (
+  rapt_bus #(
+      .XLEN(XLEN),
+      .PostedWrites(PostedWrites)
+  ) bus (
       .clock(clock),
       .reset(reset),
       .coherent_ready(cache_coherent_ready),
@@ -131,7 +139,8 @@ module rapt_memory #(
 
   rapt_axi_master #(
       .XLEN(XLEN),
-      .MAX_READ_OUTSTANDING(MemoryReadCredits)
+      .MAX_READ_OUTSTANDING(MemoryReadCredits),
+      .MAX_WRITE_OUTSTANDING(PostedWrites > 0 ? PostedWrites : 1)
   ) axi_master (
       .clock(clock),
       .reset(reset),

@@ -60,7 +60,9 @@ task automatic fp_irq_seed;
   fp_irq_fpr.ioq_wvalid = 1;
   tick(1);
   fp_irq_fpr.ioq_wvalid = 0;
-  check(fp_irq_fpr.ioq_rdata == 64'h0123456789abcdef, "FPR sentinel seed failed");
+  tick(1);
+  check(fp_irq_fpr.ioq_rvalid && fp_irq_fpr.ioq_rdata == 64'h0123456789abcdef,
+      "FPR sentinel seed failed");
 endtask
 task automatic fp_irq_positive_control;
   uop_t control_uop;
@@ -84,7 +86,7 @@ task automatic fp_irq_positive_control;
   check(fp_irq_enqueued == 7, "positive control did not enter actual FPQ");
   check(fp_irq_writes == 1 && fp_irq_retired == 1,
       "uncanceled FP control did not write and retire exactly once");
-  check(fp_irq_fpr.ioq_rdata == 64'hffffffffffff0000,
+  check(fp_irq_fpr.ioq_rvalid && fp_irq_fpr.ioq_rdata == 64'hffffffffffff0000,
       "uncanceled FMV.H.X control did not update boxed FPR");
   $display("PASS: actual FPQ/FEU/guard/FPR cancellation and positive control XLEN=%0d", XLEN);
 endtask

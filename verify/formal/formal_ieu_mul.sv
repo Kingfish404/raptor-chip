@@ -18,6 +18,7 @@ module formal_ieu_mul #(
       .clock,
       .reset,
       .flush(1'b0),
+      .cancel_tags('0),
       .in_a,
       .in_b,
       .in_op,

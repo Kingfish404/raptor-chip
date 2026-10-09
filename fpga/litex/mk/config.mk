@@ -45,6 +45,7 @@ BOARD_mlk_cu08_ku15p_LINUX_WITH_LITEDRAM := 0
 BOARD_mlk_cu08_ku15p_LITEDRAM_SIZE       := 0x40000000
 BOARD_mlk_cu08_ku15p_HAS_MIG             := 1
 BOARD_mlk_cu08_ku15p_LINUX_WITH_MIG      := 1
+BOARD_mlk_cu08_ku15p_MIG_SIZE            := 0x80000000
 BOARD_mlk_cu08_ku15p_MIG_TCL             := scripts/ku15p_cu08_ddr4_mig.tcl
 BOARD_mlk_cu08_ku15p_HAS_SDCARD          := 1
 BOARD_mlk_cu08_ku15p_DEFAULT_WITH_SDCARD := 1
@@ -68,6 +69,7 @@ BOARD_mlk_cu07_ku15p_LINUX_WITH_LITEDRAM := 0
 BOARD_mlk_cu07_ku15p_LITEDRAM_SIZE       := 0x40000000
 BOARD_mlk_cu07_ku15p_HAS_MIG             := 1
 BOARD_mlk_cu07_ku15p_LINUX_WITH_MIG      := 1
+BOARD_mlk_cu07_ku15p_MIG_SIZE            := 0x80000000
 BOARD_mlk_cu07_ku15p_MIG_TCL             := scripts/ku15p_ddr4_mig.tcl
 BOARD_mlk_cu07_ku15p_HAS_SDCARD          := 1
 BOARD_mlk_cu07_ku15p_DEFAULT_WITH_SDCARD := 1
@@ -89,6 +91,7 @@ BOARD_alinx_axau15_DEFAULT_RAPT_CONFIG := small
 BOARD_alinx_axau15_HAS_LITEDRAM        := 0
 BOARD_alinx_axau15_HAS_MIG             := 1
 BOARD_alinx_axau15_LINUX_WITH_MIG      := 1
+BOARD_alinx_axau15_MIG_SIZE            := 0x40000000
 BOARD_alinx_axau15_MIG_TCL             := scripts/axau15_ddr4_mig.tcl
 BOARD_alinx_axau15_HAS_SDCARD          := 1
 BOARD_alinx_axau15_DEFAULT_WITH_SDCARD := 0
@@ -306,6 +309,7 @@ _FPGA_CONFIG_VARS := FPGA_BOARD VARIANT RAPT_CONFIG RAPT_PACK_VFLAGS BOOT_MODE \
 	WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE WITH_SDCARD \
 	WITH_ETHERNET FMC_SLOT ETH_PORT ETH_SPEED EXTRA_FLAGS \
 	VIVADO_JOBS VIVADO_INCREMENTAL VIVADO_ROUTE_DIRECTIVE VIVADO_SYNTH_DIRECTIVE \
+	VIVADO_SYS_SETUP_MARGIN_NS VIVADO_SYS_FINAL_WNS_NS \
 	FW_FPGA_BIN FW_LINUX_CONFIG_ID
 FPGA_CONFIG_ID := $(call _build_identity,$(_FPGA_CONFIG_VARS))
 FPGA_DIR       := $(BUILD_DIR)/$(FPGA_BOARD)/$(FPGA_FLAVOR)-$(FPGA_CONFIG_ID)
@@ -323,6 +327,8 @@ VIVADO_JOBS := $(strip $(VIVADO_JOBS))
 VIVADO_INCREMENTAL := $(strip $(VIVADO_INCREMENTAL))
 VIVADO_ROUTE_DIRECTIVE := $(strip $(VIVADO_ROUTE_DIRECTIVE))
 VIVADO_SYNTH_DIRECTIVE := $(strip $(VIVADO_SYNTH_DIRECTIVE))
+VIVADO_SYS_SETUP_MARGIN_NS := $(strip $(VIVADO_SYS_SETUP_MARGIN_NS))
+VIVADO_SYS_FINAL_WNS_NS := $(strip $(VIVADO_SYS_FINAL_WNS_NS))
 OFL := $(strip $(OFL))
 OFL_CABLE := $(strip $(OFL_CABLE))
 
@@ -362,6 +368,8 @@ _FPGA_FLAGS = --output-dir=$(FPGA_DIR) \
 	--cpu-variant=$(VARIANT) --sys-clk-freq=$(SYS_CLK) \
 	--vivado-max-threads=$(VIVADO_JOBS) --vivado-route-directive=$(VIVADO_ROUTE_DIRECTIVE) $(VIVADO_INCREMENTAL_FLAG) \
 	--vivado-synth-directive=$(VIVADO_SYNTH_DIRECTIVE) \
+	$(if $(filter mlk_cu07_ku15p mlk_cu08_ku15p,$(FPGA_BOARD)),--vivado-sys-setup-margin-ns=$(VIVADO_SYS_SETUP_MARGIN_NS),) \
+	$(if $(and $(filter mlk_cu07_ku15p mlk_cu08_ku15p,$(FPGA_BOARD)),$(VIVADO_SYS_FINAL_WNS_NS)),--vivado-sys-final-wns-ns=$(VIVADO_SYS_FINAL_WNS_NS),) \
 	--uart-baudrate=$(UART_BAUD) \
 	$(_FPGA_BOOT_FLAGS) \
 	$(_MAIN_RAM_FLAG) \
@@ -376,6 +384,7 @@ _FPGA_HASH_COMMON_INPUTS = $(PACK_SV) $(RTL_SOURCES) $(FPGA_PY) $(LITEX_DIR)/Mak
 	$(LITEX_DIR)/cores/cpu/raptor/core.py \
 	$(wildcard $(LITEX_DIR)/cores/cpu/raptor/*.h $(LITEX_DIR)/cores/cpu/raptor/*.S) \
 	$(if $(filter mlk_cu07_ku15p mlk_cu08_ku15p,$(FPGA_BOARD)),$(LITEX_DIR)/ku15p_soc.py $(LITEX_DIR)/scripts/vivado_retry_timing.tcl,) \
+	$(if $(filter mlk_cu07_ku15p mlk_cu08_ku15p,$(FPGA_BOARD)),$(LITEX_DIR)/scripts/vivado_setup_margin.tcl,) \
 	$(if $(filter mlk_cu08_ku15p,$(FPGA_BOARD)),$(LITEX_DIR)/mlk_cu08_ku15p_platform.py,) \
 	$(if $(filter mlk_cu08_ku15p,$(FPGA_BOARD)),$(LITEX_DIR)/scripts/ku15p_ddr4_mig.tcl,) \
 	$(if $(WITH_MIG_FLAG),$(LITEX_DIR)/$(BOARD_$(FPGA_BOARD)_MIG_TCL),)

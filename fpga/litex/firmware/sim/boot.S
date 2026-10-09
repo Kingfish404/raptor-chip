@@ -10,12 +10,12 @@
 #   ROM:          0x20000000
 #   SRAM:         0x0f000000 (8KB)
 #   main_ram:     0x80000000 (8MB)
-#   UART RXTX:    0xf0001800
-#   UART TXFULL:  0xf0001804
+#   UART RXTX:    0x11001800
+#   UART TXFULL:  0x11001804
 
 .equ MAIN_RAM,  0x80000000
-.equ UART_RXTX, 0xf0001800
-.equ UART_TXFULL, 0xf0001804
+.equ UART_RXTX, 0x11001800
+.equ UART_TXFULL, 0x11001804
 .equ DTB_DEST,  0x80700000   # DTB copy destination near top of main_ram
 
 .macro li_addr reg, val

@@ -1,6 +1,7 @@
 /* LiteX RXTX is an 8-bit payload in a 32-bit CSR; one SW emits one byte. */
+#include "raptor_platform.h"
 #ifndef UART_BASE
-#define UART_BASE 0xf0001000
+#define UART_BASE RAPTOR_LITEX_UART_BASE
 #endif
 .option norvc
 .section .text

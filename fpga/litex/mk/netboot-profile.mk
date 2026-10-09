@@ -34,13 +34,15 @@ NETBOOT_PAYLOAD_RV32 ?= $(LINUX_RV32GC_FPGA_PAYLOAD)
 NETBOOT_PAYLOAD_RV64 ?= $(LINUX_RV64GC_DIST_DIR)/fw_payload.bin
 VIVADO ?= vivado
 VIVADO_JOBS ?= 8
+# W4 needs the full area optimization pass; keep other preset defaults intact.
+NETBOOT_SYNTH_DIRECTIVE ?= $(if $(filter 64,$(_nb_xlen)),$(if $(filter default-w4,$(RAPT_CONFIG)),default,RuntimeOptimized),default)
 CROSS ?= riscv64-linux-gnu-
 # Do not propagate arbitrary command-line profile overrides into this fixed build.
 override MAKEOVERRIDES :=
 # Reject conflicting fixed settings instead of silently building other hardware.
 _nb_fixed = $(if $(filter undefined,$(origin $(1))),,$(if $(filter-out x$(2),x$(strip $($(1)))),$(error $(1)='$($(1))' conflicts with netboot $(1)='$(2)'; use ordinary fpga-* targets for another hardware profile)))$(1)=$(2)
 _nb_quote = '$(subst ','"'"',$(1))'
-_nb_targets := $(foreach x,32 64,$(foreach op,build load info check bundle serve test console,fpga-netboot-rv$(x)-$(op))) fpga-netboot-host-setup fpga-netboot-host-restore
+_nb_targets := $(foreach x,32 64,$(foreach op,build load info reports check bundle serve test console,fpga-netboot-rv$(x)-$(op))) fpga-netboot-host-setup fpga-netboot-host-restore
 ifneq ($(filter-out $(_nb_targets),$(MAKECMDGOALS)),)
 $(error Use only fpga-netboot targets in this invocation)
 endif
@@ -51,19 +53,26 @@ $(filter fpga-netboot-rv32-%,$(_nb_targets)): _nb_xlen := 32
 $(filter fpga-netboot-rv64-%,$(_nb_targets)): _nb_xlen := 64
 _nb_dir = $(_nb_root)/rv$(_nb_xlen)
 _nb_payload = $(NETBOOT_PAYLOAD_RV$(_nb_xlen))
+# W4 matches the performance-tested fetch pipeline and selects its completion
+# boundary in the preset. Other RV64 presets retain both response registers.
+_nb_rv64_pack_flags = $(if $(filter default-w4,$(RAPT_CONFIG)),-DRAPT_FETCH_RESPONSE_STAGE=0,-DRAPT_FETCH_RESPONSE_STAGE=1 -DRAPT_IOQ_LOAD_RESPONSE_STAGE=1)
+_nb_setup_margin = $(if $(and $(filter 64,$(_nb_xlen)),$(filter default-w4,$(RAPT_CONFIG))),1.0,0)
+_nb_final_wns = $(if $(and $(filter 64,$(_nb_xlen)),$(filter default-w4,$(RAPT_CONFIG))),0.3,)
 _nb_args = $(call _nb_fixed,FPGA_BOARD,mlk_cu08_ku15p) $(call _nb_fixed,FPGA_AUTO_DETECT,0) $(call _nb_fixed,VARIANT,linux$(_nb_xlen)) \
  $(call _nb_quote,RAPT_CONFIG=$(RAPT_CONFIG)) $(call _nb_fixed,SYS_CLK,50000000) $(call _nb_fixed,WITH_MIG,1) $(call _nb_fixed,WITH_LITEDRAM,0) \
  $(call _nb_fixed,WITH_SDCARD,1) $(call _nb_fixed,WITH_ETHERNET,1) $(call _nb_fixed,ETH_SPEED,1000) $(call _nb_fixed,FMC_SLOT,c) $(call _nb_fixed,ETH_PORT,a) \
  $(call _nb_fixed,BOOT_MODE,bios) $(call _nb_fixed,EXTRA_FLAGS,) $(call _nb_fixed,LINUX_FPGA_INIT,full) \
  $(call _nb_quote,CROSS=$(CROSS)) \
- $(call _nb_quote,$(call _nb_fixed,RAPT_PACK_VFLAGS,$(if $(filter 64,$(_nb_xlen)),-DRAPT_FETCH_RESPONSE_STAGE=1 -DRAPT_IOQ_LOAD_RESPONSE_STAGE=1,))) \
+ $(call _nb_quote,$(call _nb_fixed,RAPT_PACK_VFLAGS,$(if $(filter 64,$(_nb_xlen)),$(_nb_rv64_pack_flags),))) \
  $(call _nb_fixed,LINUX_ISA,rv$(_nb_xlen)imafdc_zicbom_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs) \
  $(call _nb_quote,LINUX_IMG=$(_nb_payload)) $(call _nb_quote,LINUX_FPGA_PAYLOAD=$(_nb_payload)) \
  $(call _nb_fixed,LINUX_FPGA_DTB_OFFSET,0x4000000) $(call _nb_fixed,LINUX_FPGA_DTB_ADDR,0x83f00000) \
  $(call _nb_quote,BUILD_DIR=$(_nb_dir)/build) $(call _nb_quote,FPGA_DIR=$(_nb_dir)/soc) \
  $(call _nb_fixed,FPGA_FLAVOR_SUFFIX,$(RAPT_CONFIG)-no-ila) \
  $(call _nb_quote,VIVADO_JOBS=$(VIVADO_JOBS)) $(call _nb_fixed,VIVADO_ROUTE_DIRECTIVE,Explore) \
- $(call _nb_fixed,VIVADO_SYNTH_DIRECTIVE,$(if $(filter 64,$(_nb_xlen)),RuntimeOptimized,default)) $(call _nb_quote,VIVADO=$(VIVADO))
+ $(call _nb_fixed,VIVADO_SYNTH_DIRECTIVE,$(NETBOOT_SYNTH_DIRECTIVE)) $(call _nb_quote,VIVADO=$(VIVADO))
+_nb_args += $(call _nb_fixed,VIVADO_SYS_SETUP_MARGIN_NS,$(_nb_setup_margin))
+_nb_args += $(call _nb_fixed,VIVADO_SYS_FINAL_WNS_NS,$(_nb_final_wns))
 
 NETBOOT_PYTHON ?= $(_NETBOOT_LITEX)/.venv/bin/python3
 NETBOOT_INTERFACE ?=

@@ -116,7 +116,7 @@ define _run_vsim
 		: > sim_run.log; \
 		obj_dir/Vsim > sim_run.log 2>&1 & vpid=$$!; \
 		tail -n +1 -f sim_run.log 2>/dev/null & tpid=$$!; \
-		limit=$(SIM_TIMEOUT); [ "$$limit" = "0" ] && limit=100000; i=0; \
+		limit=$(SIM_TIMEOUT); [ "$$limit" = "0" ] && limit=100000; i=0; stopped=0; \
 		while kill -0 $$vpid 2>/dev/null; do \
 			if grep -qF "$(SIM_STOP_MARKER)" sim_run.log; then \
 				echo "[INFO] Sim reached completion marker ('$(SIM_STOP_MARKER)')."; break; fi; \
@@ -124,10 +124,15 @@ define _run_vsim
 			if [ $$i -ge $$limit ]; then echo ""; echo "[INFO] Simulation timed out after $(SIM_TIMEOUT)s."; break; fi; \
 			sleep 1; \
 		done; \
-		kill $$vpid 2>/dev/null || true; sleep 0.3; \
+		kill $$vpid 2>/dev/null && stopped=1; sleep 0.3; \
 		for _ in 1 2 3 4 5; do kill -0 $$vpid 2>/dev/null || break; sleep 0.2; done; \
-		kill -9 $$vpid 2>/dev/null || true; wait $$vpid 2>/dev/null || true; \
+		kill -9 $$vpid 2>/dev/null || true; rc=0; wait $$vpid 2>/dev/null || rc=$$?; \
 		kill $$tpid 2>/dev/null || true; wait $$tpid 2>/dev/null || true; \
+		grep -qF "$(SIM_STOP_MARKER)" sim_run.log || { \
+			echo "[ERR] Simulation did not reach completion marker."; exit 1; }; \
+		if [ $$rc -ne 0 ] && ! { [ $$stopped -eq 1 ] && { [ $$rc -eq 143 ] || [ $$rc -eq 137 ]; }; }; then \
+			echo "[ERR] Simulator exited abnormally ($$rc)."; exit $$rc; \
+		fi; \
 	fi
 	@if [ -n "$(TRACE_MSG)" ] && [ -f $(1)/sim.$(TRACE) ]; then \
 		sz=$$(wc -c < $(1)/sim.$(TRACE)); \
@@ -425,7 +430,7 @@ $(TEST_TARGETS): test-%:
 
 tests-run: tests
 	@mkdir -p $(LITEX_LOG_DIR)
-	@{ set -e; for t in $(TEST_NAMES); do \
+	@set -o pipefail; { set -e; for t in $(TEST_NAMES); do \
 		echo "================================================================"; \
 		echo "[tests-run] Running test-$$t"; \
 		echo "================================================================"; \
@@ -741,13 +746,18 @@ endif
 		"$(VIVADO)" -mode batch -nojournal -nolog -notrace \
 			-source $(LITEX_DIR)/scripts/vivado_check_part.tcl -tclargs $(FPGA_PART) || exit 1; \
 	fi; \
-	$(call _run_litex_target,$(_FPGA_FLAGS) --build) && \
+	( $(call _run_litex_target,$(_FPGA_FLAGS) --build) ) || { \
+		build_status=$$?; \
+		$(MAKE) --no-print-directory fpga-reports-index $(_FPGA_REPORTS_INDEX_ARGS) FPGA_REPORTS_BUILD_FAILED=1 || \
+			echo "[WARN] Could not generate the partial FPGA report dashboard." >&2; \
+		exit $$build_status; \
+	}; \
 	FINAL_HASH=$$($(_FPGA_HASH_COMMAND)) && \
 	if [ "$$FINAL_HASH" != "$$NEW_HASH" ]; then \
-		echo "[ERR] FPGA inputs changed during build; refusing to stamp this bitstream as current." >&2; \
-		exit 1; \
+		echo "[WARN] FPGA inputs changed during build; stamping the pre-build input hash $${NEW_HASH:0:12}." >&2; \
+		echo "[WARN] The bitstream reflects the inputs captured at start; the next fpga-build will treat it as stale." >&2; \
 	fi && \
-	printf '%s' "$$FINAL_HASH" > $(FPGA_STAMP)
+	printf '%s' "$$NEW_HASH" > $(FPGA_STAMP)
 	@$(MAKE) --no-print-directory fpga-reports-index $(_FPGA_REPORTS_INDEX_ARGS)
 	@echo ""
 	@echo "========================================="
@@ -778,13 +788,10 @@ ifeq ($(FPGA_VENDOR),gowin)
 	fi
 else
 	@if [ -d "$(FPGA_BUILD_DIR)" ]; then \
-		if ls "$(FPGA_BUILD_DIR)"/*.rpt >/dev/null 2>&1; then \
-			$(HOST_PYTHON) $(VIVADO_REPORTS_INDEX_GEN) $(FPGA_BUILD_DIR) \
-				--output $(VIVADO_REPORTS_INDEX_DST) \
-				--title "Vivado Reports - $(FPGA_BOARD) $(BOOT_MODE) $(RAPT_CONFIG)"; \
-		else \
-			echo "[WARN] no Vivado .rpt files under $(FPGA_BUILD_DIR) — run 'make fpga-build' first."; \
-		fi; \
+		$(HOST_PYTHON) "$(VIVADO_REPORTS_INDEX_GEN)" "$(FPGA_BUILD_DIR)" \
+			--output "$(VIVADO_REPORTS_INDEX_DST)" \
+			--title "Vivado Reports - $(FPGA_BOARD) $(VARIANT) $(BOOT_MODE) $(RAPT_CONFIG)" \
+			$(if $(filter 1,$(FPGA_REPORTS_BUILD_FAILED)),--build-failed,); \
 	else \
 		echo "[WARN] $(FPGA_BUILD_DIR) not found — run 'make fpga-build' first."; \
 	fi

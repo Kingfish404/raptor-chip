@@ -18,19 +18,19 @@ int main(void) {
   serial_rx_enqueue('X');
   serial_update_irq();
   assert(delivered_irq == 10);
-  struct mapping *hw = find(0xf0001800u), *old = find(0xf0001000u);
-  assert(hw->space == old->space && hw->callback == old->callback);
+  struct mapping *hw = find(0x11001800u);
+  for (int i = 0; i < count; i++)
+    assert(maps[i].base != 0xf0001800u && maps[i].base != 0xf0001000u);
   litex_uart_store32(0x14, 3);
   hw->callback(0x14, 4, true);
-  old->callback(0x14, 4, false);
+  hw->callback(0x14, 4, false);
   assert(litex_uart_load32(0x14) == 3);
   hw->callback(0x08, 4, false);
   assert(litex_uart_load32(0x08) == 0);
-  old->callback(0, 4, false);
+  hw->callback(0, 4, false);
   assert(litex_uart_load32(0) == 'X');
   hw->callback(0x08, 4, false);
   assert(litex_uart_load32(0x08) == 1);
   litex_uart_store32(0, 'A'); hw->callback(0, 4, true);
-  litex_uart_store32(0, 'A'); old->callback(0, 4, true);
-  puts("PASS: NEMU IRQ10, CU08/egos shared register state and RX/TX");
+  puts("PASS: NEMU IRQ10, low LiteX CSR and RX/TX");
 }

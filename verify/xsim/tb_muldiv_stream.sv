@@ -14,6 +14,7 @@ module tb_muldiv_stream;
       .XLEN(X),
       .TAG_W(4)
   ) dut (
+      .cancel_tags('0),
       .*
   );
 

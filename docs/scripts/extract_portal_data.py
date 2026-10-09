@@ -117,7 +117,7 @@ ARCH_SHORT = {
     "rapt_fqu": "FQU",
     "rapt_idu": "IDU",
     "rapt_rnu": "RNU",
-    "rapt_operand_stage": "UOQ",
+    "rapt_operand_stage": "OPS",
     "rapt_prf": "PRF",
     "rapt_fpr": "FPR",
     "rapt_rou": "ROU",
@@ -196,7 +196,7 @@ GAP_X = 0.7
 GAP_Y = 0.85
 SCHEMATIC = {
     # (col, row, colspan, rowspan)
-    # Pipeline: Frontend (through IDU) then Backend (RNU, UOQ, ROB, DPU, exec).
+    # Pipeline: Frontend (through IDU) then Backend (RNU, operand stage, UOQ/ROB, DPU, exec).
     # Memory frame: caches, translation, MSHR, PMP, and device windows.
     "rapt_bpu": (0, 0, 1, 1),
     "rapt_l1i": (1, 0, 1, 1),
@@ -908,11 +908,11 @@ def layout_nodes(modules: list[dict[str, Any]], values: dict[str, Any], extra: d
         nodes.append(
             {
                 "id": "rapt_operand_stage",
-                "short": "UOQ",
+                "short": "OPS",
                 "file": "hdl/backend/rapt_rou.sv",
                 "domain": "backend",
                 "stage": 3,
-                "summary": "UOQ pre-reads PRF operands and listens for completion.",
+                "summary": "Operand stage: registers one renamed group before the ROU UOQ reads PRF operands.",
                 "parent": "rapt_backend",
                 "display": True,
                 "x": x,
@@ -949,7 +949,7 @@ def soc_display_nodes(
             "soc_uart",
             "cluster",
             9,
-            "MMIO UART/GPIO window at 0x10000000 from rapt_pkg::addr_mapped; LiteX UART also at 0xf0001000.",
+            "MMIO UART/GPIO window at 0x10000000 from rapt_pkg::addr_mapped; LiteX UART at 0x11001800.",
         ),
     )
     nodes = []

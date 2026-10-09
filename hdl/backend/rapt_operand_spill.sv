@@ -110,16 +110,37 @@ module rapt_operand_spill #(
         release_valid_q[r] <= release_valid[r];
         release_index_q[r] <= release_index[r];
       end
-      for (int e = 0; e < Entries; e++) begin
-        if (update_valid[e] && entry_valid[e]) payload_q[e] <= update_payload[e];
-      end
       // Allocation wins when a registered release and allocation target the
       // same physical slot, replacing the old payload atomically.
       for (int a = 0; a < AllocateWidth; a++) begin
         if (allocate_valid[a] && allocate_ready[a]) begin
           valid_q[allocate_index[a]] <= 1'b1;
-          payload_q[allocate_index[a]] <= allocate_payload[a];
         end
+      end
+    end
+  end
+
+  // Each payload flop has one fixed physical destination. Resolve its write
+  // sources locally so synthesis does not build variable-index write ports
+  // across the whole payload array.
+  localparam int LaneBits = AllocateWidth > 1 ? $clog2(AllocateWidth) : 1;
+  for (genvar e = 0; e < Entries; e++) begin : g_payload_write
+    logic allocation_hit;
+    logic [LaneBits-1:0] allocation_lane;
+    always_comb begin
+      allocation_hit = 1'b0;
+      allocation_lane = '0;
+      for (int a = 0; a < AllocateWidth; a++) begin
+        if (allocate_valid[a] && allocate_ready[a] && allocate_index[a] == IndexBits'(e)) begin
+          allocation_hit = 1'b1;
+          allocation_lane = LaneBits'(a);
+        end
+      end
+    end
+    always_ff @(posedge clock) begin
+      if (!(reset || flush)) begin
+        if (allocation_hit) payload_q[e] <= allocate_payload[allocation_lane];
+        else if (update_valid[e] && entry_valid[e]) payload_q[e] <= update_payload[e];
       end
     end
   end

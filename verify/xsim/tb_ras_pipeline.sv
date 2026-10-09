@@ -3,6 +3,8 @@
 
 module tb_ras_pipeline;
   localparam int XLEN = `RAPT_XLEN;
+  // RV64 has no C.JAL; C.JALR x6 pushes the same two-byte return link.
+  localparam logic [31:0] CompressedCall = XLEN == 32 ? 32'h00002001 : 32'h00009302;
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
   cmu_bcast_if cmu_bcast ();
@@ -51,8 +53,9 @@ module tb_ras_pipeline;
     rou_cmu.slot[1] = '0;
     rou_cmu.slot[1].valid = 1;
     rou_cmu.slot[1].pc = pc;
-    rou_cmu.slot[1].inst = 32'h000000ef;
-    rou_cmu.slot[1].jen = 1;
+    rou_cmu.slot[1].inst = compressed && XLEN == 64 ? 32'h000300e7 : 32'h000000ef;
+    rou_cmu.slot[1].jen = !(compressed && XLEN == 64);
+    rou_cmu.slot[1].jren = compressed && XLEN == 64;
     rou_cmu.slot[1].c = compressed;
     rou_cmu.slot[1].trap = trap;
     rou_cmu.flush_pipe = flush;
@@ -87,7 +90,6 @@ module tb_ras_pipeline;
     ifu_idu.slot = '{default:'0};
     ifu_idu.valid = '{default:0};
     idu_rnu.ready = '{default:1};
-    ifu_bpu.pc = 0;
     ifu_bpu.nextpc = 0;
     ifu_bpu.pc_update = 0;
     ifu_bpu.history_valid = 0;
@@ -107,10 +109,11 @@ module tb_ras_pipeline;
     tick(1);
     check(!idu_bpu.ras_valid, "empty pop remains empty");
 
-    // C.JAL: speculative return PC is +2, even across a static early resteer.
-    receive(32'h00002001, 'h1000, 'h1002);
-    check(idu_bpu.push_en && !idu_bpu.pop_en && idu_bpu.push_addr == 'h1002, "C.JAL push");
-    check(ifu_idu.resteer, "C.JAL early correction");
+    // Compressed call: return PC is +2, including RV32 C.JAL early resteer.
+    receive(CompressedCall, 'h1000, 'h1002);
+    check(idu_bpu.push_en && !idu_bpu.pop_en && idu_bpu.push_addr == 'h1002,
+          "compressed call push");
+    if (XLEN == 32) check(ifu_idu.resteer, "C.JAL early correction");
     tick(1);
     check(idu_bpu.ras_valid && idu_bpu.ras_addr == 'h1002, "early resteer keeps accepted push");
 
@@ -128,7 +131,6 @@ module tb_ras_pipeline;
     receive(32'h000000ef, 'h4000, 'h4000);
     tick(1);
     ifu_bpu.nextpc = 'h2000;
-    ifu_bpu.pc = 'h2000;
     ifu_bpu.pc_update = 1;
     repeat (5) begin
       tick(1);
@@ -201,7 +203,7 @@ module tb_ras_pipeline;
     ifu_idu.slot[0].inst = 32'h00000013;
     ifu_idu.slot[0].pc = 'h8000;
     ifu_idu.slot[0].pnpc = 'h8004;
-    ifu_idu.slot[1].inst = 32'h00002001;
+    ifu_idu.slot[1].inst = CompressedCall;
     ifu_idu.slot[1].pc = 'h8004;
     ifu_idu.slot[1].pnpc = 'h8006;
     ifu_idu.valid = '{default:1};

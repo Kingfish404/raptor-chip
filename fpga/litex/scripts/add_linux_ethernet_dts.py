@@ -20,9 +20,12 @@ def ethernet_node(csr):
         raise ValueError("Ethernet slots exceed the exported buffer region")
     # Raptor memory map is single-cell, including RV64. LiteEth buffers must
     # live in the uncached I/O aperture, not in the CPU's cached main RAM.
-    for address, length in ((mac, 0x7c), (phy, 0x0a), (memory["base"], memory["size"])):
-        if length <= 0 or not 0xc0000000 <= address < address + length <= 0x100000000:
-            raise ValueError("Ethernet regions must fit in Raptor's uncached I/O aperture")
+    for address, length in ((mac, 0x7c), (phy, 0x0a)):
+        if length <= 0 or not 0x11000000 <= address < address + length <= 0x12000000:
+            raise ValueError("Ethernet CSRs must fit in Raptor's CSR aperture")
+    address, length = memory["base"], memory["size"]
+    if length <= 0 or not 0x18000000 <= address < address + length <= 0x19000000:
+        raise ValueError("Ethernet buffers must fit in Raptor's low I/O aperture")
     # Register layout follows the in-tree LiteX JSON-to-Linux-DTS exporter.
     # Unlike zero-based LiteX IRQ numbering, Raptor reserves PLIC source 0.
     return f'''

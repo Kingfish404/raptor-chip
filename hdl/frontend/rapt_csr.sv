@@ -397,7 +397,6 @@ module rapt_csr #(
 
   assign exu_csr.mepc = mepc_value;
   assign exu_csr.sepc = sepc_value;
-  assign exu_csr.mtvec = csr[MTVEC__];
 
   assign mstatus_mie = csr[MSTATUS][`RAPT_CSR_MSTATUS_MIE_];
 

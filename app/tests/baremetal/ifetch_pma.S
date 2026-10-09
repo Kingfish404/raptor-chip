@@ -1,6 +1,7 @@
 /* Physical device execution is forbidden in Bare and translated modes.
  * PMP and PTE.X allow access, so only execute PMA may reject the request.
  * Restore a RAM mapping and execute it to verify recovery and invalidation. */
+#include "raptor_platform.h"
 #if __riscv_xlen == 64
 #define REG_S sd
 #define SATP_MODE 0x8000000000000000
@@ -22,7 +23,7 @@ _start:
   li t0, 0x1f
   csrw pmpcfg0, t0
   li s7, 0
-  li s9, 0x02000000
+  li s9, RAPTOR_CLINT_BASE
   mv s8, s9
   la s11, bare_resume
   jalr ra, s9, 0
@@ -69,7 +70,7 @@ boundary_resume:
   ori t0, t0, 1
   sw t0, 1024(s0)
 #endif
-  li t0, 0x0080004b  /* CLINT PPN, V/R/X/A */
+  li t0, RAPTOR_PTE(RAPTOR_CLINT_BASE, 0x4b)  /* CLINT PPN, V/R/X/A */
   la t1, level0
   REG_S t0, 0(t1)
   srli t0, s0, 12

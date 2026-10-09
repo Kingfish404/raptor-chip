@@ -1,6 +1,6 @@
 #include "raptos.h"
 
-#define LITEX_UART_BASE 0xf0001800u
+#define LITEX_UART_BASE 0x11001800u
 #define NS16550_BASE 0x10000000u
 #define PTE_V 0x001u
 #define PTE_R 0x002u

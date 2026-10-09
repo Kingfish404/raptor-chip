@@ -1,5 +1,6 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
+`include "rapt_soc.svh"
 
 module tb_ifu_wide_pack;
   localparam int XLEN = `RAPT_XLEN;

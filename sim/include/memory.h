@@ -15,6 +15,7 @@ extern "C" void pmem_write(word_t addr, word_t data, char mask);
 void vaddr_show(vaddr_t addr, int n);
 
 void init_mem();
+void init_memory_backing();
 
 void print_nsim_memory_map(FILE *out);
 

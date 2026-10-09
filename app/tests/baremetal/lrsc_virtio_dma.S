@@ -1,6 +1,7 @@
 /* Real NPC virtio read: device overwrites the byte covered by LR.W.
  * No difftest reference is needed to detect the forbidden successful SC.
  * Run with a private nonempty --disk image. */
+#include "raptor_platform.h"
 .option norvc
 .option norelax
 .section .text
@@ -10,7 +11,7 @@ _start:
   csrw mtvec, t0
   csrw mie, zero
   csrw mstatus, zero
-  li s0, 0x10001000
+  li s0, RAPTOR_VIRTIO_BASE
   lw t0, 8(s0)
   li t1, 2
   bne t0, t1, device_fail

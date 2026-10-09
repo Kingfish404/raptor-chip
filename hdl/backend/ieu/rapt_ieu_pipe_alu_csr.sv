@@ -6,11 +6,13 @@
 module rapt_ieu_pipe_alu_csr #(
     parameter type CompletionT = rapt_pkg::completion_t,
     parameter type IssueT = rapt_pkg::issue_packet_t,
+    parameter bit UseDispatchCsrAddress = 1'b0,
     parameter unsigned ROB_SIZE = `RAPT_ROB_SIZE,
     parameter unsigned XLEN     = `RAPT_XLEN
 ) (
     cmu_bcast_if.in cmu_bcast,
     input IssueT iss,
+    input logic [11:0] csr_read_addr = '0,
     csr_bcast_if.in csr_bcast,
     exu_csr_if.master exu_csr,
     output CompletionT wb_alu_csr
@@ -30,7 +32,7 @@ module rapt_ieu_pipe_alu_csr #(
   logic csr_write_enable;
   assign jump_target = ((iss.uop.execute.branch.indirect ? iss.op1 : iss.uop.pc)
       + iss.uop.imm) & ~'b1;
-  assign exu_csr.raddr = iss.uop.imm[11:0];
+  assign exu_csr.raddr = UseDispatchCsrAddress ? csr_read_addr : iss.uop.imm[11:0];
   // Write suppression depends on the encoded rs1/uimm field, not its value.
   // A non-x0 register containing zero still writes CSRRS/CSRRC (for example,
   // an explicit minstret write must override that instruction's increment).

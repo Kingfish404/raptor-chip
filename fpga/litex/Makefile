@@ -129,7 +129,7 @@ WITH_LED_CHASER ?= 0 ## Set to 1 to add LedChaser to fpga-build (off by default 
 WITH_LITEDRAM ?= $(if $(LINUX_FPGA_PROFILE),$(BOARD_$(FPGA_BOARD)_LINUX_WITH_LITEDRAM),0) ## Set to 1 to use external LiteDRAM/DDR4 as FPGA main_ram
 LITEDRAM_SIZE ?= $(BOARD_$(FPGA_BOARD)_LITEDRAM_SIZE) ## Mapped external LiteDRAM main_ram size in bytes
 WITH_MIG ?= $(if $(LINUX_FPGA_PROFILE),$(BOARD_$(FPGA_BOARD)_LINUX_WITH_MIG),0) ## Set to 1 to use board-supported Xilinx DDR4 MIG as FPGA main_ram
-MIG_SIZE ?= 0x40000000 ## Mapped external MIG main_ram size in bytes
+MIG_SIZE ?= $(or $(BOARD_$(FPGA_BOARD)_MIG_SIZE),0x40000000) ## Board-specific mapped MIG main_ram size in bytes
 WITH_SDCARD ?= $(if $(LINUX_FPGA_PROFILE),$(BOARD_$(FPGA_BOARD)_LINUX_WITH_SDCARD),$(BOARD_$(FPGA_BOARD)_DEFAULT_WITH_SDCARD)) ## Add the board-supported SDCard controller/DMA when available
 ifneq (,$(filter 1 yes true on,$(WITH_LITEDRAM)))
 ifeq ($(BOARD_$(FPGA_BOARD)_HAS_LITEDRAM),0)
@@ -199,6 +199,9 @@ override RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS))
 ifeq (,$(filter -DRAPT_FPGA_DSP -DRAPT_FPGA_DSP=%,$(RAPT_PACK_VFLAGS)))
 override RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS) -DRAPT_FPGA_DSP=1)
 endif
+ifeq (,$(filter -DRAPT_FPGA_LUTRAM -DRAPT_FPGA_LUTRAM=%,$(RAPT_PACK_VFLAGS)))
+override RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS) -DRAPT_FPGA_LUTRAM=1)
+endif
 ifeq ($(VARIANT),linux32)
 ifneq (,$(filter -DRAPT_RV64 -DRAPT_RV64=%,$(RAPT_PACK_VFLAGS)))
 $(error VARIANT=linux32 conflicts with RAPT_PACK_VFLAGS defining RAPT_RV64)
@@ -225,20 +228,6 @@ ifeq (,$(findstring -DRAPT_RV64,$(RAPT_PACK_VFLAGS)))
 override RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS) -DRAPT_RV64)
 endif
 endif
-# Match the shared KU15P target's PMA override before packing/hashing RTL.
-KU15P_PMEM_SIZE :=
-ifneq (,$(filter mlk_cu07_ku15p mlk_cu08_ku15p,$(FPGA_BOARD)))
-ifneq (,$(filter 1 yes true on,$(WITH_MIG)))
-KU15P_PMEM_SIZE := $(MIG_SIZE)
-else ifneq (,$(filter 1 yes true on,$(WITH_LITEDRAM)))
-KU15P_PMEM_SIZE := $(LITEDRAM_SIZE)
-endif
-endif
-ifneq ($(KU15P_PMEM_SIZE),)
-override RAPT_PACK_VFLAGS := $(filter-out -DRAPT_PMEM_BYTES=%,$(RAPT_PACK_VFLAGS)) -DRAPT_PMEM_BYTES=$(shell printf '%d' $(KU15P_PMEM_SIZE))
-endif
-export RAPT_PACK_VFLAGS
-
 _WITH_EXTERNAL_MAIN_RAM := $(strip $(filter 1 yes true on,$(WITH_LITEDRAM) $(WITH_MIG)))
 INTEGRATED_MAIN_RAM_SIZE ?= $(if $(_WITH_EXTERNAL_MAIN_RAM),0,$(if $(LINUX_FPGA_PROFILE),$(BOARD_$(FPGA_BOARD)_LINUX_MAIN_RAM_SIZE),0x80000)) ## BSRAM-backed main_ram size at 0x80000000 (automatically 0 with external RAM)
 INTEGRATED_MAIN_RAM_SIZE := $(strip $(INTEGRATED_MAIN_RAM_SIZE))
@@ -247,6 +236,11 @@ ifneq ($(INTEGRATED_MAIN_RAM_SIZE),0)
 $(error External RAM requires INTEGRATED_MAIN_RAM_SIZE=0 (got $(INTEGRATED_MAIN_RAM_SIZE)))
 endif
 endif
+FPGA_PMEM_SIZE := $(if $(filter 1 yes true on,$(WITH_MIG)),$(MIG_SIZE),$(if $(filter 1 yes true on,$(WITH_LITEDRAM)),$(LITEDRAM_SIZE),$(INTEGRATED_MAIN_RAM_SIZE)))
+ifneq ($(FPGA_PMEM_SIZE),0)
+override RAPT_PACK_VFLAGS := $(filter-out -DRAPT_PMEM_BYTES=%,$(RAPT_PACK_VFLAGS)) -DRAPT_PMEM_BYTES=$(shell printf '%d' $(FPGA_PMEM_SIZE))
+endif
+export RAPT_PACK_VFLAGS
 ifneq ($(INTEGRATED_MAIN_RAM_SIZE),0)
 _MAIN_RAM_FLAG := --integrated-main-ram-size=$(INTEGRATED_MAIN_RAM_SIZE)
 else
@@ -389,7 +383,7 @@ OPENSBI_FW_DIR  := $(LINUX_DIR)/opensbi/build-rv$(LINUX_XLEN)/platform/generic/f
 OPENSBI_BIN     := $(OPENSBI_FW_DIR)/fw_payload.bin
 LINUX_IMG        = $(if $(filter 64,$(LINUX_XLEN)),$(LINUX_RV64_PAYLOAD),$(LINUX_RV32GC_FPGA_PAYLOAD))
 
-LINUX_FPGA_RAM_SIZE ?= $(or $(KU15P_PMEM_SIZE),0x10000000) ## KU15P external DDR: 1 GiB by default; other platforms retain 256 MiB
+LINUX_FPGA_RAM_SIZE ?= $(if $(and $(filter 32,$(LINUX_XLEN)),$(filter 0x80000000,$(FPGA_PMEM_SIZE))),0x40000000,$(FPGA_PMEM_SIZE)) ## RV32 Linux advertises 1 GiB of a 2 GiB hardware window
 LINUX_FPGA_INIT ?= full ## Startup: full (default Buildroot services), prepared-shell (runtime mounts), shell (bare legacy diagnostics)
 ifneq (,$(filter-out shell prepared-shell full,$(LINUX_FPGA_INIT)))
 $(error LINUX_FPGA_INIT must be shell, prepared-shell or full, got '$(LINUX_FPGA_INIT)')
@@ -410,7 +404,7 @@ LINUX_FPGA_DTB_OFFSET ?= $(if $(filter 32,$(LINUX_XLEN)),0x04000000,0x02000000) 
 LINUX_FPGA_OPENSBI_DTB_OFFSET ?= 0x00800000 ## Offset of DTB source inside OpenSBI-only upload image
 LINUX_FPGA_DTB_ADDR ?= 0x83f00000 ## DTB runtime address passed to OpenSBI in a1
 LINUX_FPGA_STAGE0_SRAM ?= 0x0f000000 ## SRAM address for stage0 relocation loop
-override LINUX_FPGA_UART_BASE := 0xf0001800 # Stable LiteUART CSR base (board csr_map slot 3).
+override LINUX_FPGA_UART_BASE := 0x11001800 # Stable LiteUART CSR base (board csr_map slot 3).
 OS ?= ## Generic OS selector for fpga-tinyos-* helpers: egos or xv6
 TINYOS_OS ?= ## TinyOS OS selector for fpga-tinyos-* helpers: egos or xv6
 LINUX_FPGA_EGOS_IMAGE ?= $(RAPTOR_HOME)/app/build/tinyos-sim-src/egos-2000/tools/egos.bin ## Prepared egos flat image path
@@ -749,11 +743,13 @@ bios: ## Alias: make sim ROM=bios (run LiteX BIOS in sim) {SOC,PAYLOAD,TRACE,SIM
 
 # Help declarations only; invoking these selects mk/netboot-profile.mk above.
 fpga-netboot-rv32-build: ## Build fixed CU08 RV32 Linux BIOS with gigabit Ethernet/netboot
-fpga-netboot-rv32-load: ## Load matching fixed RV32 netboot bitstream after freshness/timing checks
+fpga-netboot-rv32-load: ## Load matching fixed RV32 netboot bitstream after timing checks (stale sources warn)
 fpga-netboot-rv32-info: ## Show fixed RV32 netboot configuration and output paths
+fpga-netboot-rv32-reports: ## Refresh RV32 netboot HTML report dashboard without synthesis
 fpga-netboot-rv64-build: ## Build fixed CU08 RV64 Linux BIOS with gigabit Ethernet/netboot
-fpga-netboot-rv64-load: ## Load matching fixed RV64 netboot bitstream after freshness/timing checks
+fpga-netboot-rv64-load: ## Load matching fixed RV64 netboot bitstream after timing checks (stale sources warn)
 fpga-netboot-rv64-info: ## Show fixed RV64 netboot configuration and output paths
+fpga-netboot-rv64-reports: ## Refresh RV64 netboot HTML report dashboard without synthesis
 fpga-netboot-rv32-check: ## Check RV32 netboot tools, payload, UART and dedicated interface
 fpga-netboot-rv64-check: ## Check RV64 netboot tools, payload, UART and dedicated interface
 fpga-netboot-rv32-bundle: ## Verify/package matching RV32 firmware into a content-addressed bundle
@@ -774,6 +770,8 @@ VIVADO_JOBS  ?= $(shell n='$(NPROC)'; if [ "$$n" -gt 32 ]; then echo 32; else ec
 VIVADO_INCREMENTAL ?= 0 ## Set to 1 to reuse a compatible routed checkpoint
 VIVADO_ROUTE_DIRECTIVE ?= default ## Vivado route_design directive (for example AlternateCLBRouting)
 VIVADO_SYNTH_DIRECTIVE ?= default ## Vivado synth_design directive (for example RuntimeOptimized)
+VIVADO_SYS_SETUP_MARGIN_NS ?= 0 ## Extra system setup margin during implementation; final reports use original constraints
+VIVADO_SYS_FINAL_WNS_NS ?= ## Minimum final system WNS; empty retains the implementation-margin gate
 
 LITEX_CONFIG_PHASE := fpga
 include $(LITEX_DIR)/mk/config.mk
@@ -781,9 +779,15 @@ include $(LITEX_DIR)/mk/config.mk
 fpga-detect: ## Refresh and show connected FPGA count, target info, and board mapping {FPGA_AUTO_DETECT,VIVADO,FPGA_DETECT_CACHE}
 
 
-fpga-gen: $(PACK_SV) $(_FPGA_FW_DEP) ## Generate FPGA SoC sources only (no PnR) {BOOT_MODE,FPGA_BOARD,RAPT_CONFIG,INTEGRATED_MAIN_RAM_SIZE}
+memory-map-check:
+	python3 $(RAPTOR_HOME)/verify/scripts/check_memory_map.py
 
-fpga-build: $(PACK_SV) $(_FPGA_FW_DEP) ## Build FPGA bitstream (synth + P&R) {BOOT_MODE,FPGA_BOARD,RAPT_CONFIG,INTEGRATED_MAIN_RAM_SIZE,WITH_LED_CHASER}
+ram-profile-check:
+	python3 $(LITEX_DIR)/scripts/check_ram_profile.py --hardware=$(FPGA_PMEM_SIZE) --linux=$(LINUX_FPGA_RAM_SIZE) --xlen=$(LINUX_XLEN)
+
+fpga-gen: memory-map-check ram-profile-check $(PACK_SV) $(_FPGA_FW_DEP) ## Generate FPGA SoC sources only (no PnR) {BOOT_MODE,FPGA_BOARD,RAPT_CONFIG,INTEGRATED_MAIN_RAM_SIZE}
+
+fpga-build: memory-map-check ram-profile-check $(PACK_SV) $(_FPGA_FW_DEP) ## Build FPGA bitstream (synth + P&R) {BOOT_MODE,FPGA_BOARD,RAPT_CONFIG,INTEGRATED_MAIN_RAM_SIZE,WITH_LED_CHASER}
 
 fpga-reports-index: ## Generate/install aggregated FPGA report HTML dashboard
 
@@ -863,7 +867,7 @@ include $(LITEX_DIR)/mk/recipes.mk
 	$(APP_LLM_TARGETS) $(APP_LLM_BUILDS) $(APP_LLM_FPGAS) \
 	microbench microbench-build \
 	tests tests-clean tests-run $(TEST_TARGETS) \
-	opensbi-build opensbi-rv32 opensbi-rv64 opensbi-rv32-build opensbi-rv64-build opensbi-clean fpga-opensbi-jump-build \
+	opensbi-build opensbi-rv32 opensbi-rv64 opensbi-rv32-build opensbi-rv64-build opensbi-clean \
 	payload \
 	linux32 linux64 linux32-build linux64-build \
 	raptos-bios-sim-rv32 raptos-bios-sim-rv64 \
@@ -878,7 +882,6 @@ include $(LITEX_DIR)/mk/recipes.mk
 	fpga-raptos-rv32-build fpga-raptos-rv32-upload fpga-raptos-rv32-run \
 	fpga-raptos-rv64-build fpga-raptos-rv64-upload fpga-raptos-rv64-run \
 	fpga-tinyos-prepare fpga-tinyos-check fpga-tinyos-upload \
-	tang-mega-138k-pro \
 	mlk-cu08-ku15p  \
 	mlk-cu07-ku15p  \
 	xilinx-vcu118  \

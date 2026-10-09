@@ -14,7 +14,7 @@ _start:
   la t0, fail
   csrw mtvec, t0
   clint_subword_translation_setup
-  li s0, (0x02004000 + CLINT_VA_DELTA)
+  li s0, (RAPTOR_CLINT_BASE + 0x4000 + CLINT_VA_DELTA)
   la s1, expected
   lw t0, 0(s1)
   sw t0, 0(s0)
@@ -60,7 +60,7 @@ write_halves:
   li t0, 8
   bltu s2, t0, write_halves
 #elif CLINT_SUBWORD_CASE == 2
-  li s0, (0x0200bff8 + CLINT_VA_DELTA)
+  li s0, (RAPTOR_CLINT_BASE + 0xbff8 + CLINT_VA_DELTA)
   li t0, 0x12
   sb t0, 7(s0)
   fence iorw,iorw
@@ -81,7 +81,7 @@ write_halves:
   bne t1, t0, fail
 #elif CLINT_SUBWORD_CASE == 3
   /* The MSIP high bytes are read-only zero; writing them leaves bit 0. */
-  li s0, (0x02000000 + CLINT_VA_DELTA)
+  li s0, (RAPTOR_CLINT_BASE + CLINT_VA_DELTA)
   li t0, 1
   sb t0, 0(s0)
   sb zero, 1(s0)

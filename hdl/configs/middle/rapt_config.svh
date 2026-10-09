@@ -15,8 +15,6 @@
 `define RAPT_MISA 'h4014112f
 `endif
 
-
-`define RAPT_I_EXTENSION 'h1
 `define RAPT_M_EXTENSION 'h1
 
 // ---------- Microarchitecture (uarch) ----------
@@ -32,12 +30,14 @@
 // Half of default's OoO queue capacities, no smaller than small.
 `define RAPT_RIQ_SIZE 4
 `define RAPT_IIQ_SIZE 4
+`ifndef RAPT_ROB_SIZE
 `define RAPT_ROB_SIZE 16
-`ifndef RAPT_OPERAND_SPILL_ENTRIES
-`define RAPT_OPERAND_SPILL_ENTRIES 8
 `endif
-// Half of default's steering scan window, within the ROB capacity.
+`define RAPT_OPERAND_SPILL_ENTRIES 8
+// Eight-entry steering scan window, within the ROB capacity.
+`ifndef RAPT_STEER_SCAN_ENTRIES
 `define RAPT_STEER_SCAN_ENTRIES 8
+`endif
 
 `define RAPT_RS_SIZE 4
 `define RAPT_IOQ_SIZE 4
@@ -64,15 +64,9 @@
 `ifndef RAPT_COMMIT_WIDTH
 `define RAPT_COMMIT_WIDTH 2
 `endif
-`ifndef RAPT_FETCH_LOOKAHEAD
 `define RAPT_FETCH_LOOKAHEAD
-`endif
 
-`ifdef RAPT_I_EXTENSION
 `define RAPT_REG_SIZE 32
-`else
-`define RAPT_REG_SIZE 16
-`endif
 
 `define RAPT_REG_LEN $clog2(`RAPT_REG_SIZE)
 
@@ -85,9 +79,7 @@
 `define RAPT_L1I_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / 4)
 `define RAPT_L1I_LEN 5
 `define RAPT_L1I_N_WAYS 2
-`ifndef RAPT_L1I_REFILL_WORDS
 `define RAPT_L1I_REFILL_WORDS 4
-`endif
 
 // L1D: 16B line * 8 sets * 2-way = 256 B, matching small.
 `define RAPT_L1D_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))

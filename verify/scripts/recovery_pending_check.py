@@ -11,22 +11,11 @@ from pathlib import Path
 import re
 import subprocess
 
+from yosys_common import run_yosys
+
 ROOT = Path(__file__).resolve().parents[2]
 DUT = ROOT / "hdl/backend/rapt_recovery_pending.sv"
 REFERENCE = ROOT / "verify/formal/formal_recovery_pending.sv"
-
-
-def run_yosys(command, log, timeout):
-    with log.open("w") as stream:
-        subprocess.run(
-            ["yosys", "-Q", "-T", "-m", "slang", "-p", command],
-            stdout=stream,
-            stderr=subprocess.STDOUT,
-            check=True,
-            timeout=timeout,
-            cwd=ROOT,
-        )
-    return log.read_text()
 
 
 def main():

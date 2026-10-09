@@ -2,6 +2,111 @@
 // ---- tb_lsu_atomic_acquire ----
 `include "rapt.svh"
 `include "rapt_if.svh"
+
+// A speculative conflict hint may survive combinational cancellation. It
+// blocks stale forwarding but never allocates a store or changes committed
+// write data; both load ports recover after the cancelled owner is removed.
+module tb_lsu_forward_cancel;
+  localparam int XLEN = `RAPT_XLEN;
+  localparam int LsuTbSqSize = 4;
+  `define TB_LSU_MANUAL_FORWARD
+  `include "tb_lsu_harness.svh"
+  `undef TB_LSU_MANUAL_FORWARD
+
+  task automatic fresh;
+    reset = 1'b1;
+    init_lsu_inputs(1'b1, 32'h76543210, `RAPT_ALU_LW__);
+    tick(3);
+    reset = 1'b0;
+    tick(1);
+  endtask
+
+  task automatic pending_store;
+    exu_ioq_bcast.valid = 1'b0;
+    exu_ioq_bcast.wen = 1'b1;
+    exu_ioq_bcast.tval = XLEN'('h80001000);
+    exu_ioq_bcast.sq_waddr = XLEN'('h80001000);
+    exu_ioq_bcast.sq_wdata = XLEN'('h55667788);
+    exu_ioq_bcast.alu = XLEN == 64 ? `RAPT_SD_WSTRB : `RAPT_SW_WSTRB;
+    sq_forward_pending = 1'b1;
+    exu_lsu.rvalid = 1'b1;
+    exu_lsu.raddr = XLEN'('h80001000);
+    exu_lsu.rvalid_b = 1'b1;
+    exu_lsu.raddr_b = XLEN'('h80001000);
+    lsu_l1d.rready = 1'b1;
+    lsu_l1d.rready_b = 1'b1;
+  endtask
+
+  task automatic check_pending;
+    #1;
+    check(!dut.sq_alloc_fire, "conflict hint allocated an unaccepted store");
+    check(!lsu_l1d.rvalid && !exu_lsu.rready, "A request escaped the pending younger store");
+    check(!lsu_l1d.rvalid_b && !exu_lsu.rready_b, "B request escaped the pending younger store");
+  endtask
+
+  initial begin
+    fresh();
+    exu_ioq_bcast.valid = 1'b1;
+    exu_ioq_bcast.wen = 1'b1;
+    exu_ioq_bcast.dest = 3;
+    exu_ioq_bcast.tval = XLEN'('h80001000);
+    exu_ioq_bcast.sq_waddr = XLEN'('h80001000);
+    exu_ioq_bcast.sq_wdata = XLEN'('h11223344);
+    exu_ioq_bcast.alu = XLEN == 64 ? `RAPT_SD_WSTRB : `RAPT_SW_WSTRB;
+    tick(1);
+    exu_ioq_bcast.valid = 1'b0;
+    rou_lsu.valid = 1'b1;
+    rou_lsu.store = 1'b1;
+    rou_lsu.dest = 3;
+    rou_lsu.sq_vaddr = XLEN'('h80001000);
+    tick(1);
+    rou_lsu.valid = 1'b0;
+    rou_lsu.store = 1'b0;
+    pending_store();
+    repeat (3) begin
+      check_pending();
+      check(lsu_l1d.wvalid && lsu_l1d.wdata == XLEN'('h11223344),
+            "pending hint changed the committed write");
+      tick(1);
+    end
+    cmu_bcast.ben = 1'b1;
+    cmu_bcast.flush_pipe = 1'b1;
+    check_pending();
+    tick(1);
+    cmu_bcast.flush_pipe = 1'b0;
+    cmu_bcast.ben = 1'b0;
+    sq_forward_pending = 1'b0;
+    exu_ioq_bcast.wen = 1'b0;
+    #1;
+    check(exu_lsu.rready && exu_lsu.rdata == XLEN'('h11223344) && !lsu_l1d.rvalid,
+          "A retained cancelled store data or lost the committed store");
+    check(exu_lsu.rready_b && exu_lsu.rdata_b == XLEN'('h11223344) && !lsu_l1d.rvalid_b,
+          "B retained cancelled store data or lost the committed store");
+    exu_lsu.rvalid = 1'b0;
+    exu_lsu.rvalid_b = 1'b0;
+    lsu_l1d.wready = 1'b1;
+    tick(1);
+    lsu_l1d.wready = 1'b0;
+    tick(2);
+    check(rou_lsu.sq_empty && !lsu_l1d.wvalid, "cancelled store survived the committed drain");
+
+    fresh();
+    pending_store();
+    reset = 1'b1;
+    check_pending();
+    tick(2);
+    reset = 1'b0;
+    sq_forward_pending = 1'b0;
+    exu_ioq_bcast.wen = 1'b0;
+    exu_lsu.rvalid = 1'b0;
+    exu_lsu.rvalid_b = 1'b0;
+    tick(1);
+    check(rou_lsu.sq_empty && !lsu_l1d.wvalid, "reset conflict hint created a store");
+    $display("PASS: SQ unqualified forwarding hint cancellation XLEN=%0d", XLEN);
+    $finish;
+  end
+endmodule
+
 module tb_lsu_atomic_acquire;
   localparam int XLEN = `RAPT_XLEN;
   localparam int LsuTbSqSize = 4;
@@ -314,10 +419,8 @@ module tb_lsu_axi_io_order;
       .exu_lsu,
       .exu_ioq_bcast,
       .completion_accept(1'b1),
-      .sq_handoff_valid(1'b0),
-      .sq_handoff_vaddr('0),
+      .sq_forward_pending(1'b0),
       .sq_handoff_alu('0),
-      .sq_handoff_fp64(1'b0),
       .sq_waddr_hi,
       .sq_waddr_third,
       .sq_wpbmt,
@@ -821,14 +924,22 @@ module tb_lsu_hum_pmp;
     lsu_l1d.rdata_b='h12345678;
   endtask
 
+  // Channel B decides PMP statically: only effective M mode with every entry
+  // OFF completes there. Any other permitted load stays pending on B and is
+  // retried through channel A, which performs the full registered PMP check.
   task automatic expect_b(input bit allowed, input bit forwarding);
+    logic static_ok;
+    static_ok = (csr_bcast.mprv ? csr_bcast.mpp : csr_bcast.priv) ==
+    `RAPT_PRIV_M
+    && (&pmp_state.pmp_mode_off);
     #1;
     lsu_l1d.rready_b = lsu_l1d.rvalid_b;
     #1;
-    check(exu_lsu.rready_b == allowed,
+    check(exu_lsu.rready_b == (allowed && static_ok),
           "HUM permission mismatch (forbidden completion or permitted load stalled)");
-    check(lsu_l1d.rvalid_b == (allowed && !forwarding), "HUM request escaped permission gate");
-    if (allowed) check(exu_lsu.rdata_b == 'h78, "allowed B load data incorrect");
+    check(lsu_l1d.rvalid_b == (allowed && static_ok && !forwarding),
+          "HUM request escaped permission gate");
+    if (allowed && static_ok) check(exu_lsu.rdata_b == 'h78, "allowed B load data incorrect");
   endtask
 
   initial begin
@@ -866,6 +977,14 @@ module tb_lsu_hum_pmp;
     exu_lsu.raddr_b='h0f001fff;
     exu_lsu.ralu_b=`RAPT_ALU_LHU_;
     expect_b(0, 0);  // SRAM endpoint: entire access must be mapped.
+    for (int f = 0; f < 2; f++) begin
+      setup(1'(f));
+      init_pmp_state_defaults(1);  // All entries OFF: M mode completes on B.
+      expect_b(1, 1'(f));
+      csr_bcast.priv = `RAPT_PRIV_S;
+      expect_b(0, 1'(f));  // S mode is never decided statically.
+      csr_bcast.priv = `RAPT_PRIV_M;
+    end
     $display("PASS: HUM cache and SQ-forward permissions, MPRV, PMP/PMA endpoints");
     $finish;
   end
@@ -913,10 +1032,8 @@ module tb_lsu_l1d_io_split;
       .exu_lsu,
       .exu_ioq_bcast,
       .completion_accept(1'b1),
-      .sq_handoff_valid(1'b0),
-      .sq_handoff_vaddr('0),
+      .sq_forward_pending(1'b0),
       .sq_handoff_alu('0),
-      .sq_handoff_fp64(1'b0),
       .sq_waddr_hi,
       .sq_waddr_third,
       .sq_wpbmt,
@@ -1723,9 +1840,8 @@ module tb_lsu_sq_random;
           break;
         end
       end
-      allocation_conflict = exu_ioq_bcast.valid && exu_ioq_bcast.wen &&
-          (csr_bcast.dmmu_en ? exu_ioq_bcast.tval[11:2] == probe_addr[11:2]
-                            : exu_ioq_bcast.tval[31:2] == probe_addr[31:2]);
+      // A store handed off this cycle blocks every load, whatever its address.
+      allocation_conflict = exu_ioq_bcast.valid && exu_ioq_bcast.wen;
       if (allocation_conflict || (match >= 0 &&
           (store_epoch[match] != context_epoch || model_vaddr[match][31:2] != probe_addr[31:2]))) begin
         check(!exu_lsu.rready && !lsu_l1d.rvalid, "unresolved address identity bypassed SQ");
@@ -1808,7 +1924,9 @@ module tb_lsu_sq_random;
     check(!lsu_l1d.rvalid, "DMMU load entered L1D during same-cycle SQ allocation handoff");
     exu_lsu.raddr = 32'h4040_000c;
     #1;
-    check(lsu_l1d.rvalid, "DMMU load with a different page offset did not bypass SQ allocation");
+    // The allocation hint is address-independent: every load waits one cycle.
+    check(!lsu_l1d.rvalid,
+          "DMMU load with a different page offset entered L1D during SQ allocation");
     reset = 1'b1;
     tick(1);
     init_lsu_inputs(1'b0, 32'h5a5a_a5a5, `RAPT_ALU_LW__);

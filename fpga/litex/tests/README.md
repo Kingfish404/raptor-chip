@@ -8,8 +8,8 @@ The standard `am-kernels/microbench` bundle contains stale pre-built object file
 
 These tests:
 
-- Use only the **LiteX sim UART** (`0xf0001800`) for I/O.
-- Use only the **CLINT mtime register** (`0x0200BFF8`) or the `rdcycle` CSR for timing — both are intercepted in `rapt_bus.sv` and never touch AXI.
+- Use only the **LiteX sim UART** (`0x11001800`) for I/O.
+- Use only the **CLINT mtime register** (`0x0200BFF8`) or the `rdcycle` CSR for timing. `rdcycle` reads core CSR state; CLINT MMIO uses the on-chip AXI router in `rapt.sv` and does not reach off-chip AXI.
 - Are short enough to run to completion on Verilator sim within the default `SIM_TIMEOUT=30s` budget.
 
 ## Available tests
@@ -31,9 +31,12 @@ KU15P DDR/PMA host checks (no shared RTL packing or board access):
 ```bash
 fpga/litex/.venv/bin/python -B fpga/litex/tests/test_ddr_pma.py
 make -C verify verilator-addr-classification-ku15p-rv32 verilator-addr-classification-ku15p-rv64
+make -C verify verilator-addr-classification-litedram-rv32 verilator-addr-classification-litedram-rv64
+make -C verify verilator-l2-pmem2g
+fpga/litex/.venv/bin/python -B fpga/litex/tests/test_wb64_lanes.py
 ```
 
-Run these from the repository root. They check the 1 GiB pack/default contract and RAM/MMIO PMA boundaries for both XLENs; they do not test physical DDR cells.
+Run these from the repository root. They check the 2 GiB MIG and 1 GiB LiteDRAM RAM/MMIO PMA boundaries for both XLENs, plus 32-bit AXI to 64-bit Wishbone lower/upper lane and byte selection. They do not test physical DDR cells.
 
 | Target          | What it does                                       |
 | --------------- | -------------------------------------------------- |

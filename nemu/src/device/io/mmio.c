@@ -39,7 +39,8 @@ static bool mmio_ram_overlap = false;
 static bool range_overlaps_ram(paddr_t l, paddr_t r)
 {
   return (l <= PMEM_RIGHT && r >= PMEM_LEFT)
-      || (l <= (paddr_t)(CONFIG_SDRAM_BASE + CONFIG_SDRAM_SIZE - 1)
+      || (CONFIG_SDRAM_SIZE != 0
+          && l <= (paddr_t)(CONFIG_SDRAM_BASE + CONFIG_SDRAM_SIZE - 1)
           && r >= (paddr_t)CONFIG_SDRAM_BASE)
       || (l <= (paddr_t)(CONFIG_SRAM_BASE + CONFIG_SRAM_SIZE - 1)
           && r >= (paddr_t)CONFIG_SRAM_BASE);

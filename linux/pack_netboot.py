@@ -14,7 +14,7 @@ from raptor_linux import HOME, identity, require, run, sha
 LITEX = HOME.parent / 'fpga/litex'
 sys.path.insert(0, str(LITEX / 'scripts'))
 from add_linux_sdcard_dts import ensure_sdcard_dtb
-from netboot_distro import ADDRESSES, persistence_bootargs
+from netboot_distro import ADDRESSES, persistence_bootargs, require_linux_ram
 from netboot_distro_publish import verify as verify_bundle
 from netboot_names import name_bundle
 
@@ -28,7 +28,7 @@ def pack(artifacts, soc, csr, output, cross='riscv64-linux-gnu-', selector='LABE
     require(not output.exists(), 'netboot output must be a new directory')
     bits = source['bits']
     require(run('fdtget', '-t', 's', soc, '/cpus/cpu@0', 'riscv,isa-base').strip() == f'rv{bits}i'.encode(), 'DTB XLEN mismatch')
-    require(run('fdtget', '-t', 'x', soc, '/memory@80000000', 'reg').strip() == b'80000000 40000000', 'requires 1 GiB LiteX RAM')
+    require_linux_ram(soc, bits)
     config = (artifacts / 'kernel.config').read_text()
     for option in ('MMC_LITEX', 'MMC_BLOCK', 'EXT4_FS', 'REGULATOR_FIXED_VOLTAGE', 'SERIAL_LITEUART_CONSOLE', 'LITEX_LITEETH', 'BLK_DEV_INITRD',
                    'RISCV_ISA_ZICBOM', 'RISCV_DMA_NONCOHERENT'):

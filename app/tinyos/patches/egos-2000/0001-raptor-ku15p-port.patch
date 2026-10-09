@@ -8,7 +8,7 @@ index 2391738..b18999f 100644
  
 +# KU15P RAM-disk image: a single flat binary uploaded to main_ram (RAM_START)
 +# via LiteX BIOS serialboot. The egos kernel is (re)built with -DPLATFORM_KU15P
-+# so it drives the LiteX UART (0xF0001800) and the Raptor internal CLINT
++# so it drives the LiteX UART (0x11001800) and the Raptor internal CLINT
 +# (0x02000000), and serves its read-only file system from a RAM-disk embedded
 +# at KU15P_FLASH_BASE. Layout: egos.bin at offset 0, disk.img at
 +# (KU15P_FLASH_BASE - KU15P_RAM_BASE). Override KU15P_FLASH_BASE to trade the
@@ -72,7 +72,7 @@ index 0240399..cb0ded3 100644
 +/* Raptor KU15P LiteX SoC overrides (fpga/litex .../csr.csv). The core still
 + * reports mvendorid==666 so boot.c selects the HARDWARE (LiteX) driver paths,
 + * but the peripheral bases differ from the tangnano20k board:
-+ *   UART  : LiteX UART CSR at 0xF0001800
++ *   UART  : LiteX UART CSR at 0x11001800
 + *   CLINT : Raptor internal CLINT at 0x02000000 (intercepted by rapt_router,
 + *           register-compatible: mtimecmp +0x4000, mtime +0xBFF8)
 + *   FLASH : RAM-disk embedded above RAM_END, uploaded with the kernel image
@@ -81,7 +81,7 @@ index 0240399..cb0ded3 100644
 +#ifndef EGOS_KU15P_FLASH_BASE
 +#define EGOS_KU15P_FLASH_BASE 0x81000000UL
 +#endif
-+#define UART_BASE        0xF0001800UL
++#define UART_BASE        0x11001800UL
 +#define CLINT_BASE       0x02000000UL
 +#define FLASH_ROM_BASE   EGOS_KU15P_FLASH_BASE
 +#define VIDEO_FRAME_BASE 0x80600000UL

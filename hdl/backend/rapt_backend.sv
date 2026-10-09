@@ -112,20 +112,18 @@ module rapt_backend #(
   rapt_pkg::completion_t exu_wb_mul;
   rapt_pkg::completion_t completion[rapt_pkg::CompletionPorts];
   rapt_pkg::completion_t completion_accepted[rapt_pkg::CompletionPorts];
-  // Validate every physical producer before endpoint arbitration. There are
-  // two more candidates than broadcast ports: FPU shares the selected system
-  // port, and independent early-load wake is not a CDB port. A stale FP result
-  // cannot suppress an independently valid integer/system result.
+  // Validate every physical producer before endpoint arbitration. There is
+  // one more candidate than broadcast ports: FPU shares the selected system
+  // port. A stale FP result cannot suppress an independently valid
+  // integer/system result.
   localparam int CandidateIntegerBase = 0;
   localparam int CandidateFpu = IntegerIssuePorts;
   localparam int CandidateBranch = IntegerIssuePorts + 1;
   localparam int CandidateMemory = IntegerIssuePorts + 2;
   localparam int CandidateMul = IntegerIssuePorts + 3;
-  localparam int CandidateFastLoad = IntegerIssuePorts + 4;
   // Physical producers are a composition registry, not derived from the
-  // number of downstream broadcast ports (one integer endpoint is shared and
-  // fast-load is not a CDB port at all).
-  localparam int CompletionCandidates = CandidateFastLoad + 1;
+  // number of downstream broadcast ports (one integer endpoint is shared).
+  localparam int CompletionCandidates = CandidateMul + 1;
   rapt_pkg::completion_t completion_candidate[CompletionCandidates];
   logic completion_candidate_accept[CompletionCandidates];
   logic completion_candidate_identity_match[CompletionCandidates];
@@ -138,7 +136,6 @@ module rapt_backend #(
   assign completion_candidate[CandidateBranch] = wb_branch;
   assign completion_candidate[CandidateMemory] = exu_ioq_bcast;
   assign completion_candidate[CandidateMul] = exu_wb_mul;
-  rapt_pkg::completion_t fast_load_candidate;
   // Keep each physical CDB slot on its own combinational writer so a
   // branch-queue CDB wake cannot see the branch packet it is producing.
   for (
@@ -173,10 +170,11 @@ module rapt_backend #(
   // Dedicated external wake view: no branch producer is on this input.
   rapt_pkg::completion_t branch_wake[rapt_pkg::CompletionPorts];
   rapt_pkg::completion_t memory_wake;
+  // Keep the memory-only wake writer independent of the other CDB slots.
+  // Operands see the accepted producer immediately; ROB control is registered.
   always_comb begin
     memory_wake = exu_ioq_bcast;
-    memory_wake.valid = exu_ioq_bcast.valid
-        && g_completion_guard[CandidateMemory].accepted;
+    memory_wake.valid = exu_ioq_bcast.valid && g_completion_guard[CandidateMemory].accepted;
   end
   for (genvar p = 0; p < IntegerIssuePorts; p++) begin : g_branch_wake
     if (p == IntegerSystemPort) assign branch_wake[p] = wb_integer_shared;
@@ -192,94 +190,43 @@ module rapt_backend #(
   assign branch_wake[IntegerIssuePorts+1] = memory_wake;
   assign branch_wake[IntegerIssuePorts+2] = '0;
 
+  // The speculative fast-load wake pair needs a live memory completion to
+  // confirm it on the next edge. Completion control is registered, so queues
+  // wake from accepted operand packets and the pair stays quiet.
   load_fast_if load_fast_raw ();
-  load_fast_if load_fast_accepted ();
   load_fast_if load_fast ();
-  logic fast_load_confirm_reject;
   always_comb begin
-    fast_load_candidate = '0;
-    fast_load_candidate.valid = load_fast_raw.valid && !load_fast_raw.rebusy;
-    fast_load_candidate.dest = load_fast_raw.dest;
-    fast_load_candidate.generation = load_fast_raw.generation;
-    fast_load_candidate.prd = load_fast_raw.prd;
-    fast_load_candidate.rd = load_fast_raw.rd;
-
-    fast_load_confirm_reject = load_fast_raw.confirmed
-        && !g_completion_guard[CandidateMemory].accepted;
-    load_fast_accepted.valid = (load_fast_raw.valid
-        && (load_fast_raw.rebusy || g_completion_guard[CandidateFastLoad].accepted))
-        || fast_load_confirm_reject;
-    load_fast_accepted.rebusy = load_fast_raw.rebusy || fast_load_confirm_reject;
-    load_fast_accepted.prd = fast_load_confirm_reject ? load_fast_raw.confirmed_prd
-        : load_fast_raw.prd;
-    load_fast_accepted.dest = fast_load_confirm_reject ? load_fast_raw.confirmed_dest
-        : load_fast_raw.dest;
-    load_fast_accepted.generation = fast_load_confirm_reject
-        ? load_fast_raw.confirmed_generation : load_fast_raw.generation;
-    load_fast_accepted.rd = fast_load_confirm_reject ? load_fast_raw.confirmed_rd
-        : load_fast_raw.rd;
-    load_fast_accepted.confirmed = load_fast_raw.confirmed
-        && g_completion_guard[CandidateMemory].accepted;
-    load_fast_accepted.confirmed_prd = load_fast_raw.confirmed_prd;
-    load_fast_accepted.confirmed_dest = load_fast_raw.confirmed_dest;
-    load_fast_accepted.confirmed_generation = load_fast_raw.confirmed_generation;
-    load_fast_accepted.confirmed_rd = load_fast_raw.confirmed_rd;
-    load_fast_accepted.result = load_fast_raw.result;
+    load_fast.valid                = 1'b0;
+    load_fast.confirmed            = 1'b0;
+    load_fast.rebusy               = 1'b0;
+    load_fast.prd                  = '0;
+    load_fast.dest                 = '0;
+    load_fast.generation           = '0;
+    load_fast.rd                   = '0;
+    load_fast.confirmed_prd        = '0;
+    load_fast.confirmed_dest       = '0;
+    load_fast.confirmed_generation = '0;
+    load_fast.confirmed_rd         = '0;
+    load_fast.result               = '0;
   end
-  // Simple ALU and branch results come from stored IQ operands and selection.
-  // Memory may broadcast its accepted response in the same cycle. MUL/DIV
-  // already registers its result; an optional bypass avoids a second register.
+  // Register every accepted completion before ROB recovery and retirement.
+  // Accepted operand data reaches PRF, ROU operand storage and execution
+  // queues on the producer edge, independent of this control boundary.
   for (genvar p = 0; p < rapt_pkg::CompletionPorts; p++) begin : g_completion_stage
-    if (p != IntegerIssuePorts + 2 || `RAPT_MDQ_LIVE_WAKE) begin : g_same_cycle
-      assign completion[p] = completion_accepted[p];
-    end else begin : g_registered
-      rapt_completion_stage stage (
-          .clock(clock),
-          .reset(reset),
-          .flush(cmu_bcast.flush_pipe),
-          .accepted(completion_accepted[p]),
-          .completion(completion[p])
-      );
-    end
+    rapt_completion_stage stage (
+        .clock(clock),
+        .reset(reset),
+        .flush(cmu_bcast.flush_pipe),
+        .accepted(completion_accepted[p]),
+        .completion(completion[p])
+    );
   end
-  // Fast-load wake is combinational with IOQ `rready`; confirm is the
-  // registered IOQ broadcast the next cycle. Do not re-register the pair.
-  always_comb begin
-    load_fast.valid = load_fast_accepted.valid && !reset && !cmu_bcast.flush_pipe;
-    load_fast.confirmed = load_fast_accepted.confirmed && !reset
-        && !cmu_bcast.flush_pipe;
-    load_fast.rebusy = load_fast_accepted.rebusy;
-    load_fast.prd = load_fast_accepted.prd;
-    load_fast.dest = load_fast_accepted.dest;
-    load_fast.generation = load_fast_accepted.generation;
-    load_fast.rd = load_fast_accepted.rd;
-    load_fast.confirmed_prd = load_fast_accepted.confirmed_prd;
-    load_fast.confirmed_dest = load_fast_accepted.confirmed_dest;
-    load_fast.confirmed_generation = load_fast_accepted.confirmed_generation;
-    load_fast.confirmed_rd = load_fast_accepted.confirmed_rd;
-    load_fast.result = load_fast_accepted.result;
+  // ROU operand spill, PRF and execution queues must share the same wake edge:
+  // a value arriving during dispatch must be captured by the new queue owner.
+  rapt_pkg::completion_t operand_wake[rapt_pkg::CompletionPorts];
+  for (genvar p = 0; p < rapt_pkg::CompletionPorts; p++) begin : g_operand_wake
+    assign operand_wake[p] = completion_accepted[p];
   end
-  `RAPT_SVA_IMPLY(clock, reset, MEMORY_COMPLETION_SAME_CYCLE,
-                  completion_accepted[IntegerIssuePorts+1].valid,
-                  completion[IntegerIssuePorts+1] == completion_accepted[IntegerIssuePorts+1])
-  `RAPT_SVA_IMPLY(clock, reset, BRANCH_COMPLETION_SAME_CYCLE,
-                  completion_accepted[IntegerIssuePorts].valid,
-                  completion[IntegerIssuePorts] == completion_accepted[IntegerIssuePorts])
-  `RAPT_SVA_IMPLY(clock, reset, FAST_LOAD_WAKE_SAME_CYCLE,
-                  load_fast_accepted.valid && !cmu_bcast.flush_pipe, load_fast.valid)
-  `RAPT_SVA_NEXT(clock, reset, FAST_LOAD_STAGE_FLUSH, cmu_bcast.flush_pipe,
-                 !load_fast.valid && !load_fast.confirmed)
-  // Consequent extracted so the SVA macro argument stays short and the
-  // formatter cannot rejoin it past the column limit.
-  logic fast_load_stage_confirm;
-  assign fast_load_stage_confirm = completion[IntegerIssuePorts+1].valid
-      && completion[IntegerIssuePorts+1].dest == load_fast.confirmed_dest
-      && completion[IntegerIssuePorts+1].generation == load_fast.confirmed_generation
-      && completion[IntegerIssuePorts+1].prd == load_fast.confirmed_prd
-      && completion[IntegerIssuePorts+1].result == load_fast.result;
-  `RAPT_SVA_IMPLY(clock, reset, FAST_LOAD_STAGE_CONFIRM, load_fast.confirmed,
-                  fast_load_stage_confirm)
-  assign completion_candidate[CandidateFastLoad] = fast_load_candidate;
   if (!(IntegerIssuePorts > 0)) begin : g_invalid_config_0
     $error("Invalid rapt_core configuration");
   end
@@ -290,7 +237,18 @@ module rapt_backend #(
     $error("Invalid rapt_core configuration");
   end
   for (genvar p = 0; p < CompletionCandidates; p++) begin : g_completion_guard
-    logic accepted;
+    logic accepted, guard_accept;
+    // The IOQ only loses owners to a precise flush, which also kills its
+    // completion. Each owner completes once. The memory port therefore keeps
+    // the ROB owner lookup off the load-to-wake path and checks the same
+    // identity contract in verification.
+    if (p == CandidateMemory) begin : g_trusted
+      assign accepted = completion_candidate[p].valid;
+      `RAPT_SVA_IMPLY(clock, reset || cmu_bcast.flush_pipe, MEMORY_COMPLETION_OWNER_LIVE,
+                      completion_candidate[p].valid, guard_accept)
+    end else begin : g_guarded
+      assign accepted = guard_accept;
+    end
     assign completion_candidate_accept[p] = accepted;
     rapt_completion_guard #(
         .Entries(rapt_pkg::CoreConfig.rob_entries),
@@ -310,7 +268,7 @@ module rapt_backend #(
         .owner_generation(completion_owner.generation),
         .owner_prd(completion_owner.prd),
         .owner_rd(completion_owner.rd),
-        .accept(accepted),
+        .accept(guard_accept),
         .identity_match(completion_candidate_identity_match[p]),
         .payload_match(completion_candidate_payload_match[p])
     );
@@ -419,7 +377,10 @@ module rapt_backend #(
       .downstream(rnu_operand)
   );
 
-  rapt_rou rou (
+  rapt_rou #(
+      .SeparateOperandWake(1'b1)
+  ) rou (
+      .operand_wake(operand_wake),
       .writeback_idle(writeback_idle),
       .writeback_drain(writeback_drain),
       .completion(completion),
@@ -472,7 +433,7 @@ module rapt_backend #(
 `endif
 
   rapt_prf prf (
-      .completion(completion),
+      .completion(operand_wake),
       .clock(clock),
       .reset(reset),
 
@@ -551,7 +512,7 @@ module rapt_backend #(
       .cancel_valid(recovery.redirect_valid),
       .cancel_head(recovery.head),
       .cancel_owner(recovery.owner),
-      .completion(completion),
+      .completion(operand_wake),
       .clock(clock),
       .reset(reset),
       .cmu_bcast(cmu_bcast),
@@ -576,7 +537,7 @@ module rapt_backend #(
       .cancel_valid(recovery.redirect_valid),
       .cancel_head(recovery.head),
       .cancel_owner(recovery.owner),
-      .completion(completion),
+      .completion(operand_wake),
       .clock(clock),
       .reset(reset),
       .cmu_bcast(cmu_bcast),
@@ -649,7 +610,7 @@ module rapt_backend #(
 
   // LSU (Load/Store Unit)
   rapt_lsu lsu (
-      .completion(completion),
+      .completion(operand_wake),
       .clock(clock),
       .reset(reset),
       .cmu_bcast(cmu_bcast),

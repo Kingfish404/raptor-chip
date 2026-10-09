@@ -2,13 +2,44 @@
 #include <cpu.h>
 #include <memory.h>
 #include <dlfcn.h>
+#ifdef RAPT_LARGE_PMEM
+#include <sys/mman.h>
+#include <unistd.h>
+#include <vector>
+#endif
 
 extern NPCState npc;
 extern char *regs[];
 
-uint8_t pmem_ref[MSIZE] = {};
 
 void (*ref_difftest_memcpy)(paddr_t addr, void *buf, size_t n, bool direction) = NULL;
+#ifdef RAPT_LARGE_PMEM
+static void (*ref_difftest_reset_pmem)(void) = NULL;
+
+static void difftest_sync_sparse_pmem()
+{
+  constexpr size_t chunk = 64 * 1024;
+  static const uint8_t zeros[chunk] = {};
+  uint8_t *pmem = guest_to_host(MBASE);
+  assert(pmem != nullptr && ref_difftest_reset_pmem != nullptr);
+  const long page_size = sysconf(_SC_PAGESIZE);
+  assert(page_size > 0);
+  std::vector<unsigned char> resident((MSIZE + (size_t)page_size - 1) / (size_t)page_size);
+  assert(mincore(pmem, MSIZE, resident.data()) == 0);
+  ref_difftest_reset_pmem();
+  for (size_t off = 0; off < MSIZE; off += chunk)
+  {
+    const size_t n = off + chunk <= MSIZE ? chunk : MSIZE - off;
+    bool any_resident = false;
+    for (size_t page = off / (size_t)page_size;
+         page <= (off + n - 1) / (size_t)page_size; ++page)
+      any_resident |= (resident[page] & 1u) != 0;
+    if (!any_resident) continue;
+    if (memcmp(pmem + off, zeros, n) != 0)
+      ref_difftest_memcpy((paddr_t)((uint64_t)MBASE + off), pmem + off, n, DIFFTEST_TO_REF);
+  }
+}
+#endif
 void (*ref_difftest_regcpy)(void *dut, bool direction) = NULL;
 void (*ref_difftest_exec)(uint64_t n) = NULL;
 void (*ref_difftest_raise_intr)(uint64_t NO) = NULL;
@@ -61,7 +92,11 @@ void difftest_checkpoint_resync()
   if (!difftest_enabled)
     return;
 
+#ifdef RAPT_LARGE_PMEM
+  difftest_sync_sparse_pmem();
+#else
   ref_difftest_memcpy(MBASE, guest_to_host(MBASE), MSIZE, DIFFTEST_TO_REF);
+#endif
   ref_difftest_memcpy(MROM_BASE, guest_to_host(MROM_BASE), MROM_SIZE, DIFFTEST_TO_REF);
   ref_difftest_memcpy(FLASH_BASE, guest_to_host(FLASH_BASE), FLASH_SIZE, DIFFTEST_TO_REF);
   // Trampoline execution is not replayed by REF. Install its saved timer CSR
@@ -166,6 +201,10 @@ void init_difftest(char *ref_so_file, long img_size, int port)
 
   ref_difftest_memcpy = (void (*)(paddr_t, void *, size_t, bool))dlsym(handle, "difftest_memcpy");
   assert(ref_difftest_memcpy);
+#ifdef RAPT_LARGE_PMEM
+  ref_difftest_reset_pmem = (void (*)(void))dlsym(handle, "difftest_reset_pmem");
+  assert(ref_difftest_reset_pmem && "2 GiB simulation needs a matching NEMU reference");
+#endif
 
   ref_difftest_regcpy = (void (*)(void *dut, bool direction))dlsym(handle, "difftest_regcpy");
   assert(ref_difftest_regcpy);
@@ -327,7 +366,7 @@ static void checkregs(NPCState *ref, vaddr_t pc)
       {
         pc_paddr = (paddr_t)(pc - 0x3FC00000u);
       }
-      if (pc_paddr >= MBASE && pc_paddr + 16 <= MBASE + MSIZE)
+      if (pc_paddr >= MBASE && (uint64_t)pc_paddr + 16 <= (uint64_t)MBASE + MSIZE)
       {
         uint8_t ref_mem[16] = {};
         uint8_t *npc_mem = (uint8_t *)guest_to_host(pc_paddr & ~(paddr_t)0xf);
@@ -364,7 +403,7 @@ static void checkregs(NPCState *ref, vaddr_t pc)
 
       // Compare physical memory content at ref's physical address
       paddr_t ref_paddr = ref->rpaddr;
-      if (ref_paddr >= MBASE && ref_paddr < MBASE + MSIZE)
+      if (ref_paddr >= MBASE && (uint64_t)ref_paddr < (uint64_t)MBASE + MSIZE)
       {
         uint8_t ref_mem[16] = {};
         uint8_t *npc_mem = (uint8_t *)guest_to_host(ref_paddr & ~(paddr_t)0xf);

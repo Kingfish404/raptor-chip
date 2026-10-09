@@ -474,7 +474,7 @@ bool serial_console_line_open()
 }
 
 // ----------------------------------------------------------------------------
-// LiteX UART model: CU08 0xf0001800, legacy egos alias 0xf0001000.
+// LiteX UART model: Raptor CSR slot 3 at 0x11001800.
 // Register layout (from litex/soc/cores/uart.py and egos dev_tty.c):
 //   0x00 RXTX     : R=pop RX byte / W=push TX byte
 //   0x04 TXFULL   : R=1 if TX FIFO full

@@ -53,11 +53,11 @@ class SubsystemBuildCacheTest(unittest.TestCase):
             records = compile_scopes(xlen=64)
             self.assertEqual(len(records), 6)
             self.assertTrue(all("-DRAPT_RV64" in args for args in records[-3:]))
-            records = compile_scopes(xlen=64, defines="-DRAPT_BPU_AUX_PC_HASH=0")
+            records = compile_scopes(xlen=64, defines="-DRAPT_FETCH_RESPONSE_STAGE=1")
             self.assertEqual(len(records), 9)
-            self.assertTrue(all("-DRAPT_BPU_AUX_PC_HASH=0" in args for args in records[-3:]))
+            self.assertTrue(all("-DRAPT_FETCH_RESPONSE_STAGE=1" in args for args in records[-3:]))
             records = compile_scopes(config="default-l2", xlen=64,
-                                     defines="-DRAPT_BPU_AUX_PC_HASH=0")
+                                     defines="-DRAPT_FETCH_RESPONSE_STAGE=1")
             self.assertEqual(len(records), 12)
             self.assertTrue(all(f"-I{hdl}/configs/default-l2" in args for args in records[-3:]))
             # Set a newer timestamp deterministically, including on file systems
@@ -66,7 +66,7 @@ class SubsystemBuildCacheTest(unittest.TestCase):
             header.write_text("// changed common header\n")
             os.utime(header, ns=(newer, newer))
             self.assertEqual(len(compile_scopes(config="default-l2", xlen=64,
-                                               defines="-DRAPT_BPU_AUX_PC_HASH=0")), 15)
+                                               defines="-DRAPT_FETCH_RESPONSE_STAGE=1")), 15)
 
 
 if __name__ == "__main__":

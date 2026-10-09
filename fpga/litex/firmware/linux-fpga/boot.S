@@ -36,7 +36,7 @@
 #endif
 
 #ifndef RAPT_UART_BASE
-#define RAPT_UART_BASE 0xf0001800
+#define RAPT_UART_BASE 0x11001800
 #endif
 
 .equ MAIN_RAM,     RAPT_MAIN_RAM

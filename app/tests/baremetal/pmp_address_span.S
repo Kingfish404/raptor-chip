@@ -1,7 +1,9 @@
 #if __riscv_xlen != 64
 #error "PMP high-address regression requires RV64"
 #endif
-/* A retained high pmpaddr bit must not grant a low-address MPRV/U load. */
+/* A retained high pmpaddr bit must not grant a low-address MPRV/U load.
+ * The implemented pmpaddr width follows the platform physical-address width,
+ * so the test discovers it instead of assuming 56-bit physical addresses. */
 .option norvc
 .option norelax
 .section .text
@@ -15,7 +17,23 @@ _start:
   li t0, 0x1800000000000000  /* background NAPOT, U denied, M bypass */
   csrw pmpcfg2, t0
   la s0, data
-  li s1, 46
+  /* pmpaddr is WARL: discover the implemented width W (bits [W+1:2]). */
+  li t0, -1
+  csrw pmpaddr0, t0
+  csrr t0, pmpaddr0
+  li s5, 0
+width_scan:
+  beqz t0, width_done
+  srli t0, t0, 1
+  addi s5, s5, 1
+  j width_scan
+width_done:
+  li t1, 33                 /* must exceed the bits used by data's address */
+  blt s5, t1, fail
+  li t1, 54                 /* RV64 architectural maximum */
+  bgt s5, t1, fail
+  /* Walk every implemented bit above the data address. */
+  li s1, 32
   li s3, 0
 next_bit:
   srli t0, s0, 2
@@ -34,11 +52,10 @@ next_bit:
 denied_load:
   lbu t1, 0(s0)
   csrc mstatus, t0
-  addi t2, s1, -45
+  addi t2, s1, -31
   bne s3, t2, fail
   addi s1, s1, 1
-  li t2, 54
-  blt s1, t2, next_bit
+  blt s1, s5, next_bit
   /* Positive control: the actual low NA4 range must grant the same access. */
   srli t0, s0, 2
   csrw pmpaddr0, t0

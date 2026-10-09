@@ -119,9 +119,7 @@ doctor: ## Check OpenROAD, rendering tools, and selected platform files
 	@$(OPENROAD) -version
 	@echo "OpenROAD and $(PDK) physical-design data are ready"
 
-syn: ## Build the mapped netlist with the LSPD synthesis flow
-	+$(MAKE) -C $(SYN_DIR) syn MODULE=$(MODULE) PDK=$(PDK) \
-		RAPT_CONFIG=$(RAPT_CONFIG) CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) SRAM_MODE=flops
+syn: $(SYN_NETLIST) ## Build the mapped netlist with the LSPD synthesis flow
 
 stage: $(STAGED_NETLIST) $(STAGED_SDC) ## Stage netlist and physical timing constraints
 
@@ -129,9 +127,10 @@ $(STAGED_NETLIST): $(SYN_NETLIST)
 	@mkdir -p $(INPUT_DIR)
 	@cp $< $@
 
-$(SYN_NETLIST):
-	+$(MAKE) -C $(SYN_DIR) syn MODULE=$(MODULE) PDK=$(PDK) \
-		RAPT_CONFIG=$(RAPT_CONFIG) CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) SRAM_MODE=flops
+$(SYN_NETLIST): FORCE
+	+$(MAKE) -C $(SYN_DIR) $(SYN_NETLIST) BUILD_DIR=$(SYN_BUILD_DIR) \
+		MODULE=$(MODULE) PDK=$(PDK) RAPT_CONFIG=$(RAPT_CONFIG) \
+		CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) SRAM_MODE=flops
 
 $(STAGED_SDC): scripts/write_sdc.py Makefile
 	@mkdir -p $(INPUT_DIR)

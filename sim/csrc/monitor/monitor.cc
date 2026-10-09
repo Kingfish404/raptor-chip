@@ -430,6 +430,10 @@ void init_monitor(int argc, char *argv[])
 {
   parse_args(argc, argv);
 
+  // The 2 GiB PMEM is allocated lazily by mmap, but its host address must
+  // exist before load_img() copies the payload into it.
+  init_memory_backing();
+
   long img_size = load_img();
 
   void virtio_blk_set_disk_image(const char *path);

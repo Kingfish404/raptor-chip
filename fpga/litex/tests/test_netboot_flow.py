@@ -269,12 +269,31 @@ class NetbootFlowTest(unittest.TestCase):
             item.idle_output.assert_called_once()
 
     def test_legacy_incomplete_output_is_not_published(self):
+        # An unstamped leftover is skipped with a warning; the new build may run.
         with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
             item, _ = self.published_fixture(tmp)
             item.idle_output = Mock()
-            with self.assertRaisesRegex(RuntimeError, 'completed legacy build stamp'):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
                 item.preserve_existing_bitstream()
+            self.assertIn('[WARN] Leftover bitstream has no completed build stamp', stderr.getvalue())
             self.assertFalse((item.work / 'ready.json').exists())
+            self.assertFalse((item.work / 'bitstreams').exists())
+
+    def test_legacy_timing_failed_output_is_not_published(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
+            item, live = self.published_fixture(tmp)
+            item.idle_output = Mock()
+            (live.parent / '.bitstream_stamp').write_text('legacy-build-hash')
+            (live / 'mlk_cu08_ku15p_timing.rpt').write_text(
+                'Timing constraints are not met.\n'
+                '1. checking no_clock (0)\n4. checking unconstrained_internal_endpoints (0)\n')
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                item.preserve_existing_bitstream()
+            self.assertIn('[WARN] Leftover bitstream did not pass final timing', stderr.getvalue())
+            self.assertFalse((item.work / 'ready.json').exists())
+            self.assertFalse((item.work / 'bitstreams').exists())
 
     def test_failed_build_never_packages(self):
         item = object.__new__(flow.Flow)
@@ -290,6 +309,24 @@ class NetbootFlowTest(unittest.TestCase):
             item.run()
         item.gate.assert_not_called()
         item.prepare_bundle.assert_not_called()
+
+    def test_report_refresh_only_runs_report_target(self):
+        item = object.__new__(flow.Flow)
+        item.args = argparse.Namespace(action='reports')
+        item.make = Mock()
+        item.run()
+        item.make.assert_called_once_with('fpga-reports-index')
+
+    def test_info_exposes_report_path_without_changing_build_context(self):
+        item = object.__new__(flow.Flow)
+        item.args = argparse.Namespace(action='info')
+        item.context = {'soc': '/tmp/netboot/default-w3/rv64/soc', 'xlen': '64'}
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            item.run()
+        self.assertEqual(json.loads(output.getvalue())['reports_index'],
+                         '/tmp/netboot/default-w3/rv64/soc/gateware/index.html')
+        self.assertNotIn('reports_index', item.context)
 
     def test_gate_rejects_missing_or_incomplete_timing_coverage(self):
         good = '1. checking no_clock (0)\n4. checking unconstrained_internal_endpoints (0)\n'
@@ -312,7 +349,7 @@ class NetbootFlowTest(unittest.TestCase):
             report.write_text(good)
             item.gate(building=True)
             self.assertEqual([call.args[0] for call in item.make.call_args_list],
-                             ['fpga-bitstream-current', 'fpga-timing-ok'])
+                             ['fpga-bitstream-warn', 'fpga-timing-ok'])
 
     def test_network_counter_parser(self):
         result = flow.network_stats('noise\n  eth0: 1100000 1 0 0 0 0 0 0 1200000 2 0 0 0 0 0 0\r\n')
@@ -491,7 +528,7 @@ class NetbootFlowTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'receipt'):
                 item.gate()
 
-    def test_changed_sources_block_load(self):
+    def test_changed_sources_warn_on_load(self):
         with tempfile.TemporaryDirectory() as tmp:
             item = object.__new__(flow.Flow)
             item.work = Path(tmp)
@@ -502,8 +539,14 @@ class NetbootFlowTest(unittest.TestCase):
             (Path(tmp) / 'gateware').mkdir()
             (Path(tmp) / 'gateware/mlk_cu08_ku15p_timing.rpt').write_text(
                 '1. checking no_clock (0)\n4. checking unconstrained_internal_endpoints (0)\n')
-            flow.save(item.work / 'build.json', {'source': 'old'})
-            with patch.object(flow, 'source_identity', return_value='new'), self.assertRaisesRegex(RuntimeError, 'Sources changed'):
+            flow.save(item.work / 'build.json', {'source': 'old', 'bit_sha256': 'bit'})
+            item.bit_hash = Mock(return_value='bit')
+            stderr = io.StringIO()
+            with patch.object(flow, 'source_identity', return_value='new'), contextlib.redirect_stderr(stderr):
+                item.gate()
+            self.assertIn('Sources changed since workflow build', stderr.getvalue())
+            item.bit_hash = Mock(return_value='other')
+            with patch.object(flow, 'source_identity', return_value='new'), self.assertRaisesRegex(RuntimeError, 'Bitstream changed'):
                 item.gate()
 
     def test_bundle_reuse_and_input_identity(self):

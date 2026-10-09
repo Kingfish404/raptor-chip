@@ -4,6 +4,7 @@
  * value. An observed-core run must separately require actual cancellation;
  * a pass alone does not prove the branch was mispredicted.
  */
+#include "raptor_platform.h"
 #ifndef TEST_D
 #define TEST_D 0
 #endif
@@ -31,7 +32,7 @@ _start:
   csrw satp, zero
   li s0, 0
 region:
-  li s1, 0x0f000000
+  li s1, RAPTOR_SRAM_BASE
   beqz s0, base_ready
   li s1, 0x80400000
   li t0, 1
@@ -69,12 +70,12 @@ increment:
   addi s0, s0, 1
   li t0, 3
   bne s0, t0, region
-  li t0, 0x00100000
+  li t0, RAPTOR_FINISHER_BASE
   li t1, 0x5555
   sw t1, 0(t0)
 1: j 1b
 fail:
-  li t0, 0x00100000
+  li t0, RAPTOR_FINISHER_BASE
   li t1, 0x3333
   sw t1, 0(t0)
 2: j 2b

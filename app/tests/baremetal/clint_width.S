@@ -1,3 +1,4 @@
+#include "raptor_platform.h"
 .option norvc
 .option norelax
 .section .text
@@ -7,7 +8,7 @@ _start:
   csrw mtvec, t0
   csrw mstatus, zero
   csrw mie, zero
-  li s0, 0x02004000
+  li s0, (RAPTOR_CLINT_BASE + 0x4000)
 #if __riscv_xlen == 64
   li t0, 0x1234567876543210
   sd t0, 0(s0)

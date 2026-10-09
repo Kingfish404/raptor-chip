@@ -1,4 +1,5 @@
 /* Device and ROM atomic PMAs: fault before reads, writes or reservation. */
+#include "raptor_platform.h"
 #if __riscv_xlen == 64
 #define FAULTS_PER_REGION 6
 #define REG_S sd
@@ -24,11 +25,11 @@ _start:
   li t0, 0xf0
   csrw menvcfg, t0
   li s7, 0
-  li s9, 0x02000000
+  li s9, RAPTOR_CLINT_BASE
   jal ra, test_readonly
-  li s9, 0x20001000
+  li s9, (RAPTOR_MROM_BASE + 0x1000)
   jal ra, test_readonly
-  li s9, 0x30001000
+  li s9, (RAPTOR_FLASH_BASE + 0x1000)
   jal ra, test_readonly
   li t0, (3 * FAULTS_PER_REGION)
   bne s7, t0, fail
@@ -54,7 +55,7 @@ _start:
   ori t0, t0, 1
   sw t0, 1024(s0)
 #endif
-  li t0, 0x008000cf /* CLINT 0x02000000, V/R/W/X/A/D */
+  li t0, RAPTOR_PTE(RAPTOR_CLINT_BASE, 0xcf) /* CLINT 0x02000000, V/R/W/X/A/D */
   la t1, level0
   REG_S t0, 0(t1)
   srli t0, s0, 12

@@ -1300,7 +1300,7 @@ module tb_l1d_permission_stage;
       automatic int idx, off;
       idx = int'(PA[`RAPT_L1D_LEN+IdxLo-1:IdxLo]);
       off = int'(PA[IdxLo-1:OffBits]);
-      dut.u_tags.l1d_tag[0][idx] = PA[`RAPT_PADDR_BITS-1:`RAPT_L1D_LEN+IdxLo];
+      force dut.u_tags.tag_addr_data[0] = PA[`RAPT_PADDR_BITS-1:`RAPT_L1D_LEN+IdxLo];
       dut.u_tags.l1d_valid[0][idx][off] = 1'b1;
     end
     lsu_l1d.raddr = PA;
@@ -1311,6 +1311,7 @@ module tb_l1d_permission_stage;
     check(lsu_l1d.rready && !l1d_bus.arvalid && !lsu_l1d.trap,
           "permitted cacheable hit did not complete on the post-SRAM cycle");
     lsu_l1d.rvalid = 0;
+    release dut.u_tags.tag_addr_data[0];
     tick(1);
     cases++;
     // S-mode with no matching PMP: deny before data AR or rready.

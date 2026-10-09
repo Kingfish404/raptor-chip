@@ -63,9 +63,52 @@ with each timing or area measurement.
 | Firmware   | OpenSBI v1.8 (in-tree `third_party/.../opensbi`)             | `linux/opensbi/`                                   |
 | Bootrom    | NPC / raptSoC reset vector                                   | `nemu/src/memory/rom/`                             |
 
+## Physical Address Contract
+
+[`hdl/configs/memory_map.json`](../hdl/configs/memory_map.json) records the shared 32-bit physical addresses and the main RAM
+capacity of each board or simulator profile. The window starts at `0x80000000`.
+KU15P CU07/CU08 with MIG map 2 GiB through `0xffffffff`; RV32 and RV64 use
+the same hardware map. RV32 Linux advertises only the lower 1 GiB in its device
+tree until high-memory support is validated. KU15P LiteDRAM and AXAU15 MIG
+remain at 1 GiB. Other board capacities are listed in the JSON file.
+
+`make memory-map-check` cross-checks the contract against RTL, LiteX, firmware,
+NPC and NEMU constants, and that the generated [`app/lib/raptor_platform.h`](../app/lib/raptor_platform.h) is current.
+Guest test programs include that header (`RAPTOR_<REGION>_BASE`/`_SIZE`,
+`RAPTOR_PTE()`) instead of copying addresses; the verify Makefile adds
+`-I app/lib` to every guest compile. The generator and checker live in `verify/scripts/`. After editing the JSON, run
+`make memory-map-header`. The FPGA build also validates the selected hardware
+and Linux RAM sizes. When changing a region or capacity, update the JSON and
+the affected implementation together, then rerun the checker and focused
+regressions.
+
+The optional `SIM_MEM_PROFILE=large` NPC profile and matching NEMU
+`riscv32_ref_2g_defconfig` / `riscv64_ref_2g_defconfig` map 2 GiB of sparse
+RAM. Their default profiles retain the smaller legacy RAM capacity. In the
+large profile, `0xa0000000` is RAM, not the separate legacy SDRAM or software
+MMIO region. LiteX UART is at `0x11001800`; old high MMIO aliases are absent.
+
+The boundary program in `app/tests/baremetal/pmem_2g_boundaries.S` checks
+`0xa0000000`, `0xc0000000`, `0xf0001800`, and the final word and byte of RAM.
+Its RV64 path also rejects an address with arbitrary noncanonical upper bits.
+Build it for both XLENs with the repository RISC-V toolchain (add `-I app/lib`) and run each image
+with `make -C sim run SIM_MEM_PROFILE=large IMG=/absolute/path/to/image.bin`
+(add `VFLAGS=-DRAPT_RV64` for RV64). The `run` target selects the matching
+NEMU 2 GiB reference for differential checking. The program exits through the
+SiFive finisher with `0x5555` on success or `0x3333` on failure; the old UART
+address must produce no serial output.
+
+The source contract, SoC generation and simulator regressions cannot prove
+that a physical KU15P DDR build meets timing or that every DDR cell works. Board
+bring-up must read and write `0xa0000000`, `0xc0000000` and near `0xffffffff`,
+check that `0xf0001800` does not activate UART, and exercise the selected
+SD/Ethernet hardware. Throughput, CoreMark/MHz, timing and resource results
+from matching builds are needed before making a 64-bit Wishbone performance
+claim.
+
 ## NPC Memory Map
 
-`npc_soc` peripherals and address ranges:
+`npc_soc` peripherals and address ranges for the default memory profile:
 
 | Device             | Range                       |
 | ------------------ | --------------------------- |

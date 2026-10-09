@@ -87,7 +87,7 @@ module tb_l2_ordered_mmio;
     expect_upstream_r(32'ha500_0001, 1'b1, "cacheable burst miss second beat");
 
     axi_s.bready = 1'b0;
-    send_l2_aw(32'hf000_1800, 4'h1);
+    send_l2_aw(32'h1100_1800, 4'h1);
     send_l2_w(32'h0000_0041, 4'hf);
     tick(3);
     check(!axi_s.bvalid, "non-cacheable MMIO write produced posted upstream B");
@@ -117,16 +117,16 @@ module tb_l2_ordered_mmio;
     return_l2_downstream_b(4'h2, 2'b00);
     tick(1);
 
-    send_l2_aw(32'hf000_1800, 4'h3);
+    send_l2_aw(32'h1100_1800, 4'h3);
     send_l2_w(32'h0000_0042, 4'hf);
-    send_l2_ar(32'hf000_1804, 4'h4);
+    send_l2_ar(32'h1100_1804, 4'h4);
     tick(3);
     check(!axi_m.arvalid, "non-cacheable read bypassed an older MMIO write");
     accept_l2_downstream_write(downstream_id, downstream_addr, downstream_data, downstream_strb,
                                downstream_last);
     return_l2_downstream_b(4'h3, 2'b00);
     tick(2);
-    check(axi_m.arvalid && axi_m.araddr == 32'hf000_1804 && axi_m.arid == 4'h4,
+    check(axi_m.arvalid && axi_m.araddr == 32'h1100_1804 && axi_m.arid == 4'h4,
           "non-cacheable read did not issue after older write drained");
     $display("PASS: L2 ordered-MMIO xsim checks passed");
 
@@ -163,7 +163,7 @@ module tb_l2_ordered_mmio;
     send_l2_w_full(32'h3333_0000);
     expect_posted_b(4'h2);
 
-    send_l2_ar(32'hf000_1000, 4'h4);
+    send_l2_ar(32'h1100_1000, 4'h4);
     tick(4);
     check(!axi_m.arvalid, "MMIO read bypassed posted DDR writes still draining");
 
@@ -187,7 +187,7 @@ module tb_l2_ordered_mmio;
 
     accept_l2_downstream_ar(downstream_id, downstream_addr, downstream_len);
     check(downstream_id == 4'h4, "MMIO read id mismatch after writes drained");
-    check(downstream_addr == 32'hf000_1000, "MMIO read addr mismatch after writes drained");
+    check(downstream_addr == 32'h1100_1000, "MMIO read addr mismatch after writes drained");
 
     $display("PASS: L2 posted write stream xsim checks passed");
     $finish;

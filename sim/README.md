@@ -21,16 +21,16 @@ sim/build/<profile>/
   run-riscv64/data/...
 ```
 
-For example, after preparing both NEMU reference libraries, these simulator builds/runs can execute concurrently:
+NEMU references live in `nemu/build/ref/<defconfig>/`, with separate configuration, generated headers, objects, and libraries. `SIM_MEM_PROFILE=large` selects `riscv{32,64}_ref_2g_defconfig`; the default selects `riscv{32,64}_ref_defconfig`. `nemu-reference` builds incrementally under a per-defconfig lock, leaving interactive `nemu/.config` untouched. Root `build-nemu{32,64}-ref` and verification use the default profile. Explicit `DIFF_REF_SO` overrides (including an empty value) and `DIFFTEST=0` retain their behavior. For example, after preparing both NEMU reference libraries, these simulator builds/runs can execute concurrently:
 
 ```sh
 make verilog
 make build-nemu32-ref
 make build-nemu64-ref
 make run-rv32 BUILD_PROFILE=smoke32 BUILD_ROOT=/tmp/raptor-sim-builds \
-  DIFF_REF_SO="-d $PWD/nemu/build/riscv32-nemu-interpreter-so" &
+  DIFF_REF_SO="-d $PWD/nemu/build/ref/riscv32_ref_defconfig/riscv32-nemu-interpreter-so" &
 make run-rv64 BUILD_PROFILE=smoke64 BUILD_ROOT=/tmp/raptor-sim-builds \
-  DIFF_REF_SO="-d $PWD/nemu/build/riscv64-nemu-interpreter-so" &
+  DIFF_REF_SO="-d $PWD/nemu/build/ref/riscv64_ref_defconfig/riscv64-nemu-interpreter-so" &
 wait
 ```
 

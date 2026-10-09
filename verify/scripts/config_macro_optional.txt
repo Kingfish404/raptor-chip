@@ -1,0 +1,14 @@
+# Intentional absence is part of these switches' interface, not missing configuration.
+# Direction alternatives are checked as an exactly-one group by the checker.
+RAPT_RV64 # Absent selects RV32; supplied by the build's XLEN flag.
+RAPT_RVFI # Formal instrumentation, enabled only by the formal build.
+RAPT_ASSERT_EN # Simulation assertions, supplied by simulation/verification builds.
+RAPT_AXI_OBSERVE # Optional simulation AXI observation ports.
+RAPT_USE_SRAM_MACRO # Physical SRAM flow; absent selects behavioral storage.
+RAPT_YSYXSOC # Alternate SoC integration selected by its build.
+RAPT_PMEM_BYTES # Platform override; rapt_pkg supplies the default PmemBytes value.
+RAPT_FETCH_LOOKAHEAD # Preset-selected fetch lookahead; absent disables it.
+RAPT_FETCH_WIDE # Preset-selected wide instruction window; absent selects the narrow window.
+RAPT_LSU_HUM # Preset-selected hit-under-miss path; absent disables it.
+RAPT_L2_EN # Preset-selected L2; absent bypasses it.
+RAPT_L2_STORE_WRITEBACK # L2 store policy; absent selects write-through.

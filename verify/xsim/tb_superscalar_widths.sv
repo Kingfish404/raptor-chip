@@ -255,7 +255,10 @@ module tb_superscalar_widths;
   // Finite bursts force completed instructions to accumulate for wide commit;
   // periodic issue pauses force partial dispatch and queue full/reclaim cases.
   always @(negedge clock) begin
-    issue_enable = cycle % 11 < 4 ? '0 : '1;
+    // Periodic stalls plus one long pause: the pause builds a dispatch backlog so
+    // the multi-slot dispatch check below holds even when rename supplies one
+    // uop per cycle and a deep window would otherwise drain it every cycle.
+    issue_enable = (cycle % 11 < 4 || (cycle >= 20 && cycle < 50)) ? '0 : '1;
     for (int p = 0; p < Cfg.completion_ports; p++) completion[p] = '0;
     if (!reset && cycle % 5 == 0) begin
       for (int p = 0; p < Cfg.completion_ports; p++)

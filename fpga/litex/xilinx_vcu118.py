@@ -108,6 +108,7 @@ class RaptorVCU118SoC(SoCCore):
         kwargs.setdefault("integrated_rom_size", 0x8000)
         kwargs.setdefault("integrated_sram_size", 0x2000)
         kwargs.setdefault("integrated_main_ram_size", 0)
+        kwargs["bus_data_width"] = 64
         kwargs.setdefault("bus_timeout", 4096)
 
         if with_litedram and kwargs.get("integrated_main_ram_size", 0) != 0:
@@ -116,6 +117,7 @@ class RaptorVCU118SoC(SoCCore):
             )
 
         SoCCore.__init__(self, platform, sys_clk_freq, **kwargs)
+        self.cpu.pmem_size = (litedram_size if with_litedram else kwargs["integrated_main_ram_size"]) or None
         self.add_config("BIOS_NO_BOOT")
         self.crg = _CRG(platform, sys_clk_freq, with_litedram=with_litedram)
 

@@ -34,7 +34,7 @@ def main():
                 f=line.split()
                 if len(f)==9 and f[0]=='AXI_OBS' and f[2] in ('AR','AW'):
                     events+=1
-                    assert not 0xf0001000 <= (int(f[4],16)&0xffffffff) < 0xf0001100, 'faulting access reached device'
+                    assert not 0x11001800 <= (int(f[4],16)&0xffffffff) < 0x11001900, 'faulting access reached device'
             assert events, 'missing AXI observation'
             evidence.append(dict(delay=r['delay'],seed=r['seed'],log=str(log),sha256=hashlib.sha256(log.read_bytes()).hexdigest()))
         report['cases'].append(dict(translated=translated,pbmt=attr,width=width,command=cmd,inputs=summary['inputs'],runs=evidence))

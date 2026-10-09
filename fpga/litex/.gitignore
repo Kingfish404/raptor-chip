@@ -16,6 +16,7 @@
 !mk/
 !mk/*.mk
 !scripts/*.tcl
+!patches/*.patch
 
 # LiteX build artifacts
 build/

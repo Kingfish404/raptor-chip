@@ -119,6 +119,7 @@ class RaptorTangMega138KSoC(SoCCore):
         kwargs.setdefault("integrated_rom_size", 0x8000)
         kwargs.setdefault("integrated_sram_size", 0x2000)
         kwargs.setdefault("integrated_main_ram_size", 0)
+        kwargs["bus_data_width"] = 64
         # Tighten the wishbone interconnect timeout so that an access to
         # an unmapped address (e.g. a stray `mem_read 0xdeadbeef` from BIOS)
         # raises wb.err quickly. The AXI<->Wishbone bridge translates wb.err
@@ -130,6 +131,7 @@ class RaptorTangMega138KSoC(SoCCore):
         kwargs.setdefault("bus_timeout", 4096)
 
         SoCCore.__init__(self, platform, sys_clk_freq, **kwargs)
+        self.cpu.pmem_size = kwargs["integrated_main_ram_size"] or None
         self.add_config("BIOS_NO_BOOT")
 
         self.crg = _CRG(platform, sys_clk_freq)

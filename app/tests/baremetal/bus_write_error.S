@@ -1,5 +1,10 @@
 /* Runtime DECERR after store retirement: platform interrupt 16, first-error
  * diagnostics, masked accumulation, W1C and valid-memory recovery. */
+#include "raptor_platform.h"
+/* Two distinct physical addresses in a mapped device aperture that NPC leaves
+ * unbacked, so every access completes with an AXI DECERR. */
+#define DEVICE_HOLE_A RAPTOR_UNBACKED_DEVICE_BASE
+#define DEVICE_HOLE_B (RAPTOR_UNBACKED_DEVICE_BASE + 0x100000)
 #if __riscv_xlen == 64
 #define REG_S sd
 #define SATP_MODE 0x8000000000000000
@@ -46,7 +51,7 @@ _start:
   csrw 0x7c0, t0
   li s8, 0x1800
   li s3, 0
-  li s4, 0xc0001000
+  li s4, DEVICE_HOLE_B
   li s5, ERROR_OVERFLOW
   li s6, 0x10000
   li t0, 0x12345678
@@ -61,7 +66,7 @@ _start:
   and t0, t0, s6
   bne t0, s6, fail
   bnez s3, fail
-  li t0, 0x21000000
+  li t0, DEVICE_HOLE_A
   error_store zero, t0
   fence rw, rw
   csrr t0, 0x7c0
@@ -102,7 +107,7 @@ checkpoint_acknowledged:
   csrr t0, 0xfc0
   bne t0, s4, fail
 #endif
-  li s4, 0x21000000
+  li s4, DEVICE_HOLE_A
   li s5, ERROR_PENDING
   error_store zero, s4
   li s7, 2
@@ -154,14 +159,14 @@ checkpoint_acknowledged:
   sw t0, 1024(s0)
 #endif
   la t1, level0
-  li t0, 0x300004cf
+  li t0, RAPTOR_PTE(DEVICE_HOLE_B, 0xcf)
   REG_S t0, 0(t1)
   srli t0, s0, 12
   li t1, SATP_MODE
   or t0, t0, t1
   csrw satp, t0
   sfence.vma
-  li s4, 0xc0001000
+  li s4, DEVICE_HOLE_B
   li s8, 0x800
   csrw mie, s6
   li t0, SUPERVISOR_STATUS

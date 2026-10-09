@@ -27,10 +27,9 @@
 `define RAPT_XLEN 32
 `define RAPT_MISA 'h4014112f
 `endif
-`define RAPT_I_EXTENSION 'h1
 `define RAPT_M_EXTENSION 'h1
 
-// One-cycle multiplier keeps the proof shallow.
+// Pipelined multiply: 2-cycle latency, 1/cycle throughput; divide remains iterative.
 `define RAPT_M_FAST 'h1
 
 // Branch predictor: smallest tables, bimodal direction predictor (no TAGE /
@@ -45,7 +44,9 @@
 // still retires two consecutive entries.
 `define RAPT_RIQ_SIZE 2
 `define RAPT_IIQ_SIZE 2
+`ifndef RAPT_ROB_SIZE
 `define RAPT_ROB_SIZE 4
+`endif
 
 `define RAPT_RS_SIZE 4
 `define RAPT_IOQ_SIZE 4
@@ -74,16 +75,14 @@
 `ifndef RAPT_COMMIT_WIDTH
 `define RAPT_COMMIT_WIDTH 2
 `endif
-`ifndef RAPT_FETCH_LOOKAHEAD
 `define RAPT_FETCH_LOOKAHEAD
-`endif
 
 // Full 32-entry architectural register file (rv32i, not rv32e).
 `define RAPT_REG_SIZE 32
 `define RAPT_REG_LEN $clog2(`RAPT_REG_SIZE)
 
-// Physical register file: must be a power of two and cover 32 arch regs plus
-// the in-flight window. 64 is the smallest legal value.
+// Physical register file: must exceed the 32 arch regs. 64 also covers the
+// in-flight window, so rename never stalls on free registers.
 `define RAPT_PHY_SIZE 64
 `define RAPT_PHY_LEN $clog2(`RAPT_PHY_SIZE)
 
@@ -95,9 +94,7 @@
 `define RAPT_L1I_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / 4)
 `define RAPT_L1I_LEN 1
 `define RAPT_L1I_N_WAYS 1
-`ifndef RAPT_L1I_REFILL_WORDS
 `define RAPT_L1I_REFILL_WORDS 4
-`endif
 
 // L1D: 16B line x 2 sets x 1 way.
 `define RAPT_L1D_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
@@ -110,5 +107,10 @@
 
 // L2: disabled (pass-through) so its tag/data arrays drop out of the cone.
 // (RAPT_L2_EN intentionally not defined.)
+
+// Geometry for an explicit command-line L2 enable; L2 remains disabled here.
+`define RAPT_L2_LEN 8
+`define RAPT_L2_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
+`define RAPT_L2_N_WAYS 1
 
 `endif

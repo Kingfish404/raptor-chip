@@ -1,5 +1,6 @@
-module tb_operand_value_spill;
-  localparam int Xlen = 64;
+module tb_operand_value_spill #(
+    parameter int Xlen = 64
+);
   localparam int PhysBits = 6;
   localparam int SpillEntries = 8;
   localparam int AllocateWidth = 2;
@@ -65,8 +66,8 @@ module tb_operand_value_spill;
     // the same completion. Both compact entries must capture the value.
     allocate_valid = '{1'b1, 1'b1};
     allocate_uop = '{32'h3333_0003, 32'h7777_0007};
-    allocate_op1 = '{64'h30, 64'h70};
-    allocate_op2 = '{64'h31, 64'h71};
+    allocate_op1 = '{Xlen'('h30), Xlen'('h70)};
+    allocate_op2 = '{Xlen'('h31), Xlen'('h71)};
     allocate_pr1 = '{6'd9, 6'd11};
     allocate_pr2 = '{6'd10, 6'd9};
     #1;
@@ -77,17 +78,17 @@ module tb_operand_value_spill;
     allocate_valid = '{default:1'b0};
     completion_valid[0] = 1'b1;
     completion_prd[0] = 6'd9;
-    completion_result[0] = 64'h9999;
+    completion_result[0] = Xlen'('h9999);
     #1;
     // Stored values change on the completion edge; dispatch muxes remain
     // responsible for merging completion in the cycle before this edge.
-    assert (read_op1[0] == 64'h30 && read_op2[1] == 64'h71);
+    assert (read_op1[0] == Xlen'('h30) && read_op2[1] == Xlen'('h71));
     @(posedge clock);
     #1;
     assert (read_valid[0] && read_valid[1]);
     assert (read_uop[0] == 32'h3333_0003 && read_uop[1] == 32'h7777_0007)
     else $fatal(1, "resident uop payload changed during completion capture");
-    assert (read_op1[0] == 64'h9999 && read_op2[1] == 64'h9999)
+    assert (read_op1[0] == Xlen'('h9999) && read_op2[1] == Xlen'('h9999))
     else $fatal(1, "multi-consumer completion capture failed");
     assert (read_pr1[0] == '0 && read_pr2[1] == '0 && read_pr2[0] == 6'd10 && read_pr1[1] == 6'd11)
     else $fatal(1, "spill-local waiting tags did not update with values");
@@ -95,10 +96,10 @@ module tb_operand_value_spill;
     // Two independent completion ports update opposite operands together.
     completion_valid = '{1'b1, 1'b1, 1'b0};
     completion_prd = '{6'd10, 6'd11, 6'd0};
-    completion_result = '{64'haaaa, 64'hbbbb, 64'h0};
+    completion_result = '{Xlen'('haaaa), Xlen'('hbbbb), Xlen'('h0)};
     @(posedge clock);
     #1;
-    assert (read_op2[0] == 64'haaaa && read_op1[1] == 64'hbbbb)
+    assert (read_op2[0] == Xlen'('haaaa) && read_op1[1] == Xlen'('hbbbb))
     else $fatal(1, "multi-port completion capture failed");
     assert (read_pr2[0] == '0 && read_pr1[1] == '0)
     else $fatal(1, "completed local tags remained live");
@@ -113,24 +114,34 @@ module tb_operand_value_spill;
     release_valid[0] = 1'b0;
     allocate_valid[0] = 1'b1;
     allocate_uop[0] = 32'h9999_0009;
-    allocate_op1[0] = 64'h9000;
-    allocate_op2[0] = 64'h9001;
+    allocate_op1[0] = Xlen'('h9000);
+    allocate_op2[0] = Xlen'('h9001);
     allocate_pr1[0] = 6'd12;
     completion_valid[0] = 1'b1;
     completion_prd[0] = 6'd9;
-    completion_result[0] = 64'hdead;
+    completion_result[0] = Xlen'('hdead);
     #1;
     assert (allocate_ready[0] && allocate_index[0] == 0);
     @(posedge clock);
     #1;
     completion_valid = '{default:1'b0};
     allocate_valid = '{default:1'b0};
-    assert (read_op1[0] == 64'h9000 && read_op2[0] == 64'h9001)
+    assert (read_op1[0] == Xlen'('h9000) && read_op2[0] == Xlen'('h9001))
     else $fatal(1, "allocation did not win release/update overlap");
     assert (read_uop[0] == 32'h9999_0009)
     else $fatal(1, "reclaimed spill slot retained the previous uop");
     assert (read_pr1[0] == 6'd12 && read_pr2[0] == '0)
     else $fatal(1, "reclaimed spill slot retained an old waiting tag");
+
+    // All three completion ports may report the same tag. The lowest port
+    // must supply the captured value, as it does for the ROB/CDB mux.
+    completion_valid = '{default:1'b1};
+    completion_prd = '{default:6'd12};
+    completion_result = '{Xlen'('h1111), Xlen'('h2222), Xlen'('h3333)};
+    @(posedge clock);
+    #1;
+    assert (read_op1[0] == Xlen'('h1111) && read_pr1[0] == '0)
+    else $fatal(1, "duplicate completion priority changed");
 
     flush = 1'b1;
     @(posedge clock);
