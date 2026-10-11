@@ -5,6 +5,8 @@
 // Instantiate queue interfaces here so distinct queue depths are preserved.
 module rapt_ieu_syn_top #(
     parameter int unsigned NumSlots = rapt_pkg::DispatchWidth,
+    parameter bit LocalIntegerWake = 1'b1,
+    parameter bit LocalMemoryWake = 1'b1,
     parameter int unsigned NumIntegerPorts = rapt_pkg::CoreConfig.integer_issue_ports,
     parameter int unsigned IntegerSystemPort = rapt_pkg::CoreConfig.integer_system_port,
     parameter int unsigned NumCompletions = rapt_pkg::CoreConfig.completion_ports,
@@ -19,6 +21,7 @@ module rapt_ieu_syn_top #(
     cancel_owner,
     input rapt_pkg::dispatch_slot_t dispatch[NumSlots],
     input rapt_pkg::completion_t completion[NumCompletions],
+    input rapt_pkg::completion_t local_integer_input[NumIntegerPorts+1],
     input rapt_pkg::completion_t branch_wake[NumCompletions],
     input rapt_pkg::completion_t memory_wake,
     cmu_bcast_if.in cmu_bcast,
@@ -71,7 +74,16 @@ module rapt_ieu_syn_top #(
     assign mdq_free[s] = disp_mdq.free_found[s];
     assign mdq_free_index[s] = disp_mdq.free_idx[s];
   end
+  // Backend only forwards accepted integer producers to local capture.
+  rapt_pkg::completion_t local_integer_wake[NumCompletions];
+  for (genvar p = 0; p < NumCompletions; p++) begin : g_local_wake
+    if (p < NumIntegerPorts) assign local_integer_wake[p] = local_integer_input[p];
+    else if (LocalMemoryWake && p == NumIntegerPorts + 1)
+      assign local_integer_wake[p] = local_integer_input[NumIntegerPorts];
+    else assign local_integer_wake[p] = '0;
+  end
   rapt_ieu #(
+      .LocalIntegerWake(LocalIntegerWake),
       .NumSlots(NumSlots),
       .NumIntegerPorts(NumIntegerPorts),
       .IntegerSystemPort(IntegerSystemPort),
@@ -87,6 +99,7 @@ module rapt_ieu_syn_top #(
       .cancel_owner,
       .dispatch,
       .completion,
+      .local_integer_wake,
       .branch_wake,
       .memory_wake,
       .cmu_bcast,

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Exercise real core miss replay and prove concurrent cache-to-bus miss ownership.
 
-Requires RAPT_AXI_OBSERVE and RAPT_L1D_MSHRS=2, with difftest disabled.
+Requires RAPT_AXI_OBSERVE and at least two L1D MSHRs, with difftest disabled.
 Architectural results are checked by the bare-metal program, bus ownership
 and internal miss overlap by this script. The external slave may serialize AR. This is not a differential ISA regression.
 """

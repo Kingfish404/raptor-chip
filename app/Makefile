@@ -228,6 +228,62 @@ coremark-sim: coremark-build ## Build and run CoreMark on NPC/sim via pk
 coremark-nemu: coremark-build ## Build and run CoreMark on NEMU via pk
 	@$(call _pk_run_with,nemu-run,$(APP_HOME)/build/rv$(XLEN)/coremark/coremark.elf)
 
+# CoreMark-PRO uses the unmodified upstream nine-workload suite. See its README
+# for license/run-rule limits and the separate validation/performance modes.
+CMP_HOME := $(APP_HOME)/benchmarks/coremark-pro
+CMP_WORKLOADS ?= cjpeg-rose7-preset core linear_alg-mid-100x100-sp loops-all-mid-10k-sp nnet_test parser-125k radix2-big-64k sha-test zip-test
+CMP_JOBS ?= 2
+CMP_TIMEOUT ?= 7200
+CMP_RUN_MODE ?= pk
+CMP_BIN_DIR = $(APP_HOME)/build/rv$(XLEN)/coremark-pro/$(CMP_RUN_MODE)/bin
+CMP_LOG_DIR ?= $(APP_LOG_DIR)/coremark-pro-$(CMP_RUN_MODE)-rv$(XLEN)
+CMP_PK_BUILD = $(APP_HOME)/build/pk-build-rv$(XLEN)-coremark-pro
+
+coremark-pro-build: ## Build all nine CoreMark-PRO pk ELFs with F/D
+	@$(MAKE) $(Q) -C $(CMP_HOME) build
+
+coremark-pro-baremetal-build: ## Build all nine CoreMark-PRO bare-metal binaries with F/D
+	@$(MAKE) $(Q) -C $(CMP_HOME) baremetal-build
+
+coremark-pro-pk-bins: coremark-pro-build
+	@$(MAKE) $(Q) -C $(APP_HOME)/pk PK_BUILD_PROFILE=coremark-pro $(CMP_PK_BUILD)/Makefile
+	+@set -e; for bench in $(CMP_WORKLOADS); do \
+		cp "$(APP_HOME)/build/rv$(XLEN)/coremark-pro/pk/bin/$$bench.elf" "$(CMP_PK_BUILD)/payload.elf"; \
+		rm -f "$(CMP_PK_BUILD)/pk_payload.o" "$(CMP_PK_BUILD)/pk"; \
+		env -u CFLAGS -u CPPFLAGS -u LDFLAGS $(MAKE) $(Q) -C $(CMP_PK_BUILD) -j$(NPROC) > /dev/null; \
+		$(OBJCOPY) -S -O binary "$(CMP_PK_BUILD)/pk" "$(APP_HOME)/build/rv$(XLEN)/coremark-pro/pk/bin/$$bench.bin"; \
+	done
+
+coremark-pro-sim: coremark-pro-pk-bins ## Run CoreMark-PRO via pk and write per-workload JSON/Markdown
+	@$(MAKE) $(Q) _coremark-pro-run-sim CMP_RUN_MODE=pk
+
+coremark-pro-baremetal-sim: coremark-pro-baremetal-build ## Run CoreMark-PRO bare metal and write JSON/Markdown
+	@$(MAKE) $(Q) _coremark-pro-run-sim CMP_RUN_MODE=baremetal
+
+_coremark-pro-run-sim:
+	@NPC_CMD=$$($(MAKE) $(Q) -C $(NSIM_HOME) ISA=riscv$(XLEN) VFLAGS="$(VFLAGS)" print-npc-exec | tail -1); \
+	$(PYTHON) $(CMP_HOME)/run.py --command "$$NPC_CMD $(ARGS)" \
+		--image-dir "$(CMP_BIN_DIR)" --log-dir "$(CMP_LOG_DIR)" --cwd "$(NSIM_HOME)" \
+		--workloads $(CMP_WORKLOADS) --jobs $(CMP_JOBS) --timeout $(CMP_TIMEOUT)
+
+coremark-pro-nemu: coremark-pro-pk-bins ## Run CoreMark-PRO via pk on NEMU and write JSON/Markdown
+	@$(MAKE) $(Q) _coremark-pro-run-nemu CMP_RUN_MODE=pk
+
+coremark-pro-baremetal-nemu: coremark-pro-baremetal-build ## Validate CoreMark-PRO bare metal on NEMU
+	@$(MAKE) $(Q) _coremark-pro-run-nemu CMP_RUN_MODE=baremetal
+
+_coremark-pro-run-nemu:
+	@$(PYTHON) $(CMP_HOME)/run.py --command "$(NEMU_HOME)/build/riscv$(XLEN)-nemu-interpreter $(ARGS)" \
+		--image-dir "$(CMP_BIN_DIR)" --log-dir "$(CMP_LOG_DIR)-nemu" --cwd "$(NEMU_HOME)" \
+		--workloads $(CMP_WORKLOADS) --jobs $(CMP_JOBS) --timeout $(CMP_TIMEOUT) --nemu-status
+
+coremark-pro-report: ## Regenerate the local workload report from CMP_LOG_DIR/results.json
+	@$(PYTHON) $(CMP_HOME)/run.py --report-only --log-dir "$(CMP_LOG_DIR)"
+
+.PHONY: coremark-pro-build coremark-pro-baremetal-build coremark-pro-pk-bins \
+    coremark-pro-sim coremark-pro-baremetal-sim _coremark-pro-run-sim \
+    coremark-pro-nemu coremark-pro-baremetal-nemu _coremark-pro-run-nemu coremark-pro-report
+
 microbench-build: ## Build MicroBench as a gem5 SE-compatible user ELF
 	@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/microbench build
 
@@ -730,7 +786,7 @@ demos-nemu: demos-build ## Build and run all demos on NEMU via pk
 # ============================================================================
 # Build all
 # ============================================================================
-all: tests-build demos-build coremark-build embench-build llm-bench-build ## Build everything
+all: tests-build demos-build coremark-build coremark-pro-build embench-build llm-bench-build ## Build everything
 
 # ============================================================================
 # Architecture / difftest variants
@@ -760,6 +816,17 @@ coremark-rv64:
 	@$(MAKE) $(Q) -C $(APP_HOME) coremark-sim ISA64=1
 coremark-nemu32: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. build-nemu32-difftest && $(MAKE) $(Q) -C $(APP_HOME) coremark-nemu ISA64=0
 coremark-nemu64: ; @$(MAKE) $(Q) -C $(APP_HOME)/.. build-nemu64-difftest && $(MAKE) $(Q) -C $(APP_HOME) coremark-nemu ISA64=1
+coremark-pro-rv32:
+	@$(MAKE) $(Q) -C $(APP_HOME)/.. app-coremark-pro-rv32
+coremark-pro-rv64:
+	@$(MAKE) $(Q) -C $(APP_HOME)/.. app-coremark-pro-rv64
+coremark-pro-nemu32:
+	@$(MAKE) $(Q) -C $(APP_HOME)/.. build-nemu32
+	@$(MAKE) $(Q) -C $(APP_HOME) coremark-pro-nemu ISA64=0
+coremark-pro-nemu64:
+	@$(MAKE) $(Q) -C $(APP_HOME)/.. build-nemu64
+	@$(MAKE) $(Q) -C $(APP_HOME) coremark-pro-nemu ISA64=1
+.PHONY: coremark-pro-rv32 coremark-pro-rv64 coremark-pro-nemu32 coremark-pro-nemu64
 embench-rv32:
 	@$(MAKE) $(Q) -C $(APP_HOME)/.. build-rv32
 	@$(MAKE) $(Q) -C $(APP_HOME) embench-sim ISA64=0

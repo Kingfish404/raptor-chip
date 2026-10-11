@@ -60,6 +60,9 @@ l1d_bus_if l1d_bus ();
   rapt_l1d #(
       .LineRefill(0)
   ) cache_dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .clock,
       .reset,
       .cmu_bcast,

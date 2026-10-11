@@ -12,6 +12,9 @@ Software test sources live in `app/tests/baremetal/` (freestanding RISC-V progra
 ## Maintaining verification drivers
 
 `make -C verify config-macro-check` audits unused/undefined preset macros and exactly one direction predictor; it also runs in `script-unittests`.
+`make -C verify bpu-config-check` additionally elaborates all four direction
+predictors in RV32/RV64 and verifies that a missing selection fails in both
+Verilator and Slang, including Verilator's `-Wno-fatal` mode.
 
 Directed module rules name only their testbench top and any non-RTL helpers. RTL resolves by module name: `rapt_pkg.sv` compiles first and every other `hdl/` file is a Verilator `-v` library (`XSIM_RTL_LIBRARY`; the xsim flow compiles `XSIM_RTL_ALL`). Adding, splitting or renaming RTL therefore needs no rule edits, and testbench stubs take precedence over library modules. All rules share `VERILATOR_DIRECTED_FLAGS` (warnings are not fatal; `make lint` owns lint); a rule appends only what it needs, such as `-G` parameters or `-CFLAGS -O0`. Guest programs compile with `GUEST_CPPFLAGS` (script runners through the exported `CPATH`) and take platform addresses from `app/lib/raptor_platform.h`. The RVA22S64 directed programs are one `RVA22S64_CASES` table (`RVA22S64_RV64_CASES` marks RV64-only sources); `make -C verify rva22s64-directed RVA22S64_XLEN=32|64 RVA22S64_NPC=...` runs them all; RVA22S64 and SQ-checkpoint targets pick the MROM from their own XLEN, so `ISA` need not match.
 
@@ -467,7 +470,13 @@ These checks fill and read every word of each cache, require all four same-set l
 
 `make -C verify verilator-cache-stream-rv32 verilator-cache-stream-rv64 verilator-cache-stream-l2-rv32 verilator-cache-stream-l2-rv64` runs the complete L1D/bus/AXI/optional-L2 path with randomized ready stalls. Tests check early critical-word completion, every resident word across full L1D capacity, CBO set colors and pending fills, 64-byte ZERO AW/W/B counts and delayed/error B, cancelled/error refills, and NA4/TOR/NAPOT boundary word fallback at both cache levels. Repeat with `XSIM_RAPT_CONFIG=small` to cover 16-byte lines. `verilator-cache-stream-rnp-rv32` checks the word-serial RNP bridge: the core keeps one burst owner, while the external RNP side uses one transaction per word and has no error-response encoding.
 
-The BOOM-style write-back preset has a separate L1D/L2 ownership regression: `make -C verify verilator-cache-stream-wb-l2-rv32 verilator-cache-stream-wb-l2-rv64 XSIM_RAPT_CONFIG=default-l2`. It checks dirty L1D releases on L2 eviction and CBO, D-side ownership after a store miss or a resident L2 hit, and an overlapping L1D write-back/CBO. `default-l2` also selects L1D write-back for the top-level core; the streaming targets explicitly set their `WriteBack` test parameter to exercise both policies.
+`default`, `default-w3`, `default-w4`, `default-w8`, and `default-l2` select write-back with four L1D MSHRs and two writeback buffers. `make -C verify verilator-cache-default-rv32 verilator-cache-default-rv64 XSIM_RAPT_CONFIG=<preset>` exercises that preset's policy without a parameter override. The older `cache-stream` targets explicitly select write-through; `cache-stream-wb` explicitly selects write-back.
+
+`make -C verify verilator-wb-ptw-rv32 verilator-wb-ptw-rv64` checks dirty PTE publication, partial store misses against outstanding I/D-side PTW reads, both I/D walkers waiting for an older bus store, and an I-side PTW write invalidating cache state while an older SQ B response arrives. The write-channel case exercises the bus contract; the current Svade walkers do not generate A/D writes. With `XSIM_RAPT_CONFIG=default-l2`, the test checks dirty PTE publication and partial store exclusion through L2 (the held outer-B cases require passthrough L2).
+
+`make -C verify sq-checkpoint-rv32 sq-checkpoint-rv64 SIM_BUILD_PROFILE=<profile> SQ_CHECKPOINT_KIND=cache` checks architectural save/load with dirty victims, eight conflicting L1D lines and a newer partial store after SQ drain. Run it with simulators built from `default` and `default-l2`; add `SQ_CHECKPOINT_REQUIRE_L2=1` for the latter to require captured dirty L2 data. Checkpoints overlay actual dirty L2/L1D SRAM data before committed SQ stores and undo the overlays when execution continues. The runner checks both restore and continued execution with NEMU difftest. The existing `word`, `fp64` and `unaligned` kinds cover pending SQ/AXI stores and split-store drain; use a fresh `BUILD_DIR` for each run.
+
+The BOOM-style write-back preset has a separate L1D/L2 ownership regression: `make -C verify verilator-cache-stream-wb-l2-rv32 verilator-cache-stream-wb-l2-rv64 XSIM_RAPT_CONFIG=default-l2`. It checks dirty L1D releases on L2 eviction and CBO, D-side ownership after a store miss or a resident L2 hit, and an overlapping L1D write-back/CBO. The preset-policy targets also cover this L1D/L2 path in both XLEN modes.
 
 `make -C verify verilator-l2-release-admission-rv32 verilator-l2-release-admission-rv64 XSIM_RAPT_CONFIG=default-l2` checks that a ReleaseData reserves L2 admission from its first beat through gaps between beats and ReleaseAck, then checks the released data remains resident.
 
@@ -521,9 +530,9 @@ Covers resident operand wakeup, dispatch-time completion forwarding, request bac
 make -C verify verilator-fmax-boundaries-rv32 verilator-fmax-boundaries-rv64 RAPT_CONFIG=default
 ```
 
-These assertion-enabled tests cover the integer/FP shared completion buffers, issue-to-execute registers, and the fixed-position rename packet stage before PRF reads. Checks include simultaneous completions without loss, capacity reservation, rejected completions, generation payloads, wrapped ROB selective cancellation, flush, and three-lane partial consumption with checkpoint retention. The shared endpoint accepts results only into previously reserved empty slots; it does not grant same-cycle dequeue credit. This adds latency and can insert system-port bubbles. The operand stage accepts a new batch when the old batch fully drains, and compacts a partially consumed suffix while preserving order.
+These assertion-enabled tests cover the reusable buffered completion arbiter, issue-to-execute registers, and the fixed-position rename packet stage before PRF reads. Checks include simultaneous completions without loss, capacity reservation, rejected completions, generation payloads, wrapped ROB selective cancellation, flush, and three-lane partial consumption with checkpoint retention. The arbiter fixture reserves empty slots before acceptance and does not grant same-cycle dequeue credit. The core now has a dedicated FP completion endpoint; the FP result queues are checked by `verilator-feu-ooo-rv32/rv64`. The operand stage accepts a new batch when the old batch fully drains, and compacts a partially consumed suffix while preserving order.
 
-`verilator-rou-fp-irq-compose-rv32/rv64` exercises the actual FP queue, execution, FPR writeback and recovery composition. `formal/zkt_cdb.sby` checks control independence from result data across the buffered arbiter using 12-step BMC; this is a bounded check, not an unbounded proof.
+`verilator-rou-fp-irq-compose-rv32/rv64` exercises the actual FP queue, execution, committed FPR storage and interrupt recovery composition. `formal/zkt_cdb.sby` checks control independence from result data across the buffered arbiter using 12-step BMC; this is a bounded check, not an unbounded proof.
 
 ### UART 平台一致性
 
@@ -559,6 +568,19 @@ python3 verify/scripts/mmio_transaction_check.py \
 
 ### L1D MSHR 与重放
 
+`make -C verify verilator-wb-mshr-rv32 verilator-wb-mshr-rv64` 检查真实 L1D/bus
+组合：Sv32/Sv39 冷页表遍历与四条独立回填重叠、同一物理行合并、跨 ID 交错响应、
+关键字提前返回、两个写回缓冲在 B 阻塞时允许无关读推进、同地址读等待写回、队列满
+背压、晚到本地存储与已接受 load 的让行/唤醒、存储与回填安装冲突、脏 PTE 发布、
+取消、权限错误和总线错误。
+`verilator-wb-mshr-l2-rv32/-rv64` 固定使用 `default-l2`，检查 MSHR 回填取得
+包含式 L2 的 D-client 所有权，以及脏受害行 Release/ReleaseAck。
+`verilator-mshr-ioq-translated-rv32/-rv64` 检查开启翻译后的 IOQ park/wake、
+年轻 load 前进和重放上下文保持。
+`verilator-l2tlb-cbo-rv32/-rv64` 还检查脏 L1D 下冷 L1 TLB、热 L2 TLB
+不会产生页表读取或无关写回。
+
+
 ```sh
 make -C verify verilator-mshr-cache-rv32 verilator-mshr-cache-rv64 \
   verilator-mshr-ioq-rv32 verilator-mshr-ioq-rv64 \
@@ -576,7 +598,7 @@ python3 verify/scripts/mshr_check.py --npc /path/to/riscv64-npc-sim \
   --mrom /path/to/mrom-data.bin --xlen 64 --output /tmp/raptor-chip-mshr-core64
 ```
 
-要求 sim 启用 `RAPT_AXI_OBSERVE`、双 MSHR，关闭 difftest。脚本检查实际运算结果、
+要求 sim 启用 `RAPT_AXI_OBSERVE`、至少两个 MSHR（default 为四个），关闭 difftest。脚本检查实际运算结果、
 AXI 响应和 cache→bus 两个同时存活的 miss owner；单独记录外部 AXI 是否重叠，
 不把串行 slave 的行为当成并行 DRAM 性能证据。`MSHR_OBS` 仅在仿真观测构建中生成。
 
@@ -698,3 +720,227 @@ requests, store permission precheck, byte coverage and per-port MMU/PMP store
 forwarding, both fetch response stages, recovery, MUL/DIV reuse, and TAGE auxiliary
 reads at both 8/7 and 10/9 index widths. Logs and `results.json` are saved under
 the build directory. `--filter tb_tage` restricts the Python runner to predictor tests.
+
+## Shared L2 TLB
+
+`RAPT_L2TLB_ENTRIES=256` enables the shared direct-mapped instruction/data
+translation cache in every preset except `small` and `middle` (which set zero).
+This is independent of the L2 data-cache setting. Run both XLEN variants:
+
+```sh
+make -C verify verilator-l2tlb-rv32 verilator-l2tlb-rv64
+make -C verify verilator-cached-ptw-rv32 verilator-cached-ptw-rv64
+make -C verify verilator-l2tlb-l1i-epoch-rv32 verilator-l2tlb-l1i-epoch-rv64
+make -C verify verilator-l2tlb-l1i-sret-rv32 verilator-l2tlb-l1i-sret-rv64
+make -C verify verilator-l2tlb-cbo-rv32 verilator-l2tlb-cbo-rv64
+```
+
+The table test covers all 256 slots, direct-mapped replacement, ASID/global
+matching, root/PBMTE/SBE separation, canonical addresses, full Sv39 PPNs,
+arbitration and flush priority. The two-walker test checks cross-client reuse,
+Svade faults, PBMT, superpage subpages, concurrent misses/fills, captured request
+context, and cancellation during accepted reads or pending fills. The integration
+targets enable the shared-cache port on real L1I/L1D instances and exercise
+mapping-epoch changes, SRET cancellation and CBO translation/flush semantics.
+Existing targets for those testbenches retain the bypass configuration.
+
+### Floating-point out-of-order execution
+
+The FP scheduler reuses `rapt_iq` with three value/tag operands and arithmetic-unit availability. `rapt_fp_registers` renames all 32 FPRs onto ROB result slots; `rapt_fu_result_queue` reserves completion capacity before launch. FP values and accrued flags become architectural only for the actual commit prefix.
+
+```sh
+make -C verify verilator-fp-registers-rv32 verilator-fp-registers-rv64
+make -C verify verilator-feu-ooo-rv32 verilator-feu-ooo-rv64
+make -C verify verilator-rou-fp-ooo-rv32 verilator-rou-fp-ooo-rv64
+make -C verify verilator-ioq-fp-ooo-rv32 verilator-ioq-fp-ooo-rv64
+make build-rv32 build-rv64 BUILD_PROFILE=fp-ooo-check
+make -C verify rva22s64-fp-ooo-run RVA22S64_XLEN=32 RVA22S64_CORE_PROFILE=fp-ooo-check
+make -C verify rva22s64-fp-ooo-run RVA22S64_XLEN=64 RVA22S64_CORE_PROFILE=fp-ooo-check
+```
+
+The block checks cover f0, RAW/WAR/WAW, same-group renaming, FMA's third source, GPR/FP tag separation, independent completion during DIV, continuous fixed-pipeline launch, randomized mixed-unit traffic, backpressure, canceled/late owners, multi-FP commit and precise flags.
+
+`make -C verify/xsim/fpu all` also checks arithmetic against host references; ADD/SUB, MUL, FMA, S/D conversion and both integer-conversion directions include continuous streams, bubbles and flushes. The host-fenv arithmetic checks cover RNE/RTZ/RDN/RUP; FP-to-integer also checks RMM.
+
+IOQ checks cover younger FLH/FLW/FLD completion, A/B payload selection (including B becoming head before its response), boxing, cancellation and removal without duplicate publication; rerun with `VERILATOR_DIRECTED_FLAGS="--binary --timing --assert -Wno-fatal -j 1 -DRAPT_IOQ_LOAD_RESPONSE_STAGE=1"` for registered responses.
+
+The full-core `fp_ooo.S` checks renamed FP store data, mixed precision, integer round trips and an illegal-rounding trap with younger completed work. Its runner uses NEMU difftest with delay 0/7/63 and seeds 1/42. Existing FP privilege, context, page retry, nested IRQ and checkpoint regressions remain applicable. These functional checks do not establish FPGA frequency or area.
+
+Validation on 2026-10-09 used the `default` preset, assertions enabled, and RV32/RV64 simulators built with `BUILD_PROFILE=fp-ooo-validated` from the working tree based on `f35ea31e`. The generated C++ used `-O0 -g0`; these runs measure functional behavior only. Memory-delay tests used delay maxima 0/63 and seed 1. The longer directed cases used a 180-second host timeout.
+
+| Check | Result |
+| --- | --- |
+| FP rename, FEU mixed traffic, ROU/FEU commit/recovery, IRQ composition | Passed in RV32/RV64; FEU checked 1,241/1,245 completions |
+| FP IOQ A/B publication and head transition | Passed in RV32/RV64 with `RAPT_IOQ_LOAD_RESPONSE_STAGE=0/1` |
+| Existing 15 `app/tests/fp` programs | 60/60 NEMU differential runs passed |
+| Directed FP/privilege/PMP/cross-page programs (16 XLEN/case combinations) | 32/32 NEMU differential runs passed, including RV64 page retry and nested IRQ |
+| `sq-checkpoint-rv32/rv64 SQ_CHECKPOINT_KIND=fp64` | Save, restore and continued execution passed |
+| Arithmetic references | ADD/SUB, MUL, FMA, conversion and integer conversion passed serial and continuous-stream checks; DIV/SQRT passed its existing 300,000-case check |
+| `sta-check RAPT_CONFIG=default XLEN=32/64 MEMORY=sram/dff` | All four Slang elaborations passed; this is not STA |
+| `config-macro-check`; Verilator lint with `LINT_EXTRA=-Wno-fatal` | Passed; lint retains unused-signal, width and naming warnings |
+
+The preset elaboration sweep also passed `small`, `middle`, `default-l2`, `default-w3`, `default-w4` and `default-w8` in both XLENs and memory selections (28/32 combinations including `default`). `large` fails on an unsupported L1I SRAM shape; the pre-change source snapshot reproduces that failure. All 35 modified/new standalone SystemVerilog files for this change passed formatting. A subsequent repair replaced the BPU's formatter-incompatible preprocessor error with an explicit invalid module selection and formatted `tb_operand_value_spill_banked.sv`; repository-wide formatting and `git diff --check` now pass. `make -C verify bpu-config-check` checks all four predictors and rejects missing selections in both XLENs using Verilator (including nonfatal warnings) and Slang, with 20 cases passing. No whole-core STA or FPGA PPA result is claimed.
+
+### Floating-point cycle performance
+
+`scripts/fp_ooo_performance.py` builds `app/tests/baremetal/fp_ooo_perf.S` once per XLEN/case/precision and runs identical images on the pre/post FP-OoO simulators with NEMU difftest enabled. It requires equal retired-instruction counts inside the measured region and reports `baseline_cycles / candidate_cycles`. Each kernel has four warmup iterations followed by 64 measured iterations; CSR timing, loop and call overhead are included, while initialization, UART output and final self-checks are excluded. Independent arithmetic repeatedly overwrites the same destination to exercise WAW renaming; the chain cases have true RAW dependencies. These are synthetic kernels, not estimates of general application speedup.
+
+The 2026-10-09 comparison used worktree snapshots based on `f35ea31e`, the build-time `default` preset (two-wide ordered stages, 32-entry ROB, ITLB/DTLB/L2TLB = 32/16/256, 16 KiB L1I/L1D, write-back L1D, L2 disabled), behavioral SRAM, and bare machine mode. The compiled Verilator source hashes prove that both configurations and every memory RTL source match. The snapshots include the earlier integer-completion and memory/TLB changes on both sides. Later worktree changes to the preset and write-back/PTW logic are excluded. Both host builds used Verilator 5.052 and an effective C++ `-O1 -g0`; host execution time is not a performance metric.
+
+With AXI random delay disabled, the measured cycle counts were:
+
+| Kernel | Baseline cycles | Candidate cycles | Cycle speedup |
+| --- | ---: | ---: | ---: |
+| Integer control, RV32/RV64 | 2,490 | 2,490 | 1.000x |
+| Independent ADD, S/D, RV32/RV64 | 10,615 | 1,087 | 9.765x |
+| ADD dependency chain, S/D, RV32/RV64 | 10,615 | 5,179 | 2.050x |
+| Independent MUL, S/D, RV32/RV64 | 11,639 | 1,092 | 10.658x |
+| Independent FMA, S/D, RV32/RV64 | 15,735 | 1,092 | 14.409x |
+| FMA dependency chain, S/D, RV32/RV64 | 15,735 | 10,299 | 1.528x |
+| DIV stream, S, RV32/RV64 | 9,079 | 7,483 | 1.213x |
+| DIV stream, D, RV32/RV64 | 16,503 | 14,907 | 1.107x |
+| DIV + 64 integer ADDs, S/D, RV32/RV64 | 4,599 / 6,455 | 3,396 / 5,252 | 1.354x / 1.229x |
+| DIV + 16 independent FP ADDs, S/D, RV32/RV64 | 12,791 / 14,647 | 1,923 / 3,779 | 6.652x / 3.876x |
+| Load/add/store, S/D, RV32 | 6,007 / 6,775 | 999 / 2,481 | 6.013x / 2.731x |
+| Load/add/store, S/D, RV64 | 6,007 / 6,007 | 1,032 / 999 | 5.821x / 6.013x |
+| CoreMark integer control, RV32 | 225,487 | 225,123 | 1.00162x |
+| CoreMark integer control, RV64 | 228,463 | 228,126 | 1.00148x |
+
+The full matrix passed 160/160 NEMU differential runs: 19 microbenchmark images plus CoreMark, two XLENs, two revisions, and delay maxima 0/63 with seed 1. The second memory seed and preloaded-output diagnostics add 12/12 passing runs. Each compared pair has the same guest binary hash and ROI retired-instruction count. One RV32 delayed CoreMark run reached its initial 180-second host timeout while printing results; it passed when rerun with a 600-second limit, and both attempt logs are retained. At delay 63, CoreMark ROI cycles are 264,596 → 264,241 (RV32) and 266,654 → 265,989 (RV64); the integer control changes by only +0.13% to +0.25% in cycle speed across the four samples.
+
+The nonallocating partial-store path is an exception: RV64 single-precision load/add/store with AXI delay 0–63 and seed 1 takes 17,292 → 17,650 cycles (2.07% more cycles); seed 42 takes 17,120 → 17,352 (1.36% more). In this kernel the output is only written during warmup. The tested L1D allocates full-word stores, but a missing 32-bit store in RV64 goes to the bus without allocation. With `--preload-output`, output words are first read into cache: the same RV64 S kernel takes 6,007 → 1,386 cycles (4.334x) with either delay 0 or 63. The preloaded D kernel takes 6,007 → 999 (6.013x). This controlled comparison identifies the memory-policy bottleneck; the slowdown should not be hidden by averaging it into compute-only results.
+
+CoreMark uses the same `ITERATIONS=1`, baseline `-O2` guest image for each pair and passes CRC checks. Its simulated duration is below the required ten seconds, so these are cycle comparisons, not official CoreMark scores. No target clock frequency, synthesis timing, area or FPGA utilization was measured; cycle speedups do not establish a wall-clock speedup after implementation.
+
+### Upstream floating-point workload sampling (2026-10-09)
+
+The [CoreMark-PRO integration](../app/benchmarks/coremark-pro/README.md) builds
+the unchanged upstream nine-workload suite with F/D for RV32/RV64, using GCC
+13.2.0, `-O2`, one context and one worker. All 36 pk/bare-metal ELFs built, and
+all 18 bare-metal reference-validation runs passed on QEMU 8.2.2 `virt`.
+The four FP workloads also passed full NEMU validation and separate `-v0`
+performance-image runs. The initial NEMU check passed 16/18 workloads; both
+`zip-test` runs exceeded the 1800-second host timeout during dataset initialization.
+After moving NEMU's environment lookups outside its instruction loop, the same
+zip images pass in 837.331 seconds (RV32) and 791.343 seconds (RV64). All 18 full
+NEMU reference checks now pass. PC/register snapshots confirm the expensive
+initialization repeatedly scans a growing string; no benchmark source or input
+was changed. Per-workload status directories and phase-aware timeout reports
+make subsequent slow runs diagnosable. The repair evidence is in
+`build/coremark-pro-fixes/{report.md,results.json,manifest.json}`.
+Software-interpreter cycles and these host runtimes are not RTL timing.
+
+`scripts/coremark_pro_performance.py` uses those NEMU runs to capture architectural
+checkpoints at 10%, 50%, and 90% of each performance ROI's instruction stream.
+Both RTL implementations restore the same checkpoint, warm for 4096 instructions,
+and measure approximately 16384 instructions at identical retirement boundaries.
+Assertions and NEMU difftest remain enabled. All 24 selected pairs / 48 RTL runs
+passed. These sparse windows measure individual execution phases; they do not
+estimate full-program speedup or an aggregate/certified benchmark score.
+
+The matched hardware snapshots are the same ones as the synthetic FP comparison:
+two-wide, ROB32, 16 KiB L1I/L1D, writeback L1D, no L2, ITLB32/DTLB16/L2TLB256,
+behavioral SRAM, bare M-mode, memory delay 0 and seed 1. Both derive from
+`f35ea31ebd4044bcca2f1087e82b7762df121be7` with dirty source snapshots identified
+by hashes and archives. Later independent memory/TLB changes are excluded.
+
+| Workload | RV32 FP-window speedup | RV64 FP-window speedup |
+|---|---:|---:|
+| `linear_alg-mid-100x100-sp` | 5.644–5.783× | 3.526–4.081× |
+| `loops-all-mid-10k-sp` | 2.114–4.480× | 3.765–5.725× |
+| `nnet_test` | 2.788–2.901× | 3.837–4.180× |
+| `radix2-big-64k` | 2.059–2.827× | 3.646–4.559× |
+
+FFT's 10% window contains only integer memory-copy work and measures 1.000×
+in both XLENs; its two FP windows form the range above. Ranges are observed
+samples, not confidence intervals or workload averages. The comparison covers
+the combined renaming, scheduling and arithmetic-pipeline changes and cannot
+attribute the whole gain to OoO alone. No Fmax, area or FPGA speedup is claimed.
+
+An RV32D sample exposed an assertion false positive: a split load in `MA_DONE`
+coincided with a new store handoff, which conservatively raised `load_in_sq`.
+The blocked-unissued-load assertion now applies only in `MA_IDLE`; synthesized
+logic is unchanged. The minimal waveform, source-only correction, RV32/RV64
+split-load regressions, and successful differential reruns establish the scope
+of that fix. RV32 FFT cycles also match exactly between the original checkpoint
+exit and the runner's bounded-cycle exit.
+
+Local evidence is in `build/coremark-pro-sampled-provenance/{report.md,results.json,manifest.json}`,
+with raw runs in `build/coremark-pro-sampled*-rv{32,64}` and full reference logs
+in `build/coremark-pro-qemu-system-validation`. Build artifacts and waveforms
+remain ignored. Run `python3 scripts/coremark_pro_performance.py --help` from
+`verify/` for required simulator/image/report paths and sampling controls.
+Its report checks are covered by:
+
+```sh
+python3 -m unittest discover -s app/benchmarks/coremark-pro -p 'test_*.py'
+python3 -m unittest discover -s verify/scripts -p 'test_coremark_pro_performance.py'
+make -C verify verilator-lsu-split-fault-rv32 verilator-lsu-split-fault-rv64
+```
+
+Embench F/D integration additionally built 76 application images and 19 LiteX
+images, passed all 38 bare-metal NEMU reference checks, and passed RV32/RV64
+pk hard-float smoke tests. Default SRAM Slang elaboration and configuration
+macro checks passed in both XLENs. Repository-wide `make format-check FORMAT_SCOPE=all`
+passes after the BPU configuration-guard and testbench formatting repairs above.
+
+Example invocation, using already built RV64 simulators and boot ROM:
+
+```sh
+python3 verify/scripts/fp_ooo_performance.py \
+  --xlen 64 \
+  --baseline /tmp/raptor-fp-baseline/sim/build/fp-perf-before/riscv64-npc-sim \
+  --candidate sim/build/fp-perf-after/riscv64-npc-sim \
+  --reference nemu/build/ref/riscv64_ref_defconfig/riscv64-nemu-interpreter-so \
+  --mrom verify/build/fp-ooo-app-fixed-rv64/mrom-rv64/mrom-data.bin \
+  --coremark abstract-machine/app/am-kernels/benchmarks/coremark_eembc/build/coremark-riscv64-npc.bin \
+  --output verify/build/fp-ooo-perf-rv64
+```
+
+Use `--cases load_add_store --preload-output` for the cache-resident diagnostic and `--seed 42 --delays 63` for the second delayed-memory sample. RV32 uses the matching simulator, reference, ROM and CoreMark image. Full commands, image/binary hashes, ROI instruction counts and logs are in the ignored `verify/build/fp-ooo-perf-rv32/results.json` and `fp-ooo-perf-rv64/results.json`. Exact compiled RTL archives, Verilator input manifests and host build logs are in `verify/build/fp-ooo-perf-provenance/`; these identify the measured dirty revisions more precisely than the shared Git base.
+
+### Embench cycle benefit from the FP changes
+
+`scripts/embench_performance.py` uses the same archived RTL models and matched
+instruction-window method as CoreMark-PRO above. It first validates each complete
+benchmark in NEMU and profiles every instruction between `start_trigger` and
+`stop_trigger`. All 38 RV32/RV64 reference runs passed, and the profiled ROI lengths
+exactly match the standalone interpreter counters. Eighteen of the 19 workloads
+execute no FP instructions; wikisort executes only 216 FP arithmetic instructions
+per ROI, or 0.01653% of RV32 instructions and 0.01426% of RV64 instructions.
+
+The selected 114 pairs / 228 RTL window runs passed differential checking.
+Fifteen workloads have exactly identical cycles at all sampled positions in both
+XLENs. The remaining sampled ranges are:
+
+| Workload | RV32 speedup | RV64 speedup |
+|---|---:|---:|
+| `picojpeg` | 1.000202× | 1.000128–1.000129× |
+| `sglib-combined` | 1.006049–1.030962× | 1.006022–1.027151× |
+| `slre` | 1.000134–1.000147× | 1.000217–1.000295× |
+| `wikisort` | 1.000000–1.006373× | 1.000000–1.006276× |
+
+Sglib's exact same 50% instruction interval also passed with approximately 32K
+warmup instructions, measuring 1.017360× on RV32 and 1.014748× on RV64. It executes
+no FP arithmetic, so its small gain cannot be attributed to FP arithmetic
+throughput; the experiment does not isolate the mechanism of this combined change.
+
+Wikisort additionally passed four complete RTL runs from reset, including the
+normal warm-cache pass and result verification. Its full timed ROI changes from
+1,191,841 to 1,190,339 cycles on RV32 (1.001262×, 0.1260% fewer cycles), and from
+1,322,835 to 1,321,227 on RV64 (1.001217×, 0.1216% fewer cycles).
+
+Three initial checkpoints began on a store and failed identically in both RTL
+versions because REF resynchronization can precede that store's buffered memory
+write. The selected RV32 edn 90% and RV32/RV64 sglib 10% checkpoints start exactly
+one unchanged guest instruction later. The original failures are retained. The
+RV64 longer-warmup diagnostic needed the same adjustment while preserving its
+exact measured instruction interval. Assertions and difftest remain enabled.
+
+These are local phase measurements plus full wikisort timing, not a whole-suite
+Embench score. The combined Embench/CoreMark-PRO evidence is in
+`build/fp-benchmark-benefit/{report.md,results.json,manifest.json}`; it records
+280 selected RTL runs plus four longer-warmup diagnostics, source and image
+hashes, configuration, commands and exclusions. Raw data is in
+`build/embench-fp-*`. Run `python3 verify/scripts/embench_performance.py --help`
+from the repository root for simulator-manifest and sampling options.

@@ -7,6 +7,7 @@
 
 #include "Vrapt_fpu_convert_tb.h"
 #include "verilated.h"
+#include "../pipeline_host_check.h"
 
 static Vrapt_fpu_convert_tb* top;
 static uint64_t rng = 0x243f6a8885a308d3ULL;
@@ -190,6 +191,20 @@ int main(int argc, char** argv) {
     tick();
   }
 
+  for (bool narrow : {false, true}) {
+    top->narrow = narrow;
+    failures += check_pipeline_stream(top, iterations, [&](int cycle) {
+      uint64_t operand = narrow ? generate64(random64()) : 0xffffffff00000000ULL | generate32(random64());
+      if (!narrow && cycle % 37 == 0) operand &= 0xffffffffULL;
+      int rm = random64() % 4;
+      top->operand = operand; top->rounding_mode = rm;
+      const Result expected = narrow ? host_narrow(operand, rm) : host_widen(operand);
+      return std::make_pair(expected.bits, expected.flags);
+    }, [&](uint64_t expected, uint64_t actual) {
+      return expected == actual || (narrow ? is_nan32(expected) && is_nan32(actual)
+                                          : is_nan64(expected) && is_nan64(actual));
+    });
+  }
   printf("TOTAL=%d FAILS=%d (NaN payload-tolerant, %d NaN cases OK)\n",
          iterations, failures, nan_cases);
   top->final();

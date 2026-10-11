@@ -3,6 +3,8 @@ bpu	default-w4	64	2	0
 bpu	default-l2	64	2	0
 fpr	default-w4	*	4	0
 fpr	default-l2	*	4	0
+feu	default-w4	64	0	5000
+l2tlb	default-w4	64	2	0
 rnu	default-w4	64	64	0
 l1i	default-w4	*	32	0
 l1i	default-l2	*	32	0

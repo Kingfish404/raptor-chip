@@ -106,6 +106,8 @@
 
 `define RAPT_ITLB_ENTRIES 32
 `define RAPT_DTLB_ENTRIES 32
+// Shared instruction/data second-level translation cache; zero bypasses it.
+`define RAPT_L2TLB_ENTRIES 256
 
 // L2 unified cache: 64B line * 2048 sets * 1 way = 128 KiB
 `ifndef RAPT_L2_EN

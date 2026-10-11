@@ -122,7 +122,7 @@ module tb_stream_queue #(
 );
   logic clock = 0;
   always #5 clock = ~clock;
-  logic [6:0] done;
+  logic [10:0] done;
   wire sweep_done;
   if (SweepDepth > 0) begin : g_sweep
     wire [SweepDepth-1:0] depth_done;
@@ -203,6 +203,19 @@ module tb_stream_queue #(
       clock,
       done[6]
   );
+  // FP arithmetic pipelines use non-power-of-two credit queues. Exercise
+  // both capacity contracts with the single-reader/single-writer storage.
+  for (genvar i = 0; i < 4; i++) begin : g_single_lane
+    stream_queue_case #(
+        .Depth(i < 2 ? 6 : 12),
+        .InWidth(1),
+        .OutWidth(1),
+        .ReclaimSameCycle((i % 2) == 0)
+    ) single_lane (
+        .clock,
+        .done(done[7+i])
+    );
+  end
   initial begin
     wait ((&done) && sweep_done);
     $display("PASS: randomized stream widths, wrap, full reclaim and flush");

@@ -22,10 +22,16 @@ module rapt_iq #(
     parameter bit                     RebalancePorts  = 1'b0,
     parameter bit                     UniformSimplePorts = 1'b0,
     parameter bit                     ReclaimOnIssue  = 1'b0,
+    parameter bit                     ThirdOperand   = 1'b0,
+    parameter bit                     FilterResources = 1'b0,
+    parameter int unsigned            NumResources = 1,
     // Same-cycle CDB operand wake. Mask must exclude any completion port
     // this queue produces combinationally (BRQ skips the branch port).
     parameter bit                     ComboCdbWake    = 1'b0,
     parameter bit                     ConfirmCdbWake  = 1'b0,
+    // A local producer may capture resident operands before its global packet
+    // reaches the registered broadcast. Allocation still uses the global view.
+    parameter bit                     LocalOperandWake = 1'b0,
     parameter logic [31:0]            ComboWakePorts  = 32'hFFFF_FFFF,
     parameter unsigned                ROB_SIZE        = Cfg.rob_entries,
     parameter unsigned                PLEN            = rapt_pkg::index_bits(Cfg.phys_regs),
@@ -33,6 +39,7 @@ module rapt_iq #(
     parameter unsigned                XLEN            = Cfg.xlen
 ) (
     input CompletionT completion[NumCompletions],
+    input CompletionT local_operand_wake[NumCompletions] = '{default: '0},
     input clock,
     input reset,
     // One-cycle, producer-validated recovery event. Ages use the ROB ring,
@@ -58,6 +65,7 @@ module rapt_iq #(
 
     // Execution availability per attached function-unit port.
     input logic [NumIssuePorts-1:0] issue_enable,
+    input logic [NumResources-1:0] resource_ready = '1,
 
     // Issue ports: combinational view of the oldest registered-ready entries.
     // Fast-confirmed operands become eligible on the following cycle.
@@ -113,7 +121,7 @@ module rapt_iq #(
         if (!(reset || cmu_bcast.flush_pipe) && alloc_slot[i] >= 0)
           iq_pc[i] <= dispatch[alloc_slot[i]].uop.pc;
     end else begin : g_flop_probe
-      assign iq_pc[i] = iq_uop[i].pc;
+      assign iq_pc[i] = XLEN'(iq_uop[i].pc);
     end
   end
 `endif
@@ -185,6 +193,8 @@ module rapt_iq #(
   logic [   PLEN-1:0]              iq_pr2                 [        IQ_SIZE];
   logic [IQ_SIZE-1:0]              iq_pr1_busy;
   logic [IQ_SIZE-1:0]              iq_pr2_busy;
+  logic [IQ_SIZE-1:0] pr3_ready, resources_ready;
+  logic [XLEN-1:0]                 iq_vl[IQ_SIZE];
   logic [IQ_SIZE-1:0]              iq_pr1_fast;
   logic [IQ_SIZE-1:0]              iq_pr2_fast;
   // A fast-wake identity is small per-entry control state with concurrent
@@ -198,7 +208,8 @@ module rapt_iq #(
   logic [ ROBLen-1:0]              iq_dep_tag             [NumDependencies] [IQ_SIZE];
   logic [GenBits-1:0]              iq_dep_generation      [NumDependencies] [IQ_SIZE];
   // === Unified CDB view for operand wakeup ===
-  // All sources use one typed completion array.
+  // The global array also carries dependency completion. The optional local
+  // array only captures resident operand data and busy state at the next edge.
   localparam int unsigned NWB = NumCompletions;
   logic            wb_valid [NWB];
   logic [PLEN-1:0] wb_prd   [NWB];
@@ -213,6 +224,8 @@ module rapt_iq #(
     wb_hit = 1'b0;
     for (int p = 0; p < NWB; p++) begin
       wb_hit |= (pr != '0) && wb_valid[p] && (wb_prd[p] == pr);
+      if (LocalOperandWake)
+        wb_hit |= (pr != '0) && local_operand_wake[p].valid && local_operand_wake[p].prd == pr;
     end
   endfunction
 
@@ -246,8 +259,15 @@ module rapt_iq #(
     wb_val = dflt;
     for (int p = NWB - 1; p >= 0; p--) begin
       if ((pr != '0) && wb_valid[p] && (wb_prd[p] == pr)) wb_val = wb_result[p];
+      if (LocalOperandWake && (pr != '0) && local_operand_wake[p].valid
+          && local_operand_wake[p].prd == pr)
+        wb_val = local_operand_wake[p].result;
     end
   endfunction
+
+  if (LocalOperandWake && (ComboCdbWake || ConfirmCdbWake)) begin : g_invalid_local_wake
+    $error("Local operand wake requires registered-only issue readiness");
+  end
 
   // === Fast load-use helpers (same protocol as the former RS) ===
   function automatic logic fast_wake_match(input logic [PLEN-1:0] pr);
@@ -322,9 +342,48 @@ module rapt_iq #(
       assign registers_ready = !iq_pr1_busy[i] && !iq_pr2_busy[i];
     end
     assign pr_ready[i] = !dependencies_busy(i) && registers_ready
+        && pr3_ready[i] && resources_ready[i]
         && (!iq_pr1_fast[i] || (ConfirmCdbWake && pr1_fast_confirm[i]))
         && (!iq_pr2_fast[i] || (ConfirmCdbWake && pr2_fast_confirm[i]));
     assign iq_ready_vec[i] = iq_valid[i] && pr_ready[i];
+  end
+
+  // Optional third source and unit availability use the same age/selection
+  // machinery as the integer queues. Readiness changes only select identities;
+  // accepted completions independently capture waiting operand values.
+  for (genvar e = 0; e < IQ_SIZE; e++) begin : g_optional_operands
+    if (ThirdOperand) begin : g_third
+      logic [PLEN-1:0] tag;
+      logic busy;
+      assign pr3_ready[e] = !busy;
+      always_ff @(posedge clock) begin
+        if (reset || cmu_bcast.flush_pipe) busy <= 1'b0;
+        else if (alloc_slot[e] >= 0) begin
+          tag <= dispatch[alloc_slot[e]].pr3;
+          busy <= dispatch[alloc_slot[e]].pr3 != '0
+              && !wb_hit(dispatch[alloc_slot[e]].pr3);
+        end else if (iq_valid[e] && wb_hit(tag)) busy <= 1'b0;
+      end
+      always_ff @(posedge clock) begin
+        if (!(reset || cmu_bcast.flush_pipe)) begin
+          if (alloc_slot[e] >= 0)
+            iq_vl[e] <= wb_val(dispatch[alloc_slot[e]].pr3, dispatch[alloc_slot[e]].op3);
+          else if (iq_valid[e] && busy && wb_hit(tag)) iq_vl[e] <= wb_val(tag, iq_vl[e]);
+        end
+      end
+    end else begin : g_two
+      assign pr3_ready[e] = 1'b1;
+      assign iq_vl[e] = '0;
+    end
+    if (FilterResources) begin : g_resources
+      logic [NumResources-1:0] mask_q;
+      always_ff @(posedge clock)
+        if (!(reset || cmu_bcast.flush_pipe) && alloc_slot[e] >= 0)
+          mask_q <= NumResources'(dispatch[alloc_slot[e]].resources);
+      assign resources_ready[e] = |(mask_q & resource_ready);
+    end else begin : g_unfiltered
+      assign resources_ready[e] = 1'b1;
+    end
   end
 
   logic [IQ_SIZE-1:0] claimed, baseline_claimed, select_valid, select_valid_nc;
@@ -539,6 +598,7 @@ module rapt_iq #(
     // Cancellation gates only this valid bit; the selected identity and
     // payload above do not depend on the recovery transaction.
     assign issue[p].valid = |selected[p] && !cancelled[index];
+    assign issue[p].op3 = iq_vl[index];
     // Resolve every entry's operand (confirmed fast load, same-cycle wake or
     // stored value) in parallel, then reduce with the one-hot selection. The
     // late select drives only the final AND-OR instead of an encoded index

@@ -13,7 +13,7 @@ VFLAGS := --cc --exe --build -Wno-fatal -Wno-lint -Wno-WIDTH \
           -CFLAGS -frounding-math -I$(HDL_INC) -I$(CONFIG) \
           --top-module rapt_fpu_convert_tb
 
-obj_dir/tb: $(DUTS) rapt_fpu_convert_tb.sv tb_host_diff.cpp
+obj_dir/tb: $(DUTS) rapt_fpu_convert_tb.sv tb_host_diff.cpp ../pipeline_host_check.h
 	+$(VERILATOR) $(VFLAGS) $(DUTS) rapt_fpu_convert_tb.sv tb_host_diff.cpp -o tb
 
 run: obj_dir/tb

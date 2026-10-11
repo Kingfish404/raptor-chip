@@ -1,9 +1,9 @@
 `include "rapt.svh"
 
-// One-at-a-time FMUL/FMA endpoint with one shared significand multiplier.
-// FMUL and FMA capture the product in stage 2. Their four/eight-cycle
-// pipelines, rounding and flags remain independent.
-// No arbitration/retry latency: a request is accepted only when both are idle.
+// Streaming FMUL/FMA endpoint with one shared significand multiplier.
+// Both operations use the product in stage 2. Pad the four-stage FMUL result
+// to the FMA's eight-stage latency so a mixed stream has one ordered result
+// per cycle and never collides at the shared result endpoint.
 module rapt_fpu_mul_fma #(
     parameter bit TARGET_DOUBLE = 1'b0
 ) (
@@ -80,10 +80,28 @@ module rapt_fpu_mul_fma #(
       .product_valid(fma_product_valid),
       .product(product)
   );
-  assign result_valid = mul_result_valid || fma_result_valid;
-  assign result = mul_result_valid ? mul_result : fma_result;
-  assign flags = mul_result_valid ? mul_flags : fma_flags;
+  logic [3:0] mul_delay_valid;
+  logic [63:0] mul_delay_result[4];
+  logic [4:0] mul_delay_flags[4];
+  always_ff @(posedge clock) begin
+    if (reset || flush) mul_delay_valid <= '0;
+    else begin
+      mul_delay_valid <= {mul_delay_valid[2:0], mul_result_valid};
+      if (mul_result_valid) begin
+        mul_delay_result[0] <= mul_result;
+        mul_delay_flags[0] <= mul_flags;
+      end
+      for (int stage = 1; stage < 4; stage++)
+      if (mul_delay_valid[stage-1]) begin
+        mul_delay_result[stage] <= mul_delay_result[stage-1];
+        mul_delay_flags[stage] <= mul_delay_flags[stage-1];
+      end
+    end
+  end
+  assign result_valid = mul_delay_valid[3] || fma_result_valid;
+  assign result = mul_delay_valid[3] ? mul_delay_result[3] : fma_result;
+  assign flags = mul_delay_valid[3] ? mul_delay_flags[3] : fma_flags;
 
   `RAPT_SVA(clock, reset || flush, FP_PRODUCT_ONE_OWNER, !(mul_product_valid && fma_product_valid))
-  `RAPT_SVA(clock, reset || flush, FP_PRODUCT_ONE_RESULT, !(mul_result_valid && fma_result_valid))
+  `RAPT_SVA(clock, reset || flush, FP_PRODUCT_ONE_RESULT, !(mul_delay_valid[3] && fma_result_valid))
 endmodule

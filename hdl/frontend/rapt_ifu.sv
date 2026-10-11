@@ -60,10 +60,18 @@ module rapt_ifu #(
     logic [XLEN-1:0] cause, tval;
     logic predicted_taken;
     logic [XLEN-1:0] predicted_npc;
+    logic [XLEN-1:0] request_npc;
+`ifdef RAPT_FETCH_LOOKAHEAD
+    logic [XLEN-1:0] aux_pc;
+`endif
   } fetch_response_t;
   fetch_response_t live_response, response, response_q;
+  fetch_response_t response_fifo[2];
+  logic response_read_q, response_write_q;
+  logic [1:0] response_count_q;
   logic response_valid, response_valid_q;
-  logic capture_response, response_redirect, response_stop;
+  logic capture_response, pop_response, response_redirect, response_stop;
+  logic response_kill_younger;
   logic [XLEN-1:0] request_nextpc;
   always_comb begin
     live_response = '0;
@@ -87,9 +95,32 @@ module rapt_ifu #(
     live_response.predicted_taken = ifu_bpu.taken;
     live_response.predicted_npc = ifu_bpu.npc;
   end
+  assign response_q = response_fifo[response_read_q];
+  assign response_valid_q = response_count_q != 0;
   assign response = ResponseStage ? response_q : live_response;
   assign response_valid = ResponseStage ? response_valid_q : ifu_l1i.valid;
   assign response_pending_o = ResponseStage && response_valid_q;
+
+  logic response_primary_taken;
+  logic [XLEN-1:0] response_primary_npc;
+`ifdef RAPT_BPU_DIRP_TAGE
+`ifdef RAPT_FETCH_LOOKAHEAD
+  // Request-side primary prediction can precede the previous packet's history
+  // update. At the FIFO head the history belongs to this packet. Reuse the
+  // otherwise idle auxiliary port for a first conditional, with the PC already
+  // captured in aux_pc_q. Its immediate supplies the target without another BTB
+  // lookup. This adds no raw-cache-data -> predictor-address path.
+  wire refresh_primary = ResponseStage && response_valid && is_cond[0] && !response.trap;
+  assign response_primary_taken = refresh_primary ? ifu_bpu.aux_taken : response.predicted_taken;
+  assign response_primary_npc = refresh_primary ? cond_target[0] : response.predicted_npc;
+`else
+  assign response_primary_taken = response.predicted_taken;
+  assign response_primary_npc = response.predicted_npc;
+`endif
+`else
+  assign response_primary_taken = response.predicted_taken;
+  assign response_primary_npc = response.predicted_npc;
+`endif
 
   // Predict only the packet boundary here. In particular, lookahead permission
   // and auxiliary direction must NOT feed this request-address calculation.
@@ -97,7 +128,7 @@ module rapt_ifu #(
   // decompressing an instruction or computing its target. A not-taken branch
   // can therefore continue without a correction bubble. Unavailable words and
   // taken auxiliary branches are resolved by the registered response stage
-  // before any younger response is accepted.
+  // before any younger response is packed into the instruction stream.
   function automatic logic request_control(input logic [15:0] first);
     case (first[1:0])
       2'b11: return first[6:0] inside {`RAPT_OP_B_TYPE_, `RAPT_OP_JAL___, `RAPT_OP_JALR__};
@@ -107,7 +138,6 @@ module rapt_ifu #(
       default: return 1'b0;
     endcase
   endfunction
-`ifdef RAPT_FETCH_LOOKAHEAD
   function automatic logic request_conditional(input logic [15:0] first);
     case (first[1:0])
       2'b11: return first[6:0] == `RAPT_OP_B_TYPE_;
@@ -115,7 +145,6 @@ module rapt_ifu #(
       default: return 1'b0;
     endcase
   endfunction
-`endif
   // A synchronous BTB prediction only belongs to the packet's first PC.
   // Conditional branches have the auxiliary direction predictor and direct
   // jumps derive their target from the immediate, but a later JALR has neither.
@@ -130,6 +159,7 @@ module rapt_ifu #(
   logic [15:0] request_halfword[WindowHalfwords];
   logic [OffsetBits-1:0] request_offset[Width+1];
   logic request_stopped[Width+1];
+  logic request_control_seen[Width+1];
   assign request_halfword[0] = live_response.inst_n0[15:0];
   assign request_halfword[1] = live_response.inst_n0[31:16];
   assign request_halfword[2] = pc_ifu[1] ? live_response.inst_n1[31:16]
@@ -155,22 +185,30 @@ module rapt_ifu #(
 `endif
   assign request_offset[0] = 0;
   assign request_stopped[0] = 1'b0;
+  assign request_control_seen[0] = 1'b0;
   for (genvar s = 0; s < Width; s++) begin : g_request_boundary
     wire [OffsetBits-1:0] step = request_offset[s] < OffsetBits'(RequestHalfwords)
         && request_halfword[WindowIndexBits'(request_offset[s])][1:0] != 2'b11
         ? OffsetBits'(1) : OffsetBits'(2);
-    wire split_before_indirect = request_offset[s] != 0
+    wire request_is_control = request_offset[s] < OffsetBits'(RequestHalfwords)
+        && request_control(request_halfword[WindowIndexBits'(request_offset[s])]);
+    wire request_is_conditional = request_offset[s] < OffsetBits'(RequestHalfwords)
+        && request_conditional(request_halfword[WindowIndexBits'(request_offset[s])]);
+    // Predict the not-taken prefix through its first conditional, matching the
+    // packing stage's single-control budget. The auxiliary predictor resolves
+    // a taken non-first branch after the registered response boundary.
+    wire split_before_control = request_offset[s] != 0
         && request_offset[s] < OffsetBits'(RequestHalfwords)
-        && request_indirect(request_halfword[WindowIndexBits'(request_offset[s])]);
+        && (request_indirect(request_halfword[WindowIndexBits'(request_offset[s])])
+            || (request_control_seen[s] && request_is_control));
     assign request_offset[s+1] = !request_stopped[s]
         && request_offset[s] < OffsetBits'(RequestHalfwords)
-        && !split_before_indirect
+        && !split_before_control
         && {1'b0, request_offset[s]} + {1'b0, step} <= (OffsetBits+1)'(RequestHalfwords)
         ? request_offset[s] + step : request_offset[s];
     assign request_stopped[s+1] = request_stopped[s]
-        || split_before_indirect
-        || (request_offset[s] < OffsetBits'(RequestHalfwords)
-            && request_control(request_halfword[WindowIndexBits'(request_offset[s])]));
+        || split_before_control || (request_is_control && !request_is_conditional);
+    assign request_control_seen[s+1] = request_control_seen[s] || request_is_control;
   end
 `ifdef RAPT_FETCH_LOOKAHEAD
   logic [XLEN-1:0] aux_pc_live, aux_pc_q;
@@ -180,30 +218,76 @@ module rapt_ifu #(
   always_comb begin
     aux_pc_live = pc_ifu;
     for (int s = 1; s < Width; s++) begin
-      if (!request_stopped[s] && request_offset[s] < OffsetBits'(RequestHalfwords)
+      if (!request_stopped[s] && !request_control_seen[s]
+          && request_offset[s] < OffsetBits'(RequestHalfwords)
           && request_conditional(
               request_halfword[WindowIndexBits'(request_offset[s])]
           ))
         aux_pc_live = pc_ifu + XLEN'({request_offset[s], 1'b0});
     end
   end
-  always_ff @(posedge clock) if (capture_response) aux_pc_q <= aux_pc_live;
+  assign aux_pc_q = response_q.aux_pc;
 `endif
+  logic successor_hit;
+  logic [XLEN-1:0] packet_successor;
+  if (ResponseStage) begin : g_successor
+    // The table reads only the registered request PC. Training starts from a
+    // registered response, so no raw cache-data or reverse-ready path feeds
+    // the request prediction. A stale hint is corrected by the existing FIFO
+    // head check before any younger packet becomes visible.
+    rapt_fetch_successor #(
+        .XLEN(XLEN)
+    ) predictor (
+        .clock,
+        .reset,
+        .invalidate(cmu_bcast.fence_i),
+        .query_pc(pc_ifu),
+        .hit(successor_hit),
+        .successor(packet_successor),
+        .train(recv_ready && !response_stop),
+        .train_pc(response.pc),
+        .train_successor(nextpc)
+    );
+  end else begin : g_no_successor
+    assign successor_hit = 1'b0;
+    assign packet_successor = '0;
+  end
   assign request_nextpc = ifu_bpu.taken ? ifu_bpu.npc
+      : successor_hit ? packet_successor
       : pc_ifu + XLEN'({request_offset[Width], 1'b0});
-  assign response_redirect = ResponseStage && recv_ready
-      && (response_stop || nextpc != pc_ifu);
-  assign capture_response = ResponseStage && (!response_valid_q || recv_ready)
-      && !response_redirect && !blocked && !redirect_event && !recovery.pending
+  // Each packet owns the successor used when it was captured. The live request
+  // PC may already be two packets ahead and cannot identify a correction.
+  // Detect correction independently of downstream readiness so a stalled head
+  // can cancel speculation without creating a ready -> cache-consumed path.
+  assign response_kill_younger = ResponseStage && response_valid_q
+      && (response_stop || nextpc != response_q.request_npc);
+  assign response_redirect = recv_ready && response_kill_younger;
+  assign capture_response = ResponseStage && response_count_q < 2
+      && !response_kill_younger && !blocked && !redirect_event && !recovery.pending
       && !reset && ifu_l1i.valid;
+  assign pop_response = ResponseStage && recv_ready;
   always_ff @(posedge clock) begin
-    if (reset || redirect_event || recovery.pending) begin
-      response_valid_q <= 1'b0;
-    end else if (capture_response) begin
-      response_q <= live_response;
-      response_valid_q <= 1'b1;
-    end else if (recv_ready) begin
-      response_valid_q <= 1'b0;
+    if (reset || redirect_event || recovery.pending || response_redirect) begin
+      response_count_q <= 0;
+      response_read_q <= 0;
+      response_write_q <= 0;
+    end else begin
+      case ({
+        capture_response, pop_response
+      })
+        2'b10: response_count_q <= response_count_q + 1'b1;
+        2'b01: response_count_q <= response_count_q - 1'b1;
+        default: ;
+      endcase
+      if (pop_response) response_read_q <= !response_read_q;
+      if (capture_response) begin
+        response_write_q <= !response_write_q;
+        response_fifo[response_write_q] <= live_response;
+        response_fifo[response_write_q].request_npc <= request_nextpc;
+`ifdef RAPT_FETCH_LOOKAHEAD
+        response_fifo[response_write_q].aux_pc <= aux_pc_live;
+`endif
+      end
     end
   end
   function automatic logic is_zimop(input logic [31:0] inst);
@@ -305,7 +389,16 @@ module rapt_ifu #(
     end
   end
 `ifdef RAPT_FETCH_LOOKAHEAD
+`ifdef RAPT_BPU_DIRP_TAGE
+  // The auxiliary tables are already read continuously. Gate their response
+  // only with registered FIFO occupancy, not combinational packet decisions.
+  // Otherwise synthesis can share mutually masked decode/cancel terms through
+  // the returned direction and form a combinational loop across IFU and BPU.
+  // Packing still selects at most one conditional and gates history on accept.
+  assign ifu_bpu.aux_query = ResponseStage ? response_valid_q : secondary_query;
+`else
   assign ifu_bpu.aux_query = secondary_query;
+`endif
   assign ifu_bpu.aux_pc = ResponseStage ? aux_pc_q : candidate_pc[secondary_index];
 `endif
   always_comb begin
@@ -322,8 +415,8 @@ module rapt_ifu #(
       fetched[s].inst = raw[s];
       fetched[s].pc = candidate_pc[s];
       fetched[s].pnpc = sequential[s];
-      fetched[s].predicted_taken = is_cond[s] && s == 0 && response.predicted_taken;
-      if (s == 0 && response.predicted_taken) fetched[s].pnpc = response.predicted_npc;
+      fetched[s].predicted_taken = is_cond[s] && s == 0 && response_primary_taken;
+      if (s == 0 && response_primary_taken) fetched[s].pnpc = response_primary_npc;
 `ifdef RAPT_FETCH_LOOKAHEAD
       if (s != 0 && is_cond[s]) begin
         if (ifu_bpu.aux_taken) fetched[s].pnpc = cond_target[s];
@@ -351,7 +444,7 @@ module rapt_ifu #(
       stopped |= !available[s] || split_before_indirect || is_serial[s]
           || (is_control[s] && control_seen)
           || (is_control[s] && (!is_cond[s] || fetched[s].predicted_taken))
-          || (s == 0 && (response.predicted_taken || response.trap));
+          || (s == 0 && (response_primary_taken || response.trap));
       control_seen |= is_control[s];
     end
   end
@@ -395,7 +488,7 @@ module rapt_ifu #(
   assign ifu_bpu.pc_update = redirect_event
       || (ResponseStage ? capture_response || response_redirect : recv_ready);
   assign ifu_l1i.consumed = ResponseStage ? capture_response : recv_ready;
-  assign ifu_l1i.cancel = redirect_event || recovery.pending || response_redirect;
+  assign ifu_l1i.cancel = redirect_event || recovery.pending || response_kill_younger;
   assign ifu_l1i.pc = pc_ifu;
   assign ifu_l1i.invalid = cmu_bcast.fence_i;
   // Ordinary reads use pc_ifu's registered address. L1I already reads the
@@ -476,7 +569,7 @@ module rapt_ifu #(
       pmu_ifu_icache_stall <= held_count == 0 && !blocked && !response_valid && !ifu_l1i.valid;
       pmu_ifu_empty_stall <= blocked;
       pmu_fetch_response_consume <= recv_ready;
-      pmu_fetch_bpu_taken <= recv_ready && response.predicted_taken;
+      pmu_fetch_bpu_taken <= recv_ready && response_primary_taken;
       pmu_fetch_target_steer <= recv_ready
           && nextpc != response.pc + XLEN'(2 * offset[fetched_count]);
 `endif
@@ -511,6 +604,9 @@ module rapt_ifu #(
   `RAPT_SVA_IMPLY(clock, reset, IFU_RECOVERY_NO_STREAM_OUTPUT, recovery.pending, !ifu_idu.valid[0])
   `RAPT_SVA_IMPLY(clock, reset, IFU_RESPONSE_NO_WRONG_PACKET, response_redirect,
                   !capture_response && ifu_l1i.cancel)
-  `RAPT_SVA_IMPLY(clock, reset, IFU_RESPONSE_NO_OVERWRITE, capture_response,
-                  !response_valid_q || recv_ready)
+  `RAPT_SVA_IMPLY(clock, reset, IFU_RESPONSE_NO_OVERWRITE, capture_response, response_count_q < 2)
+  `RAPT_SVA(clock, reset, IFU_RESPONSE_COUNT_BOUND, response_count_q <= 2)
+  `RAPT_SVA_IMPLY(clock, reset, IFU_RESPONSE_NO_UNDERFLOW, pop_response, response_valid_q)
+  `RAPT_SVA_IMPLY(clock, reset, IFU_RESPONSE_FULL_STOPS_CAPTURE, response_count_q == 2,
+                  !capture_response)
 endmodule

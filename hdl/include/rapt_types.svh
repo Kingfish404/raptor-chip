@@ -27,6 +27,8 @@
   WordT csr_wdata; \
   logic fp_flags_valid; \
   logic [4:0] fp_flags; \
+  logic fp_wen; \
+  logic [63:0] fp_result; \
   logic wen; \
   logic [5:0] alu; \
   WordT sq_waddr; \
@@ -63,8 +65,10 @@
   WordT stable_op1; \
   logic stable_op1_valid; \
   WordT op2; \
+  WordT op3; \
   PhysT pr1; \
   PhysT pr2; \
+  PhysT pr3; \
   PhysT prd; \
   PhysT prs; \
   logic [NumDeps-1:0] dep_valid; \
@@ -72,6 +76,9 @@
   GenerationT [NumDeps-1:0] dep_generation; \
   RobT dest; \
   GenerationT generation; \
+  logic [2:0][63:0] fp_value; \
+  logic [2:0][$bits(RobT):0] fp_tag; \
+  logic [31:0] resources; \
   } Name;
 
 `define RAPT_ISSUE_PACKET_TYPE(Name, UopT, WordT, PhysT, RobT, GenerationT) \
@@ -80,6 +87,7 @@
   UopT uop; \
   WordT op1; \
   WordT op2; \
+  WordT op3; \
   RobT dest; \
   GenerationT generation; \
   PhysT prd; \

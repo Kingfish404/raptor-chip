@@ -42,7 +42,7 @@ if (CheckOperandIndependence) begin : g_operand_pair
   rapt_rou #(
       .ValidateCompletionInputs(1'b1)
   ) shadow (
-      .writeback_idle(tb_writeback_idle),
+      .writeback_done(tb_writeback_idle),
       .writeback_drain(shadow_writeback_drain),
       .completion(shadow_completion),
       .completion_owner(shadow_completion_owner),

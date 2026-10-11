@@ -775,6 +775,11 @@ def main(board):
         help="Reuse the previous routed checkpoint for incremental implementation.",
     )
     parser.add_target_argument(
+        "--vivado-no-timing-driven",
+        action="store_true",
+        help="Disable synthesis timing optimization; retain implementation and STA constraints.",
+    )
+    parser.add_target_argument(
         "--vivado-sys-setup-margin-ns", type=float, default=0.0,
         help="Extra system setup margin during implementation; restore original constraints for final reports.",
     )
@@ -873,7 +878,7 @@ def main(board):
     # from its kwargs (CLI default "default") and would overwrite a value set
     # directly on the toolchain object before builder.build().
     toolchain_argdict = dict(parser.toolchain_argdict)
-    # Optimize placement before routing the CPU and the 300 MHz MIG UI.
+    # Optimize placement before routing the CPU and the board-specific MIG UI.
     # LiteX otherwise only runs phys_opt after routing, when replication and
     # movement have fewer opportunities. Explicit CLI directives still win.
     if args.with_mig and toolchain_argdict.get("vivado_post_place_phys_opt_directive") is None:
@@ -891,6 +896,7 @@ def main(board):
     toolchain_argdict["vivado_synth_directive"] = (
         str(toolchain_argdict.get("vivado_synth_directive") or "default")
         + KU15P_SYNTH_OPTIONS
+        + (" -no_timing_driven" if args.vivado_no_timing_driven else "")
     )
     final_setup_command = ku15p_final_setup_command(
         args.vivado_sys_setup_margin_ns, args.vivado_sys_final_wns_ns)

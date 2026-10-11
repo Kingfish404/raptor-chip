@@ -66,6 +66,8 @@ module rapt_ieu_pipe_alu_csr #(
   assign wb_alu_csr.csr_wen = csr_write_enable;
   assign wb_alu_csr.csr_wdata = csr_wdata;
   assign wb_alu_csr.fp_flags_valid = 1'b0;
+  assign wb_alu_csr.fp_wen = 1'b0;
+  assign wb_alu_csr.fp_result = '0;
   assign wb_alu_csr.fp_flags = '0;
   assign wb_alu_csr.trap = iss.uop.trap;
   assign wb_alu_csr.tval = iss.uop.tval;

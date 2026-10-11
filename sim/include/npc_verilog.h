@@ -23,8 +23,7 @@
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _wrap_ysyxsoc))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt__M1))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_core__M1))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_backend))
-// The symbol header includes the actual parameter-specialized ROU class.
+// The symbol header includes the actual parameter-specialized backend and ROU classes.
 #include CONCAT_HEAD(CONCAT(TOP_NAME, __Syms))
 #define VERILOG_CPU(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->adapter->cpu->core->m)
 #define VERILOG_BACKEND(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->adapter->cpu->core->backend->m)
@@ -65,8 +64,7 @@
 #else
 #error Unsupported Verilator rapt hierarchy
 #endif
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_backend))
-// The symbol header includes the actual parameter-specialized ROU class.
+// The symbol header includes the actual parameter-specialized backend and ROU classes.
 #include CONCAT_HEAD(CONCAT(TOP_NAME, __Syms))
 #define VERILOG_CPU(m) (top->rootp->raptSoC->cpu->core->m)
 #define VERILOG_BACKEND(m) (top->rootp->raptSoC->cpu->core->backend->m)
@@ -145,7 +143,7 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->minstret = csr + MINSTRET;
   npc->minstreth = csr + MINSTRETH;
 
-  npc->fpr = (uint64_t *)&VERILOG_BACKEND(fpr_bank__DOT__monitor_regs);
+  npc->fpr = (uint64_t *)&VERILOG_ROU(fp_registers__DOT__architectural);
   npc->fcsr = (uint32_t *)(csr + FCSR);
 
   npc->clint_mtime = (uint64_t *)&VERILOG_CLINT(mtime);

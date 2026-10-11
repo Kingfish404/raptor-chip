@@ -23,6 +23,9 @@ module tb_l1d_byte_rom;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .clock(clock),
       .cmu_bcast(cmu_bcast),
       .lsu_l1d(lsu_l1d),
@@ -160,6 +163,9 @@ module tb_l1d_cmo_permissions;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -424,6 +430,9 @@ module tb_l1d_flush_ordered;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .clock(clock),
       .cmu_bcast(cmu_bcast),
       .lsu_l1d(lsu_l1d),
@@ -586,6 +595,9 @@ module tb_l1d_io_size;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -735,6 +747,9 @@ module tb_l1d_load_pbmt;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -932,6 +947,9 @@ module tb_l1d_load_footprint;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -1151,6 +1169,9 @@ module tb_l1d_permission_stage;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .coherent_request(1'b0),
       .coherent_write(1'b0),
       .coherent_ready(),
@@ -1350,6 +1371,9 @@ module tb_l1d_plic_width;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -1447,6 +1471,9 @@ module tb_l1d_pma;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -1560,6 +1587,15 @@ module tb_l1d_ptw_axi_error;
   pmp_update_if pmp_update ();
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
+  // This manual AXI harness carries the same captured-request context as
+  // the common L1D harness; the architectural CSR source is not the request.
+  assign lsu_l1d.rcontext = '{mmu_en: csr_bcast.dmmu_en,
+      eff_priv: (csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv)
+          ? csr_bcast.mpp : csr_bcast.priv,
+      sum: csr_bcast.sum, mxr: csr_bcast.mxr, pbmte: csr_bcast.menvcfg_pbmte,
+      asid: csr_bcast.satp_asid, version: 8'd0};
+  assign lsu_l1d.rcontext_b = lsu_l1d.rcontext;
+  assign exu_l1d.mem_context = lsu_l1d.rcontext;
   mem_link_if #(
       .XLEN(XLEN),
       .ID_W(4)
@@ -1571,6 +1607,9 @@ module tb_l1d_ptw_axi_error;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -1825,6 +1864,9 @@ module tb_l1d_ptw_error;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -2006,6 +2048,9 @@ module tb_l1d_ptw_pma;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -2095,6 +2140,9 @@ module tb_l1d_read_error;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -2389,6 +2437,9 @@ module tb_l1d_reservation_external;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .coherent_request(1'b0),
       .coherent_write(1'b0),
       .coherent_ready(),
@@ -2681,6 +2732,9 @@ module tb_l1d_store_coherence #(
       .WriteBack(WriteBack),
       .LineRefill(LineRefill)
   ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .coherent_request(coherent_request),
       .coherent_write(coherent_write),
       .coherent_ready(coherent_ready),
@@ -2790,8 +2844,8 @@ module tb_l1d_store_coherence #(
           "hot store TLB lookup requested a global dirty-line drain");
     dut.u_dstlb.valid[0] = 1'b0;
     #1;
-    check(dut.wb_global_request && dut.wb_hold,
-          "store TLB miss lost its page-table coherence drain");
+    check(!dut.wb_global_request && !dut.wb_hold,
+          "store TLB miss drained before an actual PTE read");
     exu_l1d.valid = 1'b0;
     exu_l1d.mmu_en = 1'b0;
     lsu_l1d.raddr = XLEN'(TestAddr);
@@ -2806,8 +2860,8 @@ module tb_l1d_store_coherence #(
           "hot load TLB lookup requested a global dirty-line drain");
     dut.u_dtlb.valid[0] = 1'b0;
     #1;
-    check(dut.wb_global_request && dut.wb_hold, $sformatf(
-          "load TLB miss lost page-table drain state=%0d hit=%b miss=%b req=%b hold=%b dirty=%b",
+    check(!dut.wb_global_request && !dut.wb_hold, $sformatf(
+          "load TLB miss drained before PTE read state=%0d hit=%b miss=%b req=%b hold=%b dirty=%b",
           dut.l1d_state,
           dut.tlb_hit,
           dut.load_tlb_miss,
@@ -2981,8 +3035,10 @@ module tb_l1d_store_coherence #(
     l1d_bus.werr = 0;
     repeat (64) begin
       tick(1);
-      check(writeback_error && dut.dirty_any && dut.wb_busy && !writeback_idle,
-            "targeted error lost dirty ownership");
+      check(
+          writeback_error && dut.wb_busy && !writeback_idle
+            && dut.wb_addr == held_addr && dut.wb_data == held_data,
+          "targeted error lost dirty ownership");
       check(!l1d_bus.wvalid && !l1d_bus.arvalid && !lsu_l1d.rready && !lsu_l1d.wready,
             "targeted error retried or completed the blocked miss");
     end
@@ -3561,7 +3617,7 @@ module tb_l1d_store_coherence #(
       tick(512);
       check(writeback_error && !writeback_idle && !coherent_ready,
             "writeback error did not hold maintenance");
-      check(dut.dirty_any && dut.wb_busy && !l1d_bus.wvalid,
+      check(dut.wb_busy && !l1d_bus.wvalid && dut.wb_data[31:0] == 32'h1234_abcd,
             "writeback error lost dirty ownership or retried");
       check(mem_word[0][0] == expected_word[0][0], "failed write changed backing memory");
       targeted_writeback_error(0, 1);
@@ -3598,6 +3654,9 @@ module tb_l1d_store_pbmt;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -3953,6 +4012,9 @@ module tb_l1d_trap_owner;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -4087,8 +4149,14 @@ module tb_l1d_write_error;
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
   rapt_l1d #(
+      // This case checks precise B errors on synchronous write-through stores.
+      // Dirty write-back errors have a separate fail-stop regression.
+      .WriteBack(1'b0),
       .LineRefill(0)
   ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),

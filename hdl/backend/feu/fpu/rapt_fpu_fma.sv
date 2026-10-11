@@ -1,6 +1,6 @@
 `include "rapt_fp_ops.svh"
 
-// Eight-stage, one-operation-at-a-time IEEE-754 fused multiply-add unit.
+// Eight-stage IEEE-754 fused multiply-add pipeline (one launch per cycle).
 //
 // Stage 1: decode and normalize operands.
 // Stage 2: calculate the mantissa product from registered operands.
@@ -12,7 +12,7 @@
 // Stage 8: round and pack the architectural result.
 //
 // The unit deliberately exposes a ready/valid boundary. The FPU execution
-// pipe holds the ROB metadata while this unit is occupied and writes the FPR
+// pipe carries each ROB owner alongside its result and publishes completion
 // only with result_valid. This creates real RTL timing boundaries; no FPGA
 // multicycle exception is required for the FMA datapath.
 
@@ -60,7 +60,7 @@ module rapt_fpu_prefix_adder #(
   end
 endmodule
 
-// Standalone compatibility wrapper: no changes to the six-stage API.
+// Standalone compatibility wrapper around the eight-stage pipeline.
 module rapt_fpu_fma #(
     parameter bit TARGET_DOUBLE = 1'b0
 ) (
@@ -191,6 +191,18 @@ module rapt_fpu_fma_pipeline #(
   logic [63:0] round_result_q, packed_result_c;
   logic [4:0] round_flags_q, packed_flags_c;
 
+  // Stage-1 control/addend metadata must cross the product register with its
+  // own operation. Keeping it only in normalization registers would combine
+  // the previous product with the next launch's exponent, addend or flags.
+  typedef struct packed {
+    logic [MantBits-1:0] mant_c;
+    logic signed [13:0] exp_a, exp_b, exp_c;
+    logic product_sign, addend_sign, product_zero, addend_zero, special;
+    logic [63:0] special_result;
+    logic [4:0] special_flags;
+    logic [2:0] rounding_mode;
+  } product_metadata_t;
+  product_metadata_t normalize_metadata_q;
   logic [MantBits-1:0] s1_mant_a_q, s1_mant_b_q, s1_mant_c_q;
   logic [ProductBits-1:0] s1_product_q;
   logic signed [13:0] s1_exp_a_q, s1_exp_b_q, s1_exp_c_q;
@@ -708,8 +720,7 @@ module rapt_fpu_fma_pipeline #(
 
   always_comb s4_leading_one_c = find_leading_one(s3_magnitude_q);
 
-  assign ready = !(normalize_valid_q || s1_valid_q || align_valid_q || s2_valid_q
-    || s3_valid_q || s4_valid_q || round_valid_q || s5_valid_q);
+  assign ready = !reset && !flush;
   assign result = result_q;
   assign flags = flags_q;
   assign result_valid = s5_valid_q;
@@ -735,22 +746,30 @@ module rapt_fpu_fma_pipeline #(
       align_valid_q <= s1_valid_q;
       s1_valid_q <= normalize_valid_q;
       normalize_valid_q <= valid && ready;
-      if (normalize_valid_q) s1_product_q <= product_c;
       if (valid && ready) begin
         s1_mant_a_q <= mant_a_c;
         s1_mant_b_q <= mant_b_c;
-        s1_mant_c_q <= mant_c_c;
-        s1_exp_a_q <= exponent_a_c;
-        s1_exp_b_q <= exponent_b_c;
-        s1_exp_c_q <= exponent_c_c;
-        s1_product_sign_q <= product_sign_c;
-        s1_addend_sign_q <= addend_sign_c;
-        s1_product_zero_q <= a_zero_c || b_zero_c;
-        s1_addend_zero_q <= c_zero_c;
-        s1_special_q <= special_c;
-        s1_special_result_q <= special_result_c;
-        s1_special_flags_q <= special_flags_c;
-        s1_rounding_mode_q <= rounding_mode;
+        normalize_metadata_q <= '{
+            mant_c: mant_c_c, exp_a: exponent_a_c, exp_b: exponent_b_c, exp_c: exponent_c_c,
+            product_sign: product_sign_c, addend_sign: addend_sign_c,
+            product_zero: a_zero_c || b_zero_c, addend_zero: c_zero_c,
+            special: special_c, special_result: special_result_c,
+            special_flags: special_flags_c, rounding_mode: rounding_mode};
+      end
+      if (normalize_valid_q) begin
+        s1_product_q <= product_c;
+        s1_mant_c_q <= normalize_metadata_q.mant_c;
+        s1_exp_a_q <= normalize_metadata_q.exp_a;
+        s1_exp_b_q <= normalize_metadata_q.exp_b;
+        s1_exp_c_q <= normalize_metadata_q.exp_c;
+        s1_product_sign_q <= normalize_metadata_q.product_sign;
+        s1_addend_sign_q <= normalize_metadata_q.addend_sign;
+        s1_product_zero_q <= normalize_metadata_q.product_zero;
+        s1_addend_zero_q <= normalize_metadata_q.addend_zero;
+        s1_special_q <= normalize_metadata_q.special;
+        s1_special_result_q <= normalize_metadata_q.special_result;
+        s1_special_flags_q <= normalize_metadata_q.special_flags;
+        s1_rounding_mode_q <= normalize_metadata_q.rounding_mode;
       end
       if (s1_valid_q) begin
         align_product_term_q <= align_product_term_c;

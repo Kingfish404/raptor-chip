@@ -16,6 +16,29 @@ package rapt_pkg;
     logic [7:0] version;
   } mem_context_t;
 
+  // One arbitrated L2 translation-cache port per walker. Requests remain
+  // stable until ready; only lookups receive a registered response.
+  typedef struct packed {
+    logic valid;
+    logic fill;
+    logic [`RAPT_XLEN-1:12] vtag;
+    logic [8:0] asid;
+    logic [`RAPT_CSR_SATP_PPN_W-1:0] root;
+    logic pbmte;
+    logic sbe;
+    logic [`RAPT_XLEN-1:10] ptag;
+    logic [6:0] pte;
+    logic [1:0] pbmt;
+  } l2tlb_req_t;
+
+  typedef struct packed {
+    logic valid;
+    logic hit;
+    logic [`RAPT_XLEN-1:10] ptag;
+    logic [6:0] pte;
+    logic [1:0] pbmt;
+  } l2tlb_rsp_t;
+
   // RISC-V implicit return-stack hints, applied to expanded instructions.
   // Different link registers on JALR denote pop-then-push (coroutine switch).
   typedef struct packed {logic push, pop;} ras_action_t;
@@ -79,7 +102,7 @@ package rapt_pkg;
       steer_scan_entries: `RAPT_STEER_SCAN_ENTRIES,
       rob_generation_bits: `RAPT_ROB_GENERATION_BITS,
       branch_checkpoints: `RAPT_BRANCH_CHECKPOINTS,
-      completion_ports: `RAPT_INTEGER_ISSUE_PORTS + 3,
+      completion_ports: `RAPT_INTEGER_ISSUE_PORTS + 4,
       execution_domains: 5,
       completion_dependencies: 3
   };
@@ -268,6 +291,55 @@ package rapt_pkg;
   // scalar-FP operations execute through the independent FP issue queue.
   function automatic logic uop_is_fp_exec(input rapt_pkg::uop_t u);
     return u.execute.fp.valid && !u.execute.memory.store && !u.execute.memory.load;
+  endfunction
+
+  // Architectural floating-point dependencies. f0 is an ordinary writable
+  // register. Integer/FP transfers use the integer rename path for their GPR
+  // operand/destination and this description for the floating-point side.
+  function automatic logic fp_from_integer(input logic [5:0] op, input logic [31:0] inst);
+    return op == `RAPT_FP_OP_FMV_W_X || op ==
+    `RAPT_FP_OP_FMV_D_X
+    || (op >= `RAPT_FP_OP_FCVT_S_W && op <= `RAPT_FP_OP_FCVT_S_LU) ||
+        (op >= `RAPT_FP_OP_FCVT_D_W && op <= `RAPT_FP_OP_FCVT_D_LU) ||
+        (op == `RAPT_FP_OP_ZFHMIN && inst[31:25] == 7'b1111010);
+  endfunction
+
+  function automatic logic fp_writes_register(input logic valid, input logic [5:0] op,
+                                              input logic [31:0] inst);
+    return valid && op != `RAPT_FP_OP_FSW && op !=
+    `RAPT_FP_OP_FSD
+    && op != `RAPT_FP_OP_FMV_X_W && op !=
+    `RAPT_FP_OP_FMV_X_D
+    && !(op >= `RAPT_FP_OP_FLE_S && op <= `RAPT_FP_OP_FCVT_LU_S) &&
+        !(op >= `RAPT_FP_OP_FCVT_W_D && op <= `RAPT_FP_OP_FCVT_LU_D) && !(op ==
+    `RAPT_FP_OP_ZFHMIN
+    && (inst[6:0] == 7'b0100111 || inst[31:25] == 7'b1110010));
+  endfunction
+
+  function automatic logic [2:0] fp_sources(input logic valid, input logic [5:0] op,
+                                            input logic [31:0] inst);
+    logic [2:0] sources;
+    sources = '0;
+    if (valid) begin
+      if (op == `RAPT_FP_OP_FSW || op ==
+          `RAPT_FP_OP_FSD
+          || (op == `RAPT_FP_OP_ZFHMIN && inst[6:0] == 7'b0100111))
+        sources[1] = 1'b1;
+      else if (!(op == `RAPT_FP_OP_FLW || op ==
+          `RAPT_FP_OP_FLD
+          || (op == `RAPT_FP_OP_ZFHMIN && inst[6:0] == 7'b0000111) || fp_from_integer(
+              op, inst
+          ))) begin
+        sources[0] = 1'b1;
+        sources[1] = (op >= `RAPT_FP_OP_FSGNJ_S && op <= `RAPT_FP_OP_FSGNJX_S)
+            || (op >= `RAPT_FP_OP_FSGNJ_D && op <= `RAPT_FP_OP_FSGNJX_D)
+            || (op >= `RAPT_FP_OP_FADD_S && op <= `RAPT_FP_OP_FEQ_S)
+            || (op >= `RAPT_FP_OP_FLE_D && op <= `RAPT_FP_OP_FEQ_D)
+            || (op >= `RAPT_FP_OP_FMADD_S && op <= `RAPT_FP_OP_FDIV_D);
+        sources[2] = op >= `RAPT_FP_OP_FMADD_S && op <= `RAPT_FP_OP_FNMADD_D;
+      end
+    end
+    return sources;
   endfunction
 
   // ALU-CSR-only: CSR / system / trap semantics live exclusively in that pipe.

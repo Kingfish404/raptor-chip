@@ -6,7 +6,7 @@
 module rapt_feu_syn_top #(
     parameter int unsigned NumSlots = rapt_pkg::DispatchWidth,
     parameter int unsigned NumCompletions = rapt_pkg::CoreConfig.completion_ports,
-    parameter int unsigned FPQ_SIZE = 1
+    parameter int unsigned FPQ_SIZE = rapt_pkg::CoreConfig.iq_entries
 ) (
     input logic clock,
     reset,
@@ -18,7 +18,6 @@ module rapt_feu_syn_top #(
     cmu_bcast_if.in cmu_bcast,
     csr_bcast_if.in csr_bcast,
     load_fast_if.sink load_fast,
-    fpr_if.alu fpr,
     input logic fpq_accept[NumSlots],
     input logic [rapt_pkg::index_bits(FPQ_SIZE)-1:0] fpq_index[NumSlots],
     output logic fpq_free[NumSlots],
@@ -52,7 +51,6 @@ module rapt_feu_syn_top #(
       .cmu_bcast,
       .csr_bcast,
       .load_fast,
-      .fpr,
       .disp_fpq,
       .wb_fpu,
       .wb_accept,

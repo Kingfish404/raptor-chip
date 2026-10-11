@@ -14,7 +14,8 @@ module rapt_l1i #(
     parameter int unsigned L1I_LINE_SIZE = 2 ** L1I_LINE_LEN,
     parameter int L1I_LEN = `RAPT_L1I_LEN,
     parameter unsigned L1I_N_WAYS = `RAPT_L1I_N_WAYS,
-    parameter int PADDR_BITS = `RAPT_PADDR_BITS
+    parameter int PADDR_BITS = `RAPT_PADDR_BITS,
+    parameter bit L2Tlb = 0
 ) (
     input clock,
 
@@ -29,7 +30,10 @@ module rapt_l1i #(
     input reset,
     input logic io_authorized = 1'b0,
     output logic io_start,
-    output logic [XLEN-1:0] io_owner_pc
+    output logic [XLEN-1:0] io_owner_pc,
+    output rapt_pkg::l2tlb_req_t l2tlb_req_o,
+    input logic l2tlb_ready_i = 1'b0,
+    input rapt_pkg::l2tlb_rsp_t l2tlb_rsp_i = '0
 );
   typedef enum logic [2:0] {
     IDLE   = 3'b000,
@@ -544,9 +548,14 @@ module rapt_l1i #(
   );
 
   // --- PTW ---
-  rapt_ptw #(
-      .XLEN(XLEN)
+  rapt_cached_ptw #(
+      .XLEN(XLEN),
+      .Enable(L2Tlb)
   ) u_iptw (
+      .asid(csr_bcast.satp_asid),
+      .l2_req_o(l2tlb_req_o),
+      .l2_ready_i(l2tlb_ready_i),
+      .l2_rsp_i(l2tlb_rsp_i),
       .clock(clock),
       .reset(reset),
       .req_valid(ptw_req),

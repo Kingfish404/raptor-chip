@@ -62,6 +62,8 @@ module rapt_ieu_pipe_branch #(
   assign wb_branch.csr_wen = 1'b0;
   assign wb_branch.csr_wdata = '0;
   assign wb_branch.fp_flags_valid = 1'b0;
+  assign wb_branch.fp_wen = 1'b0;
+  assign wb_branch.fp_result = '0;
   assign wb_branch.fp_flags = '0;
   assign wb_branch.trap = 1'b0;
   assign wb_branch.tval = '0;

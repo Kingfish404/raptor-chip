@@ -28,7 +28,6 @@ module rapt_lsu #(
     rou_lsu_if.in rou_lsu,
     csr_bcast_if.in csr_bcast,
     pmp_update_if.in pmp_update,
-    fpr_if.ioq fpr,
     load_fast_if.source load_fast,
     output logic pmu_sq_full
 );
@@ -74,7 +73,6 @@ module rapt_lsu #(
 
       .exu_lsu      (exu_lsu),
       .exu_l1d      (exu_l1d),
-      .fpr          (fpr),
       .exu_ioq_bcast(exu_ioq_bcast),
       .wb_accept   (wb_accept),
       .sq_handoff_valid(sq_handoff_valid_unused),

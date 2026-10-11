@@ -1,6 +1,8 @@
 `include "rapt.svh"
 
-module tb_tlb_flush_asid;
+module tb_tlb_flush_asid #(
+    parameter int Entries = `RAPT_ITLB_ENTRIES
+);
   localparam int XLEN = `RAPT_XLEN;
 
   logic clock = 1'b0;
@@ -20,7 +22,7 @@ module tb_tlb_flush_asid;
 
   rapt_tlb #(
       .XLEN(XLEN),
-      .ENTRIES(4)
+      .ENTRIES(Entries)
   ) dut (
       .*
   );
@@ -113,7 +115,7 @@ module tb_tlb_flush_asid;
 
     // Fill past capacity with alternating attributes and unrelated lookup.
     fill_pte = 7'b110_0011;
-    for (int entry = 0; entry < 9; entry++) begin
+    for (int entry = 0; entry < 2 * Entries + 1; entry++) begin
       fill_vtag = (XLEN-12)'(entry + 1);
       fill_ptag = (XLEN-10)'(entry + 256);
       fill_asid = 9'(entry);
@@ -126,6 +128,19 @@ module tb_tlb_flush_asid;
       #1;
       check(hit && pbmt == fill_pbmt && ptag == fill_ptag,
             "replacement/fill mixed translation and PBMT payloads");
+      // Before the first eviction, every filled entry must remain reachable.
+      // Afterwards exactly the newest Entries translations must be resident.
+      for (int resident = 0; resident <= entry; resident++) begin
+        lookup_vtag = (XLEN-12)'(resident + 1);
+        lookup_asid = 9'(resident);
+        #1;
+        check(hit == (resident > entry - Entries), "TLB capacity or replacement wrap mismatch");
+        if (hit)
+          check(
+              ptag == (XLEN-10)'(resident + 256) && pbmt == 2'(resident % 3)
+              && pte_flags == fill_pte,
+              "resident TLB payload changed during replacement");
+      end
     end
 
     flush = 1'b1;
@@ -176,7 +191,8 @@ module tb_tlb_flush_asid;
             "nonzero PPN transport padding was silently truncated");
     end
 
-    $display("PASS: TLB compact tags, canonical lookup, flush and ASID checks passed");
+    $display("PASS: TLB %0d entries, compact tags, canonical lookup, flush and ASID checks passed",
+             Entries);
     $finish;
   end
 endmodule

@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include "Vrapt_fpu_fma_tb.h"
 #include "verilated.h"
 
@@ -139,6 +140,57 @@ int main(int argc, char **argv) {
     }
     tick();
   }
+  // Stream independent inputs through every stage. The scalar test above
+  // intentionally waits for each result and cannot catch metadata overwritten
+  // by a following operation. Check against host fma, not a second RTL copy.
+  int streamed = 0;
+  for (bool is_double : {false, true}) {
+    reset();
+    top->is_double = is_double;
+    std::deque<Reference> pending;
+    for (int index = 0; index < iterations + 10; ++index) {
+      top->valid = index < iterations && index % 17 != 0;
+      top->flush = index < iterations && index % 257 == 256;
+      if (top->flush) {
+        pending.clear();
+        top->valid = 0;
+      }
+      if (top->valid) {
+        int variant = random64() % 4, rounding = random64() % 4;
+        uint64_t a = generate_value(random64()), b = generate_value(random64());
+        uint64_t c = generate_value(random64());
+        if (!is_double) {
+          a = 0xffffffff00000000ULL | uint32_t(a);
+          b = 0xffffffff00000000ULL | uint32_t(b);
+          c = 0xffffffff00000000ULL | uint32_t(c);
+        }
+        top->op = 51 + is_double + variant * 2;
+        top->operand_a = a; top->operand_b = b; top->operand_c = c;
+        top->rounding_mode = rounding;
+        Reference expected = reference(a, b, c, is_double, variant, rounding);
+        if ((is_zero(a, is_double) && is_infinity(b, is_double))
+            || (is_infinity(a, is_double) && is_zero(b, is_double))) expected.flags |= 0x10;
+        pending.push_back(expected);
+      }
+      tick();
+      if (top->dut_valid) {
+        if (pending.empty()) { ++failures; printf("STREAM unowned result\n"); break; }
+        const Reference expected = pending.front();
+        pending.pop_front();
+        ++streamed;
+        if ((expected.bits != top->dut_result
+            && !(is_nan(expected.bits, is_double) && is_nan(top->dut_result, is_double)))
+            || expected.flags != top->dut_flags) {
+          if (++failures < 20)
+            printf("STREAM d=%d index=%d expected=%016llx/%02x got=%016llx/%02x\n",
+                is_double, index, (unsigned long long)expected.bits, expected.flags,
+                (unsigned long long)top->dut_result, top->dut_flags);
+        }
+      }
+    }
+    if (!pending.empty()) { ++failures; printf("STREAM missing results\n"); }
+  }
+  printf("STREAMED=%d\n", streamed);
   printf("TOTAL=%d FAILS=%d (NaN payload-tolerant, %d NaN cases OK)\n",
          iterations, failures, nan_cases);
   top->final(); delete top; return failures != 0;

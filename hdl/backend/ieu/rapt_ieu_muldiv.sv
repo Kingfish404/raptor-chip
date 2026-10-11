@@ -262,6 +262,8 @@ module rapt_ieu_muldiv #(
   assign exu_wb_mul.csr_wen = 1'b0;
   assign exu_wb_mul.csr_wdata = '0;
   assign exu_wb_mul.fp_flags_valid = 1'b0;
+  assign exu_wb_mul.fp_wen = 1'b0;
+  assign exu_wb_mul.fp_result = '0;
   assign exu_wb_mul.fp_flags = '0;
   assign exu_wb_mul.trap = 1'b0;
   assign exu_wb_mul.tval = '0;

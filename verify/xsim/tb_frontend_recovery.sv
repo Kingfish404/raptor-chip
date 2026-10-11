@@ -167,9 +167,15 @@ module tb_frontend_recovery;
       cmu_bcast.fetch_context_stable = 1'b1;
       cmu_bcast.redirect_pc = SameContextTarget;
       #1;
-      assert (ifu.pc_ifu == SameContextTarget && !ifu.redirect_event && ifu.recv_ready)
+      assert (ifu.pc_ifu == SameContextTarget && !ifu.redirect_event && !ifu_l1i.cancel
+              && ifu_l1i.consumed)
       else $fatal(1, "same-context redirect cancelled the prefetched target");
       tick();
+      cmu_bcast.flush_redirect = 1'b0;
+      cmu_bcast.fetch_context_stable = 1'b0;
+      // A response boundary accepts the warmed target now and packs it on the
+      // following edge. Observe the cache handshake above in either mode.
+      if (`RAPT_FETCH_RESPONSE_STAGE) tick();
       assert (ifu.held_count != 0 && ifu.held[0].pc == SameContextTarget)
       else $fatal(1, "same-context redirect did not accept the target instruction");
       cmu_bcast.flush_redirect = 1'b0;

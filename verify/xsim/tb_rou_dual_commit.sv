@@ -108,6 +108,25 @@ module tb_rou_dual_commit #(
   rou_lsu_if rou_lsu ();
   logic tb_sq_ready, tb_sq_empty;
   logic tb_writeback_idle = 1'b1;
+  wire tb_writeback_done;
+`ifdef RAPT_TEST_REGISTERED_DRAIN
+  logic memory_idle = 1, raw_writeback_idle = 1;
+  wire drain_active, drain_done;
+  rapt_memory_drain drain_controller (
+      .clock,
+      .reset,
+      .request_i(tb_writeback_drain),
+      .stores_empty_i(rou_lsu.sq_empty),
+      .memory_idle_i(memory_idle),
+      .writeback_idle_i(raw_writeback_idle),
+      .drain_o(drain_active),
+      .done_o(drain_done)
+  );
+  assign tb_writeback_done = drain_done;
+`else
+  assign tb_writeback_done = tb_writeback_idle;
+`endif
+
   logic tb_writeback_drain;
 `ifndef RAPT_TEST_ATOMIC_REPLAY
   assign rou_lsu.sq_ready = tb_sq_ready;
@@ -116,11 +135,23 @@ module tb_rou_dual_commit #(
   cmu_bcast_if cmu_bcast ();
 
   rapt_rou #(
+`ifdef RAPT_TEST_COMPACT_FP
+      .CompactFpOperands(1'b1),
+`endif
+`ifdef RAPT_TEST_REGISTERED_PAYLOAD
+      .RegisteredDispatchPayload(1'b1),
+`endif
       .ValidateCompletionInputs(1'b1)
+`ifdef RAPT_TEST_REGISTERED_DRAIN
+      ,
+      .RegisteredDrainCompletion(1'b1),
+      .SeparateOperandWake(1'b1)
+`endif
   ) dut_rou (
-      .writeback_idle(tb_writeback_idle),
+      .writeback_done(tb_writeback_done),
       .writeback_drain(tb_writeback_drain),
       .completion(completion),
+      .operand_wake(completion),
       .completion_owner(completion_owner),
       .clock(clock),
       .rnu_rou(rnu_rou),
@@ -437,6 +468,10 @@ rapt_cmu dut_cmu (
               == u.execute.branch.predicted_taken,
             "checkpoint direction was not captured on rename acceptance");
       end
+`ifdef RAPT_TEST_REGISTERED_PAYLOAD
+      check(!dispatch_valid[0], "new allocation bypassed the payload register");
+      tick(1);
+`endif
       check(dispatch_valid[0], "ROU did not present dispatch after enqueue");
       check(dispatch[0].dest == expected_dest, "ROU dispatch dest mismatch");
       check(dispatch[0].uop.pnpc == '0, "predicted target leaked into execution queue");
@@ -988,6 +1023,10 @@ rapt_cmu dut_cmu (
 
       exu_ioq_bcast.dest = RobW'(1);
       exu_ioq_bcast.npc = 32'h8003_1008;
+      // An FP load completes through the FP result channel, even though it
+      // does not write the integer PRF. Keep this fixture faithful to IOQ.
+      exu_ioq_bcast.fp_wen = 1'b1;
+      exu_ioq_bcast.fp_result = 64'h4008_0000_0000_0000;
       exu_ioq_bcast.wen = 1'b0;
       exu_ioq_bcast.trap = 1'b0;
       exu_ioq_bcast.valid = 1'b1;
@@ -1000,7 +1039,10 @@ rapt_cmu dut_cmu (
       check(rou_csr.csr_addr == 12'h100,
             "reused FP load did not retain the sstatus-aliasing immediate");
       check(!rou_csr.csr_wen, "non-system FP load exposed stale csr_wen at retirement");
+      exu_ioq_bcast.fp_wen = 1'b0;
       tick(1);
+      check(dut_rou.fp_registers.architectural[1] == 64'h4008_0000_0000_0000,
+            "reused FP load did not commit its FP result");
     end
   endtask
 
@@ -1380,10 +1422,10 @@ rapt_cmu dut_cmu (
 `ifdef RAPT_TEST_RETIRE_COUNT
   `include "tb_rou_retire_count.svh"
 `endif
-`ifdef RAPT_TEST_FP_IRQ_BOUNDARY
 `ifdef RAPT_TEST_FP_IRQ_COMPOSE
   `include "tb_rou_fp_irq_compose.svh"
 `endif
+`ifdef RAPT_TEST_FP_IRQ_BOUNDARY
   `include "tb_rou_fp_irq_boundary.svh"
 `endif
 
@@ -1423,15 +1465,98 @@ rapt_cmu dut_cmu (
   endtask
 
   `include "tb_rou_fence_commit.svh"
+`ifdef RAPT_TEST_DRAIN_HANDSHAKE
+  `include "tb_rou_drain_handshake.svh"
+`endif
+`ifdef RAPT_TEST_FP_OOO
+  `include "tb_rou_fp_ooo.svh"
+`endif
+
+`ifdef RAPT_TEST_PAYLOAD_BOUNDARY
+  task automatic expect_registered_payload_bursts;
+    int fired;
+    int cycles;
+    rapt_pkg::uop_t u;
+    begin
+      reset_dut();
+      for (int s = 0; s < rapt_pkg::DispatchWidth; s++) dispatch_ready[s] = 1'b0;
+      // Two full allocation beats fill both resident and carry populations.
+      for (int group_id = 0; group_id < 2; group_id++) begin
+        for (int s = 0; s < rapt_pkg::DispatchWidth; s++) begin
+          u = make_alu_uop(XLEN'(32'h8010_0000 + 4*(group_id*rapt_pkg::DispatchWidth+s)),
+                          32'h0010_0093, 5'(s+1));
+          u.tval = XLEN'(32'habc0_0000 + group_id*rapt_pkg::DispatchWidth+s);
+          rnu_rou.slot[s] = '0;
+          rnu_rou.slot[s].uop = u;
+          rnu_rou.slot[s].prd = PLEN'(33+s);
+          rnu_rou.valid[s] = 1'b1;
+        end
+        #1;
+        for (int s = 0; s < rapt_pkg::DispatchWidth; s++)
+        check(rnu_rou.ready[s], "burst enqueue not ready");
+        tick(1);
+        for (int s = 0; s < rapt_pkg::DispatchWidth; s++) rnu_rou.valid[s] = 1'b0;
+        tick(1);
+      end
+      tick(3);
+      check($countones(dut_rou.rob_dispatch_pending) == 2 * rapt_pkg::DispatchWidth,
+            "blocked payload owners were lost");
+      for (int s = 0; s < rapt_pkg::DispatchWidth; s++) dispatch_ready[s] = 1'b1;
+      fired = 0;
+      cycles = 0;
+      while (fired < 2 * rapt_pkg::DispatchWidth && cycles < 4) begin
+        #1;
+        for (int s = 0; s < rapt_pkg::DispatchWidth; s++) begin
+          check(slot_fire(s), "registered payload stage lost full-width throughput");
+          check(int'(dispatch[s].dest) == fired, "registered payload changed owner order");
+          check(dispatch[s].uop.pc == XLEN'(32'h8010_0000 + 4 * fired),
+                "registered PC owner mismatch");
+          check(dispatch[s].uop.tval == XLEN'(32'habc0_0000 + fired),
+                "registered tval owner mismatch");
+          fired++;
+        end
+        tick(1);
+        cycles++;
+      end
+      check(fired == 2 * rapt_pkg::DispatchWidth && cycles == 2,
+            "two payload beats did not sustain dispatch width");
+      #1;
+      check(!dispatch_valid[0], "accepted payload owner was offered twice");
+      // Flush while stalled, then reuse slot zero with a different payload.
+      reset_dut();
+      for (int s = 0; s < rapt_pkg::DispatchWidth; s++) dispatch_ready[s] = 1'b0;
+      buffer_one(make_alu_uop(32'h8011_0000, 32'h0010_0093, 5'd1), 6'd33, 6'd1, RobW'(0));
+      tick(3);
+      reset_dut();
+      dispatch_one(make_alu_uop(32'h8012_0000, 32'h0010_0113, 5'd2), 6'd34, 6'd2, RobW'(0));
+      check(dut_rou.rob_entry[0].state == ROB_EX, "warm reset payload slot reuse failed");
+    end
+  endtask
+`endif
 
   initial begin
     if (rapt_pkg::CommitWidth < 2) fail("tb_rou_dual_commit requires commit width >= 2");
 
-`ifdef RAPT_TEST_FENCE_COMMIT
+`ifdef RAPT_TEST_PAYLOAD_BOUNDARY
+    init_inputs();
+    expect_registered_payload_bursts();
+    expect_cross_domain_dispatch_bypass();
+    expect_dispatch_edge_writeback_merge();
+    $display(
+        "PASS: registered payload identity, carry/resident, stalls, reset/reuse, full-width and edge wake XLEN=%0d",
+        XLEN);
+    $finish;
+`elsif RAPT_TEST_DRAIN_HANDSHAKE
+    run_drain_handshake_tests();
+    $finish;
+`elsif RAPT_TEST_FENCE_COMMIT
     run_fence_commit_tests();
     $finish;
 `elsif RAPT_TEST_EXCEPTION_RD
     run_exception_rd();
+    $finish;
+`elsif RAPT_TEST_FP_OOO
+    run_fp_ooo();
     $finish;
 `elsif RAPT_TEST_FP_IRQ_BOUNDARY
     run_fp_irq_boundary();

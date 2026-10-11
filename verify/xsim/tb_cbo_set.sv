@@ -20,6 +20,9 @@ module tb_cbo_set;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),

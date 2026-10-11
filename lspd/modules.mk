@@ -39,3 +39,9 @@ TOP_axi  := rapt_axi_master
 TOP_l2   := rapt_l2
 
 $(foreach module,$(MODULES),$(eval CLOCK_$(module) := clock))
+
+MODULES += fp_registers l2tlb
+TOP_fp_registers := rapt_fp_registers_syn_top
+TOP_l2tlb := rapt_l2tlb
+CLOCK_fp_registers := clock
+CLOCK_l2tlb := clock

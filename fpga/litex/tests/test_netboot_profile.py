@@ -98,6 +98,7 @@ class NetbootProfileTest(unittest.TestCase):
                         'VARIANT=linux32', 'VARIANT=', 'SYS_CLK=30000000',
                         'WITH_ETHERNET=0', 'BOOT_MODE=custom',
                         'VIVADO_SYNTH_DIRECTIVE=default',
+                        'VIVADO_NO_TIMING_DRIVEN=1',
                         'VIVADO_SYS_SETUP_MARGIN_NS=1.0',
                         'VIVADO_SYS_FINAL_WNS_NS=0.3',
                         'RAPT_PACK_VFLAGS=-DRAPT_ROB_SIZE=8',
@@ -143,6 +144,7 @@ class NetbootProfileTest(unittest.TestCase):
                 self.assertEqual(settings["VIVADO_SYS_FINAL_WNS_NS"], "")
                 self.assertEqual(settings["VIVADO_SYNTH_DIRECTIVE"],
                                  "RuntimeOptimized" if xlen == 64 else "default")
+                self.assertEqual(settings["VIVADO_NO_TIMING_DRIVEN"], "0")
                 self.assertEqual(settings["SYS_CLK"], "50000000")
                 self.assertEqual(settings["RAPT_CONFIG"], "default")
                 self.assertEqual(settings["RAPT_PACK_VFLAGS"],
@@ -169,6 +171,8 @@ class NetbootProfileTest(unittest.TestCase):
                 self.assertEqual(settings["RAPT_PACK_VFLAGS"],
                                  "-DRAPT_FETCH_RESPONSE_STAGE=0" if xlen == 64 else "")
                 self.assertEqual(settings["VIVADO_SYNTH_DIRECTIVE"], "default")
+                self.assertEqual(settings["VIVADO_NO_TIMING_DRIVEN"],
+                                 "1" if xlen == 64 else "0")
                 self.assertEqual(settings["VIVADO_SYS_SETUP_MARGIN_NS"],
                                  "1.0" if xlen == 64 else "0")
                 self.assertEqual(settings["VIVADO_SYS_FINAL_WNS_NS"],

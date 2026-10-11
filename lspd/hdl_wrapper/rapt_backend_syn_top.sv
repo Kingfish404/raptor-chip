@@ -2,11 +2,19 @@
 `include "rapt_if.svh"
 
 module rapt_backend_syn_top #(
-    parameter int XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN,
+    parameter bit RegisteredDrainCompletion = 1'b1,
+    parameter bit CompactFpOperands = 1'b1,
+    parameter bit RegisteredDispatchPayload = 1'b1,
+    parameter bit LocalIntegerWake = 1'b1,
+    parameter bit LocalMemoryWake = 1'b1,
+    parameter logic [rapt_pkg::CompletionPorts-1:0] RegisteredOperandWakePorts =
+        ((rapt_pkg::CompletionPorts'(1) << rapt_pkg::IntegerIssuePorts) - 1'b1)
+        | (rapt_pkg::CompletionPorts'(1) << (rapt_pkg::IntegerIssuePorts + 1))
 ) (
     input logic clock,
     input logic reset,
-    input logic writeback_idle,
+    input logic writeback_done,
     output logic writeback_drain,
     idu_rnu_if.slave idu_rnu,
     cmu_bcast_if.out cmu_bcast,
@@ -84,7 +92,13 @@ module rapt_backend_syn_top #(
       pmp_internal.cfg_l, pmp_internal.mode_off, pmp_internal.mode_tor,
       pmp_internal.mode_na4, pmp_internal.mode_napot};
   rapt_backend #(
-      .XLEN(XLEN)
+      .XLEN(XLEN),
+      .RegisteredDrainCompletion(RegisteredDrainCompletion),
+      .CompactFpOperands(CompactFpOperands),
+      .RegisteredDispatchPayload(RegisteredDispatchPayload),
+      .LocalIntegerWake(LocalIntegerWake),
+      .LocalMemoryWake(LocalMemoryWake),
+      .RegisteredOperandWakePorts(RegisteredOperandWakePorts)
   ) dut (
       .cmu_bcast(cmu_internal),
       .csr_bcast(csr_internal),

@@ -26,6 +26,22 @@ bool serial_console_line_open();
 
 extern long long int max_timeout;
 
+// The shared-TLB adapter adds a generate scope around the original walker.
+// Keep diagnostic observation compatible with both layouts and bypass mode.
+#define PTW_STATE_OBSERVER(name, path) \
+  template <typename Top> auto name(Top *top, int) \
+      -> decltype(VERILOG_CPU(CONCAT(path, __DOT__state))) \
+  { return VERILOG_CPU(CONCAT(path, __DOT__state)); } \
+  template <typename Top> auto name(Top *top, long) \
+      -> decltype(VERILOG_CPU(CONCAT(path, __DOT__g_cached__DOT__state))) \
+  { return VERILOG_CPU(CONCAT(path, __DOT__g_cached__DOT__state)); } \
+  template <typename Top> auto name(Top *top, ...) \
+      -> decltype(VERILOG_CPU(CONCAT(path, __DOT__g_bypass__DOT__walker__DOT__state))) \
+  { return VERILOG_CPU(CONCAT(path, __DOT__g_bypass__DOT__walker__DOT__state)); }
+PTW_STATE_OBSERVER(instruction_ptw_state, memory_subsystem__DOT__l1i_cache__DOT__u_iptw)
+PTW_STATE_OBSERVER(data_ptw_state, memory_subsystem__DOT__l1d_cache__DOT__u_dptw)
+#undef PTW_STATE_OBSERVER
+
 bool cpu_read_sq_snapshot_control(uint32_t *valid, uint32_t *committed,
                                   uint8_t *capacity, uint8_t *head)
 {
@@ -111,9 +127,9 @@ static void dump_pipeline_stall_state()
       "mmio=%u skid=%u source=%u",
       (unsigned)VERILOG_FRONTEND(ifu__DOT__held_count),
       (unsigned)VERILOG_CPU(memory_subsystem__DOT__l1i_cache__DOT__l1i_state),
-      (unsigned)VERILOG_CPU(memory_subsystem__DOT__l1i_cache__DOT__u_iptw__DOT__state),
+      (unsigned)instruction_ptw_state(top, 0),
       (unsigned)VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__l1d_state),
-      (unsigned)VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__u_dptw__DOT__state),
+      (unsigned)data_ptw_state(top, 0),
       (unsigned)VERILOG_CPU(memory_subsystem__DOT__axi_master__DOT__read_outstanding),
       (unsigned)VERILOG_CPU(memory_subsystem__DOT__axi_master__DOT__read_request_fire),
       (unsigned)VERILOG_CPU(memory_subsystem__DOT__axi_master__DOT__read_response_fire),
@@ -210,8 +226,8 @@ static void cpu_exec_one_cycle()
 }
 
 /* LightSSS hook: runs inside the throwaway snapshot child (a COW fork frozen
- * at the last progress point). Drains the pipeline so committed stores have
- * reached the host memory buffer, then writes a self-consistent checkpoint.
+ * at the last progress point). Drains the pipeline and waits for stable cache
+ * ownership before exporting dirty data into an architectural checkpoint.
  * The child diverging from the parent here is harmless -- it exits afterward. */
 void cpu_exec_lightsss_snapshot(const char *dir)
 {
@@ -223,11 +239,11 @@ void cpu_exec_lightsss_snapshot(const char *dir)
   {
     bool rob_q = (npc.rob_empty != NULL) ? (*npc.rob_empty != 0) : true;
     bool sq_q = (npc.sq_empty != NULL) ? (*npc.sq_empty != 0) : true;
-    if (rob_q && sq_q)
-      break;
+    if (rob_q && sq_q && checkpoint_emergency_save(dir))
+      return;
     cpu_exec_one_cycle();
   }
-  checkpoint_emergency_save(dir);
+  Error("lightsss: pipeline/cache did not quiesce; refusing inconsistent checkpoint");
 }
 
 void cpu_show_itrace()

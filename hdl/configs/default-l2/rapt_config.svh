@@ -131,17 +131,20 @@
 `define RAPT_L1D_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
 `define RAPT_L1D_LEN 6
 `define RAPT_L1D_N_WAYS 4
+`ifndef RAPT_L1D_WRITEBACK
 `define RAPT_L1D_WRITEBACK 1
-// Write-back L1D disables its MSHR path. Zero also removes the unused bus
-// MSHR read slot; set MSHRs only together with a write-through L1D.
+`endif
+// Four physical-line refills may overlap after translation; IOQ replays on wake.
 `ifndef RAPT_L1D_MSHRS
-`define RAPT_L1D_MSHRS 0
+`define RAPT_L1D_MSHRS 4
 `endif
 
 // Fully-associative translation caches.  The data-side arrays are replicated
 // for simultaneous load/store lookup and receive the same fills.
 `define RAPT_ITLB_ENTRIES 16
 `define RAPT_DTLB_ENTRIES 16
+// Shared instruction/data second-level translation cache; zero bypasses it.
+`define RAPT_L2TLB_ENTRIES 256
 
 // L2 unified cache (between rapt_bus and io_master).
 // Medium BOOM WithInclusiveCache(): 512 KiB = 1024 sets x 8 ways x 64 bytes.

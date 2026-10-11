@@ -2252,3 +2252,151 @@ lspd/pnr/build/<config>/<pdk>/<module>/<frequency>MHz/
 ```
 
 `pd-summary` writes `lspd/pnr/build/<config>/<pdk>/pnr_summary.md` with post-route instance count, cell and die area, utilization, WNS/TNS, estimated Fmax, vectorless power, detailed-route violations, runtime, peak memory, and visualization status. Use `CORE_UTILIZATION`, `CORE_ASPECT_RATIO`, and `PLACE_DENSITY` to evaluate floorplan tradeoffs. `PNR_MODE=fast` selects the repository's reduced-runtime OpenROAD flow for iteration; the default is `standard`. The `viz` target uses the repository's KLayout batch renderer and Nangate45 layer properties.
+
+## W4 CU08 50 MHz routed implementation (2026-10-11)
+
+The RV64 `default-w4` configuration completed synthesis, placement, routing,
+post-route optimization and native bitstream generation for
+`xcku15p-ffva1156-2-e` with the existing CU08 board constraints. An independent
+read-only audit of the final routed checkpoint passed all 13 checks, including
+all-clock setup/hold/pulse width, the complete 21-clock inventory, internal
+timing coverage, route legality, four bus-skew constraints, DRC/methodology
+severity and the CM005 sampling aperture. This is a routed implementation
+result; the bitstream has not been programmed or boot-tested on hardware.
+
+The accepted sources retain the preset capacities, out-of-order execution,
+existing FP pipelines, predictor and cache features. The timing changes register
+immutable ROB dispatch fields and integer/load completion broadcasts. ALQ/BRQ
+residents capture local integer/load operands at a clock edge; allocation and
+other consumers retain the registered global ownership view. The compact FP
+source store follows operand-spill ownership rather than replicating source
+values across the ROB. Registered fetch, PTW permission, memory-drain completion
+and MSHR fill-selection boundaries remain enabled. Flush, cancellation, drain
+ordering and owner handoff are exercised by the functional regressions.
+
+| Final complete-board metric | Result |
+| --- | ---: |
+| System clock period | 20.000 ns / 50 MHz |
+| System setup / hold slack | +1.314 / +0.010 ns |
+| Worst actual 20 ns system data path | +1.568 ns |
+| All-clock WNS / TNS | +0.028 / 0.000 ns |
+| All-clock WHS / THS | +0.006 / 0.000 ns |
+| Failing setup / hold / pulse-width endpoints | 0 / 0 / 0 |
+| Fully routed / routable nets | 456,971 / 456,971 |
+| Nets with routing errors | 0 |
+| LUTs | 404,742 / 522,720 (77.43%) |
+| FFs | 133,043 / 1,045,440 (12.73%) |
+| Occupied CLBs | 62,064 / 65,340 (94.99%) |
+| BRAM tiles / DSPs / URAMs | 183.5 / 30 / 0 |
+
+The aggregate system slack includes a 2 ns reset-synchronizer max-delay path.
+The worst 20 ns system data path is IFU PC to BTB target-memory enable; it has
+17.948 ns data delay, including 13.291 ns routing. The global setup bottleneck
+is a MIG internal register path on its 3.752 ns clock. These numbers do not
+establish a higher supported core frequency. High CLB occupancy also remains
+relevant to future placement changes.
+
+The full native run took about 1 hour 52 minutes, including approximately
+16 minutes synthesis, 26 minutes placement and 47 minutes routing. Explore
+pre-route physical optimization completed in 49 seconds. No second full setup
+reroute was required. In the equivalent complete-board synthesis scope, the
+preceding V5 source used 454,151 LUTs / 134,000 FFs and this candidate used
+430,173 LUTs / 132,328 FFs: a cumulative reduction of 23,978 LUTs and 1,672 FFs.
+That comparison includes several intervening changes and does not isolate the
+effect of local wake capture. Synthesis figures and final implementation figures
+are separate scopes; independently optimized module resources are not summed.
+
+The implementation used Vivado 2025.2, four threads, default synthesis with
+`-no_timing_driven`, resource sharing off, `-no_lc` and fanout limit 24; Explore
+pre-route physical optimization and routing; and default post-route physical
+optimization. A 1.0 ns extra system setup margin was used during implementation.
+The existing native flow then restored system setup uncertainty to 0.000 ns and
+kept 0.050 ns hold uncertainty, all clock periods, jitter, I/O constraints and
+exceptions unchanged. The final system setup target was +0.300 ns. The original
+constraint file was not relaxed to accept this candidate.
+
+The board configuration is Linux RV64, 2 GiB MIG, SD card and 1 Gb/s Ethernet on
+FMC C / port A, BIOS boot and no ILA. `default-w4` FPGA and netboot recipes now
+select `RAPT_FETCH_RESPONSE_STAGE=1` unless explicitly overridden. The matched
+build uses `RAPT_IOQ_LOAD_RESPONSE_STAGE=0`, `RAPT_FPGA_LUTRAM=1` and
+`RAPT_FPGA_DSP=1`. The archived flow records the full command, payload paths,
+generated Tcl, source hashes and intermediate checkpoints. The central build
+settings are:
+
+```sh
+make -C fpga/litex fpga-build \
+  FPGA_BOARD=mlk_cu08_ku15p FPGA_AUTO_DETECT=0 VARIANT=linux64 \
+  RAPT_CONFIG=default-w4 SYS_CLK=50000000 \
+  WITH_MIG=1 MIG_SIZE=0x80000000 WITH_LITEDRAM=0 \
+  WITH_SDCARD=1 WITH_ETHERNET=1 ETH_SPEED=1000 FMC_SLOT=c ETH_PORT=a \
+  BOOT_MODE=bios LINUX_FPGA_INIT=full \
+  VIVADO_JOBS=4 VIVADO_SYNTH_DIRECTIVE=default VIVADO_NO_TIMING_DRIVEN=1 \
+  VIVADO_ROUTE_DIRECTIVE=Explore \
+  EXTRA_FLAGS='--vivado-post-place-phys-opt-directive Explore' \
+  VIVADO_SYS_SETUP_MARGIN_NS=1.0 VIVADO_SYS_FINAL_WNS_NS=0.3
+```
+
+Use the archived settings and source snapshot for exact reproduction; the command
+above retains the local Linux image selection. The current staged evaluator and
+its guide remain intact, and `make -C lspd fpga-eval-check` passed all 16 tests
+after adoption. Main-tree generation reproduced the accepted packed RTL and XDC
+byte for byte, and reproduced the SoC logic after removing generation timestamp
+and hierarchy comments. No additional implementation run was needed for that
+generation check.
+
+The native backend OOC run with generic 4 ns input/output delays remains a
+recorded **failure**: WNS -1.378 ns, TNS -14.086 ns and 30 failing endpoints.
+Its register-to-register paths pass at +0.139 ns. The 30 failures comprise
+12 unused upper debug-read outputs and 18 reset-input paths under the generic
+input model. They were classified before the actual board run; no false path,
+RTL tie-off or looser OOC constraint was added. The complete-board result above
+is separate evidence under the actual reset/debug connections and board clocks.
+
+The original external-I/O coverage limits remain: eight inputs have no external
+input-delay model, twelve outputs have no output-delay model and six CM005 RX
+pins have partial input-delay coverage. The exact port sets match the original
+board. All internal coverage checks pass. CM005's separate digital sampling-window
+check covers ten Fast/Slow control/data corner lanes at 0.030..0.767 ns within
+the original 0.025..0.775 ns bounds. This does not qualify full SD/UART/MDIO
+external timing, analog sampling reliability or complete board CDC behavior.
+Final DRC has 67 warning checks; methodology has 482 warning/advisory checks and
+neither has errors or critical warnings. Their individual rules and retained
+integration limits are reviewed in the acceptance evidence. The nine earlier
+synthesis critical-warning prints are the same project-mode/MIG in-context
+diagnostics as the prior run; MIG synthesis, final clock coverage, legal routing
+and native bitstream generation all completed.
+
+Functional qualification includes 64 whole-program differential runs on the
+candidate and 14 public assertion-enabled RV32/RV64 cases. Post-adoption checks
+cover `make format FORMAT_SCOPE=all`, `make format-check FORMAT_SCOPE=all`,
+formatting of added compilation units, the configuration macro audit, `sta-check`
+with `MEMORY=dff` in both XLEN modes, 12 LiteX build-isolation tests, 11 netboot
+profile tests and those 14 public cases on the main workspace. The public cases
+cover real-FEU compact FP, empty-ROB FP interrupts, memory-drain handshake,
+fence replay, immutable dispatch ownership/full-width throughput and local
+integer/load capture. The first build-isolation attempt used system Python
+without LiteX; the preserved retry uses `fpga/litex/.venv/bin/python3`.
+
+The same CRC-valid two-iteration CoreMark image retires 636,760 ROI instructions:
+
+| Memory delay limit / seed | Initial cycles | Before wake changes | Accepted cycles | Change vs initial |
+| --- | ---: | ---: | ---: | ---: |
+| 0 / 1 | 383,572 | 396,755 | 417,660 | +8.887% |
+| 63 / 1 | 423,533 | 435,563 | 457,742 | +8.077% |
+
+The wake changes cost +5.269% / +5.092% cycles versus the immediately preceding
+candidate. These short simulator runs compare latency/performance tradeoffs and
+are not valid official CoreMark scores.
+
+The source base is Git `f35ea31ebd4044bcca2f1087e82b7762df121be7` plus the
+recorded dirty-workspace inputs. The accepted packed RTL SHA256 is
+`d8aee06403b75264fcf96fd5e278a6a3ee05796a15d51e51b4d67ae867832a3e`.
+The 49-file delivery overlay and complete HDL manifest match the accepted board
+input; pre-existing user changes and the newer evaluation flow are preserved.
+The local, ignored archive is
+`fpga/litex/build/validated/w4-cu08-50mhz-local-load-wake-23a1fd1c4292/`.
+It contains `artifact-manifest.json`, the acceptance and adoption records, frozen
+sources, source/constraint identity reviews, functional and performance evidence,
+native and independent timing/DRC reports, the routed checkpoint and bitstream.
+The manifest records every archived file's SHA256, including snapshots of
+regression DTBs/reference executables referenced outside the experiment tree.

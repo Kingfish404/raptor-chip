@@ -12,6 +12,7 @@
 #include <cfenv>
 #include "Vrapt_fpu_addsub_tb.h"
 #include "verilated.h"
+#include "../pipeline_host_check.h"
 
 static Vrapt_fpu_addsub_tb* top;
 static void tick(){ top->clock=0; top->eval(); top->clock=1; top->eval(); }
@@ -95,6 +96,24 @@ int main(int argc,char**argv){
             fails++; if(fails<20)printf("MISMATCH sub=%d dbl=%d rm=%d a=%016llx b=%016llx\n  host=%016llx f=%02x dut=%016llx f=%02x\n",sub,dbl,rm,(unsigned long long)a,(unsigned long long)b,(unsigned long long)hr.b,hr.f,(unsigned long long)dr,df);
         }
         tick();
+    }
+    for (bool dbl : {false, true}) {
+        top->is_double = dbl;
+        fails += check_pipeline_stream(top, N, [&](int) {
+            bool sub = xr() & 1;
+            int rm = xr() % 4;
+            uint64_t a = gen(xr()), b = gen(xr());
+            if (!dbl) {
+                a = 0xffffffff00000000ULL | uint32_t(a);
+                b = 0xffffffff00000000ULL | uint32_t(b);
+            }
+            top->op = dbl ? (sub ? OP_FSUB_D : OP_FADD_D) : (sub ? OP_FSUB_S : OP_FADD_S);
+            top->operand_a = a; top->operand_b = b; top->rounding_mode = rm;
+            Res expected = host(a, b, dbl, sub, rm);
+            return std::make_pair(expected.b, expected.f);
+        }, [&](uint64_t expected, uint64_t actual) {
+            return expected == actual || (isnan_bits(expected, dbl) && isnan_bits(actual, dbl));
+        });
     }
     printf("TOTAL=%d FAILS=%d (NaN payload-tolerant, %d NaN cases OK)\n",total,fails,nanok);
     top->final();delete top;return fails?1:0;

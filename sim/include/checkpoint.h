@@ -3,6 +3,7 @@
 
 #include <common.h>
 #include <stdbool.h>
+#include <vector>
 
 /* ===== Checkpoint feature =================================================
  *
@@ -30,6 +31,9 @@
  * to the RTL's register-file / CSR backing arrays before the trampoline runs.
  * Non-RAM device state (CLINT/PLIC/PMP) is injected explicitly by the C++
  * runtime after reset.
+ * Dirty L2 and L1D data are read from functional cache SRAMs at a stable
+ * ownership boundary, then overlaid before pending committed SQ stores.
+ * Temporary memory overlays are undone if simulation continues after save.
  */
 
 /* Configure save. Triggers are relative to the current reset/resume point:
@@ -52,6 +56,17 @@ bool cpu_read_sq_snapshot_control(uint32_t *valid, uint32_t *committed,
 
 /* Read an unconsumed cacheable AXI write, stage first and then skid. */
 bool cpu_read_axi_write_snapshot(bool skid, word_t *addr, word_t *data, uint8_t *strb);
+
+struct CacheSnapshotWord
+{
+  paddr_t addr;
+  uint64_t data;
+  unsigned bytes;
+};
+/* Observe actual dirty SRAM contents, oldest cache level first. Retry while
+ * a cache update/writeback is in flight; never reconstruct data from stores. */
+bool cpu_cache_snapshot_ready(void);
+void cpu_read_cache_snapshot(std::vector<CacheSnapshotWord> &words);
 
 /* Configure load: read checkpoint dir and stash arch state to inject after
  * reset. Memory regions are loaded into the host buffers and an MROM
@@ -80,10 +95,11 @@ int checkpoint_load_pending(void);
 /* Returns 1 if a save is configured, 0 otherwise. */
 int checkpoint_save_configured(void);
 
-/* Unconditional dump of the current live architectural + memory state into
- * `dir`, bypassing the trigger/quiesce state machine. Used by LightSSS from
+/* Try to dump the current live architectural + memory state into
+ * `dir`, bypassing the trigger state machine. Returns false until cache/SQ
+ * state can be represented consistently. Used by LightSSS from
  * the throwaway snapshot child after it has drained the pipeline. */
-void checkpoint_emergency_save(const char *dir);
+bool checkpoint_emergency_save(const char *dir);
 
 /* Returns 1 if a load is configured, 0 otherwise (callers can use this to
  * skip loading the original image's MROM, since restore overrides it). */

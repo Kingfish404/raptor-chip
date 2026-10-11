@@ -112,6 +112,7 @@ module rapt_l1d_tags #(
     end
   end
   logic [L1D_LINE_SIZE-1:0] dirty[L1D_N_WAYS][L1D_SIZE];
+  logic line_dirty_q[L1D_N_WAYS][L1D_SIZE];
   logic [L1D_N_WAYS-1:0] dirty_conflict;
   logic [L1D_N_WAYS-1:0] update_tag_match;
   logic clear_blocked;
@@ -127,7 +128,7 @@ module rapt_l1d_tags #(
     clear_blocked = 1'b0;
     for (int way = 0; way < L1D_N_WAYS; way++) begin
       for (int set_idx = 0; set_idx < L1D_SIZE; set_idx++) begin
-        dirty_any |= |dirty[way][set_idx];
+        dirty_any |= line_dirty_q[way][set_idx];
         clear_blocked |= clear_set[set_idx] && |dirty[way][set_idx];
       end
     end
@@ -285,24 +286,32 @@ module rapt_l1d_tags #(
         end
       end
       if (WriteBack) begin : g_dirty_state
-        always_ff @(posedge clock) begin
+        logic [L1D_LINE_SIZE-1:0] dirty_next;
+        always_comb begin
+          dirty_next = dirty[way][set_idx];
           if (reset || (clear_set[set_idx] && update_allowed)
               || (clear_line_valid && clear_line_idx == L1D_LEN'(set_idx)
                   && clear_tag_match[way]
                   && !(|dirty[way][set_idx])))
-            dirty[way][set_idx] <= '0;
+            dirty_next = '0;
           else begin
             if (clean_valid && inspect_set == L1D_LEN'(set_idx) && inspect_way == L1dWayW'(way))
-              dirty[way][set_idx] <= dirty[way][set_idx] & ~clean_mask;
+              dirty_next = dirty[way][set_idx] & ~clean_mask;
             if (!(|clear_set) && !clear_line_valid
                 && l1d_update && l1d_valid_u && update_allowed
                 && l1d_idx == L1D_LEN'(set_idx) && l1d_way == L1dWayW'(way)) begin
-              if (line_update) dirty[way][set_idx] <= update_dirty ? line_mask : '0;
+              if (line_update) dirty_next = update_dirty ? line_mask : '0;
               else if (!update_tag_match[way])
-                dirty[way][set_idx] <= update_dirty ? L1D_LINE_SIZE'(1) << l1d_off : '0;
-              else if (update_dirty) dirty[way][set_idx][l1d_off] <= 1'b1;
+                dirty_next = update_dirty ? L1D_LINE_SIZE'(1) << l1d_off : '0;
+              else if (update_dirty) dirty_next[l1d_off] = 1'b1;
             end
           end
+        end
+        // Derive both states from the same next value, including clean/store
+        // collisions. The global summary is available without another cycle.
+        always_ff @(posedge clock) begin
+          dirty[way][set_idx] <= dirty_next;
+          line_dirty_q[way][set_idx] <= |dirty_next;
         end
 `ifndef SYNTHESIS
         assert property (@(posedge clock) disable iff (reset)
@@ -310,6 +319,7 @@ module rapt_l1d_tags #(
 `endif
       end else begin : g_no_dirty
         assign dirty[way][set_idx] = '0;
+        assign line_dirty_q[way][set_idx] = 1'b0;
       end
     end
   end

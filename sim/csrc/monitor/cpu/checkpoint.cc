@@ -609,17 +609,58 @@ static void restore_sq_overlay(const SqOverlayByte *bytes, size_t byte_count)
   }
 }
 
-/* Unconditional dump of the current live architectural + memory state into
- * `dir`. Bypasses the trigger/quiesce state machine in checkpoint_save_tick();
- * used by LightSSS, which already drains the pipeline before calling this from
- * the throwaway snapshot child. */
-void checkpoint_emergency_save(const char *dir)
+static bool save_memory_image(void)
+{
+  if (!cpu_cache_snapshot_ready())
+    return false;
+
+  // Host RAM < pending outer writes < L2 < L1D < committed SQ. Read real
+  // cache storage only at a stable ownership boundary. Restore every byte
+  // in reverse order afterward, including overlapping copies, so a save
+  // which continues execution cannot make stale-memory bugs disappear.
+  SqOverlayByte axi_overlay[2 * sizeof(word_t)];
+  size_t axi_count = overlay_pending_axi(axi_overlay);
+  std::vector<CacheSnapshotWord> cache_words;
+  cpu_read_cache_snapshot(cache_words);
+  std::vector<SqOverlayByte> cache_overlay;
+  for (const auto &word : cache_words)
+    for (unsigned lane = 0; lane < word.bytes; ++lane)
+    {
+      uint8_t *host = guest_to_host(word.addr + lane);
+      Assert(host != NULL, "checkpoint: dirty cache address has no RAM backing");
+      cache_overlay.push_back({host, *host});
+      *host = uint8_t(word.data >> (lane * 8));
+    }
+
+  SqOverlayByte sq_overlay[32 * sizeof(word_t)];
+  size_t sq_count = 0;
+  bool ready = overlay_committed_sq(sq_overlay, &sq_count);
+  if (ready)
+  {
+    if (axi_count > 0)
+      Log("checkpoint: overlaid %zu pending AXI bytes into memory image", axi_count);
+    if (!cache_overlay.empty())
+      Log("checkpoint: overlaid %zu dirty cache bytes into memory image", cache_overlay.size());
+    if (sq_count > 0)
+      Log("checkpoint: overlaid %zu committed SQ bytes into memory image", sq_count);
+    do_save();
+  }
+  restore_sq_overlay(sq_overlay, sq_count);
+  restore_sq_overlay(cache_overlay.data(), cache_overlay.size());
+  restore_sq_overlay(axi_overlay, axi_count);
+  return ready && save_done;
+}
+
+/* Try a dump without a user trigger. LightSSS calls this at an empty ROB/SQ
+ * boundary in its throwaway snapshot child; cache transients may still need
+ * more cycles before their dirty data can be captured consistently. */
+bool checkpoint_emergency_save(const char *dir)
 {
   strncpy(save_dir, dir, sizeof(save_dir) - 1);
   save_dir[sizeof(save_dir) - 1] = '\0';
   snprintf(save_trigger_desc, sizeof(save_trigger_desc), "lightsss snapshot");
   save_done = 0;
-  do_save();
+  return save_memory_image();
 }
 
 bool checkpoint_save_tick(void)
@@ -663,8 +704,8 @@ bool checkpoint_save_tick(void)
    * the SQ or posted AXI buffers are overlaid into the memory image below;
    * complex SQ stores must drain normally before the snapshot can proceed. */
   bool rob_q = (npc.rob_empty != NULL) ? (*npc.rob_empty != 0) : true;
-  bool sq_q = true;
-  if (!(rob_q && sq_q))
+  bool cache_q = cpu_cache_snapshot_ready();
+  if (!(rob_q && cache_q))
   {
     uint64_t cycle = current_pmu_cycle();
     if (cycle == quiesce_last_cycle)
@@ -675,8 +716,8 @@ bool checkpoint_save_tick(void)
     if (quiesce_wait_cycles < wait_max)
       return false;
     Error("checkpoint: quiesce wait exceeded %llu cycles "
-      "(rob_q=%d sq_q=%d) -- refusing inconsistent save",
-        (unsigned long long)wait_max, rob_q, sq_q);
+      "(rob_q=%d cache_q=%d) -- refusing inconsistent save",
+        (unsigned long long)wait_max, rob_q, cache_q);
     npc.state = NPC_ABORT;
     save_enabled = 0;
     return false;
@@ -687,27 +728,7 @@ bool checkpoint_save_tick(void)
         (unsigned long long)quiesce_wait_cycles);
   }
 
-  // Posted writes have left the SQ but may not have reached the slave's W
-  // handshake/DPI write. Apply stage, skid, then SQ so younger bytes win.
-  // Restore loads this memory image and resets the AXI master/bus, so these
-  // buffered writes are not replayed. Undo both overlays if execution resumes.
-  SqOverlayByte axi_overlay[2 * sizeof(word_t)];
-  size_t axi_count = overlay_pending_axi(axi_overlay);
-  SqOverlayByte overlay[32 * sizeof(word_t)];
-  size_t overlay_count = 0;
-  if (!overlay_committed_sq(overlay, &overlay_count))
-  {
-    restore_sq_overlay(axi_overlay, axi_count);
-    return false;
-  }
-  if (axi_count > 0)
-    Log("checkpoint: overlaid %zu pending AXI bytes into memory image", axi_count);
-  if (overlay_count > 0)
-    Log("checkpoint: overlaid %zu committed SQ bytes into memory image", overlay_count);
-  do_save();
-  restore_sq_overlay(overlay, overlay_count);
-  restore_sq_overlay(axi_overlay, axi_count);
-  return save_exit_after ? true : false;
+  return save_memory_image() && save_exit_after;
 }
 
 /* ---------------------------------------------------------------------------

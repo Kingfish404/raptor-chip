@@ -1,7 +1,9 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
 
-module tb_l1i_sret_priv_epoch;
+module tb_l1i_sret_priv_epoch #(
+    parameter bit L2Tlb = 0
+);
   localparam int XLEN = `RAPT_XLEN;
   localparam logic [XLEN-1:0] OldSupervisorPc = XLEN'(32'hc000_1000);
 `ifdef RAPT_TEST_ZERO_PC
@@ -22,7 +24,24 @@ module tb_l1i_sret_priv_epoch;
   csr_bcast_if csr_bcast ();
   pmp_state_if pmp_state ();
 
-  rapt_l1i dut (
+  rapt_pkg::l2tlb_req_t l2_req [2];
+  rapt_pkg::l2tlb_rsp_t l2_rsp [2];
+  logic [1:0] l2_ready;
+  assign l2_req[1] = '0;
+  rapt_l2tlb shared_tlb (
+      .clock(clock),
+      .reset(reset),
+      .flush(cmu_bcast.fence_time),
+      .req_i(l2_req),
+      .ready_o(l2_ready),
+      .rsp_o(l2_rsp)
+  );
+  rapt_l1i #(
+      .L2Tlb(L2Tlb)
+  ) dut (
+      .l2tlb_req_o(l2_req[0]),
+      .l2tlb_ready_i(l2_ready[0]),
+      .l2tlb_rsp_i(l2_rsp[0]),
       .io_authorized(1'b0),
       .io_start(),
       .io_owner_pc(),

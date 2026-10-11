@@ -27,6 +27,9 @@ module rapt_memory #(
     output logic [XLEN-1:0] ifetch_io_owner_pc_o,
     output logic data_idle_o,
     output logic writeback_idle_o,
+    // Drain completion is held for the requesting serializing ROB owner.
+    output logic writeback_done_o,
+    input logic stores_empty_i = 1'b1,
     input logic writeback_drain_i = 1'b0,
     output logic writeback_error_o,
     input logic external_write_valid_i = 1'b0,
@@ -50,6 +53,18 @@ module rapt_memory #(
   logic [XLEN-1:0] l2_release_addr, l2_release_data;
   logic l2_probe_window, l1d_writeback_bus_pending;
   logic data_idle_q;
+  logic cache_writeback_drain;
+
+  rapt_memory_drain drain_control (
+      .clock(clock),
+      .reset(reset),
+      .request_i(writeback_drain_i),
+      .stores_empty_i(stores_empty_i),
+      .memory_idle_i(lsu_l1d.idle && l1d_bus.idle),
+      .writeback_idle_i(writeback_idle_o),
+      .drain_o(cache_writeback_drain),
+      .done_o(writeback_done_o)
+  );
 
   // IO instruction fetches need a quiescent data side, but the live bus-idle
   // expression includes DTLB/PMP request generation.  Sampling quiescence
@@ -68,7 +83,33 @@ module rapt_memory #(
       .state(pmp_fetch_state)
   );
 
-  rapt_l1i l1i_cache (
+  rapt_pkg::l2tlb_req_t l2tlb_req [2];
+  rapt_pkg::l2tlb_rsp_t l2tlb_rsp [2];
+  logic [1:0] l2tlb_ready;
+  if (`RAPT_L2TLB_ENTRIES > 0) begin : g_l2tlb
+    rapt_l2tlb #(
+        .Entries(`RAPT_L2TLB_ENTRIES),
+        .XLEN(XLEN)
+    ) u_l2tlb (
+        .clock(clock),
+        .reset(reset),
+        .flush(cmu_bcast.fence_time),
+        .req_i(l2tlb_req),
+        .ready_o(l2tlb_ready),
+        .rsp_o(l2tlb_rsp)
+    );
+  end else begin : g_no_l2tlb
+    assign l2tlb_ready = '0;
+    assign l2tlb_rsp[0] = '0;
+    assign l2tlb_rsp[1] = '0;
+  end
+
+  rapt_l1i #(
+      .L2Tlb(`RAPT_L2TLB_ENTRIES > 0)
+  ) l1i_cache (
+      .l2tlb_req_o(l2tlb_req[0]),
+      .l2tlb_ready_i(l2tlb_ready[0]),
+      .l2tlb_rsp_i(l2tlb_rsp[0]),
       .clock(clock),
       .reset(reset),
       .io_authorized(ifetch_io_authorized_i),
@@ -82,8 +123,12 @@ module rapt_memory #(
   );
 
   rapt_l1d #(
-      .WriteBack(L1dWriteBack)
+      .WriteBack(L1dWriteBack),
+      .L2Tlb(`RAPT_L2TLB_ENTRIES > 0)
   ) l1d_cache (
+      .l2tlb_req_o(l2tlb_req[1]),
+      .l2tlb_ready_i(l2tlb_ready[1]),
+      .l2tlb_rsp_i(l2tlb_rsp[1]),
       .clock(clock),
       .reset(reset),
       .coherent_ready(cache_coherent_ready),
@@ -108,7 +153,7 @@ module rapt_memory #(
       .writeback_bus_pending_o(l1d_writeback_bus_pending),
       .writeback_error(writeback_error_o),
       .writeback_idle(writeback_idle_o),
-      .writeback_drain(writeback_drain_i),
+      .writeback_drain(cache_writeback_drain),
       .external_write_valid_i(external_write_valid_i),
       .external_write_pending_i(external_write_pending_i),
       .external_write_first_i(external_write_first_i),

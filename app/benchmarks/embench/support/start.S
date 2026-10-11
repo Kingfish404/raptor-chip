@@ -4,6 +4,12 @@
 
 _start:
     la      sp, __stack_top
+#ifdef __riscv_flen
+    /* M-mode payloads must enable the FP state before entering hard-float C. */
+    li      t0, 0x6000
+    csrs    mstatus, t0
+    csrw    fcsr, zero
+#endif
 
     la      t0, __bss_start
     la      t1, __bss_end

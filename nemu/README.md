@@ -10,6 +10,14 @@ $NEMU_HOME/build/riscv32-nemu-interpreter -b -f -l $NEMU_HOME/build/nemu-log.txt
 $NEMU_HOME/build/riscv32-nemu-interpreter -b -f -l $NEMU_HOME/build/nemu-log.txt $RAPTOR_HOME/abstract-machine/app/am-kernels/benchmarks/microbench/build/microbench-riscv32-npc.bin
 ```
 
+Long runs save `nemu-status.log` and `nemu-uarch_state.json` every 100 million
+guest instructions. Set `NEMU_STATUS_DIR` to an existing directory to keep
+each concurrent run's snapshots separate; otherwise they use `$NEMU_HOME/build`.
+The JSON includes the PC, instruction count, registers, and exception CSRs.
+`NEMU_PC_DEBUG=1` additionally emits periodic PC/count messages to stderr.
+Debug options are read once per execution request rather than once per guest
+instruction.
+
 ## Introduction
 
 NEMU(NJU Emulator) is a simple but complete full-system emulator designed for teaching purpose.

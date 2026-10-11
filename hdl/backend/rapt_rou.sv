@@ -40,13 +40,20 @@ module rapt_rou #(
     // production datapath pay for the same ROB lookup twice.
     parameter bit ValidateCompletionInputs = 1'b0,
     // Composition may deliver accepted operand data before ROB completion.
-    parameter bit SeparateOperandWake = 1'b0
+    parameter bit SeparateOperandWake = 1'b0,
+    // Enable only when writeback_done is the held completion of a drain that
+    // already observed SQ, memory and writeback quiescence for this ROB owner.
+    parameter bit RegisteredDrainCompletion = 1'b0,
+    parameter bit CompactFpOperands = 1'b0,
+    // Read immutable instruction fields before the registered dispatch window.
+    // Allocations enter the carry lanes on the following cycle.
+    parameter bit RegisteredDispatchPayload = 1'b0
 ) (
     input CompletionT completion[NumCompletions],
     input CompletionT operand_wake[NumCompletions] = '{default: '0},
     rob_completion_owner_if.owner completion_owner,
     input clock,
-    input logic writeback_idle = 1'b1,
+    input logic writeback_done = 1'b1,
     output logic writeback_drain,
 
     rnu_rou_if.slave rnu_rou,
@@ -194,7 +201,7 @@ module rapt_rou #(
   logic recieved_sw_trap /* verilator public */;
   logic [XLEN-1:0] trap_cause /* verilator public */;
   logic [XLEN-1:0] trap_pc, commit_npc_q, flush_target_r;
-  // CSR/FP operations enter only an empty ROB and block younger allocation.
+  // CSR/system operations enter only an empty ROB and block younger allocation.
   // Thus at most one CSR write payload can be live; keep it once, not per ROB
   // entry. The per-entry csr_wen bit still owns commit and trap cancellation.
   logic [XLEN-1:0] csr_wdata_q;
@@ -225,6 +232,7 @@ module rapt_rou #(
   logic rob_drains_sq[ROB_SIZE];
   logic rob_atomic[ROB_SIZE];
   logic rob_fp_valid[ROB_SIZE];
+  logic rob_fp_writer[ROB_SIZE];
   logic [ROB_SIZE-1:0] rob_dispatch_pending, rob_dispatch_eligible;
   logic [SpillBits-1:0] rob_dp_spill[ROB_SIZE];
   logic [GenerationBits-1:0] rob_next_generation[ROB_SIZE];
@@ -266,14 +274,16 @@ module rapt_rou #(
   logic spill_allocate_valid[NumSlots], spill_allocate_ready[NumSlots];
   logic [XLEN-1:0] spill_allocate_op1[NumSlots], spill_allocate_op2[NumSlots];
   logic [PLEN-1:0] spill_allocate_pr1[NumSlots], spill_allocate_pr2[NumSlots];
-  UopT spill_allocate_uop[NumSlots], spill_read_uop[NumSlots];
+  localparam int WindowResident = ScanEntries - 2 * NumSlots;
+  localparam int ValueReadPorts = NumSlots + (RegisteredDispatchPayload ? WindowResident : 0);
+  UopT spill_allocate_uop[NumSlots], spill_read_uop[ValueReadPorts];
   logic [SpillBits-1:0] spill_allocate_index[NumSlots];
   logic spill_release_valid[NumSlots];
   logic [SpillBits-1:0] spill_release_index[NumSlots];
-  logic [SpillBits-1:0] spill_read_index[NumSlots];
-  logic spill_read_valid[NumSlots];
-  logic [XLEN-1:0] spill_read_op1[NumSlots], spill_read_op2[NumSlots];
-  logic [PLEN-1:0] spill_read_pr1[NumSlots], spill_read_pr2[NumSlots];
+  logic [SpillBits-1:0] spill_read_index[ValueReadPorts];
+  logic spill_read_valid[ValueReadPorts];
+  logic [XLEN-1:0] spill_read_op1[ValueReadPorts], spill_read_op2[ValueReadPorts];
+  logic [PLEN-1:0] spill_read_pr1[ValueReadPorts], spill_read_pr2[ValueReadPorts];
   for (genvar p = 0; p < NWB; p++) begin : g_wb_capture
     if (SeparateOperandWake) begin : g_operand
       // Every operand holder observes the same accepted event, including
@@ -294,7 +304,7 @@ module rapt_rou #(
       .SpillEntries(OperandSpillEntries),
       .AllocateWidth(NumSlots),
       .ReleaseWidth(NumSlots),
-      .ReadPorts(NumSlots),
+      .ReadPorts(ValueReadPorts),
       .CompletionPorts(NWB),
       .SpillBits(SpillBits)
   ) operand_values (
@@ -345,8 +355,7 @@ module rapt_rou #(
       : clint_sw_trap ? XLEN'(`RAPT_CAUSE_MSI) | (XLEN'(1) << (XLEN-1))
       : clint_timer_trap ? XLEN'(`RAPT_CAUSE_MTI) | (XLEN'(1) << (XLEN-1)) : s_int_cause;
   function automatic logic serializing(input UopT u);
-    return u.execute.sys.valid || u.execute.fp.valid || u.execute.sys.fence_i
-        || u.execute.sys.fence;
+    return u.execute.sys.valid || u.execute.sys.fence_i || u.execute.sys.fence;
   endfunction
   function automatic logic drains_sq_before_commit(input UopT u);
     // CBO.ZERO uses the serialization flag but owns a speculative SQ entry.
@@ -653,6 +662,9 @@ module rapt_rou #(
   localparam int DomainBits = $bits(rapt_pkg::execution_domain_t);
   localparam int SteerPayloadBits = DomainBits + SpillBits;
   logic [SteerPayloadBits-1:0] candidate_payload[ScanEntries];
+  logic window_prefetch_valid[WindowResident];
+  logic [SteerPayloadBits-1:0] window_prefetch_payload[WindowResident];
+  UopT candidate_uop[ScanEntries];
   begin : g_window_dispatch
     logic [SteerPayloadBits-1:0] entry_payload[ROB_SIZE];
     logic [SteerPayloadBits-1:0] incoming_payload[NumSlots];
@@ -669,7 +681,8 @@ module rapt_rou #(
         .Width(NumSlots),
         .ScanEntries(ScanEntries),
         .IndexBits(RBits),
-        .PayloadBits(SteerPayloadBits)
+        .PayloadBits(SteerPayloadBits),
+        .AllocationBypass(!RegisteredDispatchPayload)
     ) select (
         .clock(clock),
         .reset(reset),
@@ -691,8 +704,38 @@ module rapt_rou #(
         .candidate_count(steer_candidate_count),
         .accepted_count(endpoint_count),
         .bypass_count(steer_bypass_count),
-        .oldest_blocked(steer_oldest_blocked)
+        .oldest_blocked(steer_oldest_blocked),
+        .prefetch_valid(window_prefetch_valid),
+        .prefetch_payload(window_prefetch_payload)
     );
+  end
+
+  if (RegisteredDispatchPayload) begin : g_dispatch_payload
+    // Only immutable uop fields are sampled here. Mutable operand values and
+    // waiting tags still observe the accepted wake fabric until endpoint fire.
+    // Unused operand outputs of the extra read ports and unused uop outputs of
+    // ordinary read ports are eliminated; metadata LUTRAM copies are retimed,
+    // not doubled.
+    for (genvar r = 0; r < WindowResident; r++) begin : g_resident
+      UopT uop_q;
+      assign spill_read_index[NumSlots+r] = window_prefetch_payload[r][SpillBits-1:0];
+      always_ff @(posedge clock)
+        if (!(reset || flush_pipe) && window_prefetch_valid[r])
+          uop_q <= spill_read_uop[NumSlots+r];
+      assign candidate_uop[r] = uop_q;
+      `RAPT_SVA_IMPLY(clock, reset || flush_pipe, ROB_PREFETCH_HAS_SPILL, window_prefetch_valid[r],
+                      spill_read_valid[NumSlots+r])
+    end
+    for (genvar s = 0; s < NumSlots; s++) begin : g_carry
+      UopT uop_q;
+      always_ff @(posedge clock)
+        if (!(reset || flush_pipe) && deq_fire[s])
+          uop_q <= spill_allocate_uop[s];
+      assign candidate_uop[WindowResident+s] = uop_q;
+      assign candidate_uop[WindowResident+NumSlots+s] = '0;
+    end
+  end else begin : g_live_dispatch_payload
+    for (genvar c = 0; c < ScanEntries; c++) assign candidate_uop[c] = '0;
   end
 
   always_ff @(posedge clock) begin
@@ -731,6 +774,66 @@ module rapt_rou #(
   // Compute allocation operands/dependencies once per physical allocation port.
   // Both fall-through dispatch and the selected ROB owner consume this record.
   SlotT allocation[NumSlots];
+  UopT fp_allocate_uop[NumSlots];
+  CompletionT fp_operand_wake[NumCompletions];
+  logic [GenerationBits-1:0] fp_allocate_generation[NumSlots];
+  logic [2:0][63:0] fp_allocate_value[NumSlots], fp_read_value[NumSlots];
+  logic [2:0][RBits:0] fp_allocate_tag[NumSlots], fp_read_tag[NumSlots];
+  logic [RBits-1:0] fp_read_index[NumSlots];
+  logic fp_operand_read_valid[NumSlots];
+  logic [SpillBits-1:0] fp_operand_read_index[NumSlots];
+  logic fp_commit_valid[CommitWidth];
+  for (genvar p = 0; p < NumCompletions; p++) begin : g_fp_wake
+    always_comb begin
+      fp_operand_wake[p] = SeparateOperandWake ? operand_wake[p] : completion[p];
+      if (!SeparateOperandWake) fp_operand_wake[p].valid = completion_valid[p];
+    end
+  end
+  for (genvar s = 0; s < NumSlots; s++) begin : g_fp_rename_ports
+    assign fp_allocate_uop[s] = uoq_uops[deq_index[s]];
+    assign fp_allocate_generation[s] = rob_next_generation[rob_alloc[s]];
+    assign fp_read_index[s] = dispatch_index[selected_candidate[s]];
+    assign fp_operand_read_index[s] = spill_read_index[s];
+    assign fp_operand_read_valid[s] = selected_valid[s]
+        && !dispatch_from_allocation[selected_candidate[s]];
+  end
+  for (genvar c = 0; c < CommitWidth; c++) begin : g_fp_commit_ports
+    assign fp_commit_valid[c] = commit_fire[c] && !rob_entry[commit_index[c]].trap;
+  end
+  rapt_fp_registers #(
+      .UopT(UopT),
+      .CompletionT(CompletionT),
+      .Entries(ROB_SIZE),
+      .AllocateWidth(NumSlots),
+      .ReadPorts(NumSlots),
+      .CommitWidth(CommitWidth),
+      .CompletionPorts(NumCompletions),
+      .GenerationBits(GenerationBits),
+      .CompactSourceOperands(CompactFpOperands),
+      .OperandEntries(OperandSpillEntries),
+      .OperandBits(SpillBits)
+  ) fp_registers (
+      .clock,
+      .reset,
+      .flush(flush_pipe),
+      .allocate_valid(deq_fire),
+      .allocate_uop(fp_allocate_uop),
+      .allocate_index(rob_alloc),
+      .allocate_generation(fp_allocate_generation),
+      .allocate_value(fp_allocate_value),
+      .allocate_tag(fp_allocate_tag),
+      .operand_allocate_index(spill_allocate_index),
+      .operand_release_valid(spill_release_valid),
+      .operand_release_index(spill_release_index),
+      .operand_read_valid(fp_operand_read_valid),
+      .operand_read_index(fp_operand_read_index),
+      .read_index(fp_read_index),
+      .read_value(fp_read_value),
+      .read_tag(fp_read_tag),
+      .completion(fp_operand_wake),
+      .commit_valid(fp_commit_valid),
+      .commit_index
+  );
   for (genvar s = 0; s < NumSlots; s++) begin : g_allocation_payload
     wire [QBits-1:0] source_index = deq_index[s];
     always_comb begin
@@ -750,9 +853,10 @@ module rapt_rou #(
       allocation[s].prs = uoq_prs[source_index];
       allocation[s].dest = rob_alloc[s];
       allocation[s].generation = rob_next_generation[rob_alloc[s]];
-      // Every FP instruction enters an empty ROB and blocks younger admission
-      // until retirement. No FPR producer can remain when the next FP (or FP
-      // store) allocates, so completion-tag dependencies are unreachable.
+      allocation[s].fp_value = fp_allocate_value[s];
+      allocation[s].fp_tag = fp_allocate_tag[s];
+      // Register renaming carries FP data dependencies; no serialization-only
+      // completion dependency is needed by arithmetic or floating-point stores.
       for (int d = 0; d < NumDependencies; d++) begin
         allocation[s].dep_valid[d] = 1'b0;
         allocation[s].dep_tag[d] = '0;
@@ -782,7 +886,8 @@ module rapt_rou #(
       dispatch[s] = '0;
       candidate_slot = int'(selected_candidate[s]);
       if (selected_valid[s] && !dispatch_from_allocation[candidate_slot]) begin
-        dispatch[s].uop = spill_read_uop[s];
+        dispatch[s].uop = RegisteredDispatchPayload ? candidate_uop[candidate_slot]
+            : spill_read_uop[s];
         // The resident pending-state snoop updates at the clock edge.  Merge
         // the current CDB combinationally as well, otherwise a completion on
         // the same edge that the endpoint accepts this uop would be lost by
@@ -797,6 +902,8 @@ module rapt_rou #(
         dispatch[s].prs = rob_entry[dispatch_index[candidate_slot]].prs;
         dispatch[s].dest = dispatch_index[candidate_slot];
         dispatch[s].generation = rob_entry[dispatch_index[candidate_slot]].generation;
+        dispatch[s].fp_value = fp_read_value[s];
+        dispatch[s].fp_tag = fp_read_tag[s];
         for (int d = 0; d < NumDependencies; d++) begin
           dispatch[s].dep_valid[d] = 1'b0;
           dispatch[s].dep_tag[d] = '0;
@@ -810,6 +917,10 @@ module rapt_rou #(
       dispatch[s].uop.pnpc = '0;
       dispatch[s].uop.execute.branch.predicted_taken = 1'b0;
     end
+    `RAPT_SVA_IMPLY(clock, reset || flush_pipe, ROB_PREFETCH_PAYLOAD_IDENTITY,
+                    RegisteredDispatchPayload && selected_valid[s],
+                    !dispatch_from_allocation[selected_candidate[s]]
+                        && candidate_uop[selected_candidate[s]] == spill_read_uop[s])
     `RAPT_SVA_IMPLY(clock, reset || flush_pipe, ROB_RESIDENT_DISPATCH_HAS_SPILL,
                     selected_valid[s] && !dispatch_from_allocation[selected_candidate[s]],
                     spill_read_valid[s])
@@ -1035,6 +1146,8 @@ module rapt_rou #(
   assign writeback_drain = !reset && rob_entry_busy[rob_head]
       && rob_entry[rob_head].state == rapt_pkg::ROB_WB
       && rob_drains_sq[rob_head];
+  // A registered completion already includes the SQ ordering point. Admission
+  // serializes its owner, so no younger store can appear before retirement.
   // Special operations retire alone; ordinary groups may contain one store and
   // one control-flow instruction, matching the physical LSU/BPU interfaces.
   for (genvar c = 0; c < CommitWidth; c++) begin : g_commit_index
@@ -1055,7 +1168,8 @@ module rapt_rou #(
           && (!rob_entry[commit_index[c]].wen || (rou_lsu.sq_ready && !store_commit_valid))
           && (!rob_control_flow[commit_index[c]] || !branch_commit_valid) &&
           (!commit_special(int'(commit_index[c])) || c == 0) &&
-          (!rob_drains_sq[commit_index[c]] || (rou_lsu.sq_empty && writeback_idle));
+          (!rob_drains_sq[commit_index[c]] ||
+           (writeback_done && (RegisteredDrainCompletion || rou_lsu.sq_empty)));
       if (commit_fire[c]) begin
         commit_count++;
         youngest_commit = commit_index[c];
@@ -1075,7 +1189,7 @@ module rapt_rou #(
   end
   assign head0_valid = recieved_trap || commit_fire[0];
   assign head0_flush = recieved_trap || (commit_fire[0] && (
-      rob_serializing[h0] && !rob_fp_valid[h0]
+      rob_serializing[h0]
       || rob_entry[h0].trap || rob_entry[h0].mispredict || rob_atomic[h0]));
   assign flush_pipe = head0_flush || debug_halt_flush;
   // Mispredicts, atomics, and CSR ops that do not change fetch translation may
@@ -1177,6 +1291,9 @@ module rapt_rou #(
           rob_drains_sq[entry] <= drains_sq_before_commit(allocation[allocate_lane].uop);
           rob_atomic[entry] <= allocation[allocate_lane].uop.execute.memory.atomic;
           rob_fp_valid[entry] <= allocation[allocate_lane].uop.execute.fp.valid;
+          rob_fp_writer[entry] <= rapt_pkg::fp_writes_register(
+              allocation[allocate_lane].uop.execute.fp.valid,
+              allocation[allocate_lane].uop.execute.fp.op, allocation[allocate_lane].uop.inst);
           rob_entry[entry].state      <= rapt_pkg::ROB_DP;
           rob_entry[entry].rd         <= allocation[allocate_lane].uop.rd;
           rob_entry[entry].mispredict <= 1'b0;
@@ -1315,36 +1432,26 @@ module rapt_rou #(
   assign rou_cmu.sys_resume = 1'b0;
   assign rou_cmu.time_trap = recieved_trap;
   assign rou_cmu.rob_head = rob_head;
-  logic fp_f2i_from_h0;
-  logic fp_dirty_from_h0;
-  assign fp_f2i_from_h0 = (uop_pl[h0].execute.fp.op == `RAPT_FP_OP_FCVT_W_S)
-      || (uop_pl[h0].execute.fp.op == `RAPT_FP_OP_FCVT_WU_S)
-      || (uop_pl[h0].execute.fp.op == `RAPT_FP_OP_FCVT_L_S)
-      || (uop_pl[h0].execute.fp.op == `RAPT_FP_OP_FCVT_LU_S)
-      || (uop_pl[h0].execute.fp.op == `RAPT_FP_OP_FCVT_W_D)
-      || (uop_pl[h0].execute.fp.op == `RAPT_FP_OP_FCVT_WU_D)
-      || (uop_pl[h0].execute.fp.op == `RAPT_FP_OP_FCVT_L_D)
-      || (uop_pl[h0].execute.fp.op == `RAPT_FP_OP_FCVT_LU_D)
-      || ((uop_pl[h0].execute.fp.op == `RAPT_FP_OP_ZFHMIN)
-          && (uop_pl[h0].inst[31:25] == 7'b1110010));
-  assign fp_dirty_from_h0 = head0_valid && rob_fp_valid[h0] && !rob_entry[h0].trap
-      && ((uop_pl[h0].execute.fp.op != `RAPT_FP_OP_FSW)
-        && (uop_pl[h0].execute.fp.op != `RAPT_FP_OP_FSD)
-        && !((uop_pl[h0].execute.fp.op == `RAPT_FP_OP_ZFHMIN)
-             && (uop_pl[h0].inst[6:0] == 7'b0100111))
-        && (uop_pl[h0].execute.fp.op != `RAPT_FP_OP_FMV_X_W)
-        && (uop_pl[h0].execute.fp.op != `RAPT_FP_OP_FMV_X_D)
-        && (uop_pl[h0].execute.fp.op != `RAPT_FP_OP_FLE_S)
-        && (uop_pl[h0].execute.fp.op != `RAPT_FP_OP_FLT_S)
-        && (uop_pl[h0].execute.fp.op != `RAPT_FP_OP_FEQ_S)
-        && (uop_pl[h0].execute.fp.op != `RAPT_FP_OP_FCLASS_S)
-        && (uop_pl[h0].execute.fp.op != `RAPT_FP_OP_FLE_D)
-        && (uop_pl[h0].execute.fp.op != `RAPT_FP_OP_FLT_D)
-        && (uop_pl[h0].execute.fp.op != `RAPT_FP_OP_FEQ_D)
-        && (uop_pl[h0].execute.fp.op != `RAPT_FP_OP_FCLASS_D)
-        && !fp_f2i_from_h0
-        || (rob_entry[h0].fp_flags_valid && |rob_entry[h0].fp_flags));
-
+  // Floating-point flags accumulate only across the actual in-order retire
+  // prefix. Several FP instructions (including WAWs) may retire together;
+  // younger speculative results and faulting instructions have no CSR effect.
+  logic fp_commit_flags_valid, fp_commit_dirty;
+  logic [4:0] fp_commit_flags;
+  always_comb begin
+    fp_commit_flags_valid = 1'b0;
+    fp_commit_flags = '0;
+    fp_commit_dirty = 1'b0;
+    for (int c = 0; c < CommitWidth; c++) begin
+      if (fp_commit_valid[c]) begin
+        fp_commit_flags_valid |= rob_entry[commit_index[c]].fp_flags_valid;
+        if (rob_entry[commit_index[c]].fp_flags_valid)
+          fp_commit_flags |= rob_entry[commit_index[c]].fp_flags;
+        fp_commit_dirty |= rob_fp_writer[commit_index[c]]
+            || (rob_entry[commit_index[c]].fp_flags_valid
+                && |rob_entry[commit_index[c]].fp_flags);
+      end
+    end
+  end
 
   logic commit_trap;
   assign commit_trap = rob_entry[h0].trap;
@@ -1355,9 +1462,9 @@ module rapt_rou #(
       && rob_entry[h0].csr_wen;
   assign rou_csr.csr_wdata = csr_wdata_q;
   assign rou_csr.csr_addr = uop_pl[h0].imm[11:0];
-  assign rou_csr.fp_flags_valid = !recieved_trap && !commit_trap && rob_entry[h0].fp_flags_valid;
-  assign rou_csr.fp_flags = rob_entry[h0].fp_flags;
-  assign rou_csr.fp_dirty = !recieved_trap && !commit_trap && fp_dirty_from_h0;
+  assign rou_csr.fp_flags_valid = fp_commit_flags_valid;
+  assign rou_csr.fp_flags = fp_commit_flags;
+  assign rou_csr.fp_dirty = fp_commit_dirty;
   assign rou_csr.ecall = !recieved_trap && !commit_trap && uop_pl[h0].execute.sys.ecall;
   assign rou_csr.ebreak = !recieved_trap && !commit_trap && uop_pl[h0].execute.sys.ebreak;
   assign rou_csr.mret = !recieved_trap && !commit_trap && uop_pl[h0].execute.sys.mret;
@@ -1366,7 +1473,7 @@ module rapt_rou #(
   assign rou_csr.tval = recieved_trap ? '0 : commit_trap ? oldest_exception_tval : '0;
   assign rou_csr.cause = recieved_trap ? trap_cause : oldest_exception_cause;
   assign rou_csr.valid = recieved_trap || (commit_fire[0] && (uop_pl[h0].execute.sys.valid
-      || commit_trap || rob_entry[h0].fp_flags_valid || fp_dirty_from_h0));
+      || commit_trap)) || fp_commit_flags_valid || fp_commit_dirty;
   // Faulting instructions still leave the ROB and deliver their exception,
   // but do not retire architecturally. commit_special confines these events
   // to a single head entry; interrupts already suppress commit_count.
@@ -1435,7 +1542,7 @@ module rapt_rou #(
         && !rou_lsu.sq_ready;
     pmu_head_drain_wait <= !reset && rob_entry_busy[h0]
         && rob_entry[h0].state == rapt_pkg::ROB_WB
-        && rob_drains_sq[h0] && (!rou_lsu.sq_empty || !writeback_idle);
+        && rob_drains_sq[h0] && (!rou_lsu.sq_empty || !writeback_done);
     for (int e = 0; e < ROB_SIZE; e++) pmu_cf_events[e] <= cf_events(e);
   end
 `endif
@@ -1455,7 +1562,13 @@ module rapt_rou #(
                     int'(commit_index[c])), commit_count == 1)
     `RAPT_SVA_IMPLY(clock, reset, ROB_MEMORY_FENCE_DRAINS_MEMORY,
                     commit_fire[c] && rob_drains_sq[commit_index[c]],
-                    rou_lsu.sq_empty && writeback_idle)
+                    rou_lsu.sq_empty && writeback_done)
+  end
+  if (RegisteredDrainCompletion) begin : g_registered_drain_contract
+    `RAPT_SVA_IMPLY(clock, reset, ROB_DRAIN_DONE_INCLUDES_STORES, writeback_drain && writeback_done,
+                    rou_lsu.sq_empty)
+    `RAPT_SVA_IMPLY(clock, reset, ROB_DRAIN_OWNER_SERIALIZED, writeback_drain,
+                    serialize_in_flight && dispatch_count == 0)
   end
   for (genvar s = 0; s < NumSlots; s++) begin : g_allocate_contract
     `RAPT_SVA_IMPLY(clock, reset || flush_pipe, ROB_DISPATCH_SYSOP_ONEHOT, deq_fire[s], $onehot0(
@@ -1517,11 +1630,6 @@ module rapt_rou #(
   end
   for (genvar s = 1; s < NumSlots; s++) begin : g_dispatch_contract
     `RAPT_SVA_IMPLY(clock, reset || flush_pipe, ROB_DISPATCH_PREFIX, deq_fire[s], deq_fire[s-1])
-  end
-  for (genvar s = 0; s < NumSlots; s++) begin : g_serial_fp_contract
-    `RAPT_SVA_IMPLY(clock, reset || flush_pipe, ROB_FP_ALONE_ON_ALLOCATION,
-                    deq_fire[s] && allocation[s].uop.execute.fp.valid,
-                    s == 0 && rob_empty && dispatch_count == 1)
   end
   for (genvar p = 0; p < NumCompletions; p++) begin : g_completion_contract
     `RAPT_SVA_IMPLY(clock, reset || flush_pipe, ROB_COMPLETION_LIVE, completion_valid[p],

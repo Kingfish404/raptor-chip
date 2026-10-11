@@ -104,6 +104,8 @@
 // Keep whole-cluster proofs tractable while still exercising replacement.
 `define RAPT_ITLB_ENTRIES 4
 `define RAPT_DTLB_ENTRIES 4
+// Shared instruction/data second-level translation cache; zero bypasses it.
+`define RAPT_L2TLB_ENTRIES 256
 
 // L2: disabled (pass-through) so its tag/data arrays drop out of the cone.
 // (RAPT_L2_EN intentionally not defined.)

@@ -22,7 +22,7 @@ module tb_backend_trace;
   lsu_l1d_mmu_if exu_l1d ();
   ifu_l1i_if ifu_l1i ();
   axi4_if axi ();
-  logic backend_empty, sq_empty, writeback_idle, writeback_drain;
+  logic backend_empty, sq_empty, writeback_done, writeback_drain;
   logic memory_data_idle, memory_wb_error, io_start, halted, commit_fire;
   logic [XLEN-1:0] io_owner, halt_pc, dbg_gpr_data;
   logic history_restore;
@@ -34,7 +34,7 @@ module tb_backend_trace;
   rapt_backend dut (
       .clock,
       .reset,
-      .writeback_idle,
+      .writeback_done,
       .writeback_drain,
       .idu_rnu,
       .cmu_bcast,
@@ -79,7 +79,9 @@ module tb_backend_trace;
       .ifetch_io_start_o(io_start),
       .ifetch_io_owner_pc_o(io_owner),
       .data_idle_o(memory_data_idle),
-      .writeback_idle_o(writeback_idle),
+      .writeback_idle_o(),
+      .writeback_done_o(writeback_done),
+      .stores_empty_i(sq_empty),
       .writeback_drain_i(writeback_drain),
       .writeback_error_o(memory_wb_error)
   );

@@ -2,7 +2,7 @@
 `include "rapt_if.svh"
 `include "rapt_soc_if.svh"
 module tb_cache_stream #(
-    parameter bit WriteBack = 0
+    parameter bit WriteBack = `RAPT_L1D_WRITEBACK
 );
   logic coherent_ready, coherent_request, coherent_write;
   logic writeback_error, writeback_idle;
@@ -32,6 +32,27 @@ module tb_cache_stream #(
   logic release_has_data_o, release_mask_o, release_last_o;
   logic [XLEN-1:0] release_addr_o, release_data_o;
   int clean_releases = 0, dirty_releases = 0, release_acks = 0;
+  string wb_mshr_trace;
+  initial
+    if ($value$plusargs("WB_MSHR_TRACE=%s", wb_mshr_trace)) begin
+      $dumpfile(wb_mshr_trace);
+      $dumpvars(0, tb_cache_stream);
+    end
+  always @(posedge clock)
+    if (!reset && wb_mshr_trace != "") begin
+      if (l1d_bus.arvalid && l1d_bus.rready)
+        $display(
+            "WB_MSHR AR %t addr=%h mshr=%b noalloc=%b",
+            $time,
+            l1d_bus.araddr,
+            l1d_bus.ar_mshr,
+            l1d_bus.noallocate
+        );
+      if (dut.mshr_fill_ready)
+        $display("WB_MSHR FILL %t addr=%h way=%d", $time, dut.mshr_fill_addr, dut.store_fill_way);
+      if (release_valid_o && release_ready_i && release_last_o)
+        $display("WB_MSHR RELEASE %t addr=%h dirty=%b", $time, release_addr_o, release_has_data_o);
+    end
   always @(posedge clock)
     if (!reset) begin
       if (release_valid_o && release_ready_i && release_last_o) begin
@@ -78,6 +99,9 @@ module tb_cache_stream #(
   rapt_l1d #(
       .WriteBack(WriteBack)
   ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
@@ -569,6 +593,210 @@ module tb_cache_stream #(
     lsu_l1d.walu = 8'({WordBytes{1'b1}});
     $display("PASS: WB preserves older store response ownership RV%0d", XLEN);
   endtask
+  task automatic ptw_dirty_publication;
+    logic [XLEN-1:0] address, expected;
+    address = XLEN'('h80009000);
+    expected = XLEN'('h12345678);
+    load(address, ram[index_of(address)]);
+    @(negedge clock);
+    lsu_l1d.waddr = address;
+    lsu_l1d.wdata = expected;
+    lsu_l1d.walu = 8'({WordBytes{1'b1}});
+    lsu_l1d.wvalid = 1;
+    #1;
+    if (!lsu_l1d.wready || l1d_bus.wvalid) $fatal(1, "PTE store did not complete locally");
+    @(posedge clock);
+    @(negedge clock);
+    lsu_l1d.wvalid = 0;
+    repeat (4) @(negedge clock);
+    if (writeback_idle || ram[index_of(address)] == expected)
+      $fatal(1, "PTE store did not retain dirty ownership");
+    l1i_bus.araddr = address;
+    l1i_bus.ar_ptw = 1;
+    l1i_bus.arvalid = 1;
+    #1;
+    if (l1i_bus.rready) $fatal(1, "PTW accepted before dirty PTE publication");
+    for (int cycle = 0; cycle < 10000 && !l1i_bus.rready; cycle++) @(negedge clock);
+    if (!l1i_bus.rready) $fatal(1, "dirty PTE publication stalled");
+    @(posedge clock);
+    @(negedge clock);
+    l1i_bus.arvalid = 0;
+    for (int cycle = 0; cycle < 10000 && !l1i_bus.ptw_rvalid; cycle++) @(negedge clock);
+    if (!l1i_bus.ptw_rvalid || l1i_bus.ptw_rerr || l1i_bus.rdata != expected)
+      $fatal(1, "I-side PTW read stale dirty PTE data");
+    @(posedge clock);
+    @(negedge clock);
+    l1i_bus.ar_ptw = 0;
+    idle();
+    $display("PASS: WB PTW reads published dirty PTE RV%0d", XLEN);
+  endtask
+
+  // A PTW read must exclude every new SQ write, including a partial miss
+  // that cannot complete in the write-back cache and uses the bus instead.
+  task automatic ptw_read_partial_store;
+    logic [XLEN-1:0] address, expected;
+    address = XLEN'('h8000d000);
+    expected = ram[index_of(address)];
+    hold_read_response = 1;
+    @(negedge clock);
+    l1i_bus.araddr = address;
+    l1i_bus.ar_ptw = 1;
+    l1i_bus.arvalid = 1;
+    #1;
+    for (int cycle = 0; cycle < 10000 && !l1i_bus.rready; cycle++) @(negedge clock);
+    if (!l1i_bus.rready) $fatal(1, "PTW read was not captured");
+    @(posedge clock);
+    @(negedge clock);
+    l1i_bus.arvalid = 0;
+    lsu_l1d.waddr = address;
+    lsu_l1d.wdata = XLEN'('h5a);
+    lsu_l1d.walu = 8'h01;
+    lsu_l1d.wvalid = 1;
+    repeat (24) begin
+      #1;
+      if (lsu_l1d.wready || l1d_bus.wvalid)
+        $fatal(1, "partial store miss overtook an outstanding I-side PTW read");
+      @(negedge clock);
+    end
+    hold_read_response = 0;
+    for (int cycle = 0; cycle < 10000 && !l1i_bus.ptw_rvalid; cycle++) @(negedge clock);
+    if (!l1i_bus.ptw_rvalid || l1i_bus.ptw_rerr || l1i_bus.rdata != expected)
+      $fatal(1, "PTW read saw a younger partial store");
+    @(posedge clock);
+    @(negedge clock);
+    l1i_bus.ar_ptw = 0;
+    for (int cycle = 0; cycle < 10000 && !lsu_l1d.wready; cycle++) @(negedge clock);
+    if (!lsu_l1d.wready || lsu_l1d.werr) $fatal(1, "partial store did not resume after PTW");
+    @(posedge clock);
+    @(negedge clock);
+    lsu_l1d.wvalid = 0;
+    expected[7:0] = 8'h5a;
+    load(address, expected);
+    $display("PASS: WB PTW read orders partial store misses RV%0d", XLEN);
+  endtask
+
+  task automatic ptw_read_older_store(input bit data_side);
+    logic [XLEN-1:0] address;
+    address = data_side ? XLEN'('h8000b000) : XLEN'('h8000c000);
+    hold_write_response = 1;
+    @(negedge clock);
+    lsu_l1d.waddr = address;
+    // Clear V in the root PTE: the data walk must observe a page fault.
+    lsu_l1d.wdata = 0;
+    lsu_l1d.walu = 8'h01;
+    lsu_l1d.wvalid = 1;
+    for (int cycle = 0; cycle < 10000 && !b_wait; cycle++) @(negedge clock);
+    if (!b_wait) $fatal(1, "PTW ordering setup did not hold the older store");
+    if (data_side) begin
+      csr_bcast.satp_ppn = `RAPT_CSR_SATP_PPN_W'(address >> 12);
+      csr_bcast.dmmu_en = 1;
+      exu_l1d.mmu_en = 1;
+      exu_l1d.vaddr = 0;
+      exu_l1d.walu = 8'h01;
+      exu_l1d.valid = 1;
+    end else begin
+      l1i_bus.araddr = address;
+      l1i_bus.ar_ptw = 1;
+      l1i_bus.arvalid = 1;
+    end
+    repeat (24) begin
+      #1;
+      if ((data_side && dut.ptw_req) || l1i_bus.rready || l1d_bus.arvalid)
+        $fatal(1, "PTW read overtook an older pending store, data_side=%0d", data_side);
+      @(negedge clock);
+    end
+    hold_write_response = 0;
+    for (int cycle = 0; cycle < 10000 && !lsu_l1d.wready; cycle++) @(negedge clock);
+    if (!lsu_l1d.wready) $fatal(1, "older store did not complete before PTW read");
+    @(posedge clock);
+    @(negedge clock);
+    lsu_l1d.wvalid = 0;
+    if (data_side) begin
+      hold_read_response = 1;
+      for (int cycle = 0; cycle < 10000 && !dut.ptw_busy; cycle++) @(negedge clock);
+      if (!dut.ptw_busy) $fatal(1, "data PTW did not start after older store");
+      lsu_l1d.wdata = XLEN'('h80);
+      lsu_l1d.wvalid = 1;
+      repeat (24) begin
+        #1;
+        if (lsu_l1d.wready || l1d_bus.wvalid)
+          $fatal(1, "partial store miss overtook an outstanding D-side PTW read");
+        @(negedge clock);
+      end
+      hold_read_response = 0;
+      for (int cycle = 0; cycle < 10000 && !exu_l1d.trap; cycle++) @(negedge clock);
+      if (!exu_l1d.trap || exu_l1d.cause != `RAPT_CAUSE_STORE_PAGE_FAULT)
+        $fatal(1, "data PTW did not consume the updated invalid PTE");
+      exu_l1d.valid = 0;
+      exu_l1d.mmu_en = 0;
+      csr_bcast.dmmu_en = 0;
+      for (int cycle = 0; cycle < 10000 && !lsu_l1d.wready; cycle++) @(negedge clock);
+      if (!lsu_l1d.wready) $fatal(1, "younger store did not resume after data PTW");
+      @(posedge clock);
+      @(negedge clock);
+      lsu_l1d.wvalid = 0;
+    end else begin
+      for (int cycle = 0; cycle < 10000 && !l1i_bus.rready; cycle++) @(negedge clock);
+      if (!l1i_bus.rready) $fatal(1, "I-side PTW did not resume after store");
+      @(posedge clock);
+      @(negedge clock);
+      l1i_bus.arvalid = 0;
+      for (int cycle = 0; cycle < 10000 && !l1i_bus.ptw_rvalid; cycle++) @(negedge clock);
+      if (!l1i_bus.ptw_rvalid || l1i_bus.ptw_rerr || l1i_bus.rdata != ram[index_of(address)])
+        $fatal(1, "I-side PTW did not consume the older store");
+      @(posedge clock);
+      @(negedge clock);
+      l1i_bus.ar_ptw = 0;
+    end
+    idle();
+    $display("PASS: WB PTW waits for older bus store RV%0d data_side=%0d", XLEN, data_side);
+  endtask
+
+  // PTW A/D writes invalidate D-cache copies. That invalidation must not
+  // swallow the one-cycle response of a store already accepted by the bus.
+  task automatic ptw_write_pending_store;
+    logic [XLEN-1:0] address, expected;
+    int requests_before;
+    address = XLEN'('h8000e000);
+    expected = XLEN'('h1234abcd);
+    requests_before = write_requests;
+    hold_write_response = 1;
+    @(negedge clock);
+    lsu_l1d.waddr = address;
+    lsu_l1d.wdata = XLEN'('h5a);
+    lsu_l1d.walu = 8'h01;
+    lsu_l1d.wvalid = 1;
+    for (int cycle = 0; cycle < 10000 && !b_wait; cycle++) @(negedge clock);
+    if (!b_wait || lsu_l1d.wready) $fatal(1, "older store did not reach held B response");
+    l1i_bus.awaddr = address;
+    l1i_bus.aw_ptw = 1;
+    l1i_bus.awvalid = 1;
+    l1i_bus.wvalid = 1;
+    l1i_bus.wdata = expected;
+    l1i_bus.wstrb = 8'({WordBytes{1'b1}});
+    repeat (8) @(negedge clock);
+    hold_write_response = 0;
+    for (int cycle = 0; cycle < 10000 && !l1d_bus.wready; cycle++) @(negedge clock);
+    if (!l1d_bus.wready || !lsu_l1d.wready || lsu_l1d.werr || l1i_bus.ptw_wready)
+      $fatal(1, "PTW invalidation swallowed the older SQ store response");
+    @(posedge clock);
+    @(negedge clock);
+    lsu_l1d.wvalid = 0;
+    for (int cycle = 0; cycle < 10000 && !l1i_bus.ptw_wready; cycle++) @(negedge clock);
+    if (!l1i_bus.ptw_wready || l1i_bus.ptw_werr)
+      $fatal(1, "PTW write did not complete after older store");
+    @(posedge clock);
+    @(negedge clock);
+    l1i_bus.awvalid = 0;
+    l1i_bus.wvalid = 0;
+    l1i_bus.aw_ptw = 0;
+    idle();
+    load(address, expected);
+    if (write_requests != requests_before + 2)
+      $fatal(1, "PTW overlap duplicated a store transaction");
+    $display("PASS: WB PTW invalidation preserves older SQ response RV%0d", XLEN);
+  endtask
+
   task automatic load(input logic [XLEN-1:0] addr, input logic [XLEN-1:0] expected,
                       input bit hot = 0, input bit early = 0);
     int before_requests;
@@ -818,6 +1046,37 @@ module tb_cache_stream #(
     for (int i = 0; i < Words; i++) ram[i] = XLEN'('h12340000) + XLEN'(i);
     repeat (4) @(negedge clock);
     reset = 0;
+    if ($test$plusargs("WB_MSHR_L2")) begin
+      if (!WriteBack || !L2WriteBack || `RAPT_L1D_MSHRS != 4)
+        $fatal(1, "requires default-l2 writeback and four MSHRs");
+      lsu_l1d.replay_allowed = 1;
+      load(XLEN'('h80000000), ram[0]);
+      store_word_for_probe_test(XLEN'('h80000000), XLEN'('haabbccdd), 1);
+      // Use different L1 tags of one set; inclusive victim Release must
+      // publish the dirty line before its array slot is reused by an MSHR.
+      for (int i = 1; i <= `RAPT_L1D_N_WAYS + 1; i++)
+      load(XLEN'('h80000000) + XLEN'(i * CapacityBytes), ram[index_of(
+           XLEN'('h80000000)+XLEN'(i*CapacityBytes))]);
+      if (dirty_releases == 0 || release_acks == 0)
+        $fatal(1, "MSHR replacement failed to release inclusive dirty victim");
+      load(XLEN'('h80000000), XLEN'('haabbccdd));
+      $display("PASS: RV%0d writeback MSHR acquires inclusive L2 client and releases dirty victim",
+               XLEN);
+      $finish;
+    end
+    if ($test$plusargs("WB_PTW_READ") || $test$plusargs("WB_PTW_WRITE")) begin
+      if (!WriteBack) $fatal(1, "PTW coherence check requires write-back");
+      if ($test$plusargs("WB_PTW_READ")) begin
+        ptw_dirty_publication();
+        ptw_read_partial_store();
+      end
+      if (!L2WriteBack) begin
+        ptw_read_older_store(0);
+        ptw_read_older_store(1);
+      end
+      if ($test$plusargs("WB_PTW_WRITE") && !L2WriteBack) ptw_write_pending_store();
+      $finish;
+    end
     // A nonzero demanded offset selects its beat, then all other words hit.
     load(XLEN'('h80000000), ram[0], 0, 1);
     if (l1_requests != 1) $fatal(1, "cold line needed multiple L1D requests");
@@ -1191,7 +1450,8 @@ module tb_cache_stream #(
       write_error = 0;
       repeat (32) begin
         @(negedge clock);
-        if (!writeback_error || writeback_idle || !dut.dirty_any
+        if (!writeback_error || writeback_idle || !dut.wb_busy
+            || dut.wb_data != XLEN'('h24681357)
             || l1d_bus.wvalid || l1d_bus.arvalid)
           $fatal(1, "AXI WB error did not preserve fail-stop");
       end

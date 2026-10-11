@@ -7,6 +7,7 @@
 #include <iostream>
 #include <limits>
 #include <random>
+#include "../pipeline_host_check.h"
 
 #pragma STDC FENV_ACCESS ON
 
@@ -80,6 +81,19 @@ int main(int argc, char **argv) {
         << unsigned(expected.flags) << std::dec << "\n";
     }
     tick(dut);
+  }
+  for (bool source_double : {false, true}) {
+    dut.source_double = source_double;
+    errors += check_pipeline_stream(&dut, iterations, [&](int) {
+      bool uns = rng() & 1, int64 = rng() & 1;
+      unsigned rm = rng() % 5;
+      uint64_t operand = rng();
+      if (!source_double && (rng() & 7)) operand |= 0xffffffff00000000ULL;
+      dut.unsigned_result = uns; dut.int64_target = int64;
+      dut.rounding_mode = rm; dut.operand = operand;
+      const Expected expected = reference(operand, source_double, uns, int64, rm);
+      return std::make_pair(expected.result, expected.flags);
+    }, [](uint64_t expected, uint64_t actual) { return expected == actual; });
   }
   std::cout << "fp_to_int cases=" << iterations << " errors=" << errors << "\n";
   return errors != 0;

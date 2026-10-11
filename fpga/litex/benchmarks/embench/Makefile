@@ -39,8 +39,8 @@ OBJCOPY := $(CROSS_COMPILE)objcopy
 SIZE    := $(CROSS_COMPILE)size
 
 # ---- Architecture ----
-ARCH := rv32imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs
-ABI  := ilp32
+ARCH := rv32imafdc_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs
+ABI  := ilp32d
 
 # ---- System parameters ----
 # LiteX sys_clk used by the default raptor_soc.py invocation (50 MHz).

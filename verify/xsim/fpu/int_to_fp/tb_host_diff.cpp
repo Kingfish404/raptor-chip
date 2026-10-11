@@ -6,6 +6,7 @@
 
 #include "Vrapt_fpu_int_to_fp_tb.h"
 #include "verilated.h"
+#include "../pipeline_host_check.h"
 
 static Vrapt_fpu_int_to_fp_tb* top;
 static uint64_t rng = 0x13198a2e03707344ULL;
@@ -106,6 +107,20 @@ int main(int argc, char** argv) {
                static_cast<unsigned long long>(top->dut_result), top->dut_flags);
     }
     tick();
+  }
+  for (bool target_double : {false, true}) {
+    for (bool int64_input : {false, true}) {
+      top->target_double = target_double;
+      top->int64_input = int64_input;
+      failures += check_pipeline_stream(top, iterations, [&](int) {
+        uint64_t operand = random64();
+        bool unsigned_input = random64() & 1;
+        int rm = random64() % 4;
+        top->operand = operand; top->unsigned_input = unsigned_input; top->rounding_mode = rm;
+        const Result expected = reference(operand, target_double, int64_input, unsigned_input, rm);
+        return std::make_pair(expected.bits, expected.flags);
+      }, [](uint64_t expected, uint64_t actual) { return expected == actual; });
+    }
   }
   printf("TOTAL=%d FAILS=%d\n", iterations, failures);
   top->final(); delete top;

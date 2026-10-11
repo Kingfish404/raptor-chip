@@ -5,6 +5,9 @@
 module rapt_l1d_mshr #(
     parameter int Xlen = `RAPT_XLEN,
     parameter int Entries = 2,
+    // A consumer that already excludes line invalidation from its fill
+    // acceptance can keep the invalidating address out of payload selection.
+    parameter bit StallFillOnLineInvalidate = 1'b0,
     parameter int LineBytes = `RAPT_CACHE_LINE_BYTES,
     parameter int Words = LineBytes / (Xlen / 8),
     parameter int WordBits = $clog2(Words),
@@ -13,8 +16,9 @@ module rapt_l1d_mshr #(
     input logic clock,
     reset,
     invalidate,
-    // Stores still drain issued refills before reaching this port. Invalidate
-    // only their physical line; unrelated completed buffers remain reusable.
+    // Stores drain issued refills; eviction/Release may invalidate a copy
+    // while unrelated refills remain live. Accepted killed owners still
+    // retain their ID through RLAST below.
     input logic invalidate_line,
     input logic [Xlen-1:0] invalidate_addr,
     output logic fill_valid,
@@ -63,14 +67,17 @@ module rapt_l1d_mshr #(
     fill_id = '0;
     for (int i = Entries - 1; i >= 0; i--) begin
       kill_line[i] = invalidate_line && tag[i] == invalidate_addr[Xlen-1:OffsetBits];
-      if (valid[i] && done[i] && !killed[i] && !installed[i] && !kill_line[i]) begin
+      if (valid[i] && done[i] && !killed[i] && !installed[i]
+          && (StallFillOnLineInvalidate || !kill_line[i])) begin
         fill_valid = 1;
         fill_id = IdBits'(i);
       end
     end
     // Cancellation gates the transfer, not the refill payload selection.
-    // Keeping it out of fill_id avoids a flush-to-tag-array address path.
-    fill_valid &= !invalidate;
+    // The optional exclusive fill policy also removes the invalidating
+    // store address from fill_id; entry invalidation still happens below.
+    // The default retains selective fill during unrelated invalidations.
+    fill_valid &= !invalidate && (!StallFillOnLineInvalidate || !invalidate_line);
     fill_addr = {tag[fill_id], {OffsetBits{1'b0}}};
     fill_mask = ~errors[fill_id];
     for (int w = 0; w < Words; w++) fill_data[w*Xlen+:Xlen] = data[fill_id][w];
@@ -183,7 +190,6 @@ module rapt_l1d_mshr #(
       end
     end
   end
-  `RAPT_SVA_IMPLY(clock, reset, MSHR_STORE_DRAINED, invalidate_line, !busy)
   `RAPT_SVA_IMPLY(
       clock, reset, MSHR_RESPONSE_OWNER, rsp_valid,
       int'(rsp_id) < Entries && valid[IdBits'(rsp_id)] && sent[IdBits'(rsp_id)] && !done[IdBits'(rsp_id)])

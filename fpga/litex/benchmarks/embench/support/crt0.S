@@ -12,6 +12,12 @@
 _start:
     /* Stack pointer at top of reserved region (defined in link.ld) */
     la      sp, _estack
+#ifdef __riscv_flen
+    /* The loader may leave FS disabled. Enable FP before hard-float C. */
+    li      t0, 0x6000
+    csrs    mstatus, t0
+    csrw    fcsr, zero
+#endif
 
     /* Clear BSS */
     la      t0, _fbss

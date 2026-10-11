@@ -6,6 +6,7 @@ module rapt_ieu #(
     parameter type IssueT = rapt_pkg::issue_packet_t,
     parameter type SlotT = rapt_pkg::dispatch_slot_t,
     parameter int unsigned NumSlots = Cfg.dispatch_width,
+    parameter bit LocalIntegerWake = 1'b0,
     parameter int unsigned NumIntegerPorts = Cfg.integer_issue_ports,
     parameter int unsigned IntegerSystemPort = Cfg.integer_system_port,
     parameter int unsigned NumCompletions = Cfg.completion_ports,
@@ -19,6 +20,7 @@ module rapt_ieu #(
     parameter unsigned XLEN     = Cfg.xlen
 ) (
     input CompletionT completion[NumCompletions],
+    input CompletionT local_integer_wake[NumCompletions] = '{default: '0},
     input CompletionT branch_wake[NumCompletions] = '{default: '0},
     input CompletionT memory_wake = '0,
     input clock,
@@ -66,9 +68,9 @@ module rapt_ieu #(
   logic [IssueCountBits-1:0] pmu_alq_extra_port_count_next;
   assign iss_branch = brq_issue[0];
 
-  // Composition chooses the single CSR/system-capable port. It may be reserved
-  // by the shared integer/FPU completion arbitration; every simple-ALU port
-  // remains independently available. Port identity carries no dispatch-lane
+  // Composition chooses the single CSR/system-capable port and controls its
+  // availability independently of the simple-ALU ports. FP owns a separate
+  // completion endpoint. Port identity carries no dispatch-lane
   // meaning and the system capability can be relocated at elaboration.
   always_comb begin
     integer_issue_enable = '1;
@@ -136,12 +138,12 @@ module rapt_ieu #(
       // same-cycle load wake would chain the L1D response, integer select,
       // ALU and the global result broadcast in one cycle.
       .ComboCdbWake(1'b0),
+      .LocalOperandWake(LocalIntegerWake),
       .ComboWakePorts(32'(1) << (NumIntegerPorts + 1)),
       .ConfirmCdbWake(1'b0),
       .NumIssuePorts(NumIntegerPorts),
-      // The system/FP shared completion path buffers contending results.
-      // Keep it available for throughput and system-only uops, but route the
-      // oldest ready general ALU uop to a simple port before the shared port.
+      // Prefer simple ports for general ALU work, leaving the system-capable
+      // port available for CSR/system uops when both classes are ready.
       .LastIssuePort(IntegerSystemPort),
       .UniformSimplePorts(1'b1),
       .ROB_SIZE (ROB_SIZE),
@@ -149,6 +151,7 @@ module rapt_ieu #(
       .RLEN     (RLEN),
       .XLEN     (XLEN)
   ) u_alq (
+      .local_operand_wake(local_integer_wake),
       .combo_source(alq_combo),
       .cancel_valid(cancel_valid),
       .cancel_head(cancel_head),
@@ -177,6 +180,7 @@ module rapt_ieu #(
       .IQ_SIZE (BRQ_SIZE),
       // Branches read operands captured at the queue edge.
       .ComboCdbWake(1'b0),
+      .LocalOperandWake(LocalIntegerWake),
       .ConfirmCdbWake(1'b0),
       .ComboWakePorts(~(32'(1) << NumIntegerPorts)),
       .ROB_SIZE(ROB_SIZE),
@@ -184,6 +188,7 @@ module rapt_ieu #(
       .RLEN    (RLEN),
       .XLEN    (XLEN)
   ) u_brq (
+      .local_operand_wake(local_integer_wake),
       .combo_source(branch_wake),
       .cancel_valid(cancel_valid),
       .cancel_head(cancel_head),

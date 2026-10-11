@@ -36,6 +36,9 @@ VIVADO ?= vivado
 VIVADO_JOBS ?= 8
 # W4 needs the full area optimization pass; keep other preset defaults intact.
 NETBOOT_SYNTH_DIRECTIVE ?= $(if $(filter 64,$(_nb_xlen)),$(if $(filter default-w4,$(RAPT_CONFIG)),default,RuntimeOptimized),default)
+# Avoid the W4 synthesis timing-optimization blowup. Placement/routing and final
+# timing checks still use the original clocks and the W4 setup margin below.
+NETBOOT_NO_TIMING_DRIVEN ?= $(if $(and $(filter 64,$(_nb_xlen)),$(filter default-w4,$(RAPT_CONFIG))),1,0)
 CROSS ?= riscv64-linux-gnu-
 # Do not propagate arbitrary command-line profile overrides into this fixed build.
 override MAKEOVERRIDES :=
@@ -72,6 +75,7 @@ _nb_args = $(call _nb_fixed,FPGA_BOARD,mlk_cu08_ku15p) $(call _nb_fixed,FPGA_AUT
  $(call _nb_quote,VIVADO_JOBS=$(VIVADO_JOBS)) $(call _nb_fixed,VIVADO_ROUTE_DIRECTIVE,Explore) \
  $(call _nb_fixed,VIVADO_SYNTH_DIRECTIVE,$(NETBOOT_SYNTH_DIRECTIVE)) $(call _nb_quote,VIVADO=$(VIVADO))
 _nb_args += $(call _nb_fixed,VIVADO_SYS_SETUP_MARGIN_NS,$(_nb_setup_margin))
+_nb_args += $(call _nb_fixed,VIVADO_NO_TIMING_DRIVEN,$(NETBOOT_NO_TIMING_DRIVEN))
 _nb_args += $(call _nb_fixed,VIVADO_SYS_FINAL_WNS_NS,$(_nb_final_wns))
 
 NETBOOT_PYTHON ?= $(_NETBOOT_LITEX)/.venv/bin/python3
