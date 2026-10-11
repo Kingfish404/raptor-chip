@@ -56,6 +56,8 @@ module rapt_ieu_pipe_alu #(
   assign wb_alu.csr_wen = 1'b0;
   assign wb_alu.csr_wdata = '0;
   assign wb_alu.fp_flags_valid = 1'b0;
+  assign wb_alu.fp_wen = 1'b0;
+  assign wb_alu.fp_result = '0;
   assign wb_alu.fp_flags = '0;
   assign wb_alu.trap = 1'b0;
   assign wb_alu.tval = '0;

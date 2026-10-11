@@ -14,7 +14,12 @@ module tb_l1i_word_path #(
   pmp_state_if pmp_state ();
   ifu_l1i_if ifu_l1i ();
   l1i_bus_if l1i_bus ();
-  rapt_l1i dut (.*);
+  rapt_l1i dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
+      .*
+  );
   if (UseGuard) begin : g_guard
     rapt_ifetch_io_guard #(
         .XLEN(XLEN)

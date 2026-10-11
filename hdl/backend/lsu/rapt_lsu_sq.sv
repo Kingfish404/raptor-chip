@@ -1048,8 +1048,10 @@ module rapt_lsu_sq #(
 
   // HANDSHAKE: a load/AMO blocked by an older partial store must not complete
   // via a stale L1D rready from a request that was never issued.
+  // MA_DONE returns an already admitted split load. A concurrent store handoff
+  // can conservatively assert load_in_sq after its beats have completed.
   `RAPT_SVA_IMPLY(clock, reset, LSU_BLOCKED_LOAD_NOT_READY,
-                  (raddr_valid && load_in_sq && !fwd_hit), (!exu_lsu.rready))
+                  (ma_state == MA_IDLE && raddr_valid && load_in_sq && !fwd_hit), (!exu_lsu.rready))
 
   // LR establishes its reservation in L1D and therefore cannot complete via
   // store-queue forwarding even when an older store fully covers its bytes.

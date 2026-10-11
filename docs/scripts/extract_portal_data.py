@@ -68,7 +68,7 @@ STAGE_OF = {
     "rapt_rnu_maptable": 2,
     "rapt_rnu_freelist": 2,
     "rapt_prf": 3,
-    "rapt_fpr": 3,
+    "rapt_fp_registers": 3,
     "rapt_rou": 3,
     "rapt_dpu": 3,
     "rapt_rob_dispatch_select": 3,
@@ -119,7 +119,7 @@ ARCH_SHORT = {
     "rapt_rnu": "RNU",
     "rapt_operand_stage": "OPS",
     "rapt_prf": "PRF",
-    "rapt_fpr": "FPR",
+    "rapt_fp_registers": "FPR",
     "rapt_rou": "ROU",
     "rapt_dpu": "DPU",
     "rapt_ieu": "IEU",
@@ -160,7 +160,7 @@ DISPLAY_IDS = {
     "rapt_rnu",
     "rapt_operand_stage",
     "rapt_prf",
-    "rapt_fpr",
+    "rapt_fp_registers",
     "rapt_rou",
     "rapt_dpu",
     "rapt_ieu",
@@ -209,7 +209,7 @@ SCHEMATIC = {
     "rapt_dpu": (8, 0, 1, 1),
     "rapt_ieu": (9, 0, 1, 1),
     "rapt_cdb_arb": (10, 0, 1, 1),
-    "rapt_fpr": (4, 1, 1, 1),
+    "rapt_fp_registers": (4, 1, 1, 1),
     "rapt_prf": (5, 1, 1, 1),
     "rapt_ieu_muldiv": (9, 1, 1, 1),
     "rapt_cmu": (10, 1, 1, 1),
@@ -240,8 +240,8 @@ LATENCY_NOTES = (
     "Default RAPT_IQ_RECLAIM_ON_ISSUE=1: an issued queue slot may be reused on that edge.",
     "RNQ and rename_pipe are inside RNU. rapt_operand_stage buffers renamed packets; ROU owns the operand-reading UOQ.",
     "Default integer, branch, and memory completions bypass the common register; MUL/DIV retains it. Scalar FP has local result buffering.",
-    "L1D hit returns from the registered access state. ITLB/DTLB are rapt_tlb; misses use rapt_ptw.",
-    "Default L1D has 2 MSHRs. L2 is passthrough unless RAPT_L2_EN is set.",
+    "L1D hit returns from the registered access state. ITLB/DTLB misses probe the shared 256-entry direct-mapped L2 TLB before rapt_ptw.",
+    "Default write-back L1D has 4 MSHRs and 2 writeback buffers; translated misses replay through IOQ. L2 is passthrough unless RAPT_L2_EN is set.",
     "PMEM/UART cycle costs are abstract PMA-window delays, not board measurements.",
     "Animation uses simplified queues, one completion delay, and conservative retirement; it omits redirects, replay, and actual ALU bypass timing. Model IPC is not RTL IPC.",
 )
@@ -505,7 +505,7 @@ def collect_config(repo: Path) -> dict[str, Any]:
         r"completion_ports:\s*`RAPT_INTEGER_ISSUE_PORTS\s*\+\s*(\d+)", pkg
     )
     issue_ports = ival("RAPT_INTEGER_ISSUE_PORTS", default=2) or 2
-    extra = int(m.group(1)) if m else 3
+    extra = int(m.group(1)) if m else 4
     completion_ports = issue_ports + extra
 
     return {
@@ -520,6 +520,7 @@ def collect_config(repo: Path) -> dict[str, Any]:
             "completion_ports": completion_ports,
             "rob_entries": ival("RAPT_ROB_SIZE", default=32),
             "alq_entries": ival("RAPT_RS_SIZE", default=8),
+            "fpq_entries": ival("RAPT_RS_SIZE", default=8),
             "ioq_entries": ival("RAPT_IOQ_SIZE", default=8),
             "sq_entries": ival("RAPT_SQ_SIZE", default=16),
             "phys_regs": ival("RAPT_PHY_SIZE", default=64),
@@ -529,6 +530,7 @@ def collect_config(repo: Path) -> dict[str, Any]:
             "btb_ways": ival("RAPT_BTB_WAYS", default=2),
             "rsb_entries": ival("RAPT_RSB_SIZE", default=4),
             "itlb_entries": ival("RAPT_ITLB_ENTRIES", default=16),
+            "l2tlb_entries": ival("RAPT_L2TLB_ENTRIES", default=0),
             "dtlb_entries": ival("RAPT_DTLB_ENTRIES", default=16),
             "branch_checkpoints": ival("RAPT_BRANCH_CHECKPOINTS", default=16),
             "steer_scan_entries": ival("RAPT_STEER_SCAN_ENTRIES"),
@@ -548,7 +550,7 @@ def collect_config(repo: Path) -> dict[str, Any]:
             "pmp_csr_slots": ival("RAPT_PMP_CSR_NUM", default=16),
             "fetch_response_stage": ival("RAPT_FETCH_RESPONSE_STAGE", default=0) or 0,
             "iq_reclaim_on_issue": ival("RAPT_IQ_RECLAIM_ON_ISSUE", default=1) or 0,
-            "l1d_mshrs": ival("RAPT_L1D_MSHRS", default=2) or 0,
+            "l1d_mshrs": ival("RAPT_L1D_MSHRS", default=0) or 0,
             "m_fast": 1 if "RAPT_M_FAST" in defines else 0,
         },
         "sources": {
@@ -713,7 +715,7 @@ def size_hint(module_id: str, values: dict[str, Any], extra: dict[str, int]) -> 
     mapping = {
         "rapt_rou": values.get("rob_entries") or 16,
         "rapt_prf": max(8, (values.get("phys_regs") or 32) // 8),
-        "rapt_fpr": 12,
+        "rapt_fp_registers": 12,
         "rapt_ieu": extra.get("alq_entries", values.get("alq_entries") or 8),
         "rapt_feu": extra.get("fpq_entries", 4),
         "rapt_lsu": values.get("sq_entries") or 8,
@@ -745,7 +747,7 @@ def buffer_model(values: dict[str, Any], extra: dict[str, int]) -> dict[str, dic
     decode = values.get("decode_width") or 2
     rob = values.get("rob_entries") or 32
     alq = extra.get("alq_entries", values.get("alq_entries") or 8)
-    fpq = extra.get("fpq_entries", values.get("fpq_entries") or 1)
+    fpq = extra.get("fpq_entries", values.get("fpq_entries") or 8)
     brq = extra.get("brq_entries", values.get("brq_entries") or 8)
     mdq = extra.get("mdq_entries", values.get("mdq_entries") or 4)
     sq = values.get("sq_entries") or 16
@@ -779,15 +781,15 @@ def buffer_model(values: dict[str, Any], extra: dict[str, int]) -> dict[str, dic
         "rapt_rnu": tile(0.95, 0.9, values.get("rename_width") or 2, 1, "RNQ plus rename_pipe and checkpoints", "stage"),
         "rapt_operand_stage": tile(0.9, 0.85, values.get("rename_width") or 2, 1, "renamed-packet buffer before the ROU operand-reading UOQ", "queue"),
         "rapt_prf": tile(0.95, 1.15, prf, 1, f"integer PRF {prf}", "regfile"),
-        "rapt_fpr": tile(0.9, 0.95, 32, 1, "architectural FPR 32x64", "regfile"),
+        "rapt_fp_registers": tile(0.9, 0.95, 32, 1, "ROB-backed FP renaming and committed FPR 32x64", "regfile"),
         "rapt_rou": tile(1.15, 1.55, rob, 1, f"ROB {rob}; UOQ {values.get('uoq_entries') or 8}; pending operands in a separate spill bank", "queue"),
         "rapt_dpu": tile(0.9, 0.85, values.get("dispatch_width") or 2, 1, "steer into ALQ/BRQ/MDQ/FPQ/IOQ", "stage"),
         "rapt_ieu": tile(1.05, 1.2, alq + brq, 1, f"ALQ {alq} + BRQ {brq}; same-edge reuse={values.get('iq_reclaim_on_issue', 1)}", "queue"),
         "rapt_ieu_muldiv": tile(1.0, 1.0, mdq, mul_fast, f"MDQ {mdq}; integer mul/div", "queue"),
-        "rapt_feu": tile(0.95, 0.95, fpq, 3, f"FPQ {fpq}; scalar F/D pipe (not 1-cycle)", "queue"),
+        "rapt_feu": tile(0.95, 0.95, fpq, 3, f"FPQ {fpq}; overlapping F/D pipelines, variable latency", "queue"),
         "rapt_lsu": tile(1.1, 1.05, ioq, 1, f"IOQ {ioq}: address, store-order, and issue", "queue"),
         "rapt_lsu_sq": tile(1.0, 1.0, sq, 1, f"unified SQ {sq}; drains after commit", "queue"),
-        "rapt_cdb_arb": tile(0.85, 0.85, 1, 1, "one shared integer-system / scalar-FP completion port", "stage"),
+        "rapt_cdb_arb": tile(0.85, 0.85, 1, 1, "legacy standalone completion buffer; core FP endpoint is independent", "stage"),
         "rapt_cmu": tile(0.95, 0.9, values.get("commit_width") or 2, 1, "retire / CMU", "stage"),
         "rapt_csr": tile(0.85, 0.8, 8, 1, "CSR file; serializing system ops", "stage"),
         "rapt_l1d": tile(1.25, 1.2, l1d, l1d_hit, f"{l1d} KiB 4-way D$; hit from registered access", "cache"),
@@ -1262,11 +1264,9 @@ def documented_flow() -> list[dict[str, str]]:
         {"from": "rapt_dpu", "to": "rapt_ieu", "label": "integer"},
         {"from": "rapt_dpu", "to": "rapt_feu", "label": "fp"},
         {"from": "rapt_dpu", "to": "rapt_lsu", "label": "memory"},
-        {"from": "rapt_ieu", "to": "rapt_cdb_arb", "label": "system-port result"},
-        {"from": "rapt_feu", "to": "rapt_cdb_arb", "label": "CDB"},
         {"from": "rapt_ieu", "to": "rapt_rou", "label": "guarded integer / branch / MUL-DIV"},
+        {"from": "rapt_feu", "to": "rapt_rou", "label": "guarded FP completion"},
         {"from": "rapt_lsu", "to": "rapt_rou", "label": "guarded memory completion"},
-        {"from": "rapt_cdb_arb", "to": "rapt_rou", "label": "complete"},
         {"from": "rapt_rou", "to": "rapt_cmu", "label": "retire"},
         {"from": "rapt_lsu", "to": "rapt_l1d", "label": "load/store"},
         {"from": "rapt_l1i", "to": "rapt_bus", "label": "fill"},
@@ -1295,6 +1295,7 @@ def build(repo: Path) -> dict[str, Any]:
     package = strip_sv_comments((repo / "hdl/rapt_pkg.sv").read_text())
     constants = {f"rapt_pkg::{name}": value for name, value in re.findall(
         r"localparam\s+(?:int\s+)?unsigned\s+(\w+)\s*=\s*(\d+)\s*;", package)}
+    constants["Cfg.iq_entries"] = str(config["values"]["alq_entries"])
     extra = parse_module_param_defaults(modules, constants)
     config["values"].update(extra)
     makefile = parse_makefile(repo)

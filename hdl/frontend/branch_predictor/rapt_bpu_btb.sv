@@ -100,14 +100,19 @@ module rapt_bpu_btb #(
       if (ren && !(target_write && waddr == raddr)) target_q <= target[raddr];
       if (target_write) target[waddr] <= wd_target;
     end
+    // During an enabled lookup, capture any target write speculatively.
+    // The unchanged valid bit exposes this value only on an address match.
+    // When the lookup is held, writes to other sets must preserve the value
+    // already being forwarded. That comparison uses the registered address,
+    // keeping the current lookup address off the wide data write enable.
+    always_ff @(posedge clock) begin
+      if (target_write && (ren || waddr == held_raddr)) target_forward_q <= wd_target;
+    end
     always_ff @(posedge clock) begin
       if (reset || init) target_forward_valid_q <= 1'b0;
       else begin
         if (ren) target_forward_valid_q <= target_write_observed;
-        if (target_write_observed) begin
-          target_forward_q <= wd_target;
-          target_forward_valid_q <= 1'b1;
-        end
+        if (target_write_observed) target_forward_valid_q <= 1'b1;
       end
     end
     always_ff @(posedge clock) begin

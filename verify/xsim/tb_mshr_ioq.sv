@@ -1,6 +1,8 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
-module tb_mshr_ioq;
+module tb_mshr_ioq #(
+    parameter bit Mmu = 0
+);
   localparam int XLEN = `RAPT_XLEN;
   `include "tb_ioq_harness.svh"
   task automatic await_load(input logic [XLEN-1:0] addr);
@@ -14,11 +16,13 @@ module tb_mshr_ioq;
           exu_lsu.raddr,
           dut.ioq_miss_wait
       );
+    check(exu_lsu.rcontext.mmu_en == Mmu, "replay lost its translation context");
   endtask
   initial begin
     init_ioq_inputs(1);
     tick(3);
     reset=0;
+    csr_bcast.dmmu_en = Mmu;
     cmu_bcast.rob_head=3;
     for (int i = 0; i < 2; i++) begin
       dispatch[i]='0;

@@ -83,7 +83,7 @@ module rapt_fpu_convert_widen (
     end
   end
 
-  assign ready = !(s1_valid_q || s2_valid_q);
+  assign ready = !reset && !flush;
   assign result = result_q;
   assign flags = flags_q;
   assign result_valid = s2_valid_q;

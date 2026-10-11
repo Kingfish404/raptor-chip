@@ -119,6 +119,8 @@ module tb_ifu_stream_events;
     ifu_l1i.inst_n0 = 32'h00000263; // BEQ target == fall-through
     ifu_bpu.taken = 1;
     ifu_bpu.npc = 'h80001004;
+    // Both query ports predict taken, including response-head refresh.
+    ifu_bpu.aux_taken = 1;
     accept_packet();
     assert (history_events == 2 && last_history_taken && ifu_idu.slot[0].predicted_taken
         && ifu_idu.slot[0].pnpc == ifu_idu.slot[0].pc + 4)

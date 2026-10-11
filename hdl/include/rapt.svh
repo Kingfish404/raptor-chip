@@ -177,6 +177,11 @@
 `define RAPT_DTLB_ENTRIES 4
 `endif
 
+// Zero bypasses the shared second-level translation cache.
+`ifndef RAPT_L2TLB_ENTRIES
+`define RAPT_L2TLB_ENTRIES 0
+`endif
+
 // Instruction Set Opcodes
 `define RAPT_INST_FENCE_I 32'h0000100f
 

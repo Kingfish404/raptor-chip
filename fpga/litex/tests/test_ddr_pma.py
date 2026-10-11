@@ -19,7 +19,7 @@ class DDRPMATest(unittest.TestCase):
         self.assertIn("CONFIG.C0.DDR4_AxiDataWidth {512}", source)
         self.assertIn("CONFIG.C0.DDR4_AxiNarrowBurst {true}", source)
 
-    def test_cu08_2133_mig_is_board_specific(self):
+    def test_cu08_1600_mig_is_board_specific(self):
         config = (LITEX / "mk/config.mk").read_text()
         board = (LITEX / "mlk_cu08_ku15p.py").read_text()
         soc = (LITEX / "ku15p_soc.py").read_text()
@@ -34,10 +34,10 @@ class DDRPMATest(unittest.TestCase):
         self.assertIn('platform.add_ip(os.path.join(_here, "scripts", "ku15p_ddr4_mig.tcl"))', soc)
         self.assertLess(soc.index('platform.add_ip(os.path.join(_here, "scripts", mig_tcl))'),
                         soc.index('platform.add_ip(os.path.join(_here, "scripts", "ku15p_ddr4_mig.tcl"))'))
-        for key, default, new in (("time_period", 833, 938),
-                                  ("input_clock_period", 9996, 10005),
-                                  ("cas_latency", 17, 15),
-                                  ("cas_write_latency", 12, 11)):
+        for key, default, new in (("time_period", 833, 1250),
+                                  ("input_clock_period", 9996, 10000),
+                                  ("cas_latency", 17, 12),
+                                  ("cas_write_latency", 12, 9)):
             self.assertIn(f"set raptor_ddr4_{key} {default}", common)
             self.assertIn(f"set raptor_ddr4_{key} {new}", cu08)
 

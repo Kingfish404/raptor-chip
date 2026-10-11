@@ -58,6 +58,14 @@ else
   VFLAGS :=
 endif
 
+# Benchmarks that exercise hardware floating point opt in before including this
+# file. Keep the other applications' existing integer ABI unchanged.
+APP_ENABLE_FP ?= 0
+ifeq ($(APP_ENABLE_FP),1)
+  ARCH := $(PK_ARCH)
+  ABI := $(if $(filter 64,$(XLEN)),lp64d,ilp32d)
+endif
+
 # ---- Build helpers ----
 Q     := --no-print-directory
 NPROC := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)

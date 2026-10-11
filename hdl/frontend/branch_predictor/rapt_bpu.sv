@@ -11,7 +11,9 @@
 `elsif RAPT_BPU_DIRP_STATIC
 `define RAPT_BPU_DIRP_MODULE rapt_bpu_static
 `else
-`error "Select a RAPT_BPU_DIRP_TAGE, GSHARE, BIMODAL or STATIC predictor"
+// An undefined module rejects missing selections in both synthesis and lint,
+// even with nonfatal warnings. Unlike `error, this is also formatter-compatible.
+`define RAPT_BPU_DIRP_MODULE rapt_bpu_requires_TAGE_GSHARE_BIMODAL_or_STATIC
 `endif
 
 /* verilator lint_off UNUSEDPARAM */

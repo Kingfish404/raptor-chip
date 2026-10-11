@@ -58,7 +58,7 @@ install_verible_linux() {
   fi
 }
 
-brew_init() {
+brew_bootstrap() {
   # Check if Homebrew is installed
   if ! command -v brew &> /dev/null; then
     echo "Homebrew not found, installing..."
@@ -80,7 +80,10 @@ brew_init() {
   else
     echo "Homebrew is already installed"
   fi
+}
 
+brew_init() {
+  brew_bootstrap
   local brew_packages=(verilator sbt asciidoctor)
 
   # On Linux, prefer the system build toolchain when it already exists.
@@ -103,17 +106,17 @@ clone_build_espresso() {
   mkdir -p "$ROOT_DIR/third_party"
   [ -d "$ROOT_DIR/third_party/espresso" ] || git clone --depth 1 https://github.com/chipsalliance/espresso "$ROOT_DIR/third_party/espresso"
 
-  cmake -S "$ROOT_DIR/third_party/espresso" -B "$ROOT_DIR/third_party/espresso/build"
+  # Decoder generation only needs the executable. Upstream enables man pages
+  # by default, which adds an otherwise unused asciidoctor dependency. Pass
+  # this on every configure so existing CMake caches are corrected as well.
+  cmake -S "$ROOT_DIR/third_party/espresso" -B "$ROOT_DIR/third_party/espresso/build" \
+    -DBUILD_DOC=OFF
   cmake --build "$ROOT_DIR/third_party/espresso/build" -j"$(host_nproc)"
 }
 
-run_setup_rtl() {
+prepare_rtl_sources() {
   local step=0
   echo "Setting up RTL build environment..."
-
-  step=$((step + 1))
-  echo "Step $step: Initializing brew..."
-  brew_init
 
   step=$((step + 1))
   echo "Step $step: Cloning/building espresso..."
@@ -130,6 +133,11 @@ run_setup_rtl() {
   make -C "$ROOT_DIR/sim" pack
 
   echo "RTL build environment setup complete."
+}
+
+run_setup_rtl() {
+  brew_init
+  prepare_rtl_sources
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then

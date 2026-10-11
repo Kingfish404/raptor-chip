@@ -172,8 +172,13 @@ else ifneq ($(findstring __GNUC__,$(SIM_CXX_MACROS)),)
 # Keep the diagnostic visible without letting this warning stop the build.
 SIM_CXX_WARNING_FLAGS += -Wno-error=maybe-uninitialized
 endif
-CXXFLAGS = $(SIM_CXX_WARNING_FLAGS) \
-	$(call remove_quote,$(CONFIG_CC_OPT))
+# Keep optimization out of -CFLAGS: Verilator appends those flags after
+# OPT_SLOW, which would optimize the large coverage-registration functions
+# even though they only run at startup. Apply Kconfig's optimization to hot
+# code and the runtime library, and leave cold code at -O0.
+SIM_MAKEFLAGS = CXX=$(CXX) OPT_FAST=$(call remove_quote,$(CONFIG_CC_OPT)) \
+	OPT_GLOBAL=$(call remove_quote,$(CONFIG_CC_OPT)) OPT_SLOW=-O0
+CXXFLAGS = $(SIM_CXX_WARNING_FLAGS)
 ifeq ($(SIM_MEM_PROFILE),large)
 CXXFLAGS += -DRAPT_LARGE_PMEM
 endif
@@ -293,14 +298,15 @@ SIM_BUILD_KEY := $(shell python3 $(NSIM_HOME)/scripts/build_cache.py fingerprint
     -- \
     $(call _sim_quote,$(SIM_BUILD_SIGNATURE)) \
     $(call _sim_quote,$(VERILATOR_FLAG) $(SIM_ASSERT_FLAGS) $(VERILATOR_EXTRA_EFFECTIVE)) \
-    $(call _sim_quote,$(CXXFLAGS) $(LDFLAGS)) $(call _sim_quote,$(VERILATOR_THREADS)))
+    $(call _sim_quote,$(CXXFLAGS) $(LDFLAGS)) $(call _sim_quote,$(SIM_MAKEFLAGS)) \
+    $(call _sim_quote,$(VERILATOR_THREADS)))
 
 $(MODEL_BIN): $(VSRCS) $(VHSRCS) $(CCSRCS) $(CHSRCS)
 	@mkdir -p "$(OBJ_DIR)"
 	+$(VERILATOR) --trace-fst -cc --exe --build -j $(VERILATOR_JOBS) $(VERILATOR_FLAG) $(SIM_ASSERT_FLAGS) $(VERILATOR_EXTRA_EFFECTIVE) $(filter-out $(CHSRCS) $(VHSRCS),$^) \
 		--threads $(VERILATOR_THREADS) \
 		--top-module $(VTARGET) \
-		-MAKEFLAGS "CXX=$(CXX)" \
+		-MAKEFLAGS "$(SIM_MAKEFLAGS)" \
 		$(addprefix -CFLAGS , $(CXXFLAGS)) $(addprefix -LDFLAGS , $(LDFLAGS)) \
 		$(addprefix -I, $(INC_PATH)) \
 		$(SIM_VFLAGS) \

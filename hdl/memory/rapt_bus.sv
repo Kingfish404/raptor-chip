@@ -106,6 +106,7 @@ module rapt_bus #(
   logic [XLEN-1:0] miss_addr[4];
   logic [7:0] miss_len[4];
   logic [2:0] miss_size[4];
+  logic [3:0] miss_noallocate;
   logic miss_push, miss_available, source_miss, take_miss, miss_response;
   logic [1:0] miss_select;
   always_comb begin
@@ -136,6 +137,7 @@ module rapt_bus #(
         miss_addr[l1d_bus.ar_mshr_id] <= l1d_bus.araddr;
         miss_len[l1d_bus.ar_mshr_id] <= l1d_bus.arlen;
         miss_size[l1d_bus.ar_mshr_id] <= l1d_arsize_enc;
+        miss_noallocate[l1d_bus.ar_mshr_id] <= l1d_bus.noallocate;
       end
       if (take_miss) miss_held[miss_select] <= 1;
       if (rd_output_fire && mem.rd_req_id[3:2] == 2'b10) miss_issued[mem.rd_req_id[1:0]] <= 1;
@@ -303,7 +305,8 @@ module rapt_bus #(
   assign mem.rd_req_size = rd_skid_valid ? rd_skid_size : source_size;
   assign mem.rd_req_burst = rd_skid_valid ? rd_skid_burst : source_burst;
   assign mem.rd_req_pbmt = rd_skid_valid ? rd_skid_pbmt : source_pbmt;
-  assign source_noallocate = source_l1d ? l1d_slot_noallocate : source_miss ? 1'b1 : l1i_q_noallocate[l1i_q_rdptr];
+  assign source_noallocate = source_l1d ? l1d_slot_noallocate
+      : source_miss ? miss_noallocate[miss_select] : l1i_q_noallocate[l1i_q_rdptr];
   assign mem.rd_req_noallocate = rd_skid_valid ? rd_skid_noallocate : source_noallocate;
   assign mem.rd_req_len = rd_skid_valid ? rd_skid_len : source_len;
   assign rd_output_fire = mem.rd_req_valid && mem.rd_req_ready;

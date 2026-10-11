@@ -10,7 +10,9 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shlex
 import shutil
+import sys
 
 import riscof.utils as utils
 from riscof.pluginTemplate import pluginTemplate
@@ -41,6 +43,7 @@ class sail_cSim(pluginTemplate):
         self.isa_spec = os.path.abspath(config.get("ispec", ""))
         self.platform_spec = os.path.abspath(config.get("pspec", ""))
         self.make = config.get("make", "make")
+        self.timeout = max(1, int(os.environ.get("RAPT_TIMEOUT", "600"))) + 30
         return sclass
 
     def initialise(self, suite, work_dir, archtest_env):
@@ -111,7 +114,7 @@ class sail_cSim(pluginTemplate):
                 + " " + test + " -o " + elf
                 + " -D" + " -D".join(entry["macros"])
             )
-            execute += compile_cmd + " &&"
+            execute += "(" + compile_cmd + ") > build.log 2>&1 &&"
             execute += self.objdump_cmd.format(elf, self.xlen, "ref.disass")
 
             sig_file = os.path.join(
@@ -121,7 +124,9 @@ class sail_cSim(pluginTemplate):
             # Match the pre-split PMP check in Raptor's LSU. Sail's default
             # decomposes even page-local misaligned accesses before PMP.
             execute += (
-                f"{self.sail_exe}"
+                f"{shlex.quote(sys.executable)} "
+                f"{shlex.quote(os.path.abspath(os.path.join(self.pluginpath, '../../../../scripts/run_with_timeout.py')))} "
+                f"{self.timeout} {shlex.quote(self.sail_exe)}"
                 f"{sail_arch_flag}"
                 f" --config-override={self.pluginpath}/raptor.json"
                 f" --signature-granularity=4"
@@ -130,7 +135,13 @@ class sail_cSim(pluginTemplate):
             )
             make.add_target(execute)
 
-        make.execute_all(self.work_dir)
+        # RISCOF defaults to 300 seconds for the entire make invocation,
+        # independently of the per-test budget. Bound each Sail run above,
+        # allow all parallel batches to finish, and propagate failures.
+        batches = (len(testList) + int(self.num_jobs) - 1) // int(self.num_jobs)
+        result = make.execute_all(self.work_dir, timeout=max(300, batches * (self.timeout + 30)))
+        if result != 0:
+            raise RuntimeError("Sail build/run failed; see per-test ref/build.log and ref/*.log")
 
     @staticmethod
     def _mabi_for_isa(march):

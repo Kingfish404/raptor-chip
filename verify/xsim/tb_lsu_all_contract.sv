@@ -447,6 +447,9 @@ l1d_bus_if l1d_bus ();
   rapt_l1d #(
       .LineRefill(0)
   ) cache_dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .clock,
       .reset,
       .cmu_bcast,
@@ -1060,6 +1063,9 @@ l1d_bus_if l1d_bus ();
   rapt_l1d #(
       .LineRefill(0)
   ) cache_dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .clock,
       .reset,
       .cmu_bcast,
@@ -1661,7 +1667,22 @@ module tb_lsu_split_fault;
     check(exu_lsu.rready && !exu_lsu.trap, "split success response missing");
     check(exu_lsu.difftest_skip == (skip_beat >= 0),
           "split skip must reflect actual consumed beats");
+    // A newly handed-off store makes the forwarding CAM conservative even
+    // though this split load already consumed every beat. It must still return
+    // its captured result, without issuing a new cache request or tripping the
+    // blocked-unissued-load assertion (observed with RV32D nnet_test).
+    exu_ioq_bcast.valid = 1;
+    exu_ioq_bcast.wen = 1;
+    exu_ioq_bcast.alu = 6'b00_1111;
+    exu_ioq_bcast.tval = XLEN'('h80001000);
+    exu_ioq_bcast.sq_waddr = XLEN'('h80001000);
+    exu_ioq_bcast.sq_wdata = XLEN'('h12345678);
+    #1;
+    check(dut.load_in_sq && exu_lsu.rready && !lsu_l1d.rvalid,
+          "store handoff blocked or reissued an already completed split load");
     tick(1);
+    exu_ioq_bcast.valid = 0;
+    exu_ioq_bcast.wen = 0;
     exu_lsu.rvalid = 0;
     tick(1);
   endtask

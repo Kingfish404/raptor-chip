@@ -34,6 +34,9 @@ module tb_translated_mmio_retry;
   rapt_l1d #(
       .LineRefill(0)
   ) cache (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .clock,
       .reset,
       .cmu_bcast,

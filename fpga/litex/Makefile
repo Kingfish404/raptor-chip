@@ -202,6 +202,13 @@ endif
 ifeq (,$(filter -DRAPT_FPGA_LUTRAM -DRAPT_FPGA_LUTRAM=%,$(RAPT_PACK_VFLAGS)))
 override RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS) -DRAPT_FPGA_LUTRAM=1)
 endif
+# W4 FPGA builds use the registered fetch boundary validated for timing.
+# Keep an explicit 0/1 override for matched performance/implementation studies.
+ifeq ($(RAPT_CONFIG),default-w4)
+ifeq (,$(filter -DRAPT_FETCH_RESPONSE_STAGE -DRAPT_FETCH_RESPONSE_STAGE=%,$(RAPT_PACK_VFLAGS)))
+override RAPT_PACK_VFLAGS := $(strip $(RAPT_PACK_VFLAGS) -DRAPT_FETCH_RESPONSE_STAGE=1)
+endif
+endif
 ifeq ($(VARIANT),linux32)
 ifneq (,$(filter -DRAPT_RV64 -DRAPT_RV64=%,$(RAPT_PACK_VFLAGS)))
 $(error VARIANT=linux32 conflicts with RAPT_PACK_VFLAGS defining RAPT_RV64)
@@ -770,6 +777,7 @@ VIVADO_JOBS  ?= $(shell n='$(NPROC)'; if [ "$$n" -gt 32 ]; then echo 32; else ec
 VIVADO_INCREMENTAL ?= 0 ## Set to 1 to reuse a compatible routed checkpoint
 VIVADO_ROUTE_DIRECTIVE ?= default ## Vivado route_design directive (for example AlternateCLBRouting)
 VIVADO_SYNTH_DIRECTIVE ?= default ## Vivado synth_design directive (for example RuntimeOptimized)
+VIVADO_NO_TIMING_DRIVEN ?= 0 ## Disable synthesis timing optimization; retain implementation/STA constraints
 VIVADO_SYS_SETUP_MARGIN_NS ?= 0 ## Extra system setup margin during implementation; final reports use original constraints
 VIVADO_SYS_FINAL_WNS_NS ?= ## Minimum final system WNS; empty retains the implementation-margin gate
 
@@ -841,7 +849,7 @@ clean-all: clean firmware-clean ## Remove build artifacts + firmware + venv
 
 lint: ## Lint RTL (via sim)
 
-_INFO_VARS := RAPTOR_HOME LITEX_DIR VARIANT LINUX_XLEN LINUX_IMG LINUX_FPGA_BOOTARGS SYS_CLK RAPT_CONFIG GOWIN_APP GOWIN_BIN_DIR OFL OFL_CABLE FPGA_AUTO_DETECT FPGA_DETECT_REFRESH FPGA_DETECT_CACHE FPGA_DETECT_INFO_CACHE FPGA_DETECT_COUNT_CACHE FPGA_DETECTED_COUNT FPGA_DETECTED_PARTS FPGA_DETECTED_INFO FPGA_BOARD_SOURCE FPGA_DEVICE FPGA_PART WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE WITH_SDCARD VIVADO_ROUTE_DIRECTIVE VIVADO_SYNTH_DIRECTIVE UART_PORT UART_BAUD SIM_TIMEOUT PACK_SV BUILD_DIR PYTHON
+_INFO_VARS := RAPTOR_HOME LITEX_DIR VARIANT LINUX_XLEN LINUX_IMG LINUX_FPGA_BOOTARGS SYS_CLK RAPT_CONFIG GOWIN_APP GOWIN_BIN_DIR OFL OFL_CABLE FPGA_AUTO_DETECT FPGA_DETECT_REFRESH FPGA_DETECT_CACHE FPGA_DETECT_INFO_CACHE FPGA_DETECT_COUNT_CACHE FPGA_DETECTED_COUNT FPGA_DETECTED_PARTS FPGA_DETECTED_INFO FPGA_BOARD_SOURCE FPGA_DEVICE FPGA_PART WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE WITH_SDCARD VIVADO_ROUTE_DIRECTIVE VIVADO_SYNTH_DIRECTIVE VIVADO_NO_TIMING_DRIVEN UART_PORT UART_BAUD SIM_TIMEOUT PACK_SV BUILD_DIR PYTHON
 
 info: ## Show configuration info
 

@@ -18,7 +18,10 @@ module fpu_product_share_check #(
   logic [63:0] mul_result, fma_result;
   logic [4:0] mul_flags, fma_flags;
   logic reference_ready;
-  int countdown = 0, accepted_mul = 0, accepted_fma = 0, completed = 0, killed = 0;
+  int accepted_mul = 0, accepted_fma = 0, completed = 0, killed = 0;
+  logic [7:0] expected_valid = '0, expected_fma = '0;
+  logic [63:0] expected_result[8];
+  logic [4:0] expected_flags[8];
   logic [31:0] rng = 32'h71648293;
   assign reference_ready = mul_ready && fma_ready;
   rapt_fpu_mul_fma #(.TARGET_DOUBLE(Double)) dut (.*);
@@ -80,36 +83,44 @@ module fpu_product_share_check #(
     return value;
   endfunction
   task automatic sample ();
-    bit take, expect_result;
+    bit take;
     take = valid && ready && !reset && !flush;
-    expect_result = 0;
     @(posedge clock);
     if (reset || flush) begin
-      if (countdown != 0) killed++;
-      countdown = 0;
+      killed += $countones(expected_valid[6:0]);
+      expected_valid = '0;
+      expected_fma = '0;
     end else begin
-      if (countdown != 0) begin
-        countdown--;
-        expect_result = countdown == 0;
+      for (int stage = 7; stage > 0; stage--) begin
+        expected_result[stage] = expected_result[stage-1];
+        expected_flags[stage] = expected_flags[stage-1];
       end
+      expected_valid = {expected_valid[6:0], take};
+      expected_fma = {expected_fma[6:0], is_fma};
       if (take) begin
-        assert (countdown == 0 && !expect_result)
-        else $fatal(1, "overlapping acceptance");
-        countdown = is_fma ? 7 : 3;  // Capture edge is stage 1 of eight/four.
         if (is_fma) accepted_fma++;
         else accepted_mul++;
       end
     end
     #1;
     assert (ready == reference_ready)
-    else $fatal(1, "ready timing changed");
-    assert (result_valid == (mul_result_valid || fma_result_valid))
-    else $fatal(1, "completion cycle differs from private resources");
-    assert (result_valid == expect_result)
-    else $fatal(1, "four/six-cycle latency changed");
+    else $fatal(1, "streaming endpoint stopped accepting operands");
+    assert (mul_result_valid == (expected_valid[3] && !expected_fma[3]))
+    else $fatal(1, "private MUL latency/owner changed");
+    assert (fma_result_valid == (expected_valid[7] && expected_fma[7]))
+    else $fatal(1, "private FMA latency/owner changed");
+    if (mul_result_valid) begin
+      expected_result[3] = mul_result;
+      expected_flags[3] = mul_flags;
+    end
+    if (fma_result_valid) begin
+      expected_result[7] = fma_result;
+      expected_flags[7] = fma_flags;
+    end
+    assert (result_valid == expected_valid[7])
+    else $fatal(1, "mixed product stream did not preserve eight-stage latency");
     if (result_valid) begin
-      assert (result == (mul_result_valid ? mul_result : fma_result)
-          && flags == (mul_result_valid ? mul_flags : fma_flags))
+      assert (result == expected_result[7] && flags == expected_flags[7])
       else $fatal(1, "shared product changed arithmetic or flags Double=%0d", Double);
       completed++;
     end

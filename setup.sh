@@ -101,7 +101,7 @@ brew_dep_install
 
 step=$((step + 1))
 echo "Step $step: Running RTL setup pipeline..."
-run_setup_rtl
+prepare_rtl_sources
 
 step=$((step + 1))
 echo "Step $step: Cloning repositories..."

@@ -11,6 +11,9 @@ on:
       - "hdl/**"
       - "sim/**"
       - ".github/scripts/**"
+      - ".github/actions/**"
+      - "setup.sh"
+      - "setup-rtl.sh"
       - ".github/workflows/sta.yaml"
   pull_request:
     branches: ["master", "main"]
@@ -18,6 +21,9 @@ on:
       - "hdl/**"
       - "sim/**"
       - ".github/scripts/**"
+      - ".github/actions/**"
+      - "setup.sh"
+      - "setup-rtl.sh"
       - ".github/workflows/sta.yaml"
   schedule:
     - cron: "0 20 * * 0" # Sundays 20:00 UTC
@@ -31,8 +37,26 @@ env:
   RAPT_CONFIG: small
 
 jobs:
+  prepare-sta:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup STA environment
+        uses: ./.github/actions/setup-environment
+        with:
+          profile: sta
+      - name: Check CI setup helpers
+        run: python3 .github/scripts/test_ci_setup.py
+      # Populate the common tool cache before the six workers start. Without
+      # this dependency, a cold cache would compile OpenSTA/Slang six times.
+      - name: Prepare shared STA tools and NanGate45 data
+        uses: ./.github/actions/setup-sta
+        with:
+          platform: nangate45
+
   sta-analysis:
-    runs-on: ubuntu-latest
+    needs: prepare-sta
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -70,13 +94,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Setup environment
-        run: ./setup.sh
+        uses: ./.github/actions/setup-environment
+        with:
+          profile: sta
       - name: Setup STA tools (${{ matrix.platform }})
-        shell: bash -l {0}
-        run: |
-          mkdir -p .github/results
-          [ -d third_party/yosys-opensta ] || git clone --depth 1 https://github.com/Kingfish404/yosys-opensta third_party/yosys-opensta
-          make -C third_party/yosys-opensta setup-opensta setup-sv-elab setup-${{ matrix.platform }}
+        uses: ./.github/actions/setup-sta
+        with:
+          platform: ${{ matrix.platform }}
 
       - name: Run STA (${{ matrix.xlen }}, ${{ matrix.platform }})
         shell: bash -l {0}

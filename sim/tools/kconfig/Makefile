@@ -27,8 +27,10 @@ $(obj)/lexer.lex.c: lexer.l $(obj)/parser.tab.h
 	@echo + LEX $@
 	@flex -o $@ $<
 
-$(obj)/parser.tab.c $(obj)/parser.tab.h: parser.y
+# One Bison invocation writes both files. Independent targets race under -j.
+$(obj)/parser.tab.c $(obj)/parser.tab.h &: parser.y
 	@echo + YACC $@
+	@mkdir -p $(obj)
 	@bison -v $< --defines=$(obj)/parser.tab.h -o $(obj)/parser.tab.c
 
 conf:

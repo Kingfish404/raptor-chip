@@ -110,7 +110,7 @@ module rapt_fpu_int_to_fp #(
     end
   end
 
-  assign ready = !(s1_valid_q || s2_valid_q || s3_valid_q);
+  assign ready = !reset && !flush;
   assign result = result_q;
   assign flags = flags_q;
   assign result_valid = s3_valid_q;

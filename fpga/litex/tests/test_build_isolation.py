@@ -137,6 +137,19 @@ class BuildIsolationTest(unittest.TestCase):
             for key in ("PACK_SV", "FW_LINUX_FPGA_DIR", "SIM_DIR"):
                 self.assertEqual(base[key], revised[key])
 
+    def test_synthesis_timing_option_isolates_implementation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for variant in ("linux32", "linux64"):
+                with self.subTest(variant=variant):
+                    base = self.config(Path(tmp), VARIANT=variant)
+                    area = self.config(Path(tmp), VARIANT=variant,
+                                       VIVADO_NO_TIMING_DRIVEN="1")
+                    self.assertNotEqual(base["FPGA_DIR"], area["FPGA_DIR"])
+                    self.assertNotIn("--vivado-no-timing-driven", base["_FPGA_FLAGS"])
+                    self.assertIn("--vivado-no-timing-driven", area["_FPGA_FLAGS"])
+                    for key in ("PACK_SV", "FW_LINUX_FPGA_DIR", "SIM_DIR"):
+                        self.assertEqual(base[key], area[key])
+
     def test_synthesis_directive_isolates_implementation(self):
         with tempfile.TemporaryDirectory() as tmp:
             for variant in ("linux32", "linux64"):

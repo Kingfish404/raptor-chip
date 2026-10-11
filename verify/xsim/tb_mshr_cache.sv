@@ -14,7 +14,12 @@ module tb_mshr_cache;
   l1d_bus_if l1d_bus ();
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
-  rapt_l1d dut (
+  rapt_l1d #(
+      .WriteBack(1'b0)
+  ) dut (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),

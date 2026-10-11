@@ -130,6 +130,8 @@ endif
 
 .DEFAULT_GOAL := help
 
+include fpga_eval.mk
+
 MODULE_PPA_TARGETS := $(addprefix ppa-module-,$(MODULES))
 PDK_PPA_TARGETS := $(addprefix ppa-pdk-,$(SUPPORTED_PDKS))
 PDK_MATRIX_TARGETS := $(addprefix ppa-matrix-pdk-,$(SUPPORTED_PDKS))

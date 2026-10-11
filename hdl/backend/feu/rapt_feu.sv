@@ -3,17 +3,16 @@
 
 // Floating-point execution unit. Floating-point loads/stores remain in the
 // LSU; this unit owns the FP issue queue, scalar arithmetic, conversions,
-// flags and FPR writes.
+// completion packets. Architectural FPR/flag updates belong to retirement.
 module rapt_feu #(
     parameter rapt_pkg::core_config_t Cfg = rapt_pkg::CoreConfig,
     parameter type IssueT = rapt_pkg::issue_packet_t,
+    parameter type UopT = rapt_pkg::uop_t,
     parameter type SlotT = rapt_pkg::dispatch_slot_t,
     parameter int unsigned NumSlots = Cfg.dispatch_width,
     parameter int unsigned NumCompletions = Cfg.completion_ports,
     parameter type CompletionT = rapt_pkg::completion_t,
-    // ROU allocates each FP instruction alone into an empty ROB and blocks
-    // younger admission until it retires; one pending FPQ entry is sufficient.
-    parameter unsigned FPQ_SIZE = 1,
+    parameter unsigned FPQ_SIZE = Cfg.iq_entries,
     parameter unsigned ROB_SIZE = Cfg.rob_entries,
     parameter unsigned PLEN     = rapt_pkg::index_bits(Cfg.phys_regs),
     parameter unsigned RLEN     = rapt_pkg::index_bits(Cfg.arch_regs),
@@ -31,73 +30,193 @@ module rapt_feu #(
     dpu_iq_if.rs disp_fpq,
 
     load_fast_if.sink load_fast,
-    fpr_if.alu fpr,
     output CompletionT wb_fpu,
     input logic wb_accept,
     input logic completion_ready = 1'b1,
     output logic issue_enable
 );
-  IssueT iss;
-  IssueT fp_issue[1];
-  logic execute_occupied;
-  logic fpq_issue_enable;
-  logic [63:0] fp_operand_a, fp_operand_b, fp_operand_c;
-  rapt_execute_stage #(
-      .IssueT(IssueT),
-      .ROB_SIZE(ROB_SIZE)
-  ) execute_stage (
+  localparam int RobBits = $clog2(ROB_SIZE);
+  localparam int GenerationBits = $bits(dispatch[0].generation);
+  localparam int OperandTagBits = (PLEN > RobBits + 1 ? PLEN : RobBits + 1) + 1;
+  typedef logic [63:0] fp_word_t;
+  typedef logic [OperandTagBits-1:0] operand_tag_t;
+  typedef logic [RobBits-1:0] owner_t;
+  typedef logic [GenerationBits-1:0] generation_t;
+  typedef logic [RLEN-1:0] arch_t;
+  `RAPT_DISPATCH_SLOT_TYPE(fp_slot_t, UopT, fp_word_t, operand_tag_t, owner_t, generation_t,
+                           Cfg.completion_dependencies)
+  `RAPT_ISSUE_PACKET_TYPE(fp_issue_t, UopT, fp_word_t, operand_tag_t, owner_t, generation_t)
+  `RAPT_COMPLETION_TYPE(fp_wake_t, fp_word_t, operand_tag_t, arch_t, owner_t, generation_t)
+  fp_slot_t fp_dispatch[NumSlots];
+  fp_issue_t fp_issue[1], iss;
+  fp_wake_t fp_wake[NumCompletions];
+  localparam int Simple = 0, AddS = 1, AddD = 2, ProductS = 3, ProductD = 4,
+      DivSqrt = 5, Widen = 6, Narrow = 7, IntDoubleW = 8, IntDoubleL = 9,
+      IntSingleW = 10, IntSingleL = 11, SingleInt = 12, DoubleInt = 13,
+      HalfToFp = 14, FpToHalf = 15, Units = 16;
+  logic [Units-1:0] unit_ready, unit_credit, arithmetic_ready;
+  logic [Units-1:0] raw_valid, unit_accept;
+  logic [63:0] raw_result[Units];
+  logic [4:0] raw_flags[Units];
+  CompletionT launch_packet, unit_launch[Units], unit_completion[Units];
+  logic [$clog2(Units)-1:0] completion_cursor, completion_choice;
+  logic [$clog2(Units)-1:0] held_choice;
+  logic completion_held;
+  logic completion_found;
+  int selected_unit;
+
+  function automatic operand_tag_t float_tag(input logic [RobBits:0] tag);
+    return tag == '0 ? '0 : (operand_tag_t'(1) << (OperandTagBits - 1)) | operand_tag_t'(tag);
+  endfunction
+  function automatic int execution_unit(input UopT uop);
+    int unit_id;
+    logic [2:0] rm;
+    unit_id = Simple;
+    case (uop.execute.fp.op)
+      `RAPT_FP_OP_FADD_S, `RAPT_FP_OP_FSUB_S: unit_id = AddS;
+      `RAPT_FP_OP_FADD_D, `RAPT_FP_OP_FSUB_D: unit_id = AddD;
+      `RAPT_FP_OP_FMUL_S, `RAPT_FP_OP_FMADD_S, `RAPT_FP_OP_FMSUB_S,
+      `RAPT_FP_OP_FNMSUB_S, `RAPT_FP_OP_FNMADD_S: unit_id = ProductS;
+      `RAPT_FP_OP_FMUL_D, `RAPT_FP_OP_FMADD_D, `RAPT_FP_OP_FMSUB_D,
+      `RAPT_FP_OP_FNMSUB_D, `RAPT_FP_OP_FNMADD_D: unit_id = ProductD;
+      `RAPT_FP_OP_FDIV_S, `RAPT_FP_OP_FDIV_D,
+      `RAPT_FP_OP_FSQRT_S, `RAPT_FP_OP_FSQRT_D: unit_id = DivSqrt;
+      `RAPT_FP_OP_FCVT_D_S: unit_id = Widen;
+      `RAPT_FP_OP_FCVT_S_D: unit_id = Narrow;
+      `RAPT_FP_OP_FCVT_D_W, `RAPT_FP_OP_FCVT_D_WU: unit_id = IntDoubleW;
+      `RAPT_FP_OP_FCVT_D_L, `RAPT_FP_OP_FCVT_D_LU: unit_id = IntDoubleL;
+      `RAPT_FP_OP_FCVT_S_W, `RAPT_FP_OP_FCVT_S_WU: unit_id = IntSingleW;
+      `RAPT_FP_OP_FCVT_S_L, `RAPT_FP_OP_FCVT_S_LU: unit_id = IntSingleL;
+      `RAPT_FP_OP_FCVT_W_S, `RAPT_FP_OP_FCVT_WU_S,
+      `RAPT_FP_OP_FCVT_L_S, `RAPT_FP_OP_FCVT_LU_S: unit_id = SingleInt;
+      `RAPT_FP_OP_FCVT_W_D, `RAPT_FP_OP_FCVT_WU_D,
+      `RAPT_FP_OP_FCVT_L_D, `RAPT_FP_OP_FCVT_LU_D: unit_id = DoubleInt;
+      `RAPT_FP_OP_ZFHMIN: begin
+        if (uop.inst[31:25] == 7'b0100000 || uop.inst[31:25] == 7'b0100001)
+          unit_id = HalfToFp;
+        else if (uop.inst[31:25] == 7'b0100010) unit_id = FpToHalf;
+      end
+      default: ;
+    endcase
+    rm = uop.execute.fp.rm == 3'b111 ? csr_bcast.frm : uop.execute.fp.rm;
+    // Illegal rounding modes return a precise exception through the simple
+    // pipeline without reserving or launching an arithmetic operation.
+    return uop.trap || (unit_id != Simple && rm > 3'b100) ? Simple : unit_id;
+  endfunction
+
+  // Adapt both register classes to the generic value-capturing issue queue.
+  // A tagged ROB result is a floating-point physical identity; GPR tags occupy
+  // the other namespace. Both wake from the same accepted completion event.
+  for (genvar s = 0; s < NumSlots; s++) begin : g_dispatch
+    always_comb begin
+      fp_dispatch[s] = '0;
+      fp_dispatch[s].uop = dispatch[s].uop;
+      fp_dispatch[s].uop.schedule.issue_ports = '1;
+      fp_dispatch[s].op1 = dispatch[s].fp_value[0];
+      fp_dispatch[s].op2 = dispatch[s].fp_value[1];
+      fp_dispatch[s].op3 = dispatch[s].fp_value[2];
+      fp_dispatch[s].pr1 = float_tag(dispatch[s].fp_tag[0]);
+      fp_dispatch[s].pr2 = float_tag(dispatch[s].fp_tag[1]);
+      fp_dispatch[s].pr3 = float_tag(dispatch[s].fp_tag[2]);
+      if (rapt_pkg::fp_from_integer(dispatch[s].uop.execute.fp.op, dispatch[s].uop.inst)) begin
+        fp_dispatch[s].op1 = 64'(dispatch[s].op1);
+        fp_dispatch[s].pr1 = operand_tag_t'(dispatch[s].pr1);
+      end
+      fp_dispatch[s].prd = operand_tag_t'(dispatch[s].prd);
+      fp_dispatch[s].dest = dispatch[s].dest;
+      fp_dispatch[s].generation = dispatch[s].generation;
+      fp_dispatch[s].resources = 32'(1) << execution_unit(dispatch[s].uop);
+      // Dispatch and a producer may meet on this same edge. Capture its value
+      // now; relying only on the queue's next-cycle snoop would lose that pulse.
+      for (int c = 0; c < NumCompletions; c++) begin
+        if (fp_wake[c].valid && fp_wake[c].prd != '0) begin
+          if (fp_dispatch[s].pr1 == fp_wake[c].prd) begin
+            fp_dispatch[s].pr1 = '0;
+            fp_dispatch[s].op1 = fp_wake[c].result;
+          end
+          if (fp_dispatch[s].pr2 == fp_wake[c].prd) begin
+            fp_dispatch[s].pr2 = '0;
+            fp_dispatch[s].op2 = fp_wake[c].result;
+          end
+          if (fp_dispatch[s].pr3 == fp_wake[c].prd) begin
+            fp_dispatch[s].pr3 = '0;
+            fp_dispatch[s].op3 = fp_wake[c].result;
+          end
+        end
+      end
+    end
+  end
+  for (genvar p = 0; p < NumCompletions; p++) begin : g_wake
+    always_comb begin
+      fp_wake[p] = '0;
+      fp_wake[p].valid = completion[p].valid && !completion[p].trap
+          && (completion[p].fp_wen || completion[p].rd != '0);
+      fp_wake[p].prd = completion[p].fp_wen
+          ? float_tag((RobBits+1)'(completion[p].dest) + (RobBits+1)'(1))
+          : operand_tag_t'(completion[p].prd);
+      fp_wake[p].result = completion[p].fp_wen ? completion[p].fp_result : 64'(completion[p].result);
+      fp_wake[p].dest = completion[p].dest;
+      fp_wake[p].generation = completion[p].generation;
+    end
+  end
+  // The core uses accepted data wakeups, with no speculative fast-load pair.
+  load_fast_if #(
+      .PLEN(OperandTagBits),
+      .ROBLEN(RobBits),
+      .GENERATION_BITS(GenerationBits),
+      .XLEN(64)
+  ) fp_fast ();
+  assign fp_fast.valid = 1'b0;
+  assign fp_fast.rebusy = 1'b0;
+  assign fp_fast.prd = '0;
+  assign fp_fast.dest = '0;
+  assign fp_fast.generation = '0;
+  assign fp_fast.rd = '0;
+  assign fp_fast.confirmed = 1'b0;
+  assign fp_fast.confirmed_prd = '0;
+  assign fp_fast.confirmed_dest = '0;
+  assign fp_fast.confirmed_generation = '0;
+  assign fp_fast.confirmed_rd = '0;
+  assign fp_fast.result = '0;
+  assign issue_enable = !reset && !cmu_bcast.flush_pipe;
+  assign iss = fp_issue[0];
+  rapt_iq #(
+      .Cfg(Cfg),
+      .SlotT(fp_slot_t),
+      .IssueT(fp_issue_t),
+      .UopT(UopT),
+      .NumSlots(NumSlots),
+      .NumCompletions(NumCompletions),
+      .CompletionT(fp_wake_t),
+      .IQ_SIZE(FPQ_SIZE),
+      .ROB_SIZE(ROB_SIZE),
+      .PLEN(OperandTagBits),
+      .RLEN(RLEN),
+      .XLEN(64),
+      .ThirdOperand(1'b1),
+      .FilterResources(1'b1),
+      .NumResources(Units)
+  ) u_fpq (
       .clock,
       .reset,
-      .flush(cmu_bcast.flush_pipe),
       .cancel_valid,
       .cancel_head,
       .cancel_owner,
-      .selected(fp_issue[0]),
-      .execute(iss),
-      .occupied(execute_occupied)
+      .cmu_bcast,
+      .completion(fp_wake),
+      .dispatch(fp_dispatch),
+      .disp(disp_fpq),
+      .load_fast(fp_fast),
+      .issue_enable,
+      .resource_ready(unit_ready),
+      .issue(fp_issue),
+      .occ_o(),
+      .pmu_iq_full()
   );
-  // The FPR samples the selected addresses on the same edge that captures
-  // the issue packet. Its clocked outputs then accompany iss in execute.
-  assign fp_operand_a = fpr.alu_rdata_a;
-  assign fp_operand_b = fpr.alu_rdata_b;
-  assign fp_operand_c = fpr.alu_rdata_c;
-  assign fpr.alu_ren = fp_issue[0].valid;
-  assign fpq_issue_enable = issue_enable && completion_ready && fpr.alu_read_ready;
-  logic [$clog2(FPQ_SIZE):0] fpq_occ_unused;
-  logic pmu_fpq_full_unused;
-
-  rapt_iq #(
-      .SlotT(SlotT),
-      .NumSlots(NumSlots),
-      .IssueT(IssueT),
-      .Cfg(Cfg),
-      .NumCompletions(NumCompletions),
-      .CompletionT(CompletionT),
-      .IQ_SIZE       (FPQ_SIZE),
-      .IN_ORDER_ISSUE(1'b1),
-      .ROB_SIZE      (ROB_SIZE),
-      .PLEN          (PLEN),
-      .RLEN          (RLEN),
-      .XLEN          (XLEN)
-  ) u_fpq (
-      .cancel_valid(cancel_valid),
-      .cancel_head(cancel_head),
-      .cancel_owner(cancel_owner),
-      .completion(completion),
-      .clock        (clock),
-      .reset        (reset),
-      .cmu_bcast    (cmu_bcast),
-      .dispatch(dispatch),
-      .disp         (disp_fpq),
-
-      .load_fast    (load_fast),
-      .issue_enable (fpq_issue_enable),
-      .issue        (fp_issue),
-      .occ_o        (fpq_occ_unused),
-      .pmu_iq_full  (pmu_fpq_full_unused)
-  );
-
-  logic [ 4:0] fp_rd;
+  logic [63:0] fp_operand_a, fp_operand_b, fp_operand_c;
+  assign fp_operand_a = iss.op1;
+  assign fp_operand_b = iss.op2;
+  assign fp_operand_c = iss.op3;
   logic [31:0] fp_s1;
   logic [63:0] fp_d1;
   logic [63:0] fp_sgnj_result, fp_compare_result;
@@ -111,8 +230,6 @@ module rapt_feu #(
   logic [4:0] fp_mul_s_flags, fp_mul_d_flags;
   logic fp_mul_s_ready, fp_mul_d_ready;
   logic fp_mul_s_valid, fp_mul_d_valid;
-  logic [63:0] fp_fma_s_result, fp_fma_d_result;
-  logic [4:0] fp_fma_s_flags, fp_fma_d_flags;
   logic [63:0] fp_convert_widen_result, fp_convert_narrow_result;
   logic [4:0] fp_convert_widen_flags, fp_convert_narrow_flags;
   logic fp_convert_widen_ready, fp_convert_widen_valid;
@@ -136,8 +253,6 @@ module rapt_feu #(
   logic [63:0] divsqrt_result;
   logic [ 4:0] divsqrt_flags;
   logic divsqrt_ready, divsqrt_result_valid;
-  logic fp_fma_s_ready, fp_fma_d_ready;
-  logic fp_fma_s_valid, fp_fma_d_valid;
   logic fp_addsub_s, fp_addsub_d, fp_mul_s, fp_mul_d, fp_fma_s, fp_fma_d;
   logic fp_divide, fp_sqrt, fp_divsqrt, fp_minmax, fp_compare, fp_classify;
   logic fp_convert_widen, fp_convert_narrow;
@@ -149,54 +264,10 @@ module rapt_feu #(
   logic fp_double, fp_rm_invalid, fp_trap;
   logic [2:0] fp_rounding_mode;
 
-  typedef enum logic [4:0] {
-    FP_PENDING_DIVSQRT,
-    FP_PENDING_FMA_S,
-    FP_PENDING_FMA_D,
-    FP_PENDING_ADDSUB_S,
-    FP_PENDING_ADDSUB_D,
-    FP_PENDING_MUL_S,
-    FP_PENDING_MUL_D,
-    FP_PENDING_CONVERT_NARROW,
-    FP_PENDING_CONVERT_WIDEN,
-    FP_PENDING_INT_TO_DOUBLE_W,
-    FP_PENDING_INT_TO_DOUBLE_L,
-    FP_PENDING_INT_TO_SINGLE_W,
-    FP_PENDING_INT_TO_SINGLE_L,
-    FP_PENDING_SINGLE_TO_INT_W,
-    FP_PENDING_SINGLE_TO_INT_L,
-    FP_PENDING_DOUBLE_TO_INT_W,
-    FP_PENDING_DOUBLE_TO_INT_L,
-    FP_PENDING_HALF_TO_FP,
-    FP_PENDING_FP_TO_HALF
-  } fp_pending_kind_e;
-
-  logic fp_long_op, fp_selected_ready, fp_launch, fp_complete;
-  logic [$bits(iss.generation)-1:0] fp_pending_generation_q;
+  logic fp_long_op, fp_launch;
   logic fp_divsqrt_launch, fp_fma_launch, fp_addsub_launch, fp_mul_launch;
-  logic fp_convert_narrow_launch;
-  logic fp_convert_widen_launch;
-  logic fp_half_to_fp_launch, fp_fp_to_half_launch;
-  logic fp_int_to_fp_launch;
-  logic fp_to_int_launch;
-  logic fp_pending_q, fp_pending_result_valid;
-  logic [1:0] fp_release_q;
-  fp_pending_kind_e fp_launch_kind, fp_pending_kind_q;
-  logic [63:0] fp_pending_result;
-  logic [4:0] fp_pending_flags;
-  logic [$clog2(ROB_SIZE)-1:0] fp_pending_dest_q;
-  logic [`RAPT_PHY_LEN-1:0] fp_pending_prd_q;
-  logic [`RAPT_REG_LEN-1:0] fp_pending_rd_q;
-  logic [XLEN-1:1] fp_pending_pc_q;
-  wire [XLEN-1:0] fp_pending_pc = {fp_pending_pc_q, 1'b0};
-  logic fp_pending_c_q;
-  logic fp_pending_to_gpr_q;
-  logic [4:0] fp_pending_frd_q;
-
-  assign fp_rd = iss.uop.execute.fp.rd;
-  assign fpr.alu_raddr_a = fp_issue[0].uop.execute.fp.rs1;
-  assign fpr.alu_raddr_b = fp_issue[0].uop.execute.fp.rs2;
-  assign fpr.alu_raddr_c = fp_issue[0].uop.execute.fp.rs3;
+  logic fp_convert_narrow_launch, fp_convert_widen_launch;
+  logic fp_half_to_fp_launch, fp_fp_to_half_launch, fp_int_to_fp_launch, fp_to_int_launch;
   assign fp_s1 = fp_operand_a[31:0];
   assign fp_d1 = fp_operand_a;
   assign fp_addsub_s = iss.uop.execute.fp.op == `RAPT_FP_OP_FADD_S
@@ -285,44 +356,7 @@ module rapt_feu #(
           || fp_single_to_int_w || fp_single_to_int_l
           || fp_double_to_int_w || fp_double_to_int_l
           || fp_half_to_fp || fp_fp_to_half;
-  assign fp_selected_ready = fp_divsqrt ? divsqrt_ready
-            : fp_fma_d ? fp_fma_d_ready : fp_fma_s ? fp_fma_s_ready
-          : fp_addsub_d ? fp_addsub_d_ready : fp_addsub_s ? fp_addsub_s_ready
-          : fp_mul_d ? fp_mul_d_ready : fp_mul_s ? fp_mul_s_ready
-          : fp_convert_narrow ? fp_convert_narrow_ready
-          : fp_convert_widen ? fp_convert_widen_ready
-          : fp_int_to_double_w ? fp_int_to_double_w_ready
-          : fp_int_to_double_l ? fp_int_to_double_l_ready
-          : fp_int_to_single_w ? fp_int_to_single_w_ready
-          : fp_int_to_single_l ? fp_int_to_single_l_ready
-          : (fp_single_to_int_w || fp_single_to_int_l) ? fp_single_to_int_ready
-          : (fp_double_to_int_w || fp_double_to_int_l) ? fp_double_to_int_ready
-          : fp_half_to_fp ? fp_half_to_fp_ready
-          : fp_fp_to_half_ready;
-
-  always_comb begin
-    fp_launch_kind = FP_PENDING_DIVSQRT;
-    if (fp_fma_s) fp_launch_kind = FP_PENDING_FMA_S;
-    else if (fp_fma_d) fp_launch_kind = FP_PENDING_FMA_D;
-    else if (fp_addsub_s) fp_launch_kind = FP_PENDING_ADDSUB_S;
-    else if (fp_addsub_d) fp_launch_kind = FP_PENDING_ADDSUB_D;
-    else if (fp_mul_s) fp_launch_kind = FP_PENDING_MUL_S;
-    else if (fp_mul_d) fp_launch_kind = FP_PENDING_MUL_D;
-    else if (fp_convert_narrow) fp_launch_kind = FP_PENDING_CONVERT_NARROW;
-    else if (fp_convert_widen) fp_launch_kind = FP_PENDING_CONVERT_WIDEN;
-    else if (fp_int_to_double_w) fp_launch_kind = FP_PENDING_INT_TO_DOUBLE_W;
-    else if (fp_int_to_double_l) fp_launch_kind = FP_PENDING_INT_TO_DOUBLE_L;
-    else if (fp_int_to_single_w) fp_launch_kind = FP_PENDING_INT_TO_SINGLE_W;
-    else if (fp_int_to_single_l) fp_launch_kind = FP_PENDING_INT_TO_SINGLE_L;
-    else if (fp_single_to_int_w) fp_launch_kind = FP_PENDING_SINGLE_TO_INT_W;
-    else if (fp_single_to_int_l) fp_launch_kind = FP_PENDING_SINGLE_TO_INT_L;
-    else if (fp_double_to_int_w) fp_launch_kind = FP_PENDING_DOUBLE_TO_INT_W;
-    else if (fp_double_to_int_l) fp_launch_kind = FP_PENDING_DOUBLE_TO_INT_L;
-    else if (fp_half_to_fp) fp_launch_kind = FP_PENDING_HALF_TO_FP;
-    else if (fp_fp_to_half) fp_launch_kind = FP_PENDING_FP_TO_HALF;
-  end
-
-  assign fp_launch = iss.valid && fp_long_op && !fp_trap && !fp_pending_q && fp_selected_ready;
+  assign fp_launch = iss.valid && fp_long_op && !fp_trap;
   assign fp_divsqrt_launch = fp_launch && fp_divsqrt;
   assign fp_fma_launch = fp_launch && (fp_fma_s || fp_fma_d);
   assign fp_addsub_launch = fp_launch && (fp_addsub_s || fp_addsub_d);
@@ -335,114 +369,6 @@ module rapt_feu #(
         || fp_int_to_double_l || fp_int_to_single_w || fp_int_to_single_l);
   assign fp_to_int_launch = fp_launch && (fp_single_to_int_w
         || fp_single_to_int_l || fp_double_to_int_w || fp_double_to_int_l);
-
-  always_comb begin
-    fp_pending_result_valid = 1'b0;
-    fp_pending_result = '0;
-    fp_pending_flags = '0;
-    unique case (fp_pending_kind_q)
-      FP_PENDING_DIVSQRT: begin
-        fp_pending_result_valid = divsqrt_result_valid;
-        fp_pending_result = divsqrt_result;
-        fp_pending_flags = divsqrt_flags;
-      end
-      FP_PENDING_FMA_S: begin
-        fp_pending_result_valid = fp_fma_s_valid;
-        fp_pending_result = fp_fma_s_result;
-        fp_pending_flags = fp_fma_s_flags;
-      end
-      FP_PENDING_FMA_D: begin
-        fp_pending_result_valid = fp_fma_d_valid;
-        fp_pending_result = fp_fma_d_result;
-        fp_pending_flags = fp_fma_d_flags;
-      end
-      FP_PENDING_ADDSUB_S: begin
-        fp_pending_result_valid = fp_addsub_s_valid;
-        fp_pending_result = fp_addsub_s_result;
-        fp_pending_flags = fp_addsub_s_flags;
-      end
-      FP_PENDING_ADDSUB_D: begin
-        fp_pending_result_valid = fp_addsub_d_valid;
-        fp_pending_result = fp_addsub_d_result;
-        fp_pending_flags = fp_addsub_d_flags;
-      end
-      FP_PENDING_MUL_S: begin
-        fp_pending_result_valid = fp_mul_s_valid;
-        fp_pending_result = fp_mul_s_result;
-        fp_pending_flags = fp_mul_s_flags;
-      end
-      FP_PENDING_MUL_D: begin
-        fp_pending_result_valid = fp_mul_d_valid;
-        fp_pending_result = fp_mul_d_result;
-        fp_pending_flags = fp_mul_d_flags;
-      end
-      FP_PENDING_CONVERT_NARROW: begin
-        fp_pending_result_valid = fp_convert_narrow_valid;
-        fp_pending_result = fp_convert_narrow_result;
-        fp_pending_flags = fp_convert_narrow_flags;
-      end
-      FP_PENDING_CONVERT_WIDEN: begin
-        fp_pending_result_valid = fp_convert_widen_valid;
-        fp_pending_result = fp_convert_widen_result;
-        fp_pending_flags = fp_convert_widen_flags;
-      end
-      FP_PENDING_INT_TO_DOUBLE_W: begin
-        fp_pending_result_valid = fp_int_to_double_w_valid;
-        fp_pending_result = fp_int_to_double_w_result;
-        fp_pending_flags = fp_int_to_double_w_flags;
-      end
-      FP_PENDING_INT_TO_DOUBLE_L: begin
-        fp_pending_result_valid = fp_int_to_double_l_valid;
-        fp_pending_result = fp_int_to_double_l_result;
-        fp_pending_flags = fp_int_to_double_l_flags;
-      end
-      FP_PENDING_INT_TO_SINGLE_W: begin
-        fp_pending_result_valid = fp_int_to_single_w_valid;
-        fp_pending_result = fp_int_to_single_w_result;
-        fp_pending_flags = fp_int_to_single_w_flags;
-      end
-      FP_PENDING_INT_TO_SINGLE_L: begin
-        fp_pending_result_valid = fp_int_to_single_l_valid;
-        fp_pending_result = fp_int_to_single_l_result;
-        fp_pending_flags = fp_int_to_single_l_flags;
-      end
-      FP_PENDING_SINGLE_TO_INT_W: begin
-        fp_pending_result_valid = fp_single_to_int_valid;
-        fp_pending_result = fp_single_to_int_result;
-        fp_pending_flags = fp_single_to_int_flags;
-      end
-      FP_PENDING_SINGLE_TO_INT_L: begin
-        fp_pending_result_valid = fp_single_to_int_valid;
-        fp_pending_result = fp_single_to_int_result;
-        fp_pending_flags = fp_single_to_int_flags;
-      end
-      FP_PENDING_DOUBLE_TO_INT_W: begin
-        fp_pending_result_valid = fp_double_to_int_valid;
-        fp_pending_result = fp_double_to_int_result;
-        fp_pending_flags = fp_double_to_int_flags;
-      end
-      FP_PENDING_DOUBLE_TO_INT_L: begin
-        fp_pending_result_valid = fp_double_to_int_valid;
-        fp_pending_result = fp_double_to_int_result;
-        fp_pending_flags = fp_double_to_int_flags;
-      end
-      FP_PENDING_HALF_TO_FP: begin
-        fp_pending_result_valid = fp_half_to_fp_valid;
-        fp_pending_result = fp_half_to_fp_result;
-        fp_pending_flags = fp_half_to_fp_flags;
-      end
-      FP_PENDING_FP_TO_HALF: begin
-        fp_pending_result_valid = fp_fp_to_half_valid;
-        fp_pending_result = fp_fp_to_half_result;
-        fp_pending_flags = fp_fp_to_half_flags;
-      end
-      default: ;
-    endcase
-  end
-
-  assign fp_complete  = fp_pending_q && fp_pending_result_valid && !cmu_bcast.flush_pipe;
-  assign issue_enable = !execute_occupied && !fp_pending_q && (fp_release_q == 0);
-
   rapt_fpu_divsqrt #(
       .XLEN(XLEN)
   ) u_divsqrt (
@@ -462,31 +388,6 @@ module rapt_feu #(
       .flags(divsqrt_flags),
       .result_valid(divsqrt_result_valid)
   );
-
-  always_ff @(posedge clock) begin
-    if (reset || cmu_bcast.flush_pipe) begin
-      fp_pending_q <= 1'b0;
-      fp_release_q <= '0;
-    end else if (fp_launch) begin
-      fp_pending_q <= 1'b1;
-      fp_release_q <= '0;
-      fp_pending_kind_q <= fp_launch_kind;
-      fp_pending_dest_q <= iss.dest;
-      fp_pending_generation_q <= iss.generation;
-      fp_pending_prd_q <= iss.prd;
-      fp_pending_rd_q <= iss.uop.rd;
-      fp_pending_pc_q <= iss.uop.pc[XLEN-1:1];
-      fp_pending_c_q <= iss.uop.c;
-      fp_pending_to_gpr_q <= fp_to_int_launch;
-      fp_pending_frd_q <= fp_rd;
-    end else if (fp_complete) begin
-      fp_pending_q <= 1'b0;
-      fp_release_q <= fp_pending_kind_q == FP_PENDING_DIVSQRT ? 0 : 2;
-    end else if (fp_release_q) begin
-      fp_release_q <= fp_release_q - 1'b1;
-    end
-  end
-
   rapt_fpu_sgnj u_fpu_sgnj (
       .op(iss.uop.execute.fp.op),
       .operand_a(fp_operand_a),
@@ -649,16 +550,8 @@ module rapt_feu #(
       .flags(fp_addsub_d_flags),
       .result_valid(fp_addsub_d_valid)
   );
-  // FEU already permits only one long operation in flight. Keep the original
-  // MUL/FMA completion kinds and latencies while sharing each format's product.
-  assign fp_fma_s_result = fp_mul_s_result;
-  assign fp_fma_s_flags = fp_mul_s_flags;
-  assign fp_fma_s_valid = fp_mul_s_valid;
-  assign fp_fma_s_ready = fp_mul_s_ready;
-  assign fp_fma_d_result = fp_mul_d_result;
-  assign fp_fma_d_flags = fp_mul_d_flags;
-  assign fp_fma_d_valid = fp_mul_d_valid;
-  assign fp_fma_d_ready = fp_mul_d_ready;
+  // MUL and FMA share each format's product pipeline. Matching their latency
+  // lets the common owner queue identify consecutive mixed results in order.
   rapt_fpu_mul_fma #(
       .TARGET_DOUBLE(1'b0)
   ) u_mul_fma_s (
@@ -726,62 +619,174 @@ module rapt_feu #(
       .result_valid(fp_double_to_int_valid)
   );
 
-  assign fpr.alu_wvalid = wb_accept && ((fp_complete && !fp_pending_to_gpr_q)
-        || (iss.valid && !fp_long_op && iss.uop.execute.fp.valid && !fp_trap
-        && !(fp_classify || fp_compare || fp_single_to_int_w
-     || fp_single_to_int_l || fp_double_to_int_w || fp_double_to_int_l)
-     && iss.uop.execute.fp.op != `RAPT_FP_OP_FMV_X_W && iss.uop.execute.fp.op != `RAPT_FP_OP_FMV_X_D
-        && !fp_fmv_x_h));
-  assign fpr.alu_waddr = fp_pending_q ? fp_pending_frd_q : fp_rd;
-  assign fpr.alu_wdata = fp_pending_q ? fp_pending_result
-    : fp_minmax ? fp_compare_result : fp_single_to_int_w ? fp_single_to_int_result
-    : fp_fmv_h_x ? {48'hffff_ffff_ffff, iss.op1[15:0]}
-    : iss.uop.execute.fp.op == `RAPT_FP_OP_FMV_W_X ? {32'hffff_ffff, iss.op1[31:0]}
-    : iss.uop.execute.fp.op == `RAPT_FP_OP_FMV_D_X ? iss.op1 : fp_sgnj_result;
+  assign selected_unit = execution_unit(iss.uop);
+  always_comb begin
+    launch_packet = '0;
+    launch_packet.valid = iss.valid;
+    launch_packet.dest = iss.dest;
+    launch_packet.generation = iss.generation;
+    launch_packet.prd = PLEN'(iss.prd);
+    launch_packet.rd = iss.uop.rd;
+    launch_packet.pc = iss.uop.pc;
+    launch_packet.npc = iss.uop.pc + (iss.uop.c ? XLEN'(2) : XLEN'(4));
+    launch_packet.fp_wen = !fp_trap && rapt_pkg::fp_writes_register(
+        iss.uop.execute.fp.valid, iss.uop.execute.fp.op, iss.uop.inst);
+    launch_packet.fp_flags_valid = !fp_trap && (fp_long_op || fp_minmax || fp_compare);
+    launch_packet.trap = fp_trap;
+    launch_packet.tval = iss.uop.trap ? iss.uop.tval : fp_rm_invalid ? XLEN'(iss.uop.inst) : '0;
+    launch_packet.cause = iss.uop.trap ? iss.uop.cause
+        : fp_rm_invalid ? XLEN'(`RAPT_CAUSE_ILLEGAL_INST) : '0;
+    launch_packet.updates = '{control_flow:1'b1, memory:1'b0, system_state:1'b1, exception:1'b1};
+  end
 
-  assign wb_fpu.dest = fp_pending_q ? fp_pending_dest_q : iss.dest;
-  assign wb_fpu.generation = fp_pending_q ? fp_pending_generation_q : iss.generation;
-  assign wb_fpu.result = fp_pending_q
-        ? (fp_pending_to_gpr_q ? fp_pending_result[XLEN-1:0] : '0)
-    : (iss.uop.execute.fp.op == `RAPT_FP_OP_FMV_X_W ? {{(XLEN-32){fp_s1[31]}}, fp_s1}
-     : iss.uop.execute.fp.op == `RAPT_FP_OP_FMV_X_D ? fp_d1[XLEN-1:0]
-    : fp_fmv_x_h ? {{(XLEN-16){fp_operand_a[15]}}, fp_operand_a[15:0]}
-    : fp_compare ? fp_compare_result[XLEN-1:0]
-    : fp_classify ? {{(XLEN-10){1'b0}}, fp_classify_result}
-    : (fp_single_to_int_w || fp_single_to_int_l) ? fp_single_to_int_result[XLEN-1:0]
-    : (fp_double_to_int_w || fp_double_to_int_l) ? fp_double_to_int_result[XLEN-1:0] : '0);
-  assign wb_fpu.npc = fp_pending_q
-        ? fp_pending_pc + (fp_pending_c_q ? 2 : 4)
-        : iss.uop.pc + (iss.uop.c ? 2 : 4);
-  // FP instructions are not control flow; IDU already repaired any false
-  // fetch prediction before they entered rename.
-  assign wb_fpu.mispredict = 1'b0;
-  assign wb_fpu.prd = fp_pending_q ? fp_pending_prd_q : iss.prd;
-  assign wb_fpu.rd = fp_pending_q ? fp_pending_rd_q : iss.uop.rd;
-  assign wb_fpu.pc = fp_pending_q ? fp_pending_pc : iss.uop.pc;
-  assign wb_fpu.fp_flags_valid = fp_complete
-    || ((fp_minmax || fp_compare || fp_single_to_int_w
-    || fp_single_to_int_l || fp_double_to_int_w || fp_double_to_int_l
-        ) && iss.valid && !fp_trap);
-  assign wb_fpu.fp_flags = fp_pending_q ? fp_pending_flags
-        : ((fp_double_to_int_w || fp_double_to_int_l) ? fp_double_to_int_flags
-    : (fp_single_to_int_w || fp_single_to_int_l) ? fp_single_to_int_flags
-    : (fp_minmax || fp_compare) ? fp_compare_flags : divsqrt_flags);
-  assign wb_fpu.trap = fp_pending_q ? 1'b0 : fp_trap;
-  assign wb_fpu.tval = fp_pending_q ? '0
-        : (iss.uop.trap ? iss.uop.tval : fp_rm_invalid ? iss.uop.inst : '0);
-  assign wb_fpu.cause = fp_pending_q ? '0
-        : (iss.uop.trap ? iss.uop.cause : fp_rm_invalid ? `RAPT_CAUSE_ILLEGAL_INST : '0);
-  assign wb_fpu.valid = fp_pending_q ? fp_complete : fp_launch ? 1'b0 : iss.valid;
-  assign wb_fpu.btaken = 1'b0;
-  assign wb_fpu.csr_wen = 1'b0;
-  assign wb_fpu.csr_wdata = '0;
-  assign wb_fpu.wen = 1'b0;
-  assign wb_fpu.alu = '0;
-  assign wb_fpu.sq_waddr = '0;
-  assign wb_fpu.sq_wdata = '0;
-  assign wb_fpu.sq_wdata64 = '0;
-  assign wb_fpu.sq_fp64 = 1'b0;
-  assign wb_fpu.difftest_skip = 1'b0;
-  assign wb_fpu.updates = '{control_flow:1'b1, memory:1'b0, system_state:1'b1, exception:1'b1};
+  logic [63:0] simple_result;
+  logic [4:0] simple_flags;
+  always_comb begin
+    simple_result = fp_sgnj_result;
+    if (fp_minmax || fp_compare) simple_result = fp_compare_result;
+    else if (fp_classify) simple_result = {54'b0, fp_classify_result};
+    else if (fp_fmv_h_x) simple_result = {48'hffff_ffff_ffff, iss.op1[15:0]};
+    else if (fp_fmv_x_h) simple_result = {{48{fp_operand_a[15]}}, fp_operand_a[15:0]};
+    else if (iss.uop.execute.fp.op == `RAPT_FP_OP_FMV_W_X)
+      simple_result = {32'hffff_ffff, iss.op1[31:0]};
+    else if (iss.uop.execute.fp.op == `RAPT_FP_OP_FMV_D_X) simple_result = iss.op1;
+    else if (iss.uop.execute.fp.op == `RAPT_FP_OP_FMV_X_W) simple_result = {{32{fp_s1[31]}}, fp_s1};
+    else if (iss.uop.execute.fp.op == `RAPT_FP_OP_FMV_X_D) simple_result = fp_d1;
+    simple_flags = fp_minmax || fp_compare ? fp_compare_flags : '0;
+  end
+  always_ff @(posedge clock) begin
+    if (reset || cmu_bcast.flush_pipe) raw_valid[Simple] <= 1'b0;
+    else begin
+      raw_valid[Simple] <= iss.valid && selected_unit == Simple;
+      if (iss.valid && selected_unit == Simple) begin
+        raw_result[Simple] <= simple_result;
+        raw_flags[Simple] <= simple_flags;
+      end
+    end
+  end
+  assign arithmetic_ready[Simple] = 1'b1;
+  assign arithmetic_ready[AddS] = fp_addsub_s_ready;
+  assign raw_valid[AddS] = fp_addsub_s_valid;
+  assign raw_result[AddS] = fp_addsub_s_result;
+  assign raw_flags[AddS] = fp_addsub_s_flags;
+  assign arithmetic_ready[AddD] = fp_addsub_d_ready;
+  assign raw_valid[AddD] = fp_addsub_d_valid;
+  assign raw_result[AddD] = fp_addsub_d_result;
+  assign raw_flags[AddD] = fp_addsub_d_flags;
+  assign arithmetic_ready[ProductS] = fp_mul_s_ready;
+  assign raw_valid[ProductS] = fp_mul_s_valid;
+  assign raw_result[ProductS] = fp_mul_s_result;
+  assign raw_flags[ProductS] = fp_mul_s_flags;
+  assign arithmetic_ready[ProductD] = fp_mul_d_ready;
+  assign raw_valid[ProductD] = fp_mul_d_valid;
+  assign raw_result[ProductD] = fp_mul_d_result;
+  assign raw_flags[ProductD] = fp_mul_d_flags;
+  assign arithmetic_ready[DivSqrt] = divsqrt_ready;
+  assign raw_valid[DivSqrt] = divsqrt_result_valid;
+  assign raw_result[DivSqrt] = divsqrt_result;
+  assign raw_flags[DivSqrt] = divsqrt_flags;
+  assign arithmetic_ready[Widen] = fp_convert_widen_ready;
+  assign raw_valid[Widen] = fp_convert_widen_valid;
+  assign raw_result[Widen] = fp_convert_widen_result;
+  assign raw_flags[Widen] = fp_convert_widen_flags;
+  assign arithmetic_ready[Narrow] = fp_convert_narrow_ready;
+  assign raw_valid[Narrow] = fp_convert_narrow_valid;
+  assign raw_result[Narrow] = fp_convert_narrow_result;
+  assign raw_flags[Narrow] = fp_convert_narrow_flags;
+  assign arithmetic_ready[IntDoubleW] = fp_int_to_double_w_ready;
+  assign raw_valid[IntDoubleW] = fp_int_to_double_w_valid;
+  assign raw_result[IntDoubleW] = fp_int_to_double_w_result;
+  assign raw_flags[IntDoubleW] = fp_int_to_double_w_flags;
+  assign arithmetic_ready[IntDoubleL] = fp_int_to_double_l_ready;
+  assign raw_valid[IntDoubleL] = fp_int_to_double_l_valid;
+  assign raw_result[IntDoubleL] = fp_int_to_double_l_result;
+  assign raw_flags[IntDoubleL] = fp_int_to_double_l_flags;
+  assign arithmetic_ready[IntSingleW] = fp_int_to_single_w_ready;
+  assign raw_valid[IntSingleW] = fp_int_to_single_w_valid;
+  assign raw_result[IntSingleW] = fp_int_to_single_w_result;
+  assign raw_flags[IntSingleW] = fp_int_to_single_w_flags;
+  assign arithmetic_ready[IntSingleL] = fp_int_to_single_l_ready;
+  assign raw_valid[IntSingleL] = fp_int_to_single_l_valid;
+  assign raw_result[IntSingleL] = fp_int_to_single_l_result;
+  assign raw_flags[IntSingleL] = fp_int_to_single_l_flags;
+  assign arithmetic_ready[SingleInt] = fp_single_to_int_ready;
+  assign raw_valid[SingleInt] = fp_single_to_int_valid;
+  assign raw_result[SingleInt] = fp_single_to_int_result;
+  assign raw_flags[SingleInt] = fp_single_to_int_flags;
+  assign arithmetic_ready[DoubleInt] = fp_double_to_int_ready;
+  assign raw_valid[DoubleInt] = fp_double_to_int_valid;
+  assign raw_result[DoubleInt] = fp_double_to_int_result;
+  assign raw_flags[DoubleInt] = fp_double_to_int_flags;
+  assign arithmetic_ready[HalfToFp] = fp_half_to_fp_ready;
+  assign raw_valid[HalfToFp] = fp_half_to_fp_valid;
+  assign raw_result[HalfToFp] = fp_half_to_fp_result;
+  assign raw_flags[HalfToFp] = fp_half_to_fp_flags;
+  assign arithmetic_ready[FpToHalf] = fp_fp_to_half_ready;
+  assign raw_valid[FpToHalf] = fp_fp_to_half_valid;
+  assign raw_result[FpToHalf] = fp_fp_to_half_result;
+  assign raw_flags[FpToHalf] = fp_fp_to_half_flags;
+
+  for (genvar unit_id = 0; unit_id < Units; unit_id++) begin : g_unit
+    // The eight-stage product pipe can launch every cycle. Other fixed
+    // pipelines are at most three stages; DIV/SQRT keeps one iterative owner.
+    localparam int Credits = unit_id == DivSqrt ? 1
+        : (unit_id == ProductS || unit_id == ProductD) ? 12 : 6;
+    assign unit_ready[unit_id] = arithmetic_ready[unit_id] && unit_credit[unit_id];
+    always_comb begin
+      unit_launch[unit_id] = launch_packet;
+      unit_launch[unit_id].valid = iss.valid && selected_unit == unit_id;
+    end
+    rapt_fu_result_queue #(
+        .CompletionT(CompletionT),
+        .Depth(Credits),
+        .Entries(ROB_SIZE)
+    ) pipe (
+        .clock,
+        .reset,
+        .flush(cmu_bcast.flush_pipe),
+        .cancel_valid,
+        .cancel_head,
+        .cancel_owner,
+        .launch(unit_launch[unit_id]),
+        .ready(unit_credit[unit_id]),
+        .result_valid(raw_valid[unit_id]),
+        .result(raw_result[unit_id]),
+        .flags(raw_flags[unit_id]),
+        .completion(unit_completion[unit_id]),
+        .completion_ready(unit_accept[unit_id])
+    );
+  end
+  // Fair completion arbitration. Each producer holds its complete identity,
+  // data and flags until selected; simultaneous results are buffered locally.
+  always_comb begin
+    completion_found = 1'b0;
+    completion_choice = '0;
+    unit_accept = '0;
+    for (int offset = 0; offset < Units; offset++) begin
+      automatic int index = (int'(completion_cursor) + offset) % Units;
+      if (!completion_found && unit_completion[index].valid) begin
+        completion_found = 1'b1;
+        completion_choice = $clog2(Units)'(index);
+      end
+    end
+    if (completion_held && unit_completion[held_choice].valid) begin
+      completion_found = 1'b1;
+      completion_choice = held_choice;
+    end
+    wb_fpu = unit_completion[completion_choice];
+    wb_fpu.valid = completion_found && !reset && !cmu_bcast.flush_pipe;
+    if (wb_fpu.valid && completion_ready) unit_accept[completion_choice] = 1'b1;
+  end
+  always_ff @(posedge clock) begin
+    if (reset || cmu_bcast.flush_pipe) begin
+      completion_cursor <= '0;
+      completion_held <= 1'b0;
+    end else begin
+      completion_held <= wb_fpu.valid && !completion_ready;
+      if (wb_fpu.valid && !completion_ready) held_choice <= completion_choice;
+      if (wb_fpu.valid && completion_ready) completion_cursor <= completion_choice + 1'b1;
+    end
+  end
+  `RAPT_SVA_IMPLY(clock, reset || cmu_bcast.flush_pipe, FP_ISSUE_HAS_UNIT, iss.valid,
+                  unit_ready[selected_unit])
 endmodule

@@ -1,0 +1,101 @@
+name: Setup Raptor CI environment
+description: Install job-specific tools and reuse downloads, generated decoders, and C++ compilations.
+inputs:
+  profile:
+    description: build (host tools only), sim, riscof (prebuilt worker), sta, nemu, or litex
+    default: sim
+  build-cache:
+    description: Compiler cache family; empty disables the Verilator compiler cache
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Identify dependency cache
+      id: deps
+      shell: bash
+      run: |
+        echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+        echo "image=${ImageOS:-ubuntu}-${ImageVersion:-unknown}" >> "$GITHUB_OUTPUT"
+
+    - name: Cache dependency downloads
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.cache/Homebrew
+          ~/.cache/coursier
+          ~/.ivy2/cache
+          ~/.sbt
+          ~/.cache/pip
+        key: deps-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.profile }}-${{ steps.deps.outputs.week }}-${{ hashFiles('setup-rtl.sh', '.github/scripts/setup-ci.sh', 'hdl/chisel/build.sbt', 'hdl/chisel/project/**') }}
+        restore-keys: |
+          deps-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.profile }}-
+          deps-v1-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Install required tools
+      shell: bash
+      env:
+        CI_PROFILE: ${{ inputs.profile }}
+        HOMEBREW_NO_AUTO_UPDATE: "1"
+        HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      run: bash .github/scripts/setup-ci.sh tools "$CI_PROFILE"
+
+    - name: Restore generated decoders
+      if: inputs.profile != 'nemu' && inputs.profile != 'riscof'
+      id: decoders
+      uses: actions/cache/restore@v5
+      with:
+        path: hdl/generated
+        key: decoders-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('hdl/chisel/src/**', 'hdl/chisel/build.sbt', 'hdl/chisel/project/**', 'hdl/chisel/Makefile', 'setup-rtl.sh', '.github/scripts/setup-ci.sh') }}
+
+    - name: Prepare generated decoders
+      if: inputs.profile != 'nemu' && inputs.profile != 'riscof'
+      shell: bash
+      env:
+        DECODERS_CACHED: ${{ steps.decoders.outputs.cache-hit }}
+      run: bash .github/scripts/setup-ci.sh decoders "$DECODERS_CACHED"
+
+    # Save before long simulations so a later test failure does not discard
+    # successful generation. No prefix restore is allowed for generated RTL.
+    - name: Save generated decoders
+      if: inputs.profile != 'nemu' && inputs.profile != 'riscof' && steps.decoders.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v5
+      with:
+        path: hdl/generated
+        key: ${{ steps.decoders.outputs.cache-primary-key }}
+
+    - name: Prepare workload sources
+      shell: bash
+      env:
+        CI_PROFILE: ${{ inputs.profile }}
+      run: bash .github/scripts/setup-ci.sh workloads "$CI_PROFILE"
+
+    - name: Configure compiler cache
+      if: inputs.build-cache != ''
+      id: compiler
+      shell: bash
+      run: |
+        {
+          echo "OBJCACHE=ccache"
+          echo "CCACHE_DIR=$GITHUB_WORKSPACE/.ci-cache/ccache"
+          echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
+          echo "CCACHE_COMPILERCHECK=content"
+          echo "CCACHE_MAXSIZE=500M"
+          # Verilator uses -include with separate hot/cold precompiled headers.
+          echo "CCACHE_SLOPPINESS=pch_defines,time_macros"
+        } >> "$GITHUB_ENV"
+        tool_id=$({ c++ --version; verilator --version; } | sha256sum | cut -d ' ' -f 1)
+        echo "id=$tool_id" >> "$GITHUB_OUTPUT"
+
+    - name: Cache compiled objects
+      if: inputs.build-cache != ''
+      uses: actions/cache@v5
+      with:
+        path: .ci-cache/ccache
+        key: ccache-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.deps.outputs.image }}-${{ steps.compiler.outputs.id }}-${{ inputs.build-cache }}-${{ github.sha }}
+        restore-keys: |
+          ccache-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.deps.outputs.image }}-${{ steps.compiler.outputs.id }}-${{ inputs.build-cache }}-
+
+    - name: Reset compiler cache statistics
+      if: inputs.build-cache != ''
+      shell: bash
+      run: ccache --zero-stats

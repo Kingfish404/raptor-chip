@@ -19,7 +19,8 @@ module rapt_rob_dispatch_window #(
     parameter int unsigned Width = rapt_pkg::DispatchWidth,
     parameter int unsigned ScanEntries = 3 * Width,
     parameter int unsigned IndexBits = rapt_pkg::index_bits(Entries),
-    parameter int unsigned PayloadBits = 1
+    parameter int unsigned PayloadBits = 1,
+    parameter bit AllocationBypass = 1'b1
 ) (
     input logic clock,
     input logic reset,
@@ -43,7 +44,10 @@ module rapt_rob_dispatch_window #(
     output int unsigned candidate_count,
     output int unsigned accepted_count,
     output int unsigned bypass_count,
-    output logic oldest_blocked
+    output logic oldest_blocked,
+    // Immutable payload reads may finish alongside the next owner selection.
+    output logic prefetch_valid[ScanEntries-2*Width],
+    output logic [PayloadBits-1:0] prefetch_payload[ScanEntries-2*Width]
 );
   localparam int unsigned Resident = ScanEntries - 2 * Width;
   localparam int unsigned CarryBase = Resident;
@@ -84,7 +88,7 @@ module rapt_rob_dispatch_window #(
     assign candidate_payload[CarryBase+w] = carry_payload_q[w];
     assign candidate_incoming[CarryBase+w] = 1'b0;
     assign candidate_source_slot[CarryBase+w] = '0;
-    assign candidate_valid[IncomingBase+w] = complete_q && incoming_valid[w];
+    assign candidate_valid[IncomingBase+w] = AllocationBypass && complete_q && incoming_valid[w];
     assign candidate_index[IncomingBase+w] = incoming_index[w];
     assign candidate_payload[IncomingBase+w] = incoming_payload[w];
     assign candidate_incoming[IncomingBase+w] = 1'b1;
@@ -156,6 +160,8 @@ module rapt_rob_dispatch_window #(
   logic [PayloadBits-1:0] next_payload[Resident];
   for (genvar r = 0; r < Resident; r++) begin : g_rank
     assign next_found[r] = count[1] > CountBits'(r);
+    assign prefetch_valid[r] = next_found[r];
+    assign prefetch_payload[r] = next_payload[r];
     assign next_payload[r] = next_found[r] ? entry_payload[next_index[r]] : '0;
     always_comb begin
       automatic logic [IndexBits-1:0] age_index;

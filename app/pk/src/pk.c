@@ -26,8 +26,10 @@ extern char _payload_end;
 static void init_tf(trapframe_t* tf, long pc, long sp)
 {
   memset(tf, 0, sizeof(*tf));
-  // Minimal status: SPIE only, avoid FS/VS that NPC might not handle
-  tf->status = SSTATUS_SPIE;
+  // Preserve the FP state enabled by machine initialization. Clearing FS here
+  // makes every F/D instruction in a hard-float userspace ELF trap as illegal.
+  // Keep vector state disabled; Raptor does not implement V.
+  tf->status = SSTATUS_SPIE | (read_csr(sstatus) & SSTATUS_FS);
   tf->gpr[2] = sp;
   tf->epc = pc;
 }

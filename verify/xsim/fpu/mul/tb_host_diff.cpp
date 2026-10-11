@@ -7,6 +7,7 @@
 
 #include "Vrapt_fpu_mul_tb.h"
 #include "verilated.h"
+#include "../pipeline_host_check.h"
 
 static Vrapt_fpu_mul_tb* top;
 static uint64_t rng = 0x9e3779b97f4a7c15ULL;
@@ -90,11 +91,11 @@ struct Result {
 static Result host_multiply(uint64_t operand_a, uint64_t operand_b,
                             bool is_double, int rounding_mode) {
   Result result{0, 0};
-  if (!is_double
-      && ((operand_a >> 32) != 0xffffffffULL
-          || (operand_b >> 32) != 0xffffffffULL)) {
-    result.bits = 0xffffffff7fc00000ULL;
-    return result;
+  if (!is_double) {
+    // Each invalid box is a quiet NaN operand. The other operand can still
+    // be a signaling NaN and must contribute NV to the host reference.
+    if ((operand_a >> 32) != 0xffffffffULL) operand_a = 0xffffffff7fc00000ULL;
+    if ((operand_b >> 32) != 0xffffffffULL) operand_b = 0xffffffff7fc00000ULL;
   }
 
   fesetround(rounding_to_host(rounding_mode));
@@ -197,6 +198,20 @@ int main(int argc, char** argv) {
     tick();
   }
 
+  for (bool is_double : {false, true}) {
+    top->is_double = is_double;
+    failures += check_pipeline_stream(top, iterations, [&](int cycle) {
+      uint64_t a = is_double ? generate64(random64()) : 0xffffffff00000000ULL | generate32(random64());
+      uint64_t b = is_double ? generate64(random64()) : 0xffffffff00000000ULL | generate32(random64());
+      if (!is_double && cycle % 37 == 0) a &= 0xffffffffULL;
+      int rm = random64() % 4;
+      top->operand_a = a; top->operand_b = b; top->rounding_mode = rm;
+      const Result expected = host_multiply(a, b, is_double, rm);
+      return std::make_pair(expected.bits, expected.flags);
+    }, [&](uint64_t expected, uint64_t actual) {
+      return expected == actual || (is_nan(expected, is_double) && is_nan(actual, is_double));
+    });
+  }
   printf("TOTAL=%d FAILS=%d (NaN payload-tolerant, %d NaN cases OK)\n",
          iterations, failures, nan_cases);
   top->final();

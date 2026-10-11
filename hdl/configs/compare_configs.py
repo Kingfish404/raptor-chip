@@ -124,9 +124,18 @@ def build_rows(macros: Dict[str, Dict[str, str]], names: List[str]) -> List[List
         *[str(as_int(col(n), "RAPT_INTEGER_ISSUE_PORTS", 2)) for n in names],
     ])
     rows.append([
+        "L1D store policy",
+        *["write-back" if as_int(col(n), "RAPT_L1D_WRITEBACK") else "write-through"
+          for n in names],
+    ])
+    rows.append([
         "L1D MSHRs",
         *[str(as_int(col(n), "RAPT_L1D_MSHRS")) for n in names],
     ])
+    for label, macro in (("ITLB entries", "RAPT_ITLB_ENTRIES"),
+                         ("DTLB entries", "RAPT_DTLB_ENTRIES"),
+                         ("Shared L2 TLB entries (direct-mapped)", "RAPT_L2TLB_ENTRIES")):
+        rows.append([label, *[str(as_int(col(n), macro)) for n in names]])
 
     return rows
 

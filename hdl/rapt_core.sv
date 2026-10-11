@@ -130,12 +130,21 @@ module rapt_core #(
       .restore_phr(restore_phr)
   );
 
-  logic cache_writeback_idle;
+  logic cache_writeback_done;
   logic cache_writeback_drain;
   rapt_backend #(
-      .XLEN(XLEN)
+      .XLEN(XLEN),
+      .RegisteredDrainCompletion(1'b1),
+      .CompactFpOperands(1'b1),
+      .RegisteredDispatchPayload(1'b1),
+      .LocalIntegerWake(1'b1),
+      .LocalMemoryWake(1'b1),
+      // Pipeline integer and load completion broadcasts; keep FP latency.
+      .RegisteredOperandWakePorts(
+          ((rapt_pkg::CompletionPorts'(1) << rapt_pkg::IntegerIssuePorts) - 1'b1)
+          | (rapt_pkg::CompletionPorts'(1) << (rapt_pkg::IntegerIssuePorts + 1)))
   ) backend (
-      .writeback_idle(cache_writeback_idle),
+      .writeback_done(cache_writeback_done),
       .writeback_drain(cache_writeback_drain),
       .clock(clock),
       .reset(reset),
@@ -229,7 +238,9 @@ module rapt_core #(
       .ifetch_io_start_o(ifetch_io_start),
       .ifetch_io_owner_pc_o(ifetch_io_owner_pc),
       .data_idle_o(memory_data_idle),
-      .writeback_idle_o(cache_writeback_idle),
+      .writeback_idle_o(),
+      .writeback_done_o(cache_writeback_done),
+      .stores_empty_i(sq_empty),
       .writeback_drain_i(cache_writeback_drain),
       .writeback_error_o(writeback_error_o),
       .external_write_valid_i(external_write_valid_i),

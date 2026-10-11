@@ -161,13 +161,22 @@ static void nemu_periodic_save(void)
     return;
   save_countdown = 100000000ULL;
 
+  // A separate directory keeps concurrent standalone runs from overwriting
+  // each other's progress. Preserve the historical NEMU_HOME/build fallback.
+  const char *directory = getenv("NEMU_STATUS_DIR");
   const char *home = getenv("NEMU_HOME");
-  if (!home)
+  if (!directory && !home)
     return;
-  char path[512];
-  snprintf(path, sizeof(path), "%s/build/nemu-status.log", home);
+  char fallback[512];
+  if (!directory)
+  {
+    snprintf(fallback, sizeof(fallback), "%s/build", home);
+    directory = fallback;
+  }
+  char path[1024];
+  snprintf(path, sizeof(path), "%s/nemu-status.log", directory);
   nemu_save_status_to_file(path);
-  snprintf(path, sizeof(path), "%s/build/nemu-uarch_state.json", home);
+  snprintf(path, sizeof(path), "%s/nemu-uarch_state.json", directory);
   nemu_save_uarch_state(path);
 }
 
@@ -335,6 +344,10 @@ static void exec_once(Decode *s, vaddr_t pc)
 
 static void execute(uint64_t n)
 {
+  // Debug options are fixed for this execution request. Avoid environment
+  // lookups in the hot instruction loop, including when diagnostics are off.
+  const bool pc_debug = getenv("NEMU_PC_DEBUG") != NULL;
+  const bool itrace_at = pc_debug && getenv("NEMU_ITRACE_AT") != NULL;
   Decode s;
   for (; n > 0; n--)
   {
@@ -356,7 +369,7 @@ static void execute(uint64_t n)
     exec_once(&s, cpu.pc);
 
     g_nr_guest_inst++;
-    if (getenv("NEMU_PC_DEBUG") != NULL)
+    if (pc_debug)
     {
       static uint64_t u_inst = 0, s_inst = 0, m_inst = 0;
       if (cpu.priv == PRV_U) u_inst++;
@@ -367,7 +380,7 @@ static void execute(uint64_t n)
                 g_nr_guest_inst, cpu.pc, cpu.priv, m_inst, s_inst, u_inst);
       static int itrace_dumps = 0;
       static uint64_t itrace_next = 0x1000000000ull;
-      if (getenv("NEMU_ITRACE_AT") != NULL && itrace_dumps < 8 &&
+      if (itrace_at && itrace_dumps < 8 &&
           g_nr_guest_inst >= itrace_next)
       {
         itrace_dumps++;

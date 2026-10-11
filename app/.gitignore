@@ -16,3 +16,4 @@ tinyos/xv6-riscv/
 build
 build/**
 .stamp
+__pycache__

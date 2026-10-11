@@ -185,7 +185,7 @@ module tb_ioq_completion_kill;
           "younger response missing before cancellation");
     cmu_bcast.flush_pipe = 1'b1;
     #1;
-    check(!exu_ioq_bcast.valid && !fpr.ioq_wvalid && !load_fast.confirmed,
+    check(!exu_ioq_bcast.valid && !load_fast.confirmed,
           "cancelled younger response caused a transfer");
     check(exu_ioq_bcast.dest == 4 && exu_ioq_bcast.result == XLEN'('h12345678),
           "flush steered the unqualified completion payload");
@@ -2228,16 +2228,15 @@ module tb_ioq_store_stage;
         && exu_ioq_bcast.sq_waddr == XLEN'('h80007000)
         && exu_ioq_bcast.sq_wdata == XLEN'('h1234),
         "prechecked store lost registered data or address ownership");
-    // A floating-point store may hand off only after the synchronous FPR
-    // response belongs to this head, even when permission and SQ are ready.
+    // A floating-point store waits for its renamed producer even when its
+    // address permission and SQ are ready. Capture all 64 bits in either XLEN.
     boot();
-    fpr.ioq_rvalid = 1'b0;
-    fpr.ioq_rdata = 64'h1234_5678_9abc_def0;
     dispatch[0] = '0;
     dispatch[0].uop.execute.memory.store = 1'b1;
     dispatch[0].uop.execute.int_op.alu = XLEN == 64 ? `RAPT_SD_WSTRB : `RAPT_SW_WSTRB;
     dispatch[0].uop.execute.fp.valid = 1'b1;
     dispatch[0].uop.execute.fp.op = `RAPT_FP_OP_FSD;
+    dispatch[0].fp_tag[1] = 8;
     dispatch[0].op1 = XLEN'('h80008000);
     dispatch[0].stable_op1 = dispatch[0].op1;
     dispatch[0].stable_op1_valid = 1'b1;
@@ -2248,11 +2247,19 @@ module tb_ioq_store_stage;
     exu_lsu.stq_ready = 1'b1;
     tick(4);
     check(!exu_ioq_bcast.valid && !sq_handoff_valid,
-          "FP store escaped before its FPR read completed");
-    fpr.ioq_rvalid = 1'b1;
+          "FP store escaped before its renamed producer completed");
+    exu_rou = '0;
+    exu_rou.valid = 1;
+    exu_rou.fp_wen = 1;
+    exu_rou.dest = 7;
+    exu_rou.fp_result = 64'h1234_5678_9abc_def0;
+    tick(1);
+    exu_rou.valid = 0;
     #1;
-    check(exu_ioq_bcast.valid && sq_handoff_valid,
-          "FP store did not resume after its FPR read completed");
+    check(
+        exu_ioq_bcast.valid && sq_handoff_valid
+        && exu_ioq_bcast.sq_wdata64 == 64'h1234_5678_9abc_def0,
+        "FP store did not capture its renamed producer's 64-bit result");
     expect_store(XLEN'('h80008000), 3, 0);
     $display("PASS: IOQ store stages preserve wakeup, identity, backpressure and flush ownership");
     $finish;

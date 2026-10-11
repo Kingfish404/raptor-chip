@@ -77,7 +77,7 @@ module rapt_fpu_half_to_fp (
     end
   end
 
-  assign ready = !valid_q;
+  assign ready = !reset && !flush;
   assign result = result_q;
   assign flags = flags_q;
   assign result_valid = valid_q;

@@ -213,6 +213,14 @@ $HOME/Vivado/.xinstall/2025.2/xsetup
 
 MiLianKe MLK-CU08-KU15P (Kintex UltraScale+ `xcku15p-ffva1156-2-e`). The board has a 100 MHz single-ended clock on `P26`, UART on `AN11/AM11`, 4 GB DDR4, a 4-bit TF-card interface, and 256 Mbit QSPI configuration flash.
 
+The CU08 MIG profile uses DDR4-1600: a 1250 ps memory clock period, CL12/CWL9,
+and a 100 MHz differential reference with a 10000 ps input period. The fixed
+4:1 PHY/controller ratio gives a 200 MHz UI clock. The physical interface is
+64 bits and the MIG AXI interface is 512 bits with narrow transfers enabled;
+CPU clocks and the mapped RAM window are selected separately. CU07 retains
+its DDR4-2400 profile. Rebuild the bitstream after changing the MIG profile;
+DDR calibration and memory traffic still require validation on the board.
+
 ```bash
 # List all FPGA targets visible through Vivado Hardware Manager:
 make fpga-detect FPGA_DETECT_REFRESH=1

@@ -55,7 +55,7 @@ module tb_iq_type_family;
     #2;
     for (int p = 0; p < 3; p++) begin
       automatic int idx=0;
-      automatic wide_issue_t legacy;
+      automatic wide_issue_t legacy = '0;
       for (int e = 0; e < 4; e++) if (dut.selected[p][e]) idx |= e;
       legacy.valid=|dut.selected[p];
       legacy.uop=dut.iq_uop[idx];

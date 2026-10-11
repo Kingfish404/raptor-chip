@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify pending retired stores survive an actual architectural save/load."""
+"""Verify pending stores and dirty cache data survive architectural save/load."""
 import argparse
 import hashlib
 import json
@@ -16,7 +16,8 @@ def main():
     for key in ('npc', 'reference', 'mrom', 'elf', 'image', 'output'):
         parser.add_argument('--' + key, type=Path, required=True)
     parser.add_argument('--xlen', type=int, choices=(32, 64), required=True)
-    parser.add_argument('--kind', choices=('word', 'fp64', 'unaligned'), default='word')
+    parser.add_argument('--kind', choices=('word', 'fp64', 'unaligned', 'cache'), default='word')
+    parser.add_argument('--require-l2', action='store_true')
     parser.add_argument('--nm', default='riscv64-elf-nm')
     args = parser.parse_args()
     inputs = {key: getattr(args, key).resolve()
@@ -59,16 +60,31 @@ def main():
         width = 8 if args.kind == 'fp64' else args.xlen // 8
         value = 0x123456789abcdef if width == 8 else 0x789abcde
         for word in range(8):
-            offset = symbols['checkpoint_data'] - 0x80000000 + word * width
+            stride = 4096 if args.kind == 'cache' else width
+            expected = value
+            if args.kind == 'cache':
+                expected = (value & ~0xff00) | 0x5a00 if word == 0 else value + 17 * word
+            offset = symbols['checkpoint_data'] - 0x80000000 + word * stride
             position = chunks.index(offset & ~4095) * 4096 + (offset & 4095)
-            assert int.from_bytes(data[position:position + width], 'little') == value, word
+            assert int.from_bytes(data[position:position + width], 'little') == expected, word
         if args.kind == 'word':
             assert 'overlaid ' in text, 'test did not capture pending committed stores'
+        if args.kind == 'cache':
+            assert 'dirty cache bytes' in text, 'test did not capture dirty cache data'
+            assert 'dirty L1D bytes' in text, 'test did not capture dirty L1D data'
+            assert 'committed SQ bytes' not in text, 'cache payload did not drain the SQ'
+        if args.require_l2:
+            assert 'dirty L2 bytes' in text, 'test did not capture dirty L2 data'
         result['snapshot_sha256'] = {p.name: sha(p) for p in snapshot.iterdir() if p.is_file()}
         text = run('load', [f'--ckpt-load={snapshot}'])
         assert 'HIT GOOD TRAP' in text and 'resynchronized difftest REF' in text
+        # A non-exiting save must undo its temporary RAM overlays. Exercise
+        # continued RTL execution and difftest after exactly the same marker.
+        text = run('continue', [f'--ckpt-save={out / "continued-snapshot"}',
+                               f'--ckpt-pc=0x{symbols["checkpoint_marker"]:x}'])
+        assert 'checkpoint: SAVED' in text and 'HIT GOOD TRAP' in text
         result['passed'] = True
-        print(f'PASS RV{args.xlen} {args.kind}: pending stores exported and restored')
+        print(f'PASS RV{args.xlen} {args.kind}: memory image, restore and continued execution')
     finally:
         (out / 'summary.json').write_text(json.dumps(result, indent=2) + '\n')
 

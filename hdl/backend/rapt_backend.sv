@@ -8,10 +8,18 @@
 // issue/execute, completion ownership, LSU/SQ and precise retirement remain
 // in one synthesis block. Only decoded uops and memory/control contracts cross.
 module rapt_backend #(
-    parameter int XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN,
+    // Standalone users may supply live idle; the core supplies held completion.
+    parameter bit RegisteredDrainCompletion = 1'b0,
+    parameter bit CompactFpOperands = 1'b0,
+    parameter bit RegisteredDispatchPayload = 1'b0,
+    parameter bit LocalIntegerWake = 1'b0,
+    parameter bit LocalMemoryWake = 1'b0,
+    // Reuse the ownership-checked completion register for selected wake ports.
+    parameter logic [rapt_pkg::CompletionPorts-1:0] RegisteredOperandWakePorts = '0
 ) (
     input logic clock,
-    input logic writeback_idle = 1'b1,
+    input logic writeback_done = 1'b1,
     output logic writeback_drain,
     idu_rnu_if.slave idu_rnu,
     cmu_bcast_if cmu_bcast,
@@ -95,16 +103,14 @@ module rapt_backend #(
   dpu_iq_if disp_alq ();
   dpu_iq_if #(.RS_SIZE(rapt_pkg::BranchQueueEntries)) disp_brq ();
   dpu_iq_if #(.RS_SIZE(4)) disp_mdq ();
-  dpu_iq_if #(.RS_SIZE(1)) disp_fpq ();
+  dpu_iq_if #(.RS_SIZE(rapt_pkg::CoreConfig.iq_entries)) disp_fpq ();
   dpu_ioq_if disp_ioq ();
 
-  // Unified completion topology: a parameterized integer-port array followed
-  // by branch, memory and MUL/DIV. Composition selects which integer port owns
-  // CSR/system capability and shares its endpoint with FP; ordered stage width
-  // and dispatch-slot identity do not determine any physical port identity.
+  // Integer, branch, memory, MUL/DIV and floating-point producers share the
+  // same ownership guard, operand wake and registered ROB completion contract.
+  // FP has an independent endpoint so a divide cannot stop an integer port.
   localparam int IntegerIssuePorts = rapt_pkg::CoreConfig.integer_issue_ports;
   localparam int IntegerSystemPort = rapt_pkg::CoreConfig.integer_system_port;
-  rapt_pkg::completion_t wb_integer_shared;
   rapt_pkg::completion_t wb_integer_raw[IntegerIssuePorts];
   rapt_pkg::completion_t wb_fpu;
   rapt_pkg::completion_t wb_branch;
@@ -112,17 +118,12 @@ module rapt_backend #(
   rapt_pkg::completion_t exu_wb_mul;
   rapt_pkg::completion_t completion[rapt_pkg::CompletionPorts];
   rapt_pkg::completion_t completion_accepted[rapt_pkg::CompletionPorts];
-  // Validate every physical producer before endpoint arbitration. There is
-  // one more candidate than broadcast ports: FPU shares the selected system
-  // port. A stale FP result cannot suppress an independently valid
-  // integer/system result.
+  // Validate each physical producer before publishing data or ROB control.
   localparam int CandidateIntegerBase = 0;
   localparam int CandidateFpu = IntegerIssuePorts;
   localparam int CandidateBranch = IntegerIssuePorts + 1;
   localparam int CandidateMemory = IntegerIssuePorts + 2;
   localparam int CandidateMul = IntegerIssuePorts + 3;
-  // Physical producers are a composition registry, not derived from the
-  // number of downstream broadcast ports (one integer endpoint is shared).
   localparam int CompletionCandidates = CandidateMul + 1;
   rapt_pkg::completion_t completion_candidate[CompletionCandidates];
   logic completion_candidate_accept[CompletionCandidates];
@@ -141,14 +142,10 @@ module rapt_backend #(
   for (
       genvar integer_port = 0; integer_port < IntegerIssuePorts; integer_port++
   ) begin : g_integer_accept
-    if (integer_port == IntegerSystemPort) begin : g_shared
-      assign completion_accepted[integer_port] = wb_integer_shared;
-    end else begin : g_simple
-      always_comb begin
-        completion_accepted[integer_port] = wb_integer_raw[integer_port];
-        completion_accepted[integer_port].valid = wb_integer_raw[integer_port].valid
-            && g_completion_guard[CandidateIntegerBase+integer_port].accepted;
-      end
+    always_comb begin
+      completion_accepted[integer_port] = wb_integer_raw[integer_port];
+      completion_accepted[integer_port].valid = wb_integer_raw[integer_port].valid
+          && g_completion_guard[CandidateIntegerBase+integer_port].accepted;
     end
   end
   always_comb begin
@@ -167,28 +164,41 @@ module rapt_backend #(
         && g_completion_guard[CandidateMul].accepted;
   end
 
+  always_comb begin
+    completion_accepted[IntegerIssuePorts+3] = wb_fpu;
+    completion_accepted[IntegerIssuePorts+3].valid = wb_fpu.valid
+        && g_completion_guard[CandidateFpu].accepted;
+  end
+
   // Dedicated external wake view: no branch producer is on this input.
   rapt_pkg::completion_t branch_wake[rapt_pkg::CompletionPorts];
   rapt_pkg::completion_t memory_wake;
   // Keep the memory-only wake writer independent of the other CDB slots.
-  // Operands see the accepted producer immediately; ROB control is registered.
-  always_comb begin
-    memory_wake = exu_ioq_bcast;
-    memory_wake.valid = exu_ioq_bcast.valid && g_completion_guard[CandidateMemory].accepted;
+  // Match the main operand bus even at the dedicated IEU wake inputs.
+  if (RegisteredOperandWakePorts[IntegerIssuePorts+1]) begin : g_registered_memory_wake
+    assign memory_wake = completion[IntegerIssuePorts+1];
+  end else begin : g_live_memory_wake
+    always_comb begin
+      memory_wake = exu_ioq_bcast;
+      memory_wake.valid = exu_ioq_bcast.valid && g_completion_guard[CandidateMemory].accepted;
+    end
   end
   for (genvar p = 0; p < IntegerIssuePorts; p++) begin : g_branch_wake
-    if (p == IntegerSystemPort) assign branch_wake[p] = wb_integer_shared;
-    else begin
+    if (RegisteredOperandWakePorts[p]) begin : g_registered
+      assign branch_wake[p] = completion[p];
+    end else begin : g_live
       always_comb begin
         branch_wake[p] = wb_integer_raw[p];
         branch_wake[p].valid = wb_integer_raw[p].valid
-            && g_completion_guard[CandidateIntegerBase+p].accepted;
+              && g_completion_guard[CandidateIntegerBase+p].accepted;
       end
     end
   end
   assign branch_wake[IntegerIssuePorts] = '0;
   assign branch_wake[IntegerIssuePorts+1] = memory_wake;
   assign branch_wake[IntegerIssuePorts+2] = '0;
+  assign branch_wake[IntegerIssuePorts+3] = RegisteredOperandWakePorts[IntegerIssuePorts+3]
+      ? completion[IntegerIssuePorts+3] : completion_accepted[IntegerIssuePorts+3];
 
   // The speculative fast-load wake pair needs a live memory completion to
   // confirm it on the next edge. Completion control is registered, so queues
@@ -210,8 +220,8 @@ module rapt_backend #(
     load_fast.result               = '0;
   end
   // Register every accepted completion before ROB recovery and retirement.
-  // Accepted operand data reaches PRF, ROU operand storage and execution
-  // queues on the producer edge, independent of this control boundary.
+  // Selected operand ports reuse this boundary; other producer ports retain
+  // their accepted same-cycle wake latency.
   for (genvar p = 0; p < rapt_pkg::CompletionPorts; p++) begin : g_completion_stage
     rapt_completion_stage stage (
         .clock(clock),
@@ -221,11 +231,12 @@ module rapt_backend #(
         .completion(completion[p])
     );
   end
-  // ROU operand spill, PRF and execution queues must share the same wake edge:
-  // a value arriving during dispatch must be captured by the new queue owner.
+  // The global wake edge is shared by operand storage and queue allocations.
+  // Optional local capture only wakes residents; the registered copy covers
+  // owner transfer when an allocation coincides with an early local result.
   rapt_pkg::completion_t operand_wake[rapt_pkg::CompletionPorts];
   for (genvar p = 0; p < rapt_pkg::CompletionPorts; p++) begin : g_operand_wake
-    assign operand_wake[p] = completion_accepted[p];
+    assign operand_wake[p] = RegisteredOperandWakePorts[p] ? completion[p] : completion_accepted[p];
   end
   if (!(IntegerIssuePorts > 0)) begin : g_invalid_config_0
     $error("Invalid rapt_core configuration");
@@ -233,7 +244,7 @@ module rapt_backend #(
   if (!(IntegerSystemPort < IntegerIssuePorts)) begin : g_invalid_config_1
     $error("Invalid rapt_core configuration");
   end
-  if (!(rapt_pkg::CompletionPorts == IntegerIssuePorts + 3)) begin : g_invalid_config_2
+  if (!(rapt_pkg::CompletionPorts == IntegerIssuePorts + 4)) begin : g_invalid_config_2
     $error("Invalid rapt_core configuration");
   end
   for (genvar p = 0; p < CompletionCandidates; p++) begin : g_completion_guard
@@ -279,12 +290,8 @@ module rapt_backend #(
                     completion_candidate[p].valid && completion_candidate_identity_match[p],
                     completion_candidate_payload_match[p])
   end
-  logic integer_system_issue_enable;
-  logic fpu_completion_ready;
-  logic fpu_issue_enable;
 
   exu_prf_if exu_prf ();
-  fpr_if fpr ();
   exu_csr_if exu_csr ();
 
 `ifndef SYNTHESIS
@@ -378,10 +385,13 @@ module rapt_backend #(
   );
 
   rapt_rou #(
-      .SeparateOperandWake(1'b1)
+      .SeparateOperandWake(1'b1),
+      .RegisteredDrainCompletion(RegisteredDrainCompletion),
+      .CompactFpOperands(CompactFpOperands),
+      .RegisteredDispatchPayload(RegisteredDispatchPayload)
   ) rou (
       .operand_wake(operand_wake),
-      .writeback_idle(writeback_idle),
+      .writeback_done(writeback_done),
       .writeback_drain(writeback_drain),
       .completion(completion),
       .completion_owner(completion_owner),
@@ -458,12 +468,6 @@ module rapt_backend #(
 `endif
   );
 
-  rapt_fpr fpr_bank (
-      .clock(clock),
-      .reset(reset),
-      .fpr(fpr)
-  );
-
   rapt_pkg::dispatch_capacity_t dispatch_capacity[rapt_pkg::ExecutionDomains];
   rapt_pkg::dispatch_grant_t dispatch_grant[rapt_pkg::ExecutionDomains];
   rapt_dpu #(
@@ -506,7 +510,20 @@ module rapt_backend #(
       .grant(dispatch_grant[rapt_pkg::DOMAIN_MEMORY])
   );
 
-  rapt_ieu ieu (
+  // Only ALQ/BRQ resident data registers receive these local integer/load
+  // copies. ROU, PRF, MUL/DIV, FP and memory consumers keep the global edge.
+  // Local capture cannot feed same-cycle selection or dispatch readiness.
+  rapt_pkg::completion_t local_integer_wake[rapt_pkg::CompletionPorts];
+  for (genvar p = 0; p < rapt_pkg::CompletionPorts; p++) begin : g_local_integer_wake
+    if (LocalIntegerWake && (p < IntegerIssuePorts
+        || (LocalMemoryWake && p == IntegerIssuePorts + 1)))
+      assign local_integer_wake[p] = completion_accepted[p];
+    else assign local_integer_wake[p] = '0;
+  end
+  rapt_ieu #(
+      .LocalIntegerWake(LocalIntegerWake)
+  ) ieu (
+      .local_integer_wake(local_integer_wake),
       .branch_wake(branch_wake),
       .memory_wake(memory_wake),
       .cancel_valid(recovery.redirect_valid),
@@ -523,7 +540,7 @@ module rapt_backend #(
       .disp_mdq(disp_mdq),
 
       .load_fast(load_fast),
-      .integer_system_issue_enable(integer_system_issue_enable),
+      .integer_system_issue_enable(1'b1),
       .exu_csr(exu_csr),
       .wb_integer_raw(wb_integer_raw),
       .wb_branch(wb_branch),
@@ -546,30 +563,10 @@ module rapt_backend #(
       .disp_fpq(disp_fpq),
 
       .load_fast(load_fast),
-      .fpr(fpr),
       .wb_fpu(wb_fpu),
       .wb_accept(g_completion_guard[CandidateFpu].accepted),
-      .completion_ready(fpu_completion_ready),
-      .issue_enable(fpu_issue_enable)
-  );
-
-  rapt_cdb_arb cdb_arb (
-      .flush(cmu_bcast.flush_pipe),
-      .cancel_valid(recovery.redirect_valid),
-      .cancel_head(recovery.head),
-      .cancel_owner(recovery.owner),
-      .fpu_completion_ready(fpu_completion_ready),
-      .clock(clock),
-      .reset(reset),
-      .integer_system_pipe_enable(1'b1),
-      .fpu_issue_enable(fpu_issue_enable),
-      .wb_integer_system_raw(wb_integer_raw[IntegerSystemPort]),
-      .wb_fpu(wb_fpu),
-      .wb_integer_system_accept(g_completion_guard[CandidateIntegerBase
-          +IntegerSystemPort].accepted),
-      .wb_fpu_accept(g_completion_guard[CandidateFpu].accepted),
-      .wb_shared(wb_integer_shared),
-      .integer_system_issue_enable(integer_system_issue_enable)
+      .completion_ready(1'b1),
+      .issue_enable()
   );
 
   // CMU (ComMit Unit)
@@ -624,7 +621,6 @@ module rapt_backend #(
       .rou_lsu(rou_lsu),
       .csr_bcast(csr_bcast),
       .pmp_update(pmp_update),
-      .fpr(fpr),
       .load_fast(load_fast_raw),
       .pmu_sq_full(pmu_sq_full_unused)
   );

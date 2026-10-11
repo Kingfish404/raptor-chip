@@ -19,7 +19,6 @@ rapt_pkg::completion_t exu_rou_b;
 rapt_pkg::completion_t exu_wb_mul;
 lsu_pipe_if exu_lsu();
 lsu_l1d_mmu_if exu_l1d();
-fpr_if fpr();
 rapt_pkg::completion_t exu_ioq_bcast;
 rapt_pkg::completion_t completion[rapt_pkg::CompletionPorts];
 for (genvar p = 0; p < rapt_pkg::CompletionPorts; p++) begin : g_completion
@@ -44,7 +43,7 @@ rapt_lsu_ioq dut (
 
     .exu_lsu(exu_lsu),
     .exu_l1d(exu_l1d),
-    .fpr(fpr),
+
     .exu_ioq_bcast(exu_ioq_bcast),
 `ifdef TB_IOQ_WB_ACCEPT
     .wb_accept(`TB_IOQ_WB_ACCEPT),
@@ -75,7 +74,7 @@ task automatic init_ioq_inputs(input logic dmmu_en);
     init_csr_bcast_defaults(`RAPT_PRIV_M, XLEN'(32'h2000_0000), dmmu_en);
     init_pmp_state_defaults(1'b0);
     for (int s = 0; s < rapt_pkg::DispatchWidth; s++) begin
-      dispatch[s].uop = '0;
+      dispatch[s] = '0;
       dispatch[s].op1 = '0;
       dispatch[s].op2 = '0;
       dispatch[s].pr1 = '0;
@@ -85,6 +84,9 @@ task automatic init_ioq_inputs(input logic dmmu_en);
       dispatch[s].dest = '0;
       disp.accept[s] = 1'b0;
     end
+    exu_rou = '0;
+    exu_rou_b = '0;
+    exu_wb_mul = '0;
     exu_rou.pc = '0;
     exu_rou.npc = '0;
     exu_rou.btaken = 1'b0;
@@ -134,8 +136,6 @@ task automatic init_ioq_inputs(input logic dmmu_en);
     exu_l1d.reservation_valid = 1'b0;
     exu_l1d.reservation_size_m1 = 4'd3;
     exu_l1d.reservation_blocked = 1'b0;
-    fpr.ioq_rdata = '0;
-    fpr.ioq_rvalid = 1'b1;  // Fixture supplies an already sampled FPR value.
     exu_l1d.ready = 1'b0;
   end
 endtask

@@ -67,7 +67,7 @@ task automatic run_fp_irq_boundary;
           tick(1);
         end
 `ifdef RAPT_TEST_FP_IRQ_COMPOSE
-        check(fp_irq_writes == 0 && fp_irq_fpr.ioq_rdata == 64'h0123456789abcdef,
+        check(fp_irq_writes == 0 && dut_rou.fp_registers.architectural[2] == 0,
             "canceled FP modified actual FPR storage");
 `endif
       end

@@ -1142,6 +1142,27 @@ app-coremark-rv32: build-rv32 ## [app] CoreMark via pk (rv32)
 app-coremark-nemu32: build-nemu32 ## [app] CoreMark via pk on NEMU (rv32)
 	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) coremark-nemu ARGS="$(ARGS)" $(call tee_app,coremark-nemu32)
 
+app-coremark-pro-rv32: build-rv32 ## [app] CoreMark-PRO via pk, local workload report (rv32)
+	@$(MAKE) --no-print-directory -C $(APP_HOME) coremark-pro-sim ISA64=0 ARGS="$(ARGS)"
+
+app-coremark-pro-rv64: build-rv64 ## [app] CoreMark-PRO via pk, local workload report (rv64)
+	@$(MAKE) --no-print-directory -C $(APP_HOME) coremark-pro-sim ISA64=1 ARGS="$(ARGS)"
+
+coremark-pro-rv32: build-rv32 ## CoreMark-PRO bare metal, local workload report (rv32)
+	@$(MAKE) --no-print-directory -C $(APP_HOME) coremark-pro-baremetal-sim ISA64=0 ARGS="$(ARGS)"
+
+coremark-pro-rv64: build-rv64 ## CoreMark-PRO bare metal, local workload report (rv64)
+	@$(MAKE) --no-print-directory -C $(APP_HOME) coremark-pro-baremetal-sim ISA64=1 ARGS="$(ARGS)"
+
+coremark-pro-nemu32: build-nemu32 ## CoreMark-PRO bare-metal validation on NEMU (rv32)
+	@$(MAKE) --no-print-directory -C $(APP_HOME) coremark-pro-baremetal-nemu ISA64=0 ARGS="$(ARGS)"
+
+coremark-pro-nemu64: build-nemu64 ## CoreMark-PRO bare-metal validation on NEMU (rv64)
+	@$(MAKE) --no-print-directory -C $(APP_HOME) coremark-pro-baremetal-nemu ISA64=1 ARGS="$(ARGS)"
+
+.PHONY: app-coremark-pro-rv32 app-coremark-pro-rv64 coremark-pro-rv32 coremark-pro-rv64 \
+    coremark-pro-nemu32 coremark-pro-nemu64
+
 app-embench-rv32: build-rv32 ## [app] Build, run, and report Embench-IoT via pk (rv32)
 	@$(MAKE) --no-print-directory -C $(APP_HOME) embench-sim \
 		ISA64=0 ARGS="$(ARGS)" EMBENCH_JOBS=$(JOBS)

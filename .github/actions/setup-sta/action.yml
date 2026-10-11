@@ -1,0 +1,90 @@
+name: Setup cached STA tools
+description: Reuse OpenSTA, the Yosys Slang plugin, and PDK data across the XLEN matrix.
+inputs:
+  platform:
+    description: nangate45, asap7, or sky130hd
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Identify STA toolchain
+      id: toolchain
+      shell: bash
+      run: |
+        git clone --depth 1 https://github.com/Kingfish404/yosys-opensta third_party/yosys-opensta
+        echo "revision=$(git -C third_party/yosys-opensta rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        # The upstream setup scripts follow moving tool/PDK revisions. Refresh
+        # weekly, and invalidate native binaries on runner or Homebrew changes.
+        echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+        identity=$({
+          printf '%s\n' "${ImageOS:-unknown}" "${ImageVersion:-unknown}"
+          c++ --version
+          brew list --versions
+          sha256sum "$(command -v yosys)"
+        } | sha256sum | cut -d ' ' -f 1)
+        echo "id=$identity" >> "$GITHUB_OUTPUT"
+
+    - name: Restore STA binaries
+      id: tools
+      uses: actions/cache/restore@v5
+      with:
+        path: .ci-cache/sta-tools
+        key: sta-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.id }}-${{ steps.toolchain.outputs.revision }}-${{ steps.toolchain.outputs.week }}-${{ hashFiles('.github/actions/setup-sta/action.yml') }}
+
+    - name: Build STA binaries
+      if: steps.tools.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        # Check the C++ scanner header before spending time building CUDD.
+        printf '#include <FlexLexer.h>\n' | c++ -x c++ -fsyntax-only -
+        make -C third_party/yosys-opensta setup-opensta setup-sv-elab
+        mkdir -p .ci-cache/sta-tools
+        cp third_party/yosys-opensta/third_party/OpenSTA/build/sta .ci-cache/sta-tools/sta
+        cp "$(yosys-config --datdir)/plugins/slang.so" .ci-cache/sta-tools/slang.so
+        {
+          git -C third_party/yosys-opensta rev-parse HEAD
+          git -C third_party/yosys-opensta/third_party/OpenSTA rev-parse HEAD
+          git -C third_party/yosys-opensta/third_party/sv-elab rev-parse HEAD
+          yosys -V
+          .ci-cache/sta-tools/sta -version
+        } > .ci-cache/sta-tools/versions.txt
+
+    - name: Install and check cached STA binaries
+      shell: bash
+      run: |
+        mkdir -p third_party/yosys-opensta/third_party/OpenSTA/build
+        install -m 755 .ci-cache/sta-tools/sta third_party/yosys-opensta/third_party/OpenSTA/build/sta
+        install -D -m 755 .ci-cache/sta-tools/slang.so "$(yosys-config --datdir)/plugins/slang.so"
+        third_party/yosys-opensta/third_party/OpenSTA/build/sta -version
+        yosys -Q -T -m slang -p 'slang_version'
+        cat .ci-cache/sta-tools/versions.txt
+
+    - name: Save STA binaries
+      if: steps.tools.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v5
+      with:
+        path: .ci-cache/sta-tools
+        key: ${{ steps.tools.outputs.cache-primary-key }}
+
+    - name: Restore PDK data
+      id: pdk
+      uses: actions/cache/restore@v5
+      with:
+        path: third_party/yosys-opensta/third_party/lib/${{ inputs.platform }}
+        key: sta-pdk-v1-${{ inputs.platform }}-${{ steps.toolchain.outputs.revision }}-${{ steps.toolchain.outputs.week }}
+
+    - name: Download PDK data
+      if: steps.pdk.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        STA_PLATFORM: ${{ inputs.platform }}
+      run: |
+        case "$STA_PLATFORM" in nangate45|asap7|sky130hd) ;; *) exit 2 ;; esac
+        make -C third_party/yosys-opensta "setup-$STA_PLATFORM"
+
+    - name: Save PDK data
+      if: steps.pdk.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v5
+      with:
+        path: third_party/yosys-opensta/third_party/lib/${{ inputs.platform }}
+        key: ${{ steps.pdk.outputs.cache-primary-key }}

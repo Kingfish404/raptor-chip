@@ -1,6 +1,6 @@
 `include "rapt.svh"
 
-// Three-stage, one-operation-at-a-time IEEE-754 floating-point add/sub unit.
+// Three-stage, one-operation-per-cycle IEEE-754 floating-point add/sub unit.
 //
 // Stage 1: decode operands, classify specials, align mantissas with sticky.
 // Stage 2: add/subtract aligned mantissas and normalize (priority-encoded
@@ -294,7 +294,7 @@ module rapt_fpu_addsub #(
     end
   end
 
-  assign ready = !(s1_valid_q || s2_valid_q || s3_valid_q);
+  assign ready = !reset && !flush;
   assign result = result_q;
   assign flags = flags_q;
   assign result_valid = s3_valid_q;

@@ -85,6 +85,8 @@
 
 `define RAPT_ITLB_ENTRIES 4
 `define RAPT_DTLB_ENTRIES 4
+// Shared instruction/data second-level translation cache; zero bypasses it.
+`define RAPT_L2TLB_ENTRIES 0
 
 // Geometry for an explicit command-line L2 enable; L2 remains disabled here.
 `define RAPT_L2_LEN 8

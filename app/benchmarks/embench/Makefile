@@ -5,12 +5,17 @@
 _THIS_DIR   := $(dir $(lastword $(MAKEFILE_LIST)))
 APP_HOME    := $(abspath $(_THIS_DIR)/../..)
 SUPPORT_DIR := $(_THIS_DIR)support
+APP_ENABLE_FP := 1
 include $(APP_HOME)/common.mk
+.DEFAULT_GOAL := build
 
 # ---- Directories ----
 EMBENCH_DIR := $(APP_HOME)/build/src/embench-iot
 BUILD_DIR   := $(APP_HOME)/build/rv$(XLEN)/embench
 BARE_BUILD_DIR := $(APP_HOME)/build/rv$(XLEN)/embench-baremetal
+CONFIG_STAMP := $(BUILD_DIR)/.build-config
+BARE_CONFIG_STAMP := $(BARE_BUILD_DIR)/.build-config
+shell_quote = '$(subst ','"'"',$(1))'
 
 # ---- Embench benchmark list ----
 BENCHMARKS := aha-mont64 crc32 depthconv edn huffbench matmult-int \
@@ -50,6 +55,18 @@ BARE_LDFLAGS := -march=$(ARCH) -mabi=$(ABI) -mcmodel=medany \
 				-Wl,--gc-sections -Wl,--no-relax
 BARE_RUNTIME := $(SUPPORT_DIR)/start.S $(SUPPORT_DIR)/baremetal.c
 BARE_LIBGCC := $(shell $(CC) -march=$(ARCH) -mabi=$(ABI) -print-libgcc-file-name)
+
+$(CONFIG_STAMP): FORCE
+	@mkdir -p $(dir $@)
+	@printf '%s\n' $(call shell_quote,$(CC) $(CFLAGS) $(_PICOLIBC_IO)) > $@.tmp
+	@cmp -s $@.tmp $@ && rm $@.tmp || mv $@.tmp $@
+
+$(BARE_CONFIG_STAMP): FORCE
+	@mkdir -p $(dir $@)
+	@printf '%s\n' $(call shell_quote,$(CC) $(BARE_CFLAGS) $(BARE_HEADER_FLAGS) $(BARE_LDFLAGS) $(BARE_LIBGCC)) > $@.tmp
+	@cmp -s $@.tmp $@ && rm $@.tmp || mv $@.tmp $@
+
+$(SUPPORT_OBJS): $(CONFIG_STAMP) $(MAKEFILE_LIST)
 
 $(BUILD_DIR)/support/%.o: $(SUPPORT_DIR)/%.c
 	@mkdir -p $(dir $@)
@@ -117,6 +134,9 @@ endef
 $(foreach b,$(BENCHMARKS),$(eval $(call BENCH_TEMPLATE,$(b))))
 $(foreach b,$(BENCHMARKS),$(eval $(call BARE_BENCH_TEMPLATE,$(b))))
 
+$(foreach b,$(BENCHMARKS),$($(b)_OBJS)): $(CONFIG_STAMP) $(MAKEFILE_LIST)
+$(foreach b,$(BENCHMARKS),$($(b)_BARE_OBJS) $($(b)_BARE_SUPPORT_OBJS)): $(BARE_CONFIG_STAMP) $(MAKEFILE_LIST)
+
 ALL_ELFS := $(foreach b,$(BENCHMARKS),$(BUILD_DIR)/$(b)/$(b).elf)
 ALL_BARE_BINS := $(foreach b,$(BENCHMARKS),$(BARE_BUILD_DIR)/$(b)/$(b).bin)
 
@@ -146,4 +166,5 @@ baremetal-run: baremetal-build ## Run one bare-metal benchmark on NPC (BENCH=crc
 clean:
 	rm -rf $(BUILD_DIR) $(BARE_BUILD_DIR)
 
-.PHONY: build _build baremetal-build _baremetal-build baremetal-run clean
+FORCE:
+.PHONY: build _build baremetal-build _baremetal-build baremetal-run clean FORCE

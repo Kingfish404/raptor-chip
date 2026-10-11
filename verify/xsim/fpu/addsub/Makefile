@@ -13,7 +13,7 @@ VERILATOR ?= verilator
 VFLAGS := --cc --exe --build -Wno-fatal -Wno-lint -Wno-WIDTH \
           -I$(HDL_INC) -I$(CONFIG) --top-module rapt_fpu_addsub_tb
 
-obj_dir/tb: $(DUT) rapt_fpu_addsub_tb.sv tb_host_diff.cpp
+obj_dir/tb: $(DUT) rapt_fpu_addsub_tb.sv tb_host_diff.cpp ../pipeline_host_check.h
 	+$(VERILATOR) $(VFLAGS) $(DUT) rapt_fpu_addsub_tb.sv tb_host_diff.cpp -o tb
 
 run: obj_dir/tb

@@ -155,7 +155,7 @@ module rapt_fpu_fp_to_half (
     result_c = {48'hffff_ffff_ffff, half_result};
   end
 
-  assign ready = !valid_q;
+  assign ready = !reset && !flush;
   assign result = result_q;
   assign flags = flags_q;
   assign result_valid = valid_q;

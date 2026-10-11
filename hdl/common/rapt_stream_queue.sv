@@ -24,10 +24,12 @@ module rapt_stream_queue #(
   localparam int PtrBits = rapt_pkg::index_bits(Depth);
   // Registered-capacity boundaries avoid a combinational ready path through
   // the banked RAM prefetch. Equal power-of-two lane counts give each bank at
-  // most one read and one write per cycle. Other queues retain flop storage.
+  // most one read and one write per cycle. Single-lane queues can use LUTRAM.
   localparam bit BlockPayload = `RAPT_FPGA_STREAM_BRAM && !ReclaimSameCycle &&
       InWidth == OutWidth && InWidth >= 4 && Depth >= 2 * InWidth &&
       (Depth & (Depth - 1)) == 0 && (InWidth & (InWidth - 1)) == 0;
+  localparam bit DistributedPayload = `RAPT_FPGA_LUTRAM && InWidth == 1 && OutWidth == 1
+      && Depth > 1;
   logic [PtrBits-1:0] head, tail;
   logic [PtrBits-1:0] push_index[InWidth];
   int unsigned push_count, pop_count;
@@ -116,6 +118,15 @@ module rapt_stream_queue #(
     end
     for (genvar s = 0; s < OutWidth; s++) begin : g_output
       assign out_data[s] = ItemT'(bank_data[BankBits'(head[BankBits-1:0]+BankBits'(s))]);
+    end
+  end else if (DistributedPayload) begin : g_distributed_payload
+    // One indexed writer exposes the single-writer memory to FPGA inference.
+    // Asynchronous reads retain the flop queue's latency, including enqueue
+    // into an empty queue and simultaneous dequeue/enqueue at pointer wrap.
+    (* ram_style = "distributed" *) ItemT words[Depth];
+    assign out_data[0] = words[head];
+    always_ff @(posedge clock) begin
+      if (!reset && !flush && push_count != 0) words[tail] <= in_data[0];
     end
   end else begin : g_flop_payload
     // Each entry owns its storage update. Accepted slots have distinct indices;

@@ -147,7 +147,7 @@ module rapt_fpu_single_to_int_w #(
     stage3_flags_c[0] = inexact_c && !range_invalid_c;
   end
 
-  assign ready = !(s1_valid_q || s2_valid_q || s3_valid_q);
+  assign ready = !reset && !flush;
   assign result = result_q;
   assign flags = flags_q;
   assign result_valid = s3_valid_q;

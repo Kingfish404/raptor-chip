@@ -8,7 +8,7 @@
 
 Welcome to the Raptor Project! Here is an all-in-one repository for exploring, developing, optimizing, and verifying a RISC-V core. Aiming at high quality, full Linux support, FPGA implementation, and ASIC readiness.
 
-Core description: **Super-scalar, out-of-order RISC-V core** with register renaming, a 32-entry ROB, six execution paths fed by five scheduler classes over five unified writeback CDB ports, TAGE branch prediction, and a unified speculative/committed store queue. The scalar F/D unit has a dedicated FPQ and architectural 32 x 64-bit FPR bank, and shares CDB0 with the ALU-CSR pipe. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 (RV32) / Sv39 (RV64) virtual memory (MMU/TLB/PTW), 8 usable PMP entries (TOR/NA4/NAPOT; 16 CSR slots, upper eight read-only zero), LR/SC + AMO atomics, compressed instructions (RVC), CLINT/PLIC interrupts, a RISC-V Debug Module / JTAG DTM bring-up path, and Linux v6.18.x flows via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
+Core description: **Super-scalar, out-of-order RISC-V core** with register renaming, a 32-entry ROB, six execution paths fed by five scheduler classes over six unified writeback CDB ports, TAGE branch prediction, and a unified speculative/committed store queue. F/D operations use an out-of-order FPQ, ROB-backed register renaming, overlapping arithmetic pipelines and a dedicated completion endpoint. The 32 x 64-bit architectural FPR bank updates only at retirement. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 (RV32) / Sv39 (RV64) virtual memory (MMU/TLB/PTW), 8 usable PMP entries (TOR/NA4/NAPOT; 16 CSR slots, upper eight read-only zero), LR/SC + AMO atomics, compressed instructions (RVC), CLINT/PLIC interrupts, a RISC-V Debug Module / JTAG DTM bring-up path, and Linux v6.18.x flows via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
 
 ```
 RV64 (default config, -DRAPT_RV64)
@@ -28,7 +28,7 @@ PMP:        8 usable entries, TOR / NA4 / NAPOT, L-bit lockable
 Interrupts: CLINT (mtime, mtimecmp, msip) + PLIC (31 sources, M/S contexts)
 
 Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID; burst-capable reads (up to 8 outstanding), up to 4 posted cacheable writes with write-through L1D and no L2; other writes wait for B responses, with independent AW/W handshakes (single-beat ordinary stores, multi-beat Zicboz `CBO.ZERO`)
-Default uarch: dual issue / dual commit, ROB=32, ALQ=8 (2 issue ports), BRQ=8, MDQ=4, FPQ=1, IOQ=8, SQ=16, integer PRF=64, FPR=32 x 64-bit, L1I=16 KiB, L1D=16 KiB (both 4-way), 64 B cache lines, optional L2 passthrough/cache stage
+Default uarch: dual issue / dual commit, ROB=32, ALQ=8 (2 issue ports), BRQ=8, MDQ=4, FPQ=8, IOQ=8, SQ=16, integer PRF=64, FPR=32 x 64-bit, L1I=16 KiB, L1D=16 KiB write-back with 4 MSHRs and 2 writeback buffers (both caches 4-way), 64 B cache lines, optional L2 passthrough/cache stage
 
 Verifying:  RISCOF (riscv-arch-test), full-core F/D directed/differential tests, RVFI, SVA
 ```
@@ -61,11 +61,11 @@ flowchart TD
     ROU["ROU (UOQ 8 + ROB 32 + operand spill 16)"]
     DPU{{"DPU dispatch router"}}
     IEU["IEU: ALQ 8 + BRQ 8 + MDQ 4"]
-    FEU["FEU: FPQ 1 + scalar F/D/Zfhmin"]
+    FEU["FEU: FPQ 8 + pipelined F/D/Zfhmin"]
     LSU["LSU: IOQ 8 + SQ 16"]
-    CDB(("CDB ×5"))
-    PRF["PRF (2 × RenameWidth reads, CompletionPorts writes; default 4R/5W)"]
-    FPR["FPR (32 × 64-bit)"]
+    CDB(("CDB ×6"))
+    PRF["PRF (2 × RenameWidth reads, CompletionPorts writes; default 4R/6W)"]
+    FPR["FP rename/results + committed FPR (32 × 64-bit)"]
     CMU["CMU (commit)"]
     CSR
   end
@@ -77,10 +77,11 @@ flowchart TD
       IPTW["IPTW (Sv32 2-lvl / Sv39 3-lvl)"]
     end
     subgraph DMEM["D-side · registered cache access; configurable response stage"]
-      L1D["L1D 16 KiB 4-way (banked SRAM, VIPT, write-through)"]
+      L1D["L1D 16 KiB 4-way (banked SRAM, VIPT, write-back)"]
       DTLB["DTLB (default 16 entries, replicated load/store views)"]
       DPTW["DPTW (Sv32/Sv39, Svade)"]
     end
+    L2TLB["Shared L2 TLB (256 entries, direct-mapped)"]
     PMPC["PMP ×8 (TOR/NA4/NAPOT): fetch + ld/st + PTW checks"]
     BUS["BUS (mem_link arbiter, request IDs, L1D > L1I)"]
     AXIM["AXI4 master (up to 8 reads, independent AW/W)"]
@@ -98,8 +99,7 @@ flowchart TD
   DPU --> IEU & FEU & LSU
   IEU & FEU & LSU --> CDB
   CDB -->|"writeback + wakeup"| ROU & PRF
-  FEU --- FPR
-  LSU --- FPR
+  ROU --- FPR
   ROU --> CMU
   ROU -."store commit".-> LSU
   CMU -."flush / BPU train".-> FE
@@ -107,10 +107,12 @@ flowchart TD
   CSR --- IEU
   IFU --- L1I
   L1I --- ITLB
-  ITLB -."miss".-> IPTW
+  ITLB -."miss".-> L2TLB
   LSU --> L1D
   L1D --- DTLB
-  DTLB -."miss".-> DPTW
+  DTLB -."miss".-> L2TLB
+  L2TLB -."I miss".-> IPTW
+  L2TLB -."D miss".-> DPTW
   PMPC -.-> L1I & L1D & IPTW & DPTW
   L1I & L1D & IPTW & DPTW --> BUS
   BUS -->|mem_link| AXIM --> L2 --> RBUF_AXI --> RTR

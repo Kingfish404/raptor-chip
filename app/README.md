@@ -25,6 +25,8 @@ make memory-tests-rv32     # Memory subsystem tests
 make algo-tests-rv32       # Algorithm correctness tests
 make demos-rv32            # Demo programs
 make coremark-rv32         # CoreMark benchmark
+make coremark-pro-build    # Full upstream CoreMark-PRO suite, with F/D
+make coremark-pro-baremetal-nemu # Reference validation (existing NEMU build)
 make embench-rv32          # Embench-IoT benchmarks
 make llm-bench-report-rv32 # RLLMBench: LLM operator/infer/train benchmark + report
 make llm-native-test       # RLLMBench host-native build/run/report smoke test
@@ -65,6 +67,7 @@ app/
 ├── demos/            # Interactive demo programs
 ├── benchmarks/       # Performance benchmarks
 │   ├── coremark/     #   CoreMark (sources from AM am-kernels; prepare with root setup)
+│   ├── coremark-pro/ #   Pinned upstream suite, Raptor MITH port, workload reports
 │   ├── embench/      #   Embench-IoT (auto-cloned)
 │   └── llm/          #   Fixed-point LLM operator/infer/train benchmarks
 ├── lib/              # Picolibc I/O stubs (Linux toolchain only)
@@ -73,6 +76,15 @@ app/
 ```
 
 ## Test Suites
+
+Embench builds enable F/D and the double-precision hard-float ABI for both XLEN
+modes, including the separate LiteX build. The current Embench-IoT selection is
+mostly integer code; enabling the ISA does not turn it into a floating-point
+suite. The [CoreMark-PRO integration](benchmarks/coremark-pro/README.md) supplies
+four floating-point and five integer workloads. Its local reports distinguish
+reference validation from performance runs and do not calculate or publish an
+official suite score. See that README for make targets and upstream license
+requirements.
 
 ### ISA Verification (`tests/isa/`)
 

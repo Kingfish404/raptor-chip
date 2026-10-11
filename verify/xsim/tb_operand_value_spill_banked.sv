@@ -37,7 +37,9 @@ module tb_operand_value_spill_banked #(
       .ReleaseWidth(Width),
       .ReadPorts(Width),
       .CompletionPorts(2)
-  ) dut (.*);
+  ) dut (
+      .*
+  );
 
   task automatic check_all;
     for (int group = 0; group < Entries / Width; group++) begin
@@ -46,8 +48,15 @@ module tb_operand_value_spill_banked #(
       for (int p = 0; p < Width; p++) begin
         int e = group * Width + p;
         assert (read_valid[p] == expected_valid[e])
-        else $fatal(1, "read validity stage=%0d entry=%0d got=%0d expected=%0d", stage, e,
-                    read_valid[p], expected_valid[e]);
+        else
+          $fatal(
+              1,
+              "read validity stage=%0d entry=%0d got=%0d expected=%0d",
+              stage,
+              e,
+              read_valid[p],
+              expected_valid[e]
+          );
         if (expected_valid[e])
           assert (read_uop[p] == expected[e])
           else $fatal(1, "uop mismatch entry=%0d got=%h expected=%h", e, read_uop[p], expected[e]);
@@ -63,13 +72,14 @@ module tb_operand_value_spill_banked #(
     end
     #1;
     for (int a = 0; a < Width; a++) begin
-      assert (allocate_ready[a]) else $fatal(1, "allocation lane %0d blocked", a);
+      assert (allocate_ready[a])
+      else $fatal(1, "allocation lane %0d blocked", a);
       expected_valid[allocate_index[a]] = 1'b1;
       expected[allocate_index[a]] = allocate_uop[a];
     end
     @(posedge clock);
     #1;
-    allocate_valid = '{default:1'b0};
+    allocate_valid = '{default: 1'b0};
   endtask
 
   task automatic recycle_four(input int a0, a1, a2, a3, token);
@@ -81,7 +91,7 @@ module tb_operand_value_spill_banked #(
     end
     @(posedge clock);
     #1;
-    release_valid = '{default:1'b0};
+    release_valid = '{default: 1'b0};
     for (int r = 0; r < Width; r++) expected_valid[slots[r]] = 1'b0;
     check_all();
     allocate_four(token);

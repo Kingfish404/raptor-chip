@@ -27,6 +27,9 @@ on:
       - "verify/**"
       - "fpga/litex/**"
       - ".github/scripts/**"
+      - ".github/actions/**"
+      - "setup.sh"
+      - "setup-rtl.sh"
       - ".github/workflows/app.yaml"
   pull_request:
     branches: ["master", "main"]
@@ -38,6 +41,9 @@ on:
       - "verify/**"
       - "fpga/litex/**"
       - ".github/scripts/**"
+      - ".github/actions/**"
+      - "setup.sh"
+      - "setup-rtl.sh"
       - ".github/workflows/app.yaml"
   workflow_dispatch:
 
@@ -49,9 +55,41 @@ env:
   RAPT_CONFIG: default
 
 jobs:
+  build-riscof:
+    runs-on: ubuntu-24.04
+    env:
+      RAPTOR_HOME: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup build environment
+        uses: ./.github/actions/setup-environment
+        with:
+          profile: build
+          build-cache: default-riscof-rv32
+      - name: Check CI setup helpers
+        run: python3 .github/scripts/test_ci_setup.py
+      - name: Build shared RISCOF simulator
+        shell: bash -l {0}
+        run: |
+          make -C verify riscof-classic-build-npc
+          # Follow the simulator symlink and retain executable modes. Capstone
+          # is loaded from this workspace path at runtime.
+          tar -czhf "$RUNNER_TEMP/riscof-npc.tar.gz" \
+            "sim/build/$RAPT_CONFIG-riscof/riscv32-npc-sim" \
+            nemu/tools/capstone/repo/libcapstone.so.5
+      - name: Share simulator with compliance shards
+        uses: actions/upload-artifact@v7
+        with:
+          name: riscof-npc-${{ github.sha }}
+          path: ${{ runner.temp }}/riscof-npc.tar.gz
+          retention-days: 1
+
   riscof-classic:
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
+    needs: build-riscof
+    runs-on: ubuntu-24.04
+    # Allow the compliance step to time out before the job so its logs and
+    # partial workdir can still be uploaded for diagnosis.
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
@@ -72,9 +110,21 @@ jobs:
           python-version: "3.11"
 
       - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          profile: riscof
+
+      - name: Download shared RISCOF simulator
+        uses: actions/download-artifact@v8
+        with:
+          name: riscof-npc-${{ github.sha }}
+          path: ${{ runner.temp }}
+
+      - name: Restore shared RISCOF simulator
         run: |
-          set -euo pipefail
-          ./setup.sh
+          tar -xzf "$RUNNER_TEMP/riscof-npc.tar.gz"
+          test -x "sim/build/$RAPT_CONFIG-riscof/riscv32-npc-sim"
+          test -s nemu/tools/capstone/repo/libcapstone.so.5
 
       - name: Install sail-riscv reference model
         run: |
@@ -100,13 +150,6 @@ jobs:
           set -euo pipefail
           python3 -m pip install --upgrade pip
           pip3 install git+https://github.com/riscv/riscof.git@d38859f85fe407bcacddd2efcd355ada4683aee4
-
-      - name: Build (no difftest) and MROM image
-        shell: bash -l {0}
-        run: |
-          make build-rv32
-          make -C sim -j$(nproc)
-          make -C sim/csrc/mem/mrom-data
 
       - name: Cache riscv-arch-test suite
         uses: actions/cache@v5
@@ -134,12 +177,22 @@ jobs:
           command -v riscof
           riscof --version || true
 
+      - name: Check RISCOF runner failure handling
+        run: |
+          python3 verify/scripts/test_riscof_classic_runner.py
+          python3 verify/scripts/test_riscof_classic_sail.py
+
       - name: Run classic RISCOF compliance tests
         shell: bash -l {0}
+        timeout-minutes: 180
         # Large D-extension cases exceed 45s even on local hardware.
         # Keep every test, distributing the suite across independent runners.
+        # The simulator is built once for this workflow SHA. Skip only its
+        # build prerequisite; each shard still runs its selected suite and
+        # constructs its own inexpensive MROM image.
         run: >-
-          make -C verify riscof-classic RISCOF_CLASSIC_TIMEOUT=600 JOBS=2
+          make -C verify -o riscof-classic-build-npc riscof-classic-setup riscof-classic-run
+          RISCOF_CLASSIC_TIMEOUT=600 JOBS=2
           RISCOF_CLASSIC_SHARD_INDEX=${{ matrix.shard }} RISCOF_CLASSIC_SHARD_COUNT=4
 
       - name: Diagnose missing reference signatures
@@ -187,7 +240,8 @@ jobs:
           retention-days: 7
 
   fuzztest-sigtest-and-coverage:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
     env:
       RAPTOR_HOME: ${{ github.workspace }}
       NEMU_HOME: ${{ github.workspace }}/nemu
@@ -196,21 +250,31 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Setup environment
-        run: ./setup.sh
-      - name: Build with difftest and NEMU-Ref
+        uses: ./.github/actions/setup-environment
+        with:
+          profile: sim
+          build-cache: default-coverage-rv32
+      - name: Check parallel Kconfig builds
+        run: python3 verify/scripts/test_kconfig_parallel.py
+      - name: Build NEMU-Ref
         shell: bash -l {0}
-        run: |
-          make build-rv32
-          make build-nemu32-ref
-      # - name: Random instruction fuzz tests
-      #   shell: bash -l {0}
-      #   run: make -C verify fuzz SEED=42 FUZZ_NUM=20 FUZZ_LEN=200 TIMEOUT=10
-      # - name: Signature-based ISA tests
-      #   shell: bash -l {0}
-      #   run: make -C verify sigtest TIMEOUT=10
+        # All workloads below use the isolated coverage simulator.
+        run: make build-nemu32-ref
       - name: Build with coverage instrumentation
         shell: bash -l {0}
-        run: make -C verify coverage-build
+        timeout-minutes: 90
+        run: |
+          set -euo pipefail
+          /usr/bin/time -v make -C verify coverage-build 2>&1 | tee coverage-build.log
+
+      - name: Upload coverage build log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-build-log
+          path: coverage-build.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Run fuzz + sigtest for coverage
         shell: bash -l {0}
@@ -229,7 +293,7 @@ jobs:
         run: make -C verify coverage-report COV_LINE_MIN=50.0
 
   linux-rv32-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     env:
@@ -240,14 +304,19 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Setup environment
-        run: ./setup.sh
+        uses: ./.github/actions/setup-environment
+        with:
+          profile: sim
+          build-cache: default-linux-rv32
       - name: Download pre-built Linux kernel
         shell: bash -l {0}
         run: make linux-download-rv32
       - name: Check RV32 Linux kernel entry with default difftest
         shell: bash -l {0}
+        # NPC's legacy -m/MAX_INST budget counts cycles. Stop at the checked
+        # entry marker instead of spending the remaining budget after success.
         run: |
-          make linux-boot-rv32 ARGS="-b -n" MAX_INST=40000000 \
+          make linux-boot-rv32 ARGS="-b -n --serial-exit-on='Linux version'" MAX_INST=10000000 \
             2>&1 | tee /tmp/linux-boot.log || true
       - name: Linux kernel-entry summary
         run: |
@@ -312,7 +381,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
   nemu-linux-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       RAPTOR_HOME: ${{ github.workspace }}
       NEMU_HOME: ${{ github.workspace }}/nemu
@@ -321,7 +390,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Setup environment
-        run: ./setup.sh
+        uses: ./.github/actions/setup-environment
+        with:
+          profile: nemu
       - name: Build OpenSBI
         run: make -C third_party/riscv-software-src/opensbi PLATFORM_RISCV_ISA=rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs CROSS_COMPILE=riscv64-linux-gnu- PLATFORM_RISCV_XLEN=32 PLATFORM=generic -j$(nproc)
       - name: Build NEMU (Linux config)
@@ -367,7 +438,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   litex-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       RAPTOR_HOME: ${{ github.workspace }}
@@ -375,7 +446,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Setup environment
-        run: ./setup.sh
+        uses: ./.github/actions/setup-environment
+        with:
+          profile: litex
+          build-cache: default-litex
       - name: Prepare LiteX
         shell: bash -l {0}
         run: cd fpga/litex && make setup
@@ -435,7 +509,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # litex-embench:
-  #   runs-on: ubuntu-latest
+  #   runs-on: ubuntu-24.04
   #   timeout-minutes: 120
   #   env:
   #     RAPTOR_HOME: ${{ github.workspace }}
