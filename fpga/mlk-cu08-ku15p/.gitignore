@@ -1,0 +1,10 @@
+!/build.py
+!/build.tcl
+!/constraints/*.xdc
+!/ip/*.tcl
+/build/
+*.jou
+*.log
+.Xil/
+__pycache__/
+!/board.json

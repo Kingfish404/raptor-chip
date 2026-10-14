@@ -1,3 +1,5 @@
+#include "fp_test_macros.h"
+
 .section .text
 .globl _start
 _start:
@@ -18,44 +20,38 @@ rm_dyn:
   .word 0x00107153
 
 after_dyn:
-  csrr t1, fflags
-  bnez t1, fail_flags
+  FP_CHECK_FFLAGS 0, fail_flags
 
   csrw frm, zero
 rm_static:
   .word 0x00105153
 
 after_static:
-  csrr t1, fflags
-  bnez t1, fail_flags
+  FP_CHECK_FFLAGS 0, fail_flags
 
 rm_fdiv_s_static:
   .word 0x18105153
 
 after_fdiv_s_static:
-  csrr t1, fflags
-  bnez t1, fail_flags
+  FP_CHECK_FFLAGS 0, fail_flags
 
 rm_fsqrt_s_static:
   .word 0x58005153
 
 after_fsqrt_s_static:
-  csrr t1, fflags
-  bnez t1, fail_flags
+  FP_CHECK_FFLAGS 0, fail_flags
 
 rm_fdiv_d_static:
   .word 0x1a105153
 
 after_fdiv_d_static:
-  csrr t1, fflags
-  bnez t1, fail_flags
+  FP_CHECK_FFLAGS 0, fail_flags
 
 rm_fsqrt_d_static:
   .word 0x5a005153
 
 after_fsqrt_d_static:
-  csrr t1, fflags
-  bnez t1, fail_flags
+  FP_CHECK_FFLAGS 0, fail_flags
 
   li t0, 5
   csrw frm, t0
@@ -63,37 +59,32 @@ rm_fcvt_dyn:
   .word 0xc0007353
 
 after_fcvt_dyn:
-  csrr t1, fflags
-  bnez t1, fail_flags
+  FP_CHECK_FFLAGS 0, fail_flags
 
   csrw frm, zero
 rm_fcvt_static:
   .word 0xc0005353
 
 after_fcvt_static:
-  csrr t1, fflags
-  bnez t1, fail_flags
+  FP_CHECK_FFLAGS 0, fail_flags
 
 rm_fcvt_s_d_static:
   .word 0x401050d3
 
 after_fcvt_s_d_static:
-  csrr t1, fflags
-  bnez t1, fail_flags
+  FP_CHECK_FFLAGS 0, fail_flags
 
 rm_fcvt_d_s_static:
   .word 0x420050d3
 
 after_fcvt_d_s_static:
-  csrr t1, fflags
-  bnez t1, fail_flags
+  FP_CHECK_FFLAGS 0, fail_flags
 #if __riscv_xlen == 32
 rv32_fcvt_l:
   .word 0xc0200353
 
 after_rv32_fcvt_l:
-  csrr t1, fflags
-  bnez t1, fail_flags
+  FP_CHECK_FFLAGS 0, fail_flags
   li t1, 11
 #else
   li t1, 10
@@ -200,27 +191,15 @@ advance_mepc:
   addi s0, s0, 1
   mret
 
-fail_flags:
-  li t0, 0x00100000
-  li t1, 0x00013333
-  sw t1, 0(t0)
+  FP_FAIL fail_flags, 0x00013333
 
-fail_count:
-  li t0, 0x00100000
-  li t1, 0x00023333
-  sw t1, 0(t0)
+  FP_FAIL fail_count, 0x00023333
 
-fail_cause:
-  li t0, 0x00100000
-  li t1, 0x00033333
-  sw t1, 0(t0)
+  FP_FAIL fail_cause, 0x00033333
 
 fail_tval:
   beqz t0, fail_tval_zero
   li t0, 0x00100000
   li t1, 0x00043333
   sw t1, 0(t0)
-fail_tval_zero:
-  li t0, 0x00100000
-  li t1, 0x003d3333
-  sw t1, 0(t0)
+  FP_FAIL fail_tval_zero, 0x003d3333

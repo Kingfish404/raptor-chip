@@ -27,8 +27,8 @@ Core name:  raptor-falcon (Linux-capable)
 PMP:        8 usable entries, TOR / NA4 / NAPOT, L-bit lockable
 Interrupts: CLINT (mtime, mtimecmp, msip) + PLIC (31 sources, M/S contexts)
 
-Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID; burst-capable reads (up to 8 outstanding), up to 4 posted cacheable writes with write-through L1D and no L2; other writes wait for B responses, with independent AW/W handshakes (single-beat ordinary stores, multi-beat Zicboz `CBO.ZERO`)
-Default uarch: dual issue / dual commit, ROB=32, ALQ=8 (2 issue ports), BRQ=8, MDQ=4, FPQ=8, IOQ=8, SQ=16, integer PRF=64, FPR=32 x 64-bit, L1I=16 KiB, L1D=16 KiB write-back with 4 MSHRs and 2 writeback buffers (both caches 4-way), 64 B cache lines, optional L2 passthrough/cache stage
+Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID; burst-capable reads (up to 8 outstanding); writes use independent AW/W handshakes (single-beat stores and dirty-line words, multi-beat Zicboz `CBO.ZERO`). With the default write-back L1D each bus write waits for its B response; write-through builds without L2 may post up to 4 cacheable writes (`RAPT_POSTED_WRITES`)
+Default uarch: 2-wide decode / rename / dispatch / commit, 2 integer ALU ports, ROB=32, ALQ=8, BRQ=8, MDQ=4, FPQ=8, IOQ=8, unified SQ=16, 6 completion ports, 16 branch checkpoints, integer PRF=64, FPR=32 x 64-bit, TAGE + 128-entry BTB + 16-entry RAS, L1I=16 KiB, L1D=16 KiB write-back with 4 MSHRs and 2 writeback buffers (both caches 4-way), 64 B cache lines, ITLB/DTLB=16 + shared 256-entry L2 TLB, L2 passthrough (cache in `default-l2`)
 
 Verifying:  RISCOF (riscv-arch-test), full-core F/D directed/differential tests, RVFI, SVA
 ```
@@ -41,82 +41,92 @@ See [documentation](./docs/README.md) for more details.
 
 ## Microarchitecture
 
+Sizes shown are for the `default` preset (`hdl/configs/default/rapt_config.svh`); other presets differ. See [Microarchitecture](./docs/uarch.md) for the pipeline stages and the per-block contracts.
+
 ```mermaid
 flowchart TD
-  subgraph BPU["BPU structure"]
-    direction TD
-    BTB["BTB (2-way SA, 128 entries)"]
-    PHT["PHT (2-bit, 256 entries)"]
-    RSB["RSB (16 entries)"]
-    TAGE["TAGE (default DIRP)"]
-  end
-  subgraph FE["Frontend (default decode width: 2)"]
-    BPU["BPU (TAGE/BTB/RSB)"]
-    IFU["IFU (instruction prefix + held suffix)"]
-    IDU["IDU (DecodeWidth slots)"]
-  end
-  subgraph BE["Backend (default rename/dispatch/commit widths: 2/2/2)"]
-    RNU["RNU (RenameWidth slots, integrated MAP/RAT/free bitmap + checkpoints)"]
-    RBUF["rename_pipe (2 × RenameWidth) + operand stage"]
-    ROU["ROU (UOQ 8 + ROB 32 + operand spill 16)"]
-    DPU{{"DPU dispatch router"}}
-    IEU["IEU: ALQ 8 + BRQ 8 + MDQ 4"]
-    FEU["FEU: FPQ 8 + pipelined F/D/Zfhmin"]
-    LSU["LSU: IOQ 8 + SQ 16"]
-    CDB(("CDB ×6"))
-    PRF["PRF (2 × RenameWidth reads, CompletionPorts writes; default 4R/6W)"]
-    FPR["FP rename/results + committed FPR (32 × 64-bit)"]
-    CMU["CMU (commit)"]
-    CSR
-  end
-  subgraph MEM["Memory Subsystem"]
-    direction TD
-    subgraph IMEM["I-side · synchronous SRAM with sequential pre-read"]
-      L1I["L1I 16 KiB 4-way (banked SRAM)"]
-      ITLB["ITLB (default 16 entries, FA)"]
-      IPTW["IPTW (Sv32 2-lvl / Sv39 3-lvl)"]
+  subgraph FE["rapt_frontend (decode width 2)"]
+    subgraph BPU["BPU (rapt_bpu)"]
+      direction LR
+      TAGE["TAGE DIRP: 1024 bimodal + 3 x 1024 tagged<br/>(history 8/16/64, side query for a 2nd branch)"]
+      BTB["BTB (128 entries, 2-way)"]
+      RAS["RAS (16 entries)"]
+      HIST["GHR / PHR history"]
     end
-    subgraph DMEM["D-side · registered cache access; configurable response stage"]
-      L1D["L1D 16 KiB 4-way (banked SRAM, VIPT, write-back)"]
-      DTLB["DTLB (default 16 entries, replicated load/store views)"]
-      DPTW["DPTW (Sv32/Sv39, Svade)"]
+    IFU["IFU (6-halfword L1I lookahead, held suffix)"]
+    FQU["FQU (4-entry stream queue)"]
+    IDU["IDU (DecodeWidth slots, early resteer)"]
+  end
+  subgraph BE["rapt_backend (rename / dispatch / commit 2 / 2 / 2)"]
+    RNU["RNU: RNQ 8, MAP/RAT/free bitmap,<br/>16 branch checkpoints, rename_pipe 4"]
+    OPS["operand stage (RenameWidth slots)"]
+    ROU["ROU: UOQ 8, ROB 32, operand spill 16,<br/>dispatch window 12 lanes"]
+    DPU{{"DPU (capacity-aware router, DispatchWidth)"}}
+    ALQ["ALQ 8: ALU0 (+CSR/system), ALU1"]
+    BRQ["BRQ 8: branch unit"]
+    MDQ["MDQ 4: pipelined MUL, iterative DIV"]
+    FPQ["FPQ 8: FEU (F/D/Zfhmin)"]
+    LSU["LSU: IOQ 8 + unified SQ 16"]
+    CPL(("completion x6 (N+4)<br/>+ completion stage"))
+    PRF["integer PRF 64 (4R / 6W)"]
+    FPR["FP result file + committed FPR (32 x 64-bit)"]
+    CMU["CMU (in-order commit)"]
+    CSR["CSR (M/S/U, traps, Sv32/Sv39, PMP)"]
+  end
+  subgraph MEM["rapt_memory"]
+    subgraph IMEM["I-side"]
+      L1I["L1I 16 KiB, 4-way, 64 B lines<br/>(banked SRAM, sequential pre-read)"]
+      ITLB["ITLB (16, fully associative)"]
+      IPTW["IPTW (Sv32 / Sv39)"]
     end
-    L2TLB["Shared L2 TLB (256 entries, direct-mapped)"]
-    PMPC["PMP ×8 (TOR/NA4/NAPOT): fetch + ld/st + PTW checks"]
-    BUS["BUS (mem_link arbiter, request IDs, L1D > L1I)"]
-    AXIM["AXI4 master (up to 8 reads, independent AW/W)"]
-    L2["L2 (default bypass; default-l2: 512 KiB, 8-way)"]
-    RBUF_AXI["AXI R buffer (2 entries with L2 write-back; default bypass)"]
-    RTR["cluster AXI router (1 master / 3 targets)"]
+    subgraph DMEM["D-side"]
+      L1D["L1D 16 KiB, 4-way, VIPT, write-back<br/>(4 MSHRs, 2 writeback buffers)"]
+      DTLB["DTLB (16, load/store replicas)"]
+      DPTW["DPTW (Sv32 / Sv39, Svade)"]
+    end
+    L2TLB["shared L2 TLB (256, direct-mapped)"]
+    PMPC["PMP x8 (TOR/NA4/NAPOT):<br/>fetch, load/store and PTW checks"]
+    BUS["rapt_bus (D/PTW > MSHR > L1I, request IDs)"]
+    AXIM["AXI4 master (up to 8 reads)"]
+    L2["L2 (default passthrough;<br/>default-l2: 512 KiB, 8-way)"]
+    RBUF["AXI R buffer (default-l2 only)"]
+  end
+  subgraph CLU["rapt (cluster top)"]
+    RTR["AXI router (1 master / 3 targets)"]
     CLINT["CLINT (mtime / mtimecmp / msip)"]
     PLIC["PLIC (31 sources, M/S contexts)"]
+    DBG["JTAG DTM + Debug Module"]
     EXT["off-chip AXI (memory / LiteX SoC)"]
   end
-  BPU --- IFU
-  IFU --> IDU --> RNU
-  IDU -."Early Resteer".-> IFU
-  RNU --> RBUF --> ROU --> DPU
-  DPU --> IEU & FEU & LSU
-  IEU & FEU & LSU --> CDB
-  CDB -->|"writeback + wakeup"| ROU & PRF
+  BPU <-->|"predict / update"| IFU
+  IFU --> FQU --> IDU --> RNU
+  IDU -. "resteer" .-> IFU
+  RNU --> OPS --> ROU --> DPU
+  PRF -. "operand read" .- ROU
   ROU --- FPR
+  DPU --> ALQ & BRQ & MDQ & FPQ & LSU
+  ALQ & BRQ & MDQ & FPQ & LSU --> CPL
+  CPL -->|"wakeup + writeback"| ROU & PRF & FPR
+  ALQ --- CSR
   ROU --> CMU
-  ROU -."store commit".-> LSU
-  CMU -."flush / BPU train".-> FE
-  CMU -."retirement / recovery".-> RNU
-  CSR --- IEU
-  IFU --- L1I
+  ROU -. "store commit" .-> LSU
+  BRQ -. "mispredict recovery" .-> FE
+  CMU -. "flush / redirect / BPU training" .-> FE
+  CMU -. "retire / free mappings" .-> RNU
+  IFU --> L1I
   L1I --- ITLB
-  ITLB -."miss".-> L2TLB
   LSU --> L1D
   L1D --- DTLB
-  DTLB -."miss".-> L2TLB
-  L2TLB -."I miss".-> IPTW
-  L2TLB -."D miss".-> DPTW
+  ITLB & DTLB -. "miss" .-> L2TLB
+  L2TLB -. "I miss" .-> IPTW
+  L2TLB -. "D miss" .-> DPTW
+  CSR -. "PMP / satp state" .-> PMPC
   PMPC -.-> L1I & L1D & IPTW & DPTW
   L1I & L1D & IPTW & DPTW --> BUS
-  BUS -->|mem_link| AXIM --> L2 --> RBUF_AXI --> RTR
+  BUS --> AXIM --> L2 --> RBUF --> RTR
   RTR --> CLINT & PLIC & EXT
+  CLINT & PLIC -. "interrupts" .-> CSR
+  DBG -. "halt / GPR access" .-> BE
 ```
 
 ## Setup & Quick Start
@@ -249,6 +259,10 @@ make verify-light
 ```
 
 ### 7. FPGA
+
+For a CU08-KU15P flow without LiteX/Migen, see [native board support](fpga/mlk-cu08-ku15p/README.md).
+It provides a SystemVerilog SoC, UART boot ROM, BRAM/DDR4 configurations and batch Vivado builds.
+For example: `make -C fpga/mlk-cu08-ku15p sim XLEN=64 MEMORY=bram`.
 
 For **MLK-CU08 RV32/RV64 Linux with Ethernet and BIOS `netboot`**, follow the [paired build/load quick start](fpga/litex/README.md#cu08-rv32rv64-netboot-build-and-load) and then [TFTP bundle preparation](fpga/litex/NETBOOT.md). Ethernet is **disabled by default** (`WITH_ETHERNET=0`), including Linux CPU variants. A plain build therefore does not provide BIOS `netboot`. Build and load must use the same Ethernet settings and output directory; `fpga-load` loads an existing bitstream and does not rebuild it.
 

@@ -1,11 +1,5 @@
 /* AMO fault classification, write permission and no write/rd side effects. */
-#if __riscv_xlen == 64
-#define REG_S sd
-#define SATP_MODE 0x8000000000000000
-#else
-#define REG_S sw
-#define SATP_MODE 0x80000000
-#endif
+#include "page_fault_macros.h"
 .option norvc
 .option norelax
 .section .text
@@ -41,47 +35,7 @@ _start:
    * PA and the page tables are above 0x80000000 and permitted by entry 1. */
   li t0, 0x1f08
   csrw pmpcfg0, t0
-  la s0, root
-  li t0, 0x200000cf
-#if __riscv_xlen == 64
-  sd t0, 16(s0)
-  la t0, level1
-  srli t0, t0, 2
-  ori t0, t0, 1
-  sd t0, 8(s0)
-  la t0, level0
-  srli t0, t0, 2
-  ori t0, t0, 1
-  la t1, level1
-  sd t0, 0(t1)
-#else
-  li t1, 2048
-  add t1, s0, t1
-  sw t0, 0(t1)
-  la t0, level0
-  srli t0, t0, 2
-  ori t0, t0, 1
-  sw t0, 1024(s0)
-#endif
-  la s1, level0
-  la t0, page_a
-  srli t0, t0, 2
-  ori t0, t0, 0xcf
-  REG_S t0, 0(s1)
-  la t0, page_b
-  srli t0, t0, 2
-  ori t0, t0, 0xcf
-  REG_S t0, (__riscv_xlen/8)(s1)
-  srli t0, s0, 12
-  li t1, SATP_MODE
-  or t0, t0, t1
-  csrw satp, t0
-  sfence.vma
-  li t0, 0x6800       /* FS=Dirty, MPP=S */
-  csrw mstatus, t0
-  la t0, supervisor
-  csrw mepc, t0
-  mret
+  map_two_pages_and_enter_s
 supervisor:
   la s0, page_a
   la s1, level0
@@ -140,18 +94,7 @@ next_permissions:
   ecall
   j fail
 machine_trap:
-  csrr t0, mcause
-  li t1, 9
-  beq t0, t1, pass
-  bne t0, s6, fail
-  csrr t0, mepc
-  bne t0, s8, fail
-  csrr t1, mtval
-  bne t1, s9, fail
-  addi s7, s7, 1
-  addi t0, t0, 4
-  csrw mepc, t0
-  mret
+  check_machine_page_fault
 pass:
   li a0, 0
   ebreak

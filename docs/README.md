@@ -27,13 +27,14 @@ Repository: <https://github.com/Kingfish404/raptor-chip>
 | Interrupts           | CLINT (`mtime`, `mtimecmp`, `msip`) + PLIC (31 sources, M/S contexts)                                   |
 | Ordered widths       | Decode 2 / Rename 2 / Dispatch 2 / Commit 2 by default; independently parameterized                    |
 | Integer execution    | 2 physical integer issue/ALU ports by default; CSR/system on port 0                                     |
-| Queues               | ROB 32, ALQ 8, BRQ 8, MDQ 4, FPQ 1, IOQ 8, unified SQ 16                                               |
-| Register state       | 64-entry integer PRF (including 32 architectural mappings) + 32 x 64-bit FPR bank                        |
-| Writeback            | CDB x5 (integer ports + branch + memory + MUL/DIV)                                                      |
+| Queues               | ROB 32, ALQ 8, BRQ 8, MDQ 4, FPQ 8, IOQ 8, unified SQ 16                                               |
+| Register state       | 64-entry integer PRF (including 32 architectural mappings); ROB-backed FP results + 32 x 64-bit committed FPR bank |
+| Writeback            | 6 completion ports (`N+4`: 2 integer + branch + memory + MUL/DIV + FP), registered before ROB writeback  |
 | BPU                  | TAGE direction predictor (1024 bimodal + 3 x 1024 tagged) + 2-way BTB (128) + 16-entry RAS               |
-| L1I / L1D            | 16 KiB 4-way each (64 sets x 64 B x 4), banked SRAM; L1D write-through                                    |
-| L2                   | Default bypass; `default-l2` enables 512 KiB, eight ways with L1D write-back                           |
-| Bus                  | AXI4, XLEN-bit data/addr, 4-bit ID; up to 8 reads; up to 4 posted cacheable writes without L2, otherwise one (ordinary stores single-beat; CBO.ZERO multi-beat) |
+| L1I / L1D            | 16 KiB 4-way each (64 sets x 64 B x 4), banked SRAM; L1D write-back with 4 MSHRs and 2 writeback buffers   |
+| TLB                  | ITLB 16, DTLB 16 (load/store replicas); shared 256-entry direct-mapped L2 TLB; Sv32/Sv39 PTWs            |
+| L2                   | Default passthrough; `default-l2` enables a 512 KiB, eight-way inclusive L2 with write-back              |
+| Bus                  | AXI4, XLEN-bit data/addr, 4-bit ID; up to 8 reads; one B-synchronous write with the default write-back L1D (write-through builds without L2 may post up to 4); stores single-beat, CBO.ZERO multi-beat |
 | Debug                | RISC-V Debug Module / JTAG DTM bring-up ports at cluster top                                            |
 | Verification         | Difftest against NEMU; RVFI/riscv-formal; SVA                                                           |
 
@@ -72,8 +73,8 @@ raptor-chip/
 |   |-- rapt_core.sv      single-hart CPU body
 |   |-- rapt_pkg.sv       core configuration and shared types
 |   |-- frontend/         IFU, FQU, IDU, RNU, BPU, CSR
-|   |-- backend/          PRF, ROU, DPU, IEU, FEU, LSU, CMU
-|   |-- memory/           L1I/L1D, optional L2, TLB, PTW, AXI4 bus
+|   |-- backend/          PRF, ROU, DPU, IEU, FEU, LSU, CMU; standalone VPU (vpu/)
+|   |-- memory/           L1I/L1D, optional L2, TLB/L2 TLB, PTW, PMP, AXI4 bus
 |   |-- common/           stream queue, issue/rank selectors
 |   |-- sram/             1RW/2RW SRAM wrappers (behavioral or macro)
 |   |-- configs/          microarchitecture presets (rapt_config.svh)
@@ -84,8 +85,10 @@ raptor-chip/
 |-- sim/                  NPC Verilator simulator
 |-- lspd/                 synthesis/PPA flow and non-product HDL wrappers
 |-- abstract-machine/     AM runtime (nanos-lite, navy-apps)
+|-- app/                  bare-metal tests, benchmarks, riscv-pk apps
+|-- verify/               testbenches, formal, RISCOF, fuzzing
 |-- linux/                Linux kernel build scripts
-|-- fpga/                 FPGA integration (Gowin Tang Nano 20K, LiteX)
+|-- fpga/                 FPGA integration (LiteX boards, Gowin Tang Nano 20K, OOC partitions)
 `-- docs/                 documentation (this directory)
 ```
 

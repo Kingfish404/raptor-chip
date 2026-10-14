@@ -24,7 +24,7 @@ sim-build-isolation-check: ## Check build-local Kconfig and non-destructive mode
 	python3 "$(VERIFY_HOME)/scripts/test_sim_build_isolation.py"
 
 # Tool-free unit tests for helper scripts that have no dedicated check target.
-SCRIPT_UNITTESTS := test_config_macro_check test_closeout_config_check test_litex_sdcard_linux_override \
+SCRIPT_UNITTESTS := test_config_macro_check test_fp_test_makefile test_closeout_config_check test_litex_sdcard_linux_override \
 	test_lrsc_constrained_progress test_lrsc_trace_check test_run_act4 \
 	test_sta_summary_status test_subsystem_build_cache
 
@@ -2134,7 +2134,8 @@ verilator-tlb-flush-asid:
 # unless a per-case RVA22S64_TEST_SOURCE override below says otherwise.
 RVA22S64_CASES := \
 	amo-access-fault amo-minmax amo-page-fault atomic-pma bare-mode-switch bit-xlen-legality \
-	branch-sq-forward bus-read-error bus-write-error clint-mtime-shared clint-mtime-write \
+	branch-sq-forward btb-amo-slot-reuse btb-exception-slot-reuse \
+	bus-read-error bus-write-error cycle-counter clint-mtime-shared clint-mtime-write \
 	clint-subword clint-subword-msip clint-subword-time clint-subword-write clint-width \
 	clint-word-irq compressed-register-legality compressed-zero-immediate csr-architectural \
 	data-span fence-i-self-modify fp-ooo fp-context fp-page-nested-irq fp-page-retry fp-privilege \
@@ -2156,6 +2157,24 @@ rva22s64-directed: ## Run every directed RVA22S64 case for RVA22S64_XLEN (skips 
 	@$(MAKE) --no-print-directory -k $(if $(filter 32,$(RVA22S64_XLEN)),$(filter-out $(RVA22S64_RV64_CASES:%=rva22s64-%-run),$(RVA22S64_CASE_TARGETS)),$(RVA22S64_CASE_TARGETS))
 # Shared guest sources keep separate named scenarios and output directories.
 RVA22S64_TEST_SOURCE ?= $(subst -,_,$(patsubst rva22s64-%-run,%,$@))
+rva22s64-clint-mtime-shared-run: RVA22S64_TEST_SOURCE = clint_mtime_write
+rva22s64-clint-mtime-shared-run: RVA22S64_CASE_CPPFLAGS = -DCHECK_CSR_TIME=1
+rva22s64-fp-page-nested-irq-run: RVA22S64_TEST_SOURCE = fp_page_retry
+rva22s64-fp-page-nested-irq-run: RVA22S64_CASE_CPPFLAGS = -DFP_PAGE_NESTED_IRQ=1
+rva22s64-svinval-page-retry-run: RVA22S64_TEST_SOURCE = fp_page_retry
+rva22s64-svinval-page-retry-run: RVA22S64_CASE_CPPFLAGS = -DFP_PAGE_SINVAL=1
+rva22s64-load-pmp-float-run: RVA22S64_TEST_SOURCE = load_pmp_footprint
+rva22s64-load-pmp-float-run: RVA22S64_CASE_CPPFLAGS = -DPMP_TEST_FP=1
+rva22s64-load-pmp-translated-float-run: RVA22S64_TEST_SOURCE = load_pmp_translated
+rva22s64-load-pmp-translated-float-run: RVA22S64_CASE_CPPFLAGS = -DPMP_TEST_FP=1
+rva22s64-lrsc-exact-extent-run: RVA22S64_TEST_SOURCE = lrsc_reservation
+rva22s64-lrsc-exact-extent-run: RVA22S64_CASE_CPPFLAGS = -DREQUIRE_EXACT_LR_EXTENT=1
+rva22s64-ptw-pma-run: RVA22S64_TEST_SOURCE = ptw_pmp_span
+rva22s64-ptw-pma-run: RVA22S64_CASE_CPPFLAGS = -DPTW_PMA_TEST=1
+rva22s64-split-page-permissions-run: RVA22S64_TEST_SOURCE = split_page_fault
+rva22s64-split-page-permissions-run: RVA22S64_CASE_CPPFLAGS = -DSPLIT_EXEC_ONLY=1
+rva22s64-store-cross-page-run: RVA22S64_TEST_SOURCE = split_page_fault
+rva22s64-store-cross-page-run: RVA22S64_CASE_CPPFLAGS = -DCROSS_PAGE_ONLY=1
 rva22s64-readonly-pma-run: RVA22S64_TEST_SOURCE = zero_pma
 rva22s64-readonly-pma-run: RVA22S64_CASE_CPPFLAGS = -DPMA_READONLY=1
 rva22s64-plic-completion-context-run rva22s64-plic-completion-id-run: RVA22S64_TEST_SOURCE = plic_contract

@@ -1,0 +1,4 @@
+!/scripts/*.py
+!/scripts/*.tcl
+!/tests/test_*.py
+__pycache__/

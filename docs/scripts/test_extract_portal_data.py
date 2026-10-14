@@ -243,7 +243,7 @@ class LiveRepoTest(unittest.TestCase):
         self.assertEqual(data["config"]["values"]["l1d_kib"], 16)
         self.assertEqual(data["config"]["values"]["phys_regs"], 64)
         self.assertEqual(data["config"]["values"]["fetch_response_stage"], 0)
-        self.assertEqual(data["config"]["values"]["steer_scan_entries"], 16)
+        self.assertEqual(data["config"]["values"]["steer_scan_entries"], 12)
         self.assertEqual(data["config"]["values"]["operand_spill_entries"], 16)
         self.assertEqual(data["config"]["values"]["uoq_entries"], 8)
         self.assertEqual(data["config"]["values"]["store_follower"], 1)
@@ -267,7 +267,7 @@ class LiveRepoTest(unittest.TestCase):
         self.assertIn("rapt_ifu", display)
         self.assertTrue(display <= {n["id"] for n in data["graph"]["nodes"]})
         self.assertEqual(data["config"]["values"]["brq_entries"], 8)
-        self.assertEqual(data["config"]["values"]["fpq_entries"], 1)
+        self.assertEqual(data["config"]["values"]["fpq_entries"], 8)
         inst = {(e["from"], e["to"]) for e in data["graph"]["instance_edges"]}
         self.assertIn(("rapt", "rapt_core"), inst)
         self.assertIn(("rapt_core", "rapt_frontend"), inst)

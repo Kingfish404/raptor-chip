@@ -1,0 +1,13 @@
+{
+  "part": "xcku15p-ffva1156-2-e",
+  "top": "rapt_cu08_top",
+  "bitstream": "rapt_cu08.bit",
+  "device": "xcku15p",
+  "ddr_clock_port": "clk100_ddr_p",
+  "reference_hz": 100000000,
+  "ddr_part": "MT40A512M16HA-083E",
+  "ddr_rtl": "rapt_cu08_ddr.sv",
+  "compatible": "raptor,cu08-native",
+  "model": "Raptor native MLK-CU08-KU15P",
+  "banner": "CU08"
+}

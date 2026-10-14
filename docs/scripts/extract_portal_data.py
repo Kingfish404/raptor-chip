@@ -408,6 +408,15 @@ def parse_defines_ifdef(text: str, predef: set[str] | None = None) -> dict[str, 
     return macros
 
 
+def has_top_level_question(expr: str) -> bool:
+    depth = 0
+    for char in expr:
+        depth += (char == "(") - (char == ")")
+        if depth == 0 and char == "?":
+            return True
+    return False
+
+
 def eval_simple_int(expr: str, env: dict[str, Any]) -> int | None:
     """Resolve integer constants and the small expression subset used in presets.
 
@@ -443,6 +452,27 @@ def eval_simple_int(expr: str, env: dict[str, Any]) -> int | None:
         if condition is None:
             return None
         return eval_simple_int(expr[question + 1:colon] if condition else expr[colon + 1:], env)
+    # Derived defaults nest a conditional inside parentheses; fold each such
+    # group to its value before the arithmetic parse.
+    folded, i = [], 0
+    while i < len(expr):
+        if expr[i] == "(":
+            depth = 0
+            for j in range(i, len(expr)):
+                depth += (expr[j] == "(") - (expr[j] == ")")
+                if depth == 0:
+                    break
+            inner = expr[i + 1:j]
+            if depth == 0 and has_top_level_question(inner):
+                value = eval_simple_int(inner, env)
+                if value is None:
+                    return None
+                folded.append(str(value))
+                i = j + 1
+                continue
+        folded.append(expr[i])
+        i += 1
+    expr = "".join(folded)
     def macro(match):
         value = eval_simple_int(match[0], env)
         return str(value) if value is not None else "unknown"
@@ -537,7 +567,7 @@ def collect_config(repo: Path) -> dict[str, Any]:
             "rnq_entries": ival("RAPT_RIQ_SIZE"),
             "uoq_entries": ival("RAPT_IIQ_SIZE"),
             "operand_spill_entries": ival("RAPT_OPERAND_SPILL_ENTRIES"),
-            "store_follower": ival("RAPT_ROU_STORE_FOLLOWER", default=0),
+            "store_follower": 1,  # unconditional since RAPT_ROU_STORE_FOLLOWER was removed
             "load_response_stage": ival("RAPT_IOQ_LOAD_RESPONSE_STAGE", default=0),
             "cache_line_bytes": line,
             "l1i_kib": cache_kib(l1i_len, l1i_ways, line),

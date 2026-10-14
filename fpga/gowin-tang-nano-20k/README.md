@@ -1,7 +1,9 @@
 # Tang Nano 20K (Gowin GW2AR-18) RISC-V
 
-This is the legacy Tang Nano example. Run its commands from
-`fpga/gowin-tang-nano-20k/`; the maintained Raptor SoC flow is [LiteX](../litex/README.md).
+This archived Tang Nano example is no longer an active board target. Native
+board support targets [CU08-KU15P](../mlk-cu08-ku15p/README.md); the separate
+[LiteX integration](../litex/README.md) remains available. Historical commands
+below are relative to `fpga/gowin-tang-nano-20k/`.
 
 ## Hardware
 - __[Tango Nano 20K-Aliexpress](https://www.aliexpress.com/item/1005005581148230.html)__ (38.77 $) or [Tang Nano 20K FPGA-淘宝网](https://item.taobao.com/item.htm?id=717932028073) (169 RMB)

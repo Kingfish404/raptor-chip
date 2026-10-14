@@ -1,3 +1,5 @@
+#include "fp_test_macros.h"
+
 .section .text
 .globl _start
 _start:
@@ -15,8 +17,7 @@ _start:
   lw t1, 0(t0)
   bnez t1, fail_add
   lw t1, 4(t0)
-  li t2, 0x40080000
-  bne t1, t2, fail_add
+  FP_CHECK_T1 0x40080000, fail_add
 
   fsub.d ft3, ft2, ft0
   la t0, result_sub
@@ -24,8 +25,7 @@ _start:
   lw t1, 0(t0)
   bnez t1, fail_sub
   lw t1, 4(t0)
-  li t2, 0x40000000
-  bne t1, t2, fail_sub
+  FP_CHECK_T1 0x40000000, fail_sub
 
   fmul.d ft4, ft3, ft1
   la t0, result_mul
@@ -33,27 +33,17 @@ _start:
   lw t1, 0(t0)
   bnez t1, fail_mul
   lw t1, 4(t0)
-  li t2, 0x40100000
-  bne t1, t2, fail_mul
+  FP_CHECK_T1 0x40100000, fail_mul
 
   li t0, 0x00100000
   li t1, 0x5555
   sw t1, 0(t0)
 
-fail_add:
-  li t0, 0x00100000
-  li t1, 0x00013333
-  sw t1, 0(t0)
+  FP_FAIL fail_add, 0x00013333
 
-fail_sub:
-  li t0, 0x00100000
-  li t1, 0x00023333
-  sw t1, 0(t0)
+  FP_FAIL fail_sub, 0x00023333
 
-fail_mul:
-  li t0, 0x00100000
-  li t1, 0x00033333
-  sw t1, 0(t0)
+  FP_FAIL fail_mul, 0x00033333
 
 .section .data
 .align 3

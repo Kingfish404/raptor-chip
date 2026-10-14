@@ -43,8 +43,8 @@
         "verify/xsim/tb_lsu_all_contract.sv",
         "app/tests/baremetal/load_pmp_footprint.S",
         "app/tests/baremetal/load_pmp_translated.S",
-        "app/tests/baremetal/load_pmp_float.S",
-        "app/tests/baremetal/load_pmp_translated_float.S",
+        "app/tests/baremetal/load_pmp_footprint.S (PMP_TEST_FP=1)",
+        "app/tests/baremetal/load_pmp_translated.S (PMP_TEST_FP=1)",
         "verify/xsim/tb_lsu_all_contract.sv",
         "verify/xsim/tb_l1d_all_contract.sv",
         "verify/xsim/tb_ptw_all_contract.sv",
@@ -172,7 +172,7 @@
         "Recovery159: eight current-source RV32/RV64 decoder/ALU targets pass (M opcode-space legality in M/S/U, bit-immediate/REV8 legality, independent assembled arithmetic vectors, native/compressed ZEXT.H XLEN checks). Relevant production files match recovery128 frozen core. Source snapshot and 212-member archive verified, SHA256 750c5f5313e05b1b8f2a8deb53b0c1743c72c7d463eb94731ee8f47e0eec6f69. Component evidence only; no renewed full extension acceptance.",
         "Recovery160: 36 frozen recovery128 RV32/RV64 core runs pass for M/S/U arithmetic edges, bit XLEN legality and native/compressed ZEXT.H at delay 0/63 seed42. Two actual MULDIV/MDQ fixture targets pass flush/reuse/wakeup/word checks (fixture MDQ size4). Relevant production sources match parent frozen core. 302-member archive verified, SHA256 1e49e2258377592f74ef20823f1e742d97c981ebe9e7b0dd419ff76391f994cf. Supplemental evidence; full extension acceptance not renewed.",
         "Recovery158 complete: 53 freshly generated local ACT4 RV64 M/Zba/Zbb/Zbs tests (13/8/24/8) with fixed unchanged Sail 0.13.1; 212 generation tasks and 106 frozen recovery128 DUT runs pass (delay0/63 seed42). Final audit checks exact selected IDs, image/ELF/log hashes, terminal summaries/finisher and all Sail signature words versus self-check constants. Generated test sources absent from upstream HEAD; exact local hashes retained, no upstream release identity claim. 630-member archive verified, SHA256 a1473456193435cc81f5ca7c0767fda172432f352b9f3c38fecd0b9c0057dd88. Combined recovery159/160 restore component/privilege/completion evidence; complete clause reacceptance remains a separate review.",
-        "Recovery161 renews frozen recovery128 M/Zba/Zbb/Zbs acceptance with recoverable recovery158–160 evidence and clause/source/dependency audit. Historical bases retained; current L1D and IOQ differ from frozen core and are excluded from this result."
+        "Recovery161 renews frozen recovery128 M/Zba/Zbb/Zbs acceptance with recoverable recovery158\u2013160 evidence and clause/source/dependency audit. Historical bases retained; current L1D and IOQ differ from frozen core and are excluded from this result."
       ],
       "historical_acceptance_bases": [
         {
@@ -240,7 +240,7 @@
         "Recovery159: eight current-source RV32/RV64 decoder/ALU targets pass (M opcode-space legality in M/S/U, bit-immediate/REV8 legality, independent assembled arithmetic vectors, native/compressed ZEXT.H XLEN checks). Relevant production files match recovery128 frozen core. Source snapshot and 212-member archive verified, SHA256 750c5f5313e05b1b8f2a8deb53b0c1743c72c7d463eb94731ee8f47e0eec6f69. Component evidence only; no renewed full extension acceptance.",
         "Recovery160: 36 frozen recovery128 RV32/RV64 core runs pass for M/S/U arithmetic edges, bit XLEN legality and native/compressed ZEXT.H at delay 0/63 seed42. Two actual MULDIV/MDQ fixture targets pass flush/reuse/wakeup/word checks (fixture MDQ size4). Relevant production sources match parent frozen core. 302-member archive verified, SHA256 1e49e2258377592f74ef20823f1e742d97c981ebe9e7b0dd419ff76391f994cf. Supplemental evidence; full extension acceptance not renewed.",
         "Recovery158 complete: 53 freshly generated local ACT4 RV64 M/Zba/Zbb/Zbs tests (13/8/24/8) with fixed unchanged Sail 0.13.1; 212 generation tasks and 106 frozen recovery128 DUT runs pass (delay0/63 seed42). Final audit checks exact selected IDs, image/ELF/log hashes, terminal summaries/finisher and all Sail signature words versus self-check constants. Generated test sources absent from upstream HEAD; exact local hashes retained, no upstream release identity claim. 630-member archive verified, SHA256 a1473456193435cc81f5ca7c0767fda172432f352b9f3c38fecd0b9c0057dd88. Combined recovery159/160 restore component/privilege/completion evidence; complete clause reacceptance remains a separate review.",
-        "Recovery161 renews frozen recovery128 M/Zba/Zbb/Zbs acceptance with recoverable recovery158–160 evidence and clause/source/dependency audit. Historical bases retained; current L1D and IOQ differ from frozen core and are excluded from this result."
+        "Recovery161 renews frozen recovery128 M/Zba/Zbb/Zbs acceptance with recoverable recovery158\u2013160 evidence and clause/source/dependency audit. Historical bases retained; current L1D and IOQ differ from frozen core and are excluded from this result."
       ],
       "historical_acceptance_bases": [
         {
@@ -311,7 +311,7 @@
         "Recovery159: eight current-source RV32/RV64 decoder/ALU targets pass (M opcode-space legality in M/S/U, bit-immediate/REV8 legality, independent assembled arithmetic vectors, native/compressed ZEXT.H XLEN checks). Relevant production files match recovery128 frozen core. Source snapshot and 212-member archive verified, SHA256 750c5f5313e05b1b8f2a8deb53b0c1743c72c7d463eb94731ee8f47e0eec6f69. Component evidence only; no renewed full extension acceptance.",
         "Recovery160: 36 frozen recovery128 RV32/RV64 core runs pass for M/S/U arithmetic edges, bit XLEN legality and native/compressed ZEXT.H at delay 0/63 seed42. Two actual MULDIV/MDQ fixture targets pass flush/reuse/wakeup/word checks (fixture MDQ size4). Relevant production sources match parent frozen core. 302-member archive verified, SHA256 1e49e2258377592f74ef20823f1e742d97c981ebe9e7b0dd419ff76391f994cf. Supplemental evidence; full extension acceptance not renewed.",
         "Recovery158 complete: 53 freshly generated local ACT4 RV64 M/Zba/Zbb/Zbs tests (13/8/24/8) with fixed unchanged Sail 0.13.1; 212 generation tasks and 106 frozen recovery128 DUT runs pass (delay0/63 seed42). Final audit checks exact selected IDs, image/ELF/log hashes, terminal summaries/finisher and all Sail signature words versus self-check constants. Generated test sources absent from upstream HEAD; exact local hashes retained, no upstream release identity claim. 630-member archive verified, SHA256 a1473456193435cc81f5ca7c0767fda172432f352b9f3c38fecd0b9c0057dd88. Combined recovery159/160 restore component/privilege/completion evidence; complete clause reacceptance remains a separate review.",
-        "Recovery161 renews frozen recovery128 M/Zba/Zbb/Zbs acceptance with recoverable recovery158–160 evidence and clause/source/dependency audit. Historical bases retained; current L1D and IOQ differ from frozen core and are excluded from this result."
+        "Recovery161 renews frozen recovery128 M/Zba/Zbb/Zbs acceptance with recoverable recovery158\u2013160 evidence and clause/source/dependency audit. Historical bases retained; current L1D and IOQ differ from frozen core and are excluded from this result."
       ],
       "historical_acceptance_bases": [
         {
@@ -375,7 +375,7 @@
         "Recovery159: eight current-source RV32/RV64 decoder/ALU targets pass (M opcode-space legality in M/S/U, bit-immediate/REV8 legality, independent assembled arithmetic vectors, native/compressed ZEXT.H XLEN checks). Relevant production files match recovery128 frozen core. Source snapshot and 212-member archive verified, SHA256 750c5f5313e05b1b8f2a8deb53b0c1743c72c7d463eb94731ee8f47e0eec6f69. Component evidence only; no renewed full extension acceptance.",
         "Recovery160: 36 frozen recovery128 RV32/RV64 core runs pass for M/S/U arithmetic edges, bit XLEN legality and native/compressed ZEXT.H at delay 0/63 seed42. Two actual MULDIV/MDQ fixture targets pass flush/reuse/wakeup/word checks (fixture MDQ size4). Relevant production sources match parent frozen core. 302-member archive verified, SHA256 1e49e2258377592f74ef20823f1e742d97c981ebe9e7b0dd419ff76391f994cf. Supplemental evidence; full extension acceptance not renewed.",
         "Recovery158 complete: 53 freshly generated local ACT4 RV64 M/Zba/Zbb/Zbs tests (13/8/24/8) with fixed unchanged Sail 0.13.1; 212 generation tasks and 106 frozen recovery128 DUT runs pass (delay0/63 seed42). Final audit checks exact selected IDs, image/ELF/log hashes, terminal summaries/finisher and all Sail signature words versus self-check constants. Generated test sources absent from upstream HEAD; exact local hashes retained, no upstream release identity claim. 630-member archive verified, SHA256 a1473456193435cc81f5ca7c0767fda172432f352b9f3c38fecd0b9c0057dd88. Combined recovery159/160 restore component/privilege/completion evidence; complete clause reacceptance remains a separate review.",
-        "Recovery161 renews frozen recovery128 M/Zba/Zbb/Zbs acceptance with recoverable recovery158–160 evidence and clause/source/dependency audit. Historical bases retained; current L1D and IOQ differ from frozen core and are excluded from this result."
+        "Recovery161 renews frozen recovery128 M/Zba/Zbb/Zbs acceptance with recoverable recovery158\u2013160 evidence and clause/source/dependency audit. Historical bases retained; current L1D and IOQ differ from frozen core and are excluded from this result."
       ],
       "historical_acceptance_bases": [
         {
@@ -461,7 +461,7 @@
         "app/tests/baremetal/lrsc_reservation.S",
         "app/tests/baremetal/lrsc_virtio_dma.S",
         "app/tests/baremetal/lrsc_sv39_alias.S",
-        "app/tests/baremetal/lrsc_exact_extent.S",
+        "app/tests/baremetal/lrsc_reservation.S (REQUIRE_EXACT_LR_EXTENT=1)",
         "app/tests/baremetal/lrsc_misaligned.S",
         "verify/xsim/tb_ioq_all_contract.sv",
         "verify/xsim/tb_lsu_all_contract.sv",
@@ -504,7 +504,7 @@
       "acceptance": "open",
       "remaining_gates": [
         "Complete independent final-source A selection and permissions/fault-priority audit; aq/rl and memory-model checks; eventuality below.",
-        "Complete external-platform notification contracts and eventual progress. Phase72–74 translated aliases and reservation geometry evidence remains scoped to its frozen configurations.",
+        "Complete external-platform notification contracts and eventual progress. Phase72\u201374 translated aliases and reservation geometry evidence remains scoped to its frozen configurations.",
         "Continue AMO/SC acquire through store drain, release versus older stores, FENCE/FENCE.TSO and external observation per docs.agent/isa/rva22s64/memory-order-review.md.",
         "Phase79 composition correction: ROU flushes every atomic at commit. IOQ publication diagnostics alone are not architectural failures; evaluate replay and post-commit pending SQ writes before adding acquire constraints or claiming phase77 blocker necessary.",
         "Phase91: unmodified historical Sail Zaamo 18/18 and Zalrsc 3/4; SC.D test 241 fails at LR.W->SC.D with DUT=1/reference=0. Experimental exact-reservation Sail Zalrsc 4/4 is separate evidence, not an upstream pass. Complete A/PMA/order/eventuality remain open.",
@@ -843,7 +843,7 @@
         "app/tests/baremetal/fp_half_negative_offset.S",
         "verify/xsim/tb_zfhmin_decode_slot.sv",
         "verify/xsim/fpu/half/tb_flush.sv",
-        "app/tests/baremetal/fp_half_fault_state.S",
+        "app/tests/baremetal/fp_fault_state.S (FP_FAULT_HALF=1)",
         "verify/xsim/tb_rou_fp_irq_boundary.svh",
         "verify/xsim/tb_rou_fp_irq_compose.svh",
         "verify/formal/formal_dispatch_admit.sv",
@@ -1009,7 +1009,7 @@
         "verify/xsim/tb_counter_permissions.sv",
         "app/tests/baremetal/counter_permissions.S",
         "app/tests/baremetal/instret_exceptions.S",
-        "app/tests/baremetal/clint_mtime_shared.S",
+        "app/tests/baremetal/clint_mtime_write.S (CHECK_CSR_TIME=1)",
         "verify/xsim/tb_csr_all_contract.sv",
         "verify/xsim/tb_csr_all_contract.sv",
         "verify/xsim/tb_csr_all_contract.sv",
@@ -1224,7 +1224,7 @@
         "verify/xsim/tb_counter_permissions.sv",
         "app/tests/baremetal/counter_permissions.S",
         "app/tests/baremetal/clint_mtime_write.S",
-        "app/tests/baremetal/clint_mtime_shared.S",
+        "app/tests/baremetal/clint_mtime_write.S (CHECK_CSR_TIME=1)",
         "app/tests/baremetal/instret_exceptions.S",
         "verify/xsim/tb_idu_contract.sv",
         "verify/xsim/tb_csr_all_contract.sv"
@@ -1516,7 +1516,6 @@
         "verify/xsim/tb_lsu_all_contract.sv",
         "verify/xsim/tb_l1d_all_contract.sv",
         "verify/formal/formal_pma_capabilities.sv",
-        "verify/scripts/pma_capabilities_check.py",
         "verify/xsim/tb_csr_all_contract.sv"
       ],
       "evidence_manifests": [
@@ -1551,7 +1550,6 @@
       ],
       "tests": [
         "verify/formal/formal_pma_capabilities.sv",
-        "verify/scripts/pma_capabilities_check.py",
         "verify/xsim/tb_lsu_all_contract.sv"
       ],
       "evidence_manifests": [
@@ -1652,9 +1650,7 @@
       ],
       "tests": [
         "verify/formal/formal_pma_capabilities.sv",
-        "verify/scripts/pma_capabilities_check.py",
         "verify/formal/formal_ifetch_word_atomic.sv",
-        "verify/scripts/ifetch_word_atomic_check.py",
         "verify/xsim/tb_l1i_data_integrity.sv",
         "app/tests/baremetal/ifetch_atomic_word.S",
         "verify/formal/formal_npc_read_stability.sv",
@@ -1692,8 +1688,7 @@
       ],
       "tests": [
         "app/tests/baremetal/atomic_pma.S",
-        "verify/formal/formal_pma_capabilities.sv",
-        "verify/scripts/pma_capabilities_check.py"
+        "verify/formal/formal_pma_capabilities.sv"
       ],
       "evidence_manifests": [
         "build/rva22s64/evidence/phase122-final-manifest.json"
@@ -1719,7 +1714,7 @@
         "hdl/memory/rapt_l1d.sv"
       ],
       "tests": [
-        "app/tests/baremetal/store_cross_page.S",
+        "app/tests/baremetal/split_page_fault.S (CROSS_PAGE_ONLY=1)",
         "app/tests/baremetal/fp_page_retry.S",
         "app/tests/baremetal/store_overlap.S",
         "app/tests/baremetal/store_overlap_widths.S",
@@ -1729,13 +1724,12 @@
         "verify/xsim/tb_lsu_all_contract.sv",
         "app/tests/baremetal/load_pmp_footprint.S",
         "app/tests/baremetal/load_pmp_translated.S",
-        "app/tests/baremetal/load_pmp_float.S",
-        "app/tests/baremetal/load_pmp_translated_float.S",
+        "app/tests/baremetal/load_pmp_footprint.S (PMP_TEST_FP=1)",
+        "app/tests/baremetal/load_pmp_translated.S (PMP_TEST_FP=1)",
         "verify/xsim/tb_lsu_all_contract.sv",
         "verify/xsim/tb_l1d_all_contract.sv",
         "verify/xsim/tb_ptw_all_contract.sv",
-        "verify/formal/formal_pma_capabilities.sv",
-        "verify/scripts/pma_capabilities_check.py"
+        "verify/formal/formal_pma_capabilities.sv"
       ],
       "evidence_manifests": [
         "/tmp/raptor-rva22s64-phase49/final-manifest.json",
@@ -1856,7 +1850,7 @@
       "tests": [
         "app/tests/baremetal/lrsc_reservation.S",
         "app/tests/baremetal/lrsc_sv39_alias.S",
-        "app/tests/baremetal/lrsc_exact_extent.S",
+        "app/tests/baremetal/lrsc_reservation.S (REQUIRE_EXACT_LR_EXTENT=1)",
         "app/tests/baremetal/lrsc_misaligned.S"
       ],
       "evidence_manifests": [
@@ -1881,7 +1875,7 @@
         "spec_clause": "RVA22 v1.0 6.1.1.2 Za64rs, inherited by 6.1.2.2",
         "scope": "phase74 frozen RV64/default single hart Bare/Sv39 Svade L2-off; phase75 declaration-only update and recorded declaration-order source drift",
         "review": "docs.agent/isa/rva22s64/za64rs-review.md",
-        "basis": "Structural review of every reservation establishment path plus frozen phase72–74 geometry/alignment/alias evidence. Exact contiguous naturally aligned 4/8-byte sets. Not full A or progress acceptance.",
+        "basis": "Structural review of every reservation establishment path plus frozen phase72\u201374 geometry/alignment/alias evidence. Exact contiguous naturally aligned 4/8-byte sets. Not full A or progress acceptance.",
         "invalidation_rule": "Reaudit LR decode/width, SQ alignment/splitting, translation low bits, reservation establishment/storage/containment and target configuration changes."
       },
       "notes": []
@@ -1899,8 +1893,8 @@
         "app/tests/baremetal/csr_architectural.S",
         "app/tests/baremetal/load_pmp_footprint.S",
         "app/tests/baremetal/load_pmp_translated.S",
-        "app/tests/baremetal/load_pmp_float.S",
-        "app/tests/baremetal/load_pmp_translated_float.S",
+        "app/tests/baremetal/load_pmp_footprint.S (PMP_TEST_FP=1)",
+        "app/tests/baremetal/load_pmp_translated.S (PMP_TEST_FP=1)",
         "verify/xsim/tb_lsu_all_contract.sv",
         "verify/xsim/tb_l1d_all_contract.sv",
         "verify/xsim/tb_ptw_all_contract.sv",
@@ -1908,7 +1902,7 @@
         "verify/xsim/tb_csr_all_contract.sv",
         "app/tests/baremetal/instret_exceptions.S",
         "app/tests/baremetal/counter_permissions.S",
-        "app/tests/baremetal/clint_mtime_shared.S",
+        "app/tests/baremetal/clint_mtime_write.S (CHECK_CSR_TIME=1)",
         "verify/xsim/tb_csr_all_contract.sv",
         "verify/xsim/tb_counter_permissions.sv",
         "verify/xsim/tb_csr_all_contract.sv",
@@ -2105,8 +2099,8 @@
         "app/tests/baremetal/bare_mode_switch.S",
         "app/tests/baremetal/load_pmp_footprint.S",
         "app/tests/baremetal/load_pmp_translated.S",
-        "app/tests/baremetal/load_pmp_float.S",
-        "app/tests/baremetal/load_pmp_translated_float.S",
+        "app/tests/baremetal/load_pmp_footprint.S (PMP_TEST_FP=1)",
+        "app/tests/baremetal/load_pmp_translated.S (PMP_TEST_FP=1)",
         "verify/xsim/tb_lsu_all_contract.sv",
         "verify/xsim/tb_l1d_all_contract.sv",
         "verify/xsim/tb_ptw_all_contract.sv",
@@ -2192,7 +2186,7 @@
       ],
       "tests": [
         "app/tests/baremetal/fp_page_retry.S",
-        "app/tests/baremetal/fp_page_nested_irq.S",
+        "app/tests/baremetal/fp_page_retry.S (FP_PAGE_NESTED_IRQ=1)",
         "app/tests/baremetal/sstvala_sv39.S",
         "app/tests/baremetal/svade_repair_retry.S",
         "verify/xsim/tb_ptw_all_contract.sv",
@@ -2261,7 +2255,6 @@
       "tests": [
         "app/tests/baremetal/ptw_pmp_span.S",
         "verify/formal/formal_pma_capabilities.sv",
-        "verify/scripts/pma_capabilities_check.py",
         "verify/xsim/tb_pmp_endpoint.sv",
         "verify/xsim/tb_ptw_all_contract.sv",
         "app/tests/baremetal/ifetch_cross_page.S",
@@ -2517,7 +2510,7 @@
       ],
       "tests": [
         "verify/xsim/tb_idu_contract.sv",
-        "app/tests/baremetal/svinval_page_retry.S",
+        "app/tests/baremetal/fp_page_retry.S (FP_PAGE_SINVAL=1)",
         "app/tests/baremetal/ifetch_mapping_replace.S",
         "app/tests/baremetal/ifetch_asid_recycle.S",
         "verify/xsim/tb_ptw_all_contract.sv",

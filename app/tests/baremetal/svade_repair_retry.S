@@ -4,14 +4,7 @@
 .option norelax
 .section .text
 .globl _start
-.macro leaf_flags flags
-  la t0, page
-  srli t0, t0, 2
-  ori t0, t0, \flags
-  la t1, level0
-  sd t0, 0(t1)
-  sfence.vma
-.endm
+#include "supervisor_trap_macros.h"
 .macro prepare cause, flags, address
   leaf_flags \flags
   mv s5, t0
@@ -24,47 +17,7 @@
   bne s6, s7, fail
 .endm
 _start:
-  la t0, fail
-  csrw mtvec, t0
-  csrw mie, zero
-  li t0, -1
-  csrw pmpaddr0, t0
-  li t0, 0x1f
-  csrw pmpcfg0, t0
-  li t0, 0xb3ff
-  csrw medeleg, t0
-  la t0, supervisor_trap
-  csrw stvec, t0
-  la t0, root
-  li t1, 0xcf
-  sd t1, 0(t0)
-  li t1, 0x200000cf
-  sd t1, 16(t0)
-  la t1, level1
-  srli t1, t1, 2
-  ori t1, t1, 1
-  sd t1, 8(t0)
-  la t0, level1
-  la t1, level0
-  srli t1, t1, 2
-  ori t1, t1, 1
-  sd t1, 0(t0)
-  leaf_flags 0xcf
-  la t0, root
-  srli t0, t0, 12
-  li t1, (8 << 60)
-  or t0, t0, t1
-  csrw satp, t0
-  csrr t1, satp
-  bne t0, t1, fail
-  sfence.vma
-  la t0, supervisor
-  csrw mepc, t0
-  li t0, 0x800
-  csrw mstatus, t0
-  li s6, 0
-  li s7, 0
-  mret
+  enter_sv39_supervisor
 supervisor:
   li a0, 0x40000040
   li a1, 0x12345678

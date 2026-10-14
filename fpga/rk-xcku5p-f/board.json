@@ -1,0 +1,13 @@
+{
+  "part": "xcku5p-ffvb676-2-i",
+  "top": "rapt_rk_top",
+  "bitstream": "rapt_rk.bit",
+  "device": "xcku5p",
+  "ddr_clock_port": "sys_clk_p",
+  "reference_hz": 200000000,
+  "ddr_part": "MT40A512M16LY-075",
+  "ddr_rtl": "rapt_rk_ddr.sv",
+  "compatible": "raptor,rk-xcku5p-f-native",
+  "model": "Raptor native RK-XCKU5P-F V1.2",
+  "banner": "RK-XCKU5P-F"
+}

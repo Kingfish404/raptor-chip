@@ -1,3 +1,5 @@
+#include "fp_test_macros.h"
+
 .section .text
 .globl _start
 _start:
@@ -39,29 +41,24 @@ after_fs_off:
   csrs mstatus, t0
 
   fmv.x.w t1, ft0
-  li t2, 0x3f800000
-  bne t1, t2, fail_flw_side_effect
+  FP_CHECK_T1 0x3f800000, fail_flw_side_effect
 
   la t0, result_d
   fsd ft1, 0(t0)
   lw t1, 0(t0)
   bnez t1, fail_fld_side_effect
   lw t1, 4(t0)
-  li t2, 0x3ff00000
-  bne t1, t2, fail_fld_side_effect
+  FP_CHECK_T1 0x3ff00000, fail_fld_side_effect
 
   la t0, store_s
   lw t1, 0(t0)
-  li t2, 0x11223344
-  bne t1, t2, fail_fsw_side_effect
+  FP_CHECK_T1 0x11223344, fail_fsw_side_effect
 
   la t0, store_d
   lw t1, 0(t0)
-  li t2, 0x55667788
-  bne t1, t2, fail_fsd_side_effect
+  FP_CHECK_T1 0x55667788, fail_fsd_side_effect
   lw t1, 4(t0)
-  li t2, 0x11223344
-  bne t1, t2, fail_fsd_side_effect
+  FP_CHECK_T1 0x11223344, fail_fsd_side_effect
 
   li t0, 0x00100000
   li t1, 0x5555
@@ -80,40 +77,19 @@ trap_handler:
   addi s0, s0, 1
   mret
 
-fail_trap_count:
-  li t0, 0x00100000
-  li t1, 0x00013333
-  sw t1, 0(t0)
+  FP_FAIL fail_trap_count, 0x00013333
 
-fail_flw_side_effect:
-  li t0, 0x00100000
-  li t1, 0x00023333
-  sw t1, 0(t0)
+  FP_FAIL fail_flw_side_effect, 0x00023333
 
-fail_fld_side_effect:
-  li t0, 0x00100000
-  li t1, 0x00033333
-  sw t1, 0(t0)
+  FP_FAIL fail_fld_side_effect, 0x00033333
 
-fail_fsw_side_effect:
-  li t0, 0x00100000
-  li t1, 0x00043333
-  sw t1, 0(t0)
+  FP_FAIL fail_fsw_side_effect, 0x00043333
 
-fail_fsd_side_effect:
-  li t0, 0x00100000
-  li t1, 0x00053333
-  sw t1, 0(t0)
+  FP_FAIL fail_fsd_side_effect, 0x00053333
 
-fail_cause:
-  li t0, 0x00100000
-  li t1, 0x00063333
-  sw t1, 0(t0)
+  FP_FAIL fail_cause, 0x00063333
 
-fail_tval:
-  li t0, 0x00100000
-  li t1, 0x00073333
-  sw t1, 0(t0)
+  FP_FAIL fail_tval, 0x00073333
 
 .section .data
 .align 3

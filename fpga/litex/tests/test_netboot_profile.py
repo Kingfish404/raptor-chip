@@ -148,8 +148,7 @@ class NetbootProfileTest(unittest.TestCase):
                 self.assertEqual(settings["SYS_CLK"], "50000000")
                 self.assertEqual(settings["RAPT_CONFIG"], "default")
                 self.assertEqual(settings["RAPT_PACK_VFLAGS"],
-                                 "-DRAPT_FETCH_RESPONSE_STAGE=1 -DRAPT_IOQ_LOAD_RESPONSE_STAGE=1"
-                                 if xlen == 64 else "")
+                                 "-DRAPT_FETCH_RESPONSE_STAGE=0" if xlen == 64 else "")
                 self.assertIn(f"/rv{xlen}/soc", settings["FPGA_DIR"])
 
     def test_paths_and_fixed_settings(self):

@@ -775,11 +775,13 @@ linux-boot-rv32-ckpt-load: build-nemu32-ref build-rv32-linux ## Resume Linux boo
 # ============================================================================
 # FPGA Targets
 # ============================================================================
-fpga-syn: ## Synthesize for Gowin Tang Nano 20K
-	$(MAKE) -C $(RAPTOR_HOME)/fpga/gowin-tang-nano-20k syn
+FPGA_BOARD ?= mlk-cu08-ku15p
 
-fpga-pnr: ## Place and route for FPGA
-	$(MAKE) -C $(RAPTOR_HOME)/fpga/gowin-tang-nano-20k pnr
+fpga-syn: ## Synthesize the selected native FPGA board
+	$(MAKE) -C $(RAPTOR_HOME)/fpga/$(FPGA_BOARD) synth
+
+fpga-pnr: ## Build and timing-check the selected native FPGA board
+	$(MAKE) -C $(RAPTOR_HOME)/fpga/$(FPGA_BOARD) build
 
 # ============================================================================
 # Utilities

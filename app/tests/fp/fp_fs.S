@@ -1,3 +1,5 @@
+#include "fp_test_macros.h"
+
 .section .text
 .globl _start
 _start:
@@ -47,27 +49,12 @@ trap_handler:
   addi s0, s0, 1
   mret
 
-fail_trap_count:
-  li t0, 0x00100000
-  li t1, 0x00013333
-  sw t1, 0(t0)
+  FP_FAIL fail_trap_count, 0x00013333
 
-fail_fp_dirty:
-  li t0, 0x00100000
-  li t1, 0x00023333
-  sw t1, 0(t0)
+  FP_FAIL fail_fp_dirty, 0x00023333
 
-fail_csr_dirty:
-  li t0, 0x00100000
-  li t1, 0x00033333
-  sw t1, 0(t0)
+  FP_FAIL fail_csr_dirty, 0x00033333
 
-fail_cause:
-  li t0, 0x00100000
-  li t1, 0x00043333
-  sw t1, 0(t0)
+  FP_FAIL fail_cause, 0x00043333
 
-fail_tval:
-  li t0, 0x00100000
-  li t1, 0x00053333
-  sw t1, 0(t0)
+  FP_FAIL fail_tval, 0x00053333

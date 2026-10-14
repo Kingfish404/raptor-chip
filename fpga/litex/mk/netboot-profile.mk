@@ -56,9 +56,9 @@ $(filter fpga-netboot-rv32-%,$(_nb_targets)): _nb_xlen := 32
 $(filter fpga-netboot-rv64-%,$(_nb_targets)): _nb_xlen := 64
 _nb_dir = $(_nb_root)/rv$(_nb_xlen)
 _nb_payload = $(NETBOOT_PAYLOAD_RV$(_nb_xlen))
-# W4 matches the performance-tested fetch pipeline and selects its completion
-# boundary in the preset. Other RV64 presets retain both response registers.
-_nb_rv64_pack_flags = $(if $(filter default-w4,$(RAPT_CONFIG)),-DRAPT_FETCH_RESPONSE_STAGE=0,-DRAPT_FETCH_RESPONSE_STAGE=1 -DRAPT_IOQ_LOAD_RESPONSE_STAGE=1)
+# RV64 presets use the performance-tested fetch pipeline and take the IOQ
+# load boundary from the preset.
+_nb_rv64_pack_flags = -DRAPT_FETCH_RESPONSE_STAGE=0
 _nb_setup_margin = $(if $(and $(filter 64,$(_nb_xlen)),$(filter default-w4,$(RAPT_CONFIG))),1.0,0)
 _nb_final_wns = $(if $(and $(filter 64,$(_nb_xlen)),$(filter default-w4,$(RAPT_CONFIG))),0.3,)
 _nb_args = $(call _nb_fixed,FPGA_BOARD,mlk_cu08_ku15p) $(call _nb_fixed,FPGA_AUTO_DETECT,0) $(call _nb_fixed,VARIANT,linux$(_nb_xlen)) \

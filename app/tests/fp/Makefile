@@ -67,340 +67,55 @@ run: fp-config $(BIN)
 	cd $(NEMU_HOME) && ./build/$$(basename $(NEMU_BIN)) -b -n \
 		--log=$(LOG) $(if $(filter 1,$(DIFFTEST)),--diff=$(SPIKE_SO),) $(BIN)
 
-arith: fp-config
-	$(MAKE) -C $(NEMU_HOME) $(NEMU_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(MARCH) -mabi=$(MABI) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_arith_$(ISA).elf fp_arith.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_arith_$(ISA).elf $(BUILD_DIR)/fp_arith_$(ISA).bin
-	cd $(NEMU_HOME) && ./build/$$(basename $(NEMU_BIN)) -b -n \
-		--log=$(BUILD_DIR)/fp_arith_$(ISA).nemu.log $(BUILD_DIR)/fp_arith_$(ISA).bin
+# Shared build/run recipes; each row preserves the source and F/D ISA choice.
+FP_D_MARCH = $(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc)
+FP_D_MABI = $(if $(filter rv32,$(ISA)),ilp32d,lp64d)
+FP_F_RUNNER = ./build/$$(basename $(NEMU_BIN))
+FP_D_RUNNER = ./build/$(if $(filter rv32,$(ISA)),riscv32-nemu-interpreter,riscv64-nemu-interpreter)
+FP_IMAGE = $(BUILD_DIR)/fp_$(subst -,_,$(1))_$(ISA)
 
-arith-spike: fp-config
-	$(MAKE) -C $(NEMU_HOME) $(NEMU_SPIKE_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	$(MAKE) -C $(NEMU_HOME)/tools/spike-diff \
-		CONFIG_RV64=$(SPIKE_RV64) GUEST_ISA=riscv -j$$(nproc)
+# $(1): source stem, $(2): F or D. Expand at recipe execution time.
+define FP_COMPILE
 	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(MARCH) -mabi=$(MABI) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_arith_$(ISA).elf fp_arith.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_arith_$(ISA).elf $(BUILD_DIR)/fp_arith_$(ISA).bin
-	cd $(NEMU_HOME) && ./build/$$(basename $(NEMU_BIN)) -b -n \
-		--diff=$(SPIKE_SO) $(BUILD_DIR)/fp_arith_$(ISA).bin
+	$(CC) -march=$(if $(filter D,$(2)),$(FP_D_MARCH),$(MARCH)) \
+		-mabi=$(if $(filter D,$(2)),$(FP_D_MABI),$(MABI)) -nostdlib -nostartfiles \
+		-T $(LINKER) -o $(call FP_IMAGE,$(1)).elf fp_$(subst -,_,$(1)).S
+	$(OBJCOPY) -O binary $(call FP_IMAGE,$(1)).elf $(call FP_IMAGE,$(1)).bin
+endef
 
-fcsr: fp-config
-	$(MAKE) -C $(NEMU_HOME) $(NEMU_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(MARCH) -mabi=$(MABI) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_fcsr_$(ISA).elf fp_fcsr.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_fcsr_$(ISA).elf $(BUILD_DIR)/fp_fcsr_$(ISA).bin
-	cd $(NEMU_HOME) && ./build/$$(basename $(NEMU_BIN)) -b -n \
-		$(BUILD_DIR)/fp_fcsr_$(ISA).bin
+# $(1): target, $(2): source stem, $(3): F/D, $(4): spike or log (optional).
+define FP_NEMU_TEST
+$(1): fp-config
+	$$(MAKE) -C $$(NEMU_HOME) $$(if $$(filter spike,$(4)),$$(NEMU_SPIKE_DEFCONFIG),$$(NEMU_DEFCONFIG))
+	$$(MAKE) -C $$(NEMU_HOME) -j$$$$(nproc)
+	$$(if $$(filter spike,$(4)),$$(MAKE) -C $$(NEMU_HOME)/tools/spike-diff CONFIG_RV64=$$(SPIKE_RV64) GUEST_ISA=riscv -j$$$$(nproc))
+	$$(call FP_COMPILE,$(2),$(3))
+	cd $$(NEMU_HOME) && $$(FP_$(3)_RUNNER) -b -n \
+		$$(if $$(filter spike,$(4)),--diff=$$(SPIKE_SO),$$(if $$(filter log,$(4)),--log=$$(call FP_IMAGE,$(2)).nemu.log)) $$(call FP_IMAGE,$(2)).bin
+endef
 
-fcsr-spike: fp-config
-	$(MAKE) -C $(NEMU_HOME) $(NEMU_SPIKE_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	$(MAKE) -C $(NEMU_HOME)/tools/spike-diff \
-		CONFIG_RV64=$(SPIKE_RV64) GUEST_ISA=riscv -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(MARCH) -mabi=$(MABI) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_fcsr_$(ISA).elf fp_fcsr.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_fcsr_$(ISA).elf $(BUILD_DIR)/fp_fcsr_$(ISA).bin
-	cd $(NEMU_HOME) && ./build/$$(basename $(NEMU_BIN)) -b -n \
-		--diff=$(SPIKE_SO) $(BUILD_DIR)/fp_fcsr_$(ISA).bin
+# $(1): source stem, $(2): compiler F/D, $(3): NEMU reference F/D.
+# rm-illegal deliberately uses the F compiler flags and D reference profile.
+define FP_NPC_TEST
+npc-$(1):
+	$$(MAKE) -C $$(NEMU_HOME) $$(NPC_NEMU_$(3)_DEFCONFIG)
+	$$(MAKE) -C $$(NEMU_HOME) -j$$$$(nproc)
+	$$(call FP_COMPILE,$(1),$(2))
+	$$(MAKE) -C $$(SIM_HOME) run NPROC=$$(NPC_NPROC) \
+		VFLAGS='$$(NPC_VFLAGS)' DIFF_REF_SO='-d $$(NPC_DIFF_REF_SO)' \
+		IMG=$$(call FP_IMAGE,$(1)).bin ARGS='$$(NPC_ARGS)'
+endef
 
-rm-illegal-spike: fp-config
-	$(MAKE) -C $(NEMU_HOME) $(NEMU_SPIKE_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	$(MAKE) -C $(NEMU_HOME)/tools/spike-diff \
-		CONFIG_RV64=$(SPIKE_RV64) GUEST_ISA=riscv -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(MARCH) -mabi=$(MABI) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_rm_illegal_$(ISA).elf fp_rm_illegal.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_rm_illegal_$(ISA).elf $(BUILD_DIR)/fp_rm_illegal_$(ISA).bin
-	cd $(NEMU_HOME) && ./build/$$(basename $(NEMU_BIN)) -b -n \
-		--diff=$(SPIKE_SO) $(BUILD_DIR)/fp_rm_illegal_$(ISA).bin
-
-fs-spike: fp-config
-	$(MAKE) -C $(NEMU_HOME) $(NEMU_SPIKE_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	$(MAKE) -C $(NEMU_HOME)/tools/spike-diff \
-		CONFIG_RV64=$(SPIKE_RV64) GUEST_ISA=riscv -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(MARCH) -mabi=$(MABI) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_fs_$(ISA).elf fp_fs.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_fs_$(ISA).elf $(BUILD_DIR)/fp_fs_$(ISA).bin
-	cd $(NEMU_HOME) && ./build/$$(basename $(NEMU_BIN)) -b -n \
-		--diff=$(SPIKE_SO) $(BUILD_DIR)/fp_fs_$(ISA).bin
-
-fs-mem-spike: fp-config
-	$(MAKE) -C $(NEMU_HOME) $(NEMU_SPIKE_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	$(MAKE) -C $(NEMU_HOME)/tools/spike-diff \
-		CONFIG_RV64=$(SPIKE_RV64) GUEST_ISA=riscv -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
-		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_fs_mem_$(ISA).elf fp_fs_mem.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_fs_mem_$(ISA).elf $(BUILD_DIR)/fp_fs_mem_$(ISA).bin
-	cd $(NEMU_HOME) && ./build/$(if $(filter rv32,$(ISA)),riscv32-nemu-interpreter,riscv64-nemu-interpreter) \
-		-b -n --diff=$(SPIKE_SO) $(BUILD_DIR)/fp_fs_mem_$(ISA).bin
-
-compressed-mem-spike: fp-config
-	$(MAKE) -C $(NEMU_HOME) $(NEMU_SPIKE_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	$(MAKE) -C $(NEMU_HOME)/tools/spike-diff \
-		CONFIG_RV64=$(SPIKE_RV64) GUEST_ISA=riscv -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
-		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_compressed_mem_$(ISA).elf fp_compressed_mem.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_compressed_mem_$(ISA).elf $(BUILD_DIR)/fp_compressed_mem_$(ISA).bin
-	cd $(NEMU_HOME) && ./build/$(if $(filter rv32,$(ISA)),riscv32-nemu-interpreter,riscv64-nemu-interpreter) \
-		-b -n --diff=$(SPIKE_SO) $(BUILD_DIR)/fp_compressed_mem_$(ISA).bin
-
-d-arith: fp-config
-	$(MAKE) -C $(NEMU_HOME) $(NEMU_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
-		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_d_arith_$(ISA).elf fp_d_arith.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_d_arith_$(ISA).elf $(BUILD_DIR)/fp_d_arith_$(ISA).bin
-	cd $(NEMU_HOME) && ./build/$(if $(filter rv32,$(ISA)),riscv32-nemu-interpreter,riscv64-nemu-interpreter) \
-		-b -n $(BUILD_DIR)/fp_d_arith_$(ISA).bin
-
-d-arith-spike: fp-config
-	$(MAKE) -C $(NEMU_HOME) $(NEMU_SPIKE_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	$(MAKE) -C $(NEMU_HOME)/tools/spike-diff \
-		CONFIG_RV64=$(SPIKE_RV64) GUEST_ISA=riscv -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
-		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_d_arith_$(ISA).elf fp_d_arith.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_d_arith_$(ISA).elf $(BUILD_DIR)/fp_d_arith_$(ISA).bin
-	cd $(NEMU_HOME) && ./build/$(if $(filter rv32,$(ISA)),riscv32-nemu-interpreter,riscv64-nemu-interpreter) \
-		-b -n --diff=$(SPIKE_SO) $(BUILD_DIR)/fp_d_arith_$(ISA).bin
-
-minmax-spike: fp-config
-	$(MAKE) -C $(NEMU_HOME) $(NEMU_SPIKE_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	$(MAKE) -C $(NEMU_HOME)/tools/spike-diff \
-		CONFIG_RV64=$(SPIKE_RV64) GUEST_ISA=riscv -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
-		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_minmax_$(ISA).elf fp_minmax.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_minmax_$(ISA).elf $(BUILD_DIR)/fp_minmax_$(ISA).bin
-	cd $(NEMU_HOME) && ./build/$(if $(filter rv32,$(ISA)),riscv32-nemu-interpreter,riscv64-nemu-interpreter) \
-		-b -n --diff=$(SPIKE_SO) $(BUILD_DIR)/fp_minmax_$(ISA).bin
-
-compare-spike: fp-config
-	$(MAKE) -C $(NEMU_HOME) $(NEMU_SPIKE_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	$(MAKE) -C $(NEMU_HOME)/tools/spike-diff \
-		CONFIG_RV64=$(SPIKE_RV64) GUEST_ISA=riscv -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
-		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_compare_$(ISA).elf fp_compare.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_compare_$(ISA).elf $(BUILD_DIR)/fp_compare_$(ISA).bin
-	cd $(NEMU_HOME) && ./build/$(if $(filter rv32,$(ISA)),riscv32-nemu-interpreter,riscv64-nemu-interpreter) \
-		-b -n --diff=$(SPIKE_SO) $(BUILD_DIR)/fp_compare_$(ISA).bin
-
-convert-spike: fp-config
-	$(MAKE) -C $(NEMU_HOME) $(NEMU_SPIKE_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	$(MAKE) -C $(NEMU_HOME)/tools/spike-diff \
-		CONFIG_RV64=$(SPIKE_RV64) GUEST_ISA=riscv -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
-		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_convert_$(ISA).elf fp_convert.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_convert_$(ISA).elf $(BUILD_DIR)/fp_convert_$(ISA).bin
-	cd $(NEMU_HOME) && ./build/$(if $(filter rv32,$(ISA)),riscv32-nemu-interpreter,riscv64-nemu-interpreter) \
-		-b -n --diff=$(SPIKE_SO) $(BUILD_DIR)/fp_convert_$(ISA).bin
-
-fma-spike: fp-config
-	$(MAKE) -C $(NEMU_HOME) $(NEMU_SPIKE_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	$(MAKE) -C $(NEMU_HOME)/tools/spike-diff \
-		CONFIG_RV64=$(SPIKE_RV64) GUEST_ISA=riscv -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
-		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_fma_$(ISA).elf fp_fma.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_fma_$(ISA).elf $(BUILD_DIR)/fp_fma_$(ISA).bin
-	cd $(NEMU_HOME) && ./build/$(if $(filter rv32,$(ISA)),riscv32-nemu-interpreter,riscv64-nemu-interpreter) \
-		-b -n --diff=$(SPIKE_SO) $(BUILD_DIR)/fp_fma_$(ISA).bin
-
-divsqrt-spike: fp-config
-	$(MAKE) -C $(NEMU_HOME) $(NEMU_SPIKE_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	$(MAKE) -C $(NEMU_HOME)/tools/spike-diff \
-		CONFIG_RV64=$(SPIKE_RV64) GUEST_ISA=riscv -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
-		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_divsqrt_$(ISA).elf fp_divsqrt.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_divsqrt_$(ISA).elf $(BUILD_DIR)/fp_divsqrt_$(ISA).bin
-	cd $(NEMU_HOME) && ./build/$(if $(filter rv32,$(ISA)),riscv32-nemu-interpreter,riscv64-nemu-interpreter) \
-		-b -n --diff=$(SPIKE_SO) $(BUILD_DIR)/fp_divsqrt_$(ISA).bin
-
-npc-arith:
-	$(MAKE) -C $(NEMU_HOME) $(NPC_NEMU_F_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(MARCH) -mabi=$(MABI) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_arith_$(ISA).elf fp_arith.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_arith_$(ISA).elf $(BUILD_DIR)/fp_arith_$(ISA).bin
-	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
-		VFLAGS='$(NPC_VFLAGS)' \
-		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
-		IMG=$(BUILD_DIR)/fp_arith_$(ISA).bin ARGS='$(NPC_ARGS)'
-
-npc-fcsr:
-	$(MAKE) -C $(NEMU_HOME) $(NPC_NEMU_F_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(MARCH) -mabi=$(MABI) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_fcsr_$(ISA).elf fp_fcsr.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_fcsr_$(ISA).elf $(BUILD_DIR)/fp_fcsr_$(ISA).bin
-	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
-		VFLAGS='$(NPC_VFLAGS)' \
-		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
-		IMG=$(BUILD_DIR)/fp_fcsr_$(ISA).bin ARGS='$(NPC_ARGS)'
-
-npc-rm-illegal:
-	$(MAKE) -C $(NEMU_HOME) $(NPC_NEMU_D_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(MARCH) -mabi=$(MABI) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_rm_illegal_$(ISA).elf fp_rm_illegal.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_rm_illegal_$(ISA).elf $(BUILD_DIR)/fp_rm_illegal_$(ISA).bin
-	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
-		VFLAGS='$(NPC_VFLAGS)' \
-		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
-		IMG=$(BUILD_DIR)/fp_rm_illegal_$(ISA).bin ARGS='$(NPC_ARGS)'
-
-npc-fs:
-	$(MAKE) -C $(NEMU_HOME) $(NPC_NEMU_F_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(MARCH) -mabi=$(MABI) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_fs_$(ISA).elf fp_fs.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_fs_$(ISA).elf $(BUILD_DIR)/fp_fs_$(ISA).bin
-	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
-		VFLAGS='$(NPC_VFLAGS)' \
-		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
-		IMG=$(BUILD_DIR)/fp_fs_$(ISA).bin ARGS='$(NPC_ARGS)'
-
-npc-fs-mem:
-	$(MAKE) -C $(NEMU_HOME) $(NPC_NEMU_D_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
-		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_fs_mem_$(ISA).elf fp_fs_mem.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_fs_mem_$(ISA).elf $(BUILD_DIR)/fp_fs_mem_$(ISA).bin
-	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
-		VFLAGS='$(NPC_VFLAGS)' \
-		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
-		IMG=$(BUILD_DIR)/fp_fs_mem_$(ISA).bin ARGS='$(NPC_ARGS)'
-
-npc-compressed-mem:
-	$(MAKE) -C $(NEMU_HOME) $(NPC_NEMU_D_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
-		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_compressed_mem_$(ISA).elf fp_compressed_mem.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_compressed_mem_$(ISA).elf $(BUILD_DIR)/fp_compressed_mem_$(ISA).bin
-	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
-		VFLAGS='$(NPC_VFLAGS)' \
-		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
-		IMG=$(BUILD_DIR)/fp_compressed_mem_$(ISA).bin ARGS='$(NPC_ARGS)'
-
-npc-d-arith:
-	$(MAKE) -C $(NEMU_HOME) $(NPC_NEMU_D_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
-		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_d_arith_$(ISA).elf fp_d_arith.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_d_arith_$(ISA).elf $(BUILD_DIR)/fp_d_arith_$(ISA).bin
-	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
-		VFLAGS='$(NPC_VFLAGS)' \
-		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
-		IMG=$(BUILD_DIR)/fp_d_arith_$(ISA).bin ARGS='$(NPC_ARGS)'
-
-npc-minmax:
-	$(MAKE) -C $(NEMU_HOME) $(NPC_NEMU_D_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
-		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_minmax_$(ISA).elf fp_minmax.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_minmax_$(ISA).elf $(BUILD_DIR)/fp_minmax_$(ISA).bin
-	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
-		VFLAGS='$(NPC_VFLAGS)' \
-		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
-		IMG=$(BUILD_DIR)/fp_minmax_$(ISA).bin ARGS='$(NPC_ARGS)'
-
-npc-compare:
-	$(MAKE) -C $(NEMU_HOME) $(NPC_NEMU_D_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
-		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_compare_$(ISA).elf fp_compare.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_compare_$(ISA).elf $(BUILD_DIR)/fp_compare_$(ISA).bin
-	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
-		VFLAGS='$(NPC_VFLAGS)' \
-		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
-		IMG=$(BUILD_DIR)/fp_compare_$(ISA).bin ARGS='$(NPC_ARGS)'
-
-npc-convert:
-	$(MAKE) -C $(NEMU_HOME) $(NPC_NEMU_D_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
-		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_convert_$(ISA).elf fp_convert.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_convert_$(ISA).elf $(BUILD_DIR)/fp_convert_$(ISA).bin
-	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
-		VFLAGS='$(NPC_VFLAGS)' \
-		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
-		IMG=$(BUILD_DIR)/fp_convert_$(ISA).bin ARGS='$(NPC_ARGS)'
-
-npc-fma:
-	$(MAKE) -C $(NEMU_HOME) $(NPC_NEMU_D_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
-		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_fma_$(ISA).elf fp_fma.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_fma_$(ISA).elf $(BUILD_DIR)/fp_fma_$(ISA).bin
-	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
-		VFLAGS='$(NPC_VFLAGS)' \
-		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
-		IMG=$(BUILD_DIR)/fp_fma_$(ISA).bin ARGS='$(NPC_ARGS)'
-
-npc-divsqrt:
-	$(MAKE) -C $(NEMU_HOME) $(NPC_NEMU_D_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
-		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_divsqrt_$(ISA).elf fp_divsqrt.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_divsqrt_$(ISA).elf $(BUILD_DIR)/fp_divsqrt_$(ISA).bin
-	$(MAKE) -C $(SIM_HOME) run NPROC=$(NPC_NPROC) \
-		VFLAGS='$(NPC_VFLAGS)' \
-		DIFF_REF_SO='-d $(NPC_DIFF_REF_SO)' \
-		IMG=$(BUILD_DIR)/fp_divsqrt_$(ISA).bin ARGS='$(NPC_ARGS)'
+$(eval $(call FP_NEMU_TEST,arith,arith,F,log))
+$(eval $(call FP_NEMU_TEST,fcsr,fcsr,F))
+# Compatibility entry point after merging fp_double.S into fp_d_arith.S.
+double: d-arith
+$(foreach test,d-arith double-unaligned,$(eval $(call FP_NEMU_TEST,$(test),$(test),D)))
+$(foreach test,arith fcsr rm-illegal fs,$(eval $(call FP_NEMU_TEST,$(test)-spike,$(test),F,spike)))
+$(foreach test,fs-mem compressed-mem d-arith minmax compare convert fma divsqrt,$(eval $(call FP_NEMU_TEST,$(test)-spike,$(test),D,spike)))
+$(foreach test,arith fcsr fs,$(eval $(call FP_NPC_TEST,$(test),F,F)))
+$(eval $(call FP_NPC_TEST,rm-illegal,F,D))
+$(foreach test,fs-mem compressed-mem d-arith minmax compare convert fma divsqrt,$(eval $(call FP_NPC_TEST,$(test),D,D)))
 
 npc-coverage:
 	mkdir -p $(BUILD_DIR)
@@ -437,28 +152,6 @@ npc-matrix:
 	$(MAKE) ISA=rv64 NPC_NPROC=$(NPC_NPROC) NPC_ARGS='$(NPC_ARGS)' npc-fs
 	$(MAKE) ISA=rv64 NPC_NPROC=$(NPC_NPROC) NPC_ARGS='$(NPC_ARGS)' npc-fs-mem
 	$(MAKE) ISA=rv64 NPC_NPROC=$(NPC_NPROC) NPC_ARGS='$(NPC_ARGS)' npc-compressed-mem
-
-double: fp-config
-	$(MAKE) -C $(NEMU_HOME) $(NEMU_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
-		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_double_$(ISA).elf fp_double.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_double_$(ISA).elf $(BUILD_DIR)/fp_double_$(ISA).bin
-	cd $(NEMU_HOME) && ./build/$(if $(filter rv32,$(ISA)),riscv32-nemu-interpreter,riscv64-nemu-interpreter) \
-		-b -n $(BUILD_DIR)/fp_double_$(ISA).bin
-
-double-unaligned: fp-config
-	$(MAKE) -C $(NEMU_HOME) $(NEMU_DEFCONFIG)
-	$(MAKE) -C $(NEMU_HOME) -j$$(nproc)
-	mkdir -p $(BUILD_DIR)
-	$(CC) -march=$(if $(filter rv32,$(ISA)),rv32imafdc,rv64imafdc) \
-		-mabi=$(if $(filter rv32,$(ISA)),ilp32d,lp64d) -nostdlib -nostartfiles \
-		-T $(LINKER) -o $(BUILD_DIR)/fp_double_unaligned_$(ISA).elf fp_double_unaligned.S
-	$(OBJCOPY) -O binary $(BUILD_DIR)/fp_double_unaligned_$(ISA).elf $(BUILD_DIR)/fp_double_unaligned_$(ISA).bin
-	cd $(NEMU_HOME) && ./build/$(if $(filter rv32,$(ISA)),riscv32-nemu-interpreter,riscv64-nemu-interpreter) \
-		-b -n $(BUILD_DIR)/fp_double_unaligned_$(ISA).bin
 
 clean:
 	rm -f $(ELF) $(BIN) $(LOG) $(BUILD_DIR)/fp_moves_rv32.elf \

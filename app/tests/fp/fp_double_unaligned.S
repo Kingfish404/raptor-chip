@@ -1,3 +1,5 @@
+#include "fp_test_macros.h"
+
 .macro TEST_BYTES ptr, fail_label
   lbu t2, 0(\ptr)
   li t3, 0x88
@@ -64,25 +66,13 @@ _start:
   li t1, 0x5555
   sw t1, 0(t0)
 
-fail_first:
-  li t0, 0x00100000
-  li t1, 0x00013333
-  sw t1, 0(t0)
+  FP_FAIL fail_first, 0x00013333
 
-fail_second:
-  li t0, 0x00100000
-  li t1, 0x00014333
-  sw t1, 0(t0)
+  FP_FAIL fail_second, 0x00014333
 
-fail_third:
-  li t0, 0x00100000
-  li t1, 0x00015333
-  sw t1, 0(t0)
+  FP_FAIL fail_third, 0x00015333
 
-fail_fld:
-  li t0, 0x00100000
-  li t1, 0x00023333
-  sw t1, 0(t0)
+  FP_FAIL fail_fld, 0x00023333
 
 .section .data
 .align 3
