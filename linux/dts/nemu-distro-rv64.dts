@@ -1,0 +1,28 @@
+/include/ "spike-rv64gc-nemu.dts"
+
+/ {
+    model = "Raptor NEMU RV64GC distribution boot";
+    chosen {
+        bootargs = "console=ttyS0,115200 earlycon=sbi root=/dev/vda rw rootwait init=/sbin/init unaligned_scalar_speed=fast random.trust_bootloader=on systemd.show_status=yes";
+    };
+    memory@80000000 {
+        reg = <0 0x80000000 0 0x40000000>;
+    };
+    poweroff {
+        compatible = "syscon-poweroff";
+        regmap = <&nemu_test>;
+        offset = <0>;
+        value = <0x5555>;
+    };
+    soc {
+        nemu_test: test@100000 {
+            compatible = "sifive,test1", "sifive,test0", "syscon";
+        };
+        virtio_blk@10001000 {
+            compatible = "virtio,mmio";
+            reg = <0 0x10001000 0 0x1000>;
+            interrupt-parent = <&plic0>;
+            interrupts = <1>;
+        };
+    };
+};

@@ -1,18 +1,20 @@
 name: Benchmark (AM + bare metal + pk + ysyxSoC + random memory)
 
 # Combined performance / functional benchmark workflow:
-#   - rv-benchmark                   : AM benchmarks + RV32/RV32E CPU tests
-#   - app-pk-coremark                 : pk-hosted hello + CoreMark
-#   - app-pk-embench                  : pk/MMU-hosted Embench-IoT suite
-#   - app-baremetal-embench           : bare-metal Embench-IoT suite
-#   - ysyxsoc-benchmark              : ysyxSoC benchmarks + CPU tests
-#   - sim-random-memory              : RV32/RV64 random AXI memory delays
-# STA / PPA evaluation lives in the dedicated `sta.yaml` workflow.
+#   - prepare-simulators : warm the RV32/RV64 compiler caches once
+#   - rv-benchmark       : AM benchmarks, arch tests and CPU tests (RV32/RV32E)
+#   - ysyxsoc-benchmark  : ysyxSoC benchmarks + CPU tests
+#   - sim-random-memory  : RV32/RV64 random AXI memory delays
+#   - app-pk-coremark    : pk-hosted hello + CoreMark
+#   - app-embench        : RV64 Embench-IoT shards, bare metal and pk/MMU
+#   - app-embench-report : merge shard logs and score the full RV64 suites
+# STA / PPA lives in sta.yaml; CI script self-tests live in ci-checks.yaml.
+# Log parsing and job summaries: .github/scripts/ci_report.py.
 
 on:
   push:
-    branches: [ "master", "main" ]
-    paths:
+    branches: ["master", "main"]
+    paths: &benchmark-paths
       - "hdl/**"
       - "sim/**"
       - "abstract-machine/**"
@@ -23,17 +25,8 @@ on:
       - "setup-rtl.sh"
       - ".github/workflows/benchmark.yaml"
   pull_request:
-    branches: [ "master", "main" ]
-    paths:
-      - "hdl/**"
-      - "sim/**"
-      - "abstract-machine/**"
-      - "app/**"
-      - ".github/scripts/**"
-      - ".github/actions/**"
-      - "setup.sh"
-      - "setup-rtl.sh"
-      - ".github/workflows/benchmark.yaml"
+    branches: ["master", "main"]
+    paths: *benchmark-paths
   workflow_dispatch:
 
 # Cancel in-flight runs on the same ref/PR when a newer commit is pushed.
@@ -41,18 +34,28 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    # Login shell for the tool paths, but keep GitHub's errexit/pipefail so
+    # `make ... | tee log` fails the step when the simulation fails.
+    shell: bash -leo pipefail {0}
+
 env:
   RAPT_CONFIG: default
+  RAPTOR_HOME: ${{ github.workspace }}
+  NEMU_HOME: ${{ github.workspace }}/nemu
+  AM_HOME: ${{ github.workspace }}/abstract-machine
+  CROSS_COMPILE: riscv64-elf-
+  REPORT: python3 .github/scripts/ci_report.py
 
 jobs:
   prepare-simulators:
     runs-on: ubuntu-24.04
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         xlen: [32, 64]
-    env:
-      RAPTOR_HOME: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v6
       - name: Setup simulator build environment
@@ -60,12 +63,9 @@ jobs:
         with:
           profile: build
           build-cache: default-rv${{ matrix.xlen }}
-      - name: Check CI setup helpers
-        run: python3 .github/scripts/test_ci_setup.py
       # Prime ccache before fan-out, including on the first run. Consumers
       # still run normal Make/Verilator dependency checks for their workload.
       - name: Prepare shared RV${{ matrix.xlen }} compiler cache
-        shell: bash -l {0}
         run: |
           make build-rv${{ matrix.xlen }}
           ccache --show-stats
@@ -76,11 +76,7 @@ jobs:
     # not suppress this job. Normal builds also handle a missing cache.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
-    env:
-      RAPTOR_HOME: ${{ github.workspace }}
-      NEMU_HOME: ${{ github.workspace }}/nemu
-      AM_HOME: ${{ github.workspace }}/abstract-machine
-      CROSS_COMPILE: riscv64-elf-
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6
       - name: Setup environment
@@ -89,84 +85,56 @@ jobs:
           build-cache: default-rv32
       - name: Build NEMU (ref) and rv32
         id: build
-        shell: bash -l {0}
         run: |
           make build-nemu32-ref
           make build-rv32
 
+      # Each workload runs even if a sibling failed, so the summary is complete.
       - name: Run microbench rv32
-        shell: bash -l {0}
-        run: |
-          mkdir -p .github/results
-          make microbench-rv32 ARGS="-b -n" MAINARGS=test \
-            2>&1 | tee /tmp/microbench-rv32.log
-          bash .github/scripts/parse-benchmark.sh microbench /tmp/microbench-rv32.log > .github/results/microbench-rv32.txt
-
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: make microbench-rv32 ARGS="-b -n" MAINARGS=test 2>&1 | tee /tmp/microbench-rv32.log
       - name: Run microbench rv32e
-        shell: bash -l {0}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           make microbench-rv32 NPC_ARCH=riscv32e-npc ARGS="-b -n" MAINARGS=test \
             2>&1 | tee /tmp/microbench-rv32e.log
-          bash .github/scripts/parse-benchmark.sh microbench /tmp/microbench-rv32e.log > .github/results/microbench-rv32e.txt
-
       - name: Run coremark rv32
-        shell: bash -l {0}
-        run: |
-          make coremark-rv32 ARGS="-b -n" \
-            2>&1 | tee /tmp/coremark-rv32.log
-          bash .github/scripts/parse-benchmark.sh coremark /tmp/coremark-rv32.log > .github/results/coremark-rv32.txt
-
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: make coremark-rv32 ARGS="-b -n" 2>&1 | tee /tmp/coremark-rv32.log
       - name: Run coremark rv32e
-        shell: bash -l {0}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           make coremark-rv32 NPC_ARCH=riscv32e-npc ARGS="-b -n" \
             2>&1 | tee /tmp/coremark-rv32e.log
-          bash .github/scripts/parse-benchmark.sh coremark /tmp/coremark-rv32e.log > .github/results/coremark-rv32e.txt
-
       - name: Run RISC-V Architecture Test rv32
-        shell: bash -l {0}
-        run: |
-          make archtest-rv32 ARGS="-b -n" \
-            2>&1 | tee /tmp/archtest-rv32.log
-          bash .github/scripts/parse-benchmark.sh archtest /tmp/archtest-rv32.log > .github/results/archtest-rv32.txt
-
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: make archtest-rv32 ARGS="-b -n" 2>&1 | tee /tmp/archtest-rv32.log
       - name: Run RISC-V Architecture Test rv32e
-        shell: bash -l {0}
-        run: |
-          make archtest-rv32e ARGS="-b -n" \
-            2>&1 | tee /tmp/archtest-rv32e.log
-          bash .github/scripts/parse-benchmark.sh archtest /tmp/archtest-rv32e.log > .github/results/archtest-rv32e.txt
-
-      - name: Generate benchmark summary
-        run: bash .github/scripts/generate-summary.sh .github/results
-          .github/benchmark-results.json "$GITHUB_STEP_SUMMARY"
-
-      - name: PMU details
-        if: always()
-        run: |
-          bash .github/scripts/parse-pmu.sh \
-            "CoreMark rv32" /tmp/coremark-rv32.log \
-            "CoreMark rv32e" /tmp/coremark-rv32e.log \
-            "MicroBench rv32" /tmp/microbench-rv32.log \
-            "MicroBench rv32e" /tmp/microbench-rv32e.log \
-            >> "$GITHUB_STEP_SUMMARY"
-
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: make archtest-rv32e ARGS="-b -n" 2>&1 | tee /tmp/archtest-rv32e.log
       - name: cpu-tests rv32e
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        shell: bash -l {0}
         run: make cpu-tests-rv32 NPC_ARCH=riscv32e-npc ARGS="-b -n"
       - name: cpu-tests rv32
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        shell: bash -l {0}
         run: make cpu-tests-rv32 NPC_ARCH=riscv32-npc ARGS="-b -n"
+
+      - name: Benchmark summary
+        if: always()
+        run: |
+          {
+            $REPORT bench "Performance (rv32, standalone sim)" \
+              CoreMark=coremark:/tmp/coremark-rv32.log MicroBench=microbench:/tmp/microbench-rv32.log
+            $REPORT bench "Performance (rv32e, standalone sim)" \
+              CoreMark=coremark:/tmp/coremark-rv32e.log MicroBench=microbench:/tmp/microbench-rv32e.log
+            $REPORT archtest rv32=/tmp/archtest-rv32.log rv32e=/tmp/archtest-rv32e.log
+            $REPORT pmu "CoreMark rv32" /tmp/coremark-rv32.log "CoreMark rv32e" /tmp/coremark-rv32e.log \
+              "MicroBench rv32" /tmp/microbench-rv32.log "MicroBench rv32e" /tmp/microbench-rv32e.log
+          } >> "$GITHUB_STEP_SUMMARY"
 
   ysyxsoc-benchmark:
     runs-on: ubuntu-24.04
-    env:
-      RAPTOR_HOME: ${{ github.workspace }}
-      NEMU_HOME: ${{ github.workspace }}/nemu
-      AM_HOME: ${{ github.workspace }}/abstract-machine
-      CROSS_COMPILE: riscv64-elf-
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6
       - name: Setup environment
@@ -177,85 +145,65 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
       - name: Generate pinned upstream ysyxSoC
-        shell: bash -l {0}
         run: |
           curl -fL --retry 3 https://github.com/com-lihaoyi/mill/releases/download/0.12.4/0.12.4 \
             -o "$RUNNER_TEMP/mill-0.12.4"
           make ysyxsoc-setup YSYXSOC_MILL="$RUNNER_TEMP/mill-0.12.4" YSYXSOC_JAVA_HOME="$JAVA_HOME"
       - name: Build simulator (ysyxSoC config) and NEMU-Ref
         id: build
-        shell: bash -l {0}
         run: |
           make build-rv32-ysyxsoc
           make build-nemu32-ref
       - name: Run microbench riscv32-ysyxsoc
-        shell: bash -l {0}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: make microbench-ysyxsoc MAINARGS=test ARGS="-b -n" 2>&1 | tee /tmp/mb-soc.log
       - name: Run microbench riscv32e-ysyxsoc
-        shell: bash -l {0}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
-          make microbench-ysyxsoc YSYXSOC_ARCH=riscv32e-ysyxsoc MAINARGS=test ARGS="-b -n" 2>&1 | tee /tmp/mb-soce.log
+          make microbench-ysyxsoc YSYXSOC_ARCH=riscv32e-ysyxsoc MAINARGS=test ARGS="-b -n" \
+            2>&1 | tee /tmp/mb-soce.log
       - name: Run coremark riscv32-ysyxsoc
-        shell: bash -l {0}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: make coremark-ysyxsoc ARGS="-b -n" 2>&1 | tee /tmp/cm-soc.log
       - name: Run coremark riscv32e-ysyxsoc
-        shell: bash -l {0}
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
-          make coremark-ysyxsoc YSYXSOC_ARCH=riscv32e-ysyxsoc ARGS="-b -n" 2>&1 | tee /tmp/cm-soce.log
-      - name: ysyxSoC benchmark summary
-        shell: bash -l {0}
-        run: |
-          mkdir -p .github/results
-          bash .github/scripts/parse-benchmark.sh coremark /tmp/cm-soc.log > .github/results/coremark-ysyxsoc.txt
-          bash .github/scripts/parse-benchmark.sh coremark /tmp/cm-soce.log > .github/results/coremark-ysyxsoce.txt
-          extract_ipc() { grep -oP 'IPC:\s*\K[0-9.]+' "$1" 2>/dev/null | head -1 || echo "N/A"; }
-          extract_score() { grep -oP '\d+(?=(/1000)? Marks)' "$1" 2>/dev/null | head -1 || echo "N/A"; }
-          extract_trap() { grep -oE 'HIT (GOOD|BAD) TRAP' "$1" 2>/dev/null | head -1 || echo "N/A"; }
-          read_result() { grep -oP "^$2=\K.*" "$1" 2>/dev/null || echo "N/A"; }
-          {
-            echo ""
-            echo "## ysyxSoC Benchmark Results"
-            echo "| Benchmark | Target | Score | CoreMark/MHz | IPC | Status |"
-            echo "|-----------|--------|-------|--------------|-----|--------|"
-            echo "| CoreMark  | riscv32-ysyxsoc  | $(extract_score /tmp/cm-soc.log) | $(read_result .github/results/coremark-ysyxsoc.txt coremark_per_mhz) ($(read_result .github/results/coremark-ysyxsoc.txt iterations) iterations) | $(extract_ipc /tmp/cm-soc.log) | $(extract_trap /tmp/cm-soc.log) |"
-            echo "| CoreMark  | riscv32e-ysyxsoc | $(extract_score /tmp/cm-soce.log) | $(read_result .github/results/coremark-ysyxsoce.txt coremark_per_mhz) ($(read_result .github/results/coremark-ysyxsoce.txt iterations) iterations) | $(extract_ipc /tmp/cm-soce.log) | $(extract_trap /tmp/cm-soce.log) |"
-            echo "| MicroBench | riscv32-ysyxsoc  | $(extract_score /tmp/mb-soc.log) | N/A | $(extract_ipc /tmp/mb-soc.log) | $(extract_trap /tmp/mb-soc.log) |"
-            echo "| MicroBench | riscv32e-ysyxsoc | $(extract_score /tmp/mb-soce.log) | N/A | $(extract_ipc /tmp/mb-soce.log) | $(extract_trap /tmp/mb-soce.log) |"
-          } >> "$GITHUB_STEP_SUMMARY"
-          bash .github/scripts/parse-pmu.sh \
-            "CoreMark riscv32-ysyxsoc" /tmp/cm-soc.log \
-            "CoreMark riscv32e-ysyxsoc" /tmp/cm-soce.log \
-            "MicroBench riscv32-ysyxsoc" /tmp/mb-soc.log \
-            "MicroBench riscv32e-ysyxsoc" /tmp/mb-soce.log \
-            >> "$GITHUB_STEP_SUMMARY"
-
+          make coremark-ysyxsoc YSYXSOC_ARCH=riscv32e-ysyxsoc ARGS="-b -n" \
+            2>&1 | tee /tmp/cm-soce.log
       - name: cpu-tests riscv32-ysyxsoc
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        shell: bash -l {0}
-        run: make -C $RAPTOR_HOME/abstract-machine/app/am-kernels/tests/cpu-tests
-          ARCH=riscv32-ysyxsoc run ARGS="-b -n"
+        run: |
+          make -C "$RAPTOR_HOME/abstract-machine/app/am-kernels/tests/cpu-tests" \
+            ARCH=riscv32-ysyxsoc run ARGS="-b -n"
       - name: cpu-tests riscv32e-ysyxsoc
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        shell: bash -l {0}
-        run: make -C $RAPTOR_HOME/abstract-machine/app/am-kernels/tests/cpu-tests
-          ARCH=riscv32e-ysyxsoc run ARGS="-b -n"
+        run: |
+          make -C "$RAPTOR_HOME/abstract-machine/app/am-kernels/tests/cpu-tests" \
+            ARCH=riscv32e-ysyxsoc run ARGS="-b -n"
+      - name: ysyxSoC benchmark summary
+        if: always()
+        run: |
+          {
+            $REPORT bench "ysyxSoC Benchmark Results" \
+              CoreMark-riscv32=coremark:/tmp/cm-soc.log CoreMark-riscv32e=coremark:/tmp/cm-soce.log \
+              MicroBench-riscv32=microbench:/tmp/mb-soc.log MicroBench-riscv32e=microbench:/tmp/mb-soce.log
+            $REPORT pmu "CoreMark riscv32-ysyxsoc" /tmp/cm-soc.log "CoreMark riscv32e-ysyxsoc" /tmp/cm-soce.log \
+              "MicroBench riscv32-ysyxsoc" /tmp/mb-soc.log "MicroBench riscv32e-ysyxsoc" /tmp/mb-soce.log
+          } >> "$GITHUB_STEP_SUMMARY"
 
   sim-random-memory:
     needs: prepare-simulators
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
         xlen: [32, 64]
         seed: [1, 42]
     env:
-      RAPTOR_HOME: ${{ github.workspace }}
-      NEMU_HOME: ${{ github.workspace }}/nemu
-      AM_HOME: ${{ github.workspace }}/abstract-machine
-      CROSS_COMPILE: riscv64-elf-
       SIM_RANDOM_DELAY: "31"
       SIM_RANDOM_SEED: ${{ matrix.seed }}
     steps:
@@ -265,193 +213,135 @@ jobs:
         with:
           build-cache: default-rv${{ matrix.xlen }}
       - name: Build NEMU reference
-        shell: bash -l {0}
         run: make build-nemu${{ matrix.xlen }}-ref
       - name: CPU tests with random memory delays
-        shell: bash -l {0}
         run: |
-          set -o pipefail
-          make cpu-tests-rv${{ matrix.xlen }} SIM_RANDOM_DELAY=31 ARGS="-b -n -t 120" 2>&1 | tee /tmp/cpu-random.log
+          make cpu-tests-rv${{ matrix.xlen }} SIM_RANDOM_DELAY=31 ARGS="-b -n -t 120" \
+            2>&1 | tee /tmp/cpu-random.log
       - name: MicroBench with random memory delays
-        shell: bash -l {0}
         run: |
-          set -o pipefail
-          make microbench-rv${{ matrix.xlen }} SIM_RANDOM_DELAY=31 ARGS="-b -n -t 900" 2>&1 | tee /tmp/microbench-random.log
+          make microbench-rv${{ matrix.xlen }} SIM_RANDOM_DELAY=31 ARGS="-b -n -t 900" \
+            2>&1 | tee /tmp/microbench-random.log
+      # CRC-checked functional stress run. The AM port uses compile-time
+      # ITERATIONS (mainargs=test does not reduce its default 10).
       - name: CoreMark with random memory delays
-        shell: bash -l {0}
         run: |
-          set -o pipefail
-          # This is a CRC-checked functional stress run. The AM port uses
-          # compile-time ITERATIONS (mainargs=test does not reduce its default 10).
-          make coremark-rv${{ matrix.xlen }} SIM_RANDOM_DELAY=31 ITERATIONS=1 ARGS="-b -n -t 900" 2>&1 | tee /tmp/coremark-random.log
-          python3 - <<'PY'
-          import re
-          from pathlib import Path
-          log = re.sub(r'\x1b\[[0-9;]*m', '', Path('/tmp/coremark-random.log').read_text())
-          expected = {'Iterations': '1', 'CoreMark Size': '666'}
-          for label, value in expected.items():
-              found = re.findall(r'^' + re.escape(label) + r'\s*:\s*(\S+)\s*$', log, re.M)
-              if not found or any(item.lower() != value for item in found):
-                  raise SystemExit(f'CoreMark smoke validation failed: {label}={found}, expected {value}')
-          if re.findall(r'HIT (?:GOOD|BAD) TRAP', log) != ['HIT GOOD TRAP']:
-              raise SystemExit('CoreMark did not terminate successfully')
-          # AM klib does not format %04x correctly. Use CoreMark's internal
-          # known-profile CRC comparisons and error summary, not printed hex.
-          if '2K performance run parameters for coremark.' not in log:
-              raise SystemExit('CoreMark did not select a known CRC validation profile')
-          # A sub-10-second run is not a valid benchmark score; CRCs still apply.
-          short = 'ERROR! Must execute for at least 10 secs for a valid result!'
-          if any('ERROR!' in line and line.strip() != short for line in log.splitlines()):
-              raise SystemExit('CoreMark reported an additional validation error')
-          if short in log:
-              if log.count(short) != 1 or log.count('Errors detected') != 1:
-                  raise SystemExit('Incomplete CoreMark short-run validation summary')
-          elif log.count('Correct operation validated.') != 1 or 'Errors detected' in log:
-              raise SystemExit('CoreMark CRC validation failed')
-          print('CoreMark random-memory CRC smoke PASS (1 iteration; not a benchmark score)')
-          PY
+          make coremark-rv${{ matrix.xlen }} SIM_RANDOM_DELAY=31 ITERATIONS=1 ARGS="-b -n -t 900" \
+            2>&1 | tee /tmp/coremark-random.log
+          $REPORT coremark-am /tmp/coremark-random.log --iterations 1 >> "$GITHUB_STEP_SUMMARY"
       - name: Summarize stress configuration
         if: always()
         run: |
           {
             echo "## Sim random memory delays"
             echo "RV${{ matrix.xlen }}, preset=$RAPT_CONFIG, delay=0..$SIM_RANDOM_DELAY cycles/beat, seed=$SIM_RANDOM_SEED"
-            echo "CoreMark: 1 iteration with CRC validation (functional smoke, not a benchmark score)."
+            $REPORT pmu "CoreMark random" /tmp/coremark-random.log \
+              "MicroBench random" /tmp/microbench-random.log
           } >> "$GITHUB_STEP_SUMMARY"
-          bash .github/scripts/parse-pmu.sh \
-            "CoreMark random" /tmp/coremark-random.log \
-            "MicroBench random" /tmp/microbench-random.log \
-            >> "$GITHUB_STEP_SUMMARY"
+
   app-pk-coremark:
     needs: prepare-simulators
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 90
     env:
-      RAPTOR_HOME: ${{ github.workspace }}
-      NEMU_HOME: ${{ github.workspace }}/nemu
-      AM_HOME: ${{ github.workspace }}/abstract-machine
       CROSS_COMPILE: riscv64-unknown-elf-
     steps:
       - uses: actions/checkout@v6
-
-      - name: Check CoreMark summary validation
-        run: python3 .github/scripts/test_summarize_pk_coremark.py
-
       - name: Setup base environment
         uses: ./.github/actions/setup-environment
         with:
           build-cache: default-rv32
-
-      - name: Build NEMU reference and simulator
-        shell: bash -l {0}
-        run: |
-          make build-nemu32-ref
-          make build-rv32
-
-      - name: Build pk
-        shell: bash -l {0}
-        run: make --no-print-directory -C app pk-build
-
-      # ---- Hello world ----
-      - name: Run hello
-        shell: bash -l {0}
-        run: |
-          mkdir -p .github/results
-          make app-hello-rv32 ARGS="-b -n" 2>&1 | tee /tmp/app-hello.log
-
-      # CRC-checked smoke run; standard CoreMark validation still requires 10 seconds.
-      - name: Run CoreMark
-        shell: bash -l {0}
-        run: |
-          make app-coremark-rv32 ITERATIONS=1 ARGS="-b -n" 2>&1 | tee /tmp/app-coremark.log
-
-      # ---- Summary ----
-      - name: Generate summary
-        if: always()
-        run: |
-          report_rc=0
-          python3 .github/scripts/summarize-pk-coremark.py \
-            /tmp/app-hello.log /tmp/app-coremark.log "$GITHUB_STEP_SUMMARY" \
-            --expected-iterations 1 --allow-short || report_rc=$?
-          bash .github/scripts/parse-pmu.sh \
-            "Hello (pk)" /tmp/app-hello.log \
-            "CoreMark (pk)" /tmp/app-coremark.log \
-            >> "$GITHUB_STEP_SUMMARY" || true
-          exit "$report_rc"
-
-  app-baremetal-embench:
-    needs: prepare-simulators
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
-    env:
-      RAPTOR_HOME: ${{ github.workspace }}
-      NEMU_HOME: ${{ github.workspace }}/nemu
-      AM_HOME: ${{ github.workspace }}/abstract-machine
-      CROSS_COMPILE: riscv64-unknown-elf-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup base environment
-        uses: ./.github/actions/setup-environment
-        with:
-          build-cache: default-rv32
-
-      - name: Build NEMU reference and simulator
-        shell: bash -l {0}
-        run: |
-          make build-nemu32-ref
-          make build-rv32
-
-      # ---- Embench-IoT ----
-      - name: Run Embench-IoT
-        shell: bash -l {0}
-        run: |
-          mkdir -p .github/results
-          make app-embench-baremetal-run-rv32 ARGS="-b -n"
-
-      # ---- Summary ----
-      - name: Generate summary
-        if: always()
-        run: |
-          report_rc=0
-          make app-embench-baremetal-report-rv32 || report_rc=$?
-          cat sim/build/${{ env.RAPT_CONFIG }}/logs/app/embench-baremetal-rv32.md \
-            >> "$GITHUB_STEP_SUMMARY"
-          exit "$report_rc"
-
-  app-pk-embench:
-    needs: prepare-simulators
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
-    env:
-      RAPTOR_HOME: ${{ github.workspace }}
-      NEMU_HOME: ${{ github.workspace }}/nemu
-      AM_HOME: ${{ github.workspace }}/abstract-machine
-      CROSS_COMPILE: riscv64-unknown-elf-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup base environment
-        uses: ./.github/actions/setup-environment
-        with:
-          build-cache: default-rv32
-
       - name: Build NEMU reference, simulator, and pk
-        shell: bash -l {0}
         run: |
           make build-nemu32-ref
           make build-rv32
           make --no-print-directory -C app pk-build
-
-      - name: Run pk/MMU Embench-IoT
-        shell: bash -l {0}
-        run: make app-embench-pk-run-rv32 ARGS="-b -n"
-
-      - name: Generate pk/MMU summary
+      - name: Run hello
+        run: make app-hello-rv32 ARGS="-b -n" 2>&1 | tee /tmp/app-hello.log
+      # CRC-checked smoke run; standard CoreMark validation still requires 10 seconds.
+      - name: Run CoreMark
+        if: ${{ !cancelled() }}
+        run: make app-coremark-rv32 ITERATIONS=1 ARGS="-b -n" 2>&1 | tee /tmp/app-coremark.log
+      - name: CoreMark validation and summary
         if: always()
+        shell: bash --noprofile --norc -eo pipefail {0}
         run: |
           report_rc=0
-          make app-embench-pk-report-rv32 || report_rc=$?
-          cat sim/build/${{ env.RAPT_CONFIG }}/logs/app/embench-pk-rv32.md \
+          $REPORT coremark-pk /tmp/app-hello.log /tmp/app-coremark.log \
+            --expected-iterations 1 --allow-short | tee -a "$GITHUB_STEP_SUMMARY" || report_rc=$?
+          $REPORT pmu "Hello (pk)" /tmp/app-hello.log "CoreMark (pk)" /tmp/app-coremark.log \
             >> "$GITHUB_STEP_SUMMARY"
+          echo "CoreMark report exit status: $report_rc"
+          exit "$report_rc"
+
+  app-embench:
+    needs: prepare-simulators
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [baremetal, pk]
+        shard: [0, 1, 2, 3]
+    name: app-embench-${{ matrix.suite }}-rv64-${{ matrix.shard }}
+    env:
+      CROSS_COMPILE: riscv64-unknown-elf-
+      DIFFTEST: "0"
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup base environment
+        uses: ./.github/actions/setup-environment
+        with:
+          build-cache: default-rv64
+      - name: Build simulator
+        run: make build-rv64
+      - name: Build pk
+        if: matrix.suite == 'pk'
+        run: make --no-print-directory -C app pk-build ISA64=1
+      - name: Run Embench-IoT (${{ matrix.suite }}, shard ${{ matrix.shard }})
+        env:
+          EMBENCH_SHARD: ${{ matrix.shard }}
+        run: |
+          benchmarks=$(PYTHONPATH=app/benchmarks/embench python3 -c \
+            'import os; from report import BENCHMARKS; print(" ".join(BENCHMARKS[int(os.environ["EMBENCH_SHARD"])::4]))')
+          make --no-print-directory -C app embench-${{ matrix.suite }}-run-sim \
+            ISA64=1 BENCHMARKS="$benchmarks" EMBENCH_BENCHMARKS="$benchmarks" \
+            EMBENCH_JOBS=2 ARGS="-b -n"
+      - name: Upload Embench logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: embench-rv64-${{ matrix.suite }}-${{ matrix.shard }}-${{ github.sha }}
+          path: sim/build/${{ env.RAPT_CONFIG }}/logs/app/embench-${{ matrix.suite }}-rv64/
+          if-no-files-found: error
+          retention-days: 7
+
+  app-embench-report:
+    needs: app-embench
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [baremetal, pk]
+    name: app-embench-${{ matrix.suite }}-rv64-score
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download Embench shard logs
+        uses: actions/download-artifact@v8
+        with:
+          pattern: embench-rv64-${{ matrix.suite }}-*-${{ github.sha }}
+          path: sim/build/${{ env.RAPT_CONFIG }}/logs/app/embench-${{ matrix.suite }}-rv64
+          merge-multiple: true
+      - name: Embench full-suite summary
+        if: always()
+        shell: bash --noprofile --norc -eo pipefail {0}
+        run: |
+          report_rc=0
+          make --no-print-directory -C app embench-${{ matrix.suite }}-report-sim ISA64=1 || report_rc=$?
+          cat "sim/build/$RAPT_CONFIG/logs/app/embench-${{ matrix.suite }}-rv64.md" \
+            >> "$GITHUB_STEP_SUMMARY" || true
           exit "$report_rc"

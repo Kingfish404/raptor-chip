@@ -15,10 +15,14 @@
 
 #include <device/map.h>
 #include <memory/paddr.h>
+#include <cpu/cpu.h>
+#include <cpu/multidiff.h>
+#include <cpu/diffjournal.h>
 
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #define VIRTIO_RNG_BASE CONFIG_RNG_MMIO
 #define VIRTIO_RNG_SIZE 0x1000u
@@ -83,24 +87,19 @@ static struct
 } rng;
 
 void plic_raise_irq(int irq);
+void plic_raise_rng_irq(int irq);
 
 static bool guest_mem_read(uint64_t addr, void *buf, size_t len)
 {
-  uint8_t *dst = buf;
-  for (size_t i = 0; i < len; i++)
-    dst[i] = *guest_to_host((paddr_t)(addr + i));
-  return true;
+  return paddr_dma_read((paddr_t)addr, buf, len);
 }
 
 static bool guest_mem_write(uint64_t addr, const void *buf, size_t len)
 {
-  const uint8_t *src = buf;
-  for (size_t i = 0; i < len; i++)
-    *guest_to_host((paddr_t)(addr + i)) = src[i];
-  return true;
+  return paddr_dma_write((paddr_t)addr, buf, len);
 }
 
-static bool host_random_fill(void *buf, size_t len)
+static bool host_random_read(void *buf, size_t len)
 {
   uint8_t *dst = buf;
   while (len > 0)
@@ -119,9 +118,23 @@ static bool host_random_fill(void *buf, size_t len)
   return true;
 }
 
+static bool host_random_fill(void *buf, size_t len)
+{
+  bool success = host_random_read(buf, len);
+  if (multidiff_rng_active() && nemu_journal_rng_input &&
+      !nemu_journal_rng_input(buf, len, success)) return false;
+  return success;
+}
+
 static void reset_regs(void)
 {
   memset(&rng, 0, sizeof(rng));
+}
+
+bool nemu_rng_reset_state(void)
+{
+  const uint8_t zero[sizeof(rng)] = {0};
+  return !memcmp(&rng, zero, sizeof(rng));
 }
 
 static bool queue_is_ready(void)
@@ -145,32 +158,38 @@ static bool queue_pop(uint16_t *head)
     return false;
 
   uint16_t avail_idx;
-  guest_mem_read(rng.driver_addr + 2, &avail_idx, sizeof(avail_idx));
+  if (!guest_mem_read(rng.driver_addr + 2, &avail_idx, sizeof(avail_idx)))
+    return false;
   if (rng.last_avail_idx == avail_idx)
     return false;
 
   uint64_t ring_addr = rng.driver_addr + 4 +
                        (uint64_t)(rng.last_avail_idx % rng.queue_num) * 2;
-  guest_mem_read(ring_addr, head, sizeof(*head));
+  if (!guest_mem_read(ring_addr, head, sizeof(*head)))
+    return false;
   rng.last_avail_idx++;
   return *head < rng.queue_num;
 }
 
-static void queue_push(uint16_t head, uint32_t len)
+static bool queue_push(uint16_t head, uint32_t len)
 {
   uint16_t used_idx;
-  guest_mem_read(rng.device_addr + 2, &used_idx, sizeof(used_idx));
+  if (!guest_mem_read(rng.device_addr + 2, &used_idx, sizeof(used_idx)))
+    return false;
 
   uint64_t elem_addr = rng.device_addr + 4 +
                        (uint64_t)(used_idx % rng.queue_num) * 8;
   uint32_t elem_id = head;
-  guest_mem_write(elem_addr, &elem_id, sizeof(elem_id));
-  guest_mem_write(elem_addr + 4, &len, sizeof(len));
+  if (!guest_mem_write(elem_addr, &elem_id, sizeof(elem_id)) ||
+      !guest_mem_write(elem_addr + 4, &len, sizeof(len)))
+    return false;
   used_idx++;
-  guest_mem_write(rng.device_addr + 2, &used_idx, sizeof(used_idx));
+  if (!guest_mem_write(rng.device_addr + 2, &used_idx, sizeof(used_idx)))
+    return false;
 
   rng.interrupt_status |= 1u;
-  plic_raise_irq(VIRTIO_RNG_IRQ);
+  plic_raise_rng_irq(VIRTIO_RNG_IRQ);
+  return true;
 }
 
 static uint32_t fill_desc_chain(uint16_t head)
@@ -211,7 +230,8 @@ static void service_queue(void)
 {
   uint16_t head;
   while (queue_pop(&head))
-    queue_push(head, fill_desc_chain(head));
+    if (!queue_push(head, fill_desc_chain(head)))
+      break;
 }
 
 static uint64_t io_read_value(uint32_t offset, int len)
@@ -341,9 +361,17 @@ void init_rng(void)
 
   if (host_random_fd < 0)
   {
-    host_random_fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
-    Assert(host_random_fd >= 0, "virtio-rng: cannot open /dev/urandom: %s",
-           strerror(errno));
+    const char *source = "/dev/urandom";
+#ifdef NEMU_HAS_SMP
+    if (nemu_rng_input_path) source = nemu_rng_input_path;
+#endif
+    host_random_fd = open(source, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+    struct stat info;
+    if (host_random_fd < 0 || fstat(host_random_fd, &info) ||
+        (strcmp(source, "/dev/urandom") && !S_ISREG(info.st_mode))) {
+      fprintf(stderr, "virtio-rng: entropy input must be readable regular file or /dev/urandom\n");
+      exit(EXIT_FAILURE);
+    }
   }
 
   virtio_rng_base = new_space(VIRTIO_RNG_SIZE);

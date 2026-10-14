@@ -37,6 +37,7 @@ static void finisher_io_handler(uint32_t offset, int len, bool is_write) {
 
 void init_finisher() {
   finisher_base = new_space(0x1000);
+  memset(finisher_base, 0, 0x1000);
   add_mmio_map("finisher", CONFIG_FINISHER_MMIO, finisher_base, 0x1000,
                finisher_io_handler);
 }

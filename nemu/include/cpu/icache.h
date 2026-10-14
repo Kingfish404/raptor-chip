@@ -31,8 +31,8 @@ typedef struct {
   uint32_t epoch;  /* entry valid iff epoch == icache_epoch          */
 } icache_entry_t;
 
-extern icache_entry_t icache[ICACHE_SIZE];
-extern uint32_t       icache_epoch;
+extern NEMU_TLS icache_entry_t icache[ICACHE_SIZE];
+extern NEMU_TLS uint32_t       icache_epoch;
 
 /* O(1) flush. Wrap-to-zero hard-resets all tags so a stale epoch-0
  * entry can never be mistaken as valid. */

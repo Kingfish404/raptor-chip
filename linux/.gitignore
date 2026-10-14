@@ -1,4 +1,5 @@
 !*.c
 !*.dts
+!distro-boot/*
 build/
 opensbi/

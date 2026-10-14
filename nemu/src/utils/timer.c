@@ -14,6 +14,7 @@
 ***************************************************************************************/
 
 #include <common.h>
+#include <cpu/thread.h>
 #if !defined(CONFIG_TIMER_CYCLE)
 #include MUXDEF(CONFIG_TIMER_GETTIMEOFDAY, <sys/time.h>, <time.h>)
 #endif
@@ -29,7 +30,7 @@ static uint64_t boot_time = 0;
 
 #if defined(CONFIG_TIMER_CYCLE)
 // Cycle-based timer: 1GHz CPU -> 1 inst = 1 cycle = 1ns -> 1000 cycles/µs
-extern uint64_t g_nr_guest_inst;
+extern NEMU_TLS uint64_t g_nr_guest_inst;
 #endif
 
 static uint64_t get_time_internal() {
@@ -50,6 +51,9 @@ static uint64_t get_time_internal() {
 }
 
 uint64_t get_time() {
+#ifdef NEMU_HAS_THREADS
+  if (nemu_threaded) return cpu_thread_time_us();
+#endif
 #if defined(CONFIG_TIMER_CYCLE)
   return get_time_internal();
 #else

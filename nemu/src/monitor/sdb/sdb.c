@@ -259,7 +259,8 @@ void sdb_mainloop()
   if (is_batch_mode)
   {
     cpu_exec(max_inst);
-    set_nemu_state(NEMU_QUIT, cpu.pc, -1);
+    if (nemu_state.state == NEMU_STOP)
+      set_nemu_state(NEMU_QUIT, cpu.pc, -1);
     Log("Batch mode, exit.");
     void statistic();
     statistic();

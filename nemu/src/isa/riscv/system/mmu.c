@@ -16,12 +16,13 @@
 #include <setjmp.h>
 #include <stdlib.h>
 #include <isa.h>
+#include <cpu/thread.h>
 #include <isa-def.h>
 #include <memory/vaddr.h>
 #include <memory/paddr.h>
 
-extern jmp_buf exec_jmp_buf;
-extern int cause;
+extern NEMU_TLS jmp_buf exec_jmp_buf;
+extern NEMU_TLS int cause;
 
 bool pmp_check(paddr_t addr, int size, uint32_t priv,
                bool op_r, bool op_w, bool op_x);
@@ -306,7 +307,7 @@ static paddr_t sv39_translate(vaddr_t vaddr, int len, int type, uint8_t *out_pbm
 #endif
 
 // a.k.a. Page Table Walk
-paddr_t isa_mmu_translate_attrs(vaddr_t vaddr, int len, int type, uint8_t *pbmt)
+static paddr_t mmu_translate_unlocked(vaddr_t vaddr, int len, int type, uint8_t *pbmt)
 {
   if (pbmt != NULL) *pbmt = 0;
   csr_t reg = {.val = cpu.sr[CSR_SATP]};
@@ -468,6 +469,14 @@ paddr_t isa_mmu_translate_attrs(vaddr_t vaddr, int len, int type, uint8_t *pbmt)
 #endif
 
   return ((paddr_t)pte.pte_ppn.ppn << 12) | offset;
+}
+
+paddr_t isa_mmu_translate_attrs(vaddr_t vaddr, int len, int type, uint8_t *pbmt)
+{
+  cpu_bus_lock();
+  paddr_t physical = mmu_translate_unlocked(vaddr, len, type, pbmt);
+  cpu_bus_unlock();
+  return physical;
 }
 
 /* Preserve the existing PA-only API while access and software-TLB clients

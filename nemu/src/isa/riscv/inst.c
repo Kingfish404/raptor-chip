@@ -19,10 +19,12 @@
 #include "local-include/fp-exec.h"
 #include <isa-def.h>
 #include <cpu/cpu.h>
+#include <cpu/thread.h>
 #include <cpu/ifetch.h>
 #include <cpu/decode.h>
 #include <cpu/difftest.h>
 #include <cpu/icache.h>
+#include <cpu/multidiff.h>
 #include <memory/tlb.h>
 #include <memory/vaddr.h>
 #include <stdlib.h>
@@ -38,23 +40,34 @@ static inline bool sstc_enabled(void)
   return (CSR(CSR_MENVCFGH) >> 31) != 0;
 #endif
 }
-word_t riscv_mip_value(void)
+word_t riscv_hart_mip_value(const riscv_CPU_state *hart)
 {
-  word_t value = CSR(CSR_MIP) | (cpu.seip ? (word_t)0x200 : 0);
+  word_t value = hart->sr[CSR_MIP] | (hart->seip ? (word_t)0x200 : 0);
 #ifdef CONFIG_RAPTOR_MEMORY_MAP
-  value = (value & ~((word_t)1 << 16)) | ((CSR(CSR_MBERR_STATUS) & 1) << 16);
+  value = (value & ~((word_t)1 << 16)) | ((hart->sr[CSR_MBERR_STATUS] & 1) << 16);
 #endif
-  if (sstc_enabled())
+#ifdef CONFIG_RV64
+  bool stce = (hart->sr[CSR_MENVCFG] >> 63) != 0;
+#else
+  bool stce = (hart->sr[CSR_MENVCFGH] >> 31) != 0;
+#endif
+  if (stce)
   {
     // Standalone CLINT computes this level. A differential reference gets
     // the DUT timer input at each step, rather than using its unrelated clock.
-    value = (value & ~(word_t)0x20) | (cpu.stip ? 0x20 : 0);
+    value = (value & ~(word_t)0x20) | (hart->stip ? 0x20 : 0);
   }
   return value;
+}
+word_t riscv_mip_value(void)
+{
+  return riscv_hart_mip_value(&cpu);
 }
 static inline word_t csr_read_value(uint16_t csr)
 {
   csr &= 0xfff;
+  if ((csr == CSR_TIME || csr == CSR_TIMEH) && multidiff_clint_active() && nemu_md_timer_update)
+    nemu_md_timer_update();
   if (csr == CSR_MIP) return riscv_mip_value();
   if (csr == CSR_SIP) return riscv_mip_value() & CSR(CSR_MIDELEG) & (word_t)0x222;
   if (csr == CSR_SIE) return CSR(CSR_MIE) & CSR(CSR_MIDELEG) & (word_t)0x222;
@@ -229,7 +242,7 @@ uint64_t get_time();
 word_t get_paddr(vaddr_t addr, int len);
 void clint_update_mip(void);
 bool clint_wfi_advance(void);
-extern uint64_t g_nr_guest_inst;
+extern NEMU_TLS uint64_t g_nr_guest_inst;
 
 void ftrace_add(word_t pc, word_t npc, word_t inst);
 extern bool ftrace_enabled;
@@ -840,8 +853,8 @@ static int decode_exec(Decode *s)
 
   INSTPAT_CASE(0b00011, grp_miscmem)                                   // MISC-MEM (fence, fence.i, Zicbom, fence.tso, pause)
   INSTPAT("0000000 10000 00000 000 00000 00011 11", pause, N, {});     // hint instruction (include in fence)
-  INSTPAT("1000001 10011 00000 000 00000 00011 11", fence_tso, N, {}); // fence.tso: inst[6:2]=0b00011, same MISC-MEM group
-  INSTPAT("??????? ????? ????? 000 ????? 00011 11", fence, N, {});
+  INSTPAT("1000001 10011 00000 000 00000 00011 11", fence_tso, N, { cpu_bus_lock(); cpu_bus_unlock(); });
+  INSTPAT("??????? ????? ????? 000 ????? 00011 11", fence, N, { cpu_bus_lock(); cpu_bus_unlock(); });
   INSTPAT("??????? ????? ????? 001 ????? 00011 11", fence_i, I, icache_flush());
   INSTPAT("0000000 00000 ????? 010 00000 00011 11", cbo.inval, I, {
     if (cbo_prepare(s, CBO_INVAL)) vaddr_check_cmo(src1);
@@ -983,6 +996,11 @@ static int decode_exec(Decode *s)
 #if !defined(CONFIG_TARGET_SHARE)
       // WFI acceleration: if no interrupt pending, advance time to mtimecmp
       word_t pending = riscv_mip_value() & cpu.sr[CSR_MIE];
+#ifdef NEMU_HAS_SMP
+      if (nemu_nr_harts > 1 || nemu_threaded || multidiff_clint_active())
+        nemu_hart_waiting[nemu_hartid] = pending == 0;
+      else
+#endif
       if (pending == 0)
         clint_wfi_advance();
 #endif
@@ -1111,11 +1129,13 @@ static int decode_exec(Decode *s)
     word_t mip_bits = CSR(CSR_SIP) & mask;
     CSR(CSR_MIP) = (CSR(CSR_MIP) & ~mask) | mip_bits;
   }
-#if !defined(CONFIG_TARGET_SHARE) && defined(CONFIG_DEVICE)
   if (last_csr_wr == 0x14d || last_csr_wr == 0x15d ||
-      last_csr_wr == CSR_MENVCFG || last_csr_wr == CSR_MENVCFGH)
-    clint_update_mip();
+      last_csr_wr == CSR_MENVCFG || last_csr_wr == CSR_MENVCFGH) {
+    if (multidiff_clint_active() && nemu_md_timer_update) nemu_md_timer_update();
+#if !defined(CONFIG_TARGET_SHARE) && defined(CONFIG_DEVICE)
+    else clint_update_mip();
 #endif
+  }
   if (((CSR(CSR_MSTATUS) >> 11) & 3) == 2)
     CSR(CSR_MSTATUS) &= ~((word_t)3 << 11);
 #ifdef CONFIG_RV64
@@ -1170,7 +1190,9 @@ static int decode_exec(Decode *s)
 #endif
   /* See RV32 sibling for the deadlock-safety rationale of this gate. */
 #define TIMER_TICK_INTERVAL 1024u
-  if ((g_nr_guest_inst & (TIMER_TICK_INTERVAL - 1)) == 0)
+  if ((CSR(CSR_MCYCLE) & (TIMER_TICK_INTERVAL - 1)) == 0 && multidiff_clint_active() && nemu_md_timer_update)
+    nemu_md_timer_update();
+  if (!multidiff_active() && (g_nr_guest_inst & (TIMER_TICK_INTERVAL - 1)) == 0)
   {
 #if defined(CONFIG_TIMER_CYCLE)
     uint64_t ticks = (g_nr_guest_inst + inst_advance) / 100;
@@ -1192,15 +1214,15 @@ static int decode_exec(Decode *s)
 #if !defined(CONFIG_TARGET_SHARE)
   /* Skip the per-instruction call/return bookkeeping unless an ELF is loaded
    * or an interrupt entry still needs classifying. */
-  if (ftrace_enabled || cpu.raise_intr != INTR_EMPTY)
+  if (!nemu_threaded && (ftrace_enabled || cpu.raise_intr != INTR_EMPTY))
     ftrace_add(s->pc, s->dnpc, s->isa.inst);
 #endif
   s->pc = s->dnpc;
   return 0;
 }
 
-jmp_buf exec_jmp_buf;
-int cause;
+NEMU_TLS jmp_buf exec_jmp_buf;
+NEMU_TLS int cause;
 
 int isa_exec_once(Decode *s)
 {
@@ -1211,6 +1233,7 @@ int isa_exec_once(Decode *s)
   int jmp_value = nemu_setjmp(exec_jmp_buf);
   if (jmp_value)
   {
+    cpu_bus_unwind();
     s->pc = isa_raise_intr(cause, s->pc);
     s->isa.inst = 0x13; // addi x0, x0, 0; a.k.a. NOP
     return 0;
@@ -1234,10 +1257,14 @@ int isa_exec_once(Decode *s)
     s->isa.inst = inst_fetch(&s->snpc, 4); // advances snpc to pc+4
   }
   cpu.inst = s->isa.inst;
+  if (nemu_md_instruction && !nemu_md_instruction(s->isa.inst)) return 0;
 
   vaddr_t fill_pc = s->pc; // decode_exec will clobber s->pc <- dnpc
   const uint32_t fetch_epoch = icache_epoch;
+  const bool atomic_instruction = (s->isa.inst & 0x7f) == 0x2f;
+  if (atomic_instruction) cpu_bus_lock();
   int ret = decode_exec(s);
+  if (atomic_instruction) cpu_bus_unlock();
   // A CSR write, xRET, trap or fence can invalidate the context that
   // authorized this fetch. Never resurrect its decode in the new epoch.
   if (cache_decode && fetch_epoch == icache_epoch && !icache_hit(e, fill_pc))

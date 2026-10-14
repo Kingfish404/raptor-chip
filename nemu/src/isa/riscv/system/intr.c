@@ -17,6 +17,7 @@
 #include <isa-def.h>
 #include <stdio.h>
 #include <cpu/difftest.h>
+#include <cpu/multidiff.h>
 #include <memory/tlb.h>
 
 #if defined(CONFIG_ISA64)
@@ -27,7 +28,7 @@
 #define IRQ_TIMER 0x80000007
 #endif
 
-extern word_t g_vaddr;
+extern NEMU_TLS word_t g_vaddr;
 
 word_t isa_raise_intr(word_t NO, vaddr_t epc)
 {
@@ -166,7 +167,7 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
   return ret_pc;
 }
 
-#if !defined(CONFIG_TARGET_SHARE)
+#if !defined(CONFIG_TARGET_SHARE) || defined(NEMU_HAS_REPLAY)
 // Helper: check if an interrupt (given its MIP bit position) can be taken,
 // considering delegation, privilege level, and global interrupt enables.
 static inline bool can_take_interrupt(int bit, csr_t reg_mstatus)
@@ -183,11 +184,12 @@ static inline bool can_take_interrupt(int bit, csr_t reg_mstatus)
 
 word_t isa_query_intr()
 {
-#if defined(CONFIG_TARGET_SHARE)
-  // In reference model mode, all interrupts are injected externally
-  // via difftest_raise_intr(). Do not auto-detect from MIP bits.
+#if defined(CONFIG_TARGET_SHARE) && !defined(NEMU_HAS_REPLAY)
   return INTR_EMPTY;
 #else
+#ifdef CONFIG_TARGET_SHARE
+  if (!nemu_md_interrupts) return INTR_EMPTY;
+#endif
   csr_t reg_mstatus = {.val = cpu.sr[CSR_MSTATUS]};
   word_t mip = riscv_mip_value();
   word_t mie = cpu.sr[CSR_MIE];

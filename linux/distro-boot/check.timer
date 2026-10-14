@@ -1,0 +1,9 @@
+[Unit]
+Description=Run Raptor acceptance after userspace startup
+
+[Timer]
+OnBootSec=20s
+Unit=raptor-distro-check.service
+
+[Install]
+WantedBy=timers.target

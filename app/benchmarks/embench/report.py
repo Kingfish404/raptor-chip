@@ -119,7 +119,10 @@ def format_int(value):
 
 def render_markdown(rows, title, timing):
     passed = sum(row["status"] == "PASS" for row in rows)
-    score = geometric_mean([row.get("speed") for row in rows])
+    speeds = [row.get("speed") for row in rows]
+    score = geometric_mean(speeds) if passed == len(rows) and all(
+        speed is not None and speed > 0 for speed in speeds
+    ) else None
     benchmark_geomean = geometric_mean([row.get("benchmark_cycles") for row in rows])
     pmu_geomean = geometric_mean([row.get("pmu_cycles") for row in rows])
     average_ipc = arithmetic_mean([row.get("ipc") for row in rows])
@@ -187,7 +190,7 @@ def render_markdown(rows, title, timing):
             "",
         ]
     )
-    return "\n".join(output), passed == len(rows)
+    return "\n".join(output), passed == len(rows) and score is not None
 
 
 def main():

@@ -1,8 +1,8 @@
 #include <cpu/icache.h>
 #include <string.h>
 
-icache_entry_t icache[ICACHE_SIZE];
-uint32_t icache_epoch = 1;
+NEMU_TLS icache_entry_t icache[ICACHE_SIZE];
+NEMU_TLS uint32_t icache_epoch = 1;
 
 void icache_flush(void)
 {

@@ -62,6 +62,10 @@ CFLAGS_BUILD += $(if $(CONFIG_CC_ASAN),-fsanitize=address,)
 CFLAGS_TRACE += -DITRACE_COND=$(if $(CONFIG_ITRACE_COND),$(call remove_quote,$(CONFIG_ITRACE_COND)),true)
 CFLAGS  += $(CFLAGS_BUILD) $(CFLAGS_TRACE) -D__GUEST_ISA__=$(GUEST_ISA) $(shell sdl2-config --cflags) 
 LDFLAGS += $(CFLAGS_BUILD) $(shell sdl2-config --libs)
+ifneq ($(filter y,$(CONFIG_TARGET_NATIVE_ELF) $(CONFIG_TARGET_SHARE)),)
+CFLAGS += -pthread
+LDFLAGS += -pthread
+endif
 
 # Include rules for menuconfig
 include $(NEMU_HOME)/scripts/config.mk

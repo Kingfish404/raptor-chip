@@ -310,3 +310,27 @@ run-rv32-sim run-rv64-sim: ## Build and boot on RTL sim using existing GC config
 	$(MAKE) -C $(RAPTOR_HOME) linux-boot-rv$(_linux_bits)gc LINUX_RV$(_linux_bits)GC_PAYLOAD="$(LINUX_OUTPUT)/fw_payload.bin"
 run-rv32-nemu run-rv64-nemu: ## Build and boot on NEMU using existing GC configuration targets
 	$(MAKE) -C $(RAPTOR_HOME) linux-boot-nemu$(_linux_bits)gc LINUX_RV$(_linux_bits)GC_PAYLOAD="$(LINUX_OUTPUT)/fw_payload.bin"
+
+DISTRO_BOOT ?= debian
+DISTRO_HARTS ?= 1
+DISTRO_NEMU_BACKEND ?= rr
+DISTRO_NEMU_CLOCK_DIV ?= 16
+DISTRO_WORK ?= $(LINUX_BUILD_DIR)/distro-boot$(if $(filter 1,$(DISTRO_HARTS)),,-smp$(DISTRO_HARTS))$(if $(filter threaded,$(DISTRO_NEMU_BACKEND)),-threaded,)
+DISTRO_KERNEL ?= $(LINUX_BUILD_DIR)/raptor/$(LINUX_BUILD_VERSION)/rv64-debian-fpga
+DISTRO_ENGINE ?= nemu
+DISTRO_TIMEOUT ?= 3600
+.PHONY: nemu-distro-download nemu-distro-prepare nemu-distro-check nemu-distro-run
+nemu-distro-download: ## Download/check pinned official Debian or Ubuntu riscv64 image (DISTRO_BOOT=debian/ubuntu)
+	$(LINUX_PYTHON) $(LINUX_HOME)/distro_boot.py download --distro $(DISTRO_BOOT)
+nemu-distro-prepare: ## Prepare official systemd root disk, firmware and private NEMU build
+	$(LINUX_PYTHON) $(LINUX_HOME)/distro_boot.py prepare --distro $(DISTRO_BOOT) \
+		--work "$(DISTRO_WORK)" --kernel-artifacts "$(DISTRO_KERNEL)" --harts $(DISTRO_HARTS) \
+		--nemu-backend $(DISTRO_NEMU_BACKEND) --nemu-clock-div $(DISTRO_NEMU_CLOCK_DIV)
+nemu-distro-check: ## Verify systemd multi-user boot on NEMU (DISTRO_ENGINE=qemu for a control run)
+	$(LINUX_PYTHON) $(LINUX_HOME)/distro_boot.py check --distro $(DISTRO_BOOT) \
+		--work "$(DISTRO_WORK)" --engine $(DISTRO_ENGINE) --timeout $(DISTRO_TIMEOUT) \
+		--nemu-backend $(DISTRO_NEMU_BACKEND) --nemu-clock-div $(DISTRO_NEMU_CLOCK_DIV)
+nemu-distro-run: ## Interactive official distro serial console; disables automatic acceptance shutdown
+	$(LINUX_PYTHON) $(LINUX_HOME)/distro_boot.py run --distro $(DISTRO_BOOT) \
+		--work "$(DISTRO_WORK)" --engine $(DISTRO_ENGINE) \
+		--nemu-backend $(DISTRO_NEMU_BACKEND) --nemu-clock-div $(DISTRO_NEMU_CLOCK_DIV)

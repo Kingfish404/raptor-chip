@@ -46,7 +46,7 @@ const char *regs[] = {
     "a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7",
     "s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6"};
 
-extern uint64_t g_nr_guest_inst;
+extern NEMU_TLS uint64_t g_nr_guest_inst;
 
 void isa_reg_display()
 {

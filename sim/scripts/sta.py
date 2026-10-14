@@ -7,20 +7,42 @@ import re
 import subprocess
 
 
+SYNTH_WRAPPER = """proc synth {args} {
+    yosys memory_collect
+    yosys synth {*}$args
+}
+source $::env(RAPT_STA_BACKEND_YOSYS)
+"""
+
+
+def link_dependency(source: Path, target: Path) -> None:
+    if not source.exists():
+        raise SystemExit(f"Missing backend dependency: {source}; prepare STA dependencies first")
+    if target.is_symlink() and target.resolve() == source.resolve():
+        return
+    if target.exists() or target.is_symlink():
+        raise SystemExit(f"Refusing to replace existing workspace path: {target}")
+    target.symlink_to(source, target_is_directory=source.is_dir())
+
+
 def prepare(backend: Path, work: Path, platform: str) -> None:
     if not (backend / "platforms" / platform / "platform.mk").is_file():
         raise SystemExit(f"Unknown STA platform: {platform} (backend: {backend})")
     work.mkdir(parents=True, exist_ok=True)
     for name in ("Makefile", "scripts", "platforms", "third_party"):
-        source = backend / name
-        target = work / name
-        if not source.exists():
-            raise SystemExit(f"Missing backend dependency: {source}; prepare STA dependencies first")
-        if target.is_symlink() and target.resolve() == source.resolve():
-            continue
-        if target.exists() or target.is_symlink():
-            raise SystemExit(f"Refusing to replace existing workspace path: {target}")
-        target.symlink_to(source, target_is_directory=source.is_dir())
+        link_dependency(backend / name, work / name)
+    synthesis = work / "synth-scripts"
+    if synthesis.is_symlink():
+        raise SystemExit(f"Refusing to replace existing workspace path: {synthesis}")
+    synthesis.mkdir(exist_ok=True)
+    for source in (backend / "scripts").iterdir():
+        if source.name != "yosys.tcl":
+            link_dependency(source, synthesis / source.name)
+    wrapper = synthesis / "yosys.tcl"
+    if wrapper.is_symlink():
+        raise SystemExit(f"Refusing to replace existing workspace path: {wrapper}")
+    if not wrapper.exists() or wrapper.read_text() != SYNTH_WRAPPER:
+        wrapper.write_text(SYNTH_WRAPPER)
 
 
 def main() -> None:
@@ -53,6 +75,7 @@ def main() -> None:
     # RESULT_DIR, DESIGN, or EXTRA_LIB_FILES) into this independent backend.
     env = {k: v for k, v in os.environ.items()
            if not k.startswith("MAKE") and k != "MFLAGS"}
+    env["RAPT_STA_BACKEND_YOSYS"] = str(backend / "scripts/yosys.tcl")
     if args.report_only:
         env["STA_REPORT_ONLY"] = "1"
     frequency = format(args.frequency, "g")
@@ -60,6 +83,7 @@ def main() -> None:
     command = ["make", "-j1", "-C", str(work), "sta",
                *(["sta-detail"] if args.detail else []), "show",
                "DESIGN=rapt", f"PLATFORM={args.platform}",
+               f"SCRIPT_DIR={work / 'synth-scripts'}",
                f"CLK_FREQ_MHZ={frequency}", f"RTL_FILES={rtl}",
                f"EXTRA_LIB_FILES={' '.join(str(p.resolve()) for p in args.lib)}", "EXTRA_BLACKBOX_V_FILES=",
                f"SYNTH_HIERARCHICAL={int(args.memory == 'sram')}", "SYNTH_SHARE=0", "SYNTH_MEMORY_DFF=0"]

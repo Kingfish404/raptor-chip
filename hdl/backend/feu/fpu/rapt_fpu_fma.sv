@@ -607,12 +607,11 @@ module rapt_fpu_fma_pipeline #(
       stage4_flags_c[1] = s4_sticky_q;
     end else if (!s4_special_q) begin
       exponent_value = 14'(s4_leading_one_q) + s4_common_base_q - 1;
-      shift_amount = integer'(s4_leading_one_q) > MantBits
-        ? integer'(s4_leading_one_q) - MantBits : 0;
+      shift_amount = integer'(s4_leading_one_q) - MantBits;
       // Round at target precision before clamping the exponent. Final
       // subnormal rounding can produce a normal encoding while still tiny.
-      magnitude_aligned = shift_amount == 0
-        ? s4_magnitude_q << (MantBits - integer'(s4_leading_one_q))
+      magnitude_aligned = shift_amount < 0
+        ? s4_magnitude_q << (-shift_amount)
         : s4_magnitude_q >> shift_amount;
       precision_retained = magnitude_aligned[MantBits-1:0];
       precision_guard = shift_amount > 0 ? s4_magnitude_q[shift_amount-1] : 1'b0;
@@ -639,8 +638,8 @@ module rapt_fpu_fma_pipeline #(
         guard_bit = 1'b0;
         sticky_bit = sticky_bit || (|s4_magnitude_q);
       end else begin
-        magnitude_aligned = shift_amount == 0
-          ? s4_magnitude_q << (MantBits - integer'(s4_leading_one_q))
+        magnitude_aligned = shift_amount < 0
+          ? s4_magnitude_q << (-shift_amount)
           : s4_magnitude_q >> shift_amount;
         retained = magnitude_aligned[MantBits-1:0];
         guard_bit = shift_amount > 0

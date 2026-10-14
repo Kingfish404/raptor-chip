@@ -15,14 +15,15 @@
 
 #include <setjmp.h>
 #include <isa.h>
+#include <cpu/thread.h>
 #include <memory/host.h>
 #include <memory/vaddr.h>
 #include <device/map.h>
 
 #define IO_SPACE_MAX (32 * 1024 * 1024) // 32 * 1MB
 
-extern jmp_buf exec_jmp_buf;
-extern int cause;
+extern NEMU_TLS jmp_buf exec_jmp_buf;
+extern NEMU_TLS int cause;
 
 static uint8_t *io_space = NULL;
 static uint8_t *p_space = NULL;
@@ -75,9 +76,11 @@ word_t map_read(paddr_t addr, int len, IOMap *map)
 {
   assert(len >= 1 && len <= 8);
   check_bound(map, addr, true);
+  cpu_bus_lock();
   paddr_t offset = addr - map->low;
   invoke_callback(map->callback, offset, len, false); // prepare data to read
   word_t ret = host_read(map->space + offset, len);
+  cpu_bus_unlock();
   return ret;
 }
 
@@ -85,7 +88,9 @@ void map_write(paddr_t addr, int len, word_t data, IOMap *map)
 {
   assert(len >= 1 && len <= 8);
   check_bound(map, addr, false);
+  cpu_bus_lock();
   paddr_t offset = addr - map->low;
   host_write(map->space + offset, len, data);
   invoke_callback(map->callback, offset, len, true);
+  cpu_bus_unlock();
 }

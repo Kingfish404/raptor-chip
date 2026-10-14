@@ -16,13 +16,24 @@
 #include <utils.h>
 #include <cpu/ifetch.h>
 #include <isa.h>
+#include <cpu/thread.h>
 #include <cpu/difftest.h>
 
 void set_nemu_state(int state, vaddr_t pc, int halt_ret) {
+  cpu_bus_lock();
+  if (nemu_threaded && nemu_state.state != NEMU_RUNNING) {
+    cpu_bus_unlock();
+    return;
+  }
   difftest_skip_ref();
-  nemu_state.state = state;
+#ifdef NEMU_HAS_THREADS
+  if (nemu_threaded) nemu_stop_hart = nemu_hartid;
+#endif
   nemu_state.halt_pc = pc;
   nemu_state.halt_ret = halt_ret;
+  nemu_state.state = state;
+  cpu_thread_wake();
+  cpu_bus_unlock();
 }
 
 __attribute__((noinline))

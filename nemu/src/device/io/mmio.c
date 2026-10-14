@@ -26,7 +26,7 @@ static int nr_map = 0;
 /* Negative page cache: RAM workloads repeatedly probe addresses that are
  * not MMIO. Without it every paddr access walks all maps. */
 #define MMIO_MISS_SLOTS 64
-static struct
+static NEMU_TLS struct
 {
   paddr_t page;
   uint32_t epoch;
@@ -67,7 +67,7 @@ bool mmio_map_contains(paddr_t addr)
   /* Single-entry hint: UART polling, CLINT mtime reads, etc. tend to
    * hammer the same MMIO region back-to-back. Caching the last-hit map
    * index turns the common case from O(nr_map) to one compare. */
-  static int last_hit = -1;
+  static NEMU_TLS int last_hit = -1;
   if (last_hit >= 0 && last_hit < nr_map && map_inside(&maps[last_hit], addr))
   {
     return true;
@@ -82,6 +82,16 @@ bool mmio_map_contains(paddr_t addr)
   }
   mmio_miss[idx].page = addr >> 12;
   mmio_miss[idx].epoch = mmio_epoch;
+  return false;
+}
+
+bool mmio_map_overlaps(paddr_t addr, size_t len)
+{
+  if (!len) return false;
+  if (len - 1 > (paddr_t)-1 - addr) return true;
+  paddr_t last = addr + len - 1;
+  for (int index = 0; index < nr_map; index++)
+    if (addr <= maps[index].high && last >= maps[index].low) return true;
   return false;
 }
 

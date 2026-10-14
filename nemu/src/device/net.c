@@ -1,9 +1,16 @@
 #include <device/map.h>
 #include <memory/paddr.h>
+#include <cpu/cpu.h>
+#include <cpu/multidiff.h>
+#include <cpu/diffjournal.h>
 
 #include <arpa/inet.h>
 #include <poll.h>
 #include <slirp/libslirp.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #define VIRTIO_NET_BASE CONFIG_NET_MMIO
 #define VIRTIO_NET_SIZE 0x1000u
@@ -94,22 +101,102 @@ static struct
   virtio_net_queue_t queues[VIRTIO_NET_QUEUE_COUNT];
 } net;
 
-void plic_raise_irq(int irq);
+void plic_raise_net_irq(int irq);
+
+static bool scripted_net;
+static uint64_t transmitted, last_poll_ticks;
+typedef struct {
+  uint64_t after_tx;
+  size_t size;
+  uint8_t *bytes;
+} NetInput;
+static NetInput net_inputs[2][512];
+static size_t net_input_count[2], net_input_next[2];
+static ssize_t slirp_send_packet(const void *packet, size_t packet_len, void *opaque);
+
+static void input_error(void)
+{
+  fprintf(stderr, "virtio-net: invalid script; expected tx|poll AFTER_TX HEX (ordered per phase, bounded regular file)\n");
+  exit(EXIT_FAILURE);
+}
+
+static unsigned hex_value(unsigned char byte)
+{
+  if (byte >= '0' && byte <= '9') return byte - '0';
+  if (byte >= 'a' && byte <= 'f') return byte - 'a' + 10;
+  if (byte >= 'A' && byte <= 'F') return byte - 'A' + 10;
+  input_error();
+  return 0;
+}
+
+static void load_net_inputs(const char *path)
+{
+  if (!path) return;
+  int descriptor = open(path, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+  struct stat info;
+  if (descriptor < 0 || fstat(descriptor, &info) || !S_ISREG(info.st_mode) ||
+      info.st_size > 32 * 1024 * 1024) input_error();
+  FILE *file = fdopen(descriptor, "r");
+  if (!file) input_error();
+  char line[2 * VIRTIO_NET_MAX_FRAME + 64];
+  size_t total = 0;
+  while (fgets(line, sizeof(line), file)) {
+    if (!strchr(line, '\n') && !feof(file)) input_error();
+    char *phase = strtok(line, " \t\r\n");
+    if (!phase) continue;
+    char *ordinal = strtok(NULL, " \t\r\n"), *hex = strtok(NULL, " \t\r\n"), *end;
+    if ((strcmp(phase, "tx") && strcmp(phase, "poll")) || !ordinal || !hex ||
+        strtok(NULL, " \t\r\n") || strspn(ordinal, "0123456789") != strlen(ordinal)) input_error();
+    errno = 0;
+    uint64_t after_tx = strtoull(ordinal, &end, 10);
+    unsigned channel = !strcmp(phase, "tx");
+    size_t size = !strcmp(hex, "-") ? 0 : strlen(hex) / 2;
+    if (errno || *end || (channel && !after_tx) || net_input_count[channel] == 512 ||
+        (size && strlen(hex) % 2) || (!size && strcmp(hex, "-")) ||
+        size > VIRTIO_NET_MAX_FRAME - VIRTIO_NET_HDR_LEN || total + size > 16 * 1024 * 1024 ||
+        (net_input_count[channel] && after_tx < net_inputs[channel][net_input_count[channel] - 1].after_tx)) input_error();
+    NetInput *input = &net_inputs[channel][net_input_count[channel]++];
+    input->after_tx = after_tx;
+    input->size = size;
+    input->bytes = malloc(size ? size : 1);
+    Assert(input->bytes, "virtio-net: script allocation failed");
+    for (size_t index = 0; index < size; index++)
+      input->bytes[index] = hex_value(hex[2 * index]) * 16 + hex_value(hex[2 * index + 1]);
+    total += size;
+  }
+  if (ferror(file)) input_error();
+  fclose(file);
+}
+
+static void scripted_input(bool during_tx)
+{
+  while (net_input_next[during_tx] < net_input_count[during_tx]) {
+    NetInput *input = &net_inputs[during_tx][net_input_next[during_tx]];
+    if (input->after_tx > transmitted) break;
+    net_input_next[during_tx]++;
+    slirp_send_packet(input->bytes, input->size, NULL);
+  }
+}
+
+bool nemu_net_input_consumed(void)
+{
+  return net_input_next[0] == net_input_count[0] && net_input_next[1] == net_input_count[1];
+}
+
+bool nemu_net_reset_state(void)
+{
+  const uint8_t zero[sizeof(net)] = {0};
+  return !memcmp(&net, zero, sizeof(net)) && !transmitted && !net_input_next[0] && !net_input_next[1];
+}
 
 static bool guest_mem_read(uint64_t addr, void *buf, size_t len)
 {
-  uint8_t *dst = buf;
-  for (size_t i = 0; i < len; i++)
-    dst[i] = *guest_to_host((paddr_t)(addr + i));
-  return true;
+  return paddr_dma_read((paddr_t)addr, buf, len);
 }
 
 static bool guest_mem_write(uint64_t addr, const void *buf, size_t len)
 {
-  const uint8_t *src = buf;
-  for (size_t i = 0; i < len; i++)
-    *guest_to_host((paddr_t)(addr + i)) = src[i];
-  return true;
+  return paddr_dma_write((paddr_t)addr, buf, len);
 }
 
 static bool read_desc(const virtio_net_queue_t *queue, uint16_t idx,
@@ -135,32 +222,33 @@ static bool queue_pop(virtio_net_queue_t *queue, uint16_t *head)
     return false;
 
   uint16_t avail_idx;
-  guest_mem_read(queue->driver_addr + 2, &avail_idx, sizeof(avail_idx));
+  if (!guest_mem_read(queue->driver_addr + 2, &avail_idx, sizeof(avail_idx))) return false;
   if (queue->last_avail_idx == avail_idx)
     return false;
 
   uint64_t ring_addr = queue->driver_addr + 4 +
                        (uint64_t)(queue->last_avail_idx % queue->num) * 2;
-  guest_mem_read(ring_addr, head, sizeof(*head));
+  if (!guest_mem_read(ring_addr, head, sizeof(*head))) return false;
   queue->last_avail_idx++;
   return *head < queue->num;
 }
 
-static void queue_push(virtio_net_queue_t *queue, uint16_t head, uint32_t len)
+static bool queue_push(virtio_net_queue_t *queue, uint16_t head, uint32_t len)
 {
   uint16_t used_idx;
-  guest_mem_read(queue->device_addr + 2, &used_idx, sizeof(used_idx));
+  if (!guest_mem_read(queue->device_addr + 2, &used_idx, sizeof(used_idx))) return false;
 
   uint64_t elem_addr = queue->device_addr + 4 +
                        (uint64_t)(used_idx % queue->num) * 8;
   uint32_t elem_id = head;
-  guest_mem_write(elem_addr, &elem_id, sizeof(elem_id));
-  guest_mem_write(elem_addr + 4, &len, sizeof(len));
+  if (!guest_mem_write(elem_addr, &elem_id, sizeof(elem_id)) ||
+      !guest_mem_write(elem_addr + 4, &len, sizeof(len))) return false;
   used_idx++;
-  guest_mem_write(queue->device_addr + 2, &used_idx, sizeof(used_idx));
+  if (!guest_mem_write(queue->device_addr + 2, &used_idx, sizeof(used_idx))) return false;
 
   net.interrupt_status |= 1u;
-  plic_raise_irq(VIRTIO_NET_IRQ);
+  plic_raise_net_irq(VIRTIO_NET_IRQ);
+  return true;
 }
 
 static size_t copy_from_desc_chain(const virtio_net_queue_t *queue,
@@ -174,7 +262,7 @@ static size_t copy_from_desc_chain(const virtio_net_queue_t *queue,
     if (!read_desc(queue, idx, &desc) || (desc.flags & VRING_DESC_F_WRITE) ||
         desc.len > cap - copied)
       return 0;
-    guest_mem_read(desc.addr, buf + copied, desc.len);
+    if (!guest_mem_read(desc.addr, buf + copied, desc.len)) return 0;
     copied += desc.len;
     if (!(desc.flags & VRING_DESC_F_NEXT))
       return copied;
@@ -194,7 +282,7 @@ static size_t copy_to_desc_chain(const virtio_net_queue_t *queue,
     if (!read_desc(queue, idx, &desc) || !(desc.flags & VRING_DESC_F_WRITE))
       return 0;
     size_t chunk = desc.len < len - copied ? desc.len : len - copied;
-    guest_mem_write(desc.addr, buf + copied, chunk);
+    if (!guest_mem_write(desc.addr, buf + copied, chunk)) return 0;
     copied += chunk;
     if (!(desc.flags & VRING_DESC_F_NEXT))
       break;
@@ -212,12 +300,15 @@ static void service_tx_queue(void)
   while (queue_pop(queue, &head))
   {
     size_t len = copy_from_desc_chain(queue, head, frame, sizeof(frame));
-    if (len >= VIRTIO_NET_HDR_LEN && slirp)
+    if (len >= VIRTIO_NET_HDR_LEN && (slirp || scripted_net))
     {
-      slirp_input(slirp, frame + VIRTIO_NET_HDR_LEN,
-                  (int)(len - VIRTIO_NET_HDR_LEN));
+      if (multidiff_net_active() && nemu_journal_net_tx &&
+          !nemu_journal_net_tx(frame + VIRTIO_NET_HDR_LEN, len - VIRTIO_NET_HDR_LEN)) return;
+      transmitted++;
+      if (scripted_net) scripted_input(true);
+      else slirp_input(slirp, frame + VIRTIO_NET_HDR_LEN, (int)(len - VIRTIO_NET_HDR_LEN));
     }
-    queue_push(queue, head, (uint32_t)len);
+    if (!queue_push(queue, head, (uint32_t)len)) break;
   }
 }
 
@@ -227,18 +318,24 @@ static ssize_t slirp_send_packet(const void *packet, size_t packet_len,
   (void)opaque;
   if (packet_len > VIRTIO_NET_MAX_FRAME - VIRTIO_NET_HDR_LEN)
     return -1;
+  if (multidiff_net_active() && nemu_journal_net_rx && !nemu_journal_net_rx(packet, packet_len)) return -1;
 
   virtio_net_queue_t *queue = &net.queues[VIRTIO_NET_RX_QUEUE];
   uint16_t head;
-  if (!queue_pop(queue, &head))
+  if (!queue_pop(queue, &head)) {
+    if (multidiff_net_active() && nemu_journal_net_result) nemu_journal_net_result(packet_len, 0);
     return (ssize_t)packet_len;
+  }
 
   uint8_t frame[VIRTIO_NET_MAX_FRAME] = {0};
   memcpy(frame + VIRTIO_NET_HDR_LEN, packet, packet_len);
   size_t total = packet_len + VIRTIO_NET_HDR_LEN;
   size_t written = copy_to_desc_chain(queue, head, frame, total);
-  queue_push(queue, head, (uint32_t)written);
-  return written ? (ssize_t)packet_len : -1;
+  bool committed = queue_push(queue, head, (uint32_t)written);
+  ssize_t result = written && committed ? (ssize_t)packet_len : -1;
+  if (multidiff_net_active() && nemu_journal_net_result)
+    nemu_journal_net_result(result, written && committed ? 1 : 2);
+  return result;
 }
 
 static void slirp_guest_error(const char *message, void *opaque)
@@ -364,6 +461,15 @@ void virtio_net_poll(void)
   int result = poll(poll_fds, poll_fd_count, 0);
   slirp_pollfds_poll(slirp, result < 0, slirp_get_revents, NULL);
   run_expired_timers();
+}
+
+void nemu_net_poll_inputs(uint64_t ticks)
+{
+  if (scripted_net) scripted_input(false);
+  else if (ticks - last_poll_ticks >= 10000000 / 60) {
+    last_poll_ticks = ticks;
+    virtio_net_poll();
+  }
 }
 
 static uint64_t io_read_value(uint32_t offset, int len)
@@ -530,6 +636,12 @@ static const SlirpCb slirp_callbacks = {
 void init_net(void)
 {
   reset_regs();
+  const char *input_path = NULL;
+#ifdef NEMU_HAS_SMP
+  scripted_net = nemu_net_script;
+  input_path = nemu_net_input_path;
+#endif
+  if (scripted_net) load_net_inputs(input_path);
 
   SlirpConfig config = {
       .version = 1,
@@ -552,12 +664,15 @@ void init_net(void)
   Assert(inet_pton(AF_INET, "10.0.2.3", &config.vnameserver) == 1,
          "invalid libslirp DNS address");
 
-  slirp = slirp_new(&config, &slirp_callbacks, NULL);
-  Assert(slirp != NULL, "failed to initialize libslirp");
+  if (!scripted_net) {
+    slirp = slirp_new(&config, &slirp_callbacks, NULL);
+    Assert(slirp != NULL, "failed to initialize libslirp");
+  }
 
   virtio_net_base = new_space(VIRTIO_NET_SIZE);
   memset(virtio_net_base, 0, VIRTIO_NET_SIZE);
   add_mmio_map("virtio-net", VIRTIO_NET_BASE, virtio_net_base,
                VIRTIO_NET_SIZE, virtio_net_io_handler);
-  Log("virtio-net: user-mode NAT enabled (guest DHCP 10.0.2.15, gateway 10.0.2.2)");
+  Log("virtio-net: %s", scripted_net ? "scripted input backend; no host networking" :
+      "user-mode NAT enabled (guest DHCP 10.0.2.15, gateway 10.0.2.2)");
 }

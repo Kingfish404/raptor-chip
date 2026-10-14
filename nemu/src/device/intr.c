@@ -14,6 +14,9 @@
  ***************************************************************************************/
 
 #include <isa.h>
+#include <cpu/thread.h>
+#include <cpu/diffjournal.h>
+#include <cpu/multidiff.h>
 #include <device/map.h>
 
 // ---------------------------------------------------------------------------
@@ -24,9 +27,8 @@
 
 // Number of external interrupt sources (1-based; source 0 is reserved/unused)
 #define PLIC_NDEV 32
-// Number of contexts: context 0 = M-mode hart 0, context 1 = S-mode hart 0
-#define PLIC_NCTX 2
-#define PLIC_NWORDS ((PLIC_NDEV + 31) / 32)
+#define PLIC_NCTX (2 * NEMU_MAX_HARTS)
+#define PLIC_NWORDS ((PLIC_NDEV + 32) / 32)
 
 // PLIC register-map offsets
 #define PLIC_PRIORITY_BASE 0x000000 // 4 bytes per source (0..NDEV)
@@ -45,10 +47,25 @@ static uint32_t plic_enable[PLIC_NCTX][PLIC_NWORDS];
 static uint32_t plic_threshold[PLIC_NCTX];
 static uint32_t plic_claimed[PLIC_NCTX];
 
+#ifdef NEMU_HAS_THREADS
+static bool plic_lines[PLIC_NCTX];
+
+void plic_sync_hart(void)
+{
+    if (!nemu_threaded || !nemu_worker) return;
+    if (plic_lines[2 * nemu_hartid])
+        cpu.sr[CSR_MIP] |= (word_t)1 << 11;
+    else
+        cpu.sr[CSR_MIP] &= ~((word_t)1 << 11);
+    cpu.seip = plic_lines[2 * nemu_hartid + 1];
+    cpu.sr[CSR_SIP] = riscv_mip_value() & cpu.sr[CSR_MIDELEG] & 0x222;
+}
+#endif
+
 // Update MIP.MEIP / MIP.SEIP (and SIP.SEIP) based on current PLIC state.
 static void plic_update_mip(void)
 {
-    for (int ctx = 0; ctx < PLIC_NCTX; ctx++)
+    for (unsigned ctx = 0; ctx < 2 * nemu_nr_harts; ctx++)
     {
         bool has_irq = false;
         for (int i = 1; i <= PLIC_NDEV; i++)
@@ -62,21 +79,33 @@ static void plic_update_mip(void)
                 break;
             }
         }
-        if (ctx == 0)
+#ifdef NEMU_HAS_THREADS
+        if (nemu_threaded)
+        {
+            plic_lines[ctx] = has_irq;
+            continue;
+        }
+#endif
+        CPU_state *hart = riscv_hart(ctx / 2);
+        if ((ctx & 1) == 0)
         {
             // Context 0 -> MEIP (bit 11 of MIP)
             if (has_irq)
-                cpu.sr[CSR_MIP] |= (1u << 11);
+                hart->sr[CSR_MIP] |= (1u << 11);
             else
-                cpu.sr[CSR_MIP] &= ~(1u << 11);
+                hart->sr[CSR_MIP] &= ~(1u << 11);
         }
         else
         {
             // External SEIP must not overwrite M-mode's software pending bit.
-            cpu.seip = has_irq;
-            cpu.sr[CSR_SIP] = riscv_mip_value() & cpu.sr[CSR_MIDELEG] & 0x222;
+            hart->seip = has_irq;
+            hart->sr[CSR_SIP] = riscv_hart_mip_value(hart) & hart->sr[CSR_MIDELEG] & 0x222;
         }
     }
+#ifdef NEMU_HAS_THREADS
+    plic_sync_hart();
+#endif
+    cpu_thread_wake();
 }
 
 // Claim: return highest-priority pending+enabled IRQ for a context
@@ -106,13 +135,67 @@ static uint32_t plic_claim(int ctx)
 }
 
 // Public: raise an external interrupt at source `irq` (1-based).
-void plic_raise_irq(int irq)
+static void plic_raise_source(int irq, unsigned origin)
 {
     if (irq < 1 || irq > PLIC_NDEV)
         return;
+    cpu_bus_lock();
+    if (origin == 4 && multidiff_block_active() && nemu_journal_block_irq)
+        nemu_journal_block_irq(irq);
+    else if (origin == 3 && multidiff_net_active() && nemu_journal_net_irq)
+        nemu_journal_net_irq(irq);
+    else if (origin == 2 && multidiff_rng_active() && nemu_journal_rng_irq)
+        nemu_journal_rng_irq(irq);
+    else if (origin == 1 && multidiff_uart_active() && nemu_journal_uart_irq)
+        nemu_journal_uart_irq(irq);
+    else if (multidiff_plic_active() && nemu_journal_plic_source)
+        nemu_journal_plic_source(irq);
     int w = irq / 32, b = irq % 32;
     plic_pending[w] |= (1u << b);
     plic_update_mip();
+    cpu_bus_unlock();
+}
+
+void plic_raise_irq(int irq)
+{
+    plic_raise_source(irq, false);
+}
+
+void plic_raise_uart_irq(int irq)
+{
+    plic_raise_source(irq, true);
+}
+
+void plic_raise_rng_irq(int irq)
+{
+    plic_raise_source(irq, 2);
+}
+
+void plic_raise_net_irq(int irq)
+{
+    plic_raise_source(irq, 3);
+}
+
+void plic_raise_block_irq(int irq)
+{
+    plic_raise_source(irq, 4);
+}
+
+bool nemu_plic_reset_state(void)
+{
+    for (unsigned source = 0; source <= PLIC_NDEV; source++)
+        if (plic_priority[source]) return false;
+    for (unsigned word = 0; word < PLIC_NWORDS; word++)
+        if (plic_pending[word]) return false;
+    for (unsigned context = 0; context < PLIC_NCTX; context++) {
+        if (plic_threshold[context] || plic_claimed[context]) return false;
+        for (unsigned word = 0; word < PLIC_NWORDS; word++)
+            if (plic_enable[context][word]) return false;
+#ifdef NEMU_HAS_THREADS
+        if (plic_lines[context]) return false;
+#endif
+    }
+    return true;
 }
 
 void plic_restore_checkpoint(const uint8_t *priority, uint32_t pending,
@@ -189,6 +272,7 @@ static void plic_io_handler(uint32_t offset, int len, bool is_write)
             uint32_t v = *(uint32_t *)(plic_base + offset);
             if (w == 0) v &= ~1u; // source 0 hardwired
             plic_pending[w] |= v;
+            plic_update_mip();
         }
         else
         {

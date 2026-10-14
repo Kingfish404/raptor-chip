@@ -9,7 +9,161 @@ This directory provides the Linux build entry points for Raptor. The base kernel
 
 This release does not provide RV32 Alpine/Debian packages; the build entry points reject those combinations. The workflow reuses distribution root filesystems and rebuilds the kernel and firmware for Raptor; it does not rebuild Alpine/Debian package repositories in this project. Userspace uses BusyBox init; services that require systemd/OpenRC need separate integration.
 
+## Official Debian / Ubuntu on NEMU (systemd)
+
+`distro_boot.py` provides a separate full-distribution path: official Debian 13
+nocloud and Ubuntu 24.04 LTS riscv64 userspace, with the distribution's own
+`/sbin/init` and systemd. It does not use the BusyBox-init conversion described
+above. Ubuntu 24.04 is selected for the RV64GC baseline; this is not support for
+Ubuntu 25.10+ and its RVA23 baseline.
+
+Pinned sources are Debian build `20261001-2618` (SHA512) and Ubuntu build
+`20260926` (SHA256), obtained from the official HTTPS image sites. Their source
+URLs and checksums are in `distro_boot.py`. The platform uses an upstream Linux
+kernel built by this repository, not the cloud image's distribution kernel or
+its modules. The initially validated kernel artifact is Linux 6.18.51 with
+VirtIO block/network, ext4, devtmpfs, RV64 floating point and systemd prerequisites
+built in. The artifact manifest is checked before use.
+
+The prepared environment uses 1 GiB RAM, NS16550 UART, CLINT/PLIC, VirtIO
+block/network/RNG, and a syscon poweroff mapping to NEMU's finisher. OpenSBI is
+rebuilt from the local source in an isolated temporary directory. NEMU is
+compiled from the current sources with private Kconfig/generated headers and
+objects under each distribution's output directory; shared `nemu/.config` and
+the RTL simulator configuration are untouched.
+
+Host prerequisites are the Linux build dependencies listed below, plus QEMU
+system/tools, fakeroot, GNU tar, cpio, SDL2/readline/libslirp development files,
+and the initialized NEMU Kconfig/fixdep/SoftFloat tools. The rootfs builder uses
+the system `/usr/bin/tar` and `/usr/sbin/mke2fs` so a different libc in an
+alternative tool installation does not bypass fakeroot ownership handling.
+No root mount, loop device, binfmt registration, TAP interface, or host package
+installation is performed by this workflow.
+
+Ubuntu extraction must preserve the archive's numeric UID/GID values. If a
+sandbox makes fakeroot's ownership operations fail with `Invalid argument`,
+run preparation in an environment where fakeroot works; do not work around it
+with `--no-same-owner`. A failed preparation leaves its output directory for
+inspection, so move it aside or choose a new `DISTRO_WORK` before retrying.
+
+With the existing kernel artifacts, run from the repository root:
+
+```sh
+make -C linux nemu-distro-prepare DISTRO_BOOT=debian
+make -C linux nemu-distro-check DISTRO_BOOT=debian
+make -C linux nemu-distro-prepare DISTRO_BOOT=ubuntu
+make -C linux nemu-distro-check DISTRO_BOOT=ubuntu
+
+# Independent control run, using the same kernel and rootfs without changing it:
+make -C linux nemu-distro-check DISTRO_BOOT=debian DISTRO_ENGINE=qemu
+
+# Interactive serial root console, without the acceptance timer's shutdown:
+make -C linux nemu-distro-run DISTRO_BOOT=debian
+make -C linux nemu-distro-run DISTRO_BOOT=ubuntu
+```
+
+`nemu-distro-prepare` requires a new `<DISTRO_WORK>/<DISTRO_BOOT>` directory; once prepared,
+use `nemu-distro-check` or `nemu-distro-run` directly. The default work directory is
+`linux/build/distro-boot`. `DISTRO_TIMEOUT` defaults to 3600 wall-clock seconds.
+Checks write `<distro>/{nemu,qemu}-boot.log` and a matching `*-result.json`;
+the result binds the log and artifact manifest hashes. NEMU also writes its
+instruction/PC snapshots inside that distribution's directory.
+
+To construct a fresh kernel first, select a new output directory rather than
+overwriting an older immutable kernel build:
+
+```sh
+make -C linux build-rv64-fpga LINUX_DISTRO=debian \
+    LINUX_OUTPUT="$PWD/linux/build/distro-kernel-new"
+make -C linux nemu-distro-prepare DISTRO_BOOT=debian \
+    DISTRO_WORK="$PWD/linux/build/distro-boot-new" \
+    DISTRO_KERNEL="$PWD/linux/build/distro-kernel-new"
+```
+
+The platform overlay configures the single ext4 root disk, hostname, locale,
+timezone, DHCP via systemd-networkd, and local serial root autologin. It disables
+cloud-init, interactive firstboot, multipath and Snap startup, and the cloud
+Pollinate entropy service; NEMU supplies host entropy through VirtIO RNG and
+the boot DTB. It retains distribution libraries, package databases, systemd,
+udev, D-Bus and normal service startup. No inbound network forwarding is added.
+
+Acceptance requires systemd as PID 1, `multi-user.target`, an active serial
+getty, no failed units, the expected distro/architecture, glibc and package
+queries, floating-point arithmetic, a dynamic shell/checksum pipeline, ext4
+root writes, and clean guest poweroff with emulator exit status zero. Merely
+seeing a welcome banner or login prompt is insufficient. QEMU is a control,
+not a substitute for the NEMU result.
+
+NEMU's existing `--disk` backend keeps writes in memory, and QEMU checks use
+`-snapshot`: guest changes do **not** survive a new emulator invocation. These
+checks do not establish persistent package installation, external Internet
+access, current wall-clock time, or FPGA boot. Use `poweroff` to end an
+interactive session; NEMU's finisher does not implement guest reboot.
+Allow host memory for the entire root disk plus guest RAM and emulator overhead.
+
 ## Building and validation
+
+### NEMU multi-hart distribution boot
+
+Set `DISTRO_HARTS=2` or `4` when preparing and running a distribution. The default
+is still one hart. Each count uses a separate directory:
+`build/distro-boot-smp2/<distro>` or `build/distro-boot-smp4/<distro>`; existing
+single-hart artifacts are not rewritten.
+
+```sh
+make -C linux nemu-distro-prepare DISTRO_BOOT=debian DISTRO_HARTS=2
+make -C linux nemu-distro-check DISTRO_BOOT=debian DISTRO_HARTS=2
+make -C linux nemu-distro-prepare DISTRO_BOOT=debian DISTRO_HARTS=4
+make -C linux nemu-distro-check DISTRO_BOOT=debian DISTRO_HARTS=4
+make -C linux nemu-distro-run DISTRO_BOOT=debian DISTRO_HARTS=4
+```
+
+The manifest records the hart count, and `check`/`run` use that recorded value
+for both NEMU and the optional `DISTRO_ENGINE=qemu` control. Preparation checks
+the kernel's SMP/CPU capacity, builds NEMU with both runtime-selectable backends, and generates
+matching CPU, CLINT and PLIC DTB topology. The guest acceptance program checks
+the exact online CPU count, pins a pthread to each CPU, and exercises shared AMO
+and LR/SC counters plus independent floating-point state. A boot is accepted
+only after `RAPTOR_SMP_PASS harts=N ...`, the existing distribution checks, and
+clean poweroff. The default `DISTRO_NEMU_BACKEND=rr` uses one host thread.
+Select `DISTRO_NEMU_BACKEND=threaded` for one pthread per hart:
+
+```sh
+make -C linux nemu-distro-prepare DISTRO_HARTS=4 DISTRO_NEMU_BACKEND=threaded
+make -C linux nemu-distro-check DISTRO_HARTS=4 DISTRO_NEMU_BACKEND=threaded
+make -C linux nemu-distro-run DISTRO_HARTS=4 DISTRO_NEMU_BACKEND=threaded
+```
+
+The default threaded directory is `build/distro-boot-smp4-threaded/debian`.
+Use `DISTRO_HARTS=2` for two harts or `DISTRO_BOOT=ubuntu` for Ubuntu.
+`DISTRO_NEMU_CLOCK_DIV=16` controls guest time relative to monotonic host time;
+the default slows guest time by 16 to accommodate interpreter throughput.
+Backend and clock selection are runtime options, recorded in boot receipts.
+To switch an already prepared, current NEMU image without rebuilding, supply
+its existing `DISTRO_WORK` explicitly and select the other backend. The CPU
+count remains tied to its prepared DTB and guest acceptance configuration.
+This is functional emulation, not an FPGA multicore result or timing model.
+CPU hotplug is outside this validation scope. Store run logs, timings and
+investigation notes in ignored build directories rather than this guide.
+
+To validate the prepared default directories:
+
+```sh
+for distro in debian ubuntu; do
+  for harts in 2 4; do
+    make -C linux nemu-distro-check DISTRO_BOOT="$distro" DISTRO_HARTS="$harts" \
+      DISTRO_NEMU_BACKEND=threaded DISTRO_NEMU_CLOCK_DIV=16 DISTRO_TIMEOUT=3600 || exit
+  done
+done
+```
+
+This validates the repository-built upstream kernel with official distribution
+userspace, not a distribution-packaged kernel, persistent disk writes, FPGA
+multicore or multicore DiffTest. See the
+[multicore DiffTest guide](../nemu/README.md#multicore-difftest) for
+the separate verification work required.
+
+### Existing kernel/initramfs flow
 
 Run these commands from the repository root:
 

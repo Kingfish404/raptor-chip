@@ -223,6 +223,9 @@ else
 	$(MAKE) -C $(RAPTOR_HOME) build-nemu32-ref
 endif
 
+# NEMU ISS checks: nemu-*-check targets.
+include $(VERIFY_HOME)/nemu/nemu.mk
+
 # One MROM per XLEN; the directory name selects it, so XLEN-specific flows
 # (e.g. RVA22S64_XLEN) cannot pick up the other XLEN's boot ROM.
 $(BUILD_DIR)/mrom-rv%/mrom-data.bin:
@@ -2826,10 +2829,6 @@ verilator-l1d-sram-pma-rv32 verilator-l1d-sram-pma-rv64:
 verilator-ioq-data-span-rv32 verilator-ioq-data-span-rv64:
 	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_data_span,,-d RAPT_ASSERT_EN)
 
-.PHONY: nemu-memory-map-check
-nemu-memory-map-check:
-	$(PYTHON) "$(VERIFY_HOME)/scripts/nemu_memory_map_check.py"
-
 .PHONY: verilator-l1d-read-error-rv32 verilator-l1d-read-error-rv64
 verilator-l1d-read-error-rv32 verilator-l1d-read-error-rv64:
 	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1d_read_error,,-d RAPT_ASSERT_EN)
@@ -2898,15 +2897,6 @@ rva22s64-clint-time-checkpoint-run: $(RVA22S64_MROM)
 		--npc "$(RVA22S64_NPC)" --reference "$(NEMU_SO_$(RVA22S64_XLEN))" --mrom "$(MROM_IMG)" \
 		--elf "$(RVA22S64_TIME_CHECKPOINT_DIR)/test.elf" --image "$(RVA22S64_TIME_CHECKPOINT_DIR)/test.bin" --output "$(RVA22S64_TIME_CHECKPOINT_DIR)/runs"
 
-.PHONY: nemu-svpbmt-check
-nemu-svpbmt-check:
-	$(PYTHON) "$(VERIFY_HOME)/scripts/nemu_svpbmt_check.py"
-
-.PHONY: nemu-svpbmt-access-check
-nemu-svpbmt-access-check:
-	$(PYTHON) "$(VERIFY_HOME)/scripts/nemu_svpbmt_check.py" --access
-
-.PHONY: nemu-svpbmt-decode-check
 HOST_CXX ?= c++
 .PHONY: mmio-alignment-check
 mmio-alignment-check: $(MROM_IMG)
@@ -2952,12 +2942,6 @@ mmio-virtio-mask-check:
 	"$(BUILD_DIR)/mmio-virtio-mask32"
 	$(HOST_CXX) -std=c++17 -O2 -DCONFIG_ISA64 -I"$(NSIM_HOME)/include" "$(RAPTOR_HOME)/app/tests/host/mmio_virtio_mask.cc" -o "$(BUILD_DIR)/mmio-virtio-mask64"
 	"$(BUILD_DIR)/mmio-virtio-mask64"
-nemu-svpbmt-decode-check:
-	@mkdir -p "$(BUILD_DIR)"
-	$(HOST_CXX) -std=c++17 -DCONFIG_ISA64 -I"$(NSIM_HOME)/include" "$(RAPTOR_HOME)/app/tests/host/nemu_svpbmt_decode.cc" -ldl -o "$(BUILD_DIR)/nemu-svpbmt-decode"
-	"$(BUILD_DIR)/nemu-svpbmt-decode" "$(NEMU_SO_64)" 1
-	"$(BUILD_DIR)/nemu-svpbmt-decode" "$(NEMU_SO_64)" 2
-
 .PHONY: verilator-lsu-hum-pmp-rv32 verilator-lsu-hum-pmp-rv64
 verilator-lsu-hum-pmp-rv32 verilator-lsu-hum-pmp-rv64:
 	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_lsu_hum_pmp,,-d RAPT_ASSERT_EN)
@@ -3092,14 +3076,7 @@ verilator-ptw-kill-drain-rv32: verilator-ptw-kill-drain
 
 rva22s64-ifetch-superpage-replace-run: RVA22S64_TEST_MARCH = rv64imafdc_zicsr_zifencei_svinval
 
-.PHONY: nemu-sv39-superpage-check
-.PHONY: nemu-satp-warl-check
-.PHONY: nemu-pmp-priority-check
-.PHONY: nemu-pmp-capacity-check pmp-capacity-check
-nemu-pmp-capacity-check:
-	$(PYTHON) "$(VERIFY_HOME)/scripts/nemu_pmp_priority_check.py" \
-		--test-source "$(RAPTOR_HOME)/app/tests/host/nemu_pmp_capacity.c"
-
+.PHONY: pmp-capacity-check
 pmp-capacity-check: nemu-pmp-capacity-check \
 	verilator-csr-pmp-warl-rv32 verilator-csr-pmp-warl-rv64 \
 	verilator-csr-pmp-lock-rv32 verilator-csr-pmp-lock-rv64 \
@@ -3107,18 +3084,6 @@ pmp-capacity-check: nemu-pmp-capacity-check \
 	verilator-pmp-reset-napot-rv32 verilator-pmp-reset-napot-rv64 \
 	verilator-idu-csr-addresses-rv32 verilator-idu-csr-addresses-rv64 \
 	verilator-l1d-pmp-shared-rv32 verilator-l1d-pmp-shared-rv64
-
-nemu-pmp-priority-check:
-	$(PYTHON) "$(VERIFY_HOME)/scripts/nemu_pmp_priority_check.py"
-
-nemu-satp-warl-check:
-	$(PYTHON) "$(VERIFY_HOME)/scripts/nemu_satp_warl_check.py" \
-		--reference "$(NEMU_SO_64)" --output "$(BUILD_DIR)/nemu-satp-warl.json"
-
-nemu-sv39-superpage-check:
-	$(PYTHON) "$(VERIFY_HOME)/scripts/nemu_sv39_superpage_check.py" \
-		--reference "$(NEMU_SO_64)" --output "$(BUILD_DIR)/nemu-sv39-superpage" \
-		--cc "$(CC)" --objcopy "$(OBJCOPY)"
 
 .PHONY: verilator-idu-hints-rv32 verilator-idu-hints-rv64
 verilator-idu-hints-rv32 verilator-idu-hints-rv64:

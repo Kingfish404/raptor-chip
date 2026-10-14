@@ -89,7 +89,7 @@ static inline void pmp_addr_set(int i, word_t v)
 /* CSR write hook: returns non-zero on success, 0 if the target was   */
 /* not a PMP CSR (caller should perform the normal write).            */
 
-static bool pmp_any_active = false;
+static NEMU_TLS bool pmp_any_active = false;
 
 /* Decoded PMP entries: rebuilt only when a PMP CSR changes. Avoids the
  * per-lookup shift/mask and NAPOT trailing-ones loops. */
@@ -103,7 +103,7 @@ struct pmp_decoded
   word_t mask_w;  /* NAPOT: size mask, in 4-byte words; 0 otherwise */
 };
 
-static struct pmp_decoded pmp_dec[PMP_N];
+static NEMU_TLS struct pmp_decoded pmp_dec[PMP_N];
 
 /* Per-word match cache: the lowest-numbered matching entry is a pure
  * function of (pmpcfg, pmpaddr, word address), so a generation counter
@@ -117,8 +117,8 @@ struct pmp_wcache_entry
   uint8_t cfg;
   uint32_t gen;
 };
-static struct pmp_wcache_entry pmp_wcache[PMP_WCACHE_SIZE];
-static uint32_t pmp_gen = 1;
+static NEMU_TLS struct pmp_wcache_entry pmp_wcache[PMP_WCACHE_SIZE];
+static NEMU_TLS uint32_t pmp_gen = 1;
 
 static inline word_t pmp_napot_mask(word_t pa)
 {
@@ -175,6 +175,11 @@ static void pmp_rebuild_decoded(void)
     memset(pmp_wcache, 0, sizeof(pmp_wcache));
     pmp_gen = 1;
   }
+}
+
+void pmp_hart_switch(void)
+{
+  pmp_rebuild_decoded();
 }
 
 void pmp_restore_checkpoint(const uint8_t *cfg, const word_t *addr)
@@ -294,7 +299,7 @@ static void pmp_byte_lookup(paddr_t addr_bytes, struct pmp_match *m)
 /* Last PMP fault address — reports which byte of a possibly-straddling access
  * triggered the fault. For hi-byte failures, reports the naturally-aligned
  * second segment (matching sail's mtval convention for straddle faults). */
-word_t pmp_last_fault_addr = 0;
+NEMU_TLS word_t pmp_last_fault_addr = 0;
 
 /* Main PMP check.
  * addr     : physical byte address of the first byte of the access.

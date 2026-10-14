@@ -1,0 +1,10 @@
+[Unit]
+Description=Raptor official distribution boot acceptance
+After=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh /usr/local/lib/raptor-distro-check
+StandardOutput=journal+console
+StandardError=journal+console

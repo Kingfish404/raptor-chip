@@ -28,15 +28,15 @@ typedef struct
 } soft_tlb_entry_t;
 
 /* Three separate TLBs: mirrors Spike's design for permission separation */
-extern soft_tlb_entry_t soft_tlb_ifetch[SOFT_TLB_ENTRIES];
-extern soft_tlb_entry_t soft_tlb_load[SOFT_TLB_ENTRIES];
-extern soft_tlb_entry_t soft_tlb_store[SOFT_TLB_ENTRIES];
+extern NEMU_TLS soft_tlb_entry_t soft_tlb_ifetch[SOFT_TLB_ENTRIES];
+extern NEMU_TLS soft_tlb_entry_t soft_tlb_load[SOFT_TLB_ENTRIES];
+extern NEMU_TLS soft_tlb_entry_t soft_tlb_store[SOFT_TLB_ENTRIES];
 
 /* Global epoch counter: incremented on every full flush. An entry whose
  * `epoch` field doesn't match the current global counter is treated as
  * invalid, turning the previously-O(SOFT_TLB_ENTRIES * 3) memset flush
  * into an O(1) increment. */
-extern uint32_t soft_tlb_epoch;
+extern NEMU_TLS uint32_t soft_tlb_epoch;
 
 /* Flush all TLBs (called from sfence.vma / satp write).
  * Now O(1): just bumps soft_tlb_epoch. Stale entries from earlier epochs

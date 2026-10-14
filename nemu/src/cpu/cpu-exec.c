@@ -15,8 +15,11 @@
 
 #include <common.h>
 #include <cpu/cpu.h>
+#include <cpu/thread.h>
 #include <cpu/decode.h>
 #include <cpu/difftest.h>
+#include <cpu/multidiff.h>
+#include <cpu/diffjournal.h>
 #include <isa.h>
 #include <locale.h>
 #include <unistd.h>
@@ -40,12 +43,14 @@ static FILE *subsystem_inst_trace = NULL;
 static bool subsystem_trace_checked = false;
 size_t pc_continue_cnt = 1;
 
-CPU_state cpu = {};
-uint64_t g_nr_guest_inst = 0;
+#ifndef NEMU_HAS_SMP
+NEMU_TLS CPU_state cpu = {};
+#endif
+NEMU_TLS uint64_t g_nr_guest_inst = 0;
 static uint64_t g_timer = 0; // unit: us
 static bool g_print_step = false;
-Decode iringbuf[MAX_IRING_SIZE];
-uint64_t iringhead = 0;
+NEMU_TLS Decode iringbuf[MAX_IRING_SIZE];
+NEMU_TLS uint64_t iringhead = 0;
 
 #ifdef CONFIG_ITRACE
 extern bool log_enable(void);
@@ -117,6 +122,8 @@ static int nemu_save_uarch_state(const char *filename)
   int gpr_num = MUXDEF(CONFIG_RVE, 16, 32);
 
   fprintf(fp, "{\n");
+  fprintf(fp, "  \"hartid\": %u,\n", nemu_hartid);
+  fprintf(fp, "  \"harts\": %u,\n", nemu_nr_harts);
   fprintf(fp, "  \"pc\": \"" FMT_WORD "\",\n", cpu.pc);
   fprintf(fp, "  \"priv\": %d,\n", cpu.priv);
   fprintf(fp, "  \"inst_cnt\": %" PRIu64 ",\n", g_nr_guest_inst);
@@ -255,7 +262,7 @@ static void trace_and_difftest(Decode *_this, vaddr_t dnpc)
 
 static void exec_once(Decode *s, vaddr_t pc)
 {
-  if (!subsystem_trace_checked)
+  if (!nemu_threaded && !subsystem_trace_checked)
   {
     const char *prefix = getenv("RAPT_SUBSYSTEM_TRACE_PREFIX");
     subsystem_trace_checked = true;
@@ -342,6 +349,15 @@ static void exec_once(Decode *s, vaddr_t pc)
   cpu.inst = s->isa.inst;
 }
 
+#if defined(CONFIG_ISA_riscv) && defined(CONFIG_TARGET_SHARE)
+void nemu_md_exec_one(void)
+{
+  Decode instruction;
+  exec_once(&instruction, cpu.pc);
+  g_nr_guest_inst++;
+}
+#endif
+
 static void execute(uint64_t n)
 {
   // Debug options are fixed for this execution request. Avoid environment
@@ -351,12 +367,24 @@ static void execute(uint64_t n)
   Decode s;
   for (; n > 0; n--)
   {
+#ifdef NEMU_HAS_SMP
+    if (!nemu_threaded && (nemu_nr_harts > 1 || (nemu_hart_waiting[nemu_hartid] && multidiff_clint_active())) && !cpu_schedule())
+      break;
+    if (!nemu_multidiff_begin()) break;
+#endif
+#ifdef NEMU_HAS_THREADS
+    if (nemu_threaded && ((g_nr_guest_inst & 1023) == 0 || nemu_hart_waiting[nemu_hartid]))
+      if (!cpu_thread_poll())
+        break;
+#endif
+    IFDEF(NEMU_HAS_SMP, if (!nemu_journal_begin()) break;);
     word_t intr = INTR_EMPTY;
     if (riscv_intr_may_pending())
     {
       intr = isa_query_intr();
       if (intr != INTR_EMPTY)
       {
+        IFDEF(NEMU_HAS_SMP, if (!nemu_journal_interrupt(intr)) break;);
         // Log("nemu: intr %x at pc = " FMT_WORD, intr, cpu.pc);
         cpu.pc = isa_raise_intr(intr, cpu.pc);
         /* ref_difftest_raise_intr is only resolved when a --diff reference
@@ -367,9 +395,11 @@ static void execute(uint64_t n)
       }
     }
     exec_once(&s, cpu.pc);
+    IFDEF(NEMU_HAS_SMP, nemu_multidiff_finish());
+    IFDEF(NEMU_HAS_SMP, nemu_journal_end());
 
     g_nr_guest_inst++;
-    if (pc_debug)
+    if (pc_debug && !nemu_threaded)
     {
       static uint64_t u_inst = 0, s_inst = 0, m_inst = 0;
       if (cpu.priv == PRV_U) u_inst++;
@@ -390,13 +420,17 @@ static void execute(uint64_t n)
         fflush(stdout);
       }
     }
-    nemu_periodic_save();
-    trace_and_difftest(&s, cpu.pc);
+    if (!nemu_threaded)
+    {
+      nemu_periodic_save();
+      trace_and_difftest(&s, cpu.pc);
+    }
     if (nemu_state.state != NEMU_RUNNING)
     {
       break;
     }
-    IFDEF(CONFIG_DEVICE, device_update());
+    if (!nemu_threaded && !multidiff_active())
+      IFDEF(CONFIG_DEVICE, device_update());
   }
 }
 
@@ -436,10 +470,25 @@ void cpu_exec(uint64_t n)
 
   uint64_t timer_start = get_time();
 
-  execute(n);
+#ifdef NEMU_HAS_THREADS
+  if (nemu_threaded)
+  {
+    Assert(n == UINT64_MAX, "Threaded execution supports batch continue only");
+    cpu_threads_run(execute);
+  }
+  else
+#endif
+    execute(n);
 
+  IFDEF(NEMU_HAS_SMP, nemu_multidiff_report());
+  IFDEF(NEMU_HAS_SMP, nemu_journal_close());
   uint64_t timer_end = get_time();
-  g_timer += timer_end - timer_start;
+#ifdef NEMU_HAS_THREADS
+  if (nemu_threaded)
+    g_timer += cpu_thread_wall_us();
+  else
+#endif
+    g_timer += timer_end - timer_start;
 
   switch (nemu_state.state)
   {

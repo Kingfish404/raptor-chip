@@ -20,6 +20,12 @@
 
 void cpu_exec(uint64_t n);
 
+#ifdef NEMU_HAS_SMP
+void cpu_select_hart(unsigned hartid);
+bool cpu_schedule(void);
+void cpu_invalidate_reservations(paddr_t addr, size_t len);
+#endif
+
 void cpu_show_itrace();
 
 void cpu_show_ftrace();

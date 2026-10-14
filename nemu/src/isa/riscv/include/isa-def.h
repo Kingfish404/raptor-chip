@@ -410,8 +410,32 @@ typedef struct
 } riscv_CPU_state;
 
 word_t riscv_mip_value(void);
+word_t riscv_hart_mip_value(const riscv_CPU_state *hart);
 
-extern riscv_CPU_state cpu;
+#ifdef NEMU_HAS_SMP
+#define NEMU_MAX_HARTS 4
+extern riscv_CPU_state cpu_harts[NEMU_MAX_HARTS];
+extern NEMU_TLS riscv_CPU_state *cpu_current;
+extern unsigned nemu_nr_harts;
+extern NEMU_TLS unsigned nemu_hartid;
+extern bool nemu_hart_waiting[NEMU_MAX_HARTS];
+#define cpu (*cpu_current)
+#else
+#define NEMU_MAX_HARTS 1
+#define nemu_nr_harts 1u
+#define nemu_hartid 0u
+extern NEMU_TLS riscv_CPU_state cpu;
+#endif
+
+static inline riscv_CPU_state *riscv_hart(unsigned hartid)
+{
+#ifdef NEMU_HAS_SMP
+  return &cpu_harts[hartid];
+#else
+  (void)hartid;
+  return &cpu;
+#endif
+}
 /* Cheap interrupt pre-filter for the execute loop. Only a raw MIP source that
  * is also enabled in mie can ever produce a pending interrupt, so the common
  * case (nothing asserted) can skip the full isa_query_intr() call. */

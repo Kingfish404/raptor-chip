@@ -18,17 +18,27 @@
 
 #include <common.h>
 
+#if defined(NEMU_HAS_THREADS) && defined(__cplusplus)
+#include <atomic>
+#endif
+
 // ----------- state -----------
 
 enum { NEMU_RUNNING, NEMU_STOP, NEMU_END, NEMU_ABORT, NEMU_QUIT };
 
 typedef struct {
+#if defined(NEMU_HAS_THREADS) && defined(__cplusplus)
+  std::atomic<int> state;
+#elif defined(NEMU_HAS_THREADS)
+  _Atomic int state;
+#else
   int state;
+#endif
   vaddr_t halt_pc;
   uint32_t halt_ret;
 } NEMUState;
 
-extern NEMUState nemu_state;
+extern NEMU_REF_TLS NEMUState nemu_state;
 
 // ----------- timer -----------
 

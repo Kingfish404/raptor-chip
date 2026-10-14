@@ -15,24 +15,25 @@
 
 #include <setjmp.h>
 #include <isa.h>
+#include <cpu/thread.h>
 #include <memory/paddr.h>
 #include <memory/tlb.h>
 #include <cpu/icache.h>
 #include <inttypes.h>
 
-extern jmp_buf exec_jmp_buf;
-extern int cause;
+extern NEMU_TLS jmp_buf exec_jmp_buf;
+extern NEMU_TLS int cause;
 
 extern FILE *mem_trace;
 extern FILE *subsystem_mem_trace;
-extern uint64_t g_nr_guest_inst;
+extern NEMU_TLS uint64_t g_nr_guest_inst;
 
 /* PMP check (implemented in src/isa/<isa>/system/pmp.c) */
 bool pmp_check(paddr_t addr, int size, uint32_t priv,
                bool op_r, bool op_w, bool op_x);
-extern word_t pmp_last_fault_addr;
+extern NEMU_TLS word_t pmp_last_fault_addr;
 
-word_t g_vaddr = 0;
+NEMU_TLS word_t g_vaddr = 0;
 
 static word_t subsystem_log_read(vaddr_t addr, int len, word_t data)
 {
@@ -50,13 +51,13 @@ static void subsystem_log_write(vaddr_t addr, int len, word_t data)
 }
 
 /* Software TLB arrays: direct-mapped, separate per access type */
-soft_tlb_entry_t soft_tlb_ifetch[SOFT_TLB_ENTRIES];
-soft_tlb_entry_t soft_tlb_load[SOFT_TLB_ENTRIES];
-soft_tlb_entry_t soft_tlb_store[SOFT_TLB_ENTRIES];
+NEMU_TLS soft_tlb_entry_t soft_tlb_ifetch[SOFT_TLB_ENTRIES];
+NEMU_TLS soft_tlb_entry_t soft_tlb_load[SOFT_TLB_ENTRIES];
+NEMU_TLS soft_tlb_entry_t soft_tlb_store[SOFT_TLB_ENTRIES];
 
 /* Start at 1 so the zero-initialized `epoch` field of a fresh entry never
  * appears "valid" before the first explicit refill. */
-uint32_t soft_tlb_epoch = 1;
+NEMU_TLS uint32_t soft_tlb_epoch = 1;
 
 void soft_tlb_flush(void)
 {
@@ -362,7 +363,7 @@ word_t vaddr_read(vaddr_t addr, int len)
   return vaddr_read_piece(addr, len, len, (addr & (len - 1)) != 0);
 }
 
-void vaddr_write(vaddr_t addr, int len, word_t data)
+static void vaddr_write_unlocked(vaddr_t addr, int len, word_t data)
 {
   g_vaddr = addr;
   cpu.vwaddr = addr;
@@ -444,6 +445,13 @@ void vaddr_write(vaddr_t addr, int len, word_t data)
     cpu.reservation_bytes = 0;
   }
   subsystem_log_write(addr, len, data);
+}
+
+void vaddr_write(vaddr_t addr, int len, word_t data)
+{
+  cpu_bus_lock();
+  vaddr_write_unlocked(addr, len, data);
+  cpu_bus_unlock();
 }
 
 /* Zicbom management operations check the addressed byte as a data access with

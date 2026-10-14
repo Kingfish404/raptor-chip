@@ -11,6 +11,11 @@ Software test sources live in `app/tests/baremetal/` (freestanding RISC-V progra
 
 ## Maintaining verification drivers
 
+NEMU checks live in `nemu/`: `nemu/check.py NAME` runs one check, `nemu/nemu.mk`
+defines the `nemu-*-check` targets, and `nemu/lib`, `nemu/multihart`, `nemu/isa` and
+`nemu/tests` hold the shared harness, multi-hart checks, single-hart checks and unit
+tests. Targets and options are listed in [the NEMU guide](../nemu/README.md#checks).
+
 `make -C verify config-macro-check` audits unused/undefined preset macros and exactly one direction predictor; it also runs in `script-unittests`.
 `make -C verify bpu-config-check` additionally elaborates all four direction
 predictors in RV32/RV64 and verifies that a missing selection fails in both
@@ -448,7 +453,7 @@ The current Raptor RTL traps accesses to the optional `mcountinhibit` CSR (`0x32
 After `make build-nemu64-ref` from the repository root, check the reference:
 
 ```sh
-python3 verify/scripts/nemu_rva22s64_check.py --xlen 64 \
+python3 verify/nemu/check.py rva22s64 --xlen 64 \
     --reference nemu/build/riscv64-nemu-interpreter-so \
     --mcountinhibit absent --output /tmp/raptor-nemu64-csr-check.json
 ```

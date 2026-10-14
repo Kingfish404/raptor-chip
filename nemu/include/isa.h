@@ -29,7 +29,9 @@ extern unsigned char isa_logo[];
 void init_isa();
 
 // reg
-extern CPU_state cpu;
+#ifndef NEMU_HAS_SMP
+extern NEMU_TLS CPU_state cpu;
+#endif
 void isa_reg_display();
 word_t isa_reg_str2val(const char *name, bool *success);
 

@@ -100,9 +100,82 @@ module tb;
     end
   endtask
 
+  // Exact cancellation residuals of 1/4, 1/2 and 3/4 minimum subnormal.
+  // Exercise every rounding mode and fused sign variant, with both result signs.
+  task deep_cancellation;
+    logic [63:0] sign_bit, x, y, z, expected, actual;
+    logic [4:0] actual_flags;
+    bit increment;
+    for (int d = 0; d < 2; d++) begin
+      sign_bit = d ? 64'h8000000000000000 : 64'h0000000080000000;
+      for (int variant = 0; variant < 4; variant++) begin
+        for (int negative = 0; negative < 2; negative++) begin
+          for (int mode = 0; mode < 5; mode++) begin
+            for (int quarter = 1; quarter < 4; quarter++) begin
+              x = d ? 64'h0010000000000000 | (64'(quarter) << 50)
+                    : 64'h0000000000800000 | (64'(quarter) << 21);
+              y = d ? 64'h3ff0000000000001 : 64'h000000003f800001;
+              z = (x + 1) ^ sign_bit;
+              if (negative != 0) begin
+                x ^= sign_bit;
+                z ^= sign_bit;
+              end
+              if (variant >= 2) x ^= sign_bit;
+              if (variant == 1 || variant == 3) z ^= sign_bit;
+              increment = (mode == 0 && quarter > 2)
+                || (mode == 2 && negative != 0)
+                || (mode == 3 && negative == 0)
+                || (mode == 4 && quarter >= 2);
+              expected = (negative != 0 ? sign_bit : 64'b0) | 64'(increment);
+              if (d == 0) begin
+                x |= 64'hffffffff00000000;
+                y |= 64'hffffffff00000000;
+                z |= 64'hffffffff00000000;
+                expected |= 64'hffffffff00000000;
+              end
+              @(negedge clock);
+              a = x;
+              b = y;
+              c = z;
+              rm = 3'(mode);
+              op = 6'(51 + d + 2 * variant);
+              valid = 1;
+              @(negedge clock);
+              valid = 0;
+              while (!(d != 0 ? rv : rv_s)) @(negedge clock);
+              actual = d != 0 ? res : res_s;
+              actual_flags = d != 0 ? flags : flags_s;
+              if (actual !== expected || actual_flags !== 5'b00011) begin
+                errors++;
+                $display("FAIL cancellation d=%0d variant=%0d sign=%0d rm=%0d quarter=%0d", d,
+                         variant, negative, mode, quarter);
+                $display("  got %h/%h expected %h/03", actual, actual_flags, expected);
+              end
+            end
+          end
+        end
+      end
+    end
+    $display("FMA deep-cancellation: 240 checks completed");
+  endtask
+
   initial begin
     repeat (2) @(negedge clock);
     reset = 0;
+
+    deep_cancellation();
+
+    // Deep cancellation can also leave an exact minimum subnormal: no UF/NX.
+    ts(64'hffff_ffff_01000000, 64'hffff_ffff_3f800000, 64'hffff_ffff_80ffffff,
+       64'hffff_ffff_00000001, 5'b00000);
+    td(64'h0020000000000000, 64'h3ff0000000000000, 64'h801fffffffffffff, 64'h0000000000000001,
+       5'b00000);
+
+    // (1 + ulp) * (1 - ulp) - 1 leaves an exact subnormal requiring a left shift.
+    ts(64'hffff_ffff_17000001, 64'hffff_ffff_3f7ffffe, 64'hffff_ffff_97000000,
+       64'hffff_ffff_80400000, 5'b00000);
+    td(64'h0680000000000001, 64'h3feffffffffffffe, 64'h8680000000000000, 64'h8008000000000000,
+       5'b00000);
 
     // basics
     td(64'h3FF0000000000000, 64'h3FF0000000000000, 64'h3FF0000000000000, 64'h4000000000000000,
@@ -138,7 +211,7 @@ module tb;
        64'hffff_ffff_7fc00000, 5'b00000);
 
     if (errors == 0) $display("FMA-UNIT PASS");
-    else $display("FMA-UNIT FAIL (%0d errors)", errors);
+    else $fatal(1, "FMA-UNIT FAIL (%0d errors)", errors);
     repeat (2) @(negedge clock);
     $finish;
   end

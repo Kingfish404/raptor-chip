@@ -19,7 +19,7 @@
 #include <string.h>
 #include <memory/paddr.h>
 
-NEMUState nemu_state = {.state = NEMU_STOP};
+NEMU_REF_TLS NEMUState nemu_state = {.state = NEMU_STOP};
 
 int is_exit_status_bad()
 {

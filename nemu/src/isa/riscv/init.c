@@ -16,6 +16,7 @@
 #include <isa.h>
 #include <isa-def.h>
 #include <memory/paddr.h>
+#include <cpu/cpu.h>
 
 extern int boot_from_flash;
 
@@ -48,6 +49,7 @@ static void restart()
   cpu.sr[CSR_MVENDORID] = 0; // MVENDORID=0 for open-source implementations
   cpu.sr[CSR_MARCHID] = 50; // MARCHID=50 (0x32) for Raptor
   cpu.sr[CSR_MISA] = CSR_MISA_VALUE;
+  cpu.sr[CSR_MHARTID] = nemu_hartid;
   cpu.priv = PRV_M;
   cpu.raise_intr = INTR_EMPTY;
   cpu.last_inst_priv = PRV_M;
@@ -80,5 +82,10 @@ void init_isa()
   memcpy(guest_to_host(RESET_VECTOR), img, sizeof(img));
 
   /* Initialize this virtual computer system. */
-  restart();
+  for (unsigned hartid = 0; hartid < nemu_nr_harts; hartid++)
+  {
+    IFDEF(NEMU_HAS_SMP, cpu_select_hart(hartid));
+    restart();
+  }
+  IFDEF(NEMU_HAS_SMP, cpu_select_hart(0));
 }

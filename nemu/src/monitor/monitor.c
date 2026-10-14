@@ -14,6 +14,9 @@
  ***************************************************************************************/
 
 #include <isa.h>
+#include <cpu/thread.h>
+#include <cpu/multidiff.h>
+#include <cpu/diffjournal.h>
 #include <memory/paddr.h>
 #include <device/mmio.h>
 #include <inttypes.h>
@@ -33,6 +36,7 @@ void init_sdb();
 void init_disasm();
 #ifdef CONFIG_HAS_SERIAL
 void serial_set_lf_to_cr(bool enable);
+void serial_set_stdout(bool enable);
 #endif
 
 static void welcome()
@@ -51,6 +55,7 @@ static void welcome()
 #include <getopt.h>
 
 void sdb_set_batch_mode();
+static bool batch_requested;
 
 int boot_from_flash = 0;
 
@@ -60,6 +65,9 @@ static char *img_file = NULL;
 static char *disk_img_file = NULL;
 static char *sdcard_img_file = NULL;
 static int difftest_port = 1234;
+#ifdef NEMU_HAS_SMP
+static bool net_backend_requested;
+#endif
 #ifdef CONFIG_HAS_DISK
 void virtio_blk_set_disk_image(const char *path);
 #endif
@@ -250,13 +258,36 @@ void usage(int argc, char *argv[])
   printf("  -f, --flash              boot from flash\n");
   printf("  -l, --log=FILE           output log to FILE\n");
   printf("  -d, --diff=REF_SO        run DiffTest with reference REF_SO\n");
+  printf("      --diff-mode=MODE     legacy (default) or multihart (strict rr baseline)\n");
+  printf("      --diff-record=FILE   record memory-only rr/threaded replay journal\n");
+  printf("      --diff-stream-fd=N   stream the journal to an inherited write-only pipe (N >= 3)\n");
+  printf("      --diff-interrupts    enable checked CPU interrupt entry and WFI (journal v2)\n");
+  printf("      --diff-clint         enable checked CLINT/time inputs and IRQs (journal v3)\n");
+  printf("      --diff-plic          also check PLIC MMIO and source inputs (journal v4)\n");
+  printf("      --diff-plic-input=FILE  ordered raw tick/source pulse pairs (requires --diff-plic)\n");
+  printf("      --diff-uart          also check ns16550 UART and derived IRQs (journal v5)\n");
+  printf("      --diff-rng           also check virtio-rng/DMA (v7; requires retained TLB and pthreads)\n");
+  printf("      --diff-rng-input=FILE  read deterministic entropy instead of /dev/urandom\n");
+  printf("      --diff-net           also check virtio-net TX/RX/DMA (journal v8)\n");
+  printf("      --diff-block         also check virtio-blk with independent disk image (journal v9)\n");
+  printf("      --diff-net-backend=MODE  slirp (default) or script (no host networking)\n");
+  printf("      --diff-net-input=FILE  ordered tx|poll AFTER_TX HEX lines for script backend\n");
+  printf("      --diff-uart-input=FILE  ordered raw tick/byte pairs (requires --diff-uart)\n");
+  printf("      --diff-uart-stdin    record stdin RX during serialized timer polls\n");
+  printf("      --diff-progress=N   report journal progress every N retirements (0 disables)\n");
+  printf("      --diff-tlb=MODE     flush (default) or retain (requires UART journal and threaded backend)\n");
+  printf("      --diff-record-max-bytes=N  total limit (file default 268435456; stream unlimited; 64..1099511627776)\n");
   printf("  -p, --port=PORT          run DiffTest with port PORT\n");
   printf("  -e, --elf=ELF_FILE       add ELF_FILE for ftrace\n");
   printf("  -t, --tree=BTB_FILE      add BTB_FILE for rom\n");
   printf("      --disk=DISK_IMAGE    attach a virtio-mmio block image\n");
+  printf("      --smp=N              number of harts (1..%u; requires matching DTB)\n", NEMU_MAX_HARTS);
+  printf("      --smp-backend=MODE   rr (default) or threaded; no rebuild required\n");
+  printf("      --smp-clock-div=N    threaded guest clock divisor (1..1000; default 16)\n");
   printf("      --sdcard=SD_IMAGE    attach a QEMU SDHCI SD-card image\n");
 #ifdef CONFIG_HAS_SERIAL
   printf("      --serial-lf-to-cr    translate host LF input to CR for CR-terminated monitors\n");
+  printf("      --serial-stdout     send guest UART output to stdout instead of stderr\n");
 #endif
   printf("  -m, --maximum=NUM        set the maximum number of instructions to execute\n");
   printf("  -n, --none               do nothing\n");
@@ -280,8 +311,31 @@ static int parse_args(int argc, char *argv[])
       {"none", no_argument, NULL, 'n'},
       {"disk", required_argument, NULL, 257},
       {"sdcard", required_argument, NULL, 258},
+      {"smp", required_argument, NULL, 260},
+      {"smp-backend", required_argument, NULL, 261},
+      {"smp-clock-div", required_argument, NULL, 262},
+      {"diff-mode", required_argument, NULL, 263},
+      {"diff-record", required_argument, NULL, 264},
+      {"diff-record-max-bytes", required_argument, NULL, 265},
+      {"diff-stream-fd", required_argument, NULL, 266},
+      {"diff-interrupts", no_argument, NULL, 267},
+      {"diff-clint", no_argument, NULL, 268},
+      {"diff-plic", no_argument, NULL, 269},
+      {"diff-plic-input", required_argument, NULL, 270},
+      {"diff-uart", no_argument, NULL, 271},
+      {"diff-uart-input", required_argument, NULL, 272},
+      {"diff-uart-stdin", no_argument, NULL, 273},
+      {"diff-progress", required_argument, NULL, 274},
+      {"diff-tlb", required_argument, NULL, 275},
+      {"diff-rng", no_argument, NULL, 276},
+      {"diff-rng-input", required_argument, NULL, 277},
+      {"diff-net", no_argument, NULL, 278},
+      {"diff-net-backend", required_argument, NULL, 279},
+      {"diff-net-input", required_argument, NULL, 280},
+      {"diff-block", no_argument, NULL, 281},
 #ifdef CONFIG_HAS_SERIAL
       {"serial-lf-to-cr", no_argument, NULL, 259},
+      {"serial-stdout", no_argument, NULL, 282},
 #endif
       {"help", no_argument, NULL, 'h'},
       {"sig", required_argument, NULL, 256},
@@ -298,6 +352,7 @@ static int parse_args(int argc, char *argv[])
     switch (o)
     {
     case 'b':
+      batch_requested = true;
       sdb_set_batch_mode();
       break;
     case 'f':
@@ -306,6 +361,206 @@ static int parse_args(int argc, char *argv[])
     case 'p':
       sscanf(optarg, "%d", &difftest_port);
       break;
+    case 275:
+#ifdef NEMU_HAS_SMP
+      if (!strcmp(optarg, "flush")) nemu_md_tlb_retain = false;
+      else if (!strcmp(optarg, "retain")) nemu_md_tlb_retain = true;
+      else {
+        fprintf(stderr, "--diff-tlb requires flush or retain\n");
+        exit(1);
+      }
+      break;
+#else
+      fprintf(stderr, "--diff-tlb requires native RISC-V journal support\n");
+      exit(1);
+#endif
+    case 274:
+    {
+      char *end = NULL;
+      unsigned long long interval = strtoull(optarg, &end, 10);
+      if (!*optarg || strspn(optarg, "0123456789") != strlen(optarg) || *end || interval > (1ull << 40)) {
+        fprintf(stderr, "--diff-progress requires 0..1099511627776\n");
+        exit(1);
+      }
+#ifdef NEMU_HAS_SMP
+      nemu_journal_progress_interval = interval;
+#else
+      fprintf(stderr, "--diff-progress requires native RISC-V journal support\n");
+      exit(1);
+#endif
+      break;
+    }
+    case 273:
+#ifdef NEMU_HAS_SMP
+      nemu_uart_stdin = true;
+      break;
+#else
+      fprintf(stderr, "--diff-uart-stdin requires native RISC-V journal support\n");
+      exit(1);
+#endif
+    case 272:
+#ifdef NEMU_HAS_SMP
+      nemu_uart_input_path = optarg;
+      break;
+#else
+      fprintf(stderr, "--diff-uart-input requires native RISC-V journal support\n");
+      exit(1);
+#endif
+    case 277:
+#ifdef NEMU_HAS_SMP
+      nemu_rng_input_path = optarg;
+      break;
+#else
+      fprintf(stderr, "--diff-rng-input requires native RISC-V journal support\n");
+      exit(1);
+#endif
+    case 280:
+#ifdef NEMU_HAS_SMP
+      nemu_net_input_path = optarg;
+      break;
+#else
+      fprintf(stderr, "--diff-net-input requires native RISC-V journal support\n");
+      exit(1);
+#endif
+    case 279:
+#ifdef NEMU_HAS_SMP
+      if (strcmp(optarg, "script") && strcmp(optarg, "slirp")) {
+        fprintf(stderr, "--diff-net-backend requires slirp or script\n");
+        exit(1);
+      }
+      nemu_net_script = !strcmp(optarg, "script");
+      net_backend_requested = true;
+      break;
+#else
+      fprintf(stderr, "--diff-net-backend requires native RISC-V journal support\n");
+      exit(1);
+#endif
+    case 281:
+#if defined(NEMU_HAS_SMP) && defined(CONFIG_HAS_DISK)
+      nemu_md_block = true;
+      __attribute__((fallthrough));
+#else
+      fprintf(stderr, "--diff-block requires native virtio-blk support\n");
+      exit(1);
+#endif
+    case 278:
+#if defined(NEMU_HAS_SMP) && defined(CONFIG_HAS_NET) && CONFIG_NET_MMIO == 0x10002000 && CONFIG_NET_PLIC_IRQ == 2
+      nemu_md_net = true;
+      __attribute__((fallthrough));
+#else
+      fprintf(stderr, "--diff-net requires native virtio-net at 0x10002000 with IRQ2\n");
+      exit(1);
+#endif
+    case 276:
+#if defined(NEMU_HAS_SMP) && defined(CONFIG_HAS_RNG) && CONFIG_RNG_MMIO == 0x10003000 && CONFIG_RNG_PLIC_IRQ == 3
+      nemu_md_rng = true;
+      __attribute__((fallthrough));
+#else
+      fprintf(stderr, "--diff-rng requires native virtio-rng at 0x10003000 with IRQ3\n");
+      exit(1);
+#endif
+    case 271:
+#if defined(NEMU_HAS_SMP) && defined(CONFIG_DEVICE) && defined(CONFIG_HAS_TIMER) && defined(CONFIG_HAS_SERIAL) && defined(CONFIG_SERIAL_INPUT_FIFO) && !defined(CONFIG_HAS_PORT_IO) && CONFIG_RTC_MMIO_CLINT == 0x02000000 && CONFIG_PLIC_MMIO == 0x0c000000 && CONFIG_SERIAL_MMIO_US16550 == 0x10000000 && CONFIG_SERIAL_PLIC_IRQ == 10
+      nemu_md_uart = true;
+      nemu_md_plic = true;
+      nemu_md_clint = true;
+      nemu_md_interrupts = true;
+      break;
+#else
+      fprintf(stderr, "--diff-uart requires native ns16550/CLINT/PLIC with RX FIFO and UART IRQ10\n");
+      exit(1);
+#endif
+    case 270:
+#ifdef NEMU_HAS_SMP
+      nemu_plic_input_path = optarg;
+      break;
+#else
+      fprintf(stderr, "--diff-plic-input requires native RISC-V journal support\n");
+      exit(1);
+#endif
+    case 269:
+#if defined(NEMU_HAS_SMP) && defined(CONFIG_DEVICE) && defined(CONFIG_HAS_TIMER) && CONFIG_RTC_MMIO_CLINT == 0x02000000 && CONFIG_PLIC_MMIO == 0x0c000000
+      nemu_md_plic = true;
+      nemu_md_clint = true;
+      nemu_md_interrupts = true;
+      break;
+#else
+      fprintf(stderr, "--diff-plic requires native CLINT/PLIC at 0x02000000/0x0c000000\n");
+      exit(1);
+#endif
+    case 268:
+#if defined(NEMU_HAS_SMP) && defined(CONFIG_DEVICE) && defined(CONFIG_HAS_TIMER) && CONFIG_RTC_MMIO_CLINT == 0x02000000
+      nemu_md_clint = true;
+      nemu_md_interrupts = true;
+      break;
+#else
+      fprintf(stderr, "--diff-clint requires the native RISC-V CLINT at 0x02000000\n");
+      exit(1);
+#endif
+    case 267:
+#ifdef NEMU_HAS_SMP
+      nemu_md_interrupts = true;
+      break;
+#else
+      fprintf(stderr, "--diff-interrupts requires a native RISC-V system build with SMP\n");
+      exit(1);
+#endif
+    case 266:
+    {
+      char *end = NULL;
+      unsigned long descriptor = strtoul(optarg, &end, 10);
+      if (!*optarg || strspn(optarg, "0123456789") != strlen(optarg) || *end ||
+          descriptor < 3 || descriptor > 0x7ffffffful) {
+        fprintf(stderr, "--diff-stream-fd requires a descriptor in 3..2147483647\n");
+        exit(1);
+      }
+#ifdef NEMU_HAS_SMP
+      nemu_journal_fd = descriptor;
+#else
+      fprintf(stderr, "--diff-stream-fd requires a native RISC-V system build with SMP\n");
+      exit(1);
+#endif
+      break;
+    }
+    case 265:
+    {
+      char *end = NULL;
+      unsigned long long limit = strtoull(optarg, &end, 10);
+      if (!*optarg || strspn(optarg, "0123456789") != strlen(optarg) || *end ||
+          limit < 64 || limit > (1ull << 40)) {
+        fprintf(stderr, "--diff-record-max-bytes requires 64..1099511627776\n");
+        exit(1);
+      }
+#ifdef NEMU_HAS_SMP
+      nemu_journal_max_bytes = limit;
+      nemu_journal_limit_explicit = true;
+#else
+      fprintf(stderr, "--diff-record-max-bytes requires a native RISC-V system build with SMP\n");
+      exit(1);
+#endif
+      break;
+    }
+    case 264:
+#ifdef NEMU_HAS_SMP
+      nemu_journal_path = optarg;
+      break;
+#else
+      fprintf(stderr, "--diff-record requires a native RISC-V system build with SMP\n");
+      exit(1);
+#endif
+    case 263:
+#ifdef NEMU_HAS_SMP
+      if (strcmp(optarg, "multihart") == 0) nemu_multidiff_requested = true;
+      else if (strcmp(optarg, "legacy") == 0) nemu_multidiff_requested = false;
+      else {
+        fprintf(stderr, "--diff-mode requires legacy or multihart\n");
+        exit(1);
+      }
+      break;
+#else
+      fprintf(stderr, "--diff-mode requires a native RISC-V system build with SMP\n");
+      exit(1);
+#endif
     case 'l':
       log_file = optarg;
       break;
@@ -324,9 +579,56 @@ static int parse_args(int argc, char *argv[])
     case 258:
       sdcard_img_file = optarg;
       break;
+    case 262:
+    {
+      char *end = NULL;
+      unsigned long divisor = strtoul(optarg, &end, 10);
+      if (!*optarg || *end || divisor < 1 || divisor > 1000)
+      {
+        fprintf(stderr, "--smp-clock-div requires 1..1000\n");
+        exit(1);
+      }
+#ifdef NEMU_HAS_THREADS
+      nemu_thread_clock_div = divisor;
+#else
+      fprintf(stderr, "--smp-clock-div requires standalone RISC-V with timer devices\n");
+      exit(1);
+#endif
+      break;
+    }
+    case 261:
+      if (strcmp(optarg, "rr") == 0)
+      {
+        IFDEF(NEMU_HAS_THREADS, nemu_threaded = false);
+      }
+#ifdef NEMU_HAS_THREADS
+      else if (strcmp(optarg, "threaded") == 0)
+        nemu_threaded = true;
+#endif
+      else
+      {
+        fprintf(stderr, "--smp-backend requires rr or threaded (standalone RISC-V with timer devices)\n");
+        exit(1);
+      }
+      break;
+    case 260:
+    {
+      char *end = NULL;
+      unsigned long count = strtoul(optarg, &end, 10);
+      if (!*optarg || *end || count < 1 || count > NEMU_MAX_HARTS)
+      {
+        fprintf(stderr, "--smp requires 1..%u harts\n", NEMU_MAX_HARTS);
+        exit(1);
+      }
+      IFDEF(NEMU_HAS_SMP, nemu_nr_harts = count);
+      break;
+    }
 #ifdef CONFIG_HAS_SERIAL
     case 259:
       serial_set_lf_to_cr(true);
+      break;
+    case 282:
+      serial_set_stdout(true);
       break;
 #endif
     case 'm':
@@ -362,6 +664,67 @@ void init_monitor(int argc, char *argv[])
 
   /* Parse arguments. */
   parse_args(argc, argv);
+#ifdef NEMU_HAS_SMP
+  if ((net_backend_requested && !nemu_md_net) ||
+      (nemu_net_input_path && (!nemu_md_net || !nemu_net_script))) {
+    fprintf(stderr, "--diff-net-backend requires --diff-net; --diff-net-input also requires script backend\n");
+    exit(1);
+  }
+  if (nemu_rng_input_path && !nemu_md_rng) {
+    fprintf(stderr, "--diff-rng-input requires --diff-rng\n");
+    exit(1);
+  }
+  if (nemu_md_rng && (!nemu_md_tlb_retain || !nemu_threaded || !nemu_journal_requested())) {
+    fprintf(stderr, "%s requires --diff-tlb=retain, --smp-backend=threaded and a journal transport\n",
+            nemu_md_block ? "--diff-block" : nemu_md_net ? "--diff-net" : "--diff-rng");
+    exit(1);
+  }
+  if (nemu_md_tlb_retain && (!nemu_journal_requested() || !nemu_md_uart || !nemu_threaded)) {
+    fprintf(stderr, "--diff-tlb=retain requires --diff-uart, --smp-backend=threaded and a journal transport\n");
+    exit(1);
+  }
+  if (nemu_journal_progress_interval && !nemu_journal_requested()) {
+    fprintf(stderr, "--diff-progress requires --diff-record or --diff-stream-fd\n");
+    exit(1);
+  }
+  if (nemu_md_interrupts && !nemu_journal_requested()) {
+    fprintf(stderr, "%s requires --diff-record or --diff-stream-fd\n",
+            nemu_md_uart ? "--diff-uart" : (nemu_md_plic ? "--diff-plic" : (nemu_md_clint ? "--diff-clint" : "--diff-interrupts")));
+    exit(1);
+  }
+  if (nemu_plic_input_path && !nemu_md_plic) {
+    fprintf(stderr, "--diff-plic-input requires --diff-plic\n");
+    exit(1);
+  }
+  if ((nemu_uart_input_path || nemu_uart_stdin) && !nemu_md_uart) {
+    fprintf(stderr, "%s requires --diff-uart\n", nemu_uart_input_path ? "--diff-uart-input" : "--diff-uart-stdin");
+    exit(1);
+  }
+  if (nemu_journal_path && nemu_journal_fd >= 0) {
+    fprintf(stderr, "--diff-record and --diff-stream-fd are mutually exclusive\n");
+    exit(1);
+  }
+  if (nemu_journal_requested() && (!batch_requested || diff_so_file || nemu_multidiff_requested)) {
+    fprintf(stderr, "--diff-record/--diff-stream-fd requires --batch and no --diff/--diff-mode=multihart\n");
+    exit(1);
+  }
+  if (nemu_multidiff_requested && (!diff_so_file || nemu_threaded || !batch_requested)) {
+    fprintf(stderr, "Multihart DiffTest requires --diff, --batch and --smp-backend=rr\n");
+    exit(1);
+  }
+  if (nemu_nr_harts > 1 || nemu_threaded || nemu_multidiff_requested || nemu_journal_requested())
+  {
+    extern bool ftrace_enabled;
+    Assert((!diff_so_file || nemu_multidiff_requested) && !ftrace_enabled && !boot_from_flash &&
+           !getenv("RAPT_SUBSYSTEM_TRACE_PREFIX"),
+           "Multi-hart execution does not support DiffTest, ftrace or flash/subsystem traces");
+  }
+#endif
+  if (nemu_threaded && !batch_requested)
+  {
+    fprintf(stderr, "Threaded execution requires --batch; interactive debugging is unsupported\n");
+    exit(1);
+  }
 
   /* Set random seed. */
   init_rand();
@@ -398,9 +761,14 @@ void init_monitor(int argc, char *argv[])
     sigemptyset(&set_blk);
     sigaddset(&set_blk, SIGVTALRM);
     sigprocmask(SIG_BLOCK, &set_blk, &set_old);
-    init_difftest(diff_so_file, img_size, difftest_port);
+#ifdef NEMU_HAS_SMP
+    if (nemu_multidiff_requested) nemu_multidiff_init(diff_so_file, img_size);
+    else
+#endif
+      init_difftest(diff_so_file, img_size, difftest_port);
     sigprocmask(SIG_SETMASK, &set_old, NULL);
   }
+  IFDEF(NEMU_HAS_SMP, nemu_journal_init());
 
   /* Arm the virtual timer only after difftest init has finished (see
    * device.c). The timer handler list itself was filled during

@@ -24,6 +24,31 @@
 #include <generated/autoconf.h>
 #include <macro.h>
 
+#if defined(CONFIG_ISA_riscv) && defined(CONFIG_TARGET_NATIVE_ELF) && defined(CONFIG_DEVICE) && defined(CONFIG_HAS_TIMER)
+#define NEMU_HAS_SMP 1
+#define NEMU_HAS_THREADS 1
+#endif
+
+#if defined(CONFIG_ISA_riscv) && defined(CONFIG_TARGET_SHARE) && defined(CONFIG_MODE_SYSTEM)
+#define NEMU_HAS_REPLAY 1
+#endif
+
+#if defined(NEMU_HAS_THREADS) || defined(NEMU_HAS_REPLAY)
+#ifdef __cplusplus
+#define NEMU_TLS thread_local
+#else
+#define NEMU_TLS _Thread_local
+#endif
+#else
+#define NEMU_TLS
+#endif
+
+#ifdef NEMU_HAS_REPLAY
+#define NEMU_REF_TLS NEMU_TLS
+#else
+#define NEMU_REF_TLS
+#endif
+
 #ifdef CONFIG_TARGET_AM
 #include <klib.h>
 #else

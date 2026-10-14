@@ -9,6 +9,7 @@
 !*.h
 !*.c
 !*.ini
+!/nemu/nemu.mk
 !/vpu/vendor/riscv-opcodes/rv_v
 
 __pycache__/

@@ -15,9 +15,17 @@
 
 #include <utils.h>
 #include <device/map.h>
+#include <cpu/multidiff.h>
+#include <cpu/diffjournal.h>
 
 #ifndef CONFIG_TARGET_AM
 #include <stdio.h>
+static bool serial_stdout;
+
+void serial_set_stdout(bool enable)
+{
+  serial_stdout = enable;
+}
 #endif
 
 #if defined(CONFIG_SERIAL_INPUT_FIFO) && !defined(CONFIG_TARGET_AM)
@@ -123,6 +131,7 @@ static void serial_ensure_host_stdin(void) {
 }
 
 void serial_poll_stdin(void) {
+  if (multidiff_uart_active()) return;
   serial_ensure_host_stdin();
   uint8_t buf[64];
   while (serial_rx_free() > 0) {
@@ -170,9 +179,10 @@ static void serial_putc(uint8_t ch)
 #ifdef CONFIG_TARGET_AM
   putch((char)ch);
 #else
-  if (fputc((int)ch, stderr) != EOF) {
-    fflush(stderr);
-  }
+  FILE *output = serial_stdout ? stdout : stderr;
+  bool delivered = fputc((int)ch, output) != EOF;
+  if (delivered) delivered = fflush(output) == 0;
+  if (multidiff_uart_active() && nemu_journal_uart_tx) nemu_journal_uart_tx(ch, delivered);
 #endif
 }
 
@@ -279,15 +289,46 @@ static uint32_t dll, dlm;
 static bool tx_irq_pending;
 
 extern void plic_raise_irq(int irq);
+void plic_raise_uart_irq(int irq) __attribute__((weak));
+
+static void serial_raise_irq(void)
+{
+  if (multidiff_uart_active()) {
+    assert(plic_raise_uart_irq);
+    plic_raise_uart_irq(UART_IRQ);
+  } else {
+    plic_raise_irq(UART_IRQ);
+  }
+}
 
 static void serial_update_irq(void)
 {
 #ifdef SERIAL_HOST_INPUT
   if ((ier & UART_IER_RDI) && serial_rx_count() > 0)
-    plic_raise_irq(UART_IRQ);
+    serial_raise_irq();
 #endif
   if ((ier & UART_IER_THRI) && tx_irq_pending)
-    plic_raise_irq(UART_IRQ);
+    serial_raise_irq();
+}
+
+bool nemu_uart_reset_state(void)
+{
+  static const uint8_t reset[] = {0, 0, 1, 0, 8, 0x60, 0xb0, 0};
+  if (!serial_us16550_base || memcmp(serial_us16550_base, reset, sizeof(reset)) ||
+      fcr || lcr || mcr || ier || scr || dll || dlm || tx_irq_pending) return false;
+#ifdef SERIAL_HOST_INPUT
+  if (serial_rx_count() || raw_term_inited) return false;
+#endif
+  return true;
+}
+
+void nemu_uart_receive(uint8_t byte)
+{
+#ifdef SERIAL_HOST_INPUT
+  assert(multidiff_uart_active());
+  serial_rx_enqueue(byte);
+  serial_update_irq();
+#endif
 }
 
 __attribute__((__unused__)) static void serial_io_handler_ns16550(uint32_t offset, int len, bool is_write)

@@ -14,6 +14,10 @@
  ***************************************************************************************/
 
 #include <isa.h>
+#include <cpu/thread.h>
+#include <cpu/multidiff.h>
+#include <cpu/diffjournal.h>
+#include <difftest-journal.h>
 #include <device/map.h>
 #include <device/alarm.h>
 #include <utils.h>
@@ -39,38 +43,39 @@
 static uint32_t *rtc_port_base = NULL;
 static uint8_t *goldfish_rtc_base = NULL;
 static uint32_t *clint_base = NULL;
-static uint32_t clint_msip = 0; // MSIP register (only bit 0 used)
+static uint32_t clint_msip[NEMU_MAX_HARTS];
 
 static uint64_t clint_get_ticks(void)
 {
+  if (nemu_threaded) return get_time() * 10;
 #if defined(CONFIG_TIMER_CYCLE)
   // 1GHz / 10MHz = 100 cycles per tick
-  extern uint64_t g_nr_guest_inst;
+  extern NEMU_TLS uint64_t g_nr_guest_inst;
   return g_nr_guest_inst / 100;
 #else
   return get_time() * 10;
 #endif
 }
 
-static uint64_t sstc_get_stimecmp(void)
+static uint64_t sstc_get_stimecmp(const CPU_state *hart)
 {
 #if defined(CONFIG_RV64)
-  return cpu.sr[CSR_STIMECMP];
+  return hart->sr[CSR_STIMECMP];
 #else
-  return ((uint64_t)(uint32_t)cpu.sr[CSR_STIMECMPH] << 32) |
-         (uint32_t)cpu.sr[CSR_STIMECMP];
+  return ((uint64_t)(uint32_t)hart->sr[CSR_STIMECMPH] << 32) |
+         (uint32_t)hart->sr[CSR_STIMECMP];
 #endif
 }
 
 #if !defined(CONFIG_TARGET_SHARE) && defined(CONFIG_TIMER_CYCLE)
 // Only the instruction-count timer's WFI fast-forward path needs STCE here.
 // The live STIP level is kept separately and gated when CSR MIP is read.
-static bool sstc_enabled(void)
+static bool sstc_enabled(const CPU_state *hart)
 {
 #if defined(CONFIG_RV64)
-  return (cpu.sr[CSR_MENVCFG] >> 63) & 0x1;
+  return (hart->sr[CSR_MENVCFG] >> 63) & 0x1;
 #else
-  return (cpu.sr[CSR_MENVCFGH] >> 31) & 0x1;
+  return (hart->sr[CSR_MENVCFGH] >> 31) & 0x1;
 #endif
 }
 #endif
@@ -79,26 +84,43 @@ static bool sstc_enabled(void)
 // Called after every instruction (from decode_exec) and on CLINT MMIO writes.
 void clint_update_mip(void)
 {
+  if (multidiff_active() && !multidiff_clint_active()) return;
 #if !defined(CONFIG_TARGET_SHARE)
+  if (nemu_threaded && !nemu_worker) return;
+  cpu_bus_lock();
   uint64_t ticks = clint_get_ticks();
 
-  // MTIP: mtime >= mtimecmp (level-triggered, same as RTL CLINT)
-  if (ticks >= cpu.mtimecmp)
-    cpu.sr[CSR_MIP] |= MIP_MTIP_BIT;
-  else
-    cpu.sr[CSR_MIP] &= ~MIP_MTIP_BIT;
+  if (multidiff_clint_active() && nemu_journal_clock)
+    nemu_journal_clock(ticks, NEMU_JOURNAL_CLOCK_UPDATE);
 
-  cpu.stip = ticks >= sstc_get_stimecmp();
-
-  // MSIP: software interrupt from CLINT MSIP register
-  if (clint_msip & 1u)
-    cpu.sr[CSR_MIP] |= MIP_MSIP_BIT;
-  else
-    cpu.sr[CSR_MIP] &= ~MIP_MSIP_BIT;
-
-  // Keep the stored sip view consistent with mip; the per-instruction CSR
-  // commit tail no longer mirrors it unconditionally.
-  cpu.sr[CSR_SIP] = riscv_mip_value() & cpu.sr[CSR_MIDELEG] & (word_t)0x222;
+  for (unsigned hartid = 0; hartid < nemu_nr_harts; hartid++)
+  {
+    if (nemu_threaded && hartid != nemu_hartid) continue;
+    CPU_state *hart = riscv_hart(hartid);
+    if (ticks >= hart->mtimecmp)
+      hart->sr[CSR_MIP] |= MIP_MTIP_BIT;
+    else
+      hart->sr[CSR_MIP] &= ~MIP_MTIP_BIT;
+    hart->stip = ticks >= sstc_get_stimecmp(hart);
+    if (clint_msip[hartid] & 1u)
+      hart->sr[CSR_MIP] |= MIP_MSIP_BIT;
+    else
+      hart->sr[CSR_MIP] &= ~MIP_MSIP_BIT;
+    hart->sr[CSR_SIP] = riscv_hart_mip_value(hart) & hart->sr[CSR_MIDELEG] & (word_t)0x222;
+    hart->sr[CSR_TIME] = (word_t)ticks;
+#ifndef CONFIG_RV64
+    hart->sr[CSR_TIMEH] = (uint32_t)(ticks >> 32);
+#endif
+  }
+#ifdef NEMU_HAS_THREADS
+  if (nemu_threaded)
+  {
+    extern void plic_sync_hart(void);
+    plic_sync_hart();
+  }
+#endif
+  if (multidiff_plic_active() && nemu_journal_inputs) nemu_journal_inputs(ticks);
+  cpu_bus_unlock();
 #endif
 }
 
@@ -106,13 +128,13 @@ void clint_restore_checkpoint(uint64_t mtime, uint64_t mtimecmp, uint8_t msip)
 {
   (void)mtime;
   cpu.mtimecmp = mtimecmp;
-  clint_msip = msip & 1u;
+  clint_msip[nemu_hartid] = msip & 1u;
   if (clint_base != NULL)
   {
     uint8_t *p = (uint8_t *)clint_base;
-    *(uint32_t *)(p + MSIP_BASE) = clint_msip;
-    *(uint32_t *)(p + MTIMECMP_BASE) = (uint32_t)mtimecmp;
-    *(uint32_t *)(p + MTIMECMP_BASE + 4) = (uint32_t)(mtimecmp >> 32);
+    *(uint32_t *)(p + MSIP_BASE + 4 * nemu_hartid) = clint_msip[nemu_hartid];
+    *(uint32_t *)(p + MTIMECMP_BASE + 8 * nemu_hartid) = (uint32_t)mtimecmp;
+    *(uint32_t *)(p + MTIMECMP_BASE + 8 * nemu_hartid + 4) = (uint32_t)(mtimecmp >> 32);
   }
   clint_update_mip();
 }
@@ -121,17 +143,27 @@ void clint_restore_checkpoint(uint64_t mtime, uint64_t mtimecmp, uint8_t msip)
 // Returns true if time was advanced.
 bool clint_wfi_advance(void)
 {
+  if (nemu_threaded) return false;
 #if !defined(CONFIG_TARGET_SHARE) && defined(CONFIG_TIMER_CYCLE)
   uint64_t ticks = clint_get_ticks();
-  uint64_t next_cmp = cpu.mtimecmp;
-  uint64_t stimecmp = sstc_get_stimecmp();
-  if (sstc_enabled() && stimecmp < next_cmp)
-    next_cmp = stimecmp;
+  uint64_t next_cmp = UINT64_MAX;
+  for (unsigned hartid = 0; hartid < nemu_nr_harts; hartid++)
+  {
+    const CPU_state *hart = riscv_hart(hartid);
+    if ((nemu_nr_harts == 1 || (hart->sr[CSR_MIE] & MIP_MTIP_BIT)) &&
+        hart->mtimecmp > ticks && hart->mtimecmp < next_cmp)
+      next_cmp = hart->mtimecmp;
+    uint64_t stimecmp = sstc_get_stimecmp(hart);
+    if (sstc_enabled(hart) &&
+        (nemu_nr_harts == 1 || (hart->sr[CSR_MIE] & MIP_STIP_BIT)) &&
+        stimecmp > ticks && stimecmp < next_cmp)
+      next_cmp = stimecmp;
+  }
   // Only advance if timer interrupt is not already pending
-  if (ticks < next_cmp)
+  if (ticks < next_cmp && next_cmp <= UINT64_MAX / 100)
   {
     // Advance g_nr_guest_inst so that ticks reaches the next timer compare.
-    extern uint64_t g_nr_guest_inst;
+    extern NEMU_TLS uint64_t g_nr_guest_inst;
     g_nr_guest_inst = next_cmp * 100;
     clint_update_mip();
     return true;
@@ -163,42 +195,37 @@ static void goldfish_rtc_io_handler(uint32_t offset, int len, bool is_write)
 
 static void clint_io_handler(uint32_t offset, int len, bool is_write)
 {
+  uint8_t *base = (uint8_t *)clint_base;
+  for (unsigned hartid = 0; hartid < nemu_nr_harts; hartid++)
+  {
+    unsigned msip_offset = MSIP_BASE + 4 * hartid;
+    unsigned cmp_offset = MTIMECMP_BASE + 8 * hartid;
+    if (offset < msip_offset + 4 && offset + len > msip_offset)
+    {
+      if (is_write)
+        clint_msip[hartid] = *(uint32_t *)(base + msip_offset) & 1u;
+      *(uint32_t *)(base + msip_offset) = clint_msip[hartid];
+    }
+    if (offset < cmp_offset + 8 && offset + len > cmp_offset)
+    {
+      CPU_state *hart = riscv_hart(hartid);
+      if (is_write)
+        memcpy(&hart->mtimecmp, base + cmp_offset, 8);
+      else
+        memcpy(base + cmp_offset, &hart->mtimecmp, 8);
+    }
+  }
   if (is_write)
   {
-    // MSIP register (offset 0x0, only bit 0)
-    if (offset >= MSIP_BASE && offset < MSIP_BASE + 4)
-    {
-      uint8_t *p = (uint8_t *)clint_base;
-      clint_msip = *(uint32_t *)(p + MSIP_BASE) & 1u;
-      clint_update_mip();
-    }
-    // mtimecmp register (offset 0x4000, 64-bit)
-    else if (offset >= MTIMECMP_BASE && offset < MTIMECMP_BASE + 8)
-    {
-      uint8_t *p = (uint8_t *)clint_base;
-      uint32_t lo = *(uint32_t *)(p + MTIMECMP_BASE);
-      uint32_t hi = *(uint32_t *)(p + MTIMECMP_BASE + 4);
-      cpu.mtimecmp = ((uint64_t)hi << 32) | lo;
-      // Immediately recalculate MTIP (writing mtimecmp often clears timer interrupt)
-      clint_update_mip();
-    }
+    clint_update_mip();
+    cpu_thread_wake();
   }
   else
   {
-    // MSIP read
-    if (offset >= MSIP_BASE && offset < MSIP_BASE + 4)
-    {
-      uint8_t *p = (uint8_t *)clint_base;
-      *(uint32_t *)(p + MSIP_BASE) = clint_msip & 1u;
-    }
-    // mtime read: update mtime from ticks
-    else
-    {
-      uint64_t ticks = clint_get_ticks();
-      uint8_t *p = (uint8_t *)clint_base;
-      *(uint32_t *)(p + MTIME_BASE) = (uint32_t)ticks;
-      *(uint32_t *)(p + MTIME_BASE + 4) = (uint32_t)(ticks >> 32);
-    }
+    uint64_t ticks = clint_get_ticks();
+    if (multidiff_clint_active() && nemu_journal_clock)
+      nemu_journal_clock(ticks, NEMU_JOURNAL_CLOCK_READ);
+    memcpy(base + MTIME_BASE, &ticks, 8);
   }
 }
 
@@ -215,10 +242,10 @@ static void timer_intr()
 
 uint64_t get_mtimecmp()
 {
-  uint8_t *p = (uint8_t *)clint_base;
-  uint32_t lo = *(uint32_t *)(p + MTIMECMP_BASE);
-  uint32_t hi = *(uint32_t *)(p + MTIMECMP_BASE + 4);
-  return ((uint64_t)hi << 32) | lo;
+  cpu_bus_lock();
+  uint64_t value = cpu.mtimecmp;
+  cpu_bus_unlock();
+  return value;
 }
 
 void init_timer()
@@ -226,11 +253,10 @@ void init_timer()
   rtc_port_base = (uint32_t *)new_space(8);
   goldfish_rtc_base = new_space(GOLDFISH_RTC_SIZE);
   clint_base = (uint32_t *)new_space(0x000c0000);
-  clint_msip = 0;
+  memset(clint_msip, 0, sizeof(clint_msip));
   /* Initialize mtimecmp to max so timer doesn't fire until software programs it */
   uint8_t *p = (uint8_t *)clint_base;
-  *(uint32_t *)(p + MTIMECMP_BASE) = 0xFFFFFFFF;
-  *(uint32_t *)(p + MTIMECMP_BASE + 4) = 0xFFFFFFFF;
+  memset(p + MTIMECMP_BASE, 0xff, 8 * nemu_nr_harts);
 #ifdef CONFIG_HAS_PORT_IO
   add_pio_map("rtc", CONFIG_RTC_PORT, rtc_port_base, 8, rtc_io_handler);
 #else

@@ -20,12 +20,16 @@
 #include <memory/tlb.h>
 #include <device/mmio.h>
 #include <cpu/difftest.h>
+#include <cpu/cpu.h>
+#include <cpu/thread.h>
+#include <cpu/multidiff.h>
+#include <cpu/diffjournal.h>
 #ifdef CONFIG_RAPTOR_PMEM_2G
 #include <sys/mman.h>
 #endif
 
-extern jmp_buf exec_jmp_buf;
-extern int cause;
+extern NEMU_TLS jmp_buf exec_jmp_buf;
+extern NEMU_TLS int cause;
 
 char *btb_file = NULL;
 
@@ -219,6 +223,7 @@ static word_t pmem_read(paddr_t addr, int len)
 
 static void pmem_write(paddr_t addr, int len, word_t data)
 {
+  IFDEF(NEMU_HAS_SMP, cpu_invalidate_reservations(addr, len));
   host_write(guest_to_host(addr), len, data);
 }
 
@@ -317,6 +322,12 @@ word_t ref_paddr_io(paddr_t addr)
 
 bool paddr_is_mapped(paddr_t addr)
 {
+  if (multidiff_active() && addr >= 0x100000 && addr < 0x100004) return true;
+#ifdef NEMU_HAS_REPLAY
+  if (nemu_md_rng_span(addr & ~(paddr_t)3, 4)) return true;
+  if (nemu_md_net_span(addr & ~(paddr_t)3, 4, false)) return true;
+  if (nemu_md_block_span(addr & ~(paddr_t)3, 4)) return true;
+#endif
   if (paddr_is_memory_span(addr, 1)) return true;
 #ifdef CONFIG_DEVICE
   if (mmio_map_contains(addr)) return true;
@@ -348,7 +359,7 @@ bool paddr_supports_zero(paddr_t addr)
   return paddr_is_ram_span(addr & ~(paddr_t)63, 64);
 }
 
-word_t paddr_read(paddr_t addr, int len)
+static word_t paddr_read_unlocked(paddr_t addr, int len)
 {
 #ifdef CONFIG_MTRACE
   printf("paddr_r: " FMT_PADDR ", size: %d\n", addr, len);
@@ -390,7 +401,7 @@ word_t paddr_read(paddr_t addr, int len)
   return 0;
 }
 
-void paddr_write(paddr_t addr, int len, word_t data)
+static void paddr_write_unlocked(paddr_t addr, int len, word_t data)
 {
 #ifdef CONFIG_MTRACE
   printf("paddr_w: " FMT_PADDR ", size: %d, data: " FMT_WORD "\n", addr, len, data);
@@ -417,4 +428,111 @@ void paddr_write(paddr_t addr, int len, word_t data)
 #endif
   IFDEF(CONFIG_DEVICE, mmio_write(addr, len, data); return);
   out_of_bound(addr);
+}
+
+word_t paddr_read(paddr_t addr, int len)
+{
+  cpu_bus_lock();
+  if (nemu_md_guard && !nemu_md_guard(addr, len, false, 0)) {
+    cpu_bus_unlock();
+    return 0;
+  }
+  word_t data;
+#ifdef NEMU_HAS_REPLAY
+  if (multidiff_active() && addr == 0x100000 && len == 4) {
+    data = 0;
+  } else if (nemu_md_clint_span(addr, len, false)) {
+    Assert(nemu_replay_clint, "CLINT replay model unavailable");
+    data = nemu_replay_clint(addr, len, false, 0);
+  } else if (nemu_md_plic_span(addr, len)) {
+    Assert(nemu_replay_plic, "PLIC replay model unavailable");
+    data = nemu_replay_plic(addr, len, false, 0);
+  } else if (nemu_md_uart_span(addr, len)) {
+    Assert(nemu_replay_uart, "UART replay model unavailable");
+    data = nemu_replay_uart(addr, len, false, 0);
+  } else if (nemu_md_rng_span(addr, len)) {
+    Assert(nemu_replay_rng, "RNG replay model unavailable");
+    data = nemu_replay_rng(addr, len, false, 0);
+  } else if (nemu_md_net_span(addr, len, false)) {
+    Assert(nemu_replay_net, "NET replay model unavailable");
+    data = nemu_replay_net(addr, len, false, 0);
+  } else if (nemu_md_block_span(addr, len)) {
+    Assert(nemu_replay_block, "BLOCK replay model unavailable");
+    data = nemu_replay_block(addr, len, false, 0);
+  } else
+#endif
+    data = paddr_read_unlocked(addr, len);
+  if (nemu_md_record) nemu_md_record(addr, len, false, data);
+  cpu_bus_unlock();
+  return data;
+}
+
+void paddr_write(paddr_t addr, int len, word_t data)
+{
+  cpu_bus_lock();
+  if (nemu_md_guard && !nemu_md_guard(addr, len, true, data)) {
+    cpu_bus_unlock();
+    return;
+  }
+#ifdef NEMU_HAS_REPLAY
+  if (nemu_md_clint_span(addr, len, true)) {
+    Assert(nemu_replay_clint, "CLINT replay model unavailable");
+    nemu_replay_clint(addr, len, true, data);
+  } else if (nemu_md_plic_span(addr, len)) {
+    Assert(nemu_replay_plic, "PLIC replay model unavailable");
+    nemu_replay_plic(addr, len, true, data);
+  } else if (nemu_md_uart_span(addr, len)) {
+    Assert(nemu_replay_uart, "UART replay model unavailable");
+    nemu_replay_uart(addr, len, true, data);
+  } else if (nemu_md_rng_span(addr, len)) {
+    Assert(nemu_replay_rng, "RNG replay model unavailable");
+    nemu_replay_rng(addr, len, true, data);
+  } else if (nemu_md_net_span(addr, len, true)) {
+    Assert(nemu_replay_net, "NET replay model unavailable");
+    nemu_replay_net(addr, len, true, data);
+  } else if (nemu_md_block_span(addr, len)) {
+    Assert(nemu_replay_block, "BLOCK replay model unavailable");
+    nemu_replay_block(addr, len, true, data);
+  } else
+#endif
+    paddr_write_unlocked(addr, len, data);
+  if (nemu_md_record) nemu_md_record(addr, len, true, data);
+  cpu_bus_unlock();
+}
+
+bool paddr_dma_read(paddr_t addr, void *buffer, size_t len)
+{
+  if (!len) return true;
+  cpu_bus_lock();
+  bool allowed = !nemu_md_dma_guard || nemu_md_dma_guard(addr, len, false);
+  bool valid = len <= INT32_MAX && paddr_is_memory_span(addr, len)
+#ifdef CONFIG_DEVICE
+      && !mmio_map_overlaps(addr, len)
+#endif
+      ;
+  if (allowed && nemu_journal_dma)
+    allowed = nemu_journal_dma(addr, valid ? guest_to_host(addr) : NULL, len, false, valid);
+  if (allowed && valid) memcpy(buffer, guest_to_host(addr), len);
+  cpu_bus_unlock();
+  return allowed && valid;
+}
+
+bool paddr_dma_write(paddr_t addr, const void *buffer, size_t len)
+{
+  if (!len) return true;
+  cpu_bus_lock();
+  bool allowed = !nemu_md_dma_guard || nemu_md_dma_guard(addr, len, true);
+  bool valid = len <= INT32_MAX && paddr_is_ram_span(addr, len)
+#ifdef CONFIG_DEVICE
+      && !mmio_map_overlaps(addr, len)
+#endif
+      ;
+  if (allowed && nemu_journal_dma)
+    allowed = nemu_journal_dma(addr, buffer, len, true, valid);
+  if (allowed && valid) {
+    IFDEF(NEMU_HAS_SMP, cpu_invalidate_reservations(addr, len));
+    memcpy(guest_to_host(addr), buffer, len);
+  }
+  cpu_bus_unlock();
+  return allowed && valid;
 }

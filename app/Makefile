@@ -297,7 +297,7 @@ EMBENCH_BENCHMARKS := aha-mont64 crc32 depthconv edn huffbench matmult-int \
 
 EMBENCH_JOBS ?= $(NPROC)## Parallel NPC/sim instances for embench-sim
 PK_BUILD     = $(APP_HOME)/build/pk-build-rv$(XLEN)$(PK_PROFILE_SUFFIX)
-EMBENCH_REF_JSON ?= $(RAPTOR_HOME)/.github/data/embench-m4-ref.json## Cortex-M4 Embench reference data
+EMBENCH_REF_JSON ?= $(RAPTOR_HOME)/app/benchmarks/embench/embench-m4-ref.json## Cortex-M4 Embench reference data
 EMBENCH_BARE_BUILD_DIR = $(APP_HOME)/build/rv$(XLEN)/embench-baremetal
 EMBENCH_BARE_LOG_DIR = $(APP_LOG_DIR)/embench-baremetal-rv$(XLEN)
 EMBENCH_BARE_SUITE_LOG = $(APP_LOG_DIR)/embench-baremetal-rv$(XLEN).log

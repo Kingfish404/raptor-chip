@@ -15,6 +15,9 @@
 
 #include <device/map.h>
 #include <memory/paddr.h>
+#include <cpu/cpu.h>
+#include <cpu/multidiff.h>
+#include <cpu/diffjournal.h>
 
 #include <errno.h>
 #include <stdio.h>
@@ -60,6 +63,7 @@
 
 #define VIRTIO_CONFIG_S_DRIVER_OK 4u
 #define VRING_DESC_F_NEXT 1u
+#define VRING_DESC_F_WRITE 2u
 #define VIRTIO_BLK_T_IN 0u
 #define VIRTIO_BLK_T_OUT 1u
 #define VIRTIO_BLK_T_GET_ID 8u
@@ -104,7 +108,21 @@ static struct
     uint16_t last_avail_idx;
 } blk;
 
-void plic_raise_irq(int irq);
+void plic_raise_block_irq(int irq);
+
+const uint8_t *nemu_block_image(size_t *size)
+{
+    *size = blk.disk_size;
+    return blk.disk;
+}
+
+bool nemu_block_reset_state(void)
+{
+    return !blk.device_features_sel && !blk.driver_features_sel &&
+           !blk.driver_features[0] && !blk.driver_features[1] && !blk.queue_sel &&
+           !blk.queue_num && !blk.queue_ready && !blk.status && !blk.interrupt_status &&
+           !blk.desc_addr && !blk.driver_addr && !blk.device_addr && !blk.last_avail_idx;
+}
 
 void virtio_blk_set_disk_image(const char *path)
 {
@@ -135,23 +153,17 @@ static void reset_regs(void)
 
 static bool guest_mem_read(uint64_t addr, void *buf, size_t len)
 {
-    uint8_t *dst = buf;
-    for (size_t i = 0; i < len; i++)
-        dst[i] = *guest_to_host((paddr_t)(addr + i));
-    return true;
+  return paddr_dma_read((paddr_t)addr, buf, len);
 }
 
 static bool guest_mem_write(uint64_t addr, const void *buf, size_t len)
 {
-    const uint8_t *src = buf;
-    for (size_t i = 0; i < len; i++)
-        *guest_to_host((paddr_t)(addr + i)) = src[i];
-    return true;
+  return paddr_dma_write((paddr_t)addr, buf, len);
 }
 
 static bool read_desc(uint16_t idx, virtq_desc_t *desc)
 {
-    if (idx >= VIRTIO_QUEUE_NUM_MAX)
+    if (idx >= (blk.queue_num ? blk.queue_num : VIRTIO_QUEUE_NUM_MAX))
         return false;
     return guest_mem_read(blk.desc_addr + (uint64_t)idx * sizeof(*desc), desc, sizeof(*desc));
 }
@@ -214,16 +226,45 @@ static void finish_request(uint16_t head, uint32_t used_len)
     if (write_used_elem(head, used_len))
     {
         blk.interrupt_status |= 1u;
-        plic_raise_irq(VIRTIO_BLK_IRQ);
+        plic_raise_block_irq(VIRTIO_BLK_IRQ);
     }
 }
 
-/* A virtio-blk request is a descriptor chain of the form
- *   [header][data...][status]
- * where the data portion may span an arbitrary number of chained
- * descriptors (NetBSD does this for multi-page transfers).  Walk the whole
- * chain instead of assuming exactly one data descriptor, otherwise large
- * reads are only partially filled and the guest sees corrupt filesystems. */
+static bool transfer_data(uint32_t type, uint64_t address, uint32_t length,
+                          size_t *offset, uint32_t *used_length)
+{
+    uint8_t buffer[65536];
+    static const uint8_t identity[20] = "NEMU-VIRTIO-BLK";
+    if (length > VIRTIO_BLK_MAX_SIZE || (type != VIRTIO_BLK_T_GET_ID &&
+        (*offset > blk.disk_size || length > blk.disk_size - *offset))) return false;
+    for (uint32_t done = 0; done < length;) {
+        size_t chunk = length - done < sizeof(buffer) ? length - done : sizeof(buffer);
+        if (type == VIRTIO_BLK_T_OUT) {
+            if (!guest_mem_read(address + done, buffer, chunk)) return false;
+            if (multidiff_block_active() && nemu_journal_block_data &&
+                !nemu_journal_block_data(*offset, buffer, chunk, true)) return false;
+            memcpy(blk.disk + *offset, buffer, chunk);
+        } else {
+            if (type == VIRTIO_BLK_T_IN) {
+                memcpy(buffer, blk.disk + *offset, chunk);
+                if (multidiff_block_active() && nemu_journal_block_data &&
+                    !nemu_journal_block_data(*offset, buffer, chunk, false)) return false;
+            } else {
+                memset(buffer, 0, chunk);
+                if (done < sizeof(identity)) {
+                    size_t part = sizeof(identity) - done < chunk ? sizeof(identity) - done : chunk;
+                    memcpy(buffer, identity + done, part);
+                }
+            }
+            if (!guest_mem_write(address + done, buffer, chunk)) return false;
+            *used_length += chunk;
+        }
+        if (type != VIRTIO_BLK_T_GET_ID) *offset += chunk;
+        done += chunk;
+    }
+    return true;
+}
+
 static void process_one(uint16_t head)
 {
     virtq_desc_t desc0, desc, status_desc;
@@ -233,10 +274,9 @@ static void process_one(uint16_t head)
     bool io_ok = true;
     bool have_status = false;
     size_t disk_off = 0;
-    size_t remaining = 0;
 
     if (!read_desc(head, &desc0) || desc0.len < sizeof(req) ||
-        !(desc0.flags & VRING_DESC_F_NEXT) ||
+        !(desc0.flags & VRING_DESC_F_NEXT) || (desc0.flags & VRING_DESC_F_WRITE) ||
         !guest_mem_read(desc0.addr, &req, sizeof(req)))
     {
         finish_request(head, 0);
@@ -244,14 +284,13 @@ static void process_one(uint16_t head)
     }
 
     uint64_t byte_off = req.sector * (uint64_t)VIRTIO_SECTOR_SIZE;
-    if (byte_off < blk.disk_size)
+    if (req.sector <= UINT64_MAX / VIRTIO_SECTOR_SIZE && byte_off < blk.disk_size)
     {
         disk_off = (size_t)byte_off;
-        remaining = blk.disk_size - disk_off;
     }
     else
     {
-        io_ok = false;
+        io_ok = req.type == VIRTIO_BLK_T_GET_ID;
     }
 
     memset(&status_desc, 0, sizeof(status_desc));
@@ -259,7 +298,8 @@ static void process_one(uint16_t head)
         fprintf(stderr, "[disk] req type=%u sector=%llu head=%u\n", req.type,
                 (unsigned long long)req.sector, head);
     uint16_t idx = desc0.next;
-    for (uint32_t guard = 0; guard <= VIRTIO_QUEUE_NUM_MAX; guard++)
+    uint32_t limit = blk.queue_num ? blk.queue_num : VIRTIO_QUEUE_NUM_MAX;
+    for (uint32_t guard = 1; guard < limit; guard++)
     {
         if (!read_desc(idx, &desc))
         {
@@ -268,60 +308,21 @@ static void process_one(uint16_t head)
         }
         if (!(desc.flags & VRING_DESC_F_NEXT))
         {
-            /* The final descriptor in the chain carries the status byte. */
             status_desc = desc;
-            have_status = true;
+            have_status = desc.len >= 1 && (desc.flags & VRING_DESC_F_WRITE);
             break;
         }
 
-        uint32_t len = desc.len;
-        if (req.type == VIRTIO_BLK_T_IN)
-        {
-            uint32_t n = (len <= remaining) ? len : (uint32_t)remaining;
-            guest_mem_write(desc.addr, blk.disk + disk_off, n);
-            if (n < len)
-            {
-                uint8_t zero = 0;
-                for (uint32_t i = n; i < len; i++)
-                    guest_mem_write(desc.addr + i, &zero, 1);
-            }
-            used_len += len;
-            disk_off += n;
-            remaining -= n;
-        }
-        else if (req.type == VIRTIO_BLK_T_OUT)
-        {
-            uint32_t n = (len <= remaining) ? len : (uint32_t)remaining;
-            if (n != len)
-                io_ok = false;
-            guest_mem_read(desc.addr, blk.disk + disk_off, n);
-            disk_off += n;
-            remaining -= n;
-        }
-        else if (req.type == VIRTIO_BLK_T_GET_ID)
-        {
-            static const char id[20] = "NEMU-VIRTIO-BLK";
-            uint32_t n = len < sizeof(id) ? len : (uint32_t)sizeof(id);
-            guest_mem_write(desc.addr, id, n);
-            if (n < len)
-            {
-                uint8_t zero = 0;
-                for (uint32_t i = n; i < len; i++)
-                    guest_mem_write(desc.addr + i, &zero, 1);
-            }
-            used_len += len;
-        }
-        else
-        {
-            io_ok = false;
-        }
+        bool supported = req.type == VIRTIO_BLK_T_IN || req.type == VIRTIO_BLK_T_OUT || req.type == VIRTIO_BLK_T_GET_ID;
+        bool writable = req.type != VIRTIO_BLK_T_OUT;
+        if (!supported || !!(desc.flags & VRING_DESC_F_WRITE) != writable) io_ok = false;
+        if (io_ok && !transfer_data(req.type, desc.addr, desc.len, &disk_off, &used_len)) io_ok = false;
         idx = desc.next;
     }
 
-    if (!io_ok)
+    if (!io_ok || (req.type != VIRTIO_BLK_T_IN && req.type != VIRTIO_BLK_T_OUT && req.type != VIRTIO_BLK_T_GET_ID))
         status = VIRTIO_BLK_STATUS_IOERR;
-    if (have_status)
-        guest_mem_write(status_desc.addr, &status, 1);
+    if (have_status && guest_mem_write(status_desc.addr, &status, 1)) used_len++;
     finish_request(head, used_len);
 }
 

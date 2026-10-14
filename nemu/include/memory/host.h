@@ -25,10 +25,25 @@ static inline word_t host_read(void *addr, int len)
   case 1:
     return *(uint8_t *)addr;
   case 2:
-    return *(uint16_t *)addr;
+  {
+    uint16_t value;
+    memcpy(&value, addr, sizeof(value));
+    return value;
+  }
   case 4:
-    return *(uint32_t *)addr;
-    IFDEF(CONFIG_ISA64, case 8 : return *(uint64_t *)addr);
+  {
+    uint32_t value;
+    memcpy(&value, addr, sizeof(value));
+    return value;
+  }
+#ifdef CONFIG_ISA64
+  case 8:
+  {
+    uint64_t value;
+    memcpy(&value, addr, sizeof(value));
+    return value;
+  }
+#endif
   default:
     MUXDEF(CONFIG_RT_CHECK, assert(0), return 0);
   }
@@ -42,12 +57,22 @@ static inline void host_write(void *addr, int len, word_t data)
     *(uint8_t *)addr = data;
     return;
   case 2:
-    *(uint16_t *)addr = data;
+  {
+    uint16_t value = data;
+    memcpy(addr, &value, sizeof(value));
     return;
+  }
   case 4:
-    *(uint32_t *)addr = data;
+  {
+    uint32_t value = data;
+    memcpy(addr, &value, sizeof(value));
     return;
-    IFDEF(CONFIG_ISA64, case 8 : *(uint64_t *)addr = data; return);
+  }
+#ifdef CONFIG_ISA64
+  case 8:
+    memcpy(addr, &data, sizeof(data));
+    return;
+#endif
     IFDEF(CONFIG_RT_CHECK, default : assert(0));
   }
 }

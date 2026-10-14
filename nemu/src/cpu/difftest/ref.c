@@ -23,7 +23,9 @@
 #endif
 #include <memory/vaddr.h>
 
-extern CPU_state cpu;
+#ifndef NEMU_HAS_SMP
+extern NEMU_TLS CPU_state cpu;
+#endif
 
 /* IMPORTANT: This struct layout must stay in sync with the canonical
  * NPCState defined in sim/include/common.h. */

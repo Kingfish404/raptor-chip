@@ -12,7 +12,7 @@
 #   Ticks:  <N> (CLOCKS_PER_SEC=1000000)
 #   Result: PASS|FAIL|TIMEOUT|ERROR
 #
-# Reference data: <repo>/.github/data/embench-m4-ref.json
+# Reference data: <repo>/app/benchmarks/embench/embench-m4-ref.json
 #   Cortex-M4 @ 16 MHz baseline, in ms. Embench Score = geomean(speed_i)
 #   where speed_i = ref_ms * 1000 / measured_cycles (cycle-normalised).
 # ============================================================================
@@ -22,7 +22,7 @@ set -euo pipefail
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 # SCRIPT_DIR = <repo>/fpga/litex/benchmarks/embench  -> 4 parents up = repo root
 RAPTOR_HOME="$( cd "$SCRIPT_DIR/../../../.." && pwd )"
-REF_JSON="$RAPTOR_HOME/.github/data/embench-m4-ref.json"
+REF_JSON="$RAPTOR_HOME/app/benchmarks/embench/embench-m4-ref.json"
 
 if [[ ! -f "$REF_JSON" ]]; then
     echo "[ERR] Missing reference file: $REF_JSON" >&2
@@ -219,4 +219,4 @@ if [[ "$NETTLE_SHA256_LOCAL_SCALE" != "562" ]]; then
     echo ""
 fi
 echo "_Score definition: for each benchmark speed_i = ref_ms × 1000 / measured_cycles;_"
-echo "_Embench Score = geomean(speed_i). Reference ms from [.github/data/embench-m4-ref.json](../../../../.github/data/embench-m4-ref.json)._"
+echo "_Embench Score = geomean(speed_i). Reference ms from [app/benchmarks/embench/embench-m4-ref.json](../../../../app/benchmarks/embench/embench-m4-ref.json)._"

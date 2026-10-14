@@ -92,6 +92,7 @@ module wrap_ysyxsoc (
       .MemoryReadCredits(1)
   ) cpu (
       .clock(clock),
+      .writeback_error_o(),
       .reset(reset),
       .io_interrupt(io_interrupt),
       .external_write_valid_i(1'b0),

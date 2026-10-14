@@ -1,13 +1,13 @@
 name: STA (PPA matrix)
 
-# Static Timing Analysis across {rv32, rv64} × {nangate45, asap7}.
-# Runs weekly to keep PPA numbers fresh without bloating PR CI.
-# Manual dispatch is also supported via the Actions tab.
+# Static Timing Analysis across {rv32, rv64} × {nangate45, asap7, sky130hd}.
+# Runs on RTL/simulator changes, weekly to refresh tool and PDK revisions, and
+# on manual dispatch. Logs are uploaded; ci_report.py renders the summary.
 
 on:
   push:
     branches: ["master", "main"]
-    paths:
+    paths: &sta-paths
       - "hdl/**"
       - "sim/**"
       - ".github/scripts/**"
@@ -17,14 +17,7 @@ on:
       - ".github/workflows/sta.yaml"
   pull_request:
     branches: ["master", "main"]
-    paths:
-      - "hdl/**"
-      - "sim/**"
-      - ".github/scripts/**"
-      - ".github/actions/**"
-      - "setup.sh"
-      - "setup-rtl.sh"
-      - ".github/workflows/sta.yaml"
+    paths: *sta-paths
   schedule:
     - cron: "0 20 * * 0" # Sundays 20:00 UTC
   workflow_dispatch:
@@ -33,20 +26,27 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    shell: bash -leo pipefail {0}
+
 env:
   RAPT_CONFIG: small
+  RAPTOR_HOME: ${{ github.workspace }}
+  NEMU_HOME: ${{ github.workspace }}/nemu
+  AM_HOME: ${{ github.workspace }}/abstract-machine
+  CROSS_COMPILE: riscv64-elf-
 
 jobs:
   prepare-sta:
     runs-on: ubuntu-24.04
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v6
       - name: Setup STA environment
         uses: ./.github/actions/setup-environment
         with:
           profile: sta
-      - name: Check CI setup helpers
-        run: python3 .github/scripts/test_ci_setup.py
       # Populate the common tool cache before the six workers start. Without
       # this dependency, a cold cache would compile OpenSTA/Slang six times.
       - name: Prepare shared STA tools and NanGate45 data
@@ -86,11 +86,9 @@ jobs:
             vflags: "-DRAPT_RV64"
             clk_freq_mhz: 25
     name: sta-${{ matrix.xlen }}-${{ matrix.platform }}
+    timeout-minutes: 180
     env:
-      RAPTOR_HOME: ${{ github.workspace }}
-      NEMU_HOME: ${{ github.workspace }}/nemu
-      AM_HOME: ${{ github.workspace }}/abstract-machine
-      CROSS_COMPILE: riscv64-elf-
+      STA_LOG: /tmp/sta-${{ matrix.xlen }}-${{ matrix.platform }}.log
     steps:
       - uses: actions/checkout@v6
       - name: Setup environment
@@ -103,37 +101,21 @@ jobs:
           platform: ${{ matrix.platform }}
 
       - name: Run STA (${{ matrix.xlen }}, ${{ matrix.platform }})
-        shell: bash -l {0}
         run: |
-          mkdir -p .github/results
-          LOG=/tmp/sta-${{ matrix.xlen }}-${{ matrix.platform }}.log
-          OUT=.github/results/sta-${{ matrix.xlen }}-${{ matrix.platform }}
-          make sta STA_PLATFORM=${{ matrix.platform }} CLK_FREQ_MHZ=${{ matrix.clk_freq_mhz }} VFLAGS="${{ matrix.vflags }}" \
-            2>&1 | tee "$LOG" | tail -256
-          cp "$LOG" "${OUT}.log"
-          bash .github/scripts/parse-benchmark.sh sta "$LOG" > "${OUT}.txt"
+          make sta STA_PLATFORM=${{ matrix.platform }} CLK_FREQ_MHZ=${{ matrix.clk_freq_mhz }} \
+            VFLAGS="${{ matrix.vflags }}" 2>&1 | tee "$STA_LOG" | tail -256
 
-      - name: Generate STA summary (${{ matrix.xlen }}, ${{ matrix.platform }})
-        shell: bash -l {0}
+      - name: STA summary (${{ matrix.xlen }}, ${{ matrix.platform }})
+        if: always()
         run: |
-          OUT=.github/results/sta-${{ matrix.xlen }}-${{ matrix.platform }}.txt
-          read_val() {
-            local key="$1"
-            grep -oP "^${key}=\\K.*" "$OUT" 2>/dev/null || echo "N/A"
-          }
+          python3 .github/scripts/ci_report.py sta ${{ matrix.xlen }} ${{ matrix.platform }} "$STA_LOG" \
+            >> "$GITHUB_STEP_SUMMARY"
 
-          FREQ=$(read_val freq_mhz)
-          AREA=$(read_val area)
-          POWER=$(read_val power)
-
-          {
-            echo ""
-            echo "## STA Results (${{ matrix.xlen }} / ${{ matrix.platform }})"
-            echo "| Metric | Value |"
-            echo "|--------|-------|"
-            echo "| ISA    | ${{ matrix.xlen }} |"
-            echo "| PDK    | ${{ matrix.platform }} |"
-            echo "| Fmax   | ${FREQ} MHz |"
-            echo "| Area   | ${AREA} |"
-            echo "| Power  | ${POWER} W |"
-          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload STA log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sta-${{ matrix.xlen }}-${{ matrix.platform }}
+          path: ${{ env.STA_LOG }}
+          if-no-files-found: warn
+          retention-days: 14

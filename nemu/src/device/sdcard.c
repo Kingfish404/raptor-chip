@@ -16,6 +16,7 @@
 #include <common.h>
 #include <device/map.h>
 #include <memory/paddr.h>
+#include <cpu/cpu.h>
 
 #define QEMU_SDHCI_PCI_ECAM_BASE 0x30008000u
 #define QEMU_SDHCI_PCI_ECAM_SIZE 0x1000u
@@ -83,7 +84,7 @@ static void dma_read_block()
   }
 
   uint32_t dma_addr = load32(SDHCI_DMA_ADDRESS);
-  memcpy(guest_to_host(dma_addr), block, sizeof(block));
+  paddr_dma_write(dma_addr, block, sizeof(block));
 }
 
 static void complete_command()

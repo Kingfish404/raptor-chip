@@ -14,6 +14,8 @@
  ***************************************************************************************/
 
 #include <common.h>
+#include <cpu/thread.h>
+#include <cpu/multidiff.h>
 #include <device/alarm.h>
 #include <sys/time.h>
 #include <signal.h>
@@ -40,6 +42,7 @@ static void alarm_sig_handler(int signum)
 
 void init_alarm()
 {
+  if (nemu_threaded || multidiff_active()) return;
   struct sigaction s;
   memset(&s, 0, sizeof(s));
   s.sa_handler = alarm_sig_handler;

@@ -15,7 +15,7 @@
 
 #include <common.h>
 
-extern uint64_t g_nr_guest_inst;
+extern NEMU_TLS uint64_t g_nr_guest_inst;
 
 #ifndef CONFIG_TARGET_AM
 FILE *log_fp = NULL;

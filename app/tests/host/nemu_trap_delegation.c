@@ -2,8 +2,9 @@
 #include <isa-def.h>
 #include <stdio.h>
 
-CPU_state cpu;
-word_t g_vaddr;
+NEMU_TLS CPU_state cpu;
+NEMU_TLS word_t g_vaddr;
+bool nemu_md_interrupts;
 static unsigned flushes;
 void soft_tlb_flush(void) { ++flushes; }
 word_t riscv_mip_value(void) { return cpu.sr[CSR_MIP]; }
@@ -73,6 +74,13 @@ int main(void) {
         expected=MCA_INTR_BIT | irq_bits[i]; break;
       }
     }
+#ifdef NEMU_HAS_REPLAY
+    nemu_md_interrupts = false;
+    if (isa_query_intr() != INTR_EMPTY && failures++ < 8)
+      puts("FAIL legacy reference selected an interrupt automatically");
+    ++cases;
+    nemu_md_interrupts = true;
+#endif
     word_t actual=isa_query_intr();
     if (actual!=expected && failures++<8) printf("FAIL interrupt priority p=%u ie=%u deleg=%u pending=%u enable=%u\n",p,ie,deleg,pending,enable);
     ++cases;

@@ -1,0 +1,56 @@
+name: CI checks
+
+# Fast self-tests for the CI itself: workflow lint, setup/caching helpers,
+# log parsing and CoreMark validation, and RISCOF runner failure handling.
+# They need no simulator build, so they run once here instead of inside every
+# simulation, STA and compliance job.
+
+on:
+  push:
+    branches: ["master", "main"]
+    paths: &ci-paths
+      - ".github/**"
+      - "setup.sh"
+      - "setup-rtl.sh"
+      - "verify/scripts/test_riscof_*.py"
+      - "verify/scripts/riscof*"
+      - "verify/riscof/**"
+      - "app/benchmarks/coremark/portme/**"
+      - "app/benchmarks/embench/report.py"
+      - "app/benchmarks/embench/test_report.py"
+  pull_request:
+    branches: ["master", "main"]
+    paths: *ci-paths
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  self-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Lint workflows (actionlint + shellcheck)
+        run: |
+          set -euo pipefail
+          ACTIONLINT_VERSION=1.7.12
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/actionlint.tgz" \
+            "https://github.com/rhysd/actionlint/releases/download/v$ACTIONLINT_VERSION/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          tar -xzf "$RUNNER_TEMP/actionlint.tgz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
+      - name: CI setup helpers
+        run: python3 .github/scripts/test_ci_setup.py
+      - name: Log parsing and CoreMark validation
+        run: python3 .github/scripts/test_ci_report.py
+      - name: Embench score aggregation
+        run: python3 app/benchmarks/embench/test_report.py
+      - name: RISCOF runner failure handling
+        run: |
+          python3 verify/scripts/test_riscof_classic_runner.py
+          python3 verify/scripts/test_riscof_classic_sail.py

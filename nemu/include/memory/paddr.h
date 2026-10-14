@@ -100,6 +100,8 @@ static inline bool in_flash(paddr_t addr)
 }
 
 word_t paddr_read(paddr_t addr, int len);
+bool paddr_dma_read(paddr_t addr, void *buffer, size_t len);
+bool paddr_dma_write(paddr_t addr, const void *buffer, size_t len);
 void paddr_write(paddr_t addr, int len, word_t data);
 bool paddr_is_mapped(paddr_t addr);
 bool paddr_is_readonly(paddr_t addr);
