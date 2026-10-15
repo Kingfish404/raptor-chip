@@ -1,8 +1,9 @@
 `include "rapt.svh"
 
 // Timing noninterference at the shared fast MUL/iterative DIV port.
-// DIV is not required by Zkt; here its operands also vary to check the
-// current implementation's interference with later MUL transactions.
+// Zkt covers MUL only: MUL operands are secret (independent in each copy).
+// DIV is not covered and skips leading dividend zeros, so its operands are
+// public (equal in both copies) while DIVs still interleave with MULs.
 module formal_zkt_muldiv (
     input clock,
     reset,
@@ -73,6 +74,7 @@ module formal_zkt_muldiv (
       assume (is_mul || is_div);
       if (X == 32) assume (!in_word);
       if (in_word && is_mul) assume (in_op == `RAPT_ALU_MUL___);
+      if (is_div) assume (a0 == a1 && b0 == b1);
     end
     if (past_valid) begin
       // Inductive lemmas for long-lived divider state. These are assertions
@@ -100,7 +102,7 @@ module formal_zkt_muldiv (
     else
       case (phase)
         0:
-        if (in_valid && ready0 && is_div && a0 != a1 && b0 != b1) begin
+        if (in_valid && ready0 && is_div) begin
           phase <= 1;
           div_was_word <= in_word;
         end

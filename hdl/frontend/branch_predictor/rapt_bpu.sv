@@ -40,6 +40,7 @@ module rapt_bpu #(
     ifu_bpu_if.in ifu_bpu,
     idu_bpu_if.in idu_bpu,
     input logic execute_recover = 1'b0,
+    input logic preserve_fetch = 1'b0,
     input logic [GHR_LEN-1:0] execute_ghr = '0,
     input logic [PHR_LEN-1:0] execute_phr = '0,
     output logic [GHR_LEN-1:0] snapshot_ghr,
@@ -117,7 +118,7 @@ module rapt_bpu #(
       .clock(clock),
       .reset(reset),
       .clear(cmu_bcast.fence_time),
-      .flush(cmu_bcast.flush_pipe || cmu_bcast.sys_resume),
+      .flush(cmu_bcast.flush_pipe && !preserve_fetch),
       .decode_recover(idu_bpu.history_recover),
       .execute_recover(execute_recover),
       .execute_ghr(execute_ghr),
@@ -148,6 +149,12 @@ module rapt_bpu #(
   // thing the `ifdef` switches is the module name. Keeps the parameter
   // map and port map authoritative in a single place.
   `RAPT_BPU_DIRP_MODULE #(
+`ifdef RAPT_BPU_DIRP_TAGE
+`ifdef RAPT_FETCH_LOOKAHEAD
+      .AuxPositions(rapt_pkg::DecodeWidth > 1 && !`RAPT_FETCH_RESPONSE_STAGE
+                    ? 2 * (rapt_pkg::DecodeWidth - 1) : 0),
+`endif
+`endif
       .XLEN   (XLEN),
       .GHR_LEN(GHR_LEN),
       .PHR_LEN(PHR_LEN),
@@ -156,6 +163,7 @@ module rapt_bpu #(
 `ifdef RAPT_BPU_DIRP_TAGE
 `ifdef RAPT_FETCH_LOOKAHEAD
       .aux_pc(ifu_bpu.aux_pc),
+      .aux_position(ifu_bpu.aux_position),
 `else
       .aux_pc('0),
 `endif
@@ -196,7 +204,10 @@ module rapt_bpu #(
   logic [       XLEN-1:1] cmu_wd_full;
   logic [    BTB_LEN-1:0] cmu_waddr;
   logic [BTB_TAG_LEN-1:0] cmu_wd_tag;
-  assign cmu_wen_entry = cmu_bcast.flush_pipe && (cmu_bcast.jen || cmu_bcast.jren || rbtaken);
+  assign cmu_wen_entry = cmu_bcast.flush_pipe
+      && (cmu_bcast.jen || cmu_bcast.jren || (cmu_bcast.ben && rbtaken));
+  `RAPT_SVA_IMPLY(clock, reset, BPU_COMMIT_ENTRY_IS_CONTROL, cmu_wen_entry,
+                  cmu_bcast.ben || cmu_bcast.jen || cmu_bcast.jren)
   assign cmu_wen_type  = cmu_bcast.jren || cmu_bcast.jen || (cmu_bcast.ben && rbtaken);
   // RETU identifies a return/coroutine target; IDU supplies RAS repair/training.
   assign cmu_wd_type   = cmu_bcast.ret ? RETU : cmu_bcast.jren ? INDR : cmu_bcast.jen ? DIRE : COND;

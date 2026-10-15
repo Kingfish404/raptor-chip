@@ -2,6 +2,8 @@
 """Exercise the classic Sail plugin's timeout and failure paths without RTL."""
 
 import importlib.util
+import configparser
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -19,7 +21,7 @@ riscof = types.ModuleType("riscof")
 riscof.__path__ = []
 utils = types.ModuleType("riscof.utils")
 template = types.ModuleType("riscof.pluginTemplate")
-template.pluginTemplate = type("pluginTemplate", (), {})
+template.pluginTemplate = type("pluginTemplate", (), {"__init__": lambda self, **kwargs: None})
 riscof.utils = utils
 with patch.dict(sys.modules, {"riscof": riscof, "riscof.utils": utils,
                               "riscof.pluginTemplate": template}):
@@ -47,14 +49,43 @@ class Make:
 
 
 class SailRunnerTest(unittest.TestCase):
+    suite = "classic"
+
+    def make_runner(self):
+        directory = ROOT / "verify/riscof" / self.suite
+        config = configparser.ConfigParser()
+        config.read(directory / "config.ini")
+        self.assertEqual((directory / config["RISCOF"]["ReferencePluginPath"]).resolve(),
+                         PLUGIN.parent)
+        settings = dict(config["sail_cSim"])
+        for name in ("pluginpath", "sail_config"):
+            if name in settings:
+                settings[name] = str((directory / settings[name]).resolve())
+        return module.sail_cSim(config=settings)
+
+    def test_profile_defaults_and_environment_override(self):
+        with patch.dict(os.environ, {}, clear=True):
+            runner = self.make_runner()
+            self.assertEqual(runner.num_jobs, "4")
+            self.assertEqual(runner.timeout, 40 if self.suite == "classic-nemu" else 630)
+        with patch.dict(os.environ, {"RAPT_JOBS": "2", "RAPT_TIMEOUT": "15"}):
+            runner = self.make_runner()
+            self.assertEqual((runner.num_jobs, runner.timeout), ("2", 45))
+        self.assertEqual(Path(runner.sail_config).name,
+                         "nemu.json" if self.suite == "classic-nemu" else "raptor.json")
+        self.assertTrue(Path(runner.sail_config).is_file())
+
     def exercise(self, *, count=1, delay=0, returncode=0, timeout=1,
-                 compiler="true rv{0}", succeeds=True):
+                 compiler="true rv{0}", succeeds=True, xlen="32"):
         with tempfile.TemporaryDirectory(prefix="riscof-sail-") as directory:
             root = Path(directory)
+            runner = self.make_runner()
             sail = root / "fake-sail"
             sail.write_text(
                 f"#!{sys.executable}\n"
                 "from pathlib import Path\nimport sys\nimport time\n"
+                f"assert '--config-override={runner.sail_config}' in sys.argv\n"
+                f"assert ('--rv32' in sys.argv) == {xlen == '32'}\n"
                 f"time.sleep({delay})\n"
                 f"if {returncode}: sys.exit({returncode})\n"
                 "sig = next(a.split('=', 1)[1] for a in sys.argv "
@@ -62,13 +93,11 @@ class SailRunnerTest(unittest.TestCase):
                 "Path(sig).write_text('12345678\\n')\n"
             )
             sail.chmod(0o755)
-            runner = object.__new__(module.sail_cSim)
             runner.work_dir = directory
-            runner.pluginpath = str(PLUGIN.parent)
             runner.name = "Reference-sail_c_simulator_"
             runner.make = "make"
             runner.num_jobs = "2"
-            runner.xlen = "32"
+            runner.xlen = xlen
             runner.timeout = timeout
             runner.sail_exe = str(sail)
             runner.compile_cmd = compiler
@@ -78,7 +107,7 @@ class SailRunnerTest(unittest.TestCase):
                 work = root / str(index)
                 work.mkdir()
                 tests[str(index)] = {"test_path": "/suite/test.S", "work_dir": str(work),
-                                     "isa": "RV32I", "macros": ["XLEN=32"]}
+                                     "isa": f"RV{xlen}I", "macros": [f"XLEN={xlen}"]}
             with patch.object(module.utils, "makeUtil", Make, create=True):
                 if succeeds:
                     runner.runTests(tests)
@@ -95,6 +124,9 @@ class SailRunnerTest(unittest.TestCase):
     def test_parallel_batch_outlives_implicit_framework_timeout(self):
         self.exercise(count=3, delay=0.1)
 
+    def test_rv64_reference(self):
+        self.exercise(xlen="64")
+
     def test_reference_failure_stops_flow(self):
         self.exercise(returncode=7, succeeds=False)
 
@@ -105,6 +137,10 @@ class SailRunnerTest(unittest.TestCase):
         logs = self.exercise(compiler="echo compiler-failed; false", succeeds=False)
         self.assertIn("compiler-failed", logs["build.log"])
         self.assertNotIn("test.log", logs)
+
+
+class NemuSailRunnerTest(SailRunnerTest):
+    suite = "classic-nemu"
 
 
 if __name__ == "__main__":

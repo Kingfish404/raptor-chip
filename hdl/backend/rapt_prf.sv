@@ -16,7 +16,7 @@
 // On flush, registers marked transient are invalidated (data remains don't-care).
 module rapt_prf #(
     parameter rapt_pkg::core_config_t Cfg = rapt_pkg::CoreConfig,
-    parameter int RenameWidth = Cfg.rename_width,
+    parameter int ReadWidth = Cfg.dispatch_width,
     parameter int CommitWidth = Cfg.commit_width,
     parameter int unsigned NumCompletions = Cfg.completion_ports,
     parameter type CompletionT = rapt_pkg::completion_t,
@@ -29,7 +29,7 @@ module rapt_prf #(
     input clock,
     input reset,
 
-    // Read ports (from ROU operand fetch)
+    // Read ports (from the ROU dispatch lanes)
     exu_prf_if.slave prf_rd,
 
     // Commit / dealloc / flush
@@ -57,14 +57,14 @@ module rapt_prf #(
     output logic [XLEN-1:0] dbg_rdata_o
     `RAPT_PRF_RVFI_PORTS
 );
-  if (RenameWidth < 1 || CommitWidth < 1 || NumCompletions < 1
+  if (ReadWidth < 1 || CommitWidth < 1 || NumCompletions < 1
       || RNUM < 1 || RNUM > 32 || PNUM < RNUM || XLEN < 1
       || PLEN < rapt_pkg::index_bits(
           PNUM
       )) begin : g_invalid_shape
     $error("Invalid rapt_prf configuration: storage/port shape");
   end
-  if (prf_rd.Width != RenameWidth || prf_rd.PLEN != PLEN || prf_rd.XLEN != XLEN
+  if (prf_rd.Width != ReadWidth || prf_rd.PLEN != PLEN || prf_rd.XLEN != XLEN
       || rou_cmu.Width != CommitWidth || rou_cmu.PLEN != PLEN
       || rou_cmu.XLEN != XLEN) begin : g_invalid_interfaces
     $error("Invalid rapt_prf configuration: interface dimensions");
@@ -84,17 +84,18 @@ module rapt_prf #(
   logic [PNUM-1:0] prf_transient;
   localparam int ArchIndexBits = rapt_pkg::index_bits(RNUM);
 
-  assign dbg_rdata_o = int'(dbg_addr_i) < RNUM
-      ? prf_arr[rat_snapshot[ArchIndexBits'(dbg_addr_i)]] : '0;
+  logic [PLEN-1:0] dbg_read_index, dbg_write_index;
+  logic dbg_write;
+  assign dbg_read_index = rat_snapshot[ArchIndexBits'(dbg_addr_i)];
+  assign dbg_write_index = dbg_read_index;
+  assign dbg_write = dbg_we_i && dbg_addr_i != 5'd0 && int'(dbg_addr_i) < RNUM;
 
 `ifdef RAPT_RVFI
   for (genvar c = 0; c < CommitWidth; c++)
     assign rvfi_rd_data[c] = rou_cmu.slot[c].rd != 0 ? prf_arr[rou_cmu.slot[c].prd] : '0;
 `endif
 
-  for (genvar s = 0; s < RenameWidth; s++) begin : g_read
-    assign prf_rd.pv1[s] = prf_arr[prf_rd.pr1[s]];
-    assign prf_rd.pv2[s] = prf_arr[prf_rd.pr2[s]];
+  for (genvar s = 0; s < ReadWidth; s++) begin : g_read_valid
     assign prf_rd.pv1_valid[s] = prf_valid[prf_rd.pr1[s]];
     assign prf_rd.pv2_valid[s] = prf_valid[prf_rd.pr2[s]];
   end
@@ -130,21 +131,24 @@ module rapt_prf #(
       if (wr_en[p]) wr_oh[p][wr_addr[p]] = 1'b1;
     end
   end
-  // Any-port write select per entry (unique by rename invariant).
+  // Any-port write select per entry. Rename keeps one live producer per
+  // physical destination, so at most one port writes an entry: AND-OR select.
   logic [PNUM-1:0] wr_any_oh;
   logic [XLEN-1:0] wr_mux_data[PNUM];
-  // Each entry owns its write selection and state. The small inner scan
-  // expresses the existing lowest-port priority; physical entries are not
-  // one large procedural unroll domain.
+  for (genvar a = 0; a < NWB; a++) begin : g_write_unique
+    for (genvar b = a + 1; b < NWB; b++) begin : g_pair
+      `RAPT_SVA(clock, reset, PRF_WRITE_TAG_UNIQUE,
+                !(wr_en[a] && wr_en[b] && wr_addr[a] == wr_addr[b]))
+    end
+  end
   for (genvar i = 0; i < PNUM; i++) begin : g_entry
     always_comb begin
       wr_any_oh[i]   = 1'b0;
-      wr_mux_data[i] = wr_data[0];
-      for (int p = NWB - 1; p >= 0; p--) begin
-        if (wr_oh[p][i]) begin
-          wr_any_oh[i]   = 1'b1;
-          wr_mux_data[i] = wr_data[p];
-        end
+      wr_mux_data[i] = '0;
+      for (int p = 0; p < NWB; p++)
+      if (wr_oh[p][i]) begin
+        wr_any_oh[i] = 1'b1;
+        wr_mux_data[i] |= wr_data[p];
       end
     end
     // ---- Write / state update ----
@@ -169,27 +173,112 @@ module rapt_prf #(
           prf_valid[i]     <= 1'b0;
           prf_transient[i] <= 1'b0;
         end else if (!cmu_bcast.flush_pipe && wr_any_oh[i]) begin
-          prf_arr[i]       <= wr_mux_data[i];
           prf_valid[i]     <= 1'b1;
           prf_transient[i] <= 1'b1;
-        end else if (dbg_we_i && dbg_addr_i != 5'd0 && int'(dbg_addr_i) < RNUM
-                     && rat_snapshot[ArchIndexBits'(dbg_addr_i)] == PLEN'(i)) begin
-          // Halt-time abstract write: target the committed phys reg of
-          // architectural reg `dbg_addr_i`. Caller must hold halted=1.
-          prf_arr[i] <= dbg_wdata_i;
         end
       end
     end
   end
 
-  // ---- Debug: architectural register view ----
-  genvar gi;
-  generate
-    for (gi = 0; gi < RNUM; gi = gi + 1) begin : gen_rf_debug
-      assign rf[gi]     = prf_arr[rat_snapshot[gi]];
-      assign rf_map[gi] = prf_arr[map_snapshot[gi]];
+  if (`RAPT_FPGA_LUTRAM) begin : g_lutram
+    // One distributed-RAM bank per completion writer, so every bank has a
+    // single write port; each read lane has its own copy. A small live-value
+    // table names the bank holding each register's latest value. Halt-time
+    // debug writes (no completions in flight) share writer zero's bank.
+    localparam int BankBits = NWB > 1 ? $clog2(NWB) : 1;
+    localparam int Reads = 2 * ReadWidth + 1;
+    logic [BankBits-1:0] lvt[PNUM];
+    logic bank_we[NWB];
+    logic [PLEN-1:0] bank_addr[NWB];
+    logic [XLEN-1:0] bank_data[NWB];
+    logic [PLEN-1:0] read_addr[Reads];
+    logic [XLEN-1:0] bank_read[Reads][NWB];
+    logic [XLEN-1:0] read_data[Reads];
+    for (genvar p = 0; p < NWB; p++) begin : g_bank
+      if (p == 0) begin : g_debug_share
+        assign bank_we[p] = (wr_en[p] && !cmu_bcast.flush_pipe) || dbg_write;
+        assign bank_addr[p] = wr_en[p] ? wr_addr[p] : dbg_write_index;
+        assign bank_data[p] = wr_en[p] ? wr_data[p] : dbg_wdata_i;
+      end else begin : g_writer
+        assign bank_we[p] = wr_en[p] && !cmu_bcast.flush_pipe;
+        assign bank_addr[p] = wr_addr[p];
+        assign bank_data[p] = wr_data[p];
+      end
+      for (genvar r = 0; r < Reads; r++) begin : g_copy
+        (* ram_style = "distributed" *) logic [XLEN-1:0] words[PNUM];
+        always_ff @(posedge clock) if (bank_we[p]) words[bank_addr[p]] <= bank_data[p];
+        assign bank_read[r][p] = words[read_addr[r]];
+      end
     end
-  endgenerate
+    // Writers are unique per entry (PRF_WRITE_TAG_UNIQUE); the lowest bank
+    // wins only to keep the LVT deterministic.
+    for (genvar i = 0; i < PNUM; i++) begin : g_lvt
+      always_ff @(posedge clock) begin
+        for (int p = NWB - 1; p >= 0; p--)
+        if (bank_we[p] && bank_addr[p] == PLEN'(i)) lvt[i] <= BankBits'(p);
+      end
+    end
+    for (genvar s = 0; s < ReadWidth; s++) begin : g_read_addr
+      assign read_addr[2*s] = prf_rd.pr1[s];
+      assign read_addr[2*s+1] = prf_rd.pr2[s];
+      assign prf_rd.pv1[s] = read_data[2*s];
+      assign prf_rd.pv2[s] = read_data[2*s+1];
+    end
+    assign read_addr[Reads-1] = dbg_read_index;
+    for (genvar r = 0; r < Reads; r++) begin : g_read
+      assign read_data[r] = bank_read[r][lvt[read_addr[r]]];
+    end
+    assign dbg_rdata_o = int'(dbg_addr_i) < RNUM ? read_data[Reads-1] : '0;
+`ifndef SYNTHESIS
+    // Full-file view for difftest, RVFI and module checks.
+    for (genvar i = 0; i < PNUM; i++) begin : g_view
+      logic [XLEN-1:0] bank_word[NWB];
+      for (genvar p = 0; p < NWB; p++) begin : g_bank_word
+        assign bank_word[p] = g_bank[p].g_copy[0].words[i];
+      end
+      assign prf_arr[i] = bank_word[lvt[i]];
+    end
+`else
+    for (genvar i = 0; i < PNUM; i++) begin : g_no_view
+      assign prf_arr[i] = '0;
+    end
+`ifdef RAPT_RVFI
+    $error("rapt_prf: RVFI needs the full register view, which LUTRAM synthesis omits");
+`endif
+`endif
+  end else begin : g_flops
+    for (genvar i = 0; i < PNUM; i++) begin : g_entry_data
+      // A completion writes a newly renamed, uncommitted destination, which is
+      // never deallocated or settled in the same cycle. Validity, not data,
+      // carries flush, so the data enable keeps only the write select.
+      `RAPT_SVA(clock, reset, PRF_WRITE_NOT_RETIRING,
+                !(wr_any_oh[i] && (dealloc_prs_oh[i] || settle_prd_oh[i])))
+      always_ff @(posedge clock) begin
+        if (!reset) begin
+          if (!cmu_bcast.flush_pipe && wr_any_oh[i]) begin
+            prf_arr[i] <= wr_mux_data[i];
+          end else if (!dealloc_prs_oh[i] && !settle_prd_oh[i]
+                       && !(cmu_bcast.flush_pipe && prf_transient[i])
+                       && dbg_write && dbg_write_index == PLEN'(i)) begin
+            // Halt-time abstract write: target the committed phys reg of
+            // architectural reg `dbg_addr_i`. Caller must hold halted=1.
+            prf_arr[i] <= dbg_wdata_i;
+          end
+        end
+      end
+    end
+    for (genvar s = 0; s < ReadWidth; s++) begin : g_read
+      assign prf_rd.pv1[s] = prf_arr[prf_rd.pr1[s]];
+      assign prf_rd.pv2[s] = prf_arr[prf_rd.pr2[s]];
+    end
+    assign dbg_rdata_o = int'(dbg_addr_i) < RNUM ? prf_arr[dbg_read_index] : '0;
+  end
+
+  // ---- Debug: architectural register view ----
+  for (genvar r = 0; r < RNUM; r++) begin : gen_rf_debug
+    assign rf[r]     = prf_arr[rat_snapshot[r]];
+    assign rf_map[r] = prf_arr[map_snapshot[r]];
+  end
 endmodule
 
 `undef RAPT_PRF_RVFI_PORTS

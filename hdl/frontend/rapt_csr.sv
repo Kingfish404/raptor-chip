@@ -111,7 +111,24 @@ module rapt_csr #(
   } csr_t;
 
   logic [1:0] priv_mode;
-  logic [XLEN-1:0] csr[64];
+  logic [XLEN-1:0] csr_state[64];
+  // Preserve the simulator's legacy observation array while storing shared
+  // status bits only once. RESET_VAL reaches SSTATUS through MSTATUS as well.
+  wire [XLEN-1:0] csr[64] /* verilator public_flat_rd */;
+  for (genvar i = 0; i < 64; i++) begin : g_csr_view
+    if (i == int'(SSTATUS)) begin : g_sstatus
+      assign csr[i] = (csr_state[MSTATUS] & `RAPT_CSR_SSTATUS_CMASK) | `RAPT_CSR_SSTATUS_HW;
+    end else begin : g_storage
+      assign csr[i] = csr_state[i];
+    end
+  end
+
+  // ROU commit_special retires returns alone; FP effects only come from the
+  // actual commit prefix. A return cannot share an FP update or a CSR write.
+  `RAPT_SVA_IMPLY(clock, reset, CSR_RETURN_RETIRES_ALONE,
+                  rou_csr.valid && (rou_csr.mret || rou_csr.sret),
+                  !rou_csr.fp_dirty && !rou_csr.csr_wen)
+
   // mepc/sepc must be halfword aligned with the C extension. Store only the
   // implemented address bits and restore bit 0 at CSR/interface boundaries.
   logic [XLEN-1:1] mepc_half_q, sepc_half_q;
@@ -198,6 +215,14 @@ module rapt_csr #(
     assign pmpcfg_r[i] = '0;
     assign pmpaddr_r[i] = '0;
   end
+
+  // A locked TOR entry also protects the preceding address (its lower bound).
+  function automatic logic pmp_addr_locked(input logic [3:0] index);
+    return pmpcfg_r[index][`RAPT_PMPCFG_L_]
+        || ((index < 4'(`RAPT_PMP_NUM - 1))
+            && pmpcfg_r[index + 4'd1][`RAPT_PMPCFG_L_]
+            && (pmpcfg_r[index + 4'd1][`RAPT_PMPCFG_A_] == `RAPT_PMP_A_TOR));
+  endfunction
 
   // trap handle
   logic [XLEN-1:0] cause_idx;
@@ -423,6 +448,32 @@ module rapt_csr #(
   assign ecall_deleg = (priv_mode != `RAPT_PRIV_M) && |(csr[MEDELEG] & ecall_cause_idx);
   assign ebreak_deleg = (priv_mode != `RAPT_PRIV_M) && csr[MEDELEG][3];
 
+  logic trap_enter, trap_to_s;
+  logic [XLEN-1:0] trap_cause, trap_tval, trap_epc;
+  always_comb begin
+    trap_enter = 1'b0;
+    trap_to_s = smode_handle;
+    trap_cause = rou_csr.cause;
+    trap_tval = rou_csr.tval;
+    trap_epc = rou_csr.pc;
+    if (rou_csr.ecall) begin
+      trap_enter = 1'b1;
+      trap_to_s = ecall_deleg;
+      trap_cause = priv_mode == `RAPT_PRIV_M ? `RAPT_CAUSE_ECALL_M
+          : priv_mode == `RAPT_PRIV_S ? `RAPT_CAUSE_ECALL_S : `RAPT_CAUSE_ECALL_U;
+      trap_tval = '0;
+    end else if (!rou_csr.mret && !rou_csr.sret) begin
+      if (rou_csr.ebreak) begin
+        trap_enter = 1'b1;
+        trap_to_s = ebreak_deleg;
+        trap_cause = `RAPT_CAUSE_BREAKPOINT;
+        trap_tval = trap_epc;
+      end else if (rou_csr.trap) begin
+        trap_enter = 1'b1;
+      end
+    end
+  end
+
   always_comb begin
     mret_mstatus_next = csr[MSTATUS];
     mret_mstatus_next[`RAPT_CSR_MSTATUS_MPP_] = `RAPT_PRIV_U;
@@ -571,8 +622,7 @@ module rapt_csr #(
     automatic int cfg_count;
     automatic logic cfg_write;
     automatic logic [3:0] pidx;
-    automatic logic self_locked;
-    automatic logic tor_locked;
+    automatic logic addr_locked;
 
     pmp_update.addr_we    = 1'b0;
     pmp_update.addr_idx   = '0;
@@ -636,17 +686,13 @@ module rapt_csr #(
     end
 
     pidx = rou_csr.csr_addr[3:0];
-    self_locked = pmpcfg_r[pidx][`RAPT_PMPCFG_L_];
-    tor_locked = (pidx < 4'(`RAPT_PMP_NUM - 1))
-        ? (pmpcfg_r[pidx + 4'd1][`RAPT_PMPCFG_L_]
-           && (pmpcfg_r[pidx + 4'd1][`RAPT_PMPCFG_A_] == `RAPT_PMP_A_TOR))
-        : 1'b0;
+    addr_locked = pmp_addr_locked(pidx);
     if (rou_csr.valid && rou_csr.csr_wen
       && rou_csr.csr_addr >= PMPAddrBase
       && rou_csr.csr_addr <= PMPAddrLast
       && int'(pidx) <
         `RAPT_PMP_NUM
-        && !self_locked && !tor_locked) begin
+        && !addr_locked) begin
       pmp_update.addr_we    = 1'b1;
       pmp_update.addr_idx   = PMPIndexW'(pidx);
       pmp_update.raw_addr   = rou_csr.csr_wdata[PMPCheckAddrW-1:0];
@@ -658,72 +704,69 @@ module rapt_csr #(
   always_ff @(posedge clock) begin
     if (reset) begin
       priv_mode <= `RAPT_PRIV_M;
-      csr[MCAUSE_] <= RESET_VAL;
+      csr_state[MCAUSE_] <= RESET_VAL;
       mepc_half_q <= RESET_VAL[XLEN-1:1];
-      csr[MTVEC__] <= RESET_VAL;
-      csr[MSTATUS] <= RESET_VAL | `RAPT_CSR_MSTATUS_HW;
-      csr[SSTATUS] <= `RAPT_CSR_SSTATUS_HW;
-      csr[FCSR] <= '0;
-      csr[SIE____] <= '0;
-      csr[STVEC__] <= '0;
-      csr[SSCRATC] <= '0;
+      csr_state[MTVEC__] <= RESET_VAL;
+      csr_state[MSTATUS] <= RESET_VAL | `RAPT_CSR_MSTATUS_HW;
+      csr_state[FCSR] <= '0;
+      csr_state[SIE____] <= '0;
+      csr_state[STVEC__] <= '0;
+      csr_state[SSCRATC] <= '0;
       sepc_half_q <= '0;
-      csr[SCAUSE_] <= '0;
-      csr[STVAL__] <= '0;
-      csr[SIP____] <= '0;
-      csr[SATP___] <= '0;
-      csr[MEDELEG] <= '0;
-      csr[MIE____] <= '0;
-      csr[MSCRATCH] <= '0;
-      csr[MTVAL__] <= '0;
-      csr[MIP____] <= '0;
-      csr[MCYCLE_] <= RESET_VAL;
-      csr[MCYCLEH] <= RESET_VAL;
-      csr[MINSTRET] <= RESET_VAL;
-      csr[MINSTRETH] <= RESET_VAL;
-      csr[MSTATUSH] <= '0;
-      csr[MENVCFG] <= '0;
-      csr[MENVCFGH] <= '0;
-      csr[MCOUNTE] <= '0;
-      csr[SCOUNTE] <= '0;
-      csr[SENVCFG] <= '0;
-      csr[MIDELEG] <= '0;
+      csr_state[SCAUSE_] <= '0;
+      csr_state[STVAL__] <= '0;
+      csr_state[SIP____] <= '0;
+      csr_state[SATP___] <= '0;
+      csr_state[MEDELEG] <= '0;
+      csr_state[MIE____] <= '0;
+      csr_state[MSCRATCH] <= '0;
+      csr_state[MTVAL__] <= '0;
+      csr_state[MIP____] <= '0;
+      csr_state[MCYCLE_] <= RESET_VAL;
+      csr_state[MCYCLEH] <= RESET_VAL;
+      csr_state[MINSTRET] <= RESET_VAL;
+      csr_state[MINSTRETH] <= RESET_VAL;
+      csr_state[MSTATUSH] <= '0;
+      csr_state[MENVCFG] <= '0;
+      csr_state[MENVCFGH] <= '0;
+      csr_state[MCOUNTE] <= '0;
+      csr_state[SCOUNTE] <= '0;
+      csr_state[SENVCFG] <= '0;
+      csr_state[MIDELEG] <= '0;
       stimecmp <= 64'hFFFF_FFFF_FFFF_FFFF;
       for (int i = 0; i < `RAPT_PMP_NUM; i++) begin
         pmpcfg_r[i]  <= '0;
         pmpaddr_r[i] <= '0;
       end
     end else begin
-      csr[MCYCLE_] <= csr[MCYCLE_] + 1;
-      if (csr[MCYCLE_] == ~'h0 && !(rou_csr.valid && rou_csr.csr_wen && waddr_reg == MCYCLE_)) begin
-        csr[MCYCLEH] <= csr[MCYCLEH] + 1;
+      csr_state[MCYCLE_] <= csr[MCYCLE_] + 1;
+      if (csr[MCYCLE_] == '1 && !(rou_csr.valid && rou_csr.csr_wen && waddr_reg == MCYCLE_)) begin
+        csr_state[MCYCLEH] <= csr[MCYCLEH] + 1;
       end
-      csr[MINSTRET] <= csr[MINSTRET] + XLEN'(rou_csr.retire_count);
+      csr_state[MINSTRET] <= csr[MINSTRET] + XLEN'(rou_csr.retire_count);
       if (csr[MINSTRET] + XLEN'(rou_csr.retire_count) < csr[MINSTRET]
           && !(rou_csr.valid && rou_csr.csr_wen && waddr_reg == MINSTRET)) begin
-        csr[MINSTRETH] <= csr[MINSTRETH] + 1;
+        csr_state[MINSTRETH] <= csr[MINSTRETH] + 1;
       end
       if (rou_csr.valid) begin
         if (rou_csr.fp_dirty) begin
-          csr[MSTATUS] <= csr[MSTATUS] | `RAPT_CSR_MSTATUS_SD | (XLEN'(3) << 13);
-          csr[SSTATUS] <= csr[SSTATUS] | `RAPT_CSR_MSTATUS_SD | (XLEN'(3) << 13);
+          csr_state[MSTATUS] <= csr[MSTATUS] | `RAPT_CSR_MSTATUS_SD | (XLEN'(3) << 13);
         end
         if (rou_csr.fp_flags_valid) begin
-          csr[FCSR][4:0] <= csr[FCSR][4:0] | rou_csr.fp_flags;
+          csr_state[FCSR][4:0] <= csr[FCSR][4:0] | rou_csr.fp_flags;
         end
         if (rou_csr.csr_wen) begin
           if (waddr_reg == FFLAGS || waddr_reg == FRM || waddr_reg == FCSR) begin
-            csr[MSTATUS] <= csr[MSTATUS] | `RAPT_CSR_MSTATUS_SD | (XLEN'(3) << 13);
-            csr[SSTATUS] <= csr[SSTATUS] | `RAPT_CSR_MSTATUS_SD | (XLEN'(3) << 13);
+            csr_state[MSTATUS] <= csr[MSTATUS] | `RAPT_CSR_MSTATUS_SD | (XLEN'(3) << 13);
           end
           if (rou_csr.csr_addr == `RAPT_CSR_MBERR_STATUS) begin
             // No generic CSR storage write for platform W1C status.
           end else if (waddr_reg == FFLAGS) begin
-            csr[FCSR][4:0] <= rou_csr.csr_wdata[4:0];
+            csr_state[FCSR][4:0] <= rou_csr.csr_wdata[4:0];
           end else if (waddr_reg == FRM) begin
-            csr[FCSR][7:5] <= rou_csr.csr_wdata[2:0];
+            csr_state[FCSR][7:5] <= rou_csr.csr_wdata[2:0];
           end else if (waddr_reg == FCSR) begin
-            csr[FCSR][7:0] <= rou_csr.csr_wdata[7:0];
+            csr_state[FCSR][7:0] <= rou_csr.csr_wdata[7:0];
           end else if (rou_csr.csr_addr == `RAPT_CSR_PMPCFG0) begin
             // pmpcfg0: RV32 packs entries 0..3 (4 bytes); RV64 packs entries 0..7 (8 bytes).
             // L-bit locked cfgs ignore further writes (until reset).
@@ -758,32 +801,27 @@ module rapt_csr #(
             // pmpaddr[i] writable unless entry i is locked OR the next entry
             // is locked AND its A-mode is TOR (entry i then forms TOR's lower bound).
             automatic logic [3:0] pidx = rou_csr.csr_addr[3:0];
-            automatic logic self_locked = pmpcfg_r[pidx][`RAPT_PMPCFG_L_];
-            automatic logic tor_locked  = (pidx < 4'(`RAPT_PMP_NUM - 1))
-                ? (pmpcfg_r[pidx + 4'd1][`RAPT_PMPCFG_L_]
-                   && (pmpcfg_r[pidx + 4'd1][`RAPT_PMPCFG_A_] == `RAPT_PMP_A_TOR))
-                : 1'b0;
             for (int pi = 0; pi < `RAPT_PMP_NUM; pi++) begin
-              if (pidx == 4'(pi) && !self_locked && !tor_locked) begin
+              if (pidx == 4'(pi) && !pmp_addr_locked(pidx)) begin
                 pmpaddr_r[pi] <= rou_csr.csr_wdata[PMPAddrW-1:0];
               end
             end
           end else if (waddr_reg == MEDELEG) begin
-            csr[waddr_reg] <= (rou_csr.csr_wdata & `RAPT_CSR_MEDELEG_WMASK);
+            csr_state[waddr_reg] <= (rou_csr.csr_wdata & `RAPT_CSR_MEDELEG_WMASK);
           end else if (waddr_reg == MIDELEG) begin
             // Only SSI(1)/STI(5)/SEI(9) are delegatable.
-            csr[waddr_reg] <= (rou_csr.csr_wdata & XLEN'(`RAPT_CSR_MIDELEG_WMASK));
+            csr_state[waddr_reg] <= (rou_csr.csr_wdata & XLEN'(`RAPT_CSR_MIDELEG_WMASK));
           end else if (waddr_reg == MIE____) begin
-            csr[MIE____] <= rou_csr.csr_wdata & XLEN'(`RAPT_CSR_MIE_WMASK);
+            csr_state[MIE____] <= rou_csr.csr_wdata & XLEN'(`RAPT_CSR_MIE_WMASK);
           end else if (waddr_reg == MCOUNTE || waddr_reg == SCOUNTE) begin
             // Only CY/TM/IR (bits [2:0]) modeled; HPM bits WARL-zero.
-            csr[waddr_reg] <= (rou_csr.csr_wdata & XLEN'(`RAPT_CSR_COUNTEREN_WMASK));
+            csr_state[waddr_reg] <= (rou_csr.csr_wdata & XLEN'(`RAPT_CSR_COUNTEREN_WMASK));
           end else if (waddr_reg == SENVCFG) begin
-            csr[SENVCFG] <= envcfg_warl(rou_csr.csr_wdata, XLEN'(`RAPT_CSR_SENVCFG_WMASK));
+            csr_state[SENVCFG] <= envcfg_warl(rou_csr.csr_wdata, XLEN'(`RAPT_CSR_SENVCFG_WMASK));
           end else if (waddr_reg == MENVCFG) begin
-            csr[MENVCFG] <= envcfg_warl(rou_csr.csr_wdata, XLEN'(`RAPT_CSR_MENVCFG_WMASK));
+            csr_state[MENVCFG] <= envcfg_warl(rou_csr.csr_wdata, XLEN'(`RAPT_CSR_MENVCFG_WMASK));
           end else if (waddr_reg == MENVCFGH) begin
-            csr[MENVCFGH] <= rou_csr.csr_wdata & XLEN'(32'h8000_0000);
+            csr_state[MENVCFGH] <= rou_csr.csr_wdata & XLEN'(32'h8000_0000);
           end else if (waddr_reg == STIMECMP) begin
             if (XLEN == 64) begin
               stimecmp <= 64'(rou_csr.csr_wdata);
@@ -796,28 +834,26 @@ module rapt_csr #(
             end
           end else if (waddr_reg == MSTATUSH) begin
             // SBE/MBE are WARL-zero (little-endian only).
-            csr[MSTATUSH] <= '0;
+            csr_state[MSTATUSH] <= '0;
           end else if (waddr_reg == MSTATUS) begin
-            csr[MSTATUS] <= mstatus_write;
-            csr[SSTATUS] <= sstatus_write;
+            csr_state[MSTATUS] <= mstatus_write;
           end else if (waddr_reg == SSTATUS) begin
-            csr[SSTATUS] <= sstatus_write;
-            csr[MSTATUS] <= (csr[MSTATUS] & ~`RAPT_CSR_SSTATUS_CMASK) | sstatus_write;
+            csr_state[MSTATUS] <= (csr[MSTATUS] & ~`RAPT_CSR_SSTATUS_CMASK) | sstatus_write;
           end else if (waddr_reg == SIE____) begin
             // sie is a restricted view of mie; write only the SIE-visible bits.
-            csr[MIE____] <= (csr[MIE____] & ~(csr[MIDELEG] & XLEN'(`RAPT_CSR_SIE_WMASK)))
+            csr_state[MIE____] <= (csr[MIE____] & ~(csr[MIDELEG] & XLEN'(`RAPT_CSR_SIE_WMASK)))
                           | (rou_csr.csr_wdata & csr[MIDELEG] & XLEN'(`RAPT_CSR_SIE_WMASK));
           end else if (waddr_reg == SIP____) begin
             // sip is a restricted view of mip; only SSIP (bit 1) is software-writable.
-            csr[MIP____] <= (csr[MIP____] & ~(csr[MIDELEG] & XLEN'(`RAPT_CSR_SIP_WMASK)))
+            csr_state[MIP____] <= (csr[MIP____] & ~(csr[MIDELEG] & XLEN'(`RAPT_CSR_SIP_WMASK)))
                           | (rou_csr.csr_wdata & csr[MIDELEG] & XLEN'(`RAPT_CSR_SIP_WMASK));
           end else if (waddr_reg == MIP____) begin
-            csr[MIP____] <= (csr[MIP____] & ~mip_write_mask) | (rou_csr.csr_wdata & mip_write_mask);
+            csr_state[MIP____] <= (csr[MIP____] & ~mip_write_mask) | (rou_csr.csr_wdata & mip_write_mask);
           end else if (waddr_reg == MTVEC__ || waddr_reg == STVEC__) begin
             // WARL on MODE field [1:0]: only Direct(00) and Vectored(01) are
             // defined; reserved values (10/11) coerce to Direct(00).
             // BASE field [XLEN-1:2] is fully writable (must be 4-byte aligned).
-            csr[waddr_reg] <= {
+            csr_state[waddr_reg] <= {
               rou_csr.csr_wdata[XLEN-1:2], rou_csr.csr_wdata[1] ? 2'b00 : rou_csr.csr_wdata[1:0]
             };
           end else if (waddr_reg == MEPC___ || waddr_reg == SEPC___) begin
@@ -838,110 +874,42 @@ module rapt_csr #(
             // Raptor implements ASID[8:0].  ASID[15:9] are WARL-zero so the
             // architectural write/read probe reports ASIDLEN=9, matching the
             // nine bits carried by the TLB interface.
-            if (rou_csr.csr_wdata[XLEN-1:XLEN-4] == 4'd0
-                || rou_csr.csr_wdata[XLEN-1:XLEN-4] == 4'd8) begin
-              csr[waddr_reg] <= {rou_csr.csr_wdata[63:60], 7'b0, rou_csr.csr_wdata[52:0]};
+            if (rou_csr.csr_wdata[XLEN-1:XLEN-4] == 4'd0 || rou_csr.csr_wdata[XLEN-1:XLEN-4] == 4'd8) begin
+              csr_state[waddr_reg] <= {rou_csr.csr_wdata[63:60], 7'b0, rou_csr.csr_wdata[52:0]};
             end
             // else: write rejected, satp unchanged
 `else
             // RV32: MODE is bit [31]. Both 0 (Bare) and 1 (Sv32) are supported.
-            csr[waddr_reg] <= rou_csr.csr_wdata;
+            csr_state[waddr_reg] <= rou_csr.csr_wdata;
 `endif
           end else begin
-            csr[waddr_reg] <= (rou_csr.csr_wdata);
+            csr_state[waddr_reg] <= (rou_csr.csr_wdata);
           end
         end
-        if (rou_csr.ecall) begin
-          if (ecall_deleg) begin
-            // Delegate to S-mode
-            sepc_half_q <= rou_csr.pc[XLEN-1:1];
-            csr[SCAUSE_] <= priv_mode == `RAPT_PRIV_S ? `RAPT_CAUSE_ECALL_S : `RAPT_CAUSE_ECALL_U;
-            csr[STVAL__] <= 0;
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_SPIE] <= csr[MSTATUS][`RAPT_CSR_MSTATUS_SIE_];
-            csr[SSTATUS][`RAPT_CSR_MSTATUS_SPIE] <= csr[SSTATUS][`RAPT_CSR_MSTATUS_SIE_];
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_SIE_] <= 'h0;
-            csr[SSTATUS][`RAPT_CSR_MSTATUS_SIE_] <= 'h0;
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_SPP_] <= (priv_mode == `RAPT_PRIV_S);
-            csr[SSTATUS][`RAPT_CSR_MSTATUS_SPP_] <= (priv_mode == `RAPT_PRIV_S);
+        if (trap_enter) begin
+          if (trap_to_s) begin
+            sepc_half_q <= trap_epc[XLEN-1:1];
+            csr_state[SCAUSE_] <= trap_cause;
+            csr_state[STVAL__] <= trap_tval;
+            csr_state[MSTATUS][`RAPT_CSR_MSTATUS_SPIE] <= csr[MSTATUS][`RAPT_CSR_MSTATUS_SIE_];
+            csr_state[MSTATUS][`RAPT_CSR_MSTATUS_SIE_] <= 1'b0;
+            csr_state[MSTATUS][`RAPT_CSR_MSTATUS_SPP_] <= (priv_mode == `RAPT_PRIV_S);
             priv_mode <= `RAPT_PRIV_S;
           end else begin
-            // Handle in M-mode
+            mepc_half_q <= trap_epc[XLEN-1:1];
+            csr_state[MCAUSE_] <= trap_cause;
+            csr_state[MTVAL__] <= trap_tval;
+            csr_state[MSTATUS][`RAPT_CSR_MSTATUS_MPP_] <= priv_mode;
+            csr_state[MSTATUS][`RAPT_CSR_MSTATUS_MPIE] <= mstatus_mie;
+            csr_state[MSTATUS][`RAPT_CSR_MSTATUS_MIE_] <= 1'b0;
             priv_mode <= `RAPT_PRIV_M;
-            csr[MCAUSE_] <= priv_mode == `RAPT_PRIV_M
-              ? `RAPT_CAUSE_ECALL_M
-              : priv_mode == `RAPT_PRIV_S
-                ? `RAPT_CAUSE_ECALL_S : `RAPT_CAUSE_ECALL_U;
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_MPP_] <= priv_mode;
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_MPIE] <= mstatus_mie;
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_MIE_] <= 1'b0;
-            mepc_half_q <= rou_csr.pc[XLEN-1:1];
-            csr[MTVAL__] <= 0;
           end
         end else if (rou_csr.mret) begin
           priv_mode <= csr[MSTATUS][`RAPT_CSR_MSTATUS_MPP_];
-          csr[MSTATUS] <= mret_mstatus_next;
+          csr_state[MSTATUS] <= mret_mstatus_next;
         end else if (rou_csr.sret) begin
           priv_mode <= csr[MSTATUS][`RAPT_CSR_MSTATUS_SPP_] == 1'b1 ? `RAPT_PRIV_S : `RAPT_PRIV_U;
-          csr[MSTATUS] <= sret_mstatus_next;
-          csr[SSTATUS] <= {
-            csr[SSTATUS][XLEN-1:9],
-            1'b0,  // SPP = 0
-            csr[SSTATUS][7:6],
-            1'b1,  // SPIE = 1
-            csr[SSTATUS][4:2],
-            csr[SSTATUS][`RAPT_CSR_MSTATUS_SPIE],  // SIE <- SPIE
-            csr[SSTATUS][0]
-          };
-        end else if (rou_csr.ebreak) begin
-          if (ebreak_deleg) begin
-            // Delegate to S-mode
-            sepc_half_q <= rou_csr.pc[XLEN-1:1];
-            csr[SCAUSE_] <= `RAPT_CAUSE_BREAKPOINT;
-            csr[STVAL__] <= rou_csr.pc;
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_SPIE] <= csr[MSTATUS][`RAPT_CSR_MSTATUS_SIE_];
-            csr[SSTATUS][`RAPT_CSR_MSTATUS_SPIE] <= csr[SSTATUS][`RAPT_CSR_MSTATUS_SIE_];
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_SIE_] <= 'h0;
-            csr[SSTATUS][`RAPT_CSR_MSTATUS_SIE_] <= 'h0;
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_SPP_] <= (priv_mode == `RAPT_PRIV_S);
-            csr[SSTATUS][`RAPT_CSR_MSTATUS_SPP_] <= (priv_mode == `RAPT_PRIV_S);
-            priv_mode <= `RAPT_PRIV_S;
-          end else begin
-            // Handle in M-mode
-            priv_mode <= `RAPT_PRIV_M;
-            csr[MCAUSE_] <= `RAPT_CAUSE_BREAKPOINT;
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_MPP_] <= priv_mode;
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_MPIE] <= mstatus_mie;
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_MIE_] <= 1'b0;
-            mepc_half_q <= rou_csr.pc[XLEN-1:1];
-            csr[MTVAL__] <= rou_csr.pc;
-          end
-        end else if (rou_csr.trap) begin
-          if (smode_handle) begin
-            csr[STVAL__] <= rou_csr.tval;
-            sepc_half_q <= rou_csr.pc[XLEN-1:1];
-            csr[SCAUSE_] <= rou_csr.cause;
-
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_SIE_] <= 'h0;
-            csr[SSTATUS][`RAPT_CSR_MSTATUS_SIE_] <= 'h0;
-
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_SPIE] <= csr[MSTATUS][`RAPT_CSR_MSTATUS_SIE_];
-            csr[SSTATUS][`RAPT_CSR_MSTATUS_SPIE] <= csr[SSTATUS][`RAPT_CSR_MSTATUS_SIE_];
-
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_SPP_] <= (priv_mode == `RAPT_PRIV_S);
-            csr[SSTATUS][`RAPT_CSR_MSTATUS_SPP_] <= (priv_mode == `RAPT_PRIV_S);
-
-            priv_mode <= `RAPT_PRIV_S;
-          end else begin
-            csr[MCAUSE_] <= rou_csr.cause;
-
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_MPP_] <= priv_mode;
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_MPIE] <= mstatus_mie;
-            csr[MSTATUS][`RAPT_CSR_MSTATUS_MIE_] <= 1'b0;
-
-            mepc_half_q <= rou_csr.pc[XLEN-1:1];
-            csr[MTVAL__] <= rou_csr.tval;
-            priv_mode <= `RAPT_PRIV_M;
-          end
+          csr_state[MSTATUS] <= sret_mstatus_next;
         end
       end
 

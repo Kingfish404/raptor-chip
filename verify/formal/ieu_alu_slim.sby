@@ -1,0 +1,24 @@
+[tasks]
+rv32
+rv64
+
+[options]
+mode prove
+depth 1
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+plugin -i slang
+rv32: read_slang --single-unit formal_ieu_alu_slim.sv rapt_ieu_alu.sv
+rv64: read_slang --single-unit -DRAPT_RV64 formal_ieu_alu_slim.sv rapt_ieu_alu.sv
+prep -top formal_ieu_alu_slim
+
+[files]
+formal_ieu_alu_slim.sv
+rapt_ieu_alu.sv ../../hdl/backend/ieu/rapt_ieu_alu.sv
+rapt.svh ../../hdl/include/rapt.svh
+rapt_fp_ops.svh ../../hdl/include/rapt_fp_ops.svh
+rapt_config.svh ../../hdl/configs/formal/rapt_config.svh
+rapt_sva.svh ../../hdl/include/rapt_sva.svh

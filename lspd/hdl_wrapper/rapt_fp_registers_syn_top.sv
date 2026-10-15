@@ -26,11 +26,13 @@ module rapt_fp_registers_syn_top #(
     input UopT allocate_uop[AllocateWidth],
     input logic [IndexBits-1:0] allocate_index[AllocateWidth],
     input logic [GenerationBits-1:0] allocate_generation[AllocateWidth],
-    output logic [2:0][63:0] allocate_value[AllocateWidth],
     output logic [2:0][TagBits-1:0] allocate_tag[AllocateWidth],
     input logic [IndexBits-1:0] read_index[ReadPorts],
-    output logic [2:0][63:0] read_value[ReadPorts],
     output logic [2:0][TagBits-1:0] read_tag[ReadPorts],
+    input UopT resolve_uop[ReadPorts],
+    input logic [2:0][TagBits-1:0] resolve_tag[ReadPorts],
+    output logic [2:0][63:0] resolve_value[ReadPorts],
+    output logic [2:0][TagBits-1:0] resolve_ready_tag[ReadPorts],
     input CompletionT completion[CompletionPorts],
     input logic commit_valid[CommitWidth],
     input logic [IndexBits-1:0] commit_index[CommitWidth],
@@ -61,7 +63,8 @@ module rapt_fp_registers_syn_top #(
       .GenerationBits(GenerationBits),
       .CompactSourceOperands(CompactSourceOperands),
       .OperandEntries(OperandEntries),
-      .OperandBits(OperandBits)
+      .OperandBits(OperandBits),
+      .WritePorts((32'(1) << (IntegerPorts + 1)) | (32'(1) << (IntegerPorts + 3)))
   ) dut (
       .completion(fp_completion),
       .*

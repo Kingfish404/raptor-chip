@@ -89,7 +89,13 @@ module rapt_l1i #(
     $error("L1I physical address width must fit its request and cache geometry");
   end
   localparam unsigned L1iWayW = L1I_N_WAYS > 1 ? $clog2(L1I_N_WAYS) : 1;
-  logic [L1I_LINE_SIZE-1:0] l1i_valid[L1I_N_WAYS][L1iSize];
+  // Word-valid masks: per-line live flags take the bulk clears (reset,
+  // fence.i); the masks themselves have one refill writer per way and are
+  // read through replicated distributed RAM.
+  logic l1i_line_live[L1I_N_WAYS][L1iSize];
+  logic [L1I_LINE_SIZE-1:0] valid_curr[L1I_N_WAYS], valid_next[L1I_N_WAYS];
+  logic [L1I_LINE_SIZE-1:0] valid_next4[L1I_N_WAYS], valid_fetch[L1I_N_WAYS];
+  logic l1i_valid_clear;
 
   // Per-way data SRAM bank signals.
   logic [31:0] data_bank_rdata[L1I_N_WAYS][L1I_LINE_SIZE];
@@ -173,11 +179,6 @@ module rapt_l1i #(
   logic ptw_done, ptw_fault;
   logic ptw_arvalid;
   logic [XLEN-1:0] ptw_araddr;
-  logic ptw_awvalid;
-  logic [XLEN-1:0] ptw_awaddr;
-  logic ptw_wvalid;
-  logic [XLEN-1:0] ptw_wdata;
-  logic [7:0] ptw_wstrb;
   logic [XLEN-1:10] ptw_result_ptag;
   logic [XLEN-1:12] ptw_result_vtag;
   logic [6:0] ptw_result_pte;
@@ -265,15 +266,60 @@ module rapt_l1i #(
                         && (l1i_state == IDLE || l1i_state == RD_A || l1i_state == FINA);
   end
 
+  // Clear dominates in the same edge only for lines without a refill; a
+  // refill merges with the pre-clear mask, as the former flop array did.
+  assign l1i_valid_clear = reset || ((invalid_l1i || wait_invalid) && l1i_state == IDLE);
+  for (genvar w = 0; w < L1I_N_WAYS; w++) begin : g_valid_way
+    logic fill_write;
+    logic [L1I_LINE_SIZE-1:0] fill_data;
+    logic [L1I_LINE_SIZE-1:0] raw_curr, raw_next, raw_next4, raw_fetch;
+    assign fill_write = l1i_fill_en && fill_way_r == L1iWayW'(w);
+    assign fill_data = fill_tag_match[w] ? (valid_fetch[w] | fill_word_mask) : fill_word_mask;
+    if (`RAPT_FPGA_LUTRAM) begin : g_lutram
+      (* ram_style = "distributed" *) logic [L1I_LINE_SIZE-1:0] curr_words[L1iSize];
+      (* ram_style = "distributed" *) logic [L1I_LINE_SIZE-1:0] next_words[L1iSize];
+      (* ram_style = "distributed" *) logic [L1I_LINE_SIZE-1:0] next4_words[L1iSize];
+      (* ram_style = "distributed" *) logic [L1I_LINE_SIZE-1:0] fetch_words[L1iSize];
+      always_ff @(posedge clock)
+        if (fill_write) begin
+          curr_words[idx_fetch] <= fill_data;
+          next_words[idx_fetch] <= fill_data;
+          next4_words[idx_fetch] <= fill_data;
+          fetch_words[idx_fetch] <= fill_data;
+        end
+      assign raw_curr = curr_words[addr_idx];
+      assign raw_next = next_words[addr_idx_next];
+      assign raw_next4 = next4_words[addr_idx_next4];
+      assign raw_fetch = fetch_words[idx_fetch];
+    end else begin : g_shared
+      logic [L1I_LINE_SIZE-1:0] words[L1iSize];
+      always_ff @(posedge clock) if (fill_write) words[idx_fetch] <= fill_data;
+      assign raw_curr = words[addr_idx];
+      assign raw_next = words[addr_idx_next];
+      assign raw_next4 = words[addr_idx_next4];
+      assign raw_fetch = words[idx_fetch];
+    end
+    assign valid_curr[w] = l1i_line_live[w][addr_idx] ? raw_curr : '0;
+    assign valid_next[w] = l1i_line_live[w][addr_idx_next] ? raw_next : '0;
+    assign valid_next4[w] = l1i_line_live[w][addr_idx_next4] ? raw_next4 : '0;
+    assign valid_fetch[w] = l1i_line_live[w][idx_fetch] ? raw_fetch : '0;
+    for (genvar i = 0; i < L1iSize; i++) begin : g_live
+      always_ff @(posedge clock) begin
+        if (fill_write && idx_fetch == L1I_LEN'(i)) l1i_line_live[w][i] <= 1'b1;
+        else if (l1i_valid_clear) l1i_line_live[w][i] <= 1'b0;
+      end
+    end
+  end
+
   // --- L1I Tag Comparison (N-way set-associative, line-level tags) ---
   generate
     for (genvar w = 0; w < L1I_N_WAYS; w++) begin : gen_way_hit
       assign way_tag_match[w] = tag_valid_curr[w] && (tag_rdata_curr[w] == addr_tag);
       assign way_tag_match_next[w] = (pc_ifu[1] ? tag_valid_next4[w] : tag_valid_curr[w])
         && ((pc_ifu[1] ? tag_rdata_next4[w] : tag_rdata_curr[w]) == addr_tag_next);
-      assign way_hit[w] = way_tag_match[w] && l1i_valid[w][addr_idx][addr_offset];
+      assign way_hit[w] = way_tag_match[w] && valid_curr[w][addr_offset];
       assign way_hit_next[w] = way_tag_match_next[w]
-        && l1i_valid[w][addr_idx_next][addr_offset_next];
+        && valid_next[w][addr_offset_next];
     end
   endgenerate
   always_comb begin
@@ -461,12 +507,6 @@ module rapt_l1i #(
   assign l1i_bus.rpbmt = slow_active && !slow_ptw ? slow_read_pbmt : 2'b00;
   // Cache refill words and PTW reads use individual AXI requests.
   assign l1i_bus.arburst = 1'b0;
-  assign l1i_bus.awvalid = ptw_awvalid;
-  assign l1i_bus.awaddr  = ptw_awaddr;
-  assign l1i_bus.wvalid  = ptw_wvalid;
-  assign l1i_bus.wdata   = ptw_wdata;
-  assign l1i_bus.wstrb   = ptw_wstrb;
-  assign l1i_bus.aw_ptw  = 1'b1;
 
   // Cache refills and IPTW reads have distinct AXI IDs. A cache response may
   // therefore complete while the walker is busy and must still be consumed.
@@ -572,13 +612,6 @@ module rapt_l1i #(
       .bus_arready(!slow_active && l1i_bus.rready),
       .bus_rvalid(!slow_active && l1i_bus.ptw_rvalid),
       .bus_rdata(l1i_bus.rdata),
-      .bus_awvalid(ptw_awvalid),
-      .bus_awaddr(ptw_awaddr),
-      .bus_wvalid(ptw_wvalid),
-      .bus_wdata(ptw_wdata),
-      .bus_wstrb(ptw_wstrb),
-      .bus_wready(l1i_bus.ptw_wready),
-      .bus_werr(l1i_bus.ptw_werr),
       .done(ptw_done),
       .fault(ptw_fault),
       .result_ptag(ptw_result_ptag),
@@ -829,10 +862,10 @@ module rapt_l1i #(
     for (genvar w = 0; w < L1I_N_WAYS; w++) begin : gen_way_hit_n1
       assign way_hit_n1[w] = tag_valid_next4[w]
         && (tag_rdata_next4[w] == addr_tag_next4)
-        && l1i_valid[w][addr_idx_next4][addr_offset_n1];
+        && valid_next4[w][addr_offset_n1];
       assign way_hit_n2[w] = tag_valid_next4[w]
         && (tag_rdata_next4[w] == addr_tag_next4)
-        && l1i_valid[w][addr_idx_next4][addr_offset_n2];
+        && valid_next4[w][addr_offset_n2];
     end
   endgenerate
 
@@ -888,10 +921,10 @@ module rapt_l1i #(
   for (genvar w = 0; w < L1I_N_WAYS; w++) begin : g_way_hit_wide
     assign way_hit_n3[w] = tag_valid_next4[w]
         && tag_rdata_next4[w] == addr_tag_next4
-        && l1i_valid[w][addr_idx_next4][addr_offset_n3];
+        && valid_next4[w][addr_offset_n3];
     assign way_hit_n4[w] = tag_valid_next4[w]
         && tag_rdata_next4[w] == addr_tag_next4
-        && l1i_valid[w][addr_idx_next4][addr_offset_n4];
+        && valid_next4[w][addr_offset_n4];
   end
   always_comb begin
     hit_n3_way_sel = '0;
@@ -949,9 +982,6 @@ module rapt_l1i #(
       l1i_state <= IDLE;
       ifq_head  <= 0;
       ifq_valid <= 0;
-      for (int w = 0; w < int'(L1I_N_WAYS); w++) begin
-        for (int i = 0; i < int'(L1iSize); i++) l1i_valid[w][i] <= '0;
-      end
       replace_bit <= 0;
       fill_way_r <= 0;
       l1i_fill_issue_idx <= '0;
@@ -1121,9 +1151,6 @@ module rapt_l1i #(
 
     if (invalid_l1i || wait_invalid) begin
       if (l1i_state == IDLE) begin
-        for (int w = 0; w < int'(L1I_N_WAYS); w++) begin
-          for (int i = 0; i < int'(L1iSize); i++) l1i_valid[w][i] <= '0;
-        end
         wait_invalid <= 0;
       end else begin
         wait_invalid <= 1;
@@ -1144,9 +1171,6 @@ module rapt_l1i #(
     end
     // Cache line arrival (tag fill handled by SRAM wen).
     if (l1i_fill_en) begin
-      l1i_valid[fill_way_r][idx_fetch] <= fill_tag_match[fill_way_r]
-        ? (l1i_valid[fill_way_r][idx_fetch] | fill_word_mask)
-        : fill_word_mask;
       if (ifq_valid[0] == 0 && L1I_N_WAYS == 2) begin
         replace_bit[idx_fetch] <= ~replace_bit[idx_fetch];
       end

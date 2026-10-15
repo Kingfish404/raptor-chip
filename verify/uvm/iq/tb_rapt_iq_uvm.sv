@@ -30,7 +30,6 @@ module tb_rapt_iq_uvm;
     assign completion[p] = '0;
   end
 
-  load_fast_if load_fast ();
   rapt_pkg::issue_packet_t iss;
   rapt_pkg::issue_packet_t iss_b;
   rapt_pkg::issue_packet_t issue[2];
@@ -51,7 +50,6 @@ module tb_rapt_iq_uvm;
       .dispatch(dispatch),
       .disp,
 
-      .load_fast,
       .issue,
       .issue_enable(2'b11),
       .occ_o(tb_if.occ),
@@ -93,10 +91,6 @@ module tb_rapt_iq_uvm;
 
 
     exu_ioq_bcast.valid = tb_if.wb_valid[0];
-    load_fast.confirmed = exu_ioq_bcast.valid;
-    load_fast.confirmed_prd = exu_ioq_bcast.prd;
-    load_fast.confirmed_rd = exu_ioq_bcast.rd;
-    load_fast.result = exu_ioq_bcast.result;
     exu_ioq_bcast.prd = tb_if.wb_prd_0;
     exu_ioq_bcast.result = tb_if.wb_result_0;
     exu_rou.valid = tb_if.wb_valid[1];
@@ -108,9 +102,6 @@ module tb_rapt_iq_uvm;
     exu_wb_mul.valid = tb_if.wb_valid[3];
     exu_wb_mul.prd = tb_if.wb_prd_3;
     exu_wb_mul.result = tb_if.wb_result_3;
-    load_fast.valid = tb_if.load_fast_valid;
-    load_fast.rebusy = tb_if.load_fast_rebusy;
-    load_fast.prd = tb_if.load_fast_prd;
 
     tb_if.iss_valid = iss.valid;
     tb_if.iss_pc = iss.uop.pc;

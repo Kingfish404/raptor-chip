@@ -263,11 +263,11 @@ module rapt_ifu #(
       && (response_stop || nextpc != response_q.request_npc);
   assign response_redirect = recv_ready && response_kill_younger;
   assign capture_response = ResponseStage && response_count_q < 2
-      && !response_kill_younger && !blocked && !redirect_event && !recovery.pending
+      && !response_kill_younger && !blocked && !redirect_event
       && !reset && ifu_l1i.valid;
   assign pop_response = ResponseStage && recv_ready;
   always_ff @(posedge clock) begin
-    if (reset || redirect_event || recovery.pending || response_redirect) begin
+    if (reset || redirect_event || response_redirect) begin
       response_count_q <= 0;
       response_read_q <= 0;
       response_write_q <= 0;
@@ -399,7 +399,17 @@ module rapt_ifu #(
 `else
   assign ifu_bpu.aux_query = secondary_query;
 `endif
-  assign ifu_bpu.aux_pc = ResponseStage ? aux_pc_q : candidate_pc[secondary_index];
+  // Without a response register, the auxiliary branch can only sit at
+  // halfword 1..2*(Width-1) of the fetch block. Send the registered block PC
+  // and the decoded position; the predictor looks up every position and the
+  // position selects the direction, so L1I data never reaches an address.
+  if (!ResponseStage && Width > 1) begin : g_positional_aux
+    assign ifu_bpu.aux_pc = response.pc;
+    assign ifu_bpu.aux_position = 4'(offset[secondary_index] - 1);
+  end else begin : g_exact_aux
+    assign ifu_bpu.aux_pc = ResponseStage ? aux_pc_q : candidate_pc[secondary_index];
+    assign ifu_bpu.aux_position = '0;
+  end
 `endif
   always_comb begin
     automatic logic control_seen;
@@ -448,28 +458,26 @@ module rapt_ifu #(
       control_seen |= is_control[s];
     end
   end
-  // A same-context commit redirect repeats the PC already prefetched on
-  // flush_pipe. Do not cancel that fill or rewrite pc_ifu a second time.
-  assign redirect_event = cmu_bcast.flush_pipe
+  // Clean retirement of an announced recovery owner keeps its target stream.
+  // Other flushes retain the immediate prefetch and post-context redirect.
+  assign redirect_event = (cmu_bcast.flush_pipe && !recovery.preserve_fetch)
       || (cmu_bcast.flush_redirect && !cmu_bcast.fetch_context_stable)
-      || cmu_bcast.sys_resume || recovery.redirect_valid || ifu_idu.resteer;
+      || recovery.redirect_valid || ifu_idu.resteer;
   assign redirect_pc = cmu_bcast.flush_redirect ? cmu_bcast.redirect_pc
-      : (cmu_bcast.flush_pipe || cmu_bcast.sys_resume) ? cmu_bcast.cpc
+      : cmu_bcast.flush_pipe ? cmu_bcast.cpc
       : recovery.redirect_valid ? recovery.target : ifu_idu.resteer_pc;
   always_comb begin
     consumed = 0;
     for (int s = 0; s < Width; s++) begin
       ifu_idu.slot[s]  = held[s];
-      ifu_idu.valid[s] = s < 32'(held_count) && !redirect_event && !recovery.pending && !reset;
+      ifu_idu.valid[s] = s < 32'(held_count) && !redirect_event && !reset;
       if (s == consumed && ifu_idu.valid[s] && ifu_idu.ready[s]) consumed++;
     end
   end
-  // The completion-time redirect is allowed to launch a read-ahead, but the
-  // returned line must not repopulate fetch state until precise backend
-  // cleanup releases the recovery fence.  This also prevents speculative
-  // history updates from the recovery target while retirement is pending.
+  // Checkpoint history is installed on the redirect edge. Fetch may then
+  // fill IFU/FQU while decode waits for precise backend cleanup.
   assign recv_ready = 32'(held_count) == consumed && !blocked && !redirect_event
-      && !recovery.pending && !reset && response_valid;
+      && !reset && response_valid;
   always_comb begin
     ifu_bpu.history_valid = 0;
     ifu_bpu.history_taken = 0;
@@ -488,7 +496,7 @@ module rapt_ifu #(
   assign ifu_bpu.pc_update = redirect_event
       || (ResponseStage ? capture_response || response_redirect : recv_ready);
   assign ifu_l1i.consumed = ResponseStage ? capture_response : recv_ready;
-  assign ifu_l1i.cancel = redirect_event || recovery.pending || response_kill_younger;
+  assign ifu_l1i.cancel = redirect_event || response_kill_younger;
   assign ifu_l1i.pc = pc_ifu;
   assign ifu_l1i.invalid = cmu_bcast.fence_i;
   // Ordinary reads use pc_ifu's registered address. L1I already reads the
@@ -595,13 +603,14 @@ module rapt_ifu #(
     `RAPT_SVA(clock, reset, IFU_RESIDENT_COUNT_BOUND, 32'(held_count) <= Width)
   end
   `RAPT_SVA(clock, reset, IFU_COUNT_BOUNDS, consumed <= 32'(held_count) && fetched_count <= Width)
-  `RAPT_SVA_IMPLY(clock, reset, IFU_RECOVERY_NO_RESPONSE_ACCEPT, recovery.pending,
+  `RAPT_SVA_IMPLY(clock, reset, IFU_RECOVERY_NO_RESPONSE_ACCEPT, recovery.redirect_valid,
                   !recv_ready && !ifu_bpu.history_valid)
   `RAPT_SVA_IMPLY(clock, reset, IFU_STABLE_REDIRECT_KEEPS_PC,
-                  cmu_bcast.flush_redirect && cmu_bcast.fetch_context_stable,
-                  cmu_bcast.redirect_pc == $past(cmu_bcast.cpc)
+                  cmu_bcast.flush_redirect && cmu_bcast.fetch_context_stable && !$past
+                  (recovery.preserve_fetch), cmu_bcast.redirect_pc == $past(cmu_bcast.cpc)
                   && pc_ifu == cmu_bcast.redirect_pc && !redirect_event)
-  `RAPT_SVA_IMPLY(clock, reset, IFU_RECOVERY_NO_STREAM_OUTPUT, recovery.pending, !ifu_idu.valid[0])
+  `RAPT_SVA_IMPLY(clock, reset, IFU_RECOVERY_NO_STREAM_OUTPUT, recovery.redirect_valid,
+                  !ifu_idu.valid[0])
   `RAPT_SVA_IMPLY(clock, reset, IFU_RESPONSE_NO_WRONG_PACKET, response_redirect,
                   !capture_response && ifu_l1i.cancel)
   `RAPT_SVA_IMPLY(clock, reset, IFU_RESPONSE_NO_OVERWRITE, capture_response, response_count_q < 2)

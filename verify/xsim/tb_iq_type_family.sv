@@ -40,12 +40,7 @@ module tb_iq_type_family;
   assign iss = issue[0];
   assign iss_b = '0;
   cmu_bcast_if cmu_bcast ();
-  load_fast_if #(
-      .PLEN(9),
-      .ROBLEN(7),
-      .GENERATION_BITS(6),
-      .XLEN(64)
-  ) load_fast ();
+
   dpu_iq_if #(.RS_SIZE(4)) disp ();
   logic [2:0] occupancy;
   int issued_count = 0;
@@ -89,7 +84,6 @@ module tb_iq_type_family;
       .disp,
       .completion,
       .cmu_bcast,
-      .load_fast,
       .issue_enable,
       .issue,
       .occ_o(occupancy),
@@ -107,8 +101,7 @@ module tb_iq_type_family;
   task automatic tick;
     @(negedge clock);
   endtask
-  task automatic allocate_a(input physical_t source, input bit early,
-                            input logic [2:0] ports = 3'b111);
+  task automatic allocate_a(input physical_t source, input logic [2:0] ports = 3'b111);
     dispatch[0] = '0;
     dispatch[0].uop.schedule.issue_ports = ports;
     dispatch[0].uop.execute = 96'hfedc_ba98_7654_3210_0123_4567;
@@ -117,14 +110,9 @@ module tb_iq_type_family;
     dispatch[0].pr1 = source;
     dispatch[0].op2 = 64'hf000_0000_0000_0007;
     dispatch[0].dest = 7'h62;
-    load_fast.valid = early;
-    load_fast.prd = source;
-    load_fast.dest = 7'h55;
-    load_fast.generation = 6'h2a;
     disp.accept[0] = 1;
     tick();
     disp.accept[0] = 0;
-    load_fast.valid = 0;
   endtask
 
   assign disp.rs_idx[0] = disp.free_idx[0];
@@ -135,15 +123,6 @@ module tb_iq_type_family;
     disp.accept[0] = 0;
     disp.accept[1] = 0;
     disp.rs_idx[1] = 0;
-    load_fast.valid = 0;
-    load_fast.prd = 0;
-    load_fast.rebusy = 0;
-    load_fast.confirmed = 0;
-    load_fast.confirmed_prd = 0;
-    load_fast.confirmed_dest = 0;
-    load_fast.confirmed_generation = 0;
-    load_fast.confirmed_rd = 0;
-    load_fast.result = 0;
     repeat (3) tick();
     reset = 0;
 
@@ -195,47 +174,29 @@ module tb_iq_type_family;
             && issued[1].prd == 9'h101 && issued[1].dest == 7'h62)
     else $fatal(1, "slot B dependencies/type widths/payload");
 
-    allocate_a(9'h188, 1);
+    allocate_a(9'h188);
     tick();
     assert (issued_count == 2)
-    else $fatal(1, "early wakeup issued without confirmation");
-    load_fast.confirmed = 1;
-    load_fast.confirmed_prd = 9'h188;
-    load_fast.confirmed_dest = 7'h55;
-    load_fast.confirmed_generation = 6'h2b;
-    load_fast.confirmed_rd = 0;
-    load_fast.result = 64'h1234_5678_abcd_ef01;
+    else $fatal(1, "operand issued without completion");
+    completion[6].valid = 1;
+    completion[6].prd = 9'h189;
+    completion[6].result = 64'h1234_5678_abcd_ef01;
     tick();
     assert (issued_count == 2)
-    else $fatal(1, "stale-generation fast confirmation released operand");
-    load_fast.confirmed_generation = 6'h2a;
-    load_fast.confirmed_prd = 9'h189;
+    else $fatal(1, "wrong physical register released operand");
+    completion[6].prd = 9'h188;
     tick();
     assert (issued_count == 2)
-    else $fatal(1, "wrong-physical-register confirmation released operand");
-    load_fast.confirmed_prd = 9'h188;
-    load_fast.confirmed_dest = 7'h54;
-    tick();
-    assert (issued_count == 2)
-    else $fatal(1, "wrong-ROB-slot confirmation released operand");
-    load_fast.confirmed_dest = 7'h55;
-    tick();
-    assert (issued_count == 2)
-    else $fatal(1, "fast confirmation issued before operand register capture");
-    load_fast.confirmed = 0;
+    else $fatal(1, "completion issued before operand register capture");
+    completion[6].valid = 0;
     tick();
     assert (issued_count == 3 && issued[2].op1 == 64'h1234_5678_abcd_ef01)
-    else $fatal(1, "registered fast confirmation did not issue");
+    else $fatal(1, "registered completion did not issue");
 
-    allocate_a(9'h188, 1);
-    load_fast.valid = 1;
-    load_fast.rebusy = 1;
-    tick();
-    load_fast.valid = 0;
-    load_fast.rebusy = 0;
-    tick();
+    allocate_a(9'h188);
+    repeat (2) tick();
     assert (issued_count == 3)
-    else $fatal(1, "rebusy lost");
+    else $fatal(1, "blocked source became ready without a new completion");
     completion[6].valid = 1;
     completion[6].prd = 9'h188;
     completion[6].result = 64'hffff_eeee_dddd_cccc;
@@ -243,10 +204,10 @@ module tb_iq_type_family;
     completion[6].valid = 0;
     repeat (2) tick();
     assert (issued_count == 4 && issued[3].op1 == 64'hffff_eeee_dddd_cccc)
-    else $fatal(1, "ordinary completion after rebusy");
+    else $fatal(1, "ordinary completion lost value");
 
     issue_enable = 3'b011;
-    allocate_a(0, 0, 3'b100);
+    allocate_a(0, 3'b100);
     tick();
     assert (issued_count == 4)
     else $fatal(1, "unsupported/disabled execution port selected");
@@ -256,9 +217,9 @@ module tb_iq_type_family;
     else $fatal(1, "third execution port capability mask");
     tick();
     issue_enable = 0;
-    allocate_a(0, 0);
-    allocate_a(0, 0);
-    allocate_a(0, 0);
+    allocate_a(0);
+    allocate_a(0);
+    allocate_a(0);
     issue_enable = 3'b111;
     #1;
     assert (issue[0].valid && issue[1].valid && issue[2].valid)
@@ -267,8 +228,8 @@ module tb_iq_type_family;
     assert (issued_count == 8)
     else $fatal(1, "multiport issue count");
     issue_enable = 0;
-    allocate_a(0, 0, 3'b011);
-    allocate_a(0, 0, 3'b001);
+    allocate_a(0, 3'b011);
+    allocate_a(0, 3'b001);
     issue_enable = 3'b011;
     #1;
     assert (issue[0].valid && issue[1].valid
@@ -278,14 +239,14 @@ module tb_iq_type_family;
     tick();
     assert (issued_count == 10)
     else $fatal(1, "port repair duplicated/lost uop");
-    allocate_a(9'h111, 0);
+    allocate_a(9'h111);
     cmu_bcast.flush_pipe = 1;
     tick();
     cmu_bcast.flush_pipe = 0;
     assert (occupancy == 0)
     else $fatal(1, "flush");
     issue_enable = 0;
-    allocate_a(0, 0);
+    allocate_a(0);
     cmu_bcast.flush_pipe = 1;
     issue_enable = '1;
     #1;
@@ -297,7 +258,7 @@ module tb_iq_type_family;
     assert (occupancy == 0 && issued_count == 10)
     else $fatal(1, "flush issued a cancelled uop");
     issue_enable = 0;
-    repeat (4) allocate_a(0, 0, 3'b001);
+    repeat (4) allocate_a(0, 3'b001);
     #1;
     assert (occupancy == 4 && !disp.free_found[0])
     else $fatal(1, "queue not full before reclaim");
@@ -317,8 +278,7 @@ module tb_iq_type_family;
     repeat (5) tick();
     assert (issued_count == 15 && issued[14].uop.execute == 96'h0123_4567_89ab_cdef_dead_beef)
     else $fatal(1, "reclaimed entry lost payload or became older than residents");
-    $display(
-        "PASS: independent types, generation-qualified early wakeup, four dependencies, three ports, port repair, flush kill and same-cycle issue-slot reclaim");
+    $display("PASS: typed IQ payloads, CDB wake, port repair, flush and issue-slot reclaim");
     $finish;
   end
   initial begin

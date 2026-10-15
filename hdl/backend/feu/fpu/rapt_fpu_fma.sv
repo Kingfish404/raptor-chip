@@ -5,7 +5,7 @@
 // Stage 1: decode and normalize operands.
 // Stage 2: calculate the mantissa product from registered operands.
 // Stage 3: align the product/addend in the fixed-point work window.
-// Stage 4: calculate the signed sum with a parallel-prefix adder.
+// Stage 4: calculate the signed sum.
 // Stage 5: apply the discarded-bit correction and form the magnitude.
 // Stage 6: calculate the leading-one position.
 // Stage 7: normalize and extract rounding information.
@@ -27,36 +27,46 @@ module rapt_fpu_prefix_adder #(
     input  logic [WIDTH-1:0] rhs,
     output logic [WIDTH-1:0] sum
 );
-  localparam int LEVELS = $clog2(WIDTH);
-  wire [WIDTH-1:0] bit_propagate;
-  wire [WIDTH-1:0] prefix_generate[LEVELS+1];
-  wire [WIDTH-1:0] prefix_propagate[LEVELS+1];
+`ifdef RAPT_FPGA_DSP
+  localparam bit FpgaCarry = `RAPT_FPGA_DSP;
+`else
+  localparam bit FpgaCarry = 1'b0;
+`endif
+  if (FpgaCarry) begin : gen_fpga
+    // Let FPGA synthesis infer the dedicated carry chain.
+    assign sum = lhs + rhs;
+  end else begin : gen_asic
+    localparam int LEVELS = $clog2(WIDTH);
+    wire [WIDTH-1:0] bit_propagate;
+    wire [WIDTH-1:0] prefix_generate[LEVELS+1];
+    wire [WIDTH-1:0] prefix_propagate[LEVELS+1];
 
-  assign bit_propagate = lhs ^ rhs;
-  assign prefix_generate[0] = lhs & rhs;
-  assign prefix_propagate[0] = bit_propagate;
+    assign bit_propagate = lhs ^ rhs;
+    assign prefix_generate[0] = lhs & rhs;
+    assign prefix_propagate[0] = bit_propagate;
 
-  for (genvar level = 0; level < LEVELS; level++) begin : gen_prefix_level
-    localparam int DISTANCE = 1 << level;
-    for (genvar bit_index = 0; bit_index < WIDTH; bit_index++) begin : gen_prefix_bit
-      if (bit_index >= DISTANCE) begin : gen_combine
-        assign prefix_generate[level+1][bit_index] =
+    for (genvar level = 0; level < LEVELS; level++) begin : gen_prefix_level
+      localparam int DISTANCE = 1 << level;
+      for (genvar bit_index = 0; bit_index < WIDTH; bit_index++) begin : gen_prefix_bit
+        if (bit_index >= DISTANCE) begin : gen_combine
+          assign prefix_generate[level+1][bit_index] =
             prefix_generate[level][bit_index]
             | (prefix_propagate[level][bit_index]
                & prefix_generate[level][bit_index-DISTANCE]);
-        assign prefix_propagate[level+1][bit_index] =
+          assign prefix_propagate[level+1][bit_index] =
             prefix_propagate[level][bit_index]
             & prefix_propagate[level][bit_index-DISTANCE];
-      end else begin : gen_pass
-        assign prefix_generate[level+1][bit_index] = prefix_generate[level][bit_index];
-        assign prefix_propagate[level+1][bit_index] = prefix_propagate[level][bit_index];
+        end else begin : gen_pass
+          assign prefix_generate[level+1][bit_index] = prefix_generate[level][bit_index];
+          assign prefix_propagate[level+1][bit_index] = prefix_propagate[level][bit_index];
+        end
       end
     end
-  end
 
-  assign sum[0] = bit_propagate[0];
-  for (genvar bit_index = 1; bit_index < WIDTH; bit_index++) begin : gen_sum_bit
-    assign sum[bit_index] = bit_propagate[bit_index] ^ prefix_generate[LEVELS][bit_index-1];
+    assign sum[0] = bit_propagate[0];
+    for (genvar bit_index = 1; bit_index < WIDTH; bit_index++) begin : gen_sum_bit
+      assign sum[bit_index] = bit_propagate[bit_index] ^ prefix_generate[LEVELS][bit_index-1];
+    end
   end
 endmodule
 
@@ -130,16 +140,16 @@ module rapt_fpu_fma_pipeline #(
   localparam int FracBits = TARGET_DOUBLE ? 52 : 23;
   localparam int MantBits = FracBits + 1;
   localparam int ProductBits = 2 * MantBits;
-  // Enough room for the product, retained precision, and sticky information.
-  // Alignment shifts beyond this window are saturated into sticky bits.
-  localparam int WorkBits = TARGET_DOUBLE ? 256 : 128;
+  // Keep the exact product at bit zero. The upper p+3 bits accommodate a
+  // larger addend without moving the product; bit WorkBits-1 is the sign.
+  localparam int WorkBits = 3 * MantBits + 3;
   localparam int ExpBias = TARGET_DOUBLE ? 1023 : 127;
   localparam int MinExp = TARGET_DOUBLE ? -1022 : -126;
   localparam int MaxExp = TARGET_DOUBLE ? 1023 : 127;
   localparam int InfExponent = TARGET_DOUBLE ? 11'h7ff : 11'h0ff;
   localparam int LeadingBits = $clog2(WorkBits + 1);
   localparam int LeadingGroupBits = 16;
-  localparam int LeadingGroups = WorkBits / LeadingGroupBits;
+  localparam int LeadingGroups = (WorkBits + LeadingGroupBits - 1) / LeadingGroupBits;
 
   // Form the discarded-bit window before reducing it. A loop with a running
   // sticky OR makes each bit depend on the previous bit in FPGA synthesis.
@@ -155,12 +165,14 @@ module rapt_fpu_fma_pipeline #(
   endfunction
 
   function automatic logic [LeadingBits-1:0] find_leading_one(input logic [WorkBits-1:0] value);
+    logic [LeadingGroups*LeadingGroupBits-1:0] padded_value;
     logic [LeadingGroups-1:0] group_nonzero;
     logic group_found;
     logic bit_found;
     begin
+      padded_value = (LeadingGroups * LeadingGroupBits)'(value);
       for (int group_index = 0; group_index < LeadingGroups; group_index++)
-      group_nonzero[group_index] = |value[group_index*LeadingGroupBits+:LeadingGroupBits];
+      group_nonzero[group_index] = |padded_value[group_index*LeadingGroupBits+:LeadingGroupBits];
 
       find_leading_one = '0;
       group_found = 1'b0;
@@ -168,7 +180,7 @@ module rapt_fpu_fma_pipeline #(
         if (!group_found && group_nonzero[group_index]) begin
           bit_found = 1'b0;
           for (int bit_index = LeadingGroupBits - 1; bit_index >= 0; bit_index--) begin
-            if (!bit_found && value[group_index*LeadingGroupBits+bit_index]) begin
+            if (!bit_found && padded_value[group_index*LeadingGroupBits+bit_index]) begin
               find_leading_one = LeadingBits'(
                 group_index * LeadingGroupBits + bit_index + 1);
               bit_found = 1'b1;
@@ -406,7 +418,6 @@ module rapt_fpu_fma_pipeline #(
     logic signed [13:0] addend_base;
     logic signed [13:0] common_base;
     logic signed [14:0] base_delta;
-    logic signed [14:0] product_shift;
     logic signed [14:0] addend_shift;
     logic product_discarded;
     logic addend_discarded;
@@ -439,63 +450,36 @@ module rapt_fpu_fma_pipeline #(
     product_discarded = 1'b0;
     addend_discarded = 1'b0;
     discarded_sign = 1'b0;
-    /* A zero operand makes the product/addend identically zero; its (useless)
-     * placeholder exponent MinExp must NOT drag the fixed-point base down,
-     * otherwise the other term's shift saturates WorkBits and the value is
-     * lost (e.g. fmadd.d(x, 0, min_subnormal) dropped the addend). */
-    product_base = s1_product_zero_q
-      ? s1_exp_c_q - FracBits
-      : s1_exp_a_q + s1_exp_b_q - (2 * FracBits);
+    product_base = s1_exp_a_q + s1_exp_b_q - (2 * FracBits);
     addend_base = s1_exp_c_q - FracBits;
-    base_delta = 15'(product_base) - 15'(addend_base);
-    /* Prefer the lower exponent when the complete product and addend fit in
-     * the fixed-point window.  Keeping only a sticky bit for a discarded
-     * opposite-sign addend loses the borrow/carry at the rounding boundary
-     * (e.g. fmsub.s 0x7 * 0x73741824 - 0xa0, a 1-ULP RNE error). */
-    /* s2_total_c is signed; leave one top bit as sign headroom.  Allowing
-     * the aligned product to occupy bit WorkBits-1 turns a large positive
-     * product into a negative value and can produce -inf instead of +inf. */
-    if (base_delta >= 0) begin
-      if (base_delta <= WorkBits - 1 - ProductBits) begin
-        common_base = addend_base;
-        product_shift = -base_delta;
-        addend_shift = '0;
-      end else begin
-        common_base = product_base - ProductBits;
-        product_shift = -ProductBits;
-        addend_shift = base_delta - ProductBits;
-      end
-    end else begin
-      if (-base_delta <= WorkBits - 1 - ProductBits) begin
-        common_base = product_base;
-        product_shift = '0;
-        addend_shift = base_delta;
-      end else begin
-        common_base = addend_base - ProductBits;
-        product_shift = -base_delta - ProductBits;
-        addend_shift = -ProductBits;
-      end
-    end
+    base_delta = 15'(addend_base) - 15'(product_base);
+    common_base = product_base;
+    addend_shift = base_delta;
 
     if (!s1_special_q) begin
-      if (product_shift < 0) begin
-        product_term = WorkBits'(s1_product_q) <<< (-product_shift);
-      end else if (product_shift >= WorkBits) begin
+      if (!s1_addend_zero_q && (s1_product_zero_q || int'(base_delta) > 2 * MantBits + 1)) begin
+        // Here Ec - (Ea + Eb) >= p+3, so the product is strictly less than
+        // a quarter addend ULP, including the binade boundary below a power
+        // of two. Retain the addend exactly and the product's signed tail;
+        // no product barrel shifter is needed in this case.
+        common_base = addend_base - 2 * MantBits;
+        addend_term = WorkBits'(s1_mant_c_q) << (2 * MantBits);
         product_discarded = |s1_product_q;
       end else begin
-        product_term = WorkBits'(s1_product_q) >> product_shift;
-        for (integer index = 0; index < ProductBits; index = index + 1)
-        if (index < product_shift) product_discarded = product_discarded || s1_product_q[index];
+        product_term = WorkBits'(s1_product_q);
+        if (addend_shift >= 0) begin
+          addend_term = WorkBits'(s1_mant_c_q) << addend_shift;
+        end else if (-int'(addend_shift) >= MantBits) begin
+          addend_discarded = |s1_mant_c_q;
+        end else begin
+          addend_term = WorkBits'(s1_mant_c_q) >> (-addend_shift);
+          addend_discarded = |(s1_mant_c_q
+            & ({MantBits{1'b1}} >> (MantBits + int'(addend_shift))));
+        end
       end
-      if (addend_shift < 0) begin
-        addend_term = WorkBits'(s1_mant_c_q) <<< (-addend_shift);
-      end else if (addend_shift >= WorkBits) begin
-        addend_discarded = |s1_mant_c_q;
-      end else begin
-        addend_term = WorkBits'(s1_mant_c_q) >> addend_shift;
-        for (integer index = 0; index < MantBits; index = index + 1)
-        if (index < addend_shift) addend_discarded = addend_discarded || s1_mant_c_q[index];
-      end
+      // The magnitude stage subtracts one window ULP when a discarded tail
+      // opposes the integer sum. Sticky then represents the positive residual
+      // below that corrected magnitude, preserving ties and directed rounding.
       discarded_sign = product_discarded
         ? s1_product_sign_q : s1_addend_sign_q;
       align_product_term_c = product_term;
@@ -508,7 +492,7 @@ module rapt_fpu_fma_pipeline #(
 
   // Convert both aligned magnitudes to two's-complement operands without a
   // carry-propagating negation.  A carry-save compressor folds in the two
-  // sign-bias bits; only the following prefix network propagates carry.
+  // sign-bias bits; only the following adder propagates carry.
   always_comb begin
     signed_product_c = align_product_term_q ^ {WorkBits{align_product_sign_q}};
     signed_addend_c = align_addend_term_q ^ {WorkBits{align_addend_sign_q}};
@@ -532,7 +516,7 @@ module rapt_fpu_fma_pipeline #(
   );
 
   // Fold the one-ULP discarded-bit correction into the absolute-value
-  // operation.  This needs one more prefix addition, but no linear negation.
+  // operation. This needs one more addition, but no separate negation.
   always_comb begin
     magnitude_base_c = '0;
     magnitude_adjust_c = '0;
@@ -566,7 +550,7 @@ module rapt_fpu_fma_pipeline #(
   );
 
   always_comb begin
-    logic [WorkBits-1:0] magnitude_aligned;
+    logic [MantBits-1:0] magnitude_aligned;
     logic [FracBits:0] retained;
     logic result_sign;
     logic guard_bit, sticky_bit, inexact, round_up;
@@ -575,6 +559,7 @@ module rapt_fpu_fma_pipeline #(
     logic [FracBits:0] precision_retained;
     logic signed [13:0] exponent_value;
     integer shift_amount;
+    logic [MantBits:0] denormal_input, denormal_aligned, denormal_mask;
 
     stage4_result_c = s4_special_result_q;
     stage4_flags_c = s4_special_flags_q;
@@ -592,6 +577,9 @@ module rapt_fpu_fma_pipeline #(
     exponent_value = '0;
     shift_amount = 0;
     magnitude_aligned = '0;
+    denormal_input = '0;
+    denormal_aligned = '0;
+    denormal_mask = '0;
 
     if (!s4_special_q && s4_leading_one_q == 0) begin
       /* Exact zero OR total underflow to zero.  If sticky captured discarded
@@ -607,12 +595,13 @@ module rapt_fpu_fma_pipeline #(
       stage4_flags_c[1] = s4_sticky_q;
     end else if (!s4_special_q) begin
       exponent_value = 14'(s4_leading_one_q) + s4_common_base_q - 1;
-      shift_amount = integer'(s4_leading_one_q) - MantBits;
+      shift_amount = integer'(s4_leading_one_q) > MantBits
+        ? integer'(s4_leading_one_q) - MantBits : 0;
       // Round at target precision before clamping the exponent. Final
       // subnormal rounding can produce a normal encoding while still tiny.
-      magnitude_aligned = shift_amount < 0
-        ? s4_magnitude_q << (-shift_amount)
-        : s4_magnitude_q >> shift_amount;
+      magnitude_aligned = MantBits'(shift_amount == 0
+        ? s4_magnitude_q << (MantBits - integer'(s4_leading_one_q))
+        : s4_magnitude_q >> shift_amount);
       precision_retained = magnitude_aligned[MantBits-1:0];
       precision_guard = shift_amount > 0 ? s4_magnitude_q[shift_amount-1] : 1'b0;
       precision_sticky |= discarded_nonzero(s4_magnitude_q, shift_amount);
@@ -626,25 +615,28 @@ module rapt_fpu_fma_pipeline #(
       endcase
       tiny_after_rounding = (exponent_value < MinExp)
         && !((exponent_value == MinExp-1) && precision_up && (&precision_retained));
+      retained = precision_retained;
+      guard_bit = precision_guard;
+      sticky_bit = precision_sticky;
       if (exponent_value < MinExp) begin
-        shift_amount = shift_amount + (MinExp - exponent_value);
-        // The extra shift expresses the result at Emin.  Packing must use
-        // that clamped exponent so rounding a maximal subnormal up produces
-        // the minimum normal value instead of truncating its new hidden bit.
+        // Denormalize the unrounded normalized significand, including its guard
+        // bit. Using the raw magnitude here would lose the left normalization
+        // after deep cancellation. Sticky preserves every bit below the guard.
+        denormal_input = {precision_retained, precision_guard};
+        shift_amount = MinExp - integer'(exponent_value);
+        if (shift_amount > MantBits) begin
+          retained = '0;
+          guard_bit = 1'b0;
+          sticky_bit |= |denormal_input;
+        end else begin
+          denormal_aligned = denormal_input >> $clog2(MantBits + 1)'(shift_amount);
+          denormal_mask = {(MantBits + 1){1'b1}} >> (MantBits + 1 - shift_amount);
+          retained = denormal_aligned[MantBits:1];
+          guard_bit = denormal_aligned[0];
+          sticky_bit |= |(denormal_input & denormal_mask);
+        end
+        // Keep the clamped exponent when rounding carries into the hidden bit.
         exponent_value = MinExp;
-      end
-      if (shift_amount >= WorkBits) begin
-        retained = '0;
-        guard_bit = 1'b0;
-        sticky_bit = sticky_bit || (|s4_magnitude_q);
-      end else begin
-        magnitude_aligned = shift_amount < 0
-          ? s4_magnitude_q << (-shift_amount)
-          : s4_magnitude_q >> shift_amount;
-        retained = magnitude_aligned[MantBits-1:0];
-        guard_bit = shift_amount > 0
-          ? s4_magnitude_q[shift_amount - 1] : 1'b0;
-        sticky_bit |= discarded_nonzero(s4_magnitude_q, shift_amount);
       end
       inexact = guard_bit || sticky_bit;
       case (s4_rounding_mode_q)

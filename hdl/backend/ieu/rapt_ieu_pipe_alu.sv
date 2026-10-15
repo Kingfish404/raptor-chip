@@ -5,8 +5,8 @@
 //
 // Pure combinational function unit + writeback drive for the ALU CDB
 // port. Dispatch routing guarantees this pipe never sees CSR / system /
-// trap / conditional-branch / MUL-DIV uops, so the only taken-redirect
-// source is an unconditional jump (jen).
+// trap / conditional-branch / MUL-DIV / count / CLMUL uops, so the only
+// taken-redirect source is an unconditional jump (jen).
 /* verilator lint_off UNUSEDSIGNAL */
 module rapt_ieu_pipe_alu #(
     parameter type CompletionT = rapt_pkg::completion_t,
@@ -22,7 +22,10 @@ module rapt_ieu_pipe_alu #(
   /* verilator lint_on UNUSEDSIGNAL */
 
   logic [XLEN-1:0] alu_result;
-  rapt_ieu_alu gen_alu (
+  rapt_ieu_alu #(
+      .XLEN(XLEN),
+      .EnableRareOps(1'b0)
+  ) gen_alu (
       .s1(iss.op1),
       .s2(iss.op2),
       .op(iss.uop.execute.int_op.alu),

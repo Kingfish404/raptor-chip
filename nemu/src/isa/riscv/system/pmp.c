@@ -378,7 +378,7 @@ bool pmp_check(paddr_t addr, int size, uint32_t priv,
     }
     /* covered with e0 < 0 means no grain matched at all; leave the pass
      * loop below to apply the M-mode-vs-S/U no-match rule. */
-    if ((lo.any_match || hi.any_match) && !covered)
+    if (!covered)
     {
       pmp_last_fault_addr = addr;
       return true;

@@ -26,7 +26,6 @@ module rapt_ieu_syn_top #(
     input rapt_pkg::completion_t memory_wake,
     cmu_bcast_if.in cmu_bcast,
     csr_bcast_if.in csr_bcast,
-    load_fast_if.sink load_fast,
     exu_csr_if.master exu_csr,
     input logic integer_system_issue_enable,
     input logic alq_accept[NumSlots],
@@ -78,7 +77,7 @@ module rapt_ieu_syn_top #(
   rapt_pkg::completion_t local_integer_wake[NumCompletions];
   for (genvar p = 0; p < NumCompletions; p++) begin : g_local_wake
     if (p < NumIntegerPorts) assign local_integer_wake[p] = local_integer_input[p];
-    else if (LocalMemoryWake && p == NumIntegerPorts + 1)
+    else if (LocalMemoryWake && p == rapt_pkg::completion_memory_port(rapt_pkg::CoreConfig))
       assign local_integer_wake[p] = local_integer_input[NumIntegerPorts];
     else assign local_integer_wake[p] = '0;
   end
@@ -104,7 +103,6 @@ module rapt_ieu_syn_top #(
       .memory_wake,
       .cmu_bcast,
       .csr_bcast,
-      .load_fast,
       .exu_csr,
       .integer_system_issue_enable,
       .disp_alq,

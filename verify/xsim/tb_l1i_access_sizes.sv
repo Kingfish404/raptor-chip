@@ -3,6 +3,9 @@
 
 // Compare the late-select fetch checker with the original dynamic-size PMP
 // interface. This is a combinational equivalence regression, not a timing test.
+// Lookahead words follow the primary fetch word (aligned PC + 4/8) and their
+// PMP result may be conservative: a lookahead may be suppressed, never passed
+// when the precise check would fault.
 module tb_l1i_access_sizes;
   localparam int XLEN = `RAPT_XLEN;
   localparam int AW = `RAPT_PADDR_BITS - 2;
@@ -16,7 +19,7 @@ module tb_l1i_access_sizes;
   wire [1:0] fetch_fault, fetch_fault_lo, ptw_fault, n1_fault, n2_fault;
   wire [1:0] tlb_fault, walk_fault;
   int unsigned rng = 32'h9e3779b9;
-  int unsigned cases_checked = 0;
+  int unsigned cases_checked = 0, lookahead_checked = 0, lookahead_conservative = 0;
 
   function automatic int unsigned random_word();
     rng ^= rng << 13;
@@ -108,14 +111,19 @@ module tb_l1i_access_sizes;
           addr[1], 4'(XLEN / 8 - 1)
       )))
       else $fatal(1, "PTW mismatch");
-      assert (n1_fault[look] === (look != 0 && (ref_fault[2] || !rapt_pkg::addr_executable(
-          addr[2], 4'd3
-      ))))
-      else $fatal(1, "lookahead n1 mismatch");
-      assert (n2_fault[look] === (look != 0 && (ref_fault[3] || !rapt_pkg::addr_executable(
-          addr[3], 4'd3
-      ))))
-      else $fatal(1, "lookahead n2 mismatch");
+      for (int k = 0; k < 2; k++) begin
+        automatic logic precise = ref_fault[2+k] || !rapt_pkg::addr_executable(addr[2+k], 4'd3);
+        automatic logic observed = k == 0 ? n1_fault[look] : n2_fault[look];
+        if (look == 0)
+          assert (observed === 1'b0)
+          else $fatal(1, "disabled lookahead n%0d", k + 1);
+        else begin
+          assert (observed || !precise)
+          else $fatal(1, "lookahead n%0d passed a faulting word addr=%h", k + 1, addr[2+k]);
+          lookahead_checked++;
+          if (observed && !precise) lookahead_conservative++;
+        end
+      end
       assert (tlb_fault[look] === (tlb_hit && pte_fault(
           itlb_pte
       )) && walk_fault[look] === pte_fault(
@@ -157,6 +165,9 @@ module tb_l1i_access_sizes;
           default: addr[p] = XLEN'('h80000000 + 2 * p);
         endcase
       end
+      // rapt_l1i derives the lookahead words from the primary fetch PC.
+      addr[2] = {addr[0][XLEN-1:2], 2'b00} + XLEN'(4);
+      addr[3] = {addr[0][XLEN-1:2], 2'b00} + XLEN'(8);
       // Exercise every ready/is_c combination for each fixed address/state.
       // In particular, is_c must not narrow a check before SRAM is ready.
       for (int select_bits = 0; select_bits < 4; select_bits++) begin
@@ -165,8 +176,15 @@ module tb_l1i_access_sizes;
         check_outputs();
       end
     end
-    $display("PASS: L1I fixed-size select equivalence XLEN=%0d cases=%0d seed=9e3779b9", XLEN,
-             cases_checked);
+    // Random PMP states place region edges everywhere; most lookahead words
+    // must still be decided exactly rather than suppressed.
+    if (lookahead_conservative * 2 > lookahead_checked)
+      $fatal(
+          1, "lookahead too conservative: %0d of %0d", lookahead_conservative, lookahead_checked
+      );
+    $display(
+        "PASS: L1I fixed-size select equivalence XLEN=%0d cases=%0d lookahead=%0d conservative=%0d seed=9e3779b9",
+        XLEN, cases_checked, lookahead_checked, lookahead_conservative);
     $finish;
   end
 endmodule

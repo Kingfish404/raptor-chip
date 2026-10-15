@@ -7,7 +7,8 @@
 // Fetch/predict/decode composition. Rename belongs to the backend so its
 // checkpoint, retirement and physical-register feedback stay within that block.
 module rapt_frontend #(
-    parameter int XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN,
+    parameter bit DerivedConstants = 1'b0
 ) (
     input logic clock,
     input logic reset,
@@ -35,6 +36,7 @@ module rapt_frontend #(
       .ifu_bpu(ifu_bpu),
       .idu_bpu(idu_bpu),
       .execute_recover(history_restore),
+      .preserve_fetch(recovery.preserve_fetch),
       .execute_ghr(restore_ghr),
       .execute_phr(restore_phr),
       .snapshot_ghr(snapshot_ghr),
@@ -73,7 +75,9 @@ module rapt_frontend #(
   );
 
   // IDU (Instruction Decode Unit)
-  rapt_idu idu (
+  rapt_idu #(
+      .DerivedConstants(DerivedConstants)
+  ) idu (
       .clock(clock),
 
       .cmu_bcast(cmu_bcast),

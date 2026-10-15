@@ -67,11 +67,16 @@ module rapt_vpu_geometry #(
         && (!masked || mask_result || vd != 0);
     if (gather)
       legal &= (int'(vd)+dg <= int'(vs2) || int'(vs2)+ag <= int'(vd))
-        && (!src_vector || int'(vd)+dg <= int'(vs1) || int'(vs1)+bg <= int'(vd));
+        && (!src_vector || int'(vd)+dg <= int'(vs1) || int'(vs1)+bg <= int'(vd))
+        && (!gather16 || sew == 1 || int'(vs2)+ag <= int'(vs1)
+        || int'(vs1)+bg <= int'(vs2));
     if (slide_up) legal &= int'(vd) + dg <= int'(vs2) || int'(vs2) + ag <= int'(vd);
     if (compress)
       legal &= (int'(vd)+dg <= int'(vs2) || int'(vs2)+ag <= int'(vd))
-        && (int'(vs1) < int'(vd) || int'(vs1) >= int'(vd)+dg);
+        && (int'(vs1) < int'(vd) || int'(vs1) >= int'(vd)+dg)
+        && (int'(vs1) < int'(vs2) || int'(vs1) >= int'(vs2)+ag);
+    if (uses_vs2 && src_vector && asize != sew)
+      legal &= int'(vs2) + ag <= int'(vs1) || int'(vs1) + bg <= int'(vs2);
     if (mask_source) legal &= int'(vs2) < int'(vd) || int'(vs2) >= int'(vd) + dg;
     else if (uses_vs2)
       legal &= overlap_ok(vs2, ag, mask_logic ? -3 : asize, ae, mask_result ? -3 : dsize);

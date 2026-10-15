@@ -58,7 +58,6 @@ module tb_superscalar_widths;
   dispatch_grant_t grant[Cfg.execution_domains];
   extended_issue_t issue[TestIssuePorts];
   dpu_iq_if #(.RS_SIZE(8)) queue ();
-  load_fast_if load_fast ();
   exu_prf_if prf_rd ();
   rou_cmu_if rou_cmu ();
   rou_csr_if rou_csr ();
@@ -69,101 +68,8 @@ module tb_superscalar_widths;
   xlen_t rf[RNUMPkg], rf_map[RNUMPkg];
   logic [3:0] occupancy;
 
-  rapt_rnu #(
-      .Cfg (Cfg),
-      .UopT(extended_uop_t)
-  ) rename (
-      .clock,
-      .reset,
-      .idu_rnu,
-      .rnu_rou,
-      .recovery,
-      .checkpoint_release,
-      .rou_cmu,
-      .cmu_bcast,
-      .map_snapshot,
-      .rat_snapshot
-  );
-  rapt_rou #(
-      .Cfg  (Cfg),
-      .UopT (extended_uop_t),
-      .SlotT(extended_slot_t),
-      .ScanEntries(Cfg.steer_scan_entries)
-  ) rob (
-      .clock,
-      .reset,
-      .rnu_rou,
-      .recovery,
-      .checkpoint_release,
-      .exu_prf(prf_rd),
-      .dispatch,
-      .candidate_domain(dispatch_candidate_domain),
-      .candidate_valid(dispatch_candidate_valid),
-      .candidate_ready(dispatch_candidate_ready),
-      .selected_valid(dispatch_valid),
-      .selected_candidate(dispatch_selected_candidate),
-      .completion,
-      .completion_owner(completion_owner),
-      .csr_bcast,
-      .clint_timer_trap(1'b0),
-      .clint_sw_trap(1'b0),
-      .clint_ext_trap(1'b0),
-      .s_int_pending(1'b0),
-      .s_int_cause('0),
-      .rou_cmu,
-      .rou_csr,
-      .rou_lsu,
-      .dm_haltreq_i(1'b0),
-      .halted_o(),
-      .halt_pc_o(),
-      .commit_fire_o(),
-      .pmu_rob_full()
-  );
-  rapt_cmu commit_unit (
-      .clock,
-      .reset,
-      .rou_cmu,
-      .cmu_bcast
-  );
-  rapt_prf #(
-      .Cfg(Cfg)
-  ) prf (
-      .clock,
-      .reset,
-      .prf_rd,
-      .completion,
-      .rou_cmu,
-      .cmu_bcast,
-      .map_snapshot,
-      .rat_snapshot,
-      .rf,
-      .rf_map,
-      .dbg_we_i(1'b0),
-      .dbg_addr_i('0),
-      .dbg_wdata_i('0),
-      .dbg_rdata_o()
-  );
-  rapt_dpu #(
-      .Cfg  (Cfg),
-      .NumCandidates(Cfg.steer_scan_entries)
-  ) router (
-      .clock,
-      .reset,
-      .candidate_domain(dispatch_candidate_domain),
-      .candidate_valid(dispatch_candidate_valid),
-      .candidate_ready(dispatch_candidate_ready),
-      .selected_valid(dispatch_valid),
-      .selected_candidate(dispatch_selected_candidate),
-      .capacity,
-      .grant
-  );
-  for (genvar d = 0; d < 5; d++) assign capacity[d] = '0;
-  rapt_dispatch_iq_adapter endpoint (
-      .queue,
-      .capacity(capacity[5]),
-      .grant(grant[5])
-  );
-  rapt_iq #(
+  `include "tb_backend_domain_dut.svh"
+rapt_iq #(
       .Cfg(Cfg),
       .IQ_SIZE(8),
       .NumIssuePorts(TestIssuePorts),
@@ -180,7 +86,6 @@ module tb_superscalar_widths;
       .dispatch,
       .disp(queue),
       .completion,
-      .load_fast,
       .issue_enable,
       .issue,
       .occ_o(occupancy),
@@ -278,13 +183,6 @@ module tb_superscalar_widths;
     init_csr_bcast_defaults(2'b11, 'h8000_1000, 1'b0);
     rou_lsu.sq_ready = 1;
     rou_lsu.sq_empty = 1;
-    load_fast.valid = 0;
-    load_fast.rebusy = 0;
-    load_fast.prd = 0;
-    load_fast.confirmed = 0;
-    load_fast.confirmed_prd = 0;
-    load_fast.confirmed_rd = 0;
-    load_fast.result = 0;
     idu_rnu.valid = '{default: 0};
     idu_rnu.slot = '{default: '0};
     repeat (4) @(negedge clock);

@@ -80,14 +80,36 @@ module rapt_l1i_access #(
   // The wide window consumes only the low halfword of n4.
   assign pmp_n4_fetch_fault = fault[5]
       || (WideLookahead && !rapt_pkg::addr_executable(lookahead_n4_addr, 4'd1));
+  // Lookahead words n1..n4 lie within four words after the primary fetch
+  // word. When no PMP boundary falls in that window they share the primary
+  // word's permission, so they reuse its four-byte check; otherwise the
+  // lookahead is suppressed and the primary path checks it precisely later.
+  localparam int LookaheadWords = WideLookahead ? 4 : 2;
+  logic primary_word_fault, lookahead_uniform;
+  if (Lookahead || WideLookahead) begin : g_lookahead_window
+    rapt_pmp_window_uniform #(
+        .XLEN(XLEN),
+        .Words(LookaheadWords)
+    ) u_window (
+        .addr(pc_ifu),
+        .state(pmp_state),
+        .uniform_o(lookahead_uniform)
+    );
+  end else begin : g_no_lookahead_window
+    assign lookahead_uniform = 1'b0;
+  end
   for (genvar port_idx = 0; port_idx < 6; port_idx++) begin : g_check
-    if (port_idx < Checks) begin : g_active
+    if (port_idx >= 2 && port_idx < Checks) begin : g_lookahead
+      assign fault[port_idx] = primary_word_fault || !lookahead_uniform;
+      assign fault_lo[port_idx] = fault[port_idx];
+    end else if (port_idx < Checks) begin : g_active
       // SRAM readiness and instruction length arrive after the address. Do
       // not put that late select ahead of the PMP end-address arithmetic and
       // comparisons: check both fetch lengths, then select the result.
       localparam int Sizes = port_idx == 0 ? 2 : 1;
       wire [Sizes-1:0] size_fault, size_fault_lo;
       if (port_idx == 0) begin : g_fetch_select
+        assign primary_word_fault = size_fault[1];
         assign fault[port_idx] = sram_data_ready && is_c ? size_fault[0] : size_fault[1];
         assign fault_lo[port_idx] = sram_data_ready && is_c
             ? size_fault_lo[0] : size_fault_lo[1];

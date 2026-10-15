@@ -1,5 +1,6 @@
 // Sequential equivalence against an independent top-at-zero shift stack.
 // All actions and addresses are unrestricted, including commit+flush+spec action.
+// The architectural address has bit zero cleared; the DUT stores only [Xlen-1:1].
 module formal_ras #(
     parameter int Depth = 3,
     parameter int Xlen = 8
@@ -39,7 +40,7 @@ module formal_ras #(
     end
     if (push) begin
       for (int i = Depth - 1; i > 0; i--) next_state.data[i] = next_state.data[i-1];
-      next_state.data[0] = addr;
+      next_state.data[0] = {addr[Xlen-1:1], 1'b0};
       if (next_state.count < Depth) next_state.count++;
     end
     return next_state;
@@ -67,8 +68,8 @@ module formal_ras #(
       automatic int ci = int'(dut.committed.next_index) - 1 - i;
       if (si < 0) si += Depth;
       if (ci < 0) ci += Depth;
-      if (i < spec.count) correct &= dut.speculative.data[si] == spec.data[i];
-      if (i < commit.count) correct &= dut.committed.data[ci] == commit.data[i];
+      if (i < spec.count) correct &= {dut.speculative.data[si], 1'b0} == spec.data[i];
+      if (i < commit.count) correct &= {dut.committed.data[ci], 1'b0} == commit.data[i];
     end
   end
 endmodule

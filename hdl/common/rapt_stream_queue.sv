@@ -49,11 +49,16 @@ module rapt_stream_queue #(
   for (genvar s = 0; s < OutWidth; s++) begin : g_read
     assign out_valid[s] = !flush && !reset && int'(occupancy) > s;
   end
-  always_comb begin
-    pop_count = 0;
-    for (int s = 0; s < OutWidth; s++)
-    if (s == pop_count && out_valid[s] && out_ready[s]) pop_count++;
+  // Transfers are contiguous prefixes; each count is the leading run length.
+  logic [OutWidth-1:0] pop_prefix;
+  for (genvar s = 0; s < OutWidth; s++) begin : g_pop_prefix
+    if (s == 0) begin : g_first
+      assign pop_prefix[s] = out_valid[s] && out_ready[s];
+    end else begin : g_next
+      assign pop_prefix[s] = pop_prefix[s-1] && out_valid[s] && out_ready[s];
+    end
   end
+  assign pop_count = $countones(pop_prefix);
   // ReclaimSameCycle preserves the normal full-rate queue contract.  Pipeline
   // boundaries that participate in a wider ready/flush feedback path can turn
   // it off so readiness depends only on registered occupancy.
@@ -62,11 +67,15 @@ module rapt_stream_queue #(
         && s < Depth - int'(occupancy) + (ReclaimSameCycle ? pop_count : 0);
     assign push_index[s] = PtrBits'(advance(int'(tail), s));
   end
-  always_comb begin
-    push_count = 0;
-    for (int s = 0; s < InWidth; s++)
-    if (s == push_count && in_valid[s] && in_ready[s]) push_count++;
+  logic [InWidth-1:0] push_prefix;
+  for (genvar s = 0; s < InWidth; s++) begin : g_push_prefix
+    if (s == 0) begin : g_first
+      assign push_prefix[s] = in_valid[s] && in_ready[s];
+    end else begin : g_next
+      assign push_prefix[s] = push_prefix[s-1] && in_valid[s] && in_ready[s];
+    end
   end
+  assign push_count = $countones(push_prefix);
   always_ff @(posedge clock) begin
     if (reset || flush) begin
       head <= '0;

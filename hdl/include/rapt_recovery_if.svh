@@ -5,7 +5,8 @@
 
 // One registered oldest-mispredict transaction.  `redirect_valid` pulses when a new
 // owner is published or a later completion replaces it with an older owner;
-// `pending` holds the recovery fence until precise backend cleanup completes.
+// `pending` fences decode/rename until precise backend cleanup completes.
+// `preserve_fetch` marks that owner's clean retirement: keep its fetched target.
 // The owner identity is intentionally transported now so future ROB/IQ/LSQ
 // selective-kill consumers do not need another ad-hoc recovery sideband.
 interface rapt_recovery_if #(
@@ -17,6 +18,8 @@ interface rapt_recovery_if #(
 );
   logic pending;
   logic redirect_valid;
+  logic preserve_fetch;
+  logic taken;
   logic [RobBits-1:0] owner;
   logic [RobBits-1:0] head; // age reference for the validated redirect event
   logic [GenerationBits-1:0] generation;
@@ -24,10 +27,12 @@ interface rapt_recovery_if #(
   logic checkpoint_valid;
   logic [CheckpointBits-1:0] checkpoint;
   modport source(
-      output pending, redirect_valid, owner, head, generation, target, checkpoint_valid, checkpoint
+      output pending, redirect_valid, preserve_fetch, taken,
+      output owner, head, generation, target, checkpoint_valid, checkpoint
   );
   modport sink(
-      input pending, redirect_valid, owner, head, generation, target, checkpoint_valid, checkpoint
+      input pending, redirect_valid, preserve_fetch, taken,
+      input owner, head, generation, target, checkpoint_valid, checkpoint
   );
 endinterface
 

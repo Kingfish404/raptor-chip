@@ -11,7 +11,7 @@ The published homepage is an interactive product surface: a 2D pipeline block di
 
 Raptor is a parameterized superscalar, out-of-order RISC-V core with register renaming, a reorder buffer, reservation stations, branch prediction, and Sv32/Sv39 virtual memory support for RV32/RV64.
 
-The repository also bundles the NEMU software ISS (used as a difftest reference), a Verilator-based simulator (NPC), an AbstractMachine runtime, Linux kernel build scripts, and FPGA integration (Gowin Tang boards and Xilinx KU15P through LiteX).
+The repository also bundles the NEMU software ISS (used as a difftest reference), a Verilator-based simulator (NPC), an AbstractMachine runtime, Linux kernel build scripts, and native FPGA integration for MLK-CU08-KU15P and RK-XCKU5P-F, plus LiteX SoCs.
 
 Repository: <https://github.com/Kingfish404/raptor-chip>
 
@@ -42,12 +42,12 @@ See [Microarchitecture](./uarch.md) for the complete pipeline description.
 
 ## Performance
 
-See [Getting Started](./getting-started.md) for RV32/RV64 benchmark commands. Compare measurements using the same source revision, configuration, binary, and memory model. Dated evaluations and iteration logs are kept locally under `docs.agent/evaluation/` and `docs.agent/history/`.
+See [Getting Started](./getting-started.md) for RV32/RV64 benchmark commands. Compare measurements using the same source revision, configuration, binary, and memory model.
 
 ## Verification
 
 - Difftest - retired instructions can be compared against NEMU, including the full-core directed/differential RV32/RV64 F/D test suite under `app/tests/fp`.
-- Architectural tests - `cpu-tests` supplies RV32/RV64 smoke coverage; historical pass counts do not certify the current working tree.
+- Architectural tests - `cpu-tests` supplies RV32/RV64 smoke coverage. Run the tests against the selected source revision and configuration.
 - [RISCOF](https://github.com/riscv-software-src/riscof) running [riscv-arch-test](https://github.com/riscv-non-isa/riscv-arch-test): classic test entry points compare signatures with Sail for the RTL DUT (`make verify-riscof-classic`) and NEMU (`make verify-riscof-classic-nemu`). The classic profile declares RV32 I/M/A/F/D/C/S/U plus the listed Z extensions. ACT4 has separate RV32GC, RV64GC M-mode and RV64 supervisor configurations; see [verification](../verify/README.md). The riscv-dv target is an RV32 I/M/C, M-mode, Bare smoke configuration.
 - Benchmarks: CoreMark, MicroBench, Embench-IoT, and RLLMBench/LLM-style fixed-point workloads under NPC/NEMU and selected native/LiteX paths.
 - System software: nanos-lite, riscv-pk, OpenSBI + Linux boot (see [Linux Kernel Boot](./linux_kernel.md)); upstream xv6-riscv and egos-2000 CLI smoke paths are available through `app/tinyos`.

@@ -47,9 +47,6 @@ interface rapt_iq_uvm_if (
   logic [XLEN-1:0] wb_result_1;
   logic [XLEN-1:0] wb_result_2;
   logic [XLEN-1:0] wb_result_3;
-  logic load_fast_valid;
-  logic load_fast_rebusy;
-  logic [PLEN-1:0] load_fast_prd;
 
   logic free_found_a;
   logic free_found_b;
@@ -107,9 +104,6 @@ interface rapt_iq_uvm_if (
     wb_result_1 = '0;
     wb_result_2 = '0;
     wb_result_3 = '0;
-    load_fast_valid = 1'b0;
-    load_fast_rebusy = 1'b0;
-    load_fast_prd = '0;
   end
 
   clocking drv_cb @(negedge clock);
@@ -120,7 +114,6 @@ interface rapt_iq_uvm_if (
     output pc_b, op1_b, op2_b, pr1_b, pr2_b, prd_b, rd_b, dest_b;
     output wb_valid, wb_prd_0, wb_prd_1, wb_prd_2, wb_prd_3;
     output wb_result_0, wb_result_1, wb_result_2, wb_result_3;
-    output load_fast_valid, load_fast_rebusy, load_fast_prd;
     input free_found_a, free_found_b, free_idx_a, free_idx_b;
   endclocking
 
@@ -132,7 +125,6 @@ interface rapt_iq_uvm_if (
     input pc_b, op1_b, op2_b, pr1_b, pr2_b, prd_b, rd_b, dest_b;
     input wb_valid, wb_prd_0, wb_prd_1, wb_prd_2, wb_prd_3;
     input wb_result_0, wb_result_1, wb_result_2, wb_result_3;
-    input load_fast_valid, load_fast_rebusy, load_fast_prd;
     input free_found_a, free_found_b, free_idx_a, free_idx_b;
     input occ, pmu_iq_full;
     input iss_valid, iss_pc, iss_op1, iss_op2, iss_prd, iss_rd, iss_dest;

@@ -49,7 +49,7 @@ module tb_mmio_load_retry;
 
     // Translation discovers MMIO: release A, but neither complete nor wake.
     exu_lsu.rretry = 1;
-    check(!exu_ioq_bcast.valid && !load_fast.valid, "retry completed MMIO");
+    check(!exu_ioq_bcast.valid, "retry completed MMIO");
     tick(1);
     exu_lsu.rretry = 0;
     check(!dut.ioq_complete[1], "retry marked the entry complete");
@@ -58,8 +58,7 @@ module tb_mmio_load_retry;
         break;
       end
       check(!exu_lsu.ordered, "younger MMIO acquired premature ordering permit");
-      check(!exu_ioq_bcast.valid && !load_fast.valid,
-            "blocked MMIO generated an architectural completion or wakeup");
+      check(!exu_ioq_bcast.valid, "blocked MMIO generated an architectural completion or wakeup");
       tick(1);
     end
     check(exu_lsu.rvalid && exu_lsu.raddr == RamVA,

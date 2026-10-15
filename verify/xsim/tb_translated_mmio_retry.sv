@@ -18,15 +18,18 @@ module tb_translated_mmio_retry;
   rou_cmu_if rou_cmu ();
   rou_lsu_if rou_lsu ();
   fpr_if fpr ();
-  load_fast_if load_fast ();
   dpu_ioq_if disp_ioq ();
   rapt_pkg::dispatch_slot_t dispatch[rapt_pkg::DispatchWidth];
   rapt_pkg::completion_t completion[rapt_pkg::CompletionPorts];
   rapt_pkg::completion_t exu_ioq_bcast, producer;
   logic pmu_sq_full;
   for (genvar i = 0; i < rapt_pkg::CompletionPorts; i++) begin
-    assign completion[i] = i == 0 ? producer : i == 3 ? exu_ioq_bcast : '0;
+    assign completion[i] = i == 0 ? producer : i == rapt_pkg::completion_memory_port(
+        rapt_pkg::CoreConfig
+    ) ? exu_ioq_bcast : '0;
   end
+  rapt_pkg::completion_t local_fp_wake[rapt_pkg::CompletionPorts];
+  assign local_fp_wake = '{default: '0};
   rapt_lsu dut (
       .wb_accept(1'b1),
       .*
@@ -106,8 +109,7 @@ module tb_translated_mmio_retry;
         end
       end
       if (lsu_l1d.rretry) begin
-        check(!lsu_l1d.rready && !load_fast.valid && !exu_ioq_bcast.valid,
-              "retry produced a completion");
+        check(!lsu_l1d.rready && !exu_ioq_bcast.valid, "retry produced a completion");
         check(dut.exu_lsu.rretry, "SQ failed to propagate retry");
         retries <= retries + 1;
       end
@@ -161,8 +163,6 @@ module tb_translated_mmio_retry;
     l1d_bus.difftest_skip = 0;
     l1d_bus.wready = 1;
     l1d_bus.werr = 0;
-    l1d_bus.ptw_wready = 0;
-    l1d_bus.ptw_werr = 0;
     tick(3);
     reset = 0;
     pmp_update.addr_we = 1;

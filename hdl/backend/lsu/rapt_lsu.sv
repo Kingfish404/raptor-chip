@@ -15,6 +15,8 @@ module rapt_lsu #(
     parameter unsigned XLEN     = Cfg.xlen
 ) (
     input CompletionT completion[NumCompletions],
+    // Live FEU result; only resident FP store data captures it.
+    input CompletionT local_fp_wake[NumCompletions] = '{default: '0},
     input clock,
     input reset,
     cmu_bcast_if.in cmu_bcast,
@@ -28,7 +30,6 @@ module rapt_lsu #(
     rou_lsu_if.in rou_lsu,
     csr_bcast_if.in csr_bcast,
     pmp_update_if.in pmp_update,
-    load_fast_if.source load_fast,
     output logic pmu_sq_full
 );
   lsu_pipe_if #(.XLEN(XLEN)) exu_lsu ();
@@ -63,6 +64,7 @@ module rapt_lsu #(
       .XLEN    (XLEN)
   ) u_ioq (
       .completion(completion),
+      .local_fp_wake(local_fp_wake),
       .clock        (clock),
       .reset        (reset),
       .cmu_bcast    (cmu_bcast),
@@ -83,7 +85,6 @@ module rapt_lsu #(
       .sq_wpbmt(sq_wpbmt),
       .sq_context(sq_context),
       .sq_acquire(sq_acquire),
-      .load_fast    (load_fast),
       .pmu_ioq_full (pmu_ioq_full_unused)
   );
 

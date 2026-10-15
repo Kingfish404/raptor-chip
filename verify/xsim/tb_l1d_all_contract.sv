@@ -583,34 +583,14 @@ endmodule
 module tb_l1d_io_size;
   localparam int XLEN = 64;
   logic [63:0] physical_page;
-  localparam logic [63:0] VA = 64'h40000000;
+  // The first PTW read returns a 1 GiB leaf for VA[38:30] == 1. RAM maps to
+  // the gigapage at 0x80000000; the device case uses the gigapage at 0 and
+  // offsets VA into the UART/peripheral window at 0x10000000.
+  localparam logic [63:0] RamVa = 64'h40000000;
+  localparam logic [63:0] DeviceVa = 64'h50000000;
+  logic [63:0] va;
   logic clock = 0, reset = 1;
-  cmu_bcast_if cmu_bcast ();
-  lsu_l1d_if lsu_l1d ();
-  l1d_bus_if l1d_bus ();
-  csr_bcast_if csr_bcast ();
-  pmp_update_if pmp_update ();
-  lsu_l1d_mmu_if exu_l1d ();
-  rou_cmu_if rou_cmu ();
-  rapt_l1d #(
-      .LineRefill(0)
-  ) dut (
-      .l2tlb_req_o(),
-      .l2tlb_ready_i(1'b0),
-      .l2tlb_rsp_i('0),
-      .external_write_valid_i(1'b0),
-      .external_write_pending_i(1'b0),
-      .external_write_first_i('0),
-      .external_write_last_i('0),
-      .coherent_request(1'b0),
-      .coherent_write(1'b0),
-      .coherent_ready(),
-      .writeback_error(),
-      .writeback_idle(),
-      .writeback_drain(1'b0),
-      `TB_L1D_UNUSED_RELEASE_PORTS,
-      .*
-  );
+  `include "tb_l1d_harness.svh"
   always #5 clock = ~clock;
   `include "tb_common.svh"
   `include "tb_l1d_defaults.svh"
@@ -654,7 +634,8 @@ module tb_l1d_io_size;
     init_l1d_inputs();
     allow_data = 1;
     pte_pbmt = 2'(attr);
-    physical_page = device ? 64'hc0000000 : 64'h80000000;
+    physical_page = device ? 64'h00000000 : 64'h80000000;
+    va = device ? DeviceVa : RamVa;
     data_value = 64'h1122334455667788;
     tick(4);
     reset = 0;
@@ -680,12 +661,12 @@ module tb_l1d_io_size;
       before_data = data_reads;
       before_ptw = ptw_reads;
       // Aligned address represents a split beat of an unaligned instruction.
-      lsu_l1d.raddr = VA;
+      lsu_l1d.raddr = va;
       lsu_l1d.ralu = `RAPT_ALU_LD__;
       lsu_l1d.rmisaligned = misaligned;
       lsu_l1d.ordered = 1;
       lsu_l1d.rvalid = !store;
-      exu_l1d.vaddr = VA;
+      exu_l1d.vaddr = va;
       exu_l1d.walu = `RAPT_SD_WSTRB;
       exu_l1d.misaligned = misaligned;
       exu_l1d.mmu_en = store;
@@ -937,32 +918,7 @@ module tb_l1d_load_footprint;
   localparam int WORD_BYTES = XLEN / 8;
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
-  cmu_bcast_if cmu_bcast ();
-  lsu_l1d_if lsu_l1d ();
-  l1d_bus_if l1d_bus ();
-  csr_bcast_if csr_bcast ();
-  pmp_update_if pmp_update ();
-  lsu_l1d_mmu_if exu_l1d ();
-  rou_cmu_if rou_cmu ();
-  rapt_l1d #(
-      .LineRefill(0)
-  ) dut (
-      .l2tlb_req_o(),
-      .l2tlb_ready_i(1'b0),
-      .l2tlb_rsp_i('0),
-      .external_write_valid_i(1'b0),
-      .external_write_pending_i(1'b0),
-      .external_write_first_i('0),
-      .external_write_last_i('0),
-      .coherent_request(1'b0),
-      .coherent_write(1'b0),
-      .coherent_ready(),
-      .writeback_error(),
-      .writeback_idle(),
-      .writeback_drain(1'b0),
-      `TB_L1D_UNUSED_RELEASE_PORTS,
-      .*
-  );
+  `include "tb_l1d_harness.svh"
   `include "tb_common.svh"
   `include "tb_l1d_defaults.svh"
   initial begin
@@ -1322,7 +1278,9 @@ module tb_l1d_permission_stage;
       idx = int'(PA[`RAPT_L1D_LEN+IdxLo-1:IdxLo]);
       off = int'(PA[IdxLo-1:OffBits]);
       force dut.u_tags.tag_addr_data[0] = PA[`RAPT_PADDR_BITS-1:`RAPT_L1D_LEN+IdxLo];
-      dut.u_tags.l1d_valid[0][idx][off] = 1'b1;
+      dut.u_tags.g_word_state[0].valid_words[idx] = '0;
+      dut.u_tags.g_word_state[0].valid_words[idx][off] = 1'b1;
+      dut.u_tags.line_live[0][idx] = 1'b1;
     end
     lsu_l1d.raddr = PA;
     lsu_l1d.ralu = 5'b00010;
@@ -1361,32 +1319,7 @@ module tb_l1d_plic_width;
   localparam int XLEN = `RAPT_XLEN;
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
-  cmu_bcast_if cmu_bcast ();
-  lsu_l1d_if lsu_l1d ();
-  l1d_bus_if l1d_bus ();
-  csr_bcast_if csr_bcast ();
-  pmp_update_if pmp_update ();
-  lsu_l1d_mmu_if exu_l1d ();
-  rou_cmu_if rou_cmu ();
-  rapt_l1d #(
-      .LineRefill(0)
-  ) dut (
-      .l2tlb_req_o(),
-      .l2tlb_ready_i(1'b0),
-      .l2tlb_rsp_i('0),
-      .external_write_valid_i(1'b0),
-      .external_write_pending_i(1'b0),
-      .external_write_first_i('0),
-      .external_write_last_i('0),
-      .coherent_request(1'b0),
-      .coherent_write(1'b0),
-      .coherent_ready(),
-      .writeback_error(),
-      .writeback_idle(),
-      .writeback_drain(1'b0),
-      `TB_L1D_UNUSED_RELEASE_PORTS,
-      .*
-  );
+  `include "tb_l1d_harness.svh"
   `include "tb_common.svh"
   `include "tb_l1d_defaults.svh"
   initial begin
@@ -1461,32 +1394,7 @@ module tb_l1d_pma;
   localparam int XLEN = `RAPT_XLEN;
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
-  cmu_bcast_if cmu_bcast ();
-  lsu_l1d_if lsu_l1d ();
-  l1d_bus_if l1d_bus ();
-  csr_bcast_if csr_bcast ();
-  pmp_update_if pmp_update ();
-  lsu_l1d_mmu_if exu_l1d ();
-  rou_cmu_if rou_cmu ();
-  rapt_l1d #(
-      .LineRefill(0)
-  ) dut (
-      .l2tlb_req_o(),
-      .l2tlb_ready_i(1'b0),
-      .l2tlb_rsp_i('0),
-      .external_write_valid_i(1'b0),
-      .external_write_pending_i(1'b0),
-      .external_write_first_i('0),
-      .external_write_last_i('0),
-      .coherent_request(1'b0),
-      .coherent_write(1'b0),
-      .coherent_ready(),
-      .writeback_error(),
-      .writeback_idle(),
-      .writeback_drain(1'b0),
-      `TB_L1D_UNUSED_RELEASE_PORTS,
-      .*
-  );
+  `include "tb_l1d_harness.svh"
   `include "tb_common.svh"
   `include "tb_l1d_defaults.svh"
   logic [XLEN-1:0] pa, va;
@@ -1732,12 +1640,6 @@ module tb_l1d_ptw_axi_error;
     l1i_bus.ar_ptw=0;
     l1i_bus.rpbmt=0;
     l1i_bus.noallocate = 0;
-    l1i_bus.awvalid=0;
-    l1i_bus.awaddr=0;
-    l1i_bus.aw_ptw=0;
-    l1i_bus.wvalid=0;
-    l1i_bus.wdata=0;
-    l1i_bus.wstrb=0;
     axi.arready=0;
     axi.rvalid=0;
     axi.rid=0;
@@ -1854,32 +1756,7 @@ module tb_l1d_ptw_error;
   localparam logic [XLEN-1:0] VA = 'h40000120, PA = 'h80000120;
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
-  cmu_bcast_if cmu_bcast ();
-  lsu_l1d_if lsu_l1d ();
-  l1d_bus_if l1d_bus ();
-  csr_bcast_if csr_bcast ();
-  pmp_update_if pmp_update ();
-  lsu_l1d_mmu_if exu_l1d ();
-  rou_cmu_if rou_cmu ();
-  rapt_l1d #(
-      .LineRefill(0)
-  ) dut (
-      .l2tlb_req_o(),
-      .l2tlb_ready_i(1'b0),
-      .l2tlb_rsp_i('0),
-      .external_write_valid_i(1'b0),
-      .external_write_pending_i(1'b0),
-      .external_write_first_i('0),
-      .external_write_last_i('0),
-      .coherent_request(1'b0),
-      .coherent_write(1'b0),
-      .coherent_ready(),
-      .writeback_error(),
-      .writeback_idle(),
-      .writeback_drain(1'b0),
-      `TB_L1D_UNUSED_RELEASE_PORTS,
-      .*
-  );
+  `include "tb_l1d_harness.svh"
   `include "tb_common.svh"
   `include "tb_l1d_defaults.svh"
 
@@ -2038,32 +1915,7 @@ module tb_l1d_ptw_pma;
   localparam int XLEN = `RAPT_XLEN;
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
-  cmu_bcast_if cmu_bcast ();
-  lsu_l1d_if lsu_l1d ();
-  l1d_bus_if l1d_bus ();
-  csr_bcast_if csr_bcast ();
-  pmp_update_if pmp_update ();
-  lsu_l1d_mmu_if exu_l1d ();
-  rou_cmu_if rou_cmu ();
-  rapt_l1d #(
-      .LineRefill(0)
-  ) dut (
-      .l2tlb_req_o(),
-      .l2tlb_ready_i(1'b0),
-      .l2tlb_rsp_i('0),
-      .external_write_valid_i(1'b0),
-      .external_write_pending_i(1'b0),
-      .external_write_first_i('0),
-      .external_write_last_i('0),
-      .coherent_request(1'b0),
-      .coherent_write(1'b0),
-      .coherent_ready(),
-      .writeback_error(),
-      .writeback_idle(),
-      .writeback_drain(1'b0),
-      `TB_L1D_UNUSED_RELEASE_PORTS,
-      .*
-  );
+  `include "tb_l1d_harness.svh"
   `include "tb_common.svh"
   `include "tb_l1d_defaults.svh"
   initial begin
@@ -2130,32 +1982,7 @@ module tb_l1d_read_error;
   localparam logic [XLEN-1:0] Good = 'h12345678, Bad = 'hdeadbeef;
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
-  cmu_bcast_if cmu_bcast ();
-  lsu_l1d_if lsu_l1d ();
-  l1d_bus_if l1d_bus ();
-  csr_bcast_if csr_bcast ();
-  pmp_update_if pmp_update ();
-  lsu_l1d_mmu_if exu_l1d ();
-  rou_cmu_if rou_cmu ();
-  rapt_l1d #(
-      .LineRefill(0)
-  ) dut (
-      .l2tlb_req_o(),
-      .l2tlb_ready_i(1'b0),
-      .l2tlb_rsp_i('0),
-      .external_write_valid_i(1'b0),
-      .external_write_pending_i(1'b0),
-      .external_write_first_i('0),
-      .external_write_last_i('0),
-      .coherent_request(1'b0),
-      .coherent_write(1'b0),
-      .coherent_ready(),
-      .writeback_error(),
-      .writeback_idle(),
-      .writeback_drain(1'b0),
-      `TB_L1D_UNUSED_RELEASE_PORTS,
-      .*
-  );
+  `include "tb_l1d_harness.svh"
   `include "tb_common.svh"
   `include "tb_l1d_defaults.svh"
 
@@ -2330,6 +2157,7 @@ module tb_l1d_replacement;
       .inspect_tag(),
       .inspect_valid(),
       .inspect_dirty(),
+      .inspect_dirty_any(),
       .dirty_any(),
       .update_blocked(),
       .line_update(1'b0),
@@ -2792,8 +2620,19 @@ module tb_l1d_store_coherence #(
       for (int wait_cycle = 0; wait_cycle < (WriteBack ? 4096 : 64); wait_cycle++) begin
         #1;
         if (lsu_l1d.wready) begin
+          automatic
+          bit
+          masked_hit = dut.hit_w && dut.cacheable_w && !lsu_l1d.werr
+              && !dut.wb_hold && !dut.probe_valid_i && !dut.line_clearing
+              && !(|dut.fence_clear_set);
           @(posedge clock);
           @(negedge clock);
+          if (masked_hit) begin
+            check(dut.l1d_update && dut.l1d_valid_u && !dut.l1d_inv_all_ways,
+                  "store hit did not schedule an immediate masked update");
+            check(dut.l1d_strobe_u == (walu[XLEN/8-1:0] << (addr % (XLEN / 8))),
+                  "store hit byte enables do not match the address lanes");
+          end
           lsu_l1d.wvalid = 1'b0;
           tick(settle_cycles);
           return;
@@ -3234,8 +3073,7 @@ module tb_l1d_store_coherence #(
     write_store(TestAddr, 32'h0000_beef, `RAPT_SH_WSTRB, 4);
     read_word(TestAddr, 32'hc4aa_beef);
 
-    // Keep a second partial store asserted while the first store's RMW owns
-    // the SRAM read port. It must wait and then merge against the first result.
+    // Consecutive partial stores must preserve both writes in the same word.
     write_word(TestAddr, 32'hc4aa_4680);
     write_store(TestAddr, 32'h0000_0081, `RAPT_SB_WSTRB, 0);
     write_store(TestAddr + 32'd2, 32'h0000_beef, `RAPT_SH_WSTRB, 4);
@@ -3644,32 +3482,7 @@ module tb_l1d_store_pbmt;
   localparam logic [XLEN-1:0] Addr = 'h80000000;
   localparam logic [4:0] LoadAlu = XLEN == 64 ? `RAPT_ALU_LD__ : `RAPT_ALU_LW__;
   logic clock = 0, reset = 1;
-  cmu_bcast_if cmu_bcast ();
-  lsu_l1d_if lsu_l1d ();
-  l1d_bus_if l1d_bus ();
-  csr_bcast_if csr_bcast ();
-  pmp_update_if pmp_update ();
-  lsu_l1d_mmu_if exu_l1d ();
-  rou_cmu_if rou_cmu ();
-  rapt_l1d #(
-      .LineRefill(0)
-  ) dut (
-      .l2tlb_req_o(),
-      .l2tlb_ready_i(1'b0),
-      .l2tlb_rsp_i('0),
-      .external_write_valid_i(1'b0),
-      .external_write_pending_i(1'b0),
-      .external_write_first_i('0),
-      .external_write_last_i('0),
-      .coherent_request(1'b0),
-      .coherent_write(1'b0),
-      .coherent_ready(),
-      .writeback_error(),
-      .writeback_idle(),
-      .writeback_drain(1'b0),
-      `TB_L1D_UNUSED_RELEASE_PORTS,
-      .*
-  );
+  `include "tb_l1d_harness.svh"
   always #5 clock = ~clock;
   `include "tb_common.svh"
   `include "tb_l1d_defaults.svh"
@@ -3741,7 +3554,7 @@ module tb_l1d_store_pbmt;
           tick(1);
           lsu_l1d.wvalid = 0;
           for (int c = 0; c < 4; c++) begin
-            check(!dut.l1d_update && !dut.l1d_rmw, "NC/IO store allocated or updated cache");
+            check(!dut.l1d_update, "NC/IO store allocated or updated cache");
             tick(1);
           end
           check(writes == 1, "typed store did not reach backing memory exactly once");
@@ -3800,7 +3613,7 @@ module tb_l1d_tags;
       logic [Words-1:0] clean_mask = '0, line_mask = '0;
       wire [1:0] inspect_tag;
       wire [Words-1:0] inspect_dirty;
-      wire dirty_any, update_blocked;
+      wire dirty_any, inspect_dirty_any, update_blocked;
       wire [Words-1:0] observed_valid = dut.l1d_valid[0][0];
       wire [Words-1:0] observed_dirty = dut.dirty[0][0];
 
@@ -3827,6 +3640,8 @@ module tb_l1d_tags;
         #1;
         if (|(observed_dirty & ~observed_valid))
           $fatal(1, "case %0d: dirty word without valid data", CaseId);
+        if (inspect_dirty_any !== (|inspect_dirty))
+          $fatal(1, "case %0d: dirty summary differs from word mask", CaseId);
         @(negedge clock);
       endtask
 
@@ -4002,32 +3817,7 @@ module tb_l1d_trap_owner;
   localparam logic [XLEN-1:0] VA = 'h40000120;
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
-  cmu_bcast_if cmu_bcast ();
-  lsu_l1d_if lsu_l1d ();
-  l1d_bus_if l1d_bus ();
-  csr_bcast_if csr_bcast ();
-  pmp_update_if pmp_update ();
-  lsu_l1d_mmu_if exu_l1d ();
-  rou_cmu_if rou_cmu ();
-  rapt_l1d #(
-      .LineRefill(0)
-  ) dut (
-      .l2tlb_req_o(),
-      .l2tlb_ready_i(1'b0),
-      .l2tlb_rsp_i('0),
-      .external_write_valid_i(1'b0),
-      .external_write_pending_i(1'b0),
-      .external_write_first_i('0),
-      .external_write_last_i('0),
-      .coherent_request(1'b0),
-      .coherent_write(1'b0),
-      .coherent_ready(),
-      .writeback_error(),
-      .writeback_idle(),
-      .writeback_drain(1'b0),
-      `TB_L1D_UNUSED_RELEASE_PORTS,
-      .*
-  );
+  `include "tb_l1d_harness.svh"
   `include "tb_common.svh"
   `include "tb_l1d_defaults.svh"
 
@@ -4219,7 +4009,7 @@ module tb_l1d_write_error;
       // Error without B completion must not consume or mutate the write.
       l1d_bus.werr=1;
       tick(3);
-      check(!lsu_l1d.wready && !lsu_l1d.werr && !dut.l1d_rmw, "stray write error consumed");
+      check(!lsu_l1d.wready && !lsu_l1d.werr, "stray write error consumed");
       l1d_bus.wready = 1;
       #1;
       check(lsu_l1d.wready && lsu_l1d.werr, "write failure was not exposed to SQ");

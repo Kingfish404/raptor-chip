@@ -156,7 +156,9 @@ module tb_ifu_response_stage;
         : force_self_prediction || predicted_taken(dut.pc_ifu);
     ifu_bpu.npc = phase == 9 ? dut.pc_ifu
         : force_self_prediction ? Base : following(dut.pc_ifu);
-    ifu_bpu.aux_taken = ifu_bpu.aux_query && predicted_taken(ifu_bpu.aux_pc);
+    // Without a response register the IFU sends the block PC and position.
+    ifu_bpu.aux_taken = ifu_bpu.aux_query && predicted_taken(`RAPT_FETCH_RESPONSE_STAGE
+        ? ifu_bpu.aux_pc : ifu_bpu.aux_pc + XLEN'(2 * (int'(ifu_bpu.aux_position) + 1)));
   end
   always @(posedge clock) begin
     if (!reset) begin
@@ -170,6 +172,11 @@ module tb_ifu_response_stage;
       if (`RAPT_FETCH_RESPONSE_STAGE && ifu_bpu.aux_query) begin
         assert (ifu_bpu.aux_pc == dut.candidate_pc[dut.secondary_index])
         else $fatal(1, "registered auxiliary PC does not match the buffered branch PC");
+      end
+      if (!`RAPT_FETCH_RESPONSE_STAGE && ifu_bpu.aux_query) begin
+        assert (ifu_bpu.aux_pc + XLEN'(2 * (int'(ifu_bpu.aux_position) + 1))
+            == dut.candidate_pc[dut.secondary_index])
+        else $fatal(1, "selected auxiliary PC does not match the decoded branch PC");
       end
 `endif
       if (checking) begin
@@ -221,6 +228,8 @@ module tb_ifu_response_stage;
     init_cmu_bcast_defaults();
     recovery.pending = 0;
     recovery.redirect_valid = 0;
+    recovery.preserve_fetch = 0;
+    recovery.taken = 0;
     recovery.target = Base;
     ifu_idu.resteer = 0;
     ifu_idu.resteer_pc = Base;
@@ -379,7 +388,8 @@ module tb_ifu_response_stage;
     end
 
     // Fill both the held packet and response slot, then cancel at the same PC.
-    // No cached packet may reappear while recovery fences the frontend.
+    // With the cache silent, no old packet may survive the redirect. Fresh
+    // responses at the same PC may refill while decode remains fenced.
     cache_enabled = 1;
     phase = 0;
     cmu_bcast.fence_i = 1;
@@ -390,6 +400,7 @@ module tb_ifu_response_stage;
     if (`RAPT_FETCH_RESPONSE_STAGE)
       assert (dut.response_count_q == 2 && dut.held_count != 0)
       else $fatal(1, "response backpressure scenario was not reached");
+    cache_enabled = 0;
     recovery.pending = 1;
     recovery.redirect_valid = 1;
     recovery.target = Base;
@@ -400,6 +411,13 @@ module tb_ifu_response_stage;
       else $fatal(1, "same-PC recovery leaked a buffered response");
       tick();
     end
+    phase = 5;
+    cache_enabled = 1;
+    repeat (8) tick();
+    assert (ifu_idu.valid[0] && ifu_idu.slot[0].pc == Base && ifu_idu.slot[0].inst[15:0] == half_at(
+        Base
+    ) && ifu_l1i.pc > Base)
+    else $fatal(1, "pending recovery did not refill with the fresh same-PC response");
     recovery.pending = 0;
     expected_pc = Base;
     checking = 1;
@@ -408,6 +426,7 @@ module tb_ifu_response_stage;
 
     // The request PC can equal the retirement frontier while an older dynamic
     // instance of that PC is buffered. PC equality alone cannot authorize IO.
+    phase = 0;
     redirect();
     force_self_prediction = 1;
     ifu_idu.ready = '{default: 0};

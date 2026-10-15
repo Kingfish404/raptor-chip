@@ -5,6 +5,14 @@ from width_evaluate import (parse_dispatch, parse_frontend, parse_recovery,
                             parse_rob_dispatch,
                             parse_recovery_transaction, parse_rename_checkpoints,
                             parse_alq_selection)
+import json
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+from unittest.mock import patch
+import width_evaluate
+
 
 REPORT = """Dispatch stop width: cycles 1, unfilled slots 0, zero-progress cycles 0
 Dispatch stop empty: cycles 2, unfilled slots 3, zero-progress cycles 1
@@ -14,6 +22,7 @@ Dispatch histogram: [1 2 1]
 Dispatch endpoint domain 0: cycles 1
 Dispatch accounting: cycles 4, width 2, accepted 4, unfilled 4
 """
+
 
 ROB_DISPATCH_REPORT = """ROB dispatch steering: candidates 12, accepted 8, bypass 3, oldest blocked 4, pending avg 1.500, peak 5
 ROB dispatch blocked domain 0: cycles 1
@@ -288,6 +297,62 @@ class RecoveryParserTest(unittest.TestCase):
         self.assertEqual(parse_recovery(self.report() + residual)["residual_cycles"]["live"], 0)
         with self.assertRaises(ValueError):
             parse_recovery(self.report() + residual.replace("live cycles 0", "live cycles 1"))
+
+
+class EvidenceTest(unittest.TestCase):
+    def run_failure(self, first_succeeds):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name in ('ref', 'boot', 'sim', 'bit-riscv32-npc.bin', 'mul-longlong-riscv32-npc.bin'):
+                (root / name).write_bytes(b'fixture')
+            out = root / 'out'
+            out.mkdir()
+            (out / 'results.json').write_text('{"complete": true}')
+            args = ['width_evaluate.py', '--profile', f'test={root}/sim', '--output', str(out),
+                    '--reference', str(root / 'ref'), '--boot', str(root / 'boot'),
+                    '--images', str(root), '--case', 'bit', '--case', 'mul-longlong']
+            responses = [subprocess.TimeoutExpired('sim', 120)]
+            if first_succeeds:
+                responses.insert(0, subprocess.CompletedProcess([], 0, 'HIT GOOD TRAP\n#inst: 1, cycle: 2\n'))
+            with patch.object(sys, 'argv', args), patch.object(width_evaluate.subprocess, 'run', side_effect=responses):
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    width_evaluate.main()
+            result = json.loads((out / 'results.json').read_text())
+            self.assertFalse(result['complete'])
+            self.assertFalse(result['profiles'][0]['complete'])
+            self.assertEqual(len(result['profiles'][0]['cases']), int(first_succeeds))
+            self.assertIn('binary_sha256', result['profiles'][0])
+
+    def test_first_failure_invalidates_old_success(self):
+        self.run_failure(False)
+
+    def test_second_failure_preserves_first_case(self):
+        self.run_failure(True)
+
+    def test_changed_inputs_do_not_produce_complete_report(self):
+        for changed_name in ('sim', 'ref', 'boot', 'bit-riscv32-npc.bin'):
+            with self.subTest(changed_name=changed_name), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                for name in ('sim', 'ref', 'boot', 'bit-riscv32-npc.bin'):
+                    (root / name).write_bytes(b'original')
+                out = root / 'out'
+                args = ['width_evaluate.py', '--profile', f'test={root}/sim',
+                        '--output', str(out), '--reference', str(root / 'ref'),
+                        '--boot', str(root / 'boot'), '--images', str(root), '--case', 'bit']
+
+                def mutate(*unused_args, **unused_kwargs):
+                    (root / changed_name).write_bytes(b'replaced during execution')
+                    return subprocess.CompletedProcess([], 0, 'HIT GOOD TRAP\n#inst: 1, cycle: 2\n')
+
+                with patch.object(sys, 'argv', args), patch.object(
+                        width_evaluate.subprocess, 'run', side_effect=mutate):
+                    with self.assertRaisesRegex(RuntimeError, 'test input changed during'):
+                        width_evaluate.main()
+                result = json.loads((out / 'results.json').read_text())
+                self.assertFalse(result['complete'])
+                self.assertFalse(result['profiles'][0]['complete'])
+                self.assertEqual(result['profiles'][0]['cases'], [])
+                self.assertIn('HIT GOOD TRAP', (out / 'test-bit.log').read_text())
 
 
 if __name__ == "__main__":

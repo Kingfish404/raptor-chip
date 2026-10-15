@@ -37,6 +37,29 @@ CoreMark/MHz  : 2.6778
 
 
 class SummaryTests(unittest.TestCase):
+    def test_benchmark_default_shell_preserves_command_status(self):
+        workflow = (SCRIPT.resolve().parents[1] / 'workflows/benchmark.yaml').read_text()
+        defaults = workflow.split('defaults:\n', 1)[1].split('\nenv:', 1)[0]
+        shell = next(line.strip().removeprefix('shell: ') for line in defaults.splitlines()
+                     if line.strip().startswith('shell: '))
+        command = shlex.split(shell)
+        self.assertEqual(command.pop(), '{0}')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / '.bash_logout').write_text('false\n')
+            script = root / 'step.sh'
+            environment = dict(os.environ, HOME=str(root))
+            script.write_text('exit 0\n')
+            login_result = subprocess.run(['bash', '-leo', 'pipefail', str(script)],
+                                          env=environment, capture_output=True,
+                                          text=True, timeout=15)
+            self.assertEqual(login_result.returncode, 1)
+            for expected in (0, 1):
+                script.write_text(f'exit {expected}\n')
+                result = subprocess.run([*command, str(script)], env=environment,
+                                        capture_output=True, text=True, timeout=15)
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+
     def check(self, log=SMOKE, allow_short=True, iterations=1):
         return summary.evaluate_pk(log, iterations, allow_short)
 
@@ -208,6 +231,7 @@ class SummaryTests(unittest.TestCase):
                 result = subprocess.run([*command, str(step_script)], cwd=root,
                                         env=environment, capture_output=True, text=True, timeout=15)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                self.assertIn(f'Embench report exit status: {expected}', result.stdout)
                 self.assertIn('# Embench', summary.read_text())
 
 

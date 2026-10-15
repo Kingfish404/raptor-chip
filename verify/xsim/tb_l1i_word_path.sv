@@ -78,8 +78,6 @@ module tb_l1i_word_path #(
     l1i_bus.ptw_rerr=0;
     l1i_bus.rdata=0;
     l1i_bus.rerr=0;
-    l1i_bus.ptw_wready=0;
-    l1i_bus.ptw_werr=0;
     grant_memory_idle=0;
     guard_pipeline_empty=1;
     guard_advance=0;

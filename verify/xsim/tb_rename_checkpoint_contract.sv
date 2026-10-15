@@ -174,6 +174,8 @@ endmodule
 module tb_rename_checkpoint_pipeline;
   import rapt_pkg::*;
   localparam int Width = 2;
+  localparam logic [63:0] BranchGhr = 64'h8091_a2b3_c4d5_e6f2;
+  localparam logic [7:0] BranchPhr = 8'h31;
 
   typedef struct packed {
     phys_reg_t prd, prs;
@@ -192,6 +194,9 @@ module tb_rename_checkpoint_pipeline;
   cmu_bcast_if cmu_bcast ();
   phys_reg_t map_snapshot[RNUMPkg], rat_snapshot[RNUMPkg];
   output_t observed[$];
+  logic [63:0] snapshot_ghr = 0, restore_ghr;
+  logic [7:0] snapshot_phr = 0, restore_phr;
+  logic history_restore;
 
   rapt_rnu dut (
       .clock,
@@ -203,7 +208,12 @@ module tb_rename_checkpoint_pipeline;
       .rou_cmu(commit_bus),
       .cmu_bcast,
       .map_snapshot,
-      .rat_snapshot
+      .rat_snapshot,
+      .snapshot_ghr,
+      .snapshot_phr,
+      .history_restore,
+      .restore_ghr,
+      .restore_phr
   );
 
   always @(posedge clock)
@@ -237,6 +247,8 @@ module tb_rename_checkpoint_pipeline;
     for (int s = 0; s < Width; s++) begin
       idu_rnu.slot[s].uop.pc = xlen_t'(64'h1234567800000000)
                              + xlen_t'(idu_rnu.slot[s].uop.rd) * 4;
+      idu_rnu.slot[s].uop.execute.branch.predicted_taken
+          = idu_rnu.slot[s].uop.execute.branch.conditional && snapshot_ghr[0];
       idu_rnu.slot[s].op1 = xlen_t'(64'ha5c39e1700000000);
       idu_rnu.slot[s].op2 = xlen_t'(64'h3e7a82d100000000);
     end
@@ -254,11 +266,14 @@ module tb_rename_checkpoint_pipeline;
   initial begin
     output_t older, branch, younger, reused;
     phys_reg_t queued_prd;
+    logic [63:0] oldest_ghr;
+    logic [7:0] oldest_phr;
     clear_decode();
     rnu_rou.ready = '{default: 1};
     commit_bus.slot = '{default: '0};
     cmu_bcast.flush_pipe = 0;
     recovery.pending = 0;
+    recovery.taken = 0;
     recovery.redirect_valid = 0;
     recovery.owner = '0;
     recovery.generation = '0;
@@ -347,6 +362,7 @@ module tb_rename_checkpoint_pipeline;
     @(negedge clock);
     clear_decode();
     recovery.pending = 0;
+    recovery.taken = 0;
     recovery.redirect_valid = 0;
     recovery.checkpoint_valid = 0;
     commit_bus.slot = '{default: '0};
@@ -367,6 +383,13 @@ module tb_rename_checkpoint_pipeline;
     younger = observed.pop_front();
     assert (branch.checkpoint_valid && younger.checkpoint_valid
             && branch.checkpoint != younger.checkpoint);
+    // A stalled branch must keep its own post-prediction history while a
+    // younger conditional advances the live decode watermark behind it.
+    snapshot_ghr = (BranchGhr << 1) | 64'h1;
+    snapshot_phr = (BranchPhr << 1);
+    send_group(1, '0, 1, '0, 0);
+    snapshot_ghr = (snapshot_ghr << 1);
+    snapshot_phr = (snapshot_phr << 1);
     send_group(1, '0, 1, '0, 0);
     wait (dut.candidate_valid[0] && !dut.candidate_ready[0]);
     assert (dut.checkpoint_live == '1 && dut.checkpoint_available == '0)
@@ -386,6 +409,152 @@ module tb_rename_checkpoint_pipeline;
     assert (reused.checkpoint_valid && reused.checkpoint == branch.checkpoint)
     else $fatal(1, "released checkpoint was not safely reused");
 
+    @(negedge clock);
+    recovery.pending = 1;
+    recovery.redirect_valid = 1;
+    recovery.checkpoint_valid = 1;
+    recovery.checkpoint = reused.checkpoint;
+    #1;
+    $display("RNQ history: expected=%h/%h restored=%h/%h queued=%0d", 64'h0123_4567_89ab_cde4,
+             8'h62, restore_ghr, restore_phr, dut.decoded_count);
+    // Predicted taken, resolved not taken: append zero to this branch's
+    // prediction-time GHR. Both offered branch PCs have bit one clear.
+    assert (history_restore && restore_ghr == (BranchGhr << 1) && restore_phr == (BranchPhr << 1))
+    else $fatal(1, "recovery used younger decode history instead of branch history");
+
+    // A target-only misprediction keeps a correctly predicted taken bit.
+    recovery.taken = 1;
+    #1;
+    assert (history_restore && restore_ghr == ((BranchGhr << 1) | 64'h1))
+    else $fatal(1, "target-only recovery inverted the correct direction");
+    @(negedge clock);
+    recovery.pending = 0;
+    recovery.redirect_valid = 0;
+    recovery.checkpoint_valid = 0;
+    cmu_bcast.flush_pipe = 1;
+    @(posedge clock);
+    #1;
+    cmu_bcast.flush_pipe = 0;
+    observed.delete();
+
+    // Exercise modular position wrap without flushing the rolling window.
+    // Correct resolutions release IDs, so this also repeatedly reuses them.
+    for (int edge_index = 0; edge_index < 3 * (1 << dut.HistoryPositionBits); edge_index++) begin
+      snapshot_ghr = (snapshot_ghr << 1) | 64'(edge_index % 3 == 0);
+      snapshot_phr = (snapshot_phr << 1) | 8'(edge_index % 5 == 0);
+      send_group(1, '0, 1, '0, 0);
+      wait_observed(1);
+      reused = observed.pop_front();
+      assert (dut.checkpoints.ghr_q[reused.checkpoint] == snapshot_ghr
+              && dut.checkpoints.phr_q[reused.checkpoint] == snapshot_phr)
+      else $fatal(1, "RNQ history position wrap lost edge %0d", edge_index);
+      checkpoint_release.valid[0] = 1;
+      checkpoint_release.checkpoint[0] = reused.checkpoint;
+      @(posedge clock);
+      #1;
+      checkpoint_release.valid[0] = 0;
+    end
+
+    // Exhaust checkpoints, then fill RNQ with conditional edges. The oldest
+    // queued snapshot must survive the maximum possible younger-edge distance.
+    send_group(1, '0, 1, '0, 0);
+    send_group(1, '0, 1, '0, 0);
+    wait_observed(2);
+    branch = observed.pop_front();
+    younger = observed.pop_front();
+    for (int i = 0; i < dut.RIQ_SIZE; i++) begin
+      snapshot_ghr = (snapshot_ghr << 1) | 64'(i % 3 == 1);
+      snapshot_phr = (snapshot_phr << 1) | 8'(i % 2 == 0);
+      if (i == 0) begin
+        oldest_ghr = snapshot_ghr;
+        oldest_phr = snapshot_phr;
+      end
+      send_group(1, '0, 1, '0, 0);
+    end
+    assert (dut.decoded_count == dut.RIQ_SIZE)
+    else $fatal(1, "history window test did not fill RNQ");
+    checkpoint_release.valid[0] = 1;
+    checkpoint_release.checkpoint[0] = branch.checkpoint;
+    @(posedge clock);
+    #1;
+    checkpoint_release.valid[0] = 0;
+    wait_observed(1);
+    reused = observed.pop_front();
+    assert (dut.checkpoints.ghr_q[reused.checkpoint] == oldest_ghr
+            && dut.checkpoints.phr_q[reused.checkpoint] == oldest_phr)
+    else $fatal(1, "maximum RNQ history distance lost the oldest snapshot");
+
+    // Share the live BPU watermark while enqueue and rename overlap. An
+    // independent FIFO retains full snapshots across random queue pressure,
+    // checkpoint exhaustion, jumps, idle cycles, and many position wraps.
+    begin
+      typedef struct packed {
+        logic [63:0] ghr;
+        logic [7:0] phr;
+      } history_t;
+      history_t expected[$], item, live_history, post_history;
+      bit accepted;
+      int unsigned rng;
+      rng = 32'h9b49017;
+      live_history = {64'h89ab_cdef_0123_4567, 8'hb6};
+      @(negedge clock);
+      clear_decode();
+      checkpoint_release.valid = '{default: 0};
+      cmu_bcast.flush_pipe = 1;
+      @(posedge clock);
+      @(negedge clock);
+      cmu_bcast.flush_pipe = 0;
+      for (int cycle = 0; cycle < 3000; cycle++) begin
+        clear_decode();
+        rng = rng * 1664525 + 1013904223;
+        idu_rnu.valid[0] = rng[3:0] != 0;
+        idu_rnu.slot[0].uop.pc = xlen_t'(64'h1234567800000000);
+        idu_rnu.slot[0].op1 = xlen_t'(64'ha5c39e1700000000);
+        idu_rnu.slot[0].op2 = xlen_t'(64'h3e7a82d100000000);
+        idu_rnu.slot[0].uop.execute.branch.conditional = rng[5:4] != 0;
+        idu_rnu.slot[0].uop.execute.branch.jump = rng[5:4] == 0 && rng[6];
+        idu_rnu.slot[0].uop.execute.branch.predicted_taken = rng[7];
+        rnu_rou.ready = '{default: 1};
+        if (rng[9:8] == 0) rnu_rou.ready = '{default: 0};
+        checkpoint_release.valid = '{default: 0};
+        for (int e = 0; e < 2; e++) begin
+          checkpoint_release.valid[e] = dut.checkpoint_live[e] && rng[10+e];
+          checkpoint_release.checkpoint[e] = branch_checkpoint_t'(e);
+        end
+        #1;
+        accepted = idu_rnu.valid[0] && idu_rnu.ready[0];
+        post_history = live_history;
+        if (accepted && idu_rnu.slot[0].uop.execute.branch.conditional) begin
+          post_history.ghr = (live_history.ghr << 1) | 64'(rng[7]);
+          post_history.phr = (live_history.phr << 1) | 8'(rng[12]);
+        end
+        snapshot_ghr = post_history.ghr;
+        snapshot_phr = post_history.phr;
+        @(posedge clock);
+        for (int slot = 0; slot < Width; slot++) begin
+          if (dut.renamed_valid[slot]) begin
+            assert (expected.size() != 0)
+            else $fatal(1, "unexpected rename");
+            item = expected.pop_front();
+            if (dut.checkpoint_allocate_valid[slot]) begin
+              assert (dut.checkpoint_allocate_ghr[slot] == item.ghr
+                      && dut.checkpoint_allocate_phr[slot] == item.phr)
+              else $fatal(1, "shared history mismatch at cycle %0d slot %0d", cycle, slot);
+            end
+          end
+        end
+        if (accepted) expected.push_back(post_history);
+        live_history = post_history;
+        @(negedge clock);
+      end
+      clear_decode();
+      checkpoint_release.valid = '{default: 0};
+      cmu_bcast.flush_pipe = 1;
+      @(posedge clock);
+      #1;
+      $display("PASS: shared RNQ history random overlap, seed=0x09b49017, 3000 cycles");
+    end
+
     $display(
         "PASS: XLEN=%0d RNU history checkpoint, deferred MAP/free rebuild, persistent queue fence, payload, capacity backpressure, reuse",
         $bits(xlen_t));
@@ -393,7 +562,7 @@ module tb_rename_checkpoint_pipeline;
   end
 
   initial begin
-    #10000;
+    #50000;
     $fatal(1, "rename checkpoint pipeline timeout");
   end
 endmodule

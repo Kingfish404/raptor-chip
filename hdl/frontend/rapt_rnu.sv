@@ -38,10 +38,14 @@ module rapt_rnu #(
 );
   localparam int CheckpointOccupancyBits = rapt_pkg::index_bits(CheckpointEntries + 1);
 
+  localparam int HistoryPositionBits = rapt_pkg::index_bits(RIQ_SIZE);
+  typedef logic [HistoryPositionBits-1:0] history_position_t;
+
   typedef struct packed {
     UopT uop;
     logic [XLEN-1:0] op1, op2;
     logic [RLEN-1:0] rs1, rs2;
+    history_position_t history_position;
   } decoded_t;
   typedef struct packed {
     UopT uop;
@@ -132,9 +136,9 @@ module rapt_rnu #(
   always_comb begin
     restore_ghr = checkpoint_restore_ghr;
     restore_phr = checkpoint_restore_phr;
-    // Decode GHR records only conditionals. A mispredicted conditional has
-    // the wrong last taken bit in the rename snapshot; jumps keep it.
-    if (checkpoint_restore_conditional) restore_ghr[0] = ~checkpoint_restore_ghr[0];
+    // Correct direction explicitly: a target-only miss need not invert it.
+    // Jumps do not append a conditional-history bit.
+    if (checkpoint_restore_conditional) restore_ghr[0] = recovery.taken;
   end
   if (!(idu_rnu.Width == DecodeWidth && rnu_rou.Width == RenameWidth)) begin : g_invalid_config_0
     $error("Invalid rapt_rnu configuration");
@@ -154,8 +158,43 @@ module rapt_rnu #(
   if (!(recovery.CheckpointBits == CheckpointBits)) begin : g_invalid_config_5
     $error("Invalid rapt_rnu configuration");
   end
+  // A queued item has fewer than RIQ_SIZE younger conditional edges. Keep
+  // only shifted-out bits; snapshot_* already supplies the live post-decode
+  // watermark. Include this cycle's accepted edge in both window and position.
+  logic [RIQ_SIZE:0] overflow_ghr, overflow_phr;
+  logic [63+RIQ_SIZE:0] queued_ghr;
+  logic [7+RIQ_SIZE:0] queued_phr;
+  history_position_t history_position, enqueue_position;
+  logic enqueue_conditional;
+  always_comb begin
+    enqueue_conditional = 1'b0;
+    for (int s = 0; s < DecodeWidth; s++)
+    if (idu_rnu.valid[s] && idu_rnu.ready[s] && !idu_rnu.slot[s].uop.trap
+        && idu_rnu.slot[s].uop.execute.branch.conditional)
+      enqueue_conditional = 1'b1;
+  end
+  assign enqueue_position = history_position + HistoryPositionBits'(enqueue_conditional);
+  assign queued_ghr = {enqueue_conditional ? overflow_ghr[RIQ_SIZE-1:0] :
+      overflow_ghr[RIQ_SIZE:1], snapshot_ghr};
+  assign queued_phr = {enqueue_conditional ? overflow_phr[RIQ_SIZE-1:0] :
+      overflow_phr[RIQ_SIZE:1], snapshot_phr};
+  always_ff @(posedge clock) begin
+    if (reset || cmu_bcast.flush_pipe || recovery.pending) begin
+      history_position <= '0;
+    end else if (idu_rnu.valid[0] && idu_rnu.ready[0]) begin
+      history_position <= enqueue_position;
+      overflow_ghr[0] <= snapshot_ghr[63];
+      overflow_phr[0] <= snapshot_phr[7];
+      if (enqueue_conditional) begin
+        overflow_ghr[RIQ_SIZE:1] <= overflow_ghr[RIQ_SIZE-1:0];
+        overflow_phr[RIQ_SIZE:1] <= overflow_phr[RIQ_SIZE-1:0];
+      end
+    end
+  end
   for (genvar s = 0; s < DecodeWidth; s++) begin : g_decode_copy
-    assign decoded[s] = idu_rnu.slot[s];
+    // IDU accepts at most one control-flow edge per cycle. Its post-decode
+    // watermark includes this edge, even when it waits for a checkpoint.
+    assign decoded[s] = {idu_rnu.slot[s], enqueue_position};
   end
   rapt_stream_queue #(
       .ItemT(decoded_t),
@@ -284,8 +323,10 @@ module rapt_rnu #(
       renamed[s].checkpoint = CheckpointBits'(checkpoint_chosen);
       checkpoint_allocate_valid[s] = renamed[s].checkpoint_valid;
       checkpoint_allocate_id[s] = renamed[s].checkpoint;
-      checkpoint_allocate_ghr[s] = snapshot_ghr;
-      checkpoint_allocate_phr[s] = snapshot_phr;
+      checkpoint_allocate_ghr[s] = 64'(queued_ghr >>
+          HistoryPositionBits'(enqueue_position - candidate[s].history_position));
+      checkpoint_allocate_phr[s] = 8'(queued_phr >>
+          HistoryPositionBits'(enqueue_position - candidate[s].history_position));
       checkpoint_allocate_conditional[s] = candidate[s].uop.execute.branch.conditional;
       if (renamed[s].checkpoint_valid) checkpoint_rank++;
 

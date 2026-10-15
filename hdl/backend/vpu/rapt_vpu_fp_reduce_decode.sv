@@ -1,7 +1,7 @@
 // RVV 1.0 FP reduction admission. No arithmetic or architectural effects.
 // enabled combines VS and FS. Caller checks VTYPE/LMUL/source-group geometry,
 // VL and nonzero vstart before reading VRF or issuing a numeric request.
-// Seed/destination are scalars independent of LMUL and may overlap any source.
+// Seed/destination are scalars independent of LMUL; destination may overlap a source.
 module rapt_vpu_fp_reduce_decode #(
     parameter int ELEN = 64
 ) (

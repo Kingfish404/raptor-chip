@@ -17,6 +17,23 @@ module tb_bit_decode_alu;
       .word(decoded.uop.execute.int_op.word),
       .out_r(result)
   );
+  logic [X-1:0] simple_result;
+  rapt_ieu_alu #(
+      .XLEN(X),
+      .EnableRareOps(1'b0)
+  ) simple_alu (
+      .s1(a),
+      .s2(operand2),
+      .op(decoded.uop.execute.int_op.alu),
+      .word(decoded.uop.execute.int_op.word),
+      .out_r(simple_result)
+  );
+  logic rare_op;
+  // Classify the instruction encoding independently of the scheduling helper.
+  assign rare_op = (fetched.inst[6:0] == 7'h33 && fetched.inst[31:25] == 7'h05
+      && fetched.inst[14:12] inside {3'd1, 3'd2, 3'd3})
+      || (fetched.inst[6:0] inside {7'h13, 7'h1b} && fetched.inst[14:12] == 3'd1
+          && fetched.inst[31:20] inside {12'h600, 12'h601, 12'h602});
   string vectors;
   integer fd, status, count = 0;
   logic [31:0] inst;
@@ -41,6 +58,26 @@ module tb_bit_decode_alu;
       if (priv != 2) begin
         csr_bcast.priv = 2'(priv);
         #1;
+        assert (decoded.uop.schedule.issue_ports == (rare_op
+            ? rapt_pkg::IntegerSystemPortMask : rapt_pkg::IntegerAluPortMask))
+        else
+          $fatal(
+              1,
+              "bit ALU port mask inst=%h mask=%b rare=%b",
+              inst,
+              decoded.uop.schedule.issue_ports,
+              rare_op
+          );
+        assert (simple_result == (rare_op ? X'(0) : expected))
+        else
+          $fatal(
+              1,
+              "simple bit ALU inst=%h result=%h expected=%h rare=%b",
+              inst,
+              simple_result,
+              expected,
+              rare_op
+          );
         if (decoded.uop.trap || result != expected)
           $fatal(
               1,

@@ -104,7 +104,10 @@ module tb_predict_history_pipeline;
   logic [7:0] execute_phr = 0, snapshot_phr;
   rapt_idu idu (.*);
   rapt_cmu cmu (.*);
-  rapt_bpu bpu (.*);
+  rapt_bpu bpu (
+      .preserve_fetch(1'b0),
+      .*
+  );
   rapt_pkg::issue_packet_t iss;
   rapt_pkg::completion_t wb_branch;
   rapt_ieu_pipe_branch branch_pipe (.*);
@@ -141,7 +144,6 @@ module tb_predict_history_pipeline;
     rou_cmu.fence_i = 0;
     rou_cmu.flush_pipe = 0;
     rou_cmu.flush_redirect = 0;
-    rou_cmu.sys_resume = 0;
     rou_cmu.time_trap = 0;
     rou_cmu.rob_head = 0;
     ifu_idu.slot = '{default:'0};
@@ -156,6 +158,7 @@ module tb_predict_history_pipeline;
 `ifdef RAPT_FETCH_LOOKAHEAD
     ifu_bpu.aux_query = 0;
     ifu_bpu.aux_pc = 0;
+    ifu_bpu.aux_position = 0;
 `endif
     tick(3);
     reset = 0;

@@ -10,8 +10,17 @@ module tb_fp_registers;
   uop_t allocate_uop[2];
   logic [Bits-1:0] allocate_index[2], commit_index[2], read_index[2];
   logic [GenBits-1:0] allocate_generation[2];
-  logic [2:0][63:0] allocate_value[2], read_value[2];
   logic [2:0][Bits:0] allocate_tag[2], read_tag[2];
+  // Values resolve on dispatch lanes: from allocation tags (fall-through) or
+  // from stored tags (resident owner selected by read_index).
+  uop_t resolve_uop[2];
+  logic [2:0][Bits:0] resolve_tag[2], resolve_ready_tag[2];
+  logic [2:0][63:0] resolve_value[2];
+  logic resolve_read = 0;
+  for (genvar p = 0; p < 2; p++) begin : g_resolve
+    assign resolve_uop[p] = allocate_uop[p];
+    assign resolve_tag[p] = resolve_read ? read_tag[p] : allocate_tag[p];
+  end
   completion_t completion[2];
   rapt_fp_registers #(
 `ifdef RAPT_TEST_COMPACT_FP
@@ -149,13 +158,13 @@ module tb_fp_registers;
     allocate_uop[0].execute.fp.op = `RAPT_FP_OP_FCLASS_D;
     allocate_uop[0].execute.fp.rs1 = 5'(reg_index);
     #1;
-    if (allocate_tag[0][0] != 0 || allocate_value[0][0] != expected)
+    if (resolve_ready_tag[0][0] != 0 || resolve_value[0][0] != expected)
       $fatal(
           1,
           "f%0d read tag=%0d value=%h expected=%h",
           reg_index,
-          allocate_tag[0][0],
-          allocate_value[0][0],
+          resolve_ready_tag[0][0],
+          resolve_value[0][0],
           expected
       );
   endtask
@@ -176,8 +185,8 @@ module tb_fp_registers;
     allocate_uop[1].execute.fp.rs2 = 2;
     allocate_uop[1].execute.fp.rs3 = 1;
     #1;
-    if (allocate_tag[1][0] != 1 || allocate_tag[1][2] != 0
-        || allocate_value[1][2] != 64'hfedcba9876543210)
+    if (allocate_tag[1][0] != 1 || resolve_ready_tag[1][0] != 1 || allocate_tag[1][2] != 0
+        || resolve_value[1][2] != 64'hfedcba9876543210)
       $fatal(1, "same-group RAW or FMA third-source WAR capture failed");
     tick();
     clear_inputs();
@@ -189,13 +198,21 @@ module tb_fp_registers;
     clear_inputs();
     read_arch(0, 64'hbbbbbbbbbbbbbbbb);
     read_index[0] = 1;
+    resolve_read = 1;
     #1;
-    if (read_tag[0][0] != 1) $fatal(1, "younger WAW completion woke an older dependency");
+    if (read_tag[0][0] != 1 || resolve_ready_tag[0][0] != 1)
+      $fatal(1, "younger WAW completion woke an older dependency");
     finish_owner(0, 0, 64'haaaaaaaaaaaaaaaa);
     #1;
-    if (read_tag[0][0] != 0 || read_value[0][0] != 64'haaaaaaaaaaaaaaaa)
+    if (resolve_ready_tag[0][0] != 0 || resolve_value[0][0] != 64'haaaaaaaaaaaaaaaa)
       $fatal(1, "dispatch/completion bypass lost the old renamed producer");
     tick();
+    clear_inputs();
+    read_index[0] = 1;
+    #1;
+    if (resolve_ready_tag[0][0] != 0 || resolve_value[0][0] != 64'haaaaaaaaaaaaaaaa)
+      $fatal(1, "completed producer slot did not resolve a resident source");
+    resolve_read = 0;
     clear_inputs();
     retire(0, 0);
     tick();
@@ -253,7 +270,8 @@ module tb_fp_registers;
     allocate_uop[0].execute.fp.op = `RAPT_FP_OP_FCLASS_D;
     allocate_uop[0].execute.fp.rs1 = 5;
     #1;
-    if (allocate_tag[0][0] != 1) $fatal(1, "stale generation completed a reused owner");
+    if (allocate_tag[0][0] != 1 || resolve_ready_tag[0][0] != 1)
+      $fatal(1, "stale generation completed a reused owner");
     finish_owner(0, 0, 64'h5555555555555555, 9);
     tick();
     clear_inputs();

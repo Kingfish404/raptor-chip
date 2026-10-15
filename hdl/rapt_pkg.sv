@@ -3,6 +3,19 @@ package rapt_pkg;
   `include "rapt.svh"
   `include "rapt_types.svh"
 
+  // Store opcode masks are compact size codes, not arbitrary byte enables.
+  // Callers retain their own fallback for CBOs and non-store encodings.
+  function automatic logic [3:0] store_bytes(input logic [4:0] alu,
+                                             input logic [3:0] default_bytes = 4'd4);
+    case (alu)
+      `RAPT_SB_WSTRB: return 4'd1;
+      `RAPT_SH_WSTRB: return 4'd2;
+      `RAPT_SW_WSTRB: return 4'd4;
+      `RAPT_SD_WSTRB: return 4'd8;
+      default: return default_bytes;
+    endcase
+  endfunction
+
   // Control sampled when an LSU operation acquires ownership. The version
   // distinguishes address-space epochs; SATP root and PMP tables remain
   // centralized and are changed only across the pipeline flush barrier.
@@ -102,10 +115,28 @@ package rapt_pkg;
       steer_scan_entries: `RAPT_STEER_SCAN_ENTRIES,
       rob_generation_bits: `RAPT_ROB_GENERATION_BITS,
       branch_checkpoints: `RAPT_BRANCH_CHECKPOINTS,
-      completion_ports: `RAPT_INTEGER_ISSUE_PORTS + 4,
+      completion_ports: `RAPT_INTEGER_ISSUE_PORTS + 4,  // + CompletionFixedPorts
       execution_domains: 5,
       completion_dependencies: 3
   };
+  // Completion slot layout shared by rapt_backend, its consumers and
+  // testbenches: integer ports, then branch, memory, MUL and FPU. Index slots
+  // through these helpers rather than offsets from the port count.
+  localparam int unsigned CompletionFixedPorts = 4;
+  /* verilator lint_off UNUSEDSIGNAL */
+  function automatic int unsigned completion_branch_port(input core_config_t cfg);
+    return cfg.integer_issue_ports;
+  endfunction
+  function automatic int unsigned completion_memory_port(input core_config_t cfg);
+    return cfg.integer_issue_ports + 1;
+  endfunction
+  function automatic int unsigned completion_mul_port(input core_config_t cfg);
+    return cfg.integer_issue_ports + 2;
+  endfunction
+  function automatic int unsigned completion_fpu_port(input core_config_t cfg);
+    return cfg.integer_issue_ports + 3;
+  endfunction
+  /* verilator lint_on UNUSEDSIGNAL */
   function automatic int unsigned index_bits(input int unsigned entries);
     return entries > 1 ? $clog2(entries) : 1;
   endfunction
@@ -351,6 +382,13 @@ package rapt_pkg;
         || u.execute.sys.mret || u.execute.sys.sret || (u.execute.sys.csr_csw != '0);
   endfunction
   /* verilator lint_on UNUSEDSIGNAL */
+  // Count (including W forms) and carry-less multiply exist only on the
+  // system port. Keep this capability separate from serializing CSR semantics.
+  function automatic logic alu_requires_system_port(input logic [5:0] op);
+    return (op == `RAPT_ALU_CLZ_) || (op == `RAPT_ALU_CTZ_) || (op == `RAPT_ALU_CPOP)
+        || (op == `RAPT_ALU_CLMUL) || (op == `RAPT_ALU_CLMULH) || (op == `RAPT_ALU_CLMULR);
+  endfunction
+
   // Decode policy is centralized here, not replicated by queues or router.
   function automatic scheduling_t schedule_uop(input uop_t u);
     scheduling_t result;
@@ -360,7 +398,8 @@ package rapt_pkg;
     else if (u.execute.branch.conditional) result.domain = DOMAIN_BRANCH;
     else result.domain = DOMAIN_INTEGER;
     result.issue_ports = IntegerAluPortMask;
-    if (uop_requires_alu_csr(u)) result.issue_ports = IntegerSystemPortMask;
+    if (uop_requires_alu_csr(u) || alu_requires_system_port(u.execute.int_op.alu))
+      result.issue_ports = IntegerSystemPortMask;
     return result;
   endfunction
 
@@ -439,6 +478,182 @@ package rapt_pkg;
   localparam logic [31:0] PmemBytes = 32'h10000000;
 `endif
   localparam logic [63:0] PmemEnd = 64'h80000000 + 64'(PmemBytes);
+  // One physical-region table. Endpoints are exclusive and wide enough for
+  // the 2 GiB PMEM window ending at 0x1_0000_0000.
+  typedef struct packed {
+    logic mapped, cacheable, writable, mmio_skip, plic_width32, pmem;
+  } pma_attr_t;
+  typedef struct packed {
+    logic [63:0] base_addr, end_addr;
+    pma_attr_t attrs;
+    logic enabled;
+  } pma_region_t;
+  localparam pma_attr_t PmaMapped = 6'b100000, PmaCacheable = 6'b010000,
+      PmaWritable = 6'b001000, PmaMmioSkip = 6'b000100, PmaPlicWidth32 = 6'b000010,
+      PmaPmem = 6'b000001;
+  localparam int PmaRegionCount = 13;
+  // Preserve the established mapped/cacheable reduction order. The constant
+  // interval union below accepts unsorted rows; MMIO uses ascending bounds.
+  localparam bit LegacySdramEnabled = PmemBytes < 32'h80000000;
+  // verilog_format: off
+  localparam pma_region_t PmaRegions[PmaRegionCount] = '{
+      // finisher
+      '{64'h00100000, 64'h00101000, PmaMapped | PmaWritable | PmaMmioSkip, 1'b1},
+      '{64'h02000000, 64'h020c0000, PmaMapped | PmaWritable | PmaMmioSkip, 1'b1},  // CLINT
+      // PLIC
+      '{64'h0c000000, 64'h0d000000, PmaMapped | PmaWritable | PmaMmioSkip | PmaPlicWidth32, 1'b1},
+      // SRAM
+      '{64'(SramBase), 64'(SramBase + SramBytes), PmaMapped | PmaCacheable | PmaWritable, 1'b1},
+      // simulator peripherals
+      '{64'h10000000, 64'h10011000, PmaMapped | PmaWritable | PmaMmioSkip, 1'b1},
+      // No backing target in sim/csrc/mem, NEMU device maps or LiteX. Preserve
+      // the historical mapped tail without difftest skip pending a map change.
+      '{64'h10011000, 64'h10012000, PmaMapped | PmaWritable, 1'b1},
+      '{64'h20000000, 64'h20010000, PmaMapped | PmaCacheable, 1'b1},  // MROM
+      '{64'h21000000, 64'h21200000, PmaMapped | PmaWritable | PmaMmioSkip, 1'b1},  // VGA
+      '{64'h30000000, 64'h40000000, PmaMapped | PmaCacheable, 1'b1},  // flash
+      // LiteX CSR banks
+      '{64'h11000000, 64'h12000000, PmaMapped | PmaWritable | PmaMmioSkip, 1'b1},
+      // LiteEth packet SRAM
+      '{64'h18000000, 64'h19000000, PmaMapped | PmaWritable | PmaMmioSkip, 1'b1},
+      '{64'h80000000, PmemEnd, PmaMapped | PmaCacheable | PmaWritable | PmaPmem, 1'b1},  // PMEM
+      // legacy simulator SDRAM (at 2 GiB and above PMEM already covers it)
+      '{64'ha0000000, 64'ha2000000, PmaMapped | PmaCacheable | PmaWritable, LegacySdramEnabled}
+  };
+  // verilog_format: on
+
+  function automatic logic pma_regions_valid();
+    for (int r = 0; r < PmaRegionCount; r++) begin
+      if (PmaRegions[r].base_addr >= PmaRegions[r].end_addr
+          || PmaRegions[r].end_addr > 64'h100000000)
+        return 1'b0;
+      // Writable is mapped minus readonly, so overlapping rows must agree.
+      for (int q = 0; q < r; q++) begin
+        if (PmaRegions[r].enabled && PmaRegions[q].enabled
+            && PmaRegions[r].base_addr < PmaRegions[q].end_addr
+            && PmaRegions[q].base_addr < PmaRegions[r].end_addr
+            && PmaRegions[r].attrs.writable != PmaRegions[q].attrs.writable)
+          return 1'b0;
+      end
+      if (PmaRegions[r].base_addr[2:0] != 0 || PmaRegions[r].end_addr[2:0] != 0) return 1'b0;
+      if ((PmaRegions[r].attrs.mmio_skip || PmaRegions[r].attrs.cacheable
+          || PmaRegions[r].attrs.writable)
+          && !PmaRegions[r].attrs.mapped)
+        return 1'b0;
+    end
+    return 1'b1;
+  endfunction
+  localparam bit PmaRegionsValid = pma_regions_valid();
+
+  typedef struct packed {
+    logic [31:0] base_addr;
+    logic [32:0] end_addr;
+    logic pmem;
+  } pma_interval_t;
+  typedef struct packed {
+    int count;
+    pma_interval_t [PmaRegionCount-1:0] intervals;
+  } pma_ranges_t;
+
+  // Constant-only interval union. Expand each selected row to its connected
+  // component, including adjacent rows, then emit only its first table member.
+  // Repeated expansion handles arbitrary order and transitive overlaps.
+  function automatic pma_ranges_t pma_ranges(input pma_attr_t attr, input pma_attr_t exclude = '0);
+    pma_ranges_t ranges;
+    logic [63:0] lo, hi;
+    logic prior, pmem;
+    pma_interval_t swap_interval;
+    ranges = '0;
+    for (int r = 0; r < PmaRegionCount; r++) begin
+      if (PmaRegions[r].enabled && |(PmaRegions[r].attrs & attr)
+          && !(|(PmaRegions[r].attrs & exclude))) begin
+        lo = PmaRegions[r].base_addr;
+        hi = PmaRegions[r].end_addr;
+        pmem = PmaRegions[r].attrs.pmem;
+        for (int pass = 0; pass < PmaRegionCount; pass++) begin
+          for (int q = 0; q < PmaRegionCount; q++) begin
+            if (PmaRegions[q].enabled && |(PmaRegions[q].attrs & attr)
+                && !(|(PmaRegions[q].attrs & exclude))
+                && PmaRegions[q].base_addr <= hi && PmaRegions[q].end_addr >= lo) begin
+              if (PmaRegions[q].base_addr < lo) lo = PmaRegions[q].base_addr;
+              if (PmaRegions[q].end_addr > hi) hi = PmaRegions[q].end_addr;
+              pmem |= PmaRegions[q].attrs.pmem;
+            end
+          end
+        end
+        prior = 1'b0;
+        for (int q = 0; q < r; q++) begin
+          if (PmaRegions[q].enabled && |(PmaRegions[q].attrs & attr)
+              && !(|(PmaRegions[q].attrs & exclude))
+              && PmaRegions[q].base_addr >= lo && PmaRegions[q].base_addr < hi)
+            prior = 1'b1;
+        end
+        if (!prior) begin
+          ranges.intervals[ranges.count] = '{32'(lo), 33'(hi), pmem};
+          ranges.count++;
+        end
+      end
+    end
+    if (attr.mmio_skip) begin
+      for (int r = 0; r < ranges.count; r++) begin
+        for (int q = r + 1; q < ranges.count; q++) begin
+          if (ranges.intervals[q].base_addr < ranges.intervals[r].base_addr) begin
+            swap_interval = ranges.intervals[r];
+            ranges.intervals[r] = ranges.intervals[q];
+            ranges.intervals[q] = swap_interval;
+          end
+        end
+      end
+    end
+    return ranges;
+  endfunction
+  localparam pma_ranges_t PmaAttrRanges[6] = '{
+      pma_ranges(PmaMapped),
+      pma_ranges(PmaCacheable),
+      pma_ranges(PmaWritable),
+      pma_ranges(PmaMmioSkip),
+      pma_ranges(PmaPlicWidth32),
+      pma_ranges(PmaPmem)
+  };
+  localparam pma_ranges_t PmaReadonlyRanges = pma_ranges(PmaMapped, PmaWritable);
+
+  function automatic logic pma_in_ranges(input logic [31:0] addr, input pma_ranges_t ranges,
+                                         input logic upper_valid = 1'b1);
+    logic hit;
+    pma_in_ranges = 1'b0;
+    for (int r = 0; r < PmaRegionCount; r++) begin
+      if (r < ranges.count) begin
+        hit = addr >= ranges.intervals[r].base_addr
+            && (ranges.intervals[r].end_addr[32] || addr < ranges.intervals[r].end_addr[31:0]);
+        // Preserve the nested addr_in_pmem upper-half guard used by the
+        // legacy mapped/cacheable decode, including its sharing with PMEM checks.
+        if (ranges.intervals[r].pmem) hit = upper_valid && hit;
+        pma_in_ranges = pma_in_ranges || hit;
+      end
+    end
+  endfunction
+
+  // Upper-half policy belongs to the caller: device-width capability has
+  // always inspected the canonical low address even for invalid upper bits.
+  function automatic logic pma_has_attr(input logic [31:0] addr, input pma_attr_t attr,
+                                        input logic upper_valid = 1'b1);
+    case (attr)
+      PmaMapped: return pma_in_ranges(addr, PmaAttrRanges[0], upper_valid);
+      PmaCacheable: return pma_in_ranges(addr, PmaAttrRanges[1], upper_valid);
+      PmaWritable: return pma_in_ranges(addr, PmaAttrRanges[2], upper_valid);
+      PmaMmioSkip: return pma_in_ranges(addr, PmaAttrRanges[3], upper_valid);
+      PmaPlicWidth32: return pma_in_ranges(addr, PmaAttrRanges[4], upper_valid);
+      PmaPmem: return pma_in_ranges(addr, PmaAttrRanges[5], upper_valid);
+      default: begin
+        pma_has_attr = 1'b0;
+        for (int a = 0; a < 6; a++) begin
+          if (attr[5-a])
+            pma_has_attr = pma_has_attr || pma_in_ranges(addr, PmaAttrRanges[a], upper_valid);
+        end
+      end
+    endcase
+  endfunction
+
   function automatic logic [XLENPkg-1:0] canonical_addr(input logic [XLENPkg-1:0] addr);
     return (XLENPkg == 64) ? XLENPkg'({32'b0, addr[31:0]}) : addr;
   endfunction
@@ -457,31 +672,21 @@ package rapt_pkg;
   endfunction
 
   function automatic logic addr_in_pmem(input logic [XLENPkg-1:0] addr);
-    logic [XLENPkg-1:0] a;
-    a = canonical_addr(addr);
-    return addr_upper_valid(addr) && 64'(a) >= 64'h80000000 && 64'(a) < PmemEnd;
+    return addr_upper_valid(addr) && pma_has_attr(addr[31:0], PmaPmem);
   endfunction
 
   function automatic logic addr_cacheable(input logic [XLENPkg-1:0] addr);
-    logic [XLENPkg-1:0] a;
-    a = canonical_addr(addr);
-    return addr_upper_valid(
-        addr
-    ) && ((0)  // --- IGNORE ---
-    || (a >= XLENPkg'(SramBase) && a < XLENPkg'(SramBase + SramBytes))
-    || (a >= 'h20000000 && a < 'h20010000)  // mrom (64KB)
-    || (a >= 'h30000000 && a < 'h40000000)  // flash
-    || addr_in_pmem(
-        addr
-    )  // PMEM
-    || (a >= XLENPkg'(32'ha0000000) && a < XLENPkg'(32'ha2000000))  // sdram
-    );
+    return addr_upper_valid(addr) && pma_has_attr(addr[31:0], PmaCacheable, addr_upper_valid(addr));
   endfunction
 
   // True when base + any signed 12-bit immediate stays inside cacheable PMEM.
   function automatic logic addr_pmem_offset_safe(input logic [XLENPkg-1:0] base);
-    return addr_upper_valid(base) && 64'(canonical_addr(base)) >= 64'h80000800 &&
-        64'(canonical_addr(base)) < PmemEnd - 64'h800;
+    addr_pmem_offset_safe = 1'b0;
+    for (int r = 0; r < PmaRegionCount; r++) begin
+      addr_pmem_offset_safe |= PmaRegions[r].enabled && PmaRegions[r].attrs.pmem
+          && addr_upper_valid(base) && 64'(canonical_addr(base)) >= PmaRegions[r].base_addr +
+          64'h800 && 64'(canonical_addr(base)) < PmaRegions[r].end_addr - 64'h800;
+    end
   endfunction
 
   // Physical execute PMA for this platform: RAM/ROM/flash support fetch;
@@ -530,26 +735,7 @@ package rapt_pkg;
   // are unmapped and must raise an access-fault trap to mimic sail /
   // real-hardware bus-error behaviour.
   function automatic logic addr_mapped(input logic [XLENPkg-1:0] addr);
-    logic [XLENPkg-1:0] a;
-    a = canonical_addr(addr);
-    return addr_upper_valid(
-        addr
-    ) && ((0)  // --- IGNORE ---
-    || (a >= 'h00100000 && a < 'h00101000)  // sifive,test finisher
-    || (a >= 'h02000000 && a < 'h020c0000)  // CLINT
-    || (a >= 'h0c000000 && a < 'h0d000000)  // PLIC
-    || (a >= XLENPkg'(SramBase) && a < XLENPkg'(SramBase + SramBytes))
-    || (a >= 'h10000000 && a < 'h10012000)  // UART / GPIO / peripherals
-    || (a >= 'h20000000 && a < 'h20010000)  // MROM
-    || (a >= 'h21000000 && a < 'h21200000)  // VGA
-    || (a >= 'h30000000 && a < 'h40000000)  // FLASH
-    || (a >= 'h11000000 && a < 'h12000000)  // LiteX CSR banks
-    || (a >= 'h18000000 && a < 'h19000000)  // LiteEth packet SRAM
-    || addr_in_pmem(
-        addr
-    )  // PMEM
-    || (PmemBytes < 32'h80000000 && a >= XLENPkg'(32'ha0000000)
-        && a < XLENPkg'(32'ha2000000)));  // legacy simulator SDRAM
+    return addr_upper_valid(addr) && pma_has_attr(addr[31:0], PmaMapped, addr_upper_valid(addr));
   endfunction
 
   // Device PMA is independent of page-based cache/order overrides. Physical
@@ -564,20 +750,24 @@ package rapt_pkg;
   // Other device widths retain their existing policy pending region audit.
   function automatic logic addr_device_width_capable(input logic [XLENPkg-1:0] addr,
                                                      input logic [3:0] original_size_m1);
-    logic [XLENPkg-1:0] a;
-    a = canonical_addr(addr);
-    return !(a >= 'h0c000000 && a < 'h0d000000) || (original_size_m1 == 4'd3 && a[1:0] == 2'b00);
+    logic [31:0] a;
+    a = 32'(canonical_addr(addr));
+    return !pma_has_attr(a[31:0], PmaPlicWidth32) || (original_size_m1 == 4'd3 && a[1:0] == 2'b00);
   endfunction
 
   // ROM and the memory-mapped flash image are physically read-only.
   // Device register write/size capabilities are a separate PMA contract;
   // this predicate does not imply atomic or reservation support.
   function automatic logic addr_writable(input logic [XLENPkg-1:0] addr);
-    logic [XLENPkg-1:0] a;
-    a = canonical_addr(addr);
-    return addr_mapped(
-        addr
-    ) && !(a >= 'h20000000 && a < 'h20010000) && !(a >= 'h30000000 && a < 'h40000000);
+    logic writable;
+    writable = addr_mapped(addr);
+    for (int r = 0; r < PmaRegionCount; r++) begin
+      if (r < PmaReadonlyRanges.count)
+        writable = writable && !(addr[31:0] >= PmaReadonlyRanges.intervals[r].base_addr
+            && (PmaReadonlyRanges.intervals[r].end_addr[32]
+                || addr[31:0] < PmaReadonlyRanges.intervals[r].end_addr[31:0]));
+    end
+    return writable;
   endfunction
 
   // Ordinary data span mapping/permission check. This does not grant device
@@ -653,18 +843,26 @@ package rapt_pkg;
 
   // MMIO regions for difftest skip (not modelled in reference ISS)
   function automatic logic addr_mmio(input logic [XLENPkg-1:0] addr);
-    logic [XLENPkg-1:0] a;
-    a = canonical_addr(addr);
-    return addr_upper_valid(
-        addr
-    ) && ((0)  // --- IGNORE ---
-    || (a >= 'h00100000 && a <= 'h00100fff)  // finisher (sifive,test)
-    || (a >= 'h02000000 && a <= 'h020bffff)  // CLINT (mtime / mtimecmp / msip)
-    || (a >= 'h0c000000 && a <= 'h0cffffff)  // PLIC (claim/complete RMW)
-    || (a >= 'h10000000 && a < 'h10011000)  // simulator UART / VirtIO / peripherals
-    || (a >= 'h11000000 && a < 'h12000000)  // LiteX CSR banks
-    || (a >= 'h18000000 && a < 'h19000000)  // LiteEth packet SRAM
-    || (a >= 'h21000000 && a < 'h21200000));  // VGA
+    return addr_upper_valid(addr) && pma_has_attr(addr[31:0], PmaMmioSkip);
   endfunction
 
+  // Zero-tag operand encoding used when decode emits selectors instead of
+  // values (rapt_decode_slot DerivedConstants). The decode table only uses
+  // op1 in {0, pc, imm, CSR uimm} and op2 in {0, imm}.
+  localparam logic [1:0] OpConstZero = 2'd0, OpConstPc = 2'd1, OpConstImm = 2'd2,
+      OpConstUimm = 2'd3;
+  function automatic logic [XLENPkg-1:0] derive_op1(
+      input logic [XLENPkg-1:0] selector, input logic [XLENPkg-1:0] pc,
+      input logic [XLENPkg-1:0] imm, input logic [31:0] inst);
+    case (selector[1:0])
+      OpConstPc: return pc;
+      OpConstImm: return imm;
+      OpConstUimm: return XLENPkg'(inst[19:15]);
+      default: return '0;
+    endcase
+  endfunction
+  function automatic logic [XLENPkg-1:0] derive_op2(input logic [XLENPkg-1:0] selector,
+                                                    input logic [XLENPkg-1:0] imm);
+    return selector[0] ? imm : '0;
+  endfunction
 endpackage

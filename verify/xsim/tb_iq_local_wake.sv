@@ -6,7 +6,7 @@
 module tb_iq_local_wake;
   import rapt_pkg::*;
 `ifdef RAPT_TEST_LOCAL_MEMORY_WAKE
-  localparam int LocalWakePort = IntegerIssuePorts + 1;
+  localparam int LocalWakePort = rapt_pkg::completion_memory_port(rapt_pkg::CoreConfig);
 `else
   localparam int LocalWakePort = 0;
 `endif
@@ -19,7 +19,6 @@ module tb_iq_local_wake;
   issue_packet_t issue[1];
   dpu_iq_if #(.RS_SIZE(4)) disp ();
   cmu_bcast_if cmu_bcast ();
-  load_fast_if load_fast ();
   logic issue_enable = 0;
   logic [2:0] occupancy;
   for (genvar p = 0; p < CompletionPorts; p++) begin : g_completion
@@ -50,7 +49,6 @@ module tb_iq_local_wake;
       .cancel_head('0),
       .cancel_owner('0),
       .combo_source(completion),
-      .load_fast,
       .issue_enable,
       .issue,
       .occ_o(occupancy),
@@ -112,11 +110,6 @@ module tb_iq_local_wake;
     stop_offer();
     accepted = '{default: '0};
     cmu_bcast.flush_pipe = 0;
-    load_fast.valid = 0;
-    load_fast.rebusy = 0;
-    load_fast.confirmed = 0;
-    load_fast.prd = 0;
-    load_fast.result = 0;
     repeat (3) tick();
     reset = 0;
 

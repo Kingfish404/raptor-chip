@@ -3,7 +3,6 @@
 completion_t fp_irq_wb;
 logic fp_irq_accept, fp_irq_issue_enable;
 dpu_iq_if #(.RS_SIZE(CoreConfig.iq_entries)) fp_irq_queue();
-load_fast_if fp_irq_fast();
 integer fp_irq_writes = 0;
 integer fp_irq_retired = 0;
 integer fp_irq_enqueued = 0;
@@ -16,22 +15,9 @@ for (genvar fq = 0; fq < DispatchWidth; fq++) begin
   always @(posedge clock) if (!reset && fp_irq_queue.accept[fq])
     check(fp_irq_queue.free_found[fq], "FP route accepted without queue capacity");
 end
-assign fp_irq_fast.valid = 0;
-assign fp_irq_fast.rebusy = 0;
-assign fp_irq_fast.prd = '0;
-assign fp_irq_fast.dest = '0;
-assign fp_irq_fast.generation = '0;
-assign fp_irq_fast.rd = '0;
-assign fp_irq_fast.confirmed = 0;
-assign fp_irq_fast.confirmed_prd = '0;
-assign fp_irq_fast.confirmed_dest = '0;
-assign fp_irq_fast.confirmed_generation = '0;
-assign fp_irq_fast.confirmed_rd = '0;
-assign fp_irq_fast.result = '0;
 rapt_feu fp_irq_feu(.completion(completion), .clock(clock), .reset(reset),
     .cancel_valid(recovery.redirect_valid), .cancel_head(recovery.head), .cancel_owner(recovery.owner),
-    .cmu_bcast(cmu_bcast), .csr_bcast(csr_bcast), .dispatch(dispatch),
-    .disp_fpq(fp_irq_queue), .load_fast(fp_irq_fast),
+    .cmu_bcast(cmu_bcast), .csr_bcast(csr_bcast), .dispatch(dispatch), .disp_fpq(fp_irq_queue),
     .wb_fpu(fp_irq_wb), .wb_accept(fp_irq_accept), .issue_enable(fp_irq_issue_enable));
 rapt_completion_guard #(.Entries(`RAPT_ROB_SIZE), .IndexBits(RobW),
     .GenerationBits(CoreConfig.rob_generation_bits), .PhysBits(PLEN), .ArchBits(RLEN),

@@ -119,7 +119,9 @@ module rapt_vpu_fp_reduce_engine #(
     group_size = !type_q[2] ? (1 << type_q[1:0]) : 1;
     geometry_legal = !type_illegal && vl_q <= vlmax && start_q == 0
         && (int'(insn_q[24:20]) & (group_size-1)) == 0
-        && int'(insn_q[24:20])+group_size <= 32;
+        && int'(insn_q[24:20])+group_size <= 32
+        && (!widen || int'(insn_q[19:15]) < int'(insn_q[24:20])
+        || int'(insn_q[19:15]) >= int'(insn_q[24:20]) + group_size);
   end
   rapt_vpu_fp_reduce_control #(
       .ELEN(ELEN),

@@ -69,12 +69,6 @@ module formal_bus #(
   assign l1i_bus.ar_ptw = 1'b0;
   assign l1i_bus.rpbmt = 2'b00;
   assign l1i_bus.noallocate = 0;
-  assign l1i_bus.awvalid = 1'b0;
-  assign l1i_bus.awaddr = '0;
-  assign l1i_bus.aw_ptw = 1'b0;
-  assign l1i_bus.wvalid = 1'b0;
-  assign l1i_bus.wdata = '0;
-  assign l1i_bus.wstrb = '0;
 
   // Drive L1D master-side signals from module inputs
   assign l1d_bus.arvalid = l1d_arvalid;
@@ -87,7 +81,6 @@ module formal_bus #(
   assign l1d_bus.ar_ptw = 1'b0;
   assign l1d_bus.awvalid = l1d_awvalid;
   assign l1d_bus.awaddr = l1d_awaddr;
-  assign l1d_bus.aw_ptw = 1'b0;
   assign l1d_bus.wvalid = l1d_wvalid;
   assign l1d_bus.wdata = l1d_wdata;
   assign l1d_bus.wstrb = l1d_wstrb;
@@ -108,7 +101,6 @@ module formal_bus #(
   assign cmu_bcast.redirect_pc = '0;
   assign cmu_bcast.rob_head = '0;
   assign cmu_bcast.flush_redirect = 1'b0;
-  assign cmu_bcast.sys_resume = 1'b0;
   assign cmu_bcast.ben = 1'b0;
   assign cmu_bcast.jen = 1'b0;
   assign cmu_bcast.jren = 1'b0;

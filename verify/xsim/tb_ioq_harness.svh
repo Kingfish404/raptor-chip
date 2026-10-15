@@ -24,12 +24,13 @@ rapt_pkg::completion_t completion[rapt_pkg::CompletionPorts];
 for (genvar p = 0; p < rapt_pkg::CompletionPorts; p++) begin : g_completion
   if (p == 0) assign completion[p] = exu_rou;
   else if (p == 1) assign completion[p] = exu_rou_b;
-  else if (p == rapt_pkg::IntegerIssuePorts + 1) assign completion[p] = exu_ioq_bcast;
-  else if (p == rapt_pkg::IntegerIssuePorts + 2) assign completion[p] = exu_wb_mul;
+  else if (p == rapt_pkg::completion_memory_port(rapt_pkg::CoreConfig))
+    assign completion[p] = exu_ioq_bcast;
+  else if (p == rapt_pkg::completion_mul_port(rapt_pkg::CoreConfig))
+    assign completion[p] = exu_wb_mul;
   else assign completion[p] = '0;
 end
 
-load_fast_if load_fast();
 
 rapt_lsu_ioq dut (
     .completion(completion),
@@ -58,7 +59,6 @@ rapt_lsu_ioq dut (
     .sq_wpbmt,
     .sq_acquire,
     .sq_context,
-    .load_fast(load_fast),
     .pmu_ioq_full(pmu_ioq_full)
 );
 

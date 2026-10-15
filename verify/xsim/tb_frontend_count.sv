@@ -47,8 +47,7 @@ module tb_frontend_count;
       automatic int ready_count = cycle < 16 ? 0 : cycle < 64 ? Width
           : int'(random_word() % (Width+1));
       int popped, pushed;
-      cmu_bcast.flush_pipe = cycle % 53 == 52;
-      cmu_bcast.sys_resume = cycle % 79 == 78;
+      cmu_bcast.flush_pipe = cycle % 53 == 52 || cycle % 79 == 78;
       recovery.pending = cycle % 97 inside {94, 95, 96};
       for (int s = 0; s < Width; s++) begin
         ifu_idu.valid[s] = s < offer_count;
@@ -64,7 +63,7 @@ module tb_frontend_count;
       if (expected.size() == Width) full_cycles++;
       popped=0;
       pushed=0;
-      if (cmu_bcast.flush_pipe || cmu_bcast.sys_resume || recovery.pending) begin
+      if (cmu_bcast.flush_pipe || recovery.pending) begin
         assert (!ifu_idu.ready[0] && !idu_rnu.valid[0])
         else $fatal(1, "recovery accepted");
         expected.delete();

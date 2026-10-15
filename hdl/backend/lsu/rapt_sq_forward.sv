@@ -38,12 +38,7 @@ module rapt_sq_forward #(
   function automatic logic [1:0] store_span(input logic [OffsetBits-1:0] offset,
                                             input logic [4:0] alu, input logic fp64);
     logic [3:0] size_m1;
-    case (alu)
-      `RAPT_SB_WSTRB: size_m1 = 0;
-      `RAPT_SH_WSTRB: size_m1 = 1;
-      `RAPT_SD_WSTRB: size_m1 = 7;
-      default: size_m1 = 3;
-    endcase
+    size_m1 = rapt_pkg::store_bytes(alu) - 4'd1;
     if (fp64) size_m1 = 7;
     return 2'((4'(offset) + size_m1) >> OffsetBits);
   endfunction
@@ -101,13 +96,7 @@ module rapt_sq_forward #(
         || ((reverse_borrow ? previous_block : same_block) && reverse_delta <= load_span);
   endfunction
   function automatic logic [3:0] store_size_m1(input logic [4:0] alu);
-    case (alu)
-      `RAPT_SB_WSTRB: return 0;
-      `RAPT_SH_WSTRB: return 1;
-      `RAPT_SW_WSTRB: return 3;
-      `RAPT_SD_WSTRB: return 7;
-      default: return 0;
-    endcase
+    return rapt_pkg::store_bytes(alu, 4'd1) - 4'd1;
   endfunction
   logic [1:0] store_words[Entries];
   for (genvar entry_idx = 0; entry_idx < Entries; entry_idx++) begin : g_span
@@ -130,6 +119,8 @@ module rapt_sq_forward #(
     logic [1:0] load_words;
     logic [Entries-1:0] slot_match, before_head, candidates, winner, eligible;
     logic alloc_match;
+    logic [Xlen-1:0] winner_data;
+    logic [OffsetBits-1:0] winner_offset;
     assign load_words = 2'((4'(load_addr[port_idx][OffsetBits-1:0])
                             + load_size_m1[port_idx]) >> OffsetBits);
     // Compare physical slots before selecting by age. Rotating wide address
@@ -195,13 +186,23 @@ module rapt_sq_forward #(
     // An accepted allocation is younger than every resident store, but cannot
     // provide data yet. CBO.ZERO likewise blocks forwarding on every port.
     assign forward_valid[port_idx] = !zero_pending && !alloc_match && (|(winner & eligible));
+    // Select the one-hot winner before the shared byte-alignment shifter.
     always_comb begin
-      forward_data[port_idx] = '0;
+      winner_data = '0;
+      winner_offset = '0;
       for (int entry_idx = 0; entry_idx < Entries; entry_idx++) begin
-        forward_data[port_idx] |= (NarrowForward
-            ? store_data[entry_idx] << (store_addr[entry_idx][OffsetBits-1:0] * 8)
-            : store_data[entry_idx]) & {Xlen{winner[entry_idx]}};
+        winner_data |= store_data[entry_idx] & {Xlen{winner[entry_idx]}};
+        winner_offset |= store_addr[entry_idx][OffsetBits-1:0] & {OffsetBits{winner[entry_idx]}};
       end
     end
+    assign forward_data[port_idx] = NarrowForward
+        ? winner_data << (winner_offset * 8) : winner_data;
+`ifdef RAPT_SVA_ACTIVE
+    always_comb begin
+      SQ_FORWARD_WINNER_ONEHOT_a :
+      assert final ($onehot0(winner))
+      else $fatal(1, "SQ_FORWARD_WINNER_ONEHOT");
+    end
+`endif
   end
 endmodule

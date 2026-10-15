@@ -1,8 +1,7 @@
 """RISCOF reference plugin: sail-riscv C simulator.
 
-Adapted for modern `sail_riscv_sim` with Raptor's page-local, whole-access
-PMP checking policy in raptor.json. Sail still splits at page boundaries;
-the classic filter relocates the three PMP straddle tests within a page.
+Shared by the RTL and NEMU classic flows. Each config selects its own Sail
+model policy; compilation, timeout and failure handling stay identical.
 """
 
 from __future__ import annotations
@@ -43,7 +42,10 @@ class sail_cSim(pluginTemplate):
         self.isa_spec = os.path.abspath(config.get("ispec", ""))
         self.platform_spec = os.path.abspath(config.get("pspec", ""))
         self.make = config.get("make", "make")
-        self.timeout = max(1, int(os.environ.get("RAPT_TIMEOUT", "600"))) + 30
+        self.timeout = max(1, int(os.environ.get("RAPT_TIMEOUT", config.get("timeout", 600)))) + 30
+        self.sail_config = os.path.abspath(
+            config.get("sail_config", os.path.join(self.pluginpath, "raptor.json"))
+        )
         return sclass
 
     def initialise(self, suite, work_dir, archtest_env):
@@ -121,14 +123,12 @@ class sail_cSim(pluginTemplate):
                 test_dir, self.name[:-1] + ".signature"
             )
 
-            # Match the pre-split PMP check in Raptor's LSU. Sail's default
-            # decomposes even page-local misaligned accesses before PMP.
             execute += (
                 f"{shlex.quote(sys.executable)} "
                 f"{shlex.quote(os.path.abspath(os.path.join(self.pluginpath, '../../../../scripts/run_with_timeout.py')))} "
                 f"{self.timeout} {shlex.quote(self.sail_exe)}"
                 f"{sail_arch_flag}"
-                f" --config-override={self.pluginpath}/raptor.json"
+                f" --config-override={shlex.quote(self.sail_config)}"
                 f" --signature-granularity=4"
                 f" --test-signature={sig_file}"
                 f" {elf} > {test_name}.log 2>&1"

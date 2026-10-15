@@ -65,7 +65,6 @@ STAGE_OF = {
     "rapt_rnu": 2,
     "rapt_rename_checkpoint": 2,
     "rapt_rename_admit": 2,
-    "rapt_rnu_maptable": 2,
     "rapt_rnu_freelist": 2,
     "rapt_prf": 3,
     "rapt_fp_registers": 3,

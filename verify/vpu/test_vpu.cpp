@@ -211,6 +211,91 @@ static uint64_t configure(unsigned type, uint64_t avl) {
 static uint32_t integer(unsigned op, unsigned form, unsigned vd, unsigned vs2, unsigned src, bool vm) {
     return (op << 26) | (unsigned(vm) << 25) | (vs2 << 20) | (src << 15) | (form << 12) | (vd << 7) | 0x57;
 }
+static void test_nemu_diff_vectors(const char* path, bool fp_mode = false) {
+    auto* vectors = std::fopen(path, "r");
+    require(vectors != nullptr, "cannot open NEMU DiffTest vectors");
+    unsigned insn, type, avl, start, seed, rounding;
+    unsigned long long scalar;
+    unsigned cases = 0;
+    while (true) {
+        const int parsed = std::fscanf(vectors, "%x %x %x %x %llx %x %x",
+                                       &insn, &type, &avl, &start, &scalar, &seed,
+                                       &rounding);
+        if (parsed == EOF) break;
+        require(parsed == 7, "malformed NEMU DiffTest vectors");
+        for (unsigned addr = 0; addr < 32 * TEST_VLEN / 8; addr += 8) {
+            uint64_t value = 0;
+            for (unsigned byte = 0; byte < 8; ++byte) {
+                const unsigned index = addr + byte;
+                auto seeded = uint8_t(index * 29 + (index / 16) * 37 + seed * 13);
+                if (seed == 255 && (index == 8 * 16 || index == 16 * 16)) seeded = 0x80;
+                if (seed == 254 && (index == 8 * 16 || index == 8 * 16 + 1)) seeded = 0xff;
+                if (seed == 253 && index == 8 * 16) seeded = 0;
+                if (seed == 253 && index == 8 * 16 + 1) seeded = 0x80;
+                if (seed == 252) {
+                    if (index >= 8 * 16 && index < 8 * 16 + 4)
+                        seeded = uint8_t(uint32_t(0x7f800001) >> (8 * (index - 8 * 16)));
+                    if (index >= 16 * 16 && index < 16 * 16 + 4)
+                        seeded = uint8_t(uint32_t(0x3f800000) >> (8 * (index - 16 * 16)));
+                    if (index >= 24 * 16 && index < 24 * 16 + 8)
+                        seeded = uint8_t(uint64_t(0x3ff0000000000000) >> (8 * (index - 24 * 16)));
+                }
+                if (seed == 251) {
+                    if (index >= 8 * 16 && index < 8 * 16 + 8)
+                        seeded = uint8_t(uint64_t(0x3ff0000010000000) >> (8 * (index - 8 * 16)));
+                    if (index >= 16 * 16 && index < 16 * 16 + 4)
+                        seeded = uint8_t(uint32_t(0x3f800000) >> (8 * (index - 16 * 16)));
+                    if (index >= 24 * 16 && index < 24 * 16 + 8)
+                        seeded = uint8_t(uint64_t(0x3ff0000000000000) >> (8 * (index - 24 * 16)));
+                }
+                if (seed >= 247 && seed <= 250 && index >= 8 * 16 && index < 9 * 16) {
+                    const uint64_t low = seed == 247 ? 0x8000000100000001ULL
+                        : seed == 248 ? 0x7ff0000000000000ULL
+                        : seed == 249 ? 0ULL : 0x8000000000000000ULL;
+                    const uint64_t high = seed == 247 ? 0x807fffff007fffffULL
+                        : seed == 248 ? 0xfff0000000000000ULL
+                        : seed == 249 ? 0x8000000000000000ULL : 0xff8000007f800000ULL;
+                    const unsigned offset = index - 8 * 16;
+                    seeded = uint8_t((offset < 8 ? low : high) >> (8 * (offset % 8)));
+                }
+                value |= uint64_t(seeded) << (8 * byte);
+            }
+            host(true, addr, 3, value);
+        }
+        configure(type, avl);
+        write_csr(0x008, start);
+        write_csr(0x009, seed == 79);
+        write_csr(0x00a, rounding);
+        const auto response = fp_mode ? command(insn, 0, 0, false, scalar, rounding)
+                                      : command(insn, scalar);
+        const auto vl = read_csr(0xc20);
+        const auto vtype = read_csr(0xc21);
+        const auto vstart = read_csr(0x008);
+        const auto vxsat = read_csr(0x009);
+        const auto vxrm = read_csr(0x00a);
+        const auto vcsr = read_csr(0x00f);
+        std::printf("%s %u %llx %llx %u %llx %llx %llx %llx %llx %llx %llx ",
+                    fp_mode ? "VPU_NEMU_FP_RESULT" : "VPU_NEMU_RESULT",
+                    unsigned(response.trap), (unsigned long long)response.cause,
+                    (unsigned long long)response.tval, response.rd,
+                    (unsigned long long)response.value, (unsigned long long)vl,
+                    (unsigned long long)vtype, (unsigned long long)vstart,
+                    (unsigned long long)vxsat, (unsigned long long)vxrm,
+                    (unsigned long long)vcsr);
+        if (fp_mode)
+            std::printf("%u %llx %x ", unsigned(response.fp_write),
+                        (unsigned long long)response.fp_value, response.fflags);
+        for (unsigned addr = 0; addr < 32 * TEST_VLEN / 8; addr += 8) {
+            const auto value = host(false, addr, 3, 0);
+            for (unsigned byte = 0; byte < 8; ++byte)
+                std::printf("%02x", unsigned(uint8_t(value >> (8 * byte))));
+        }
+        std::printf("\n");
+        ++cases;
+    }
+    std::fclose(vectors);
+    require(cases != 0, "empty NEMU DiffTest vectors");
+}
 static __int128 signed_element(uint64_t value, unsigned bits) {
     const __int128 wide = value;
     return (value >> (bits-1)) ? wide - (__int128(1) << bits) : wide;
@@ -279,6 +364,16 @@ int main(int argc, char** argv) {
         spike = std::make_unique<SpikeReference>(TEST_XLEN, TEST_VLEN, TEST_ELEN);
 #endif
         dut.reset = 1; tick(); tick(); dut.reset = 0; dut.vector_enabled = 1; eval();
+        if (argc == 3 && std::string(argv[1]) == "--nemu-diff") {
+            test_nemu_diff_vectors(argv[2]);
+            dut.final();
+            return 0;
+        }
+        if (argc == 3 && std::string(argv[1]) == "--nemu-diff-fp") {
+            test_nemu_diff_vectors(argv[2], true);
+            dut.final();
+            return 0;
+        }
         if(argc==2&&(std::string(argv[1])=="--fp-mixed"||std::string(argv[1])=="--fp-divsqrt"||std::string(argv[1])=="--fp-misc"||std::string(argv[1])=="--fp-wide"||std::string(argv[1])=="--fp-convert"||std::string(argv[1])=="--int-fp"||std::string(argv[1])=="--estimate"||std::string(argv[1])=="--transfer"||std::string(argv[1])=="--fp-reduce"||std::string(argv[1])=="--catalog"||std::string(argv[1])=="--geometry"||std::string(argv[1])=="--encoding"||std::string(argv[1])=="--config-encoding"||std::string(argv[1])=="--memory-encoding"||std::string(argv[1])=="--context"||std::string(argv[1])=="--store-completion")){
             const bool divsqrt=std::string(argv[1])=="--fp-divsqrt";
             const bool misc=std::string(argv[1])=="--fp-misc";

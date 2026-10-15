@@ -26,10 +26,7 @@ module rapt_cdb_arb #(
   CompletionT integer_q, fp_q;
   logic integer_live, fp_live;
   function automatic logic killed(input CompletionT packet);
-    logic younger;
-    younger = ((packet.dest < cancel_head) == (cancel_owner < cancel_head))
-        ? packet.dest > cancel_owner : packet.dest < cancel_head;
-    return cancel_valid && younger;
+    return cancel_valid && `RAPT_ROB_YOUNGER(packet.dest, cancel_owner, cancel_head);
   endfunction
   logic integer_raw_live, integer_bypass;
   assign integer_live = integer_q.valid && !killed(integer_q);

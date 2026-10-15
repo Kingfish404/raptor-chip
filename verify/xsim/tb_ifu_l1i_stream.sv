@@ -159,8 +159,6 @@ module tb_ifu_l1i_stream;
     l1i_bus.ptw_rerr=0;
     l1i_bus.ptw_rvalid=0;
     l1i_bus.rerr=0;
-    l1i_bus.ptw_wready=0;
-    l1i_bus.ptw_werr=0;
     repeat (4) @(negedge clock);
     reset = 0;
 `ifdef RAPT_TEST_ALL_32

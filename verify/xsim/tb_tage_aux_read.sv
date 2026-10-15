@@ -13,6 +13,7 @@ module tb_tage_aux_read #(
   logic [7:0] r_phr = 0, update_phr = 0;
   logic rd_taken, update_en = 0, update_taken = 0, update_mispred = 0;
   logic [XLEN-1:0] aux_pc = 0;
+  logic [3:0] aux_position = 0;
   logic [63:0] aux_ghr = 0;
   logic [7:0] aux_phr = 0;
   logic aux_taken;
@@ -61,7 +62,7 @@ module tb_tage_aux_read #(
     #1;
     assert (aux_taken == rd_taken)
     else $fatal(1, "auxiliary/primary query disagree on shared trained state");
-    assert (dut.g_auxiliary_read.aux_rd_t1_idx == dut.rd_t1_idx && dut.g_auxiliary_read.aux_rd_t3_tag == dut.rd_t3_tag)
+    assert (dut.g_auxiliary_read.g_port[0].aux_rd_t1_idx == dut.rd_t1_idx && dut.g_auxiliary_read.g_port[0].aux_rd_t3_tag == dut.rd_t3_tag)
     else $fatal(1, "auxiliary query address/history hash mismatch");
     assert (dut.rd_bim_idx == sampled_pc[BimBits:1])
     else $fatal(1, "base PC index");

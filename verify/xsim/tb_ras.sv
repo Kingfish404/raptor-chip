@@ -70,6 +70,22 @@ module ras_case #(
     else $fatal(1, "depth %0d top", Depth);
     assert (int'(dut.speculative.count) == spec_model.size());
     assert (int'(dut.committed.count) == commit_model.size());
+    // Entry write enables and same-edge flush bypass must preserve every
+    // live address, including entries hidden below the current top.
+    for (int i = 0; i < spec_model.size(); i++) begin
+      automatic
+      int
+      index = (int'(dut.speculative.next_index) + Depth - spec_model.size() + i) % Depth;
+      assert ({dut.speculative.data[index], 1'b0} == spec_model[i])
+      else $fatal(1, "depth %0d speculative payload %0d", Depth, i);
+    end
+    for (int i = 0; i < commit_model.size(); i++) begin
+      automatic
+      int
+      index = (int'(dut.committed.next_index) + Depth - commit_model.size() + i) % Depth;
+      assert ({dut.committed.data[index], 1'b0} == commit_model[i])
+      else $fatal(1, "depth %0d committed payload %0d", Depth, i);
+    end
   endtask
 
   initial begin

@@ -13,7 +13,6 @@
 exporter. Both native and LiteX builds consume the same CPU sources and preset
 definitions. Native board addresses come from `hdl/configs/memory_map.json`.
 
-The Tang Nano 20K directory is retained as an archived example. It is no longer
-an active board target. Root `make fpga-syn` and `make fpga-pnr` use CU08-KU15P;
+The Tang Nano 20K directory is an archived example outside active board support. Root `make fpga-syn` and `make fpga-pnr` use CU08-KU15P;
 select RK with `FPGA_BOARD=rk-xcku5p-f`. Select a preset explicitly, for example
 `RAPT_CONFIG=small`, and memory with `MEMORY=bram|ddr`.

@@ -5741,19 +5741,6 @@
       ]
     },
     {
-      "id": "rapt_plru",
-      "file": "hdl/memory/rapt_plru.sv",
-      "domain": "memory",
-      "stage": null,
-      "summary": "",
-      "params": {
-        "NUMWAYS": "4",
-        "SETLEN": "5",
-        "NSETS": "32"
-      },
-      "instances": []
-    },
-    {
       "id": "rapt_pmp_state",
       "file": "hdl/memory/rapt_pmp.sv",
       "domain": "memory",
@@ -8618,21 +8605,6 @@
         "z": 1.84,
         "h": 6,
         "child_count": 8
-      },
-      {
-        "id": "rapt_plru",
-        "short": "plru",
-        "file": "hdl/memory/rapt_plru.sv",
-        "domain": "memory",
-        "stage": 8,
-        "summary": "",
-        "parent": null,
-        "display": false,
-        "x": 8.0,
-        "y": 0.0,
-        "z": 2.06,
-        "h": 6,
-        "child_count": 0
       },
       {
         "id": "rapt_pmp_state",

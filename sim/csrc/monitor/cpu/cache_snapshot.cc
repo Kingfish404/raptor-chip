@@ -154,7 +154,7 @@ void read_l1(std::vector<CacheSnapshotWord> &words)
 
 bool cpu_cache_snapshot_ready(void)
 {
-  return !L1(l1d_update) && !L1(l1d_rmw) && !L1(writeback__DOT__count)
+  return !L1(l1d_update) && !L1(writeback__DOT__count)
       && L1(wb_state) == 0 && l1_misses_ready(top, 0) && l2_ready(top, 0);
 }
 

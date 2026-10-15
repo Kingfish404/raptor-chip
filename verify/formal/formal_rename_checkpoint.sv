@@ -88,7 +88,17 @@ module formal_rename_checkpoint #(
   always_comb begin
     correct = live == ref_valid && available == ~ref_valid;
     for (int e = 0; e < Entries; e++) begin
-      correct &= dut.older_q[e] == ref_older[e];
+      // Invalid IDs have no age relation in the compact representation.
+      // Compare every live pair against the original full ancestry matrix.
+      if (ref_valid[e]) begin
+        correct &= (ref_older[e] & ~ref_valid) == '0;
+        correct &= dut.older_q[e] == ref_older[e];
+        // A reachable age order is transitive. Prove this invariant too, so
+        // induction cannot start with a cycle of live checkpoint ancestors.
+        for (int a = 0; a < Entries; a++)
+        for (int b = 0; b < Entries; b++)
+        if (ref_older[e][a] && ref_older[a][b]) correct &= ref_older[e][b];
+      end
       if (ref_valid[e]) begin
         correct &= dut.ghr_q[e] == ref_ghr[e];
         correct &= dut.phr_q[e] == ref_phr[e];

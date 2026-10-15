@@ -104,8 +104,6 @@ module tb_l1i_16k;
     l1i_bus.ptw_rerr = 0;
     l1i_bus.ptw_rvalid = 0;
     l1i_bus.rerr = 0;
-    l1i_bus.ptw_wready = 0;
-    l1i_bus.ptw_werr = 0;
     repeat (4) @(negedge clock);
     reset = 0;
     if ($bits(dut.addr_tag) != `RAPT_PADDR_BITS - `RAPT_L1I_LEN - `RAPT_L1I_LINE_LEN - 2)

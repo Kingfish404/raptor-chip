@@ -17,7 +17,7 @@ make-targets-test: ## Check consolidated Make entry points, formatting scopes an
 
 .PHONY: sta-flow-check
 sta-flow-check: ## Check isolated SRAM/DFF STA runner contracts (no PDK/tool installation)
-	python3 scripts/test_sta_dff.py
+	python3 scripts/test_sta.py DffFlowTest
 
 .PHONY: sim-build-isolation-check
 sim-build-isolation-check: ## Check build-local Kconfig and non-destructive model cache selection
@@ -25,8 +25,8 @@ sim-build-isolation-check: ## Check build-local Kconfig and non-destructive mode
 
 # Tool-free unit tests for helper scripts that have no dedicated check target.
 SCRIPT_UNITTESTS := test_config_macro_check test_fp_test_makefile test_closeout_config_check test_litex_sdcard_linux_override \
-	test_lrsc_constrained_progress test_lrsc_trace_check test_run_act4 \
-	test_sta_summary_status test_subsystem_build_cache
+	test_lrsc_trace_check test_run_act4 \
+	test_sta.SummaryStatusTest test_subsystem_build_cache
 
 .PHONY: script-unittests
 script-unittests: config-macro-check ## Run helper-script unit tests that need no EDA tools
@@ -1076,8 +1076,8 @@ sigtest-clean: ## Clean sigtest artifacts
 FORMAL_DIR := $(VERIFY_HOME)/formal
 
 .PHONY: formal formal-setup formal-bus formal-ieu-alu formal-ieu-mul \
-	formal-pmp formal-plru formal-rnu-maptable formal-clint formal-plic formal-dtm formal-divsqrt \
-	formal-rvfi formal-rvfi-gen formal-rvfi-check formal-rvfi-clean formal-clean
+	formal-pmp formal-pmp-monolithic formal-zkt formal-plru formal-clint \
+	formal-plic formal-dtm formal-divsqrt formal-rvfi formal-rvfi-gen formal-rvfi-check formal-rvfi-clean formal-clean
 
 formal-setup: ## Install oss-cad-suite (yosys, sby, solvers)
 	$(MAKE) -C $(FORMAL_DIR) setup
@@ -1085,20 +1085,32 @@ formal-setup: ## Install oss-cad-suite (yosys, sby, solvers)
 formal-bus: ## Formal: verify AXI bus properties
 	$(MAKE) -C $(FORMAL_DIR) formal_bus
 
+FORMAL_MEMORY_PROGRESS_TIMEOUT ?= 600
+.PHONY: formal-memory-progress formal-memory-progress-negative
+formal-memory-progress: ## Formal: bounded L1D/bus progress and collision/escape witnesses
+	$(PYTHON) scripts/memory_progress_formal.py --output "$(BUILD_DIR)/memory-progress/bounded" --timeout $(FORMAL_MEMORY_PROGRESS_TIMEOUT)
+	$(PYTHON) scripts/memory_progress_formal.py --mode cover --output "$(BUILD_DIR)/memory-progress/cover" --timeout $(FORMAL_MEMORY_PROGRESS_TIMEOUT)
+
+formal-memory-progress-negative: ## Require the isolated old refill gate to fail a progress assertion
+	$(PYTHON) scripts/memory_progress_formal.py --mode bmc --negative-control --output "$(BUILD_DIR)/memory-progress/negative" --timeout $(FORMAL_MEMORY_PROGRESS_TIMEOUT)
+
 formal-ieu-mul: ## Formal: verify IEU multiplier
 	$(MAKE) -C $(FORMAL_DIR) formal_ieu_mul
 
 formal-ieu-alu: ## Formal: verify RV32 IEU ALU and bit-manipulation operations
 	$(MAKE) -C $(FORMAL_DIR) formal_ieu_alu
 
-formal-pmp: ## Formal: verify RV32/RV64 PMP matching and permissions
+formal-pmp: ## Formal: prove RV32/RV64 PMP per entry, then compose priority/permissions
+	$(MAKE) -C $(FORMAL_DIR) formal_pmp_composed
+
+formal-pmp-monolithic: ## Formal: single-model PMP proof (RV32 ~12 min, RV64 much longer)
 	$(MAKE) -C $(FORMAL_DIR) formal_pmp
+
+formal-zkt: ## Formal: Zkt operand-independent MUL, MUL/DIV port, ALU and CDB timing
+	$(MAKE) -C $(FORMAL_DIR) zkt-mul zkt-muldiv zkt-alu-ports zkt-cdb
 
 formal-plru: ## Formal: verify 2/4/8-way PLRU replacement
 	$(MAKE) -C $(FORMAL_DIR) formal_plru
-
-formal-rnu-maptable: ## Formal: verify rename MAP/RAT recovery and WAW priority
-	$(MAKE) -C $(FORMAL_DIR) formal_rnu_maptable
 
 formal-clint: ## Formal: verify CLINT timer and software-interrupt semantics
 	$(MAKE) -C $(FORMAL_DIR) formal_clint
@@ -1112,8 +1124,8 @@ formal-dtm: ## Formal: verify the single-clock JTAG TAP and DMI transport
 formal-divsqrt: ## Formal: verify FPU divide/square-root control contract
 	$(MAKE) -C $(FORMAL_DIR) formal_divsqrt
 
-formal: formal-ieu-alu formal-ieu-mul formal-pmp formal-plru \
-	formal-rnu-maptable formal-clint formal-plic formal-dtm formal-bus formal-divsqrt ## Run all standalone formal checks
+formal: formal-ieu-alu formal-ieu-mul formal-pmp formal-zkt formal-plru formal-memory-progress \
+	formal-clint formal-plic formal-dtm formal-bus formal-divsqrt ## Run all standalone formal checks
 
 formal-rvfi-gen: ## Formal: generate riscv-formal checks (auto-clones repo)
 	$(MAKE) -C $(FORMAL_DIR) formal_rvfi_gen
@@ -1327,7 +1339,7 @@ XSIM_TARGETS := \
 	xsim-rou-dual-commit
 
 define SHARED_TB_SOURCE
-$(if $(filter tb_idu_%,$(1)),tb_idu_contract.sv,$(if $(filter tb_router_%,$(1)),tb_router_all_contract.sv,$(if $(filter tb_ptw_%,$(1)),tb_ptw_all_contract.sv,$(if $(filter tb_sq_%,$(1)),tb_sq_all_contract.sv,$(if $(filter-out tb_l1d_16k tb_l1d_pmp_shared tb_l1d_ptw_permission_stage,$(filter tb_l1d_%,$(1))),tb_l1d_all_contract.sv,$(if $(filter-out tb_ioq_forward_nonalias tb_ioq_dispatch_stable tb_ioq_fp_ooo tb_ioq_paddr_preload,$(filter tb_ioq_%,$(1))),tb_ioq_all_contract.sv,$(if $(filter tb_lsu_%,$(1)),tb_lsu_all_contract.sv,$(if $(filter tb_csr_%,$(1)),tb_csr_all_contract.sv,$(if $(filter tb_predict_history%,$(1)),tb_predict_history_contract.sv,$(if $(filter tb_issue_select%,$(1)),tb_issue_select_contract.sv,$(if $(filter tb_rename_checkpoint%,$(1)),tb_rename_checkpoint_contract.sv,$(1).sv)))))))))))
+$(if $(filter tb_idu_%,$(1)),tb_idu_contract.sv,$(if $(filter tb_router_%,$(1)),tb_router_all_contract.sv,$(if $(filter tb_ptw_%,$(1)),tb_ptw_all_contract.sv,$(if $(filter tb_sq_%,$(1)),tb_sq_all_contract.sv,$(if $(filter-out tb_l1d_16k tb_l1d_pmp_shared tb_l1d_ptw_permission_stage,$(filter tb_l1d_%,$(1))),tb_l1d_all_contract.sv,$(if $(filter-out tb_ioq_forward_nonalias tb_ioq_dispatch_stable tb_ioq_fp_ooo,$(filter tb_ioq_%,$(1))),tb_ioq_all_contract.sv,$(if $(filter tb_lsu_%,$(1)),tb_lsu_all_contract.sv,$(if $(filter tb_csr_%,$(1)),tb_csr_all_contract.sv,$(if $(filter tb_predict_history%,$(1)),tb_predict_history_contract.sv,$(if $(filter tb_issue_select%,$(1)),tb_issue_select_contract.sv,$(if $(filter tb_rename_checkpoint%,$(1)),tb_rename_checkpoint_contract.sv,$(1).sv)))))))))))
 endef
 
 define XSIM_RUN
@@ -1493,6 +1505,8 @@ VERILATOR_DIRECTED_TARGETS := \
 	verilator-l2-release-buffer-rv64 \
 	verilator-l1d-byte-rom \
 	verilator-l1d-store-coherence \
+	verilator-memory-coherence-progress-rv32 \
+	verilator-memory-coherence-progress-rv64 \
 	verilator-l1d-writeback-rv32 \
 	verilator-l1d-writeback-rv64 \
 	verilator-l1d-writeback-line-rv32 \
@@ -1539,6 +1553,8 @@ VERILATOR_DIRECTED_TARGETS := \
 	verilator-pmp-endpoint \
 	verilator-pmp-reset-napot-rv32 \
 	verilator-pmp-reset-napot-rv64 \
+	verilator-pmp-window-uniform-rv32 \
+	verilator-pmp-window-uniform-rv64 \
 	verilator-lsu-lr-sq-forward \
 	verilator-lsu-cbo-zero \
 	verilator-lsu-sq-random \
@@ -1644,8 +1660,25 @@ VERILATOR_DIRECTED_XLEN_RUN = $(call VERILATOR_DIRECTED_RUN,$(subst -,_,$(patsub
 
 .PHONY: verilator-directed verilator-directed-clean $(VERILATOR_DIRECTED_TARGETS)
 
-verilator-directed: superscalar-structure-check $(VERILATOR_DIRECTED_TARGETS) ## Run all module checks with portable Verilator
+verilator-directed: superscalar-structure-check verilator-directed-registry-check $(VERILATOR_DIRECTED_TARGETS) ## Run the fast module-check gate with portable Verilator
 	@echo "[verilator-directed] all $(words $(VERILATOR_DIRECTED_TARGETS)) checks passed"
+
+# verilator-* rules that are aggregates or helpers rather than checks. Every
+# other verilator-* rule is a directed check and runs in verilator-directed-all.
+VERILATOR_DIRECTED_NONTEST := verilator-directed verilator-directed-all \
+	verilator-directed-clean verilator-directed-registry-check verilator-execution-port-matrix
+
+.PHONY: verilator-directed-all verilator-directed-registry-check _directed-registry-db
+verilator-directed-all: superscalar-structure-check verilator-directed-registry-check ## Run every defined directed module check
+	+@checks="$$($(PYTHON) "$(VERIFY_HOME)/scripts/directed_registry.py" list)"; \
+	$(MAKE) --no-print-directory $$checks && \
+	echo "[verilator-directed-all] all $$(echo $$checks | wc -w) checks passed"
+
+verilator-directed-registry-check: ## Reject gate entries without a rule; count ungated checks
+	@$(PYTHON) "$(VERIFY_HOME)/scripts/directed_registry.py" check
+
+_directed-registry-db:
+	@:
 
 .PHONY: superscalar-structure-check
 .PHONY: rtl-synthesis-check
@@ -1750,7 +1783,6 @@ integer-issue-port-workloads: ## Compare two/three-port simulators on CoreMark a
 
 execution-port-workload-parser-test:
 	$(PYTHON) "$(VERIFY_HOME)/scripts/test_execution_port_workloads.py"
-	$(PYTHON) "$(VERIFY_HOME)/scripts/test_execution_port_report.py"
 
 .PHONY: integer-issue-port-report
 integer-issue-port-report: ## Summarize dispatch-domain bottlenecks in the latest long-workload result
@@ -1912,182 +1944,21 @@ integer-system-port-fp-test: ## Check FP/system shared completion with system ca
 		tail -80 "$(INTEGER_SYSTEM_PORT_FP_DIR)/run.log"; exit 1; }
 	@echo "[integer-system-port] FP result, fflags CSR, NEMU difftest: PASS"
 
-verilator-alu-zbb-strlen:
-	$(call VERILATOR_DIRECTED_RUN,alu_zbb_strlen,tb_alu_zbb_strlen,,-d RAPT_RV64,)
-.PHONY: verilator-alu-cpop
-verilator-alu-cpop:
-	$(call VERILATOR_DIRECTED_RUN,alu_cpop,tb_alu_cpop,,,)
-.PHONY: verilator-alu-clmul-rv32 verilator-alu-clmul-rv64
-verilator-alu-clmul-rv32 verilator-alu-clmul-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_alu_clmul,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-verilator-l2:
-	$(call VERILATOR_DIRECTED_RUN,l2,tb_l2_ordered_mmio,,-d RAPT_L2_EN,)
-.PHONY: verilator-l2-pmem2g
-verilator-l2-pmem2g:
-	$(call VERILATOR_DIRECTED_RUN,l2_pmem2g,tb_l2_ordered_mmio,,-d RAPT_L2_EN -d RAPT_PMEM_BYTES=2147483648,)
-.PHONY: verilator-l2-assoc-rv32 verilator-l2-assoc-rv64
-verilator-l2-assoc-rv32 verilator-l2-assoc-rv64: ## Check 8-way L2 and CBO (XSIM_RAPT_CONFIG=default-l2)
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l2_assoc,,$(if $(findstring rv64,$@),-d RAPT_RV64) -d RAPT_L2_EN,)
-.PHONY: verilator-l2-line-local-put-rv32 verilator-l2-line-local-put-rv64
-verilator-l2-line-local-put-rv32 verilator-l2-line-local-put-rv64: ## Check short cacheable Put line allocation and refill merge
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l2_line_local_put,,$(if $(findstring rv64,$@),-d RAPT_RV64) -d RAPT_L2_EN,)
-.PHONY: verilator-l2-cross-line-put-rv32 verilator-l2-cross-line-put-rv64
-verilator-l2-cross-line-put-rv32 verilator-l2-cross-line-put-rv64: ## Check segmented cacheable Put and failed-refill W drain
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l2_cross_line_put,,$(if $(findstring rv64,$@),-d RAPT_RV64) -d RAPT_L2_EN,)
-.PHONY: verilator-l2-forwarded-error-rv32 verilator-l2-forwarded-error-rv64
-verilator-l2-forwarded-error-rv32 verilator-l2-forwarded-error-rv64: ## Check failed cacheable forwarded B preserves resident dirty data
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l2_forwarded_error,,$(if $(findstring rv64,$@),-d RAPT_RV64) -d RAPT_L2_EN -d RAPT_ASSERT_EN,)
-.PHONY: verilator-l2-forwarded-client-rv32 verilator-l2-forwarded-client-rv64
-verilator-l2-forwarded-client-rv32 verilator-l2-forwarded-client-rv64: ## Check forwarded D-client Probe and overlapping C Release
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l2_forwarded_client,,$(if $(findstring rv64,$@),-d RAPT_RV64) -d RAPT_L2_EN -d RAPT_ASSERT_EN,)
-
-verilator-axi-r-buffer-rv32 verilator-axi-r-buffer-rv64: ## Check registered AXI R buffering and outer-channel passthrough
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_axi_r_buffer,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-.PHONY: verilator-l2-put-buffer-rv32 verilator-l2-put-buffer-rv64
-verilator-l2-put-buffer-rv32 verilator-l2-put-buffer-rv64: ## Check 40-entry BOOM-size L2 put buffer (XSIM_RAPT_CONFIG=default-l2)
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l2_put_buffer,,$(if $(findstring rv64,$@),-d RAPT_RV64) -d RAPT_L2_EN,)
-.PHONY: verilator-l2-put-list-rv32 verilator-l2-put-list-rv64
-verilator-l2-put-list-rv32 verilator-l2-put-list-rv64: ## Check BOOM's 40 lists and 40 shared put beats
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l2_put_list_buffer,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-.PHONY: verilator-l2-secondary-buffer
-verilator-l2-secondary-buffer: ## Check BOOM's 21 virtual secondary queues and 33 shared entries
-	$(call VERILATOR_DIRECTED_RUN,l2_secondary_buffer,tb_l2_secondary_buffer,,,)
-.PHONY: verilator-l2-secondary-buffer-rv32
-verilator-l2-secondary-buffer-rv32: ## Check 15 RV32 secondary queues and 35 shared entries
-	$(call VERILATOR_DIRECTED_RUN,l2_secondary_buffer_rv32,tb_l2_secondary_buffer,,-d RAPT_L2_RV32_GEOMETRY,)
-.PHONY: verilator-l2-release-buffer-rv32 verilator-l2-release-buffer-rv64
-verilator-l2-release-buffer-rv32 verilator-l2-release-buffer-rv64: ## Check two Release lists and shared lowest-free beat pool
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l2_release_buffer,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-.PHONY: verilator-l2-release-admission-rv32 verilator-l2-release-admission-rv64
-verilator-l2-release-admission-rv32 verilator-l2-release-admission-rv64: ## Reserve L2 admission from the first ReleaseData beat
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l2_release_admission,,$(if $(findstring rv64,$@),-d RAPT_RV64) -d RAPT_L2_EN,)
-.PHONY: verilator-l2-release-probe-rv32 verilator-l2-release-probe-rv64
-verilator-l2-release-probe-rv32 verilator-l2-release-probe-rv64: ## Check nested C Release pre-emption and victim metadata forwarding
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l2_release_probe,,$(if $(findstring rv64,$@),-d RAPT_RV64) -d RAPT_L2_EN,)
-
-.PHONY: verilator-l2-owned-read-rv32 verilator-l2-owned-read-rv64
-verilator-l2-owned-read-rv32 verilator-l2-owned-read-rv64: ## Check Get owner Probe and same-tag MSHR metadata reuse
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l2_owned_read,,$(if $(findstring rv64,$@),-d RAPT_RV64) -d RAPT_L2_EN,)
-
-.PHONY: verilator-l2-mshr-scheduler
-verilator-l2-mshr-scheduler: ## Check BOOM's five ordinary plus two reserved L2 MSHR slots
-	$(call VERILATOR_DIRECTED_RUN,l2_mshr_scheduler,tb_l2_mshr_scheduler,,,)
-.PHONY: verilator-l2-mshr-frontend
-verilator-l2-mshr-frontend: ## Check BOOM-sized MSHR admission and secondary replay together
-	$(call VERILATOR_DIRECTED_RUN,l2_mshr_frontend,tb_l2_mshr_frontend,,,)
-.PHONY: verilator-l2-refill-mshrs-rv32 verilator-l2-refill-mshrs-rv64
-verilator-l2-refill-mshrs-rv32 verilator-l2-refill-mshrs-rv64: ## Check RV32 five/RV64 seven refill contexts with interleaved RIDs
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l2_refill_mshrs,,$(if $(findstring rv32,$@),-GXLEN=32,),)
-.PHONY: verilator-l2-mshr-concurrent-rv32 verilator-l2-mshr-concurrent-rv64
-verilator-l2-mshr-concurrent-rv32 verilator-l2-mshr-concurrent-rv64: ## Check RV32 three/RV64 five live L2 clean misses before outer R
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l2_mshr_concurrent,,$(if $(findstring rv64,$@),-d RAPT_RV64) -d RAPT_L2_EN,)
-.PHONY: verilator-l2-mshr-different-tag-rv32 verilator-l2-mshr-different-tag-rv64
-verilator-l2-mshr-different-tag-rv32 verilator-l2-mshr-different-tag-rv64: ## Check live same-set different-tag secondary replay
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l2_mshr_different_tag,,$(if $(findstring rv64,$@),-d RAPT_RV64) -d RAPT_L2_EN,)
-.PHONY: verilator-l2-adapter-write-rv32 verilator-l2-adapter-write-rv64
-verilator-l2-adapter-write-rv32 verilator-l2-adapter-write-rv64: ## Check adapter stores allocate in default-l2
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l2_adapter_write_allocate,,$(if $(findstring rv64,$@),-d RAPT_RV64) -d RAPT_L2_EN,)
-.PHONY: verilator-l2-data-array
-verilator-l2-data-array: ## Check BOOM four-bank data array and its single-port arbitration
-	$(call VERILATOR_DIRECTED_RUN,l2_data_array,tb_l2_data_array,,,)
-.PHONY: verilator-l2-directory
-verilator-l2-directory: ## Check BOOM-style L2 directory wipe, metadata and queued-write bypass
-	$(call VERILATOR_DIRECTED_RUN,l2_directory,tb_l2_directory,,,)
-.PHONY: verilator-l2-directory-oneway
-verilator-l2-directory-oneway: ## Check a one-way L2 directory never chooses an invalid victim
-	$(call VERILATOR_DIRECTED_RUN,l2_directory_oneway,tb_l2_directory_oneway,,,)
-verilator-cache-replacement:
-	$(call VERILATOR_DIRECTED_RUN,cache_replacement,tb_cache_replacement,,,)
-verilator-l1d-replacement:
-	$(call VERILATOR_DIRECTED_RUN,l1d_replacement,tb_l1d_replacement,,,)
 verilator-l1i-width-window-4way: VERILATOR_DIRECTED_FLAGS += -GWays=4
-verilator-l1i-width-window-4way:
-	$(call VERILATOR_DIRECTED_RUN,l1i_width_window_4way,tb_l1i_width_window,,-d RAPT_ASSERT_EN,)
 verilator-l1i-width-window-8way: VERILATOR_DIRECTED_FLAGS += -GWays=8
-verilator-l1i-width-window-8way:
-	$(call VERILATOR_DIRECTED_RUN,l1i_width_window_8way,tb_l1i_width_window,,-d RAPT_ASSERT_EN,)
 .PHONY: yosys-sq-span-equivalence
 yosys-sq-span-equivalence:
 	python3 "$(VERIFY_HOME)/scripts/check_sq_span_equivalence.py" --rtl "$(RAPTOR_HOME)/hdl/backend/lsu/rapt_sq_forward.sv" --build-dir "$(BUILD_DIR)/sq-span-equivalence"
 
-verilator-sq-forward-ports:
-	$(call VERILATOR_DIRECTED_RUN,sq_forward_ports,tb_sq_forward_ports,,,)
-verilator-sq-forward-ports-rv64:
-	$(call VERILATOR_DIRECTED_RUN,sq_forward_ports_rv64,tb_sq_forward_ports,,-d RAPT_RV64,)
-verilator-sq-forward-ring-rv32 verilator-sq-forward-ring-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_store_queue_forward_ring,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-verilator-l1d-data:
-	$(call VERILATOR_DIRECTED_RUN,l1d_data,tb_l1d_data,,,)
-.PHONY: verilator-l1d-writeback
-verilator-l1d-writeback:
-	$(call VERILATOR_DIRECTED_RUN,l1d_writeback,tb_writeback,,,)
-verilator-l1d-tags:
-	$(call VERILATOR_DIRECTED_RUN,l1d_tags,tb_l1d_tags,,,)
-verilator-l1d-byte-rom:
-	$(call VERILATOR_DIRECTED_RUN,l1d_byte_rom,tb_l1d_byte_rom,,,)
-verilator-l1d-store-coherence:
-	$(call VERILATOR_DIRECTED_RUN,l1d_store_coherence,tb_l1d_store_coherence,,,+BUS_DELAY_MAX=$(VERILATOR_DIRECTED_DELAY) +SEED=$(VERILATOR_DIRECTED_SEED))
-.PHONY: verilator-l1d-writeback-rv32 verilator-l1d-writeback-rv64
-.PHONY: verilator-l1d-writeback-line-rv32 verilator-l1d-writeback-line-rv64
 WB_LINE_REFILL ?= 0
 verilator-l1d-writeback-rv32 verilator-l1d-writeback-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1 -GLineRefill=$(WB_LINE_REFILL)
-verilator-l1d-writeback-rv32 verilator-l1d-writeback-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l1d_store_coherence,,$(if $(findstring rv64,$@),-d RAPT_RV64),+BUS_DELAY_MAX=$(VERILATOR_DIRECTED_DELAY) +SEED=$(VERILATOR_DIRECTED_SEED))
 verilator-l1d-writeback-line-rv32 verilator-l1d-writeback-line-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1 -GLineRefill=1
-verilator-l1d-writeback-line-rv32 verilator-l1d-writeback-line-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l1d_store_coherence,,$(if $(findstring rv64,$@),-d RAPT_RV64),+BUS_DELAY_MAX=$(VERILATOR_DIRECTED_DELAY) +SEED=$(VERILATOR_DIRECTED_SEED))
-.PHONY: verilator-l1d-writeback-bscan-rv64
 L1D_BSCAN_TRACE ?= 0
 verilator-l1d-writeback-bscan-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1 -GLineRefill=1 --trace
-verilator-l1d-writeback-bscan-rv64:
-	$(call VERILATOR_DIRECTED_RUN,l1d_writeback_bscan_rv64,tb_l1d_store_coherence,,-d RAPT_RV64,+MIN_WB_B $(if $(filter 1,$(L1D_BSCAN_TRACE)),+TRACE_WB_B +WAVE_FILE=$(VERILATOR_DIRECTED_BUILD_DIR)/l1d_writeback_bscan_rv64/wave.vcd,))
-verilator-l1d-flush-ordered:
-	$(call VERILATOR_DIRECTED_RUN,l1d_flush_ordered,tb_l1d_flush_ordered,,-d RAPT_ASSERT_EN,)
-verilator-l1d-cmo-permissions:
-	$(call VERILATOR_DIRECTED_RUN,l1d_cmo_permissions,tb_l1d_cmo_permissions,,-d RAPT_RV64 -d RAPT_ASSERT_EN,)
-
-.PHONY: verilator-cbo-set-rv32 verilator-cbo-set-rv64
-verilator-cbo-set-rv32 verilator-cbo-set-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_cbo_set,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
 
 .PHONY: verilator-l1d-config-slices
 verilator-l1d-config-slices: ## Lint all L1D geometries and full w4/w8 core slices in RV32/RV64
 	python3 "$(VERIFY_HOME)/scripts/check_l1d_config_slices.py"
-
-.PHONY: verilator-cbo-tlb-rv32 verilator-cbo-tlb-rv64
-verilator-cbo-tlb-rv32 verilator-cbo-tlb-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_cbo_tlb,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
-verilator-l1i-sret-priv-epoch:
-	$(call VERILATOR_DIRECTED_RUN,l1i_sret_priv_epoch,tb_l1i_sret_priv_epoch,,-d RAPT_ASSERT_EN,)
-
-.PHONY: verilator-l1i-zero-va
-verilator-l1i-zero-va:
-	$(call VERILATOR_DIRECTED_RUN,l1i_zero_va,tb_l1i_sret_priv_epoch,,-d RAPT_ASSERT_EN -d RAPT_TEST_ZERO_PC,)
-.PHONY: verilator-l1i-zero-va-rv64 verilator-l1i-sret-priv-epoch-rv64
-verilator-l1i-zero-va-rv64:
-	$(call VERILATOR_DIRECTED_RUN,l1i_zero_va_rv64,tb_l1i_sret_priv_epoch,,-d RAPT_ASSERT_EN -d RAPT_TEST_ZERO_PC -d RAPT_RV64,)
-verilator-l1i-sret-priv-epoch-rv64:
-	$(call VERILATOR_DIRECTED_RUN,l1i_sret_priv_epoch_rv64,tb_l1i_sret_priv_epoch,,-d RAPT_ASSERT_EN -d RAPT_RV64,)
-verilator-ptw-kill-drain:
-	$(call VERILATOR_DIRECTED_RUN,ptw_kill_drain,tb_ptw_kill_drain,,-d RAPT_ASSERT_EN,)
-verilator-ptw-profile-negative:
-	$(call VERILATOR_DIRECTED_RUN,ptw_profile_negative,tb_ptw_profile_negative,,-d RAPT_RV64 -d RAPT_ASSERT_EN,)
-verilator-ptw-global-rv32 verilator-ptw-global-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ptw_global,,-d RAPT_ASSERT_EN)
-.PHONY: verilator-ptw-pbmt
-verilator-ptw-pbmt:
-	$(call VERILATOR_DIRECTED_RUN,ptw_pbmt,tb_ptw_pbmt,,-d RAPT_RV64 -d RAPT_ASSERT_EN,)
-verilator-idu-illegal-stval:
-	$(call VERILATOR_DIRECTED_RUN,idu_illegal_stval,tb_idu_illegal_stval,,-d RAPT_RV64 -d RAPT_ASSERT_EN,)
-verilator-zfhmin-decode-slot-rv32 verilator-zfhmin-decode-slot-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_zfhmin_decode_slot,,)
-
-verilator-idu-zfhmin:
-	$(call VERILATOR_DIRECTED_RUN,idu_zfhmin,tb_idu_zfhmin,,-d RAPT_RV64 -d RAPT_ASSERT_EN,)
-verilator-idu-cmo:
-	$(call VERILATOR_DIRECTED_RUN,idu_cmo,tb_idu_cmo,,-d RAPT_RV64 -d RAPT_ASSERT_EN,)
-verilator-idu-privileged-rv32 verilator-idu-privileged-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_idu_privileged,,-d RAPT_ASSERT_EN)
 
 .PHONY: verilator-idu-zkt-rv32 verilator-idu-zkt-rv64
 verilator-idu-zkt-rv32 verilator-idu-zkt-rv64:
@@ -2124,11 +1995,6 @@ rva22s64-privileged-run: $(RVA22S64_MROM)
 	$(PYTHON) "$(VERIFY_HOME)/scripts/rva22s64_privileged.py" \
 		--npc "$(RVA22S64_NPC)" --reference "$(NEMU_SO_$(RVA22S64_XLEN))" --mrom "$(MROM_IMG)" \
 		--image "$(RVA22S64_PRIV_DIR)/privileged.bin" --output "$(RVA22S64_PRIV_DIR)/runs"
-.PHONY: verilator-tlb-flush-asid-rv64
-verilator-tlb-flush-asid-rv64:
-	$(call VERILATOR_DIRECTED_RUN,tlb_flush_asid_rv64,tb_tlb_flush_asid,,-d RAPT_RV64 -d RAPT_ASSERT_EN,)
-verilator-tlb-flush-asid:
-	$(call VERILATOR_DIRECTED_RUN,tlb_flush_asid,tb_tlb_flush_asid,,-d RAPT_ASSERT_EN,)
 
 # Directed guest programs, one name each: app/tests/baremetal/<name with _>.S
 # unless a per-case RVA22S64_TEST_SOURCE override below says otherwise.
@@ -2156,6 +2022,7 @@ RVA22S64_CASE_TARGETS := $(RVA22S64_CASES:%=rva22s64-%-run)
 rva22s64-directed: ## Run every directed RVA22S64 case for RVA22S64_XLEN (skips RV64-only on RV32)
 	@$(MAKE) --no-print-directory -k $(if $(filter 32,$(RVA22S64_XLEN)),$(filter-out $(RVA22S64_RV64_CASES:%=rva22s64-%-run),$(RVA22S64_CASE_TARGETS)),$(RVA22S64_CASE_TARGETS))
 # Shared guest sources keep separate named scenarios and output directories.
+RVA22S64_TEST_DIR ?= $(RAPTOR_HOME)/app/tests/baremetal
 RVA22S64_TEST_SOURCE ?= $(subst -,_,$(patsubst rva22s64-%-run,%,$@))
 rva22s64-clint-mtime-shared-run: RVA22S64_TEST_SOURCE = clint_mtime_write
 rva22s64-clint-mtime-shared-run: RVA22S64_CASE_CPPFLAGS = -DCHECK_CSR_TIME=1
@@ -2225,108 +2092,13 @@ rva22s64-bus-read-error-run rva22s64-data-span-run rva22s64-store-cross-page-run
 $(RVA22S64_CASE_TARGETS): $(RVA22S64_MROM)
 	@mkdir -p "$(BUILD_DIR)/$(patsubst rva22s64-%-run,%,$@)"
 	$(CC) $(GUEST_CPPFLAGS) $(RVA22S64_TEST_CPPFLAGS) $(RVA22S64_CASE_CPPFLAGS) -march=$(RVA22S64_TEST_MARCH) -mabi=$(if $(filter 64,$(RVA22S64_XLEN)),lp64,ilp32) -nostdlib -nostartfiles -static \
-		-Wl,--no-relax -T "$(FUZZ_LINKER)" "$(RAPTOR_HOME)/app/tests/baremetal/$(RVA22S64_TEST_SOURCE).S" \
+		-Wl,--no-relax -T "$(FUZZ_LINKER)" "$(RVA22S64_TEST_DIR)/$(RVA22S64_TEST_SOURCE).S" \
 		-o "$(BUILD_DIR)/$(patsubst rva22s64-%-run,%,$@)/test.elf"
 	$(OBJCOPY) -O binary "$(BUILD_DIR)/$(patsubst rva22s64-%-run,%,$@)/test.elf" "$(BUILD_DIR)/$(patsubst rva22s64-%-run,%,$@)/test.bin"
 	$(PYTHON) "$(VERIFY_HOME)/scripts/rva22s64_privileged.py" --name "$(patsubst rva22s64-%-run,%,$@)" \
 		--timeout "$(or $(RVA22S64_RUN_TIMEOUT),60)" \
 		--npc "$(RVA22S64_NPC)" --reference "$(NEMU_SO_$(RVA22S64_XLEN))" --mrom "$(MROM_IMG)" \
 		--image "$(BUILD_DIR)/$(patsubst rva22s64-%-run,%,$@)/test.bin" --output "$(BUILD_DIR)/$(patsubst rva22s64-%-run,%,$@)/runs"
-verilator-bus-axi:
-	$(call VERILATOR_DIRECTED_RUN,bus_axi,tb_bus_l1d_rlast,,,)
-.PHONY: verilator-axi-storage-rv32 verilator-axi-storage-rv64 verilator-axi-storage-synthesis-rv32 verilator-axi-storage-synthesis-rv64
-verilator-axi-storage-rv32 verilator-axi-storage-rv64 verilator-axi-storage-synthesis-rv32 verilator-axi-storage-synthesis-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_axi_master_storage,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64) $(if $(findstring synthesis,$@),-d SYNTHESIS),)
-.PHONY: verilator-axi-write-lanes-rv32 verilator-axi-write-lanes-rv64
-verilator-axi-write-lanes-rv32 verilator-axi-write-lanes-rv64: ## Check AXI byte-lane spans, independent AW/W stalls and B errors
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_axi_write_lanes,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
-verilator-bus-read-ownership:
-	$(call VERILATOR_DIRECTED_RUN,bus_read_ownership,tb_bus_read_ownership,,,)
-
-.PHONY: verilator-bus-read-ownership-rv32 verilator-bus-read-ownership-rv64 \
-	verilator-fpr-payload-reset-rv32 verilator-fpr-payload-reset-rv64
-verilator-bus-read-ownership-rv32 verilator-bus-read-ownership-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_bus_read_ownership,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
-verilator-fpr-payload-reset-rv32 verilator-fpr-payload-reset-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_fpr_payload_reset,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-verilator-csr-sret-roundtrip-rv32 verilator-csr-sret-roundtrip-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_csr_sret_roundtrip,,)
-
-.PHONY: verilator-csr-trap-payload-rv32 verilator-csr-trap-payload-rv64
-verilator-csr-trap-payload-rv32 verilator-csr-trap-payload-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_csr_trap_payload,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-verilator-csr-architectural-rv32 verilator-csr-architectural-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_csr_architectural,,)
-.PHONY: verilator-addr-classification-rv32
-verilator-addr-classification-rv32:
-	$(call VERILATOR_DIRECTED_RUN,addr_classification_rv32,tb_addr_classification,,,)
-verilator-addr-classification:
-	$(call VERILATOR_DIRECTED_RUN,addr_classification,tb_addr_classification,,-d RAPT_RV64,)
-
-.PHONY: verilator-addr-classification-ku15p-rv32 verilator-addr-classification-ku15p-rv64
-verilator-addr-classification-ku15p-rv32 verilator-addr-classification-ku15p-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_addr_classification,,-d RAPT_PMEM_BYTES=2147483648)
-.PHONY: verilator-addr-classification-litedram-rv32 verilator-addr-classification-litedram-rv64
-verilator-addr-classification-litedram-rv32 verilator-addr-classification-litedram-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_addr_classification,,-d RAPT_PMEM_BYTES=1073741824)
-verilator-pmp-endpoint:
-	$(call VERILATOR_DIRECTED_RUN,pmp_endpoint,tb_pmp_endpoint,,,)
-.PHONY: verilator-pmp-permissions-rv32 verilator-pmp-permissions-rv64
-verilator-pmp-permissions-rv32 verilator-pmp-permissions-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_pmp_permissions,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-.PHONY: verilator-l1d-page-permissions-rv32 verilator-l1d-page-permissions-rv64
-.PHONY: verilator-l1d-pmp-shared-rv32 verilator-l1d-pmp-shared-rv64
-verilator-l1d-pmp-shared-rv32 verilator-l1d-pmp-shared-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l1d_pmp_shared,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-verilator-l1d-page-permissions-rv32 verilator-l1d-page-permissions-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1d_page_permissions,,)
-.PHONY: verilator-pmp-reset-napot-rv32 verilator-pmp-reset-napot-rv64
-verilator-pmp-reset-napot-rv32 verilator-pmp-reset-napot-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_pmp_reset_napot,"$(VERIFY_HOME)/formal/pmp_formal_if.sv",)
-verilator-lsu-lr-sq-forward:
-	$(call VERILATOR_DIRECTED_RUN,lsu_lr_sq_forward,tb_lsu_lr_sq_forward,,-d RAPT_ASSERT_EN,)
-verilator-lsu-cbo-zero:
-	$(call VERILATOR_DIRECTED_RUN,lsu_cbo_zero,tb_lsu_cbo_zero,,-d RAPT_RV64 -d RAPT_ASSERT_EN,)
-verilator-lsu-sq-random:
-	$(call VERILATOR_DIRECTED_RUN,lsu_sq_random,tb_lsu_sq_random,,-d RAPT_ASSERT_EN,+SEED=$(VERILATOR_DIRECTED_SEED))
-verilator-ioq:
-	$(call VERILATOR_DIRECTED_RUN,ioq,tb_ioq_pending_lock,,,)
-.PHONY: verilator-hum-request-stage-rv32 verilator-hum-request-stage-rv64
-verilator-hum-request-stage-rv32 verilator-hum-request-stage-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_hum_request_stage,,-d RAPT_ASSERT_EN)
-.PHONY: verilator-ioq-mmio-retry-rv32 verilator-ioq-mmio-retry-rv64
-verilator-ioq-mmio-retry-rv32 verilator-ioq-mmio-retry-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_mmio_load_retry,,-d RAPT_ASSERT_EN)
-.PHONY: verilator-translated-mmio-retry-rv32 verilator-translated-mmio-retry-rv64
-verilator-translated-mmio-retry-rv32 verilator-translated-mmio-retry-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_translated_mmio_retry,,-d RAPT_ASSERT_EN)
-.PHONY: verilator-split-load-retry-rv32 verilator-split-load-retry-rv64
-.PHONY: verilator-split-load-fault-reset-rv32 verilator-split-load-fault-reset-rv64
-verilator-split-load-fault-reset-rv32 verilator-split-load-fault-reset-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_split_load_fault_reset,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
-verilator-split-load-retry-rv32 verilator-split-load-retry-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_split_load_retry,,-d RAPT_ASSERT_EN)
-.PHONY: verilator-ioq-store-pbmt-rv32 verilator-ioq-store-pbmt-rv64
-verilator-ioq-store-pbmt-rv32 verilator-ioq-store-pbmt-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_store_pbmt,,-d RAPT_ASSERT_EN)
-.PHONY: verilator-sq-store-pbmt-rv32 verilator-sq-store-pbmt-rv64
-verilator-sq-store-pbmt-rv32 verilator-sq-store-pbmt-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_sq_store_pbmt,,-d RAPT_ASSERT_EN)
-.PHONY: verilator-l1d-store-pbmt-rv32 verilator-l1d-store-pbmt-rv64
-verilator-l1d-store-pbmt-rv32 verilator-l1d-store-pbmt-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1d_store_pbmt,,-d RAPT_ASSERT_EN)
-verilator-clint:
-	$(call VERILATOR_DIRECTED_RUN,clint,tb_clint,,,)
-
-.PHONY: verilator-clint-strobe-rv32 verilator-clint-strobe-rv64
-verilator-clint-strobe-rv32 verilator-clint-strobe-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_clint_strobe,,)
-
-.PHONY: verilator-router-clint-strobe-rv32 verilator-router-clint-strobe-rv64
-verilator-router-clint-strobe-rv32 verilator-router-clint-strobe-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_router_clint_strobe,,-d RAPT_ASSERT_EN)
-verilator-plic-gateway:
-	$(call VERILATOR_DIRECTED_RUN,plic_gateway,tb_plic_gateway,,,)
 
 define VERILATOR_PLIC_CONTRACT_RUN
 	$(call VERILATOR_DIRECTED_RUN,router_plic_contract_rv$(1),tb_router_plic_contract,,$(if $(filter 64,$(1)),-d RAPT_RV64,),,for case_id in 1 2 3 4 5 6; do \
@@ -2340,139 +2112,28 @@ verilator-router-plic-contract-rv32:
 	$(call VERILATOR_PLIC_CONTRACT_RUN,32)
 verilator-router-plic-contract-rv64:
 	$(call VERILATOR_PLIC_CONTRACT_RUN,64)
-verilator-muldiv-flush-reuse:
-	$(call VERILATOR_DIRECTED_RUN,muldiv_flush_reuse,tb_muldiv_flush_reuse,,-d RAPT_ASSERT_EN,)
-verilator-muldiv-word-rv64:
-	$(call VERILATOR_DIRECTED_RUN,muldiv_word_rv64,tb_muldiv_flush_reuse,,-d RAPT_RV64 -d RAPT_ASSERT_EN,)
-.PHONY: verilator-div-iterations verilator-div-iterations-rv64
-.PHONY: verilator-mdq-zkt-rv32 verilator-mdq-zkt-rv64
+
+.PHONY: verilator-plic-network-rv32 verilator-plic-network-rv64
+verilator-plic-network-rv32 verilator-plic-network-rv64:
+	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_plic_network,,-d RAPT_ASSERT_EN,,for case_id in 1 2 3 4 5; do \
+		"$$model_dir/tb_plic_network" +CASE=$$case_id \
+		> "$(VERILATOR_DIRECTED_BUILD_DIR)/$(subst -,_,$(patsubst verilator-%,%,$@))/case$$case_id.log" 2>&1; \
+		grep 'PASS:' "$(VERILATOR_DIRECTED_BUILD_DIR)/$(subst -,_,$(patsubst verilator-%,%,$@))/case$$case_id.log"; \
+	done)
 verilator-mdq-zkt-rv32 verilator-mdq-zkt-rv64: VERILATOR_DIRECTED_FLAGS += -CFLAGS -O0
-verilator-mdq-zkt-rv32 verilator-mdq-zkt-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_muldiv_flush_reuse,,-d RAPT_ASSERT_EN -GCheckOperandIndependence=1 $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-mdq-selective-recovery-rv32 verilator-mdq-selective-recovery-rv64
-verilator-mdq-selective-recovery-rv32 verilator-mdq-selective-recovery-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_mdq_selective_recovery,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-muldiv-stream verilator-muldiv-stream-rv64
-verilator-muldiv-stream verilator-muldiv-stream-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_muldiv_stream,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-.PHONY: verilator-muldiv-fpga-rv32 verilator-muldiv-fpga-rv64
-verilator-muldiv-fpga-rv32 verilator-muldiv-fpga-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_muldiv_fpga,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
 
 .PHONY: ioq-overlap-check
 ioq-overlap-check:
 	$(PYTHON) scripts/formal_contract.py ioq-overlap --output "$(BUILD_DIR)/ioq-overlap"
-verilator-div-iterations verilator-div-iterations-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_div_word_iterations,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-verilator-rou-dual-commit:
-	$(call VERILATOR_DIRECTED_RUN,rou_dual_commit,tb_rou_dual_commit,,-d RAPT_ASSERT_EN,)
 
-.PHONY: verilator-rou-exception-rd-rv32 verilator-rou-exception-rd-rv64
-verilator-rou-exception-rd-rv32 verilator-rou-exception-rd-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_rou_dual_commit,,-d RAPT_ASSERT_EN -d RAPT_TEST_EXCEPTION_RD $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-rou-zkt-rv32 verilator-rou-zkt-rv64
 verilator-rou-zkt-rv32 verilator-rou-zkt-rv64: VERILATOR_DIRECTED_FLAGS += -CFLAGS -O0
-verilator-rou-zkt-rv32 verilator-rou-zkt-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_rou_dual_commit,,-d RAPT_ASSERT_EN -GCheckOperandIndependence=1 $(if $(findstring rv64,$@),-d RAPT_RV64),)
 
-.PHONY: verilator-rou-fence-commit-rv32 verilator-rou-fence-commit-rv64
-verilator-rou-fence-commit-rv32 verilator-rou-fence-commit-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_rou_dual_commit,,-d RAPT_ASSERT_EN -d RAPT_TEST_FENCE_COMMIT $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-rou-dual-commit-rv64
-verilator-rou-dual-commit-rv64:
-	$(call VERILATOR_DIRECTED_RUN,rou_dual_commit_rv64,tb_rou_dual_commit,,-d RAPT_RV64 -d RAPT_ASSERT_EN,)
-
-.PHONY: verilator-rou-rvfi verilator-rou-rvfi-rv64 \
-	verilator-lsu-store-observation verilator-lsu-store-observation-rv64
-verilator-rou-rvfi:
-	$(call VERILATOR_DIRECTED_RUN,rou_rvfi,tb_rou_dual_commit,,-d RAPT_RVFI -d RAPT_ASSERT_EN,)
-verilator-rou-rvfi-rv64:
-	$(call VERILATOR_DIRECTED_RUN,rou_rvfi_rv64,tb_rou_dual_commit,,-d RAPT_RVFI -d RAPT_RV64 -d RAPT_ASSERT_EN,)
-verilator-lsu-store-observation:
-	$(call VERILATOR_DIRECTED_RUN,lsu_store_observation,tb_lsu_store_observation,,-d RAPT_ASSERT_EN,)
-verilator-lsu-store-observation-rv64:
-	$(call VERILATOR_DIRECTED_RUN,lsu_store_observation_rv64,tb_lsu_store_observation,,-d RAPT_RV64 -d RAPT_ASSERT_EN,)
-
-.PHONY: verilator-backend-extensibility
-.PHONY: verilator-backend-recovery verilator-backend-recovery-rv64
 verilator-backend-recovery: VERILATOR_DIRECTED_FLAGS += -GRecoveryExercise=1
 verilator-backend-recovery-rv64: VERILATOR_DIRECTED_FLAGS += -GRecoveryExercise=1 -DRAPT_RV64
-verilator-backend-extensibility:
-	$(call VERILATOR_DIRECTED_RUN,backend_extensibility,tb_backend_extensibility,,-d RAPT_ASSERT_EN,)
-verilator-backend-recovery:
-	$(call VERILATOR_DIRECTED_RUN,backend_recovery,tb_backend_extensibility,,-d RAPT_ASSERT_EN,)
-verilator-backend-recovery-rv64:
-	$(call VERILATOR_DIRECTED_RUN,backend_recovery_rv64,tb_backend_extensibility,,-d RAPT_ASSERT_EN,)
 
-.PHONY: verilator-iq-type-family
-verilator-iq-type-family:
-	$(call VERILATOR_DIRECTED_RUN,iq_type_family,tb_iq_type_family,,-d RAPT_ASSERT_EN,)
-
-.PHONY: verilator-width-1 verilator-width-2 verilator-width-3 verilator-width-4 verilator-width-mixed
 verilator-superscalar-widths: verilator-width-1 verilator-width-2 verilator-width-3 verilator-width-4 verilator-width-mixed verilator-width-contract verilator-width-odd
-verilator-width-1 verilator-width-2 verilator-width-3 verilator-width-4:
-	$(call VERILATOR_DIRECTED_RUN,width_$(lastword $(subst -, ,$@)),tb_superscalar_widths,,-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=$(lastword $(subst -, ,$@)) -d RAPT_RENAME_WIDTH=$(lastword $(subst -, ,$@)) -d RAPT_DISPATCH_WIDTH=$(lastword $(subst -, ,$@)) -d RAPT_COMMIT_WIDTH=$(lastword $(subst -, ,$@)),)
-verilator-width-mixed:
-	$(call VERILATOR_DIRECTED_RUN,width_mixed,tb_superscalar_widths,,-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=3 -d RAPT_RENAME_WIDTH=4 -d RAPT_DISPATCH_WIDTH=3 -d RAPT_COMMIT_WIDTH=4,)
-.PHONY: verilator-width-mixed-rv64
-verilator-width-mixed-rv64:
-	$(call VERILATOR_DIRECTED_RUN,width_mixed_rv64,tb_superscalar_widths,,-d RAPT_ASSERT_EN -d RAPT_RV64 -d RAPT_DECODE_WIDTH=3 -d RAPT_RENAME_WIDTH=4 -d RAPT_DISPATCH_WIDTH=3 -d RAPT_COMMIT_WIDTH=4,)
-.PHONY: verilator-width-contract verilator-width-odd
-verilator-width-contract:
-	$(call VERILATOR_DIRECTED_RUN,width_contract,tb_superscalar_widths,,-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=4 -d RAPT_RENAME_WIDTH=1 -d RAPT_DISPATCH_WIDTH=2 -d RAPT_COMMIT_WIDTH=3,)
-verilator-width-odd:
-	$(call VERILATOR_DIRECTED_RUN,width_odd,tb_superscalar_widths,,-d RAPT_ASSERT_EN -d RAPT_TEST_ODD_DEPTHS -d RAPT_DECODE_WIDTH=4 -d RAPT_RENAME_WIDTH=3 -d RAPT_DISPATCH_WIDTH=1 -d RAPT_COMMIT_WIDTH=2,)
-verilator-stream-queue:
-	$(call VERILATOR_DIRECTED_RUN,stream_queue,tb_stream_queue,,-d RAPT_ASSERT_EN,)
-.PHONY: verilator-stream-queue-bram
-verilator-stream-queue-bram:
-	$(call VERILATOR_DIRECTED_RUN,stream_queue_bram,tb_stream_queue,,-d RAPT_ASSERT_EN -d RAPT_FPGA_STREAM_BRAM=1,)
-.PHONY: verilator-stream-queue-lutram
-verilator-stream-queue-lutram:
-	$(call VERILATOR_DIRECTED_RUN,stream_queue_lutram,tb_stream_queue,,-d RAPT_ASSERT_EN -d RAPT_FPGA_LUTRAM=1,)
-.PHONY: verilator-stream-queue-sweep
-verilator-stream-queue-sweep:
-	$(call VERILATOR_DIRECTED_RUN,stream_queue_sweep,tb_stream_queue,,-d RAPT_ASSERT_EN -GSweepDepth=5,)
-verilator-rename-checkpoint:
-	$(call VERILATOR_DIRECTED_RUN,rename_checkpoint,tb_rename_checkpoint,,-d RAPT_ASSERT_EN,)
-verilator-rename-checkpoint-pipeline:
-	$(call VERILATOR_DIRECTED_RUN,rename_checkpoint_pipeline,tb_rename_checkpoint_pipeline,,-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=2 -d RAPT_RENAME_WIDTH=2 -d RAPT_COMMIT_WIDTH=2 -d RAPT_BRANCH_CHECKPOINTS=2,)
-.PHONY: verilator-rename-checkpoint-pipeline-rv64
-verilator-rename-checkpoint-pipeline-rv64:
-	$(call VERILATOR_DIRECTED_RUN,rename_checkpoint_pipeline_rv64,tb_rename_checkpoint_pipeline,,-d RAPT_ASSERT_EN -d RAPT_RV64 -d RAPT_DECODE_WIDTH=2 -d RAPT_RENAME_WIDTH=2 -d RAPT_COMMIT_WIDTH=2 -d RAPT_BRANCH_CHECKPOINTS=2,)
-verilator-rename-width-recovery:
-	$(call VERILATOR_DIRECTED_RUN,rename_width_recovery,tb_rename_width_recovery,,-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=4 -d RAPT_RENAME_WIDTH=4 -d RAPT_COMMIT_WIDTH=4,)
-.PHONY: verilator-rename-width-recovery-bram-rv32 verilator-rename-width-recovery-bram-rv64
-verilator-rename-width-recovery-bram-rv32 verilator-rename-width-recovery-bram-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_rename_width_recovery,,-d RAPT_ASSERT_EN -d RAPT_FPGA_STREAM_BRAM=1 -d RAPT_DECODE_WIDTH=4 -d RAPT_RENAME_WIDTH=4 -d RAPT_COMMIT_WIDTH=4 $(if $(findstring rv64,$@),-d RAPT_RV64),)
-verilator-l1i-width-window:
-	$(call VERILATOR_DIRECTED_RUN,l1i_width_window,tb_l1i_width_window,,-d RAPT_ASSERT_EN,)
-verilator-ifu-stream-events:
-	$(call VERILATOR_DIRECTED_RUN,ifu_stream_events,tb_ifu_stream_events,,-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=4,)
-.PHONY: verilator-ifu-stream-events-rv32 verilator-ifu-stream-events-rv64
+.PHONY: verilator-ifu-stream-events-rv32
 verilator-ifu-stream-events-rv32: verilator-ifu-stream-events
-verilator-ifu-stream-events-rv64:
-	$(call VERILATOR_DIRECTED_RUN,ifu_stream_events_rv64,tb_ifu_stream_events,,-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=4 -d RAPT_RV64,)
-.PHONY: verilator-ifu-wide-pack-rv32 verilator-ifu-wide-pack-rv64
-verilator-ifu-wide-pack-rv32 verilator-ifu-wide-pack-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_ifu_wide_pack,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
-.PHONY: verilator-ifu-l1i-wide-rv32 verilator-ifu-l1i-wide-rv64
-verilator-ifu-l1i-wide-rv32 verilator-ifu-l1i-wide-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_ifu_l1i_stream,,-d RAPT_ASSERT_EN -d RAPT_TEST_ALL_32 $(if $(findstring rv64,$@),-d RAPT_RV64),)
-.PHONY: verilator-ifu-response-stage-rv32 verilator-ifu-response-stage-rv64
-verilator-ifu-response-stage-rv32 verilator-ifu-response-stage-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_ifu_response_stage,,-d RAPT_ASSERT_EN -d RAPT_FETCH_RESPONSE_STAGE=1 $(if $(findstring rv64,$@),-d RAPT_RV64),)
-verilator-frontend-recovery:
-	$(call VERILATOR_DIRECTED_RUN,frontend_recovery,tb_frontend_recovery,,-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=4,)
-verilator-rename-random:
-	$(call VERILATOR_DIRECTED_RUN,rename_random,tb_rename_random,,-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=4 -d RAPT_RENAME_WIDTH=3 -d RAPT_COMMIT_WIDTH=4,+SEED=$(VERILATOR_DIRECTED_SEED))
-.PHONY: verilator-rename-random-bram-rv32 verilator-rename-random-bram-rv64
-verilator-rename-random-bram-rv32 verilator-rename-random-bram-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_rename_random,,-d RAPT_ASSERT_EN -d RAPT_FPGA_STREAM_BRAM=1 -d RAPT_DECODE_WIDTH=4 -d RAPT_RENAME_WIDTH=4 -d RAPT_COMMIT_WIDTH=4 $(if $(findstring rv64,$@),-d RAPT_RV64),+SEED=$(VERILATOR_DIRECTED_SEED))
 .PHONY: rename-admit-prove
 .PHONY: rename-admit-native
 .PHONY: rename-admit-lint
@@ -2495,73 +2156,46 @@ rename-admit-prove:
 	@set -e; for width in 1 3 4 8 16; do \
 		timeout 60s yosys -Q -T -m slang -p "read_slang --single-unit --top formal_rename_admit -GWidth=$$width $(RAPTOR_HOME)/hdl/frontend/rapt_rename_admit.sv $(RAPTOR_HOME)/verify/formal/formal_rename_admit.sv; select -assert-none t:\$$check t:\$$assert t:\$$assume t:\$$cover; prep -top formal_rename_admit -flatten; opt; sat -verify -prove correct 1 -set-def-inputs" > "$(BUILD_DIR)/rename-admit/prove-$$width.log" 2>&1; \
 	done
-.PHONY: verilator-rename-random-rv64 verilator-rename-random-expand
-verilator-rename-random-rv64:
-	$(call VERILATOR_DIRECTED_RUN,rename_random_rv64,tb_rename_random,,-d RAPT_ASSERT_EN -d RAPT_RV64 -d RAPT_DECODE_WIDTH=4 -d RAPT_RENAME_WIDTH=3 -d RAPT_COMMIT_WIDTH=4,+SEED=$(VERILATOR_DIRECTED_SEED))
-verilator-rename-random-expand:
-	$(call VERILATOR_DIRECTED_RUN,rename_random_expand,tb_rename_random,,-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=2 -d RAPT_RENAME_WIDTH=4 -d RAPT_COMMIT_WIDTH=2,+SEED=$(VERILATOR_DIRECTED_SEED))
 .PHONY: rank-select-prove rank-select-evaluate
 rank-select-prove:
-	python3 "$(RAPTOR_HOME)/verify/scripts/rank_select_check.py" --mode prove
+	python3 "$(RAPTOR_HOME)/verify/scripts/logic_check.py" rank-select --mode prove
 rank-select-evaluate:
-	python3 "$(RAPTOR_HOME)/verify/scripts/rank_select_check.py" --mode all
+	python3 "$(RAPTOR_HOME)/verify/scripts/logic_check.py" rank-select --mode all
 
 # These standalone selectors must compile with warnings fatal, including
 # scheduling cycles; do not inherit the broad directed-suite warning policy.
-verilator-issue-select:
-	$(call VERILATOR_DIRECTED_RUN,issue_select,tb_issue_select, "$(RAPTOR_HOME)/verify/formal/formal_issue_select.sv",,+SEED=$(VERILATOR_DIRECTED_SEED))
-.PHONY: verilator-issue-select-large
-verilator-issue-select-large:
-	$(call VERILATOR_DIRECTED_RUN,issue_select_large,tb_issue_select_large,,,)
 .PHONY: issue-select-prove issue-select-evaluate issue-select-scaling issue-select-audit-test
 .PHONY: issue-select-uniform-prove
 issue-select-prove:
-	python3 "$(RAPTOR_HOME)/verify/scripts/issue_select_check.py" --mode prove
+	python3 "$(RAPTOR_HOME)/verify/scripts/logic_check.py" issue-select --mode prove
 issue-select-uniform-prove:
-	python3 "$(RAPTOR_HOME)/verify/scripts/issue_select_check.py" --mode prove --matrix uniform --output "$(BUILD_DIR)/issue-select-uniform"
+	python3 "$(RAPTOR_HOME)/verify/scripts/logic_check.py" issue-select --mode prove --matrix uniform --output "$(BUILD_DIR)/issue-select-uniform"
 issue-select-evaluate:
-	python3 "$(RAPTOR_HOME)/verify/scripts/issue_select_check.py" --mode all
+	python3 "$(RAPTOR_HOME)/verify/scripts/logic_check.py" issue-select --mode all
 issue-select-scaling:
-	python3 "$(RAPTOR_HOME)/verify/scripts/issue_select_check.py" --mode synth --matrix port-scaling --output "$(BUILD_DIR)/issue-port-scaling"
+	python3 "$(RAPTOR_HOME)/verify/scripts/logic_check.py" issue-select --mode synth --matrix port-scaling --output "$(BUILD_DIR)/issue-port-scaling"
 issue-select-audit-test:
-	python3 "$(RAPTOR_HOME)/verify/scripts/test_issue_select_check.py"
-verilator-dispatch-admit:
-	$(call VERILATOR_DIRECTED_RUN,dispatch_admit,tb_dispatch_admit, "$(RAPTOR_HOME)/verify/formal/formal_dispatch_admit.sv",,+SEED=$(VERILATOR_DIRECTED_SEED))
+	python3 "$(RAPTOR_HOME)/verify/scripts/test_logic_check.py"
 
-verilator-rob-dispatch-select:
-	$(call VERILATOR_DIRECTED_RUN,rob_dispatch_select,tb_rob_dispatch_select,,,+SEED=$(VERILATOR_DIRECTED_SEED))
-.PHONY: verilator-operand-spill
-verilator-operand-spill:
-	$(call VERILATOR_DIRECTED_RUN,operand_spill,tb_operand_spill,,-d RAPT_ASSERT_EN,+SEED=$(VERILATOR_DIRECTED_SEED))
-.PHONY: verilator-operand-value-spill verilator-operand-value-spill-lutram
-verilator-operand-value-spill:
-	$(call VERILATOR_DIRECTED_RUN,operand_value_spill,tb_operand_value_spill,,-d RAPT_ASSERT_EN,+SEED=$(VERILATOR_DIRECTED_SEED))
-verilator-operand-value-spill-lutram:
-	$(call VERILATOR_DIRECTED_RUN,operand_value_spill_lutram,tb_operand_value_spill,,-d RAPT_ASSERT_EN -d RAPT_FPGA_LUTRAM=1,+SEED=$(VERILATOR_DIRECTED_SEED))
-.PHONY: verilator-dispatch-compact
-verilator-dispatch-compact:
-	$(call VERILATOR_DIRECTED_RUN,dispatch_compact,tb_dispatch_compact,,-d RAPT_ASSERT_EN,+SEED=$(VERILATOR_DIRECTED_SEED))
 .PHONY: rob-dispatch-select-prove rob-dispatch-select-evaluate dispatch-compact-evaluate
 rob-dispatch-select-prove:
-	python3 "$(RAPTOR_HOME)/verify/scripts/rob_dispatch_select_check.py" --mode prove \
+	python3 "$(RAPTOR_HOME)/verify/scripts/logic_check.py" rob-dispatch-select --mode prove \
 		--output "$(BUILD_DIR)/rob-dispatch-select-proof"
 rob-dispatch-select-evaluate:
-	python3 "$(RAPTOR_HOME)/verify/scripts/rob_dispatch_select_check.py" --mode all
+	python3 "$(RAPTOR_HOME)/verify/scripts/logic_check.py" rob-dispatch-select --mode all
 dispatch-compact-evaluate:
 	python3 "$(RAPTOR_HOME)/verify/scripts/dispatch_compact_evaluate.py"
 .PHONY: dispatch-admit-prove
 dispatch-admit-prove:
-	python3 "$(RAPTOR_HOME)/verify/scripts/dispatch_admit_check.py"
+	python3 "$(RAPTOR_HOME)/verify/scripts/logic_check.py" dispatch-admit
 
-verilator-recovery-pending:
-	$(call VERILATOR_DIRECTED_RUN,recovery_pending,tb_recovery_pending, "$(RAPTOR_HOME)/verify/formal/formal_recovery_pending.sv",-d RAPT_ASSERT_EN,+SEED=$(VERILATOR_DIRECTED_SEED))
 .PHONY: recovery-pending-check
 recovery-pending-check:
 	python3 "$(RAPTOR_HOME)/verify/scripts/recovery_pending_check.py"
 
 .PHONY: rob-age-mask-check
 rob-age-mask-check: ## Prove the circular recovery mask and compare generic mapped cones
-	python3 "$(RAPTOR_HOME)/verify/scripts/rob_age_mask_check.py"
+	python3 "$(RAPTOR_HOME)/verify/scripts/logic_check.py" rob-age-mask
 
 .PHONY: synthesis-driver-check
 synthesis-driver-check: ## Exercise valid/missing-driver tops through the actual synthesis flow
@@ -2577,20 +2211,10 @@ rename-checkpoint-check:
 rename-checkpoint-prove:
 	python3 "$(RAPTOR_HOME)/verify/scripts/rename_checkpoint_check.py" --mode prove
 
-verilator-completion-guard:
-	$(call VERILATOR_DIRECTED_RUN,completion_guard,tb_completion_guard,,,+SEED=$(VERILATOR_DIRECTED_SEED))
-.PHONY: verilator-completion-stage-rv32 verilator-completion-stage-rv64
-verilator-completion-stage-rv32 verilator-completion-stage-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_completion_stage,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
 .PHONY: completion-guard-check
 completion-guard-check:
 	python3 "$(RAPTOR_HOME)/verify/scripts/completion_guard_check.py"
 
-verilator-iq-reclaim-random:
-	$(call VERILATOR_DIRECTED_RUN,iq_reclaim_random,tb_iq_reclaim_random,,-d RAPT_ASSERT_EN -d RAPT_DISPATCH_WIDTH=3,+SEED=$(VERILATOR_DIRECTED_SEED))
-
-.PHONY: verilator-iq-recovery-window
-.PHONY: verilator-iq-recovery-window-rv64
 IQ_RECOVERY_MATRIX_TARGETS := verilator-iq-recovery-width3 verilator-iq-recovery-width3-rv64 \
                               verilator-iq-recovery-width4 verilator-iq-recovery-width4-rv64
 .PHONY: $(IQ_RECOVERY_MATRIX_TARGETS)
@@ -2598,54 +2222,16 @@ $(IQ_RECOVERY_MATRIX_TARGETS): VERILATOR_DIRECTED_FLAGS += -CFLAGS -O0
 $(IQ_RECOVERY_MATRIX_TARGETS):
 	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_iq_recovery_window,,-d RAPT_ASSERT_EN -d RAPT_DISPATCH_WIDTH=$(if $(findstring width3,$@),3,4) $(if $(findstring rv64,$@),-d RAPT_RV64),)
 verilator-iq-recovery-window verilator-iq-recovery-window-rv64: VERILATOR_DIRECTED_FLAGS += -CFLAGS -O0
-verilator-iq-recovery-window-rv64:
-	$(call VERILATOR_DIRECTED_RUN,iq_recovery_window_rv64,tb_iq_recovery_window,,-d RAPT_ASSERT_EN -d RAPT_RV64,)
-verilator-iq-recovery-window: ## Measure resident wrong-path issue before precise flush
-	$(call VERILATOR_DIRECTED_RUN,iq_recovery_window,tb_iq_recovery_window,,-d RAPT_ASSERT_EN,)
-.PHONY: verilator-iq-reclaim-random-rv64
-verilator-iq-reclaim-random-rv64:
-	$(call VERILATOR_DIRECTED_RUN,iq_reclaim_random_rv64,tb_iq_reclaim_random,,-d RAPT_ASSERT_EN -d RAPT_RV64 -d RAPT_DISPATCH_WIDTH=3,+SEED=$(VERILATOR_DIRECTED_SEED))
-.PHONY: verilator-iq-deferred-reclaim-rv32 verilator-iq-deferred-reclaim-rv64
-verilator-iq-deferred-reclaim-rv32 verilator-iq-deferred-reclaim-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_iq_reclaim_random,,-d RAPT_ASSERT_EN -d RAPT_DISPATCH_WIDTH=3 -GReclaimOnIssue=0 $(if $(findstring rv64,$@),-d RAPT_RV64),+SEED=$(VERILATOR_DIRECTED_SEED))
-.PHONY: verilator-iq-reclaim-single verilator-iq-reclaim-three verilator-iq-reclaim-six-rv64 iq-reclaim-width-matrix
+.PHONY: iq-reclaim-width-matrix
 IQ_RECLAIM_WIDTH_TARGETS := verilator-iq-reclaim-single verilator-iq-reclaim-three verilator-iq-reclaim-six-rv64
-.PHONY: verilator-iq-zkt-dependencies-rv32 verilator-iq-zkt-dependencies-rv64
 verilator-iq-zkt-dependencies-rv32 verilator-iq-zkt-dependencies-rv64: VERILATOR_DIRECTED_FLAGS += -CFLAGS -O0
-verilator-iq-zkt-dependencies-rv32 verilator-iq-zkt-dependencies-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_iq_recovery_window,,-d RAPT_ASSERT_EN -GCheckOperandIndependence=1 -GCheckDependencyCases=1 $(if $(findstring rv64,$@),-d RAPT_RV64),)
 
-.PHONY: verilator-iq-zkt-recovery-rv32 verilator-iq-zkt-recovery-rv64
-verilator-iq-zkt-recovery-rv32 verilator-iq-zkt-recovery-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_iq_recovery_window,,-d RAPT_ASSERT_EN -GCheckOperandIndependence=1 $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-iq-zkt-rv32 verilator-iq-zkt-rv64
-verilator-iq-zkt-rv32 verilator-iq-zkt-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_iq_reclaim_random,,-d RAPT_ASSERT_EN -GCheckOperandIndependence=1 -GEntries=8 $(if $(findstring rv64,$@),-d RAPT_RV64),+SEED=$(VERILATOR_DIRECTED_SEED))
-verilator-iq-reclaim-single:
-	$(call VERILATOR_DIRECTED_RUN,iq_reclaim_single,tb_iq_reclaim_random,,-d RAPT_ASSERT_EN -d RAPT_INTEGER_ISSUE_PORTS=1 -d RAPT_DISPATCH_WIDTH=1 -GEntries=1,+SEED=$(VERILATOR_DIRECTED_SEED))
-verilator-iq-reclaim-three:
-	$(call VERILATOR_DIRECTED_RUN,iq_reclaim_three,tb_iq_reclaim_random,,-d RAPT_ASSERT_EN -d RAPT_INTEGER_ISSUE_PORTS=3 -d RAPT_DISPATCH_WIDTH=4 -GEntries=7,+SEED=$(VERILATOR_DIRECTED_SEED))
-verilator-iq-reclaim-six-rv64:
-	$(call VERILATOR_DIRECTED_RUN,iq_reclaim_six_rv64,tb_iq_reclaim_random,,-d RAPT_ASSERT_EN -d RAPT_RV64 -d RAPT_INTEGER_ISSUE_PORTS=6 -d RAPT_DISPATCH_WIDTH=4 -GEntries=11,+SEED=$(VERILATOR_DIRECTED_SEED))
 iq-reclaim-width-matrix: verilator-iq-reclaim-random verilator-iq-reclaim-random-rv64 $(IQ_RECLAIM_WIDTH_TARGETS)
 
-.PHONY: verilator-iq-ordered-head verilator-iq-ordered-head-rv64
-verilator-iq-ordered-head verilator-iq-ordered-head-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_iq_reclaim_random,,-d RAPT_ASSERT_EN -GInOrder=1 -GPorts=1 -GEntries=7 $(if $(findstring rv64,$@),-d RAPT_RV64),+SEED=$(VERILATOR_DIRECTED_SEED))
-
-.PHONY: verilator-iq-repair-three verilator-iq-repair-six-rv64 iq-repair-lifecycle-matrix
-verilator-iq-repair-three:
-	$(call VERILATOR_DIRECTED_RUN,iq_repair_three,tb_iq_reclaim_random,,-d RAPT_ASSERT_EN -d RAPT_INTEGER_ISSUE_PORTS=3 -d RAPT_DISPATCH_WIDTH=4 -GEntries=7 -GRebalance=1,+SEED=$(VERILATOR_DIRECTED_SEED))
-verilator-iq-repair-six-rv64:
-	$(call VERILATOR_DIRECTED_RUN,iq_repair_six_rv64,tb_iq_reclaim_random,,-d RAPT_ASSERT_EN -d RAPT_RV64 -d RAPT_INTEGER_ISSUE_PORTS=6 -d RAPT_DISPATCH_WIDTH=4 -GEntries=11 -GRebalance=1,+SEED=$(VERILATOR_DIRECTED_SEED))
+.PHONY: iq-repair-lifecycle-matrix
 iq-repair-lifecycle-matrix: verilator-iq-repair-three verilator-iq-repair-six-rv64
 
 .PHONY: sim-build-flags-test width-evaluate-parser-test
-.PHONY: verilator-prf-state verilator-prf-state-rv64
-.PHONY: verilator-prf-state-arch16
-verilator-prf-state-arch16:
-	$(call VERILATOR_DIRECTED_RUN,prf_state_arch16,tb_prf_state,,-d RAPT_RVFI -GArchRegs=16,+SEED=$(VERILATOR_DIRECTED_SEED))
 
 .PHONY: prf-equivalence-audit-test
 .PHONY: rnu-equivalence-audit-test
@@ -2667,49 +2253,28 @@ prf-contract-check:
 prf-equivalence-audit-test:
 	python3 "$(RAPTOR_HOME)/verify/scripts/test_prf_equivalence.py"
 
-verilator-prf-state:
-	$(call VERILATOR_DIRECTED_RUN,prf_state,tb_prf_state,,-d RAPT_RVFI,+SEED=$(VERILATOR_DIRECTED_SEED))
-verilator-prf-state-rv64:
-	$(call VERILATOR_DIRECTED_RUN,prf_state_rv64,tb_prf_state,,-d RAPT_RVFI -d RAPT_RV64,+SEED=$(VERILATOR_DIRECTED_SEED))
-
 sim-build-flags-test: ## Check assertion compiler flags in an isolated simulator fixture
 	python3 "$(RAPTOR_HOME)/verify/scripts/test_sim_build_flags.py"
 
 .PHONY: sta-entrypoints-test
 sta-entrypoints-test: ## Check offline STA preflight and dependency failure diagnostics
-	python3 "$(RAPTOR_HOME)/verify/scripts/test_sta_entrypoints.py"
+	python3 "$(RAPTOR_HOME)/verify/scripts/test_sta.py" StaEntrypointsTest
 
 width-evaluate-parser-test:
 	python3 "$(RAPTOR_HOME)/verify/scripts/test_width_evaluate.py"
-	python3 "$(RAPTOR_HOME)/verify/scripts/test_width_evaluate_evidence.py"
-verilator-ras:
-	$(call VERILATOR_DIRECTED_RUN,ras,tb_ras,,-d RAPT_ASSERT_EN,+SEED=$(VERILATOR_DIRECTED_SEED))
-.PHONY: verilator-ras-rv64 verilator-tage-read-storage-rv32 verilator-tage-read-storage-rv64
-verilator-ras-rv64:
-	$(call VERILATOR_DIRECTED_RUN,ras_rv64,tb_ras,,-d RAPT_ASSERT_EN -d RAPT_RV64,+SEED=$(VERILATOR_DIRECTED_SEED))
-.PHONY: verilator-btb-storage-rv32 verilator-btb-storage-rv64
-verilator-btb-storage-rv32 verilator-btb-storage-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_btb_storage,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
 
-verilator-tage-read-storage-rv32 verilator-tage-read-storage-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_tage_read_storage,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
-.PHONY: verilator-frontend-count-rv32 verilator-frontend-count-rv64
-verilator-frontend-count-rv32 verilator-frontend-count-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_frontend_count,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
 verilator-ras-pipeline:
 	$(call VERILATOR_DIRECTED_RUN,ras_pipeline,tb_ras_pipeline, $(wildcard $(RAPTOR_HOME)/hdl/frontend/branch_predictor/*.sv),-d RAPT_ASSERT_EN,)
 	$(call VERILATOR_DIRECTED_RUN,ras_pipeline4,tb_ras_pipeline, $(wildcard $(RAPTOR_HOME)/hdl/frontend/branch_predictor/*.sv),-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=4 -d RAPT_COMMIT_WIDTH=4,)
 .PHONY: ras-check
 ras-check:
-	python3 "$(RAPTOR_HOME)/verify/scripts/ras_check.py"
-verilator-predict-history:
-	$(call VERILATOR_DIRECTED_RUN,predict_history,tb_predict_history, "$(RAPTOR_HOME)/verify/formal/formal_predict_history.sv",,+SEED=$(VERILATOR_DIRECTED_SEED))
+	python3 "$(RAPTOR_HOME)/verify/scripts/logic_check.py" ras
 verilator-predict-history-pipeline:
 	$(call VERILATOR_DIRECTED_RUN,predict_history_pipeline,tb_predict_history_pipeline, $(wildcard $(RAPTOR_HOME)/hdl/frontend/branch_predictor/*.sv),-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=4 -d RAPT_COMMIT_WIDTH=4,)
 	$(call VERILATOR_DIRECTED_RUN,predict_history_pipeline_rv64,tb_predict_history_pipeline, $(wildcard $(RAPTOR_HOME)/hdl/frontend/branch_predictor/*.sv),-d RAPT_ASSERT_EN -d RAPT_RV64 -d RAPT_DECODE_WIDTH=4 -d RAPT_COMMIT_WIDTH=2,)
 .PHONY: predict-history-prove
 predict-history-prove:
-	python3 "$(RAPTOR_HOME)/verify/scripts/predict_history_check.py"
+	python3 "$(RAPTOR_HOME)/verify/scripts/logic_check.py" predict-history
 .PHONY: recovery-metrics-test
 recovery-metrics-test:
 	@mkdir -p "$(BUILD_DIR)/recovery-metrics"
@@ -2730,145 +2295,9 @@ light: fuzz sigtest ## Run all lightweight verification
 clean: fuzz-clean riscof-clean coverage-clean sigtest-clean formal-clean jtag-clean uvm-clean xsim-clean verilator-directed-clean ## Clean all verify artifacts
 	rm -rf $(BUILD_DIR)
 
-.PHONY: verilator-lsu-split-fault-rv32 verilator-lsu-split-fault-rv64
-verilator-lsu-split-fault-rv32 verilator-lsu-split-fault-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_lsu_split_fault,,-d RAPT_ASSERT_EN)
-
 .PHONY: rva22s64-split-page-permissions-run
 
-.PHONY: verilator-l1d-load-pbmt
-verilator-l1d-load-pbmt:
-	$(call VERILATOR_DIRECTED_RUN,l1d_load_pbmt,tb_l1d_load_pbmt,,-d RAPT_RV64 -d RAPT_ASSERT_EN,)
-
-.PHONY: verilator-ioq-pbmt-order verilator-sq-pbmt-order
-verilator-ioq-pbmt-order:
-	$(call VERILATOR_DIRECTED_RUN,ioq_pbmt_order,tb_ioq_pbmt_order,,-d RAPT_RV64 -d RAPT_ASSERT_EN,)
-verilator-sq-pbmt-order:
-	$(call VERILATOR_DIRECTED_RUN,sq_pbmt_order,tb_sq_pbmt_order,,-d RAPT_RV64 -d RAPT_ASSERT_EN,)
-
-.PHONY: verilator-ioq-store-snapshot-rv32 verilator-ioq-store-snapshot-rv64
-verilator-ioq-store-snapshot-rv32 verilator-ioq-store-snapshot-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_store_translation_snapshot,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-ioq-store-stage-rv32 verilator-ioq-store-stage-rv64
-verilator-ioq-store-stage-rv32 verilator-ioq-store-stage-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_store_stage,,-d RAPT_ASSERT_EN)
-.PHONY: verilator-ioq-mem-context-rv32 verilator-ioq-mem-context-rv64
-verilator-ioq-mem-context-rv32 verilator-ioq-mem-context-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_mem_context,,-d RAPT_ASSERT_EN)
-.PHONY: verilator-lsu-mem-context-rv32 verilator-lsu-mem-context-rv64
-verilator-lsu-mem-context-rv32 verilator-lsu-mem-context-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_lsu_mem_context,,-d RAPT_ASSERT_EN)
-.PHONY: verilator-ioq-readonly-pma-rv32 verilator-ioq-readonly-pma-rv64
-verilator-ioq-readonly-pma-rv32 verilator-ioq-readonly-pma-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_readonly_pma,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-ioq-amo-fault-rv32 verilator-ioq-amo-fault-rv64
-verilator-ioq-amo-fault-rv32 verilator-ioq-amo-fault-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_amo_fault,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-l1d-io-size
-verilator-l1d-io-size:
-	$(call VERILATOR_DIRECTED_RUN,l1d_io_size,tb_l1d_io_size,,-d RAPT_RV64 -d RAPT_ASSERT_EN,)
-
-.PHONY: verilator-lsu-l1d-io-split
-verilator-lsu-l1d-io-split:
-	$(call VERILATOR_DIRECTED_RUN,lsu_l1d_io_split,tb_lsu_l1d_io_split,$(sort  ),-d RAPT_RV64 -d RAPT_ASSERT_EN,)
-
-.PHONY: verilator-bus-pbmt-rv32 verilator-bus-pbmt-rv64
-verilator-bus-pbmt-rv32 verilator-bus-pbmt-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_bus_pbmt,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-l2-pbmt
-verilator-l2-pbmt:
-	$(call VERILATOR_DIRECTED_RUN,l2_pbmt,tb_l2_pbmt,,-d RAPT_L2_EN,)
-
-.PHONY: verilator-l2-pbmt-rv64
-verilator-l2-pbmt-rv64:
-	$(call VERILATOR_DIRECTED_RUN,l2_pbmt_rv64,tb_l2_pbmt,,-d RAPT_RV64 -d RAPT_L2_EN,)
-
-.PHONY: verilator-l2-pbmt-boom-rv32 verilator-l2-pbmt-boom-rv64
-verilator-l2-pbmt-boom-rv32 verilator-l2-pbmt-boom-rv64: ## Check PBMT bypass and typed AXI responses with the 8-way SRAM L2
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l2_pbmt_boom,,$(if $(findstring rv64,$@),-d RAPT_RV64) -d RAPT_L2_EN -d RAPT_ASSERT_EN,)
-
-.PHONY: verilator-l1d-ptw-pma-rv32 verilator-l1d-ptw-pma-rv64
-verilator-l1d-ptw-pma-rv32 verilator-l1d-ptw-pma-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1d_ptw_pma,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-ifetch-word-rv32 verilator-ifetch-word-rv64
-verilator-ifetch-word-rv32 verilator-ifetch-word-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ifetch_word,,)
-
-.PHONY: verilator-ifetch-translate-rv32 verilator-ifetch-translate-rv64
-verilator-ifetch-translate-rv32 verilator-ifetch-translate-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ifetch_translate,,)
-
-.PHONY: verilator-data-page-permissions-rv32 verilator-data-page-permissions-rv64
-verilator-data-page-permissions-rv32 verilator-data-page-permissions-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_data_page_permissions,,)
-
-.PHONY: verilator-ptw-pmp-span-rv32 verilator-ptw-pmp-span-rv64
-verilator-ptw-pmp-span-rv32 verilator-ptw-pmp-span-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ptw_pmp_span,,)
-
-.PHONY: verilator-l1i-word-path-rv32 verilator-l1i-word-path-rv64
-.PHONY: verilator-l1i-access-sizes-rv32 verilator-l1i-access-sizes-rv64
-verilator-l1i-access-sizes-rv32 verilator-l1i-access-sizes-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l1i_access_sizes,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-verilator-l1i-word-path-rv32 verilator-l1i-word-path-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1i_word_path,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-ifetch-io-guard-rv32 verilator-ifetch-io-guard-rv64
-verilator-ifetch-io-guard-rv32 verilator-ifetch-io-guard-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ifetch_io_guard,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-l1i-io-guard-rv64
 verilator-l1i-io-guard-rv64: VERILATOR_DIRECTED_FLAGS += -GUseGuard=1
-verilator-l1i-io-guard-rv64:
-	$(call VERILATOR_DIRECTED_RUN,l1i_io_guard_rv64,tb_l1i_word_path,,-d RAPT_RV64 -d RAPT_ASSERT_EN,)
-
-.PHONY: verilator-ioq-atomic-pma-rv32 verilator-ioq-atomic-pma-rv64
-verilator-ioq-atomic-pma-rv32 verilator-ioq-atomic-pma-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_atomic_pma,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-l1d-lr-pma-rv32 verilator-l1d-lr-pma-rv64
-verilator-l1d-lr-pma-rv32 verilator-l1d-lr-pma-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1d_pma,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-ioq-zero-pma-rv32 verilator-ioq-zero-pma-rv64
-verilator-ioq-zero-pma-rv32 verilator-ioq-zero-pma-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_zero_pma,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-l1d-sram-pma-rv32 verilator-l1d-sram-pma-rv64
-verilator-l1d-sram-pma-rv32 verilator-l1d-sram-pma-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1d_pma,,-d RAPT_ASSERT_EN,+SRAM)
-
-.PHONY: verilator-ioq-data-span-rv32 verilator-ioq-data-span-rv64
-verilator-ioq-data-span-rv32 verilator-ioq-data-span-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_data_span,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-l1d-read-error-rv32 verilator-l1d-read-error-rv64
-verilator-l1d-read-error-rv32 verilator-l1d-read-error-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1d_read_error,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-l1d-ptw-error-rv32 verilator-l1d-ptw-error-rv64
-verilator-l1d-ptw-error-rv32 verilator-l1d-ptw-error-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1d_ptw_error,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-l1d-ptw-axi-error-rv32 verilator-l1d-ptw-axi-error-rv64
-verilator-l1d-ptw-axi-error-rv32 verilator-l1d-ptw-axi-error-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1d_ptw_axi_error,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-l1d-write-error-rv32 verilator-l1d-write-error-rv64 verilator-sq-write-error-rv32 verilator-sq-write-error-rv64
-verilator-l1d-write-error-rv32 verilator-l1d-write-error-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1d_write_error,,-d RAPT_ASSERT_EN)
-verilator-sq-write-error-rv32 verilator-sq-write-error-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_sq_write_error,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-csr-bus-error-rv32 verilator-csr-bus-error-rv64
-verilator-csr-bus-error-rv32 verilator-csr-bus-error-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_csr_bus_error,,-d RAPT_ASSERT_EN)
 
 # Architectural snapshot persistence for posted-write diagnostics. The caller
 # supplies a freshly built DUT/reference; output must be fresh (no stale saves).
@@ -2879,7 +2308,7 @@ rva22s64-bus-error-checkpoint-run: $(RVA22S64_MROM)
 	$(CC) $(GUEST_CPPFLAGS) -DRAPT_CKPT_ERROR -march=rv$(RVA22S64_XLEN)imac_zicsr_zifencei -mabi=$(if $(filter 64,$(RVA22S64_XLEN)),lp64,ilp32) -nostdlib -nostartfiles -static \
 		-Wl,--no-relax -T "$(VERIFY_HOME)/scripts/fuzz_link.ld" "$(RAPTOR_HOME)/app/tests/baremetal/bus_write_error.S" -o "$(RVA22S64_CHECKPOINT_DIR)/test.elf"
 	$(OBJCOPY) -O binary "$(RVA22S64_CHECKPOINT_DIR)/test.elf" "$(RVA22S64_CHECKPOINT_DIR)/test.bin"
-	$(PYTHON) "$(VERIFY_HOME)/scripts/bus_error_checkpoint.py" \
+	$(PYTHON) "$(VERIFY_HOME)/scripts/checkpoint_milestones.py" bus-error \
 		--npc "$(RVA22S64_NPC)" --reference "$(NEMU_SO_$(RVA22S64_XLEN))" --mrom "$(MROM_IMG)" \
 		--elf "$(RVA22S64_CHECKPOINT_DIR)/test.elf" --image "$(RVA22S64_CHECKPOINT_DIR)/test.bin" --output "$(RVA22S64_CHECKPOINT_DIR)/runs"
 
@@ -2961,56 +2390,11 @@ mmio-virtio-mask-check:
 	"$(BUILD_DIR)/mmio-virtio-mask32"
 	$(HOST_CXX) -std=c++17 -O2 -DCONFIG_ISA64 -I"$(NSIM_HOME)/include" "$(RAPTOR_HOME)/app/tests/host/mmio_virtio_mask.cc" -o "$(BUILD_DIR)/mmio-virtio-mask64"
 	"$(BUILD_DIR)/mmio-virtio-mask64"
-.PHONY: verilator-lsu-hum-pmp-rv32 verilator-lsu-hum-pmp-rv64
-verilator-lsu-hum-pmp-rv32 verilator-lsu-hum-pmp-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_lsu_hum_pmp,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-pmp-endpoint-rv64
-verilator-pmp-endpoint-rv64:
-	$(call VERILATOR_DIRECTED_RUN,pmp_endpoint_rv64,tb_pmp_endpoint,,-d RAPT_RV64,)
-
-.PHONY: verilator-fpu-product-share
-.PHONY: verilator-fp-registers-rv32 verilator-fp-registers-rv64
-verilator-fp-registers-rv32 verilator-fp-registers-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_fp_registers,,-d RAPT_ASSERT_EN,,)
-.PHONY: verilator-ioq-fp-ooo-rv32 verilator-ioq-fp-ooo-rv64
-verilator-ioq-fp-ooo-rv32 verilator-ioq-fp-ooo-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_fp_ooo,,-d RAPT_ASSERT_EN,,)
-.PHONY: verilator-feu-ooo-rv32 verilator-feu-ooo-rv64
-verilator-feu-ooo-rv32 verilator-feu-ooo-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_feu_ooo,,-d RAPT_ASSERT_EN,,)
-verilator-fpu-product-share:
-	$(call VERILATOR_DIRECTED_RUN,fpu_product_share,tb_fpu_product_share,,-d RAPT_ASSERT_EN,)
-
-.PHONY: verilator-csr-pmp-warl-rv32 verilator-csr-pmp-warl-rv64
-verilator-csr-pmp-warl-rv32 verilator-csr-pmp-warl-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_csr_pmp_warl,,)
-
-.PHONY: verilator-csr-pmp-address-rv64
-verilator-csr-pmp-address-rv64:
-	$(call VERILATOR_DIRECTED_RUN,csr_pmp_address_rv64,tb_csr_pmp_address,,-d RAPT_RV64,)
-
 .PHONY: npc-event-bridge-check
 npc-event-bridge-check: ## Check NPC half-cycle external-write notification ordering
 	mkdir -p "$(BUILD_DIR)/npc-event-bridge"
 	$(HOST_CXX) -std=c++17 -Wall -Wextra -Werror -I"$(NSIM_HOME)/include" "$(RAPTOR_HOME)/app/tests/host/npc_eval_events.cc" -o "$(BUILD_DIR)/npc-event-bridge/test"
 	"$(BUILD_DIR)/npc-event-bridge/test"
-
-.PHONY: verilator-l1d-reservation-external-rv32 verilator-l1d-reservation-external-rv64
-verilator-l1d-reservation-external-rv32 verilator-l1d-reservation-external-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1d_reservation_external,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-ioq-sc-external-rv32 verilator-ioq-sc-external-rv64
-verilator-ioq-sc-external-rv32 verilator-ioq-sc-external-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_sc_external,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-ioq-completion-kill-rv32 verilator-ioq-completion-kill-rv64
-verilator-ioq-completion-kill-rv32 verilator-ioq-completion-kill-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_completion_kill,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-lsu-forward-cancel-rv32 verilator-lsu-forward-cancel-rv64
-verilator-lsu-forward-cancel-rv32 verilator-lsu-forward-cancel-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_lsu_forward_cancel,,-d RAPT_ASSERT_EN)
 
 .PHONY: rva22s64-lrsc-sv39-alias-run
 rva22s64-lrsc-sv39-alias-run: RVA22S64_XLEN = 64
@@ -3020,75 +2404,11 @@ rva22s64-lrsc-sv39-alias-run: $(RVA22S64_MROM)
 	$(OBJCOPY) -O binary "$(BUILD_DIR)/lrsc-sv39-alias/test.elf" "$(BUILD_DIR)/lrsc-sv39-alias/test.bin"
 	$(PYTHON) "$(VERIFY_HOME)/scripts/rva22s64_privileged.py" --name lrsc-sv39-alias --npc "$(RVA22S64_NPC)" --reference "$(NEMU_SO_64)" --mrom "$(MROM_IMG)" --image "$(BUILD_DIR)/lrsc-sv39-alias/test.bin" --output "$(BUILD_DIR)/lrsc-sv39-alias/runs"
 
-.PHONY: verilator-ioq-reservation-extent-rv32 verilator-ioq-reservation-extent-rv64
-verilator-ioq-reservation-extent-rv32 verilator-ioq-reservation-extent-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_reservation_extent,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-lsu-lr-alignment-rv32 verilator-lsu-lr-alignment-rv64
-verilator-lsu-lr-alignment-rv32 verilator-lsu-lr-alignment-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_lsu_lr_alignment,,-d RAPT_ASSERT_EN)
-
 rva22s64-lrsc-misaligned-run: RVA22S64_RUN_TIMEOUT = 180
-
-.PHONY: verilator-ioq-acquire-publish-rv32 verilator-ioq-acquire-publish-rv64
-verilator-ioq-acquire-publish-rv32 verilator-ioq-acquire-publish-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_acquire_publish,,-d RAPT_ASSERT_EN,$(IOQ_ACQUIRE_PLUSARGS))
-
-.PHONY: verilator-ioq-early-load-bcast-rv32 verilator-ioq-early-load-bcast-rv64
-verilator-ioq-early-load-bcast-rv32 verilator-ioq-early-load-bcast-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_early_load_bcast,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-ioq-b-wake-alias-rv32 verilator-ioq-b-wake-alias-rv64
-verilator-ioq-b-wake-alias-rv32 verilator-ioq-b-wake-alias-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_b_wake_alias,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-lsu-atomic-release-rv32 verilator-lsu-atomic-release-rv64
-verilator-lsu-atomic-release-rv32 verilator-lsu-atomic-release-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_lsu_atomic_release,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-ioq-atomic-release-rv32 verilator-ioq-atomic-release-rv64
-verilator-ioq-atomic-release-rv32 verilator-ioq-atomic-release-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_atomic_release,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-ioq-amo-acquire-publish-rv32 verilator-ioq-amo-acquire-publish-rv64
-verilator-ioq-amo-acquire-publish-rv32 verilator-ioq-amo-acquire-publish-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_acquire_publish,,-d RAPT_ASSERT_EN,+AMO $(IOQ_ACQUIRE_PLUSARGS))
-
-.PHONY: verilator-atomic-replay-rv32 verilator-atomic-replay-rv64
-verilator-atomic-replay-rv32 verilator-atomic-replay-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_rou_dual_commit, $(filter-out ,),-d RAPT_ASSERT_EN -d RAPT_TEST_ATOMIC_REPLAY)
-
-.PHONY: verilator-lsu-atomic-acquire-rv32 verilator-lsu-atomic-acquire-rv64
-verilator-lsu-atomic-acquire-rv32 verilator-lsu-atomic-acquire-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_lsu_atomic_acquire,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-fence-replay-rv32 verilator-fence-replay-rv64
-verilator-fence-replay-rv32 verilator-fence-replay-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_rou_dual_commit, $(filter-out ,),-d RAPT_ASSERT_EN -d RAPT_TEST_ATOMIC_REPLAY -d RAPT_TEST_FENCE_REPLAY -d RAPT_TEST_REGISTERED_DRAIN -d RAPT_TEST_COMPACT_FP -d RAPT_TEST_REGISTERED_PAYLOAD)
-
-.PHONY: verilator-lsu-axi-io-order-rv32 verilator-lsu-axi-io-order-rv64
-verilator-lsu-axi-io-order-rv32 verilator-lsu-axi-io-order-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_lsu_axi_io_order,$(sort   ),-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-l1i-invalidate-pending-rv32 verilator-l1i-invalidate-pending-rv64
-verilator-l1i-invalidate-pending-rv32 verilator-l1i-invalidate-pending-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1i_invalidate_pending,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-l1i-response-error-rv32 verilator-l1i-response-error-rv64
-verilator-l1i-response-error-rv32 verilator-l1i-response-error-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1i_response_error,,-d RAPT_ASSERT_EN,$(L1I_ERROR_PLUSARGS))
 
 rva22s64-ifetch-mapping-replace-run: RVA22S64_TEST_MARCH = rv$(RVA22S64_XLEN)imafdc_zicsr_zifencei_svinval
 
 rva22s64-ifetch-asid-recycle-run: RVA22S64_TEST_MARCH = rv$(RVA22S64_XLEN)imafdc_zicsr_zifencei_svinval
-
-.PHONY: verilator-ptw-kill-drain-rv64
-verilator-ptw-kill-drain-rv64:
-	$(call VERILATOR_DIRECTED_RUN,ptw_kill_drain_rv64,tb_ptw_kill_drain,,-d RAPT_RV64 -d RAPT_ASSERT_EN,)
-
-.PHONY: verilator-l1i-mapping-epoch-rv32 verilator-l1i-mapping-epoch-rv64
-verilator-l1i-mapping-epoch-rv32 verilator-l1i-mapping-epoch-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1i_mapping_epoch,,-d RAPT_ASSERT_EN)
 
 .PHONY: verilator-ptw-kill-drain-rv32
 verilator-ptw-kill-drain-rv32: verilator-ptw-kill-drain
@@ -3104,65 +2424,9 @@ pmp-capacity-check: nemu-pmp-capacity-check \
 	verilator-idu-csr-addresses-rv32 verilator-idu-csr-addresses-rv64 \
 	verilator-l1d-pmp-shared-rv32 verilator-l1d-pmp-shared-rv64
 
-.PHONY: verilator-idu-hints-rv32 verilator-idu-hints-rv64
-verilator-idu-hints-rv32 verilator-idu-hints-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_idu_hints,,)
-
-.PHONY: verilator-sq-context-rv32 verilator-sq-context-rv64
-verilator-sq-context-rv32 verilator-sq-context-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_sq_context,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-sq-branch-context-rv32 verilator-sq-branch-context-rv64
-verilator-sq-branch-context-rv32 verilator-sq-branch-context-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_sq_branch_context,,-d RAPT_ASSERT_EN -d RAPT_LSU_TB_CMU)
-
-.PHONY: verilator-sq-atomic-context-rv32 verilator-sq-atomic-context-rv64
-verilator-sq-atomic-context-rv32 verilator-sq-atomic-context-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_sq_atomic_context,,-d RAPT_ASSERT_EN -d RAPT_LSU_TB_CMU)
-
-.PHONY: verilator-ioq-overlap-rv32 verilator-ioq-overlap-rv64
-verilator-ioq-overlap-rv32 verilator-ioq-overlap-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_overlap,,-d RAPT_ASSERT_EN)
-
 rva22s64-load-overlap-widths-run rva22s64-store-overlap-widths-run: RVA22S64_TEST_MARCH = rv$(RVA22S64_XLEN)imafdc_zicsr_zifencei
 
-.PHONY: verilator-lsu-load-footprint-rv32 verilator-lsu-load-footprint-rv64
-verilator-lsu-load-footprint-rv32 verilator-lsu-load-footprint-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_lsu_load_footprint,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-l1d-load-footprint-rv32 verilator-l1d-load-footprint-rv64
-.PHONY: verilator-l1d-plic-width-rv32 verilator-l1d-plic-width-rv64
-verilator-l1d-plic-width-rv32 verilator-l1d-plic-width-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1d_plic_width,,-d RAPT_ASSERT_EN)
-
-verilator-l1d-load-footprint-rv32 verilator-l1d-load-footprint-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1d_load_footprint,,-d RAPT_ASSERT_EN)
-
 rva22s64-load-pmp-float-run rva22s64-load-pmp-translated-float-run: RVA22S64_TEST_MARCH = rv$(RVA22S64_XLEN)imafdc_zicsr_zifencei
-
-.PHONY: verilator-router-clint-width-rv32 verilator-router-clint-width-rv64
-verilator-router-clint-width-rv32 verilator-router-clint-width-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_router_clint_width,,)
-
-.PHONY: verilator-clint-csr-time-rv32 verilator-clint-csr-time-rv64
-verilator-clint-csr-time-rv32 verilator-clint-csr-time-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_clint_csr_time,,)
-
-.PHONY: verilator-ioq-plic-width-rv32 verilator-ioq-plic-width-rv64
-verilator-ioq-plic-width-rv32 verilator-ioq-plic-width-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_plic_width,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-router-clint-subword-rv32 verilator-router-clint-subword-rv64
-verilator-router-clint-subword-rv32 verilator-router-clint-subword-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_router_clint_subword,,-d RAPT_ASSERT_EN)
-
-.PHONY: verilator-idu-m-encodings-rv32 verilator-idu-m-encodings-rv64
-verilator-idu-m-encodings-rv32 verilator-idu-m-encodings-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_idu_m_encodings,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-idu-bit-immediates-rv32 verilator-idu-bit-immediates-rv64
-verilator-idu-bit-immediates-rv32 verilator-idu-bit-immediates-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_idu_bit_immediates,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
 
 rva22s64-bit-xlen-legality-run: RVA22S64_TEST_MARCH = rv$(RVA22S64_XLEN)imac_zicsr_zifencei_zba_zbb_zbs
 
@@ -3171,19 +2435,12 @@ verilator-bit-decode-alu-rv32 verilator-bit-decode-alu-rv64:
 	$(PYTHON) "$(VERIFY_HOME)/scripts/bit_alu_vectors.py" --xlen $(if $(findstring rv64,$@),64,32) --output "$(BUILD_DIR)/$@-vectors"
 	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_bit_decode_alu,,$(if $(findstring rv64,$@),-d RAPT_RV64),+vectors=$(abspath $(BUILD_DIR)/$@-vectors/vectors.txt))
 
-.PHONY: verilator-zexth-decode-alu-rv32 verilator-zexth-decode-alu-rv64
-verilator-zexth-decode-alu-rv32 verilator-zexth-decode-alu-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_zexth_decode_alu,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-
 rva22s64-zexth-xlen-run: RVA22S64_TEST_MARCH = rv$(RVA22S64_XLEN)imac_zicsr_zifencei_zba_zbb_zbs
 
-.PHONY: verilator-compressed-register-legality-rv32 verilator-compressed-register-legality-rv64
-verilator-compressed-register-legality-rv32 verilator-compressed-register-legality-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_compressed_register_legality,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-compressed-zero-immediate-rv32 verilator-compressed-zero-immediate-rv64
-verilator-compressed-zero-immediate-rv32 verilator-compressed-zero-immediate-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_compressed_zero_immediate,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
+# One decoder build per XLEN covers both exhaustive legality matrices.
+.PHONY: verilator-compressed-register-legality-rv32 verilator-compressed-register-legality-rv64 verilator-compressed-zero-immediate-rv32 verilator-compressed-zero-immediate-rv64
+verilator-compressed-register-legality-rv32 verilator-compressed-zero-immediate-rv32: verilator-compressed-legality-rv32
+verilator-compressed-register-legality-rv64 verilator-compressed-zero-immediate-rv64: verilator-compressed-legality-rv64
 
 .PHONY: compressed-assembler-rv32 compressed-assembler-rv64
 compressed-assembler-rv32 compressed-assembler-rv64:
@@ -3205,308 +2462,28 @@ verilator-compressed-expansion-rv32 verilator-compressed-expansion-rv64:
 	$(PYTHON) "$(VERIFY_HOME)/scripts/compressed_vectors.py" --xlen $(if $(findstring rv64,$@),64,32) --output "$(BUILD_DIR)/$@-vectors"
 	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_compressed_expansion,,$(if $(findstring rv64,$@),-d RAPT_RV64),+vectors=$(abspath $(BUILD_DIR)/$@-vectors/vectors.txt))
 
-.PHONY: verilator-csr-write-intent-rv32 verilator-csr-write-intent-rv64
-verilator-csr-write-intent-rv32 verilator-csr-write-intent-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_csr_write_intent,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-rou-retire-count-rv32 verilator-rou-retire-count-rv64
-.PHONY: verilator-half-store-visibility-rv32 verilator-half-store-visibility-rv64
-.PHONY: verilator-half-axi-write-rv32 verilator-half-axi-write-rv64
-verilator-half-axi-write-rv32 verilator-half-axi-write-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_half_axi_write,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-verilator-half-store-visibility-rv32 verilator-half-store-visibility-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_half_store_visibility, $(filter-out ,),-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-rou-fp-ooo-rv32 verilator-rou-fp-ooo-rv64
-verilator-rou-fp-ooo-rv32 verilator-rou-fp-ooo-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_rou_dual_commit,,-d RAPT_ASSERT_EN -d RAPT_TEST_FP_OOO -d RAPT_TEST_FP_IRQ_COMPOSE $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-rou-fp-irq-boundary-rv32 verilator-rou-fp-irq-boundary-rv64
-.PHONY: verilator-rou-fp-irq-compose-rv32 verilator-rou-fp-irq-compose-rv64
-verilator-rou-fp-irq-compose-rv32 verilator-rou-fp-irq-compose-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_rou_dual_commit,,-d RAPT_ASSERT_EN -d RAPT_TEST_FP_IRQ_BOUNDARY -d RAPT_TEST_FP_IRQ_COMPOSE $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-verilator-rou-fp-irq-boundary-rv32 verilator-rou-fp-irq-boundary-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_rou_dual_commit,,-d RAPT_ASSERT_EN -d RAPT_TEST_FP_IRQ_BOUNDARY $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-verilator-rou-retire-count-rv32 verilator-rou-retire-count-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_rou_dual_commit,,-d RAPT_ASSERT_EN -d RAPT_TEST_RETIRE_COUNT $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-csr-counter-priority-rv32 verilator-csr-counter-priority-rv64
-verilator-csr-counter-priority-rv32 verilator-csr-counter-priority-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_csr_counter_priority,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-counter-permissions-rv32 verilator-counter-permissions-rv64
-verilator-counter-permissions-rv32 verilator-counter-permissions-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_counter_permissions,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-l1i-width-window-rv64
-verilator-l1i-width-window-rv64:
-	$(call VERILATOR_DIRECTED_RUN,l1i_width_window_rv64,tb_l1i_width_window,,-d RAPT_RV64,)
-
-.PHONY: verilator-svinval-decode-rv32 verilator-svinval-decode-rv64
-verilator-svinval-decode-rv32 verilator-svinval-decode-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_svinval_decode,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-l1i-data-integrity
 L1I_DATA_SEED ?= 1
-verilator-l1i-data-integrity:
-	$(call VERILATOR_DIRECTED_RUN,l1i_data_integrity,tb_l1i_data_integrity,,,+SEED=$(L1I_DATA_SEED))
-
-.PHONY: verilator-l1d-permission-stage-rv32 verilator-l1d-permission-stage-rv64
-.PHONY: verilator-l1d-trap-owner-rv32 verilator-l1d-trap-owner-rv64
-verilator-l1d-trap-owner-rv32 verilator-l1d-trap-owner-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l1d_trap_owner,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-verilator-l1d-permission-stage-rv32 verilator-l1d-permission-stage-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l1d_permission_stage,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-idu-fence-i-fields-rv32 verilator-idu-fence-i-fields-rv64
-verilator-idu-fence-i-fields-rv32 verilator-idu-fence-i-fields-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_idu_fence_i_fields,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-csr-satp-warl-rv32 verilator-csr-satp-warl-rv64
-verilator-csr-satp-warl-rv32 verilator-csr-satp-warl-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_csr_contract,,$(if $(findstring rv64,$@),-d RAPT_RV64),+CASE=satp_warl)
-
-.PHONY: verilator-csr-envcfg-warl-rv32 verilator-csr-envcfg-warl-rv64
-verilator-csr-envcfg-warl-rv32 verilator-csr-envcfg-warl-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_csr_envcfg_warl,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-ifu-l1i-stream-rv32 verilator-ifu-l1i-stream-rv64
-verilator-ifu-l1i-stream-rv32 verilator-ifu-l1i-stream-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_ifu_l1i_stream,,-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=4 $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-csr-pmp-lock-rv32 verilator-csr-pmp-lock-rv64
-verilator-csr-pmp-lock-rv32 verilator-csr-pmp-lock-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_csr_pmp_lock,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-idu-csr-addresses-rv32 verilator-idu-csr-addresses-rv64
-verilator-idu-csr-addresses-rv32 verilator-idu-csr-addresses-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_idu_csr_addresses,,$(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-csr-trap-storage-rv32 verilator-csr-trap-storage-rv64
-verilator-csr-trap-storage-rv32 verilator-csr-trap-storage-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_csr_contract,,$(if $(findstring rv64,$@),-d RAPT_RV64),+CASE=trap_storage)
-
-.PHONY: verilator-csr-status-fields-rv32 verilator-csr-status-fields-rv64
-verilator-csr-status-fields-rv32 verilator-csr-status-fields-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_csr_contract,,$(if $(findstring rv64,$@),-d RAPT_RV64),+CASE=status_fields)
-
-.PHONY: verilator-csr-fp-aliases-rv32 verilator-csr-fp-aliases-rv64
-verilator-csr-fp-aliases-rv32 verilator-csr-fp-aliases-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_csr_contract,,$(if $(findstring rv64,$@),-d RAPT_RV64),+CASE=fp_aliases)
-
-.PHONY: verilator-csr-stimecmp-rv32 verilator-csr-stimecmp-rv64
-verilator-csr-stimecmp-rv32 verilator-csr-stimecmp-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_csr_contract,,$(if $(findstring rv64,$@),-d RAPT_RV64),+CASE=stimecmp)
-
-.PHONY: verilator-csr-identity-time-rv32 verilator-csr-identity-time-rv64
-verilator-csr-identity-time-rv32 verilator-csr-identity-time-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_csr_contract,,$(if $(findstring rv64,$@),-d RAPT_RV64),+CASE=identity_time)
-
-.PHONY: verilator-csr-tvec-routes-rv32 verilator-csr-tvec-routes-rv64
-verilator-csr-tvec-routes-rv32 verilator-csr-tvec-routes-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_csr_contract,,$(if $(findstring rv64,$@),-d RAPT_RV64),+CASE=tvec_routes)
-
-.PHONY: verilator-l2-response-error-rv32 verilator-l2-response-error-rv64
-verilator-l2-response-error-rv32: ## Check failed L2 refills complete, drain and retry in RV32
-	$(call VERILATOR_DIRECTED_RUN,l2_response_error_rv32,tb_l2_response_error,,-d RAPT_L2_EN -d RAPT_ASSERT_EN,)
-verilator-l2-response-error-rv64: ## Check failed L2 refills complete, drain and retry in RV64
-	$(call VERILATOR_DIRECTED_RUN,l2_response_error_rv64,tb_l2_response_error,,-d RAPT_L2_EN -d RAPT_ASSERT_EN -d RAPT_RV64,)
-.PHONY: verilator-l2-response-error-boom-rv32 verilator-l2-response-error-boom-rv64
-verilator-l2-response-error-boom-rv32: ## Check RV32 failed writes through the 8-way SRAM directory
-	$(call VERILATOR_DIRECTED_RUN,l2_response_error_boom_rv32,tb_l2_response_error,,-d RAPT_L2_EN -d RAPT_ASSERT_EN -d RAPT_TEST_BOOM_L2,)
-verilator-l2-response-error-boom-rv64: ## Check failed writes through the 8-way SRAM directory
-	$(call VERILATOR_DIRECTED_RUN,l2_response_error_boom_rv64,tb_l2_response_error,,-d RAPT_L2_EN -d RAPT_ASSERT_EN -d RAPT_RV64 -d RAPT_TEST_BOOM_L2,)
-
-.PHONY: verilator-router-early-write-rv32 verilator-router-early-write-rv64
-verilator-router-early-write-rv32: ## Check W-before-AW routing and response ownership in RV32
-	$(call VERILATOR_DIRECTED_RUN,router_early_write_rv32,tb_chip_router_early_write,,-d RAPT_ASSERT_EN,)
-verilator-router-early-write-rv64: ## Check W-before-AW routing and response ownership in RV64
-	$(call VERILATOR_DIRECTED_RUN,router_early_write_rv64,tb_chip_router_early_write,,-d RAPT_ASSERT_EN -d RAPT_RV64,)
-
-.PHONY: verilator-rnp-handshake-rv32
-verilator-rnp-handshake-rv32: ## Check RNP AW/W serialization, IDs and response stalls
-	$(call VERILATOR_DIRECTED_RUN,rnp_handshake_rv32,tb_rnp_handshake,,-d RAPT_ASSERT_EN,)
 
 # Follow the preset policy without a WriteBack parameter override.
-.PHONY: verilator-cache-default-rv32 verilator-cache-default-rv64 verilator-wb-ptw-rv32 verilator-wb-ptw-rv64
-verilator-cache-default-rv32 verilator-cache-default-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_cache_stream,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
 verilator-wb-ptw-rv32 verilator-wb-ptw-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1
-verilator-wb-ptw-rv32 verilator-wb-ptw-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_cache_stream,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),+WB_PTW_READ +WB_PTW_WRITE)
 
 # Full-capacity checks follow the configured default L1 geometry (sets/ways/line).
-.PHONY: verilator-l1i-16k-rv32 verilator-l1i-16k-rv64 verilator-l1d-16k-rv32 verilator-l1d-16k-rv64
-verilator-l1i-16k-rv32 verilator-l1i-16k-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l1i_16k,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
-verilator-l1d-16k-rv32 verilator-l1d-16k-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_l1d_16k,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
 
-.PHONY: verilator-cache-stream-rv32 verilator-cache-stream-rv64 verilator-cache-stream-l2-rv32 verilator-cache-stream-l2-rv64 verilator-cache-stream-rnp-rv32
-.PHONY: verilator-cache-stream-wb-rv32 verilator-cache-stream-wb-rv64 verilator-cache-stream-wb-l2-rv32 verilator-cache-stream-wb-l2-rv64
 verilator-cache-stream-wb-rv32 verilator-cache-stream-wb-rv64 verilator-cache-stream-wb-l2-rv32 verilator-cache-stream-wb-l2-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1
-verilator-cache-stream-wb-rv32 verilator-cache-stream-wb-rv64 verilator-cache-stream-wb-l2-rv32 verilator-cache-stream-wb-l2-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_cache_stream,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64) $(if $(findstring -l2-,$@),-d RAPT_L2_EN),)
 verilator-cache-stream-rv32 verilator-cache-stream-rv64 verilator-cache-stream-l2-rv32 verilator-cache-stream-l2-rv64 verilator-cache-stream-rnp-rv32: VERILATOR_DIRECTED_FLAGS += -GWriteBack=0
-verilator-cache-stream-rv32 verilator-cache-stream-rv64 verilator-cache-stream-l2-rv32 verilator-cache-stream-l2-rv64 verilator-cache-stream-rnp-rv32:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_cache_stream,,-d RAPT_ASSERT_EN $(if $(findstring -rnp-,$@),-d RAPT_TEST_RNP) $(if $(findstring rv64,$@),-d RAPT_RV64) $(if $(findstring -l2-,$@),-d RAPT_L2_EN),)
 
-.PHONY: verilator-ioq-address-stage-rv32 verilator-ioq-address-stage-rv64
-verilator-ioq-address-stage-rv32 verilator-ioq-address-stage-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_ioq_address_stage,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-ioq-dispatch-stable-rv32 verilator-ioq-dispatch-stable-rv64
-verilator-ioq-dispatch-stable-rv32 verilator-ioq-dispatch-stable-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_dispatch_stable,,-d RAPT_ASSERT_EN -d RAPT_IOQ_LOAD_RESPONSE_STAGE=0)
-
-.PHONY: verilator-ioq-forward-nonalias-rv32 verilator-ioq-forward-nonalias-rv64
-verilator-ioq-forward-nonalias-rv32 verilator-ioq-forward-nonalias-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_ioq_forward_nonalias,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-cdb-streaming-rv32 verilator-cdb-streaming-rv64
-.PHONY: verilator-port-priority
-verilator-port-priority:
-	$(call VERILATOR_DIRECTED_RUN,port_priority,tb_port_priority,,,)
-
-.PHONY: verilator-iq-cdb-wake-rv32 verilator-iq-cdb-wake-rv64
-.PHONY: verilator-dispatch-iq-index-rv32 verilator-dispatch-iq-index-rv64
-verilator-dispatch-iq-index-rv32 verilator-dispatch-iq-index-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_dispatch_iq_index,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-verilator-iq-cdb-wake-rv32 verilator-iq-cdb-wake-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_iq_cdb_wake,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-iq-registered-wake-rv32 verilator-iq-registered-wake-rv64
-verilator-iq-registered-wake-rv32 verilator-iq-registered-wake-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_iq_cdb_wake,,-d RAPT_ASSERT_EN -GComboCdbWake=0 $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-iq-port-priority-rv32 verilator-iq-port-priority-rv64
-verilator-iq-port-priority-rv32 verilator-iq-port-priority-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_iq_reclaim_random,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64) -d RAPT_INTEGER_ISSUE_PORTS=3 -d RAPT_INTEGER_SYSTEM_PORT=1 -GLastIssuePort=1 -GReclaimOnIssue=0,+SEED=$(VERILATOR_DIRECTED_SEED))
-
-verilator-cdb-streaming-rv32 verilator-cdb-streaming-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_cdb_streaming,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-fmax-boundaries-rv32 verilator-fmax-boundaries-rv64
-verilator-fmax-boundaries-rv32 verilator-fmax-boundaries-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_fmax_boundaries,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-mshr-fill-selection-rv32 verilator-mshr-fill-selection-rv64
-verilator-mshr-fill-selection-rv32 verilator-mshr-fill-selection-rv64: ## Compare refill selection with exclusive line invalidation
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_mshr_fill_selection,,-d RAPT_ASSERT_EN,)
-
-.PHONY: verilator-mshr-cache-rv32 verilator-mshr-cache-rv64
-verilator-mshr-cache-rv32 verilator-mshr-cache-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_mshr_cache,,-d RAPT_ASSERT_EN -d RAPT_L1D_MSHRS=2 $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-mshr-ioq-rv32 verilator-mshr-ioq-rv64
-verilator-mshr-ioq-rv32 verilator-mshr-ioq-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_mshr_ioq,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
 # Both XLEN modes use the production default-w4 preset and independent directed benches.
 .PHONY: w4-scaling
 w4-scaling:
 	python3 "$(VERIFY_HOME)/scripts/test_w4_scaling.py" --build-dir "$(BUILD_DIR)/w4-scaling"
 
-.PHONY: verilator-ioq-response-stage-rv32 verilator-ioq-response-stage-rv64
-verilator-ioq-response-stage-rv32 verilator-ioq-response-stage-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_ioq_load_response_stage,,-d RAPT_ASSERT_EN -d RAPT_IOQ_LOAD_RESPONSE_STAGE=1 $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-operand-value-spill-banked-rv32 verilator-operand-value-spill-banked-rv64
-.PHONY: verilator-iq-banked-w4-rv32 verilator-iq-banked-w4-rv64
-verilator-operand-value-spill-banked-rv32 verilator-operand-value-spill-banked-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_operand_value_spill_banked,,-d RAPT_ASSERT_EN -d RAPT_FPGA_LUTRAM=1 $(if $(findstring rv64,$@),-d RAPT_RV64,-GXlen=32),)
-
-verilator-iq-banked-w4-rv32 verilator-iq-banked-w4-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_iq_reclaim_random,,-d RAPT_ASSERT_EN -d RAPT_FPGA_LUTRAM=1 -GEntries=16 $(if $(findstring rv64,$@),-d RAPT_RV64),+SEED=$(VERILATOR_DIRECTED_SEED))
-
-.PHONY: verilator-l2tlb-rv32 verilator-l2tlb-rv64
-verilator-l2tlb-rv32 verilator-l2tlb-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l2tlb,,,,)
-.PHONY: verilator-cached-ptw-rv32 verilator-cached-ptw-rv64
-verilator-cached-ptw-rv32 verilator-cached-ptw-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_cached_ptw,,,,)
-.PHONY: verilator-l2tlb-l1i-epoch-rv32 verilator-l2tlb-l1i-epoch-rv64
 verilator-l2tlb-l1i-epoch-rv32 verilator-l2tlb-l1i-epoch-rv64: override VERILATOR_DIRECTED_FLAGS += -GL2Tlb=1
-verilator-l2tlb-l1i-epoch-rv32 verilator-l2tlb-l1i-epoch-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1i_mapping_epoch,,-d RAPT_ASSERT_EN,,)
-.PHONY: verilator-l2tlb-l1i-sret-rv32 verilator-l2tlb-l1i-sret-rv64
 verilator-l2tlb-l1i-sret-rv32 verilator-l2tlb-l1i-sret-rv64: override VERILATOR_DIRECTED_FLAGS += -GL2Tlb=1
-verilator-l2tlb-l1i-sret-rv32 verilator-l2tlb-l1i-sret-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1i_sret_priv_epoch,,-d RAPT_ASSERT_EN,,)
-.PHONY: verilator-l2tlb-cbo-rv32 verilator-l2tlb-cbo-rv64
 verilator-l2tlb-cbo-rv32 verilator-l2tlb-cbo-rv64: override VERILATOR_DIRECTED_FLAGS += -GL2Tlb=1
-verilator-l2tlb-cbo-rv32 verilator-l2tlb-cbo-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_cbo_tlb,,-d RAPT_ASSERT_EN,,)
 
-.PHONY: verilator-wb-mshr-rv32 verilator-wb-mshr-rv64
-verilator-wb-mshr-rv32 verilator-wb-mshr-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_wb_mshr,,-d RAPT_ASSERT_EN -d RAPT_L1D_MSHRS=4,)
-
-.PHONY: verilator-wb-mshr-l2-rv32 verilator-wb-mshr-l2-rv64
 verilator-wb-mshr-l2-rv32 verilator-wb-mshr-l2-rv64: override XSIM_COMMON_INCLUDES := $(subst /configs/$(XSIM_RAPT_CONFIG),/configs/default-l2,$(XSIM_COMMON_INCLUDES))
-verilator-wb-mshr-l2-rv32 verilator-wb-mshr-l2-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_cache_stream,,-d RAPT_ASSERT_EN,+WB_MSHR_L2)
-
-.PHONY: verilator-mshr-ioq-translated-rv32 verilator-mshr-ioq-translated-rv64
-verilator-mshr-ioq-translated-rv32 verilator-mshr-ioq-translated-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_mshr_ioq,,-d RAPT_ASSERT_EN -GMmu=1,)
 
 # Public-port checks for FPGA committed-register RAM and deferred PA publication.
 FP_ARCH_BANK_LUTRAM ?= 1
-.PHONY: verilator-fp-arch-bank-rv32 verilator-fp-arch-bank-rv64
-verilator-fp-arch-bank-rv32 verilator-fp-arch-bank-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_fp_arch_bank,,-d RAPT_ASSERT_EN -d RAPT_FPGA_LUTRAM=$(FP_ARCH_BANK_LUTRAM))
 
-.PHONY: verilator-ioq-paddr-preload-rv32 verilator-ioq-paddr-preload-rv64
-verilator-ioq-paddr-preload-rv32 verilator-ioq-paddr-preload-rv64:
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_ioq_paddr_preload,,-d RAPT_ASSERT_EN)
-
-
-.PHONY: verilator-memory-drain-rv32 verilator-memory-drain-rv64
-verilator-memory-drain-rv32 verilator-memory-drain-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_memory_drain,,-d RAPT_ASSERT_EN $(if $(findstring rv64,$@),-d RAPT_RV64),)
-.PHONY: verilator-rou-drain-handshake-rv32 verilator-rou-drain-handshake-rv64
-verilator-rou-drain-handshake-rv32 verilator-rou-drain-handshake-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_rou_dual_commit,,-d RAPT_ASSERT_EN -d RAPT_TEST_DRAIN_HANDSHAKE -d RAPT_TEST_REGISTERED_DRAIN -d RAPT_TEST_COMPACT_FP -d RAPT_TEST_REGISTERED_PAYLOAD $(if $(findstring rv64,$@),-d RAPT_RV64),)
-.PHONY: verilator-ifu-response-bypass-rv32 verilator-ifu-response-bypass-rv64
-verilator-ifu-response-bypass-rv32 verilator-ifu-response-bypass-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_ifu_response_stage,,-d RAPT_ASSERT_EN -d RAPT_FETCH_RESPONSE_STAGE=0 $(if $(findstring rv64,$@),-d RAPT_RV64),)
-.PHONY: verilator-frontend-recovery-stage-rv32 verilator-frontend-recovery-stage-rv64
-verilator-frontend-recovery-stage-rv32 verilator-frontend-recovery-stage-rv64:
-	$(call VERILATOR_DIRECTED_RUN,$(subst -,_,$@),tb_frontend_recovery,,-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=4 -d RAPT_FETCH_RESPONSE_STAGE=1 $(if $(findstring rv64,$@),-d RAPT_RV64),)
-
-.PHONY: verilator-fp-registers-compact-rv32 verilator-fp-registers-compact-rv64
-verilator-fp-registers-compact-rv32 verilator-fp-registers-compact-rv64: ## Exercise physical FP source-slot ownership and wake/reuse
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_fp_registers,,-d RAPT_ASSERT_EN -d RAPT_TEST_COMPACT_FP,)
-
-.PHONY: verilator-rou-fp-compact-rv32 verilator-rou-fp-compact-rv64
-verilator-rou-fp-compact-rv32 verilator-rou-fp-compact-rv64: ## Exercise compact FP sources with the real FEU and accepted wake fabric
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_rou_dual_commit,,-d RAPT_ASSERT_EN -d RAPT_TEST_COMPACT_FP -d RAPT_TEST_REGISTERED_DRAIN -d RAPT_TEST_FP_OOO -d RAPT_TEST_FP_IRQ_COMPOSE -d RAPT_TEST_REGISTERED_PAYLOAD,)
-
-.PHONY: verilator-l1d-ptw-permission-stage-rv32 verilator-l1d-ptw-permission-stage-rv64
-verilator-l1d-ptw-permission-stage-rv32 verilator-l1d-ptw-permission-stage-rv64: ## Exercise held PTW permission across backpressure and cancellation
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1d_ptw_permission_stage,,-d RAPT_ASSERT_EN,)
-
-.PHONY: verilator-l1d-ptw-permission-l2tlb-rv32 verilator-l1d-ptw-permission-l2tlb-rv64
-verilator-l1d-ptw-permission-l2tlb-rv32 verilator-l1d-ptw-permission-l2tlb-rv64: ## Exercise the permission boundary with the shared L2 TLB
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_l1d_ptw_permission_stage,,-d RAPT_ASSERT_EN -d RAPT_TEST_PTW_L2TLB,)
-
-.PHONY: verilator-rou-payload-boundary-rv32 verilator-rou-payload-boundary-rv64
-verilator-rou-payload-boundary-rv32 verilator-rou-payload-boundary-rv64: ## Check registered immutable dispatch ownership and full-width throughput
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_rou_dual_commit,,-d RAPT_ASSERT_EN -d RAPT_TEST_REGISTERED_DRAIN -d RAPT_TEST_COMPACT_FP -d RAPT_TEST_REGISTERED_PAYLOAD -d RAPT_TEST_PAYLOAD_BOUNDARY,)
-
-.PHONY: verilator-iq-local-wake-rv32 verilator-iq-local-wake-rv64
-verilator-iq-local-wake-rv32 verilator-iq-local-wake-rv64: ## Check local integer capture and delayed global owner handoff
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_iq_local_wake,,-d RAPT_ASSERT_EN,)
-
-.PHONY: verilator-iq-local-load-wake-rv32 verilator-iq-local-load-wake-rv64
-verilator-iq-local-load-wake-rv32 verilator-iq-local-load-wake-rv64: ## Check local load capture without combinational issue wake
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_iq_local_wake,,-d RAPT_ASSERT_EN -d RAPT_TEST_LOCAL_MEMORY_WAKE,)
-
-.PHONY: verilator-rou-fp-irq-compact-rv32 verilator-rou-fp-irq-compact-rv64
-verilator-rou-fp-irq-compact-rv32 verilator-rou-fp-irq-compact-rv64: ## Check empty-ROB IRQ with compact FP and registered payload
-	$(call VERILATOR_DIRECTED_XLEN_RUN,tb_rou_dual_commit,,-d RAPT_ASSERT_EN -d RAPT_TEST_REGISTERED_DRAIN -d RAPT_TEST_COMPACT_FP -d RAPT_TEST_REGISTERED_PAYLOAD -d RAPT_TEST_FP_IRQ_BOUNDARY -d RAPT_TEST_FP_IRQ_COMPOSE,)
+include $(VERIFY_HOME)/directed-tests.mk

@@ -752,13 +752,13 @@ module tb_cache_stream #(
     $display("PASS: WB PTW waits for older bus store RV%0d data_side=%0d", XLEN, data_side);
   endtask
 
-  // PTW A/D writes invalidate D-cache copies. That invalidation must not
-  // swallow the one-cycle response of a store already accepted by the bus.
-  task automatic ptw_write_pending_store;
+  // A PTW read requests a D-cache drain. That request must not swallow
+  // the one-cycle response of a store already accepted by the bus.
+  task automatic ptw_read_pending_store;
     logic [XLEN-1:0] address, expected;
     int requests_before;
     address = XLEN'('h8000e000);
-    expected = XLEN'('h1234abcd);
+    expected = (ram[index_of(address)] & ~XLEN'('hff)) | XLEN'('h5a);
     requests_before = write_requests;
     hold_write_response = 1;
     @(negedge clock);
@@ -768,33 +768,33 @@ module tb_cache_stream #(
     lsu_l1d.wvalid = 1;
     for (int cycle = 0; cycle < 10000 && !b_wait; cycle++) @(negedge clock);
     if (!b_wait || lsu_l1d.wready) $fatal(1, "older store did not reach held B response");
-    l1i_bus.awaddr = address;
-    l1i_bus.aw_ptw = 1;
-    l1i_bus.awvalid = 1;
-    l1i_bus.wvalid = 1;
-    l1i_bus.wdata = expected;
-    l1i_bus.wstrb = 8'({WordBytes{1'b1}});
+    l1i_bus.araddr = address;
+    l1i_bus.ar_ptw = 1;
+    l1i_bus.arvalid = 1;
     repeat (8) @(negedge clock);
     hold_write_response = 0;
     for (int cycle = 0; cycle < 10000 && !l1d_bus.wready; cycle++) @(negedge clock);
-    if (!l1d_bus.wready || !lsu_l1d.wready || lsu_l1d.werr || l1i_bus.ptw_wready)
-      $fatal(1, "PTW invalidation swallowed the older SQ store response");
+    if (!l1d_bus.wready || !lsu_l1d.wready || lsu_l1d.werr || l1i_bus.ptw_rvalid)
+      $fatal(1, "PTW drain swallowed the older SQ store response");
     @(posedge clock);
     @(negedge clock);
     lsu_l1d.wvalid = 0;
-    for (int cycle = 0; cycle < 10000 && !l1i_bus.ptw_wready; cycle++) @(negedge clock);
-    if (!l1i_bus.ptw_wready || l1i_bus.ptw_werr)
-      $fatal(1, "PTW write did not complete after older store");
+    for (int cycle = 0; cycle < 10000 && !l1i_bus.rready; cycle++) @(negedge clock);
+    if (!l1i_bus.rready) $fatal(1, "PTW read was not accepted after older store");
     @(posedge clock);
     @(negedge clock);
-    l1i_bus.awvalid = 0;
-    l1i_bus.wvalid = 0;
-    l1i_bus.aw_ptw = 0;
+    l1i_bus.arvalid = 0;
+    for (int cycle = 0; cycle < 10000 && !l1i_bus.ptw_rvalid; cycle++) @(negedge clock);
+    if (!l1i_bus.ptw_rvalid || l1i_bus.ptw_rerr || l1i_bus.rdata != expected)
+      $fatal(1, "PTW read did not observe the older store");
+    @(posedge clock);
+    @(negedge clock);
+    l1i_bus.ar_ptw = 0;
     idle();
     load(address, expected);
-    if (write_requests != requests_before + 2)
+    if (write_requests != requests_before + 1)
       $fatal(1, "PTW overlap duplicated a store transaction");
-    $display("PASS: WB PTW invalidation preserves older SQ response RV%0d", XLEN);
+    $display("PASS: WB PTW drain preserves older SQ response RV%0d", XLEN);
   endtask
 
   task automatic load(input logic [XLEN-1:0] addr, input logic [XLEN-1:0] expected,
@@ -1037,12 +1037,6 @@ module tb_cache_stream #(
     l1i_bus.ar_ptw=0;
     l1i_bus.rpbmt=0;
     l1i_bus.noallocate = 0;
-    l1i_bus.awvalid=0;
-    l1i_bus.awaddr=0;
-    l1i_bus.aw_ptw=0;
-    l1i_bus.wvalid=0;
-    l1i_bus.wdata=0;
-    l1i_bus.wstrb=0;
     for (int i = 0; i < Words; i++) ram[i] = XLEN'('h12340000) + XLEN'(i);
     repeat (4) @(negedge clock);
     reset = 0;
@@ -1064,7 +1058,7 @@ module tb_cache_stream #(
                XLEN);
       $finish;
     end
-    if ($test$plusargs("WB_PTW_READ") || $test$plusargs("WB_PTW_WRITE")) begin
+    if ($test$plusargs("WB_PTW_READ") || $test$plusargs("WB_PTW_PENDING_STORE")) begin
       if (!WriteBack) $fatal(1, "PTW coherence check requires write-back");
       if ($test$plusargs("WB_PTW_READ")) begin
         ptw_dirty_publication();
@@ -1074,7 +1068,7 @@ module tb_cache_stream #(
         ptw_read_older_store(0);
         ptw_read_older_store(1);
       end
-      if ($test$plusargs("WB_PTW_WRITE") && !L2WriteBack) ptw_write_pending_store();
+      if ($test$plusargs("WB_PTW_PENDING_STORE") && !L2WriteBack) ptw_read_pending_store();
       $finish;
     end
     // A nonzero demanded offset selects its beat, then all other words hit.

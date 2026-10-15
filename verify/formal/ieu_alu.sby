@@ -10,9 +10,11 @@ depth 1
 
 [engines]
 rv32: smtbmc
-rv32_clmul: smtbmc z3
-rv32_clmulh_basis: smtbmc z3
-rv32_clmulr: smtbmc z3
+# Carry-less products are XOR trees: bitwuzla closes them in seconds, z3 did
+# not finish within 14 hours.
+rv32_clmul: smtbmc bitwuzla
+rv32_clmulh_basis: smtbmc bitwuzla
+rv32_clmulr: smtbmc bitwuzla
 
 [script]
 rv32: plugin -i slang

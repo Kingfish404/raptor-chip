@@ -203,7 +203,7 @@ module tb_ifu_stream_events;
     ifu_l1i.inst_n2 = 32'h00000013;
     accept_packet();
     assert (!dut.blocked && dut.held_count == 3)
-    else $fatal(1, "Svinval ordering fences incorrectly block fetch awaiting sys_resume");
+    else $fatal(1, "Svinval ordering fences incorrectly block fetch");
     ifu_l1i.inst_n0 = 32'h00000013;
     ifu_l1i.valid = 1;
     tick();

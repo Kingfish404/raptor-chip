@@ -1,6 +1,6 @@
 `include "rapt.svh"
 
-// Page-table walker.
+// Read-only page-table walker.
 // RV32 uses Sv32 two-level page tables. RV64 uses the Sv39 three-level format
 // expected by upstream xv6-riscv. Permission checks against the access type and
 // current privilege are performed by the requesters (L1I/L1D) using the returned
@@ -28,14 +28,6 @@ module rapt_ptw #(
     input  logic bus_arready,
     input  logic bus_rvalid,
     input  logic [XLEN-1:0] bus_rdata,
-
-    output logic bus_awvalid,
-    output logic [XLEN-1:0] bus_awaddr,
-    output logic bus_wvalid,
-    output logic [XLEN-1:0] bus_wdata,
-    output logic [7:0] bus_wstrb,
-    input  logic bus_wready,
-    input  logic bus_werr,
 
     output logic done,
     output logic fault,
@@ -131,11 +123,6 @@ module rapt_ptw #(
   assign bus_arvalid = !kill
                      && (state == LVL2_REQ || state == LVL1_REQ || state == LVL0_REQ);
   assign bus_araddr = XLEN'({pte_word_addr, 3'b000});
-  assign bus_awvalid = 1'b0;
-  assign bus_awaddr = '0;
-  assign bus_wvalid = 1'b0;
-  assign bus_wdata = '0;
-  assign bus_wstrb = '0;
   assign result_vtag = (XLEN-12)'($signed(vtag_q));
 
   // SBE is WARL-zero in rapt today. Keep the port so the requester interface
@@ -331,11 +318,6 @@ module rapt_ptw #(
   assign busy = (state != IDLE);
   assign bus_arvalid = !kill && (state == LVL1_REQ || state == LVL0_REQ);
   assign bus_araddr = XLEN'({pte_word_addr, 2'b00});
-  assign bus_awvalid = 1'b0;
-  assign bus_awaddr = '0;
-  assign bus_wvalid = 1'b0;
-  assign bus_wdata = '0;
-  assign bus_wstrb = '0;
 
   logic pte_v;
   logic pte_r;
@@ -465,12 +447,5 @@ module rapt_ptw #(
                  (killed || kill) && ((state inside {LVL1_WAIT, LVL0_WAIT}) && bus_rvalid),
                  !done && !fault)
 `endif
-
-  // The shared PTW interface retains write-response inputs for wiring
-  // compatibility, but Svade makes the page-table write channel unused.
-  /* verilator lint_off UNUSEDSIGNAL */
-  logic _unused_write_response;
-  assign _unused_write_response = bus_wready ^ bus_werr;
-  /* verilator lint_on UNUSEDSIGNAL */
 
 endmodule

@@ -50,7 +50,8 @@ module rapt_vpu_move #(
   assign legal = !vill_q && insn_q[6:0] == 7'h57 && insn_q[14:12] == 3
       && insn_q[31:25] == 7'b1001111
       && (count_mask == 0 || count_mask == 1 || count_mask == 3 || count_mask == 7)
-      && (insn_q[24:20] & count_mask) == 0 && (insn_q[11:7] & count_mask) == 0;
+      && (insn_q[24:20] & count_mask) == 0 && (insn_q[11:7] & count_mask) == 0
+      && offset_q < limit;
   assign cmd_ready = !reset && state == IDLE;
   assign done_valid = !reset && state == DONE;
   assign vr_valid = !reset && (state == READ_REQ || state == WRITE_REQ);
@@ -84,7 +85,7 @@ module rapt_vpu_move #(
         if (!legal) begin
           done_trap <= 1;
           state <= DONE;
-        end else if (offset_q >= limit || insn_q[11:7] == insn_q[24:20]) state <= DONE;
+        end else if (insn_q[11:7] == insn_q[24:20]) state <= DONE;
         else state <= READ_REQ;
         READ_REQ: if (vr_valid && vr_ready) state <= READ_RSP;
         READ_RSP: if (vr_rsp_valid && vr_rsp_ready) begin

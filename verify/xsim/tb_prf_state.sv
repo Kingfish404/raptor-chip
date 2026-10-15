@@ -3,7 +3,9 @@
 
 // Entry ownership/priority test, including intentionally conflicting control
 // inputs. This checks deterministic PRF behavior, not legality of those inputs
-// in the integrated rename/retirement protocol.
+// in the integrated rename/retirement protocol. Simultaneous writers to one
+// entry merge with OR, and a completion write updates data even when the entry
+// is reclaimed or settled in the same cycle (validity still follows reclaim).
 module tb_prf_state #(
     parameter int ArchRegs = 32
 );
@@ -40,7 +42,7 @@ module tb_prf_state #(
   wire [Xlen-1:0] rvfi_data[Width];
 `endif
   rapt_prf #(
-      .RenameWidth(Width),
+      .ReadWidth(Width),
       .CommitWidth(Width),
       .NumCompletions(Ports),
       .CompletionT(write_t),
@@ -78,12 +80,13 @@ module tb_prf_state #(
     @(posedge clock);
     if (!reset && dbg_we && int'(dbg_addr) >= ArchRegs) invalid_debug_requests++;
     for (int i = 0; i < Entries; i++) begin
-      bit reclaim, settle;
-      int selected, writers;
+      bit reclaim, settle, was_transient;
+      int writers;
+      logic [Xlen-1:0] merged;
       reclaim = 0;
       settle = 0;
-      selected = -1;
       writers = 0;
+      merged = '0;
       for (int c = 0; c < Width; c++) begin
         if (commits.slot[c].valid && commits.slot[c].rd != 0) begin
           reclaim |= int'(commits.slot[c].prs) == i;
@@ -92,7 +95,7 @@ module tb_prf_state #(
       end
       for (int p = 0; p < Ports; p++) begin
         if (completion[p].valid && completion[p].rd != 0 && int'(completion[p].prd) == i) begin
-          if (selected < 0) selected = p;
+          merged |= completion[p].result;
           writers++;
         end
       end
@@ -102,19 +105,23 @@ module tb_prf_state #(
       end else begin
         reclaim_settle += int'(reclaim && settle);
         settle_flush += int'(settle && cmu.flush_pipe);
-        flush_write += int'(selected >= 0 && cmu.flush_pipe);
+        flush_write += int'(writers > 0 && cmu.flush_pipe);
         duplicate_write += int'(writers > 1);
+        was_transient = transient_state[i];
         if (reclaim) valid[i] = 0;
         else if (settle) transient_state[i] = 0;
         else if (cmu.flush_pipe && transient_state[i]) begin
           valid[i] = 0;
           transient_state[i] = 0;
-        end else if (!cmu.flush_pipe && selected >= 0) begin
-          data[i] = completion[selected].result;
-          known[i] = 1;
+        end else if (!cmu.flush_pipe && writers > 0) begin
           valid[i] = 1;
           transient_state[i] = 1;
-        end else if (dbg_we && dbg_addr != 0 && int'(dbg_addr) < ArchRegs
+        end
+        if (!cmu.flush_pipe && writers > 0) begin
+          data[i] = merged;
+          known[i] = 1;
+        end else if (!reclaim && !settle && !(cmu.flush_pipe && was_transient)
+                     && dbg_we && dbg_addr != 0 && int'(dbg_addr) < ArchRegs
                      && int'(rat[ArchIndexBits'(dbg_addr)]) == i) begin
           data[i] = dbg_data;
           known[i] = 1;

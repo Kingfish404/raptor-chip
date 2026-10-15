@@ -1043,7 +1043,7 @@ verify-verilator: ## Pure-Verilator parallel regression: modules, RV32/RV64, app
 	@echo "[verify-verilator] PASS: portable Verilator regression completed"
 
 _verify-verilator-directed:
-	$(MAKE) -C $(VERIFY_HOME) verilator-directed \
+	$(MAKE) -C $(VERIFY_HOME) verilator-directed-all \
 		RAPT_CONFIG=$(RAPT_CONFIG) XSIM_RAPT_CONFIG=$(RAPT_CONFIG) \
 		VERILATOR_DIRECTED_DELAY=$(VERILATOR_VERIFY_DELAY) \
 		VERILATOR_DIRECTED_SEED=$(VERILATOR_VERIFY_SEED)

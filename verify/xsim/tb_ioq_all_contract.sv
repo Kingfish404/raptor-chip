@@ -146,7 +146,7 @@ module tb_ioq_completion_kill;
     fresh(1'b1);
     for (int c = 0; c < 20 && !exu_ioq_bcast.valid; c++) tick(1);
     check(exu_ioq_bcast.valid && sq_handoff_valid && sq_forward_pending, "checked store missing");
-    check(!load_fast.confirmed, "store entered fast-load confirmation path");
+
     cmu_bcast.flush_pipe = 1'b1;
     #1;
     check(!exu_ioq_bcast.valid && !sq_handoff_valid, "flush leaked store handoff");
@@ -185,8 +185,7 @@ module tb_ioq_completion_kill;
           "younger response missing before cancellation");
     cmu_bcast.flush_pipe = 1'b1;
     #1;
-    check(!exu_ioq_bcast.valid && !load_fast.confirmed,
-          "cancelled younger response caused a transfer");
+    check(!exu_ioq_bcast.valid, "cancelled younger response caused a transfer");
     check(exu_ioq_bcast.dest == 4 && exu_ioq_bcast.result == XLEN'('h12345678),
           "flush steered the unqualified completion payload");
     tick(1);
@@ -208,8 +207,7 @@ module tb_ioq_early_load_bcast;
 
   task automatic capture_response_stage(input bit channel_b);
     if (`RAPT_IOQ_LOAD_RESPONSE_STAGE) begin
-      check(!exu_ioq_bcast.valid && !load_fast.valid,
-            "registered load response leaked into live completion or wake");
+      check(!exu_ioq_bcast.valid, "registered load response leaked into live completion or wake");
       tick(1);
       if (channel_b) exu_lsu.rready_b = 0;
       else exu_lsu.rready = 0;
@@ -1377,7 +1375,7 @@ module tb_ioq_pending_lock;
           end else begin
             // A registered response completes from captured state; queues wake
             // from that completion, never from a speculative fast-wake pair.
-            check(!load_fast.valid && !load_fast.rebusy, "unexpected fast-load wake");
+
           end
           sample_load_broadcast();
           tick(1);
@@ -1893,7 +1891,7 @@ module tb_ioq_sc_external;
         cmu_bcast.flush_pipe = (flushing != 0);
         #1;
         check(exu_ioq_bcast.valid == (flushing == 0), "flush did not kill SC candidate");
-        check(!load_fast.confirmed, "SC entered fast-load confirmation path");
+
         check(sc_accept == (flushing == 0 && rejection == 0),
               "completion ownership or flush check incorrect");
         check(exu_l1d.reservation_clear == (flushing == 0 && rejection == 0),
@@ -1914,12 +1912,39 @@ endmodule
 // ---- tb_ioq_store_pbmt ----
 `include "rapt.svh"
 `include "rapt_if.svh"
-module tb_ioq_store_pbmt;
+module tb_ioq_store_pbmt #(
+    parameter bit UnacceptedTraffic = 0
+);
   localparam int XLEN = `RAPT_XLEN;
   `include "tb_ioq_harness.svh"
   logic [XLEN-1:0] PageVA;
   localparam logic [XLEN-1:0] PagePA = 'h80000000;
   localparam logic [XLEN-1:0] NextPA = 'h81002000;
+
+  // No translation response is accepted here. Give the SQ credit while
+  // toggling unrelated PA/PBMT/fault payloads to expose premature publication.
+  task automatic wait_with_unaccepted_addresses;
+    logic saved_sq_ready;
+    saved_sq_ready = exu_lsu.stq_ready;
+    exu_lsu.stq_ready = 1'b1;
+    for (int delay = 0; delay < 7; delay++) begin
+      exu_l1d.ready = 1'b0;
+      case (delay % 4)
+        0: exu_l1d.paddr = XLEN'('h0f002000);
+        1: exu_l1d.paddr = XLEN'('h80007000);
+        2: exu_l1d.paddr = '1;
+        default: exu_l1d.paddr = XLEN'('h02000001);
+      endcase
+      exu_l1d.pbmt = 2'(delay);
+      exu_l1d.trap = 1'(delay);
+      tick(1);
+      check(exu_l1d.valid && exu_l1d.mmu_en, "unaccepted payload changed translation ownership");
+      check(!exu_ioq_bcast.valid && !sq_handoff_valid,
+            "unaccepted address or fault escaped to completion/SQ");
+    end
+    exu_lsu.stq_ready = saved_sq_ready;
+    exu_l1d.trap = 1'b0;
+  endtask
 
   task automatic run_store(input int offset, input int size, input int attr0, input int attr1,
                            input bit second_fault, input bit cancel_second,
@@ -1957,7 +1982,8 @@ module tb_ioq_store_pbmt;
     #1;
     check(exu_l1d.valid && exu_l1d.mmu_en && exu_l1d.vaddr == va, "missing first-page translation");
     check(exu_l1d.misaligned == ((offset % size) != 0), "original store alignment lost");
-    tick(3);
+    if (UnacceptedTraffic) wait_with_unaccepted_addresses();
+    else tick(3);
     check(!exu_ioq_bcast.valid, "store completed before translation");
     exu_l1d.paddr = PagePA + XLEN'(offset);
     exu_l1d.pbmt  = 2'(attr0);
@@ -1971,7 +1997,8 @@ module tb_ioq_store_pbmt;
     if (crosses && !first_fault) begin
       check(exu_l1d.mmu_en && exu_l1d.vaddr == PageVA + 4096, "missing second-page translation");
       check(exu_l1d.misaligned == ((offset % size) != 0), "second page lost original alignment");
-      tick(3);
+      if (UnacceptedTraffic) wait_with_unaccepted_addresses();
+      else tick(3);
       check(!exu_ioq_bcast.valid, "store escaped before second-page check");
       if (cancel_second) begin
         cmu_bcast.flush_pipe = 1;
@@ -2035,9 +2062,18 @@ module tb_ioq_store_pbmt;
       run_store(4095, 8, 1, 2, 1, 0, 0);
       run_store(4095, 8, 1, 2, 0, 1, 0);
     end
-    $display("PASS: IOQ per-beat PA/PBMT, noncontiguous pages, delay, fault and cancellation");
+    if (UnacceptedTraffic)
+      $display(
+          "PASS: IOQ unaccepted PA/PBMT/fault traffic with SQ credit; publication, pages and cancellation"
+      );
+    else $display("PASS: IOQ per-beat PA/PBMT, noncontiguous pages, delay, fault and cancellation");
     $finish;
   end
+endmodule
+
+// Preserve the directed entry point while sharing all translation checks.
+module tb_ioq_paddr_preload;
+  tb_ioq_store_pbmt #(.UnacceptedTraffic(1)) contract ();
 endmodule
 
 
@@ -2378,14 +2414,16 @@ module tb_ioq_address_stage;
     exu_rou.valid = 1;
     exu_rou.prd = 7;
     exu_rou.result = XLEN'('h80000040);
+    // Rename gives each tag one producer; a same-cycle broadcast of another
+    // tag must not disturb the selected wake value.
     exu_rou_b.valid = 1;
-    exu_rou_b.prd = 7;
+    exu_rou_b.prd = 6;
     exu_rou_b.result = XLEN'('h80000140);
     tick(1);
     exu_rou.valid   = 0;
     exu_rou_b.valid = 0;
     check(dut.ioq_addr_ready[0] && (!exu_lsu.rvalid || exu_lsu.raddr == XLEN'('h8000004c)),
-          "port-zero CDB priority or registered address was lost");
+          "concurrent CDB tag disturbed the wake or registered address was lost");
     tick(1);
     check(dut.ioq_addr_ready[0] && exu_lsu.rvalid && exu_lsu.raddr == XLEN'('h8000004c),
           "address/request register did not present rvalid after preparation");
@@ -2420,7 +2458,7 @@ module tb_ioq_address_stage;
     exu_lsu.rdata  = XLEN'('h80000800);
     #1;
     if (`RAPT_IOQ_LOAD_RESPONSE_STAGE) begin
-      check(!exu_ioq_bcast.valid && !load_fast.valid, "load bypassed response stage");
+      check(!exu_ioq_bcast.valid, "load bypassed response stage");
       tick(1);
       exu_lsu.rready = 0;
       #1;
@@ -2428,14 +2466,13 @@ module tb_ioq_address_stage;
     check(exu_ioq_bcast.valid && exu_ioq_bcast.prd == $bits(exu_ioq_bcast.prd)'(7),
           "dependent next-head load lost its pointer completion");
 
-    // Memory-port results do not forward into the request register (this
-    // keeps the load response off the next request's cycle); the dependent
-    // load captures its base on the wake edge and issues from its prepared
-    // address instead.
-    check(!dut.wake_next_req_valid, "load result forwarded into the next request");
+    // The registered memory completion forwards into the request register
+    // (pointer chasing): the dependent load issues on the wake edge with the
+    // returned base, not a cycle later from its prepared address.
+    check(dut.wake_next_req_valid && dut.wake_next_addr == XLEN'('h8000080c),
+          "load result did not forward into the next request");
     tick(1);
     exu_lsu.rready = 0;
-    for (int n = 0; n < 4 && !exu_lsu.rvalid; n++) tick(1);
     check(exu_lsu.rvalid && exu_lsu.raddr == XLEN'('h8000080c),
           "dependent request used a stale pointer");
     exu_lsu.rready = 1;
@@ -2490,7 +2527,7 @@ module tb_ioq_address_stage;
       exu_lsu.rdata  = XLEN'(n);
       #1;
       if (`RAPT_IOQ_LOAD_RESPONSE_STAGE) begin
-        check(!exu_ioq_bcast.valid && !load_fast.valid, "load bypassed response stage");
+        check(!exu_ioq_bcast.valid, "load bypassed response stage");
         tick(1);
         exu_lsu.rready = 0;
         #1;
@@ -2633,8 +2670,7 @@ module tb_ioq_load_response_stage;
 
   task automatic no_live_response;
     #1;
-    check(!exu_ioq_bcast.valid && !load_fast.valid,
-          "response crossed completion/wakeup register before capture");
+    check(!exu_ioq_bcast.valid, "response crossed completion/wakeup register before capture");
   endtask
 
   initial begin
@@ -2714,7 +2750,7 @@ module tb_ioq_load_response_stage;
       if (captured) tick(1);
       cmu_bcast.flush_pipe = 1;
       #1;
-      check(!exu_ioq_bcast.valid && !load_fast.valid, "flush leaked completion or wake");
+      check(!exu_ioq_bcast.valid, "flush leaked completion or wake");
       tick(1);
       cmu_bcast.flush_pipe = 0;
       exu_lsu.rready = 0;
@@ -2733,6 +2769,106 @@ module tb_ioq_load_response_stage;
     end
     $display("PASS: registered IOQ responses, metadata, drain throughput and recovery XLEN=%0d",
              XLEN);
+    $finish;
+  end
+endmodule
+
+// AMO completion must retain the captured old value while the response bus
+// changes and the SQ is backpressured. Flush discards that owner and payload.
+module tb_ioq_amo_registered;
+  localparam int XLEN = `RAPT_XLEN;
+  `include "tb_ioq_harness.svh"
+  int cases = 0;
+
+  task automatic scenario(input logic [5:0] op, input bit word_op, input logic [XLEN-1:0] old_value,
+                          input logic [XLEN-1:0] operand, input logic [XLEN-1:0] expected,
+                          input bit flush_response, input bit flush_pending,
+                          input bit reset_first = 1'b1);
+    if (reset_first) begin
+      reset = 1;
+      init_ioq_inputs(0);
+      tick(3);
+      reset = 0;
+      tick(1);
+    end
+    dispatch[0] = '0;
+    dispatch[0].uop.pc = XLEN'('h80000000);
+    dispatch[0].uop.execute.memory.load = 1;
+    dispatch[0].uop.execute.memory.store = 1;
+    dispatch[0].uop.execute.memory.atomic = 1;
+    dispatch[0].uop.execute.int_op.alu = op;
+    dispatch[0].uop.execute.int_op.word = word_op;
+    dispatch[0].op1 = XLEN'('h80001000);
+    dispatch[0].op2 = operand;
+    dispatch[0].dest = 3;
+    dispatch[0].prd = 9;
+    dispatch[0].uop.rd = 5;
+    cmu_bcast.rob_head = 3;
+    disp.accept[0] = 1;
+    tick(1);
+    disp.accept[0] = 0;
+    for (int c = 0; c < 24 && !exu_lsu.rvalid; c++) tick(1);
+    check(exu_lsu.rvalid, "AMO request missing");
+    exu_lsu.stq_ready = 0;
+    exu_lsu.rdata = old_value;
+    exu_lsu.rready = 1;
+    cmu_bcast.flush_pipe = flush_response;
+    #1;
+    check(!exu_ioq_bcast.valid && !sq_handoff_valid, "AMO bypassed captured response");
+    tick(1);
+    exu_lsu.rready = 0;
+    exu_lsu.rdata = ~old_value;
+    cmu_bcast.flush_pipe = 0;
+    repeat (3) begin
+      check(!exu_ioq_bcast.valid && !sq_handoff_valid, "AMO ignored SQ backpressure");
+      tick(1);
+      exu_lsu.rdata = exu_lsu.rdata + XLEN'(17);
+    end
+    cmu_bcast.flush_pipe = flush_pending;
+    exu_lsu.stq_ready = 1;
+    #1;
+    if (flush_response || flush_pending) begin
+      check(!exu_ioq_bcast.valid && !sq_handoff_valid, "flushed AMO escaped");
+    end else begin
+      check(exu_ioq_bcast.valid && exu_ioq_bcast.wen && !exu_ioq_bcast.trap,
+            "captured AMO failed to complete");
+      check(exu_ioq_bcast.result == old_value, "AMO old value changed after capture");
+      check(
+          word_op ? exu_ioq_bcast.sq_wdata[31:0] == expected[31:0]
+                    : exu_ioq_bcast.sq_wdata == expected,
+          "AMO store value mismatch");
+      check(sq_handoff_valid, "AMO store handoff missing");
+    end
+    tick(1);
+    cmu_bcast.flush_pipe = 0;
+    tick(2);
+    check(!exu_ioq_bcast.valid && !exu_lsu.rvalid, "AMO completed twice or survived flush");
+    cases++;
+  endtask
+
+  initial begin
+    for (int w = 0; w < (XLEN == 64 ? 2 : 1); w++) begin
+      // For .W the upper operand bits deliberately disagree with bit 31.
+      scenario(`RAPT_ATO_ADD_, w == 0, '1, XLEN'(2), XLEN'(1), 0, 0);
+      scenario(`RAPT_ATO_SWAP, w == 0, '1, XLEN'(7), XLEN'(7), 0, 0);
+      scenario(`RAPT_ATO_XOR_, w == 0, '1, XLEN'(3), ~XLEN'(3), 0, 0);
+      scenario(`RAPT_ATO_AND_, w == 0, '1, XLEN'(3), XLEN'(3), 0, 0);
+      scenario(`RAPT_ATO_OR__, w == 0, XLEN'(4), XLEN'(3), XLEN'(7), 0, 0);
+      scenario(`RAPT_ATO_MIN_, w == 0, '1, XLEN'(64'hffffffff00000002),
+               w == 0 ? '1 : XLEN'(64'hffffffff00000002), 0, 0);
+      scenario(`RAPT_ATO_MAX_, w == 0, '1, XLEN'(64'hffffffff00000002), w == 0 ? XLEN'(2) : '1, 0,
+               0);
+      // Sign extension must not turn the .W unsigned comparison into a .D one.
+      scenario(`RAPT_ATO_MINU, w == 0, XLEN'(64'hffffffff80000000), XLEN'(32'hffffffff),
+               w == 0 ? XLEN'(32'h80000000) : XLEN'(32'hffffffff), 0, 0);
+      scenario(`RAPT_ATO_MAXU, w == 0, XLEN'(64'hffffffff80000000), XLEN'(32'hffffffff),
+               w == 0 ? XLEN'(32'hffffffff) : XLEN'(64'hffffffff80000000), 0, 0);
+    end
+    scenario(`RAPT_ATO_ADD_, 1, XLEN'(5), XLEN'(7), XLEN'(12), 1, 0);
+    scenario(`RAPT_ATO_ADD_, 1, XLEN'(5), XLEN'(7), XLEN'(12), 0, 1);
+    scenario(`RAPT_ATO_ADD_, 1, XLEN'(11), XLEN'(7), XLEN'(18), 0, 0, 0);
+    $display("PASS: AMO captured data, operations, backpressure and flush XLEN=%0d cases=%0d",
+             XLEN, cases);
     $finish;
   end
 endmodule

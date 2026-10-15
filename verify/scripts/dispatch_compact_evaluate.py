@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 import subprocess
 
-from rank_select_check import run_yosys
+from yosys_common import run_yosys
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "hdl/rapt_pkg.sv"

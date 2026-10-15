@@ -15,11 +15,20 @@ module rapt_cache_plru #(
     output wire [WayBits-1:0] victim[ReadPorts],
     input logic [UpdatePorts-1:0] update_valid,
     input logic [SetBits-1:0] update_set[UpdatePorts],
+`ifdef FORMAL
+    input logic [WayBits-1:0] update_way[UpdatePorts],
+    output wire [Ways-2:0] formal_recent[2**SetBits]
+`else
     input logic [WayBits-1:0] update_way[UpdatePorts]
+`endif
 );
   localparam int Sets  = 2 ** SetBits;
   localparam int Nodes = Ways - 1;
   logic [Nodes-1:0] recent[Sets];
+`ifdef FORMAL
+  // Observation only: expose every node for the independent formal model.
+  assign formal_recent = recent;
+`endif
   if (!(Ways >= 2 && (Ways & (Ways - 1)) == 0 && WayBits == $clog2(
           Ways
       ) && SetBits > 0 && ReadPorts > 0 && UpdatePorts > 0)) begin : g_invalid_config

@@ -67,6 +67,12 @@ module tb_hum_request_stage;
     end
     exu_lsu.rready_b=1;
     exu_lsu.rdata_b=XLEN'('h13579bdf);
+    #1;
+    // A non-head B response broadcasts its captured owner immediately; the
+    // entry stays complete only for in-order retirement.
+    check(
+        exu_ioq_bcast.valid && exu_ioq_bcast.dest == 2 && exu_ioq_bcast.result == XLEN'('h13579bdf),
+        "B response did not complete its owner");
     tick(1);
     exu_lsu.rready_b = 0;
     check(dut.ioq_complete[2] && !dut.ioq_complete[1],
@@ -92,10 +98,6 @@ module tb_hum_request_stage;
     check(
         exu_ioq_bcast.valid && exu_ioq_bcast.dest == 1 && exu_ioq_bcast.result == XLEN'('h33334444),
         "wrong simultaneous B result");
-    tick(1);
-    check(
-        exu_ioq_bcast.valid && exu_ioq_bcast.dest == 2 && exu_ioq_bcast.result == XLEN'('h13579bdf),
-        "lost earlier B result");
     tick(1);
     check(!exu_ioq_bcast.valid, "duplicate completion");
 
@@ -147,23 +149,46 @@ module tb_hum_request_stage;
     enqueue(0, XLEN'('h80006000));
     await_a(XLEN'('h80006000));
     enqueue(1, XLEN'('h80007000), 0, 1);
-    repeat (4) begin
+    if (XLEN == 64) begin
+      // RV64 carries the whole FLD payload on either lane, like LD.
+      for (int n = 0; n < 8 && !exu_lsu.rvalid_b; n++) tick(1);
+      check(exu_lsu.rvalid_b && exu_lsu.raddr_b == XLEN'('h80007000),
+            "RV64 FLD did not use the B lane");
+      exu_lsu.rdata_b = XLEN'(64'hfedcba9876543210);
+      exu_lsu.rready_b = 1;
+      #1;
+      check(
+          exu_ioq_bcast.valid && exu_ioq_bcast.fp_wen && exu_ioq_bcast.dest == 1
+            && exu_ioq_bcast.fp_result == 64'hfedcba9876543210,
+          "RV64 FLD B response lost FPR write");
       tick(1);
-      check(!exu_lsu.rvalid_b, "FLD used B without a FP64 response payload");
+      exu_lsu.rready_b = 0;
+      exu_lsu.rready = 1;
+      tick(1);
+      exu_lsu.rready = 0;
+      check(!(exu_ioq_bcast.valid && exu_ioq_bcast.dest == 1), "RV64 FLD write was duplicated");
+    end else begin
+      repeat (4) begin
+        tick(1);
+        check(!exu_lsu.rvalid_b, "FLD used B without a FP64 response payload");
+      end
+      exu_lsu.rready = 1;
+      tick(1);
+      exu_lsu.rready = 0;
+      await_a(XLEN'('h80007000));
+      check(exu_lsu.fp_rdata64_req, "FLD fallback lost its 64-bit request");
+      exu_lsu.fp_rdata64=64'hfedcba9876543210;
+      exu_lsu.rready=1;
+      #1;
+      // FP load results reach the FPR through the memory completion, which the
+      // ROB owner (dest) maps to the architectural FP destination.
+      check(exu_ioq_bcast.valid && exu_ioq_bcast.fp_wen && exu_ioq_bcast.dest == 1,
+            "FLD fallback lost FPR write identity");
+      check(exu_ioq_bcast.fp_result == 64'hfedcba9876543210, "FLD fallback lost FPR data");
+      tick(1);
+      exu_lsu.rready = 0;
+      check(!exu_ioq_bcast.valid, "FLD fallback write was duplicated");
     end
-    exu_lsu.rready = 1;
-    tick(1);
-    exu_lsu.rready = 0;
-    await_a(XLEN'('h80007000));
-    check(exu_lsu.fp_rdata64_req, "FLD fallback lost its 64-bit request");
-    exu_lsu.fp_rdata64=64'hfedcba9876543210;
-    exu_lsu.rready=1;
-    #1;
-    check(fpr.ioq_wvalid && fpr.ioq_waddr == 5, "FLD fallback lost FPR write identity");
-    check(fpr.ioq_wdata == 64'hfedcba9876543210, "FLD fallback lost FPR data");
-    tick(1);
-    exu_lsu.rready = 0;
-    check(!fpr.ioq_wvalid, "FLD fallback write was duplicated");
     $display("PASS: registered HUM ownership/backpressure/flush/FP64 XLEN=%0d", XLEN);
     $finish;
   end

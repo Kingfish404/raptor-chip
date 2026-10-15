@@ -12,8 +12,15 @@ module tb_fp_arch_bank;
   uop_t allocate_uop[Width];
   logic [Bits-1:0] allocate_index[Width], commit_index[Width], read_index[Width];
   logic [GenBits-1:0] allocate_generation[Width];
-  logic [2:0][63:0] allocate_value[Width], read_value[Width];
   logic [2:0][Bits:0] allocate_tag[Width], read_tag[Width];
+  // The committed bank is read through the dispatch-lane resolve ports.
+  uop_t resolve_uop[Width];
+  logic [2:0][Bits:0] resolve_tag[Width], resolve_ready_tag[Width];
+  logic [2:0][63:0] resolve_value[Width];
+  for (genvar s = 0; s < Width; s++) begin : g_resolve
+    assign resolve_uop[s] = allocate_uop[s];
+    assign resolve_tag[s] = allocate_tag[s];
+  end
   completion_t completion[Width];
   logic [63:0] expected[32];
   logic [63:0] data[Width];
@@ -79,15 +86,15 @@ module tb_fp_arch_bank;
       #1;
       for (int s = 0; s < Width; s++) begin
         for (int operand = 0; operand < 3; operand++) begin
-          if (allocate_tag[s][operand] !== '0
-              || allocate_value[s][operand] !== expected[(r+s*3+operand*7)%32])
+          if (allocate_tag[s][operand] !== '0 || resolve_ready_tag[s][operand] !== '0
+              || resolve_value[s][operand] !== expected[(r+s*3+operand*7)%32])
             $fatal(
                 1,
                 "committed bank mismatch lane=%0d operand=%0d f%0d got=%h expected=%h",
                 s,
                 operand,
                 (r + s * 3 + operand * 7) % 32,
-                allocate_value[s][operand],
+                resolve_value[s][operand],
                 expected[(r+s*3+operand*7)%32]
             );
           observations++;

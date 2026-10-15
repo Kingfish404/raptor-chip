@@ -365,3 +365,63 @@ module rapt_pmp_line_uniform #(
   end
   assign uniform_o = !(|boundary);
 endmodule
+
+// True when no enabled PMP region starts or ends inside words
+// (addr_word, addr_word + Words]. Every word in that window then has the same
+// match vector as addr's word, hence the same first match and permission.
+// Speculative lookahead uses this to reuse the primary word's check; a false
+// result only suppresses lookahead. Subtract-and-compare per boundary, with no
+// full permission CAM.
+module rapt_pmp_window_uniform #(
+    parameter int XLEN = `RAPT_XLEN,
+    parameter int PADDR_BITS = `RAPT_PADDR_BITS,
+    parameter int Words = 4
+) (
+    input logic [XLEN-1:0] addr,
+    pmp_state_if.in state,
+    output logic uniform_o
+);
+  localparam int WordBits = PADDR_BITS - 2;
+  logic [WordBits-1:0] word;
+  logic window_wraps;
+  logic [`RAPT_PMP_NUM-1:0] boundary;
+  assign word = addr[PADDR_BITS-1:2];
+  assign window_wraps = word > WordBits'({WordBits{1'b1}} - Words);
+  // A region starting at `start` changes membership inside the window when
+  // start - word is in [1, Words]; one ending at word `last` when last - word
+  // is in [0, Words - 1].
+  function automatic logic starts_inside(input logic [WordBits-1:0] start);
+    logic [WordBits-1:0] distance;
+    distance = start - word;
+    return distance != '0 && distance <= WordBits'(Words);
+  endfunction
+  function automatic logic ends_inside(input logic [WordBits-1:0] last);
+    logic [WordBits-1:0] distance;
+    distance = last - word;
+    return distance < WordBits'(Words);
+  endfunction
+  logic [`RAPT_PMP_NUM-1:0] raw_starts;
+  for (genvar i = 0; i < `RAPT_PMP_NUM; i++) begin : g_raw
+    // TOR membership changes exactly at its pmpaddr boundary values.
+    assign raw_starts[i] = starts_inside(state.pmp_raw_addr[i]);
+  end
+  for (genvar i = 0; i < `RAPT_PMP_NUM; i++) begin : g_boundary
+    wire [WordBits-1:0] base = state.pmp_raw_addr[i] & ~state.pmp_napot_mask[i];
+    wire [WordBits-1:0] last = state.pmp_raw_addr[i] | state.pmp_napot_mask[i];
+    logic tor_edge;
+    if (i == 0) begin : g_first
+      assign tor_edge = raw_starts[i];
+    end else begin : g_next
+      assign tor_edge = raw_starts[i] || raw_starts[i-1];
+    end
+    assign boundary[i] = (state.pmp_mode_tor[i] && tor_edge)
+        || (state.pmp_mode_na4[i] && (raw_starts[i] || ends_inside(
+        state.pmp_raw_addr[i]
+    ))) || (state.pmp_mode_napot[i] && (starts_inside(
+        base
+    ) || ends_inside(
+        last
+    )));
+  end
+  assign uniform_o = !window_wraps && !(|boundary);
+endmodule

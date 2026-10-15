@@ -21,7 +21,6 @@ module iq_recovery_window_case #(
   issue_packet_t issue[Ports];
   dpu_iq_if #(.RS_SIZE(Entries)) disp ();
   cmu_bcast_if cmu_bcast ();
-  load_fast_if load_fast ();
   logic [Ports-1:0] issue_enable;
   logic [$clog2(Entries):0] occupancy;
   logic cancel_valid;
@@ -41,7 +40,6 @@ module iq_recovery_window_case #(
       .completion,
       .disp,
       .cmu_bcast,
-      .load_fast,
       .issue_enable,
       .issue,
       .occ_o(occupancy),
@@ -53,19 +51,6 @@ module iq_recovery_window_case #(
     completion_t shadow_completion[CompletionPorts];
     issue_packet_t shadow_issue[Ports];
     dpu_iq_if #(.RS_SIZE(Entries)) shadow_disp ();
-    load_fast_if shadow_fast ();
-    assign shadow_fast.valid = load_fast.valid;
-    assign shadow_fast.rebusy = load_fast.rebusy;
-    assign shadow_fast.prd = load_fast.prd;
-    assign shadow_fast.dest = load_fast.dest;
-    assign shadow_fast.generation = load_fast.generation;
-    assign shadow_fast.rd = load_fast.rd;
-    assign shadow_fast.confirmed = load_fast.confirmed;
-    assign shadow_fast.confirmed_prd = load_fast.confirmed_prd;
-    assign shadow_fast.confirmed_dest = load_fast.confirmed_dest;
-    assign shadow_fast.confirmed_generation = load_fast.confirmed_generation;
-    assign shadow_fast.confirmed_rd = load_fast.confirmed_rd;
-    assign shadow_fast.result = ~load_fast.result;
     logic [$clog2(Entries):0] shadow_occupancy;
     rapt_iq #(
         .IQ_SIZE(Entries),
@@ -82,7 +67,6 @@ module iq_recovery_window_case #(
         .completion(shadow_completion),
         .disp(shadow_disp),
         .cmu_bcast,
-        .load_fast(shadow_fast),
         .issue_enable,
         .issue(shadow_issue),
         .occ_o(shadow_occupancy),
@@ -265,7 +249,7 @@ module iq_recovery_window_case #(
     $display("PASS: cancellation incoming/owner/late-wakeup edges in_order=%0d", InOrder);
   endtask
 
-  task automatic cancellation_fast_paths;
+  task automatic cancellation_data_wake;
     localparam logic [`RAPT_XLEN-1:0] Value = `RAPT_XLEN'(64'h1234_5678_aa55_55aa);
     measuring = 0;
     for (int mode = 0; mode < 3; mode++) begin
@@ -276,73 +260,39 @@ module iq_recovery_window_case #(
       owner = 8;
       enqueue(6, 1);
       enqueue(10, 1);
-      // Both consumers wait on one older producer. Its generation is not
-      // required to equal either consumer's allocation generation.
-      load_fast.valid = 1;
-      load_fast.prd = `RAPT_PHY_LEN'(5);
-      load_fast.dest = $bits(load_fast.dest)'(4);
-      load_fast.generation = rob_generation_t'(3);
-      load_fast.rd = arch_reg_t'(5);
-      tick();
-      load_fast.valid = 0;
-      @(negedge clock);
+      // Exercise a matching, mismatched or absent data wake at cancellation.
       cancel_valid = 1;
       issue_enable = '1;
-      load_fast.confirmed = mode != 2;
-      load_fast.confirmed_prd = `RAPT_PHY_LEN'(5);
-      load_fast.confirmed_dest = $bits(load_fast.dest)'(4);
-      load_fast.confirmed_rd = arch_reg_t'(5);
-      load_fast.confirmed_generation = rob_generation_t'(mode == 1 ? 2 : 3);
-      load_fast.result = Value;
-      load_fast.valid = mode == 2;
-      load_fast.rebusy = mode == 2;
+      completion[0].valid = mode != 2;
+      completion[0].prd = `RAPT_PHY_LEN'(mode == 1 ? 7 : 5);
+      completion[0].result = Value;
       #1;
-      assert (!issue[0].valid)
-      else $fatal(1, "cancel/confirm/rebusy eligibility mismatch mode=%0d", mode);
-      for (int p = 1; p < Ports; p++)
+      for (int p = 0; p < Ports; p++)
       assert (!issue[p].valid)
-      else $fatal(1, "younger fast-confirmed consumer escaped cancellation");
+      else $fatal(1, "data wake bypassed capture at cancellation");
       tick();
       cancel_valid = 0;
-      load_fast.valid = 0;
-      load_fast.rebusy = 0;
-      if (mode == 0) begin
-        load_fast.confirmed = 0;
-        #1;
-        assert (issue[0].valid && int'(issue[0].dest) == 6 && issue[0].op1 == Value)
-        else $fatal(1, "older fast confirmation was not registered");
+      completion[0].valid = 0;
+      if (mode != 0) begin
+        assert (occupancy == 1 && !issue[0].valid)
+        else $fatal(1, "older blocked consumer was cancelled or released");
+        completion[0].valid = 1;
+        completion[0].prd = `RAPT_PHY_LEN'(5);
         tick();
-        // A repeated confirmation after removal must not recreate either uop.
-        repeat (2) tick();
-      end else begin
-        assert (occupancy == 1)
-        else $fatal(1, "older blocked consumer was cancelled");
-        load_fast.confirmed = 1;
-        load_fast.confirmed_generation = rob_generation_t'(3);
-        #1;
-        assert (!issue[0].valid)
-        else $fatal(1, "confirmation bypassed the operand register");
-        if (mode == 2) begin
-          tick();
-          load_fast.confirmed = 0;
-          completion[0].valid = 1;
-          completion[0].prd = `RAPT_PHY_LEN'(5);
-          completion[0].result = Value;
-          tick();
-          completion[0].valid = 0;
-        end else begin
-          tick();
-          load_fast.confirmed = 0;
-        end
-        #1;
-        assert (issue[0].valid && int'(issue[0].dest) == 6 && issue[0].op1 == Value)
-        else $fatal(1, "older consumer failed to recover after stale confirm/rebusy");
-        tick();
+        completion[0].valid = 0;
       end
-      load_fast.confirmed = 0;
+      #1;
+      assert (issue[0].valid && int'(issue[0].dest) == 6 && issue[0].op1 == Value)
+      else $fatal(1, "older consumer lost registered completion");
+      tick();
+      // A repeated completion cannot recreate either removed consumer.
+      completion[0].valid = 1;
+      completion[0].prd = `RAPT_PHY_LEN'(5);
+      repeat (2) tick();
+      completion[0].valid = 0;
       assert (occupancy == 0)
-      else $fatal(1, "fast-path case left a cancelled resident alive");
-      $display("PASS: cancel fast-path mode=%0d in_order=%0d", mode, InOrder);
+      else $fatal(1, "late wake recreated a removed resident");
+      $display("PASS: cancel data-wake mode=%0d in_order=%0d", mode, InOrder);
     end
   endtask
 
@@ -698,25 +648,13 @@ module iq_recovery_window_case #(
       disp.rs_idx[s] = '0;
     end
     foreach (completion[p]) completion[p] = '0;
-    load_fast.valid = 0;
-    load_fast.rebusy = 0;
-    load_fast.confirmed = 0;
-    load_fast.prd = '0;
-    load_fast.dest = '0;
-    load_fast.generation = '0;
-    load_fast.rd = '0;
-    load_fast.confirmed_prd = '0;
-    load_fast.confirmed_dest = '0;
-    load_fast.confirmed_generation = '0;
-    load_fast.confirmed_rd = '0;
-    load_fast.result = '0;
     tick();
     reset = 0;
     measure_window(10, 12);
     measure_window(ROBEntries - 2, 0);
     if (Cancel) begin
       cancellation_edges();
-      cancellation_fast_paths();
+      cancellation_data_wake();
       cancellation_reclaim();
       cancellation_supersession();
       cancellation_batch();

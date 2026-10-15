@@ -41,9 +41,6 @@ package rapt_iq_uvm_pkg;
     bit [XLEN-1:0] wb_result_1;
     bit [XLEN-1:0] wb_result_2;
     bit [XLEN-1:0] wb_result_3;
-    bit load_fast_valid;
-    bit load_fast_rebusy;
-    bit [PLEN-1:0] load_fast_prd;
 
     bit reset;
     bit [$clog2(IQSize)-1:0] b_rs_idx;
@@ -105,9 +102,6 @@ package rapt_iq_uvm_pkg;
       wb_result_1 = 0;
       wb_result_2 = 0;
       wb_result_3 = 0;
-      load_fast_valid = 0;
-      load_fast_rebusy = 0;
-      load_fast_prd = 0;
     endfunction
 
     function void generate_random_stimulus();
@@ -143,9 +137,6 @@ package rapt_iq_uvm_pkg;
       wb_result_1 = $urandom;
       wb_result_2 = $urandom;
       wb_result_3 = $urandom;
-      load_fast_valid = ($urandom_range(0, 99) < 12);
-      load_fast_rebusy = ($urandom_range(0, 9) == 0);
-      load_fast_prd = $urandom_range(1, 31);
     endfunction
   endclass
 
@@ -220,9 +211,6 @@ package rapt_iq_uvm_pkg;
       vif.drv_cb.wb_result_1 <= item.wb_result_1;
       vif.drv_cb.wb_result_2 <= item.wb_result_2;
       vif.drv_cb.wb_result_3 <= item.wb_result_3;
-      vif.drv_cb.load_fast_valid <= item.load_fast_valid;
-      vif.drv_cb.load_fast_rebusy <= item.load_fast_rebusy;
-      vif.drv_cb.load_fast_prd <= item.load_fast_prd;
     endtask
   endclass
 
@@ -281,9 +269,6 @@ package rapt_iq_uvm_pkg;
       sample.wb_result_1 = vif.mon_cb.wb_result_1;
       sample.wb_result_2 = vif.mon_cb.wb_result_2;
       sample.wb_result_3 = vif.mon_cb.wb_result_3;
-      sample.load_fast_valid = vif.mon_cb.load_fast_valid;
-      sample.load_fast_rebusy = vif.mon_cb.load_fast_rebusy;
-      sample.load_fast_prd = vif.mon_cb.load_fast_prd;
       sample.free_found_a = vif.mon_cb.free_found_a;
       sample.free_found_b = vif.mon_cb.free_found_b;
       sample.free_idx_a = vif.mon_cb.free_idx_a;
@@ -319,8 +304,6 @@ package rapt_iq_uvm_pkg;
     bit [PLEN-1:0] pr2;
     bit pr1_busy;
     bit pr2_busy;
-    bit pr1_fast;
-    bit pr2_fast;
     bit [PLEN-1:0] prd;
     bit [RLEN-1:0] rd;
     bit [ROBLEN-1:0] dest;
@@ -371,26 +354,8 @@ package rapt_iq_uvm_pkg;
         wb_value = wb_result_at(item, p);
     endfunction
 
-    function bit fast_wake(iq_cycle_item item, bit [PLEN-1:0] pr);
-      return (pr != 0) && item.load_fast_valid && !item.load_fast_rebusy
-             && (item.load_fast_prd == pr);
-    endfunction
-
-    function bit fast_confirm(iq_cycle_item item, bit is_fast, bit [PLEN-1:0] pr);
-      return is_fast && item.wb_valid[0] && (item.wb_prd_0 == pr);
-    endfunction
-
-    function bit fast_rebusy(iq_cycle_item item, bit is_fast, bit [PLEN-1:0] pr);
-      return is_fast && item.load_fast_valid && item.load_fast_rebusy && (item.load_fast_prd == pr);
-    endfunction
-
     function bit entry_ready(iq_cycle_item item, int index);
-      return entries[index].valid
-             && !entries[index].pr1_busy && !entries[index].pr2_busy
-             && (!entries[index].pr1_fast
-                 || fast_confirm(item, entries[index].pr1_fast, entries[index].pr1)) &&
-          (!entries[index].pr2_fast ||
-           fast_confirm(item, entries[index].pr2_fast, entries[index].pr2));
+      return entries[index].valid && !entries[index].pr1_busy && !entries[index].pr2_busy;
     endfunction
 
     function int oldest_ready(iq_cycle_item item, bit port_b, int exclude);
@@ -422,10 +387,8 @@ package rapt_iq_uvm_pkg;
         `uvm_error("IQ_VALID", $sformatf(
                    "port %s valid=%0b expected=%0b", port_name, actual_valid, index >= 0))
       if (index < 0 || !actual_valid) return;
-      expected_op1 = fast_confirm(item, entries[index].pr1_fast, entries[index].pr1)
-                     ? item.wb_result_0 : entries[index].op1;
-      expected_op2 = fast_confirm(item, entries[index].pr2_fast, entries[index].pr2)
-                     ? item.wb_result_0 : entries[index].op2;
+      expected_op1 = entries[index].op1;
+      expected_op2 = entries[index].op2;
       if (actual_pc != entries[index].pc || actual_prd != entries[index].prd
           || actual_op1 != expected_op1 || actual_op2 != expected_op2)
         `uvm_error("IQ_PAYLOAD", $sformatf(
@@ -457,48 +420,29 @@ package rapt_iq_uvm_pkg;
       entries[index].prd = slot_b ? item.prd_b : item.prd_a;
       entries[index].rd = slot_b ? item.rd_b : item.rd_a;
       entries[index].dest = slot_b ? item.dest_b : item.dest_a;
-      entries[index].pr1_busy = (entries[index].pr1 != 0)
-                                && !fast_wake(item, entries[index].pr1);
-      entries[index].pr2_busy = (entries[index].pr2 != 0)
-                                && !fast_wake(item, entries[index].pr2);
-      entries[index].pr1_fast = fast_wake(item, entries[index].pr1);
-      entries[index].pr2_fast = fast_wake(item, entries[index].pr2);
+      entries[index].pr1_busy = (entries[index].pr1 != 0);
+      entries[index].pr2_busy = (entries[index].pr2 != 0);
       entries[index].age = age_value;
     endfunction
 
     function void update_operand(iq_cycle_item item, int index, bit operand_two);
       bit [PLEN-1:0] pr = operand_two ? entries[index].pr2 : entries[index].pr1;
-      bit is_fast = operand_two ? entries[index].pr2_fast : entries[index].pr1_fast;
       bit is_busy = operand_two ? entries[index].pr2_busy : entries[index].pr1_busy;
       bit [XLEN-1:0] value = operand_two ? entries[index].op2 : entries[index].op1;
 
-      if (fast_confirm(item, is_fast, pr)) begin
-        value = item.wb_result_0;
-        pr = 0;
-        is_busy = 0;
-        is_fast = 0;
-      end else if (fast_rebusy(item, is_fast, pr)) begin
-        is_busy = 1;
-        is_fast = 0;
-      end else if (is_busy && wb_hit(item, pr)) begin
+      if (is_busy && wb_hit(item, pr)) begin
         value = wb_value(item, pr, value);
         pr = 0;
         is_busy = 0;
-        is_fast = 0;
-      end else if (is_busy && fast_wake(item, pr)) begin
-        is_busy = 0;
-        is_fast = 1;
       end
 
       if (operand_two) begin
         entries[index].pr2 = pr;
         entries[index].pr2_busy = is_busy;
-        entries[index].pr2_fast = is_fast;
         entries[index].op2 = value;
       end else begin
         entries[index].pr1 = pr;
         entries[index].pr1_busy = is_busy;
-        entries[index].pr1_fast = is_fast;
         entries[index].op1 = value;
       end
     endfunction
@@ -563,8 +507,6 @@ package rapt_iq_uvm_pkg;
     int unsigned dispatch_b_hits;
     int unsigned dual_dispatch_hits;
     int unsigned wb_port_hits[4];
-    int unsigned fast_wake_hits;
-    int unsigned fast_rebusy_hits;
     int unsigned flush_hits;
 
     function new(string name, uvm_component parent);
@@ -580,8 +522,6 @@ package rapt_iq_uvm_pkg;
       dispatch_b_hits += t.accept_b;
       dual_dispatch_hits += t.accept_a && t.accept_b;
       for (int i = 0; i < 4; i++) wb_port_hits[i] += t.wb_valid[i];
-      fast_wake_hits += t.load_fast_valid && !t.load_fast_rebusy;
-      fast_rebusy_hits += t.load_fast_valid && t.load_fast_rebusy;
       flush_hits += t.flush_pipe;
     endfunction
 
@@ -589,7 +529,7 @@ package rapt_iq_uvm_pkg;
       `uvm_info("IQ_COVERAGE", $sformatf(
                 {
                   "occ(empty/partial/full)=%0d/%0d/%0d dispatch(A/B/dual)=%0d/%0d/%0d ",
-                  "wb=%0d/%0d/%0d/%0d fast(wake/rebusy)=%0d/%0d flush=%0d"
+                  "wb=%0d/%0d/%0d/%0d flush=%0d"
                 },
                 occ_empty_hits,
                 occ_partial_hits,
@@ -601,8 +541,6 @@ package rapt_iq_uvm_pkg;
                 wb_port_hits[1],
                 wb_port_hits[2],
                 wb_port_hits[3],
-                fast_wake_hits,
-                fast_rebusy_hits,
                 flush_hits
                 ), UVM_LOW)
     endfunction
@@ -698,8 +636,6 @@ package rapt_iq_uvm_pkg;
       item.pr1_a = 7'd10;
       item.prd_a = 3;
       item.rd_a = 3;
-      item.load_fast_valid = 1;
-      item.load_fast_prd = 7'd10;
       finish_item(item);
       send_idle();
 
@@ -720,16 +656,11 @@ package rapt_iq_uvm_pkg;
       item.pr1_a = 7'd11;
       item.prd_a = 4;
       item.rd_a = 4;
-      item.load_fast_valid = 1;
-      item.load_fast_prd = 7'd11;
       finish_item(item);
 
       item = iq_cycle_item::type_id::create("item");
       start_item(item);
       item.clear_stimulus();
-      item.load_fast_valid = 1;
-      item.load_fast_rebusy = 1;
-      item.load_fast_prd = 7'd11;
       finish_item(item);
 
       item = iq_cycle_item::type_id::create("item");

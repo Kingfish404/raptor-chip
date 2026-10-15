@@ -11,39 +11,8 @@ module tb_csr_architectural;
   always #5 clock = ~clock;
   logic external_s = 0;
   logic [63:0] platform_time = 0;
-  rou_csr_if rou_csr ();
-  exu_csr_if exu_csr ();
-  csr_bcast_if csr_bcast ();
-  cmu_bcast_if cmu_bcast ();
-  pmp_update_if pmp_update ();
-  rapt_pkg::issue_packet_t iss;
-  rapt_pkg::completion_t wb;
-  rapt_csr csr_dut (
-      .clock,
-      .reset,
-      .hart_id_i('0),
-      .mtime_i(platform_time),
-      .rou_csr,
-      .exu_csr,
-      .csr_bcast,
-      .pmp_update,
-      .timer_irq_i(1'b0),
-      .sw_irq_i(1'b0),
-      .m_ext_irq_i(1'b0),
-      .store_error_i(1'b0),
-      .store_error_addr_i('0),
-      .store_error_strb_i('0),
-      .s_ext_irq_i(external_s),
-      .s_int_pending(),
-      .s_int_cause()
-  );
-  rapt_ieu_pipe_alu_csr execute_dut (
-      .iss,
-      .cmu_bcast,
-      .csr_bcast,
-      .exu_csr,
-      .wb_alu_csr(wb)
-  );
+  `define TB_CSR_TIME platform_time
+  `include "tb_csr_execute_dut.svh"
   `include "tb_core_bcast_defaults.svh"
   `include "tb_csr_clear_commit.svh"
   `include "tb_csr_execute_tasks.svh"
@@ -356,39 +325,8 @@ module tb_csr_bus_error;
   logic [XLEN-1:0] store_error_addr_i=0;
   logic [7:0] store_error_strb_i=0;
   localparam logic [XLEN-1:0] Irq = XLEN'(1) << 16;
-  rou_csr_if rou_csr ();
-  exu_csr_if exu_csr ();
-  csr_bcast_if csr_bcast ();
-  cmu_bcast_if cmu_bcast ();
-  pmp_update_if pmp_update ();
-  rapt_pkg::issue_packet_t iss;
-  rapt_pkg::completion_t wb;
-  rapt_csr csr_dut (
-      .clock,
-      .reset,
-      .hart_id_i('0),
-      .mtime_i(64'd0),
-      .rou_csr,
-      .exu_csr,
-      .csr_bcast,
-      .pmp_update,
-      .timer_irq_i(1'b0),
-      .sw_irq_i(1'b0),
-      .m_ext_irq_i(1'b0),
-      .store_error_i,
-      .store_error_addr_i,
-      .store_error_strb_i,
-      .s_ext_irq_i(external_s),
-      .s_int_pending(),
-      .s_int_cause()
-  );
-  rapt_ieu_pipe_alu_csr execute_dut (
-      .iss,
-      .cmu_bcast,
-      .csr_bcast,
-      .exu_csr,
-      .wb_alu_csr(wb)
-  );
+  `define TB_CSR_BUS_ERROR
+  `include "tb_csr_execute_dut.svh"
   `include "tb_core_bcast_defaults.svh"
   `include "tb_csr_clear_commit.svh"
   `include "tb_csr_execute_tasks.svh"
@@ -486,39 +424,9 @@ module tb_csr_contract;
   logic [XLEN-1:0] hart_id='0;
   logic external_s = 0;
   logic [63:0] platform_time = 0;
-  rou_csr_if rou_csr ();
-  exu_csr_if exu_csr ();
-  csr_bcast_if csr_bcast ();
-  cmu_bcast_if cmu_bcast ();
-  pmp_update_if pmp_update ();
-  rapt_pkg::issue_packet_t iss;
-  rapt_pkg::completion_t wb;
-  rapt_csr csr_dut (
-      .clock,
-      .reset,
-      .hart_id_i(hart_id),
-      .mtime_i(platform_time),
-      .rou_csr,
-      .exu_csr,
-      .csr_bcast,
-      .pmp_update,
-      .timer_irq_i(1'b0),
-      .sw_irq_i(1'b0),
-      .m_ext_irq_i(1'b0),
-      .store_error_i(1'b0),
-      .store_error_addr_i('0),
-      .store_error_strb_i('0),
-      .s_ext_irq_i(external_s),
-      .s_int_pending(),
-      .s_int_cause()
-  );
-  rapt_ieu_pipe_alu_csr execute_dut (
-      .iss,
-      .cmu_bcast,
-      .csr_bcast,
-      .exu_csr,
-      .wb_alu_csr(wb)
-  );
+  `define TB_CSR_TIME platform_time
+  `define TB_CSR_HART_ID hart_id
+  `include "tb_csr_execute_dut.svh"
   `include "tb_core_bcast_defaults.svh"
   `include "tb_csr_clear_commit.svh"
   `include "tb_csr_execute_tasks.svh"
@@ -1065,39 +973,8 @@ module tb_csr_envcfg_warl;
   always #5 clock = ~clock;
   logic external_s = 0;
   logic [63:0] platform_time = 0;
-  rou_csr_if rou_csr ();
-  exu_csr_if exu_csr ();
-  csr_bcast_if csr_bcast ();
-  cmu_bcast_if cmu_bcast ();
-  pmp_update_if pmp_update ();
-  rapt_pkg::issue_packet_t iss;
-  rapt_pkg::completion_t wb;
-  rapt_csr csr_dut (
-      .clock,
-      .reset,
-      .hart_id_i('0),
-      .mtime_i(platform_time),
-      .rou_csr,
-      .exu_csr,
-      .csr_bcast,
-      .pmp_update,
-      .timer_irq_i(1'b0),
-      .sw_irq_i(1'b0),
-      .m_ext_irq_i(1'b0),
-      .store_error_i(1'b0),
-      .store_error_addr_i('0),
-      .store_error_strb_i('0),
-      .s_ext_irq_i(external_s),
-      .s_int_pending(),
-      .s_int_cause()
-  );
-  rapt_ieu_pipe_alu_csr execute_dut (
-      .iss,
-      .cmu_bcast,
-      .csr_bcast,
-      .exu_csr,
-      .wb_alu_csr(wb)
-  );
+  `define TB_CSR_TIME platform_time
+  `include "tb_csr_execute_dut.svh"
   `include "tb_core_bcast_defaults.svh"
   `include "tb_csr_clear_commit.svh"
   `include "tb_csr_execute_tasks.svh"
@@ -1186,39 +1063,7 @@ module tb_csr_pmp_address;
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
   logic external_s = 0;
-  rou_csr_if rou_csr ();
-  exu_csr_if exu_csr ();
-  csr_bcast_if csr_bcast ();
-  cmu_bcast_if cmu_bcast ();
-  pmp_update_if pmp_update ();
-  rapt_pkg::issue_packet_t iss;
-  rapt_pkg::completion_t wb;
-  rapt_csr csr_dut (
-      .clock,
-      .reset,
-      .hart_id_i('0),
-      .mtime_i(64'd0),
-      .rou_csr,
-      .exu_csr,
-      .csr_bcast,
-      .pmp_update,
-      .timer_irq_i(1'b0),
-      .sw_irq_i(1'b0),
-      .m_ext_irq_i(1'b0),
-      .store_error_i(1'b0),
-      .store_error_addr_i('0),
-      .store_error_strb_i('0),
-      .s_ext_irq_i(external_s),
-      .s_int_pending(),
-      .s_int_cause()
-  );
-  rapt_ieu_pipe_alu_csr execute_dut (
-      .iss,
-      .cmu_bcast,
-      .csr_bcast,
-      .exu_csr,
-      .wb_alu_csr(wb)
-  );
+  `include "tb_csr_execute_dut.svh"
   `include "tb_core_bcast_defaults.svh"
   `include "tb_csr_clear_commit.svh"
   `include "tb_csr_execute_tasks.svh"
@@ -1263,18 +1108,25 @@ pmp_state_if replica ();
     init_cmu_bcast_defaults();
     repeat (2) @(negedge clock);
     reset = 0;
-    for (int bit_index = 46; bit_index < 54; bit_index++) begin
+    // pmpaddr implements PA bits [PADDR_BITS-1:2]; higher CSR bits are WARL
+    // zero. An implemented high bit must not alias low memory, and a dropped
+    // bit must read back as zero so the entry behaves as software observes.
+    for (int bit_index = `RAPT_PMPADDR_BITS - 4; bit_index < 54; bit_index++) begin
       logic [XLEN-1:0] raw;
+      logic implemented;
+      implemented = bit_index < `RAPT_PMPADDR_BITS;
       raw = (XLEN'(1) << bit_index) | (addr >> 2);
       write_csr(12'h3a0, 0);
       write_csr(12'h3b0, raw);
-      expect_csr(12'h3b0, raw);
+      expect_csr(12'h3b0, implemented ? raw : addr >> 2);
       write_csr(12'h3a0, XLEN'(8'h11));  // NA4 with read permission, U-mode
       #1;
-      if (!fault)
+      if (implemented && !fault)
         $fatal(
             1, "PMP CSR bit %0d retained on readback but aliases low address %h", bit_index, addr
         );
+      if (!implemented && fault)
+        $fatal(1, "PMP CSR bit %0d reads as zero but still changes matching", bit_index);
     end
     write_csr(12'h3a0, 0);
     write_csr(12'h3b0, addr >> 2);
@@ -1302,39 +1154,7 @@ module tb_csr_pmp_lock;
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
   logic external_s = 0;
-  rou_csr_if rou_csr ();
-  exu_csr_if exu_csr ();
-  csr_bcast_if csr_bcast ();
-  cmu_bcast_if cmu_bcast ();
-  pmp_update_if pmp_update ();
-  rapt_pkg::issue_packet_t iss;
-  rapt_pkg::completion_t wb;
-  rapt_csr csr_dut (
-      .clock,
-      .reset,
-      .hart_id_i('0),
-      .mtime_i(64'd0),
-      .rou_csr,
-      .exu_csr,
-      .csr_bcast,
-      .pmp_update,
-      .timer_irq_i(1'b0),
-      .sw_irq_i(1'b0),
-      .m_ext_irq_i(1'b0),
-      .store_error_i(1'b0),
-      .store_error_addr_i('0),
-      .store_error_strb_i('0),
-      .s_ext_irq_i(external_s),
-      .s_int_pending(),
-      .s_int_cause()
-  );
-  rapt_ieu_pipe_alu_csr execute_dut (
-      .iss,
-      .cmu_bcast,
-      .csr_bcast,
-      .exu_csr,
-      .wb_alu_csr(wb)
-  );
+  `include "tb_csr_execute_dut.svh"
   `include "tb_core_bcast_defaults.svh"
   `include "tb_csr_clear_commit.svh"
   `include "tb_csr_execute_tasks.svh"
@@ -1428,39 +1248,7 @@ module tb_csr_pmp_warl;
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
   logic external_s = 0;
-  rou_csr_if rou_csr ();
-  exu_csr_if exu_csr ();
-  csr_bcast_if csr_bcast ();
-  cmu_bcast_if cmu_bcast ();
-  pmp_update_if pmp_update ();
-  rapt_pkg::issue_packet_t iss;
-  rapt_pkg::completion_t wb;
-  rapt_csr csr_dut (
-      .clock,
-      .reset,
-      .hart_id_i('0),
-      .mtime_i(64'd0),
-      .rou_csr,
-      .exu_csr,
-      .csr_bcast,
-      .pmp_update,
-      .timer_irq_i(1'b0),
-      .sw_irq_i(1'b0),
-      .m_ext_irq_i(1'b0),
-      .store_error_i(1'b0),
-      .store_error_addr_i('0),
-      .store_error_strb_i('0),
-      .s_ext_irq_i(external_s),
-      .s_int_pending(),
-      .s_int_cause()
-  );
-  rapt_ieu_pipe_alu_csr execute_dut (
-      .iss,
-      .cmu_bcast,
-      .csr_bcast,
-      .exu_csr,
-      .wb_alu_csr(wb)
-  );
+  `include "tb_csr_execute_dut.svh"
   `include "tb_core_bcast_defaults.svh"
   `include "tb_csr_clear_commit.svh"
   `include "tb_csr_execute_tasks.svh"
@@ -2005,6 +1793,8 @@ module tb_csr_write_intent;
       .XLEN(X)
   ) pipe0 (
       .*,
+      // Unused without UseDispatchCsrAddress; Verilator's .* ignores defaults.
+      .csr_read_addr(12'h000),
       .wb_alu_csr(result)
   );
   logic [X-1:0] operand, value, expected;
@@ -2072,6 +1862,54 @@ module tb_csr_write_intent;
         end
     if (count != 92160) $fatal(1, "incomplete count");
     $display("PASS: RV%0d CSR decode/execute intent %0d checks", X, count);
+    $finish;
+  end
+endmodule
+
+
+// ---- tb_csr_difftest_policy ----
+`include "rapt.svh"
+`include "rapt_if.svh"
+module tb_csr_difftest_policy;
+  rapt_pkg::issue_packet_t iss;
+  rapt_pkg::completion_t result;
+  csr_bcast_if csr_bcast ();
+  cmu_bcast_if cmu_bcast ();
+  exu_csr_if exu_csr ();
+  rapt_ieu_pipe_alu_csr dut (
+      .*,
+      .csr_read_addr(12'h000),
+      .wb_alu_csr(result)
+  );
+  initial begin
+    iss = '0;
+    exu_csr.rdata = '0;
+    exu_csr.rmw_data = '0;
+    exu_csr.mepc = '0;
+    exu_csr.sepc = '0;
+    // Instruction-retirement and WARL-zero HPM counters have architectural
+    // reference models. Only wall-clock counters need the RTL skip bit.
+    for (int address = 0; address < 4096; address++) begin
+      for (int op = 0; op < 4; op++) begin
+        automatic bit expected_skip;
+        expected_skip = op != 0 && (address == 'hc00 || address == 'hc80
+            || address == 'hb00 || address == 'hb80 || address == 'hc01 || address == 'hc81);
+        iss.uop.imm = `RAPT_XLEN'(address);
+        iss.uop.execute.sys.csr_csw = op == 0 ? 3'b000 : 3'b001 << (op - 1);
+        #1;
+        assert (result.difftest_skip == expected_skip)
+        else
+          $fatal(
+              1,
+              "CSR difftest policy address=%h op=%0d skip=%b expected=%b",
+              12'(address),
+              op,
+              result.difftest_skip,
+              expected_skip
+          );
+      end
+    end
+    $display("PASS: RV%0d CSR difftest policy, 16384 address/operation checks", `RAPT_XLEN);
     $finish;
   end
 endmodule

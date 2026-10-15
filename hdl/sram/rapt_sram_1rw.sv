@@ -221,6 +221,17 @@ module rapt_sram_1rw #(
           .din0(wdata),
           .dout0(rdata)
       );
+    end else if (DEPTH == 512 && DATA_WIDTH == 128) begin : g_512x128
+      // Quad-banked L1I data of the large preset (512 sets).
+      rapt_openram_1rw_512x128 u_sram (
+          .clk0(clock),
+          .csb0(~en),
+          .web0(~wen),
+          .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+          .addr0(addr),
+          .din0(wdata),
+          .dout0(rdata)
+      );
     end else if (DEPTH == 2048 && DATA_WIDTH == 32) begin : g_2048x32
       rapt_openram_1rw_2048x32 u_sram (
           .clk0(clock),

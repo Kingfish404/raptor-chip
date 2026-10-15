@@ -22,6 +22,8 @@ module tb_sq_narrow_forward;
       .ReadPorts(3),
       .NarrowForward(1)
   ) dut (
+      .store_next_block('{default: '0}),
+      .store_prev_block('{default: '0}),
       .*
   );
   function automatic logic [4:0] mask_for(input int bytes);

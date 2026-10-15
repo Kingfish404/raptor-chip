@@ -23,44 +23,22 @@ result-reset:
 		tb_result_reset.sv --Mdir $(RESET_BUILD_DIR)/rv$(RESET_XLEN) -j 2 -o test
 	$(RESET_BUILD_DIR)/rv$(RESET_XLEN)/test
 
-.PHONY: all addsub mul fma convert int_to_fp fp_to_int half misc divsqrt clean
+COMPONENTS := addsub mul fma convert int_to_fp fp_to_int half misc divsqrt
+.PHONY: all $(COMPONENTS) clean
+all: $(COMPONENTS)
 
-all: addsub mul fma convert int_to_fp fp_to_int half misc divsqrt
+addsub: N = $(ADDSUB_N)
+mul: N = $(MUL_N)
+fma: N = $(FMA_N)
+convert: N = $(CONVERT_N)
+int_to_fp: N = $(INT_TO_FP_N)
+fp_to_int: N = $(FP_TO_INT_N)
+divsqrt: N = $(DIVSQRT_N)
+$(COMPONENTS):
+	$(MAKE) -C $@ run $(if $(N),N=$(N))
 
-half:
-	$(MAKE) -C half run
-
-addsub:
-	$(MAKE) -C addsub run N=$(ADDSUB_N)
-
-mul:
-	$(MAKE) -C mul run N=$(MUL_N)
-
-fma:
-	$(MAKE) -C fma run N=$(FMA_N)
-
-convert:
-	$(MAKE) -C convert run N=$(CONVERT_N)
-
-int_to_fp:
-	$(MAKE) -C int_to_fp run N=$(INT_TO_FP_N)
-
-fp_to_int:
-	$(MAKE) -C fp_to_int run N=$(FP_TO_INT_N)
-
-misc:
-	$(MAKE) -C misc run
-
-divsqrt:
-	$(MAKE) -C divsqrt run N=$(DIVSQRT_N)
-
-clean:
-	$(MAKE) -C addsub clean
-	$(MAKE) -C mul clean
-	$(MAKE) -C fma clean
-	$(MAKE) -C convert clean
-	$(MAKE) -C int_to_fp clean
-	$(MAKE) -C fp_to_int clean
-	$(MAKE) -C misc clean
-	$(MAKE) -C divsqrt clean
-	$(MAKE) -C half clean
+CLEAN_TARGETS := $(addprefix clean-,$(COMPONENTS))
+.PHONY: $(CLEAN_TARGETS)
+clean: $(CLEAN_TARGETS)
+$(CLEAN_TARGETS):
+	$(MAKE) -C $(patsubst clean-%,%,$@) clean

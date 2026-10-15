@@ -1144,6 +1144,7 @@ rapt_cmu dut_cmu (
       check(rou_cmu.flush_pipe && rou_cmu.slot[0].valid,
             "pending branch did not flush at precise retirement boundary");
       check(rou_cmu.slot[0].pc == 32'h8004_0004, "pending branch retired from the wrong ROB entry");
+      check(recovery.preserve_fetch, "clean recovery owner did not preserve target fetch");
       tick(1);
       check(!dut_rou.recovery_pending, "full flush did not clear recovery request");
       check(!dut_rou.rob_entry_busy[2], "full flush did not clear pending wrong-path uop");
@@ -1191,6 +1192,7 @@ rapt_cmu dut_cmu (
       check(dut_rou.recovery_target == 32'h8005_0100,
             "older late recovery request did not replace target");
       check(rou_cmu.flush_pipe, "older head recovery did not request precise flush");
+      check(!recovery.preserve_fetch, "new older recovery preserved a younger target");
       tick(1);
       check(!dut_rou.recovery_pending, "older recovery flush did not clear transaction");
 
@@ -1215,6 +1217,61 @@ rapt_cmu dut_cmu (
       check(rou_cmu.flush_pipe && rou_cmu.slot[0].trap,
             "faulting control flow did not retain exception flush priority");
       tick(1);
+    end
+  endtask
+
+  task automatic expect_recovery_trap_priority;
+    for (int mode = 0; mode < 3; mode++) begin
+      reset_dut();
+      dispatch_one(make_alu_uop('h8007_0000, 32'h0010_0093, 5'd1), 6'd33, 6'd1, RobW'(0));
+      dispatch_one(make_branch_uop('h8007_0004, 32'h0000_0863), '0, '0, RobW'(1));
+      dispatch_one(make_alu_uop('h8007_0008, 32'h0020_0113, 5'd2), 6'd34, 6'd2, RobW'(2));
+      exu_rou_b.dest = RobW'(1);
+      exu_rou_b.npc = XLEN'('h8007_0100);
+      exu_rou_b.btaken = 1;
+      exu_rou_b.valid = 1;
+      tick(1);
+      clear_writebacks();
+      tick(1);
+      check(recovery.pending && !recovery.redirect_valid, "recovery did not remain announced");
+
+      // A younger fault cannot retire through the pending branch. It must
+      // disappear at clean owner retirement, without invalidating its target.
+      if (mode == 2) begin
+        exu_rou.dest = RobW'(2);
+        exu_rou.npc = XLEN'('h8007_000c);
+        exu_rou.trap = 1;
+        exu_rou.cause = XLEN'(`RAPT_CAUSE_LOAD_PAGE_FAULT);
+        exu_rou.valid = 1;
+        tick(1);
+        clear_writebacks();
+        check(!rou_cmu.flush_pipe && !recovery.preserve_fetch,
+              "younger exception escaped pending recovery");
+      end
+      exu_rou.dest = RobW'(0);
+      exu_rou.npc = XLEN'('h8007_0004);
+      exu_rou.trap = mode == 0;
+      exu_rou.cause = XLEN'(`RAPT_CAUSE_LOAD_PAGE_FAULT);
+      exu_rou.valid = 1;
+      tick(1);
+      clear_writebacks();
+      if (mode == 0) begin
+        check(rou_cmu.flush_pipe && rou_cmu.slot[0].trap && !recovery.preserve_fetch,
+              "older exception incorrectly kept recovery-target fetch");
+      end else begin
+        clint_timer_trap = mode == 1;
+        tick(1);
+        check(rou_cmu.flush_pipe, "owner/interrupt did not request precise cleanup");
+        check(recovery.preserve_fetch == (mode == 2),
+              "interrupt or younger-exception fetch preservation priority");
+        if (mode == 1)
+          check(rou_csr.trap && rou_csr.pc == XLEN'('h8007_0004),
+                "interrupt recovery changed the precise exception PC");
+      end
+      tick(1);
+      clint_timer_trap = 0;
+      check(!recovery.pending && !dut_rou.rob_entry_busy[2],
+            "precise cleanup retained wrong-path owners");
     end
   endtask
 
@@ -1544,6 +1601,14 @@ rapt_cmu dut_cmu (
     expect_dispatch_edge_writeback_merge();
     $display(
         "PASS: registered payload identity, carry/resident, stalls, reset/reuse, full-width and edge wake XLEN=%0d",
+        XLEN);
+    $finish;
+`elsif RAPT_TEST_EARLY_RECOVERY
+    init_inputs();
+    expect_registered_recovery_fence();
+    expect_recovery_trap_priority();
+    $display(
+        "PASS: XLEN=%0d early fetch retirement, nested recovery, older/younger faults, interrupt",
         XLEN);
     $finish;
 `elsif RAPT_TEST_DRAIN_HANDSHAKE

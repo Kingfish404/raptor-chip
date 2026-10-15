@@ -67,8 +67,8 @@ module rapt_predict_history #(
       next_fetch = '0;
     end
   end
-  // Rename snapshots the post-decode watermark, including this cycle's
-  // accepted control-flow edge, before execute-recovery overwrites it.
+  // RNQ records this post-decode watermark, including this cycle's accepted
+  // conditional, before younger decode or recovery overwrites it.
   assign decode_snapshot = append(decoded, decode_valid, decode_taken, decode_pc_bit);
   assign snapshot_ghr = decode_snapshot.ghr;
   assign snapshot_phr = decode_snapshot.phr;

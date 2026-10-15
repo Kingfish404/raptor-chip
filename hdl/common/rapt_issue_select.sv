@@ -52,13 +52,20 @@ module rapt_issue_select #(
   end
   if (UniformSimplePorts && Ports > 1 && !InOrder && !Rebalance) begin : g_uniform
     localparam int FirstSimplePort = LastPort == 0 ? 1 : 0;
-    localparam int CountBits = $clog2((Entries > Ports ? Entries : Ports) + 1);
+    // Older-candidate counts are only compared with port ranks and the simple
+    // capacity, both at most Ports, so they saturate at Ports.
+    localparam int CountBits = $clog2(Ports + 1);
     localparam int CountLeaves = 1 << $clog2(Entries);
-    localparam int PortCountBits = CountBits;
     logic [Entries-1:0] candidates, last_candidates, used;
     logic [CountBits-1:0] older_count[Entries];
-    logic [PortCountBits-1:0] simple_capacity;
-    assign simple_capacity = PortCountBits'($countones(enabled & ~(Ports'(1) << LastPort)));
+    logic [CountBits-1:0] simple_capacity;
+    function automatic logic [CountBits-1:0] capped_add(input logic [CountBits-1:0] left,
+                                                        input logic [CountBits-1:0] right);
+      logic [CountBits:0] sum;
+      sum = {1'b0, left} + {1'b0, right};
+      return sum > (CountBits + 1)'(Ports) ? CountBits'(Ports) : CountBits'(sum);
+    endfunction
+    assign simple_capacity = CountBits'($countones(enabled & ~(Ports'(1) << LastPort)));
     for (genvar e = 0; e < Entries; e++) begin : g_entry
       wire [CountBits-1:0] count_tree[2*CountLeaves];
       assign candidates[e] = valid[e] && ready[e] && compatible[e][FirstSimplePort];
@@ -68,7 +75,7 @@ module rapt_issue_select #(
         else assign count_tree[CountLeaves+o] = '0;
       end
       for (genvar node = 1; node < CountLeaves; node++) begin : g_count
-        assign count_tree[node] = count_tree[2*node] + count_tree[2*node+1];
+        assign count_tree[node] = capped_add(count_tree[2*node], count_tree[2*node+1]);
       end
       assign older_count[e] = count_tree[1];
       assign last_candidates[e] = valid[e] && ready[e] && compatible[e][LastPort]
@@ -79,8 +86,8 @@ module rapt_issue_select #(
     for (genvar p = 0; p < Ports; p++) begin : g_port
       if (p == LastPort) assign greedy[p] = enabled[p] ? oldest(last_candidates) : '0;
       else begin : g_simple
-        wire [PortCountBits-1:0] port_rank;
-        assign port_rank = PortCountBits'($countones(
+        wire [CountBits-1:0] port_rank;
+        assign port_rank = CountBits'($countones(
             enabled & ((Ports'(1) << p) - 1'b1) & ~(Ports'(1) << LastPort)
         ));
         for (genvar e = 0; e < Entries; e++) begin : g_entry
@@ -103,11 +110,9 @@ module rapt_issue_select #(
       for (genvar e = 0; e < Entries; e++) begin : g_candidate
         assign candidates[e] = valid[e] && ready[e] && !used_before[e] && compatible[e][p];
       end
-      assign grant = !enabled[p] ? '0 : InOrder ? oldest(
-        valid & ~used_before
-    ) & candidates : oldest(
-        candidates
-    );
+      // In-order issue may only grant the oldest unissued entry.
+      wire [Entries-1:0] in_order_head = oldest(valid & ~used_before);
+      assign grant = !enabled[p] ? '0 : InOrder ? in_order_head & candidates : oldest(candidates);
       assign used_after = used_before | grant;
       assign greedy[p] = grant;
     end

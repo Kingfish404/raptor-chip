@@ -112,8 +112,11 @@ module rapt_core #(
   logic [63:0] snapshot_ghr, restore_ghr;
   logic [7:0] snapshot_phr, restore_phr;
 
+  // Constant operands travel as selectors from decode to the ROU dispatch
+  // lanes; frontend and backend must agree on the encoding.
   rapt_frontend #(
-      .XLEN(XLEN)
+      .XLEN(XLEN),
+      .DerivedConstants(1'b1)
   ) frontend (
       .clock(clock),
       .reset(reset),
@@ -137,12 +140,18 @@ module rapt_core #(
       .RegisteredDrainCompletion(1'b1),
       .CompactFpOperands(1'b1),
       .RegisteredDispatchPayload(1'b1),
+      .DerivedConstants(1'b1),
       .LocalIntegerWake(1'b1),
       .LocalMemoryWake(1'b1),
-      // Pipeline integer and load completion broadcasts; keep FP latency.
+      .LocalFpWake(1'b1),
+      // Pipeline every completion broadcast. Local ALQ/BRQ captures keep
+      // integer, branch-link and MUL latency; FPQ keeps FP-to-FP latency.
       .RegisteredOperandWakePorts(
           ((rapt_pkg::CompletionPorts'(1) << rapt_pkg::IntegerIssuePorts) - 1'b1)
-          | (rapt_pkg::CompletionPorts'(1) << (rapt_pkg::IntegerIssuePorts + 1)))
+          | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_branch_port(rapt_pkg::CoreConfig))
+          | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_memory_port(rapt_pkg::CoreConfig))
+          | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_mul_port(rapt_pkg::CoreConfig))
+          | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_fpu_port(rapt_pkg::CoreConfig)))
   ) backend (
       .writeback_done(cache_writeback_done),
       .writeback_drain(cache_writeback_drain),

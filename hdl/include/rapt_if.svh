@@ -8,7 +8,6 @@
 `include "rapt_recovery_if.svh"
 `include "rapt_rou_if.svh"
 `include "rapt_dpu_if.svh"
-`include "rapt_cdb_if.svh"
 `include "rapt_eu_if.svh"
 `include "rapt_lsu_if.svh"
 
@@ -97,7 +96,7 @@ interface lsu_l1d_if #(
   );
 endinterface
 
-// instruction cache interface
+// Read-only instruction cache and page-table interface.
 interface l1i_bus_if #(
     parameter int XLEN = `RAPT_XLEN
 );
@@ -118,27 +117,13 @@ interface l1i_bus_if #(
   // Asserted in the same cycle as `rvalid`; treat as fetch access-fault.
   logic rerr;
 
-  // Store path used only by IPTW hardware A-bit updates.
-  logic awvalid;
-  logic [XLEN-1:0] awaddr;
-  logic wvalid;
-  logic [XLEN-1:0] wdata;
-  logic [7:0] wstrb;
-  logic aw_ptw;
-  logic ptw_wready;
-  logic ptw_werr;
-
   modport master(
       output arvalid, noallocate, rpbmt, araddr, arburst, ar_ptw,
-      input rready, rdata, rvalid, ptw_rvalid, ptw_rerr, rerr,
-      output awvalid, awaddr, wvalid, wdata, wstrb, aw_ptw,
-      input ptw_wready, ptw_werr
+      input rready, rdata, rvalid, ptw_rvalid, ptw_rerr, rerr
   );
   modport slave(
       input arvalid, noallocate, rpbmt, araddr, arburst, ar_ptw,
-      output rready, rdata, rvalid, ptw_rvalid, ptw_rerr, rerr,
-      input awvalid, awaddr, wvalid, wdata, wstrb, aw_ptw,
-      output ptw_wready, ptw_werr
+      output rready, rdata, rvalid, ptw_rvalid, ptw_rerr, rerr
   );
 endinterface
 
@@ -186,9 +171,6 @@ interface l1d_bus_if #(
   // a machine interrupt. IOQ checks PMA / PMP / MMU permissions before
   // stores reach the bus; this reports a later bus response error.
   logic werr;
-  logic aw_ptw;
-  logic ptw_wready;
-  logic ptw_werr;
   // Posted write-through stores. `wpost` says the L1D can complete this
   // store's handshake now, so the bus may acknowledge it at AXI acceptance.
   // `posted_busy` covers accepted stores still waiting for B; a failed B
@@ -206,16 +188,16 @@ interface l1d_bus_if #(
       input rready,
       input idle, rdata, rvalid, r_mshr, r_mshr_id, ptw_rvalid, ptw_rerr, rlast, difftest_skip, rerr,
 
-      output awvalid, awaddr, wvalid, wzero, wdata, wstrb, wpbmt, aw_ptw, wpost, wmore,
-      input wready, werr, ptw_wready, ptw_werr, posted_busy, posted_error, posted_error_addr
+      output awvalid, awaddr, wvalid, wzero, wdata, wstrb, wpbmt, wpost, wmore,
+      input wready, werr, posted_busy, posted_error, posted_error_addr
   );
   modport slave(
       input arvalid, ar_mshr, ar_mshr_id, araddr, arlen, noallocate, rstrb, rpbmt, ar_ptw,
       output rready,
       output idle, rdata, rvalid, r_mshr, r_mshr_id, ptw_rvalid, ptw_rerr, rlast, difftest_skip, rerr,
 
-      input awvalid, awaddr, wvalid, wzero, wdata, wstrb, wpbmt, aw_ptw, wpost, wmore,
-      output wready, werr, ptw_wready, ptw_werr, posted_busy, posted_error, posted_error_addr
+      input awvalid, awaddr, wvalid, wzero, wdata, wstrb, wpbmt, wpost, wmore,
+      output wready, werr, posted_busy, posted_error, posted_error_addr
   );
 endinterface
 
@@ -380,8 +362,12 @@ interface cmu_bcast_if #(
   // flush_pipe. Leave this clear for traps, privilege returns, fence.i,
   // sfence.vma, and satp/PMP writes; those redirects still cancel fetch.
   logic fetch_context_stable;
-  logic sys_resume;
   logic time_trap;
+
+  // Branch/jump and atomic retirement preserve memory address identity.
+  logic mem_context_invalidate;
+  assign mem_context_invalidate = fence_time
+      || (flush_pipe && (time_trap || !(ben || jen || jren || atomic_retired)));
 
   // Registered commit-redirect target (Phase 1): frontend fetch redirect PC.
   logic [XLEN-1:0] redirect_pc;
@@ -393,13 +379,15 @@ interface cmu_bcast_if #(
 
   modport in(
       input rpc, cpc, ben, jen, jren, btaken, atomic_retired, call, ret, rvc,
-      input fence_time, fence_i, cbo_inval, cbo_block, flush_pipe, flush_redirect, fetch_context_stable, sys_resume, time_trap,
+      input fence_time, fence_i, cbo_inval, cbo_block, flush_pipe, flush_redirect,
+      fetch_context_stable, time_trap, mem_context_invalidate,
       input redirect_pc,
       input rob_head
   );
   modport out(
       output rpc, cpc, ben, jen, jren, btaken, atomic_retired, call, ret, rvc,
-      output fence_time, fence_i, cbo_inval, cbo_block, flush_pipe, flush_redirect, fetch_context_stable, sys_resume, time_trap,
+      output fence_time, fence_i, cbo_inval, cbo_block, flush_pipe, flush_redirect,
+      fetch_context_stable, time_trap,
       output redirect_pc,
       output rob_head
   );

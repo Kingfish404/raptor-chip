@@ -164,6 +164,10 @@ module rapt_l2 #(
   localparam int LineSize = 1 << L2_LINE_LEN;  // words per line
   localparam int LineBits = LineSize * XLEN;
   localparam int NSets = 1 << L2_LEN;
+  // Small directories clear every valid bit in one cycle; larger ones walk one
+  // set per cycle. The bulk loops nest sets inside ways, and slang counts every
+  // nested iteration (ways + ways * sets) against its default unroll limit.
+  localparam bit BulkSetClear = L2_N_WAYS * (NSets + 1) <= 4000;
   localparam int WayBits = (L2_N_WAYS <= 1) ? 1 : $clog2(L2_N_WAYS);
   // Medium BOOM uses four 16384 x 64-bit logical data banks:
   // row={way[2:0],set[9:0],chunk[2]}, bank=chunk[1:0].
@@ -2693,8 +2697,8 @@ module rapt_l2 #(
       r_client_marked       <= 1'b0;
       r_response_secondary  <= 1'b0;
       wipe_set              <= '0;
-      wipe_done             <= BoomBankedStore || (L2_N_WAYS * NSets <= 4000);
-      if (!BoomBankedStore && L2_N_WAYS * NSets <= 4000) begin
+      wipe_done             <= BoomBankedStore || BulkSetClear;
+      if (!BoomBankedStore && BulkSetClear) begin
         for (int w = 0; w < L2_N_WAYS; w++) begin
           for (int s = 0; s < NSets; s++) line_valid[w][s] <= 1'b0;
         end
@@ -3496,11 +3500,10 @@ module rapt_l2 #(
         line_valid[way][burst_addr[IndexMsb:IndexLsb]] <= 1'b0;
       end
       if (!BoomBankedStore && cbo_apply) begin
-        if (L2_N_WAYS * NSets <= 4000) begin
+        if (BulkSetClear) begin
+          for (int way = 0; way < L2_N_WAYS; way++)
           for (int set_idx = 0; set_idx < NSets; set_idx++)
-          if (cbo_pending[set_idx] || cbo_mask[set_idx]) begin
-            for (int way = 0; way < L2_N_WAYS; way++) line_valid[way][set_idx] <= 1'b0;
-          end
+          if (cbo_pending[set_idx] || cbo_mask[set_idx]) line_valid[way][set_idx] <= 1'b0;
         end else begin
           for (int way = 0; way < L2_N_WAYS; way++) line_valid[way][cbo_clear_set] <= 1'b0;
         end
@@ -3831,8 +3834,7 @@ module rapt_l2 #(
             end
           end
         end
-      end else if (L2_N_WAYS * NSets <= 4000)
-        cbo_pending <= cbo_apply ? '0 : cbo_pending | cbo_mask;
+      end else if (BulkSetClear) cbo_pending <= cbo_apply ? '0 : cbo_pending | cbo_mask;
       else begin
         cbo_pending <= cbo_pending | cbo_mask;
         if (cbo_apply) cbo_pending[cbo_clear_set] <= 1'b0;

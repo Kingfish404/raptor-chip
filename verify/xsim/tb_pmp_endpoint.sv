@@ -11,6 +11,7 @@ module tb_pmp_endpoint;
   logic fault_lo;
   logic op_r;
   logic op_x;
+  logic [1:0] priv;
   pmp_state_if #(.XLEN(XLEN)) pmp_state ();
 
   rapt_pmp #(
@@ -18,7 +19,7 @@ module tb_pmp_endpoint;
   ) dut (
       .addr,
       .size_m1,
-      .priv(`RAPT_PRIV_U),
+      .priv,
       .op_r,
       .op_w(1'b0),
       .op_x,
@@ -63,6 +64,7 @@ module tb_pmp_endpoint;
 
     op_r = 1'b0;
     op_x = 1'b1;
+    priv = `RAPT_PRIV_U;
     addr = XLEN'(32'h0000_0ffe);
     size_m1 = 4'd1;
     #1;
@@ -148,6 +150,19 @@ module tb_pmp_endpoint;
     pmp_state.pmp_mode_off[0]=1;
     #1;
     check(!fault, "full-space NAPOT failed wrapped byte coverage");
+    pmp_state.pmp_mode_off = '1;
+    pmp_state.pmp_mode_tor = '0;
+    pmp_state.pmp_mode_napot = '0;
+    pmp_state.pmp_mode_na4 = '0;
+    pmp_state.pmp_mode_off[0] = 0;
+    pmp_state.pmp_mode_na4[0] = 1;
+    pmp_state.pmp_raw_addr[0] = 'h400;
+    priv = `RAPT_PRIV_M;
+    addr = 'hffd;
+    size_m1 = 7;
+    #1;
+    check(fault, "unlocked interior NA4 entry failed to fault in M-mode");
+    check(!fault_lo, "interior NA4 fault was attributed to the low endpoint");
     $display("PASS: PMP endpoint-size boundary checks passed");
     $finish;
   end

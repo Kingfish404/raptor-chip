@@ -120,7 +120,7 @@ module tb_backend_trace;
       end
       idu_rnu.slot[s] = decoded[s];
       idu_rnu.valid[s] = !reset && s < feed_width && feed_index+s < trace_count
-          && !cmu_bcast.flush_pipe && !cmu_bcast.sys_resume;
+          && !cmu_bcast.flush_pipe;
     end
   end
 
@@ -400,7 +400,7 @@ module tb_backend_trace;
           && dut.lsu.u_ioq.pmu_ioq_all_full)
         rob_stop_ioq_full++;
       next_feed_index = feed_index;
-      if (cmu_bcast.flush_pipe || cmu_bcast.sys_resume) begin
+      if (cmu_bcast.flush_pipe) begin
         flushes++;
         next_feed_index = commit_index;
       end else begin

@@ -2,8 +2,8 @@
 `include "rapt_if.svh"
 
 // Integration contract for completion-time branch recovery.  The redirect
-// may warm the target-side instruction path immediately, while all mutable
-// IFU/FQU/IDU stream state remains empty until the precise cleanup fence drops.
+// fills IFU/FQU immediately. Decode waits for precise cleanup, which keeps
+// the target stream only when the announced owner retires without a trap.
 module tb_frontend_recovery;
   localparam int XLEN = `RAPT_XLEN;
   localparam logic [XLEN-1:0] RecoveryTarget = 32'h8000_3000;
@@ -71,6 +71,7 @@ module tb_frontend_recovery;
     init_csr_bcast_defaults(2'b11, '0, 1'b1);
 
     recovery.pending = 1'b0;
+    recovery.preserve_fetch = 1'b0;
     recovery.redirect_valid = 1'b0;
     recovery.owner = '0;
     recovery.generation = '0;
@@ -122,26 +123,58 @@ module tb_frontend_recovery;
             && fqu.pmu_count == 0 && idu.count == 0)
     else $fatal(1, "recovery did not atomically cancel front-end stream state");
 
-    // The L1I response remains available, deliberately stressing the fence.
-    // No stage may consume it, append history, or present work downstream.
-    repeat (3) begin
-      assert (!ifu.recv_ready && !ifu_bpu.history_valid
-              && !idu_bpu.history_valid && !idu_rnu.valid[0])
-      else $fatal(1, "recovery fence leaked a front-end acceptance event");
+    // Fill the target while the branch is still pending. Decode remains
+    // fenced: its RAS and rename state are repaired by precise cleanup.
+    repeat (6) begin
+      assert (!idu_bpu.history_valid && !idu_rnu.valid[0])
+      else $fatal(1, "decode crossed the backend recovery fence");
       tick();
-      assert (ifu.held_count == 0 && fqu.pmu_count == 0 && idu.count == 0)
-      else $fatal(1, "front-end repopulated while recovery remained pending");
     end
+    assert (fqu.pmu_count != 0 && fqu_idu.slot[0].pc == RecoveryTarget)
+    else $fatal(1, "recovery target did not fill FQU before retirement");
+    assert (idu.count == 0)
+    else $fatal(1, "decode accepted work before precise cleanup");
 
-    // Once precise cleanup releases the fence, the warmed target is the first
-    // instruction stream admitted to decode.
+    // An older branch resolving later discards this target, even after the
+    // first recovery has filled every available fetch slot.
+    recovery.redirect_valid = 1'b1;
+    recovery.target = RecoveryTarget - XLEN'(16);
+    tick();
+    recovery.redirect_valid = 1'b0;
+    assert (fqu.pmu_count == 0 && ifu.held_count == 0)
+    else $fatal(1, "nested recovery retained the younger target");
+    repeat (6) tick();
+    assert (fqu_idu.valid[0] && fqu_idu.slot[0].pc == recovery.target)
+    else $fatal(1, "older recovery did not replace the target stream");
+
+    // Clean retirement must retain already-fetched slots and the advanced PC.
+    recovery.preserve_fetch = 1'b1;
+    cmu_bcast.flush_pipe = 1'b1;
+    cmu_bcast.cpc = recovery.target;
+    #1;
+    assert (!ifu.redirect_event && fqu_idu.valid[0] && !idu_rnu.valid[0])
+    else $fatal(1, "clean recovery retirement discarded fetch-ahead");
+    tick();
+    cmu_bcast.flush_pipe = 1'b0;
+    recovery.preserve_fetch = 1'b0;
     recovery.pending = 1'b0;
+    cmu_bcast.flush_redirect = 1'b1;
+    cmu_bcast.fetch_context_stable = 1'b1;
+    cmu_bcast.redirect_pc = recovery.target;
+    #1;
+    // A full FQU exposes its existing stream without borrowing same-edge
+    // decode capacity back into IFU's response-acceptance path.
+    assert (fqu.pmu_full && fqu_idu.ready[0] && !ifu_fqu.ready[0])
+    else $fatal(1, "full recovery queue leaked decode-ready feedback");
+    tick();
+    cmu_bcast.flush_redirect = 1'b0;
+    cmu_bcast.fetch_context_stable = 1'b0;
     begin : wait_for_target
       automatic bit target_seen = 1'b0;
       for (int cycle = 0; cycle < 8; cycle++) begin
         tick();
         if (idu_rnu.valid[0]) begin
-          assert (idu_rnu.slot[0].uop.pc == RecoveryTarget)
+          assert (idu_rnu.slot[0].uop.pc == recovery.target)
           else $fatal(1, "post-recovery decode resumed at the wrong PC");
           target_seen = 1'b1;
           break;
@@ -200,7 +233,7 @@ module tb_frontend_recovery;
       assert (ifu.held_count == 0)
       else $fatal(1, "context-changing redirect repopulated the IFU");
     end
-    $display("PASS: unified recovery redirects once, fences IFU/FQU/IDU, and resumes at target");
+    $display("PASS: early fetch, nested recovery, clean retirement, precise flush, decode fence");
     $finish;
   end
 

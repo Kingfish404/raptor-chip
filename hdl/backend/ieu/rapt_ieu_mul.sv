@@ -23,8 +23,13 @@ module rapt_ieu_mul #(
     output logic out_valid
 );
 
-`ifdef RAPT_M_FAST
-  // Hybrid fast MUL + iterative DIV/REM:
+`ifndef RAPT_M_FAST
+  if (1) begin : g_requires_fast_mul
+    $error("rapt_ieu_mul requires RAPT_M_FAST; the serial fallback is unsupported");
+  end
+`endif
+
+  // Requires RAPT_M_FAST: pipelined MUL + iterative DIV/REM.
   //   MUL/MULH/MULHSU/MULHU: fully pipelined (2-cycle latency, 1/cycle throughput)
   //   DIV/DIVU/REM/REMU: iterative restoring divider. One normalization cycle
   //   skips the dividend's leading zero bits (their quotient bits are zero),
@@ -347,165 +352,5 @@ module rapt_ieu_mul #(
       end
     end
   end
-
-`else
-  // Non-fast (fully iterative) fallback: serial MUL *and* DIV.
-  // Pipelining not supported in this variant; in_ready deasserts while busy.
-
-  logic [XLEN-1:0] s1, s2;
-  logic [4:0] op;
-  logic word_r;
-  logic valid;
-  logic [TAG_W-1:0] tag_r;
-
-  assign out_valid = valid && !cancel_tags[tag_r];
-  assign out_tag   = tag_r;
-  assign in_ready  = (op == 0 && !valid);
-
-  logic [XLEN-1:0] p, s, quotient;
-  logic [$clog2(2*XLEN+2)-1:0] counter;
-  logic [1:0] bb;
-
-  logic [2*XLEN-1:0] ss1, ss2;
-  logic [2*XLEN-1:0] pp, ss;
-  logic signed_op;
-  assign signed_op = in_op == `RAPT_ALU_REM___ || in_op == `RAPT_ALU_DIV___;
-  logic [XLEN-1:0] s1_signed;
-  assign s1_signed = ((signed_op) && in_a[XLEN-1]) ? -in_a : in_a;
-
-  logic [XLEN-1:0] div_bit;
-  logic [XLEN:0] reh;
-  logic [1:0] sign;
-
-  always_ff @(posedge clock) begin
-    if (reset || flush) begin
-      op      <= 0;
-      valid   <= 0;
-      counter <= 0;
-    end else if ((op != 0 || valid) && cancel_tags[tag_r]) begin
-      op <= 0;
-      valid <= 0;
-      counter <= 0;
-    end else if (in_valid && in_ready && !cancel_tags[in_tag]) begin
-      op <= in_op;
-      word_r <= in_word;
-      tag_r <= in_tag;
-      s1 <= s1_signed;
-      s2 <= (signed_op && in_b[XLEN-1]) ? -in_b : in_b;
-      ss1 <= (in_op != `RAPT_ALU_MULHU_) ? {{XLEN{in_a[XLEN-1]}}, in_a} : {{XLEN{1'b0}}, in_a};
-      ss2 <= (in_op != `RAPT_ALU_MULH__) ? {{XLEN{1'b0}}, in_b} : {{XLEN{in_b[XLEN-1]}}, in_b};
-      s <= 0;
-      ss <= 0;
-      p <= 0;
-      pp <= 0;
-
-      div_bit <= 'b1 << (XLEN - 1);
-      reh <= {{XLEN{1'b0}}, s1_signed[XLEN-1]};
-      sign <= {in_a[XLEN-1], in_b[XLEN-1]};
-      quotient <= 0;
-
-      bb <= 0;
-      counter <= 0;
-      valid <= 0;
-    end else begin
-      unique case (op)
-        `RAPT_ALU_MUL___: begin
-          if (counter == XLEN + 1) begin
-            out_r <= p;
-            valid <= 1;
-            op    <= 0;
-          end else begin
-            valid <= 0;
-          end
-        end
-        `RAPT_ALU_MULH__, `RAPT_ALU_MULHSU, `RAPT_ALU_MULHU_: begin
-          if (counter == 2 * XLEN + 1) begin
-            out_r <= pp[2*XLEN-1:XLEN];
-            valid <= 1;
-            op    <= 0;
-          end else begin
-            valid <= 0;
-          end
-        end
-        `RAPT_ALU_DIV___, `RAPT_ALU_DIVU__: begin
-          if (s2 == 0 && counter == 0) begin
-            out_r <= -1;
-            valid <= 1;
-            op    <= 0;
-          end else if (op == `RAPT_ALU_DIV___ && counter == XLEN) begin
-            out_r <= (sign == 'b00 || sign == 'b11) ? quotient : ~quotient + 1;
-            op <= 0;
-            valid <= 1;
-          end else if (op == `RAPT_ALU_DIVU__ && counter == XLEN) begin
-            out_r <= quotient;
-            valid <= 1;
-            op    <= 0;
-          end else begin
-            valid <= 0;
-          end
-        end
-        `RAPT_ALU_REM___: begin
-          if (counter == XLEN) begin
-            out_r <= (sign == 'b00 || sign == 'b01) ? reh[XLEN:1] : ~reh[XLEN:1] + 1;
-            valid <= 1;
-            op    <= 0;
-          end else begin
-            valid <= 0;
-          end
-        end
-        `RAPT_ALU_REMU__: begin
-          if (counter == XLEN) begin
-            out_r <= reh[XLEN:1];
-            valid <= 1;
-            op    <= 0;
-          end else begin
-            valid <= 0;
-          end
-        end
-        default: begin
-          valid <= 0;
-        end
-      endcase
-
-      unique case (op)
-        `RAPT_ALU_MUL___: begin
-          s  <= {s1[0], s[XLEN-1:1]};
-          s1 <= s1 >> 1;
-          s2 <= s2 << 1;
-          bb <= {s2[XLEN-1], s2[XLEN-2]};
-          if (bb == 'b01) begin
-            p <= p + s;
-          end else if (bb == 'b10) begin
-            p <= p - s;
-          end
-          counter <= counter + 1;
-        end
-        `RAPT_ALU_MULH__, `RAPT_ALU_MULHSU, `RAPT_ALU_MULHU_: begin
-          ss  <= {ss1[0], ss[2*XLEN-1:1]};
-          ss1 <= ss1 >> 1;
-          ss2 <= ss2 << 1;
-          bb  <= {ss2[2*XLEN-1], ss2[2*XLEN-2]};
-          if (bb == 'b01) begin
-            pp <= pp + ss;
-          end else if (bb == 'b10) begin
-            pp <= pp - ss;
-          end
-          counter <= counter + 1;
-        end
-        `RAPT_ALU_DIV___, `RAPT_ALU_DIVU__, `RAPT_ALU_REM___, `RAPT_ALU_REMU__: begin
-          div_bit <= div_bit >> 1;
-          quotient <= (reh >= {{1'b0}, s2}) ? quotient + div_bit : quotient;
-          reh <= (reh >= {{1'b0}, s2}) ?
-            ((reh - {{1'b0}, s2}) << 1) + {{XLEN{1'b0}}, s1[XLEN-2]} :
-            ((reh) << 1) + {{XLEN{1'b0}}, s1[XLEN-2]};
-          s1 <= s1 << 1;
-          counter <= counter + 1;
-        end
-        default: begin
-        end
-      endcase
-    end
-  end
-`endif
 
 endmodule

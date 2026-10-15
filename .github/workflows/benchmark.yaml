@@ -36,9 +36,7 @@ concurrency:
 
 defaults:
   run:
-    # Login shell for the tool paths, but keep GitHub's errexit/pipefail so
-    # `make ... | tee log` fails the step when the simulation fails.
-    shell: bash -leo pipefail {0}
+    shell: bash --noprofile --norc -eo pipefail {0}
 
 env:
   RAPT_CONFIG: default
@@ -344,4 +342,5 @@ jobs:
           make --no-print-directory -C app embench-${{ matrix.suite }}-report-sim ISA64=1 || report_rc=$?
           cat "sim/build/$RAPT_CONFIG/logs/app/embench-${{ matrix.suite }}-rv64.md" \
             >> "$GITHUB_STEP_SUMMARY" || true
+          echo "Embench report exit status: $report_rc"
           exit "$report_rc"

@@ -4,7 +4,8 @@
 module rapt_idu #(
     parameter int XLEN  = `RAPT_XLEN,
     parameter int RLEN  = `RAPT_REG_LEN,
-    parameter int Width = rapt_pkg::DecodeWidth
+    parameter int Width = rapt_pkg::DecodeWidth,
+    parameter bit DerivedConstants = 1'b0
 ) (
     input logic clock,
     cmu_bcast_if.in cmu_bcast,
@@ -29,7 +30,8 @@ module rapt_idu #(
   for (genvar s = 0; s < Width; s++) begin : g_decode
     rapt_decode_slot #(
         .XLEN(XLEN),
-        .RLEN(RLEN)
+        .RLEN(RLEN),
+        .DerivedConstants(DerivedConstants)
     ) decoder (
         .fetched(slots[s]),
         .csr_bcast(csr_bcast),
@@ -41,7 +43,7 @@ module rapt_idu #(
   always_comb begin
     automatic logic control_seen;
     control_seen = 1'b0;
-    prefix = !reset && !cmu_bcast.flush_pipe && !cmu_bcast.sys_resume
+    prefix = !reset && !cmu_bcast.flush_pipe
         && !recovery.pending;
     consumed = 0;
     redirect = 1'b0;
@@ -93,7 +95,7 @@ module rapt_idu #(
   always_comb begin
     incoming = 0;
     for (int s = 0; s < Width; s++) begin
-      ifu_idu.ready[s] = !reset && !cmu_bcast.flush_pipe && !cmu_bcast.sys_resume
+      ifu_idu.ready[s] = !reset && !cmu_bcast.flush_pipe
           && !recovery.pending
           && !redirect && s < Width - 32'(count) + consumed;
       if (s == incoming && ifu_idu.valid[s] && ifu_idu.ready[s]) incoming++;
@@ -123,7 +125,7 @@ module rapt_idu #(
   assign idu_bpu.push_addr = ras_slot < 0 ? '0 : slots[ras_slot].pc
       + (decoded[ras_slot].uop.c ? XLEN'(2) : XLEN'(4));
   always_ff @(posedge clock) begin
-    if (reset || cmu_bcast.flush_pipe || cmu_bcast.sys_resume || recovery.pending) begin
+    if (reset || cmu_bcast.flush_pipe || recovery.pending) begin
       count <= 0;
       pmu_early_resteer <= 1'b0;
     end else begin

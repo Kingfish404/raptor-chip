@@ -22,8 +22,10 @@ cleanup() { rm -f "$compat_script"; }
 trap cleanup EXIT
 
 abc_wrapper=$(cd "$(dirname "$0")" && pwd)/abc-read-blif-compat.sh
+# Recent Yosys removed abc's -fast switch. The default AND mapping is valid
+# on both versions; dropping this optimization also keeps SBY's AIG flow usable.
 /usr/bin/awk -v abc_wrapper="$abc_wrapper" \
-  '{ if ($0 == "abc -g AND -fast") print "abc -exe " abc_wrapper " -g AND -fast"; else print }' \
+  '{ if ($0 == "abc -g AND -fast") print "abc -exe " abc_wrapper " -g AND"; else print }' \
   "$script_file" > "$compat_script"
 for index in "${!args[@]}"; do
   if [[ ${args[$index]} == "$script_file" ]]; then

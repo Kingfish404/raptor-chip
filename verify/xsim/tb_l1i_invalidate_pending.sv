@@ -76,8 +76,6 @@ module tb_l1i_invalidate_pending #(
       l1i_bus.rdata=0;
       l1i_bus.ptw_rerr=0;
       l1i_bus.ptw_rvalid=0;
-      l1i_bus.ptw_wready=0;
-      l1i_bus.ptw_werr=0;
       tick(4);
       reset = 0;
       repeat (30) begin

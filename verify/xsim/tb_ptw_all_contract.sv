@@ -11,9 +11,6 @@ module tb_ptw_global;
   logic [`RAPT_CSR_SATP_PPN_W-1:0] satp_ppn = 'h100;
   logic bus_arvalid, bus_arready = 0, bus_rvalid = 0;
   logic [XLEN-1:0] bus_araddr, bus_rdata = 0;
-  logic bus_awvalid, bus_wvalid, bus_wready = 0, bus_werr = 0;
-  logic [XLEN-1:0] bus_awaddr, bus_wdata;
-  logic [7:0] bus_wstrb;
   logic done, fault, busy;
   logic [XLEN-1:10] result_ptag;
   logic [XLEN-1:12] result_vtag;
@@ -42,7 +39,6 @@ module tb_ptw_global;
     bus_rvalid = 1;
     tick(1);
     bus_rvalid = 0;
-    check(!bus_awvalid && !bus_wvalid, "Svade emitted a page-table write");
   endtask
 
   initial begin
@@ -130,13 +126,6 @@ module tb_ptw_kill_drain;
   logic bus_arready;
   logic bus_rvalid;
   logic [XLEN-1:0] bus_rdata;
-  logic bus_awvalid;
-  logic [XLEN-1:0] bus_awaddr;
-  logic bus_wvalid;
-  logic [XLEN-1:0] bus_wdata;
-  logic [7:0] bus_wstrb;
-  logic bus_wready;
-  logic bus_werr;
   logic done;
   logic fault;
   logic [XLEN-1:10] result_ptag;
@@ -174,7 +163,6 @@ module tb_ptw_kill_drain;
     bus_rvalid=1;
     tick(1);
     bus_rvalid = 0;
-    check(!bus_awvalid && !bus_wvalid, "Svade unexpectedly wrote a PTE");
   endtask
 
   task automatic cancel_at_level(input int level, input int timing, input int payload);
@@ -268,8 +256,6 @@ module tb_ptw_kill_drain;
     bus_arready = 1'b0;
     bus_rvalid = 1'b0;
     bus_rdata = '0;
-    bus_wready = 1'b0;
-    bus_werr = 1'b0;
     tick(4);
     reset = 1'b0;
     tick(1);
@@ -308,7 +294,6 @@ module tb_ptw_kill_drain;
     tick(1);
     bus_rvalid = 1'b0;
     check(fault && !done && !busy, "Sv32 A=0 leaf did not raise a page fault");
-    check(!bus_awvalid && !bus_wvalid, "Svade PTW attempted an A/D writeback");
 
     for (int level = 0; level < Levels; level++) begin
       cancel_at_level(level, 0, 0);
@@ -334,9 +319,6 @@ module tb_ptw_pbmt;
   logic [`RAPT_CSR_SATP_PPN_W-1:0] satp_ppn = 'h100;
   logic bus_arvalid, bus_arready = 0, bus_rvalid = 0;
   logic [XLEN-1:0] bus_araddr, bus_rdata = 0;
-  logic bus_awvalid, bus_wvalid, bus_wready = 0, bus_werr = 0;
-  logic [XLEN-1:0] bus_awaddr, bus_wdata;
-  logic [7:0] bus_wstrb;
   logic done, fault, busy;
   logic [XLEN-1:10] result_ptag;
   logic [XLEN-1:12] result_vtag;
@@ -365,7 +347,6 @@ module tb_ptw_pbmt;
     bus_rvalid = 1;
     tick(1);
     bus_rvalid = 0;
-    check(!bus_awvalid && !bus_wvalid, "Svade emitted a page-table write");
   endtask
 
   task automatic finish_case(input bit expect_fault, input logic [1:0] expected_pbmt);
@@ -630,13 +611,6 @@ module tb_ptw_profile_negative;
   logic bus_arready;
   logic bus_rvalid;
   logic [XLEN-1:0] bus_rdata;
-  logic bus_awvalid;
-  logic [XLEN-1:0] bus_awaddr;
-  logic bus_wvalid;
-  logic [XLEN-1:0] bus_wdata;
-  logic [7:0] bus_wstrb;
-  logic bus_wready;
-  logic bus_werr;
   logic done;
   logic fault;
   logic [XLEN-1:10] result_ptag;
@@ -645,12 +619,6 @@ module tb_ptw_profile_negative;
   logic busy;
 
   int matrix_cases = 0;
-  // Svade's walker must never issue a hardware A/D write, including
-  // intermediate states rather than only the final response cycle.
-  always @(posedge clock)
-    if (!reset)
-      assert (!bus_awvalid && !bus_wvalid)
-      else $fatal(1, "Svade walker issued a page-table write");
 
   logic pbmte = 0;
   logic [1:0] result_pbmt;
@@ -702,8 +670,6 @@ module tb_ptw_profile_negative;
     bus_arready = 1'b0;
     bus_rvalid = 1'b0;
     bus_rdata = '0;
-    bus_wready = 1'b0;
-    bus_werr = 1'b0;
     tick(4);
     reset = 1'b0;
     tick(1);
@@ -724,14 +690,12 @@ module tb_ptw_profile_negative;
     start_walk(64'h0000_0000_4000_1000, 1'b0);
     accept_root_leaf(64'h0000_0000_0000_008f);
     check(fault && !done && !busy, "Sv39 A=0 load leaf did not fault");
-    check(!bus_awvalid && !bus_wvalid, "Svade attempted to set A in memory");
     clear_result();
 
     // Valid level-2 leaf with A=1/D=0.  A store must page-fault under Svade.
     start_walk(64'h0000_0000_8000_1000, 1'b1);
     accept_root_leaf(64'h0000_0000_0000_004f);
     check(fault && !done && !busy, "Sv39 D=0 store leaf did not fault");
-    check(!bus_awvalid && !bus_wvalid, "Svade attempted to set D in memory");
     clear_result();
 
     // D is irrelevant to a load when A is already set.
@@ -744,7 +708,6 @@ module tb_ptw_profile_negative;
     start_walk(64'h0000_0000_0000_1000, 1'b1);
     accept_root_leaf(64'h0000_0000_0000_00cf);
     check(done && !fault && !busy, "Sv39 A=1/D=1 store leaf did not complete");
-    check(!bus_awvalid && !bus_wvalid, "Svade PTW exposed a write request");
 
     clear_result();
     // Three leaf levels, all V/R/W/X/U/G/A/D flag combinations except

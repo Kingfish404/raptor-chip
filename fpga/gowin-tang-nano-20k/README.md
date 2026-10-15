@@ -1,6 +1,6 @@
 # Tang Nano 20K (Gowin GW2AR-18) RISC-V
 
-This archived Tang Nano example is no longer an active board target. Native
+This directory is an archived Tang Nano example outside active board support. Native
 board support targets [CU08-KU15P](../mlk-cu08-ku15p/README.md); the separate
 [LiteX integration](../litex/README.md) remains available. Historical commands
 below are relative to `fpga/gowin-tang-nano-20k/`.

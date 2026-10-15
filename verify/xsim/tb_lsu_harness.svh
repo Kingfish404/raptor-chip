@@ -70,7 +70,8 @@ task automatic init_lsu_inputs(
     rou_cmu.next_pc = 0; rou_cmu.redirect_pc = 0;
     rou_cmu.btaken = 0; rou_cmu.ben = 0; rou_cmu.jen = 0; rou_cmu.jren = 0;
     rou_cmu.atomic_sc = 0; rou_cmu.fence_time = 0; rou_cmu.cbo_inval = 0; rou_cmu.cbo_block = '0; rou_cmu.fence_i = 0;
-    rou_cmu.flush_pipe = 0; rou_cmu.flush_redirect = 0; rou_cmu.sys_resume = 0;
+    rou_cmu.flush_pipe = 0;
+    rou_cmu.flush_redirect = 0;
     rou_cmu.time_trap = 0; rou_cmu.rob_head = 0;
 `else
     init_cmu_bcast_defaults();

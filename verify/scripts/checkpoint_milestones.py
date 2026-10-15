@@ -3,8 +3,8 @@
 
 For each milestone and memory delay, save an architectural snapshot at the
 symbol's PC, exit, then restore it with difftest and run to completion. The
-caller checks the saved state and logs; this module owns the command lines,
-fresh-snapshot policy, log screening and summary.json evidence.
+selected FP or posted-write scenario checks the state and logs. Both modes
+share command lines, fresh-snapshot policy and summary.json evidence.
 """
 import argparse
 import hashlib
@@ -20,15 +20,16 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def run(description, milestones, check_save, check_load=None):
-    """Run every milestone; check_save(label, state, text, log) and
-    check_load(label, text, log) raise AssertionError on failure."""
-    p = argparse.ArgumentParser(description=description)
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('check', choices=('fp', 'bus-error'))
     for name in INPUTS + ('output',):
         p.add_argument('--' + name, type=Path, required=True)
     p.add_argument('--nm', default='riscv64-elf-nm')
     p.add_argument('--delays', nargs='+', type=int, default=[0, 63])
     args = p.parse_args()
+    status = {'checkpoint_pending': 0xf03, 'checkpoint_acknowledged': 0xf00}
+    milestones = ('probe', 'software_interrupt') if args.check == 'fp' else status
     root = Path(__file__).resolve().parents[2]
     paths = {n: getattr(args, n).resolve() for n in INPUTS}
     for f in paths.values():
@@ -64,13 +65,25 @@ def run(description, milestones, check_save, check_load=None):
                 if kind == 'save':
                     assert (snapshot / 'state.txt').is_file(), f'no snapshot generated; inspect {log}'
                     state = dict(line.split('=', 1) for line in (snapshot / 'state.txt').read_text().splitlines() if '=' in line)
-                    check_save(label, state, text, log)
+                    if args.check == 'fp':
+                        assert all(f'fpr{i}' in state for i in range(32)), state
+                        assert 'csr_fcsr' in state, state
+                        if label == 'software_interrupt':
+                            assert any(int(state[f'fpr{i}'], 0) != 0 for i in range(32)), state
+                    else:
+                        assert int(state['csr_mberr_status'], 0) == status[label], state
+                        assert int(state['csr_mberr_addr'], 0) == 0x21100000, state
+                        assert text.count('AXI write decode error') == 2, log
                 else:
                     assert 'HIT GOOD TRAP' in text and 'resynchronized difftest REF' in text, log
-                    if check_load:
-                        check_load(label, text, log)
+                    if args.check == 'bus-error':
+                        assert text.count('AXI write decode error') == 3, log
                 result['runs'].append({'milestone': label, 'delay': delay, 'kind': kind, 'command': command, 'log': str(log), 'sha256': sha(log), 'passed': True})
                 print(f'PASS {label} delay={delay} {kind}', flush=True)
             result.setdefault('states', {})[str(snapshot / 'state.txt')] = sha(snapshot / 'state.txt')
     (output / 'summary.json').write_text(json.dumps(result, indent=2) + '\n')
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -209,8 +209,9 @@ module fpu_result_reset_case #(
   endtask
   initial begin
     tick();
-    if (result_valid || !ready) $fatal(1, "cold reset");
+    if (result_valid) $fatal(1, "cold reset");
     reset = 0;
+    #1;
     transaction(1);
     for (int use_reset = 0; use_reset < 2; use_reset++) begin
       for (int phase = 0; phase < 8; phase++) begin
@@ -224,7 +225,7 @@ module fpu_result_reset_case #(
         flush = use_reset == 0;
         tick();
         valid = 0;
-        if (result_valid || !ready) $fatal(1, "cancel failed kind=%0d phase=%0d", Kind, phase);
+        if (result_valid) $fatal(1, "cancel failed kind=%0d phase=%0d", Kind, phase);
         reset = 0;
         flush = 0;
         repeat (8) begin

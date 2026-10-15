@@ -21,13 +21,14 @@ module tb_muldiv_flush_reuse #(
   rapt_pkg::completion_t exu_ioq_bcast;
   rapt_pkg::completion_t exu_wb_mul;
   rapt_pkg::completion_t completion[rapt_pkg::CompletionPorts];
-  assign completion[0] = exu_rou;
-  assign completion[1] = exu_rou_b;
-  assign completion[2] = '0;
-  assign completion[3] = exu_ioq_bcast;
-  assign completion[4] = exu_wb_mul;
-  for (genvar p = 5; p < rapt_pkg::CompletionPorts; p++) begin : g_extra_completion
-    assign completion[p] = '0;
+  localparam int MemoryPort = rapt_pkg::completion_memory_port(rapt_pkg::CoreConfig);
+  localparam int MulPort = rapt_pkg::completion_mul_port(rapt_pkg::CoreConfig);
+  for (genvar p = 0; p < rapt_pkg::CompletionPorts; p++) begin : g_completion
+    if (p == 0) assign completion[p] = exu_rou;
+    else if (p == 1) assign completion[p] = exu_rou_b;
+    else if (p == MemoryPort) assign completion[p] = exu_ioq_bcast;
+    else if (p == MulPort) assign completion[p] = exu_wb_mul;
+    else assign completion[p] = '0;
   end
 
   rapt_ieu_muldiv #(
@@ -108,6 +109,9 @@ module tb_muldiv_flush_reuse #(
   endtask
 
   int paired_mdq_issues = 0, paired_mdq_completions = 0, differing_mdq_issues = 0;
+  // Zkt requires data-independent MUL timing only. The divider deliberately
+  // skips leading dividend zeros, so pair checks run in the MUL-only phase.
+  bit zkt_window = 0;
   if (CheckOperandIndependence) begin : g_pair
     rapt_pkg::dispatch_slot_t other_dispatch[rapt_pkg::DispatchWidth];
     rapt_pkg::completion_t other_completion[rapt_pkg::CompletionPorts];
@@ -137,7 +141,7 @@ module tb_muldiv_flush_reuse #(
       end
     end
     for (genvar p = 0; p < rapt_pkg::CompletionPorts; p++) begin
-      if (p == 4) assign other_completion[p] = other_wb;
+      if (p == MulPort) assign other_completion[p] = other_wb;
       else
         always_comb begin
           other_completion[p] = completion[p];
@@ -145,7 +149,7 @@ module tb_muldiv_flush_reuse #(
         end
     end
     always @(posedge clock)
-      if (!reset) begin
+      if (!reset && zkt_window) begin
         for (int s = 0; s < rapt_pkg::DispatchWidth; s++)
         assert ({disp.free_found[s], disp.free_idx[s]} == {other_disp.free_found[s], other_disp.free_idx[s]})
         else $fatal(1, "operand-dependent MDQ capacity/allocation");
@@ -175,6 +179,7 @@ module tb_muldiv_flush_reuse #(
 
   task automatic mdq_wakeup_cases;
     int count;
+    zkt_window = 1;
     for (int mode = 0; mode < 3; mode++) begin
       cmu_bcast.flush_pipe = 1;
       tick(1);
@@ -216,6 +221,38 @@ module tb_muldiv_flush_reuse #(
       check(count == (mode == 2 ? 2 : 1), "MDQ wakeup completion count");
       $display("PASS: MDQ wakeup mode=%0d XLEN=%0d", mode, XLEN);
     end
+    // Every Zkt MUL-family op with ready operands; the paired instance sees
+    // complemented values, so any data-dependent latency trips the pair checks.
+    for (int op = 0; op < 4; op++)
+      for (int sample = 0; sample < 2; sample ++) begin
+        logic [4:0] alu;
+        logic [XLEN-1:0] a, b;
+        logic signed [2*XLEN-1:0] product;
+        logic [XLEN-1:0] expected;
+        alu = op == 0 ? `RAPT_ALU_MUL___ : op == 1 ? `RAPT_ALU_MULH__
+          : op == 2 ? `RAPT_ALU_MULHSU : `RAPT_ALU_MULHU_;
+        a = sample == 0 ? XLEN'(64'h0000_0000_0000_0003) : XLEN'(64'hfedc_ba98_7654_3210);
+        b = sample == 0 ? XLEN'(64'h8000_0000_0000_0001) : XLEN'(64'h0123_4567_89ab_cdef);
+        case (op)
+          0, 1: product = $signed({{XLEN{a[XLEN-1]}}, a}) * $signed({{XLEN{b[XLEN-1]}}, b});
+          2: product = $signed({{XLEN{a[XLEN-1]}}, a}) * $signed({{XLEN{1'b0}}, b});
+          default: product = $signed({{XLEN{1'b0}}, a}) * $signed({{XLEN{1'b0}}, b});
+        endcase
+        expected = op == 0 ? product[XLEN-1:0] : product[2*XLEN-1:XLEN];
+        dispatch_md(alu, a, b, RobBits'(24 + op), `RAPT_PHY_LEN'(26 + op), 5'(9 + op),
+                    XLEN'('h80007000 + 4 * op), 0);
+        count = 0;
+        repeat (20) begin
+          #1;
+          if (exu_wb_mul.valid) begin
+            count++;
+            check(exu_wb_mul.result == expected, "Zkt MUL sweep result mismatch");
+          end
+          tick(1);
+        end
+        check(count == 1, "Zkt MUL sweep completion count");
+      end
+    zkt_window = 0;
   endtask
 
   assign disp.rs_idx[0] = disp.free_idx[0];

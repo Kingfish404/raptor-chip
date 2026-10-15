@@ -38,7 +38,7 @@ CSR_BUILD := $(BUILD_DIR)/csr-$(XLEN)-$(VLEN)-$(ELEN)
 TOP_BUILD := $(BUILD_DIR)/$(if $(filter 1,$(CORE_ADAPTER)),core-top,top)-$(XLEN)-$(VLEN)-$(ELEN)-$(BANK_BITS)-$(BANKS)-opt$(OPT_READS)$(if $(filter 1,$(DIFF)),-spike,)$(if $(filter-out full,$(TOP_SUITE)),-$(TOP_SUITE),)
 OWNER_BUILD := $(BUILD_DIR)/owner-$(TAG_BITS)
 
-.PHONY: test leaves vtype vrf csr top owner matrix top-matrix opt-check synth
+.PHONY: test leaves vtype vrf csr top top-build owner matrix top-matrix opt-check synth
 test: leaves core-adapter owner muldiv mask-write fixed move mask-scan slide fp-decode int-fp-decode fp-reduce-control fp-reduce-decode fp-reduce-engine top
 leaves: vtype vrf csr
 
@@ -78,13 +78,13 @@ matrix:
 synth:
 	python3 $(CURDIR)/synth_check.py --build-dir $(BUILD_DIR)/synth
 
-top:
+top-build:
 	@mkdir -p $(TOP_BUILD)
 	python3 $(CURDIR)/record_run.py $(TOP_BUILD)/sources.json $(XLEN) $(VLEN) $(ELEN) $(BANK_BITS) $(BANKS) $(OPT_READS) $(DIFF) $(CORE_ADAPTER) $(TOP_SUITE)
 ifeq ($(DIFF),1)
 	python3 $(CURDIR)/reference_manifest.py $(SPIKE_BUILD) $(TOP_BUILD)/reference.json
 endif
-	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/hdl/include -j $(JOBS) \
+	$(VERILATOR) --cc --exe --build --assert -Wall -Wno-PINCONNECTEMPTY -DRAPT_ASSERT_EN -I$(ROOT)/hdl/include -j $(JOBS) \
 	  $(CURDIR)/fma_legacy.vlt --top-module $(if $(filter 1,$(CORE_ADAPTER)),rapt_vpu_core,rapt_vpu) --prefix Vrapt_vpu --Mdir $(TOP_BUILD) \
 	  -GXLEN=$(XLEN) -GVLEN=$(VLEN) -GELEN=$(ELEN) -GBankBits=$(BANK_BITS) -GBanks=$(BANKS) \
 	  -GOptimizeOperandReads=$(OPT_READS) \
@@ -92,6 +92,8 @@ endif
 	  $(DIFF_FLAGS) \
 	  $(ROOT)/hdl/sram/rapt_sram_1rw.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_fma.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_divsqrt.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_convert_narrow.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_int_to_fp.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv $(wildcard $(VPU)/*.sv) $(CURDIR)/test_vpu.cpp \
 	  >$(TOP_BUILD)/build.log 2>&1 || { cat $(TOP_BUILD)/build.log; exit 1; }
+
+top: top-build
 	$(TOP_BUILD)/Vrapt_vpu $(if $(filter-out full,$(TOP_SUITE)),--$(TOP_SUITE),) | tee $(TOP_BUILD)/run.log
 
 owner:

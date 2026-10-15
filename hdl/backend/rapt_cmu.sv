@@ -56,7 +56,8 @@ module rapt_cmu #(
   // Only successful retirement preserves address identity; a trapping atomic
   // must follow normal context invalidation just like any other exception.
   assign cmu_bcast.atomic_retired = atomic_valid;
-  assign cmu_bcast.btaken = rou_cmu.slot[branch_index].btaken;
+  assign cmu_bcast.btaken = branch_valid && !rou_cmu.slot[branch_index].trap
+      && rou_cmu.slot[branch_index].btaken;
   assign commit_ras_action = rapt_pkg::ras_action(bcast_inst);
   assign cmu_bcast.call = branch_valid && !rou_cmu.slot[branch_index].trap
       && commit_ras_action.push;
@@ -73,7 +74,6 @@ module rapt_cmu #(
   assign cmu_bcast.flush_redirect = rou_cmu.flush_redirect;
   assign cmu_bcast.fetch_context_stable = rou_cmu.fetch_context_stable;
   assign cmu_bcast.redirect_pc = rou_cmu.redirect_pc;
-  assign cmu_bcast.sys_resume = rou_cmu.sys_resume;
   assign cmu_bcast.rob_head = rou_cmu.rob_head;
   always_ff @(posedge clock) begin
     if (reset) begin

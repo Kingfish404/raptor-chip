@@ -35,7 +35,6 @@ module rapt_ieu #(
     dpu_iq_if.rs disp_brq,
     dpu_iq_if.rs disp_mdq,
 
-    load_fast_if.sink load_fast,
     input logic integer_system_issue_enable,
     exu_csr_if.master exu_csr,
     output CompletionT wb_integer_raw[NumIntegerPorts],
@@ -53,8 +52,7 @@ module rapt_ieu #(
   // feed the same ALQ selector combinationally. Gate cancelled issue packets.
   for (genvar p = 0; p < NumIntegerPorts; p++) begin : g_execute_stage
     logic younger;
-    assign younger = ((alq_issue[p].dest < cancel_head) == (cancel_owner < cancel_head))
-        ? alq_issue[p].dest > cancel_owner : alq_issue[p].dest < cancel_head;
+    assign younger = `RAPT_ROB_YOUNGER(alq_issue[p].dest, cancel_owner, cancel_head);
     always_comb begin
       alq_execute[p] = alq_issue[p];
       alq_execute[p].valid = alq_issue[p].valid && !reset && !cmu_bcast.flush_pipe
@@ -122,7 +120,7 @@ module rapt_ieu #(
 
   CompletionT alq_combo[NumCompletions];
   for (genvar p = 0; p < NumCompletions; p++) begin : g_alq_combo
-    if (p == NumIntegerPorts + 1) assign alq_combo[p] = memory_wake;
+    if (p == rapt_pkg::completion_memory_port(Cfg)) assign alq_combo[p] = memory_wake;
     else assign alq_combo[p] = '0;
   end
 
@@ -139,8 +137,7 @@ module rapt_ieu #(
       // ALU and the global result broadcast in one cycle.
       .ComboCdbWake(1'b0),
       .LocalOperandWake(LocalIntegerWake),
-      .ComboWakePorts(32'(1) << (NumIntegerPorts + 1)),
-      .ConfirmCdbWake(1'b0),
+      .ComboWakePorts(32'(1) << rapt_pkg::completion_memory_port(Cfg)),
       .NumIssuePorts(NumIntegerPorts),
       // Prefer simple ports for general ALU work, leaving the system-capable
       // port available for CSR/system uops when both classes are ready.
@@ -163,7 +160,6 @@ module rapt_ieu #(
       .dispatch(dispatch),
       .disp         (disp_alq),
 
-      .load_fast    (load_fast),
       .issue_enable (integer_issue_enable),
       .issue(alq_issue),
       .occ_o        (occ_alq),
@@ -181,8 +177,7 @@ module rapt_ieu #(
       // Branches read operands captured at the queue edge.
       .ComboCdbWake(1'b0),
       .LocalOperandWake(LocalIntegerWake),
-      .ConfirmCdbWake(1'b0),
-      .ComboWakePorts(~(32'(1) << NumIntegerPorts)),
+      .ComboWakePorts(~(32'(1) << rapt_pkg::completion_branch_port(Cfg))),
       .ROB_SIZE(ROB_SIZE),
       .PLEN    (PLEN),
       .RLEN    (RLEN),
@@ -200,7 +195,6 @@ module rapt_ieu #(
       .dispatch(dispatch),
       .disp         (disp_brq),
 
-      .load_fast    (load_fast),
       .issue_enable (1'b1),
       .issue(brq_issue),
       .occ_o        (occ_brq),

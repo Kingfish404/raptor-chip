@@ -4,7 +4,10 @@
 // Pure single-instruction decode. No slot identity or pipeline control here.
 module rapt_decode_slot #(
     parameter int XLEN = `RAPT_XLEN,
-    parameter int RLEN = (`RAPT_REG_LEN)
+    parameter int RLEN = (`RAPT_REG_LEN),
+    // Emit constant operands as small selectors (see rapt_pkg::derive_op*)
+    // instead of XLEN values; the ROU rebuilds them from the uop at dispatch.
+    parameter bit DerivedConstants = 1'b0
 ) (
     input rapt_pkg::fetch_slot_t fetched,
     csr_bcast_if.in csr_bcast,
@@ -128,8 +131,33 @@ module rapt_decode_slot #(
 
   // Truncate 64-bit decoder outputs to XLEN
   assign decoded.uop.imm = dec_imm[XLEN-1:0];
-  assign decoded.op1     = dec_op1[XLEN-1:0];
-  assign decoded.op2     = dec_op2[XLEN-1:0];
+  // The decoder only produces op1 in {0, pc, imm, uimm} and op2 in {0, imm}.
+  // With DerivedConstants the upper bits are constant zero, so every buffer
+  // between decode and dispatch drops them.
+  if (DerivedConstants) begin : g_derived_constants
+    logic [1:0] op1_kind;
+    always_comb begin
+      if (dec_op1[XLEN-1:0] == '0) op1_kind = rapt_pkg::OpConstZero;
+      else if (dec_op1[XLEN-1:0] == pc_idu) op1_kind = rapt_pkg::OpConstPc;
+      else if (dec_op1[XLEN-1:0] == dec_imm[XLEN-1:0]) op1_kind = rapt_pkg::OpConstImm;
+      else op1_kind = rapt_pkg::OpConstUimm;
+    end
+    assign decoded.op1 = XLEN'(op1_kind);
+    assign decoded.op2 = XLEN'(dec_op2[XLEN-1:0] != '0);
+`ifndef SYNTHESIS
+    always_comb begin
+      assert (rapt_pkg::derive_op1(
+          XLEN'(op1_kind), pc_idu, dec_imm[XLEN-1:0], decoded.uop.inst
+      ) == dec_op1[XLEN-1:0])
+      else $error("decode op1 constant is not derivable");
+      assert (rapt_pkg::derive_op2(decoded.op2, dec_imm[XLEN-1:0]) == dec_op2[XLEN-1:0])
+      else $error("decode op2 constant is not derivable");
+    end
+`endif
+  end else begin : g_value_constants
+    assign decoded.op1 = dec_op1[XLEN-1:0];
+    assign decoded.op2 = dec_op2[XLEN-1:0];
+  end
 
   // Per-instruction legality is independent of the decode position. Check the
   // ALU encoding, CSR access, privilege gates and extension availability here;

@@ -205,7 +205,6 @@ module tb_frontend_trace;
         cmu_bcast.jren = event_indirect[event_head];
         cmu_bcast.btaken = event_taken[event_head];
         if (event_serial[event_head]) begin
-          cmu_bcast.sys_resume = 1;
           cmu_bcast.flush_pipe = 1;
           cmu_bcast.redirect_pc = event_npc[event_head];
           flushing = 1;

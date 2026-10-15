@@ -36,21 +36,14 @@ module rapt_store_beats #(
 
   assign ma_w_off = {1'b0, waddr[OFFW-1:0]};
   // Compute store size from walu byte mask.
-  always_comb begin
-    unique case (walu)
-      `RAPT_SB_WSTRB: ma_w_size = (OFFW+2)'(1);
-      `RAPT_SH_WSTRB: ma_w_size = (OFFW+2)'(2);
-      `RAPT_SW_WSTRB: ma_w_size = (OFFW+2)'(4);
 `ifdef RAPT_RV64
-      `RAPT_SD_WSTRB: ma_w_size = (OFFW+2)'(8);
+  assign ma_w_size = (OFFW + 2)'(rapt_pkg::store_bytes(walu, 4'd0));
 `else
-      default:        ma_w_size = wfp64 ? (OFFW+2)'(8) : (OFFW+2)'(0);
+  assign ma_w_size = (OFFW+2)'((walu == `RAPT_SD_WSTRB)
+      ? (wfp64 ? 4'd8 : 4'd0) : rapt_pkg::store_bytes(
+      walu, wfp64 ? 4'd8 : 4'd0
+  ));
 `endif
-`ifdef RAPT_RV64
-      default:        ma_w_size = (OFFW+2)'(0);
-`endif
-    endcase
-  end
   // Misaligned cross-word if off + size > word size.
   assign ma_store_span = (ma_w_size != '0)
                       && ((ma_w_off + ma_w_size) > (OFFW+2)'(XLEN/8));

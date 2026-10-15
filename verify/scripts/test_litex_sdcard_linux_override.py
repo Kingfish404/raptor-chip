@@ -100,6 +100,7 @@ BOOT_MODE := bios
 FPGA_BOARD := mlk_cu08_ku15p
 VARIANT := linux32
 RAPT_CONFIG := default
+VIVADO_NO_TIMING_DRIVEN := 0
 include {litex_dir}/mk/config.mk
 include {litex_dir}/mk/recipes.mk
 FPGA_STAMP := {stamp}

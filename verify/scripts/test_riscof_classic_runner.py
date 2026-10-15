@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check the classic DUT runner's fail-closed result handling (no RTL build)."""
 import importlib.util
+import configparser
 import json
 from pathlib import Path
 import subprocess
@@ -40,7 +41,10 @@ class RunnerTest(unittest.TestCase):
                 pmp = json.loads((plugin / config_name).read_text())["memory"]["pmp"]
                 self.assertEqual(pmp["count"], 16)
                 self.assertEqual(pmp["usable_count"], 8)
-                self.assertRegex((plugin / "env/model_test.h").read_text(),
+                config = configparser.ConfigParser()
+                config.read(ROOT / "verify/riscof" / suite / "config.ini")
+                shared = ROOT / "verify/riscof" / suite / config["sail_cSim"]["pluginpath"]
+                self.assertRegex((shared / "env/model_test.h").read_text(),
                                  r"#define\s+RVMODEL_NUM_PMPS\s+8\b")
 
     def test_shards_partition_the_selected_suite(self):

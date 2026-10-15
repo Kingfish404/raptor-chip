@@ -20,6 +20,7 @@ module tb_ras_pipeline;
   rapt_bpu #(
       .RSB_SIZE(3)
   ) bpu (
+      .preserve_fetch(1'b0),
       .execute_recover(1'b0),
       .execute_ghr('0),
       .execute_phr('0),
@@ -84,7 +85,6 @@ module tb_ras_pipeline;
     rou_cmu.fence_i = 0;
     rou_cmu.flush_pipe = 0;
     rou_cmu.flush_redirect = 0;
-    rou_cmu.sys_resume = 0;
     rou_cmu.time_trap = 0;
     rou_cmu.rob_head = 0;
     ifu_idu.slot = '{default:'0};
@@ -98,6 +98,7 @@ module tb_ras_pipeline;
 `ifdef RAPT_FETCH_LOOKAHEAD
     ifu_bpu.aux_query = 0;
     ifu_bpu.aux_pc = 0;
+    ifu_bpu.aux_position = 0;
 `endif
     tick(3);
     reset = 0;

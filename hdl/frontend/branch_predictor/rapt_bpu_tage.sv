@@ -31,10 +31,15 @@ module rapt_bpu_tage #(
     /* verilator lint_on UNUSEDPARAM */
     parameter int BIM_LEN = `RAPT_TAGE_BIM_BITS,
     parameter int IDX_LEN = `RAPT_TAGE_INDEX_BITS,
-    parameter bit AuxRead = 1'b1
+    parameter bit AuxRead = 1'b1,
+    // Nonzero: aux_pc is the fetch-block PC and every candidate halfword
+    // position 1..AuxPositions is looked up; the late decoded aux_position
+    // selects the direction instead of steering a table address.
+    parameter int AuxPositions = 0
 ) (
     `RAPT_BPU_DIRP_PORTS,
     input logic [XLEN-1:0] aux_pc = '0,
+    input logic [3:0] aux_position = '0,
     input logic [GHR_LEN-1:0] aux_ghr = '0,
     input logic [PHR_LEN-1:0] aux_phr = '0,
     output logic aux_taken
@@ -79,28 +84,29 @@ module rapt_bpu_tage #(
   // ---------------- Storage ----------------
   // Bimodal base (2-bit saturating counter; MSB = taken)
   (* ram_style = "distributed" *) logic [1:0] bim_data[BimSize];
-  logic [BimSize-1:0] bim_valid;
-  function automatic logic [1:0] bim_value(input logic [BIM_LEN-1:0] index);
-    return bim_valid[index] ? bim_data[index] : 2'b01;
-  endfunction
+  // Valid and useful bits need a bulk clear (reset, fence, u aging). They
+  // live in grouped LUTRAM words with one flop per group instead of one flop
+  // per entry; each consumer below has its own read port.
+  localparam int AuxPorts   = AuxPositions > 0 ? AuxPositions : 1;
+  localparam int ValidReads = 2 + AuxPorts;
+  logic bim_valid_rd, bim_valid_aux[AuxPorts], bim_valid_up;
+  logic t1_valid_rd, t1_valid_aux[AuxPorts], t1_valid_up, t1_u_up;
+  logic t2_valid_rd, t2_valid_aux[AuxPorts], t2_valid_up, t2_u_up;
+  logic t3_valid_rd, t3_valid_aux[AuxPorts], t3_valid_up, t3_u_up;
+  logic [BIM_LEN-1:0] aux_bim_index[AuxPorts];
+  logic [IDX_LEN-1:0] aux_t1_index[AuxPorts], aux_t2_index[AuxPorts], aux_t3_index[AuxPorts];
 
   // Tagged table 1
   (* ram_style = "distributed" *) logic [TagLen1-1:0] t1_tag  [TabSize];
   (* ram_style = "distributed" *) logic signed [CtrBits-1:0] t1_ctr  [TabSize];
-  logic                      t1_u    [TabSize];
-  logic                      t1_valid[TabSize];
 
   // Tagged table 2
   (* ram_style = "distributed" *) logic [TagLen2-1:0] t2_tag  [TabSize];
   (* ram_style = "distributed" *) logic signed [CtrBits-1:0] t2_ctr  [TabSize];
-  logic                      t2_u    [TabSize];
-  logic                      t2_valid[TabSize];
 
   // Tagged table 3
   (* ram_style = "distributed" *) logic [TagLen3-1:0] t3_tag  [TabSize];
   (* ram_style = "distributed" *) logic signed [CtrBits-1:0] t3_ctr  [TabSize];
-  logic                      t3_u    [TabSize];
-  logic                      t3_valid[TabSize];
 
   // ---------------- Folded-history helpers ----------------
   // Combinationally fold the low `HIST` bits of `ghr` into `W` bits via XOR.
@@ -243,11 +249,11 @@ module rapt_bpu_tage #(
   assign rd_t2_tag = t2_tag_of(r_pc_q, r_ghr_q, r_phr_q);
   assign rd_t3_tag = t3_tag_of(r_pc_q, r_ghr_q, r_phr_q);
 
-  assign hit1 = t1_valid[rd_t1_idx] && (t1_tag[rd_t1_idx] == rd_t1_tag);
-  assign hit2 = t2_valid[rd_t2_idx] && (t2_tag[rd_t2_idx] == rd_t2_tag);
-  assign hit3 = t3_valid[rd_t3_idx] && (t3_tag[rd_t3_idx] == rd_t3_tag);
+  assign hit1 = t1_valid_rd && (t1_tag[rd_t1_idx] == rd_t1_tag);
+  assign hit2 = t2_valid_rd && (t2_tag[rd_t2_idx] == rd_t2_tag);
+  assign hit3 = t3_valid_rd && (t3_tag[rd_t3_idx] == rd_t3_tag);
 
-  assign bim_taken = bim_taken_at(rd_bim_idx);
+  assign bim_taken = bim_valid_rd && bim_data[rd_bim_idx][1];
   assign t1_taken = ~t1_ctr[rd_t1_idx][CtrBits-1];  // sign bit 0 => >=0 => taken
   assign t2_taken = ~t2_ctr[rd_t2_idx][CtrBits-1];
   assign t3_taken = ~t3_ctr[rd_t3_idx][CtrBits-1];
@@ -291,72 +297,87 @@ module rapt_bpu_tage #(
                   ? alt_pred : provider_pred;
 
   if (AuxRead) begin : g_auxiliary_read
-    // A packet contains at most one conditional branch. The auxiliary
-    // position uses the pre-packet fetch history and the same trained tables.
-    logic [BIM_LEN-1:0] aux_rd_bim_idx;
-    logic [IDX_LEN-1:0] aux_rd_t1_idx, aux_rd_t2_idx, aux_rd_t3_idx;
-    logic [TagLen1-1:0] aux_rd_t1_tag;
-    logic [TagLen2-1:0] aux_rd_t2_tag;
-    logic [TagLen3-1:0] aux_rd_t3_tag;
-    logic aux_hit1, aux_hit2, aux_hit3;
-    logic aux_bim_taken, aux_t1_taken, aux_t2_taken, aux_t3_taken;
+    logic port_taken[AuxPorts];
+    for (genvar k = 0; k < AuxPorts; k++) begin : g_port
+      wire [XLEN-1:0] port_pc = AuxPositions > 0 ? aux_pc + XLEN'(2 * (k + 1)) : aux_pc;
+      // A packet contains at most one conditional branch. The auxiliary
+      // position uses the pre-packet fetch history and the same trained tables.
+      logic [BIM_LEN-1:0] aux_rd_bim_idx;
+      logic [IDX_LEN-1:0] aux_rd_t1_idx, aux_rd_t2_idx, aux_rd_t3_idx;
+      logic [TagLen1-1:0] aux_rd_t1_tag;
+      logic [TagLen2-1:0] aux_rd_t2_tag;
+      logic [TagLen3-1:0] aux_rd_t3_tag;
+      logic aux_hit1, aux_hit2, aux_hit3;
+      logic aux_bim_taken, aux_t1_taken, aux_t2_taken, aux_t3_taken;
 
-    assign aux_rd_bim_idx = bim_idx(aux_pc);
-    assign aux_rd_t1_idx = t1_idx(aux_pc, aux_ghr, aux_phr);
-    assign aux_rd_t2_idx = t2_idx(aux_pc, aux_ghr, aux_phr);
-    assign aux_rd_t3_idx = t3_idx(aux_pc, aux_ghr, aux_phr);
-    assign aux_rd_t1_tag = t1_tag_of(aux_pc, aux_ghr, aux_phr);
-    assign aux_rd_t2_tag = t2_tag_of(aux_pc, aux_ghr, aux_phr);
-    assign aux_rd_t3_tag = t3_tag_of(aux_pc, aux_ghr, aux_phr);
+      assign aux_rd_bim_idx = bim_idx(port_pc);
+      assign aux_rd_t1_idx = t1_idx(port_pc, aux_ghr, aux_phr);
+      assign aux_rd_t2_idx = t2_idx(port_pc, aux_ghr, aux_phr);
+      assign aux_rd_t3_idx = t3_idx(port_pc, aux_ghr, aux_phr);
+      assign aux_rd_t1_tag = t1_tag_of(port_pc, aux_ghr, aux_phr);
+      assign aux_rd_t2_tag = t2_tag_of(port_pc, aux_ghr, aux_phr);
+      assign aux_rd_t3_tag = t3_tag_of(port_pc, aux_ghr, aux_phr);
+      assign aux_bim_index[k] = aux_rd_bim_idx;
+      assign aux_t1_index[k] = aux_rd_t1_idx;
+      assign aux_t2_index[k] = aux_rd_t2_idx;
+      assign aux_t3_index[k] = aux_rd_t3_idx;
 
-    assign aux_hit1 = t1_valid[aux_rd_t1_idx] && (t1_tag[aux_rd_t1_idx] == aux_rd_t1_tag);
-    assign aux_hit2 = t2_valid[aux_rd_t2_idx] && (t2_tag[aux_rd_t2_idx] == aux_rd_t2_tag);
-    assign aux_hit3 = t3_valid[aux_rd_t3_idx] && (t3_tag[aux_rd_t3_idx] == aux_rd_t3_tag);
+      assign aux_hit1 = t1_valid_aux[k] && (t1_tag[aux_rd_t1_idx] == aux_rd_t1_tag);
+      assign aux_hit2 = t2_valid_aux[k] && (t2_tag[aux_rd_t2_idx] == aux_rd_t2_tag);
+      assign aux_hit3 = t3_valid_aux[k] && (t3_tag[aux_rd_t3_idx] == aux_rd_t3_tag);
 
-    assign aux_bim_taken = bim_taken_at(aux_rd_bim_idx);
-    assign aux_t1_taken = ~t1_ctr[aux_rd_t1_idx][CtrBits-1];  // sign bit 0 => >=0 => taken
-    assign aux_t2_taken = ~t2_ctr[aux_rd_t2_idx][CtrBits-1];
-    assign aux_t3_taken = ~t3_ctr[aux_rd_t3_idx][CtrBits-1];
+      assign aux_bim_taken = bim_valid_aux[k] && bim_data[aux_rd_bim_idx][1];
+      assign aux_t1_taken = ~t1_ctr[aux_rd_t1_idx][CtrBits-1];  // sign bit 0 => >=0 => taken
+      assign aux_t2_taken = ~t2_ctr[aux_rd_t2_idx][CtrBits-1];
+      assign aux_t3_taken = ~t3_ctr[aux_rd_t3_idx][CtrBits-1];
 
-    // Provider = longest matching table; else bimodal.
-    // use_alt_on_na: when provider ctr is weakly correct (|ctr| <= 1, i.e. ctr
-    // is 0 or -1 with 3-bit signed encoding) and the global confidence counter
-    // says alt has historically been better, return alt-pred.
-    logic                         aux_provider_weak;
-    logic                         aux_provider_pred;
-    logic                         aux_alt_pred;
-    logic signed [   CtrBits-1:0] aux_prov_ctr;
+      // Provider = longest matching table; else bimodal.
+      // use_alt_on_na: when provider ctr is weakly correct (|ctr| <= 1, i.e. ctr
+      // is 0 or -1 with 3-bit signed encoding) and the global confidence counter
+      // says alt has historically been better, return alt-pred.
+      logic                         aux_provider_weak;
+      logic                         aux_provider_pred;
+      logic                         aux_alt_pred;
+      logic signed [   CtrBits-1:0] aux_prov_ctr;
 
-    always_comb begin : aux_provider_select
-      if (aux_hit3) begin
-        aux_prov_ctr      = t3_ctr[aux_rd_t3_idx];
-        aux_provider_pred = aux_t3_taken;
-        aux_alt_pred      = aux_hit2 ? aux_t2_taken : aux_hit1 ? aux_t1_taken : aux_bim_taken;
-      end else if (aux_hit2) begin
-        aux_prov_ctr      = t2_ctr[aux_rd_t2_idx];
-        aux_provider_pred = aux_t2_taken;
-        aux_alt_pred      = aux_hit1 ? aux_t1_taken : aux_bim_taken;
-      end else if (aux_hit1) begin
-        aux_prov_ctr      = t1_ctr[aux_rd_t1_idx];
-        aux_provider_pred = aux_t1_taken;
-        aux_alt_pred      = aux_bim_taken;
-      end else begin
-        aux_prov_ctr      = '0;
-        aux_provider_pred = aux_bim_taken;
-        aux_alt_pred      = aux_bim_taken;
+      always_comb begin : aux_provider_select
+        if (aux_hit3) begin
+          aux_prov_ctr      = t3_ctr[aux_rd_t3_idx];
+          aux_provider_pred = aux_t3_taken;
+          aux_alt_pred      = aux_hit2 ? aux_t2_taken : aux_hit1 ? aux_t1_taken : aux_bim_taken;
+        end else if (aux_hit2) begin
+          aux_prov_ctr      = t2_ctr[aux_rd_t2_idx];
+          aux_provider_pred = aux_t2_taken;
+          aux_alt_pred      = aux_hit1 ? aux_t1_taken : aux_bim_taken;
+        end else if (aux_hit1) begin
+          aux_prov_ctr      = t1_ctr[aux_rd_t1_idx];
+          aux_provider_pred = aux_t1_taken;
+          aux_alt_pred      = aux_bim_taken;
+        end else begin
+          aux_prov_ctr      = '0;
+          aux_provider_pred = aux_bim_taken;
+          aux_alt_pred      = aux_bim_taken;
+        end
       end
+      // "Weak" = ctr in {-1, 0}. With CtrBits=3 signed, those are the two
+      // values closest to the decision boundary (sign bit flip).
+      assign aux_provider_weak = (aux_prov_ctr == 3'sd0) || (aux_prov_ctr == -3'sd1);
+
+      logic aux_any_tagged_hit;
+      assign aux_any_tagged_hit = aux_hit1 || aux_hit2 || aux_hit3;
+      assign port_taken[k] = (aux_any_tagged_hit && aux_provider_weak && (use_alt_ctr >= 0))
+                    ? aux_alt_pred : aux_provider_pred;
     end
-    // "Weak" = ctr in {-1, 0}. With CtrBits=3 signed, those are the two
-    // values closest to the decision boundary (sign bit flip).
-    assign aux_provider_weak = (aux_prov_ctr == 3'sd0) || (aux_prov_ctr == -3'sd1);
-
-    logic aux_any_tagged_hit;
-    assign aux_any_tagged_hit = aux_hit1 || aux_hit2 || aux_hit3;
-    assign aux_taken = (aux_any_tagged_hit && aux_provider_weak && (use_alt_ctr >= 0))
-                  ? aux_alt_pred : aux_provider_pred;
-
+    assign aux_taken = AuxPositions > 0 && int'(aux_position) < AuxPorts
+        ? port_taken[aux_position] : port_taken[0];
   end else begin : g_no_auxiliary_read
     assign aux_taken = 1'b0;
+    for (genvar k = 0; k < AuxPorts; k++) begin : g_port
+      assign aux_bim_index[k] = '0;
+      assign aux_t1_index[k] = '0;
+      assign aux_t2_index[k] = '0;
+      assign aux_t3_index[k] = '0;
+    end
   end
   // ---------------- Update path (commit) ----------------
   logic [BIM_LEN-1:0] up_bim_idx;
@@ -375,9 +396,9 @@ module rapt_bpu_tage #(
   assign up_t2_tag = t2_tag_of(update_pc, update_ghr, update_phr);
   assign up_t3_tag = t3_tag_of(update_pc, update_ghr, update_phr);
 
-  assign up_hit1 = t1_valid[up_t1_idx] && (t1_tag[up_t1_idx] == up_t1_tag);
-  assign up_hit2 = t2_valid[up_t2_idx] && (t2_tag[up_t2_idx] == up_t2_tag);
-  assign up_hit3 = t3_valid[up_t3_idx] && (t3_tag[up_t3_idx] == up_t3_tag);
+  assign up_hit1 = t1_valid_up && (t1_tag[up_t1_idx] == up_t1_tag);
+  assign up_hit2 = t2_valid_up && (t2_tag[up_t2_idx] == up_t2_tag);
+  assign up_hit3 = t3_valid_up && (t3_tag[up_t3_idx] == up_t3_tag);
 
   assign up_provider = up_hit3 ? 2'd3 : up_hit2 ? 2'd2 : up_hit1 ? 2'd1 : 2'd0;
 
@@ -393,19 +414,19 @@ module rapt_bpu_tage #(
       up_provider_taken = ~t3_ctr[up_t3_idx][CtrBits-1];
       up_alt_taken      = up_hit2 ? ~t2_ctr[up_t2_idx][CtrBits-1]
                         : up_hit1 ? ~t1_ctr[up_t1_idx][CtrBits-1]
-                                  : bim_taken_at(up_bim_idx);
+                                  : bim_taken_at_update();
     end else if (up_hit2) begin
       up_prov_ctr       = t2_ctr[up_t2_idx];
       up_provider_taken = ~t2_ctr[up_t2_idx][CtrBits-1];
-      up_alt_taken      = up_hit1 ? ~t1_ctr[up_t1_idx][CtrBits-1] : bim_taken_at(up_bim_idx);
+      up_alt_taken      = up_hit1 ? ~t1_ctr[up_t1_idx][CtrBits-1] : bim_taken_at_update();
     end else if (up_hit1) begin
       up_prov_ctr       = t1_ctr[up_t1_idx];
       up_provider_taken = ~t1_ctr[up_t1_idx][CtrBits-1];
-      up_alt_taken      = bim_taken_at(up_bim_idx);
+      up_alt_taken      = bim_taken_at_update();
     end else begin
       up_prov_ctr       = '0;
-      up_provider_taken = bim_taken_at(up_bim_idx);
-      up_alt_taken      = bim_taken_at(up_bim_idx);
+      up_provider_taken = bim_taken_at_update();
+      up_alt_taken      = bim_taken_at_update();
     end
   end
   assign up_provider_weak = (up_prov_ctr == 3'sd0) || (up_prov_ctr == -3'sd1);
@@ -434,9 +455,9 @@ module rapt_bpu_tage #(
   // policy: ideally random, but smallest-rank works well empirically).
   logic alloc_t1_ok, alloc_t2_ok, alloc_t3_ok;
   logic do_alloc;
-  assign alloc_t1_ok = (up_provider < 2'd1) && (t1_u[up_t1_idx] == 1'b0);
-  assign alloc_t2_ok = (up_provider < 2'd2) && (t2_u[up_t2_idx] == 1'b0);
-  assign alloc_t3_ok = (up_provider < 2'd3) && (t3_u[up_t3_idx] == 1'b0);
+  assign alloc_t1_ok = (up_provider < 2'd1) && (t1_u_up == 1'b0);
+  assign alloc_t2_ok = (up_provider < 2'd2) && (t2_u_up == 1'b0);
+  assign alloc_t3_ok = (up_provider < 2'd3) && (t3_u_up == 1'b0);
   assign do_alloc    = update_en && update_mispred;
 
   // Keep each table payload on one unreset write port. Valid bits supply
@@ -447,7 +468,7 @@ module rapt_bpu_tage #(
   assign alloc_t3 = do_alloc && !alloc_t1_ok && !alloc_t2_ok && alloc_t3_ok;
   always_ff @(posedge clock) begin
     if (!(reset || init) && update_en) begin
-      bim_data[up_bim_idx] <= bim_update(bim_value(up_bim_idx), update_taken);
+      bim_data[up_bim_idx] <= bim_update(bim_valid_up ? bim_data[up_bim_idx] : 2'b01, update_taken);
       if (alloc_t1) t1_tag[up_t1_idx] <= up_t1_tag;
       if (alloc_t1 || up_hit1)
         t1_ctr[up_t1_idx] <= alloc_t1 ? (update_taken ? CtrInitT : CtrInitN) : ctr_update(
@@ -468,65 +489,151 @@ module rapt_bpu_tage #(
 
   // Resettable table metadata has fixed physical destinations. Decode a
   // single addressed update per table before the per-entry write enables.
-  for (genvar e = 0; e < BimSize; e++) begin : g_bim_valid
-    always_ff @(posedge clock) begin
-      if (reset || init) bim_valid[e] <= 1'b0;
-      else if (update_en && up_bim_idx == BIM_LEN'(e)) bim_valid[e] <= 1'b1;
-    end
+  // Read ports: primary, auxiliary position(s), update.
+  logic bim_read[ValidReads];
+  logic [BIM_LEN-1:0] bim_read_index[ValidReads];
+  assign bim_read_index[0] = rd_bim_idx;
+  assign bim_read_index[ValidReads-1] = up_bim_idx;
+  for (genvar k = 0; k < AuxPorts; k++) begin : g_bim_aux
+    assign bim_read_index[1+k] = aux_bim_index[k];
+    assign bim_valid_aux[k] = bim_read[1+k];
   end
+  rapt_bulk_clear_bits #(
+      .Entries(BimSize),
+      .ReadPorts(ValidReads)
+  ) u_bim_valid (
+      .clock,
+      .clear(reset || init),
+      .read_index(bim_read_index),
+      .read_bit(bim_read),
+      .write_valid(update_en),
+      .write_index(up_bim_idx),
+      .write_bit(1'b1)
+  );
+  assign bim_valid_rd = bim_read[0];
+  assign bim_valid_up = bim_read[ValidReads-1];
   logic no_allocation;
   assign no_allocation = do_alloc && !(alloc_t1_ok || alloc_t2_ok || alloc_t3_ok);
   logic useful_t1, clear_t1;
   assign useful_t1 = up_hit1 && up_provider == 2'd1
-      && t1_taken_at(up_t1_idx) != bim_taken_at(up_bim_idx)
+      && t1_taken_at(up_t1_idx) != bim_taken_at_update()
       && t1_taken_at(up_t1_idx) == update_taken;
   assign clear_t1 = alloc_t1 || (no_allocation && up_provider < 2'd1);
-  for (genvar e = 0; e < TabSize; e++) begin : g_t1_metadata
-    always_ff @(posedge clock) begin
-      if (reset || init) begin
-        t1_valid[e] <= 1'b0;
-        t1_u[e] <= 1'b0;
-      end else if (update_en) begin
-        if (alloc_t1 && up_t1_idx == IDX_LEN'(e)) t1_valid[e] <= 1'b1;
-        if (u_clear_pulse) t1_u[e] <= 1'b0;
-        else if ((useful_t1 || clear_t1) && up_t1_idx == IDX_LEN'(e)) t1_u[e] <= !clear_t1;
-      end
-    end
+  logic t1_valid_read[ValidReads], t1_u_read[1];
+  logic [IDX_LEN-1:0] t1_read_index[ValidReads];
+  assign t1_read_index[0] = rd_t1_idx;
+  assign t1_read_index[ValidReads-1] = up_t1_idx;
+  for (genvar k = 0; k < AuxPorts; k++) begin : g_t1_aux
+    assign t1_read_index[1+k] = aux_t1_index[k];
+    assign t1_valid_aux[k] = t1_valid_read[1+k];
   end
+  rapt_bulk_clear_bits #(
+      .Entries(TabSize),
+      .ReadPorts(ValidReads)
+  ) u_t1_valid (
+      .clock,
+      .clear(reset || init),
+      .read_index(t1_read_index),
+      .read_bit(t1_valid_read),
+      .write_valid(update_en && alloc_t1),
+      .write_index(up_t1_idx),
+      .write_bit(1'b1)
+  );
+  rapt_bulk_clear_bits #(
+      .Entries(TabSize),
+      .ReadPorts(1)
+  ) u_t1_useful (
+      .clock,
+      .clear(reset || init || (update_en && u_clear_pulse)),
+      .read_index('{up_t1_idx}),
+      .read_bit(t1_u_read),
+      .write_valid(update_en && (useful_t1 || clear_t1)),
+      .write_index(up_t1_idx),
+      .write_bit(!clear_t1)
+  );
+  assign t1_valid_rd = t1_valid_read[0];
+  assign t1_valid_up = t1_valid_read[ValidReads-1];
+  assign t1_u_up = t1_u_read[0];
   logic useful_t2, clear_t2;
   assign useful_t2 = up_hit2 && up_provider == 2'd2
-      && t2_taken_at(up_t2_idx) != bim_taken_at(up_bim_idx)
+      && t2_taken_at(up_t2_idx) != bim_taken_at_update()
       && t2_taken_at(up_t2_idx) == update_taken;
   assign clear_t2 = alloc_t2 || (no_allocation && up_provider < 2'd2);
-  for (genvar e = 0; e < TabSize; e++) begin : g_t2_metadata
-    always_ff @(posedge clock) begin
-      if (reset || init) begin
-        t2_valid[e] <= 1'b0;
-        t2_u[e] <= 1'b0;
-      end else if (update_en) begin
-        if (alloc_t2 && up_t2_idx == IDX_LEN'(e)) t2_valid[e] <= 1'b1;
-        if (u_clear_pulse) t2_u[e] <= 1'b0;
-        else if ((useful_t2 || clear_t2) && up_t2_idx == IDX_LEN'(e)) t2_u[e] <= !clear_t2;
-      end
-    end
+  logic t2_valid_read[ValidReads], t2_u_read[1];
+  logic [IDX_LEN-1:0] t2_read_index[ValidReads];
+  assign t2_read_index[0] = rd_t2_idx;
+  assign t2_read_index[ValidReads-1] = up_t2_idx;
+  for (genvar k = 0; k < AuxPorts; k++) begin : g_t2_aux
+    assign t2_read_index[1+k] = aux_t2_index[k];
+    assign t2_valid_aux[k] = t2_valid_read[1+k];
   end
+  rapt_bulk_clear_bits #(
+      .Entries(TabSize),
+      .ReadPorts(ValidReads)
+  ) u_t2_valid (
+      .clock,
+      .clear(reset || init),
+      .read_index(t2_read_index),
+      .read_bit(t2_valid_read),
+      .write_valid(update_en && alloc_t2),
+      .write_index(up_t2_idx),
+      .write_bit(1'b1)
+  );
+  rapt_bulk_clear_bits #(
+      .Entries(TabSize),
+      .ReadPorts(1)
+  ) u_t2_useful (
+      .clock,
+      .clear(reset || init || (update_en && u_clear_pulse)),
+      .read_index('{up_t2_idx}),
+      .read_bit(t2_u_read),
+      .write_valid(update_en && (useful_t2 || clear_t2)),
+      .write_index(up_t2_idx),
+      .write_bit(!clear_t2)
+  );
+  assign t2_valid_rd = t2_valid_read[0];
+  assign t2_valid_up = t2_valid_read[ValidReads-1];
+  assign t2_u_up = t2_u_read[0];
   logic useful_t3, clear_t3;
   assign useful_t3 = up_hit3 && up_provider == 2'd3
-      && t3_taken_at(up_t3_idx) != bim_taken_at(up_bim_idx)
+      && t3_taken_at(up_t3_idx) != bim_taken_at_update()
       && t3_taken_at(up_t3_idx) == update_taken;
   assign clear_t3 = alloc_t3 || (no_allocation && up_provider < 2'd3);
-  for (genvar e = 0; e < TabSize; e++) begin : g_t3_metadata
-    always_ff @(posedge clock) begin
-      if (reset || init) begin
-        t3_valid[e] <= 1'b0;
-        t3_u[e] <= 1'b0;
-      end else if (update_en) begin
-        if (alloc_t3 && up_t3_idx == IDX_LEN'(e)) t3_valid[e] <= 1'b1;
-        if (u_clear_pulse) t3_u[e] <= 1'b0;
-        else if ((useful_t3 || clear_t3) && up_t3_idx == IDX_LEN'(e)) t3_u[e] <= !clear_t3;
-      end
-    end
+  logic t3_valid_read[ValidReads], t3_u_read[1];
+  logic [IDX_LEN-1:0] t3_read_index[ValidReads];
+  assign t3_read_index[0] = rd_t3_idx;
+  assign t3_read_index[ValidReads-1] = up_t3_idx;
+  for (genvar k = 0; k < AuxPorts; k++) begin : g_t3_aux
+    assign t3_read_index[1+k] = aux_t3_index[k];
+    assign t3_valid_aux[k] = t3_valid_read[1+k];
   end
+  rapt_bulk_clear_bits #(
+      .Entries(TabSize),
+      .ReadPorts(ValidReads)
+  ) u_t3_valid (
+      .clock,
+      .clear(reset || init),
+      .read_index(t3_read_index),
+      .read_bit(t3_valid_read),
+      .write_valid(update_en && alloc_t3),
+      .write_index(up_t3_idx),
+      .write_bit(1'b1)
+  );
+  rapt_bulk_clear_bits #(
+      .Entries(TabSize),
+      .ReadPorts(1)
+  ) u_t3_useful (
+      .clock,
+      .clear(reset || init || (update_en && u_clear_pulse)),
+      .read_index('{up_t3_idx}),
+      .read_bit(t3_u_read),
+      .write_valid(update_en && (useful_t3 || clear_t3)),
+      .write_index(up_t3_idx),
+      .write_bit(!clear_t3)
+  );
+  assign t3_valid_rd = t3_valid_read[0];
+  assign t3_valid_up = t3_valid_read[ValidReads-1];
+  assign t3_u_up = t3_u_read[0];
   always_ff @(posedge clock) begin
     if (reset || init) begin
       u_age_cnt <= '0;
@@ -553,8 +660,8 @@ module rapt_bpu_tage #(
   function automatic logic t3_taken_at(input logic [IDX_LEN-1:0] i);
     return ~t3_ctr[i][CtrBits-1];
   endfunction
-  function automatic logic bim_taken_at(input logic [BIM_LEN-1:0] i);
-    return bim_valid[i] && bim_data[i][1];
+  function automatic logic bim_taken_at_update();
+    return bim_valid_up && bim_data[up_bim_idx][1];
   endfunction
 
   /* verilator lint_on UNUSEDSIGNAL */

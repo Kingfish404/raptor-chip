@@ -29,6 +29,8 @@ task automatic init_l1d_inputs;
     lsu_l1d.wvalid = 1'b0;
     lsu_l1d.wdata = '0;
 
+    // Integration benches connect a real bus and must not drive its outputs.
+`ifndef TB_L1D_EXTERNAL_BUS
     l1d_bus.rdata = '0;
     l1d_bus.rvalid = 1'b0;
     l1d_bus.r_mshr = 1'b0;
@@ -40,8 +42,7 @@ task automatic init_l1d_inputs;
     l1d_bus.rerr = 1'b0;
     l1d_bus.wready = 1'b1;
     l1d_bus.werr = 1'b0;
-    l1d_bus.ptw_wready = 1'b0;
-    l1d_bus.ptw_werr = 1'b0;
+`endif
 
     init_csr_bcast_defaults(`RAPT_PRIV_M, '0, 1'b1);
     pmp_update.addr_we = 1'b0;

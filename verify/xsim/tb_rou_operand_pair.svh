@@ -105,10 +105,14 @@ if (CheckOperandIndependence) begin : g_operand_pair
           && exu_prf.pr2[s] == shadow_exu_prf.pr2[s])
         else $fatal(1, "operand-dependent ROU rename admission/read address");
     end
+    // Candidate lanes and per-slot selections are distinct index spaces;
+    // both instances share the fixture's selection of the DUT candidates.
+    for (int c = 0; c < ScanEntries; c++) begin
+      assert (candidate_valid[c] == shadow_dispatch_valid[c]
+          && (!candidate_valid[c] || candidate_domain[c] == shadow_candidate_domain[c]))
+        else $fatal(1, "operand-dependent ROU dispatch eligibility lane=%0d", c);
+    end
     for (int s = 0; s < DispatchWidth; s++) begin
-      assert (dispatch_valid[s] == shadow_dispatch_valid[s]
-          && candidate_domain[s] == shadow_candidate_domain[s])
-        else $fatal(1, "operand-dependent ROU dispatch eligibility");
       if (dispatch_valid[s]) begin
         automatic dispatch_slot_t a = dispatch[s], b = shadow_dispatch[s];
         // A nonzero pr tag denotes an unavailable operand. Allocation may
@@ -143,7 +147,13 @@ if (CheckOperandIndependence) begin : g_operand_pair
       else $fatal(1, "operand-dependent ROU rou_csr");
     assert ({rou_lsu.store, rou_lsu.dest, rou_lsu.sq_vaddr, rou_lsu.pc, rou_lsu.valid} == {shadow_rou_lsu.store, shadow_rou_lsu.dest, shadow_rou_lsu.sq_vaddr, shadow_rou_lsu.pc, shadow_rou_lsu.valid})
       else $fatal(1, "operand-dependent ROU rou_lsu");
-    assert ({rou_cmu.next_pc, rou_cmu.redirect_pc, rou_cmu.btaken, rou_cmu.ben, rou_cmu.jen, rou_cmu.jren, rou_cmu.atomic_sc, rou_cmu.fence_time, rou_cmu.fence_i, rou_cmu.flush_pipe, rou_cmu.flush_redirect, rou_cmu.sys_resume, rou_cmu.time_trap, rou_cmu.rob_head} == {shadow_rou_cmu.next_pc, shadow_rou_cmu.redirect_pc, shadow_rou_cmu.btaken, shadow_rou_cmu.ben, shadow_rou_cmu.jen, shadow_rou_cmu.jren, shadow_rou_cmu.atomic_sc, shadow_rou_cmu.fence_time, shadow_rou_cmu.fence_i, shadow_rou_cmu.flush_pipe, shadow_rou_cmu.flush_redirect, shadow_rou_cmu.sys_resume, shadow_rou_cmu.time_trap, shadow_rou_cmu.rob_head})
+      assert ({rou_cmu.next_pc, rou_cmu.redirect_pc, rou_cmu.btaken, rou_cmu.ben,
+        rou_cmu.jen, rou_cmu.jren, rou_cmu.atomic_sc, rou_cmu.fence_time, rou_cmu.fence_i,
+        rou_cmu.flush_pipe, rou_cmu.flush_redirect, rou_cmu.time_trap, rou_cmu.rob_head}
+        == {shadow_rou_cmu.next_pc, shadow_rou_cmu.redirect_pc, shadow_rou_cmu.btaken,
+        shadow_rou_cmu.ben, shadow_rou_cmu.jen, shadow_rou_cmu.jren, shadow_rou_cmu.atomic_sc,
+        shadow_rou_cmu.fence_time, shadow_rou_cmu.fence_i, shadow_rou_cmu.flush_pipe,
+        shadow_rou_cmu.flush_redirect, shadow_rou_cmu.time_trap, shadow_rou_cmu.rob_head})
       else $fatal(1, "operand-dependent ROU rou_cmu");
     assert ({recovery.pending, recovery.redirect_valid, recovery.owner, recovery.head, recovery.generation, recovery.target, recovery.checkpoint_valid, recovery.checkpoint} == {shadow_recovery.pending, shadow_recovery.redirect_valid, shadow_recovery.owner, shadow_recovery.head, shadow_recovery.generation, shadow_recovery.target, shadow_recovery.checkpoint_valid, shadow_recovery.checkpoint})
       else $fatal(1, "operand-dependent ROU recovery");

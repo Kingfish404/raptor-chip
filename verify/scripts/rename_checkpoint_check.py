@@ -72,7 +72,7 @@ def main():
             output = run_yosys(command, args.output / f"{name}.log", args.timeout)
             row = {
                 "checkpoint_entries": entries, "rename_width": 4, "resolve_ports": 5,
-                "state_bits": entries * (entries + 74),
+                "state_bits": entries * 74 + entries * (entries - 1) // 2,
                 "generic_cells": int(re.findall(r"^\s*(\d+) cells\s*$", output, re.M)[-1]),
                 "topological_depth": int(re.findall(
                     r"Longest topological path .*\(length=(\d+)\)", output)[-1]),

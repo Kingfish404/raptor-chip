@@ -60,13 +60,31 @@ def check():
          number(regions["sram"]["size"]), "SRAM size")
     contains("hdl/rapt_pkg.sv", r"PmemEnd\s*=\s*64'h80000000\s*\+\s*64'\(PmemBytes\)",
              "PMEM end must be widened before addition")
-    contains("hdl/rapt_pkg.sv", r"addr_in_pmem\(\s*addr\s*\)", "PMEM PMA helper")
-    for start, end in (("11000000", "12000000"), ("18000000", "19000000")):
-        contains("hdl/rapt_pkg.sv", rf"'h{start}\s*&&\s*a\s*<\s*'h{end}",
-                 f"low device window {start}")
-    mmio = source("hdl/rapt_pkg.sv").split("function automatic logic addr_mmio", 1)[1].split(
-        "endfunction", 1)[0]
-    require("32'hc0000000" not in mmio.lower() and "32'hf000" not in mmio.lower(),
+    contains("hdl/rapt_pkg.sv", r"pma_has_attr\(addr\[31:0\], PmaPmem\)",
+             "PMEM PMA table lookup")
+    contains("hdl/rapt_pkg.sv", r"'\{\s*64'h80000000,\s*PmemEnd,\s*"
+             r"PmaMapped \| PmaCacheable \| PmaWritable \| PmaPmem,\s*1'b1\s*\}",
+             "PMEM region must be mapped, cacheable, writable and enabled")
+    table = source("hdl/rapt_pkg.sv").split("PmaRegions[PmaRegionCount]", 1)[1].split("};", 1)[0]
+    attr_bits = {"PmaMapped": 0b100000, "PmaCacheable": 0b010000,
+                 "PmaWritable": 0b001000, "PmaMmioSkip": 0b000100,
+                 "PmaPlicWidth32": 0b000010, "PmaPmem": 0b000001}
+    fixed = {}
+    for start, end, attrs in re.findall(
+            r"'\{\s*64'h([0-9a-f]+),\s*64'h([0-9a-f]+),\s*([\w\s|]+),", table):
+        mask = 0
+        for attr in attrs.split("|"):
+            require(attr.strip() in attr_bits, f"unknown PMA attribute: {attr}")
+            mask |= attr_bits[attr.strip()]
+        fixed[int(start, 16)] = (int(end, 16), mask)
+    for start, end in ((0x11000000, 0x12000000), (0x18000000, 0x19000000),
+                       (0x00100000, 0x00101000), (0x21000000, 0x21200000),
+                       (0x10000000, 0x10011000)):
+        require(fixed.get(start) == (end, 0b101100),
+                f"RTL mapped/writable/MMIO device window {start:08x}")
+    require(fixed.get(0x10011000) == (0x10012000, 0b101000),
+            "preserve mapped peripheral tail without difftest skip")
+    require(all(start < 0x80000000 for start, (_, attrs) in fixed.items() if attrs & 0b000100),
             "RTL MMIO skip must not cover high RAM or legacy aliases")
 
     same("fpga/litex/cores/cpu/raptor/core.py", r'"csr":\s*(0x[\da-fA-F_]+)',
@@ -113,8 +131,6 @@ def check():
              r"0x11000000\s*<=\s*base.*?0x12000000", "SD CSR aperture")
     for path in ("hdl/rapt_pkg.sv", "sim/csrc/mem/memory.cc", "nemu/src/device/serial.c"):
         require("0xf0001800" not in source(path).lower(), f"{path}: old UART alias")
-    contains("hdl/rapt_pkg.sv", r"a >= 'h00100000 && a < 'h00101000", "test finisher aperture")
-    contains("hdl/rapt_pkg.sv", r"a >= 'h21000000 && a < 'h21200000", "VGA device aperture")
     require(number(regions["vga"]["base"]) == 0x21000000 and number(regions["vga"]["size"]) == 0x200000,
             "VGA aperture must match rapt_pkg::addr_mapped")
     import subprocess

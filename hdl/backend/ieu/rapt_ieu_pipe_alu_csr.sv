@@ -76,6 +76,7 @@ module rapt_ieu_pipe_alu_csr #(
       `RAPT_CSR_TIME___
       || iss.uop.imm[11:0] == `RAPT_CSR_TIMEH__ || iss.uop.imm[11:0] ==
       `RAPT_CSR_CYCLE__
+      || iss.uop.imm[11:0] == `RAPT_CSR_CYCLEH_
       || iss.uop.imm[11:0] == `RAPT_CSR_MCYCLE_ || iss.uop.imm[11:0] == `RAPT_CSR_MCYCLEH);
   assign wb_alu_csr.valid = iss.valid;
   assign wb_alu_csr.btaken = 1'b0;

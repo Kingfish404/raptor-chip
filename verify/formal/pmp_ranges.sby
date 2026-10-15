@@ -35,7 +35,8 @@ range64_15
 [options]
 mode prove
 depth 1
-timeout 300
+# ~70 s standalone for RV64; leave headroom for the parallel formal gate.
+timeout 1200
 
 [engines]
 smtbmc

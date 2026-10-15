@@ -77,10 +77,7 @@ module rapt_ieu_muldiv #(
   // owner on the cancellation edge, before a freed slot can be allocated again.
   logic [(1 << MDQLen)-1:0] cancel_tags;
   function automatic logic cancelled(input logic [$clog2(ROB_SIZE)-1:0] dest);
-    logic older;
-    older = ((dest < cancel_head) == (cancel_owner < cancel_head))
-        ? dest < cancel_owner : dest >= cancel_head;
-    return cancel_valid && dest != cancel_owner && !older;
+    return cancel_valid && `RAPT_ROB_YOUNGER(dest, cancel_owner, cancel_head);
   endfunction
   always_comb begin
     cancel_tags = '0;
@@ -108,11 +105,25 @@ module rapt_ieu_muldiv #(
 
   function automatic logic [XLEN-1:0] wb_val(input logic [PLEN-1:0] pr,
                                              input logic [XLEN-1:0] dflt);
-    wb_val = dflt;
-    for (int p = NWB - 1; p >= 0; p--) begin
-      if ((pr != '0) && wb_valid[p] && (wb_prd[p] == pr)) wb_val = wb_result[p];
+    logic hit;
+    hit = 1'b0;
+    wb_val = '0;
+    for (int p = 0; p < NWB; p++)
+    if ((pr != '0) && wb_valid[p] && (wb_prd[p] == pr)) begin
+      hit = 1'b1;
+      wb_val |= wb_result[p];
     end
+    if (!hit) wb_val = dflt;
   endfunction
+
+  // Rename keeps one live producer per tag, so at most one completion source
+  // carries a given nonzero tag; the value selects below rely on it.
+  for (genvar a = 0; a < NWB; a++) begin : g_tag_unique
+    for (genvar b = a + 1; b < NWB; b++) begin : g_pair
+      `RAPT_SVA(clock, reset, MDQ_WAKE_TAG_UNIQUE,
+                !(wb_valid[a] && wb_valid[b] && wb_prd[a] != '0 && wb_prd[a] == wb_prd[b]))
+    end
+  end
 
   // Same-cycle enqueue snoop (entry invisible to the loop until next cycle)
   function automatic logic [PLEN-1:0] wake_pr(input logic [PLEN-1:0] pr);
@@ -372,5 +383,5 @@ module rapt_ieu_muldiv #(
   `RAPT_SVA_IMPLY(clock, reset, MDQ_WB_VALID_ENTRY, fu_out_valid,
                   (mdq_valid[fu_out_tag] && mdq_issued[fu_out_tag]))
 
-  assign exu_wb_mul.updates = '{control_flow: 1'b1, default: '0};
+  assign exu_wb_mul.updates = '{control_flow: 1'b0, default: '0};
 endmodule

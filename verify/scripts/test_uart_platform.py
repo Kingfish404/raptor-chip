@@ -21,6 +21,15 @@ class UARTPlatformTest(unittest.TestCase):
             # Only NEMU's registration and environment are stubbed; device code is included unchanged.
             nemu = work/'nemu'
             (nemu/'device').mkdir(parents=True)
+            (nemu/'cpu').mkdir()
+            (nemu/'cpu/multidiff.h').write_text('''#pragma once
+#include <utils.h>
+static inline bool multidiff_uart_active(void) { return false; }
+''')
+            (nemu/'cpu/diffjournal.h').write_text('''#pragma once
+#include <utils.h>
+void nemu_journal_uart_tx(uint8_t, bool) __attribute__((weak));
+''')
             (nemu/'utils.h').write_text('''#pragma once
 #include <stdint.h>
 #include <stdbool.h>

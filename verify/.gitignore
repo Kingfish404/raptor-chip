@@ -10,6 +10,8 @@
 !*.c
 !*.ini
 !/nemu/nemu.mk
+!/xsim/fpu/*.mk
+!/directed-tests.mk
 !/vpu/vendor/riscv-opcodes/rv_v
 
 __pycache__/

@@ -17,7 +17,6 @@ module tb_iq_reclaim_random #(
   issue_packet_t issue[Ports];
   dpu_iq_if #(.RS_SIZE(Entries)) disp ();
   cmu_bcast_if cmu_bcast ();
-  load_fast_if load_fast ();
   logic [Ports-1:0] issue_enable;
   logic [$clog2(Entries):0] occupancy;
   rapt_iq #(
@@ -37,7 +36,6 @@ module tb_iq_reclaim_random #(
       .completion,
       .disp,
       .cmu_bcast,
-      .load_fast,
       .issue_enable,
       .issue,
       .occ_o(occupancy),
@@ -68,7 +66,6 @@ module tb_iq_reclaim_random #(
         .completion(shadow_completion),
         .disp(shadow_disp),
         .cmu_bcast,
-        .load_fast,
         .issue_enable,
         .issue(shadow_issue),
         .occ_o(shadow_occupancy),
@@ -303,17 +300,6 @@ module tb_iq_reclaim_random #(
     completion = '{default: '0};
     issue_enable = 0;
     cmu_bcast.flush_pipe = 0;
-    load_fast.valid = 0;
-    load_fast.prd = 0;
-    load_fast.rebusy = 0;
-    load_fast.confirmed = 0;
-    load_fast.confirmed_prd = 0;
-    load_fast.confirmed_rd = 0;
-    load_fast.dest = 0;
-    load_fast.generation = 0;
-    load_fast.confirmed_dest = 0;
-    load_fast.confirmed_generation = 0;
-    load_fast.result = 0;
     repeat (3) @(negedge clock);
     reset = 0;
     for (int cycle = 0; cycle < 5000; cycle++) begin

@@ -60,7 +60,7 @@
 // Physical integer issue topology is independent of every ordered pipeline
 // boundary. One selected port carries the system/CSR capability; the remaining
 // ports are interchangeable simple-ALU capabilities. The completion fabric
-// derives one endpoint per integer port plus branch, memory and MUL/DIV.
+// derives one endpoint per integer port plus branch, memory, MUL/DIV and FP.
 `ifndef RAPT_INTEGER_ISSUE_PORTS
 `define RAPT_INTEGER_ISSUE_PORTS 2
 `endif
@@ -96,19 +96,25 @@
 `define RAPT_ROB_GENERATION_BITS 4
 `endif
 
+// Circular ROB order from head: true when index x is strictly younger than
+// owner. On the same side of the wrap point the indices compare directly;
+// across it, x is younger exactly when it lies before head. Width-generic.
+`define RAPT_ROB_YOUNGER(x, owner, head) \
+  ((((x) < (head)) == ((owner) < (head))) ? ((x) > (owner)) : ((x) < (head)))
+
 // Rename checkpoints are allocated to control-flow uops and released on
 // resolution.  They are a distinct resource from ROB entries: capacity
 // pressure stops at the ordered rename boundary instead of silently dropping
 // recovery state.
 //
 // Cost is deliberately kept bounded in this count. Every entry stores a
-// full architectural MAP/free snapshot, a GHR/PHR history snapshot, and an
-// `Entries`-wide control-flow ancestry mask, while restore reads all of them
-// through an `Entries`-way mux cone. The ancestry mask alone makes the array
-// quadratic, and the restore cone is linear in width times entries. Sixteen
-// entries hold the array at half the 32-entry flip-flop count and halve the
-// restore mux depth on FPGA. Override with a larger count in a preset
-// that trades area for deeper control-flow speculation.
+// GHR/PHR history snapshot, a conditional-branch flag and an `Entries`-wide
+// control-flow ancestry mask; MAP/free state is not snapshotted, because the
+// precise retirement flush rebuilds it from the committed RAT. Restore reads
+// the history through an `Entries`-way mux cone. The ancestry mask alone makes
+// the array quadratic. Sixteen entries hold the array at half the 32-entry
+// flip-flop count and halve the restore mux depth on FPGA. Override with a
+// larger count in a preset that trades area for deeper control-flow speculation.
 `ifndef RAPT_BRANCH_CHECKPOINTS
 `define RAPT_BRANCH_CHECKPOINTS 16
 `endif

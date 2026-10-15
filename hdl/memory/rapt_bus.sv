@@ -429,40 +429,23 @@ module rapt_bus #(
   logic posted_ack_now, posted_ack_late;
 
   write_state_t write_state;
-  state_lds_t store_bridge;
-  state_lds_t store_source;
-  logic [XLEN-1:0] store_awaddr;
-  logic [XLEN-1:0] store_wdata;
-  logic [7:0] store_wstrb;
-  logic store_awvalid;
-  logic store_wvalid;
-
-  assign coherent_request = l1i_arvalid_q || l1i_bus.awvalid
-      || coherent_reads != 0
-      || (write_state == WR_WAIT && store_source inside {L1I, TLBI});
-  assign coherent_write = l1i_bus.awvalid
-      || (write_state == WR_WAIT && store_source inside {L1I, TLBI});
-  assign store_bridge = l1i_bus.awvalid && coherent_ready ? (l1i_bus.aw_ptw ? TLBI : L1I)
-                                        : (l1d_bus.aw_ptw ? TLBD : L1D);
-  assign store_awaddr = (store_bridge inside {L1I, TLBI}) ? l1i_bus.awaddr : l1d_bus.awaddr;
-  assign store_wdata = (store_bridge inside {L1I, TLBI}) ? l1i_bus.wdata : l1d_bus.wdata;
-  assign store_wstrb = (store_bridge inside {L1I, TLBI}) ? l1i_bus.wstrb : l1d_bus.wstrb;
-  assign store_awvalid = (store_bridge inside {L1I, TLBI}) ? l1i_bus.awvalid : l1d_bus.awvalid;
-  assign store_wvalid = (store_bridge inside {L1I, TLBI}) ? l1i_bus.wvalid : l1d_bus.wvalid;
+  // Svade walkers only read; L1D owns every store transaction.
+  assign coherent_request = l1i_arvalid_q || coherent_reads != 0;
+  assign coherent_write = 1'b0;
 
   assign l1d_bus.idle = !(|miss_busy) && !l1d_slot_busy && !l1d_bus.arvalid
-      && write_state == WR_IDLE && !store_awvalid && !store_wvalid && posted_idle;
+      && write_state == WR_IDLE && !l1d_bus.awvalid && !l1d_bus.wvalid && posted_idle;
 
   // Posted writes: ordinary cacheable L1D stores that the L1D can retire on
   // this edge (`wpost`). Every other write waits until all posted B
   // responses have returned, so a single owner consumes each response.
   // A posted write also waits for a presented read of the same line.
   assign posted_idle = posted_count == '0;
-  assign posted_eligible = PostedWrites > 0 && store_bridge == L1D && !l1d_bus.aw_ptw
+  assign posted_eligible = PostedWrites > 0
       && !l1d_bus.wzero && l1d_bus.wpost && l1d_bus.wpbmt == 2'b00
       && rapt_pkg::addr_cacheable(l1d_bus.awaddr)
       && !(mem.rd_req_valid && mem.rd_req_addr[XLEN-1:LineLsb] == l1d_bus.awaddr[XLEN-1:LineLsb]);
-  assign mem.wr_req_valid = (write_state == WR_IDLE) && store_awvalid && store_wvalid
+  assign mem.wr_req_valid = (write_state == WR_IDLE) && l1d_bus.awvalid && l1d_bus.wvalid
       && (posted_eligible ? posted_count < PostedCountW'(PostedWrites) : posted_idle);
   assign posted_fire = mem.wr_req_valid && mem.wr_req_ready && posted_eligible;
   assign posted_ack_now = posted_fire && (PostedAckDelay == 0 || l1d_bus.wmore);
@@ -474,45 +457,38 @@ module rapt_bus #(
   assign l1d_bus.posted_busy = !posted_idle;
   assign l1d_bus.posted_error = posted_response && mem.wr_rsp_error;
   assign l1d_bus.posted_error_addr = {posted_line[posted_head], LineLsb'(0)};
-  assign mem.wr_req_zero = store_bridge == L1D && l1d_bus.wzero;
-  assign mem.wr_req_id = 4'(store_bridge);
-  assign mem.wr_req_addr = store_awaddr;
-  assign mem.wr_req_pbmt = store_bridge == L1D ? l1d_bus.wpbmt : 2'b00;
+  assign mem.wr_req_zero = l1d_bus.wzero;
+  assign mem.wr_req_id = 4'(L1D);
+  assign mem.wr_req_addr = l1d_bus.awaddr;
+  assign mem.wr_req_pbmt = l1d_bus.wpbmt;
   // Right-aligned one- and two-byte requests can use narrow AXI transfers.
   // Wider or lane-shifted partial masks come from aligned misaligned-store
   // beats; cover the highest asserted lane with a 4- or 8-byte transfer and
   // let WSTRB select the architectural bytes. The AXI master also accounts
   // for AWADDR's byte offset when sizing the final bus-lane transfer span.
-  assign mem.wr_req_size = (store_wstrb == 8'h01) ? 3'b000
-                         : (store_wstrb == 8'h03) ? 3'b001
-                         : (store_wstrb[7:4] == 4'h0) ? 3'b010
+  assign mem.wr_req_size = (l1d_bus.wstrb == 8'h01) ? 3'b000
+                         : (l1d_bus.wstrb == 8'h03) ? 3'b001
+                         : (l1d_bus.wstrb[7:4] == 4'h0) ? 3'b010
                          : 3'b011;
-  assign mem.wr_req_data = store_wdata;
-  assign mem.wr_req_strb = store_wstrb[XLEN/8-1:0];
+  assign mem.wr_req_data = l1d_bus.wdata;
+  assign mem.wr_req_strb = l1d_bus.wstrb[XLEN/8-1:0];
   assign mem.wr_rsp_ready = write_state == WR_WAIT || !posted_idle;
 
   logic sync_response;
   assign sync_response = write_state == WR_WAIT && mem.wr_rsp_valid;
-  assign l1i_bus.ptw_wready = sync_response && (store_source == TLBI);
-  assign l1i_bus.ptw_werr = l1i_bus.ptw_wready && mem.wr_rsp_error;
   // A posted store completes at acceptance and never reports `werr`; its
   // late error is signalled through `posted_error`.
-  assign l1d_bus.wready = posted_ack_now || posted_ack_late
-      || (sync_response && (store_source == L1D));
-  assign l1d_bus.werr = sync_response && (store_source == L1D) && mem.wr_rsp_error;
-  assign l1d_bus.ptw_wready = sync_response && (store_source == TLBD);
-  assign l1d_bus.ptw_werr = l1d_bus.ptw_wready && mem.wr_rsp_error;
+  assign l1d_bus.wready = posted_ack_now || posted_ack_late || sync_response;
+  assign l1d_bus.werr = sync_response && mem.wr_rsp_error;
 
   always_ff @(posedge clock) begin
     if (reset) begin
       write_state <= WR_IDLE;
-      store_source <= L1D;
       post_timer <= '0;
     end else begin
       unique case (write_state)
         WR_IDLE: begin
           if (mem.wr_req_valid && mem.wr_req_ready && !posted_eligible) begin
-            store_source <= store_bridge;
             write_state <= WR_WAIT;
           end else if (posted_fire && !posted_ack_now) begin
             write_state <= WR_POSTED;
@@ -561,12 +537,11 @@ module rapt_bus #(
     end
   end
 
-  `RAPT_SVA_IMPLY(
-      clock, reset, BUS_STORE_RESPONSE_OWNED, mem.wr_rsp_valid,
-      (write_state == WR_WAIT && mem.wr_rsp_id == 4'(store_source)) || (write_state != WR_WAIT && !posted_idle && mem.wr_rsp_id == 4'(L1D)))
+  `RAPT_SVA_IMPLY(clock, reset, BUS_STORE_RESPONSE_OWNED, mem.wr_rsp_valid,
+                  (write_state == WR_WAIT || !posted_idle) && mem.wr_rsp_id == 4'(L1D))
   `RAPT_SVA_IMPLY(clock, reset, BUS_POSTED_SYNC_EXCLUSIVE, write_state == WR_WAIT, posted_idle)
   `RAPT_SVA_IMPLY(clock, reset, BUS_POSTED_STORE_HELD, write_state == WR_POSTED,
-                  l1d_bus.awvalid && l1d_bus.wvalid && !l1d_bus.aw_ptw)
+                  l1d_bus.awvalid && l1d_bus.wvalid)
   `RAPT_SVA_IMPLY(clock, reset, BUS_POSTED_NO_READ_OVERTAKE, mem.rd_req_valid && !rd_skid_valid,
                   posted_idle || !posted_line_hit(mem.rd_req_addr[XLEN-1:LineLsb]))
 

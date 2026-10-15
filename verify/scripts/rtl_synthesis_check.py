@@ -130,14 +130,18 @@ def main():
         ("stream-input-too-wide", "rapt_stream_queue", "hdl/common/rapt_stream_queue.sv", "InWidth=9"),
         ("stream-output-too-wide", "rapt_stream_queue", "hdl/common/rapt_stream_queue.sv", "OutWidth=9"),
         ("checkpoint-no-entries", "rapt_rename_checkpoint", "hdl/frontend/rapt_rename_checkpoint.sv", "Entries=0"),
-        ("checkpoint-no-map", "rapt_rename_checkpoint", "hdl/frontend/rapt_rename_checkpoint.sv", "MapEntries=0"),
         ("checkpoint-no-rename", "rapt_rename_checkpoint", "hdl/frontend/rapt_rename_checkpoint.sv", "RenameWidth=0"),
         ("checkpoint-no-resolve", "rapt_rename_checkpoint", "hdl/frontend/rapt_rename_checkpoint.sv", "ResolvePorts=0"),
-        ("checkpoint-short-map", "rapt_rename_checkpoint", "hdl/frontend/rapt_rename_checkpoint.sv", "PhysRegs=128 -GMapBits=6"),
         ("checkpoint-short-id", "rapt_rename_checkpoint", "hdl/frontend/rapt_rename_checkpoint.sv", "Entries=8 -GCheckpointBits=2"),
     ]:
         if args.only and top not in {"stream": ("rapt_stream_queue",), "checkpoint": ("rapt_rename_checkpoint",), "issue": ("rapt_issue_select",), "execution": (), "lsu": (), "integration": ()}[args.only]:
             continue
+        # An override of a parameter the module no longer declares is ignored
+        # by the frontend, so the case would "pass" without testing anything.
+        module_text = (hdl_root / Path(source).relative_to("hdl")).read_text()
+        for override in re.findall(r"(?:^|-G)([A-Za-z_]\w*)=", parameter):
+            if not re.search(rf"\bparameter\b[^;)]*\b{override}\b", module_text):
+                raise RuntimeError(f"{name}: {top} has no parameter {override}; stale contract case")
         dependencies = ""
         if top in ("rapt_stream_queue", "rapt_rename_checkpoint"):
             dependencies = (f"-DSYNTHESIS -I{hdl_root / 'configs/default'} "

@@ -6,11 +6,17 @@ module rapt_backend_syn_top #(
     parameter bit RegisteredDrainCompletion = 1'b1,
     parameter bit CompactFpOperands = 1'b1,
     parameter bit RegisteredDispatchPayload = 1'b1,
+    parameter bit DerivedConstants = 1'b1,
     parameter bit LocalIntegerWake = 1'b1,
     parameter bit LocalMemoryWake = 1'b1,
+    parameter bit LocalFpWake = 1'b1,
+    // Match rapt_core: integer, load, MUL/DIV and FP broadcasts are registered.
     parameter logic [rapt_pkg::CompletionPorts-1:0] RegisteredOperandWakePorts =
         ((rapt_pkg::CompletionPorts'(1) << rapt_pkg::IntegerIssuePorts) - 1'b1)
-        | (rapt_pkg::CompletionPorts'(1) << (rapt_pkg::IntegerIssuePorts + 1))
+        | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_branch_port(rapt_pkg::CoreConfig))
+        | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_memory_port(rapt_pkg::CoreConfig))
+        | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_mul_port(rapt_pkg::CoreConfig))
+        | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_fpu_port(rapt_pkg::CoreConfig))
 ) (
     input logic clock,
     input logic reset,
@@ -53,13 +59,13 @@ module rapt_backend_syn_top #(
       cmu_bcast.jren, cmu_bcast.btaken, cmu_bcast.atomic_retired,
       cmu_bcast.call, cmu_bcast.ret, cmu_bcast.rvc, cmu_bcast.fence_time,
       cmu_bcast.fence_i, cmu_bcast.cbo_inval, cmu_bcast.cbo_block,
-      cmu_bcast.flush_pipe, cmu_bcast.flush_redirect, cmu_bcast.fetch_context_stable, cmu_bcast.sys_resume,
+      cmu_bcast.flush_pipe, cmu_bcast.flush_redirect, cmu_bcast.fetch_context_stable,
       cmu_bcast.time_trap, cmu_bcast.redirect_pc, cmu_bcast.rob_head} =
      {cmu_internal.rpc, cmu_internal.cpc, cmu_internal.ben, cmu_internal.jen,
       cmu_internal.jren, cmu_internal.btaken, cmu_internal.atomic_retired,
       cmu_internal.call, cmu_internal.ret, cmu_internal.rvc, cmu_internal.fence_time,
       cmu_internal.fence_i, cmu_internal.cbo_inval, cmu_internal.cbo_block,
-      cmu_internal.flush_pipe, cmu_internal.flush_redirect, cmu_internal.fetch_context_stable, cmu_internal.sys_resume,
+      cmu_internal.flush_pipe, cmu_internal.flush_redirect, cmu_internal.fetch_context_stable,
       cmu_internal.time_trap, cmu_internal.redirect_pc, cmu_internal.rob_head};
   assign {csr_bcast.priv, csr_bcast.satp_ppn, csr_bcast.satp_asid, csr_bcast.immu_en,
       csr_bcast.dmmu_en, csr_bcast.mtvec, csr_bcast.tvec, csr_bcast.timer_int_en,
@@ -79,9 +85,11 @@ module rapt_backend_syn_top #(
       csr_internal.menvcfg_cbcfe, csr_internal.menvcfg_cbze, csr_internal.menvcfg_stce,
       csr_internal.menvcfg_pbmte, csr_internal.senvcfg_cbie, csr_internal.senvcfg_cbcfe,
       csr_internal.senvcfg_cbze};
-  assign {recovery.pending, recovery.redirect_valid, recovery.owner, recovery.head,
+  assign {recovery.pending, recovery.redirect_valid, recovery.preserve_fetch, recovery.taken,
+      recovery.owner, recovery.head,
       recovery.generation, recovery.target, recovery.checkpoint_valid, recovery.checkpoint} =
-     {recovery_internal.pending, recovery_internal.redirect_valid, recovery_internal.owner,
+     {recovery_internal.pending, recovery_internal.redirect_valid,
+      recovery_internal.preserve_fetch, recovery_internal.taken, recovery_internal.owner,
       recovery_internal.head, recovery_internal.generation, recovery_internal.target,
       recovery_internal.checkpoint_valid, recovery_internal.checkpoint};
   assign {pmp_update.addr_we, pmp_update.addr_idx, pmp_update.raw_addr, pmp_update.napot_mask,
@@ -96,8 +104,10 @@ module rapt_backend_syn_top #(
       .RegisteredDrainCompletion(RegisteredDrainCompletion),
       .CompactFpOperands(CompactFpOperands),
       .RegisteredDispatchPayload(RegisteredDispatchPayload),
+      .DerivedConstants(DerivedConstants),
       .LocalIntegerWake(LocalIntegerWake),
       .LocalMemoryWake(LocalMemoryWake),
+      .LocalFpWake(LocalFpWake),
       .RegisteredOperandWakePorts(RegisteredOperandWakePorts)
   ) dut (
       .cmu_bcast(cmu_internal),

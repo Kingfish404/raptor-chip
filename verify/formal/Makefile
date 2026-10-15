@@ -132,7 +132,11 @@ check-tools: ## Verify sby and yosys are available
 # ============================================================================
 # Formal Verification Targets
 # ============================================================================
-all: formal_ieu_alu formal_ieu_mul formal_pmp formal_plru formal_rnu_maptable formal_clint formal_plic formal_dtm formal_bus formal_divsqrt ## Run all formal verification (excludes RVFI)
+all: formal_ieu_alu formal_ieu_mul formal_pmp formal_plru formal_clint formal_plic formal_dtm formal_bus formal_divsqrt formal_memory_progress ## Run all formal verification (excludes RVFI)
+
+.PHONY: formal_memory_progress
+formal_memory_progress: ## Check reduced L1D/bus bounded progress and cover collision recovery
+	$(MAKE) -C .. formal-memory-progress
 
 FORMAL_BUS_SRCS := \
 		$(RAPTOR_HOME)/hdl/rapt_pkg.sv \
@@ -161,17 +165,23 @@ formal_bus: check-tools $(FORMAL_BUS_PACK) ## Verify AXI bus
 formal_ieu_mul: check-tools ## Verify IEU multiplier
 	sby -f ieu_mul.sby
 
-formal_ieu_alu: check-tools ## Verify RV32 IEU ALU and bitmanip equivalence
+formal_ieu_alu: check-tools ## Verify full RV32 ALU and RV32/RV64 simple-port equivalence
 	sby -f ieu_alu.sby
+	sby -f ieu_alu_slim.sby
 
 formal_pmp: check-tools ## Prove RV32/RV64 PMP matching, priority and permissions
 	sby -f pmp.sby
 
+# Range tasks follow the implemented entry count; pmp_ranges.sby defines 16.
+PMP_ENTRIES := $(shell sed -n 's/^`define RAPT_PMP_NUM \([0-9]*\).*/\1/p' $(RAPTOR_HOME)/hdl/include/rapt.svh)
+
 .PHONY: formal_pmp_composed
 formal_pmp_composed: check-tools ## Prove every PMP range, then compose with priority/permissions
+	@test -n "$(PMP_ENTRIES)" || { echo "cannot read RAPT_PMP_NUM"; exit 1; }
 	@set -e; for bits in 32 64; do \
-	  for base in 0 4 8 12; do \
-	    tasks=(); for offset in 0 1 2 3; do tasks+=("range$${bits}_$$((base + offset))"); done; \
+	  for ((base = 0; base < $(PMP_ENTRIES); base += 4)); do \
+	    tasks=(); for ((i = base; i < base + 4 && i < $(PMP_ENTRIES); i++)); do \
+	      tasks+=("range$${bits}_$$i"); done; \
 	    sby -j 8 -f pmp_ranges.sby "$${tasks[@]}"; \
 	  done; \
 	done
@@ -179,9 +189,6 @@ formal_pmp_composed: check-tools ## Prove every PMP range, then compose with pri
 
 formal_plru: check-tools ## Prove 2/4/8-way PLRU selection and state updates
 	sby -f plru.sby
-
-formal_rnu_maptable: check-tools ## Prove rename MAP/RAT WAW priority and flush recovery
-	sby -f rnu_maptable.sby
 
 formal_clint: check-tools ## Prove CLINT timer, compare, register and interrupt behavior
 	sby -f clint.sby

@@ -132,12 +132,6 @@ module tb_bus_read_ownership;
     l1i_bus.araddr = '0;
     l1i_bus.arburst = 1'b0;
     l1i_bus.ar_ptw = 1'b0;
-    l1i_bus.awvalid = 1'b0;
-    l1i_bus.awaddr = '0;
-    l1i_bus.wvalid = 1'b0;
-    l1i_bus.wdata = '0;
-    l1i_bus.wstrb = '0;
-    l1i_bus.aw_ptw = 1'b0;
 
     l1d_bus.arvalid = 1'b0;
     l1d_bus.araddr = '0;
@@ -155,7 +149,6 @@ module tb_bus_read_ownership;
     l1d_bus.wdata = '0;
     l1d_bus.wstrb = '0;
     l1d_bus.wzero = 0;
-    l1d_bus.aw_ptw = 1'b0;
 
     csr_bcast.dmmu_en = 1'b0;
     cmu_bcast.flush_pipe = 1'b0;

@@ -22,12 +22,14 @@ module rapt_fqu #(
       .ItemT(rapt_pkg::fetch_slot_t),
       .Depth(Entries),
       .InWidth(FetchWidth),
-      .OutWidth(DecodeWidth)
+      .OutWidth(DecodeWidth),
+      // Break decode-ready feedback into IFU acceptance during fetch-ahead.
+      .ReclaimSameCycle(1'b0)
   ) queue (
       .clock(clock),
       .reset(reset),
-      .flush(cmu_bcast.flush_pipe || cmu_bcast.sys_resume
-          || recovery.pending || idu_out.resteer),
+      .flush((cmu_bcast.flush_pipe && !recovery.preserve_fetch)
+          || recovery.redirect_valid || idu_out.resteer),
       .in_data(ifu_in.slot),
       .in_valid(ifu_in.valid),
       .in_ready(ifu_in.ready),
@@ -39,6 +41,6 @@ module rapt_fqu #(
   assign pmu_full = pmu_count == Entries;
   assign ifu_in.resteer = idu_out.resteer;
   assign ifu_in.resteer_pc = idu_out.resteer_pc;
-  `RAPT_SVA_IMPLY(clock, reset, FQU_RECOVERY_NO_ACCEPT_OR_OUTPUT, recovery.pending,
+  `RAPT_SVA_IMPLY(clock, reset, FQU_RECOVERY_NO_ACCEPT_OR_OUTPUT, recovery.redirect_valid,
                   !ifu_in.ready[0] && !idu_out.valid[0])
 endmodule

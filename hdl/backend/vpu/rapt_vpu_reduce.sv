@@ -3,7 +3,8 @@
 // Authorized, sequential integer reduction over an exclusive element VRF port.
 // Seed and destination are scalars in one register regardless of LMUL. No
 // destination write occurs until all source/mask reads have completed, permitting
-// arbitrary destination/source overlap, including v0. Nonzero vstart is illegal.
+// destination/source overlap, including v0 when it is not also the predicate.
+// Nonzero vstart is illegal.
 module rapt_vpu_reduce #(
     parameter int XLEN=64,
     parameter int VLEN=128,
@@ -71,6 +72,8 @@ module rapt_vpu_reduce #(
         && lm >= -$clog2(ELEN/8) && lm <= 3 && (8 << type_q[5:3]) <= ELEN
         && (lm >= 0 || (8 << type_q[5:3]) <= (ELEN >> (-lm)))
         && (int'(insn_q[24:20]) & (group_size-1)) == 0 && vl_q <= XLEN'(VLEN)
+        && (!wide || int'(insn_q[19:15]) < int'(insn_q[24:20])
+        || int'(insn_q[19:15]) >= int'(insn_q[24:20]) + group_size)
         && ((insn_q[14:12] == 2 && insn_q[31:29] == 0)
           || (wide && insn_q[31:27] == 5'b11000 && (16 << type_q[5:3]) <= ELEN));
     alu_op = 0;

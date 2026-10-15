@@ -1,7 +1,8 @@
 `include "rapt.svh"
 
 module rapt_ieu_alu #(
-    parameter int XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN,
+    parameter bit EnableRareOps = 1'b1
 ) (
     input        [XLEN-1:0] s1,
     input        [XLEN-1:0] s2,
@@ -79,6 +80,8 @@ module rapt_ieu_alu #(
         ? {high_bits, shift_stage[level][XLEN-1:Distance]} : shift_stage[level];
   end
 
+  // Simple issue ports disconnect these trees at the result mux below,
+  // allowing synthesis to remove count and carry-less multiply hardware.
   // Encode the first and last set bits with a shared balanced validity tree.
   // The word form masks the upper half before selection. Zero operands return
   // the active width, without a serial found/increment dependency per bit.
@@ -177,9 +180,9 @@ module rapt_ieu_alu #(
       `RAPT_ALU_XNOR: begin alu_r = ~(s1 ^ s2); end
 
       // Zbb: count
-      `RAPT_ALU_CLZ_:  begin alu_r = XLEN'(clz_count); end
-      `RAPT_ALU_CTZ_:  begin alu_r = XLEN'(ctz_count); end
-      `RAPT_ALU_CPOP: begin alu_r = XLEN'(pop_count[1]); end
+      `RAPT_ALU_CLZ_:  begin alu_r = EnableRareOps ? XLEN'(clz_count) : '0; end
+      `RAPT_ALU_CTZ_:  begin alu_r = EnableRareOps ? XLEN'(ctz_count) : '0; end
+      `RAPT_ALU_CPOP: begin alu_r = EnableRareOps ? XLEN'(pop_count[1]) : '0; end
 
       // Zbb: compare-and-select
       `RAPT_ALU_MAX_:  begin alu_r = !less_signed ? s1 : s2; end
@@ -217,9 +220,9 @@ module rapt_ieu_alu #(
       `RAPT_ALU_CZERO_NEZ: begin alu_r = (s2 != '0) ? '0 : s1; end
 
       // Zbc (Carry-less Multiplication)
-      `RAPT_ALU_CLMUL:  begin alu_r = clmul_tree[1][XLEN-1:0]; end
-      `RAPT_ALU_CLMULH: begin alu_r = clmul_tree[1][2*XLEN-1:XLEN]; end
-      `RAPT_ALU_CLMULR: begin alu_r = clmul_tree[1][2*XLEN-2-:XLEN]; end
+      `RAPT_ALU_CLMUL:  begin alu_r = EnableRareOps ? clmul_tree[1][XLEN-1:0] : '0; end
+      `RAPT_ALU_CLMULH: begin alu_r = EnableRareOps ? clmul_tree[1][2*XLEN-1:XLEN] : '0; end
+      `RAPT_ALU_CLMULR: begin alu_r = EnableRareOps ? clmul_tree[1][2*XLEN-2-:XLEN] : '0; end
       // verilog_format: on
       default: begin
         alu_r = 'h0;

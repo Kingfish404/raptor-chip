@@ -10,7 +10,12 @@ depth 1
 timeout 300
 
 [engines]
-smtbmc
+# The selector proofs (with range lemmas) need a bit-vector solver: bitwuzla
+# closes them in seconds where the default yices exceeds the timeout.
+ranges32: smtbmc
+ranges64: smtbmc
+selector32: smtbmc bitwuzla
+selector64: smtbmc bitwuzla
 
 [script]
 plugin -i slang

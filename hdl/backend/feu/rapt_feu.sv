@@ -16,9 +16,12 @@ module rapt_feu #(
     parameter unsigned ROB_SIZE = Cfg.rob_entries,
     parameter unsigned PLEN     = rapt_pkg::index_bits(Cfg.phys_regs),
     parameter unsigned RLEN     = rapt_pkg::index_bits(Cfg.arch_regs),
-    parameter unsigned XLEN     = Cfg.xlen
+    parameter unsigned XLEN     = Cfg.xlen,
+    // FPQ residents also capture this live view; allocation uses `completion`.
+    parameter bit LocalFpWake = 1'b0
 ) (
     input CompletionT completion[NumCompletions],
+    input CompletionT local_fp_wake[NumCompletions] = '{default: '0},
     input clock,
     input reset,
     input logic cancel_valid,
@@ -29,7 +32,6 @@ module rapt_feu #(
     input SlotT dispatch[NumSlots],
     dpu_iq_if.rs disp_fpq,
 
-    load_fast_if.sink load_fast,
     output CompletionT wb_fpu,
     input logic wb_accept,
     input logic completion_ready = 1'b1,
@@ -49,7 +51,7 @@ module rapt_feu #(
   `RAPT_COMPLETION_TYPE(fp_wake_t, fp_word_t, operand_tag_t, arch_t, owner_t, generation_t)
   fp_slot_t fp_dispatch[NumSlots];
   fp_issue_t fp_issue[1], iss;
-  fp_wake_t fp_wake[NumCompletions];
+  fp_wake_t fp_wake[NumCompletions], fp_local_wake[NumCompletions];
   localparam int Simple = 0, AddS = 1, AddD = 2, ProductS = 3, ProductD = 4,
       DivSqrt = 5, Widen = 6, Narrow = 7, IntDoubleW = 8, IntDoubleL = 9,
       IntSingleW = 10, IntSingleL = 11, SingleInt = 12, DoubleInt = 13,
@@ -63,8 +65,12 @@ module rapt_feu #(
   logic [$clog2(Units)-1:0] held_choice;
   logic completion_held;
   logic completion_found;
+  logic completion_grant;
   int selected_unit;
 
+  function automatic logic cancelled_now(input logic [$clog2(ROB_SIZE)-1:0] owner);
+    return cancel_valid && `RAPT_ROB_YOUNGER(owner, cancel_owner, cancel_head);
+  endfunction
   function automatic operand_tag_t float_tag(input logic [RobBits:0] tag);
     return tag == '0 ? '0 : (operand_tag_t'(1) << (OperandTagBits - 1)) | operand_tag_t'(tag);
   endfunction
@@ -146,38 +152,19 @@ module rapt_feu #(
       end
     end
   end
+  function automatic fp_wake_t fp_wake_view(input CompletionT packet);
+    fp_wake_view = '0;
+    fp_wake_view.valid = packet.valid && !packet.trap && (packet.fp_wen || packet.rd != '0);
+    fp_wake_view.prd = packet.fp_wen ? float_tag((RobBits+1)'(packet.dest) + (RobBits+1)'(1))
+        : operand_tag_t'(packet.prd);
+    fp_wake_view.result = packet.fp_wen ? packet.fp_result : 64'(packet.result);
+    fp_wake_view.dest = packet.dest;
+    fp_wake_view.generation = packet.generation;
+  endfunction
   for (genvar p = 0; p < NumCompletions; p++) begin : g_wake
-    always_comb begin
-      fp_wake[p] = '0;
-      fp_wake[p].valid = completion[p].valid && !completion[p].trap
-          && (completion[p].fp_wen || completion[p].rd != '0);
-      fp_wake[p].prd = completion[p].fp_wen
-          ? float_tag((RobBits+1)'(completion[p].dest) + (RobBits+1)'(1))
-          : operand_tag_t'(completion[p].prd);
-      fp_wake[p].result = completion[p].fp_wen ? completion[p].fp_result : 64'(completion[p].result);
-      fp_wake[p].dest = completion[p].dest;
-      fp_wake[p].generation = completion[p].generation;
-    end
+    assign fp_wake[p] = fp_wake_view(completion[p]);
+    assign fp_local_wake[p] = LocalFpWake ? fp_wake_view(local_fp_wake[p]) : '0;
   end
-  // The core uses accepted data wakeups, with no speculative fast-load pair.
-  load_fast_if #(
-      .PLEN(OperandTagBits),
-      .ROBLEN(RobBits),
-      .GENERATION_BITS(GenerationBits),
-      .XLEN(64)
-  ) fp_fast ();
-  assign fp_fast.valid = 1'b0;
-  assign fp_fast.rebusy = 1'b0;
-  assign fp_fast.prd = '0;
-  assign fp_fast.dest = '0;
-  assign fp_fast.generation = '0;
-  assign fp_fast.rd = '0;
-  assign fp_fast.confirmed = 1'b0;
-  assign fp_fast.confirmed_prd = '0;
-  assign fp_fast.confirmed_dest = '0;
-  assign fp_fast.confirmed_generation = '0;
-  assign fp_fast.confirmed_rd = '0;
-  assign fp_fast.result = '0;
   assign issue_enable = !reset && !cmu_bcast.flush_pipe;
   assign iss = fp_issue[0];
   rapt_iq #(
@@ -195,8 +182,10 @@ module rapt_feu #(
       .XLEN(64),
       .ThirdOperand(1'b1),
       .FilterResources(1'b1),
+      .LocalOperandWake(LocalFpWake),
       .NumResources(Units)
   ) u_fpq (
+      .local_operand_wake(fp_local_wake),
       .clock,
       .reset,
       .cancel_valid,
@@ -206,7 +195,6 @@ module rapt_feu #(
       .completion(fp_wake),
       .dispatch(fp_dispatch),
       .disp(disp_fpq),
-      .load_fast(fp_fast),
       .issue_enable,
       .resource_ready(unit_ready),
       .issue(fp_issue),
@@ -636,7 +624,7 @@ module rapt_feu #(
     launch_packet.tval = iss.uop.trap ? iss.uop.tval : fp_rm_invalid ? XLEN'(iss.uop.inst) : '0;
     launch_packet.cause = iss.uop.trap ? iss.uop.cause
         : fp_rm_invalid ? XLEN'(`RAPT_CAUSE_ILLEGAL_INST) : '0;
-    launch_packet.updates = '{control_flow:1'b1, memory:1'b0, system_state:1'b1, exception:1'b1};
+    launch_packet.updates = '{control_flow:1'b0, memory:1'b0, system_state:1'b1, exception:1'b1};
   end
 
   logic [63:0] simple_result;
@@ -773,18 +761,21 @@ module rapt_feu #(
       completion_found = 1'b1;
       completion_choice = held_choice;
     end
+    completion_grant = completion_found && !reset && !cmu_bcast.flush_pipe;
     wb_fpu = unit_completion[completion_choice];
-    wb_fpu.valid = completion_found && !reset && !cmu_bcast.flush_pipe;
-    if (wb_fpu.valid && completion_ready) unit_accept[completion_choice] = 1'b1;
+    // Arbitrate on registered validity only. Late recovery is the final term,
+    // so a packet cancelled in its grant cycle drains instead of publishing.
+    wb_fpu.valid = completion_grant && !cancelled_now(wb_fpu.dest);
+    if (completion_grant && completion_ready) unit_accept[completion_choice] = 1'b1;
   end
   always_ff @(posedge clock) begin
     if (reset || cmu_bcast.flush_pipe) begin
       completion_cursor <= '0;
       completion_held <= 1'b0;
     end else begin
-      completion_held <= wb_fpu.valid && !completion_ready;
-      if (wb_fpu.valid && !completion_ready) held_choice <= completion_choice;
-      if (wb_fpu.valid && completion_ready) completion_cursor <= completion_choice + 1'b1;
+      completion_held <= completion_grant && !completion_ready;
+      if (completion_grant && !completion_ready) held_choice <= completion_choice;
+      if (completion_grant && completion_ready) completion_cursor <= completion_choice + 1'b1;
     end
   end
   `RAPT_SVA_IMPLY(clock, reset || cmu_bcast.flush_pipe, FP_ISSUE_HAS_UNIT, iss.valid,

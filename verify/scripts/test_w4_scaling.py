@@ -21,13 +21,12 @@ IDU = ["rapt_pkg.sv", "generated/rapt_idu_decoder_c.sv",
 
 def cases():
     for xlen in (32, 64):
-        for combo, confirm in ((1, 1), (1, 0), (0, 1)):
-            yield xlen, "tb_iq_confirm_wake", ["rapt_pkg.sv",
-                "common/rapt_issue_select.sv", "backend/rapt_iq.sv"], [
-                f"-GComboCdbWake={combo}", f"-GConfirmCdbWake={confirm}"]
-        for top in ("tb_ioq_forward_nonalias", "tb_ioq_store_precheck"):
-            yield xlen, top, IOQ, []
-        yield xlen, "tb_sq_narrow_forward", ["backend/lsu/rapt_sq_forward.sv"], []
+        for combo, hold in ((1, 1), (1, 3), (0, 1)):
+            yield xlen, "tb_iq_cdb_wake", ["rapt_pkg.sv",
+                "common/rapt_issue_select.sv", "common/rapt_rank_select.sv", "backend/rapt_iq.sv"], [
+                f"-GComboCdbWake={combo}", f"-GHoldCycles={hold}"]
+        yield xlen, "tb_ioq_forward_nonalias", IOQ, []
+        yield xlen, "tb_sq_narrow_forward", ["rapt_pkg.sv", "backend/lsu/rapt_sq_forward.sv"], []
         yield xlen, "tb_lsu_narrow_forward", ["rapt_pkg.sv",
             "backend/lsu/rapt_sq_forward.sv", "memory/rapt_pmp.sv",
             "backend/lsu/rapt_store_beats.sv", "backend/lsu/rapt_lsu_sq.sv"], []
@@ -48,8 +47,9 @@ def cases():
         for top in ("tb_muldiv_flush_reuse", "tb_muldiv_stream"):
             yield xlen, top, ["rapt_pkg.sv", "backend/ieu/rapt_ieu_mul.sv",
                 "backend/ieu/rapt_ieu_muldiv.sv"], []
-        yield xlen, "tb_sq_forward_ports", ["backend/lsu/rapt_sq_forward.sv"], []
-        yield xlen, "tb_store_queue_forward_ring", ["backend/lsu/rapt_sq_forward.sv"], []
+        yield xlen, "tb_sq_forward_ports", ["rapt_pkg.sv", "backend/lsu/rapt_sq_forward.sv"], []
+        yield xlen, "tb_store_queue_forward_ring", [
+            "rapt_pkg.sv", "backend/lsu/rapt_sq_forward.sv"], []
         yield xlen, "tb_ioq_store_stage", IOQ, []
         yield xlen, "tb_ifu_stream_events", ["rapt_pkg.sv",
             "generated/rapt_idu_decoder_c.sv", "frontend/rapt_ifu.sv"], []

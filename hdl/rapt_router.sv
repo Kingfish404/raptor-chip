@@ -105,6 +105,10 @@ module rapt_router #(
   // Set when an offchip beat handshakes that is NOT rlast; cleared on
   // the rlast handshake. Used to lock the R-mux to offchip mid-burst.
   logic offchip_in_burst;
+  // The first/only offchip beat also owns R while stalled. Burst ownership
+  // starts at a handshake, which is too late to protect an offered beat from
+  // a newly queued internal response when RREADY is low.
+  logic offchip_r_stalled;
 
   int_slave_t            ar_int;
   logic                  ar_is_int;
@@ -132,10 +136,10 @@ module rapt_router #(
 
   // ----- R-channel arbiter -----
   // Drain the internal FIFO whenever (a) it has data AND (b) we are
-  // not in the middle of an offchip burst. Offchip burst lock-in
-  // prevents AXI4-illegal beat interleaving within one burst.
+  // not holding an offchip beat or in the middle of its burst. Ownership starts
+  // when a beat is offered, and burst lock-in extends it through the last beat.
   logic drain_int;
-  assign drain_int = !int_resp_empty && !offchip_in_burst;
+  assign drain_int = !int_resp_empty && !offchip_in_burst && !offchip_r_stalled;
 
   assign core_axi.rvalid = drain_int || offchip_axi.rvalid;
   assign core_axi.rdata  = drain_int ? int_resp_q[int_resp_head].data : offchip_axi.rdata;
@@ -162,10 +166,12 @@ module rapt_router #(
       int_resp_tail    <= '0;
       int_resp_count   <= '0;
       offchip_in_burst <= 1'b0;
+      offchip_r_stalled <= 1'b0;
       // int_resp_q payload stays unreset: drain_int (count != 0) gates
       // every read of int_resp_q[int_resp_head], and a push always
       // rewrites the tail entry together with the count increment.
     end else begin
+      offchip_r_stalled <= !drain_int && offchip_axi.rvalid && !core_axi.rready;
       // Push: capture the internal slave's combinational read result
       // in the same cycle as the AR handshake.
       if (push_int_resp) begin
@@ -209,6 +215,9 @@ module rapt_router #(
   // rlast for the burst, the next R beat must also come from offchip
   // (i.e. drain_int must be 0).
   `RAPT_SVA_IMPLY(clock, reset, ROUTER_R_NO_INTERLEAVE, offchip_in_burst, !drain_int)
+  `RAPT_SVA_NEXT(clock, reset, ROUTER_R_STABLE, core_axi.rvalid && !core_axi.rready,
+                 core_axi.rvalid && $stable
+                 ({core_axi.rid, core_axi.rdata, core_axi.rresp, core_axi.rlast}))
 
 
   // ----- Write channel router -----

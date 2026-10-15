@@ -3,9 +3,10 @@
 
 // Compare BRQ-style same-cycle wake with ALQ-style registered wake. Both
 // consume the producer's CDB value, but only ComboCdbWake may issue before
-// the capture edge. A fast tag alone must not make an operand ready.
+// the capture edge. A mismatched CDB tag must leave the operand blocked.
 module tb_iq_cdb_wake #(
-    parameter bit ComboCdbWake = 1'b1
+    parameter bit ComboCdbWake = 1'b1,
+    parameter int HoldCycles = 1
 );
   import rapt_pkg::*;
   logic clock = 0, reset = 1;
@@ -15,7 +16,6 @@ module tb_iq_cdb_wake #(
   issue_packet_t issue[1];
   dpu_iq_if #(.RS_SIZE(4)) disp ();
   cmu_bcast_if cmu_bcast ();
-  load_fast_if load_fast ();
   logic issue_enable;
   logic [2:0] occupancy;
   rapt_iq #(
@@ -33,7 +33,6 @@ module tb_iq_cdb_wake #(
       .disp,
       .cmu_bcast,
       .combo_source(completion),
-      .load_fast,
       .issue_enable,
       .issue,
       .occ_o(occupancy),
@@ -50,11 +49,6 @@ module tb_iq_cdb_wake #(
     completion = '{default: '0};
     issue_enable = 1;
     cmu_bcast.flush_pipe = 0;
-    load_fast.valid = 0;
-    load_fast.rebusy = 0;
-    load_fast.confirmed = 0;
-    load_fast.prd = 0;
-    load_fast.result = 0;
     repeat (3) tick();
     reset = 0;
 
@@ -74,14 +68,10 @@ module tb_iq_cdb_wake #(
     tick();
     #1;
     if (issue[0].valid) $fatal(1, "issued before producer CDB");
-
-    load_fast.valid = 1;
-    load_fast.prd = phys_reg_t'(5);
-    load_fast.dest = 4;
-    load_fast.generation = 2;
+    completion[0].valid = 1;
+    completion[0].prd = phys_reg_t'(6);
     #1;
-    if (issue[0].valid) $fatal(1, "tag-only fast-wake issued without CDB");
-    load_fast.valid = 0;
+    if (issue[0].valid) $fatal(1, "wrong CDB tag released operand");
 
     completion[0].valid = 1;
     completion[0].prd = phys_reg_t'(5);
@@ -103,7 +93,28 @@ module tb_iq_cdb_wake #(
     if (issue[0].op2 != $bits(issue[0].op2)'('h1111)) $fatal(1, "ready op2 was overwritten");
     if (issue[0].dest != 3) $fatal(1, "issue identity changed");
 
-    $display("PASS: IQ CDB operand wake ComboCdbWake=%0d XLEN=%0d", ComboCdbWake, `RAPT_XLEN);
+    tick();
+    completion = '{default: '0};
+    tick();
+    dispatch[0] = '0;
+    dispatch[0].uop.schedule.issue_ports = 1;
+    dispatch[0].pr1 = phys_reg_t'(11);
+    dispatch[0].dest = 10;
+    disp.accept[0] = 1;
+    tick();
+    disp.accept[0] = 0;
+    issue_enable = 0;
+    completion[0].valid = 1;
+    completion[0].prd = phys_reg_t'(11);
+    completion[0].result = 'h13572468;
+    tick();
+    completion[0].valid = 0;
+    repeat (HoldCycles) tick();
+    issue_enable = 1;
+    #1;
+    if (!issue[0].valid || issue[0].op1 != `RAPT_XLEN'('h13572468))
+      $fatal(1, "unselected consumer lost a one-cycle CDB wake");
+    $display("PASS: IQ CDB wake XLEN=%0d combo=%0d hold=%0d", `RAPT_XLEN, ComboCdbWake, HoldCycles);
     $finish;
   end
 endmodule

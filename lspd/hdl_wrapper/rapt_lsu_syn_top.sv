@@ -22,7 +22,6 @@ module rapt_lsu_syn_top #(
     rou_lsu_if.in rou_lsu,
     csr_bcast_if.in csr_bcast,
     pmp_update_if.in pmp_update,
-    load_fast_if.source load_fast,
     output rapt_pkg::completion_t exu_ioq_bcast,
     input logic wb_accept,
     output logic pmu_sq_full
@@ -52,7 +51,6 @@ module rapt_lsu_syn_top #(
       .rou_lsu,
       .csr_bcast,
       .pmp_update,
-      .load_fast,
       .exu_ioq_bcast,
       .wb_accept,
       .pmu_sq_full

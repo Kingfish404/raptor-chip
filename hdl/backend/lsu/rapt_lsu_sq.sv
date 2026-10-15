@@ -92,7 +92,8 @@ module rapt_lsu_sq #(
   // ==========================================================================
   logic [SQLen-1:0] sq_head;  // oldest committed (drain point)
   logic [SQLen-1:0] sq_cmt;   // commit boundary: [head,cmt) committed
-  logic [SQLen-1:0] sq_tail;  // allocation point
+  // Allocation point: bound pointer replication across the payload write ports.
+  (* max_fanout = (`RAPT_DISPATCH_WIDTH >= 4 ? -1 : 96) *) logic [SQLen-1:0] sq_tail;
   logic [SQ_SIZE-1:0] sq_valid;
   logic [SQ_SIZE-1:0] sq_committed;
   logic sq_alloc_fire;
@@ -104,10 +105,7 @@ module rapt_lsu_sq #(
   // Normal branch/jump and atomic retirement preserve address identity.
   // CMU suppresses their flags for synchronous traps; interrupts and fences
   // retain priority. Acquire/release ordering is enforced separately below.
-  assign sq_context_invalidated = cmu_bcast.fence_time
-      || (cmu_bcast.flush_pipe && (cmu_bcast.time_trap
-          || !(cmu_bcast.ben || cmu_bcast.jen || cmu_bcast.jren
-               || cmu_bcast.atomic_retired)));
+  assign sq_context_invalidated = cmu_bcast.mem_context_invalidate;
   always_ff @(posedge clock) begin
     if (reset) sq_stale_context <= '0;
     else if (sq_context_invalidated) sq_stale_context <= sq_stale_context | sq_valid;

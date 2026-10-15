@@ -157,12 +157,21 @@ verilator: verilator-build ## Compile and run the RTL testbench under Verilator
 # regression deliberately requires a configuration with more than one commit
 # slot and proves that a non-first slot reaches the testbench monitor.
 SMOKE_IMG ?= $(RAPTOR_HOME)/abstract-machine/app/am-kernels/tests/cpu-tests/build/dummy-riscv32-npc.bin
-SMOKE_MROM ?= $(RAPTOR_HOME)/sim/csrc/mem/mrom-data/build/mrom-data.bin
+# Build the RV32 boot ROM here, as sim does under its BUILD_DIR, rather than
+# reading a legacy in-source artifact that a clean checkout does not have.
+SMOKE_MROM_DIR := $(abspath build/mrom/rv32-spike-rv32ima)
+SMOKE_MROM ?= $(SMOKE_MROM_DIR)/mrom-data.bin
 SMOKE_LOG := build/vl-middle/smoke.log
 
+$(SMOKE_MROM_DIR)/mrom-data.bin: $(RAPTOR_HOME)/sim/csrc/mem/mrom-data/Makefile \
+		$(RAPTOR_HOME)/sim/csrc/mem/mrom-data/rom.c $(RAPTOR_HOME)/linux/dts/spike-rv32ima.dts
+	+$(MAKE) -C $(RAPTOR_HOME)/sim/csrc/mem/mrom-data BUILD_DIR=$(SMOKE_MROM_DIR) \
+		ISA64=0 DT_SOURCE=spike-rv32ima.dts
+
 .PHONY: verilator-middle-smoke
-verilator-middle-smoke: ## Build middle and require GOOD TRAP plus a non-first commit slot
+verilator-middle-smoke: $(SMOKE_MROM) ## Build middle and require GOOD TRAP plus a non-first commit slot
 	$(MAKE) --no-print-directory verilator-build RAPT_CONFIG=middle
+	test -f "$(SMOKE_MROM)"
 	test -f "$(SMOKE_IMG)"
 	./build/vl-middle/$(TOP) +IMG=$(abspath $(SMOKE_IMG)) \
 		+MROM=$(abspath $(SMOKE_MROM)) +MAX_CYCLES=10000 +COMMIT_TRACE=1 \

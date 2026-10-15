@@ -178,6 +178,7 @@ sram-model: $(SRAM_STAMP) ## Generate abstract SRAM macro models used by LSPD PP
 
 $(SRAM_STAMP): $(SRAM_DIR)/Makefile $(SRAM_DIR)/scripts/gen_stub_lib.py $(SRAM_BLACKBOX) $(wildcard $(SRAM_DIR)/configs/*.py)
 	@$(MAKE) -C $(SRAM_DIR) stubs PLATFORM=$(SRAM_PLATFORM)
+	@mkdir -p $(dir $@)
 	@touch $@
 
 syn: $(NETLIST) ## Synthesize MODULE and write its mapped netlist

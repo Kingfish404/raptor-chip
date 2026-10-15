@@ -40,6 +40,7 @@ CONFIGS := \
 	rapt_sram_16x128_1rw \
 	rapt_sram_32x128_1rw \
 	rapt_sram_64x128_1rw \
+	rapt_sram_512x128_1rw \
 	rapt_sram_2048x32_1rw \
 	rapt_sram_2048x64_1rw \
 	rapt_sram_4096x64_1rw
@@ -128,6 +129,7 @@ STUB_SHAPES := \
 	rapt_openram_1rw_16x128,16,128,8 \
 	rapt_openram_1rw_32x128,32,128,8 \
 	rapt_openram_1rw_64x128,64,128,8 \
+	rapt_openram_1rw_512x128,512,128,8 \
 	rapt_openram_1rw_2048x32,2048,32,8 \
 	rapt_openram_1rw_2048x64,2048,64,8 \
 	rapt_openram_1rw_4096x64,4096,64,8

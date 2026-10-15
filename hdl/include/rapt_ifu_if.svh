@@ -24,6 +24,9 @@ interface ifu_bpu_if #(
   // direction table. Its target is derived statically by IFU.
   logic            aux_query;
   logic [XLEN-1:0] aux_pc;
+  // With positional lookup, aux_pc is the fetch-block PC and the branch sits
+  // at aux_pc + 2 * (aux_position + 1); otherwise aux_pc is the branch PC.
+  logic [3:0]      aux_position;
   logic            aux_taken;
   logic [$clog2(PHT_SIZE)-1:0] aux_index;
 `endif
@@ -32,14 +35,14 @@ interface ifu_bpu_if #(
   modport out(
       output nextpc, pc_update,
       output history_valid, history_taken, history_pc_bit,
-      output aux_query, aux_pc,
+      output aux_query, aux_pc, aux_position,
       input aux_taken, aux_index,
       input npc, taken
   );
   modport in(
       input nextpc, pc_update,
       input history_valid, history_taken, history_pc_bit,
-      input aux_query, aux_pc,
+      input aux_query, aux_pc, aux_position,
       output aux_taken, aux_index,
       output npc, taken
   );
