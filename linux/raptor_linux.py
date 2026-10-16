@@ -12,6 +12,11 @@ import tarfile
 import tempfile
 
 HOME = Path(__file__).resolve().parent
+NEMU_RVA23_OPTIONS = ('64BIT', 'MMU', 'RISCV_ALTERNATIVE', 'RISCV_ISA_V',
+                     'RISCV_ISA_V_DEFAULT_ENABLE', 'RISCV_ISA_SUPM', 'RISCV_ISA_SVNAPOT',
+                     'RISCV_ISA_SVPBMT', 'RISCV_ISA_ZAWRS', 'RISCV_ISA_ZBA', 'RISCV_ISA_ZBB',
+                     'RISCV_ISA_ZICBOM', 'RISCV_ISA_ZICBOP', 'RISCV_ISA_ZICBOZ', 'KVM',
+                     'MFD_SYSCON', 'POWER_RESET', 'POWER_RESET_SYSCON_POWEROFF')
 
 
 def sha(path):
@@ -35,8 +40,10 @@ def identity(value):
 def kernel(package, cache, cross, profile='fpga', rootfs=None, init='/sbin/raptor-init'):
     """Build in an isolated O= directory from the release-pinned source archive."""
     manifest = json.loads((package / 'manifest.json').read_text())
-    require(profile in ('sim', 'fpga'), 'unknown kernel profile')
+    require(profile in ('sim', 'fpga', 'nemu-rva23'), 'unknown kernel profile')
     require((profile == 'sim') == bool(rootfs), 'sim kernel requires an embedded initramfs')
+    if profile == 'nemu-rva23':
+        require(manifest.get('bits') == 64, 'NEMU RVA23 kernel requires RV64')
     for name in ('kernel.config',):
         require(sha(package / name) == manifest['files'][name], 'source hash mismatch: ' + name)
     source_file = package / 'kernel-source.json'
@@ -62,11 +69,13 @@ def kernel(package, cache, cross, profile='fpga', rootfs=None, init='/sbin/rapto
         # clean/invalidate Raptor's cache without the Zicbom implementation.
         options += ['RISCV_ALTERNATIVE', 'RISCV_ISA_ZICBOM',
                     'FTRACE', 'ENABLE_DEFAULT_TRACERS']
+    if profile == 'nemu-rva23':
+        options += NEMU_RVA23_OPTIONS
     # FPGA network acceptance traces skb drop reasons. Keep event tracing
     # available without instrumenting every function; simulators omit both.
     disabled = ['LEGACY_PTYS', 'BLK_DEV_IO_TRACE', 'BPF_EVENTS',
                 'FUNCTION_TRACER', 'FUNCTION_GRAPH_TRACER']
-    if profile == 'sim':
+    if profile != 'fpga':
         disabled += ['FTRACE']
     build_vars = ['KBUILD_BUILD_USER=raptor', 'KBUILD_BUILD_HOST=netboot',
                   'KBUILD_BUILD_TIMESTAMP=1970-01-01 00:00:00 +0000', 'KBUILD_BUILD_VERSION=1']
@@ -111,6 +120,9 @@ def kernel(package, cache, cross, profile='fpga', rootfs=None, init='/sbin/rapto
         make = ['make', '-C', str(tree), 'O=' + str(obj), 'ARCH=riscv', 'CROSS_COMPILE=' + cross, *build_vars]
         subprocess.run(make + ['olddefconfig'], check=True)
         config = (obj / '.config').read_text()
+        if profile == 'nemu-rva23':
+            for option in NEMU_RVA23_OPTIONS:
+                require(f'CONFIG_{option}=y\n' in config, 'resolved NEMU RVA23 kernel lacks ' + option)
         if profile == 'fpga':
             for option in ('RISCV_ISA_ZICBOM', 'RISCV_DMA_NONCOHERENT', 'EVENT_TRACING'):
                 require(f'CONFIG_{option}=y\n' in config, 'resolved FPGA kernel lacks ' + option)

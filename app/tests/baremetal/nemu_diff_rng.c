@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-_Alignas(4096) unsigned char nemu_rng_stacks[HARTS][4096];
+_Alignas(4096) unsigned char nemu_test_stacks[HARTS][4096];
 static volatile unsigned barrier_count, barrier_generation;
 static volatile unsigned irq_count;
 static _Alignas(64) volatile unsigned char output[HARTS][512];
@@ -165,7 +165,7 @@ static void interrupt_test(void)
   check(irq_count == 1 && reg_read(0x60) == 0);
 }
 
-void nemu_rng_main(unsigned hart)
+void nemu_test_main(unsigned hart)
 {
   __asm__ volatile ("csrw mstatus, zero\ncsrw mie, %0" :: "r"(8) : "memory");
 #ifdef BAD_WIDTH

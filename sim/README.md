@@ -2,6 +2,8 @@
 
 From the repository root, `make run-rv32` and `make run-rv64` configure, build, and run the built-in smoke program with difftest. Use `IMG=/absolute/path.bin` for another program. `DIFFTEST=1` is the default and selects `o2_difftest_defconfig`; `DIFFTEST=0` selects `o2_defconfig` and disables the runtime reference. An explicit `NPC_DEFCONFIG` overrides the profile choice.
 
+With `--diff`, `--diff-isa=MASK` opts the NEMU reference into Svnapot (bit 0), Zawrs (bit 1), and Zfa (bit 2); the default mask is zero. For example, `--diff-isa=0x4` enables Zfa. The simulator rejects other extension bits and missing reference negotiation; V/H and extensions with additional CSR state need RTL state export and comparison first. This option does not enable an extension in RTL: use it only when the selected RTL preset implements the feature.
+
 ## Independent builds
 
 `BUILD_ROOT` selects the output root (default `sim/build`); `BUILD_PROFILE` selects a named configuration workspace (default: the HDL preset name). RV32 and RV64 configurations are separate even within one profile:

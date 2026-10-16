@@ -1,8 +1,10 @@
 #include <common.h>
 #include <checkpoint.h>
 #include <difftest.h>
+#include <difftest-isa.h>
 #include <lightsss.h>
 #include <memory.h>
+#include <errno.h>
 #include <getopt.h>
 #include <stdio.h>
 #include <string.h>
@@ -84,6 +86,8 @@ void serial_set_exit_pattern(const char *pattern);
 
 static char *log_file = NULL;
 static char *diff_so_file = NULL;
+static uint64_t diff_isa_mask = 0;
+static bool diff_isa_mask_set = false;
 static char *img_file = NULL;
 static char *mrom_img_file = NULL;
 static char *disk_img_file = NULL;
@@ -174,6 +178,7 @@ static void usage(const char *prog)
   printf("  -c, --cycle=THRESHOLD    start waveform dump at active-cycle THRESHOLD (continues to end)\n");
   printf("  -i, --instr=THRESHOLD    start waveform dump at instruction THRESHOLD (continues to end)\n");
   printf("  -d, --diff=REF_SO        run DiffTest with reference REF_SO\n");
+  printf("      --diff-isa=MASK      opt in reference scalar ISA extensions (bitmask)\n");
   printf("  -p, --port=PORT          run DiffTest with port PORT\n");
   printf("  -e, --elf=ELF_FILE       add ELF_FILE for ftrace\n");
   printf("  -m, --maximum=NUM        set the maximum number of instructions to execute\n");
@@ -234,6 +239,7 @@ static int parse_args(int argc, char *argv[])
       {"mem-random-delay", required_argument, NULL, 269},
       {"mem-random-seed", required_argument, NULL, 270},
       {"serial-exit-on", required_argument, NULL, 271},
+      {"diff-isa", required_argument, NULL, 272},
       {0, 0, NULL, 0},
   };
   int o;
@@ -374,6 +380,24 @@ static int parse_args(int argc, char *argv[])
     case 271:
       serial_set_exit_pattern(optarg);
       break;
+    case 272:
+    {
+      constexpr uint64_t supported = NEMU_ISA_EXT_SVNAPOT | NEMU_ISA_EXT_ZAWRS |
+          NEMU_ISA_EXT_ZFA;
+      char *end = nullptr;
+      errno = 0;
+      unsigned long long mask = strtoull(optarg, &end, 0);
+      if (optarg[0] == '-' || end == optarg || *end || errno == ERANGE ||
+          (mask & ~supported))
+      {
+        fprintf(stderr, "ERROR: invalid --diff-isa mask (supported: 0x%" PRIx64 ")\n",
+                supported);
+        exit(1);
+      }
+      diff_isa_mask = mask;
+      diff_isa_mask_set = true;
+      break;
+    }
     case 1:
       img_file = optarg;
       break;
@@ -381,6 +405,11 @@ static int parse_args(int argc, char *argv[])
       usage(argv[0]);
       exit(0);
     }
+  }
+  if (diff_isa_mask_set && diff_so_file == NULL)
+  {
+    fprintf(stderr, "ERROR: --diff-isa requires an active --diff reference\n");
+    exit(1);
   }
   void cpu_exec_set_threshold(uint64_t cycle, uint64_t inst);
   cpu_exec_set_threshold(cycle_threshold, instr_threshold);
@@ -460,7 +489,7 @@ void init_monitor(int argc, char *argv[])
   init_mem();
 
 #ifdef CONFIG_DIFFTEST
-  init_difftest(diff_so_file, img_size, difftest_port);
+  init_difftest(diff_so_file, img_size, difftest_port, diff_isa_mask);
 #endif
 
 #if defined(CONFIG_ITRACE)

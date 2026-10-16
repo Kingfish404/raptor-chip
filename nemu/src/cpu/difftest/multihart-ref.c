@@ -1,4 +1,5 @@
 #include <cpu/multidiff.h>
+#include <difftest-vector.h>
 
 #if defined(CONFIG_ISA_riscv) && defined(CONFIG_TARGET_SHARE) && defined(CONFIG_MODE_SYSTEM)
 #include <isa.h>
@@ -6,6 +7,7 @@
 #include <utils.h>
 
 static NemuDiffState states[NEMU_DIFF_MULTI_HARTS];
+static NemuDiffVectorState vector_states[NEMU_DIFF_MULTI_HARTS];
 static unsigned hart_count;
 static uint64_t next_sequence;
 static bool stopped;
@@ -51,8 +53,10 @@ static int initialize(uint32_t harts)
 static int set_state(uint32_t hart, const NemuDiffState *state)
 {
   if (hart >= hart_count || !state || next_sequence || state->gpr[0] ||
-      state->csr[CSR_MHARTID] != hart || state->privilege > 3 ||
-      state->privilege == 2 || state->reservation_bytes || state->stip > 1 || state->seip > 1) return -1;
+      state->csr[CSR_MHARTID] != hart || (state->privilege & 3) == 2 ||
+      ((state->privilege & 3) == 3 && (state->privilege & 4)) ||
+      state->privilege > (riscv_h_gstage_preview_enabled() ? 5u : 3u) ||
+      state->reservation_bytes || state->stip > 1 || state->seip > 1) return -1;
 #ifndef CONFIG_RV64
   if (state->pc > UINT32_MAX) return -1;
   for (unsigned index = 0; index < 32; index++)
@@ -68,6 +72,34 @@ static int get_state(uint32_t hart, NemuDiffState *state)
 {
   if (hart >= hart_count || !state) return -1;
   *state = states[hart];
+  return 0;
+}
+
+static int set_vector_state(uint32_t hart, const NemuDiffVectorState *state)
+{
+  if (!state || next_sequence) return -1;
+  if (!hart_count)
+  {
+    if (hart) return -1;
+    memcpy(cpu.vreg, state->reg, sizeof(cpu.vreg));
+    return 0;
+  }
+  if (hart >= hart_count) return -1;
+  vector_states[hart] = *state;
+  return 0;
+}
+
+static int get_vector_state(uint32_t hart, NemuDiffVectorState *state)
+{
+  if (!state) return -1;
+  if (!hart_count)
+  {
+    if (hart) return -1;
+    memcpy(state->reg, cpu.vreg, sizeof(cpu.vreg));
+    return 0;
+  }
+  if (hart >= hart_count) return -1;
+  *state = vector_states[hart];
   return 0;
 }
 
@@ -88,12 +120,14 @@ static int step(uint32_t hart, uint64_t sequence, NemuDiffFrame *frame)
 {
   if (hart >= hart_count || !frame || sequence != next_sequence || stopped) return -1;
   nemu_md_restore(&states[hart]);
+  memcpy(cpu.vreg, vector_states[hart].reg, sizeof(cpu.vreg));
   nemu_md_reset_frame();
   g_nr_guest_inst = sequence;
   nemu_state.state = NEMU_RUNNING;
   if (riscv_intr_may_pending()) nemu_md_frame.error = 1;
   else nemu_md_exec_one();
   nemu_md_capture(&states[hart]);
+  memcpy(vector_states[hart].reg, cpu.vreg, sizeof(cpu.vreg));
   nemu_md_frame.state = states[hart];
   nemu_md_frame.trapped = cpu.instruction_trapped;
   nemu_md_frame.ended = nemu_state.state == NEMU_END;
@@ -117,5 +151,15 @@ __EXPORT const NemuDiffAPI *nemu_difftest_query(uint32_t version, uint32_t size)
   if (version != api.version || size != api.size) return NULL;
   api.isa_features = nemu_md_features();
   return &api;
+}
+
+__EXPORT const NemuDiffVectorAPI *nemu_difftest_vector_query(uint32_t version, uint32_t size)
+{
+  static const NemuDiffVectorAPI api = {
+    .version = NEMU_DIFF_VECTOR_VERSION, .size = sizeof(NemuDiffVectorAPI),
+    .xlen = XLEN, .max_harts = NEMU_DIFF_MULTI_HARTS,
+    .set_state = set_vector_state, .get_state = get_vector_state,
+  };
+  return version == api.version && size == api.size ? &api : NULL;
 }
 #endif

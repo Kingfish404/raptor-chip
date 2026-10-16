@@ -85,6 +85,15 @@ bool mmio_map_contains(paddr_t addr)
   return false;
 }
 
+bool mmio_map_contains_span(paddr_t addr, size_t len)
+{
+  if (!len || len - 1 > (paddr_t)-1 - addr) return false;
+  paddr_t last = addr + len - 1;
+  for (int index = 0; index < nr_map; index++)
+    if (addr >= maps[index].low && last <= maps[index].high) return true;
+  return false;
+}
+
 bool mmio_map_overlaps(paddr_t addr, size_t len)
 {
   if (!len) return false;

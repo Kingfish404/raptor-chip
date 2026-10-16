@@ -6,7 +6,9 @@
 #include <cpu/multidiff.h>
 #include <cpu/thread.h>
 #include <difftest-journal.h>
+#include <difftest-vector.h>
 #include <isa.h>
+#include <isa-extensions.h>
 #include <memory/paddr.h>
 #include <utils.h>
 #include <fcntl.h>
@@ -17,6 +19,7 @@
 #include <unistd.h>
 
 _Static_assert(sizeof(NemuDiffState) == NEMU_JOURNAL_STATE_WORDS * 8, "journal state layout changed");
+_Static_assert(sizeof(cpu.vreg) == sizeof(NemuDiffVectorState), "journal vector layout changed");
 _Static_assert(sizeof(NemuJournalHeader) == 64, "journal header layout changed");
 _Static_assert(sizeof(NemuJournalRecord) == 40, "journal event layout changed");
 
@@ -59,6 +62,7 @@ static uint64_t written = 64;
 static uint64_t instructions[NEMU_MAX_HARTS];
 static uint64_t retired;
 static NemuDiffState previous[NEMU_MAX_HARTS];
+static NemuDiffVectorState previous_vector[NEMU_MAX_HARTS];
 static NEMU_TLS bool executing;
 static NEMU_TLS bool participating;
 
@@ -534,7 +538,8 @@ void nemu_journal_init(void)
   const NemuJournalHeader header = {NEMU_JOURNAL_MAGIC,
       nemu_md_block ? NEMU_JOURNAL_BLOCK_VERSION : nemu_md_net ? NEMU_JOURNAL_NET_VERSION : nemu_md_rng ? NEMU_JOURNAL_RNG_VERSION : nemu_md_tlb_retain ? NEMU_JOURNAL_TLB_VERSION : (nemu_md_uart ? NEMU_JOURNAL_UART_VERSION : (nemu_md_plic ? NEMU_JOURNAL_PLIC_VERSION :
       (nemu_md_clint ? NEMU_JOURNAL_CLINT_VERSION :
-      (nemu_md_interrupts ? NEMU_JOURNAL_IRQ_VERSION : NEMU_JOURNAL_VERSION)))), XLEN,
+      (nemu_md_interrupts ? NEMU_JOURNAL_IRQ_VERSION : NEMU_JOURNAL_VERSION)))) |
+      (riscv_v128_preview_enabled() ? NEMU_JOURNAL_VECTOR_FLAG : 0), XLEN,
       nemu_nr_harts, PMEM_LEFT, CONFIG_MSIZE, nemu_md_features(), nemu_threaded};
   if (fwrite(&header, sizeof(header), 1, journal) != 1) fail("header write error");
   initial_block();
@@ -543,12 +548,16 @@ void nemu_journal_init(void)
   for (unsigned hart = 0; hart < nemu_nr_harts; hart++) {
     cpu_select_hart(hart);
     nemu_md_capture(&previous[hart]);
+    if (riscv_v128_preview_enabled())
+      memcpy(previous_vector[hart].reg, cpu.vreg, sizeof(cpu.vreg));
     if (nemu_md_clint && (previous[hart].mtimecmp != UINT64_MAX || previous[hart].stip ||
         previous[hart].seip || (previous[hart].csr[CSR_MIP] & 0x88)))
       fail("CLINT capture requires reset peripheral state");
     if (nemu_md_plic && (previous[hart].csr[CSR_MIP] & 0x800))
       fail("PLIC capture requires clear MEIP");
-    append(JOURNAL_STATE, hart, &previous[hart], sizeof(NemuDiffState));
+    append_parts(JOURNAL_STATE, hart, &previous[hart], sizeof(NemuDiffState),
+                 riscv_v128_preview_enabled() ? &previous_vector[hart] : NULL,
+                 riscv_v128_preview_enabled() ? sizeof(NemuDiffVectorState) : 0);
   }
   cpu_select_hart(0);
   if (failed) exit(EXIT_FAILURE);
@@ -601,13 +610,27 @@ void nemu_journal_end(void)
   cpu_bus_lock();
   NemuDiffState state;
   nemu_md_capture(&state);
-  uint64_t record[4 + 2 * (sizeof(state) / sizeof(uint64_t))];
+  uint64_t record[4 + 2 * (NEMU_JOURNAL_STATE_WORDS + sizeof(NemuDiffVectorState) / 8)];
   size_t count = 4;
   record[0] = cpu.inst;
   record[1] = cpu.instruction_trapped;
   record[2] = nemu_md_frame.error;
   record[3] = nemu_state.state == NEMU_END && (!nemu_threaded || nemu_stop_hart == nemu_hartid);
   count += nemu_diff_state_delta(&state, &previous[nemu_hartid], record + count);
+  if (riscv_v128_preview_enabled()) {
+    const uint8_t *actual = (const uint8_t *)cpu.vreg;
+    uint8_t *saved = (uint8_t *)previous_vector[nemu_hartid].reg;
+    for (size_t offset = 0; offset < sizeof(cpu.vreg); offset += sizeof(uint64_t)) {
+      uint64_t value, old;
+      memcpy(&value, actual + offset, sizeof(value));
+      memcpy(&old, saved + offset, sizeof(old));
+      if (value != old) {
+        record[count++] = NEMU_JOURNAL_STATE_WORDS + offset / sizeof(uint64_t);
+        record[count++] = value;
+        memcpy(saved + offset, &value, sizeof(value));
+      }
+    }
+  }
   append(JOURNAL_END, nemu_hartid, record, count * sizeof(uint64_t));
   instructions[nemu_hartid]++;
   retired++;

@@ -30,6 +30,7 @@ void add_alarm_handle(alarm_handler_t handler) { (void)handler; }
 void soft_tlb_flush(void) {}
 void device_update_slow(void) {}
 void assert_fail_msg(void) { abort(); }
+void nemu_memory_longjmp(int value) { (void)value; abort(); }
 word_t riscv_hart_mip_value(const CPU_state *hart)
 {
   return hart->sr[CSR_MIP] | (hart->seip ? 0x200 : 0);

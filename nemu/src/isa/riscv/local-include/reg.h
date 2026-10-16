@@ -60,6 +60,28 @@ static inline bool is_fp_csr(uint16_t csr)
   return csr == CSR_FFLAGS || csr == CSR_FRM || csr == CSR_FCSR;
 }
 
+static inline bool is_vector_csr(uint16_t csr)
+{
+  csr &= 0xfff;
+  return csr == CSR_VSTART || csr == CSR_VXSAT || csr == CSR_VXRM ||
+         csr == CSR_VCSR || csr == CSR_VL || csr == CSR_VTYPE || csr == CSR_VLENB;
+}
+
+static inline bool is_stateen_csr(uint16_t csr)
+{
+  if ((csr >= CSR_SSTATEEN0 && csr <= CSR_SSTATEEN3) ||
+      (csr >= CSR_MSTATEEN0 && csr <= CSR_MSTATEEN3)) return true;
+#ifdef CONFIG_RV64
+  if (csr >= CSR_HSTATEEN0 && csr <= CSR_HSTATEEN3)
+    return riscv_h_gstage_preview_enabled();
+#endif
+#ifndef CONFIG_RV64
+  return csr >= CSR_MSTATEEN0H && csr <= CSR_MSTATEEN3H;
+#else
+  return false;
+#endif
+}
+
 /* Raptor implements the optional Zihpm CSR banks as WARL-zero.  Keep the
  * reference model's CSR existence and read/write behaviour aligned with the
  * RTL: reads return zero and writes to the machine banks are ignored. */
@@ -73,6 +95,8 @@ static inline bool is_hpm_zero_csr(uint16_t csr)
 #ifndef CONFIG_RV64
   if ((csr >= 0xb83 && csr <= 0xb9f) ||  /* mhpmcounter3h..31h */
       (csr >= 0xc83 && csr <= 0xc9f))    /* hpmcounter3h..31h */
+    return true;
+  if (riscv_sscofpmf_enabled() && csr >= 0x723 && csr <= 0x73f)
     return true;
 #endif
   return false;
@@ -131,10 +155,13 @@ static inline CSR_status check_csr_exist(uint16_t csr)
           csr == CSR_FFLAGS ||
           csr == CSR_FRM ||
           csr == CSR_FCSR ||
+          (riscv_v128_preview_enabled() && is_vector_csr(csr)) ||
+          (riscv_smstateen_preview_enabled() && is_stateen_csr(csr)) ||
           csr == CSR_SIE ||
           csr == CSR_STVEC ||
 
           csr == CSR_SCOUNTEREN ||
+          (csr == CSR_SCOUNTOVF && riscv_sscofpmf_enabled()) ||
           csr == CSR_SENVCFG ||
 
           csr == CSR_SSCRATCH ||
@@ -143,6 +170,19 @@ static inline CSR_status check_csr_exist(uint16_t csr)
           csr == CSR_STVAL ||
           csr == CSR_SIP ||
           csr == CSR_SATP ||
+
+          (riscv_h_gstage_preview_enabled() &&
+           (csr == CSR_VSSTATUS || csr == CSR_VSIE || csr == CSR_VSTVEC ||
+            csr == CSR_VSSCRATCH || csr == CSR_VSEPC || csr == CSR_VSCAUSE ||
+            csr == CSR_VSTVAL || csr == CSR_VSIP || csr == CSR_VSTIMECMP ||
+            csr == CSR_VSATP ||
+            csr == CSR_HSTATUS || csr == CSR_HEDELEG || csr == CSR_HIDELEG ||
+            csr == CSR_HIE || csr == CSR_HIP || csr == CSR_HVIP ||
+            csr == CSR_HTIMEDELTA || csr == CSR_HCOUNTEREN ||
+            csr == CSR_HGEIE || csr == CSR_HGEIP ||
+            csr == CSR_HENVCFG ||
+            csr == CSR_HGATP || csr == CSR_HTVAL || csr == CSR_HTINST ||
+            csr == CSR_MTVAL2 || csr == CSR_MTINST)) ||
 
           csr == CSR_MSTATUS ||
           csr == CSR_MISA ||
@@ -194,7 +234,6 @@ static inline CSR_status check_csr_exist(uint16_t csr)
         || (csr == CSR_MARCHID)   //
         || (csr == CSR_IMPID)     //
         || (csr == CSR_MHARTID)   //
-
     )
     {
       return CSR_EXIST_DIFF_SKIP;

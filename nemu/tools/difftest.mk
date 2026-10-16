@@ -19,7 +19,8 @@ DIFF_REF_PATH = $(NEMU_HOME)/$(call remove_quote,$(CONFIG_DIFFTEST_REF_PATH))
 # not silently reuse a stale binary built for the other width.
 DIFF_REF_ISA = $(if $(filter riscv,$(GUEST_ISA)),$(GUEST_ISA)$(if $(CONFIG_RV64),64,32),$(GUEST_ISA))
 DIFF_REF_SO = $(DIFF_REF_PATH)/build/$(DIFF_REF_ISA)-$(call remove_quote,$(CONFIG_DIFFTEST_REF_NAME))-so
-MKFLAGS = GUEST_ISA=$(GUEST_ISA) SHARE=1 ENGINE=interpreter $(if $(CONFIG_RV64),CONFIG_RV64=y)
+MKFLAGS = GUEST_ISA=$(GUEST_ISA) SHARE=1 ENGINE=interpreter $(if $(CONFIG_RV64),CONFIG_RV64=y) \
+          NEMU_CONFIG_DIR=$(abspath include) BUILD_DIR=$(abspath $(dir $(DIFF_REF_SO)))
 ARGS_DIFF = --diff=$(DIFF_REF_SO)
 
 ifndef CONFIG_DIFFTEST_REF_NEMU

@@ -80,7 +80,7 @@ RUN_DIR ?= $(abspath $(BUILD_DIR)/run-$(ISA_NAME))
 -include $(SIM_AUTOCONFIG).cmd
 
 # Config dir MUST come before hdl/include so its rapt_config.svh wins.
-INC_PATH ?= $(CONFIG_DIR) $(SIM_CONFIG_ROOT)/include $(abspath ./include) $(abspath $(VSRC_PATH)/include)
+INC_PATH ?= $(CONFIG_DIR) $(SIM_CONFIG_ROOT)/include $(abspath ./include) $(abspath $(VSRC_PATH)/include) $(NEMU_HOME)/include
 
 remove_quote = $(patsubst "%",%,$(1))
 NPROC ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)

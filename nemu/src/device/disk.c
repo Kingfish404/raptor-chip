@@ -14,6 +14,7 @@
  ***************************************************************************************/
 
 #include <device/map.h>
+#include <device/block-image.h>
 #include <memory/paddr.h>
 #include <cpu/cpu.h>
 #include <cpu/multidiff.h>
@@ -57,6 +58,8 @@
  * select register 1, bit 0. */
 #define VIRTIO_BLK_F_SIZE_MAX (1u << 1)
 #define VIRTIO_BLK_F_SEG_MAX (1u << 2)
+#define VIRTIO_BLK_F_RO (1u << 5)
+#define VIRTIO_BLK_F_FLUSH (1u << 9)
 #define VIRTIO_BLK_FEATURES_LOW (VIRTIO_BLK_F_SIZE_MAX | VIRTIO_BLK_F_SEG_MAX)
 #define VIRTIO_BLK_MAX_SIZE 0x100000u
 #define VIRTIO_BLK_SEG_MAX 128u
@@ -66,6 +69,7 @@
 #define VRING_DESC_F_WRITE 2u
 #define VIRTIO_BLK_T_IN 0u
 #define VIRTIO_BLK_T_OUT 1u
+#define VIRTIO_BLK_T_FLUSH 4u
 #define VIRTIO_BLK_T_GET_ID 8u
 #define VIRTIO_BLK_STATUS_OK 0u
 #define VIRTIO_BLK_STATUS_IOERR 1u
@@ -88,12 +92,12 @@ typedef struct
 } __attribute__((packed)) virtio_blk_req_t;
 
 static uint8_t *virtio_blk_base;
+static NemuBlockImage disk_image = {.fd = -1};
 
 static struct
 {
     const char *path;
-    uint8_t *disk;
-    size_t disk_size;
+    NemuBlockMode mode;
     uint32_t device_features_sel;
     uint32_t driver_features_sel;
     uint32_t driver_features[2];
@@ -112,13 +116,13 @@ void plic_raise_block_irq(int irq);
 
 const uint8_t *nemu_block_image(size_t *size)
 {
-    *size = blk.disk_size;
-    return blk.disk;
+    *size = disk_image.mode == NEMU_BLOCK_VOLATILE ? disk_image.size : 0;
+    return disk_image.data;
 }
 
 bool nemu_block_reset_state(void)
 {
-    return !blk.device_features_sel && !blk.driver_features_sel &&
+    return disk_image.mode == NEMU_BLOCK_VOLATILE && !blk.device_features_sel && !blk.driver_features_sel &&
            !blk.driver_features[0] && !blk.driver_features[1] && !blk.queue_sel &&
            !blk.queue_num && !blk.queue_ready && !blk.status && !blk.interrupt_status &&
            !blk.desc_addr && !blk.driver_addr && !blk.device_addr && !blk.last_avail_idx;
@@ -129,9 +133,14 @@ void virtio_blk_set_disk_image(const char *path)
     blk.path = path;
 }
 
+void virtio_blk_set_disk_mode(NemuBlockMode mode)
+{
+    blk.mode = mode;
+}
+
 static bool enabled(void)
 {
-    return blk.disk != NULL;
+    return disk_image.size != 0;
 }
 
 static void reset_regs(void)
@@ -236,17 +245,17 @@ static bool transfer_data(uint32_t type, uint64_t address, uint32_t length,
     uint8_t buffer[65536];
     static const uint8_t identity[20] = "NEMU-VIRTIO-BLK";
     if (length > VIRTIO_BLK_MAX_SIZE || (type != VIRTIO_BLK_T_GET_ID &&
-        (*offset > blk.disk_size || length > blk.disk_size - *offset))) return false;
+        (*offset > disk_image.size || length > disk_image.size - *offset))) return false;
     for (uint32_t done = 0; done < length;) {
         size_t chunk = length - done < sizeof(buffer) ? length - done : sizeof(buffer);
         if (type == VIRTIO_BLK_T_OUT) {
             if (!guest_mem_read(address + done, buffer, chunk)) return false;
             if (multidiff_block_active() && nemu_journal_block_data &&
                 !nemu_journal_block_data(*offset, buffer, chunk, true)) return false;
-            memcpy(blk.disk + *offset, buffer, chunk);
+            if (!nemu_block_write(&disk_image, *offset, buffer, chunk)) return false;
         } else {
             if (type == VIRTIO_BLK_T_IN) {
-                memcpy(buffer, blk.disk + *offset, chunk);
+                if (!nemu_block_read(&disk_image, *offset, buffer, chunk)) return false;
                 if (multidiff_block_active() && nemu_journal_block_data &&
                     !nemu_journal_block_data(*offset, buffer, chunk, false)) return false;
             } else {
@@ -284,7 +293,7 @@ static void process_one(uint16_t head)
     }
 
     uint64_t byte_off = req.sector * (uint64_t)VIRTIO_SECTOR_SIZE;
-    if (req.sector <= UINT64_MAX / VIRTIO_SECTOR_SIZE && byte_off < blk.disk_size)
+    if (req.sector <= UINT64_MAX / VIRTIO_SECTOR_SIZE && byte_off < disk_image.size)
     {
         disk_off = (size_t)byte_off;
     }
@@ -292,6 +301,10 @@ static void process_one(uint16_t head)
     {
         io_ok = req.type == VIRTIO_BLK_T_GET_ID;
     }
+    if (req.type == VIRTIO_BLK_T_OUT && disk_image.mode == NEMU_BLOCK_READONLY)
+        io_ok = false;
+    if (req.type == VIRTIO_BLK_T_FLUSH)
+        io_ok = disk_image.mode == NEMU_BLOCK_PERSISTENT && req.sector == 0;
 
     memset(&status_desc, 0, sizeof(status_desc));
     if (getenv("NEMU_DISK_DEBUG") != NULL)
@@ -320,7 +333,12 @@ static void process_one(uint16_t head)
         idx = desc.next;
     }
 
-    if (!io_ok || (req.type != VIRTIO_BLK_T_IN && req.type != VIRTIO_BLK_T_OUT && req.type != VIRTIO_BLK_T_GET_ID))
+    if (io_ok && have_status && (req.type == VIRTIO_BLK_T_FLUSH ||
+        (req.type == VIRTIO_BLK_T_OUT && disk_image.mode == NEMU_BLOCK_PERSISTENT &&
+         !(blk.driver_features[0] & VIRTIO_BLK_F_FLUSH))))
+        io_ok = nemu_block_flush(&disk_image);
+    if (!io_ok || (req.type != VIRTIO_BLK_T_IN && req.type != VIRTIO_BLK_T_OUT &&
+                   req.type != VIRTIO_BLK_T_GET_ID && req.type != VIRTIO_BLK_T_FLUSH))
         status = VIRTIO_BLK_STATUS_IOERR;
     if (have_status && guest_mem_write(status_desc.addr, &status, 1)) used_len++;
     finish_request(head, used_len);
@@ -374,7 +392,9 @@ static uint32_t read_reg32(uint32_t base)
          * NetBSD accept the device instead of failing feature negotiation.
          * Selector 0 advertises SIZE_MAX/SEG_MAX so the guest sizes its DMA
          * maps correctly instead of assuming a single-segment payload. */
-        return (blk.device_features_sel == 1) ? 1u : VIRTIO_BLK_FEATURES_LOW;
+        return (blk.device_features_sel == 1) ? 1u : VIRTIO_BLK_FEATURES_LOW |
+            (disk_image.mode == NEMU_BLOCK_READONLY ? VIRTIO_BLK_F_RO : 0) |
+            (disk_image.mode == NEMU_BLOCK_PERSISTENT ? VIRTIO_BLK_F_FLUSH : 0);
     case VIRTIO_MMIO_QUEUE_NUM_MAX:
         return enabled() && blk.queue_sel == 0 ? VIRTIO_QUEUE_NUM_MAX : 0u;
     case VIRTIO_MMIO_QUEUE_READY:
@@ -384,9 +404,9 @@ static uint32_t read_reg32(uint32_t base)
     case VIRTIO_MMIO_STATUS:
         return blk.status;
     case VIRTIO_MMIO_CONFIG_CAPACITY_LOW:
-        return (uint32_t)(blk.disk_size / VIRTIO_SECTOR_SIZE);
+        return (uint32_t)(disk_image.size / VIRTIO_SECTOR_SIZE);
     case VIRTIO_MMIO_CONFIG_CAPACITY_HIGH:
-        return (uint32_t)((blk.disk_size / VIRTIO_SECTOR_SIZE) >> 32);
+        return (uint32_t)((disk_image.size / VIRTIO_SECTOR_SIZE) >> 32);
     case VIRTIO_MMIO_CONFIG_SIZE_MAX:
         return VIRTIO_BLK_MAX_SIZE;
     case VIRTIO_MMIO_CONFIG_SEG_MAX:
@@ -462,43 +482,32 @@ static void virtio_blk_io_handler(uint32_t offset, int len, bool is_write)
     io_write_value(base, 4, read_reg32(base));
 }
 
+static void close_disk(void)
+{
+    nemu_block_close(&disk_image);
+}
+
 void init_disk(void)
 {
     reset_regs();
-    free(blk.disk);
-    blk.disk = NULL;
-    blk.disk_size = 0;
+    close_disk();
 
     if (blk.path != NULL && blk.path[0] != '\0')
     {
-        FILE *fp = fopen(blk.path, "rb");
-        if (fp == NULL)
+        if (!nemu_block_open(&disk_image, blk.path, blk.mode))
         {
-            fprintf(stderr, "[virtio-blk] cannot open %s: %s\n", blk.path, strerror(errno));
+            fprintf(stderr, "[virtio-blk] cannot attach %s: %s (requires a nonempty regular file and compatible lock)\n",
+                    blk.path, strerror(errno));
             exit(1);
         }
-        if (fseek(fp, 0, SEEK_END) != 0)
-        {
-            fprintf(stderr, "[virtio-blk] cannot seek %s\n", blk.path);
-            exit(1);
-        }
-        long size = ftell(fp);
-        if (size <= 0)
-        {
-            fprintf(stderr, "[virtio-blk] empty disk image: %s\n", blk.path);
-            exit(1);
-        }
-        rewind(fp);
-        blk.disk = malloc((size_t)size);
-        Assert(blk.disk != NULL, "out of memory loading disk image");
-        if (fread(blk.disk, 1, (size_t)size, fp) != (size_t)size)
-        {
-            fprintf(stderr, "[virtio-blk] short read loading %s\n", blk.path);
-            exit(1);
-        }
-        fclose(fp);
-        blk.disk_size = (size_t)size;
-        Log("virtio-blk: loaded %s (%zu bytes, writes are in-memory)", blk.path, blk.disk_size);
+        Log("virtio-blk: attached %s (%zu bytes, mode=%s)", blk.path, disk_image.size,
+            blk.mode == NEMU_BLOCK_VOLATILE ? "volatile" :
+            blk.mode == NEMU_BLOCK_READONLY ? "readonly" : "persistent");
+    }
+    static bool cleanup_registered;
+    if (!cleanup_registered) {
+        atexit(close_disk);
+        cleanup_registered = true;
     }
 
     virtio_blk_base = new_space(VIRTIO_BLK_SIZE);

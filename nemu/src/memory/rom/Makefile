@@ -1,9 +1,9 @@
 # Canonical device-tree sources live in <repo>/linux/dts (single source of
 # truth for both sim and nemu). dtc reads from there; generated .dtb files are
 # still written here because CONFIG_ROM_DTB_PATH references this directory.
-NEMU_DTS_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../../..)/linux/dts
+NEMU_DTS_DIR ?= $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../../..)/linux/dts
 DTB_NAMES := qemu-rv32ima spike-rv32ima spike-rv32gc spike-rv32gc-nemu \
-	qemu-rv64ima spike-rv64ima spike-rv64gc spike-rv64gc-nemu
+	qemu-rv64ima spike-rv64ima spike-rv64gc spike-rv64gc-nemu spike-rva23-nemu
 
 build_dtb: $(addsuffix .dtb,$(DTB_NAMES))
 
@@ -12,6 +12,7 @@ build_dtb: $(addsuffix .dtb,$(DTB_NAMES))
 
 spike-rv32gc-nemu.dtb: $(NEMU_DTS_DIR)/spike-rv32gc.dts
 spike-rv64gc-nemu.dtb: $(NEMU_DTS_DIR)/spike-rv64gc.dts
+spike-rva23-nemu.dtb: $(NEMU_DTS_DIR)/spike-rv64gc.dts $(NEMU_DTS_DIR)/spike-rv64gc-nemu.dts
 
 parse_dtb: generate_qemu_rv32_dts generate_qemu_rv64_dts
 	dtc -I dtb qemu-rv32.dtb -O dts -o $(NEMU_DTS_DIR)/qemu-rv32.dts

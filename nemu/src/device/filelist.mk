@@ -22,18 +22,21 @@ SRCS-$(CONFIG_DEVICE) += src/device/fwcfg.c
 SRCS-$(CONFIG_HAS_KEYBOARD) += src/device/keyboard.c
 SRCS-$(CONFIG_HAS_VGA) += src/device/vga.c
 SRCS-$(CONFIG_HAS_AUDIO) += src/device/audio.c
-SRCS-$(CONFIG_HAS_DISK) += src/device/disk.c
+SRCS-$(CONFIG_HAS_DISK) += src/device/disk.c src/device/block-image.c
 SRCS-$(CONFIG_HAS_NET) += src/device/net.c
 SRCS-$(CONFIG_HAS_RNG) += src/device/rng.c
 SRCS-$(CONFIG_HAS_SDCARD) += src/device/sdcard.c
 
 SRCS-BLACKLIST-$(CONFIG_TARGET_AM) += src/device/alarm.c
 
-ifdef CONFIG_DEVICE
-ifdef CONFIG_VGA_SHOW_SCREEN
 ifndef CONFIG_TARGET_AM
-LIBS += $(shell sdl2-config --libs)
+ifneq ($(filter y,$(CONFIG_HAS_KEYBOARD) $(CONFIG_HAS_AUDIO) $(CONFIG_VGA_SHOW_SCREEN)),)
+SDL_CONFIG ?= sdl2-config
+ifeq ($(shell $(SDL_CONFIG) --version 2>/dev/null),)
+$(error Keyboard, audio or graphical display requires SDL2 development files ($(SDL_CONFIG)))
 endif
+CFLAGS += $(shell $(SDL_CONFIG) --cflags)
+LIBS += $(shell $(SDL_CONFIG) --libs)
 endif
 endif
 

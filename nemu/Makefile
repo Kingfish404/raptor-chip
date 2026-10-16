@@ -13,6 +13,15 @@
 # See the Mulan PSL v2 for more details.
 #**************************************************************************************/
 
+ifndef NEMU_HOME
+NEMU_HOME := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+endif
+export NEMU_HOME
+
+ifneq ($(strip $(O)),)
+include $(NEMU_HOME)/scripts/output.mk
+else
+
 # Reference builds use a private working directory, including Kconfig state.
 # Dispatch before reading the interactive configuration or its file lists.
 ifeq ($(MAKECMDGOALS),reference)
@@ -41,6 +50,8 @@ ENGINE ?= $(call remove_quote,$(CONFIG_ENGINE))
 NAME = $(if $(filter riscv,$(GUEST_ISA)),$(GUEST_ISA)$(if $(CONFIG_RV64),64,32),$(GUEST_ISA))-nemu-$(ENGINE)
 
 # Include all filelist.mk to merge file lists
+CONFIG_ONLY_GOALS := %defconfig menuconfig savedefconfig help clean distclean clean-tools clean-all
+ifneq ($(if $(MAKECMDGOALS),$(filter-out $(CONFIG_ONLY_GOALS),$(MAKECMDGOALS)),app),)
 FILELIST_MK = $(shell find -L ./src -name "filelist.mk")
 include $(FILELIST_MK)
 
@@ -50,6 +61,7 @@ DIRS-BLACKLIST-y += $(DIRS-BLACKLIST)
 SRCS-BLACKLIST-y += $(SRCS-BLACKLIST) $(call find_c_files,$(DIRS-BLACKLIST-y))
 SRCS-y += $(call find_c_files,$(DIRS-y))
 SRCS = $(filter-out $(SRCS-BLACKLIST-y),$(SRCS-y))
+endif
 
 # Extract compiler and options from menuconfig
 ifneq ($(CONFIG_CC),)
@@ -60,8 +72,8 @@ CFLAGS_BUILD += $(if $(CONFIG_CC_LTO),-flto,)
 CFLAGS_BUILD += $(if $(CONFIG_CC_DEBUG),-Og -ggdb3,)
 CFLAGS_BUILD += $(if $(CONFIG_CC_ASAN),-fsanitize=address,)
 CFLAGS_TRACE += -DITRACE_COND=$(if $(CONFIG_ITRACE_COND),$(call remove_quote,$(CONFIG_ITRACE_COND)),true)
-CFLAGS  += $(CFLAGS_BUILD) $(CFLAGS_TRACE) -D__GUEST_ISA__=$(GUEST_ISA) $(shell sdl2-config --cflags) 
-LDFLAGS += $(CFLAGS_BUILD) $(shell sdl2-config --libs)
+CFLAGS  += $(CFLAGS_BUILD) $(CFLAGS_TRACE) -D__GUEST_ISA__=$(GUEST_ISA)
+LDFLAGS += $(CFLAGS_BUILD)
 ifneq ($(filter y,$(CONFIG_TARGET_NATIVE_ELF) $(CONFIG_TARGET_SHARE)),)
 CFLAGS += -pthread
 LDFLAGS += -pthread
@@ -79,3 +91,4 @@ include $(NEMU_HOME)/scripts/native.mk
 endif
 
 endif # reference dispatch
+endif

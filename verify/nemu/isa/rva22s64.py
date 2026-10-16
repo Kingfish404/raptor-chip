@@ -5,12 +5,13 @@ This is a directed/random architectural regression, not profile certification.
 Integer expectations use Python arithmetic; no RTL or NEMU semantic imports.
 """
 import argparse
+import ctypes
 import hashlib
 import json
 import random
 import struct
 from pathlib import Path
-from lib.reference import Reference
+from lib.reference import ISAAPI, Reference
 
 
 def main():
@@ -18,9 +19,20 @@ def main():
     p.add_argument('--xlen', type=int, choices=(32, 64), required=True)
     p.add_argument('--reference', type=Path, required=True)
     p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--profile', choices=('none', 'rva23'), default='none')
     p.add_argument('--mcountinhibit', choices=('absent', 'zero'), default='zero',
                    help='Expected optional CSR policy: standalone profile zero, Raptor reference absent')
     a = p.parse_args()
+    if a.profile == 'rva23':
+        if a.xlen != 64:
+            p.error('RVA23 requires RV64')
+        library = ctypes.CDLL(str(a.reference.resolve()))
+        query = library.nemu_difftest_isa_query
+        query.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
+        query.restype = ctypes.POINTER(ISAAPI)
+        api = query(1, ctypes.sizeof(ISAAPI)).contents
+        if api.supported & 0x7ff != 0x7ff or api.configure(api.supported) != 0:
+            raise RuntimeError('cannot enable the RVA23 extension bundle')
     ref = Reference(a.reference, a.xlen)
     s, x, mask = ref.state, a.xlen, ref.mask
     rows = []
@@ -229,7 +241,7 @@ def main():
         pc=ref.run([0x0010a00f])
         check('cmo-pmp-virtual-tval',[s.mcause[0],s.mtval[0],s.mepc[0]],[7,va,pc])
     failures=[row for row in rows if not row['passed']]
-    report=dict(xlen=x,seed=220064,mcountinhibit=a.mcountinhibit,
+    report=dict(xlen=x,seed=220064,mcountinhibit=a.mcountinhibit,profile=a.profile,
                 reference_sha256=hashlib.sha256(a.reference.read_bytes()).hexdigest(),
                 checker_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                 adapter_sha256=hashlib.sha256((Path(__file__).parents[1] / 'lib/reference.py').read_bytes()).hexdigest(),

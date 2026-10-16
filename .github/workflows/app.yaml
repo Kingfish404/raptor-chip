@@ -379,7 +379,7 @@ jobs:
       - name: Test OpenSBI on NEMU
         run: |
           make -C nemu run IMG=../third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin \
-            ARGS="-b -m 10000000 --log ./build/nemu-log.txt" 2>&1 | tee /tmp/nemu-opensbi.log
+            ARGS="-b -m 10000000 --log=./build/nemu-log.txt" 2>&1 | tee /tmp/nemu-opensbi.log
       - name: Download pre-built Linux kernel
         run: make linux-download-rv32 linux-download-rv64
       - name: Boot Linux 32-bit on NEMU

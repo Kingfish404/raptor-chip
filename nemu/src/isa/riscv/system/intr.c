@@ -29,6 +29,10 @@
 #endif
 
 extern NEMU_TLS word_t g_vaddr;
+NEMU_TLS paddr_t riscv_h_fault_gpa;
+NEMU_TLS bool riscv_h_fault_ptw;
+NEMU_TLS bool riscv_h_fault_write;
+NEMU_TLS bool riscv_h_explicit_trap;
 
 word_t isa_raise_intr(word_t NO, vaddr_t epc)
 {
@@ -47,6 +51,7 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
     switch (NO)
     {
     case MCA_ILLEGAL_INS:
+    case MCA_VIRT_INS:
       // RV32 fetch may retain the following parcel in cpu.inst. Illegal
       // compressed instructions report only their own 16-bit encoding.
       tval = (cpu.inst & 3) == 3 ? cpu.inst : (cpu.inst & 0xffff);
@@ -75,16 +80,20 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
       break;
     case MCA_ENV_CAL_UMO:
     case MCA_ENV_CAL_SMO:
+    case MCA_ENV_CAL_VSMO:
     case MCA_ENV_CAL_MMO:
       tval = 0;
       break;
     case MCA_INS_PAG_FAU:
+    case MCA_INS_GUEST_PAG_FAU:
       /* epc identifies the instruction; a straddling instruction can fault
        * on the second halfword, whose VA is retained by vaddr_ifetch. */
       tval = g_vaddr;
       break;
     case MCA_LOA_PAG_FAU:
     case MCA_STO_PAG_FAU:
+    case MCA_LOA_GUEST_PAG_FAU:
+    case MCA_STO_GUEST_PAG_FAU:
       tval = g_vaddr;
       break;
     default:
@@ -95,17 +104,63 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
   word_t ret_pc = 0;
   const bool is_interrupt = (NO & MCA_INTR_BIT) != 0;
   const word_t cause = NO & ~MCA_INTR_BIT;
-  const word_t delegation = cpu.sr[is_interrupt ? CSR_MIDELEG : CSR_MEDELEG];
+  const word_t delegation = cpu.sr[is_interrupt ? CSR_MIDELEG : CSR_MEDELEG] |
+      (is_interrupt ? (word_t)riscv_virtual_irq_mask() : 0);
   if (cpu.priv <= PRV_S)
   {
     // Interrupts consult only mideleg, exceptions only medeleg. Never shift
     // by the interrupt flag or by an unrepresentable delegation bit number.
     if (cause < XLEN && ((delegation >> cause) & 1))
     {
+      if (cpu.virt && riscv_h_gstage_preview_enabled() &&
+          ((cpu.sr[is_interrupt ? CSR_HIDELEG : CSR_HEDELEG] >> cause) & 1))
+      {
+        word_t vs_cause = is_interrupt &&
+            (((word_t)1 << cause) & (word_t)riscv_virtual_irq_mask())
+            ? MCA_INTR_BIT | (cause - 1) : NO;
+        cpu.sr[CSR_VSTVAL] = tval;
+        cpu.sr[CSR_VSEPC] = epc;
+        cpu.sr[CSR_VSCAUSE] = vs_cause;
+        csr_t reg_v = {.val = cpu.sr[CSR_VSSTATUS]};
+        reg_v.mstatus.spp = cpu.priv;
+        reg_v.mstatus.spie = reg_v.mstatus.sie;
+        reg_v.mstatus.sie = 0;
+        cpu.sr[CSR_VSSTATUS] = reg_v.val;
+        cpu.last_inst_priv = cpu.priv;
+        cpu.priv = PRV_S;
+        soft_tlb_flush();
+        word_t vstvec = cpu.sr[CSR_VSTVEC];
+        word_t base = vstvec & ~(word_t)0x3;
+        return is_interrupt && (vstvec & 0x3) == 1
+            ? base + (vs_cause & ~MCA_INTR_BIT) * 4 : base;
+      }
       // printf("NO: %x, (NO & (1 << (XLEN - 1))): %x, "
       //        "(1 << (NO & ~(1 << (XLEN - 1)))): %x\n",
       //        NO, (NO & (1 << (XLEN - 1))), (1 << (NO & ~(1 << (XLEN - 1)))));
       cpu.sr[CSR_STVAL] = tval;
+      if (riscv_h_gstage_preview_enabled())
+      {
+        bool guest_fault = NO == MCA_INS_GUEST_PAG_FAU ||
+            NO == MCA_LOA_GUEST_PAG_FAU || NO == MCA_STO_GUEST_PAG_FAU;
+        cpu.sr[CSR_HTVAL] = guest_fault ? riscv_h_fault_gpa >> 2 : 0;
+        cpu.sr[CSR_HTINST] = guest_fault && riscv_h_fault_ptw ?
+            (riscv_h_fault_write ? 0x3020 : 0x3000) : 0;
+        word_t hstatus = cpu.sr[CSR_HSTATUS] & ~((word_t)3 << 6);
+        bool guest_address = cpu.virt &&
+            (NO == MCA_BREAK_POINT || NO == MCA_INS_PAG_FAU || NO == MCA_LOA_PAG_FAU ||
+             NO == MCA_STO_PAG_FAU || guest_fault ||
+             NO == MCA_INS_ACC_FAU || NO == MCA_LOA_ACC_FAU ||
+             NO == MCA_STO_ACC_FAU || NO == MCA_INS_ADD_MIS ||
+             NO == MCA_LOA_ADD_MIS || NO == MCA_STO_ADD_MIS);
+        if (guest_address || riscv_h_explicit_trap) hstatus |= (word_t)1 << 6;
+        if (cpu.virt) hstatus |= (word_t)1 << 7;
+        if (cpu.virt)
+        {
+          hstatus &= ~((word_t)1 << 8);
+          if (cpu.priv == PRV_S) hstatus |= (word_t)1 << 8;
+        }
+        cpu.sr[CSR_HSTATUS] = hstatus;
+      }
       cpu.sr[CSR_SEPC] = epc;
       cpu.sr[CSR_SCAUSE] = NO;
 
@@ -123,6 +178,7 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
 
       cpu.last_inst_priv = cpu.priv;
       cpu.priv = PRV_S;
+      cpu.virt = false;
       soft_tlb_flush();
       {
         word_t stvec = cpu.sr[CSR_STVEC];
@@ -139,17 +195,45 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
     }
   }
   cpu.sr[CSR_MTVAL] = tval;
+  if (riscv_h_gstage_preview_enabled())
+  {
+    bool guest_fault = NO == MCA_INS_GUEST_PAG_FAU ||
+        NO == MCA_LOA_GUEST_PAG_FAU || NO == MCA_STO_GUEST_PAG_FAU;
+    cpu.sr[CSR_MTVAL2] = guest_fault ? riscv_h_fault_gpa >> 2 : 0;
+    cpu.sr[CSR_MTINST] = guest_fault && riscv_h_fault_ptw ?
+        (riscv_h_fault_write ? 0x3020 : 0x3000) : 0;
+  }
   cpu.sr[CSR_MEPC] = epc;
   cpu.sr[CSR_MCAUSE] = NO;
   csr_t reg = {.val = cpu.sr[CSR_MSTATUS]};
   reg.mstatus.mpp = cpu.priv;
   reg.mstatus.mpie = reg.mstatus.mie;
   reg.mstatus.mie = 0;
+  if (riscv_h_gstage_preview_enabled())
+  {
+    reg.val &= ~(word_t)(UINT64_C(3) << 38);
+    if (cpu.virt) reg.val |= (word_t)(UINT64_C(1) << 39);
+    bool guest_address = cpu.virt &&
+        (NO == MCA_BREAK_POINT || NO == MCA_INS_PAG_FAU || NO == MCA_LOA_PAG_FAU ||
+         NO == MCA_STO_PAG_FAU || NO == MCA_INS_GUEST_PAG_FAU ||
+         NO == MCA_LOA_GUEST_PAG_FAU || NO == MCA_STO_GUEST_PAG_FAU ||
+         NO == MCA_INS_ACC_FAU || NO == MCA_LOA_ACC_FAU ||
+         NO == MCA_STO_ACC_FAU || NO == MCA_INS_ADD_MIS ||
+         NO == MCA_LOA_ADD_MIS || NO == MCA_STO_ADD_MIS);
+    guest_address = guest_address || (riscv_data_virtual_mode() &&
+        (NO == MCA_LOA_PAG_FAU || NO == MCA_STO_PAG_FAU ||
+         NO == MCA_LOA_GUEST_PAG_FAU || NO == MCA_STO_GUEST_PAG_FAU ||
+         NO == MCA_LOA_ACC_FAU || NO == MCA_STO_ACC_FAU ||
+         NO == MCA_LOA_ADD_MIS || NO == MCA_STO_ADD_MIS));
+    if (guest_address || riscv_h_explicit_trap)
+      reg.val |= (word_t)(UINT64_C(1) << 38);
+  }
   cpu.sr[CSR_MSTATUS] = reg.val;
 
   cpu.last_inst_priv = cpu.priv;
   cpu.raise_intr = NO;
   cpu.priv = PRV_M;
+  cpu.virt = false;
   soft_tlb_flush();
   {
     word_t mtvec = cpu.sr[CSR_MTVEC];
@@ -172,9 +256,18 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
 // considering delegation, privilege level, and global interrupt enables.
 static inline bool can_take_interrupt(int bit, csr_t reg_mstatus)
 {
-  word_t deleg = cpu.sr[CSR_MIDELEG] & ((word_t)1 << bit);
+  word_t irq_bit = (word_t)1 << bit;
+  if (irq_bit & (word_t)riscv_virtual_irq_mask())
+  {
+    if (cpu.sr[CSR_HIDELEG] & irq_bit)
+      return cpu.virt && (cpu.priv < PRV_S ||
+                          (cpu.priv == PRV_S && (cpu.sr[CSR_VSSTATUS] & 0x2)));
+    return cpu.virt || cpu.priv < PRV_S ||
+           (cpu.priv == PRV_S && reg_mstatus.mstatus.sie);
+  }
+  word_t deleg = cpu.sr[CSR_MIDELEG] & irq_bit;
   if (deleg)
-    return (cpu.priv < PRV_S) ||
+    return cpu.virt || (cpu.priv < PRV_S) ||
            (cpu.priv == PRV_S && reg_mstatus.mstatus.sie);
   else
     return (cpu.priv < PRV_M) ||
@@ -241,6 +334,28 @@ word_t isa_query_intr()
     if (can_take_interrupt(5, reg_mstatus))
       return MCA_SUP_TIM_INT;
   }
+
+  if (pending & (1u << 10))
+  {
+    if (can_take_interrupt(10, reg_mstatus))
+      return MCA_VSUP_EXT_INT;
+  }
+
+  if (pending & (1u << 2))
+  {
+    if (can_take_interrupt(2, reg_mstatus))
+      return MCA_VSUP_SOF_INT;
+  }
+
+  if (pending & (1u << 6))
+  {
+    if (can_take_interrupt(6, reg_mstatus))
+      return MCA_VSUP_TIM_INT;
+  }
+
+  if (riscv_sscofpmf_enabled() && (pending & (1u << 13)) &&
+      can_take_interrupt(13, reg_mstatus))
+    return MCA_COU_OVE_INT;
 
   return INTR_EMPTY;
 #endif

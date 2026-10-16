@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from build_linux import build, overlay, verify
-from raptor_linux import HOME, kernel, sha
+from raptor_linux import HOME, NEMU_RVA23_OPTIONS, kernel, sha
 
 
 class LinuxTest(unittest.TestCase):
@@ -96,6 +96,37 @@ class LinuxTest(unittest.TestCase):
         self.assertEqual(int(data[18:26], 16), 0o100755)
         self.assertEqual(len(data) % 4, 0)
         self.assertIn(b'TRAILER!!!\0', data)
+
+    def test_nemu_rva23_kernel_options_are_isolated(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-rva23-test-', dir='/tmp') as temporary:
+            root = Path(temporary)
+            cached = root / 'cache/key'
+            cached.mkdir(parents=True)
+            (cached / 'built.json').write_text('{}')
+            original = 'CONFIG_64BIT=y\n# CONFIG_RISCV_ISA_ZICBOZ is not set\n'
+            (root / 'kernel.config').write_text(original)
+            source = {'version': '6.18.51', 'sha256': '0' * 64,
+                      'archive_url': 'https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.51.tar.xz'}
+            (root / 'kernel-source.json').write_text(json.dumps(source))
+            manifest = {'bits': 64, 'kernel_version': source['version'],
+                        'files': {name: sha(root / name) for name in ('kernel.config', 'kernel-source.json')}}
+            (root / 'manifest.json').write_text(json.dumps(manifest))
+            with patch('raptor_linux.run', return_value=b'compiler'), \
+                 patch('raptor_linux.identity', return_value='key') as key:
+                self.assertEqual(kernel(root, root / 'cache', 'test-', 'nemu-rva23'), cached)
+                options, disabled = key.call_args.args[0][3:5]
+                self.assertTrue(set(NEMU_RVA23_OPTIONS) <= set(options))
+                self.assertIn('FTRACE', disabled)
+                self.assertEqual(key.call_args.args[0][6], 'nemu-rva23')
+                kernel(root, root / 'cache', 'test-', 'fpga')
+                options = key.call_args.args[0][3]
+                for option in ('RISCV_ISA_V', 'RISCV_ISA_SUPM', 'RISCV_ISA_ZICBOZ', 'KVM'):
+                    self.assertNotIn(option, options)
+            self.assertEqual((root / 'kernel.config').read_text(), original)
+            manifest['bits'] = 32
+            (root / 'manifest.json').write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError, 'requires RV64'):
+                kernel(root, root / 'cache', 'test-', 'nemu-rva23')
 
     def test_netboot_rejects_kernel_without_cache_maintenance(self):
         from pack_netboot import pack

@@ -14,6 +14,7 @@
  ***************************************************************************************/
 
 #include <isa.h>
+#include <isa-extensions.h>
 #include <cpu/thread.h>
 #include <cpu/diffjournal.h>
 #include <cpu/multidiff.h>
@@ -58,7 +59,7 @@ void plic_sync_hart(void)
     else
         cpu.sr[CSR_MIP] &= ~((word_t)1 << 11);
     cpu.seip = plic_lines[2 * nemu_hartid + 1];
-    cpu.sr[CSR_SIP] = riscv_mip_value() & cpu.sr[CSR_MIDELEG] & 0x222;
+    cpu.sr[CSR_SIP] = riscv_mip_value() & cpu.sr[CSR_MIDELEG] & (word_t)riscv_supervisor_irq_mask();
 }
 #endif
 
@@ -99,7 +100,7 @@ static void plic_update_mip(void)
         {
             // External SEIP must not overwrite M-mode's software pending bit.
             hart->seip = has_irq;
-            hart->sr[CSR_SIP] = riscv_hart_mip_value(hart) & hart->sr[CSR_MIDELEG] & 0x222;
+            hart->sr[CSR_SIP] = riscv_hart_mip_value(hart) & hart->sr[CSR_MIDELEG] & (word_t)riscv_supervisor_irq_mask();
         }
     }
 #ifdef NEMU_HAS_THREADS

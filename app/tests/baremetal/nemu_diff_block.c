@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <stddef.h>
 
-_Alignas(4096) unsigned char nemu_block_stacks[HARTS][4096];
+_Alignas(4096) unsigned char nemu_test_stacks[HARTS][4096];
 static volatile unsigned barrier_count, barrier_generation, irq_count;
 typedef struct { uint64_t address; uint32_t length; uint16_t flags, next; } Descriptor;
 typedef struct { uint32_t type, reserved; uint64_t sector; } Request;
@@ -167,7 +167,7 @@ static void failures(void)
 }
 #endif
 
-void nemu_block_main(unsigned hart)
+void nemu_test_main(unsigned hart)
 {
   __asm__ volatile ("csrw mstatus, zero\ncsrw mie, %0" :: "r"(8) : "memory");
 #ifdef BAD_WIDTH

@@ -1,0 +1,31 @@
+/include/ "spike-rv64gc-nemu.dts"
+
+/ {
+	model = "Raptor NEMU RVA23 platform";
+	poweroff {
+		compatible = "syscon-poweroff";
+		regmap = <&rva23_test>;
+		offset = <0>;
+		value = <0x5555>;
+	};
+	cpus {
+		cpu@0 {
+			riscv,isa = "rv64imafdcbvh_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_zkt_zawrs_zfa_zfhmin_zca_zcb_zcd_zcmop_zba_zbb_zbc_zbs_zvbb_zvfhmin_zvkt_smstateen_smnpm_sscofpmf_ssnpm_ssstateen_sstc_svade_svinval_svnapot_svpbmt";
+			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "b", "v", "h",
+				"zicbom", "zicbop", "zicboz", "zicntr", "zicond", "zicsr", "zifencei",
+				"zihintntl", "zihintpause", "zihpm", "zimop", "zkt", "zawrs", "zfa", "zfhmin",
+				"zca", "zcb", "zcd", "zcmop", "zba", "zbb", "zbc", "zbs", "zvbb", "zvfhmin", "zvkt",
+				"smstateen", "smnpm", "sscofpmf", "ssnpm", "ssstateen", "sstc", "svade",
+				"svinval", "svnapot", "svpbmt";
+			riscv,cbom-block-size = <64>;
+			riscv,cbop-block-size = <64>;
+			riscv,cboz-block-size = <64>;
+			riscv,pmpregions = <8>;
+		};
+	};
+	soc {
+		rva23_test: test@100000 {
+			compatible = "sifive,test1", "sifive,test0", "syscon";
+		};
+	};
+};

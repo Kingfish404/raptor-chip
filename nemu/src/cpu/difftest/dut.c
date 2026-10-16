@@ -14,8 +14,12 @@
 ***************************************************************************************/
 
 #include <dlfcn.h>
-
 #include <isa.h>
+#ifdef CONFIG_ISA_riscv
+#include <isa-extensions.h>
+#include <difftest-vector.h>
+#endif
+
 #include <cpu/cpu.h>
 #include <memory/paddr.h>
 #include <utils.h>
@@ -32,6 +36,22 @@ uint32_t (*ref_difftest_state_version)(void) = NULL;
 bool difftest_ref_loaded = false;
 
 #ifdef CONFIG_DIFFTEST
+
+#ifdef CONFIG_ISA_riscv
+static const NemuDiffVectorAPI *ref_vector_api;
+
+static void check_vector_state(vaddr_t pc)
+{
+  if (!ref_vector_api) return;
+  NemuDiffVectorState reference_state;
+  Assert(ref_vector_api->get_state(0, &reference_state) == 0, "vector reference state unavailable");
+  if (memcmp(cpu.vreg, reference_state.reg, sizeof(cpu.vreg))) {
+    fprintf(stderr, "NEMU_DIFFTEST_VECTOR_FAIL pc=" FMT_WORD "\n", pc);
+    nemu_state.state = NEMU_ABORT;
+    nemu_state.halt_pc = pc;
+  }
+}
+#endif
 
 static bool is_skip_ref = false;
 static int skip_dut_nr_inst = 0;
@@ -79,6 +99,17 @@ void init_difftest(char *ref_so_file, long img_size, int port) {
   handle = dlopen(ref_so_file, RTLD_LAZY);
   assert(handle);
 
+#ifdef CONFIG_ISA_riscv
+  if (riscv_isa_extensions) {
+    NemuISAQuery query = (NemuISAQuery)dlsym(handle, "nemu_difftest_isa_query");
+    const NemuISAAPI *api = query ? query(NEMU_ISA_API_VERSION, sizeof(NemuISAAPI)) : NULL;
+    Assert(api && api->version == NEMU_ISA_API_VERSION && api->size == sizeof(NemuISAAPI)
+           && api->xlen == XLEN && api->configure && !api->locked
+           && !(riscv_isa_extensions & ~api->supported), "Reference lacks requested ISA extensions");
+    Assert(api->configure(riscv_isa_extensions) == 0, "Reference ISA configuration failed");
+  }
+#endif
+
   ref_difftest_memcpy = dlsym(handle, "difftest_memcpy");
   assert(ref_difftest_memcpy);
 
@@ -106,6 +137,19 @@ void init_difftest(char *ref_so_file, long img_size, int port) {
       "If it is not necessary, you can turn it off in menuconfig.", ref_so_file);
 
   ref_difftest_init(port);
+#ifdef CONFIG_ISA_riscv
+  if (riscv_v128_preview_enabled()) {
+    NemuDiffVectorQuery vector_query = (NemuDiffVectorQuery)dlsym(handle, "nemu_difftest_vector_query");
+    ref_vector_api = vector_query ? vector_query(NEMU_DIFF_VECTOR_VERSION, sizeof(NemuDiffVectorAPI)) : NULL;
+    Assert(ref_vector_api && ref_vector_api->version == NEMU_DIFF_VECTOR_VERSION &&
+           ref_vector_api->size == sizeof(NemuDiffVectorAPI) && ref_vector_api->xlen == XLEN &&
+           ref_vector_api->set_state && ref_vector_api->get_state,
+           "Reference lacks vector register state API");
+    NemuDiffVectorState vector_state;
+    memcpy(vector_state.reg, cpu.vreg, sizeof(cpu.vreg));
+    Assert(ref_vector_api->set_state(0, &vector_state) == 0, "Reference vector initialization failed");
+  }
+#endif
   difftest_ref_loaded = true;
   ref_difftest_memcpy(RESET_VECTOR, guest_to_host(RESET_VECTOR), img_size, DIFFTEST_TO_REF);
   ref_difftest_regcpy(&cpu, DIFFTEST_TO_REF);
@@ -116,6 +160,9 @@ static void checkregs(CPU_state *ref, vaddr_t pc) {
     nemu_state.state = NEMU_ABORT;
     nemu_state.halt_pc = pc;
   }
+#ifdef CONFIG_ISA_riscv
+  check_vector_state(pc);
+#endif
 }
 
 void difftest_step(vaddr_t pc, vaddr_t npc) {
@@ -140,6 +187,13 @@ void difftest_step(vaddr_t pc, vaddr_t npc) {
   if (is_skip_ref) {
     // to skip the checking of an instruction, just copy the reg state to reference design
     ref_difftest_regcpy(&cpu, DIFFTEST_TO_REF);
+#ifdef CONFIG_ISA_riscv
+    if (ref_vector_api) {
+      NemuDiffVectorState vector_state;
+      memcpy(vector_state.reg, cpu.vreg, sizeof(cpu.vreg));
+      Assert(ref_vector_api->set_state(0, &vector_state) == 0, "Reference vector resynchronization failed");
+    }
+#endif
     is_skip_ref = false;
     return;
   }

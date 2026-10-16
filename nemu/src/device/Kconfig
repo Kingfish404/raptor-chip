@@ -158,7 +158,11 @@ endif # HAS_AUDIO
 
 menuconfig HAS_DISK
   bool "Enable disk"
+  depends on !TARGET_AM
   default y
+  help
+    Provide a virtio-mmio block device using a host raw image. The command
+    line selects volatile (default), readonly or persistent storage.
 
 if HAS_DISK
 config DISK_CTL_PORT

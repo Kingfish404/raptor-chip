@@ -5,6 +5,7 @@ from lib.harness import Check, parser, sha256
 
 SOURCES = ['nemu/src/cpu/smp.c', 'nemu/src/cpu/thread.c', 'nemu/src/cpu/difftest/multihart-state.c',
            'nemu/src/device/timer.c', 'nemu/src/device/intr.c', 'nemu/src/isa/riscv/system/pmp.c',
+           'nemu/src/isa/riscv/extensions.c',
            'nemu/src/device/io/map.c', 'nemu/src/device/io/mmio.c', 'nemu/src/memory/paddr.c',
            'nemu/src/utils/timer.c', 'app/tests/host/nemu_dma_rng.c']
 

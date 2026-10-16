@@ -84,6 +84,11 @@ typedef struct net_timer
 
 static uint8_t *virtio_net_base;
 static Slirp *slirp;
+static struct {
+  unsigned host_port;
+  unsigned guest_port;
+} host_forwards[16];
+static unsigned host_forward_count;
 static net_timer_t *timers;
 static struct pollfd poll_fds[SLIRP_MAX_POLL_FDS];
 static size_t poll_fd_count;
@@ -113,6 +118,38 @@ typedef struct {
 static NetInput net_inputs[2][512];
 static size_t net_input_count[2], net_input_next[2];
 static ssize_t slirp_send_packet(const void *packet, size_t packet_len, void *opaque);
+
+static unsigned forward_port(const char **cursor)
+{
+  unsigned port = 0, digits = 0;
+  while (**cursor >= '0' && **cursor <= '9') {
+    port = port * 10 + *(*cursor)++ - '0';
+    if (++digits > 5 || port > 65535) return 0;
+  }
+  return port;
+}
+
+int net_add_hostfwd(const char *spec)
+{
+  if (!spec || strncmp(spec, "tcp:", 4) ||
+      host_forward_count == ARRLEN(host_forwards)) return -1;
+  const char *cursor = spec + 4;
+  unsigned host_port = forward_port(&cursor);
+  if (!host_port || *cursor++ != ':') return -1;
+  unsigned guest_port = forward_port(&cursor);
+  if (!guest_port || *cursor) return -1;
+  for (unsigned index = 0; index < host_forward_count; index++)
+    if (host_forwards[index].host_port == host_port) return -1;
+  host_forwards[host_forward_count].host_port = host_port;
+  host_forwards[host_forward_count++].guest_port = guest_port;
+  return 0;
+}
+
+static void close_net(void)
+{
+  if (slirp) slirp_cleanup(slirp);
+  slirp = NULL;
+}
 
 static void input_error(void)
 {
@@ -667,6 +704,17 @@ void init_net(void)
   if (!scripted_net) {
     slirp = slirp_new(&config, &slirp_callbacks, NULL);
     Assert(slirp != NULL, "failed to initialize libslirp");
+    atexit(close_net);
+    struct in_addr host = {.s_addr = htonl(INADDR_LOOPBACK)};
+    for (unsigned index = 0; index < host_forward_count; index++) {
+      unsigned host_port = host_forwards[index].host_port;
+      unsigned guest_port = host_forwards[index].guest_port;
+      if (slirp_add_hostfwd(slirp, false, host, host_port, config.vdhcp_start, guest_port) < 0) {
+        fprintf(stderr, "virtio-net: cannot bind tcp 127.0.0.1:%u (port busy or unavailable)\n", host_port);
+        exit(EXIT_FAILURE);
+      }
+      Log("virtio-net: forward tcp 127.0.0.1:%u -> 10.0.2.15:%u", host_port, guest_port);
+    }
   }
 
   virtio_net_base = new_space(VIRTIO_NET_SIZE);

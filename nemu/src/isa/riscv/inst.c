@@ -18,6 +18,8 @@
 #include "local-include/fp.h"
 #include "local-include/fp-exec.h"
 #include <isa-def.h>
+#include <isa-extensions.h>
+#include <vector-control.h>
 #include <cpu/cpu.h>
 #include <cpu/thread.h>
 #include <cpu/ifetch.h>
@@ -25,13 +27,19 @@
 #include <cpu/difftest.h>
 #include <cpu/icache.h>
 #include <cpu/multidiff.h>
+#include <device/mmio.h>
 #include <memory/tlb.h>
+#include <memory/trap.h>
+#include <memory/paddr.h>
 #include <memory/vaddr.h>
 #include <stdlib.h>
 #include <stdio.h>
 
 #define R(i) gpr(i)
 #define CSR(i) sr(i)
+extern NEMU_TLS word_t g_vaddr;
+bool pmp_check(paddr_t addr, int size, uint32_t priv,
+               bool op_r, bool op_w, bool op_x);
 static inline bool sstc_enabled(void)
 {
 #ifdef CONFIG_RV64
@@ -42,7 +50,9 @@ static inline bool sstc_enabled(void)
 }
 word_t riscv_hart_mip_value(const riscv_CPU_state *hart)
 {
-  word_t value = hart->sr[CSR_MIP] | (hart->seip ? (word_t)0x200 : 0);
+  word_t value = (hart->sr[CSR_MIP] & ~(word_t)riscv_virtual_irq_mask()) |
+      (hart->seip ? (word_t)0x200 : 0);
+  value |= hart->sr[CSR_HVIP] & (word_t)riscv_virtual_irq_mask();
 #ifdef CONFIG_RAPTOR_MEMORY_MAP
   value = (value & ~((word_t)1 << 16)) | ((hart->sr[CSR_MBERR_STATUS] & 1) << 16);
 #endif
@@ -57,20 +67,80 @@ word_t riscv_hart_mip_value(const riscv_CPU_state *hart)
     // the DUT timer input at each step, rather than using its unrelated clock.
     value = (value & ~(word_t)0x20) | (hart->stip ? 0x20 : 0);
   }
+  if (riscv_virtual_timer_pending(hart)) value |= (word_t)0x40;
   return value;
 }
 word_t riscv_mip_value(void)
 {
   return riscv_hart_mip_value(&cpu);
 }
+static inline uint16_t guest_csr_alias(uint16_t csr)
+{
+#ifdef CONFIG_RV64
+  if (cpu.virt)
+  {
+    switch (csr)
+    {
+    case CSR_SSTATUS: return CSR_VSSTATUS;
+    case CSR_SIE: return CSR_VSIE;
+    case CSR_STVEC: return CSR_VSTVEC;
+    case CSR_SSCRATCH: return CSR_VSSCRATCH;
+    case CSR_SEPC: return CSR_VSEPC;
+    case CSR_SCAUSE: return CSR_VSCAUSE;
+    case CSR_STVAL: return CSR_VSTVAL;
+    case CSR_SIP: return CSR_VSIP;
+    case 0x14d: return CSR_VSTIMECMP;
+    case CSR_SATP: return CSR_VSATP;
+    default: break;
+    }
+  }
+#endif
+  return csr;
+}
+
+static inline bool guest_shared_supervisor_csr(uint16_t csr)
+{
+  return csr == CSR_SCOUNTEREN || csr == CSR_SENVCFG ||
+      (csr >= CSR_SSTATEEN0 && csr <= CSR_SSTATEEN3);
+}
+
 static inline word_t csr_read_value(uint16_t csr)
 {
-  csr &= 0xfff;
+  csr = guest_csr_alias(csr & 0xfff);
+#ifdef CONFIG_RV64
+  if (csr == CSR_VSSTATUS && riscv_h_gstage_preview_enabled())
+  {
+    word_t value = (CSR(CSR_VSSTATUS) & ~((word_t)1 << 63)) | ((word_t)2 << 32);
+    if (((value >> 13) & 3) == 3 || ((value >> 9) & 3) == 3)
+      value |= (word_t)1 << 63;
+    return value;
+  }
+  if (csr == CSR_HSTATUS && riscv_h_gstage_preview_enabled())
+    return CSR(CSR_HSTATUS) | ((word_t)2 << 32);
+  if ((csr == CSR_HGEIE || csr == CSR_HGEIP) && riscv_h_gstage_preview_enabled())
+    return 0;
+  if (csr == CSR_HENVCFG && riscv_h_gstage_preview_enabled())
+    return CSR(CSR_HENVCFG) & (CSR(CSR_MENVCFG) | ~((word_t)3 << 62));
+#endif
   if ((csr == CSR_TIME || csr == CSR_TIMEH) && multidiff_clint_active() && nemu_md_timer_update)
     nemu_md_timer_update();
+  if (csr == CSR_TIME && cpu.virt && riscv_h_gstage_preview_enabled())
+    return CSR(CSR_TIME) + CSR(CSR_HTIMEDELTA);
   if (csr == CSR_MIP) return riscv_mip_value();
-  if (csr == CSR_SIP) return riscv_mip_value() & CSR(CSR_MIDELEG) & (word_t)0x222;
-  if (csr == CSR_SIE) return CSR(CSR_MIE) & CSR(CSR_MIDELEG) & (word_t)0x222;
+  if (csr == CSR_SIP) return riscv_mip_value() & CSR(CSR_MIDELEG) & (word_t)riscv_supervisor_irq_mask();
+  if (csr == CSR_SIE) return CSR(CSR_MIE) & CSR(CSR_MIDELEG) & (word_t)riscv_supervisor_irq_mask();
+  if (riscv_h_gstage_preview_enabled())
+  {
+    word_t virtual_mask = (word_t)riscv_virtual_irq_mask();
+    if (csr == CSR_HIP) return riscv_mip_value() & virtual_mask;
+    if (csr == CSR_HIE) return CSR(CSR_MIE) & virtual_mask;
+    if (csr == CSR_VSIP) return (riscv_mip_value() & CSR(CSR_HIDELEG) & virtual_mask) >> 1;
+    if (csr == CSR_VSIE) return (CSR(CSR_MIE) & CSR(CSR_HIDELEG) & virtual_mask) >> 1;
+  }
+  if (csr == CSR_SCOUNTOVF) return 0;
+  if (csr >= CSR_HSTATEEN0 && csr <= CSR_HSTATEEN3 &&
+      riscv_h_gstage_preview_enabled() && riscv_smstateen_preview_enabled())
+    return CSR(csr) & CSR(CSR_MSTATEEN0 + csr - CSR_HSTATEEN0);
   if (is_hpm_zero_csr(csr))
     return 0;
   if (csr == CSR_FFLAGS)
@@ -101,6 +171,86 @@ static inline word_t csr_rmw_value(uint16_t csr)
     return (riscv_mip_value() & ~(word_t)0x200) | (CSR(CSR_MIP) & (word_t)0x200);
   return csr_read_value(csr);
 }
+static inline word_t stateen_machine_mask(uint16_t csr)
+{
+#ifdef CONFIG_RV64
+  return ((word_t)1 << 63) | (csr == CSR_MSTATEEN0 ? (word_t)1 << 62 : 0);
+#else
+  return ((word_t)1 << 31) | (csr == CSR_MSTATEEN0H ? (word_t)1 << 30 : 0);
+#endif
+}
+
+static inline void stateen_write(uint16_t csr, word_t value)
+{
+  if (csr >= CSR_SSTATEEN0 && csr <= CSR_SSTATEEN3) return;
+#ifdef CONFIG_RV64
+  if (csr >= CSR_HSTATEEN0 && csr <= CSR_HSTATEEN3 &&
+      riscv_h_gstage_preview_enabled() && riscv_smstateen_preview_enabled())
+  {
+    unsigned index = csr - CSR_HSTATEEN0;
+    sr(csr) = value & stateen_machine_mask(CSR_MSTATEEN0 + index) &
+        CSR(CSR_MSTATEEN0 + index);
+    return;
+  }
+  if (csr >= CSR_MSTATEEN0 && csr <= CSR_MSTATEEN3)
+  {
+    sr(csr) = value & stateen_machine_mask(csr);
+    if (riscv_h_gstage_preview_enabled())
+      sr(CSR_HSTATEEN0 + csr - CSR_MSTATEEN0) &= sr(csr);
+  }
+#else
+  if (csr >= CSR_MSTATEEN0H && csr <= CSR_MSTATEEN3H)
+    sr(csr) = value & stateen_machine_mask(csr);
+#endif
+}
+
+static inline bool stateen_machine_allows_supervisor(uint16_t csr)
+{
+  if (!riscv_smstateen_preview_enabled()) return true;
+  unsigned index;
+  unsigned bit;
+  if (csr >= CSR_SSTATEEN0 && csr <= CSR_SSTATEEN3)
+  {
+    index = csr - CSR_SSTATEEN0;
+    bit = 63;
+  }
+  else if (csr >= CSR_HSTATEEN0 && csr <= CSR_HSTATEEN3 &&
+           riscv_h_gstage_preview_enabled())
+  {
+    index = csr - CSR_HSTATEEN0;
+    bit = 63;
+  }
+  else if (csr == CSR_HENVCFG && riscv_h_gstage_preview_enabled())
+  {
+    index = 0;
+    bit = 62;
+  }
+  else if (csr == CSR_SENVCFG)
+  {
+    index = 0;
+    bit = 62;
+  }
+  else return true;
+#ifdef CONFIG_RV64
+  return (CSR(CSR_MSTATEEN0 + index) >> bit) & 1;
+#else
+  return (CSR(CSR_MSTATEEN0H + index) >> (bit - 32)) & 1;
+#endif
+}
+
+static inline bool stateen_guest_access(uint16_t csr)
+{
+#ifdef CONFIG_RV64
+  if (!cpu.virt || cpu.priv != PRV_S || !riscv_h_gstage_preview_enabled() ||
+      !riscv_smstateen_preview_enabled()) return true;
+  if (csr == CSR_SENVCFG) return (CSR(CSR_HSTATEEN0) >> 62) & 1;
+  if (csr >= CSR_SSTATEEN0 && csr <= CSR_SSTATEEN3)
+    return (CSR(CSR_HSTATEEN0 + csr - CSR_SSTATEEN0) >> 63) & 1;
+#else
+  (void)csr;
+#endif
+  return true;
+}
 /* CSR write with PMP hook: routes writes to pmpcfg/pmpaddr through
  * pmp_csr_write() which enforces WARL masking and L-bit lockdown.  All
  * other CSRs fall through to the raw cpu.sr[] store. */
@@ -128,15 +278,15 @@ static inline word_t csrw_warl(uint16_t c, word_t v)
 #ifdef CONFIG_RV_MCOUNTINHIBIT
   if (c == CSR_MCOUNTINHIBIT) return 0;
 #endif
-  if (c == CSR_MTVEC || c == CSR_STVEC)
+  if (c == CSR_MTVEC || c == CSR_STVEC || c == CSR_VSTVEC)
   {
     return (v & ~(word_t)0x3) | ((v & 0x2) ? 0 : (v & 0x3));
   }
-  if (c == CSR_MEPC || c == CSR_SEPC)
+  if (c == CSR_MEPC || c == CSR_SEPC || c == CSR_VSEPC)
   {
     return v & ~(word_t)0x1;
   }
-  if (c == CSR_SATP)
+  if (c == CSR_SATP || c == CSR_VSATP)
   {
 #ifdef CONFIG_RV64
     /* ASID width is a platform choice: generic RV64 uses 16 bits, while
@@ -147,15 +297,53 @@ static inline word_t csrw_warl(uint16_t c, word_t v)
     return v;
 #endif
   }
+#ifdef CONFIG_RV64
+  if (c == CSR_HEDELEG)
+    return v & (word_t)0xcb1fe;
+  if (c == CSR_HCOUNTEREN)
+    return v & (word_t)0x7;
+  if (c == CSR_HGEIE)
+    return 0;
+  if (c == CSR_HIDELEG || c == CSR_HVIP)
+    return v & (word_t)riscv_virtual_irq_mask();
+  if (c == CSR_HSTATUS)
+  {
+    unsigned hupmm = (v >> 48) & 3;
+    if (!(riscv_isa_extensions & NEMU_ISA_EXT_SSNPM) || hupmm == 1) hupmm = 0;
+    return (v & (((word_t)15 << 6) | CSR_HSTATUS_VTVM |
+                 CSR_HSTATUS_VTW | CSR_HSTATUS_VTSR)) | ((word_t)2 << 32) |
+        ((word_t)hupmm << 48);
+  }
+  if (c == CSR_HENVCFG)
+  {
+    word_t result = (v & (word_t)0xf0) |
+        (word_t)riscv_envcfg_pmm(v, NEMU_ISA_EXT_SSNPM) |
+        (v & CSR(CSR_MENVCFG) & ((word_t)3 << 62));
+    return (result & (word_t)0x30) == (word_t)0x20
+        ? result | (word_t)0x10 : result;
+  }
+  if (c == CSR_VSSTATUS)
+    return (v & ((word_t)3 << 18 | (word_t)3 << 13 | (word_t)1 << 8 |
+                 (word_t)1 << 5 | (word_t)1 << 1 |
+                 (riscv_v128_preview_enabled() ? CSR_MSTATUS_VS_MASK : 0))) |
+        ((word_t)2 << 32);
+  if (c == CSR_HGATP)
+  {
+    word_t mode = v >> 60;
+    return mode == 8 ? ((word_t)8 << 60) | (v & (((word_t)1 << 44) - 4)) : 0;
+  }
+#endif
   if (c == CSR_MCOUNTEREN || c == CSR_SCOUNTEREN)
   {
     return v & (word_t)0x7;
   }
 #ifdef CONFIG_RAPTOR_MEMORY_MAP
-  if (c == CSR_MIE) return v & (word_t)0x10aaa;
+  if (c == CSR_MIE) return v & ((word_t)0x10aaa | (riscv_sscofpmf_enabled() ? (word_t)0x2000 : 0) |
+                                   (word_t)riscv_virtual_irq_mask());
   if (c == CSR_MBERR_STATUS) return CSR(CSR_MBERR_STATUS) & ~(v & (word_t)3);
 #else
-  if (c == CSR_MIE) return v & (word_t)0xaaa;
+  if (c == CSR_MIE) return v & ((word_t)0xaaa | (riscv_sscofpmf_enabled() ? (word_t)0x2000 : 0) |
+                                   (word_t)riscv_virtual_irq_mask());
 #endif
   if (c == CSR_MENVCFGH)
     return v & (word_t)0x80000000;
@@ -166,14 +354,15 @@ static inline word_t csrw_warl(uint16_t c, word_t v)
   }
   if (c == CSR_SENVCFG)
   {
-    word_t result = v & (word_t)0xf0;
+    word_t result = (v & (word_t)0xf0) | (word_t)riscv_envcfg_pmm(v, NEMU_ISA_EXT_SSNPM);
     return (result & (word_t)0x30) == (word_t)0x20
         ? result | (word_t)0x10 : result;
   }
   if (c == CSR_MENVCFG)
   {
 #ifdef CONFIG_RV64
-    word_t result = v & ((word_t)0xc000000000000000ull | (word_t)0xf0);
+    word_t result = (v & ((word_t)0xc000000000000000ull | (word_t)0xf0))
+        | (word_t)riscv_envcfg_pmm(v, NEMU_ISA_EXT_SMNPM);
 #else
     word_t result = v & (word_t)0xf0;
 #endif
@@ -186,10 +375,13 @@ static inline word_t csrw_warl(uint16_t c, word_t v)
 #define CSRW(i, v)                                                                      \
   do                                                                                    \
   {                                                                                     \
-    uint16_t _c = (uint16_t)((i) & 0xfff);                                              \
+    uint16_t _c = guest_csr_alias((uint16_t)((i) & 0xfff));                             \
     word_t _v = csrw_warl(_c, (word_t)(v));                                             \
+    bool _pmm_changed = (_c == CSR_SENVCFG || _c == CSR_MENVCFG ||                      \
+                         _c == CSR_HENVCFG) &&                                          \
+        ((CSR(_c) ^ _v) & (word_t)RISCV_ENVCFG_PMM);                                    \
     /* satp WARL: drop entire write if MODE is unsupported (Priv §10.6.1). */           \
-    if (_c == CSR_SATP && !csrw_satp_accept(_v))                                        \
+    if ((_c == CSR_SATP || _c == CSR_VSATP) && !csrw_satp_accept(_v))                   \
     {                                                                                   \
       cpu.last_csr_wr = _c;                                                             \
       break;                                                                            \
@@ -203,7 +395,12 @@ static inline word_t csrw_warl(uint16_t c, word_t v)
       else                                                                              \
         CSR(CSR_FCSR) = _v & 0xff;                                                      \
       CSR(CSR_MSTATUS) = (CSR(CSR_MSTATUS) & ~CSR_MSTATUS_FS_MASK) | ((word_t)3 << 13); \
+      if (cpu.virt) CSR(CSR_VSSTATUS) |= CSR_MSTATUS_FS_MASK;                          \
     }                                                                                   \
+    else if (is_vector_csr(_c))                                                         \
+      riscv_vector_csr_write(_c, _v);                                                  \
+    else if (is_stateen_csr(_c))                                                        \
+      stateen_write(_c, _v);                                                           \
     else if (is_hpm_zero_csr(_c))                                                       \
     {                                                                                   \
       /* Optional HPM counters/event selectors are implemented as WARL-zero. */         \
@@ -212,16 +409,37 @@ static inline word_t csrw_warl(uint16_t c, word_t v)
     {                                                                                   \
       if (_c == CSR_MIP)                                                                \
       {                                                                                \
-        word_t mask = (word_t)0x222 & ~(sstc_enabled() ? (word_t)0x20 : 0);                \
+        word_t mask = (word_t)riscv_supervisor_irq_mask() &                            \
+            ~(sstc_enabled() ? (word_t)0x20 : 0);                                       \
         sr(_c) = (sr(_c) & ~mask) | (_v & mask);                                          \
+        if (riscv_h_gstage_preview_enabled())                                           \
+          CSR(CSR_HVIP) = (CSR(CSR_HVIP) & ~(word_t)0x4) | (_v & (word_t)0x4);          \
       }                      \
+      else if (_c == CSR_HIE || _c == CSR_VSIE)                                         \
+      {                                                                                \
+        word_t mask = (word_t)riscv_virtual_irq_mask();                                 \
+        if (_c == CSR_VSIE) mask &= CSR(CSR_HIDELEG);                                   \
+        word_t bits = _c == CSR_VSIE ? _v << 1 : _v;                                   \
+        CSR(CSR_MIE) = (CSR(CSR_MIE) & ~mask) | (bits & mask);                           \
+      }                                                                                \
+      else if (_c == CSR_HIP || _c == CSR_VSIP)                                         \
+      {                                                                                \
+        word_t mask = (word_t)0x4;                                                      \
+        if (_c == CSR_VSIP) mask &= CSR(CSR_HIDELEG);                                   \
+        word_t bits = _c == CSR_VSIP ? _v << 1 : _v;                                   \
+        CSR(CSR_HVIP) = (CSR(CSR_HVIP) & ~mask) | (bits & mask);                         \
+      }                                                                                \
       else                                                                              \
         sr(_c) = _v;                                                                    \
     }                                                                                   \
+    if (_c == CSR_MENVCFG && riscv_h_gstage_preview_enabled())                          \
+      CSR(CSR_HENVCFG) &= _v | ~(word_t)(UINT64_C(3) << 62);                           \
     cpu.last_csr_wr = _c;                                                               \
     /* Flush soft TLB on writes to CSRs that affect address translation */              \
-    if (_c == CSR_SATP || _c == CSR_MSTATUS || _c == CSR_SSTATUS ||                     \
-        _c == CSR_MSTATUSH)                                                             \
+    if (_c == CSR_SATP || _c == CSR_VSATP || _c == CSR_HGATP ||                         \
+        _c == CSR_HSTATUS || _c == CSR_VSSTATUS ||                                      \
+        _c == CSR_MSTATUS || _c == CSR_SSTATUS ||                                       \
+        _c == CSR_MSTATUSH || _pmm_changed)                                              \
       soft_tlb_flush();                                                                 \
   } while (0)
 #define Mr vaddr_read
@@ -254,48 +472,227 @@ enum cbo_kind
   CBO_ZERO,
 };
 
-static bool cbo_access_enabled(enum cbo_kind kind)
+static word_t cbo_access_exception(enum cbo_kind kind)
 {
   if (cpu.priv == PRV_M)
-    return true;
+    return 0;
 
   word_t menvcfg = CSR(CSR_MENVCFG);
   word_t senvcfg = CSR(CSR_SENVCFG);
-  bool machine_enabled;
-  bool supervisor_enabled;
+  word_t henvcfg = CSR(CSR_HENVCFG);
+  word_t mask;
   if (kind == CBO_INVAL)
-  {
-    machine_enabled = (menvcfg & (word_t)0x30) != 0;
-    supervisor_enabled = (senvcfg & (word_t)0x30) != 0;
-  }
+    mask = (word_t)0x30;
   else if (kind == CBO_CLEAN_FLUSH)
-  {
-    machine_enabled = (menvcfg & (word_t)0x40) != 0;
-    supervisor_enabled = (senvcfg & (word_t)0x40) != 0;
-  }
+    mask = (word_t)0x40;
   else
-  {
-    machine_enabled = (menvcfg & (word_t)0x80) != 0;
-    supervisor_enabled = (senvcfg & (word_t)0x80) != 0;
-  }
-  return machine_enabled && (cpu.priv != PRV_U || supervisor_enabled);
+    mask = (word_t)0x80;
+  if (!(menvcfg & mask) || (cpu.priv == PRV_U && !cpu.virt && !(senvcfg & mask)))
+    return MCA_ILLEGAL_INS;
+  if (cpu.virt && (!(henvcfg & mask) || (cpu.priv == PRV_U && !(senvcfg & mask))))
+    return MCA_VIRT_INS;
+  return 0;
 }
 
 static bool cbo_prepare(Decode *s, enum cbo_kind kind)
 {
-  if (cbo_access_enabled(kind))
-    return true;
-  s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
-  difftest_skip_ref();
+  word_t exception = cbo_access_exception(kind);
+  if (!exception) return true;
+  s->dnpc = isa_raise_intr(exception, s->pc);
+  if (exception == MCA_ILLEGAL_INS) difftest_skip_ref();
   return false;
 }
+
+static void vector_memory_execute(Decode *s, bool store)
+{
+  word_t cause = riscv_vector_memory(s->isa.inst, store);
+  if (cause) s->dnpc = isa_raise_intr(cause, s->pc);
+}
+
+#ifdef CONFIG_RV64
+static word_t hypervisor_pointer_mask(word_t address, bool execute_access)
+{
+  if (execute_access || !(riscv_isa_extensions & NEMU_ISA_EXT_SSNPM) ||
+      ((CSR(CSR_MSTATUS) | CSR(CSR_VSSTATUS)) & ((word_t)1 << 19)))
+    return address;
+  bool virtual_supervisor = (CSR(CSR_HSTATUS) & ((word_t)1 << 8)) != 0;
+  unsigned pmm = virtual_supervisor ? (CSR(CSR_HENVCFG) >> 32) & 3 :
+      cpu.priv == PRV_U ? (CSR(CSR_HSTATUS) >> 48) & 3 :
+      (CSR(CSR_SENVCFG) >> 32) & 3;
+  return riscv_pointer_mask_value(address, pmm, (CSR(CSR_VSATP) >> 60) != 0);
+}
+
+static void hypervisor_memory_trap(Decode *s, word_t trap)
+{
+  riscv_h_explicit_trap = true;
+  s->dnpc = isa_raise_intr(trap, s->pc);
+  riscv_h_explicit_trap = false;
+}
+
+static bool hypervisor_memory_piece(Decode *s, bool store, bool execute_access,
+                                    int length, bool misaligned, int original_length,
+                                    word_t address, paddr_t *piece_address)
+{
+  g_vaddr = address;
+  riscv_h_fault_gpa = address;
+  riscv_h_fault_ptw = false;
+  riscv_h_fault_write = false;
+  paddr_t guest_address = 0;
+  paddr_t physical_address = 0;
+  uint8_t vs_pbmt = 0;
+  uint8_t g_pbmt = 0;
+  int status = riscv_vstage_translate(address, store, execute_access,
+                                      (CSR(CSR_HSTATUS) & ((word_t)1 << 8)) != 0, false,
+                                      &guest_address, &riscv_h_fault_gpa,
+                                      &riscv_h_fault_write, &vs_pbmt);
+  if (status != RISCV_VSTAGE_OK)
+  {
+    word_t trap = status == RISCV_VSTAGE_PAGE_FAULT ?
+        (store ? MCA_STO_PAG_FAU : MCA_LOA_PAG_FAU) :
+        (status == RISCV_VSTAGE_GUEST_PAGE_FAULT ?
+            (store ? MCA_STO_GUEST_PAG_FAU : MCA_LOA_GUEST_PAG_FAU) :
+            (store ? MCA_STO_ACC_FAU : MCA_LOA_ACC_FAU));
+    riscv_h_fault_ptw = status == RISCV_VSTAGE_GUEST_PAGE_FAULT;
+    hypervisor_memory_trap(s, trap);
+    return false;
+  }
+  riscv_h_fault_gpa = guest_address;
+  status = riscv_gstage_translate(guest_address, store, execute_access, false, false,
+                                  &physical_address, &g_pbmt);
+  if (status != RISCV_GSTAGE_OK)
+  {
+    word_t trap = status == RISCV_GSTAGE_PAGE_FAULT ?
+        (store ? MCA_STO_GUEST_PAG_FAU : MCA_LOA_GUEST_PAG_FAU) :
+        (store ? MCA_STO_ACC_FAU : MCA_LOA_ACC_FAU);
+    hypervisor_memory_trap(s, trap);
+    return false;
+  }
+  uint8_t effective_pbmt = vs_pbmt ? vs_pbmt : g_pbmt;
+  bool memory = paddr_is_memory_span(physical_address, length);
+#ifdef CONFIG_DEVICE
+  bool device = mmio_map_contains_span(physical_address, length);
+#else
+  bool device = !memory && paddr_is_mapped(physical_address) &&
+      paddr_is_mapped(physical_address + length - 1);
+#endif
+  bool invalid_width = false;
+#ifdef CONFIG_RAPTOR_MEMORY_MAP
+  invalid_width = physical_address >= 0x0c000000u && physical_address < 0x0d000000u &&
+      (original_length != 4 || (physical_address & 3));
+#endif
+  if ((!memory && !device) || (execute_access && device) || invalid_width ||
+      (store && !device && paddr_is_readonly(physical_address)) ||
+      pmp_check(physical_address, length, PRV_S, !store, store, execute_access))
+  {
+    hypervisor_memory_trap(s, store ? MCA_STO_ACC_FAU : MCA_LOA_ACC_FAU);
+    return false;
+  }
+  if (misaligned && (effective_pbmt == 2 || device))
+  {
+    hypervisor_memory_trap(s, store ? MCA_STO_ACC_FAU : MCA_LOA_ACC_FAU);
+    return false;
+  }
+  if (misaligned && effective_pbmt == 1)
+  {
+    hypervisor_memory_trap(s, store ? MCA_STO_ADD_MIS : MCA_LOA_ADD_MIS);
+    return false;
+  }
+  *piece_address = physical_address;
+  return true;
+}
+
+static bool hypervisor_memory_access(Decode *s, bool store, bool execute_access, int length,
+                                     word_t address, word_t data, word_t *result)
+{
+  if (cpu.virt)
+  {
+    s->dnpc = isa_raise_intr(MCA_VIRT_INS, s->pc);
+    return false;
+  }
+  if (!riscv_h_gstage_preview_enabled() ||
+      (cpu.priv == PRV_U && !(CSR(CSR_HSTATUS) & ((word_t)1 << 9))))
+  {
+    s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+    return false;
+  }
+  address = hypervisor_pointer_mask(address, execute_access);
+  bool misaligned = (address & (length - 1)) != 0;
+  int first_length = 4096 - (int)(address & 4095);
+  if (first_length > length) first_length = length;
+  int second_length = length - first_length;
+  paddr_t first_address = 0;
+  paddr_t second_address = 0;
+  if (!hypervisor_memory_piece(s, store, execute_access, first_length, misaligned,
+                               length, address, &first_address)) return false;
+  if (second_length &&
+      !hypervisor_memory_piece(s, store, execute_access, second_length, misaligned,
+                               length, address + first_length, &second_address)) return false;
+  if (store)
+  {
+    if (second_length)
+    {
+      for (int index = 0; index < length; index++)
+      {
+        paddr_t physical_address = index < first_length ? first_address + index :
+            second_address + index - first_length;
+        paddr_write(physical_address, 1, (data >> (8 * index)) & 0xff);
+      }
+    }
+    else paddr_write(first_address, length, data);
+  }
+  else if (second_length)
+  {
+    *result = 0;
+    for (int index = 0; index < length; index++)
+    {
+      paddr_t physical_address = index < first_length ? first_address + index :
+          second_address + index - first_length;
+      *result |= (word_t)paddr_read(physical_address, 1) << (8 * index);
+    }
+  }
+  else *result = paddr_read(first_address, length);
+  return true;
+}
+
+static bool hypervisor_fence(Decode *s, bool guest_stage)
+{
+  if (cpu.virt)
+  {
+    s->dnpc = isa_raise_intr(MCA_VIRT_INS, s->pc);
+    return false;
+  }
+  csr_t status = {.val = CSR(CSR_MSTATUS)};
+  if (!riscv_h_gstage_preview_enabled() || cpu.priv == PRV_U ||
+      (guest_stage && cpu.priv == PRV_S && status.mstatus.tvm))
+  {
+    s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+    return false;
+  }
+  soft_tlb_flush();
+  return true;
+}
+#endif
 
 bool csr_valid(Decode *s, uint16_t csr, bool is_write)
 {
   csr = csr & 0xfff;
   // Privilege check: CSR addr[9:8] encodes minimum privilege level
   uint8_t csr_priv = (csr >> 8) & 0x3;
-  if (csr_priv > cpu.priv)
+  bool guest_hs_csr = cpu.virt && (csr_priv == 2 ||
+      (cpu.priv == PRV_S && csr_priv == 1 && guest_csr_alias(csr) == csr &&
+       !guest_shared_supervisor_csr(csr)) ||
+      (cpu.priv == PRV_U && csr_priv == 1 &&
+       check_csr_exist(csr) != CSR_NOT_EXIST));
+  if (guest_hs_csr)
+  {
+    bool hs_qualified = check_csr_exist(csr) != CSR_NOT_EXIST &&
+        !(is_write && ((csr >> 10) & 0x3) == 0x3) &&
+        stateen_machine_allows_supervisor(csr);
+    s->dnpc = isa_raise_intr(hs_qualified ? MCA_VIRT_INS : MCA_ILLEGAL_INS, s->pc);
+    return false;
+  }
+  if (csr_priv > cpu.priv &&
+      !(csr_priv == 2 && cpu.priv == PRV_S && riscv_h_gstage_preview_enabled()))
   {
     s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
     difftest_skip_ref();
@@ -308,8 +705,18 @@ bool csr_valid(Decode *s, uint16_t csr, bool is_write)
     difftest_skip_ref();
     return false;
   }
+  if (cpu.priv == PRV_S && !stateen_machine_allows_supervisor(csr))
+  {
+    s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+    return false;
+  }
+  if (!stateen_guest_access(csr))
+  {
+    s->dnpc = isa_raise_intr(MCA_VIRT_INS, s->pc);
+    return false;
+  }
   // TVM: if mstatus.TVM=1 and priv==S, access to satp traps illegal-instruction.
-  if (csr == CSR_SATP && cpu.priv == PRV_S)
+  if ((csr == CSR_SATP || csr == CSR_HGATP) && cpu.priv == PRV_S && !cpu.virt)
   {
     csr_t ms = {.val = cpu.sr[CSR_MSTATUS]};
     if (ms.mstatus.tvm)
@@ -319,15 +726,28 @@ bool csr_valid(Decode *s, uint16_t csr, bool is_write)
       return false;
     }
   }
+  if (csr == CSR_SATP && cpu.virt && cpu.priv == PRV_S &&
+      riscv_h_gstage_preview_enabled() && (CSR(CSR_HSTATUS) & CSR_HSTATUS_VTVM))
+  {
+    s->dnpc = isa_raise_intr(MCA_VIRT_INS, s->pc);
+    return false;
+  }
   if (is_fp_csr(csr))
   {
     word_t fs = (CSR(CSR_MSTATUS) & CSR_MSTATUS_FS_MASK) >> 13;
-    if (!(CSR(CSR_MISA) & CSR_MISA_EXT_F) || fs == 0)
+    if (!(CSR(CSR_MISA) & CSR_MISA_EXT_F) || fs == 0 ||
+        (cpu.virt && !(CSR(CSR_VSSTATUS) & CSR_MSTATUS_FS_MASK)))
     {
       s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
       difftest_skip_ref();
       return false;
     }
+  }
+  if (is_vector_csr(csr) &&
+      !riscv_vector_context_enabled())
+  {
+    s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+    return false;
   }
   if ((csr == 0x14d || csr == 0x15d) && cpu.priv != PRV_M &&
       (!sstc_enabled() || !(CSR(CSR_MCOUNTEREN) & 2)))
@@ -335,16 +755,37 @@ bool csr_valid(Decode *s, uint16_t csr, bool is_write)
     s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
     return false;
   }
+  if (csr == 0x14d && cpu.virt && riscv_h_gstage_preview_enabled() &&
+      (!(CSR(CSR_HENVCFG) & (word_t)(UINT64_C(1) << 63)) ||
+       !(CSR(CSR_HCOUNTEREN) & 2)))
+  {
+    s->dnpc = isa_raise_intr(MCA_VIRT_INS, s->pc);
+    return false;
+  }
   unsigned counter_bit = counteren_bit(csr);
   if (counter_bit != 0 && cpu.priv != PRV_M)
   {
-    bool denied = (CSR(CSR_MCOUNTEREN) & counter_bit) == 0;
-    if (cpu.priv == PRV_U)
-      denied = denied || (CSR(CSR_SCOUNTEREN) & counter_bit) == 0;
-    if (denied)
+    if (!(CSR(CSR_MCOUNTEREN) & counter_bit))
     {
       s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
       difftest_skip_ref();
+      return false;
+    }
+    if (cpu.virt && riscv_h_gstage_preview_enabled() &&
+        !(CSR(CSR_HCOUNTEREN) & counter_bit))
+    {
+      s->dnpc = isa_raise_intr(MCA_VIRT_INS, s->pc);
+      return false;
+    }
+    if (cpu.priv == PRV_U && !(CSR(CSR_SCOUNTEREN) & counter_bit))
+    {
+      if (cpu.virt && riscv_h_gstage_preview_enabled())
+        s->dnpc = isa_raise_intr(MCA_VIRT_INS, s->pc);
+      else
+      {
+        s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+        difftest_skip_ref();
+      }
       return false;
     }
   }
@@ -518,6 +959,18 @@ static int decode_exec(Decode *s)
   INSTPAT("??????? ????? ????? 001 ????? 00001 11", flh, I, fp_load_h(s, rd, src1 + imm));
   INSTPAT("??????? ????? ????? 010 ????? 00001 11", flw, I, fp_load_s(s, rd, src1 + imm));
   INSTPAT("??????? ????? ????? 011 ????? 00001 11", fld, I, fp_load_d(s, rd, src1 + imm));
+  INSTPAT("??????? ????? ????? 000 ????? 00001 11", vle8, N, {
+    vector_memory_execute(s, false);
+  });
+  INSTPAT("??????? ????? ????? 101 ????? 00001 11", vle16, N, {
+    vector_memory_execute(s, false);
+  });
+  INSTPAT("??????? ????? ????? 110 ????? 00001 11", vle32, N, {
+    vector_memory_execute(s, false);
+  });
+  INSTPAT("??????? ????? ????? 111 ????? 00001 11", vle64, N, {
+    vector_memory_execute(s, false);
+  });
   INSTPAT_CASE_END(grp_fp_load)
 
   INSTPAT_CASE(0b01000, grp_store) // Store
@@ -534,6 +987,18 @@ static int decode_exec(Decode *s)
   INSTPAT("??????? ????? ????? 001 ????? 01001 11", fsh, S, fp_store_h(s, src1 + imm, fp_rs2(s)));
   INSTPAT("??????? ????? ????? 010 ????? 01001 11", fsw, S, fp_store_s(s, src1 + imm, fp_rs2(s)));
   INSTPAT("??????? ????? ????? 011 ????? 01001 11", fsd, S, fp_store_d(s, src1 + imm, fp_rs2(s)));
+  INSTPAT("??????? ????? ????? 000 ????? 01001 11", vse8, N, {
+    vector_memory_execute(s, true);
+  });
+  INSTPAT("??????? ????? ????? 101 ????? 01001 11", vse16, N, {
+    vector_memory_execute(s, true);
+  });
+  INSTPAT("??????? ????? ????? 110 ????? 01001 11", vse32, N, {
+    vector_memory_execute(s, true);
+  });
+  INSTPAT("??????? ????? ????? 111 ????? 01001 11", vse64, N, {
+    vector_memory_execute(s, true);
+  });
   INSTPAT_CASE_END(grp_fp_store)
 
   INSTPAT_CASE(0b10000, grp_fmadd)
@@ -557,6 +1022,13 @@ static int decode_exec(Decode *s)
   INSTPAT_CASE_END(grp_fnmadd)
 
   INSTPAT_CASE(0b10100, grp_fp_op)
+  INSTPAT("111100? 00001 ????? 000 ????? 10100 11", fli, N, fp_exec_zfa(s, FP_ZFA_LI));
+  INSTPAT("001010? ????? ????? 01? ????? 10100 11", fminmaxm, N, fp_exec_zfa(s, FP_ZFA_MINMAX));
+  INSTPAT("010000? 0010? ????? ??? ????? 10100 11", fround, N, fp_exec_zfa(s, FP_ZFA_ROUND));
+  INSTPAT("101000? ????? ????? 10? ????? 10100 11", fquiet, N, fp_exec_zfa(s, FP_ZFA_QUIET));
+  INSTPAT("1100001 01000 ????? 001 ????? 10100 11", fcvtmod.w.d, N, fp_exec_zfa(s, FP_ZFA_MOD));
+  INSTPAT("1110001 00001 ????? 000 ????? 10100 11", fmvh.x.d, N, fp_exec_zfa(s, FP_ZFA_MOVE_HIGH));
+  INSTPAT("1011001 ????? ????? 000 ????? 10100 11", fmvp.d.x, N, fp_exec_zfa(s, FP_ZFA_MOVE_PAIR));
   INSTPAT("1111010 00000 ????? 000 ????? 10100 11", fmv.h.x, R, fp_move_to_h(s, rd, src1));
   INSTPAT("1110010 00000 ????? 000 ????? 10100 11", fmv.x.h, R, fp_move_from_h(s, rd, fp_rs1(s)));
   INSTPAT("1111000 00000 ????? 000 ????? 10100 11", fmv.w.x, R, fp_move_to_s(s, rd, src1));
@@ -625,11 +1097,11 @@ static int decode_exec(Decode *s)
 
   INSTPAT_CASE(0b00100, grp_opimm) // OP-IMM
   // Zicbop HINTs are explicit so the advertised profile is visible in the
-  // decoder.  The generic ORI encoding would also have no architectural
+  // decoder. The generic OP-IMM encodings also leave no architectural
   // effect with rd=x0, but naming these avoids accidental future rejection.
-  INSTPAT("0000000 00000 ????? 110 00000 00100 11", prefetch.i, N, {});
-  INSTPAT("0000000 00001 ????? 110 00000 00100 11", prefetch.r, N, {});
-  INSTPAT("0000000 00011 ????? 110 00000 00100 11", prefetch.w, N, {});
+  INSTPAT("??????? 00000 ????? 110 00000 00100 11", prefetch.i, N, {});
+  INSTPAT("??????? 00000 ????? 100 00000 00100 11", prefetch.r, N, {});
+  INSTPAT("??????? 00011 ????? 110 00000 00100 11", prefetch.w, N, {});
   INSTPAT("??????? ????? ????? 000 ????? 00100 11", addi, I, R(rd) = (sword_t)src1 + imm);
   INSTPAT("??????? ????? ????? 010 ????? 00100 11", slti, I, R(rd) = ((sword_t)src1 < (sword_t)imm) ? 1 : 0);
   INSTPAT("??????? ????? ????? 011 ????? 00100 11", sltiu, I, R(rd) = ((word_t)src1 < (word_t)imm) ? 1 : 0);
@@ -784,6 +1256,17 @@ static int decode_exec(Decode *s)
   INSTPAT("0000111 ????? ????? 111 ????? 01100 11", czero.nez, R, R(rd) = (src2 != 0) ? 0 : src1);
   INSTPAT_CASE_END(grp_op)
 
+  INSTPAT_CASE(0b10101, grp_vector)
+  INSTPAT("??????? ????? ????? 111 ????? 10101 11", vset, N, {
+    if (!riscv_vector_configure(s->isa.inst))
+      s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+  });
+  INSTPAT("??????? ????? ????? ??? ????? 10101 11", vector, N, {
+    if (!riscv_vector_execute(s->isa.inst))
+      s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+  });
+  INSTPAT_CASE_END(grp_vector)
+
 #ifdef CONFIG_RV64
   // RV64I OP-IMM-32 and OP-32 (RV64-only opcode groups; in RV32 these encodings
   // are reserved and must trap illegal-instruction, so the cases are omitted.)
@@ -901,7 +1384,9 @@ static int decode_exec(Decode *s)
                           s->pc, t6, (long)R(10), (long)R(11), (long)R(12));
           }
           s->dnpc = isa_raise_intr(
-              ((cpu.priv == PRV_U) ? MCA_ENV_CAL_UMO : ((cpu.priv == PRV_S) ? MCA_ENV_CAL_SMO : MCA_ENV_CAL_MMO)),
+              ((cpu.priv == PRV_U) ? MCA_ENV_CAL_UMO :
+               (cpu.priv == PRV_S ? (cpu.virt ? MCA_ENV_CAL_VSMO : MCA_ENV_CAL_SMO) :
+                MCA_ENV_CAL_MMO)),
               s->pc));
 #ifdef CONFIG_RV_EBREAK_HOST_EXIT
   INSTPAT("0000000 00001 00000 000 00000 11100 11", ebreak, N, {
@@ -920,7 +1405,10 @@ static int decode_exec(Decode *s)
 #endif
   INSTPAT("0001001 ????? ????? 000 00000 11100 11", sfence.vma, N, {
     csr_t ms = {.val = CSR(CSR_MSTATUS)};
-    if (cpu.priv == PRV_U || (cpu.priv == PRV_S && ms.mstatus.tvm))
+    if (cpu.virt && riscv_h_gstage_preview_enabled() &&
+        (cpu.priv == PRV_U || (CSR(CSR_HSTATUS) & CSR_HSTATUS_VTVM)))
+      s->dnpc = isa_raise_intr(MCA_VIRT_INS, s->pc);
+    else if (cpu.priv == PRV_U || (cpu.priv == PRV_S && ms.mstatus.tvm && !cpu.virt))
     {
       s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
       difftest_skip_ref();
@@ -930,15 +1418,82 @@ static int decode_exec(Decode *s)
       soft_tlb_flush();
     }
   });
+#ifdef CONFIG_RV64
+  INSTPAT("0010001 ????? ????? 000 00000 11100 11", hfence.vvma, N, {
+    hypervisor_fence(s, false);
+  });
+  INSTPAT("0010011 ????? ????? 000 00000 11100 11", hinval.vvma, N, {
+    hypervisor_fence(s, false);
+  });
+  INSTPAT("0110001 ????? ????? 000 00000 11100 11", hfence.gvma, N, {
+    hypervisor_fence(s, true);
+  });
+  INSTPAT("0110011 ????? ????? 000 00000 11100 11", hinval.gvma, N, {
+    hypervisor_fence(s, true);
+  });
+  INSTPAT("011000000000 ????? 100 ????? 11100 11", hlv.b, R, {
+    word_t value;
+    if (hypervisor_memory_access(s, false, false, 1, src1, 0, &value)) R(rd) = SEXT(value, 8);
+  });
+  INSTPAT("011000000001 ????? 100 ????? 11100 11", hlv.bu, R, {
+    word_t value;
+    if (hypervisor_memory_access(s, false, false, 1, src1, 0, &value)) R(rd) = value;
+  });
+  INSTPAT("011001000000 ????? 100 ????? 11100 11", hlv.h, R, {
+    word_t value;
+    if (hypervisor_memory_access(s, false, false, 2, src1, 0, &value)) R(rd) = SEXT(value, 16);
+  });
+  INSTPAT("011001000001 ????? 100 ????? 11100 11", hlv.hu, R, {
+    word_t value;
+    if (hypervisor_memory_access(s, false, false, 2, src1, 0, &value)) R(rd) = value;
+  });
+  INSTPAT("011010000000 ????? 100 ????? 11100 11", hlv.w, R, {
+    word_t value;
+    if (hypervisor_memory_access(s, false, false, 4, src1, 0, &value)) R(rd) = SEXT(value, 32);
+  });
+  INSTPAT("011010000001 ????? 100 ????? 11100 11", hlv.wu, R, {
+    word_t value;
+    if (hypervisor_memory_access(s, false, false, 4, src1, 0, &value)) R(rd) = value;
+  });
+  INSTPAT("011011000000 ????? 100 ????? 11100 11", hlv.d, R, {
+    word_t value;
+    if (hypervisor_memory_access(s, false, false, 8, src1, 0, &value)) R(rd) = value;
+  });
+  INSTPAT("011001000011 ????? 100 ????? 11100 11", hlvx.hu, R, {
+    word_t value;
+    if (hypervisor_memory_access(s, false, true, 2, src1, 0, &value)) R(rd) = value;
+  });
+  INSTPAT("011010000011 ????? 100 ????? 11100 11", hlvx.wu, R, {
+    word_t value;
+    if (hypervisor_memory_access(s, false, true, 4, src1, 0, &value)) R(rd) = value;
+  });
+  INSTPAT("0110001 ????? ????? 100 00000 11100 11", hsv.b, R, {
+    hypervisor_memory_access(s, true, false, 1, src1, src2, NULL);
+  });
+  INSTPAT("0110011 ????? ????? 100 00000 11100 11", hsv.h, R, {
+    hypervisor_memory_access(s, true, false, 2, src1, src2, NULL);
+  });
+  INSTPAT("0110101 ????? ????? 100 00000 11100 11", hsv.w, R, {
+    hypervisor_memory_access(s, true, false, 4, src1, src2, NULL);
+  });
+  INSTPAT("0110111 ????? ????? 100 00000 11100 11", hsv.d, R, {
+    hypervisor_memory_access(s, true, false, 8, src1, src2, NULL);
+  });
+#endif
   INSTPAT("0001011 ????? ????? 000 00000 11100 11", sinval.vma, N, {
     csr_t ms = {.val = CSR(CSR_MSTATUS)};
-    if (cpu.priv == PRV_U || (cpu.priv == PRV_S && ms.mstatus.tvm))
+    if (cpu.virt && riscv_h_gstage_preview_enabled() &&
+        (cpu.priv == PRV_U || (CSR(CSR_HSTATUS) & CSR_HSTATUS_VTVM)))
+      s->dnpc = isa_raise_intr(MCA_VIRT_INS, s->pc);
+    else if (cpu.priv == PRV_U || (cpu.priv == PRV_S && ms.mstatus.tvm && !cpu.virt))
       s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
     else
       soft_tlb_flush();
   });
   INSTPAT("0001100 0000? 00000 000 00000 11100 11", sfence.inval, N, {
-    if (cpu.priv == PRV_U)
+    if (cpu.priv == PRV_U && cpu.virt && riscv_h_gstage_preview_enabled())
+      s->dnpc = isa_raise_intr(MCA_VIRT_INS, s->pc);
+    else if (cpu.priv == PRV_U)
       s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
   });
   // RV32/RV64 Zicsr Extension
@@ -957,6 +1512,9 @@ static int decode_exec(Decode *s)
       csr_t reg = {.val = CSR(CSR_MSTATUS)};
       cpu.last_inst_priv = cpu.priv;
       cpu.priv = reg.mstatus.mpp;
+      cpu.virt = riscv_h_gstage_preview_enabled() && cpu.priv != PRV_M &&
+          (((uint64_t)reg.val >> 39) & 1);
+      reg.val &= ~(word_t)(UINT64_C(1) << 39);
       if (cpu.priv != PRV_M) reg.mstatus.mprv = 0;
       reg.mstatus.mie = reg.mstatus.mpie;
       reg.mstatus.mpie = 1;
@@ -968,13 +1526,31 @@ static int decode_exec(Decode *s)
   });
   INSTPAT("0001000 00010 00000 000 00000 11100 11", sret, N, {
     csr_t reg = {.val = CSR(CSR_MSTATUS)};
-    if (cpu.priv == PRV_U || (cpu.priv == PRV_S && reg.mstatus.tsr)) {
+    if (cpu.virt && riscv_h_gstage_preview_enabled() &&
+        (cpu.priv == PRV_U || (CSR(CSR_HSTATUS) & CSR_HSTATUS_VTSR))) {
+      s->dnpc = isa_raise_intr(MCA_VIRT_INS, s->pc);
+    } else if (cpu.priv == PRV_U ||
+               (cpu.priv == PRV_S && !cpu.virt && reg.mstatus.tsr)) {
       s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
       difftest_skip_ref();
+    } else if (cpu.virt) {
+      word_t vsstatus = CSR(CSR_VSSTATUS);
+      s->dnpc = CSR(CSR_VSEPC);
+      cpu.last_inst_priv = cpu.priv;
+      cpu.priv = (vsstatus >> 8) & 1;
+      vsstatus = (vsstatus & ~((word_t)0x122)) |
+          (((vsstatus >> 5) & 1) << 1) | ((word_t)1 << 5);
+      CSR(CSR_VSSTATUS) = vsstatus;
+      cpu.csr_dirty = true;
+      soft_tlb_flush();
     } else {
       s->dnpc = CSR(CSR_SEPC);
       cpu.last_inst_priv = cpu.priv;
+      word_t hstatus = CSR(CSR_HSTATUS);
+      cpu.virt = riscv_h_gstage_preview_enabled() && ((hstatus >> 7) & 1);
       cpu.priv = reg.mstatus.spp;
+      if (riscv_h_gstage_preview_enabled())
+        CSR(CSR_HSTATUS) = hstatus & ~((word_t)1 << 7);
       reg.mstatus.sie = reg.mstatus.spie;
       reg.mstatus.spie = 1;
       reg.mstatus.spp = 0;
@@ -986,10 +1562,26 @@ static int decode_exec(Decode *s)
       soft_tlb_flush();
     }
   });
+  INSTPAT("0000000 01101 00000 000 00000 11100 11", wrs.nto, N, {
+    csr_t reg = {.val = CSR(CSR_MSTATUS)};
+    if (!(riscv_isa_extensions & NEMU_ISA_EXT_ZAWRS) ||
+        (cpu.priv != PRV_M && reg.mstatus.tw))
+      s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+    else if (cpu.virt && riscv_h_gstage_preview_enabled() &&
+             (CSR(CSR_HSTATUS) & CSR_HSTATUS_VTW))
+      s->dnpc = isa_raise_intr(MCA_VIRT_INS, s->pc);
+  });
+  INSTPAT("0000000 11101 00000 000 00000 11100 11", wrs.sto, N, {
+    if (!(riscv_isa_extensions & NEMU_ISA_EXT_ZAWRS))
+      s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+  });
   // Interrupt-Management Instructions
   INSTPAT("0001000 00101 00000 000 00000 11100 11", wfi, N, {
     csr_t reg = {.val = CSR(CSR_MSTATUS)};
-    if (cpu.priv == PRV_U || (cpu.priv == PRV_S && reg.mstatus.tw)) {
+    if (cpu.virt && riscv_h_gstage_preview_enabled() && !reg.mstatus.tw &&
+        (cpu.priv == PRV_U || (CSR(CSR_HSTATUS) & CSR_HSTATUS_VTW))) {
+      s->dnpc = isa_raise_intr(MCA_VIRT_INS, s->pc);
+    } else if (cpu.priv == PRV_U || (cpu.priv == PRV_S && reg.mstatus.tw)) {
       s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
       difftest_skip_ref();
     } else {
@@ -1079,13 +1671,14 @@ static int decode_exec(Decode *s)
   if (csr_commit)
   {
   // mstatus write mask: clear non-writable bits.
-  // SD (bit 31/63) is read-only (computed below); VS (bits 10:9) hardwired 0 (no V ext).
+  // SD (bit 31/63) is read-only (computed below); VS is writable in V128 preview mode.
   // RV64: SXL[35:34] and UXL[33:32] are WARL fields that hold XLEN==2 and are
   // enforced below regardless of writes.
 #ifdef CONFIG_RV64
-#define MSTATUS_WMASK 0x007E79AAULL
+#define MSTATUS_WMASK (0x007E79AAULL | (riscv_v128_preview_enabled() ? CSR_MSTATUS_VS_MASK : 0) | \
+    (riscv_h_gstage_preview_enabled() ? (UINT64_C(3) << 38) : 0))
 #else
-#define MSTATUS_WMASK 0x007E79AA
+#define MSTATUS_WMASK (0x007E79AA | (riscv_v128_preview_enabled() ? CSR_MSTATUS_VS_MASK : 0))
 #endif
   CSR(CSR_MSTATUS) = CSR(CSR_MSTATUS) & MSTATUS_WMASK;
   CSR(CSR_MISA) = CSR_MISA_VALUE;
@@ -1094,19 +1687,20 @@ static int decode_exec(Decode *s)
   // no Zicfiss/Zicfilp/H): bits 1-9, 12/13/15 (page faults), 19 (hw error).
   // Hardwired 0: bit 0 (misaligned fetch; C ext), bit 11 (ecall-M, per spec),
   // bit 18 (software check; needs Zicfiss/Zicfilp), reserved bits.
-  CSR(CSR_MEDELEG) &= 0x8b3fe;
-  CSR(CSR_MIDELEG) &= 0x222;
+  CSR(CSR_MEDELEG) &= 0x8b3fe | (riscv_h_gstage_preview_enabled() ? (word_t)0xf00400 : 0);
+  CSR(CSR_MIDELEG) = (CSR(CSR_MIDELEG) & (word_t)riscv_supervisor_irq_mask()) |
+      (word_t)riscv_virtual_irq_mask();
   // sstatus/sie are architecturally views of mstatus/mie (not separate regs).
   // Propagate direct writes back to mstatus/mie at any privilege level.
-  // sstatus read mask: includes SD (computed), excludes VS.
+  // sstatus read mask: includes SD (computed) and preview VS when enabled.
 #ifdef CONFIG_RV64
-#define SSTATUS_RMASK 0x80000003000C6122ULL
+#define SSTATUS_RMASK (0x80000003000C6122ULL | (riscv_v128_preview_enabled() ? CSR_MSTATUS_VS_MASK : 0))
 #else
-#define SSTATUS_RMASK 0x800c6122
+#define SSTATUS_RMASK (0x800c6122 | (riscv_v128_preview_enabled() ? CSR_MSTATUS_VS_MASK : 0))
 #endif
-#define SIE_RMASK 0x222
-#define SIP_RMASK 0x222
-#define SIP_WMASK 0x2
+#define SIE_RMASK ((word_t)riscv_supervisor_irq_mask())
+#define SIP_RMASK ((word_t)riscv_supervisor_irq_mask())
+#define SIP_WMASK ((word_t)0x2 | (riscv_sscofpmf_enabled() ? (word_t)0x2000 : 0))
   /* SSTATUS/SIE are architectural views of MSTATUS/MIE.  If the last CSR
    * write targeted SSTATUS/SIE, propagate the (masked) value into the real
    * MSTATUS/MIE.  Otherwise, SSTATUS/SIE are always re-derived below from
@@ -1222,7 +1816,13 @@ static int decode_exec(Decode *s)
 }
 
 NEMU_TLS jmp_buf exec_jmp_buf;
+NEMU_TLS jmp_buf *exec_jmp_override;
 NEMU_TLS int cause;
+
+void nemu_memory_longjmp(int value)
+{
+  nemu_longjmp(exec_jmp_override ? *exec_jmp_override : exec_jmp_buf, value);
+}
 
 int isa_exec_once(Decode *s)
 {

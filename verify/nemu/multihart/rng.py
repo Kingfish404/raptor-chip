@@ -59,7 +59,7 @@ def corrupt(source, destination, fault):
 
 def main():
     check = Check(parser(__doc__, repeat=2).parse_args(), 'rng')
-    payload = check.snapshot('nemu_diff_rng.S', 'nemu_diff_rng.c')
+    payload = check.snapshot('nemu_virtio_start.S', 'nemu_diff_rng.c')
     for xlen in check.args.xlen:
         check.target(xlen)
         binary, directory, dtb = check.binary, check.directory, check.dtb

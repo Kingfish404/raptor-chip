@@ -2,6 +2,26 @@
 #include <stdbool.h>
 #include <softfloat.h>
 
+uint64_t riscv_fp_fli(unsigned immediate, bool double_precision)
+{
+  static const uint32_t constants[32] = {
+    0xbf800000, 0x00800000, 0x37800000, 0x38000000,
+    0x3b800000, 0x3c000000, 0x3d800000, 0x3e000000,
+    0x3e800000, 0x3ea00000, 0x3ec00000, 0x3ee00000,
+    0x3f000000, 0x3f200000, 0x3f400000, 0x3f600000,
+    0x3f800000, 0x3fa00000, 0x3fc00000, 0x3fe00000,
+    0x40000000, 0x40200000, 0x40400000, 0x40800000,
+    0x41000000, 0x41800000, 0x43000000, 0x43800000,
+    0x47000000, 0x47800000, 0x7f800000, 0x7fc00000,
+  };
+  uint32_t bits = constants[immediate & 31];
+  if (!double_precision) return bits;
+  unsigned exponent = (bits >> 23) & 255;
+  exponent = immediate == 1 ? 1 : exponent == 255 ? 2047 : exponent + 896;
+  return ((uint64_t)(bits >> 31) << 63) | ((uint64_t)exponent << 52)
+      | ((uint64_t)(bits & 0x7fffff) << 29);
+}
+
 static uint_fast8_t riscv_fp_rounding_mode(unsigned rm)
 {
   switch (rm & 0x7) {
@@ -318,6 +338,62 @@ uint32_t riscv_fp_lt_d(uint64_t lhs, uint64_t rhs, uint32_t *flags)
 uint32_t riscv_fp_eq_d(uint64_t lhs, uint64_t rhs, uint32_t *flags)
 {
   return riscv_fp_compare_d(lhs, rhs, 2, flags);
+}
+
+uint32_t riscv_fp_minmaxm_s(uint32_t lhs, uint32_t rhs, bool maximum, uint32_t *flags)
+{
+  uint32_t result = riscv_fp_minmax_s(lhs, rhs, maximum, flags);
+  return riscv_fp_is_nan_s(lhs) || riscv_fp_is_nan_s(rhs) ? UINT32_C(0x7fc00000) : result;
+}
+
+uint64_t riscv_fp_minmaxm_d(uint64_t lhs, uint64_t rhs, bool maximum, uint32_t *flags)
+{
+  uint64_t result = riscv_fp_minmax_d(lhs, rhs, maximum, flags);
+  return riscv_fp_is_nan_d(lhs) || riscv_fp_is_nan_d(rhs) ? UINT64_C(0x7ff8000000000000) : result;
+}
+
+uint32_t riscv_fp_round_s(uint32_t bits, unsigned rm, bool exact, uint32_t *flags)
+{
+  softfloat_exceptionFlags = 0;
+  float32_t result = f32_roundToInt((float32_t){bits}, riscv_fp_rounding_mode(rm), exact);
+  *flags = riscv_fp_flags();
+  return result.v;
+}
+
+uint64_t riscv_fp_round_d(uint64_t bits, unsigned rm, bool exact, uint32_t *flags)
+{
+  softfloat_exceptionFlags = 0;
+  float64_t result = f64_roundToInt((float64_t){bits}, riscv_fp_rounding_mode(rm), exact);
+  *flags = riscv_fp_flags();
+  return result.v;
+}
+
+uint32_t riscv_fp_quiet_s(uint32_t lhs, uint32_t rhs, bool less, uint32_t *flags)
+{
+  softfloat_exceptionFlags = 0;
+  bool result = less ? f32_lt_quiet((float32_t){lhs}, (float32_t){rhs})
+                    : f32_le_quiet((float32_t){lhs}, (float32_t){rhs});
+  *flags = riscv_fp_flags();
+  return result;
+}
+
+uint32_t riscv_fp_quiet_d(uint64_t lhs, uint64_t rhs, bool less, uint32_t *flags)
+{
+  softfloat_exceptionFlags = 0;
+  bool result = less ? f64_lt_quiet((float64_t){lhs}, (float64_t){rhs})
+                    : f64_le_quiet((float64_t){lhs}, (float64_t){rhs});
+  *flags = riscv_fp_flags();
+  return result;
+}
+
+uint32_t riscv_fp_mod_w_d(uint64_t bits, uint32_t *flags)
+{
+  riscv_fp_to_int_d(bits, 1, false, false, flags);
+  int exponent = (int)((bits >> 52) & 2047) - 1023;
+  if (exponent < 0 || exponent >= 84) return 0;
+  uint64_t significand = (bits & UINT64_C(0xfffffffffffff)) | (UINT64_C(1) << 52);
+  uint32_t result = exponent > 52 ? significand << (exponent - 52) : significand >> (52 - exponent);
+  return bits >> 63 ? (uint32_t)(0u - result) : result;
 }
 
 uint32_t riscv_fp_class_d(uint64_t bits)

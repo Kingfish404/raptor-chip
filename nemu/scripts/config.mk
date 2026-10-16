@@ -56,6 +56,11 @@ savedefconfig: $(CONF)
 
 # Help text used by make help
 help:
+	@echo  '  O=DIR           - Keep configuration, host tools and objects in DIR'
+	@echo  '  <name>_defconfig - Select a configuration from configs/'
+	@echo  '  app / run       - Build / run the configured emulator'
+	@echo  '  reference       - Build a private DiffTest library (REF_DEFCONFIG=...)'
+	@echo  '  install         - Install the configured build (PREFIX=/usr/local, DESTDIR=...)'
 	@echo  '  menuconfig	  - Update current config utilising a menu based program'
 	@echo  '  savedefconfig   - Save current config as configs/defconfig (minimal config)'
 

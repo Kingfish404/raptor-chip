@@ -45,7 +45,7 @@ def corrupt(source, destination, fault):
 def main():
     check = Check(parser(__doc__, repeat=2).parse_args(), 'block')
     check.timeout = 180
-    payload = check.snapshot('nemu_diff_block.S', 'nemu_diff_block.c')
+    payload = check.snapshot('nemu_virtio_start.S', 'nemu_diff_block.c')
     for xlen in check.args.xlen:
         check.target(xlen)
         binary, directory = check.binary, check.directory

@@ -29,8 +29,8 @@ class JournalTest(unittest.TestCase):
             events.insert(-1, [UNLOCK, 0, 1, b''])
         return events
 
-    def encoded(self, events, threaded=False, version=1):
-        data = HEADER.pack(b'NMUJNL01', version, 64, 1, 0x80000000, 4096, 0, threaded)
+    def encoded(self, events, threaded=False, version=1, features=0):
+        data = HEADER.pack(b'NMUJNL01', version, 64, 1, 0x80000000, 4096, features, threaded)
         for sequence, (kind, hart, instruction, payload) in enumerate(events):
             data += RECORD.pack(kind, sequence, hart, instruction, len(payload)) + payload
         return data
@@ -200,6 +200,21 @@ class JournalTest(unittest.TestCase):
             events.insert(3, [INTERRUPT, 0, 0, payload])
             with self.assertRaises(JournalError):
                 self.check(self.encoded(events, version=2))
+
+    def test_virtual_interrupt_requires_h_feature(self):
+        for cause in (2, 6, 10):
+            with self.subTest(cause=cause):
+                events = self.fixture()
+                events.insert(3, [INTERRUPT, 0, 0,
+                                  struct.pack('<2Q', (1 << 63) | cause, 0x80000000)])
+                with self.assertRaisesRegex(JournalError, 'invalid interrupt cause'):
+                    self.check(self.encoded(events, version=2))
+                result = self.check(self.encoded(events, version=2, features=1 << 50))
+                self.assertEqual(result['interrupts'], [1])
+                rv32 = bytearray(self.encoded(events, version=2, features=1 << 50))
+                struct.pack_into('<Q', rv32, 16, 32)
+                with self.assertRaisesRegex(JournalError, 'H preview requires RV64'):
+                    self.check(rv32)
 
     def clint_fixture(self):
         events = self.fixture()

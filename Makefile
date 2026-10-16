@@ -664,6 +664,15 @@ linux-boot-nemu64gc: build-nemu64gc-linux ## Boot RV64GC Buildroot Linux on NEMU
 	@set -o pipefail; $(MAKE) -C $(NEMU_HOME) run IMG=$(LINUX_RV64GC_PAYLOAD) \
 		ARGS="$(ARGS) $(if $(MAX_INST),-m $(MAX_INST))" $(call tee_nemu,linux-boot-nemu64gc)
 
+NEMU_RVA23_HARTS ?= 1
+NEMU_RVA23_DTB_DIR = $(LINUX_HOME)/build/nemu-rva23-platform/harts$(NEMU_RVA23_HARTS)
+.PHONY: linux-nemu-rva23-dtb linux-boot-nemu-rva23
+linux-nemu-rva23-dtb: ## Generate the NEMU RVA23 platform for NEMU_RVA23_HARTS=1..4
+	PYTHONPATH="$(LINUX_HOME)" python3 -c 'import sys; from pathlib import Path; from distro_boot import build_dtb; directory = Path(sys.argv[1]); directory.mkdir(parents=True, exist_ok=True); build_dtb(directory, int(sys.argv[2]), source_name="spike-rva23-nemu.dts")' "$(NEMU_RVA23_DTB_DIR)" "$(NEMU_RVA23_HARTS)"
+
+linux-boot-nemu-rva23: linux-nemu-rva23-dtb ## Boot Linux with NEMU's RVA23 profile (NEMU_RVA23_HARTS=1..4)
+	$(MAKE) linux-boot-nemu64gc ARGS="$(ARGS) --isa-extensions=rva23 --smp=$(NEMU_RVA23_HARTS) --smp-backend=rr -t $(NEMU_RVA23_DTB_DIR)/nemu.dtb"
+
 linux-boot-rv32: build-nemu32-ref build-rv32-linux ## Boot Linux on NPC with NEMU difftest (riscv32)
 	$(call linux_boot_npc,rv32,$(LINUX_RV32_PAYLOAD),linux-boot-rv32)
 

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Validate independent virtio-net replay with scripted RX and local slirp ARP."""
 import os
+import socket
 import struct
 
 from lib.harness import Check, parser
+from lib.console import run_console
 from lib.journal import ACCESS, ACCESS_KIND, END, check_journal, read_events, write_events
 from lib.net import NET_BASE, NET_IRQ, NET_RX, NET_RX_RESULT, NET_TX
 from lib.rng import DMA_READ, DMA_WRITE
@@ -83,12 +85,65 @@ def corrupt(source, destination, fault):
     write_events(destination, header, events)
 
 
+def forwarding(check, payload):
+    binary, directory = check.binary, check.directory
+    for index, spec in enumerate(('', 'tcp:0:22', 'udp:22:65536', 'tcp:-1:22', 'tcp:+1:22',
+                                  'tcp: 1:22', 'tcp:1:22x', 'tcp:1:22:33', 'tcp::22',
+                                  'sctp:1:22', 'tcp:000001:22', 'tcp:127.0.0.1:22:22', 'udp:2222:22')):
+        check.run('hostfwd-invalid-' + str(index), [binary, '--hostfwd=' + spec, '--describe'],
+                  1, b'--hostfwd requires')
+    check.run('hostfwd-duplicate', [binary, '--hostfwd=tcp:02000:22', '--hostfwd=tcp:2000:23', '--describe'],
+              1, b'--hostfwd requires')
+    rules = [f'--hostfwd=tcp:{2000 + index}:19000' for index in range(16)]
+    check.run('hostfwd-limit', [binary, *rules, '--describe'], markers=b'"hostfwd_max":16')
+    check.run('hostfwd-over-limit', [binary, *rules, '--hostfwd=tcp:3000:22', '--describe'],
+              1, b'--hostfwd requires')
+    for label, options in (('script', ['--diff-net-backend=script']), ('legacy', ['--diff=/unused']),
+                           ('unchecked-journal', ['--diff-record=/unused'])):
+        check.run('hostfwd-reject-' + label, [binary, '--hostfwd=tcp:2000:22', *options],
+                  1, b'--hostfwd requires standalone slirp')
+    with socket.socket() as occupied:
+        occupied.bind(('127.0.0.1', 0))
+        occupied.listen()
+        port = occupied.getsockname()[1]
+        check.run('hostfwd-bind-conflict', [binary, '-b', '--hostfwd=tcp:' + str(port) + ':22',
+                                          '-t', check.dtb], 1, b'virtio-net: cannot bind')
+    with socket.socket() as reservation:
+        reservation.bind(('127.0.0.1', 0))
+        port = reservation.getsockname()[1]
+    image = check.guest('hostfwd-tcp', payload, 1, ['-DSLIRP_ARP', '-DHOSTFWD_TCP'], c=True)
+    journal = directory / 'hostfwd.njr'
+    log = directory / 'hostfwd.log'
+    command = list(map(str, [binary, '-b', '--smp-backend=threaded', '--diff-net', '--diff-tlb=retain',
+                            '--diff-record=' + str(journal), f'--hostfwd=tcp:{port}:19000',
+                            '-t', check.dtb, image]))
+    def send_packet(timeout):
+        with socket.create_connection(('127.0.0.1', port), timeout=timeout):
+            pass
+    returncode, timed_out = run_console(command, log, check.timeout, environment=check.environment,
+                                       ready_marker=b'NEMU_HOSTFWD_READY', on_ready=send_packet)
+    check.save('hostfwd-tcp-capture', returncode == 0 and not timed_out and b'HIT GOOD TRAP' in log.read_bytes(),
+               command=command, returncode=returncode, timed_out=timed_out, log=str(log))
+    stats = check_journal(journal)
+    check.save('hostfwd-tcp-inspect', stats['net_rx'] == 2 and stats['net_rx_drops'] == 0, stats=stats)
+    check.replay('hostfwd-tcp-replay', journal)
+    with socket.socket() as released:
+        released.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        released.bind(('127.0.0.1', port))
+    check.save('hostfwd-port-released', True)
+
+
 def main():
-    check = Check(parser(__doc__, repeat=2).parse_args(), 'net')
+    arguments = parser(__doc__, repeat=2)
+    arguments.add_argument('--hostfwd-only', action='store_true', help='run only host forwarding checks')
+    check = Check(arguments.parse_args(), 'net')
     check.timeout = 180
-    payload = check.snapshot('nemu_diff_net.S', 'nemu_diff_net.c')
+    payload = check.snapshot('nemu_virtio_start.S', 'nemu_diff_net.c')
     for xlen in check.args.xlen:
         check.target(xlen)
+        forwarding(check, payload)
+        if check.args.hostfwd_only:
+            continue
         binary, directory, dtb = check.binary, check.directory, check.dtb
         options = ['--diff-net', '--diff-tlb=retain', '--smp-backend=threaded']
         for harts, mode in [(1, 'script'), (2, 'script'), (4, 'script'), (1, 'big'), (1, 'slirp'), (2, 'slirp'),

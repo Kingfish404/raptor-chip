@@ -14,11 +14,15 @@
  ***************************************************************************************/
 
 #include <isa.h>
+#ifdef CONFIG_ISA_riscv
+#include <isa-extensions.h>
+#endif
 #include <cpu/thread.h>
 #include <cpu/multidiff.h>
 #include <cpu/diffjournal.h>
 #include <memory/paddr.h>
 #include <device/mmio.h>
+#include <device/block-image.h>
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,6 +38,7 @@ void init_difftest(char *ref_so_file, long img_size, int port);
 void init_device();
 void init_sdb();
 void init_disasm();
+void print_nemu_machine(void);
 #ifdef CONFIG_HAS_SERIAL
 void serial_set_lf_to_cr(bool enable);
 void serial_set_stdout(bool enable);
@@ -56,6 +61,10 @@ static void welcome()
 
 void sdb_set_batch_mode();
 static bool batch_requested;
+static bool hostfwd_requested;
+#ifdef CONFIG_HAS_NET
+int net_add_hostfwd(const char *spec);
+#endif
 
 int boot_from_flash = 0;
 
@@ -63,6 +72,8 @@ static char *log_file = NULL;
 static char *diff_so_file = NULL;
 static char *img_file = NULL;
 static char *disk_img_file = NULL;
+static NemuBlockMode disk_mode;
+static bool disk_mode_requested;
 static char *sdcard_img_file = NULL;
 static int difftest_port = 1234;
 #ifdef NEMU_HAS_SMP
@@ -70,6 +81,7 @@ static bool net_backend_requested;
 #endif
 #ifdef CONFIG_HAS_DISK
 void virtio_blk_set_disk_image(const char *path);
+void virtio_blk_set_disk_mode(NemuBlockMode mode);
 #endif
 #ifdef CONFIG_HAS_SDCARD
 void sdcard_set_image(const char *path);
@@ -254,6 +266,7 @@ void usage(int argc, char *argv[])
 {
   printf("Usage: %s [OPTION...] IMAGE [args]\n\n", argv[0]);
   printf("Options:\n");
+  printf("      --isa-extensions=SET  none (default) or rva23 (RV64 cycle-based profile)\n");
   printf("  -b, --batch              run with batch mode\n");
   printf("  -f, --flash              boot from flash\n");
   printf("  -l, --log=FILE           output log to FILE\n");
@@ -280,7 +293,9 @@ void usage(int argc, char *argv[])
   printf("  -p, --port=PORT          run DiffTest with port PORT\n");
   printf("  -e, --elf=ELF_FILE       add ELF_FILE for ftrace\n");
   printf("  -t, --tree=BTB_FILE      add BTB_FILE for rom\n");
-  printf("      --disk=DISK_IMAGE    attach a virtio-mmio block image\n");
+  printf("      --disk=DISK_IMAGE    attach a raw virtio-mmio block image\n");
+  printf("      --disk-mode=MODE     volatile (default), readonly or persistent (writes host file)\n");
+  printf("      --hostfwd=SPEC       tcp:HOST_PORT:GUEST_PORT; loopback -> 10.0.2.15 (up to 16)\n");
   printf("      --smp=N              number of harts (1..%u; requires matching DTB)\n", NEMU_MAX_HARTS);
   printf("      --smp-backend=MODE   rr (default) or threaded; no rebuild required\n");
   printf("      --smp-clock-div=N    threaded guest clock divisor (1..1000; default 16)\n");
@@ -293,6 +308,7 @@ void usage(int argc, char *argv[])
   printf("  -n, --none               do nothing\n");
   printf("      --sig=SPEC           dump RISCOF signature (SPEC=<hex_begin>-<hex_end>:<path>)\n");
   printf("  -h, --help               display this help and exit\n");
+  printf("      --describe          print compiled machine capabilities as JSON and exit\n");
   printf("\n");
   print_nemu_memory_map(stdout);
 }
@@ -310,6 +326,9 @@ static int parse_args(int argc, char *argv[])
       {"maximum", required_argument, NULL, 'm'},
       {"none", no_argument, NULL, 'n'},
       {"disk", required_argument, NULL, 257},
+      {"disk-mode", required_argument, NULL, 284},
+      {"describe", no_argument, NULL, 285},
+      {"hostfwd", required_argument, NULL, 286},
       {"sdcard", required_argument, NULL, 258},
       {"smp", required_argument, NULL, 260},
       {"smp-backend", required_argument, NULL, 261},
@@ -333,6 +352,7 @@ static int parse_args(int argc, char *argv[])
       {"diff-net-backend", required_argument, NULL, 279},
       {"diff-net-input", required_argument, NULL, 280},
       {"diff-block", no_argument, NULL, 281},
+      {"isa-extensions", required_argument, NULL, 283},
 #ifdef CONFIG_HAS_SERIAL
       {"serial-lf-to-cr", no_argument, NULL, 259},
       {"serial-stdout", no_argument, NULL, 282},
@@ -351,6 +371,26 @@ static int parse_args(int argc, char *argv[])
   {
     switch (o)
     {
+    case 286:
+#ifdef CONFIG_HAS_NET
+      if (net_add_hostfwd(optarg) == 0) {
+        hostfwd_requested = true;
+        break;
+      }
+      fprintf(stderr, "--hostfwd requires tcp:HOST_PORT:GUEST_PORT, ports 1..65535, at most 16 unique host ports (UDP unsupported)\n");
+#else
+      fprintf(stderr, "--hostfwd requires a build with CONFIG_HAS_NET\n");
+#endif
+      exit(EXIT_FAILURE);
+    case 285:
+      print_nemu_machine();
+      exit(0);
+    case 283:
+#ifdef CONFIG_ISA_riscv
+      if (riscv_isa_configure_names(optarg) == 0) break;
+#endif
+      fprintf(stderr, "--isa-extensions requires none or rva23 (RV64 system mode with F, D, Svade and CONFIG_TIMER_CYCLE required)\n");
+      exit(EXIT_FAILURE);
     case 'b':
       batch_requested = true;
       sdb_set_batch_mode();
@@ -576,6 +616,16 @@ static int parse_args(int argc, char *argv[])
     case 257:
       disk_img_file = optarg;
       break;
+    case 284:
+      if (!strcmp(optarg, "volatile")) disk_mode = NEMU_BLOCK_VOLATILE;
+      else if (!strcmp(optarg, "readonly")) disk_mode = NEMU_BLOCK_READONLY;
+      else if (!strcmp(optarg, "persistent")) disk_mode = NEMU_BLOCK_PERSISTENT;
+      else {
+        fprintf(stderr, "--disk-mode requires volatile, readonly or persistent\n");
+        exit(1);
+      }
+      disk_mode_requested = true;
+      break;
     case 258:
       sdcard_img_file = optarg;
       break;
@@ -664,6 +714,31 @@ void init_monitor(int argc, char *argv[])
 
   /* Parse arguments. */
   parse_args(argc, argv);
+  if (hostfwd_requested && (diff_so_file ||
+      IFDEF(NEMU_HAS_SMP, nemu_net_script || nemu_multidiff_requested ||
+            (nemu_journal_requested() && !nemu_md_net) ||) false)) {
+    fprintf(stderr, "--hostfwd requires standalone slirp networking or a --diff-net journal, not script/lockstep/legacy DiffTest\n");
+    exit(1);
+  }
+  if (disk_img_file && !*disk_img_file) {
+    fprintf(stderr, "--disk requires a nonempty image path\n");
+    exit(1);
+  }
+  if (disk_mode_requested && (!disk_img_file || !*disk_img_file)) {
+    fprintf(stderr, "--disk-mode requires --disk=IMAGE\n");
+    exit(1);
+  }
+#ifndef CONFIG_HAS_DISK
+  if (disk_img_file || disk_mode_requested) {
+    fprintf(stderr, "--disk requires a build with CONFIG_HAS_DISK\n");
+    exit(1);
+  }
+#endif
+  if (disk_mode != NEMU_BLOCK_VOLATILE && (diff_so_file ||
+      IFDEF(NEMU_HAS_SMP, nemu_multidiff_requested || nemu_journal_requested() ||) false)) {
+    fprintf(stderr, "DiffTest and journal replay require --disk-mode=volatile\n");
+    exit(1);
+  }
 #ifdef NEMU_HAS_SMP
   if ((net_backend_requested && !nemu_md_net) ||
       (nemu_net_input_path && (!nemu_md_net || !nemu_net_script))) {
@@ -725,6 +800,13 @@ void init_monitor(int argc, char *argv[])
     fprintf(stderr, "Threaded execution requires --batch; interactive debugging is unsupported\n");
     exit(1);
   }
+#ifdef CONFIG_ISA_riscv
+  if (riscv_isa_extensions && !riscv_isa_profile_clock_supported(nemu_threaded))
+  {
+    fprintf(stderr, "RVA23 requires instruction-count timing: CONFIG_TIMER_CYCLE and --smp-backend=rr\n");
+    exit(1);
+  }
+#endif
 
   /* Set random seed. */
   init_rand();
@@ -738,6 +820,7 @@ void init_monitor(int argc, char *argv[])
   /* Initialize devices. */
 #ifdef CONFIG_HAS_DISK
   virtio_blk_set_disk_image(disk_img_file);
+  virtio_blk_set_disk_mode(disk_mode);
 #endif
 #ifdef CONFIG_HAS_SDCARD
   sdcard_set_image(sdcard_img_file);

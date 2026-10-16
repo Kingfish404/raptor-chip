@@ -18,6 +18,7 @@
 #include <memory/host.h>
 #include <memory/paddr.h>
 #include <memory/tlb.h>
+#include <memory/trap.h>
 #include <device/mmio.h>
 #include <cpu/difftest.h>
 #include <cpu/cpu.h>
@@ -27,9 +28,6 @@
 #ifdef CONFIG_RAPTOR_PMEM_2G
 #include <sys/mman.h>
 #endif
-
-extern NEMU_TLS jmp_buf exec_jmp_buf;
-extern NEMU_TLS int cause;
 
 char *btb_file = NULL;
 
@@ -232,7 +230,7 @@ static void out_of_bound(paddr_t addr)
   if (cpu.sr[CSR_MTVEC] != 0 && cpu.priv == PRV_M)
   {
     cause = MCA_LOA_ACC_FAU;
-    nemu_longjmp(exec_jmp_buf, 10);
+    nemu_memory_longjmp(10);
   }
   panic("address = " FMT_PADDR " is out of bound of pmem [" FMT_PADDR ", " FMT_PADDR "] at pc = " FMT_WORD,
         addr, PMEM_LEFT, PMEM_RIGHT, cpu.pc);
@@ -246,7 +244,7 @@ void init_mem()
               MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   assert(pmem != MAP_FAILED);
 #else
-  pmem = malloc(CONFIG_MSIZE);
+  pmem = calloc(1, CONFIG_MSIZE);
   assert(pmem);
 #endif
 #endif

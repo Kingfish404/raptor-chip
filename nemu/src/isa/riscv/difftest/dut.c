@@ -60,6 +60,16 @@ bool isa_difftest_checkregs(CPU_state *ref_r, vaddr_t pc)
            cpu.sr[CSR_FCSR], ref_r->sr[CSR_FCSR]);
     is_same = false;
   }
+  if (riscv_v128_preview_enabled())
+  {
+    CHECK_CSR(CSR_VSTART);
+    CHECK_CSR(CSR_VXSAT);
+    CHECK_CSR(CSR_VXRM);
+    CHECK_CSR(CSR_VCSR);
+    CHECK_CSR(CSR_VL);
+    CHECK_CSR(CSR_VTYPE);
+    CHECK_CSR(CSR_VLENB);
+  }
   CHECK_CSR(CSR_SSTATUS);
   CHECK_CSR(CSR_SIE);
   CHECK_CSR(CSR_STVEC);

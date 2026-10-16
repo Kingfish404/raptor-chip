@@ -15,8 +15,11 @@
 
 #include <common.h>
 #include <cpu/thread.h>
-#if !defined(CONFIG_TIMER_CYCLE)
-#include MUXDEF(CONFIG_TIMER_GETTIMEOFDAY, <sys/time.h>, <time.h>)
+#ifndef CONFIG_TARGET_AM
+#include <time.h>
+#endif
+#ifdef CONFIG_TIMER_GETTIMEOFDAY
+#include <sys/time.h>
 #endif
 
 IFDEF(CONFIG_TIMER_CLOCK_GETTIME,
@@ -60,6 +63,19 @@ uint64_t get_time() {
   if (boot_time == 0) boot_time = get_time_internal();
   uint64_t now = get_time_internal();
   return now - boot_time;
+#endif
+}
+
+uint64_t get_host_time(void) {
+#ifdef CONFIG_TARGET_AM
+  return io_read(AM_TIMER_UPTIME).us;
+#else
+  struct timespec now;
+  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+    perror("clock_gettime(CLOCK_MONOTONIC)");
+    abort();
+  }
+  return (uint64_t)now.tv_sec * 1000000 + now.tv_nsec / 1000;
 #endif
 }
 

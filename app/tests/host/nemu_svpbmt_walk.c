@@ -6,13 +6,16 @@
 #include <setjmp.h>
 #include <stdio.h>
 CPU_state cpu;
+NEMU_TLS paddr_t riscv_h_fault_gpa;
+NEMU_TLS bool riscv_h_fault_ptw;
+NEMU_TLS bool riscv_h_fault_write;
 jmp_buf exec_jmp_buf;
 int cause;
+void nemu_memory_longjmp(int value) { nemu_longjmp(exec_jmp_buf, value); }
 static uint8_t memory[16384];
 static unsigned reads, writes, checked;
 static uint8_t expected_pbmt, observed_pbmt;
 static uint64_t denied;
-uint32_t pmp_effective_priv_ls(void) { return cpu.priv; }
 bool pmp_check(paddr_t addr, int size, uint32_t priv, bool r, bool w, bool x) {
   (void)size; (void)priv; (void)r; (void)w; (void)x;
   return addr == denied;

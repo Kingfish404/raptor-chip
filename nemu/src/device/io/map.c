@@ -17,13 +17,11 @@
 #include <isa.h>
 #include <cpu/thread.h>
 #include <memory/host.h>
+#include <memory/trap.h>
 #include <memory/vaddr.h>
 #include <device/map.h>
 
 #define IO_SPACE_MAX (32 * 1024 * 1024) // 32 * 1MB
-
-extern NEMU_TLS jmp_buf exec_jmp_buf;
-extern NEMU_TLS int cause;
 
 static uint8_t *io_space = NULL;
 static uint8_t *p_space = NULL;
@@ -45,7 +43,7 @@ static void check_bound(IOMap *map, paddr_t addr, bool is_read)
     if (cpu.sr[CSR_MTVEC] != 0 && (cpu.priv == PRV_M || cpu.priv == PRV_S || cpu.priv == PRV_U))
     {
       cause = is_read ? MCA_LOA_ACC_FAU : MCA_STO_ACC_FAU;
-      nemu_longjmp(exec_jmp_buf, 20);
+      nemu_memory_longjmp(20);
     }
     Assert(map != NULL, "map.c > check_bound: address (" FMT_PADDR ") is out of bound at pc = " FMT_WORD_NO_PREFIX, addr, cpu.pc);
   }

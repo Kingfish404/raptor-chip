@@ -1,5 +1,6 @@
 #include <isa.h>
 #include <isa-def.h>
+#include <isa-extensions.h>
 #include <stdio.h>
 
 NEMU_TLS CPU_state cpu;
@@ -7,7 +8,12 @@ NEMU_TLS word_t g_vaddr;
 bool nemu_md_interrupts;
 static unsigned flushes;
 void soft_tlb_flush(void) { ++flushes; }
-word_t riscv_mip_value(void) { return cpu.sr[CSR_MIP]; }
+word_t riscv_mip_value(void) {
+  word_t mask = (word_t)riscv_virtual_irq_mask();
+  word_t value = (cpu.sr[CSR_MIP] & ~mask) | (cpu.sr[CSR_HVIP] & mask);
+  if (riscv_virtual_timer_pending(&cpu)) value |= (word_t)0x40;
+  return value;
+}
 
 int main(void) {
   unsigned cases=0, failures=0;
@@ -36,8 +42,9 @@ int main(void) {
     if (!interrupt) {
       switch (code) {
         case 0: case 1: case 4: case 5: case 6: case 7:
-        case 12: case 13: case 15: expected_tval = g_vaddr; break;
-        case 2: expected_tval = 0xdeadbeef; break;
+        case 12: case 13: case 15: case 20: case 21: case 23:
+          expected_tval = g_vaddr; break;
+        case 2: case 22: expected_tval = 0xdeadbeef; break;
         case 3: expected_tval = epc; break;
       }
     }
@@ -85,6 +92,139 @@ int main(void) {
     if (actual!=expected && failures++<8) printf("FAIL interrupt priority p=%u ie=%u deleg=%u pending=%u enable=%u\n",p,ie,deleg,pending,enable);
     ++cases;
   }
+#if defined(CONFIG_RV64) && !defined(CONFIG_TARGET_SHARE)
+  memset(&cpu, 0, sizeof(cpu));
+  cpu.priv = PRV_S;
+  cpu.virt = true;
+  cpu.sr[CSR_MIDELEG] = (word_t)1 << 5;
+  cpu.sr[CSR_MIE] = (word_t)1 << 5;
+  cpu.sr[CSR_MIP] = (word_t)1 << 5;
+  if (isa_query_intr() != MCA_SUP_TIM_INT) failures++;
+  cases++;
+#endif
+#ifdef CONFIG_RV64
+  riscv_isa_extensions = NEMU_ISA_EXT_H_GSTAGE_PREVIEW;
+  const unsigned virtual_bits[] = {2, 6, 10};
+  for (unsigned index = 0; index < 3; index++) {
+    unsigned bit = virtual_bits[index];
+    memset(&cpu, 0, sizeof(cpu));
+    cpu.priv = PRV_S;
+    cpu.virt = true;
+    cpu.sr[CSR_HVIP] = (word_t)1 << bit;
+    cpu.sr[CSR_HIDELEG] = (word_t)1 << bit;
+    cpu.sr[CSR_MIE] = (word_t)1 << bit;
+    cpu.sr[CSR_VSSTATUS] = 2;
+    cpu.sr[CSR_VSTVEC] = 0x80004001;
+#if !defined(CONFIG_TARGET_SHARE)
+    if (isa_query_intr() != (MCA_INTR_BIT | bit)) failures++;
+    cpu.sr[CSR_VSSTATUS] = 0;
+    if (isa_query_intr() != INTR_EMPTY) failures++;
+    cpu.sr[CSR_VSSTATUS] = 2;
+    cases += 2;
+#endif
+    word_t handler = isa_raise_intr(MCA_INTR_BIT | bit, 0x80003002);
+    if (handler != 0x80004000 + 4 * (bit - 1) ||
+        cpu.sr[CSR_VSCAUSE] != (MCA_INTR_BIT | (bit - 1)) ||
+        cpu.sr[CSR_VSEPC] != 0x80003002 || !cpu.virt ||
+        cpu.priv != PRV_S || !(cpu.sr[CSR_VSSTATUS] & 0x20) ||
+        (cpu.sr[CSR_VSSTATUS] & 0x2)) failures++;
+    cases++;
+  }
+  memset(&cpu, 0, sizeof(cpu));
+  cpu.priv = PRV_S;
+  cpu.virt = true;
+  cpu.sr[CSR_HVIP] = 0x40;
+  cpu.sr[CSR_MIE] = 0x40;
+  cpu.sr[CSR_STVEC] = 0x80002001;
+#if !defined(CONFIG_TARGET_SHARE)
+  if (isa_query_intr() != MCA_VSUP_TIM_INT) failures++;
+  cases++;
+#endif
+  if (isa_raise_intr(MCA_VSUP_TIM_INT, 0x80003002) != 0x80002018 ||
+      cpu.sr[CSR_SCAUSE] != MCA_VSUP_TIM_INT || cpu.virt ||
+      !(cpu.sr[CSR_HSTATUS] & 0x80)) failures++;
+  cases++;
+  memset(&cpu, 0, sizeof(cpu));
+  cpu.priv = PRV_S;
+  cpu.virt = true;
+  cpu.sr[CSR_VSSTATUS] = 2;
+  cpu.sr[CSR_HIDELEG] = 0x40;
+  cpu.sr[CSR_MIE] = 0x40;
+  cpu.sr[CSR_MENVCFG] = (word_t)(UINT64_C(1) << 63);
+  cpu.sr[CSR_HENVCFG] = (word_t)(UINT64_C(1) << 63);
+  cpu.sr[CSR_TIME] = 100;
+  cpu.sr[CSR_HTIMEDELTA] = 5;
+  cpu.sr[CSR_VSTIMECMP] = 105;
+  if (!riscv_intr_may_pending() || !(riscv_mip_value() & 0x40)) failures++;
+  cpu.sr[CSR_VSTIMECMP] = 106;
+  if (riscv_intr_may_pending() || (riscv_mip_value() & 0x40)) failures++;
+  cpu.sr[CSR_HVIP] = 0x40;
+  if (!riscv_intr_may_pending() || !(riscv_mip_value() & 0x40)) failures++;
+  cases += 3;
+#if !defined(CONFIG_TARGET_SHARE)
+  cpu.sr[CSR_HVIP] = 0;
+  cpu.sr[CSR_VSTIMECMP] = 105;
+  if (isa_query_intr() != MCA_VSUP_TIM_INT) failures++;
+  cases++;
+  memset(&cpu, 0, sizeof(cpu));
+  cpu.priv = PRV_S;
+  cpu.sr[CSR_HVIP] = 0x40;
+  cpu.sr[CSR_MIE] = 0x40;
+  cpu.sr[CSR_HIDELEG] = 0x40;
+  if (isa_query_intr() != INTR_EMPTY) failures++;
+  cpu.virt = true;
+  cpu.priv = PRV_U;
+  if (isa_query_intr() != MCA_VSUP_TIM_INT) failures++;
+  cases += 2;
+  memset(&cpu, 0, sizeof(cpu));
+  cpu.priv = PRV_S;
+  cpu.virt = true;
+  cpu.sr[CSR_VSSTATUS] = 2;
+  cpu.sr[CSR_MIDELEG] = 0x200;
+  cpu.sr[CSR_MIE] = 0x644;
+  cpu.sr[CSR_MIP] = 0x200;
+  cpu.sr[CSR_HVIP] = 0x444;
+  cpu.sr[CSR_HIDELEG] = 0x444;
+  if (isa_query_intr() != MCA_SUP_EXT_INT) failures++;
+  cpu.sr[CSR_MIP] = 0;
+  if (isa_query_intr() != MCA_VSUP_EXT_INT) failures++;
+  cpu.sr[CSR_HVIP] = 0x44;
+  if (isa_query_intr() != MCA_VSUP_SOF_INT) failures++;
+  cpu.sr[CSR_HVIP] = 0x40;
+  if (isa_query_intr() != MCA_VSUP_TIM_INT) failures++;
+  cases += 4;
+#endif
+  memset(&cpu, 0, sizeof(cpu));
+  cpu.priv = PRV_S;
+  cpu.sr[CSR_HSTATUS] = (word_t)7 << 6;
+  cpu.sr[CSR_MEDELEG] = (word_t)1 << MCA_BREAK_POINT;
+  cpu.sr[CSR_STVEC] = 0x80002000;
+  if (isa_raise_intr(MCA_BREAK_POINT, 0x80003002) != 0x80002000 ||
+      (cpu.sr[CSR_HSTATUS] & ((word_t)7 << 6)) != ((word_t)1 << 8) ||
+      cpu.sr[CSR_STVAL] != 0x80003002) failures++;
+  cases++;
+  for (unsigned privilege = PRV_U; privilege <= PRV_S; privilege++) {
+    memset(&cpu, 0, sizeof(cpu));
+    cpu.priv = privilege;
+    cpu.virt = true;
+    cpu.sr[CSR_MEDELEG] = (word_t)1 << MCA_BREAK_POINT;
+    cpu.sr[CSR_STVEC] = 0x80002000;
+    if (isa_raise_intr(MCA_BREAK_POINT, 0x80003002) != 0x80002000 ||
+        (cpu.sr[CSR_HSTATUS] & ((word_t)7 << 6)) !=
+          (((word_t)3 << 6) | ((word_t)privilege << 8)) ||
+        cpu.sr[CSR_STVAL] != 0x80003002) failures++;
+    cases++;
+  }
+  memset(&cpu, 0, sizeof(cpu));
+  cpu.priv = PRV_U;
+  cpu.virt = true;
+  cpu.sr[CSR_MTVEC] = 0x80001000;
+  if (isa_raise_intr(MCA_BREAK_POINT, 0x80003002) != 0x80001000 ||
+      (cpu.sr[CSR_MSTATUS] & ((word_t)3 << 38)) != ((word_t)3 << 38) ||
+      cpu.sr[CSR_MTVAL] != 0x80003002) failures++;
+  cases++;
+  riscv_isa_extensions = 0;
+#endif
   printf("%s RV%d trap routing cases=%u failures=%u\n",failures?"FAIL":"PASS",XLEN,cases,failures);
   return failures!=0;
 }

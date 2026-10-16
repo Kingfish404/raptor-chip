@@ -4,7 +4,8 @@ from lib.build import build_production_harness
 from lib.harness import Check, parser
 
 DEVICE_SOURCES = ['nemu/src/cpu/smp.c', 'nemu/src/cpu/thread.c', 'nemu/src/device/timer.c',
-                  'nemu/src/device/intr.c', 'nemu/src/isa/riscv/system/pmp.c']
+                  'nemu/src/device/intr.c', 'nemu/src/isa/riscv/system/pmp.c',
+                  'nemu/src/isa/riscv/extensions.c']
 HARNESSES = {'rr': ['app/tests/host/nemu_smp_devices.c'],
              'threaded': ['nemu/src/device/io/map.c', 'nemu/src/device/io/mmio.c', 'nemu/src/memory/paddr.c',
                           'nemu/src/utils/timer.c', 'app/tests/host/nemu_threaded_bus.c']}
@@ -40,6 +41,9 @@ def main():
                                       ('clock-div-low', '--smp-clock-div=0', b'--smp-clock-div requires'),
                                       ('clock-div-high', '--smp-clock-div=1001', b'--smp-clock-div requires')):
             check.run('reject-' + name, [binary, option], 'nonzero', message)
+        check.run('help-isa-extensions', [binary, '--help'], markers=b'none (default) or rva23')
+        check.run('reject-isa-extensions', [binary, '--isa-extensions=unknown'],
+                  'nonzero', b'--isa-extensions requires none or rva23')
     check.finish('SMP')
 
 

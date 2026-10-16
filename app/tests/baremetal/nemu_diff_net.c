@@ -15,7 +15,7 @@
 #define RECEIVE_FRAME_LENGTH FRAME_LENGTH
 #endif
 
-_Alignas(4096) unsigned char nemu_net_stacks[HARTS][4096];
+_Alignas(4096) unsigned char nemu_test_stacks[HARTS][4096];
 static volatile unsigned barrier_count, barrier_generation, irq_count;
 typedef struct {
   uint64_t address;
@@ -197,7 +197,7 @@ static void failure_tests(void)
 }
 #endif
 
-void nemu_net_main(unsigned hart)
+void nemu_test_main(unsigned hart)
 {
   __asm__ volatile ("csrw mstatus, zero\ncsrw mie, %0" :: "r"(8) : "memory");
 #ifdef BAD_WIDTH
@@ -278,6 +278,17 @@ void nemu_net_main(unsigned hart)
     failure_tests();
 #else
     wait_interrupt(HARTS);
+#endif
+#ifdef HOSTFWD_TCP
+    setup(1);
+    irq_count = 0;
+    const char *ready = "NEMU_HOSTFWD_READY\n";
+    while (*ready) *(volatile uint8_t *)(uintptr_t)0x10000000 = *ready++;
+    wait_interrupt(1);
+    check(used[0][2] >= 66 && used[0][2] <= RECEIVE_FRAME_LENGTH);
+    check(receive[0][24] == 8 && receive[0][25] == 0 && receive[0][26] == 0x45);
+    check(receive[0][35] == 6 && receive[0][48] == 0x4a && receive[0][49] == 0x38);
+    check((receive[0][59] & 0x12) == 2);
 #endif
     write_reg(0x70, 0);
     check(read_reg(0x44) == 0 && read_reg(0x60) == 0);

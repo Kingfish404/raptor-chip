@@ -6,9 +6,9 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'linux'))
-from distro_boot import build_nemu, nemu_build_flags  # noqa: E402
+from distro_boot import build_dtb, build_nemu, nemu_build_flags  # noqa: E402
 
-__all__ = ['ROOT', 'build_host', 'build_nemu', 'build_production_harness', 'build_reference', 'build_replay_driver',
+__all__ = ['ROOT', 'build_dtb', 'build_host', 'build_nemu', 'build_production_harness', 'build_reference', 'build_replay_driver',
            'compile_guest', 'dtb_path', 'guest_source', 'nemu_build_flags']
 
 GUEST_CFLAGS = ['-O2', '-ffreestanding', '-fno-builtin', '-fno-stack-protector', '-mcmodel=medany',

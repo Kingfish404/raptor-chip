@@ -213,11 +213,11 @@ def build_nemu(directory, xlen=64, sanitize=None):
     return directory / f'build/riscv{xlen}-nemu-interpreter'
 
 
-def build_dtb(directory, harts):
+def build_dtb(directory, harts, source_name='nemu-distro-rv64.dts'):
     require(1 <= harts <= 4, 'requires 1..4 harts')
     dtb = directory / 'nemu.dtb'
     run(['/usr/bin/dtc', '-I', 'dts', '-O', 'dtb', '-i', HOME / 'dts',
-         '-o', dtb, HOME / 'dts/nemu-distro-rv64.dts'])
+         '-o', dtb, HOME / 'dts' / source_name])
     if harts == 1:
         return
     properties = run(['fdtget', '-p', dtb, '/cpus/cpu@0'], capture_output=True).stdout.decode().split()
@@ -235,7 +235,7 @@ def build_dtb(directory, harts):
     clint = ' '.join(f'&cpu{hartid}_intc 3 &cpu{hartid}_intc 7' for hartid in range(harts))
     plic = ' '.join(f'&cpu{hartid}_intc 11 &cpu{hartid}_intc 9' for hartid in range(harts))
     source = directory / 'nemu-smp.dts'
-    source.write_text('/include/ "nemu-distro-rv64.dts"\n/ { cpus {\n' + '\n'.join(nodes) +
+    source.write_text('/include/ "' + source_name + '"\n/ { cpus {\n' + '\n'.join(nodes) +
                       '\n}; soc { clint@2000000 { interrupts-extended = <' + clint +
                       '>; }; plic@c000000 { interrupts-extended = <' + plic + '>; }; }; };\n')
     run(['/usr/bin/dtc', '-I', 'dts', '-O', 'dtb', '-i', HOME / 'dts', '-o', dtb, source])

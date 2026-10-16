@@ -1,6 +1,7 @@
 #include <common.h>
 #include <cpu.h>
 #include <memory.h>
+#include <difftest-isa.h>
 #include <dlfcn.h>
 #ifdef RAPT_LARGE_PMEM
 #include <sys/mman.h>
@@ -183,11 +184,12 @@ static void checkmem(uint8_t *ref, uint8_t *dut, size_t n)
   }
 }
 
-void init_difftest(char *ref_so_file, long img_size, int port)
+void init_difftest(char *ref_so_file, long img_size, int port, uint64_t isa_extensions)
 {
 #ifdef CONFIG_DIFFTEST
   if (ref_so_file == NULL)
   {
+    assert(isa_extensions == 0);
     printf("[difftest] DISABLED: no `-d <ref.so>` argument supplied; "
            "register/CSR comparison against REF is skipped.\n");
     difftest_enabled = false;
@@ -198,6 +200,38 @@ void init_difftest(char *ref_so_file, long img_size, int port)
   void *handle;
   handle = dlopen(ref_so_file, RTLD_LAZY);
   assert(handle);
+
+  NemuISAQuery isa_query = (NemuISAQuery)dlsym(handle, "nemu_difftest_isa_query");
+  if (isa_query == nullptr && isa_extensions)
+  {
+    fprintf(stderr, "[difftest] reference lacks optional ISA negotiation\n");
+    abort();
+  }
+  if (isa_query != nullptr)
+  {
+    const NemuISAAPI *isa_api = isa_query(NEMU_ISA_API_VERSION, sizeof(NemuISAAPI));
+    if (isa_api == nullptr || isa_api->version != NEMU_ISA_API_VERSION ||
+        isa_api->size != sizeof(NemuISAAPI) || isa_api->xlen != sizeof(word_t) * 8 ||
+        isa_api->configure == nullptr || isa_api->locked)
+    {
+      fprintf(stderr, "[difftest] NEMU reference ISA ABI or XLEN mismatch\n");
+      abort();
+    }
+    if ((isa_extensions & ~isa_api->supported) ||
+        isa_api->configure(isa_extensions) != 0)
+    {
+      fprintf(stderr, "[difftest] reference cannot enable ISA mask 0x%" PRIx64 "\n",
+              isa_extensions);
+      abort();
+    }
+    isa_api = isa_query(NEMU_ISA_API_VERSION, sizeof(NemuISAAPI));
+    if (isa_api == nullptr || isa_api->enabled != isa_extensions)
+    {
+      fprintf(stderr, "[difftest] reference ISA mask did not take effect\n");
+      abort();
+    }
+    printf("[difftest] reference ISA mask: 0x%" PRIx64 "\n", isa_extensions);
+  }
 
   ref_difftest_memcpy = (void (*)(paddr_t, void *, size_t, bool))dlsym(handle, "difftest_memcpy");
   assert(ref_difftest_memcpy);

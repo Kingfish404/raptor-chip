@@ -3,6 +3,13 @@ import ctypes as C
 from pathlib import Path
 
 
+class ISAAPI(C.Structure):
+    _fields_ = [('version', C.c_uint32), ('size', C.c_uint32),
+                ('xlen', C.c_uint32), ('locked', C.c_uint32),
+                ('supported', C.c_uint64), ('enabled', C.c_uint64),
+                ('configure', C.CFUNCTYPE(C.c_int, C.c_uint64))]
+
+
 class Reference:
     def __init__(self, path, xlen):
         self.xlen = xlen

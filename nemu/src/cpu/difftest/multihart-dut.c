@@ -1,14 +1,17 @@
 #include <cpu/multidiff.h>
+#include <difftest-vector.h>
 
 #ifdef NEMU_HAS_SMP
 #include <cpu/cpu.h>
 #include <isa.h>
+#include <isa-extensions.h>
 #include <memory/paddr.h>
 #include <utils.h>
 #include <dlfcn.h>
 
 bool nemu_multidiff_requested;
 static const NemuDiffAPI *reference;
+static const NemuDiffVectorAPI *vector_reference;
 static uint64_t sequence;
 static uint64_t start_pc;
 static unsigned seen_harts;
@@ -37,6 +40,14 @@ void nemu_multidiff_init(const char *path, size_t image_size)
   require(path != NULL, "--diff-mode=multihart requires --diff=REF_SO");
   void *handle = dlopen(path, RTLD_NOW | RTLD_LOCAL);
   require(handle != NULL, "cannot load reference library");
+  if (riscv_isa_extensions) {
+    NemuISAQuery isa_query = (NemuISAQuery)dlsym(handle, "nemu_difftest_isa_query");
+    const NemuISAAPI *isa_api = isa_query ? isa_query(NEMU_ISA_API_VERSION, sizeof(NemuISAAPI)) : NULL;
+    require(isa_api && isa_api->version == NEMU_ISA_API_VERSION && isa_api->size == sizeof(NemuISAAPI)
+            && isa_api->xlen == XLEN && isa_api->configure && !isa_api->locked
+            && !(riscv_isa_extensions & ~isa_api->supported), "reference lacks requested ISA extensions");
+    require(isa_api->configure(riscv_isa_extensions) == 0, "reference ISA configuration failed");
+  }
   NemuDiffQuery query = (NemuDiffQuery)dlsym(handle, "nemu_difftest_query");
   require(query != NULL, "reference lacks the versioned multihart ABI");
   reference = query(NEMU_DIFF_MULTI_VERSION, sizeof(NemuDiffAPI));
@@ -49,6 +60,14 @@ void nemu_multidiff_init(const char *path, size_t image_size)
           "reference memory capability/map mismatch");
   require(reference->init && reference->set_state && reference->get_state &&
           reference->memory_copy && reference->step, "incomplete reference API");
+  if (riscv_v128_preview_enabled()) {
+    NemuDiffVectorQuery vector_query = (NemuDiffVectorQuery)dlsym(handle, "nemu_difftest_vector_query");
+    vector_reference = vector_query ? vector_query(NEMU_DIFF_VECTOR_VERSION, sizeof(NemuDiffVectorAPI)) : NULL;
+    require(vector_reference && vector_reference->version == NEMU_DIFF_VECTOR_VERSION &&
+            vector_reference->size == sizeof(NemuDiffVectorAPI) && vector_reference->xlen == XLEN &&
+            vector_reference->max_harts >= nemu_nr_harts && vector_reference->set_state &&
+            vector_reference->get_state, "reference lacks vector register state API");
+  }
   require(image_size <= CONFIG_MSIZE, "image exceeds RAM");
   require(reference->init(nemu_nr_harts) == 0, "reference initialization failed");
   require(reference->memory_copy(PMEM_LEFT, guest_to_host(PMEM_LEFT), CONFIG_MSIZE, 1) == 0,
@@ -60,6 +79,16 @@ void nemu_multidiff_init(const char *path, size_t image_size)
     cpu_select_hart(hart);
     nemu_md_capture(&nemu_md_frame.state);
     require(reference->set_state(hart, &nemu_md_frame.state) == 0, "reference hart initialization failed");
+    if (vector_reference) {
+      NemuDiffVectorState vector_state;
+      NemuDiffVectorState observed;
+      memcpy(vector_state.reg, cpu.vreg, sizeof(cpu.vreg));
+      require(vector_reference->set_state(hart, &vector_state) == 0,
+              "reference vector hart initialization failed");
+      require(vector_reference->get_state(hart, &observed) == 0 &&
+              memcmp(&observed, &vector_state, sizeof(vector_state)) == 0,
+              "reference initial vector state mismatch");
+    }
     require(reference->get_state(hart, &expected.state) == 0 &&
             memcmp(&expected.state, &nemu_md_frame.state, sizeof(NemuDiffState)) == 0,
             "reference initial state mismatch");
@@ -116,6 +145,20 @@ void nemu_multidiff_finish(void)
   if (memcmp(actual, wanted, sizeof(*actual))) {
     mismatch("privilege-reservation-or-platform-state", 0, actual->privilege, wanted->privilege);
     return;
+  }
+  if (vector_reference) {
+    NemuDiffVectorState vector_state;
+    if (vector_reference->get_state(nemu_hartid, &vector_state) != 0) {
+      mismatch("vreg-state", 0, 0, 1);
+      return;
+    }
+    for (unsigned reg = 0; reg < 32; reg++)
+      for (unsigned byte = 0; byte < NEMU_DIFF_VECTOR_VLENB; byte++)
+        if (cpu.vreg[reg][byte] != vector_state.reg[reg][byte]) {
+          mismatch("vreg-byte", reg * NEMU_DIFF_VECTOR_VLENB + byte,
+                   cpu.vreg[reg][byte], vector_state.reg[reg][byte]);
+          return;
+        }
   }
   if (nemu_md_frame.trapped != expected.trapped || nemu_md_frame.ended != expected.ended) {
     mismatch("trap-or-end", 0, nemu_md_frame.trapped, expected.trapped);

@@ -11,6 +11,7 @@
 !*.cc
 !*.mk
 !/sim/*
+!/tools/nemu.py
 
 # Build artifacts (Kconfig generated)
 include/config

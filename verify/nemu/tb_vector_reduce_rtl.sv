@@ -1,0 +1,112 @@
+module tb_vector_reduce_rtl #(
+    parameter int XLEN = 64
+);
+  logic clock;
+  always #5 clock = ~clock;
+
+  logic reset = 1;
+  logic cmd_valid = 0;
+  logic cmd_ready;
+  logic [31:0] cmd_insn;
+  logic [XLEN-1:0] cmd_vtype, cmd_vl;
+  logic [6:0] cmd_vstart;
+  logic done_valid, done_ready = 0, done_trap;
+  logic vr_valid, vr_ready, vr_write, vr_rsp_valid, vr_rsp_ready;
+  logic [8:0] vr_addr;
+  logic [1:0] vr_size;
+  logic [63:0] vr_wdata, vr_rdata;
+  logic [7:0] storage[0:511];
+  logic [7:0] seed;
+  string vectors;
+  int input_file;
+  int parsed;
+  int cycles;
+
+  assign vr_ready = 1;
+  rapt_vpu_reduce #(
+      .XLEN(XLEN),
+      .VLEN(128),
+      .ELEN(64)
+  ) dut (
+      .clock,
+      .reset,
+      .cmd_valid,
+      .cmd_ready,
+      .cmd_insn,
+      .cmd_vtype,
+      .cmd_vl,
+      .cmd_vstart,
+      .done_valid,
+      .done_ready,
+      .done_trap,
+      .vr_valid,
+      .vr_ready,
+      .vr_write,
+      .vr_addr,
+      .vr_size,
+      .vr_wdata,
+      .vr_rsp_valid,
+      .vr_rsp_ready,
+      .vr_rdata
+  );
+
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      vr_rsp_valid <= 0;
+      vr_rdata <= 0;
+    end else begin
+      vr_rsp_valid <= vr_valid && vr_ready;
+      if (vr_rsp_valid && !vr_rsp_ready) $fatal(1, "Unaccepted vector response");
+    end
+    if (!reset && vr_valid && vr_ready) begin
+      if (!vr_write) vr_rdata <= 0;
+      for (int byte_index = 0; byte_index < 8; byte_index++) begin
+        if (byte_index < (1 << vr_size)) begin
+          if (vr_write) storage[int'(vr_addr)+byte_index] <= vr_wdata[byte_index*8+:8];
+          else vr_rdata[byte_index*8+:8] <= storage[int'(vr_addr)+byte_index];
+        end
+      end
+    end
+  end
+
+  initial begin
+    clock = 0;
+    if (!$value$plusargs("vectors=%s", vectors)) $fatal(1, "Missing vectors path");
+    input_file = $fopen(vectors, "r");
+    if (input_file == 0) $fatal(1, "Cannot open vector inputs");
+    repeat (2) @(negedge clock);
+    reset = 0;
+    while (!$feof(
+        input_file
+    )) begin
+      parsed =
+          $fscanf(input_file, "%h %h %h %h %h\n", cmd_insn, cmd_vtype, cmd_vl, cmd_vstart, seed);
+      if (parsed == 5) begin
+        for (int byte_index = 0; byte_index < 512; byte_index++)
+        storage[byte_index] = 8'(byte_index * 29 + (byte_index / 16) * 37 + int'(seed) * 13);
+        @(negedge clock);
+        if (!cmd_ready) $fatal(1, "Reduction command not ready");
+        cmd_valid = 1;
+        @(negedge clock);
+        cmd_valid = 0;
+        cycles = 0;
+        while (!done_valid && cycles < 3000) begin
+          @(negedge clock);
+          cycles++;
+        end
+        if (!done_valid) $fatal(1, "Reduction command timed out");
+        $write("VECTOR_REDUCE_RESULT %0d ", done_trap);
+        for (int byte_index = 0; byte_index < 512; byte_index++)
+        $write("%02x", storage[byte_index]);
+        $write("\n");
+        done_ready = 1;
+        @(negedge clock);
+        done_ready = 0;
+      end else if (!$feof(input_file)) begin
+        $fatal(1, "Malformed vector input");
+      end
+    end
+    $fclose(input_file);
+    $finish;
+  end
+endmodule

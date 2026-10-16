@@ -7,10 +7,16 @@
 #include <setjmp.h>
 #include <stdio.h>
 CPU_state cpu;
+NEMU_TLS paddr_t riscv_h_fault_gpa;
+NEMU_TLS bool riscv_h_fault_ptw;
+NEMU_TLS bool riscv_h_fault_write;
 jmp_buf exec_jmp_buf;
 int cause;
+void nemu_memory_longjmp(int value) { nemu_longjmp(exec_jmp_buf, value); }
 extern word_t g_vaddr;
 FILE *mem_trace;
+FILE *subsystem_mem_trace;
+NEMU_TLS uint64_t g_nr_guest_inst;
 word_t pmp_last_fault_addr;
 static uint8_t memory[32768];
 static unsigned pt_reads, data_reads, data_writes, cases;
@@ -20,7 +26,6 @@ bool paddr_is_readonly(paddr_t p) { (void)p;return false; }
 bool paddr_supports_atomic(paddr_t p,int n) { return paddr_is_mapped(p) && (n==4||n==8) && (p&(n-1))==0; }
 bool paddr_supports_zero(paddr_t p) { return paddr_is_mapped(p); }
 
-uint32_t pmp_effective_priv_ls(void) { return cpu.priv; }
 bool pmp_check(paddr_t p, int n, uint32_t priv, bool r, bool w, bool x) {
   (void)p;(void)n;(void)priv;(void)r;(void)w;(void)x; return false;
 }

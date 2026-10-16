@@ -16,6 +16,6 @@ void difftest_checkpoint_resync();
 
 void difftest_step(vaddr_t pc, uint32_t retire_count = 1);
 
-void init_difftest(char *ref_so_file, long img_size, int port);
+void init_difftest(char *ref_so_file, long img_size, int port, uint64_t isa_extensions);
 
 #endif /* __NPC_DIFFTEST_H__ */

@@ -16,6 +16,7 @@
 #ifndef __MEMORY_PADDR_H__
 #define __MEMORY_PADDR_H__
 
+#include <stddef.h>
 #include <common.h>
 
 #define PMEM_LEFT ((paddr_t)CONFIG_MBASE)

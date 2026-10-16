@@ -94,12 +94,17 @@ root writes, and clean guest poweroff with emulator exit status zero. Merely
 seeing a welcome banner or login prompt is insufficient. QEMU is a control,
 not a substitute for the NEMU result.
 
-NEMU's existing `--disk` backend keeps writes in memory, and QEMU checks use
+These NEMU distribution checks use the default volatile `--disk` mode, and QEMU checks use
 `-snapshot`: guest changes do **not** survive a new emulator invocation. These
 checks do not establish persistent package installation, external Internet
 access, current wall-clock time, or FPGA boot. Use `poweroff` to end an
 interactive session; NEMU's finisher does not implement guest reboot.
 Allow host memory for the entire root disk plus guest RAM and emulator overhead.
+Standalone NEMU also supports explicit `--disk-mode=persistent` and `readonly`;
+see [disk storage modes](../nemu/README.md#disk-images-and-persistence) for host-file
+modification, flush and locking semantics. The existing distribution checks
+and their manifests remain volatile; persistent storage has a separate
+`make -C verify nemu-storage-linux-check` ext4 reboot-retention check.
 
 ## Building and validation
 

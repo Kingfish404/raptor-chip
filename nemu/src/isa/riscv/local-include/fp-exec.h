@@ -15,6 +15,12 @@ typedef uint64_t (*fp_minmax_d_fn)(uint64_t, uint64_t, uint32_t *);
 typedef uint32_t (*fp_compare_s_fn)(uint32_t, uint32_t, uint32_t *);
 typedef uint32_t (*fp_compare_d_fn)(uint64_t, uint64_t, uint32_t *);
 
+enum fp_zfa_operation {
+    FP_ZFA_LI, FP_ZFA_MINMAX, FP_ZFA_ROUND, FP_ZFA_QUIET,
+    FP_ZFA_MOD, FP_ZFA_MOVE_HIGH, FP_ZFA_MOVE_PAIR,
+};
+void fp_exec_zfa(Decode *s, enum fp_zfa_operation operation);
+
 int fp_rs1(const Decode *s);
 int fp_rs2(const Decode *s);
 int fp_rs3(const Decode *s);

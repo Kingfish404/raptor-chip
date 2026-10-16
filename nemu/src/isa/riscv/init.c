@@ -15,6 +15,8 @@
 
 #include <isa.h>
 #include <isa-def.h>
+#include <isa-extensions.h>
+#include <vector-control.h>
 #include <memory/paddr.h>
 #include <cpu/cpu.h>
 
@@ -49,8 +51,10 @@ static void restart()
   cpu.sr[CSR_MVENDORID] = 0; // MVENDORID=0 for open-source implementations
   cpu.sr[CSR_MARCHID] = 50; // MARCHID=50 (0x32) for Raptor
   cpu.sr[CSR_MISA] = CSR_MISA_VALUE;
+  cpu.sr[CSR_MIDELEG] = (word_t)riscv_virtual_irq_mask();
   cpu.sr[CSR_MHARTID] = nemu_hartid;
   cpu.priv = PRV_M;
+  cpu.virt = false;
   cpu.raise_intr = INTR_EMPTY;
   cpu.last_inst_priv = PRV_M;
   cpu.last_csr_wr = 0;
@@ -61,6 +65,7 @@ static void restart()
   cpu.mtimecmp = ~(uint64_t)0;
   cpu.sr[0x14d] = ~(word_t)0; // stimecmp
   cpu.sr[0x15d] = ~(word_t)0; // stimecmph
+  riscv_vector_reset();
 
 #if defined(CONFIG_RV64)
   /* Set SXL=2, UXL=2 (XLEN=64 for S-mode and U-mode) */
@@ -71,6 +76,11 @@ static void restart()
   // SSTATUS is the supervisor view of MSTATUS, including the read-only UXL.
   // Initialize it before the first instruction/difftest synchronization.
   cpu.sr[CSR_SSTATUS] = (word_t)2 << 32;
+  if (riscv_h_gstage_preview_enabled())
+  {
+    cpu.sr[CSR_VSSTATUS] = (word_t)2 << 32;
+    cpu.sr[CSR_VSTIMECMP] = ~(word_t)0;
+  }
 #endif
 
   cpu.intr = false;
@@ -78,6 +88,7 @@ static void restart()
 
 void init_isa()
 {
+  riscv_isa_lock();
   /* Load built-in image. */
   memcpy(guest_to_host(RESET_VECTOR), img, sizeof(img));
 

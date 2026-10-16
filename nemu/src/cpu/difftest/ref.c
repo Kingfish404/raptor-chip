@@ -15,6 +15,7 @@
 
 #include <isa.h>
 #include <isa-def.h>
+#include <isa-extensions.h>
 #include <cpu/cpu.h>
 #include <difftest-def.h>
 #include <memory/paddr.h>
@@ -283,7 +284,7 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
     npc->timeh__ = &cpu.sr[CSR_TIMEH];
     static word_t mip_effective;
     mip_effective = riscv_mip_value();
-    cpu.sr[CSR_SIP] = mip_effective & cpu.sr[CSR_MIDELEG] & (word_t)0x222;
+    cpu.sr[CSR_SIP] = mip_effective & cpu.sr[CSR_MIDELEG] & (word_t)riscv_supervisor_irq_mask();
     npc->mip____ = &mip_effective;
 
     npc->vwaddr = cpu.vwaddr;
@@ -304,6 +305,19 @@ __EXPORT void difftest_regcpy(void *dut, bool direction)
 __EXPORT uint32_t difftest_state_version(void)
 {
   return DIFFTEST_STATE_VERSION;
+}
+
+__EXPORT const NemuISAAPI *nemu_difftest_isa_query(uint32_t version, uint32_t size)
+{
+  static NemuISAAPI api = {
+    .version = NEMU_ISA_API_VERSION, .size = sizeof(NemuISAAPI), .xlen = XLEN,
+    .configure = riscv_isa_configure,
+  };
+  if (version != api.version || size != api.size) return NULL;
+  api.supported = riscv_isa_supported();
+  api.enabled = riscv_isa_extensions;
+  api.locked = riscv_isa_locked;
+  return &api;
 }
 
 __EXPORT void difftest_checkpoint_sync(void *dut, uint32_t plic_ndev,

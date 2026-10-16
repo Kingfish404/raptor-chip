@@ -14,6 +14,7 @@
  ***************************************************************************************/
 
 #include <isa.h>
+#include <isa-extensions.h>
 #include <cpu/thread.h>
 #include <cpu/multidiff.h>
 #include <cpu/diffjournal.h>
@@ -106,7 +107,7 @@ void clint_update_mip(void)
       hart->sr[CSR_MIP] |= MIP_MSIP_BIT;
     else
       hart->sr[CSR_MIP] &= ~MIP_MSIP_BIT;
-    hart->sr[CSR_SIP] = riscv_hart_mip_value(hart) & hart->sr[CSR_MIDELEG] & (word_t)0x222;
+    hart->sr[CSR_SIP] = riscv_hart_mip_value(hart) & hart->sr[CSR_MIDELEG] & (word_t)riscv_supervisor_irq_mask();
     hart->sr[CSR_TIME] = (word_t)ticks;
 #ifndef CONFIG_RV64
     hart->sr[CSR_TIMEH] = (uint32_t)(ticks >> 32);
@@ -158,6 +159,15 @@ bool clint_wfi_advance(void)
         (nemu_nr_harts == 1 || (hart->sr[CSR_MIE] & MIP_STIP_BIT)) &&
         stimecmp > ticks && stimecmp < next_cmp)
       next_cmp = stimecmp;
+#ifdef CONFIG_RV64
+    if (riscv_h_gstage_preview_enabled() && sstc_enabled(hart) &&
+        (hart->sr[CSR_HENVCFG] & (word_t)(UINT64_C(1) << 63)) &&
+        (nemu_nr_harts == 1 || (hart->sr[CSR_MIE] & (word_t)0x40)))
+    {
+      uint64_t virtual_cmp = hart->sr[CSR_VSTIMECMP] - hart->sr[CSR_HTIMEDELTA];
+      if (virtual_cmp > ticks && virtual_cmp < next_cmp) next_cmp = virtual_cmp;
+    }
+#endif
   }
   // Only advance if timer interrupt is not already pending
   if (ticks < next_cmp && next_cmp <= UINT64_MAX / 100)

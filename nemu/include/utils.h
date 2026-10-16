@@ -43,6 +43,7 @@ extern NEMU_REF_TLS NEMUState nemu_state;
 // ----------- timer -----------
 
 uint64_t get_time();
+uint64_t get_host_time(void);
 
 // ----------- log -----------
 

@@ -14,6 +14,8 @@ HEADER = struct.Struct('<8s7Q')
 RECORD = struct.Struct('<5Q')
 ACCESS = struct.Struct('<QQII')
 STATE_WORDS = 4165
+VECTOR_WORDS = 64
+VECTOR_FLAG = 0x100
 MEMORY, STATE, BEGIN, ACCESS_KIND, END, LOCK, UNLOCK, COMPLETE = range(1, 9)
 INTERRUPT = 9
 CLOCK = 10
@@ -40,7 +42,7 @@ def records(stream):
         require(len(header) == RECORD.size, 'truncated record header')
         kind, sequence, hart, instruction, size = RECORD.unpack(header)
         require(sequence == serial, 'event sequence mismatch')
-        require(size <= 2 * STATE_WORDS * 8 + 32, 'oversized record')
+        require(size <= 2 * (STATE_WORDS + VECTOR_WORDS) * 8 + 32, 'oversized record')
         payload = stream.read(size)
         require(len(payload) == size, 'truncated record payload')
         yield kind, sequence, hart, instruction, payload
@@ -91,13 +93,19 @@ def check_journal(path):
     with Path(path).open('rb') as stream:
         header = stream.read(HEADER.size)
         require(len(header) == HEADER.size, 'truncated file header')
-        magic, version, xlen, harts, base, size, features, threaded = HEADER.unpack(header)
-        require(magic == b'NMUJNL01' and version in (1, 2, 3, 4, 5, 6, 7, 8, 9), 'unsupported journal version')
+        magic, raw_version, xlen, harts, base, size, features, threaded = HEADER.unpack(header)
+        version = raw_version & 0xff
+        vector_format = bool(raw_version & VECTOR_FLAG)
+        require(magic == b'NMUJNL01' and not raw_version & ~(0xff | VECTOR_FLAG)
+                and version in range(1, 10), 'unsupported journal version')
+        require(not vector_format or features & (1 << 14), 'vector format requires V128 preview')
         require(xlen in (32, 64) and 1 <= harts <= 4 and threaded in (0, 1), 'invalid machine geometry')
+        require(xlen == 64 or not features & (1 << 50), 'H preview requires RV64')
         require(version < 6 or threaded == 1, 'retained TLB requires threaded execution')
         require(0 < size <= 1 << 40 and base + size <= 1 << 64, 'invalid RAM span')
         pages = {}
         states = {}
+        vectors = {}
         retired = [0] * harts
         active = {}
         owner = None
@@ -346,8 +354,13 @@ def check_journal(path):
                 require(address // 4096 not in pages, 'duplicate initial memory page')
                 store(address, data)
             elif kind == STATE:
-                require(not started and hart not in states and len(payload) == STATE_WORDS * 8, 'invalid initial state')
-                states[hart] = list(struct.unpack(f'<{STATE_WORDS}Q', payload))
+                require(not started and hart not in states and
+                        len(payload) == (STATE_WORDS + (VECTOR_WORDS if vector_format else 0)) * 8,
+                        'invalid initial state')
+                states[hart] = list(struct.unpack_from(f'<{STATE_WORDS}Q', payload))
+                if vector_format:
+                    vectors[hart] = list(struct.unpack_from(f'<{VECTOR_WORDS}Q', payload,
+                                                            STATE_WORDS * 8))
                 require(states[hart][1] == 0 and states[hart][65 + 0xf14] == hart, 'invalid hart initial registers')
                 if version >= 3:
                     require(states[hart][4162] == (1 << 64) - 1 and states[hart][4164] == 0
@@ -381,7 +394,12 @@ def check_journal(path):
                 require(version >= 2 and hart in interruptible and len(payload) == 16, 'invalid interrupt entry')
                 require(not threaded or owner == hart, 'interrupt outside bus lock')
                 cause, pc = struct.unpack('<2Q', payload)
-                require(cause in ((1 << (xlen - 1)) | code for code in (1, 3, 5, 7, 9, 11)), 'invalid interrupt cause')
+                codes = [1, 3, 5, 7, 9, 11]
+                if features & (1 << 50):
+                    codes.extend((2, 6, 10))
+                if features & (1 << 13):
+                    codes.append(13)
+                require(cause in ((1 << (xlen - 1)) | code for code in codes), 'invalid interrupt cause')
                 require(pc == states[hart][0], 'interrupt entry PC mismatch')
                 interruptible.remove(hart)
                 interrupts[hart] += 1
@@ -593,10 +611,19 @@ def check_journal(path):
                 require(not threaded or owner == hart, 'retirement outside bus lock')
                 opcode, trapped, error, ended = struct.unpack_from('<4Q', payload)
                 require(opcode < 1 << 32 and trapped <= 1 and ended <= 1 and error == 0, 'unsupported or malformed retirement')
+                if features & (1 << 14) and not vector_format:
+                    operation, width = opcode & 0x7f, opcode >> 12 & 7
+                    require(not ((operation == 0x57 and width != 7) or
+                                 (operation in (0x07, 0x27) and (width == 0 or width >= 5))),
+                            'vector instruction requires vector journal state')
                 previous_index = -1
                 for index, value in struct.iter_unpack('<QQ', payload[32:]):
-                    require(previous_index < index < STATE_WORDS, 'invalid state delta ordering/index')
-                    states[hart][index] = value
+                    require(previous_index < index < STATE_WORDS + (VECTOR_WORDS if vector_format else 0),
+                            'invalid state delta ordering/index')
+                    if index < STATE_WORDS:
+                        states[hart][index] = value
+                    else:
+                        vectors[hart][index - STATE_WORDS] = value
                     previous_index = index
                 require(states[hart][1] == 0 and states[hart][65 + 0xf14] == hart, 'invalid retired hart registers')
                 if version >= 3:
@@ -633,7 +660,8 @@ def check_journal(path):
                     net_tx_bytes=net_tx_bytes, net_rx_drops=net_rx_drops,
                     block_reads=block_reads, block_writes=block_writes, block_bytes=block_bytes,
                     block_irqs=block_irqs, block_image_size=block_image_size, block_pages=block_pages,
-                    tlb_retain=version >= 6, status='memory-consistent')
+                    tlb_retain=version >= 6, vector_format=vector_format,
+                    status='memory-consistent')
 
 
 def main():
@@ -649,4 +677,3 @@ def main():
     if args.output:
         args.output.write_text(text)
     print(text, end='')
-

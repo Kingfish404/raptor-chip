@@ -47,7 +47,8 @@ size_t pc_continue_cnt = 1;
 NEMU_TLS CPU_state cpu = {};
 #endif
 NEMU_TLS uint64_t g_nr_guest_inst = 0;
-static uint64_t g_timer = 0; // unit: us
+static NEMU_TLS uint64_t g_timer = 0; // unit: us
+static NEMU_TLS uint64_t executed_instructions = 0;
 static bool g_print_step = false;
 NEMU_TLS Decode iringbuf[MAX_IRING_SIZE];
 NEMU_TLS uint64_t iringhead = 0;
@@ -76,16 +77,12 @@ extern bool wp_present;
 extern bool difftest_ref_loaded;
 #endif
 
-uint64_t get_time();
-
-static uint64_t nemu_start_timer = 0;
+static NEMU_TLS uint64_t exec_start_time = 0;
 
 static void nemu_save_status_to_file(const char *filename)
 {
   if (filename == NULL)
     return;
-  if (nemu_start_timer == 0)
-    nemu_start_timer = get_time();
   fflush(stdout);
 
   int saved_stdout = dup(fileno(stdout));
@@ -95,10 +92,10 @@ static void nemu_save_status_to_file(const char *filename)
   dup2(fd, fileno(stdout));
   close(fd);
 
-  uint64_t current_time = get_time();
-  printf(" Simulated Time: %.3f s\n", (current_time - nemu_start_timer) / 1000000.0);
-  printf("Simulated Speed: %.3f MIPS\n",
-         (g_nr_guest_inst / 1000000.0) / ((current_time - nemu_start_timer) / 1000000.0));
+  uint64_t elapsed = g_timer + get_host_time() - exec_start_time;
+  printf("Host execution time: %.3f s\n", elapsed / 1000000.0);
+  printf("Guest clock time: %.3f s\n", get_time() / 1000000.0);
+  printf("Simulation speed: %.3f MIPS\n", elapsed ? (double)executed_instructions / elapsed : 0.0);
   printf("\n");
 
   isa_reg_display();
@@ -127,6 +124,7 @@ static int nemu_save_uarch_state(const char *filename)
   fprintf(fp, "  \"pc\": \"" FMT_WORD "\",\n", cpu.pc);
   fprintf(fp, "  \"priv\": %d,\n", cpu.priv);
   fprintf(fp, "  \"inst_cnt\": %" PRIu64 ",\n", g_nr_guest_inst);
+  fprintf(fp, "  \"executed_inst_cnt\": %" PRIu64 ",\n", executed_instructions);
   fprintf(fp, "  \"gpr\": [\n");
   for (int i = 0; i < gpr_num; i++)
   {
@@ -355,6 +353,7 @@ void nemu_md_exec_one(void)
   Decode instruction;
   exec_once(&instruction, cpu.pc);
   g_nr_guest_inst++;
+  executed_instructions++;
 }
 #endif
 
@@ -422,6 +421,7 @@ static void execute(uint64_t n)
     }
     if (!nemu_threaded)
     {
+      executed_instructions++;
       nemu_periodic_save();
       trace_and_difftest(&s, cpu.pc);
     }
@@ -440,9 +440,10 @@ void statistic()
 #define NUMBERIC_FMT MUXDEF(CONFIG_TARGET_AM, "%", "%'") PRIu64
   Log("ftracedepth_max = %d ", ftracedepth_max);
   Log("host time spent = " NUMBERIC_FMT " us", g_timer);
-  Log("total guest instructions = " NUMBERIC_FMT, g_nr_guest_inst);
+  Log("total guest instructions = " NUMBERIC_FMT, executed_instructions);
+  Log("guest clock steps = " NUMBERIC_FMT, g_nr_guest_inst);
   if (g_timer > 0)
-    Log("simulation frequency = " NUMBERIC_FMT " inst/s", g_nr_guest_inst * 1000000 / g_timer);
+    Log("simulation frequency = " NUMBERIC_FMT " inst/s", executed_instructions * 1000000 / g_timer);
   else
     Log("Finish running in less than 1 us and can not calculate the simulation frequency");
 }
@@ -468,13 +469,15 @@ void cpu_exec(uint64_t n)
     nemu_state.state = NEMU_RUNNING;
   }
 
-  uint64_t timer_start = get_time();
+  exec_start_time = get_host_time();
 
 #ifdef NEMU_HAS_THREADS
   if (nemu_threaded)
   {
     Assert(n == UINT64_MAX, "Threaded execution supports batch continue only");
+    uint64_t previous_instructions = g_nr_guest_inst;
     cpu_threads_run(execute);
+    executed_instructions += g_nr_guest_inst - previous_instructions;
   }
   else
 #endif
@@ -482,13 +485,7 @@ void cpu_exec(uint64_t n)
 
   IFDEF(NEMU_HAS_SMP, nemu_multidiff_report());
   IFDEF(NEMU_HAS_SMP, nemu_journal_close());
-  uint64_t timer_end = get_time();
-#ifdef NEMU_HAS_THREADS
-  if (nemu_threaded)
-    g_timer += cpu_thread_wall_us();
-  else
-#endif
-    g_timer += timer_end - timer_start;
+  g_timer += get_host_time() - exec_start_time;
 
   switch (nemu_state.state)
   {

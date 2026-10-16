@@ -17,6 +17,7 @@ def main():
         work = Path(tmp)
         (work/'generated').mkdir()
         (work/'generated/autoconf.h').write_text('''#define CONFIG_ISA64 1
+#define CONFIG_ISA_riscv 1
 #define CONFIG_RV64 1
 #define CONFIG_RV_SVADE 1
 #define CONFIG_RAPTOR_MEMORY_MAP 1
@@ -31,6 +32,7 @@ def main():
                         '-D__GUEST_ISA__=riscv', '-I'+str(work), '-I'+str(root/'nemu/include'),
                         '-I'+str(root/'nemu/src/isa/riscv/include'),
                         str(args.source or root/'nemu/src/isa/riscv/system/mmu.c'),
+                        str(root/'nemu/src/isa/riscv/extensions.c'),
                         str(root/'app/tests/host'/test), *extra, '-o', str(exe)], check=True)
         subprocess.run([str(exe)], check=True)
     return 0

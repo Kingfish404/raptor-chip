@@ -18,6 +18,7 @@
 #include "platform.h"
 #include "../../include/common.h"
 #include <difftest-def.h>
+#include <riscv-state.h>
 
 #define NR_GPR MUXDEF(CONFIG_RVE, 16, 32)
 
@@ -35,27 +36,6 @@ static debug_module_config_t difftest_dm_config = {
     .support_abstract_fpr_access = true,
     .support_haltgroups = true,
     .support_impebreak = true};
-
-struct diff_context_t
-{
-  word_t sr[4096];
-  word_t gpr[MUXDEF(CONFIG_RVE, 16, 32)];
-  uint64_t fpr[32];
-  word_t pc;
-  word_t cpc;
-  uint32_t inst;
-  uint32_t priv;
-  bool intr;
-  word_t raise_intr;
-  uint32_t last_inst_priv;
-  uint64_t mtimecmp;
-  vaddr_t reservation;
-
-  vaddr_t vwaddr;
-  word_t pwaddr;
-  word_t wdata;
-  word_t len;
-};
 
 class diffsim_t : public sim_t
 {
@@ -107,7 +87,7 @@ public:
 
   void diff_get_regs(void *diff_context)
   {
-    struct diff_context_t *ctx = (struct diff_context_t *)diff_context;
+    riscv_CPU_state *ctx = static_cast<riscv_CPU_state *>(diff_context);
     ctx->pc = state->pc;
     for (int i = 0; i < NR_GPR; i++)
     {
@@ -151,7 +131,7 @@ public:
 
   void diff_set_regs(void *diff_context)
   {
-    struct diff_context_t *ctx = (struct diff_context_t *)diff_context;
+    riscv_CPU_state *ctx = static_cast<riscv_CPU_state *>(diff_context);
     state->pc = ctx->pc;
     for (int i = 0; i < NR_GPR; i++)
     {

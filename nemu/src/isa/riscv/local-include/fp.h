@@ -51,5 +51,13 @@ uint32_t riscv_fp_convert_h_to_s(uint16_t bits, uint32_t *flags);
 uint64_t riscv_fp_convert_h_to_d(uint16_t bits, uint32_t *flags);
 uint16_t riscv_fp_convert_s_to_h(uint32_t bits, unsigned rm, uint32_t *flags);
 uint16_t riscv_fp_convert_d_to_h(uint64_t bits, unsigned rm, uint32_t *flags);
+uint64_t riscv_fp_fli(unsigned immediate, bool double_precision);
+uint32_t riscv_fp_minmaxm_s(uint32_t lhs, uint32_t rhs, bool maximum, uint32_t *flags);
+uint64_t riscv_fp_minmaxm_d(uint64_t lhs, uint64_t rhs, bool maximum, uint32_t *flags);
+uint32_t riscv_fp_round_s(uint32_t bits, unsigned rm, bool exact, uint32_t *flags);
+uint64_t riscv_fp_round_d(uint64_t bits, unsigned rm, bool exact, uint32_t *flags);
+uint32_t riscv_fp_quiet_s(uint32_t lhs, uint32_t rhs, bool less, uint32_t *flags);
+uint32_t riscv_fp_quiet_d(uint64_t lhs, uint64_t rhs, bool less, uint32_t *flags);
+uint32_t riscv_fp_mod_w_d(uint64_t bits, uint32_t *flags);
 
 #endif

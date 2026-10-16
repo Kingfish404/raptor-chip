@@ -7,14 +7,18 @@
 #include <cpu/thread.h>
 #include <difftest-journal.h>
 #include <difftest-replay.h>
+#include <difftest-vector.h>
 #include <isa.h>
 #include <memory/paddr.h>
 #include <utils.h>
 #include <pthread.h>
+#include <isa-extensions.h>
 #include <setjmp.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+_Static_assert(sizeof(cpu.vreg) == sizeof(NemuDiffVectorState), "replay vector layout changed");
 
 typedef struct {
   pthread_t thread;
@@ -23,6 +27,7 @@ typedef struct {
   uint64_t retired;
   CPU_state *live;
   NemuDiffState expected;
+  NemuDiffVectorState expected_vector;
 } ReplayHart;
 
 static ReplayHart harts[NEMU_DIFF_MULTI_HARTS];
@@ -31,8 +36,10 @@ static pthread_cond_t changed = PTHREAD_COND_INITIALIZER;
 static FILE *input;
 static char input_buffer[NEMU_JOURNAL_BUFFER_BYTES];
 static NemuJournalHeader machine;
+static uint64_t journal_version;
+static bool vector_journal;
 static NemuJournalRecord event;
-static uint64_t payload[4 + 2 * NEMU_JOURNAL_STATE_WORDS];
+static uint64_t payload[4 + 2 * (NEMU_JOURNAL_STATE_WORDS + sizeof(NemuDiffVectorState) / 8)];
 static uint64_t sequence;
 static uint64_t consumed = 64;
 static uint64_t interleaved;
@@ -269,7 +276,7 @@ static void plic_update(void)
     CPU_state *state = harts[hart].live;
     state->sr[CSR_MIP] = (state->sr[CSR_MIP] & ~(word_t)0x800) | (plic_pick(2 * hart) ? 0x800 : 0);
     state->seip = plic_pick(2 * hart + 1) != 0;
-    state->sr[CSR_SIP] = riscv_hart_mip_value(state) & state->sr[CSR_MIDELEG] & (word_t)0x222;
+    state->sr[CSR_SIP] = riscv_hart_mip_value(state) & state->sr[CSR_MIDELEG] & (word_t)riscv_supervisor_irq_mask();
   }
 }
 
@@ -404,7 +411,7 @@ static void timer_sample(bool executing)
 #endif
     state->stip = ticks >= compare;
     state->sr[CSR_TIME] = ticks;
-    state->sr[CSR_SIP] = riscv_hart_mip_value(state) & state->sr[CSR_MIDELEG] & (word_t)0x222;
+    state->sr[CSR_SIP] = riscv_hart_mip_value(state) & state->sr[CSR_MIDELEG] & (word_t)riscv_supervisor_irq_mask();
   }
   if (machine.threaded) plic_update();
   advance();
@@ -990,12 +997,25 @@ static void retire(void)
   if (payload[0] != cpu.inst || payload[1] != cpu.instruction_trapped || payload[2] ||
       payload[3] != (nemu_state.state == NEMU_END) || nemu_md_frame.error || nemu_state.state == NEMU_ABORT)
     reject("instruction/trap/termination mismatch");
+  if (riscv_v128_preview_enabled() && !vector_journal) {
+    unsigned opcode = cpu.inst & 0x7f;
+    unsigned width = (cpu.inst >> 12) & 7;
+    if ((opcode == 0x57 && width != 7) ||
+        ((opcode == 0x07 || opcode == 0x27) && (width == 0 || width >= 5)))
+      reject("vector instruction requires vector journal state");
+  }
   uint64_t previous_index = 0;
   for (size_t index = 4; index < event.length / 8; index += 2) {
     uint64_t slot = payload[index];
-    if (slot >= NEMU_JOURNAL_STATE_WORDS || (index > 4 && slot <= previous_index))
+    if (slot >= NEMU_JOURNAL_STATE_WORDS +
+                    (vector_journal ? sizeof(NemuDiffVectorState) / 8 : 0) ||
+        (index > 4 && slot <= previous_index))
       reject("invalid retirement state delta");
-    memcpy((uint8_t *)&current->expected + slot * 8, &payload[index + 1], 8);
+    if (slot < NEMU_JOURNAL_STATE_WORDS)
+      memcpy((uint8_t *)&current->expected + slot * 8, &payload[index + 1], 8);
+    else
+      memcpy((uint8_t *)&current->expected_vector +
+             (slot - NEMU_JOURNAL_STATE_WORDS) * 8, &payload[index + 1], 8);
     previous_index = slot;
   }
   NemuDiffState actual;
@@ -1012,6 +1032,8 @@ static void retire(void)
       }
     }
   }
+  if (vector_journal && memcmp(cpu.vreg, current->expected_vector.reg, sizeof(cpu.vreg)))
+    reject("vector register state mismatch");
   endings += payload[3];
   current->executing = false;
   current->retired++;
@@ -1024,6 +1046,7 @@ static void *worker(void *argument)
   check_thread(pthread_mutex_lock(&mutex));
   if (nemu_setjmp(escape) == 0) {
     nemu_md_restore(&current->expected);
+    if (vector_journal) memcpy(cpu.vreg, current->expected_vector.reg, sizeof(cpu.vreg));
     current->live = &cpu;
     nemu_state.state = NEMU_RUNNING;
     ready++;
@@ -1084,6 +1107,9 @@ static bool initial_state(unsigned hart)
 {
   NemuDiffState *state = &harts[hart].expected;
   memcpy(state, payload, sizeof(*state));
+  if (vector_journal)
+    memcpy(harts[hart].expected_vector.reg, (uint8_t *)payload + sizeof(*state),
+           sizeof(NemuDiffVectorState));
   if (state->gpr[0] || state->csr[CSR_MHARTID] != hart || state->privilege > 3 ||
       state->privilege == 2 || state->reservation_bytes || state->stip > 1 || state->seip > 1) return false;
 #ifndef CONFIG_RV64
@@ -1099,28 +1125,40 @@ static bool initial_state(unsigned hart)
 static bool initialize(void)
 {
   uint16_t endian = 1;
-  if (*(uint8_t *)&endian != 1 || fread(&machine, sizeof(machine), 1, input) != 1 ||
-      memcmp(machine.magic, NEMU_JOURNAL_MAGIC, 8) ||
-      (machine.version != NEMU_JOURNAL_VERSION && machine.version != NEMU_JOURNAL_IRQ_VERSION &&
-       machine.version != NEMU_JOURNAL_CLINT_VERSION && machine.version != NEMU_JOURNAL_PLIC_VERSION &&
-       machine.version != NEMU_JOURNAL_UART_VERSION && machine.version != NEMU_JOURNAL_TLB_VERSION &&
-       machine.version != NEMU_JOURNAL_RNG_VERSION && machine.version != NEMU_JOURNAL_NET_VERSION &&
-       machine.version != NEMU_JOURNAL_BLOCK_VERSION) ||
-      machine.xlen != XLEN || !machine.harts || machine.harts > NEMU_DIFF_MULTI_HARTS ||
-      machine.ram_base != PMEM_LEFT || machine.ram_size != CONFIG_MSIZE ||
-      machine.isa_features != nemu_md_features() || machine.threaded > 1 ||
-      (machine.version >= NEMU_JOURNAL_TLB_VERSION && machine.threaded != 1)) {
+  if (*(uint8_t *)&endian != 1 || fread(&machine, sizeof(machine), 1, input) != 1) {
     fail("journal version or machine configuration mismatch");
     return false;
   }
-  nemu_md_interrupts = machine.version >= NEMU_JOURNAL_IRQ_VERSION;
-  nemu_md_clint = machine.version >= NEMU_JOURNAL_CLINT_VERSION;
-  nemu_md_plic = machine.version >= NEMU_JOURNAL_PLIC_VERSION;
-  nemu_md_uart = machine.version >= NEMU_JOURNAL_UART_VERSION;
-  nemu_md_tlb_retain = machine.version >= NEMU_JOURNAL_TLB_VERSION;
-  nemu_md_rng = machine.version >= NEMU_JOURNAL_RNG_VERSION;
-  nemu_md_net = machine.version >= NEMU_JOURNAL_NET_VERSION;
-  nemu_md_block = machine.version >= NEMU_JOURNAL_BLOCK_VERSION;
+  journal_version = machine.version & 0xff;
+  vector_journal = (machine.version & NEMU_JOURNAL_VECTOR_FLAG) != 0;
+  if (machine.version & ~(UINT64_C(0xff) | NEMU_JOURNAL_VECTOR_FLAG) ||
+      memcmp(machine.magic, NEMU_JOURNAL_MAGIC, 8) ||
+      (journal_version < NEMU_JOURNAL_VERSION || journal_version > NEMU_JOURNAL_BLOCK_VERSION) ||
+      machine.xlen != XLEN || !machine.harts || machine.harts > NEMU_DIFF_MULTI_HARTS ||
+      machine.ram_base != PMEM_LEFT || machine.ram_size != CONFIG_MSIZE ||
+      (machine.isa_features & ~NEMU_ISA_JOURNAL_MASK) != (nemu_md_features() & ~NEMU_ISA_JOURNAL_MASK)
+      || machine.threaded > 1 ||
+      (journal_version >= NEMU_JOURNAL_TLB_VERSION && machine.threaded != 1)) {
+    fail("journal version or machine configuration mismatch");
+    return false;
+  }
+  if (riscv_isa_configure(NEMU_ISA_JOURNAL_DECODE(machine.isa_features & NEMU_ISA_JOURNAL_MASK))) {
+    fail("unsupported or locked journal ISA extensions");
+    return false;
+  }
+  riscv_isa_lock();
+  if (vector_journal && !riscv_v128_preview_enabled()) {
+    fail("vector journal format or ISA extension mismatch");
+    return false;
+  }
+  nemu_md_interrupts = journal_version >= NEMU_JOURNAL_IRQ_VERSION;
+  nemu_md_clint = journal_version >= NEMU_JOURNAL_CLINT_VERSION;
+  nemu_md_plic = journal_version >= NEMU_JOURNAL_PLIC_VERSION;
+  nemu_md_uart = journal_version >= NEMU_JOURNAL_UART_VERSION;
+  nemu_md_tlb_retain = journal_version >= NEMU_JOURNAL_TLB_VERSION;
+  nemu_md_rng = journal_version >= NEMU_JOURNAL_RNG_VERSION;
+  nemu_md_net = journal_version >= NEMU_JOURNAL_NET_VERSION;
+  nemu_md_block = journal_version >= NEMU_JOURNAL_BLOCK_VERSION;
   if (!initial_block()) return false;
   nemu_md_harts = machine.harts;
   void init_mem(void);
@@ -1153,7 +1191,10 @@ static bool initialize(void)
       pages[page] = true;
       memcpy(guest_to_host(address), &payload[1], event.length - 8);
     } else if (event.kind == JOURNAL_STATE) {
-      if ((states & (1u << event.hart)) || event.length != sizeof(NemuDiffState) || !initial_state(event.hart)) {
+      if ((states & (1u << event.hart)) ||
+          event.length != sizeof(NemuDiffState) +
+              (vector_journal ? sizeof(NemuDiffVectorState) : 0) ||
+          !initial_state(event.hart)) {
         fail("invalid initial hart state");
         break;
       }

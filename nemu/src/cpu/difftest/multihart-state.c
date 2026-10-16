@@ -5,6 +5,7 @@
 
 #if defined(CONFIG_ISA_riscv) && defined(CONFIG_MODE_SYSTEM) && !defined(CONFIG_TARGET_AM)
 #include <isa.h>
+#include <isa-extensions.h>
 #include <cpu/cpu.h>
 #include <memory/paddr.h>
 #include <memory/tlb.h>
@@ -117,6 +118,7 @@ uint64_t nemu_md_features(void)
   geometry = ((uint64_t)CONFIG_RV_ASID_BITS << 32) | ((uint64_t)CONFIG_RV_PMPADDR_BITS << 16);
 #endif
   return geometry |
+         NEMU_ISA_JOURNAL_ENCODE(riscv_isa_extensions) |
          (ISDEF(CONFIG_RV_F) << 0) | (ISDEF(CONFIG_RV_D) << 1) |
          (ISDEF(CONFIG_RV_SVADE) << 2) | (ISDEF(CONFIG_RV_MCOUNTINHIBIT) << 3) |
          (ISDEF(CONFIG_RV_EBREAK_HOST_EXIT) << 4) | (ISDEF(CONFIG_RAPTOR_MEMORY_MAP) << 5) |
@@ -135,7 +137,7 @@ void nemu_md_capture(NemuDiffState *state)
   for (unsigned index = 0; index < 4096; index++) state->csr[index] = cpu.sr[index];
 #endif
   memcpy(state->fpr, cpu.fpr, sizeof(state->fpr));
-  state->privilege = cpu.priv;
+  state->privilege = cpu.priv | (cpu.virt ? 4u : 0u);
   state->reservation = cpu.reservation;
   state->reservation_bytes = cpu.reservation_bytes;
   state->mtimecmp = cpu.mtimecmp;
@@ -150,7 +152,8 @@ void nemu_md_restore(const NemuDiffState *state)
   for (unsigned index = 0; index < RISCV_GPR_NUM; index++) cpu.gpr[index] = state->gpr[index];
   memcpy(cpu.fpr, state->fpr, sizeof(cpu.fpr));
   for (unsigned index = 0; index < 4096; index++) cpu.sr[index] = state->csr[index];
-  cpu.priv = state->privilege;
+  cpu.priv = state->privilege & 3u;
+  cpu.virt = riscv_h_gstage_preview_enabled() && (state->privilege & 4u) != 0;
   cpu.reservation = state->reservation;
   cpu.reservation_bytes = state->reservation_bytes;
   cpu.mtimecmp = state->mtimecmp;

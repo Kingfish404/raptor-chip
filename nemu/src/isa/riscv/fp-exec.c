@@ -2,6 +2,7 @@
 #include "local-include/fp.h"
 #include "local-include/reg.h"
 #include <isa-def.h>
+#include <isa-extensions.h>
 #include <cpu/cpu.h>
 #include <cpu/difftest.h>
 #include <memory/vaddr.h>
@@ -14,7 +15,8 @@ static inline bool fp_access(Decode *s, bool double_precision)
     word_t misa = CSR(CSR_MISA);
     word_t fs = (CSR(CSR_MSTATUS) & CSR_MSTATUS_FS_MASK) >> 13;
     word_t required = CSR_MISA_EXT_F | (double_precision ? CSR_MISA_EXT_D : 0);
-    if ((misa & required) != required || fs == 0)
+    if ((misa & required) != required || fs == 0 ||
+        (cpu.virt && !(CSR(CSR_VSSTATUS) & CSR_MSTATUS_FS_MASK)))
     {
         s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
         difftest_skip_ref();
@@ -38,6 +40,7 @@ static inline unsigned fp_rm_resolve(unsigned rm)
 static inline void fp_mark_dirty(void)
 {
     CSR(CSR_MSTATUS) = (CSR(CSR_MSTATUS) & ~CSR_MSTATUS_FS_MASK) | ((word_t)3 << 13);
+    if (cpu.virt) CSR(CSR_VSSTATUS) |= CSR_MSTATUS_FS_MASK;
     cpu.csr_dirty = true;
 }
 
@@ -90,6 +93,68 @@ static inline bool fp_prepare(Decode *s, bool double_precision, unsigned *rm)
 int fp_rs1(const Decode *s) { return BITS(s->isa.inst, 19, 15); }
 int fp_rs2(const Decode *s) { return BITS(s->isa.inst, 24, 20); }
 int fp_rs3(const Decode *s) { return BITS(s->isa.inst, 31, 27); }
+
+void fp_exec_zfa(Decode *s, enum fp_zfa_operation operation)
+{
+    bool double_precision = BITS(s->isa.inst, 25, 25);
+    unsigned rm = BITS(s->isa.inst, 14, 12);
+    word_t required = CSR_MISA_EXT_F | (double_precision ? CSR_MISA_EXT_D : 0);
+    if (!(riscv_isa_extensions & NEMU_ISA_EXT_ZFA) ||
+        (CSR(CSR_MISA) & required) != required || !(CSR(CSR_MSTATUS) & CSR_MSTATUS_FS_MASK) ||
+        (cpu.virt && !(CSR(CSR_VSSTATUS) & CSR_MSTATUS_FS_MASK)) ||
+        (operation == FP_ZFA_ROUND && !fp_rm_valid(rm)) ||
+        (sizeof(word_t) != 4 && (operation == FP_ZFA_MOVE_HIGH || operation == FP_ZFA_MOVE_PAIR)))
+    {
+        s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
+        return;
+    }
+    int rd = BITS(s->isa.inst, 11, 7), rs1 = fp_rs1(s), rs2 = fp_rs2(s);
+    uint64_t lhs = double_precision ? fpr(rs1) : riscv_fp_read_s(fpr(rs1));
+    uint64_t rhs = double_precision ? fpr(rs2) : riscv_fp_read_s(fpr(rs2));
+    uint64_t result = 0;
+    uint32_t flags = 0;
+    bool integer_result = false;
+    switch (operation)
+    {
+    case FP_ZFA_LI:
+        result = riscv_fp_fli(rs1, double_precision);
+        break;
+    case FP_ZFA_MINMAX:
+        result = double_precision ? riscv_fp_minmaxm_d(lhs, rhs, rm & 1, &flags)
+                                  : riscv_fp_minmaxm_s(lhs, rhs, rm & 1, &flags);
+        break;
+    case FP_ZFA_ROUND:
+        result = double_precision ? riscv_fp_round_d(lhs, fp_rm_resolve(rm), rs2 & 1, &flags)
+                                  : riscv_fp_round_s(lhs, fp_rm_resolve(rm), rs2 & 1, &flags);
+        break;
+    case FP_ZFA_QUIET:
+        result = double_precision ? riscv_fp_quiet_d(lhs, rhs, rm & 1, &flags)
+                                  : riscv_fp_quiet_s(lhs, rhs, rm & 1, &flags);
+        integer_result = true;
+        break;
+    case FP_ZFA_MOD:
+        result = SEXT(riscv_fp_mod_w_d(lhs, &flags), 32);
+        integer_result = true;
+        break;
+    case FP_ZFA_MOVE_HIGH:
+        result = lhs >> 32;
+        integer_result = true;
+        break;
+    case FP_ZFA_MOVE_PAIR:
+        result = ((uint64_t)(uint32_t)R(rs2) << 32) | (uint32_t)R(rs1);
+        break;
+    }
+    if (integer_result)
+    {
+        R(rd) = result;
+        if (flags) fp_merge_flags(flags);
+    }
+    else
+    {
+        fpr(rd) = double_precision ? result : riscv_fp_box_s(result);
+        fp_merge_flags(flags);
+    }
+}
 
 void fp_load_s(Decode *s, int rd, vaddr_t addr)
 {

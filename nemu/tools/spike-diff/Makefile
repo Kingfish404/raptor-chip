@@ -39,8 +39,10 @@ $(SPIKE): $(REPO_MAKEFILE)
 BUILD_DIR = ./build
 $(shell mkdir -p $(BUILD_DIR))
 
-inc_dependencies = fesvr riscv disasm customext fdt softfloat spike_main spike_dasm build
-INC_PATH  = -I$(REPO_PATH) $(addprefix -I$(REPO_PATH)/, $(inc_dependencies))
+inc_dependencies = riscv disasm customext fdt softfloat spike_main spike_dasm build
+NEMU_CONFIG_DIR ?= $(NEMU_HOME)/include
+INC_PATH  = -I$(NEMU_CONFIG_DIR) -I$(REPO_PATH) $(addprefix -I$(REPO_PATH)/, $(inc_dependencies))
+INC_PATH += -iquote $(REPO_PATH)/fesvr
 INC_PATH += -I$(NEMU_HOME)/include
 INC_PATH += -I$(NEMU_HOME)/src/isa/$(GUEST_ISA)/include
 lib_dependencies = libspike_main.a libriscv.a libdisasm.a libsoftfloat.a libfesvr.a libfdt.a
@@ -52,8 +54,9 @@ NAME = $(if $(filter riscv,$(GUEST_ISA)),$(GUEST_ISA)$(if $(CONFIG_RV64),64,32),
 BINARY = $(BUILD_DIR)/$(NAME)
 SRCS = difftest.cc
 
-$(BINARY): $(SPIKE) $(SRCS)
-	g++ -std=c++17 -O2 -shared -fPIC -fvisibility=hidden $(INC_PATH) $(SRCS) $(INC_LIBS) -o $@
+$(BINARY): $(SPIKE) $(SRCS) $(NEMU_CONFIG_DIR)/generated/autoconf.h \
+           $(NEMU_HOME)/src/isa/riscv/include/riscv-state.h
+	g++ -std=c++20 -O2 -shared -fPIC -fvisibility=hidden $(INC_PATH) $(SRCS) $(INC_LIBS) -o $@
 
 clean:
 	rm -rf $(BUILD_DIR)

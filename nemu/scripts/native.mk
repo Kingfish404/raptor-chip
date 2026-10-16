@@ -13,10 +13,10 @@
 # See the Mulan PSL v2 for more details.
 #**************************************************************************************/
 
--include $(NEMU_HOME)/../Makefile
 include $(NEMU_HOME)/scripts/build.mk
 
 include $(NEMU_HOME)/tools/difftest.mk
+include $(NEMU_HOME)/scripts/install.mk
 
 # Some convenient rules
 
@@ -32,7 +32,9 @@ IMG ?=
 NEMU_EXEC := $(BINARY) $(ARGS) $(IMG)
 
 NEMU_ROM_DTB_PATH := $(call remove_quote,$(CONFIG_ROM_DTB_PATH))
-NEMU_ROM_DTB_SOURCE := $(NEMU_HOME)/../linux/dts/$(patsubst %.dtb,%.dts,$(notdir $(NEMU_ROM_DTB_PATH)))
+NEMU_DTS_DIR ?= $(NEMU_HOME)/../linux/dts
+export NEMU_DTS_DIR
+NEMU_ROM_DTB_SOURCE := $(NEMU_DTS_DIR)/$(patsubst %.dtb,%.dts,$(notdir $(NEMU_ROM_DTB_PATH)))
 NEMU_ROM_DTB_BASE_SOURCE := $(patsubst %-nemu.dts,%.dts,$(NEMU_ROM_DTB_SOURCE))
 
 $(NEMU_ROM_DTB_PATH): $(NEMU_ROM_DTB_SOURCE) $(wildcard $(NEMU_ROM_DTB_BASE_SOURCE))

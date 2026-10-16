@@ -18,11 +18,9 @@
 #include <cpu/thread.h>
 #include <memory/paddr.h>
 #include <memory/tlb.h>
+#include <memory/trap.h>
 #include <cpu/icache.h>
 #include <inttypes.h>
-
-extern NEMU_TLS jmp_buf exec_jmp_buf;
-extern NEMU_TLS int cause;
 
 extern FILE *mem_trace;
 extern FILE *subsystem_mem_trace;
@@ -85,11 +83,12 @@ void soft_tlb_flush(void)
 
 word_t get_paddr(vaddr_t addr, int len)
 {
+  addr = riscv_pointer_mask(addr);
   paddr_t paddr = addr;
   if (paddr == 0)
   {
     cause = MCA_INS_ACC_FAU;
-    nemu_longjmp(exec_jmp_buf, 20);
+    nemu_memory_longjmp(20);
   }
   // Used by LR/SC to compute the reservation address. These are loads/stores,
   // not instruction fetches, so use MEM_TYPE_READ semantics (R=1 needed). Using
@@ -137,7 +136,7 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
           || pmp_check(paddr, len, cpu.priv, false, false, true))
       {
         cause = MCA_INS_ACC_FAU;
-        nemu_longjmp(exec_jmp_buf, 22);
+        nemu_memory_longjmp(22);
       }
       return paddr_read(paddr, len);
     }
@@ -147,7 +146,7 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
   if (!paddr_is_memory_span(paddr, len))
   {
     cause = MCA_INS_ACC_FAU;
-    nemu_longjmp(exec_jmp_buf, 20);
+    nemu_memory_longjmp(20);
   }
   if (pmp_check(paddr, len, cpu.priv, false, false, true))
   {
@@ -156,7 +155,7 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
       g_vaddr = pmp_last_fault_addr;
     }
     cause = MCA_INS_ACC_FAU;
-    nemu_longjmp(exec_jmp_buf, 22);
+    nemu_memory_longjmp(22);
   }
   return paddr_read(paddr, len);
 }
@@ -186,7 +185,7 @@ static void check_data_pma(paddr_t pa, int len, bool store)
   {
     g_vaddr += (word_t)fault_offset;
     cause = store ? MCA_STO_ACC_FAU : MCA_LOA_ACC_FAU;
-    nemu_longjmp(exec_jmp_buf, store ? 24 : 23);
+    nemu_memory_longjmp(store ? 24 : 23);
   }
 }
 
@@ -210,26 +209,34 @@ static void check_data_type(paddr_t pa, uint8_t pbmt, bool misaligned, bool stor
 #endif
   if (width_fault || ((pbmt == 2 || device) && misaligned)) {
     cause = store ? MCA_STO_ACC_FAU : MCA_LOA_ACC_FAU;
-    nemu_longjmp(exec_jmp_buf, store ? 24 : 23);
+    nemu_memory_longjmp(store ? 24 : 23);
   }
 }
 
-static paddr_t checked_data_piece(vaddr_t addr, int len, bool store, bool misaligned, int original_len)
+static paddr_t checked_data_piece_attrs(vaddr_t addr, int len, bool store, bool misaligned,
+                                       int original_len, uint8_t *pbmt_out)
 {
+  addr = riscv_pointer_mask(addr);
   g_vaddr = addr;
   const int type = store ? MEM_TYPE_WRITE : MEM_TYPE_READ;
   const bool translated = isa_mmu_check(addr, len, type) != MMU_DIRECT;
   uint8_t pbmt = 0;
   paddr_t pa = translated ? isa_mmu_translate_attrs(addr, len, type, &pbmt) : addr;
+  if (pbmt_out) *pbmt_out = pbmt;
   check_data_type(pa, pbmt, misaligned, store, original_len);
   check_data_pma(pa, len, store);
   if (pmp_check(pa, len, pmp_effective_priv_ls(), !store, store, false))
   {
     if (!translated) g_vaddr = pmp_last_fault_addr;
     cause = store ? MCA_STO_ACC_FAU : MCA_LOA_ACC_FAU;
-    nemu_longjmp(exec_jmp_buf, store ? 24 : 23);
+    nemu_memory_longjmp(store ? 24 : 23);
   }
   return pa;
+}
+
+static paddr_t checked_data_piece(vaddr_t addr, int len, bool store, bool misaligned, int original_len)
+{
+  return checked_data_piece_attrs(addr, len, store, misaligned, original_len, NULL);
 }
 
 static paddr_t checked_data_address(vaddr_t addr, int len, bool store)
@@ -237,44 +244,67 @@ static paddr_t checked_data_address(vaddr_t addr, int len, bool store)
   return checked_data_piece(addr, len, store, (addr & (len - 1)) != 0, len);
 }
 
+bool vaddr_probe_vector(vaddr_t addr, int len, bool store)
+{
+  addr = riscv_pointer_mask(addr);
+  int first = 4096 - (int)(addr & 4095);
+  if (len <= first || isa_mmu_check(addr, len, store ? MEM_TYPE_WRITE : MEM_TYPE_READ) == MMU_DIRECT)
+    first = len;
+  bool restricted = false;
+  for (int offset = 0; offset < len; )
+  {
+    int piece = offset == 0 ? first : len - first;
+    uint8_t pbmt = 0;
+    paddr_t pa = checked_data_piece_attrs(addr + offset, piece, store,
+                                         (addr & (len - 1)) != 0, len, &pbmt);
+    restricted |= pbmt == 2 || !paddr_is_memory_span(pa, piece);
+    offset += piece;
+  }
+  return restricted;
+}
+
 /* A valid writable PTE also grants reads. Check write translation first so
  * AMO page faults have the store class, then check both physical permissions. */
 paddr_t vaddr_check_reservation(vaddr_t addr, int len, bool store)
 {
+  addr = riscv_pointer_mask(addr);
   paddr_t pa = checked_data_address(addr, len, store);
   if (!paddr_supports_atomic(pa, len))
   {
     g_vaddr = addr;
     cause = store ? MCA_STO_ACC_FAU : MCA_LOA_ACC_FAU;
-    nemu_longjmp(exec_jmp_buf, store ? 24 : 23);
+    nemu_memory_longjmp(store ? 24 : 23);
   }
   return pa;
 }
 
 void vaddr_check_amo(vaddr_t addr, int len)
 {
+  addr = riscv_pointer_mask(addr);
   const paddr_t pa = vaddr_check_reservation(addr, len, true);
   if (pmp_check(pa, len, pmp_effective_priv_ls(), true, true, false))
   {
     g_vaddr = addr;
     cause = MCA_STO_ACC_FAU;
-    nemu_longjmp(exec_jmp_buf, 24);
+    nemu_memory_longjmp(24);
   }
 }
 
 void vaddr_check_zero(vaddr_t addr)
 {
+  addr = riscv_pointer_mask(addr);
   paddr_t pa = checked_data_address(addr, 1, true);
   if (!paddr_supports_zero(pa))
   {
     g_vaddr = addr;
     cause = MCA_STO_ACC_FAU;
-    nemu_longjmp(exec_jmp_buf, 24);
+    nemu_memory_longjmp(24);
   }
 }
 
 void vaddr_check_store(vaddr_t addr, int len)
 {
+  addr = riscv_pointer_mask(addr);
   const int first = 4096 - (int)(addr & 4095);
   if (len > first && isa_mmu_check(addr, len, MEM_TYPE_WRITE) != MMU_DIRECT)
   {
@@ -288,6 +318,7 @@ void vaddr_check_store(vaddr_t addr, int len)
  * each piece's PMP footprint or reading a device during validation. */
 word_t vaddr_read_piece(vaddr_t addr, int len, int original_len, bool original_misaligned)
 {
+  addr = riscv_pointer_mask(addr);
   g_vaddr = addr;
   cpu.rvaddr = addr;
   cpu.rlen = len;
@@ -333,7 +364,7 @@ word_t vaddr_read_piece(vaddr_t addr, int len, int original_len, bool original_m
           g_vaddr = pmp_last_fault_addr;
         }
         cause = MCA_LOA_ACC_FAU;
-        nemu_longjmp(exec_jmp_buf, 23);
+        nemu_memory_longjmp(23);
       }
       cpu.rpaddr = paddr;
       cpu.rdata = paddr_read(paddr, len);
@@ -351,7 +382,7 @@ word_t vaddr_read_piece(vaddr_t addr, int len, int original_len, bool original_m
       g_vaddr = pmp_last_fault_addr;
     }
     cause = MCA_LOA_ACC_FAU;
-    nemu_longjmp(exec_jmp_buf, 23);
+    nemu_memory_longjmp(23);
   }
   cpu.rpaddr = paddr;
   cpu.rdata = paddr_read(paddr, len);
@@ -365,6 +396,7 @@ word_t vaddr_read(vaddr_t addr, int len)
 
 static void vaddr_write_unlocked(vaddr_t addr, int len, word_t data)
 {
+  addr = riscv_pointer_mask(addr);
   g_vaddr = addr;
   cpu.vwaddr = addr;
   cpu.wdata = data;
@@ -411,7 +443,7 @@ static void vaddr_write_unlocked(vaddr_t addr, int len, word_t data)
           g_vaddr = pmp_last_fault_addr;
         }
         cause = MCA_STO_ACC_FAU;
-        nemu_longjmp(exec_jmp_buf, 24);
+        nemu_memory_longjmp(24);
       }
       cpu.pwaddr = paddr;
       paddr_write(paddr, len, data);
@@ -435,7 +467,7 @@ static void vaddr_write_unlocked(vaddr_t addr, int len, word_t data)
       g_vaddr = pmp_last_fault_addr;
     }
     cause = MCA_STO_ACC_FAU;
-    nemu_longjmp(exec_jmp_buf, 24);
+    nemu_memory_longjmp(24);
   }
   cpu.pwaddr = paddr;
   paddr_write(paddr, len, data);
@@ -459,6 +491,7 @@ void vaddr_write(vaddr_t addr, int len, word_t data)
  * PTE.A under Svade, do not require PTE.D, and have no memory side effect. */
 void vaddr_check_cmo(vaddr_t addr)
 {
+  addr = riscv_pointer_mask(addr);
   g_vaddr = addr;
   paddr_t paddr = addr;
   const bool translated = isa_mmu_check(addr, 1, MEM_TYPE_CMO) != MMU_DIRECT;
@@ -471,7 +504,7 @@ void vaddr_check_cmo(vaddr_t addr)
   if (!paddr_is_mapped(paddr))
   {
     cause = MCA_STO_ACC_FAU;
-    nemu_longjmp(exec_jmp_buf, 24);
+    nemu_memory_longjmp(24);
   }
   uint32_t priv = pmp_effective_priv_ls();
   bool read_fault = pmp_check(paddr, 1, priv, true, false, false);
@@ -481,7 +514,7 @@ void vaddr_check_cmo(vaddr_t addr)
     // PMP checks physical addresses; tval must retain the virtual operand.
     if (!translated) g_vaddr = pmp_last_fault_addr;
     cause = MCA_STO_ACC_FAU;
-    nemu_longjmp(exec_jmp_buf, 24);
+    nemu_memory_longjmp(24);
   }
 }
 

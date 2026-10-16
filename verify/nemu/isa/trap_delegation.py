@@ -22,6 +22,7 @@ for xlen in (32,64):
             '-D__GUEST_ISA__=riscv','-I'+str(work),'-I'+str(root/'nemu/include'),
             '-I'+str(root/'nemu/src/isa/riscv/include'),
             str(a.source or root/'nemu/src/isa/riscv/system/intr.c'),
+            str(root/'nemu/src/isa/riscv/extensions.c'),
             str(root/'app/tests/host/nemu_trap_delegation.c'),'-o',str(work/'test')]
         if a.sanitize:command+=['-fsanitize=undefined','-fno-sanitize-recover=all']
         subprocess.run(command,check=True)
