@@ -26,9 +26,12 @@ module raptSoC #(
     output jtag_tdo,
     input  reset
 );
-`ifdef RAPT_LRSC_OBSERVE
 `ifndef SYNTHESIS
+`ifdef RAPT_LRSC_OBSERVE
+  `include "rapt_ioq_observe.svh"
   `include "rapt_lrsc_observe.svh"
+`elsif RAPT_SPEC_OBSERVE
+  `include "rapt_ioq_observe.svh"
 `endif
 `endif
   logic auto_master_out_awready;
@@ -97,7 +100,7 @@ module raptSoC #(
               cpu.core.backend.lsu.u_ioq.ioq_pc[q],
               cpu.core.backend.lsu.u_ioq.ioq_eff_addr[q],
               cpu.core.backend.lsu.u_ioq.ioq_dest[q],
-              cpu.core.backend.lsu.u_ioq.ioq_generation[q],
+              ioq_observe_generation[q],
               cpu.core.cmu_bcast.rob_head
           );
       end

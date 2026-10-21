@@ -106,7 +106,12 @@ module tb_frontend_recovery;
 
     repeat (3) tick();
     reset = 1'b0;
-    repeat (4) tick();
+    for (
+        int wait_cycles = 0;
+        wait_cycles < 16 && !(ifu.held_count != 0 && fqu.pmu_count != 0 && idu.count != 0);
+        wait_cycles++
+    )
+    tick();
     assert (ifu.held_count != 0 && fqu.pmu_count != 0 && idu.count != 0)
     else $fatal(1, "front-end did not establish work before recovery");
 

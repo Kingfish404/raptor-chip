@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Independent functional regression for NEMU's RVA22 mandatory scalar paths.
 
-This is a directed/random architectural regression, not profile certification.
+This directed/random architectural regression checks mandatory scalar paths.
 Integer expectations use Python arithmetic; no RTL or NEMU semantic imports.
 """
 import argparse

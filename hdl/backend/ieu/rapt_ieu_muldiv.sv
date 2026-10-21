@@ -150,20 +150,15 @@ module rapt_ieu_muldiv #(
   end
 
   int alloc_slot[MDQ_SIZE];
-  always_comb begin
-    automatic logic [MDQ_SIZE-1:0] remaining;
-    remaining = ~mdq_valid;
-    for (int s = 0; s < NumSlots; s++) begin
-      disp.free_found[s] = 1'b0;
-      disp.free_idx[s] = '0;
-      for (int e = 0; e < MDQ_SIZE; e++)
-      if (!disp.free_found[s] && remaining[e]) begin
-        disp.free_found[s] = 1'b1;
-        disp.free_idx[s] = MDQLen'(e);
-        remaining[e] = 1'b0;
-      end
-    end
-  end
+  rapt_rank_select #(
+      .Entries(MDQ_SIZE),
+      .NumSelect(NumSlots),
+      .IndexBits(MDQLen)
+  ) u_free_rank_select (
+      .available(~mdq_valid),
+      .found(disp.free_found),
+      .index(disp.free_idx)
+  );
   for (genvar s = 0; s < NumSlots; s++) begin : g_alloc_contract
     `RAPT_SVA_IMPLY(clock, reset || cmu_bcast.flush_pipe, QUEUE_ALLOC_FREE, disp.accept[s],
                     !mdq_valid[disp.rs_idx[s]])
@@ -289,6 +284,72 @@ module rapt_ieu_muldiv #(
 
   // === Sequential: alloc / wakeup / issue / completion ===
   always_ff @(posedge clock) begin
+    for (int e = 0; e < MDQ_SIZE; e++)
+    if (alloc_slot[e] >= 0) begin
+      mdq_valid[e]    <= !cancelled(dispatch[alloc_slot[e]].dest);
+      mdq_issued[e]   <= 1'b0;
+      mdq_vj[e]       <= wake_val(dispatch[alloc_slot[e]].pr1, dispatch[alloc_slot[e]].op1);
+      mdq_vk[e]       <= wake_val(dispatch[alloc_slot[e]].pr2, dispatch[alloc_slot[e]].op2);
+      mdq_pr1[e]      <= wake_pr(dispatch[alloc_slot[e]].pr1);
+      mdq_pr2[e]      <= wake_pr(dispatch[alloc_slot[e]].pr2);
+      mdq_pr1_busy[e] <= |wake_pr(dispatch[alloc_slot[e]].pr1);
+      mdq_pr2_busy[e] <= |wake_pr(dispatch[alloc_slot[e]].pr2);
+      mdq_prd[e]      <= dispatch[alloc_slot[e]].prd;
+      mdq_rd[e]       <= dispatch[alloc_slot[e]].uop.rd;
+      mdq_dest[e]     <= dispatch[alloc_slot[e]].dest;
+      mdq_generation[e] <= dispatch[alloc_slot[e]].generation;
+      mdq_pc[e]       <= dispatch[alloc_slot[e]].uop.pc;
+      mdq_c[e]        <= dispatch[alloc_slot[e]].uop.c;
+      mdq_word[e]     <= dispatch[alloc_slot[e]].uop.execute.int_op.word;
+      mdq_alu[e]      <= dispatch[alloc_slot[e]].uop.execute.int_op.alu[4:0];
+    end
+    // ---- Resident operand wakeup (skip slots being allocated) ----
+    for (int i = 0; i < MDQ_SIZE; i++) begin
+      if (mdq_valid[i]) begin
+        if (mdq_fwd1_hit[i]) begin
+          mdq_vj[i]       <= mdq_fwd1_val[i];
+          mdq_pr1[i]      <= '0;
+          mdq_pr1_busy[i] <= 1'b0;
+        end
+        if (mdq_fwd2_hit[i]) begin
+          mdq_vk[i]       <= mdq_fwd2_val[i];
+          mdq_pr2[i]      <= '0;
+          mdq_pr2_busy[i] <= 1'b0;
+        end
+      end
+    end
+
+    // ---- FU issue bookkeeping ----
+    if (sel_found && fu_in_ready) begin
+      mdq_issued[sel_idx] <= 1'b1;
+    end
+
+    // ---- Completion: free the entry on tag return ----
+    if (fu_out_valid) begin
+      mdq_valid[fu_out_tag]  <= 1'b0;
+      mdq_issued[fu_out_tag] <= 1'b0;
+    end
+
+    // No same-edge reuse: admission reads registered mdq_valid. A matching
+    // in-flight FU owner is removed on this same edge by cancel_tags.
+    for (int e = 0; e < MDQ_SIZE; e++) begin
+      if (cancel_tags[e]) begin
+        mdq_valid[e] <= 1'b0;
+        mdq_issued[e] <= 1'b0;
+        mdq_pr1_busy[e] <= 1'b0;
+        mdq_pr2_busy[e] <= 1'b0;
+      end
+    end
+
+    // New entries are younger than residents and ordered by dispatch slot.
+    for (int i = 0; i < MDQ_SIZE; i++) begin
+      for (int j = 0; j < MDQ_SIZE; j++) begin
+        if (alloc_slot[i] >= 0 && alloc_slot[j] >= 0)
+          age_mat[i][j] <= alloc_slot[i] < alloc_slot[j];
+        else if (alloc_slot[i] >= 0) age_mat[i][j] <= 1'b0;
+        else if (alloc_slot[j] >= 0) age_mat[i][j] <= mdq_valid[i];
+      end
+    end
     if (reset || cmu_bcast.flush_pipe) begin
       mdq_valid    <= '0;
       mdq_issued   <= '0;
@@ -301,74 +362,6 @@ module rapt_ieu_muldiv #(
       // initializes each new entry's age row/column before its valid bit
       // is set (same argument as rapt_iq).  Only valid/issued/busy
       // control bits stay on the reset network.
-    end else begin
-      for (int e = 0; e < MDQ_SIZE; e++)
-      if (alloc_slot[e] >= 0) begin
-        mdq_valid[e]    <= !cancelled(dispatch[alloc_slot[e]].dest);
-        mdq_issued[e]   <= 1'b0;
-        mdq_vj[e]       <= wake_val(dispatch[alloc_slot[e]].pr1, dispatch[alloc_slot[e]].op1);
-        mdq_vk[e]       <= wake_val(dispatch[alloc_slot[e]].pr2, dispatch[alloc_slot[e]].op2);
-        mdq_pr1[e]      <= wake_pr(dispatch[alloc_slot[e]].pr1);
-        mdq_pr2[e]      <= wake_pr(dispatch[alloc_slot[e]].pr2);
-        mdq_pr1_busy[e] <= |wake_pr(dispatch[alloc_slot[e]].pr1);
-        mdq_pr2_busy[e] <= |wake_pr(dispatch[alloc_slot[e]].pr2);
-        mdq_prd[e]      <= dispatch[alloc_slot[e]].prd;
-        mdq_rd[e]       <= dispatch[alloc_slot[e]].uop.rd;
-        mdq_dest[e]     <= dispatch[alloc_slot[e]].dest;
-        mdq_generation[e] <= dispatch[alloc_slot[e]].generation;
-        mdq_pc[e]       <= dispatch[alloc_slot[e]].uop.pc;
-        mdq_c[e]        <= dispatch[alloc_slot[e]].uop.c;
-        mdq_word[e]     <= dispatch[alloc_slot[e]].uop.execute.int_op.word;
-        mdq_alu[e]      <= dispatch[alloc_slot[e]].uop.execute.int_op.alu[4:0];
-      end
-      // ---- Resident operand wakeup (skip slots being allocated) ----
-      for (int i = 0; i < MDQ_SIZE; i++) begin
-        if (mdq_valid[i]) begin
-          if (mdq_fwd1_hit[i]) begin
-            mdq_vj[i]       <= mdq_fwd1_val[i];
-            mdq_pr1[i]      <= '0;
-            mdq_pr1_busy[i] <= 1'b0;
-          end
-          if (mdq_fwd2_hit[i]) begin
-            mdq_vk[i]       <= mdq_fwd2_val[i];
-            mdq_pr2[i]      <= '0;
-            mdq_pr2_busy[i] <= 1'b0;
-          end
-        end
-      end
-
-      // ---- FU issue bookkeeping ----
-      if (sel_found && fu_in_ready) begin
-        mdq_issued[sel_idx] <= 1'b1;
-      end
-
-      // ---- Completion: free the entry on tag return ----
-      if (fu_out_valid) begin
-        mdq_valid[fu_out_tag]  <= 1'b0;
-        mdq_issued[fu_out_tag] <= 1'b0;
-      end
-
-      // No same-edge reuse: admission reads registered mdq_valid. A matching
-      // in-flight FU owner is removed on this same edge by cancel_tags.
-      for (int e = 0; e < MDQ_SIZE; e++) begin
-        if (cancel_tags[e]) begin
-          mdq_valid[e] <= 1'b0;
-          mdq_issued[e] <= 1'b0;
-          mdq_pr1_busy[e] <= 1'b0;
-          mdq_pr2_busy[e] <= 1'b0;
-        end
-      end
-
-      // New entries are younger than residents and ordered by dispatch slot.
-      for (int i = 0; i < MDQ_SIZE; i++) begin
-        for (int j = 0; j < MDQ_SIZE; j++) begin
-          if (alloc_slot[i] >= 0 && alloc_slot[j] >= 0)
-            age_mat[i][j] <= alloc_slot[i] < alloc_slot[j];
-          else if (alloc_slot[i] >= 0) age_mat[i][j] <= 1'b0;
-          else if (alloc_slot[j] >= 0) age_mat[i][j] <= mdq_valid[i];
-        end
-      end
-
     end
   end
 

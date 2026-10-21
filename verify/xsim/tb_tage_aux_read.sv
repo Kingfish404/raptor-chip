@@ -23,6 +23,8 @@ module tb_tage_aux_read #(
       .IDX_LEN(IndexBits),
       .AuxRead(1)
   ) dut (
+      .request_aux_position('0),
+      .request_aux_taken(),
       .*
   );
   logic [XLEN-1:0] sampled_pc = 0;

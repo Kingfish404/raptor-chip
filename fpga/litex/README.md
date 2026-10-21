@@ -42,6 +42,21 @@ Vivado load and flash scripts require exactly one JTAG device matching the board
 
 `fpga-load` and `fpga-flash` require a bitstream whose saved input hash matches the current inputs. Missing bitstream files or failed timing checks also stop loading.
 
+## RK onboard Ethernet and DDR4
+
+The RK-XCKU5P-F V1.2 has a separate LiteX profile using its onboard RTL8211F
+RGMII PHY and 2 GiB DDR4 MIG. Use
+`make fpga-netboot-rv64-build FPGA_BOARD=rk_xcku5p_f` (or `rv32`), then the
+matching `info`, `load`, `serve`, and `test` targets. The fixed profile defaults
+to the `small` CPU preset. See the [RK board guide](../rk-xcku5p-f/README.md#onboard-ethernet-netboot)
+and [netboot workflow](NETBOOT.md) for the full command sequence and host setup.
+The RV64 `small` profile completed Vivado 2025.2 routing at 50 MHz: WNS was
++0.118 ns, WHS was +0.005 ns, and there were no failing setup or hold endpoints.
+Its bitstream was loaded into the detected RK XCKU5P-F only. MIG calibration
+passed and the BIOS verified a 16 MiB DDR4 memory test. The Ethernet boot test
+is still pending: the RTL8211F reported link down, and BIOS ARP failed before
+TFTP. Linux network operation has not yet been verified.
+
 ## CM005 Ethernet on CU07/CU08
 
 For **LiteX BIOS TFTP network boot** (without replacing the SD card), see [netboot preparation](NETBOOT.md). Its standalone `netboot.mk` checks/packages finished firmware without parsing the FPGA Makefile or touching the board; TFTP service activation and board acceptance remain separate steps.
@@ -84,6 +99,11 @@ make fpga-netboot-rv64-load
 Run load only after a successful build and when the board is available. This profile fixes CU08, runs both RV32 and RV64 at 50 MHz, defaults to `RAPT_CONFIG=default`, and supports other presets through e.g. `RAPT_CONFIG=small`. It uses MIG DDR, manual SD boot, CM005 FMC_C/ETHA gigabit, full Linux initialization, Vivado 8 threads and Explore routing. DTB offset/address are `0x04000000`/`0x83f00000`. Matching build and load targets use the same parameters; load requires the matching build stamp and an existing, passing timing report. It does not rebuild or program flash.
 
 Outputs and workflow locks are isolated by preset and XLEN at `build/netboot-<RAPT_CONFIG>/rv32/{build,soc,netboot}` and `build/netboot-<RAPT_CONFIG>/rv64/{build,soc,netboot}`; they do not reuse the earlier compact temporary candidates. Use `make fpga-netboot-rv32-info` (or `rv64-info`) to see resolved paths. Do **not** substitute bare `make fpga-load` for the paired target.
+
+Each Vivado `soc/gateware/` result has `index.html` for browsing reports and
+`README.md` with synthesis/placement resource totals and available timing.
+The matching `fpga-netboot-rv64-reports` or `fpga-netboot-rv32-reports` target
+regenerates these files from existing reports without rebuilding the bitstream.
 
 The default payloads are downloaded by the paired `build` target when absent: `linux/build/linux-riscv-rv32-qemu-rv32-buildroot-v6.18.50/fw_payload.bin` and `linux/build/linux-riscv-rv64-qemu-rv64-fast-buildroot-v6.18.50/fw_payload.bin`. Repeat `RAPT_CONFIG` for build/load/test steps. Host setup/restore shares `NETBOOT_STATE_ROOT` (default `build/netboot-default`) across presets. Supported location/tool overrides are `NETBOOT_BUILD_ROOT`, `NETBOOT_STATE_ROOT`, `NETBOOT_PAYLOAD_RV32`, `NETBOOT_PAYLOAD_RV64`, `VIVADO`, `VIVADO_JOBS`, and `CROSS`; use absolute paths for custom build/payload locations and repeat them for all workflow steps, or put them in ignored `netboot.local.mk`. Custom build outputs use `<NETBOOT_BUILD_ROOT>/<RAPT_CONFIG>/rvXX/`; older custom-root builds need rebuilding in this layout. Conflicting fixed board/variant/hardware overrides fail explicitly. Use the manual flow below for a different hardware configuration. Do not mix fixed-profile and ordinary targets in the same Make invocation. For the complete flow, including explicit host setup, namespaced TFTP deployment, manual BIOS netboot, Linux startup and network checks, see [NETBOOT.md](NETBOOT.md#fixed-cu08-end-to-end-targets). In short, after build use `make fpga-netboot-host-setup`, `make fpga-netboot-rv64-serve`, `make fpga-netboot-rv64-load` and `make fpga-netboot-rv64-console`; manually enter the namespaced `netboot` command printed by `serve` at `litex>`. After Linux starts, close the console and use `make fpga-netboot-rv64-test` (substitute `rv32` throughout as needed). Restore recorded host changes with `make fpga-netboot-host-restore` when finished. Never boot an RV32 SD payload on RV64. Source edits during or after a netboot build do not block it: the stamp and `build.json` record the pre-build input identity (with `sources_changed_during_build`), and `load` warns about stale sources. The bitstream hash and timing checks remain hard failures.
 

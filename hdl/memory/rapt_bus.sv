@@ -1,4 +1,5 @@
 `include "rapt.svh"
+`include "../memory/rapt_axi_ids_pkg.svh"
 `include "rapt_if.svh"
 `include "rapt_soc.svh"
 
@@ -32,6 +33,7 @@ module rapt_bus #(
 
     // Internal memory transaction port
     mem_link_if.master mem,
+    output logic rd_req_cacheable,
 
     l1i_bus_if.slave l1i_bus,
     l1d_bus_if.slave l1d_bus,
@@ -41,12 +43,7 @@ module rapt_bus #(
 
     input reset
 );
-  typedef enum logic [3:0] {
-    L1I  = 1,
-    L1D  = 2,
-    TLBI = 3,
-    TLBD = 4
-  } state_lds_t;  // load source
+  import rapt_axi_ids_pkg::*;
 
   // =========================================================================
   // Multi-outstanding read AR pipeline.
@@ -120,7 +117,7 @@ module rapt_bus #(
   end
   assign miss_push = (`RAPT_L1D_MSHRS > 0) && l1d_bus.arvalid && l1d_bus.ar_mshr
       && !miss_busy[l1d_bus.ar_mshr_id];
-  assign miss_response = mem.rd_rsp_valid && mem.rd_rsp_id[3:2] == 2'b10
+  assign miss_response = mem.rd_rsp_valid && (mem.rd_rsp_id & MshrMask) == MshrBase
       && miss_issued[mem.rd_rsp_id[1:0]];
   assign l1d_bus.r_mshr = miss_response;
   assign l1d_bus.r_mshr_id = mem.rd_rsp_id[1:0];
@@ -140,7 +137,8 @@ module rapt_bus #(
         miss_noallocate[l1d_bus.ar_mshr_id] <= l1d_bus.noallocate;
       end
       if (take_miss) miss_held[miss_select] <= 1;
-      if (rd_output_fire && mem.rd_req_id[3:2] == 2'b10) miss_issued[mem.rd_req_id[1:0]] <= 1;
+      if (rd_output_fire && (mem.rd_req_id & MshrMask) == MshrBase)
+        miss_issued[mem.rd_req_id[1:0]] <= 1;
       if (miss_response && mem.rd_rsp_last) begin
         miss_busy[mem.rd_rsp_id[1:0]] <= 0;
         miss_held[mem.rd_rsp_id[1:0]] <= 0;
@@ -208,6 +206,7 @@ module rapt_bus #(
   logic [7:0] rd_skid_len;
   logic [1:0] rd_skid_burst;
   logic [1:0] rd_skid_pbmt;
+  logic rd_skid_cacheable;
   localparam int PostedSlots = PostedWrites > 0 ? PostedWrites : 1;
   localparam int PostedIndexW = PostedSlots > 1 ? $clog2(PostedSlots) : 1;
   localparam int PostedCountW = $clog2(PostedSlots + 1);
@@ -230,6 +229,7 @@ module rapt_bus #(
   logic [7:0] source_len;
   logic [1:0] source_burst;
   logic [1:0] source_pbmt;
+  logic source_cacheable;
   logic rd_skid_available, rd_capture_source;
   logic take_l1d, take_l1i, l1i_pop;
 
@@ -277,10 +277,12 @@ module rapt_bus #(
   assign l1d_bus.rerr = l1d_bus.rvalid && mem.rd_rsp_error;
   assign l1d_bus.ptw_rerr = l1d_bus.ptw_rvalid && mem.rd_rsp_error;
 
-  assign source_id = source_l1d ? (l1d_slot_ptw ? 4'(TLBD) : 4'(L1D))
-                                : source_miss ? {2'b10, miss_select} : (l1i_q_ptw[l1i_q_rdptr] ? 4'(TLBI) : 4'(L1I));
+  assign source_id = source_l1d ? (l1d_slot_ptw ? TLBD : L1D)
+                                : source_miss ? (MshrBase | {2'b00, miss_select})
+                                : (l1i_q_ptw[l1i_q_rdptr] ? TLBI : L1I);
   assign source_pbmt = source_l1d ? l1d_slot_pbmt : source_miss ? 2'b00 : l1i_q_pbmt[l1i_q_rdptr];
   assign source_addr = source_l1d ? l1d_slot_addr : source_miss ? miss_addr[miss_select] : l1i_q_head_addr;
+  assign source_cacheable = rapt_pkg::addr_cacheable(source_addr);
   // RV64 page-table entries are 64 bits.  L1I/PTW requests share the L1I
   // queue, but only ordinary instruction refills are 32-bit reads. Sending
   // a 4-byte PTW read through LiteX's AXI64->AXI32 converter returns only one
@@ -305,6 +307,7 @@ module rapt_bus #(
   assign mem.rd_req_size = rd_skid_valid ? rd_skid_size : source_size;
   assign mem.rd_req_burst = rd_skid_valid ? rd_skid_burst : source_burst;
   assign mem.rd_req_pbmt = rd_skid_valid ? rd_skid_pbmt : source_pbmt;
+  assign rd_req_cacheable = rd_skid_valid ? rd_skid_cacheable : source_cacheable;
   assign source_noallocate = source_l1d ? l1d_slot_noallocate
       : source_miss ? miss_noallocate[miss_select] : l1i_q_noallocate[l1i_q_rdptr];
   assign mem.rd_req_noallocate = rd_skid_valid ? rd_skid_noallocate : source_noallocate;
@@ -314,7 +317,7 @@ module rapt_bus #(
                            && (rd_skid_valid || !mem.rd_req_ready);
   assign mem.rd_rsp_ready = 1'b1;
   assign source_read_blocked = PostedWrites > 0 && !posted_idle
-      && (source_pbmt != 2'b00 || !rapt_pkg::addr_cacheable(source_addr)
+      && (source_pbmt != 2'b00 || !source_cacheable
           || posted_line_hit(source_addr[XLEN-1:LineLsb]));
 
   // L1D arsize from rstrb (matches original encoding).
@@ -338,6 +341,7 @@ module rapt_bus #(
         rd_skid_len   <= source_len;
         rd_skid_burst <= source_burst;
         rd_skid_pbmt <= source_pbmt;
+        rd_skid_cacheable <= source_cacheable;
         rd_skid_noallocate <= source_noallocate;
       end
     end

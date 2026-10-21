@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Board entry point for the shared native FPGA flow (no LiteX/Migen)."""
+"""Board entry point for the shared native FPGA flow."""
 from pathlib import Path
 import subprocess
 import sys

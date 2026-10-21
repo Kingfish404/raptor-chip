@@ -175,42 +175,40 @@ module rapt_fpu_convert_narrow (
   assign result_valid = s3_valid_q;
 
   always_ff @(posedge clock) begin
+    // Payload is observed only with its valid/state owner. Clear control last.
+    s3_valid_q <= s2_valid_q;
+    s2_valid_q <= s1_valid_q;
+    s1_valid_q <= valid && ready;
+    begin
+      s1_sign_q <= sign_c;
+      s1_exponent_q <= exponent_value_c;
+      s1_significand_q <= significand_c;
+      s1_special_q <= special_c;
+      s1_special_result_q <= special_result_c;
+      s1_special_flags_q <= special_flags_c;
+      s1_rounding_mode_q <= rounding_mode;
+    end
+    if (s1_valid_q) begin
+      s2_sign_q <= s1_sign_q;
+      s2_exponent_q <= s1_exponent_q;
+      s2_normal_q <= normal_c;
+      s2_tiny_q <= tiny_c;
+      s2_retained_q <= retained_c;
+      s2_guard_q <= guard_c;
+      s2_sticky_q <= sticky_c;
+      s2_special_q <= s1_special_q;
+      s2_special_result_q <= s1_special_result_q;
+      s2_special_flags_q <= s1_special_flags_q;
+      s2_rounding_mode_q <= s1_rounding_mode_q;
+    end
+    if (s2_valid_q) begin
+      result_q <= stage3_result_c;
+      flags_q <= stage3_flags_c;
+    end
     if (reset || flush) begin
       s1_valid_q <= 1'b0;
       s2_valid_q <= 1'b0;
       s3_valid_q <= 1'b0;
-      // Result/flags are meaningful only with result_valid; keep payload
-      // unreset so reset/flush only cancels the valid pipeline.
-    end else begin
-      s3_valid_q <= s2_valid_q;
-      s2_valid_q <= s1_valid_q;
-      s1_valid_q <= valid && ready;
-      if (valid && ready) begin
-        s1_sign_q <= sign_c;
-        s1_exponent_q <= exponent_value_c;
-        s1_significand_q <= significand_c;
-        s1_special_q <= special_c;
-        s1_special_result_q <= special_result_c;
-        s1_special_flags_q <= special_flags_c;
-        s1_rounding_mode_q <= rounding_mode;
-      end
-      if (s1_valid_q) begin
-        s2_sign_q <= s1_sign_q;
-        s2_exponent_q <= s1_exponent_q;
-        s2_normal_q <= normal_c;
-        s2_tiny_q <= tiny_c;
-        s2_retained_q <= retained_c;
-        s2_guard_q <= guard_c;
-        s2_sticky_q <= sticky_c;
-        s2_special_q <= s1_special_q;
-        s2_special_result_q <= s1_special_result_q;
-        s2_special_flags_q <= s1_special_flags_q;
-        s2_rounding_mode_q <= s1_rounding_mode_q;
-      end
-      if (s2_valid_q) begin
-        result_q <= stage3_result_c;
-        flags_q <= stage3_flags_c;
-      end
     end
   end
 endmodule

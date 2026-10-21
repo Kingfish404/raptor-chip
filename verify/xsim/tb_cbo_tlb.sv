@@ -92,6 +92,20 @@ module tb_cbo_tlb #(
     l1d_bus.rready = 1;
     repeat (4) @(negedge clock);
     reset = 0;
+    // Translation has S/U effective privilege; permit the page-table and
+    // data RAM explicitly instead of combining M-mode PMP bypass with MMU.
+    csr_bcast.priv = `RAPT_PRIV_S;
+    pmp_update.addr_we = 1;
+    pmp_update.raw_addr = '1;
+    pmp_update.napot_mask = '1;
+    pmp_update.cfg_we = 1;
+    pmp_update.cfg_r = 1;
+    pmp_update.cfg_w = 1;
+    pmp_update.mode_off[0] = 0;
+    pmp_update.mode_napot = 1;
+    @(negedge clock);
+    pmp_update.addr_we = 0;
+    pmp_update.cfg_we = 0;
     csr_bcast.dmmu_en = 1;
     csr_bcast.satp_ppn = ('h80001);
     exu_l1d.mmu_en = 1;

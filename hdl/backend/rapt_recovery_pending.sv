@@ -81,18 +81,18 @@ module rapt_recovery_pending #(
     assign tree_age[node] = choose_left ? tree_age[2*node] : tree_age[2*node+1];
   end
 
+  logic [IndexBits-1:0] owner_q;
+  logic [Xlen-1:0] target_q;
+  logic [GenerationBits-1:0] generation_q;
+  assign owner = pending ? owner_q : '0;
+  assign target = pending ? target_q : '0;
+  assign generation = pending ? generation_q : '0;
   always_ff @(posedge clock) begin
-    if (reset || flush) begin
-      pending <= 1'b0;
-      owner <= '0;
-      target <= '0;
-      generation <= '0;
-    end else begin
-      pending <= tree_valid[1];
-      owner <= tree_valid[1] ? tree_owner[1] : '0;
-      target <= tree_valid[1] ? tree_target[1] : '0;
-      generation <= tree_valid[1] ? tree_generation[1] : '0;
-    end
+    pending <= tree_valid[1];
+    owner_q <= tree_owner[1];
+    target_q <= tree_target[1];
+    generation_q <= tree_generation[1];
+    if (reset || flush) pending <= 1'b0;
   end
   if (!(Entries > 0 && Ports > 0 && Xlen > 0 && GenerationBits > 0)) begin : g_invalid_config_0
     $error("Invalid rapt_recovery_pending configuration");

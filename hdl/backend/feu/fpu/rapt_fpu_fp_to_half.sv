@@ -161,16 +161,14 @@ module rapt_fpu_fp_to_half (
   assign result_valid = valid_q;
 
   always_ff @(posedge clock) begin
+    // Payload is observed only with its valid/state owner. Clear control last.
+    valid_q <= valid && ready;
+    begin
+      result_q <= result_c;
+      flags_q <= flags_c;
+    end
     if (reset || flush) begin
       valid_q <= 1'b0;
-      // Result/flags are meaningful only with result_valid; keep payload
-      // unreset so reset/flush only cancels the valid pipeline.
-    end else begin
-      valid_q <= valid && ready;
-      if (valid && ready) begin
-        result_q <= result_c;
-        flags_q <= flags_c;
-      end
     end
   end
 endmodule

@@ -10,9 +10,8 @@
 // This removes the old per-word tag duplication while preserving the
 // parallel hit checks needed by the fetch path.
 //
-// Tags use (* ram_style = "block" *) to guide FPGA synthesis toward BRAM
-// inference, reducing LUT-mux depth on the read path.  Valid bits remain
-// distributed flops for fast bulk invalidation.
+// Asynchronous tag reads require distributed storage on FPGA. Valid bits
+// remain distributed flops for fast bulk invalidation.
 (* keep_hierarchy *)
 module rapt_l1i_tagmem #(
     parameter int L1I_LEN  = `RAPT_L1I_LEN,
@@ -40,11 +39,9 @@ module rapt_l1i_tagmem #(
 
     input logic inv
 );
-  // Register arrays with block-RAM hint for FPGA synthesis.
-  // On FPGA this infers BRAM with registered output (pipelined naturally).
-  // On ASIC this stays as flops; 32 entries x ~22 bits is a shallow mux.
-  (* ram_style = "block" *) logic [TAG_W-1:0] tags_curr[L1I_SIZE];
-  (* ram_style = "block" *) logic [TAG_W-1:0] tags_next4[L1I_SIZE];
+  // The current, next-PC and write-tag reads are all combinational.
+  (* ram_style = "distributed" *) logic [TAG_W-1:0] tags_curr[L1I_SIZE];
+  (* ram_style = "distributed" *) logic [TAG_W-1:0] tags_next4[L1I_SIZE];
   logic [L1I_SIZE-1:0] valid;
 
   assign rtag_curr = tags_curr[raddr_curr];

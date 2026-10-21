@@ -24,6 +24,8 @@ module rapt_ifu #(
   logic [XLEN-1:1] pc_ifu_q;
   wire [XLEN-1:0] pc_ifu = {pc_ifu_q, 1'b0};
   logic [XLEN-1:0] nextpc, redirect_pc;
+  logic prediction_ready, prediction_taken;
+  logic [XLEN-1:0] prediction_npc;
   rapt_pkg::fetch_slot_t held[Width], fetched[Width];
 `ifdef RAPT_FETCH_WIDE
   localparam int WindowHalfwords = 8;
@@ -92,13 +94,13 @@ module rapt_ifu #(
     live_response.trap = ifu_l1i.trap;
     live_response.cause = ifu_l1i.cause;
     live_response.tval = ifu_l1i.tval;
-    live_response.predicted_taken = ifu_bpu.taken;
-    live_response.predicted_npc = ifu_bpu.npc;
+    live_response.predicted_taken = prediction_taken;
+    live_response.predicted_npc = prediction_npc;
   end
   assign response_q = response_fifo[response_read_q];
   assign response_valid_q = response_count_q != 0;
   assign response = ResponseStage ? response_q : live_response;
-  assign response_valid = ResponseStage ? response_valid_q : ifu_l1i.valid;
+  assign response_valid = ResponseStage ? response_valid_q : ifu_l1i.valid && prediction_ready;
   assign response_pending_o = ResponseStage && response_valid_q;
 
   logic response_primary_taken;
@@ -252,7 +254,7 @@ module rapt_ifu #(
     assign successor_hit = 1'b0;
     assign packet_successor = '0;
   end
-  assign request_nextpc = ifu_bpu.taken ? ifu_bpu.npc
+  assign request_nextpc = prediction_taken ? prediction_npc
       : successor_hit ? packet_successor
       : pc_ifu + XLEN'({request_offset[Width], 1'b0});
   // Each packet owns the successor used when it was captured. The live request
@@ -264,7 +266,7 @@ module rapt_ifu #(
   assign response_redirect = recv_ready && response_kill_younger;
   assign capture_response = ResponseStage && response_count_q < 2
       && !response_kill_younger && !blocked && !redirect_event
-      && !reset && ifu_l1i.valid;
+      && !reset && ifu_l1i.valid && prediction_ready;
   assign pop_response = ResponseStage && recv_ready;
   always_ff @(posedge clock) begin
     if (reset || redirect_event || response_redirect) begin
@@ -491,10 +493,120 @@ module rapt_ifu #(
     end
   end
   assign ifu_hazard = blocked;
+  // Read the predictor continuously. The query is selected only from the
+  // registered fetch PC, predictor response, and packet-successor response.
+  // Acceptance and instruction boundaries validate/select the result after
+  // the edge; they never gate a predictor RAM read.
+  localparam int HintBits = 11;
+  localparam int HintTagBits = 8;
+  localparam int HintEntries = 1 << HintBits;
+  typedef struct packed {
+    logic [HintTagBits-1:0] tag;
+    logic signed [15:0] delta;
+    logic [OffsetBits-1:0] length;
+    logic [3:0] position;
+    logic conditional, direct;
+  } hint_t;
+  (* ram_style = "block" *) hint_t hints[HintEntries];
+  hint_t hint_q, hint_train;
+  logic hint_valid_read[1];
+  logic hint_valid_q, query_valid_q, saved_valid_q;
+  logic [XLEN-1:0] query_pc_q;
+  logic saved_taken_q;
+  logic [OffsetBits-1:0] stride_q;
+  logic hint_match;
+  logic [XLEN-1:0] predicted_successor;
+  wire [HintBits-1:0] hint_read_index = ifu_bpu.nextpc[HintBits:1]
+      ^ ifu_bpu.nextpc[2*HintBits:HintBits+1];
+  wire [HintBits-1:0] hint_write_index = response.pc[HintBits:1]
+      ^ response.pc[2*HintBits:HintBits+1];
+  wire query_match = query_valid_q && query_pc_q == pc_ifu;
+  wire request_advance = ResponseStage ? capture_response || response_redirect : recv_ready;
+  // Hints may alias or truncate a distant successor. The query-PC check below
+  // repairs either case before the corresponding prediction is consumed.
+  rapt_bulk_clear_bits #(
+      .Entries(HintEntries),
+      .GroupBits(5)
+  ) hint_valids (
+      .clock,
+      .clear(reset || cmu_bcast.fence_i),
+      .read_index('{hint_read_index}),
+      .read_bit(hint_valid_read),
+      .write_valid(recv_ready && !response_stop),
+      .write_index(hint_write_index),
+      .write_bit(1'b1)
+  );
+  assign hint_match = hint_valid_q && hint_q.tag == pc_ifu[HintBits+HintTagBits:HintBits+1];
+  assign prediction_ready = saved_valid_q || query_match;
+  assign prediction_taken = saved_valid_q ? saved_taken_q : ifu_bpu.taken;
+  assign prediction_npc = saved_valid_q ? query_pc_q : ifu_bpu.npc;
+  logic request_aux_taken;
+`ifdef RAPT_FETCH_LOOKAHEAD
+  assign ifu_bpu.request_aux_position = hint_q.position;
+  assign request_aux_taken = ifu_bpu.request_aux_taken;
+`else
+  assign request_aux_taken = 1'b0;
+`endif
+  always_comb begin
+    automatic logic prefix, control_seen;
+    prefix = 1'b1;
+    control_seen = 1'b0;
+    hint_train = '0;
+    hint_train.tag = response.pc[HintBits+HintTagBits:HintBits+1];
+    // Record the available fallthrough prefix even when the current branch
+    // is taken. A cache-line edge may permanently expose fewer than Width
+    // instructions; using the maximum window there causes repeated retries.
+    for (int s = 0; s < Width; s++) begin
+      if (s != 0 && expanded[s][6:0] == `RAPT_OP_JALR__) prefix = 1'b0;
+      if (is_control[s] && control_seen) prefix = 1'b0;
+      if (prefix && available[s]) hint_train.length = OffsetBits'(offset[s+1]);
+      prefix &= available[s] && !is_serial[s] && !fetched[s].trap && (!is_control[s] || is_cond[s]);
+      control_seen |= is_control[s];
+    end
+    hint_train.conditional = secondary_query;
+    hint_train.position = 4'(offset[secondary_index] - 1);
+    hint_train.delta = 16'(cond_target[secondary_index] - response.pc);
+    for (int s = 1; s < Width; s++) begin
+      if (s < fetched_count && expanded[s][6:0] == `RAPT_OP_JAL___) begin
+        hint_train.direct = 1'b1;
+        hint_train.delta = 16'(fetched[s].pnpc - response.pc);
+      end
+    end
+    if (ResponseStage) begin
+      hint_train.conditional = 1'b0;
+      hint_train.direct = 1'b1;
+      hint_train.delta = 16'(nextpc - response.pc);
+    end
+  end
+  assign predicted_successor = ifu_bpu.taken ? ifu_bpu.npc
+      : hint_match && (hint_q.direct || (hint_q.conditional && request_aux_taken))
+      ? pc_ifu + XLEN'($signed(hint_q.delta))
+      : pc_ifu + (hint_match ? XLEN'({hint_q.length, 1'b0}) : XLEN'({stride_q, 1'b0}));
   assign ifu_bpu.nextpc = redirect_event ? redirect_pc
-      : !ResponseStage || response_redirect ? nextpc : request_nextpc;
-  assign ifu_bpu.pc_update = redirect_event
-      || (ResponseStage ? capture_response || response_redirect : recv_ready);
+      : !prediction_ready ? pc_ifu : saved_valid_q ? query_pc_q : predicted_successor;
+  assign ifu_bpu.pc_update = 1'b1;
+  always_ff @(posedge clock) begin
+    query_pc_q <= ifu_bpu.nextpc;
+    query_valid_q <= 1'b1;
+    hint_q <= hints[hint_read_index];
+    hint_valid_q <= hint_valid_read[0];
+    if (recv_ready && !response_stop) begin
+      hints[hint_write_index] <= hint_train;
+      stride_q <= OffsetBits'(offset[fetched_count]);
+    end
+    if (query_match && !saved_valid_q) begin
+      saved_valid_q <= 1'b1;
+      // This edge also captures predicted_successor in query_pc_q. Hold that
+      // query while stalled, sharing its register with the saved target.
+      saved_taken_q <= ifu_bpu.taken;
+    end
+    if (request_advance || redirect_event) saved_valid_q <= 1'b0;
+    if (reset) begin
+      query_valid_q <= 1'b0;
+      saved_valid_q <= 1'b0;
+      stride_q <= OffsetBits'(2 * Width);
+    end
+  end
   assign ifu_l1i.consumed = ResponseStage ? capture_response : recv_ready;
   assign ifu_l1i.cancel = redirect_event || response_kill_younger;
   assign ifu_l1i.pc = pc_ifu;
@@ -603,6 +715,10 @@ module rapt_ifu #(
     `RAPT_SVA(clock, reset, IFU_RESIDENT_COUNT_BOUND, 32'(held_count) <= Width)
   end
   `RAPT_SVA(clock, reset, IFU_COUNT_BOUNDS, consumed <= 32'(held_count) && fetched_count <= Width)
+  `RAPT_SVA_IMPLY(clock, reset, IFU_SAVED_QUERY_CAPTURE, saved_valid_q && !$past(saved_valid_q),
+                  query_pc_q == $past(predicted_successor))
+  `RAPT_SVA_IMPLY(clock, reset, IFU_SAVED_QUERY_HOLD, saved_valid_q && $past(saved_valid_q),
+                  $stable(query_pc_q))
   `RAPT_SVA_IMPLY(clock, reset, IFU_RECOVERY_NO_RESPONSE_ACCEPT, recovery.redirect_valid,
                   !recv_ready && !ifu_bpu.history_valid)
   `RAPT_SVA_IMPLY(clock, reset, IFU_STABLE_REDIRECT_KEEPS_PC,

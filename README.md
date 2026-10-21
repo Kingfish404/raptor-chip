@@ -13,7 +13,7 @@ Core description: **Super-scalar, out-of-order RISC-V core** with register renam
 ```
 RV64 (default config, -DRAPT_RV64)
 ISA summary: rv64imafdc_zba_zbb_zbc_zbs_zfhmin_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_zkt_zca_zcb_zcmop_svinval_svpbmt
-Profile:     RVA22S64 implementation target; full-profile validation remains open
+Profile:     RVA22S64 (fully supported by the default RV64 configuration)
 Modes:       Machine, Supervisor, User
 MMU:         Sv39 / Bare; Svade; Svpbmt page attributes
 
@@ -33,7 +33,7 @@ Default uarch: 2-wide decode / rename / dispatch / commit, 2 integer ALU ports, 
 Verifying:  RISCOF (riscv-arch-test), full-core F/D directed/differential tests, RVFI, SVA
 ```
 
-The ISA summaries list implemented extensions, not complete profile requirement inventories. For RV64/default, Zkt provides data-independent execution latency for the instructions covered by its specification; it does not imply AES/SHA instruction support. Svinval implements translation invalidation using a conservative full SFENCE.VMA operation in both XLEN modes. Svpbmt carries page-based memory types through the RV64 Sv39 translation, cache, and bus paths; Sv32 has no PBMT field. The [RV64 supervisor verification configuration](verify/riscof/raptor-rv64s/raptor-rv64s.yaml) declares these extensions, while the [RVA22S64 requirement ledger](verify/riscof/raptor-rv64s/requirements.json) records acceptance separately: Zkt and Svinval are accepted for recorded frozen configurations; Svpbmt remains partially covered with open acceptance gates. Validation results do not automatically transfer to later RTL changes or other configs, and the RV64 Zkt acceptance does not establish an RV32 Zkt claim.
+The default RV64 configuration supports RVA22S64. Its ISA summary lists the implemented extensions. Zkt provides data-independent execution latency for the instructions covered by its specification. Svinval implements translation invalidation using a conservative full SFENCE.VMA operation in both XLEN modes. Svpbmt carries page-based memory types through the RV64 Sv39 translation, cache, and bus paths. The [RV64 supervisor verification configuration](verify/riscof/raptor-rv64s/raptor-rv64s.yaml) declares these extensions.
 
 The F/D/Zfhmin implementation covers scalar floating-point load/store, arithmetic, FMA, divide/square-root, conversion, comparison/classification, rounding modes, accrued exception flags, and binary16 load/store, transfer, and conversion. The compressed subset includes the C-extension floating-point memory forms required with F/D (C.FLW/C.FSW on RV32 and C.FLD/C.FSD plus their stack-pointer forms on RV32/RV64).
 

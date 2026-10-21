@@ -191,6 +191,26 @@ class NetbootFlowTest(unittest.TestCase):
             item.gate.assert_not_called()
             item.console.assert_not_called()
 
+    def test_rk_publication_loads_only_matching_board(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
+            item, live = self.published_fixture(tmp)
+            item.args.board = 'rk_xcku5p_f'
+            for suffix in ('.bit', '_timing.rpt'):
+                (live / ('mlk_cu08_ku15p' + suffix)).rename(
+                    live / ('rk_xcku5p_f' + suffix))
+            directory = item.publish_bitstream('rk-source')
+            manifest = json.loads((directory / 'manifest.json').read_text())
+            self.assertEqual(manifest['board'], 'rk_xcku5p_f')
+            with patch.object(flow, 'execute') as execute, \
+                    patch.object(flow, 'vivado', return_value='/tools/vivado'):
+                item.load_bitstream()
+            argv = execute.call_args.args[0]
+            self.assertEqual(argv[-2], directory / 'rk_xcku5p_f.bit')
+            self.assertEqual(argv[-1], 'xcku5p')
+            item.args.board = 'mlk_cu08_ku15p'
+            with self.assertRaisesRegex(RuntimeError, 'board mismatch'):
+                item.load_bitstream()
+
     def test_failed_publication_keeps_previous_and_success_creates_generation(self):
         with tempfile.TemporaryDirectory(prefix='raptor-chip-netboot-', dir='/tmp') as tmp:
             item, live = self.published_fixture(tmp)

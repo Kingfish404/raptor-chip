@@ -5,6 +5,7 @@ module rapt_axi_master #(
     parameter int XLEN = `RAPT_XLEN,
     parameter int ID_W = 4,
     parameter int MAX_READ_OUTSTANDING = 8,
+    parameter bit USE_CARRIED_READ_CACHEABLE = 0,
     // Accepted writes whose B response is still pending. One keeps the
     // original single-transaction behavior; larger values let a posting
     // requester stream independent writes behind earlier B responses.
@@ -14,6 +15,7 @@ module rapt_axi_master #(
     input logic reset,
 
     mem_link_if.slave mem,
+    input logic rd_req_cacheable = 1'b0,
     axi4_if.master axi
 );
   localparam int ReadCountW = $clog2(MAX_READ_OUTSTANDING + 1);
@@ -31,7 +33,17 @@ module rapt_axi_master #(
   assign axi.arsize = mem.rd_req_size;
   assign axi.arlen = mem.rd_req_len;
   assign axi.arburst = mem.rd_req_burst;
-  assign axi.arcache = rapt_pkg::axi_cache_attr(mem.rd_req_addr, mem.rd_req_pbmt)
+  // The bus carries the PMA result with the skid payload. Standalone users
+  // keep the address decode for the same AXI attribute contract.
+  logic [3:0] read_cache_attr;
+  if (USE_CARRIED_READ_CACHEABLE) begin : gen_carried_read_cache
+    assign read_cache_attr = mem.rd_req_pbmt == 2'b00
+        ? (rd_req_cacheable ? 4'b1111 : 4'b0000)
+        : mem.rd_req_pbmt == 2'b01 ? 4'b0010 : 4'b0000;
+  end else begin : gen_decoded_read_cache
+    assign read_cache_attr = rapt_pkg::axi_cache_attr(mem.rd_req_addr, mem.rd_req_pbmt);
+  end
+  assign axi.arcache = read_cache_attr
       & (mem.rd_req_noallocate ? 4'b0011 : 4'b1111);
   assign mem.rd_req_ready = axi.arready && read_capacity;
   assign read_request_fire = mem.rd_req_valid && mem.rd_req_ready;
@@ -228,6 +240,9 @@ module rapt_axi_master #(
   `RAPT_SVA_IMPLY(
       clock, reset, AXI_READ_RESPONSE_OWNED, axi.rvalid,
       (read_id_outstanding[axi.rid] != '0) || (read_request_fire && (mem.rd_req_id == axi.rid)))
+  `RAPT_SVA_IMPLY(clock, reset, AXI_CARRIED_CACHE_ATTR,
+                  USE_CARRIED_READ_CACHEABLE && mem.rd_req_valid,
+                  read_cache_attr == rapt_pkg::axi_cache_attr(mem.rd_req_addr, mem.rd_req_pbmt))
   `RAPT_SVA_IMPLY(clock, reset, AXI_WRITE_RESPONSE_OWNED, axi.bvalid, write_outstanding != '0)
   `RAPT_SVA_IMPLY(clock, reset, AXI_WRITE_RESPONSE_ID, axi.bvalid && MAX_WRITE_OUTSTANDING == 1,
                   axi.bid == write_stage.id)

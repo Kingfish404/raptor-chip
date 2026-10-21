@@ -59,7 +59,14 @@ def pack(artifacts, soc, csr, output, cross='riscv64-linux-gnu-', selector='LABE
         work = Path(tmp)
         for name in ('Image', 'fw_dynamic.bin', 'kernel.config', rootfs):
             shutil.copyfile(artifacts / name, work / name)
-        ensure_sdcard_dtb(soc, json.loads(csr.read_text()), work / 'soc.dtb')
+        csr_map = json.loads(csr.read_text())
+        if 'sdcard_phy_card_detect' in csr_map.get('csr_registers', {}):
+            ensure_sdcard_dtb(soc, csr_map, work / 'soc.dtb')
+        else:
+            # Some LiteX boards (including RK-XCKU5P-F) have no SD controller.
+            # Their CSR-matched base DTB is already complete and must not be
+            # rewritten with a nonexistent LiteSDCard device.
+            shutil.copyfile(soc, work / 'soc.dtb')
         for name, value in [('linux,initrd-start', 0x88000000), ('linux,initrd-end', 0x88000000 + size)]:
             run('fdtput', '-t', 'x', work / 'soc.dtb', '/chosen', name, f'{value:x}')
         run('fdtput', '-t', 's', work / 'soc.dtb', '/chosen', 'bootargs', bootargs)

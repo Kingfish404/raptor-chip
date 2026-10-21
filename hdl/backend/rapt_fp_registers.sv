@@ -194,9 +194,7 @@ module rapt_fp_registers #(
       for (genvar s = 0; s < ReadPorts; s++) begin : g_read_copy
         for (genvar operand = 0; operand < 3; operand++) begin : g_operand
           (* ram_style = "distributed" *) logic [63:0] words[32];
-          always_ff @(posedge clock)
-            if (!reset && write_valid[c])
-              words[write_index[c]] <= write_value[c];
+          always_ff @(posedge clock) if (write_valid[c]) words[write_index[c]] <= write_value[c];
           assign bank_read[s][operand][c] = words[source_register(resolve_uop[s], operand)];
           // Preserve the existing internal verification view. It has no
           // functional consumers in this branch and is pruned in synthesis.
@@ -231,16 +229,19 @@ module rapt_fp_registers #(
       end
     end
   end else begin : g_arch_flops
-    // Keep the original flop implementation for non-FPGA configurations.
+    // Preserve architectural zero using a valid bit rather than data reset.
     for (genvar r = 0; r < 32; r++) begin : g_word
+      logic written_q;
+      logic [63:0] data_q;
+      assign architectural[r] = written_q ? data_q : '0;
       always_ff @(posedge clock) begin
-        if (reset) architectural[r] <= '0;
-        else begin
-          for (int c = 0; c < CommitWidth; c++)
-          if (commit_valid[c] && destination_valid[commit_index[c]]
-                && destination[commit_index[c]] == 5'(r))
-            architectural[r] <= result_commit[c];
+        for (int c = 0; c < CommitWidth; c++)
+        if (commit_valid[c] && destination_valid[commit_index[c]]
+              && destination[commit_index[c]] == 5'(r)) begin
+          data_q <= result_commit[c];
+          written_q <= 1'b1;
         end
+        if (reset) written_q <= 1'b0;
       end
     end
     for (genvar s = 0; s < ReadPorts; s++) begin : g_resolve_read
@@ -287,7 +288,7 @@ module rapt_fp_registers #(
         for (genvar r = 0; r < Reads; r++) begin : g_copy
           (* ram_style = "distributed" *) logic [63:0] words[Entries];
           always_ff @(posedge clock)
-            if (!(reset || flush) && wake_valid[p])
+            if (wake_valid[p])
               words[completion[p].dest] <= completion[p].fp_result;
           assign bank_read[r][p] = words[read_addr[r]];
         end
@@ -300,7 +301,7 @@ module rapt_fp_registers #(
     // The highest writer wins, matching the flop file's port order.
     for (genvar e = 0; e < Entries; e++) begin : g_lvt
       always_ff @(posedge clock) begin
-        if (!(reset || flush)) begin
+        begin
           for (int p = 0; p < CompletionPorts; p++)
           if (WritePorts[p] && wake_valid[p] && completion[p].dest == IndexBits'(e))
             lvt[e] <= PortBits'(p);
@@ -337,7 +338,7 @@ module rapt_fp_registers #(
   end else begin : g_result_flops
     for (genvar e = 0; e < Entries; e++) begin : g_entry
       always_ff @(posedge clock) begin
-        if (!(reset || flush)) begin
+        begin
           for (int p = 0; p < CompletionPorts; p++)
           if (wake_valid[p] && completion[p].dest == IndexBits'(e))
             result_q[e] <= completion[p].fp_result;
@@ -417,7 +418,7 @@ module rapt_fp_registers #(
     logic [2:0][TagBits-1:0] source_tag[Entries];
     for (genvar e = 0; e < Entries; e++) begin : g_owner
       always_ff @(posedge clock) begin
-        if (!(reset || flush)) begin
+        begin
           for (int operand = 0; operand < 3; operand++)
           if (owner_live[e] && retiring(source_tag[e][operand])) source_tag[e][operand] <= '0;
           for (int s = 0; s < AllocateWidth; s++)

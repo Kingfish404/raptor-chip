@@ -24,9 +24,9 @@ netboot raptor-netboot/rv64/alpine-linux6_18_51-20260916T102205Z-ad6ce74b/boot.j
 
 可用 `scripts/netboot_relabel.py SOURCE --output-root OUTPUT` 将旧发行版 bundle 复制为新名称，再用 `scripts/netboot_distro_publish.py OUTPUT/BUNDLE` 发布。该命令不自动归档源目录，不加载 FPGA，也不执行 netboot。
 
-## Fixed CU08 end-to-end targets
+## Fixed CU08 and RK end-to-end targets
 
-Run from `fpga/litex` with the CU08 UART/JTAG available and FMC_C/ETHA connected to a dedicated host Ethernet interface:
+Run from `fpga/litex` with the CU08 UART/JTAG available and FMC_C/ETHA connected to a dedicated host Ethernet interface. For RK-XCKU5P-F V1.2, pass `FPGA_BOARD=rk_xcku5p_f` to every command below, including host setup/restore; connect its onboard Ethernet PHY to the dedicated host interface. The RK board Makefile provides the same targets with board selection built in.
 
 ```sh
 make fpga-netboot-rv64-check
@@ -44,7 +44,7 @@ make fpga-netboot-rv64-test
 make fpga-netboot-host-restore
 ```
 
-Replace `rv64` with `rv32` throughout for RV32. `load` only programs the FPGA; enter `netboot` yourself at the BIOS prompt. Build, load and boot are separate. The profile uses `RAPT_CONFIG=default` unless another preset is selected, for example `make fpga-netboot-rv64-build RAPT_CONFIG=small`. Repeat the same `RAPT_CONFIG` for all subsequent build/load/test steps. Host setup/restore is shared across presets and does not require a build or FPGA tools. The profile fixes 50 MHz for both RV64 and RV32, plus MIG DDR, BIOS, CM005 gigabit Ethernet and full Linux initialization. BIOS stops at `litex>` after initialization; choose `sdcardboot` or the exact namespaced `netboot` command printed by `serve` manually. The profile does not automatically shrink the CPU to make routing pass. A routing/timing failure means no board acceptance.
+Replace `rv64` with `rv32` throughout for RV32. `load` only programs the FPGA; enter `netboot` yourself at the BIOS prompt. Build, load and boot are separate. CU08 defaults to `RAPT_CONFIG=default`; RK defaults to `RAPT_CONFIG=small`. Repeat the same board and preset for all build/load/test steps. Host setup/restore is shared across presets and does not require a build or FPGA tools. Both profiles fix 50 MHz, MIG DDR, BIOS, gigabit Ethernet and full Linux initialization. CU08 uses CM005 FMC_C/ETHA; RK uses its onboard RTL8211F RGMII PHY and maps 2 GiB of DDR4. BIOS stops at `litex>` after initialization; enter the exact namespaced `netboot` command printed by `serve` manually. The profile does not automatically shrink the CPU to make routing pass. The RK RV64 `small` profile passed Vivado 2025.2 routing at 50 MHz (WNS +0.118 ns, WHS +0.005 ns, zero failing setup/hold endpoints); its bitstream loaded on the detected XCKU5P-F, and MIG calibration plus a 16 MiB BIOS memory test passed. Physical netboot is still pending: the RTL8211F reported link down and BIOS ARP failed before TFTP, so Linux network operation has not been verified.
 
 Builds automatically write an offline HTML dashboard alongside the Vivado reports
 at `fpga/litex/build/netboot-<RAPT_CONFIG>/rvXX/soc/gateware/index.html`
@@ -82,7 +82,7 @@ currently present. With `NETBOOT_BUILD_ROOT`, the dashboard instead lives at
 
 No firmware directory, bundle directory or DTB address needs to be supplied. Default release versions/paths and SHA256 values are pinned in `linux/vars.mk`; `build` acquires the BIOS firmware prerequisite; `bundle` also acquires the selected distro and builds a cached LiteX kernel/rootfs in isolated directories. `NETBOOT_DISTRO=legacy` selects the original fw_payload diagnostic workflow. `check` deliberately does not download anything. Initial tool installation is still required: the project LiteX environment (`make setup`), Vivado, RISC-V GNU tools, Verilator, device-tree-compiler, pyserial, `ip`, `nmcli`, `ping`, `sudo`, dnsmasq and tftpd-hpa. Setup/download/build must not overlap another session changing the same dependencies or outputs.
 
-Vivado on PATH or a single standard installation, one MiLianKe UART by-id, and one linked physical non-uplink interface are discovered automatically. Ambiguity fails instead of guessing. Optional machine-specific settings go in ignored `fpga/litex/netboot.local.mk`, for example:
+Vivado on PATH or a single standard installation, one board UART by-id, and one linked physical non-uplink interface are discovered automatically. CU08 discovery matches MiLianKe UART; RK matches the FTDI interface 01 UART. Ambiguity fails instead of guessing. Optional machine-specific settings go in ignored `fpga/litex/netboot.local.mk`, for example:
 
 ```make
 # Only needed when discovery is ambiguous:

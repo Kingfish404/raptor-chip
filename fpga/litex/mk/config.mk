@@ -77,6 +77,29 @@ BOARD_mlk_cu07_ku15p_LINUX_WITH_SDCARD   := 1
 BOARD_mlk_cu07_ku15p_LINUX_MAIN_RAM_SIZE := 0
 BOARD_mlk_cu07_ku15p_VIVADO_FLASH        := 1
 
+BOARD_rk_xcku5p_f_VENDOR              := vivado
+BOARD_rk_xcku5p_f_PY                  := rk_xcku5p_f.py
+BOARD_rk_xcku5p_f_BITNAME             := rk_xcku5p_f.bit
+BOARD_rk_xcku5p_f_TIMINGRPT           := rk_xcku5p_f_timing.rpt
+BOARD_rk_xcku5p_f_UART                := /dev/ttyUSB1
+BOARD_rk_xcku5p_f_DEVICE              := xcku5p
+BOARD_rk_xcku5p_f_PART                := xcku5p-ffvb676-2-i
+BOARD_rk_xcku5p_f_DEFAULT_SYS_CLK     := 50000000
+BOARD_rk_xcku5p_f_LINUX32_SYS_CLK     := 50000000
+BOARD_rk_xcku5p_f_LINUX64_SYS_CLK     := 50000000
+BOARD_rk_xcku5p_f_DEFAULT_RAPT_CONFIG := small
+BOARD_rk_xcku5p_f_DEFAULT_WITH_ETHERNET := 1
+BOARD_rk_xcku5p_f_HAS_LITEDRAM        := 0
+BOARD_rk_xcku5p_f_HAS_MIG             := 1
+BOARD_rk_xcku5p_f_LINUX_WITH_MIG      := 1
+BOARD_rk_xcku5p_f_MIG_SIZE            := 0x80000000
+BOARD_rk_xcku5p_f_MIG_TCL             := scripts/rk_xcku5p_f_ddr4_mig.tcl
+BOARD_rk_xcku5p_f_HAS_SDCARD          := 0
+BOARD_rk_xcku5p_f_DEFAULT_WITH_SDCARD := 0
+BOARD_rk_xcku5p_f_LINUX_WITH_SDCARD   := 0
+BOARD_rk_xcku5p_f_LINUX_MAIN_RAM_SIZE := 0
+BOARD_rk_xcku5p_f_VIVADO_FLASH        := 0
+
 BOARD_alinx_axau15_VENDOR              := vivado
 BOARD_alinx_axau15_PY                  := alinx_axau15.py
 BOARD_alinx_axau15_BITNAME             := alinx_axau15.bit
@@ -267,7 +290,7 @@ $(error Invalid BOOT_MODE='$(BOOT_MODE)'. Use BOOT_MODE=custom or BOOT_MODE=bios
 endif
 endif
 
-WITH_ETHERNET ?= 0
+WITH_ETHERNET ?= $(or $(BOARD_$(FPGA_BOARD)_DEFAULT_WITH_ETHERNET),0)
 FMC_SLOT ?= $(if $(filter mlk_cu08_ku15p,$(FPGA_BOARD)),c,a)
 ETH_PORT ?= a
 ETH_SPEED ?= 1000
@@ -275,8 +298,8 @@ ifneq (,$(filter 1 yes true on,$(WITH_ETHERNET)))
 ifeq (,$(filter 100 1000,$(ETH_SPEED)))
 $(error ETH_SPEED must be 100 or 1000 Mb/s)
 endif
-ifeq (,$(filter mlk_cu07_ku15p mlk_cu08_ku15p,$(FPGA_BOARD)))
-$(error CM005 Ethernet currently requires an MLK KU15P target)
+ifeq (,$(filter mlk_cu07_ku15p mlk_cu08_ku15p rk_xcku5p_f,$(FPGA_BOARD)))
+$(error Ethernet requires an MLK KU15P or RK-XCKU5P-F target)
 endif
 endif
 WITH_ETHERNET_FLAG = $(if $(filter 1 yes true on,$(WITH_ETHERNET)),--with-ethernet --fmc-slot=$(FMC_SLOT) --eth-port=$(ETH_PORT) --eth-speed=$(ETH_SPEED),)
@@ -294,7 +317,7 @@ FPGA_FLAVOR := $(FPGA_FLAVOR)-sdcard
 endif
 FPGA_FLAVOR := $(FPGA_FLAVOR)-$(RAPT_CONFIG)
 ifneq (,$(filter 1 yes true on,$(WITH_ETHERNET)))
-FPGA_FLAVOR := $(FPGA_FLAVOR)-cm005-$(FMC_SLOT)-$(ETH_PORT)
+FPGA_FLAVOR := $(FPGA_FLAVOR)-$(if $(filter rk_xcku5p_f,$(FPGA_BOARD)),onboard-eth,cm005-$(FMC_SLOT)-$(ETH_PORT))
 ifeq ($(ETH_SPEED),100)
 FPGA_FLAVOR := $(FPGA_FLAVOR)-100m
 endif
@@ -308,7 +331,7 @@ _FPGA_CONFIG_VARS := FPGA_BOARD VARIANT RAPT_CONFIG RAPT_PACK_VFLAGS BOOT_MODE \
 	SYS_CLK UART_BAUD INTEGRATED_MAIN_RAM_SIZE WITH_LED_CHASER \
 	WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE WITH_SDCARD \
 	WITH_ETHERNET FMC_SLOT ETH_PORT ETH_SPEED EXTRA_FLAGS \
-	VIVADO_JOBS VIVADO_INCREMENTAL VIVADO_ROUTE_DIRECTIVE VIVADO_SYNTH_DIRECTIVE \
+	VIVADO_JOBS VIVADO_INCREMENTAL VIVADO_ROUTE_DIRECTIVE VIVADO_SYNTH_DIRECTIVE VIVADO_OPT_DIRECTIVE \
 	VIVADO_NO_TIMING_DRIVEN VIVADO_SYS_SETUP_MARGIN_NS VIVADO_SYS_FINAL_WNS_NS \
 	FW_FPGA_BIN FW_LINUX_CONFIG_ID
 FPGA_CONFIG_ID := $(call _build_identity,$(_FPGA_CONFIG_VARS))
@@ -327,6 +350,7 @@ VIVADO_JOBS := $(strip $(VIVADO_JOBS))
 VIVADO_INCREMENTAL := $(strip $(VIVADO_INCREMENTAL))
 VIVADO_ROUTE_DIRECTIVE := $(strip $(VIVADO_ROUTE_DIRECTIVE))
 VIVADO_SYNTH_DIRECTIVE := $(strip $(VIVADO_SYNTH_DIRECTIVE))
+VIVADO_OPT_DIRECTIVE := $(strip $(VIVADO_OPT_DIRECTIVE))
 VIVADO_NO_TIMING_DRIVEN := $(strip $(VIVADO_NO_TIMING_DRIVEN))
 ifeq ($(filter $(VIVADO_NO_TIMING_DRIVEN),0 1),)
 $(error VIVADO_NO_TIMING_DRIVEN must be 0 or 1)
@@ -372,9 +396,10 @@ _FPGA_FLAGS = --output-dir=$(FPGA_DIR) \
 	--cpu-variant=$(VARIANT) --sys-clk-freq=$(SYS_CLK) \
 	--vivado-max-threads=$(VIVADO_JOBS) --vivado-route-directive=$(VIVADO_ROUTE_DIRECTIVE) $(VIVADO_INCREMENTAL_FLAG) \
 	--vivado-synth-directive=$(VIVADO_SYNTH_DIRECTIVE) \
-	$(if $(and $(filter mlk_cu07_ku15p mlk_cu08_ku15p,$(FPGA_BOARD)),$(filter 1,$(VIVADO_NO_TIMING_DRIVEN))),--vivado-no-timing-driven,) \
-	$(if $(filter mlk_cu07_ku15p mlk_cu08_ku15p,$(FPGA_BOARD)),--vivado-sys-setup-margin-ns=$(VIVADO_SYS_SETUP_MARGIN_NS),) \
-	$(if $(and $(filter mlk_cu07_ku15p mlk_cu08_ku15p,$(FPGA_BOARD)),$(VIVADO_SYS_FINAL_WNS_NS)),--vivado-sys-final-wns-ns=$(VIVADO_SYS_FINAL_WNS_NS),) \
+	--vivado-opt-directive=$(VIVADO_OPT_DIRECTIVE) \
+	$(if $(and $(filter mlk_cu07_ku15p mlk_cu08_ku15p rk_xcku5p_f,$(FPGA_BOARD)),$(filter 1,$(VIVADO_NO_TIMING_DRIVEN))),--vivado-no-timing-driven,) \
+	$(if $(filter mlk_cu07_ku15p mlk_cu08_ku15p rk_xcku5p_f,$(FPGA_BOARD)),--vivado-sys-setup-margin-ns=$(VIVADO_SYS_SETUP_MARGIN_NS),) \
+	$(if $(and $(filter mlk_cu07_ku15p mlk_cu08_ku15p rk_xcku5p_f,$(FPGA_BOARD)),$(VIVADO_SYS_FINAL_WNS_NS)),--vivado-sys-final-wns-ns=$(VIVADO_SYS_FINAL_WNS_NS),) \
 	--uart-baudrate=$(UART_BAUD) \
 	$(_FPGA_BOOT_FLAGS) \
 	$(_MAIN_RAM_FLAG) \
@@ -384,12 +409,13 @@ _FPGA_FLAGS = --output-dir=$(FPGA_DIR) \
 FPGA_STAMP := $(FPGA_DIR)/.bitstream_stamp
 _FPGA_HASH_COMMON_INPUTS = $(PACK_SV) $(RTL_SOURCES) $(FPGA_PY) $(LITEX_DIR)/Makefile \
 	$(LITEX_DIR)/scripts/isolated_pack.py $(LITEX_DIR)/scripts/build_identity.py \
-	$(if $(filter 1 yes true on,$(WITH_ETHERNET)),$(LITEX_DIR)/cm005.py $(LITEX_DIR)/cm005_oversample.py $(LITEX_DIR)/scripts/check_cm005_aperture.tcl,) \
+	$(if $(and $(filter 1 yes true on,$(WITH_ETHERNET)),$(filter mlk_cu07_ku15p mlk_cu08_ku15p,$(FPGA_BOARD))),$(LITEX_DIR)/cm005.py $(LITEX_DIR)/cm005_oversample.py $(LITEX_DIR)/scripts/check_cm005_aperture.tcl,) \
 	$(LITEX_DIR)/mk/config.mk $(LITEX_DIR)/mk/recipes.mk \
 	$(LITEX_DIR)/cores/cpu/raptor/core.py \
 	$(wildcard $(LITEX_DIR)/cores/cpu/raptor/*.h $(LITEX_DIR)/cores/cpu/raptor/*.S) \
-	$(if $(filter mlk_cu07_ku15p mlk_cu08_ku15p,$(FPGA_BOARD)),$(LITEX_DIR)/ku15p_soc.py $(LITEX_DIR)/scripts/vivado_retry_timing.tcl,) \
-	$(if $(filter mlk_cu07_ku15p mlk_cu08_ku15p,$(FPGA_BOARD)),$(LITEX_DIR)/scripts/vivado_setup_margin.tcl,) \
+	$(if $(filter mlk_cu07_ku15p mlk_cu08_ku15p rk_xcku5p_f,$(FPGA_BOARD)),$(LITEX_DIR)/ku15p_soc.py $(LITEX_DIR)/scripts/vivado_retry_timing.tcl,) \
+	$(if $(filter mlk_cu07_ku15p mlk_cu08_ku15p rk_xcku5p_f,$(FPGA_BOARD)),$(LITEX_DIR)/scripts/vivado_setup_margin.tcl,) \
+	$(if $(filter rk_xcku5p_f,$(FPGA_BOARD)),$(LITEX_DIR)/rk_xcku5p_f_platform.py $(RAPTOR_HOME)/fpga/rk-xcku5p-f/constraints/ddr4.xdc,) \
 	$(if $(filter mlk_cu08_ku15p,$(FPGA_BOARD)),$(LITEX_DIR)/mlk_cu08_ku15p_platform.py,) \
 	$(if $(filter mlk_cu08_ku15p,$(FPGA_BOARD)),$(LITEX_DIR)/scripts/ku15p_ddr4_mig.tcl,) \
 	$(if $(WITH_MIG_FLAG),$(LITEX_DIR)/$(BOARD_$(FPGA_BOARD)_MIG_TCL),)

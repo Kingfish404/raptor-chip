@@ -34,7 +34,7 @@ def main():
                 top = "rapt_vpu_int_fp"
             sources = [VPU / f"{top}.sv"]
             if leaf in ("int_fp16", "int_fp32", "int_fp64"):
-                sources = [ROOT / "hdl/backend/feu/fpu/rapt_fpu_int_to_fp.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv"] + sources
+                sources = [ROOT / "hdl/backend/feu/fpu/rapt_fpu_int_to_fp.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_integer_to_fp.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_fp_to_int.sv"] + sources
             if leaf in ("fp_reduce_engine", "fp_reduce_engine_baseline"):
                 sources = [VPU / f"rapt_vpu_{name}.sv" for name in ("vtype", "fp_widen", "fp_reduce_decode", "fp_reduce_control")] + sources
             if leaf == "fp_reduce":
@@ -58,7 +58,7 @@ def main():
             if leaf == "csr":
                 sources.insert(0, VPU / "rapt_vpu_vtype.sv")
             if leaf.startswith("top"):
-                sources = [ROOT / "hdl/sram/rapt_sram_1rw.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_fma.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_divsqrt.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_convert_narrow.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_int_to_fp.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv"] + sorted(VPU.glob("*.sv"))
+                sources = [ROOT / "hdl/sram/rapt_sram_1rw.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_fma.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_divsqrt.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_convert_narrow.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_int_to_fp.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_integer_to_fp.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv", ROOT / "hdl/backend/feu/fpu/rapt_fpu_fp_to_int.sv"] + sorted(VPU.glob("*.sv"))
                 params = dict(XLEN=xlen, VLEN=vlen, ELEN=elen, BankBits=max(64, bank_bits), Banks=banks,
                               OptimizeOperandReads=int(leaf in ("top", "top_core")))
             elif leaf in ("fp_reduce_engine", "fp_reduce_engine_baseline"):

@@ -506,53 +506,52 @@ module rapt_fpu_divsqrt #(
   assign result_valid = done_q;
 
   always_ff @(posedge clock) begin
+    // Payload is observed only with its valid/state owner. Clear control last.
+    done_q <= 1'b0;
+    unique case (state_q)
+      ST_IDLE: begin
+        // Preload a vacant unit independently of issue/flush qualification.
+        // Only state/done publish an accepted operation.
+        sign_q <= divide ? (sign_a ^ sign_b) : sign_a;
+        rm_q <= rounding_mode;
+        is_double_q <= src_is_double;
+        do_divide_q <= divide;
+        exp_q <= exp_launch;
+        cnt_q <= cnt_launch;
+        d_q <= d_launch;
+        rem_q <= rem_launch;
+        quo_q <= (divide && !sqrt) ? 56'd1 : 56'd0;
+        sroot_q <= '0;
+        result_q <= special_result;
+        flags_q <= special_flags;
+        if (valid && (divide || sqrt)) begin
+          if (special) done_q <= 1'b1;
+          else state_q <= ST_RUN;
+        end
+      end
+      ST_RUN: begin
+        if (do_divide_q) begin
+          rem_q <= div_rem_n;
+          quo_q <= div_quo_n;
+        end else begin
+          rem_q   <= sqrt_rem_n;
+          d_q     <= sqrt_rad_n;
+          sroot_q <= sqrt_root_n;
+        end
+        if (cnt_q == CntW'(1)) begin
+          state_q  <= ST_IDLE;
+          result_q <= final_result;
+          flags_q  <= final_flags;
+          done_q   <= 1'b1;
+        end else begin
+          cnt_q <= cnt_q - CntW'(1);
+        end
+      end
+      default: state_q <= ST_IDLE;
+    endcase
     if (reset || flush) begin
       state_q <= ST_IDLE;
       done_q  <= 1'b0;
-    end else begin
-      done_q <= 1'b0;
-      unique case (state_q)
-        ST_IDLE: begin
-          if (valid && (divide || sqrt)) begin
-            sign_q      <= divide ? (sign_a ^ sign_b) : sign_a;
-            rm_q        <= rounding_mode;
-            is_double_q <= src_is_double;
-            do_divide_q <= divide;
-            if (special) begin
-              result_q <= special_result;
-              flags_q  <= special_flags;
-              done_q   <= 1'b1;
-            end else begin
-              exp_q <= exp_launch;
-              cnt_q <= cnt_launch;
-              d_q   <= d_launch;
-              rem_q <= rem_launch;
-              quo_q <= (divide && !sqrt) ? 56'd1 : 56'd0;  // divide integer bit
-              sroot_q <= '0;
-              state_q <= ST_RUN;
-            end
-          end
-        end
-        ST_RUN: begin
-          if (do_divide_q) begin
-            rem_q <= div_rem_n;
-            quo_q <= div_quo_n;
-          end else begin
-            rem_q   <= sqrt_rem_n;
-            d_q     <= sqrt_rad_n;
-            sroot_q <= sqrt_root_n;
-          end
-          if (cnt_q == CntW'(1)) begin
-            state_q  <= ST_IDLE;
-            result_q <= final_result;
-            flags_q  <= final_flags;
-            done_q   <= 1'b1;
-          end else begin
-            cnt_q <= cnt_q - CntW'(1);
-          end
-        end
-        default: state_q <= ST_IDLE;
-      endcase
     end
   end
 

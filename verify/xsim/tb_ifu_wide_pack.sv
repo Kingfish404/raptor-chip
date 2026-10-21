@@ -61,7 +61,7 @@ module tb_ifu_wide_pack;
     ifu_idu.ready = '{default: 0};
     repeat (3) tick();
     reset = 0;
-    tick();
+    for (int wait_cycles = 0; wait_cycles < 16 && dut.held_count == 0; wait_cycles++) tick();
     assert (dut.held_count == 4 && dut.pc_ifu == Base + 16)
     else
       $fatal(

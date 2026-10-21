@@ -16,24 +16,34 @@
 REPO_PATH = repo
 REPO_MARKER = $(REPO_PATH)/softfloat/softfloat.h
 
-$(REPO_MARKER):
+$(REPO_PATH)/.git:
 	git clone --depth=1 https://github.com/riscv-software-src/riscv-isa-sim $(REPO_PATH)
+
+# Recent Spike headers link into the berkeley-softfloat-3 submodule. Run this
+# even for an existing checkout: softfloat.h alone does not prove that its
+# includes exist (for example after an interrupted bootstrap).
+.PHONY: prepare-repo
+prepare-repo: $(REPO_PATH)/.git
+	git -C $(REPO_PATH) submodule update --init --recursive
 	bash ./patch.sh
+
+$(REPO_MARKER): | prepare-repo
 
 REPO_BUILD_PATH = $(REPO_PATH)/build
 REPO_MAKEFILE = $(REPO_BUILD_PATH)/Makefile
 NPROC := $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+SUBMAKE_JOBS = $(if $(filter --jobserver-auth=% --jobserver-fds=%,$(MAKEFLAGS)),,-j$(NPROC))
 $(REPO_MAKEFILE): $(REPO_MARKER)
 	@mkdir -p $(@D)
 	cd $(@D) && $(abspath $(REPO_PATH))/configure
 	sed -i.bak -e 's/-g -O2/-O2/' $@ && rm -f $@.bak
 
 $(REPO_BUILD_PATH)/libsoftfloat.a: $(REPO_MAKEFILE)
-	$(MAKE) -C $(REPO_BUILD_PATH) -j$(NPROC) libsoftfloat.a
+	$(MAKE) -C $(REPO_BUILD_PATH) $(SUBMAKE_JOBS) libsoftfloat.a
 
 SPIKE = $(REPO_BUILD_PATH)/spike
 $(SPIKE): $(REPO_MAKEFILE)
-	$(MAKE) -C $(^D) -j$(NPROC) \
+	$(MAKE) -C $(^D) $(SUBMAKE_JOBS) \
 		CFLAGS="-fvisibility=hidden" CXXFLAGS="-fvisibility=hidden"
 
 BUILD_DIR = ./build

@@ -47,6 +47,7 @@ module tb_rename_random;
   logic [31:0] random_state = 32'h176adc05;
   int cycle = 0, sent = 0, renamed = 0, drained = 0, commits = 0, flushes = 0;
   int exhaustion = 0, waw = 0, zero_writes = 0, commit_flush = 0;
+  int multi_commit_flush = 0, waw_commit_flush = 0;
   int allocated, count;
   always @(posedge clock)
     if (!reset) begin
@@ -75,6 +76,12 @@ module tb_rename_random;
       if (cmu_bcast.flush_pipe) begin
         flushes++;
         if (count > 0) commit_flush++;
+        if (count > 1) multi_commit_flush++;
+        for (int c = 1; c < CommitWidth; c++)
+        for (int older = 0; older < c; older++)
+        if (commit_bus.slot[c].valid && commit_bus.slot[older].valid
+            && commit_bus.slot[c].rd != 0 && commit_bus.slot[c].rd == commit_bus.slot[older].rd)
+          waw_commit_flush++;
         accepted.delete();
         output_model.delete();
         pending_commit.delete();
@@ -201,12 +208,15 @@ module tb_rename_random;
     #1;
     assert ($countones(dut.free_q) == 6)
     else $fatal(1, "flush leaked registers");
-    assert (renamed>1000 && drained>1000 && commits>1000 && waw>0 && exhaustion>0 && zero_writes>0 && commit_flush>0)
+    assert (renamed>1000 && drained>1000 && commits>1000 && waw>0 && exhaustion>0
+            && zero_writes>0 && commit_flush>0 && multi_commit_flush>0 && waw_commit_flush>0)
     else $fatal(1, "missing random coverage");
-    $display(
-        "PASS: XLEN=%0d D/R/C=%0d/%0d/%0d randomized rename %0d uops, %0d commits, %0d WAW, %0d exhaustion cycles, %0d commit+flush",
-        $bits(xlen_t), DecodeWidth, RenameWidth, CommitWidth, renamed, commits, waw, exhaustion,
-        commit_flush);
+    $write("PASS: XLEN=%0d D/R/C=%0d/%0d/%0d randomized rename ", $bits(xlen_t), DecodeWidth,
+           RenameWidth, CommitWidth);
+    $write("%0d uops, %0d commits, %0d WAW, %0d exhaustion cycles, ", renamed, commits, waw,
+           exhaustion);
+    $display("%0d commit+flush, %0d multi-commit+flush, %0d WAW+flush", commit_flush,
+             multi_commit_flush, waw_commit_flush);
     $finish;
   end
   initial begin

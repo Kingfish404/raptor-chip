@@ -40,7 +40,7 @@ else
 	TIMEOUT_FOREGROUND := --foreground
 endif
 
-BOARDS := tang_mega_138k_pro mlk_cu08_ku15p mlk_cu07_ku15p alinx_axau15 xilinx_vcu118
+BOARDS := tang_mega_138k_pro mlk_cu08_ku15p mlk_cu07_ku15p rk_xcku5p_f alinx_axau15 xilinx_vcu118
 BOARD_ALIASES := $(subst _,-,$(BOARDS))
 
 # Gowin IDE bundle (macOS). Empty on Linux / when GowinIDE is not installed; it
@@ -398,7 +398,7 @@ endif
 LINUX_FPGA_BOOTARGS_BASE ?= console=liteuart0,115200 earlycon=sbi unaligned_scalar_speed=fast cryptomgr.notests=1 random.trust_bootloader=on
 LINUX_FPGA_BOOTARGS ?= $(LINUX_FPGA_BOOTARGS_BASE) $(if $(filter full,$(LINUX_FPGA_INIT)),rdinit=/init,$(if $(filter prepared-shell,$(LINUX_FPGA_INIT)),rdinit=/sbin/raptor-shell,rdinit=/bin/sh)) ## Linux FPGA kernel command line
 LINUX_FPGA_MODEL ?= Raptor LiteX SoC on $(FPGA_BOARD) ## Linux model string reported from the generated DTB
-WITH_ETHERNET ?= 0
+WITH_ETHERNET ?= $(or $(BOARD_$(FPGA_BOARD)_DEFAULT_WITH_ETHERNET),0)
 FMC_SLOT ?= $(if $(filter mlk_cu08_ku15p,$(FPGA_BOARD)),c,a)
 ETH_PORT ?= a
 ETH_SPEED ?= 1000
@@ -777,6 +777,7 @@ VIVADO_JOBS  ?= $(shell n='$(NPROC)'; if [ "$$n" -gt 32 ]; then echo 32; else ec
 VIVADO_INCREMENTAL ?= 0 ## Set to 1 to reuse a compatible routed checkpoint
 VIVADO_ROUTE_DIRECTIVE ?= default ## Vivado route_design directive (for example AlternateCLBRouting)
 VIVADO_SYNTH_DIRECTIVE ?= default ## Vivado synth_design directive (for example RuntimeOptimized)
+VIVADO_OPT_DIRECTIVE ?= default ## Vivado opt_design directive (for example RuntimeOptimized)
 VIVADO_NO_TIMING_DRIVEN ?= 0 ## Disable synthesis timing optimization; retain implementation/STA constraints
 VIVADO_SYS_SETUP_MARGIN_NS ?= 0 ## Extra system setup margin during implementation; final reports use original constraints
 VIVADO_SYS_FINAL_WNS_NS ?= ## Minimum final system WNS; empty retains the implementation-margin gate
@@ -849,7 +850,7 @@ clean-all: clean firmware-clean ## Remove build artifacts + firmware + venv
 
 lint: ## Lint RTL (via sim)
 
-_INFO_VARS := RAPTOR_HOME LITEX_DIR VARIANT LINUX_XLEN LINUX_IMG LINUX_FPGA_BOOTARGS SYS_CLK RAPT_CONFIG GOWIN_APP GOWIN_BIN_DIR OFL OFL_CABLE FPGA_AUTO_DETECT FPGA_DETECT_REFRESH FPGA_DETECT_CACHE FPGA_DETECT_INFO_CACHE FPGA_DETECT_COUNT_CACHE FPGA_DETECTED_COUNT FPGA_DETECTED_PARTS FPGA_DETECTED_INFO FPGA_BOARD_SOURCE FPGA_DEVICE FPGA_PART WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE WITH_SDCARD VIVADO_ROUTE_DIRECTIVE VIVADO_SYNTH_DIRECTIVE VIVADO_NO_TIMING_DRIVEN UART_PORT UART_BAUD SIM_TIMEOUT PACK_SV BUILD_DIR PYTHON
+_INFO_VARS := RAPTOR_HOME LITEX_DIR VARIANT LINUX_XLEN LINUX_IMG LINUX_FPGA_BOOTARGS SYS_CLK RAPT_CONFIG GOWIN_APP GOWIN_BIN_DIR OFL OFL_CABLE FPGA_AUTO_DETECT FPGA_DETECT_REFRESH FPGA_DETECT_CACHE FPGA_DETECT_INFO_CACHE FPGA_DETECT_COUNT_CACHE FPGA_DETECTED_COUNT FPGA_DETECTED_PARTS FPGA_DETECTED_INFO FPGA_BOARD_SOURCE FPGA_DEVICE FPGA_PART WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE WITH_SDCARD VIVADO_ROUTE_DIRECTIVE VIVADO_SYNTH_DIRECTIVE VIVADO_OPT_DIRECTIVE VIVADO_NO_TIMING_DRIVEN UART_PORT UART_BAUD SIM_TIMEOUT PACK_SV BUILD_DIR PYTHON
 
 info: ## Show configuration info
 

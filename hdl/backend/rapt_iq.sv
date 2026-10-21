@@ -75,35 +75,41 @@ module rapt_iq #(
   localparam unsigned IQLen = (IQ_SIZE > 1) ? $clog2(IQ_SIZE) : 1;
   localparam unsigned ROBLen = $clog2(ROB_SIZE);
   localparam unsigned GenBits = $bits(dispatch[0].generation);
-  localparam bit BankUop = `RAPT_FPGA_LUTRAM && IQ_SIZE >= 16 && NumIssuePorts > 1;
+  // The uop, generation and physical destination are immutable after allocation.
+  // FPGA LUTRAM uses one write bank per dispatch lane and one copy per issue port.
+  localparam bit BankUop = `RAPT_FPGA_LUTRAM;
+  localparam int BankBits = $bits(UopT) + GenBits + PLEN;
   localparam int LaneBits = NumSlots > 1 ? $clog2(NumSlots) : 1;
   logic alloc_hit[IQ_SIZE];
   logic [LaneBits-1:0] alloc_lane[IQ_SIZE];
 
+  // Non-LUTRAM builds retain one FF copy of these fields per entry.
   UopT iq_uop[IQ_SIZE];
+  logic [GenBits-1:0] iq_generation[IQ_SIZE];
+  logic [PLEN-1:0] iq_prd[IQ_SIZE];
+  // These signals are consumed only by the LUTRAM generate branch.
+  /* verilator lint_off UNUSEDSIGNAL */
   logic [NumIssuePorts-1:0] iq_issue_ports[IQ_SIZE];
   logic [IQLen-1:0] issue_data_index[NumIssuePorts];
-  UopT banked_issue_uop[NumIssuePorts];
+  logic [BankBits-1:0] issue_payload[NumIssuePorts];
+  /* verilator lint_on UNUSEDSIGNAL */
   if (BankUop) begin : g_banked_uop
-    localparam int UopBits = $bits(UopT);
     logic [LaneBits-1:0] lane_q[IQ_SIZE];
-    logic [UopBits-1:0] bank_read[NumIssuePorts][NumSlots];
+    logic [BankBits-1:0] bank_read[NumIssuePorts][NumSlots];
     for (genvar e = 0; e < IQ_SIZE; e++) begin : g_lane
-      always_ff @(posedge clock)
-        if (!(reset || cmu_bcast.flush_pipe) && alloc_hit[e])
-          lane_q[e] <= alloc_lane[e];
+      always_ff @(posedge clock) if (alloc_hit[e]) lane_q[e] <= alloc_lane[e];
     end
     for (genvar a = 0; a < NumSlots; a++) begin : g_write_lane
       for (genvar p = 0; p < NumIssuePorts; p++) begin : g_read_copy
-        (* ram_style = "distributed" *) logic [UopBits-1:0] words[IQ_SIZE];
+        (* ram_style = "distributed" *) logic [BankBits-1:0] words[IQ_SIZE];
         always_ff @(posedge clock)
-          if (!(reset || cmu_bcast.flush_pipe) && disp.accept[a])
-            words[disp.rs_idx[a]] <= UopBits'(dispatch[a].uop);
+          if (disp.accept[a])
+            words[disp.rs_idx[a]] <= {dispatch[a].uop, dispatch[a].generation, dispatch[a].prd};
         assign bank_read[p][a] = words[issue_data_index[p]];
       end
     end
     for (genvar p = 0; p < NumIssuePorts; p++) begin : g_select
-      assign banked_issue_uop[p] = UopT'(bank_read[p][lane_q[issue_data_index[p]]]);
+      assign issue_payload[p] = bank_read[p][lane_q[issue_data_index[p]]];
     end
   end
 `ifndef SYNTHESIS
@@ -112,13 +118,7 @@ module rapt_iq #(
   // is a read-only projection, not separately stored execution payload.
   logic [XLEN-1:0] iq_pc[IQ_SIZE];
   for (genvar i = 0; i < IQ_SIZE; i++) begin : g_iq_pc_probe
-    if (BankUop) begin : g_banked_probe
-      always_ff @(posedge clock)
-        if (!(reset || cmu_bcast.flush_pipe) && alloc_hit[i])
-          iq_pc[i] <= dispatch[alloc_lane[i]].uop.pc;
-    end else begin : g_flop_probe
-      assign iq_pc[i] = XLEN'(iq_uop[i].pc);
-    end
+    always_ff @(posedge clock) if (alloc_hit[i]) iq_pc[i] <= XLEN'(dispatch[alloc_lane[i]].uop.pc);
   end
 `endif
 `endif
@@ -134,7 +134,7 @@ module rapt_iq #(
     $error("IQ allocation width must match the selected frontend profile");
   end
   if (!(NumIssuePorts > 0 && NumIssuePorts <= $bits(
-          iq_uop[0].schedule.issue_ports
+          dispatch[0].uop.schedule.issue_ports
       ))) begin : g_invalid_config_1
     $error("IQ execution-port mask is too narrow");
   end
@@ -174,7 +174,6 @@ module rapt_iq #(
   logic [   XLEN-1:0]              iq_vj                  [        IQ_SIZE];
   logic [   XLEN-1:0]              iq_vk                  [        IQ_SIZE];
   logic [ ROBLen-1:0]              iq_dest                [        IQ_SIZE];
-  logic [GenBits-1:0]              iq_generation          [        IQ_SIZE];
   logic [IQ_SIZE-1:0] cancelled;
   function automatic logic younger_than_cancel(input logic [ROBLen-1:0] dest);
     return cancel_valid && `RAPT_ROB_YOUNGER(dest, cancel_owner, cancel_head);
@@ -188,7 +187,6 @@ module rapt_iq #(
   logic [IQ_SIZE-1:0]              iq_pr2_busy;
   logic [IQ_SIZE-1:0] pr3_ready, resources_ready;
   logic [XLEN-1:0]                 iq_vl[IQ_SIZE];
-  logic [   PLEN-1:0]              iq_prd                 [        IQ_SIZE];
   logic [IQ_SIZE-1:0]              iq_dep_busy            [NumDependencies];
   logic [ ROBLen-1:0]              iq_dep_tag             [NumDependencies] [IQ_SIZE];
   logic [GenBits-1:0]              iq_dep_generation      [NumDependencies] [IQ_SIZE];
@@ -365,7 +363,7 @@ module rapt_iq #(
         end else if (iq_valid[e] && wb_hit(tag)) busy <= 1'b0;
       end
       always_ff @(posedge clock) begin
-        if (!(reset || cmu_bcast.flush_pipe)) begin
+        begin
           if (alloc_hit[e]) iq_vl[e] <= g_lane_third.lane_vl[alloc_lane[e]];
           else if (iq_valid[e] && busy && wb_hit(tag)) iq_vl[e] <= wb_val(tag, iq_vl[e]);
         end
@@ -377,7 +375,7 @@ module rapt_iq #(
     if (FilterResources) begin : g_resources
       logic [NumResources-1:0] mask_q;
       always_ff @(posedge clock)
-        if (!(reset || cmu_bcast.flush_pipe) && alloc_hit[e])
+        if (alloc_hit[e])
           mask_q <= NumResources'(dispatch[alloc_lane[e]].resources);
       assign resources_ready[e] = |(mask_q & resource_ready);
     end else begin : g_unfiltered
@@ -450,8 +448,11 @@ module rapt_iq #(
   logic [IQ_SIZE-1:0] claimed_data, baseline_claimed_data;
   logic [NumIssuePorts-1:0] port_mask[IQ_SIZE];
   for (genvar e = 0; e < IQ_SIZE; e++) begin : g_port_mask
-    assign port_mask[e] = BankUop ? iq_issue_ports[e]
-        : NumIssuePorts'(iq_uop[e].schedule.issue_ports);
+    if (BankUop) begin : g_banked
+      assign port_mask[e] = iq_issue_ports[e];
+    end else begin : g_flops
+      assign port_mask[e] = NumIssuePorts'(iq_uop[e].schedule.issue_ports);
+    end
   end
   // The selector sees architectural validity only: the recovery transaction
   // must not fan into the wide payload mux through the selected identity.
@@ -532,9 +533,7 @@ module rapt_iq #(
         baseline_claimed & ~cancelled));
     pmu_reclaim_allocations <= reset || cmu_bcast.flush_pipe ? 0 : reclaim_allocations;
   end
-  localparam int StoredPayloadBits = (BankUop ? 0 : $bits(
-      UopT
-  )) + 2 * XLEN + ROBLen + GenBits + PLEN;
+  localparam int StoredPayloadBits = (BankUop ? 0 : BankBits) + 2 * XLEN + ROBLen;
   logic [StoredPayloadBits-1:0] stored_payload[IQ_SIZE];
   logic [XLEN-1:0] entry_op1[IQ_SIZE], entry_op2[IQ_SIZE];
   for (genvar e = 0; e < IQ_SIZE; e++) begin : g_entry_operand
@@ -543,7 +542,7 @@ module rapt_iq #(
   end
   for (genvar e = 0; e < IQ_SIZE; e++) begin : g_stored_payload
     if (BankUop) begin : g_banked
-      assign stored_payload[e] = {iq_vj[e], iq_vk[e], iq_dest[e], iq_generation[e], iq_prd[e]};
+      assign stored_payload[e] = {iq_vj[e], iq_vk[e], iq_dest[e]};
     end else begin : g_flops
       assign stored_payload[e] = {
         iq_uop[e], iq_vj[e], iq_vk[e], iq_dest[e], iq_generation[e], iq_prd[e]
@@ -587,9 +586,8 @@ module rapt_iq #(
     // Share the encoded selector across the wide payload bus.
     assign payload = stored_payload[index];
     if (BankUop) begin : g_banked_payload
-      assign {stored_op1, stored_op2, issue[p].dest,
-          issue[p].generation, issue[p].prd} = payload;
-      assign issue[p].uop = banked_issue_uop[p];
+      assign {stored_op1, stored_op2, issue[p].dest} = payload;
+      assign {issue[p].uop, issue[p].generation, issue[p].prd} = issue_payload[p];
     end else begin : g_flop_payload
       assign {issue[p].uop, stored_op1, stored_op2, issue[p].dest,
           issue[p].generation, issue[p].prd} = payload;
@@ -636,7 +634,7 @@ module rapt_iq #(
   // the LSU arbitration path on every iq_vj/iq_vk clock-enable pin.
   for (genvar i = 0; i < IQ_SIZE; i++) begin : g_operand_state
     always_ff @(posedge clock) begin
-      if (!(reset || cmu_bcast.flush_pipe)) begin
+      begin
         if (alloc_hit[i]) begin
           iq_vj[i] <= dispatch[alloc_lane[i]].op1;
           iq_vk[i] <= dispatch[alloc_lane[i]].op2;
@@ -657,23 +655,24 @@ module rapt_iq #(
   // only while the owner's valid bit is set.
   for (genvar i = 0; i < IQ_SIZE; i++) begin : g_entry_state
     always_ff @(posedge clock) begin
-      if (reset || cmu_bcast.flush_pipe) iq_valid[i] <= 1'b0;
-      else begin
+      begin
         if (alloc_hit[i]) begin
           // Allocation owns the new identity, even when the former resident
           // is cancelled. A younger incoming is accepted-and-discarded.
           iq_valid[i] <= !lane_cancelled[alloc_lane[i]];
           if (BankUop)
             iq_issue_ports[i] <= NumIssuePorts'(dispatch[alloc_lane[i]].uop.schedule.issue_ports);
-          else iq_uop[i] <= dispatch[alloc_lane[i]].uop;
+          else begin
+            iq_uop[i] <= dispatch[alloc_lane[i]].uop;
+            iq_generation[i] <= dispatch[alloc_lane[i]].generation;
+            iq_prd[i] <= dispatch[alloc_lane[i]].prd;
+          end
 
           iq_dest[i] <= dispatch[alloc_lane[i]].dest;
-          iq_generation[i] <= dispatch[alloc_lane[i]].generation;
           iq_pr1[i] <= dispatch[alloc_lane[i]].pr1;
           iq_pr2[i] <= dispatch[alloc_lane[i]].pr2;
           iq_pr1_busy[i] <= |dispatch[alloc_lane[i]].pr1;
           iq_pr2_busy[i] <= |dispatch[alloc_lane[i]].pr2;
-          iq_prd[i] <= dispatch[alloc_lane[i]].prd;
 
           for (int d = 0; d < NumDependencies; d++) begin
             iq_dep_busy[d][i] <= lane_dep_busy[d][alloc_lane[i]];
@@ -702,10 +701,11 @@ module rapt_iq #(
         end
 
       end
+      if (reset || cmu_bcast.flush_pipe) iq_valid[i] <= 1'b0;
     end
     // An age row is independent of other rows at the clock edge.
     always_ff @(posedge clock) begin
-      if (!(reset || cmu_bcast.flush_pipe)) begin
+      begin
         // New entries are younger than residents and ordered by dispatch slot.
         for (int j = 0; j < IQ_SIZE; j++) begin
           if (alloc_hit[i] && alloc_hit[j]) age_mat[i][j] <= alloc_lane[i] < alloc_lane[j];

@@ -8,7 +8,8 @@ module rapt_l2_refill_mshrs #(
     parameter int NumMshrs = 7,
     parameter int MshrBits = (NumMshrs <= 1) ? 1 : $clog2(NumMshrs),
     parameter int LineWords = LineBytes / (XLEN / 8),
-    parameter int WordBits = (LineWords <= 1) ? 1 : $clog2(LineWords)
+    parameter int WordBits = (LineWords <= 1) ? 1 : $clog2(LineWords),
+    parameter int WrapBits = $clog2(16 * (XLEN / 8))
 ) (
     input logic clock,
     input logic reset,
@@ -27,6 +28,7 @@ module rapt_l2_refill_mshrs #(
     input logic [ID_W-1:0] alloc_inner_id,
     input logic [7:0] alloc_inner_len,
     input logic [2:0] alloc_inner_size,
+    input logic [WrapBits-1:0] alloc_inner_wrap_mask,
     input logic [1:0] alloc_inner_burst,
     input logic [3:0] alloc_cache,
     output logic outer_arvalid,
@@ -59,6 +61,7 @@ module rapt_l2_refill_mshrs #(
     output logic [ID_W-1:0] retire_inner_id,
     output logic [7:0] retire_inner_len,
     output logic [2:0] retire_inner_size,
+    output logic [WrapBits-1:0] retire_inner_wrap_mask,
     output logic [1:0] retire_inner_burst,
     output logic [3:0] retire_cache
 );
@@ -77,6 +80,7 @@ module rapt_l2_refill_mshrs #(
   logic [ID_W-1:0] inner_id[NumMshrs];
   logic [7:0] inner_len[NumMshrs];
   logic [2:0] inner_size[NumMshrs];
+  logic [WrapBits-1:0] inner_wrap_mask[NumMshrs];
   logic [1:0] inner_burst[NumMshrs];
   logic [3:0] cache[NumMshrs];
   logic [MshrBits-1:0] last_issue, issue_slot;
@@ -114,6 +118,7 @@ module rapt_l2_refill_mshrs #(
   assign retire_inner_id = inner_id[int'(retire_slot)];
   assign retire_inner_len = inner_len[int'(retire_slot)];
   assign retire_inner_size = inner_size[int'(retire_slot)];
+  assign retire_inner_wrap_mask = inner_wrap_mask[int'(retire_slot)];
   assign retire_inner_burst = inner_burst[int'(retire_slot)];
   assign retire_cache = cache[int'(retire_slot)];
   for (genvar slot = 0; slot < NumMshrs; slot++) begin : g_critical_ready
@@ -163,6 +168,7 @@ module rapt_l2_refill_mshrs #(
         inner_id[int'(alloc_slot)] <= alloc_inner_id;
         inner_len[int'(alloc_slot)] <= alloc_inner_len;
         inner_size[int'(alloc_slot)] <= alloc_inner_size;
+        inner_wrap_mask[int'(alloc_slot)] <= alloc_inner_wrap_mask;
         inner_burst[int'(alloc_slot)] <= alloc_inner_burst;
         cache[int'(alloc_slot)] <= alloc_cache;
       end

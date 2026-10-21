@@ -53,10 +53,8 @@ module rapt_rob_dispatch_window #(
   localparam int unsigned CarryBase = Resident;
   localparam int unsigned IncomingBase = Resident + Width;
   localparam int unsigned SourceSlotBits = rapt_pkg::index_bits(Width);
-  localparam int unsigned Leaves = 2 ** $clog2(Entries);
   // One extra rank detects owners beyond the window.
   localparam int unsigned NumRank = Resident + 1;
-  localparam int unsigned CountBits = $clog2(NumRank + 1);
 
   if (!(Entries > 0 && Width > 0 && ScanEntries > 2 * Width)) begin : g_invalid_config_0
     $error("Invalid rapt_rob_dispatch_window configuration");
@@ -129,50 +127,28 @@ module rapt_rob_dispatch_window #(
   assign remaining_shifted = remaining_doubled >> head;
   assign age_pending = remaining_shifted[Entries-1:0];
 
-  // Bounded-count up/down trees as in rapt_rank_select. Each selected rank
-  // is a one-hot over ages. Encode the selected owner before reading its
-  // narrow payload, avoiding a full payload rotation for every ROB entry.
-  logic [CountBits-1:0] count[2*Leaves], before_count[2*Leaves];
-  function automatic logic [CountBits-1:0] capped_add(input logic [CountBits-1:0] left,
-                                                      input logic [CountBits-1:0] right);
-    logic [CountBits:0] sum;
-    sum = {1'b0, left} + {1'b0, right};
-    return sum > (CountBits + 1)'(NumRank) ? CountBits'(NumRank) : CountBits'(sum);
-  endfunction
-  assign count[0] = '0;
-  assign before_count[0] = '0;
-  assign before_count[1] = '0;
-  for (genvar e = 0; e < Leaves; e++) begin : g_leaf
-    if (e < Entries) begin : g_available
-      assign count[Leaves+e] = CountBits'(age_pending[e]);
-    end else begin : g_pad
-      assign count[Leaves+e] = '0;
-    end
-  end
-  for (genvar n = 1; n < Leaves; n++) begin : g_tree
-    assign count[n] = capped_add(count[2*n], count[2*n+1]);
-    assign before_count[2*n] = before_count[n];
-    assign before_count[2*n+1] = capped_add(before_count[n], count[2*n]);
-  end
+  // The extra rank indicates that at least one owner lies beyond the window.
+  logic ranked_found[NumRank];
+  logic [IndexBits-1:0] ranked_age[NumRank];
+  rapt_rank_select #(
+      .Entries(Entries),
+      .NumSelect(NumRank),
+      .IndexBits(IndexBits)
+  ) u_age_rank_select (
+      .available(age_pending),
+      .found(ranked_found),
+      .index(ranked_age)
+  );
 
-  logic next_found[Resident];
   logic [IndexBits-1:0] next_index[Resident];
   logic [PayloadBits-1:0] next_payload[Resident];
   for (genvar r = 0; r < Resident; r++) begin : g_rank
-    assign next_found[r] = count[1] > CountBits'(r);
-    assign prefetch_valid[r] = next_found[r];
+    assign prefetch_valid[r] = ranked_found[r];
     assign prefetch_payload[r] = next_payload[r];
-    assign next_payload[r] = next_found[r] ? entry_payload[next_index[r]] : '0;
+    assign next_payload[r] = ranked_found[r] ? entry_payload[next_index[r]] : '0;
     always_comb begin
-      automatic logic [IndexBits-1:0] age_index;
       automatic logic [IndexBits:0] physical_sum;
-      age_index = '0;
-      for (int e = 0; e < Entries; e++) begin
-        automatic logic hit;
-        hit = age_pending[e] && before_count[Leaves+e] == CountBits'(r);
-        age_index |= IndexBits'(e) & {IndexBits{hit}};
-      end
-      physical_sum = {1'b0, head} + {1'b0, age_index};
+      physical_sum = {1'b0, head} + {1'b0, ranked_age[r]};
       next_index[r] = physical_sum >= (IndexBits + 1)'(Entries)
           ? IndexBits'(physical_sum - (IndexBits + 1)'(Entries)) : IndexBits'(physical_sum);
     end
@@ -185,9 +161,9 @@ module rapt_rob_dispatch_window #(
       for (int w = 0; w < Width; w++) carry_valid_q[w] <= 1'b0;
     end else begin
       // Owners beyond the window are older than every allocation lane.
-      complete_q <= !(count[1] > CountBits'(Resident));
+      complete_q <= !ranked_found[Resident];
       for (int r = 0; r < Resident; r++) begin
-        window_valid_q[r] <= next_found[r];
+        window_valid_q[r] <= ranked_found[r];
         window_index_q[r] <= next_index[r];
         window_payload_q[r] <= next_payload[r];
       end

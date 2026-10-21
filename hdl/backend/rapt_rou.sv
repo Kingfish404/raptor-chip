@@ -123,6 +123,11 @@ module rapt_rou #(
   logic dispatch_from_allocation[ScanEntries];
   logic [SlotBits-1:0] dispatch_source_slot[ScanEntries];
   rapt_pkg::rob_entry_t rob_entry[ROB_SIZE];
+  rapt_pkg::rob_state_t rob_state_next[ROB_SIZE];
+  logic rob_drains_sq_next[ROB_SIZE];
+  logic [RBits-1:0] rob_head_next;
+  logic head_wb_q[CommitWidth];
+  logic head_drain_q;
   // Project narrow, dynamically indexed state out of the packed ROB record
   // before selecting it.  Some FPGA synthesis flows otherwise build a mux
   // for the entire rob_entry_t and discard every bit except `trap` afterward.
@@ -207,6 +212,8 @@ module rapt_rou #(
   logic recieved_sw_trap /* verilator public */;
   logic [XLEN-1:0] trap_cause /* verilator public */;
   logic [XLEN-1:0] trap_pc, commit_npc_q, flush_target_r;
+  logic [XLEN-1:0] youngest_npc, xret_npc_q;
+  logic [XLEN-1:0] commit_npc[CommitWidth];
   // CSR/system operations enter only an empty ROB and block younger allocation.
   // Thus at most one CSR write payload can be live; keep it once, not per ROB
   // entry. The per-entry csr_wen bit still owns commit and trap cancellation.
@@ -312,7 +319,8 @@ module rapt_rou #(
       .ReleaseWidth(NumSlots),
       .ReadPorts(ValueReadPorts),
       .CompletionPorts(NWB),
-      .SpillBits(SpillBits)
+      .SpillBits(SpillBits),
+      .ResolveAtDispatch(1'b1)
   ) operand_values (
       .clock,
       .reset,
@@ -738,18 +746,14 @@ module rapt_rou #(
     for (genvar r = 0; r < WindowResident; r++) begin : g_resident
       UopT uop_q;
       assign spill_read_index[NumSlots+r] = window_prefetch_payload[r][SpillBits-1:0];
-      always_ff @(posedge clock)
-        if (!(reset || flush_pipe) && window_prefetch_valid[r])
-          uop_q <= spill_read_uop[NumSlots+r];
+      always_ff @(posedge clock) if (window_prefetch_valid[r]) uop_q <= spill_read_uop[NumSlots+r];
       assign candidate_uop[r] = uop_q;
       `RAPT_SVA_IMPLY(clock, reset || flush_pipe, ROB_PREFETCH_HAS_SPILL, window_prefetch_valid[r],
                       spill_read_valid[NumSlots+r])
     end
     for (genvar s = 0; s < NumSlots; s++) begin : g_carry
       UopT uop_q;
-      always_ff @(posedge clock)
-        if (!(reset || flush_pipe) && deq_fire[s])
-          uop_q <= spill_allocate_uop[s];
+      always_ff @(posedge clock) if (deq_fire[s]) uop_q <= spill_allocate_uop[s];
       assign candidate_uop[WindowResident+s] = uop_q;
       assign candidate_uop[WindowResident+NumSlots+s] = '0;
     end
@@ -1062,15 +1066,14 @@ module rapt_rou #(
     end
   end
   always_ff @(posedge clock) begin
-    if (reset || flush_pipe) csr_wdata_q <= '0;
-    else begin
+    begin
       for (int p = 0; p < NumCompletions; p++)
       if (completion_valid[p] && completion[p].updates.system_state && completion[p].csr_wen)
         csr_wdata_q <= completion[p].csr_wdata;
     end
   end
   always_ff @(posedge clock) begin
-    if (!reset && !flush_pipe) begin
+    begin
       for (int s = 0; s < RenameWidth; s++) begin
         if (enq_fire[s] && rnu_rou.checkpoint_valid[s]
             && int'(rnu_rou.checkpoint[s]) < CheckpointEntries) begin
@@ -1110,21 +1113,15 @@ module rapt_rou #(
     end
   end
   always_ff @(posedge clock) begin
-    if (reset || flush_pipe) begin
-      oldest_exception_valid <= 1'b0;
-      oldest_exception_owner <= '0;
-      oldest_exception_cause <= '0;
-      oldest_exception_tval <= '0;
-    end else begin
-      oldest_exception_valid <= exception_next_valid;
-      oldest_exception_owner <= exception_next_owner;
-      oldest_exception_cause <= exception_next_cause;
-      oldest_exception_tval <= exception_next_tval;
-    end
+    // Only valid publishes the exception payload; cancellation wins last.
+    oldest_exception_valid <= exception_next_valid;
+    oldest_exception_owner <= exception_next_owner;
+    oldest_exception_cause <= exception_next_cause;
+    oldest_exception_tval <= exception_next_tval;
+    if (reset || flush_pipe) oldest_exception_valid <= 1'b0;
   end
   always_ff @(posedge clock) begin
-    if (reset || flush_pipe) cbo_block_q <= '0;
-    else begin
+    begin
       for (int p = 0; p < NumCompletions; p++)
       if (completion_valid[p] && completion[p].dest == h0 && head_cbo)
         cbo_block_q <= completion[p].sq_waddr[XLEN-1:6];
@@ -1171,9 +1168,27 @@ module rapt_rou #(
     end
   end
   // Retirement scans a contiguous prefix with explicit scalar-effect budgets.
-  assign writeback_drain = !reset && rob_entry_busy[rob_head]
-      && rob_entry[rob_head].state == rapt_pkg::ROB_WB
-      && rob_drains_sq[rob_head];
+  assign rob_head_next = RBits'((int'(rob_head) + commit_count) % ROB_SIZE);
+  // Predict the next retirement window at this edge. Completion and retirement
+  // use the same state priority as the ROB; no extra commit cycle is introduced.
+  for (genvar c = 0; c < CommitWidth; c++) begin : g_head_state
+    wire [RBits-1:0] next_index = RBits'((int'(rob_head_next) + c) % ROB_SIZE);
+    always_ff @(posedge clock) begin
+      head_wb_q[c] <= rob_state_next[next_index] == rapt_pkg::ROB_WB;
+      if (reset || flush_pipe) head_wb_q[c] <= 1'b0;
+    end
+    `RAPT_SVA(clock, reset, ROB_HEAD_WB_EQUIVALENT,
+              head_wb_q[c] == (rob_entry[commit_index[c]].state == rapt_pkg::ROB_WB))
+  end
+  always_ff @(posedge clock) begin
+    head_drain_q <= rob_state_next[rob_head_next] == rapt_pkg::ROB_WB
+        && rob_drains_sq_next[rob_head_next];
+    if (reset || flush_pipe) head_drain_q <= 1'b0;
+  end
+  assign writeback_drain = !reset && head_drain_q;
+  `RAPT_SVA(
+      clock, reset, ROB_HEAD_DRAIN_EQUIVALENT,
+      head_drain_q == (rob_entry_busy[rob_head] && rob_entry[rob_head].state == rapt_pkg::ROB_WB && rob_drains_sq[rob_head]))
   // A registered completion already includes the SQ ordering point. Admission
   // serializes its owner, so no younger store can appear before retirement.
   // Special operations retire alone; ordinary groups may contain one store and
@@ -1191,8 +1206,7 @@ module rapt_rou #(
     store_commit_valid = 1'b0;
     branch_commit_valid = 1'b0;
     for (int c = 0; c < CommitWidth; c++) begin
-      commit_fire[c] = prefix && rob_entry_busy[commit_index[c]]
-          && rob_entry[commit_index[c]].state == rapt_pkg::ROB_WB
+      commit_fire[c] = prefix && head_wb_q[c]
           && (!rob_entry[commit_index[c]].wen || (rou_lsu.sq_ready && !store_commit_valid))
           && (!rob_control_flow[commit_index[c]] || !branch_commit_valid) &&
           (!commit_special(int'(commit_index[c])) || c == 0) &&
@@ -1227,10 +1241,23 @@ module rapt_rou #(
       || (commit_fire[0] && fetch_uop_changes(
       h0
   ));
+  for (genvar c = 0; c < CommitWidth; c++) begin : g_commit_npc
+    wire [RBits-1:0] successor = RBits'((int'(commit_index[c]) + 1) % ROB_SIZE);
+    wire [RBits-1:0] owner = commit_index[c];
+    always_comb begin
+      if (recovery_pending && recovery_owner_current && owner == recovery_owner)
+        commit_npc[c] = recovery_target;
+      else if (uop_pl[owner].execute.sys.mret || uop_pl[owner].execute.sys.sret)
+        commit_npc[c] = xret_npc_q;
+      else if (successor != rob_tail && rob_entry_busy[successor])
+        commit_npc[c] = {uop_pl[successor].pc, 1'b0};
+      else commit_npc[c] = youngest_npc;
+    end
+  end
   assign rou_cmu.next_pc = debug_halt_flush ? commit_npc_q :
       recieved_trap || rob_entry[youngest_commit].trap
       || uop_pl[youngest_commit].execute.sys.ecall || uop_pl[youngest_commit].execute.sys.ebreak
-      ? csr_bcast.tvec : {rob_entry[youngest_commit].npc, 1'b0};
+      ? csr_bcast.tvec : commit_npc[commit_count != 0 ? commit_count-1 : 0];
   for (genvar entry = 0; entry < ROB_SIZE; entry++) begin : g_generation
     always_ff @(posedge clock) begin
       if (reset) rob_next_generation[entry] <= '0;
@@ -1243,17 +1270,35 @@ module rapt_rou #(
     end
   end
 
+  // Redirect payload is published only by flush_apply on the following cycle.
+  always_ff @(posedge clock) begin
+    if (flush_pipe) flush_target_r <= rou_cmu.next_pc;
+  end
   always_ff @(posedge clock) begin
     if (reset) begin
       flush_apply <= 1'b0;
       fetch_context_stable <= 1'b0;
-      flush_target_r <= '0;
       commit_npc_q <= XLEN'(`RAPT_PC_INIT);
     end else begin
       flush_apply <= flush_pipe;
       fetch_context_stable <= flush_pipe && !fetch_context_changes;
-      if (flush_pipe) flush_target_r <= rou_cmu.next_pc;
       if (head0_valid) commit_npc_q <= rou_cmu.next_pc;
+    end
+  end
+  always_ff @(posedge clock) begin
+    for (int s = 0; s < NumSlots; s++) begin
+      if (deq_fire[s]) begin
+        if (uoq_checkpoint_valid[deq_index[s]] && control_flow(allocation[s].uop))
+          youngest_npc <= {predicted_npc[uoq_checkpoint[deq_index[s]]], 1'b0};
+        else youngest_npc <= allocation[s].uop.pc + (allocation[s].uop.c ? XLEN'(2) : XLEN'(4));
+      end
+    end
+    if (recovery_pending && recovery_owner_current) youngest_npc <= recovery_target;
+    for (int p = 0; p < NumCompletions; p++) begin
+      if (completion_valid[p] && int'(completion[p].dest) < ROB_SIZE
+          && (uop_pl[completion[p].dest].execute.sys.mret
+              || uop_pl[completion[p].dest].execute.sys.sret))
+        xret_npc_q <= completion[p].npc;
     end
   end
   always_ff @(posedge clock) begin
@@ -1267,7 +1312,7 @@ module rapt_rou #(
       pmu_rob_full <= 1'b0;
     end else begin
       rob_tail <= RBits'((int'(rob_tail) + dispatch_count) % ROB_SIZE);
-      rob_head <= RBits'((int'(rob_head) + commit_count) % ROB_SIZE);
+      rob_head <= rob_head_next;
       pmu_rob_full <= (&rob_entry_busy) && !rob_full_r;
       rob_full_r <= &rob_entry_busy;
       if (commit_count != 0 || rob_empty) begin
@@ -1304,94 +1349,104 @@ module rapt_rou #(
         end
       end
     end
+    always_comb begin
+      rob_state_next[entry] = rob_entry[entry].state;
+      rob_drains_sq_next[entry] = rob_drains_sq[entry];
+      if (allocate_hit) begin
+        rob_state_next[entry] = rapt_pkg::ROB_DP;
+        rob_drains_sq_next[entry] = drains_sq_before_commit(allocation[allocate_lane].uop);
+      end
+      for (int s = 0; s < ScanEntries; s++)
+      if (endpoint_fire[s] && int'(dispatch_index[s]) == entry)
+        rob_state_next[entry] = rapt_pkg::ROB_EX;
+      if (complete_hit) rob_state_next[entry] = rapt_pkg::ROB_WB;
+      for (int c = 0; c < CommitWidth; c++)
+      if (commit_fire[c] && int'(commit_index[c]) == entry)
+        rob_state_next[entry] = rapt_pkg::ROB_CM;
+      if (reset || flush_pipe) rob_state_next[entry] = rapt_pkg::ROB_CM;
+    end
     always_ff @(posedge clock) begin
-      if (reset || flush_pipe) begin
-        rob_entry[entry].state <= rapt_pkg::ROB_CM;
-        rob_checkpoint_valid[entry] <= 1'b0;
-      end else begin
-        if (allocate_hit) begin
-          // ---- ROB entry: control + WB-mutable defaults ----
-          rob_entry[entry].prd        <= allocation[allocate_lane].prd;
-          rob_entry[entry].prs        <= allocation[allocate_lane].prs;
-          rob_entry[entry].generation <= allocation[allocate_lane].generation;
-          rob_control_flow[entry] <= control_flow(allocation[allocate_lane].uop);
-          rob_serializing[entry] <= serializing(allocation[allocate_lane].uop);
-          rob_drains_sq[entry] <= drains_sq_before_commit(allocation[allocate_lane].uop);
-          rob_atomic[entry] <= allocation[allocate_lane].uop.execute.memory.atomic;
-          rob_fp_valid[entry] <= allocation[allocate_lane].uop.execute.fp.valid;
-          rob_fp_writer[entry] <= rapt_pkg::fp_writes_register(
-              allocation[allocate_lane].uop.execute.fp.valid,
-              allocation[allocate_lane].uop.execute.fp.op, allocation[allocate_lane].uop.inst);
-          rob_entry[entry].state      <= rapt_pkg::ROB_DP;
-          rob_entry[entry].rd         <= allocation[allocate_lane].uop.rd;
-          rob_entry[entry].mispredict <= 1'b0;
-          rob_entry[entry].btaken     <= 1'b0;
-          rob_checkpoint_valid[entry] <= uoq_checkpoint_valid[deq_index[allocate_lane]];
-          rob_checkpoint[entry]       <= uoq_checkpoint[deq_index[allocate_lane]];
-          rob_entry[entry].wen        <= allocation[allocate_lane].uop.execute.memory.store;
-          rob_entry[entry].fp_flags_valid <= 1'b0;
-          rob_entry[entry].fp_flags   <= '0;
-          rob_entry[entry].trap  <= allocation[allocate_lane].uop.trap;
+      rob_entry[entry].state <= rob_state_next[entry];
+      if (allocate_hit) begin
+        // ---- ROB entry: control + WB-mutable defaults ----
+        rob_entry[entry].prd        <= allocation[allocate_lane].prd;
+        rob_entry[entry].prs        <= allocation[allocate_lane].prs;
+        rob_entry[entry].generation <= allocation[allocate_lane].generation;
+        rob_control_flow[entry] <= control_flow(allocation[allocate_lane].uop);
+        rob_serializing[entry] <= serializing(allocation[allocate_lane].uop);
+        rob_drains_sq[entry] <= drains_sq_before_commit(allocation[allocate_lane].uop);
+        rob_atomic[entry] <= allocation[allocate_lane].uop.execute.memory.atomic;
+        rob_fp_valid[entry] <= allocation[allocate_lane].uop.execute.fp.valid;
+        rob_fp_writer[entry] <= rapt_pkg::fp_writes_register(
+            allocation[allocate_lane].uop.execute.fp.valid,
+            allocation[allocate_lane].uop.execute.fp.op, allocation[allocate_lane].uop.inst);
+        rob_entry[entry].rd         <= allocation[allocate_lane].uop.rd;
+        rob_entry[entry].mispredict <= 1'b0;
+        rob_entry[entry].btaken     <= 1'b0;
+        rob_checkpoint_valid[entry] <= uoq_checkpoint_valid[deq_index[allocate_lane]];
+        rob_checkpoint[entry]       <= uoq_checkpoint[deq_index[allocate_lane]];
+        rob_entry[entry].wen        <= allocation[allocate_lane].uop.execute.memory.store;
+        rob_entry[entry].fp_flags_valid <= 1'b0;
+        rob_entry[entry].fp_flags   <= '0;
+        rob_entry[entry].trap  <= allocation[allocate_lane].uop.trap;
 `ifndef SYNTHESIS
-          store_addr_witness[entry] <= allocation[allocate_lane].uop.tval;
+        store_addr_witness[entry] <= allocation[allocate_lane].uop.tval;
 `endif
 
-          // Immutable metadata belongs to the ROB, not execution-unit ports.
-          uop_pl[entry] <= compact_retire_uop(allocation[allocate_lane].uop);
+        // Immutable metadata belongs to the ROB, not execution-unit ports.
+        uop_pl[entry] <= compact_retire_uop(allocation[allocate_lane].uop);
 
-          rob_dp_spill[entry] <= spill_allocate_index[allocate_lane];
-        end
-        for (int s = 0; s < ScanEntries; s++)
-        if (endpoint_fire[s] && int'(dispatch_index[s]) == entry)
-          rob_entry[entry].state <= rapt_pkg::ROB_EX;
-        // NPC and skip are unconditional completion fields. Resolve their
-        // port once; conditional update groups below retain per-field priority.
-        if (complete_hit) begin
-          rob_entry[entry].npc <= completion[complete_lane].npc[XLEN-1:1];
-          rob_entry[entry].difftest_skip <= completion[complete_lane].difftest_skip;
-        end
-        for (int p = 0; p < NumCompletions; p++) begin
-          if (completion_valid[p] && int'(completion[p].dest) == entry) begin
-            rob_entry[entry].state <= rapt_pkg::ROB_WB;
-            if (completion[p].updates.control_flow) begin
-              rob_entry[entry].btaken <= completion[p].btaken;
-              rob_entry[entry].mispredict <= completion_mispredict[p];
-            end
-            if (completion[p].updates.memory) begin
-              rob_entry[entry].wen <= completion[p].wen && !completion[p].trap;
+        rob_dp_spill[entry] <= spill_allocate_index[allocate_lane];
+      end
+      // The shadow NPC and skip are unconditional completion fields. Resolve their
+      // port once; conditional update groups below retain per-field priority.
+      if (complete_hit) begin
+`ifdef RAPT_ROB_NPC_SHADOW
+        rob_entry[entry].npc <= completion[complete_lane].npc[XLEN-1:1];
+`endif
+        rob_entry[entry].difftest_skip <= completion[complete_lane].difftest_skip;
+      end
+      for (int p = 0; p < NumCompletions; p++) begin
+        if (completion_valid[p] && int'(completion[p].dest) == entry) begin
+          if (completion[p].updates.control_flow) begin
+            rob_entry[entry].btaken <= completion[p].btaken;
+            rob_entry[entry].mispredict <= completion_mispredict[p];
+          end
+          if (completion[p].updates.memory) begin
+            rob_entry[entry].wen <= completion[p].wen && !completion[p].trap;
 `ifdef RAPT_RVFI
-              rvfi_mem_addr[entry] <= completion[p].sq_waddr;
-              rvfi_mem_data[entry] <= completion[p].sq_wdata;
+            rvfi_mem_addr[entry] <= completion[p].sq_waddr;
+            rvfi_mem_data[entry] <= completion[p].sq_wdata;
 `endif
-            end
-            if (completion[p].updates.system_state) begin
-              rob_entry[entry].csr_wen <= completion[p].csr_wen;
-              rob_entry[entry].fp_flags_valid <= completion[p].fp_flags_valid;
-              rob_entry[entry].fp_flags <= completion[p].fp_flags;
-            end
-            if (completion[p].updates.exception) begin
-              // A faulting producer must not update the architectural map.
-              // This includes FP-to-GPR operations, not just memory faults.
-              if (completion[p].trap) rob_entry[entry].rd <= '0;
-              rob_entry[entry].trap <= completion[p].trap;
+          end
+          if (completion[p].updates.system_state) begin
+            rob_entry[entry].csr_wen <= completion[p].csr_wen;
+            rob_entry[entry].fp_flags_valid <= completion[p].fp_flags_valid;
+            rob_entry[entry].fp_flags <= completion[p].fp_flags;
+          end
+          if (completion[p].updates.exception) begin
+            // A faulting producer must not update the architectural map.
+            // This includes FP-to-GPR operations, not just memory faults.
+            if (completion[p].trap) rob_entry[entry].rd <= '0;
+            rob_entry[entry].trap <= completion[p].trap;
 `ifndef SYNTHESIS
-              store_addr_witness[entry] <= completion[p].tval;
+            store_addr_witness[entry] <= completion[p].tval;
 `endif
-            end
           end
         end
+      end
 
 
-        for (int c = 0; c < CommitWidth; c++)
-        if (commit_fire[c] && int'(commit_index[c]) == entry) begin
-          rob_entry[entry].state <= rapt_pkg::ROB_CM;
-          rob_entry[entry].csr_wen <= 1'b0;
-          rob_entry[entry].fp_flags_valid <= 1'b0;
-          rob_entry[entry].trap <= 1'b0;
-          rob_entry[entry].wen <= 1'b0;
-          rob_checkpoint_valid[entry] <= 1'b0;
-        end
-
+      for (int c = 0; c < CommitWidth; c++)
+      if (commit_fire[c] && int'(commit_index[c]) == entry) begin
+        rob_entry[entry].csr_wen <= 1'b0;
+        rob_entry[entry].fp_flags_valid <= 1'b0;
+        rob_entry[entry].trap <= 1'b0;
+        rob_entry[entry].wen <= 1'b0;
+        rob_checkpoint_valid[entry] <= 1'b0;
+      end
+      if (reset || flush_pipe) begin
+        rob_checkpoint_valid[entry] <= 1'b0;
       end
     end
   end
@@ -1409,7 +1464,7 @@ module rapt_rou #(
       rou_cmu.slot[c].atomic = rob_atomic[commit_index[c]];
       rou_cmu.slot[c].npc = rob_entry[commit_index[c]].trap
           || uop_pl[commit_index[c]].execute.sys.ecall || uop_pl[commit_index[c]].execute.sys.ebreak
-          ? csr_bcast.tvec : {rob_entry[commit_index[c]].npc, 1'b0};
+          ? csr_bcast.tvec : commit_npc[c];
       rou_cmu.slot[c].ebreak = uop_pl[commit_index[c]].execute.sys.ebreak;
       rou_cmu.slot[c].difftest_skip = rob_entry[commit_index[c]].difftest_skip;
       rou_cmu.slot[c].ben = uop_pl[commit_index[c]].execute.branch.conditional;
@@ -1426,6 +1481,16 @@ module rapt_rou #(
 `endif
     end
   end
+`ifdef RAPT_ROB_NPC_SHADOW
+  for (genvar c = 0; c < CommitWidth; c++) begin : g_npc_shadow_check
+    wire [RBits-1:0] owner = commit_index[c];
+    wire [XLEN-1:0] shadow_npc = rob_entry[owner].trap
+        || uop_pl[owner].execute.sys.ecall || uop_pl[owner].execute.sys.ebreak
+        ? csr_bcast.tvec : {rob_entry[owner].npc, 1'b0};
+    `RAPT_SVA_IMPLY(clock, reset, ROB_NPC_MATCHES_SHADOW, commit_fire[c],
+                    rou_cmu.slot[c].npc == shadow_npc)
+  end
+`endif
   assign rou_cmu.ben = branch_commit_valid && uop_pl[branch_commit].execute.branch.conditional;
   assign rou_cmu.jen = branch_commit_valid && uop_pl[branch_commit].execute.branch.jump;
   assign rou_cmu.jren = branch_commit_valid && uop_pl[branch_commit].execute.branch.indirect;
@@ -1498,8 +1563,9 @@ module rapt_rou #(
   assign rou_csr.mret = !recieved_trap && !commit_trap && uop_pl[h0].execute.sys.mret;
   assign rou_csr.sret = !recieved_trap && !commit_trap && uop_pl[h0].execute.sys.sret;
   assign rou_csr.trap = recieved_trap || commit_trap;
-  assign rou_csr.tval = recieved_trap ? '0 : commit_trap ? oldest_exception_tval : '0;
-  assign rou_csr.cause = recieved_trap ? trap_cause : oldest_exception_cause;
+  assign rou_csr.tval = recieved_trap ? '0 : commit_trap && oldest_exception_valid ? oldest_exception_tval : '0;
+  assign rou_csr.cause = recieved_trap ? trap_cause
+      : oldest_exception_valid ? oldest_exception_cause : '0;
   assign rou_csr.valid = recieved_trap || (commit_fire[0] && (uop_pl[h0].execute.sys.valid
       || commit_trap)) || fp_commit_flags_valid || fp_commit_dirty;
   // Faulting instructions still leave the ROB and deliver their exception,

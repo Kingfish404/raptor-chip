@@ -89,24 +89,22 @@ module rapt_fpu_convert_widen (
   assign result_valid = s2_valid_q;
 
   always_ff @(posedge clock) begin
+    // Payload is observed only with its valid/state owner. Clear control last.
+    s2_valid_q <= s1_valid_q;
+    s1_valid_q <= valid && ready;
+    begin
+      s1_sign_q <= sign_c;
+      s1_exponent_q <= exponent_c;
+      s1_fraction_q <= fraction_c;
+      s1_leading_one_q <= leading_one_c;
+    end
+    if (s1_valid_q) begin
+      result_q <= stage2_result_c;
+      flags_q <= stage2_flags_c;
+    end
     if (reset || flush) begin
       s1_valid_q <= 1'b0;
       s2_valid_q <= 1'b0;
-      // Result/flags are meaningful only with result_valid; keep payload
-      // unreset so reset/flush only cancels the valid pipeline.
-    end else begin
-      s2_valid_q <= s1_valid_q;
-      s1_valid_q <= valid && ready;
-      if (valid && ready) begin
-        s1_sign_q <= sign_c;
-        s1_exponent_q <= exponent_c;
-        s1_fraction_q <= fraction_c;
-        s1_leading_one_q <= leading_one_c;
-      end
-      if (s1_valid_q) begin
-        result_q <= stage2_result_c;
-        flags_q <= stage2_flags_c;
-      end
     end
   end
 endmodule

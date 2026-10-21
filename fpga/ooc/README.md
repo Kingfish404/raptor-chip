@@ -22,7 +22,7 @@ python3 fpga/ooc/build.py "$task_tmp/rv64" --merge
 python3 fpga/ooc/build.py "$task_tmp/rv64" --merge --route
 ```
 
-The default hierarchy selects the write-through L1D through `L1dWriteBack=0`; pass an explicit parameter override to evaluate the optional write-back implementation. For RV32, omit `-DRAPT_RV64` and use a separate output directory. The default part is `xcku15p-ffva1156-2-e`, with a 20 ns clock and 2 ns input/output budgets. `--part` and `--period` select another device or clock budget. These are CPU OOC constraints, not board constraints or a replacement for full-SoC implementation. The flow requires Verilator, a C++ compiler, Python and Vivado. It does not rewrite `sim/.config`, install dependencies or program a board.
+The default hierarchy selects the write-through L1D through `L1dWriteBack=0`; pass an explicit parameter override to evaluate the optional write-back implementation. For RV32, omit `-DRAPT_RV64` and use a separate output directory. The default part is `xcku15p-ffva1156-2-e`, with a 20 ns (50 MHz) clock and 2 ns input/output budgets. `--part` and `--period` select another device or clock budget. These are CPU OOC constraints, not board constraints or a replacement for full-SoC implementation. The flow requires Verilator, a C++ compiler, Python and Vivado. It does not rewrite `sim/.config`, install dependencies or program a board.
 
 ## Synthesis runtime exploration
 

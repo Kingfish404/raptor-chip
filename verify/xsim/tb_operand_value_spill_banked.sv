@@ -23,6 +23,8 @@ module tb_operand_value_spill_banked #(
   logic [6:0] completion_prd[2];
   logic [Xlen-1:0] completion_result[2];
   test_uop_t expected[Entries];
+  logic [Xlen-1:0] expected_op1[Entries], expected_op2[Entries];
+  logic [6:0] expected_pr1[Entries], expected_pr2[Entries];
   bit expected_valid[Entries];
   int stage;
 
@@ -36,7 +38,8 @@ module tb_operand_value_spill_banked #(
       .AllocateWidth(Width),
       .ReleaseWidth(Width),
       .ReadPorts(Width),
-      .CompletionPorts(2)
+      .CompletionPorts(2),
+      .ResolveAtDispatch(1'b1)
   ) dut (
       .*
   );
@@ -60,6 +63,11 @@ module tb_operand_value_spill_banked #(
         if (expected_valid[e])
           assert (read_uop[p] == expected[e])
           else $fatal(1, "uop mismatch entry=%0d got=%h expected=%h", e, read_uop[p], expected[e]);
+        if (expected_valid[e]) begin
+          assert (read_op1[p] == expected_op1[e] && read_op2[p] == expected_op2[e]
+                  && read_pr1[p] == expected_pr1[e] && read_pr2[p] == expected_pr2[e])
+          else $fatal(1, "immutable operand mismatch entry=%0d", e);
+        end
       end
     end
   endtask
@@ -69,6 +77,10 @@ module tb_operand_value_spill_banked #(
     for (int a = 0; a < Width; a++) begin
       allocate_valid[a] = 1'b1;
       allocate_uop[a] = 128'((token << 8) | a);
+      allocate_op1[a] = Xlen'(token * 16 + a);
+      allocate_op2[a] = Xlen'(token * 32 + a);
+      allocate_pr1[a] = 7'((token + a) % 100 + 1);
+      allocate_pr2[a] = 7'((token + a + 20) % 100 + 1);
     end
     #1;
     for (int a = 0; a < Width; a++) begin
@@ -76,6 +88,10 @@ module tb_operand_value_spill_banked #(
       else $fatal(1, "allocation lane %0d blocked", a);
       expected_valid[allocate_index[a]] = 1'b1;
       expected[allocate_index[a]] = allocate_uop[a];
+      expected_op1[allocate_index[a]] = allocate_op1[a];
+      expected_op2[allocate_index[a]] = allocate_op2[a];
+      expected_pr1[allocate_index[a]] = allocate_pr1[a];
+      expected_pr2[allocate_index[a]] = allocate_pr2[a];
     end
     @(posedge clock);
     #1;
@@ -118,6 +134,14 @@ module tb_operand_value_spill_banked #(
     reset = 0;
     for (int group = 0; group < Entries / Width; group++) allocate_four(group + 1);
     stage = 1;
+    check_all();
+    @(negedge clock);
+    completion_valid[0] = 1'b1;
+    completion_prd[0] = expected_pr1[0];
+    completion_result[0] = Xlen'('hdeadbeef);
+    @(posedge clock);
+    #1;
+    completion_valid[0] = 1'b0;
     check_all();
     stage = 2;
     recycle_four(1, 6, 10, 15, 100);

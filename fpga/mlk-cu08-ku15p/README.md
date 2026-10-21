@@ -1,10 +1,9 @@
 # Native MLK-CU08-KU15P
 
-Standalone Raptor support for `xcku15p-ffva1156-2-e`, using SystemVerilog, XDC and batch
-Vivado. Supports RV32/RV64 with BRAM or DDR4 main memory, a boot ROM, scratch
-SRAM, an 8250-compatible UART, CLINT and PLIC. No LiteX, Migen or LiteX BIOS
-environment is required. The native target provides UART boot; SD, Ethernet,
-PCIe and storage drivers are not included.
+Raptor support for `xcku15p-ffva1156-2-e`, using SystemVerilog, XDC and batch
+Vivado. The native SoC supports RV32/RV64 with BRAM or DDR4 main memory, a boot
+ROM, scratch SRAM, an 8250-compatible UART, CLINT and PLIC. The separate LiteX
+netboot profile adds DDR4 and Ethernet through the CM005 FMC module.
 
 All commands below run from the **repository root**.
 
@@ -47,11 +46,45 @@ checks source/configuration freshness, artifact hashes and a passing routed
 build, then requires exactly one matching FPGA on JTAG. Programming is volatile;
 it does not write configuration flash or automatically rebuild stale outputs.
 
-Root shortcuts are also available; select the preset explicitly:
+For native builds, `fpga-rv32-build`, `fpga-rv64-build` and the matching `load`,
+`info`, `prepare`, `lint`, `test`, `sim`, `ip-check`, `peripheral-synth` and `synth`
+targets select XLEN directly. For example:
 
 ```sh
-make fpga-syn FPGA_BOARD=mlk-cu08-ku15p XLEN=64 MEMORY=bram RAPT_CONFIG=small
-make fpga-pnr FPGA_BOARD=mlk-cu08-ku15p XLEN=64 MEMORY=ddr RAPT_CONFIG=small
+make -C fpga/mlk-cu08-ku15p fpga-rv32-build MEMORY=ddr RAPT_CONFIG=small
+```
+
+For DDR4 plus CM005 Ethernet network boot, the board Makefile forwards the
+`fpga-netboot-rv32-*` and `fpga-netboot-rv64-*` targets to the fixed LiteX CU08
+profile. The same targets also work from the repository root:
+
+```sh
+make -C fpga/mlk-cu08-ku15p fpga-netboot-rv32-build
+make -C fpga/mlk-cu08-ku15p fpga-netboot-rv64-build
+```
+
+Use the matching `check`, `info`, `load`, `bundle`, `serve`, `console` and `test`
+targets for each XLEN. This profile defaults to `RAPT_CONFIG=default`, 50 MHz,
+DDR4 MIG and gigabit Ethernet. See the [netboot workflow](../litex/NETBOOT.md#fixed-cu08-and-rk-end-to-end-targets)
+for host setup and Linux boot steps. Native `fpga-rv*` builds retain their own
+BRAM default and do not include the CM005 Ethernet interface.
+
+For the general LiteX FPGA flow, the board Makefile also forwards `fpga-gen`,
+`fpga-build`, `fpga-load`, `fpga-console`, `fpga-info`, `fpga-reports-index` and
+`fpga-timing-ok`, fixing board selection to CU08:
+
+```sh
+make -C fpga/mlk-cu08-ku15p fpga-build VARIANT=linux64
+make -C fpga/mlk-cu08-ku15p fpga-load VARIANT=linux64
+make -C fpga/mlk-cu08-ku15p fpga-console UART_PORT=/dev/ttyUSB1
+```
+
+Native root shortcuts are also available; select the preset explicitly because
+the repository root defaults to `RAPT_CONFIG=default`:
+
+```sh
+make fpga-rv32-build FPGA_BOARD=mlk-cu08-ku15p MEMORY=ddr RAPT_CONFIG=small
+make fpga-rv64-build FPGA_BOARD=mlk-cu08-ku15p MEMORY=ddr RAPT_CONFIG=small
 ```
 
 ## Configuration and outputs
@@ -115,7 +148,7 @@ latencies, geometry or pins automatically.
 The board top is [rapt_cu08_top.sv](rtl/rapt_cu08_top.sv). Pin assignments are in
 [board.xdc](constraints/board.xdc) and [ddr4.xdc](constraints/ddr4.xdc); the DDR
 profile is in [create_ip.tcl](ip/create_ip.tcl). The pinout follows the repository's
-CU08 platform definition, but building this target does not import LiteX.
+CU08 platform definition.
 
 ## Memory map and software interface
 
@@ -219,6 +252,10 @@ DDR simulation uses a delayed AXI RAM model, not a physical DDR model. For a
 focused boot waveform, run `python3 fpga/mlk-cu08-ku15p/build.py --xlen 64 --memory ddr --trace sim`.
 Review `timing_summary.rpt`, `check_timing.rpt`, `cdc.rpt`, `drc.rpt` and
 `utilization.rpt` for the exact source/configuration in `manifest.json`.
+The output directory also contains `index.html` for browsing all Vivado
+reports and `README.md` with synthesis and implementation resource tables.
+The native `synth` and `build` actions regenerate both summaries, including
+partial reports after a failed Vivado run.
 Peripheral synthesis excludes the CPU and board clock/DDR infrastructure.
 A passing build gate does not establish CDC sign-off, DDR calibration or
 successful software execution on the physical board.

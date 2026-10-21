@@ -4,4 +4,5 @@
 # Usage:  make -C verify/xsim/fpu/addsub run [N=200000]
 
 UNITS := addsub
+EXTRA_SOURCES = $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_fp_addsub.sv
 include ../host-diff.mk

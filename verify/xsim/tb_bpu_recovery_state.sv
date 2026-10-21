@@ -14,7 +14,12 @@ module tb_bpu_recovery_state;
   logic execute_recover = 0, preserve_fetch = 0;
   logic [63:0] execute_ghr = 64'h1234_5678_9abc_def0, snapshot_ghr;
   logic [7:0] execute_phr = 8'ha6, snapshot_phr;
-  rapt_bpu #(.RSB_SIZE(4)) dut (.*);
+  rapt_bpu #(
+      .RSB_SIZE(4)
+  ) dut (
+      .decode_target_q('0),
+      .*
+  );
   `include "tb_core_bcast_defaults.svh"
 
   task automatic tick;

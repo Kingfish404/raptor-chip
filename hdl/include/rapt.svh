@@ -2,6 +2,9 @@
 `define RAPT_SVH
 `include "rapt_config.svh"
 `include "rapt_sva.svh"
+`ifdef RAPT_SVA_ACTIVE
+`define RAPT_ROB_NPC_SHADOW
+`endif
 
 `ifndef RAPT_L1D_MSHRS
 `define RAPT_L1D_MSHRS 0

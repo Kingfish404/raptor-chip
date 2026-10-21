@@ -349,52 +349,50 @@ module rapt_fpu_mul_pipeline #(
   assign result_valid = s4_valid_q;
 
   always_ff @(posedge clock) begin
+    // Payload is observed only with its valid/state owner. Clear control last.
+    s4_valid_q <= s3_valid_q;
+    s3_valid_q <= s2_valid_q;
+    s2_valid_q <= s1_valid_q;
+    s1_valid_q <= valid && ready;
+    begin
+      s1_mant_a_q <= mant_a_c;
+      s1_mant_b_q <= mant_b_c;
+      s1_exp_a_q <= 14'(exponent_a_c);
+      s1_exp_b_q <= 14'(exponent_b_c);
+      s1_result_sign_q <= sign_a_c ^ sign_b_c;
+      s1_special_q <= special_c;
+      s1_special_result_q <= special_result_c;
+      s1_special_flags_q <= special_flags_c;
+      s1_rounding_mode_q <= rounding_mode;
+    end
+    if (s1_valid_q) begin
+      s2_product_q <= product_c;
+      s2_exp_sum_q <= exponent_sum_c;
+      s2_result_sign_q <= s1_result_sign_q;
+      s2_special_q <= s1_special_q;
+      s2_special_result_q <= s1_special_result_q;
+      s2_special_flags_q <= s1_special_flags_q;
+      s2_rounding_mode_q <= s1_rounding_mode_q;
+    end
+    if (s2_valid_q) begin
+      s3_mant_q <= stage3_mant_c;
+      s3_tiny_q <= stage3_tiny_c;
+      s3_exponent_q <= stage3_exponent_c;
+      s3_result_sign_q <= s2_result_sign_q;
+      s3_special_q <= s2_special_q;
+      s3_special_result_q <= s2_special_result_q;
+      s3_special_flags_q <= s2_special_flags_q;
+      s3_rounding_mode_q <= s2_rounding_mode_q;
+    end
+    if (s3_valid_q) begin
+      result_q <= stage4_result_c;
+      flags_q <= stage4_flags_c;
+    end
     if (reset || flush) begin
       s1_valid_q <= 1'b0;
       s2_valid_q <= 1'b0;
       s3_valid_q <= 1'b0;
       s4_valid_q <= 1'b0;
-      // Result/flags are meaningful only with result_valid; keep payload
-      // unreset so reset/flush only cancels the valid pipeline.
-    end else begin
-      s4_valid_q <= s3_valid_q;
-      s3_valid_q <= s2_valid_q;
-      s2_valid_q <= s1_valid_q;
-      s1_valid_q <= valid && ready;
-      if (valid && ready) begin
-        s1_mant_a_q <= mant_a_c;
-        s1_mant_b_q <= mant_b_c;
-        s1_exp_a_q <= 14'(exponent_a_c);
-        s1_exp_b_q <= 14'(exponent_b_c);
-        s1_result_sign_q <= sign_a_c ^ sign_b_c;
-        s1_special_q <= special_c;
-        s1_special_result_q <= special_result_c;
-        s1_special_flags_q <= special_flags_c;
-        s1_rounding_mode_q <= rounding_mode;
-      end
-      if (s1_valid_q) begin
-        s2_product_q <= product_c;
-        s2_exp_sum_q <= exponent_sum_c;
-        s2_result_sign_q <= s1_result_sign_q;
-        s2_special_q <= s1_special_q;
-        s2_special_result_q <= s1_special_result_q;
-        s2_special_flags_q <= s1_special_flags_q;
-        s2_rounding_mode_q <= s1_rounding_mode_q;
-      end
-      if (s2_valid_q) begin
-        s3_mant_q <= stage3_mant_c;
-        s3_tiny_q <= stage3_tiny_c;
-        s3_exponent_q <= stage3_exponent_c;
-        s3_result_sign_q <= s2_result_sign_q;
-        s3_special_q <= s2_special_q;
-        s3_special_result_q <= s2_special_result_q;
-        s3_special_flags_q <= s2_special_flags_q;
-        s3_rounding_mode_q <= s2_rounding_mode_q;
-      end
-      if (s3_valid_q) begin
-        result_q <= stage4_result_c;
-        flags_q <= stage4_flags_c;
-      end
     end
   end
 endmodule

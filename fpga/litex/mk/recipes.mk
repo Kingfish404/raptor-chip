@@ -871,7 +871,8 @@ netboot-flow-context:
 	 $(call _shell_quote,firmware=$(FW_LINUX_FPGA_DIR)) \
 	 $(call _shell_quote,payload=$(LINUX_FPGA_PAYLOAD)) \
 	 $(call _shell_quote,soc=$(FPGA_DIR)) $(call _shell_quote,pack=$(PACK_SV)) \
-	 $(call _shell_quote,cross=$(CROSS)) $(call _shell_quote,xlen=$(LINUX_XLEN))
+	 $(call _shell_quote,cross=$(CROSS)) $(call _shell_quote,xlen=$(LINUX_XLEN)) \
+	 $(call _shell_quote,board=$(FPGA_BOARD))
 
 fpga-console:
 	$(call _require_var,UART_PORT,$(UART_PORT),UART_PORT empty — plug in the board or set UART_PORT=/dev/tty.usbserial-XXXX)

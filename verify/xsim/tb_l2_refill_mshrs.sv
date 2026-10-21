@@ -4,6 +4,7 @@ module tb_l2_refill_mshrs #(
   localparam int NumMshrs = XLEN == 64 ? 7 : 5;
   localparam int ID_W = 4;
   localparam int LineWords = 64 / (XLEN / 8);
+  localparam int WrapBits = $clog2(16 * (XLEN / 8));
   logic clock = 1'b0;
   logic reset = 1'b1;
   logic alloc_valid = 1'b0;
@@ -16,6 +17,7 @@ module tb_l2_refill_mshrs #(
   logic [ID_W-1:0] alloc_inner_id = '0;
   logic [7:0] alloc_inner_len = '0;
   logic [2:0] alloc_inner_size = '0;
+  logic [WrapBits-1:0] alloc_inner_wrap_mask = '0;
   logic [1:0] alloc_inner_burst = 2'b01;
   logic [3:0] alloc_cache = 4'hf;
   logic outer_arvalid;
@@ -48,6 +50,7 @@ module tb_l2_refill_mshrs #(
   logic [ID_W-1:0] retire_inner_id;
   logic [7:0] retire_inner_len;
   logic [2:0] retire_inner_size;
+  logic [WrapBits-1:0] retire_inner_wrap_mask;
   logic [1:0] retire_inner_burst;
   logic [3:0] retire_cache;
   logic [NumMshrs-1:0] ar_seen = '0;
@@ -76,6 +79,7 @@ module tb_l2_refill_mshrs #(
       alloc_inner_id = ID_W'(slot + 8);
       alloc_inner_len = 8'(slot);
       alloc_inner_size = 3'($clog2(XLEN / 8));
+      alloc_inner_wrap_mask = WrapBits'(slot * 3 + 1);
       #1;
       check(alloc_ready, "refill context was unavailable");
       tick(1);
@@ -132,6 +136,8 @@ module tb_l2_refill_mshrs #(
           retire_addr == XLEN'('h8000_0000 + slot * 64)
                 && retire_inner_id == ID_W'(slot + 8) && retire_inner_len == 8'(slot),
           "inner request metadata was not retained by RID");
+      check(retire_inner_wrap_mask == WrapBits'(slot * 3 + 1),
+            "inner wrap mask was not retained by RID");
       check(retire_resp == (slot == 3 ? 2'b10 : 2'b00), "refill error was not retained per MSHR");
       check(slot_resp[slot] == retire_resp, "per-slot response did not match selected refill");
       check(retire_beat_valid == '1, "completed refill did not mark all beats valid");
@@ -147,6 +153,7 @@ module tb_l2_refill_mshrs #(
         alloc_addr = XLEN'('h8001_0000);
         alloc_inner_id = 4'd15;
         alloc_inner_len = '0;
+        alloc_inner_wrap_mask = WrapBits'('h35);
         outer_arready = 1'b0;
         alloc_reload = 1'b1;
         alloc_valid = 1'b1;
@@ -186,7 +193,8 @@ module tb_l2_refill_mshrs #(
     #1;
     check(
         slot_done[0] && retire_addr == XLEN'('h8001_0000)
-          && retire_inner_id == 4'd15 && retire_resp == 2'b10,
+          && retire_inner_id == 4'd15 && retire_resp == 2'b10
+          && retire_inner_wrap_mask == WrapBits'('h35),
         "reloaded context did not retain its new request and refill error");
     retry_slot  = 3'd0;
     retry_valid = 1'b1;
@@ -196,7 +204,7 @@ module tb_l2_refill_mshrs #(
     check(
         slot_valid[0] && !slot_done[0] && slot_beat_valid[0] == '0
               && slot_resp[0] == 2'b00 && retire_addr == XLEN'('h8001_0000)
-              && retire_inner_id == 4'd15,
+              && retire_inner_id == 4'd15 && retire_inner_wrap_mask == WrapBits'('h35),
         "retry did not clear the failed fill while preserving its request");
     for (int cycle = 0; cycle < 8 && !outer_arvalid; cycle++) tick(1);
     check(outer_arvalid && outer_arid == 4'd0 && outer_araddr == XLEN'('h8001_0000),

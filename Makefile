@@ -785,6 +785,20 @@ linux-boot-rv32-ckpt-load: build-nemu32-ref build-rv32-linux ## Resume Linux boo
 # FPGA Targets
 # ============================================================================
 FPGA_BOARD ?= mlk-cu08-ku15p
+NATIVE_FPGA_ACTIONS := prepare refresh-software lint test sim ip-check peripheral-synth synth build load info
+NATIVE_FPGA_TARGETS := $(addprefix fpga-,$(NATIVE_FPGA_ACTIONS))
+NATIVE_FPGA_RV_TARGETS := $(foreach x,32 64,$(addprefix fpga-rv$(x)-,$(filter-out refresh-software,$(NATIVE_FPGA_ACTIONS))))
+.PHONY: $(NATIVE_FPGA_TARGETS) $(NATIVE_FPGA_RV_TARGETS)
+
+fpga-build: ## Build and timing-check the selected native FPGA board (RK defaults to DDR)
+fpga-load: ## Program the selected native FPGA board from a matching validated build
+fpga-info: ## Show native FPGA configuration and output path
+fpga-rv32-build: ## Build the selected native board for RV32
+fpga-rv64-build: ## Build the selected native board for RV64
+$(NATIVE_FPGA_TARGETS):
+	$(MAKE) -C $(RAPTOR_HOME)/fpga/$(FPGA_BOARD) $(patsubst fpga-%,%,$@)
+$(NATIVE_FPGA_RV_TARGETS):
+	$(MAKE) -C $(RAPTOR_HOME)/fpga/$(FPGA_BOARD) $@
 
 fpga-syn: ## Synthesize the selected native FPGA board
 	$(MAKE) -C $(RAPTOR_HOME)/fpga/$(FPGA_BOARD) synth

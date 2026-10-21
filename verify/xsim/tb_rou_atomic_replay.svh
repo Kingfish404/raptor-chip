@@ -16,14 +16,27 @@ assign replay_context = '{mmu_en: csr_bcast.dmmu_en,
 assign replay_pipe.rcontext = replay_context;
 assign replay_pipe.rcontext_b = replay_context;
 `include "tb_pmp_state_defaults.svh"
-rapt_lsu_sq #(.SQ_SIZE(4)) replay_sq (
-  .clock(clock), .reset(reset), .cmu_bcast(cmu_bcast),
-  .lsu_l1d(replay_l1d), .exu_lsu(replay_pipe),
-  .exu_ioq_bcast(completion[3]), .completion_accept(1'b1),
-  .sq_acquire(replay_acquire), .sq_waddr_hi('0), .sq_waddr_third('0), .sq_wpbmt('0),
-  .sq_context(replay_context),
-  .rou_lsu(rou_lsu), .csr_bcast(csr_bcast), .pmp_state(pmp_state),
-  .pmu_sq_full(replay_sq_full)
+rapt_lsu_sq #(
+    .SQ_SIZE(4)
+) replay_sq (
+    .clock(clock),
+    .reset(reset),
+    .cmu_bcast(cmu_bcast),
+    .lsu_l1d(replay_l1d),
+    .exu_lsu(replay_pipe),
+    .exu_ioq_bcast(completion[3]),
+    .completion_accept(1'b1),
+    .sq_forward_pending(completion[3].valid && completion[3].wen),
+    .sq_handoff_alu(completion[3].alu[4:0]),
+    .sq_acquire(replay_acquire),
+    .sq_waddr_hi('0),
+    .sq_waddr_third('0),
+    .sq_wpbmt('0),
+    .sq_context(replay_context),
+    .rou_lsu(rou_lsu),
+    .csr_bcast(csr_bcast),
+    .pmp_state(pmp_state),
+    .pmu_sq_full(replay_sq_full)
 );
 always @(posedge clock) if (!reset) begin
   for(int p=0;p<rapt_pkg::CompletionPorts;p++)

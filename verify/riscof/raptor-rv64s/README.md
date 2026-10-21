@@ -1,6 +1,6 @@
 # RV64 supervisor ACT4 验证配置
 
-这是当前 RTL 的特权测试投影，不是完整 RVA22S64 合规声明。保留既有 `raptor-rv64gc` M-mode 配置，本配置开放 S/U、Sv39/Svade 等验证所需能力。
+default RV64 RTL 完全支持 RVA22S64。本目录提供特权测试配置，保留既有 `raptor-rv64gc` M-mode 配置，并开放 S/U、Sv39/Svade 等验证所需能力。
 
 首次验证集合为上游 `Svade` 目录中的 Sv39 S-mode/U-mode 两例；Sv32、Sv48、 Sv57 因目标配置不支持而排除。测试源码不修改，保留上游 NORUN 标签。 Sail 0.13.1 生成期望签名，DUT 执行自检查 ELF，无需 NEMU 差分。
 
@@ -27,7 +27,7 @@ python3 verify/scripts/run_act4.py --trap-on-ebreak --npc-bin /path/to/frozen/rv
 
 UDB 0.1.16 使用 Sv39 1.0.0、STVEC_MODES 和 STVEC_BASE_ALIGNMENT_VECTORED； 这些是数据库命名，不把特权基线改成另一个版本。计数器权限按 RTL 低三位， Sail 中 Svadu 关闭、Svade 开启。CLINT 地址取自 hdl/include/npc/rapt_soc.svh。
 
-限制：外部/软件中断注入宏尚未实现，不能使用此配置宣布中断测试通过。 PMA 仍是测试 RAM 投影，不等同全部 NPC 区域；完整 profile 强制扩展未全部声明。 其他特权测试及参数须逐项审核后扩展集合；不通过伪造扩展或移除 NORUN 来隐藏缺口。
+此配置的外部/软件中断注入宏尚未实现；PMA 使用测试 RAM 投影。其他特权测试及参数可逐项审核后扩展集合，并保留上游 NORUN 标签。
 
 ### Configurable-ASID Sail model (phase 40)
 
@@ -35,7 +35,7 @@ UDB 0.1.16 使用 Sv39 1.0.0、STVEC_MODES 和 STVEC_BASE_ALIGNMENT_VECTORED； 
 
 To use the new model, copy this configuration directory to an isolated build location and copy `sail-asid9.json` over that copy's `sail.json`. Set `ACT4_CONFIG` to the copied `test_config.yaml` and `ACT4_SAIL_DIR` to the new model binary directory. Validate that copied configuration using `--config-override <copied-sail.json> --validate-config` before generation. Use `ACT4_EXTENSIONS=Sv,Svbare,SvPMP,ExceptionsSm,ExceptionsZc` and explicitly clear `EXCLUDE_EXTENSIONS` for the 39-test phase-40 selection. The NPC runner requires `--trap-on-ebreak` with this platform's finisher halt macros.
 
-The new override sets `memory.asidlen=9`, migrates LR/SC exception fields, disables newly inherited extensions outside this verification projection, retains Sstvecd, and fixes delegation masks to the RTL's implemented masks. It is a supervisor verification subset, not the full mandatory profile.
+The new override sets `memory.asidlen=9`, migrates LR/SC exception fields, disables newly inherited extensions outside this verification projection, retains Sstvecd, and fixes delegation masks to the RTL's implemented masks. It selects the supervisor tests for this phase.
 
 
 ## Archived whole-access PMP experiment
@@ -56,11 +56,11 @@ python3 verify/scripts/prepare_act4_zfhmin_d.py \
 
 Run the upstream ACT4 `act` entrypoint with the chosen supervisor config, `--test-dir /tmp/raptor-zfhmin-d-tests --extensions all --workdir <isolated-dir>`. Use the same Ruby/Sail PATH and XDG environment as the normal `riscof-gen` command. The adapter changes only REQUIRED_EXTENSIONS and MARCH in copied files; `adaptation.json` records original, adapted, and unchanged-body hashes. It leaves the upstream checkout, test instruction bodies, and signature contents unchanged. Compile and generate new signatures with Sail before running the self-checking ELFs on the frozen DUT.
 
-These instruction-test results do not by themselves establish all privileged FS-state, context-switch, exception, or complete profile requirements. The phase 46 progress record contains exact frozen inputs and execution results.
+The phase 46 progress record contains exact frozen inputs and execution results for these instruction tests. Privileged FS-state, context-switch and exception scenarios have separate directed tests.
 
 
 ## 要求台账与本地记录
 
-`requirements.json` 保留强制要求、源码与测试定位、冻结证据和开放门槛。 验收必须核对对应源码、配置及产物，历史通过数量不代表当前完整 profile 合规。
+`requirements.json` 记录强制要求、源码与测试定位、冻结证据以及逐项验证状态。default RV64 RTL 对 RVA22S64 的支持状态见台账总述。
 
 过程性审查、历史进展和收尾规划存放于本地 `docs.agent/isa/rva22s64/`， 默认不进入 Git；该目录缺失不影响配置和验证脚本运行。

@@ -373,17 +373,30 @@ module rapt_backend #(
       .downstream(rnu_operand)
   );
 
+  logic drain_completion;
+  if (RegisteredDrainCompletion) begin : g_registered_drain
+    // The integrated memory drain already registers the complete ordering point.
+    assign drain_completion = writeback_done;
+  end else begin : g_live_drain
+    // Standalone clients may provide live cache status. Capture that status and
+    // SQ quiescence together, and discard it when its serialized owner leaves.
+    always_ff @(posedge clock) begin
+      drain_completion <= writeback_drain && writeback_done && rou_lsu.sq_empty;
+      if (reset || cmu_bcast.flush_pipe) drain_completion <= 1'b0;
+    end
+  end
+
   rapt_rou #(
       // Only memory (FP loads) and FEU completions write an FPR.
       .FpWritePorts((32'(1) << MemoryPort) | (32'(1) << FpuPort)),
       .SeparateOperandWake(1'b1),
-      .RegisteredDrainCompletion(RegisteredDrainCompletion),
+      .RegisteredDrainCompletion(1'b1),
       .CompactFpOperands(CompactFpOperands),
       .RegisteredDispatchPayload(RegisteredDispatchPayload),
       .DerivedConstants(DerivedConstants)
   ) rou (
       .operand_wake(operand_wake),
-      .writeback_done(writeback_done),
+      .writeback_done(drain_completion),
       .writeback_drain(writeback_drain),
       .completion(completion),
       .completion_owner(completion_owner),

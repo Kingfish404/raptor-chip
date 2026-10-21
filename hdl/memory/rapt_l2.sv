@@ -68,7 +68,6 @@
 `ifndef RAPT_L2_N_WAYS
 `define RAPT_L2_N_WAYS 1
 `endif
-
 /* verilator lint_off UNUSEDPARAM */
 /* verilator lint_off UNUSEDSIGNAL */
 module rapt_l2 #(
@@ -100,22 +99,18 @@ module rapt_l2 #(
     output logic release_ack_o,
     input logic l1d_writeback_pending_i = 1'b0,
     output logic probe_window_o,
-
     // CPU / rapt_bus side
     axi4_if.slave  axi_s,
     // External memory side
     axi4_if.master axi_m
 );
-
   // Explicit cache enable; otherwise the AXI interface is a passthrough.
 `ifdef RAPT_L2_EN
   `define RAPT_L2_ACTIVE
 `endif
 
 `ifndef RAPT_L2_ACTIVE
-  // =====================================================================
   // Pure passthrough (L2 disabled). Kept lint-clean.
-  // =====================================================================
   assign probe_valid_o         = 1'b0;
   assign probe_addr_o          = '0;
   assign probe_release_ready_o = 1'b0;
@@ -130,7 +125,6 @@ module rapt_l2 #(
   assign axi_m.arburst         = axi_s.arburst;
   assign axi_m.arcache         = axi_s.arcache;
   assign axi_s.arready         = axi_m.arready;
-
   assign axi_s.rvalid          = axi_m.rvalid;
   assign axi_s.rdata           = axi_m.rdata;
   assign axi_s.rid             = axi_m.rid;
@@ -146,7 +140,6 @@ module rapt_l2 #(
   assign axi_m.awburst         = axi_s.awburst;
   assign axi_m.awcache         = axi_s.awcache;
   assign axi_s.awready         = axi_m.awready;
-
   assign axi_m.wvalid          = axi_s.wvalid;
   assign axi_m.wdata           = axi_s.wdata;
   assign axi_m.wstrb           = axi_s.wstrb;
@@ -158,15 +151,11 @@ module rapt_l2 #(
   assign axi_s.bresp           = axi_m.bresp;
   assign axi_m.bready          = axi_s.bready;
 `else
-  // =====================================================================
   // Active L2 cache implementation.
-  // =====================================================================
   localparam int LineSize = 1 << L2_LINE_LEN;  // words per line
   localparam int LineBits = LineSize * XLEN;
   localparam int NSets = 1 << L2_LEN;
-  // Small directories clear every valid bit in one cycle; larger ones walk one
-  // set per cycle. The bulk loops nest sets inside ways, and slang counts every
-  // nested iteration (ways + ways * sets) against its default unroll limit.
+  // Large directories clear one set per cycle to bound reset unrolling.
   localparam bit BulkSetClear = L2_N_WAYS * (NSets + 1) <= 4000;
   localparam int WayBits = (L2_N_WAYS <= 1) ? 1 : $clog2(L2_N_WAYS);
   // Medium BOOM uses four 16384 x 64-bit logical data banks:
@@ -181,9 +170,7 @@ module rapt_l2 #(
   // A legal AXI WRAP has at most 16 beats, each no wider than this data bus.
   localparam int ReadWrapBits = $clog2(16 * WordBytes);
   localparam int IndexBits = L2_LEN;
-  // BOOM's generated directory stores address bits [33:16] in each entry.
-  // Raptor's RV64 physical-address datapath is wider, but the cacheable DDR
-  // windows fit below bit 34; keep the default-l2 SRAM entry at BOOM's 22 bits.
+  // DDR fits BOOM's 22-bit directory entry despite the wider RV64 PA.
   localparam int TagBits = BoomBankedStore ? 18 : PADDR_BITS - IndexBits - OffsetBits;
   if (PADDR_BITS > XLEN || PADDR_BITS <= IndexBits + OffsetBits) begin : g_invalid_paddr_width
     $error("L2 physical address width must fit its request and cache geometry");
@@ -194,9 +181,7 @@ module rapt_l2 #(
   localparam int IndexLsb = OffsetBits;
   localparam int IndexMsb = OffsetBits + IndexBits - 1;
   localparam int TagLsb = OffsetBits + IndexBits;
-
-  // A forwarded AXI4 burst can contain 256 W beats. Keep resident-hit beats
-  // until the real outer B before applying them to the cache.
+  // Forwarded bursts retain hit beats until outer B.
   localparam int ForwardLogDepth = 256;
   localparam int ForwardLogAddrBits = TagLsb + TagBits;
   typedef struct packed {
@@ -218,8 +203,7 @@ module rapt_l2 #(
   forward_log_entry_t forward_log_wdata, forward_log_rdata;
   logic [8:0] forward_log_count;
   logic [7:0] forward_replay_index;
-  // Cached-hit forwarding blocks new AR/AW until B, so an invalidated
-  // client cannot reacquire this line between journal entries.
+  // Forwarded hits block new AR/AW until B to protect invalidated clients.
   logic forward_replay_probed_valid;
   logic [ForwardLogAddrBits-OffsetBits-1:0] forward_replay_probed_line;
   logic forward_replay_line_probed;
@@ -227,7 +211,6 @@ module rapt_l2 #(
   logic forward_replay_b_match;
   assign forward_replay_line_probed = forward_replay_probed_valid
       && forward_replay_probed_line == forward_log_rdata.addr[ForwardLogAddrBits-1:OffsetBits];
-
   typedef enum logic [1:0] {
     REL_IDLE,
     REL_LOOKUP,
@@ -253,8 +236,7 @@ module rapt_l2 #(
   logic release_dir_write_candidate, release_dir_write_fire;
   logic release_word_step;
   logic release_pending;
-  // Reserve the directory from the first C beat, including a possible gap
-  // before the last beat makes a complete Release visible at the buffer head.
+  // Reserve the directory from C first beat through its Release.
   assign release_pending = (BoomBankedStore && release_valid_i)
       || release_buffer_busy || release_state != REL_IDLE;
   assign forward_replay_probe_request = forward_replay_state == F_PROBE && !release_pending;
@@ -285,10 +267,7 @@ module rapt_l2 #(
       .head_data(release_head_data),
       .head_mask(release_head_mask)
   );
-
-  // Queue CBO set masks while accepted AXI work drains. Blocking new
-  // requests through the clear edge prevents an older fill from resurrecting
-  // a line and makes the next demand observe the completed maintenance.
+  // Block new requests through CBO clear so old fills cannot revive a line.
   localparam logic [11:0] CboIndexMask = 12'((NSets - 1) << OffsetBits) & 12'hfc0;
   logic [NSets-1:0] cbo_pending, cbo_mask;
   logic [NSets-1:0] cbo_pending_broad;
@@ -315,7 +294,7 @@ module rapt_l2 #(
     C_ERROR
   } cbo_state_t;
   cbo_state_t cbo_state;
-  logic [IndexBits-1:0] cbo_active_set;
+  (* max_fanout = -1 *) logic [IndexBits-1:0] cbo_active_set;
   logic [WayBits-1:0] cbo_way;
   logic [L2_LINE_LEN-1:0] cbo_word;
   logic [L2_N_WAYS*22-1:0] cbo_entries_q, dir_scan_entries;
@@ -360,8 +339,7 @@ module rapt_l2 #(
                                 == ({cbo_block_i[11:6], 6'b0} & CboIndexMask));
   end
   assign cbo_busy = cbo_inval_i || |cbo_pending;
-  // A balanced priority tree keeps the 1024-set CBO clear path to log2(NSets)
-  // mux levels. The previous procedural scan built a 1024-deep priority path.
+  // A balanced tree bounds CBO clear selection to log2(NSets) levels.
   logic [  2*NSets-1:1] cbo_tree_has;
   logic [IndexBits-1:0] cbo_tree_idx [2*NSets];
   for (genvar leaf = 0; leaf < NSets; leaf++) begin : g_cbo_leaf
@@ -377,11 +355,7 @@ module rapt_l2 #(
   assign cbo_entry = cbo_entries_q[int'(cbo_way)*22+:22];
   assign cbo_tag = cbo_entry[17:0];
   assign cbo_scan_valid = BoomBankedStore && cbo_state == C_SCAN;
-
-  // ---------------------------------------------------------------------
-  // Storage. BOOM geometry uses the SRAM directory as its only tag/valid
-  // state. Small legacy configurations retain the flop directory.
-  // ---------------------------------------------------------------------
+  // BOOM uses its SRAM directory; legacy caches retain flop tags.
   /* verilator lint_off UNUSEDPARAM */
   /* verilator lint_off UNUSEDSIGNAL */
   logic               line_valid  [L2_N_WAYS][   NSets];
@@ -401,8 +375,7 @@ module rapt_l2 #(
   logic [WayBits-1:0] dir_write_way;
   logic [1:0] dir_write_state;
   logic dir_write_clients, dir_write_dirty;
-  // Used by the directory instance below; declare before its port binding
-  // so synthesis does not create an implicit generate-local scalar net.
+  // Declare before directory binding to avoid an implicit scalar net.
   logic dir_lookup_dirty;
   logic dir_client_mark, r_client_marked;
   logic ms_alloc_invalidate;
@@ -495,10 +468,7 @@ module rapt_l2 #(
   end
   /* verilator lint_on UNUSEDPARAM */
   /* verilator lint_on UNUSEDSIGNAL */
-
-  // ---------------------------------------------------------------------
   // Helpers
-  // ---------------------------------------------------------------------
   // L2 is intentionally narrower than the L1 addr_cacheable() allowlist: keep
   // ROM/SRAM/flash single-beat through the LiteX fabric and reserve L2 line
   // fills for external main memory where Linux/app payloads execute.
@@ -513,7 +483,6 @@ module rapt_l2 #(
     ) || (rapt_pkg::PmemBytes < 32'h80000000 && physical >= XLEN'('ha0000000) &&
           physical < XLEN'('ha2000000)));
   endfunction
-
   function automatic logic cacheable_line(input logic [XLEN-1:0] a);
     return cacheable(a) && cacheable(a | XLEN'((1 << OffsetBits) - 1));
   endfunction
@@ -522,7 +491,6 @@ module rapt_l2 #(
     return (rapt_pkg::canonical_addr(a) >> OffsetBits) ==
         (rapt_pkg::canonical_addr(b) >> OffsetBits);
   endfunction
-
   function automatic logic [ReadWrapBits-1:0] read_wrap_mask(input logic [7:0] len,
                                                              input logic [2:0] size);
     return ((ReadWrapBits'(len) + ReadWrapBits'(1)) << size) - ReadWrapBits'(1);
@@ -542,7 +510,6 @@ module rapt_l2 #(
       default: return addr;
     endcase
   endfunction
-
   function automatic logic source_read_shape(input logic [XLEN-1:0] addr, input logic [7:0] len,
                                              input logic [2:0] size, input logic [1:0] burst);
     logic wrap_valid;
@@ -555,9 +522,7 @@ module rapt_l2 #(
         (burst != 2'b01 ||
          int'(addr[OffsetBits-1:0]) + (int'(len) << int'(size)) < (1 << OffsetBits));
   endfunction
-
-  // A no-allocate DDR read must still observe an existing L2 line. The
-  // outer RAM may be stale while that line is dirty.
+  // No-allocate reads observe dirty resident lines before outer DDR.
   logic ar_cache_lookup;
   assign ar_cache_lookup = cacheable_line(
       axi_s.araddr
@@ -573,10 +538,7 @@ module rapt_l2 #(
     end
     return merged;
   endfunction
-
-  // =====================================================================
   // READ PATH
-  // =====================================================================
   typedef enum logic [4:0] {
     R_IDLE,
     R_HIT,
@@ -609,8 +571,32 @@ module rapt_l2 #(
     R_BURST_DONE,
     R_BURST_ERROR
   } state_r_t;
+  state_r_t rs, rs_parent;
+  logic evict_valid, evict_ready, evict_done_valid;
+  logic [1:0] evict_phase;
+  logic [L2_LINE_LEN-1:0] evict_word;
+  logic bypass_valid, bypass_ready, bypass_done_valid;
+  logic [1:0] bypass_phase;
+  logic hit_valid, hit_ready;
+  logic [2:0] hit_phase;
+  logic refill_valid, refill_ready;
+  logic [1:0] refill_phase;
 
-  state_r_t rs;
+  assign evict_valid = rs_parent == R_EVICT_AW;
+  assign bypass_valid = rs_parent == R_BYPASS_WAIT || rs_parent == R_BYPASS_AR;
+  assign hit_valid = rs_parent == R_HIT || rs_parent == R_INSTALL_READ;
+  assign refill_valid = rs_parent == R_MISS_INVALIDATE || rs_parent == R_MISS_AR;
+  assign rs = evict_valid ? (evict_phase == 2'd0 ? R_EVICT_AW
+                         : evict_phase == 2'd1 ? R_EVICT_READ
+                         : evict_phase == 2'd2 ? R_EVICT_W : R_EVICT_B)
+      : bypass_valid ? (bypass_phase == 2'd0 ? R_BYPASS_WAIT
+                      : bypass_phase == 2'd1 ? R_BYPASS_AR : R_BYPASS_R)
+      : hit_valid ? (hit_phase == 3'd0 ? R_HIT
+                   : hit_phase == 3'd1 ? R_HIT_DATA
+                   : hit_phase == 3'd2 ? R_HIT_PROBE
+                   : hit_phase == 3'd3 ? R_HIT_PROBE_COMMIT : R_INSTALL_READ)
+      : refill_valid ? (refill_phase == 2'd0 ? R_MISS_INVALIDATE
+                      : refill_phase == 2'd1 ? R_MISS_AR : R_MISS_R) : rs_parent;
   logic [ID_W-1:0] r_id;
   logic [XLEN-1:0] r_addr;  // captured AR address (start of req)
   logic [7:0] r_len;  // remaining beats - 1 of upstream burst
@@ -621,7 +607,6 @@ module rapt_l2 #(
   logic [L2_LINE_LEN-1:0] r_word;  // current word offset within line
   logic [XLEN-1:0] r_line_buf[LineSize];
   logic [L2_LINE_LEN-1:0] r_fill_cnt;  // next word slot to write on fill
-  logic [L2_LINE_LEN-1:0] evict_word;
   logic [1:0] r_resp;  // sticky worst rresp during fill
   logic r_up_done;  // upstream burst fully delivered (early-restart latch)
   logic r_store_fill;
@@ -631,9 +616,7 @@ module rapt_l2 #(
   function automatic logic d_client_read_id(input logic [ID_W-1:0] id);
     return id == ID_W'(2) || (ID_W >= 4 && (id & ID_W'('hc)) == ID_W'('h8));
   endfunction
-
-  // Hit detection on currently latched address (only meaningful while
-  // rs == R_IDLE handshake or in R_HIT/R_MISS_*).
+  // Hit lookup uses the saved read address.
   logic [IndexBits-1:0] r_idx_q;
   logic [TagBits-1:0] r_tag_q;
   logic r_hit_q;
@@ -653,12 +636,8 @@ module rapt_l2 #(
   logic rs_rlast;
   logic [1:0] rs_rresp;
   logic [ID_W-1:0] rs_rid;
-  // The ordinary BOOM MSHR slots handle independent clean A-channel
-  // refills. The Release handler occupies the reserved C scheduler slot
-  // while its buffer head is live; BC remains unconnected.
-  // InclusiveCacheParameters.out_mshrs = max(3, ceil(memCycles/blockBeats))
-  // with memCycles=40, plus one BC and one C reservation. RV64 therefore
-  // has 5+2 contexts and RV32 has 3+2 contexts for a 64-byte line.
+  // BOOM clean refills use max(3, ceil(40/LineSize)) MSHRs plus BC/C slots.
+  // The C slot stays reserved while its Release buffer head is live.
   localparam int BoomNormalMshrs = (40 + LineSize - 1) / LineSize > 3
                                    ? (40 + LineSize - 1) / LineSize : 3;
   localparam int BoomMshrs = BoomNormalMshrs + 2;
@@ -678,11 +657,17 @@ module rapt_l2 #(
   logic [LineSize-1:0] ms_beat_valid[BoomMshrs];
   logic [IndexBits-1:0] ms_set[BoomNormalMshrs];
   logic [XLEN-1:0] ms_line_addr[BoomNormalMshrs];
+  logic [XLEN-1:IndexMsb+1] ms_line_hi[BoomNormalMshrs];
+  logic [WordOffsetLsb-1:0] ms_line_lo[BoomNormalMshrs];
   logic [ID_W-1:0] ms_id[BoomNormalMshrs];
   logic [7:0] ms_len[BoomNormalMshrs];
   logic [2:0] ms_size[BoomNormalMshrs];
   logic [1:0] ms_burst[BoomNormalMshrs];
   logic [L2_LINE_LEN-1:0] ms_word[BoomNormalMshrs];
+  // The set and requested word already retain address bits [IndexMsb:WordOffsetLsb].
+  for (genvar slot = 0; slot < BoomNormalMshrs; slot++) begin : g_ms_line_addr
+    assign ms_line_addr[slot] = {ms_line_hi[slot], ms_set[slot], ms_word[slot], ms_line_lo[slot]};
+  end
   logic [BoomNormalMshrs-1:0] ms_early_sent;
   logic [BoomNormalMshrs-1:0] ms_early_good_accepted;
   logic ms_early_response_pending_q;
@@ -736,6 +721,7 @@ module rapt_l2 #(
   logic [2:0] ms_alloc_slot;
   logic ms_alloc_valid, ms_alloc_ready, ms_alloc_reload;
   logic ms_retire_valid, ms_complete_valid, ms_complete_candidate;
+  logic [BoomNormalMshrs-1:0] ms_complete_eligible;
   logic release_same_line_pending;
   logic ms_early_pending, ms_early_send, ms_early_overlap_state;
   logic blocking_critical_candidate, blocking_last_dir_ready;
@@ -779,6 +765,7 @@ module rapt_l2 #(
   logic [ID_W-1:0] ms_retire_id;
   logic [7:0] ms_retire_len;
   logic [2:0] ms_retire_size;
+  logic [ReadWrapBits-1:0] ms_retire_wrap_mask;
   logic [1:0] ms_retire_burst;
   logic [3:0] ms_retire_cache;
   logic [WayBits-1:0] ms_way[BoomNormalMshrs];
@@ -794,9 +781,7 @@ module rapt_l2 #(
   logic [XLEN-1:0] boom_bank_sourcec_word;
   logic boom_bank_line_busy;
   assign r_idx_q = r_addr[IndexMsb:IndexLsb];
-  // RV64 accepts both zero-extended and sign-extended forms of the same
-  // implemented 32-bit PA. Directory identity must use the canonical PA;
-  // otherwise the two forms can occupy different ways and miss store snoops.
+  // Canonicalize RV64 PA aliases before directory lookup and store snoops.
   assign r_tag_q = TagBits'(rapt_pkg::canonical_addr(r_addr) >> TagLsb);
   assign dir_lookup_hit = dir_lookup_hold_valid ? dir_lookup_hold_hit : dir_result_hit;
   assign dir_lookup_way = dir_lookup_hold_valid ? dir_lookup_hold_way : dir_result_way;
@@ -843,8 +828,7 @@ module rapt_l2 #(
       dir_lookup_hold_valid <= 1'b0;
     end else if (dir_result_valid && !dir_result_for_aw_q && !dir_result_for_error_q
                  && rs == R_HIT) begin
-      // A queued metadata write may drain while R_HIT waits for the data
-      // SRAM port or while a store makes a separate directory lookup.
+      // Hold lookup metadata across competing directory writes.
       dir_lookup_hold_valid <= 1'b1;
       dir_lookup_hold_hit <= dir_result_hit;
       dir_lookup_hold_way <= dir_result_way;
@@ -853,9 +837,7 @@ module rapt_l2 #(
       dir_lookup_hold_dirty <= dir_result_dirty;
       dir_lookup_hold_clients <= dir_result_clients;
     end
-    // A local store can dirty the same line after the read lookup was
-    // captured. Keep the held metadata current before a D-client mark writes
-    // that entry back to the one-port directory.
+    // Refresh held dirty metadata after an overlapping local store.
     if (!reset && (rs == R_HIT || hit_probe_active) && w_hit_update && same_line(
             w_snoop_addr, r_addr
         ))
@@ -881,12 +863,8 @@ module rapt_l2 #(
       end
     end
   end
-
   assign ms_busy = |ms_slot_valid;
-  // A client may release a line after receiving its critical word. C may
-  // take the reserved way while SinkD still fills it. Each C word waits
-  // until SinkD has committed that word, so later refill beats cannot
-  // overwrite released data.
+  // C can take a way during SinkD refill; each C word waits for its SinkD beat.
   always_comb begin
     release_same_line_pending = 1'b0;
     release_nested_candidate = 1'b0;
@@ -926,12 +904,18 @@ module rapt_l2 #(
   assign ms_sched_valid = {
     BoomBankedStore && release_head_valid, 1'b0, ms_slot_valid[BoomNormalMshrs-1:0]
   };
+  for (genvar slot = 0; slot < BoomNormalMshrs; slot++) begin : g_complete_eligible
+    assign ms_complete_eligible[slot] = ms_slot_done[slot] && !ms_installed[slot]
+        && !(ms_early_good_accepted[slot] && ms_slot_resp[slot] != 2'b00)
+        && (!ms_secondary_queue_valid[slot] || !ms_early_sent[slot]
+            || (ms_replay_pending && ms_replay_slot == 3'(slot)));
+  end
+  assign ms_complete_candidate = |ms_complete_eligible;
   always_comb begin
     ms_free = 1'b0;
     ms_free_slot = '0;
     ms_done_any = 1'b0;
     ms_active_refills = 1'b0;
-    ms_complete_candidate = 1'b0;
     ms_complete_slot = '0;
     ms_retire_candidate = 1'b0;
     ms_retire_slot = '0;
@@ -956,20 +940,11 @@ module rapt_l2 #(
         ms_late_response_slot = 3'(slot);
       end
       if (ms_slot_done[slot]) ms_done_any = 1'b1;
-      // A grant already sent to the client cannot be replaced by an AXI
-      // error response. Keep the MSHR and retry its complete line instead.
+      // Retry after an AXI error once a critical word was granted.
       if (ms_slot_done[slot] && !ms_installed[slot] && ms_early_good_accepted[slot]
           && ms_slot_resp[slot] != 2'b00 && !ms_failed_early_retry) begin
         ms_failed_early_retry = 1'b1;
         ms_failed_early_retry_slot = 3'(slot);
-      end
-      if (ms_slot_done[slot] && !ms_installed[slot]
-          && !(ms_early_good_accepted[slot] && ms_slot_resp[slot] != 2'b00)
-          && (!ms_secondary_queue_valid[slot] || !ms_early_sent[slot]
-              || (ms_replay_pending && ms_replay_slot == 3'(slot)))
-          && !ms_complete_candidate) begin
-        ms_complete_candidate = 1'b1;
-        ms_complete_slot = 3'(slot);
       end
       if (ms_slot_done[slot] && ms_installed[slot] && !ms_secondary_queue_valid[slot]
           && !ms_late_response_pending[slot]
@@ -997,6 +972,8 @@ module rapt_l2 #(
         ms_early_slot = 3'(slot);
       end
     end
+    for (int slot = BoomNormalMshrs - 1; slot >= 0; slot--)
+    if (ms_complete_eligible[slot]) ms_complete_slot = 3'(slot);
   end
   assign ms_alloc_slot = ms_replay_active ? ms_replay_slot : ms_free_slot;
   assign ms_alloc_reload = ms_replay_active && ms_slot_done[int'(ms_replay_slot)]
@@ -1009,9 +986,7 @@ module rapt_l2 #(
       && !w_hit_update && !burst_hit_update && !cbo_exact_invalidate
       && !(axi_s.awvalid && axi_s.awready);
   assign ms_alloc_invalidate = ms_alloc_valid && ms_alloc_ready;
-  // An unrelated clean MSHR may return its critical word while the blocking
-  // miss writes back a victim or accepts refill data. The blocking miss's own
-  // critical beat has priority when both responses are ready together.
+  // Blocking critical beats take priority over independent MSHR responses.
   assign ms_early_overlap_state = rs == R_EVICT_PROBE || rs == R_EVICT_AW
       || rs == R_EVICT_READ || rs == R_EVICT_W || rs == R_EVICT_B
       || rs == R_MISS_INVALIDATE || rs == R_MISS_AR || rs == R_MISS_R;
@@ -1022,17 +997,12 @@ module rapt_l2 #(
   assign ms_early_send = BoomBankedStore && (rs == R_IDLE || ms_early_overlap_state)
       && ms_early_pending && !blocking_critical_candidate
       && !rs_rvalid && !cache_install && !burst_active;
-  // Once SinkD has filled every bank, commit metadata even if an unrelated
-  // blocking miss still owns the shared read FSM. Keep the primary response
-  // pending until that FSM is available to read the installed line.
+  // Completed SinkD lines may commit metadata during another blocking miss.
   assign ms_late_response_issue = BoomBankedStore && ms_late_response_candidate
       && rs == R_IDLE && !rs_rvalid && !cache_install && !boom_bank_line_busy
       && !burst_active && !release_pending && !ms_early_send
       && !ms_replay_pending && !ms_replay_active && !ms_source_active;
-  // SourceD can read a completed ordinary line from its installed banked
-  // way while a different miss is still in Probe, eviction, or refill.
-  // A line-local FIXED, INCR, or WRAP burst can read the installed way without
-  // borrowing the blocking miss's response FSM.
+  // SourceD reads an installed line during an unrelated blocking miss.
   assign ms_source_start = BoomBankedStore && ms_late_response_candidate
       && ms_early_overlap_state && !release_pending && !ms_source_active
       && !ms_late_response_active
@@ -1042,9 +1012,7 @@ module rapt_l2 #(
       ms_size[int'(ms_late_response_slot)],
       ms_burst[int'(ms_late_response_slot)]
   );
-  // An installed equal-tag secondary can reuse the MSHR's committed way.
-  // Different tags and unsupported burst shapes still replay via the
-  // directory after the blocking transaction completes.
+  // Installed equal-tag secondaries reuse the way; others replay.
   assign ms_source_secondary_start = BoomBankedStore && ms_secondary_reload_valid
       && ms_slot_done[int'(ms_secondary_slot)] && ms_installed[int'(ms_secondary_slot)]
       && ms_early_sent[int'(ms_secondary_slot)] && !ms_secondary_reload_needs_directory
@@ -1084,9 +1052,7 @@ module rapt_l2 #(
   assign ms_source_response_send = ms_source_active && ms_source_data_valid
       && (ms_early_overlap_state || rs == R_IDLE) && !rs_rvalid
       && !blocking_critical_candidate && !ms_early_send && !burst_active;
-  // A foreign Get must retrieve a Trunk owner's latest data. A D regrant
-  // after C/Probe must re-mark ownership before replying. Before install,
-  // only the primary grant contributes a client; queued future grants do not.
+  // Foreign Gets probe Trunk owners and re-mark ownership before D regrant.
   assign ms_secondary_needs_ownership = ms_installed[int'(ms_secondary_slot)]
       ? (!ms_meta_valid[int'(ms_secondary_slot)]
           || ms_meta_tag[int'(ms_secondary_slot)] != ms_sched_tag[int'(ms_secondary_slot)]
@@ -1111,9 +1077,7 @@ module rapt_l2 #(
   assign ms_complete_valid = BoomBankedStore && rs == R_IDLE && ms_complete_candidate
       && !rs_rvalid && !cache_install && !boom_bank_line_busy && !burst_active
       && !ms_late_response_issue && !ms_source_active
-      // C's first lookup has finished. A completed refill for another set
-      // may install while C waits for later data beats. A same-line refill
-      // stays reserved until C commits its dirty metadata on ReleaseAck.
+      // Different-set refill may install while C awaits more Release beats.
       && (!release_pending
           || (release_head_valid && release_state == REL_DATA
               && ms_set[int'(ms_complete_slot)] != release_head_addr[IndexMsb:IndexLsb]))
@@ -1121,9 +1085,7 @@ module rapt_l2 #(
       && !ms_early_send && !ms_secondary_send && !ms_secondary_capture
       && !ms_source_secondary_start
       && dir_write_ready;
-  // SinkD has already written every clean refill beat to its reserved way.
-  // The metadata write can commit while another miss waits for Probe,
-  // dirty-victim writeback, or outer R, without borrowing its read FSM.
+  // SinkD's clean line may commit metadata during another blocking miss.
   assign ms_direct_complete = BoomBankedStore && ms_complete_candidate
       && ms_slot_resp[int'(ms_complete_slot)] == 2'b00
       && (rs == R_EVICT_PROBE || rs == R_EVICT_AW || rs == R_EVICT_READ
@@ -1171,9 +1133,7 @@ module rapt_l2 #(
       ms_replay_meta_dirty = dir_write_dirty;
     end
   end
-  // Reuse includes an Invalid entry: the same reserved way needs an outer
-  // refill, rather than a new directory lookup. Keep eligibility independent
-  // of the live metadata-write bypass to avoid feedback into AR/AW admission.
+  // An Invalid reserved way still requires a refill.
   assign ms_replay_use_metadata = !ms_replay_needs_directory
       && ms_meta_valid[int'(ms_replay_slot)]
       && ms_meta_tag[int'(ms_replay_slot)] == TagBits'(rapt_pkg::canonical_addr(
@@ -1279,7 +1239,8 @@ module rapt_l2 #(
       ms_replay_needs_directory <= 1'b0;
       for (int slot = 0; slot < BoomNormalMshrs; slot++) begin
         ms_set[slot] <= '0;
-        ms_line_addr[slot] <= '0;
+        ms_line_hi[slot] <= '0;
+        ms_line_lo[slot] <= '0;
         ms_id[slot] <= '0;
         ms_len[slot] <= '0;
         ms_size[slot] <= '0;
@@ -1294,7 +1255,8 @@ module rapt_l2 #(
       end
       if (ms_alloc_valid && ms_alloc_ready) begin
         ms_set[int'(ms_alloc_slot)] <= r_idx_q;
-        ms_line_addr[int'(ms_alloc_slot)] <= r_addr;
+        ms_line_hi[int'(ms_alloc_slot)] <= r_addr[XLEN-1:IndexMsb+1];
+        ms_line_lo[int'(ms_alloc_slot)] <= r_addr[WordOffsetLsb-1:0];
         ms_id[int'(ms_alloc_slot)] <= r_id;
         ms_len[int'(ms_alloc_slot)] <= r_len;
         ms_size[int'(ms_alloc_slot)] <= r_size;
@@ -1485,6 +1447,7 @@ module rapt_l2 #(
         .alloc_inner_id(r_id),
         .alloc_inner_len(r_len),
         .alloc_inner_size(r_size),
+        .alloc_inner_wrap_mask(r_wrap_mask),
         .alloc_inner_burst(r_burst),
         .alloc_cache(r_cache),
         .outer_arvalid(ms_arvalid),
@@ -1517,6 +1480,7 @@ module rapt_l2 #(
         .retire_inner_id(ms_retire_id),
         .retire_inner_len(ms_retire_len),
         .retire_inner_size(ms_retire_size),
+        .retire_inner_wrap_mask(ms_retire_wrap_mask),
         .retire_inner_burst(ms_retire_burst),
         .retire_cache(ms_retire_cache)
     );
@@ -1546,6 +1510,7 @@ module rapt_l2 #(
     assign ms_retire_id = '0;
     assign ms_retire_len = '0;
     assign ms_retire_size = '0;
+    assign ms_retire_wrap_mask = '0;
     assign ms_retire_burst = '0;
     assign ms_retire_cache = '0;
     assign ms_secondary_request_ready = 1'b0;
@@ -1574,16 +1539,12 @@ module rapt_l2 #(
     end
   end
 `endif
-
-  // ---------------------------------------------------------------------
   // Slave side R driver
-  // ---------------------------------------------------------------------
   assign axi_s.rvalid = rs_rvalid;
   assign axi_s.rdata  = rs_rdata;
   assign axi_s.rlast  = rs_rlast;
   assign axi_s.rresp  = rs_rresp;
   assign axi_s.rid    = rs_rid;
-
   logic r_hit_beat_fire;
   logic [XLEN-1:0] r_next_addr;
   logic boom_queued_miss_or_unknown;
@@ -1649,10 +1610,7 @@ module rapt_l2 #(
       : (rs == R_IDLE && axi_s.arvalid && axi_s.arready
           && ar_cache_lookup) ? axi_s.araddr[IndexMsb:IndexLsb] :
       (r_hit_beat_fire && (r_len != 8'd0)) ? r_next_addr[IndexMsb:IndexLsb] : r_idx_q;
-
-  // ---------------------------------------------------------------------
   // AR acceptance: only when read FSM idle.
-  // ---------------------------------------------------------------------
   // An early-restarted refill can return to IDLE before its registered
   // install pulse writes SRAM. A new lookup needs a real read edge.
   logic ms_ar_common_ready;
@@ -1695,10 +1653,7 @@ module rapt_l2 #(
                                  && (!BoomBankedStore || !cacheable_line(
       axi_s.araddr
   ) || !(|axi_s.arcache[3:2]) || ms_free));
-
-  // ---------------------------------------------------------------------
   // Master-side AR (issued during R_MISS_AR or R_BYPASS_AR).
-  // ---------------------------------------------------------------------
   logic            m_arvalid;
   logic [XLEN-1:0] m_araddr;
   logic [     7:0] m_arlen;
@@ -1714,13 +1669,7 @@ module rapt_l2 #(
   assign axi_m.arsize = m_arvalid ? m_arsize : ms_arsize;
   assign axi_m.arburst = m_arvalid ? m_arburst : ms_arburst;
   assign axi_m.arcache = m_arvalid ? m_arcache : ms_arcache;
-
-  // A blocking partial Put refill writes each accepted outer beat through
-  // SinkD, so a same-bank higher-priority access may backpressure AXI R.
-  // Bypass reads use the single upstream holding register instead.
-  // A blocking last beat raises cache_install on the next edge. Wait for the
-  // one-entry directory write queue to drain so that install cannot be lost
-  // behind an unrelated MSHR metadata commit.
+  // SinkD backpressure and the directory write queue gate blocking refill R.
   assign blocking_last_dir_ready = !BoomBankedStore || !axi_m.rlast
       || (dir_write_ready && !dir_write_valid);
   assign axi_m.rready = ms_sinkd_valid ? ms_rready
@@ -1728,33 +1677,11 @@ module rapt_l2 #(
          && blocking_last_dir_ready
          && (!blocking_refill_sinkd_valid || boom_bank_sinkd_ready))
           || ((rs == R_BYPASS_R) && (!rs_rvalid || axi_s.rready));
-
-  // ---------------------------------------------------------------------
   // Cache write port (drive on fill completion)
-  // ---------------------------------------------------------------------
-  // ---------------------------------------------------------------------
   // Write buffer
-  // ---------------------------------------------------------------------
-  // Decouples upstream AW/W capture from the downstream drain. A buffered
-  // store hit can complete locally; a store miss waits for its refill and
-  // a forwarded write waits for the real downstream B when not posted.
-  //
-  // Stores from rapt_bus are single-beat (axi.awlen==0), so each buffer
-  // entry holds the whole transaction. A small B-id FIFO records the
-  // upstream id ordering independently of the downstream drain pointer.
-  // A BOOM-layout write miss holds its B entry until the refill installs.
-  //
-  // BOOM provisions 40 put lists and 40 put beats for its default 40-cycle
-  // memory latency. Raptor's buffered AXI writes are single-beat, so one
-  // entry consumes one list and one beat. Keep the smaller legacy cache at
-  // two entries; the BOOM geometry gets 40 AW/W slots and 40 ordered B slots.
-  //
-  // Future extensions (left as TODO comments below):
-  //   - Write coalescing: on AW enqueue, scan buffer for same-line entries
-  //     and merge wstrb into existing entry (saves a downstream beat).
-  //   - Read MSHR: mirror this structure on the read side (multiple
-  //     outstanding fills), today `r_*` is a single-entry placeholder.
-  //   - Coalesce consecutive L1D write-back words in a single line entry.
+  // Single-beat AW/W entries decouple capture from drain; B IDs keep order.
+  // BOOM has 40 slots for its 40-cycle latency; legacy caches keep two.
+  // Local hits finish in L2, misses wait for refill, and forwarded writes wait for B.
   localparam int WbufDepth = BoomBankedStore ? 40 : 2;
   localparam int WbufPtrW  = $clog2(WbufDepth);
   localparam int WbufCntW  = $clog2(WbufDepth + 1);
@@ -1784,10 +1711,9 @@ module rapt_l2 #(
     logic                lookup_clients;
     logic [WbufPtrW-1:0] rsp_slot;
   } wbuf_ent_t;
-
   wbuf_ent_t wbuf[WbufDepth];
   logic [WbufPtrW-1:0] aw_wptr;  // next AW capture slot
-  logic [WbufPtrW-1:0] w_wptr;  // next W capture slot (trails aw_wptr)
+  (* max_fanout = -1 *) logic [WbufPtrW-1:0] w_wptr;  // next W capture slot
   logic [WbufPtrW-1:0] d_rptr;  // drain head slot
   logic put_push_ready, put_pop_valid, burst_put_pop_valid, burst_forward_pop_valid;
   logic put_claim_fire;
@@ -1824,7 +1750,6 @@ module rapt_l2 #(
   assign w_lookup_ready = wbuf[w_wptr].lookup_ready || w_lookup_now;
   assign w_lookup_hit = w_lookup_now ? dir_result_hit : wbuf[w_wptr].lookup_hit;
   assign w_lookup_way = w_lookup_now ? dir_result_way : wbuf[w_wptr].lookup_way;
-
   // BOOM SinkA claims the lowest free list on the first data beat. AXI AW can
   // precede W, so the descriptor does not claim a list until W is accepted.
   always_comb begin
@@ -1848,7 +1773,6 @@ module rapt_l2 #(
       if (put_claim_fire) put_list_claimed[put_list_alloc] <= 1'b1;
     end
   end
-
   if (BoomBankedStore) begin : g_put_buffer
     rapt_l2_put_buffer #(
         .Xlen(XLEN),
@@ -1880,7 +1804,6 @@ module rapt_l2 #(
   assign drain_wdata = BoomBankedStore ? put_pop_data : wbuf[d_rptr].wdata;
   assign drain_wstrb = BoomBankedStore ? put_pop_mask : wbuf[d_rptr].wstrb;
   assign drain_wlast = BoomBankedStore ? put_pop_last : wbuf[d_rptr].wlast;
-
   // Posted-B id FIFO (one id per W beat captured; consumed on upstream bready).
   logic [ID_W-1:0] b_id_q[WbufDepth];
   logic [1:0] b_resp_q[WbufDepth];
@@ -1896,11 +1819,7 @@ module rapt_l2 #(
   logic forward_b_match;
   logic [WbufPtrW-1:0] forward_b_slot;
   assign bq_full = (b_count == WbufCntW'(WbufDepth));
-
-  // Outer B may return after a later forwarded burst has taken the active
-  // slot. Compare fixed slots in parallel, then choose the lowest matching
-  // index at or after b_rptr, wrapping to the lowest index if needed. This
-  // preserves the oldest matching slot without a rotating array read mux.
+  // Match outer B to the oldest pending slot, wrapping after b_rptr.
   for (genvar slot = 0; slot < WbufDepth; slot++) begin : g_forward_b_candidate
     assign forward_b_candidate[slot] = forward_b_pending[slot] && b_id_q[slot] == axi_m.bid;
     if (slot == (1 << WbufPtrW) - 1) begin : g_last_encodable_slot
@@ -2029,7 +1948,6 @@ module rapt_l2 #(
     end
   end
 `endif
-
   // Any-busy: used to serialize reads vs all in-flight writes (AXI memory
   // models may reorder AR vs same- or other-line AW).
   logic read_bypass_in_progress;
@@ -2046,7 +1964,6 @@ module rapt_l2 #(
   assign forward_scalar_head = wbuf_forward_scalar[d_rptr] && wbuf[d_rptr].has_w;
   assign read_bypass_in_progress = (rs == R_BYPASS_WAIT) || (rs == R_BYPASS_AR)
                                  || (rs == R_BYPASS_R);
-
   // Snoop hit-merge: fires when a W beat is captured into wbuf[w_wptr].
   // The AW directory result is held in that slot if W arrives later.
   logic [IndexBits-1:0] w_idx_q;
@@ -2142,20 +2059,11 @@ module rapt_l2 #(
       // upstream R channel stalls. Do not use it after its line is invalid.
       r_lookup_killed <= 1'b1;
   end
-
-  // The BOOM-layout store has four banks selected by line chunk. Its
-  // read-ready contract permits a hit read alongside a write to another
-  // bank; the legacy word banks serialize full-word store updates.
-  //   * cache_install fires while the read FSM sits in R_INSTALL_WAIT --
-  //     the read port is idle, no conflict.
-  //   * w_hit_update can fire mid-R_HIT (store drain concurrent with an
-  //     unrelated read burst). The write then wins the port and the read
-  //     address register is clobbered; R_HIT stalls for exactly one cycle
-  //     (see l2_sram_wblock below) while the read address is re-latched.
+  // BOOM banks permit separate-bank read/write; legacy banks serialize.
+  // A same-bank store during R_HIT stalls one cycle to refresh read data.
   assign l2_sram_wblock = BoomBankedStore
                           ? (rs == R_EVICT_READ ? !boom_bank_sourcec_ready : !boom_bank_read_ready)
                           : cache_install || w_cache_word_write;
-
   generate
     if (BoomBankedStore) begin : g_boom_banked_store
       logic [511:0] read_line_data, install_line_data;
@@ -2325,7 +2233,6 @@ module rapt_l2 #(
       end
     end
   endgenerate
-
   // Drain FSM placed before the read FSM because read miss-issue
   // serializes against write activity to avoid AR/AW ordering races.
   typedef enum logic [1:0] {
@@ -2342,9 +2249,7 @@ module rapt_l2 #(
   assign burst_pop_next_addr = advance_read_addr(
       burst_pop_addr, burst_size, burst_kind, burst_wrap_mask
   );
-  // BOOM's non-flowing Put list can empty between incoming W beats. Keep the
-  // list claimed until its last beat is popped. Stop at each line boundary
-  // until that segment commits, then re-read the next line's directory entry.
+  // Hold a claimed Put list across W gaps and commit each line segment.
   assign burst_put_pop_valid = BoomBankedStore && burst_active && burst_allocate
       && burst_input_started && !burst_w_done && put_list_valid[burst_put_list]
       && (rs == R_BURST_ERROR
@@ -2418,11 +2323,8 @@ module rapt_l2 #(
   end
   assign dir_error_inv = BoomBankedStore && write_response_error && dir_error_hit
       && !forward_scalar_head;
-  // AXI non-bufferable cacheable scalar stores must wait for the real B.
-  // Keep older dirty bytes intact if that B fails; on success, apply the
-  // saved W beat to the line found by the fresh directory lookup.
-  // A D-client owner must release the old copy before the saved W beat can
-  // change L2, even though the outer write has already completed.
+  // Non-bufferable scalar stores apply to L2 after successful outer B
+  // and any D-client release, preserving older dirty bytes on error.
   assign forward_scalar_probe_request = forward_scalar_head && ws == W_B
       && axi_m.bvalid && axi_m.bresp == 2'b00
       && error_lookup_state == E_WRITE && error_lookup_hit_q && error_lookup_clients_q
@@ -2465,9 +2367,7 @@ module rapt_l2 #(
       && (cbo_state == C_IDLE || rs == R_IDLE && cbo_state == C_PROBE)
       && (!rs_rvalid || release_probe_preempt)
       && !cache_install && !boom_bank_line_busy
-      // A forwarded resident-hit burst holds outer B until its journal
-      // replays. L1D can be waiting for this ReleaseAck before it can answer
-      // the journal's Probe, so C may use the directory once W has drained.
+      // Hold forwarded hit B until its journal replays and L1D can answer Probe.
       && ((!any_write_in_flight && b_count == 0)
           || (forward_cache_pending && !burst_active && !(|wbuf_busy)
               && |forward_b_pending)
@@ -2475,10 +2375,7 @@ module rapt_l2 #(
           || forward_scalar_release_preempt
           || release_probe_preempt)
       && (!dir_error_pending || forward_scalar_release_preempt);
-  // C's first lookup blocks new primary AR and AW; an independent secondary
-  // may only enter its queue. The other lookup sources are excluded by the
-  // read/burst/error state terms above. Avoid feeding their ready signals
-  // back through the scheduler into this C request.
+  // C's first lookup blocks primary AR/AW; independent secondaries queue.
   assign release_lookup_fire = release_lookup_candidate
       && ms_secondary_schedule_onehot[BoomMshrs-1];
   // SinkC has priority over line installs and resident store writes. Different
@@ -2653,837 +2550,770 @@ module rapt_l2 #(
   assign dir_clear_set = burst_active ? burst_addr[IndexMsb:IndexLsb]
       : BoomBankedStore ? cbo_active_set : cbo_clear_set;
   assign dir_clear_valid = BoomBankedStore && cbo_state == C_CLEAR && cbo_active_broad;
+  logic r_idle_service_blocked, r_idle_burst_branch, r_idle_store_branch;
+  logic evict_capture_valid, evict_capture_way_only;
+  logic [WayBits-1:0] evict_capture_way;
+  logic [TagBits-1:0] evict_capture_tag;
+  logic [1:0] evict_capture_state;
+  logic evict_capture_dirty, evict_capture_clients;
+  logic evict_nested_release;
+  logic r_idle_ar_take, r_hit_blocking_miss;
+  logic refill_beat_fire, refill_early_fire, refill_count_clear, refill_count_inc;
+  logic refill_response_clear, refill_response_load, refill_up_done_clear;
+  logic [1:0] refill_response_data;
+  logic r_idle_secondary_error_take, refill_probe_burst_clear;
+  logic r_idle_ar_direct, r_bypass_wait_issue, r_evict_probe_legacy_issue;
+  logic r_evict_b_legacy_issue, outer_ar_capture, outer_ar_issue;
+  typedef struct packed {
+    logic [XLEN-1:0] addr;
+    logic [ID_W-1:0] id;
+    logic [7:0] len;
+    logic [2:0] size;
+    logic [1:0] burst;
+    logic [3:0] cache;
+  } outer_ar_t;
+  outer_ar_t outer_ar_data;
+  assign r_idle_service_blocked = ms_source_response_send || ms_early_send
+      || ms_late_response_issue || ms_secondary_send || ms_secondary_capture
+      || ms_complete_valid || ms_replay_issue || ms_retire_valid || ms_secondary_accept
+      || (axi_s.arvalid && axi_s.arready);
+  assign r_idle_burst_branch = rs == R_IDLE && !r_idle_service_blocked && !ms_busy
+      && burst_active && burst_allocate && burst_segment_ready && burst_lookup_ready
+      && !rs_rvalid && !cache_install;
+  assign r_idle_store_branch = rs == R_IDLE && !r_idle_service_blocked
+      && !r_idle_burst_branch && BoomBankedStore && !ms_busy && ws == W_IDLE
+      && wbuf[d_rptr].busy && wbuf[d_rptr].has_w && wbuf[d_rptr].local_miss
+      && wbuf[d_rptr].lookup_ready && !rs_rvalid && !cache_install;
+  assign r_idle_ar_take = rs == R_IDLE && axi_s.arvalid && axi_s.arready
+      && !(ms_source_response_send || ms_early_send || ms_late_response_issue
+           || ms_secondary_send || ms_secondary_capture || ms_complete_valid
+           || ms_replay_issue || ms_retire_valid || ms_secondary_accept);
+  assign r_idle_secondary_error_take = rs == R_IDLE && ms_secondary_send
+      && !ms_source_response_send && !ms_early_send && !ms_late_response_issue
+      && ms_retire_resp != 2'b00
+      && ms_secondary_reload_payload[SecondaryLenLsb+:8] != 8'd0;
+  assign r_idle_ar_direct = r_idle_ar_take && !ar_cache_lookup
+      && !ms_busy && !any_write_in_flight && !(axi_s.awvalid && axi_s.awready);
+  assign r_bypass_wait_issue = rs == R_BYPASS_WAIT && !ms_busy && !any_write_in_flight;
+  assign r_evict_probe_legacy_issue = rs == R_EVICT_PROBE && !BoomBankedStore
+      && !release_pending && (!victim_clients_q || probe_ready_i)
+      && !(r_burst_fill && burst_lookup_hit)
+      && !(victim_dirty_q && victim_state_q != 2'b00)
+      && !(r_burst_fill && burst_all_full);
+  assign r_evict_b_legacy_issue = rs == R_EVICT_B && !BoomBankedStore
+      && evict_done_valid && axi_m.bresp == 2'b00
+      && !(r_burst_fill && burst_all_full);
+  assign evict_nested_release = BoomBankedStore
+      && (rs == R_EVICT_PROBE || hit_probe_active) && release_dir_write_fire
+      && release_head_addr[IndexMsb:IndexLsb] == r_idx_q
+      && TagBits'(rapt_pkg::canonical_addr(release_head_addr) >> TagLsb) == victim_tag_q;
+  always_comb begin
+    evict_capture_valid = 1'b0;
+    evict_capture_way_only = 1'b0;
+    {evict_capture_way, evict_capture_tag, evict_capture_state,
+     evict_capture_dirty, evict_capture_clients} = '0;
+    if (r_idle_burst_branch && !burst_direct_hit) begin
+      evict_capture_valid = 1'b1;
+      {evict_capture_way, evict_capture_tag, evict_capture_state,
+       evict_capture_dirty, evict_capture_clients} =
+          {burst_lookup_way, burst_lookup_tag, burst_lookup_state,
+           burst_lookup_dirty, burst_lookup_clients};
+    end else if (r_idle_store_branch) begin
+      evict_capture_valid = 1'b1;
+      {evict_capture_way, evict_capture_tag, evict_capture_state,
+       evict_capture_dirty, evict_capture_clients} =
+          {wbuf[d_rptr].lookup_way, wbuf[d_rptr].lookup_tag,
+           wbuf[d_rptr].lookup_state, wbuf[d_rptr].lookup_dirty,
+           wbuf[d_rptr].lookup_clients};
+    end else if (rs == R_HIT && !(dir_client_mark && !dir_write_ready)
+                 && !l2_sram_wblock && r_hit_q && BoomBankedStore
+                 && dir_lookup_clients && !d_client_read_id(
+            r_id
+        )) begin
+      evict_capture_valid = 1'b1;
+      {evict_capture_way, evict_capture_tag, evict_capture_state,
+       evict_capture_dirty, evict_capture_clients} =
+          {r_hit_way, r_tag_q, dir_lookup_state, dir_lookup_dirty, 1'b1};
+    end else if (rs == R_HIT && !(dir_client_mark && !dir_write_ready)
+                 && !l2_sram_wblock && !r_hit_q
+                 && !(BoomBankedStore && release_pending
+                      && (dir_lookup_clients || dir_lookup_dirty))
+                 && (|r_cache[3:2]) && !any_write_in_flight
+                 && !(axi_s.awvalid && axi_s.awready)) begin
+      if (BoomBankedStore) begin
+        evict_capture_valid = dir_lookup_clients || dir_lookup_dirty || ms_alloc_invalidate;
+        evict_capture_way_only = !dir_lookup_clients && !dir_lookup_dirty;
+        {evict_capture_way, evict_capture_tag, evict_capture_state,
+         evict_capture_dirty, evict_capture_clients} =
+            {dir_lookup_way, dir_lookup_tag, dir_lookup_state,
+             dir_lookup_dirty, dir_lookup_clients};
+      end else begin
+        evict_capture_valid = 1'b1;
+        evict_capture_way_only = 1'b1;
+        evict_capture_way = L2_N_WAYS == 1 ? '0
+            : WayBits'(victim_lfsr[9:0] >> (10 - WayBits));
+      end
+    end
+  end
+  assign r_hit_blocking_miss = rs == R_HIT && !r_hit_q && evict_capture_valid
+      && !(BoomBankedStore && !dir_lookup_clients && !dir_lookup_dirty);
+  assign refill_beat_fire = rs == R_MISS_R && axi_m.rvalid && axi_m.rready
+      && axi_m.rid == m_arid;
+  assign refill_early_fire = refill_beat_fire && !r_store_fill && !r_burst_fill
+      && !r_up_done && r_len == 8'd0 && r_fill_cnt == r_word
+      && axi_m.rresp == 2'b00 && r_resp == 2'b00 && (!rs_rvalid || axi_s.rready);
+  assign refill_probe_burst_clear = rs == R_EVICT_PROBE && !release_pending
+      && (!victim_clients_q || probe_ready_i) && r_burst_fill && burst_all_full
+      && (burst_lookup_hit ? BoomBankedStore : !(victim_dirty_q && victim_state_q != 2'b00));
+  assign refill_count_clear = (r_idle_burst_branch && !burst_direct_hit)
+      || r_idle_store_branch || r_hit_blocking_miss || refill_probe_burst_clear
+      || (rs == R_EVICT_B && evict_done_valid && axi_m.bresp == 2'b00
+          && r_burst_fill && burst_all_full)
+      || (rs == R_BURST_HIT_MERGE && r_fill_cnt == L2_LINE_LEN'(LineSize - 1)
+          && BoomBankedStore)
+      || (refill_beat_fire && axi_m.rlast && axi_m.rresp == 2'b00
+          && r_resp == 2'b00 && blocking_refill_streamed);
+  assign refill_count_inc = (rs == R_BURST_HIT_MERGE
+      && r_fill_cnt != L2_LINE_LEN'(LineSize - 1))
+      || (rs == R_BURST_PUT_WRITE && (!burst_put_word_valid || bank_write_word_ready)
+          && r_fill_cnt != L2_LINE_LEN'(LineSize - 1)) || refill_beat_fire;
+  assign refill_response_clear = rs == R_IDLE
+      && (ms_late_response_issue || ms_replay_issue || r_idle_ar_take
+          || (r_idle_burst_branch && !burst_direct_hit) || r_idle_store_branch)
+      || r_hit_blocking_miss;
+  assign refill_response_load = r_idle_secondary_error_take || ms_complete_valid
+      || (rs == R_EVICT_B && evict_done_valid && axi_m.bresp != 2'b00)
+      || (refill_beat_fire && axi_m.rresp != 2'b00);
+  assign refill_response_data = r_idle_secondary_error_take || ms_complete_valid
+      ? ms_retire_resp : rs == R_EVICT_B ? axi_m.bresp : axi_m.rresp;
+  assign refill_up_done_clear = (rs == R_IDLE
+      && (ms_late_response_issue || ms_complete_valid || ms_replay_issue
+          || (r_idle_burst_branch && !burst_direct_hit) || r_idle_store_branch))
+      || r_hit_blocking_miss;
+  assign outer_ar_capture = r_idle_ar_direct || (r_idle_burst_branch && !burst_direct_hit)
+      || r_idle_store_branch || r_hit_blocking_miss || r_bypass_wait_issue;
+  assign outer_ar_issue = r_idle_ar_direct || r_bypass_wait_issue
+      || (r_hit_blocking_miss && !BoomBankedStore)
+      || (rs == R_MISS_INVALIDATE && dir_write_ready)
+      || r_evict_probe_legacy_issue || r_evict_b_legacy_issue;
+  always_comb begin
+    outer_ar_data = '0;
+    if (r_idle_ar_direct)
+      outer_ar_data = {
+        axi_s.araddr, axi_s.arid, axi_s.arlen, axi_s.arsize, axi_s.arburst, axi_s.arcache
+      };
+    else if (r_idle_burst_branch && !burst_direct_hit)
+      outer_ar_data = {
+        {burst_start[XLEN-1:OffsetBits], {OffsetBits{1'b0}}},
+        burst_id,
+        8'(LineSize - 1),
+        3'($clog2(WordBytes)),
+        2'b01,
+        burst_cache
+      };
+    else if (r_idle_store_branch)
+      outer_ar_data = {
+        {wbuf[d_rptr].addr[XLEN-1:OffsetBits], {OffsetBits{1'b0}}},
+        wbuf[d_rptr].id,
+        8'(LineSize - 1),
+        3'($clog2(WordBytes)),
+        2'b01,
+        wbuf[d_rptr].cache
+      };
+    else if (r_hit_blocking_miss)
+      outer_ar_data = {
+        {r_addr[XLEN-1:OffsetBits], {OffsetBits{1'b0}}},
+        BoomBankedStore ? ID_W'(ms_replay_active ? ms_replay_slot : ms_free_slot) : r_id,
+        8'(LineSize - 1),
+        3'($clog2(WordBytes)),
+        2'b01,
+        r_cache
+      };
+    else if (r_bypass_wait_issue) outer_ar_data = {r_addr, r_id, r_len, r_size, r_burst, r_cache};
+  end
 
-  // ---------------------------------------------------------------------
+  rapt_l2_evict_ctrl #(
+      .LINE_LEN(L2_LINE_LEN),
+      .WAY_BITS(WayBits),
+      .TAG_BITS(TagBits)
+  ) u_evict_ctrl (
+      .clock,
+      .reset,
+      .valid_i(evict_valid),
+      .ready_o(evict_ready),
+      .phase_o(evict_phase),
+      .word_o(evict_word),
+      .aw_fire_i(axi_m.awvalid && axi_m.awready),
+      .read_ready_i(!l2_sram_wblock),
+      .w_fire_i(axi_m.wvalid && axi_m.wready),
+      .b_fire_i(axi_m.bvalid && axi_m.bready),
+      .done_valid_o(evict_done_valid),
+      .done_ready_i(1'b1),
+      .capture_valid_i(evict_capture_valid),
+      .capture_way_only_i(evict_capture_way_only),
+      .capture_way_i(evict_capture_way),
+      .capture_tag_i(evict_capture_tag),
+      .capture_state_i(evict_capture_state),
+      .capture_dirty_i(evict_capture_dirty),
+      .capture_clients_i(evict_capture_clients),
+      .probe_release_i(probe_release_fire && (rs == R_EVICT_PROBE || rs == R_HIT_PROBE)),
+      .nested_release_i(evict_nested_release),
+      .nested_dirty_i(release_dir_dirty_q || release_head_has_data),
+      .nested_state_i(dir_write_state),
+      .victim_way_o(victim_way_q),
+      .victim_tag_o(victim_tag_q),
+      .victim_state_o(victim_state_q),
+      .victim_dirty_o(victim_dirty_q),
+      .victim_clients_o(victim_clients_q)
+  );
+  rapt_l2_bypass_ctrl #(
+      .XLEN(XLEN),
+      .ID_W(ID_W)
+  ) u_bypass_ctrl (
+      .clock,
+      .reset,
+      .valid_i(bypass_valid),
+      .start_ar_i(rs_parent == R_BYPASS_AR),
+      .ready_o(bypass_ready),
+      .phase_o(bypass_phase),
+      .wait_done_i(!ms_busy && !any_write_in_flight),
+      .ar_done_i(!m_arvalid),
+      .r_last_fire_i(axi_m.rvalid && (!rs_rvalid || axi_s.rready) && axi_m.rlast),
+      .done_valid_o(bypass_done_valid),
+      .done_ready_i(1'b1),
+      .request_valid_i(outer_ar_capture),
+      .request_issue_i(outer_ar_issue),
+      .request_addr_i(outer_ar_data.addr),
+      .request_id_i(outer_ar_data.id),
+      .request_len_i(outer_ar_data.len),
+      .request_size_i(outer_ar_data.size),
+      .request_burst_i(outer_ar_data.burst),
+      .request_cache_i(outer_ar_data.cache),
+      .arready_i(axi_m.arready),
+      .arvalid_o(m_arvalid),
+      .araddr_o(m_araddr),
+      .arid_o(m_arid),
+      .arlen_o(m_arlen),
+      .arsize_o(m_arsize),
+      .arburst_o(m_arburst),
+      .arcache_o(m_arcache)
+  );
+
+  logic hit_capture_addr_valid, hit_capture_word_valid, hit_capture_len_valid;
+  logic [XLEN-1:0] hit_capture_addr;
+  logic [L2_LINE_LEN-1:0] hit_capture_word;
+  logic [7:0] hit_capture_len;
+  logic hit_beat_advance, hit_error_advance, hit_replay_take;
+  assign hit_replay_take = ms_replay_issue && !ms_secondary_send && !ms_secondary_capture;
+  assign hit_capture_addr_valid = ms_late_response_issue || ms_complete_valid
+      || hit_replay_take || r_idle_ar_take || (r_idle_burst_branch && !burst_direct_hit)
+      || r_idle_store_branch;
+  assign hit_capture_word_valid = hit_capture_addr_valid;
+  assign hit_capture_len_valid = ms_late_response_issue || r_idle_secondary_error_take
+      || ms_complete_valid || hit_replay_take || r_idle_ar_take;
+  always_comb begin
+    {hit_capture_addr, hit_capture_word, hit_capture_len} = '0;
+    if (ms_late_response_issue || ms_complete_valid)
+      {hit_capture_addr, hit_capture_word, hit_capture_len} = {
+        ms_retire_addr, ms_retire_addr[WordOffsetMsb:WordOffsetLsb], ms_retire_len
+      };
+    else if (r_idle_secondary_error_take)
+      hit_capture_len = ms_secondary_reload_payload[SecondaryLenLsb+:8];
+    else if (hit_replay_take)
+      {hit_capture_addr, hit_capture_word, hit_capture_len} = {
+        ms_replay_payload[ID_W+:XLEN],
+        ms_replay_payload[ID_W+WordOffsetLsb+:L2_LINE_LEN],
+        ms_replay_payload[SecondaryLenLsb+:8]
+      };
+    else if (r_idle_ar_take)
+      {hit_capture_addr, hit_capture_word, hit_capture_len} = {
+        axi_s.araddr, axi_s.araddr[WordOffsetMsb:WordOffsetLsb], axi_s.arlen
+      };
+    else if (r_idle_burst_branch && !burst_direct_hit) hit_capture_addr = burst_start;
+    else if (r_idle_store_branch)
+      {hit_capture_addr, hit_capture_word} = {
+        wbuf[d_rptr].addr, wbuf[d_rptr].addr[WordOffsetMsb:WordOffsetLsb]
+      };
+  end
+  assign hit_beat_advance = r_len != 8'd0 && (!rs_rvalid || axi_s.rready)
+      && ((rs == R_HIT && !BoomBankedStore && r_hit_q
+           && !(dir_client_mark && !dir_write_ready) && !l2_sram_wblock)
+          || (rs == R_HIT_DATA && !l2_sram_wblock && r_selected_resident));
+  assign hit_error_advance = rs == R_ERROR && r_len != 8'd0
+      && (!rs_rvalid || axi_s.rready);
+  typedef struct packed {
+    logic [XLEN-1:0] data;
+    logic [ID_W-1:0] id;
+    logic [1:0] code;
+    logic last;
+  } read_response_t;
+  read_response_t read_response;
+  logic read_response_write, read_response_secondary_write, read_response_secondary;
+  always_comb begin
+    read_response_write = 1'b0;
+    read_response = '0;
+    read_response_secondary_write = 1'b0;
+    read_response_secondary = 1'b0;
+    if (ms_source_response_send && (ms_early_overlap_state || rs == R_IDLE)) begin
+      read_response_write = 1'b1;
+      read_response = {ms_source_data, ms_source_id, 2'b00, ms_source_len == 8'd0};
+      read_response_secondary_write = 1'b1;
+      read_response_secondary = ms_source_primary_secondary;
+    end else if (ms_early_send && (ms_early_overlap_state || rs == R_IDLE)) begin
+      read_response_write = 1'b1;
+      read_response = {ms_retire_line[int'(ms_word[int'(ms_early_slot)])*XLEN+:XLEN],
+                       ms_id[int'(ms_early_slot)], ms_retire_resp, 1'b1};
+      read_response_secondary_write = 1'b1;
+      read_response_secondary = ms_primary_secondary[int'(ms_early_slot)];
+    end
+    unique case (rs)
+      R_IDLE:
+      if (!ms_source_response_send && !ms_early_send && !ms_late_response_issue
+                  && ms_secondary_send
+                  && !(ms_retire_resp != 2'b00
+                       && ms_secondary_reload_payload[SecondaryLenLsb+:8] != 8'd0)) begin
+        read_response_write = 1'b1;
+        read_response = {ms_retire_line[int'(ms_secondary_reload_addr[WordOffsetMsb:
+                                                 WordOffsetLsb])*XLEN+:XLEN],
+                         ms_secondary_reload_payload[0+:ID_W], ms_retire_resp, 1'b1};
+        read_response_secondary_write = 1'b1;
+        read_response_secondary = 1'b1;
+      end
+      R_HIT:
+      if (!BoomBankedStore && r_hit_q && !(dir_client_mark && !dir_write_ready)
+                 && !l2_sram_wblock && (!rs_rvalid || axi_s.rready)) begin
+        read_response_write = 1'b1;
+        read_response = {line_data_r[r_hit_way][r_word], r_id, 2'b00, r_len == 8'd0};
+      end
+      R_HIT_DATA:
+      if (!l2_sram_wblock && r_selected_resident && (!rs_rvalid || axi_s.rready)) begin
+        read_response_write = 1'b1;
+        read_response = {line_data_r[r_selected_way][r_word], r_id, 2'b00, r_len == 8'd0};
+        if (r_response_secondary) begin
+          read_response_secondary_write = 1'b1;
+          read_response_secondary = 1'b1;
+        end
+      end
+      R_MISS_R:
+      if (refill_early_fire) begin
+        read_response_write = 1'b1;
+        read_response = {axi_m.rdata, r_id, 2'b00, 1'b1};
+        if (r_response_secondary) begin
+          read_response_secondary_write = 1'b1;
+          read_response_secondary = 1'b1;
+        end
+      end
+      R_ERROR:
+      if (!rs_rvalid || axi_s.rready) begin
+        read_response_write = 1'b1;
+        read_response = {{XLEN{1'b0}}, r_id, r_resp, r_len == 8'd0};
+        if (r_response_secondary) begin
+          read_response_secondary_write = 1'b1;
+          read_response_secondary = 1'b1;
+        end
+      end
+      R_BYPASS_R:
+      if (axi_m.rvalid && (!rs_rvalid || axi_s.rready)) begin
+        read_response_write = 1'b1;
+        read_response = {axi_m.rdata, axi_m.rid, axi_m.rresp, axi_m.rlast};
+      end
+      default: ;
+    endcase
+  end
+
+  rapt_l2_hit_ctrl #(
+      .XLEN(XLEN),
+      .LINE_LEN(L2_LINE_LEN),
+      .ID_W(ID_W)
+  ) u_hit_ctrl (
+      .clock,
+      .reset,
+      .valid_i(hit_valid),
+      .start_install_i(rs_parent == R_INSTALL_READ),
+      .ready_o(hit_ready),
+      .phase_o(hit_phase),
+      .boom_i(BoomBankedStore),
+      .lookup_blocked_i((dir_client_mark && !dir_write_ready) || l2_sram_wblock),
+      .hit_i(r_hit_q),
+      .probe_needed_i(dir_lookup_clients && !d_client_read_id(r_id)),
+      .probe_done_i(!release_pending && (!victim_clients_q || probe_ready_i)),
+      .probe_commit_i(hit_probe_commit),
+      .data_recheck_i(l2_sram_wblock || !r_selected_resident),
+      .data_advance_i(!rs_rvalid || axi_s.rready),
+      .more_beats_i(r_len != 8'd0),
+      .install_ready_i(!l2_sram_wblock),
+      .capture_addr_valid_i(hit_capture_addr_valid),
+      .capture_addr_i(hit_capture_addr),
+      .capture_word_valid_i(hit_capture_word_valid),
+      .capture_word_i(hit_capture_word),
+      .capture_len_valid_i(hit_capture_len_valid),
+      .capture_len_i(hit_capture_len),
+      .beat_advance_i(hit_beat_advance),
+      .error_advance_i(hit_error_advance),
+      .next_addr_i(r_next_addr),
+      .next_word_i(r_next_addr[WordOffsetMsb:WordOffsetLsb]),
+      .addr_o(r_addr),
+      .word_o(r_word),
+      .len_o(r_len),
+      .response_write_i(read_response_write),
+      .response_data_i(read_response.data),
+      .response_id_i(read_response.id),
+      .response_code_i(read_response.code),
+      .response_last_i(read_response.last),
+      .response_secondary_write_i(read_response_secondary_write),
+      .response_secondary_i(read_response_secondary),
+      .response_ready_i(axi_s.rready),
+      .response_valid_o(rs_rvalid),
+      .response_data_o(rs_rdata),
+      .response_id_o(rs_rid),
+      .response_code_o(rs_rresp),
+      .response_last_o(rs_rlast),
+      .response_secondary_o(ms_response_secondary)
+  );
+  rapt_l2_refill_ctrl #(
+      .XLEN(XLEN),
+      .LINE_LEN(L2_LINE_LEN),
+      .LINE_SIZE(LineSize),
+      .LINE_BITS(LineBits)
+  ) u_refill_ctrl (
+      .clock,
+      .reset,
+      .valid_i(refill_valid),
+      .start_ar_i(rs_parent == R_MISS_AR),
+      .ready_o(refill_ready),
+      .phase_o(refill_phase),
+      .invalidate_ready_i(dir_write_ready),
+      .ar_done_i(!m_arvalid),
+      .complete_valid_i(ms_complete_valid),
+      .complete_line_i(ms_retire_line),
+      .merge_valid_i(rs == R_BURST_HIT_MERGE),
+      .merge_word_i(r_fill_cnt),
+      .merge_old_i(line_data_r[r_selected_way][r_fill_cnt]),
+      .merge_data_i(burst_line_buf[r_fill_cnt]),
+      .merge_mask_i(burst_mask_buf[r_fill_cnt]),
+      .beat_valid_i(refill_beat_fire),
+      .beat_streamed_i(blocking_refill_streamed),
+      .beat_word_i(r_fill_cnt),
+      .beat_data_i(axi_m.rdata),
+      .beat_store_i(r_store_fill),
+      .wanted_word_i(r_word),
+      .store_data_i(drain_wdata),
+      .store_mask_i(drain_wstrb),
+      .line_o(r_line_buf),
+      .count_clear_i(refill_count_clear),
+      .count_inc_i(refill_count_inc),
+      .count_o(r_fill_cnt),
+      .response_clear_i(refill_response_clear),
+      .response_load_i(refill_response_load),
+      .response_data_i(refill_response_data),
+      .response_o(r_resp),
+      .up_done_clear_i(refill_up_done_clear),
+      .up_done_set_i(refill_early_fire),
+      .up_done_o(r_up_done)
+  );
   // Read FSM
-  // ---------------------------------------------------------------------
+  // The parent arbitrates between phase controllers. Each controller owns its
+  // phase and transaction registers; this register only selects the next owner.
+  always_ff @(posedge clock) begin
+    if (reset) rs_parent <= R_IDLE;
+    else
+      unique case (rs)
+        R_IDLE: begin
+          if (ms_source_response_send || ms_early_send) begin
+          end else if (ms_late_response_issue) begin
+            if (hit_ready) rs_parent <= R_INSTALL_READ;
+          end else if (ms_secondary_send) begin
+            if (ms_retire_resp != 2'b00 && ms_secondary_reload_payload[SecondaryLenLsb+:8] != 8'd0)
+              rs_parent <= R_ERROR;
+          end else
+          if (ms_secondary_capture) begin
+          end else if (ms_complete_valid) begin
+            if (ms_retire_resp == 2'b00)
+              rs_parent <= ms_early_sent[int'(ms_complete_slot)] ? R_MSHR_EARLY_INSTALL
+                                                                 : R_INSTALL_WAIT;
+            else rs_parent <= ms_early_sent[int'(ms_complete_slot)] ? R_IDLE : R_ERROR;
+          end else if (ms_replay_issue) begin
+            if (hit_ready) rs_parent <= R_HIT;
+          end else
+          if (ms_retire_valid || ms_secondary_accept) begin
+          end else if (axi_s.arvalid && axi_s.arready) begin
+            if (ar_cache_lookup) begin
+              if (hit_ready) rs_parent <= R_HIT;
+            end else if (ms_busy || any_write_in_flight || (axi_s.awvalid && axi_s.awready)) begin
+              if (bypass_ready) rs_parent <= R_BYPASS_WAIT;
+            end else if (bypass_ready) rs_parent <= R_BYPASS_AR;
+          end else if (r_idle_burst_branch) begin
+            if (burst_direct_hit) begin
+              if (burst_direct_commit) rs_parent <= R_BURST_DONE;
+            end else if (burst_lookup_clients && burst_lookup_state != 2'b00)
+              rs_parent <= R_EVICT_PROBE;
+            else if (burst_lookup_hit)
+              rs_parent <= burst_all_full ? R_BURST_PUT_WRITE : R_BURST_HIT_READ;
+            else if (burst_lookup_dirty && burst_lookup_state != 2'b00) begin
+              if (evict_ready) rs_parent <= R_EVICT_AW;
+            end else if (burst_all_full) rs_parent <= R_BURST_PUT_WRITE;
+            else if (refill_ready) rs_parent <= R_MISS_INVALIDATE;
+          end else if (r_idle_store_branch) begin
+            if (wbuf[d_rptr].lookup_clients && wbuf[d_rptr].lookup_state != 2'b00)
+              rs_parent <= R_EVICT_PROBE;
+            else if (wbuf[d_rptr].lookup_dirty && wbuf[d_rptr].lookup_state != 2'b00) begin
+              if (evict_ready) rs_parent <= R_EVICT_AW;
+            end else if (refill_ready) rs_parent <= R_MISS_INVALIDATE;
+          end
+        end
+        R_HIT: begin
+          if (!(dir_client_mark && !dir_write_ready) && !l2_sram_wblock) begin
+            if (r_hit_q && BoomBankedStore) begin
+            end else if (r_hit_q) begin
+              if ((!rs_rvalid || axi_s.rready) && r_len == 8'd0) rs_parent <= R_IDLE;
+            end else
+            if (BoomBankedStore && release_pending
+                       && (dir_lookup_clients || dir_lookup_dirty)) begin
+            end else if (!(|r_cache[3:2])) begin
+              if (bypass_ready) rs_parent <= R_BYPASS_WAIT;
+            end else
+            if (any_write_in_flight || (axi_s.awvalid && axi_s.awready)) begin
+            end else if (BoomBankedStore && !dir_lookup_clients && !dir_lookup_dirty) begin
+              if (ms_alloc_invalidate) rs_parent <= R_IDLE;
+            end else if (BoomBankedStore && dir_lookup_clients && dir_lookup_state != 2'b00)
+              rs_parent <= R_EVICT_PROBE;
+            else if (BoomBankedStore && dir_lookup_dirty && dir_lookup_state != 2'b00) begin
+              if (evict_ready) rs_parent <= R_EVICT_AW;
+            end else if (BoomBankedStore) begin
+              if (refill_ready) rs_parent <= R_MISS_INVALIDATE;
+            end else if (refill_ready) rs_parent <= R_MISS_AR;
+          end
+        end
+        R_HIT_DATA: if (!l2_sram_wblock && r_selected_resident
+                     && (!rs_rvalid || axi_s.rready) && r_len == 8'd0) rs_parent <= R_IDLE;
+        R_EVICT_PROBE: if (!release_pending && (!victim_clients_q || probe_ready_i)) begin
+        if (r_burst_fill && burst_lookup_hit) begin
+          if (burst_all_full)
+            rs_parent <= BoomBankedStore ? R_BURST_PUT_WRITE : R_INSTALL_WAIT;
+          else rs_parent <= R_BURST_HIT_READ;
+        end else if (victim_dirty_q && victim_state_q != 2'b00) begin
+          if (evict_ready) rs_parent <= R_EVICT_AW;
+        end else if (r_burst_fill && burst_all_full) rs_parent <= R_BURST_PUT_WRITE;
+        else if (BoomBankedStore) begin
+          if (refill_ready) rs_parent <= R_MISS_INVALIDATE;
+        end else if (refill_ready) rs_parent <= R_MISS_AR;
+      end
+        R_EVICT_B: if (evict_done_valid) begin
+        if (axi_m.bresp != 2'b00)
+          rs_parent <= r_burst_fill ? R_BURST_ERROR : r_store_fill ? R_STORE_ERROR : R_ERROR;
+        else if (r_burst_fill && burst_all_full) rs_parent <= R_BURST_PUT_WRITE;
+        else if (BoomBankedStore) begin
+          if (refill_ready) rs_parent <= R_MISS_INVALIDATE;
+        end else if (refill_ready) rs_parent <= R_MISS_AR;
+      end
+        R_STORE_MERGE_READ: if (!l2_sram_wblock) rs_parent <= R_STORE_MERGE_LATCH;
+        R_STORE_MERGE_LATCH: rs_parent <= R_STORE_MERGE_WRITE;
+        R_STORE_MERGE_WRITE: if (bank_write_word_ready) rs_parent <= R_INSTALL_WAIT;
+        R_BURST_HIT_READ: if (!l2_sram_wblock) rs_parent <= R_BURST_HIT_MERGE;
+        R_BURST_HIT_MERGE: begin
+        if (r_fill_cnt == L2_LINE_LEN'(LineSize - 1))
+          rs_parent <= BoomBankedStore ? R_BURST_PUT_WRITE : R_INSTALL_WAIT;
+        else if (l2_sram_wblock) rs_parent <= R_BURST_HIT_READ;
+      end
+        R_BURST_PUT_WRITE: if ((!burst_put_word_valid || bank_write_word_ready)
+                              && r_fill_cnt == L2_LINE_LEN'(LineSize - 1))
+        rs_parent <= R_INSTALL_WAIT;
+        R_MISS_R: if (axi_m.rvalid && axi_m.rready && axi_m.rid == m_arid
+                    && axi_m.rlast) begin
+        if (r_burst_fill)
+          rs_parent <= (axi_m.rresp != 2'b00 || r_resp != 2'b00) ? R_BURST_ERROR
+              : blocking_refill_streamed ? R_BURST_HIT_READ : R_INSTALL_WAIT;
+        else if (r_store_fill)
+          rs_parent <= (axi_m.rresp != 2'b00 || r_resp != 2'b00) ? R_STORE_ERROR
+              : blocking_refill_streamed ? R_STORE_MERGE_READ : R_INSTALL_WAIT;
+        else if (r_up_done || ((r_len == 8'd0) && (r_fill_cnt == r_word)
+                 && (axi_m.rresp == 2'b00) && (r_resp == 2'b00)
+                 && (!rs_rvalid || axi_s.rready))) rs_parent <= R_IDLE;
+        else if (axi_m.rresp != 2'b00 || r_resp != 2'b00) rs_parent <= R_ERROR;
+        else rs_parent <= R_INSTALL_WAIT;
+      end
+        R_INSTALL_WAIT: if (!cache_install && !boom_bank_line_busy)
+        rs_parent <= r_burst_fill ? R_BURST_DONE : r_store_fill ? R_STORE_DONE : R_INSTALL_READ;
+        R_MSHR_EARLY_INSTALL: if (!cache_install && !boom_bank_line_busy) rs_parent <= R_IDLE;
+        R_STORE_DONE, R_STORE_ERROR, R_BURST_DONE: rs_parent <= R_IDLE;
+        R_BURST_ERROR: if (burst_w_done) rs_parent <= R_IDLE;
+        R_ERROR: if ((!rs_rvalid || axi_s.rready) && r_len == 8'd0) rs_parent <= R_IDLE;
+        R_BYPASS_R: if (bypass_done_valid) rs_parent <= R_IDLE;
+        R_HIT_PROBE, R_HIT_PROBE_COMMIT, R_MISS_INVALIDATE, R_MISS_AR,
+      R_EVICT_AW, R_EVICT_READ, R_EVICT_W, R_BYPASS_WAIT, R_BYPASS_AR,
+      R_INSTALL_READ: ;
+        default: rs_parent <= R_IDLE;
+      endcase
+  end
+  // Saved request fields are shared by hit replay, blocking refill, and bypass.
   always_ff @(posedge clock) begin
     if (reset) begin
-      rs                    <= R_IDLE;
-      m_arvalid             <= 1'b0;
-      rs_rvalid             <= 1'b0;
-      rs_rlast              <= 1'b0;
-      rs_rresp              <= 2'b00;
-      rs_rid                <= '0;
-      rs_rdata              <= '0;
-      ms_response_secondary <= 1'b0;
-      r_id                  <= '0;
-      r_addr                <= '0;
-      r_len                 <= '0;
-      r_size                <= '0;
-      r_burst               <= '0;
-      r_wrap_mask           <= '0;
-      r_cache               <= '0;
-      r_word                <= '0;
-      r_fill_cnt            <= '0;
-      evict_word            <= '0;
-      r_resp                <= 2'b00;
-      r_up_done             <= 1'b0;
-      r_store_fill          <= 1'b0;
-      r_store_merge_data    <= '0;
-      r_burst_fill          <= 1'b0;
-      cache_install         <= 1'b0;
-      install_streamed      <= 1'b0;
-      cache_install_dirty   <= 1'b0;
-      install_idx           <= '0;
-      install_tag           <= '0;
-      install_way           <= '0;
-      victim_way_q          <= '0;
-      victim_tag_q          <= '0;
-      victim_state_q        <= '0;
-      victim_dirty_q        <= 1'b0;
-      victim_clients_q      <= 1'b0;
-      r_selected_way        <= '0;
-      r_client_marked       <= 1'b0;
-      r_response_secondary  <= 1'b0;
-      wipe_set              <= '0;
-      wipe_done             <= BoomBankedStore || BulkSetClear;
+      {r_id, r_size, r_burst, r_wrap_mask, r_cache} <= '0;
+      {r_store_fill, r_burst_fill, r_client_marked, r_response_secondary} <= '0;
+    end else begin
+      if (rs == R_IDLE) begin
+        if (ms_late_response_issue || ms_complete_valid) begin
+          {r_store_fill, r_burst_fill, r_client_marked} <= '0;
+          r_id <= ms_retire_id;
+          r_size <= ms_retire_size;
+          r_burst <= ms_retire_burst;
+          r_wrap_mask <= ms_retire_wrap_mask;
+          r_cache <= ms_retire_cache;
+          r_response_secondary <= ms_primary_secondary[ms_late_response_issue ? int'(ms_late_response_slot) : int'(ms_complete_slot)];
+        end else if (r_idle_secondary_error_take) begin
+          r_id <= ms_secondary_reload_payload[0+:ID_W];
+          r_response_secondary <= 1'b1;
+        end else if (hit_replay_take) begin
+          {r_store_fill, r_burst_fill, r_client_marked} <= '0;
+          r_response_secondary <= 1'b1;
+          r_id <= ms_replay_payload[0+:ID_W];
+          r_size <= ms_replay_payload[ID_W+XLEN+:3];
+          r_burst <= ms_replay_payload[SecondaryBurstLsb+:2];
+          r_wrap_mask <= read_wrap_mask(
+              ms_replay_payload[SecondaryLenLsb+:8], ms_replay_payload[ID_W+XLEN+:3]);
+          r_cache <= ms_replay_payload[ID_W+XLEN+3+:4];
+        end else if (r_idle_ar_take) begin
+          {r_store_fill, r_burst_fill, r_client_marked, r_response_secondary} <= '0;
+          r_id <= axi_s.arid;
+          r_size <= axi_s.arsize;
+          r_burst <= axi_s.arburst;
+          r_wrap_mask <= read_wrap_mask(axi_s.arlen, axi_s.arsize);
+          r_cache <= axi_s.arcache;
+        end else if (r_idle_burst_branch && !burst_direct_hit) begin
+          {r_store_fill, r_burst_fill} <= 2'b01;
+          r_id <= burst_id;
+          r_cache <= burst_cache;
+        end else if (r_idle_store_branch) begin
+          {r_store_fill, r_burst_fill} <= 2'b10;
+          r_id <= wbuf[d_rptr].id;
+          r_cache <= wbuf[d_rptr].cache;
+        end
+      end
+      if (rs == R_HIT && !(dir_client_mark && !dir_write_ready) && !l2_sram_wblock
+          && r_hit_q && BoomBankedStore
+          && !(dir_lookup_clients && !d_client_read_id(
+              r_id
+          )) && dir_client_mark && dir_write_ready)
+        r_client_marked <= 1'b1;
+      if (rs == R_HIT_DATA && !l2_sram_wblock && r_selected_resident
+          && (!rs_rvalid || axi_s.rready) && r_len != 8'd0
+          && !same_line(
+              r_addr, r_next_addr
+          ))
+        r_client_marked <= 1'b0;
+    end
+  end
+  // Install metadata is shared by completed MSHRs, blocking refills, and Put merges.
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      {cache_install, install_streamed, cache_install_dirty} <= '0;
+      {install_idx, install_tag, install_way, r_selected_way} <= '0;
+      {r_store_merge_data, wipe_set} <= '0;
+      wipe_done <= BoomBankedStore || BulkSetClear;
+    end else begin
+      if (!BoomBankedStore && !wipe_done) begin
+        wipe_set <= wipe_set + 1'b1;
+        if (wipe_set == IndexBits'(NSets - 1)) wipe_done <= 1'b1;
+      end
+      cache_install <= 1'b0;
+      if (ms_complete_valid) install_streamed <= 1'b1;
+      else if (rs == R_IDLE && !cache_install && !boom_bank_line_busy) install_streamed <= 1'b0;
+      if (rs == R_IDLE) begin
+        if (ms_late_response_issue || ms_complete_valid) begin
+          install_idx <= ms_retire_addr[IndexMsb:IndexLsb];
+          install_tag <= TagBits'(rapt_pkg::canonical_addr(ms_retire_addr) >> TagLsb);
+          install_way <= ms_way[ms_late_response_issue ? int'(ms_late_response_slot) : int'(ms_complete_slot)];
+          if (ms_complete_valid) begin
+            cache_install_dirty <= 1'b0;
+            if (ms_retire_resp == 2'b00) cache_install <= 1'b1;
+          end
+        end else if (r_idle_burst_branch && !burst_direct_hit
+                     && !(burst_lookup_clients && burst_lookup_state != 2'b00)
+                     && (burst_lookup_hit
+                         || (!(burst_lookup_dirty && burst_lookup_state != 2'b00)
+                             && burst_all_full)))
+          r_selected_way <= burst_lookup_way;
+      end
+      if (rs == R_HIT && !(dir_client_mark && !dir_write_ready) && !l2_sram_wblock
+          && r_hit_q && BoomBankedStore)
+        r_selected_way <= r_hit_way;
+      if (rs == R_EVICT_PROBE && !release_pending && (!victim_clients_q || probe_ready_i)) begin
+        if (r_burst_fill && burst_lookup_hit) begin
+          if (!burst_all_full || BoomBankedStore) r_selected_way <= victim_way_q;
+          if (burst_all_full && !BoomBankedStore) begin
+            cache_install <= 1'b1;
+            cache_install_dirty <= 1'b1;
+            install_idx <= r_idx_q;
+            install_tag <= r_tag_q;
+            install_way <= victim_way_q;
+          end
+        end else if (!(victim_dirty_q && victim_state_q != 2'b00) && r_burst_fill && burst_all_full)
+          r_selected_way <= victim_way_q;
+      end
+      if (rs == R_EVICT_B && evict_done_valid && axi_m.bresp == 2'b00
+          && r_burst_fill && burst_all_full)
+        r_selected_way <= victim_way_q;
+      if (rs == R_STORE_MERGE_LATCH)
+        r_store_merge_data <= merge_store_word(
+            line_data_r[r_selected_way][r_word], drain_wdata, drain_wstrb
+        );
+      if ((rs == R_STORE_MERGE_WRITE && bank_write_word_ready)
+          || (rs == R_BURST_HIT_MERGE && r_fill_cnt == L2_LINE_LEN'(LineSize - 1)
+              && !BoomBankedStore)
+          || (rs == R_BURST_PUT_WRITE && (!burst_put_word_valid || bank_write_word_ready)
+              && r_fill_cnt == L2_LINE_LEN'(LineSize - 1))) begin
+        cache_install <= 1'b1;
+        cache_install_dirty <= 1'b1;
+        install_idx <= r_idx_q;
+        install_tag <= r_tag_q;
+        install_way <= r_selected_way;
+        if (rs == R_STORE_MERGE_WRITE || rs == R_BURST_PUT_WRITE) install_streamed <= 1'b1;
+      end
+      if (rs == R_MISS_R && axi_m.rvalid && axi_m.rready && axi_m.rid == m_arid
+          && axi_m.rlast && axi_m.rresp == 2'b00 && r_resp == 2'b00) begin
+        if (blocking_refill_streamed) begin
+          r_selected_way <= victim_way_q;
+          if (!r_store_fill && !r_burst_fill) begin
+            cache_install <= 1'b1;
+            install_streamed <= 1'b1;
+            install_idx <= r_idx_q;
+            install_tag <= r_tag_q;
+            install_way <= victim_way_q;
+            cache_install_dirty <= 1'b0;
+          end
+        end else begin
+          cache_install <= 1'b1;
+          install_idx <= r_idx_q;
+          install_tag <= r_tag_q;
+          install_way <= victim_way_q;
+          cache_install_dirty <= r_store_fill || r_burst_fill;
+        end
+      end
+      if (rs == R_INSTALL_READ && BoomBankedStore && !l2_sram_wblock) r_selected_way <= install_way;
+    end
+  end
+  // Legacy tag/valid arrays are shared by install, snoop, CBO, and reset wipe.
+  always_ff @(posedge clock) begin
+    if (reset) begin
       if (!BoomBankedStore && BulkSetClear) begin
         for (int w = 0; w < L2_N_WAYS; w++) begin
           for (int s = 0; s < NSets; s++) line_valid[w][s] <= 1'b0;
         end
       end
     end else begin
-      if (probe_release_fire && (rs == R_EVICT_PROBE || rs == R_HIT_PROBE)) victim_dirty_q <= 1'b1;
-      // A large directory uses the same one-set-per-cycle reset wipe as the
-      // BOOM inclusive cache. Requests remain blocked until every valid bit
-      // has been initialized; data and tags are valid-gated and need no reset.
       if (!BoomBankedStore && !wipe_done) begin
         for (int way = 0; way < L2_N_WAYS; way++) line_valid[way][wipe_set] <= 1'b0;
-        wipe_set <= wipe_set + 1'b1;
-        if (wipe_set == IndexBits'(NSets - 1)) wipe_done <= 1'b1;
       end
-      // Default deassert of pulses
-      cache_install <= 1'b0;
-      if (ms_complete_valid) install_streamed <= 1'b1;
-      else if (rs == R_IDLE && !cache_install && !boom_bank_line_busy) install_streamed <= 1'b0;
-      // R-channel handshake: clear rvalid on accepted beat
-      if (rs_rvalid && axi_s.rready) begin
-        rs_rvalid <= 1'b0;
-        rs_rlast <= 1'b0;
-        ms_response_secondary <= 1'b0;
-      end
-      // AR-channel handshake: clear m_arvalid when accepted
-      if (m_arvalid && axi_m.arready) begin
-        m_arvalid <= 1'b0;
-      end
-      if (ms_early_send && ms_early_overlap_state) begin
-        rs_rvalid <= 1'b1;
-        rs_rdata <= ms_retire_line[int'(ms_word[int'(ms_early_slot)])*XLEN+:XLEN];
-        rs_rresp <= ms_retire_resp;
-        rs_rid <= ms_id[int'(ms_early_slot)];
-        rs_rlast <= 1'b1;
-        ms_response_secondary <= ms_primary_secondary[int'(ms_early_slot)];
-      end
-      if (ms_source_response_send && ms_early_overlap_state) begin
-        rs_rvalid <= 1'b1;
-        rs_rdata <= ms_source_data;
-        rs_rresp <= 2'b00;
-        rs_rid <= ms_source_id;
-        rs_rlast <= ms_source_len == 8'd0;
-        ms_response_secondary <= ms_source_primary_secondary;
-      end
-
-      unique case (rs)
-        // -----------------------------------------------------------------
-        R_IDLE: begin
-          if (ms_source_response_send) begin
-            rs_rvalid <= 1'b1;
-            rs_rdata <= ms_source_data;
-            rs_rresp <= 2'b00;
-            rs_rid <= ms_source_id;
-            rs_rlast <= ms_source_len == 8'd0;
-            ms_response_secondary <= ms_source_primary_secondary;
-          end else if (ms_early_send) begin
-            rs_rvalid <= 1'b1;
-            rs_rdata <= ms_retire_line[int'(ms_word[int'(ms_early_slot)])*XLEN+:XLEN];
-            rs_rresp <= ms_retire_resp;
-            rs_rid <= ms_id[int'(ms_early_slot)];
-            rs_rlast <= 1'b1;
-            ms_response_secondary <= ms_primary_secondary[int'(ms_early_slot)];
-          end else if (ms_late_response_issue) begin
-            // A successful ordinary refill was installed during another
-            // miss's blocking phase. Read its banked data only after the
-            // shared response path becomes available.
-            r_store_fill <= 1'b0;
-            r_burst_fill <= 1'b0;
-            r_client_marked <= 1'b0;
-            r_up_done <= 1'b0;
-            r_id <= ms_retire_id;
-            r_addr <= ms_retire_addr;
-            r_len <= ms_retire_len;
-            r_size <= ms_retire_size;
-            r_burst <= ms_retire_burst;
-            r_wrap_mask <= read_wrap_mask(ms_retire_len, ms_retire_size);
-            r_cache <= ms_retire_cache;
-            r_response_secondary <= ms_primary_secondary[int'(ms_late_response_slot)];
-            r_word <= ms_retire_addr[WordOffsetMsb:WordOffsetLsb];
-            r_resp <= 2'b00;
-            install_idx <= ms_retire_addr[IndexMsb:IndexLsb];
-            install_tag <= TagBits'(rapt_pkg::canonical_addr(ms_retire_addr) >> TagLsb);
-            install_way <= ms_way[int'(ms_late_response_slot)];
-            rs <= R_INSTALL_READ;
-          end else if (ms_secondary_send) begin
-            if (ms_retire_resp != 2'b00
-                && ms_secondary_reload_payload[SecondaryLenLsb+:8] != 8'd0) begin
-              r_id <= ms_secondary_reload_payload[0+:ID_W];
-              r_len <= ms_secondary_reload_payload[SecondaryLenLsb+:8];
-              r_resp <= ms_retire_resp;
-              r_response_secondary <= 1'b1;
-              rs <= R_ERROR;
-            end else begin
-              rs_rvalid <= 1'b1;
-              rs_rdata <= ms_retire_line[int'(ms_secondary_reload_addr[WordOffsetMsb:
-                                            WordOffsetLsb])*XLEN+:XLEN];
-              rs_rresp <= ms_retire_resp;
-              rs_rid <= ms_secondary_reload_payload[0+:ID_W];
-              rs_rlast <= 1'b1;
-              ms_response_secondary <= 1'b1;
-            end
-          end else if (ms_secondary_capture) begin
-            // Save a queued request requiring shared-FSM service. Equal
-            // tags reuse current MSHR metadata; other tags read the directory.
-          end else if (ms_complete_valid) begin
-            // Complete one independent clean fill through the existing
-            // install/readback path. The context remains set-interlocked
-            // until this edge; AR admission stays closed during install.
-            r_store_fill <= 1'b0;
-            r_burst_fill <= 1'b0;
-            r_client_marked <= 1'b0;
-            r_up_done <= 1'b0;
-            r_id <= ms_retire_id;
-            r_addr <= ms_retire_addr;
-            r_len <= ms_retire_len;
-            r_size <= ms_retire_size;
-            r_burst <= ms_retire_burst;
-            r_wrap_mask <= read_wrap_mask(ms_retire_len, ms_retire_size);
-            r_cache <= ms_retire_cache;
-            r_response_secondary <= ms_primary_secondary[int'(ms_complete_slot)];
-            r_word <= ms_retire_addr[WordOffsetMsb:WordOffsetLsb];
-            r_resp <= ms_retire_resp;
-            install_idx <= ms_retire_addr[IndexMsb:IndexLsb];
-            install_tag <= TagBits'(rapt_pkg::canonical_addr(ms_retire_addr) >> TagLsb);
-            install_way <= ms_way[int'(ms_complete_slot)];
-            cache_install_dirty <= 1'b0;
-            for (int word = 0; word < LineSize; word++)
-            r_line_buf[word] <= ms_retire_line[word*XLEN+:XLEN];
-            if (ms_retire_resp == 2'b00) begin
-              cache_install <= 1'b1;
-              rs <= ms_early_sent[int'(ms_complete_slot)] ? R_MSHR_EARLY_INSTALL : R_INSTALL_WAIT;
-            end else rs <= ms_early_sent[int'(ms_complete_slot)] ? R_IDLE : R_ERROR;
-          end else if (ms_replay_issue) begin
-            r_store_fill <= 1'b0;
-            r_burst_fill <= 1'b0;
-            r_client_marked <= 1'b0;
-            r_response_secondary <= 1'b1;
-            r_up_done <= 1'b0;
-            r_id <= ms_replay_payload[0+:ID_W];
-            r_addr <= ms_replay_payload[ID_W+:XLEN];
-            r_len <= ms_replay_payload[SecondaryLenLsb+:8];
-            r_size <= ms_replay_payload[ID_W+XLEN+:3];
-            r_burst <= ms_replay_payload[SecondaryBurstLsb+:2];
-            r_wrap_mask <= read_wrap_mask(
-                ms_replay_payload[SecondaryLenLsb+:8], ms_replay_payload[ID_W+XLEN+:3]
-            );
-            r_cache <= ms_replay_payload[ID_W+XLEN+3+:4];
-            r_word <= ms_replay_payload[ID_W+WordOffsetLsb+:L2_LINE_LEN];
-            r_resp <= 2'b00;
-            rs <= R_HIT;
-          end else if (ms_retire_valid) begin
-            // Release an installed owner once every secondary list drains.
-          end else if (ms_secondary_accept) begin
-            // The live MSHR owns this line. Its A-channel secondary queue
-            // retains the address and ID until the completed fill replies.
-          end else if (axi_s.arvalid && axi_s.arready) begin
-            r_store_fill <= 1'b0;
-            r_burst_fill <= 1'b0;
-            r_client_marked <= 1'b0;
-            r_response_secondary <= 1'b0;
-            r_id    <= axi_s.arid;
-            r_addr  <= axi_s.araddr;
-            r_len   <= axi_s.arlen;
-            r_size  <= axi_s.arsize;
-            r_burst <= axi_s.arburst;
-            r_wrap_mask <= read_wrap_mask(axi_s.arlen, axi_s.arsize);
-            r_cache <= axi_s.arcache;
-            r_word  <= axi_s.araddr[WordOffsetMsb:WordOffsetLsb];
-            r_resp  <= 2'b00;
-            if (ar_cache_lookup) begin
-              // Lookup is combinational on r_addr_next; but since we
-              // sample on the same edge we must wait one cycle for
-              // r_addr to be latched, then decide. Use a transient state:
-              rs <= R_HIT;
-            end else begin
-              // Forward AR straight through.
-              if (ms_busy || any_write_in_flight || (axi_s.awvalid && axi_s.awready)) begin
-                rs <= R_BYPASS_WAIT;
-              end else begin
-                m_arvalid <= 1'b1;
-                m_araddr  <= axi_s.araddr;
-                m_arid    <= axi_s.arid;
-                m_arlen   <= axi_s.arlen;
-                m_arsize  <= axi_s.arsize;
-                m_arburst <= axi_s.arburst;
-                m_arcache <= axi_s.arcache;
-                rs <= R_BYPASS_AR;
-              end
-            end
-          end else if (!ms_busy && burst_active && burst_allocate && burst_segment_ready
-                       && burst_lookup_ready && !rs_rvalid && !cache_install) begin
-            // A resident line without a client has already accepted each
-            // Put beat through the SourceD bank-write port. Its metadata
-            // write completes the burst without another line install.
-            if (burst_direct_hit) begin
-              if (burst_direct_commit) rs <= R_BURST_DONE;
-            end else begin
-              // A complete PutFullData line needs no old outer data. Short
-              // line-local bursts and masked writes merge with a resident
-              // line or a refill before replacing it.
-              r_store_fill <= 1'b0;
-              r_burst_fill <= 1'b1;
-              r_addr <= burst_start;
-              r_id <= burst_id;
-              r_cache <= burst_cache;
-              r_word <= '0;
-              r_fill_cnt <= '0;
-              r_resp <= 2'b00;
-              r_up_done <= 1'b0;
-              victim_way_q <= burst_lookup_way;
-              victim_tag_q <= burst_lookup_tag;
-              victim_state_q <= burst_lookup_state;
-              victim_dirty_q <= burst_lookup_dirty;
-              victim_clients_q <= burst_lookup_clients;
-              m_araddr <= {burst_start[XLEN-1:OffsetBits], {OffsetBits{1'b0}}};
-              m_arid <= burst_id;
-              m_arlen <= 8'(LineSize - 1);
-              m_arsize <= 3'($clog2(WordBytes));
-              m_arcache <= burst_cache;
-              m_arburst <= 2'b01;
-              if (burst_lookup_clients && burst_lookup_state != 2'b00) begin
-                rs <= R_EVICT_PROBE;
-              end else if (burst_lookup_hit) begin
-                if (burst_all_full) begin
-                  r_selected_way <= burst_lookup_way;
-                  rs <= R_BURST_PUT_WRITE;
-                end else begin
-                  r_selected_way <= burst_lookup_way;
-                  rs <= R_BURST_HIT_READ;
-                end
-              end else if (burst_lookup_dirty && burst_lookup_state != 2'b00) begin
-                evict_word <= '0;
-                rs <= R_EVICT_AW;
-              end else if (burst_all_full) begin
-                r_selected_way <= burst_lookup_way;
-                rs <= R_BURST_PUT_WRITE;
-              end else begin
-                rs <= R_MISS_INVALIDATE;
-              end
-            end
-          end else if (BoomBankedStore && !ms_busy && ws == W_IDLE && wbuf[d_rptr].busy
-                       && wbuf[d_rptr].has_w && wbuf[d_rptr].local_miss
-                       && wbuf[d_rptr].lookup_ready && !rs_rvalid && !cache_install) begin
-            // The buffered store owns this miss. Reuse the read refill and
-            // dirty-victim writeback states, but send no upstream R beats.
-            r_store_fill <= 1'b1;
-            r_burst_fill <= 1'b0;
-            r_addr <= wbuf[d_rptr].addr;
-            r_id <= wbuf[d_rptr].id;
-            r_cache <= wbuf[d_rptr].cache;
-            r_word <= wbuf[d_rptr].addr[WordOffsetMsb:WordOffsetLsb];
-            r_fill_cnt <= '0;
-            r_resp <= 2'b00;
-            r_up_done <= 1'b0;
-            victim_way_q <= wbuf[d_rptr].lookup_way;
-            victim_tag_q <= wbuf[d_rptr].lookup_tag;
-            victim_state_q <= wbuf[d_rptr].lookup_state;
-            victim_dirty_q <= wbuf[d_rptr].lookup_dirty;
-            victim_clients_q <= wbuf[d_rptr].lookup_clients;
-            m_araddr <= {wbuf[d_rptr].addr[XLEN-1:OffsetBits], {OffsetBits{1'b0}}};
-            m_arid <= wbuf[d_rptr].id;
-            m_arlen <= 8'(LineSize - 1);
-            m_arsize <= 3'($clog2(WordBytes));
-            m_arcache <= wbuf[d_rptr].cache;
-            m_arburst <= 2'b01;
-            if (wbuf[d_rptr].lookup_clients && wbuf[d_rptr].lookup_state != 2'b00) begin
-              rs <= R_EVICT_PROBE;
-            end else if (wbuf[d_rptr].lookup_dirty && wbuf[d_rptr].lookup_state != 2'b00) begin
-              evict_word <= '0;
-              rs <= R_EVICT_AW;
-            end else begin
-              rs <= R_MISS_INVALIDATE;
-            end
-          end
-        end
-
-        // -----------------------------------------------------------------
-        // Resolve hit / miss against the (now-latched) request.
-        R_HIT: begin
-          if (dir_client_mark && !dir_write_ready) begin
-            // The one-entry directory write queue must accept ownership
-            // before the L1D can observe the hit response.
-          end else if (l2_sram_wblock) begin
-            // A store-hit snoop write took the single SRAM port this cycle
-            // and clobbered the read address register. Hold the burst for
-            // one cycle so data_sram_raddr is re-latched and line_data_r
-            // is fresh again before the next beat is delivered.
-            rs <= R_HIT;
-          end else if (r_hit_q && BoomBankedStore) begin
-            // The BOOM bank row includes the selected way. Read it after
-            // the directory lookup, then return data on the next cycle.
-            r_selected_way <= r_hit_way;
-            if (dir_lookup_clients && !d_client_read_id(r_id)) begin
-              victim_way_q <= r_hit_way;
-              victim_tag_q <= r_tag_q;
-              victim_state_q <= dir_lookup_state;
-              victim_dirty_q <= dir_lookup_dirty;
-              victim_clients_q <= 1'b1;
-              rs <= R_HIT_PROBE;
-            end else begin
-              if (dir_client_mark && dir_write_ready) r_client_marked <= 1'b1;
-              rs <= R_HIT_DATA;
-            end
-          end else if (r_hit_q) begin
-            // Drive next beat from cache. May take multiple cycles for
-            // a burst -- we hold this state until the burst completes.
-            if (!rs_rvalid || axi_s.rready) begin
-              rs_rvalid <= 1'b1;
-              rs_rdata  <= line_data_r[r_hit_way][r_word];
-              rs_rresp  <= 2'b00;
-              rs_rid    <= r_id;
-              rs_rlast  <= (r_len == 8'd0);
-              // Advance address / counters
-              if (r_len == 8'd0) begin
-                rs <= R_IDLE;
-              end else begin
-                r_len  <= r_len - 8'd1;
-                // AXI beat size is independent of the SRAM word width.
-                // RV64 instruction reads can request two 32-bit beats from
-                // the same 64-bit word. FIXED bursts retain their address.
-                r_word <= r_next_addr[WordOffsetMsb:WordOffsetLsb];
-                r_addr <= r_next_addr;
-              end
-            end
-          end else if (BoomBankedStore && release_pending
-                       && (dir_lookup_clients || dir_lookup_dirty)) begin
-            // A dirty-victim writeback or L1D probe would contend with the
-            // C transaction. Keep this different-set replay's directory
-            // result until ReleaseAck, then enter the blocking miss path.
-          end else begin
-            // Miss: issue line-aligned fill burst.
-            //
-            // Read-after-write coherence: AXI does not order AR vs an
-            // outstanding/incoming AW/W to the same line. Stall the
-            // miss issue while ANY write is in the posted write buffer
-            // (or arriving this cycle) to avoid memory-level reordering.
-            //
-            // We cover three races:
-            //  1) An AW already captured in the buffer (any slot busy).
-            //  2) AW is being accepted THIS cycle (axi_s.awvalid).
-            //  3) Any write activity at all (worst-case fallback): the
-            //     bus-level model may reorder AR vs AW for different
-            //     addresses too, so be conservative.
-            if (!(|r_cache[3:2])) begin
-              // No-allocate reads use resident data on a hit, but bypass
-              // the cache on a miss without evicting or allocating a line.
-              rs <= R_BYPASS_WAIT;
-            end else if (any_write_in_flight || (axi_s.awvalid && axi_s.awready)) begin
-              // hold in R_HIT; re-evaluate next cycle
-            end else if (BoomBankedStore && !dir_lookup_clients && !dir_lookup_dirty) begin
-              // Clean victim: admit the miss to one of BOOM's five ordinary
-              // refill slots. The directory still interlocks its set until
-              // the completed line is installed and returned upstream.
-              if (ms_alloc_invalidate) begin
-                victim_way_q <= dir_lookup_way;
-                rs <= R_IDLE;
-              end
-            end else begin
-              r_fill_cnt <= '0;
-              r_resp     <= 2'b00;
-              r_up_done  <= 1'b0;
-              if (BoomBankedStore) begin
-                // Keep the old entry before refill replaces its way. A
-                // write-back/probe sequence needs its tag, state and owners.
-                victim_way_q <= dir_lookup_way;
-                victim_tag_q <= dir_lookup_tag;
-                victim_state_q <= dir_lookup_state;
-                victim_dirty_q <= dir_lookup_dirty;
-                victim_clients_q <= dir_lookup_clients;
-              end else if (L2_N_WAYS == 1) victim_way_q <= '0;
-              else victim_way_q <= WayBits'(victim_lfsr[9:0] >> (10 - WayBits));
-              m_araddr <= {r_addr[XLEN-1:OffsetBits], {OffsetBits{1'b0}}};
-              // A dirty-victim or client-probe miss uses one of BOOM's five
-              // normal outer IDs. An installed replay reuses its own slot.
-              m_arid    <= BoomBankedStore
-                  ? ID_W'(ms_replay_active ? ms_replay_slot : ms_free_slot) : r_id;
-              m_arlen <= 8'(LineSize - 1);
-              m_arsize <= 3'($clog2(WordBytes));
-              m_arcache <= r_cache;
-              m_arburst <= 2'b01;  // INCR
-              if (BoomBankedStore && dir_lookup_clients && dir_lookup_state != 2'b00) begin
-                rs <= R_EVICT_PROBE;
-              end else if (BoomBankedStore && dir_lookup_dirty && dir_lookup_state != 2'b00) begin
-                evict_word <= '0;
-                rs <= R_EVICT_AW;
-              end else begin
-                if (BoomBankedStore) rs <= R_MISS_INVALIDATE;
-                else begin
-                  m_arvalid <= 1'b1;
-                  rs <= R_MISS_AR;
-                end
-              end
-            end
-          end
-        end
-
-        // -----------------------------------------------------------------
-        R_HIT_PROBE: begin
-          if (!release_pending && (!victim_clients_q || probe_ready_i)) rs <= R_HIT_PROBE_COMMIT;
-        end
-
-        R_HIT_PROBE_COMMIT: begin
-          if (hit_probe_commit) rs <= R_HIT;
-        end
-
-        R_HIT_DATA: begin
-          if (l2_sram_wblock || !r_selected_resident) begin
-            // Recheck the tag after an overlapping store invalidation and
-            // refresh the single-port bank output after a write conflict.
-            rs <= R_HIT;
-          end else if (!rs_rvalid || axi_s.rready) begin
-            rs_rvalid <= 1'b1;
-            rs_rdata  <= line_data_r[r_selected_way][r_word];
-            rs_rresp  <= 2'b00;
-            rs_rid    <= r_id;
-            rs_rlast  <= (r_len == 8'd0);
-            if (r_response_secondary) ms_response_secondary <= 1'b1;
-            if (r_len == 8'd0) rs <= R_IDLE;
-            else begin
-              r_len  <= r_len - 8'd1;
-              r_word <= r_next_addr[WordOffsetMsb:WordOffsetLsb];
-              r_addr <= r_next_addr;
-              if (!same_line(r_addr, r_next_addr)) r_client_marked <= 1'b0;
-              rs <= R_HIT;
-            end
-          end
-        end
-
-        // -----------------------------------------------------------------
-        R_MISS_INVALIDATE: begin
-          // The victim must become invisible before SinkD writes refill
-          // beats into its banks. A failed outer read leaves this way Invalid.
-          if (dir_write_ready) begin
-            m_arvalid <= 1'b1;
-            rs <= R_MISS_AR;
-          end
-        end
-
-        R_MISS_AR: begin
-          if (!m_arvalid) begin
-            rs <= R_MISS_R;
-          end
-        end
-
-        R_EVICT_PROBE: begin
-          // Inner C has priority over the ordinary Probe. The owner may be
-          // finishing its voluntary Release before it can answer Probe.
-          if (!release_pending && (!victim_clients_q || probe_ready_i)) begin
-            if (r_burst_fill && burst_lookup_hit) begin
-              if (burst_all_full) begin
-                if (BoomBankedStore) begin
-                  r_selected_way <= victim_way_q;
-                  r_fill_cnt <= '0;
-                  rs <= R_BURST_PUT_WRITE;
-                end else begin
-                  cache_install <= 1'b1;
-                  cache_install_dirty <= 1'b1;
-                  install_idx <= r_idx_q;
-                  install_tag <= r_tag_q;
-                  install_way <= victim_way_q;
-                  rs <= R_INSTALL_WAIT;
-                end
-              end else begin
-                r_selected_way <= victim_way_q;
-                rs <= R_BURST_HIT_READ;
-              end
-            end else if (victim_dirty_q && victim_state_q != 2'b00) begin
-              evict_word <= '0;
-              rs <= R_EVICT_AW;
-            end else if (r_burst_fill && burst_all_full) begin
-              r_selected_way <= victim_way_q;
-              r_fill_cnt <= '0;
-              rs <= R_BURST_PUT_WRITE;
-            end else begin
-              if (BoomBankedStore) rs <= R_MISS_INVALIDATE;
-              else begin
-                m_arvalid <= 1'b1;
-                rs <= R_MISS_AR;
-              end
-            end
-          end
-        end
-
-        R_EVICT_AW: begin
-          if (axi_m.awvalid && axi_m.awready) rs <= R_EVICT_READ;
-        end
-
-        R_EVICT_READ: begin
-          if (!l2_sram_wblock) rs <= R_EVICT_W;
-        end
-
-        R_EVICT_W: begin
-          if (axi_m.wvalid && axi_m.wready) begin
-            if (evict_word == L2_LINE_LEN'(LineSize - 1)) rs <= R_EVICT_B;
-            else begin
-              evict_word <= evict_word + 1'b1;
-              rs <= R_EVICT_READ;
-            end
-          end
-        end
-
-        R_EVICT_B: begin
-          if (axi_m.bvalid && axi_m.bready) begin
-            if (axi_m.bresp == 2'b00) begin
-              if (r_burst_fill && burst_all_full) begin
-                r_selected_way <= victim_way_q;
-                r_fill_cnt <= '0;
-                rs <= R_BURST_PUT_WRITE;
-              end else begin
-                if (BoomBankedStore) rs <= R_MISS_INVALIDATE;
-                else begin
-                  m_arvalid <= 1'b1;
-                  rs <= R_MISS_AR;
-                end
-              end
-            end else begin
-              r_resp <= axi_m.bresp;
-              rs <= r_burst_fill ? R_BURST_ERROR : r_store_fill ? R_STORE_ERROR : R_ERROR;
-            end
-          end
-        end
-
-        R_STORE_MERGE_READ: begin
-          // The raw refill is in the bank. Read only the touched word while
-          // the selected directory way remains Invalid.
-          if (!l2_sram_wblock) rs <= R_STORE_MERGE_LATCH;
-        end
-
-        R_STORE_MERGE_LATCH: begin
-          // Hold merged data if a higher-priority bank client stalls SourceD.
-          r_store_merge_data <= merge_store_word(
-              line_data_r[r_selected_way][r_word], drain_wdata, drain_wstrb
-          );
-          rs <= R_STORE_MERGE_WRITE;
-        end
-
-        R_STORE_MERGE_WRITE: begin
-          if (bank_write_word_ready) begin
-            cache_install <= 1'b1;
-            install_streamed <= 1'b1;
-            cache_install_dirty <= 1'b1;
-            install_idx <= r_idx_q;
-            install_tag <= r_tag_q;
-            install_way <= r_selected_way;
-            rs <= R_INSTALL_WAIT;
-          end
-        end
-
-        R_BURST_HIT_READ: begin
-          if (!l2_sram_wblock) rs <= R_BURST_HIT_MERGE;
-        end
-
-        R_BURST_HIT_MERGE: begin
-          // Consume the previous synchronous read while issuing the next
-          // beat. A higher-priority access stalls only that next bank read;
-          // the consumed beat is already held in the SRAM output register.
-          r_line_buf[r_fill_cnt] <= merge_store_word(
-              line_data_r[r_selected_way][r_fill_cnt],
-              burst_line_buf[r_fill_cnt],
-              burst_mask_buf[r_fill_cnt]
-          );
-          if (r_fill_cnt == L2_LINE_LEN'(LineSize - 1)) begin
-            if (BoomBankedStore) begin
-              r_fill_cnt <= '0;
-              rs <= R_BURST_PUT_WRITE;
-            end else begin
-              cache_install <= 1'b1;
-              cache_install_dirty <= 1'b1;
-              install_idx <= r_idx_q;
-              install_tag <= r_tag_q;
-              install_way <= r_selected_way;
-              rs <= R_INSTALL_WAIT;
-            end
-          end else begin
-            r_fill_cnt <= r_fill_cnt + 1'b1;
-            if (l2_sram_wblock) rs <= R_BURST_HIT_READ;
-          end
-        end
-
-        R_BURST_PUT_WRITE: begin
-          // SourceD-write retires all full-Put beats or only chunks touched
-          // by a partial Put. The bank port may stall behind higher priority
-          // SinkC, SourceC, or SinkD traffic.
-          if (!burst_put_word_valid || bank_write_word_ready) begin
-            if (r_fill_cnt == L2_LINE_LEN'(LineSize - 1)) begin
-              cache_install <= 1'b1;
-              install_streamed <= 1'b1;
-              cache_install_dirty <= 1'b1;
-              install_idx <= r_idx_q;
-              install_tag <= r_tag_q;
-              install_way <= r_selected_way;
-              rs <= R_INSTALL_WAIT;
-            end else r_fill_cnt <= r_fill_cnt + 1'b1;
-          end
-        end
-
-        // -----------------------------------------------------------------
-        R_MISS_R: begin
-          // Collect fill beats. Early-restart: forward the wanted word
-          // (the beat indexed by r_word) the cycle it arrives, so the
-          // upstream single-beat load completes before line install.
-          // One-shot, gated to r_len==0 (L1D miss = single-beat).
-          if (axi_m.rvalid && axi_m.rready && axi_m.rid == m_arid) begin
-            if (!blocking_refill_streamed)
-              r_line_buf[r_fill_cnt] <= r_store_fill && r_fill_cnt == r_word ? merge_store_word(
-                  axi_m.rdata, drain_wdata, drain_wstrb
-              ) : axi_m.rdata;
-            if (axi_m.rresp != 2'b00) r_resp <= axi_m.rresp;
-            r_fill_cnt <= r_fill_cnt + 1'b1;
-
-            if (!r_store_fill && !r_burst_fill && !r_up_done && (r_len == 8'd0)
-                && (r_fill_cnt == r_word)
-                && (axi_m.rresp == 2'b00) && (r_resp == 2'b00)
-                && (!rs_rvalid || axi_s.rready)) begin
-              rs_rvalid <= 1'b1;
-              rs_rdata  <= axi_m.rdata;
-              rs_rresp  <= 2'b00;
-              rs_rid    <= r_id;
-              rs_rlast  <= 1'b1;
-              if (r_response_secondary) ms_response_secondary <= 1'b1;
-              r_up_done <= 1'b1;
-            end
-
-            if (axi_m.rlast) begin
-              // SinkD writes every blocking refill beat before the directory
-              // becomes valid. A blocking Put then merges its masked words.
-              if (axi_m.rresp == 2'b00 && r_resp == 2'b00) begin
-                if (blocking_refill_streamed) begin
-                  r_selected_way <= victim_way_q;
-                  r_fill_cnt <= '0;
-                  if (!r_store_fill && !r_burst_fill) begin
-                    cache_install <= 1'b1;
-                    install_streamed <= 1'b1;
-                    install_idx <= r_idx_q;
-                    install_tag <= r_tag_q;
-                    install_way <= victim_way_q;
-                    cache_install_dirty <= 1'b0;
-                  end
-                end else begin
-                  cache_install <= 1'b1;
-                  install_idx <= r_idx_q;
-                  install_tag <= r_tag_q;
-                  install_way <= victim_way_q;
-                  cache_install_dirty <= r_store_fill || r_burst_fill;
-                end
-              end
-              if (r_burst_fill) begin
-                rs <= (axi_m.rresp != 2'b00 || r_resp != 2'b00) ? R_BURST_ERROR
-                    : blocking_refill_streamed ? R_BURST_HIT_READ : R_INSTALL_WAIT;
-              end else if (r_store_fill) begin
-                rs <= (axi_m.rresp != 2'b00 || r_resp != 2'b00) ? R_STORE_ERROR
-                    : blocking_refill_streamed ? R_STORE_MERGE_READ : R_INSTALL_WAIT;
-              end else if (r_up_done
-                  || ((r_len == 8'd0) && (r_fill_cnt == r_word)
-                      && (axi_m.rresp == 2'b00) && (r_resp == 2'b00)
-                      && (!rs_rvalid || axi_s.rready))) begin
-                rs <= R_IDLE;
-              end else if (axi_m.rresp != 2'b00 || r_resp != 2'b00) begin
-                // The refill has drained, but no line was installed. Going
-                // through R_HIT here would miss again and retry forever.
-                // Complete the remaining upstream beats with the saved error.
-                rs <= R_ERROR;
-              end else begin
-                rs <= R_INSTALL_WAIT;  // allow SRAM install/read to settle
-              end
-            end
-          end
-        end
-
-        // -----------------------------------------------------------------
-        R_INSTALL_WAIT: begin
-          // Wait for any remaining buffered line writes; a streamed Put has
-          // already committed its selected bank beats before directory update.
-          if (!cache_install && !boom_bank_line_busy)
-            rs <= r_burst_fill ? R_BURST_DONE : r_store_fill ? R_STORE_DONE : R_INSTALL_READ;
-        end
-
-        R_MSHR_EARLY_INSTALL: begin
-          // The critical word was already returned. Commit the completed
-          // line and release the read FSM without another upstream beat.
-          if (!cache_install && !boom_bank_line_busy) rs <= R_IDLE;
-        end
-
-        R_STORE_DONE: rs <= R_IDLE;
-
-        R_STORE_ERROR: rs <= R_IDLE;
-
-        R_BURST_DONE: rs <= R_IDLE;
-
-        // AXI requires every W beat through WLAST even when an earlier
-        // line segment failed. The Put list drains without installing data.
-        R_BURST_ERROR: if (burst_w_done) rs <= R_IDLE;
-
-        R_INSTALL_READ: begin
-          // The SRAM has a synchronous read port. After the install write,
-          // allow one read edge to refresh line_data_r before R_HIT consumes
-          // it on the following edge.
-          if (BoomBankedStore) begin
-            if (!l2_sram_wblock) begin
-              r_selected_way <= install_way;
-              rs <= R_HIT_DATA;
-            end
-          end else rs <= R_HIT;
-        end
-
-        R_ERROR: begin
-          if (!rs_rvalid || axi_s.rready) begin
-            rs_rvalid <= 1'b1;
-            rs_rdata  <= '0;
-            rs_rresp  <= r_resp;
-            rs_rid    <= r_id;
-            rs_rlast  <= (r_len == 8'd0);
-            if (r_response_secondary) ms_response_secondary <= 1'b1;
-            if (r_len == 8'd0) rs <= R_IDLE;
-            else r_len <= r_len - 8'd1;
-          end
-        end
-
-        // -----------------------------------------------------------------
-        R_BYPASS_WAIT: begin
-          if (!ms_busy && !any_write_in_flight) begin
-            m_arvalid <= 1'b1;
-            m_araddr  <= r_addr;
-            m_arid    <= r_id;
-            m_arlen   <= r_len;
-            m_arsize  <= r_size;
-            m_arburst <= r_burst;
-            m_arcache <= r_cache;
-            rs <= R_BYPASS_AR;
-          end
-        end
-
-        // -----------------------------------------------------------------
-        R_BYPASS_AR: begin
-          if (!m_arvalid) rs <= R_BYPASS_R;
-        end
-
-        // -----------------------------------------------------------------
-        R_BYPASS_R: begin
-          // Forward downstream R beats to upstream verbatim.
-          if (axi_m.rvalid && (!rs_rvalid || axi_s.rready)) begin
-            rs_rvalid <= 1'b1;
-            rs_rdata  <= axi_m.rdata;
-            rs_rresp  <= axi_m.rresp;
-            rs_rid    <= axi_m.rid;
-            rs_rlast  <= axi_m.rlast;
-            if (axi_m.rlast) rs <= R_IDLE;
-          end
-        end
-
-        default: rs <= R_IDLE;
-      endcase
-
-      // Forward nested C metadata to the ordinary request's saved victim,
-      // as BOOM's nested writeback does. A clean L2 victim can become dirty
-      // when its owner returns modified data during Probe pre-emption.
-      if (BoomBankedStore && (rs == R_EVICT_PROBE || hit_probe_active) && release_dir_write_fire
-          && release_head_addr[IndexMsb:IndexLsb] == r_idx_q
-          && TagBits'(rapt_pkg::canonical_addr(
-              release_head_addr
-          ) >> TagLsb) == victim_tag_q) begin
-        victim_clients_q <= 1'b0;
-        victim_dirty_q <= release_dir_dirty_q || release_head_has_data;
-        victim_state_q <= dir_write_state;
-      end
-
-      // ---------------------------------------------------------------
-      // Cache install (write port on fill completion)
-      // ---------------------------------------------------------------
       if (!BoomBankedStore && cache_install) begin
         line_valid[install_way][install_idx] <= 1'b1;
         line_tag[install_way][install_idx]   <= install_tag;
       end
-
-      // ---------------------------------------------------------------
       // Hit update. BOOM's bank uses byte enables and tracks dirty metadata;
       // smaller legacy configurations still invalidate on partial stores.
-      // ---------------------------------------------------------------
       if (!BoomBankedStore && w_hit_update && !w_full_strobe) begin
         line_valid[w_hit_way][w_idx_q] <= 1'b0;
       end
-      // Snoop updates precede the downstream response. A failed full-word
-      // write must not leave its value cached after software observes B.
-      // Typed writes also invalidate aliases: an error can have partial effects.
-      // Do not invalidate a different tag installed at the same index now.
+      // Invalidate a failed full-word write only if the same tag remains.
       if (!BoomBankedStore && write_response_error) begin
         for (int way = 0; way < L2_N_WAYS; way++) begin
           if ((cache_install && install_idx == write_error_idx
@@ -3510,14 +3340,10 @@ module rapt_l2 #(
       end
     end
   end
-
-  // =====================================================================
   // WRITE PATH (BOOM write-back hits/misses; forwarded uncached and bursts)
-  // =====================================================================
   // Write buffer: capture upstream AW/W into wbuf[]. BOOM-layout hits can
   // return B after the local bank write; misses wait for refill/install.
   // Forwarded transactions drain to memory and retain their AXI response.
-
   // ---- Snoop hit/update (fires same cycle as W capture) ----
   always_comb begin
     w_hit_update = 1'b0;
@@ -3528,7 +3354,6 @@ module rapt_l2 #(
       w_hit_update = 1'b1;
     end
   end
-
   // ---- Upstream (slave) handshakes ----
   // AW: accept when the target wbuf slot is empty AND not a same-line
   // race against an in-flight fill (AR/AW reordering hazard).
@@ -3569,22 +3394,20 @@ module rapt_l2 #(
       && !forward_cache_pending
       && !forward_scalar_pending
       && (!cbo_busy || (cbo_state == C_IDLE && l1d_writeback_pending_i)) && !burst_active
-      && !(rs == R_EVICT_PROBE || rs == R_EVICT_AW || rs == R_EVICT_READ
-          || rs == R_EVICT_W || rs == R_EVICT_B)
-      && !(BoomBankedStore && (boom_queued_miss_or_unknown || rs != R_IDLE || rs_rvalid))
+      && !(rs_parent == R_EVICT_PROBE || evict_valid)
+      && !(BoomBankedStore && (boom_queued_miss_or_unknown || rs_parent != R_IDLE || rs_rvalid))
       && !(BoomBankedStore && dir_error_pending)
       && !(dir_aw_needs_read && (!dir_read_ready || dir_demand_read_valid))
       && !(burst_alloc_needs_read && (!dir_read_ready || dir_demand_read_valid))
       && (axi_s.awlen != 0
           ? (!burst_active && !(|wbuf_busy)
               && (!burst_alloc_needs_read || !(|forward_b_pending))
-              && !bq_full && rs == R_IDLE && !rs_rvalid && !cache_install)
+              && !bq_full && rs_parent == R_IDLE && !rs_rvalid && !cache_install)
           : (!wbuf[aw_wptr].busy && !(|forward_b_pending)
               && !bq_full && !read_bypass_in_progress
               && !(l2_fill_in_progress && l2_aw_same_line)));
   assign dir_aw_read_fire = dir_aw_needs_read && axi_s.awready;
   assign dir_burst_alloc_read_fire = burst_alloc_needs_read && axi_s.awready;
-
   // W: accept when the W-target slot has an AW captured but no W yet.
   // (For single-beat stores w_wptr always points at the right slot.)
   logic wbuf_w_pending;
@@ -3621,13 +3444,11 @@ module rapt_l2 #(
               || rs == R_EVICT_W || rs == R_EVICT_B))
           && (!BoomBankedStore || !w_hit_q || dir_write_ready)
           && (!BoomBankedStore || !w_hit_q || bank_write_word_ready);
-
   // B: BOOM-layout store misses wait for installation, and non-cacheable
   // writes wait for the real downstream B so CSR/MMIO stays ordered.
   assign axi_s.bvalid = (b_count != 0) && b_ready_q[b_rptr];
   assign axi_s.bid = b_id_q[b_rptr];
   assign axi_s.bresp = b_resp_q[b_rptr];
-
   // ---- Downstream (master) drives ----
   // AW/W issued combinationally from the drain head. axi_m.awvalid is
   // gated on ws==W_IDLE (no AW in flight) AND head ready.
@@ -3929,7 +3750,6 @@ module rapt_l2 #(
         burst_active <= 0;
     end
   end
-
   // ---- Combined capture + drain FSM ----
   always_ff @(posedge clock) begin
     if (reset) begin
@@ -4036,7 +3856,6 @@ module rapt_l2 #(
         end
         default: ws <= W_IDLE;
       endcase
-
       // ---- AW capture (slave) ----
       // Order matters: AW capture is after drain-free so that on the
       // wraparound cycle (drain freeing slot S while a new AW also
@@ -4070,7 +3889,6 @@ module rapt_l2 #(
         // the enqueue. Saves a downstream beat for adjacent stores.
         aw_wptr <= (aw_wptr == WbufPtrW'(WbufDepth - 1)) ? '0 : (aw_wptr + 1'b1);
       end
-
       // ---- W capture (slave) ----
       if (!burst_active && axi_s.wvalid && axi_s.wready) begin
         if (BoomBankedStore) wbuf[w_wptr].put_list <= put_list_alloc;
@@ -4095,7 +3913,6 @@ module rapt_l2 #(
           b_wptr <= (b_wptr == WbufPtrW'(WbufDepth - 1)) ? '0 : (b_wptr + 1'b1);
         end
       end
-
       if (burst_write_fire && axi_s.wlast) begin
         burst_rsp_slot <= b_wptr;
         b_id_q[b_wptr] <= burst_id;
@@ -4103,14 +3920,12 @@ module rapt_l2 #(
         b_ready_q[b_wptr] <= 1'b0;
         b_wptr <= (b_wptr == WbufPtrW'(WbufDepth - 1)) ? '0 : (b_wptr + 1'b1);
       end
-
       // ---- Upstream B consume ----
       if (axi_s.bvalid && axi_s.bready) begin
         b_ready_q[b_rptr] <= 1'b0;
         b_resp_q[b_rptr] <= 2'b00;
         b_rptr <= (b_rptr == WbufPtrW'(WbufDepth - 1)) ? '0 : (b_rptr + 1'b1);
       end
-
       // ---- B credit counter ----
       // Net delta: +1 on W-beat last capture, -1 on upstream B handshake.
       b_count <= b_count
@@ -4120,13 +3935,11 @@ module rapt_l2 #(
   end
 
 `endif  // RAPT_L2_ACTIVE
-
   // Scope the helper define to this module so it does not leak into other
   // translation-unit files in single-unit Verilator/Yosys compilation.
 `ifdef RAPT_L2_ACTIVE
   `undef RAPT_L2_ACTIVE
 `endif
-
 endmodule
 /* verilator lint_on UNUSEDPARAM */
 /* verilator lint_on UNUSEDSIGNAL */

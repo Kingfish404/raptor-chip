@@ -237,6 +237,111 @@ module rapt_ieu_mul #(
   // read while div_active, but keeping it defined avoids a sim-only X check
   // on the first post-reset division.
   always_ff @(posedge clock) begin
+    // ===== MUL stage-1 load =====
+    if (accept_mul) begin
+      m1_s1   <= in_a;
+      m1_s2   <= in_b;
+      m1_op   <= in_op;
+      m1_word <= in_word;
+      m1_tag  <= in_tag;
+      m1_v    <= 1'b1;
+    end else begin
+      m1_v <= 1'b0;
+    end
+
+    // ===== MUL stage-1 -> stage-2 =====
+    if (m1_v && !cancel_tags[m1_tag]) begin
+      m2_r   <= mul_r_comb;
+      m2_tag <= m1_tag;
+      m2_v   <= 1'b1;
+    end else begin
+      m2_v <= 1'b0;
+    end
+
+    // ===== DIV start =====
+    if (accept_div) begin
+      div_op               <= in_op;
+      div_s1               <= div_input_a;
+      div_s2               <= div_input_b;
+      div_word             <= in_word;
+      div_tag              <= in_tag;
+
+      div_quotient         <= 0;
+      div_remainder        <= '0;
+      div_divisor          <= abs_b;
+      div_dividend_shifted <= div_aligned_a;
+      div_counter          <= (XLEN > 32 && in_word) ? $clog2(XLEN+1)'(XLEN - 32) : '0;
+      div_sign             <= {div_input_a[XLEN-1], div_input_b[XLEN-1]};
+      div_active           <= 1'b1;
+      div_norm             <= 1'b1;
+      div_out_valid        <= 1'b0;
+    end else if (div_active && cancel_tags[div_tag]) begin
+      // Abort only this divider owner; older pipelined MULs remain live.
+      div_active <= 1'b0;
+      div_norm <= 1'b0;
+      div_out_valid <= 1'b0;
+    end else if (div_active && div_norm) begin
+      // Leading dividend zeros keep a zero partial remainder and produce
+      // zero quotient bits (a zero divisor's result is overridden below).
+      // Start at the first significant bit, exactly where the bit-serial
+      // loop would first leave a zero remainder.
+      div_norm <= 1'b0;
+      if (div_start >= ($clog2(XLEN + 1) + 1)'(XLEN)) begin
+        div_counter <= $clog2(XLEN + 1)'(XLEN);
+      end else begin
+        div_counter          <= div_start[$clog2(XLEN+1)-1:0];
+        div_remainder        <= {{XLEN{1'b0}}, div_normalized[XLEN-1]};
+        div_dividend_shifted <= div_normalized << 1;
+      end
+    end else if (div_active) begin
+      if (div_counter == XLEN[$clog2(XLEN+1)-1:0]) begin
+        // Division complete: apply sign correction and emit
+        div_active    <= 1'b0;
+        div_out_valid <= 1'b1;
+        div_out_tag   <= div_tag;
+        unique case (div_op)
+          `RAPT_ALU_DIV___: begin
+            if (div_s2 == 0) div_out_r <= ~'h0;
+            else if (!div_word && div_s1 == ('b1 << (XLEN - 1)) && div_s2 == ~'h0)
+              div_out_r <= 'b1 << (XLEN - 1);
+            else if (div_word && div_s1[31:0] == 32'h8000_0000 && div_s2[31:0] == 32'hffff_ffff)
+              div_out_r <= {{XLEN - 32{1'b1}}, 32'h8000_0000};
+            else if (div_word) div_out_r <= {{XLEN - 32{div_q_signed[31]}}, div_q_signed[31:0]};
+            else div_out_r <= div_q_signed;
+          end
+          `RAPT_ALU_DIVU__: begin
+            if (div_s2 == 0) div_out_r <= ~'h0;
+            else if (div_word) div_out_r <= {{XLEN - 32{div_quotient[31]}}, div_quotient[31:0]};
+            else div_out_r <= div_quotient;
+          end
+          `RAPT_ALU_REM___: begin
+            if (div_s2 == 0) div_out_r <= div_s1;
+            else if (div_word) div_out_r <= {{XLEN - 32{div_r_signed[31]}}, div_r_signed[31:0]};
+            else div_out_r <= div_r_signed;
+          end
+          `RAPT_ALU_REMU__: begin
+            // REMUW by zero returns the low 32-bit dividend and, like
+            // every W-form result, sign-extends it to XLEN.
+            if (div_s2 == 0 && div_word) div_out_r <= {{XLEN - 32{div_s1[31]}}, div_s1[31:0]};
+            else if (div_s2 == 0) div_out_r <= div_s1;
+            else if (div_word) div_out_r <= {{XLEN - 32{div_remainder[32]}}, div_remainder[32:1]};
+            else div_out_r <= div_remainder[XLEN:1];
+          end
+          default: div_out_r <= 0;
+        endcase
+      end else begin
+        // Two restoring iterations (one on the final odd bit).
+        div_quotient <= div_quotient
+            | (XLEN'(div_q1) << (XLEN[$clog2(XLEN+1)-1:0] - 1 - div_counter))
+            | (XLEN'(div_two && div_q2) << (XLEN[$clog2(XLEN+1)-1:0] - 2 - div_counter));
+        div_remainder <= div_two ? div_r2 : div_r1;
+        div_dividend_shifted <= div_two ? div_dividend_shifted << 2 : div_dividend_shifted << 1;
+        div_counter <= div_counter + (div_two ? 2 : 1);
+      end
+    end else begin
+      // No DIV pending: clear any held DIV emission after one cycle.
+      div_out_valid <= 1'b0;
+    end
     if (reset || flush) begin
       m1_v          <= 1'b0;
       m2_v          <= 1'b0;
@@ -244,112 +349,6 @@ module rapt_ieu_mul #(
       div_norm      <= 1'b0;
       div_out_valid <= 1'b0;
       div_counter   <= '0;
-    end else begin
-      // ===== MUL stage-1 load =====
-      if (accept_mul) begin
-        m1_s1   <= in_a;
-        m1_s2   <= in_b;
-        m1_op   <= in_op;
-        m1_word <= in_word;
-        m1_tag  <= in_tag;
-        m1_v    <= 1'b1;
-      end else begin
-        m1_v <= 1'b0;
-      end
-
-      // ===== MUL stage-1 -> stage-2 =====
-      if (m1_v && !cancel_tags[m1_tag]) begin
-        m2_r   <= mul_r_comb;
-        m2_tag <= m1_tag;
-        m2_v   <= 1'b1;
-      end else begin
-        m2_v <= 1'b0;
-      end
-
-      // ===== DIV start =====
-      if (accept_div) begin
-        div_op               <= in_op;
-        div_s1               <= div_input_a;
-        div_s2               <= div_input_b;
-        div_word             <= in_word;
-        div_tag              <= in_tag;
-
-        div_quotient         <= 0;
-        div_remainder        <= '0;
-        div_divisor          <= abs_b;
-        div_dividend_shifted <= div_aligned_a;
-        div_counter          <= (XLEN > 32 && in_word) ? $clog2(XLEN+1)'(XLEN - 32) : '0;
-        div_sign             <= {div_input_a[XLEN-1], div_input_b[XLEN-1]};
-        div_active           <= 1'b1;
-        div_norm             <= 1'b1;
-        div_out_valid        <= 1'b0;
-      end else if (div_active && cancel_tags[div_tag]) begin
-        // Abort only this divider owner; older pipelined MULs remain live.
-        div_active <= 1'b0;
-        div_norm <= 1'b0;
-        div_out_valid <= 1'b0;
-      end else if (div_active && div_norm) begin
-        // Leading dividend zeros keep a zero partial remainder and produce
-        // zero quotient bits (a zero divisor's result is overridden below).
-        // Start at the first significant bit, exactly where the bit-serial
-        // loop would first leave a zero remainder.
-        div_norm <= 1'b0;
-        if (div_start >= ($clog2(XLEN + 1) + 1)'(XLEN)) begin
-          div_counter <= $clog2(XLEN + 1)'(XLEN);
-        end else begin
-          div_counter          <= div_start[$clog2(XLEN+1)-1:0];
-          div_remainder        <= {{XLEN{1'b0}}, div_normalized[XLEN-1]};
-          div_dividend_shifted <= div_normalized << 1;
-        end
-      end else if (div_active) begin
-        if (div_counter == XLEN[$clog2(XLEN+1)-1:0]) begin
-          // Division complete: apply sign correction and emit
-          div_active    <= 1'b0;
-          div_out_valid <= 1'b1;
-          div_out_tag   <= div_tag;
-          unique case (div_op)
-            `RAPT_ALU_DIV___: begin
-              if (div_s2 == 0) div_out_r <= ~'h0;
-              else if (!div_word && div_s1 == ('b1 << (XLEN - 1)) && div_s2 == ~'h0)
-                div_out_r <= 'b1 << (XLEN - 1);
-              else if (div_word && div_s1[31:0] == 32'h8000_0000 && div_s2[31:0] == 32'hffff_ffff)
-                div_out_r <= {{XLEN - 32{1'b1}}, 32'h8000_0000};
-              else if (div_word) div_out_r <= {{XLEN - 32{div_q_signed[31]}}, div_q_signed[31:0]};
-              else div_out_r <= div_q_signed;
-            end
-            `RAPT_ALU_DIVU__: begin
-              if (div_s2 == 0) div_out_r <= ~'h0;
-              else if (div_word) div_out_r <= {{XLEN - 32{div_quotient[31]}}, div_quotient[31:0]};
-              else div_out_r <= div_quotient;
-            end
-            `RAPT_ALU_REM___: begin
-              if (div_s2 == 0) div_out_r <= div_s1;
-              else if (div_word) div_out_r <= {{XLEN - 32{div_r_signed[31]}}, div_r_signed[31:0]};
-              else div_out_r <= div_r_signed;
-            end
-            `RAPT_ALU_REMU__: begin
-              // REMUW by zero returns the low 32-bit dividend and, like
-              // every W-form result, sign-extends it to XLEN.
-              if (div_s2 == 0 && div_word) div_out_r <= {{XLEN - 32{div_s1[31]}}, div_s1[31:0]};
-              else if (div_s2 == 0) div_out_r <= div_s1;
-              else if (div_word) div_out_r <= {{XLEN - 32{div_remainder[32]}}, div_remainder[32:1]};
-              else div_out_r <= div_remainder[XLEN:1];
-            end
-            default: div_out_r <= 0;
-          endcase
-        end else begin
-          // Two restoring iterations (one on the final odd bit).
-          div_quotient <= div_quotient
-              | (XLEN'(div_q1) << (XLEN[$clog2(XLEN+1)-1:0] - 1 - div_counter))
-              | (XLEN'(div_two && div_q2) << (XLEN[$clog2(XLEN+1)-1:0] - 2 - div_counter));
-          div_remainder <= div_two ? div_r2 : div_r1;
-          div_dividend_shifted <= div_two ? div_dividend_shifted << 2 : div_dividend_shifted << 1;
-          div_counter <= div_counter + (div_two ? 2 : 1);
-        end
-      end else begin
-        // No DIV pending: clear any held DIV emission after one cycle.
-        div_out_valid <= 1'b0;
-      end
     end
   end
 

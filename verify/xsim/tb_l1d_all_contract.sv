@@ -140,6 +140,10 @@ endmodule
 `include "rapt_if.svh"
 
 module tb_l1d_cmo_permissions;
+  function automatic int tlb_slot(input logic [`RAPT_XLEN-1:0] vpn);
+    return `RAPT_DTLB_WAYS == 0 ? 0
+        : int'(vpn) % (`RAPT_DTLB_ENTRIES / (`RAPT_DTLB_WAYS == 0 ? 1 : `RAPT_DTLB_WAYS));
+  endfunction
   localparam int XLEN = 64;
   localparam logic [63:0] Vaddr = 64'h0000_0000_4000_0123;
   logic [63:0] Paddr = 64'h0000_0000_8000_0123;
@@ -179,11 +183,12 @@ module tb_l1d_cmo_permissions;
 
   task automatic install_store_tlb(input logic [6:0] pte);
     begin
-      dut.u_dstlb.valid[0] = 1'b1;
-      dut.u_dstlb.vtags[0] = $bits(dut.u_dstlb.vtags[0])'(Vaddr >> 12);
-      dut.u_dstlb.ptags[0] = $bits(dut.u_dstlb.ptags[0])'(Paddr >> 12);
-      dut.u_dstlb.asids[0] = '0;
-      dut.u_dstlb.ptes[0] = pte;
+      dut.u_dstlb.valid[tlb_slot(Vaddr >> 12)] = 1'b1;
+      dut.u_dstlb.vtags[tlb_slot(Vaddr >> 12)] = $bits(dut.u_dstlb.vtags[0])'(Vaddr >> 12);
+      dut.u_dstlb.ptags[tlb_slot(Vaddr >> 12)] = $bits(dut.u_dstlb.ptags[0])'(Paddr >> 12);
+      dut.u_dstlb.asids[tlb_slot(Vaddr >> 12)] = '0;
+      dut.u_dstlb.ptes[tlb_slot(Vaddr >> 12)] = pte;
+      dut.u_dstlb.verdicts[tlb_slot(Vaddr >> 12)] = '0;
     end
   endtask
 
@@ -196,6 +201,8 @@ module tb_l1d_cmo_permissions;
       exu_l1d.valid = 1'b1;
       #1;
       check(!lsu_l1d.idle, "incoming CMO translation advertised L1D idle");
+      check(!exu_l1d.ready, {name, " bypassed registered translation"});
+      tick(1);
       check(exu_l1d.ready && !exu_l1d.trap, {name, " did not authorize"});
       tick(1);
       exu_l1d.valid = 1'b0;
@@ -260,6 +267,63 @@ module tb_l1d_cmo_permissions;
       expect_cmo_success("physical ROM CMO via read permission");
     end
 
+    // An older store translation must not wait for a load's stalled bus AR.
+    Paddr = 64'h80000123;
+    install_store_tlb(7'b110_0011);
+    csr_bcast.dmmu_en = 0;
+    lsu_l1d.rvalid = 1;
+    lsu_l1d.raddr = 'h80002000;
+    lsu_l1d.ralu = `RAPT_ALU_LW__;
+    l1d_bus.rready = 0;
+    tick(1);
+    check(l1d_bus.arvalid, "load did not hold a pending bus request");
+    csr_bcast.dmmu_en = 1;
+    expect_cmo_success("CMO concurrent with stalled load");
+    check(l1d_bus.arvalid && !lsu_l1d.rready, "translation disturbed stalled load");
+    cmu_bcast.flush_pipe = 1;
+    lsu_l1d.rvalid = 0;
+    tick(1);
+    cmu_bcast.flush_pipe = 0;
+
+    // Cancel both before capture and while a translated response is pending.
+    for (int after_capture = 0; after_capture < 2; after_capture++) begin
+      exu_l1d.vaddr = Vaddr;
+      exu_l1d.walu = `RAPT_CBO_MGMT_WALU;
+      exu_l1d.cmo_mgmt = 1;
+      exu_l1d.mmu_en = 1;
+      exu_l1d.valid = 1;
+      if (after_capture != 0) tick(1);
+      cmu_bcast.flush_pipe = 1;
+      #1;
+      check(!exu_l1d.ready && !l1d_bus.awvalid, "flushed translation completed a store");
+      tick(1);
+      exu_l1d.valid = 0;
+      exu_l1d.mmu_en = 0;
+      cmu_bcast.flush_pipe = 0;
+      #1;
+      check(!dut.store_check_valid && !exu_l1d.ready, "cancelled response survived flush");
+      tick(1);
+    end
+    expect_cmo_success("CMO retry after response cancellation");
+
+    // A response no longer depends on its CAM entry, nor may an eviction
+    // start a duplicate walk for the request completing on this edge.
+    exu_l1d.vaddr = Vaddr;
+    exu_l1d.walu = `RAPT_CBO_MGMT_WALU;
+    exu_l1d.cmo_mgmt = 1;
+    exu_l1d.mmu_en = 1;
+    exu_l1d.valid = 1;
+    tick(1);
+    dut.u_dstlb.valid = '0;
+    #1;
+    check(exu_l1d.ready && !exu_l1d.trap && exu_l1d.paddr == Paddr,
+          "TLB eviction changed the captured response");
+    check(!dut.ptw_req, "completed translation started a duplicate walk");
+    tick(1);
+    exu_l1d.valid = 0;
+    exu_l1d.mmu_en = 0;
+    tick(1);
+
     $display("PASS: Zicbom R-or-W, A-only PTE permission and store-fault semantics");
     $finish;
   end
@@ -305,6 +369,7 @@ module tb_l1d_data;
             .WordBits(WordBits),
             .Ways(Ways)
         ) dut (
+            .write_blocked(1'b0),
             .write_line(1'b0),
             .write_mask('0),
             .write_line_data('0),
@@ -914,6 +979,10 @@ endmodule
 `include "rapt.svh"
 `include "rapt_if.svh"
 module tb_l1d_load_footprint;
+  function automatic int tlb_slot(input logic [`RAPT_XLEN-1:0] vpn);
+    return `RAPT_DTLB_WAYS == 0 ? 0
+        : int'(vpn) % (`RAPT_DTLB_ENTRIES / (`RAPT_DTLB_WAYS == 0 ? 1 : `RAPT_DTLB_WAYS));
+  endfunction
   localparam int XLEN = `RAPT_XLEN;
   localparam int WORD_BYTES = XLEN / 8;
   logic clock = 0, reset = 1;
@@ -946,12 +1015,15 @@ module tb_l1d_load_footprint;
       tick(1);
       pmp_update.addr_we=0;
       pmp_update.cfg_we=0;
+      // Observe the PMP flush before manually installing a test translation.
+      tick(1);
       if (translated != 0) begin
-        dut.u_dtlb.valid[0]=1;
-        dut.u_dtlb.vtags[0]=$bits(dut.u_dtlb.vtags[0])'(va>>12);
-        dut.u_dtlb.ptags[0]=$bits(dut.u_dtlb.ptags[0])'(beat_pa>>12);
-        dut.u_dtlb.asids[0]=0;
-        dut.u_dtlb.ptes[0]=7'b1100011;
+        dut.u_dtlb.valid[tlb_slot(va>>12)]=1;
+        dut.u_dtlb.vtags[tlb_slot(va>>12)]=$bits(dut.u_dtlb.vtags[tlb_slot(va>>12)])'(va>>12);
+        dut.u_dtlb.ptags[tlb_slot(va>>12)]=$bits(dut.u_dtlb.ptags[tlb_slot(va>>12)])'(beat_pa>>12);
+        dut.u_dtlb.asids[tlb_slot(va>>12)]=0;
+        dut.u_dtlb.ptes[tlb_slot(va>>12)]=7'b1100011;
+        dut.u_dtlb.verdicts[tlb_slot(va>>12)] = '0;
       end
       lsu_l1d.raddr=va;
       lsu_l1d.ralu=XLEN==64 ? `RAPT_ALU_LD__ : `RAPT_ALU_LW__;
@@ -1316,6 +1388,10 @@ endmodule
 `include "rapt.svh"
 `include "rapt_if.svh"
 module tb_l1d_plic_width;
+  function automatic int tlb_slot(input logic [`RAPT_XLEN-1:0] vpn);
+    return `RAPT_DTLB_WAYS == 0 ? 0
+        : int'(vpn) % (`RAPT_DTLB_ENTRIES / (`RAPT_DTLB_WAYS == 0 ? 1 : `RAPT_DTLB_WAYS));
+  endfunction
   localparam int XLEN = `RAPT_XLEN;
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
@@ -1346,11 +1422,14 @@ module tb_l1d_plic_width;
         tick(1);
         pmp_update.addr_we=0;
         pmp_update.cfg_we=0;
-        dut.u_dtlb.valid[0]=1;
-        dut.u_dtlb.vtags[0]=$bits(dut.u_dtlb.vtags[0])'(va>>12);
-        dut.u_dtlb.ptags[0]=$bits(dut.u_dtlb.ptags[0])'(pa>>12);
-        dut.u_dtlb.asids[0]=0;
-        dut.u_dtlb.ptes[0]=7'b1100011;
+        // Observe the PMP flush before manually installing a test translation.
+        tick(1);
+        dut.u_dtlb.valid[tlb_slot(va>>12)]=1;
+        dut.u_dtlb.vtags[tlb_slot(va>>12)]=$bits(dut.u_dtlb.vtags[tlb_slot(va>>12)])'(va>>12);
+        dut.u_dtlb.ptags[tlb_slot(va>>12)]=$bits(dut.u_dtlb.ptags[tlb_slot(va>>12)])'(pa>>12);
+        dut.u_dtlb.asids[tlb_slot(va>>12)]=0;
+        dut.u_dtlb.ptes[tlb_slot(va>>12)]=7'b1100011;
+        dut.u_dtlb.verdicts[tlb_slot(va>>12)] = '0;
       end
       lsu_l1d.raddr = va;
       case (kind)
@@ -1391,6 +1470,10 @@ endmodule
 `include "rapt.svh"
 `include "rapt_if.svh"
 module tb_l1d_pma;
+  function automatic int tlb_slot(input logic [`RAPT_XLEN-1:0] vpn);
+    return `RAPT_DTLB_WAYS == 0 ? 0
+        : int'(vpn) % (`RAPT_DTLB_ENTRIES / (`RAPT_DTLB_WAYS == 0 ? 1 : `RAPT_DTLB_WAYS));
+  endfunction
   localparam int XLEN = `RAPT_XLEN;
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
@@ -1425,6 +1508,8 @@ module tb_l1d_pma;
       tick(1);
       pmp_update.addr_we=0;
       pmp_update.cfg_we=0;
+      // Observe the PMP flush before manually installing a test translation.
+      tick(1);
       if (sram_path) pa = region == 0 ? XLEN'('h0f002000) : XLEN'('h0f00f000);
       else
         pa = region == 0 ? XLEN'('h02000000) : region == 1 ? XLEN'('h20001000) : XLEN'('h30001000);
@@ -1432,17 +1517,19 @@ module tb_l1d_pma;
       csr_bcast.dmmu_en=1'(translated);
       if (translated) begin
         csr_bcast.priv=`RAPT_PRIV_S;
-        dut.u_dtlb.valid[0]=1;
-        dut.u_dtlb.vtags[0]=$bits(dut.u_dtlb.vtags[0])'(va>>12);
-        dut.u_dtlb.ptags[0]=$bits(dut.u_dtlb.ptags[0])'(pa>>12);
-        dut.u_dtlb.asids[0]='0;
-        dut.u_dtlb.ptes[0]=7'b1100011;
+        dut.u_dtlb.valid[tlb_slot(va>>12)]=1;
+        dut.u_dtlb.vtags[tlb_slot(va>>12)]=$bits(dut.u_dtlb.vtags[tlb_slot(va>>12)])'(va>>12);
+        dut.u_dtlb.ptags[tlb_slot(va>>12)]=$bits(dut.u_dtlb.ptags[tlb_slot(va>>12)])'(pa>>12);
+        dut.u_dtlb.asids[tlb_slot(va>>12)]='0;
+        dut.u_dtlb.ptes[tlb_slot(va>>12)]=7'b1100011;
+        dut.u_dtlb.verdicts[tlb_slot(va>>12)] = '0;
         if (sram_path) begin
-          dut.u_dstlb.valid[0]=1;
-          dut.u_dstlb.vtags[0]=$bits(dut.u_dstlb.vtags[0])'(va>>12);
-          dut.u_dstlb.ptags[0]=$bits(dut.u_dstlb.ptags[0])'(pa>>12);
-          dut.u_dstlb.asids[0]='0;
-          dut.u_dstlb.ptes[0]=7'b1100011;
+          dut.u_dstlb.valid[tlb_slot(va>>12)]=1;
+          dut.u_dstlb.vtags[tlb_slot(va>>12)]=$bits(dut.u_dstlb.vtags[tlb_slot(va>>12)])'(va>>12);
+          dut.u_dstlb.ptags[tlb_slot(va>>12)]=$bits(dut.u_dstlb.ptags[tlb_slot(va>>12)])'(pa>>12);
+          dut.u_dstlb.asids[tlb_slot(va>>12)]='0;
+          dut.u_dstlb.ptes[tlb_slot(va>>12)]=7'b1100011;
+          dut.u_dstlb.verdicts[tlb_slot(va>>12)] = '0;
         end
       end
       lsu_l1d.raddr=va;
@@ -1726,7 +1813,7 @@ module tb_l1d_ptw_axi_error;
       tick(1);
       axi.rvalid = 0;
     end else begin
-      tick(2);
+      for (int n = 0; n < 20 && !exu_l1d.ready; n++) tick(1);
       check(exu_l1d.ready && !exu_l1d.trap && exu_l1d.paddr == PA,
             "store AXI retry translation failed");
     end
@@ -1887,7 +1974,7 @@ module tb_l1d_ptw_error;
       tick(1);
       l1d_bus.rvalid = 0;
     end else begin
-      tick(2);
+      for (int n = 0; n < 20 && !exu_l1d.ready; n++) tick(1);
       check(exu_l1d.ready && !exu_l1d.trap && exu_l1d.paddr == PA,
             "retry store translation did not complete");
     end
@@ -1977,6 +2064,10 @@ endmodule
 `include "rapt.svh"
 `include "rapt_if.svh"
 module tb_l1d_read_error;
+  function automatic int tlb_slot(input logic [`RAPT_XLEN-1:0] vpn);
+    return `RAPT_DTLB_WAYS == 0 ? 0
+        : int'(vpn) % (`RAPT_DTLB_ENTRIES / (`RAPT_DTLB_WAYS == 0 ? 1 : `RAPT_DTLB_WAYS));
+  endfunction
   localparam int XLEN = `RAPT_XLEN;
   localparam logic [XLEN-1:0] PA = 'h80000000, VA = 'h40000000;
   localparam logic [XLEN-1:0] Good = 'h12345678, Bad = 'hdeadbeef;
@@ -2035,16 +2126,19 @@ module tb_l1d_read_error;
     tick(1);
     pmp_update.addr_we=0;
     pmp_update.cfg_we=0;
+    // Observe the PMP flush before manually installing a test translation.
+    tick(1);
     if (attr != 0) begin
       csr_bcast.priv=`RAPT_PRIV_S;
       csr_bcast.dmmu_en=1;
       csr_bcast.menvcfg_pbmte=1;
-      dut.u_dtlb.valid[0]=1;
-      dut.u_dtlb.vtags[0]=$bits(dut.u_dtlb.vtags[0])'(VA>>12);
-      dut.u_dtlb.ptags[0]=$bits(dut.u_dtlb.ptags[0])'(PA>>12);
-      dut.u_dtlb.asids[0]=0;
-      dut.u_dtlb.ptes[0]=7'b1100011;
-      dut.u_dtlb.pbmts[0]=2'(attr);
+      dut.u_dtlb.valid[tlb_slot(VA>>12)]=1;
+      dut.u_dtlb.vtags[tlb_slot(VA>>12)]=$bits(dut.u_dtlb.vtags[tlb_slot(VA>>12)])'(VA>>12);
+      dut.u_dtlb.ptags[tlb_slot(VA>>12)]=$bits(dut.u_dtlb.ptags[tlb_slot(VA>>12)])'(PA>>12);
+      dut.u_dtlb.asids[tlb_slot(VA>>12)]=0;
+      dut.u_dtlb.ptes[tlb_slot(VA>>12)]=7'b1100011;
+      dut.u_dtlb.pbmts[tlb_slot(VA>>12)]=2'(attr);
+      dut.u_dtlb.verdicts[tlb_slot(VA>>12)] = '0;
     end
     lsu_l1d.raddr=attr==0 ? PA : VA;
     lsu_l1d.ralu=`RAPT_ALU_LW__;
@@ -2127,6 +2221,7 @@ endmodule
 `include "rapt.svh"
 module tb_l1d_replacement;
   logic clock = 0, reset = 1, fence_time = 0;
+  logic clear_enable = 1;
   logic [1:0] clear_set = '0;
   logic addr_idx = 0, waddr_idx = 1, fill_idx = 1, probe_idx = 0, l1d_idx = 0;
   logic addr_offset = 0, waddr_offset = 0, probe_offset = 0, l1d_off = 0;
@@ -2227,8 +2322,13 @@ module tb_l1d_replacement;
     if (ld_fill_way != 3 || store_fill_way != 1)
       $fatal(1, "refill did not reuse a partial matching line independently of load");
     fill_probe = 0;
-    fence_time = 1;
+    clear_enable = 0;
     clear_set = '1;
+    tick();
+    if (ld_fill_way != 3 || store_fill_way != 2)
+      $fatal(1, "disabled maintenance changed live replacement state");
+    clear_enable = 1;
+    fence_time = 1;
     tick();
     clear_set = '0;
     fence_time = 0;
@@ -2250,6 +2350,10 @@ endmodule
 `include "rapt.svh"
 `include "rapt_if.svh"
 module tb_l1d_reservation_external;
+  function automatic int tlb_slot(input logic [`RAPT_XLEN-1:0] vpn);
+    return `RAPT_DTLB_WAYS == 0 ? 0
+        : int'(vpn) % (`RAPT_DTLB_ENTRIES / (`RAPT_DTLB_WAYS == 0 ? 1 : `RAPT_DTLB_WAYS));
+  endfunction
   localparam int XLEN = `RAPT_XLEN;
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
@@ -2417,13 +2521,16 @@ module tb_l1d_reservation_external;
       tick(1);
       pmp_update.addr_we=0;
       pmp_update.cfg_we=0;
+      // Observe the PMP flush before manually installing a test translation.
+      tick(1);
       csr_bcast.dmmu_en=1;
       csr_bcast.priv=`RAPT_PRIV_S;
-      dut.u_dtlb.valid[0]=1;
-      dut.u_dtlb.vtags[0]=$bits(dut.u_dtlb.vtags[0])'('h40000);
-      dut.u_dtlb.ptags[0]=$bits(dut.u_dtlb.ptags[0])'(PA>>12);
-      dut.u_dtlb.asids[0]='0;
-      dut.u_dtlb.ptes[0]=7'b1100011;
+      dut.u_dtlb.valid[tlb_slot('h40000)]=1;
+      dut.u_dtlb.vtags[tlb_slot('h40000)]=$bits(dut.u_dtlb.vtags[tlb_slot('h40000)])'('h40000);
+      dut.u_dtlb.ptags[tlb_slot('h40000)]=$bits(dut.u_dtlb.ptags[tlb_slot('h40000)])'(PA>>12);
+      dut.u_dtlb.asids[tlb_slot('h40000)]='0;
+      dut.u_dtlb.ptes[tlb_slot('h40000)]=7'b1100011;
+      dut.u_dtlb.verdicts[tlb_slot('h40000)] = '0;
       start_lr(XLEN'('h40000000), bytes);
       finish_lr();
       check(exu_l1d.reservation == PA && exu_l1d.reservation_valid,
@@ -2520,6 +2627,10 @@ module tb_l1d_store_coherence #(
   logic coherent_request = 0, coherent_write = 0;
   logic coherent_ready, writeback_error, writeback_idle;
   logic writeback_drain = 0;
+  function automatic int tlb_slot(input logic [`RAPT_XLEN-1:0] vpn);
+    return `RAPT_DTLB_WAYS == 0 ? 0
+        : int'(vpn) % (`RAPT_DTLB_ENTRIES / (`RAPT_DTLB_WAYS == 0 ? 1 : `RAPT_DTLB_WAYS));
+  endfunction
   localparam int XLEN = `RAPT_XLEN;
   localparam logic [31:0] TestAddr = 32'h8000_0000;
   localparam int ConflictShift = `RAPT_L1D_LEN + `RAPT_L1D_LINE_LEN + $clog2(XLEN / 8);
@@ -2673,15 +2784,16 @@ module tb_l1d_store_coherence #(
           "bare store address check started a write-back scan");
     exu_l1d.vaddr = XLEN'(TestAddr);
     exu_l1d.mem_context.asid = '0;
-    dut.u_dstlb.valid[0] = 1'b1;
-    dut.u_dstlb.vtags[0] = $bits(dut.u_dstlb.vtags[0])'(TestAddr >> 12);
-    dut.u_dstlb.asids[0] = '0;
-    dut.u_dstlb.ptes[0] = 7'b1100011;
+    dut.u_dstlb.valid[tlb_slot(TestAddr >> 12)] = 1'b1;
+    dut.u_dstlb.vtags[tlb_slot(TestAddr >> 12)] = $bits(dut.u_dstlb.vtags[0])'(TestAddr >> 12);
+    dut.u_dstlb.asids[tlb_slot(TestAddr >> 12)] = '0;
+    dut.u_dstlb.ptes[tlb_slot(TestAddr >> 12)] = 7'b1100011;
+    dut.u_dstlb.verdicts[tlb_slot(TestAddr >> 12)] = '0;
     exu_l1d.mmu_en = 1'b1;
     #1;
     check(dut.stlb_hit && !dut.wb_global_request && !dut.wb_hold,
           "hot store TLB lookup requested a global dirty-line drain");
-    dut.u_dstlb.valid[0] = 1'b0;
+    dut.u_dstlb.valid[tlb_slot(TestAddr>>12)] = 1'b0;
     #1;
     check(!dut.wb_global_request && !dut.wb_hold,
           "store TLB miss drained before an actual PTE read");
@@ -2689,15 +2801,16 @@ module tb_l1d_store_coherence #(
     exu_l1d.mmu_en = 1'b0;
     lsu_l1d.raddr = XLEN'(TestAddr);
     csr_bcast.dmmu_en = 1'b1;
-    dut.u_dtlb.valid[0] = 1'b1;
-    dut.u_dtlb.vtags[0] = $bits(dut.u_dtlb.vtags[0])'(TestAddr >> 12);
-    dut.u_dtlb.asids[0] = '0;
-    dut.u_dtlb.ptes[0] = 7'b1100011;
+    dut.u_dtlb.valid[tlb_slot(TestAddr >> 12)] = 1'b1;
+    dut.u_dtlb.vtags[tlb_slot(TestAddr >> 12)] = $bits(dut.u_dtlb.vtags[0])'(TestAddr >> 12);
+    dut.u_dtlb.asids[tlb_slot(TestAddr >> 12)] = '0;
+    dut.u_dtlb.ptes[tlb_slot(TestAddr >> 12)] = 7'b1100011;
+    dut.u_dtlb.verdicts[tlb_slot(TestAddr >> 12)] = '0;
     lsu_l1d.rvalid = 1'b1;
     #1;
     check(dut.tlb_hit && !dut.wb_global_request && !dut.wb_hold,
           "hot load TLB lookup requested a global dirty-line drain");
-    dut.u_dtlb.valid[0] = 1'b0;
+    dut.u_dtlb.valid[tlb_slot(TestAddr>>12)] = 1'b0;
     #1;
     check(!dut.wb_global_request && !dut.wb_hold, $sformatf(
           "load TLB miss drained before PTE read state=%0d hit=%b miss=%b req=%b hold=%b dirty=%b",
@@ -3610,6 +3723,7 @@ module tb_l1d_tags;
       logic [1:0] tag_model[Ways][4];
       logic [63:0] rng = 64'hcafe0123456789ab ^ 64'(CaseId);
       logic update_dirty = 1'b0, clean_valid = 1'b0, line_update = 1'b0;
+      logic clear_enable = 1'b1;
       logic [Words-1:0] clean_mask = '0, line_mask = '0;
       wire [1:0] inspect_tag;
       wire [Words-1:0] inspect_dirty;
@@ -3688,6 +3802,13 @@ module tb_l1d_tags;
         dirty_tick();
         l1d_update = 1'b0;
         clear_set = 4'b0001;
+        clear_enable = 1'b0;
+        #1;
+        if (update_blocked) $fatal(1, "case %0d: disabled maintenance blocked update", CaseId);
+        dirty_tick();
+        if (inspect_dirty !== Words'(1))
+          $fatal(1, "case %0d: disabled maintenance discarded dirty word", CaseId);
+        clear_enable = 1'b1;
         dirty_tick();
         if (inspect_dirty !== Words'(1) || !update_blocked)
           $fatal(1, "case %0d: maintenance discarded dirty word", CaseId);

@@ -58,7 +58,8 @@ module rapt_lsu_sq #(
     LS_S_X_V  = 3'b100   // RV32D FSD: present third/final beat
   } state_store_t;
 
-  state_store_t state_store;
+  state_store_t state_store, state_store_next;
+  logic [SQLen-1:0] sq_head_next, sq_follow_next;
 
   logic raddr_valid;
   logic [XLEN-1:0] raddr;
@@ -144,6 +145,7 @@ module rapt_lsu_sq #(
   logic sq_alloc_ready;
   logic sq_commit_fire;
   logic sq_drain_fire;
+  logic [SQ_SIZE-1:0] sq_commit_oh, sq_drain_oh;
 
   assign sq_alloc_fire  = completion_accept && exu_ioq_bcast.valid && exu_ioq_bcast.wen;
   assign sq_alloc_ready = !sq_valid[sq_tail];
@@ -172,25 +174,37 @@ module rapt_lsu_sq #(
   assign sq_snapshot_capacity = 8'(SQ_SIZE);
   assign sq_snapshot_head = 8'(sq_head);
   assign sq_all_full  = &sq_valid;
-  assign rou_lsu.sq_empty = sq_all_empty;
+  logic [SQ_SIZE-1:0] sq_valid_next;
+  logic sq_empty_q;
+  // Export next-state emptiness at the boundary without adding a drain cycle.
+  always_ff @(posedge clock) begin
+    sq_empty_q <= (sq_valid_next == '0) && (state_store_next == LS_S_V);
+    if (reset) sq_empty_q <= 1'b1;
+  end
+  assign rou_lsu.sq_empty = sq_empty_q;
+  `RAPT_SVA(clock, reset, SQ_EMPTY_BOUNDARY_EQUIVALENT, sq_empty_q == sq_all_empty)
 
-  // Drain source: oldest committed entry.
+  // Predict the resident head after this edge. The SQ keeps ownership until
+  // the final L1D response; the output register is only a view of that owner.
   logic wvalid;
   logic [XLEN-1:0] wdata;
   logic [63:0] wdata64;
   logic wfp64;
   logic [XLEN-1:0] waddr;
   logic [4:0] walu;
-  assign wvalid = sq_valid[sq_head] && sq_committed[sq_head];
-  assign wdata  = sq_wdata[sq_head];
+  assign sq_head_next = sq_head + SQLen'(sq_drain_fire);
+  assign sq_follow_next = sq_head_next + 1'b1;
+  assign wvalid = sq_valid[sq_head_next] && !sq_drain_oh[sq_head_next]
+      && (sq_committed[sq_head_next] || sq_commit_oh[sq_head_next]);
+  assign wdata  = sq_wdata[sq_head_next];
 `ifdef RAPT_RV64
-  assign wdata64 = sq_wdata[sq_head];
+  assign wdata64 = sq_wdata[sq_head_next];
 `else
-  assign wdata64 = sq_wdata64[sq_head];
+  assign wdata64 = sq_wdata64[sq_head_next];
 `endif
-  assign wfp64 = sq_fp64[sq_head];
-  assign waddr  = sq_paddr[sq_head];
-  assign walu   = sq_alu[sq_head];
+  assign wfp64 = sq_fp64[sq_head_next];
+  assign waddr  = sq_paddr[sq_head_next];
+  assign walu   = sq_alu[sq_head_next];
 
   logic [XLEN-1:0] difftest_store_addr;
   logic [XLEN-1:0] difftest_store_data;
@@ -229,6 +243,7 @@ module rapt_lsu_sq #(
 
   logic ma_store_span;
   logic ma_store_third;
+  logic ma_store_span_next, ma_store_third_next;
 
   // Release the owner on its final write response, not in an extra idle
   // state one cycle later. The next committed entry can then reach the bus
@@ -236,13 +251,11 @@ module rapt_lsu_sq #(
   // ownership until their final beat; an error cancels remaining beats.
   assign sq_drain_fire = lsu_l1d.wvalid && lsu_l1d.wready
       && (lsu_l1d.werr
-          || (state_store == LS_S_V && (!ma_store_span || walu == `RAPT_CBO_ZERO_WALU))
+          || (state_store == LS_S_V && (!ma_store_span || lsu_l1d.wzero))
           || (state_store == LS_S_HI_V && !ma_store_third)
           || state_store == LS_S_X_V);
 
   logic [SQ_SIZE-1:0] sq_alloc_oh;
-  logic [SQ_SIZE-1:0] sq_commit_oh;
-  logic [SQ_SIZE-1:0] sq_drain_oh;
   logic [SQ_SIZE-1:0] sq_flush_clear_oh;
   always_comb begin
     sq_alloc_oh = '0;
@@ -260,12 +273,46 @@ module rapt_lsu_sq #(
     end
   end
 
+  // A vacant tail may pre-sample payload. Only the allocation valid bit
+  // publishes it; flush can discard speculation without enabling these words.
   always_ff @(posedge clock) begin
+    if (!sq_valid[sq_tail]) begin
+      sq_alu[sq_tail]   <= exu_ioq_bcast.alu[4:0];
+      sq_acquire_q[sq_tail] <= sq_acquire;
+`ifndef SYNTHESIS
+      sq_dest[sq_tail] <= exu_ioq_bcast.dest;
+`endif
+      sq_vaddr[sq_tail] <= exu_ioq_bcast.tval;      // virtual (forwarding)
+      sq_next_block[sq_tail] <= exu_ioq_bcast.tval[XLEN-1:SqBlockLsb] + 1'b1;
+      sq_prev_block[sq_tail] <= exu_ioq_bcast.tval[XLEN-1:SqBlockLsb] - 1'b1;
+      sq_paddr[sq_tail] <= exu_ioq_bcast.sq_waddr;  // physical (drain)
+      sq_paddr_hi[sq_tail] <= sq_waddr_hi[XLEN-1:WordOffBits];
+      sq_paddr_third[sq_tail] <= sq_waddr_third[XLEN-1:WordOffBits];
+      sq_pbmt[sq_tail] <= sq_wpbmt;
+      sq_entry_context[sq_tail] <= sq_context;
+      sq_wdata[sq_tail] <= exu_ioq_bcast.sq_wdata;
+`ifndef RAPT_RV64
+      sq_wdata64[sq_tail] <= exu_ioq_bcast.sq_wdata64;
+`endif
+      sq_fp64[sq_tail] <= exu_ioq_bcast.sq_fp64;
+    end
+  end
+
+  always_comb begin
+    sq_valid_next = sq_valid;
+    for (int i = 0; i < SQ_SIZE; i++) begin
+      if (sq_alloc_oh[i]) sq_valid_next[i] = 1'b1;
+      if (sq_flush_clear_oh[i] || sq_drain_oh[i]) sq_valid_next[i] = 1'b0;
+    end
+    if (reset) sq_valid_next = '0;
+  end
+
+  always_ff @(posedge clock) begin
+    sq_valid <= sq_valid_next;
     if (reset) begin
       sq_head      <= '0;
       sq_cmt       <= '0;
       sq_tail      <= '0;
-      sq_valid     <= '0;
       sq_committed <= '0;
       pmu_sq_full  <= 1'b0;
       sq_full_r    <= 1'b0;
@@ -294,24 +341,6 @@ module rapt_lsu_sq #(
         end
       end else begin
         if (sq_alloc_fire) begin
-          sq_alu[sq_tail]   <= exu_ioq_bcast.alu[4:0];
-          sq_acquire_q[sq_tail] <= sq_acquire;
-`ifndef SYNTHESIS
-          sq_dest[sq_tail] <= exu_ioq_bcast.dest;
-`endif
-          sq_vaddr[sq_tail] <= exu_ioq_bcast.tval;      // virtual (forwarding)
-          sq_next_block[sq_tail] <= exu_ioq_bcast.tval[XLEN-1:SqBlockLsb] + 1'b1;
-          sq_prev_block[sq_tail] <= exu_ioq_bcast.tval[XLEN-1:SqBlockLsb] - 1'b1;
-          sq_paddr[sq_tail] <= exu_ioq_bcast.sq_waddr;  // physical (drain)
-          sq_paddr_hi[sq_tail] <= sq_waddr_hi[XLEN-1:WordOffBits];
-          sq_paddr_third[sq_tail] <= sq_waddr_third[XLEN-1:WordOffBits];
-          sq_pbmt[sq_tail] <= sq_wpbmt;
-          sq_entry_context[sq_tail] <= sq_context;
-          sq_wdata[sq_tail] <= exu_ioq_bcast.sq_wdata;
-`ifndef RAPT_RV64
-          sq_wdata64[sq_tail] <= exu_ioq_bcast.sq_wdata64;
-`endif
-          sq_fp64[sq_tail] <= exu_ioq_bcast.sq_fp64;
           sq_tail <= sq_tail + 1'b1;
         end
         if (sq_commit_fire) begin
@@ -329,10 +358,6 @@ module rapt_lsu_sq #(
       // Static per-entry state muxes. Drain is textually last in the former
       // implementation, so it retains highest priority on any pointer alias.
       for (int i = 0; i < SQ_SIZE; i++) begin
-        if (sq_drain_oh[i]) sq_valid[i] <= 1'b0;
-        else if (sq_flush_clear_oh[i]) sq_valid[i] <= 1'b0;
-        else if (sq_alloc_oh[i]) sq_valid[i] <= 1'b1;
-
         if (sq_drain_oh[i]) sq_committed[i] <= 1'b0;
         else if (sq_commit_oh[i]) sq_committed[i] <= 1'b1;
       end
@@ -816,48 +841,23 @@ module rapt_lsu_sq #(
   assign exu_lsu.rretry = lsu_l1d.rvalid && lsu_l1d.rretry
       && !cmu_bcast.flush_pipe;
 
-  always_ff @(posedge clock) begin
-    if (reset) begin
-      state_store <= LS_S_V;
-    end else begin
-      if (lsu_l1d.wvalid && lsu_l1d.wready && lsu_l1d.werr) begin
-        // The store already retired. Consume its failed beat and release
-        // only this owner; do not issue the remaining split/zero beats.
-        // Earlier beats cannot be rolled back. Platform notification of
-        // this imprecise error is separate from architectural load traps.
-        state_store <= LS_S_V;
-      end else
+  always_comb begin
+    state_store_next = state_store;
+    if (lsu_l1d.wvalid && lsu_l1d.wready) begin
+      if (lsu_l1d.werr) state_store_next = LS_S_V;
+      else begin
         unique case (state_store)
-          LS_S_V: begin
-            if (wvalid) begin
-              if (lsu_l1d.wready) begin
-                if (walu == `RAPT_CBO_ZERO_WALU) begin
-                  // A single descriptor remains resident through the final
-                  // burst B response, including errors and pipeline flushes.
-                  state_store <= LS_S_V;
-                end else begin
-                  // Lo beat accepted. If the store straddles a word/dword boundary
-                  // we still owe a high beat; otherwise retire.
-                  state_store <= ma_store_span ? LS_S_HI_V : LS_S_V;
-                end
-              end
-            end
-          end
-          LS_S_HI_V: begin
-            if (lsu_l1d.wready) begin
-              state_store <= ma_store_third ? LS_S_X_V : LS_S_V;
-            end
-          end
-          LS_S_X_V: begin
-            if (lsu_l1d.wready) begin
-              state_store <= LS_S_V;
-            end
-          end
-          default: begin
-            state_store <= LS_S_V;
-          end
+          LS_S_V: state_store_next = ma_store_span && !lsu_l1d.wzero ? LS_S_HI_V : LS_S_V;
+          LS_S_HI_V: state_store_next = ma_store_third ? LS_S_X_V : LS_S_V;
+          default: state_store_next = LS_S_V;
         endcase
+      end
     end
+  end
+
+  always_ff @(posedge clock) begin
+    if (reset) state_store <= LS_S_V;
+    else state_store <= state_store_next;
   end
 
   assign lsu_l1d.raddr = ma_req_addr;
@@ -879,66 +879,57 @@ module rapt_lsu_sq #(
   // don't-care in MA_IDLE (same principle as rapt_prf); only the FSM state
   // needs reset.
   always_ff @(posedge clock) begin
-    if (reset) begin
-      ma_state <= MA_IDLE;
-      ma_fault <= 1'b0;
-      ma_skip <= 1'b0;
-      // Cause is selected only in MA_DONE with ma_fault. Every beat that
-      // can enter MA_DONE captures cause together with the fault indication.
-    end else if (cmu_bcast.flush_pipe || exu_lsu.rretry) begin
-      // Replay the whole instruction, discarding incomplete merged data.
-      // Prior unordered beats cannot have device side effects: L1D gates
-      // each device beat on ordered and faults misaligned device accesses.
-      ma_state <= MA_IDLE;
-      ma_fault <= 1'b0;
-      ma_skip <= 1'b0;
-    end else begin
-      unique case (ma_state)
-        MA_IDLE: begin
-          if (ma_load_req && lsu_l1d.rready) begin
-            ma_skip <= lsu_l1d.difftest_skip;
-            ma_fault <= lsu_l1d.trap;
-            ma_fault_cause <= lsu_l1d.cause;
-            ma_fault_tval <= raddr;
-            if (lsu_l1d.trap) begin
-              ma_state <= MA_DONE;
-            end else begin
-              ma_lo_data <= lsu_l1d.rdata;
-              ma_state <= MA_HI;
-            end
-          end
-        end
-        MA_HI: begin
-          if (lsu_l1d.rready) begin
-            ma_skip <= ma_skip || lsu_l1d.difftest_skip;
-            ma_fault <= lsu_l1d.trap;
-            ma_fault_cause <= lsu_l1d.cause;
-            ma_fault_tval <= ma_req_addr;
-            if (!lsu_l1d.trap) ma_hi_data <= lsu_l1d.rdata;
-            ma_state <= (!lsu_l1d.trap && ma_load_third) ? MA_X : MA_DONE;
-          end
-        end
-        MA_X: begin
-          if (lsu_l1d.rready) begin
-            ma_skip <= ma_skip || lsu_l1d.difftest_skip;
-            ma_fault <= lsu_l1d.trap;
-            ma_fault_cause <= lsu_l1d.cause;
-            ma_fault_tval <= ma_req_addr;
-            if (!lsu_l1d.trap) ma_x_data <= lsu_l1d.rdata;
+    unique case (ma_state)
+      MA_IDLE: begin
+        if (ma_load_req && lsu_l1d.rready) begin
+          ma_skip <= lsu_l1d.difftest_skip;
+          ma_fault <= lsu_l1d.trap;
+          ma_fault_cause <= lsu_l1d.cause;
+          ma_fault_tval <= raddr;
+          if (lsu_l1d.trap) begin
             ma_state <= MA_DONE;
+          end else begin
+            ma_lo_data <= lsu_l1d.rdata;
+            ma_state <= MA_HI;
           end
         end
-        MA_DONE: begin
-          // The IOQ may switch directly to another load after this response;
-          // release ownership on the handshake instead of requiring an
-          // otherwise-unrelated rvalid bubble.
-          if (!exu_lsu.rvalid || exu_lsu.rready) begin
-            ma_state <= MA_IDLE;
-            ma_fault <= 1'b0;
-          end
+      end
+      MA_HI: begin
+        if (lsu_l1d.rready) begin
+          ma_skip <= ma_skip || lsu_l1d.difftest_skip;
+          ma_fault <= lsu_l1d.trap;
+          ma_fault_cause <= lsu_l1d.cause;
+          ma_fault_tval <= ma_req_addr;
+          if (!lsu_l1d.trap) ma_hi_data <= lsu_l1d.rdata;
+          ma_state <= (!lsu_l1d.trap && ma_load_third) ? MA_X : MA_DONE;
         end
-        default: ma_state <= MA_IDLE;
-      endcase
+      end
+      MA_X: begin
+        if (lsu_l1d.rready) begin
+          ma_skip <= ma_skip || lsu_l1d.difftest_skip;
+          ma_fault <= lsu_l1d.trap;
+          ma_fault_cause <= lsu_l1d.cause;
+          ma_fault_tval <= ma_req_addr;
+          if (!lsu_l1d.trap) ma_x_data <= lsu_l1d.rdata;
+          ma_state <= MA_DONE;
+        end
+      end
+      MA_DONE: begin
+        // The IOQ may switch directly to another load after this response;
+        // release ownership on the handshake instead of requiring an
+        // otherwise-unrelated rvalid bubble.
+        if (!exu_lsu.rvalid || exu_lsu.rready) begin
+          ma_state <= MA_IDLE;
+          ma_fault <= 1'b0;
+        end
+      end
+      default: ma_state <= MA_IDLE;
+    endcase
+    // Cancellation discards ownership after data updates; no beat is published.
+    if (reset || cmu_bcast.flush_pipe || exu_lsu.rretry) begin
+      ma_state <= MA_IDLE;
+      ma_fault <= 1'b0;
+      ma_skip <= 1'b0;
     end
   end
 
@@ -946,14 +937,14 @@ module rapt_lsu_sq #(
       .XLEN(XLEN)
   ) u_store_beats (
       .waddr(waddr),
-      .waddr_hi({sq_paddr_hi[sq_head], {WordOffBits{1'b0}}}),
+      .waddr_hi({sq_paddr_hi[sq_head_next], {WordOffBits{1'b0}}}),
       .wdata(wdata),
       .wdata64(wdata64),
       .wfp64(wfp64),
       .walu(walu),
-      .waddr_third({sq_paddr_third[sq_head], {WordOffBits{1'b0}}}),
-      .ma_store_span(ma_store_span),
-      .ma_store_third(ma_store_third),
+      .waddr_third({sq_paddr_third[sq_head_next], {WordOffBits{1'b0}}}),
+      .ma_store_span(ma_store_span_next),
+      .ma_store_third(ma_store_third_next),
       .ma_waddr_lo(ma_waddr_lo),
       .ma_waddr_hi(ma_waddr_hi),
       .ma_waddr_third(ma_waddr_third),
@@ -967,31 +958,39 @@ module rapt_lsu_sq #(
 
   logic cbo_zero_active;
   logic [XLEN-1:0] cbo_zero_addr;
-  assign cbo_zero_active = walu == `RAPT_CBO_ZERO_WALU && state_store == LS_S_V;
+  assign cbo_zero_active = walu == `RAPT_CBO_ZERO_WALU && state_store_next == LS_S_V;
   assign cbo_zero_addr = {waddr[XLEN-1:6], 6'b0};
-  assign lsu_l1d.wzero = cbo_zero_active;
 
-  // L1D drive muxing.
-  assign lsu_l1d.wpbmt = (state_store == LS_S_HI_V) ? sq_pbmt[sq_head][1]
-                       : (state_store == LS_S_X_V) ? sq_pbmt[sq_head][2]
-                       : sq_pbmt[sq_head][0];
-  assign lsu_l1d.waddr  = cbo_zero_active ? cbo_zero_addr
-                       : (state_store == LS_S_HI_V) ? ma_waddr_hi
-                       : (state_store == LS_S_X_V)  ? ma_waddr_third
-                       : ma_store_span              ? ma_waddr_lo : waddr;
-  assign lsu_l1d.walu   = cbo_zero_active ? CboBusWstrb
-                       : (state_store == LS_S_HI_V) ? ma_walu_hi
-                       : (state_store == LS_S_X_V)  ? ma_walu_third : ma_walu_lo;
-  assign lsu_l1d.wvalid = (state_store == LS_S_V && wvalid)
-                       || (state_store == LS_S_HI_V)
-                       || (state_store == LS_S_X_V);
-  // Another committed store is queued behind the draining head.
-  assign lsu_l1d.wmore = sq_valid[int'(sq_head) == SQ_SIZE - 1 ? 0 : int'(sq_head) + 1]
-      && sq_committed[int'(sq_head) == SQ_SIZE - 1 ? 0 : int'(sq_head) + 1];
-  assign lsu_l1d.wdata  = cbo_zero_active ? '0
-                       : (state_store == LS_S_HI_V) ? ma_wdata_hi
-                       : (state_store == LS_S_X_V)  ? ma_wdata_third
-                       : ma_store_span              ? ma_wdata_lo : wdata;
+  // Capture the next head/beat, including a commit on this edge. No entry is
+  // popped into this view: forwarding, empty and fence checks keep seeing it.
+  // A response can select the following beat or owner on the same edge, so
+  // a ready L1D still accepts one committed single-beat store every cycle.
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      lsu_l1d.wvalid <= 1'b0;
+      lsu_l1d.wmore <= 1'b0;
+    end else begin
+      lsu_l1d.wvalid <= wvalid;
+      lsu_l1d.wmore <= sq_valid[sq_follow_next] && !sq_drain_oh[sq_follow_next]
+          && (sq_committed[sq_follow_next] || sq_commit_oh[sq_follow_next]);
+    end
+    ma_store_span <= ma_store_span_next;
+    ma_store_third <= ma_store_third_next;
+    lsu_l1d.wzero <= cbo_zero_active;
+    lsu_l1d.wpbmt <= (state_store_next == LS_S_HI_V) ? sq_pbmt[sq_head_next][1]
+        : (state_store_next == LS_S_X_V) ? sq_pbmt[sq_head_next][2] : sq_pbmt[sq_head_next][0];
+    lsu_l1d.waddr <= cbo_zero_active ? cbo_zero_addr
+        : (state_store_next == LS_S_HI_V) ? ma_waddr_hi
+        : (state_store_next == LS_S_X_V) ? ma_waddr_third
+        : ma_store_span_next ? ma_waddr_lo : waddr;
+    lsu_l1d.walu <= cbo_zero_active ? CboBusWstrb
+        : (state_store_next == LS_S_HI_V) ? ma_walu_hi
+        : (state_store_next == LS_S_X_V) ? ma_walu_third : ma_walu_lo;
+    lsu_l1d.wdata <= cbo_zero_active ? '0
+        : (state_store_next == LS_S_HI_V) ? ma_wdata_hi
+        : (state_store_next == LS_S_X_V) ? ma_wdata_third
+        : ma_store_span_next ? ma_wdata_lo : wdata;
+  end
 
   // ==========================================================================
   //  Assertions (enable with +define+RAPT_ASSERT_EN)

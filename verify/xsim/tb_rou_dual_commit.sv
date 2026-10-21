@@ -976,7 +976,8 @@ rapt_cmu dut_cmu (
       check(rou_csr.csr_addr == 12'h300 && rou_csr.csr_wdata == payload,
             "serial CSR write lost its full-width payload");
       tick(1);
-      check(dut_rou.csr_wdata_q == '0, "CSR payload survived the commit flush");
+      // Payload flops may retain data; the CSR consumer observes only valid writes.
+      check(!rou_csr.valid, "CSR write remained valid after the commit flush");
     end
   endtask
 

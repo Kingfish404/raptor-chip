@@ -4,7 +4,18 @@ _NETBOOT_LITEX := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 _NETBOOT_ROOT := $(abspath $(_NETBOOT_LITEX)/../..)
 -include $(_NETBOOT_LITEX)/netboot.local.mk
 include $(_NETBOOT_ROOT)/linux/vars.mk
-RAPT_CONFIG ?= default
+_nb_requested_board := $(or $(strip $(FPGA_BOARD)),$(strip $(BOARD)),mlk_cu08_ku15p)
+_nb_board := $(subst -,_,$(_nb_requested_board))
+ifeq ($(filter $(_nb_board),mlk_cu08_ku15p rk_xcku5p_f),)
+$(error Netboot supports FPGA_BOARD=mlk_cu08_ku15p or rk_xcku5p_f (got '$(_nb_requested_board)'))
+endif
+ifneq ($(strip $(BOARD)),)
+ifneq ($(subst -,_,$(strip $(BOARD))),$(_nb_board))
+$(error BOARD='$(BOARD)' conflicts with FPGA_BOARD='$(FPGA_BOARD)')
+endif
+endif
+override FPGA_BOARD := $(_nb_board)
+RAPT_CONFIG ?= $(if $(filter rk_xcku5p_f,$(_nb_board)),small,default)
 override RAPT_CONFIG := $(strip $(RAPT_CONFIG))
 _nb_configs := $(notdir $(patsubst %/rapt_config.svh,%,$(wildcard $(_NETBOOT_ROOT)/hdl/configs/*/rapt_config.svh)))
 ifneq ($(filter-out fpga-netboot-host-setup fpga-netboot-host-restore,$(MAKECMDGOALS)),)
@@ -17,7 +28,7 @@ endif
 endif
 # Custom roots are containers too: presets must never share SoC/receipt paths.
 ifeq ($(origin NETBOOT_BUILD_ROOT),undefined)
-NETBOOT_BUILD_ROOT = $(_NETBOOT_LITEX)/build/netboot-$(RAPT_CONFIG)
+NETBOOT_BUILD_ROOT = $(_NETBOOT_LITEX)/build/netboot-$(if $(filter rk_xcku5p_f,$(_nb_board)),rk-,)$(RAPT_CONFIG)
 _nb_root = $(NETBOOT_BUILD_ROOT)
 else
 _nb_root = $(NETBOOT_BUILD_ROOT)/$(RAPT_CONFIG)
@@ -34,11 +45,15 @@ NETBOOT_PAYLOAD_RV32 ?= $(LINUX_RV32GC_FPGA_PAYLOAD)
 NETBOOT_PAYLOAD_RV64 ?= $(LINUX_RV64GC_DIST_DIR)/fw_payload.bin
 VIVADO ?= vivado
 VIVADO_JOBS ?= 8
-# W4 needs the full area optimization pass; keep other preset defaults intact.
-NETBOOT_SYNTH_DIRECTIVE ?= $(if $(filter 64,$(_nb_xlen)),$(if $(filter default-w4,$(RAPT_CONFIG)),default,RuntimeOptimized),default)
+# W4 variants need the full area optimization pass; keep other preset defaults intact.
+_nb_w4_configs := default-w4 default-w4-cache
+NETBOOT_SYNTH_DIRECTIVE ?= $(if $(filter 64,$(_nb_xlen)),$(if $(filter $(_nb_w4_configs),$(RAPT_CONFIG)),default,RuntimeOptimized),default)
 # Avoid the W4 synthesis timing-optimization blowup. Placement/routing and final
 # timing checks still use the original clocks and the W4 setup margin below.
-NETBOOT_NO_TIMING_DRIVEN ?= $(if $(and $(filter 64,$(_nb_xlen)),$(filter default-w4,$(RAPT_CONFIG))),1,0)
+NETBOOT_NO_TIMING_DRIVEN ?= $(if $(and $(filter 64,$(_nb_xlen)),$(filter $(_nb_w4_configs),$(RAPT_CONFIG))),1,0)
+# Vivado 2025.2 crashes in BRAM power optimization for the 32-way L1D.
+# RuntimeOptimized keeps the logic optimizations while omitting that optional pass.
+NETBOOT_OPT_DIRECTIVE ?= $(if $(filter default-cache middle-cache,$(RAPT_CONFIG)),RuntimeOptimized,default)
 CROSS ?= riscv64-linux-gnu-
 # Do not propagate arbitrary command-line profile overrides into this fixed build.
 override MAKEOVERRIDES :=
@@ -59,11 +74,11 @@ _nb_payload = $(NETBOOT_PAYLOAD_RV$(_nb_xlen))
 # RV64 presets use the performance-tested fetch pipeline and take the IOQ
 # load boundary from the preset.
 _nb_rv64_pack_flags = -DRAPT_FETCH_RESPONSE_STAGE=0
-_nb_setup_margin = $(if $(and $(filter 64,$(_nb_xlen)),$(filter default-w4,$(RAPT_CONFIG))),1.0,0)
-_nb_final_wns = $(if $(and $(filter 64,$(_nb_xlen)),$(filter default-w4,$(RAPT_CONFIG))),0.3,)
-_nb_args = $(call _nb_fixed,FPGA_BOARD,mlk_cu08_ku15p) $(call _nb_fixed,FPGA_AUTO_DETECT,0) $(call _nb_fixed,VARIANT,linux$(_nb_xlen)) \
+_nb_setup_margin = $(if $(and $(filter 64,$(_nb_xlen)),$(filter $(_nb_w4_configs),$(RAPT_CONFIG))),1.0,0)
+_nb_final_wns = $(if $(and $(filter 64,$(_nb_xlen)),$(filter $(_nb_w4_configs),$(RAPT_CONFIG))),0.3,)
+_nb_args = $(call _nb_fixed,FPGA_BOARD,$(_nb_board)) $(call _nb_fixed,FPGA_AUTO_DETECT,0) $(call _nb_fixed,VARIANT,linux$(_nb_xlen)) \
  $(call _nb_quote,RAPT_CONFIG=$(RAPT_CONFIG)) $(call _nb_fixed,SYS_CLK,50000000) $(call _nb_fixed,WITH_MIG,1) $(call _nb_fixed,WITH_LITEDRAM,0) \
- $(call _nb_fixed,WITH_SDCARD,1) $(call _nb_fixed,WITH_ETHERNET,1) $(call _nb_fixed,ETH_SPEED,1000) $(call _nb_fixed,FMC_SLOT,c) $(call _nb_fixed,ETH_PORT,a) \
+ $(call _nb_fixed,WITH_SDCARD,$(if $(filter rk_xcku5p_f,$(_nb_board)),0,1)) $(call _nb_fixed,WITH_ETHERNET,1) $(call _nb_fixed,ETH_SPEED,1000) $(call _nb_fixed,FMC_SLOT,$(if $(filter rk_xcku5p_f,$(_nb_board)),a,c)) $(call _nb_fixed,ETH_PORT,a) \
  $(call _nb_fixed,BOOT_MODE,bios) $(call _nb_fixed,EXTRA_FLAGS,) $(call _nb_fixed,LINUX_FPGA_INIT,full) \
  $(call _nb_quote,CROSS=$(CROSS)) \
  $(call _nb_quote,$(call _nb_fixed,RAPT_PACK_VFLAGS,$(if $(filter 64,$(_nb_xlen)),$(_nb_rv64_pack_flags),))) \
@@ -77,6 +92,7 @@ _nb_args = $(call _nb_fixed,FPGA_BOARD,mlk_cu08_ku15p) $(call _nb_fixed,FPGA_AUT
 _nb_args += $(call _nb_fixed,VIVADO_SYS_SETUP_MARGIN_NS,$(_nb_setup_margin))
 _nb_args += $(call _nb_fixed,VIVADO_NO_TIMING_DRIVEN,$(NETBOOT_NO_TIMING_DRIVEN))
 _nb_args += $(call _nb_fixed,VIVADO_SYS_FINAL_WNS_NS,$(_nb_final_wns))
+_nb_args += $(call _nb_fixed,VIVADO_OPT_DIRECTIVE,$(NETBOOT_OPT_DIRECTIVE))
 
 NETBOOT_PYTHON ?= $(_NETBOOT_LITEX)/.venv/bin/python3
 NETBOOT_INTERFACE ?=
@@ -97,9 +113,8 @@ NETBOOT_INITRAMFS_COMPRESSION ?= none
 fpga-netboot-host-setup fpga-netboot-host-restore: _nb_xlen := 64
 _nb_action = $(if $(filter fpga-netboot-host-%,$@),$(patsubst fpga-netboot-%,%,$@),$(patsubst fpga-netboot-rv$(_nb_xlen)-%,%,$@))
 $(_nb_targets):
-	@$(if $(filter fpga-netboot-host-%,$@),,$(if $(strip $(BOARD)),$(if $(filter-out mlk_cu08_ku15p,$(strip $(BOARD))),$(error BOARD conflicts with netboot FPGA_BOARD=mlk_cu08_ku15p))))
 	@$(call _nb_quote,$(NETBOOT_PYTHON)) $(call _nb_quote,$(_NETBOOT_LITEX)/scripts/netboot_flow.py) \
-	 $(_nb_action) --xlen $(_nb_xlen) --root $(call _nb_quote,$(_nb_root)) \
+	 $(_nb_action) --xlen $(_nb_xlen) --board $(_nb_board) --root $(call _nb_quote,$(_nb_root)) \
 	 --state-root $(call _nb_quote,$(NETBOOT_STATE_ROOT)) \
 	 --interface $(call _nb_quote,$(NETBOOT_INTERFACE)) --uart $(call _nb_quote,$(NETBOOT_UART)) \
 	 --server-ip $(call _nb_quote,$(NETBOOT_SERVER_IP)) --host-ip $(call _nb_quote,$(NETBOOT_HOST_IP)) \

@@ -236,7 +236,8 @@ must still be provided with `EXTRA_DEFINES`, as shown for recovery's `Xlen`.
 Do not pass a conflicting XLEN macro in `EXTRA_DEFINES`.
 Defaults are `FPGA_PART=xcku15p-ffva1156-2-e`, `FPGA_THREADS=4`,
 `FPGA_XLEN=64`, `FPGA_SYNTH_DIRECTIVE=default`, `RAPT_CONFIG=default`, and
-`CLK_FREQ_MHZ=100`. Set `FPGA_SYNTH_DIRECTIVE=RuntimeOptimized` to match a
+`CLK_FREQ_MHZ=50` (20 ns, also the default for `fpga-eval`). Other LSPD targets
+retain their 100 MHz default. Set `FPGA_SYNTH_DIRECTIVE=RuntimeOptimized` to match a
 whole-core build using that synthesis directive. The selected directive is
 recorded in `run_config.txt`; compare RTL alternatives with the same directive.
 The flow defines `RAPT_FPGA_DSP=1` and defaults `RAPT_FPGA_LUTRAM=1`

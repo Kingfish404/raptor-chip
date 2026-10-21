@@ -36,8 +36,10 @@ private directories and must not be combined with `O`.
 
 Build prerequisites are GNU make 4.3+, GCC/G++, flex, bison and readline development
 headers. Floating-point execution uses the SoftFloat sources/archive under
-`tools/spike-diff/repo`; the existing dependency rule fetches Spike if missing
-(network access and its configure dependencies are then needed). SDL2 is only
+`tools/spike-diff/repo`; the dependency rule fetches Spike if missing and
+initializes its recursive submodules, including Berkeley SoftFloat. Existing
+checkouts from an interrupted bootstrap are initialized on retry as well
+(network access and Spike's configure dependencies are then needed). SDL2 is only
 required for keyboard, audio or graphical-display configurations, not headless
 Linux or shared-reference builds. `menuconfig` additionally needs ncurses.
 Device-tree generation requires `dtc`.
@@ -281,7 +283,7 @@ unsupported I/O must fail rather than silently bypass comparison.
   (64-byte block), Zfhmin, Zihintpause and Zicntr/Zihpm.
 - The shipped defconfigs match the RTL's `misa`, translation behavior, CMO
   privilege controls and counter-CSR gating. RV64 enables the RVA22S64
-  execution environment; this is not a profile certification.
+  execution environment used as the reference for the default RV64 RTL configuration.
 - `CONFIG_RV_ASID_BITS` sets the RV64 `satp.ASID` width: 16 by default (as in
   Sail), 9 in `riscv64_ref_defconfig` to match the RTL.
 - RV64 `EBREAK`/`C.EBREAK` always raise a guest breakpoint. Legacy payloads that

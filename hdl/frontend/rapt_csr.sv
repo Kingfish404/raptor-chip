@@ -699,6 +699,22 @@ module rapt_csr #(
       pmp_update.napot_mask = pmp_update.raw_addr
             ^ (pmp_update.raw_addr + PMPCheckAddrW'(1));
     end
+    // Even an ignored (locked or unimplemented) PMP write invalidates cached
+    // data-access verdicts. Refresh entry zero unchanged to carry that event
+    // over the existing update interface without weakening its lock semantics.
+    if (rou_csr.valid && rou_csr.csr_wen && !pmp_update.addr_we && !(|pmp_update.cfg_we)
+        && ((rou_csr.csr_addr >= `RAPT_CSR_PMPCFG0 && rou_csr.csr_addr <= `RAPT_CSR_PMPCFG3)
+            || (rou_csr.csr_addr >= PMPAddrBase && rou_csr.csr_addr <= PMPAddrLast))) begin
+      pmp_update.cfg_we[0] = 1'b1;
+      pmp_update.cfg_r[0] = pmpcfg_r[0][`RAPT_PMPCFG_R_];
+      pmp_update.cfg_w[0] = pmpcfg_r[0][`RAPT_PMPCFG_W_];
+      pmp_update.cfg_x[0] = pmpcfg_r[0][`RAPT_PMPCFG_X_];
+      pmp_update.cfg_l[0] = pmpcfg_r[0][`RAPT_PMPCFG_L_];
+      pmp_update.mode_off[0] = pmpcfg_r[0][4:3] == `RAPT_PMP_A_OFF;
+      pmp_update.mode_tor[0] = pmpcfg_r[0][4:3] == `RAPT_PMP_A_TOR;
+      pmp_update.mode_na4[0] = pmpcfg_r[0][4:3] == `RAPT_PMP_A_NA4;
+      pmp_update.mode_napot[0] = pmpcfg_r[0][4:3] == `RAPT_PMP_A_NAPOT;
+    end
   end
 
   always_ff @(posedge clock) begin
@@ -807,15 +823,17 @@ module rapt_csr #(
               end
             end
           end else if (waddr_reg == MEDELEG) begin
-            csr_state[waddr_reg] <= (rou_csr.csr_wdata & `RAPT_CSR_MEDELEG_WMASK);
+            csr_state[MEDELEG] <= (rou_csr.csr_wdata & `RAPT_CSR_MEDELEG_WMASK);
           end else if (waddr_reg == MIDELEG) begin
             // Only SSI(1)/STI(5)/SEI(9) are delegatable.
-            csr_state[waddr_reg] <= (rou_csr.csr_wdata & XLEN'(`RAPT_CSR_MIDELEG_WMASK));
+            csr_state[MIDELEG] <= (rou_csr.csr_wdata & XLEN'(`RAPT_CSR_MIDELEG_WMASK));
           end else if (waddr_reg == MIE____) begin
             csr_state[MIE____] <= rou_csr.csr_wdata & XLEN'(`RAPT_CSR_MIE_WMASK);
           end else if (waddr_reg == MCOUNTE || waddr_reg == SCOUNTE) begin
             // Only CY/TM/IR (bits [2:0]) modeled; HPM bits WARL-zero.
-            csr_state[waddr_reg] <= (rou_csr.csr_wdata & XLEN'(`RAPT_CSR_COUNTEREN_WMASK));
+            if (waddr_reg == MCOUNTE)
+              csr_state[MCOUNTE] <= rou_csr.csr_wdata & XLEN'(`RAPT_CSR_COUNTEREN_WMASK);
+            else csr_state[SCOUNTE] <= rou_csr.csr_wdata & XLEN'(`RAPT_CSR_COUNTEREN_WMASK);
           end else if (waddr_reg == SENVCFG) begin
             csr_state[SENVCFG] <= envcfg_warl(rou_csr.csr_wdata, XLEN'(`RAPT_CSR_SENVCFG_WMASK));
           end else if (waddr_reg == MENVCFG) begin
@@ -853,9 +871,15 @@ module rapt_csr #(
             // WARL on MODE field [1:0]: only Direct(00) and Vectored(01) are
             // defined; reserved values (10/11) coerce to Direct(00).
             // BASE field [XLEN-1:2] is fully writable (must be 4-byte aligned).
-            csr_state[waddr_reg] <= {
-              rou_csr.csr_wdata[XLEN-1:2], rou_csr.csr_wdata[1] ? 2'b00 : rou_csr.csr_wdata[1:0]
-            };
+            if (waddr_reg == MTVEC__) begin
+              csr_state[MTVEC__] <= {
+                rou_csr.csr_wdata[XLEN-1:2], rou_csr.csr_wdata[1] ? 2'b00 : rou_csr.csr_wdata[1:0]
+              };
+            end else begin
+              csr_state[STVEC__] <= {
+                rou_csr.csr_wdata[XLEN-1:2], rou_csr.csr_wdata[1] ? 2'b00 : rou_csr.csr_wdata[1:0]
+              };
+            end
           end else if (waddr_reg == MEPC___ || waddr_reg == SEPC___) begin
             // WARL: mepc/sepc bit [0] is always 0 per RISC-V priv spec.
             // With C-ext, bit [1] is writable (2-byte alignment). Without C,
@@ -875,15 +899,28 @@ module rapt_csr #(
             // architectural write/read probe reports ASIDLEN=9, matching the
             // nine bits carried by the TLB interface.
             if (rou_csr.csr_wdata[XLEN-1:XLEN-4] == 4'd0 || rou_csr.csr_wdata[XLEN-1:XLEN-4] == 4'd8) begin
-              csr_state[waddr_reg] <= {rou_csr.csr_wdata[63:60], 7'b0, rou_csr.csr_wdata[52:0]};
+              csr_state[SATP___] <= {rou_csr.csr_wdata[63:60], 7'b0, rou_csr.csr_wdata[52:0]};
             end
             // else: write rejected, satp unchanged
 `else
             // RV32: MODE is bit [31]. Both 0 (Bare) and 1 (Sv32) are supported.
-            csr_state[waddr_reg] <= rou_csr.csr_wdata;
+            csr_state[SATP___] <= rou_csr.csr_wdata;
 `endif
           end else begin
-            csr_state[waddr_reg] <= (rou_csr.csr_wdata);
+            // Keep write destinations static so masked CSR bits remain constants.
+            case (waddr_reg)
+              SSCRATC: csr_state[SSCRATC] <= rou_csr.csr_wdata;
+              SCAUSE_: csr_state[SCAUSE_] <= rou_csr.csr_wdata;
+              STVAL__: csr_state[STVAL__] <= rou_csr.csr_wdata;
+              MSCRATCH: csr_state[MSCRATCH] <= rou_csr.csr_wdata;
+              MCAUSE_: csr_state[MCAUSE_] <= rou_csr.csr_wdata;
+              MTVAL__: csr_state[MTVAL__] <= rou_csr.csr_wdata;
+              MCYCLE_: csr_state[MCYCLE_] <= rou_csr.csr_wdata;
+              MCYCLEH: csr_state[MCYCLEH] <= rou_csr.csr_wdata;
+              MINSTRET: csr_state[MINSTRET] <= rou_csr.csr_wdata;
+              MINSTRETH: csr_state[MINSTRETH] <= rou_csr.csr_wdata;
+              default: csr_state[MNONE__] <= rou_csr.csr_wdata;
+            endcase
           end
         end
         if (trap_enter) begin

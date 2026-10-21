@@ -86,14 +86,12 @@ module rapt_lsu_ioq #(
   logic pmu_ioq_all_full  /*verilator public_flat_rd*/;
   logic [IOQLen-1:0] ioq_tail_a;
   logic [IOQLen-1:0] ioq_head;
-
   logic [XLEN-1:0] ioq_pc[IOQ_SIZE];
+  logic [IOQLen-1:0] load_req_sel_idx;
+  logic [IOQLen-1:0] bcast_idx;
 
   logic [PLEN-1:0] ioq_pr1[IOQ_SIZE];
   logic [PLEN-1:0] ioq_pr2[IOQ_SIZE];
-  logic [PLEN-1:0] ioq_prd[IOQ_SIZE];
-  logic [RLEN-1:0] ioq_rd[IOQ_SIZE];
-
   logic ioq_c[IOQ_SIZE];
   /* verilator lint_off UNUSEDSIGNAL */
   logic ioq_word[IOQ_SIZE];  // reserved for RV64 sub-word
@@ -107,7 +105,6 @@ module rapt_lsu_ioq #(
   logic [XLEN-1:0] ioq_vj[IOQ_SIZE];
   logic [XLEN-1:0] ioq_vk[IOQ_SIZE];
   logic [ROBLen-1:0] ioq_dest[IOQ_SIZE];
-  logic [GenBits-1:0] ioq_generation[IOQ_SIZE];
   logic [11:0] ioq_imm[IOQ_SIZE];
 
   logic [IOQ_SIZE-1:0] ioq_wen;
@@ -161,7 +158,8 @@ module rapt_lsu_ioq #(
   logic [    XLEN-1:0] ioq_rdata            [IOQ_SIZE];
   logic [        63:0] ioq_fp_rdata64       [IOQ_SIZE];
   logic [         3:0] ioq_load_cause       [IOQ_SIZE];
-  logic [    XLEN-1:0] ioq_load_tval        [IOQ_SIZE];
+  // An A response writes one slot, and only the head reads its saved tval.
+  (* ram_style = "distributed" *) logic [XLEN-1:0] ioq_load_tval[IOQ_SIZE];
 
   logic [  IOQLen-1:0] ioq_issue_idx;
   logic                ioq_issue_found;
@@ -199,11 +197,50 @@ module rapt_lsu_ioq #(
   logic                                ioq_valid_found;
   logic                                reservation_match;
 
+  always_ff @(posedge clock) begin
+    if (exu_lsu.rvalid && exu_lsu.rready && (active_idx != ioq_head || !ioq_valid_found))
+      ioq_load_tval[active_idx] <= exu_lsu.tval;
+  end
+
   assign pmu_ioq_any_valid = |ioq_valid;
   assign pmu_ioq_all_full  = &ioq_valid;
 
   int alloc_slot[IOQ_SIZE];
   int unsigned allocation_count;
+  // Completion metadata is immutable until its slot is reused. Each accepted
+  // dispatch lane writes one RAM bank; a narrow slot tag selects its bank.
+  // Keep PC and C in flops for the timing-critical broadcast NPC path.
+  localparam int LaneBits = (NumSlots > 1) ? $clog2(NumSlots) : 1;
+  typedef struct packed {
+    logic [GenBits-1:0] generation;
+    logic [PLEN-1:0] prd;
+    logic [RLEN-1:0] rd;
+  } ioq_completion_payload_t;
+  logic [LaneBits-1:0] ioq_payload_lane[IOQ_SIZE];
+  logic [IOQLen-1:0] payload_write_idx[NumSlots];
+  ioq_completion_payload_t ioq_completion_bcast;
+  ioq_completion_payload_t completion_bcast_lane[NumSlots];
+  always_comb begin
+    int unsigned preceding;
+    preceding = 0;
+    for (int s = 0; s < NumSlots; s++) begin
+      payload_write_idx[s] = ioq_tail_a + IOQLen'(preceding);
+      if (disp.accept[s]) preceding++;
+    end
+  end
+  for (genvar s = 0; s < NumSlots; s++) begin : g_payload_bank
+    (* ram_style = "distributed" *) ioq_completion_payload_t completion_info[IOQ_SIZE];
+    always_ff @(posedge clock) begin
+      if (disp.accept[s]) begin
+        completion_info[payload_write_idx[s]] <= '{
+            generation: dispatch[s].generation,
+            prd: dispatch[s].prd,
+            rd: dispatch[s].uop.rd
+        };
+      end
+    end
+    assign completion_bcast_lane[s] = completion_info[bcast_idx];
+  end
   // Admission credit is updated at the same edge as queue ownership.  In
   // particular, a load response can only change the next cycle's credit;
   // it cannot feed back through DPU/ROU dispatch in its completion cycle.
@@ -247,9 +284,7 @@ module rapt_lsu_ioq #(
       assign ioq_eff_addr[e]   = ioq_atom[e] ? ioq_vj[e] : (prepared ? prepared_addr : '0);
       assign ioq_addr_ready[e] = ioq_valid[e] && ioq_pr1[e] == '0 && (ioq_atom[e] || prepared);
       always_ff @(posedge clock) begin
-        if (reset || cmu_bcast.flush_pipe || (ioq_valid_found && ioq_head == IOQLen'(e))) begin
-          prepared <= 1'b0;
-        end else if (alloc_slot[e] >= 0) begin
+        if (alloc_slot[e] >= 0) begin
           // Ready dispatch operands can enter the address register directly;
           // do not spend an otherwise idle resident cycle rediscovering that
           // the base tag was already clear at allocation.
@@ -275,6 +310,8 @@ module rapt_lsu_ioq #(
               + XLEN'($signed(ioq_imm[e]));
           prepared <= 1'b1;
         end
+        if (reset || cmu_bcast.flush_pipe || (ioq_valid_found && ioq_head == IOQLen'(e)))
+          prepared <= 1'b0;
       end
     end else begin : g_combinational
       assign ioq_eff_addr[e]   = ioq_atom[e] ? ioq_vj[e] : ioq_vj[e] + XLEN'($signed(ioq_imm[e]));
@@ -434,7 +471,6 @@ module rapt_lsu_ioq #(
       && (!ioq_wen[ioq_head] || (head_store_check_valid_q && !head_store_check_fault_q))
       && ioq_pr1[ioq_head] == 0 && ioq_pr2[ioq_head] == 0;
 
-  logic [IOQLen-1:0] load_req_sel_idx;
   logic [XLEN-1:0] load_req_sel_addr;
   logic load_req_sel_valid;
   logic [IOQLen-1:0] wake_next_idx;
@@ -614,7 +650,7 @@ module rapt_lsu_ioq #(
       || ioq_fp_store_tag[ioq_head] == '0;
   for (genvar e = 0; e < IOQ_SIZE; e++) begin : g_fp_store_operand
     always_ff @(posedge clock) begin
-      if (!(reset || cmu_bcast.flush_pipe)) begin
+      begin
         if (alloc_slot[e] >= 0) begin
           ioq_fp_store_tag[e] <= dispatch[alloc_slot[e]].fp_tag[1];
           ioq_fp_store_data[e] <= dispatch[alloc_slot[e]].fp_value[1];
@@ -693,9 +729,7 @@ module rapt_lsu_ioq #(
     end
   end
   always_ff @(posedge clock) begin
-    if (reset || cmu_bcast.flush_pipe) begin
-      b_req_valid_q <= 1'b0;
-    end else if (b_req_valid_q) begin
+    if (b_req_valid_q) begin
       if (exu_lsu.rready_b || exu_lsu.rretry_b) begin
         b_req_valid_q <= 1'b0;
         if (a_req_holds && b_issue_found) begin
@@ -713,6 +747,7 @@ module rapt_lsu_ioq #(
       b_req_context_q <= ioq_context[b_issue_idx];
       b_req_alu_q <= ioq_alu[b_issue_idx][4:0];
     end
+    if (reset || cmu_bcast.flush_pipe) b_req_valid_q <= 1'b0;
   end
   assign exu_lsu.rvalid_b = b_req_valid_q;
   assign exu_lsu.raddr_b = b_req_addr_q;
@@ -838,7 +873,7 @@ module rapt_lsu_ioq #(
   // The first-page response already separates the two translation requests.
   // Save its second-page address on that edge; the valid bit owns this payload.
   always_ff @(posedge clock) begin
-    if (!reset && !cmu_bcast.flush_pipe && exu_l1d.ready && ioq_mmu_en[ioq_head] &&
+    if (exu_l1d.ready && ioq_mmu_en[ioq_head] &&
         !ioq_mmu_second[ioq_head] && head_store_cross_page && !exu_l1d.trap) begin
       head_store_hi_page_q <= head_store_hi_vaddr[XLEN-1:12];
     end
@@ -1048,7 +1083,6 @@ module rapt_lsu_ioq #(
   // === Writeback (IOQ -> ROB) ===
   logic [IOQ_SIZE-1:0] ioq_early_bcasted;
   logic early_bcast_found;
-  logic [IOQLen-1:0] bcast_idx;
   logic head_bcast_valid;
   logic head_nonatomic_ready;
   logic head_atomic_ready;
@@ -1182,6 +1216,7 @@ module rapt_lsu_ioq #(
   end
   assign sq_acquire = ioq_acquire[ioq_head];
   assign sq_context = ioq_context[ioq_head];
+  assign ioq_completion_bcast = completion_bcast_lane[ioq_payload_lane[bcast_idx]];
   assign exu_ioq_bcast.pc = `RAPT_IOQ_BCAST_PICK(ioq_pc);
   assign exu_ioq_bcast.npc = exu_ioq_bcast.trap ? csr_bcast.tvec
       : `RAPT_IOQ_BCAST_PICK(ioq_pc) + (`RAPT_IOQ_BCAST_PICK(ioq_c) ? 2 : 4);
@@ -1192,9 +1227,9 @@ module rapt_lsu_ioq #(
       ? (reservation_match ? 0 : 1)
       : (ioq_ren[ioq_head] ? head_rdata : ioq_vk[ioq_head]);
   assign exu_ioq_bcast.dest = `RAPT_IOQ_BCAST_PICK(ioq_dest);
-  assign exu_ioq_bcast.generation = `RAPT_IOQ_BCAST_PICK(ioq_generation);
-  assign exu_ioq_bcast.prd = `RAPT_IOQ_BCAST_PICK(ioq_prd);
-  assign exu_ioq_bcast.rd = `RAPT_IOQ_BCAST_PICK(ioq_rd);
+  assign exu_ioq_bcast.generation = ioq_completion_bcast.generation;
+  assign exu_ioq_bcast.prd = ioq_completion_bcast.prd;
+  assign exu_ioq_bcast.rd = ioq_completion_bcast.rd;
   assign exu_ioq_bcast.wen = early_bcast_select ? 1'b0
       : (head_is_cbo_mgmt || exu_ioq_bcast.trap
       || (ioq_wen[ioq_head] && !head_store_check_valid_q)) ? 1'b0
@@ -1301,14 +1336,14 @@ module rapt_lsu_ioq #(
       end
     end
     always_ff @(posedge clock) begin
-      if (reset || cmu_bcast.flush_pipe) begin
-        legacy_check_valid <= 1'b0;
-      end else if (ioq_valid_found) begin
-        legacy_check_valid <= 1'b0;
-      end else if (!legacy_check_valid && head_store_addr_valid_q
+      if (!legacy_check_valid && head_store_addr_valid_q
         && store_check_selected && store_check_idx == ioq_head
         && ioq_valid[ioq_head] && ioq_wen[ioq_head] && !ioq_mmu_en[ioq_head]) begin
         legacy_check_valid <= 1'b1;
+      end
+      // Sample while vacant, independently of completion/flush arbitration.
+      // The valid bit publishes exactly the same edge as the permission check.
+      if (!legacy_check_valid) begin
         legacy_check_fault <= head_store_fault_d;
         legacy_check_cause <= ioq_trap[ioq_head]
           ? ioq_cause[ioq_head] : 4'(`RAPT_CAUSE_STORE_ACC_FAULT);
@@ -1318,6 +1353,7 @@ module rapt_lsu_ioq #(
           : store_bare_pmp_trap ? head_store_vaddr + XLEN'(store_bare_fault_offset)
           : ioq_eff_addr[ioq_head];
       end
+      if (ioq_valid_found || reset || cmu_bcast.flush_pipe) legacy_check_valid <= 1'b0;
     end
   end
   always_comb begin
@@ -1511,6 +1547,188 @@ module rapt_lsu_ioq #(
   end
 
   always_ff @(posedge clock) begin
+    // A2: Latch current full status (rising-edge detection for pmu_ioq_full)
+    ioq_full_r <= (&ioq_valid);  // Full when all entries valid
+
+    // ---- Registered load-request pipeline ----
+    // An occupied stage is held verbatim until the LSU response handshake.
+    // The selector excludes both in-flight owners, so a response can
+    // replace the stage on the same edge without reissuing the old entry.
+    if (!load_req_valid_q || exu_lsu.rready || exu_lsu.rretry || exu_lsu.rmiss) begin
+      // The payload is captured whenever the stage is free; only the valid
+      // bit waits for the late forwarded-address qualification.
+      load_req_valid_q <= dispatch_load_found || load_req_sel_valid;
+      if (dispatch_load_found) begin
+        // The first allocation into a registered-empty IOQ owns ioq_tail_a.
+        // Capture its stable-base request on the allocation edge. An owner
+        // retiring on this edge cannot reopen this bypass combinationally.
+        load_req_valid_q <= 1'b1;
+        load_req_idx_q <= ioq_tail_a;
+        load_req_addr_q <= dispatch_load_addr;
+        load_req_context_q <= dispatch_context;
+        load_req_alu_q <= dispatch_load_alu;
+        load_req_atomic_q <= 1'b0;
+        load_req_release_q <= 1'b0;
+        load_req_ordered_q <= 1'b0;
+        load_req_pc_q <= dispatch_load_pc;
+        load_req_fp64_q <= dispatch_load_fp64;
+      end else begin
+        load_req_idx_q <= load_req_sel_idx;
+        load_req_addr_q <= load_req_sel_addr;
+        load_req_context_q <= ioq_context[load_req_sel_idx];
+        load_req_alu_q   <= ioq_atom[load_req_sel_idx]
+            ? (ioq_word[load_req_sel_idx] ? `RAPT_ALU_LW__ : `RAPT_ALU_LD__)
+            : ((ioq_fp_valid[load_req_sel_idx]
+                  && ioq_fp_op[load_req_sel_idx] == `RAPT_FP_OP_FLD)
+                ?
+        `RAPT_ALU_LD__
+        : ((ioq_fp_valid[load_req_sel_idx] && ioq_fp_op[load_req_sel_idx] == `RAPT_FP_OP_FLW) ?
+           `RAPT_ALU_LW__ : ioq_alu[load_req_sel_idx][4:0]));
+        load_req_atomic_q <= ioq_atom[load_req_sel_idx]
+            && ioq_alu[load_req_sel_idx] == `RAPT_ATO_LR__;
+        load_req_release_q <= ioq_release[load_req_sel_idx];
+        load_req_ordered_q <= (load_req_sel_idx == ioq_head) && ioq_at_rob_head;
+        load_req_pc_q <= ioq_pc[load_req_sel_idx];
+        load_req_fp64_q <= ioq_fp_valid[load_req_sel_idx]
+            && ioq_fp_op[load_req_sel_idx] == `RAPT_FP_OP_FLD;
+      end
+    end
+    // Promote a held translation as soon as both heads catch up. If L1D
+    // discovers a device before then, rretry releases this request and
+    // ioq_needs_ordered prevents it from blocking older ready loads again.
+    if (load_req_valid_q && !(exu_lsu.rready || exu_lsu.rretry || exu_lsu.rmiss)
+        && (load_req_idx_q == ioq_head) && ioq_at_rob_head)
+      load_req_ordered_q <= 1'b1;
+    // ---- Static per-entry enqueue mux (B > A on any selector alias) ----
+    for (int i = 0; i < IOQ_SIZE; i++) begin
+      if (alloc_slot[i] >= 0) begin
+        ioq_valid[i] <= 1'b1;
+        ioq_pc[i] <= dispatch[alloc_slot[i]].uop.pc;
+        ioq_payload_lane[i] <= LaneBits'(alloc_slot[i]);
+        ioq_pr1[i] <= wake_pr(dispatch[alloc_slot[i]].pr1);
+        ioq_pr2[i] <= wake_pr(dispatch[alloc_slot[i]].pr2);
+        ioq_c[i] <= dispatch[alloc_slot[i]].uop.c;
+        ioq_word[i] <= dispatch[alloc_slot[i]].uop.execute.int_op.word;
+        ioq_alu[i] <= dispatch[alloc_slot[i]].uop.execute.int_op.alu;
+        ioq_vj[i] <= wake_val(dispatch[alloc_slot[i]].pr1, dispatch[alloc_slot[i]].op1);
+        ioq_vk[i] <= wake_val(dispatch[alloc_slot[i]].pr2, dispatch[alloc_slot[i]].op2);
+        ioq_dest[i] <= dispatch[alloc_slot[i]].dest;
+        ioq_imm[i] <= dispatch[alloc_slot[i]].uop.imm[11:0];
+        ioq_wen[i] <= dispatch[alloc_slot[i]].uop.execute.memory.store;
+        ioq_mmu_en[i] <= dispatch_context.mmu_en;
+        ioq_context[i] <= dispatch_context;
+        ioq_mmu_second[i] <= 1'b0;
+        ioq_pbmt[i] <= 2'b00;
+        ioq_pbmt_hi[i] <= 2'b00;
+        ioq_ren[i] <= dispatch[alloc_slot[i]].uop.execute.memory.load;
+        ioq_atom[i] <= dispatch[alloc_slot[i]].uop.execute.memory.atomic;
+        ioq_release[i] <= dispatch[alloc_slot[i]].uop.execute.memory.atomic
+            && dispatch[alloc_slot[i]].uop.inst[25];
+        ioq_acquire[i] <= dispatch[alloc_slot[i]].uop.execute.memory.atomic
+            && dispatch[alloc_slot[i]].uop.inst[26];
+        ioq_fp_valid[i] <= dispatch[alloc_slot[i]].uop.execute.fp.valid;
+        ioq_fp_op[i] <= dispatch[alloc_slot[i]].uop.execute.fp.op;
+        ioq_trap[i] <= dispatch[alloc_slot[i]].uop.trap;
+        ioq_mmu_fault[i] <= 1'b0;
+        ioq_complete[i] <= 1'b0;
+        ioq_needs_ordered[i] <= 1'b0;
+        ioq_load_trap[i] <= 1'b0;
+        ioq_load_skip[i] <= 1'b0;
+      end
+
+      // Translation control publishes the physical-address payload only
+      // after ready. Preload the pending page while its MMU bit is set;
+      // the accepting edge still captures the same final address. Once
+      // the second page starts, retain the first page until consumption.
+      // Fault cause/tval are payload too: sample them every translating
+      // cycle so the late DTLB/PMP ready only enables the control bits.
+      if (ioq_mmu_en[ioq_head] && i == int'(ioq_head)) begin
+        if (ioq_mmu_second[i]) ioq_paddr_hi[i] <= exu_l1d.paddr;
+        else ioq_paddr[i] <= exu_l1d.paddr;
+        ioq_cause[i] <= exu_l1d.cause[3:0];
+        ioq_store_tval[i] <= exu_l1d.vaddr;
+      end
+
+      // Preserve the original NBA priority for translation completion.
+      if (exu_l1d.ready && ioq_mmu_en[ioq_head] && i == int'(ioq_head)) begin
+        if (ioq_mmu_second[i]) begin
+          ioq_pbmt_hi[i]    <= exu_l1d.pbmt;
+          ioq_mmu_second[i] <= 1'b0;
+          ioq_mmu_en[i]     <= 1'b0;
+        end else begin
+          ioq_pbmt[i] <= exu_l1d.pbmt;
+          if (head_store_cross_page && !exu_l1d.trap) begin
+            ioq_mmu_second[i] <= 1'b1;
+          end else begin
+            ioq_mmu_en[i] <= 1'b0;
+          end
+        end
+        ioq_trap[i] <= exu_l1d.trap;
+        ioq_mmu_fault[i] <= exu_l1d.trap;
+      end
+
+      if (ioq_valid_found && i == int'(ioq_head)) begin
+        ioq_wen[i]    <= 1'b0;
+        ioq_mmu_en[i] <= 1'b0;
+        ioq_mmu_second[i] <= 1'b0;
+        ioq_trap[i]   <= 1'b0;
+        ioq_ren[i]    <= 1'b0;
+        ioq_valid[i]  <= 1'b0;
+      end
+
+      if (exu_lsu.rvalid && exu_lsu.rretry && i == int'(active_idx)) begin
+        ioq_needs_ordered[i] <= 1'b1;
+      end
+
+      if (exu_lsu.rvalid && exu_lsu.rready && i == int'(active_idx)) begin
+        ioq_rdata[i] <= exu_lsu.rdata;
+        if (ioq_fp_valid[i] && ioq_fp_op[i] == `RAPT_FP_OP_FLD)
+          ioq_fp_rdata64[i] <= exu_lsu.fp_rdata64;
+        if (active_idx != ioq_head || !ioq_valid_found) begin
+          ioq_complete[i]   <= 1'b1;
+          ioq_load_trap[i]  <= exu_lsu.trap;
+          ioq_load_cause[i] <= exu_lsu.cause[3:0];
+          ioq_load_skip[i]  <= exu_lsu.difftest_skip;
+        end
+      end
+`ifdef RAPT_LSU_HUM
+      if (exu_lsu.rvalid_b && exu_lsu.rready_b
+          // An idle A stage still samples an index; it owns no response.
+          && (!load_req_valid_q || b_req_idx_q != active_idx)
+          && !(ioq_valid_found && b_req_idx_q == ioq_head)
+          && i == int'(b_req_idx_q)) begin
+        ioq_rdata[i] <= exu_lsu.rdata_b;
+        if (XLEN == 64 && ioq_fp_valid[i] && ioq_fp_op[i] == `RAPT_FP_OP_FLD)
+          ioq_fp_rdata64[i] <= 64'(exu_lsu.rdata_b);
+        ioq_complete[i]   <= 1'b1;
+        ioq_load_trap[i]  <= 1'b0;
+        ioq_load_cause[i] <= '0;
+        ioq_load_skip[i]  <= 1'b0;
+      end
+`endif
+      if (ioq_valid_found && i == int'(ioq_head)) begin
+        ioq_complete[i]  <= 1'b0;
+        ioq_load_trap[i] <= 1'b0;
+        ioq_load_skip[i] <= 1'b0;
+      end
+
+      if (ioq_valid[i]) begin
+        if ((|ioq_pr1[i]) && ioq_fwd1_hit[i]) begin
+          ioq_vj[i]  <= ioq_fwd1_val[i];
+          ioq_pr1[i] <= '0;
+        end
+        if ((|ioq_pr2[i]) && ioq_fwd2_hit[i]) begin
+          ioq_vk[i]  <= ioq_fwd2_val[i];
+          ioq_pr2[i] <= '0;
+        end
+      end
+    end
+    ioq_tail_a <= IOQLen'((int'(ioq_tail_a) + allocation_count) % IOQ_SIZE);
+
+    // ---- Head retire ----
+    if (ioq_valid_found) begin
+      ioq_head <= ioq_head + 1'b1;
+    end
     if (reset || cmu_bcast.flush_pipe) begin
       ioq_ren                <= '0;
       ioq_wen                <= '0;
@@ -1525,203 +1743,15 @@ module rapt_lsu_ioq #(
       ioq_mmu_fault          <= '0;
       ioq_load_skip          <= '0;
       load_req_valid_q       <= 1'b0;
-      load_req_context_q     <= '0;
-      load_req_idx_q         <= '0;
       ioq_full_r             <= 1'b0;  // A2: Initialize full state tracker
-      // Payload arrays (pc/vj/vk/imm/cause/rdata/...) are intentionally NOT
-      // reset: every read is gated by ioq_valid[] / ioq_complete[] / the busy
-      // bits, so the data flops are don't-care (same principle as rapt_prf).
+      // Payload memories and registers are intentionally NOT reset: every
+      // read is gated by ioq_valid[] / ioq_complete[] / the busy bits, so
+      // their old contents are don't-care (same principle as rapt_prf).
       // pr1/pr2 likewise stay unreset: the older-store blocker reads them
       // inside ioq_valid[j] && ioq_wen[j], issue/head/valid_found checks are
       // valid-gated, and the resident forwarding flags are only consumed in
       // the `if (ioq_valid[i])` wakeup branch.  Every allocation rewrites
       // the pair before ioq_valid[i] is set.
-    end else begin
-      // A2: Latch current full status (rising-edge detection for pmu_ioq_full)
-      ioq_full_r <= (&ioq_valid);  // Full when all entries valid
-
-      // ---- Registered load-request pipeline ----
-      // An occupied stage is held verbatim until the LSU response handshake.
-      // The selector excludes both in-flight owners, so a response can
-      // replace the stage on the same edge without reissuing the old entry.
-      if (!load_req_valid_q || exu_lsu.rready || exu_lsu.rretry || exu_lsu.rmiss) begin
-        // The payload is captured whenever the stage is free; only the valid
-        // bit waits for the late forwarded-address qualification.
-        load_req_valid_q <= dispatch_load_found || load_req_sel_valid;
-        if (dispatch_load_found) begin
-          // The first allocation into a registered-empty IOQ owns ioq_tail_a.
-          // Capture its stable-base request on the allocation edge. An owner
-          // retiring on this edge cannot reopen this bypass combinationally.
-          load_req_valid_q <= 1'b1;
-          load_req_idx_q <= ioq_tail_a;
-          load_req_addr_q <= dispatch_load_addr;
-          load_req_context_q <= dispatch_context;
-          load_req_alu_q <= dispatch_load_alu;
-          load_req_atomic_q <= 1'b0;
-          load_req_release_q <= 1'b0;
-          load_req_ordered_q <= 1'b0;
-          load_req_pc_q <= dispatch_load_pc;
-          load_req_fp64_q <= dispatch_load_fp64;
-        end else begin
-          load_req_idx_q <= load_req_sel_idx;
-          load_req_addr_q <= load_req_sel_addr;
-          load_req_context_q <= ioq_context[load_req_sel_idx];
-          load_req_alu_q   <= ioq_atom[load_req_sel_idx]
-              ? (ioq_word[load_req_sel_idx] ? `RAPT_ALU_LW__ : `RAPT_ALU_LD__)
-              : ((ioq_fp_valid[load_req_sel_idx]
-                    && ioq_fp_op[load_req_sel_idx] == `RAPT_FP_OP_FLD)
-                  ?
-          `RAPT_ALU_LD__
-          : ((ioq_fp_valid[load_req_sel_idx] && ioq_fp_op[load_req_sel_idx] == `RAPT_FP_OP_FLW) ?
-             `RAPT_ALU_LW__ : ioq_alu[load_req_sel_idx][4:0]));
-          load_req_atomic_q <= ioq_atom[load_req_sel_idx]
-              && ioq_alu[load_req_sel_idx] == `RAPT_ATO_LR__;
-          load_req_release_q <= ioq_release[load_req_sel_idx];
-          load_req_ordered_q <= (load_req_sel_idx == ioq_head) && ioq_at_rob_head;
-          load_req_pc_q <= ioq_pc[load_req_sel_idx];
-          load_req_fp64_q <= ioq_fp_valid[load_req_sel_idx]
-              && ioq_fp_op[load_req_sel_idx] == `RAPT_FP_OP_FLD;
-        end
-      end
-      // Promote a held translation as soon as both heads catch up. If L1D
-      // discovers a device before then, rretry releases this request and
-      // ioq_needs_ordered prevents it from blocking older ready loads again.
-      if (load_req_valid_q && !(exu_lsu.rready || exu_lsu.rretry || exu_lsu.rmiss)
-          && (load_req_idx_q == ioq_head) && ioq_at_rob_head)
-        load_req_ordered_q <= 1'b1;
-      // ---- Static per-entry enqueue mux (B > A on any selector alias) ----
-      for (int i = 0; i < IOQ_SIZE; i++) begin
-        if (alloc_slot[i] >= 0) begin
-          ioq_valid[i] <= 1'b1;
-          ioq_pc[i] <= dispatch[alloc_slot[i]].uop.pc;
-          ioq_pr1[i] <= wake_pr(dispatch[alloc_slot[i]].pr1);
-          ioq_pr2[i] <= wake_pr(dispatch[alloc_slot[i]].pr2);
-          ioq_prd[i] <= dispatch[alloc_slot[i]].prd;
-          ioq_rd[i] <= dispatch[alloc_slot[i]].uop.rd;
-          ioq_c[i] <= dispatch[alloc_slot[i]].uop.c;
-          ioq_word[i] <= dispatch[alloc_slot[i]].uop.execute.int_op.word;
-          ioq_alu[i] <= dispatch[alloc_slot[i]].uop.execute.int_op.alu;
-          ioq_vj[i] <= wake_val(dispatch[alloc_slot[i]].pr1, dispatch[alloc_slot[i]].op1);
-          ioq_vk[i] <= wake_val(dispatch[alloc_slot[i]].pr2, dispatch[alloc_slot[i]].op2);
-          ioq_dest[i] <= dispatch[alloc_slot[i]].dest;
-          ioq_generation[i] <= dispatch[alloc_slot[i]].generation;
-          ioq_imm[i] <= dispatch[alloc_slot[i]].uop.imm[11:0];
-          ioq_wen[i] <= dispatch[alloc_slot[i]].uop.execute.memory.store;
-          ioq_mmu_en[i] <= dispatch_context.mmu_en;
-          ioq_context[i] <= dispatch_context;
-          ioq_mmu_second[i] <= 1'b0;
-          ioq_pbmt[i] <= 2'b00;
-          ioq_pbmt_hi[i] <= 2'b00;
-          ioq_ren[i] <= dispatch[alloc_slot[i]].uop.execute.memory.load;
-          ioq_atom[i] <= dispatch[alloc_slot[i]].uop.execute.memory.atomic;
-          ioq_release[i] <= dispatch[alloc_slot[i]].uop.execute.memory.atomic
-              && dispatch[alloc_slot[i]].uop.inst[25];
-          ioq_acquire[i] <= dispatch[alloc_slot[i]].uop.execute.memory.atomic
-              && dispatch[alloc_slot[i]].uop.inst[26];
-          ioq_fp_valid[i] <= dispatch[alloc_slot[i]].uop.execute.fp.valid;
-          ioq_fp_op[i] <= dispatch[alloc_slot[i]].uop.execute.fp.op;
-          ioq_trap[i] <= dispatch[alloc_slot[i]].uop.trap;
-          ioq_mmu_fault[i] <= 1'b0;
-          ioq_complete[i] <= 1'b0;
-          ioq_needs_ordered[i] <= 1'b0;
-          ioq_load_trap[i] <= 1'b0;
-          ioq_load_skip[i] <= 1'b0;
-        end
-
-        // Translation control publishes the physical-address payload only
-        // after ready. Preload the pending page while its MMU bit is set;
-        // the accepting edge still captures the same final address. Once
-        // the second page starts, retain the first page until consumption.
-        // Fault cause/tval are payload too: sample them every translating
-        // cycle so the late DTLB/PMP ready only enables the control bits.
-        if (ioq_mmu_en[ioq_head] && i == int'(ioq_head)) begin
-          if (ioq_mmu_second[i]) ioq_paddr_hi[i] <= exu_l1d.paddr;
-          else ioq_paddr[i] <= exu_l1d.paddr;
-          ioq_cause[i] <= exu_l1d.cause[3:0];
-          ioq_store_tval[i] <= exu_l1d.vaddr;
-        end
-
-        // Preserve the original NBA priority for translation completion.
-        if (exu_l1d.ready && ioq_mmu_en[ioq_head] && i == int'(ioq_head)) begin
-          if (ioq_mmu_second[i]) begin
-            ioq_pbmt_hi[i]    <= exu_l1d.pbmt;
-            ioq_mmu_second[i] <= 1'b0;
-            ioq_mmu_en[i]     <= 1'b0;
-          end else begin
-            ioq_pbmt[i] <= exu_l1d.pbmt;
-            if (head_store_cross_page && !exu_l1d.trap) begin
-              ioq_mmu_second[i] <= 1'b1;
-            end else begin
-              ioq_mmu_en[i] <= 1'b0;
-            end
-          end
-          ioq_trap[i] <= exu_l1d.trap;
-          ioq_mmu_fault[i] <= exu_l1d.trap;
-        end
-
-        if (ioq_valid_found && i == int'(ioq_head)) begin
-          ioq_wen[i]    <= 1'b0;
-          ioq_mmu_en[i] <= 1'b0;
-          ioq_mmu_second[i] <= 1'b0;
-          ioq_trap[i]   <= 1'b0;
-          ioq_ren[i]    <= 1'b0;
-          ioq_valid[i]  <= 1'b0;
-        end
-
-        if (exu_lsu.rvalid && exu_lsu.rretry && i == int'(active_idx)) begin
-          ioq_needs_ordered[i] <= 1'b1;
-        end
-
-        if (exu_lsu.rvalid && exu_lsu.rready && i == int'(active_idx)) begin
-          ioq_rdata[i] <= exu_lsu.rdata;
-          if (ioq_fp_valid[i] && ioq_fp_op[i] == `RAPT_FP_OP_FLD)
-            ioq_fp_rdata64[i] <= exu_lsu.fp_rdata64;
-          if (active_idx != ioq_head || !ioq_valid_found) begin
-            ioq_complete[i]   <= 1'b1;
-            ioq_load_trap[i]  <= exu_lsu.trap;
-            ioq_load_cause[i] <= exu_lsu.cause[3:0];
-            ioq_load_tval[i]  <= exu_lsu.tval;
-            ioq_load_skip[i]  <= exu_lsu.difftest_skip;
-          end
-        end
-`ifdef RAPT_LSU_HUM
-        if (exu_lsu.rvalid_b && exu_lsu.rready_b
-            // An idle A stage still samples an index; it owns no response.
-            && (!load_req_valid_q || b_req_idx_q != active_idx)
-            && !(ioq_valid_found && b_req_idx_q == ioq_head)
-            && i == int'(b_req_idx_q)) begin
-          ioq_rdata[i] <= exu_lsu.rdata_b;
-          if (XLEN == 64 && ioq_fp_valid[i] && ioq_fp_op[i] == `RAPT_FP_OP_FLD)
-            ioq_fp_rdata64[i] <= 64'(exu_lsu.rdata_b);
-          ioq_complete[i]   <= 1'b1;
-          ioq_load_trap[i]  <= 1'b0;
-          ioq_load_cause[i] <= '0;
-          ioq_load_skip[i]  <= 1'b0;
-        end
-`endif
-        if (ioq_valid_found && i == int'(ioq_head)) begin
-          ioq_complete[i]  <= 1'b0;
-          ioq_load_trap[i] <= 1'b0;
-          ioq_load_skip[i] <= 1'b0;
-        end
-
-        if (ioq_valid[i]) begin
-          if ((|ioq_pr1[i]) && ioq_fwd1_hit[i]) begin
-            ioq_vj[i]  <= ioq_fwd1_val[i];
-            ioq_pr1[i] <= '0;
-          end
-          if ((|ioq_pr2[i]) && ioq_fwd2_hit[i]) begin
-            ioq_vk[i]  <= ioq_fwd2_val[i];
-            ioq_pr2[i] <= '0;
-          end
-        end
-      end
-      ioq_tail_a <= IOQLen'((int'(ioq_tail_a) + allocation_count) % IOQ_SIZE);
-
-      // ---- Head retire ----
-      if (ioq_valid_found) begin
-        ioq_head <= ioq_head + 1'b1;
-      end
     end
   end
 

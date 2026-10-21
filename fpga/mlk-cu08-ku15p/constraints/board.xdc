@@ -1,5 +1,5 @@
 # CU08-KU15P pinout: matches fpga/litex/mlk_cu08_ku15p_platform.py.
-# Board-specific physical constraints; no LiteX import is used by this flow.
+# Board-specific physical constraints.
 set_property PACKAGE_PIN P26 [get_ports {clk100}]
 set_property IOSTANDARD LVCMOS18 [get_ports {clk100}]
 set_property PACKAGE_PIN AJ14 [get_ports {cpu_resetn}]

@@ -69,6 +69,7 @@ if {$with_ddr} {
 }
 write_checkpoint -force [file join $out synthesized.dcp]
 report_utilization -hierarchical -file [file join $out synth_utilization.rpt]
+report_utilization -file [file join $out synth_utilization_summary.rpt]
 report_timing_summary -file [file join $out synth_timing.rpt]
 if {$action eq "synth"} {close_project; exit 0}
 if {$action ne "build"} {error "Unknown action: $action"}
@@ -79,6 +80,7 @@ phys_opt_design
 route_design -directive Explore
 write_checkpoint -force [file join $out routed.dcp]
 report_utilization -hierarchical -file [file join $out utilization.rpt]
+report_utilization -file [file join $out utilization_summary.rpt]
 report_timing_summary -check_timing_verbose -report_unconstrained -file [file join $out timing_summary.rpt]
 report_cdc -details -file [file join $out cdc.rpt]
 report_drc -file [file join $out drc.rpt]

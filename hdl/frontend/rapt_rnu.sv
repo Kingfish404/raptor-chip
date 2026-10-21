@@ -63,6 +63,7 @@ module rapt_rnu #(
   logic renamed_valid[RenameWidth], renamed_ready[RenameWidth];
   logic [PLEN-1:0] map_q[RNUM], rat_q[RNUM], map_next[RNUM], rat_next[RNUM];
   logic [PNUM-1:0] free_q, free_next, free_after_commit;
+  logic [PNUM-1:0] arch_allocated_q, arch_allocated_next;
   logic allocation_found[RenameWidth];
   logic [PLEN-1:0] allocation_index[RenameWidth];
   logic [CheckpointEntries-1:0] checkpoint_available, checkpoint_live;
@@ -279,6 +280,14 @@ module rapt_rnu #(
       free_after_commit[rou_cmu.slot[c].prs] = 1'b1;
   end
   always_comb begin
+    arch_allocated_next = arch_allocated_q;
+    for (int c = 0; c < CommitWidth; c++) begin
+      if (rou_cmu.slot[c].valid && rou_cmu.slot[c].rd != 0) begin
+        // Match the RAT's commit order, including consecutive writes to one rd.
+        arch_allocated_next[rou_cmu.slot[c].prs] = 1'b0;
+        arch_allocated_next[rou_cmu.slot[c].prd] = 1'b1;
+      end
+    end
     for (int r = 0; r < RNUM; r++) begin
       rat_next[r] = rat_q[r];
       map_next[r] = map_q[r];
@@ -333,11 +342,10 @@ module rapt_rnu #(
     end
     if (cmu_bcast.flush_pipe) begin
       // All speculative identities, including those buffered before ROB,
-      // are discarded. Rebuild from the post-commit architectural map.
-      free_next = '1;
+      // are discarded. Keep only the post-commit architectural identities.
+      free_next = ~arch_allocated_next;
       for (int r = 0; r < RNUM; r++) begin
         map_next[r] = rat_next[r];
-        free_next[rat_next[r]] = 1'b0;
       end
     end
     free_next[0] = 1'b0;
@@ -347,12 +355,14 @@ module rapt_rnu #(
   always_ff @(posedge clock) begin
     if (reset) begin
       free_q <= {PNUM{1'b1}} << RNUM;
+      arch_allocated_q <= {PNUM{1'b1}} >> (PNUM - RNUM);
       for (int r = 0; r < RNUM; r++) begin
         map_q[r] <= PLEN'(r);
         rat_q[r] <= PLEN'(r);
       end
     end else begin
       free_q <= free_next;
+      arch_allocated_q <= arch_allocated_next;
       for (int r = 0; r < RNUM; r++) begin
         map_q[r] <= map_next[r];
         rat_q[r] <= rat_next[r];
@@ -364,6 +374,15 @@ module rapt_rnu #(
     assign rat_snapshot[r] = rat_q[r];
     `RAPT_SVA(clock, reset, RENAME_MAP_ALLOCATED, !free_q[map_q[r]])
   end
+`ifdef RAPT_SVA_ACTIVE
+  logic [PNUM-1:0] arch_allocated_from_rat;
+  always_comb begin
+    arch_allocated_from_rat = '0;
+    for (int r = 0; r < RNUM; r++) arch_allocated_from_rat[rat_q[r]] = 1'b1;
+  end
+  `RAPT_SVA(clock, reset, RENAME_ARCH_ALLOCATED_MATCHES_RAT,
+            arch_allocated_q == arch_allocated_from_rat)
+`endif
   `RAPT_SVA_IMPLY(clock, reset || cmu_bcast.flush_pipe, RENAME_RECOVERY_FENCES_ACCEPT,
                   recovery.pending, !candidate_valid[0] || !candidate_ready[0])
 endmodule

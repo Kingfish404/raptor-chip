@@ -443,8 +443,10 @@ package rapt_pkg;
 
     // Branch / jump resolution (WB-written)
     logic               btaken;
-    // Every completed next PC is an instruction address (IALIGN=16).
+`ifdef RAPT_ROB_NPC_SHADOW
+    // Verification witness only; functional retirement reconstructs this value.
     logic [XLENPkg-1:1] npc;
+`endif
     // 1-bit BPU mispredict flag (dispatch-init 0; WB sets when computed
     // npc != predicted pnpc). Replaces an XLEN-wide `pnpc` field that was
     // only ever consumed for the `npc != pnpc` comparison at commit.

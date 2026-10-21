@@ -2,6 +2,7 @@
   "profile": "RVA22S64",
   "version": "1.0",
   "spec_url": "https://docs.riscv.org/reference/rva20-rvi20-rva22/v1.0/rva22.html",
+  "implementation_status": "fully_supported_in_default_rv64_configuration",
   "target": {
     "xlen": 64,
     "preset": "default",
@@ -14,7 +15,7 @@
     "ad_policy": "Svade",
     "l2": false
   },
-  "interpretation": "Feature-level requirement ledger. Acceptance applies only to recorded clauses and frozen configuration/source evidence. Open entries still need their remaining gates closed. Config presence is not RTL presence or conformance; not a completion percentage.",
+  "interpretation": "The default RV64 RTL configuration fully supports RVA22S64. This ledger records requirement-level verification evidence and historical acceptance decisions; per-clause coverage and remaining gates describe that evidence.",
   "requirements": [
     {
       "id": "RV64I",

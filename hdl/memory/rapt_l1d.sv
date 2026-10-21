@@ -74,9 +74,10 @@ module rapt_l1d #(
   } l1d_state_t;
 
   l1d_state_t l1d_state;
-  // Permission sampled beside the speculative SRAM read; LD_A consumes the
-  // registered result so PMP decode stays off rready/fast-wakeup.
+  // Permission is registered before LD_A consumes the speculative SRAM read,
+  // keeping PMP decode off rready/fast-wakeup.
   logic load_perm_denied_q;
+  logic load_page_fault_q;
   logic [XLEN-1:0] perm_base_addr;
   // Shared state used by MSHR eligibility and invalidation below.
   logic fence_clear_busy;
@@ -363,6 +364,10 @@ module rapt_l1d #(
 
   logic [XLEN-1:0] cause;
   logic [XLEN-1:0] store_paddr;
+  logic [1:0] store_pbmt;
+  logic store_access_fault;
+  logic store_check_valid, store_page_fault;
+  logic store_check_capture;
 
   // atomic support
   logic [XLEN-1:0] reservation;
@@ -722,6 +727,7 @@ module rapt_l1d #(
   // SRAM read port is idle, steer it to the B request's set this cycle and
   // tag-compare next cycle.  Declared here so the sram_raddr mux can see it.
   logic b_arm_ok;
+  logic b_armed;
   logic [L1D_LEN-1:0] b_idx_in;
   // Shared with the tag-array probe port; declare before its instance.
   logic [L1dTagW-1:0] b_tag;
@@ -737,15 +743,40 @@ module rapt_l1d #(
   // l1d_addr holds the virtual address during PTW, whose index equals the
   // final physical index.
   logic [L1D_LEN-1:0] sram_raddr;
-  logic [L1D_LEN-1:0] sram_raddr_fallback;
+  logic [L1D_LEN-1:0] sram_expected_idx;
+  logic sram_read_authorized_r;
+  logic load_read_early;
+  logic [L1D_N_WAYS-1:0] load_way_data_ready;
+  assign load_read_early = l1d_state == IDLE && lsu_l1d.rvalid;
 `ifdef RAPT_LSU_HUM
-  assign sram_raddr_fallback = b_arm_ok ? b_idx_in : addr_idx;
-`else
-  assign sram_raddr_fallback = addr_idx;
-`endif
-  assign sram_raddr = WriteBack && wb_state != WB_IDLE ? wb_set : load_speculate
+  logic b_read_early;
+  // Choose an address before store/victim arbitration. A blocked read is
+  // harmless: the original arbitration still controls response ownership.
+  assign b_read_early = lsu_l1d.rvalid_b
+      && (l1d_state == LD_D || (l1d_state == LD_A
+          && cacheable_r && !load_perm_denied_q && !(l1d_atomic_lock && mshr_busy)
+          && |load_way_hit && !(|(load_way_hit & ~load_way_data_ready)))
+          || (l1d_state == IDLE && !load_read_early && !b_armed));
+  assign sram_raddr = WriteBack && wb_state != WB_IDLE ? wb_set
+      : load_read_early
       ? lsu_l1d.raddr[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits]
-      : sram_raddr_fallback;
+      : b_read_early ? b_idx_in : addr_idx;
+  assign sram_expected_idx = WriteBack && wb_state != WB_IDLE ? wb_set : load_speculate
+      ? lsu_l1d.raddr[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits]
+      : b_arm_ok ? b_idx_in : addr_idx;
+`else
+  assign sram_raddr = WriteBack && wb_state != WB_IDLE ? wb_set : load_read_early
+      ? lsu_l1d.raddr[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits]
+      : addr_idx;
+  assign sram_expected_idx = WriteBack && wb_state != WB_IDLE ? wb_set : load_speculate
+      ? lsu_l1d.raddr[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits]
+      : addr_idx;
+`endif
+  // Late arbitration reaches only tracking flops, never the SRAM address.
+  // Record that the actual address matched the originally authorized index.
+  always_ff @(posedge clock) begin
+    sram_read_authorized_r <= sram_raddr == sram_expected_idx;
+  end
 
   // Data-array ownership includes SRAM geometry and read-valid tracking.
   wire [L1D_N_WAYS-1:0][L1D_LINE_SIZE-1:0] sram_word_valid;
@@ -760,7 +791,8 @@ module rapt_l1d #(
       .clock(clock),
       .reset(reset),
       .read_addr(sram_raddr),
-      .write_valid(l1d_update && l1d_valid_u && !wb_blocked),
+      .write_valid(l1d_update && l1d_valid_u),
+      .write_blocked(wb_blocked),
       .write_addr(l1d_idx),
       .write_word(l1d_off),
       .write_way(l1d_way),
@@ -787,23 +819,111 @@ module rapt_l1d #(
   logic [1:0] ptw_result_pbmt;
   logic [1:0] dtlb_pbmt;
   logic [1:0] dstlb_pbmt;
+  // Verdict bits describe a complete 4 KiB physical portion. A zero uniform
+  // bit keeps unusual PMP/PMA boundaries on the registered checker path.
+  localparam int VUniform = 0, VRead = 1, VWrite = 2, VMapped = 3, VWritable = 4,
+      VCacheable = 5, VDevice = 6, VAtomic = 7, VWidth32 = 8, VRefill = 9;
+  logic [9:0] fill_verdict, dtlb_verdict, dstlb_verdict, store_verdict;
+  logic [XLEN-1:0] verdict_page;
+  logic verdict_uniform, verdict_pma_uniform, verdict_read_fault, verdict_write_fault;
+  logic pmp_flush;
+  assign pmp_flush = pmp_update.addr_we || |pmp_update.cfg_we;
+  assign verdict_page = XLEN'({ptw_result_ptag, 12'b0});
+  rapt_pmp_window_uniform #(
+      .XLEN(XLEN),
+      .Words(1023),
+      .AlignedWindow(1'b1)
+  ) u_page_uniform (
+      .addr(verdict_page),
+      .state(pmp_state),
+      .uniform_o(verdict_uniform)
+  );
+  rapt_pmp_permissions #(
+      .XLEN(XLEN)
+  ) u_page_permissions (
+      .addr(verdict_page),
+      .size_m1(4'd3),
+      .priv(`RAPT_PRIV_S),
+      .op_r(1'b1),
+      .op_w(1'b0),
+      .op_x(1'b0),
+      .pmp_raw_addr(pmp_state.pmp_raw_addr),
+      .pmp_napot_mask(pmp_state.pmp_napot_mask),
+      .pmp_cfg_r(pmp_state.pmp_cfg_r),
+      .pmp_cfg_w(pmp_state.pmp_cfg_w),
+      .pmp_cfg_x(pmp_state.pmp_cfg_x),
+      .pmp_cfg_l(pmp_state.pmp_cfg_l),
+      .pmp_mode_off(pmp_state.pmp_mode_off),
+      .pmp_mode_tor(pmp_state.pmp_mode_tor),
+      .pmp_mode_na4(pmp_state.pmp_mode_na4),
+      .pmp_mode_napot(pmp_state.pmp_mode_napot),
+      .fault(),
+      .fault_lo_o(),
+      .fault_read_o(verdict_read_fault),
+      .fault_write_o(verdict_write_fault)
+  );
+  always_comb begin
+    verdict_pma_uniform = 1'b1;
+    // Only a non-page-aligned PMA endpoint can split this aligned page.
+    // Constant aligned endpoints disappear instead of building range adders.
+    for (int r = 0; r < rapt_pkg::PmaRegionCount; r++) begin
+      if (rapt_pkg::PmaRegions[r].enabled
+          && ((rapt_pkg::PmaRegions[r].base_addr[11:0] != 0
+               && rapt_pkg::PmaRegions[r].base_addr[63:12] == 52'(verdict_page[31:12]))
+              || (rapt_pkg::PmaRegions[r].end_addr[11:0] != 0
+                  && rapt_pkg::PmaRegions[r].end_addr[63:12] == 52'(verdict_page[31:12]))))
+        verdict_pma_uniform = 1'b0;
+    end
+    fill_verdict = '0;
+    fill_verdict[VUniform] = verdict_uniform && verdict_pma_uniform;
+    fill_verdict[VRead] = !verdict_read_fault;
+    fill_verdict[VWrite] = !verdict_write_fault;
+    fill_verdict[VMapped] = rapt_pkg::addr_mapped(verdict_page);
+    fill_verdict[VWritable] = rapt_pkg::addr_writable(verdict_page);
+    fill_verdict[VCacheable] = rapt_pkg::addr_cacheable(verdict_page);
+    fill_verdict[VDevice] = rapt_pkg::addr_device(verdict_page);
+    fill_verdict[VAtomic] = rapt_pkg::addr_atomic_capable(verdict_page, 4'd3);
+    fill_verdict[VWidth32] = !rapt_pkg::addr_device_width_capable(verdict_page, 4'd0);
+    fill_verdict[VRefill] = L1dLineOffset <= 12 && GuardOffset <= 12
+        && refill_ram(verdict_page, verdict_page | XLEN'(4095));
+  end
+  logic cached_load_check, cached_load_denied;
+  logic [12:0] cached_first, cached_last;
+  logic [3:0] cached_size, cached_orig_size;
+  assign cached_size = lsu_l1d.rcheck_valid ? lsu_l1d.rcheck_size_m1
+      : ((4'd1 << lsu_l1d.ralu[1:0]) - 4'd1);
+  assign cached_orig_size = lsu_l1d.rcheck_valid ? lsu_l1d.rorig_size_m1 : cached_size;
+  assign cached_first = {1'b0, lsu_l1d.raddr[11:0]}
+      + (lsu_l1d.rcheck_valid ? 13'(lsu_l1d.rcheck_offset) : 13'd0);
+  assign cached_last = cached_first + 13'(cached_size);
+  assign cached_load_check = dtlb_verdict[VUniform]
+      && cached_last < 13'd4096 && cached_size <= 7 && !pmp_flush;
+  assign cached_load_denied = !dtlb_verdict[VRead] || !dtlb_verdict[VMapped]
+      || (dtlb_verdict[VWidth32] && (cached_orig_size != 3 || cached_first[1:0] != 0))
+      || (lsu_l1d.rmisaligned && (dtlb_verdict[VDevice] || dtlb_pbmt == 2'b10))
+      || (lsu_l1d.atomic_lock && (!dtlb_verdict[VAtomic]
+          || (lsu_l1d.ralu[1:0] == 2'b11 ? (XLEN != 64 || lsu_l1d.raddr[2:0] != 0)
+              : lsu_l1d.raddr[1:0] != 0)));
   logic dtlb_fill, dstlb_fill;
   assign dtlb_fill  = (l1d_state == PTWAIT) && ptw_done;
   assign dstlb_fill = (l1d_state == PTWAIT) && ptw_done;
 
-  rapt_tlb #(
+  rapt_data_tlb #(
       .XLEN   (XLEN),
+      .WAYS(`RAPT_DTLB_WAYS),
       .ENTRIES(`RAPT_DTLB_ENTRIES)
   ) u_dtlb (
       .clock(clock),
       .reset(reset),
-      .flush(cmu_bcast.fence_time),
+      .flush(cmu_bcast.fence_time || pmp_flush),
       .lookup_vtag(lsu_l1d.raddr[XLEN-1:12]),
       .lookup_asid(lsu_l1d.rcontext.asid),
       .hit(tlb_hit),
       .ptag(dtlb_ptag),
       .pte_flags(dtlb_pte),
       .pbmt(dtlb_pbmt),
+      .verdict(dtlb_verdict),
+      .fill_verdict(fill_verdict),
       .fill_valid(dtlb_fill),
       .fill_ptag(ptw_result_ptag),
       .fill_vtag(ptw_result_vtag),
@@ -812,19 +932,22 @@ module rapt_l1d #(
       .fill_pte(ptw_result_pte)
   );
 
-  rapt_tlb #(
+  rapt_data_tlb #(
       .XLEN   (XLEN),
+      .WAYS(`RAPT_DTLB_WAYS),
       .ENTRIES(`RAPT_DTLB_ENTRIES)
   ) u_dstlb (
       .clock(clock),
       .reset(reset),
-      .flush(cmu_bcast.fence_time),
+      .flush(cmu_bcast.fence_time || pmp_flush),
       .lookup_vtag(exu_l1d.vaddr[XLEN-1:12]),
       .lookup_asid(exu_l1d.mem_context.asid),
       .hit(stlb_hit),
       .ptag(dstlb_ptag),
       .pte_flags(dstlb_pte),
       .pbmt(dstlb_pbmt),
+      .verdict(dstlb_verdict),
+      .fill_verdict(fill_verdict),
       .fill_valid(dstlb_fill),
       .fill_ptag(ptw_result_ptag),
       .fill_vtag(ptw_result_vtag),
@@ -834,7 +957,10 @@ module rapt_l1d #(
   );
 
   // Shared PTW: serves both load and store TLB misses
-  assign store_tlb_miss = exu_l1d.mmu_en && exu_l1d.valid && !stlb_hit && !mis_align_store;
+  // A captured response owns this descriptor even if a concurrent fill or
+  // invalidation removes its TLB entry before the requester consumes ready.
+  assign store_tlb_miss = exu_l1d.mmu_en && exu_l1d.valid && !store_check_valid
+      && !stlb_hit && !mis_align_store;
   assign ptw_vaddr = store_tlb_miss ? exu_l1d.vaddr : lsu_l1d.raddr;
 
   logic ptw_read_error;
@@ -929,7 +1055,8 @@ module rapt_l1d #(
       .clock(clock),
       .reset(reset),
       .fence_time(cmu_bcast.fence_time),
-      .clear_set(wb_hold ? '0 : fence_clear_set),
+      .clear_set(fence_clear_set),
+      .clear_enable(!wb_hold),
       .clear_line_valid(line_clearing),
       .clear_line_idx(line_clear_set),
       .clear_line_tag(line_clear_tag),
@@ -990,10 +1117,9 @@ module rapt_l1d #(
 
   // A tag miss needs no SRAM data. On a hit, only the matching way and word's
   // bank must have read this set; unrelated banks can read during a write.
-  logic [L1D_N_WAYS-1:0] load_way_data_ready;
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_load_bank_ready
     assign load_way_data_ready[way] = sram_word_valid[way][addr_offset]
-        && sram_read_idx_r == addr_idx;
+        && sram_read_idx_r == addr_idx && sram_read_authorized_r;
   end
   logic l1d_sram_busy;
   assign l1d_sram_busy = l1d_update || |(load_way_hit & ~load_way_data_ready);
@@ -1043,7 +1169,6 @@ module rapt_l1d #(
   //  registered SRAM read index still matches B before returning data.
   // ==========================================================================
 `ifdef RAPT_LSU_HUM
-  logic b_armed;
   logic [XLEN-1:0] b_addr_r;
   logic b_sram_ready;
   assign b_idx_in
@@ -1072,7 +1197,8 @@ module rapt_l1d #(
   assign b_off = b_addr_r[L1D_LINE_LEN+L1dOffsetBits-1:L1dOffsetBits];
   logic [L1D_N_WAYS-1:0] b_way_data_ready;
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_b_bank_ready
-    assign b_way_data_ready[way] = sram_word_valid[way][b_off] && sram_read_idx_r == b_idx;
+    assign b_way_data_ready[way] = sram_word_valid[way][b_off] && sram_read_idx_r == b_idx
+        && sram_read_authorized_r;
   end
   assign b_sram_ready = |(b_way_hit & b_way_data_ready) && !wb_hold;
 
@@ -1123,26 +1249,13 @@ module rapt_l1d #(
   // Access policy is combinational; this controller owns fault timing.
   logic pmp_load_fault, load_unmapped_fault;
   logic load_region_unmapped_fault;
-  logic [XLEN-1:0] idle_load_pa;
-  logic [1:0] idle_load_pbmt;
-  assign idle_load_pa   = lsu_l1d.rcontext.mmu_en
-      ? XLEN'({dtlb_ptag, lsu_l1d.raddr[11:0]}) : lsu_l1d.raddr;
-  assign idle_load_pbmt = lsu_l1d.rcontext.mmu_en ? dtlb_pbmt : 2'b00;
-  // Match the IDLE load-capture arm: store translation still has priority.
-  logic idle_load_capture;
-  assign idle_load_capture = (l1d_state == IDLE) && lsu_l1d.rvalid
-      && !cmu_bcast.flush_pipe && !fence_clear_busy
-      && (!lsu_l1d.atomic_lock || !exu_l1d.reservation_blocked)
-      && !(exu_l1d.mmu_en && exu_l1d.valid)
-      && (!lsu_l1d.rcontext.mmu_en || tlb_hit);
+  // Only bare requests bypass the registered physical address. In particular,
+  // neither TLB hit/PA nor PTW completion can select an input of the PMP cone.
   logic idle_load_perm;
-  assign idle_load_perm = idle_load_capture && !ptw_arvalid;
-  assign perm_load_context = idle_load_perm ? lsu_l1d.rcontext : load_context_q;
-  logic [XLEN-1:0] ptw_load_pa;
-  assign ptw_load_pa = XLEN'({ptw_result_ptag, l1d_addr[11:0]});
-  logic ptw_load_perm;
-  assign ptw_load_perm  = (l1d_state == PTWAIT) && ptw_done && !stlb_mmu && !ptw_arvalid;
-  assign perm_base_addr = idle_load_perm ? idle_load_pa : (ptw_load_perm ? ptw_load_pa : l1d_addr);
+  assign idle_load_perm = (l1d_state == IDLE) && !lsu_l1d.rcontext.mmu_en;
+  // PTE policy in IDLE uses the incoming context even for translated loads.
+  assign perm_load_context = (l1d_state == IDLE) ? lsu_l1d.rcontext : load_context_q;
+  assign perm_base_addr = idle_load_perm ? lsu_l1d.raddr : l1d_addr;
   logic perm_check_valid;
   logic [2:0] perm_check_offset;
   logic [3:0] perm_check_size_m1;
@@ -1161,7 +1274,7 @@ module rapt_l1d #(
   assign perm_load_size_m1 = perm_check_valid ? perm_check_size_m1
       : ((4'd1 << perm_ralu_size) - 4'd1);
   logic [1:0] perm_pbmt;
-  assign perm_pbmt = idle_load_perm ? idle_load_pbmt : (ptw_load_perm ? ptw_result_pbmt : l1d_pbmt);
+  assign perm_pbmt = idle_load_perm ? 2'b00 : l1d_pbmt;
   logic capture_io_size_fault;
   assign capture_io_size_fault = (idle_load_perm ? lsu_l1d.rmisaligned
       : l1d_orig_misaligned) && (perm_pbmt == 2'b10
@@ -1355,12 +1468,20 @@ module rapt_l1d #(
       && !l1d_update && !line_update
       && !fence_clear_busy && !(l1d_state == LD_D && refill_line);
 
-  // store address translation: stlb_hit uses TLB, otherwise wait for PTW
-  assign store_paddr = XLEN'({ptw_result_ptag, exu_l1d.vaddr[11:0]});
-  assign exu_l1d.paddr = stlb_hit ? XLEN'({dstlb_ptag, exu_l1d.vaddr[11:0]}) : store_paddr;
-  assign exu_l1d.pbmt = exu_l1d.mmu_en ? (stlb_hit ? dstlb_pbmt : ptw_result_pbmt) : 2'b00;
-  assign exu_l1d.trap = (l1d_state == TRAP) && rec_store && (rec_addr == exu_l1d.vaddr);
-  assign exu_l1d.cause = cause;
+  // Translation completes only after the captured PA has passed PMP/PMA.
+  // The requester holds its descriptor until ready, including split stores.
+  assign exu_l1d.paddr = store_paddr;
+  assign exu_l1d.pbmt = store_pbmt;
+  assign store_access_fault = (store_verdict[VUniform] && !pmp_flush
+      ? ((exu_l1d.cmo_mgmt ? !(store_verdict[VRead] || store_verdict[VWrite])
+                           : !store_verdict[VWrite])
+          || (exu_l1d.cmo_mgmt ? !store_verdict[VMapped] : !store_verdict[VWritable]))
+      : (pmp_store_fault_mmu || store_unmapped_fault_mmu)) || store_io_size_fault;
+  assign exu_l1d.trap = ((l1d_state == TRAP) && rec_store
+      && (rec_addr == exu_l1d.vaddr)) || (store_check_valid && (store_page_fault || store_access_fault));
+  assign exu_l1d.cause = store_check_valid
+      ? (store_page_fault ? XLEN'(`RAPT_CAUSE_STORE_PAGE_FAULT)
+                          : XLEN'(`RAPT_CAUSE_STORE_ACC_FAULT)) : cause;
   assign exu_l1d.reservation = reservation;
   assign exu_l1d.reservation_size_m1 = reservation_size_m1;
   assign exu_l1d.reservation_valid = reservation_valid && !external_hits_reservation;
@@ -1369,16 +1490,34 @@ module rapt_l1d #(
     if (reset || l1d_state == IDLE) lr_interfered <= 1'b0;
     else if (external_hits_lr) lr_interfered <= 1'b1;
   end
-  assign exu_l1d.ready = exu_l1d.valid && (exu_l1d.trap
-    || (stlb_hit
-      && !mis_align_store
-      && !pmp_store_fault_mmu
-      && !store_unmapped_fault_mmu && !store_io_size_fault && !pf_store_tlb)
-    || (stlb_mmu
-      && ptw_done
-      && !pf_store_ptw
-      && !pmp_store_fault_mmu
-      && !store_unmapped_fault_mmu && !store_io_size_fault));
+  // Ready denotes a completed translation, not permission to issue a store.
+  // Its structural state is independent of the TLB and permission result;
+  // trap accompanies a denied response before the LSU can issue any write.
+  assign exu_l1d.ready = exu_l1d.valid && !cmu_bcast.flush_pipe
+      && (store_check_valid || ((l1d_state == TRAP) && rec_store
+          && rec_addr == exu_l1d.vaddr));
+
+  // Keep the translation response independent of the load FSM: an older
+  // store may translate while a younger load owns the cache or refill bus.
+  // The held request supplies size/context until this response is consumed.
+  assign store_check_capture = exu_l1d.mmu_en && exu_l1d.valid && !store_check_valid
+      && !mis_align_store && (stlb_hit || (stlb_mmu && ptw_done));
+  always_ff @(posedge clock) begin
+    if (reset || cmu_bcast.flush_pipe) begin
+      store_check_valid <= 1'b0;
+    end else begin
+      store_check_valid <= store_check_capture;
+    end
+  end
+  // Only occupied responses expose this payload. Free-running payload
+  // flops avoid distributing the capture enable across the PA bus.
+  always_ff @(posedge clock) begin
+    store_paddr <= stlb_hit ? XLEN'({dstlb_ptag, exu_l1d.vaddr[11:0]})
+        : XLEN'({ptw_result_ptag, exu_l1d.vaddr[11:0]});
+    store_verdict <= stlb_hit && !pmp_flush ? dstlb_verdict : 10'b0;
+    store_pbmt <= stlb_hit ? dstlb_pbmt : ptw_result_pbmt;
+    store_page_fault <= stlb_hit ? pf_store_tlb : pf_store_ptw;
+  end
 
   // Fill acceptance requires !l1d_update. Preload the wide line payload
   // while this update buffer is vacant; the original line_update control
@@ -1396,6 +1535,7 @@ module rapt_l1d #(
       load_context_q <= '0;
       ptw_context_q <= '0;
       load_perm_denied_q <= 1'b0;
+      load_page_fault_q <= 1'b0;
       rec_store <= 1'b0;
       fence_clear_set <= '0;
       l1d_update <= 0;
@@ -1429,6 +1569,7 @@ module rapt_l1d #(
         IDLE: begin
           load_killed <= 1'b0;
           load_perm_denied_q <= 1'b0;
+          load_page_fault_q <= 1'b0;
           l1d_atomic_lock <= 1'b0;
           if (!cmu_bcast.flush_pipe && !fence_clear_busy && !wb_hold && !local_store_ready
               && !(WriteBack && coherent_write)
@@ -1439,17 +1580,6 @@ module rapt_l1d #(
                 rec_store <= 1'b1;
                 if (mis_align_store) begin
                   cause <= 'h6;  // store address mis-aligned
-                  rec_addr <= exu_l1d.vaddr;
-                  l1d_state <= TRAP;
-                end else if (stlb_hit && pf_store_tlb) begin
-                  // PTE permission denies store.
-                  cause <= `RAPT_CAUSE_STORE_PAGE_FAULT;
-                  rec_addr <= exu_l1d.vaddr;
-                  l1d_state <= TRAP;
-                end else if (stlb_hit && (pmp_store_fault_mmu || store_unmapped_fault_mmu
-                    || store_io_size_fault)) begin
-                  // PMP violation on translated store address.
-                  cause <= `RAPT_CAUSE_STORE_ACC_FAULT;
                   rec_addr <= exu_l1d.vaddr;
                   l1d_state <= TRAP;
                 end else if (!stlb_hit && ptw_req) begin
@@ -1467,14 +1597,11 @@ module rapt_l1d #(
                   cause <= 'h4;  // load address mis-aligned
                   rec_addr <= lsu_l1d.raddr;
                   l1d_state <= TRAP;
-                end else if (tlb_hit && pf_load_tlb) begin
-                  cause <= `RAPT_CAUSE_LOAD_PAGE_FAULT;
-                  rec_addr <= lsu_l1d.raddr;
-                  l1d_state <= TRAP;
                 end else if (tlb_hit) begin
                   // Capture the physical request before its permission stage.
                   l1d_addr <= XLEN'({dtlb_ptag, lsu_l1d.raddr[11:0]});
                   l1d_pbmt <= dtlb_pbmt;
+                  load_page_fault_q <= pf_load_tlb;
                   rec_addr <= lsu_l1d.raddr;
                   l1d_ralu <= lsu_l1d.ralu;
                   l1d_orig_misaligned <= lsu_l1d.rmisaligned;
@@ -1483,12 +1610,16 @@ module rapt_l1d #(
                   l1d_check_size_m1 <= lsu_l1d.rcheck_size_m1;
                   l1d_orig_size_m1 <= lsu_l1d.rorig_size_m1;
                   l1d_atomic_lock <= lsu_l1d.atomic_lock;
-                  if (ptw_arvalid) l1d_state <= LD_CHECK;
-                  else begin
-                    load_perm_denied_q <= capture_load_denied;
-                    refill_safe <= capture_refill_safe;
-                    l1d_state <= LD_A;
-                  end
+                  if (cached_load_check) begin
+                    load_perm_denied_q <= cached_load_denied;
+                    refill_safe <= dtlb_verdict[VCacheable] && dtlb_pbmt == 2'b00
+                        && dtlb_verdict[VRefill];
+                    if (pf_load_tlb || cached_load_denied) begin
+                      cause <= pf_load_tlb ? XLEN'(`RAPT_CAUSE_LOAD_PAGE_FAULT)
+                          : XLEN'(`RAPT_CAUSE_LOAD_ACC_FAULT);
+                      l1d_state <= TRAP;
+                    end else l1d_state <= LD_A;
+                  end else l1d_state <= LD_CHECK;
                 end else if (ptw_req) begin
                   // PTW request issued via ptw_req
                   l1d_addr <= lsu_l1d.raddr;
@@ -1551,32 +1682,14 @@ module rapt_l1d #(
             if (stlb_mmu) begin
               // Store PTW done: TLB filled by u_dstlb
               stlb_mmu <= 'b0;
-              if (pf_store_ptw) begin
-                cause <= `RAPT_CAUSE_STORE_PAGE_FAULT;
-                l1d_state <= TRAP;
-              end else if (pmp_store_fault_mmu || store_unmapped_fault_mmu
-                  || store_io_size_fault) begin
-                // PMP denies store on the freshly-translated PA.
-                cause <= `RAPT_CAUSE_STORE_ACC_FAULT;
-                l1d_state <= TRAP;
-              end else begin
-                l1d_state <= IDLE;
-              end
+              // The independent response stage captures PA and PTE policy.
+              l1d_state <= IDLE;
             end else begin
-              // Load PTW done: TLB filled by u_dtlb, compute physical address
-              if (pf_load_ptw) begin
-                cause <= `RAPT_CAUSE_LOAD_PAGE_FAULT;
-                l1d_state <= TRAP;
-              end else begin
-                l1d_addr <= XLEN'({ptw_result_ptag, l1d_addr[11:0]});
-                l1d_pbmt <= ptw_result_pbmt;
-                if (ptw_arvalid) l1d_state <= LD_CHECK;
-                else begin
-                  load_perm_denied_q <= capture_load_denied;
-                  refill_safe <= capture_refill_safe;
-                  l1d_state <= LD_A;
-                end
-              end
+              // Register the walk result before the physical permission check.
+              l1d_addr <= XLEN'({ptw_result_ptag, l1d_addr[11:0]});
+              l1d_pbmt <= ptw_result_pbmt;
+              load_page_fault_q <= pf_load_ptw;
+              l1d_state <= LD_CHECK;
             end
           end else if (ptw_fault) begin
             if (stlb_mmu) begin
@@ -1598,12 +1711,16 @@ module rapt_l1d #(
           if (cmu_bcast.flush_pipe) begin
             l1d_addr  <= '0;
             l1d_state <= IDLE;
+          end else if (load_page_fault_q) begin
+            cause <= `RAPT_CAUSE_LOAD_PAGE_FAULT;
+            l1d_state <= TRAP;
           end else if (ptw_arvalid) begin
             // A PTW request can survive until trap recovery after a denied
             // PTE read. It owns the shared read checker, so keep this load
             // captured without consuming the PTW's permission result.
             l1d_state <= LD_CHECK;
-          end else if (pmp_load_fault || load_unmapped_fault || load_io_size_fault) begin
+          end else if (capture_load_denied) begin
+            load_perm_denied_q <= 1'b1;
             // PMP denies load at this physical address for eff_priv,
             // or the address is unmapped (bus error -> access fault).
             cause <= `RAPT_CAUSE_LOAD_ACC_FAULT;
@@ -1833,9 +1950,10 @@ module rapt_l1d #(
       || (l1d_state == LD_A && load_perm_denied_q));
   `RAPT_SVA_NEXT(clock, reset, L1D_PERMISSION_STAGE_DENIED, l1d_permission_stage_denied,
                  l1d_state == TRAP)
-  `RAPT_SVA_NEXT(clock, reset, L1D_PERMISSION_STAGE_WAITS_FOR_PTW,
-                 l1d_state == LD_CHECK && ptw_arvalid && !cmu_bcast.flush_pipe,
-                 l1d_state == LD_CHECK)
+  `RAPT_SVA_NEXT(
+      clock, reset, L1D_PERMISSION_STAGE_WAITS_FOR_PTW,
+      l1d_state == LD_CHECK && ptw_arvalid && !load_page_fault_q && !cmu_bcast.flush_pipe,
+      l1d_state == LD_CHECK)
   logic l1d_lr_hit_establishes_reservation;
   // A dirty-cache drain holds LD_A before the LR hit can be accepted.
   assign l1d_lr_hit_establishes_reservation = data_hit

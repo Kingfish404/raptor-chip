@@ -28,6 +28,9 @@ interface ifu_bpu_if #(
   // at aux_pc + 2 * (aux_position + 1); otherwise aux_pc is the branch PC.
   logic [3:0]      aux_position;
   logic            aux_taken;
+  // Registered packet metadata selects an existing positional direction read.
+  logic [3:0]      request_aux_position;
+  logic            request_aux_taken;
   logic [$clog2(PHT_SIZE)-1:0] aux_index;
 `endif
 
@@ -35,15 +38,15 @@ interface ifu_bpu_if #(
   modport out(
       output nextpc, pc_update,
       output history_valid, history_taken, history_pc_bit,
-      output aux_query, aux_pc, aux_position,
-      input aux_taken, aux_index,
+      output aux_query, aux_pc, aux_position, request_aux_position,
+      input aux_taken, aux_index, request_aux_taken,
       input npc, taken
   );
   modport in(
       input nextpc, pc_update,
       input history_valid, history_taken, history_pc_bit,
-      input aux_query, aux_pc, aux_position,
-      output aux_taken, aux_index,
+      input aux_query, aux_pc, aux_position, request_aux_position,
+      output aux_taken, aux_index, request_aux_taken,
       output npc, taken
   );
 `else
@@ -60,8 +63,9 @@ endinterface
 
 // IDU -> BPU BTB training side-channel.
 //
-// Fires alongside `ifu_idu.resteer` when the IDU detects a BPU prediction
-// failure that can be resolved with the *static* portion of the instruction:
+// Captures training on decode acceptance, one cycle before the registered
+// `ifu_idu.resteer`. BPU applies the captured write with that redirect. This
+// repairs prediction failures resolved by the static portion of the instruction:
 //   - JAL with wrong / missing BTB target (BPU not-taken, or wrong target)
 //   - B-type with BPU-taken but wrong BTB target (stale entry)
 //   - Return with a decode-ordered RAS target (speculative; execution validates)
@@ -77,7 +81,7 @@ endinterface
 interface idu_bpu_if #(
     parameter int XLEN = `RAPT_XLEN
 );
-  logic            train_en;     // 1-cycle pulse aligned with ifu_idu.resteer
+  logic            train_en;     // Accepted decode correction; registered inside BPU
   logic [XLEN-1:0] train_pc;     // PC of the offending instruction
   logic [XLEN-1:0] train_target; // Correct target PC
   logic [1:0]      train_type;   // 00=COND, 01=DIRE, 11=RETU (matches BPU enum)

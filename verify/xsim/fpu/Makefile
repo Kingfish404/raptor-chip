@@ -19,7 +19,7 @@ result-reset:
 		-I../../../hdl/include -I../../../hdl/configs/default \
 		$(if $(filter 64,$(RESET_XLEN)),-DRAPT_RV64) \
 		--top-module tb_fpu_result_reset \
-		$(addprefix ../../../hdl/backend/feu/fpu/rapt_fpu_,$(addsuffix .sv,addsub mul fma convert_narrow convert_widen int_to_fp single_to_int_w fp_to_half half_to_fp)) \
+		$(addprefix ../../../hdl/backend/feu/fpu/rapt_fpu_,$(addsuffix .sv,addsub mul fma convert_narrow convert_widen int_to_fp integer_to_fp single_to_int_w fp_to_int fp_to_half half_to_fp)) \
 		tb_result_reset.sv --Mdir $(RESET_BUILD_DIR)/rv$(RESET_XLEN) -j 2 -o test
 	$(RESET_BUILD_DIR)/rv$(RESET_XLEN)/test
 

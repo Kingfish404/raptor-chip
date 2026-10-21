@@ -375,30 +375,44 @@ endmodule
 module rapt_pmp_window_uniform #(
     parameter int XLEN = `RAPT_XLEN,
     parameter int PADDR_BITS = `RAPT_PADDR_BITS,
-    parameter int Words = 4
+    parameter int Words = 4,
+    parameter bit AlignedWindow = 1'b0
 ) (
     input logic [XLEN-1:0] addr,
     pmp_state_if.in state,
     output logic uniform_o
 );
   localparam int WordBits = PADDR_BITS - 2;
+  localparam int LowBits  = $clog2(Words + 1) > 0 ? $clog2(Words + 1) : 1;
+  if (AlignedWindow && (Words < 1 || ((Words + 1) & Words) != 0)) begin : g_bad_window
+    $error("Aligned PMP window must contain a power of two words");
+  end
   logic [WordBits-1:0] word;
   logic window_wraps;
   logic [`RAPT_PMP_NUM-1:0] boundary;
   assign word = addr[PADDR_BITS-1:2];
-  assign window_wraps = word > WordBits'({WordBits{1'b1}} - Words);
+  assign window_wraps = AlignedWindow ? 1'b0
+      : word > WordBits'({WordBits{1'b1}} - Words);
   // A region starting at `start` changes membership inside the window when
   // start - word is in [1, Words]; one ending at word `last` when last - word
   // is in [0, Words - 1].
   function automatic logic starts_inside(input logic [WordBits-1:0] start);
     logic [WordBits-1:0] distance;
-    distance = start - word;
-    return distance != '0 && distance <= WordBits'(Words);
+    if (AlignedWindow) begin
+      return start[WordBits-1:LowBits] == word[WordBits-1:LowBits] && |start[LowBits-1:0];
+    end else begin
+      distance = start - word;
+      return distance != '0 && distance <= WordBits'(Words);
+    end
   endfunction
   function automatic logic ends_inside(input logic [WordBits-1:0] last);
     logic [WordBits-1:0] distance;
-    distance = last - word;
-    return distance < WordBits'(Words);
+    if (AlignedWindow) begin
+      return last[WordBits-1:LowBits] == word[WordBits-1:LowBits] && !(&last[LowBits-1:0]);
+    end else begin
+      distance = last - word;
+      return distance < WordBits'(Words);
+    end
   endfunction
   logic [`RAPT_PMP_NUM-1:0] raw_starts;
   for (genvar i = 0; i < `RAPT_PMP_NUM; i++) begin : g_raw
@@ -423,5 +437,5 @@ module rapt_pmp_window_uniform #(
         last
     )));
   end
-  assign uniform_o = !window_wraps && !(|boundary);
+  assign uniform_o = !window_wraps && !(|boundary) && (!AlignedWindow || word[LowBits-1:0] == '0);
 endmodule

@@ -30,7 +30,7 @@ if top == 'rapt_vpu_fp_wide_arith':
 if top == 'rapt_vpu_fp_convert':
     files += [root/'hdl/backend/vpu/rapt_vpu_fp_widen.sv', root/'hdl/backend/feu/fpu/rapt_fpu_convert_narrow.sv']
 if top == 'rapt_vpu_int_fp':
-    files += [root/'hdl/backend/feu/fpu/rapt_fpu_int_to_fp.sv', root/'hdl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv']
+    files += [root/'hdl/backend/feu/fpu/rapt_fpu_int_to_fp.sv', root/'hdl/backend/feu/fpu/rapt_fpu_integer_to_fp.sv', root/'hdl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv', root/'hdl/backend/feu/fpu/rapt_fpu_fp_to_int.sv']
 if top == 'rapt_vpu_divsqrt':
     files.append(root/'hdl/backend/feu/fpu/rapt_fpu_divsqrt.sv')
 if top == 'rapt_vpu_muldiv':

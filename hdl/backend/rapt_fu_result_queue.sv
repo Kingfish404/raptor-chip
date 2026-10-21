@@ -19,6 +19,7 @@ module rapt_fu_result_queue #(
     cancel_owner,
     input CompletionT launch,
     output logic ready,
+    output logic credit_available,
     input logic result_valid,
     input logic [63:0] result,
     input logic [4:0] flags,
@@ -41,13 +42,24 @@ module rapt_fu_result_queue #(
   function automatic logic [PtrBits-1:0] advance(input logic [PtrBits-1:0] ptr);
     return ptr == PtrBits'(Depth - 1) ? '0 : ptr + 1'b1;
   endfunction
+  function automatic logic [PtrBits-1:0] offset_pointer(input logic [PtrBits-1:0] base,
+                                                        input logic [CountBits-1:0] distance);
+    logic [PtrBits:0] sum;
+    sum = {1'b0, base} + (PtrBits + 1)'(distance);
+    return PtrBits'(sum >= (PtrBits + 1)'(Depth) ? sum - (PtrBits + 1)'(Depth) : sum);
+  endfunction
   function automatic logic killed_now(input logic [IndexBits-1:0] owner);
     return cancel_valid && `RAPT_ROB_YOUNGER(owner, cancel_owner, cancel_head);
   endfunction
 
+  // Occupancy locates both write positions relative to the oldest owner. Each
+  // sum is below twice Depth, so one subtraction replaces redundant pointers.
+  assign tail = offset_pointer(head, count);
+  assign result_head = offset_pointer(head, completed);
   // A credit covers an owner from launch through completion acceptance. Full
   // queues do not reclaim a departing credit until the following cycle.
-  assign ready = !reset && !flush && int'(count) < Depth;
+  // Selection may observe capacity during recovery; only ready permits a push.
+  assign ready = !reset && !flush && credit_available;
   assign push = launch.valid && ready;
   assign capture = !reset && !flush && result_valid && count > completed;
   assign pop = !reset && !flush && completed != '0 && (completion_ready || !completion.valid);
@@ -73,22 +85,22 @@ module rapt_fu_result_queue #(
   always_ff @(posedge clock) begin
     if (reset || flush) begin
       head <= '0;
-      tail <= '0;
-      result_head <= '0;
       count <= '0;
+      credit_available <= 1'b1;
       completed <= '0;
     end else begin
-      if (push) tail <= advance(tail);
-      if (capture) result_head <= advance(result_head);
       if (pop) head <= advance(head);
+      // Mirror next occupancy so selection does not wait on a count comparison.
+      if (push && !pop) credit_available <= int'(count) < Depth - 1;
+      else if (pop && !push) credit_available <= 1'b1;
       count <= count + CountBits'(push) - CountBits'(pop);
       completed <= completed + CountBits'(capture) - CountBits'(pop);
     end
-    if (push) begin
+    if (launch.valid && credit_available) begin
       owners[tail] <= owner_input;
       destinations[tail] <= launch.dest;
     end
-    if (capture) results[result_head] <= {result, flags};
+    if (result_valid && count > completed) results[result_head] <= {result, flags};
   end
   // Owner numbers need parallel recovery reads. Keep them separate so the
   // remaining metadata retains one read port and can map to FPGA LUTRAM.
@@ -104,5 +116,7 @@ module rapt_fu_result_queue #(
   end
   `RAPT_SVA_IMPLY(clock, reset || flush, FU_LAUNCH_HAS_CREDIT, launch.valid, ready)
   `RAPT_SVA_IMPLY(clock, reset || flush, FU_RESULT_HAS_OWNER, result_valid, count > completed)
+  `RAPT_SVA(clock, reset || flush, FU_CREDIT_MIRRORS_COUNT,
+            credit_available == (int'(count) < Depth))
   `RAPT_SVA(clock, reset || flush, FU_RESULT_CREDITS, int'(count) <= Depth && completed <= count)
 endmodule

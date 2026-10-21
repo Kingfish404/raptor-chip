@@ -13,7 +13,9 @@ include $(LSPD_DIR)/modules.mk
 MODULE ?= core
 PDK ?= nangate45
 RAPT_CONFIG ?= default
-CLK_FREQ_MHZ ?= 100
+# FPGA OOC targets use the same 50 MHz default as the board builds. Keep the
+# ASIC synthesis/STA default independent of that target.
+CLK_FREQ_MHZ ?= $(if $(filter fpga-syn fpga-syn-locked fpga-eval,$(MAKECMDGOALS)),50,100)
 IO_DELAY_FRAC ?= 0.20
 OUTPUT_LOAD_FF ?= 5.0
 EXTRA_DEFINES ?=

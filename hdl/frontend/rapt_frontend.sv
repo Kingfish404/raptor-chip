@@ -28,13 +28,16 @@ module rapt_frontend #(
   ifu_idu_if fqu_idu ();
   ifu_bpu_if ifu_bpu ();
   idu_bpu_if idu_bpu ();
-  rapt_bpu bpu (
+  rapt_bpu #(
+      .SharedDecodeTarget(1'b1)
+  ) bpu (
       .clock(clock),
 
       .cmu_bcast(cmu_bcast),
 
       .ifu_bpu(ifu_bpu),
       .idu_bpu(idu_bpu),
+      .decode_target_q(fqu_idu.resteer_pc[XLEN-1:1]),
       .execute_recover(history_restore),
       .preserve_fetch(recovery.preserve_fetch),
       .execute_ghr(restore_ghr),
@@ -90,6 +93,11 @@ module rapt_frontend #(
 
       .reset(reset)
   );
+
+  `RAPT_SVA_IMPLY(clock, reset, FRONTEND_CORRECTION_KILLS_YOUNGER, fqu_idu.resteer,
+                  !fqu_idu.valid[0] && !idu_rnu.valid[0])
+  `RAPT_SVA_IMPLY(clock, reset, FRONTEND_SHARED_TRAIN_TARGET, $past(idu_bpu.train_en),
+                  fqu_idu.resteer_pc == $past(idu_bpu.train_target))
 
   // Same emptiness predicate previously used by the core IO guard. This is
   // a combinational status, not a delayed authorization or flush indication.

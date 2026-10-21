@@ -157,6 +157,8 @@ module tb_ifu_response_stage;
     ifu_bpu.npc = phase == 9 ? dut.pc_ifu
         : force_self_prediction ? Base : following(dut.pc_ifu);
     // Without a response register the IFU sends the block PC and position.
+    ifu_bpu.request_aux_taken = predicted_taken(ifu_bpu.aux_pc
+        + XLEN'(2 * (int'(ifu_bpu.request_aux_position) + 1)));
     ifu_bpu.aux_taken = ifu_bpu.aux_query && predicted_taken(`RAPT_FETCH_RESPONSE_STAGE
         ? ifu_bpu.aux_pc : ifu_bpu.aux_pc + XLEN'(2 * (int'(ifu_bpu.aux_position) + 1)));
   end

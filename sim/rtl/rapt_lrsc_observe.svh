@@ -21,7 +21,7 @@ always @(posedge clock) begin
         lrsc_observe_cycle,
         `LRSC_BACKEND.lsu.u_ioq.ioq_pc[`LRSC_BACKEND.lsu.u_ioq.ioq_head],
         `LRSC_BACKEND.lsu.u_ioq.ioq_dest[`LRSC_BACKEND.lsu.u_ioq.ioq_head],
-        `LRSC_BACKEND.lsu.u_ioq.ioq_generation[`LRSC_BACKEND.lsu.u_ioq.ioq_head],
+          ioq_observe_generation[`LRSC_BACKEND.lsu.u_ioq.ioq_head],
         `LRSC_BACKEND.lsu.u_ioq.ioq_alu[`LRSC_BACKEND.lsu.u_ioq.ioq_head],
         `LRSC_BACKEND.exu_ioq_bcast.valid, `LRSC_BACKEND.lsu.wb_accept,
         `LRSC_BACKEND.exu_ioq_bcast.result, `LRSC_CORE.exu_l1d.reservation_valid,

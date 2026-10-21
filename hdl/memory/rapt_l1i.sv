@@ -624,10 +624,13 @@ module rapt_l1i #(
   logic pf_fetch_tlb, pf_fetch_ptw;
 `ifdef RAPT_FETCH_LOOKAHEAD
   logic [XLEN-1:0] lookahead_n1_addr, lookahead_n2_addr;
+  logic [12:0] lookahead_n1_page, lookahead_n2_page;
+  logic [XLEN-13:0] lookahead_bare_next_page;
   logic pmp_n1_fetch_fault, pmp_n2_fetch_fault;
 `endif
 `ifdef RAPT_FETCH_WIDE
   logic [XLEN-1:0] lookahead_n3_addr, lookahead_n4_addr;
+  logic [12:0] lookahead_n3_page, lookahead_n4_page;
   logic pmp_n3_fetch_fault, pmp_n4_fetch_fault;
 `endif
   rapt_l1i_access #(
@@ -852,8 +855,18 @@ module rapt_l1i #(
   logic sram_n1_ready;
   logic sram_n2_ready;
   logic n2_same_line_as_next4;
-  assign lookahead_n1_addr = {pc_ifu[XLEN-1:2], 2'b00} + XLEN'(4);
-  assign lookahead_n2_addr = {pc_ifu[XLEN-1:2], 2'b00} + XLEN'(8);
+  // Translated lookahead never crosses a page. Add in the untranslated
+  // offset, then reuse the current PA page; carry suppresses the response.
+  // Bare fetch shares the next-page increment across the lookahead slots.
+  assign lookahead_bare_next_page = ifu_l1i.pc[XLEN-1:12] + (XLEN-12)'(1);
+  assign lookahead_n1_page = {1'b0, ifu_l1i.pc[11:2], 2'b00} + 13'd4;
+  assign lookahead_n1_addr = {mmu_en ? pc_ifu[XLEN-1:12]
+      : (lookahead_n1_page[12] ? lookahead_bare_next_page : ifu_l1i.pc[XLEN-1:12]),
+      lookahead_n1_page[11:0]};
+  assign lookahead_n2_page = {1'b0, ifu_l1i.pc[11:2], 2'b00} + 13'd8;
+  assign lookahead_n2_addr = {mmu_en ? pc_ifu[XLEN-1:12]
+      : (lookahead_n2_page[12] ? lookahead_bare_next_page : ifu_l1i.pc[XLEN-1:12]),
+      lookahead_n2_page[11:0]};
 
   assign addr_offset_n1 = addr_offset + L1I_LINE_LEN'(1);
   assign addr_offset_n2 = addr_offset + L1I_LINE_LEN'(2);
@@ -896,7 +909,7 @@ module rapt_l1i #(
   // the halfword consumed by the former two-slot path. Suppression forces
   // primary refetch, where the precise fault machinery handles the address.
   assign ifu_l1i.inst_n1_valid = !slow_active && !slow_select && !pmp_n1_fetch_fault
-    && (!mmu_en || lookahead_n1_addr[XLEN-1:12] == pc_ifu[XLEN-1:12])
+    && (!mmu_en || !lookahead_n1_page[12])
     && (pc_ifu[1]
       ? (hit_next && data_bank_rvalid_d1[hit_next_way_sel][addr_offset_next]
          && (data_bank_raddr_d1[hit_next_way_sel][addr_offset_next] == addr_idx_next))
@@ -904,7 +917,7 @@ module rapt_l1i #(
   assign ifu_l1i.inst_n2 = l1i_word_n2;
   assign ifu_l1i.inst_n2_valid = !slow_active && !slow_select && !pmp_n2_fetch_fault
       && n2_same_line_as_next4
-      && (!mmu_en || lookahead_n2_addr[XLEN-1:12] == pc_ifu[XLEN-1:12])
+      && (!mmu_en || !lookahead_n2_page[12])
       && hit_n2 && sram_n2_ready;
 `ifdef RAPT_FETCH_WIDE
   // The extra banks are read in parallel with n1/n2. Only words in the line
@@ -914,8 +927,14 @@ module rapt_l1i #(
   logic [L1iWayW-1:0] hit_n3_way_sel, hit_n4_way_sel;
   logic hit_n3, hit_n4, sram_n3_ready, sram_n4_ready;
   logic n3_same_line_as_next4, n4_same_line_as_next4;
-  assign lookahead_n3_addr = {pc_ifu[XLEN-1:2], 2'b00} + XLEN'(12);
-  assign lookahead_n4_addr = {pc_ifu[XLEN-1:2], 2'b00} + XLEN'(16);
+  assign lookahead_n3_page = {1'b0, ifu_l1i.pc[11:2], 2'b00} + 13'd12;
+  assign lookahead_n3_addr = {mmu_en ? pc_ifu[XLEN-1:12]
+      : (lookahead_n3_page[12] ? lookahead_bare_next_page : ifu_l1i.pc[XLEN-1:12]),
+      lookahead_n3_page[11:0]};
+  assign lookahead_n4_page = {1'b0, ifu_l1i.pc[11:2], 2'b00} + 13'd16;
+  assign lookahead_n4_addr = {mmu_en ? pc_ifu[XLEN-1:12]
+      : (lookahead_n4_page[12] ? lookahead_bare_next_page : ifu_l1i.pc[XLEN-1:12]),
+      lookahead_n4_page[11:0]};
   assign addr_offset_n3 = addr_offset + L1I_LINE_LEN'(3);
   assign addr_offset_n4 = addr_offset + L1I_LINE_LEN'(4);
   for (genvar w = 0; w < L1I_N_WAYS; w++) begin : g_way_hit_wide
@@ -948,11 +967,11 @@ module rapt_l1i #(
   assign ifu_l1i.inst_n4 = data_bank_rdata[hit_n4_way_sel][addr_offset_n4];
   assign ifu_l1i.inst_n3_valid = !slow_active && !slow_select && !pmp_n3_fetch_fault
       && n3_same_line_as_next4
-      && (!mmu_en || lookahead_n3_addr[XLEN-1:12] == pc_ifu[XLEN-1:12])
+      && (!mmu_en || !lookahead_n3_page[12])
       && hit_n3 && sram_n3_ready;
   assign ifu_l1i.inst_n4_valid = !slow_active && !slow_select && !pmp_n4_fetch_fault
       && n4_same_line_as_next4
-      && (!mmu_en || lookahead_n4_addr[XLEN-1:12] == pc_ifu[XLEN-1:12])
+      && (!mmu_en || !lookahead_n4_page[12])
       && hit_n4 && sram_n4_ready;
 `endif
 `endif

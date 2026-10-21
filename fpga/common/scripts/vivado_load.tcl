@@ -17,31 +17,43 @@ if {![file exists $bitstream]} {
 
 open_hw_manager
 connect_hw_server -allow_non_jtag
-open_hw_target
 
 set matches [list]
 set discovered [list]
-foreach candidate [get_hw_devices] {
-    refresh_hw_device -update_hw_probes false $candidate
-    set candidate_part [string tolower [get_property PART $candidate]]
-    lappend discovered "$candidate:$candidate_part"
-    if {$candidate_part eq $expected_part} {
-        lappend matches $candidate
+foreach target [get_hw_targets *] {
+    open_hw_target $target
+    foreach candidate [get_hw_devices] {
+        refresh_hw_device -update_hw_probes false $candidate
+        set candidate_part [string tolower [get_property PART $candidate]]
+        lappend discovered "$target/$candidate:$candidate_part"
+        if {$candidate_part eq $expected_part} {
+            lappend matches [list $target $candidate]
+        }
     }
+    close_hw_target
 }
 
 if {[llength $matches] != 1} {
     puts "ERROR: expected exactly one JTAG device with part '$expected_part', found [llength $matches]."
     puts "ERROR: discovered devices: [join $discovered {, }]"
     puts "ERROR: refusing to program; select the matching FPGA_BOARD or reconnect the target."
-    close_hw_target
     disconnect_hw_server
     close_hw_manager
     exit 1
 }
 
-set dev [lindex $matches 0]
-puts "INFO: programming hw device: $dev (part=$expected_part)"
+lassign [lindex $matches 0] target dev_name
+open_hw_target $target
+set selected [get_hw_devices $dev_name]
+if {[llength $selected] != 1 || [string tolower [get_property PART [lindex $selected 0]]] ne $expected_part} {
+    puts "ERROR: selected JTAG device changed during scan; refusing to program."
+    close_hw_target
+    disconnect_hw_server
+    close_hw_manager
+    exit 1
+}
+set dev [lindex $selected 0]
+puts "INFO: programming hw device: $target/$dev (part=$expected_part)"
 
 current_hw_device $dev
 set_property PROGRAM.FILE $bitstream $dev

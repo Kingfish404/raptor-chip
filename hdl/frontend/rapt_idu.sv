@@ -23,6 +23,8 @@ module rapt_idu #(
   int unsigned next_count, consumed, incoming;
   logic accept[Width];
   logic redirect, prefix;
+  logic redirect_q;
+  logic [XLEN-1:0] redirect_pc_q;
   logic [XLEN-1:0] redirect_pc;
   int redirect_slot, ras_slot;
   rapt_pkg::ras_action_t ras_actions[Width];
@@ -38,6 +40,9 @@ module rapt_idu #(
         .decoded(decoded[s])
     );
   end
+  // A registered correction has no resident slots: the accepting edge clears
+  // count. Hold input through the registered pulse; the count check already
+  // blocks output without adding correction feedback to the decode prefix.
   // Resolve only accepted instructions. The redirect is generated from this
   // registered stage, so flushing FQU cannot form a valid->redirect loop.
   always_comb begin
@@ -97,21 +102,32 @@ module rapt_idu #(
     for (int s = 0; s < Width; s++) begin
       ifu_idu.ready[s] = !reset && !cmu_bcast.flush_pipe
           && !recovery.pending
-          && !redirect && s < Width - 32'(count) + consumed;
+          && !redirect && !redirect_q && s < Width - 32'(count) + consumed;
       if (s == incoming && ifu_idu.valid[s] && ifu_idu.ready[s]) incoming++;
     end
     next_count = 32'(count) - consumed + incoming;
     for (int s = 0; s < Width; s++) begin
       next_slots[s] = '0;
-      if (s < 32'(count) - consumed) next_slots[s] = slots[s+consumed];
-      for (int i = 0; i < Width; i++)
-      if (i < incoming && s == 32'(count) - consumed + i) next_slots[s] = ifu_idu.slot[i];
+      // Resident and incoming ranges do not overlap. Express the selection
+      // as parallel masked data instead of a wide priority mux.
+      for (int i = 0; i < Width; i++) begin
+        next_slots[s] |= (i >= s && s + consumed == i && i < 32'(count)) ? slots[i] : '0;
+        next_slots[s] |= (i <= s && i < incoming && s == 32'(count) - consumed + i)
+            ? ifu_idu.slot[i] : '0;
+      end
     end
     if (redirect) next_count = 0;
   end
-  assign ifu_idu.resteer = redirect;
-  assign idu_bpu.history_recover = redirect;
-  assign ifu_idu.resteer_pc = redirect_pc;
+  // The accepted correction clears local younger slots immediately. The
+  // registered pulse then clears both upstream queues before refill can resume.
+  assign ifu_idu.resteer = redirect_q;
+  assign idu_bpu.history_recover = redirect_q;
+  assign ifu_idu.resteer_pc = redirect_pc_q;
+  always_ff @(posedge clock) begin
+    redirect_q <= redirect;
+    if (redirect) redirect_pc_q <= redirect_pc;
+    if (reset || cmu_bcast.flush_pipe || recovery.pending) redirect_q <= 1'b0;
+  end
   assign idu_bpu.train_en = redirect && (decoded[redirect_slot].uop.execute.branch.conditional
       || (decoded[redirect_slot].uop.execute.branch.jump
           && !decoded[redirect_slot].uop.execute.branch.indirect)
@@ -137,6 +153,7 @@ module rapt_idu #(
   if ((Width & (Width + 1)) != 0) begin : g_count_range
     `RAPT_SVA(clock, reset, IDU_RESIDENT_COUNT_BOUND, 32'(count) <= Width)
   end
+  `RAPT_SVA_IMPLY(clock, reset, IDU_CORRECTION_EMPTY, redirect_q, count == 0)
   `RAPT_SVA(clock, reset, IDU_COUNT_BOUNDS, consumed <= 32'(count) && next_count <= Width)
   `RAPT_SVA_IMPLY(
       clock, reset, IDU_RECOVERY_NO_ACCEPT_OR_OUTPUT, recovery.pending,

@@ -1,7 +1,7 @@
 // Actual ROU/FEU composition: renamed operands, out-of-order completion,
 // architectural prefix commit, flags and recovery. Integer completion is driven
 // by the fixture to hold a precise retirement frontier for the checks below.
-integer fp_ooo_pc = 'h80002000;
+int unsigned fp_ooo_pc = 'h80002000;
 integer fp_ooo_multi_commit = 0;
 logic [4:0] fp_ooo_flags = 0;
 always @(posedge clock) if (!reset) begin
@@ -60,6 +60,8 @@ task automatic run_fp_ooo;
       && dut_rou.fp_registers.architectural[2] == 64'h4008000000000000,
       "FP OOO architectural seeds were not retired");
   dispatch_one(make_alu_uop('h80002100, 32'h00100093, 1), PLEN'(33), '0, RobW'(2));
+  // The FP uops follow the ALU in ROB order, so their PCs must follow it too.
+  fp_ooo_pc = 'h80002104;
   fp_ooo_enqueue(fp_ooo_uop(`RAPT_FP_OP_FDIV_D, 0, 1, 2), 3);
   fp_ooo_enqueue(fp_ooo_uop(`RAPT_FP_OP_FADD_D, 3, 2, 2), 4);
   fp_ooo_enqueue(fp_ooo_uop(`RAPT_FP_OP_FMADD_D, 4, 2, 2, 0), 5);
@@ -89,6 +91,7 @@ task automatic run_fp_ooo;
   reset_dut();
   fp_ooo_flags = 0;
   dispatch_one(make_branch_uop('h80003000, 32'h00000863), '0, '0, RobW'(0));
+  fp_ooo_pc = 'h80003004;
   fp_ooo_enqueue(fp_ooo_uop(`RAPT_FP_OP_FDIV_D, 2, 0, 0), 1);
   fp_ooo_enqueue(fp_ooo_uop(`RAPT_FP_OP_FCVT_D_W, 3), 2, 17);
   tick(100);

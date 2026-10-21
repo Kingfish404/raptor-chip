@@ -24,7 +24,11 @@ INC_PATH += $(SOFTFLOAT_ROOT)/softfloat
 GENERATED_HEADERS += $(SOFTFLOAT_HEADER)
 ARCHIVES += $(SOFTFLOAT_ARCHIVE)
 
-$(SOFTFLOAT_HEADER):
+# Prepare transitive headers before compiling NEMU, including when a previous
+# build left softfloat.h in an incompletely initialized Spike checkout.
+.PHONY: prepare-softfloat
+$(SOFTFLOAT_HEADER): | prepare-softfloat
+prepare-softfloat:
 	$(MAKE) -C $(NEMU_HOME)/tools/spike-diff repo/softfloat/softfloat.h
 
 $(SOFTFLOAT_ARCHIVE): $(SOFTFLOAT_HEADER)

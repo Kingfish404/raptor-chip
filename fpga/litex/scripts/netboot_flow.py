@@ -23,6 +23,10 @@ import time
 import netboot
 
 LITEX = Path(__file__).resolve().parents[1]
+BOARD_ARTIFACTS = {
+    'mlk_cu08_ku15p': ('mlk_cu08_ku15p.bit', 'mlk_cu08_ku15p_timing.rpt', 'xcku15p'),
+    'rk_xcku5p_f': ('rk_xcku5p_f.bit', 'rk_xcku5p_f_timing.rpt', 'xcku5p'),
+}
 
 
 def require(ok, message):
@@ -84,6 +88,8 @@ def source_identity(make_args):
     roots = (repo / 'hdl', repo / 'sim/rtl', repo / 'sim/include',
              LITEX / 'mk', LITEX / 'cores', LITEX / 'scripts')
     paths = {LITEX / 'Makefile', *LITEX.glob('*.py'), *LITEX.glob('*.tcl')}
+    if 'FPGA_BOARD=rk_xcku5p_f' in make_args:
+        paths.add(repo / 'fpga/rk-xcku5p-f/constraints/ddr4.xdc')
     for root in roots:
         paths.update(p for p in root.rglob('*') if p.suffix in ('.sv', '.svh', '.v', '.vh', '.py', '.mk', '.tcl', '.h', '.S'))
     # Fixing UART/TFTP orchestration does not alter the compiled bitstream.
@@ -338,6 +344,14 @@ class DropTrace:
 
 
 class Flow:
+    @property
+    def board(self):
+        return getattr(getattr(self, 'args', None), 'board', 'mlk_cu08_ku15p')
+
+    @property
+    def artifacts(self):
+        return BOARD_ARTIFACTS[self.board]
+
     def __init__(self, args):
         self.args = args
         self.root = args.root.resolve()
@@ -362,6 +376,8 @@ class Flow:
         elif args.action != 'test' and not args.action.startswith('host-') and not published_load:
             self.context = json.loads(self.make('netboot-flow-context', capture=True).stdout)
             require(int(self.context['xlen']) == args.xlen, 'Profile XLEN mismatch')
+            require(self.context.get('board', 'mlk_cu08_ku15p') == self.board,
+                    'Profile FPGA board mismatch')
         for address in (args.server_ip, args.host_ip):
             ip = ipaddress.IPv4Address(address)
             require(not (ip.is_unspecified or ip.is_multicast or ip.is_loopback), 'Invalid board-facing address')
@@ -377,7 +393,7 @@ class Flow:
             self.verify_reference()
             return
         self.idle_output()
-        report = Path(self.context['soc']) / 'gateware/mlk_cu08_ku15p_timing.rpt'
+        report = Path(self.context['soc']) / 'gateware' / self.artifacts[1]
         require(report.is_file(),
                 'No final timing report; build this exact profile successfully before loading')
         validate_timing_coverage(report.read_text())
@@ -397,20 +413,21 @@ class Flow:
     def bit_hash(self):
         if hasattr(self, 'reference'):
             self.verify_reference()
-            return self.reference['bitstream_manifest']['files']['mlk_cu08_ku15p.bit']
-        return netboot.digest((Path(self.context['soc']) / 'gateware/mlk_cu08_ku15p.bit').read_bytes())
+            return self.reference['bitstream_manifest']['files'][self.artifacts[0]]
+        return netboot.digest((Path(self.context['soc']) / 'gateware' / self.artifacts[0]).read_bytes())
 
     def verify_reference(self):
         """Explicit software-only update against a previously accepted hardware snapshot."""
         record = self.reference['bitstream_manifest']
         generation = netboot.digest(json.dumps(record, sort_keys=True).encode())
         require(record['xlen'] == self.args.xlen, 'Hardware reference XLEN mismatch')
+        require(record.get('board', 'mlk_cu08_ku15p') == self.board, 'Hardware reference board mismatch')
         directory = self.work / 'bitstreams' / generation
         require(json.loads((directory / 'manifest.json').read_text()) == record, 'Hardware manifest changed')
-        for name in ('mlk_cu08_ku15p.bit', 'mlk_cu08_ku15p_timing.rpt'):
+        for name in self.artifacts[:2]:
             require(netboot.digest((directory / name).read_bytes()) == record['files'][name],
                     'Published hardware artifact changed: ' + name)
-        report = (directory / 'mlk_cu08_ku15p_timing.rpt').read_text()
+        report = (directory / self.artifacts[1]).read_text()
         validate_timing_coverage(report)
         require('Timing constraints are not met' not in report and
                 re.search(r'(?:All user specified )?Timing constraints are met', report, re.I), 'Timing failed')
@@ -423,7 +440,7 @@ class Flow:
         """Publish a private, verified generation; never overwrite a loaded file."""
         archive = self.work / 'bitstreams'
         archive.mkdir(parents=True, exist_ok=True)
-        names = ('mlk_cu08_ku15p.bit', 'mlk_cu08_ku15p_timing.rpt')
+        names = self.artifacts[:2]
         live = Path(self.context['soc']) / 'gateware'
         with lock(self.work / 'publish.lock', wait=True):
             with tempfile.TemporaryDirectory(prefix='.publish-', dir=archive) as temporary:
@@ -441,7 +458,7 @@ class Flow:
                         'Cannot publish bitstream without passing final timing')
                 require(all(netboot.digest((live / n).read_bytes()) == hashes[n] for n in names),
                         'Build outputs changed while archiving; previous published bitstream retained')
-                record = {'source': source, 'xlen': self.args.xlen,
+                record = {'source': source, 'xlen': self.args.xlen, 'board': self.board,
                           'context': self.context, 'files': hashes}
                 generation = netboot.digest(json.dumps(record, sort_keys=True).encode())
                 save(staging / 'manifest.json', record)
@@ -462,7 +479,7 @@ class Flow:
         if (self.work / 'ready.json').exists():
             return
         live = Path(self.context['soc'])
-        if not (live / 'gateware/mlk_cu08_ku15p.bit').is_file():
+        if not (live / 'gateware' / self.artifacts[0]).is_file():
             return
         self.idle_output()
         receipt = self.work / 'build.json'
@@ -479,7 +496,7 @@ class Flow:
                 print('[WARN] Leftover bitstream has no completed build stamp; not archiving it',
                       file=sys.stderr)
                 return
-            report = live / 'gateware/mlk_cu08_ku15p_timing.rpt'
+            report = live / 'gateware' / self.artifacts[1]
             if not (report.is_file() and final_timing_passed(report.read_text())):
                 print('[WARN] Leftover bitstream did not pass final timing; not archiving it',
                       file=sys.stderr)
@@ -507,7 +524,8 @@ class Flow:
         require(netboot.digest(json.dumps(record, sort_keys=True).encode()) == generation,
                 'Published manifest changed')
         require(record['xlen'] == self.args.xlen, 'Published bitstream XLEN mismatch')
-        names = {'mlk_cu08_ku15p.bit', 'mlk_cu08_ku15p_timing.rpt'}
+        require(record.get('board', 'mlk_cu08_ku15p') == self.board, 'Published bitstream board mismatch')
+        names = set(self.artifacts[:2])
         require(set(record['files']) == names, 'Incomplete published bitstream manifest')
         for name, digest in record['files'].items():
             require(netboot.digest((directory / name).read_bytes()) == digest,
@@ -516,7 +534,7 @@ class Flow:
         print(f'Loading published RV{record["xlen"]} bitstream: {directory} (source {record["source"]})', flush=True)
         execute([vivado(tool), '-mode', 'batch', '-nojournal', '-nolog',
                  '-source', LITEX / 'scripts/vivado_load.tcl', '-tclargs',
-                 directory / 'mlk_cu08_ku15p.bit', 'xcku15p'])
+                 directory / self.artifacts[0], self.artifacts[2]])
 
     def idle_output(self):
         expected = ('--output-dir=' + self.context['soc']).encode()
@@ -547,7 +565,8 @@ class Flow:
 
     def serial_device(self):
         candidates = [str(p) for p in Path('/dev/serial/by-id').glob('*')
-                      if 'MiLianKe' in p.name and 'if01' in p.name]
+                      if ('MiLianKe' in p.name if self.board == 'mlk_cu08_ku15p'
+                          else 'FTDI' in p.name or 'FT2232' in p.name) and 'if01' in p.name]
         device = choose(candidates, self.args.uart, 'NETBOOT_UART')
         require(Path(device).exists(), f'UART missing: {device}')
         return str(Path(device).resolve())
@@ -894,6 +913,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('info', 'reports', 'check', 'build', 'bundle', 'load', 'serve', 'test', 'console', 'host-setup', 'host-restore'))
     parser.add_argument('--xlen', type=int, choices=(32, 64), required=True)
+    parser.add_argument('--board', choices=tuple(BOARD_ARTIFACTS), default='mlk_cu08_ku15p')
     parser.add_argument('--root', type=Path, required=True)
     parser.add_argument('--state-root', type=Path, default=LITEX / 'build/netboot-default')
     parser.add_argument('--interface', default='')

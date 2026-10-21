@@ -31,7 +31,8 @@ module rapt_bpu #(
     // contexts that share GHR but reach the branch via different call paths.
     parameter int PHR_LEN = 8,
     parameter int RSB_SIZE = `RAPT_RSB_SIZE,
-    parameter int XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN,
+    parameter bit SharedDecodeTarget = 1'b0
 ) (
     input clock,
 
@@ -41,6 +42,7 @@ module rapt_bpu #(
     idu_bpu_if.in idu_bpu,
     input logic execute_recover = 1'b0,
     input logic preserve_fetch = 1'b0,
+    input logic [XLEN-1:1] decode_target_q = '0,
     input logic [GHR_LEN-1:0] execute_ghr = '0,
     input logic [PHR_LEN-1:0] execute_phr = '0,
     output logic [GHR_LEN-1:0] snapshot_ghr,
@@ -75,7 +77,7 @@ module rapt_bpu #(
   logic [BTB_TAG_LEN-1:0] rbtb_tag;
   logic btb_tag_match;
   logic taken;
-  logic dirp_aux_taken;
+  logic dirp_aux_taken, dirp_request_aux_taken;
   logic rbtaken;
 
 `ifdef RAPT_FETCH_LOOKAHEAD
@@ -83,6 +85,7 @@ module rapt_bpu #(
   // read port (its position is known only after the L1I response arrives).
   // Its target remains a static branch immediate in IFU.
   assign ifu_bpu.aux_index = '0;
+  assign ifu_bpu.request_aux_taken = dirp_request_aux_taken;
   assign ifu_bpu.aux_taken = ifu_bpu.aux_query && dirp_aux_taken;
 `endif
 
@@ -164,12 +167,14 @@ module rapt_bpu #(
 `ifdef RAPT_FETCH_LOOKAHEAD
       .aux_pc(ifu_bpu.aux_pc),
       .aux_position(ifu_bpu.aux_position),
+      .request_aux_position(ifu_bpu.request_aux_position),
 `else
       .aux_pc('0),
 `endif
       .aux_ghr(gshare),
       .aux_phr(phr),
       .aux_taken(dirp_aux_taken),
+      .request_aux_taken(dirp_request_aux_taken),
 `endif
       .clock         (clock),
       .reset         (reset),
@@ -189,6 +194,7 @@ module rapt_bpu #(
 
 `ifndef RAPT_BPU_DIRP_TAGE
   assign dirp_aux_taken = 1'b0;
+  assign dirp_request_aux_taken = 1'b0;
 `endif
 
   // BTB (synchronous read, separate entry/type writes)
@@ -219,9 +225,26 @@ module rapt_bpu #(
   logic                   idu_wen;
   logic [    BTB_LEN-1:0] idu_waddr;
   logic [BTB_TAG_LEN-1:0] idu_wd_tag;
-  assign idu_wen    = idu_bpu.train_en;
-  assign idu_waddr  = idu_bpu.train_pc[BTB_LEN-1+1:1] ^ idu_bpu.train_pc[2*BTB_LEN-1+1:BTB_LEN+1];
-  assign idu_wd_tag = idu_bpu.train_pc[BTB_LEN+1+BTB_TAG_LEN-1:BTB_LEN+1];
+  logic idu_wen_q;
+  logic [XLEN-1:1] idu_target_q;
+  logic [1:0] idu_type_q;
+  // Decode training follows its registered redirect. Store only the BTB key,
+  // not another full PC, and let an older recovery cancel the pending write.
+  assign idu_wen = idu_wen_q && !cmu_bcast.flush_pipe && !execute_recover;
+  always_ff @(posedge clock) begin
+    idu_wen_q <= idu_bpu.train_en && !reset;
+    idu_waddr <= idu_bpu.train_pc[BTB_LEN:1] ^ idu_bpu.train_pc[2*BTB_LEN:BTB_LEN+1];
+    idu_wd_tag <= idu_bpu.train_pc[BTB_LEN+BTB_TAG_LEN:BTB_LEN+1];
+    idu_type_q <= idu_bpu.train_type;
+  end
+
+  // The composed frontend already stores this target in IDU's redirect
+  // register on the training edge. Standalone users retain the local copy.
+  if (SharedDecodeTarget) begin : g_shared_decode_target
+    assign idu_target_q = decode_target_q;
+  end else begin : g_local_decode_target
+    always_ff @(posedge clock) idu_target_q <= idu_bpu.train_target[XLEN-1:1];
+  end
 
   // Final mux: priority = commit-flush entry write > IDU train > commit
   // type-only refresh. Rationale:
@@ -243,9 +266,9 @@ module rapt_bpu #(
   assign wen_type_mux  = cmu_wen_type || idu_grant;
   // idu_grant already excludes a commit entry write.
   assign waddr_mux     = idu_grant ? idu_waddr : cmu_waddr;
-  assign wd_target_mux = cmu_wen_entry ? cmu_wd_full : idu_bpu.train_target[XLEN-1:1];
+  assign wd_target_mux = cmu_wen_entry ? cmu_wd_full : idu_target_q;
   assign wd_tag_mux    = idu_grant ? idu_wd_tag : cmu_wd_tag;
-  assign wd_type_mux   = idu_grant ? idu_bpu.train_type : cmu_wd_type;
+  assign wd_type_mux   = idu_grant ? idu_type_q : cmu_wd_type;
 
   rapt_bpu_btb #(
       .DEPTH(BTB_SIZE / BTB_WAYS),

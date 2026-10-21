@@ -22,12 +22,14 @@ module tb_bus_pbmt;
   l1d_bus_if #(.XLEN(XLEN)) l1d_bus ();
   csr_bcast_if #(.XLEN(XLEN)) csr_bcast ();
   cmu_bcast_if #(.XLEN(XLEN)) cmu_bcast ();
+  logic rd_req_cacheable;
 
   rapt_bus #(
       .XLEN(XLEN)
   ) dut (
       .clock(clock),
       .mem(mem),
+      .rd_req_cacheable(rd_req_cacheable),
       .l1i_bus(l1i_bus),
       .l1d_bus(l1d_bus),
       .csr_bcast(csr_bcast),
@@ -37,11 +39,13 @@ module tb_bus_pbmt;
 
   rapt_axi_master #(
       .XLEN(XLEN),
-      .ID_W(IdW)
+      .ID_W(IdW),
+      .USE_CARRIED_READ_CACHEABLE(1'b1)
   ) adapter (
       .clock(clock),
       .reset(reset),
       .mem(mem),
+      .rd_req_cacheable(rd_req_cacheable),
       .axi(axi)
   );
 
@@ -50,21 +54,22 @@ module tb_bus_pbmt;
   `include "tb_common.svh"
   `include "tb_bus_defaults.svh"
   task automatic read_case(input bit instruction, input bit ptw, input int attr,
-                           input bit noallocate = 0);
+                           input bit noallocate = 0, input logic [XLEN-1:0] address = 'h80000000);
     logic [3:0] expected, owner;
-    expected = (ptw || attr == 0 ? 4'hf : attr == 1 ? 4'h2 : 4'h0)
+    expected = (ptw || attr == 0 ? (rapt_pkg::addr_cacheable(address) ? 4'hf : 4'h0)
+        : attr == 1 ? 4'h2 : 4'h0)
         & (ptw || noallocate ? 4'h3 : 4'hf);
     l1i_bus.noallocate=noallocate;
     l1d_bus.noallocate=noallocate;
     owner = instruction ? (ptw ? 3 : 1) : (ptw ? 4 : 2);
     axi.arready = 0;
     if (instruction) begin
-      l1i_bus.araddr = 'h80000000;
+      l1i_bus.araddr = address;
       l1i_bus.rpbmt = 2'(attr);
       l1i_bus.ar_ptw = ptw;
       l1i_bus.arvalid = 1;
     end else begin
-      l1d_bus.araddr = 'h80000000;
+      l1d_bus.araddr = address;
       l1d_bus.rpbmt = 2'(attr);
       l1d_bus.ar_ptw = ptw;
       l1d_bus.arvalid = 1;
@@ -80,7 +85,7 @@ module tb_bus_pbmt;
     l1d_bus.rpbmt = 3;
     tick(2);
     repeat (5) begin
-      check(axi.arvalid && axi.arcache == expected && axi.arid == owner && axi.araddr == 'h80000000,
+      check(axi.arvalid && axi.arcache == expected && axi.arid == owner && axi.araddr == address,
             "read skid lost attribute or owner");
       tick(1);
     end
@@ -207,6 +212,7 @@ module tb_bus_pbmt;
     end
     read_case(0, 1, 2);
     read_case(1, 1, 2);
+    read_case(0, 0, 0, 0, 'h10000000);
     $display("PASS: bus/AXI PBMT ownership, skid holding, AW/W backpressure and PTW PMA override");
     $finish;
   end

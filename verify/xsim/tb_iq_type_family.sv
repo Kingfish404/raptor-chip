@@ -44,7 +44,18 @@ module tb_iq_type_family;
   dpu_iq_if #(.RS_SIZE(4)) disp ();
   logic [2:0] occupancy;
   int issued_count = 0;
-  // Compare the complete output against the indexed registered-payload read,
+  wide_uop_t expected_uop[4];
+  generation_t expected_generation[4];
+  physical_t expected_prd[4];
+  always @(posedge clock)
+    if (!reset && !cmu_bcast.flush_pipe)
+      for (int s = 0; s < DispatchWidth; s++)
+        if (disp.accept[s]) begin
+          expected_uop[disp.rs_idx[s]] <= dispatch[s].uop;
+          expected_generation[disp.rs_idx[s]] <= dispatch[s].generation;
+          expected_prd[disp.rs_idx[s]] <= dispatch[s].prd;
+        end
+  // Compare the complete output against independently captured dispatch data,
   // including invalid outputs. Fast confirmation is captured at the edge.
   always @(negedge clock) begin
     #2;
@@ -53,12 +64,12 @@ module tb_iq_type_family;
       automatic wide_issue_t legacy = '0;
       for (int e = 0; e < 4; e++) if (dut.selected[p][e]) idx |= e;
       legacy.valid=|dut.selected[p];
-      legacy.uop=dut.iq_uop[idx];
+      legacy.uop=expected_uop[idx];
       legacy.op1=dut.iq_vj[idx];
       legacy.op2=dut.iq_vk[idx];
       legacy.dest=dut.iq_dest[idx];
-      legacy.generation=dut.iq_generation[idx];
-      legacy.prd=dut.iq_prd[idx];
+      legacy.generation=expected_generation[idx];
+      legacy.prd=expected_prd[idx];
       assert (issue[p] === legacy)
       else $fatal(1, "stored onehot/indexed output mismatch");
     end

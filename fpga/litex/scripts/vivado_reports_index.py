@@ -34,8 +34,16 @@ class Report:
 
 
 REPORT_KINDS: tuple[ReportKind, ...] = (
+    ReportKind("Timing Summary (native routed)", "Timing", "Native post-route timing summary", ("timing_summary.rpt",)),
+    ReportKind("Timing Summary (native synth)", "Timing", "Native post-synthesis timing summary", ("synth_timing.rpt",)),
+    ReportKind("Peripheral Timing", "Timing", "Native peripheral-only synthesis timing", ("peripheral_timing.rpt",)),
     ReportKind("Timing Summary", "Timing", "Post-route setup, hold, and pulse-width summary", ("*_timing.rpt",)),
     ReportKind("Timing Summary (synth)", "Timing", "Post-synthesis timing summary", ("*_timing_synth.rpt",)),
+    ReportKind("Utilization (native routed)", "Utilization", "Native post-route resource utilization", ("utilization_summary.rpt",)),
+    ReportKind("Utilization (native synth)", "Utilization", "Native post-synthesis resource utilization", ("synth_utilization_summary.rpt",)),
+    ReportKind("Utilization Hierarchy (native routed)", "Utilization", "Native post-route resource hierarchy", ("utilization.rpt",)),
+    ReportKind("Utilization Hierarchy (native synth)", "Utilization", "Native post-synthesis resource hierarchy", ("synth_utilization.rpt",)),
+    ReportKind("Peripheral Utilization", "Utilization", "Native peripheral-only synthesis resources", ("peripheral_utilization.rpt",)),
     ReportKind("Utilization (place)", "Utilization", "Post-place resource utilization", ("*_utilization_place.rpt",)),
     ReportKind("Utilization Hierarchy (place)", "Utilization", "Post-place hierarchical utilization", ("*_utilization_hierarchical_place.rpt",)),
     ReportKind("Utilization (synth)", "Utilization", "Post-synthesis resource utilization", ("*_utilization_synth.rpt",)),
@@ -127,6 +135,27 @@ def find_report(reports: list[Report], suffix: str) -> Report | None:
     return None
 
 
+def find_named(reports: list[Report], name: str) -> Report | None:
+    return next((report for report in reports if report.path.name == name), None)
+
+
+def main_reports(reports: list[Report]) -> dict[str, Report | None]:
+    """Select whole-board reports without mistaking peripheral OOC for routed timing."""
+    litex_routed = next((report for report in reports
+                         if report.path.name.endswith("_timing.rpt") and
+                         report.path.name not in ("synth_timing.rpt", "peripheral_timing.rpt")), None)
+    return {
+        "routed_timing": find_named(reports, "timing_summary.rpt") or litex_routed,
+        "synth_timing": find_named(reports, "synth_timing.rpt") or find_report(reports, "_timing_synth.rpt"),
+        "routed_util": (find_named(reports, "utilization_summary.rpt") or
+                        find_report(reports, "_utilization_place.rpt") or
+                        find_named(reports, "utilization.rpt")),
+        "synth_util": (find_named(reports, "synth_utilization_summary.rpt") or
+                       find_report(reports, "_utilization_synth.rpt") or
+                       find_named(reports, "synth_utilization.rpt")),
+    }
+
+
 def parse_timing(report_text: str) -> dict[str, str]:
     lines = report_text.splitlines()
     for index, line in enumerate(lines):
@@ -148,7 +177,7 @@ def parse_table_row(report_text: str, label: str) -> list[str] | None:
         if "|" not in line:
             continue
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
-        if cells and cells[0] == label:
+        if cells and cells[0].rstrip("*").strip() == label:
             return cells
     return None
 
@@ -166,6 +195,46 @@ def parse_utilization(report_text: str) -> dict[str, dict[str, str]]:
         if cells and len(cells) >= 5:
             utilization[label] = {"used": cells[1], "available": cells[-2], "util": cells[-1]}
     return utilization
+
+
+def parse_hierarchy_utilization(report_text: str) -> dict[str, dict[str, str]]:
+    """Older native reports have only a hierarchy table and no device capacity."""
+    lines = report_text.splitlines()
+    for index, line in enumerate(lines):
+        if not line.startswith("|") or "Instance" not in line or "Total LUTs" not in line:
+            continue
+        headings = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        for data_line in lines[index + 1 : index + 5]:
+            if not data_line.startswith("|") or "(top)" not in data_line:
+                continue
+            values = [cell.strip() for cell in data_line.strip().strip("|").split("|")]
+            if len(headings) != len(values):
+                continue
+            row = dict(zip(headings, values))
+            if row.get("Module") != "(top)":
+                continue
+            mapping = {"CLB LUTs": "Total LUTs", "CLB Registers": "FFs",
+                       "URAM": "URAM", "DSPs": "DSP Blocks"}
+            result = {label: {"used": row[column], "available": "—", "util": "—"}
+                      for label, column in mapping.items() if column in row}
+            try:
+                memory_luts = int(row["LUTRAMs"].replace(",", "")) + int(row["SRLs"].replace(",", ""))
+                result["LUT as Memory"] = {"used": str(memory_luts), "available": "—", "util": "—"}
+            except (KeyError, ValueError):
+                pass
+            try:
+                ram_tiles = int(row["RAMB36"].replace(",", "")) + int(row["RAMB18"].replace(",", "")) / 2
+                result["Block RAM Tile"] = {"used": f"{ram_tiles:g}", "available": "—", "util": "—"}
+            except (KeyError, ValueError):
+                pass
+            return result
+    return {}
+
+
+def resource_values(report: Report | None) -> dict[str, dict[str, str]]:
+    if report is None:
+        return {}
+    return parse_utilization(report.text) or parse_hierarchy_utilization(report.text)
 
 
 def parse_power(report_text: str) -> dict[str, str]:
@@ -222,6 +291,10 @@ def as_int(value: str | None) -> int | None:
         return None
 
 
+def utilization_text(value: str) -> str:
+    return value + "%" if re.fullmatch(r"<?[\d,.]+", value) else value
+
+
 def status_class(is_bad: bool) -> str:
     return "bad" if is_bad else "good"
 
@@ -236,18 +309,20 @@ def make_card(label: str, value: str, detail: str, level: str = "good") -> str:
 
 
 def render_overview(reports: list[Report], gateware_dir: Path) -> str:
-    routed_timing = find_report(reports, "_timing.rpt")
-    timing_report = routed_timing or find_report(reports, "_timing_synth.rpt")
-    utilization_report = (find_report(reports, "_utilization_place.rpt")
-                          or find_report(reports, "_utilization_synth.rpt"))
+    selected = main_reports(reports)
+    routed_timing = selected["routed_timing"]
+    timing_report = routed_timing or selected["synth_timing"]
+    utilization_report = selected["routed_util"] or selected["synth_util"]
     power_report = find_report(reports, "_power.rpt")
-    drc_report = find_report(reports, "_drc.rpt")
-    route_report = find_report(reports, "_route_status.rpt")
+    drc_report = find_named(reports, "drc.rpt") or find_report(reports, "_drc.rpt")
+    route_report = find_named(reports, "route_status.rpt") or find_report(reports, "_route_status.rpt")
     control_report = find_report(reports, "_control_sets.rpt")
 
     header = parse_header(timing_report.text if timing_report else reports[0].text if reports else "")
+    if utilization_report:
+        header["Device"] = parse_header(utilization_report.text).get("Device", header.get("Device", ""))
     timing = parse_timing(timing_report.text) if timing_report else {}
-    utilization = parse_utilization(utilization_report.text) if utilization_report else {}
+    utilization = resource_values(utilization_report)
     power = parse_power(power_report.text) if power_report else {}
     drc_checks = parse_drc(drc_report.text) if drc_report else None
     route_errors = parse_route_errors(route_report.text) if route_report else None
@@ -265,7 +340,7 @@ def render_overview(reports: list[Report], gateware_dir: Path) -> str:
     if route_errors is not None:
         cards.append(make_card("Route Errors", route_errors, "nets with routing errors", status_class((as_int(route_errors) or 0) > 0)))
     if drc_checks is not None:
-        cards.append(make_card("DRC Checks", drc_checks, "checks found", status_class((as_int(drc_checks) or 0) > 0)))
+        cards.append(make_card("DRC Findings", drc_checks, "inspect report severities", "neutral"))
     if power:
         cards.append(make_card("Power", f"{power.get('total', '?')} W", f"confidence {power.get('confidence', '?')}", "neutral"))
     if control_sets is not None:
@@ -283,10 +358,11 @@ def render_overview(reports: list[Report], gateware_dir: Path) -> str:
                 meter = (f'<meter min="0" max="100" low="60" high="85" optimum="0" '
                          f'value="{percent:.4f}" aria-label="{html.escape(label)} utilization">'
                          f'{html.escape(item["util"])}%</meter>')
+            util_text = html.escape(utilization_text(item["util"]))
             resource_rows.append(
                 "<tr>"
                 f"<td>{html.escape(label)}</td><td>{html.escape(item['used'])}</td>"
-                f"<td>{html.escape(item['available'])}</td><td>{html.escape(item['util'])}%{meter}</td>"
+                f"<td>{html.escape(item['available'])}</td><td>{util_text}{meter}</td>"
                 "</tr>"
             )
 
@@ -295,9 +371,13 @@ def render_overview(reports: list[Report], gateware_dir: Path) -> str:
         for label, report in (("Resources", utilization_report), ("Timing", timing_report))
         if report is not None
     )
+    native_unvalidated = (gateware_dir / "manifest.json").exists() and not (gateware_dir / "result.json").exists()
     incomplete = ("" if routed_timing else
                   '<p class="notice">No post-route timing report is available. '
                   'These partial results do not establish a completed build or timing closure.</p>')
+    if native_unvalidated:
+        incomplete += ('<p class="notice">No validated native result stamp is present. '
+                       'Existing bitstreams and reports do not establish a current loadable build.</p>')
 
     clock_rows = []
     for clock in clocks:
@@ -449,16 +529,101 @@ def render_html(title: str, gateware_dir: Path, reports: list[Report],
 """
 
 
+def render_readme(title: str, gateware_dir: Path, reports: list[Report],
+                  build_failed: bool = False) -> str:
+    selected = main_reports(reports)
+    routed_timing = selected["routed_timing"]
+    timing_report = routed_timing or selected["synth_timing"]
+    header = parse_header(timing_report.text if timing_report else reports[0].text if reports else "")
+    resource_report = selected["routed_util"] or selected["synth_util"]
+    if resource_report:
+        header["Device"] = parse_header(resource_report.text).get("Device", header.get("Device", ""))
+    manifest_path = gateware_dir / "manifest.json"
+    manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else None
+    bitstreams = sorted(path.name for path in gateware_dir.glob("*.bit"))
+    if build_failed:
+        status = "Build failed; reports and bitstream files may belong to an earlier attempt."
+    elif manifest is not None:
+        status = ("Native result stamp present; source identity is checked when loading."
+                  if (gateware_dir / "result.json").exists()
+                  else "No validated native build stamp; files are not confirmed loadable for these sources.")
+    elif (gateware_dir.parent / ".bitstream_stamp").exists() and bitstreams:
+        status = "LiteX bitstream stamp present."
+    else:
+        status = "Partial or unstamped build; no completed bitstream is established."
+
+    def metadata(key: str, value: object) -> str:
+        escaped = str(value).replace("|", "\\|")
+        return f"| {key} | {escaped} |\n"
+
+    text = [f"# {title}\n\n", f"**Status:** {status}\n\n",
+            "Open [the HTML report dashboard](index.html) for all embedded Vivado reports.\n\n",
+            "## Build information\n\n", "| Field | Value |\n| --- | --- |\n"]
+    for key in ("Tool Version", "Date", "Design", "Device", "Design State"):
+        if key in header:
+            text.append(metadata(key, header[key]))
+    if manifest:
+        text.append(metadata("Source revision", manifest.get("revision", "unknown")))
+        for key, value in manifest.get("configuration", {}).items():
+            text.append(metadata(key, value))
+    text.append(metadata("Bitstream files", ", ".join(bitstreams) if bitstreams else "none"))
+
+    implementation_report = selected["routed_util"]
+    implementation_heading = ("Placement resources" if implementation_report and
+                              implementation_report.path.name.endswith("_utilization_place.rpt")
+                              else "Routed resources")
+    for heading, report in (("Synthesis resources", selected["synth_util"]),
+                            (implementation_heading, implementation_report)):
+        if report is None:
+            continue
+        values = resource_values(report)
+        text.extend((f"\n## {heading}\n\n", f"Source: [{report.rel_path}]({quote(report.rel_path)})\n\n"))
+        if values:
+            text.append("| Resource | Used | Available | Utilization |\n| --- | ---: | ---: | ---: |\n")
+            for label in RESOURCE_LABELS:
+                item = values.get(label)
+                if item:
+                    util = utilization_text(item["util"])
+                    text.append(f"| {label} | {item['used']} | {item['available']} | {util} |\n")
+            if all(item["available"] == "—" for item in values.values()):
+                text.append("\nThis older native hierarchy report has no device-capacity columns; "
+                            "its Total LUTs and FFs are shown in the CLB rows.\n")
+        else:
+            text.append("Resource totals could not be parsed from this report.\n")
+
+    text.append("\n## Timing\n\n")
+    if timing_report:
+        stage = "post-route" if routed_timing else "post-synthesis only"
+        text.append(f"Stage: {stage}. Source: [{timing_report.rel_path}]({quote(timing_report.rel_path)})\n\n")
+        timing = parse_timing(timing_report.text)
+        if timing:
+            text.append("| Check | Slack (ns) | Failing endpoints |\n| --- | ---: | ---: |\n")
+            for label, slack, failing in (("Setup", "wns", "setup_failing"),
+                                          ("Hold", "whs", "hold_failing"),
+                                          ("Pulse width", "wpws", "pulse_failing")):
+                text.append(f"| {label} | {timing[slack]} | {timing[failing]} |\n")
+        else:
+            text.append("Timing summary values could not be parsed from this report.\n")
+    else:
+        text.append("No whole-board timing report is available.\n")
+    if not routed_timing:
+        text.append("\nNo post-route timing report is available; timing closure is unverified.\n")
+    return "".join(text)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate a Vivado report HTML dashboard")
     parser.add_argument("gateware_dir", type=Path, help="Vivado gateware build directory containing .rpt files")
     parser.add_argument("--output", type=Path, default=None, help="Output HTML path, defaults to <gateware_dir>/index.html")
+    parser.add_argument("--readme-output", type=Path, default=None,
+                        help="Output Markdown path, defaults to <gateware_dir>/README.md")
     parser.add_argument("--title", default="Vivado Build Reports", help="Dashboard title")
     parser.add_argument("--build-failed", action="store_true", help="Mark reports from a failed build attempt")
     args = parser.parse_args()
 
     gateware_dir = args.gateware_dir.resolve()
     output_path = (args.output or gateware_dir / "index.html").resolve()
+    readme_path = (args.readme_output or gateware_dir / "README.md").resolve()
     if not gateware_dir.is_dir():
         print(f"error: gateware directory not found: {gateware_dir}", file=sys.stderr)
         return 1
@@ -467,7 +632,11 @@ def main() -> int:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(render_html(args.title, gateware_dir, reports, args.build_failed),
                            encoding="utf-8")
+    readme_path.parent.mkdir(parents=True, exist_ok=True)
+    readme_path.write_text(render_readme(args.title, gateware_dir, reports, args.build_failed),
+                           encoding="utf-8")
     print(f"[INFO] Vivado reports index: {output_path}")
+    print(f"[INFO] Vivado resource summary: {readme_path}")
     print(f"[INFO] Embedded reports: {len(reports)}")
     return 0
 

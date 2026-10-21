@@ -1,10 +1,11 @@
 # Native RK-XCKU5P-F V1.2
 
-Standalone Raptor support for `xcku5p-ffvb676-2-i`, using SystemVerilog, XDC and batch
-Vivado. Supports RV32/RV64 with BRAM or DDR4 main memory, a boot ROM, scratch
-SRAM, an 8250-compatible UART, CLINT and PLIC. No LiteX, Migen or LiteX BIOS
-environment is required. The native target provides UART boot; SD, Ethernet,
-PCIe and storage drivers are not included.
+Raptor support for `xcku5p-ffvb676-2-i`, using SystemVerilog, XDC and batch
+Vivado. Supports RV32/RV64 with DDR4 or BRAM main memory, a boot ROM, scratch
+SRAM, an 8250-compatible UART, CLINT and PLIC. The board has a 2 GiB DDR4
+interface and an RTL8211F Ethernet PHY. The native SoC uses UART boot. The
+LiteX profile in this repository adds an RGMII MAC, BIOS TFTP netboot and Linux
+networking through the onboard PHY.
 
 All commands below run from the **repository root**.
 
@@ -24,22 +25,23 @@ library and need no additional Python packages.
 
 ## Build and program
 
-The defaults are RV64, preset `small`, 50 MHz CPU clock and 128 KiB BRAM.
-Start with BRAM to exercise the UART and loader without DDR calibration:
+The board Makefile defaults to RV64, preset `small`, a 50 MHz CPU clock and
+DDR4 main memory. Build and program the default DDR configuration with:
 
 ```sh
-make -C fpga/rk-xcku5p-f build XLEN=64 MEMORY=bram
-make -C fpga/rk-xcku5p-f info XLEN=64 MEMORY=bram
-make -C fpga/rk-xcku5p-f load XLEN=64 MEMORY=bram
+make -C fpga/rk-xcku5p-f fpga-rv64-ip-check
+make -C fpga/rk-xcku5p-f fpga-rv64-build
+make -C fpga/rk-xcku5p-f fpga-rv64-info
+make -C fpga/rk-xcku5p-f fpga-rv64-load
 ```
 
-For DDR, generate and elaborate the vendor IP before the full build:
+The `fpga-rv32-*` targets select RV32 with the same default DDR configuration.
+Use `MEMORY=bram` on each command for an isolated UART/loader bring-up without
+DDR calibration; BRAM defaults to 128 KiB:
 
 ```sh
-make -C fpga/rk-xcku5p-f ip-check XLEN=64 MEMORY=ddr
-make -C fpga/rk-xcku5p-f build XLEN=64 MEMORY=ddr
-make -C fpga/rk-xcku5p-f info XLEN=64 MEMORY=ddr
-make -C fpga/rk-xcku5p-f load XLEN=64 MEMORY=ddr
+make -C fpga/rk-xcku5p-f fpga-rv64-build MEMORY=bram
+make -C fpga/rk-xcku5p-f fpga-rv64-load MEMORY=bram
 ```
 
 Use the same configuration options for `build`, `info` and `load`. `load`
@@ -47,12 +49,74 @@ checks source/configuration freshness, artifact hashes and a passing routed
 build, then requires exactly one matching FPGA on JTAG. Programming is volatile;
 it does not write configuration flash or automatically rebuild stale outputs.
 
-Root shortcuts are also available; select the preset explicitly:
+Root shortcuts are also available; select the preset explicitly because the
+repository root defaults to `RAPT_CONFIG=default`:
 
 ```sh
-make fpga-syn FPGA_BOARD=rk-xcku5p-f XLEN=64 MEMORY=bram RAPT_CONFIG=small
-make fpga-pnr FPGA_BOARD=rk-xcku5p-f XLEN=64 MEMORY=ddr RAPT_CONFIG=small
+make fpga-rv32-build FPGA_BOARD=rk-xcku5p-f RAPT_CONFIG=small
+make fpga-rv64-build FPGA_BOARD=rk-xcku5p-f RAPT_CONFIG=small
+make fpga-rv64-load FPGA_BOARD=rk-xcku5p-f RAPT_CONFIG=small
 ```
+
+The board Makefile also forwards the generic LiteX SoC targets with RK board
+selection fixed, including `fpga-build`, `fpga-load`, and `fpga-console`:
+
+```sh
+make -C fpga/rk-xcku5p-f fpga-build VARIANT=linux64
+make -C fpga/rk-xcku5p-f fpga-load VARIANT=linux64
+make -C fpga/rk-xcku5p-f fpga-console UART_PORT=/dev/ttyUSB2
+```
+
+`fpga-build` follows the LiteX RK Linux profile defaults (50 MHz, `small`, MIG
+DDR4 and onboard Ethernet). The `fpga-rv64-*` targets above build the separate
+native SystemVerilog SoC. The dedicated `fpga-netboot-rv64-*` flow below adds
+matching Linux bundle and TFTP steps.
+
+## Onboard Ethernet netboot
+
+The LiteX board profile uses the RK onboard RGMII PHY and 2 GiB DDR4 MIG at
+50 MHz. Its fixed netboot build selects `RAPT_CONFIG=small` by default, builds a
+BIOS with Ethernet, and packages matching RV32 or RV64 Linux boot files. Run
+from the repository root:
+
+```sh
+make -C fpga/rk-xcku5p-f fpga-netboot-rv64-check
+make -C fpga/rk-xcku5p-f fpga-netboot-rv64-build
+make -C fpga/rk-xcku5p-f fpga-netboot-rv64-info
+make -C fpga/rk-xcku5p-f fpga-netboot-host-setup
+make -C fpga/rk-xcku5p-f fpga-netboot-rv64-serve
+# In another terminal if serve is running in the foreground:
+make -C fpga/rk-xcku5p-f fpga-netboot-rv64-load
+make -C fpga/rk-xcku5p-f fpga-netboot-rv64-console
+# At the litex> prompt, enter the exact netboot .../boot.json command printed by serve.
+make -C fpga/rk-xcku5p-f fpga-netboot-rv64-test
+make -C fpga/rk-xcku5p-f fpga-netboot-host-restore
+```
+
+Use `rv32` in place of `rv64` for RV32. The network host needs a dedicated
+Ethernet interface and an accessible board UART/JTAG connection. Set
+`NETBOOT_INTERFACE` and `NETBOOT_UART` if discovery is ambiguous. `serve` and
+`console` occupy their terminals; exit the console before `test`. See the
+[netboot workflow](../litex/NETBOOT.md) for host setup and result gates. The
+RV64 `small` profile passed Vivado 2025.2 routing at 50 MHz (WNS +0.118 ns,
+WHS +0.005 ns, zero failing setup/hold endpoints) and loaded on the detected
+XCKU5P-F. MIG calibration and a 16 MiB BIOS DDR4 memory test passed. Physical
+netboot is still pending: the RTL8211F reported link down and BIOS ARP failed
+before TFTP, so Linux network operation has not been verified.
+
+Linux 6.18.51 also booted through the UART `serialboot` path on the RV64
+`small` LiteX bitstream. The BIOS reached its interactive `litex>` prompt,
+passed a 16 MiB DDR4 memory test, and accepted the serial image. OpenSBI and
+Linux reached the initramfs `tinysh#` prompt; `uname -a`, `free` and `uptime`
+worked. This check did not use Ethernet. For the same 50 MHz DDR4 plus Ethernet
+SoC, `middle` placed and routed with 171,927/216,960 LUTs and 26,160/27,120
+CLB sites (96.46%). Final WNS was +0.024 ns and WHS was +0.005 ns, so the
+implementation has very little margin. The `middle` bitstream loaded on the
+XCKU5P-F, its interactive BIOS passed a 16 MiB DDR4 test, and a UART serialboot
+of Linux 6.18.51 reached the initramfs `tinysh#` prompt. `uname -a`, `free`
+and `uptime` worked there too. The native `default` RV64 DDR4 synthesis alone
+used 230,862 LUTs, exceeding this part's LUT capacity; `default-w3` and
+`default-w4` are larger still.
 
 ## Configuration and outputs
 
@@ -60,7 +124,7 @@ make fpga-pnr FPGA_BOARD=rk-xcku5p-f XLEN=64 MEMORY=ddr RAPT_CONFIG=small
 |---|---|---|
 | `XLEN` | `64` | `32` or `64` |
 | `RAPT_CONFIG` | `small` | CPU preset from `hdl/configs/` |
-| `MEMORY` | `bram` | `bram` or `ddr` main RAM |
+| `MEMORY` | `ddr` | `ddr` or `bram` main RAM |
 | `CLOCK_MHZ` | `50` | CPU clock target: `25`, `50` or `100` MHz |
 | `RAM_BYTES` | `131072` | BRAM main RAM size; power of two, 16 KiB–1 MiB |
 | `USE_RESET_BUTTON` | `0` | Set to `1` to enable the active-low reset button |
@@ -96,6 +160,12 @@ new `build`; an accepted refresh retains the original implementation manifest.
 | LEDs 0–3 | H9/J9/G11/H11: reset released, DDR ready, heartbeat, writeback error |
 | Fan | G9, active high, continuously enabled |
 | DDR4 data interface | Two x16 devices, 32-bit bus, 2 GiB physical memory; 256-bit MIG AXI interface |
+| Onboard Ethernet (LiteX) | RTL8211F-CG RGMII, 1.8 V I/O, 1000 Mb/s; MDIO on L19/M19 |
+
+The [board schematic](../../third_party/rk-xcku5p-f-v1.2/doc/RK-XCKU5P-F%20V1.2原理图.pdf)
+pulls `TXDLY/RXD1` high and `RXDLY/RXCTL` low. LiteX therefore uses the PHY's
+TX clock delay and a compensated FPGA RX capture clock. The board UDP reference and
+native DDR XDC supply the RGMII and DDR pin assignments, respectively.
 
 Power-on reset is always enabled. DDR-ready is asserted continuously in BRAM
 mode. In DDR mode, the CPU remains in reset until MIG calibration completes.
@@ -235,6 +305,10 @@ DDR simulation uses a delayed AXI RAM model, not a physical DDR model. For a
 focused boot waveform, run `python3 fpga/rk-xcku5p-f/build.py --xlen 64 --memory ddr --trace sim`.
 Review `timing_summary.rpt`, `check_timing.rpt`, `cdc.rpt`, `drc.rpt` and
 `utilization.rpt` for the exact source/configuration in `manifest.json`.
+The output directory also contains `index.html` for browsing all Vivado
+reports and `README.md` with synthesis and implementation resource tables.
+The native `synth` and `build` actions regenerate both summaries, including
+partial reports after a failed Vivado run.
 Peripheral synthesis excludes the CPU and board clock/DDR infrastructure.
 A passing build gate does not establish CDC sign-off, DDR calibration or
 successful software execution on the physical board.

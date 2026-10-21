@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reproducible native FPGA builds, without importing LiteX or Migen."""
+"""Reproducible native FPGA builds."""
 import argparse
 import fcntl
 import hashlib
@@ -31,6 +31,15 @@ def run(command, *, cwd=None, log=None):
             raise subprocess.CalledProcessError(result.returncode, command)
     else:
         subprocess.run(list(map(str, command)), cwd=cwd, check=True)
+
+
+def write_reports(out, failed=False):
+    """Keep an offline HTML dashboard and a short resource summary with each run."""
+    command = [sys.executable, REPO / "fpga/litex/scripts/vivado_reports_index.py", out,
+               "--title", f"Native FPGA reports - {BOARD.name} / {out.name}"]
+    if failed:
+        command.append("--build-failed")
+    run(command)
 
 
 def sha(path):
@@ -405,16 +414,33 @@ def main():
             # Never let a failed new run leave an old loadable result stamp.
             if args.action == "build":
                 (out / "result.json").unlink(missing_ok=True)
-            run([args.vivado, "-mode", "batch", "-source", COMMON / "scripts/native_build.tcl", "-tclargs",
-                 out / "config.tcl", args.action], cwd=out, log=out / (args.action + ".log"))
-            if identity(args)["sha256"] != manifest["sha256"]:
-                raise RuntimeError("Sources changed during Vivado execution; build is not current")
-            if args.action == "build":
-                if (out / "timing.pass").read_text().strip() != "PASS":
-                    raise RuntimeError("Missing routed timing pass")
-                artifacts = {name: sha(out / name) for name in (
-                    PROFILE["bitstream"], "timing.pass", "timing_summary.rpt", "utilization.rpt", "manifest.json"
-                )}
-                (out / "result.json").write_text(json.dumps({"identity": manifest["sha256"],
-                    "timing_pass": True, "artifacts": artifacts}, indent=2) + "\n")
+                (out / "timing.pass").unlink(missing_ok=True)
+                for name in ("utilization.rpt", "utilization_summary.rpt", "timing_summary.rpt",
+                             "check_timing.rpt", "cdc.rpt", "drc.rpt", "route_status.rpt"):
+                    (out / name).unlink(missing_ok=True)
+            if args.action in ("build", "synth"):
+                for name in ("synth_utilization.rpt", "synth_utilization_summary.rpt", "synth_timing.rpt"):
+                    (out / name).unlink(missing_ok=True)
+            try:
+                run([args.vivado, "-mode", "batch", "-source", COMMON / "scripts/native_build.tcl", "-tclargs",
+                     out / "config.tcl", args.action], cwd=out, log=out / (args.action + ".log"))
+                if identity(args)["sha256"] != manifest["sha256"]:
+                    raise RuntimeError("Sources changed during Vivado execution; build is not current")
+                if args.action == "build":
+                    if (out / "timing.pass").read_text().strip() != "PASS":
+                        raise RuntimeError("Missing routed timing pass")
+                    artifacts = {name: sha(out / name) for name in (
+                        PROFILE["bitstream"], "timing.pass", "timing_summary.rpt", "utilization.rpt", "manifest.json"
+                    )}
+                    (out / "result.json").write_text(json.dumps({"identity": manifest["sha256"],
+                        "timing_pass": True, "artifacts": artifacts}, indent=2) + "\n")
+            except Exception:
+                if args.action in ("build", "synth"):
+                    try:
+                        write_reports(out, failed=True)
+                    except Exception as report_error:
+                        print(f"WARN: could not generate partial Vivado reports: {report_error}", file=sys.stderr)
+                raise
+            if args.action in ("build", "synth"):
+                write_reports(out)
         print(f"{args.action}: PASS ({out})")

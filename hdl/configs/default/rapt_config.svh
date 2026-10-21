@@ -142,10 +142,11 @@
 `define RAPT_L1D_MSHRS 4
 `endif
 
-// Fully-associative translation caches.  The data-side arrays are replicated
-// for simultaneous load/store lookup and receive the same fills.
+// ITLB remains fully associative. Data WAYS=0 keeps CAM; WAYS=1/2 indexes
+// replicated tables for simultaneous load/store lookup with shared fills.
 `define RAPT_ITLB_ENTRIES 16
-`define RAPT_DTLB_ENTRIES 16
+`define RAPT_DTLB_ENTRIES 64
+`define RAPT_DTLB_WAYS 2
 // Shared instruction/data second-level translation cache; zero bypasses it.
 `define RAPT_L2TLB_ENTRIES 256
 

@@ -20,6 +20,7 @@ module tb_ras_pipeline;
   rapt_bpu #(
       .RSB_SIZE(3)
   ) bpu (
+      .decode_target_q('0),
       .preserve_fetch(1'b0),
       .execute_recover(1'b0),
       .execute_ghr('0),
@@ -33,6 +34,7 @@ module tb_ras_pipeline;
 
   task automatic receive(input logic [31:0] inst, input logic [XLEN-1:0] pc, prediction,
                          input bit trap = 0);
+    while (!ifu_idu.ready[0]) tick(1);
     ifu_idu.slot[0] = '0;
     ifu_idu.slot[0].inst = inst;
     ifu_idu.slot[0].pc = pc;
@@ -114,7 +116,7 @@ module tb_ras_pipeline;
     receive(CompressedCall, 'h1000, 'h1002);
     check(idu_bpu.push_en && !idu_bpu.pop_en && idu_bpu.push_addr == 'h1002,
           "compressed call push");
-    if (XLEN == 32) check(ifu_idu.resteer, "C.JAL early correction");
+    if (XLEN == 32) check(idu.redirect && !ifu_idu.resteer, "C.JAL pending correction");
     tick(1);
     check(idu_bpu.ras_valid && idu_bpu.ras_addr == 'h1002, "early resteer keeps accepted push");
 
@@ -152,10 +154,11 @@ module tb_ras_pipeline;
     end
     idu_rnu.ready = '{default: 1};
     #1;
-    check(idu_bpu.pop_en && ifu_idu.resteer && ifu_idu.resteer_pc == 'h1002, "return repair");
+    check(idu_bpu.pop_en && idu.redirect && !ifu_idu.resteer, "return repair pending");
     check(idu_bpu.train_en && idu_bpu.train_type == 3, "return repair trains BTB");
     check(idu_rnu.slot[0].uop.pnpc == 'h1002, "return prediction carried to execute");
     tick(1);
+    check(ifu_idu.resteer && ifu_idu.resteer_pc == 'h1002, "registered return repair");
     check(!idu_bpu.ras_valid, "accepted return pops exactly once");
 
     // Speculation may overwrite all storage; full flush recovers committed data.
@@ -174,8 +177,9 @@ module tb_ras_pipeline;
     // JALR x5,x1,3: pop old top, predict (top+imm)&~1, push new link.
     receive(32'h003082e7, 'h6000, 'h6004);
     check(idu_bpu.push_en && idu_bpu.pop_en, "coroutine action");
-    check(ifu_idu.resteer_pc == 'h1004, "JALR immediate and low-bit clear");
+    check(idu.redirect_pc == 'h1004 && !ifu_idu.resteer, "JALR immediate and low-bit clear");
     tick(1);
+    check(ifu_idu.resteer && ifu_idu.resteer_pc == 'h1004, "registered coroutine repair");
     check(idu_bpu.ras_addr == 'h6004, "coroutine replacement link");
     rou_cmu.slot[1].valid = 1;
     rou_cmu.slot[1].jren = 1;

@@ -90,7 +90,7 @@ endif
 	  -GOptimizeOperandReads=$(OPT_READS) \
 	  -CFLAGS '-DTEST_XLEN=$(XLEN) -DTEST_VLEN=$(VLEN) -DTEST_ELEN=$(ELEN) -DTEST_OPT_READS=$(OPT_READS) -DTEST_CORE_ADAPTER=$(CORE_ADAPTER)' \
 	  $(DIFF_FLAGS) \
-	  $(ROOT)/hdl/sram/rapt_sram_1rw.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_fma.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_divsqrt.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_convert_narrow.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_int_to_fp.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv $(wildcard $(VPU)/*.sv) $(CURDIR)/test_vpu.cpp \
+	  $(ROOT)/hdl/sram/rapt_sram_1rw.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_fma.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_divsqrt.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_convert_narrow.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_int_to_fp.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_integer_to_fp.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_fp_to_int.sv $(wildcard $(VPU)/*.sv) $(CURDIR)/test_vpu.cpp \
 	  >$(TOP_BUILD)/build.log 2>&1 || { cat $(TOP_BUILD)/build.log; exit 1; }
 
 top: top-build
@@ -306,7 +306,7 @@ int-fp:
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/hdl/include -j $(JOBS) \
 	  --top-module rapt_vpu_int_fp -GFloatDouble=$(FMA_DOUBLE) -GIntBits=$(INT_BITS) --Mdir $(INT_FP_BUILD) \
 	  -CFLAGS '-DTEST_DOUBLE=$(FMA_DOUBLE) -DTEST_INT_BITS=$(INT_BITS) -I$(SPIKE_BUILD)/softfloat' -LDFLAGS '$(SPIKE_BUILD)/libsoftfloat.a' \
-	  $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_int_to_fp.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv \
+	  $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_int_to_fp.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_integer_to_fp.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv $(ROOT)/hdl/backend/feu/fpu/rapt_fpu_fp_to_int.sv \
 	  $(VPU)/rapt_vpu_int_fp.sv $(CURDIR)/test_int_fp.cpp \
 	  >$(INT_FP_BUILD)/build.log 2>&1 || { cat $(INT_FP_BUILD)/build.log; exit 1; }
 	$(INT_FP_BUILD)/Vrapt_vpu_int_fp | tee $(INT_FP_BUILD)/run.log

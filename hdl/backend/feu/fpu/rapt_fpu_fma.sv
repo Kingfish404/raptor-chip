@@ -717,6 +717,104 @@ module rapt_fpu_fma_pipeline #(
   assign result_valid = s5_valid_q;
 
   always_ff @(posedge clock) begin
+    // Payload is observed only with its valid/state owner. Clear control last.
+    s5_valid_q <= round_valid_q;
+    round_valid_q <= s4_valid_q;
+    s4_valid_q <= s3_valid_q;
+    s3_valid_q <= s2_valid_q;
+    s2_valid_q <= align_valid_q;
+    align_valid_q <= s1_valid_q;
+    s1_valid_q <= normalize_valid_q;
+    normalize_valid_q <= valid && ready;
+    begin
+      s1_mant_a_q <= mant_a_c;
+      s1_mant_b_q <= mant_b_c;
+      normalize_metadata_q <= '{
+          mant_c: mant_c_c, exp_a: exponent_a_c, exp_b: exponent_b_c, exp_c: exponent_c_c,
+          product_sign: product_sign_c, addend_sign: addend_sign_c,
+          product_zero: a_zero_c || b_zero_c, addend_zero: c_zero_c,
+          special: special_c, special_result: special_result_c,
+          special_flags: special_flags_c, rounding_mode: rounding_mode};
+    end
+    if (normalize_valid_q) begin
+      s1_product_q <= product_c;
+      s1_mant_c_q <= normalize_metadata_q.mant_c;
+      s1_exp_a_q <= normalize_metadata_q.exp_a;
+      s1_exp_b_q <= normalize_metadata_q.exp_b;
+      s1_exp_c_q <= normalize_metadata_q.exp_c;
+      s1_product_sign_q <= normalize_metadata_q.product_sign;
+      s1_addend_sign_q <= normalize_metadata_q.addend_sign;
+      s1_product_zero_q <= normalize_metadata_q.product_zero;
+      s1_addend_zero_q <= normalize_metadata_q.addend_zero;
+      s1_special_q <= normalize_metadata_q.special;
+      s1_special_result_q <= normalize_metadata_q.special_result;
+      s1_special_flags_q <= normalize_metadata_q.special_flags;
+      s1_rounding_mode_q <= normalize_metadata_q.rounding_mode;
+    end
+    if (s1_valid_q) begin
+      align_product_term_q <= align_product_term_c;
+      align_addend_term_q <= align_addend_term_c;
+      align_product_sign_q <= s1_product_sign_q;
+      align_addend_sign_q <= s1_addend_sign_q;
+      align_discarded_sign_q <= align_discarded_sign_c;
+      align_common_base_q <= align_common_base_c;
+      align_zero_sign_q <= align_zero_sign_c;
+      align_sticky_q <= align_sticky_c;
+      align_special_q <= align_special_c;
+      align_special_result_q <= align_special_result_c;
+      align_special_flags_q <= align_special_flags_c;
+      align_rounding_mode_q <= s1_rounding_mode_q;
+    end
+    if (align_valid_q) begin
+      s2_total_q <= s2_total_c;
+      s2_common_base_q <= align_common_base_q;
+      s2_result_sign_q <= align_zero_sign_q;
+      s2_discarded_sign_q <= align_discarded_sign_q;
+      s2_sticky_q <= align_sticky_q;
+      s2_special_q <= align_special_q;
+      s2_special_result_q <= align_special_result_q;
+      s2_special_flags_q <= align_special_flags_q;
+      s2_rounding_mode_q <= align_rounding_mode_q;
+    end
+    if (s2_valid_q) begin
+      s3_magnitude_q <= s3_magnitude_c;
+      s3_common_base_q <= s2_common_base_q;
+      s3_result_sign_q <= s3_result_sign_c;
+      s3_zero_sign_q <= s2_result_sign_q;
+      s3_sticky_q <= s2_sticky_q;
+      s3_special_q <= s2_special_q;
+      s3_special_result_q <= s2_special_result_q;
+      s3_special_flags_q <= s2_special_flags_q;
+      s3_rounding_mode_q <= s2_rounding_mode_q;
+    end
+    if (s3_valid_q) begin
+      s4_magnitude_q <= s3_magnitude_q;
+      s4_leading_one_q <= s4_leading_one_c;
+      s4_common_base_q <= s3_common_base_q;
+      s4_result_sign_q <= s3_result_sign_q;
+      s4_zero_sign_q <= s3_zero_sign_q;
+      s4_sticky_q <= s3_sticky_q;
+      s4_special_q <= s3_special_q;
+      s4_special_result_q <= s3_special_result_q;
+      s4_special_flags_q <= s3_special_flags_q;
+      s4_rounding_mode_q <= s3_rounding_mode_q;
+    end
+    if (s4_valid_q) begin
+      round_retained_q <= round_retained_c;
+      round_exponent_q <= round_exponent_c;
+      round_up_q <= round_up_c;
+      round_inexact_q <= round_inexact_c;
+      round_tiny_q <= round_tiny_c;
+      round_active_q <= !s4_special_q && s4_leading_one_q != 0;
+      round_sign_q <= s4_result_sign_q;
+      round_mode_q <= s4_rounding_mode_q;
+      round_result_q <= stage4_result_c;
+      round_flags_q <= stage4_flags_c;
+    end
+    if (round_valid_q) begin
+      result_q <= packed_result_c;
+      flags_q <= packed_flags_c;
+    end
     if (reset || flush) begin
       normalize_valid_q <= 1'b0;
       round_valid_q <= 1'b0;
@@ -726,106 +824,6 @@ module rapt_fpu_fma_pipeline #(
       s3_valid_q <= 1'b0;
       s4_valid_q <= 1'b0;
       s5_valid_q <= 1'b0;
-      // Result/flags are meaningful only with result_valid; keep payload
-      // unreset so reset/flush only cancels the valid pipeline.
-    end else begin
-      s5_valid_q <= round_valid_q;
-      round_valid_q <= s4_valid_q;
-      s4_valid_q <= s3_valid_q;
-      s3_valid_q <= s2_valid_q;
-      s2_valid_q <= align_valid_q;
-      align_valid_q <= s1_valid_q;
-      s1_valid_q <= normalize_valid_q;
-      normalize_valid_q <= valid && ready;
-      if (valid && ready) begin
-        s1_mant_a_q <= mant_a_c;
-        s1_mant_b_q <= mant_b_c;
-        normalize_metadata_q <= '{
-            mant_c: mant_c_c, exp_a: exponent_a_c, exp_b: exponent_b_c, exp_c: exponent_c_c,
-            product_sign: product_sign_c, addend_sign: addend_sign_c,
-            product_zero: a_zero_c || b_zero_c, addend_zero: c_zero_c,
-            special: special_c, special_result: special_result_c,
-            special_flags: special_flags_c, rounding_mode: rounding_mode};
-      end
-      if (normalize_valid_q) begin
-        s1_product_q <= product_c;
-        s1_mant_c_q <= normalize_metadata_q.mant_c;
-        s1_exp_a_q <= normalize_metadata_q.exp_a;
-        s1_exp_b_q <= normalize_metadata_q.exp_b;
-        s1_exp_c_q <= normalize_metadata_q.exp_c;
-        s1_product_sign_q <= normalize_metadata_q.product_sign;
-        s1_addend_sign_q <= normalize_metadata_q.addend_sign;
-        s1_product_zero_q <= normalize_metadata_q.product_zero;
-        s1_addend_zero_q <= normalize_metadata_q.addend_zero;
-        s1_special_q <= normalize_metadata_q.special;
-        s1_special_result_q <= normalize_metadata_q.special_result;
-        s1_special_flags_q <= normalize_metadata_q.special_flags;
-        s1_rounding_mode_q <= normalize_metadata_q.rounding_mode;
-      end
-      if (s1_valid_q) begin
-        align_product_term_q <= align_product_term_c;
-        align_addend_term_q <= align_addend_term_c;
-        align_product_sign_q <= s1_product_sign_q;
-        align_addend_sign_q <= s1_addend_sign_q;
-        align_discarded_sign_q <= align_discarded_sign_c;
-        align_common_base_q <= align_common_base_c;
-        align_zero_sign_q <= align_zero_sign_c;
-        align_sticky_q <= align_sticky_c;
-        align_special_q <= align_special_c;
-        align_special_result_q <= align_special_result_c;
-        align_special_flags_q <= align_special_flags_c;
-        align_rounding_mode_q <= s1_rounding_mode_q;
-      end
-      if (align_valid_q) begin
-        s2_total_q <= s2_total_c;
-        s2_common_base_q <= align_common_base_q;
-        s2_result_sign_q <= align_zero_sign_q;
-        s2_discarded_sign_q <= align_discarded_sign_q;
-        s2_sticky_q <= align_sticky_q;
-        s2_special_q <= align_special_q;
-        s2_special_result_q <= align_special_result_q;
-        s2_special_flags_q <= align_special_flags_q;
-        s2_rounding_mode_q <= align_rounding_mode_q;
-      end
-      if (s2_valid_q) begin
-        s3_magnitude_q <= s3_magnitude_c;
-        s3_common_base_q <= s2_common_base_q;
-        s3_result_sign_q <= s3_result_sign_c;
-        s3_zero_sign_q <= s2_result_sign_q;
-        s3_sticky_q <= s2_sticky_q;
-        s3_special_q <= s2_special_q;
-        s3_special_result_q <= s2_special_result_q;
-        s3_special_flags_q <= s2_special_flags_q;
-        s3_rounding_mode_q <= s2_rounding_mode_q;
-      end
-      if (s3_valid_q) begin
-        s4_magnitude_q <= s3_magnitude_q;
-        s4_leading_one_q <= s4_leading_one_c;
-        s4_common_base_q <= s3_common_base_q;
-        s4_result_sign_q <= s3_result_sign_q;
-        s4_zero_sign_q <= s3_zero_sign_q;
-        s4_sticky_q <= s3_sticky_q;
-        s4_special_q <= s3_special_q;
-        s4_special_result_q <= s3_special_result_q;
-        s4_special_flags_q <= s3_special_flags_q;
-        s4_rounding_mode_q <= s3_rounding_mode_q;
-      end
-      if (s4_valid_q) begin
-        round_retained_q <= round_retained_c;
-        round_exponent_q <= round_exponent_c;
-        round_up_q <= round_up_c;
-        round_inexact_q <= round_inexact_c;
-        round_tiny_q <= round_tiny_c;
-        round_active_q <= !s4_special_q && s4_leading_one_q != 0;
-        round_sign_q <= s4_result_sign_q;
-        round_mode_q <= s4_rounding_mode_q;
-        round_result_q <= stage4_result_c;
-        round_flags_q <= stage4_flags_c;
-      end
-      if (round_valid_q) begin
-        result_q <= packed_result_c;
-        flags_q <= packed_flags_c;
-      end
     end
   end
 endmodule

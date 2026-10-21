@@ -40,9 +40,11 @@ module rapt_bpu_tage #(
     `RAPT_BPU_DIRP_PORTS,
     input logic [XLEN-1:0] aux_pc = '0,
     input logic [3:0] aux_position = '0,
+    input logic [3:0] request_aux_position = '0,
     input logic [GHR_LEN-1:0] aux_ghr = '0,
     input logic [PHR_LEN-1:0] aux_phr = '0,
-    output logic aux_taken
+    output logic aux_taken,
+    output logic request_aux_taken
 );
   /* verilator lint_off UNUSEDSIGNAL */
   /* verilator lint_off UNUSEDPARAM */
@@ -87,7 +89,8 @@ module rapt_bpu_tage #(
   // Valid and useful bits need a bulk clear (reset, fence, u aging). They
   // live in grouped LUTRAM words with one flop per group instead of one flop
   // per entry; each consumer below has its own read port.
-  localparam int AuxPorts   = AuxPositions > 0 ? AuxPositions : 1;
+  localparam int AuxPorts = AuxPositions > 0 ? AuxPositions : 1;
+  localparam int AuxPortBits = AuxPorts > 1 ? $clog2(AuxPorts) : 1;
   localparam int ValidReads = 2 + AuxPorts;
   logic bim_valid_rd, bim_valid_aux[AuxPorts], bim_valid_up;
   logic t1_valid_rd, t1_valid_aux[AuxPorts], t1_valid_up, t1_u_up;
@@ -368,10 +371,13 @@ module rapt_bpu_tage #(
       assign port_taken[k] = (aux_any_tagged_hit && aux_provider_weak && (use_alt_ctr >= 0))
                     ? aux_alt_pred : aux_provider_pred;
     end
+    assign request_aux_taken = AuxPositions > 0 && int'(request_aux_position) < AuxPorts
+        ? port_taken[AuxPortBits'(request_aux_position)] : port_taken[0];
     assign aux_taken = AuxPositions > 0 && int'(aux_position) < AuxPorts
         ? port_taken[aux_position] : port_taken[0];
   end else begin : g_no_auxiliary_read
     assign aux_taken = 1'b0;
+    assign request_aux_taken = 1'b0;
     for (genvar k = 0; k < AuxPorts; k++) begin : g_port
       assign aux_bim_index[k] = '0;
       assign aux_t1_index[k] = '0;

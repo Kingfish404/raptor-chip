@@ -105,7 +105,8 @@
 `endif
 
 `define RAPT_ITLB_ENTRIES 32
-`define RAPT_DTLB_ENTRIES 32
+`define RAPT_DTLB_ENTRIES 64
+`define RAPT_DTLB_WAYS 2
 // Shared instruction/data second-level translation cache; zero bypasses it.
 `define RAPT_L2TLB_ENTRIES 256
 

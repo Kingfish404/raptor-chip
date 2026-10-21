@@ -14,6 +14,7 @@ module rapt_l1d_data #(
     input logic reset,
     input logic [SetBits-1:0] read_addr,
     input logic write_valid,
+    input logic write_blocked = 1'b0,
     input logic [SetBits-1:0] write_addr,
     input logic [WordBits-1:0] write_word,
     input logic [WayBits-1:0] write_way,
@@ -59,6 +60,8 @@ module rapt_l1d_data #(
       localparam int BaseWord = bank * SubarrayWords;
       wire [SubarrayBytes-1:0] byte_enable;
       wire [SubarrayBytes*8-1:0] bank_data, bank_wdata;
+      // Reserve the address from registered write metadata. Late arbitration
+      // can suppress the access, but must not select the SRAM address.
       wire  bank_write = |byte_enable;
       logic bank_read_valid;
 
@@ -88,8 +91,8 @@ module rapt_l1d_data #(
           .USE_BWE(1)
       ) u_sram (
           .clock(clock),
-          .en(1'b1),
-          .wen(bank_write),
+          .en(!bank_write || !write_blocked),
+          .wen(bank_write && !write_blocked),
           .addr(bank_write ? write_addr : read_addr),
           .rdata(bank_data),
           .wdata(bank_wdata),

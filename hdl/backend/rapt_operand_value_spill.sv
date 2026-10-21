@@ -1,9 +1,9 @@
 `include "rapt.svh"
 
 // Operand-value bank for blocked ROB owners. Each live spill entry carries its
-// own waiting tags and values, so completion matching never reads ROB-indexed
-// tag banks through the owner. Prediction targets are consumed by the ROB
-// checkpoint file before this payload is read for issue.
+// own waiting tags and allocation-time values. The FPGA ROU resolves live
+// tags from the PRF at dispatch; other uses capture completion values here.
+// Prediction targets are consumed by the ROB checkpoint file before issue.
 module rapt_operand_value_spill #(
     parameter int unsigned Xlen = rapt_pkg::XLENPkg,
     parameter type UopT = rapt_pkg::uop_t,
@@ -13,7 +13,8 @@ module rapt_operand_value_spill #(
     parameter int unsigned ReleaseWidth = AllocateWidth,
     parameter int unsigned ReadPorts = AllocateWidth,
     parameter int unsigned CompletionPorts = rapt_pkg::CompletionPorts,
-    parameter int unsigned SpillBits = rapt_pkg::index_bits(SpillEntries)
+    parameter int unsigned SpillBits = rapt_pkg::index_bits(SpillEntries),
+    parameter bit ResolveAtDispatch = 1'b0
 ) (
     input logic clock,
     reset,
@@ -81,7 +82,111 @@ module rapt_operand_value_spill #(
     return found ? completion_result[index] : dflt;
   endfunction
 
-  if (`RAPT_FPGA_LUTRAM) begin : g_lutram
+  typedef struct packed {
+    value_state_t payload;
+    logic valid;
+  } completion_update_t;
+
+  function automatic completion_update_t completion_update(input value_state_t entry,
+                                                           input logic entry_valid);
+    completion_update_t update;
+    logic hit1, hit2;
+    update.payload = entry;
+    update.valid = 1'b0;
+    hit1 = completion_hit(entry.pr1);
+    hit2 = completion_hit(entry.pr2);
+    if (entry_valid) begin
+      update.valid = hit1 || hit2;
+      update.payload.op1 = completion_value(entry.pr1, entry.op1);
+      update.payload.op2 = completion_value(entry.pr2, entry.op2);
+      if (hit1) update.payload.pr1 = '0;
+      if (hit2) update.payload.pr2 = '0;
+    end
+    return update;
+  endfunction
+
+  if (`RAPT_FPGA_LUTRAM && ResolveAtDispatch) begin : g_immutable_lutram
+    // The ROU resolves live tags from the PRF at dispatch. The source PRF
+    // mapping cannot be freed by a younger commit while its consumer waits
+    // here. Each allocation lane owns one RAM write port; copies supply the
+    // independent read lanes.
+    typedef logic [0:0] marker_t;
+    localparam int PayloadBits = $bits(value_payload_t);
+    localparam int LaneBits = AllocateWidth > 1 ? $clog2(AllocateWidth) : 1;
+    marker_t marker_allocate[AllocateWidth];
+    value_payload_t allocate_word[AllocateWidth];
+    logic write_valid[AllocateWidth];
+    logic [LaneBits-1:0] lane_q[SpillEntries];
+    logic [PayloadBits-1:0] bank_read[ReadPorts][AllocateWidth];
+
+    /* verilator lint_off PINCONNECTEMPTY */
+    rapt_operand_spill #(
+        .PayloadT(marker_t),
+        .Entries(SpillEntries),
+        .AllocateWidth(AllocateWidth),
+        .ReleaseWidth(ReleaseWidth),
+        .ReadPorts(ReadPorts),
+        .IndexBits(SpillBits)
+    ) storage (
+        .clock,
+        .reset,
+        .flush,
+        .allocate_valid,
+        .allocate_payload(marker_allocate),
+        .allocate_ready,
+        .allocate_index,
+        .release_valid,
+        .release_index,
+        .read_index,
+        .read_valid,
+        .read_payload(),
+        .update_valid('{default: '0}),
+        .update_payload('{default: '0}),
+        .entry_valid(),
+        .entry_payload()
+    );
+    /* verilator lint_on PINCONNECTEMPTY */
+
+    for (genvar a = 0; a < AllocateWidth; a++) begin : g_write_lane
+      assign marker_allocate[a] = '0;
+      assign allocate_word[a] = '{
+              uop: allocate_uop[a],
+              op1: allocate_op1[a],
+              op2: allocate_op2[a],
+              pr1: allocate_pr1[a],
+              pr2: allocate_pr2[a]
+          };
+      assign write_valid[a] = allocate_valid[a] && allocate_ready[a];
+      for (genvar p = 0; p < ReadPorts; p++) begin : g_read_copy
+        (* ram_style = "distributed" *) logic [PayloadBits-1:0] words[SpillEntries];
+        always_ff @(posedge clock)
+          if (write_valid[a])
+            words[allocate_index[a]] <= PayloadBits'(allocate_word[a]);
+        assign bank_read[p][a] = words[read_index[p]];
+      end
+    end
+    for (genvar e = 0; e < SpillEntries; e++) begin : g_lane
+      always_ff @(posedge clock) begin
+        begin
+          for (int a = 0; a < AllocateWidth; a++)
+          if (write_valid[a] && allocate_index[a] == SpillBits'(e)) lane_q[e] <= LaneBits'(a);
+        end
+      end
+    end
+    for (genvar p = 0; p < ReadPorts; p++) begin : g_read
+      value_payload_t selected;
+      always_comb begin
+        selected = '0;
+        if (int'(read_index[p]) < SpillEntries)
+          selected = value_payload_t'(bank_read[p][lane_q[read_index[p]]]);
+        read_uop[p] = selected.uop;
+        read_op1[p] = selected.op1;
+        read_op2[p] = selected.op2;
+        read_pr1[p] = selected.pr1;
+        read_pr2[p] = selected.pr2;
+      end
+    end
+  end else if (`RAPT_FPGA_LUTRAM) begin : g_lutram
     // Keep mutable operands and waiting tags in the compact flop bank.
     value_state_t allocate_payload[AllocateWidth];
     value_state_t read_payload[ReadPorts];
@@ -102,17 +207,11 @@ module rapt_operand_value_spill #(
       assign read_pr2[p] = read_payload[p].pr2;
     end
     for (genvar e = 0; e < SpillEntries; e++) begin : g_completion
+      completion_update_t update;
+      assign update = completion_update(entry_payload[e], entry_valid[e]);
       always_comb begin
-        update_payload[e] = entry_payload[e];
-        update_valid[e] = 1'b0;
-        if (entry_valid[e]) begin
-          update_valid[e] = completion_hit(entry_payload[e].pr1)
-              || completion_hit(entry_payload[e].pr2);
-          update_payload[e].op1 = completion_value(entry_payload[e].pr1, entry_payload[e].op1);
-          update_payload[e].op2 = completion_value(entry_payload[e].pr2, entry_payload[e].op2);
-          if (completion_hit(entry_payload[e].pr1)) update_payload[e].pr1 = '0;
-          if (completion_hit(entry_payload[e].pr2)) update_payload[e].pr2 = '0;
-        end
+        update_payload[e] = update.payload;
+        update_valid[e] = update.valid;
       end
     end
     rapt_operand_spill #(
@@ -138,14 +237,14 @@ module rapt_operand_value_spill #(
       for (genvar p = 0; p < ReadPorts; p++) begin : g_read_copy
         (* ram_style = "distributed" *) logic [UopBits-1:0] words[SpillEntries];
         always_ff @(posedge clock)
-          if (!(reset || flush) && uop_write[a])
+          if (uop_write[a])
             words[allocate_index[a]] <= UopBits'(allocate_uop[a]);
         assign bank_read[p][a] = words[read_index[p]];
       end
     end
     for (genvar e = 0; e < SpillEntries; e++) begin : g_lane
       always_ff @(posedge clock) begin
-        if (!(reset || flush)) begin
+        begin
           for (int a = 0; a < AllocateWidth; a++)
           if (uop_write[a] && allocate_index[a] == SpillBits'(e)) uop_lane_q[e] <= LaneBits'(a);
         end
@@ -181,17 +280,15 @@ module rapt_operand_value_spill #(
       assign read_pr2[p] = read_payload[p].pr2;
     end
     for (genvar e = 0; e < SpillEntries; e++) begin : g_completion
+      completion_update_t update;
+      assign update = completion_update(value_state_t'(entry_payload[e]), entry_valid[e]);
       always_comb begin
         update_payload[e] = entry_payload[e];
-        update_valid[e] = 1'b0;
-        if (entry_valid[e]) begin
-          update_valid[e] = completion_hit(entry_payload[e].pr1)
-              || completion_hit(entry_payload[e].pr2);
-          update_payload[e].op1 = completion_value(entry_payload[e].pr1, entry_payload[e].op1);
-          update_payload[e].op2 = completion_value(entry_payload[e].pr2, entry_payload[e].op2);
-          if (completion_hit(entry_payload[e].pr1)) update_payload[e].pr1 = '0;
-          if (completion_hit(entry_payload[e].pr2)) update_payload[e].pr2 = '0;
-        end
+        update_payload[e].op1 = update.payload.op1;
+        update_payload[e].op2 = update.payload.op2;
+        update_payload[e].pr1 = update.payload.pr1;
+        update_payload[e].pr2 = update.payload.pr2;
+        update_valid[e] = update.valid;
       end
     end
     rapt_operand_spill #(

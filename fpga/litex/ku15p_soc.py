@@ -703,7 +703,7 @@ class RaptorKU15PSoC(SoCCore):
                 pass
 
 
-def main(board):
+def main(board, soc_class=RaptorKU15PSoC):
     parser = LiteXArgumentParser(
         platform=board.platform,
         description=f"{board.ident} (Vivado).",
@@ -821,7 +821,7 @@ def main(board):
                 "--no-compile-software or use --boot-mode=custom"
             )
 
-    soc = RaptorKU15PSoC(
+    soc = soc_class(
         board=board,
         sys_clk_freq=int(args.sys_clk_freq),
         with_litedram=args.with_litedram,

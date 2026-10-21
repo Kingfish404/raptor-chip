@@ -41,6 +41,8 @@ $(eval $(call XLEN_TEST,addr-classification-litedram,tb_addr_classification,,-d 
 $(eval $(call XLEN_TEST,pmp-window-uniform,tb_pmp_window_uniform)) ## Lookahead PMP window never claims uniformity across a region edge
 $(eval $(call XLEN_TEST,memory-coherence-progress,tb_memory_coherence_progress,,-d RAPT_ASSERT_EN,+BUS_DELAY_MAX=$$(VERILATOR_DIRECTED_DELAY) +SEED=$$(VERILATOR_DIRECTED_SEED)))
 $(eval $(call XLEN_TEST,l1d-page-permissions,tb_l1d_page_permissions))
+$(eval $(call XLEN_TEST,l1d-translated-pipeline,tb_translated_load_pipeline,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,translated-atomics,tb_translated_atomics,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,pmp-reset-napot,tb_pmp_reset_napot,"$$(VERIFY_HOME)/formal/pmp_formal_if.sv"))
 $(eval $(call XLEN_TEST,hum-request-stage,tb_hum_request_stage,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,ioq-mmio-retry,tb_mmio_load_retry,,-d RAPT_ASSERT_EN))
@@ -49,6 +51,14 @@ $(eval $(call XLEN_TEST,split-load-retry,tb_split_load_retry,,-d RAPT_ASSERT_EN)
 $(eval $(call XLEN_TEST,ioq-store-pbmt,tb_ioq_store_pbmt,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,sq-store-pbmt,tb_sq_store_pbmt,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,l1d-store-pbmt,tb_l1d_store_pbmt,,-d RAPT_ASSERT_EN))
+# Registered SQ drain view and early L1D SRAM addressing.
+$(eval $(call XLEN_TEST,sq-registered-drain,tb_registered_store_drain,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,l1d-registered-store-path,tb_registered_store_path,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,l1d-registered-sram-address,tb_registered_sram_address))
+# C1: registered retirement-window and SQ-empty equivalence assertions.
+$(eval $(call XLEN_TEST,c1-head-flags,tb_rou_dual_commit,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,c1-sq-empty,tb_registered_store_drain,,-d RAPT_ASSERT_EN))
+# C1 end
 $(eval $(call XLEN_TEST,clint-strobe,tb_clint_strobe))
 $(eval $(call XLEN_TEST,router-clint-strobe,tb_router_clint_strobe,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,lsu-split-fault,tb_lsu_split_fault,,-d RAPT_ASSERT_EN))
@@ -419,3 +429,18 @@ $(eval $(call XLEN_TEST,lsu-axi-io-order-wt,tb_lsu_axi_io_order,,-d RAPT_ASSERT_
 
 $(eval $(call XLEN_TEST,bpu-recovery-state,tb_bpu_recovery_state,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,rou-early-recovery,tb_rou_dual_commit,,-d RAPT_ASSERT_EN -d RAPT_TEST_EARLY_RECOVERY))
+
+# F1: registered decode correction and wrong-path containment.
+$(eval $(call XLEN_TEST,frontend-delayed-correction,tb_frontend_delayed_correction,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,frontend-delayed-correction-w3,tb_frontend_delayed_correction,,-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=3))
+$(eval $(call XLEN_TEST,frontend-delayed-correction-w4,tb_frontend_delayed_correction,,-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=4))
+# F1 end
+
+# P2c
+$(eval $(call XLEN_TEST,dtlb-table,tb_dtlb_table))
+$(eval $(call XLEN_TEST,dtlb-table-2way,tb_dtlb_table,,-GWays=2))
+$(eval $(call XLEN_TEST,dtlb-verdict,tb_dtlb_verdict,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,dtlb-l2-conflict,tb_dtlb_l2_conflict,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,dtlb-table-cam,tb_dtlb_table,,-GWays=0))
+$(eval $(call XLEN_TEST,pmp-page-uniform,tb_pmp_page_uniform))
+$(eval $(call XLEN_TEST,csr-pmp-flush,tb_csr_pmp_flush,"$$(VERIFY_HOME)/xsim/tb_csr_pmp_flush.sv"))

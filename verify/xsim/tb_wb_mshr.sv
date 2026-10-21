@@ -39,7 +39,10 @@ module tb_wb_mshr;
       `TB_L1D_UNUSED_RELEASE_PORTS,
       .*
   );
-  rapt_bus bus_dut (.*);
+  rapt_bus bus_dut (
+      .rd_req_cacheable(),
+      .*
+  );
   `include "tb_l1d_defaults.svh"
 
   logic ptw_pending = 0, write_pending = 0;
@@ -256,7 +259,13 @@ module tb_wb_mshr;
     lsu_l1d.waddr = XLEN'('h80008040);
     lsu_l1d.wdata = XLEN'('h55667788);
     lsu_l1d.walu = 8'({Bytes{1'b1}});
-    @(posedge clock);
+    // Keep both owners asserted through an optional translated permission
+    // stage; the accepted miss must still yield as soon as tag lookup runs.
+    for (int n = 0; n < 2; n++) begin
+      @(posedge clock);
+      if (lsu_l1d.rready) $fatal(1, "pending store allowed an unexpected load response");
+      if (lsu_l1d.rmiss) break;
+    end
     if (!lsu_l1d.rmiss || lsu_l1d.rready)
       $fatal(1, "local store and accepted MSHR load failed to release each other");
     @(negedge clock);

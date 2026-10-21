@@ -3,8 +3,11 @@ bpu	default-w4	64	2	0
 bpu	default-l2	64	2	0
 fpr	default-w4	*	4	0
 fpr	default-l2	*	4	0
-# One owner ring replaces the two full-packet queues per FPU unit.
-feu	default-w4	64	0	2500
+# Banked IQ payloads now map to distributed RAM in both execution units.
+ieu	default	64	0	600
+ieu	default-w4	64	0	1200
+feu	default	64	0	2000
+feu	default-w4	64	0	2400
 l2tlb	default-w4	64	2	0
 rnu	default-w4	64	64	0
 l1i	default-w4	*	32	0
@@ -14,3 +17,6 @@ l1d	default-w4	64	32	600
 l1d	default-l2	*	32	0
 memory	default-w4	*	64	0
 memory	default-l2	*	64	0
+# ROU allocation-lane operand banks and FP result banks must remain distributed RAM.
+rou	default	64	0	3400
+rou	default-w4	64	0	9500

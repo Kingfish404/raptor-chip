@@ -12,6 +12,9 @@ on:
       - ".github/**"
       - "setup.sh"
       - "setup-rtl.sh"
+      - "nemu/tools/spike-diff/**"
+      - "nemu/src/isa/filelist.mk"
+      - "verify/scripts/test_spike_bootstrap.py"
       - "verify/scripts/test_riscof_*.py"
       - "verify/scripts/riscof*"
       - "verify/riscof/**"
@@ -46,6 +49,8 @@ jobs:
           "$RUNNER_TEMP/actionlint" -color
       - name: CI setup helpers
         run: python3 .github/scripts/test_ci_setup.py
+      - name: Spike and SoftFloat bootstrap
+        run: python3 verify/scripts/test_spike_bootstrap.py
       - name: Log parsing and CoreMark validation
         run: python3 .github/scripts/test_ci_report.py
       - name: Embench score aggregation

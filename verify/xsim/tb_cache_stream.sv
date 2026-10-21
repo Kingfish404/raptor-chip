@@ -22,7 +22,12 @@ module tb_cache_stream #(
   localparam int LineBytes = `RAPT_CACHE_LINE_BYTES;
   localparam int DemandIndex = LineBytes / WordBytes > 3 ? 3 : LineBytes / WordBytes - 1;
   localparam int CapacityBytes = (1 << `RAPT_L1D_LEN) * LineBytes * `RAPT_L1D_N_WAYS;
-  localparam int Words = (L2WriteBack ? 1048576 : 65536) / WordBytes;
+  // The full-capacity sweep and the cold store just beyond it need backing RAM.
+  localparam int BaseRamBytes = L2WriteBack ? 1048576 : 65536;
+  localparam int ColdStoreOffset = CapacityBytes > 'hE000 ? CapacityBytes : 'hE000;
+  localparam int RequiredRamBytes = ColdStoreOffset + LineBytes;
+  localparam int Words = (BaseRamBytes > RequiredRamBytes ? BaseRamBytes : RequiredRamBytes)
+      / WordBytes;
   logic probe_valid_i, probe_ready_o;
   logic hold_probe_ack = 0;
   logic [XLEN-1:0] probe_addr_i;
@@ -555,7 +560,7 @@ module tb_cache_stream #(
     if (!lsu_l1d.wready || l1d_bus.wvalid) $fatal(1, "partial WB store was not accepted locally");
     @(posedge clock);
     @(negedge clock);
-    lsu_l1d.waddr = XLEN'('h8000e000);
+    lsu_l1d.waddr = XLEN'('h80000000) + XLEN'(ColdStoreOffset);
     lsu_l1d.wdata = XLEN'('h5a);
     lsu_l1d.walu = 8'h01;
 
@@ -1465,7 +1470,8 @@ module tb_cache_stream #(
     $finish;
   end
   initial begin
-    #2000000;
+    // The capacity sweep takes longer for large caches, especially at RV32.
+    #(2000000 + (CapacityBytes / WordBytes) * 100);
     $fatal(1, "cache stream watchdog");
   end
 endmodule

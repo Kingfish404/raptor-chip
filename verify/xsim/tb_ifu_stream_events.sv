@@ -41,6 +41,10 @@ module tb_ifu_stream_events;
   // speculative request PC using the first packet's data.
   task automatic accept_packet;
     ifu_l1i.valid = 1;
+    #1;
+    for (int wait_cycles = 0; wait_cycles < 16 && !ifu_l1i.consumed; wait_cycles++) tick();
+    assert (ifu_l1i.consumed)
+    else $fatal(1, "fetch response was not accepted");
     tick();
     ifu_l1i.valid = 0;
     if (`RAPT_FETCH_RESPONSE_STAGE) tick();
@@ -209,10 +213,12 @@ module tb_ifu_stream_events;
     tick();
     assert (dut.pmu_fetch_slots == 3)
     else $fatal(1, "Svinval ordering packet was not delivered");
+    ifu_idu.ready = '{default: 0};
+    for (int wait_cycles = 0; wait_cycles < 16 && dut.held_count == 0; wait_cycles++) tick();
     ifu_l1i.valid = 0;
-    if (`RAPT_FETCH_RESPONSE_STAGE) tick();
     assert (!dut.blocked && dut.held_count == 3)
     else $fatal(1, "fetch failed to progress past Svinval ordering fences");
+    ifu_idu.ready = '{default: 1};
     cmu_bcast.flush_pipe = 1;
     tick();
     cmu_bcast.flush_pipe = 0;

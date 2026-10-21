@@ -20,6 +20,8 @@ module tb_tage_read_storage;
       .IDX_LEN(7),
       .AuxRead(0)
   ) dut (
+      .request_aux_position('0),
+      .request_aux_taken(),
       .*
   );
   logic [XLEN-1:0] sampled_pc = 0;

@@ -17,6 +17,7 @@ module rapt_l1d_tags #(
     input logic reset,
     input logic fence_time,
     input logic [L1D_SIZE-1:0] clear_set,
+    input logic clear_enable = 1'b1,
     input logic clear_line_valid = 1'b0,
     input logic [L1D_LEN-1:0] clear_line_idx = '0,
     input logic [L1dTagW-1:0] clear_line_tag = '0,
@@ -74,6 +75,8 @@ module rapt_l1d_tags #(
   logic [L1D_LINE_SIZE-1:0] valid_write_data[L1D_N_WAYS], dirty_write_data[L1D_N_WAYS];
   logic update_enable;
   logic update_allowed;
+  logic clear_any;
+  assign clear_any = clear_enable && |clear_set;
   // Retain the generic flop layout and its stable verification view.
   logic [L1dTagW-1:0] l1d_tag[L1D_N_WAYS][L1D_SIZE];
   logic [L1dTagW-1:0] tag_addr_data[L1D_N_WAYS];
@@ -84,7 +87,7 @@ module rapt_l1d_tags #(
   logic [L1dTagW-1:0] tag_inspect_data[L1D_N_WAYS];
   logic [L1D_N_WAYS-1:0] tag_write, clear_tag_match;
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_tag_storage
-    assign tag_write[way] = !reset && !(|clear_set) && !clear_line_valid
+    assign tag_write[way] = !reset && !clear_any && !clear_line_valid
         && l1d_update && l1d_valid_u && update_allowed && l1d_way == L1dWayW'(way);
     assign clear_tag_match[way] = tag_clear_data[way] == clear_line_tag;
     if (`RAPT_FPGA_LUTRAM) begin : g_lutram
@@ -135,7 +138,10 @@ module rapt_l1d_tags #(
   // only this bit; keep the full mask selection off its combinational path.
   assign inspect_dirty_any = line_dirty_q[inspect_way][inspect_set];
   assign update_allowed = !update_blocked;
-  assign update_blocked = WriteBack && (clear_blocked || |dirty_conflict);
+  // Reduce the registered clear-set/dirty state before the common enable.
+  // Writeback arbitration may arrive late; it must not traverse every line's
+  // clear test and the cache-wide reduction before reaching update_allowed.
+  assign update_blocked = WriteBack && ((clear_enable && clear_blocked) || |dirty_conflict);
 
   always_comb begin
     dirty_any = 1'b0;
@@ -201,7 +207,7 @@ module rapt_l1d_tags #(
     assign read_set[1] = waddr_idx;
     assign update_set[0] = addr_idx;
     assign update_set[1] = l1d_idx;
-    assign update_valid = {l1d_update && l1d_valid_u && !(|clear_set)
+    assign update_valid = {l1d_update && l1d_valid_u && !clear_any
                            && !clear_line_valid && update_allowed, load_hit};
     assign update_way[1] = l1d_way;
     always_comb begin
@@ -276,8 +282,7 @@ module rapt_l1d_tags #(
   // installing a different tag clears the other words in the target line.
   // Whole-line clears and duplicate scrubs only drop the live flag; word
   // masks are rewritten from the effective view on the next install.
-  assign update_enable = !reset && !(|clear_set) && !clear_line_valid && l1d_update
-      && update_allowed;
+  assign update_enable = !reset && !clear_any && !clear_line_valid && l1d_update && update_allowed;
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_word_update
     logic [L1D_LINE_SIZE-1:0] word_bit, dirty_base;
     logic clean_hit;
@@ -364,7 +369,7 @@ module rapt_l1d_tags #(
 
     for (genvar set_idx = 0; set_idx < L1D_SIZE; set_idx++) begin : g_set_state
       logic line_clear;
-      assign line_clear = (clear_set[set_idx] && update_allowed)
+      assign line_clear = (clear_enable && clear_set[set_idx] && update_allowed)
           || (clear_line_valid && clear_line_idx == L1D_LEN'(set_idx) && clear_tag_match[way]
               && (!WriteBack || !line_dirty_q[way][set_idx]));
       always_ff @(posedge clock) begin

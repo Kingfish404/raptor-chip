@@ -172,6 +172,54 @@ module tb_feu_ooo;
     end
     tick(3);
   endtask
+  // Recovery must cancel the transfer without changing the selected payload.
+  // Exercise every execution unit with a resident ready to issue at the edge.
+  task automatic recovery_selection;
+    for (int use_reset = 0; use_reset < 2; use_reset++) begin
+      for (int unit_id = 0; unit_id < 10; unit_id++) begin
+        dispatch_slot_t packet;
+        logic [$bits(dut.iss)-2:0] payload;
+        int op;
+        case (unit_id)
+          0: op = `RAPT_FP_OP_FCLASS_D;
+          1: op = `RAPT_FP_OP_FADD_D;
+          2: op = `RAPT_FP_OP_FMUL_D;
+          3: op = `RAPT_FP_OP_FDIV_D;
+          4: op = `RAPT_FP_OP_FCVT_D_S;
+          5: op = `RAPT_FP_OP_FCVT_S_D;
+          6: op = `RAPT_FP_OP_FCVT_D_W;
+          7: op = `RAPT_FP_OP_FCVT_W_D;
+          default: op = `RAPT_FP_OP_ZFHMIN;
+        endcase
+        // Keep entry zero blocked so recovery cannot silently select the same
+        // payload through the empty-selector fallback to index zero.
+        packet = operation(0, `RAPT_FP_OP_FADD_D, 0, 0);
+        packet.fp_tag[0] = 8;
+        enqueue(packet, 0);
+        packet = operation(1, op, 64'h3ff0000000000000, 64'h4000000000000000);
+        if (unit_id == 8) packet.uop.inst = 32'h40200053;  // FCVT.S.H
+        if (unit_id == 9) packet.uop.inst = 32'h44100053;  // FCVT.H.D
+        enqueue(packet, 0);
+        #1;
+        if (!dut.iss.valid) $fatal(1, "recovery test has no ready issue");
+        payload = dut.iss[$bits(dut.iss)-2:0];
+        if (use_reset) reset = 1;
+        else cmu_bcast.flush_pipe = 1;
+        #1;
+        if (dut.iss.valid || dut.fp_launch || wb_fpu.valid || issue_enable)
+          $fatal(1, "recovery allowed an FP transfer");
+        if (dut.iss[$bits(dut.iss)-2:0] !== payload)
+          $fatal(1, "recovery steered FP payload unit=%0d reset=%0d", unit_id, use_reset);
+        for (int u = 0; u < 10; u++)
+        if (dut.unit_launch[u].valid) $fatal(1, "recovery allocated an FP owner");
+        tick();
+        reset = 0;
+        cmu_bcast.flush_pipe = 0;
+        clear_scoreboard();
+        tick(20);
+      end
+    end
+  endtask
   logic random_stalls = 0;
   logic [31:0] random_state = 32'hb16b00b5;
   function automatic int random_number;
@@ -283,6 +331,7 @@ module tb_feu_ooo;
     clear_scoreboard();
     tick(3);
     reset = 0;
+    recovery_selection();
     enqueue(operation(0, `RAPT_FP_OP_FDIV_D, 64'h401c000000000000, 64'h4008000000000000),
             64'h4002aaaaaaaaaaab, 1);
     enqueue(operation(1, `RAPT_FP_OP_FDIV_D, 64'h4018000000000000, 64'h4008000000000000),

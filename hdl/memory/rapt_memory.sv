@@ -41,6 +41,7 @@ module rapt_memory #(
   l1i_bus_if l1i_bus ();
   l1d_bus_if l1d_bus ();
   mem_link_if memory_link ();
+  logic memory_read_cacheable;
   axi4_if l2_axi ();
   axi4_if l2_outer_axi ();
   logic cache_coherent_ready, cache_coherent_request, cache_coherent_write;
@@ -176,6 +177,7 @@ module rapt_memory #(
       .coherent_request(cache_coherent_request),
       .coherent_write(cache_coherent_write),
       .mem(memory_link),
+      .rd_req_cacheable(memory_read_cacheable),
       .l1i_bus(l1i_bus),
       .l1d_bus(l1d_bus),
       .csr_bcast(csr_bcast),
@@ -185,11 +187,13 @@ module rapt_memory #(
   rapt_axi_master #(
       .XLEN(XLEN),
       .MAX_READ_OUTSTANDING(MemoryReadCredits),
+      .USE_CARRIED_READ_CACHEABLE(1'b1),
       .MAX_WRITE_OUTSTANDING(PostedWrites > 0 ? PostedWrites : 1)
   ) axi_master (
       .clock(clock),
       .reset(reset),
       .mem(memory_link),
+      .rd_req_cacheable(memory_read_cacheable),
       .axi(l2_axi)
   );
 

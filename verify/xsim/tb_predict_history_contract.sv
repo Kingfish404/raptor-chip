@@ -105,6 +105,7 @@ module tb_predict_history_pipeline;
   rapt_idu idu (.*);
   rapt_cmu cmu (.*);
   rapt_bpu bpu (
+      .decode_target_q('0),
       .preserve_fetch(1'b0),
       .*
   );
@@ -184,8 +185,10 @@ module tb_predict_history_pipeline;
     receive(32'h00000463, 'h1002, 'h2000, 1);
     check(
         idu_bpu.history_valid && idu_bpu.history_taken && idu_bpu.history_pc_bit
-        && idu_bpu.history_recover,
-        "decode branch/resteer event");
+        && idu.redirect && !idu_bpu.history_recover,
+        "decode branch/pending resteer event");
+    tick(1);
+    check(idu_bpu.history_recover && !idu_bpu.history_valid, "delayed history recovery");
     check(bpu.dirp_read_ghr == 1 && bpu.dirp_read_phr == 1,
           "resteer query uses post-decode watermark");
     tick(1);

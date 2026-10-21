@@ -97,7 +97,9 @@ module rapt_bpu_btb #(
     assign way_hit[w] = valid[w][r_raddr_valid[w]] && (r_rtag_cmp[w] == tag[r_raddr_tag[w]]);
     assign w_way_match[w] = valid[w][waddr] && (wd_tag == tag[waddr]);
     always_ff @(posedge clock) begin
-      if (ren && !(target_write && waddr == raddr)) target_q <= target[raddr];
+      // Forward collisions after the edge; keep the address comparison off
+      // the RAM read enable, including reads whose result will be discarded.
+      if (ren) target_q <= target[raddr];
       if (target_write) target[waddr] <= wd_target;
     end
     // During an enabled lookup, capture any target write speculatively.

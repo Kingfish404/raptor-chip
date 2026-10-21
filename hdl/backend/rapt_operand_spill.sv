@@ -68,21 +68,15 @@ module rapt_operand_spill #(
   // Ready/index depend only on registered capacity and lane position, not on
   // allocate_valid. Reserving every earlier lane removes admission-valid from
   // the capacity cone and matches the ROU's conservative full-prefix policy.
-  always_comb begin
-    automatic logic [Entries-1:0] remaining;
-    remaining = available;
-    for (int a = 0; a < AllocateWidth; a++) begin
-      allocate_ready[a] = 1'b0;
-      allocate_index[a] = '0;
-      for (int e = 0; e < Entries; e++) begin
-        if (!allocate_ready[a] && remaining[e]) begin
-          allocate_index[a] = IndexBits'(e);
-          allocate_ready[a] = 1'b1;
-          remaining[e] = 1'b0;
-        end
-      end
-    end
-  end
+  rapt_rank_select #(
+      .Entries(Entries),
+      .NumSelect(AllocateWidth),
+      .IndexBits(IndexBits)
+  ) u_free_rank_select (
+      .available(available),
+      .found(allocate_ready),
+      .index(allocate_index)
+  );
 
   for (genvar p = 0; p < ReadPorts; p++) begin : g_read
     always_comb begin
@@ -138,7 +132,7 @@ module rapt_operand_spill #(
       end
     end
     always_ff @(posedge clock) begin
-      if (!(reset || flush)) begin
+      begin
         if (allocation_hit) payload_q[e] <= allocate_payload[allocation_lane];
         else if (update_valid[e] && entry_valid[e]) payload_q[e] <= update_payload[e];
       end
