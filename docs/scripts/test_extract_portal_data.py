@@ -171,7 +171,8 @@ class PayloadTest(unittest.TestCase):
         edges = {(edge["from"], edge["to"]) for edge in ext.documented_flow()}
         self.assertIn(("rapt_bus", "rapt_axi_master"), edges)
         self.assertIn(("rapt_axi_master", "rapt_l2"), edges)
-        self.assertIn(("rapt_l2", "soc_pmem"), edges)
+        self.assertIn(("rapt_l2", "rapt_router"), edges)
+        self.assertIn(("rapt_router", "soc_pmem"), edges)
         self.assertNotIn(("rapt_l2", "rapt_axi_master"), edges)
         for domain, kernel in (("memory", "list"), ("mmio", "")):
             path = ext.path_for_domain(domain, kernel)
@@ -247,10 +248,17 @@ class LiveRepoTest(unittest.TestCase):
         self.assertEqual(data["config"]["values"]["operand_spill_entries"], 16)
         self.assertEqual(data["config"]["values"]["uoq_entries"], 8)
         self.assertEqual(data["config"]["values"]["store_follower"], 1)
+        self.assertEqual(data["config"]["values"]["dtlb_entries"], 64)
+        self.assertEqual(data["config"]["values"]["dtlb_ways"], 2)
+        self.assertEqual(data["config"]["values"]["tage_base_entries"], 1024)
+        self.assertEqual(data["config"]["values"]["tage_tagged_entries"], 1024)
+        self.assertEqual(data["config"]["values"]["iq_reclaim_on_issue"], 0)
         operand = next(m for m in data["modules"] if m["id"] == "rapt_operand_stage")
         self.assertEqual(operand["file"], "hdl/backend/rapt_rou.sv")
         shown = {n["id"] for n in data["graph"]["nodes"] if n.get("display")}
         for required in (
+            "rapt_completion_stage",
+            "rapt_l2tlb",
             "rapt_operand_stage",
             "rapt_ieu_muldiv",
             "rapt_lsu_sq",
@@ -259,6 +267,7 @@ class LiveRepoTest(unittest.TestCase):
             "rapt_l1d_mshr",
         ):
             self.assertIn(required, shown)
+        self.assertNotIn("rapt_cdb_arb", shown)
         l1i_n = next(n for n in data["graph"]["nodes"] if n["id"] == "rapt_l1i")
         l1d_n = next(n for n in data["graph"]["nodes"] if n["id"] == "rapt_l1d")
         self.assertIn(f"{data['config']['values']['l1i_kib']} KiB", l1i_n["model_note"])
@@ -274,7 +283,7 @@ class LiveRepoTest(unittest.TestCase):
         self.assertIn(("rapt_frontend", "rapt_ifu"), inst)
         self.assertTrue(any(c["name"] == "run-rv32" for c in data["makefile"]["commands"]))
         overview = next(d for d in data["docs"] if d["name"] == "README.md")
-        self.assertEqual(overview["title"], "Raptor - RISC-V Processor Core")
+        self.assertEqual(overview["title"], "Raptor at a glance")
         self.assertFalse(overview["summary"].startswith("---"))
         self.assertTrue(data["graph"]["flow_edges"])
         payload = data["payload"]
@@ -335,7 +344,7 @@ class LiveRepoTest(unittest.TestCase):
         self.assertLess(front["x"], back["x"])
         self.assertLess(back["z"], mem["z"])
         trace = data["trace"]
-        self.assertEqual(trace["kind"], "contract-cycle")
+        self.assertEqual(trace["kind"], "illustrative-occupancy")
         self.assertEqual(trace["committed"], len(payload["instructions"]))
         self.assertGreater(trace["cycles"], 0)
         for fr in trace["frames"]:

@@ -250,8 +250,10 @@ module rapt_ieu_mul #(
     end
 
     // ===== MUL stage-1 -> stage-2 =====
+    // Only m2_v publishes this payload. Keep the late cancellation lookup
+    // off the wide result register's enable; invalid data is unobservable.
+    m2_r <= mul_r_comb;
     if (m1_v && !cancel_tags[m1_tag]) begin
-      m2_r   <= mul_r_comb;
       m2_tag <= m1_tag;
       m2_v   <= 1'b1;
     end else begin

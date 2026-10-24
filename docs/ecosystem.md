@@ -12,7 +12,7 @@ Simulators, FPGA boards, ASIC flow, software stack, and memory maps.
 | ----------- | --------------------------------- | ------------------------------------------------------------- |
 | NEMU        | Software ISS (difftest reference) | `nemu/README.md`                                              |
 | NPC         | Verilator simulator               | `sim/`                                                        |
-| FPGA        | Native CU08/RK boards and LiteX SoCs | [FPGA support](../fpga/README.md) |
+| FPGA        | Native CU08/RK boards and LiteX SoCs | [FPGA support](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/README.md) |
 | ASIC (open) | Yosys + OpenSTA flow              | [yosys-opensta](https://github.com/Kingfish404/yosys-opensta) |
 
 ## Simulators
@@ -40,8 +40,8 @@ NPC is the primary development simulator. With `DIFFTEST=1` (the default), NEMU 
 | **OOC partitions**             | Frontend/backend/cache checkpoints, not a board flow                    | `fpga/ooc/README.md`                         |
 
 Root `make fpga-syn` and `make fpga-pnr` select native CU08-KU15P by default;
-use `FPGA_BOARD=rk-xcku5p-f` for RK. See [native FPGA support](../fpga/README.md)
-for board build options and [LiteX](../fpga/litex/README.md) for BIOS and Linux.
+use `FPGA_BOARD=rk-xcku5p-f` for RK. See [native FPGA support](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/README.md)
+for board build options and [LiteX](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/litex/README.md) for BIOS and Linux.
 
 ## ASIC Flow
 
@@ -69,7 +69,7 @@ with each timing or area measurement.
 
 ## Physical Address Contract
 
-[`hdl/configs/memory_map.json`](../hdl/configs/memory_map.json) records the shared 32-bit physical addresses and the main RAM
+[`hdl/configs/memory_map.json`](https://github.com/Kingfish404/raptor-chip/blob/master/hdl/configs/memory_map.json) records the shared 32-bit physical addresses and the main RAM
 capacity of each board or simulator profile. The window starts at `0x80000000`.
 KU15P CU07/CU08 with MIG map 2 GiB through `0xffffffff`; RV32 and RV64 use
 the same hardware map. RV32 Linux advertises only the lower 1 GiB in its device
@@ -77,7 +77,7 @@ tree until high-memory support is validated. KU15P LiteDRAM and AXAU15 MIG
 remain at 1 GiB. Other board capacities are listed in the JSON file.
 
 `make memory-map-check` cross-checks the contract against RTL, LiteX, firmware,
-NPC and NEMU constants, and that the generated [`app/lib/raptor_platform.h`](../app/lib/raptor_platform.h) is current.
+NPC and NEMU constants, and that the generated [`app/lib/raptor_platform.h`](https://github.com/Kingfish404/raptor-chip/blob/master/app/lib/raptor_platform.h) is current.
 Guest test programs include that header (`RAPTOR_<REGION>_BASE`/`_SIZE`,
 `RAPTOR_PTE()`) instead of copying addresses; the verify Makefile adds
 `-I app/lib` to every guest compile. The generator and checker live in `verify/scripts/`. After editing the JSON, run
@@ -92,23 +92,11 @@ RAM. Their default profiles retain the smaller legacy RAM capacity. In the
 large profile, `0xa0000000` is RAM, not the separate legacy SDRAM or software
 MMIO region. LiteX UART is at `0x11001800`; high addresses within the large-profile RAM window access memory.
 
-The boundary program in `app/tests/baremetal/pmem_2g_boundaries.S` checks
-`0xa0000000`, `0xc0000000`, `0xf0001800`, and the final word and byte of RAM.
-Its RV64 path also rejects an address with arbitrary noncanonical upper bits.
-Build it for both XLENs with the repository RISC-V toolchain (add `-I app/lib`) and run each image
-with `make -C sim run SIM_MEM_PROFILE=large IMG=/absolute/path/to/image.bin`
-(add `VFLAGS=-DRAPT_RV64` for RV64). The `run` target selects the matching
-NEMU 2 GiB reference for differential checking. The program exits through the
-SiFive finisher with `0x5555` on success or `0x3333` on failure; `0xf0001800`
-must produce no serial output.
-
-The source contract, SoC generation and simulator regressions cannot prove
-that a physical KU15P DDR build meets timing or that every DDR cell works. Board
-bring-up must read and write `0xa0000000`, `0xc0000000` and near `0xffffffff`,
-check that `0xf0001800` does not activate UART, and exercise the selected
-SD/Ethernet hardware. Throughput, CoreMark/MHz, timing and resource results
-from matching builds are needed before making a 64-bit Wishbone performance
-claim.
+The RV32/RV64 boundary test in `app/tests/baremetal/pmem_2g_boundaries.S`
+checks the upper RAM windows and that high RAM addresses do not alias UART.
+See the [simulation guide](https://github.com/Kingfish404/raptor-chip/blob/master/sim/README.md)
+for running the large-memory profile. Board DDR validation and routed timing
+remain separate from simulator checks.
 
 ## NPC Memory Map
 
@@ -134,37 +122,6 @@ Use `make microbench-rv32 SIM_RANDOM_DELAY=31` or `make coremark-rv64 SIM_RANDOM
 `SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=42` to exercise reproducible AXI memory
 wait states. `cpu-tests-rv32` / `cpu-tests-rv64` run AM CPU tests
 under the same delay model. These targets use the NPC memory map above.
-
-## Reference Device Trees
-
-### Spike
-
-Source: [`riscv-isa-sim/riscv/platform.h`](https://github.com/riscv-software-src/riscv-isa-sim/blob/master/riscv/platform.h)
-
-```c
-#define DEFAULT_RSTVEC     0x00001000
-#define DEFAULT_ISA        "rv64imafdc_zicntr_zihpm"
-#define DEFAULT_PRIV       "MSU"
-#define CLINT_BASE         0x02000000
-#define CLINT_SIZE         0x000c0000
-#define PLIC_BASE          0x0c000000
-#define PLIC_SIZE          0x01000000
-#define NS16550_BASE       0x10000000
-#define NS16550_SIZE       0x100
-#define DRAM_BASE          0x80000000
-```
-
-### QEMU (`virt`)
-
-Source: [`hw/riscv/virt.c`](https://github.com/qemu/qemu/blob/master/hw/riscv/virt.c)
-
-```c
-[VIRT_CLINT]  = { 0x02000000, 0x00010000 },
-[VIRT_PLIC]   = { 0x0c000000, VIRT_PLIC_SIZE(...) },
-[VIRT_UART0]  = { 0x10000000, 0x00000100 },
-[VIRT_FLASH]  = { 0x20000000, 0x04000000 },
-[VIRT_DRAM]   = { 0x80000000, 0x00000000 },
-```
 
 ## Upstream & Related Projects
 

@@ -13,9 +13,11 @@
 !/NETBOOT.md
 !/RV64-NETWORK.md
 !/CM005-FMC-C.md
+!/CM005-BRIDGE.md
 !mk/
 !mk/*.mk
 !scripts/*.tcl
+!tests/*.tcl
 !patches/*.patch
 
 # LiteX build artifacts

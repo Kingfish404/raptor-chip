@@ -48,7 +48,8 @@ module rapt_ifu #(
   logic [XLEN-1:0] sequential[Width];
   logic [XLEN-1:0] cond_target[Width];
   logic secondary_query;
-  int secondary_index;
+  localparam int SlotBits = Width > 1 ? $clog2(Width) : 1;
+  logic [SlotBits-1:0] secondary_index;
   logic blocked;
   typedef struct packed {
     logic [XLEN-1:0] pc;
@@ -384,7 +385,7 @@ module rapt_ifu #(
       for (int older = 0; older < s; older++)
       before_control &= !is_control[older] && !is_serial[older];
       if (before_control && is_cond[s]) begin
-        secondary_index = s;
+        secondary_index = SlotBits'(s);
         secondary_query = available[s] && !response.predicted_taken && !response.trap;
         for (int older = 0; older < s; older++) secondary_query &= available[older];
       end
@@ -397,7 +398,7 @@ module rapt_ifu #(
   // Otherwise synthesis can share mutually masked decode/cancel terms through
   // the returned direction and form a combinational loop across IFU and BPU.
   // Packing still selects at most one conditional and gates history on accept.
-  assign ifu_bpu.aux_query = ResponseStage ? response_valid_q : secondary_query;
+  assign ifu_bpu.aux_query = ResponseStage ? response_valid_q : 1'b1;
 `else
   assign ifu_bpu.aux_query = secondary_query;
 `endif
@@ -407,7 +408,7 @@ module rapt_ifu #(
   // position selects the direction, so L1I data never reaches an address.
   if (!ResponseStage && Width > 1) begin : g_positional_aux
     assign ifu_bpu.aux_pc = response.pc;
-    assign ifu_bpu.aux_position = 4'(offset[secondary_index] - 1);
+    assign ifu_bpu.aux_position = 4'(offset[CountBits'(secondary_index)] - 1);
   end else begin : g_exact_aux
     assign ifu_bpu.aux_pc = ResponseStage ? aux_pc_q : candidate_pc[secondary_index];
     assign ifu_bpu.aux_position = '0;
@@ -508,7 +509,9 @@ module rapt_ifu #(
     logic conditional, direct;
   } hint_t;
   (* ram_style = "block" *) hint_t hints[HintEntries];
-  hint_t hint_q, hint_train;
+  hint_t hint_q, hint_train, hint_write_q;
+  logic hint_write_valid_q;
+  logic [HintBits-1:0] hint_write_index_q;
   logic hint_valid_read[1];
   logic hint_valid_q, query_valid_q, saved_valid_q;
   logic [XLEN-1:0] query_pc_q;
@@ -532,8 +535,8 @@ module rapt_ifu #(
       .clear(reset || cmu_bcast.fence_i),
       .read_index('{hint_read_index}),
       .read_bit(hint_valid_read),
-      .write_valid(recv_ready && !response_stop),
-      .write_index(hint_write_index),
+      .write_valid(hint_write_valid_q),
+      .write_index(hint_write_index_q),
       .write_bit(1'b1)
   );
   assign hint_match = hint_valid_q && hint_q.tag == pc_ifu[HintBits+HintTagBits:HintBits+1];
@@ -564,7 +567,7 @@ module rapt_ifu #(
       control_seen |= is_control[s];
     end
     hint_train.conditional = secondary_query;
-    hint_train.position = 4'(offset[secondary_index] - 1);
+    hint_train.position = 4'(offset[CountBits'(secondary_index)] - 1);
     hint_train.delta = 16'(cond_target[secondary_index] - response.pc);
     for (int s = 1; s < Width; s++) begin
       if (s < fetched_count && expanded[s][6:0] == `RAPT_OP_JAL___) begin
@@ -590,8 +593,14 @@ module rapt_ifu #(
     query_valid_q <= 1'b1;
     hint_q <= hints[hint_read_index];
     hint_valid_q <= hint_valid_read[0];
+    // Training payload and address cross the same edge; late fetch validity
+    // only sets the pending bit. Invalidation cancels both pending generations.
+    hint_write_q <= hint_train;
+    hint_write_index_q <= hint_write_index;
+    hint_write_valid_q <= recv_ready && !response_stop && !reset && !cmu_bcast.fence_i;
+    if (hint_write_valid_q && !reset && !cmu_bcast.fence_i)
+      hints[hint_write_index_q] <= hint_write_q;
     if (recv_ready && !response_stop) begin
-      hints[hint_write_index] <= hint_train;
       stride_q <= OffsetBits'(offset[fetched_count]);
     end
     if (query_match && !saved_valid_q) begin
@@ -635,7 +644,7 @@ module rapt_ifu #(
 `endif
   always_ff @(posedge clock) begin
     if (reset) begin
-      pc_ifu_q <= XLEN'(`RAPT_PC_INIT) >> 1;
+      pc_ifu_q <= (XLEN-1)'(XLEN'(`RAPT_PC_INIT) >> 1);
       held_count <= 0;
       blocked <= 1'b0;
 `ifndef SYNTHESIS
@@ -701,14 +710,20 @@ module rapt_ifu #(
         if (!ResponseStage) pc_ifu_q <= nextpc[XLEN-1:1];
         held_count <= CountBits'(fetched_count);
         for (int s = 0; s < Width; s++) begin
-          held[s] <= fetched[s];
           if (s < fetched_count && (is_serial[s] || fetched[s].trap)) blocked <= 1'b1;
         end
       end else begin
         held_count <= CountBits'(32'(held_count) - consumed);
-        for (int s = 0; s < Width; s++)
-        if (s + consumed < 32'(held_count)) held[s] <= held[s+consumed];
       end
+    end
+  end
+  // A free payload bank can sample even a missing/faulted fetch. Only the
+  // count above publishes it. Translation/hit/prediction validity therefore
+  // cannot fan out to the wide packet register's capture enable.
+  always_ff @(posedge clock) begin
+    for (int s = 0; s < Width; s++) begin
+      if (32'(held_count) == consumed) held[s] <= fetched[s];
+      else if (s + consumed < 32'(held_count)) held[s] <= held[s+consumed];
     end
   end
   if ((Width & (Width + 1)) != 0) begin : g_count_range

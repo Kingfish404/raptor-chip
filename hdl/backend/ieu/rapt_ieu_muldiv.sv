@@ -224,6 +224,7 @@ module rapt_ieu_muldiv #(
 
 `ifdef RAPT_M_EXTENSION
   rapt_ieu_mul #(
+      .XLEN(XLEN),
       .TAG_W(MDQLen)
   ) mul (
       .clock(clock),

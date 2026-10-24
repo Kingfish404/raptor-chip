@@ -68,6 +68,9 @@ module axi2rnp #(
     output logic [1:0] rnp_rwstate
 );
 
+  // Burst length owns completion; RNP does not carry WLAST.
+  wire unused_axi_wlast = axi_wlast;
+
   // One AXI owner at a time. Split an INCR/FIXED burst into single-word
   // RNP transactions; retain RID and emit RLAST/B only at the AXI boundary.
   typedef enum logic [2:0] {
@@ -217,6 +220,9 @@ module rnp2axi #(
     input [1:0] rnp_rwstate
 );
 
+  // This combinational, single-owner bridge has no RNP response metadata.
+  wire unused_axi_metadata = ^{clk, reset, axi_rid, axi_rlast, axi_rresp, axi_bid, axi_bresp};
+
   assign axi_arburst = 0;
   assign axi_arsize = 2;
   assign axi_arlen = 0;
@@ -283,5 +289,5 @@ module wrap_rnp #(
     input clk,
     input reset
 );
-
+  wire unused_inputs = clk ^ reset;
 endmodule

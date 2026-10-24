@@ -24,7 +24,8 @@ from litex.gen import *
 from litex.build.io import DifferentialInput
 from litex.build.parser import LiteXArgumentParser
 
-from litex.soc.cores.clock import USPMMCM, USPIDELAYCTRL
+from litex.soc.cores.clock import USPMMCM
+from usp_clock import USPIDELAYCTRL
 from litex.soc.cores.cpu import CPUS
 from litex.soc.cores.led import LedChaser
 from litex.soc.integration.builder import Builder
@@ -109,7 +110,12 @@ def configure_ku15p_timing(platform, board, with_litedram=False, with_mig=False,
 
 class _CRG(LiteXModule):
     def __init__(self, platform, sys_clk_freq, with_litedram=False, with_ethernet=False,
-                 eth_speed=1000, cm005_oversample=False):
+                 eth_speed=1000, cm005_oversample=False, cm005_tx_split=False,
+                 cm005_tx_dual=False, external_sys=None):
+        if cm005_tx_dual and not cm005_tx_split:
+            raise ValueError("Dual-port TX clocks require split PHY clocks")
+        if cm005_tx_split and not (with_ethernet and cm005_oversample and eth_speed == 1000):
+            raise ValueError("Split TX clocks require oversampled gigabit Ethernet")
         self.rst = Signal()
         self.cd_sys = ClockDomain()
         self.cd_por = ClockDomain()
@@ -118,6 +124,13 @@ class _CRG(LiteXModule):
             if cm005_oversample and eth_speed == 1000:
                 self.cd_cm005_tx_raw = ClockDomain(reset_less=True)
                 self.cd_cm005_tx_serial = ClockDomain(reset_less=True)
+                if cm005_tx_split:
+                    self.cd_cm005_tx_phy = ClockDomain(reset_less=True)
+                if cm005_tx_dual:
+                    self.cd_cm005_b_tx_raw = ClockDomain(reset_less=True)
+                    self.cd_cm005_b_tx = ClockDomain(reset_less=True)
+                    self.cd_cm005_b_tx_serial = ClockDomain(reset_less=True)
+                    self.cd_cm005_b_tx_phy = ClockDomain(reset_less=True)
             else:
                 self.cd_cm005_tx_shifted = ClockDomain(reset_less=True)
             if cm005_oversample:
@@ -152,9 +165,15 @@ class _CRG(LiteXModule):
         ]
         self.sync.por += If(~por_done, por_count.eq(por_count - 1))
 
-        self.pll = pll = USPMMCM(speedgrade=-2)
-        self.comb += pll.reset.eq(~por_done | self.rst)
-        if with_litedram:
+        if external_sys is not None and with_litedram:
+            raise ValueError("External system clock cannot drive the LiteDRAM CRG")
+        if external_sys is None:
+            self.pll = pll = USPMMCM(speedgrade=-2)
+            self.comb += pll.reset.eq(~por_done | self.rst)
+        if external_sys is not None:
+            self.comb += [self.cd_sys.clk.eq(external_sys[0]),
+                          self.cd_sys.rst.eq(external_sys[1])]
+        elif with_litedram:
             clk100_ddr_pads = platform.request("clk100_ddr")
             clk100_ddr = Signal()
             platform.add_period_constraint(clk100_ddr_pads.p, 1e9 / 100e6)
@@ -196,14 +215,43 @@ class _CRG(LiteXModule):
                 # the 125 MHz byte clock with a matched dedicated divider.
                 ethpll.create_clkout(self.cd_cm005_tx_raw, 250e6, buf=None,
                                      margin=0, with_reset=False)
-                self.specials += [
-                    Instance("BUFGCE_DIV", name="cm005_tx_serial_buf",
+                if cm005_tx_split:
+                    # The PHY I/O clock has only the DDR launch loads. Keep
+                    # the MAC on its own, phase-aligned divide-by-two buffer.
+                    self.specials += [
+                        Instance("BUFGCE", name="cm005_tx_serial_buf", attr={"keep"}, p_CE_TYPE="SYNC",
+                            i_I=self.cd_cm005_tx_raw.clk, i_CE=ethpll.locked,
+                            o_O=self.cd_cm005_tx_serial.clk),
+                        Instance("BUFGCE_DIV", name="cm005_tx_phy_buf", attr={"keep"},
+                            p_BUFGCE_DIVIDE=2, i_I=self.cd_cm005_tx_raw.clk,
+                            i_CE=1, i_CLR=~ethpll.locked, o_O=self.cd_cm005_tx_phy.clk),
+                    ]
+                    if cm005_tx_dual:
+                        self.eth_b_pll = bpll = USPMMCM(speedgrade=-2, name="cm005_b_tx_pll")
+                        self.comb += bpll.reset.eq(~por_done | self.rst)
+                        bpll.register_clkin(clk100, 100e6)
+                        bpll.create_clkout(self.cd_cm005_b_tx_raw, 250e6, buf=None,
+                                          margin=0, with_reset=False)
+                        self.specials += [
+                            Instance("BUFGCE_DIV", name="cm005_b_tx_serial_buf", attr={"keep"},
+                                p_BUFGCE_DIVIDE=1, i_I=self.cd_cm005_b_tx_raw.clk,
+                                i_CE=1, i_CLR=~bpll.locked,
+                                o_O=self.cd_cm005_b_tx_serial.clk),
+                            Instance("BUFGCE_DIV", name="cm005_b_tx_phy_buf", attr={"keep"},
+                                p_BUFGCE_DIVIDE=2, i_I=self.cd_cm005_b_tx_raw.clk,
+                                i_CE=1, i_CLR=~bpll.locked, o_O=self.cd_cm005_b_tx_phy.clk),
+                            Instance("BUFGCE_DIV", name="cm005_b_tx_word_buf", attr={"keep"},
+                                p_BUFGCE_DIVIDE=2, i_I=self.cd_cm005_b_tx_raw.clk,
+                                i_CE=1, i_CLR=~bpll.locked, o_O=self.cd_cm005_b_tx.clk),
+                        ]
+                else:
+                    self.specials += Instance("BUFGCE_DIV", name="cm005_tx_serial_buf",
                         p_BUFGCE_DIVIDE=1, i_I=self.cd_cm005_tx_raw.clk,
-                        i_CE=1, i_CLR=~ethpll.locked, o_O=self.cd_cm005_tx_serial.clk),
-                    Instance("BUFGCE_DIV", name="cm005_tx_word_buf",
+                        i_CE=1, i_CLR=~ethpll.locked, o_O=self.cd_cm005_tx_serial.clk)
+                self.specials += Instance("BUFGCE_DIV", name="cm005_tx_word_buf",
+                        attr={"keep"} if cm005_tx_split else set(),
                         p_BUFGCE_DIVIDE=2, i_I=self.cd_cm005_tx_raw.clk,
-                        i_CE=1, i_CLR=~ethpll.locked, o_O=self.cd_cm005_tx.clk),
-                ]
+                        i_CE=1, i_CLR=~ethpll.locked, o_O=self.cd_cm005_tx.clk)
             else:
                 ethpll.create_clkout(self.cd_cm005_tx, eth_clk_freq, with_reset=False)
                 ethpll.create_clkout(self.cd_cm005_tx_shifted, eth_clk_freq, phase=90, with_reset=False)
@@ -225,7 +273,13 @@ class _CRG(LiteXModule):
                 self.idelayctrl = USPIDELAYCTRL(cd_ref=self.cd_idelay, cd_sys=self.cd_cm005_ready)
 
         # Ignore the sys_clk -> pll.clkin path created by the SoC reset.
-        platform.add_false_path_constraints(self.cd_sys.clk, pll.clkin)
+        if external_sys is None:
+            # LiteX preserves signals used as timing endpoints. Preserving
+            # the MMCM input alias separately from the shared input clock
+            # inserts an identity LUT on the CU08 clock tree. Reference the
+            # actual input clock for the dual-port design instead.
+            clock_input = clk100 if cm005_tx_dual else pll.clkin
+            platform.add_false_path_constraints(self.cd_sys.clk, clock_input)
 
 
 # AXI / DDR4 MIG ---------------------------------------------------------------
@@ -421,6 +475,7 @@ class RaptorKU15PSoC(SoCCore):
         with_sdcard=False,
         sdcard_autoboot=False,
         with_ethernet=False,
+        with_cm005_bridge=None,
         eth_speed=1000,
         fmc_slot=None,
         eth_port="a",
@@ -432,7 +487,13 @@ class RaptorKU15PSoC(SoCCore):
         fmc_slot = (fmc_slot or board.default_fmc_slot).lower()
         eth_port = eth_port.lower()
         oversampled_rx = (board.name, fmc_slot, eth_port) == ("mlk_cu08_ku15p", "c", "a")
-        self.cm005_oversampled_rx = with_ethernet and oversampled_rx
+        if with_cm005_bridge is None:
+            with_cm005_bridge = board.name == "mlk_cu08_ku15p"
+        if with_cm005_bridge and (not oversampled_rx or eth_speed != 1000 or with_litedram):
+            raise ValueError("CM005 forwarding requires CU08 FMC_C port A, 1000 Mb/s and MIG or SRAM; "
+                             "use --without-cm005-bridge for other wiring or LiteDRAM")
+        self.cm005_oversampled_rx = (with_ethernet or with_cm005_bridge) and oversampled_rx
+        self.with_cm005_bridge = with_cm005_bridge
         platform = board.platform(toolchain="vivado")
 
         kwargs["cpu_type"] = "raptor"
@@ -468,10 +529,19 @@ class RaptorKU15PSoC(SoCCore):
         if eth_speed not in (100, 1000):
             raise ValueError("CM005 speed must be 100 or 1000 Mb/s")
         self.crg = _CRG(platform, sys_clk_freq, with_litedram=with_litedram,
-                        with_ethernet=with_ethernet, eth_speed=eth_speed,
-                        cm005_oversample=oversampled_rx)
+                        with_ethernet=with_ethernet or with_cm005_bridge, eth_speed=eth_speed,
+                        cm005_oversample=oversampled_rx,
+                        cm005_tx_split=with_cm005_bridge, cm005_tx_dual=with_cm005_bridge)
 
-        if with_ethernet:
+        if with_cm005_bridge:
+            from cm005_bridge import add_cm005_forwarder
+            from cm005_switch import add_cpu_frame_mac
+            cpu_mac = add_cpu_frame_mac(self) if with_ethernet else None
+            add_cm005_forwarder(self, platform, sys_clk_freq, cpu_mac=cpu_mac)
+            self.add_constant("CM005_BRIDGE", 1)
+            self.add_constant("CM005_ETH_SPEED", 1000)
+            self.add_constant("CM005_RX_OVERSAMPLE", 1)
+        elif with_ethernet:
             from cm005 import CM005PHY, add_pads
             from cm005_oversample import SAMPLE_IDELAY_FREQ
             clocks, pads = add_pads(platform, board.name, fmc_slot, eth_port)
@@ -511,131 +581,10 @@ class RaptorKU15PSoC(SoCCore):
                               with_timing_constraints=False)
             self.add_constant("CM005_ETH_SPEED", eth_speed)
             self.add_constant("CM005_RX_OVERSAMPLE", int(oversampled_rx))
-            if oversampled_rx and eth_speed == 1000:
-                # At 125 MHz DDR, use fast output edges on data/control and
-                # forwarded clock together; keep the PHY setup/hold budget.
-                platform.add_platform_command(
-                    "set_property SLEW FAST [get_ports {{{txclk} {txdata}[*] {txctl}}}]",
-                    txclk=clocks.tx, txdata=pads.tx_data, txctl=pads.tx_ctl)
-            if oversampled_rx:
-                # These inputs are intentionally asynchronous to the 1.25 GS/s
-                # sampler. Bound the first-stage data paths; aperture/relative
-                # lane delay is a separate sampling-window verification item.
-                platform.add_platform_command(
-                    "set_max_delay 2.0 -datapath_only "
-                    "-from [get_ports {{{rxclk} {rxdata}[*] {rxctl}}}] "
-                    "-to [get_pins -of_objects [get_cells -hier -filter "
-                    "{{REF_NAME == ISERDESE3 && NAME =~ *cm005_sample_*}}] "
-                    "-filter {{REF_PIN_NAME == D}}]",
-                    rxclk=clocks.rx, rxdata=pads.rx_data, rxctl=pads.rx_ctl)
-                platform.add_platform_command(
-                    "set_property LOC MMCM_X0Y8 [get_cells cm005_sample_pll]")
-                # This auto-inserted BUFG exists after synthesis/optimization,
-                # not during the synthesis-stage XDC read.
-                platform.toolchain.pre_placement_commands += [
-                    "set_property CLOCK_DEDICATED_ROUTE SAME_CMT_COLUMN "
-                    "[get_nets -of_objects [get_pins clk100_IBUF_BUFG_inst/O]]"]
-                tx_clock_net = "cm005_tx_serial_clk" if eth_speed == 1000 else "cm005_tx_shifted_clk"
-                # Synthesis merges cm005_sample_div_clk into eth_rx_clk.
-                # Buffer output pins survive that alias merge, unlike the
-                # original net name used by the physical clock constraints.
-                sampling_clock_nets = (
-                    "[get_nets -of_objects [get_pins "
-                    "{{cm005_sample_fast_buf/O cm005_sample_word_buf/O}}]]")
-                platform.add_platform_command(
-                    "set_property USER_CLOCK_ROOT X2Y8 " + sampling_clock_nets)
-                platform.add_platform_command(
-                    "set_property USER_CLOCK_ROOT X2Y8 "
-                    "[get_nets {{cm005_tx_clk " + tx_clock_net + "}}]")
-                if eth_speed == 1000:
-                    platform.add_platform_command(
-                        "set_property CLOCK_DELAY_GROUP cm005_transmit "
-                        "[get_nets {{cm005_tx_clk cm005_tx_serial_clk}}]")
-                    # The complete MAC spreads TX clock loads farther than
-                    # a PHY-only test. Keep this small clock domain local to
-                    # the I/O region so its clock tree does not consume the
-                    # RGMII setup/hold window (UG912 CLOCK_LOW_FANOUT).
-                    platform.add_platform_command(
-                        "set_property CLOCK_LOW_FANOUT TRUE "
-                        "[get_nets {{cm005_tx_clk cm005_tx_serial_clk}}]")
-                platform.add_platform_command(
-                    "set_property CLOCK_DELAY_GROUP cm005_sampling "
-                    + sampling_clock_nets)
-                platform.toolchain.bitstream_commands += [
-                    "source {{" + os.path.join(_here, "scripts", "check_cm005_aperture.tcl") + "}}",
-                    "cm005_check_sampling_aperture cm005_aperture.rpt",
-                ]
-            else:
-                # Platform period constraints are emitted after user commands.
-                # Define this clock before the following I/O delays reference it.
-                platform.add_platform_command(
-                    f"create_clock -name cm005_rxclk -period {40.0 if eth_speed == 100 else 8.0} [get_ports {{rxclk}}]",
-                    rxclk=clocks.rx)
-            platform.add_false_path_constraints(self.crg.cd_sys.clk, self.ethphy.crg.cd_eth_rx.clk)
-            platform.add_false_path_constraints(self.crg.cd_cm005_tx.clk, self.ethphy.crg.cd_eth_rx.clk)
-            # LiteEth's TX CDC is an AsyncFIFO (gray-coded pointers) written on
-            # sys_clk and read on the 125 MHz cm005_tx_clk. Without this group
-            # the FIFO's dual-clock LUTRAM path is timed as a synchronous
-            # 4 ns path and becomes the reported SoC WNS.
-            platform.add_false_path_constraints(self.crg.cd_sys.clk, self.crg.cd_cm005_tx.clk)
-            # YT8531 datasheet table 95: delayed RX clock guarantees 1 ns
-            # setup/hold. Constrain both DDR edges, including 0.2 ns PCB margin.
-            # Describe the NEXT transition after each sampling edge. STA then
-            # checks setup at the next half-cycle and hold at the current edge.
-            # IDDRE1 retains setup checks on C and CB even when Q2 is unused.
-            # Keep both sampling edges constrained in 100M mode too: the PHY
-            # repeats the nibble, so allowing an independent transition in
-            # each half-cycle is conservative. Preserve the same 1 ns PHY
-            # setup/hold guarantee and 0.2 ns PCB margin at both edges.
-            rx_max = 19.2 if eth_speed == 100 else 3.2
-            for edge in (() if oversampled_rx else ("", "-clock_fall -add_delay")):
-                platform.add_platform_command(
-                    "set_input_delay -clock [get_clocks -of_objects [get_ports {rxclk}]] "
-                    f"-max {rx_max} {edge} [get_ports {{{{ {{rxdata}}[*] {{rxctl}} }}}}]",
-                    rxclk=clocks.rx, rxdata=pads.rx_data, rxctl=pads.rx_ctl)
-                platform.add_platform_command(
-                    "set_input_delay -clock [get_clocks -of_objects [get_ports {rxclk}]] "
-                    f"-min 0.8 {edge} [get_ports {{{{ {{rxdata}}[*] {{rxctl}} }}}}]",
-                    rxclk=clocks.rx, rxdata=pads.rx_data, rxctl=pads.rx_ctl)
-            # UltraScale+ defaults to LATENCY phase-shift modeling. RGMII
-            # samples at the forwarded quarter-cycle edge, so model that
-            # edge explicitly (UG906 MMCM/PLL Phase Shift Modes).
-            if not (oversampled_rx and eth_speed == 1000):
-                platform.add_platform_command(
-                    "set_property PHASESHIFT_MODE WAVEFORM "
-                    "[get_cells -hier -filter {{REF_NAME == MMCME4_ADV && CLKOUT1_PHASE == 90.000}}]")
-            if tuned_ethernet:
-                # CU08 FMCA/ETHA DDR IO is in X2Y8. Keep its MMCM and clock
-                # roots nearby; otherwise the RX clock insertion can exceed
-                # the external hold window. Use only dedicated clock routing
-                # for the shared 100 MHz input's remote MMCM load.
-                platform.add_platform_command(
-                    "set_property LOC MMCM_X0Y8 [get_cells -hier -filter "
-                    "{{REF_NAME == MMCME4_ADV && CLKOUT1_PHASE == 90.000}}]")
-                platform.add_platform_command(
-                    "set_property CLOCK_DEDICATED_ROUTE SAME_CMT_COLUMN "
-                    "[get_nets -of_objects [get_pins clk100_IBUF_BUFG_inst/O]]")
-                platform.add_platform_command(
-                    "set_property USER_CLOCK_ROOT X2Y8 "
-                    "[get_nets {{eth_rx_clk cm005_tx_clk cm005_tx_shifted_clk}}]")
-            if oversampled_rx and eth_speed == 1000:
-                platform.add_platform_command(
-                    "create_generated_clock -name cm005_txclk -source "
-                    "[get_pins -of_objects [get_cells cm005_tx_clock_ddr] "
-                    "-filter {{REF_PIN_NAME == C || REF_PIN_NAME == CLK}}] "
-                    "-edges {{2 4 6}} [get_ports {txclk}]", txclk=clocks.tx)
-            else:
-                platform.add_platform_command(
-                    "create_generated_clock -name cm005_txclk -source "
-                    "[get_pins -of_objects [get_cells -hier -filter {{NAME =~ *cm005_txclk_ddr}}] "
-                    "-filter {{REF_PIN_NAME == C || REF_PIN_NAME == CLK}}] "
-                    "-divide_by 1 [get_ports {txclk}]", txclk=clocks.tx)
-            for edge in ("", "-clock_fall -add_delay"):
-                for bound, delay in (("max", 1.2), ("min", -1.2)):
-                    platform.add_platform_command(
-                        f"set_output_delay -clock cm005_txclk -{bound} {delay} {edge} "
-                        "[get_ports {{ {txdata}[*] {txctl} }}]",
-                        txdata=pads.tx_data, txctl=pads.tx_ctl)
+            from cm005_timing import constrain_cm005
+            constrain_cm005(platform, self.crg, self.ethphy, clocks, pads,
+                            eth_speed=eth_speed, oversampled_rx=oversampled_rx,
+                            tuned_ethernet=tuned_ethernet)
 
         if with_mig:
             self.ddr4_mig = KU15PDDR4MIG(platform, board.mig_tcl)
@@ -754,6 +703,8 @@ def main(board, soc_class=RaptorKU15PSoC):
     )
     parser.add_target_argument("--with-ethernet", action="store_true",
                                help="Enable the CM005 YT8531 Ethernet MAC.")
+    parser.add_target_argument("--without-cm005-bridge", action="store_true",
+                               help="Disable default CU08 FMC_C A/B forwarding (disconnects KU5P transit).")
     parser.add_target_argument("--sdcard-autoboot", action="store_true",
                                help="Unsupported legacy option; automatic boot is rejected.")
     parser.add_target_argument("--eth-speed", type=int, choices=[100, 1000], default=1000,
@@ -820,6 +771,9 @@ def main(board, soc_class=RaptorKU15PSoC):
                 "--boot-mode=bios requires software compilation; remove "
                 "--no-compile-software or use --boot-mode=custom"
             )
+
+    if board.name in ("mlk_cu08_ku15p", "mlk_cu07_ku15p"):
+        soc_kwargs["with_cm005_bridge"] = False if args.without_cm005_bridge else None
 
     soc = soc_class(
         board=board,
@@ -904,6 +858,12 @@ def main(board, soc_class=RaptorKU15PSoC):
         # Retry routing under the extra setup margin first. The final checkpoint
         # and reports then return to the original clock/hold/jitter constraints.
         soc.platform.toolchain.bitstream_commands.append(final_setup_command)
+    if getattr(soc, "with_cm005_bridge", False):
+        commands = soc.platform.toolchain.bitstream_commands
+        first = commands.index("set bridge_methodology [report_methodology -return_string]")
+        checks = commands[first:first + 5]
+        del commands[first:first + 5]
+        commands.extend(checks)
     if soc.cm005_oversampled_rx:
         # A MIG timing retry can change routing. Check the final layout, not
         # merely the initial routed candidate before that retry.
@@ -923,6 +883,9 @@ def main(board, soc_class=RaptorKU15PSoC):
         print("[litex] No routed checkpoint found; using full implementation")
 
     builder = Builder(soc, **builder_kwargs)
+    if getattr(soc, "with_cm005_bridge", False):
+        from cm005_switch import check_dependency_origins
+        check_dependency_origins()
 
     if args.build:
         builder.build(build_name=board.name, **toolchain_argdict)

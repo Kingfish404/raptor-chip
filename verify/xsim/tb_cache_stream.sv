@@ -37,6 +37,7 @@ module tb_cache_stream #(
   logic release_has_data_o, release_mask_o, release_last_o;
   logic [XLEN-1:0] release_addr_o, release_data_o;
   int clean_releases = 0, dirty_releases = 0, release_acks = 0;
+  int i_ptw_requests = 0;
   string wb_mshr_trace;
   initial
     if ($value$plusargs("WB_MSHR_TRACE=%s", wb_mshr_trace)) begin
@@ -60,6 +61,7 @@ module tb_cache_stream #(
     end
   always @(posedge clock)
     if (!reset) begin
+      if (l1i_bus.arvalid && l1i_bus.ar_ptw && l1i_bus.rready) i_ptw_requests++;
       if (release_valid_o && release_ready_i && release_last_o) begin
         if (release_has_data_o) dirty_releases++;
         else clean_releases++;
@@ -407,6 +409,14 @@ module tb_cache_stream #(
     end
     $fatal(1, "cache stream did not drain");
   endtask
+  task automatic registered_local_store;
+    #1;
+    if (lsu_l1d.wready || !dut.store_accept || l1d_bus.wvalid)
+      $fatal(1, "local store did not stop at the acknowledgement register");
+    @(negedge clock);
+    if (!lsu_l1d.wready || lsu_l1d.werr || l1d_bus.wvalid)
+      $fatal(1, "local store acknowledgement was not registered");
+  endtask
   task automatic store_response_hit_transition;
     logic [XLEN-1:0] base;
     base = XLEN'('h80078000);
@@ -479,6 +489,8 @@ module tb_cache_stream #(
   endtask
   task automatic store_word_for_probe_test(input logic [XLEN-1:0] addr, input logic [XLEN-1:0] data,
                                            input bit require_local = 0);
+    bit accepted_local;
+    accepted_local = 0;
     @(negedge clock);
     lsu_l1d.waddr = addr;
     lsu_l1d.wdata = data;
@@ -487,10 +499,12 @@ module tb_cache_stream #(
     for (int cycle = 0; cycle < 10000; cycle++) begin
       #1;
       if (lsu_l1d.wready) break;
+      @(posedge clock);
+      if (dut.store_accept && dut.local_store_ready) accepted_local = 1;
       @(negedge clock);
     end
     if (!lsu_l1d.wready) $fatal(1, "probe test store timed out addr=%h", addr);
-    if (require_local && !dut.local_store_ready)
+    if (require_local && !accepted_local)
       $fatal(1, "other-victim setup store did not dirty locally addr=%h", addr);
     @(posedge clock);
     @(negedge clock);
@@ -556,8 +570,7 @@ module tb_cache_stream #(
     lsu_l1d.wdata = XLEN == 64 ? XLEN'('hcafebabe) : XLEN'('ha5);
     lsu_l1d.walu = XLEN == 64 ? 8'h0f : 8'h01;
     lsu_l1d.wvalid = 1;
-    #1;
-    if (!lsu_l1d.wready || l1d_bus.wvalid) $fatal(1, "partial WB store was not accepted locally");
+    registered_local_store();
     @(posedge clock);
     @(negedge clock);
     lsu_l1d.waddr = XLEN'('h80000000) + XLEN'(ColdStoreOffset);
@@ -608,8 +621,7 @@ module tb_cache_stream #(
     lsu_l1d.wdata = expected;
     lsu_l1d.walu = 8'({WordBytes{1'b1}});
     lsu_l1d.wvalid = 1;
-    #1;
-    if (!lsu_l1d.wready || l1d_bus.wvalid) $fatal(1, "PTE store did not complete locally");
+    registered_local_store();
     @(posedge clock);
     @(negedge clock);
     lsu_l1d.wvalid = 0;
@@ -682,6 +694,8 @@ module tb_cache_stream #(
 
   task automatic ptw_read_older_store(input bit data_side);
     logic [XLEN-1:0] address;
+    int ptw_before;
+    ptw_before = i_ptw_requests;
     address = data_side ? XLEN'('h8000b000) : XLEN'('h8000c000);
     hold_write_response = 1;
     @(negedge clock);
@@ -741,10 +755,10 @@ module tb_cache_stream #(
       @(negedge clock);
       lsu_l1d.wvalid = 0;
     end else begin
-      for (int cycle = 0; cycle < 10000 && !l1i_bus.rready; cycle++) @(negedge clock);
-      if (!l1i_bus.rready) $fatal(1, "I-side PTW did not resume after store");
-      @(posedge clock);
-      @(negedge clock);
+      // The bus may capture PTW while the registered SQ acknowledgement is visible.
+      for (int cycle = 0; cycle < 10000 && i_ptw_requests == ptw_before; cycle++) @(negedge clock);
+      if (i_ptw_requests != ptw_before + 1)
+        $fatal(1, "I-side PTW did not resume exactly once after store");
       l1i_bus.arvalid = 0;
       for (int cycle = 0; cycle < 10000 && !l1i_bus.ptw_rvalid; cycle++) @(negedge clock);
       if (!l1i_bus.ptw_rvalid || l1i_bus.ptw_rerr || l1i_bus.rdata != ram[index_of(address)])
@@ -761,7 +775,8 @@ module tb_cache_stream #(
   // the one-cycle response of a store already accepted by the bus.
   task automatic ptw_read_pending_store;
     logic [XLEN-1:0] address, expected;
-    int requests_before;
+    int requests_before, ptw_before;
+    ptw_before = i_ptw_requests;
     address = XLEN'('h8000e000);
     expected = (ram[index_of(address)] & ~XLEN'('hff)) | XLEN'('h5a);
     requests_before = write_requests;
@@ -779,15 +794,17 @@ module tb_cache_stream #(
     repeat (8) @(negedge clock);
     hold_write_response = 0;
     for (int cycle = 0; cycle < 10000 && !l1d_bus.wready; cycle++) @(negedge clock);
-    if (!l1d_bus.wready || !lsu_l1d.wready || lsu_l1d.werr || l1i_bus.ptw_rvalid)
+    if (!l1d_bus.wready || lsu_l1d.wready || l1i_bus.ptw_rvalid)
+      $fatal(1, "PTW overlap bypassed the SQ acknowledgement register");
+    @(negedge clock);
+    if (!lsu_l1d.wready || lsu_l1d.werr || l1i_bus.ptw_rvalid)
       $fatal(1, "PTW drain swallowed the older SQ store response");
     @(posedge clock);
     @(negedge clock);
     lsu_l1d.wvalid = 0;
-    for (int cycle = 0; cycle < 10000 && !l1i_bus.rready; cycle++) @(negedge clock);
-    if (!l1i_bus.rready) $fatal(1, "PTW read was not accepted after older store");
-    @(posedge clock);
-    @(negedge clock);
+    for (int cycle = 0; cycle < 10000 && i_ptw_requests == ptw_before; cycle++) @(negedge clock);
+    if (i_ptw_requests != ptw_before + 1)
+      $fatal(1, "PTW read was not accepted exactly once after older store");
     l1i_bus.arvalid = 0;
     for (int cycle = 0; cycle < 10000 && !l1i_bus.ptw_rvalid; cycle++) @(negedge clock);
     if (!l1i_bus.ptw_rvalid || l1i_bus.ptw_rerr || l1i_bus.rdata != expected)
@@ -1348,8 +1365,7 @@ module tb_cache_stream #(
       lsu_l1d.wdata = XLEN'('h76543210);
       lsu_l1d.walu = 8'({WordBytes{1'b1}});
       lsu_l1d.wvalid = 1;
-      #1;
-      if (!lsu_l1d.wready || l1d_bus.wvalid) $fatal(1, "WB store not local");
+      registered_local_store();
       @(negedge clock);
       lsu_l1d.wvalid = 0;
       repeat (4) @(negedge clock);
@@ -1437,8 +1453,7 @@ module tb_cache_stream #(
       @(negedge clock);
       lsu_l1d.wdata = XLEN'('h24681357);
       lsu_l1d.wvalid = 1;
-      #1;
-      if (!lsu_l1d.wready) $fatal(1, "error-path WB store not accepted");
+      registered_local_store();
       @(negedge clock);
       lsu_l1d.wvalid = 0;
       repeat (4) @(negedge clock);

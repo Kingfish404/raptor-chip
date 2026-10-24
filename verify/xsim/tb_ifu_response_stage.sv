@@ -175,7 +175,9 @@ module tb_ifu_response_stage;
         assert (ifu_bpu.aux_pc == dut.candidate_pc[dut.secondary_index])
         else $fatal(1, "registered auxiliary PC does not match the buffered branch PC");
       end
-      if (!`RAPT_FETCH_RESPONSE_STAGE && ifu_bpu.aux_query) begin
+      // Positional TAGE reads can be active before a secondary branch exists.
+      // Check the decoded branch address only when that direction is selected.
+      if (!`RAPT_FETCH_RESPONSE_STAGE && ifu_bpu.aux_query && dut.secondary_query) begin
         assert (ifu_bpu.aux_pc + XLEN'(2 * (int'(ifu_bpu.aux_position) + 1))
             == dut.candidate_pc[dut.secondary_index])
         else $fatal(1, "selected auxiliary PC does not match the decoded branch PC");

@@ -28,12 +28,12 @@ PMP:        8 usable entries, TOR / NA4 / NAPOT, L-bit lockable
 Interrupts: CLINT (mtime, mtimecmp, msip) + PLIC (31 sources, M/S contexts)
 
 Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID; burst-capable reads (up to 8 outstanding); writes use independent AW/W handshakes (single-beat stores and dirty-line words, multi-beat Zicboz `CBO.ZERO`). With the default write-back L1D each bus write waits for its B response; write-through builds without L2 may post up to 4 cacheable writes (`RAPT_POSTED_WRITES`)
-Default uarch: 2-wide decode / rename / dispatch / commit, 2 integer ALU ports, ROB=32, ALQ=8, BRQ=8, MDQ=4, FPQ=8, IOQ=8, unified SQ=16, 6 completion ports, 16 branch checkpoints, integer PRF=64, FPR=32 x 64-bit, TAGE + 128-entry BTB + 16-entry RAS, L1I=16 KiB, L1D=16 KiB write-back with 4 MSHRs and 2 writeback buffers (both caches 4-way), 64 B cache lines, ITLB/DTLB=16 + shared 256-entry L2 TLB, L2 passthrough (cache in `default-l2`)
+Default uarch: 2-wide decode / rename / dispatch / commit, 2 integer ALU ports, ROB=32, ALQ=8, BRQ=8, MDQ=4, FPQ=8, IOQ=8, unified SQ=16, 6 completion ports, 16 branch checkpoints, integer PRF=64, FPR=32 x 64-bit, TAGE + 128-entry BTB + 16-entry RAS, L1I=16 KiB, L1D=16 KiB write-back with 4 MSHRs and 2 writeback buffers (both caches 4-way), 64 B cache lines, ITLB=16, DTLB=64 (2-way, load/store replicas) + shared 256-entry L2 TLB, L2 passthrough (cache in `default-l2`)
 
 Verifying:  RISCOF (riscv-arch-test), full-core F/D directed/differential tests, RVFI, SVA
 ```
 
-The default RV64 configuration supports RVA22S64. Its ISA summary lists the implemented extensions. Zkt provides data-independent execution latency for the instructions covered by its specification. Svinval implements translation invalidation using a conservative full SFENCE.VMA operation in both XLEN modes. Svpbmt carries page-based memory types through the RV64 Sv39 translation, cache, and bus paths. The [RV64 supervisor verification configuration](verify/riscof/raptor-rv64s/raptor-rv64s.yaml) declares these extensions.
+The default RV64 configuration supports [RVA22S64](./docs/README.md#rva22s64-support). Its ISA summary lists the implemented extensions. Zkt provides data-independent execution latency for the instructions covered by its specification. Svinval implements translation invalidation using a conservative full SFENCE.VMA operation in both XLEN modes. Svpbmt carries page-based memory types through the RV64 Sv39 translation, cache, and bus paths. The [RV64 supervisor verification configuration](verify/riscof/raptor-rv64s/raptor-rv64s.yaml) declares these extensions.
 
 The F/D/Zfhmin implementation covers scalar floating-point load/store, arithmetic, FMA, divide/square-root, conversion, comparison/classification, rounding modes, accrued exception flags, and binary16 load/store, transfer, and conversion. The compressed subset includes the C-extension floating-point memory forms required with F/D (C.FLW/C.FSW on RV32 and C.FLD/C.FSD plus their stack-pointer forms on RV32/RV64).
 
@@ -81,7 +81,7 @@ flowchart TD
     end
     subgraph DMEM["D-side"]
       L1D["L1D 16 KiB, 4-way, VIPT, write-back<br/>(4 MSHRs, 2 writeback buffers)"]
-      DTLB["DTLB (16, load/store replicas)"]
+      DTLB["DTLB (64, 2-way, load/store replicas)"]
       DPTW["DPTW (Sv32 / Sv39, Svade)"]
     end
     L2TLB["shared L2 TLB (256, direct-mapped)"]

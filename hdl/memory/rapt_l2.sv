@@ -702,7 +702,6 @@ module rapt_l2 #(
   logic ms_source_primary_secondary;
   logic ms_busy, ms_done_any, ms_free, ms_ar_conflict, ms_retire_candidate;
   logic ms_failed_early_retry, ms_refill_retry;
-  logic ms_active_refills;
   logic ms_id_conflict, ms_secondary_match, ms_secondary_accept, ms_secondary_send;
   logic ms_secondary_capture, ms_secondary_reload_needs_directory;
   logic ms_secondary_needs_ownership;
@@ -915,7 +914,6 @@ module rapt_l2 #(
     ms_free = 1'b0;
     ms_free_slot = '0;
     ms_done_any = 1'b0;
-    ms_active_refills = 1'b0;
     ms_complete_slot = '0;
     ms_retire_candidate = 1'b0;
     ms_retire_slot = '0;
@@ -933,7 +931,6 @@ module rapt_l2 #(
         ms_free = 1'b1;
         ms_free_slot = 3'(slot);
       end
-      if (ms_slot_valid[slot] && !ms_installed[slot]) ms_active_refills = 1'b1;
       if (ms_slot_valid[slot] && ms_late_response_pending[slot]
           && !ms_late_response_candidate) begin
         ms_late_response_candidate = 1'b1;
@@ -1388,6 +1385,9 @@ module rapt_l2 #(
     end
   end
   if (BoomBankedStore) begin : g_read_refill_mshrs
+    logic [$clog2(BoomMshrs)-1:0] unused_allocate_index;
+    logic unused_schedule_valid, unused_reload_from_request, unused_secondary_push_ready;
+    logic [LineSize-1:0] unused_retire_beat_valid;
     rapt_l2_mshr_frontend #(
         .NumMshrs(BoomMshrs),
         .NumEntries(BoomSecondaryEntries),
@@ -1416,17 +1416,17 @@ module rapt_l2 #(
         .schedule_resources_ready('1),
         .schedule_reload('1),
         .allocate_valid(ms_secondary_allocate_valid),
-        .allocate_index(),
-        .schedule_valid(),
+        .allocate_index(unused_allocate_index),
+        .schedule_valid(unused_schedule_valid),
         .schedule_index(ms_secondary_slot),
         .schedule_onehot(ms_secondary_schedule_onehot),
         .schedule_stalled(ms_secondary_schedule_stalled),
         .reload_valid(ms_secondary_reload_valid),
-        .reload_from_request(),
+        .reload_from_request(unused_reload_from_request),
         .reload_needs_directory(ms_secondary_reload_needs_directory),
         .reload_tag(ms_secondary_reload_tag),
         .reload_payload(ms_secondary_reload_payload),
-        .secondary_push_ready(),
+        .secondary_push_ready(unused_secondary_push_ready),
         .secondary_queue_valid(ms_secondary_queue_valid)
     );
     rapt_l2_refill_mshrs #(
@@ -1473,7 +1473,7 @@ module rapt_l2 #(
         .slot_resp(ms_slot_resp),
         .retire_valid(ms_retire_valid),
         .retire_slot(ms_collector_slot),
-        .retire_beat_valid(),
+        .retire_beat_valid(unused_retire_beat_valid),
         .retire_line(ms_retire_line),
         .retire_resp(ms_retire_resp),
         .retire_addr(ms_retire_addr),
@@ -1545,14 +1545,11 @@ module rapt_l2 #(
   assign axi_s.rlast  = rs_rlast;
   assign axi_s.rresp  = rs_rresp;
   assign axi_s.rid    = rs_rid;
-  logic r_hit_beat_fire;
   logic [XLEN-1:0] r_next_addr;
   logic boom_queued_miss_or_unknown;
   logic [IndexBits-1:0] install_idx;
   logic [TagBits-1:0] install_tag;
   assign r_next_addr = advance_read_addr(r_addr, r_size, r_burst, r_wrap_mask);
-  logic [IndexBits-1:0] data_sram_raddr;
-  assign r_hit_beat_fire = (rs == R_HIT) && r_hit_q && (!rs_rvalid || axi_s.rready);
   always_comb begin
     dir_demand_read_valid = 1'b0;
     dir_read_set = r_idx_q;
@@ -1605,11 +1602,6 @@ module rapt_l2 #(
   assign dir_read_valid = dir_demand_read_valid || dir_error_lookup_request
       || (release_lookup_fire && !release_nested_candidate) || dir_aw_read_fire
       || dir_burst_read_valid || dir_burst_alloc_read_fire;
-  assign data_sram_raddr =
-      ms_replay_issue ? ms_replay_payload[ID_W+IndexLsb+:IndexBits]
-      : (rs == R_IDLE && axi_s.arvalid && axi_s.arready
-          && ar_cache_lookup) ? axi_s.araddr[IndexMsb:IndexLsb] :
-      (r_hit_beat_fire && (r_len != 8'd0)) ? r_next_addr[IndexMsb:IndexLsb] : r_idx_q;
   // AR acceptance: only when read FSM idle.
   // An early-restarted refill can return to IDLE before its registered
   // install pulse writes SRAM. A new lookup needs a real read edge.
@@ -2066,6 +2058,7 @@ module rapt_l2 #(
                           : cache_install || w_cache_word_write;
   generate
     if (BoomBankedStore) begin : g_boom_banked_store
+      logic unused_source_c_result_valid;
       logic [511:0] read_line_data, install_line_data;
       logic [63:0] priority_data, store_data, sink_d_data;
       logic [63:0] source_c_data;
@@ -2157,7 +2150,7 @@ module rapt_l2 #(
           .source_c_read_set(r_idx_q),
           .source_c_read_way(victim_way_q),
           .source_c_read_chunk(3'(int'(evict_word) / (64 / XLEN))),
-          .source_c_result_valid(),
+          .source_c_result_valid(unused_source_c_result_valid),
           .source_c_read_data(source_c_data),
           .sink_d_write_valid(bank_sinkd_valid),
           .sink_d_write_ready(boom_bank_sinkd_ready),
@@ -2200,6 +2193,14 @@ module rapt_l2 #(
         end
       end
     end else begin : g_legacy_banked_store
+      logic [IndexBits-1:0] data_sram_raddr;
+      logic r_hit_beat_fire;
+      assign r_hit_beat_fire = (rs == R_HIT) && r_hit_q && (!rs_rvalid || axi_s.rready);
+      assign data_sram_raddr =
+          ms_replay_issue ? ms_replay_payload[ID_W+IndexLsb+:IndexBits]
+          : (rs == R_IDLE && axi_s.arvalid && axi_s.arready
+              && ar_cache_lookup) ? axi_s.araddr[IndexMsb:IndexLsb] :
+          (r_hit_beat_fire && (r_len != 8'd0)) ? r_next_addr[IndexMsb:IndexLsb] : r_idx_q;
       assign boom_bank_read_ready = 1'b1;
       assign boom_bank_read_result_valid = 1'b0;
       assign boom_bank_sourcec_ready = 1'b1;

@@ -76,8 +76,8 @@ module rapt_rnu #(
   int allocation_rank;
   int checkpoint_rank;
   logic destination_needed[RenameWidth], checkpoint_needed[RenameWidth];
-  int chosen;
-  int checkpoint_chosen;
+  logic [PLEN-1:0] chosen;
+  logic [CheckpointBits-1:0] checkpoint_chosen;
   logic pmu_pending;
   logic pmu_checkpoint_full /* verilator public_flat_rd */;
   logic pmu_checkpoint_stall /* verilator public_flat_rd */;
@@ -304,8 +304,8 @@ module rapt_rnu #(
     chosen = 0;
     checkpoint_chosen = 0;
     for (int s = 0; s < RenameWidth; s++) begin
-      chosen = int'(allocation_index[allocation_rank]);
-      checkpoint_chosen = int'(checkpoint_index[checkpoint_rank]);
+      chosen = allocation_index[allocation_rank];
+      checkpoint_chosen = checkpoint_index[checkpoint_rank];
       renamed[s] = '0;
       renamed[s].uop = candidate[s].uop;
       renamed[s].op1 = candidate[s].op1;

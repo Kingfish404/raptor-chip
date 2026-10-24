@@ -398,6 +398,7 @@ endif
 LINUX_FPGA_BOOTARGS_BASE ?= console=liteuart0,115200 earlycon=sbi unaligned_scalar_speed=fast cryptomgr.notests=1 random.trust_bootloader=on
 LINUX_FPGA_BOOTARGS ?= $(LINUX_FPGA_BOOTARGS_BASE) $(if $(filter full,$(LINUX_FPGA_INIT)),rdinit=/init,$(if $(filter prepared-shell,$(LINUX_FPGA_INIT)),rdinit=/sbin/raptor-shell,rdinit=/bin/sh)) ## Linux FPGA kernel command line
 LINUX_FPGA_MODEL ?= Raptor LiteX SoC on $(FPGA_BOARD) ## Linux model string reported from the generated DTB
+WITH_CM005_BRIDGE ?= $(if $(filter mlk_cu08_ku15p,$(FPGA_BOARD)),1,0) ## CU08 FMC_C A/B hardware forwarding (1/0)
 WITH_ETHERNET ?= $(or $(BOARD_$(FPGA_BOARD)_DEFAULT_WITH_ETHERNET),0)
 FMC_SLOT ?= $(if $(filter mlk_cu08_ku15p,$(FPGA_BOARD)),c,a)
 ETH_PORT ?= a
@@ -441,7 +442,7 @@ _FW_LINUX_CONFIG_VARS := FPGA_BOARD VARIANT RAPT_CONFIG RAPT_PACK_VFLAGS SYS_CLK
 	LINUX_FPGA_PAYLOAD LINUX_FPGA_OPENSBI_PAYLOAD LINUX_FPGA_PAYLOAD_OFFSET \
 	LINUX_FPGA_DTB_OFFSET LINUX_FPGA_OPENSBI_DTB_OFFSET LINUX_FPGA_DTB_ADDR \
 	LINUX_FPGA_STAGE0_SRAM LINUX_FPGA_UART_BASE RAPT_CACHE_LINE_BYTES CROSS \
-	WITH_ETHERNET FMC_SLOT ETH_PORT ETH_SPEED
+	WITH_CM005_BRIDGE WITH_ETHERNET FMC_SLOT ETH_PORT ETH_SPEED
 # The automatically derived CSR path includes FPGA_DIR; only an explicit
 # override belongs in this earlier identity (otherwise it would be circular).
 ifneq (,$(filter command line environment,$(origin LINUX_FPGA_ETH_CSR)))

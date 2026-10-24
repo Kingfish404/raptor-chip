@@ -50,6 +50,8 @@ module rapt_ifetch_translate #(
   logic [6:0] pte;
   logic [1:0] pbmt;
   wire [1:0] pmp_fault;
+  wire [1:0] unused_pmp_fault_lo;
+  wire [XLEN-1:12] unused_result_vtag;
   wire [XLEN-1:0] pmp_addr[2];
   logic pte_access_fault, target_access_fault;
 
@@ -88,7 +90,7 @@ module rapt_ifetch_translate #(
         .pmp_mode_na4(pmp_state.pmp_mode_na4),
         .pmp_mode_napot(pmp_state.pmp_mode_napot),
         .fault(pmp_fault[port_idx]),
-        .fault_lo_o()
+        .fault_lo_o(unused_pmp_fault_lo[port_idx])
     );
   end
 
@@ -113,7 +115,7 @@ module rapt_ifetch_translate #(
       .done(ptw_done),
       .fault(ptw_fault),
       .result_ptag(ptag),
-      .result_vtag(),
+      .result_vtag(unused_result_vtag),
       .result_pte(pte),
       .result_pbmt(pbmt),
       .busy(ptw_busy)

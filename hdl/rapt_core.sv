@@ -107,6 +107,7 @@ module rapt_core #(
   lsu_l1d_if lsu_l1d ();
   lsu_l1d_mmu_if exu_l1d ();
   logic memory_data_idle;
+  logic unused_writeback_idle;
   logic frontend_empty, backend_empty, sq_empty;
   logic history_restore;
   logic [63:0] snapshot_ghr, restore_ghr;
@@ -247,7 +248,7 @@ module rapt_core #(
       .ifetch_io_start_o(ifetch_io_start),
       .ifetch_io_owner_pc_o(ifetch_io_owner_pc),
       .data_idle_o(memory_data_idle),
-      .writeback_idle_o(),
+      .writeback_idle_o(unused_writeback_idle),
       .writeback_done_o(cache_writeback_done),
       .stores_empty_i(sq_empty),
       .writeback_drain_i(cache_writeback_drain),

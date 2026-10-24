@@ -55,6 +55,8 @@ package rapt_pkg;
   // RISC-V implicit return-stack hints, applied to expanded instructions.
   // Different link registers on JALR denote pop-then-push (coroutine switch).
   typedef struct packed {logic push, pop;} ras_action_t;
+  // Preserve the full instruction API; only opcode and register hints are needed.
+  /* verilator lint_off UNUSEDSIGNAL */
   function automatic ras_action_t ras_action(input logic [31:0] inst);
     ras_action_t action;
     logic rd_link, rs1_link;
@@ -68,6 +70,7 @@ package rapt_pkg;
     end
     return action;
   endfunction
+  /* verilator lint_on UNUSEDSIGNAL */
 
   // Typed elaboration configuration. Legacy presets are adapted once here;
   // modules receive values/types, not another per-execution-domain macro.
@@ -853,6 +856,8 @@ package rapt_pkg;
   // op1 in {0, pc, imm, CSR uimm} and op2 in {0, imm}.
   localparam logic [1:0] OpConstZero = 2'd0, OpConstPc = 2'd1, OpConstImm = 2'd2,
       OpConstUimm = 2'd3;
+  // Selectors retain the operand-width API; only the encoded low bits matter.
+  /* verilator lint_off UNUSEDSIGNAL */
   function automatic logic [XLENPkg-1:0] derive_op1(
       input logic [XLENPkg-1:0] selector, input logic [XLENPkg-1:0] pc,
       input logic [XLENPkg-1:0] imm, input logic [31:0] inst);
@@ -867,4 +872,5 @@ package rapt_pkg;
                                                     input logic [XLENPkg-1:0] imm);
     return selector[0] ? imm : '0;
   endfunction
+  /* verilator lint_on UNUSEDSIGNAL */
 endpackage

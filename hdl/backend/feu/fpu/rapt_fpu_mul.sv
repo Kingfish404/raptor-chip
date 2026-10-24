@@ -24,6 +24,7 @@ module rapt_fpu_mul #(
 );
   localparam int MantBits = TARGET_DOUBLE ? 53 : 24;
   logic [MantBits-1:0] product_a, product_b;
+  logic unused_product_valid;
   logic [2*MantBits-1:0] product;
   assign product = product_a * product_b;
   rapt_fpu_mul_pipeline #(
@@ -43,7 +44,7 @@ module rapt_fpu_mul #(
       .product_a(product_a),
       .product_b(product_b),
       .product(product),
-      .product_valid()
+      .product_valid(unused_product_valid)
   );
 endmodule
 
@@ -72,9 +73,11 @@ module rapt_fpu_mul_pipeline #(
   localparam int ProductBits = 2 * MantBits;
   localparam int ExtBits = TARGET_DOUBLE ? 59 : 27;
   localparam int RoundBits = ExtBits - MantBits;
-  localparam int Bias = TARGET_DOUBLE ? 1023 : 127;
-  localparam int MinExp = TARGET_DOUBLE ? -1022 : -126;
-  localparam int MaxExp = TARGET_DOUBLE ? 1023 : 127;
+  // Normalized finite exponents: D [-1074, 1023], S [-149, 127].
+  // Their sum plus normalization/rounding is within [-2148, 2048].
+  localparam logic signed [13:0] Bias = TARGET_DOUBLE ? 1023 : 127;
+  localparam logic signed [13:0] MinExp = TARGET_DOUBLE ? -1022 : -126;
+  localparam logic signed [13:0] MaxExp = TARGET_DOUBLE ? 1023 : 127;
   localparam logic [10:0] InfExponent = TARGET_DOUBLE ? 11'h7ff : 11'h0ff;
 
   logic s1_valid_q, s2_valid_q, s3_valid_q, s4_valid_q;
@@ -110,7 +113,7 @@ module rapt_fpu_mul_pipeline #(
   logic a_nan_c, b_nan_c, a_snan_c, b_snan_c;
   logic a_inf_c, b_inf_c, a_zero_c, b_zero_c;
   logic [MantBits-1:0] mant_a_c, mant_b_c;
-  integer exponent_a_c, exponent_b_c;
+  logic signed [13:0] exponent_a_c, exponent_b_c;
   logic special_c;
   logic [63:0] special_result_c;
   logic [4:0] special_flags_c;
@@ -130,8 +133,8 @@ module rapt_fpu_mul_pipeline #(
   logic [52:0] significand_4;
   logic signed [13:0] exponent_4;
 
-  function automatic logic [MantBits-1:0] normalize_subnormal(input logic [FracBits-1:0] fraction,
-                                                              output integer exponent_value);
+  function automatic logic [MantBits-1:0] normalize_subnormal(
+      input logic [FracBits-1:0] fraction, output logic signed [13:0] exponent_value);
     logic [MantBits-1:0] normalized;
     logic found;
     integer index;
@@ -142,7 +145,7 @@ module rapt_fpu_mul_pipeline #(
       for (index = FracBits - 1; index >= 0; index = index - 1) begin
         if (!found && fraction[index]) begin
           normalized = {1'b0, fraction} << (MantBits - index - 1);
-          exponent_value = MinExp - FracBits + index;
+          exponent_value = MinExp - 14'(FracBits) + 14'(index);
           found = 1'b1;
         end
       end
@@ -201,13 +204,13 @@ module rapt_fpu_mul_pipeline #(
       mant_a_c = normalize_subnormal(frac_a_c[FracBits-1:0], exponent_a_c);
     end else begin
       mant_a_c = {1'b1, frac_a_c[FracBits-1:0]};
-      exponent_a_c = exp_a_c - Bias;
+      exponent_a_c = $signed({3'b0, exp_a_c}) - Bias;
     end
     if (exp_b_c == '0) begin
       mant_b_c = normalize_subnormal(frac_b_c[FracBits-1:0], exponent_b_c);
     end else begin
       mant_b_c = {1'b1, frac_b_c[FracBits-1:0]};
-      exponent_b_c = exp_b_c - Bias;
+      exponent_b_c = $signed({3'b0, exp_b_c}) - Bias;
     end
 
     special_c = 1'b0;
@@ -248,12 +251,12 @@ module rapt_fpu_mul_pipeline #(
     precision_sticky_c = 1'b0;
     precision_up_c = 1'b0;
     if (s2_product_q[ProductBits-1]) begin
-      stage3_mant_c = s2_product_q >> (ProductBits - ExtBits);
+      stage3_mant_c = ExtBits'(s2_product_q >> (ProductBits - ExtBits));
       stage3_mant_c[0] = stage3_mant_c[0]
           | (|s2_product_q[ProductBits-ExtBits-1:0]);
       stage3_exponent_c = s2_exp_sum_q + 1;
     end else begin
-      stage3_mant_c = s2_product_q >> (ProductBits - ExtBits - 1);
+      stage3_mant_c = ExtBits'(s2_product_q >> (ProductBits - ExtBits - 1));
       stage3_mant_c[0] = stage3_mant_c[0]
           | (|s2_product_q[ProductBits-ExtBits-2:0]);
     end
@@ -271,10 +274,10 @@ module rapt_fpu_mul_pipeline #(
       default: precision_up_c = 1'b0;
     endcase
     stage3_tiny_c = (stage3_exponent_c < MinExp)
-        && !((stage3_exponent_c == MinExp-1) && precision_up_c
+        && !((stage3_exponent_c == MinExp - 14'sd1) && precision_up_c
              && (&stage3_mant_c[ExtBits-1-:MantBits]));
     if (stage3_exponent_c < MinExp) begin
-      subnormal_shift_c = MinExp - stage3_exponent_c;
+      subnormal_shift_c = int'(MinExp) - int'(stage3_exponent_c);
       stage3_mant_c = shift_sticky(stage3_mant_c, subnormal_shift_c);
       stage3_exponent_c = MinExp;
     end
@@ -357,8 +360,8 @@ module rapt_fpu_mul_pipeline #(
     begin
       s1_mant_a_q <= mant_a_c;
       s1_mant_b_q <= mant_b_c;
-      s1_exp_a_q <= 14'(exponent_a_c);
-      s1_exp_b_q <= 14'(exponent_b_c);
+      s1_exp_a_q <= exponent_a_c;
+      s1_exp_b_q <= exponent_b_c;
       s1_result_sign_q <= sign_a_c ^ sign_b_c;
       s1_special_q <= special_c;
       s1_special_result_q <= special_result_c;

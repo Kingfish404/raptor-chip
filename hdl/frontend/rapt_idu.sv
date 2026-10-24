@@ -26,7 +26,9 @@ module rapt_idu #(
   logic redirect_q;
   logic [XLEN-1:0] redirect_pc_q;
   logic [XLEN-1:0] redirect_pc;
-  int redirect_slot, ras_slot;
+  localparam int SlotBits = Width > 1 ? $clog2(Width) : 1;
+  logic [SlotBits-1:0] redirect_slot;
+  int ras_slot;
   rapt_pkg::ras_action_t ras_actions[Width];
   logic pmu_early_resteer;
   for (genvar s = 0; s < Width; s++) begin : g_decode
@@ -88,7 +90,7 @@ module rapt_idu #(
         if (!decoded[s].uop.trap && corrected != slots[s].pnpc) begin
           redirect = 1'b1;
           redirect_pc = corrected;
-          redirect_slot = s;
+          redirect_slot = SlotBits'(s);
         end
       end
       prefix = prefix && accept[s] && !redirect && !decoded[s].uop.trap

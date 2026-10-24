@@ -1,0 +1,9 @@
+config RAPTOR_NATIVE_ETH
+	tristate "Raptor native packet SRAM Ethernet"
+	depends on OF && HAS_IOMEM && NETDEVICES && ETHERNET
+	select PHYLIB
+	select MDIO_BITBANG
+	help
+	  Native RK-XCKU5P-F Ethernet with eight receive slots and one transmit
+	  buffer. Uses aligned 32-bit programmed I/O, with no DMA into main RAM.
+	  Select built-in when using an NFS root filesystem.

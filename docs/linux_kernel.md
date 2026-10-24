@@ -52,6 +52,11 @@ All NPC Linux boot targets use the matching RV32/RV64 NEMU difftest reference
 by default, including the hard-float `rv32gc` and `rv64gc` targets. For focused
 simulator diagnosis, pass `DIFF_REF_SO=` explicitly to disable comparison.
 
+The default RV64 core supports [RVA22S64](./README.md#rva22s64-support), including
+Sv39, Svade, Svpbmt, and Svinval. Linux runs in S-mode with OpenSBI providing the
+M-mode execution environment; payload and board compatibility still depend on
+the selected platform configuration.
+
 ## Supported Modes
 
 | Mode                | RTL path                              | Status                                                |
@@ -66,7 +71,7 @@ The presence of an RV64 or hard-float target documents integration and build
 wiring, not a reproduced full boot result for every checkout. Use a dated boot
 log or the corresponding verification target when recording validated status.
 
-See [linux/README.md](../linux/README.md) and [app/tinyos/README.md](../app/tinyos/README.md) for the lower-level payload and xv6/egos helpers.
+See [linux/README.md](https://github.com/Kingfish404/raptor-chip/blob/master/linux/README.md) and [app/tinyos/README.md](https://github.com/Kingfish404/raptor-chip/blob/master/app/tinyos/README.md) for the lower-level payload and xv6/egos helpers.
 
 ## Payload Paths
 
@@ -124,7 +129,7 @@ tar -xf linux-6.18.51.tar.xz
 cd linux-6.18.51
 ```
 
-See more details in [linux/README.md](../linux/README.md).
+See more details in [linux/README.md](https://github.com/Kingfish404/raptor-chip/blob/master/linux/README.md).
 
 The repository also keeps source-build helpers in `linux/Makefile`:
 

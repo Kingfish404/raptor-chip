@@ -6,6 +6,8 @@
 module rapt_native_bus #(
     parameter int XLEN = `RAPT_XLEN,
     parameter bit WithDdr = 0,
+    parameter bit WithPeripheral = 0,
+    parameter logic [31:0] PeripheralBase = 32'h1800_0000,
     parameter int RamBytes = 131072,
     parameter int ClockHz = 50_000_000,
     parameter string RomFile = "boot.hex"
@@ -15,6 +17,13 @@ module rapt_native_bus #(
     input logic uart_rx,
     output logic uart_tx,
     output logic uart_irq,
+    output logic peripheral_rd,
+    peripheral_wr,
+    output logic [15:0] peripheral_raddr,
+    peripheral_waddr,
+    output logic [31:0] peripheral_wdata,
+    output logic [3:0] peripheral_wstrb,
+    input logic [31:0] peripheral_rdata,
     axi4_if.slave cpu,
     axi4_if.master ddr
 );
@@ -30,7 +39,8 @@ module rapt_native_bus #(
     Sram,
     Ram,
     Uart,
-    Ddr
+    Ddr,
+    Peripheral
   } target_t;
   typedef enum logic [1:0] {
     RIdle,
@@ -69,6 +79,9 @@ module rapt_native_bus #(
     if (64'(addr) >= RomBase && 64'(addr) < RomBase + RomBytes) return Rom;
     if (64'(addr) >= SramBase && 64'(addr) < SramBase + SramBytes) return Sram;
     if (64'(addr) >= UartBase && 64'(addr) < UartBase + 8) return Uart;
+    if (WithPeripheral && 64'(addr) >= 64'(PeripheralBase) &&
+        64'(addr) < 64'(PeripheralBase) + 64'h10000)
+      return Peripheral;
     if (64'(addr) >= RamBase && (64'(addr) - RamBase) < (WithDdr ? DdrBytes : 64'(RamBytes)))
       return WithDdr ? Ddr : Ram;
     return Bad;
@@ -91,6 +104,7 @@ module rapt_native_bus #(
         ) != dest || last_addr[XLEN-1:12] != addr[XLEN-1:12])
       return Bad;
     if (dest == Uart && (len != 0 || size != 0)) return Bad;
+    if (dest == Peripheral && (len != 0 || size != 2 || addr[1:0] != 0)) return Bad;
     return dest;
   endfunction
 
@@ -130,6 +144,15 @@ module rapt_native_bus #(
   assign ddr.bready = ws == WReply && cpu.bready;
 
   assign uart_rd = rs == RIssue && rt == Uart;
+  // A native board peripheral returns a registered word on the read issue edge.
+  // RV64 accesses retain the addressed 32-bit AXI lane, including upper lanes.
+  assign peripheral_rd = !reset && rs == RIssue && rt == Peripheral;
+  assign peripheral_wr = !reset && ws == WData && wt == Peripheral &&
+                         cpu.wvalid && cpu.wready;
+  assign peripheral_raddr = ra[15:0];
+  assign peripheral_waddr = wa[15:0];
+  assign peripheral_wdata = 32'(cpu.wdata >> (8 * wa[ByteBits-1:0]));
+  assign peripheral_wstrb = 4'(cpu.wstrb >> wa[ByteBits-1:0]);
   assign uart_wr = ws == WData && wt == Uart && cpu.wvalid && cpu.wready &&
                    cpu.wstrb[wa[ByteBits-1:0]];
   assign uart_addr = uart_rd ? ra[2:0] : wa[2:0];
@@ -160,6 +183,7 @@ module rapt_native_bus #(
       Sram: rdata = sram_q;
       Ram: rdata = ram_q;
       Uart: rdata = uart_q;
+      Peripheral: rdata = XLEN'(peripheral_rdata) << (8 * ra[ByteBits-1:0]);
       default: rdata = '0;
     endcase
   end

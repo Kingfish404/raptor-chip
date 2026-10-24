@@ -587,10 +587,13 @@ module tb_lsu_axi_io_order;
       axi.bvalid=1;
       #1;
       check(axi.bready, "adapter did not accept B");
-      check(lsu_l1d.wready && lsu_l1d.werr == (response != 0), "B error lost before SQ");
+      check(l1d_bus.wready && l1d_bus.werr == (response != 0), "B error lost before L1D");
+      check(!lsu_l1d.wready, "B response bypassed the SQ acknowledgement register");
       check(mem.wr_rsp_error == (response != 0), "adapter lost B response error");
       tick(1);
       axi.bvalid = 0;
+      #1;
+      check(lsu_l1d.wready && lsu_l1d.werr == (response != 0), "registered B error lost before SQ");
       repeat (30) begin
         if (axi.arvalid) break;
         tick(1);
@@ -1958,5 +1961,572 @@ module tb_lsu_store_observation;
         "PASS: SQ-owned store observation, poisoned completion, commit+flush and drain (XLEN=%0d)",
         XLEN);
     $finish;
+  end
+endmodule
+
+
+// ---- tb_lsu_split_payload ----
+`include "rapt.svh"
+`include "rapt_if.svh"
+module tb_lsu_split_payload;
+  localparam int XLEN = `RAPT_XLEN;
+  localparam int LsuTbSqSize = 4;
+  localparam logic [XLEN-1:0] Addr = XLEN'('h80001000);
+  localparam logic [4:0] WordAlu = XLEN == 64 ? `RAPT_ALU_LD__ : `RAPT_ALU_LW__;
+  `define TB_LSU_MANUAL_FORWARD
+  `include "tb_lsu_harness.svh"
+  `undef TB_LSU_MANUAL_FORWARD
+
+  task automatic fresh;
+    reset = 1;
+    init_lsu_inputs(1, 32'h76543210, `RAPT_ALU_LW__);
+    exu_lsu.fp_rdata64_req = 0;
+    tick(3);
+    reset = 0;
+    tick(1);
+  endtask
+
+  task automatic check_first_payload;
+    check(lsu_l1d.raddr == Addr && lsu_l1d.ralu == WordAlu,
+          "pending conflict changed the split address or width");
+    check(
+        lsu_l1d.rcheck_valid && lsu_l1d.rcheck_offset == 3'(XLEN/8-1)
+          && lsu_l1d.rcheck_size_m1 == 0 && lsu_l1d.rorig_size_m1 == 3,
+        "pending conflict changed the split permission footprint");
+  endtask
+
+  initial begin
+    fresh();
+    exu_lsu.rvalid = 1;
+    exu_lsu.raddr = Addr + XLEN'(XLEN/8-1);
+    exu_lsu.ralu = `RAPT_ALU_LW__;
+    exu_ioq_bcast.wen = 1;
+    exu_ioq_bcast.tval = Addr;
+    exu_ioq_bcast.sq_waddr = Addr;
+    exu_ioq_bcast.alu = XLEN == 64 ? `RAPT_SD_WSTRB : `RAPT_SW_WSTRB;
+    sq_forward_pending = 1;
+    #1;
+    check(!lsu_l1d.rvalid, "split escaped a pending store conflict");
+    check_first_payload();
+    tick(2);
+    sq_forward_pending = 0;
+    #1;
+    check(lsu_l1d.rvalid, "split did not issue when conflict cleared");
+    check_first_payload();
+    tick(2);
+    sq_forward_pending = 1;
+    #1;
+    check(!lsu_l1d.rvalid, "renewed conflict did not block admission");
+    check_first_payload();
+    sq_forward_pending = 0;
+    lsu_l1d.rready = 1;
+    tick(1);
+    check(
+        lsu_l1d.rvalid && lsu_l1d.raddr == Addr + XLEN'(XLEN/8)
+          && lsu_l1d.rcheck_valid && lsu_l1d.rcheck_offset == 0
+          && lsu_l1d.rcheck_size_m1 == 2,
+        "second split footprint changed");
+    tick(1);
+    check(exu_lsu.rready && !exu_lsu.trap, "split did not complete");
+
+    fresh();
+    exu_lsu.rvalid = 1;
+    exu_lsu.raddr = Addr + XLEN'(XLEN/8-1);
+    exu_lsu.atomic_lock = 1;
+    #1;
+    check(!lsu_l1d.rvalid && exu_lsu.rready && exu_lsu.trap,
+          "misaligned LR lost its original fault");
+    check(lsu_l1d.raddr == exu_lsu.raddr && lsu_l1d.ralu == exu_lsu.ralu && !lsu_l1d.rcheck_valid,
+          "LR was rewritten as an ordinary split");
+
+    fresh();
+    csr_bcast.priv = `RAPT_PRIV_S;
+    exu_lsu.rvalid = 1;
+    exu_lsu.raddr = Addr + XLEN'(XLEN/8-1);
+    #1;
+    check(!lsu_l1d.rvalid, "split skipped its registered PMP decision");
+    tick(1);
+    check(exu_lsu.rready && exu_lsu.trap, "denied split did not fault");
+    check(lsu_l1d.raddr == exu_lsu.raddr && lsu_l1d.ralu == exu_lsu.ralu && !lsu_l1d.rcheck_valid,
+          "PMP fault lost the original footprint");
+    tick(1);
+    $display("PASS: stable SQ split payload with conflict, LR and PMP RV%0d", XLEN);
+    $finish;
+  end
+  initial begin
+    #200000;
+    $fatal(1, "split payload timeout");
+  end
+endmodule
+
+
+// ---- tb_lsu_killed_consumer ----
+`include "rapt.svh"
+`include "rapt_if.svh"
+`include "tb_l1d_unused_release_ports.svh"
+
+// Actual IOQ/SQ/L1D completion into two local-wake IQs. A killed refill
+// retains its bus ID while a new generation reuses the physical destination.
+module tb_lsu_killed_consumer;
+  import rapt_pkg::*;
+  localparam int XLEN = `RAPT_XLEN;
+  localparam int Words = `RAPT_CACHE_LINE_BYTES / (XLEN / 8);
+  localparam logic [XLEN-1:0] OldAddr = XLEN'('h80000000);
+  localparam logic [XLEN-1:0] NewAddr = XLEN'('h80001000);
+  localparam logic [XLEN-1:0] NewValue = XLEN'('h12345678);
+  logic clock = 0, reset = 1;
+  always #5 clock = ~clock;
+  cmu_bcast_if cmu_bcast ();
+  csr_bcast_if csr_bcast ();
+  pmp_update_if pmp_update ();
+  lsu_l1d_if lsu_l1d ();
+  lsu_l1d_mmu_if exu_l1d ();
+  l1d_bus_if l1d_bus ();
+  rou_lsu_if rou_lsu ();
+  dpu_ioq_if disp_ioq ();
+  dispatch_slot_t dispatch[DispatchWidth], consumer_dispatch[DispatchWidth];
+  completion_t completion[CompletionPorts], exu_ioq_bcast;
+  completion_t local_fp_wake[CompletionPorts];
+  logic pmu_sq_full;
+  assign local_fp_wake = '{default: '0};
+  for (genvar p = 0; p < CompletionPorts; p++) begin : g_completion
+    assign completion[p] = p == completion_memory_port(CoreConfig) ? exu_ioq_bcast : '0;
+  end
+  rapt_lsu dut (
+      .wb_accept(1'b1),
+      .*
+  );
+  rapt_l1d #(
+      .WriteBack(1),
+      .L1D_LEN(2),
+      .L1D_SIZE(4),
+      .L1D_N_WAYS(1)
+  ) cache (
+      .l2tlb_req_o(),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0),
+      .coherent_request(1'b0),
+      .coherent_write(1'b0),
+      .coherent_ready(),
+      .writeback_idle(),
+      .writeback_error(),
+      .writeback_drain(1'b0),
+      .external_write_valid_i(1'b0),
+      .external_write_pending_i(1'b0),
+      .external_write_first_i('0),
+      .external_write_last_i('0),
+      `TB_L1D_UNUSED_RELEASE_PORTS,
+      .clock,
+      .reset,
+      .cmu_bcast,
+      .csr_bcast,
+      .pmp_update,
+      .lsu_l1d,
+      .exu_l1d,
+      .l1d_bus
+  );
+  logic consumer_alloc = 0, consumer_enable = 0;
+  logic [1:0] consumer_ready;
+  for (genvar q = 0; q < 2; q++) begin : g_consumer
+    dpu_iq_if #(.RS_SIZE(4)) disp ();
+    issue_packet_t issue[1];
+    for (genvar s = 0; s < DispatchWidth; s++) begin : g_dispatch
+      assign disp.accept[s] = s == 0 && consumer_alloc;
+      assign disp.rs_idx[s] = disp.free_idx[s];
+    end
+    rapt_iq #(
+        .IQ_SIZE(4),
+        .NumIssuePorts(1),
+        .ComboCdbWake(1'b1)
+    ) iq (
+        .cancel_valid(1'b0),
+        .cancel_head('0),
+        .cancel_owner('0),
+        .clock,
+        .reset,
+        .dispatch(consumer_dispatch),
+        .completion,
+        .disp,
+        .cmu_bcast,
+        .combo_source(completion),
+        .issue_enable(consumer_enable),
+        .issue,
+        .occ_o(),
+        .pmu_iq_full()
+    );
+    assign consumer_ready[q] = issue[0].valid;
+    always @(posedge clock)
+      if (!reset && issue[0].valid) begin
+        if (issue[0].op1 != NewValue || issue[0].op2 != XLEN'(7)
+          || issue[0].dest != 5 || issue[0].generation != 2)
+          $fatal(1, "consumer %0d captured a killed value or changed owner", q);
+      end
+  end
+  `include "tb_common.svh"
+  `include "tb_core_bcast_defaults.svh"
+
+  logic [3:0] pending = 0;
+  logic [XLEN-1:0] request_addr[4];
+  int requests = 0, results = 0;
+  bit allow_result = 0;
+  assign l1d_bus.rready = !reset;
+  assign l1d_bus.idle = pending == 0;
+  assign l1d_bus.rerr = 0;
+  assign l1d_bus.ptw_rerr = 0;
+  assign l1d_bus.ptw_rvalid = 0;
+  assign l1d_bus.wready = 0;
+  assign l1d_bus.werr = 0;
+  assign l1d_bus.posted_busy = 0;
+  assign l1d_bus.posted_error = 0;
+  assign l1d_bus.posted_error_addr = 0;
+  assign l1d_bus.difftest_skip = 0;
+  always @(posedge clock)
+    if (!reset) begin
+      if (l1d_bus.arvalid && l1d_bus.rready) begin
+        check(l1d_bus.ar_mshr && !l1d_bus.ar_ptw, "expected a tagged cache refill");
+        check(!pending[l1d_bus.ar_mshr_id], "MSHR ID reused before killed RLAST");
+        pending[l1d_bus.ar_mshr_id] = 1;
+        request_addr[l1d_bus.ar_mshr_id] = l1d_bus.araddr;
+        requests++;
+      end
+      if (l1d_bus.rvalid && l1d_bus.rlast) pending[l1d_bus.r_mshr_id] = 0;
+      if (exu_ioq_bcast.valid) begin
+        check(allow_result, "killed refill woke a reused physical destination");
+        check(
+            !exu_ioq_bcast.trap && exu_ioq_bcast.dest == 4
+          && exu_ioq_bcast.generation == 2 && exu_ioq_bcast.result == NewValue,
+            "new load completion lost generation or value");
+        results++;
+      end
+    end
+  task automatic enqueue(input logic [XLEN-1:0] a, input int owner, generation);
+    @(negedge clock);
+    dispatch[0] = '0;
+    dispatch[0].uop.execute.memory.load = 1;
+    dispatch[0].uop.execute.int_op.alu = XLEN == 64 ? `RAPT_ALU_LD__ : `RAPT_ALU_LW__;
+    dispatch[0].op1 = a;
+    dispatch[0].prd = 7;
+    dispatch[0].dest = $bits(dispatch[0].dest)'(owner);
+    dispatch[0].generation = $bits(dispatch[0].generation)'(generation);
+    dispatch[0].uop.rd = 7;
+    disp_ioq.accept[0] = 1;
+    @(negedge clock);
+    disp_ioq.accept[0] = 0;
+    dispatch[0] = '0;
+  endtask
+  task automatic refill(input int id, input logic [XLEN-1:0] value);
+    for (int w = 0; w < Words; w++) begin
+      @(negedge clock);
+      l1d_bus.rvalid = 1;
+      l1d_bus.r_mshr = 1;
+      l1d_bus.r_mshr_id = 2'(id);
+      l1d_bus.rdata = value;
+      l1d_bus.rlast = w == Words-1;
+      @(negedge clock);
+      l1d_bus.rvalid = 0;
+    end
+  endtask
+
+  initial begin
+    init_cmu_bcast_defaults();
+    init_csr_bcast_defaults(`RAPT_PRIV_M, '0, 1'b0);
+    dispatch = '{default: '0};
+    consumer_dispatch = '{default: '0};
+    disp_ioq.accept = '{default: 0};
+    rou_lsu.store = 0;
+    rou_lsu.valid = 0;
+    rou_lsu.dest = 0;
+    rou_lsu.sq_vaddr = 0;
+    rou_lsu.pc = 0;
+    pmp_update.addr_we = 0;
+    pmp_update.addr_idx = 0;
+    pmp_update.raw_addr = 0;
+    pmp_update.napot_mask = 0;
+    pmp_update.cfg_we = 0;
+    pmp_update.cfg_r = 0;
+    pmp_update.cfg_w = 0;
+    pmp_update.cfg_x = 0;
+    pmp_update.cfg_l = 0;
+    pmp_update.mode_off = '1;
+    pmp_update.mode_tor = 0;
+    pmp_update.mode_na4 = 0;
+    pmp_update.mode_napot = 0;
+    l1d_bus.rvalid = 0;
+    l1d_bus.r_mshr = 1;
+    l1d_bus.r_mshr_id = 0;
+    l1d_bus.rdata = 0;
+    l1d_bus.rlast = 0;
+    repeat (4) @(negedge clock);
+    reset = 0;
+    cmu_bcast.rob_head = 3;
+    enqueue(OldAddr, 3, 1);
+    for (int n = 0; n < 100 && requests != 1; n++) @(negedge clock);
+    check(pending[0] && request_addr[0] == OldAddr, "old miss was not allocated");
+    cmu_bcast.flush_pipe = 1;
+    @(negedge clock);
+    cmu_bcast.flush_pipe = 0;
+    cmu_bcast.rob_head = 4;
+    enqueue(NewAddr, 4, 2);
+    consumer_dispatch[0].uop.schedule.issue_ports = 1;
+    consumer_dispatch[0].pr1 = 7;
+    consumer_dispatch[0].op2 = 7;
+    consumer_dispatch[0].dest = 5;
+    consumer_dispatch[0].generation = 2;
+    consumer_alloc = 1;
+    @(negedge clock);
+    consumer_alloc = 0;
+    consumer_enable = 1;
+    for (int n = 0; n < 100 && requests != 2; n++) @(negedge clock);
+    check(pending[1] && request_addr[1] == NewAddr, "new miss did not retain a separate ID");
+    refill(0, XLEN'('hdeadbeef));
+    repeat (5) @(negedge clock);
+    check(results == 0 && consumer_ready == 0, "late killed data escaped into local wakeup");
+    consumer_enable = 0;
+    allow_result = 1;
+    refill(1, NewValue);
+    for (int n = 0; n < 100 && results == 0; n++) @(negedge clock);
+    check(results == 1, "new generation did not complete exactly once");
+    repeat (3) @(negedge clock);
+    consumer_enable = 1;
+    #1;
+    check(consumer_ready == 2'b11, "ALQ/BRQ-style operands failed to retain the new result");
+    @(negedge clock);
+    consumer_enable = 0;
+    repeat (10) @(negedge clock);
+    check(results == 1 && pending == 0, "refill or completion owner leaked");
+    $display("PASS: B1 killed MSHR cannot wake reused ALQ/BRQ consumers RV%0d", XLEN);
+    $finish;
+  end
+  initial begin
+    #100000;
+    $fatal(1, "B1 killed-consumer timeout");
+  end
+endmodule
+
+
+// ---- tb_lsu_request_boundary ----
+`include "rapt.svh"
+`include "rapt_if.svh"
+`include "tb_l1d_unused_release_ports.svh"
+
+// Back-to-back IOQ requests through the real SQ, cache and DPTW, including
+// the B-to-A fallback for a split access and ordered device reads.
+module tb_lsu_request_boundary;
+  import rapt_pkg::*;
+  localparam int XLEN  = `RAPT_XLEN;
+  localparam int Bytes = XLEN / 8;
+  logic clock = 0, reset = 1;
+  always #5 clock = ~clock;
+  cmu_bcast_if cmu_bcast ();
+  csr_bcast_if csr_bcast ();
+  pmp_update_if pmp_update ();
+  lsu_l1d_if lsu_l1d ();
+  lsu_l1d_mmu_if exu_l1d ();
+  l1d_bus_if l1d_bus ();
+  rou_lsu_if rou_lsu ();
+  dpu_ioq_if disp_ioq ();
+  dispatch_slot_t dispatch[DispatchWidth];
+  completion_t completion[CompletionPorts], exu_ioq_bcast;
+  completion_t local_fp_wake[CompletionPorts];
+  logic pmu_sq_full;
+  l2tlb_req_t tlb_req[2];
+  l2tlb_rsp_t tlb_rsp[2];
+  logic [1:0] tlb_ready;
+  assign tlb_req[0] = '0;
+  rapt_l2tlb #(
+      .Entries(4)
+  ) shared_tlb (
+      .clock,
+      .reset,
+      .flush(cmu_bcast.fence_time),
+      .req_i(tlb_req),
+      .ready_o(tlb_ready),
+      .rsp_o(tlb_rsp)
+  );
+  assign local_fp_wake = '{default: '0};
+  for (genvar p = 0; p < CompletionPorts; p++) begin : g_completion
+    assign completion[p] = p == completion_memory_port(CoreConfig) ? exu_ioq_bcast : '0;
+  end
+  rapt_lsu dut (
+      .wb_accept(1'b1),
+      .*
+  );
+  rapt_l1d #(
+      .LineRefill(0),
+      .L2Tlb(1)
+  ) cache (
+      .l2tlb_req_o(tlb_req[1]),
+      .l2tlb_ready_i(tlb_ready[1]),
+      .l2tlb_rsp_i(tlb_rsp[1]),
+      .coherent_request(1'b0),
+      .coherent_write(1'b0),
+      .coherent_ready(),
+      .writeback_idle(),
+      .writeback_error(),
+      .writeback_drain(1'b0),
+      .external_write_valid_i(1'b0),
+      .external_write_pending_i(1'b0),
+      .external_write_first_i('0),
+      .external_write_last_i('0),
+      `TB_L1D_UNUSED_RELEASE_PORTS,
+      .clock,
+      .reset,
+      .cmu_bcast,
+      .csr_bcast,
+      .pmp_update,
+      .lsu_l1d,
+      .exu_l1d,
+      .l1d_bus
+  );
+  `include "tb_common.svh"
+  `include "tb_core_bcast_defaults.svh"
+
+  int delay_left = 0, walks = 0, reads = 0, io_reads = 0, b_retries = 0;
+  logic pending_ptw;
+  logic [XLEN-1:0] pending_data, expected[2];
+  logic [1:0] completed = 0;
+  function automatic logic [XLEN-1:0] bytes_at(input logic [XLEN-1:0] a);
+    logic [XLEN-1:0] result;
+    for (int b = 0; b < Bytes; b++) result[b*8+:8] = 8'(a + XLEN'(b)) ^ 8'h5a;
+    return result;
+  endfunction
+  assign l1d_bus.rready = !reset && delay_left == 0;
+  assign l1d_bus.idle = delay_left == 0;
+  assign l1d_bus.rerr = 0;
+  assign l1d_bus.ptw_rerr = 0;
+  assign l1d_bus.rlast = 1;
+  assign l1d_bus.r_mshr = 0;
+  assign l1d_bus.r_mshr_id = 0;
+  assign l1d_bus.wready = l1d_bus.wvalid;
+  assign l1d_bus.werr = 0;
+  assign l1d_bus.posted_busy = 0;
+  assign l1d_bus.posted_error = 0;
+  assign l1d_bus.posted_error_addr = 0;
+  assign l1d_bus.difftest_skip = 0;
+  always @(posedge clock) begin
+    if (reset) begin
+      delay_left <= 0;
+      walks <= 0;
+      reads <= 0;
+      io_reads <= 0;
+      b_retries <= 0;
+      completed <= 0;
+      l1d_bus.rvalid <= 0;
+      l1d_bus.ptw_rvalid <= 0;
+      l1d_bus.rdata <= 0;
+    end else begin
+      l1d_bus.rvalid <= 0;
+      l1d_bus.ptw_rvalid <= 0;
+      if (dut.exu_lsu.rvalid_b && dut.exu_lsu.rretry_b) b_retries <= b_retries + 1;
+      if (l1d_bus.arvalid && l1d_bus.rready) begin
+        check(!l1d_bus.ar_mshr, "scalar test unexpectedly allocated a refill");
+        pending_ptw <= l1d_bus.ar_ptw;
+        // A root leaf maps VA 0x40000000 to the RAM superpage 0x80000000.
+        pending_data <= l1d_bus.ar_ptw ? XLEN'('h200000cf)
+            : bytes_at(l1d_bus.araddr & ~XLEN'(Bytes - 1));
+        delay_left <= 8;
+        if (l1d_bus.ar_ptw) walks <= walks + 1;
+        else begin
+          reads <= reads + 1;
+          if (l1d_bus.araddr == XLEN'('h10000000)) begin
+            check(completed[0] && cmu_bcast.rob_head == 1 && lsu_l1d.ordered,
+                  "device read escaped before its ROB/SQ release");
+            io_reads <= io_reads + 1;
+          end
+        end
+      end else if (delay_left > 0) begin
+        delay_left <= delay_left - 1;
+        if (delay_left == 1) begin
+          l1d_bus.rdata <= pending_data;
+          l1d_bus.rvalid <= !pending_ptw;
+          l1d_bus.ptw_rvalid <= pending_ptw;
+        end
+      end
+      if (exu_ioq_bcast.valid) begin
+        check(exu_ioq_bcast.dest < 2 && !exu_ioq_bcast.trap,
+              "load response trapped or changed owner");
+        check(!completed[exu_ioq_bcast.dest[0]], "duplicate load response");
+        check(exu_ioq_bcast.result == expected[exu_ioq_bcast.dest[0]],
+              "wrong split/translated data");
+        completed[exu_ioq_bcast.dest[0]] <= 1;
+        cmu_bcast.rob_head <= exu_ioq_bcast.dest + 1'b1;
+      end
+    end
+  end
+  task automatic boot(input bit translated);
+    reset = 1;
+    init_cmu_bcast_defaults();
+    init_csr_bcast_defaults(`RAPT_PRIV_M, '0, 1'b1);
+    csr_bcast.dmmu_en = translated;
+    csr_bcast.satp_ppn = 'h80001;
+    dispatch = '{default: '0};
+    disp_ioq.accept = '{default: 0};
+    rou_lsu.store = 0;
+    rou_lsu.valid = 0;
+    rou_lsu.dest = 0;
+    rou_lsu.sq_vaddr = 0;
+    rou_lsu.pc = 0;
+    pmp_update.addr_we = 0;
+    pmp_update.addr_idx = 0;
+    pmp_update.raw_addr = 0;
+    pmp_update.napot_mask = 0;
+    pmp_update.cfg_we = 0;
+    pmp_update.cfg_r = 0;
+    pmp_update.cfg_w = 0;
+    pmp_update.cfg_x = 0;
+    pmp_update.cfg_l = 0;
+    pmp_update.mode_off = '1;
+    pmp_update.mode_tor = 0;
+    pmp_update.mode_na4 = 0;
+    pmp_update.mode_napot = 0;
+    repeat (4) @(negedge clock);
+    reset = 0;
+  endtask
+  task automatic pair(input logic [XLEN-1:0] a, b, input bit device = 0);
+    @(negedge clock);
+    for (int s = 0; s < 2; s++) begin
+      dispatch[s] = '0;
+      dispatch[s].uop.execute.memory.load = 1;
+      dispatch[s].uop.execute.int_op.alu = (device && s == 1) ? `RAPT_ALU_LBU_
+          : XLEN == 64 ? `RAPT_ALU_LD__ : `RAPT_ALU_LW__;
+      dispatch[s].uop.rd = 5'(10+s);
+      dispatch[s].op1 = s == 0 ? a : b;
+      dispatch[s].prd = phys_reg_t'(10+s);
+      dispatch[s].dest = $bits(dispatch[s].dest)'(s);
+      disp_ioq.accept[s] = 1;
+    end
+    @(negedge clock);
+    disp_ioq.accept = '{default: 0};
+    dispatch = '{default: '0};
+    for (int n = 0; n < 300 && completed != 2'b11; n++) @(negedge clock);
+    check(completed == 2'b11, "back-to-back requests did not complete");
+    repeat (5) @(negedge clock);
+  endtask
+  initial begin
+    boot(0);
+    expected[0] = bytes_at(XLEN'('h80002001));
+    expected[1] = bytes_at(XLEN'('h80003001));
+    pair(XLEN'('h80002001), XLEN'('h80003001));
+    check(b_retries != 0 && reads == 4, "split loads did not exercise B fallback and A beats");
+    $display("PASS: B1 RV%0d A split and B split retry preserve ownership/data", XLEN);
+
+    boot(1);
+    expected[0] = bytes_at(XLEN'('h80004000));
+    expected[1] = bytes_at(XLEN'('h80005000));
+    pair(XLEN'('h40004000), XLEN'('h40005000));
+    check(walks >= 1 && reads == 2, "back-to-back IOQ loads did not traverse DPTW");
+    $display("PASS: B1 RV%0d DPTW and back-to-back IOQ loads", XLEN);
+
+    boot(0);
+    expected[0] = bytes_at(XLEN'('h80006000));
+    expected[1] = XLEN'('h5a);
+    pair(XLEN'('h80006000), XLEN'('h10000000), 1);
+    check(io_reads == 1 && reads == 2, "MMIO load was skipped or duplicated");
+    $display("PASS: B1 RV%0d registered ROB release orders the single MMIO read", XLEN);
+    $finish;
+  end
+  initial begin
+    #100000;
+    $fatal(1, "B1 request boundary timeout");
   end
 endmodule

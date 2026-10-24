@@ -92,7 +92,8 @@ module rapt_l1d #(
   logic [XLEN-1:0] l1d_addr;
   logic tag_hit;
   logic [L1D_N_WAYS-1:0] load_way_hit;
-  logic wb_hold, probe_wb_hold;
+  logic wb_hold, probe_wb_hold, load_miss_wb_hold;
+  logic store_accept, store_error, store_rsp_valid_q, store_rsp_error_q;
   logic mshr_busy, mshr_wake, mshr_ready, mshr_error, mshr_wait;
   logic mshr_lookup, mshr_eligible, mshr_complete, mshr_release, mshr_buffered;
   logic mshr_store_yield;
@@ -122,14 +123,14 @@ module rapt_l1d #(
   // word without a matching buffer waits for its array read; an absent word
   // can allocate while a different refill is writing the array.
   assign mshr_lookup = mshr_eligible && l1d_state == LD_A && !lsu_l1d.wvalid
-      && !mshr_invalidate && !wb_hold;
+      && !mshr_invalidate && !load_miss_wb_hold;
   assign mshr_complete = mshr_lookup && mshr_ready;
   assign mshr_release = mshr_lookup && mshr_wait;
   // A local store arriving after load acceptance needs IDLE to update the
   // array. Yield the held load instead of waiting in LD_A for that store;
   // store completion (or refill progress) wakes its IOQ owner for replay.
   assign mshr_store_yield = mshr_eligible && l1d_state == LD_A
-      && lsu_l1d.wvalid && !tag_hit && !wb_hold && !mshr_invalidate;
+      && lsu_l1d.wvalid && !tag_hit && !load_miss_wb_hold && !mshr_invalidate;
   assign lsu_l1d.rmiss = (mshr_release || mshr_store_yield) && lsu_l1d.rvalid;
   assign lsu_l1d.miss_wake = mshr_wake || (lsu_l1d.wvalid && lsu_l1d.wready);
   if (`RAPT_L1D_MSHRS > 0) begin : g_mshr
@@ -242,7 +243,7 @@ module rapt_l1d #(
   // Maintenance and refill logic reference these before the address logic.
   logic [L1D_LEN-1:0] waddr_idx;
   logic [L1D_LINE_LEN-1:0] addr_offset;
-  assign zero_complete = lsu_l1d.wvalid && lsu_l1d.wready && lsu_l1d.wzero;
+  assign zero_complete = lsu_l1d.wvalid && store_accept && lsu_l1d.wzero;
 
   // No tag lookup: invalidate every way of the VA-selected set. A CBO block
   // is 64 bytes even for presets with smaller cache lines, so ignore index
@@ -277,7 +278,7 @@ module rapt_l1d #(
   for (genvar s = 0; s < L1D_SIZE; s++) begin : g_maintenance_set
     assign maintenance_set[s] = cmu_bcast.fence_time
       || (WriteBack && (coherent_write
-        || (lsu_l1d.wvalid && lsu_l1d.wready && !cacheable_w)))
+        || (lsu_l1d.wvalid && store_accept && !cacheable_w)))
       || (!(WriteBack && L2Inclusive) && cmu_bcast.cbo_inval
         && (12'(s << L1dLineOffset) & CboIndexMask)
             == (cbo_addr[11:0] & CboIndexMask))
@@ -423,7 +424,8 @@ module rapt_l1d #(
   logic                    l1d_inv_all_ways;
   logic [     L1dTagW-1:0] l1d_tag_u;
   logic [     L1D_LEN-1:0] l1d_idx;
-  logic [L1D_LINE_LEN-1:0] l1d_off;
+  // Bound the word-selector fanout into the independently placed data banks.
+  (* max_fanout = 16 *) logic [L1D_LINE_LEN-1:0] l1d_off;
   logic [     L1dWayW-1:0] l1d_way;  // which way for pending l1d_update
   logic [     L1dWayW-1:0] ld_fill_way_r;  // registered fill way for load miss
   logic [    L1D_SIZE-1:0] d_replace_bit;  // random replacement toggle per set (2-way only)
@@ -478,6 +480,8 @@ module rapt_l1d #(
   localparam logic [7:0] FullStoreWstrb = 8'({XLEN / 8{1'b1}});
   logic [L1dWayW-1:0] store_hit_way, store_fill_way;
   logic wb_global_request, wb_victim_request, wb_targeted;
+  logic load_victim_request, load_victim_valid, load_victim_dirty;
+  logic [L1dTagW-1:0] load_victim_tag;
   logic wb_global_dirty;
   logic wb_fill_probe, wb_fill_victim, wb_read_match, wb_miss_match;
   logic tag_probe_fill;
@@ -518,6 +522,10 @@ module rapt_l1d #(
       && cacheable_r && !(|load_way_hit)
       && (L2Release ? |wb_valid_words : wb_dirty_any)
       && (line_read_request || wb_tag != addr_tag);
+  assign load_victim_request = l1d_state == LD_A && !load_perm_denied_q
+      && cacheable_r && !(|load_way_hit)
+      && (L2Release ? load_victim_valid : load_victim_dirty)
+      && (line_read_request || load_victim_tag != addr_tag);
   assign wb_drain_request = probe_valid_i ? probe_dirty_request
       : wb_global_request || wb_victim_request || wb_store_victim || wb_fill_victim;
   // A global drain with no dirty words must not displace a clean victim
@@ -552,6 +560,17 @@ module rapt_l1d #(
       || (update_dirty && l1d_update));
   assign wb_hold = probe_wb_hold
       || (WriteBack && L2Release && (wb_victim_request || wb_store_victim || wb_fill_victim));
+  // Only the load victim can be requested in LD_A. Express that state
+  // contract before the shared tag probe so store/refill selection cannot
+  // reach a load's retry/miss response.
+  assign load_miss_wb_hold = WriteBack
+      && ((dirty_any && (probe_valid_i ? probe_dirty_request
+          : (wb_global_request || load_victim_request)))
+          || (wb_busy && (L2Inclusive || probe_valid_i || wb_global_request || !mshr_eligible))
+          || wb_state != WB_IDLE || writeback_error
+          || (update_dirty && l1d_update) || (L2Release && load_victim_request));
+  `RAPT_SVA_IMPLY(clock, reset, L1D_LOAD_HOLD_EQUIVALENT, l1d_state == LD_A,
+                  load_miss_wb_hold == wb_hold)
   // Idle/ready must depend only on registered writeback state and dirty data.
   // wb_hold also contains the current drain request; feeding it into these
   // outputs creates request -> hold -> ready/idle -> request loops across the
@@ -567,7 +586,7 @@ module rapt_l1d #(
   // if a pending cache update makes that address a hit before B returns.
   always_ff @(posedge clock) begin
     if (reset) lsu_bus_write_pending_q <= 1'b0;
-    else if (lsu_l1d.wvalid && lsu_l1d.wready) lsu_bus_write_pending_q <= 1'b0;
+    else if (lsu_l1d.wvalid && store_accept) lsu_bus_write_pending_q <= 1'b0;
     else if (l1d_bus.awvalid && !wb_valid) lsu_bus_write_pending_q <= 1'b1;
   end
   // PTW coherence also covers nonallocating partial store misses. Keep an
@@ -582,7 +601,8 @@ module rapt_l1d #(
       && l1d_bus.wready && wb_state == WB_IDLE && !wb_valid;
   assign local_store = WriteBack && !lsu_bus_write_pending_q && cacheable_w && !lsu_l1d.wzero
       && (hit_w || (!L2Inclusive && store_allocate && !wb_store_victim));
-  assign local_store_ready = lsu_l1d.wvalid && local_store && l1d_state == IDLE && wb_state == WB_IDLE
+  assign local_store_ready = lsu_l1d.wvalid && !store_rsp_valid_q && local_store
+      && l1d_state == IDLE && wb_state == WB_IDLE
       && !writeback_error && !l1d_update && !ptw_busy
       && !coherent_request && !fence_clear_busy && !mshr_busy && !wb_busy;
   for (genvar word_idx = 0; word_idx < L1D_LINE_SIZE; word_idx++) begin : g_wb_data
@@ -718,6 +738,13 @@ module rapt_l1d #(
       && !lsu_l1d.wvalid && !exu_l1d.valid && !wb_busy && wb_state == WB_IDLE
       && !writeback_error;
 
+  // An LR owns the A port only after older MSHR bus traffic has drained.
+  // No MSHR allocation can occur while that atomic owner is active, so its
+  // hit response need not re-evaluate the table's busy reduction.
+  logic load_admit;
+  assign load_admit = lsu_l1d.rvalid && (!lsu_l1d.atomic_lock || !mshr_busy);
+  `RAPT_SVA_IMPLY(clock, reset, L1D_ATOMIC_ADMISSION_DRAINED, l1d_state == LD_A && l1d_atomic_lock,
+                  !mshr_busy)
   logic load_speculate;
   assign load_speculate = (l1d_state == IDLE && lsu_l1d.rvalid
       && !cmu_bcast.flush_pipe && !fence_clear_busy && !wb_hold && !local_store_ready);
@@ -754,7 +781,7 @@ module rapt_l1d #(
   // harmless: the original arbitration still controls response ownership.
   assign b_read_early = lsu_l1d.rvalid_b
       && (l1d_state == LD_D || (l1d_state == LD_A
-          && cacheable_r && !load_perm_denied_q && !(l1d_atomic_lock && mshr_busy)
+          && cacheable_r && !load_perm_denied_q
           && |load_way_hit && !(|(load_way_hit & ~load_way_data_ready)))
           || (l1d_state == IDLE && !load_read_early && !b_armed));
   assign sram_raddr = WriteBack && wb_state != WB_IDLE ? wb_set
@@ -1086,6 +1113,9 @@ module rapt_l1d #(
       .store_hit_way(store_hit_way),
       .store_fill_way(store_fill_way),
       .ld_fill_way(ld_fill_way),
+      .load_victim_tag(load_victim_tag),
+      .load_victim_valid(load_victim_valid),
+      .load_victim_dirty(load_victim_dirty),
       .l1d_update(l1d_update),
       .l1d_valid_u(l1d_valid_u),
       .line_update(line_update),
@@ -1124,7 +1154,7 @@ module rapt_l1d #(
   logic l1d_sram_busy;
   assign l1d_sram_busy = l1d_update || |(load_way_hit & ~load_way_data_ready);
   assign tag_hit = (l1d_state == LD_A) && !load_perm_denied_q
-    && cacheable_r && !(l1d_atomic_lock && mshr_busy)
+    && cacheable_r
     && !l1d_sram_busy
     && |load_way_hit;
   // data_hit: SRAM data ready in LD_A. IDLE (or PTW-wait) speculated the
@@ -1200,7 +1230,11 @@ module rapt_l1d #(
     assign b_way_data_ready[way] = sram_word_valid[way][b_off] && sram_read_idx_r == b_idx
         && sram_read_authorized_r;
   end
-  assign b_sram_ready = |(b_way_hit & b_way_data_ready) && !wb_hold;
+  // The arm edge already checked writeback arbitration. A new victim
+  // request cannot change the data read on that edge: array writes and
+  // invalidation are checked below, and bank ownership is registered.
+  // Do not let this cycle's refill/tag/victim lookup cancel that response.
+  assign b_sram_ready = |(b_way_hit & b_way_data_ready);
 
   logic [XLEN-1:0] b_way_data_masked[L1D_N_WAYS];
   logic [XLEN-1:0] b_data;
@@ -1435,13 +1469,13 @@ module rapt_l1d #(
   assign l1d_bus.noallocate = mshr_select ? !L2Inclusive : ptw_arvalid || !refill_safe;
   assign l1d_bus.arlen = (mshr_select || (!ptw_arvalid && line_read_request)) ? 8'(L1D_LINE_SIZE-1) : 8'd0;
   assign l1d_bus.awvalid = (wb_valid && !wb_probe_mode) || (!wb_hold
-      && lsu_l1d.wvalid && lsu_bus_write_allowed && !local_store && !mshr_busy
+      && lsu_l1d.wvalid && !store_rsp_valid_q && lsu_bus_write_allowed && !local_store && !mshr_busy
       && !(l1d_state == LD_D && refill_line));
   assign l1d_bus.awaddr = wb_valid ? wb_addr : lsu_l1d.waddr;
   assign l1d_bus.wpbmt = wb_valid ? 2'b00 : lsu_l1d.wpbmt;
   assign l1d_bus.wstrb = wb_valid ? FullStoreWstrb : lsu_l1d.walu;
   assign l1d_bus.wvalid = (wb_valid && !wb_probe_mode) || (!wb_hold
-      && lsu_l1d.wvalid && lsu_bus_write_allowed && !local_store && !mshr_busy
+      && lsu_l1d.wvalid && !store_rsp_valid_q && lsu_bus_write_allowed && !local_store && !mshr_busy
       && !(l1d_state == LD_D && refill_line));
   assign l1d_bus.wdata = wb_valid ? wb_data : lsu_l1d.wdata;
 
@@ -1450,12 +1484,27 @@ module rapt_l1d #(
   // requests, but the matching response still belongs to the SQ request.
   // Let that response retire while WB is idle. A pending SQ bus write
   // excludes victim capture, and queued writebacks cannot acknowledge SQ.
-  assign lsu_l1d.wready = local_store_ready || lsu_bus_write_response || ((!wb_hold
+  assign store_accept = !store_rsp_valid_q && (local_store_ready || lsu_bus_write_response || ((!wb_hold
       || (!wb_valid && wb_state == WB_IDLE && !l1d_bus.idle && l1d_bus.wready))
       && !local_store
       && !wb_busy && l1d_bus.wready && !mshr_busy && !fence_clear_busy
-      && !(l1d_state == LD_D && refill_line));
-  assign lsu_l1d.werr = lsu_l1d.wready && !local_store_ready && l1d_bus.werr;
+      && !(l1d_state == LD_D && refill_line)));
+  assign store_error = store_accept && !local_store_ready && l1d_bus.werr;
+  // The cache consumes a committed store on store_accept. Keep its SQ owner
+  // until the registered acknowledgement; suppress a duplicate bus offer
+  // while that acknowledgement is pending. Local updates already occupy
+  // this cycle, so the two-cycle write-back hit throughput is unchanged.
+  always_ff @(posedge clock) begin
+    if (reset) store_rsp_valid_q <= 1'b0;
+    else store_rsp_valid_q <= lsu_l1d.wvalid && store_accept;
+    store_rsp_error_q <= store_error;
+  end
+  assign lsu_l1d.wready = store_rsp_valid_q;
+  assign lsu_l1d.werr = store_rsp_error_q && store_rsp_valid_q;
+  `RAPT_SVA_NEXT(clock, reset, L1D_STORE_RESPONSE_REGISTERED, lsu_l1d.wvalid && store_accept,
+                 lsu_l1d.wready)
+  `RAPT_SVA_IMPLY(clock, reset, L1D_STORE_RESPONSE_NO_REACCEPT, store_rsp_valid_q,
+                  !store_accept && !local_store_ready && (!l1d_bus.awvalid || wb_valid))
   // The bus may acknowledge this store at AXI acceptance only when every
   // non-bus condition of the synchronous `wready` above already holds, and
   // its hit/miss decision is final: a completed refill may still be
@@ -1527,6 +1576,9 @@ module rapt_l1d #(
       line_update_mask <= mshr_fill_mask;
       line_update_data <= mshr_fill_data;
     end
+    // LD_MSHR_RSP publishes the preceding LD_A lookup. Capture independently
+    // of victim arbitration; a held response retains its payload.
+    if (l1d_state == LD_A) mshr_rsp_data_q <= mshr_data;
   end
 
   always_ff @(posedge clock) begin
@@ -1551,7 +1603,6 @@ module rapt_l1d #(
       reservation_size_m1 <= 4'd3;
       l1d_atomic_lock <= 1'b0;
       load_killed <= 1'b0;
-      mshr_rsp_data_q <= '0;
       refill_safe <= 0;
       refill_line <= 0;
       refill_word <= '0;
@@ -1589,7 +1640,7 @@ module rapt_l1d #(
                   stlb_mmu  <= 'b1;
                   l1d_state <= PTWAIT;
                 end
-              end else if (lsu_l1d.rvalid) begin
+              end else if (load_admit) begin
                 rec_store <= 1'b0;
                 load_context_q <= lsu_l1d.rcontext;
                 // Load TLB lookup
@@ -1636,7 +1687,7 @@ module rapt_l1d #(
                 end
               end
             end else begin
-              if (lsu_l1d.rvalid) begin
+              if (load_admit) begin
                 rec_store <= 1'b0;
                 load_context_q <= lsu_l1d.rcontext;
                 l1d_addr <= lsu_l1d.raddr;
@@ -1737,14 +1788,13 @@ module rapt_l1d #(
           end else if (cmu_bcast.flush_pipe) begin
             l1d_addr  <= '0;
             l1d_state <= IDLE;
-          end else if (wb_hold) begin
+          end else if (load_miss_wb_hold) begin
             l1d_state <= LD_A;
           end else if (mshr_complete) begin
             if (mshr_error) begin
               cause <= `RAPT_CAUSE_LOAD_ACC_FAULT;
               l1d_state <= TRAP;
             end else begin
-              mshr_rsp_data_q <= mshr_data;
               l1d_state <= LD_MSHR_RSP;
             end
           end else if (mshr_release || mshr_store_yield) begin
@@ -1866,7 +1916,7 @@ module rapt_l1d #(
       end else if (zero_complete) begin
         // The ZERO descriptor updates memory as a burst. Its complete block
         // is invalidated through maintenance_set, including on a failed B.
-      end else if (lsu_l1d.wvalid && lsu_l1d.wready && lsu_l1d.werr) begin
+      end else if (lsu_l1d.wvalid && store_accept && store_error) begin
         // An errored posted write may have modified some external bytes.
         // Do not install the intended value or retain a potentially stale
         // physical alias, including a hot PMA copy of an NC/IO write target.
@@ -1877,7 +1927,7 @@ module rapt_l1d #(
         l1d_idx <= waddr_idx;
         l1d_off <= waddr_offset;
         l1d_way <= store_hit_way;
-      end else if (lsu_l1d.wvalid && lsu_l1d.wready && cacheable_w && !lsu_l1d.wzero) begin
+      end else if (lsu_l1d.wvalid && store_accept && cacheable_w && !lsu_l1d.wzero) begin
         update_dirty <= local_store_ready;
         // Only full aligned stores allocate. Hits use the SRAM byte enables;
         // split stores already carry aligned addresses and lane-shifted data.
@@ -1926,7 +1976,7 @@ module rapt_l1d #(
   `RAPT_SVA_IMPLY(clock, reset, L1D_REFILL_LAST, l1d_state == LD_D && refill_line && legacy_rvalid,
                   l1d_bus.rlast == (refill_word == L1D_LINE_LEN'(L1D_LINE_SIZE - 1)))
   `RAPT_SVA_IMPLY(clock, reset, L1D_REFILL_STORE_EXCLUSION, l1d_state == LD_D && refill_line,
-                  !lsu_l1d.wready && !l1d_bus.awvalid)
+                  !store_accept && !l1d_bus.awvalid)
   `RAPT_SVA_IMPLY(clock, reset, L1D_MMIO_READ_REQUIRES_ORDER,
                   legacy_arvalid && !l1d_bus.ar_ptw && !cacheable_r, lsu_l1d.ordered)
   `RAPT_SVA_IMPLY(clock, reset, L1D_RETRY_NO_COMPLETION_OR_READ, lsu_l1d.rretry,

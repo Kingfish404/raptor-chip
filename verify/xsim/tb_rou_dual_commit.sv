@@ -468,10 +468,8 @@ rapt_cmu dut_cmu (
               == u.execute.branch.predicted_taken,
             "checkpoint direction was not captured on rename acceptance");
       end
-`ifdef RAPT_TEST_REGISTERED_PAYLOAD
-      check(!dispatch_valid[0], "new allocation bypassed the payload register");
+      check(!dispatch_valid[0], "registered skid bypassed the allocation edge");
       tick(1);
-`endif
       check(dispatch_valid[0], "ROU did not present dispatch after enqueue");
       check(dispatch[0].dest == expected_dest, "ROU dispatch dest mismatch");
       check(dispatch[0].uop.pnpc == '0, "predicted target leaked into execution queue");
@@ -1495,7 +1493,8 @@ rapt_cmu dut_cmu (
     reset_dut();
     dispatch_one(make_alu_uop(32'h8000_1000, 32'h0010_0093, 5'd1), 6'd33, 6'd1, RobW'(0));
     rnu_rou.slot[0]='0;
-    rnu_rou.slot[0].uop=make_alu_uop(32'h8000_1004,32'h0020_0113,5'd2);
+    // A serializing owner must remain in the skid behind the incomplete ALU.
+    rnu_rou.slot[0].uop=make_sret_uop(32'h8000_1004);
     rnu_rou.slot[0].prd=6'd34;
     rnu_rou.slot[0].prs=6'd2;
     rnu_rou.valid[0]=1;
@@ -1592,10 +1591,18 @@ rapt_cmu dut_cmu (
   endtask
 `endif
 
+`ifdef RAPT_TEST_E67
+  `include "tb_e67_skid.svh"
+`endif
+
   initial begin
     if (rapt_pkg::CommitWidth < 2) fail("tb_rou_dual_commit requires commit width >= 2");
 
-`ifdef RAPT_TEST_PAYLOAD_BOUNDARY
+`ifdef RAPT_TEST_E67
+    init_inputs();
+    run_e67_skid();
+    $finish;
+`elsif RAPT_TEST_PAYLOAD_BOUNDARY
     init_inputs();
     expect_registered_payload_bursts();
     expect_cross_domain_dispatch_bypass();

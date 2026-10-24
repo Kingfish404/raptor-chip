@@ -8,59 +8,67 @@
   <main id="content" class="home-main">
     <section class="hero">
       <div class="hero-copy">
-        <p class="eyebrow">raptor-falcon | marchID 0x32</p>
-        <h1>Out-of-order RISC-V for Linux and FPGA.</h1>
-        <p class="lede">
-          Dual-issue, dual-commit register renaming with TAGE, Sv32/Sv39, PMP,
-          and a Linux path through NEMU, Verilator, and LiteX FPGA.
-        </p>
+        <p class="eyebrow">Open hardware · RV32 / RV64</p>
+        <h1>A RISC-V core.<br>Room to explore.</h1>
+        <p class="lede">A configurable, superscalar out-of-order processor with
+          TAGE prediction, scalar floating point, and Sv32/Sv39 virtual memory.
+          The default RV64 configuration supports
+          <a href="{{ '/overview.html#rva22s64-support' | relative_url }}">RVA22S64</a>.</p>
         <div class="hero-actions">
-          <a class="btn btn-primary" href="{{ '/getting-started.html' | relative_url }}">Quick Start</a>
-          <a class="btn" href="{{ '/explore.html' | relative_url }}">Open explorer</a>
-          <a class="btn" href="{{ '/uarch.html' | relative_url }}">Read the uarch</a>
-          <a class="btn" href="https://github.com/Kingfish404/raptor-chip" rel="external">GitHub</a>
+          <a class="btn btn-primary" href="{{ '/getting-started.html' | relative_url }}">Get started <span aria-hidden="true">↗</span></a>
+          <a class="btn" href="{{ '/uarch.html' | relative_url }}">Read the architecture</a>
         </div>
-        <p class="hero-note">
-          Pipeline on top, memory and peripherals on the bottom.
-          Occupancy illustrates a simplified queue model on CoreMark instruction bytes
-          in listing order. Branches do not redirect; replay and RTL completion
-          bypasses are omitted. Model IPC is not a processor performance measurement.
-        </p>
+        <p class="hero-note">SystemVerilog RTL · Verilator + NEMU difftest · Native FPGA and LiteX flows</p>
       </div>
-      <div class="hero-stage" id="explore">
-        <div id="uarch-diagram" class="uarch-frame"></div>
-        <div class="stage-bar">
-          <div class="stage-controls">
-            <button type="button" data-uarch-flow>Pause</button>
-          </div>
-          <div class="stage-legend" id="uarch-legend"></div>
-        </div>
-        <aside class="stage-inspect" id="uarch-inspect">
-          <p class="muted">Click a block for its source. Tokens are RV32 CoreMark (matrix / list / CRC / UART MMIO).</p>
-        </aside>
-      </div>
+      <aside class="quick-run" aria-label="First simulation">
+        <p class="eyebrow">01 / Run the core</p>
+        <h2>From source to simulation.</h2>
+        <p>From the repository root, after cloning:</p>
+        <pre><code><span class="code-comment"># Prepare the RTL workspace</span>
+make setup-rtl
+
+<span class="code-comment"># RV32 · batch mode · no waveform</span>
+make run-rv32 ARGS="-b -n"</code></pre>
+        <a href="{{ '/getting-started.html' | relative_url }}">Prerequisites and RV64 commands <span aria-hidden="true">→</span></a>
+      </aside>
     </section>
     <section class="spec-strip" aria-label="Default configuration">
-      <p class="spec-kicker">Default preset | parsed from <code>hdl/configs/default/rapt_config.svh</code></p>
-      <dl id="spec-grid" class="spec-grid"></dl>
+      <p class="spec-kicker">Default preset <span aria-hidden="true">/</span> <a href="{{ '/uarch.html#default-configuration' | relative_url }}">All parameters →</a></p>
+      <dl id="spec-grid" class="spec-grid"><div><dt>Configuration</dt><dd><a href="{{ '/uarch.html#default-configuration' | relative_url }}">View RTL defaults</a></dd></div></dl>
     </section>
-    <section class="home-term-wrap" aria-label="Documentation shell">
-      {% include terminal.html %}
-    </section>
-    <section class="doc-index">
+    <section class="doc-index" aria-labelledby="manual-title">
       <div class="section-head">
-        <h2>Manual</h2>
-        <p>The same Markdown tree GitHub Pages has always served, now behind a product surface.</p>
+        <p class="eyebrow">02 / Find your path</p>
+        <h2 id="manual-title">Build. Understand. Integrate.</h2>
       </div>
-      <div class="doc-grid" id="doc-grid"></div>
+      <div class="doc-grid">
+        <a class="doc-card" href="{{ '/overview.html' | relative_url }}"><h3>Core overview <span aria-hidden="true">↗</span></h3><p>Capabilities, default configuration, and verification scope.</p></a>
+        <a class="doc-card" href="{{ '/getting-started.html' | relative_url }}"><h3>Quick start <span aria-hidden="true">↗</span></h3><p>Build RV32 or RV64 and run your first program.</p></a>
+        <a class="doc-card" href="{{ '/uarch.html' | relative_url }}"><h3>Microarchitecture <span aria-hidden="true">↗</span></h3><p>Follow fetch, rename, execution, and precise retirement.</p></a>
+        <a class="doc-card" href="{{ '/linux_kernel.html' | relative_url }}"><h3>Linux boot <span aria-hidden="true">↗</span></h3><p>OpenSBI, payloads, and simulator or FPGA boot paths.</p></a>
+        <a class="doc-card" href="{{ '/ecosystem.html' | relative_url }}"><h3>Platform integration <span aria-hidden="true">↗</span></h3><p>FPGA boards, memory maps, and the software stack.</p></a>
+        <a class="doc-card" href="{{ '/vpu.html' | relative_url }}"><h3>Standalone VPU <span aria-hidden="true">↗</span></h3><p>Vector components and contracts for future core integration.</p></a>
+      </div>
+    </section>
+    <section class="home-explorer" aria-labelledby="diagram-title">
+      <div class="section-head">
+        <div><p class="eyebrow">03 / Look inside</p><h2 id="diagram-title">Follow the instruction.</h2></div>
+        <a href="{{ '/explore.html' | relative_url }}">Open full explorer →</a>
+      </div>
+      {% include architecture-explorer.html %}
+    </section>
+    <section class="home-term-wrap" aria-label="Command lookup">
+      <details><summary>Find a Makefile command</summary>
+        <p class="muted">Look up commands here, then run them in your local checkout.</p>
+        {% include terminal.html %}
+      </details>
     </section>
   </main>
   <footer class="site-footer">
-    <p>
-      Licensed under the
-      <a href="https://github.com/Kingfish404/raptor-chip/blob/master/LICENSE">Apache License 2.0</a>.
-      Topology extracted from <code>hdl/</code>; commands from the root <code>Makefile</code>.
-    </p>
+    <p>Raptor · <a href="https://github.com/Kingfish404/raptor-chip">Source on GitHub</a> ·
+      <a href="https://github.com/Kingfish404/raptor-chip/blob/master/LICENSE">Apache 2.0</a> ·
+      <a href="{{ '/perf-iterations.html' | relative_url }}">Performance history</a> ·
+      <a href="{{ '/REFERENCE.html' | relative_url }}">References</a></p>
   </footer>
   {% include scripts.html %}
 </body>

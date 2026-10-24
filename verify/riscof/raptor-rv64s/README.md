@@ -63,4 +63,4 @@ The phase 46 progress record contains exact frozen inputs and execution results 
 
 `requirements.json` 记录强制要求、源码与测试定位、冻结证据以及逐项验证状态。default RV64 RTL 对 RVA22S64 的支持状态见台账总述。
 
-过程性审查、历史进展和收尾规划存放于本地 `docs.agent/isa/rva22s64/`， 默认不进入 Git；该目录缺失不影响配置和验证脚本运行。
+过程性审查、历史进展和收尾规划应归档在源码树之外，不作为配置和验证脚本的运行依赖。

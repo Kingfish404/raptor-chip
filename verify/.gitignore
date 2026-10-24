@@ -28,6 +28,6 @@ obj_*
 *.o
 *.out
 
-# Keep operational READMEs; put task reviews and progress notes in docs.agent/.
+# Keep operational READMEs; archive task reviews and progress notes outside Git.
 *.md
 !README.md

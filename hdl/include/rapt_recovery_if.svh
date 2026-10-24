@@ -22,7 +22,10 @@ interface rapt_recovery_if #(
   logic taken;
   logic [RobBits-1:0] owner;
   logic [RobBits-1:0] head; // age reference for the validated redirect event
+  // Retain the owner-generation API for selective recovery consumers.
+  /* verilator lint_off UNUSEDSIGNAL */
   logic [GenerationBits-1:0] generation;
+  /* verilator lint_on UNUSEDSIGNAL */
   logic [XLEN-1:0] target;
   logic checkpoint_valid;
   logic [CheckpointBits-1:0] checkpoint;

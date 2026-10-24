@@ -26,26 +26,31 @@ PINOUTS = {
         "P24 M25 R23 R22 R21 M21 N21 M26 T25 T24 P25 P23 P20 P21 AD28".split(),
     ("mlk_cu08_ku15p", "a", "a"):
         "E18 E16 C19 G14 G15 K17 K18 D16 C17 C18 E17 B19 G19 F19 F24".split(),
+    # FMC_C ETHB: G2 H35 G25 G27 G28 G30 G31 H28 H29 H31 H32 H34 H25 H26 G16.
+    # G16/E8 is the shared A/B reset gate; instantiate it only once.
+    ("mlk_cu08_ku15p", "c", "b"):
+        "G9 H13 G11 K11 J11 D13 C13 F13 E13 C12 B12 J13 L12 K12 E8".split(),
     ("mlk_cu08_ku15p", "c", "a"):
         "L19 F18 D14 B16 B17 A18 A19 F17 D15 E15 L18 C14 B15 A15 E8".split(),
 }
 
 
-def add_pads(platform, board, slot, port):
+def add_pads(platform, board, slot, port, name="cm005", with_reset_gate=True):
     key = (board, slot.lower(), port.lower())
     if key not in PINOUTS:
         raise ValueError(f"CM005 pin mapping not verified for {key}; supported: {list(PINOUTS)}")
     p = PINOUTS[key]
     platform.add_extension([
-        ("cm005_clocks", 0,
+        (name + "_clocks", 0,
             Subsignal("rx", Pins(p[0])), Subsignal("tx", Pins(p[1])), IOStandard("LVCMOS18")),
-        ("cm005", 0,
+        (name, 0,
             Subsignal("rx_ctl", Pins(p[2])), Subsignal("rx_data", Pins(" ".join(p[3:7]))),
             Subsignal("tx_ctl", Pins(p[7])), Subsignal("tx_data", Pins(" ".join(p[8:12]))),
             Subsignal("mdc", Pins(p[12])), Subsignal("mdio", Pins(p[13])),
-            Subsignal("reset_gate", Pins(p[14])), IOStandard("LVCMOS18")),
+            *([Subsignal("reset_gate", Pins(p[14]))] if with_reset_gate else []),
+            IOStandard("LVCMOS18")),
     ])
-    return platform.request("cm005_clocks"), platform.request("cm005")
+    return platform.request(name + "_clocks"), platform.request(name)
 
 
 class CM005Reset(LiteXModule):
@@ -104,6 +109,20 @@ class CM005RXFrameError(LiteXModule):
                 error_seen.eq(error_seen | sink.error)))
 
 
+class CM005RXNative(LiteEthPHYRGMIIRX):
+    """Native global-clock receiver retaining both RGMII control edges."""
+    def __init__(self, pads, **kwargs):
+        super().__init__(pads, **kwargs)
+        instances = [s for s in self._fragment.specials if isinstance(s, Instance)]
+        ibuf, = [s for s in instances if s.of == "IBUF" and s.get_io("I") is pads.rx_ctl]
+        delay, = [s for s in instances if s.of == "IDELAYE3"
+                  and s.get_io("IDATAIN") is ibuf.get_io("O")]
+        iddr, = [s for s in instances if s.of == "IDDRE1"
+                 and s.get_io("D") is delay.get_io("DATAOUT")]
+        # Q1=RX_DV, Q2=RX_DV xor RX_ER. Match the upstream data register.
+        self.sync += self.source.error.eq(iddr.get_io("Q1") ^ iddr.get_io("Q2"))
+
+
 class CM005TX1000(LiteXModule):
     """Native DDR TX with one MMCM output for the 250/125 MHz clocks.
 
@@ -112,20 +131,20 @@ class CM005TX1000(LiteXModule):
     a 125 MHz clock centered on the native 125 MHz DDR data. All physical
     launch/capture edges are constrained; no repeated-slot exception is used.
     """
-    def __init__(self, clocks, pads):
+    def __init__(self, clocks, pads, name_prefix="cm005_tx"):
         self.sink = sink = stream.Endpoint(eth_phy_description(8))
         self.comb += sink.ready.eq(1)
         valid = sink.valid
         phase = Signal()
         forwarded = Signal()
         self.specials += [
-            Instance("FDRE", name="cm005_tx_phase",
+            Instance("FDRE", name=f"{name_prefix}_phase",
                 p_IS_C_INVERTED=1, i_C=ClockSignal("cm005_tx_serial"),
                 i_CE=1, i_R=0, i_D=ClockSignal("eth_tx"), o_Q=phase),
-            Instance("ODDRE1", name="cm005_tx_clock_ddr",
+            Instance("ODDRE1", name=f"{name_prefix}_clock_ddr",
                 i_C=ClockSignal("cm005_tx_serial"), i_SR=0,
                 i_D1=phase, i_D2=~phase, o_Q=forwarded),
-            Instance("OBUF", name="cm005_tx_clock_obuf", i_I=forwarded, o_O=clocks.tx),
+            Instance("OBUF", name=f"{name_prefix}_clock_obuf", i_I=forwarded, o_O=clocks.tx),
         ]
         lanes = [("control", pads.tx_ctl, valid, valid ^ sink.error),
                  *[(f"data{i}", pads.tx_data[i], sink.data[i], sink.data[i + 4])
@@ -133,10 +152,10 @@ class CM005TX1000(LiteXModule):
         for name, pin, low, high in lanes:
             serialized = Signal()
             self.specials += [
-                Instance("ODDRE1", name=f"cm005_tx_{name}_ddr",
+                Instance("ODDRE1", name=f"{name_prefix}_{name}_ddr",
                     i_C=ClockSignal("eth_tx"), i_SR=0,
                     i_D1=low, i_D2=high, o_Q=serialized),
-                Instance("OBUF", name=f"cm005_tx_{name}_obuf", i_I=serialized, o_O=pin),
+                Instance("OBUF", name=f"{name_prefix}_{name}_obuf", i_I=serialized, o_O=pin),
             ]
 
 
@@ -223,7 +242,8 @@ class CM005MDIO100(CM005MDIO):
 
 
 class CM005CRG(LiteXModule):
-    def __init__(self, clocks, pads, sys_clk_freq, rx_oversample=False, tx_serial=False):
+    def __init__(self, clocks, pads, sys_clk_freq, rx_oversample=False, tx_serial=False,
+                 drive_reset=True, tx_mac_clock="cm005_tx"):
         self._reset = CSRStorage(description="Assert CM005 PHY reset (active-high NMOS gate).")
         self.power_reset = CM005Reset(sys_clk_freq)
         self.clock_unlocked = Signal()
@@ -246,13 +266,14 @@ class CM005CRG(LiteXModule):
         self.comb += [
             self.power_reset.restart.eq(restart),
             self.reset.eq(self._reset.storage | self.power_reset.active | self.clock_unlocked),
-            pads.reset_gate.eq(self.reset),
-            self.cd_eth_tx.clk.eq(ClockSignal("cm005_tx")),
+            self.cd_eth_tx.clk.eq(ClockSignal(tx_mac_clock)),
         ]
         self.specials += [
             AsyncResetSynchronizer(self.cd_eth_rx, self.reset | ResetSignal("sys")),
             AsyncResetSynchronizer(self.cd_eth_tx, self.reset | ResetSignal("sys")),
         ]
+        if drive_reset:
+            self.comb += pads.reset_gate.eq(self.reset)
         if not tx_serial:
             self.specials += Instance("ODDRE1", name="cm005_txclk_ddr",
                 i_C=ClockSignal("cm005_tx_shifted"), i_SR=0, i_D1=1, i_D2=0,
@@ -265,7 +286,10 @@ class CM005PHY(LiteXModule):
 
     def __init__(self, clocks, pads, sys_clk_freq, iodelay_clk_freq=300e6,
                  rx_delay=1e-9, rx_ctl_delay=None, speed=1000, rx_oversample=False,
-                 rx_data_sample_advance=(0, 0, 0, 0), rx_control_sample_advance=0):
+                 rx_data_sample_advance=(0, 0, 0, 0), rx_control_sample_advance=0,
+                 tx_serial=None, tx_name_prefix="cm005_tx", drive_reset=True,
+                 tx_phy_clock="eth_tx", tx_serial_clock="cm005_tx_serial",
+                 tx_mac_clock="cm005_tx"):
         if speed not in (100, 1000):
             raise ValueError("CM005 speed must be 100 or 1000 Mb/s")
         if (any(rx_data_sample_advance) or rx_control_sample_advance) and not rx_oversample:
@@ -277,11 +301,18 @@ class CM005PHY(LiteXModule):
         if rx_oversample:
             from cm005_oversample import SAMPLE_WORD_FREQ
             self.rx_clk_freq = SAMPLE_WORD_FREQ
-        tx_serial = rx_oversample and speed == 1000
+        if tx_serial is None:
+            tx_serial = rx_oversample and speed == 1000
+        if tx_serial and speed != 1000:
+            raise ValueError("Serial TX requires gigabit mode")
         self.crg = CM005CRG(clocks, pads, sys_clk_freq, rx_oversample=rx_oversample,
-                           tx_serial=tx_serial)
-        self.tx = ClockDomainsRenamer("eth_tx")(
-            CM005TX1000(clocks, pads) if tx_serial else LiteEthPHYRGMIITX(pads))
+                           tx_serial=tx_serial, drive_reset=drive_reset,
+                           tx_mac_clock=tx_mac_clock)
+        # CM005TX1000 names eth_tx explicitly; the generic LiteEth TX also
+        # has sys-domain registers. Rename both to the selected PHY clock.
+        self.tx = ClockDomainsRenamer({"sys": tx_phy_clock, "eth_tx": tx_phy_clock,
+                                      "cm005_tx_serial": tx_serial_clock})(
+            CM005TX1000(clocks, pads, name_prefix=tx_name_prefix) if tx_serial else LiteEthPHYRGMIITX(pads))
         # CM005 straps RXD0 high (PHY adds 2 ns RX delay at 1G, 8 ns at 100M), RXD1 low
         # (no PHY TX delay). FPGA forwards a 90-degree shifted TX clock.
         # Compensate FPGA input-clock insertion with calibrated data delay. This
@@ -294,7 +325,7 @@ class CM005PHY(LiteXModule):
                                   data_sample_advance=rx_data_sample_advance,
                                   control_sample_advance=rx_control_sample_advance)
         else:
-            rx = LiteEthPHYRGMIIRX(
+            rx = CM005RXNative(
                 pads, rx_delay=rx_delay, iodelay_clk_freq=iodelay_clk_freq, usp=True)
         if rx_ctl_delay is not None and not rx_oversample:
             # LiteEth exposes one shared delay. Customize only the control
@@ -334,7 +365,7 @@ class CM005PHY(LiteXModule):
         # The sys-datapath converter already derives this, but relying on it
         # would silently disable CRC error detection in the byte datapath.
         self.comb += self.source.last_be.eq(self.source.last)
-        if speed == 1000 and rx_oversample:
+        if speed == 1000:
             # LiteEth's byte CRC checker fills four bytes before producing
             # output, but forwards the current sink.error, not FIFO.error.
             # Retain even an early RX_ER through FCS removal and conversion.

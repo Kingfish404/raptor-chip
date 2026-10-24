@@ -50,6 +50,7 @@ module rapt_frontend #(
 
   // IFU (Instruction Fetch Unit)
   logic ifu_response_pending;
+  logic unused_ifu_hazard;
   rapt_ifu ifu (
       .clock(clock),
 
@@ -59,7 +60,7 @@ module rapt_frontend #(
       .ifu_bpu(ifu_bpu),
       .ifu_l1i(ifu_l1i),
       .ifu_idu(ifu_fqu),
-      .ifu_hazard(),
+      .ifu_hazard(unused_ifu_hazard),
       .response_pending_o(ifu_response_pending),
 
       .reset(reset)

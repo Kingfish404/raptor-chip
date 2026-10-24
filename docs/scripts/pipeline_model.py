@@ -1,8 +1,7 @@
 """Illustrative queue-occupancy model for the Raptor explorer.
 
 Not NPC/Verilator or an RTL timing model. A straight-line listing (branches do
-not redirect) uses preset widths, simplified queues and a register-name
-scoreboard. The single completion delay and conservative store/control-flow
+not redirect) uses preset widths, simplified queues and fixed illustrative execution delays. The single completion delay and conservative store/control-flow
 retirement do not reproduce RTL bypasses, replay or store followers.
 """
 
@@ -25,18 +24,21 @@ def _cfg(values: dict[str, Any]) -> dict[str, int]:
         "dispatch": int(values.get("dispatch_width") or 2),
         "commit": int(values.get("commit_width") or 2),
         "rob": int(values.get("rob_entries") or 32),
+        "rnq": int(values.get("rnq_entries") or 8),
+        "uoq": int(values.get("uoq_entries") or 8),
+        "integer_ports": int(values.get("integer_issue_ports") or 2),
         "alq": int(values.get("alq_entries") or 8),
         "brq": int(values.get("brq_entries") or 8),
         "mdq": int(values.get("mdq_entries") or 4),
         "ioq": int(values.get("ioq_entries") or 8),
         "fpq": int(values.get("fpq_entries") or 1),
         "fetch_stage": int(values.get("fetch_response_stage") or 0),
-        "mul": 1 if values.get("m_fast") else 3,
+        "mul": 2 if values.get("m_fast") else 3,
         "l1d_hit": 2,
         "complete_reg": 1,
         "mmio": 4,
         "pmem_fill": 8,
-        "iq_reclaim": 0 if int(values.get("iq_reclaim_on_issue", 1)) == 1 else 1,
+        "iq_reclaim": 0 if int(values.get("iq_reclaim_on_issue", 0)) == 1 else 1,
     }
 
 
@@ -147,7 +149,7 @@ class Model:
         for idx in self.rnu:
             put("rapt_rnu", idx)
         for idx in self.uoq:
-            put("rapt_prf", idx)
+            put("model_uoq", idx)
         for idx in self.rob:
             put("rapt_rou", idx)
         for idx in self.alq + self.brq:
@@ -171,7 +173,7 @@ class Model:
             elif node == "rapt_l1d":
                 put("rapt_lsu", idx)
         for idx in self.completing:
-            put("rapt_cdb_arb", idx)
+            put("rapt_completion_stage", idx)
         return occ
 
     def commit(self) -> None:
@@ -218,16 +220,11 @@ class Model:
         for idx in done:
             node, _ = self.executing.pop(idx)
             insn = self.insns[idx]
-            insn.loc = "rapt_cdb_arb"
-            if node == "rapt_ieu_muldiv":
-                self.completing[idx] = self.cycle + self.cfg["complete_reg"]
-            else:
-                self.done.add(idx)
-                if insn.dest:
-                    self.ready_at[insn.dest] = self.cycle
+            insn.loc = "rapt_completion_stage"
+            self.completing[idx] = self.cycle + self.cfg["complete_reg"]
 
     def issue(self) -> None:
-        ports = {"alq": 2, "brq": 1, "mdq": 1, "ioq": 1, "fpq": 1}
+        ports = {"alq": self.cfg["integer_ports"], "brq": 1, "mdq": 1, "ioq": 1, "fpq": 1}
         for kind, q in (("alq", self.alq), ("brq", self.brq), ("mdq", self.mdq), ("ioq", self.ioq), ("fpq", self.fpq)):
             issued = 0
             keep: list[int] = []
@@ -288,10 +285,10 @@ class Model:
             n += 1
 
     def rename(self) -> None:
-        self._move(self.rnu, self.uoq, self.cfg["rename"], "rapt_prf", self.cfg["rob"])
+        self._move(self.rnu, self.uoq, self.cfg["rename"], "model_uoq", self.cfg["uoq"])
 
     def decode(self) -> None:
-        self._move(self.idu, self.rnu, self.cfg["decode"], "rapt_rnu", 8)
+        self._move(self.idu, self.rnu, self.cfg["decode"], "rapt_rnu", self.cfg["rnq"])
 
     def into_idu(self) -> None:
         self._move(self.fqu, self.idu, self.cfg["decode"], "rapt_idu", self.cfg["decode"])
@@ -313,6 +310,7 @@ class Model:
             self.insns[idx].loc = "rapt_l1i"
 
     def step(self) -> dict[str, list[int]]:
+        committed_before = len(self.committed)
         self.commit()
         self.complete()
         self.execute()
@@ -325,7 +323,7 @@ class Model:
         self.into_fqu()
         self.fetch()
         occ = self.occupancy()
-        retiring = [i for i in self.committed[-self.cfg["commit"] :] if self.insns[i].loc == "rapt_cmu"]
+        retiring = self.committed[committed_before:]
         if retiring:
             occ.setdefault("rapt_cmu", []).extend(retiring)
         self.cycle += 1
@@ -372,7 +370,18 @@ def simulate(instructions: list[dict[str, Any]], values: dict[str, Any], max_cyc
     frames: list[dict[str, Any]] = []
     while model.cycle < max_cycles:
         occ = model.step()
-        frames.append({"t": model.cycle - 1, "occ": {k: v for k, v in occ.items() if v}})
+        execution = {kind: [] for kind in ("alq", "brq", "mdq", "ioq", "fpq")}
+        for idx in model.executing:
+            execution[iq_kind(model.insns[idx].domain)].append(idx)
+        frames.append({
+            "t": model.cycle - 1,
+            "occ": {k: v for k, v in occ.items() if v},
+            "queues": {name: list(getattr(model, name)) for name in (
+                "ifu", "fqu", "idu", "rnu", "uoq", "rob", "alq", "brq", "mdq", "ioq", "fpq"
+            )},
+            "executing": execution,
+            "retired_total": len(model.committed),
+        })
         if model.drained():
             break
     if not all(i.committed for i in insns):
@@ -380,7 +389,7 @@ def simulate(instructions: list[dict[str, Any]], values: dict[str, Any], max_cyc
     commits = len(model.committed)
     cycles = max(model.cycle, 1)
     return {
-        "kind": "contract-cycle",
+        "kind": "illustrative-occupancy",
         "cycles": cycles,
         "committed": commits,
         "ipc": round(commits / cycles, 3),
@@ -389,8 +398,9 @@ def simulate(instructions: list[dict[str, Any]], values: dict[str, Any], max_cyc
             "Illustrative cycle model; not timing-equivalent to current RTL or NPC/Verilator.",
             "Listing order; branches do not redirect, so this is not CoreMark IPC.",
             "FQU/IDU/RNU/UOQ are registered queues with no empty-queue bypass.",
-            "IQ issue uses a register scoreboard from the dump; issued slots free next cycle.",
-            "Model adds one completion cycle to all ports; current RTL bypasses it on integer endpoints. L1D is hit-only here; MSHR replay is not modeled.",
+            "IQ issue uses simplified readiness; register dependency timing is not reproduced. Issued slots free next cycle.",
+            "All execution classes pass through one modeled completion register before retirement. Local operand bypasses are omitted.",
+            "Memory requests use abstract hit, external-memory, or MMIO delays. TLBs, MSHR replay, cache contents, and store draining are not modeled.",
         ],
         "frames": frames,
     }

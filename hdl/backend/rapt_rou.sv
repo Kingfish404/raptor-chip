@@ -5,7 +5,7 @@
 // Re-Order Unit (ROU) - dispatch queue + reorder buffer + commit.
 //
 // Sub-sections:
-//   1. Dispatch Queue (UOQ)   - buffers renamed uops before ROB allocation
+//   1. Rename skid            - holds a registered group for ROB allocation
 //   2. ROB Dispatch Buffer    - independently steers allocated owners to domains
 //   3. Reorder Buffer (ROB)   - tracks in-flight instructions for in-order commit
 //   4. Operand Bypass         - forwards results while work awaits a domain
@@ -60,6 +60,7 @@ module rapt_rou #(
     input clock,
     input logic writeback_done = 1'b1,
     output logic writeback_drain,
+    output logic rename_buffer_empty_o,
 
     rnu_rou_if.slave rnu_rou,
     rapt_recovery_if.source recovery,
@@ -179,7 +180,28 @@ module rapt_rou #(
     logic [XLEN-1:1] pc;
   } retire_uop_t;
   retire_uop_t uop_pl[ROB_SIZE];
-  logic [QBits-1:0] uoq_head, uoq_tail, enq_index[RenameWidth], deq_index[NumSlots];
+  // One registered rename group absorbs allocation backpressure. The final
+  // allocation can replace it with the next group on the same edge.
+  localparam int SkidIndexBits = rapt_pkg::index_bits(RenameWidth);
+  localparam int SkidCountBits = rapt_pkg::index_bits(RenameWidth + 1);
+  logic [SkidCountBits-1:0] skid_count, skid_start;
+  logic [SkidCountBits-1:0] skid_count_next;
+  // Registered prefix validity keeps count decoding off the allocation edge.
+  logic [RenameWidth-1:0] skid_valid;
+  wire skid_empty = !skid_valid[0];
+  assign rename_buffer_empty_o = skid_empty;
+`ifndef SYNTHESIS
+  // Preserve the simulator's stall-dump names without retaining ring storage.
+  /* verilator lint_off UNUSEDSIGNAL */
+  wire [QBits-1:0] uoq_head = QBits'(int'(skid_start) + int'(skid_count));
+  wire [QBits-1:0] uoq_tail = QBits'(skid_start);
+  /* verilator lint_on UNUSEDSIGNAL */
+`endif
+  typedef rnu_rou.slot_t RenameSlotT;
+  RenameSlotT skid_slot[RenameWidth];
+  logic skid_checkpoint_valid[RenameWidth];
+  logic [CheckpointBits-1:0] skid_checkpoint[RenameWidth];
+  logic [QBits-1:0] deq_index[NumSlots];
   logic [IIQ_SIZE-1:0] uoq_valid;
   UopT uoq_uops[IIQ_SIZE];
   logic [PLEN-1:0] uoq_pr1[IIQ_SIZE], uoq_pr2[IIQ_SIZE], uoq_prd[IIQ_SIZE], uoq_prs[IIQ_SIZE];
@@ -195,6 +217,7 @@ module rapt_rou #(
       endpoint_fire[ScanEntries],
       commit_fire[CommitWidth];
   int unsigned enqueue_count, dispatch_count, endpoint_count, commit_count;
+  wire skid_replace = skid_empty || dispatch_count == int'(skid_count);
   logic admission_present[NumSlots], admission_rob_available[NumSlots], admission_serial[NumSlots];
   logic admission_eligible[NumSlots], allocation_endpoint_ready[NumSlots];
   rapt_pkg::dispatch_stop_t dispatch_stop, pmu_dispatch_reason;
@@ -709,7 +732,7 @@ module rapt_rou #(
         .ScanEntries(ScanEntries),
         .IndexBits(RBits),
         .PayloadBits(SteerPayloadBits),
-        .AllocationBypass(!RegisteredDispatchPayload)
+        .AllocationBypass(1'b0)
     ) select (
         .clock(clock),
         .reset(reset),
@@ -746,19 +769,35 @@ module rapt_rou #(
     for (genvar r = 0; r < WindowResident; r++) begin : g_resident
       UopT uop_q;
       assign spill_read_index[NumSlots+r] = window_prefetch_payload[r][SpillBits-1:0];
-      always_ff @(posedge clock) if (window_prefetch_valid[r]) uop_q <= spill_read_uop[NumSlots+r];
+      always_ff @(posedge clock) uop_q <= spill_read_uop[NumSlots+r];
+`ifdef RAPT_ASSERT_EN
+      UopT old_uop_q;
+      always_ff @(posedge clock)
+        if (window_prefetch_valid[r])
+          old_uop_q <= spill_read_uop[NumSlots+r];
+      `RAPT_SVA_IMPLY(clock, reset || flush_pipe, ROB_RESIDENT_PAYLOAD_EQUIVALENT,
+                      candidate_valid[r], uop_q == old_uop_q)
+`endif
       assign candidate_uop[r] = uop_q;
       `RAPT_SVA_IMPLY(clock, reset || flush_pipe, ROB_PREFETCH_HAS_SPILL, window_prefetch_valid[r],
                       spill_read_valid[NumSlots+r])
     end
     for (genvar s = 0; s < NumSlots; s++) begin : g_carry
       UopT uop_q;
-      always_ff @(posedge clock) if (deq_fire[s]) uop_q <= spill_allocate_uop[s];
+      always_ff @(posedge clock) uop_q <= spill_allocate_uop[s];
+`ifdef RAPT_ASSERT_EN
+      UopT old_uop_q;
+      always_ff @(posedge clock) if (deq_fire[s]) old_uop_q <= spill_allocate_uop[s];
+      `RAPT_SVA_IMPLY(clock, reset || flush_pipe, ROB_CARRY_PAYLOAD_EQUIVALENT,
+                      candidate_valid[WindowResident+s], uop_q == old_uop_q)
+`endif
       assign candidate_uop[WindowResident+s] = uop_q;
       assign candidate_uop[WindowResident+NumSlots+s] = '0;
     end
   end else begin : g_live_dispatch_payload
-    for (genvar c = 0; c < ScanEntries; c++) assign candidate_uop[c] = '0;
+    for (genvar c = 0; c < ScanEntries; c++) begin : g_candidate
+      assign candidate_uop[c] = '0;
+    end
   end
 
   always_ff @(posedge clock) begin
@@ -766,7 +805,8 @@ module rapt_rou #(
     pmu_dispatch_count <= dispatch_count;
     pmu_dispatch_stop_domain <= 0;
     for (int s = 0; s < NumSlots; s++)
-    if (dispatch_stop == rapt_pkg::DispatchStopEndpoint && dispatch_count == s)
+    if (dispatch_stop == rapt_pkg::dispatch_stop_t'(rapt_pkg::DispatchStopEndpoint)
+        && dispatch_count == s)
       pmu_dispatch_stop_domain <= 32'(uoq_uops[deq_index[s]].schedule.domain);
     pmu_steer_candidates <= 32'(steer_candidate_count);
     pmu_steer_accepted <= 32'(endpoint_count);
@@ -795,7 +835,7 @@ module rapt_rou #(
 
   end
   // Compute allocation operands/dependencies once per physical allocation port.
-  // Both fall-through dispatch and the selected ROB owner consume this record.
+  // ROB, spill, and FP source writes consume this record.
   SlotT allocation[NumSlots];
   UopT fp_allocate_uop[NumSlots];
   CompletionT fp_operand_wake[NumCompletions];
@@ -977,7 +1017,7 @@ module rapt_rou #(
                     spill_read_valid[s])
   end
   for (genvar s = 0; s < NumSlots; s++) begin : g_allocate
-    assign deq_index[s] = QBits'((int'(uoq_tail) + s) % IIQ_SIZE);
+    assign deq_index[s] = QBits'(s);
     assign rob_alloc[s] = RBits'((int'(rob_tail) + s) % ROB_SIZE);
     assign admission_present[s] = uoq_valid[deq_index[s]];
     assign admission_rob_available[s] = !rob_entry_busy[rob_alloc[s]];
@@ -995,17 +1035,12 @@ module rapt_rou #(
     assign allocation_endpoint_ready[s] = spill_allocate_ready[s];
   end
   for (genvar s = 0; s < RenameWidth; s++) begin : g_enqueue
-    logic available;
-    assign enq_index[s] = QBits'((int'(uoq_head) + s) % IIQ_SIZE);
-    // Reclaim a dispatched UOQ entry after the edge.  Same-cycle reuse feeds
-    // dispatch admission back into rename readiness and, through frontend
-    // cancellation and retirement, forms a core-wide combinational loop.
-    assign available = !uoq_valid[enq_index[s]];
-    if (s == 0) begin : g_first_slot
-      assign rnu_rou.ready[s] = available && !flush_pipe && !reset && !dm_haltreq_i;
-    end else begin : g_chain_slot
-      assign rnu_rou.ready[s] = available && enq_fire[s-1] && !flush_pipe && !reset
-          && !dm_haltreq_i;
+    // Allocation reads only registered payload; complete drain permits refill.
+    if (s == 0) begin : g_first
+      assign rnu_rou.ready[s] = skid_replace && !reset && !flush_pipe
+          && !dm_haltreq_i && !recovery_pending;
+    end else begin : g_prefix
+      assign rnu_rou.ready[s] = enq_fire[s-1];
     end
     assign enq_fire[s] = rnu_rou.valid[s] && rnu_rou.ready[s];
   end
@@ -1052,17 +1087,24 @@ module rapt_rou #(
 
 
 
+  assign skid_count_next = SkidCountBits'(int'(skid_count) - dispatch_count + enqueue_count);
   always_ff @(posedge clock) begin
     if (reset || flush_pipe) begin
-      uoq_head <= '0;
-      uoq_tail <= '0;
+      skid_count <= '0;
+      skid_start <= '0;
+      skid_valid <= '0;
       serialize_in_flight <= 1'b0;
     end else begin
-      uoq_head <= QBits'((int'(uoq_head) + enqueue_count) % IIQ_SIZE);
-      uoq_tail <= QBits'((int'(uoq_tail) + dispatch_count) % IIQ_SIZE);
+      skid_count <= skid_count_next;
+      for (int s = 0; s < RenameWidth; s++) skid_valid[s] <= int'(skid_count_next) > s;
+      if (skid_replace) begin
+        skid_start <= '0;
+      end else begin
+        skid_start <= SkidCountBits'(int'(skid_start) + dispatch_count);
+      end
       if (serialize_in_flight && rob_empty) serialize_in_flight <= 1'b0;
       for (int s = 0; s < NumSlots; s++)
-      if (deq_fire[s] && serializing(allocation[s].uop)) serialize_in_flight <= 1'b1;
+      if (deq_fire[s] && admission_serial[s]) serialize_in_flight <= 1'b1;
     end
   end
   always_ff @(posedge clock) begin
@@ -1127,46 +1169,54 @@ module rapt_rou #(
         cbo_block_q <= completion[p].sq_waddr[XLEN-1:6];
     end
   end
-  // Each UOQ destination has one possible rename lane when the packet fits
-  // the ring. Select that payload from the registered enqueue pointer before
-  // late ready/flush decisions; enq_fire only controls its write enable.
-  // Preserve first-fired-lane behavior for oversized parameter combinations.
-  function automatic int enq_writer(input int unsigned e);
-    for (int s = 0; s < RenameWidth; s++)
-    if ((RenameWidth <= IIQ_SIZE || enq_fire[s]) && int'(enq_index[s]) == e) return s;
-    return -1;
-  endfunction
-  for (genvar e = 0; e < IIQ_SIZE; e++) begin : g_uoq_state
-    // Admission never reuses a live entry in the cycle it is dispatched.
-    // Vacant payload may be overwritten before acceptance; only uoq_valid
-    // publishes it. Keep late flush/halt/prefix control off these wide fields.
+  // Capture a group when empty or after complete allocation. Partial
+  // allocation advances only the narrow start/count; held payload never moves.
+  for (genvar s = 0; s < RenameWidth; s++) begin : g_skid_storage
     always_ff @(posedge clock) begin
-      automatic int writer = enq_writer(e);
-      if (!uoq_valid[e] && writer >= 0) begin
-        uoq_uops[e] <= without_prediction(rnu_rou.slot[writer].uop);
-        uoq_pr1[e] <= rnu_rou.slot[writer].pr1;
-        uoq_pr2[e] <= rnu_rou.slot[writer].pr2;
-        uoq_prd[e] <= rnu_rou.slot[writer].prd;
-        uoq_prs[e] <= rnu_rou.slot[writer].prs;
-        uoq_checkpoint_valid[e] <= rnu_rou.checkpoint_valid[writer];
-        uoq_checkpoint[e] <= rnu_rou.checkpoint[writer];
-        uoq_op1[e] <= rnu_rou.slot[writer].op1;
-        uoq_op2[e] <= rnu_rou.slot[writer].op2;
-      end
-    end
-    always_ff @(posedge clock) begin
-      if (reset || flush_pipe) begin
-        uoq_valid[e] <= 1'b0;
-      end else begin
-        automatic int writer = enq_writer(e);
-        if (writer >= 0 && enq_fire[writer]) uoq_valid[e] <= 1'b1;
-        else begin
-          for (int s = 0; s < NumSlots; s++)
-          if (deq_fire[s] && int'(deq_index[s]) == e) uoq_valid[e] <= 1'b0;
-        end
+      if (skid_replace) begin
+        skid_slot[s] <= rnu_rou.slot[s];
+        skid_slot[s].uop <= without_prediction(rnu_rou.slot[s].uop);
+        skid_checkpoint_valid[s] <= rnu_rou.checkpoint_valid[s];
+        skid_checkpoint[s] <= rnu_rou.checkpoint[s];
       end
     end
   end
+  // These views retain the allocation interface; they contain no UOQ storage.
+  for (genvar s = 0; s < IIQ_SIZE; s++) begin : g_allocation_input
+    if (s < RenameWidth) begin : g_lane
+      RenameSlotT slot_view;
+      wire [SkidIndexBits-1:0] held_index = SkidIndexBits'(int'(skid_start) + s);
+      assign slot_view = skid_slot[held_index];
+      assign uoq_valid[s] = skid_valid[s];
+      `RAPT_SVA(clock, reset || flush_pipe, ROU_SKID_VALID_COUNT,
+                skid_valid[s] == (int'(skid_count) > s))
+      assign uoq_uops[s] = without_prediction(slot_view.uop);
+      assign uoq_pr1[s] = slot_view.pr1;
+      assign uoq_pr2[s] = slot_view.pr2;
+      assign uoq_prd[s] = slot_view.prd;
+      assign uoq_prs[s] = slot_view.prs;
+      assign uoq_op1[s] = slot_view.op1;
+      assign uoq_op2[s] = slot_view.op2;
+      assign uoq_checkpoint_valid[s] = skid_checkpoint_valid[held_index];
+      assign uoq_checkpoint[s] = skid_checkpoint[held_index];
+    end else begin : g_unused
+      assign uoq_valid[s] = 1'b0;
+      assign uoq_uops[s] = '0;
+      assign uoq_pr1[s] = '0;
+      assign uoq_pr2[s] = '0;
+      assign uoq_prd[s] = '0;
+      assign uoq_prs[s] = '0;
+      assign uoq_op1[s] = '0;
+      assign uoq_op2[s] = '0;
+      assign uoq_checkpoint_valid[s] = 1'b0;
+      assign uoq_checkpoint[s] = '0;
+    end
+  end
+  `RAPT_SVA(
+      clock, reset || flush_pipe, ROU_SKID_CAPACITY,
+      int'(skid_count) <= RenameWidth && (skid_count == 0 || int'(skid_start) + int'(skid_count) <= RenameWidth))
+  `RAPT_SVA_IMPLY(clock, reset || flush_pipe, ROU_SKID_RECOVERY_HOLD, recovery_pending,
+                  dispatch_count == 0 && enqueue_count == 0)
   // Retirement scans a contiguous prefix with explicit scalar-effect budgets.
   assign rob_head_next = RBits'((int'(rob_head) + commit_count) % ROB_SIZE);
   // Predict the next retirement window at this edge. Completion and retirement
@@ -1288,6 +1338,7 @@ module rapt_rou #(
   always_ff @(posedge clock) begin
     for (int s = 0; s < NumSlots; s++) begin
       if (deq_fire[s]) begin
+        // The checkpoint target was captured when this registered group was accepted.
         if (uoq_checkpoint_valid[deq_index[s]] && control_flow(allocation[s].uop))
           youngest_npc <= {predicted_npc[uoq_checkpoint[deq_index[s]]], 1'b0};
         else youngest_npc <= allocation[s].uop.pc + (allocation[s].uop.c ? XLEN'(2) : XLEN'(4));
@@ -1335,9 +1386,10 @@ module rapt_rou #(
       allocate_hit = 1'b0;
       allocate_lane = '0;
       for (int s = 0; s < NumSlots; s++) begin
+        // Registered ROB tail selects data; admission only qualifies its write.
+        if (int'(rob_alloc[s]) == entry) allocate_lane = SlotBits'(s);
         if (deq_fire[s] && int'(rob_alloc[s]) == entry) begin
           allocate_hit = 1'b1;
-          allocate_lane = SlotBits'(s);
         end
       end
       complete_hit = 1'b0;
@@ -1349,6 +1401,8 @@ module rapt_rou #(
         end
       end
     end
+    `RAPT_SVA_IMPLY(clock, reset || flush_pipe, ROB_ALLOCATION_LANE_IDENTITY, allocate_hit,
+                    deq_fire[allocate_lane] && int'(rob_alloc[allocate_lane]) == entry)
     always_comb begin
       rob_state_next[entry] = rob_entry[entry].state;
       rob_drains_sq_next[entry] = rob_drains_sq[entry];

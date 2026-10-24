@@ -14,7 +14,11 @@ def main():
     parser.add_argument("output", type=Path)
     parser.add_argument("--experimental-split-clock", action="store_true",
         help="Model the physical ECO: separate PHY divider and SYNC BUFGCE serial clock")
+    parser.add_argument("--serial-divider", action="store_true",
+        help="Use a /1 BUFGCE_DIV for the split PHY's serial clock")
     args = parser.parse_args()
+    if args.serial_divider and not args.experimental_split_clock:
+        parser.error("--serial-divider requires --experimental-split-clock")
     output = args.output
     output.mkdir(parents=True, exist_ok=True)
     dut = Module()
@@ -24,12 +28,15 @@ def main():
     clock_reset = Signal(name_override="clock_reset")
     if args.experimental_split_clock:
         dut.clock_domains.cd_cm005_tx_phy = ClockDomain("cm005_tx_phy", reset_less=True)
-        dut.specials += [
-            Instance("BUFGCE", name="cm005_tx_serial_buf", p_CE_TYPE="SYNC",
-                i_I=raw, i_CE=~clock_reset, o_O=dut.cd_cm005_tx_serial.clk),
-            Instance("BUFGCE_DIV", name="cm005_tx_phy_buf", p_BUFGCE_DIVIDE=2,
-                i_I=raw, i_CE=1, i_CLR=clock_reset, o_O=dut.cd_cm005_tx_phy.clk),
-        ]
+        if args.serial_divider:
+            dut.specials += Instance("BUFGCE_DIV", name="cm005_tx_serial_buf",
+                p_BUFGCE_DIVIDE=1, i_I=raw, i_CE=1, i_CLR=clock_reset,
+                o_O=dut.cd_cm005_tx_serial.clk)
+        else:
+            dut.specials += Instance("BUFGCE", name="cm005_tx_serial_buf", p_CE_TYPE="SYNC",
+                i_I=raw, i_CE=~clock_reset, o_O=dut.cd_cm005_tx_serial.clk)
+        dut.specials += Instance("BUFGCE_DIV", name="cm005_tx_phy_buf", p_BUFGCE_DIVIDE=2,
+                i_I=raw, i_CE=1, i_CLR=clock_reset, o_O=dut.cd_cm005_tx_phy.clk)
     else:
         dut.specials += Instance("BUFGCE_DIV", name="cm005_tx_serial_buf", p_BUFGCE_DIVIDE=1,
             i_I=raw, i_CE=1, i_CLR=clock_reset, o_O=dut.cd_cm005_tx_serial.clk)

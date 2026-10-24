@@ -444,3 +444,41 @@ $(eval $(call XLEN_TEST,dtlb-l2-conflict,tb_dtlb_l2_conflict,,-d RAPT_ASSERT_EN)
 $(eval $(call XLEN_TEST,dtlb-table-cam,tb_dtlb_table,,-GWays=0))
 $(eval $(call XLEN_TEST,pmp-page-uniform,tb_pmp_page_uniform))
 $(eval $(call XLEN_TEST,csr-pmp-flush,tb_csr_pmp_flush,"$$(VERIFY_HOME)/xsim/tb_csr_pmp_flush.sv"))
+
+# Explicit XLEN parameters in integer execution units.
+$(eval $(call XLEN_TEST,ieu-xlen-parameter,tb_ieu_xlen_parameter))
+$(eval $(call XLEN_TEST,muldiv-xlen-parameter,tb_ieu_xlen_parameter,,-GCheckMuldiv=1))
+
+# L2 refill address stability under backpressure.
+$(eval $(call XLEN_TEST,l2-refill-ar-stable,tb_l2_refill_ar_stable))
+
+# Debug reset and halt sequencing.
+$(eval $(call XLEN_TEST,dm-step-reset,tb_rtop_dm_reset))
+$(eval $(call XLEN_TEST,dm-step-halt,tb_rtop_dm_reset,,-GExplicitHalt=1))
+
+# Memory / LSU boundary ownership and collision checks.
+$(eval $(call XLEN_TEST,l1d-response-boundary,tb_l1d_response_boundary,,-d RAPT_ASSERT_EN -d RAPT_L1D_MSHRS=4))
+$(eval $(call XLEN_TEST,lsu-killed-consumer,tb_lsu_killed_consumer,,-d RAPT_ASSERT_EN -d RAPT_L1D_MSHRS=4))
+$(eval $(call XLEN_TEST,lsu-request-boundary,tb_lsu_request_boundary,,-d RAPT_ASSERT_EN))
+
+# Rename skid buffering and branch recovery latency.
+E67_SKID_DEFINES := -d RAPT_ASSERT_EN -d RAPT_TEST_E67 -d RAPT_TEST_REGISTERED_PAYLOAD
+e67_width = -d RAPT_RENAME_WIDTH=$(1) -d RAPT_DISPATCH_WIDTH=$(1) -d RAPT_COMMIT_WIDTH=$(1)
+$(eval $(call XLEN_TEST,e67-skid,tb_rou_dual_commit,,$(E67_SKID_DEFINES)))
+$(eval $(call XLEN_TEST,e67-skid-w3,tb_rou_dual_commit,,$(E67_SKID_DEFINES) $(call e67_width,3)))
+$(eval $(call XLEN_TEST,e67-skid-w4,tb_rou_dual_commit,,$(E67_SKID_DEFINES) $(call e67_width,4)))
+$(eval $(call XLEN_TEST,e67-latency,tb_e67_latency,"$$(RAPTOR_HOME)/sim/tb/rapt_tb_mem.sv",-d RAPT_ASSERT_EN))
+
+# Frontend refill ownership, prediction and hint collisions.
+$(eval $(call XLEN_TEST,fetch-refill,tb_fetch_refill,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,fetch-prediction,tb_fetch_prediction,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,fetch-hints,tb_fetch_hints,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,fetch-tage-query,tb_fetch_tage_query,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,fetch-hint-alias,tb_fetch_hint_alias,,-d RAPT_ASSERT_EN))
+
+# Store/load admission, address ownership and split payloads.
+$(eval $(call XLEN_TEST,ioq-prepared-address,tb_ioq_prepared_address,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,l1d-mshr-fill-owner,tb_l1d_mshr_fill_owner,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,l1d-lr-admission,tb_l1d_lr_admission,,-d RAPT_ASSERT_EN -d RAPT_L1D_MSHRS=2))
+$(eval $(call XLEN_TEST,ioq-store-payload,tb_ioq_store_payload,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,lsu-split-payload,tb_lsu_split_payload,,-d RAPT_ASSERT_EN))

@@ -31,7 +31,7 @@ module rapt_decode_slot #(
 
   logic fp_valid;
   logic [5:0] fp_op;
-  logic fp_to_int;
+  logic unused_fp_to_int;
   logic fp_writes_fpr;
   logic fp_i2f, fp_rv64_only;
   logic fp_load, fp_store;
@@ -92,7 +92,7 @@ module rapt_decode_slot #(
       .out_fp_load(fp_load),
       .out_fp_store(fp_store),
       .out_fp_width_d(fp_width_d),
-      .out_fp_to_int(fp_to_int),
+      .out_fp_to_int(unused_fp_to_int),
       .out_fp_writes_fpr(fp_writes_fpr),
 
       .out_imm(dec_imm),

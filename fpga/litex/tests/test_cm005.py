@@ -79,7 +79,7 @@ class CM005Test(unittest.TestCase):
             with self.subTest(variant=variant, dram=dram, speed=speed), tempfile.TemporaryDirectory() as tmp:
                 with patch.object(shared.Raptor, "add_sources", lambda *args, **kwargs: None):
                     soc = cu08.RaptorMLKCU08SoC(sys_clk_freq=50e6, cpu_variant=variant,
-                        with_ethernet=True, with_litedram=dram, eth_speed=speed,
+                        with_ethernet=True, with_cm005_bridge=False, with_litedram=dram, eth_speed=speed,
                         integrated_main_ram_size=0 if dram else 0x10000)
                     Builder(soc, output_dir=tmp, compile_software=False).build(run=False)
                 xdc = next((pathlib.Path(tmp) / "gateware").glob("*.xdc")).read_text()
@@ -122,7 +122,7 @@ class CM005Test(unittest.TestCase):
                     self.assertEqual(soc.ethphy.rx.decoder.control_sample_advance, 2)
                     self.assertEqual(len(re.findall(r"ODDRE1 cm005_tx_\w+_ddr\(", verilog)), 6)
                     self.assertIn("cm005_tx_phase", verilog)
-                    self.assertIn("-edges {2 4 6}", xdc)
+                    self.assertIn("-edges {1 3 5} -edge_shift {2 2 2}", xdc)
                     self.assertIn("CLOCK_DELAY_GROUP cm005_transmit", xdc)
                     self.assertIn("set_property CLOCK_LOW_FANOUT TRUE", xdc)
                     self.assertIn("set_property SLEW FAST", xdc)
@@ -169,7 +169,7 @@ class CM005Test(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with patch.object(shared.Raptor, "add_sources", lambda *args, **kwargs: None):
                 soc = cu08.RaptorMLKCU08SoC(sys_clk_freq=50e6, cpu_variant="linux64",
-                    with_ethernet=True, eth_speed=100, integrated_main_ram_size=0x10000)
+                    with_ethernet=True, with_cm005_bridge=False, eth_speed=100, integrated_main_ram_size=0x10000)
                 Builder(soc, output_dir=tmp, compile_software=False).build(run=False)
             csr = json.loads((pathlib.Path(tmp) / "csr.json").read_text())
             self.assertEqual(csr["constants"]["cm005_eth_speed"], 100)
@@ -394,7 +394,7 @@ class CM005Test(unittest.TestCase):
                 # peripheral construction, CSR layout and emitted constraints only.
                 with patch.object(shared.Raptor, "add_sources", lambda *args, **kwargs: None):
                     soc = soc_type(sys_clk_freq=50e6,
-                        with_ethernet=True, with_litedram=dram, eth_speed=speed, fmc_slot="a",
+                        with_ethernet=True, with_cm005_bridge=False, with_litedram=dram, eth_speed=speed, fmc_slot="a",
                         integrated_main_ram_size=0 if dram else 0x10000)
                     Builder(soc, output_dir=tmp, compile_software=False).build(run=False)
                 csr = json.loads((pathlib.Path(tmp) / "csr.json").read_text())

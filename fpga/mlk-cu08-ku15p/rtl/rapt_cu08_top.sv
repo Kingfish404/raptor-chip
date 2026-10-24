@@ -24,6 +24,25 @@ module rapt_cu08_top (
     inout wire [7:0] ddram_dqs_p,
     inout wire [7:0] ddram_dqs_n,
 `endif
+`ifdef NATIVE_WITH_CM005_BRIDGE
+    input wire cm005_clocks_rx,
+    output wire cm005_clocks_tx,
+    input wire cm005_rx_ctl,
+    input wire [3:0] cm005_rx_data,
+    output wire cm005_tx_ctl,
+    output wire [3:0] cm005_tx_data,
+    output wire cm005_mdc,
+    inout wire cm005_mdio,
+    output wire cm005_reset_gate,
+    input wire cm005_b_clocks_rx,
+    output wire cm005_b_clocks_tx,
+    input wire cm005_b_rx_ctl,
+    input wire [3:0] cm005_b_rx_data,
+    output wire cm005_b_tx_ctl,
+    output wire [3:0] cm005_b_tx_data,
+    output wire cm005_b_mdc,
+    inout wire cm005_b_mdio,
+`endif
     output wire [4:0] user_led
 );
   localparam int ClockHz = `NATIVE_CLOCK_HZ;
@@ -125,14 +144,65 @@ module rapt_cu08_top (
   assign ddr.rlast = 0;
   assign ddr.rvalid = 0;
 `endif
+  logic peripheral_rd, peripheral_wr;
+  logic [15:0] peripheral_raddr, peripheral_waddr;
+  logic [31:0] peripheral_wdata, peripheral_rdata;
+  logic [3:0] peripheral_wstrb;
+`ifdef NATIVE_WITH_CM005_BRIDGE
+  // The forwarder runs before DDR calibration and independently of CPU reset.
+  // Its fixed 50 MHz system clock shares the native core PLL; PHY clocks remain
+  // local to each CM005 port. Only the board power/reset domain resets it.
+  (* keep_hierarchy = "yes" *)
+  rapt_cm005_bridge cm005_bridge (
+      .clk100(clk_ref),
+      .cpu_resetn,
+      .native_clk(clk),
+      .native_reset(reset),
+      .native_rd(peripheral_rd),
+      .native_wr(peripheral_wr),
+      .native_raddr(peripheral_raddr),
+      .native_waddr(peripheral_waddr),
+      .native_wdata(peripheral_wdata),
+      .native_wstrb(peripheral_wstrb),
+      .native_rdata(peripheral_rdata),
+      .cm005_clocks_rx,
+      .cm005_clocks_tx,
+      .cm005_rx_ctl,
+      .cm005_rx_data,
+      .cm005_tx_ctl,
+      .cm005_tx_data,
+      .cm005_mdc,
+      .cm005_mdio,
+      .cm005_reset_gate,
+      .cm005_b_clocks_rx,
+      .cm005_b_clocks_tx,
+      .cm005_b_rx_ctl,
+      .cm005_b_rx_data,
+      .cm005_b_tx_ctl,
+      .cm005_b_tx_data,
+      .cm005_b_mdc,
+      .cm005_b_mdio
+  );
+`else
+  assign peripheral_rdata = '0;
+`endif
   rapt_native_soc #(
       .WithDdr(`NATIVE_DDR),
+      .WithPeripheral(`NATIVE_CM005_BRIDGE),
       .RamBytes(`NATIVE_RAM_BYTES),
       .ClockHz(ClockHz),
       .RomFile(`NATIVE_ROM_FILE)
   ) soc (
       .clk,
       .reset(reset || !ddr_ready),
+      .peripheral_rd,
+      .peripheral_wr,
+      .peripheral_raddr,
+      .peripheral_waddr,
+      .peripheral_wdata,
+      .peripheral_wstrb,
+      .peripheral_rdata,
+      .peripheral_irq(1'b0),
       .uart_rx(serial_rx),
       .uart_tx(serial_tx),
       .writeback_error,

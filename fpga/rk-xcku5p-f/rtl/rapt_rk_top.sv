@@ -7,6 +7,16 @@ module rapt_rk_top (
     input wire cpu_resetn,
     input wire serial_rx,
     output wire serial_tx,
+`ifdef NATIVE_WITH_ETHERNET
+    input wire eth_rxc,
+    eth_rx_ctl,
+    input wire [3:0] eth_rxd,
+    output wire eth_txc,
+    eth_tx_ctl,
+    output wire [3:0] eth_txd,
+    output wire eth_mdc,
+    inout wire eth_mdio,
+`endif
 `ifdef NATIVE_WITH_DDR
     output wire [16:0] ddram_adr,
     output wire [1:0] ddram_ba,
@@ -26,7 +36,11 @@ module rapt_rk_top (
     output wire fan_enable,
     output wire [3:0] user_led
 );
-  localparam int ClockHz = `NATIVE_CLOCK_HZ;
+  localparam int  ClockHz   = `NATIVE_CLOCK_HZ;
+  // Share the main MMCM for TX125/ref300. MIG and RX each use one more;
+  // the debug hub reuses the core clock without an additional MMCM divider.
+  localparam real PllVcoMHz = `NATIVE_ETHERNET ? 1500.0 : 1000.0;
+  wire eth_tx_raw, eth_delay_raw;
   wire clk_in, clk_ref, clk_fb, clk_fb_buf, clk_raw, clk, locked;
   IBUFDS input_buf (
       .I(sys_clk_p),
@@ -47,8 +61,10 @@ module rapt_rk_top (
       .BANDWIDTH("OPTIMIZED"),
       .CLKIN1_PERIOD(5.0),
       .DIVCLK_DIVIDE(1),
-      .CLKFBOUT_MULT_F(5.0),
-      .CLKOUT0_DIVIDE_F(1000.0 / (ClockHz / 1.0e6)),
+      .CLKFBOUT_MULT_F(PllVcoMHz / 200.0),
+      .CLKOUT0_DIVIDE_F(PllVcoMHz / (ClockHz / 1.0e6)),
+      .CLKOUT1_DIVIDE(12),
+      .CLKOUT2_DIVIDE(5),
       .STARTUP_WAIT("FALSE")
   ) pll (
       .CLKIN1(clk_ref),
@@ -57,6 +73,8 @@ module rapt_rk_top (
       .CLKFBIN(clk_fb_buf),
       .CLKFBOUT(clk_fb),
       .CLKOUT0(clk_raw),
+      .CLKOUT1(eth_tx_raw),
+      .CLKOUT2(eth_delay_raw),
       .LOCKED(locked),
       .RST(pll_reset),
       .PWRDWN(1'b0),
@@ -124,8 +142,50 @@ module rapt_rk_top (
   assign ddr.rlast = 0;
   assign ddr.rvalid = 0;
 `endif
+  wire peripheral_rd, peripheral_wr, peripheral_irq;
+  wire [15:0] peripheral_raddr, peripheral_waddr;
+  wire [31:0] peripheral_wdata, peripheral_rdata;
+  wire [3:0] peripheral_wstrb;
+`ifdef NATIVE_WITH_ETHERNET
+  wire eth_tx_clk, eth_delay_clk;
+  BUFG eth_tx_buffer (
+      .I(eth_tx_raw),
+      .O(eth_tx_clk)
+  );
+  BUFG eth_delay_buffer (
+      .I(eth_delay_raw),
+      .O(eth_delay_clk)
+  );
+  rapt_rk_ethernet ethernet (
+      .clk,
+      .reset,
+      .tx_clk(eth_tx_clk),
+      .delay_clk(eth_delay_clk),
+      .clock_locked(locked),
+      .rd(peripheral_rd),
+      .wr(peripheral_wr),
+      .raddr(peripheral_raddr),
+      .waddr(peripheral_waddr),
+      .wdata(peripheral_wdata),
+      .wstrb(peripheral_wstrb),
+      .rdata(peripheral_rdata),
+      .irq(peripheral_irq),
+      .eth_rxc,
+      .eth_rx_ctl,
+      .eth_rxd,
+      .eth_txc,
+      .eth_tx_ctl,
+      .eth_txd,
+      .eth_mdc,
+      .eth_mdio
+  );
+`else
+  assign peripheral_irq = 0;
+  assign peripheral_rdata = 0;
+`endif
   rapt_native_soc #(
       .WithDdr(`NATIVE_DDR),
+      .WithPeripheral(`NATIVE_ETHERNET),
       .RamBytes(`NATIVE_RAM_BYTES),
       .ClockHz(ClockHz),
       .RomFile(`NATIVE_ROM_FILE)
@@ -135,6 +195,14 @@ module rapt_rk_top (
       .uart_rx(serial_rx),
       .uart_tx(serial_tx),
       .writeback_error,
+      .peripheral_rd,
+      .peripheral_wr,
+      .peripheral_raddr,
+      .peripheral_waddr,
+      .peripheral_wdata,
+      .peripheral_wstrb,
+      .peripheral_rdata,
+      .peripheral_irq,
       .ddr
   );
   logic [25:0] heartbeat = 0;

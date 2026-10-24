@@ -73,6 +73,10 @@ module wrap_ysyxsoc (
   end
   // The upstream CPU slave port is reserved/unused. It does not expose RAM,
   // debug or DMA access; no requests are accepted and no response is fabricated.
+  wire unused_slave_inputs = ^{io_slave_awvalid, io_slave_awaddr, io_slave_awid,
+      io_slave_awlen, io_slave_awsize, io_slave_awburst, io_slave_wvalid, io_slave_wdata,
+      io_slave_wstrb, io_slave_wlast, io_slave_bready, io_slave_arvalid, io_slave_araddr,
+      io_slave_arid, io_slave_arlen, io_slave_arsize, io_slave_arburst, io_slave_rready};
   assign io_slave_awready = '0;
   assign io_slave_wready = '0;
   assign io_slave_bvalid = '0;
@@ -87,12 +91,14 @@ module wrap_ysyxsoc (
 
   // The upstream interface has no AxCACHE or JTAG pins. Normal/Device
   // classification is still enforced inside Raptor. Park the debug TAP.
+  logic unused_writeback_error, unused_jtag_tdo;
+  logic [3:0] unused_arcache, unused_awcache;
   rapt #(
       .XLEN(32),
       .MemoryReadCredits(1)
   ) cpu (
       .clock(clock),
-      .writeback_error_o(),
+      .writeback_error_o(unused_writeback_error),
       .reset(reset),
       .io_interrupt(io_interrupt),
       .external_write_valid_i(1'b0),
@@ -103,9 +109,9 @@ module wrap_ysyxsoc (
       .jtag_trst_n(1'b0),
       .jtag_tms(1'b1),
       .jtag_tdi(1'b0),
-      .jtag_tdo(),
-      .io_master_arcache(),
-      .io_master_awcache(),
+      .jtag_tdo(unused_jtag_tdo),
+      .io_master_arcache(unused_arcache),
+      .io_master_awcache(unused_awcache),
       .io_master_awready(io_master_awready),
       .io_master_awvalid(io_master_awvalid),
       .io_master_awaddr(io_master_awaddr),
@@ -140,6 +146,7 @@ endmodule
 
 // Match the unmodified upstream BlackBox name. Tapeout delivery must rename
 // this module and all internal modules to the assigned student ID namespace.
+/* verilator lint_off DECLFILENAME */
 module ysyx_00000000 (
     input logic        clock,
     input logic        reset,
@@ -267,4 +274,5 @@ module ysyx_00000000 (
       .io_slave_rid(io_slave_rid)
   );
 endmodule
+/* verilator lint_on DECLFILENAME */
 `endif

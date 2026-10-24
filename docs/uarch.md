@@ -4,6 +4,13 @@ title: Microarchitecture
 
 # Microarchitecture
 
+The default core is two-wide with a 32-entry ROB. Start with the
+[configuration table](#default-configuration), then follow the pipeline and block
+contracts below. Capacities refer to the current RTL; cycle sequences describe
+ideal paths and are not benchmark results. The default RV64 configuration supports
+[RVA22S64](./README.md#rva22s64-support); the linked overview defines the ISA and
+supervisor scope and points to requirement-level verification evidence.
+
 ## Pipeline stages
 
 `En` is the n-th clock edge that captures an instruction; cycle *n* is the logic between `En` and `En+1`. An ALU instruction passes 13 edges from fetch PC to retirement: 9 in-order edges up to ROB allocation, 1 to enter an issue queue, 1 to execute, and 2 to write back and retire. Every ordered buffer is registered without empty-queue fall-through, so each one costs an edge even when it is empty.
@@ -62,7 +69,7 @@ The `default`, `default-w3`, `default-w4`, `default-w8`, and `default-l2` preset
 
 ## Organization
 
-Raptor is a configurable RV32/RV64 out-of-order core with a two-wide default preset. `rapt_core` composes `rapt_frontend` (prediction, fetch, FQU, decode), `rapt_backend` (rename, operand stage, ROB, dispatch, issue, completion, LSU, precise commit), and `rapt_memory` (L1I, L1D, translation, bus, optional L2). The composition boundaries themselves add no registers. The default decode, rename, dispatch, and commit widths are each two; instruction queues hold individual instructions rather than fixed pairs.
+Raptor is a configurable RV32/RV64 out-of-order core with a two-wide default preset. `rapt_core` composes `rapt_frontend` (prediction, fetch, FQU, decode), `rapt_backend` (rename, operand stage, ROB, dispatch, issue, completion, LSU, precise commit), and `rapt_memory` (L1I, L1D, translation, bus, optional L2). Registers inside the blocks define the stage boundaries. The default decode, rename, dispatch, and commit widths are each two; instruction queues hold individual instructions rather than fixed pairs.
 
 The [pipeline explorer](./explore.md) is an illustrative cycle model. It does not model current branch recovery, MSHR replay, or the direct integer completion path, so its cycle counts are not RTL timing or CoreMark IPC.
 
@@ -92,7 +99,7 @@ The predictor query PC is `ifu_bpu.nextpc`. IFU and IDU report accepted branch-h
 - **Wider configurations:** This contract is lane independent, but the current IOQ still presents one memory completion packet per cycle and the L1D A/B load paths share one data SRAM read port. Raising dispatch and integer issue widths to four, eight, or sixteen does not add memory completion or hot-hit read bandwidth. If a fraction `f` of committed instructions needs this memory completion port, its steady-state IPC ceiling is `min(issue width, 1/f)`, even with perfect frontend and cache hits. A future multi-lane LSU must apply the same owner, exception, flush, and SQ handoff rules to each accepted packet; then it needs explicit completion arbitration, enough cache banks/read ports, and SQ admission bandwidth. With sixteen integer lanes, the current `N+4` completion fabric already has twenty broadcast endpoints, so banked/distributed wakeup and physically local completion paths also need measurement before adopting that width. Widening dispatch alone does not provide those resources.
 - **L1D:** The default 16 KiB, four-way L1D has 64-byte lines, banked synchronous SRAM, four physical-line MSHRs, separate load/store DTLB lookup replicas, and a shared data PTW. Cacheable replayable loads translate and pass permission checks before allocating a miss. IOQ parks these requests and retries them after a wake; a held miss also yields to a late local store so the store can reach the idle cache port; independent Sv32/Sv39 misses can overlap, including later page walks while earlier refills remain outstanding. Same-line misses share a refill, and demanded words can return before RLAST. Replays recheck translation and permissions. MMIO, atomics, and nonreplayable split accesses retain the ordered path. The best-effort B hit-under-miss channel (`RAPT_LSU_HUM`) remains bare-mode only; translated concurrency uses the A-channel MSHR/replay path.
 - **Store policy:** All `default*` presets set `RAPT_L1D_WRITEBACK=1` and `RAPT_L1D_MSHRS=4`; both macros remain overridable. L1D has two full-line writeback buffers with per-word dirty masks. Without inclusive L2, a captured dirty victim releases its array slot before B, while unrelated replayable loads continue. A read of a buffered physical line waits for its writeback; full queues backpressure victim capture, and failed B responses retain queued data until reset. Stores drain active refills, and local stores wait for queued writebacks. Inclusive L2 victim Release/ReleaseAck and Probe operations retain their serialized ownership protocol. MSHR refills acquire the L2 D-client mark, and a Release also invalidates any retained refill copy. Fences and coherence wait for dirty resident data and queued writebacks. A D-side L1 TLB miss first probes L2 TLB; only an actual PTE bus request triggers dirty publication. I-side PTW reads similarly require publication when they reach the bus. Earlier bus stores retain their response ownership, and new stores wait while a walk is active. DMA coherence remains a platform/software responsibility.
-- **Translation and protection:** The fully associative ITLB has 16 entries by default; load/store DTLBs have 16 entries each. Their miss paths share a 256-entry direct-mapped L2 TLB before the separate Sv32/Sv39 instruction and data PTWs. PMP checks fetch, data, and PTW accesses. Split loads carry both their architectural width and each physical fragment's permission footprint, so a narrower fragment cannot bypass a device-width restriction.
+- **Translation and protection:** The fully associative ITLB has 16 entries by default; load/store DTLB replicas each have 64 entries with two-way set associativity. Their miss paths share a 256-entry direct-mapped L2 TLB before the separate Sv32/Sv39 instruction and data PTWs. PMP checks fetch, data, and PTW accesses. Split loads carry both their architectural width and each physical fragment's permission footprint, so a narrower fragment cannot bypass a device-width restriction.
 - **Cache-block operations:** `cbo.inval`, `cbo.clean`, and `cbo.flush` check the translated address before retirement, then wait for the SQ to drain; invalidation/flush remove matching L1D blocks. `cbo.zero` commits an aligned 64-byte zero descriptor through SQ and waits for its final write response. Zicbop prefetch encodings are nonfaulting hints.
 - **Bus:** `rapt_bus` arbitrates L1I, L1D, and PTW requests; `rapt_axi_master` supports up to eight outstanding reads. Without L2 and with a write-through L1D, it accepts up to `RAPT_POSTED_WRITES` (default four) posted cacheable writes; otherwise one write is outstanding. A read cannot overtake a posted write to its line, and an uncacheable read waits for every posted write. A failed posted write's B response reports the affected line to L1D. The default preset leaves L2 as a combinational passthrough. The outer AXI R channel has a two-entry registered buffer when `RAPT_L2_STORE_WRITEBACK` is defined (as in `default-l2`); the generic default bypasses it.
 - **Optional L2:** `default-l2` enables a 512 KiB, eight-way L2 with 1024 sets and 64-byte lines. Eight 1024x22 directory SRAMs hold tag/state/dirty/client metadata. Four logical 16384x64 data banks support Vivado RAM inference and optional segmented SRAM macros. This banked geometry stores 18 tag bits and bypasses addresses above its 34-bit cache-address aperture instead of truncating them into an alias.
@@ -133,20 +140,20 @@ These values refer to `hdl/configs/default/rapt_config.svh`, shared defaults in 
 | Branch prediction | TAGE (1024 bimodal + 3 x 1024 tagged), side conditional query of the same TAGE, 128-entry two-way BTB, 16-entry RAS |
 | L1I | 16 KiB, four-way, 64 sets, 64-byte lines, 32-byte refill sector |
 | L1D | 16 KiB, four-way, 64 sets, 64-byte lines, write-back, 4 MSHRs, 2 writeback buffers, Sv32/Sv39 miss replay |
-| TLB | ITLB 16, DTLB 16 (replicated load/store lookup); shared direct-mapped L2 TLB 256 |
+| TLB | ITLB 16 (fully associative), DTLB 64 (two-way, replicated load/store lookup); shared direct-mapped L2 TLB 256 |
 | L2 | Disabled (combinational passthrough) |
 | AXI master | 4-bit ID, XLEN-bit data, up to 8 reads; one B-synchronous bus write (local L1D store completion on eligible hits) |
 | PMP / PLIC | 8 PMP entries in 16 CSR slots; 31 PLIC sources, M/S contexts |
 
-ITLB capacity is 16 entries across the `default`, `default-l2`, `default-w3`,
-`default-w4`, and `default-w8` presets; `large` uses 32. `small`/`formal` use
-4 entries and `middle` uses 8. Each preset gives the load and store DTLBs the
-same capacity as its ITLB.
+The `default*` presets use a 16-entry fully associative ITLB and 64-entry,
+two-way DTLB replicas. `large` uses ITLB 32 and DTLB 64/two-way.
+`small`/`formal` use 4 entries and `middle`/`middle-cache` use 8 entries in
+both levels of L1 translation; their DTLBs are fully associative (`WAYS=0`).
 
 The instruction and data miss paths share one **256-entry, direct-mapped L2
 TLB**, implemented by `rapt_l2tlb` and the `rapt_cached_ptw` adapters. It is
-enabled in `default`, `default-l2`, `default-w3`, `default-w4`, `default-w8`,
-`large`, and `formal`; `small` and `middle` set `RAPT_L2TLB_ENTRIES=0` and
+enabled in all `default*` presets, `large`, and `formal`;
+`small`, `middle`, and `middle-cache` set `RAPT_L2TLB_ENTRIES=0` and
 bypass it. This setting is independent of the L2 data-cache enable.
 
 The low eight VPN bits index the table. A single synchronous payload port

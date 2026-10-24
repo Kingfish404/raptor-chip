@@ -40,6 +40,9 @@ module rapt_l1d_tags #(
     output logic [L1dWayW-1:0] store_hit_way,
     output logic [L1dWayW-1:0] store_fill_way,
     output logic [L1dWayW-1:0] ld_fill_way,
+    output logic [L1dTagW-1:0] load_victim_tag,
+    output logic load_victim_valid,
+    output logic load_victim_dirty,
     input logic l1d_update,
     input logic l1d_valid_u,
     input logic line_update = 1'b0,
@@ -131,6 +134,10 @@ module rapt_l1d_tags #(
   logic [L1D_N_WAYS-1:0] update_tag_match;
   logic clear_blocked;
 
+  // The accepted load owns this read independently of store/refill probes.
+  assign load_victim_tag = tag_addr_data[ld_fill_way];
+  assign load_victim_valid = |valid_addr[ld_fill_way];
+  assign load_victim_dirty = line_dirty_q[ld_fill_way][addr_idx];
   assign inspect_tag = tag_inspect_data[inspect_way];
   assign inspect_valid = valid_inspect[inspect_way];
   assign inspect_dirty = dirty_inspect[inspect_way];

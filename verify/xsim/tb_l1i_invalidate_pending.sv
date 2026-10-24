@@ -31,13 +31,14 @@ module tb_l1i_invalidate_pending #(
   } response_t;
   response_t pending[$], response;
   logic permit_response = 0, new_epoch = 0, old_error = 0;
+  logic code_changed;
   int accepted = 0, returned = 0;
   localparam logic [31:0] OldInst = 32'h00100513, NewInst = 32'h00200513;
   assign l1i_bus.rready = l1i_bus.arvalid;
   always @(posedge clock) begin
     if (!reset && l1i_bus.arvalid && l1i_bus.rready) begin
       check(!l1i_bus.ar_ptw, "unexpected PTW in Bare fixture");
-      response.data=XLEN==64 ? XLEN'({2{new_epoch ? NewInst:OldInst}}) : XLEN'(new_epoch ? NewInst:OldInst);
+      response.data=XLEN==64 ? XLEN'({2{(new_epoch && code_changed) ? NewInst:OldInst}}) : XLEN'((new_epoch && code_changed) ? NewInst:OldInst);
       response.error=!new_epoch && old_error;
       pending.push_back(response);
       accepted++;
@@ -60,6 +61,7 @@ module tb_l1i_invalidate_pending #(
       reset=1;
       permit_response=0;
       new_epoch=0;
+      code_changed=0;
       old_error=error_response;
       pending.delete();
       accepted=0;
@@ -88,6 +90,9 @@ module tb_l1i_invalidate_pending #(
       ifu_l1i.invalid=cancel_mode==0 || cancel_mode==3;
       cmu_bcast.flush_pipe=cancel_mode==1 || cancel_mode==3;
       cmu_bcast.flush_redirect=cancel_mode==2;
+      // A flush changes the consumer, not memory contents. Only FENCE.I
+      // permits this fixture to publish changed instructions at the same PA.
+      code_changed=cancel_mode==0 || cancel_mode==3;
       new_epoch=1;
       permit_response=same_cycle;
       tick(1);
@@ -107,12 +112,14 @@ module tb_l1i_invalidate_pending #(
         #1;
         check(!ifu_l1i.trap, "orphan old error trapped new fetch");
         if (ifu_l1i.valid) begin
-          check(ifu_l1i.inst_n0 == NewInst, "old response refilled code after invalidation");
+          check(ifu_l1i.inst_n0 == (code_changed ? NewInst : OldInst),
+                "old response refilled code after invalidation");
           seen = 1;
         end
         tick(1);
       end
-      check(seen && returned > 1, "new fetch never completed after old drain");
+      check(seen && returned >= 1 && returned == accepted,
+            "new fetch never completed after old drain");
       $display(
           "PASS INVALIDATE error=%0d collision=%0d mode=%0d XLEN=%0d requests=%0d responses=%0d",
           error_response, same_cycle, cancel_mode, XLEN, accepted, returned);

@@ -40,6 +40,19 @@ For FPGA targets, the Makefile asks Vivado Hardware Manager for attached Xilinx 
 
 Vivado load and flash scripts require exactly one JTAG device matching the board's registered part. They never fall back to the first device in the chain, so a KU15P bitstream cannot accidentally be assigned to an AU15P.
 
+When multiple JTAG adapters are connected, select the adapter for a volatile
+load with `FPGA_HW_TARGET='*/2519C98F420A'` (replace the serial with your
+adapter's target name). The pattern must match exactly one target, and the
+device part is still checked before programming. For example:
+
+```sh
+make fpga-load FPGA_BOARD=mlk_cu08_ku15p FPGA_AUTO_DETECT=0 \
+    FPGA_HW_TARGET='*/2519C98F420A' VARIANT=linux32
+```
+
+Keep the build's other profile arguments when loading. `FPGA_HW_TARGET` selects
+the download adapter only; it does not select a board pinout or a UART port.
+
 `fpga-load` and `fpga-flash` require a bitstream whose saved input hash matches the current inputs. Missing bitstream files or failed timing checks also stop loading.
 
 ## RK onboard Ethernet and DDR4
@@ -58,6 +71,14 @@ is still pending: the RTL8211F reported link down, and BIOS ARP failed before
 TFTP. Linux network operation has not yet been verified.
 
 ## CM005 Ethernet on CU07/CU08
+
+CU08 CPU builds retain FMC_C A↔B forwarding by default (`WITH_CM005_BRIDGE=1`),
+so loading a LiteX CPU bitstream preserves the server → CM005 A/B → KU5P path.
+The CPU, DDR and UART remain available. `WITH_ETHERNET=1` additionally attaches
+the CPU's LiteEth NIC to this shared segment; forwarding also works when that
+CPU NIC is disabled. See [CPU-integrated forwarding](CM005-BRIDGE.md#litex-cpu-and-forwarding)
+for configuration, congestion behavior and validation scope. The standalone
+`cm005_bridge.py` target remains available when no CPU or DDR is needed.
 
 For **LiteX BIOS TFTP network boot** (without replacing the SD card), see [netboot preparation](NETBOOT.md). Its standalone `netboot.mk` checks/packages finished firmware without parsing the FPGA Makefile or touching the board; TFTP service activation and board acceptance remain separate steps.
 
@@ -109,7 +130,7 @@ The default payloads are downloaded by the paired `build` target when absent: `l
 
 #### Manual configurable flow
 
-Ethernet itself is **opt-in**: `WITH_ETHERNET=0` is the default, even with `VARIANT=linux32` or `linux64`. The 1000 Mb/s default above applies only when Ethernet is enabled. BIOS registers `netboot` only when its generated CSR header defines `CSR_ETHMAC_BASE`. A BIOS without that command cannot be repaired by connecting a cable or starting a TFTP server.
+The CU07/CU08 **CPU NIC** is opt-in: `WITH_ETHERNET=0` is the default, even with `VARIANT=linux32` or `linux64`. CU08 A↔B hardware forwarding is independently enabled by default; RK onboard Ethernet defaults to enabled. The 1000 Mb/s default above applies only when Ethernet is enabled. BIOS registers `netboot` only when its generated CSR header defines `CSR_ETHMAC_BASE`. A BIOS without that command cannot be repaired by connecting a cable or starting a TFTP server.
 
 Run the following in one Bash or Zsh session, starting at the repository root. Complete `make setup` once and put Vivado on `PATH` first. Reserve the board before loading it; do not run this against another session's active build or board test. These commands use the CU08 FMC_C / ETHA connection, MIG DDR, SD support and the `default` RTL preset; RV32 runs at 50 MHz and RV64 at 30 MHz. They do not write flash or SD.
 

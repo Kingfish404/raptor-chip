@@ -119,8 +119,8 @@ module tb_l1d_16k;
             XLEN / 8
         ))
       $fatal(1, "D tag must exclude non-physical, index and offset bits");
-    if (`RAPT_CACHE_LINE_BYTES != 64 || Sets < 2 || Ways < 2)
-      $fatal(1, "test requires 64 B lines and at least two sets and ways");
+    if (!(LineBytes inside {16, 32, 64}) || Sets < 2 || Ways < 2)
+      $fatal(1, "test requires 16/32/64 B lines and at least two sets and ways");
     for (int offset = 0; offset < CapacityBytes; offset += XLEN / 8) load(load_addr(offset), 0);
     for (int offset = 0; offset < CapacityBytes; offset += XLEN / 8) load(load_addr(offset), 1);
     begin

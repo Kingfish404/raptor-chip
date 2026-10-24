@@ -200,7 +200,9 @@ module rapt_fp_registers #(
           // functional consumers in this branch and is pruned in synthesis.
 `ifndef SYNTHESIS
           if (s == 0 && operand == 0) begin : g_debug_view
-            for (genvar r = 0; r < 32; r++) assign debug_word[r][c] = words[r];
+            for (genvar r = 0; r < 32; r++) begin : g_word
+              assign debug_word[r][c] = words[r];
+            end
           end
 `endif
         end

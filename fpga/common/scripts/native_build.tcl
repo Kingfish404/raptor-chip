@@ -33,6 +33,8 @@ if {$action eq "peripheral-synth"} {
 read_verilog -sv [file join $sources board_sources.sv]
 set_property top $top [current_fileset]
 read_xdc [file join $sources board.xdc]
+if {$with_ethernet} {read_xdc [file join $sources ethernet.xdc]}
+if {$with_cm005_bridge} {read_xdc [file join $sources cm005_pins.xdc]}
 if {$with_ddr} {
     source [file join $sources create_ip.tcl]
     read_xdc [file join $sources ddr4.xdc]
@@ -54,6 +56,7 @@ launch_runs synth_1 -jobs $jobs
 wait_on_run synth_1
 if {[get_property PROGRESS [get_runs synth_1]] ne "100%"} {error "Board synthesis failed"}
 open_run synth_1
+if {$with_cm005_bridge} {source [file join $sources cm005_timing.tcl]}
 if {$with_ddr} {
     set ddr_ref [get_clocks -quiet -of_objects [get_ports $ddr_clock_port]]
     if {[llength $ddr_ref] != 1} {error "Expected exactly one MIG reference clock"}
@@ -62,9 +65,17 @@ if {$with_ddr} {
     set hub [get_debug_cores -quiet dbg_hub]
     if {[llength $hub]} {
         disconnect_debug_port dbg_hub/clk
-        connect_debug_port dbg_hub/clk [get_nets clk_ref]
-        set_property C_CLK_INPUT_FREQ_HZ $reference_hz $hub
-        set_property C_ENABLE_CLK_DIVIDER [expr {$reference_hz > 100000000}] $hub
+        if {$with_ethernet || $with_cm005_bridge} {
+            # The native core clock is free-running after power-on. Reuse it
+            # so the hub does not consume the MMCM next to the RGMII RX pins.
+            connect_debug_port dbg_hub/clk [get_nets clk]
+            set hub_hz [expr {int($clock_mhz * 1000000)}]
+        } else {
+            connect_debug_port dbg_hub/clk [get_nets clk_ref]
+            set hub_hz $reference_hz
+        }
+        set_property C_CLK_INPUT_FREQ_HZ $hub_hz $hub
+        set_property C_ENABLE_CLK_DIVIDER [expr {$hub_hz > 100000000}] $hub
     }
 }
 write_checkpoint -force [file join $out synthesized.dcp]
@@ -75,6 +86,7 @@ if {$action eq "synth"} {close_project; exit 0}
 if {$action ne "build"} {error "Unknown action: $action"}
 file delete -force [file join $out timing.pass]
 opt_design
+if {$with_ethernet} {source [file join $sources ethernet_cdc.tcl]}
 place_design -directive Explore
 phys_opt_design
 route_design -directive Explore
@@ -85,6 +97,13 @@ report_timing_summary -check_timing_verbose -report_unconstrained -file [file jo
 report_cdc -details -file [file join $out cdc.rpt]
 report_drc -file [file join $out drc.rpt]
 report_route_status -file [file join $out route_status.rpt]
+if {$with_ethernet} {
+    set skew_report [report_bus_skew -return_string]
+    set fh [open [file join $out bus_skew.rpt] w]
+    puts $fh $skew_report
+    close $fh
+    if {[string first "VIOLATED" $skew_report] >= 0} {error "Native Ethernet Gray bus skew failed"}
+}
 
 # Fail closed: both setup and hold need constrained paths and nonnegative slack.
 foreach kind {max min} {
@@ -101,7 +120,13 @@ foreach category {no_clock constant_clock multiple_clock unconstrained_internal_
     if {![regexp [format {checking %s \(([0-9]+)\)} $category] $timing_check -> count]} {
         error "Unable to establish check_timing category $category"
     }
-    if {$count != 0} {error "check_timing $category reports $count endpoints"}
+    if {$count != 0} {
+        if {$with_cm005_bridge && $category eq "partial_input_delay"} {
+            cm005_native_check_partial_inputs $timing_check $count
+        } else {
+            error "check_timing $category reports $count endpoints"
+        }
+    }
 }
 # check_timing's summary also counts explicitly false-pathed asynchronous pins.
 # Require zero genuinely missing I/O delays; UART/LED/reset exceptions are XDC.
@@ -113,6 +138,17 @@ foreach direction {input output} {
 }
 set violations [get_drc_violations -quiet -filter {SEVERITY == Error || SEVERITY == {Critical Warning}}]
 if {[llength $violations]} {error "Routed DRC has errors/critical warnings: $violations"}
+if {$with_cm005_bridge} {
+    source [file join $sources cm005_aperture.tcl]
+    cm005_check_sampling_aperture [file join $out cm005_aperture.rpt]
+    set methodology [report_methodology -return_string]
+    set fh [open [file join $out cm005_methodology.rpt] w]
+    puts $fh $methodology
+    close $fh
+    if {[string first "Critical Warning" $methodology] >= 0} {
+        error "Native CM005 clock/methodology checks failed"
+    }
+}
 write_bitstream -force [file join $out $bitstream]
 set fh [open [file join $out timing.pass] w]
 puts $fh PASS

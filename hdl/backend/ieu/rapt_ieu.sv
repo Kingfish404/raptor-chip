@@ -120,8 +120,11 @@ module rapt_ieu #(
 
   CompletionT alq_combo[NumCompletions];
   for (genvar p = 0; p < NumCompletions; p++) begin : g_alq_combo
-    if (p == rapt_pkg::completion_memory_port(Cfg)) assign alq_combo[p] = memory_wake;
-    else assign alq_combo[p] = '0;
+    if (p == rapt_pkg::completion_memory_port(Cfg)) begin : g_memory
+      assign alq_combo[p] = memory_wake;
+    end else begin : g_none
+      assign alq_combo[p] = '0;
+    end
   end
 
   rapt_iq #(
@@ -205,7 +208,6 @@ module rapt_ieu #(
     if (p == IntegerSystemPort) begin : g_system
       rapt_ieu_pipe_alu_csr #(
           .UseDispatchCsrAddress(1'b1),
-          .ROB_SIZE(ROB_SIZE),
           .XLEN    (XLEN)
       ) u_pipe_alu_csr (
           .cmu_bcast (cmu_bcast),

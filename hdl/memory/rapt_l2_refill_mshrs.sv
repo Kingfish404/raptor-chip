@@ -67,8 +67,9 @@ module rapt_l2_refill_mshrs #(
 );
   if ((XLEN != 32 && XLEN != 64) || LineBytes < XLEN / 8
       || LineBytes % (XLEN / 8) != 0 || (LineWords & (LineWords - 1)) != 0
-      || NumMshrs < 3 || NumMshrs > (1 << ID_W))
+      || NumMshrs < 3 || NumMshrs > (1 << ID_W)) begin : g_invalid_geometry
     $error("invalid L2 refill MSHR geometry");
+  end
 
   logic [NumMshrs-1:0] ar_sent;
   logic [WordBits-1:0] fill_word[NumMshrs];
@@ -84,6 +85,7 @@ module rapt_l2_refill_mshrs #(
   logic [1:0] inner_burst[NumMshrs];
   logic [3:0] cache[NumMshrs];
   logic [MshrBits-1:0] last_issue, issue_slot;
+  logic issue_held;
   logic r_fire;
 
   assign alloc_ready = int'(alloc_slot) < NumMshrs
@@ -141,6 +143,17 @@ module rapt_l2_refill_mshrs #(
         issue_slot = MshrBits'(candidate);
       end
     end
+    // New allocations/retries may outrank this slot while ARREADY is low.
+    // AXI ownership lasts from the first advertised valid through handshake.
+    if (issue_held) begin
+      outer_arvalid = 1'b1;
+      issue_slot = last_issue;
+    end
+  end
+
+  always_ff @(posedge clock) begin
+    if (reset) issue_held <= 1'b0;
+    else issue_held <= outer_arvalid && !outer_arready;
   end
 
   always_ff @(posedge clock) begin
@@ -179,10 +192,10 @@ module rapt_l2_refill_mshrs #(
         beat_valid[int'(retry_slot)] <= '0;
         fill_resp[int'(retry_slot)] <= 2'b00;
       end
-      if (outer_arvalid && outer_arready) begin
-        ar_sent[int'(issue_slot)] <= 1'b1;
-        last_issue <= issue_slot;
-      end
+      // Reuse the round-robin cursor to retain a stalled grant. While held,
+      // issue_slot selects this cursor; after acceptance it seeds the next scan.
+      if (outer_arvalid) last_issue <= issue_slot;
+      if (outer_arvalid && outer_arready) ar_sent[int'(issue_slot)] <= 1'b1;
       if (r_fire) begin
         line_buf[int'(outer_rid)][int'(fill_word[int'(outer_rid)])*XLEN+:XLEN] <= outer_rdata;
         beat_valid[int'(outer_rid)][int'(fill_word[int'(outer_rid)])] <= 1'b1;

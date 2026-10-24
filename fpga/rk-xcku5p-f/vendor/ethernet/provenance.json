@@ -1,0 +1,12 @@
+{
+  "origin": "https://github.com/alexforencich/verilog-ethernet",
+  "upstream_revision": "ebe31e811cee9db615a7d5ec8472f972f3368b90",
+  "local_source": "third_party/chipyard/generators/cva6/src/main/resources/vsrc/cva6/fpga/src/ariane-ethernet",
+  "notes": "CVA6 copy with Jonathan Kimmitt CRC observation ports and rgmii_lfsr name; copied unchanged. MIT license retained in each file.",
+  "files": {
+    "eth_mac_1g.sv": "8dfb44f630698ad0b31b74e26a10a0495aa5d78e68f6c76d2e4be5beee761ace",
+    "axis_gmii_rx.sv": "de911f782d980677fcb72c7c8d15b630715b8cbd74ddd3eedcb5df84fd3c1240",
+    "axis_gmii_tx.sv": "fd59040376af3c8ef586683b35afdb0135bbbe6079ceef9c17af6f11dd993c82",
+    "rgmii_lfsr.sv": "13baf18135d579ab771a9f7dc68c462c3fe90dad86c5143c29b0cb822932ce6b"
+  }
+}

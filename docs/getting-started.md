@@ -22,7 +22,7 @@ git clone https://github.com/Kingfish404/raptor-chip
 cd raptor-chip
 
 # Install the common development toolchain (FPGA/PDK setup is separate)
-make setup
+make setup-rtl
 
 # Show all available targets
 make help
@@ -32,14 +32,6 @@ make help
 
 ```shell
 make run-nemu32                 # configure + build + run, RV32
-```
-
-Or step by step:
-
-```shell
-make build-nemu32               # configure and build
-make run-nemu32
-make menuconfig-nemu32          # interactive Kconfig
 ```
 
 ## 3. Run NPC (Verilator Simulation)
@@ -125,28 +117,33 @@ Details: **[Linux Kernel Boot](./linux_kernel.md)**.
 
 ## 7. FPGA
 
-LiteX is the supported board flow (KU15P, AXAU15, VCU118, Tang Mega 138K Pro):
+The root FPGA targets select native **MLK-CU08-KU15P** by default:
+
+```shell
+make fpga-syn
+make fpga-pnr
+# Select another native board explicitly
+make fpga-syn FPGA_BOARD=rk-xcku5p-f
+```
+
+For LiteX BIOS/Linux flows:
 
 ```shell
 make -C fpga/litex help
-make -C fpga/litex fpga-detect          # detect attached Xilinx parts
+make -C fpga/litex fpga-detect
 ```
 
-The Gowin Tang Nano 20K path remains as a small open-toolchain target:
-
-```shell
-make fpga-syn                       # synth
-make fpga-pnr                       # place & route
-```
-
-See [`fpga/litex/README.md`](../fpga/litex/README.md) and [`fpga/gowin-tang-nano-20k/README.md`](../fpga/gowin-tang-nano-20k/README.md).
+See [native FPGA support](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/README.md) and
+[LiteX board setup](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/litex/README.md) for toolchains and constraints.
+The Tang Nano 20K directory is an archived example. Synthesis does not establish
+routed timing closure or a working board image.
 
 ## 8. Utilities
 
 ```shell
 make pack     # pack all SV into one file
 make lint     # Verilator lint (RV32)
-make sta MEMORY=sram XLEN=32  # SRAM macro STA (placeholder libs if absent)
+make sta MEMORY=sram XLEN=32  # full synthesis + STA; can take hours
 make sta-check MEMORY=dff XLEN=64 # RTL elaboration only
 make format FORMAT_SCOPE=all  # includes tracked HDL and SV testbenches
 make format-check FORMAT_SCOPE=all # no file changes
@@ -154,49 +151,17 @@ make regression-plan         # preview CoreMark/STA/FPGA regression commands
 make clean    # clean NEMU, selected sim profile, generated RTL, verify and app outputs
 ```
 
-## Command Reference
+## Build options
 
-| Task                            | Command                                |
-| ------------------------------- | -------------------------------------- |
-| Show all targets                | `make help`                            |
-| Setup environment               | `make setup`                           |
-| Generate RTL                    | `make verilog`                         |
-| Build & run NEMU                | `make run-nemu32`                      |
-| Full NPC simulation             | `make run-rv32`                        |
-| NPC simulation (batch, no wave) | `make run-rv32 ARGS="-b -n"`           |
-| NPC RV64 mode                   | `make run-rv64 ARGS="-b -n"`           |
-| CPU tests on NPC                | `make cpu-tests-rv32 ARGS="-b -n"`     |
-| Run CoreMark on NPC             | `make coremark-rv32 ARGS="-b -n"`      |
-| Run MicroBench on NPC           | `make microbench-rv32 ARGS="-b -n"`    |
-| Run nanos-lite on NEMU          | `make nanos-nemu32`                    |
-| Boot Linux on NEMU              | `make linux-boot-nemu32`               |
-| Boot Linux on NPC w/ difftest   | `make linux-boot-rv32`                 |
-| FPGA (LiteX)                    | `make -C fpga/litex help`              |
-| FPGA (Tang Nano 20K)            | `make fpga-syn` / `make fpga-pnr`      |
-| Pack SV / Lint / STA            | `make pack` / `make lint` / `make sta` |
-| Clean selected build outputs    | `make clean`                           |
+| Option | Purpose |
+| --- | --- |
+| `ARGS`, `IMG` | Runtime flags and custom binary |
+| `DIFFTEST=0` / `1` | Disable / enable the NEMU differential reference |
+| `BENCH_OPT=baseline` / `optimized` | Benchmark compiler preset |
+| `SIM_RANDOM_DELAY`, `SIM_RANDOM_SEED` | Reproducible memory wait states |
+| `FPGA_BOARD` | Native FPGA board selection |
+| `MEMORY=sram` / `dff`, `XLEN=32` / `64` | STA memory model and word width |
 
-Key overridable variables: `ARGS` (runtime), `VFLAGS` (RTL defines), `IMG` (custom binary),
-`MAINARGS` (benchmark mode), `DIFFTEST=0|1`, `BENCH_OPT=baseline|optimized`,
-`SIM_RANDOM_DELAY` / `SIM_RANDOM_SEED`, `FORMAT_SCOPE=all|hdl`, and
-`MEMORY=sram|dff` / `XLEN=32|64` for STA. See the
-[simulator and STA usage](../sim/README.md).
-
-## Manual Workflow
-
-The same actions using the environment directly:
-
-```shell
-source ./env.sh
-
-# 1. NEMU
-cd $NEMU_HOME && make riscv32_defconfig && make && make run
-
-# 2. NPC
-cd $RAPTOR_HOME/hdl/chisel && make verilog
-cd $NSIM_HOME && make o2_difftest_defconfig && make && make run
-
-# 3. nanos-lite on NEMU (with VME)
-cd $RAPTOR_HOME/abstract-machine/app/nanos-lite \
-  && make ARCH=$ISA-nemu update run ARGS="-b" VME=1
-```
+For direct shell workflows, run `source env.sh`. See the
+[simulator guide](https://github.com/Kingfish404/raptor-chip/blob/master/sim/README.md)
+for configuration caches and lower-level commands.

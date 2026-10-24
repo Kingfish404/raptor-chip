@@ -43,13 +43,6 @@ module rapt_issue_select #(
   endfunction
   logic [Entries-1:0] greedy[Ports];
   logic [Entries-1:0] greedy_claimed;
-  // Port-oriented view of the same wires, shared by every repair stage.
-  logic [Entries-1:0] port_compatible[Ports];
-  for (genvar p = 0; p < Ports; p++) begin : g_compatibility
-    for (genvar e = 0; e < Entries; e++) begin : g_entry
-      assign port_compatible[p][e] = compatible[e][p];
-    end
-  end
   if (UniformSimplePorts && Ports > 1 && !InOrder && !Rebalance) begin : g_uniform
     localparam int FirstSimplePort = LastPort == 0 ? 1 : 0;
     // Older-candidate counts are only compared with port ranks and the simple
@@ -70,9 +63,11 @@ module rapt_issue_select #(
       wire [CountBits-1:0] count_tree[2*CountLeaves];
       assign candidates[e] = valid[e] && ready[e] && compatible[e][FirstSimplePort];
       for (genvar o = 0; o < CountLeaves; o++) begin : g_leaf
-        if (o < Entries)
+        if (o < Entries) begin : g_candidate
           assign count_tree[CountLeaves+o] = CountBits'(candidates[o] && older_mask[e][o]);
-        else assign count_tree[CountLeaves+o] = '0;
+        end else begin : g_pad
+          assign count_tree[CountLeaves+o] = '0;
+        end
       end
       for (genvar node = 1; node < CountLeaves; node++) begin : g_count
         assign count_tree[node] = capped_add(count_tree[2*node], count_tree[2*node+1]);
@@ -84,8 +79,9 @@ module rapt_issue_select #(
           || greedy[LastPort][e];
     end
     for (genvar p = 0; p < Ports; p++) begin : g_port
-      if (p == LastPort) assign greedy[p] = enabled[p] ? oldest(last_candidates) : '0;
-      else begin : g_simple
+      if (p == LastPort) begin : g_last
+        assign greedy[p] = enabled[p] ? oldest(last_candidates) : '0;
+      end else begin : g_simple
         wire [CountBits-1:0] port_rank;
         assign port_rank = CountBits'($countones(
             enabled & ((Ports'(1) << p) - 1'b1) & ~(Ports'(1) << LastPort)
@@ -120,6 +116,13 @@ module rapt_issue_select #(
   end
   assign baseline_claimed = greedy_claimed;
   if (Rebalance && !InOrder && Ports > 1) begin : g_rebalance
+    // Port-oriented view of the same wires, shared by every repair stage.
+    logic [Entries-1:0] port_compatible[Ports];
+    for (genvar p = 0; p < Ports; p++) begin : g_compatibility
+      for (genvar e = 0; e < Entries; e++) begin : g_entry
+        assign port_compatible[p][e] = compatible[e][p];
+      end
+    end
     for (genvar p = 0; p < Ports; p++) begin : g_idle_port
       // Keep stage signals in separate generate scopes: a single unpacked
       // stage array obscures the acyclic dependency for event simulators.

@@ -7,23 +7,17 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-VIEW = ROOT / "docs/assets/js/uarch-view.js"
+VIEW = ROOT / "docs/assets/js/explore-view.js"
+WIDGET = ROOT / "docs/_includes/architecture-explorer.html"
 HOME = ROOT / "docs/_layouts/home.html"
 EXPLORE = ROOT / "docs/_layouts/explore.html"
 STYLE = ROOT / "docs/assets/css/style.scss"
 
 
 class UarchView2DTest(unittest.TestCase):
-    def test_memory_path_places_axi_adapter_before_l2(self) -> None:
-        src = VIEW.read_text(encoding="utf-8")
-        self.assertIn('["rapt_bus", "rapt_axi_master"]', src)
-        self.assertIn('["rapt_axi_master", "rapt_l2"]', src)
-        self.assertIn('["rapt_l2", "soc_pmem"]', src)
-        self.assertNotIn('["rapt_l2", "rapt_axi_master"]', src)
-
     def test_shipped_renderer_is_svg_not_3d(self) -> None:
         src = VIEW.read_text(encoding="utf-8")
-        self.assertIn('class: "uarch-diagram"', src)
+        self.assertIn("class: 'architecture-svg'", src)
         self.assertIn("viewBox", src)
         self.assertIn("http://www.w3.org/2000/svg", src)
         self.assertNotIn("yaw", src)
@@ -32,15 +26,19 @@ class UarchView2DTest(unittest.TestCase):
         self.assertNotIn("getContext(\"2d\")", src)
         self.assertNotIn("uarch-canvas", src)
 
-    def test_layouts_host_diagram_not_canvas(self) -> None:
-        home = HOME.read_text(encoding="utf-8")
-        explore = EXPLORE.read_text(encoding="utf-8")
-        for text in (home, explore):
-            self.assertIn('id="uarch-diagram"', text)
-            self.assertNotIn("uarch-canvas", text)
-            self.assertNotIn("<canvas", text)
-        self.assertIn("Branches do not redirect", home)
-        self.assertIn("Branches do not redirect", explore)
+    def test_home_and_explore_share_the_complete_component(self) -> None:
+        for layout in (HOME, EXPLORE):
+            text = layout.read_text(encoding="utf-8")
+            self.assertEqual(text.count("{% include architecture-explorer.html %}"), 1)
+            self.assertNotIn('id="uarch-diagram"', text)
+        widget = WIDGET.read_text(encoding="utf-8")
+        self.assertIn('id="uarch-diagram"', widget)
+        self.assertIn("Branches do not redirect", widget)
+        self.assertIn("data-cycle-play", widget)
+        self.assertIn("data-cycle-step", widget)
+        self.assertIn('id="cycle-slider"', widget)
+        self.assertIn("Functional connections, not cycle timing", widget)
+        self.assertFalse((ROOT / "docs/assets/js/uarch-view.js").exists())
 
 
 class LightCodeThemeTest(unittest.TestCase):

@@ -290,6 +290,15 @@ $(error Invalid BOOT_MODE='$(BOOT_MODE)'. Use BOOT_MODE=custom or BOOT_MODE=bios
 endif
 endif
 
+WITH_CM005_BRIDGE ?= $(if $(filter mlk_cu08_ku15p,$(FPGA_BOARD)),1,0)
+ifneq (,$(filter 1 yes true on,$(WITH_CM005_BRIDGE)))
+ifneq ($(FPGA_BOARD),mlk_cu08_ku15p)
+$(error CM005 forwarding is supported only on mlk_cu08_ku15p FMC_C A/B)
+endif
+endif
+_CM005_BOARD = $(filter mlk_cu07_ku15p mlk_cu08_ku15p,$(FPGA_BOARD))
+_CM005_ENABLED = $(filter 1 yes true on,$(WITH_CM005_BRIDGE))
+WITH_CM005_BRIDGE_FLAG = $(if $(_CM005_BOARD),$(if $(_CM005_ENABLED),,--without-cm005-bridge),)
 WITH_ETHERNET ?= $(or $(BOARD_$(FPGA_BOARD)_DEFAULT_WITH_ETHERNET),0)
 FMC_SLOT ?= $(if $(filter mlk_cu08_ku15p,$(FPGA_BOARD)),c,a)
 ETH_PORT ?= a
@@ -302,7 +311,11 @@ ifeq (,$(filter mlk_cu07_ku15p mlk_cu08_ku15p rk_xcku5p_f,$(FPGA_BOARD)))
 $(error Ethernet requires an MLK KU15P or RK-XCKU5P-F target)
 endif
 endif
-WITH_ETHERNET_FLAG = $(if $(filter 1 yes true on,$(WITH_ETHERNET)),--with-ethernet --fmc-slot=$(FMC_SLOT) --eth-port=$(ETH_PORT) --eth-speed=$(ETH_SPEED),)
+# The PHY ports are in use when either the CPU NIC or CM005 forwarding is enabled.
+_ETHERNET_PORTS_USED = $(filter 1 yes true on,$(WITH_ETHERNET) $(WITH_CM005_BRIDGE))
+_ETHERNET_PORT_ARGS = --fmc-slot=$(FMC_SLOT) --eth-port=$(ETH_PORT) --eth-speed=$(ETH_SPEED)
+WITH_ETHERNET_FLAG = $(if $(filter 1 yes true on,$(WITH_ETHERNET)),--with-ethernet,) \
+	$(if $(_ETHERNET_PORTS_USED),$(_ETHERNET_PORT_ARGS),)
 
 FPGA_FLAVOR := $(BOOT_MODE)
 FPGA_FLAVOR := $(FPGA_FLAVOR)-$(VARIANT)
@@ -322,6 +335,7 @@ ifeq ($(ETH_SPEED),100)
 FPGA_FLAVOR := $(FPGA_FLAVOR)-100m
 endif
 endif
+FPGA_FLAVOR := $(FPGA_FLAVOR)$(if $(filter 1 yes true on,$(WITH_CM005_BRIDGE)),-bridge,)
 FPGA_FLAVOR_SUFFIX := $(strip $(FPGA_FLAVOR_SUFFIX))
 ifneq ($(FPGA_FLAVOR_SUFFIX),)
 FPGA_FLAVOR := $(FPGA_FLAVOR)-$(FPGA_FLAVOR_SUFFIX)
@@ -330,7 +344,7 @@ endif
 _FPGA_CONFIG_VARS := FPGA_BOARD VARIANT RAPT_CONFIG RAPT_PACK_VFLAGS BOOT_MODE \
 	SYS_CLK UART_BAUD INTEGRATED_MAIN_RAM_SIZE WITH_LED_CHASER \
 	WITH_LITEDRAM LITEDRAM_SIZE WITH_MIG MIG_SIZE WITH_SDCARD \
-	WITH_ETHERNET FMC_SLOT ETH_PORT ETH_SPEED EXTRA_FLAGS \
+	WITH_CM005_BRIDGE WITH_ETHERNET FMC_SLOT ETH_PORT ETH_SPEED EXTRA_FLAGS \
 	VIVADO_JOBS VIVADO_INCREMENTAL VIVADO_ROUTE_DIRECTIVE VIVADO_SYNTH_DIRECTIVE VIVADO_OPT_DIRECTIVE \
 	VIVADO_NO_TIMING_DRIVEN VIVADO_SYS_SETUP_MARGIN_NS VIVADO_SYS_FINAL_WNS_NS \
 	FW_FPGA_BIN FW_LINUX_CONFIG_ID
@@ -362,7 +376,9 @@ OFL_CABLE := $(strip $(OFL_CABLE))
 
 ifeq ($(FPGA_VENDOR),vivado)
 FPGA_LOAD_TOOL_CHECK = command -v "$(VIVADO)" >/dev/null 2>&1 || { echo "[ERR] $(VIVADO) not found on PATH — source settings64.sh"; exit 1; }
-FPGA_LOAD_CMD  = "$(VIVADO)" -mode batch -nojournal -nolog -source "$(LITEX_DIR)/scripts/vivado_load.tcl" -tclargs "$(FPGA_BITSTREAM)" "$(FPGA_DEVICE)"
+FPGA_LOAD_CMD  = "$(VIVADO)" -mode batch -nojournal -nolog \
+	-source "$(LITEX_DIR)/scripts/vivado_load.tcl" \
+	-tclargs "$(FPGA_BITSTREAM)" "$(FPGA_DEVICE)" $(if $(strip $(FPGA_HW_TARGET)),"$(FPGA_HW_TARGET)",)
 FPGA_FLASH_CMD = "$(VIVADO)" -mode batch -nojournal -nolog -source "$(LITEX_DIR)/scripts/vivado_flash.tcl" -tclargs "$(FPGA_BITSTREAM)" "$(FPGA_BUILD_DIR)" "$(FPGA_DEVICE)"
 else
 FPGA_LOAD_TOOL_CHECK = command -v $(OFL) >/dev/null 2>&1 || { echo "[ERR] openFPGALoader not found"; exit 1; }
@@ -404,12 +420,15 @@ _FPGA_FLAGS = --output-dir=$(FPGA_DIR) \
 	$(_FPGA_BOOT_FLAGS) \
 	$(_MAIN_RAM_FLAG) \
 	$(WITH_LED_CHASER_FLAG) $(WITH_LITEDRAM_FLAG) $(LITEDRAM_SIZE_FLAG) \
-	$(WITH_MIG_FLAG) $(MIG_SIZE_FLAG) $(WITH_SDCARD_FLAG) $(WITH_ETHERNET_FLAG) $(EXTRA_FLAGS)
+	$(WITH_MIG_FLAG) $(MIG_SIZE_FLAG) $(WITH_SDCARD_FLAG) $(WITH_ETHERNET_FLAG) $(WITH_CM005_BRIDGE_FLAG) $(EXTRA_FLAGS)
 
 FPGA_STAMP := $(FPGA_DIR)/.bitstream_stamp
+_CM005_SOURCES = $(addprefix $(LITEX_DIR)/,cm005.py cm005_oversample.py cm005_timing.py \
+	usp_clock.py cm005_bridge.py cm005_bridge_queue.py cm005_switch.py \
+	scripts/check_cm005_aperture.tcl)
 _FPGA_HASH_COMMON_INPUTS = $(PACK_SV) $(RTL_SOURCES) $(FPGA_PY) $(LITEX_DIR)/Makefile \
 	$(LITEX_DIR)/scripts/isolated_pack.py $(LITEX_DIR)/scripts/build_identity.py \
-	$(if $(and $(filter 1 yes true on,$(WITH_ETHERNET)),$(filter mlk_cu07_ku15p mlk_cu08_ku15p,$(FPGA_BOARD))),$(LITEX_DIR)/cm005.py $(LITEX_DIR)/cm005_oversample.py $(LITEX_DIR)/scripts/check_cm005_aperture.tcl,) \
+	$(if $(and $(_ETHERNET_PORTS_USED),$(_CM005_BOARD)),$(_CM005_SOURCES),) \
 	$(LITEX_DIR)/mk/config.mk $(LITEX_DIR)/mk/recipes.mk \
 	$(LITEX_DIR)/cores/cpu/raptor/core.py \
 	$(wildcard $(LITEX_DIR)/cores/cpu/raptor/*.h $(LITEX_DIR)/cores/cpu/raptor/*.S) \

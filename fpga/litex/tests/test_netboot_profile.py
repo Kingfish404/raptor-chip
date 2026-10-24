@@ -107,6 +107,16 @@ class NetbootProfileTest(unittest.TestCase):
                 self.expand('fpga-netboot-rv64-build', setting)
             self.assertIn('conflicts with netboot', error.exception.stderr)
 
+    def test_cpu_forwarding_profile_is_explicit_and_fixed(self):
+        for board, expected in (('mlk_cu08_ku15p', '1'), ('rk_xcku5p_f', '0')):
+            settings = self.expand('fpga-netboot-rv64-info', f'FPGA_BOARD={board}')[0][1]
+            self.assertEqual(settings['WITH_CM005_BRIDGE'], expected)
+            wrong = '0' if expected == '1' else '1'
+            with self.assertRaises(subprocess.CalledProcessError) as error:
+                self.expand('fpga-netboot-rv64-info', f'FPGA_BOARD={board}',
+                            f'WITH_CM005_BRIDGE={wrong}')
+            self.assertIn('conflicts with netboot', error.exception.stderr)
+
     def test_custom_roots_isolate_presets_and_share_host_state(self):
         for config in ('default', 'small'):
             settings = self.expand('fpga-netboot-rv64-info', f'RAPT_CONFIG={config}',

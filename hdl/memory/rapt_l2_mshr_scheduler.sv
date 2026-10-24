@@ -43,8 +43,9 @@ module rapt_l2_mshr_scheduler #(
     output logic reload_from_request,
     output logic reload_needs_directory
 );
-  if (NumMshrs < 3 || NormalMshrs != NumMshrs - 2 || SetBits < 1 || TagBits < 1)
+  if (NumMshrs < 3 || NormalMshrs != NumMshrs - 2 || SetBits < 1 || TagBits < 1) begin : g_invalid_geometry
     $error("invalid L2 MSHR geometry");
+  end
 
   localparam int BcMshr = NumMshrs - 2;
   localparam int CMshr  = NumMshrs - 1;

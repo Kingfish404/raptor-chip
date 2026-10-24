@@ -21,7 +21,9 @@ module tb_vector_alu_rtl;
     if (!$value$plusargs("vectors=%s", vectors)) $fatal(1, "Missing vectors path");
     input_file = $fopen(vectors, "r");
     if (input_file == 0) $fatal(1, "Cannot open vector inputs");
-    while (!$feof(input_file)) begin
+    while (!$feof(
+        input_file
+    )) begin
       parsed = $fscanf(input_file, "%h %h %h %h %h %h\n", funct6, sew, a, b, mask_bit, mask_logic);
       if (parsed == 6) begin
         #1;

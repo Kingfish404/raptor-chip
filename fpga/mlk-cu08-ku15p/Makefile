@@ -3,7 +3,8 @@
 PYTHON ?= python3
 XLEN ?= 64
 RAPT_CONFIG ?= small
-MEMORY ?= bram
+MEMORY ?= ddr
+CM005_BRIDGE ?= 1
 CLOCK_MHZ ?= 50
 RAM_BYTES ?= 131072
 USE_RESET_BUTTON ?= 0
@@ -13,7 +14,7 @@ VIVADO ?= vivado
 JOBS ?= 4
 BUILD_ROOT ?= $(CURDIR)/build
 OPTIONS = --xlen $(XLEN) --preset $(RAPT_CONFIG) --memory $(MEMORY) \
-	--clock-mhz $(CLOCK_MHZ) --ram-bytes $(RAM_BYTES) --reset-button $(USE_RESET_BUTTON) \
+	--cm005-bridge $(CM005_BRIDGE) --clock-mhz $(CLOCK_MHZ) --ram-bytes $(RAM_BYTES) --reset-button $(USE_RESET_BUTTON) \
 	--ddr-part '$(DDR_PART)' --cross '$(CROSS)' --vivado '$(VIVADO)' --jobs $(JOBS) \
 	--build-root '$(BUILD_ROOT)'
 RV_ACTIONS := prepare lint test sim ip-check peripheral-synth synth build load info

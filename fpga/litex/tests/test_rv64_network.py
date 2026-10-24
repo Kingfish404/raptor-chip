@@ -80,6 +80,7 @@ class RV64NetworkTest(unittest.TestCase):
                 with patch.object(shared.Raptor, "add_sources", lambda *args, **kwargs: None):
                     soc = cu08.RaptorMLKCU08SoC(sys_clk_freq=50e6,
                         cpu_variant=variant, with_sdcard=True, with_ethernet=True,
+                        with_cm005_bridge=False,
                         eth_speed=100, integrated_main_ram_size=0x10000)
                     Builder(soc, output_dir=tmp, compile_software=False).build(run=False)
                 csr = json.loads((Path(tmp) / "csr.json").read_text())

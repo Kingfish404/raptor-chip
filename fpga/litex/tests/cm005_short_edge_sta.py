@@ -26,7 +26,7 @@ def main():
     args = parser.parse_args()
     dram_clocks = args.litedram
     with patch.object(shared.Raptor, "add_sources", lambda *args, **kwargs: None):
-        soc = RaptorMLKCU08SoC(sys_clk_freq=50e6, with_ethernet=True,
+        soc = RaptorMLKCU08SoC(sys_clk_freq=50e6, with_ethernet=True, with_cm005_bridge=False,
                               with_litedram=dram_clocks,
                               fmc_slot="c", eth_speed=args.speed,
                               integrated_main_ram_size=0 if dram_clocks else 0x10000)

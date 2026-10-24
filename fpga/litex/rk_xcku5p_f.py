@@ -11,13 +11,14 @@ from cpu.raptor.core import Raptor
 from ku15p_soc import AXIClockDomainCrossing, AXIInitGate, KU15PBoard, main as run_target
 import rk_xcku5p_f_platform as rk_platform
 
-from migen import ClockDomain, ClockDomainsRenamer, ClockSignal, If, Instance, ResetSignal, Signal
+from migen import Cat, ClockDomain, ClockDomainsRenamer, ClockSignal, If, Instance, ResetSignal, Signal
 from migen.genlib.cdc import MultiReg
 from migen.genlib.resetsync import AsyncResetSynchronizer
 
 from litex.build.io import DifferentialInput
 from litex.gen import LiteXModule
-from litex.soc.cores.clock import USPMMCM, USPIDELAYCTRL
+from litex.soc.cores.clock import USPMMCM
+from usp_clock import USPIDELAYCTRL
 from litex.soc.cores.cpu import CPUS
 from litex.soc.cores.led import LedChaser
 from litex.soc.integration.soc import SoCRegion
@@ -85,7 +86,8 @@ class RKRGMIIClocking(LiteXModule):
         pll.register_clkin(rxclk, 125e6)
         # The MMCM/BUFG receive path adds about 2.6 ns at the IDDR. A
         # negative half-cycle shift puts both DDR sample edges in the data
-        # eyes and requires swapping the IDDR's Q1/Q2 lane assignments.
+        # eyes. RX must also realign adjacent IDDR words: Q2 captures the
+        # low nibble before Q1 captures its matching high nibble.
         pll.create_clkout(self.cd_eth_rx, 125e6, phase=-180, with_reset=False)
         pll.create_clkout(self.cd_eth_tx, 125e6, with_reset=False)
         self.comb += self.cd_eth_tx_delayed.clk.eq(self.cd_eth_tx.clk)
@@ -114,6 +116,7 @@ class RKRGMIIReceive(LiteXModule):
     def __init__(self, pads):
         self.source = source = stream.Endpoint(eth_phy_description(8))
         rx_ctl_ibuf, rx_ctl_idelay, rx_ctl = Signal(), Signal(), Signal()
+        rx_ctl_high = Signal()
         rx_data_ibuf, rx_data_idelay, rx_data = Signal(4), Signal(4), Signal(8)
 
         def input_lane(pad, buffered, delayed, low, high=None):
@@ -133,18 +136,30 @@ class RKRGMIIReceive(LiteXModule):
                          o_Q1=high if high is not None else Signal(), o_Q2=low),
             ]
 
-        input_lane(pads.rx_ctl, rx_ctl_ibuf, rx_ctl_idelay, rx_ctl)
+        input_lane(pads.rx_ctl, rx_ctl_ibuf, rx_ctl_idelay, rx_ctl, rx_ctl_high)
         for bit in range(4):
             input_lane(pads.rx_data[bit], rx_data_ibuf[bit], rx_data_idelay[bit],
                        rx_data[bit], rx_data[bit + 4])
 
         rx_ctl_d = Signal()
+        rx_low_d = Signal(4)
+        error_seen = Signal()
+        # SAME_EDGE_PIPELINED presents high[N-1] alongside low[N]. Delay
+        # low and RX_DV one cycle to reconstruct byte N-1, including RX_ER
+        # encoded on that byte's high-nibble control sample.
         self.sync += [
             rx_ctl_d.eq(rx_ctl),
-            source.valid.eq(rx_ctl),
-            source.data.eq(rx_data),
+            rx_low_d.eq(rx_data[:4]),
+            source.valid.eq(rx_ctl_d),
+            source.data.eq(Cat(rx_low_d, rx_data[4:])),
+            source.error.eq(rx_ctl_d & (error_seen | (rx_ctl_d ^ rx_ctl_high))),
+            If(~rx_ctl_d, error_seen.eq(0)).Else(
+                error_seen.eq(error_seen | (rx_ctl_d ^ rx_ctl_high))),
         ]
-        self.comb += source.last.eq(~rx_ctl & rx_ctl_d)
+        self.comb += [
+            source.last.eq(~rx_ctl_d & source.valid),
+            source.last_be.eq(source.last),
+        ]
 
 
 class RKRGMII(LiteXModule):
@@ -284,10 +299,19 @@ class RaptorRKSoC(SoCCore):
 
         if with_ethernet:
             clocks, pads = platform.request("eth_clocks"), platform.request("eth")
-            # Board schematic: TXDLY/RXD1 is pulled high, RXDLY/RXCTL low.
-            # The PHY delays its TX sampling clock. RX is captured by the
+            # Timing requires PHY TX delay on and RX delay off. Despite the
+            # schematic's RXDLY pull-down, the tested RTL8211F powered up with
+            # RX delay on: clear page 0xd08, RXCR 0x15 bit 3 before netboot.
+            # See CM005-BRIDGE.md for the measured configuration. RX uses the
             # MMCM's compensated clock path; routed I/O timing is checked.
             self.ethphy = RKRGMII(clocks, pads)
+            # Retain the RX distribution root from the timing-closed board
+            # implementation. A root local to the input bank advances both
+            # capture edges enough to violate the +/-1 ns input budget.
+            platform.toolchain.pre_placement_commands.append(
+                "set rk_rx_clock_net [get_nets -quiet eth_rx_clk]; "
+                "if {{[llength $rk_rx_clock_net] != 1}} {{error RK_RX_CLOCK_UNRESOLVED}}; "
+                "set_property USER_CLOCK_ROOT X1Y1 $rk_rx_clock_net")
             # Vivado reports this fixed RK pin as unavailable while MIG's
             # DDR byte performs BISC. The CPU stays in reset until MIG
             # calibration completes and the MAC has no startup TX traffic.
@@ -301,7 +325,7 @@ class RaptorRKSoC(SoCCore):
             platform.add_platform_command(
                 "create_clock -name rk_eth_rxc -period 8.000 [get_ports {rxclk}]",
                 rxclk=clocks.rx)
-            # RXDLY is low. Budget the PHY's +/-0.5 ns output skew plus
+            # With PHY RX delay disabled, budget +/-0.5 ns output skew plus
             # another 0.5 ns for package, trace, and board uncertainty.
             for edge in ("", "-clock_fall -add_delay"):
                 for bound, delay in (("max", 1.0), ("min", -1.0)):

@@ -54,23 +54,46 @@ def tcl(value):
 
 
 def configuration(args):
-    return {key: getattr(args, key) for key in (
-        "xlen", "preset", "memory", "clock_mhz", "ram_bytes", "reset_button", "ddr_part", "cross"
+    result = {key: getattr(args, key) for key in (
+        "xlen", "preset", "memory", "clock_mhz", "ram_bytes", "reset_button", "ddr_part", "cross", "ethernet"
     )}
+    if PROFILE.get("cm005_bridge"):
+        result["cm005_bridge"] = args.cm005_bridge
+    return result
 
 
-def input_hashes():
+def input_hashes(cm005_bridge=False):
     files = []
+    extensions = {".sv", ".svh", ".py", ".c", ".h", ".S", ".tcl", ".xdc", ".json"}
     for root in (REPO / "hdl", REPO / "sim/include", REPO / "sim/rtl", COMMON, BOARD):
-        files += [p for p in root.rglob("*") if p.is_file() and
-                  p.suffix in (".sv", ".svh", ".py", ".c", ".h", ".S", ".tcl", ".xdc", ".json") and
-                  "build" not in p.relative_to(root).parts and "tests" not in p.relative_to(root).parts and
-                  "__pycache__" not in p.parts]
+        # Prune generated trees before traversal: Ubuntu rootfs/kernel caches can
+        # contain hundreds of thousands of files and are never source inputs.
+        for directory, children, names in os.walk(root):
+            parent = Path(directory)
+            children[:] = [name for name in children
+                           if name not in {"build", "tests", "__pycache__"} and
+                           parent / name != REPO / "hdl/chisel/target"]
+            files += [parent / name for name in names
+                      if Path(name).suffix in extensions and (parent / name).is_file()]
+    if cm005_bridge:
+        bridge_sources = (
+            "cm005_native.py", "cm005_bridge.py", "cm005_bridge_queue.py", "cm005.py",
+            "cm005_oversample.py", "cm005_timing.py", "usp_clock.py", "ku15p_soc.py",
+            "mlk_cu08_ku15p.py", "mlk_cu08_ku15p_platform.py",
+            "cores/cpu/raptor/core.py", "cores/cpu/raptor/__init__.py",
+            "scripts/check_cm005_aperture.tcl")
+        files += [REPO / "fpga/litex" / name for name in bridge_sources]
+        for name in ("migen", "litex", "liteeth", "litedram"):
+            root = REPO / "third_party/enjoy-digital" / name
+            dependency_sources = sorted(root.rglob("*.py"))
+            if not dependency_sources:
+                raise RuntimeError(f"Missing bridge generator dependency: {root}")
+            files += dependency_sources
     return {str(p.relative_to(REPO)): sha(p) for p in sorted(set(files))}
 
 
 def identity(args):
-    data = {"configuration": configuration(args), "inputs": input_hashes()}
+    data = {"configuration": configuration(args), "inputs": input_hashes(getattr(args, "cm005_bridge", 0))}
     data["sha256"] = hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
     data["revision"] = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip()
     return data
@@ -148,6 +171,29 @@ def firmware(args, out, values):
 
 def device_tree(args, out, ram_bytes):
     reg = region_map()
+    ethernet = ""
+    if getattr(args, "ethernet", 0):
+        ethernet = '''
+        ethernet@18000000 {
+            compatible = "raptor,native-ethernet-v1";
+            reg = <0 0x18000000 0 0x10000>;
+            interrupt-parent = <&plic>; interrupts = <2>;
+            local-mac-address = [02 52 41 50 05 01];
+            phy-mode = "rgmii-txid";
+            phy-handle = <&eth_phy>;
+            mdio {
+                #address-cells = <1>; #size-cells = <0>;
+                eth_phy: ethernet-phy@1 { reg = <1>; };
+            };
+        };
+'''
+    if getattr(args, "cm005_bridge", 0):
+        ethernet = '''
+        bridge@18000000 {
+            compatible = "raptor,cm005-forwarder-v1";
+            reg = <0 0x18000000 0 0x10000>;
+        };
+'''
     def cells(name):
         return f"0 0x{reg[name]['base']:x} 0 0x{reg[name]['size']:x}"
     isa = f"rv{args.xlen}imafdc_zicsr_zifencei_zicntr"
@@ -194,6 +240,7 @@ def device_tree(args, out, ram_bytes):
             interrupt-parent = <&plic>; interrupts = <1>;
             fifo-size = <1>; tx-threshold = <0>; no-loopback-test;
         }};
+{ethernet}
     }};
 }};
 """
@@ -211,7 +258,11 @@ def peripheral_wrapper(args, out):
               "awburst": 2, "awcache": 4, "awvalid": 1, "awready": 1, "wdata": args.xlen,
               "wstrb": args.xlen // 8, "wlast": 1, "wvalid": 1, "wready": 1, "bid": 4,
               "bresp": 2, "bvalid": 1, "bready": 1}
-    ports = ["input wire clk, reset, uart_rx", "output wire uart_tx, uart_irq"]
+    ports = ["input wire clk, reset, uart_rx", "output wire uart_tx, uart_irq",
+             "output wire peripheral_rd, peripheral_wr",
+             "output wire [15:0] peripheral_raddr, peripheral_waddr",
+             "output wire [31:0] peripheral_wdata", "output wire [3:0] peripheral_wstrb",
+             "input wire [31:0] peripheral_rdata"]
     assignments = []
     for interface in ("cpu", "ddr"):
         for field, width in widths.items():
@@ -227,9 +278,12 @@ def peripheral_wrapper(args, out):
     text += f"axi4_if #(.XLEN({args.xlen})) cpu(), ddr();\n" + "\n".join(assignments)
     text += f"""
 rapt_native_bus #(.XLEN({args.xlen}), .WithDdr({int(args.memory == 'ddr')}),
+    .WithPeripheral({int(bool(args.ethernet or args.cm005_bridge))}),
     .RamBytes({args.ram_bytes}), .ClockHz({args.clock_mhz * 1_000_000}),
     .RomFile({json.dumps(str(out / 'boot.hex'))})) bus (
-    .clk, .reset, .uart_rx, .uart_tx, .uart_irq, .cpu, .ddr);
+    .clk, .reset, .uart_rx, .uart_tx, .uart_irq, .cpu, .ddr,
+    .peripheral_rd, .peripheral_wr, .peripheral_raddr, .peripheral_waddr,
+    .peripheral_wdata, .peripheral_wstrb, .peripheral_rdata);
 endmodule
 """
     (out / "sources/peripheral_top.sv").write_text(text)
@@ -253,24 +307,51 @@ def prepare(args, out):
         for path in root.iterdir():
             if path.is_file():
                 shutil.copyfile(path, sources / path.name)
+    if args.ethernet:
+        for path in (BOARD / "vendor/ethernet").glob("*"):
+            if path.is_file():
+                shutil.copyfile(path, sources / path.name)
+    if args.cm005_bridge:
+        generated = out / "cm005-generated"
+        run([args.bridge_python, REPO / "fpga/litex/cm005_native.py", "--output", generated],
+            log=out / "cm005-generation.log")
+        for path in generated.iterdir():
+            if path.is_file():
+                shutil.copyfile(path, sources / path.name)
     config = f"""`define RAPT_XLEN {args.xlen}
 `define NATIVE_BOARD_STRING "{PROFILE['banner']}"
 `define NATIVE_CLOCK_HZ {args.clock_mhz * 1_000_000}
 `define NATIVE_DDR {int(args.memory == 'ddr')}
+`define NATIVE_ETHERNET {args.ethernet}
+`define NATIVE_CM005_BRIDGE {args.cm005_bridge}
 `define NATIVE_RAM_BYTES {args.ram_bytes}
 `define NATIVE_USE_RESET_BUTTON {args.reset_button}
 `define NATIVE_ROM_FILE "{out / 'boot.hex'}"
 """
     if args.memory == "ddr":
         config += "`define NATIVE_WITH_DDR\n"
+    if args.ethernet:
+        config += "`define NATIVE_WITH_ETHERNET\n"
+    if args.cm005_bridge:
+        config += "`define NATIVE_WITH_CM005_BRIDGE\n"
     (sources / "native_config.svh").write_text(config)
     names = ["native_config.svh", "rapt_pack.sv", "native_map.sv",
              "rapt_native_uart.sv", "rapt_native_bus.sv", "rapt_native_soc.sv"]
     (sources / "soc_sources.sv").write_text("".join(f'`include "{name}"\n' for name in names))
-    names = ["soc_sources.sv"] + ([PROFILE["ddr_rtl"]] if args.memory == "ddr" else []) + [PROFILE["top"] + ".sv"]
+    eth_names = ["rgmii_lfsr.sv", "axis_gmii_rx.sv", "axis_gmii_tx.sv", "eth_mac_1g.sv",
+                 "rapt_native_eth.sv", "rapt_rk_rgmii_rx.sv", "rapt_rk_ethernet.sv"] if args.ethernet else []
+    (sources / "ethernet_sources.sv").write_text("".join(f'`include "{name}"\n' for name in eth_names))
+    names = ["soc_sources.sv"]
+    if args.memory == "ddr":
+        names.append(PROFILE["ddr_rtl"])
+    names += eth_names
+    if args.cm005_bridge:
+        names.append("rapt_cm005_bridge.v")
+    names.append(PROFILE["top"] + ".sv")
     (sources / "board_sources.sv").write_text("".join(f'`include "{name}"\n' for name in names))
     peripheral_wrapper(args, out)
     cfg = {"out": out, "xlen": args.xlen, "with_ddr": int(args.memory == "ddr"),
+           "with_ethernet": args.ethernet, "with_cm005_bridge": args.cm005_bridge,
            "ddr_part": args.ddr_part, "jobs": args.jobs, "clock_mhz": args.clock_mhz,
            **{key: PROFILE[key] for key in ("part", "top", "bitstream", "ddr_clock_port", "reference_hz")}}
     (out / "config.tcl").write_text("".join(f"set {key} {tcl(value)}\n" for key, value in cfg.items()))
@@ -366,17 +447,30 @@ def main():
                                           "synth", "build", "load", "info"))
     parser.add_argument("--xlen", type=int, choices=(32, 64), default=64)
     parser.add_argument("--preset", default="small")
-    parser.add_argument("--memory", choices=("bram", "ddr"), default="bram")
+    parser.add_argument("--memory", choices=("bram", "ddr"), default=PROFILE.get("default_memory", "bram"))
     parser.add_argument("--clock-mhz", type=int, choices=(25, 50, 100), default=50)
     parser.add_argument("--ram-bytes", type=int, default=131072)
     parser.add_argument("--reset-button", type=int, choices=(0, 1), default=0)
+    parser.add_argument("--ethernet", type=int, choices=(0, 1), default=0,
+                        help="enable native gigabit Ethernet on supported boards")
+    parser.add_argument("--cm005-bridge", type=int, choices=(0, 1), default=PROFILE.get("cm005_bridge", 0),
+                        help="retain independent CM005 A/B forwarding on CU08 (50 MHz)")
+    parser.add_argument("--bridge-python", default=str(REPO / "fpga/litex/.venv/bin/python"),
+                        help="Python environment for the pinned CM005 Migen/LiteEth generator")
     parser.add_argument("--ddr-part", default=PROFILE["ddr_part"])
     parser.add_argument("--cross", default="riscv64-unknown-elf-")
     parser.add_argument("--vivado", default="vivado")
+    parser.add_argument("--hw-target", help="optional exact JTAG target glob, e.g. */0ABC01A")
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--trace", action="store_true", help="capture the focused boot AXI waveform")
     parser.add_argument("--build-root", type=Path, default=BOARD / "build")
     args = parser.parse_args()
+    if args.ethernet and not PROFILE.get("ethernet"):
+        parser.error("native Ethernet is not supported by this board")
+    if args.cm005_bridge and not PROFILE.get("cm005_bridge"):
+        parser.error("CM005 forwarding is not supported by this board")
+    if args.cm005_bridge and args.clock_mhz != 50:
+        parser.error("CM005 forwarding currently requires CLOCK_MHZ=50; disable it explicitly for other clocks")
     if args.jobs <= 0 or args.jobs > 32:
         parser.error("jobs must be between 1 and 32")
     if args.ram_bytes < 16384 or args.ram_bytes > 1048576 or args.ram_bytes & (args.ram_bytes - 1):
@@ -395,7 +489,8 @@ def main():
         if args.action == "load":
             validate_load(args, out)
             run([args.vivado, "-mode", "batch", "-source", COMMON / "scripts/vivado_load.tcl",
-                 "-tclargs", out / PROFILE["bitstream"], PROFILE["device"]], cwd=out)
+                 "-tclargs", out / PROFILE["bitstream"], PROFILE["device"],
+                 *([args.hw_target] if args.hw_target else [])], cwd=out)
             return
         if args.action == "refresh-software":
             refresh_software(args, out)

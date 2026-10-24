@@ -2,6 +2,7 @@
 !_layouts/**
 !_includes/**
 !scripts/*.py
+!scripts/*.mjs
 
 # Jekyll / local preview artifacts
 _site/

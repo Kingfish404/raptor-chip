@@ -1,4 +1,3 @@
-import { createUarchView } from "./uarch-view.js";
 import { createTerminal } from "./terminal.js";
 
 const portalUrl = document.body.dataset.portal;
@@ -7,23 +6,12 @@ function fillSpecs(values) {
   const grid = document.getElementById("spec-grid");
   if (!grid || !values) return;
   const keys = [
-    ["decode_width", "decode"],
-    ["rename_width", "rename"],
-    ["dispatch_width", "dispatch"],
-    ["commit_width", "commit"],
-    ["rob_entries", "ROB"],
-    ["phys_regs", "int PRF"],
-    ["alq_entries", "ALQ"],
-    ["brq_entries", "BRQ"],
-    ["mdq_entries", "MDQ"],
-    ["fpq_entries", "FPQ"],
-    ["ioq_entries", "IOQ"],
-    ["sq_entries", "SQ"],
-    ["l1i_kib", "L1I KiB"],
-    ["l1d_kib", "L1D KiB"],
-    ["completion_ports", "CDB ports"],
-    ["pmp_usable", "PMP usable"],
-    ["dirp", "DIRP"],
+    ["decode_width", "Decode width"],
+    ["commit_width", "Commit width"],
+    ["rob_entries", "ROB entries"],
+    ["phys_regs", "Integer registers"],
+    ["l1i_kib", "L1I · KiB"],
+    ["l1d_kib", "L1D · KiB"],
   ];
   grid.innerHTML = keys
     .map(([k, label]) => {
@@ -34,48 +22,14 @@ function fillSpecs(values) {
     .join("");
 }
 
-function fillDocs(docs) {
-  const grid = document.getElementById("doc-grid");
-  if (!grid) return;
-  grid.innerHTML = docs
-    .map(
-      (d) =>
-        `<a class="doc-card" href="${d.url}"><h3>${d.title}</h3><p>${d.summary || d.file}</p></a>`,
-    )
-    .join("");
-}
-
-function renderInspect(node) {
-  const el = document.getElementById("uarch-inspect");
-  if (!el) return;
-  if (!node) {
-    el.innerHTML =
-      '<p class="muted">Click a block for its source. Tokens are RV32 CoreMark (matrix / list / CRC / UART MMIO).</p>';
-    return;
-  }
-  const href = `https://github.com/Kingfish404/raptor-chip/blob/master/${node.file}`;
-  const model = [
-    node.capacity != null ? `capacity ${node.capacity}` : "",
-    node.latency != null ? `latency ${node.latency} cyc` : "",
-    node.kind || "",
-  ]
-    .filter(Boolean)
-    .join(" | ");
-  el.innerHTML = `
-    <strong>${node.short} | ${node.id}</strong>
-    <p>${node.summary || "No module comment captured."}</p>
-    ${model ? `<p class="muted">${model}</p>` : ""}
-    ${node.model_note ? `<p class="muted">${node.model_note}</p>` : ""}
-    <p class="muted">${node.file}${node.parent ? " | parent " + node.parent : ""}</p>
-    <p><a href="${href}">source</a> | <a href="uarch.html">uarch manual</a></p>`;
-}
-
 function wrapTables() {
   document.querySelectorAll("main.article table").forEach((table) => {
     if (table.parentElement?.classList.contains("table-scroll")) return;
     const wrap = document.createElement("div");
     wrap.className = "table-scroll";
     wrap.tabIndex = 0;
+    wrap.setAttribute("role", "region");
+    wrap.setAttribute("aria-label", "Scrollable table");
     table.replaceWith(wrap);
     wrap.appendChild(table);
   });
@@ -89,7 +43,7 @@ function bootToc() {
   if (heads.length < 3) return;
   toc.hidden = false;
   toc.innerHTML =
-    "<strong>On this page</strong>" +
+    "<details open><summary>On this page</summary>" +
     heads
       .map((h) => {
         if (!h.id) {
@@ -101,7 +55,17 @@ function bootToc() {
         }
         return `<a href="#${h.id}">${h.textContent}</a>`;
       })
-      .join("");
+      .join("") + "</details>";
+  if (window.matchMedia("(max-width: 960px)").matches) toc.querySelector("details").open = false;
+  const observer = new IntersectionObserver((entries) => {
+    const visible = entries.filter((e) => e.isIntersecting);
+    if (!visible.length) return;
+    toc.querySelectorAll("a").forEach((a) => {
+      if (a.hash === `#${visible[0].target.id}`) a.setAttribute("aria-current", "location");
+      else a.removeAttribute("aria-current");
+    });
+  }, { rootMargin: "-12% 0px -65% 0px" });
+  heads.forEach((h) => observer.observe(h));
 }
 
 function bootMermaid() {
@@ -124,34 +88,6 @@ function bootMermaid() {
     });
   };
   document.head.appendChild(s);
-}
-
-function bootExplore(data) {
-  const list = document.getElementById("payload-list");
-  if (list) {
-    const insns = data.payload?.instructions || [];
-    list.innerHTML = insns
-      .map((i) => {
-        const color = {
-          integer: "#e07a3d",
-          branch: "#e9c46a",
-          memory: "#2ec4b6",
-          system: "#8b7cff",
-          mul: "#f4a261",
-          fp: "#c77dff",
-          mmio: "#d9480f",
-        }[i.domain] || "inherit";
-        return `<li style="color:${color}"><code>${i.asm}</code> | ${i.domain}${i.kernel ? " / " + i.kernel : ""}</li>`;
-      })
-      .join("");
-  }
-  const notes = document.getElementById("model-notes");
-  if (notes) {
-    const extra = data.trace?.notes || [];
-    notes.innerHTML = [...extra, ...(data.model?.notes || [])]
-      .map((n) => `<li>${n}</li>`)
-      .join("");
-  }
 }
 
 function bootTheme() {
@@ -179,6 +115,19 @@ function bootNav() {
   btn?.addEventListener("click", () => {
     const open = links.classList.toggle("is-open");
     btn.setAttribute("aria-expanded", String(open));
+  });
+  const close = () => {
+    links?.classList.remove("is-open");
+    btn?.setAttribute("aria-expanded", "false");
+  };
+  links?.addEventListener("click", (ev) => {
+    if (ev.target.closest("a, [data-open-term]")) close();
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && links?.classList.contains("is-open")) {
+      close();
+      btn?.focus();
+    }
   });
   const here = location.pathname.replace(/\/index\.html$/, "/").replace(/\/$/, "") || "/";
   links?.querySelectorAll("a").forEach((a) => {
@@ -242,25 +191,28 @@ function wireTerm(term) {
   const openers = document.querySelectorAll("[data-open-term]");
   const closers = document.querySelectorAll("[data-term-close]");
   const home = document.body.classList.contains("is-home");
+  let opener = null;
   const show = () => {
+    opener = document.activeElement;
+    if (home) root.closest("details").open = true;
     root.classList.add("is-open");
     term.input.focus();
   };
   const hide = () => {
-    if (home) return;
+    if (home) root.closest("details").open = false;
     root.classList.remove("is-open");
+    opener?.focus();
   };
   openers.forEach((b) => b.addEventListener("click", show));
   closers.forEach((b) => b.addEventListener("click", hide));
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "`" && !["INPUT", "TEXTAREA"].includes(ev.target.tagName)) {
       ev.preventDefault();
-      if (home || root.classList.contains("is-open")) hide();
+      if (home ? root.closest("details").open : root.classList.contains("is-open")) hide();
       else show();
     }
-    if (ev.key === "Escape") hide();
+    if (ev.key === "Escape" && (home ? root.closest("details").open : root.classList.contains("is-open"))) hide();
   });
-  if (home) root.classList.add("is-open");
 }
 
 async function main() {
@@ -277,51 +229,21 @@ async function main() {
     return r.json();
   });
   fillSpecs(data.config?.values);
-  fillDocs(data.docs || []);
 
   let view = null;
   const diagram = document.getElementById("uarch-diagram");
   if (diagram) {
-    view = createUarchView(diagram, data, {
-      onSelect: renderInspect,
-      onCycle: (c, _frame, n, playing) => {
-        const label = document.getElementById("cycle-readout");
-        const slider = document.getElementById("cycle-slider");
-        const ipc = data.trace?.ipc;
-        if (label) label.textContent = `cycle ${c}/${Math.max(n - 1, 0)}${ipc != null ? ` | IPC ${ipc}` : ""}`;
-        if (slider) {
-          slider.max = Math.max(n - 1, 0);
-          slider.value = String(c);
-        }
-        document.querySelectorAll("[data-cycle-play], [data-uarch-flow]").forEach((play) => {
-          play.textContent = playing ? "Pause" : "Play";
-        });
-      },
-    });
-    document.querySelector("[data-uarch-flow]")?.addEventListener("click", () => {
-      const on = view.toggleFlow();
-      const btn = document.querySelector("[data-uarch-flow]");
-      if (btn) btn.textContent = on ? "Pause" : "Play";
-    });
-    document.querySelector("[data-uarch-reset]")?.addEventListener("click", () => view.reset());
-    const playBtn = document.querySelector("[data-cycle-play]");
-    playBtn?.addEventListener("click", () => {
-      const on = view.toggleFlow();
-      playBtn.textContent = on ? "Pause" : "Play";
-    });
-    document.querySelectorAll("[data-cycle-step]").forEach((b) => {
-      b.addEventListener("click", () => view.step(Number(b.dataset.cycleStep) || 1));
-    });
-    const slider = document.getElementById("cycle-slider");
-    slider?.addEventListener("input", () => view.setCycle(Number(slider.value)));
+    const { createExplorer } = await import("./explore-view.js");
+    view = createExplorer(diagram, data);
   }
-  bootExplore(data);
 
   const termRoot = document.getElementById("term");
   if (termRoot) {
     const term = createTerminal(termRoot, data, {
       focusModule: (id) => view?.focus(id) ?? false,
       toggleFlow: () => view?.toggleFlow(),
+      flowLabel: "occupancy playback",
+      flowHelp: "play or pause the cycle occupancy",
     });
     wireTerm(term);
   }
@@ -329,6 +251,6 @@ async function main() {
 
 main().catch((err) => {
   const inspect = document.getElementById("uarch-inspect");
-  if (inspect) inspect.textContent = String(err);
+  if (inspect) inspect.textContent = "The interactive data could not be loaded. Reload to retry, or use the architecture manual.";
   console.error(err);
 });

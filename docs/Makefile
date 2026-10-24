@@ -58,7 +58,7 @@ help:
 	@echo "  make clean    Remove _site/, vendor/, caches"
 	@echo "  make doctor   Print the Ruby/Bundler actually used"
 	@echo "  make portal-data  Extract RTL/Makefile JSON for the homepage explorer"
-	@echo "  make portal-test  Run extractor unit tests"
+	@echo "  make portal-test  Run portal data and diagram checks (Python + Node.js)"
 	@echo ""
 	@echo "Variables: PORT=$(PORT) HOST=$(HOST) RUBY_BIN_DIR=$(RUBY_BIN_DIR)"
 
@@ -96,6 +96,7 @@ serve: install portal-data
 	$(BUNDLE) exec jekyll serve --host $(HOST) --port $(PORT) --livereload --incremental
 
 PYTHON ?= python3
+NODE ?= node
 
 portal-data:
 	$(PYTHON) scripts/extract_portal_data.py
@@ -104,6 +105,7 @@ portal-test:
 	$(PYTHON) scripts/test_pipeline_model.py
 	$(PYTHON) scripts/test_extract_portal_data.py
 	$(PYTHON) scripts/test_uarch_view_2d.py
+	$(NODE) scripts/test_architecture_model.mjs
 
 build: install portal-data
 	$(BUNDLE) exec jekyll build

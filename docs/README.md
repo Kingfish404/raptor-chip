@@ -3,94 +3,106 @@ title: Overview
 permalink: /overview.html
 ---
 
-# Raptor - RISC-V Processor Core
+# Raptor at a glance
 
-[![Benchmark](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml) [![App](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml) [![STA](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml)
+Raptor is a configurable RV32/RV64 superscalar, out-of-order RISC-V processor.
+It combines register renaming, precise in-order retirement, scalar floating
+point, and virtual memory with simulation, Linux boot, and FPGA integration flows.
+The default RV64 configuration supports **RVA22S64**.
 
-The published homepage is an interactive product surface: a 2D pipeline block diagram extracted from the SystemVerilog tree, plus a documentation shell whose `make` commands come from the repository Makefile. This page is the written overview.
+[Get started](./getting-started.md) · [Read the microarchitecture](./uarch.md) · [Explore the pipeline](./explore.md)
 
-Raptor is a parameterized superscalar, out-of-order RISC-V core with register renaming, a reorder buffer, reservation stations, branch prediction, and Sv32/Sv39 virtual memory support for RV32/RV64.
+## Default core
 
-The repository also bundles the NEMU software ISS (used as a difftest reference), a Verilator-based simulator (NPC), an AbstractMachine runtime, Linux kernel build scripts, and native FPGA integration for MLK-CU08-KU15P and RK-XCKU5P-F, plus LiteX SoCs.
+Values below describe `hdl/configs/default/rapt_config.svh` and the integrated
+`rapt_core`. Other presets and build overrides can differ.
 
-Repository: <https://github.com/Kingfish404/raptor-chip>
+| Block | Default configuration |
+| --- | --- |
+| Pipeline | Decode / rename / dispatch / commit: 2 each; 2 integer issue ports |
+| In-flight state | 32-entry ROB, 64 integer physical registers, 16 branch checkpoints |
+| Execution queues | ALQ 8, BRQ 8, MDQ 4, FPQ 8, IOQ 8; unified store queue 16 |
+| Floating point | ROB-backed speculative results; 32 × 64-bit committed FPR bank |
+| Completion | 6 endpoints, all registered before ROB writeback |
+| Prediction | TAGE: 1024 bimodal + 3 × 1024 tagged; 128-entry two-way BTB; RAS 16 |
+| L1 caches | 16 KiB each, four-way, 64-byte lines; L1D write-back, 4 MSHRs, 2 writeback buffers |
+| Translation | ITLB 16, fully associative; DTLB 64, two-way, replicated for load/store; shared L2 TLB 256 |
+| L2 cache | Passthrough; `default-l2` enables 512 KiB, eight-way inclusive write-back |
+| Platform | M/S/U; Sv32 (RV32), Sv39 (RV64), Bare; 8 usable PMP entries |
+| Interrupts / debug | CLINT; PLIC with 31 sources and M/S contexts; Debug Module / JTAG DTM bring-up path |
+| Bus | AXI4, XLEN-bit data/address, 4-bit ID, up to 8 reads; default bus writes wait for B |
 
-## Core Summary
+See [pipeline contracts and configuration](./uarch.md) for forwarding, recovery,
+cache policy, and preset differences.
 
-| Item                 | Value                                                                                                   |
-| -------------------- | ------------------------------------------------------------------------------------------------------- |
-| ISA                  | `rv32/64imafdc_zba_zbb_zbc_zbs_zfhmin_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_zca_zcb_zcmop` |
-| RV64 extras          | Zkt and Svpbmt on default RV64; Svinval decode is shared by RV32/RV64                                                |
-| Privilege modes      | M, S, U                                                                                                 |
-| MMU                  | Sv32 (RV32) / Sv39 (RV64) / Bare                                                                        |
-| PMP                  | 8 usable entries (TOR / NA4 / NAPOT); 16 CSR slots, upper eight read-only zero                          |
-| Interrupts           | CLINT (`mtime`, `mtimecmp`, `msip`) + PLIC (31 sources, M/S contexts)                                   |
-| Ordered widths       | Decode 2 / Rename 2 / Dispatch 2 / Commit 2 by default; independently parameterized                    |
-| Integer execution    | 2 physical integer issue/ALU ports by default; CSR/system on port 0                                     |
-| Queues               | ROB 32, ALQ 8, BRQ 8, MDQ 4, FPQ 8, IOQ 8, unified SQ 16                                               |
-| Register state       | 64-entry integer PRF (including 32 architectural mappings); ROB-backed FP results + 32 x 64-bit committed FPR bank |
-| Writeback            | 6 completion ports (`N+4`: 2 integer + branch + memory + MUL/DIV + FP), registered before ROB writeback  |
-| BPU                  | TAGE direction predictor (1024 bimodal + 3 x 1024 tagged) + 2-way BTB (128) + 16-entry RAS               |
-| L1I / L1D            | 16 KiB 4-way each (64 sets x 64 B x 4), banked SRAM; L1D write-back with 4 MSHRs and 2 writeback buffers   |
-| TLB                  | ITLB 16, DTLB 16 (load/store replicas); shared 256-entry direct-mapped L2 TLB; Sv32/Sv39 PTWs            |
-| L2                   | Default passthrough; `default-l2` enables a 512 KiB, eight-way inclusive L2 with write-back              |
-| Bus                  | AXI4, XLEN-bit data/addr, 4-bit ID; up to 8 reads; one B-synchronous write with the default write-back L1D (write-through builds without L2 may post up to 4); stores single-beat, CBO.ZERO multi-beat |
-| Debug                | RISC-V Debug Module / JTAG DTM bring-up ports at cluster top                                            |
-| Verification         | Difftest against NEMU; RVFI/riscv-formal; SVA                                                           |
+## ISA scope
 
-See [Microarchitecture](./uarch.md) for the complete pipeline description.
+Both XLEN modes implement **IMAFDC**, scalar **Zfhmin**, bit manipulation
+**Zba/Zbb/Zbc/Zbs**, and the following extensions:
 
-## Performance
+- **System and hints:** Zicsr, Zifencei, Zicntr, Zihpm, Zicond, Zihintntl, Zihintpause, Zimop.
+- **Cache management:** Zicbom, Zicbop, Zicboz.
+- **Compressed:** Zca, Zcb, Zcmop, alongside C's F/D memory forms.
+- **Supervisor:** Svinval in both modes; Svpbmt and Zkt in the default RV64 configuration.
 
-See [Getting Started](./getting-started.md) for RV32/RV64 benchmark commands. Compare measurements using the same source revision, configuration, binary, and memory model.
+Page-table A/D bits use software management (Svade). Svinval uses conservative
+full translation invalidation. The [standalone RVV component](./vpu.md) is
+**not integrated into the scalar core**; V is not part of this core's ISA.
+Decoder sources live in [`hdl/chisel/`](https://github.com/Kingfish404/raptor-chip/tree/master/hdl/chisel).
 
-## Verification
+## RVA22S64 support
 
-- Difftest - retired instructions can be compared against NEMU, including the full-core directed/differential RV32/RV64 F/D test suite under `app/tests/fp`.
-- Architectural tests - `cpu-tests` supplies RV32/RV64 smoke coverage. Run the tests against the selected source revision and configuration.
-- [RISCOF](https://github.com/riscv-software-src/riscof) running [riscv-arch-test](https://github.com/riscv-non-isa/riscv-arch-test): classic test entry points compare signatures with Sail for the RTL DUT (`make verify-riscof-classic`) and NEMU (`make verify-riscof-classic-nemu`). The classic profile declares RV32 I/M/A/F/D/C/S/U plus the listed Z extensions. ACT4 has separate RV32GC, RV64GC M-mode and RV64 supervisor configurations; see [verification](../verify/README.md). The riscv-dv target is an RV32 I/M/C, M-mode, Bare smoke configuration.
-- Benchmarks: CoreMark, MicroBench, Embench-IoT, and RLLMBench/LLM-style fixed-point workloads under NPC/NEMU and selected native/LiteX paths.
-- System software: nanos-lite, riscv-pk, OpenSBI + Linux boot (see [Linux Kernel Boot](./linux_kernel.md)); upstream xv6-riscv and egos-2000 CLI smoke paths are available through `app/tinyos`.
+The `default` preset built with `RAPT_RV64` supports **RVA22S64**, the
+64-bit supervisor application profile in the
+[RISC-V RVA22 specification](https://docs.riscv.org/reference/rva20-rvi20-rva22/v1.0/rva22.html).
+This scope includes its mandatory user-mode features and supervisor requirements.
 
-## Documentation
+| Area | Raptor support |
+| --- | --- |
+| Scalar ISA | RV64IMAFDC, Zfhmin, Zba/Zbb/Zbs, counters, CSR/fence instructions, PAUSE, and Zkt |
+| Memory | 64-byte cache blocks; Zicbom/Zicbop/Zicboz; misaligned loads/stores in cacheable coherent main memory; LR/SC and AMOs |
+| Supervisor | S/U execution, Sv39 and Bare, software-managed A/D bits (Svade), Svpbmt, and Svinval |
 
-- [Quick Start](./getting-started.md) - build and simulate.
-- [Microarchitecture](./uarch.md) - pipeline, modules, interfaces, ISA breakdown.
-- [Ecosystem](./ecosystem.md) - simulators, SoC memory maps, FPGA, tools.
-- [Linux Kernel Boot](./linux_kernel.md) - OpenSBI + Linux on NEMU / NPC.
-- [Standalone VPU](./vpu.md) - RVV 1.0 component delivery; not yet integrated into the scalar core.
-- [Reference](./REFERENCE.md) - AXI4, PPA references.
+The profile statement applies to the default **RV64** configuration. RV32 and
+modified presets have their own ISA scope. Vector and hypervisor extensions are
+optional in RVA22S64; the integrated scalar core does not include V or H.
 
-## Repository Layout
+The [RV64 supervisor verification guide](https://github.com/Kingfish404/raptor-chip/blob/master/verify/riscof/raptor-rv64s/README.md)
+and [requirement ledger](https://github.com/Kingfish404/raptor-chip/blob/master/verify/riscof/raptor-rv64s/requirements.json)
+record source mappings, tests, and evidence scopes. Support describes the RTL
+implementation; formal profile certification is a separate verification claim.
 
-```
-raptor-chip/
-|-- Makefile              top-level driver
-|-- env.sh                environment variables for direct shell workflows
-|-- hdl/                   SystemVerilog RTL
-|   |-- chisel/            Chisel decoder generator
-|   |-- rapt.sv           cluster-level top (core + CLINT + PLIC + router + debug)
-|   |-- rapt_core.sv      single-hart CPU body
-|   |-- rapt_pkg.sv       core configuration and shared types
-|   |-- frontend/         IFU, FQU, IDU, RNU, BPU, CSR
-|   |-- backend/          PRF, ROU, DPU, IEU, FEU, LSU, CMU; standalone VPU (vpu/)
-|   |-- memory/           L1I/L1D, optional L2, TLB/L2 TLB, PTW, PMP, AXI4 bus
-|   |-- common/           stream queue, issue/rank selectors
-|   |-- sram/             1RW/2RW SRAM wrappers (behavioral or macro)
-|   |-- configs/          microarchitecture presets (rapt_config.svh)
-|   |-- perip/            CLINT, PLIC, debug module, JTAG DTM, DPI wrappers
-|   |-- include/          type macros, interfaces, DPI-C
-|   `-- generated/        Chisel-generated decoders
-|-- nemu/                 NEMU reference ISS
-|-- sim/                  NPC Verilator simulator
-|-- lspd/                 synthesis/PPA flow and non-product HDL wrappers
-|-- abstract-machine/     AM runtime (nanos-lite, navy-apps)
-|-- app/                  bare-metal tests, benchmarks, riscv-pk apps
-|-- verify/               testbenches, formal, RISCOF, fuzzing
-|-- linux/                Linux kernel build scripts
-|-- fpga/                 FPGA integration (LiteX boards, Gowin Tang Nano 20K, OOC partitions)
-`-- docs/                 documentation (this directory)
-```
+## Run and verify
 
+Start with [RV32/RV64 simulation](./getting-started.md), then follow
+[Linux boot](./linux_kernel.md) or [FPGA integration](./ecosystem.md).
+NEMU supplies the differential reference for the Verilator simulator.
 
-The project is licensed under the [Apache License 2.0](../LICENSE). Third-party components retain their original licenses; see [NOTICE](../NOTICE).
+The repository provides directed F/D tests, ISA signature checks, RISCOF/ACT4,
+RVFI/formal, SVA, and differential fuzzing. Test profiles cover different
+subsets; see the [verification guide](https://github.com/Kingfish404/raptor-chip/blob/master/verify/README.md)
+for commands and prerequisites. A build target alone does not establish a passing
+regression or board boot for a particular revision.
+
+[Performance history](./perf-iterations.md) records earlier measurements.
+Compare results only with matching revision, preset, XLEN, workload, memory
+model, and constraints. The homepage and Explorer share one interactive architecture diagram and
+illustrative queue-occupancy model. Animation cycles are not RTL measurements.
+Both views cover the whole system: Core pipeline expands the execution pipeline,
+while Memory & platform expands translation, caches, interconnect, and devices.
+Each includes a linked overview of the other; opening it preserves the current
+animation cycle and playback state.
+
+## Source map
+
+| Directory | Contents |
+| --- | --- |
+| `hdl/` | RTL, configuration presets, and Scala decoder sources |
+| `sim/`, `nemu/` | Verilator simulation and differential reference |
+| `verify/` | Directed, formal, ISA, and fuzz verification |
+| `app/`, `abstract-machine/` | Programs, benchmarks, and runtime |
+| `fpga/`, `linux/`, `lspd/` | Board integration, boot tooling, and synthesis/STA |
+
+[Source repository](https://github.com/Kingfish404/raptor-chip) ·
+[Apache 2.0](https://github.com/Kingfish404/raptor-chip/blob/master/LICENSE) ·
+[Third-party notices](https://github.com/Kingfish404/raptor-chip/blob/master/NOTICE)

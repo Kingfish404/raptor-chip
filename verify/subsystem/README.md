@@ -114,8 +114,7 @@ prediction and pipeline delays. Current IFU ends each packet at the first
 control instruction and has one primary plus at most one auxiliary prediction
 query per packet. Its wide fetch window contains only eight halfwords, so
 larger decode width alone cannot raise the bound past the eight-halfword
-limit. Local measurements and configuration choices are archived in
-`docs.agent/evaluation/bpu-trace-evaluation-2026-09-27.md` (not distributed with Git).
+limit. Record measurements with their source revision, configuration and trace metadata.
 
 ## Other FE and MEM metrics
 
@@ -150,14 +149,8 @@ These rates are not CoreMark scores or full-core IPC. Use the complete RV32 and
 RV64 RTL runs for those claims, and compare the module rates with the existing
 PMU's fetch, retirement, miss, and stall counters.
 
-Local experiment archives under `docs.agent/evaluation/` are not distributed
-with Git. Initial CoreMark and Embench CRC32 measurements, source provenance, traffic
-splits and limitations are recorded in
-[the subsystem results](../../docs.agent/evaluation/subsystem-trace-results.md).
-The current 2026-09-25 default, four-lane and L2 reassessment is in
-[the efficiency results](../../docs.agent/evaluation/subsystem-efficiency-2026-09-25.md).
-The default backend stall breakdown, load-use optimization and matched A/B results are in
-[the backend utilization report](../../docs.agent/evaluation/backend-utilization-2026-09-26.md).
+Archive per-run measurements and logs outside the source tree. Include source
+provenance, configuration, traffic splits and limitations when reporting results.
 
 ## PPA boundary
 

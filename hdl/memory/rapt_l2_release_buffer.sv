@@ -48,10 +48,13 @@ module rapt_l2_release_buffer #(
 
   if (!(Xlen inside {32, 64}) || LineBytes < Xlen / 8
       || (LineBytes & (LineBytes - 1)) != 0 || LineWords < 2
-      || (LineWords & (LineWords - 1)) != 0)
+      || (LineWords & (LineWords - 1)) != 0) begin : g_invalid_geometry
     $error("invalid L2 release buffer geometry");
+  end
 
-  if (PoolBeats != 2 * LineWords) $error("L2 Release pool must hold two full lines");
+  if (PoolBeats != 2 * LineWords) begin : g_invalid_pool
+    $error("L2 Release pool must hold two full lines");
+  end
 
   // ListBuffer chooses the lowest free entry from pre-edge occupancy. A
   // pop on this edge cannot make a full pool ready combinationally.

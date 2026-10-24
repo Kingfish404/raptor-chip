@@ -26,6 +26,15 @@ rejection of input edits between the RTL and macro exports with the last complet
 configuration-specific output paths, read-only Make configuration evaluation
 with auto-detection disabled, and private BIOS copies.
 
+JTAG loader checks use Tcl command mocks and do not access hardware:
+
+```bash
+python3 fpga/litex/tests/test_vivado_load.py
+```
+
+They check explicit adapter selection, Make argument quoting, rejection of
+missing or ambiguous adapters and wrong device parts, and the default adapter path.
+
 KU15P DDR/PMA host checks (no shared RTL packing or board access):
 
 ```bash
@@ -104,6 +113,14 @@ Checks exported MAC regions and slot sizes, Raptor's IRQ offset, rejection of ca
 
 ## CM005 peripheral checks
 
+The standalone [A/B bridge](../CM005-BRIDGE.md) adds
+`test_cm005_bridge.py` for complete-frame buffering, overflow/error isolation,
+reset clearing and simultaneous bidirectional MAC/CDC traffic. Its full MAC
+simulation uses the configured 512-word crossings and takes several minutes.
+`test_cm005_integration.py` checks the diagnostic's Clause-22 read protocol;
+`test_usp_clock.py` checks the UltraScale+ IDELAYCTRL architecture attribute
+required by Vivado 2026.1. These tests do not access hardware.
+
 ```bash
 fpga/litex/.venv/bin/python fpga/litex/tests/test_cm005.py
 ```
@@ -160,7 +177,54 @@ An external eleven-probe raw RX ILA CSV can be replayed using `test_cm005_sample
 
 For production TX primitives, generate with `cm005_gigabit_tx_xsim.py OUTPUT_DIR` and compile/run `tb_cm005_gigabit_tx.sv` (top `tb_cm005_gigabit_tx`). Require `PASS CM005 gigabit TX primitives` and no fatal/error. The test checks 6,072 bytes with actual BUFGCE_DIV startup/restart, TX_ER, full-size frames and minimum interframe gap. These are functional primitive tests, not routed timing or hardware throughput/BER claims.
 
+For the bridge's separate MAC/PHY clocks, add `--experimental-split-clock` for
+port A and additionally `--serial-divider` for port B. Require the same PASS
+marker for both clock-buffer arrangements, using Vivado 2026.1 and
+`xelab -timescale 1ns/1ps`. `test_cm005_integration.py` checks that the
+actual bridge connects each PHY to its own preserved clock buffers.
+
 The optional `--experimental-split-clock` generator flag models the physical TX-clock ECO: independent common-source divide-by-two MAC/PHY buffers and a `BUFGCE` with `CE_TYPE=SYNC` for the serial clock, enabled by modeled PLL lock. Run the same testbench in a separate output directory. This is an experimental topology, not the production CRG; passing the functional startup/restart test does not prove routed MAC-to-PHY timing or analog PLL lock behavior.
+
+## RK RGMII receive checks
+
+Generate the production receiver and exercise the actual AMD I/O primitives:
+
+```bash
+RAPTOR_RK_RX_DIR=$(mktemp -d /tmp/raptor-rk-rx.XXXXXX)
+RAPTOR_RK_REPO=$PWD
+fpga/litex/.venv/bin/python fpga/litex/tests/rk_rgmii_rx_xsim.py "$RAPTOR_RK_RX_DIR"
+cd "$RAPTOR_RK_RX_DIR"
+xvlog -sv rk_rgmii_rx.v "$RAPTOR_RK_REPO/fpga/litex/tests/tb_rk_rgmii_rx.sv" \
+    "$XILINX_VIVADO/data/verilog/src/glbl.v"
+xelab tb_rk_rgmii_rx glbl -L unisims_ver -L secureip -mt 4 \
+    -debug typical -timescale 1ns/1ps -s rk_rx_tb
+for skew in -1 0 1; do
+    xsim rk_rx_tb -runall -testplusarg SKEW=$skew -log "skew-$skew.log"
+done
+```
+
+Require `PASS RK RGMII RX primitives` in each log, with no fatal/error. The test
+checks 1,887 bytes in six frames, inverted-clock nibble pairing, minimum IFG,
+reset, RX_ER retention and `last`/`last_be` alignment. The original receiver
+fails on the first preamble byte (`05` instead of `55`).
+
+For the actual MAC receive pipeline, emit into a separate directory using
+`--with-mac`. With Vivado available, run `vivado -mode batch -source
+PATH_TO_REPO/fpga/litex/tests/rk_rgmii_mac_xsim.tcl` in that directory. Compile
+`rk_rgmii_mac_funcsim.v`, `tb_rk_rgmii_mac.sv` and `glbl.v`; elaborate top
+`tb_rk_rgmii_mac` with the same libraries, then run the same three skew cases.
+Use the functional synthesis netlist for this test: behavioral combinational
+default assignments in the MAC can cause event-simulator delta loops. Require
+`PASS RK RGMII MAC` for 1,935 payload bytes in eight frames, including short
+preambles, maximum frames, valid/corrupted CRC, early/final RX_ER and the 125 MHz
+to 50 MHz clock crossing. This is functional gate simulation, without routed
+delay annotation.
+
+`rk_rgmii_sta.py OUTPUT_DIR` routes the production RK clocking and PHY at their
+board pins without CPU/DDR. Inspect `peripheral_timing.rpt` and
+`peripheral_rx.rpt`; both setup and hold must pass. The RX clock root is held at
+the region used by the validated full board implementation. Full-SoC routing
+and physical packet tests remain separate requirements.
 
 ## Linux BIOS boot-hook check
 
@@ -185,3 +249,34 @@ python3 fpga/litex/tests/test_cache_maintenance.py
 ```
 
 Checks all 64 mapped SRAM CBO addresses and surrounding fences, the current set-selection coverage contract, and real RV32/RV64 compilation (when the cross-toolchain is installed). The no-argument LiteX hook must cover every set; `cbo.flush 0(x0)` faults on KU15P and is not a whole-cache trigger. These firmware tests do not replace SD DMA buffer-reuse checks on hardware.
+
+## CU08 CPU-integrated forwarding
+
+Run with the matching checkout's LiteX dependencies:
+
+```sh
+fpga/litex/.venv/bin/python -m unittest discover -s fpga/litex/tests -p 'test_cm005*.py'
+```
+
+The forwarding tests have four entry points:
+
+| Module | Coverage |
+| --- | --- |
+| `test_cm005_bridge.py` | Frame admission, ordering, errors/overflow/reset; three-port arbitration and blocked outputs; dual physical MAC/CDC paths; complete wire frames, FCS and IFG at 10/30 MHz |
+| `test_cm005_cpu_mac.py` | Actual Wishbone packet bytes, CSR/IRQ acknowledgements, reset state and preamble/CRC capability readback |
+| `test_cm005_integration.py` | Standalone clock/pin constraints, RV32/RV64 CPU NIC/DTS/BIOS ABI, explicit disable, KU5P compatibility, Make identity/timing gates and read-only MDIO diagnostics |
+| `test_cm005_native.py` | Native MMIO, deterministic export, dependency isolation and sampling-constraint coverage |
+
+For a quick queue/arbitration iteration, select the classes directly:
+
+```sh
+fpga/litex/.venv/bin/python -m unittest discover -s fpga/litex/tests -p test_cm005_bridge.py -k FrameQueueTest
+fpga/litex/.venv/bin/python -m unittest discover -s fpga/litex/tests -p test_cm005_bridge.py -k SwitchTest
+```
+
+The same module's `BridgeMACPipelineTest` and `SlowTXTest` exercise real MAC/CDC
+pipelines and can take several minutes. Frame-level tests isolate admission and
+arbitration failures; wire-level tests additionally catch FCS, underflow and IFG
+errors. Existing PHY/oversampling and primitive-simulation tests remain separate.
+`cm005_switch_sta.py` emits the switch and PHY/MAC/CPU-port composition for
+scoped synthesis. Module results do not replace full SoC timing or board tests.

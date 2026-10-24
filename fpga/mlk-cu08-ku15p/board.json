@@ -9,5 +9,7 @@
   "ddr_rtl": "rapt_cu08_ddr.sv",
   "compatible": "raptor,cu08-native",
   "model": "Raptor native MLK-CU08-KU15P",
-  "banner": "CU08"
+  "banner": "CU08",
+  "cm005_bridge": 1,
+  "default_memory": "ddr"
 }

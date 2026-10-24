@@ -38,7 +38,7 @@ module rapt_fqu #(
       .out_ready(idu_out.ready),
       .occupancy(pmu_count)
   );
-  assign pmu_full = pmu_count == Entries;
+  assign pmu_full = pmu_count == $bits(pmu_count)'(Entries);
   assign ifu_in.resteer = idu_out.resteer;
   assign ifu_in.resteer_pc = idu_out.resteer_pc;
   `RAPT_SVA_IMPLY(clock, reset, FQU_RECOVERY_NO_ACCEPT_OR_OUTPUT, recovery.redirect_valid,

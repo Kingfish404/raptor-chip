@@ -188,6 +188,8 @@ module rapt_feu #(
     iss.uop.inst = issued_inst;
     iss.uop.execute.fp = issued_fp;
   end
+  logic [$clog2(FPQ_SIZE):0] unused_fpq_occupancy;
+  logic unused_fpq_full;
   rapt_iq #(
       .Cfg(Cfg),
       .SlotT(fp_slot_t),
@@ -221,8 +223,8 @@ module rapt_feu #(
       .issue_enable(1'b1),
       .resource_ready(unit_ready),
       .issue(fp_issue),
-      .occ_o(),
-      .pmu_iq_full()
+      .occ_o(unused_fpq_occupancy),
+      .pmu_iq_full(unused_fpq_full)
   );
   logic [63:0] fp_operand_a, fp_operand_b, fp_operand_c;
   assign fp_operand_a = iss.op1;

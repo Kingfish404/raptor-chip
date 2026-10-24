@@ -9,9 +9,28 @@ module tb_native_bus;
   always #5 clk = ~clk;
   axi4_if #(.XLEN(X)) cpu ();
   axi4_if #(.XLEN(X)) ddr ();
+  wire peripheral_rd, peripheral_wr;
+  wire [15:0] peripheral_raddr, peripheral_waddr;
+  wire [31:0] peripheral_wdata;
+  wire [3:0] peripheral_wstrb;
+  logic [31:0] peripheral_rdata, peripheral_mem[2];
+  int peripheral_reads = 0, peripheral_writes = 0;
+  always_ff @(posedge clk) begin
+    if (peripheral_rd) begin
+      peripheral_rdata <= peripheral_mem[peripheral_raddr[2]];
+      peripheral_reads <= peripheral_reads + 1;
+    end
+    if (peripheral_wr) begin
+      for (int b = 0; b < 4; b++)
+      if (peripheral_wstrb[b])
+        peripheral_mem[peripheral_waddr[2]][b*8+:8] <= peripheral_wdata[b*8+:8];
+      peripheral_writes <= peripheral_writes + 1;
+    end
+  end
   rapt_native_bus #(
       .XLEN(X),
       .WithDdr(`NATIVE_DDR),
+      .WithPeripheral(1),
       .RomFile("")
   ) dut (
       .clk,
@@ -19,6 +38,13 @@ module tb_native_bus;
       .uart_rx(1'b1),
       .uart_tx(),
       .uart_irq(),
+      .peripheral_rd,
+      .peripheral_wr,
+      .peripheral_raddr,
+      .peripheral_waddr,
+      .peripheral_wdata,
+      .peripheral_wstrb,
+      .peripheral_rdata,
       .cpu,
       .ddr
   );
@@ -116,6 +142,49 @@ module tb_native_bus;
     cpu.arcache = 0;
     repeat (5) @(negedge clk);
     reset = 0;
+    // The board's whole MMIO window must be mapped and uncached by the CPU,
+    // including packet SRAM, not just by this downstream AXI decoder.
+    for (int offset = 0; offset < 65536; offset += 4) begin
+      if (!rapt_pkg::pma_has_attr(
+              32'h18000000 + 32'(offset), rapt_pkg::PmaMapped
+          ) || !rapt_pkg::pma_has_attr(
+              32'h18000000 + 32'(offset), rapt_pkg::PmaWritable
+          ) || rapt_pkg::pma_has_attr(
+              32'h18000000 + 32'(offset), rapt_pkg::PmaCacheable
+          ))
+        $fatal(1, "native peripheral is outside CPU uncached writable PMA");
+    end
+    // A synchronous 32-bit peripheral must preserve both RV64 lanes and
+    // perform each side effect exactly once while AXI responses are stalled.
+    for (int i = 0; i < 2; i++) begin
+      aw(X'('h18000000 + 4 * i), 0, 2);
+      w(X'(32'h12345678 + i) << (8 * ((4 * i) % Bytes)), 1, Bytes'(15) << ((4 * i) % Bytes));
+      b();
+      ar(X'('h18000000 + 4 * i), 0, 2);
+      r(X'(32'h12345678 + i) << (8 * ((4 * i) % Bytes)), 1);
+    end
+    aw('h18000004, 0, 2);
+    w(X'(32'haabbccdd) << (8 * (4 % Bytes)), 1, Bytes'(5) << (4 % Bytes));
+    b();
+    ar('h18000004, 0, 2);
+    r(X'(32'h12bb56dd) << (8 * (4 % Bytes)), 1);
+    // Reject byte, unaligned, and burst access without peripheral side effects.
+    ar('h18000000, 0, 0);
+    r(0, 1, 3);
+    ar('h18000002, 0, 2);
+    r(0, 1, 3);
+    ar('h18000000, 1, 2);
+    r(0, 0, 3);
+    r(0, 1, 3);
+    aw('h18000002, 0, 2);
+    w('1, 1);
+    b(3);
+    aw('h18000000, 1, 2);
+    w('1, 0);
+    w('1, 1);
+    b(3);
+    if (peripheral_reads != 3 || peripheral_writes != 3)
+      $fatal(1, "peripheral side effects repeated or invalid access accepted");
     // W can precede AW; the slave must backpressure without losing it.
     cpu.wvalid = 1;
     cpu.wdata = X'('h12345678);

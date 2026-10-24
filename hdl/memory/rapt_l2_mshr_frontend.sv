@@ -43,7 +43,9 @@ module rapt_l2_mshr_frontend #(
     output logic secondary_push_ready,
     output logic [3*NumMshrs-1:0] secondary_queue_valid
 );
-  if (PayloadBits < 1) $error("L2 MSHR request payload must be nonempty");
+  if (PayloadBits < 1) begin : g_invalid_geometry
+    $error("L2 MSHR request payload must be nonempty");
+  end
 
   logic secondary_push_valid, secondary_pop_valid;
   logic [QueueBits-1:0] secondary_push_index, secondary_pop_index;

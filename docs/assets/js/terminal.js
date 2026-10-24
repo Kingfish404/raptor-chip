@@ -54,8 +54,8 @@ export function createTerminal(root, data, hooks = {}) {
           "config [key]         default preset values",
           "tree                 instantiation parents of display blocks",
           "focus <module>       highlight a block on the schematic",
-          "flow                 play or pause the cycle occupancy",
-          "payload              show the assembly source feeding the explorer",
+          `flow                 ${hooks.flowHelp || "play or pause the cycle occupancy"}`,
+          "payload              show the occupancy model assembly source",
           "about                what this shell is",
           "clear                clear the scrollback",
           "github               repository URL",
@@ -208,7 +208,7 @@ export function createTerminal(root, data, hooks = {}) {
     },
     flow() {
       const on = hooks.toggleFlow?.();
-      write(`pipeline tokens ${on ? "on" : "off"}`);
+      write(`${hooks.flowLabel || "pipeline tokens"} ${on ? "on" : "off"}`);
     },
   };
 

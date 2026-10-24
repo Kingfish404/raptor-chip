@@ -88,6 +88,7 @@ module rapt_backend #(
   logic pmu_ooo_full_unused;
   // RNU stage
   rnu_rou_if rnu_operand ();
+  logic rou_rename_empty;
   rnu_rou_if rnu_rou ();  // Re-naming => Issue
   checkpoint_release_if checkpoint_release ();  // accepted correct resolutions
 
@@ -133,7 +134,6 @@ module rapt_backend #(
   // Guards are independent per producer; candidate order carries no priority.
   // Validate each physical producer before publishing data or ROB control.
   rapt_pkg::completion_t completion_candidate[rapt_pkg::CompletionPorts];
-  logic completion_candidate_accept[rapt_pkg::CompletionPorts];
   logic completion_candidate_identity_match[rapt_pkg::CompletionPorts];
   logic completion_candidate_payload_match[rapt_pkg::CompletionPorts];
   rob_completion_owner_if completion_owner ();
@@ -248,7 +248,6 @@ module rapt_backend #(
     end else begin : g_guarded
       assign accepted = guard_accept;
     end
-    assign completion_candidate_accept[p] = accepted;
     rapt_completion_guard #(
         .Entries(rapt_pkg::CoreConfig.rob_entries),
         .IndexBits(rapt_pkg::ROBIndexBits),
@@ -365,13 +364,15 @@ module rapt_backend #(
   );
 
   // ROU (Re-Order Unit)
-  rapt_operand_stage operand_read_stage (
-      .clock,
-      .reset,
-      .flush(cmu_bcast.flush_pipe || recovery.pending),
-      .upstream(rnu_rou),
-      .downstream(rnu_operand)
-  );
+  // The ROU owns the merged registered skid and allocation handshake.
+  for (genvar s = 0; s < rapt_pkg::RenameWidth; s++) begin : g_rename_allocation
+    assign rnu_operand.slot[s] = rnu_rou.slot[s];
+    assign rnu_operand.valid[s] = rnu_rou.valid[s];
+    assign rnu_operand.checkpoint_valid[s] = rnu_rou.checkpoint_valid[s];
+    assign rnu_operand.checkpoint[s] = rnu_rou.checkpoint[s];
+    assign rnu_rou.ready[s] = rnu_operand.ready[s];
+  end
+  assign rnu_operand.empty = rnu_rou.empty;
 
   logic drain_completion;
   if (RegisteredDrainCompletion) begin : g_registered_drain
@@ -403,6 +404,7 @@ module rapt_backend #(
       .clock(clock),
 
       .rnu_rou(rnu_operand),
+      .rename_buffer_empty_o(rou_rename_empty),
       .recovery(recovery),
       .checkpoint_release(checkpoint_release),
 
@@ -521,12 +523,15 @@ module rapt_backend #(
   // dispatch readiness, so a BRQ may capture its own registered link result.
   rapt_pkg::completion_t local_integer_wake[rapt_pkg::CompletionPorts];
   for (genvar p = 0; p < rapt_pkg::CompletionPorts; p++) begin : g_local_integer_wake
-    if (LocalIntegerWake && (p < IntegerIssuePorts
-        || (LocalMemoryWake && p == MemoryPort)
-        || (RegisteredOperandWakePorts[p]
-            && (p == BranchPort || p == MulPort))))
+    localparam bit RegisteredLinkOrMul = RegisteredOperandWakePorts[p]
+        && (p == BranchPort || p == MulPort);
+    localparam bit LocalPort = p < IntegerIssuePorts
+        || (LocalMemoryWake && p == MemoryPort) || RegisteredLinkOrMul;
+    if (LocalIntegerWake && LocalPort) begin : g_live
       assign local_integer_wake[p] = completion_accepted[p];
-    else assign local_integer_wake[p] = '0;
+    end else begin : g_none
+      assign local_integer_wake[p] = '0;
+    end
   end
   // FPQ residents capture the live FP result; integer, memory and spill
   // consumers see it on the registered edge, off the FP arbiter path.
@@ -567,6 +572,7 @@ module rapt_backend #(
       .pmu_ooo_full(pmu_ooo_full_unused)
   );
 
+  logic fp_issue_enable_unused;
   rapt_feu #(
       .LocalFpWake(LocalFpWake)
   ) feu (
@@ -585,7 +591,7 @@ module rapt_backend #(
       .wb_fpu(wb_fpu),
       .wb_accept(g_completion_guard[FpuPort].accepted),
       .completion_ready(1'b1),
-      .issue_enable()
+      .issue_enable(fp_issue_enable_unused)
   );
 
   // CMU (ComMit Unit)
@@ -683,6 +689,8 @@ module rapt_backend #(
   );
 `endif
 
-  assign empty_o = !(|completion_owner.live) && rnu_operand.empty;
+  // A draining group can accept refill while still occupied; use explicit
+  // registered emptiness for I/O-fetch authorization.
+  assign empty_o = !(|completion_owner.live) && rnu_operand.empty && rou_rename_empty;
   assign sq_empty_o = rou_lsu.sq_empty;
 endmodule

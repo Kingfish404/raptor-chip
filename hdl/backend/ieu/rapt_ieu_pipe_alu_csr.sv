@@ -7,7 +7,6 @@ module rapt_ieu_pipe_alu_csr #(
     parameter type CompletionT = rapt_pkg::completion_t,
     parameter type IssueT = rapt_pkg::issue_packet_t,
     parameter bit UseDispatchCsrAddress = 1'b0,
-    parameter unsigned ROB_SIZE = `RAPT_ROB_SIZE,
     parameter unsigned XLEN     = `RAPT_XLEN
 ) (
     cmu_bcast_if.in cmu_bcast,
@@ -19,7 +18,9 @@ module rapt_ieu_pipe_alu_csr #(
 );
 
   logic [XLEN-1:0] alu_result;
-  rapt_ieu_alu gen_alu (
+  rapt_ieu_alu #(
+      .XLEN(XLEN)
+  ) gen_alu (
       .s1(iss.op1),
       .s2(iss.op2),
       .op(iss.uop.execute.int_op.alu),

@@ -2,10 +2,10 @@
 #
 # Usage (driven by `make fpga-load`):
 #   vivado -mode batch -source scripts/vivado_load.tcl \
-#       -tclargs <bitstream.bit> <expected-part>
+#       -tclargs <bitstream.bit> <expected-part> [hw-target-pattern]
 
 if {$argc < 2} {
-    puts "ERROR: usage: vivado -source vivado_load.tcl -tclargs <bitstream.bit> <expected-part>"
+    puts "ERROR: usage: vivado -source vivado_load.tcl -tclargs <bitstream.bit> <expected-part> \[hw-target-pattern\]"
     exit 1
 }
 set bitstream [lindex $argv 0]
@@ -17,7 +17,20 @@ if {![file exists $bitstream]} {
 
 open_hw_manager
 connect_hw_server -allow_non_jtag
-open_hw_target
+if {$argc >= 3 && [lindex $argv 2] ne ""} {
+    set pattern [lindex $argv 2]
+    set targets [get_hw_targets -quiet $pattern]
+    if {[llength $targets] != 1} {
+        puts "ERROR: expected exactly one JTAG target matching '$pattern', found [llength $targets]."
+        disconnect_hw_server
+        close_hw_manager
+        exit 1
+    }
+    current_hw_target [lindex $targets 0]
+    open_hw_target [lindex $targets 0]
+} else {
+    open_hw_target
+}
 
 set matches [list]
 set discovered [list]

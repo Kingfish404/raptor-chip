@@ -189,7 +189,12 @@ module rapt_l1i #(
   logic cache_ar_accept;
   logic l1i_tag_inv;
   logic ifq_push_en;
-  logic ifq_clear_en;
+  logic cache_detached_q, install_stale_q;
+  logic install_valid_q, install_replace_q;
+  logic [PADDR_BITS-1:2] install_addr_q;
+  logic [XLEN-1:0] cache_refill_addr;
+  logic [L1iWayW-1:0] install_way_q;
+  logic [31:0] install_data_q;
 
   assign mmu_en = csr_bcast.immu_en;
   assign pc_ifu = mmu_en ? XLEN'({itlb_ptag, tlb_offset}) : ifu_l1i.pc;
@@ -233,15 +238,15 @@ module rapt_l1i #(
   assign addr_tag_next4 = pc_ifu_next4[PADDR_BITS-1:L1I_LEN+L1I_LINE_LEN+2];
 
   assign fetch_addr = {ifq_raddr[ifq_tail], 2'b00};
-  assign tag_fetch = fetch_addr[PADDR_BITS-1:L1I_LEN+L1I_LINE_LEN+2];
-  assign offset_fetch = fetch_addr[L1I_LINE_LEN+2-1:2];
-  assign idx_fetch = fetch_addr[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
+  assign tag_fetch = install_addr_q[PADDR_BITS-1:L1I_LEN+L1I_LINE_LEN+2];
+  assign offset_fetch = install_addr_q[L1I_LINE_LEN+2-1:2];
+  assign idx_fetch = install_addr_q[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
 
   assign fetch_addr_valid = csr_bcast.immu_en || rapt_pkg::addr_cacheable(pc_ifu);
   assign raddr_valid = rapt_pkg::addr_executable(l1i_addr, 4'd3);
-  assign target_read_ahead = ifu_l1i.prefetch_valid && (!mmu_en || L1iViptSafe)
-                          && !invalid_l1i && !wait_invalid
-                          && (mmu_en || rapt_pkg::addr_cacheable(ifu_l1i.prefetch_pc));
+  // A speculative SRAM read cannot publish a packet. Invalidation and
+  // cacheability qualify the response below, never this address selection.
+  assign target_read_ahead = ifu_l1i.prefetch_valid && (!mmu_en || L1iViptSafe);
   assign sram_base_addr = (mmu_en && L1iViptSafe) ? ifu_l1i.pc : pc_ifu;
   assign sram_read_idx = target_read_ahead
                        ? ifu_l1i.prefetch_pc[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2]
@@ -266,14 +271,13 @@ module rapt_l1i #(
                         && (l1i_state == IDLE || l1i_state == RD_A || l1i_state == FINA);
   end
 
-  // Clear dominates in the same edge only for lines without a refill; a
-  // refill merges with the pre-clear mask, as the former flop array did.
-  assign l1i_valid_clear = reset || ((invalid_l1i || wait_invalid) && l1i_state == IDLE);
+  // Invalidation wins over both the arriving beat and a queued install.
+  assign l1i_valid_clear = reset || invalid_l1i || (wait_invalid && l1i_state == IDLE);
   for (genvar w = 0; w < L1I_N_WAYS; w++) begin : g_valid_way
     logic fill_write;
     logic [L1I_LINE_SIZE-1:0] fill_data;
     logic [L1I_LINE_SIZE-1:0] raw_curr, raw_next, raw_next4, raw_fetch;
-    assign fill_write = l1i_fill_en && fill_way_r == L1iWayW'(w);
+    assign fill_write = l1i_fill_en && install_way_q == L1iWayW'(w);
     assign fill_data = fill_tag_match[w] ? (valid_fetch[w] | fill_word_mask) : fill_word_mask;
     if (`RAPT_FPGA_LUTRAM) begin : g_lutram
       (* ram_style = "distributed" *) logic [L1I_LINE_SIZE-1:0] curr_words[L1iSize];
@@ -306,7 +310,7 @@ module rapt_l1i #(
     for (genvar i = 0; i < L1iSize; i++) begin : g_live
       always_ff @(posedge clock) begin
         if (fill_write && idx_fetch == L1I_LEN'(i)) l1i_line_live[w][i] <= 1'b1;
-        else if (l1i_valid_clear) l1i_line_live[w][i] <= 1'b0;
+        if (l1i_valid_clear) l1i_line_live[w][i] <= 1'b0;
       end
     end
   end
@@ -379,7 +383,7 @@ module rapt_l1i #(
   assign cache_issue = !slow_active && l1i_bus.arvalid
       && l1i_bus.rready && !l1i_bus.ar_ptw;
   assign cache_return = !slow_active && l1i_bus.rvalid;
-  assign cache_orphan = (ifq_valid == 0) && (cache_pending != 0);
+  assign cache_orphan = cache_detached_q && (cache_pending != 0);
   always_ff @(posedge clock) begin
     if (reset) cache_pending <= 0;
     else
@@ -491,12 +495,13 @@ module rapt_l1i #(
 `else
   assign l1i_bus.noallocate = l1i_bus.ar_ptw;
 `endif
-  assign l1i_bus.araddr = slow_active ? (slow_ptw ? slow_ptw_addr : slow_read_addr) : ptw_arvalid
-    ? ptw_araddr
-    : (RefillWords == 2)
+  assign cache_refill_addr = (RefillWords == 2)
       ? ((l1i_state == RD_0) ? (l1i_addr & ~'h4) : (l1i_addr | 'h4))
       : ((l1i_addr & ~XLEN'(RefillBytes - 1))
          + (XLEN'(l1i_fill_issue_idx) << 2));
+  assign l1i_bus.araddr = slow_active ? (slow_ptw ? slow_ptw_addr : slow_read_addr) : ptw_arvalid
+    ? ptw_araddr
+    : cache_refill_addr;
   assign l1i_bus.arvalid = slow_active ? (slow_ptw || slow_read) : ptw_arvalid
     ? !pmp_iptw_fault
     : !cache_cancel && raddr_valid && ((RefillWords == 2)
@@ -514,7 +519,7 @@ module rapt_l1i #(
   logic cache_response_owned, cache_error_current, cache_error_second;
   logic first_half_ready, second_error_seen, second_error_pending;
   logic [XLEN-1:0] second_error_pc;
-  assign cache_response_owned = !slow_active && !cache_cancel
+  assign cache_response_owned = !slow_active && !cache_cancel && !cache_detached_q
       && l1i_bus.rvalid && ifq_valid[ifq_tail];
   // A failed prefetched word is consumed but never installed. Only bytes
   // needed by the current instruction can raise its fetch exception.
@@ -545,17 +550,6 @@ module rapt_l1i #(
       end
     end
   end
-  assign l1i_fill_en = cache_response_owned && !l1i_bus.rerr;
-  assign l1i_tag_valid_set = l1i_fill_en && (ifq_valid[0] == 0);
-  assign l1i_tag_inv = (invalid_l1i || wait_invalid) && (l1i_state == IDLE);
-  assign fill_word_mask = {{L1I_LINE_SIZE - 1{1'b0}}, 1'b1} << offset_fetch;
-  assign cache_ar_accept = cache_issue;
-  assign ifq_push_en = !cache_cancel && !cache_error_current
-      && (((l1i_state == RD_0) && cache_ar_accept)
-        || ((l1i_state == RD_1) && cache_ar_accept));
-  assign ifq_clear_en = cache_cancel || cache_error_current
-      || ((l1i_state == FINA) && !raddr_valid);
-
 `ifdef RAPT_RV64
   logic [31:0] l1i_fill_data;
   assign l1i_fill_data = fetch_addr[2] ? l1i_bus.rdata[63:32] : l1i_bus.rdata[31:0];
@@ -563,6 +557,35 @@ module rapt_l1i #(
   logic [31:0] l1i_fill_data;
   assign l1i_fill_data = l1i_bus.rdata[31:0];
 `endif
+
+  // Transport ownership survives recovery. Memory content can install even
+  // after its IFU consumer is killed, but no pre-fence beat may become live.
+  // The registered install select drives the single-port data RAM address mux;
+  // a current invalidate clears tag/word validity, not the RAM address.
+  always_ff @(posedge clock) begin
+    install_addr_q <= fetch_addr[PADDR_BITS-1:2];
+    install_way_q <= fill_way_r;
+    install_data_q <= l1i_fill_data;
+    install_replace_q <= ifq_valid[0] == 0;
+    install_valid_q <= cache_return && ifq_valid[ifq_tail] && !l1i_bus.rerr
+        && !install_stale_q && !invalid_l1i && !reset;
+    if (cache_pending == 0) begin
+      cache_detached_q <= 1'b0;
+      install_stale_q <= 1'b0;
+    end
+    if (cache_cancel || cache_error_current) cache_detached_q <= 1'b1;
+    if (invalid_l1i) install_stale_q <= 1'b1;
+    if (reset) begin
+      cache_detached_q <= 1'b0;
+      install_stale_q <= 1'b0;
+    end
+  end
+  assign l1i_fill_en = install_valid_q && !invalid_l1i;
+  assign l1i_tag_valid_set = l1i_fill_en && install_replace_q;
+  assign l1i_tag_inv = invalid_l1i || (wait_invalid && (l1i_state == IDLE));
+  assign fill_word_mask = {{L1I_LINE_SIZE - 1{1'b0}}, 1'b1} << offset_fetch;
+  assign cache_ar_accept = cache_issue;
+  assign ifq_push_en = cache_ar_accept;
 
   logic [1:0] ptw_result_pbmt;
   // --- ITLB ---
@@ -726,11 +749,11 @@ module rapt_l1i #(
           .raddr_next4(addr_idx_next4),
           .rtag_next4(tag_rdata_next4[w]),
           .rvalid_next4(tag_valid_next4[w]),
-          .wen(l1i_fill_en && (fill_way_r == L1iWayW'(w))),
+          .wen(l1i_fill_en && (install_way_q == L1iWayW'(w))),
           .waddr_idx(idx_fetch),
           .wtag(tag_fetch),
           .wtag_match(fill_tag_match[w]),
-          .valid_set(l1i_tag_valid_set && (fill_way_r == L1iWayW'(w))),
+          .valid_set(l1i_tag_valid_set && (install_way_q == L1iWayW'(w))),
           .valid_set_idx(idx_fetch),
           .inv(l1i_tag_inv)
       );
@@ -752,7 +775,7 @@ module rapt_l1i #(
     assign update_set[2] = idx_fetch;
     assign update_way[0] = hit_way_sel;
     assign update_way[1] = hit_next_way_sel;
-    assign update_way[2] = fill_way_r;
+    assign update_way[2] = install_way_q;
     rapt_cache_plru #(
         .Ways(L1I_N_WAYS),
         .SetBits(L1I_LEN),
@@ -783,11 +806,11 @@ module rapt_l1i #(
       .reset(reset),
       .read_addr(data_bank_raddr),
       .read_focus_word(sram_read_offset),
-      .write_valid(l1i_fill_en),
+      .write_valid(install_valid_q),
       .write_set(idx_fetch),
       .write_word(offset_fetch),
-      .write_way(fill_way_r),
-      .write_data(l1i_fill_data),
+      .write_way(install_way_q),
+      .write_data(install_data_q),
       .read_data(data_bank_rdata),
       .read_index(data_bank_raddr_d1),
       .read_valid(data_bank_rvalid_d1)
@@ -1185,30 +1208,26 @@ module rapt_l1i #(
         rec_tval <= ifu_l1i.pc + (cache_error_second ? XLEN'(2) : XLEN'(0));
         cause <= `RAPT_CAUSE_INSTR_ACC_FAULT;
       end
-      ifq_head <= '0;
-      ifq_tail <= '0;
     end
     // Cache line arrival (tag fill handled by SRAM wen).
     if (l1i_fill_en) begin
-      if (ifq_valid[0] == 0 && L1I_N_WAYS == 2) begin
+      if (install_replace_q && L1I_N_WAYS == 2) begin
         replace_bit[idx_fetch] <= ~replace_bit[idx_fetch];
       end
     end
-    if (cache_response_owned && !cache_error_current) ifq_tail <= ifq_tail + 1;
+    if (!reset && cache_return && ifq_valid[ifq_tail]) ifq_tail <= ifq_tail + 1;
 
     // One static write cone per IFQ entry. A returning response consumes an
     // aliased entry before a same-cycle request can reuse it.
     for (int i = 0; i < int'(IFQ_SIZE); i++) begin
-      if (cache_response_owned && i == int'(ifq_tail)) begin
-        ifq_valid[i] <= 1'b0;
-      end else if (ifq_clear_en) begin
+      if (reset || (cache_return && i == int'(ifq_tail))) begin
         ifq_valid[i] <= 1'b0;
       end else if (ifq_push_en && i == int'(ifq_head)) begin
         ifq_valid[i] <= 1'b1;
       end
 
-      if (ifq_push_en && i == int'(ifq_head)) begin
-        ifq_raddr[i] <= l1i_bus.araddr[XLEN-1:2];
+      if (!ifq_valid[i] && i == int'(ifq_head)) begin
+        ifq_raddr[i] <= cache_refill_addr[XLEN-1:2];
       end
     end
   end

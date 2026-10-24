@@ -64,7 +64,9 @@ module rapt_dm #(
     input logic            halted_i,
     // Resume PC at the halt boundary (= npc of the youngest committed
     // instruction). Captured into dpc on the halted_i rising edge.
-    input logic [XLEN-1:0] halt_pc_i,
+    /* verilator lint_off UNUSEDSIGNAL */
+    input logic [XLEN-1:0] halt_pc_i,  // bit 0 is hardwired zero in dpc
+    /* verilator lint_on UNUSEDSIGNAL */
     // Single-cycle pulse from the core: at least one instruction retired
     // this cycle. Used to count instructions while dcsr.step=1 so a
     // single-step resume halts again after exactly one retire.
@@ -118,7 +120,6 @@ module rapt_dm #(
   logic [    31:0] dcsr_q;  // dcsr is fixed 32-bit per spec
   logic [XLEN-1:1] dpc_q;
   wire [XLEN-1:0] dpc_value = {dpc_q, 1'b0};
-  wire [XLEN-1:0] dpc_wdata = XLEN'(data0_q);
   logic [XLEN-1:0] dscratch0_q;
   logic [XLEN-1:0] dscratch1_q;
 
@@ -181,7 +182,9 @@ module rapt_dm #(
                            || cmd_is_trig_raz;
 
   // Read mux (XLEN-wide; data0 takes the low 32 bits).
-  logic [XLEN-1:0] reg_rdata;
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [XLEN-1:0] reg_rdata;  // RV64 upper bits await data1 support.
+  /* verilator lint_on UNUSEDSIGNAL */
   always_comb begin
     reg_rdata = '0;
     if (cmd_is_gpr) reg_rdata = dbg_gpr_rdata_i;
@@ -246,6 +249,7 @@ module rapt_dm #(
       dm_halt_state_q <= 1'b0;
       data0_q         <= '0;
       cmderr_q        <= 3'd0;
+      step_pending_q  <= 1'b0;
       // dcsr/dpc/dscratch are NOT cleared by dmactive=0 per spec; only by
       // hard reset.
       if (dmi_req && dmi_wr && dmi_addr == AddrDmcontrol) begin
@@ -262,7 +266,11 @@ module rapt_dm #(
             haltreq_q   <= dmi_wdata[31];
             // Per spec: writing haltreq=1 clears resumeack; writing
             // resumereq=1 (with haltreq=0) starts a fresh ack window.
-            if (dmi_wdata[31]) resumeack_q <= 1'b0;
+            if (dmi_wdata[31]) begin
+              resumeack_q <= 1'b0;
+              // An explicit halt must also stop a step stalled before retirement.
+              step_pending_q <= 1'b0;
+            end
             if (dmi_wdata[30] && !dmi_wdata[31]) resumeack_q <= 1'b0;
           end
           AddrData0: data0_q <= dmi_wdata;
@@ -286,7 +294,7 @@ module rapt_dm #(
           // data0 -> register. GPR writes are sourced via dbg_gpr_we_o
           // below; CSR-class targets latch here.
           if (cmd_is_dcsr) dcsr_q <= data0_q;
-          else if (cmd_is_dpc) dpc_q <= dpc_wdata[XLEN-1:1];
+          else if (cmd_is_dpc) dpc_q <= (XLEN - 1)'(data0_q >> 1);
           else if (cmd_is_dscr0) dscratch0_q <= XLEN'(data0_q);
           else if (cmd_is_dscr1) dscratch1_q <= XLEN'(data0_q);
           // cmd_is_misa: read-only, silently dropped (spec allows either).

@@ -49,7 +49,8 @@ module rapt_l2_data_array (
   logic line_active, read_pending, read_first_pending, read_full_q;
   logic [9:0] line_set_q;
   logic [2:0] line_way_q;
-  logic [2:0] line_chunk_q, line_chunk;
+  logic [2:0] line_chunk_q;
+  logic [1:0] line_chunk;
   logic [3:0] line_request, line_fire, sink_d_request;
   logic [511:0] line_data_q;
   logic [255:0] read_first_q;
@@ -61,7 +62,7 @@ module rapt_l2_data_array (
   logic [1:0] source_c_chunk_q;
 
   assign line_issue = write_line_valid || line_active;
-  assign line_chunk = line_active ? line_chunk_q : 3'd0;
+  assign line_chunk = line_active ? line_chunk_q[1:0] : 2'd0;
   assign line_request = line_issue ? (4'b0001 << line_chunk[1:0]) : 4'h0;
   assign sink_d_request = sink_d_write_valid ? (4'b0001 << sink_d_write_chunk[1:0]) : 4'h0;
   assign write_line_busy = line_active;

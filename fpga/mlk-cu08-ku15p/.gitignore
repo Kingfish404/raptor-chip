@@ -8,3 +8,6 @@
 .Xil/
 __pycache__/
 !/board.json
+!/firmware/*.c
+!/firmware/*.S
+!/scripts/*.py

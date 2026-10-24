@@ -27,6 +27,7 @@ module rapt_dpu #(
   int unsigned target[NumCandidates];
   localparam int CandidateBits = rapt_pkg::index_bits(NumCandidates);
   localparam int RankBits = rapt_pkg::index_bits(NumCandidates + 1);
+  localparam int SlotBits = rapt_pkg::index_bits(NumSlots);
   logic [RankBits-1:0] domain_rank[NumCandidates];
   logic [NumCandidates-1:0] admissible;
   if (!(NumSlots > 0 && NumCandidates > 0 && NumDomains > 0)) begin : g_invalid_config_0
@@ -55,7 +56,7 @@ module rapt_dpu #(
         domain_rank[c]++;
       admissible[c] = candidate_valid[c] && target[c] < NumDomains
           && int'(domain_rank[c]) < NumSlots
-          && capacity[target[c]].ready[domain_rank[c]];
+          && capacity[target[c]].ready[SlotBits'(domain_rank[c])];
     end
     `RAPT_SVA_IMPLY(clock, reset, DISPATCH_DOMAIN_EXISTS, candidate_valid[c],
                     int'(candidate_domain[c]) < NumDomains)
@@ -75,11 +76,11 @@ module rapt_dpu #(
     for (int d = 0; d < NumDomains; d++) begin
       grant[d] = '0;
       for (int s = 0; s < NumSlots; s++) begin
-        automatic int unsigned c;
-        c = int'(selected_candidate[s]);
+        automatic logic [CandidateBits-1:0] c;
+        c = selected_candidate[s];
         if (selected_valid[s] && target[c] == d) begin
           grant[d].accept[s] = 1'b1;
-          grant[d].index[s] = capacity[d].free_index[domain_rank[c]];
+          grant[d].index[s] = capacity[d].free_index[SlotBits'(domain_rank[c])];
         end
       end
     end

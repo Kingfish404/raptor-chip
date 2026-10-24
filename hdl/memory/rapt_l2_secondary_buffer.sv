@@ -21,8 +21,9 @@ module rapt_l2_secondary_buffer #(
     output logic [DataBits-1:0] pop_data,
     output logic [NumQueues-1:0] queue_valid
 );
-  if (NumMshrs < 3 || NumQueues != 3 * NumMshrs || NumEntries < NumMshrs || DataBits < 1)
+  if (NumMshrs < 3 || NumQueues != 3 * NumMshrs || NumEntries < NumMshrs || DataBits < 1) begin : g_invalid_geometry
     $error("invalid L2 secondary request buffer geometry");
+  end
 
   logic [NumEntries-1:0] used;
   logic [EntryBits-1:0] head[NumQueues];

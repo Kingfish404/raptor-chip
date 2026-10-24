@@ -69,6 +69,36 @@ class PipelineTest(unittest.TestCase):
         for fr in trace["frames"]:
             self.assertLessEqual(len(fr["occ"].get("rapt_ifu", [])), 2)
 
+    def test_completion_and_retirement_are_per_cycle_events(self) -> None:
+        instructions = [addi("1", "t0"),
+            {"asm": "lw a0,0(a1)", "mnemonic": "lw", "operands": "a0,0(a1)", "domain": "memory", "kernel": "list"},
+            {"asm": "mul t1,t0,a0", "mnemonic": "mul", "operands": "t1,t0,a0", "domain": "mul"},
+            {"asm": "beq a0,a1,0", "mnemonic": "beq", "operands": "a0,a1,0", "domain": "branch"},
+            {"asm": "fadd.d f0,f1,f2", "mnemonic": "fadd.d", "operands": "f0,f1,f2", "domain": "fp"},
+        ]
+        trace = pm.simulate(instructions, {"m_fast": 1})
+        retired = [idx for f in trace["frames"] for idx in f["occ"].get("rapt_cmu", [])]
+        completed = [idx for f in trace["frames"] for idx in f["occ"].get("rapt_completion_stage", [])]
+        self.assertEqual(retired, list(range(len(instructions))))
+        self.assertEqual(sorted(completed), list(range(len(instructions))))
+        self.assertEqual(trace["frames"][-1]["retired_total"], len(instructions))
+        for idx in retired:
+            completion_cycle = next(f["t"] for f in trace["frames"] if idx in f["occ"].get("rapt_completion_stage", []))
+            retirement_cycle = next(f["t"] for f in trace["frames"] if idx in f["occ"].get("rapt_cmu", []))
+            self.assertGreater(retirement_cycle, completion_cycle)
+
+    def test_waiting_queues_and_execution_are_disjoint_and_bounded(self) -> None:
+        trace = pm.simulate([addi(str(i), "a0") for i in range(40)], {
+            "integer_issue_ports": 1, "alq_entries": 2, "rnq_entries": 3, "uoq_entries": 2,
+        })
+        for frame in trace["frames"]:
+            self.assertLessEqual(len(frame["queues"]["alq"]), 2)
+            self.assertLessEqual(len(frame["queues"]["rnu"]), 3)
+            self.assertLessEqual(len(frame["queues"]["uoq"]), 2)
+            self.assertLessEqual(len(frame["executing"]["alq"]), 1)
+            for kind in ("alq", "brq", "mdq", "fpq", "ioq"):
+                self.assertFalse(set(frame["queues"][kind]) & set(frame["executing"][kind]))
+
 
 if __name__ == "__main__":
     unittest.main()

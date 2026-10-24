@@ -21,9 +21,19 @@ module tb_vector_rtl #(
     if (!$value$plusargs("vectors=%s", vectors)) $fatal(1, "Missing vectors path");
     input_file = $fopen(vectors, "r");
     if (input_file == 0) $fatal(1, "Cannot open vector inputs");
-    while (!$feof(input_file)) begin
-      parsed = $fscanf(input_file, "%h %h %h %h %h %h\n", requested_vtype,
-                       avl, current_vtype, current_vl, avl_max, keep_vl);
+    while (!$feof(
+        input_file
+    )) begin
+      parsed = $fscanf(
+          input_file,
+          "%h %h %h %h %h %h\n",
+          requested_vtype,
+          avl,
+          current_vtype,
+          current_vl,
+          avl_max,
+          keep_vl
+      );
       if (parsed == 6) begin
         #1;
         $display("VTYPE_RESULT %h %h %h %d", next_vtype, next_vl, vlmax, vill);

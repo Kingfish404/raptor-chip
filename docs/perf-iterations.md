@@ -4,12 +4,15 @@ title: Performance Iterations
 
 # Performance Iterations
 
-Legacy Version: [PROFILE.md](./PROFILE.md)
+Historical measurements, tied to the revisions and configurations in each row.
+They do not describe the current default core or establish routed FPGA timing.
+See [current defaults](./uarch.md#default-configuration) and
+[benchmark commands](./getting-started.md#4-benchmarks) for new measurements.
+Older results are in the [legacy archive](./PROFILE.md).
 
-Tracks microarchitecture changes and their impact on IPC, cycle count, and stall breakdown.
-
-- Benchmark: `make coremark-rv32 ARGS="-b -n"` and `make microbench-rv32 ARGS="-b -n"` (RV32EM, npc standalone)
-- Config: unless a row or footnote says otherwise, benchmark rows use the historical two-wide NPC path. Current default RTL/config independently declares `DECODE/RENAME/DISPATCH/COMMIT_WIDTH=2/2/2/2`, `ROB_SIZE=32`, `RS_SIZE=8`, `RIQ/IIQ=8`, `IOQ_SIZE=8`, `SQ_SIZE=16`, `PHY_SIZE=64`, L1I and L1D each 16 KiB (64 sets × 4 ways, 64-byte lines), TAGE direction predictor, and `RAPT_L2_EN` disabled by default (the instantiated L2 stage is passthrough unless that macro is defined). These current settings do not retroactively describe the historical measurements below.
+Unless specified otherwise, benchmark rows use the historical two-wide NPC
+path. Record preset, XLEN, binary, compiler flags, memory model, and constraints
+with any new result; compare equivalent scopes.
 
 ## Benchmark Results
 
@@ -99,4 +102,4 @@ The historical `[^11]` STA row is run with the `small` (single-issue, low-area) 
 | 76143bb | RAS-4 + TAGE [^10]     |     27.82 | 1,695,775.00 | 1.02e-01 |      62.43 | 155,137.83 |  4.85e-03 |       16.14 | 9,027,255.35 |   1.21e-01 |
 | 875aa2f | L2$ + L1I/SRAM [^11]   |     53.78 |   859,590.97 | 9.00e-02 |      57.67 |  80,248.39 |  6.80e-03 |       22.71 | 4,680,833.04 |   5.09e-02 |
 
-Footnote `[^9]` matches the corresponding entry in the CoreMark/MicroBench tables above. `[^10]` and `[^11]` STA were run via CI across all three PDKs and both ISAs. `[^10]` used the `default` (dual-issue OoO) preset; `[^11]` was measured at `875aa2f` with the `small` (single-issue) preset, so its lower area/higher Fmax (e.g. RV32 NG45 area 1.04M -> 0.53M um^2, Fmax 62.08 -> 77.15 MHz) reflect the smaller preset, not a like-for-like uarch comparison. No STA result is recorded for the current default worktree [^12].
+Footnote `[^9]` matches the corresponding entry in the CoreMark/MicroBench tables above. `[^10]` and `[^11]` STA were run via CI across all three PDKs and both ISAs. `[^10]` used the `default` (dual-issue OoO) preset; `[^11]` was measured at `875aa2f` with the `small` (single-issue) preset, so its lower area/higher Fmax (e.g. RV32 NG45 area 1.04M -> 0.53M um^2, Fmax 62.08 -> 77.15 MHz) reflect the smaller preset, not a like-for-like uarch comparison. No STA result is recorded here for iteration [^12].

@@ -108,8 +108,8 @@ module tb_l1i_16k;
     reset = 0;
     if ($bits(dut.addr_tag) != `RAPT_PADDR_BITS - `RAPT_L1I_LEN - `RAPT_L1I_LINE_LEN - 2)
       $fatal(1, "I tag must exclude non-physical, index and offset bits");
-    if (`RAPT_CACHE_LINE_BYTES != 64 || Sets < 2 || Ways < 2)
-      $fatal(1, "test requires 64 B lines and at least two sets and ways");
+    if (!(LineBytes inside {16, 32, 64}) || Sets < 2 || Ways < 2)
+      $fatal(1, "test requires 16/32/64 B lines and at least two sets and ways");
     // All ways for every set, both refill sectors: occupy the whole cache.
     for (int line = 0; line < CapacityLines; line++) begin
       fetch('h80000000 + LineBytes * line, 0);
@@ -149,7 +149,7 @@ module tb_l1i_16k;
     $finish;
   end
   initial begin
-    #2000000;
+    #(CapacityBytes * 250);
     $fatal(1, "L1I window timeout");
   end
 endmodule

@@ -1338,8 +1338,35 @@ XSIM_TARGETS := \
 	xsim-muldiv-flush-reuse \
 	xsim-rou-dual-commit
 
+# Scenario tops stored in a shared source, as <top pattern>:<file>. The first
+# match wins; other tops, and those in SHARED_TB_STANDALONE, use <top>.sv.
+SHARED_TB_SOURCES := \
+	tb_idu_%:tb_idu_contract.sv \
+	tb_router_%:tb_router_all_contract.sv \
+	tb_ptw_%:tb_ptw_all_contract.sv \
+	tb_sq_%:tb_sq_all_contract.sv \
+	tb_l1d_%:tb_l1d_all_contract.sv \
+	tb_ioq_%:tb_ioq_all_contract.sv \
+	tb_lsu_%:tb_lsu_all_contract.sv \
+	tb_csr_%:tb_csr_all_contract.sv \
+	tb_predict_history%:tb_predict_history_contract.sv \
+	tb_issue_select%:tb_issue_select_contract.sv \
+	tb_rename_checkpoint%:tb_rename_checkpoint_contract.sv \
+	tb_fetch_%:tb_fetch_contract.sv
+SHARED_TB_STANDALONE := \
+	tb_l1d_16k tb_l1d_pmp_shared tb_l1d_ptw_permission_stage \
+	tb_ioq_forward_nonalias tb_ioq_dispatch_stable tb_ioq_fp_ooo
+
+# $(call shared_tb_match,<pattern>:<file>,<top>) gives <file> if <top> matches.
+shared_tb_pattern = $(firstword $(subst :, ,$(1)))
+shared_tb_file = $(lastword $(subst :, ,$(1)))
+shared_tb_match = $(if $(filter $(call shared_tb_pattern,$(1)),$(2)),$(call shared_tb_file,$(1)))
+shared_tb_matches = $(foreach entry,$(SHARED_TB_SOURCES),$(call shared_tb_match,$(entry),$(1)))
+shared_tb_first = $(firstword $(call shared_tb_matches,$(1)))
+shared_tb_lookup = $(if $(filter $(SHARED_TB_STANDALONE),$(1)),,$(call shared_tb_first,$(1)))
+
 define SHARED_TB_SOURCE
-$(if $(filter tb_idu_%,$(1)),tb_idu_contract.sv,$(if $(filter tb_router_%,$(1)),tb_router_all_contract.sv,$(if $(filter tb_ptw_%,$(1)),tb_ptw_all_contract.sv,$(if $(filter tb_sq_%,$(1)),tb_sq_all_contract.sv,$(if $(filter-out tb_l1d_16k tb_l1d_pmp_shared tb_l1d_ptw_permission_stage,$(filter tb_l1d_%,$(1))),tb_l1d_all_contract.sv,$(if $(filter-out tb_ioq_forward_nonalias tb_ioq_dispatch_stable tb_ioq_fp_ooo,$(filter tb_ioq_%,$(1))),tb_ioq_all_contract.sv,$(if $(filter tb_lsu_%,$(1)),tb_lsu_all_contract.sv,$(if $(filter tb_csr_%,$(1)),tb_csr_all_contract.sv,$(if $(filter tb_predict_history%,$(1)),tb_predict_history_contract.sv,$(if $(filter tb_issue_select%,$(1)),tb_issue_select_contract.sv,$(if $(filter tb_rename_checkpoint%,$(1)),tb_rename_checkpoint_contract.sv,$(1).sv)))))))))))
+$(or $(call shared_tb_lookup,$(1)),$(1).sv)
 endef
 
 define XSIM_RUN

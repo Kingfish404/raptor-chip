@@ -145,7 +145,8 @@ module rapt_rob_dispatch_window #(
   for (genvar r = 0; r < Resident; r++) begin : g_rank
     assign prefetch_valid[r] = ranked_found[r];
     assign prefetch_payload[r] = next_payload[r];
-    assign next_payload[r] = ranked_found[r] ? entry_payload[next_index[r]] : '0;
+    // Invalid ranks may read arbitrary payload; validity is registered separately.
+    assign next_payload[r] = entry_payload[next_index[r]];
     always_comb begin
       automatic logic [IndexBits:0] physical_sum;
       physical_sum = {1'b0, head} + {1'b0, ranked_age[r]};

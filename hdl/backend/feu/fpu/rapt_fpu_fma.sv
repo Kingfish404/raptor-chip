@@ -90,6 +90,7 @@ module rapt_fpu_fma #(
 );
   localparam int MantBits = TARGET_DOUBLE ? 53 : 24;
   logic [MantBits-1:0] product_a, product_b;
+  logic unused_product_valid;
   logic [2*MantBits-1:0] product;
   assign product = product_a * product_b;
   rapt_fpu_fma_pipeline #(
@@ -111,7 +112,7 @@ module rapt_fpu_fma #(
       .product_a(product_a),
       .product_b(product_b),
       .product(product),
-      .product_valid()
+      .product_valid(unused_product_valid)
   );
 endmodule
 
@@ -143,10 +144,12 @@ module rapt_fpu_fma_pipeline #(
   // Keep the exact product at bit zero. The upper p+3 bits accommodate a
   // larger addend without moving the product; bit WorkBits-1 is the sign.
   localparam int WorkBits = 3 * MantBits + 3;
-  localparam int ExpBias = TARGET_DOUBLE ? 1023 : 127;
-  localparam int MinExp = TARGET_DOUBLE ? -1022 : -126;
-  localparam int MaxExp = TARGET_DOUBLE ? 1023 : 127;
-  localparam int InfExponent = TARGET_DOUBLE ? 11'h7ff : 11'h0ff;
+  // Finite exponents span [-1074, 1023] (D), [-149, 127] (S).
+  // Product bases span [-2252, 1942] (D); 14 signed bits also cover alignment.
+  localparam logic signed [13:0] ExpBias = TARGET_DOUBLE ? 1023 : 127;
+  localparam logic signed [13:0] MinExp = TARGET_DOUBLE ? -1022 : -126;
+  localparam logic signed [13:0] MaxExp = TARGET_DOUBLE ? 1023 : 127;
+  localparam logic [10:0] InfExponent = TARGET_DOUBLE ? 11'h7ff : 11'h0ff;
   localparam int LeadingBits = $clog2(WorkBits + 1);
   localparam int LeadingGroupBits = 16;
   localparam int LeadingGroups = (WorkBits + LeadingGroupBits - 1) / LeadingGroupBits;
@@ -320,7 +323,7 @@ module rapt_fpu_fma_pipeline #(
           shift_count[stage] = 1'b1;
         end
       end
-      exponent_adjust = fraction == '0 ? MinExp : MinExp - int'(shift_count);
+      exponent_adjust = fraction == '0 ? MinExp : MinExp - $signed(14'(shift_count));
       normalize_subnormal = normalized;
     end
   endfunction
@@ -338,12 +341,12 @@ module rapt_fpu_fma_pipeline #(
       : (operand_b[63:32] == '1 ? {3'b0, operand_b[30:23]} : 11'h0ff);
     exp_c_c = TARGET_DOUBLE ? operand_c[62:52]
       : (operand_c[63:32] == '1 ? {3'b0, operand_c[30:23]} : 11'h0ff);
-    frac_a_c = TARGET_DOUBLE ? operand_a[51:0]
-      : (operand_a[63:32] == '1 ? operand_a[22:0] : {1'b1, {FracBits-1{1'b0}}});
-    frac_b_c = TARGET_DOUBLE ? operand_b[51:0]
-      : (operand_b[63:32] == '1 ? operand_b[22:0] : {1'b1, {FracBits-1{1'b0}}});
-    frac_c_c = TARGET_DOUBLE ? operand_c[51:0]
-      : (operand_c[63:32] == '1 ? operand_c[22:0] : {1'b1, {FracBits-1{1'b0}}});
+    frac_a_c = TARGET_DOUBLE ? FracBits'(operand_a[51:0])
+      : (operand_a[63:32] == '1 ? FracBits'(operand_a[22:0]) : {1'b1, {FracBits-1{1'b0}}});
+    frac_b_c = TARGET_DOUBLE ? FracBits'(operand_b[51:0])
+      : (operand_b[63:32] == '1 ? FracBits'(operand_b[22:0]) : {1'b1, {FracBits-1{1'b0}}});
+    frac_c_c = TARGET_DOUBLE ? FracBits'(operand_c[51:0])
+      : (operand_c[63:32] == '1 ? FracBits'(operand_c[22:0]) : {1'b1, {FracBits-1{1'b0}}});
 
     product_sign_c = sign_a_c ^ sign_b_c
       ^ (TARGET_DOUBLE
@@ -366,9 +369,9 @@ module rapt_fpu_fma_pipeline #(
     a_zero_c = exp_a_c == '0 && frac_a_c == '0;
     b_zero_c = exp_b_c == '0 && frac_b_c == '0;
     c_zero_c = exp_c_c == '0 && frac_c_c == '0;
-    exponent_a_c = exp_a_c == 0 ? MinExp : $signed({1'b0, exp_a_c}) - ExpBias;
-    exponent_b_c = exp_b_c == 0 ? MinExp : $signed({1'b0, exp_b_c}) - ExpBias;
-    exponent_c_c = exp_c_c == 0 ? MinExp : $signed({1'b0, exp_c_c}) - ExpBias;
+    exponent_a_c = exp_a_c == 0 ? MinExp : $signed({3'b0, exp_a_c}) - ExpBias;
+    exponent_b_c = exp_b_c == 0 ? MinExp : $signed({3'b0, exp_b_c}) - ExpBias;
+    exponent_c_c = exp_c_c == 0 ? MinExp : $signed({3'b0, exp_c_c}) - ExpBias;
 
     mant_a_c = exp_a_c == 0 ? normalize_subnormal(frac_a_c, exponent_a_c)
                              : {1'b1, frac_a_c};
@@ -450,8 +453,8 @@ module rapt_fpu_fma_pipeline #(
     product_discarded = 1'b0;
     addend_discarded = 1'b0;
     discarded_sign = 1'b0;
-    product_base = s1_exp_a_q + s1_exp_b_q - (2 * FracBits);
-    addend_base = s1_exp_c_q - FracBits;
+    product_base = s1_exp_a_q + s1_exp_b_q - 14'(2 * FracBits);
+    addend_base = s1_exp_c_q - 14'(FracBits);
     base_delta = 15'(addend_base) - 15'(product_base);
     common_base = product_base;
     addend_shift = base_delta;
@@ -462,7 +465,7 @@ module rapt_fpu_fma_pipeline #(
         // a quarter addend ULP, including the binade boundary below a power
         // of two. Retain the addend exactly and the product's signed tail;
         // no product barrel shifter is needed in this case.
-        common_base = addend_base - 2 * MantBits;
+        common_base = addend_base - 14'(2 * MantBits);
         addend_term = WorkBits'(s1_mant_c_q) << (2 * MantBits);
         product_discarded = |s1_product_q;
       end else begin
@@ -614,7 +617,7 @@ module rapt_fpu_fma_pipeline #(
         default: precision_up = 1'b0;
       endcase
       tiny_after_rounding = (exponent_value < MinExp)
-        && !((exponent_value == MinExp-1) && precision_up && (&precision_retained));
+        && !((exponent_value == MinExp - 14'sd1) && precision_up && (&precision_retained));
       retained = precision_retained;
       guard_bit = precision_guard;
       sticky_bit = precision_sticky;
@@ -623,7 +626,7 @@ module rapt_fpu_fma_pipeline #(
         // bit. Using the raw magnitude here would lose the left normalization
         // after deep cancellation. Sticky preserves every bit below the guard.
         denormal_input = {precision_retained, precision_guard};
-        shift_amount = MinExp - integer'(exponent_value);
+        shift_amount = int'(MinExp) - int'(exponent_value);
         if (shift_amount > MantBits) begin
           retained = '0;
           guard_bit = 1'b0;
@@ -699,7 +702,7 @@ module rapt_fpu_fma_pipeline #(
         packed_flags_c[1] = inexact && tiny_after_rounding;
         packed_flags_c[0] = inexact;
       end else begin
-        result_exponent = exponent_value + ExpBias;
+        result_exponent = 11'(exponent_value + ExpBias);
         packed_result_c = TARGET_DOUBLE
           ? {result_sign, result_exponent, retained[51:0]}
           : {32'hffff_ffff, result_sign, result_exponent[7:0], retained[22:0]};

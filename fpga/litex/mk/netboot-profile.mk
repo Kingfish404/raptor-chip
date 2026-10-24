@@ -89,6 +89,7 @@ _nb_args = $(call _nb_fixed,FPGA_BOARD,$(_nb_board)) $(call _nb_fixed,FPGA_AUTO_
  $(call _nb_fixed,FPGA_FLAVOR_SUFFIX,$(RAPT_CONFIG)-no-ila) \
  $(call _nb_quote,VIVADO_JOBS=$(VIVADO_JOBS)) $(call _nb_fixed,VIVADO_ROUTE_DIRECTIVE,Explore) \
  $(call _nb_fixed,VIVADO_SYNTH_DIRECTIVE,$(NETBOOT_SYNTH_DIRECTIVE)) $(call _nb_quote,VIVADO=$(VIVADO))
+_nb_args += $(call _nb_fixed,WITH_CM005_BRIDGE,$(if $(filter mlk_cu08_ku15p,$(_nb_board)),1,0))
 _nb_args += $(call _nb_fixed,VIVADO_SYS_SETUP_MARGIN_NS,$(_nb_setup_margin))
 _nb_args += $(call _nb_fixed,VIVADO_NO_TIMING_DRIVEN,$(NETBOOT_NO_TIMING_DRIVEN))
 _nb_args += $(call _nb_fixed,VIVADO_SYS_FINAL_WNS_NS,$(_nb_final_wns))

@@ -1,0 +1,79 @@
+<div class="architecture-explorer">
+    <div class="arch-config" id="arch-config">Default preset · RV32 / RV64 · scalar out-of-order core</div>
+    <p class="arch-profile">RV64 default: <a href="{{ '/overview.html#rva22s64-support' | relative_url }}">RVA22S64 support</a></p>
+    <div class="arch-layout">
+      <section class="arch-sheet" aria-label="Architecture views">
+        <div class="arch-toolbar">
+          <div class="arch-views" role="group" aria-label="Diagram view">
+            <button type="button" data-arch-view="core" aria-pressed="true" disabled>Core pipeline</button>
+            <button type="button" data-arch-view="memory" aria-pressed="false" disabled>Memory &amp; platform</button>
+          </div>
+          <div class="arch-tools">
+            <label><input type="checkbox" id="arch-control" disabled> Control paths</label>
+            <label class="arch-zoom-label">Zoom
+              <select id="arch-zoom" disabled aria-label="Diagram zoom">
+                <option value="auto">Auto</option><option value="fit">Fit</option><option value="100">100%</option><option value="125">125%</option><option value="150">150%</option>
+              </select>
+            </label>
+            <button type="button" id="arch-export" disabled>Save SVG</button>
+          </div>
+        </div>
+        <div class="arch-playback" role="group" aria-label="Occupancy playback">
+          <button type="button" data-cycle-play aria-pressed="false" disabled>Play</button>
+          <button type="button" data-cycle-step="-1" aria-label="Previous model cycle" disabled>−1</button>
+          <button type="button" data-cycle-step="1" aria-label="Next model cycle" disabled>+1</button>
+          <button type="button" data-cycle-reset disabled>Restart</button>
+          <output id="cycle-readout" aria-live="off" for="cycle-slider">Model unavailable</output>
+          <input type="range" id="cycle-slider" min="0" max="0" value="0" aria-label="Model cycle" disabled>
+        </div>
+        <p class="arch-model-note">Illustrative CoreMark queue model, not an RTL trace or performance measurement. Bars show modeled occupancy; dots represent instructions.</p>
+        <p class="arch-scroll-hint">Scroll diagram ↔ · select a block for details</p>
+        <div id="uarch-diagram" class="arch-canvas" tabindex="0" role="region" aria-label="Scrollable architecture diagram">
+          <p class="diagram-fallback">Interactive diagram requires JavaScript. <a href="{{ '/uarch.html' | relative_url }}">Read the architecture manual.</a></p>
+        </div>
+        <div class="arch-legend" aria-label="Connection legend">
+          <span><i class="arch-key arch-key-flow"></i>Instruction / operand</span>
+          <span><i class="arch-key arch-key-result"></i>Completion</span>
+          <span><i class="arch-key arch-key-memory"></i>Memory path</span>
+          <span><i class="arch-key arch-key-translation"></i>Address translation</span>
+          <span><i class="arch-key arch-key-control"></i>Control (optional)</span>
+        </div>
+        <p class="arch-caption">Both views cover the whole system. Open the overview block to switch detail views without changing the model cycle. Functional connections, not cycle timing or a physical floorplan; response and wakeup paths are simplified.</p>
+      </section>
+      <aside class="arch-side" aria-label="Block details">
+        <label for="arch-picker">Inspect a block</label>
+        <select id="arch-picker" disabled><option value="">Overview</option></select>
+        <div id="uarch-inspect" class="arch-inspect" aria-live="polite">
+          <h2>Core pipeline</h2><p>Select a block to see its role, default configuration, and RTL sources.</p>
+        </div>
+        <details class="arch-reading">
+          <summary>How to read this diagram</summary>
+          <p>Blocks group related RTL functions. Capacities use the default preset; RV32 and RV64 share this organization. A dashed block marks an optional cache stage.</p>
+          <p>Each view expands one part of the system and groups the other part into a linked overview block. Click its “Open” action, press Enter or Space, or choose it in the block selector to switch views. Playback continues at the same cycle.</p>
+          <p>Select a block to see its current instructions and emphasize its direct connections. Use Tab and Enter, or the block selector, for keyboard navigation.</p>
+        </details>
+        <details class="arch-reading">
+          <summary>Animation scope</summary>
+          <p>Branches do not redirect. Translation, cache contents, replay, register allocation, and store draining are not simulated. Their blocks remain available for inspection.</p>
+          <p>Dots preview up to five instructions per block; counts include all instructions. Select a block for its current instruction listing.</p>
+          <p>One instruction can occupy the ROB and an execution unit at the same time. Counts belong to each structure and should not be added together.</p>
+          <ul id="arch-model-notes"></ul>
+        </details>
+        <details class="arch-reading">
+          <summary>Instruction listing</summary>
+          <ol id="arch-payload" class="arch-payload"></ol>
+        </details>
+        <details class="arch-reading">
+          <summary>Diagram references</summary>
+          <p>Grouping and visual hierarchy draw on public diagrams, including the MDS Skylake overview. Hardware contents are Raptor's own.</p>
+          <ul>
+            <li><a href="https://mdsattacks.com/diagram.html">MDS / Skylake diagram</a> — compact whole-core layout, shared paths, and block inspection</li>
+            <li><a href="https://cdrdv2-public.intel.com/779559/355308-Software-Optimization-Manual-047-Changes-Doc.pdf">Intel Golden Cove</a> — pipeline hierarchy</li>
+            <li><a href="https://www.amd.com/content/dam/amd/en/documents/epyc-business-docs/white-papers/amd-epyc-smt-technology-brief.pdf">AMD Zen 5</a> — parallel execution domains</li>
+            <li><a href="https://documentation-service.arm.com/static/6585aec6b52744113be620e8">Arm Cortex-X4</a> — memory and translation boundaries</li>
+            <li><a href="https://www.apple.com/newsroom/2024/05/apple-introduces-m4-chip/">Apple M4</a> — public SoC block grouping</li>
+          </ul>
+        </details>
+      </aside>
+    </div>
+</div>

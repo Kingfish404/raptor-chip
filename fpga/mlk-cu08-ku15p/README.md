@@ -2,8 +2,11 @@
 
 Raptor support for `xcku15p-ffva1156-2-e`, using SystemVerilog, XDC and batch
 Vivado. The native SoC supports RV32/RV64 with BRAM or DDR4 main memory, a boot
-ROM, scratch SRAM, an 8250-compatible UART, CLINT and PLIC. The separate LiteX
-netboot profile adds DDR4 and Ethernet through the CM005 FMC module.
+ROM, scratch SRAM, an 8250-compatible UART, CLINT and PLIC. The default native
+build includes DDR4 and the CM005 A↔B Ethernet forwarder. Its two-port forwarding
+path runs independently of CPU execution and DDR calibration; the native UART
+remains the CPU console. The separate LiteX netboot profile supplies an Ethernet
+interface for the KU15P CPU itself.
 
 All commands below run from the **repository root**.
 
@@ -18,18 +21,22 @@ All commands below run from the **repository root**.
   to its UART device. Install the cable drivers required by the JTAG adapter.
 
 Generate the instruction decoders from the repository's Scala sources with
-`make verilog` if they are missing. The native Python tools use the standard
-library and need no additional Python packages.
+`make verilog` if they are missing. With `CM005_BRIDGE=0`, the native Python tools use the standard library.
+The default CM005 generator additionally uses the repository Migen, LiteX,
+LiteEth and LiteDRAM sources under `third_party/enjoy-digital/` and the Python
+environment at `fpga/litex/.venv/bin/python`. The generator fingerprints and
+imports those checkout sources, including dirty changes.
 
 ## Build and program
 
-The defaults are RV64, preset `small`, 50 MHz CPU clock and 128 KiB BRAM.
-Start with BRAM to exercise the UART and loader without DDR calibration:
+The defaults are RV64, preset `small`, 50 MHz CPU clock, DDR4 and
+`CM005_BRIDGE=1`. A minimal CPU/UART build can explicitly disable the bridge
+and use BRAM to bypass DDR calibration:
 
 ```sh
-make -C fpga/mlk-cu08-ku15p build XLEN=64 MEMORY=bram
-make -C fpga/mlk-cu08-ku15p info XLEN=64 MEMORY=bram
-make -C fpga/mlk-cu08-ku15p load XLEN=64 MEMORY=bram
+make -C fpga/mlk-cu08-ku15p build XLEN=64 MEMORY=bram CM005_BRIDGE=0
+make -C fpga/mlk-cu08-ku15p info XLEN=64 MEMORY=bram CM005_BRIDGE=0
+make -C fpga/mlk-cu08-ku15p load XLEN=64 MEMORY=bram CM005_BRIDGE=0
 ```
 
 For DDR, generate and elaborate the vendor IP before the full build:
@@ -66,8 +73,9 @@ make -C fpga/mlk-cu08-ku15p fpga-netboot-rv64-build
 Use the matching `check`, `info`, `load`, `bundle`, `serve`, `console` and `test`
 targets for each XLEN. This profile defaults to `RAPT_CONFIG=default`, 50 MHz,
 DDR4 MIG and gigabit Ethernet. See the [netboot workflow](../litex/NETBOOT.md#fixed-cu08-and-rk-end-to-end-targets)
-for host setup and Linux boot steps. Native `fpga-rv*` builds retain their own
-BRAM default and do not include the CM005 Ethernet interface.
+for host setup and Linux boot steps. Native `fpga-rv*` builds default to DDR and A↔B forwarding. Their CM005 block
+does not provide a CPU NIC or network boot; it preserves the external KU5P
+network path while KU15P runs its native CPU/DDR/console.
 
 For the general LiteX FPGA flow, the board Makefile also forwards `fpga-gen`,
 `fpga-build`, `fpga-load`, `fpga-console`, `fpga-info`, `fpga-reports-index` and
@@ -93,7 +101,8 @@ make fpga-rv64-build FPGA_BOARD=mlk-cu08-ku15p MEMORY=ddr RAPT_CONFIG=small
 |---|---|---|
 | `XLEN` | `64` | `32` or `64` |
 | `RAPT_CONFIG` | `small` | CPU preset from `hdl/configs/` |
-| `MEMORY` | `bram` | `bram` or `ddr` main RAM |
+| `MEMORY` | `ddr` | `bram` or `ddr` main RAM |
+| `CM005_BRIDGE` | `1` | CM005 A↔B forwarding; requires `CLOCK_MHZ=50` |
 | `CLOCK_MHZ` | `50` | CPU clock target: `25`, `50` or `100` MHz |
 | `RAM_BYTES` | `131072` | BRAM main RAM size; power of two, 16 KiB–1 MiB |
 | `USE_RESET_BUTTON` | `0` | Set to `1` to enable the active-low reset button |
@@ -160,6 +169,7 @@ Addresses are generated from `hdl/configs/memory_map.json`:
 | PLIC | `0x0c000000` | Interrupt controller; UART source 1 |
 | Scratch SRAM | `0x0f000000` | 8 KiB; includes the ROM monitor's stack |
 | UART | `0x10000000` | Byte-spaced 8250 registers, 115200 baud, 8N1 |
+| CM005 diagnostics | `0x18000000` | 64 KiB MMIO window when enabled; generated register map |
 | Boot ROM / reset vector | `0x20000000` | 64 KiB, initialized from `boot.hex` |
 | Main RAM | `0x80000000` | `RAM_BYTES` in BRAM mode; 1 GiB RV32 / 2 GiB RV64 in DDR mode |
 
@@ -197,6 +207,51 @@ Uploads use CRC32-checked chunks of at most 4096 bytes. The monitor rejects
 writes outside main RAM and never jumps automatically after reset or a failed
 upload. A failed upload may have modified its destination; upload it again
 before requesting execution.
+
+## Native CM005 forwarding
+
+Connect the server/shared-network interface to CM005 A and KU5P to CM005 B.
+The datapath, PHY pinout, queues and receive/transmit timing contract are shared
+with the [standalone bridge](../litex/CM005-BRIDGE.md). The generated child keeps
+both PHY clock trees, the shared E8 reset and all six independent TX clock
+buffers. Native board constraints own the 100 MHz reference, UART and DDR pins;
+CM005 timing queries are scoped to the child after synthesis. A full native
+build gates the bitstream on routed setup/hold, clock/I/O coverage, DRC, clock
+methodology and the A-port sampling aperture. The six asynchronous A-port
+sampler inputs retain their 2 ns datapath-only bound and 0.025–0.775 ns routed
+relative sampling window. The coverage gate recognizes only those six named
+partial-input entries and checks each active 2 ns path requirement; ordinary
+RGMII ports must have complete setup/hold constraints. MDIO inputs use two-flop
+synchronizers, and only MDIO/MDC/shared-reset management pins receive explicit
+asynchronous I/O exceptions. See [AMD UG903 on datapath-only hold behavior](https://docs.amd.com/r/en-US/ug903-vivado-using-constraints/Consequences-of-Setting-Maximum-Delay-or-Minimum-Delay-Constraints-on-a-Path).
+
+The CPU remains held in reset until DDR calibration completes, while the
+forwarder uses the native 50 MHz clock and board reset. Re-entering the ROM or
+running CPU software leaves forwarding active. FPGA reprogramming or board
+reset briefly interrupts the KU5P link. Keep a verified previous bridge bitstream
+available when testing a new integrated image.
+
+`cm005-generated/cm005_registers.json` and `.h` in the selected build describe
+registers accessed with aligned 32-bit loads/stores: identity `0x434d3035`, version, PHY reset/MDIO controls, MAC
+preamble/CRC counts, and per-direction received/forwarded/dropped/error/queued
+counts. Independent read/write addresses and byte strobes match the native
+peripheral bus. The block has no CPU packet interface or interrupt source.
+
+With the native ROM waiting at `RAPT ready`, capture a diagnostic snapshot:
+
+```sh
+python3 fpga/mlk-cu08-ku15p/scripts/cm005_native_probe.py \
+  --build "$out" --port /dev/ttyUSB1 --output /tmp/cu08-before
+```
+
+This compiles and uploads a small matching-XLEN payload at `0x80000000`, uses a
+stack below `0x80020000`, reads CM005 MMIO and Clause-22 PHY registers, and returns
+to the ROM without resetting the bridge. It overwrites that DDR payload/stack
+area; run it before loading another OS. `--build-only` prepares the payload
+without opening the UART. Compare `status.json` snapshots around simultaneous
+bidirectional traffic, check CRC/error deltas and payload hashes, and verify
+that KU5P retains its boot identity and network access. Invalid PHY IDs are
+reported explicitly; they do not establish link status.
 
 ## OpenSBI and Linux
 

@@ -230,8 +230,8 @@ module rapt_lsu_sq #(
                                    input logic [7:0] strb, input logic [4:0] alu);
     if (alu == `RAPT_CBO_ZERO_WALU) begin
       for (int beat = 0; beat < CboBeats; beat++) begin
-        `RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF({addr[XLEN-1:6], 6'b0} + XLEN'(beat * (XLEN / 8)), '0,
-                                          CboBusWstrb)
+        `RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF({addr[XLEN-1:6], 6'b0} + XLEN'(beat) * XLEN'(XLEN / 8),
+                                          '0, CboBusWstrb)
       end
     end else begin
       `RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF(addr, data, strb)
@@ -399,8 +399,11 @@ module rapt_lsu_sq #(
   assign sq_fwd_data = forward_data[0];
   logic [ForwardPorts-1:0] narrow_allowed;
   for (genvar p = 0; p < ForwardPorts; p++) begin : g_narrow_context
-    if (p == 0) assign narrow_allowed[p] = !exu_lsu.rcontext.mmu_en;
-    else assign narrow_allowed[p] = !exu_lsu.rcontext_b.mmu_en;
+    if (p == 0) begin : g_primary
+      assign narrow_allowed[p] = !exu_lsu.rcontext.mmu_en;
+    end else begin : g_secondary
+      assign narrow_allowed[p] = !exu_lsu.rcontext_b.mmu_en;
+    end
   end
   rapt_sq_forward #(
       .Xlen(XLEN),
@@ -739,13 +742,19 @@ module rapt_lsu_sq #(
 `else
   localparam logic [4:0] MaLoadAlu = `RAPT_ALU_LW__;
 `endif
+  // Select the split footprint from the held request and registered PMP verdict.
+  // Forwarding/conflict arbitration controls admission only, never the L1D
+  // address or permission-check payload. Faulting and atomic requests retain
+  // their original address/width.
+  logic ma_split_payload;
+  assign ma_split_payload = ma_span && !exu_lsu.atomic_lock && !pmp_load_fault_lsu;
   assign ma_req_addr = (ma_state == MA_X)  ? ma_raddr_x
                      : (ma_state == MA_HI) ? ma_raddr_hi
-                     : (ma_load_req)        ? ma_raddr_lo
+                     : (ma_split_payload)   ? ma_raddr_lo
                      :                        raddr;
   // Force an aligned word/dword load opcode during the split so the L1D
   // never sees a "misaligned" request.
-  assign ma_req_alu = (ma_state == MA_HI || ma_state == MA_X || ma_load_req)
+  assign ma_req_alu = (ma_state == MA_HI || ma_state == MA_X || ma_split_payload)
                     ? MaLoadAlu : ralu;
   logic [4:0] ma_beat_start, ma_check_start, ma_check_end;
   assign ma_beat_start = ma_state == MA_X ? 5'(2*XLEN/8)
@@ -754,7 +763,7 @@ module rapt_lsu_sq #(
   assign ma_check_end = ma_end_offset < ma_beat_start + 5'(XLEN/8)
                        ? ma_end_offset : ma_beat_start + 5'(XLEN/8);
   assign lsu_l1d.rorig_size_m1 = lsu_load_size_m1;
-  assign lsu_l1d.rcheck_valid = ma_state == MA_HI || ma_state == MA_X || ma_load_req;
+  assign lsu_l1d.rcheck_valid = ma_state == MA_HI || ma_state == MA_X || ma_split_payload;
   assign lsu_l1d.rcheck_offset = 3'(ma_check_start - ma_beat_start);
   assign lsu_l1d.rcheck_size_m1 = 4'(ma_check_end - ma_check_start - 5'd1);
 
@@ -999,6 +1008,9 @@ module rapt_lsu_sq #(
   //    HANDSHAKE      : queue capacity / ready-valid contract
   //    FLUSH_ROLLBACK : flush drops exactly the speculative region
   // ==========================================================================
+
+  `RAPT_SVA_IMPLY(clock, reset, LSU_SPLIT_PAYLOAD_ADMISSION, lsu_l1d.rvalid && ma_state == MA_IDLE,
+                  ma_split_payload == ma_load_req)
 
   // Only accepted, non-flushed allocations consume these producer addresses.
   `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_LATER_BEATS_ALIGNED,

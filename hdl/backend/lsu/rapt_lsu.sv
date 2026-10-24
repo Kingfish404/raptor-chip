@@ -34,6 +34,7 @@ module rapt_lsu #(
 );
   lsu_pipe_if #(.XLEN(XLEN)) exu_lsu ();
   pmp_state_if #(.XLEN(XLEN)) pmp_state ();
+  CompletionT sq_store_payload;
   logic pmu_ioq_full_unused;
   logic [XLEN-1:0] sq_waddr_hi;
   logic [XLEN-1:0] sq_waddr_third;
@@ -76,6 +77,7 @@ module rapt_lsu #(
       .exu_lsu      (exu_lsu),
       .exu_l1d      (exu_l1d),
       .exu_ioq_bcast(exu_ioq_bcast),
+      .sq_store_payload(sq_store_payload),
       .wb_accept   (wb_accept),
       .sq_handoff_valid(sq_handoff_valid_unused),
       .sq_forward_pending(sq_forward_pending),
@@ -97,7 +99,7 @@ module rapt_lsu #(
       .cmu_bcast    (cmu_bcast),
       .lsu_l1d      (lsu_l1d),
       .exu_lsu      (exu_lsu),
-      .exu_ioq_bcast(exu_ioq_bcast),
+      .exu_ioq_bcast(sq_store_payload),
       .completion_accept(wb_accept),
       .sq_forward_pending(sq_forward_pending),
       .sq_handoff_alu(sq_handoff_alu),

@@ -22,8 +22,8 @@ module rapt_dispatch_iq_adapter #(
   end
   for (genvar s = 0; s < Width; s++) begin : g_slot
     assign capacity.ready[s] = queue.free_found[s];
-    assign capacity.free_index[s] = queue.free_idx[s];
+    assign capacity.free_index[s] = $bits(capacity.free_index[s])'(queue.free_idx[s]);
     assign queue.accept[s] = grant.accept[s];
-    assign queue.rs_idx[s] = grant.index[s];
+    assign queue.rs_idx[s] = (rapt_pkg::index_bits(queue.RS_SIZE))'(grant.index[s]);
   end
 endmodule

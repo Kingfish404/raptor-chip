@@ -31,6 +31,8 @@ module rapt_fpu_fp_addsub #(
 );
   localparam int FracBits = MULTI_FORMAT ? 52 : (TARGET_DOUBLE ? 52 : 23);
   localparam int MantExtBits = FracBits + 4;
+  // Single precision occupies the upper lane only in the shared datapath.
+  localparam int SingleTail = MULTI_FORMAT ? 29 : 0;
   logic input_double_c, s1_double_q, s2_double_q;
   logic [10:0] inf_exponent_c;
   assign input_double_c = MULTI_FORMAT ? target_double : TARGET_DOUBLE;
@@ -92,12 +94,12 @@ module rapt_fpu_fp_addsub #(
     logic [MantExtBits-1:0] shifted;
     integer tail, index;
     begin
-      tail = MULTI_FORMAT && single_format ? 29 : 0;
+      tail = single_format ? SingleTail : 0;
       shifted = value >> amount;
       if (amount >= MantExtBits - tail) shifted = '0;
       for (index = 0; index < MantExtBits; index++)
       if (index < amount + tail && value[index]) shifted[tail] = 1'b1;
-      if (MULTI_FORMAT && single_format) shifted[28:0] = '0;
+      if (MULTI_FORMAT && single_format) shifted = (shifted >> SingleTail) << SingleTail;
       shift_sticky = shifted;
     end
   endfunction
@@ -137,18 +139,18 @@ module rapt_fpu_fp_addsub #(
 
     exp_common_c = exp_a_c > exp_b_c ? exp_a_c : exp_b_c;
     raw_mant_a_c = input_double_c ? {exp_a_c != 0, frac_a_c, 3'b0}
-        : MantExtBits'({exp_a_c != 0, frac_a_c[22:0], 3'b0}) << (MULTI_FORMAT ? 29 : 0);
+        : MantExtBits'({exp_a_c != 0, frac_a_c[22:0], 3'b0}) << SingleTail;
     raw_mant_b_c = input_double_c ? {exp_b_c != 0, frac_b_c, 3'b0}
-        : MantExtBits'({exp_b_c != 0, frac_b_c[22:0], 3'b0}) << (MULTI_FORMAT ? 29 : 0);
+        : MantExtBits'({exp_b_c != 0, frac_b_c[22:0], 3'b0}) << SingleTail;
     mant_a_c = raw_mant_a_c;
     mant_b_c = raw_mant_b_c;
     /* Subnormal operands are aligned as if their exponent were Emin (1).
      * When both are subnormal (exp_common == 0) no shift is applied. */
     aligned_a_c = shift_sticky(mant_a_c,
-      (exp_common_c == 0) ? 0 : exp_common_c - (exp_a_c == 0 ? 1 : exp_a_c),
+      (exp_common_c == 0) ? 0 : int'(exp_common_c) - (exp_a_c == 0 ? 1 : int'(exp_a_c)),
       !input_double_c);
     aligned_b_c = shift_sticky(mant_b_c,
-      (exp_common_c == 0) ? 0 : exp_common_c - (exp_b_c == 0 ? 1 : exp_b_c),
+      (exp_common_c == 0) ? 0 : int'(exp_common_c) - (exp_b_c == 0 ? 1 : int'(exp_b_c)),
       !input_double_c);
 
     special_c = 1'b0;
@@ -180,7 +182,7 @@ module rapt_fpu_fp_addsub #(
   logic [MantExtBits-1:0] diff_c;
   logic [LzcBits-1:0] lzc_c;
   logic lzc_found_c;
-  logic signed [13:0] shift_clamped_c;
+  logic [LzcBits-1:0] shift_clamped_c;
   always_comb begin
     sum_c = {1'b0, s1_aligned_a_q} + {1'b0, s1_aligned_b_q};
     diff_c = '0;
@@ -194,21 +196,21 @@ module rapt_fpu_fp_addsub #(
     lzc_found_c = 1'b0;
     for (int i = MantExtBits - 1; i >= 0; i--) begin
       if (!lzc_found_c && diff_c[i]) begin
-        lzc_c = MantExtBits - 1 - i;
+        lzc_c = LzcBits'(MantExtBits - 1 - i);
         lzc_found_c = 1'b1;
       end
     end
 
     s2_mant_c = '0;
     s2_exponent_c = s1_exponent_q;
-    shift_clamped_c = 14'sd0;
+    shift_clamped_c = '0;
     if (!s1_is_sub_q) begin
       // Addition: at most a single right shift (carry out).
       if (sum_c[MantExtBits]) begin
         s2_mant_c = sum_c[MantExtBits:1];
         if (MULTI_FORMAT && !s1_double_q) begin
-          s2_mant_c[28:0] = '0;
-          s2_mant_c[29] = s2_mant_c[29] | (|sum_c[29:0]);
+          s2_mant_c = (s2_mant_c >> SingleTail) << SingleTail;
+          s2_mant_c[SingleTail] = s2_mant_c[SingleTail] | (|sum_c[SingleTail:0]);
         end else s2_mant_c[0] = s2_mant_c[0] | sum_c[0];
         s2_exponent_c = s1_exponent_q + 1;
       end else begin
@@ -217,12 +219,13 @@ module rapt_fpu_fp_addsub #(
     end else begin
       // Subtraction: normalize with one barrel shift; clamp at Emin.
       if (diff_c != 0) begin
-        if (lzc_c < s1_exponent_q - 1) begin
+        if (int'(lzc_c) < int'(s1_exponent_q) - 1) begin
           s2_mant_c = diff_c << lzc_c;
           s2_exponent_c = s1_exponent_q - 14'(lzc_c);
         end else begin
-          shift_clamped_c = s1_exponent_q > 1 ? s1_exponent_q - 1 : 14'sd0;
-          s2_mant_c = diff_c << shift_clamped_c[5:0];
+          // This branch has exponent-1 <= lzc <= MantExtBits-1.
+          shift_clamped_c = s1_exponent_q > 1 ? LzcBits'(s1_exponent_q - 1) : '0;
+          s2_mant_c = diff_c << shift_clamped_c;
           s2_exponent_c = 14'sd1;
         end
       end
@@ -264,9 +267,9 @@ module rapt_fpu_fp_addsub #(
           guard_3 = s2_mant_q[2];
           sticky_3 = |s2_mant_q[1:0];
         end else if (MULTI_FORMAT) begin
-          retained_3 = 53'(s2_mant_q >> 32);
-          guard_3 = s2_mant_q[31];
-          sticky_3 = |s2_mant_q[30:29];
+          retained_3 = 53'(s2_mant_q >> (SingleTail + 3));
+          guard_3 = s2_mant_q[SingleTail+2];
+          sticky_3 = |s2_mant_q[SingleTail+1:SingleTail];
         end else begin
           retained_3 = 53'(s2_mant_q >> 3);
           guard_3 = s2_mant_q[2];

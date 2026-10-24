@@ -300,9 +300,41 @@ module rapt_bpu_tage #(
                   ? alt_pred : provider_pred;
 
   if (AuxRead) begin : g_auxiliary_read
-    logic port_taken[AuxPorts];
+    logic port_taken[AuxPorts], saved_taken[AuxPorts];
+    // The primary request already carries the predicted packet PC and its
+    // post-event history. Prepare each positional PC on that edge and use
+    // the existing registered query history. No translation, hit, instruction
+    // boundary or packet-valid decision enters the auxiliary RAM addresses.
+    // When the query runs ahead, retain the held packet's first result.
+    // Only hashed PC bits distinguish predictions. Upper-PC aliases have
+    // identical table addresses; IFU's full-PC check still owns acceptance.
+    wire aux_query_match = r_pc_bits_q == aux_pc[ReadPcMsb:1];
+    if (AuxPositions > 0) begin : g_saved_query
+      // The IFU checks the full PC; this port only identifies table aliases.
+      wire unused_aux_pc_bits = ^aux_pc;
+      always_ff @(posedge clock) begin
+        if (aux_query_match) saved_taken <= port_taken;
+        if (reset || init) saved_taken <= '{default: 1'b0};
+      end
+    end else begin : g_no_saved_query
+      assign saved_taken = port_taken;
+    end
     for (genvar k = 0; k < AuxPorts; k++) begin : g_port
-      wire [XLEN-1:0] port_pc = AuxPositions > 0 ? aux_pc + XLEN'(2 * (k + 1)) : aux_pc;
+      wire [XLEN-1:0] port_pc;
+      wire [GHR_LEN-1:0] port_ghr = AuxPositions > 0 ? r_ghr_q : aux_ghr;
+      wire [PHR_LEN-1:0] port_phr = AuxPositions > 0 ? r_phr_q : aux_phr;
+      if (AuxPositions > 0) begin : g_query_pc
+        logic [ReadPcMsb:1] pc_bits_q;
+        wire [ReadPcMsb:0] next_pc = {raddr[ReadPcMsb:1], 1'b0}
+            + (ReadPcMsb + 1)'(2 * (k + 1));
+        always_ff @(posedge clock) begin
+          if (ren) pc_bits_q <= next_pc[ReadPcMsb:1];
+          if (reset || init) pc_bits_q <= ReadPcMsb'(k + 1);
+        end
+        assign port_pc = XLEN'({pc_bits_q, 1'b0});
+      end else begin : g_response_pc
+        assign port_pc = aux_pc;
+      end
       // A packet contains at most one conditional branch. The auxiliary
       // position uses the pre-packet fetch history and the same trained tables.
       logic [BIM_LEN-1:0] aux_rd_bim_idx;
@@ -314,12 +346,12 @@ module rapt_bpu_tage #(
       logic aux_bim_taken, aux_t1_taken, aux_t2_taken, aux_t3_taken;
 
       assign aux_rd_bim_idx = bim_idx(port_pc);
-      assign aux_rd_t1_idx = t1_idx(port_pc, aux_ghr, aux_phr);
-      assign aux_rd_t2_idx = t2_idx(port_pc, aux_ghr, aux_phr);
-      assign aux_rd_t3_idx = t3_idx(port_pc, aux_ghr, aux_phr);
-      assign aux_rd_t1_tag = t1_tag_of(port_pc, aux_ghr, aux_phr);
-      assign aux_rd_t2_tag = t2_tag_of(port_pc, aux_ghr, aux_phr);
-      assign aux_rd_t3_tag = t3_tag_of(port_pc, aux_ghr, aux_phr);
+      assign aux_rd_t1_idx = t1_idx(port_pc, port_ghr, port_phr);
+      assign aux_rd_t2_idx = t2_idx(port_pc, port_ghr, port_phr);
+      assign aux_rd_t3_idx = t3_idx(port_pc, port_ghr, port_phr);
+      assign aux_rd_t1_tag = t1_tag_of(port_pc, port_ghr, port_phr);
+      assign aux_rd_t2_tag = t2_tag_of(port_pc, port_ghr, port_phr);
+      assign aux_rd_t3_tag = t3_tag_of(port_pc, port_ghr, port_phr);
       assign aux_bim_index[k] = aux_rd_bim_idx;
       assign aux_t1_index[k] = aux_rd_t1_idx;
       assign aux_t2_index[k] = aux_rd_t2_idx;
@@ -371,10 +403,15 @@ module rapt_bpu_tage #(
       assign port_taken[k] = (aux_any_tagged_hit && aux_provider_weak && (use_alt_ctr >= 0))
                     ? aux_alt_pred : aux_provider_pred;
     end
+    logic selected_taken[AuxPorts];
+    for (genvar k = 0; k < AuxPorts; k++) begin : g_select_query
+      assign selected_taken[k] = AuxPositions > 0 && !aux_query_match
+          ? saved_taken[k] : port_taken[k];
+    end
     assign request_aux_taken = AuxPositions > 0 && int'(request_aux_position) < AuxPorts
-        ? port_taken[AuxPortBits'(request_aux_position)] : port_taken[0];
+        ? selected_taken[AuxPortBits'(request_aux_position)] : selected_taken[0];
     assign aux_taken = AuxPositions > 0 && int'(aux_position) < AuxPorts
-        ? port_taken[aux_position] : port_taken[0];
+        ? selected_taken[AuxPortBits'(aux_position)] : selected_taken[0];
   end else begin : g_no_auxiliary_read
     assign aux_taken = 1'b0;
     assign request_aux_taken = 1'b0;

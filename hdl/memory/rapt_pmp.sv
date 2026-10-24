@@ -305,6 +305,7 @@ module rapt_pmp #(
     output logic fault,
     output logic fault_lo_o
 );
+  logic unused_fault_read, unused_fault_write;
   rapt_pmp_permissions #(
       .XLEN(XLEN),
       .PADDR_BITS(PADDR_BITS)
@@ -327,8 +328,8 @@ module rapt_pmp #(
       .pmp_mode_napot(pmp_mode_napot),
       .fault(fault),
       .fault_lo_o(fault_lo_o),
-      .fault_read_o(),
-      .fault_write_o()
+      .fault_read_o(unused_fault_read),
+      .fault_write_o(unused_fault_write)
   );
 endmodule
 
@@ -353,7 +354,8 @@ module rapt_pmp_line_uniform #(
   endfunction
   for (genvar i = 0; i < `RAPT_PMP_NUM; i++) begin : g_boundary
     wire [WordBits-1:0] low = i == 0 ? '0 : state.pmp_raw_addr[i > 0 ? i-1 : 0];
-    wire [WordBits-1:0] base = state.pmp_raw_addr[i] & ~state.pmp_napot_mask[i];
+    wire [WordBits-1:LowBits] base = state.pmp_raw_addr[i][WordBits-1:LowBits]
+        & ~state.pmp_napot_mask[i][WordBits-1:LowBits];
     assign boundary[i] = (state.pmp_mode_tor[i] && (inside_line(
         low
     ) || inside_line(

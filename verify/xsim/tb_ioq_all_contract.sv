@@ -1478,9 +1478,15 @@ module tb_ioq_pending_lock;
 
     cmu_bcast.rob_head = 5'd12;
     tick(1);
+    check(!exu_lsu.ordered, "ROB-head change bypassed its release register");
+    expect_pending_addr(32'hc000_0800);
+    tick(1);
     check(exu_lsu.ordered, "held MMU load did not become ordered at ROB head");
+    expect_pending_addr(32'hc000_0800);
     complete_lsu_load(32'hfeed_1200);
     expect_load_broadcast(32'hfeed_1200, "ROB-head promoted MMU load");
+    tick(1);
+    check(!exu_ioq_bcast.valid, "promoted MMU load completed twice");
 
     reset = 1'b1;
     init_ioq_inputs(1'b1);
@@ -2231,6 +2237,8 @@ module tb_ioq_store_stage;
     tick(1);
     disp.accept[0] = 1'b0;
     #1;
+    check(!dut.store_check_selected, "background check bypassed its descriptor register");
+    tick(1);
     check(dut.store_check_selected && dut.store_check_idx == dut.ioq_head + 1'b1,
           "address-ready successor was not selected for precheck");
     check(dut.store_check_vaddr == XLEN'('h80007000), "wrong precheck address");
@@ -2870,5 +2878,176 @@ module tb_ioq_amo_registered;
     $display("PASS: AMO captured data, operations, backpressure and flush XLEN=%0d cases=%0d",
              XLEN, cases);
     $finish;
+  end
+endmodule
+
+
+// ---- tb_ioq_prepared_address ----
+`include "rapt.svh"
+`include "rapt_if.svh"
+module tb_ioq_prepared_address;
+  localparam int XLEN = `RAPT_XLEN;
+  `include "tb_ioq_harness.svh"
+
+  task automatic enqueue(input int tag, input logic [XLEN-1:0] base_addr,
+                         input logic [XLEN-1:0] offset, input bit atomic_load = 0);
+    dispatch[0] = '0;
+    dispatch[0].uop.execute.memory.load = 1;
+    dispatch[0].uop.execute.memory.atomic = atomic_load;
+    dispatch[0].uop.execute.int_op.alu = atomic_load ? `RAPT_ATO_LR__ : `RAPT_ALU_LW__;
+    dispatch[0].uop.execute.int_op.word = 1;
+    dispatch[0].uop.imm = offset;
+    dispatch[0].op1 = base_addr;
+    dispatch[0].pr1 = $bits(dispatch[0].pr1)'(tag);
+    dispatch[0].dest = 3;
+    dispatch[0].prd = 12;
+    cmu_bcast.rob_head = 3;
+    disp.accept[0] = 1;
+    tick(1);
+    disp.accept[0] = 0;
+    dispatch[0].op1 = '1;
+    dispatch[0].uop.imm = '0;
+  endtask
+
+  task automatic flush_queue;
+    cmu_bcast.flush_pipe = 1;
+    tick(1);
+    cmu_bcast.flush_pipe = 0;
+    check(!exu_lsu.rvalid && dut.ioq_addr_ready == '0, "flush leaked an address owner");
+  endtask
+
+  task automatic check_prepared(input logic [XLEN-1:0] expected);
+    check(dut.g_address[0].g_registered.prepared, "resident base was not prepared");
+    check(dut.g_address[0].g_registered.prepared_addr == expected,
+          "prepared payload did not use the registered IOQ base and offset");
+    check(dut.ioq_eff_addr[0] == expected, "prepared address bypass changed the value");
+  endtask
+
+  initial begin
+    init_ioq_inputs(0);
+    tick(3);
+    reset = 0;
+
+    // The first resident cycle can issue, but the per-entry address register
+    // cannot contain the dispatch-lane sum until the following edge.
+    enqueue(0, XLEN'('h80000040), XLEN'(-12));
+    check(!dut.g_address[0].g_registered.prepared, "dispatch added into prepared_addr");
+    check(dut.ioq_addr_ready[0] && dut.ioq_eff_addr[0] == XLEN'('h80000034),
+          "first resident cycle lost its ready address");
+    tick(1);
+    check_prepared(XLEN'('h80000034));
+    check(exu_lsu.rvalid && exu_lsu.raddr == XLEN'('h80000034),
+          "registered-base preparation added a request bubble");
+    repeat (4) begin
+      tick(1);
+      check(exu_lsu.rvalid && exu_lsu.raddr == XLEN'('h80000034),
+            "request changed under backpressure");
+    end
+    flush_queue();
+
+    // A just-woken base is captured before the per-entry adder. The existing
+    // request forwarding path still preserves pointer-chasing latency.
+    enqueue(9, XLEN'('hdead0000), XLEN'(28));
+    tick(2);
+    check(!dut.ioq_addr_ready[0] && !exu_lsu.rvalid, "unresolved base issued");
+    exu_rou.valid = 1;
+    exu_rou.prd = 9;
+    exu_rou.result = XLEN'('h80004000);
+    tick(1);
+    exu_rou.valid = 0;
+    exu_rou.result = '1;
+    check(!dut.g_address[0].g_registered.prepared, "live wake added into prepared_addr");
+    check(exu_lsu.rvalid && exu_lsu.raddr == XLEN'('h8000401c),
+          "wake request lost its original forwarding latency");
+    tick(1);
+    check_prepared(XLEN'('h8000401c));
+    flush_queue();
+
+    // Flush wins on the preparation edge. Reusing the slot cannot publish
+    // its previous sum, and atomics ignore the encoded ordinary offset.
+    enqueue(0, XLEN'('h80001000), XLEN'(16));
+    flush_queue();
+    tick(2);
+    check(!exu_lsu.rvalid, "cancelled preparation reappeared");
+    enqueue(0, XLEN'('h80002000), XLEN'(2047), 1);
+    tick(1);
+    check_prepared(XLEN'('h80002000));
+    for (int n = 0; n < 16 && !exu_lsu.rvalid; n++) tick(1);
+    check(exu_lsu.rvalid && exu_lsu.atomic_lock && exu_lsu.raddr == XLEN'('h80002000),
+          "atomic request used the ordinary offset or lost ownership");
+    flush_queue();
+    $display("PASS: WB1 IOQ-owned preparation, first-cycle issue, wake, flush and atomic RV%0d",
+             XLEN);
+    $finish;
+  end
+endmodule
+
+
+// ---- tb_ioq_store_payload ----
+`include "rapt.svh"
+`include "rapt_if.svh"
+module tb_ioq_store_payload;
+  localparam int XLEN = `RAPT_XLEN;
+  `include "tb_ioq_harness.svh"
+  bit store_seen = 0;
+  always @(posedge clock) begin
+    if (!reset && exu_ioq_bcast.valid && exu_ioq_bcast.wen) begin
+      check(
+          dut.sq_store_payload.tval == exu_ioq_bcast.tval
+            && dut.sq_store_payload.sq_wdata == XLEN'('h5678),
+          "accepted store payload disagreed with its completion");
+      store_seen = 1;
+    end
+  end
+  initial begin
+    init_ioq_inputs(0);
+    tick(3);
+    reset = 0;
+    dispatch[0] = '0;
+    dispatch[0].uop.execute.memory.store = 1;
+    dispatch[0].uop.execute.int_op.alu = `RAPT_SW_WSTRB;
+    dispatch[0].op1 = XLEN'('h80000100);
+    dispatch[0].op2 = XLEN'('h1234);
+    dispatch[0].pr2 = 3;
+    disp.accept[0] = 1;
+    tick(1);
+    dispatch[0] = '0;
+    dispatch[0].uop.execute.memory.load = 1;
+    dispatch[0].uop.execute.int_op.alu = `RAPT_ALU_LW__;
+    dispatch[0].op1 = XLEN'('h80000400);
+    dispatch[0].prd = 7;
+    dispatch[0].dest = 1;
+    tick(1);
+    disp.accept[0] = 0;
+    for (int n = 0; n < 20 && !exu_lsu.rvalid; n++) tick(1);
+    check(exu_lsu.rvalid && exu_lsu.raddr == XLEN'('h80000400),
+          "younger nonalias load did not issue");
+    tick(3);
+    check(dut.sq_store_payload.tval == XLEN'('h80000100), "SQ lost the head-store address");
+    exu_lsu.rdata = XLEN'('h7654);
+    exu_lsu.rready = 1;
+    #1;
+    check(exu_ioq_bcast.valid && !exu_ioq_bcast.wen && exu_ioq_bcast.tval == XLEN'('h80000400),
+          "live load did not select ROB payload");
+    check(
+        dut.sq_store_payload.tval == XLEN'('h80000100)
+          && dut.sq_store_payload.sq_waddr == XLEN'('h80000100)
+          && dut.sq_store_payload.sq_wdata == XLEN'('h1234),
+        "load response selected SQ preload data");
+    tick(1);
+    exu_lsu.rready = 0;
+    exu_rou.valid = 1;
+    exu_rou.prd = 3;
+    exu_rou.result = XLEN'('h5678);
+    tick(1);
+    exu_rou.valid = 0;
+    for (int n = 0; n < 20 && !store_seen; n++) tick(1);
+    if (!store_seen) $fatal(1, "head store did not complete after its data woke");
+    $display("PASS: store-only SQ payload independent of live load RV%0d", XLEN);
+    $finish;
+  end
+  initial begin
+    #200000;
+    $fatal(1, "store payload timeout");
   end
 endmodule

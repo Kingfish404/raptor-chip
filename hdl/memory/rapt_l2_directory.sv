@@ -43,8 +43,9 @@ module rapt_l2_directory #(
   localparam logic [1:0] Invalid = 2'b00;
 
   if (SetBits < 1 || Ways < 1 || Ways > 1024 || (Ways & (Ways - 1)) != 0
-      || TagBits < 1 || ClientBits < 1)
+      || TagBits < 1 || ClientBits < 1) begin : g_invalid_geometry
     $error("invalid L2 directory geometry");
+  end
 
   logic [SetBits:0] wipe_count;
   logic [SetBits-1:0] wipe_set;

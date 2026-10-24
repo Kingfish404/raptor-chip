@@ -47,8 +47,9 @@ module rapt_l1d_mshr #(
     input logic rsp_error,
     rsp_last
 );
-  if (!(Entries >= 1 && Entries <= 4 && Words >= 2 && (Words & (Words - 1)) == 0))
+  if (!(Entries >= 1 && Entries <= 4 && Words >= 2 && (Words & (Words - 1)) == 0)) begin : g_invalid_geometry
     initial $fatal(1, "Invalid L1D MSHR geometry");
+  end
   localparam int IdBits = Entries > 1 ? $clog2(Entries) : 1;
   logic [Entries-1:0] valid, sent, done, killed, consumed, installed;
   logic [Xlen-1:OffsetBits] tag[Entries];
@@ -62,26 +63,46 @@ module rapt_l1d_mshr #(
   logic [1:0] match_id, free_id;
   logic [1:0] replace_q;
   logic allocate;
+  // Hold the installation owner before exposing its line to the tag and
+  // victim probes. Installed/killed arbitration may change this register,
+  // but cannot select a different refill address in the consumer's cycle.
+  logic fill_pending;
+  logic [Entries-1:0] fill_candidate;
   always_comb begin
-    fill_valid = 0;
-    fill_id = '0;
-    for (int i = Entries - 1; i >= 0; i--) begin
+    for (int i = 0; i < Entries; i++) begin
       kill_line[i] = invalidate_line && tag[i] == invalidate_addr[Xlen-1:OffsetBits];
-      if (valid[i] && done[i] && !killed[i] && !installed[i]
-          && (StallFillOnLineInvalidate || !kill_line[i])) begin
-        fill_valid = 1;
-        fill_id = IdBits'(i);
-      end
+      // Look ahead through the last accepted beat. The owner becomes valid
+      // on the same edge as done/data, so quiescence never sees an empty
+      // cycle between the bus drain and a pending installation.
+      fill_candidate[i] = valid[i] && !killed[i] && !installed[i]
+          && (done[i] || (rsp_valid && rsp_last && sent[i] && rsp_id == 2'(i)))
+          && !kill_line[i] && !(fill_valid && fill_ready && fill_id == IdBits'(i));
     end
-    // Cancellation gates the transfer, not the refill payload selection.
-    // The optional exclusive fill policy also removes the invalidating
-    // store address from fill_id; entry invalidation still happens below.
-    // The default retains selective fill during unrelated invalidations.
-    fill_valid &= !invalidate && (!StallFillOnLineInvalidate || !invalidate_line);
     fill_addr = {tag[fill_id], {OffsetBits{1'b0}}};
     fill_mask = ~errors[fill_id];
     for (int w = 0; w < Words; w++) fill_data[w*Xlen+:Xlen] = data[fill_id][w];
   end
+  assign fill_valid = fill_pending && !invalidate
+      && (StallFillOnLineInvalidate ? !invalidate_line : !kill_line[fill_id]);
+  always_ff @(posedge clock) begin
+    if (!fill_pending || (fill_valid && fill_ready) || kill_line[fill_id]) begin
+      fill_pending <= 1'b0;
+      for (int i = Entries - 1; i >= 0; i--) begin
+        if (fill_candidate[i]) begin
+          fill_pending <= 1'b1;
+          fill_id <= IdBits'(i);
+        end
+      end
+    end
+    if (reset || invalidate) begin
+      fill_pending <= 1'b0;
+      fill_id <= '0;
+    end
+  end
+  `RAPT_SVA(clock, reset, MSHR_FILL_PENDING_COVERS_DONE,
+            fill_pending == (|(valid & done & ~killed & ~installed)))
+  `RAPT_SVA_IMPLY(clock, reset, MSHR_FILL_OWNER, fill_pending,
+                  valid[fill_id] && done[fill_id] && !killed[fill_id] && !installed[fill_id])
   always_comb begin
     match_found = 0;
     free_found = 0;

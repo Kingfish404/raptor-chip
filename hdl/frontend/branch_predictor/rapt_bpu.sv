@@ -114,6 +114,8 @@ module rapt_bpu #(
   logic dirp_update_mispred;
   logic [GHR_LEN-1:0] dirp_read_ghr;
   logic [PHR_LEN-1:0] dirp_read_phr;
+  logic [GHR_LEN-1:0] unused_decode_ghr;
+  logic [PHR_LEN-1:0] unused_decode_phr;
   rapt_predict_history #(
       .GhrBits(GHR_LEN),
       .PhrBits(PHR_LEN)
@@ -137,8 +139,8 @@ module rapt_bpu #(
       .commit_pc_bit(cmu_bcast.rpc[1]),
       .fetch_ghr(gshare),
       .fetch_phr(phr),
-      .decode_ghr(),
-      .decode_phr(),
+      .decode_ghr(unused_decode_ghr),
+      .decode_phr(unused_decode_phr),
       .commit_ghr(rgshare),
       .commit_phr(rphr),
       .query_ghr(dirp_read_ghr),

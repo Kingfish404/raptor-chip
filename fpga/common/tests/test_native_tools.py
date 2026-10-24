@@ -5,7 +5,9 @@ import os
 from pathlib import Path
 import pty
 import re
+import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 import threading
@@ -23,6 +25,25 @@ build.configure(FPGA / "mlk-cu08-ku15p")
 
 
 class NativeToolsTests(unittest.TestCase):
+    def test_source_identity_ignores_chisel_cache_but_tracks_generated_rtl(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            rtl = repo / "hdl/generated/decoder.sv"
+            cache = repo / "hdl/chisel/target/out/value/cache.json"
+            rtl.parent.mkdir(parents=True)
+            cache.parent.mkdir(parents=True)
+            rtl.write_text("module decoder; endmodule\n")
+            cache.write_text('{"cache": 1}')
+            with patch.object(build, "REPO", repo), \
+                    patch.object(build, "COMMON", repo / "fpga/common"), \
+                    patch.object(build, "BOARD", repo / "fpga/board"):
+                before = build.input_hashes()
+                self.assertEqual(list(before), ["hdl/generated/decoder.sv"])
+                cache.write_text('{"cache": 2}')
+                self.assertEqual(build.input_hashes(), before)
+                rtl.write_text("module decoder(input wire enable); endmodule\n")
+                self.assertNotEqual(build.input_hashes(), before)
+
     def test_rk_ddr_pin_parity_with_vendor_reference(self):
         reference = FPGA.parent / "third_party/rk-xcku5p-f-v1.2/designs/ddr4_0_ex/imports/example_design.xdc"
         if not reference.exists():
@@ -247,6 +268,67 @@ class NativeToolsTests(unittest.TestCase):
         original = build.hardware_inputs(manifest)
         artifacts["sources/rapt_cu08_ddr.sv"] = "changed again"
         self.assertNotEqual(build.hardware_inputs(manifest), original)
+
+
+
+@unittest.skipUnless(shutil.which("tclsh"), "tclsh is required")
+class NativeLoadTests(unittest.TestCase):
+    def invoke(self, targets="host/ku15p host/0ABC01A", devices="xcku5p", explicit=True):
+        harness = r'''
+proc open_hw_manager {} {}
+proc connect_hw_server {args} {}
+proc disconnect_hw_server {} {}
+proc close_hw_manager {} {}
+proc get_hw_targets {pattern} {return [lsearch -all -inline -glob $::env(TARGETS) $pattern]}
+proc open_hw_target {target} {puts "OPENED=$target"}
+proc close_hw_target {} {}
+proc get_hw_devices {args} {return $::env(DEVICES)}
+proc refresh_hw_device {args} {}
+proc get_property {property device} {return $device}
+proc current_hw_device {device} {}
+proc set_property {args} {}
+proc program_hw_devices {device} {puts "PROGRAMMED=$device"}
+set argv [list $::env(BIT) xcku5p]
+if {$::env(EXPLICIT)} {lappend argv */0ABC01A}
+set argc [llength $argv]
+source $::env(SCRIPT)
+'''
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "image.bit").write_bytes(b"test")
+            (root / "test.tcl").write_text(harness)
+            return subprocess.run(["tclsh", root / "test.tcl"], text=True, capture_output=True,
+                env={**os.environ, "TARGETS": targets, "DEVICES": devices, "BIT": str(root / "image.bit"),
+                     "EXPLICIT": str(int(explicit)), "SCRIPT": str(
+                         FPGA / "common/scripts/vivado_load.tcl")})
+
+    def test_only_requested_target_is_opened(self):
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("PROGRAMMED=xcku5p", result.stdout)
+        self.assertIn("OPENED=host/0ABC01A", result.stdout)
+        self.assertNotIn("OPENED=host/ku15p", result.stdout)
+
+    def test_missing_and_ambiguous_target_are_rejected_before_open(self):
+        for targets in ("host/ku15p", "first/0ABC01A second/0ABC01A"):
+            with self.subTest(targets=targets):
+                result = self.invoke(targets=targets)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("OPENED=", result.stdout)
+                self.assertNotIn("PROGRAMMED=", result.stdout)
+
+    def test_wrong_or_duplicate_part_never_programs(self):
+        for devices in ("xcku15p", "", "xcku5p xcku5p"):
+            with self.subTest(devices=devices):
+                result = self.invoke(devices=devices)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("PROGRAMMED=", result.stdout)
+
+    def test_default_scan_still_requires_unique_part(self):
+        self.assertEqual(self.invoke(targets="host/0ABC01A", explicit=False).returncode, 0)
+        result = self.invoke(explicit=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn("PROGRAMMED=", result.stdout)
 
 
 if __name__ == "__main__":

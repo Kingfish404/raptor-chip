@@ -24,8 +24,9 @@ module rapt_l2_put_buffer #(
     output logic pop_last,
     output logic [NumLists-1:0] list_valid
 );
-  if (!(Xlen inside {32, 64}) || NumLists < 2 || NumBeats < NumLists)
+  if (!(Xlen inside {32, 64}) || NumLists < 2 || NumBeats < NumLists) begin : g_invalid_geometry
     $error("invalid L2 put-buffer geometry");
+  end
 
   typedef struct packed {
     logic [Xlen-1:0] data;

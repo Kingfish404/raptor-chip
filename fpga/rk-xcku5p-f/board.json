@@ -3,6 +3,7 @@
   "top": "rapt_rk_top",
   "bitstream": "rapt_rk.bit",
   "device": "xcku5p",
+  "ethernet": true,
   "ddr_clock_port": "sys_clk_p",
   "reference_hz": 200000000,
   "ddr_part": "MT40A512M16LY-075",
