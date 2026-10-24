@@ -1,4 +1,4 @@
-# DDR geometry/rate/latencies follow the supplied ddr4_0_ex XCI.
+# RK-XCKU5P-F DDR4 geometry, data rate and latency configuration.
 # Share the top-level differential IBUFDS with the CPU PLL; MIG adds its own BUFG.
 create_ip -vendor xilinx.com -library ip -name ddr4 -version 2.2 -module_name raptor_ddr4_0
 set_property -dict [list \

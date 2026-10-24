@@ -1,4 +1,4 @@
-# RK-XCKU5P-F V1.2: vendor blink XDC and schematic (fan G9, active high).
+# RK-XCKU5P-F V1.2 board pins (fan G9, active high).
 set_property PACKAGE_PIN T24 [get_ports {sys_clk_p}]
 set_property IOSTANDARD DIFF_SSTL12 [get_ports {sys_clk_p}]
 set_property PACKAGE_PIN U24 [get_ports {sys_clk_n}]

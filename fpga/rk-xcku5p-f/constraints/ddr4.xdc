@@ -1,5 +1,5 @@
-# Pin mapping from designs/ddr4_0_ex/imports/example_design.xdc.
-# MIG supplies DDR timing constraints; no vendor timing waiver is copied.
+# RK-XCKU5P-F V1.2 DDR4 pin assignments.
+# MIG supplies DDR timing constraints.
 set_property PACKAGE_PIN AE25 [get_ports {ddram_dm[0]}]
 set_property IOSTANDARD POD12_DCI [get_ports {ddram_dm[0]}]
 set_property PACKAGE_PIN AE22 [get_ports {ddram_dm[1]}]

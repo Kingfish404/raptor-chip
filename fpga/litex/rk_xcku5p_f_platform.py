@@ -32,7 +32,7 @@ _io = [
     ("user_led", 2, Pins("G11"), IOStandard("LVCMOS33")),
     ("user_led", 3, Pins("H11"), IOStandard("LVCMOS33")),
     ("fan_enable", 0, Pins("G9"), IOStandard("LVCMOS33")),
-    # RTL8211F-CG RGMII pins: board schematic and 12_UDP_TEST/pin.xdc.
+    # RTL8211F-CG RGMII pins; see rk-xcku5p-f/constraints/ethernet.xdc.
     ("eth_clocks", 0, Subsignal("rx", Pins("K22")), Subsignal("tx", Pins("M25")),
      IOStandard("LVCMOS18")),
     ("eth", 0,

@@ -1,7 +1,8 @@
 """Illustrative queue-occupancy model for the Raptor explorer.
 
 Not NPC/Verilator or an RTL timing model. A straight-line listing (branches do
-not redirect) uses preset widths, simplified queues and fixed illustrative execution delays. The single completion delay and conservative store/control-flow
+not redirect) uses preset widths, simplified queues and fixed illustrative
+execution delays. The single completion delay and conservative store/control-flow
 retirement do not reproduce RTL bypasses, replay or store followers.
 """
 
@@ -398,9 +399,12 @@ def simulate(instructions: list[dict[str, Any]], values: dict[str, Any], max_cyc
             "Illustrative cycle model; not timing-equivalent to current RTL or NPC/Verilator.",
             "Listing order; branches do not redirect, so this is not CoreMark IPC.",
             "FQU/IDU/RNU/UOQ are registered queues with no empty-queue bypass.",
-            "IQ issue uses simplified readiness; register dependency timing is not reproduced. Issued slots free next cycle.",
-            "All execution classes pass through one modeled completion register before retirement. Local operand bypasses are omitted.",
-            "Memory requests use abstract hit, external-memory, or MMIO delays. TLBs, MSHR replay, cache contents, and store draining are not modeled.",
+            "IQ issue uses simplified readiness; register dependency timing is not reproduced. "
+            "Issued slots free next cycle.",
+            "All execution classes pass through one modeled completion register before retirement. "
+            "Local operand bypasses are omitted.",
+            "Memory requests use abstract hit, external-memory, or MMIO delays. TLBs, MSHR replay, "
+            "cache contents, and store draining are not modeled.",
         ],
         "frames": frames,
     }

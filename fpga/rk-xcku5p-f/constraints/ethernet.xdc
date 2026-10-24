@@ -1,4 +1,4 @@
-# RK V1.2 schematic / 12_UDP_TEST vendor pin assignment, RTL8211F-CG.
+# RK-XCKU5P-F V1.2 RTL8211F-CG RGMII pin assignments.
 set_property PACKAGE_PIN K22 [get_ports {eth_rxc}]
 set_property PACKAGE_PIN K23 [get_ports {eth_rx_ctl}]
 set_property PACKAGE_PIN L24 [get_ports {eth_rxd[0]}]
@@ -26,7 +26,9 @@ set_input_delay -clock rk_eth_rxc -clock_fall -add_delay -max 1.000 [get_ports {
 set_input_delay -clock rk_eth_rxc -clock_fall -add_delay -min -1.000 [get_ports {eth_rxd[*] eth_rx_ctl}]
 create_generated_clock -name rk_eth_txc -source [get_pins ethernet/send_clock/C] -divide_by 1 [get_ports eth_txc]
 # PHY TXDLY is ON: represent its delayed sample edge, preserving clock timing.
-create_generated_clock -name rk_eth_phy_sample -source [get_pins ethernet/send_clock/C] -edges {1 2 3} -edge_shift {2.000 2.000 2.000} -master_clock [get_clocks -of_objects [get_pins ethernet/send_clock/C]] -add [get_ports eth_txc]
+create_generated_clock -name rk_eth_phy_sample -source [get_pins ethernet/send_clock/C] \
+    -edges {1 2 3} -edge_shift {2.000 2.000 2.000} -add [get_ports eth_txc] \
+    -master_clock [get_clocks -of_objects [get_pins ethernet/send_clock/C]]
 set_output_delay -clock rk_eth_phy_sample -max 1.000 [get_ports {eth_txd[*] eth_tx_ctl}]
 set_output_delay -clock rk_eth_phy_sample -min -1.000 [get_ports {eth_txd[*] eth_tx_ctl}]
 set_output_delay -clock rk_eth_phy_sample -clock_fall -add_delay -max 1.000 [get_ports {eth_txd[*] eth_tx_ctl}]

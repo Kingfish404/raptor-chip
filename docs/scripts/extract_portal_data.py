@@ -240,12 +240,17 @@ SCHEMATIC = {
 LATENCY_NOTES = (
     "Default RAPT_FETCH_RESPONSE_STAGE=0: no extra IFU response register (docs/uarch.md).",
     "IQ instances use ReclaimOnIssue=0: an issued slot is reusable on a later edge.",
-    "RNQ and rename_pipe are inside RNU. rapt_operand_stage buffers renamed packets; ROU owns the operand-reading UOQ.",
-    "All accepted completions are registered before ROB writeback. Local ALQ/BRQ and FPQ operand capture can precede the global registered wakeup.",
-    "L1D hit returns from the registered access state. ITLB/DTLB misses probe the shared 256-entry direct-mapped L2 TLB before rapt_ptw.",
-    "Default write-back L1D has 4 MSHRs and 2 writeback buffers; translated misses replay through IOQ. L2 is passthrough unless RAPT_L2_EN is set.",
+    "RNQ and rename_pipe are inside RNU. rapt_operand_stage buffers renamed packets; ROU owns the "
+    "operand-reading UOQ.",
+    "All accepted completions are registered before ROB writeback. Local ALQ/BRQ and FPQ operand "
+    "capture can precede the global registered wakeup.",
+    "L1D hit returns from the registered access state. ITLB/DTLB misses probe the shared 256-entry "
+    "direct-mapped L2 TLB before rapt_ptw.",
+    "Default write-back L1D has 4 MSHRs and 2 writeback buffers; translated misses replay through "
+    "IOQ. L2 is passthrough unless RAPT_L2_EN is set.",
     "PMEM/UART cycle costs are abstract PMA-window delays, not board measurements.",
-    "Animation uses simplified queues, one completion delay, and conservative retirement; it omits redirects, replay, and actual ALU bypass timing. Model IPC is not RTL IPC.",
+    "Animation uses simplified queues, one completion delay, and conservative retirement; it omits "
+    "redirects, replay, and actual ALU bypass timing. Model IPC is not RTL IPC.",
 )
 
 DOMAIN_FROM_PATH = (
@@ -797,6 +802,10 @@ def buffer_model(values: dict[str, Any], extra: dict[str, int]) -> dict[str, dic
     fetch_stage = 1 if values.get("fetch_response_stage", 0) else 0
     mul_fast = 1 if values.get("m_fast", True) else 3
     l1d_hit = 2  # Nominal registered L1D hit latency for the visualization.
+    reclaim = values.get("iq_reclaim_on_issue", 0)
+    tlb_note = (f"ITLB {values.get('itlb_entries', 16)} fully associative; "
+                f"DTLB {values.get('dtlb_entries', 64)} entries / "
+                f"{values.get('dtlb_ways', 2)} ways per load/store replica")
 
     def tile(sx: float, sz: float, cap: int, latency: int, note: str, kind: str) -> dict[str, Any]:
         return {
@@ -821,18 +830,23 @@ def buffer_model(values: dict[str, Any], extra: dict[str, int]) -> dict[str, dic
         "rapt_fp_registers": tile(0.9, 0.95, 32, 1, "ROB-backed FP renaming and committed FPR 32x64", "regfile"),
         "rapt_rou": tile(1.15, 1.55, rob, 1, f"ROB {rob}; UOQ {values.get('uoq_entries') or 8}; pending operands in a separate spill bank", "queue"),
         "rapt_dpu": tile(0.9, 0.85, values.get("dispatch_width") or 2, 1, "steer into ALQ/BRQ/MDQ/FPQ/IOQ", "stage"),
-        "rapt_ieu": tile(1.05, 1.2, alq + brq, 1, f"ALQ {alq} + BRQ {brq}; same-edge reuse={values.get('iq_reclaim_on_issue', 0)}", "queue"),
+        "rapt_ieu": tile(1.05, 1.2, alq + brq, 1,
+                         f"ALQ {alq} + BRQ {brq}; same-edge reuse={reclaim}", "queue"),
         "rapt_ieu_muldiv": tile(1.0, 1.0, mdq, mul_fast, f"MDQ {mdq}; integer mul/div", "queue"),
         "rapt_feu": tile(0.95, 0.95, fpq, 3, f"FPQ {fpq}; overlapping F/D pipelines, variable latency", "queue"),
         "rapt_lsu": tile(1.1, 1.05, ioq, 1, f"IOQ {ioq}: address, store-order, and issue", "queue"),
         "rapt_lsu_sq": tile(1.0, 1.0, sq, 1, f"unified SQ {sq}; drains after commit", "queue"),
-        "rapt_completion_stage": tile(0.85, 0.85, values.get("completion_ports") or 6, 1, "one completion register per endpoint, before ROB writeback and recovery", "stage"),
+        "rapt_completion_stage": tile(
+            0.85, 0.85, values.get("completion_ports") or 6, 1,
+            "one completion register per endpoint, before ROB writeback and recovery", "stage"),
         "rapt_cmu": tile(0.95, 0.9, values.get("commit_width") or 2, 1, "retire / CMU", "stage"),
         "rapt_csr": tile(0.85, 0.8, 8, 1, "CSR file; serializing system ops", "stage"),
         "rapt_l1d": tile(1.25, 1.2, l1d, l1d_hit, f"{l1d} KiB 4-way D$; hit from registered access", "cache"),
         "rapt_l1d_mshr": tile(0.9, 0.85, values.get("l1d_mshrs") or 2, 1, "L1D miss status holding registers", "queue"),
-        "rapt_tlb": tile(0.95, 0.9, 0, 1, f"ITLB {values.get('itlb_entries', 16)} fully associative; DTLB {values.get('dtlb_entries', 64)} entries / {values.get('dtlb_ways', 2)} ways per load/store replica", "cache"),
-        "rapt_l2tlb": tile(0.95, 0.9, values.get("l2tlb_entries") or 0, 1, "shared direct-mapped translation cache before I/D page-table walkers", "cache"),
+        "rapt_tlb": tile(0.95, 0.9, 0, 1, tlb_note, "cache"),
+        "rapt_l2tlb": tile(
+            0.95, 0.9, values.get("l2tlb_entries") or 0, 1,
+            "shared direct-mapped translation cache before I/D page-table walkers", "cache"),
         "rapt_ptw": tile(0.9, 0.85, 1, 1, "Sv32/Sv39 page-table walk", "stage"),
         "rapt_pmp_state": tile(0.85, 0.8, pmp, 1, f"{pmp} usable PMP entries; checks fetch, data, and PTW", "stage"),
         "rapt_bus": tile(1.0, 0.95, 8, 2, "outstanding reads up to 8", "bus"),
@@ -989,7 +1003,8 @@ def soc_display_nodes(
             "soc_uart",
             "cluster",
             9,
-            "MMIO UART/GPIO window at 0x10000000 from rapt_pkg::addr_mapped; LiteX UART at 0x11001800.",
+            "MMIO UART/GPIO window at 0x10000000 from rapt_pkg::addr_mapped; LiteX UART at "
+            "0x11001800.",
         ),
     )
     nodes = []
@@ -1133,7 +1148,9 @@ def path_for_domain(domain: str, kernel: str = "") -> list[str]:
     if domain == "mmio":
         return FRONTEND_PATH + ["rapt_lsu", "rapt_bus", "rapt_axi_master", "rapt_l2", "rapt_router", "soc_uart"] + RETIRE_PATH
     if domain == "memory" and kernel == "list":
-        return FRONTEND_PATH + ["rapt_lsu", "rapt_l1d", "rapt_bus", "rapt_axi_master", "rapt_l2", "rapt_router", "soc_pmem"] + RETIRE_PATH
+        memory_path = ["rapt_lsu", "rapt_l1d", "rapt_bus", "rapt_axi_master", "rapt_l2",
+                       "rapt_router", "soc_pmem"]
+        return FRONTEND_PATH + memory_path + RETIRE_PATH
     if domain == "memory":
         return FRONTEND_PATH + ["rapt_lsu", "rapt_l1d"] + RETIRE_PATH
     if domain == "fp":

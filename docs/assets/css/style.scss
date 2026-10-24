@@ -460,7 +460,14 @@ body:not(.is-home) .term:not(.is-open) { display: none; }
 .page-wrap:has(.toc[hidden]) { grid-template-columns: minmax(0, var(--prose)); justify-content: center; }
 .toc a { color: var(--muted); text-decoration: none; display: block; padding: 0.15rem 0; }
 .toc a:hover { color: var(--ink); }
-.toc strong { color: var(--ink); display: block; margin-bottom: 0.4rem; font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.toc strong {
+  color: var(--ink);
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 
 .article {
   min-width: 0;
@@ -666,16 +673,46 @@ img, svg { max-width: 100%; height: auto; }
 /* ---- Architecture explorer ------------------------------------------- */
 .arch-page { max-width: 108rem; margin: 0 auto; padding: 1.6rem 2rem 3rem; }
 .arch-header { display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; }
-.arch-header h1 { font: 600 clamp(1.9rem, 3vw, 2.6rem)/1.1 var(--display); letter-spacing: -0.04em; margin: 0.35rem 0 0.8rem; }
+.arch-header h1 {
+  font: 600 clamp(1.9rem, 3vw, 2.6rem)/1.1 var(--display);
+  letter-spacing: -0.04em;
+  margin: 0.35rem 0 0.8rem;
+}
 .arch-header p:not(.eyebrow) { color: var(--muted); margin: 0; }
 .arch-header > a { font-size: 0.9rem; white-space: nowrap; }
 .arch-config { margin: 1.1rem 0 1rem; color: var(--muted); font: 0.8rem/1.6 var(--mono); }
 .arch-layout { display: grid; grid-template-columns: minmax(0, 1fr) 19rem; gap: 1.4rem; align-items: start; }
-.arch-sheet { min-width: 0; border: 1px solid var(--line); border-radius: 0.7rem; overflow: hidden; background: var(--bg-elev); }
-.arch-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; padding: 0.85rem; border-bottom: 1px solid var(--line); }
-.architecture-explorer button, .architecture-explorer select { font: inherit; color: var(--ink); background: var(--bg-elev); border: 1px solid var(--line); border-radius: 0.35rem; min-height: 2.5rem; padding: 0.45rem 0.65rem; cursor: pointer; }
+.arch-sheet {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  overflow: hidden;
+  background: var(--bg-elev);
+}
+.arch-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  border-bottom: 1px solid var(--line);
+}
+.architecture-explorer button, .architecture-explorer select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  min-height: 2.5rem;
+  padding: 0.45rem 0.65rem;
+  cursor: pointer;
+}
 .architecture-explorer button:disabled, .architecture-explorer select:disabled { opacity: 0.5; cursor: default; }
-.architecture-explorer :is(button, select, input):focus-visible { outline: 2px solid var(--copper); outline-offset: 3px; }
+.architecture-explorer :is(button, select, input):focus-visible {
+  outline: 2px solid var(--copper);
+  outline-offset: 3px;
+}
 .arch-views { display: flex; gap: 0.25rem; }
 .arch-views button { font-size: 0.85rem; }
 .arch-views button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--bg-elev); }
@@ -687,7 +724,15 @@ img, svg { max-width: 100%; height: auto; }
 .arch-canvas { overflow-x: auto; overscroll-behavior-x: contain; min-width: 0; }
 .arch-canvas:focus-visible { outline: 2px solid var(--copper); outline-offset: -2px; }
 .architecture-svg { display: block; max-width: none; height: auto; }
-.arch-legend { display: flex; flex-wrap: wrap; gap: 0.45rem 1.1rem; padding: 1rem 1.2rem 0; border-top: 1px solid var(--line); font-size: 0.75rem; color: var(--muted); }
+.arch-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 1.1rem;
+  padding: 1rem 1.2rem 0;
+  border-top: 1px solid var(--line);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
 .arch-legend span { display: inline-flex; align-items: center; gap: 0.4rem; }
 .arch-key { width: 1.5rem; border-top: 2px solid currentColor; }
 .arch-key-flow { color: var(--muted); }
@@ -696,14 +741,34 @@ img, svg { max-width: 100%; height: auto; }
 .arch-key-translation { border-top-style: dashed; }
 .arch-key-control { color: var(--copper); border-top-style: dotted; }
 .arch-caption { margin: 0; padding: 0.7rem 1.2rem 1.2rem; color: var(--muted); font-size: 0.78rem; }
-.arch-side { position: sticky; top: 5.8rem; min-width: 0; max-height: calc(100vh - 6.8rem); overflow-y: auto; padding: 0 0.3rem 0.3rem; }
+.arch-side {
+  position: sticky;
+  top: 5.8rem;
+  min-width: 0;
+  max-height: calc(100vh - 6.8rem);
+  overflow-y: auto;
+  padding: 0 0.3rem 0.3rem;
+}
 .arch-side > label { display: block; font-size: 0.8rem; font-weight: 600; margin: 0 0 0.5rem; }
 .arch-side > select { width: 100%; font-size: 0.9rem; }
-.arch-inspect { margin: 1rem 0; border: 1px solid var(--line); background: var(--bg-elev); padding: 1.2rem; border-radius: 0.6rem; overflow-wrap: anywhere; }
+.arch-inspect {
+  margin: 1rem 0;
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  padding: 1.2rem;
+  border-radius: 0.6rem;
+  overflow-wrap: anywhere;
+}
 .arch-inspect .eyebrow { font-size: 0.65rem; margin: 0 0 0.5rem; }
 .arch-inspect h2 { font: 600 1.4rem/1.2 var(--display); margin: 0 0 0.85rem; letter-spacing: -0.02em; }
 .arch-inspect p { font-size: 0.87rem; line-height: 1.65; }
-.arch-inspect h3 { margin: 1.3rem 0 0.6rem; color: var(--muted); font: 500 0.75rem var(--font); text-transform: uppercase; letter-spacing: 0.06em; }
+.arch-inspect h3 {
+  margin: 1.3rem 0 0.6rem;
+  color: var(--muted);
+  font: 500 0.75rem var(--font);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
 .arch-facts { margin: 1rem 0; font-size: 0.8rem; }
 .arch-facts > div { border-top: 1px solid var(--line); padding: 0.6rem 0; }
 .arch-facts dt { color: var(--muted); }
@@ -715,13 +780,38 @@ img, svg { max-width: 100%; height: auto; }
 .arch-reading ul { padding-left: 1.1rem; }
 .arch-reading li { margin-bottom: 0.6rem; }
 body.is-explore .term:not(.is-open) { display: none; }
-body.is-explore .term { position: fixed; left: 1rem; right: 1rem; bottom: 1rem; z-index: 12; max-width: 56rem; margin: 0 auto; }
+body.is-explore .term {
+  position: fixed;
+  left: 1rem;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 12;
+  max-width: 56rem;
+  margin: 0 auto;
+}
 @media (max-width: 1100px) {
   .arch-page { padding: 1.5rem 1rem 2rem; }
   .arch-layout { grid-template-columns: minmax(0, 1fr); }
   .arch-side { position: static; max-height: none; }
-  .arch-scroll-hint { display: block; margin: 0; padding: 0.4rem 0.85rem; color: var(--muted); font-size: 0.72rem; border-bottom: 1px solid var(--line); }
-  .arch-side.has-selection .arch-inspect { position: fixed; z-index: 10; left: 1rem; right: 1rem; bottom: 0.7rem; max-height: 43vh; overflow-y: auto; margin: 0; box-shadow: 0 5px 35px rgba(0, 0, 0, 0.25); }
+  .arch-scroll-hint {
+    display: block;
+    margin: 0;
+    padding: 0.4rem 0.85rem;
+    color: var(--muted);
+    font-size: 0.72rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .arch-side.has-selection .arch-inspect {
+    position: fixed;
+    z-index: 10;
+    left: 1rem;
+    right: 1rem;
+    bottom: 0.7rem;
+    max-height: 43vh;
+    overflow-y: auto;
+    margin: 0;
+    box-shadow: 0 5px 35px rgba(0, 0, 0, 0.25);
+  }
   .arch-side.has-selection .arch-inspect > button { position: sticky; bottom: 0; box-shadow: 0 0 0 4px var(--bg-elev); }
 }
 @media (max-width: 640px) {
@@ -734,7 +824,13 @@ body.is-explore .term { position: fixed; left: 1rem; right: 1rem; bottom: 1rem; 
 }
 
 /* Reading hierarchy and responsive controls. */
-.quick-run { min-width: 0; padding: 1.6rem; border: 1px solid var(--line); border-radius: 1rem; background: var(--bg-elev); }
+.quick-run {
+  min-width: 0;
+  padding: 1.6rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--bg-elev);
+}
 .quick-run h2 { font: 600 1.5rem var(--display); margin: 0 0 0.5rem; }
 .quick-run p:not(.eyebrow) { font-size: 0.9rem; color: var(--muted); }
 .quick-run pre { border: 0; background: var(--bg); padding: 1.1rem; font-size: 0.82rem; }
@@ -776,15 +872,34 @@ html:not(.js) :is(.nav-term, .theme-switch) { display: none; }
 
 /* One architecture component is shared by the homepage and Explorer. */
 .home-explorer { max-width: 108rem; }
-.arch-playback { display: flex; align-items: center; flex-wrap: wrap; gap: 0.45rem; padding: 0.65rem 0.85rem; border-bottom: 1px solid var(--line); font-size: 0.78rem; }
+.arch-playback {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.78rem;
+}
 .arch-playback output { font-family: var(--mono); margin: 0 0.3rem; }
 .arch-playback input[type="range"] { flex: 1 1 10rem; min-width: 6rem; accent-color: var(--copper); }
 .arch-playback [data-cycle-play] { min-width: 4rem; }
-.arch-model-note { margin: 0; padding: 0.65rem 0.85rem; font-size: 0.75rem; color: var(--muted); border-bottom: 1px solid var(--line); }
+.arch-model-note {
+  margin: 0;
+  padding: 0.65rem 0.85rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
 .arch-live { padding: 0.8rem 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .arch-live h3 { margin-top: 0; }
 .arch-live p { font-size: 0.8rem; margin: 0.35rem 0; }
-.arch-live ol, .arch-payload { padding-left: 1.8rem; font: 0.72rem/1.7 var(--mono); max-height: 12rem; overflow-y: auto; }
+.arch-live ol, .arch-payload {
+  padding-left: 1.8rem;
+  font: 0.72rem/1.7 var(--mono);
+  max-height: 12rem;
+  overflow-y: auto;
+}
 .arch-live-empty { color: var(--muted); }
 
 .arch-profile { margin: -0.4rem 0 1rem; color: var(--muted); font-size: 0.8rem; }

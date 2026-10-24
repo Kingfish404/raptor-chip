@@ -37,8 +37,10 @@ module tb_l1i_invalidate_pending #(
   assign l1i_bus.rready = l1i_bus.arvalid;
   always @(posedge clock) begin
     if (!reset && l1i_bus.arvalid && l1i_bus.rready) begin
+      logic [31:0] inst;
       check(!l1i_bus.ar_ptw, "unexpected PTW in Bare fixture");
-      response.data=XLEN==64 ? XLEN'({2{(new_epoch && code_changed) ? NewInst:OldInst}}) : XLEN'((new_epoch && code_changed) ? NewInst:OldInst);
+      inst = (new_epoch && code_changed) ? NewInst : OldInst;
+      response.data = XLEN == 64 ? XLEN'({2{inst}}) : XLEN'(inst);
       response.error=!new_epoch && old_error;
       pending.push_back(response);
       accepted++;

@@ -354,10 +354,10 @@ new `build`; an accepted refresh retains the original implementation manifest.
 | DDR4 data interface | Two x16 devices, 32-bit bus, 2 GiB physical memory; 256-bit MIG AXI interface |
 | Onboard Ethernet (LiteX) | RTL8211F-CG RGMII, 1.8 V I/O, 1000 Mb/s; MDIO on L19/M19 |
 
-The [board schematic](../../third_party/rk-xcku5p-f-v1.2/doc/RK-XCKU5P-F%20V1.2原理图.pdf)
-pulls `TXDLY/RXD1` high and `RXDLY/RXCTL` low. LiteX therefore uses the PHY's
-TX clock delay and a compensated FPGA RX capture clock. The board UDP reference and
-native DDR XDC supply the RGMII and DDR pin assignments, respectively.
+The board pulls `TXDLY/RXD1` high and `RXDLY/RXCTL` low. LiteX therefore uses the PHY's
+TX clock delay and a compensated FPGA RX capture clock. RGMII and DDR pin assignments
+are in [ethernet.xdc](constraints/ethernet.xdc) and [ddr4.xdc](constraints/ddr4.xdc),
+respectively.
 
 Power-on reset is always enabled. DDR-ready is asserted continuously in BRAM
 mode. In DDR mode, the CPU remains in reset until MIG calibration completes.
@@ -372,10 +372,8 @@ and the CPU/UI clock crossing. `DCIRESET` initializes I/O impedance calibration;
 its lock status crosses a two-stage synchronizer before MIG reset is released.
 Review this reset-conditioning path when changing the clock or reset design.
 
-The default MIG part is `MT40A512M16LY-075`, as in the supplied reference XCI.
-The schematic/manual instead lists `MT40A512M16LY-062E`, and the material README
-also uses `-0625E`. Confirm the fitted part and validate calibration and RAM
-access on the board. Changing `DDR_PART` changes only the MIG part selection;
+The default MIG part is `MT40A512M16LY-075`. Confirm the fitted part and validate
+calibration and RAM access on the board. Changing `DDR_PART` changes only the MIG part selection;
 it does not adjust latencies, geometry or pins automatically.
 
 The board top is [rapt_rk_top.sv](rtl/rapt_rk_top.sv). Pin assignments are in
@@ -383,17 +381,7 @@ The board top is [rapt_rk_top.sv](rtl/rapt_rk_top.sv). Pin assignments are in
 profile is in [create_ip.tcl](ip/create_ip.tcl). Configuration-bank voltage is
 1.8 V, and unused pins have pull-ups.
 
-Board references under `third_party/rk-xcku5p-f-v1.2/` are optional reading,
-not build-time dependencies:
-
-- `doc/`: board schematic and user manual for device, power, clock and memory geometry.
-- `designs/blink/blink.srcs/blink.xdc`: clock, UART, LED and button pins.
-- `designs/ddr4_0_ex/imports/example_design.xdc`: all 71 DDR pins.
-- `designs/ddr4_0_ex/ddr4_0_ex.srcs/sources_1/ip/ddr4_0/ddr4_0.xci`:
-  32-bit DDR profile with 750 ps memory clock and 5000 ps reference clock.
-
-The 50 MHz single-ended oscillator is unused; the supplied blink example
-reports it as nonfunctional on its board.
+The 50 MHz single-ended oscillator is unused.
 
 ## Memory map and software interface
 

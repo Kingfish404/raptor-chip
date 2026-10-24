@@ -320,7 +320,8 @@ Expected: `fpga-build` writes `mlk_cu07_ku15p.bit` under the configuration-speci
 Notes:
 - `RAPT_CONFIG` defaults to `default`; override it explicitly when reproducing a build made with another preset.
 - `BOOT_MODE=bios` is the default for Linux FPGA profiles, including this CU07 `linux32` flow, and is required for serialboot uploads. Other profiles default to `BOOT_MODE=custom`, which boots `firmware/fpga` from ROM.
-- Board pins come from `third_party/security-hw-fpga/board/mlk-cu07-ku15p/`. `UART_PORT` defaults to `/dev/ttyUSB0`; override with `UART_PORT=/dev/ttyUSBx`.
+- [The CU07 target](mlk_cu07_ku15p.py) uses the `litex_boards.platforms.mlk_cu07_ku15p`
+  pin definitions. `UART_PORT` defaults to `/dev/ttyUSB0`; override with `UART_PORT=/dev/ttyUSBx`.
 - `fpga-load`/`fpga-flash` drive Vivado in batch mode (`scripts/vivado_load.tcl`, `scripts/vivado_flash.tcl`).
 
 ## KU15P Linux FPGA Flow (Vivado MIG)

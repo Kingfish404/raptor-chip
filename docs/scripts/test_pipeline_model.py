@@ -79,8 +79,9 @@ class PipelineTest(unittest.TestCase):
         trace = pm.simulate(instructions, {"m_fast": 1})
         retired = [idx for f in trace["frames"] for idx in f["occ"].get("rapt_cmu", [])]
         completed = [idx for f in trace["frames"] for idx in f["occ"].get("rapt_completion_stage", [])]
-        self.assertEqual(retired, list(range(len(instructions))))
-        self.assertEqual(sorted(completed), list(range(len(instructions))))
+        expected = list(range(len(instructions)))
+        self.assertEqual(retired, expected)
+        self.assertEqual(sorted(completed), expected)
         self.assertEqual(trace["frames"][-1]["retired_total"], len(instructions))
         for idx in retired:
             completion_cycle = next(f["t"] for f in trace["frames"] if idx in f["occ"].get("rapt_completion_stage", []))

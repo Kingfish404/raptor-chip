@@ -44,22 +44,23 @@ class NativeToolsTests(unittest.TestCase):
                 rtl.write_text("module decoder(input wire enable); endmodule\n")
                 self.assertNotEqual(build.input_hashes(), before)
 
-    def test_rk_ddr_pin_parity_with_vendor_reference(self):
-        reference = FPGA.parent / "third_party/rk-xcku5p-f-v1.2/designs/ddr4_0_ex/imports/example_design.xdc"
-        if not reference.exists():
-            self.skipTest("optional board reference checkout absent")
-        expected = {}
-        rename = {"dm_dbi_n": "dm", "dqs_t": "dqs_p", "dqs_c": "dqs_n",
-                  "ck_t": "clk_p", "ck_c": "clk_n"}
-        for pin, port in re.findall(r'set_property PACKAGE_PIN (\w+)\s+\[\s*get_ports "c0_ddr4_([^"]+)"\s*\]', reference.read_text()):
-            stem = port.split("[")[0]
-            index = port[len(stem):] if stem in ("adr", "ba", "dq", "dm_dbi_n", "dqs_t", "dqs_c") else ""
-            expected["ddram_" + rename.get(stem, stem) + index] = pin
-        actual = dict((port, pin) for pin, port in re.findall(
+    def test_rk_ddr_pins_cover_top_level_ports(self):
+        board = FPGA / "rk-xcku5p-f"
+        top = (board / "rtl/rapt_rk_top.sv").read_text()
+        expected = set()
+        for high, low, name in re.findall(
+                r"(?:output|inout)\s+wire\s+(?:\[(\d+):(\d+)\]\s+)?(ddram_\w+)", top):
+            if high:
+                expected.update(f"{name}[{i}]" for i in range(int(low), int(high) + 1))
+            else:
+                expected.add(name)
+        assignments = re.findall(
             r"set_property PACKAGE_PIN (\w+) \[get_ports \{([^}]+)\}\]",
-            (FPGA / "rk-xcku5p-f/constraints/ddr4.xdc").read_text()))
+            (board / "constraints/ddr4.xdc").read_text())
+        actual = {port: pin for pin, port in assignments}
         self.assertEqual(len(expected), 71)
-        self.assertEqual(actual, expected)
+        self.assertEqual(set(actual), expected)
+        self.assertEqual(len(assignments), len(actual))
         self.assertEqual(len(set(actual.values())), len(actual))
 
     def test_board_selection_and_device_tree(self):

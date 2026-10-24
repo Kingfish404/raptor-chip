@@ -251,6 +251,9 @@ async function main() {
 
 main().catch((err) => {
   const inspect = document.getElementById("uarch-inspect");
-  if (inspect) inspect.textContent = "The interactive data could not be loaded. Reload to retry, or use the architecture manual.";
+  if (inspect) {
+    inspect.textContent =
+      "The interactive data could not be loaded. Reload to retry, or use the architecture manual.";
+  }
   console.error(err);
 });

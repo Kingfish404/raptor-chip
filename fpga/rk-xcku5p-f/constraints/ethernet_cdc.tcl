@@ -16,7 +16,8 @@ foreach pattern {tx_done_sync1_reg* tx_request_sync1_reg*} {
     set first [get_cells -hier -filter "NAME =~ ethernet/packets/$pattern"]
     set_false_path -to $first
 }
-set bundled [get_cells -hier -filter {NAME =~ ethernet/packets/rx_length_reg* || NAME =~ ethernet/packets/tx_length_reg*}]
+set bundled_filter {NAME =~ ethernet/packets/rx_length_reg* || NAME =~ ethernet/packets/tx_length_reg*}
+set bundled [get_cells -hier -filter $bundled_filter]
 set consumers [all_fanout -flat -endpoints_only -from [get_pins -of_objects $bundled -filter {REF_PIN_NAME == Q}]]
 set_max_delay -datapath_only 8.000 -from $bundled -to $consumers
 # Packet RAM uses independent clocks and explicit ownership. Constrain only

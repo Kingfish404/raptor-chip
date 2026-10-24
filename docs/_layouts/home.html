@@ -15,7 +15,8 @@
           The default RV64 configuration supports
           <a href="{{ '/overview.html#rva22s64-support' | relative_url }}">RVA22S64</a>.</p>
         <div class="hero-actions">
-          <a class="btn btn-primary" href="{{ '/getting-started.html' | relative_url }}">Get started <span aria-hidden="true">↗</span></a>
+          <a class="btn btn-primary" href="{{ '/getting-started.html' | relative_url }}">
+            Get started <span aria-hidden="true">↗</span></a>
           <a class="btn" href="{{ '/uarch.html' | relative_url }}">Read the architecture</a>
         </div>
         <p class="hero-note">SystemVerilog RTL · Verilator + NEMU difftest · Native FPGA and LiteX flows</p>
@@ -29,12 +30,19 @@ make setup-rtl
 
 <span class="code-comment"># RV32 · batch mode · no waveform</span>
 make run-rv32 ARGS="-b -n"</code></pre>
-        <a href="{{ '/getting-started.html' | relative_url }}">Prerequisites and RV64 commands <span aria-hidden="true">→</span></a>
+        <a href="{{ '/getting-started.html' | relative_url }}">
+          Prerequisites and RV64 commands <span aria-hidden="true">→</span></a>
       </aside>
     </section>
     <section class="spec-strip" aria-label="Default configuration">
-      <p class="spec-kicker">Default preset <span aria-hidden="true">/</span> <a href="{{ '/uarch.html#default-configuration' | relative_url }}">All parameters →</a></p>
-      <dl id="spec-grid" class="spec-grid"><div><dt>Configuration</dt><dd><a href="{{ '/uarch.html#default-configuration' | relative_url }}">View RTL defaults</a></dd></div></dl>
+      <p class="spec-kicker">Default preset <span aria-hidden="true">/</span>
+        <a href="{{ '/uarch.html#default-configuration' | relative_url }}">All parameters →</a></p>
+      <dl id="spec-grid" class="spec-grid">
+        <div>
+          <dt>Configuration</dt>
+          <dd><a href="{{ '/uarch.html#default-configuration' | relative_url }}">View RTL defaults</a></dd>
+        </div>
+      </dl>
     </section>
     <section class="doc-index" aria-labelledby="manual-title">
       <div class="section-head">
@@ -42,12 +50,30 @@ make run-rv32 ARGS="-b -n"</code></pre>
         <h2 id="manual-title">Build. Understand. Integrate.</h2>
       </div>
       <div class="doc-grid">
-        <a class="doc-card" href="{{ '/overview.html' | relative_url }}"><h3>Core overview <span aria-hidden="true">↗</span></h3><p>Capabilities, default configuration, and verification scope.</p></a>
-        <a class="doc-card" href="{{ '/getting-started.html' | relative_url }}"><h3>Quick start <span aria-hidden="true">↗</span></h3><p>Build RV32 or RV64 and run your first program.</p></a>
-        <a class="doc-card" href="{{ '/uarch.html' | relative_url }}"><h3>Microarchitecture <span aria-hidden="true">↗</span></h3><p>Follow fetch, rename, execution, and precise retirement.</p></a>
-        <a class="doc-card" href="{{ '/linux_kernel.html' | relative_url }}"><h3>Linux boot <span aria-hidden="true">↗</span></h3><p>OpenSBI, payloads, and simulator or FPGA boot paths.</p></a>
-        <a class="doc-card" href="{{ '/ecosystem.html' | relative_url }}"><h3>Platform integration <span aria-hidden="true">↗</span></h3><p>FPGA boards, memory maps, and the software stack.</p></a>
-        <a class="doc-card" href="{{ '/vpu.html' | relative_url }}"><h3>Standalone VPU <span aria-hidden="true">↗</span></h3><p>Vector components and contracts for future core integration.</p></a>
+        <a class="doc-card" href="{{ '/overview.html' | relative_url }}">
+          <h3>Core overview <span aria-hidden="true">↗</span></h3>
+          <p>Capabilities, default configuration, and verification scope.</p>
+        </a>
+        <a class="doc-card" href="{{ '/getting-started.html' | relative_url }}">
+          <h3>Quick start <span aria-hidden="true">↗</span></h3>
+          <p>Build RV32 or RV64 and run your first program.</p>
+        </a>
+        <a class="doc-card" href="{{ '/uarch.html' | relative_url }}">
+          <h3>Microarchitecture <span aria-hidden="true">↗</span></h3>
+          <p>Follow fetch, rename, execution, and precise retirement.</p>
+        </a>
+        <a class="doc-card" href="{{ '/linux_kernel.html' | relative_url }}">
+          <h3>Linux boot <span aria-hidden="true">↗</span></h3>
+          <p>OpenSBI, payloads, and simulator or FPGA boot paths.</p>
+        </a>
+        <a class="doc-card" href="{{ '/ecosystem.html' | relative_url }}">
+          <h3>Platform integration <span aria-hidden="true">↗</span></h3>
+          <p>FPGA boards, memory maps, and the software stack.</p>
+        </a>
+        <a class="doc-card" href="{{ '/vpu.html' | relative_url }}">
+          <h3>Standalone VPU <span aria-hidden="true">↗</span></h3>
+          <p>Vector components and contracts for future core integration.</p>
+        </a>
       </div>
     </section>
     <section class="home-explorer" aria-labelledby="diagram-title">
