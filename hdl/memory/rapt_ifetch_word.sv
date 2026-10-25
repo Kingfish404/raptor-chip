@@ -13,10 +13,10 @@ module rapt_ifetch_word #(
     input logic request_valid,
     output logic request_ready,
     output logic busy,
-    input logic [XLEN-1:0] request_pc,
+    input logic [`RAPT_PC_BITS_OF(XLEN)-1:0] request_pc,
     input logic io_authorized,
     output logic io_start,
-    output logic [XLEN-1:0] owner_pc,
+    output logic [`RAPT_PC_BITS_OF(XLEN)-1:0] owner_pc,
     output logic translate_valid,
     input logic translate_ready,
     output logic [XLEN-1:0] translate_vaddr,
@@ -84,7 +84,7 @@ module rapt_ifetch_word #(
         IDLE:
         if (request_valid && request_ready) begin
           owner_pc <= request_pc;
-          word_va <= {request_pc[XLEN-1:2],2'b00};
+          word_va <= `RAPT_PC_SEXT(XLEN, request_pc) & ~XLEN'(3);
           second <= 0;
           cancelled <= 0;
           io_owned <= 0;
@@ -104,7 +104,7 @@ module rapt_ifetch_word #(
             result_fault <= 1;
             result_inst <= 32'h13;
             result_cause <= translation_fault ? translation_cause : `RAPT_CAUSE_INSTR_PAGE_FAULT;
-            result_tval <= second ? word_va : owner_pc;
+            result_tval <= second ? word_va : `RAPT_PC_SEXT(XLEN, owner_pc);
             state <= DONE;
           end else begin
             read_paddr <= translation_paddr;
@@ -126,7 +126,7 @@ module rapt_ifetch_word #(
             result_fault <= 1;
             result_inst <= 32'h13;
             result_cause <= `RAPT_CAUSE_INSTR_ACC_FAULT;
-            result_tval <= second ? word_va : owner_pc;
+            result_tval <= second ? word_va : `RAPT_PC_SEXT(XLEN, owner_pc);
             state <= DONE;
           end else if (second) begin
             result_inst <= {response_word[15:0],low_half};

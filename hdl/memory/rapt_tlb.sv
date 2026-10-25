@@ -6,13 +6,27 @@
 // Combinational lookup, sequential fill, invalid-first round-robin replacement.
 module rapt_tlb #(
     parameter int XLEN = `RAPT_XLEN,
-    parameter int unsigned ENTRIES = 4
+    parameter int unsigned ENTRIES = 4,
+    // True LRU over all entries instead of round-robin (2-32 entries).
+    parameter bit TlbLru = `RAPT_TLB_LRU != 0,
+    // Tree PLRU reduces CAM replacement state; takes priority over true LRU.
+    parameter bit TlbPlru = `RAPT_TLB_PLRU != 0
 ) (
     input clock,
     input reset,
     input flush,
+    // Flush remains unconditional (for example PMP changes); SFENCE is selective.
+    input logic sfence_valid = 1'b0,
+    input logic [26:0] sfence_vpn = '0,
+    input logic [8:0] sfence_asid = '0,
+    input logic sfence_all_vpn = 1'b1,
+    input logic sfence_all_asid = 1'b1,
 
-    // Lookup (combinational)
+    // Lookup (combinational). Only a consumed translation updates replacement state.
+    // Unused when access-based replacement is disabled.
+    /* verilator lint_off UNUSEDSIGNAL */
+    input logic lookup_valid = 1'b0,
+    /* verilator lint_on UNUSEDSIGNAL */
     input  logic [XLEN-1:12] lookup_vtag,
     input  logic [      8:0] lookup_asid,
     output logic             hit,
@@ -26,7 +40,8 @@ module rapt_tlb #(
     input logic [XLEN-1:12] fill_vtag,
     input logic [      8:0] fill_asid,
     input logic [      6:0] fill_pte,
-    input logic [      1:0] fill_pbmt
+    input logic [      1:0] fill_pbmt,
+    input logic [      1:0] fill_level = 2'd0
 );
 
   // Store translation-format bits, not the XLEN-wide transport padding.
@@ -36,6 +51,8 @@ module rapt_tlb #(
   localparam int VAddrBits  = XLEN == 64 ? 39 : 32;
   localparam int PtePpnBits = XLEN == 64 ? 44 : 22;
   logic [        ENTRIES-1:0] valid;
+  logic [   ENTRIES-1:0] sfence_matches;
+  logic [           1:0] levels         [ENTRIES];
   logic [     VAddrBits-1:12] vtags     [ENTRIES];
   logic [      PtePpnBits-1:0] ptags    [ENTRIES];
   logic [                8:0] asids     [ENTRIES];
@@ -61,15 +78,23 @@ module rapt_tlb #(
   logic lookup_canonical, fill_canonical, fill_encodable;
   // A non-canonical lookup must miss so the PTW reports the original VA's
   // page fault. Comparing only the compact VPN would otherwise create aliases.
-  assign lookup_canonical = lookup_vtag
-      == (XLEN-12)'($signed(lookup_vtag[VAddrBits-1:12]));
-  assign fill_canonical = fill_vtag
-      == (XLEN-12)'($signed(fill_vtag[VAddrBits-1:12]));
-  assign fill_encodable = fill_canonical
-      && fill_ptag == (XLEN-10)'(PtePpnBits'(fill_ptag));
+  assign lookup_canonical = lookup_vtag == (XLEN - 12)'($signed(lookup_vtag[VAddrBits-1:12]));
+  assign fill_canonical   = fill_vtag == (XLEN - 12)'($signed(fill_vtag[VAddrBits-1:12]));
+  assign fill_encodable   = fill_canonical && fill_ptag == (XLEN - 10)'(PtePpnBits'(fill_ptag));
 
   generate
     for (genvar i = 0; i < ENTRIES; i++) begin : gen_tlb_match
+      assign sfence_matches[i] = rapt_pkg::tlb_sfence_match(
+          27'(vtags[i]),
+          levels[i],
+          asids[i],
+          ptes[i][4],
+          sfence_vpn,
+          sfence_asid,
+          sfence_all_vpn,
+          sfence_all_asid,
+          XLEN == 64
+      );
       // A global mapping is shared by every ASID. Local mappings retain the
       // normal ASID tag comparison.
       assign match_vec[i] = valid[i] && lookup_canonical
@@ -100,7 +125,25 @@ module rapt_tlb #(
     end
   end
 
-  assign fill_idx = fill_hit ? fill_match_idx : has_invalid ? first_invalid_idx : rr_ptr;
+  logic [EntryIdxW-1:0] victim_idx;
+  if ((TlbLru || TlbPlru) && ENTRIES >= 2 && ENTRIES <= 32) begin : g_lru
+    rapt_tlb_lru #(
+        .Entries(ENTRIES),
+        .Plru(TlbPlru)
+    ) u_lru (
+        .clock,
+        .reset,
+        .flush,
+        .match_vec,
+        .lookup_valid(lookup_valid && !sfence_valid),
+        .fill_valid(fill_valid && fill_encodable && !sfence_valid),
+        .fill_idx,
+        .victim(victim_idx)
+    );
+  end else begin : g_round_robin
+    assign victim_idx = rr_ptr;
+  end
+  assign fill_idx = fill_hit ? fill_match_idx : has_invalid ? first_invalid_idx : victim_idx;
 
   always_comb begin
     fill_hit         = |fill_match_vec;
@@ -120,6 +163,9 @@ module rapt_tlb #(
     if (reset || flush) begin
       valid  <= '0;
       rr_ptr <= '0;
+    end else if (sfence_valid) begin
+      // Discard even an unrelated concurrent fill: its walk predates the fence.
+      valid <= valid & ~sfence_matches;
     end else if (fill_valid && fill_encodable) begin
       // A match refreshes its payload; otherwise fill the first invalid
       // entry before selecting a round-robin victim.
@@ -129,6 +175,7 @@ module rapt_tlb #(
       asids[fill_idx] <= fill_asid;
       ptes[fill_idx]  <= fill_pte;
       pbmts[fill_idx] <= fill_pbmt;
+      levels[fill_idx] <= fill_level;
       if (!fill_hit && !has_invalid) begin
         rr_ptr <= (rr_ptr == EntryIdxW'(ENTRIES - 1)) ? '0 : rr_ptr + 1'b1;
       end
@@ -136,6 +183,8 @@ module rapt_tlb #(
   end
 
   `RAPT_SVA_NEXT(clock, reset, TLB_FLUSH_CLEARS_ENTRIES, flush, valid == '0)
+  `RAPT_SVA_NEXT(clock, reset, TLB_SFENCE_MATCHED_ENTRIES, sfence_valid && !flush, valid == ($past
+                 (valid) & ~$past(sfence_matches)))
 
 endmodule
 
@@ -146,13 +195,28 @@ endmodule
 module rapt_data_tlb #(
     parameter int XLEN = `RAPT_XLEN,
     parameter int unsigned ENTRIES = 64,
-    parameter int unsigned WAYS = 1
+    parameter int unsigned WAYS = 1,
+    // CAM: true LRU instead of round-robin (2-32 entries). 2-way table: the
+    // victim is the way not hit last, instead of the way not filled last.
+    parameter bit TlbLru = `RAPT_TLB_LRU != 0,
+    // Tree PLRU reduces CAM replacement state; takes priority over true LRU.
+    parameter bit TlbPlru = `RAPT_TLB_PLRU != 0
 ) (
     input clock,
     input reset,
     input flush,
+    // Flush remains unconditional (for example PMP changes); SFENCE is selective.
+    input logic sfence_valid = 1'b0,
+    input logic [26:0] sfence_vpn = '0,
+    input logic [8:0] sfence_asid = '0,
+    input logic sfence_all_vpn = 1'b1,
+    input logic sfence_all_asid = 1'b1,
 
-    // Lookup (combinational)
+    // Lookup (combinational). Only a consumed translation updates replacement state.
+    // Unused when access-based replacement is disabled.
+    /* verilator lint_off UNUSEDSIGNAL */
+    input logic lookup_valid = 1'b0,
+    /* verilator lint_on UNUSEDSIGNAL */
     input  logic [XLEN-1:12] lookup_vtag,
     input  logic [      8:0] lookup_asid,
     output logic             hit,
@@ -168,7 +232,8 @@ module rapt_data_tlb #(
     input logic [      8:0] fill_asid,
     input logic [      6:0] fill_pte,
     input logic [9:0] fill_verdict,
-    input logic [      1:0] fill_pbmt
+    input logic [      1:0] fill_pbmt,
+    input logic [      1:0] fill_level = 2'd0
 );
 
   // Store translation-format bits, not the XLEN-wide transport padding.
@@ -178,6 +243,8 @@ module rapt_data_tlb #(
   localparam int VAddrBits  = XLEN == 64 ? 39 : 32;
   localparam int PtePpnBits = XLEN == 64 ? 44 : 22;
   logic [        ENTRIES-1:0] valid;
+  logic [   ENTRIES-1:0] sfence_matches;
+  logic [           1:0] levels         [ENTRIES];
   (* ram_style = "distributed" *) logic [     VAddrBits-1:12] vtags     [ENTRIES];
   (* ram_style = "distributed" *) logic [      PtePpnBits-1:0] ptags    [ENTRIES];
   (* ram_style = "distributed" *) logic [                8:0] asids     [ENTRIES];
@@ -199,12 +266,52 @@ module rapt_data_tlb #(
   logic lookup_canonical, fill_canonical, fill_encodable;
   // A non-canonical lookup must miss so the PTW reports the original VA's
   // page fault. Comparing only the compact VPN would otherwise create aliases.
-  assign lookup_canonical = lookup_vtag
-      == (XLEN-12)'($signed(lookup_vtag[VAddrBits-1:12]));
-  assign fill_canonical = fill_vtag
-      == (XLEN-12)'($signed(fill_vtag[VAddrBits-1:12]));
-  assign fill_encodable = fill_canonical
-      && fill_ptag == (XLEN-10)'(PtePpnBits'(fill_ptag));
+  assign lookup_canonical = lookup_vtag == (XLEN - 12)'($signed(lookup_vtag[VAddrBits-1:12]));
+  assign fill_canonical   = fill_vtag == (XLEN - 12)'($signed(fill_vtag[VAddrBits-1:12]));
+  assign fill_encodable   = fill_canonical && fill_ptag == (XLEN - 10)'(PtePpnBits'(fill_ptag));
+
+  // Table payloads keep their indexed distributed-RAM ports. Replicate only
+  // fence metadata in flops so a selective fence can clear all matching rows
+  // in one cycle, including fragments of a superpage in different sets.
+  if (WAYS == 0) begin : g_cam_fence
+    for (genvar i = 0; i < ENTRIES; i++) begin : g_match
+      assign sfence_matches[i] = rapt_pkg::tlb_sfence_match(
+          27'(vtags[i]),
+          levels[i],
+          asids[i],
+          ptes[i][4],
+          sfence_vpn,
+          sfence_asid,
+          sfence_all_vpn,
+          sfence_all_asid,
+          XLEN == 64
+      );
+    end
+  end else begin : g_table_fence
+    logic [VAddrBits-1:12] tags[ENTRIES];
+    logic [8:0] asids_q[ENTRIES];
+    logic [ENTRIES-1:0] globals;
+    for (genvar i = 0; i < ENTRIES; i++) begin : g_match
+      assign sfence_matches[i] = rapt_pkg::tlb_sfence_match(
+          27'(tags[i]),
+          levels[i],
+          asids_q[i],
+          globals[i],
+          sfence_vpn,
+          sfence_asid,
+          sfence_all_vpn,
+          sfence_all_asid,
+          XLEN == 64
+      );
+    end
+    always_ff @(posedge clock) begin
+      if (fill_valid && fill_encodable && !reset && !flush && !sfence_valid) begin
+        tags[fill_idx] <= fill_vtag[VAddrBits-1:12];
+        asids_q[fill_idx] <= fill_asid;
+        globals[fill_idx] <= fill_pte[4];
+      end
+    end
+  end
 
   if (WAYS == 0) begin : g_cam
     logic [        ENTRIES-1:0] match_vec;
@@ -246,7 +353,25 @@ module rapt_data_tlb #(
       end
     end
 
-    assign fill_idx = fill_hit ? fill_match_idx : has_invalid ? first_invalid_idx : rr_ptr;
+    logic [EntryIdxW-1:0] victim_idx;
+    if ((TlbLru || TlbPlru) && ENTRIES >= 2 && ENTRIES <= 32) begin : g_lru
+      rapt_tlb_lru #(
+          .Entries(ENTRIES),
+          .Plru(TlbPlru)
+      ) u_lru (
+          .clock,
+          .reset,
+          .flush,
+          .match_vec,
+          .lookup_valid(lookup_valid && !sfence_valid),
+          .fill_valid(fill_valid && fill_encodable && !sfence_valid),
+          .fill_idx,
+          .victim(victim_idx)
+      );
+    end else begin : g_round_robin
+      assign victim_idx = rr_ptr;
+    end
+    assign fill_idx = fill_hit ? fill_match_idx : has_invalid ? first_invalid_idx : victim_idx;
 
     always_comb begin
       fill_match_idx   = '0;
@@ -309,10 +434,21 @@ module rapt_data_tlb #(
     assign fill_idx = write_idx;
     assign fill_hit = |fill_matches;
     assign has_invalid = 1'b0;
+    // LRU records the last lookup hit one cycle later, off the lookup path.
+    logic touch_q, touch_way_q;
+    logic [SetBits-1:0] touch_set_q;
+    always_ff @(posedge clock) begin
+      touch_q <= (TlbLru || TlbPlru) && WAYS == 2 && lookup_valid && hit
+          && !reset && !flush && !sfence_valid;
+      touch_set_q <= lookup_set;
+      touch_way_q <= WAYS == 2 && lookup_matches[WAYS-1];
+    end
     always_ff @(posedge clock) begin
       if (reset || flush) victim <= '0;
-      else if (fill_valid && fill_encodable && WAYS == 2)
-        victim[fill_set] <= !write_idx[EntryIdxW-1];
+      else if (!sfence_valid) begin
+        if (touch_q) victim[touch_set_q] <= !touch_way_q;
+        if (fill_valid && fill_encodable && WAYS == 2) victim[fill_set] <= !write_idx[EntryIdxW-1];
+      end
     end
   end
 
@@ -320,6 +456,9 @@ module rapt_data_tlb #(
     if (reset || flush) begin
       valid  <= '0;
       rr_ptr <= '0;
+    end else if (sfence_valid) begin
+      // Discard even an unrelated concurrent fill: its walk predates the fence.
+      valid <= valid & ~sfence_matches;
     end else if (fill_valid && fill_encodable) begin
       // A match refreshes its payload; otherwise fill the first invalid
       // entry before selecting a round-robin victim.
@@ -331,17 +470,91 @@ module rapt_data_tlb #(
   end
 
   always_ff @(posedge clock) begin
-    if (fill_valid && fill_encodable && !reset && !flush) begin
+    if (fill_valid && fill_encodable && !reset && !flush && !sfence_valid) begin
       vtags[fill_idx] <= fill_vtag[VAddrBits-1:12];
       ptags[fill_idx] <= PtePpnBits'(fill_ptag);
       asids[fill_idx] <= fill_asid;
       ptes[fill_idx]  <= fill_pte;
       pbmts[fill_idx] <= fill_pbmt;
+      levels[fill_idx] <= fill_level;
       verdicts[fill_idx] <= fill_verdict;
     end
   end
 
   `RAPT_SVA_NEXT(clock, reset, TLB_FLUSH_CLEARS_ENTRIES, flush, valid == '0)
+  `RAPT_SVA_NEXT(clock, reset, TLB_SFENCE_MATCHED_ENTRIES, sfence_valid && !flush, valid == ($past
+                 (valid) & ~$past(sfence_matches)))
 
+endmodule
+
+// True LRU over a fully associative TLB. A lookup hit is registered and
+// recorded one cycle later; a fill is recorded on its write edge and wins.
+module rapt_tlb_lru #(
+    parameter int unsigned Entries = 16,
+    parameter bit Plru = 0,
+    parameter int unsigned EntryIdxW = $clog2(Entries)
+) (
+    input logic clock,
+    input logic reset,
+    input logic flush,
+    input logic [Entries-1:0] match_vec,
+    input logic lookup_valid,
+    input logic fill_valid,
+    input logic [EntryIdxW-1:0] fill_idx,
+    output logic [EntryIdxW-1:0] victim
+);
+  logic touch_q;
+  logic [EntryIdxW-1:0] touch_idx_q;
+  logic [EntryIdxW-1:0] match_idx;
+  logic [1:0] update_valid;
+  logic [EntryIdxW-1:0] update_way[2];
+  logic read_set[1], update_set[2];
+  logic [EntryIdxW-1:0] victims[1];
+  always_comb begin
+    match_idx = '0;
+    for (int i = 0; i < Entries; i++) if (match_vec[i]) match_idx = EntryIdxW'(i);
+  end
+  always_ff @(posedge clock) begin
+    touch_q <= lookup_valid && |match_vec && !reset && !flush;
+    touch_idx_q <= match_idx;
+  end
+  assign update_valid = {fill_valid, touch_q};
+  assign update_way[0] = touch_idx_q;
+  assign update_way[1] = fill_idx;
+  assign read_set[0] = 1'b0;
+  assign update_set[0] = 1'b0;
+  assign update_set[1] = 1'b0;
+  if (Plru && (Entries & (Entries - 1)) == 0) begin : g_plru
+    rapt_cache_plru #(
+        .Ways(Entries),
+        .SetBits(1),
+        .ReadPorts(1)
+    ) u_policy (
+        .clock,
+        .reset,
+        .invalidate(flush),
+        .read_set,
+        .victim(victims),
+        .update_valid,
+        .update_set,
+        .update_way
+    );
+  end else begin : g_lru
+    rapt_cache_lru #(
+        .Ways(Entries),
+        .SetBits(1),
+        .ReadPorts(1)
+    ) u_policy (
+        .clock,
+        .reset,
+        .invalidate(flush),
+        .read_set,
+        .victim(victims),
+        .update_valid,
+        .update_set,
+        .update_way
+    );
+  end
+  assign victim = victims[0];
 endmodule
 /* verilator lint_on DECLFILENAME */

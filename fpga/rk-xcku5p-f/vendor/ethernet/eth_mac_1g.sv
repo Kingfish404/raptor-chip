@@ -27,12 +27,10 @@ THE SOFTWARE.
 /*
  * 1G Ethernet MAC
  */
-module eth_mac_1g #
-(
+module eth_mac_1g #(
     parameter ENABLE_PADDING = 1,
     parameter MIN_FRAME_LENGTH = 64
-)
-(
+) (
     input wire         rx_clk,
     input wire         rx_rst,
     input wire         tx_clk,
@@ -72,7 +70,7 @@ module eth_mac_1g #
     input wire         tx_clk_enable,
     input wire         rx_mii_select,
     input wire         tx_mii_select,
- 
+
     /*
      * Status
      */
@@ -87,43 +85,41 @@ module eth_mac_1g #
     input wire [7:0]   ifg_delay
 );
 
-axis_gmii_rx
-axis_gmii_rx_inst (
-    .clk(rx_clk),
-    .rst(rx_rst),
-    .gmii_rxd(gmii_rxd),
-    .gmii_rx_dv(gmii_rx_dv),
-    .gmii_rx_er(gmii_rx_er),
-    .m_axis_tdata(rx_axis_tdata),
-    .m_axis_tvalid(rx_axis_tvalid),
-    .m_axis_tlast(rx_axis_tlast),
-    .m_axis_tuser(rx_axis_tuser),
-    .clk_enable(rx_clk_enable),
-    .mii_select(rx_mii_select),
-    .error_bad_frame(rx_error_bad_frame),
-    .error_bad_fcs(rx_error_bad_fcs),
-    .fcs_reg(rx_fcs_reg)
-);
+  axis_gmii_rx axis_gmii_rx_inst (
+      .clk(rx_clk),
+      .rst(rx_rst),
+      .gmii_rxd(gmii_rxd),
+      .gmii_rx_dv(gmii_rx_dv),
+      .gmii_rx_er(gmii_rx_er),
+      .m_axis_tdata(rx_axis_tdata),
+      .m_axis_tvalid(rx_axis_tvalid),
+      .m_axis_tlast(rx_axis_tlast),
+      .m_axis_tuser(rx_axis_tuser),
+      .clk_enable(rx_clk_enable),
+      .mii_select(rx_mii_select),
+      .error_bad_frame(rx_error_bad_frame),
+      .error_bad_fcs(rx_error_bad_fcs),
+      .fcs_reg(rx_fcs_reg)
+  );
 
-axis_gmii_tx #(
-    .ENABLE_PADDING(ENABLE_PADDING),
-    .MIN_FRAME_LENGTH(MIN_FRAME_LENGTH)
-)
-axis_gmii_tx_inst (
-    .clk(tx_clk),
-    .rst(tx_rst),
-    .s_axis_tdata(tx_axis_tdata),
-    .s_axis_tvalid(tx_axis_tvalid),
-    .s_axis_tready(tx_axis_tready),
-    .s_axis_tlast(tx_axis_tlast),
-    .s_axis_tuser(tx_axis_tuser),
-    .gmii_txd(gmii_txd),
-    .gmii_tx_en(gmii_tx_en),
-    .gmii_tx_er(gmii_tx_er),
-    .clk_enable(tx_clk_enable),
-    .mii_select(tx_mii_select),
-    .ifg_delay(ifg_delay),
-    .fcs_reg(tx_fcs_reg)
-);
+  axis_gmii_tx #(
+      .ENABLE_PADDING(ENABLE_PADDING),
+      .MIN_FRAME_LENGTH(MIN_FRAME_LENGTH)
+  ) axis_gmii_tx_inst (
+      .clk(tx_clk),
+      .rst(tx_rst),
+      .s_axis_tdata(tx_axis_tdata),
+      .s_axis_tvalid(tx_axis_tvalid),
+      .s_axis_tready(tx_axis_tready),
+      .s_axis_tlast(tx_axis_tlast),
+      .s_axis_tuser(tx_axis_tuser),
+      .gmii_txd(gmii_txd),
+      .gmii_tx_en(gmii_tx_en),
+      .gmii_tx_er(gmii_tx_er),
+      .clk_enable(tx_clk_enable),
+      .mii_select(tx_mii_select),
+      .ifg_delay(ifg_delay),
+      .fcs_reg(tx_fcs_reg)
+  );
 
 endmodule

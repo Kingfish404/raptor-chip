@@ -191,7 +191,7 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
           ret_pc = base;
         }
       }
-      return ret_pc;
+      return riscv_legalize_pc(ret_pc);
     }
   }
   cpu.sr[CSR_MTVAL] = tval;
@@ -248,7 +248,7 @@ word_t isa_raise_intr(word_t NO, vaddr_t epc)
       ret_pc = base;
     }
   }
-  return ret_pc;
+  return riscv_legalize_pc(ret_pc);
 }
 
 #if !defined(CONFIG_TARGET_SHARE) || defined(NEMU_HAS_REPLAY)

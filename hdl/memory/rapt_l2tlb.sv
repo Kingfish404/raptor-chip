@@ -11,6 +11,13 @@ module rapt_l2tlb #(
     input logic clock,
     input logic reset,
     input logic flush,
+    // Cancellation drops transactions without invalidating stored translations.
+    input logic cancel = 1'b0,
+    input logic sfence_valid = 1'b0,
+    input logic [26:0] sfence_vpn = '0,
+    input logic [8:0] sfence_asid = '0,
+    input logic sfence_all_vpn = 1'b1,
+    input logic sfence_all_asid = 1'b1,
     input rapt_pkg::l2tlb_req_t req_i [2],
     output logic [1:0] ready_o,
     output rapt_pkg::l2tlb_rsp_t rsp_o [2]
@@ -29,6 +36,7 @@ module rapt_l2tlb #(
     logic [PpnBits-1:0] ptag;
     logic [6:0] pte;
     logic [1:0] pbmt;
+    logic [1:0] level;
   } row_t;
   localparam int RowBits = $bits(row_t);
   // Keep the RAM and its synchronous output as vectors for native FPGA inference.
@@ -37,6 +45,26 @@ module rapt_l2tlb #(
   row_t row_q;
   assign row_q = row_t'(row_bits_q);
   logic [Entries-1:0] valid;
+  // Parallel fence metadata is separate from the one-port payload BRAM.
+  // No fence lookup adds a read port or reset to the payload memory.
+  logic [VAddrBits-1:12] fence_tags[Entries];
+  logic [8:0] fence_asids[Entries];
+  logic [Entries-1:0] fence_globals;
+  logic [1:0] fence_levels[Entries];
+  logic [Entries-1:0] sfence_matches;
+  for (genvar i = 0; i < Entries; i++) begin : g_fence_match
+    assign sfence_matches[i] = rapt_pkg::tlb_sfence_match(
+        27'(fence_tags[i]),
+        fence_levels[i],
+        fence_asids[i],
+        fence_globals[i],
+        sfence_vpn,
+        sfence_asid,
+        sfence_all_vpn,
+        sfence_all_asid,
+        XLEN == 64
+    );
+  end
   logic prefer_d, owner, owner_q, response_q, valid_q;
   rapt_pkg::l2tlb_req_t selected;
   logic [VAddrBits-1:12+IndexBits] lookup_tag_q;
@@ -54,10 +82,10 @@ module rapt_l2tlb #(
 
   always_comb begin
     ready_o = '0;
-    if (!reset && !flush) ready_o[owner] = 1'b1;
+    if (!reset && !flush && !cancel && !sfence_valid) ready_o[owner] = 1'b1;
     for (int p = 0; p < 2; p++) begin
       rsp_o[p] = '0;
-      rsp_o[p].valid = response_q && owner_q == 1'(p) && !reset && !flush;
+      rsp_o[p].valid = response_q && owner_q == 1'(p) && !reset && !flush && !cancel && !sfence_valid;
       rsp_o[p].hit = valid_q
           && row_q.tag == lookup_tag_q
           && (row_q.pte[4] || row_q.asid == lookup_asid_q)
@@ -66,12 +94,14 @@ module rapt_l2tlb #(
       rsp_o[p].ptag = (XLEN-10)'(row_q.ptag);
       rsp_o[p].pte = row_q.pte;
       rsp_o[p].pbmt = row_q.pbmt;
+      rsp_o[p].level = row_q.level;
     end
   end
 
   always_ff @(posedge clock) begin
-    if (reset || flush) begin
-      valid <= '0;
+    if (reset || flush || cancel || sfence_valid) begin
+      if (reset || flush) valid <= '0;
+      else if (sfence_valid) valid <= valid & ~sfence_matches;
       response_q <= 1'b0;
       prefer_d <= 1'b0;
       valid_q <= 1'b0;
@@ -83,10 +113,21 @@ module rapt_l2tlb #(
         if (selected.fill) begin
           if (encodable) begin
             valid[index] <= 1'b1;
-            rows[index] <= row_t'{tag: selected.vtag[VAddrBits-1:12+IndexBits],
-                asid: selected.asid, root: selected.root, pbmte: selected.pbmte,
-                sbe: selected.sbe, ptag: PpnBits'(selected.ptag),
-                pte: selected.pte, pbmt: selected.pbmt};
+            fence_tags[index] <= selected.vtag[VAddrBits-1:12];
+            fence_asids[index] <= selected.asid;
+            fence_globals[index] <= selected.pte[4];
+            fence_levels[index] <= selected.level;
+            rows[index] <= row_t'{
+                tag: selected.vtag[VAddrBits-1:12+IndexBits],
+                asid: selected.asid,
+                root: selected.root,
+                pbmte: selected.pbmte,
+                sbe: selected.sbe,
+                ptag: PpnBits'(selected.ptag),
+                pte: selected.pte,
+                pbmt: selected.pbmt,
+                level: selected.level
+            };
           end
         end else begin
           row_bits_q <= rows[index];
@@ -102,4 +143,9 @@ module rapt_l2tlb #(
       end
     end
   end
+  `RAPT_SVA_NEXT(clock, reset, L2TLB_FLUSH_CLEARS_ENTRIES, flush, valid == '0)
+  `RAPT_SVA_NEXT(clock, reset, L2TLB_SFENCE_MATCHED_ENTRIES, sfence_valid && !flush,
+                 valid == ($past(valid) & ~$past(sfence_matches)))
+  `RAPT_SVA_NEXT(clock, reset, L2TLB_CANCEL_PRESERVES_ENTRIES, cancel && !flush && !sfence_valid,
+                 valid == $past(valid))
 endmodule

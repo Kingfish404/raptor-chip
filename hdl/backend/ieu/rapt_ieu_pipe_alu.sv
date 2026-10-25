@@ -33,44 +33,31 @@ module rapt_ieu_pipe_alu #(
       .out_r(alu_result)
   );
 
+  localparam int PcW = `RAPT_PC_BITS_OF(XLEN);
+  wire [XLEN-1:0] pc_value = `RAPT_PC_SEXT(XLEN, iss.uop.pc);
   logic [XLEN-1:0] jump_target;
-  assign jump_target = ((iss.uop.execute.branch.indirect ? iss.op1 : iss.uop.pc)
-      + iss.uop.imm) & ~'b1;
+  assign jump_target = ((iss.uop.execute.branch.indirect ? iss.op1 : pc_value) + XLEN'($signed(
+      iss.uop.imm
+  ))) & ~'b1;
 
   // === Writeback ===
-  assign wb_alu.valid = iss.valid;
-  assign wb_alu.dest = iss.dest;
-  assign wb_alu.generation = iss.generation;
-  assign wb_alu.result = iss.uop.execute.branch.jump
-      ? iss.uop.pc + (iss.uop.c ? 2 : 4)
+  always_comb begin
+    wb_alu = '0;
+    wb_alu.valid = iss.valid;
+    wb_alu.dest = iss.dest;
+    wb_alu.generation = iss.generation;
+    wb_alu.result = iss.uop.execute.branch.jump
+      ? pc_value + XLEN'(iss.uop.c ? 2 : 4)
       : alu_result;
-  assign wb_alu.prd = iss.prd;
-  assign wb_alu.rd = iss.uop.rd;
-  assign wb_alu.pc = iss.uop.pc;
-  assign wb_alu.npc    = iss.uop.execute.branch.jump
-      ? jump_target
-      : iss.uop.pc + (iss.uop.c ? 2 : 4);
-  assign wb_alu.btaken = 1'b0;
-  // IDU corrects non-control predictions before rename. Jump predictions are
-  // checked centrally at completion by the ROB checkpoint target file.
-  assign wb_alu.mispredict = 1'b0;
-  assign wb_alu.difftest_skip = 1'b0;
-  // ALU never produces CSR / trap / MEM sideband (unified completion sideband tie-offs).
-  assign wb_alu.csr_wen = 1'b0;
-  assign wb_alu.csr_wdata = '0;
-  assign wb_alu.fp_flags_valid = 1'b0;
-  assign wb_alu.fp_wen = 1'b0;
-  assign wb_alu.fp_result = '0;
-  assign wb_alu.fp_flags = '0;
-  assign wb_alu.trap = 1'b0;
-  assign wb_alu.tval = '0;
-  assign wb_alu.cause = '0;
-  assign wb_alu.wen = 1'b0;
-  assign wb_alu.alu = '0;
-  assign wb_alu.sq_waddr = '0;
-  assign wb_alu.sq_wdata = '0;
-  assign wb_alu.sq_wdata64 = '0;
-  assign wb_alu.sq_fp64 = 1'b0;
+    wb_alu.prd = iss.prd;
+    wb_alu.rd = iss.uop.rd;
+    wb_alu.pc = iss.uop.pc;
+    wb_alu.npc    = iss.uop.execute.branch.jump
+      ? `RAPT_PC_LEGALIZE(XLEN, PcW, jump_target)
+      : iss.uop.pc + PcW'(iss.uop.c ? 2 : 4);
+    // IDU corrects non-control predictions before rename. Jump predictions are
+    // checked centrally at completion by the ROB checkpoint target file.
 
-  assign wb_alu.updates = '{control_flow:1'b1, default:'0};
+    wb_alu.updates = '{control_flow:1'b1, default:'0};
+  end
 endmodule

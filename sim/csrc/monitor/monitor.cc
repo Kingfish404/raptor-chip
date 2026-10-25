@@ -83,6 +83,7 @@ void sdb_sim_init(int argc, char **argv);
 
 void serial_set_lf_to_cr(bool enable);
 void serial_set_exit_pattern(const char *pattern);
+bool serial_add_milestone(const char *pattern);
 
 static char *log_file = NULL;
 static char *diff_so_file = NULL;
@@ -95,6 +96,16 @@ static char *sdcard_img_file = NULL;
 static int difftest_port = 1234;
 static uint32_t mem_random_delay_max = 0;
 static uint32_t mem_random_state = 1;
+static uint32_t mem_read_latency = 0;
+static uint32_t mem_write_latency = 0;
+static bool mem_serialize_writes = false;
+static uint32_t mem_write_outstanding = 1;
+
+/* Fixed AXI memory latency: AR to first R beat, last W beat to B. */
+extern "C" uint32_t npc_mem_read_latency(void) { return mem_read_latency; }
+extern "C" uint32_t npc_mem_write_latency(void) { return mem_write_latency; }
+extern "C" uint32_t npc_mem_serialize_writes(void) { return mem_serialize_writes; }
+extern "C" uint32_t npc_mem_write_outstanding(void) { return mem_write_outstanding; }
 
 extern "C" uint32_t npc_mem_random_delay(void)
 {
@@ -201,8 +212,13 @@ static void usage(const char *prog)
   printf("      --sdcard=FILE        load FILE as LiteX SPI SD-card image\n");
   printf("      --serial-lf-to-cr    translate host LF input to CR for CR-terminated monitors\n");
   printf("      --serial-exit-on=TEXT exit successfully after TEXT appears on serial TX\n");
+  printf("      --serial-milestone=TEXT report first TX occurrence with cycle/inst counts (repeatable)\n");
   printf("      --mem-random-delay=N add 0..N random wait cycles to each AXI memory beat\n");
   printf("      --mem-random-seed=N  set reproducible random-delay seed (default 1)\n");
+  printf("      --mem-read-latency=N add N wait cycles before the first AXI read beat\n");
+  printf("      --mem-write-latency=N add N wait cycles before each AXI write response\n");
+  printf("      --mem-serialize-writes wait for B before accepting the next AXI AW\n");
+  printf("      --mem-write-outstanding=N overlap 1..64 AXI write responses (default 1)\n");
   printf("  -h, --help               display this help and exit\n");
   printf("\n");
   print_nsim_memory_map(stdout);
@@ -238,8 +254,13 @@ static int parse_args(int argc, char *argv[])
       {"no-lightsss", no_argument, NULL, 268},
       {"mem-random-delay", required_argument, NULL, 269},
       {"mem-random-seed", required_argument, NULL, 270},
+      {"mem-read-latency", required_argument, NULL, 273},
+      {"mem-write-latency", required_argument, NULL, 274},
+      {"mem-serialize-writes", no_argument, NULL, 276},
+      {"mem-write-outstanding", required_argument, NULL, 277},
       {"serial-exit-on", required_argument, NULL, 271},
       {"diff-isa", required_argument, NULL, 272},
+      {"serial-milestone", required_argument, NULL, 275},
       {0, 0, NULL, 0},
   };
   int o;
@@ -380,6 +401,42 @@ static int parse_args(int argc, char *argv[])
     case 271:
       serial_set_exit_pattern(optarg);
       break;
+    case 275:
+      if (!serial_add_milestone(optarg))
+      {
+        printf("ERROR: --serial-milestone requires nonempty single-line text\n");
+        exit(1);
+      }
+      break;
+    case 273:
+    case 274:
+    {
+      uint64_t latency = parse_u64_auto(optarg);
+      if (latency >= 0xfffff)
+      {
+        printf("ERROR: --mem-%s-latency must be less than 1048575 cycles\n",
+               o == 273 ? "read" : "write");
+        exit(1);
+      }
+      (o == 273 ? mem_read_latency : mem_write_latency) = (uint32_t)latency;
+      break;
+    }
+    case 276:
+      mem_serialize_writes = true;
+      break;
+    case 277:
+    {
+      char *end = nullptr;
+      errno = 0;
+      uint64_t count = strtoull(optarg, &end, 0);
+      if (optarg[0] == '-' || end == optarg || *end || errno == ERANGE || count < 1 || count > 64)
+      {
+        printf("ERROR: --mem-write-outstanding must be between 1 and 64\n");
+        exit(1);
+      }
+      mem_write_outstanding = (uint32_t)count;
+      break;
+    }
     case 272:
     {
       constexpr uint64_t supported = NEMU_ISA_EXT_SVNAPOT | NEMU_ISA_EXT_ZAWRS |
@@ -416,6 +473,13 @@ static int parse_args(int argc, char *argv[])
   if (mem_random_delay_max != 0)
     Log("AXI memory random delay enabled: 0..%u cycles, seed=%u",
         mem_random_delay_max, mem_random_state);
+  if (mem_write_outstanding != 1)
+    Log("AXI memory write response slots: %u", mem_write_outstanding);
+  if (mem_read_latency != 0 || mem_write_latency != 0)
+    Log("AXI memory fixed latency: read %u, write %u cycles", mem_read_latency,
+        mem_write_latency);
+  if (mem_serialize_writes)
+    Log("AXI memory writes: one transaction through B before the next AW");
   static char ckpt_default_dir[1100];
   if (ckpt_save_requested)
   {

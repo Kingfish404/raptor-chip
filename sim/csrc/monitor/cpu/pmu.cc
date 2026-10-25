@@ -1,4 +1,5 @@
 #include <common.h>
+#include <axi_metrics.h>
 #include <difftest.h>
 #include <readline/readline.h>
 #include <readline/history.h>
@@ -75,9 +76,99 @@ static IoqHeadStallMetrics ioq_head_stalls = {};
 struct L1dWritebackMetrics {
   std::array<uint64_t, 6> state{}; // IDLE, SCAN, READ, CAPTURE, WAIT, CLEAN.
   uint64_t dirty = 0, hold = 0, global_request = 0, drain_request = 0;
-  uint64_t local_store_ready = 0, backend_drain = 0;
+  uint64_t local_store_ready = 0, cache_drain = 0;
 };
 static L1dWritebackMetrics l1d_writeback = {};
+static AxiCycleSample axi_cycle_sample;
+static AxiMetrics axi_metrics;
+
+static bool sq_is_full()
+{
+  // The unconsumed sq_all_full alias may become undriven header storage in
+  // Verilator. Derive the reduction from the live queue-valid register instead.
+  const unsigned capacity = VERILOG_BACKEND(lsu__DOT__u_sq__DOT__SQ_SIZE);
+  const uint64_t valid = VERILOG_BACKEND(lsu__DOT__u_sq__DOT__sq_valid);
+  const uint64_t mask = capacity >= 64 ? UINT64_MAX : (uint64_t(1) << capacity) - 1;
+  return capacity != 0 && (valid & mask) == mask;
+}
+
+template <typename Top>
+static auto l1d_tag_ready(Top *top, int)
+    -> decltype(VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__u_tags__DOT__load_hit))
+{
+  return VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__u_tags__DOT__load_hit);
+}
+
+// Presets without L1D tags have no cache-hit activity to report.
+template <typename Top>
+static bool l1d_tag_ready(Top *, ...)
+{
+  return false;
+}
+
+// Capture settled channel values before the active edge. Sampling live values
+// after eval can miss a one-cycle handshake when valid drops on that edge.
+void perf_capture_axi_before_edge()
+{
+  axi_cycle_sample = {};
+#if !defined(RAPT_SOC) && !defined(CONFIG_wrapBus)
+  if (VERILOG_RESET) return;
+  auto &s = axi_cycle_sample;
+  s.valid = true;
+  // Module port aliases can survive in headers as undriven storage. The
+  // interface cell is the live endpoint used by the generated memory model.
+  const auto *axi = VERILOG_CLUSTER(__PVT__offchip_axi);
+  s.arvalid = axi->arvalid;
+  s.arready = axi->arready;
+  s.rvalid = axi->rvalid;
+  s.rready = axi->rready;
+  // The router passes WLAST through; Verilator keeps its live driver on
+  // core_axi. RLAST is driven by the native memory model's registered flag.
+  // The offchip_axi copies of these fields may be undriven aliases as well.
+  s.rlast = top->rootp->raptSoC->perip__DOT__r_last_q;
+  s.awvalid = axi->awvalid;
+  s.awready = axi->awready;
+  s.wvalid = axi->wvalid;
+  s.wready = axi->wready;
+  s.wlast = VERILOG_CLUSTER(__PVT__core_axi)->wlast;
+  s.bvalid = axi->bvalid;
+  s.bready = axi->bready;
+  s.posted_count = VERILOG_CPU(memory_subsystem__DOT__bus__DOT__posted_count);
+  s.posted_capacity = VERILOG_CPU(memory_subsystem__DOT__bus__DOT__PostedWrites);
+  s.posted_fire = VERILOG_CPU(memory_subsystem__DOT__bus__DOT__posted_fire);
+  s.posted_response = VERILOG_CPU(memory_subsystem__DOT__bus__DOT__posted_response);
+  s.write_outstanding = VERILOG_AXI_MASTER(write_outstanding);
+  s.write_skid = VERILOG_AXI_MASTER(write_skid_valid);
+  s.sq_full = sq_is_full();
+#endif
+}
+
+static void report_axi_metrics()
+{
+  const auto &a = axi_metrics;
+  if (!a.cycles) return;
+  const auto u = [](uint64_t value) { return static_cast<unsigned long long>(value); };
+  Log("AXI handshakes: cycles=%llu AR=%llu R=%llu RLAST=%llu AW=%llu W=%llu WLAST=%llu B=%llu",
+      u(a.cycles), u(a.ar), u(a.r), u(a.rlast), u(a.aw), u(a.w), u(a.wlast), u(a.b));
+  Log("AXI wait cycles: AR=%llu R=%llu AW=%llu W=%llu B=%llu wlast_without_bvalid=%llu "
+      "wlast_pending_sum=%llu wlast_pending_end=%llu unmatched_b=%llu",
+      u(a.ar_stall), u(a.r_stall), u(a.aw_stall), u(a.w_stall), u(a.b_stall),
+      u(a.b_wait), u(a.wlast_pending_sum), u(a.wlast_pending), u(a.unmatched_b));
+  std::string histogram;
+  for (size_t i = 0; i < a.posted_histogram.size(); ++i)
+  {
+    if (i) histogram += ",";
+    histogram += std::to_string(a.posted_histogram[i]);
+  }
+  Log("Posted writes: capacity=%llu accepted=%llu responses=%llu busy_cycles=%llu "
+      "full_cycles=%llu occupancy_sum=%llu peak=%llu histogram=[%s]",
+      u(a.posted_capacity), u(a.posted_fire), u(a.posted_response), u(a.posted_busy),
+      u(a.posted_full), u(a.posted_sum), u(a.posted_peak), histogram.c_str());
+  Log("Write pressure: outstanding_sum=%llu outstanding_peak=%llu skid_busy_cycles=%llu "
+      "sq_full=%llu sq_and_posted_full=%llu sq_and_w_stall=%llu sq_and_b_wait=%llu",
+      u(a.outstanding_sum), u(a.outstanding_peak), u(a.skid_busy), u(a.sq_full),
+      u(a.sq_and_posted_full), u(a.sq_and_w_stall), u(a.sq_and_b_wait));
+}
 using ControlRecoveryMetrics = RecoveryMetrics<RtlConfig::ROBEntries,
     RtlConfig::CfAllocate, RtlConfig::CfResolve, RtlConfig::CfMispredict,
     RtlConfig::CfRetire, RtlConfig::CfTrap>;
@@ -266,6 +357,8 @@ void perf_reset_counters()
   rob_head_stalls = {};
   ioq_head_stalls = {};
   l1d_writeback = {};
+  axi_metrics = {};
+  axi_cycle_sample = {};
   alq_issue_histogram = {};
   recovery_metrics = {};
   recovery_head = {};
@@ -360,6 +453,7 @@ void perf_sample_per_cycle()
     return;
   }
   pmu.active_cycle++;
+  axi_metrics.sample(axi_cycle_sample);
   const unsigned wb_state = VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__wb_state);
   if (wb_state < l1d_writeback.state.size()) ++l1d_writeback.state[wb_state];
   l1d_writeback.dirty += VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__dirty_any);
@@ -370,8 +464,8 @@ void perf_sample_per_cycle()
       VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__wb_drain_request);
   l1d_writeback.local_store_ready +=
       VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__local_store_ready);
-  l1d_writeback.backend_drain +=
-      VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__writeback_drain);
+  l1d_writeback.cache_drain +=
+      VERILOG_CPU(memory_subsystem__DOT__cache_writeback_drain);
   if (recovery_metrics.pending_wrong()) {
     if (!VERILOG_ROU(pmu_cf_head_busy)) ++recovery_head.empty;
     else if (!VERILOG_ROU(pmu_cf_head_waiting)) ++recovery_head.ready;
@@ -523,7 +617,7 @@ void perf_sample_per_cycle()
   bool exu_ioq_full = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__pmu_ioq_all_full);
   bool exu_ioq_valid_found = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_valid_found);
   uint8_t l1d_state = *(uint8_t *)&VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__l1d_state);
-  bool lsu_l1d_hit = *(uint8_t *)&VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__tag_hit);
+  bool lsu_l1d_hit = l1d_tag_ready(top, 0);
   bool lsu_fwd_hit = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_sq__DOT__fwd_hit);
   bool lsu_load_in_sq = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_sq__DOT__load_in_sq);
   bool lsu_raddr_valid = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_sq__DOT__raddr_valid);
@@ -707,12 +801,12 @@ void perf_sample_per_cycle()
   //    IOQ probes are one-bit reductions and work for every configured depth.
   //    UOQ-blocked: rnu has a renamed uop but the dispatch path cannot accept it.
   //    True ROB-full is the rapt_rou all-entry-busy event pulse.
-  //    SQ-full: width-stable 1-bit probe from the LSU (&sq_valid).
+  //    SQ-full: reduction of the live LSU queue-valid register.
   bool rs_full = *(uint8_t *)&VERILOG_BACKEND(ieu__DOT__pmu_ooo_full);
   bool ioq_full = exu_ioq_full;
   bool uoq_blocked = rnu_valid && !rou_ready;
   bool rob_full_event = *(uint8_t *)&VERILOG_ROU(pmu_rob_full);
-  bool sq_full = npc.sq_full && (*npc.sq_full != 0);
+  bool sq_full = sq_is_full();
   if (rs_full)
   {
     pmu.rs_full_cycle++;
@@ -779,12 +873,13 @@ void perf_sample_per_cycle()
   // L1D cache sample: state-transition-based tracking (load path only)
   // L1D FSM states: IDLE=000, LD_A=001, LD_D=010, PTWAIT=100, TRAP=101
   bool entering_d_ptw = (sampler_state.prev_l1d_state != 0b100) && (l1d_state == 0b100);
-  // Hit: LD_A with tag_hit (1-cycle load hit)
+  // Tag-ready cycles can include a held WB lookup; this is not a count of
+  // completed load handshakes and must not be used as a miss-rate denominator.
   if (l1d_state == 0b001 && lsu_l1d_hit)
   {
     pmu.l1d_cache_hit_cnt++;
   }
-  // Miss: transition from LD_A to LD_D (tag miss, going to memory)
+  // This transition starts a cache refill or uncached load in the tracked FSM.
   if (sampler_state.prev_l1d_state == 0b001 && l1d_state == 0b010)
   {
     pmu.l1d_cache_miss_cnt++;
@@ -1055,20 +1150,18 @@ static void perf_compact()
       pmu.l1i_cache_miss_cnt
           ? (double)pmu.l1i_cache_miss_cycle / pmu.l1i_cache_miss_cnt : 0.0,
       pmu.ifu_fetch_response_cnt, pmu.ifu_fetch_cnt);
-  const long long l1d_total = pmu.l1d_cache_hit_cnt + pmu.l1d_cache_miss_cnt;
-  const double l1d_miss_rate = percentage(pmu.l1d_cache_miss_cnt, l1d_total);
-  const double l1d_miss_penalty = pmu.l1d_cache_miss_cnt
-      ? (double)pmu.l1d_cache_miss_cycle / pmu.l1d_cache_miss_cnt : 0.0;
-  Log("L1D load: hits=%lld(%.1f%%) misses=%lld(%.1f%%) miss_cycles=%lld "
-      "miss_avg=%.2f amat=%.2f (cycles/access)",
-      pmu.l1d_cache_hit_cnt, percentage(pmu.l1d_cache_hit_cnt, l1d_total),
-      pmu.l1d_cache_miss_cnt, l1d_miss_rate, pmu.l1d_cache_miss_cycle,
-      l1d_miss_penalty,
-      l1d_total ? 1.0 + l1d_miss_rate / 100.0 * l1d_miss_penalty : 0.0);
+  // LD_A tag-ready cycles may repeat under holds. LD_A->LD_D starts include
+  // cache refills and uncached loads, so neither count defines a cache miss rate.
+  Log("L1D activity: tag_ready_cycles=%lld bus_load_starts=%lld bus_load_cycles=%lld "
+      "bus_cycles_per_start=%.2f (LD_A->LD_D starts, LD_D service cycles)",
+      pmu.l1d_cache_hit_cnt, pmu.l1d_cache_miss_cnt, pmu.l1d_cache_miss_cycle,
+      pmu.l1d_cache_miss_cnt
+          ? (double)pmu.l1d_cache_miss_cycle / pmu.l1d_cache_miss_cnt : 0.0);
 }
 
 void perf()
 {
+  report_axi_metrics();
   if (const char *verbose = std::getenv("RAPTOR_PMU_VERBOSE"); !verbose || std::string(verbose) != "1")
   {
     perf_compact();
@@ -1303,14 +1396,14 @@ void perf()
       static_cast<unsigned long long>(ioq_head_stalls.store_check_wait),
       static_cast<unsigned long long>(ioq_head_stalls.completion_ready));
   Log("L1D WB states [idle scan read capture wait clean]=[%s]; dirty=%llu hold=%llu "
-      "global_req=%llu drain_req=%llu local_store_ready=%llu backend_drain=%llu",
+      "global_req=%llu drain_req=%llu local_store_ready=%llu cache_drain=%llu",
       compact_histogram(l1d_writeback.state).c_str(),
       static_cast<unsigned long long>(l1d_writeback.dirty),
       static_cast<unsigned long long>(l1d_writeback.hold),
       static_cast<unsigned long long>(l1d_writeback.global_request),
       static_cast<unsigned long long>(l1d_writeback.drain_request),
       static_cast<unsigned long long>(l1d_writeback.local_store_ready),
-      static_cast<unsigned long long>(l1d_writeback.backend_drain));
+      static_cast<unsigned long long>(l1d_writeback.cache_drain));
 
   // -------------------------------------------------------------------
   // Rename / dispatch status mix.
@@ -1422,21 +1515,13 @@ void perf()
           ? (double)pmu.l1i_cache_miss_cycle / pmu.l1i_cache_miss_cnt
           : 0.0,
       pmu.ifu_fetch_response_cnt, pmu.ifu_fetch_cnt);
-  // L1D cache (load path only; stores are write-through and don't stall)
-  long long int l1d_total = pmu.l1d_cache_hit_cnt + pmu.l1d_cache_miss_cnt;
-  long long int l1d_hit_cycle = pmu.l1d_cache_hit_cnt; // ~1 SRAM cycle per hit
-  double l1d_hit_rate = percentage(pmu.l1d_cache_hit_cnt, l1d_total);
-  double l1d_miss_rate = percentage(pmu.l1d_cache_miss_cnt, l1d_total);
-  double l1d_access_time = pmu.l1d_cache_hit_cnt > 0 ? (double)l1d_hit_cycle / pmu.l1d_cache_hit_cnt : 0;
-  double l1d_miss_penalty = pmu.l1d_cache_miss_cnt > 0 ? (double)pmu.l1d_cache_miss_cycle / pmu.l1d_cache_miss_cnt : 0;
-  Log("L1D load: hits=%lld(%.1f%%) misses=%lld(%.1f%%) hit_cycles=%lld(%.1f%%) miss_cycles=%lld(%.1f%%) "
-      "hit_avg=%.2f miss_avg=%.2f amat=%.2f (cycles/access)",
-      pmu.l1d_cache_hit_cnt, l1d_hit_rate,
-      pmu.l1d_cache_miss_cnt, l1d_miss_rate,
-      l1d_hit_cycle, percentage(l1d_hit_cycle, l1d_hit_cycle + pmu.l1d_cache_miss_cycle),
-      pmu.l1d_cache_miss_cycle, percentage(pmu.l1d_cache_miss_cycle, l1d_hit_cycle + pmu.l1d_cache_miss_cycle),
-      l1d_access_time, l1d_miss_penalty,
-      l1d_access_time + l1d_miss_rate / 100.0 * l1d_miss_penalty);
+  // LD_A tag-ready cycles may repeat under holds. LD_A->LD_D starts include
+  // cache refills and uncached loads, so neither count defines a cache miss rate.
+  Log("L1D activity: tag_ready_cycles=%lld bus_load_starts=%lld bus_load_cycles=%lld "
+      "bus_cycles_per_start=%.2f (LD_A->LD_D starts, LD_D service cycles)",
+      pmu.l1d_cache_hit_cnt, pmu.l1d_cache_miss_cnt, pmu.l1d_cache_miss_cycle,
+      pmu.l1d_cache_miss_cnt
+          ? (double)pmu.l1d_cache_miss_cycle / pmu.l1d_cache_miss_cnt : 0.0);
   Log("TLB (misses/ptw_cycles/pct_active): ITLB=%lld/%lld/%.1f%% STLB=%lld/%lld/%.1f%% LTLB=%lld/%lld/%.1f%%",
       pmu.itlb_ptw_count, pmu.itlb_ptw_cycle, percentage(pmu.itlb_ptw_cycle, pmu.active_cycle),
       pmu.stlb_ptw_count, pmu.stlb_ptw_cycle, percentage(pmu.stlb_ptw_cycle, pmu.active_cycle),

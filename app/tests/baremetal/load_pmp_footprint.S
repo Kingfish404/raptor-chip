@@ -15,9 +15,11 @@ _start:
   csrw mstatus, zero
   li s4, 0
   la s0, area
-  srli t0, s0, 2
+  la t0, permitted_page
+  srli t0, t0, 2
+  ori t0, t0, 511
   csrw pmpaddr0, t0
-  li t0, 0x19                 /* NAPOT 8 B, read only */
+  li t0, 0x19                 /* NAPOT 4 KiB page, read only */
   csrw pmpcfg0, t0
   sfence.vma
   li t0, LOAD_STATUS
@@ -30,7 +32,10 @@ _start:
   bne t1, t3, fail
   li t3, 0x3322
   bne t2, t3, fail
-  /* TOR [area,area+12): an aligned 8 B high beat would overcheck. */
+  /* The permitted page ends at area+12: preserve the beat-overcheck case. */
+  la t0, permitted_page
+  srli t0, t0, 2
+  csrw pmpaddr0, t0
   addi t0, s0, 12
   srli t0, t0, 2
   csrw pmpaddr1, t0
@@ -91,7 +96,9 @@ fail:
   ebreak
   j fail
 .section .data
-.balign 16
+.balign 4096
+permitted_page:
+  .zero 4096-12
 area:
   .byte 0x11,0x22,0x33,0x44,0x55,0x66,0x77,0x08
   .byte 0x19,0x2a,0x3b,0x4c,0x5d,0x6e,0x7f,0x10

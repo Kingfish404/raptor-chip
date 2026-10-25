@@ -11,7 +11,10 @@ module rapt_l1d_tags #(
     parameter int L1D_N_WAYS = `RAPT_L1D_N_WAYS,
     parameter int L1dTagW = `RAPT_PADDR_BITS - L1D_LEN - L1D_LINE_LEN - $clog2(`RAPT_XLEN / 8),
     parameter int L1dWayW = L1D_N_WAYS > 1 ? $clog2(L1D_N_WAYS) : 1,
-    parameter bit WriteBack = 1'b0
+    parameter bit WriteBack = 1'b0,
+    parameter bit DirtySkip = 1'b0,
+    // True LRU for 2-16 ways instead of the 2-way fill toggle / tree PLRU.
+    parameter bit CacheLru = `RAPT_CACHE_LRU != 0
 ) (
     input logic clock,
     input logic reset,
@@ -62,6 +65,8 @@ module rapt_l1d_tags #(
     output logic [L1D_LINE_SIZE-1:0] inspect_valid,
     output logic [L1D_LINE_SIZE-1:0] inspect_dirty,
     output logic dirty_any,
+    output logic [L1D_LEN-1:0] first_dirty_set,
+    output logic [L1dWayW-1:0] first_dirty_way,
     output logic inspect_dirty_any,
     output logic update_blocked
 );
@@ -161,6 +166,30 @@ module rapt_l1d_tags #(
     end
   end
 
+  // Optional sparse maintenance selection. The controller consumes these
+  // registered-state summaries only when dirty_any is true, and rereads them
+  // after cleaning each line. No clean set needs a tag-array inspection.
+  if (WriteBack && DirtySkip) begin : g_dirty_select
+    logic [L1D_SIZE-1:0] dirty_set;
+    for (genvar set_idx = 0; set_idx < L1D_SIZE; set_idx++) begin : g_set
+      always_comb begin
+        dirty_set[set_idx] = 1'b0;
+        for (int way = 0; way < L1D_N_WAYS; way++) dirty_set[set_idx] |= line_dirty_q[way][set_idx];
+      end
+    end
+    always_comb begin
+      first_dirty_set = '0;
+      for (int set_idx = L1D_SIZE - 1; set_idx >= 0; set_idx--)
+      if (dirty_set[set_idx]) first_dirty_set = L1D_LEN'(set_idx);
+      first_dirty_way = '0;
+      for (int way = L1D_N_WAYS - 1; way >= 0; way--)
+      if (line_dirty_q[way][first_dirty_set]) first_dirty_way = L1dWayW'(way);
+    end
+  end else begin : g_no_dirty_select
+    assign first_dirty_set = '0;
+    assign first_dirty_way = '0;
+  end
+
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_dirty_conflict
     always_comb begin
       dirty_conflict[way] = 1'b0;
@@ -206,7 +235,7 @@ module rapt_l1d_tags #(
     assign load_line_valid[way] = |valid_addr[way];
     assign store_line_valid[way] = |valid_waddr[way];
   end
-  if (L1D_N_WAYS > 2) begin : g_replacement
+  if (L1D_N_WAYS > 2 || (CacheLru && L1D_N_WAYS == 2)) begin : g_replacement
     logic [L1D_LEN-1:0] read_set[2], update_set[2];
     logic [L1dWayW-1:0] update_way[2];
     logic [1:0] update_valid;
@@ -214,27 +243,44 @@ module rapt_l1d_tags #(
     assign read_set[1] = waddr_idx;
     assign update_set[0] = addr_idx;
     assign update_set[1] = l1d_idx;
-    assign update_valid = {l1d_update && l1d_valid_u && !clear_any
-                           && !clear_line_valid && update_allowed, load_hit};
+    assign update_valid = {
+      l1d_update && l1d_valid_u && !clear_any && !clear_line_valid && update_allowed, load_hit
+    };
     assign update_way[1] = l1d_way;
     always_comb begin
       update_way[0] = '0;
       for (int way = L1D_N_WAYS - 1; way >= 0; way--)
       if (load_way_hit[way]) update_way[0] = L1dWayW'(way);
     end
-    rapt_cache_plru #(
-        .Ways(L1D_N_WAYS),
-        .SetBits(L1D_LEN)
-    ) u_policy (
-        .clock(clock),
-        .reset(reset),
-        .invalidate(fence_time),
-        .read_set(read_set),
-        .victim(victims),
-        .update_valid(update_valid),
-        .update_set(update_set),
-        .update_way(update_way)
-    );
+    if (CacheLru && L1D_N_WAYS <= 16) begin : g_lru
+      rapt_cache_lru #(
+          .Ways(L1D_N_WAYS),
+          .SetBits(L1D_LEN)
+      ) u_policy (
+          .clock(clock),
+          .reset(reset),
+          .invalidate(`RAPT_SFENCE_KEEP_STATE < 1 && fence_time),
+          .read_set(read_set),
+          .victim(victims),
+          .update_valid(update_valid),
+          .update_set(update_set),
+          .update_way(update_way)
+      );
+    end else begin : g_plru
+      rapt_cache_plru #(
+          .Ways(L1D_N_WAYS),
+          .SetBits(L1D_LEN)
+      ) u_policy (
+          .clock(clock),
+          .reset(reset),
+          .invalidate(`RAPT_SFENCE_KEEP_STATE < 1 && fence_time),
+          .read_set(read_set),
+          .victim(victims),
+          .update_valid(update_valid),
+          .update_set(update_set),
+          .update_way(update_way)
+      );
+    end
   end else begin : g_toggle
     assign victims[0] = L1dWayW'(L1D_N_WAYS == 2 && load_replace);
     assign victims[1] = L1dWayW'(L1D_N_WAYS == 2 && store_replace);
@@ -242,10 +288,8 @@ module rapt_l1d_tags #(
 
 
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_probe
-    assign probe_way_hit[way] = (tag_probe_data[way] == probe_tag)
-                               & valid_probe[way][probe_offset];
-    assign clear_line_dirty_way[way] = clear_tag_match[way]
-                                    && line_dirty_q[way][clear_line_idx];
+    assign probe_way_hit[way] = (tag_probe_data[way] == probe_tag) & valid_probe[way][probe_offset];
+    assign clear_line_dirty_way[way] = clear_tag_match[way] && line_dirty_q[way][clear_line_idx];
   end
 
   // Parallel write-side tag comparison (per-line tag)

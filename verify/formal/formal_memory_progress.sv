@@ -5,7 +5,9 @@
 // Closed-loop progress contract, not a whole-cache/data equivalence proof.
 // Real L1D + bus control; two sets, one way, two words/line, MSHRs disabled
 // by the runner. Three one-shot requests start independently in cycles 0..3.
-module formal_memory_progress (
+module formal_memory_progress #(
+    parameter bit TargetedCoherence = `RAPT_L1D_TARGETED_COHERENCE
+) (
     input logic clock,
     input logic reset,
     input logic [3:0] advance,
@@ -39,8 +41,10 @@ module formal_memory_progress (
   l1i_bus_if l1i_bus ();
   mem_link_if mem ();
   logic coherent_request, coherent_write, coherent_ready;
+  logic [`RAPT_XLEN-1:0] coherent_addr;
   rapt_l1d #(
       .WriteBack(1),
+      .TargetedCoherence(TargetedCoherence),
       .LineRefill(1),
       .L1D_LEN(1),
       .L1D_N_WAYS(1),
@@ -49,6 +53,7 @@ module formal_memory_progress (
       .clock,
       .reset,
       .coherent_request,
+      .coherent_addr,
       .coherent_write,
       .coherent_ready,
       .cmu_bcast,
@@ -58,10 +63,13 @@ module formal_memory_progress (
       .exu_l1d,
       .l1d_bus
   );
-  rapt_bus bus_dut (
+  rapt_bus #(
+      .TargetedCoherence(TargetedCoherence)
+  ) bus_dut (
       .clock,
       .reset,
       .coherent_request,
+      .coherent_addr,
       .coherent_write,
       .coherent_ready,
       .cmu_bcast,

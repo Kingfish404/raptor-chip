@@ -16,7 +16,7 @@ interface lsu_pipe_if #(
   logic atomic_lock;
   logic atomic_release; // atomic read must wait for older SQ writes to complete
   logic ordered;
-  logic [XLEN-1:0] pc;
+  logic [`RAPT_PC_BITS_OF(XLEN)-1:0] pc;
   logic [XLEN-1:0] rdata;
   logic [63:0] fp_rdata64;
   logic fp_rdata64_req;

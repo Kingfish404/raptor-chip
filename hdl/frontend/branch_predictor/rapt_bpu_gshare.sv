@@ -16,6 +16,7 @@ module rapt_bpu_gshare #(
 ) (
     `RAPT_BPU_DIRP_PORTS
 );
+  localparam int PcW = `RAPT_PC_BITS_OF(XLEN);
   /* verilator lint_off UNUSEDSIGNAL */
   /* verilator lint_off UNUSEDPARAM */
   logic _u;
@@ -26,7 +27,7 @@ module rapt_bpu_gshare #(
   logic [1:0]         mem  [DEPTH];
   logic [IDX_LEN-1:0] r_idx;
 
-  function automatic logic [IDX_LEN-1:0] mix_idx(input logic [XLEN-1:0] pc,
+  function automatic logic [IDX_LEN-1:0] mix_idx(input logic [PcW-1:0] pc,
                                                  input logic [GHR_LEN-1:0] g);
     logic [IDX_LEN-1:0] pc_part;
     logic [IDX_LEN-1:0] gh_part;

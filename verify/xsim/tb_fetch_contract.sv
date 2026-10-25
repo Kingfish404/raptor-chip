@@ -216,7 +216,7 @@ module tb_fetch_prediction;
         check(ifu_idu.slot[0].trap, "predicted packet hid fetch fault");
         check(ifu_idu.slot[0].cause == (translated ? `RAPT_CAUSE_INSTR_PAGE_FAULT
               : `RAPT_CAUSE_INSTR_ACC_FAULT), "fault cause");
-        check(ifu_idu.slot[0].tval == Base, "fault tval");
+        check(!ifu_idu.slot[0].fetch_tval_plus2, "fault tval");
         seen = 1;
         break;
       end

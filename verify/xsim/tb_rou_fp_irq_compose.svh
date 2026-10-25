@@ -58,8 +58,9 @@ task automatic fp_irq_positive_control;
   fp_irq_seed();
   control_uop = '0;
   control_uop.pc = XLEN'(`RAPT_PC_INIT);
-  control_uop.pnpc = control_uop.pc + XLEN'(4);
+
   control_uop.inst = 32'hf4000153;
+  control_uop.imm = 32'hf4000153;
   control_uop.execute.fp.valid = 1;
   control_uop.execute.fp.op = `RAPT_FP_OP_ZFHMIN;
   control_uop.execute.fp.rd = 2;

@@ -196,7 +196,7 @@ rapt_iq #(
         idu_rnu.slot[s].uop.schedule.domain = CustomDomain;
         idu_rnu.slot[s].uop.schedule.issue_ports = '1;
         idu_rnu.slot[s].uop.pc = xlen_t'('h8000_0000 + 4 * id);
-        idu_rnu.slot[s].uop.pnpc = idu_rnu.slot[s].uop.pc + 4;
+        idu_rnu.slot[s].pnpc = idu_rnu.slot[s].uop.pc + 4;
         idu_rnu.slot[s].uop.inst = 32'h00000013;
         idu_rnu.slot[s].uop.rd = arch_reg_t'(1 + id % 7);
         idu_rnu.slot[s].uop.execute.custom_control = 80'(id);

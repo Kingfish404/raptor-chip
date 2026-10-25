@@ -456,7 +456,7 @@ module tb_ifu_response_stage;
     if (`RAPT_FETCH_RESPONSE_STAGE) tick();
     repeat (8) begin
       assert (ifu_idu.valid[0] && ifu_idu.slot[0].trap
-          && ifu_idu.slot[0].pc == Base && ifu_idu.slot[0].tval == Base+2
+          && ifu_idu.slot[0].pc == Base && ifu_idu.slot[0].fetch_tval_plus2
           && ifu_idu.slot[0].cause == 1 && hazard)
       else $fatal(1, "fault response metadata changed under backpressure");
       tick();

@@ -14,12 +14,12 @@ module rapt_decode_slot #(
     output rapt_pkg::decoded_slot_t decoded
 );
   logic [31:0] inst;
-  logic [XLEN-1:0] pc_idu, ifu_tval, ifu_cause;
+  logic [XLEN-1:0] pc_idu;
+  logic [5:0] ifu_cause;
   logic ifu_trap;
   assign inst = fetched.inst;
-  assign pc_idu = fetched.pc;
+  assign pc_idu = `RAPT_PC_SEXT(XLEN, fetched.pc);
   assign ifu_trap = fetched.trap;
-  assign ifu_tval = fetched.tval;
   assign ifu_cause = fetched.cause;
   logic [63:0] dec_imm, dec_op1, dec_op2;
   logic [5:0] alu;
@@ -44,14 +44,16 @@ module rapt_decode_slot #(
   logic        is_c;
   logic [31:0] inst_de;
   logic [31:0] inst_idu;
-  logic [XLEN-1:0] illegal_tval;
+  logic [31:0] illegal_tval;
+  logic illegal_inst, illegal_csr, fp_disabled, is_illegal;
+  logic is_wfi, is_sfence_vma, is_sinval_vma, is_inval_fence;
 
   assign is_c     = (inst[1:0] != 2'b11);
   assign inst_idu = is_c ? inst_de : inst;
   // Sstvala requires the actual faulting instruction, right-justified. Do
   // not report the decompressor output: a reserved 16-bit encoding expands
   // to the decoder's illegal sentinel and would otherwise lose its raw bits.
-  assign illegal_tval = is_c ? XLEN'(inst[15:0]) : XLEN'(inst);
+  assign illegal_tval = is_c ? {16'b0, inst[15:0]} : inst;
 
   rapt_idu_decoder_c idu_de_c (
       .io_cinst  (inst[15:0]),
@@ -129,15 +131,22 @@ module rapt_decode_slot #(
     || (fp_op == `RAPT_FP_OP_FCVT_D_L)
     || (fp_op == `RAPT_FP_OP_FCVT_D_LU);
 
-  // Truncate 64-bit decoder outputs to XLEN
-  assign decoded.uop.imm = dec_imm[XLEN-1:0];
+  // All scalar immediates fit signed 32 bits. Non-immediate operations reuse
+  // the payload for raw illegal/FP encodings or compact CSR/fence metadata.
+  assign decoded.uop.imm = is_illegal && !ifu_trap ? illegal_tval[31:0]
+      : fp_valid && !(fp_load || fp_store || fp_load_d || fp_store_d) ? inst_idu
+      : |csr_csw ? {15'b0, inst_idu[19:15], dec_imm[11:0]}
+      : (is_sfence_vma || is_sinval_vma)
+          ? {30'b0, (inst_idu[24:20] == 0), (inst_idu[19:15] == 0)}
+      : dec_imm[31:0];
   // The decoder only produces op1 in {0, pc, imm, uimm} and op2 in {0, imm}.
   // With DerivedConstants the upper bits are constant zero, so every buffer
   // between decode and dispatch drops them.
   if (DerivedConstants) begin : g_derived_constants
     logic [1:0] op1_kind;
     always_comb begin
-      if (dec_op1[XLEN-1:0] == '0) op1_kind = rapt_pkg::OpConstZero;
+      if (|csr_csw && inst_idu[14]) op1_kind = rapt_pkg::OpConstUimm;
+      else if (dec_op1[XLEN-1:0] == '0) op1_kind = rapt_pkg::OpConstZero;
       else if (dec_op1[XLEN-1:0] == pc_idu) op1_kind = rapt_pkg::OpConstPc;
       else if (dec_op1[XLEN-1:0] == dec_imm[XLEN-1:0]) op1_kind = rapt_pkg::OpConstImm;
       else op1_kind = rapt_pkg::OpConstUimm;
@@ -147,10 +156,10 @@ module rapt_decode_slot #(
 `ifndef SYNTHESIS
     always_comb begin
       assert (rapt_pkg::derive_op1(
-          XLEN'(op1_kind), pc_idu, dec_imm[XLEN-1:0], decoded.uop.inst
+          XLEN'(op1_kind), fetched.pc, dec_imm[31:0], inst_idu[19:15]
       ) == dec_op1[XLEN-1:0])
       else $error("decode op1 constant is not derivable");
-      assert (rapt_pkg::derive_op2(decoded.op2, dec_imm[XLEN-1:0]) == dec_op2[XLEN-1:0])
+      assert (rapt_pkg::derive_op2(decoded.op2, dec_imm[31:0]) == dec_op2[XLEN-1:0])
       else $error("decode op2 constant is not derivable");
     end
 `endif
@@ -162,8 +171,6 @@ module rapt_decode_slot #(
   // Per-instruction legality is independent of the decode position. Check the
   // ALU encoding, CSR access, privilege gates and extension availability here;
   // ordered group policy belongs to rapt_idu.
-  logic illegal_inst, illegal_csr, fp_disabled, is_illegal;
-
   assign illegal_inst = (alu == `RAPT_ALU_ILL_);
   assign fp_disabled = fp_valid && (csr_bcast.fs == 2'b00);
   // CSR write attempt: CSRRW/CSRRWI always write; CSRRS/C/SI/CI write if rs1/uimm != 0
@@ -189,7 +196,6 @@ module rapt_decode_slot #(
   //   satp: illegal in S-mode when mstatus.TVM=1 (generic priv check catches U).
   //   cycle/time/instret (+h): read from S or U needs mcounteren bit;
   //     read from U additionally needs scounteren bit.
-  logic is_wfi, is_sfence_vma, is_sinval_vma, is_inval_fence;
   logic wfi_illegal, mret_illegal, sret_illegal, sfence_vma_illegal, satp_illegal;
   logic counter_illegal, stimecmp_illegal;
   logic is_hpm_counter;
@@ -273,12 +279,10 @@ module rapt_decode_slot #(
   assign shift_imm_xlen_illegal = XLEN == 32 && inst_idu[6:0] == 7'h13
       && (inst_idu[14:12] == 3'b001 || inst_idu[14:12] == 3'b101)
       && inst_idu[25];
-  assign rev8_xlen_illegal = XLEN == 64
-      && (inst_idu & 32'hfff0707f) == 32'h69805013;
+  assign rev8_xlen_illegal = XLEN == 64 && (inst_idu & 32'hfff0707f) == 32'h69805013;
   // C.ZEXT.H already expands to the XLEN-specific opcode. Reject only
   // the unimplemented RV32 native encoding when executing RV64.
-  assign zexth_xlen_illegal = XLEN == 64
-      && (inst_idu & 32'hfff0707f) == 32'h08004033;
+  assign zexth_xlen_illegal = XLEN == 64 && (inst_idu & 32'hfff0707f) == 32'h08004033;
 
   assign is_illegal = (illegal_inst && !fp_valid) || illegal_csr
       || shift_imm_xlen_illegal || rev8_xlen_illegal || zexth_xlen_illegal
@@ -361,28 +365,44 @@ module rapt_decode_slot #(
       || fp_store || fp_store_d) ? '0
       : (fp_valid ? fp_rd[RLEN-1:0] : rd[RLEN-1:0]);
   assign decoded.uop.execute.sys.csr_csw = csr_csw;
+  assign decoded.uop.execute.branch.ras = rapt_pkg::ras_action(inst_idu);
+  assign decoded.uop.execute.memory.aq = inst_idu[26];
+  assign decoded.uop.execute.memory.rl = inst_idu[25];
+  assign decoded.uop.execute.sys.kind = (is_sfence_vma || is_sinval_vma)
+      ? rapt_pkg::SYS_TRANSLATION : (is_cbo_inval || is_cbo_flush)
+      ? rapt_pkg::SYS_CBO_INVAL : is_cbo_clean ? rapt_pkg::SYS_CBO_CLEAN
+      : is_cbo_zero ? rapt_pkg::SYS_CBO_ZERO : inst_idu[6:0] == `RAPT_OP_FENCE_
+      ? (inst_idu[14:12] == 3'b001 ? rapt_pkg::SYS_FENCE_I : rapt_pkg::SYS_FENCE)
+      : rapt_pkg::SYS_NORMAL;
+
 
   // Trap aggregation: IFU traps (e.g., page fault) or decode-time illegality
   assign decoded.uop.trap = ifu_trap || is_illegal;
-  assign decoded.uop.tval = ifu_trap ? ifu_tval
-                             : is_illegal ? illegal_tval : '0;
+  assign decoded.uop.fetch_tval_plus2 = fetched.fetch_tval_plus2;
   assign decoded.uop.cause = ifu_trap ? ifu_cause : is_illegal ? `RAPT_CAUSE_ILLEGAL_INST : '0;
 
+`ifdef RAPT_UOP_HAS_INST
   assign decoded.uop.inst = inst_idu;
+`endif
 `ifdef RAPT_RVFI
   // RVFI must report the original instruction word: compressed instructions
   // are reported as the raw 16-bit encoding zero-extended (so `insn[1:0]!=2'b11`),
   // not the decompressed 32-bit form used internally for decode/difftest.
   assign decoded.uop.rvfi_inst = is_c ? {16'b0, inst[15:0]} : inst;
 `endif
-  assign decoded.uop.pc        = pc_idu;
+  assign decoded.uop.pc        = fetched.pc;
 
-  assign decoded.rs1[RLEN-1:0] = (fp_valid &&
+  // Translation fences need real GPR dependencies for their commit descriptor.
+  // Keep the generated decoder's serialization flags and constant operands.
+  assign decoded.rs1[RLEN-1:0] = (`RAPT_SFENCE_SELECTIVE != 0
+      && (is_sfence_vma || is_sinval_vma)) ? inst_idu[19:15] : (fp_valid &&
         (fp_op == `RAPT_FP_OP_FMV_W_X || fp_op == (`RAPT_FP_OP_FMV_D_X)
          || fp_i2f || fp_load || fp_store || fp_load_d || fp_store_d))
         ? fp_rs1[RLEN-1:0] : rs1[RLEN-1:0];
-  assign decoded.rs2[RLEN-1:0] = fp_valid ? fp_rs2[RLEN-1:0] : rs2[RLEN-1:0];
+  assign decoded.rs2[RLEN-1:0] = (`RAPT_SFENCE_SELECTIVE != 0
+      && (is_sfence_vma || is_sinval_vma)) ? inst_idu[24:20]
+      : fp_valid ? fp_rs2[RLEN-1:0] : rs2[RLEN-1:0];
 
-  assign decoded.uop.pnpc = fetched.pnpc;
+  assign decoded.pnpc = fetched.pnpc;
   assign decoded.uop.execute.branch.predicted_taken = fetched.predicted_taken;
 endmodule

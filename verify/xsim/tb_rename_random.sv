@@ -9,8 +9,10 @@ module tb_rename_random;
     return c;
   endfunction
   localparam core_config_t Cfg = test_config();
+  // Mirrors rapt_rnu's renamed_t; the predicted next PC travels beside the uop.
   typedef struct packed {
     uop_t uop;
+    pc_t pnpc;
     xlen_t op1,op2;
     phys_reg_t pr1,pr2,prd,prs;
     logic checkpoint_valid;
@@ -121,6 +123,7 @@ module tb_rename_random;
           expected.uop=decoded.uop;
           expected.op1=decoded.op1;
           expected.op2=decoded.op2;
+          expected.pnpc=decoded.pnpc;
           expected.pr1=map_model[decoded.rs1];
           expected.pr2=map_model[decoded.rs2];
           expected.prs=map_model[decoded.uop.rd];

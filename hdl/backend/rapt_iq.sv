@@ -118,7 +118,9 @@ module rapt_iq #(
   // is a read-only projection, not separately stored execution payload.
   logic [XLEN-1:0] iq_pc[IQ_SIZE];
   for (genvar i = 0; i < IQ_SIZE; i++) begin : g_iq_pc_probe
-    always_ff @(posedge clock) if (alloc_hit[i]) iq_pc[i] <= XLEN'(dispatch[alloc_lane[i]].uop.pc);
+    always_ff @(posedge clock)
+      if (alloc_hit[i])
+        iq_pc[i] <= XLEN'($signed(dispatch[alloc_lane[i]].uop.pc));
   end
 `endif
 `endif

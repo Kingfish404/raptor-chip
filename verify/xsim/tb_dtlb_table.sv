@@ -11,11 +11,18 @@ module tb_dtlb_table;
   logic [6:0] pte_flags, fill_pte;
   logic [1:0] pbmt, fill_pbmt;
   logic [9:0] verdict, fill_verdict;
+  logic lookup_valid = 0;
   rapt_data_tlb #(
       .XLEN(XLEN),
       .ENTRIES(64),
       .WAYS(Ways)
   ) dut (
+      .sfence_valid(1'b0),
+      .sfence_vpn('0),
+      .sfence_asid('0),
+      .sfence_all_vpn(1'b1),
+      .sfence_all_asid(1'b1),
+      .fill_level(2'd0),
       .*
   );
   `include "tb_common.svh"

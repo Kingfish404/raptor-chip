@@ -104,9 +104,12 @@ static inline bool guest_shared_supervisor_csr(uint16_t csr)
       (csr >= CSR_SSTATEEN0 && csr <= CSR_SSTATEEN3);
 }
 
+word_t pmp_csr_read(uint16_t csr);
+
 static inline word_t csr_read_value(uint16_t csr)
 {
   csr = guest_csr_alias(csr & 0xfff);
+  if (is_pmp_csr(csr)) return pmp_csr_read(csr);
 #ifdef CONFIG_RV64
   if (csr == CSR_VSSTATUS && riscv_h_gstage_preview_enabled())
   {
@@ -1811,7 +1814,7 @@ static int decode_exec(Decode *s)
   if (!nemu_threaded && (ftrace_enabled || cpu.raise_intr != INTR_EMPTY))
     ftrace_add(s->pc, s->dnpc, s->isa.inst);
 #endif
-  s->pc = s->dnpc;
+  s->pc = riscv_legalize_pc(s->dnpc);
   return 0;
 }
 

@@ -30,6 +30,7 @@ int main(void) {
   const unsigned operations[] = {1, 2, 3};
   const int sizes[] = {1, 2, 4, 8};
   unsigned cases = 0, failures = 0;
+  const unsigned grain = 1u << CONFIG_RV_PMP_GRANULARITY_LOG2;
   /* Upper CSR slots accept access, but cannot store state or alias entry 7. */
   for (unsigned i = 8; i < 16; ++i) {
     if (!pmp_csr_write(0x3b0 + i, ~(word_t)0) || cpu.sr[0x3b0 + i] != 0)
@@ -47,25 +48,38 @@ int main(void) {
     uint8_t cfg[16] = {0}; word_t address[16] = {0};
     struct region regions[16] = {0};
     paddr_t base = 0x80001000ull + ((paddr_t)high << 32);
-    unsigned mode = kind == 0 ? 1 : kind == 1 ? 2 : 3;
-    unsigned length = kind == 0 ? 12 : kind == 1 ? 4 : kind == 2 ? 8 : 16;
-    paddr_t start = base + (kind < 2 ? 4 : length);
+    unsigned mode = kind == 0 ? 1 : kind == 1 && grain == 4 ? 2 : 3;
+    unsigned length = grain * (kind == 0 ? 3 : kind == 1 ? 1 : kind == 2 ? 2 : 4);
+    /* Each NAPOT base must be naturally aligned to its selected size. */
+    paddr_t start = (base + length) & ~(paddr_t)(mode == 3 ? length - 1 : grain - 1);
     cfg[4] = (locked << 7) | (mode << 3) | permissions[perm];
     address[3] = start >> 2;
     address[4] = mode == 1 ? (start + length) >> 2 : mode == 2 ? start >> 2 :
                  (start >> 2) | (length / 8 - 1);
-    regions[4] = (struct region){start, start + length, permissions[perm], true, locked};
+    paddr_t implemented_start = start;
+#ifdef CONFIG_RV64
+    implemented_start &= ((paddr_t)1 << (CONFIG_RV_PMPADDR_BITS + 2)) - 1;
+#endif
+    regions[4] = (struct region){implemented_start, implemented_start + length,
+                                permissions[perm], true, locked};
     if (background) {
       unsigned i = background == 1 ? 7 : 0;
       cfg[i] = 0x9f; address[i] = ~(word_t)0;
-      regions[i] = (struct region){0, (paddr_t)1 << (XLEN == 32 ? 34 : 56), 7, true, true};
+      #ifdef CONFIG_RV64
+      const unsigned coverage_bits = CONFIG_RV_PMPADDR_BITS + 3;
+#else
+      const unsigned coverage_bits = 34;
+#endif
+      regions[i] = (struct region){0, (paddr_t)1 << coverage_bits, 7, true, true};
     }
     pmp_restore_checkpoint(cfg, address);
     for (unsigned p = 0; p < 3; ++p)
     for (unsigned op = 0; op < 3; ++op)
     for (unsigned size = 0; size < 4; ++size)
-    for (int offset = -8; offset < 40; ++offset) {
-      paddr_t first = base + offset;
+    for (unsigned boundary = 0; boundary < 3; ++boundary)
+    for (int offset = -8; offset < 16; ++offset) {
+      paddr_t first = start + (boundary == 0 ? 0 : boundary == 1 ? length / 2 : length)
+                     + offset;
       bool expected = denied(regions, first, sizes[size], privileges[p], operations[op]);
       bool actual = pmp_check(first, sizes[size], privileges[p], operations[op] & 1,
                               operations[op] & 2, false);
@@ -76,6 +90,6 @@ int main(void) {
                offset, sizes[size], actual, expected);
     }
   }
-  printf("RV%d PMP: %u cases, %u failures\n", XLEN, cases, failures);
+  printf("RV%d PMP grain %u: %u cases, %u failures\n", XLEN, grain, cases, failures);
   return failures != 0;
 }

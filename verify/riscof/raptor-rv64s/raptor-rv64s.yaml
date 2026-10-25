@@ -169,7 +169,7 @@ params:
   MTVEC_BASE_ALIGNMENT_VECTORED: 4
   MTVEC_ILLEGAL_WRITE_BEHAVIOR: custom
   NUM_PMP_ENTRIES: 16
-  PMP_GRANULARITY: 2
+  PMP_GRANULARITY: 12
   HPM_COUNTER_EN: [false, false, false, false, false, false, false, false, false,
     false, false, false, false, false, false, false, false, false, false, false,
       false, false, false, false, false, false, false, false, false, false,
@@ -181,7 +181,7 @@ params:
   MCOUNTINHIBIT_IMPLEMENTED: false
   NUM_USABLE_PMP_ENTRIES: 8
   PMP_TOR_SUPPORTED: true
-  PMP_NA4_SUPPORTED: true
+  PMP_NA4_SUPPORTED: false
   PMP_NAPOT_SUPPORTED: true
   STVEC_MODES:
   - 0

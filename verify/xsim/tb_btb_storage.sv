@@ -23,10 +23,12 @@ module btb_storage_case #(
 ) (
     output logic done = 0
 );
+  // Targets are stored in the PC representation (RAPT_PC_BITS_OF).
+  localparam int PcW = `RAPT_PC_BITS_OF(Xlen);
   logic clock = 0, reset = 1, init = 0, ren = 0;
   logic [IndexBits-1:0] raddr = 0, waddr = 0;
   logic [6:0] rtag = 0, wd_tag = 0;
-  logic [Xlen-1:1] rd_target, wd_target = 0;
+  logic [PcW-1:1] rd_target, wd_target = 0;
   logic [1:0] rd_type, wd_type = 0;
   logic rd_tag_match, wen_entry = 0, wen_type = 0;
   rapt_bpu_btb #(
@@ -40,7 +42,7 @@ module btb_storage_case #(
   // writes require a tag match. Entry writes choose from PRE-edge contents.
   logic model_valid[Sets][2], type_known[Sets][2];
   logic [6:0] model_tag[Sets][2];
-  logic [Xlen-1:1] model_target[Sets][2];
+  logic [PcW-1:1] model_target[Sets][2];
   logic [1:0] model_type[Sets][2];
   int victim[Sets], read_set = 0;
   logic [6:0] read_tag = 0;
@@ -128,7 +130,7 @@ module btb_storage_case #(
       for (int tag_value = 1; tag_value <= 2; tag_value++) begin
         wd_tag = 7'(tag_value);
         rtag = wd_tag;
-        wd_target = (Xlen-1)'({random_word(), random_word()});
+        wd_target = (PcW-1)'({random_word(), random_word()});
         wd_type = 2'(tag_value);
         wen_entry = 1;
         wen_type = 1;
@@ -143,7 +145,7 @@ module btb_storage_case #(
       wen_entry = 1;
       wen_type = 0;
       wd_tag = 3;
-      wd_target = (Xlen-1)'({random_word(), random_word()});
+      wd_target = (PcW-1)'({random_word(), random_word()});
       step();
       wd_tag = 1;
       step();  // update the target of the held hit, without ren
@@ -166,7 +168,7 @@ module btb_storage_case #(
       rtag = 7'(random_word() & 7);
       wd_tag = cycle % 2 == 0 ? rtag : 7'(random_word() & 7);
       wd_type = 2'(random_word());
-      wd_target = (Xlen-1)'({random_word(), random_word()});
+      wd_target = (PcW-1)'({random_word(), random_word()});
       step();
     end
     if (read_hits == 0 || collisions == 0 || held_writes == 0 || rejected_types == 0)

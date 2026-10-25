@@ -14,6 +14,8 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--xlen', type=int, choices=(32, 64), nargs='+', default=[32, 64])
     parser.add_argument('--mode', choices=('bmc', 'cover', 'prove'), default='bmc')
+    parser.add_argument('--targeted-coherence', type=int, choices=(0, 1), default=0,
+                        help='Select legacy global maintenance (0) or per-line coherence (1)')
     parser.add_argument('--negative-control', action='store_true',
                         help='Remove only the fix in an isolated packed copy; require progress FAIL')
     parser.add_argument('--timeout', type=int, default=600)
@@ -44,6 +46,7 @@ def main():
                        'one load/store/I-PTW, start cycles 0..3, 3 aliases and 3 load kinds; '
                        'independent bounded external stalls, error-free responses; '
                        '32-cycle per-request deadline measured before AR; no data proof',
+              'targeted_coherence': bool(args.targeted_coherence),
               'negative_control': args.negative_control,
               'negative_schedule': 'load=0 store=1 PTW=0 kind=split relation=different-line'
                                    if args.negative_control else None}
@@ -63,6 +66,7 @@ def main():
         case_dir.mkdir(exist_ok=True)
         pack = case_dir / 'design.sv'
         preprocess = ['verilator', '-E', '-P', '-DSYNTHESIS', '-DRAPT_L1D_MSHRS=0']
+        preprocess += [f'-DRAPT_L1D_TARGETED_COHERENCE={args.targeted_coherence}']
         if width == 64:
             preprocess += ['-DRAPT_RV64']
         preprocess += [f'-I{p}' for p in includes] + [str(p) for p in sources]

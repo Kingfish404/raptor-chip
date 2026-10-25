@@ -9,6 +9,8 @@
 module tb_l1i_access_sizes;
   localparam int XLEN = `RAPT_XLEN;
   localparam int AW = `RAPT_PADDR_BITS - 2;
+  localparam int G = `RAPT_PMP_GRANULARITY_LOG2 - 2;
+  localparam logic [AW-1:0] LowMask = (AW'(1) << G) - 1;
   localparam int N = `RAPT_PMP_NUM;
   csr_bcast_if csr_bcast ();
   pmp_state_if pmp_state ();
@@ -75,7 +77,7 @@ module tb_l1i_access_sizes;
         .addr(addr[p]),
         .size_m1(p == 1 ? 4'(XLEN / 8 - 1)
             : (p == 0 && sram_data_ready && is_c ? 4'd1 : 4'd3)),
-        .priv(csr_bcast.priv),
+        .priv(p == 1 ? `RAPT_PRIV_S : csr_bcast.priv),
         .op_r(p == 1),
         .op_w(1'b0),
         .op_x(p != 1),
@@ -139,12 +141,12 @@ module tb_l1i_access_sizes;
       for (int i = 0; i < N; i++) begin
         int unsigned mode;
         pmp_state.pmp_raw_addr[i] = AW'(random_addr());
-        pmp_state.pmp_napot_mask[i] = pmp_state.pmp_raw_addr[i]
-            ^ (pmp_state.pmp_raw_addr[i] + AW'(1));
+        pmp_state.pmp_napot_mask[i] = (pmp_state.pmp_raw_addr[i] | (LowMask >> 1))
+            ^ ((pmp_state.pmp_raw_addr[i] | (LowMask >> 1)) + AW'(1));
         mode = random_word() % 4;
-        pmp_state.pmp_mode_off[i] = mode == 0;
+        pmp_state.pmp_mode_off[i] = mode == 0 || (mode == 2 && G != 0);
         pmp_state.pmp_mode_tor[i] = mode == 1;
-        pmp_state.pmp_mode_na4[i] = mode == 2;
+        pmp_state.pmp_mode_na4[i] = mode == 2 && G == 0;
         pmp_state.pmp_mode_napot[i] = mode == 3;
       end
       pmp_state.pmp_cfg_r = N'(random_word());
@@ -165,6 +167,7 @@ module tb_l1i_access_sizes;
           default: addr[p] = XLEN'('h80000000 + 2 * p);
         endcase
       end
+      addr[1] &= ~XLEN'(XLEN / 8 - 1);
       // rapt_l1i derives the lookahead words from the primary fetch PC.
       addr[2] = {addr[0][XLEN-1:2], 2'b00} + XLEN'(4);
       addr[3] = {addr[0][XLEN-1:2], 2'b00} + XLEN'(8);

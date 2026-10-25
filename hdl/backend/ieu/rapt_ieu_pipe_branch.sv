@@ -37,43 +37,25 @@ module rapt_ieu_pipe_branch #(
     endcase
   end
 
-  logic [XLEN-1:0] branch_target;
-  assign branch_target = (iss.uop.pc + iss.uop.imm) & ~'b1;
+  localparam int PcW = `RAPT_PC_BITS_OF(XLEN);
+  wire [XLEN-1:0] pc_value = `RAPT_PC_SEXT(XLEN, iss.uop.pc);
+  logic [PcW-1:0] branch_target;
+  assign branch_target = PcW'((pc_value + XLEN'($signed(iss.uop.imm))) & ~'b1);
 
   // === Writeback ===
-  assign wb_branch.valid = iss.valid;
-  assign wb_branch.dest = iss.dest;
-  assign wb_branch.generation = iss.generation;
-  assign wb_branch.pc = iss.uop.pc;
-  assign wb_branch.npc    = branch_taken
+  always_comb begin
+    wb_branch = '0;
+    wb_branch.valid = iss.valid;
+    wb_branch.dest = iss.dest;
+    wb_branch.generation = iss.generation;
+    wb_branch.pc = iss.uop.pc;
+    wb_branch.npc    = branch_taken
       ? branch_target
-      : iss.uop.pc + (iss.uop.c ? 2 : 4);
-  assign wb_branch.btaken = branch_taken;
-  // Prediction checking belongs to the ROB checkpoint target file. This
-  // execution pipe only resolves direction and the actual next PC.
-  assign wb_branch.mispredict = 1'b0;
-  assign wb_branch.difftest_skip = 1'b0;
-  // Branch pipe never writes rd nor produces CSR / trap / MEM sideband (unified
-  // completion sideband tie-offs; keeps the no-PRF-write-port / no-bypass-entry
-  // property: consumers never see a valid prd from this port).
-  assign wb_branch.result = '0;
-  assign wb_branch.prd = '0;
-  assign wb_branch.rd = '0;
-  assign wb_branch.csr_wen = 1'b0;
-  assign wb_branch.csr_wdata = '0;
-  assign wb_branch.fp_flags_valid = 1'b0;
-  assign wb_branch.fp_wen = 1'b0;
-  assign wb_branch.fp_result = '0;
-  assign wb_branch.fp_flags = '0;
-  assign wb_branch.trap = 1'b0;
-  assign wb_branch.tval = '0;
-  assign wb_branch.cause = '0;
-  assign wb_branch.wen = 1'b0;
-  assign wb_branch.alu = '0;
-  assign wb_branch.sq_waddr = '0;
-  assign wb_branch.sq_wdata = '0;
-  assign wb_branch.sq_wdata64 = '0;
-  assign wb_branch.sq_fp64 = 1'b0;
+      : iss.uop.pc + PcW'(iss.uop.c ? 2 : 4);
+    wb_branch.btaken = branch_taken;
+    // Prediction checking belongs to the ROB checkpoint target file. This
+    // execution pipe only resolves direction and the actual next PC.
 
-  assign wb_branch.updates = '{control_flow:1'b1, default:'0};
+    wb_branch.updates = '{control_flow:1'b1, default:'0};
+  end
 endmodule

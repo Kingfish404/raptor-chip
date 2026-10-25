@@ -271,7 +271,20 @@ ln -sfn "$HOME/.local/opt/sail-riscv-0.13.1/bin/sail_riscv_sim" \
 sail_riscv_sim --version
 ```
 
-Both ACT4 and classic RISCOF validate the exact Sail version before running.
+ACT4 validates Sail 0.13.1. Classic RISCOF uses a separate, patched Sail 0.16 reference.
+Build it with CMake, a C/C++ compiler, curl, patch, Python 3, and GMP development headers
+installed (`libgmp-dev` on Ubuntu):
+
+```bash
+make -C verify riscof-classic-sail JOBS=2
+```
+
+The builder verifies pinned compiler/source archive hashes, applies
+[`full-access-pmp-precheck.patch`](riscof/sail/full-access-pmp-precheck.patch), and installs
+under `verify/build/sail-riscv`. Classic targets prepend this installation to their tool path;
+`RISCOF_CLASSIC_SAIL_PREFIX` selects another installation. Its
+`share/sail-riscv/raptor-reference.json` records source, compiler, patch, and executable hashes.
+The setup target checks version 0.16 and validates the configured physical-access policy.
 
 Classic RTL RISCOF (`make -C verify riscof-classic`) uses a separate `RISCOF_CLASSIC_TIMEOUT=600` second wall-clock budget per DUT test. Large F/D vectors can exceed the generic 10-second smoke-test budget, especially with parallel jobs. Explicit `TIMEOUT` overrides are still honored unless `RISCOF_CLASSIC_TIMEOUT` is supplied. For example:
 
@@ -281,15 +294,48 @@ verify/build/riscof-classic-venv/bin/python verify/scripts/test_riscof_classic_r
 python3 verify/scripts/test_riscof_classic_sail.py
 ```
 
-The classic Sail plugin uses `raptor.json` to check page-local misaligned accesses as a whole before splitting, matching Raptor's PMP policy. It keeps Sail 0.13.1's ROM/IO/RAM regions but disables its default MAG and Zama16b declaration; otherwise the RAM MAG overrides the page-local split setting. The `pmpm_misaligned_{na4,napot,tor}` tests use a 16-byte region offset on both DUT and reference: this retains the PMP crossings while separating them from Sail's mandatory page split. These tests remain in the comparison; cross-page behavior is covered separately by the split-page and PMP span regressions.
+Both classic Sail profiles set `memory.pmp.check_full_access_before_split=true` to check each
+complete physical access against PMP before any split is performed or announced. Reads,
+writes, and concurrency-model write events use the same precheck. The option defaults to
+false, preserving upstream behavior. Physical splitting and per-split PMP checks remain
+unchanged; `memory.misaligned.default_allowed_within_exp=0` retains upstream's aligned
+subaccess decomposition. Virtual address translation still splits at page boundaries.
+This selects Raptor/NEMU's complete-access permission policy without combining decomposed
+memory events or adding an atomicity guarantee.
 
-Each classic Sail invocation has a wall-clock limit of `RISCOF_CLASSIC_TIMEOUT + 30` seconds. The reference batch budget scales with the selected test count and `JOBS`, avoiding RISCOF's implicit 300-second limit for the entire reference suite. Compiler, reference-model and batch failures stop the flow and retain per-test `ref/build.log` and `ref/*.log`. CI builds only the dedicated RISCOF simulator, allows 120 minutes for the compliance step, and reserves additional job time for failure artifacts.
+The profiles disable the default MAG and Zama16b declaration and supply the LR/SC PMA fields
+required since Sail 0.14. They also disable H, its dependent extensions, Sdtrig, and Stateen
+to match the classic DUT profiles; Sail 0.16's default H support would otherwise change
+exception signature record sizes.
+
+The `pmpm_misaligned_{na4,napot,tor}` tests keep their original region layout and remain in the
+signature comparison. A 16-byte relocation cannot move a 4 KiB-grain PMP boundary off a page
+boundary, so the former relocation macro is no longer injected. The existing RV32/RV64
+`verilator-pmp-permissions-*` regressions also compare full-span PMP decisions with an
+independent bytewise oracle.
+
+Each classic Sail invocation has a wall-clock limit of `RISCOF_CLASSIC_TIMEOUT + 30` seconds.
+The reference batch budget scales with the selected test count and `JOBS`, avoiding RISCOF's
+implicit 300-second limit for the entire reference suite. Compiler, reference-model and batch
+failures stop the flow and retain per-test `ref/build.log` and `ref/*.log`. CI builds the shared
+simulator and patched Sail reference once, then runs four compliance shards with `JOBS=2`, a
+600-second per-DUT budget, and a 180-minute job budget.
 
 PMP capacity is 8 usable entries in 16 architectural CSR slots (upper eight read-only zero), for RV32/RV64 and every preset. ACT4 declares `NUM_PMP_ENTRIES=16`, `NUM_USABLE_PMP_ENTRIES=8`; test headers use `RVMODEL_NUM_PMPS=8`. Classic test headers constrain generated tests to usable entries; they do not by themselves reconfigure Sail's CSR implementation or prove upper-slot read-only-zero behavior.
 
 Run `make -C verify pmp-capacity-check` for RV32/RV64 CSR WARL/upper-slot alias prevention, own/TOR predecessor locks, permission checks, reset/NAPOT, CSR legality, shared L1D checks and NEMU capacity tests. For isolated output, pass `BUILD_DIR=/tmp/<task-directory>`. This is directed component coverage, not full-core, FPGA timing, boot or complete profile validation. The separate `nemu-pmp-priority-check` compares RV32/RV64 access decisions against an independent interval oracle, including partial overlaps where only an interior grain matches.
 
 Each test's `dut/` directory retains `dut.log` and `dut-run.json`. Only a successful simulator termination with a complete, well-formed signature is passed to the signature comparison. On execution failure, partial output is kept as `*.signature.partial` and the comparison signature is empty so the test still fails. This distinguishes execution timeouts from completed architectural mismatches; it does not suppress either failure or change the test selection.
+
+Signature export uses the checkpoint memory view: host RAM, pending cacheable AXI writes,
+dirty L2/L1D data, then committed SQ stores in age order. This includes stores that remain
+in write-back caches when the finisher stops simulation. Temporary RAM overlays are restored
+after copying. The simulator fails if the snapshot is unstable or the output file cannot be opened.
+
+Classic DUT and Sail headers declare the default 4 KiB PMP grain (`RVMODEL_PMP_GRAIN=10`).
+Both classic Sail profiles set `memory.pmp.grain=10` and disable NA4, matching the ISA YAMLs.
+This also selects the upstream Sv32 PMP test's existing large-grain path: the root-table case
+is omitted when its whole page would become unreadable, while the leaf-table checks still run.
 
 ### 4. RISCV-DV Privileged Stress (`make riscv-dv`)
 
@@ -532,7 +578,17 @@ These checks fill and read every word of each cache, require all four same-set l
 
 `make -C verify formal-memory-progress-negative` removes only the refill fix in an isolated preprocessed copy and fixes the known failing arrival schedule. It must produce a counterexample to a named progress assertion; compiler errors, solver errors, timeouts and unrelated assertion failures are failures of the negative-control test. Generated packs, source hashes, tool logs and counterexample/cover waveforms are saved under `verify/build/memory-progress/`. `FORMAL_MEMORY_PROGRESS_TIMEOUT` sets the per-task wall-time limit. The reduced formal contract does not establish whole-core liveness, arbitrary traffic fairness, dirty initial cache state, data equivalence, translation, error recovery or full-size cache correctness. Full W4 simulation and the writeback/PTW/MSHR/cancellation tests below provide complementary coverage.
 
-`make -C verify verilator-cache-stream-rv32 verilator-cache-stream-rv64 verilator-cache-stream-l2-rv32 verilator-cache-stream-l2-rv64` runs the complete L1D/bus/AXI/optional-L2 path with randomized ready stalls. Tests check early critical-word completion, every resident word across full L1D capacity, CBO set colors and pending fills, 64-byte ZERO AW/W/B counts and delayed/error B, cancelled/error refills, and NA4/TOR/NAPOT boundary word fallback at both cache levels. Repeat with `XSIM_RAPT_CONFIG=small` to cover 16-byte lines. `verilator-cache-stream-rnp-rv32` checks the word-serial RNP bridge: the core keeps one burst owner, while the external RNP side uses one transaction per word and has no error-response encoding.
+`make -C verify verilator-cache-stream-rv32 verilator-cache-stream-rv64
+verilator-cache-stream-l2-rv32 verilator-cache-stream-l2-rv64` runs the complete
+L1D/bus/AXI/optional-L2 path with randomized ready stalls. Tests check early critical-word completion,
+every resident word across full L1D capacity, CBO set colors and pending fills, 64-byte ZERO AW/W/B
+counts and delayed/error B, cancelled/error refills, and PMP page-boundary protection at both cache
+levels. With the default 4 KiB PMP grain, the final permitted cache line refills normally while the
+adjacent denied page must produce no memory request. Setting `RAPT_PMP_GRANULARITY_LOG2=2` retains
+NA4/TOR/NAPOT sub-line fallback coverage, including scalar reads of dirty L2 residents. Repeat with
+`XSIM_RAPT_CONFIG=small` to cover 16-byte lines. `verilator-cache-stream-rnp-rv32` checks the word-serial
+RNP bridge: the core keeps one burst owner, while the external RNP side uses one transaction per word
+and has no error-response encoding.
 
 `default`, `default-w3`, `default-w4`, `default-w8`, and `default-l2` select write-back with four L1D MSHRs and two writeback buffers. `make -C verify verilator-cache-default-rv32 verilator-cache-default-rv64 XSIM_RAPT_CONFIG=<preset>` exercises that preset's policy without a parameter override. The older `cache-stream` targets explicitly select write-through; `cache-stream-wb` explicitly selects write-back.
 

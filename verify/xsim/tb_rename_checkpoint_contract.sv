@@ -220,10 +220,10 @@ module tb_rename_checkpoint_pipeline;
     if (!reset)
       for (int s = 0; s < Width; s++)
         if (rnu_rou.valid[s] && rnu_rou.ready[s]) begin
-          assert (rnu_rou.slot[s].uop.pc ==
-                xlen_t'(64'h1234567800000000) + xlen_t'(rnu_rou.slot[s].uop.rd) * 4
-                && rnu_rou.slot[s].op1 == xlen_t'(64'ha5c39e1700000000)
-                && rnu_rou.slot[s].op2 == xlen_t'(64'h3e7a82d100000000))
+          automatic xlen_t pc_value = xlen_t'($signed(rnu_rou.slot[s].uop.pc));
+          assert (pc_value == xlen_t'(64'hffffffd200000000) + xlen_t'(rnu_rou.slot[s].uop.rd) * 4 &&
+              rnu_rou.slot[s].op1 == xlen_t'(64'ha5c39e1700000000) &&
+              rnu_rou.slot[s].op2 == xlen_t'(64'h3e7a82d100000000))
           else $fatal(1, "checkpoint pipeline payload truncated/corrupted");
           observed.push_back('{rnu_rou.slot[s].prd, rnu_rou.slot[s].prs, rnu_rou.slot[s].uop.rd,
                              rnu_rou.checkpoint_valid[s], rnu_rou.checkpoint[s]});
@@ -245,7 +245,7 @@ module tb_rename_checkpoint_pipeline;
     idu_rnu.slot[1].uop.rd = rd1;
     idu_rnu.slot[1].uop.execute.branch.conditional = branch1;
     for (int s = 0; s < Width; s++) begin
-      idu_rnu.slot[s].uop.pc = xlen_t'(64'h1234567800000000)
+      idu_rnu.slot[s].uop.pc = xlen_t'(64'hffffffd200000000)
                              + xlen_t'(idu_rnu.slot[s].uop.rd) * 4;
       idu_rnu.slot[s].uop.execute.branch.predicted_taken
           = idu_rnu.slot[s].uop.execute.branch.conditional && snapshot_ghr[0];
@@ -508,7 +508,7 @@ module tb_rename_checkpoint_pipeline;
         clear_decode();
         rng = rng * 1664525 + 1013904223;
         idu_rnu.valid[0] = rng[3:0] != 0;
-        idu_rnu.slot[0].uop.pc = xlen_t'(64'h1234567800000000);
+        idu_rnu.slot[0].uop.pc = xlen_t'(64'hffffffd200000000);
         idu_rnu.slot[0].op1 = xlen_t'(64'ha5c39e1700000000);
         idu_rnu.slot[0].op2 = xlen_t'(64'h3e7a82d100000000);
         idu_rnu.slot[0].uop.execute.branch.conditional = rng[5:4] != 0;

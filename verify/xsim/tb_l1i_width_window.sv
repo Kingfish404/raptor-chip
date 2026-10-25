@@ -136,29 +136,58 @@ module tb_l1i_width_window #(
     assert (!ifu_l1i.inst_n4_valid)
     else $fatal(1, "wide fetch crossed a line without a second tag mirror");
 `endif
-    // A locked no-execute NA4 at the third word must suppress lookahead,
+    if (`RAPT_PMP_GRANULARITY_LOG2 >= 12) begin
+      check_pc('h80000ff8);
+      check_pc('h80001000);
+    end
+    // A locked no-execute region at the third word must suppress lookahead,
     // even though primary and second-word permissions still allow fetching.
     @(negedge clock);
     pmp_state.pmp_mode_off[0] = 0;
-    pmp_state.pmp_mode_na4[0] = 1;
+    pmp_state.pmp_mode_na4[0] = `RAPT_PMP_GRANULARITY_LOG2 == 2;
+    pmp_state.pmp_mode_napot[0] = `RAPT_PMP_GRANULARITY_LOG2 != 2;
+    pmp_state.pmp_napot_mask[0] = (`RAPT_PADDR_BITS - 2)'(
+        (1 << (`RAPT_PMP_GRANULARITY_LOG2 - 2)) - 1);
     pmp_state.pmp_cfg_l[0] = 1;
     pmp_state.pmp_cfg_x[0] = 0;
-    pmp_state.pmp_raw_addr[0] = `RAPT_PMPADDR_BITS'('h8000003c >> 2);
-    ifu_l1i.pc = 'h80000034;
+    pmp_state.pmp_raw_addr[0] = $bits(pmp_state.pmp_raw_addr[0])'('h8000003c >> 2);
+    if (`RAPT_PMP_GRANULARITY_LOG2 != 2) begin
+      pmp_state.pmp_raw_addr[0] = $bits(pmp_state.pmp_raw_addr[0])'('h80001000 >> 2);
+      ifu_l1i.pc = 'h80000ff8;
+    end else ifu_l1i.pc = 'h80000034;
     #1;
     assert (!ifu_l1i.inst_n2_valid)
     else $fatal(1, "third-word PMP bypass");
 `ifdef RAPT_FETCH_WIDE
-    ifu_l1i.pc = 'h80000030;
+    ifu_l1i.pc = `RAPT_PMP_GRANULARITY_LOG2 == 2 ? 'h80000030 : 'h80000ff4;
     #1;
     assert (!ifu_l1i.inst_n3_valid)
     else $fatal(1, "fourth-word PMP bypass");
-    pmp_state.pmp_raw_addr[0] = `RAPT_PMPADDR_BITS'('h80000010 >> 2);
-    ifu_l1i.pc = 'h80000000;
+    pmp_state.pmp_raw_addr[0] = $bits(pmp_state.pmp_raw_addr[0])'('h80000010 >> 2);
+    if (`RAPT_PMP_GRANULARITY_LOG2 != 2) begin
+      pmp_state.pmp_raw_addr[0] = $bits(pmp_state.pmp_raw_addr[0])'('h80001000 >> 2);
+      ifu_l1i.pc = 'h80000ff0;
+    end else ifu_l1i.pc = 'h80000000;
     #1;
     assert (!ifu_l1i.inst_n4_valid)
     else $fatal(1, "fifth-word PMP bypass");
 `endif
+    if (`RAPT_PMP_GRANULARITY_LOG2 >= 12) begin
+      automatic bit saw_trap = 0;
+      check_pc('h80000ff8);
+      @(negedge clock);
+      ifu_l1i.pc = 'h80001000;
+      for (int cycle = 0; cycle < 50; cycle++) begin
+        @(posedge clock);
+        if (ifu_l1i.valid) begin
+          assert (ifu_l1i.trap)
+          else $fatal(1, "resident instruction escaped locked page execute denial");
+          saw_trap = 1;
+        end
+      end
+      assert (saw_trap)
+      else $fatal(1, "denied instruction page never completed with a fault");
+    end
     $display("PASS: third-word line boundary, halfword alignment, whole-word PMP gating");
     $finish;
   end

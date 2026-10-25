@@ -16,6 +16,9 @@ import "DPI-C" function void npc_store_error_event(
 // sim/rtl/ TB wrappers to drive `ext_irq_i[]` on rapt.sv.
 import "DPI-C" function void npc_consume_ext_irq_vector(output int rdata);
 import "DPI-C" function int unsigned npc_mem_random_delay();
+import "DPI-C" function int unsigned npc_mem_read_latency();
+import "DPI-C" function int unsigned npc_mem_write_latency();
+import "DPI-C" function int unsigned npc_mem_write_outstanding();
 
 `ifdef RAPT_RV64
 import "DPI-C" function void npc_difftest_mem_diff(

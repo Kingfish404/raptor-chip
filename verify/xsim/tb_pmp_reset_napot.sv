@@ -1,6 +1,8 @@
 `include "rapt.svh"
 module tb_pmp_reset_napot;
   localparam int XLEN = `RAPT_XLEN;
+  localparam int G = `RAPT_PMP_GRANULARITY_LOG2 - 2;
+  localparam int MinBytes = G == 0 ? 8 : 1 << (G + 2);
   localparam int N = `RAPT_PMP_NUM;
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
@@ -60,13 +62,13 @@ module tb_pmp_reset_napot;
     update.cfg_r = '1;
     update.cfg_w = (writable != 0) ? '1 : '0;
     update.cfg_l = (locked != 0) ? '1 : '0;
-    update.mode_off = mode == 2 ? '1 : '0;
-    update.mode_na4 = mode == 1 ? '1 : '0;
+    update.mode_off = mode == 2 || (mode == 1 && G != 0) ? '1 : '0;
+    update.mode_na4 = mode == 1 && G == 0 ? '1 : '0;
     update.mode_napot = mode == 0 ? '1 : '0;
     tick();
     @(negedge clock);
     update.cfg_we = '0;
-    limit = mode == 0 ? 7 : (mode == 1 ? 3 : -1);
+    limit = mode == 0 ? MinBytes - 1 : (mode == 1 && G == 0 ? 3 : -1);
     for (int p = 0; p < 3; p++) begin
       priv = p == 2 ? 2'd3 : 2'(p);
       for (int w = 0; w < 2; w++) begin
@@ -75,11 +77,11 @@ module tb_pmp_reset_napot;
         for (int bytes_log2 = 0; bytes_log2 < 4; bytes_log2++) begin
           size_m1 = 4'((1 << bytes_log2) - 1);
           for (int a = 0; a < 10; a++) begin
-            addr = XLEN'(a);
-            high_byte = a + int'(size_m1);
-            expected_lo = a <= limit ? ((p != 2 || locked != 0) && w != 0 && writable == 0) : p != 2;
+            addr = XLEN'(a < 5 ? a : MinBytes + a - 8);
+            high_byte = int'(addr) + int'(size_m1);
+            expected_lo = int'(addr) <= limit ? ((p != 2 || locked != 0) && w != 0 && writable == 0) : p != 2;
             expected_hi = high_byte <= limit ? ((p != 2 || locked != 0) && w != 0 && writable == 0) : p != 2;
-            expected_fault = expected_lo || expected_hi || (a <= limit && high_byte > limit);
+            expected_fault = expected_lo || expected_hi || (int'(addr) <= limit && high_byte > limit);
             #1;
             if (fault !== expected_fault || fault_lo !== expected_lo)
               $fatal(
@@ -106,7 +108,7 @@ module tb_pmp_reset_napot;
     for (int i = 0; i < N; i++) begin
       assert (state.pmp_raw_addr[i] == '0)
       else $fatal(1, "address changed without write");
-      assert (state.pmp_napot_mask[i] == 1)
+      assert (state.pmp_napot_mask[i] == AW'(MinBytes / 4 - 1))
       else $fatal(1, "reset NAPOT derived mask");
     end
   endtask
@@ -142,7 +144,7 @@ module tb_pmp_reset_napot;
     tick();
     for (int j = 0; j < N; j++) begin
       expected_raw[j] = '0;
-      expected_mask[j] = 1;
+      expected_mask[j] = AW'(MinBytes / 4 - 1);
     end
     for (int b = 0; b < AW; b++) begin
       for (int i = 0; i < N; i++) begin

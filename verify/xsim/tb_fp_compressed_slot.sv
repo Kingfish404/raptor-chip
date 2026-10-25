@@ -10,6 +10,7 @@ module tb_fp_compressed_slot;
   initial begin
     int q, f3, base, regno, offset, width, op;
     bit store_op, double_width, is_fp, denied;
+    bit trap_mismatch, decode_mismatch;
     logic [31:0] expanded;
     fetched='0;
     fetched.pc=X'(32'h80000000);
@@ -54,14 +55,29 @@ module tb_fp_compressed_slot;
             if (denied) traps++;
             else if (is_fp) fp_legal++;
             else int_legal++;
-            if(decoded.uop.trap!=denied
-       ||(denied&&(decoded.uop.cause!=X'(2)||decoded.uop.tval!=X'(c)||decoded.uop.rd!=0))
-       ||(!denied&&(decoded.uop.inst!=expanded||!decoded.uop.c||decoded.uop.imm!=X'(offset)
-         ||decoded.rs1!=5'(base)||decoded.uop.rd!=5'(!is_fp&&!store_op?regno:0)
-         ||decoded.uop.execute.memory.load==store_op||decoded.uop.execute.memory.store!=store_op
-         ||decoded.uop.execute.fp.valid!=is_fp
-         ||(is_fp&&(decoded.uop.execute.fp.op!=6'(op)
-            ||(store_op?decoded.uop.execute.fp.rs2:decoded.uop.execute.fp.rd)!=5'(regno))))))begin
+            trap_mismatch = decoded.uop.trap != denied;
+            if (denied) begin
+              trap_mismatch |= decoded.uop.cause != X'(2);
+              trap_mismatch |= `RAPT_UOP_TVAL(X, decoded.uop) != X'(c);
+              trap_mismatch |= decoded.uop.rd != 0;
+            end
+            decode_mismatch = 0;
+            if (!denied) begin
+              decode_mismatch |= decoded.uop.inst != expanded;
+              decode_mismatch |= !decoded.uop.c;
+              decode_mismatch |= decoded.uop.imm != X'(offset);
+              decode_mismatch |= decoded.rs1 != 5'(base);
+              decode_mismatch |= decoded.uop.rd != 5'(!is_fp && !store_op ? regno : 0);
+              decode_mismatch |= decoded.uop.execute.memory.load == store_op;
+              decode_mismatch |= decoded.uop.execute.memory.store != store_op;
+              decode_mismatch |= decoded.uop.execute.fp.valid != is_fp;
+              if (is_fp) begin
+                decode_mismatch |= decoded.uop.execute.fp.op != 6'(op);
+                decode_mismatch |= (store_op ? decoded.uop.execute.fp.rs2 : decoded.uop.execute.fp.rd)
+                    != 5'(regno);
+              end
+            end
+            if (trap_mismatch || decode_mismatch) begin
               failures++;
               if (failures <= 12)
                 $display(

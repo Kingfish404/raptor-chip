@@ -44,6 +44,20 @@ module rapt_ieu #(
     output logic pmu_ooo_valid_found,
     output logic pmu_ooo_full
 );
+  typedef logic [XLEN-1:0] result_word_t;
+  typedef logic [$bits(dispatch[0].uop.pc)-1:0] result_pc_t;
+  typedef logic [PLEN-1:0] result_phys_t;
+  typedef logic [RLEN-1:0] result_arch_t;
+  typedef logic [$bits(dispatch[0].dest)-1:0] result_owner_t;
+  typedef logic [$bits(dispatch[0].generation)-1:0] result_generation_t;
+  `RAPT_ALU_COMPLETION_TYPE_PC(alu_result_t, result_word_t, result_pc_t, result_phys_t,
+                               result_arch_t, result_owner_t, result_generation_t)
+  `RAPT_SYSTEM_COMPLETION_TYPE_PC(system_result_t, result_word_t, result_pc_t, result_phys_t,
+                                  result_arch_t, result_owner_t, result_generation_t)
+  `RAPT_BRANCH_COMPLETION_TYPE_PC(branch_result_t, result_word_t, result_pc_t, result_phys_t,
+                                  result_arch_t, result_owner_t, result_generation_t)
+  `RAPT_MDU_COMPLETION_TYPE_PC(mdu_result_t, result_word_t, result_pc_t, result_phys_t,
+                               result_arch_t, result_owner_t, result_generation_t)
   IssueT iss_branch;
   IssueT alq_issue[NumIntegerPorts];
   IssueT alq_execute[NumIntegerPorts];
@@ -206,7 +220,13 @@ module rapt_ieu #(
 
   for (genvar p = 0; p < NumIntegerPorts; p++) begin : g_integer_port
     if (p == IntegerSystemPort) begin : g_system
+      system_result_t result;
+      always_comb begin
+        wb_integer_raw[p] = '0;
+        `RAPT_SYSTEM_COMPLETION_COPY(wb_integer_raw[p], result)
+      end
       rapt_ieu_pipe_alu_csr #(
+          .CompletionT(system_result_t),
           .UseDispatchCsrAddress(1'b1),
           .XLEN    (XLEN)
       ) u_pipe_alu_csr (
@@ -215,23 +235,40 @@ module rapt_ieu #(
           .csr_read_addr(csr_read_addr_q),
           .csr_bcast (csr_bcast),
           .exu_csr   (exu_csr),
-          .wb_alu_csr(wb_integer_raw[p])
+          .wb_alu_csr(result)
       );
     end else begin : g_simple
+      alu_result_t result;
+      always_comb begin
+        wb_integer_raw[p] = '0;
+        `RAPT_ALU_COMPLETION_COPY(wb_integer_raw[p], result)
+      end
       rapt_ieu_pipe_alu #(
+          .CompletionT(alu_result_t),
           .XLEN(XLEN)
       ) u_pipe_alu (
           .iss   (alq_execute[p]),
-          .wb_alu(wb_integer_raw[p])
+          .wb_alu(result)
       );
     end
   end
 
+  branch_result_t branch_result;
+  mdu_result_t mul_result;
+  always_comb begin
+    wb_branch = '0;
+    `RAPT_BRANCH_COMPLETION_COPY(wb_branch, branch_result)
+  end
+  always_comb begin
+    exu_wb_mul = '0;
+    `RAPT_MDU_COMPLETION_COPY(exu_wb_mul, mul_result)
+  end
   rapt_ieu_pipe_branch #(
+      .CompletionT(branch_result_t),
       .XLEN(XLEN)
   ) u_pipe_branch (
       .iss      (iss_branch),
-      .wb_branch(wb_branch)
+      .wb_branch(branch_result)
   );
 
   rapt_ieu_muldiv #(
@@ -245,6 +282,7 @@ module rapt_ieu #(
       .PLEN    (PLEN),
       .RLEN    (RLEN),
       .XLEN    (XLEN)
+      , .ResultT(mdu_result_t)
   ) u_muldiv (
       .cancel_valid(cancel_valid),
       .cancel_head(cancel_head),
@@ -256,7 +294,7 @@ module rapt_ieu #(
       .dispatch(dispatch),
       .disp         (disp_mdq),
 
-      .exu_wb_mul   (exu_wb_mul)
+      .exu_wb_mul   (mul_result)
   );
   if (!(NumIntegerPorts > 0)) begin : g_invalid_config_0
     $error("Invalid rapt_ieu configuration");

@@ -10,16 +10,19 @@ task automatic expect_cbo_maintenance;
       pa = XLEN'('h81234abd);
       u = make_alu_uop(XLEN'('h80002000), (32'(op) << 20) | 32'h0000a00f, '0);
       u.execute.sys.fence = 1;
+      u.execute.sys.kind = op == 1 ? rapt_pkg::SYS_CBO_CLEAN : rapt_pkg::SYS_CBO_INVAL;
       dispatch_one(u, '0, '0, RobW'(0));
       tb_sq_empty = 0;
       // Rejected old generation must neither complete nor replace the VA.
       force_stale_generation = 1;
-      exu_rou.dest = 0; exu_rou.npc = u.pnpc;
+      exu_rou.dest = 0;
+      exu_rou.npc = (u.pc + XLEN'(u.c ? 2 : 4));
       exu_rou.tval = ~va; exu_rou.valid = 1;
       tick(1); clear_writebacks(); force_stale_generation = 0;
       check(!commit_fire && !cmu_bcast.cbo_inval && !cmu_bcast.fence_time,
             "stale CBO completion caused maintenance");
-      exu_ioq_bcast.dest = 0; exu_ioq_bcast.npc = u.pnpc;
+      exu_ioq_bcast.dest = 0;
+      exu_ioq_bcast.npc = (u.pc + XLEN'(u.c ? 2 : 4));
       exu_ioq_bcast.tval = va; exu_ioq_bcast.wen = 0;
       exu_ioq_bcast.sq_waddr = pa;
       exu_ioq_bcast.trap = 1'(fault);
@@ -31,9 +34,16 @@ task automatic expect_cbo_maintenance;
         tb_sq_empty = 1; #1;
         check(commit_fire && rou_cmu.slot[0].trap && rou_cmu.flush_pipe,
               "faulting CBO did not reach trap retirement");
-        check(!cmu_bcast.cbo_inval && !cmu_bcast.fence_time,
-              "faulting CBO caused maintenance");
+        check(
+            !cmu_bcast.cbo_inval && !cmu_bcast.fence_time
+            && !tb_writeback_cbo && !tb_writeback_clean,
+            "faulting CBO caused maintenance");
       end else begin
+        check(
+            tb_writeback_cbo && !tb_writeback_clean
+            && tb_writeback_cbo_invalidate == (op != 1)
+            && tb_writeback_block == pa[XLEN-1:6],
+            "precommit CBO lost physical block or maintenance kind");
         repeat (3) begin
           check(!commit_fire && !cmu_bcast.cbo_inval && !cmu_bcast.fence_time,
                 "CBO bypassed older SQ entries");
@@ -54,10 +64,12 @@ task automatic expect_cbo_maintenance;
   branch_u = make_branch_uop(XLEN'('h80003000), 32'h00000863);
   u = make_alu_uop(XLEN'('h80003004), 32'h0020a00f, '0);
   u.execute.sys.fence = 1;
+  u.execute.sys.kind = rapt_pkg::SYS_CBO_INVAL;
   dispatch_one(branch_u, '0, '0, RobW'(0));
   // A serializing CBO stays queued until the older branch resolves. It
   // must be discarded by mispredict recovery before it can execute.
   rnu_rou.slot[0].uop = u;
+  rnu_rou.slot[0].pnpc = rnu_rou.slot[0].uop.pc + XLEN'(rnu_rou.slot[0].uop.c ? 2 : 4);
   rnu_rou.checkpoint_valid[0] = 0;
   rnu_rou.valid[0] = 1;
   #1; check(rnu_rou.ready[0], "wrong-path CBO could not enter rename queue");

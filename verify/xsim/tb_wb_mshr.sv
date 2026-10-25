@@ -21,6 +21,7 @@ module tb_wb_mshr;
   l1i_bus_if l1i_bus ();
   mem_link_if mem ();
   logic coherent_ready, coherent_request, coherent_write;
+  logic [`RAPT_XLEN-1:0] coherent_addr;
   logic writeback_error, writeback_idle;
   logic writeback_drain = 0;
   rapt_l1d #(
@@ -37,13 +38,19 @@ module tb_wb_mshr;
       .external_write_first_i('0),
       .external_write_last_i('0),
       `TB_L1D_UNUSED_RELEASE_PORTS,
+      .writeback_cbo_done(),
+      .writeback_cbo(1'b0),
+      .writeback_cbo_invalidate(1'b0),
+      .writeback_block('0),
       .*
   );
   rapt_bus bus_dut (
       .rd_req_cacheable(),
       .*
   );
+  `define TB_L1D_EXTERNAL_BUS
   `include "tb_l1d_defaults.svh"
+  `undef TB_L1D_EXTERNAL_BUS
 
   logic ptw_pending = 0, write_pending = 0;
   logic [XLEN-1:0] pte_addr, written_addr, written_data;
@@ -222,6 +229,22 @@ module tb_wb_mshr;
     writeback_drain = 0;
     repeat (4) @(negedge clock);
     reset = 0;
+    // Translation is an S-mode request. Grant its RAM and page-table accesses
+    // explicitly so cached page permissions agree with the live PMP checker.
+    csr_bcast.priv = `RAPT_PRIV_S;
+    csr_bcast.mpp = `RAPT_PRIV_S;
+    pmp_update.addr_we = 1;
+    pmp_update.raw_addr = '1;
+    pmp_update.napot_mask = '1;
+    pmp_update.cfg_we = 1;
+    pmp_update.cfg_r = 1;
+    pmp_update.cfg_w = 1;
+    pmp_update.cfg_x = 1;
+    pmp_update.mode_off[0] = 0;
+    pmp_update.mode_napot[0] = 1;
+    @(negedge clock);
+    pmp_update.addr_we = 0;
+    pmp_update.cfg_we = 0;
     lsu_l1d.replay_allowed = 1;
     csr_bcast.dmmu_en = 1;
     csr_bcast.satp_ppn = 'h80010;
@@ -263,7 +286,15 @@ module tb_wb_mshr;
     // stage; the accepted miss must still yield as soon as tag lookup runs.
     for (int n = 0; n < 2; n++) begin
       @(posedge clock);
-      if (lsu_l1d.rready) $fatal(1, "pending store allowed an unexpected load response");
+      if (lsu_l1d.rready)
+        $fatal(
+            1,
+            "pending store allowed load response: trap=%b cause=%h state=%h wb=%h",
+            lsu_l1d.trap,
+            lsu_l1d.cause,
+            dut.l1d_state,
+            dut.wb_state
+        );
       if (lsu_l1d.rmiss) break;
     end
     if (!lsu_l1d.rmiss || lsu_l1d.rready)
@@ -411,10 +442,16 @@ module tb_wb_mshr;
     init();
     lookup(va(0), 1);
     cmu_bcast.flush_pipe = 1;
+    cmu_bcast.sfence_all_vpn = 1;
+    cmu_bcast.sfence_all_asid = 1;
+    cmu_bcast.sfence_vpn = 0;
+    cmu_bcast.sfence_asid = 0;
+    cmu_bcast.sfence_valid = `RAPT_SFENCE_SELECTIVE != 0;
     cmu_bcast.fence_time = 1;
     @(negedge clock);
     cmu_bcast.flush_pipe = 0;
     cmu_bcast.fence_time = 0;
+    cmu_bcast.sfence_valid = 0;
     refill(0);
     deny_leaf = 1;
     lookup(va(0), 0, 0, 1);

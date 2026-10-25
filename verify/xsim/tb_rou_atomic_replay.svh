@@ -74,11 +74,11 @@ task automatic replay_case(input bit aq);
     dispatch_one(young_u,PLEN'(41),'0,RobW'(1));
     // Speculative younger load has already returned old data. It must be
     // discarded by real atomic commit, not counted as an architectural bug.
-    exu_ioq_bcast.dest=RobW'(1);exu_ioq_bcast.npc=young_u.pnpc;
+    exu_ioq_bcast.dest=RobW'(1);exu_ioq_bcast.npc=young_u.pc + $bits(young_u.pc)'(young_u.c ? 2 : 4);
     exu_ioq_bcast.result=0;exu_ioq_bcast.wen=0;exu_ioq_bcast.valid=1;
     tick(1);clear_writebacks();check(!commit_fire,"young result bypassed incomplete atomic");
     replay_acquire=aq;
-    exu_ioq_bcast.dest=RobW'(0);exu_ioq_bcast.npc=atomic_u.pnpc;
+    exu_ioq_bcast.dest=RobW'(0);exu_ioq_bcast.npc=atomic_u.pc + $bits(atomic_u.pc)'(atomic_u.c ? 2 : 4);
     exu_ioq_bcast.result=0;exu_ioq_bcast.wen=1;exu_ioq_bcast.valid=1;
     exu_ioq_bcast.tval=XLEN'('h80002000);exu_ioq_bcast.sq_waddr=XLEN'('h80002000);
     exu_ioq_bcast.sq_wdata=1;exu_ioq_bcast.alu=6'(`RAPT_SW_WSTRB);
@@ -109,7 +109,7 @@ task automatic replay_case(input bit aq);
       replay_l1d.wready=cycle==6;
       #1;
       if (replay_pipe.rvalid && replay_pipe.rready && !issued_completion) begin
-        exu_ioq_bcast.dest=RobW'(0);exu_ioq_bcast.npc=young_u.pnpc;
+        exu_ioq_bcast.dest=RobW'(0);exu_ioq_bcast.npc=young_u.pc + $bits(young_u.pc)'(young_u.c ? 2 : 4);
         exu_ioq_bcast.result=replay_pipe.rdata;exu_ioq_bcast.valid=1;
         issued_completion=1;
       end

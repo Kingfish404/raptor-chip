@@ -7,10 +7,11 @@ module rapt_memory #(
     parameter int XLEN = `RAPT_XLEN,
     parameter int MemoryReadCredits = 8,
     parameter bit L1dWriteBack = `RAPT_L1D_WRITEBACK,
+    parameter bit TargetedCoherence = `RAPT_L1D_TARGETED_COHERENCE,
 `ifdef RAPT_L2_EN
     parameter int PostedWrites = 0
 `else
-    parameter int PostedWrites = L1dWriteBack ? 0 : `RAPT_POSTED_WRITES
+    parameter int PostedWrites = `RAPT_POSTED_WRITES
 `endif
 ) (
     input logic clock,
@@ -24,13 +25,17 @@ module rapt_memory #(
     axi4_if.master io_master,
     input logic ifetch_io_authorized_i,
     output logic ifetch_io_start_o,
-    output logic [XLEN-1:0] ifetch_io_owner_pc_o,
+    output logic [`RAPT_PC_BITS_OF(XLEN)-1:0] ifetch_io_owner_pc_o,
     output logic data_idle_o,
     output logic writeback_idle_o,
     // Drain completion is held for the requesting serializing ROB owner.
     output logic writeback_done_o,
     input logic stores_empty_i = 1'b1,
     input logic writeback_drain_i = 1'b0,
+    input logic writeback_clean_i = 1'b1,
+    input logic writeback_cbo_i = 1'b0,
+    input logic writeback_cbo_invalidate_i = 1'b0,
+    input logic [XLEN-1:6] writeback_block_i = '0,
     output logic writeback_error_o,
     input logic external_write_valid_i = 1'b0,
     input logic external_write_pending_i = 1'b0,
@@ -54,7 +59,21 @@ module rapt_memory #(
   logic [XLEN-1:0] l2_release_addr, l2_release_data;
   logic l2_probe_window, l1d_writeback_bus_pending;
   logic data_idle_q;
-  logic cache_writeback_drain;
+  logic cache_writeback_drain, cache_cbo_done, cache_cbo_active_q;
+  logic [XLEN-1:0] cache_coherent_addr;
+
+  // Start block maintenance only after older refills and SQ writes finish.
+  // Hold the owner once armed: maintenance itself temporarily deasserts idle.
+  always_ff @(posedge clock) begin
+    if (reset || !TargetedCoherence || !cache_writeback_drain) cache_cbo_active_q <= 1'b0;
+    else if (writeback_cbo_i && stores_empty_i && lsu_l1d.idle && l1d_bus.idle)
+      cache_cbo_active_q <= 1'b1;
+  end
+
+  `RAPT_SVA_IMPLY(
+      clock, reset, CBO_START_OBSERVED_QUIESCENCE, $rose(cache_cbo_active_q),
+      $past(
+          cache_writeback_drain && writeback_cbo_i && stores_empty_i && lsu_l1d.idle && l1d_bus.idle))
 
   rapt_memory_drain drain_control (
       .clock(clock),
@@ -62,7 +81,8 @@ module rapt_memory #(
       .request_i(writeback_drain_i),
       .stores_empty_i(stores_empty_i),
       .memory_idle_i(lsu_l1d.idle && l1d_bus.idle),
-      .writeback_idle_i(writeback_idle_o),
+      .writeback_idle_i((!TargetedCoherence || writeback_clean_i) ? writeback_idle_o
+          : writeback_cbo_i ? cache_cbo_done : 1'b1),
       .drain_o(cache_writeback_drain),
       .done_o(writeback_done_o)
   );
@@ -94,7 +114,13 @@ module rapt_memory #(
     ) u_l2tlb (
         .clock(clock),
         .reset(reset),
-        .flush(cmu_bcast.fence_time),
+        .flush(`RAPT_SFENCE_SELECTIVE == 0 && cmu_bcast.fence_time),
+        .cancel(cmu_bcast.fence_time),
+        .sfence_valid(cmu_bcast.sfence_valid),
+        .sfence_vpn(cmu_bcast.sfence_vpn),
+        .sfence_asid(cmu_bcast.sfence_asid),
+        .sfence_all_vpn(cmu_bcast.sfence_all_vpn),
+        .sfence_all_asid(cmu_bcast.sfence_all_asid),
         .req_i(l2tlb_req),
         .ready_o(l2tlb_ready),
         .rsp_o(l2tlb_rsp)
@@ -125,6 +151,7 @@ module rapt_memory #(
 
   rapt_l1d #(
       .WriteBack(L1dWriteBack),
+      .TargetedCoherence(TargetedCoherence),
       .L2Tlb(`RAPT_L2TLB_ENTRIES > 0)
   ) l1d_cache (
       .l2tlb_req_o(l2tlb_req[1]),
@@ -135,6 +162,7 @@ module rapt_memory #(
       .coherent_ready(cache_coherent_ready),
       .coherent_request(cache_coherent_request),
       .coherent_write(cache_coherent_write),
+      .coherent_addr(cache_coherent_addr),
       .probe_valid_i(l2_probe_valid),
       .probe_addr_i(l2_probe_addr),
       .probe_ready_o(l2_probe_ready),
@@ -154,7 +182,12 @@ module rapt_memory #(
       .writeback_bus_pending_o(l1d_writeback_bus_pending),
       .writeback_error(writeback_error_o),
       .writeback_idle(writeback_idle_o),
-      .writeback_drain(cache_writeback_drain),
+      .writeback_drain(cache_writeback_drain && (!TargetedCoherence || writeback_clean_i)),
+      .writeback_cbo(TargetedCoherence && cache_writeback_drain
+          && writeback_cbo_i && cache_cbo_active_q),
+      .writeback_cbo_invalidate(writeback_cbo_invalidate_i),
+      .writeback_block(writeback_block_i),
+      .writeback_cbo_done(cache_cbo_done),
       .external_write_valid_i(external_write_valid_i),
       .external_write_pending_i(external_write_pending_i),
       .external_write_first_i(external_write_first_i),
@@ -169,6 +202,7 @@ module rapt_memory #(
 
   rapt_bus #(
       .XLEN(XLEN),
+      .TargetedCoherence(TargetedCoherence && L1dWriteBack),
       .PostedWrites(PostedWrites)
   ) bus (
       .clock(clock),
@@ -176,6 +210,7 @@ module rapt_memory #(
       .coherent_ready(cache_coherent_ready),
       .coherent_request(cache_coherent_request),
       .coherent_write(cache_coherent_write),
+      .coherent_addr(cache_coherent_addr),
       .mem(memory_link),
       .rd_req_cacheable(memory_read_cacheable),
       .l1i_bus(l1i_bus),

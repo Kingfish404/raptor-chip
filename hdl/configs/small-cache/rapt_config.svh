@@ -1,7 +1,7 @@
 `ifndef RAPT_CONFIG_SVH
 `define RAPT_CONFIG_SVH
 //
-// Selected via `make ... RAPT_CONFIG=small-cache16`. The sim Makefile prepends
+// Selected via `make ... RAPT_CONFIG=small-cache`. The sim Makefile prepends
 // `configs/<RAPT_CONFIG>` to the include path so this file is picked up
 // instead of `hdl/configs/default/rapt_config.svh`.
 //
@@ -68,26 +68,34 @@
 `define RAPT_PHY_SIZE 48 // total physical registers, including architectural mappings
 `define RAPT_PHY_LEN $clog2(`RAPT_PHY_SIZE)
 
-// Preserve the small pipeline and 16-byte interface while sizing caches for Linux.
-`define RAPT_CACHE_LINE_BYTES 16
+// Small core with the middle-cache 128 KiB L1I/L1D geometry.
+`define RAPT_CACHE_LINE_BYTES 64
 
-// L1I
+// L1I: 64B line * 1024 sets * 2-way = 128 KiB; physically indexed.
 `define RAPT_L1I_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / 4)
-`define RAPT_L1I_LEN 8 // 16 KiB, four ways; index stays within the page offset
-`define RAPT_L1I_N_WAYS 4
-`define RAPT_L1I_REFILL_WORDS 4
+`define RAPT_L1I_LEN 10
+`define RAPT_L1I_N_WAYS 2
+`define RAPT_L1I_REFILL_WORDS 8
 
-// L1D
+// L1D: 64B line * 64 sets * 32-way = 128 KiB; VIPT-safe.
 `define RAPT_SQ_SIZE 4
 `define RAPT_L1D_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
-`define RAPT_L1D_LEN 8 // 16 KiB, four ways; index stays within the page offset
-`define RAPT_L1D_N_WAYS 4
+`define RAPT_L1D_LEN 6
+`define RAPT_L1D_N_WAYS 32
+`ifndef RAPT_L1D_WRITEBACK
+`define RAPT_L1D_WRITEBACK 1
+`endif
 
 `define RAPT_ITLB_ENTRIES 16
 `define RAPT_DTLB_ENTRIES 16
 `define RAPT_DTLB_WAYS 0
+`ifndef RAPT_TLB_PLRU
+`define RAPT_TLB_PLRU 1
+`endif
 // Shared instruction/data second-level translation cache; zero bypasses it.
-`define RAPT_L2TLB_ENTRIES 0
+`ifndef RAPT_L2TLB_ENTRIES
+`define RAPT_L2TLB_ENTRIES 64
+`endif
 
 // Geometry for an explicit command-line L2 enable; L2 remains disabled here.
 `define RAPT_L2_LEN 8

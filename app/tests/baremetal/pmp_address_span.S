@@ -28,22 +28,24 @@ width_scan:
   addi s5, s5, 1
   j width_scan
 width_done:
-  li t1, 33                 /* must exceed the bits used by data's address */
+  li t1, 30                 /* must cover data's address bits [31:2] */
   blt s5, t1, fail
   li t1, 54                 /* RV64 architectural maximum */
   bgt s5, t1, fail
-  /* Walk every implemented bit above the data address. */
-  li s1, 32
+  /* Toggle implemented high page bits, including bits set in the data address. */
+  li s1, 20
   li s3, 0
+  bge s1, s5, positive_control
 next_bit:
   srli t0, s0, 2
   li t1, 1
   sll t1, t1, s1
-  or t0, t0, t1
+  xor t0, t0, t1
+  csrw pmpcfg0, zero
   csrw pmpaddr0, t0
   csrr t2, pmpaddr0
   bne t2, t0, fail
-  li t0, 0x11               /* NA4 read grant at a different, high address */
+  li t0, 0x19               /* NAPOT page grant at a different address */
   csrw pmpcfg0, t0
   sfence.vma
   la s2, denied_load
@@ -52,13 +54,16 @@ next_bit:
 denied_load:
   lbu t1, 0(s0)
   csrc mstatus, t0
-  addi t2, s1, -31
+  addi t2, s1, -19
   bne s3, t2, fail
   addi s1, s1, 1
   blt s1, s5, next_bit
-  /* Positive control: the actual low NA4 range must grant the same access. */
+  /* Positive control: the actual low page range must grant the same access. */
+positive_control:
   srli t0, s0, 2
   csrw pmpaddr0, t0
+  li t0, 0x19               /* minimum NAPOT page read grant */
+  csrw pmpcfg0, t0
   sfence.vma
   li t0, 0x20000
   csrs mstatus, t0
@@ -88,7 +93,7 @@ fail:
   ebreak
   j fail
 .section .data
-.balign 16
+.balign 4096
 data:
   .byte 0x5a
   .space 15

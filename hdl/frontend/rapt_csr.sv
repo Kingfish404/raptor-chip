@@ -191,6 +191,10 @@ module rapt_csr #(
   // Reserved bits [6:5] of each cfg byte are WARL-zero (mask 8'h9F).
   // pmpaddr is stored in its raw CSR form (byte_addr >> 2).
   localparam int PMPAddrW = `RAPT_PMPADDR_BITS;
+  localparam int PMPGrain = `RAPT_PMP_GRANULARITY_LOG2 - 2;
+  localparam logic [PMPAddrW-1:0] PMPTorLow = (PMPAddrW'(1) << PMPGrain) - 1;
+  localparam logic [PMPAddrW-1:0] PMPNapotLow =
+      (PMPAddrW'(1) << (PMPGrain > 0 ? PMPGrain - 1 : 0)) - 1;
   // Match pmp_update_if.IDX_W without a hierarchical constant expression.
   localparam int PMPIndexW = $clog2(`RAPT_PMP_NUM);
   localparam int PMPCheckAddrW = `RAPT_PADDR_BITS - 2;
@@ -201,6 +205,8 @@ module rapt_csr #(
   function automatic logic [7:0] legalize_pmpcfg(input logic [7:0] raw);
     logic [7:0] value;
     value = raw & 8'h9f;
+    if (PMPGrain > 0 && value[`RAPT_PMPCFG_A_] == `RAPT_PMP_A_NA4)
+      value[`RAPT_PMPCFG_A_] = `RAPT_PMP_A_OFF;
     if (!value[0] && value[1]) value[2:0] = 3'b000;
     return value;
   endfunction
@@ -409,9 +415,14 @@ module rapt_csr #(
         end else if (raddr == `RAPT_CSR_PMPCFG3) begin
           exu_csr.rdata = (XLEN == 64) ? '0
                         : XLEN'({pmpcfg_r[15], pmpcfg_r[14], pmpcfg_r[13], pmpcfg_r[12]});
-        end else if (raddr >= PMPAddrBase && raddr <= PMPAddrLast)
-          exu_csr.rdata = XLEN'(pmpaddr_r[raddr[3:0]]);
-        else exu_csr.rdata = '0;
+        end else if (raddr >= PMPAddrBase && raddr <= PMPAddrLast) begin
+          // Read masking never changes the underlying bit G-1, which must
+          // survive NAPOT -> TOR/OFF -> NAPOT without an address write.
+          if (int'(raddr[3:0]) >= `RAPT_PMP_NUM) exu_csr.rdata = '0;
+          else if (pmpcfg_r[raddr[3:0]][4])
+            exu_csr.rdata = XLEN'(pmpaddr_r[raddr[3:0]]) | XLEN'(PMPNapotLow);
+          else exu_csr.rdata = XLEN'(pmpaddr_r[raddr[3:0]]) & ~XLEN'(PMPTorLow);
+        end else exu_csr.rdata = '0;
       end
     endcase
     if (raddr == `RAPT_CSR_MBERR_STATUS)
@@ -455,7 +466,7 @@ module rapt_csr #(
     trap_to_s = smode_handle;
     trap_cause = rou_csr.cause;
     trap_tval = rou_csr.tval;
-    trap_epc = rou_csr.pc;
+    trap_epc = `RAPT_PC_SEXT(XLEN, rou_csr.pc);
     if (rou_csr.ecall) begin
       trap_enter = 1'b1;
       trap_to_s = ecall_deleg;
@@ -696,8 +707,10 @@ module rapt_csr #(
       pmp_update.addr_we    = 1'b1;
       pmp_update.addr_idx   = PMPIndexW'(pidx);
       pmp_update.raw_addr   = rou_csr.csr_wdata[PMPCheckAddrW-1:0];
-      pmp_update.napot_mask = pmp_update.raw_addr
-            ^ (pmp_update.raw_addr + PMPCheckAddrW'(1));
+      // Predecode the NAPOT interpretation even while OFF/TOR is selected.
+      // A later mode-only write can then reuse the preserved address state.
+      pmp_update.napot_mask = (pmp_update.raw_addr | PMPCheckAddrW'(PMPNapotLow))
+          ^ ((pmp_update.raw_addr | PMPCheckAddrW'(PMPNapotLow)) + PMPCheckAddrW'(1));
     end
     // Even an ignored (locked or unimplemented) PMP write invalidates cached
     // data-access verdicts. Refresh entry zero unchanged to carry that event

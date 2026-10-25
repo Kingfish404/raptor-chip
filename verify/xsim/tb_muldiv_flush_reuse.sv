@@ -90,7 +90,7 @@ module tb_muldiv_flush_reuse #(
       check(disp.free_found[0], "MULDIV queue had no free dispatch slot");
       dispatch[0].uop = '0;
       dispatch[0].uop.pc = pc;
-      dispatch[0].uop.pnpc = pc + XLEN'(4);
+
       dispatch[0].uop.execute.int_op.alu = {1'b0, alu};
       dispatch[0].uop.rd = rd;
       dispatch[0].uop.execute.int_op.word = word_op;

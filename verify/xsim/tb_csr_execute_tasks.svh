@@ -7,8 +7,7 @@ task automatic operation(input logic [11:0] addr, input logic [2:0] op,
   iss.op1 = operand;
   // This helper uses x0 for read-only zero masks and x1 otherwise.
   // Explicit non-x0 zero masks are covered by tb_csr_write_intent.
-  iss.uop.inst[19:15] = operand == 0 ? 5'd0 : 5'd1;
-  iss.uop.imm = XLEN'(addr);
+  iss.uop.imm = {15'b0, (operand == 0 ? 5'd0 : 5'd1), addr};
   iss.uop.execute.sys.valid = 1;
   iss.uop.execute.sys.csr_csw = op;
   #1;

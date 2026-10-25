@@ -7,6 +7,7 @@ CPU_state cpu;
 void soft_tlb_flush(void) {}
 void pmp_restore_checkpoint(const uint8_t *, const word_t *);
 int pmp_csr_write(uint16_t, word_t);
+word_t pmp_csr_read(uint16_t);
 bool pmp_check(paddr_t, int, uint32_t, bool, bool, bool);
 
 static void config(unsigned entry, unsigned cfg) {
@@ -25,6 +26,7 @@ int main(void) {
     config(i, 0x89); // An unavailable locked TOR must not lock its predecessor.
     assert(pmp_csr_write(0x3b0 + i, ~(word_t)0));
     assert(cpu.sr[0x3b0 + i] == 0);
+    assert(pmp_csr_read(0x3b0 + i) == 0);
     assert(pmp_csr_write(0x3b7, 0x20000000));
     assert(cpu.sr[0x3b7] == 0x20000000);
   }

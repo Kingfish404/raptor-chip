@@ -5,7 +5,8 @@ hart0:
   User_Spec_Version: "2.3"
   Privilege_Spec_Version: "1.11"
   hw_data_misaligned_support: true
-  pmp_granularity: 4
+  # riscv-config uses architectural G: 2^(G+2) bytes = 4 KiB.
+  pmp_granularity: 10
   supported_xlen: [32]
   misa:
     reset-val: 0x4014112d

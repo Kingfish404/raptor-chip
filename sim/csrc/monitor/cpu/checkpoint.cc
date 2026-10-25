@@ -9,6 +9,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <errno.h>
+#include <functional>
+#include <limits>
 #ifdef RAPT_LARGE_PMEM
 #include <sys/mman.h>
 #include <unistd.h>
@@ -545,7 +547,7 @@ static size_t overlay_pending_axi(SqOverlayByte *bytes)
   return count;
 }
 
-static bool overlay_committed_sq(SqOverlayByte *bytes, size_t *byte_count)
+static bool overlay_committed_sq(SqOverlayByte *bytes, size_t *byte_count, bool skip_mmio)
 {
   *byte_count = 0;
   if (npc.sq_snapshot_valid == NULL)
@@ -567,6 +569,8 @@ static bool overlay_committed_sq(SqOverlayByte *bytes, size_t *byte_count)
     uint8_t entry = (head + ordinal) % capacity;
     if ((valid & (1u << entry)) == 0)
       continue;
+    if (skip_mmio && guest_to_host(npc.sq_snapshot_paddr[entry]) == NULL)
+      continue;
 
     uint8_t alu = npc.sq_snapshot_alu[entry];
     size_t size = (alu == 0x01) ? 1 : (alu == 0x03) ? 2 :
@@ -585,6 +589,8 @@ static bool overlay_committed_sq(SqOverlayByte *bytes, size_t *byte_count)
   {
     uint8_t entry = (head + ordinal) % capacity;
     if ((valid & (1u << entry)) == 0)
+      continue;
+    if (skip_mmio && guest_to_host(npc.sq_snapshot_paddr[entry]) == NULL)
       continue;
     uint8_t alu = npc.sq_snapshot_alu[entry];
     size_t size = (alu == 0x01) ? 1 : (alu == 0x03) ? 2 :
@@ -609,7 +615,7 @@ static void restore_sq_overlay(const SqOverlayByte *bytes, size_t byte_count)
   }
 }
 
-static bool save_memory_image(void)
+static bool with_memory_image(const std::function<void()> &consume, bool skip_mmio = false)
 {
   if (!cpu_cache_snapshot_ready())
     return false;
@@ -634,7 +640,7 @@ static bool save_memory_image(void)
 
   SqOverlayByte sq_overlay[32 * sizeof(word_t)];
   size_t sq_count = 0;
-  bool ready = overlay_committed_sq(sq_overlay, &sq_count);
+  bool ready = overlay_committed_sq(sq_overlay, &sq_count, skip_mmio);
   if (ready)
   {
     if (axi_count > 0)
@@ -643,12 +649,32 @@ static bool save_memory_image(void)
       Log("checkpoint: overlaid %zu dirty cache bytes into memory image", cache_overlay.size());
     if (sq_count > 0)
       Log("checkpoint: overlaid %zu committed SQ bytes into memory image", sq_count);
-    do_save();
+    consume();
   }
   restore_sq_overlay(sq_overlay, sq_count);
   restore_sq_overlay(cache_overlay.data(), cache_overlay.size());
   restore_sq_overlay(axi_overlay, axi_count);
-  return ready && save_done;
+  return ready;
+}
+
+static bool save_memory_image(void)
+{
+  return with_memory_image(do_save) && save_done;
+}
+
+bool cpu_read_memory_snapshot(paddr_t addr, void *data, size_t bytes)
+{
+  if (bytes == 0)
+    return true;
+  if (bytes - 1 > std::numeric_limits<paddr_t>::max() - addr)
+    return false;
+  uint8_t *first = guest_to_host(addr);
+  uint8_t *last = guest_to_host(addr + bytes - 1);
+  if (first == NULL || last == NULL || uintptr_t(last) - uintptr_t(first) != bytes - 1)
+    return false;
+  // MMIO has no RAM bytes to copy. A checkpoint still waits for these stores
+  // to drain so its device state is consistent, but a signature ignores them.
+  return with_memory_image([=]() { memcpy(data, first, bytes); }, true);
 }
 
 /* Try a dump without a user trigger. LightSSS calls this at an empty ROB/SQ

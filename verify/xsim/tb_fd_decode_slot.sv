@@ -11,15 +11,30 @@ module tb_fd_decode_slot;
   task automatic check_one(input int expected_op, input bit to_gpr, input bit load_op = 0,
                            input bit store_op = 0);
     bit denied;
+    bit trap_mismatch;
+    bit fp_mismatch;
     fetched.inst = inst;
     #1;
     denied = expected_op == 0 || csr_bcast.fs == 0;
     checks++;
     if (!denied) legal_count++;
-    if(decoded.uop.trap!=denied || (denied && (decoded.uop.cause!=X'(2)||decoded.uop.tval!=X'(inst)||decoded.uop.rd!=0))
-    || (!denied && (!decoded.uop.execute.fp.valid || decoded.uop.execute.fp.op!=6'(expected_op)
-      || decoded.uop.execute.fp.rm!=inst[14:12] || decoded.uop.rd!=(to_gpr?inst[11:7]:5'b0)
-      || decoded.uop.execute.fp.rd!=inst[11:7] || decoded.uop.execute.memory.load!=load_op || decoded.uop.execute.memory.store!=store_op)))begin
+    trap_mismatch = decoded.uop.trap != denied;
+    if (denied) begin
+      trap_mismatch |= decoded.uop.cause != X'(2);
+      trap_mismatch |= `RAPT_UOP_TVAL(X, decoded.uop) != X'(inst);
+      trap_mismatch |= decoded.uop.rd != 0;
+    end
+    fp_mismatch = 0;
+    if (!denied) begin
+      fp_mismatch |= !decoded.uop.execute.fp.valid;
+      fp_mismatch |= decoded.uop.execute.fp.op != 6'(expected_op);
+      fp_mismatch |= decoded.uop.execute.fp.rm != inst[14:12];
+      fp_mismatch |= decoded.uop.rd != (to_gpr ? inst[11:7] : 5'b0);
+      fp_mismatch |= decoded.uop.execute.fp.rd != inst[11:7];
+      fp_mismatch |= decoded.uop.execute.memory.load != load_op;
+      fp_mismatch |= decoded.uop.execute.memory.store != store_op;
+    end
+    if (trap_mismatch || fp_mismatch) begin
       failures++;
       if (failures <= 16)
         $display(

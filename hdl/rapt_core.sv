@@ -81,7 +81,7 @@ module rapt_core #(
     output logic            halted_o,
     // Resume PC reported to the DM (= npc of the youngest committed
     // instruction). Sampled by rapt_dm into dpc on halt entry.
-    output logic [XLEN-1:0] halt_pc_o,
+    output logic [`RAPT_PC_BITS_OF(XLEN)-1:0] halt_pc_o,
     // Single-cycle pulse: at least one instruction retired this cycle.
     // Sampled by rapt_dm to implement dcsr.step.
     output logic            commit_fire_o,
@@ -136,6 +136,8 @@ module rapt_core #(
 
   logic cache_writeback_done;
   logic cache_writeback_drain;
+  logic cache_writeback_clean, cache_writeback_cbo, cache_writeback_cbo_invalidate;
+  logic [XLEN-1:6] cache_writeback_block;
   rapt_backend #(
       .XLEN(XLEN),
       .RegisteredDrainCompletion(1'b1),
@@ -156,6 +158,10 @@ module rapt_core #(
   ) backend (
       .writeback_done(cache_writeback_done),
       .writeback_drain(cache_writeback_drain),
+      .writeback_clean(cache_writeback_clean),
+      .writeback_cbo(cache_writeback_cbo),
+      .writeback_cbo_invalidate(cache_writeback_cbo_invalidate),
+      .writeback_block(cache_writeback_block),
       .clock(clock),
       .reset(reset),
       .idu_rnu(idu_rnu),
@@ -213,7 +219,7 @@ module rapt_core #(
   );
 
   logic ifetch_io_authorized, ifetch_io_start;
-  logic [XLEN-1:0] ifetch_io_owner_pc;
+  logic [`RAPT_PC_BITS_OF(XLEN)-1:0] ifetch_io_owner_pc;
   rapt_ifetch_io_guard #(
       .XLEN(XLEN)
   ) ifetch_io_guard (
@@ -252,6 +258,10 @@ module rapt_core #(
       .writeback_done_o(cache_writeback_done),
       .stores_empty_i(sq_empty),
       .writeback_drain_i(cache_writeback_drain),
+      .writeback_clean_i(cache_writeback_clean),
+      .writeback_cbo_i(cache_writeback_cbo),
+      .writeback_cbo_invalidate_i(cache_writeback_cbo_invalidate),
+      .writeback_block_i(cache_writeback_block),
       .writeback_error_o(writeback_error_o),
       .external_write_valid_i(external_write_valid_i),
       .external_write_pending_i(external_write_pending_i),

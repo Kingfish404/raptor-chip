@@ -19,6 +19,24 @@
 #define CSR_MVENDORID  0xf11
 #define CSR_MIMPID     0xf13
 
+#ifndef RAPT_PMP_GRANULARITY_LOG2
+#define RAPT_PMP_GRANULARITY_LOG2 12
+#endif
+#define PMP_G (RAPT_PMP_GRANULARITY_LOG2 - 2)
+#define PMP_TOR_LOW ((1u << PMP_G) - 1u)
+#define PMP_NAPOT_LOW (PMP_TOR_LOW >> 1)
+
+static uint32_t legal_cfg(uint32_t value)
+{
+    if (PMP_G != 0) {
+        for (unsigned shift = 0; shift < 32; shift += 8) {
+            if (((value >> (shift + 3)) & 3u) == 2u)
+                value &= ~(3u << (shift + 3));
+        }
+    }
+    return value;
+}
+
 void trap_handler(void)
 {
     puts_("unexpected mcause=");
@@ -51,6 +69,25 @@ int main(void)
     const uint32_t cfg3 = 0x000f131du; /* RV32-only packed entries 12..15 */
 
     puts_("pmp_csr: start\n");
+    csr_write_num(CSR_PMPCFG0, 0);
+    csr_write_num(CSR_PMPADDR0, 0xffffffffu);
+    uint32_t probe = csr_read_num(CSR_PMPADDR0);
+    TEST_ASSERT((probe & PMP_TOR_LOW) == 0 && (probe & (1u << PMP_G)),
+                "PMP granularity probe");
+    for (unsigned retained = 0; retained < 2; retained++) {
+        uint32_t raw = 0x1000u | (retained ? (PMP_TOR_LOW ^ PMP_NAPOT_LOW) : 0u);
+        csr_write_num(CSR_PMPCFG0, 0);
+        csr_write_num(CSR_PMPADDR0, raw);
+        TEST_ASSERT(csr_read_num(CSR_PMPADDR0) == (raw & ~PMP_TOR_LOW), "OFF grain");
+        csr_write_num(CSR_PMPCFG0, 0x19u);
+        TEST_ASSERT(csr_read_num(CSR_PMPADDR0) == (raw | PMP_NAPOT_LOW), "NAPOT grain");
+        csr_write_num(CSR_PMPCFG0, 0x09u);
+        TEST_ASSERT(csr_read_num(CSR_PMPADDR0) == (raw & ~PMP_TOR_LOW), "TOR grain");
+        csr_write_num(CSR_PMPCFG0, 0x19u);
+        TEST_ASSERT(csr_read_num(CSR_PMPADDR0) == (raw | PMP_NAPOT_LOW),
+                    "NAPOT stored G-1 bit survives TOR");
+    }
+    csr_write_num(CSR_PMPCFG0, 0);
     write_pmp_addresses();
 
     /* Entry 0 is first-priority, all-memory NAPOT RWX, so later entries can
@@ -61,8 +98,8 @@ int main(void)
     csr_write_num(CSR_PMPCFG2, cfg2);
     csr_write_num(CSR_PMPCFG3, cfg3);
 
-    TEST_ASSERT(csr_read_num(CSR_PMPCFG0) == cfg0, "pmpcfg0 readback");
-    TEST_ASSERT(csr_read_num(CSR_PMPCFG1) == cfg1, "pmpcfg1 RV32 readback");
+    TEST_ASSERT(csr_read_num(CSR_PMPCFG0) == legal_cfg(cfg0), "pmpcfg0 NA4 WARL readback");
+    TEST_ASSERT(csr_read_num(CSR_PMPCFG1) == legal_cfg(cfg1), "pmpcfg1 RV32 NA4 WARL readback");
     /* Raptor implements eight PMP entries. The architectural CSR slots for
      * entries 8..15 exist, but are read-only zero rather than usable entries. */
     TEST_ASSERT(csr_read_num(CSR_PMPCFG2) == 0, "pmpcfg2 unimplemented entries");
@@ -84,7 +121,7 @@ int main(void)
     csr_write_num(CSR_PMPCFG1, cfg1 ^ 0x00800000u);
     TEST_ASSERT(csr_read_num(CSR_PMPADDR0 + 5) == addr5, "TOR lower bound lock");
     TEST_ASSERT(csr_read_num(CSR_PMPADDR0 + 6) == addr6, "PMP self lock");
-    TEST_ASSERT(csr_read_num(CSR_PMPCFG1) == cfg1, "PMP cfg lock");
+    TEST_ASSERT(csr_read_num(CSR_PMPCFG1) == legal_cfg(cfg1), "PMP cfg lock");
 
     /* RV32-specific high halves and less frequently used config CSRs. */
     csr_write_num(CSR_SENVCFG, 0xffffffffu);

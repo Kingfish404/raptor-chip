@@ -77,7 +77,7 @@ matching Linux bundle and TFTP steps.
 
 The `ubuntu-*` targets use this board's SystemVerilog platform. The boot chain is
 native ROM → small RAM TFTP loader → OpenSBI/Linux → native Ethernet → Ubuntu
-`/sbin/init` (systemd) on an NFS root. The default is RV64 `small-cache16`, 50 MHz, 2 GiB
+`/sbin/init` (systemd) on an NFS root. The default is RV64 `middle-cache`, 50 MHz, 2 GiB
 DDR4, a 1 MHz CLINT timebase and a 115200-baud Linux console.
 
 The native controller uses eight 2 KiB receive slots and one 2 KiB transmit

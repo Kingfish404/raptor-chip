@@ -240,6 +240,8 @@ extern "C"
     // Match Raptor and NEMU's eight implemented PMP entries. Upper CSR
     // slots remain read-only zero and are probed by OpenSBI at startup.
     cfg.pmpregions = 8;
+    // OpenSBI discovers the PMP grain through WARL pmpaddr readback.
+    cfg.pmpgranularity = reg_t(1) << CONFIG_RV_PMP_GRANULARITY_LOG2;
     cfg.mem_layout = std::vector<mem_cfg_t>();
     cfg.hartids = std::vector<size_t>(1);
     cfg.real_time_clint = false;

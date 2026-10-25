@@ -5,8 +5,12 @@ module tb_cache_stream #(
     parameter bit WriteBack = `RAPT_L1D_WRITEBACK
 );
   logic coherent_ready, coherent_request, coherent_write;
+  logic [`RAPT_XLEN-1:0] coherent_addr;
   logic writeback_error, writeback_idle;
   logic writeback_drain = 0;
+  logic writeback_cbo = 0, writeback_cbo_invalidate = 0;
+  logic writeback_cbo_done;
+  logic [`RAPT_XLEN-1:6] writeback_block = '0;
 `ifdef RAPT_TEST_RNP
   localparam bit Rnp = 1;
 `else
@@ -38,6 +42,7 @@ module tb_cache_stream #(
   logic [XLEN-1:0] release_addr_o, release_data_o;
   int clean_releases = 0, dirty_releases = 0, release_acks = 0;
   int i_ptw_requests = 0;
+  string phase = "startup";
   string wb_mshr_trace;
   initial
     if ($value$plusargs("WB_MSHR_TRACE=%s", wb_mshr_trace)) begin
@@ -118,6 +123,7 @@ module tb_cache_stream #(
   rapt_bus bus_dut (
       .coherent_ready,
       .coherent_request,
+      .coherent_addr,
       .coherent_write,
       .clock,
       .reset,
@@ -840,7 +846,8 @@ module tb_cache_stream #(
         @(negedge clock);
         lsu_l1d.rvalid = 0;
         idle();
-        if (hot && l1_requests != before_requests) $fatal(1, "resident word missed %h", addr);
+        if (hot && l1_requests != before_requests)
+          $fatal(1, "resident word missed %h phase=%s", addr, phase);
         return;
       end
       @(negedge clock);
@@ -871,7 +878,18 @@ module tb_cache_stream #(
     idle();
   endtask
   task automatic invalidate(input logic [XLEN-1:0] address);
+    idle();
     @(negedge clock);
+    if (WriteBack && !dut.L2Inclusive) begin
+      writeback_block = address[XLEN-1:6];
+      writeback_cbo = 1;
+      writeback_cbo_invalidate = 1;
+      for (int cycle = 0; cycle < 10000 && !writeback_cbo_done; cycle++) @(negedge clock);
+      if (!writeback_cbo_done) $fatal(1, "physical block maintenance timed out");
+      @(negedge clock);
+      writeback_cbo = 0;
+      writeback_cbo_invalidate = 0;
+    end
     cmu_bcast.cbo_block=address[XLEN-1:6];
     cmu_bcast.cbo_inval=1;
     cmu_bcast.flush_pipe=1;
@@ -959,6 +977,9 @@ module tb_cache_stream #(
         cmu_bcast.cbo_inval=0;
         cmu_bcast.flush_pipe=0;
         idle();
+        // Targeted physical maintenance completes before the CBO commit pulse;
+        // the broadcast alone cancels the load but does not invalidate L1D.
+        if (WriteBack && !dut.L2Inclusive && dut.TargetedCoherence) invalidate(base);
         load(base, XLEN'('h77aa55cc));
         return;
       end
@@ -992,8 +1013,68 @@ module tb_cache_stream #(
   task automatic pmp_boundary(input int kind);
     logic [XLEN-1:0] base;
     int entry_id, requests_before;
-    base=XLEN'('h80005000);
-    entry_id=kind==1 ? 1 : 0;
+    base = XLEN'('h80005000);
+    if (`RAPT_PMP_GRANULARITY_LOG2 >= 12) begin
+      // No line can contain a PMP boundary at this grain. Exercise the
+      // final permitted line, then reject a demand in the adjacent page.
+      // The three cases cover minimum NAPOT, TOR, and double-page NAPOT.
+      entry_id = kind == 1 ? 1 : 0;
+      @(negedge clock);
+      pmp_update.addr_we = 1;
+      pmp_update.addr_idx = 0;
+      pmp_update.raw_addr = $bits(pmp_update.raw_addr)'((base + 4096) >> 2);
+      pmp_update.napot_mask = $bits(pmp_update.napot_mask)'(kind == 2 ? 2047 : 1023);
+      if (kind != 1) pmp_update.raw_addr |= pmp_update.napot_mask >> 1;
+      @(negedge clock);
+      if (kind == 1) begin
+        pmp_update.addr_idx = 1;
+        pmp_update.raw_addr = $bits(pmp_update.raw_addr)'((base + 8192) >> 2);
+        @(negedge clock);
+      end
+      pmp_update.addr_we = 0;
+      pmp_update.cfg_we = '1;
+      pmp_update.cfg_r = 0;
+      pmp_update.cfg_w = 0;
+      pmp_update.cfg_x = 0;
+      pmp_update.cfg_l = 0;
+      pmp_update.mode_off = '1;
+      pmp_update.mode_tor = 0;
+      pmp_update.mode_na4 = 0;
+      pmp_update.mode_napot = 0;
+      pmp_update.cfg_l[entry_id] = 1;
+      pmp_update.mode_off[entry_id] = 0;
+      pmp_update.mode_tor[entry_id] = kind == 1;
+      pmp_update.mode_napot[entry_id] = kind != 1;
+      @(negedge clock);
+      pmp_update.cfg_we = 0;
+      invalidate(base + XLEN'(4096 - LineBytes));
+      idle();
+      load(base + XLEN'(4096 - LineBytes), ram[index_of(base+XLEN'(4096-LineBytes))]);
+      if (last_l1_len != 8'(LineBytes / WordBytes - 1))
+        $fatal(1, "page-uniform PMP did not allow the final line refill");
+      requests_before = l1_requests;
+      @(negedge clock);
+      lsu_l1d.raddr = base + 4096;
+      lsu_l1d.ralu = XLEN == 64 ? 5'b00011 : 5'b00010;
+      lsu_l1d.rvalid = 1;
+      for (int cycle = 0; cycle < 10000 && !lsu_l1d.rready; cycle++) @(negedge clock);
+      if (!lsu_l1d.rready || !lsu_l1d.trap || l1_requests != requests_before)
+        $fatal(1, "denied adjacent PMP page reached the memory bus");
+      @(posedge clock);
+      @(negedge clock);
+      lsu_l1d.rvalid = 0;
+      idle();
+      pmp_update.cfg_we = '1;
+      pmp_update.mode_off = '1;
+      pmp_update.mode_tor = 0;
+      pmp_update.mode_napot = 0;
+      pmp_update.cfg_l = 0;
+      @(negedge clock);
+      pmp_update.cfg_we = 0;
+      load(base + 4096, ram[index_of(base+4096)]);
+      return;
+    end
+    entry_id = kind == 1 ? 1 : 0;
     @(negedge clock);
     pmp_update.addr_we=1;
     pmp_update.addr_idx=0;
@@ -1116,14 +1197,25 @@ module tb_cache_stream #(
     load(XLEN'('h80001000), 0);
     cancelled_fill();
     if (!Rnp) errored_fill();
+    phase = "PMP page boundaries";
     for (int kind = 0; kind < 3; kind++) pmp_boundary(kind);
     @(negedge clock);
     cmu_bcast.fence_time = 1;
     @(negedge clock);
     cmu_bcast.fence_time = 0;
     idle();
+    // SFENCE clears translation state, not data-cache contents. Start the
+    // capacity check with explicit CBO invalidation, including the earlier
+    // PMP pages outside the tested capacity, so PLRU history cannot evict
+    // a just-filled line while other old lines are hit during the sweep.
+    phase = "capacity cold setup";
+    for (int offset = 0; offset < (CapacityBytes > 'h7000 ? CapacityBytes : 'h7000); offset += 64)
+    invalidate(XLEN'('h80000000) + XLEN'(offset));
+    idle();
+    phase = "capacity fill";
     for (int offset = 0; offset < CapacityBytes; offset += LineBytes)
     load(XLEN'('h80000000) + XLEN'(offset), ram[offset/WordBytes]);
+    phase = "capacity hot sweep";
     for (int offset = 0; offset < CapacityBytes; offset += WordBytes)
     load(XLEN'('h80000000) + XLEN'(offset), ram[offset/WordBytes], 1);
     if (!WriteBack && !Rnp && L2WriteBack) begin
@@ -1192,44 +1284,54 @@ module tb_cache_stream #(
         $fatal(1, "dirty L1D victim did not complete ReleaseData/ReleaseAck");
       if (ram[index_of(XLEN'('h80068000))] == XLEN'('h6a5a55a6))
         $fatal(1, "dirty L1D victim bypassed L2 write-back policy");
-      // Force a scalar no-allocate read while that dirty line exists only
-      // in L2. It must hit the L2 copy rather than stale outer RAM, and it
-      // must not install an L1D line absent from a full-line refill.
-      @(negedge clock);
-      pmp_update.addr_we = 1;
-      pmp_update.addr_idx = 0;
-      pmp_update.raw_addr = $bits(pmp_update.raw_addr)'((XLEN'('h80068000)
+      if (`RAPT_PMP_GRANULARITY_LOG2 < 12) begin
+        // Force a scalar no-allocate read while that dirty line exists only
+        // in L2. It must hit the L2 copy rather than stale outer RAM, and it
+        // must not install an L1D line absent from a full-line refill.
+        @(negedge clock);
+        pmp_update.addr_we = 1;
+        pmp_update.addr_idx = 0;
+        pmp_update.raw_addr = $bits(pmp_update.raw_addr)'((XLEN'('h80068000)
           + XLEN'(LineBytes / 2)) >> 2);
-      pmp_update.napot_mask = 1;
-      @(negedge clock);
-      pmp_update.addr_we = 0;
-      pmp_update.cfg_we = '1;
-      pmp_update.cfg_r = 0;
-      pmp_update.cfg_w = 0;
-      pmp_update.cfg_x = 0;
-      pmp_update.cfg_l = 0;
-      pmp_update.mode_off = '1;
-      pmp_update.mode_tor = 0;
-      pmp_update.mode_na4 = 0;
-      pmp_update.mode_napot = 0;
-      pmp_update.cfg_l[0] = 1;
-      pmp_update.mode_off[0] = 0;
-      pmp_update.mode_na4[0] = 1;
-      @(negedge clock);
-      pmp_update.cfg_we = 0;
-      load(XLEN'('h80068000), XLEN'('h6a5a55a6));
-      if (last_l1_len != 0) $fatal(1, "dirty L2 read did not use scalar fallback");
-      ack_before = l1_requests;
-      load(XLEN'('h80068000), XLEN'('h6a5a55a6));
-      if (l1_requests == ack_before) $fatal(1, "scalar L1D fallback unexpectedly installed a line");
-      @(negedge clock);
-      pmp_update.cfg_we = '1;
-      pmp_update.mode_off = '1;
-      pmp_update.mode_na4 = 0;
-      pmp_update.cfg_l = 0;
-      @(negedge clock);
-      pmp_update.cfg_we = 0;
-      load(XLEN'('h80068000), XLEN'('h6a5a55a6));
+        pmp_update.napot_mask = 1;
+        @(negedge clock);
+        pmp_update.addr_we = 0;
+        pmp_update.cfg_we = '1;
+        pmp_update.cfg_r = 0;
+        pmp_update.cfg_w = 0;
+        pmp_update.cfg_x = 0;
+        pmp_update.cfg_l = 0;
+        pmp_update.mode_off = '1;
+        pmp_update.mode_tor = 0;
+        pmp_update.mode_na4 = 0;
+        pmp_update.mode_napot = 0;
+        pmp_update.cfg_l[0] = 1;
+        pmp_update.mode_off[0] = 0;
+        pmp_update.mode_na4[0] = 1;
+        @(negedge clock);
+        pmp_update.cfg_we = 0;
+        load(XLEN'('h80068000), XLEN'('h6a5a55a6));
+        if (last_l1_len != 0) $fatal(1, "dirty L2 read did not use scalar fallback");
+        ack_before = l1_requests;
+        load(XLEN'('h80068000), XLEN'('h6a5a55a6));
+        if (l1_requests == ack_before)
+          $fatal(1, "scalar L1D fallback unexpectedly installed a line");
+        @(negedge clock);
+        pmp_update.cfg_we = '1;
+        pmp_update.mode_off = '1;
+        pmp_update.mode_na4 = 0;
+        pmp_update.cfg_l = 0;
+        @(negedge clock);
+        pmp_update.cfg_we = 0;
+        load(XLEN'('h80068000), XLEN'('h6a5a55a6));
+      end else begin
+        // Full-page PMP means this dirty L2 resident can always refill a
+        // complete L1D line. The second load must hit that installed line.
+        load(XLEN'('h80068000), XLEN'('h6a5a55a6));
+        if (last_l1_len != 8'(LineBytes / WordBytes - 1))
+          $fatal(1, "dirty L2 page-uniform read did not refill a line");
+        load(XLEN'('h80068000), XLEN'('h6a5a55a6), 1);
+      end
       $display("PASS: clean/dirty voluntary L1D Release and ReleaseAck RV%0d", XLEN);
 
       load(XLEN'('h80000000), ram[0]);
@@ -1417,6 +1519,8 @@ module tb_cache_stream #(
       l1i_bus.ar_ptw = 1;
       l1i_bus.arvalid = 1;
       #1;
+      // Coherence registers the PTW address before granting the read slot.
+      for (int cycle = 0; cycle < 64 && !l1i_bus.rready; cycle++) @(negedge clock);
       if (!l1i_bus.rready) $fatal(1, "cold I-side PTW read was not captured");
       @(posedge clock);
       @(negedge clock);
@@ -1479,7 +1583,7 @@ module tb_cache_stream #(
       );
     else
       $display(
-          "PASS: cache stream RV%0d full-line refill, hot words, set CBO across L2, ZERO one AW/B, delayed/error B, fill kill/error, NA4/TOR/NAPOT boundary fallback",
+          "PASS: cache stream RV%0d full-line refill, hot words, set CBO across L2, ZERO one AW/B, delayed/error B, fill kill/error, PMP boundary protection",
           XLEN
       );
     $finish;

@@ -26,7 +26,7 @@ module tb_rou_dual_commit #(
 
   logic dm_haltreq;
   logic halted;
-  logic [XLEN-1:0] halt_pc;
+  logic [`RAPT_PC_BITS_OF(XLEN)-1:0] halt_pc;
   logic commit_fire;
   logic pmu_rob_full;
 
@@ -128,6 +128,8 @@ module tb_rou_dual_commit #(
 `endif
 
   logic tb_writeback_drain;
+  logic tb_writeback_clean, tb_writeback_cbo, tb_writeback_cbo_invalidate;
+  logic [XLEN-1:6] tb_writeback_block;
 `ifndef RAPT_TEST_ATOMIC_REPLAY
   assign rou_lsu.sq_ready = tb_sq_ready;
   assign rou_lsu.sq_empty = tb_sq_empty;
@@ -150,6 +152,10 @@ module tb_rou_dual_commit #(
   ) dut_rou (
       .writeback_done(tb_writeback_done),
       .writeback_drain(tb_writeback_drain),
+      .writeback_clean(tb_writeback_clean),
+      .writeback_cbo(tb_writeback_cbo),
+      .writeback_cbo_invalidate(tb_writeback_cbo_invalidate),
+      .writeback_block(tb_writeback_block),
       .completion(completion),
       .operand_wake(completion),
       .completion_owner(completion_owner),
@@ -227,6 +233,7 @@ rapt_cmu dut_cmu (
 
       for (int s = 0; s < rapt_pkg::RenameWidth; s++) begin
         rnu_rou.slot[s].uop = '0;
+        rnu_rou.slot[s].pnpc = rnu_rou.slot[s].uop.pc + XLEN'(rnu_rou.slot[s].uop.c ? 2 : 4);
         rnu_rou.slot[s].pr1 = '0;
         rnu_rou.slot[s].pr2 = '0;
         rnu_rou.slot[s].prd = '0;
@@ -347,8 +354,9 @@ rapt_cmu dut_cmu (
     begin
       u = '0;
       u.pc = pc;
-      u.pnpc = pc + XLEN'(4);
+
       u.inst = inst;
+      u.execute.branch.ras = rapt_pkg::ras_action(inst);
       u.rd = rd;
       u.execute.int_op.alu = `RAPT_ALU_ADD_;
       return u;
@@ -361,8 +369,9 @@ rapt_cmu dut_cmu (
     begin
       u = '0;
       u.pc = pc;
-      u.pnpc = pc + XLEN'(4);
+
       u.inst = inst;
+      u.execute.branch.ras = rapt_pkg::ras_action(inst);
       u.execute.memory.store = 1'b1;
       u.execute.int_op.alu = `RAPT_ALU_SW__;
       return u;
@@ -375,8 +384,9 @@ rapt_cmu dut_cmu (
     begin
       u = '0;
       u.pc = pc;
-      u.pnpc = pc + XLEN'(4);
+
       u.inst = inst;
+      u.execute.branch.ras = rapt_pkg::ras_action(inst);
       u.execute.branch.conditional = 1'b1;
       return u;
     end
@@ -387,7 +397,7 @@ rapt_cmu dut_cmu (
     begin
       u = '0;
       u.pc = pc;
-      u.pnpc = pc + XLEN'(4);
+
       u.inst = 32'h1020_0073;
       u.execute.sys.valid = 1'b1;
       u.execute.sys.sret = 1'b1;
@@ -400,7 +410,7 @@ rapt_cmu dut_cmu (
     begin
       u = '0;
       u.pc = pc;
-      u.pnpc = pc + XLEN'(4);
+
       u.inst = 32'h0000_0073;
       u.execute.sys.valid = 1'b1;
       u.execute.sys.ecall = 1'b1;
@@ -414,7 +424,7 @@ rapt_cmu dut_cmu (
     begin
       u = '0;
       u.pc = pc;
-      u.pnpc = pc + XLEN'(4);
+
       u.inst = 32'h1001_3087;
       u.execute.fp.valid = 1'b1;
       u.execute.fp.op = `RAPT_FP_OP_FLD;
@@ -441,6 +451,7 @@ rapt_cmu dut_cmu (
                               input logic [PLEN-1:0] prs, input logic [RobW-1:0] expected_dest);
     begin
       rnu_rou.slot[0].uop = u;
+      rnu_rou.slot[0].pnpc = rnu_rou.slot[0].uop.pc + XLEN'(rnu_rou.slot[0].uop.c ? 2 : 4);
       rnu_rou.slot[0].pr1 = '0;
       rnu_rou.slot[0].pr2 = '0;
       rnu_rou.slot[0].prd = prd;
@@ -456,12 +467,10 @@ rapt_cmu dut_cmu (
       tick(1);
       rnu_rou.valid[0] = 1'b0;
       #1;
-      check(dut_rou.uoq_uops[dut_rou.deq_index[0]].pnpc == '0,
-            "predicted target remained in UOQ payload");
       if (u.execute.branch.conditional || u.execute.branch.jump || u.execute.branch.indirect) begin
         check(
             dut_rou.predicted_npc[rapt_pkg::branch_checkpoint_t'(expected_dest)]
-                  == u.pnpc[XLEN-1:1],
+                  == rnu_rou.slot[0].pnpc[XLEN-1:1],
             "checkpoint target was not captured on rename acceptance");
         check(
             dut_rou.predicted_taken[rapt_pkg::branch_checkpoint_t'(expected_dest)]
@@ -472,7 +481,6 @@ rapt_cmu dut_cmu (
       tick(1);
       check(dispatch_valid[0], "ROU did not present dispatch after enqueue");
       check(dispatch[0].dest == expected_dest, "ROU dispatch dest mismatch");
-      check(dispatch[0].uop.pnpc == '0, "predicted target leaked into execution queue");
       check(!dispatch[0].uop.execute.branch.predicted_taken,
             "predicted direction leaked into execution queue");
       check(dispatch[0].stable_op1_valid && dispatch[0].stable_op1 == dispatch[0].op1,
@@ -488,6 +496,7 @@ rapt_cmu dut_cmu (
     begin
       rnu_rou.slot[0] = '0;
       rnu_rou.slot[0].uop = u;
+      rnu_rou.slot[0].pnpc = rnu_rou.slot[0].uop.pc + XLEN'(rnu_rou.slot[0].uop.c ? 2 : 4);
       rnu_rou.slot[0].prd = prd;
       rnu_rou.slot[0].prs = prs;
       rnu_rou.checkpoint_valid[0] = u.execute.branch.conditional
@@ -552,6 +561,7 @@ rapt_cmu dut_cmu (
       dispatch_ready[1] = 1'b0;
       rnu_rou.slot[0] = '0;
       rnu_rou.slot[0].uop = make_alu_uop(32'h800a_0004, 32'h0010_0113, 5'd2);
+      rnu_rou.slot[0].pnpc = rnu_rou.slot[0].uop.pc + XLEN'(rnu_rou.slot[0].uop.c ? 2 : 4);
       rnu_rou.slot[0].pr1 = 6'd33;
       rnu_rou.slot[0].prd = 6'd34;
       rnu_rou.slot[0].prs = 6'd2;
@@ -779,18 +789,21 @@ rapt_cmu dut_cmu (
 
   task automatic expect_dual_checkpoint_capture;
     rapt_pkg::uop_t branch0, branch1;
+    logic [XLEN-1:0] prediction0, prediction1;
     begin
       reset_dut();
       branch0 = make_branch_uop(XLEN'('h8000_4000), 32'h0000_0263);
       branch1 = make_branch_uop(XLEN'('h8000_4004), 32'h0000_0263);
-      branch0.pnpc = XLEN'('h8000_4020);
-      branch1.pnpc = XLEN'('h8000_4040);
+      prediction0 = XLEN'('h8000_4020);
+      prediction1 = XLEN'('h8000_4040);
       branch0.execute.branch.predicted_taken = 1'b1;
       branch1.execute.branch.predicted_taken = 1'b0;
       rnu_rou.slot[0] = '0;
       rnu_rou.slot[1] = '0;
       rnu_rou.slot[0].uop = branch0;
+      rnu_rou.slot[0].pnpc = prediction0;
       rnu_rou.slot[1].uop = branch1;
+      rnu_rou.slot[1].pnpc = prediction1;
       rnu_rou.checkpoint_valid[0] = 1'b1;
       rnu_rou.checkpoint_valid[1] = 1'b1;
       rnu_rou.checkpoint[0] = rapt_pkg::branch_checkpoint_t'(0);
@@ -804,13 +817,11 @@ rapt_cmu dut_cmu (
       rnu_rou.valid[1] = 1'b0;
       #1;
       check(
-          dut_rou.predicted_npc[0] == branch0.pnpc[XLEN-1:1]
-                && dut_rou.predicted_npc[1] == branch1.pnpc[XLEN-1:1],
+          dut_rou.predicted_npc[0] == prediction0[XLEN-1:1]
+                && dut_rou.predicted_npc[1] == prediction1[XLEN-1:1],
           "dual rename capture aliased checkpoint targets");
       check(dut_rou.predicted_taken[0] && !dut_rou.predicted_taken[1],
             "dual rename capture aliased checkpoint directions");
-      check(dut_rou.uoq_uops[0].pnpc == '0 && dut_rou.uoq_uops[1].pnpc == '0,
-            "dual rename capture retained per-uop targets");
     end
   endtask
 
@@ -874,11 +885,12 @@ rapt_cmu dut_cmu (
   endtask
 
   task automatic expect_oldest_exception_cause;
-    logic [XLEN-1:0] older_cause, younger_cause, older_tval, younger_tval;
+    logic [5:0] older_cause, younger_cause;
+    logic [XLEN-1:0] older_tval, younger_tval;
     begin
       reset_dut();
-      older_cause = XLEN'('hfedc_ba98_7654_3210);
-      younger_cause = XLEN'('h1234_5678_9abc_def0);
+      older_cause = 6'(`RAPT_CAUSE_LOAD_PAGE_FAULT);
+      younger_cause = 6'(`RAPT_CAUSE_STORE_ACC_FAULT);
       older_tval = XLEN'('hfedc_0000_8765_4321);
       younger_tval = XLEN'('h1234_0000_abcdef09);
       dispatch_one(make_alu_uop(XLEN'('h8002_9000), 32'h0010_0093, 5'd1), PLEN'(33), PLEN'(1),
@@ -907,7 +919,8 @@ rapt_cmu dut_cmu (
       #1;
       check(commit_fire && rou_csr.valid && rou_csr.trap,
             "older fault did not reach precise retirement");
-      check(rou_csr.cause == older_cause, "oldest synchronous exception lost its full-width cause");
+      check(rou_csr.cause == XLEN'(older_cause),
+            "oldest synchronous exception lost its compact cause");
       check(rou_csr.tval == older_tval, "oldest synchronous exception lost its full-width tval");
       tick(1);
       check(!dut_rou.oldest_exception_valid, "oldest exception record survived its flush");
@@ -942,7 +955,7 @@ rapt_cmu dut_cmu (
       tick(1);
       clear_writebacks();
       #1;
-      check(commit_fire && rou_csr.cause == older_cause,
+      check(commit_fire && rou_csr.cause == XLEN'(older_cause),
             "wrapped oldest exception lost to the younger slot-zero fault");
       check(rou_csr.tval == older_tval,
             "wrapped oldest exception tval lost to the younger slot-zero fault");
@@ -1087,6 +1100,7 @@ rapt_cmu dut_cmu (
       dispatch_ready[0] = 1'b0;
       dispatch_ready[1] = 1'b0;
       rnu_rou.slot[0].uop = make_alu_uop(32'h8004_0008, 32'h0020_0113, 5'd2);
+      rnu_rou.slot[0].pnpc = rnu_rou.slot[0].uop.pc + XLEN'(rnu_rou.slot[0].uop.c ? 2 : 4);
       rnu_rou.slot[0].prd = 6'd34;
       rnu_rou.slot[0].prs = 6'd2;
       rnu_rou.checkpoint_valid[0] = 1'b0;
@@ -1349,12 +1363,13 @@ rapt_cmu dut_cmu (
       reset_dut();
       u = make_store_uop(XLEN'('h8000_2000), 32'h0040_a00f);
       u.execute.sys.fence = 1'b1;
+      u.execute.sys.kind = rapt_pkg::SYS_CBO_ZERO;
       dispatch_one(u, '0, '0, RobW'(0));
       // CBO.ZERO has already allocated its speculative SQ resident at WB.
       // That resident cannot drain until the ROB marks it committed.
       tb_sq_empty = 1'b0;
       exu_ioq_bcast.dest = RobW'(0);
-      exu_ioq_bcast.npc = u.pnpc;
+      exu_ioq_bcast.npc = (u.pc + XLEN'(u.c ? 2 : 4));
       exu_ioq_bcast.wen = 1'b1;
       exu_ioq_bcast.valid = 1'b1;
       tick(1);
@@ -1372,9 +1387,10 @@ rapt_cmu dut_cmu (
       reset_dut();
       u = make_alu_uop(XLEN'('h8000_2004), 32'h0ff0_000f, '0);
       u.execute.sys.fence = 1'b1;
+      u.execute.sys.kind = rapt_pkg::SYS_FENCE;
       dispatch_one(u, '0, '0, RobW'(0));
       tb_sq_empty = 1'b0;
-      writeback_alu_one(RobW'(0), u.pnpc);
+      writeback_alu_one(RobW'(0), (u.pc + XLEN'(u.c ? 2 : 4)));
       check(!commit_fire, "FENCE retired while older stores remain in SQ");
       tick(3);
       check(!commit_fire, "FENCE stopped waiting for the SQ to drain");
@@ -1394,7 +1410,8 @@ rapt_cmu dut_cmu (
   `include "tb_rou_cbo.svh"
 
   task automatic expect_full_width_retirement;
-    localparam logic [XLEN-1:0] Pc = XLEN'(64'h1234_5678_8009_0000);
+    // A high-half PC with nonzero upper bits that every PC representation holds.
+    localparam logic [XLEN-1:0] Pc = XLEN'(64'hffff_ffd2_8009_0000);
     localparam logic [XLEN-1:0] NextPc = Pc + XLEN'(4);
     localparam logic [XLEN-1:0] Address = XLEN'(64'h89ab_cdef_800a_0000);
     localparam logic [XLEN-1:0] Data = XLEN'(64'hfedc_ba98_7654_3210);
@@ -1407,10 +1424,12 @@ rapt_cmu dut_cmu (
       // must use persistent metadata, including the upper half in RV64.
       exu_rou.npc = ~NextPc;
       #1;
-      check(commit_fire && rou_cmu.slot[0].pc == Pc && rou_cmu.slot[0].npc == NextPc,
+      check(commit_fire && `RAPT_PC_SEXT(XLEN, rou_cmu.slot[0].pc) == Pc &&
+            `RAPT_PC_SEXT(XLEN, rou_cmu.slot[0].npc) == NextPc,
             "full-width PC/NPC metadata was truncated or bypassed");
       tick(1);
-      check(halt_pc == NextPc, "full-width architectural next PC was not retained");
+      check(`RAPT_PC_SEXT(XLEN, halt_pc) == NextPc,
+            "full-width architectural next PC was not retained");
 
       reset_dut();
       dispatch_one(make_store_uop(Pc, 32'h0020_a023), '0, '0, RobW'(0));
@@ -1495,6 +1514,7 @@ rapt_cmu dut_cmu (
     rnu_rou.slot[0]='0;
     // A serializing owner must remain in the skid behind the incomplete ALU.
     rnu_rou.slot[0].uop=make_sret_uop(32'h8000_1004);
+    rnu_rou.slot[0].pnpc = rnu_rou.slot[0].uop.pc + XLEN'(rnu_rou.slot[0].uop.c ? 2 : 4);
     rnu_rou.slot[0].prd=6'd34;
     rnu_rou.slot[0].prs=6'd2;
     rnu_rou.valid[0]=1;
@@ -1542,9 +1562,10 @@ rapt_cmu dut_cmu (
         for (int s = 0; s < rapt_pkg::DispatchWidth; s++) begin
           u = make_alu_uop(XLEN'(32'h8010_0000 + 4*(group_id*rapt_pkg::DispatchWidth+s)),
                           32'h0010_0093, 5'(s+1));
-          u.tval = XLEN'(32'habc0_0000 + group_id*rapt_pkg::DispatchWidth+s);
+          u.imm = 32'(32'habc0_0000 + group_id*rapt_pkg::DispatchWidth+s);
           rnu_rou.slot[s] = '0;
           rnu_rou.slot[s].uop = u;
+          rnu_rou.slot[s].pnpc = rnu_rou.slot[s].uop.pc + XLEN'(rnu_rou.slot[s].uop.c ? 2 : 4);
           rnu_rou.slot[s].prd = PLEN'(33+s);
           rnu_rou.valid[s] = 1'b1;
         end
@@ -1568,8 +1589,8 @@ rapt_cmu dut_cmu (
           check(int'(dispatch[s].dest) == fired, "registered payload changed owner order");
           check(dispatch[s].uop.pc == XLEN'(32'h8010_0000 + 4 * fired),
                 "registered PC owner mismatch");
-          check(dispatch[s].uop.tval == XLEN'(32'habc0_0000 + fired),
-                "registered tval owner mismatch");
+          check(dispatch[s].uop.imm == 32'(32'habc0_0000 + fired),
+                "registered immediate owner mismatch");
           fired++;
         end
         tick(1);
@@ -1596,11 +1617,21 @@ rapt_cmu dut_cmu (
 `endif
 
   initial begin
+`ifndef RAPT_TEST_FENCE_COMMIT
     if (rapt_pkg::CommitWidth < 2) fail("tb_rou_dual_commit requires commit width >= 2");
+`endif
 
 `ifdef RAPT_TEST_E67
     init_inputs();
     run_e67_skid();
+    $finish;
+`elsif RAPT_TEST_UOP_COMPACT
+    init_inputs();
+    expect_checkpoint_direction_mismatch();
+    expect_dual_checkpoint_capture();
+    expect_correct_branch_releases_checkpoint();
+    expect_oldest_exception_cause();
+    $display("PASS: compact uop checkpoint targets and oldest exception RV%0d", XLEN);
     $finish;
 `elsif RAPT_TEST_PAYLOAD_BOUNDARY
     init_inputs();

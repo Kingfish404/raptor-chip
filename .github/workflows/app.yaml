@@ -72,11 +72,19 @@ jobs:
           tar -czhf "$RUNNER_TEMP/riscof-npc.tar.gz" \
             "sim/build/$RAPT_CONFIG-riscof/riscv32-npc-sim" \
             nemu/tools/capstone/repo/libcapstone.so.5
-      - name: Share simulator with compliance shards
+      - name: Build shared Sail reference
+        run: |
+          make -C verify riscof-classic-sail JOBS=2 \
+            BUILD_DIR="$RUNNER_TEMP/sail-reference" \
+            RISCOF_CLASSIC_SAIL_PREFIX="$GITHUB_WORKSPACE/sail-riscv"
+          tar -czf "$RUNNER_TEMP/sail-riscv.tar.gz" sail-riscv
+      - name: Share simulator and reference with compliance shards
         uses: actions/upload-artifact@v7
         with:
           name: riscof-npc-${{ github.sha }}
-          path: ${{ runner.temp }}/riscof-npc.tar.gz
+          path: |
+            ${{ runner.temp }}/riscof-npc.tar.gz
+            ${{ runner.temp }}/sail-riscv.tar.gz
           retention-days: 1
 
   riscof-classic:
@@ -116,20 +124,12 @@ jobs:
           test -x "sim/build/$RAPT_CONFIG-riscof/riscv32-npc-sim"
           test -s nemu/tools/capstone/repo/libcapstone.so.5
 
-      - name: Install sail-riscv reference model
+      - name: Restore shared Sail reference
         run: |
           set -euo pipefail
-          SAIL_VERSION=0.13.1
-          SAIL_SHA256=ee052f64494a2f5f071afd9c2cb4aa5eaae4ba84753e4f77e442b4f83f2e9469
-          SAIL_ARCHIVE="$RUNNER_TEMP/sail-riscv-Linux-x86_64.tar.gz"
-          mkdir -p "$GITHUB_WORKSPACE/sail-riscv"
-          curl --fail --location --retry 3 \
-            --output "$SAIL_ARCHIVE" \
-            "https://github.com/riscv/sail-riscv/releases/download/$SAIL_VERSION/sail-riscv-Linux-x86_64.tar.gz"
-          echo "$SAIL_SHA256  $SAIL_ARCHIVE" | sha256sum --check --strict
-          tar -xzf "$SAIL_ARCHIVE" \
-            -C "$GITHUB_WORKSPACE/sail-riscv" --strip-components=1
-          ls -al "$GITHUB_WORKSPACE/sail-riscv/bin"
+          tar -xzf "$RUNNER_TEMP/sail-riscv.tar.gz"
+          test -x sail-riscv/bin/sail_riscv_sim
+          cat sail-riscv/share/sail-riscv/raptor-reference.json
           echo "$GITHUB_WORKSPACE/sail-riscv/bin" >> "$GITHUB_PATH"
 
       - name: Install RISCOF (pinned fork)
@@ -156,8 +156,9 @@ jobs:
           python3 -V
           echo "=== sail_riscv_sim ==="
           command -v sail_riscv_sim
-          test "$(sail_riscv_sim --version)" = "0.13.1"
-          sail_riscv_sim --rv32 --validate-config
+          test "$(sail_riscv_sim --version)" = "0.16"
+          sail_riscv_sim --rv32 --validate-config \
+            --config-override verify/riscof/classic/plugins/sail_cSim/raptor.json
           sail_riscv_sim --validate-config
           echo "=== riscv64-elf-gcc ==="
           command -v riscv64-elf-gcc

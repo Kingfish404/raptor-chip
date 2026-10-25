@@ -38,7 +38,7 @@ module rapt_bpu_tage #(
     parameter int AuxPositions = 0
 ) (
     `RAPT_BPU_DIRP_PORTS,
-    input logic [XLEN-1:0] aux_pc = '0,
+    input logic [`RAPT_PC_BITS_OF(XLEN)-1:0] aux_pc = '0,
     input logic [3:0] aux_position = '0,
     input logic [3:0] request_aux_position = '0,
     input logic [GHR_LEN-1:0] aux_ghr = '0,
@@ -46,6 +46,7 @@ module rapt_bpu_tage #(
     output logic aux_taken,
     output logic request_aux_taken
 );
+  localparam int PcW = `RAPT_PC_BITS_OF(XLEN);
   /* verilator lint_off UNUSEDSIGNAL */
   /* verilator lint_off UNUSEDPARAM */
   // Synchronous prediction read: address+GHR registered on `ren`; output
@@ -180,32 +181,32 @@ module rapt_bpu_tage #(
 
   // ---------------- Index/Tag derivation ----------------
   // PC-only base index for bimodal
-  function automatic logic [BIM_LEN-1:0] bim_idx(input logic [XLEN-1:0] pc);
+  function automatic logic [BIM_LEN-1:0] bim_idx(input logic [PcW-1:0] pc);
     return pc[BIM_LEN-1+1:1];
   endfunction
   // Tagged: idx = PC_low(IDX_LEN) XOR folded_ghr XOR folded_phr
   function automatic logic [IDX_LEN-1:0] t1_idx(
-      input logic [XLEN-1:0] pc, input logic [GHR_LEN-1:0] g, input logic [PHR_LEN-1:0] p);
+      input logic [PcW-1:0] pc, input logic [GHR_LEN-1:0] g, input logic [PHR_LEN-1:0] p);
     return pc[IDX_LEN-1+1:1] ^ fold_h1_idx(g) ^ fold_phr_idx(p);
   endfunction
   function automatic logic [TagLen1-1:0] t1_tag_of(
-      input logic [XLEN-1:0] pc, input logic [GHR_LEN-1:0] g, input logic [PHR_LEN-1:0] p);
+      input logic [PcW-1:0] pc, input logic [GHR_LEN-1:0] g, input logic [PHR_LEN-1:0] p);
     return pc[IDX_LEN+TagLen1:IDX_LEN+1] ^ fold_h1_tag(g) ^ fold_phr_t1_tag(p);
   endfunction
   function automatic logic [IDX_LEN-1:0] t2_idx(
-      input logic [XLEN-1:0] pc, input logic [GHR_LEN-1:0] g, input logic [PHR_LEN-1:0] p);
+      input logic [PcW-1:0] pc, input logic [GHR_LEN-1:0] g, input logic [PHR_LEN-1:0] p);
     return pc[IDX_LEN-1+1:1] ^ fold_h2_idx(g) ^ fold_phr_idx(p);
   endfunction
   function automatic logic [TagLen2-1:0] t2_tag_of(
-      input logic [XLEN-1:0] pc, input logic [GHR_LEN-1:0] g, input logic [PHR_LEN-1:0] p);
+      input logic [PcW-1:0] pc, input logic [GHR_LEN-1:0] g, input logic [PHR_LEN-1:0] p);
     return pc[IDX_LEN+TagLen2:IDX_LEN+1] ^ fold_h2_tag(g) ^ fold_phr_t2_tag(p);
   endfunction
   function automatic logic [IDX_LEN-1:0] t3_idx(
-      input logic [XLEN-1:0] pc, input logic [GHR_LEN-1:0] g, input logic [PHR_LEN-1:0] p);
+      input logic [PcW-1:0] pc, input logic [GHR_LEN-1:0] g, input logic [PHR_LEN-1:0] p);
     return pc[IDX_LEN-1+1:1] ^ fold_h3_idx(g) ^ fold_phr_idx(p);
   endfunction
   function automatic logic [TagLen3-1:0] t3_tag_of(
-      input logic [XLEN-1:0] pc, input logic [GHR_LEN-1:0] g, input logic [PHR_LEN-1:0] p);
+      input logic [PcW-1:0] pc, input logic [GHR_LEN-1:0] g, input logic [PHR_LEN-1:0] p);
     return pc[IDX_LEN+TagLen3:IDX_LEN+1] ^ fold_h3_tag(g) ^ fold_phr_t3_tag(p);
   endfunction
 
@@ -216,8 +217,8 @@ module rapt_bpu_tage #(
   // Keep the sampling boundary unchanged; zero-filled unused bits are wires.
   localparam int ReadPcMsb = BIM_LEN > IDX_LEN + TagLen3 ? BIM_LEN : IDX_LEN + TagLen3;
   logic [ReadPcMsb:1] r_pc_bits_q;
-  wire [XLEN-1:0] r_pc_q = XLEN'({r_pc_bits_q, 1'b0});
-  if (ReadPcMsb >= XLEN) begin : g_invalid_read_pc_width
+  wire [PcW-1:0] r_pc_q = PcW'({r_pc_bits_q, 1'b0});
+  if (ReadPcMsb >= PcW) begin : g_invalid_read_pc_width
     $error("TAGE PC hash exceeds XLEN");
   end
   logic [GHR_LEN-1:0] r_ghr_q;
@@ -320,7 +321,7 @@ module rapt_bpu_tage #(
       assign saved_taken = port_taken;
     end
     for (genvar k = 0; k < AuxPorts; k++) begin : g_port
-      wire [XLEN-1:0] port_pc;
+      wire [PcW-1:0] port_pc;
       wire [GHR_LEN-1:0] port_ghr = AuxPositions > 0 ? r_ghr_q : aux_ghr;
       wire [PHR_LEN-1:0] port_phr = AuxPositions > 0 ? r_phr_q : aux_phr;
       if (AuxPositions > 0) begin : g_query_pc
@@ -331,7 +332,7 @@ module rapt_bpu_tage #(
           if (ren) pc_bits_q <= next_pc[ReadPcMsb:1];
           if (reset || init) pc_bits_q <= ReadPcMsb'(k + 1);
         end
-        assign port_pc = XLEN'({pc_bits_q, 1'b0});
+        assign port_pc = PcW'({pc_bits_q, 1'b0});
       end else begin : g_response_pc
         assign port_pc = aux_pc;
       end

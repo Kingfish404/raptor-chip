@@ -40,7 +40,10 @@ task automatic init_l1d_inputs;
     l1d_bus.rlast = 1'b1;
     l1d_bus.difftest_skip = 1'b0;
     l1d_bus.rerr = 1'b0;
+    l1d_bus.waccept = 1'b0;
+`ifndef TB_L1D_WRITE_RESPONSE_MODEL
     l1d_bus.wready = 1'b1;
+`endif
     l1d_bus.werr = 1'b0;
 `endif
 

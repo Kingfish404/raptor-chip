@@ -23,6 +23,8 @@ class BuildIsolationTest(unittest.TestCase):
 import pathlib, sys
 args = sys.argv[1:]
 out = pathlib.Path(args[args.index('-o') + 1])
+if not out.is_absolute() and '--Mdir' in args:
+    out = pathlib.Path(args[args.index('--Mdir') + 1]) / out
 out.parent.mkdir(parents=True, exist_ok=True)
 count = out.parent / 'compile-count'
 count.write_text(str(int(count.read_text()) + 1 if count.exists() else 1))
@@ -38,12 +40,13 @@ out.chmod(0o755)
         for path, state in self.legacy.items():
             self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), state, str(path))
 
-    def make(self, *arguments, profile="test", root=False):
+    def make(self, *arguments, profile="test", root=False, verify=False):
         env = os.environ.copy()
         for key in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES", "BUILD_DIR", "BUILD_PROFILE",
                     "BUILD_ROOT", "VFLAGS", "SIM_CONFIG_ROOT"):
             env.pop(key, None)
-        result = subprocess.run(["make", "--no-print-directory", "-C", str(REPO if root else SIM),
+        directory = REPO / "verify" if verify else REPO if root else SIM
+        result = subprocess.run(["make", "--no-print-directory", "-C", str(directory),
                                  f"BUILD_ROOT={self.build}", f"BUILD_PROFILE={profile}",
                                  f"VERILATOR={self.compiler}", *arguments],
                                 env=env, text=True, stdout=subprocess.PIPE,
@@ -98,21 +101,65 @@ out.chmod(0o755)
         original = link.resolve(strict=True)
         sentinel = original.parent / "preserve-me"
         sentinel.write_text("old cache stays usable")
-        self.make("all", "VERILATOR_EXTRA=--coverage-line")
-        other = link.resolve(strict=True)
-        self.assertNotEqual(original, other)
-        self.assertTrue(original.exists())
-        self.make("all")
-        self.assertEqual(link.resolve(), original)
-        self.assertEqual((original.parent / "compile-count").read_text(), "1")
-        self.assertTrue(sentinel.exists())
-        self.assertTrue(other.exists())
+        for option in ("VERILATOR_EXTRA=--coverage-line", "VERILATOR_CODEGEN_JOBS=2"):
+            with self.subTest(option=option):
+                self.make("all", option)
+                other = link.resolve(strict=True)
+                self.assertNotEqual(original, other)
+                self.assertTrue(original.exists())
+                self.make("all")
+                self.assertEqual(link.resolve(), original)
+                self.assertEqual((original.parent / "compile-count").read_text(), "1")
+                self.assertTrue(sentinel.exists())
+                self.assertTrue(other.exists())
 
     def test_root_forwards_rv64_config_selection(self):
         self.make("build-rv32", "VFLAGS=-DRAPT_RV64", root=True)
         self.assertTrue((self.config(xlen=64) / ".config").exists())
         self.assertFalse(self.config(xlen=32).exists())
         self.assertTrue((self.build / "test/riscv64-npc-sim").exists())
+
+    def test_verify_refreshes_existing_binary_and_selects_only_requested_xlen(self):
+        reference = self.root / "reference.so"
+        reference.touch()
+        rom = self.root / "mrom.bin"
+        rom.touch()
+        link = self.build / "test/riscv64-npc-sim"
+        link.parent.mkdir(parents=True)
+        link.write_text("stale simulator")
+
+        def prerequisites(preset):
+            return self.make("check-prereqs", "ISA=rv64", f"RAPT_CONFIG={preset}",
+                             f"NPC_BIN={link}", f"NEMU_SO={reference}", f"MROM_IMG={rom}",
+                             verify=True)
+
+        prerequisites("default")
+        original = link.resolve(strict=True)
+        self.assertTrue(link.is_symlink())
+        self.assertTrue(self.config(xlen=64).exists())
+        self.assertFalse(self.config(xlen=32).exists())
+        prerequisites("small")
+        selected = link.resolve(strict=True)
+        self.assertNotEqual(original, selected)
+        self.assertTrue(original.exists())
+        prerequisites("small")
+        self.assertEqual(link.resolve(strict=True), selected)
+        self.assertEqual((selected.parent / "compile-count").read_text(), "1")
+
+    def test_pin_level_cache_separates_tool_versions_and_wave_options(self):
+        env = os.environ.copy()
+        for key in ("MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES"):
+            env.pop(key, None)
+        for version, wave in (("old-version", 0), ("new-version", 0), ("new-version", 1)):
+            result = subprocess.run([
+                "make", "--no-print-directory", "-C", str(SIM / "tb"), "verilator-build",
+                f"VL_BUILD_ROOT={self.build}", f"VERILATOR={self.compiler}",
+                f"VL_TOOL_VERSION={version}", f"WAVE={wave}", "RAPT_CONFIG=middle"],
+                env=env, text=True, stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout)
+        outputs = list(self.build.glob("vl-middle-*/rapt_tb_top"))
+        self.assertEqual(len(outputs), 3)
 
     def test_help_is_read_only_and_clean_is_profile_local(self):
         self.make("help")

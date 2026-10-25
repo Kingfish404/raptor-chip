@@ -27,6 +27,7 @@ module rapt_ieu_muldiv #(
     parameter int unsigned NumSlots = Cfg.dispatch_width,
     parameter int unsigned NumCompletions = Cfg.completion_ports,
     parameter type CompletionT = rapt_pkg::completion_t,
+    parameter type ResultT = CompletionT,
     parameter unsigned MDQ_SIZE = 4,
     parameter unsigned ROB_SIZE = Cfg.rob_entries,
     parameter unsigned PLEN     = rapt_pkg::index_bits(Cfg.phys_regs),
@@ -50,7 +51,7 @@ module rapt_ieu_muldiv #(
     // CDB forwarding sources (other value-producing pipes)
 
     // Own writeback
-    output CompletionT exu_wb_mul
+    output ResultT exu_wb_mul
 );
   localparam unsigned MDQLen = (MDQ_SIZE > 1) ? $clog2(MDQ_SIZE) : 1;
   localparam unsigned GenBits = $bits(dispatch[0].generation);
@@ -68,7 +69,7 @@ module rapt_ieu_muldiv #(
   logic [    RLEN-1:0] mdq_rd      [MDQ_SIZE];
   logic [$clog2(ROB_SIZE)-1:0] mdq_dest[MDQ_SIZE];
   logic [GenBits-1:0] mdq_generation[MDQ_SIZE];
-  logic [    XLEN-1:0] mdq_pc      [MDQ_SIZE];
+  logic [`RAPT_PC_BITS_OF(XLEN)-1:0] mdq_pc[MDQ_SIZE];
   logic [MDQ_SIZE-1:0] mdq_c;
   logic [MDQ_SIZE-1:0] mdq_word;
   logic [         4:0] mdq_alu     [MDQ_SIZE];
@@ -252,36 +253,21 @@ module rapt_ieu_muldiv #(
   // === Writeback (CDB) ===
   // Driven straight from the FU's registered outputs; entry payload is
   // looked up by tag. IDU canonicalizes non-control next-PC before rename.
-  logic [XLEN-1:0] wb_npc;
-  assign wb_npc = mdq_pc[fu_out_tag] + (mdq_c[fu_out_tag] ? 'h2 : 'h4);
+  logic [`RAPT_PC_BITS_OF(XLEN)-1:0] wb_npc;
+  assign wb_npc = mdq_pc[fu_out_tag] + (`RAPT_PC_BITS_OF(XLEN))'(mdq_c[fu_out_tag] ? 2 : 4);
 
-  assign exu_wb_mul.valid = fu_out_valid;
-  assign exu_wb_mul.dest = mdq_dest[fu_out_tag];
-  assign exu_wb_mul.generation = mdq_generation[fu_out_tag];
-  assign exu_wb_mul.result = fu_out_r;
-  assign exu_wb_mul.prd = mdq_prd[fu_out_tag];
-  assign exu_wb_mul.rd = mdq_rd[fu_out_tag];
-  assign exu_wb_mul.pc = mdq_pc[fu_out_tag];
-  assign exu_wb_mul.npc = wb_npc;
-  assign exu_wb_mul.btaken = 1'b0;
-  assign exu_wb_mul.mispredict = 1'b0;
-  // Pure arithmetic pipe: no CSR / trap / MEM sideband (tie-offs).
-  assign exu_wb_mul.csr_wen = 1'b0;
-  assign exu_wb_mul.csr_wdata = '0;
-  assign exu_wb_mul.fp_flags_valid = 1'b0;
-  assign exu_wb_mul.fp_wen = 1'b0;
-  assign exu_wb_mul.fp_result = '0;
-  assign exu_wb_mul.fp_flags = '0;
-  assign exu_wb_mul.trap = 1'b0;
-  assign exu_wb_mul.tval = '0;
-  assign exu_wb_mul.cause = '0;
-  assign exu_wb_mul.wen = 1'b0;
-  assign exu_wb_mul.alu = '0;
-  assign exu_wb_mul.sq_waddr = '0;
-  assign exu_wb_mul.sq_wdata = '0;
-  assign exu_wb_mul.sq_wdata64 = '0;
-  assign exu_wb_mul.sq_fp64 = 1'b0;
-  assign exu_wb_mul.difftest_skip = 1'b0;
+  always_comb begin
+    exu_wb_mul = '0;
+    exu_wb_mul.valid = fu_out_valid;
+    exu_wb_mul.dest = mdq_dest[fu_out_tag];
+    exu_wb_mul.generation = mdq_generation[fu_out_tag];
+    exu_wb_mul.result = fu_out_r;
+    exu_wb_mul.prd = mdq_prd[fu_out_tag];
+    exu_wb_mul.rd = mdq_rd[fu_out_tag];
+    exu_wb_mul.pc = mdq_pc[fu_out_tag];
+    exu_wb_mul.npc = wb_npc;
+    exu_wb_mul.updates = '{control_flow: 1'b0, default: '0};
+  end
 
   // === Sequential: alloc / wakeup / issue / completion ===
   always_ff @(posedge clock) begin
@@ -377,5 +363,4 @@ module rapt_ieu_muldiv #(
   `RAPT_SVA_IMPLY(clock, reset, MDQ_WB_VALID_ENTRY, fu_out_valid,
                   (mdq_valid[fu_out_tag] && mdq_issued[fu_out_tag]))
 
-  assign exu_wb_mul.updates = '{control_flow: 1'b0, default: '0};
 endmodule

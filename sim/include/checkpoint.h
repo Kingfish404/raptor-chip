@@ -68,6 +68,11 @@ struct CacheSnapshotWord
 bool cpu_cache_snapshot_ready(void);
 void cpu_read_cache_snapshot(std::vector<CacheSnapshotWord> &words);
 
+/* Copy physical RAM including dirty caches and pending committed stores.
+ * Returns false if the range is unmapped or the memory state is changing.
+ * The live host RAM is restored before returning. */
+bool cpu_read_memory_snapshot(paddr_t addr, void *data, size_t bytes);
+
 /* Configure load: read checkpoint dir and stash arch state to inject after
  * reset. Memory regions are loaded into the host buffers and an MROM
  * trampoline is generated. */

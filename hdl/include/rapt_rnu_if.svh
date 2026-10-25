@@ -12,6 +12,7 @@ interface rnu_rou_if #(
 );
   typedef struct packed {
     UopT uop;
+    logic [`RAPT_PC_BITS_OF(XLEN)-1:0] pnpc;
     logic [XLEN-1:0] op1;
     logic [XLEN-1:0] op2;
     logic [PLEN-1:0] pr1;

@@ -1,5 +1,7 @@
 `include "rapt.svh"
-module tb_l2tlb;
+module tb_l2tlb #(
+    parameter int Entries = 256
+);
   localparam int XLEN = `RAPT_XLEN;
   logic clock = 0;
   always #5 clock = ~clock;
@@ -7,7 +9,9 @@ module tb_l2tlb;
   rapt_pkg::l2tlb_req_t req [2];
   rapt_pkg::l2tlb_rsp_t rsp [2];
   logic [1:0] ready;
-  rapt_l2tlb dut (
+  rapt_l2tlb #(
+      .Entries(Entries)
+  ) dut (
       .clock(clock),
       .reset(reset),
       .flush(flush),
@@ -55,12 +59,12 @@ module tb_l2tlb;
     tick();
     reset = 0;
     // Exercise every row, then read from the other client.
-    for (int n = 0; n < 256; n++) transfer(0, 1, n, 3, 0, 0);
-    for (int n = 0; n < 256; n++) transfer(1, 0, n, 3, 0, 1);
+    for (int n = 0; n < Entries; n++) transfer(0, 1, n, 3, 0, 0);
+    for (int n = 0; n < Entries; n++) transfer(1, 0, n, 3, 0, 1);
     transfer(1, 0, 5, 4, 0, 0);
-    transfer(1, 1, 261, 3, 0, 0);
+    transfer(1, 1, Entries + 5, 3, 0, 0);
     transfer(0, 0, 5, 3, 0, 0);
-    transfer(0, 0, 261, 3, 0, 1);
+    transfer(0, 0, Entries + 5, 3, 0, 1);
     transfer(0, 1, 7, 3, 1, 0);
     transfer(1, 0, 7, 500, 0, 1);
     // Context changes cannot reuse a result decoded under another root/PBMTE/SBE.
@@ -137,7 +141,8 @@ module tb_l2tlb;
     flush = 0;
     transfer(0, 0, 7, 3, 0, 0);
     transfer(1, 0, 0, 0, 0, 0);
-    $display("PASS: shared 256-entry L2 TLB capacity, collisions, context, arbitration and flush");
+    $display("PASS: shared %0d-entry L2 TLB capacity, collisions, context, arbitration and flush",
+             Entries);
     $finish;
   end
   initial begin

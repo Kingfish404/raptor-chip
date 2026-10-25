@@ -21,9 +21,33 @@ config RV_PMPADDR_BITS
   default 54
   help
     pmpaddr holds physical-address bits [N+1:2]. The architectural maximum
-    for RV64 is 54 (56-bit physical addresses). Set to 45 for the Raptor
-    reference model, whose RTL implements 47 physical-address bits
+    for RV64 is 54 (56-bit physical addresses). Set to 30 for the Raptor
+    reference model, whose RTL implements 32 physical-address bits
     (RAPT_PADDR_BITS). Unimplemented high bits read as zero.
+
+config RV_PC_BITS
+  int "Implemented RV64 PC bits"
+  depends on RV64
+  range 40 64
+  default 64
+  help
+    Width of the implemented PC representation. With 40, a jump, xRET or
+    trap-vector target whose bits [63:39] are not all equal is replaced by
+    another invalid address before it becomes the PC: bits [37:0] are kept,
+    bit 38 becomes the inverse of bit 63 and bits [63:39] copy bit 63. This
+    matches Raptor RTL with RAPT_PADDR_BITS <= 39 (the privileged spec lets
+    xepc/xtval hold a converted invalid address). Keep 64 for other targets.
+
+config RV_PMP_GRANULARITY_LOG2
+  int "PMP minimum region size (log2 bytes)"
+  range 2 12
+  default 12
+  help
+    Raptor implements 4 KiB PMP regions (12, architectural G=10).
+    NA4 is unavailable above 2. OFF/TOR addresses read with G low
+    bits cleared; NAPOT addresses read with G-1 low bits set, while
+    retaining the underlying stored address across mode changes.
+    Set to 2 for comparison with the legacy 4-byte-grain platform.
 
 config RVE
   bool "Use E extension"

@@ -6,7 +6,7 @@
  * behaviour for difftest and RISCOF.
  *
  * Configuration:
- *   - 8 implemented entries, 16 CSR slots, G=0 (4-byte grain), NA4 supported.
+ *   - 8 implemented entries, 16 CSR slots; configurable grain (default G=10).
  *   - Backing store lives in cpu.sr[0x3a0..0x3a3] (packed pmpcfg bytes) and
  *     cpu.sr[0x3b0..0x3bf] (raw pmpaddr values).
  *   - L-bit lockdown and WARL masking of reserved cfg bits are applied via
@@ -28,6 +28,8 @@
 
 #define PMP_N 8
 #define PMP_CSR_N 16
+#define PMP_G (CONFIG_RV_PMP_GRANULARITY_LOG2 - 2)
+#define PMP_TOR_MASK (((word_t)1 << PMP_G) - 1)
 
 /* pmpcfg byte field positions (match hdl/include/rapt.svh). */
 #define PMPCFG_R_BIT 0
@@ -83,6 +85,26 @@ static inline void pmp_addr_set(int i, word_t v)
   v &= ((word_t)1 << CONFIG_RV_PMPADDR_BITS) - 1;
 #endif
   cpu.sr[CSR_PMPADDR0 + i] = v;
+}
+
+/* Read masking never modifies the stored address. In particular bit G-1
+ * survives NAPOT -> TOR/OFF -> NAPOT, as required by the PMP WARL rules. */
+word_t pmp_csr_read(uint16_t csr)
+{
+  csr &= 0xfff;
+  if (csr < CSR_PMPADDR0 || csr >= CSR_PMPADDR0 + PMP_CSR_N)
+    return cpu.sr[csr];
+  int i = csr - CSR_PMPADDR0;
+  if (i >= PMP_N) return 0;
+  word_t addr = pmp_addr(i);
+#if PMP_G > 0
+  if (((pmp_cfg(i) >> PMPCFG_A_LSB) & 3) != PMP_A_NAPOT)
+    return addr & ~PMP_TOR_MASK;
+#if PMP_G > 1
+  addr |= ((word_t)1 << (PMP_G - 1)) - 1;
+#endif
+#endif
+  return addr;
 }
 
 /* ------------------------------------------------------------------ */
@@ -144,12 +166,13 @@ static void pmp_rebuild_decoded(void)
     struct pmp_decoded *d = &pmp_dec[i];
     d->cfg = cfg;
     d->a = (uint8_t)a;
-    word_t pa = pmp_addr(i);
+    word_t pa = pmp_csr_read(CSR_PMPADDR0 + i);
     if (a != PMP_A_OFF)
       pmp_any_active = true;
     if (a == PMP_A_TOR)
     {
-      d->lo_w = (i == 0) ? 0 : pmp_addr(i - 1);
+      /* TOR ignores G low bits of both bounds, including a NAPOT predecessor. */
+      d->lo_w = (i == 0) ? 0 : (pmp_addr(i - 1) & ~PMP_TOR_MASK);
       d->hi_w = pa;
       d->base_w = 0;
       d->mask_w = 0;
@@ -215,6 +238,10 @@ int pmp_csr_write(uint16_t csr, word_t val)
         continue;                                        /* locked */
       uint8_t nb = (uint8_t)((val >> (pi * 8)) & 0x9Fu); /* mask [6:5] WARL 0 */
       if ((nb & 3u) == 2u) nb &= (uint8_t)~7u; /* reserved RW: clear RWX */
+#if PMP_G > 0
+      if (((nb >> PMPCFG_A_LSB) & 3) == PMP_A_NA4)
+        nb &= (uint8_t)~(3u << PMPCFG_A_LSB); /* NA4 is not selectable. */
+#endif
       pmp_cfg_set(base + pi, nb);
     }
     pmp_rebuild_decoded();
@@ -321,13 +348,14 @@ bool pmp_check(paddr_t addr, int size, uint32_t priv,
   if (size <= 0)
     size = 1;
   paddr_t addr_hi = addr + (paddr_t)(size - 1);
-  const bool same_word = (addr_hi >> 2) == (addr >> 2);
+  const bool same_grain = (addr_hi >> CONFIG_RV_PMP_GRANULARITY_LOG2) ==
+                          (addr >> CONFIG_RV_PMP_GRANULARITY_LOG2);
 
-  /* Fast path: the entire access lies inside one 4-byte grain. PMP region
+  /* Fast path: the entire access lies inside one implemented grain. PMP region
    * boundaries are grain-aligned, so the lowest-numbered entry matching that
    * grain also covers every byte of the access. This resolves the dominant
    * fetch / word load / word store cases with a single wcache probe. */
-  if (likely(same_word))
+  if (likely(same_grain))
   {
     struct pmp_match one;
     pmp_byte_lookup(addr, &one);
@@ -366,7 +394,9 @@ bool pmp_check(paddr_t addr, int size, uint32_t priv,
   {
     const int e0 = lo.entry;
     bool covered = (hi.entry == e0);
-    for (int offset = 4 - (int)(addr & 3); covered && offset < size; offset += 4)
+    const int grain = 1 << CONFIG_RV_PMP_GRANULARITY_LOG2;
+    for (int offset = grain - (int)(addr & (grain - 1)); covered && offset < size;
+         offset += grain)
     {
       paddr_t g = addr + (paddr_t)offset;
       if ((g >> 2) == (addr_hi >> 2))

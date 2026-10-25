@@ -9,7 +9,6 @@ module tb_l1d_16k;
   // One index wrap; also the address stride between ways of the same set.
   localparam int SetStrideBytes = Sets * LineBytes;
   localparam int CapacityBytes = Sets * Ways * LineBytes;
-  localparam int CapacityLines = Sets * Ways;
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
   cmu_bcast_if cmu_bcast ();
@@ -36,6 +35,11 @@ module tb_l1d_16k;
       .writeback_idle(),
       .writeback_drain(1'b0),
       `TB_L1D_UNUSED_RELEASE_PORTS,
+      .writeback_cbo_done(),
+      .coherent_addr('0),
+      .writeback_cbo(1'b0),
+      .writeback_cbo_invalidate(1'b0),
+      .writeback_block('0),
       .*
   );
   `include "tb_l1d_defaults.svh"
@@ -79,7 +83,7 @@ module tb_l1d_16k;
         // Acceptance and response are deliberately separated.
         @(posedge clock);
         repeat (2) @(negedge clock);
-        l1d_bus.rdata = word_at(addr);
+        l1d_bus.rdata  = word_at(addr);
         l1d_bus.rvalid = 1;
       end
     end
@@ -87,7 +91,7 @@ module tb_l1d_16k;
   endtask
   task automatic reject_alias(input logic [XLEN-1:0] addr);
     @(negedge clock);
-    lsu_l1d.raddr = addr;
+    lsu_l1d.raddr  = addr;
     lsu_l1d.rvalid = 1;
     for (int cycle = 0; cycle < 30; cycle++) begin
       @(negedge clock);
@@ -108,7 +112,7 @@ module tb_l1d_16k;
   initial begin
     init_l1d_inputs();
     lsu_l1d.rvalid_b = 0;
-    l1d_bus.rready = 1;
+    l1d_bus.rready   = 1;
     repeat (4) @(negedge clock);
     reset = 0;
     if ($bits(
@@ -130,18 +134,16 @@ module tb_l1d_16k;
       if (reads == before_reads) $fatal(1, "conflicting D tag did not miss");
       load(load_addr(SetStrideBytes * Ways), 1);
       for (int way = 0; way < Ways; way++) load(load_addr(LineBytes + SetStrideBytes * way), 1);
+      for (int offset = 0; offset < CapacityBytes; offset += XLEN / 8) load(load_addr(offset), 0);
       @(negedge clock);
-      cmu_bcast.fence_time = 1;
+      cmu_bcast.fence_time   = 1;
+      cmu_bcast.sfence_valid = 1;
       @(negedge clock);
-      cmu_bcast.fence_time = 0;
+      cmu_bcast.fence_time   = 0;
+      cmu_bcast.sfence_valid = 0;
       repeat (3) @(negedge clock);
-      // Every formerly resident line must miss after the whole-cache fence.
-      for (int line = 0; line < CapacityLines; line++) begin
-        before_reads = reads;
-        load(load_addr(LineBytes * line), 0);
-        if (reads != before_reads + 1) $fatal(1, "fence left D line %0d valid", line);
-        load(load_addr(LineBytes * line), 1);
-      end
+      // Translation maintenance retains all physically tagged data words.
+      for (int offset = 0; offset < CapacityBytes; offset += XLEN / 8) load(load_addr(offset), 1);
     end
     if (XLEN == 64) begin
       reject_alias(XLEN'(64'h0100000080000040));
@@ -149,7 +151,7 @@ module tb_l1d_16k;
       load(XLEN'('h80000040), 1);
     end
     $display(
-        "PASS: L1D RV%0d PA%0d compact tags, %0d sets x %0d ways = %0d KiB capacity, replacement, fence/refill, invalid aliases",
+        "PASS: L1D RV%0d PA%0d compact tags, %0d sets x %0d ways = %0d KiB capacity, replacement, translation retention, invalid aliases",
         XLEN, `RAPT_PADDR_BITS, Sets, Ways, CapacityBytes / 1024);
     $finish;
   end

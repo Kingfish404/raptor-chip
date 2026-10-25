@@ -16,6 +16,7 @@ module rapt_idu #(
     idu_bpu_if.out idu_bpu,
     input logic reset
 );
+  localparam int PcW = `RAPT_PC_BITS_OF(XLEN);
   rapt_pkg::fetch_slot_t slots[Width], next_slots[Width];
   rapt_pkg::decoded_slot_t decoded[Width];
   localparam int CountBits = (Width > 0) ? $clog2(Width + 1) : 1;
@@ -24,8 +25,8 @@ module rapt_idu #(
   logic accept[Width];
   logic redirect, prefix;
   logic redirect_q;
-  logic [XLEN-1:0] redirect_pc_q;
-  logic [XLEN-1:0] redirect_pc;
+  logic [PcW-1:0] redirect_pc_q;
+  logic [PcW-1:0] redirect_pc;
   localparam int SlotBits = Width > 1 ? $clog2(Width) : 1;
   logic [SlotBits-1:0] redirect_slot;
   int ras_slot;
@@ -63,20 +64,20 @@ module rapt_idu #(
     for (int s = 0; s < Width; s++) begin
       automatic logic is_control;
       automatic logic direct_jump;
-      automatic logic [XLEN-1:0] sequential, corrected;
+      automatic logic [PcW-1:0] sequential, corrected;
       is_control = decoded[s].uop.execute.branch.conditional
           || decoded[s].uop.execute.branch.jump || decoded[s].uop.execute.branch.indirect;
       direct_jump = decoded[s].uop.execute.branch.jump && !decoded[s].uop.execute.branch.indirect;
-      ras_actions[s] = rapt_pkg::ras_action(decoded[s].uop.inst);
-      sequential = slots[s].pc + (decoded[s].uop.c ? XLEN'(2) : XLEN'(4));
-      corrected = direct_jump ? slots[s].pc + decoded[s].uop.imm : slots[s].pnpc;
+      ras_actions[s] = decoded[s].uop.execute.branch.ras;
+      sequential = slots[s].pc + (decoded[s].uop.c ? PcW'(2) : PcW'(4));
+      corrected = direct_jump ? slots[s].pc + PcW'($signed(decoded[s].uop.imm)) : slots[s].pnpc;
       if (decoded[s].uop.execute.branch.conditional && slots[s].pnpc != sequential)
-        corrected = slots[s].pc + decoded[s].uop.imm;
+        corrected = slots[s].pc + PcW'($signed(decoded[s].uop.imm));
       if (!is_control) corrected = sequential;
       if (decoded[s].uop.execute.branch.indirect && ras_actions[s].pop && idu_bpu.ras_valid)
-        corrected = (idu_bpu.ras_addr + decoded[s].uop.imm) & ~XLEN'(1);
+        corrected = (idu_bpu.ras_addr + PcW'($signed(decoded[s].uop.imm))) & ~PcW'(1);
       idu_rnu.slot[s] = decoded[s];
-      idu_rnu.slot[s].uop.pnpc = corrected;
+      idu_rnu.slot[s].pnpc = corrected;
       idu_rnu.valid[s] = prefix && s < 32'(count) && !(is_control && control_seen);
       accept[s] = idu_rnu.valid[s] && idu_rnu.ready[s];
       if (accept[s]) begin
@@ -141,7 +142,7 @@ module rapt_idu #(
   assign idu_bpu.push_en = ras_slot >= 0 && ras_actions[ras_slot].push;
   assign idu_bpu.pop_en = ras_slot >= 0 && ras_actions[ras_slot].pop;
   assign idu_bpu.push_addr = ras_slot < 0 ? '0 : slots[ras_slot].pc
-      + (decoded[ras_slot].uop.c ? XLEN'(2) : XLEN'(4));
+      + (decoded[ras_slot].uop.c ? PcW'(2) : PcW'(4));
   always_ff @(posedge clock) begin
     if (reset || cmu_bcast.flush_pipe || recovery.pending) begin
       count <= 0;

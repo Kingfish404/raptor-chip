@@ -24,6 +24,7 @@ module tb_writeback;
         .LineWords(Words),
         .AllowRetry(RetryEnabled)
     ) dut (
+        .write_accept(1'b0),
         .read_addr('0),
         .miss_addr('0),
         .read_match(),

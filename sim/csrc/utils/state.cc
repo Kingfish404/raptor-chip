@@ -1,4 +1,5 @@
 #include <common.h>
+#include <checkpoint.h>
 #include <memory.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -58,6 +59,18 @@ int sig_dump_if_enabled(void)
     if (!sig_enabled)
         return 0;
 
+    /* Align to whole words; RISCOF normally supplies a word-aligned range. */
+    paddr_t begin = sig_begin & ~((paddr_t)0x3);
+    uint64_t end = (uint64_t(sig_end) + 3) & ~uint64_t(0x3);
+    /* Capture once through the architectural memory view. The last signature
+     * stores can still reside in dirty caches when the finisher stops RTL. */
+    std::vector<uint8_t> data(end - begin);
+    if (!cpu_read_memory_snapshot(begin, data.data(), data.size()))
+    {
+        printf("[sig] ERROR: cannot capture a stable architectural memory image\n");
+        return -1;
+    }
+
     FILE *fp = fopen(sig_file, "w");
     if (fp == NULL)
     {
@@ -65,24 +78,15 @@ int sig_dump_if_enabled(void)
         return -1;
     }
 
-    /* Align range up to 4 bytes; RISCOF guarantees 4-byte alignment but be
-     * defensive in case of a misconfigured test. */
-    paddr_t addr = sig_begin & ~((paddr_t)0x3);
-    paddr_t end = (sig_end + 3) & ~((paddr_t)0x3);
     size_t words = 0;
 
-    for (; addr < end; addr += 4)
+    for (size_t offset = 0; offset < data.size(); offset += 4)
     {
-        uint8_t *host = guest_to_host(addr);
-        uint32_t w = 0;
-        if (host != NULL)
-        {
-            /* Little-endian load from host buffer. */
-            w = ((uint32_t)host[0]) |
-                ((uint32_t)host[1] << 8) |
-                ((uint32_t)host[2] << 16) |
-                ((uint32_t)host[3] << 24);
-        }
+        const uint8_t *host = data.data() + offset;
+        uint32_t w = ((uint32_t)host[0]) |
+                     ((uint32_t)host[1] << 8) |
+                     ((uint32_t)host[2] << 16) |
+                     ((uint32_t)host[3] << 24);
         fprintf(fp, "%08x\n", w);
         words++;
     }

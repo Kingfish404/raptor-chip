@@ -1,5 +1,5 @@
 /* Bare M-mode harness, effective U/S data privilege through MPRV.
- * TOR [area,area+12), R/RW/X-only; half accesses include a bus-beat split.
+ * TOR [permitted_page,area+12), R/RW/X-only; half accesses include a bus-beat split.
  * No locked-PMP, translated-access, PMA/MMIO or external atomicity claim. */
 .option norvc
 .option norelax
@@ -37,7 +37,8 @@ init_mem:
   fld f2, 0(t0)
   li t0, 0x43
   csrw fcsr, t0
-  srli t0, s0, 2
+  la t0, permitted_page
+  srli t0, t0, 2
   csrw pmpaddr0, t0
   addi t0, s0, 12
   srli t0, t0, 2
@@ -201,5 +202,6 @@ fail:
 source_bits: .dword 0xffffffffffffbeef
 dest_bits: .dword 0x0123456789abcdef
 saved: .zero 16
-.balign 32
+.balign 4096
+permitted_page: .zero 4096-12
 area: .zero 24

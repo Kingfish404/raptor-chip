@@ -4,7 +4,9 @@
 
 // Exercise the actual L1D/bus coherence loop, including bus request ownership.
 // The LSU-facing load represents an already translated, non-replayable beat.
-module tb_memory_coherence_progress;
+module tb_memory_coherence_progress #(
+    parameter int PostedWrites = 0
+);
   localparam int XLEN = `RAPT_XLEN;
   localparam int Bytes = XLEN / 8;
   localparam logic [XLEN-1:0] Base = XLEN'('h80000000);
@@ -12,6 +14,8 @@ module tb_memory_coherence_progress;
   localparam logic [XLEN-1:0] PteAddr = Base + 'h800;
   logic clock = 0, reset = 1;
   logic coherent_request, coherent_write, coherent_ready;
+  logic [`RAPT_XLEN-1:0] coherent_addr;
+  logic writeback_drain = 0;
   cmu_bcast_if cmu_bcast ();
   csr_bcast_if csr_bcast ();
   pmp_update_if pmp_update ();
@@ -29,8 +33,10 @@ module tb_memory_coherence_progress;
       .clock,
       .reset,
       .coherent_request,
+      .coherent_addr,
       .coherent_write,
       .coherent_ready,
+      .writeback_drain,
       .cmu_bcast,
       .csr_bcast,
       .pmp_update,
@@ -38,10 +44,13 @@ module tb_memory_coherence_progress;
       .exu_l1d,
       .l1d_bus
   );
-  rapt_bus bus_dut (
+  rapt_bus #(
+      .PostedWrites(PostedWrites)
+  ) bus_dut (
       .clock,
       .reset,
       .coherent_request,
+      .coherent_addr,
       .coherent_write,
       .coherent_ready,
       .cmu_bcast,
@@ -358,6 +367,49 @@ module tb_memory_coherence_progress;
     scheduled_cases++;
   endtask
 
+  // All dirty requests may already have issued while the WB buffer still
+  // owns their B responses. A younger SQ store must not claim that response.
+  task automatic run_buffered_owner;
+    @(negedge clock);
+    reset = 1;
+    strict_order = 0;
+    init_l1d_inputs();
+    l1i_bus.arvalid = 0;
+    store_addr = Base;
+    tick(5);
+    @(negedge clock);
+    reset = 0;
+    drive_store();
+    lsu_l1d.walu = XLEN == 64 ? 8'hff : 8'h0f;
+    for (int n = 0; n < 100 && store_done == 0; n++) @(negedge clock);
+    check(store_done == 1 && stores == 0, "full store did not dirty local cache");
+    lsu_l1d.wvalid = 0;
+    tick(4);
+    writeback_drain = 1;
+    for (int n = 0; n < 2048 && stores == 0; n++) @(negedge clock);
+    check(stores == 1 && dut.wb_busy, "dirty writeback did not issue");
+    writeback_drain = 0;
+    // Extend only this response to expose the all-issued/awaiting-B interval.
+    write_delay = 100;
+    for (int n = 0; n < 50 && dut.wb_state != dut.WB_IDLE; n++) @(negedge clock);
+    check(dut.wb_state == dut.WB_IDLE && dut.wb_busy && !dut.wb_valid,
+          "did not expose all-issued pending writeback");
+    check(!coherent_ready && !dut.writeback_idle, "pending B released coherence/drain");
+    store_addr = Base + 'h418;
+    drive_store();
+    while (writing) begin
+      #1;
+      check(!l1d_bus.awvalid && !dut.lsu_bus_write_pending_q,
+            "younger SQ store claimed outstanding WB owner");
+      check(store_done == 1, "WB response acknowledged younger SQ store");
+      @(negedge clock);
+    end
+    for (int n = 0; n < 256 && store_done == 1; n++) @(negedge clock);
+    lsu_l1d.wvalid = 0;
+    check(store_done == 2 && stores == 2, "younger SQ store lost its own response");
+    $display("case PASS buffered writeback response ownership");
+  endtask
+
   initial begin
     if ($value$plusargs("SEED=%d", seed)) begin
     end
@@ -372,6 +424,7 @@ module tb_memory_coherence_progress;
     for (int ip_start = 0; ip_start < 3; ip_start++)
     for (int relation = 0; relation < 3; relation++)
     for (int kind = 0; kind < 3; kind++) run_schedule(ld_start, st_start, ip_start, relation, kind);
+    if (PostedWrites > 0) run_buffered_owner();
     check(&arrival_coverage && scheduled_cases == 243, "arrival schedule coverage incomplete");
     $display("PASS: 243 schedules, request max ages load/store/PTW=%0d/%0d/%0d", max_load_age,
              max_store_age, max_ptw_age);

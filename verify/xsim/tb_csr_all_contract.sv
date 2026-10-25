@@ -1060,6 +1060,12 @@ endmodule
 // low addresses when broadcast to the actual access checker.
 module tb_csr_pmp_address;
   localparam int XLEN = `RAPT_XLEN;
+  localparam int PmpG = `RAPT_PMP_GRANULARITY_LOG2 - 2;
+  localparam logic [XLEN-1:0] PmpTorMask = (XLEN'(1) << PmpG) - 1;
+  localparam logic [XLEN-1:0] PmpNapotOnes = PmpTorMask >> 1;
+  function automatic logic [XLEN-1:0] pmp_read(input logic [XLEN-1:0] raw, input bit napot);
+    return napot ? raw | PmpNapotOnes : raw & ~PmpTorMask;
+  endfunction
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
   logic external_s = 0;
@@ -1115,11 +1121,11 @@ pmp_state_if replica ();
       logic [XLEN-1:0] raw;
       logic implemented;
       implemented = bit_index < `RAPT_PMPADDR_BITS;
-      raw = (XLEN'(1) << bit_index) | (addr >> 2);
+      raw = (XLEN'(1) << bit_index) ^ (addr >> 2);
       write_csr(12'h3a0, 0);
       write_csr(12'h3b0, raw);
-      expect_csr(12'h3b0, implemented ? raw : addr >> 2);
-      write_csr(12'h3a0, XLEN'(8'h11));  // NA4 with read permission, U-mode
+      expect_csr(12'h3b0, pmp_read(implemented ? raw : addr >> 2, 0));
+      write_csr(12'h3a0, XLEN'(8'h19));  // NAPOT with read permission, U-mode
       #1;
       if (implemented && !fault)
         $fatal(
@@ -1130,9 +1136,9 @@ pmp_state_if replica ();
     end
     write_csr(12'h3a0, 0);
     write_csr(12'h3b0, addr >> 2);
-    write_csr(12'h3a0, XLEN'(8'h11));
+    write_csr(12'h3a0, XLEN'(8'h19));
     #1;
-    if (fault) $fatal(1, "matching low-address NA4 entry must allow byte load");
+    if (fault) $fatal(1, "matching low-address NAPOT entry must allow byte load");
     $display("PASS: high PMP CSR addresses do not alias low memory");
     $finish;
   end
@@ -1151,6 +1157,12 @@ endmodule
 // execution, committed writes, and the distributed PMP state replica.
 module tb_csr_pmp_lock;
   localparam int XLEN = `RAPT_XLEN;
+  localparam int PmpG = `RAPT_PMP_GRANULARITY_LOG2 - 2;
+  localparam logic [XLEN-1:0] PmpTorMask = (XLEN'(1) << PmpG) - 1;
+  localparam logic [XLEN-1:0] PmpNapotOnes = PmpTorMask >> 1;
+  function automatic logic [XLEN-1:0] pmp_read(input logic [XLEN-1:0] raw, input bit napot);
+    return napot ? raw | PmpNapotOnes : raw & ~PmpTorMask;
+  endfunction
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
   logic external_s = 0;
@@ -1195,7 +1207,7 @@ pmp_state_if replica ();
           expect_csr(12'h3b0 + 12'(a), '0);
           continue;
         end
-        expect_csr(12'h3b0 + 12'(a), expected);
+        expect_csr(12'h3b0 + 12'(a), pmp_read(expected, a == entry && mode == 3));
         if (replica.pmp_raw_addr[a] !== (`RAPT_PADDR_BITS - 2)'(expected))
           $fatal(
               1,
@@ -1205,7 +1217,7 @@ pmp_state_if replica ();
               locked,
               a
           );
-        if (replica.pmp_napot_mask[a] !== (expected[2] ? 15 : 7))
+        if (replica.pmp_napot_mask[a] !== ((expected | PmpNapotOnes) ^ ((expected | PmpNapotOnes) + 1)))
           $fatal(
               1,
               "PMP mask replica mismatch entry=%0d mode=%0d lock=%0d addr=%0d",
@@ -1223,7 +1235,7 @@ pmp_state_if replica ();
     reset = 0;
     for (int a = 0; a < 16; a++) begin
       write_csr(12'h3b0 + 12'(a), XLEN'('h3000 + a * 16));
-      expect_csr(12'h3b0 + 12'(a), a < `RAPT_PMP_NUM ? XLEN'('h3000 + a * 16) : '0);
+      expect_csr(12'h3b0 + 12'(a), a < `RAPT_PMP_NUM ? pmp_read(XLEN'('h3000 + a * 16), 0) : '0);
     end
     if (cases != 128) $fatal(1, "PMP lock matrix incomplete");
     $display("PASS: RV%0d PMP own/TOR predecessor locks cases=128 address_probes=2048", XLEN);
@@ -1245,6 +1257,12 @@ endmodule
 // permission replica, including normalized writes that lock an entry.
 module tb_csr_pmp_warl;
   localparam int XLEN = `RAPT_XLEN;
+  localparam int PmpG = `RAPT_PMP_GRANULARITY_LOG2 - 2;
+  localparam logic [XLEN-1:0] PmpTorMask = (XLEN'(1) << PmpG) - 1;
+  localparam logic [XLEN-1:0] PmpNapotOnes = PmpTorMask >> 1;
+  function automatic logic [XLEN-1:0] pmp_read(input logic [XLEN-1:0] raw, input bit napot);
+    return napot ? raw | PmpNapotOnes : raw & ~PmpTorMask;
+  endfunction
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
   logic external_s = 0;
@@ -1289,13 +1307,13 @@ pmp_state_if replica ();
     int last_byte, a;
     bit permission, low_fault, high_fault, expected_fault;
     // No pmpaddr write has occurred since reset. TOR is empty, NA4 covers
-    // 0..3 and NAPOT covers 0..7, independent of the precomputed RTL mask.
+    // 0..3 only at G=0; NAPOT covers the minimum supported region.
     case (cfg[4:3])
       2'b10: last_byte = 3;
-      2'b11: last_byte = 7;
+      2'b11: last_byte = PmpG == 0 ? 7 : (1 << (PmpG + 2)) - 1;
       default: last_byte = -1;
     endcase
-    expect_csr(12'h3b0 + 12'(entry), '0);
+    expect_csr(12'h3b0 + 12'(entry), pmp_read('0, cfg[4:3] == 3));
     for (int p = 0; p < 3; p++) begin
       check_priv = p == 2 ? 2'd3 : 2'(p);
       for (int w = 0; w < 2; w++) begin
@@ -1305,9 +1323,9 @@ pmp_state_if replica ();
           case (probe)
             0: a = 0;
             1: a = 3;
-            2: a = 4;
-            3: a = 7;
-            default: a = 8;
+            2: a = PmpG == 0 ? 4 : (1 << (PmpG + 2)) - 2;
+            3: a = PmpG == 0 ? 7 : (1 << (PmpG + 2)) - 1;
+            default: a = PmpG == 0 ? 8 : (1 << (PmpG + 2));
           endcase
           check_addr = XLEN'(a);
           low_fault = a <= last_byte ? ((p != 2 || cfg[7]) && !permission) : p != 2;
@@ -1335,6 +1353,33 @@ pmp_state_if replica ();
     iss = '0;
     clear_commit();
     init_cmu_bcast_defaults();
+    repeat (2) @(negedge clock);
+    reset = 0;
+    // OpenSBI probes the OFF-mode low writable bit. Mode switching must
+    // preserve the stored G-1 bit, which is hidden only in OFF/TOR reads.
+    write_csr(12'h3b0, '1);
+    expect_csr(12'h3b0, ((XLEN'(1) << `RAPT_PMPADDR_BITS) - 1) & ~PmpTorMask);
+    for (int retained = 0; retained < 2; retained++) begin
+      write_csr(12'h3a0, 0);
+      write_csr(12'h3b0, XLEN'('h1000) | (retained ? (PmpTorMask ^ PmpNapotOnes) : 0));
+      expect_csr(12'h3b0, XLEN'('h1000));
+      write_csr(12'h3a0, XLEN'('h19));
+      expect_csr(12'h3b0,
+                 XLEN'('h1000) | PmpNapotOnes | (retained ? (PmpTorMask ^ PmpNapotOnes) : 0));
+      write_csr(12'h3a0, XLEN'('h09));
+      expect_csr(12'h3b0, XLEN'('h1000));
+      write_csr(12'h3a0, XLEN'('h19));
+      expect_csr(12'h3b0,
+                 XLEN'('h1000) | PmpNapotOnes | (retained ? (PmpTorMask ^ PmpNapotOnes) : 0));
+      if (PmpG != 0) begin
+        check_addr = XLEN'('h4000) + (XLEN'(1) << (PmpG + 2));
+        check_priv = `RAPT_PRIV_U;
+        check_write = 0;
+        #1;
+        if (check_fault !== (retained == 0))
+          $fatal(1, "retained G-1 bit failed to control NAPOT region size");
+      end
+    end
     for (int bank = 0; bank < 4; bank++) begin
       if (XLEN == 32 || (bank & 1) == 0) begin
         for (int lane = 0; lane < XLEN / 8; lane++) begin
@@ -1347,6 +1392,7 @@ pmp_state_if replica ();
               2,6: expected=8'(raw)&8'h98;
               default: expected=8'(raw)&8'h9f;
             endcase
+            if (PmpG != 0 && expected[4:3] == 2) expected[4:3] = 0;
             reset = 1;
             repeat (2) @(negedge clock);
             reset = 0;
@@ -1410,6 +1456,12 @@ module tb_csr_sret_roundtrip;
 `else
   localparam int XLEN = 32;
 `endif
+  localparam int PmpG = `RAPT_PMP_GRANULARITY_LOG2 - 2;
+  localparam logic [XLEN-1:0] PmpTorMask = (XLEN'(1) << PmpG) - 1;
+  localparam logic [XLEN-1:0] PmpNapotOnes = PmpTorMask >> 1;
+  function automatic logic [XLEN-1:0] pmp_read(input logic [XLEN-1:0] raw, input bit napot);
+    return napot ? raw | PmpNapotOnes : raw & ~PmpTorMask;
+  endfunction
   localparam logic [XLEN-1:0] PmpaddrMask = {XLEN{1'b1}} >> (XLEN - `RAPT_PMPADDR_BITS);
 
   logic clock = 1'b0;
@@ -1594,7 +1646,7 @@ module tb_csr_sret_roundtrip;
     write_csr(`RAPT_CSR_PMPADDR0, '1);
     exu_csr.raddr = `RAPT_CSR_PMPADDR0;
     #1;
-    check(exu_csr.rdata == PmpaddrMask,
+    check(exu_csr.rdata == (PmpaddrMask & ~PmpTorMask),
           "pmpaddr0 all-ones write returned the wrong architectural mask");
     check(pmp_state.pmp_raw_addr[0] == '1,
           "pmpaddr0 all-ones write did not fill the physical checker state");
@@ -1604,7 +1656,9 @@ module tb_csr_sret_roundtrip;
     check(dut.pmpaddr_r[0] == 32'h0000_0123, "pmpaddr0 write was not stored");
     check(pmp_state.pmp_raw_addr[0] == 32'h0000_0123,
           "pmpaddr0 produced the wrong raw-address shadow");
-    check(pmp_state.pmp_napot_mask[0] == 32'h0000_0007, "pmpaddr0 produced the wrong NAPOT mask");
+    check(
+        pmp_state.pmp_napot_mask[0] == ((XLEN'('h123) | PmpNapotOnes) ^ ((XLEN'('h123) | PmpNapotOnes) + 1)),
+        "pmpaddr0 produced the wrong NAPOT mask");
 
     // Entry 0 is unlocked NAPOT/RWX; entry 1 is locked TOR/R. The locked TOR
     // entry also locks pmpaddr0 because it supplies entry 1's lower bound.
@@ -1617,8 +1671,9 @@ module tb_csr_sret_roundtrip;
           "pmpcfg0 did not update entry 1 locked TOR mode");
     write_csr(`RAPT_CSR_PMPADDR0, 32'h0000_0456);
     check(dut.pmpaddr_r[0] == 32'h0000_0123, "locked TOR lower bound accepted a pmpaddr0 write");
-    check(pmp_state.pmp_napot_mask[0] == 32'h0000_0007,
-          "rejected pmpaddr0 write changed its NAPOT shadow");
+    check(
+        pmp_state.pmp_napot_mask[0] == ((XLEN'('h123) | PmpNapotOnes) ^ ((XLEN'('h123) | PmpNapotOnes) + 1)),
+        "rejected pmpaddr0 write changed its NAPOT shadow");
     check(pmp_state.pmp_raw_addr[0] == 32'h0000_0123,
           "rejected pmpaddr0 write changed its raw-address shadow");
 
@@ -1717,7 +1772,8 @@ module tb_csr_trap_payload;
   int causes[11]='{0,1,2,3,4,5,6,7,12,13,15};
   int checked=0;
   initial begin
-    logic [XLEN-1:0] value, pc;
+    logic [XLEN-1:0] value, pc, pc_pattern;
+    logic [`RAPT_PC_BITS_OF(XLEN)-1:0] packed_pc;
     int privilege;
     bit to_s;
     for (int mode = 0; mode < 3; mode++)
@@ -1738,7 +1794,21 @@ module tb_csr_trap_payload;
       // Its injected transport control remains M-routed even if software sets the bit.
       to_s=delegated!=0 && privilege!=3 && causes[cause]!=0;
       value=sample==0 ? '0 : sample==1 ? '1 : XLEN'(1)<<(sample-2);
-      pc=(~value)&~XLEN'(1);
+      // PC_LEGALIZE takes a packed variable because it selects address bits.
+      // Narrow before sign extension so the expectation matches PC transport.
+      // The independent trap value still exercises every architectural bit.
+      pc_pattern = (~value) & ~XLEN'(1);
+      packed_pc = `RAPT_PC_LEGALIZE(XLEN, `RAPT_PC_BITS_OF(XLEN), pc_pattern);
+      pc = `RAPT_PC_SEXT(XLEN, packed_pc);
+      if (mode == 0 && delegated == 0 && cause == 0 && (sample == 0 || sample == 41))
+        $display(
+            "PC40 sample=%0d pattern=%h packed=%h expected_epc=%h tval=%h",
+            sample,
+            pc_pattern,
+            packed_pc,
+            pc,
+            value
+        );
       write_csr(12'h302, delegated ? XLEN'(1) << causes[cause] : 0);
       expect_value(12'h302, delegated && causes[cause] != 0 ? XLEN'(1) << causes[cause] : 0);
       write_csr(12'h343, XLEN'('h1357));

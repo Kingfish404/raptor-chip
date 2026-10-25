@@ -5,6 +5,8 @@ module tb_pmp_permissions;
   localparam int X = `RAPT_XLEN;
   localparam int P = `RAPT_PADDR_BITS;
   localparam int A = P - 2;
+  localparam int G = `RAPT_PMP_GRANULARITY_LOG2 - 2;
+  localparam logic [A-1:0] LowMask = (A'(1) << G) - 1;
   localparam int N = `RAPT_PMP_NUM;
   logic [X-1:0] addr;
   logic [3:0] size_m1;
@@ -40,12 +42,12 @@ module tb_pmp_permissions;
     for (int e = 0; e < N; e++) begin
       any_byte = 0;
       all_bytes = 1;
-      lower = e == 0 ? '0 : pmp_raw_addr[e-1];
+      lower = e == 0 ? '0 : pmp_raw_addr[e-1] & ~LowMask;
       for (int b = 0; b <= int'(size_m1); b++) begin
         byte_addr = P'(addr) + P'(b);
         word_addr = byte_addr[P-1:2];
-        hit = (pmp_mode_tor[e] && word_addr >= lower && word_addr < pmp_raw_addr[e])
-            || (pmp_mode_na4[e] && word_addr == pmp_raw_addr[e])
+        hit = (pmp_mode_tor[e] && word_addr >= lower && word_addr < (pmp_raw_addr[e] & ~LowMask))
+            || (G == 0 && pmp_mode_na4[e] && word_addr == pmp_raw_addr[e])
             || (pmp_mode_napot[e]
                 && (word_addr & ~pmp_napot_mask[e])
                    == (pmp_raw_addr[e] & ~pmp_napot_mask[e]));
@@ -76,19 +78,21 @@ module tb_pmp_permissions;
       for (int e = 0; e < N; e++) begin
         pmp_raw_addr[e] = A'({random_word(), random_word()});
         // Mix dense overlapping regions and full-width physical addresses.
-        if (n % 3 == 0) pmp_raw_addr[e] &= A'(255);
+        if (n % 3 == 0) pmp_raw_addr[e] &= A'(255 << G);
         if (n % 29 == 0) pmp_raw_addr[e] = '1;
         if (n % 31 == 0) pmp_raw_addr[e] = '0;
-        pmp_napot_mask[e] = pmp_raw_addr[e] ^ (pmp_raw_addr[e] + A'(1));
+        pmp_napot_mask[e] = (pmp_raw_addr[e] | (LowMask >> 1))
+            ^ ((pmp_raw_addr[e] | (LowMask >> 1)) + A'(1));
         case (random_word() % 4)
           0: pmp_mode_off[e] = 1;
           1: pmp_mode_tor[e] = 1;
-          2: pmp_mode_na4[e] = 1;
+          2: if (G == 0) pmp_mode_na4[e] = 1;
+             else pmp_mode_off[e] = 1;
           3: pmp_mode_napot[e] = 1;
         endcase
       end
       selected = int'(random_word() % N);
-      region = pmp_raw_addr[selected];
+      region = pmp_raw_addr[selected] & ~LowMask;
       if (n % 2 == 0) region &= ~pmp_napot_mask[selected];
       addr = X'({region, 2'b00}) + X'(int'(random_word() % 33) - 16);
       size_m1 = 4'(n % 16);

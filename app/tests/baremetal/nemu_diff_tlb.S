@@ -250,7 +250,7 @@ deny_pmp:
   csrw pmpaddr1, t3
   srli t3, s4, 2
   csrw pmpaddr0, t3
-  li t3, 0x1f10
+  li t3, 0x1f18
   csrw pmpcfg0, t3
   csrr t3, mepc
   addi t3, t3, 4

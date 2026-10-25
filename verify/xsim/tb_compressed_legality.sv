@@ -12,9 +12,20 @@ module tb_compressed_legality;
     fetched.inst = {16'hcafe, enc};
     #1;
     if (reserved) begin
-      if (!decoded.uop.trap || decoded.uop.cause != X'(2)
-          || decoded.uop.tval != X'(enc) || decoded.uop.rd != 0)
-        $fatal(1, "reserved compressed encoding RV%0d enc=%h", X, enc);
+      if (!decoded.uop.trap || decoded.uop.cause != X'(2) ||
+          `RAPT_UOP_TVAL(X, decoded.uop)
+          != X'(enc) || decoded.uop.rd != 0)
+        $fatal(
+            1,
+            "reserved compressed RV%0d enc=%h trap=%b cause=%d tval=%h expected_tval=%h rd=%d",
+            X,
+            enc,
+            decoded.uop.trap,
+            decoded.uop.cause,
+            `RAPT_UOP_TVAL(X, decoded.uop),
+            X'(enc),
+            decoded.uop.rd
+        );
     end else begin
       if (decoded.uop.trap || !decoded.uop.c)
         $fatal(1, "legal compressed encoding RV%0d rejected enc=%h", X, enc);

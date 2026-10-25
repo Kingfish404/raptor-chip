@@ -17,7 +17,7 @@ if (CheckOperandIndependence) begin : g_operand_pair
   logic shadow_dispatch_valid[ScanEntries];
   logic shadow_halted, shadow_commit_fire, shadow_pmu_rob_full;
   logic shadow_writeback_drain;
-  logic [XLEN-1:0] shadow_halt_pc;
+  logic [`RAPT_PC_BITS_OF(XLEN)-1:0] shadow_halt_pc;
   assign shadow_rnu_rou.empty = rnu_rou.empty;
   assign shadow_rou_lsu.sq_ready = rou_lsu.sq_ready;
   assign shadow_rou_lsu.sq_empty = rou_lsu.sq_empty;
@@ -44,6 +44,10 @@ if (CheckOperandIndependence) begin : g_operand_pair
   ) shadow (
       .writeback_done(tb_writeback_idle),
       .writeback_drain(shadow_writeback_drain),
+      .writeback_clean(),
+      .writeback_cbo(),
+      .writeback_cbo_invalidate(),
+      .writeback_block(),
       .completion(shadow_completion),
       .completion_owner(shadow_completion_owner),
       .clock(clock),

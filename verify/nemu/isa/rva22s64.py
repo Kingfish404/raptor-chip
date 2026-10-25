@@ -232,9 +232,11 @@ def main():
         ref.write(root+8,((middle>>12)<<10|1).to_bytes(8,'little'))
         ref.write(middle,((leaf>>12)<<10|1).to_bytes(8,'little'))
         ref.write(leaf,((address>>12)<<10|0xcf).to_bytes(8,'little'))
-        s.gpr[1]=address>>2;ref.run([0x3b009073])
+        # Deny the mapped 4 KiB page with NAPOT. NA4 is unavailable on
+        # references whose PMP grain is a page (G=10).
+        s.gpr[1]=(address>>2)|0x1ff;ref.run([0x3b009073])
         s.gpr[1]=mask;ref.run([0x3b109073])
-        s.gpr[1]=0x0f10;ref.run([0x3a009073])
+        s.gpr[1]=0x0f18;ref.run([0x3a009073])
         s.satp[0]=(8<<60)|(root>>12)
         s.mstatus[0]|=(1<<17)|(1<<11)
         s.gpr[1]=va

@@ -37,6 +37,8 @@ module rapt_ptw #(
     output logic [6:0] result_pte,
     // Leaf PBMT; valid together with result_pte on done. Sv32 always uses PMA.
     output logic [1:0] result_pbmt,
+    // Leaf level: 0 = 4 KiB, 1 = megapage, 2 = Sv39 gigapage.
+    output logic [1:0] result_level,
 
     output logic busy
 );
@@ -120,8 +122,7 @@ module rapt_ptw #(
   assign ptag_lvl0 = {{Rv64PtagPadW{1'b0}}, pte_data[53:10]};
 
   assign busy = (state != IDLE);
-  assign bus_arvalid = !kill
-                     && (state == LVL2_REQ || state == LVL1_REQ || state == LVL0_REQ);
+  assign bus_arvalid = !kill && (state == LVL2_REQ || state == LVL1_REQ || state == LVL0_REQ);
   assign bus_araddr = XLEN'({pte_word_addr, 3'b000});
   assign result_vtag = (XLEN-12)'($signed(vtag_q));
 
@@ -139,6 +140,7 @@ module rapt_ptw #(
       fault <= 1'b0;
       killed <= 1'b0;
       global_q <= 1'b0;
+      result_level <= 2'd0;
     end else begin
       done  <= 1'b0;
       fault <= 1'b0;
@@ -178,6 +180,7 @@ module rapt_ptw #(
                 state <= IDLE;
               end else begin
                 result_ptag <= ptag_lvl2;
+                result_level <= 2'd2;
                 result_pte  <= walk_pte_flags;
                 if (pte_needs_ad_update) begin
                   fault <= 1'b1;
@@ -216,6 +219,7 @@ module rapt_ptw #(
                 state <= IDLE;
               end else begin
                 result_ptag <= ptag_lvl1;
+                result_level <= 2'd1;
                 result_pte  <= walk_pte_flags;
                 if (pte_needs_ad_update) begin
                   fault <= 1'b1;
@@ -250,6 +254,7 @@ module rapt_ptw #(
               state <= IDLE;
             end else begin
               result_ptag <= ptag_lvl0;
+              result_level <= 2'd0;
               result_pte  <= walk_pte_flags;
               if (pte_needs_ad_update) begin
                 fault <= 1'b1;
@@ -352,6 +357,7 @@ module rapt_ptw #(
       fault <= 1'b0;
       killed <= 1'b0;
       global_q <= 1'b0;
+      result_level <= 2'd0;
     end else begin
       done  <= 1'b0;
       fault <= 1'b0;
@@ -385,6 +391,7 @@ module rapt_ptw #(
                 state <= IDLE;
               end else begin
                 result_ptag <= ptag_lvl1;
+                result_level <= 2'd1;
                 result_pte  <= walk_pte_flags;
                 if (pte_needs_ad_update) begin
                   fault <= 1'b1;
@@ -419,6 +426,7 @@ module rapt_ptw #(
               state <= IDLE;
             end else begin
               result_ptag <= ptag_lvl0;
+              result_level <= 2'd0;
               result_pte  <= walk_pte_flags;
               if (pte_needs_ad_update) begin
                 fault <= 1'b1;

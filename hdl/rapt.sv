@@ -149,7 +149,7 @@ module rapt #(
   logic            dm_resumereq;
   logic            dm_ndmreset;
   logic            dm_halted;
-  logic [XLEN-1:0] dm_halt_pc;
+  logic [`RAPT_PC_BITS_OF(XLEN)-1:0] dm_halt_pc;
   logic            dm_commit_fire;
   /* verilator lint_off UNUSEDSIGNAL */
   logic            dm_resumereq_unused;
@@ -349,7 +349,7 @@ module rapt #(
       .dmi_rdata      (dmi_rdata),
       .dmi_resp       (dmi_resp),
       .halted_i       (dm_halted),
-      .halt_pc_i      (dm_halt_pc),
+      .halt_pc_i      (`RAPT_PC_SEXT(XLEN, dm_halt_pc)),
       .commit_fire_i  (dm_commit_fire),
       .haltreq_o      (dm_haltreq),
       .resumereq_o    (dm_resumereq),

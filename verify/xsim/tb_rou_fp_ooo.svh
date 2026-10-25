@@ -16,8 +16,9 @@ function automatic uop_t fp_ooo_uop(input int op, rd, rs1 = 0, rs2 = 0, rs3 = 0)
   uop_t u;
   u = '0;
   u.pc = XLEN'(fp_ooo_pc);
-  u.pnpc = u.pc + XLEN'(4);
+
   u.inst = 32'h02000053;
+  u.imm = 32'h02000053;
   u.execute.fp.valid = 1;
   u.execute.fp.op = 6'(op);
   u.execute.fp.rd = 5'(rd);
@@ -30,6 +31,7 @@ endfunction
 task automatic fp_ooo_enqueue(input uop_t u, input int owner, input logic [XLEN-1:0] gpr = 0);
   rnu_rou.slot[0] = '0;
   rnu_rou.slot[0].uop = u;
+  rnu_rou.slot[0].pnpc = rnu_rou.slot[0].uop.pc + XLEN'(rnu_rou.slot[0].uop.c ? 2 : 4);
   rnu_rou.slot[0].op1 = gpr;
   rnu_rou.checkpoint_valid[0] = 0;
   rnu_rou.valid[0] = 1;

@@ -21,11 +21,12 @@ module rapt_ifu #(
     output logic response_pending_o,
     input logic reset
 );
-  logic [XLEN-1:1] pc_ifu_q;
-  wire [XLEN-1:0] pc_ifu = {pc_ifu_q, 1'b0};
-  logic [XLEN-1:0] nextpc, redirect_pc;
+  localparam int PcW = `RAPT_PC_BITS_OF(XLEN);
+  logic [PcW-1:1] pc_ifu_q;
+  wire [PcW-1:0] pc_ifu = {pc_ifu_q, 1'b0};
+  logic [PcW-1:0] nextpc, redirect_pc;
   logic prediction_ready, prediction_taken;
-  logic [XLEN-1:0] prediction_npc;
+  logic [PcW-1:0] prediction_npc;
   rapt_pkg::fetch_slot_t held[Width], fetched[Width];
 `ifdef RAPT_FETCH_WIDE
   localparam int WindowHalfwords = 8;
@@ -42,17 +43,17 @@ module rapt_ifu #(
   int unsigned consumed, fetched_count;
   logic redirect_event, recv_ready, stopped;
   logic [31:0] raw[Width], expanded[Width];
-  logic [XLEN-1:0] candidate_pc[Width];
+  logic [PcW-1:0] candidate_pc[Width];
   int offset[Width+1];
   logic available[Width], is_control[Width], is_serial[Width], is_cond[Width];
-  logic [XLEN-1:0] sequential[Width];
-  logic [XLEN-1:0] cond_target[Width];
+  logic [PcW-1:0] sequential[Width];
+  logic [PcW-1:0] cond_target[Width];
   logic secondary_query;
   localparam int SlotBits = Width > 1 ? $clog2(Width) : 1;
   logic [SlotBits-1:0] secondary_index;
   logic blocked;
   typedef struct packed {
-    logic [XLEN-1:0] pc;
+    logic [PcW-1:0] pc;
     logic [31:0] inst_n0, inst_n1, inst_n2;
     logic inst_n1_valid, inst_n2_valid;
 `ifdef RAPT_FETCH_WIDE
@@ -62,10 +63,10 @@ module rapt_ifu #(
     logic trap;
     logic [XLEN-1:0] cause, tval;
     logic predicted_taken;
-    logic [XLEN-1:0] predicted_npc;
-    logic [XLEN-1:0] request_npc;
+    logic [PcW-1:0] predicted_npc;
+    logic [PcW-1:0] request_npc;
 `ifdef RAPT_FETCH_LOOKAHEAD
-    logic [XLEN-1:0] aux_pc;
+    logic [PcW-1:0] aux_pc;
 `endif
   } fetch_response_t;
   fetch_response_t live_response, response, response_q;
@@ -75,7 +76,7 @@ module rapt_ifu #(
   logic response_valid, response_valid_q;
   logic capture_response, pop_response, response_redirect, response_stop;
   logic response_kill_younger;
-  logic [XLEN-1:0] request_nextpc;
+  logic [PcW-1:0] request_nextpc;
   always_comb begin
     live_response = '0;
     live_response.pc = pc_ifu;
@@ -105,7 +106,7 @@ module rapt_ifu #(
   assign response_pending_o = ResponseStage && response_valid_q;
 
   logic response_primary_taken;
-  logic [XLEN-1:0] response_primary_npc;
+  logic [PcW-1:0] response_primary_npc;
 `ifdef RAPT_BPU_DIRP_TAGE
 `ifdef RAPT_FETCH_LOOKAHEAD
   // Request-side primary prediction can precede the previous packet's history
@@ -214,7 +215,7 @@ module rapt_ifu #(
     assign request_control_seen[s+1] = request_control_seen[s] || request_is_control;
   end
 `ifdef RAPT_FETCH_LOOKAHEAD
-  logic [XLEN-1:0] aux_pc_live, aux_pc_q;
+  logic [PcW-1:0] aux_pc_live, aux_pc_q;
   // A queried non-first conditional is the first control instruction in the
   // response. Capture its PC alongside the response so the auxiliary table
   // read cannot feed back into its own address through packet packing.
@@ -226,13 +227,13 @@ module rapt_ifu #(
           && request_conditional(
               request_halfword[WindowIndexBits'(request_offset[s])]
           ))
-        aux_pc_live = pc_ifu + XLEN'({request_offset[s], 1'b0});
+        aux_pc_live = pc_ifu + PcW'({request_offset[s], 1'b0});
     end
   end
   assign aux_pc_q = response_q.aux_pc;
 `endif
   logic successor_hit;
-  logic [XLEN-1:0] packet_successor;
+  logic [PcW-1:0] packet_successor;
   if (ResponseStage) begin : g_successor
     // The table reads only the registered request PC. Training starts from a
     // registered response, so no raw cache-data or reverse-ready path feeds
@@ -257,7 +258,7 @@ module rapt_ifu #(
   end
   assign request_nextpc = prediction_taken ? prediction_npc
       : successor_hit ? packet_successor
-      : pc_ifu + XLEN'({request_offset[Width], 1'b0});
+      : pc_ifu + PcW'({request_offset[Width], 1'b0});
   // Each packet owns the successor used when it was captured. The live request
   // PC may already be two packets ahead and cannot identify a correction.
   // Detect correction independently of downstream readiness so a stalled head
@@ -356,8 +357,8 @@ module rapt_ifu #(
     assign available[s] = s == 0 ? response_valid
         : offset[s+1] <= WindowHalfwords && half_valid[offset[s]]
           && (compressed || half_valid[offset[s]+1]);
-    assign candidate_pc[s] = response.pc + XLEN'(2 * offset[s]);
-    assign sequential[s] = response.pc + XLEN'(2 * offset[s+1]);
+    assign candidate_pc[s] = response.pc + PcW'(2 * offset[s]);
+    assign sequential[s] = response.pc + PcW'(2 * offset[s+1]);
     assign is_cond[s] = expanded[s][6:0] == `RAPT_OP_B_TYPE_;
     assign is_control[s] = is_cond[s] || expanded[s][6:0] ==
         `RAPT_OP_JAL___
@@ -369,7 +370,7 @@ module rapt_ifu #(
     wire [12:0] branch_imm = {
       expanded[s][31], expanded[s][7], expanded[s][30:25], expanded[s][11:8], 1'b0
     };
-    assign cond_target[s] = candidate_pc[s] + {{(XLEN - 13) {branch_imm[12]}}, branch_imm};
+    assign cond_target[s] = candidate_pc[s] + {{(PcW - 13) {branch_imm[12]}}, branch_imm};
   end
   // Existing predictor provides a primary query and one auxiliary conditional
   // query. It is sufficient because the fetched group ends at its first CFU.
@@ -443,11 +444,11 @@ module rapt_ifu #(
         immediate = {
           expanded[s][31], expanded[s][19:12], expanded[s][20], expanded[s][30:21], 1'b0
         };
-        fetched[s].pnpc = candidate_pc[s] + {{(XLEN - 21) {immediate[20]}}, immediate};
+        fetched[s].pnpc = candidate_pc[s] + {{(PcW - 21) {immediate[20]}}, immediate};
       end
       fetched[s].trap  = s == 0 && response.trap;
-      fetched[s].tval  = response.tval;
-      fetched[s].cause = response.cause;
+      fetched[s].fetch_tval_plus2 = response.tval == `RAPT_PC_SEXT(XLEN, candidate_pc[s]) + XLEN'(2);
+      fetched[s].cause = 6'(response.cause);
       if (!stopped && available[s] && !split_before_indirect
           && !(is_control[s] && control_seen)) begin
         fetched_count++;
@@ -514,11 +515,11 @@ module rapt_ifu #(
   logic [HintBits-1:0] hint_write_index_q;
   logic hint_valid_read[1];
   logic hint_valid_q, query_valid_q, saved_valid_q;
-  logic [XLEN-1:0] query_pc_q;
+  logic [PcW-1:0] query_pc_q;
   logic saved_taken_q;
   logic [OffsetBits-1:0] stride_q;
   logic hint_match;
-  logic [XLEN-1:0] predicted_successor;
+  logic [PcW-1:0] predicted_successor;
   wire [HintBits-1:0] hint_read_index = ifu_bpu.nextpc[HintBits:1]
       ^ ifu_bpu.nextpc[2*HintBits:HintBits+1];
   wire [HintBits-1:0] hint_write_index = response.pc[HintBits:1]
@@ -583,8 +584,8 @@ module rapt_ifu #(
   end
   assign predicted_successor = ifu_bpu.taken ? ifu_bpu.npc
       : hint_match && (hint_q.direct || (hint_q.conditional && request_aux_taken))
-      ? pc_ifu + XLEN'($signed(hint_q.delta))
-      : pc_ifu + (hint_match ? XLEN'({hint_q.length, 1'b0}) : XLEN'({stride_q, 1'b0}));
+      ? pc_ifu + PcW'($signed(hint_q.delta))
+      : pc_ifu + (hint_match ? PcW'({hint_q.length, 1'b0}) : PcW'({stride_q, 1'b0}));
   assign ifu_bpu.nextpc = redirect_event ? redirect_pc
       : !prediction_ready ? pc_ifu : saved_valid_q ? query_pc_q : predicted_successor;
   assign ifu_bpu.pc_update = 1'b1;
@@ -644,7 +645,7 @@ module rapt_ifu #(
 `endif
   always_ff @(posedge clock) begin
     if (reset) begin
-      pc_ifu_q <= (XLEN-1)'(XLEN'(`RAPT_PC_INIT) >> 1);
+      pc_ifu_q <= (PcW-1)'(PcW'(`RAPT_PC_INIT) >> 1);
       held_count <= 0;
       blocked <= 1'b0;
 `ifndef SYNTHESIS
@@ -674,8 +675,8 @@ module rapt_ifu #(
       // Address generation runs ahead of the response/packing stage. A
       // correction has priority over a speculative next-packet request.
       if (ResponseStage) begin
-        if (response_redirect) pc_ifu_q <= nextpc[XLEN-1:1];
-        else if (capture_response) pc_ifu_q <= request_nextpc[XLEN-1:1];
+        if (response_redirect) pc_ifu_q <= nextpc[PcW-1:1];
+        else if (capture_response) pc_ifu_q <= request_nextpc[PcW-1:1];
       end
 `ifndef SYNTHESIS
       pmu_fetch_multi_fire <= consumed > 1;
@@ -700,14 +701,14 @@ module rapt_ifu #(
       pmu_fetch_response_consume <= recv_ready;
       pmu_fetch_bpu_taken <= recv_ready && response_primary_taken;
       pmu_fetch_target_steer <= recv_ready
-          && nextpc != response.pc + XLEN'(2 * offset[fetched_count]);
+          && nextpc != response.pc + PcW'(2 * offset[fetched_count]);
 `endif
       if (redirect_event) begin
-        pc_ifu_q <= redirect_pc[XLEN-1:1];
+        pc_ifu_q <= redirect_pc[PcW-1:1];
         held_count <= 0;
         blocked <= 1'b0;
       end else if (recv_ready) begin
-        if (!ResponseStage) pc_ifu_q <= nextpc[XLEN-1:1];
+        if (!ResponseStage) pc_ifu_q <= nextpc[PcW-1:1];
         held_count <= CountBits'(fetched_count);
         for (int s = 0; s < Width; s++) begin
           if (s < fetched_count && (is_serial[s] || fetched[s].trap)) blocked <= 1'b1;

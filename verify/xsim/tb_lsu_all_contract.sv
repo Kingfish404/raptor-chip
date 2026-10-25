@@ -764,11 +764,14 @@ module tb_lsu_hum_pmp;
       exu_ioq_bcast.wen=0;
       tick(1);
     end
-    // A locked NA4 region has priority over a permissive background.
+    // A locked minimum-size region has priority over a permissive background.
     init_pmp_state_defaults(1);
     pmp_state.pmp_raw_addr[0]=$bits(pmp_state.pmp_raw_addr[0])'(Addr>>2);
     pmp_state.pmp_mode_off[0]=0;
-    pmp_state.pmp_mode_na4[0]=1;
+    pmp_state.pmp_mode_na4[0] = `RAPT_PMP_GRANULARITY_LOG2 == 2;
+    pmp_state.pmp_mode_napot[0] = `RAPT_PMP_GRANULARITY_LOG2 != 2;
+    pmp_state.pmp_napot_mask[0] = (`RAPT_PADDR_BITS - 2)'(
+        (1 << (`RAPT_PMP_GRANULARITY_LOG2 - 2)) - 1);
     pmp_state.pmp_cfg_l[0]=1;
     pmp_state.pmp_raw_addr[1]='1;
     pmp_state.pmp_napot_mask[1]='1;
@@ -823,15 +826,16 @@ module tb_lsu_hum_pmp;
     end
     setup(0);
     pmp_state.pmp_cfg_r[0] = 1;
-    if (XLEN == 64) begin
+    if (XLEN == 64 && `RAPT_PMP_GRANULARITY_LOG2 == 2) begin
       exu_lsu.ralu_b = `RAPT_ALU_LD__;
       expect_b(0, 0);  // Aligned eight-byte load partly matches a four-byte region.
       exu_lsu.ralu_b = `RAPT_ALU_LBU_;
       expect_b(1, 0);  // The byte at exactly the same address is permitted.
     end
-    exu_lsu.raddr_b=Addr+3;
+    exu_lsu.raddr_b = `RAPT_PMP_GRANULARITY_LOG2 == 2 ? Addr + 3
+        : (Addr & ~XLEN'(4095)) + 4095;
     exu_lsu.ralu_b=`RAPT_ALU_LHU_;
-    expect_b(0, 0);  // A two-byte access cannot partly match the NA4 entry.
+    expect_b(0, 0);  // A two-byte access cannot partly match the protected region.
     exu_lsu.raddr_b='h0f001fff;
     exu_lsu.ralu_b=`RAPT_ALU_LHU_;
     expect_b(0, 0);  // SRAM endpoint: entire access must be mapped.

@@ -35,8 +35,9 @@ module tb_compressed_expansion;
         #1;
         if (!decoded.uop.c) $fatal(1, "missing compressed length enc=%h", enc);
         if (kind == 1 || (fs == 0 && (expected[6:0] == 7'h07 || expected[6:0] == 7'h27))) begin
-          if (!decoded.uop.trap || decoded.uop.cause != X'(2)
-              || decoded.uop.tval != X'(enc) || decoded.uop.rd != 0)
+          if (!decoded.uop.trap || decoded.uop.cause != X'(2) ||
+              `RAPT_UOP_TVAL(X, decoded.uop)
+              != X'(enc) || decoded.uop.rd != 0)
             $fatal(1, "illegal compressed RV%0d enc=%h", X, enc);
         end else begin
           if (decoded.uop.inst != expected && !(kind == 2 && decoded.uop.inst == 32'h00000013))

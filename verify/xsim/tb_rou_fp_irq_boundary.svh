@@ -25,8 +25,9 @@ task automatic run_fp_irq_boundary;
         end
         u = '0;
         u.pc = resume_pc;
-        u.pnpc = resume_pc + XLEN'(4);
-        u.inst = 32'hf4000153; // FMV.H.X f2,x0
+
+        u.inst = 32'hf4000153;
+        u.imm = 32'hf4000153; // FMV.H.X f2,x0
         u.execute.fp.valid = 1;
         u.execute.fp.op = `RAPT_FP_OP_ZFHMIN;
         u.execute.fp.rd = 2;
@@ -34,6 +35,7 @@ task automatic run_fp_irq_boundary;
         dispatch_ready[0] = 1'(ready);
         rnu_rou.slot[0] = '0;
         rnu_rou.slot[0].uop = u;
+        rnu_rou.slot[0].pnpc = rnu_rou.slot[0].uop.pc + XLEN'(rnu_rou.slot[0].uop.c ? 2 : 4);
         rnu_rou.valid[0] = 1;
         #1;
         check(rnu_rou.ready[0], "FP enqueue not accepted");

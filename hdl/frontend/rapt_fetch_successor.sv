@@ -10,17 +10,18 @@ module rapt_fetch_successor #(
     input logic clock,
     input logic reset,
     input logic invalidate,
-    input logic [XLEN-1:0] query_pc,
+    input logic [`RAPT_PC_BITS_OF(XLEN)-1:0] query_pc,
     output logic hit,
-    output logic [XLEN-1:0] successor,
+    output logic [`RAPT_PC_BITS_OF(XLEN)-1:0] successor,
     input logic train,
-    input logic [XLEN-1:0] train_pc,
-    input logic [XLEN-1:0] train_successor
+    input logic [`RAPT_PC_BITS_OF(XLEN)-1:0] train_pc,
+    input logic [`RAPT_PC_BITS_OF(XLEN)-1:0] train_successor
 );
+  localparam int PcW = `RAPT_PC_BITS_OF(XLEN);
   localparam int Entries = 1 << IndexBits;
   typedef struct packed {
-    logic [XLEN-1:1] tag;
-    logic [XLEN-1:1] target;
+    logic [PcW-1:1] tag;
+    logic [PcW-1:1] target;
   } entry_t;
   (* ram_style = "distributed" *) entry_t entries[Entries];
   logic [Entries-1:0] valid_q;
@@ -30,12 +31,12 @@ module rapt_fetch_successor #(
       ^ train_pc[2*IndexBits:IndexBits+1];
   entry_t entry;
   assign entry = entries[read_index];
-  assign hit = valid_q[read_index] && entry.tag == query_pc[XLEN-1:1];
+  assign hit = valid_q[read_index] && entry.tag == query_pc[PcW-1:1];
   assign successor = {entry.target, 1'b0};
   always_ff @(posedge clock) begin
     if (reset || invalidate) valid_q <= '0;
     else if (train) valid_q[write_index] <= 1'b1;
     if (train && !reset && !invalidate)
-      entries[write_index] <= {train_pc[XLEN-1:1], train_successor[XLEN-1:1]};
+      entries[write_index] <= {train_pc[PcW-1:1], train_successor[PcW-1:1]};
   end
 endmodule

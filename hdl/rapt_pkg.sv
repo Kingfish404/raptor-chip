@@ -42,6 +42,7 @@ package rapt_pkg;
     logic [`RAPT_XLEN-1:10] ptag;
     logic [6:0] pte;
     logic [1:0] pbmt;
+    logic [1:0] level;
   } l2tlb_req_t;
 
   typedef struct packed {
@@ -50,7 +51,29 @@ package rapt_pkg;
     logic [`RAPT_XLEN-1:10] ptag;
     logic [6:0] pte;
     logic [1:0] pbmt;
+    logic [1:0] level;
   } l2tlb_rsp_t;
+
+  // A superpage may occupy several resolved 4 KiB cache entries. A fence
+  // naming any address in that leaf must invalidate every such fragment.
+  function automatic logic tlb_sfence_match(
+      input logic [26:0] entry_vpn, input logic [1:0] entry_level, input logic [8:0] entry_asid,
+      input logic entry_global, input logic [26:0] fence_vpn, input logic [8:0] fence_asid,
+      input logic all_vpn, input logic all_asid, input logic rv64);
+    logic vpn_match;
+    if (rv64) begin
+      case (entry_level)
+        2'd2: vpn_match = entry_vpn[26:18] == fence_vpn[26:18];
+        2'd1: vpn_match = entry_vpn[26:9] == fence_vpn[26:9];
+        default: vpn_match = entry_vpn == fence_vpn;
+      endcase
+    end else begin
+      vpn_match = entry_level == 2'd1
+          ? entry_vpn[19:10] == fence_vpn[19:10]
+          : entry_vpn[19:0] == fence_vpn[19:0];
+    end
+    return (all_vpn || vpn_match) && (all_asid || (!entry_global && entry_asid == fence_asid));
+  endfunction
 
   // RISC-V implicit return-stack hints, applied to expanded instructions.
   // Different link registers on JALR denote pop-then-push (coroutine switch).
@@ -168,6 +191,9 @@ package rapt_pkg;
   typedef logic [PLENPkg-1:0] phys_reg_t;
   typedef logic [RLENPkg-1:0] arch_reg_t;
   typedef logic [XLENPkg-1:0] xlen_t;
+  // Stored PC/fetch-target width; see RAPT_PC_BITS_OF.
+  localparam int unsigned PcBitsPkg = `RAPT_PC_BITS_OF(XLENPkg);
+  typedef logic [PcBitsPkg-1:0] pc_t;
 
   // Completion describes architectural effects plus the ROB allocation
   // identity that owns them.  A completed uop need not write a GPR (e.g. a
@@ -179,7 +205,111 @@ package rapt_pkg;
     logic exception;
   } completion_updates_t;
 
-  `RAPT_COMPLETION_TYPE(completion_t, xlen_t, phys_reg_t, arch_reg_t, rob_index_t, rob_generation_t)
+  `RAPT_COMPLETION_TYPE_PC(completion_t, xlen_t, pc_t, phys_reg_t, arch_reg_t, rob_index_t,
+                           rob_generation_t)
+
+  `RAPT_ALU_COMPLETION_TYPE_PC(alu_completion_t, xlen_t, pc_t, phys_reg_t, arch_reg_t, rob_index_t,
+                               rob_generation_t)
+  // This projection deliberately reads only its payload fields.
+  /* verilator lint_off UNUSEDSIGNAL */
+  function automatic alu_completion_t pack_alu_completion(input completion_t packet);
+    alu_completion_t compact;
+    `RAPT_ALU_COMPLETION_COPY(compact, packet)
+    return compact;
+  endfunction
+  /* verilator lint_on UNUSEDSIGNAL */
+  function automatic completion_t expand_alu_completion(input alu_completion_t packet);
+    completion_t expanded;
+    expanded = '0;
+    `RAPT_ALU_COMPLETION_COPY(expanded, packet)
+    return expanded;
+  endfunction
+
+  `RAPT_BRANCH_COMPLETION_TYPE_PC(branch_completion_t, xlen_t, pc_t, phys_reg_t, arch_reg_t,
+                                  rob_index_t, rob_generation_t)
+  // This projection deliberately reads only its payload fields.
+  /* verilator lint_off UNUSEDSIGNAL */
+  function automatic branch_completion_t pack_branch_completion(input completion_t packet);
+    branch_completion_t compact;
+    `RAPT_BRANCH_COMPLETION_COPY(compact, packet)
+    return compact;
+  endfunction
+  /* verilator lint_on UNUSEDSIGNAL */
+  function automatic completion_t expand_branch_completion(input branch_completion_t packet);
+    completion_t expanded;
+    expanded = '0;
+    `RAPT_BRANCH_COMPLETION_COPY(expanded, packet)
+    return expanded;
+  endfunction
+
+  `RAPT_MDU_COMPLETION_TYPE_PC(mdu_completion_t, xlen_t, pc_t, phys_reg_t, arch_reg_t, rob_index_t,
+                               rob_generation_t)
+  // This projection deliberately reads only its payload fields.
+  /* verilator lint_off UNUSEDSIGNAL */
+  function automatic mdu_completion_t pack_mdu_completion(input completion_t packet);
+    mdu_completion_t compact;
+    `RAPT_MDU_COMPLETION_COPY(compact, packet)
+    return compact;
+  endfunction
+  /* verilator lint_on UNUSEDSIGNAL */
+  function automatic completion_t expand_mdu_completion(input mdu_completion_t packet);
+    completion_t expanded;
+    expanded = '0;
+    `RAPT_MDU_COMPLETION_COPY(expanded, packet)
+    return expanded;
+  endfunction
+
+  `RAPT_SYSTEM_COMPLETION_TYPE_PC(system_completion_t, xlen_t, pc_t, phys_reg_t, arch_reg_t,
+                                  rob_index_t, rob_generation_t)
+  // This projection deliberately reads only its payload fields.
+  /* verilator lint_off UNUSEDSIGNAL */
+  function automatic system_completion_t pack_system_completion(input completion_t packet);
+    system_completion_t compact;
+    `RAPT_SYSTEM_COMPLETION_COPY(compact, packet)
+    return compact;
+  endfunction
+  /* verilator lint_on UNUSEDSIGNAL */
+  function automatic completion_t expand_system_completion(input system_completion_t packet);
+    completion_t expanded;
+    expanded = '0;
+    `RAPT_SYSTEM_COMPLETION_COPY(expanded, packet)
+    return expanded;
+  endfunction
+
+  `RAPT_FPU_COMPLETION_TYPE_PC(fpu_completion_t, xlen_t, pc_t, phys_reg_t, arch_reg_t, rob_index_t,
+                               rob_generation_t)
+  // This projection deliberately reads only its payload fields.
+  /* verilator lint_off UNUSEDSIGNAL */
+  function automatic fpu_completion_t pack_fpu_completion(input completion_t packet);
+    fpu_completion_t compact;
+    `RAPT_FPU_COMPLETION_COPY(compact, packet)
+    return compact;
+  endfunction
+  /* verilator lint_on UNUSEDSIGNAL */
+  function automatic completion_t expand_fpu_completion(input fpu_completion_t packet);
+    completion_t expanded;
+    expanded = '0;
+    `RAPT_FPU_COMPLETION_COPY(expanded, packet)
+    return expanded;
+  endfunction
+
+  `RAPT_LSU_COMPLETION_TYPE_PC(lsu_completion_t, xlen_t, pc_t, phys_reg_t, arch_reg_t, rob_index_t,
+                               rob_generation_t)
+  // This projection deliberately reads only its payload fields.
+  /* verilator lint_off UNUSEDSIGNAL */
+  function automatic lsu_completion_t pack_lsu_completion(input completion_t packet);
+    lsu_completion_t compact;
+    `RAPT_LSU_COMPLETION_COPY(compact, packet)
+    return compact;
+  endfunction
+  /* verilator lint_on UNUSEDSIGNAL */
+  function automatic completion_t expand_lsu_completion(input lsu_completion_t packet);
+    completion_t expanded;
+    expanded = '0;
+    `RAPT_LSU_COMPLETION_COPY(expanded, packet)
+    return expanded;
+  endfunction
+
 
   // Execution-domain registry, owned by core composition/decoder. The
   // router and completion consumers do not enumerate these domain names.
@@ -255,12 +385,14 @@ package rapt_pkg;
     logic jump;
     logic indirect;
     logic predicted_taken;
+    ras_action_t ras;
   } branch_uop_t;
 
   typedef struct packed {
     logic store;
     logic load;
     logic atomic;
+    logic aq, rl;
   } memory_uop_t;
 
   typedef struct packed {
@@ -273,6 +405,16 @@ package rapt_pkg;
     logic [4:0] rd;
   } fp_uop_t;
 
+  typedef enum logic [2:0] {
+    SYS_NORMAL,
+    SYS_FENCE,
+    SYS_FENCE_I,
+    SYS_TRANSLATION,
+    SYS_CBO_CLEAN,
+    SYS_CBO_INVAL,
+    SYS_CBO_ZERO
+  } system_kind_t;
+
   typedef struct packed {
     logic valid;
     logic ecall;
@@ -282,6 +424,7 @@ package rapt_pkg;
     logic mret;
     logic sret;
     logic [2:0] csr_csw;
+    system_kind_t kind;
   } sys_uop_t;
 
   // Domain-owned payload. Queueing/rename/transport preserve this whole
@@ -294,18 +437,29 @@ package rapt_pkg;
     sys_uop_t sys;
   } execution_payload_t;
 
-  `RAPT_UOP_TYPE(uop_t, xlen_t, arch_reg_t, scheduling_t, execution_payload_t)
+  `RAPT_UOP_TYPE_PC(uop_t, xlen_t, pc_t, arch_reg_t, scheduling_t, execution_payload_t)
+
+  // Decode faults carry either the raw instruction in imm or the fetch PC.
+  // The second half of a straddling instruction can fault at pc + 2.
+  // This projection deliberately reads only its payload fields.
+  /* verilator lint_off UNUSEDSIGNAL */
+  function automatic xlen_t uop_tval(input uop_t u);
+    return `RAPT_UOP_TVAL(XLENPkg, u);
+  endfunction
+  /* verilator lint_on UNUSEDSIGNAL */
 
   typedef struct packed {
     logic [31:0] inst;
-    xlen_t pc, pnpc;
+    pc_t pc, pnpc;
     logic trap, predicted_taken;
     logic auxiliary;
     logic [$clog2(`RAPT_PHT_SIZE)-1:0] auxiliary_index;
-    xlen_t cause, tval;
+    logic [5:0] cause;
+    logic fetch_tval_plus2;
   } fetch_slot_t;
   typedef struct packed {
     uop_t uop;
+    pc_t pnpc;
     xlen_t op1, op2;
     arch_reg_t rs1, rs2;
   } decoded_slot_t;
@@ -325,6 +479,14 @@ package rapt_pkg;
   // scalar-FP operations execute through the independent FP issue queue.
   function automatic logic uop_is_fp_exec(input rapt_pkg::uop_t u);
     return u.execute.fp.valid && !u.execute.memory.store && !u.execute.memory.load;
+  endfunction
+
+  // FP arithmetic has no immediate operand: reuse that storage for instruction
+  // subencoding and precise illegal-rounding-mode tval. FP memory retains its
+  // displacement; dependency decoding only needs its load/store opcode.
+  function automatic logic [31:0] fp_instruction(input logic load, input logic store,
+                                                 input logic [31:0] imm);
+    return store ? 32'h27 : load ? 32'h07 : imm;
   endfunction
 
   // Architectural floating-point dependencies. f0 is an ordinary writable
@@ -448,7 +610,7 @@ package rapt_pkg;
     logic               btaken;
 `ifdef RAPT_ROB_NPC_SHADOW
     // Verification witness only; functional retirement reconstructs this value.
-    logic [XLENPkg-1:1] npc;
+    logic [PcBitsPkg-1:1] npc;
 `endif
     // 1-bit BPU mispredict flag (dispatch-init 0; WB sets when computed
     // npc != predicted pnpc). Replaces an XLEN-wide `pnpc` field that was
@@ -791,11 +953,10 @@ package rapt_pkg;
     // Keep the bytewise equivalence proof when changing the physical map.
     boundary_offset = 4'd8 - {1'b0, addr[2:0]};
     next_block = {1'b0, canonical_addr(addr) & ~XLENPkg'(7)} + (XLENPkg+1)'(8);
-    first_ok = store_access ? addr_writable(canonical_addr(addr))
-                           : addr_mapped(canonical_addr(addr));
-    next_ok = !next_block[XLENPkg]
-        && (store_access ? addr_writable(next_block[XLENPkg-1:0])
-                         : addr_mapped(next_block[XLENPkg-1:0]));
+    first_ok = store_access ? addr_writable(canonical_addr(addr)) :
+        addr_mapped(canonical_addr(addr));
+    next_ok = !next_block[XLENPkg] && (store_access ? addr_writable(next_block[XLENPkg-1:0]) :
+                                       addr_mapped(next_block[XLENPkg-1:0]));
     if (!addr_upper_valid(addr) || size_m1 > 7 || !first_ok) return 4'd0;
     if (boundary_offset <= size_m1 && !next_ok) return boundary_offset;
     return 4'd8;
@@ -858,19 +1019,19 @@ package rapt_pkg;
       OpConstUimm = 2'd3;
   // Selectors retain the operand-width API; only the encoded low bits matter.
   /* verilator lint_off UNUSEDSIGNAL */
-  function automatic logic [XLENPkg-1:0] derive_op1(
-      input logic [XLENPkg-1:0] selector, input logic [XLENPkg-1:0] pc,
-      input logic [XLENPkg-1:0] imm, input logic [31:0] inst);
+  function automatic logic [XLENPkg-1:0] derive_op1(input logic [XLENPkg-1:0] selector,
+                                                    input pc_t pc, input logic [31:0] imm,
+                                                    input logic [4:0] uimm);
     case (selector[1:0])
-      OpConstPc: return pc;
-      OpConstImm: return imm;
-      OpConstUimm: return XLENPkg'(inst[19:15]);
+      OpConstPc: return `RAPT_PC_SEXT(XLENPkg, pc);
+      OpConstImm: return XLENPkg'($signed(imm));
+      OpConstUimm: return XLENPkg'(uimm);
       default: return '0;
     endcase
   endfunction
   function automatic logic [XLENPkg-1:0] derive_op2(input logic [XLENPkg-1:0] selector,
-                                                    input logic [XLENPkg-1:0] imm);
-    return selector[0] ? imm : '0;
+                                                    input logic [31:0] imm);
+    return selector[0] ? XLENPkg'($signed(imm)) : '0;
   endfunction
   /* verilator lint_on UNUSEDSIGNAL */
 endpackage

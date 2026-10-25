@@ -123,10 +123,20 @@ module rapt_fp_registers #(
   endfunction
   for (genvar s = 0; s < AllocateWidth; s++) begin : g_allocate_operands
     wire [2:0] sources = rapt_pkg::fp_sources(
-        allocate_uop[s].execute.fp.valid, allocate_uop[s].execute.fp.op, allocate_uop[s].inst
+        allocate_uop[s].execute.fp.valid,
+        allocate_uop[s].execute.fp.op,
+        rapt_pkg::fp_instruction(
+            allocate_uop[s].execute.memory.load,
+            allocate_uop[s].execute.memory.store,
+            allocate_uop[s].imm)
     );
     assign allocate_writer[s] = rapt_pkg::fp_writes_register(
-        allocate_uop[s].execute.fp.valid, allocate_uop[s].execute.fp.op, allocate_uop[s].inst
+        allocate_uop[s].execute.fp.valid,
+        allocate_uop[s].execute.fp.op,
+        rapt_pkg::fp_instruction(
+            allocate_uop[s].execute.memory.load,
+            allocate_uop[s].execute.memory.store,
+            allocate_uop[s].imm)
     ) && !allocate_uop[s].trap;
     for (genvar operand = 0; operand < 3; operand++) begin : g_source
       logic [4:0] reg_index;
@@ -437,7 +447,12 @@ module rapt_fp_registers #(
   // cycle's accepted completion or the producer's completed result slot.
   for (genvar p = 0; p < ReadPorts; p++) begin : g_resolve
     wire [2:0] sources = rapt_pkg::fp_sources(
-        resolve_uop[p].execute.fp.valid, resolve_uop[p].execute.fp.op, resolve_uop[p].inst
+        resolve_uop[p].execute.fp.valid,
+        resolve_uop[p].execute.fp.op,
+        rapt_pkg::fp_instruction(
+            resolve_uop[p].execute.memory.load,
+            resolve_uop[p].execute.memory.store,
+            resolve_uop[p].imm)
     );
     for (genvar operand = 0; operand < 3; operand++) begin : g_operand
       wire [TagBits-1:0] tag = resolve_tag[p][operand];

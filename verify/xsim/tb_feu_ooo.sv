@@ -152,7 +152,7 @@ module tb_feu_ooo;
     expected_flags[packet.dest] = flags;
     expected_trap[packet.dest] = trap;
     expected_fp[packet.dest] = !trap && rapt_pkg::fp_writes_register(1,
-        packet.uop.execute.fp.op, packet.uop.inst);
+        packet.uop.execute.fp.op, packet.uop.imm);
     expected_generation[packet.dest] = int'(packet.generation);
     issued_at[packet.dest] = -1;
     finished_at[packet.dest] = -1;
@@ -197,8 +197,8 @@ module tb_feu_ooo;
         packet.fp_tag[0] = 8;
         enqueue(packet, 0);
         packet = operation(1, op, 64'h3ff0000000000000, 64'h4000000000000000);
-        if (unit_id == 8) packet.uop.inst = 32'h40200053;  // FCVT.S.H
-        if (unit_id == 9) packet.uop.inst = 32'h44100053;  // FCVT.H.D
+        if (unit_id == 8) packet.uop.imm = 32'h40200053;  // FCVT.S.H
+        if (unit_id == 9) packet.uop.imm = 32'h44100053;  // FCVT.H.D
         enqueue(packet, 0);
         #1;
         if (!dut.iss.valid) $fatal(1, "recovery test has no ready issue");
@@ -391,10 +391,10 @@ module tb_feu_ooo;
     begin
       dispatch_slot_t packet;
       packet = operation(6, `RAPT_FP_OP_ZFHMIN, 64'hffffffffffff3c00);
-      packet.uop.inst = 32'h40200053;  // FCVT.S.H
+      packet.uop.imm = 32'h40200053;  // FCVT.S.H
       enqueue(packet, 64'hffffffff3f800000);
       packet = operation(7, `RAPT_FP_OP_ZFHMIN, 64'h3ff0000000000000);
-      packet.uop.inst = 32'h44100053;  // FCVT.H.D
+      packet.uop.imm = 32'h44100053;  // FCVT.H.D
       enqueue(packet, 64'hffffffffffff3c00);
       packet = operation(8, `RAPT_FP_OP_FCVT_W_D, 64'h3ff8000000000000);
       packet.uop.execute.fp.rm = 7;

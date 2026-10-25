@@ -23,6 +23,7 @@ void serial_tick();
 unsigned serial_rx_pending();
 const char *serial_input_source();
 bool serial_console_line_open();
+void serial_sample_milestones(uint64_t cycles, uint64_t insts, bool force);
 
 extern long long int max_timeout;
 
@@ -103,6 +104,7 @@ static uint64_t iringhead = 1; // set to 0 will cause format issue
 void perf();
 
 void perf_sample_per_cycle();
+void perf_capture_axi_before_edge();
 
 void perf_sample_per_inst(uint32_t inst);
 
@@ -204,6 +206,7 @@ void cpu_exec_set_threshold(uint64_t cycle, uint64_t inst)
 static void cpu_exec_one_cycle()
 {
 
+  if (!top->clock) perf_capture_axi_before_edge();
   top->clock = (top->clock == 0) ? 1 : 0;
   npc_eval(top);
   // Dump-gating semantics: -c/-i specify the START point of waveform capture.
@@ -216,6 +219,7 @@ static void cpu_exec_one_cycle()
   }
   contextp->timeInc(1);
 
+  if (!top->clock) perf_capture_axi_before_edge();
   top->clock = (top->clock == 0) ? 1 : 0;
   npc_eval(top);
   if ((tfp) && ((pmu.active_cycle >= tfp_cycle) | (pmu.instr_cnt >= tfp_inst)))
@@ -312,6 +316,7 @@ void cpu_exec(uint64_t n)
   uint64_t last_progress_time = now;
   uint64_t cur_inst_cycle = 0;
   uint64_t progress_cycle = 0;
+  uint64_t milestone_insts = 0;
   uint64_t timeout_us = (max_timeout > 0) ? (uint64_t)max_timeout * 1000000 : 0;
   // Progress/LightSSS-fork interval. Defaults to 40M cycles; overridable via
   // NSIM_PROGRESS_CYCLES (mainly to validate LightSSS without billion-cycle
@@ -350,12 +355,17 @@ void cpu_exec(uint64_t n)
     {
       for (uint32_t slot = 0; slot < cmu_retire_count; ++slot)
         perf_sample_per_inst(VERILOG_BACKEND(cmu__DOT__inst_slots)[slot]);
+      milestone_insts += cmu_retire_count;
       cur_inst_cycle = 0;
     }
     else
     {
       cur_inst_cycle++;
     }
+    // UART callbacks run inside eval, before PMU sampling. Timestamp matches now,
+    // including this cycle's commits, with counters independent of ROI resets.
+    serial_sample_milestones(progress_cycle + 1, milestone_insts,
+                             npc.state != NPC_RUNNING || contextp->gotFinish());
     if (npc.state == NPC_END) // ebreak has now been sampled like any other commit
       break;
 
@@ -605,6 +615,7 @@ void cpu_exec(uint64_t n)
     // -c/-i thresholds only START waveform dumping; they no longer halt the
     // simulator.  Use -m / --maximum to bound execution length explicitly.
   }
+  serial_sample_milestones(progress_cycle, milestone_insts, true);
   g_timer += get_time() - now;
 
   switch (npc.state)

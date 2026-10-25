@@ -25,6 +25,10 @@ module rapt_backend #(
     input logic clock,
     input logic writeback_done = 1'b1,
     output logic writeback_drain,
+    output logic writeback_clean,
+    output logic writeback_cbo,
+    output logic writeback_cbo_invalidate,
+    output logic [XLEN-1:6] writeback_block,
     idu_rnu_if.slave idu_rnu,
     cmu_bcast_if cmu_bcast,
     csr_bcast_if csr_bcast,
@@ -42,7 +46,7 @@ module rapt_backend #(
     input logic [XLEN-1:0] hart_id_i,
     input logic dm_haltreq_i,
     output logic halted_o,
-    output logic [XLEN-1:0] halt_pc_o,
+    output logic [`RAPT_PC_BITS_OF(XLEN)-1:0] halt_pc_o,
     output logic commit_fire_o,
     output logic [XLEN-1:0] dbg_gpr_rdata_o,
     input logic dbg_gpr_we_i,
@@ -211,13 +215,85 @@ module rapt_backend #(
   // Selected operand ports reuse this boundary; other producer ports retain
   // their accepted same-cycle wake latency.
   for (genvar p = 0; p < rapt_pkg::CompletionPorts; p++) begin : g_completion_stage
-    rapt_completion_stage stage (
-        .clock(clock),
-        .reset(reset),
-        .flush(cmu_bcast.flush_pipe),
-        .accepted(completion_accepted[p]),
-        .completion(completion[p])
-    );
+    if (p == BranchPort) begin : g_branch
+      rapt_pkg::branch_completion_t accepted, registered;
+      assign accepted = rapt_pkg::pack_branch_completion(completion_accepted[p]);
+      assign completion[p] = rapt_pkg::expand_branch_completion(registered);
+      rapt_completion_stage #(
+          .CompletionT(rapt_pkg::branch_completion_t)
+      ) stage (
+          .clock(clock),
+          .reset(reset),
+          .flush(cmu_bcast.flush_pipe),
+          .accepted(accepted),
+          .completion(registered)
+      );
+    end else if (p == MemoryPort) begin : g_lsu
+      rapt_pkg::lsu_completion_t accepted, registered;
+      assign accepted = rapt_pkg::pack_lsu_completion(completion_accepted[p]);
+      assign completion[p] = rapt_pkg::expand_lsu_completion(registered);
+      rapt_completion_stage #(
+          .CompletionT(rapt_pkg::lsu_completion_t)
+      ) stage (
+          .clock(clock),
+          .reset(reset),
+          .flush(cmu_bcast.flush_pipe),
+          .accepted(accepted),
+          .completion(registered)
+      );
+    end else if (p == MulPort) begin : g_mdu
+      rapt_pkg::mdu_completion_t accepted, registered;
+      assign accepted = rapt_pkg::pack_mdu_completion(completion_accepted[p]);
+      assign completion[p] = rapt_pkg::expand_mdu_completion(registered);
+      rapt_completion_stage #(
+          .CompletionT(rapt_pkg::mdu_completion_t)
+      ) stage (
+          .clock(clock),
+          .reset(reset),
+          .flush(cmu_bcast.flush_pipe),
+          .accepted(accepted),
+          .completion(registered)
+      );
+    end else if (p == FpuPort) begin : g_fpu
+      rapt_pkg::fpu_completion_t accepted, registered;
+      assign accepted = rapt_pkg::pack_fpu_completion(completion_accepted[p]);
+      assign completion[p] = rapt_pkg::expand_fpu_completion(registered);
+      rapt_completion_stage #(
+          .CompletionT(rapt_pkg::fpu_completion_t)
+      ) stage (
+          .clock(clock),
+          .reset(reset),
+          .flush(cmu_bcast.flush_pipe),
+          .accepted(accepted),
+          .completion(registered)
+      );
+    end else if (p == IntegerSystemPort) begin : g_system
+      rapt_pkg::system_completion_t accepted, registered;
+      assign accepted = rapt_pkg::pack_system_completion(completion_accepted[p]);
+      assign completion[p] = rapt_pkg::expand_system_completion(registered);
+      rapt_completion_stage #(
+          .CompletionT(rapt_pkg::system_completion_t)
+      ) stage (
+          .clock(clock),
+          .reset(reset),
+          .flush(cmu_bcast.flush_pipe),
+          .accepted(accepted),
+          .completion(registered)
+      );
+    end else begin : g_alu
+      rapt_pkg::alu_completion_t accepted, registered;
+      assign accepted = rapt_pkg::pack_alu_completion(completion_accepted[p]);
+      assign completion[p] = rapt_pkg::expand_alu_completion(registered);
+      rapt_completion_stage #(
+          .CompletionT(rapt_pkg::alu_completion_t)
+      ) stage (
+          .clock(clock),
+          .reset(reset),
+          .flush(cmu_bcast.flush_pipe),
+          .accepted(accepted),
+          .completion(registered)
+      );
+    end
   end
   // The global wake edge is shared by operand storage and queue allocations.
   // Optional local capture only wakes residents; the registered copy covers
@@ -399,6 +475,10 @@ module rapt_backend #(
       .operand_wake(operand_wake),
       .writeback_done(drain_completion),
       .writeback_drain(writeback_drain),
+      .writeback_clean(writeback_clean),
+      .writeback_cbo(writeback_cbo),
+      .writeback_cbo_invalidate(writeback_cbo_invalidate),
+      .writeback_block(writeback_block),
       .completion(completion),
       .completion_owner(completion_owner),
       .clock(clock),

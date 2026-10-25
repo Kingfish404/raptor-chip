@@ -41,11 +41,18 @@ class RunnerTest(unittest.TestCase):
                 pmp = json.loads((plugin / config_name).read_text())["memory"]["pmp"]
                 self.assertEqual(pmp["count"], 16)
                 self.assertEqual(pmp["usable_count"], 8)
+                self.assertEqual(pmp["grain"], 10)
+                self.assertFalse(pmp["na4_supported"])
                 config = configparser.ConfigParser()
                 config.read(ROOT / "verify/riscof" / suite / "config.ini")
                 shared = ROOT / "verify/riscof" / suite / config["sail_cSim"]["pluginpath"]
                 self.assertRegex((shared / "env/model_test.h").read_text(),
                                  r"#define\s+RVMODEL_NUM_PMPS\s+8\b")
+                dut = config[config["RISCOF"]["DUTPlugin"]]
+                dut_path = ROOT / "verify/riscof" / suite / dut["pluginpath"]
+                for header in (shared / "env/model_test.h", dut_path / "env/model_test.h"):
+                    self.assertRegex(header.read_text(),
+                                     r"#define\s+RVMODEL_PMP_GRAIN\s+10\b")
 
     def test_shards_partition_the_selected_suite(self):
         script = ROOT / "verify/scripts/filter_riscof_testlist.py"
@@ -75,7 +82,7 @@ class RunnerTest(unittest.TestCase):
                                         capture_output=True)
                 self.assertNotEqual(result.returncode, 0)
 
-    def test_pmp_boundary_relocation_for_both_duts(self):
+    def test_pmp_boundary_cases_keep_their_original_layout_for_both_duts(self):
         script = ROOT / "verify/scripts/filter_riscof_testlist.py"
         modes = ("na4", "napot", "tor", "off")
         with tempfile.TemporaryDirectory() as directory:
@@ -98,9 +105,7 @@ class RunnerTest(unittest.TestCase):
                     for mode in modes:
                         macros = selected[f"test_{mode}"]["macros"]
                         self.assertIn("XLEN=32", macros)
-                        self.assertEqual("RVMODEL_PMP_REGION_OFFSET=16" in macros,
-                                         mode != "off")
-                    self.assertIn("relocated 3 PMP boundary tests", result.stdout)
+                        self.assertEqual(macros, ["XLEN=32"])
 
     def exercise(self, output="HIT GOOD TRAP\n", rc=0,
                  signature="12345678\n", timeout=False, stale=False):

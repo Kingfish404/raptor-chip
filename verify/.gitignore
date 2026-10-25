@@ -13,6 +13,7 @@
 !/xsim/fpu/*.mk
 !/directed-tests.mk
 !/vpu/vendor/riscv-opcodes/rv_v
+!/riscof/sail/*.patch
 
 __pycache__/
 build/

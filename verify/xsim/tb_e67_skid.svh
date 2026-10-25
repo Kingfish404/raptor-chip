@@ -37,6 +37,7 @@ task automatic e67_send(input int first, input int count);
     rnu_rou.slot[s] = '0;
     rnu_rou.slot[s].uop = make_alu_uop(XLEN'(32'h80200000 + 4 * (first + s)),
                                      32'h00100013, '0);
+    rnu_rou.slot[s].pnpc = rnu_rou.slot[s].uop.pc + XLEN'(rnu_rou.slot[s].uop.c ? 2 : 4);
     rnu_rou.slot[s].pr1 = PLEN'(s + 1);
     rnu_rou.slot[s].pr2 = PLEN'(s + 9);
     rnu_rou.slot[s].op1 = XLEN'(32'h12340000 + first + s);
@@ -129,6 +130,7 @@ task automatic run_e67_skid;
       rnu_rou.slot[s] = '0;
       rnu_rou.slot[s].uop = s == 0 ? make_fence_uop(kind == 0)
           : make_alu_uop(XLEN'(32'h80040004 + 4 * s), 32'h00100013, '0);
+      rnu_rou.slot[s].pnpc = rnu_rou.slot[s].uop.pc + XLEN'(rnu_rou.slot[s].uop.c ? 2 : 4);
       rnu_rou.checkpoint_valid[s] = 0;
       rnu_rou.valid[s] = 1;
     end

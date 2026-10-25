@@ -8,7 +8,7 @@ module rapt_ifetch_io_guard #(
 ) (
     input logic clock,
     reset,
-    input logic [XLEN-1:0] owner_pc,
+    input logic [`RAPT_PC_BITS_OF(XLEN)-1:0] owner_pc,
     frontier_pc,
     input logic frontier_advance,
     blocked,

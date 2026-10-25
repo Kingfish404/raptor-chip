@@ -69,7 +69,7 @@ module rapt_rvfi #(
       prev_valid <= 0;
     end else if (count != 0) begin
       order_cnt  <= order_cnt + 64'(count);
-      prev_npc   <= rou_cmu.slot[count-1].npc;
+      prev_npc   <= `RAPT_PC_SEXT(XLEN, rou_cmu.slot[count-1].npc);
       prev_valid <= 1'b1;
     end
   end
@@ -109,7 +109,8 @@ module rapt_rvfi #(
     assign rvfi_trap[c] = rou_cmu.slot[c].valid && rou_cmu.slot[c].rvfi_trap;
     assign rvfi_halt[c] = rou_cmu.slot[c].ebreak;
     if (c == 0)
-      assign rvfi_intr[c] = rou_cmu.slot[c].valid && prev_valid && rou_cmu.slot[c].pc != prev_npc;
+      assign rvfi_intr[c] = rou_cmu.slot[c].valid && prev_valid
+          && rvfi_pc_rdata[c*XLEN+:XLEN] != prev_npc;
     else assign rvfi_intr[c] = rou_cmu.slot[c].valid && rou_cmu.slot[c].pc != rou_cmu.slot[c-1].npc;
     assign rvfi_mode[c*2+:2] = csr_bcast.priv;
     assign rvfi_ixl[c*2+:2] = XLEN == 64 ? 2'd2 : 2'd1;
@@ -119,8 +120,8 @@ module rapt_rvfi #(
     assign rvfi_rs2_rdata[c*XLEN+:XLEN] = source2;
     assign rvfi_rd_addr[c*5+:5] = rou_cmu.slot[c].rd;
     assign rvfi_rd_wdata[c*XLEN+:XLEN] = rd_wdata[c];
-    assign rvfi_pc_rdata[c*XLEN+:XLEN] = rou_cmu.slot[c].pc;
-    assign rvfi_pc_wdata[c*XLEN+:XLEN] = rou_cmu.slot[c].npc;
+    assign rvfi_pc_rdata[c*XLEN+:XLEN] = `RAPT_PC_SEXT(XLEN, rou_cmu.slot[c].pc);
+    assign rvfi_pc_wdata[c*XLEN+:XLEN] = `RAPT_PC_SEXT(XLEN, rou_cmu.slot[c].npc);
     assign rvfi_mem_addr[c*XLEN+:XLEN] = (load_op || store_op || atomic_op)
         ? rou_cmu.slot[c].rvfi_sq_waddr : '0;
     assign rvfi_mem_rmask[c*(XLEN/8)+:(XLEN/8)] = reads_mem ? mask : '0;

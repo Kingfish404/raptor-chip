@@ -3,6 +3,7 @@
 module tb_l1i_16k;
   localparam int Ways = `RAPT_L1I_N_WAYS;
   localparam int XLEN = `RAPT_XLEN;
+  localparam int PcW = `RAPT_PC_BITS_OF(XLEN);
   localparam int Sets = 2 ** `RAPT_L1I_LEN;
   localparam int LineBytes = `RAPT_CACHE_LINE_BYTES;
   // One index wrap; also the address stride between ways of the same set.
@@ -55,7 +56,7 @@ module tb_l1i_16k;
     int before_reads;
     @(negedge clock);
     before_reads = reads;
-    ifu_l1i.pc = XLEN'(pc);
+    ifu_l1i.pc   = PcW'(pc);
     for (int cycle = 0; cycle < 100; cycle++) begin
       @(posedge clock);
       if (ifu_l1i.valid) begin
@@ -71,14 +72,18 @@ module tb_l1i_16k;
   endtask
   task automatic reject_alias(input logic [XLEN-1:0] pc);
     int before_reads;
+    logic [XLEN-1:0] expected_tval;
     @(negedge clock);
     before_reads = reads;
-    ifu_l1i.pc = pc;
+    // Fetch PCs are stored in their PC representation; an invalid address
+    // arrives converted, and the trap reports that converted address.
+    ifu_l1i.pc   = `RAPT_PC_LEGALIZE(XLEN, PcW, pc);
+    expected_tval = `RAPT_PC_SEXT(XLEN, ifu_l1i.pc);
     for (int cycle = 0; cycle < 40; cycle++) begin
       @(posedge clock);
       if (reads != before_reads || l1i_bus.arvalid) $fatal(1, "invalid PA reached I bus: %h", pc);
       if (ifu_l1i.valid) begin
-        if (!ifu_l1i.trap || ifu_l1i.cause != 1 || ifu_l1i.tval != pc)
+        if (!ifu_l1i.trap || ifu_l1i.cause != 1 || ifu_l1i.tval != expected_tval)
           $fatal(1, "invalid high PA aliased a resident I tag: %h", pc);
         @(negedge clock);
         cmu_bcast.flush_pipe = 1;
@@ -93,7 +98,7 @@ module tb_l1i_16k;
     init_cmu_bcast_defaults();
     init_csr_bcast_defaults(`RAPT_PRIV_M, '0, 1);
     init_pmp_state_defaults(1);
-    ifu_l1i.pc = XLEN'('h80000000);
+    ifu_l1i.pc = PcW'('h80000000);
     ifu_l1i.consumed = 0;
     ifu_l1i.cancel = 0;
     ifu_l1i.invalid = 0;
@@ -125,9 +130,21 @@ module tb_l1i_16k;
       fetch('h80000000 + SetStrideBytes * Ways, 1);
       // Replacement of set 0 must leave neighboring set 1 resident in all ways.
       for (int way = 0; way < Ways; way++) fetch('h80000000 + LineBytes + SetStrideBytes * way, 1);
+      // SFENCE kills translation/pipeline state without invalidating physical tags.
+      @(negedge clock);
+      cmu_bcast.fence_time   = 1;
+      cmu_bcast.sfence_valid = 1;
+      cmu_bcast.flush_pipe   = 1;
+      @(negedge clock);
+      cmu_bcast.fence_time   = 0;
+      cmu_bcast.sfence_valid = 0;
+      cmu_bcast.flush_pipe   = 0;
+      fetch('h80000000 + SetStrideBytes * Ways, 1);
+      for (int way = 0; way < Ways; way++) fetch('h80000000 + LineBytes + SetStrideBytes * way, 1);
+      // FENCE.I's invalidation input must still evict the same resident lines.
       @(negedge clock);
       ifu_l1i.invalid = 1;
-      ifu_l1i.pc = XLEN'('h80008000);
+      ifu_l1i.pc = PcW'('h80008000);
       repeat (4) @(negedge clock);
       ifu_l1i.invalid = 0;
       // The held PC has a distinct tag if it refills on invalidation release.

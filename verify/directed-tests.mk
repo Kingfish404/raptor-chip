@@ -32,6 +32,7 @@ endef
 
 $(eval $(call XLEN_TEST,ptw-global,tb_ptw_global,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,zfhmin-decode-slot,tb_zfhmin_decode_slot))
+$(eval $(call XLEN_TEST,uop-instruction-metadata,tb_uop_instruction_metadata,,-d SYNTHESIS))
 $(eval $(call XLEN_TEST,idu-privileged,tb_idu_privileged,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,csr-sret-roundtrip,tb_csr_sret_roundtrip))
 $(eval $(call XLEN_TEST,csr-architectural,tb_csr_architectural))
@@ -189,6 +190,8 @@ $(eval $(call DIRECTED_TEST,l1d-byte-rom,l1d_byte_rom,tb_l1d_byte_rom))
 $(eval $(call DIRECTED_TEST,l1d-store-coherence,l1d_store_coherence,tb_l1d_store_coherence,,,+BUS_DELAY_MAX=$$(VERILATOR_DIRECTED_DELAY) +SEED=$$(VERILATOR_DIRECTED_SEED)))
 $(eval $(call DIRECTED_TEST,l1d-writeback-rv32 l1d-writeback-rv64,$$(subst -,_,$$@),tb_l1d_store_coherence,,$$(if $$(findstring rv64,$$@),-d RAPT_RV64),+BUS_DELAY_MAX=$$(VERILATOR_DIRECTED_DELAY) +SEED=$$(VERILATOR_DIRECTED_SEED)))
 $(eval $(call DIRECTED_TEST,l1d-writeback-line-rv32 l1d-writeback-line-rv64,$$(subst -,_,$$@),tb_l1d_store_coherence,,$$(if $$(findstring rv64,$$@),-d RAPT_RV64),+BUS_DELAY_MAX=$$(VERILATOR_DIRECTED_DELAY) +SEED=$$(VERILATOR_DIRECTED_SEED)))
+# Final refill tag installation must precede a nonposted store response.
+$(eval $(call DIRECTED_TEST,l1d-refill-store-rv32 l1d-refill-store-rv64,$$(subst -,_,$$@),tb_l1d_store_coherence,,$$(if $$(findstring rv64,$$@),-d RAPT_RV64),+MIN_REFILL_STORE +BUS_DELAY_MAX=0))
 $(eval $(call DIRECTED_TEST,l1d-writeback-bscan-rv64,l1d_writeback_bscan_rv64,tb_l1d_store_coherence,,-d RAPT_RV64,+MIN_WB_B $$(if $$(filter 1,$$(L1D_BSCAN_TRACE)),+TRACE_WB_B +WAVE_FILE=$$(VERILATOR_DIRECTED_BUILD_DIR)/l1d_writeback_bscan_rv64/wave.vcd,)))
 $(eval $(call DIRECTED_TEST,l1d-flush-ordered,l1d_flush_ordered,tb_l1d_flush_ordered,,-d RAPT_ASSERT_EN))
 $(eval $(call DIRECTED_TEST,l1d-cmo-permissions,l1d_cmo_permissions,tb_l1d_cmo_permissions,,-d RAPT_RV64 -d RAPT_ASSERT_EN))
@@ -281,6 +284,7 @@ $(eval $(call DIRECTED_TEST,dispatch-compact,dispatch_compact,tb_dispatch_compac
 $(eval $(call DIRECTED_TEST,recovery-pending,recovery_pending,tb_recovery_pending, "$$(RAPTOR_HOME)/verify/formal/formal_recovery_pending.sv",-d RAPT_ASSERT_EN,+SEED=$$(VERILATOR_DIRECTED_SEED)))
 $(eval $(call DIRECTED_TEST,completion-guard,completion_guard,tb_completion_guard,,,+SEED=$$(VERILATOR_DIRECTED_SEED)))
 $(eval $(call DIRECTED_TEST,completion-stage-rv32 completion-stage-rv64,$$(subst -,_,$$@),tb_completion_stage,,-d RAPT_ASSERT_EN $$(if $$(findstring rv64,$$@),-d RAPT_RV64)))
+$(eval $(call DIRECTED_TEST,completion-packets-rv32 completion-packets-rv64,$$(subst -,_,$$@),tb_completion_packets,,-d RAPT_ASSERT_EN $$(if $$(findstring rv64,$$@),-d RAPT_RV64)))
 $(eval $(call DIRECTED_TEST,iq-reclaim-random,iq_reclaim_random,tb_iq_reclaim_random,,-d RAPT_ASSERT_EN -d RAPT_DISPATCH_WIDTH=3,+SEED=$$(VERILATOR_DIRECTED_SEED)))
 $(eval $(call DIRECTED_TEST,iq-recovery-window-rv64,iq_recovery_window_rv64,tb_iq_recovery_window,,-d RAPT_ASSERT_EN -d RAPT_RV64))
 $(eval $(call DIRECTED_TEST,iq-recovery-window,iq_recovery_window,tb_iq_recovery_window,,-d RAPT_ASSERT_EN))
@@ -482,3 +486,54 @@ $(eval $(call XLEN_TEST,l1d-mshr-fill-owner,tb_l1d_mshr_fill_owner,,-d RAPT_ASSE
 $(eval $(call XLEN_TEST,l1d-lr-admission,tb_l1d_lr_admission,,-d RAPT_ASSERT_EN -d RAPT_L1D_MSHRS=2))
 $(eval $(call XLEN_TEST,ioq-store-payload,tb_ioq_store_payload,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,lsu-split-payload,tb_lsu_split_payload,,-d RAPT_ASSERT_EN))
+
+# SFENCE preserves physical caches and prediction state while killing stale walks.
+$(eval $(call XLEN_TEST,sfence-keeps-l1d,tb_l1d_16k,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,sfence-keeps-l1i,tb_l1i_16k,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,sfence-mapping-epoch,tb_l1i_mapping_epoch,,-d RAPT_ASSERT_EN -GInvalidateCache=0))
+$(eval $(call XLEN_TEST,sfence-commit,tb_rou_dual_commit,,-d RAPT_ASSERT_EN -d RAPT_TEST_FENCE_COMMIT))
+$(eval $(call XLEN_TEST,sfence-keeps-bpu,tb_bpu_recovery_state,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,sfence-data-remap-wt,tb_sfence_data_remap,,-d RAPT_ASSERT_EN -d RAPT_L1D_WRITEBACK=0))
+$(eval $(call XLEN_TEST,sfence-data-remap-wb,tb_sfence_data_remap,,-d RAPT_ASSERT_EN -d RAPT_L1D_WRITEBACK=1))
+$(eval $(call XLEN_TEST,sfence-mapping-epoch-l2,tb_l1i_mapping_epoch,,-d RAPT_ASSERT_EN -GInvalidateCache=0 -GL2Tlb=1))
+
+# Assemble whole-core RV64 guests without rebuilding a simulator. Run the
+# resulting .bin with an existing RV64 NPC and its bare-metal MROM (-b -n).
+SFENCE_REMAP_KIND ?= 4k
+SFENCE_REMAP_ASID ?= 7
+.PHONY: sfence-instruction-remap-build sfence-instruction-remap-superpage-build
+sfence-instruction-remap-superpage-build: SFENCE_REMAP_KIND = superpage
+sfence-instruction-remap-build sfence-instruction-remap-superpage-build: ## Build RV64 predictor-trained instruction remap guest
+	@mkdir -p "$(BUILD_DIR)/sfence-instruction-remap"
+	$(CROSS_COMPILE)gcc -march=rv64imac_zicsr_zifencei -mabi=lp64 -nostdlib -nostartfiles -Wl,--no-relax \
+		$(if $(filter superpage,$(SFENCE_REMAP_KIND)),-DSFENCE_REMAP_SUPERPAGE) -DSFENCE_REMAP_ASID=$(SFENCE_REMAP_ASID) \
+		-T "$(VERIFY_HOME)/scripts/fuzz_link.ld" -o "$(BUILD_DIR)/sfence-instruction-remap/$(SFENCE_REMAP_KIND).elf" \
+		"$(VERIFY_HOME)/xsim/sfence_instruction_remap.S"
+	$(CROSS_COMPILE)objcopy -O binary "$(BUILD_DIR)/sfence-instruction-remap/$(SFENCE_REMAP_KIND).elf" \
+		"$(BUILD_DIR)/sfence-instruction-remap/$(SFENCE_REMAP_KIND).bin"
+
+# Selective SFENCE masks and leaf-granularity invalidation.
+$(eval $(call XLEN_TEST,sfence-selective-tlb,tb_sfence_selective_tlb,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,sfence-selective-l2,tb_sfence_selective_l2,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,sfence-selective-walk,tb_sfence_selective_walk,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,sfence-selective-operands,tb_sfence_selective_operands,,-d RAPT_ASSERT_EN))
+
+# Targeted write-back coherence with independently delayed R/B channels.
+$(eval $(call XLEN_TEST,l1d-targeted-coherence,tb_targeted_coherence,,-d RAPT_ASSERT_EN -d RAPT_L1D_WRITEBACK=1 -d RAPT_L1D_TARGETED_COHERENCE=1,+BUS_DELAY_MAX=$$(VERILATOR_DIRECTED_DELAY)))
+$(eval $(call XLEN_TEST,dirty-line-select,tb_dirty_line_select,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,cbo-refill-order,tb_cbo_refill_order,,-d RAPT_ASSERT_EN -d RAPT_L1D_WRITEBACK=1 -d RAPT_L1D_TARGETED_COHERENCE=1))
+# Buffered writebacks retain payload and line hazards through ordered B responses.
+$(eval $(call XLEN_TEST,bus-buffered-writeback,tb_bus_buffered_writeback,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,wb-posted-coherence,tb_memory_coherence_progress,,-d RAPT_ASSERT_EN -GPostedWrites=4,+BUS_DELAY_MAX=$$(VERILATOR_DIRECTED_DELAY) +SEED=$$(VERILATOR_DIRECTED_SEED)))
+$(eval $(call XLEN_TEST,router-write-single,tb_chip_router_early_write,,-d RAPT_ASSERT_EN -GWriteOutstanding=1))
+
+# Optional true-LRU and TLB tree-PLRU replacement policies.
+$(eval $(call DIRECTED_TEST,cache-lru,cache_lru,tb_cache_lru))
+$(eval $(call XLEN_TEST,tlb-lru,tb_tlb_lru))
+$(eval $(call XLEN_TEST,l1d-replacement-lru,tb_l1d_replacement,,-d RAPT_CACHE_LRU=1))
+$(eval $(call XLEN_TEST,tlb-plru,tb_tlb_lru,,-GPlru=1))
+
+# Packed immediate sign extension and exact fetch/decode trap values.
+$(eval $(call XLEN_TEST,uop-payload,tb_uop_payload,,-d RAPT_ASSERT_EN))
+
+$(eval $(call DIRECTED_TEST,uop-rou-contract-rv32 uop-rou-contract-rv64,$$(subst -,_,$$@),tb_rou_dual_commit,,-d RAPT_ASSERT_EN -d RAPT_TEST_UOP_COMPACT $$(if $$(findstring rv64,$$@),-d RAPT_RV64)))

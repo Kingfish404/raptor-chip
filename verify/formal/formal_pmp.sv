@@ -58,6 +58,8 @@ module formal_pmp #(
   );
 
   localparam int AW = PADDR_BITS - 2;
+  localparam int G = `RAPT_PMP_GRANULARITY_LOG2 - 2;
+  localparam logic [AW-1:0] LowMask = (AW'(1) << G) - 1;
   logic [PADDR_BITS-1:0] addr_hi;
   logic [AW-1:0] lo_word, hi_word;
   logic [AW-1:0] tor_base, napot_base;
@@ -94,12 +96,12 @@ module formal_pmp #(
     // First match wins.  The loop guards deliberately express priority
     // directly rather than using the DUT's lowest-set-bit encoder.
     for (int i = 0; i < N; i++) begin
-      tor_base = (i == 0) ? '0 : pmp_raw_addr[i-1];
+      tor_base = (i == 0) ? '0 : pmp_raw_addr[i-1] & ~LowMask;
       napot_base = pmp_raw_addr[i] & ~pmp_napot_mask[i];
-      lo_match = (pmp_mode_tor[i] && lo_word >= tor_base && lo_word < pmp_raw_addr[i])
+      lo_match = (pmp_mode_tor[i] && lo_word >= tor_base && lo_word < (pmp_raw_addr[i] & ~LowMask))
           || (pmp_mode_na4[i] && lo_word == pmp_raw_addr[i])
           || (pmp_mode_napot[i] && ((lo_word & ~pmp_napot_mask[i]) == napot_base));
-      hi_match = (pmp_mode_tor[i] && hi_word >= tor_base && hi_word < pmp_raw_addr[i])
+      hi_match = (pmp_mode_tor[i] && hi_word >= tor_base && hi_word < (pmp_raw_addr[i] & ~LowMask))
           || (pmp_mode_na4[i] && hi_word == pmp_raw_addr[i])
           || (pmp_mode_napot[i] && ((hi_word & ~pmp_napot_mask[i]) == napot_base));
       if (!lo_found && lo_match) begin
@@ -121,7 +123,7 @@ module formal_pmp #(
       for (int b = 0; b < 16; b++) begin
         byte_addr = addr[PADDR_BITS-1:0] + PADDR_BITS'(b);
         byte_word = byte_addr[PADDR_BITS-1:2];
-        byte_match = (pmp_mode_tor[i] && byte_word >= tor_base && byte_word < pmp_raw_addr[i])
+        byte_match = (pmp_mode_tor[i] && byte_word >= tor_base && byte_word < (pmp_raw_addr[i] & ~LowMask))
             || (pmp_mode_na4[i] && byte_word == pmp_raw_addr[i])
             || (pmp_mode_napot[i] && ((byte_word & ~pmp_napot_mask[i]) == napot_base));
         if (b <= int'(size_m1)) begin
@@ -146,6 +148,10 @@ module formal_pmp #(
 
   always_comb begin
     for (int i = 0; i < N; i++) begin
+      if (G != 0) begin
+        assume (!pmp_mode_na4[i]);
+        assume ((pmp_napot_mask[i] & LowMask) == LowMask);
+      end
       // CSR napot_mask generation yields contiguous low ones. Arbitrary
       // sparse masks do not represent a PMP NAPOT range.
       assume ((pmp_napot_mask[i] & (pmp_napot_mask[i] + AW'(1))) == '0);

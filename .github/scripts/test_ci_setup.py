@@ -55,6 +55,7 @@ install_tools "$2"
                 if profile == "riscof":
                     self.assertNotIn("verilator", result.stdout)
                     self.assertNotIn("sbt", result.stdout)
+                    self.assertIn("libgmp10", result.stdout)
                 if profile == "sta":
                     self.assertIn("yosys", result.stdout)
                     self.assertIn("verilator", result.stdout)  # RTL packing
@@ -62,6 +63,7 @@ install_tools "$2"
                 if profile == "build":
                     self.assertIn("verilator", result.stdout)
                     self.assertNotIn("riscv64", result.stdout)
+                    self.assertIn("libgmp-dev", result.stdout)
                 if profile == "litex":
                     self.assertIn("libslirp-dev", result.stdout)
 
@@ -161,14 +163,32 @@ prepare_decoders "$3"
             capstone = source / "nemu/tools/capstone/repo/libcapstone.so.5"
             capstone.parent.mkdir(parents=True)
             capstone.write_bytes(b"runtime-library")
-            env = dict(os.environ, RUNNER_TEMP=tmp, RAPT_CONFIG="default")
+            reference = source / "sail-riscv/bin/sail_riscv_sim"
+            reference.parent.mkdir(parents=True)
+            reference.write_text("#!/bin/sh\necho shared-reference\n")
+            reference.chmod(0o755)
+            manifest = source / "sail-riscv/share/sail-riscv/raptor-reference.json"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text('{"model_version": "0.16"}\n')
+            env = dict(os.environ, RUNNER_TEMP=tmp, RAPT_CONFIG="default",
+                       GITHUB_WORKSPACE=str(source), GITHUB_PATH=str(root / "github-path"))
             result = self.shell("set -eu\nmake() { :; }\n" +
-                                workflow_run("Build shared RISCOF simulator"), cwd=source, env=env)
+                                workflow_run("Build shared RISCOF simulator") + "\n" +
+                                workflow_run("Build shared Sail reference"), cwd=source, env=env)
             self.assertEqual(result.returncode, 0, result.stderr)
             target.mkdir()
+            env["GITHUB_WORKSPACE"] = str(target)
             result = self.shell("set -eu\n" + workflow_run("Restore shared RISCOF simulator"),
                                 cwd=target, env=env)
             self.assertEqual(result.returncode, 0, result.stderr)
+            result = self.shell(workflow_run("Restore shared Sail reference"),
+                                cwd=target, env=env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = subprocess.run([str(target / reference.relative_to(source))],
+                                    text=True, capture_output=True, check=True)
+            self.assertEqual(result.stdout.strip(), "shared-reference")
+            self.assertEqual((root / "github-path").read_text().strip(),
+                             str(target / "sail-riscv/bin"))
             binary = target / "sim/build/default-riscof/riscv32-npc-sim"
             self.assertFalse(binary.is_symlink())
             self.assertFalse((binary.parent / model.parent.name).exists())

@@ -1,7 +1,9 @@
 `timescale 1ns / 1ps
 `include "native_ddr_model.svh"
 
-module tb_native_bus;
+module tb_native_bus #(
+    parameter int WriteOutstanding = 4
+);
   localparam int X = `RAPT_XLEN;
   localparam int Bytes = X / 8;
   localparam int Size = $clog2(Bytes);
@@ -30,6 +32,7 @@ module tb_native_bus;
   rapt_native_bus #(
       .XLEN(X),
       .WithDdr(`NATIVE_DDR),
+      .WriteOutstanding(WriteOutstanding),
       .WithPeripheral(1),
       .RomFile("")
   ) dut (
@@ -50,7 +53,8 @@ module tb_native_bus;
   );
   native_ddr_model #(
       .XLEN(X),
-      .InjectErrors(1)
+      .InjectErrors(1),
+      .WriteOutstanding(2 * WriteOutstanding)
   ) memory (
       .clk,
       .reset,
@@ -58,13 +62,13 @@ module tb_native_bus;
   );
 
   task automatic aw(input logic [X-1:0] addr, input int len, input int size = Size,
-                    input int burst = 1);
+                    input int burst = 1, input logic [3:0] id = 9);
     @(negedge clk);
     cpu.awaddr = addr;
     cpu.awlen = 8'(len);
     cpu.awsize = 3'(size);
     cpu.awburst = 2'(burst);
-    cpu.awid = 9;
+    cpu.awid = id;
     cpu.awvalid = 1;
     do @(posedge clk); while (!cpu.awready);
     @(negedge clk);
@@ -82,11 +86,11 @@ module tb_native_bus;
     cpu.wvalid = 0;
   endtask
 
-  task automatic b(input logic [1:0] response = 0);
+  task automatic b(input logic [1:0] response = 0, input logic [3:0] id = 9);
     wait (cpu.bvalid);
     repeat (4) begin
       @(negedge clk);
-      if (!cpu.bvalid || cpu.bid != 9 || cpu.bresp != response)
+      if (!cpu.bvalid || cpu.bid != id || cpu.bresp != response)
         $fatal(
             1, "B response/stall mismatch: id=%h resp=%h expected=%h", cpu.bid, cpu.bresp, response
         );
@@ -284,16 +288,224 @@ module tb_native_bus;
       ar('h80010000, 0);
       r('1, 1, 2);
     end
+    if (`NATIVE_DDR) begin
+      // Exercise full/empty transitions and pointer wrap at any configured depth.
+      for (int round = 0; round < 3; round++) begin
+        for (int n = 0; n < WriteOutstanding; n++) begin
+          aw(X'('h80000b00 + n * Bytes), 0, Size, 1, 4'(n));
+          w(X'(round * 256 + n), 1);
+        end
+        @(negedge clk);
+        cpu.awaddr = X'('h80000c00);
+        cpu.awid = 14;
+        cpu.awvalid = 1;
+        repeat (6) begin
+          @(negedge clk);
+          if (cpu.awready) $fatal(1, "write queue accepted past its configured depth");
+        end
+        // Keep AWVALID asserted until a retiring response frees a slot.
+        fork
+          begin
+            do @(posedge clk); while (!cpu.awready);
+            @(negedge clk);
+            cpu.awvalid = 0;
+            w(X'(round * 256 + 128), 1);
+          end
+          begin
+            for (int n = 0; n < WriteOutstanding; n++) b(0, 4'(n));
+            b(0, 14);
+          end
+        join
+        ar(X'('h80000c00), 0);
+        r(X'(round * 256 + 128), 1);
+      end
+      if (WriteOutstanding > 1) begin
+        // Reserving a new slot and retiring the head on the same edge must
+        // leave exactly one outstanding response with the replacement ID.
+        aw(X'('h80000b80), 0, Size, 1, 6);
+        w(X'('h12345678), 1);
+        wait (cpu.bvalid);
+        @(negedge clk);
+        if (cpu.bid != 6 || cpu.bresp != 0) $fatal(1, "turnover head response mismatch");
+        cpu.awaddr = X'('h80000b90);
+        cpu.awid = 7;
+        cpu.awvalid = 1;
+        cpu.bready = 1;
+        @(posedge clk);
+        if (!cpu.awready || !cpu.bvalid) $fatal(1, "write queue did not turn over concurrently");
+        @(negedge clk);
+        cpu.awvalid = 0;
+        cpu.bready = 0;
+        w(X'('h87654321), 1);
+        b(0, 7);
+        ar(X'('h80000b90), 0);
+        r(X'('h87654321), 1);
+      end
+    end
+    if (`NATIVE_DDR && WriteOutstanding == 4) begin
+      // Fill all response slots before accepting any B. IDs and both DDR error
+      // codes must survive queuing; a successful neighbor must remain successful.
+      aw(X'('h80000400), 0, Size, 1, 1);
+      w(X'('h11112222), 1);
+      aw(X'('h80010000), 0, Size, 1, 7);
+      w(X'('h33334444), 1);
+      aw(X'('h80030000), 0, Size, 1, 2);
+      w(X'('h55556666), 1);
+      aw(X'('h80000500), 0, Size, 1, 13);
+      w(X'('h77778888), 1);
+      // Independent read traffic must progress despite stalled write responses.
+      ar(X'('h80000100), 0);
+      r(X'(64'h1234567887650000), 1);
+      // A read overlapping the last pending write remains blocked until its B.
+      fork
+        begin
+          ar(X'('h80000500), 0);
+          r(X'('h77778888), 1);
+        end
+        begin
+          repeat (6) begin
+            @(posedge clk);
+            if (cpu.arvalid && cpu.arready)
+              $fatal(1, "read bypassed an outstanding overlapping write");
+          end
+          b(0, 1);
+          b(2, 7);
+          b(3, 2);
+          repeat (6) begin
+            @(posedge clk);
+            if (cpu.arvalid && cpu.arready)
+              $fatal(1, "read released before the matching write response");
+          end
+          b(0, 13);
+        end
+      join
+      // The tail of a burst is covered by the hazard range, including bytes in
+      // later beats. Missing WLAST is a local SLVERR on exactly that transaction.
+      aw(X'('h80000700), 1, Size, 1, 3);
+      w(X'('habcdef01), 0);
+      w(X'('h23456789), 0);
+      aw(X'('h80000800), 0, Size, 1, 12);
+      w(X'('h13579bdf), 1);
+      fork
+        begin
+          ar(X'('h80000700 + Bytes), 0);
+          r(X'('h23456789), 1);
+        end
+        begin
+          repeat (6) begin
+            @(posedge clk);
+            if (cpu.arvalid && cpu.arready) $fatal(1, "read bypassed pending burst tail");
+          end
+          b(2, 3);
+          b(0, 12);
+        end
+      join
+      // MMIO side effects wait for every older DDR response, including errors.
+      aw(X'('h80000900), 0, Size, 1, 5);
+      w(X'('h2468ace0), 1);
+      fork
+        begin
+          aw(X'('h18000000), 0, 2);
+          w(X'('hdeadbeef), 1, Bytes'(15));
+          b();
+        end
+        begin
+          repeat (6) begin
+            @(posedge clk);
+            if ((cpu.awvalid && cpu.awready) || peripheral_writes != 3)
+              $fatal(1, "MMIO write bypassed pending DDR write");
+          end
+          b(0, 5);
+        end
+      join
+      if (peripheral_writes != 4) $fatal(1, "ordered MMIO write was lost or repeated");
+      aw(X'('h80000a00), 0, Size, 1, 8);
+      w(X'('h98765432), 1);
+      fork
+        begin
+          ar(X'('h18000000), 0, 2);
+          r(X'('hdeadbeef), 1);
+        end
+        begin
+          repeat (6) begin
+            @(posedge clk);
+            if ((cpu.arvalid && cpu.arready) || peripheral_reads != 3)
+              $fatal(1, "MMIO read bypassed pending DDR write");
+          end
+          b(0, 8);
+        end
+      join
+      if (peripheral_reads != 4) $fatal(1, "ordered MMIO read was lost or repeated");
+    end
+    if (`NATIVE_DDR) begin
+      // Simultaneous conflicting requests give the write priority.
+      aw(X'('h80000e00), 0);
+      w(0, 1);
+      b();
+      fork
+        begin
+          aw(X'('h80000e00), 0);
+          w(X'('h50607080), 1);
+          b();
+        end
+        begin
+          ar(X'('h80000e00), 0);
+          r(X'('h50607080), 1);
+        end
+      join
+      // A write cannot overtake an accepted read of the same address.
+      ar(X'('h80000100), 0);
+      wait (cpu.rvalid);
+      fork
+        begin
+          aw(X'('h80000100), 0);
+          w(X'('h10203040), 1);
+          b();
+        end
+        begin
+          repeat (6) begin
+            @(posedge clk);
+            if (cpu.awvalid && cpu.awready) $fatal(1, "write overtook an older overlapping read");
+          end
+          r(X'(64'h1234567887650000), 1);
+        end
+      join
+      // Normalize early WLAST for DDR while preserving the local error. A
+      // downstream DECERR takes precedence when the framing is also malformed.
+      aw(X'('h80000f00), 1);
+      w(X'('h5555aaaa), 1);
+      w(X'('haaaa5555), 1);
+      b(2);
+      aw(X'('h80030000), 0);
+      w('1, 0);
+      b(3);
+      // Reset drops outstanding response metadata as well as the active burst.
+      aw(X'('h80000d00), 0, Size, 1, 10);
+      w(X'('hbad0bad0), 1);
+      @(negedge clk);
+      reset = 1;
+      repeat (3) @(negedge clk);
+      reset = 0;
+      repeat (35) begin
+        @(negedge clk);
+        if (cpu.bvalid) $fatal(1, "pre-reset DDR response survived reset");
+      end
+      aw(X'('h80000d00), 0, Size, 1, 11);
+      w(X'('h12344321), 1);
+      b(0, 11);
+      ar(X'('h80000d00), 0);
+      r(X'('h12344321), 1);
+    end
     // Reset abandons local in-flight replies, and a new request can complete.
-    ar('h0f000000, 0);
+    ar(X'('h0f000000), 0);
     wait (cpu.rvalid);
     @(negedge clk);
     reset = 1;
     repeat (3) @(negedge clk);
     reset = 0;
-    ar('h0f000000, 0);
+    ar(X'('h0f000000), 0);
     r(X'('hfeedcafe), 1);
-    $display("PASS native bus RV%0d DDR=%0d", X, `NATIVE_DDR);
+    $display("PASS native bus RV%0d DDR=%0d writes=%0d", X, `NATIVE_DDR, WriteOutstanding);
     $finish;
   end
   initial begin

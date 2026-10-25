@@ -16,7 +16,7 @@ module tb_ptw_global;
   logic [XLEN-1:12] result_vtag;
   logic [6:0] result_pte;
   logic pbmte = 0;
-  logic [1:0] result_pbmt;
+  logic [1:0] result_pbmt, result_level;
   rapt_ptw #(.XLEN(XLEN)) dut (.*);
   always #5 clock = ~clock;
   `include "tb_common.svh"
@@ -134,7 +134,7 @@ module tb_ptw_kill_drain;
   logic busy;
 
   logic pbmte = 0;
-  logic [1:0] result_pbmt;
+  logic [1:0] result_pbmt, result_level;
   rapt_ptw #(.XLEN(XLEN)) dut (.*);
 
   always #5 clock = ~clock;
@@ -324,7 +324,7 @@ module tb_ptw_pbmt;
   logic [XLEN-1:12] result_vtag;
   logic [6:0] result_pte;
   logic pbmte = 0;
-  logic [1:0] result_pbmt;
+  logic [1:0] result_pbmt, result_level;
   rapt_ptw #(.XLEN(XLEN)) dut (.*);
   always #5 clock = ~clock;
   `include "tb_common.svh"
@@ -529,27 +529,31 @@ module tb_ptw_pmp_span;
     csr_bcast.sum=0;
     csr_bcast.mxr=0;
     init_pmp_state_defaults(1);
-    // First four bytes are readable in the highest-priority NA4 entry;
-    // a lower-priority region permits everything. Sv39 must still reject
-    // the entire PTE because no first matching entry covers all eight bytes.
+    // A higher-priority denied page overrides a permissive background.
+    // At legacy grain, retain the half-authorized Sv39 PTE test instead.
     pmp_state.pmp_mode_off[0]=0;
-    pmp_state.pmp_mode_na4[0]=1;
+    pmp_state.pmp_mode_na4[0] = `RAPT_PMP_GRANULARITY_LOG2 == 2;
+    pmp_state.pmp_mode_napot[0] = `RAPT_PMP_GRANULARITY_LOG2 != 2;
+    pmp_state.pmp_napot_mask[0] = (`RAPT_PADDR_BITS - 2)'(
+        (1 << (`RAPT_PMP_GRANULARITY_LOG2 - 2)) - 1);
     pmp_state.pmp_raw_addr[0]=$bits(pmp_state.pmp_raw_addr[0])'(PteAddr>>2);
-    pmp_state.pmp_cfg_r[0]=1;
+    pmp_state.pmp_cfg_r[0] = `RAPT_PMP_GRANULARITY_LOG2 == 2;
     pmp_state.pmp_mode_off[1]=0;
     pmp_state.pmp_mode_napot[1]=1;
     pmp_state.pmp_raw_addr[1]='1;
     pmp_state.pmp_napot_mask[1]='1;
     pmp_state.pmp_cfg_r[1]=1;
     #2;
-    assert (i_fault == (XLEN == 64))
+    assert (i_fault == (`RAPT_PMP_GRANULARITY_LOG2 != 2 || XLEN == 64))
     else $fatal(1, "instruction PTW PMP checked wrong PTE span");
-    assert (d_fault == (XLEN == 64))
+    assert (d_fault == (`RAPT_PMP_GRANULARITY_LOG2 != 2 || XLEN == 64))
     else $fatal(1, "data PTW PMP checked wrong PTE span");
-    // A matching readable eight-byte NAPOT region permits both PTE formats.
+    // A complete readable minimum NAPOT region permits both PTE formats.
     pmp_state.pmp_mode_na4[0]=0;
     pmp_state.pmp_mode_napot[0]=1;
-    pmp_state.pmp_napot_mask[0]=1;
+    pmp_state.pmp_napot_mask[0] = `RAPT_PMP_GRANULARITY_LOG2 == 2 ? 1 :
+        (`RAPT_PADDR_BITS - 2)'((1 << (`RAPT_PMP_GRANULARITY_LOG2 - 2)) - 1);
+    pmp_state.pmp_cfg_r[0] = 1;
     #2;
     assert (!i_fault && !d_fault)
     else $fatal(1, "complete PTE PMP region rejected");
@@ -621,7 +625,7 @@ module tb_ptw_profile_negative;
   int matrix_cases = 0;
 
   logic pbmte = 0;
-  logic [1:0] result_pbmt;
+  logic [1:0] result_pbmt, result_level;
   rapt_ptw #(.XLEN(XLEN)) dut (.*);
 
   always #5 clock = ~clock;

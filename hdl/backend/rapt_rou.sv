@@ -60,6 +60,10 @@ module rapt_rou #(
     input clock,
     input logic writeback_done = 1'b1,
     output logic writeback_drain,
+    output logic writeback_clean,
+    output logic writeback_cbo,
+    output logic writeback_cbo_invalidate,
+    output logic [XLEN-1:6] writeback_block,
     output logic rename_buffer_empty_o,
 
     rnu_rou_if.slave rnu_rou,
@@ -99,7 +103,7 @@ module rapt_rou #(
     // Next architectural PC at the halt boundary (= npc of the youngest
     // committed instruction, or PC_RESET on cold halt). The DM samples
     // this on the halted_o rising edge and uses it as dpc.
-    output logic [XLEN-1:0] halt_pc_o,
+    output logic [`RAPT_PC_BITS_OF(XLEN)-1:0] halt_pc_o,
     // Single-cycle pulse: at least one ROB entry retired this cycle
     // (commit fire). Used by the DM to count instructions while
     // dcsr.step=1 so single-step requests halt after exactly one retire.
@@ -112,6 +116,9 @@ module rapt_rou #(
 
     input reset
 );
+  localparam int PcW = `RAPT_PC_BITS_OF(XLEN);
+  // The CSR vector is XLEN-wide WARL state; fetch uses its PC representation.
+  wire [PcW-1:0] trap_vector = `RAPT_PC_LEGALIZE(XLEN, PcW, csr_bcast.tvec);
 
   localparam int RBits = rapt_pkg::index_bits(ROB_SIZE);
   localparam int QBits = rapt_pkg::index_bits(IIQ_SIZE);
@@ -150,6 +157,7 @@ module rapt_rou #(
     logic conditional;
     logic jump;
     logic indirect;
+    rapt_pkg::ras_action_t ras;
   } retire_branch_t;
   typedef struct packed {logic [5:0] op;} retire_fp_t;
   typedef struct packed {
@@ -160,6 +168,7 @@ module rapt_rou #(
     logic fence;
     logic mret;
     logic sret;
+    rapt_pkg::system_kind_t kind;
   } retire_sys_t;
   typedef struct packed {
     retire_int_t int_op;
@@ -172,12 +181,14 @@ module rapt_rou #(
     retire_execute_t execute;
     logic c;
     logic [11:0] imm;
+`ifdef RAPT_UOP_HAS_INST
     logic [31:0] inst;
+`endif
 `ifdef RAPT_RVFI
     logic [31:0] rvfi_inst;
 `endif
     // Retired PCs are instruction addresses and therefore have bit 0 clear.
-    logic [XLEN-1:1] pc;
+    logic [PcW-1:1] pc;
   } retire_uop_t;
   retire_uop_t uop_pl[ROB_SIZE];
   // One registered rename group absorbs allocation backpressure. The final
@@ -234,9 +245,9 @@ module rapt_rou #(
   logic flush_pipe, flush_apply, fetch_context_stable, recieved_trap;
   logic recieved_sw_trap /* verilator public */;
   logic [XLEN-1:0] trap_cause /* verilator public */;
-  logic [XLEN-1:0] trap_pc, commit_npc_q, flush_target_r;
-  logic [XLEN-1:0] youngest_npc, xret_npc_q;
-  logic [XLEN-1:0] commit_npc[CommitWidth];
+  logic [PcW-1:0] trap_pc, commit_npc_q, flush_target_r;
+  logic [PcW-1:0] youngest_npc, xret_npc_q;
+  logic [PcW-1:0] commit_npc[CommitWidth];
   // CSR/system operations enter only an empty ROB and block younger allocation.
   // Thus at most one CSR write payload can be live; keep it once, not per ROB
   // entry. The per-entry csr_wen bit still owns commit and trap cancellation.
@@ -246,7 +257,7 @@ module rapt_rou #(
   // its full-width cause has one owner-selected copy instead of ROB_SIZE copies.
   logic oldest_exception_valid, exception_next_valid;
   logic [RBits-1:0] oldest_exception_owner, exception_next_owner;
-  logic [XLEN-1:0] oldest_exception_cause, exception_next_cause;
+  logic [5:0] oldest_exception_cause, exception_next_cause;
   logic [XLEN-1:0] oldest_exception_tval, exception_next_tval;
   // CBO is serializing and has one live owner. Retain its translated physical
   // block address for the inclusive L2 directory.
@@ -278,7 +289,7 @@ module rapt_rou #(
   // A checkpoint is live only until its control-flow instruction resolves.
   // Keep predicted targets in this small shared file instead of the UOQ and
   // execution-domain queues. The ROB entry carries only the checkpoint ID.
-  logic [XLEN-1:1] predicted_npc[CheckpointEntries];
+  logic [PcW-1:1] predicted_npc[CheckpointEntries];
   logic predicted_taken[CheckpointEntries];
   logic completion_mispredict[NumCompletions];
   logic [PLEN-1:0] rob_owner_prd[ROB_SIZE];
@@ -289,16 +300,16 @@ module rapt_rou #(
   logic rob_full_r;
   logic recovery_pending;
   logic [RBits-1:0] recovery_owner;
-  logic [XLEN-1:0] recovery_target;
+  logic [PcW-1:0] recovery_target;
   logic [GenerationBits-1:0] recovery_generation;
   logic recovery_owner_current;
   logic recovery_announced;
   logic [RBits-1:0] recovery_announced_owner;
-  logic [XLEN-1:0] recovery_announced_target;
+  logic [PcW-1:0] recovery_announced_target;
   logic [GenerationBits-1:0] recovery_announced_generation;
   logic recovery_candidate_valid[NumCompletions];
   logic [RBits-1:0] recovery_candidate_index[NumCompletions];
-  logic [XLEN-1:0] recovery_candidate_target[NumCompletions];
+  logic [PcW-1:0] recovery_candidate_target[NumCompletions];
   logic pmu_enqueue_ready;
   assign pmu_enqueue_ready = rnu_rou.ready[0];
   logic [RBits-1:0] youngest_commit, store_commit, branch_commit;
@@ -401,7 +412,8 @@ module rapt_rou #(
     // SQ order preserves older stores, and the resident blocks load forwarding
     // until the complete zero block has drained. Fences/CBOM own no SQ entry.
     return !u.execute.memory.store && (u.execute.sys.fence || u.execute.sys.fence_i
-        || (u.execute.sys.valid && u.inst[6:0] == `RAPT_OP_FENCE_));
+        || (u.execute.sys.valid && u.execute.sys.kind != rapt_pkg::SYS_NORMAL
+            && u.execute.sys.kind != rapt_pkg::SYS_TRANSLATION));
   endfunction
   function automatic logic control_flow(input UopT u);
     return u.execute.branch.conditional || u.execute.branch.jump || u.execute.branch.indirect;
@@ -414,6 +426,7 @@ module rapt_rou #(
     result.execute.branch.conditional = u.execute.branch.conditional;
     result.execute.branch.jump = u.execute.branch.jump;
     result.execute.branch.indirect = u.execute.branch.indirect;
+    result.execute.branch.ras = u.execute.branch.ras;
     result.execute.fp.op = u.execute.fp.op;
     result.execute.sys.valid = u.execute.sys.valid;
     result.execute.sys.ecall = u.execute.sys.ecall;
@@ -422,19 +435,21 @@ module rapt_rou #(
     result.execute.sys.fence = u.execute.sys.fence;
     result.execute.sys.mret = u.execute.sys.mret;
     result.execute.sys.sret = u.execute.sys.sret;
+    result.execute.sys.kind = u.execute.sys.kind;
     result.c = u.c;
     result.imm = u.imm[11:0];
+`ifdef RAPT_UOP_HAS_INST
     result.inst = u.inst;
+`endif
 `ifdef RAPT_RVFI
     result.rvfi_inst = u.rvfi_inst;
 `endif
-    result.pc = u.pc[XLEN-1:1];
+    result.pc = u.pc[PcW-1:1];
     return result;
   endfunction
   function automatic UopT without_prediction(input UopT u);
     UopT result;
     result = u;
-    result.pnpc = '0;
     result.execute.branch.predicted_taken = 1'b0;
     return result;
   endfunction
@@ -465,8 +480,6 @@ module rapt_rou #(
     u = uop_pl[idx];
     return rob_entry[idx].trap || u.execute.sys.ecall || u.execute.sys.ebreak
         || u.execute.sys.mret || u.execute.sys.sret || u.execute.sys.fence_i
-        || (u.inst[6:0] == `RAPT_OP_SYSTEM && u.inst[14:12] == 3'b000
-            && u.inst[31:25] == `RAPT_F7_SFENCE_VMA)
         || (rob_entry[idx].csr_wen && fetch_csr_changes(
         u.imm
     ));
@@ -601,7 +614,7 @@ module rapt_rou #(
   rapt_recovery_pending #(
       .Entries(ROB_SIZE),
       .Ports(NumCompletions),
-      .Xlen(XLEN),
+      .Xlen(PcW),
       .GenerationBits(GenerationBits)
   ) recovery_request (
       .clock(clock),
@@ -676,7 +689,7 @@ module rapt_rou #(
     // The fallback only serves standalone/hostile-input harnesses. Normal
     // rename allocates a checkpoint for every control-flow instruction.
     assign completion_mispredict[p] = has_target
-        ? (completion[p].npc[XLEN-1:1] != predicted_npc[checkpoint]
+        ? (completion[p].npc[PcW-1:1] != predicted_npc[checkpoint]
             || (uop_pl[owner].execute.branch.conditional
                 && completion[p].btaken != predicted_taken[checkpoint]))
         : completion[p].mispredict;
@@ -974,7 +987,6 @@ module rapt_rou #(
       end
       // Prediction target is consumed on RNU->UOQ acceptance and kept by
       // checkpoint ID. No execution queue needs an XLEN-wide copy.
-      dispatch_raw[s].uop.pnpc = '0;
       dispatch_raw[s].uop.execute.branch.predicted_taken = 1'b0;
     end
     // Late operand read. Each register source reads the PRF once, on its
@@ -991,8 +1003,12 @@ module rapt_rou #(
       pr2 = dispatch_raw[s].pr2;
       dispatch[s] = dispatch_raw[s];
       if (DerivedConstants) begin
-        dispatch[s].op1 = rapt_pkg::derive_op1(dispatch_raw[s].op1, dispatch_raw[s].uop.pc,
-                                               dispatch_raw[s].uop.imm, dispatch_raw[s].uop.inst);
+        dispatch[s].op1 = rapt_pkg::derive_op1(
+          dispatch_raw[s].op1,
+          dispatch_raw[s].uop.pc,
+          dispatch_raw[s].uop.imm,
+          dispatch_raw[s].uop.imm[16:12]
+        );
         dispatch[s].op2 = rapt_pkg::derive_op2(dispatch_raw[s].op2, dispatch_raw[s].uop.imm);
       end
       dispatch[s].fp_value = fp_resolve_value[s];
@@ -1025,7 +1041,6 @@ module rapt_rou #(
     assign spill_allocate_valid[s] = admission_eligible[s] && spill_allocate_ready[s];
     always_comb begin
       spill_allocate_uop[s] = allocation[s].uop;
-      spill_allocate_uop[s].pnpc = '0;
       spill_allocate_uop[s].execute.branch.predicted_taken = 1'b0;
     end
     assign spill_allocate_op1[s] = allocation[s].op1;
@@ -1119,7 +1134,7 @@ module rapt_rou #(
       for (int s = 0; s < RenameWidth; s++) begin
         if (enq_fire[s] && rnu_rou.checkpoint_valid[s]
             && int'(rnu_rou.checkpoint[s]) < CheckpointEntries) begin
-          predicted_npc[rnu_rou.checkpoint[s]] <= rnu_rou.slot[s].uop.pnpc[XLEN-1:1];
+          predicted_npc[rnu_rou.checkpoint[s]] <= rnu_rou.slot[s].pnpc[PcW-1:1];
           predicted_taken[rnu_rou.checkpoint[s]]
               <= rnu_rou.slot[s].uop.execute.branch.predicted_taken;
         end
@@ -1138,7 +1153,7 @@ module rapt_rou #(
         exception_next_valid = 1'b1;
         exception_next_owner = rob_alloc[s];
         exception_next_cause = allocation[s].uop.cause;
-        exception_next_tval = allocation[s].uop.tval;
+        exception_next_tval = `RAPT_UOP_TVAL(XLEN, allocation[s].uop);
       end
     end
     for (int p = 0; p < NumCompletions; p++) begin
@@ -1176,6 +1191,7 @@ module rapt_rou #(
       if (skid_replace) begin
         skid_slot[s] <= rnu_rou.slot[s];
         skid_slot[s].uop <= without_prediction(rnu_rou.slot[s].uop);
+        skid_slot[s].pnpc <= '0;
         skid_checkpoint_valid[s] <= rnu_rou.checkpoint_valid[s];
         skid_checkpoint[s] <= rnu_rou.checkpoint[s];
       end
@@ -1184,19 +1200,17 @@ module rapt_rou #(
   // These views retain the allocation interface; they contain no UOQ storage.
   for (genvar s = 0; s < IIQ_SIZE; s++) begin : g_allocation_input
     if (s < RenameWidth) begin : g_lane
-      RenameSlotT slot_view;
       wire [SkidIndexBits-1:0] held_index = SkidIndexBits'(int'(skid_start) + s);
-      assign slot_view = skid_slot[held_index];
       assign uoq_valid[s] = skid_valid[s];
       `RAPT_SVA(clock, reset || flush_pipe, ROU_SKID_VALID_COUNT,
                 skid_valid[s] == (int'(skid_count) > s))
-      assign uoq_uops[s] = without_prediction(slot_view.uop);
-      assign uoq_pr1[s] = slot_view.pr1;
-      assign uoq_pr2[s] = slot_view.pr2;
-      assign uoq_prd[s] = slot_view.prd;
-      assign uoq_prs[s] = slot_view.prs;
-      assign uoq_op1[s] = slot_view.op1;
-      assign uoq_op2[s] = slot_view.op2;
+      assign uoq_uops[s] = without_prediction(skid_slot[held_index].uop);
+      assign uoq_pr1[s] = skid_slot[held_index].pr1;
+      assign uoq_pr2[s] = skid_slot[held_index].pr2;
+      assign uoq_prd[s] = skid_slot[held_index].prd;
+      assign uoq_prs[s] = skid_slot[held_index].prs;
+      assign uoq_op1[s] = skid_slot[held_index].op1;
+      assign uoq_op2[s] = skid_slot[held_index].op2;
       assign uoq_checkpoint_valid[s] = skid_checkpoint_valid[held_index];
       assign uoq_checkpoint[s] = skid_checkpoint[held_index];
     end else begin : g_unused
@@ -1212,9 +1226,14 @@ module rapt_rou #(
       assign uoq_checkpoint[s] = '0;
     end
   end
-  `RAPT_SVA(
-      clock, reset || flush_pipe, ROU_SKID_CAPACITY,
-      int'(skid_count) <= RenameWidth && (skid_count == 0 || int'(skid_start) + int'(skid_count) <= RenameWidth))
+`ifdef RAPT_SVA_ACTIVE
+  wire skid_window_in_range = skid_count == 0 || int'(skid_start) + int'(skid_count) <= RenameWidth;
+  `RAPT_SVA(clock, reset || flush_pipe, ROU_SKID_CAPACITY, skid_window_in_range)
+  // A full-range count needs no redundant bound check (for example width 1).
+  if (RenameWidth + 1 < 2 ** SkidCountBits) begin : g_skid_count_contract
+    `RAPT_SVA(clock, reset || flush_pipe, ROU_SKID_COUNT, int'(skid_count) <= RenameWidth)
+  end
+`endif
   `RAPT_SVA_IMPLY(clock, reset || flush_pipe, ROU_SKID_RECOVERY_HOLD, recovery_pending,
                   dispatch_count == 0 && enqueue_count == 0)
   // Retirement scans a contiguous prefix with explicit scalar-effect budgets.
@@ -1236,6 +1255,17 @@ module rapt_rou #(
     if (reset || flush_pipe) head_drain_q <= 1'b0;
   end
   assign writeback_drain = !reset && head_drain_q;
+  // Every ordering point drains the SQ and posted responses. Only FENCE.I
+  // publishes all dirty data to instruction memory; translation fences and
+  // ordinary FENCE preserve the physically tagged cache's dirty contents.
+  // The decoded kind distinguishes FENCE.I from SFENCE, which also carries fence_i.
+  assign writeback_clean = writeback_drain && !rob_entry[h0].trap
+      && uop_pl[h0].execute.sys.kind == rapt_pkg::SYS_FENCE_I;
+  // The IOQ completion has already translated and checked this block. ZERO
+  // owns an SQ entry and therefore never requests this precommit operation.
+  assign writeback_cbo = writeback_drain && !rob_entry[h0].trap && head_cbo;
+  assign writeback_cbo_invalidate = writeback_cbo && head_cbo_inval;
+  assign writeback_block = cbo_block_q;
   `RAPT_SVA(
       clock, reset, ROB_HEAD_DRAIN_EQUIVALENT,
       head_drain_q == (rob_entry_busy[rob_head] && rob_entry[rob_head].state == rapt_pkg::ROB_WB && rob_drains_sq[rob_head]))
@@ -1307,7 +1337,7 @@ module rapt_rou #(
   assign rou_cmu.next_pc = debug_halt_flush ? commit_npc_q :
       recieved_trap || rob_entry[youngest_commit].trap
       || uop_pl[youngest_commit].execute.sys.ecall || uop_pl[youngest_commit].execute.sys.ebreak
-      ? csr_bcast.tvec : commit_npc[commit_count != 0 ? commit_count-1 : 0];
+      ? trap_vector : commit_npc[commit_count != 0 ? commit_count-1 : 0];
   for (genvar entry = 0; entry < ROB_SIZE; entry++) begin : g_generation
     always_ff @(posedge clock) begin
       if (reset) rob_next_generation[entry] <= '0;
@@ -1328,7 +1358,7 @@ module rapt_rou #(
     if (reset) begin
       flush_apply <= 1'b0;
       fetch_context_stable <= 1'b0;
-      commit_npc_q <= XLEN'(`RAPT_PC_INIT);
+      commit_npc_q <= PcW'(`RAPT_PC_INIT);
     end else begin
       flush_apply <= flush_pipe;
       fetch_context_stable <= flush_pipe && !fetch_context_changes;
@@ -1341,7 +1371,7 @@ module rapt_rou #(
         // The checkpoint target was captured when this registered group was accepted.
         if (uoq_checkpoint_valid[deq_index[s]] && control_flow(allocation[s].uop))
           youngest_npc <= {predicted_npc[uoq_checkpoint[deq_index[s]]], 1'b0};
-        else youngest_npc <= allocation[s].uop.pc + (allocation[s].uop.c ? XLEN'(2) : XLEN'(4));
+        else youngest_npc <= allocation[s].uop.pc + (allocation[s].uop.c ? PcW'(2) : PcW'(4));
       end
     end
     if (recovery_pending && recovery_owner_current) youngest_npc <= recovery_target;
@@ -1433,7 +1463,11 @@ module rapt_rou #(
         rob_fp_valid[entry] <= allocation[allocate_lane].uop.execute.fp.valid;
         rob_fp_writer[entry] <= rapt_pkg::fp_writes_register(
             allocation[allocate_lane].uop.execute.fp.valid,
-            allocation[allocate_lane].uop.execute.fp.op, allocation[allocate_lane].uop.inst);
+            allocation[allocate_lane].uop.execute.fp.op,
+            rapt_pkg::fp_instruction(allocation[allocate_lane].uop.execute.memory.load,
+                allocation[allocate_lane].uop.execute.memory.store,
+                allocation[allocate_lane].uop.imm)
+        );
         rob_entry[entry].rd         <= allocation[allocate_lane].uop.rd;
         rob_entry[entry].mispredict <= 1'b0;
         rob_entry[entry].btaken     <= 1'b0;
@@ -1444,7 +1478,7 @@ module rapt_rou #(
         rob_entry[entry].fp_flags   <= '0;
         rob_entry[entry].trap  <= allocation[allocate_lane].uop.trap;
 `ifndef SYNTHESIS
-        store_addr_witness[entry] <= allocation[allocate_lane].uop.tval;
+        store_addr_witness[entry] <= `RAPT_UOP_TVAL(XLEN, allocation[allocate_lane].uop);
 `endif
 
         // Immutable metadata belongs to the ROB, not execution-unit ports.
@@ -1456,7 +1490,7 @@ module rapt_rou #(
       // port once; conditional update groups below retain per-field priority.
       if (complete_hit) begin
 `ifdef RAPT_ROB_NPC_SHADOW
-        rob_entry[entry].npc <= completion[complete_lane].npc[XLEN-1:1];
+        rob_entry[entry].npc <= completion[complete_lane].npc[PcW-1:1];
 `endif
         rob_entry[entry].difftest_skip <= completion[complete_lane].difftest_skip;
       end
@@ -1512,13 +1546,18 @@ module rapt_rou #(
       rou_cmu.slot[c].prd = rob_entry[commit_index[c]].prd;
       rou_cmu.slot[c].prs = rob_entry[commit_index[c]].prs;
       rou_cmu.slot[c].pc = {uop_pl[commit_index[c]].pc, 1'b0};
+`ifdef RAPT_UOP_HAS_INST
       rou_cmu.slot[c].inst = uop_pl[commit_index[c]].inst;
+`else
+      rou_cmu.slot[c].inst = '0;
+`endif
+      rou_cmu.slot[c].ras = uop_pl[commit_index[c]].execute.branch.ras;
       rou_cmu.slot[c].c = uop_pl[commit_index[c]].c;
       rou_cmu.slot[c].trap = rob_entry[commit_index[c]].trap;
       rou_cmu.slot[c].atomic = rob_atomic[commit_index[c]];
       rou_cmu.slot[c].npc = rob_entry[commit_index[c]].trap
           || uop_pl[commit_index[c]].execute.sys.ecall || uop_pl[commit_index[c]].execute.sys.ebreak
-          ? csr_bcast.tvec : commit_npc[c];
+          ? trap_vector : commit_npc[c];
       rou_cmu.slot[c].ebreak = uop_pl[commit_index[c]].execute.sys.ebreak;
       rou_cmu.slot[c].difftest_skip = rob_entry[commit_index[c]].difftest_skip;
       rou_cmu.slot[c].ben = uop_pl[commit_index[c]].execute.branch.conditional;
@@ -1538,9 +1577,9 @@ module rapt_rou #(
 `ifdef RAPT_ROB_NPC_SHADOW
   for (genvar c = 0; c < CommitWidth; c++) begin : g_npc_shadow_check
     wire [RBits-1:0] owner = commit_index[c];
-    wire [XLEN-1:0] shadow_npc = rob_entry[owner].trap
+    wire [PcW-1:0] shadow_npc = rob_entry[owner].trap
         || uop_pl[owner].execute.sys.ecall || uop_pl[owner].execute.sys.ebreak
-        ? csr_bcast.tvec : {rob_entry[owner].npc, 1'b0};
+        ? trap_vector : {rob_entry[owner].npc, 1'b0};
     `RAPT_SVA_IMPLY(clock, reset, ROB_NPC_MATCHES_SHADOW, commit_fire[c],
                     rou_cmu.slot[c].npc == shadow_npc)
   end
@@ -1549,26 +1588,65 @@ module rapt_rou #(
   assign rou_cmu.jen = branch_commit_valid && uop_pl[branch_commit].execute.branch.jump;
   assign rou_cmu.jren = branch_commit_valid && uop_pl[branch_commit].execute.branch.indirect;
   assign rou_cmu.btaken = rob_entry[branch_commit].btaken;
-  assign rou_cmu.atomic_sc = rob_atomic[h0]
-      && uop_pl[h0].execute.int_op.alu == `RAPT_ATO_SC__;
+  assign rou_cmu.atomic_sc = rob_atomic[h0] && uop_pl[h0].execute.int_op.alu == `RAPT_ATO_SC__;
   // Interrupts and faulting heads must not publish instruction maintenance.
+  // Keep the decoder serialization flags; SFENCE/SINVAL only maintain translation.
   assign rou_cmu.fence_i = commit_fire[0] && !rob_entry[h0].trap
-      && uop_pl[h0].execute.sys.fence_i;
+      && uop_pl[h0].execute.sys.fence_i
+      && (`RAPT_SFENCE_KEEP_STATE < 2 || !uop_pl[h0].execute.sys.fence);
   // Decoder fence flags still serialize CBO dispatch/retirement and replay
   // younger work. They must not turn CBO into a whole-cache/TLB flush.
-  assign head_cbo = uop_pl[h0].inst[14:0] == 15'h200f
-      && (uop_pl[h0].inst[31:20] == 12'h000
-       || uop_pl[h0].inst[31:20] == 12'h001
-       || uop_pl[h0].inst[31:20] == 12'h002
-       || uop_pl[h0].inst[31:20] == 12'h004);
-  assign head_cbo_inval = head_cbo && (uop_pl[h0].inst[31:20] == 12'h000
-      || uop_pl[h0].inst[31:20] == 12'h002);
+  assign head_cbo = uop_pl[h0].execute.sys.kind == rapt_pkg::SYS_CBO_CLEAN
+      || uop_pl[h0].execute.sys.kind == rapt_pkg::SYS_CBO_INVAL
+      || uop_pl[h0].execute.sys.kind == rapt_pkg::SYS_CBO_ZERO;
+  assign head_cbo_inval = uop_pl[h0].execute.sys.kind == rapt_pkg::SYS_CBO_INVAL;
   assign rou_cmu.fence_time = commit_fire[0] && !rob_entry[h0].trap
       && uop_pl[h0].execute.sys.fence && !head_cbo;
+  // A serializing fence owns the head while its resolved completion arrives.
+  // Use the accepted completion, not dispatch operands that may still have tags.
+  if (`RAPT_SFENCE_SELECTIVE != 0) begin : g_sfence_descriptor
+    localparam int VpnBits = XLEN == 64 ? 27 : 20;
+    logic valid_q;
+    logic [VpnBits+9:0] payload_q;
+    logic [RBits-1:0] owner_q;
+    logic [GenerationBits-1:0] generation_q;
+    logic head_sfence, owner_matches;
+    assign head_sfence = uop_pl[h0].execute.sys.kind == rapt_pkg::SYS_TRANSLATION;
+    assign owner_matches = valid_q && owner_q == h0 && generation_q == rob_entry[h0].generation;
+    always_ff @(posedge clock) begin
+      if (reset || flush_pipe || (commit_fire[0] && head_sfence)) begin
+        valid_q <= 1'b0;
+      end else begin
+        for (int p = 0; p < NumCompletions; p++) begin
+          if (completion_valid[p] && completion[p].dest == h0 && head_sfence
+              && !completion[p].trap) begin
+            valid_q <= 1'b1;
+            payload_q <= completion[p].result[VpnBits+9:0];
+            owner_q <= completion[p].dest;
+            generation_q <= completion[p].generation;
+          end
+        end
+      end
+    end
+    assign rou_cmu.sfence_all_vpn = uop_pl[h0].imm[0];
+    assign rou_cmu.sfence_all_asid = uop_pl[h0].imm[1];
+    assign rou_cmu.sfence_vpn = 27'(payload_q[VpnBits-1:0]);
+    assign rou_cmu.sfence_asid = payload_q[VpnBits+:9];
+    assign rou_cmu.sfence_valid = rou_cmu.fence_time && head_sfence && owner_matches
+        && (rou_cmu.sfence_all_vpn || !payload_q[VpnBits+9]);
+    `RAPT_SVA_IMPLY(clock, reset, SFENCE_DESCRIPTOR_OWNED, rou_cmu.fence_time && head_sfence,
+                    owner_matches)
+  end else begin : g_full_sfence
+    assign rou_cmu.sfence_valid = 1'b0;
+    assign rou_cmu.sfence_all_vpn = 1'b0;
+    assign rou_cmu.sfence_all_asid = 1'b0;
+    assign rou_cmu.sfence_vpn = '0;
+    assign rou_cmu.sfence_asid = '0;
+  end
   `RAPT_SVA_IMPLY(clock, reset, ROB_MAINTENANCE_NEEDS_RETIRE, rou_cmu.fence_i || rou_cmu.fence_time,
                   commit_fire[0] && !recieved_trap && !rob_entry[h0].trap)
-  // CBOM drains the SQ and, in write-back configurations, the L1D through
-  // writeback_drain. ZERO instead uses its committed SQ store descriptor.
+  // CBOM drains the SQ and cleans its physical block before retirement.
+  // ZERO instead uses its committed SQ store descriptor.
   // A successful serializing CBO completion supplies its block offset.
   assign rou_cmu.cbo_inval = commit_fire[0] && !recieved_trap
       && !rob_entry[h0].trap && head_cbo_inval;
@@ -1619,7 +1697,7 @@ module rapt_rou #(
   assign rou_csr.trap = recieved_trap || commit_trap;
   assign rou_csr.tval = recieved_trap ? '0 : commit_trap && oldest_exception_valid ? oldest_exception_tval : '0;
   assign rou_csr.cause = recieved_trap ? trap_cause
-      : oldest_exception_valid ? oldest_exception_cause : '0;
+      : oldest_exception_valid ? {oldest_exception_cause[5], {(XLEN-6){1'b0}}, oldest_exception_cause[4:0]} : '0;
   assign rou_csr.valid = recieved_trap || (commit_fire[0] && (uop_pl[h0].execute.sys.valid
       || commit_trap)) || fp_commit_flags_valid || fp_commit_dirty;
   // Faulting instructions still leave the ROB and deliver their exception,

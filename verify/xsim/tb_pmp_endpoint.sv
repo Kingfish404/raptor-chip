@@ -87,82 +87,123 @@ module tb_pmp_endpoint;
     check(fault, "load spanning two readable TOR entries was allowed");
     check(!fault_lo, "partial-entry data fault was incorrectly attributed to the low endpoint");
 
-    // Readable higher-priority NA4 only covers the high half.
-    pmp_state.pmp_mode_tor='0;
-    pmp_state.pmp_mode_na4[0]=1;
-    pmp_state.pmp_raw_addr[0]='h400;
-    pmp_state.pmp_mode_napot[1]=1;
-    pmp_state.pmp_raw_addr[1]='1;
-    pmp_state.pmp_napot_mask[1]='1;
-    op_r=1;
-    op_x=0;
-    addr='hffc;
-    size_m1=7;
-    #1;
-    check(fault, "higher-priority high-half partial match was ignored");
-    // Entry entirely inside a request: neither endpoint belongs to it.
-    addr='hffd;
-    size_m1=7;
-    #1;
-    check(fault, "interior NA4 entry was ignored");
-    pmp_state.pmp_mode_na4[0]=0;
-    pmp_state.pmp_mode_tor[0]=1;
-    // TOR entry zero starts at zero. Use entry 1 with entry 0 OFF as base.
-    pmp_state.pmp_mode_tor[0]=0;
-    pmp_state.pmp_mode_off[0]=1;
-    pmp_state.pmp_mode_napot[1]=0;
-    pmp_state.pmp_mode_tor[1]=1;
-    pmp_state.pmp_raw_addr[1]='h401;
-    pmp_state.pmp_mode_off[2]=0;
-    pmp_state.pmp_mode_napot[2]=1;
-    pmp_state.pmp_raw_addr[2]='1;
-    pmp_state.pmp_napot_mask[2]='1;
-    pmp_state.pmp_cfg_r[2]=1;
-    #1;
-    check(fault, "interior TOR entry was ignored");
-    // Empty/reversed TOR must not claim overlapping bytes.
-    pmp_state.pmp_raw_addr[1] = 'h3ff;
-    #1;
-    check(!fault, "empty TOR incorrectly matched an access");
-    // NAPOT region [0x1000,0x1007] inside a sixteen-byte request.
-    pmp_state.pmp_mode_tor[1]=0;
-    pmp_state.pmp_mode_napot[1]=1;
-    pmp_state.pmp_raw_addr[1]='h401;
-    pmp_state.pmp_napot_mask[1]=1;
-    addr='hffd;
-    size_m1=15;
-    #1;
-    check(fault, "interior NAPOT entry was ignored");
-    // A wrapping request can have both endpoints in TOR while crossing
-    // its uncovered top-of-address-space gap.
-    pmp_state.pmp_mode_off[0]=0;
-    pmp_state.pmp_mode_tor[0]=1;
-    pmp_state.pmp_raw_addr[0]='1;
-    pmp_state.pmp_mode_tor[1]=0;
-    pmp_state.pmp_mode_napot[1]=1;
-    pmp_state.pmp_raw_addr[1]='1;
-    pmp_state.pmp_napot_mask[1]='1;
-    addr=(XLEN'(1)<<`RAPT_PADDR_BITS)-XLEN'(9);
-    size_m1=15;
-    #1;
-    check(fault, "wrapping partial TOR match was allowed");
-    pmp_state.pmp_mode_tor[0]=0;
-    pmp_state.pmp_mode_off[0]=1;
-    #1;
-    check(!fault, "full-space NAPOT failed wrapped byte coverage");
-    pmp_state.pmp_mode_off = '1;
-    pmp_state.pmp_mode_tor = '0;
-    pmp_state.pmp_mode_napot = '0;
-    pmp_state.pmp_mode_na4 = '0;
-    pmp_state.pmp_mode_off[0] = 0;
-    pmp_state.pmp_mode_na4[0] = 1;
-    pmp_state.pmp_raw_addr[0] = 'h400;
-    priv = `RAPT_PRIV_M;
-    addr = 'hffd;
-    size_m1 = 7;
-    #1;
-    check(fault, "unlocked interior NA4 entry failed to fault in M-mode");
-    check(!fault_lo, "interior NA4 fault was attributed to the low endpoint");
+    if (`RAPT_PMP_GRANULARITY_LOG2 == 2) begin
+      // Readable higher-priority NA4 only covers the high half.
+      pmp_state.pmp_mode_tor='0;
+      pmp_state.pmp_mode_na4[0]=1;
+      pmp_state.pmp_raw_addr[0]='h400;
+      pmp_state.pmp_mode_napot[1]=1;
+      pmp_state.pmp_raw_addr[1]='1;
+      pmp_state.pmp_napot_mask[1]='1;
+      op_r=1;
+      op_x=0;
+      addr='hffc;
+      size_m1=7;
+      #1;
+      check(fault, "higher-priority high-half partial match was ignored");
+      // Entry entirely inside a request: neither endpoint belongs to it.
+      addr='hffd;
+      size_m1=7;
+      #1;
+      check(fault, "interior NA4 entry was ignored");
+      pmp_state.pmp_mode_na4[0]=0;
+      pmp_state.pmp_mode_tor[0]=1;
+      // TOR entry zero starts at zero. Use entry 1 with entry 0 OFF as base.
+      pmp_state.pmp_mode_tor[0]=0;
+      pmp_state.pmp_mode_off[0]=1;
+      pmp_state.pmp_mode_napot[1]=0;
+      pmp_state.pmp_mode_tor[1]=1;
+      pmp_state.pmp_raw_addr[1]='h401;
+      pmp_state.pmp_mode_off[2]=0;
+      pmp_state.pmp_mode_napot[2]=1;
+      pmp_state.pmp_raw_addr[2]='1;
+      pmp_state.pmp_napot_mask[2]='1;
+      pmp_state.pmp_cfg_r[2]=1;
+      #1;
+      check(fault, "interior TOR entry was ignored");
+      // Empty/reversed TOR must not claim overlapping bytes.
+      pmp_state.pmp_raw_addr[1] = 'h3ff;
+      #1;
+      check(!fault, "empty TOR incorrectly matched an access");
+      // NAPOT region [0x1000,0x1007] inside a sixteen-byte request.
+      pmp_state.pmp_mode_tor[1]=0;
+      pmp_state.pmp_mode_napot[1]=1;
+      pmp_state.pmp_raw_addr[1]='h401;
+      pmp_state.pmp_napot_mask[1]=1;
+      addr='hffd;
+      size_m1=15;
+      #1;
+      check(fault, "interior NAPOT entry was ignored");
+      // A wrapping request can have both endpoints in TOR while crossing
+      // its uncovered top-of-address-space gap.
+      pmp_state.pmp_mode_off[0]=0;
+      pmp_state.pmp_mode_tor[0]=1;
+      pmp_state.pmp_raw_addr[0]='1;
+      pmp_state.pmp_mode_tor[1]=0;
+      pmp_state.pmp_mode_napot[1]=1;
+      pmp_state.pmp_raw_addr[1]='1;
+      pmp_state.pmp_napot_mask[1]='1;
+      addr=(XLEN'(1)<<`RAPT_PADDR_BITS)-XLEN'(9);
+      size_m1=15;
+      #1;
+      check(fault, "wrapping partial TOR match was allowed");
+      pmp_state.pmp_mode_tor[0]=0;
+      pmp_state.pmp_mode_off[0]=1;
+      #1;
+      check(!fault, "full-space NAPOT failed wrapped byte coverage");
+      pmp_state.pmp_mode_off = '1;
+      pmp_state.pmp_mode_tor = '0;
+      pmp_state.pmp_mode_napot = '0;
+      pmp_state.pmp_mode_na4 = '0;
+      pmp_state.pmp_mode_off[0] = 0;
+      pmp_state.pmp_mode_na4[0] = 1;
+      pmp_state.pmp_raw_addr[0] = 'h400;
+      priv = `RAPT_PRIV_M;
+      addr = 'hffd;
+      size_m1 = 7;
+      #1;
+      check(fault, "unlocked interior NA4 entry failed to fault in M-mode");
+      check(!fault_lo, "interior NA4 fault was attributed to the low endpoint");
+    end else begin
+      // A higher-priority page covers only the high end of the request.
+      pmp_state.pmp_mode_tor = '0;
+      pmp_state.pmp_mode_napot = '0;
+      pmp_state.pmp_mode_napot[0] = 1;
+      pmp_state.pmp_raw_addr[0] = 'h5ff;
+      pmp_state.pmp_napot_mask[0] = 'h3ff;
+      pmp_state.pmp_mode_napot[1] = 1;
+      pmp_state.pmp_raw_addr[1] = '1;
+      pmp_state.pmp_napot_mask[1] = '1;
+      addr = 'hffc;
+      size_m1 = 7;
+      #1;
+      check(fault, "higher-priority high-page partial match was ignored");
+      check(!fault_lo, "high-page partial match changed low endpoint permission");
+      priv = `RAPT_PRIV_M;
+      #1;
+      check(fault, "unlocked partial page match failed to fault in M-mode");
+      // Empty/reversed TOR must never claim the access.
+      pmp_state.pmp_mode_napot[0] = 0;
+      pmp_state.pmp_mode_tor[1] = 1;
+      pmp_state.pmp_mode_napot[1] = 0;
+      pmp_state.pmp_raw_addr[0] = 'h800;
+      pmp_state.pmp_raw_addr[1] = 'h400;
+      #1;
+      check(!fault, "empty TOR matched an M-mode access");
+      // Physical wrap crosses the top page excluded by a maximal TOR top.
+      pmp_state.pmp_mode_tor[0] = 1;
+      pmp_state.pmp_raw_addr[0] = '1;
+      pmp_state.pmp_mode_tor[1] = 0;
+      pmp_state.pmp_mode_napot[1] = 1;
+      pmp_state.pmp_raw_addr[1] = '1;
+      addr = (XLEN'(1) << `RAPT_PADDR_BITS) - XLEN'(9);
+      size_m1 = 15;
+      #1;
+      check(fault, "wrapping partial TOR match was allowed");
+      pmp_state.pmp_mode_tor[0] = 0;
+      #1;
+      check(!fault, "full-space NAPOT failed wrapped coverage");
+    end
     $display("PASS: PMP endpoint-size boundary checks passed");
     $finish;
   end

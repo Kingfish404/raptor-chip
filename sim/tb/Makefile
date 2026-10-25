@@ -118,7 +118,6 @@ PLUSARGS += +SDF=$(abspath $(SDF)) +SDF_MTM=$(or $(SDF_MTM),MAXIMUM)
 endif
 
 TOP := rapt_tb_top
-VL_MDIR := build/vl-$(RAPT_CONFIG)
 
 # -----------------------------------------------------------------------------
 .PHONY: help
@@ -129,7 +128,8 @@ help:
 # Verilator (RTL alignment). Requires Verilator >= 5 (--timing, --binary).
 # -----------------------------------------------------------------------------
 VERILATOR ?= verilator
-VL_FLAGS  := --binary -j 0 --timing --top-module $(TOP) \
+VERILATOR_JOBS ?= 2
+VL_FLAGS  := --binary -j $(VERILATOR_JOBS) --timing --top-module $(TOP) \
 	-Wno-fatal \
 	-Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSED -Wno-DECLFILENAME \
 	-Wno-PINMISSING -Wno-CASEINCOMPLETE -Wno-UNOPTFLAT -Wno-LATCH \
@@ -138,11 +138,18 @@ VL_FLAGS  := --binary -j 0 --timing --top-module $(TOP) \
 ifneq ($(filter-out 0,$(WAVE)),)
 VL_FLAGS += --trace-fst
 endif
+VL_TOOL_VERSION := $(shell $(VERILATOR) --version 2>/dev/null)
+VL_BUILD_OPTIONS := $(VL_TOOL_VERSION) $(VL_FLAGS) $(DEFINES) $(INCDIRS)
+_vl_quote = '$(subst ','"'"',$(1))'
+VL_BUILD_KEY := $(shell python3 $(RAPTOR_HOME)/sim/scripts/build_cache.py fingerprint \
+	--config /dev/null -- $(call _vl_quote,$(VL_BUILD_OPTIONS)))
+VL_BUILD_ROOT ?= build
+VL_MDIR := $(VL_BUILD_ROOT)/vl-$(RAPT_CONFIG)-$(VL_BUILD_KEY)
 
 .PHONY: verilator-build
 verilator-build: ## Compile the RTL testbench under Verilator without running it
 	mkdir -p $(VL_MDIR)
-	$(VERILATOR) $(VL_FLAGS) \
+	+$(VERILATOR) $(VL_FLAGS) \
 		$(addprefix +define+,$(DEFINES) RAPT_TB_EBREAK_HALT) \
 		$(addprefix -I,$(INCDIRS)) \
 		$(VSRCS) \
@@ -161,19 +168,22 @@ SMOKE_IMG ?= $(RAPTOR_HOME)/abstract-machine/app/am-kernels/tests/cpu-tests/buil
 # reading a legacy in-source artifact that a clean checkout does not have.
 SMOKE_MROM_DIR := $(abspath build/mrom/rv32-spike-rv32ima)
 SMOKE_MROM ?= $(SMOKE_MROM_DIR)/mrom-data.bin
-SMOKE_LOG := build/vl-middle/smoke.log
+SMOKE_LOG := $(VL_MDIR)/smoke.log
 
 $(SMOKE_MROM_DIR)/mrom-data.bin: $(RAPTOR_HOME)/sim/csrc/mem/mrom-data/Makefile \
 		$(RAPTOR_HOME)/sim/csrc/mem/mrom-data/rom.c $(RAPTOR_HOME)/linux/dts/spike-rv32ima.dts
 	+$(MAKE) -C $(RAPTOR_HOME)/sim/csrc/mem/mrom-data BUILD_DIR=$(SMOKE_MROM_DIR) \
 		ISA64=0 DT_SOURCE=spike-rv32ima.dts
 
-.PHONY: verilator-middle-smoke
-verilator-middle-smoke: $(SMOKE_MROM) ## Build middle and require GOOD TRAP plus a non-first commit slot
+.PHONY: verilator-middle-smoke _verilator-middle-smoke
+verilator-middle-smoke: ## Build middle and require GOOD TRAP plus a non-first commit slot
+	+$(MAKE) --no-print-directory _verilator-middle-smoke RAPT_CONFIG=middle
+
+_verilator-middle-smoke: $(SMOKE_MROM)
 	$(MAKE) --no-print-directory verilator-build RAPT_CONFIG=middle
 	test -f "$(SMOKE_MROM)"
 	test -f "$(SMOKE_IMG)"
-	./build/vl-middle/$(TOP) +IMG=$(abspath $(SMOKE_IMG)) \
+	./$(VL_MDIR)/$(TOP) +IMG=$(abspath $(SMOKE_IMG)) \
 		+MROM=$(abspath $(SMOKE_MROM)) +MAX_CYCLES=10000 +COMMIT_TRACE=1 \
 		>$(SMOKE_LOG)
 	grep -q "GOOD TRAP" $(SMOKE_LOG)

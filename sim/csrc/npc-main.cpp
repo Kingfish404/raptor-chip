@@ -57,8 +57,8 @@ int main(int argc, char *argv[])
 
   init_monitor(argc, argv);
   engine_start();
-  sig_dump_if_enabled();
-  int bad = is_exit_status_bad();
+  int sig_bad = sig_dump_if_enabled();
+  int bad = is_exit_status_bad() || sig_bad != 0;
   engine_free();
   return bad;
 }

@@ -25,7 +25,6 @@ module rapt_cmu #(
   logic ben_r, jen_r, jren_r, flush_pipe_r;
   int youngest, branch_index;
   logic branch_valid, atomic_valid;
-  logic [31:0] bcast_inst;
   rapt_pkg::ras_action_t commit_ras_action;
   always_comb begin
     count = 0;
@@ -44,7 +43,6 @@ module rapt_cmu #(
       end
     end
   end
-  assign bcast_inst = rou_cmu.slot[branch_index].inst;
   assign cmu_bcast.rpc = rou_cmu.slot[branch_valid?branch_index : youngest].pc;
   assign cmu_bcast.cpc = rou_cmu.next_pc;
   assign cmu_bcast.ben = branch_valid && !rou_cmu.slot[branch_index].trap
@@ -58,15 +56,19 @@ module rapt_cmu #(
   assign cmu_bcast.atomic_retired = atomic_valid;
   assign cmu_bcast.btaken = branch_valid && !rou_cmu.slot[branch_index].trap
       && rou_cmu.slot[branch_index].btaken;
-  assign commit_ras_action = rapt_pkg::ras_action(bcast_inst);
+  assign commit_ras_action = rou_cmu.slot[branch_index].ras;
   assign cmu_bcast.call = branch_valid && !rou_cmu.slot[branch_index].trap
       && commit_ras_action.push;
-  assign cmu_bcast.ret = branch_valid && !rou_cmu.slot[branch_index].trap
-      && commit_ras_action.pop;
+  assign cmu_bcast.ret = branch_valid && !rou_cmu.slot[branch_index].trap && commit_ras_action.pop;
   // inst is expanded by decode; its low bits cannot recover original length.
   assign cmu_bcast.rvc = rou_cmu.slot[branch_index].c;
   assign cmu_bcast.time_trap = rou_cmu.time_trap;
   assign cmu_bcast.fence_time = rou_cmu.fence_time;
+  assign cmu_bcast.sfence_valid = rou_cmu.sfence_valid;
+  assign cmu_bcast.sfence_vpn = rou_cmu.sfence_vpn;
+  assign cmu_bcast.sfence_asid = rou_cmu.sfence_asid;
+  assign cmu_bcast.sfence_all_vpn = rou_cmu.sfence_all_vpn;
+  assign cmu_bcast.sfence_all_asid = rou_cmu.sfence_all_asid;
   assign cmu_bcast.cbo_inval = rou_cmu.cbo_inval;
   assign cmu_bcast.cbo_block = rou_cmu.cbo_block;
   assign cmu_bcast.fence_i = rou_cmu.fence_i;
@@ -106,13 +108,13 @@ module rapt_cmu #(
       jren_r <= cmu_bcast.jren;
       flush_pipe_r <= rou_cmu.flush_pipe;
       if (count != 0) begin
-        rpc  <= rou_cmu.slot[youngest].pc;
-        npc  <= rou_cmu.next_pc;
+        rpc  <= `RAPT_PC_SEXT(XLEN, rou_cmu.slot[youngest].pc);
+        npc  <= `RAPT_PC_SEXT(XLEN, rou_cmu.next_pc);
         inst <= rou_cmu.slot[youngest].inst;
       end
       for (int c = 0; c < CommitWidth; c++) begin
-        rpc_slots[c] <= rou_cmu.slot[c].pc;
-        npc_slots[c] <= rou_cmu.slot[c].npc;
+        rpc_slots[c] <= `RAPT_PC_SEXT(XLEN, rou_cmu.slot[c].pc);
+        npc_slots[c] <= `RAPT_PC_SEXT(XLEN, rou_cmu.slot[c].npc);
         inst_slots[c] <= rou_cmu.slot[c].inst;
         ben_slots[c] <= rou_cmu.slot[c].ben;
         jen_slots[c] <= rou_cmu.slot[c].jen;

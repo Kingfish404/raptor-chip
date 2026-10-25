@@ -121,9 +121,11 @@ def address_cases(reference, extensions, write_csr, check):
         reference.run([0x0000b007])
         if deny:
             write_csr(0x3b0, physical >> 2)
-            write_csr(0x3b1, physical >> 2)
+            # Entry 1 denies the target page. NA4 cannot be selected when
+            # the reference implements a 4 KiB PMP grain.
+            write_csr(0x3b1, (physical >> 2) | 0x1ff)
             write_csr(0x3b2, all_bits)
-            write_csr(0x3a0, 0x1f100f)
+            write_csr(0x3a0, 0x1f180f)
         state.satp[0] = ((8 << 60) | ((root | ((1 << 52) if bad_ptw else 0)) >> 12)) if translated else 0
         state.mstatus[0] |= (int(mxr) << 19) | ((1 << 17) | (mpp << 11) if mpp is not None else 0)
         state.priv[0] = bytes([privilege])

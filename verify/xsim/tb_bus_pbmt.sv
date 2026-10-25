@@ -75,6 +75,14 @@ module tb_bus_pbmt;
       l1d_bus.arvalid = 1;
     end
     #1;
+    // A PTW coherence request registers its address before accepting the read.
+    // Hold the payload until the bus reports the actual capture handshake.
+    for (
+        int wait_cycles = 0;
+        wait_cycles < 64 && !(instruction ? l1i_bus.rready : l1d_bus.rready);
+        wait_cycles++
+    )
+      tick(1);
     check(instruction ? l1i_bus.rready : l1d_bus.rready, "read slot not accepted");
     tick(1);
     l1i_bus.arvalid = 0;

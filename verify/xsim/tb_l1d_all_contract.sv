@@ -175,6 +175,11 @@ module tb_l1d_cmo_permissions;
       .external_write_first_i('0),
       .external_write_last_i('0),
       `TB_L1D_UNUSED_RELEASE_PORTS,
+      .writeback_cbo_done(),
+      .coherent_addr('0),
+      .writeback_cbo(1'b0),
+      .writeback_cbo_invalidate(1'b0),
+      .writeback_block('0),
       .*
   );
   always #5 clock = ~clock;
@@ -823,6 +828,11 @@ module tb_l1d_load_pbmt;
       .release_ack_i(1'b0),
       .probe_window_i(1'b0),
       .writeback_bus_pending_o(),
+      .writeback_cbo_done(),
+      .coherent_addr('0),
+      .writeback_cbo(1'b0),
+      .writeback_cbo_invalidate(1'b0),
+      .writeback_block('0),
       .*
   );
   always #5 clock = ~clock;
@@ -994,7 +1004,8 @@ module tb_l1d_load_footprint;
     for (int translated = 0; translated < 2; translated++)
     for (int half = 0; half < 2; half++)
     for (int kind = 0; kind < 3; kind++) begin
-      automatic logic [XLEN-1:0] grant_pa=XLEN'('h80001000)+XLEN'(half)*XLEN'(4);
+      automatic logic [XLEN-1:0] grant_pa = (`RAPT_PMP_GRANULARITY_LOG2 == 2
+          ? XLEN'('h80001000) : XLEN'('h80001ff8)) + XLEN'(half) * XLEN'(4);
       automatic logic [XLEN-1:0] beat_pa=grant_pa & ~XLEN'(WORD_BYTES-1);
       automatic logic [XLEN-1:0] va=translated!=0 ? XLEN'('h40001000)+(beat_pa & XLEN'(4095)) : beat_pa;
       if (kind == 2 && XLEN == 32) continue;
@@ -1008,9 +1019,15 @@ module tb_l1d_load_footprint;
       pmp_update.addr_we=1;
       pmp_update.addr_idx=0;
       pmp_update.raw_addr=$bits(pmp_update.raw_addr)'(grant_pa>>2);
+      if (`RAPT_PMP_GRANULARITY_LOG2 != 2) begin
+        pmp_update.raw_addr = $bits(pmp_update.raw_addr)'(
+            ((grant_pa & ~XLEN'(4095)) >> 2) | 511);
+        pmp_update.napot_mask = $bits(pmp_update.napot_mask)'(1023);
+      end
       pmp_update.cfg_we[0]=1;
       pmp_update.mode_off[0]=0;
-      pmp_update.mode_na4[0]=1;
+      pmp_update.mode_na4[0] = `RAPT_PMP_GRANULARITY_LOG2 == 2;
+      pmp_update.mode_napot[0] = `RAPT_PMP_GRANULARITY_LOG2 != 2;
       pmp_update.cfg_r[0]=kind!=1;
       tick(1);
       pmp_update.addr_we=0;
@@ -1030,6 +1047,9 @@ module tb_l1d_load_footprint;
       lsu_l1d.rcheck_valid=1;
       lsu_l1d.rorig_size_m1=7;
       lsu_l1d.rcheck_offset=kind==2 ? 3'd0 : 3'(grant_pa-beat_pa);
+      // With page-grain PMP, both halves of the final beat are legal. The
+      // larger captured footprint crosses the page instead of a half-word.
+      if (kind == 2 && `RAPT_PMP_GRANULARITY_LOG2 != 2) lsu_l1d.rcheck_offset = 3'(WORD_BYTES - 4);
       lsu_l1d.rcheck_size_m1=kind==2 ? 4'd7 : 4'd3;
       lsu_l1d.rvalid=1;
       lsu_l1d.ordered=1;
@@ -1207,6 +1227,11 @@ module tb_l1d_permission_stage;
       .writeback_idle(),
       .writeback_drain(1'b0),
       `TB_L1D_UNUSED_RELEASE_PORTS,
+      .writeback_cbo_done(),
+      .coherent_addr('0),
+      .writeback_cbo(1'b0),
+      .writeback_cbo_invalidate(1'b0),
+      .writeback_block('0),
       .*
   );
   `include "tb_common.svh"
@@ -1616,6 +1641,11 @@ module tb_l1d_ptw_axi_error;
       .writeback_idle(),
       .writeback_drain(1'b0),
       `TB_L1D_UNUSED_RELEASE_PORTS,
+      .writeback_cbo_done(),
+      .coherent_addr('0),
+      .writeback_cbo(1'b0),
+      .writeback_cbo_invalidate(1'b0),
+      .writeback_block('0),
       .*
   );
   rapt_bus #(
@@ -2233,6 +2263,8 @@ module tb_l1d_replacement;
   wire [3:0] load_way_hit, probe_way_hit;
   wire hit_w;
   wire [1:0] store_hit_way, store_fill_way, ld_fill_way;
+  // Victim after the touches below: tree PLRU picks way 2, true LRU way 1.
+  localparam logic [1:0] Victim = `RAPT_CACHE_LRU != 0 ? 2'd1 : 2'd2;
   always #5 clock = ~clock;
   rapt_l1d_tags #(
       .L1D_LEN(1),
@@ -2256,6 +2288,8 @@ module tb_l1d_replacement;
       .load_victim_dirty(),
       .inspect_dirty(),
       .inspect_dirty_any(),
+      .first_dirty_set(),
+      .first_dirty_way(),
       .dirty_any(),
       .update_blocked(),
       .line_update(1'b0),
@@ -2284,18 +2318,18 @@ module tb_l1d_replacement;
       end
     end
     l1d_update = 0;
-    // Touch set 0 / way 0: set 0 victim becomes 2, set 1 stays at 0.
+    // Touch set 0 / way 0: set 0 victim becomes Victim, set 1 stays at 0.
     addr_tag = 0;
     load_hit = 1;
     tick();
     load_hit = 0;
     addr_tag = 15;
     #1;
-    if (ld_fill_way != 2 || store_fill_way != 0)
+    if (ld_fill_way != Victim || store_fill_way != 0)
       $fatal(1, "load and write-side victim queries used the same set");
     fill_probe = 1;
     #1;
-    if (ld_fill_way != 2 || store_fill_way != 0)
+    if (ld_fill_way != Victim || store_fill_way != 0)
       $fatal(1, "refill probe changed the load-side victim");
     // Fill set 1 / way 0 while load lookup remains on set 0.
     l1d_update = 1;
@@ -2305,13 +2339,14 @@ module tb_l1d_replacement;
     tick();
     l1d_update = 0;
     #1;
-    if (ld_fill_way != 2 || store_fill_way != 2) $fatal(1, "refill did not update its own set/way");
+    if (ld_fill_way != Victim || store_fill_way != Victim)
+      $fatal(1, "refill did not update its own set/way");
     fill_probe = 0;
-    // Unfilled offset 1: all lines remain occupied, so retain PLRU victim 2.
+    // Unfilled offset 1: all lines remain occupied, so retain the policy victim.
     addr_offset = 1;
     waddr_offset = 1;
     #1;
-    if (ld_fill_way != 2 || store_fill_way != 2)
+    if (ld_fill_way != Victim || store_fill_way != Victim)
       $fatal(1, "missing word incorrectly treated as an empty line");
     // A partial matching line must be reused instead of another invalid way.
     addr_tag = 3;
@@ -2382,6 +2417,11 @@ module tb_l1d_reservation_external;
       .writeback_idle(),
       .writeback_drain(1'b0),
       `TB_L1D_UNUSED_RELEASE_PORTS,
+      .writeback_cbo_done(),
+      .coherent_addr('0),
+      .writeback_cbo(1'b0),
+      .writeback_cbo_invalidate(1'b0),
+      .writeback_block('0),
       .*
   );
   `include "tb_common.svh"
@@ -2625,21 +2665,29 @@ endmodule
 
 module tb_l1d_store_coherence #(
     parameter bit WriteBack = 1'b0,
+    parameter bit TargetedCoherence = `RAPT_L1D_TARGETED_COHERENCE,
     parameter bit LineRefill = 1'b0
 );
   logic coherent_request = 0, coherent_write = 0;
   logic coherent_ready, writeback_error, writeback_idle;
   logic writeback_drain = 0;
+  logic writeback_cbo = 0, writeback_cbo_invalidate = 0, writeback_cbo_done;
+  logic [`RAPT_XLEN-1:6] writeback_block = '0;
   function automatic int tlb_slot(input logic [`RAPT_XLEN-1:0] vpn);
     return `RAPT_DTLB_WAYS == 0 ? 0
         : int'(vpn) % (`RAPT_DTLB_ENTRIES / (`RAPT_DTLB_WAYS == 0 ? 1 : `RAPT_DTLB_WAYS));
   endfunction
   localparam int XLEN = `RAPT_XLEN;
   localparam logic [31:0] TestAddr = 32'h8000_0000;
+  logic [XLEN-1:0] coherent_addr = XLEN'(TestAddr);
   localparam int ConflictShift = `RAPT_L1D_LEN + `RAPT_L1D_LINE_LEN + $clog2(XLEN / 8);
   localparam int ConflictLines = `RAPT_L1D_N_WAYS + 2;
   localparam int RandomOps = 2000;
-  localparam int BackingWords = (1 << `RAPT_L1D_LINE_LEN) * (XLEN / 32);
+  localparam int LineWords = (1 << `RAPT_L1D_LINE_LEN) * (XLEN / 32);
+  // Keep distinct cache sets physically distinct in the backing model. The
+  // dense-store scenarios reach beyond one 16-byte line in a 16-byte-line preset.
+  localparam int BackingWords = (1 << ConflictShift) / 4;
+  logic bus_write_pending = 0, bus_write_enable = 1;
 
   logic clock = 1'b0;
   logic reset = 1'b1;
@@ -2672,17 +2720,23 @@ module tb_l1d_store_coherence #(
 
   rapt_l1d #(
       .WriteBack(WriteBack),
+      .TargetedCoherence(TargetedCoherence),
       .LineRefill(LineRefill)
   ) dut (
       .l2tlb_req_o(),
       .l2tlb_ready_i(1'b0),
       .l2tlb_rsp_i('0),
       .coherent_request(coherent_request),
+      .coherent_addr(coherent_addr),
       .coherent_write(coherent_write),
       .coherent_ready(coherent_ready),
       .writeback_error(writeback_error),
       .writeback_idle(writeback_idle),
       .writeback_drain(writeback_drain),
+      .writeback_cbo(writeback_cbo),
+      .writeback_cbo_invalidate(writeback_cbo_invalidate),
+      .writeback_block(writeback_block),
+      .writeback_cbo_done(writeback_cbo_done),
       .clock(clock),
       .cmu_bcast(cmu_bcast),
       .lsu_l1d(lsu_l1d),
@@ -2696,7 +2750,9 @@ module tb_l1d_store_coherence #(
   always #5 clock = ~clock;
 
   `include "tb_common.svh"
+  `define TB_L1D_WRITE_RESPONSE_MODEL
   `include "tb_l1d_defaults.svh"
+  `undef TB_L1D_WRITE_RESPONSE_MODEL
 
   task automatic read_word(input logic [31:0] addr, input logic [31:0] expected);
     begin
@@ -2880,6 +2936,29 @@ module tb_l1d_store_coherence #(
     fail("concurrent partial store/load timed out");
   endtask
 
+  // Cold-cache scenarios use explicit block maintenance. Translation fences
+  // intentionally retain data now, including dirty ownership during stress.
+  task automatic invalidate_backed_lines;
+    for (int wait_cycle = 0; wait_cycle < 4096 && !lsu_l1d.idle; wait_cycle++) tick(1);
+    check(lsu_l1d.idle, "cache setup has an unfinished refill");
+    for (int line_idx = 0; line_idx < ConflictLines; line_idx++) begin
+      @(negedge clock);
+      writeback_block = (XLEN-6)'((XLEN'(TestAddr) + (XLEN'(line_idx) << ConflictShift)) >> 6);
+      writeback_cbo = 1;
+      writeback_cbo_invalidate = 1;
+      for (int wait_cycle = 0; wait_cycle < 4096 && !writeback_cbo_done; wait_cycle++) tick(1);
+      check(writeback_cbo_done, "cold-cache setup block maintenance timed out");
+      @(negedge clock);
+      writeback_cbo = 0;
+      writeback_cbo_invalidate = 0;
+      cmu_bcast.cbo_block = writeback_block;
+      cmu_bcast.cbo_inval = 1;
+      tick(1);
+      cmu_bcast.cbo_inval = 0;
+      tick(1);
+    end
+  endtask
+
   task automatic targeted_writeback_error(input bit store_miss, input bit inject_error,
                                           input bit partial_miss = 0);
     logic [XLEN-1:0] held_addr, held_data;
@@ -2903,7 +2982,7 @@ module tb_l1d_store_coherence #(
       write_word(TestAddr + (line_idx << ConflictShift), ~original_word[line_idx]);
     end
     @(negedge clock);
-    l1d_bus.wready = 0;
+    bus_write_enable = 0;
     if (partial_miss) begin
       lsu_l1d.waddr = TestAddr + (`RAPT_L1D_N_WAYS << ConflictShift);
       lsu_l1d.walu = 8'h01;
@@ -2913,9 +2992,11 @@ module tb_l1d_store_coherence #(
       check(l1d_bus.wvalid && l1d_bus.awaddr == lsu_l1d.waddr && !dut.wb_busy,
             "partial miss drained unrelated dirty data");
       l1d_bus.werr = inject_error;
-      l1d_bus.wready = 1;
+      bus_write_enable = 1;
       #1;
       check(!lsu_l1d.wready, "partial miss bypassed its response register");
+      for (int n = 0; n < 16 && !l1d_bus.wready; n++) tick(1);
+      check(l1d_bus.wready, "partial miss did not acquire a response owner");
       tick(1);
       check(lsu_l1d.wready && lsu_l1d.werr == inject_error,
             "partial miss response did not reach LSU");
@@ -2960,17 +3041,23 @@ module tb_l1d_store_coherence #(
     end
     @(negedge clock);
     if (!inject_error) begin
+      coherent_addr = XLEN'(TestAddr + ((`RAPT_L1D_N_WAYS - 1) << ConflictShift));
       coherent_request = 1;
       tick(2);
       check(!coherent_ready, "coherence escaped blocked targeted writeback");
       @(negedge clock);
-      l1d_bus.wready = 1;
+      bus_write_enable = 1;
       for (int wait_cycle = 0; wait_cycle < 4096 && !coherent_ready; wait_cycle++) tick(1);
-      check(coherent_ready && !dut.dirty_any && !writeback_error,
-            "targeted writeback did not upgrade to global coherence drain");
+      check(coherent_ready && !writeback_error,
+            "targeted coherence did not complete after the queued victim");
       for (int line_idx = 0; line_idx < `RAPT_L1D_N_WAYS; line_idx++) begin
-        check(mem_word[line_idx][0] == ~original_word[line_idx],
-              "coherence released before unrelated dirty data reached memory");
+        if (!TargetedCoherence || XLEN'(TestAddr + (line_idx << ConflictShift)) == coherent_addr
+            || XLEN'(TestAddr + (line_idx << ConflictShift)) == held_addr)
+          check(mem_word[line_idx][0] == ~original_word[line_idx],
+                "coherence released before its target or queued victim reached memory");
+        else
+          check(mem_word[line_idx][0] == original_word[line_idx],
+                "targeted coherence published unrelated dirty data");
       end
       @(negedge clock);
       coherent_request = 0;
@@ -2990,7 +3077,7 @@ module tb_l1d_store_coherence #(
       return;
     end
     l1d_bus.werr = 1;
-    l1d_bus.wready = 1;
+    bus_write_enable = 1;
     tick(1);
     @(negedge clock);
     l1d_bus.werr = 0;
@@ -3029,9 +3116,16 @@ module tb_l1d_store_coherence #(
   endfunction
 
   assign l1d_bus.rready = !reset && l1d_bus.arvalid && !bus_rd_pending;
-  // This direct model completes writes in the request cycle and has no
-  // write-response owner to retain between cycles.
-  assign l1d_bus.idle = 1'b1;
+  // Model a bus without posting: acquire an owner before returning B.
+  // A nonposted response on the request's first edge is impossible in
+  // rapt_bus and can precede a pending refill's final tag installation.
+  assign l1d_bus.wready = bus_write_enable && bus_write_pending;
+  assign l1d_bus.idle = !bus_write_pending;
+  always_ff @(posedge clock) begin
+    if (reset) bus_write_pending <= 0;
+    else if (l1d_bus.wready) bus_write_pending <= 0;
+    else if (l1d_bus.awvalid && l1d_bus.wvalid) bus_write_pending <= 1;
+  end
 
   always_ff @(posedge clock) begin : fake_memory_bus
     if (reset) begin
@@ -3128,6 +3222,41 @@ module tb_l1d_store_coherence #(
     tick(5);
     reset = 1'b0;
     tick(2);
+
+    if ($test$plusargs("MIN_REFILL_STORE")) begin
+      logic [31:0] last_word_addr;
+      last_word_addr = TestAddr + 4 * (LineWords - 1);
+      check(WriteBack && LineRefill, "refill/store race requires WB line refills");
+      @(negedge clock);
+      lsu_l1d.raddr = XLEN'(TestAddr);
+      lsu_l1d.rvalid = 1;
+      for (int n = 0; n < 512; n++) begin
+        #1;
+        if (l1d_bus.rvalid && l1d_bus.rlast) break;
+        @(negedge clock);
+      end
+      check(l1d_bus.rvalid && l1d_bus.rlast, "refill did not reach final beat");
+      @(posedge clock);
+      @(negedge clock);
+      lsu_l1d.rvalid = 0;
+      check(dut.l1d_update && dut.l1d_state == 0, "final refill installation window was missed");
+      lsu_l1d.waddr = XLEN'(last_word_addr);
+      lsu_l1d.wdata = 'h6f;
+      lsu_l1d.walu = `RAPT_SB_WSTRB;
+      lsu_l1d.wvalid = 1;
+      #1;
+      check(!dut.hit_w && l1d_bus.wvalid, "store did not precede final tag installation");
+      for (int n = 0; n < 32 && !lsu_l1d.wready; n++) tick(1);
+      check(lsu_l1d.wready, "refill-adjacent store did not complete");
+      @(posedge clock);
+      @(negedge clock);
+      lsu_l1d.wvalid = 0;
+      tick(2);
+      read_word(last_word_addr, LineWords == 4 ? 32'hddee_ff6f : 32'h0000_006f);
+      check(mem_word[0][LineWords-1][7:0] == 8'h6f, "store did not reach backing memory");
+      $display("PASS: final refill beat followed by byte store XLEN=%0d", XLEN);
+      $finish;
+    end
 
     if ($test$plusargs("MIN_WB_B")) begin
       check(WriteBack && XLEN == 64, "minimal writeback B payload requires RV64 WB");
@@ -3295,9 +3424,7 @@ module tb_l1d_store_coherence #(
       end
       check(writeback_idle, "initial writeback drain timed out");
       writeback_drain = 0;
-      cmu_bcast.fence_time = 1;
-      tick(1);
-      cmu_bcast.fence_time = 0;
+      invalidate_backed_lines();
       tick(512);
       if (LineRefill) begin
         @(negedge clock);
@@ -3340,9 +3467,7 @@ module tb_l1d_store_coherence #(
         for (int drain_cycle = 0; drain_cycle < 4096 && !writeback_idle; drain_cycle++) tick(1);
         check(writeback_idle, "overlap cleanup drain timed out");
         writeback_drain = 0;
-        cmu_bcast.fence_time = 1;
-        tick(1);
-        cmu_bcast.fence_time = 0;
+        invalidate_backed_lines();
         tick(512);
         $display("PASS: local store overlaps pending line refill XLEN=%0d", XLEN);
       end
@@ -3408,9 +3533,7 @@ module tb_l1d_store_coherence #(
       for (int drain_cycle = 0; drain_cycle < 4096 && !writeback_idle; drain_cycle++) tick(1);
       check(writeback_idle, "post-victim explicit drain timed out");
       writeback_drain = 0;
-      cmu_bcast.fence_time = 1;
-      tick(1);
-      cmu_bcast.fence_time = 0;
+      invalidate_backed_lines();
       tick(512);
       for (int line_idx = 0; line_idx < `RAPT_L1D_N_WAYS; line_idx++) begin
         read_word(TestAddr + (line_idx << ConflictShift), expected_word[line_idx][0]);
@@ -3466,10 +3589,10 @@ module tb_l1d_store_coherence #(
       concurrent_partial_store(`RAPT_SB_WSTRB, expected_word[0][0]);
       expected_word[0][0][15:0] = 16'habcd;
       concurrent_partial_store(`RAPT_SH_WSTRB, expected_word[0][0]);
-      if (BackingWords > 4) begin
-        read_word(TestAddr + 4 * (BackingWords - 1), 32'b0);
-        write_word(TestAddr + 4 * (BackingWords - 1), 32'h5a3c_c3a5);
-        read_word(TestAddr + 4 * (BackingWords - 1), 32'h5a3c_c3a5);
+      if (LineWords > 4) begin
+        read_word(TestAddr + 4 * (LineWords - 1), 32'b0);
+        write_word(TestAddr + 4 * (LineWords - 1), 32'h5a3c_c3a5);
+        read_word(TestAddr + 4 * (LineWords - 1), 32'h5a3c_c3a5);
       end
       // Exercise rapid full-width hits to one word and then several words in
       // the same dirty line. A store miss to each distinct line cannot cover
@@ -3514,9 +3637,8 @@ module tb_l1d_store_coherence #(
         for (int drain_cycle = 0; drain_cycle < 4096 && !writeback_idle; drain_cycle++) tick(1);
         check(writeback_idle, "dense-line writeback drain timed out");
         writeback_drain = 1'b0;
-        cmu_bcast.fence_time = 1'b1;
-        tick(1);
-        cmu_bcast.fence_time = 1'b0;
+        invalidate_backed_lines();
+        tick(512);
         for (int word_idx = 0; word_idx < 8; word_idx++) begin
           check(mem_word[0][2*word_idx] == 32'd7, "dense-line writeback lost backing data");
           read_word(TestAddr + 8 * word_idx, 32'd7);
@@ -3542,9 +3664,8 @@ module tb_l1d_store_coherence #(
         for (int drain_cycle = 0; drain_cycle < 4096 && !writeback_idle; drain_cycle++) tick(1);
         check(writeback_idle, "overlapped writeback drain timed out");
         writeback_drain = 1'b0;
-        cmu_bcast.fence_time = 1'b1;
-        tick(1);
-        cmu_bcast.fence_time = 1'b0;
+        invalidate_backed_lines();
+        tick(512);
         for (int word_idx = 0; word_idx < 8; word_idx++) begin
           check(mem_word[0][2*word_idx] == 32'd9, "overlapped drain lost backing data");
           read_word(TestAddr + 8 * word_idx, 32'd9);
@@ -3553,15 +3674,20 @@ module tb_l1d_store_coherence #(
       end
       read_word(TestAddr, expected_word[0][0]);
       write_store(TestAddr, 32'h0000_005a, `RAPT_SB_WSTRB, 0);
-      cmu_bcast.fence_time = 1;
-      tick(1);
-      cmu_bcast.fence_time = 0;
+      invalidate_backed_lines();
+      tick(512);
       expected_word[0][0][7:0] = 8'h5a;
       read_word(TestAddr, expected_word[0][0]);
+      // Establish the backing value explicitly before injecting a B error.
+      writeback_drain = 1;
+      for (int drain_cycle = 0; drain_cycle < 4096 && !writeback_idle; drain_cycle++) tick(1);
+      check(writeback_idle, "write-error setup drain timed out");
+      writeback_drain = 0;
       @(negedge clock);
-      l1d_bus.wready = 0;
+      bus_write_enable = 0;
       write_store(TestAddr, 32'h1234_abcd, `RAPT_SW_WSTRB, 0);
       check(mem_word[0][0] == expected_word[0][0], "dirty store reached memory before B");
+      coherent_addr = XLEN'(TestAddr);
       coherent_request = 1;
       cmu_bcast.fence_time = 1;
       tick(1);
@@ -3572,7 +3698,7 @@ module tb_l1d_store_coherence #(
             "writeback payload lost under backpressure");
       @(negedge clock);
       l1d_bus.werr = 1;
-      l1d_bus.wready = 1;
+      bus_write_enable = 1;
       tick(1);
       @(negedge clock);
       l1d_bus.werr = 0;
@@ -3685,10 +3811,13 @@ module tb_l1d_store_pbmt;
           end
           check(writes == 1, "typed store did not reach backing memory exactly once");
           if (hot != 0) begin
-            // Software performs cache maintenance before changing alias type.
-            cmu_bcast.fence_time = 1;
+            // Returning to cacheable access requires CBO maintenance, not SFENCE.
+            // This test only warmed a clean line; no dirty writeback is needed.
+            check(!dut.dirty_any, "PBMT alias maintenance unexpectedly found dirty data");
+            cmu_bcast.cbo_block = Addr[XLEN-1:6];
+            cmu_bcast.cbo_inval = 1;
             tick(1);
-            cmu_bcast.fence_time = 0;
+            cmu_bcast.cbo_inval = 0;
             tick(100);
           end
           begin
@@ -3761,6 +3890,8 @@ module tb_l1d_tags;
           .load_victim_tag(),
           .load_victim_valid(),
           .load_victim_dirty(),
+          .first_dirty_set(),
+          .first_dirty_way(),
           .fence_time(|clear_set),
           .*
       );
@@ -4095,6 +4226,11 @@ module tb_l1d_write_error;
       .writeback_idle(),
       .writeback_drain(1'b0),
       `TB_L1D_UNUSED_RELEASE_PORTS,
+      .writeback_cbo_done(),
+      .coherent_addr('0),
+      .writeback_cbo(1'b0),
+      .writeback_cbo_invalidate(1'b0),
+      .writeback_block('0),
       .*
   );
   `include "tb_common.svh"
@@ -4205,6 +4341,11 @@ module tb_l1d_lr_admission;
       .writeback_idle(),
       .writeback_drain(1'b0),
       `TB_L1D_UNUSED_RELEASE_PORTS,
+      .writeback_cbo_done(),
+      .coherent_addr('0),
+      .writeback_cbo(1'b0),
+      .writeback_cbo_invalidate(1'b0),
+      .writeback_block('0),
       .*
   );
   `include "tb_l1d_defaults.svh"
@@ -4507,6 +4648,7 @@ module tb_l1d_response_boundary;
   l1i_bus_if l1i_bus ();
   mem_link_if mem ();
   logic coherent_ready, coherent_request, coherent_write;
+  logic [`RAPT_XLEN-1:0] coherent_addr;
   logic writeback_error, writeback_idle;
   logic writeback_drain = 0;
   rapt_l1d #(
@@ -4523,6 +4665,10 @@ module tb_l1d_response_boundary;
       .external_write_first_i('0),
       .external_write_last_i('0),
       `TB_L1D_UNUSED_RELEASE_PORTS,
+      .writeback_cbo_done(),
+      .writeback_cbo(1'b0),
+      .writeback_cbo_invalidate(1'b0),
+      .writeback_block('0),
       .*
   );
   rapt_bus bus_dut (
@@ -4878,5 +5024,955 @@ module tb_l1d_response_boundary;
   initial begin
     #1000000;
     $fatal(1, "B1 response boundary timeout");
+  end
+endmodule
+
+
+// ---- tb_targeted_coherence ----
+`include "rapt.svh"
+`include "rapt_if.svh"
+`include "rapt_soc_if.svh"
+`include "tb_l1d_unused_release_ports.svh"
+
+// Real D-side walker and I-side bus owner share delayed backing memory.
+// Writes become visible only on B; unrelated dirty data must remain private.
+module tb_targeted_coherence #(
+    parameter bit DirtySkip = 0
+);
+  localparam int XLEN = `RAPT_XLEN;
+  localparam int Bytes = XLEN / 8;
+  localparam logic [XLEN-1:0] Base = XLEN'('h80000000);
+  localparam logic [XLEN-1:0] Other = Base + 'h9080;
+  localparam logic [XLEN-1:0] Target = Base + 'h2080;
+  localparam logic [XLEN-1:0] Va = XLEN'('h40000000);
+  logic clock = 0, reset = 1;
+  always #5 clock = ~clock;
+  cmu_bcast_if cmu_bcast ();
+  csr_bcast_if csr_bcast ();
+  pmp_update_if pmp_update ();
+  lsu_l1d_if lsu_l1d ();
+  lsu_l1d_mmu_if exu_l1d ();
+  rou_cmu_if rou_cmu ();
+  l1d_bus_if l1d_bus ();
+  l1i_bus_if l1i_bus ();
+  mem_link_if mem ();
+  logic coherent_request, coherent_write, coherent_ready;
+  logic [XLEN-1:0] coherent_addr;
+  logic writeback_error, writeback_idle;
+  logic writeback_drain = 0;
+  logic writeback_cbo = 0, writeback_cbo_invalidate = 0, writeback_cbo_done;
+  logic [XLEN-1:6] writeback_block = 0;
+  rapt_pkg::l2tlb_req_t l2tlb_req[2];
+  rapt_pkg::l2tlb_rsp_t l2tlb_rsp[2];
+  logic [1:0] l2tlb_ready;
+  assign l2tlb_req[0] = '0;
+  if (`RAPT_L2TLB_ENTRIES > 0) begin : g_l2tlb
+    rapt_l2tlb #(
+        .Entries(`RAPT_L2TLB_ENTRIES),
+        .XLEN(XLEN)
+    ) u_l2tlb (
+        .clock(clock),
+        .reset(reset),
+        .flush(cmu_bcast.fence_time),
+        .req_i(l2tlb_req),
+        .ready_o(l2tlb_ready),
+        .rsp_o(l2tlb_rsp)
+    );
+  end else begin : g_no_l2tlb
+    assign l2tlb_ready = '0;
+    assign l2tlb_rsp[0] = '0;
+    assign l2tlb_rsp[1] = '0;
+  end
+  rapt_l1d #(
+      .WriteBack(1),
+      .DirtySkip(DirtySkip),
+      .L2Tlb(`RAPT_L2TLB_ENTRIES > 0)
+  ) dut (
+      .l2tlb_req_o(l2tlb_req[1]),
+      .l2tlb_ready_i(l2tlb_ready[1]),
+      .l2tlb_rsp_i(l2tlb_rsp[1]),
+      .external_write_valid_i(1'b0),
+      .external_write_pending_i(1'b0),
+      .external_write_first_i('0),
+      .external_write_last_i('0),
+      `TB_L1D_UNUSED_RELEASE_PORTS,
+      .*
+  );
+  rapt_bus bus_dut (
+      .rd_req_cacheable(),
+      .*
+  );
+  `define TB_L1D_EXTERNAL_BUS
+  `include "tb_l1d_defaults.svh"
+  `undef TB_L1D_EXTERNAL_BUS
+
+  byte unsigned backing[131072];
+  logic reading = 0, writing = 0;
+  logic [3:0] read_id, write_id;
+  logic [XLEN-1:0] read_addr, write_addr, write_data;
+  logic [Bytes-1:0] write_strb;
+  int read_beats, read_step, read_delay, write_delay;
+  int writes, dptw_reads, iptw_reads, device_writes;
+  bit fail_writes = 0;
+  int delay_max = 7;
+  int unsigned rng = 1;
+
+  function automatic logic [XLEN-1:0] memory_word(input logic [XLEN-1:0] addr);
+    logic [XLEN-1:0] result;
+    result = '0;
+    if (addr >= Base && addr < Base + 131072)
+      for (int b = 0; b < Bytes; b++) result[b*8+:8] = backing[int'(addr-Base)+b];
+    else result = XLEN'('h13579bdf);
+    return result;
+  endfunction
+  task automatic seed_word(input logic [XLEN-1:0] addr, input logic [XLEN-1:0] value);
+    for (int b = 0; b < Bytes; b++) backing[int'(addr-Base)+b] = value[b*8+:8];
+  endtask
+
+  assign mem.rd_req_ready = !reading;
+  assign mem.rd_rsp_valid = reading && read_delay == 0;
+  assign mem.rd_rsp_id = read_id;
+  assign mem.rd_rsp_data = memory_word(read_addr);
+  assign mem.rd_rsp_last = read_beats == 1;
+  assign mem.rd_rsp_error = 0;
+  assign mem.wr_req_ready = !writing;
+  assign mem.wr_rsp_valid = writing && write_delay == 0;
+  assign mem.wr_rsp_id = write_id;
+  assign mem.wr_rsp_error = fail_writes;
+  always @(posedge clock) begin
+    if (reset) begin
+      reading <= 0;
+      writing <= 0;
+      writes = 0;
+      dptw_reads = 0;
+      iptw_reads = 0;
+      device_writes = 0;
+    end else begin
+      rng = rng * 1664525 + 1013904223;
+      if (mem.rd_req_valid && mem.rd_req_ready) begin
+        if ($test$plusargs("TRACE"))
+          $display(
+              "READ id=%0d addr=%h data=%h",
+              mem.rd_req_id,
+              mem.rd_req_addr,
+              memory_word(
+                  mem.rd_req_addr
+              )
+          );
+        if (writing && ((mem.rd_req_addr ^ write_addr) >> $clog2(`RAPT_CACHE_LINE_BYTES)) == 0)
+          $fatal(1, "read escaped before target write response addr=%h", mem.rd_req_addr);
+        reading <= 1;
+        read_addr <= mem.rd_req_addr;
+        read_id <= mem.rd_req_id;
+        read_beats <= int'(mem.rd_req_len) + 1;
+        read_step <= 1 << mem.rd_req_size;
+        read_delay <= int'(rng % unsigned'(delay_max + 1));
+        if (mem.rd_req_id == 4) dptw_reads++;
+        if (mem.rd_req_id == 3) iptw_reads++;
+      end else if (mem.rd_rsp_valid && mem.rd_rsp_ready) begin
+        read_addr <= read_addr + XLEN'(read_step);
+        read_beats <= read_beats - 1;
+        read_delay <= int'((rng >> 8) % unsigned'(delay_max + 1));
+        if (read_beats == 1) reading <= 0;
+      end else if (reading && read_delay != 0) read_delay <= read_delay - 1;
+      if (mem.wr_req_valid && mem.wr_req_ready) begin
+        writing <= 1;
+        write_addr <= mem.wr_req_addr & ~XLEN'(Bytes-1);
+        write_data <= mem.wr_req_data;
+        write_strb <= mem.wr_req_strb;
+        write_id <= mem.wr_req_id;
+        write_delay <= 16 + int'(rng % unsigned'(delay_max + 1));
+      end else if (mem.wr_rsp_valid && mem.wr_rsp_ready) begin
+        writing <= 0;
+        if ($test$plusargs("TRACE"))
+          $display("WRITE addr=%h data=%h mask=%h", write_addr, write_data, write_strb);
+        writes++;
+        if (fail_writes) begin
+          // A failed response must leave the writeback queue owning the data.
+        end else if (write_addr >= Base && write_addr < Base + 131072) begin
+          for (int b = 0; b < Bytes; b++)
+          if (write_strb[b]) backing[int'(write_addr-Base)+b] = write_data[b*8+:8];
+        end else device_writes++;
+      end else if (writing && write_delay != 0) write_delay <= write_delay - 1;
+      if (writeback_error && !fail_writes) $fatal(1, "unexpected writeback error");
+    end
+  end
+
+  task automatic init;
+    @(negedge clock);
+    reset = 1;
+    init_l1d_inputs();
+    lsu_l1d.rvalid_b = 0;
+    l1i_bus.arvalid = 0;
+    l1i_bus.araddr = 0;
+    l1i_bus.arburst = 0;
+    l1i_bus.ar_ptw = 0;
+    l1i_bus.rpbmt = 0;
+    l1i_bus.noallocate = 0;
+    writeback_drain = 0;
+    fail_writes = 0;
+    writeback_cbo = 0;
+    writeback_cbo_invalidate = 0;
+    writeback_block = 0;
+    foreach (backing[b]) backing[b] = 0;
+    repeat (4) @(negedge clock);
+    reset = 0;
+    repeat (4) @(negedge clock);
+  endtask
+  task automatic store(input logic [XLEN-1:0] addr, input logic [XLEN-1:0] data,
+                       input logic [1:0] pbmt = 0);
+    @(negedge clock);
+    lsu_l1d.wvalid = 1;
+    lsu_l1d.waddr = addr;
+    lsu_l1d.wdata = data;
+    lsu_l1d.walu = 8'({Bytes{1'b1}});
+    lsu_l1d.wpbmt = pbmt;
+    for (int n = 0; n < 10000; n++) begin
+      @(posedge clock);
+      if (lsu_l1d.wready) begin
+        @(negedge clock);
+        lsu_l1d.wvalid = 0;
+        lsu_l1d.wpbmt = 0;
+        repeat (4) @(negedge clock);
+        return;
+      end
+    end
+    $fatal(1, "store timeout addr=%h wb=%h", addr, dut.wb_state);
+  endtask
+  task automatic load(input logic [XLEN-1:0] addr, input logic [XLEN-1:0] expected,
+                      input bit atomic_access = 0);
+    @(negedge clock);
+    lsu_l1d.rvalid = 1;
+    lsu_l1d.raddr = addr;
+    lsu_l1d.ralu = XLEN == 64 ? `RAPT_ALU_LD__ : `RAPT_ALU_LW__;
+    lsu_l1d.atomic_lock = atomic_access;
+    for (int n = 0; n < 10000; n++) begin
+      @(posedge clock);
+      if (lsu_l1d.rready) begin
+        if (lsu_l1d.trap || lsu_l1d.rdata != expected)
+          $fatal(
+              1,
+              "load addr=%h expected=%h got=%h trap=%b",
+              addr,
+              expected,
+              lsu_l1d.rdata,
+              lsu_l1d.trap
+          );
+        @(negedge clock);
+        lsu_l1d.rvalid = 0;
+        lsu_l1d.atomic_lock = 0;
+        repeat (20) @(negedge clock);
+        return;
+      end
+    end
+    $fatal(1, "load timeout addr=%h", addr);
+  endtask
+  task automatic instruction_walk(input logic [XLEN-1:0] addr, input logic [XLEN-1:0] expected);
+    @(negedge clock);
+    l1i_bus.arvalid = 1;
+    l1i_bus.ar_ptw = 1;
+    l1i_bus.araddr = addr;
+    for (int n = 0; n < 10000; n++) begin
+      @(posedge clock);
+      if (l1i_bus.ptw_rvalid) begin
+        if (l1i_bus.ptw_rerr || l1i_bus.rdata != expected)
+          $fatal(1, "I-side PTE stale addr=%h expected=%h got=%h", addr, expected, l1i_bus.rdata);
+        @(negedge clock);
+        l1i_bus.arvalid = 0;
+        l1i_bus.ar_ptw = 0;
+        repeat (10) @(negedge clock);
+        return;
+      end
+    end
+    $fatal(1, "I-side PTE timeout");
+  endtask
+  task automatic instruction_walk_address_change;
+    bit first_response;
+    first_response = 0;
+    @(negedge clock);
+    l1i_bus.arvalid = 1;
+    l1i_bus.ar_ptw = 1;
+    l1i_bus.araddr = Base + 'ha000;
+    for (int n = 0; n < 10000; n++) begin
+      @(posedge clock);
+      if (l1i_bus.ptw_rvalid) begin
+        if (l1i_bus.ptw_rerr || l1i_bus.rdata != 0)
+          $fatal(1, "first PTE read failed in address-change test");
+        first_response = 1;
+        break;
+      end
+    end
+    if (!first_response) $fatal(1, "first PTE response timeout in address-change test");
+    // A walker may request its next level immediately after the preceding R.
+    // Keep valid asserted while replacing the old clean target with dirty data.
+    @(negedge clock);
+    l1i_bus.araddr = Target;
+    #1;
+    if (coherent_addr != Base + 'ha000 || !coherent_ready)
+      $fatal(1, "address-change test missed the old clean coherence acknowledgement");
+    @(posedge clock);
+    if (l1i_bus.rready) $fatal(1, "new PTE address reused old coherence acknowledgement");
+    for (int n = 0; n < 10000; n++) begin
+      @(posedge clock);
+      if (l1i_bus.rready && memory_word(Target) != XLEN'('h12345678))
+        $fatal(1, "new PTE captured before its target write response");
+      if (l1i_bus.ptw_rvalid) begin
+        if (l1i_bus.ptw_rerr || l1i_bus.rdata != XLEN'('h12345678))
+          $fatal(1, "new PTE read observed stale backing data");
+        @(negedge clock);
+        l1i_bus.arvalid = 0;
+        l1i_bus.ar_ptw = 0;
+        repeat (10) @(negedge clock);
+        return;
+      end
+    end
+    $fatal(1, "second PTE response timeout in address-change test");
+  endtask
+  task automatic translate(input bit expected_fault = 0);
+    @(negedge clock);
+    csr_bcast.dmmu_en = 1;
+    csr_bcast.satp_ppn = 'h80010;
+    exu_l1d.valid = 1;
+    exu_l1d.mmu_en = 1;
+    exu_l1d.vaddr = Va;
+    exu_l1d.walu = 5'({Bytes{1'b1}});
+    for (int n = 0; n < 10000; n++) begin
+      @(posedge clock);
+      if (exu_l1d.ready) begin
+        if (exu_l1d.trap != expected_fault || (!expected_fault && exu_l1d.paddr != Base)
+            || (expected_fault && exu_l1d.cause != `RAPT_CAUSE_STORE_PAGE_FAULT))
+          $fatal(
+              1,
+              "D-side translation stale paddr=%h trap=%b cause=%h reads=%0d writes=%0d",
+              exu_l1d.paddr,
+              exu_l1d.trap,
+              exu_l1d.cause,
+              dptw_reads,
+              writes
+          );
+        @(negedge clock);
+        exu_l1d.valid = 0;
+        exu_l1d.mmu_en = 0;
+        csr_bcast.dmmu_en = 0;
+        repeat (10) @(negedge clock);
+        return;
+      end
+    end
+    $fatal(1, "D-side translation timeout");
+  endtask
+  task automatic clean_block(input logic [XLEN-1:0] addr, input bit invalidate);
+    @(negedge clock);
+    writeback_cbo = 1;
+    writeback_cbo_invalidate = invalidate;
+    writeback_block = addr[XLEN-1:6];
+    for (int n = 0; n < 10000; n++) begin
+      @(posedge clock);
+      if (writeback_cbo_done) begin
+        @(negedge clock);
+        writeback_cbo = 0;
+        writeback_cbo_invalidate = 0;
+        repeat (10) @(negedge clock);
+        return;
+      end
+    end
+    $fatal(1, "CBO timeout");
+  endtask
+  task automatic unrelated_private;
+    if (memory_word(Other) != 0) $fatal(1, "operation swept unrelated dirty line");
+    load(Other, XLEN'('h2468ace0));
+  endtask
+
+  logic [XLEN-1:0] root_addr, root_pte, middle_pte, leaf_pte;
+  logic [XLEN-1:0] mixed_value[4];
+  logic [3:0] mixed_coverage;
+  int sparse_drain_cycles;
+  initial begin
+    if ($value$plusargs("BUS_DELAY_MAX=%d", delay_max)) begin
+    end
+    root_addr = Base + 'h10000 + XLEN'(XLEN == 64 ? 8 : 1024);
+    root_pte = XLEN'(((XLEN == 64 ? 'h80011 : 'h80012) << 10) | 1);
+    middle_pte = XLEN'(('h80012 << 10) | 1);
+    leaf_pte = XLEN'(('h80000 << 10) | 'hc7);
+    init();
+    store(Other, XLEN'('h2468ace0));
+    store(root_addr, root_pte);
+    if (XLEN == 64) store(Base + 'h11000, middle_pte);
+    store(Base + 'h12000, leaf_pte);
+    translate();
+    if (dptw_reads != (XLEN == 64 ? 3 : 2)) $fatal(1, "wrong number of page-table levels");
+    unrelated_private();
+    $display("PASS: RV%0d dirty PTE at every walk level is published independently", XLEN);
+
+    // Svade must fault after either A or D is cleared in a dirty leaf,
+    // even though the old backing PTE would permit this store translation.
+    for (int clear_bit = 6; clear_bit <= 7; clear_bit++) begin
+      init();
+      seed_word(root_addr, root_pte);
+      seed_word(Base + 'h11000, middle_pte);
+      seed_word(Base + 'h12000, leaf_pte);
+      store(Other, XLEN'('h2468ace0));
+      store(Base + 'h12000, leaf_pte & ~(XLEN'(1) << clear_bit));
+      translate(1);
+      unrelated_private();
+      $display("PASS: RV%0d dirty PTE bit%0d clear retains precise Svade fault", XLEN, clear_bit);
+    end
+
+    init();
+    store(Other, XLEN'('h2468ace0));
+    store(Target, XLEN'('h76543210));
+    instruction_walk(Target, XLEN'('h76543210));
+    unrelated_private();
+    instruction_walk(Other + XLEN'(`RAPT_CACHE_LINE_BYTES), 0);
+    unrelated_private();
+    $display("PASS: RV%0d I-side PTE clean handles dirty hit and absent line", XLEN);
+
+    init();
+    store(Other, XLEN'('h2468ace0));
+    store(Target, XLEN'('h12345678));
+    store(XLEN'('h10000000), XLEN'('h55));
+    load(XLEN'('h10000000), XLEN'('h13579bdf));
+    if (device_writes != 1 || memory_word(Target) != 0)
+      $fatal(1, "PMA device access swept cache or lost write");
+    unrelated_private();
+    load(Target, XLEN'('h12345678));
+    $display("PASS: RV%0d PMA device accesses preserve resident dirty lines", XLEN);
+
+    init();
+    store(Other, XLEN'('h2468ace0));
+    store(Target, XLEN'('h12345678));
+    store(Target, XLEN'('h11223344), 2'b01);
+    if (memory_word(Target) != XLEN'('h11223344)) $fatal(1, "NC store did not reach memory");
+    load(Target, XLEN'('h11223344));
+    unrelated_private();
+    $display("PASS: RV%0d NC alias publishes then invalidates one cacheable line", XLEN);
+
+    init();
+    store(Other, XLEN'('h2468ace0));
+    store(Target, XLEN'('h12345678));
+    load(Target, XLEN'('h12345678), 1);
+    if (!dut.reservation_valid) $fatal(1, "LR did not establish reservation");
+    store(Target, XLEN'('h11223344));
+    load(Target, XLEN'('h11223344), 1);
+    if (!dut.reservation_valid) $fatal(1, "LR after intervening store lost reservation");
+    @(negedge clock);
+    exu_l1d.reservation_clear = 1;
+    @(negedge clock);
+    exu_l1d.reservation_clear = 0;
+    if (dut.reservation_valid) $fatal(1, "SC completion did not clear reservation");
+    unrelated_private();
+    $display("PASS: RV%0d LR on dirty data and intervening store preserve reservation rules", XLEN);
+
+    for (int invalidate = 0; invalidate < 2; invalidate++) begin
+      init();
+      store(Other, XLEN'('h2468ace0));
+      for (int offset = 0; offset < 64; offset += `RAPT_CACHE_LINE_BYTES)
+      store(Target + XLEN'(offset), XLEN'('h12340000 + offset));
+      clean_block(Target, 1'(invalidate));
+      for (int offset = 0; offset < 64; offset += `RAPT_CACHE_LINE_BYTES) begin
+        if (memory_word(Target + XLEN'(offset)) != XLEN'('h12340000 + offset))
+          $fatal(1, "CBO lost dirty line offset=%0d", offset);
+        if (invalidate != 0) seed_word(Target + XLEN'(offset), XLEN'('h56780000 + offset));
+        load(Target + XLEN'(offset), XLEN'((invalidate != 0 ? 'h56780000 : 'h12340000) + offset));
+      end
+      unrelated_private();
+      $display("PASS: RV%0d CBO invalidate=%0d covers all lines in one 64-byte block", XLEN,
+               invalidate);
+    end
+
+    if (XLEN == 64) begin
+      for (int pbmt = 1; pbmt <= 2; pbmt++) begin
+        init();
+        seed_word(root_addr, root_pte);
+        seed_word(Base + 'h11000, middle_pte);
+        seed_word(Base + 'h12000, XLEN'(('h80002 << 10) | 'hc7) | (XLEN'(pbmt) << 61));
+        store(Other, XLEN'('h2468ace0));
+        store(Target, XLEN'('h12345678));
+        csr_bcast.dmmu_en = 1;
+        csr_bcast.satp_ppn = 'h80010;
+        csr_bcast.menvcfg_pbmte = 1;
+        load(Va + 'h80, XLEN'('h12345678));
+        csr_bcast.dmmu_en = 0;
+        if (memory_word(Target) != XLEN'('h12345678)) $fatal(1, "PBMT load read stale backing");
+        seed_word(Target, XLEN'('h11223344));
+        load(Target, XLEN'('h11223344));
+        unrelated_private();
+        $display("PASS: RV64 PBMT=%0d alias load cleans and invalidates target only", pbmt);
+      end
+    end
+
+    if (XLEN == 64) begin
+      init();
+      seed_word(root_addr, root_pte);
+      seed_word(Base + 'h11000, middle_pte);
+      seed_word(Base + 'h12000, XLEN'(('h80002 << 10) | 'hc7) | (XLEN'(1) << 61));
+      store(Other, XLEN'('h2468ace0));
+      store(Target, XLEN'('h12345678));
+      csr_bcast.dmmu_en = 1;
+      csr_bcast.satp_ppn = 'h80010;
+      csr_bcast.menvcfg_pbmte = 1;
+      // The clean I-side target cannot mask the dirty NC load's own target
+      // while coherent_ready waits for L1D to leave LD_A.
+      fork
+        load(Va + 'h80, XLEN'('h12345678));
+        instruction_walk(Base + 'ha000, 0);
+      join
+      csr_bcast.dmmu_en = 0;
+      seed_word(Target, XLEN'('h11223344));
+      load(Target, XLEN'('h11223344));
+      unrelated_private();
+      $display("PASS: RV64 concurrent I-side walk and dirty NC load arbitrate target ownership");
+    end
+
+    init();
+    store(Other, XLEN'('h2468ace0));
+    mixed_coverage = 0;
+    for (int line_idx = 0; line_idx < 4; line_idx++) mixed_value[line_idx] = 0;
+    for (int iteration = 0; iteration < 32; iteration++) begin
+      int line_idx, operation;
+      logic [XLEN-1:0] addr;
+      line_idx = int'((rng >> 12) & 3);
+      operation = int'((rng >> 20) & 3);
+      mixed_coverage[operation] = 1;
+      addr = Base + 'h3000 + XLEN'(line_idx * 64);
+      case (operation)
+        0: begin
+          mixed_value[line_idx] = XLEN'('h12340000 + iteration);
+          store(addr, mixed_value[line_idx]);
+        end
+        1: instruction_walk(addr, mixed_value[line_idx]);
+        2: begin
+          mixed_value[line_idx] = XLEN'('h56780000 + iteration);
+          store(addr, mixed_value[line_idx], 2'b01);
+        end
+        3: load(addr, mixed_value[line_idx], 1);
+      endcase
+      for (int check_idx = 0; check_idx < 4; check_idx++)
+      load(Base + 'h3000 + XLEN'(check_idx * 64), mixed_value[check_idx]);
+      unrelated_private();
+    end
+    if (mixed_coverage != 4'b1111) $fatal(1, "random mix missed operation coverage");
+    $display("PASS: RV%0d randomized cached/NC stores, LR and I-side reads preserve data", XLEN);
+
+    init();
+    store(Other, XLEN'('h2468ace0));
+    store(Target, XLEN'('h11223344));
+    // A full drain remains necessary before the instruction cache can refill
+    // modified code from memory. Check both dirty ways of the shared set.
+    @(negedge clock);
+    writeback_drain = 1;
+    sparse_drain_cycles = 0;
+    for (int n = 0; n < 20000; n++) begin
+      @(posedge clock);
+      sparse_drain_cycles++;
+      if (writeback_idle) break;
+    end
+    if (!writeback_idle || memory_word(
+            Other
+        ) != XLEN'('h2468ace0) || memory_word(
+            Target
+        ) != XLEN'('h11223344))
+      $fatal(1, "full drain lost dirty data");
+    @(negedge clock);
+    writeback_drain = 0;
+    $display("METRIC: RV%0d DirtySkip=%0d line_bytes=%0d sparse_drain_cycles=%0d delay_max=%0d",
+             XLEN, DirtySkip, `RAPT_CACHE_LINE_BYTES, sparse_drain_cycles, delay_max);
+    $display("PASS: RV%0d full instruction coherence drain publishes remaining dirty lines", XLEN);
+    init();
+    store(Other, XLEN'('h2468ace0));
+    store(Target, XLEN'('h12345678));
+    @(negedge clock);
+    l1i_bus.arvalid = 1;
+    l1i_bus.ar_ptw = 1;
+    l1i_bus.araddr = Target;
+    for (int n = 0; n < 10000 && !writing; n++) @(negedge clock);
+    if (!writing || iptw_reads != 0) $fatal(1, "cancel test missed outstanding target write");
+    // The frontend withdraws a walk before its read has been accepted.
+    // Its already captured dirty data must still reach memory exactly once.
+    l1i_bus.arvalid = 0;
+    l1i_bus.ar_ptw = 0;
+    for (int n = 0; n < 10000 && writing; n++) @(negedge clock);
+    repeat (20) @(negedge clock);
+    if (writing || writes != 1 || iptw_reads != 0 || memory_word(Target) != XLEN'('h12345678))
+      $fatal(1, "cancelled walk lost dirty owner or issued an unwanted read");
+    unrelated_private();
+    $display("PASS: RV%0d cancelled I-side walk preserves captured dirty writeback", XLEN);
+
+    init();
+    store(Other, XLEN'('h2468ace0));
+    store(Target, XLEN'('h12345678));
+    instruction_walk_address_change();
+    if (iptw_reads != 2 || writes != 1)
+      $fatal(1, "address-change test duplicated a PTE read or dirty writeback");
+    unrelated_private();
+    $display("PASS: RV%0d next PTE address waits for its own coherence acknowledgement", XLEN);
+
+    init();
+    store(Other, XLEN'('h2468ace0));
+    store(Target, XLEN'('h12345678));
+    fail_writes = 1;
+    @(negedge clock);
+    l1i_bus.arvalid = 1;
+    l1i_bus.ar_ptw = 1;
+    l1i_bus.araddr = Target;
+    for (int n = 0; n < 10000; n++) begin
+      @(negedge clock);
+      if (writeback_error) break;
+    end
+    repeat (20) @(negedge clock);
+    if (!writeback_error || coherent_ready || iptw_reads != 0 || dut.writeback.count == 0
+        || memory_word(
+            Target
+        ) != 0 || memory_word(
+            Other
+        ) != 0)
+      $fatal(1, "failed targeted writeback lost ownership or allowed stale PTE read");
+    $display("PASS: RV%0d failed targeted writeback retains data and blocks PTE publication", XLEN);
+    $finish;
+  end
+  initial begin
+    #20000000;
+    $fatal(1, "targeted coherence timeout");
+  end
+endmodule
+
+
+// ---- tb_dirty_line_select ----
+`include "rapt.svh"
+
+module tb_dirty_line_select;
+  logic clock = 0, reset = 1;
+  logic l1d_update = 0, clean_valid = 0;
+  logic [1:0] l1d_idx = 0, l1d_way = 0;
+  logic [1:0] inspect_set = 0, inspect_way = 0;
+  wire dirty_any;
+  wire [1:0] first_dirty_set, first_dirty_way;
+  bit expected[4][4];
+  int checks = 0;
+  always #5 clock = ~clock;
+
+  rapt_l1d_tags #(
+      .L1D_LEN(2),
+      .L1D_LINE_LEN(1),
+      .L1D_N_WAYS(4),
+      .L1dTagW(4),
+      .WriteBack(1'b1),
+      .DirtySkip(1'b1)
+  ) dut (
+      .clock,
+      .reset,
+      .fence_time(1'b0),
+      .clear_set('0),
+      .clear_line_dirty_way(),
+      .addr_idx('0),
+      .addr_offset('0),
+      .addr_tag('0),
+      .waddr_idx('0),
+      .waddr_offset('0),
+      .waddr_tag('0),
+      .probe_idx('0),
+      .probe_offset('0),
+      .probe_tag('0),
+      .load_hit(1'b0),
+      .load_replace(1'b0),
+      .store_replace(1'b0),
+      .load_way_hit(),
+      .probe_way_hit(),
+      .hit_w(),
+      .store_hit_way(),
+      .store_fill_way(),
+      .ld_fill_way(),
+      .load_victim_tag(),
+      .load_victim_valid(),
+      .load_victim_dirty(),
+      .l1d_update,
+      .l1d_valid_u(1'b1),
+      .l1d_inv_all_ways(1'b0),
+      .l1d_tag_u(4'(l1d_way) + 4'd1),
+      .l1d_idx,
+      .l1d_off(1'b0),
+      .l1d_way,
+      .update_dirty(1'b1),
+      .inspect_set,
+      .inspect_way,
+      .clean_valid,
+      .clean_mask(2'b11),
+      .inspect_tag(),
+      .inspect_valid(),
+      .inspect_dirty(),
+      .dirty_any,
+      .first_dirty_set,
+      .first_dirty_way,
+      .inspect_dirty_any(),
+      .update_blocked()
+  );
+
+  task automatic check_selector;
+    bit found;
+    found = 0;
+    for (int s = 0; s < 4; s++) begin
+      for (int w = 0; w < 4; w++) begin
+        if (expected[s][w] && !found) begin
+          if (!dirty_any || first_dirty_set != 2'(s) || first_dirty_way != 2'(w))
+            $fatal(1, "dirty selection mismatch: expected set=%0d way=%0d", s, w);
+          found = 1;
+        end
+      end
+    end
+    if (dirty_any != found) $fatal(1, "dirty summary mismatch");
+    checks++;
+  endtask
+
+  task automatic tick;
+    @(posedge clock);
+    #1;
+    @(negedge clock);
+  endtask
+
+  initial begin
+    tick();
+    reset = 0;
+    check_selector();
+    // Reverse insertion forces the selector to discover newly dirty entries
+    // before its previous result, including multiple ways of the same set.
+    for (int s = 3; s >= 0; s--) begin
+      for (int w = 3; w >= 0; w--) begin
+        l1d_update = 1;
+        l1d_idx = 2'(s);
+        l1d_way = 2'(w);
+        expected[s][w] = 1;
+        tick();
+        check_selector();
+      end
+    end
+    l1d_update = 0;
+    // Cleaning each result must advance without inspecting a clean set.
+    while (dirty_any) begin
+      inspect_set = first_dirty_set;
+      inspect_way = first_dirty_way;
+      clean_valid = 1;
+      expected[inspect_set][inspect_way] = 0;
+      tick();
+      check_selector();
+    end
+    // A concurrent store retains dirty ownership over a clean of that line.
+    l1d_idx = 2;
+    l1d_way = 1;
+    inspect_set = 2;
+    inspect_way = 1;
+    l1d_update = 1;
+    expected[2][1] = 1;
+    tick();
+    check_selector();
+    l1d_update = 0;
+    expected[2][1] = 0;
+    tick();
+    check_selector();
+    $display("PASS: dirty line selector RV%0d %0d checks", `RAPT_XLEN, checks);
+    $finish;
+  end
+endmodule
+
+
+// ---- tb_cbo_refill_order ----
+`include "rapt.svh"
+`include "rapt_if.svh"
+`include "rapt_soc_if.svh"
+
+// Exercise the memory wrapper's precommit CBO owner against an older AXI
+// refill. Cleaning an empty tag before RLAST would let its late fill survive.
+module tb_cbo_refill_order;
+  localparam int XLEN = `RAPT_XLEN;
+  localparam int Bytes = XLEN / 8;
+  localparam logic [XLEN-1:0] Target = XLEN'('h80000000);
+  localparam logic [XLEN-1:0] Other = Target + 'h1000;
+  localparam logic [XLEN-1:0] OrderedTarget = Target + 'h200;
+  localparam logic [XLEN-1:0] Device = XLEN'('h10000000);
+  logic clock = 0, reset = 1;
+  always #5 clock = ~clock;
+  cmu_bcast_if cmu_bcast ();
+  csr_bcast_if csr_bcast ();
+  pmp_update_if pmp_update ();
+  lsu_l1d_if lsu_l1d ();
+  lsu_l1d_mmu_if exu_l1d ();
+  rou_cmu_if rou_cmu ();
+  ifu_l1i_if ifu_l1i ();
+  axi4_if io_master ();
+  logic writeback_drain_i = 0, writeback_cbo_i = 0;
+  logic stores_empty_i = 1;
+  bit ordered_fence_done = 0;
+  logic writeback_done_o, writeback_error_o;
+  rapt_memory #(
+      .L1dWriteBack(1)
+  ) dut (
+      .ifetch_io_authorized_i(1'b0),
+      .ifetch_io_start_o(),
+      .ifetch_io_owner_pc_o(),
+      .data_idle_o(),
+      .writeback_idle_o(),
+      .writeback_clean_i(1'b0),
+      .writeback_cbo_invalidate_i(1'b1),
+      .writeback_block_i(Target[XLEN-1:6]),
+      .external_write_valid_i(1'b0),
+      .external_write_pending_i(1'b0),
+      .external_write_first_i('0),
+      .external_write_last_i('0),
+      .*
+  );
+  `define TB_L1D_EXTERNAL_BUS
+  `include "tb_l1d_defaults.svh"
+  `undef TB_L1D_EXTERNAL_BUS
+
+  logic reading = 0, hold_read = 1;
+  logic [XLEN-1:0] read_addr;
+  logic [3:0] read_id;
+  int beats_left, read_step, reads = 0;
+  function automatic logic [XLEN-1:0] memory_word(input logic [XLEN-1:0] addr);
+    return addr ^ XLEN'('h12345678);
+  endfunction
+  assign io_master.arready = !reading;
+  assign io_master.rvalid = reading && !hold_read;
+  assign io_master.rid = read_id;
+  assign io_master.rdata = memory_word(read_addr);
+  assign io_master.rresp = 0;
+  assign io_master.rlast = beats_left == 1;
+  assign io_master.awready = 1;
+  assign io_master.wready = 1;
+  assign io_master.bvalid = 0;
+  assign io_master.bid = 0;
+  assign io_master.bresp = 0;
+  always @(posedge clock) begin
+    if (reset) begin
+      reading <= 0;
+      reads = 0;
+    end else begin
+      if (io_master.arvalid && io_master.arready) begin
+        if (!(io_master.araddr inside {Target, OrderedTarget, Device}))
+          $fatal(1, "unexpected read %h", io_master.araddr);
+        if (io_master.araddr == Device && !ordered_fence_done)
+          $fatal(1, "device read overtook ordinary fence completion");
+        reading <= 1;
+        read_addr <= io_master.araddr;
+        read_id <= io_master.arid;
+        read_step <= 1 << io_master.arsize;
+        beats_left <= int'(io_master.arlen) + 1;
+        reads++;
+      end else if (io_master.rvalid && io_master.rready) begin
+        beats_left <= beats_left - 1;
+        read_addr <= read_addr + XLEN'(read_step);
+        if (beats_left == 1) reading <= 0;
+      end
+      if (io_master.awvalid || io_master.wvalid) $fatal(1, "CBO swept unrelated dirty cache line");
+      if (writeback_error_o) $fatal(1, "unexpected writeback error");
+    end
+  end
+
+  task automatic begin_load(input logic [XLEN-1:0] addr);
+    @(negedge clock);
+    lsu_l1d.rvalid = 1;
+    lsu_l1d.raddr = addr;
+    lsu_l1d.ralu = XLEN == 64 ? `RAPT_ALU_LD__ : `RAPT_ALU_LW__;
+  endtask
+  task automatic finish_load(input logic [XLEN-1:0] expected);
+    for (int n = 0; n < 10000; n++) begin
+      @(posedge clock);
+      if (lsu_l1d.rready) begin
+        if (lsu_l1d.trap || lsu_l1d.rdata != expected)
+          $fatal(1, "load expected=%h got=%h trap=%b", expected, lsu_l1d.rdata, lsu_l1d.trap);
+        @(negedge clock);
+        lsu_l1d.rvalid = 0;
+        return;
+      end
+    end
+    $fatal(1, "load timeout");
+  endtask
+  initial begin
+    init_l1d_inputs();
+    lsu_l1d.rvalid_b = 0;
+    ifu_l1i.pc = 0;
+    ifu_l1i.invalid = 1;
+    ifu_l1i.consumed = 0;
+    ifu_l1i.cancel = 0;
+    ifu_l1i.prefetch_pc = 0;
+    ifu_l1i.prefetch_valid = 0;
+    repeat (5) @(negedge clock);
+    reset = 0;
+    @(negedge clock);
+    lsu_l1d.waddr = Other;
+    lsu_l1d.wdata = XLEN'('h13579bdf);
+    lsu_l1d.walu = 8'({Bytes{1'b1}});
+    lsu_l1d.wvalid = 1;
+    for (int n = 0; n < 10000; n++) begin
+      @(posedge clock);
+      if (lsu_l1d.wready) break;
+    end
+    if (!lsu_l1d.wready) $fatal(1, "sentinel store timeout");
+    @(negedge clock);
+    lsu_l1d.wvalid = 0;
+    repeat (5) @(negedge clock);
+
+    // Ordinary fences drain SQ and outstanding memory while preserving
+    // dirty resident data. Neither condition may be mistaken for completion.
+    stores_empty_i = 0;
+    writeback_drain_i = 1;
+    repeat (10) begin
+      @(negedge clock);
+      if (writeback_done_o) $fatal(1, "ordinary fence ignored nonempty SQ");
+    end
+    begin_load(OrderedTarget);
+    for (int n = 0; n < 10000 && !reading; n++) @(negedge clock);
+    if (!reading) $fatal(1, "ordered refill did not reach AXI");
+    stores_empty_i = 1;
+    repeat (10) begin
+      @(negedge clock);
+      if (writeback_done_o) $fatal(1, "ordinary fence ignored outstanding memory");
+    end
+    hold_read = 0;
+    finish_load(memory_word(OrderedTarget));
+    for (int n = 0; n < 10000 && !writeback_done_o; n++) @(negedge clock);
+    if (!writeback_done_o) $fatal(1, "ordinary fence failed to finish");
+    ordered_fence_done = 1;
+    writeback_drain_i = 0;
+    repeat (10) @(negedge clock);
+    begin_load(Device);
+    finish_load(memory_word(Device));
+    repeat (10) @(negedge clock);
+    begin_load(Other);
+    finish_load(XLEN'('h13579bdf));
+    if (reads != 2) $fatal(1, "ordinary fence swept or invalidated dirty sentinel");
+    $display("PASS: RV%0d ordinary fence waits SQ/memory and orders device read without sweep",
+             XLEN);
+
+    hold_read = 1;
+    begin_load(Target);
+    for (int n = 0; n < 10000 && !reading; n++) @(negedge clock);
+    if (!reading) $fatal(1, "refill did not reach AXI");
+    writeback_cbo_i = 1;
+    writeback_drain_i = 1;
+    repeat (20) begin
+      @(negedge clock);
+      if (dut.cache_cbo_active_q || writeback_done_o)
+        $fatal(1, "CBO armed before older refill completed");
+    end
+    hold_read = 0;
+    finish_load(memory_word(Target));
+    for (int n = 0; n < 10000 && !writeback_done_o; n++) @(negedge clock);
+    if (!writeback_done_o) $fatal(1, "CBO did not finish after RLAST");
+    writeback_drain_i = 0;
+    writeback_cbo_i = 0;
+    repeat (10) @(negedge clock);
+    begin_load(Target);
+    finish_load(memory_word(Target));
+    if (reads != 4) $fatal(1, "late refill survived CBO invalidation");
+    repeat (20) @(negedge clock);
+    begin_load(Other);
+    finish_load(XLEN'('h13579bdf));
+    if (reads != 4) $fatal(1, "CBO invalidated unrelated same-set line");
+    $display("PASS: RV%0d precommit CBO waits for older refill and prevents late resurrection",
+             XLEN);
+    $finish;
+  end
+  initial begin
+    #10000000;
+    $fatal(1, "CBO refill order timeout");
   end
 endmodule

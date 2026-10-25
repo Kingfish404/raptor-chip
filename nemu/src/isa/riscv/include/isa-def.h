@@ -628,4 +628,18 @@ typedef struct
            ~1;                                 \
   } while (0)
 
+// PC representation of the reference target (see RV_PC_BITS).
+static inline word_t riscv_legalize_pc(word_t pc) {
+#if defined(CONFIG_RV64) && defined(CONFIG_RV_PC_BITS) && CONFIG_RV_PC_BITS < 64
+  const int bits = CONFIG_RV_PC_BITS;
+  const int64_t upper = (int64_t)pc >> (bits - 1);
+  if (upper == 0 || upper == -1) return pc;
+  const word_t sign = pc >> 63;
+  const word_t low = pc & (((word_t)1 << (bits - 2)) - 1);
+  return (sign ? ~(((word_t)1 << (bits - 1)) - 1) : 0) | ((sign ^ 1) << (bits - 2)) | low;
+#else
+  return pc;
+#endif
+}
+
 #endif

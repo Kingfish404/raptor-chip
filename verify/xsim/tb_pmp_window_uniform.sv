@@ -9,6 +9,8 @@ module tb_pmp_window_uniform;
   localparam int X = `RAPT_XLEN;
   localparam int P = `RAPT_PADDR_BITS;
   localparam int A = P - 2;
+  localparam int G = `RAPT_PMP_GRANULARITY_LOG2 - 2;
+  localparam logic [A-1:0] LowMask = (A'(1) << G) - 1;
   localparam int N = `RAPT_PMP_NUM;
   pmp_state_if state ();
   logic [X-1:0] addr;
@@ -42,9 +44,9 @@ module tb_pmp_window_uniform;
   function automatic logic [N-1:0] entry_hits(input logic [A-1:0] word_addr);
     logic [A-1:0] lower;
     for (int e = 0; e < N; e++) begin
-      lower = e == 0 ? '0 : state.pmp_raw_addr[e-1];
+      lower = e == 0 ? '0 : state.pmp_raw_addr[e-1] & ~LowMask;
       entry_hits[e] = (state.pmp_mode_tor[e] && word_addr >= lower
-                    && word_addr < state.pmp_raw_addr[e])
+                    && word_addr < (state.pmp_raw_addr[e] & ~LowMask))
           || (state.pmp_mode_na4[e] && word_addr == state.pmp_raw_addr[e])
           || (state.pmp_mode_napot[e] && (word_addr & ~state.pmp_napot_mask[e])
               == (state.pmp_raw_addr[e] & ~state.pmp_napot_mask[e]));
@@ -66,18 +68,18 @@ module tb_pmp_window_uniform;
       automatic int mode = int'(random_word() % 4);
       automatic int span = 1 + int'(random_word() % 6);
       automatic logic [A-1:0] raw = center + A'(int'(random_word() % 24) - 12);
-      state.pmp_mode_off[e] = mode == 0;
+      state.pmp_mode_off[e] = mode == 0 || (G != 0 && mode == 2);
       state.pmp_mode_tor[e] = mode == 1;
-      state.pmp_mode_na4[e] = mode == 2;
+      state.pmp_mode_na4[e] = mode == 2 && G == 0;
       state.pmp_mode_napot[e] = mode == 3;
       if (mode == 1) begin
         // Mostly ascending TOR tops, with occasional empty ranges.
         raw = previous + A'(random_word() % 10);
         previous = raw;
       end
-      state.pmp_raw_addr[e] = raw;
+      state.pmp_raw_addr[e] = raw & ~LowMask;
       // NAPOT mask is the CSR-decoded run of trailing ones of pmpaddr.
-      state.pmp_napot_mask[e] = (A'(1) << span) - A'(1);
+      state.pmp_napot_mask[e] = (A'(1) << (span + G)) - A'(1);
       if (mode == 3)
         state.pmp_raw_addr[e] = (raw & ~state.pmp_napot_mask[e]) | (state.pmp_napot_mask[e] >> 1);
       state.pmp_cfg_r[e] = 1'(random_word());
@@ -89,7 +91,7 @@ module tb_pmp_window_uniform;
 
   initial begin
     for (int trial = 0; trial < 200000; trial++) begin
-      automatic logic [A-1:0] center = A'(random_word());
+      automatic logic [A-1:0] center = A'(random_word()) & ~LowMask;
       automatic logic [A-1:0] word_addr = center + A'(int'(random_word() % 16) - 8);
       if (trial % 97 == 0) word_addr = '1 - A'(random_word() % 6);
       place_regions(center);

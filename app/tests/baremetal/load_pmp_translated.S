@@ -51,7 +51,8 @@ _start:
   fence rw,rw
   srli t0, s0, 2
   csrw pmpaddr0, t0
-  addi t0, s0, 12
+  li t0, 4096
+  add t0, s0, t0
   srli t0, t0, 2
   csrw pmpaddr1, t0
   srli t0, s1, 2

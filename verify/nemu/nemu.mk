@@ -64,8 +64,12 @@ nemu-distro-check: nemu-unit-check
 		$(if $(NEMU_DISTRO_CLOCK_DIV),--clock-div $(NEMU_DISTRO_CLOCK_DIV)) --output "$(BUILD_DIR)/nemu-distro"
 
 # Single-hart ISA and platform checks.
-NEMU_ISA_CHECKS := memory-map compressed trap-delegation rva23-profile rva23-scalar rva23-diel rva23-runtime zicond mop zcb zicbop svpbmt svpbmt-access svpbmt-decode pmp-priority \
-	pmp-capacity satp-warl sv39-superpage sv39-permissions svnapot svinval h-gstage zawrs zfa zvbb zvfhmin pointer-mask sscofpmf smstateen vector-control vector-data vector-misaligned vector-opcodes physical-address counter-trap rva22s64
+NEMU_ISA_CHECKS := memory-map compressed trap-delegation rva23-profile rva23-scalar \
+	rva23-diel rva23-runtime zicond mop zcb zicbop svpbmt svpbmt-access svpbmt-decode \
+	pmp-priority pmp-granularity pmp-capacity satp-warl sv39-superpage sv39-permissions \
+	svnapot svinval h-gstage zawrs zfa zvbb zvfhmin pointer-mask sscofpmf smstateen \
+	vector-control vector-data vector-misaligned vector-opcodes physical-address \
+	counter-trap rva22s64
 .PHONY: nemu-isa-check nemu-vector-fp-rtl-check nemu-vector-estimate-spike-check $(NEMU_ISA_CHECKS:%=nemu-%-check)
 nemu-isa-check: $(NEMU_ISA_CHECKS:%=nemu-%-check)
 
@@ -125,6 +129,9 @@ nemu-svpbmt-decode-check:
 
 nemu-pmp-priority-check:
 	$(PYTHON) "$(NEMU_VERIFY)/check.py" pmp-priority
+
+nemu-pmp-granularity-check:
+	$(PYTHON) "$(NEMU_VERIFY)/check.py" pmp-priority --test-source "$(NEMU_VERIFY)/isa/pmp_granularity.c"
 
 nemu-pmp-capacity-check:
 	$(PYTHON) "$(NEMU_VERIFY)/check.py" pmp-priority --test-source "$(RAPTOR_HOME)/app/tests/host/nemu_pmp_capacity.c"
@@ -266,9 +273,11 @@ $(NEMU_VECTOR_RTL_CHECKS:%=nemu-%-check): nemu-%-check:
 nemu-vector-fp-rtl-check: nemu-vector-fp-transfer-rtl-check
 
 nemu-physical-address-check nemu-counter-trap-check: nemu-%-check:
+	@mkdir -p "$(BUILD_DIR)/nemu-$*"
 	$(PYTHON) "$(NEMU_VERIFY)/check.py" $* --xlen 32 --reference "$(NEMU_SO_32)" --output "$(BUILD_DIR)/nemu-$*/rv32"
 	$(PYTHON) "$(NEMU_VERIFY)/check.py" $* --xlen 64 --reference "$(NEMU_SO_64)" --output "$(BUILD_DIR)/nemu-$*/rv64"
 
 nemu-rva22s64-check:
+	@mkdir -p "$(BUILD_DIR)/nemu-rva22s64"
 	$(PYTHON) "$(NEMU_VERIFY)/check.py" rva22s64 --xlen 32 --mcountinhibit absent --reference "$(NEMU_SO_32)" --output "$(BUILD_DIR)/nemu-rva22s64/rv32"
 	$(PYTHON) "$(NEMU_VERIFY)/check.py" rva22s64 --xlen 64 --mcountinhibit absent --reference "$(NEMU_SO_64)" --output "$(BUILD_DIR)/nemu-rva22s64/rv64"

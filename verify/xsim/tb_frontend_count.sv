@@ -76,7 +76,7 @@ module tb_frontend_count;
           if (idu_rnu.valid[s]) begin
             assert (!idu_rnu.slot[s].uop.trap
                     && idu_rnu.slot[s].uop.pc == expected[s]
-                    && idu_rnu.slot[s].uop.pnpc == expected[s] + XLEN'(4))
+                    && idu_rnu.slot[s].pnpc == expected[s] + XLEN'(4))
             else $fatal(1, "decode stream corruption");
             if (idu_rnu.ready[s]) popped++;
           end

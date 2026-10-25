@@ -13,6 +13,7 @@ install_tools() {
   local brew_packages=()
   case "$profile" in
     build)
+      apt_packages+=(libgmp-dev)
       brew_packages+=(verilator sbt)
       ;;
     sim | litex)
@@ -25,7 +26,7 @@ install_tools() {
       ;;
     riscof)
       # Workers execute an already built simulator and compile guest programs.
-      apt_packages+=(device-tree-compiler xxd)
+      apt_packages+=(device-tree-compiler xxd libgmp10)
       brew_packages+=(riscv64-elf-binutils riscv64-elf-gcc)
       ;;
     sta)

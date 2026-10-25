@@ -3,7 +3,12 @@
 `include "rapt_soc_if.svh"
 
 module rapt_router #(
-    parameter int XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN,
+`ifdef RAPT_L2_EN
+    parameter int WriteOutstanding = 1
+`else
+    parameter int WriteOutstanding = `RAPT_POSTED_WRITES > 0 ? `RAPT_POSTED_WRITES : 1
+`endif
 ) (
     input clock,
     input reset,
@@ -20,6 +25,14 @@ module rapt_router #(
   } int_slave_t;
 
   localparam int IntByteOffW = $clog2(XLEN / 8);
+  localparam int WriteCountW = $clog2(WriteOutstanding + 1);
+  logic [WriteCountW-1:0] offchip_write_count;
+  logic offchip_write_space, offchip_write_pending;
+  logic offchip_aw_fire, offchip_b_fire;
+
+  initial begin
+    if (WriteOutstanding < 1) $fatal(1, "router write capacity must be positive");
+  end
 
   function automatic logic [XLEN-1:0] internal_rdata_to_axi(input logic [XLEN-1:0] data,
                                                             input logic [IntByteOffW-1:0] byte_off);
@@ -126,7 +139,8 @@ module rapt_router #(
 
   // Internal AR completes immediately when there is FIFO space.
   // Offchip AR completes when downstream is ready.
-  assign core_axi.arready = ar_is_int ? !int_resp_full : offchip_axi.arready;
+  assign core_axi.arready = ar_is_int ? !int_resp_full && !offchip_write_pending
+                                      : offchip_axi.arready;
 
   // PLIC ar_commit is a 1-cycle pulse on the internal AR handshake
   // (used by PLIC to clear claim-side state). Matches the original
@@ -245,8 +259,17 @@ module rapt_router #(
   logic       aw_is_int;
   assign aw_int = addr_decode(core_axi.awaddr);
   assign aw_is_int = (aw_int != INT_NONE);
+  // Only offchip writes may overlap. Keep their route until actual B, while
+  // releasing the AW/W state after the payload has left. The downstream AXI
+  // endpoint retains IDs and response ordering; this counter owns the route.
+  assign offchip_write_space = offchip_write_count < WriteCountW'(WriteOutstanding);
+  assign offchip_write_pending = offchip_write_count != '0 || offchip_w_done_q
+      || (core_axi.awvalid && !aw_is_int);
+  assign offchip_aw_fire = offchip_axi.awvalid && offchip_axi.awready;
+  assign offchip_b_fire = offchip_axi.bvalid && offchip_axi.bready;
 
-  assign offchip_axi.awvalid = (w_state == W_IDLE) && core_axi.awvalid && !aw_is_int;
+  assign offchip_axi.awvalid = (w_state == W_IDLE) && core_axi.awvalid && !aw_is_int
+      && offchip_write_space;
   assign offchip_axi.awburst = core_axi.awburst;
   assign offchip_axi.awcache = core_axi.awcache;
   assign offchip_axi.awsize = core_axi.awsize;
@@ -254,7 +277,9 @@ module rapt_router #(
   assign offchip_axi.awid = core_axi.awid;
   assign offchip_axi.awaddr = core_axi.awaddr;
 
-  assign core_axi.awready = (w_state == W_IDLE) && (aw_is_int ? 1'b1 : offchip_axi.awready);
+  assign core_axi.awready = (w_state == W_IDLE)
+      && (aw_is_int ? offchip_write_count == '0
+                    : offchip_write_space && offchip_axi.awready);
 
   // W-channel forwarding: AXI4 permits the master to assert AW and W
   // simultaneously, and some downstream slaves (e.g. the AXI4 SDRAM
@@ -267,7 +292,7 @@ module rapt_router #(
   // valid offchip AW request pending.
   assign offchip_axi.wvalid = ((w_state == W_IO_W) ||
                                (w_state == W_IDLE && core_axi.awvalid && !aw_is_int
-                                && !offchip_w_done_q))
+                                && offchip_write_space && !offchip_w_done_q))
                               && core_axi.wvalid;
   assign offchip_axi.wlast = core_axi.wlast;
   assign offchip_axi.wdata = core_axi.wdata;
@@ -281,7 +306,7 @@ module rapt_router #(
   assign core_axi.wready = (w_state == W_INT_W)
                          || ((w_state == W_IO_W) && offchip_axi.wready)
                          || (w_state == W_IDLE && core_axi.awvalid && !aw_is_int
-                             && !offchip_w_done_q && offchip_axi.wready);
+                             && offchip_write_space && !offchip_w_done_q && offchip_axi.wready);
 
   assign w_int_data = axi_wdata_to_internal(core_axi.wdata, w_int_awaddr[IntByteOffW-1:0]);
   assign clint_bus.wdata = w_int_data;
@@ -294,11 +319,12 @@ module rapt_router #(
   assign plic_bus.wvalid  = (w_state == W_INT_W) && core_axi.wvalid && core_axi.wready
                             && (w_int_target == INT_PLIC);
 
-  assign core_axi.bvalid = (w_state == W_INT_B) || ((w_state == W_IO_B) && offchip_axi.bvalid);
+  assign core_axi.bvalid = (w_state == W_INT_B)
+      || ((offchip_write_count != '0) && offchip_axi.bvalid);
   assign core_axi.bid = (w_state == W_INT_B) ? w_int_id : offchip_axi.bid;
   assign core_axi.bresp = (w_state == W_INT_B) ? 2'b00 : offchip_axi.bresp;
 
-  assign offchip_axi.bready = (w_state == W_IO_B) && core_axi.bready;
+  assign offchip_axi.bready = (offchip_write_count != '0) && core_axi.bready;
 
   always_comb begin
     w_state_next = w_state;
@@ -309,9 +335,9 @@ module rapt_router #(
             w_state_next = W_INT_W;
           end else if (offchip_w_done_q
                        || (core_axi.wvalid && core_axi.wready && core_axi.wlast)) begin
-            // W completed earlier or together with AW. Skip W_IO_W and
-            // wait for the downstream response to this write.
-            w_state_next = W_IO_B;
+            // W completed earlier or together with AW. A bounded offchip
+            // response owner allows the next AW/W pair before this B.
+            w_state_next = WriteOutstanding > 1 ? W_IDLE : W_IO_B;
           end else begin
             w_state_next = W_IO_W;
           end
@@ -324,7 +350,8 @@ module rapt_router #(
         if (core_axi.bvalid && core_axi.bready) w_state_next = W_IDLE;
       end
       W_IO_W: begin
-        if (core_axi.wvalid && core_axi.wready && core_axi.wlast) w_state_next = W_IO_B;
+        if (core_axi.wvalid && core_axi.wready && core_axi.wlast)
+          w_state_next = WriteOutstanding > 1 ? W_IDLE : W_IO_B;
       end
       W_IO_B: begin
         if (offchip_axi.bvalid && offchip_axi.bready) w_state_next = W_IDLE;
@@ -340,8 +367,16 @@ module rapt_router #(
       w_int_id     <= '0;
       w_int_awaddr <= '0;
       offchip_w_done_q <= 1'b0;
+      offchip_write_count <= '0;
     end else begin
       w_state <= w_state_next;
+      unique case ({
+        offchip_aw_fire, offchip_b_fire
+      })
+        2'b10: offchip_write_count <= offchip_write_count + 1'b1;
+        2'b01: offchip_write_count <= offchip_write_count - 1'b1;
+        default: ;
+      endcase
       if (w_state == W_IDLE && core_axi.awvalid && core_axi.awready) offchip_w_done_q <= 1'b0;
       else if (w_state == W_IDLE && offchip_axi.wvalid && offchip_axi.wready && offchip_axi.wlast)
         offchip_w_done_q <= 1'b1;
@@ -352,4 +387,11 @@ module rapt_router #(
       end
     end
   end
+  `RAPT_SVA_IMPLY(clock, reset, ROUTER_WRITE_CAPACITY, 1'b1,
+                  offchip_write_count <= WriteCountW'(WriteOutstanding))
+  `RAPT_SVA_IMPLY(clock, reset, ROUTER_INTERNAL_WRITE_DRAIN,
+                  w_state == W_INT_W || w_state == W_INT_B, offchip_write_count == '0)
+  `RAPT_SVA_IMPLY(clock, reset, ROUTER_INTERNAL_READ_DRAIN, push_int_resp, !offchip_write_pending)
+  `RAPT_SVA_NEXT(clock, reset, ROUTER_B_STABLE, core_axi.bvalid && !core_axi.bready,
+                 core_axi.bvalid && $stable({core_axi.bid, core_axi.bresp}))
 endmodule

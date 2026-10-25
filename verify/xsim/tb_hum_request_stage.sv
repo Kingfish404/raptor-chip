@@ -8,7 +8,7 @@ module tb_hum_request_stage;
                          input bit fp64 = 0);
     dispatch[0] = '0;
     dispatch[0].uop.pc = XLEN'('h80000000 + 4*slot);
-    dispatch[0].uop.pnpc = dispatch[0].uop.pc + 4;
+
     dispatch[0].uop.execute.memory.load = 1;
     dispatch[0].uop.execute.int_op.alu = `RAPT_ALU_LW__;
     if (fp64) begin

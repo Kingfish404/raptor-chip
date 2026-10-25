@@ -1,0 +1,37 @@
+diff --git a/config/config.json.in b/config/config.json.in
+--- a/config/config.json.in
++++ b/config/config.json.in
+@@ -291,2 +291,5 @@
+     "pmp": {
++      // Check each complete physical access before decomposing it, while
++      // retaining the ordinary splitting and per-operation PMP checks.
++      "check_full_access_before_split": false,
+       "grain": 0,
+diff --git a/model/sys/mem.sail b/model/sys/mem.sail
+--- a/model/sys/mem.sail
++++ b/model/sys/mem.sail
+@@ -229,6 +229,7 @@
+ //
+-// Note that unlike `phys_access_check()` above, the PMP check is
+-// _not_ done in this function when the PMA check succeeds, but later
+-// per split in the individual checked_mem_{read,write} and mem_write_ea
+-// functions.
++// By default, successful PMA checks defer PMP checking to each split in
++// checked_mem_{read,write} and mem_write_ea. An optional full-access PMP
++// precheck can reject a partially covered physical access before any split
++// is performed or announced. This does not change splitting or atomicity;
++// the per-split PMP checks are retained.
+ private function check_pma_with_pmp_priority forall 'n, 0 < 'n <= max_mem_access . (
+@@ -242,3 +243,10 @@
+   match pmaCheck(paddr, width, access, pbmt, res_or_con) {
+-    // PMP checks are done later per-split, and might still fail.
+-    Ok(access_info) => Ok(access_info),
++    Ok(access_info) => {
++      if config memory.pmp.check_full_access_before_split : bool then {
++        match pmpCheck(paddr, width, access, priv) {
++          Some(pmpExc) => return Err(pmpExc),
++          None()       => (),
++        }
++      };
++      Ok(access_info)
++    },

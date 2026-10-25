@@ -43,12 +43,14 @@ module rapt_rnu #(
 
   typedef struct packed {
     UopT uop;
+    logic [`RAPT_PC_BITS_OF(XLEN)-1:0] pnpc;
     logic [XLEN-1:0] op1, op2;
     logic [RLEN-1:0] rs1, rs2;
     history_position_t history_position;
   } decoded_t;
   typedef struct packed {
     UopT uop;
+    logic [`RAPT_PC_BITS_OF(XLEN)-1:0] pnpc;
     logic [XLEN-1:0] op1, op2;
     logic [PLEN-1:0] pr1, pr2, prd, prs;
     logic checkpoint_valid;
@@ -237,6 +239,7 @@ module rapt_rnu #(
     always_comb begin
       rnu_rou.slot[s] = '0;
       rnu_rou.slot[s].uop = buffered[s].uop;
+      rnu_rou.slot[s].pnpc = buffered[s].pnpc;
       rnu_rou.slot[s].op1 = buffered[s].op1;
       rnu_rou.slot[s].op2 = buffered[s].op2;
       rnu_rou.slot[s].pr1 = buffered[s].pr1;
@@ -308,6 +311,7 @@ module rapt_rnu #(
       checkpoint_chosen = checkpoint_index[checkpoint_rank];
       renamed[s] = '0;
       renamed[s].uop = candidate[s].uop;
+      renamed[s].pnpc = candidate[s].pnpc;
       renamed[s].op1 = candidate[s].op1;
       renamed[s].op2 = candidate[s].op2;
       // Read the cycle-start MAP once, then bypass only older slot tags.

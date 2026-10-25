@@ -20,10 +20,20 @@ module tb_tlb_flush_asid #(
   logic [6:0] fill_pte;
   logic [1:0] pbmt, fill_pbmt = 0;
 
+  // The capacity check expects round-robin wrap order.
+  logic lookup_valid = 0;
   rapt_tlb #(
       .XLEN(XLEN),
-      .ENTRIES(Entries)
+      .ENTRIES(Entries),
+      .TlbLru(0),
+      .TlbPlru(0)
   ) dut (
+      .sfence_valid(1'b0),
+      .sfence_vpn('0),
+      .sfence_asid('0),
+      .sfence_all_vpn(1'b1),
+      .sfence_all_asid(1'b1),
+      .fill_level(2'd0),
       .*
   );
 

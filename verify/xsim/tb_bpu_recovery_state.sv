@@ -29,11 +29,13 @@ module tb_bpu_recovery_state;
 
   initial begin
     logic [63:0] target_ghr;
-    logic [7:0] target_phr;
+    logic [ 7:0] target_phr;
     init_cmu_bcast_defaults();
     ifu_bpu.nextpc = '0;
     ifu_bpu.pc_update = 0;
+`ifdef RAPT_FETCH_LOOKAHEAD
     ifu_bpu.aux_query = 0;
+`endif
     ifu_bpu.history_valid = 0;
     ifu_bpu.history_taken = 0;
     ifu_bpu.history_pc_bit = 0;
@@ -119,6 +121,62 @@ module tb_bpu_recovery_state;
     else $fatal(1, "precise trap lost history priority to branch recovery");
     assert (idu_bpu.ras_addr == XLEN'('h8000_2004))
     else $fatal(1, "precise trap did not restore the committed RAS");
+    // Train committed history and a direct target, then corrupt only speculative
+    // history/RAS. SFENCE must preserve training and restore the committed image.
+    cmu_bcast.ben = 1;
+    cmu_bcast.btaken = 1;
+    cmu_bcast.rpc = XLEN'('h8000_4002);
+    tick();
+    cmu_bcast.ben = 0;
+    cmu_bcast.jen = 1;
+    cmu_bcast.flush_pipe = 1;
+    cmu_bcast.rpc = XLEN'('h8000_4000);
+    cmu_bcast.cpc = XLEN'('h8000_5000);
+    tick();
+    cmu_bcast.jen = 0;
+    cmu_bcast.flush_pipe = 0;
+    target_ghr = dut.rgshare;
+    target_phr = dut.rphr;
+    assert (target_ghr != 0 && target_phr != 0)
+    else $fatal(1, "committed history was not trained");
+    ifu_bpu.nextpc = XLEN'('h8000_4000);
+    ifu_bpu.pc_update = 1;
+    tick();
+    assert (ifu_bpu.taken && ifu_bpu.npc == XLEN'('h8000_5000))
+    else $fatal(1, "committed BTB target was not trained");
+    ifu_bpu.pc_update = 0;
+    ifu_bpu.history_valid = 1;
+    ifu_bpu.history_taken = 0;
+    idu_bpu.push_en = 1;
+    idu_bpu.push_addr = XLEN'('h8000_bad0);
+    tick();
+    ifu_bpu.history_valid = 0;
+    idu_bpu.push_en = 0;
+    cmu_bcast.fence_time = 1;
+    cmu_bcast.sfence_valid = 1;
+    cmu_bcast.flush_pipe = 1;
+    #1;
+    if (`RAPT_SFENCE_KEEP_STATE >= 3) begin
+      assert (!dut.u_dirp.init)
+      else $fatal(1, "SFENCE cleared the direction predictor's trained tables");
+    end
+    tick();
+    cmu_bcast.fence_time   = 0;
+    cmu_bcast.sfence_valid = 0;
+    cmu_bcast.flush_pipe   = 0;
+    if (`RAPT_SFENCE_KEEP_STATE >= 3) begin
+      assert (dut.rgshare == target_ghr && dut.rphr == target_phr
+              && dut.gshare == target_ghr && dut.phr == target_phr
+              && snapshot_ghr == target_ghr && snapshot_phr == target_phr)
+      else $fatal(1, "SFENCE lost committed history or kept wrong-path history");
+      assert (idu_bpu.ras_valid && idu_bpu.ras_addr == XLEN'('h8000_2004))
+      else $fatal(1, "SFENCE lost committed RAS or kept wrong-path return");
+      ifu_bpu.pc_update = 1;
+      tick();
+      ifu_bpu.pc_update = 0;
+      assert (ifu_bpu.taken && ifu_bpu.npc == XLEN'('h8000_5000))
+      else $fatal(1, "SFENCE discarded committed BTB target");
+    end
     $display(
         "PASS: XLEN=%0d early fetch history, clean retirement, trap priority, RAS overwrite repair",
         XLEN);

@@ -31,6 +31,11 @@ module tb_mshr_cache;
       .writeback_idle(),
       .writeback_drain(1'b0),
       `TB_L1D_UNUSED_RELEASE_PORTS,
+      .writeback_cbo_done(),
+      .coherent_addr('0),
+      .writeback_cbo(1'b0),
+      .writeback_cbo_invalidate(1'b0),
+      .writeback_block('0),
       .*
   );
   `include "tb_l1d_defaults.svh"

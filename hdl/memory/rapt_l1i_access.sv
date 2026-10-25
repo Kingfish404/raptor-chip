@@ -86,7 +86,11 @@ module rapt_l1i_access #(
   // lookahead is suppressed and the primary path checks it precisely later.
   localparam int LookaheadWords = WideLookahead ? 4 : 2;
   logic primary_word_fault, lookahead_uniform;
-  if (Lookahead || WideLookahead) begin : g_lookahead_window
+  if ((Lookahead || WideLookahead) && `RAPT_PMP_GRANULARITY_LOG2 >= 12) begin : g_page_window
+    // A page has one PMP match vector. Suppress speculation at the page
+    // edge; the demand/slow path checks the next page independently.
+    assign lookahead_uniform = pc_ifu[11:2] < 10'(1024 - LookaheadWords);
+  end else if (Lookahead || WideLookahead) begin : g_lookahead_window
     rapt_pmp_window_uniform #(
         .XLEN(XLEN),
         .Words(LookaheadWords)
@@ -106,9 +110,16 @@ module rapt_l1i_access #(
       // SRAM readiness and instruction length arrive after the address. Do
       // not put that late select ahead of the PMP end-address arithmetic and
       // comparisons: check both fetch lengths, then select the result.
-      localparam int Sizes = port_idx == 0 ? 2 : 1;
+      localparam bit PageGrain = `RAPT_PMP_GRANULARITY_LOG2 >= 12;
+      localparam int Sizes = port_idx == 0 && !PageGrain ? 2 : 1;
       wire [Sizes-1:0] size_fault, size_fault_lo;
-      if (port_idx == 0) begin : g_fetch_select
+      if (port_idx == 0 && PageGrain) begin : g_page_select
+        // An aligned halfword never crosses a page. Its verdict is the low
+        // endpoint of the four-byte check, so no second range CAM is needed.
+        assign primary_word_fault = size_fault[0];
+        assign fault[port_idx] = sram_data_ready && is_c ? size_fault_lo[0] : size_fault[0];
+        assign fault_lo[port_idx] = size_fault_lo[0];
+      end else if (port_idx == 0) begin : g_fetch_select
         assign primary_word_fault = size_fault[1];
         assign fault[port_idx] = sram_data_ready && is_c ? size_fault[0] : size_fault[1];
         assign fault_lo[port_idx] = sram_data_ready && is_c
@@ -123,8 +134,8 @@ module rapt_l1i_access #(
         ) u_pmp (
             .addr(addr[port_idx]),
             .size_m1(port_idx == 1 ? 4'(XLEN / 8 - 1)
-                : ((port_idx == 0 && size_idx == 0) || port_idx == 5 ? 4'd1 : 4'd3)),
-            .priv(csr_bcast.priv),
+                : ((port_idx == 0 && size_idx == 0 && !PageGrain) || port_idx == 5 ? 4'd1 : 4'd3)),
+            .priv(port_idx == 1 ? `RAPT_PRIV_S : csr_bcast.priv),
             .op_r(port_idx == 1),
             .op_w(1'b0),
             .op_x(port_idx != 1),

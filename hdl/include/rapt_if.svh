@@ -171,12 +171,16 @@ interface l1d_bus_if #(
   // a machine interrupt. IOQ checks PMA / PMP / MMU permissions before
   // stores reach the bus; this reports a later bus response error.
   logic werr;
-  // Posted write-through stores. `wpost` says the L1D can complete this
-  // store's handshake now, so the bus may acknowledge it at AXI acceptance.
+  // Posted writes. `wpost` permits downstream capture before older B replies.
+  // Ordinary stores may complete at capture; buffered writes complete at B.
   // `posted_busy` covers accepted stores still waiting for B; a failed B
   // reports the line that may hold the intended but unwritten value. All
   // three outputs are inactive at zero for buses without posting.
   logic wpost;
+  // Buffered writebacks retain payload until wready (B), but may advance
+  // their issue cursor at waccept. Ordinary stores use only wready.
+  logic wbuffered;
+  logic waccept;
   // Another committed store waits behind this one (from lsu_l1d.wmore).
   logic wmore;
   logic posted_busy;
@@ -188,16 +192,16 @@ interface l1d_bus_if #(
       input rready,
       input idle, rdata, rvalid, r_mshr, r_mshr_id, ptw_rvalid, ptw_rerr, rlast, difftest_skip, rerr,
 
-      output awvalid, awaddr, wvalid, wzero, wdata, wstrb, wpbmt, wpost, wmore,
-      input wready, werr, posted_busy, posted_error, posted_error_addr
+      output awvalid, awaddr, wvalid, wzero, wdata, wstrb, wpbmt, wpost, wmore, wbuffered,
+      input wready, waccept, werr, posted_busy, posted_error, posted_error_addr
   );
   modport slave(
       input arvalid, ar_mshr, ar_mshr_id, araddr, arlen, noallocate, rstrb, rpbmt, ar_ptw,
       output rready,
       output idle, rdata, rvalid, r_mshr, r_mshr_id, ptw_rvalid, ptw_rerr, rlast, difftest_skip, rerr,
 
-      input awvalid, awaddr, wvalid, wzero, wdata, wstrb, wpbmt, wpost, wmore,
-      output wready, werr, posted_busy, posted_error, posted_error_addr
+      input awvalid, awaddr, wvalid, wzero, wdata, wstrb, wpbmt, wpost, wmore, wbuffered,
+      output wready, waccept, werr, posted_busy, posted_error, posted_error_addr
   );
 endinterface
 
@@ -337,8 +341,9 @@ interface cmu_bcast_if #(
     parameter unsigned RLEN = `RAPT_REG_LEN,
     parameter int XLEN = `RAPT_XLEN
 );
-  logic [XLEN-1:0] rpc;
-  logic [XLEN-1:0] cpc;
+  localparam int PcBits = `RAPT_PC_BITS_OF(XLEN);
+  logic [PcBits-1:0] rpc;
+  logic [PcBits-1:0] cpc;
 
   logic ben;
   logic jen;
@@ -350,6 +355,9 @@ interface cmu_bcast_if #(
   logic rvc;
 
   logic fence_time;
+  logic sfence_valid, sfence_all_vpn, sfence_all_asid;
+  logic [26:0] sfence_vpn;
+  logic [8:0] sfence_asid;
   logic fence_i;
   // Physical cache-block address after translation and permission checks.
   logic cbo_inval;
@@ -370,7 +378,7 @@ interface cmu_bcast_if #(
       || (flush_pipe && (time_trap || !(ben || jen || jren || atomic_retired)));
 
   // Registered commit-redirect target (Phase 1): frontend fetch redirect PC.
-  logic [XLEN-1:0] redirect_pc;
+  logic [PcBits-1:0] redirect_pc;
 
   logic [$clog2(`RAPT_ROB_SIZE)-1:0] rob_head;
 
@@ -379,14 +387,16 @@ interface cmu_bcast_if #(
 
   modport in(
       input rpc, cpc, ben, jen, jren, btaken, atomic_retired, call, ret, rvc,
-      input fence_time, fence_i, cbo_inval, cbo_block, flush_pipe, flush_redirect,
+      input fence_time, fence_i, sfence_valid, sfence_all_vpn, sfence_all_asid, sfence_vpn,
+      sfence_asid, cbo_inval, cbo_block, flush_pipe, flush_redirect,
       fetch_context_stable, time_trap, mem_context_invalidate,
       input redirect_pc,
       input rob_head
   );
   modport out(
       output rpc, cpc, ben, jen, jren, btaken, atomic_retired, call, ret, rvc,
-      output fence_time, fence_i, cbo_inval, cbo_block, flush_pipe, flush_redirect,
+      output fence_time, fence_i, sfence_valid, sfence_all_vpn, sfence_all_asid, sfence_vpn,
+      sfence_asid, cbo_inval, cbo_block, flush_pipe, flush_redirect,
       fetch_context_stable, time_trap,
       output redirect_pc,
       output rob_head

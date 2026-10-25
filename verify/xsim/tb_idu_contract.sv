@@ -18,8 +18,9 @@ module tb_idu_bit_immediates;
     if (legal_expected) begin
       if (decoded.uop.trap || decoded.uop.rd != inst[11:7] || decoded.rs1 != inst[19:15])
         $fatal(1, "legal immediate rejected/misdecoded RV%0d inst=%h", X, inst);
-    end else if (!decoded.uop.trap || decoded.uop.cause != X'(2)
-                 || decoded.uop.tval != X'(inst) || decoded.uop.rd != 0)
+    end else if (!decoded.uop.trap || decoded.uop.cause != X'(2) ||
+        `RAPT_UOP_TVAL(`RAPT_XLEN, decoded.uop)
+        != X'(inst) || decoded.uop.rd != 0)
       $fatal(1, "XLEN-incompatible immediate accepted RV%0d inst=%h", X, inst);
     count++;
   endtask
@@ -97,13 +98,16 @@ module tb_idu_cmo;
     tick(1);
   endtask
 
-  task automatic expect_legal(input logic [4:0] alu, input string name);
+  task automatic expect_legal(input logic [4:0] alu, input string name,
+                              input rapt_pkg::system_kind_t kind);
     check(idu_rnu.valid[0] && !idu_rnu.slot[0].uop.trap, {name, " decoded illegal"});
     check(!idu_rnu.slot[0].uop.execute.memory.load && idu_rnu.slot[0].uop.execute.memory.store, {
           name, " did not use the checked CMO/store path"});
     check(idu_rnu.slot[0].uop.execute.int_op.alu[4:0] == alu, {name, " has wrong LSU operation tag"
           });
     check(idu_rnu.slot[0].uop.execute.sys.fence, {name, " did not serialize at retirement"});
+    check(idu_rnu.slot[0].uop.execute.sys.kind == kind, $sformatf(
+          "%s system kind=%0d expected=%0d", name, idu_rnu.slot[0].uop.execute.sys.kind, kind));
   endtask
 
   initial begin
@@ -134,20 +138,20 @@ module tb_idu_cmo;
     ifu_idu.valid[1] = 1'b0;
     ifu_idu.slot[0].trap = 1'b0;
     ifu_idu.slot[0].cause = '0;
-    ifu_idu.slot[0].tval = '0;
+    ifu_idu.slot[0].fetch_tval_plus2 = 1'b0;
     tick(4);
     reset = 1'b0;
     tick(1);
 
     // M-mode is never gated by xenvcfg.
     decode(32'h0000_a00f);
-    expect_legal(`RAPT_CBO_MGMT_WALU, "CBO.INVAL/M");
+    expect_legal(`RAPT_CBO_MGMT_WALU, "CBO.INVAL/M", rapt_pkg::SYS_CBO_INVAL);
     decode(32'h0010_a00f);
-    expect_legal(`RAPT_CBO_MGMT_WALU, "CBO.CLEAN/M");
+    expect_legal(`RAPT_CBO_MGMT_WALU, "CBO.CLEAN/M", rapt_pkg::SYS_CBO_CLEAN);
     decode(32'h0020_a00f);
-    expect_legal(`RAPT_CBO_MGMT_WALU, "CBO.FLUSH/M");
+    expect_legal(`RAPT_CBO_MGMT_WALU, "CBO.FLUSH/M", rapt_pkg::SYS_CBO_INVAL);
     decode(32'h0040_a00f);
-    expect_legal(`RAPT_CBO_ZERO_WALU, "CBO.ZERO/M");
+    expect_legal(`RAPT_CBO_ZERO_WALU, "CBO.ZERO/M", rapt_pkg::SYS_CBO_ZERO);
 
     // Zicbop prefetches are architectural HINTs: accepted with no register or
     // memory side effect even when this implementation chooses not to act on them.
@@ -176,17 +180,17 @@ module tb_idu_cmo;
 
     csr_bcast.priv = `RAPT_PRIV_S;
     decode(32'h0040_a00f);
-    check(idu_rnu.slot[0].uop.trap && idu_rnu.slot[0].uop.tval == 64'h0040_a00f,
-          "S-mode CBO.ZERO ignored menvcfg.CBZE=0");
+    check(idu_rnu.slot[0].uop.trap && `RAPT_UOP_TVAL(`RAPT_XLEN, idu_rnu.slot[0].uop)
+          == 64'h0040_a00f, "S-mode CBO.ZERO ignored menvcfg.CBZE=0");
     csr_bcast.menvcfg_cbie = 2'b01;
     csr_bcast.menvcfg_cbcfe = 1'b1;
     csr_bcast.menvcfg_cbze = 1'b1;
     decode(32'h0000_a00f);
-    expect_legal(`RAPT_CBO_MGMT_WALU, "CBO.INVAL/S");
+    expect_legal(`RAPT_CBO_MGMT_WALU, "CBO.INVAL/S", rapt_pkg::SYS_CBO_INVAL);
     decode(32'h0010_a00f);
-    expect_legal(`RAPT_CBO_MGMT_WALU, "CBO.CLEAN/S");
+    expect_legal(`RAPT_CBO_MGMT_WALU, "CBO.CLEAN/S", rapt_pkg::SYS_CBO_CLEAN);
     decode(32'h0040_a00f);
-    expect_legal(`RAPT_CBO_ZERO_WALU, "CBO.ZERO/S");
+    expect_legal(`RAPT_CBO_ZERO_WALU, "CBO.ZERO/S", rapt_pkg::SYS_CBO_ZERO);
 
     // U-mode requires both M and S environment enables.
     csr_bcast.priv = `RAPT_PRIV_U;
@@ -198,11 +202,11 @@ module tb_idu_cmo;
     csr_bcast.senvcfg_cbcfe = 1'b1;
     csr_bcast.senvcfg_cbze = 1'b1;
     decode(32'h0000_a00f);
-    expect_legal(`RAPT_CBO_MGMT_WALU, "CBO.INVAL/U");
+    expect_legal(`RAPT_CBO_MGMT_WALU, "CBO.INVAL/U", rapt_pkg::SYS_CBO_INVAL);
     decode(32'h0020_a00f);
-    expect_legal(`RAPT_CBO_MGMT_WALU, "CBO.FLUSH/U");
+    expect_legal(`RAPT_CBO_MGMT_WALU, "CBO.FLUSH/U", rapt_pkg::SYS_CBO_INVAL);
     decode(32'h0040_a00f);
-    expect_legal(`RAPT_CBO_ZERO_WALU, "CBO.ZERO/U");
+    expect_legal(`RAPT_CBO_ZERO_WALU, "CBO.ZERO/U", rapt_pkg::SYS_CBO_ZERO);
 
     $display("PASS: RVA22 CMO decode and xenvcfg privilege gating");
     $finish;
@@ -301,9 +305,17 @@ module tb_idu_fence_i_fields;
   localparam int X = `RAPT_XLEN;
   rapt_pkg::fetch_slot_t fetched;
   rapt_pkg::decoded_slot_t decoded;
+  rapt_pkg::memory_uop_t expected_memory;
   rapt_pkg::sys_uop_t expected_sys;
   csr_bcast_if #(.XLEN(X)) csr_bcast ();
   rapt_decode_slot #(.XLEN(X)) dut (.*);
+  // aq/rl retain instruction bits even when atomic is clear; only the
+  // load/store/atomic enables request memory effects.
+  always_comb begin
+    expected_memory = '0;
+    expected_memory.aq = fetched.inst[26];
+    expected_memory.rl = fetched.inst[25];
+  end
   int count = 0;
   initial begin
     fetched = '0;
@@ -316,6 +328,7 @@ module tb_idu_fence_i_fields;
     expected_sys = '0;
     expected_sys.valid = 1;
     expected_sys.fence_i = 1;
+    expected_sys.kind = rapt_pkg::SYS_FENCE_I;
     for (int priv = 0; priv < 4; priv++)
     if (priv != 2) begin
       csr_bcast.priv = 2'(priv);
@@ -326,10 +339,29 @@ module tb_idu_fence_i_fields;
         #1;
         if (decoded.uop.trap || decoded.uop.c || decoded.uop.rd != 0
             || decoded.uop.execute.sys != expected_sys
-            || decoded.uop.execute.memory != '0
+            || decoded.uop.execute.memory != expected_memory
             || decoded.uop.execute.branch != '0 || decoded.uop.execute.fp.valid
             || decoded.rs1 != 0 || decoded.rs2 != 0 || decoded.uop.imm != 0)
-          $fatal(1, "FENCE.I ignored-field violation inst=%h priv=%0d", fetched.inst, priv);
+          $fatal(
+              1,
+              "FENCE.I inst=%h priv=%0d sys=%p expected_sys=%p memory=%p aq/rl=%b/%b expected_aq/rl=%b/%b branch=%p trap=%b c=%b rd=%d rs1=%d rs2=%d imm=%h",
+              fetched.inst,
+              priv,
+              decoded.uop.execute.sys,
+              expected_sys,
+              decoded.uop.execute.memory,
+              decoded.uop.execute.memory.aq,
+              decoded.uop.execute.memory.rl,
+              expected_memory.aq,
+              expected_memory.rl,
+              decoded.uop.execute.branch,
+              decoded.uop.trap,
+              decoded.uop.c,
+              decoded.uop.rd,
+              decoded.rs1,
+              decoded.rs2,
+              decoded.uop.imm
+          );
         count++;
       end
     end
@@ -351,24 +383,40 @@ module tb_idu_hints;
   localparam int X = `RAPT_XLEN;
   rapt_pkg::fetch_slot_t fetched;
   rapt_pkg::decoded_slot_t decoded;
+  rapt_pkg::memory_uop_t expected_memory;
   csr_bcast_if #(.XLEN(X)) csr_bcast ();
   rapt_decode_slot #(.XLEN(X)) dut (.*);
+  // aq/rl retain instruction bits even when atomic is clear; only the
+  // load/store/atomic enables request memory effects.
+  always_comb begin
+    expected_memory = '0;
+    expected_memory.aq = fetched.inst[26];
+    expected_memory.rl = fetched.inst[25];
+  end
   int hint_count = 0, pause_count = 0, neighbor_count = 0;
   task automatic no_side_effect(input bit pause_hint);
     rapt_pkg::sys_uop_t expected_sys;
     expected_sys = '0;
     expected_sys.valid = pause_hint;
+    expected_sys.kind = pause_hint ? rapt_pkg::SYS_FENCE : rapt_pkg::SYS_NORMAL;
     if (decoded.uop.trap || decoded.uop.c || decoded.uop.rd != 0
         || decoded.uop.execute.sys != expected_sys
         || decoded.uop.execute.branch != '0 || decoded.uop.execute.fp.valid
-        || decoded.uop.execute.memory.load || decoded.uop.execute.memory.store
-        || decoded.uop.execute.memory.atomic)
+        || decoded.uop.execute.memory != expected_memory)
       $fatal(
           1,
-          "HINT side effect inst=%h priv=%0d rd=%0d",
+          "HINT inst=%h priv=%0d rd=%0d sys=%p expected_sys=%p memory=%p aq/rl=%b/%b expected_aq/rl=%b/%b branch=%p",
           fetched.inst,
           csr_bcast.priv,
-          decoded.uop.rd
+          decoded.uop.rd,
+          decoded.uop.execute.sys,
+          expected_sys,
+          decoded.uop.execute.memory,
+          decoded.uop.execute.memory.aq,
+          decoded.uop.execute.memory.rl,
+          expected_memory.aq,
+          expected_memory.rl,
+          decoded.uop.execute.branch
       );
   endtask
   initial begin
@@ -410,8 +458,21 @@ module tb_idu_hints;
           #1;
           if (decoded.uop.trap || decoded.uop.rd != 5'(rd) || decoded.uop.execute.int_op.alu[4:0] !=
               `RAPT_ALU_OR__
-              || decoded.uop.execute.sys != '0 || decoded.uop.execute.memory != '0)
-            $fatal(1, "ORI neighbor was misclassified inst=%h", fetched.inst);
+              || decoded.uop.execute.sys != '0 || decoded.uop.execute.memory != expected_memory ||
+                  decoded.rs1 != fetched.inst[19:15] || X'($signed(
+                  decoded.uop.imm
+              )) != X'($signed(
+                  fetched.inst[31:20]
+              )))
+            $fatal(
+                1,
+                "ORI neighbor inst=%h rd=%d alu=%d sys=%p memory=%p",
+                fetched.inst,
+                decoded.uop.rd,
+                decoded.uop.execute.int_op.alu,
+                decoded.uop.execute.sys,
+                decoded.uop.execute.memory
+            );
           neighbor_count++;
         end
       end
@@ -497,7 +558,7 @@ module tb_idu_illegal_stval;
     ifu_idu.slot[0].pnpc = 64'h8000_0004;
     ifu_idu.slot[0].trap = 1'b0;
     ifu_idu.slot[0].cause = '0;
-    ifu_idu.slot[0].tval = '0;
+    ifu_idu.slot[0].fetch_tval_plus2 = 1'b0;
 
     tick(4);
     reset = 1'b0;
@@ -511,19 +572,20 @@ module tb_idu_illegal_stval;
           "reserved compressed instruction did not trap in slot A");
     check(idu_rnu.slot[0].uop.cause == `RAPT_CAUSE_ILLEGAL_INST,
           "reserved compressed instruction reported the wrong cause");
-    check(idu_rnu.slot[0].uop.tval == 64'h0000_0000_0000_8c40,
+    check(`RAPT_UOP_TVAL(`RAPT_XLEN, idu_rnu.slot[0].uop) == 64'h0000_0000_0000_8c40,
           "slot-A illegal compressed instruction lost its raw stval bits");
 
     // Exercise the independent slot-B decode path as well.
     drive_packet(32'h0000_0013, 64'h8000_0200, 32'h0000_8c40, 64'h8000_0204, 1'b1, 64'h8000_0206);
     check(idu_rnu.valid[1] && idu_rnu.slot[1].uop.trap,
           "reserved compressed instruction did not trap in slot B");
-    check(idu_rnu.slot[1].uop.tval == 64'h0000_0000_0000_8c40,
+    check(`RAPT_UOP_TVAL(`RAPT_XLEN, idu_rnu.slot[1].uop) == 64'h0000_0000_0000_8c40,
           "slot-B illegal compressed instruction lost its raw stval bits");
 
     // The same mux must preserve all 32 bits for an ordinary illegal opcode.
     drive_packet(32'hffff_ffff, 64'h8000_0300, 32'h0000_0013, 64'h8000_0304, 1'b0, 64'h8000_0304);
-    check(idu_rnu.slot[0].uop.trap && idu_rnu.slot[0].uop.tval == 64'h0000_0000_ffff_ffff,
+    check(idu_rnu.slot[0].uop.trap && `RAPT_UOP_TVAL(`RAPT_XLEN, idu_rnu.slot[0].uop)
+          == 64'h0000_0000_ffff_ffff,
           "illegal 32-bit instruction did not remain right-justified in stval");
 
     $display("PASS: RVA20S64 Sstvala illegal-instruction checks passed");
@@ -541,8 +603,16 @@ module tb_idu_m_encodings;
   localparam int X = `RAPT_XLEN;
   rapt_pkg::fetch_slot_t fetched;
   rapt_pkg::decoded_slot_t decoded;
+  rapt_pkg::memory_uop_t expected_memory;
   csr_bcast_if #(.XLEN(X)) csr_bcast ();
   rapt_decode_slot #(.XLEN(X)) dut (.*);
+  // aq/rl retain instruction bits even when atomic is clear; only the
+  // load/store/atomic enables request memory effects.
+  always_comb begin
+    expected_memory = '0;
+    expected_memory.aq = fetched.inst[26];
+    expected_memory.rl = fetched.inst[25];
+  end
   int legal_count = 0, illegal_count = 0, other_illegal_count = 0;
   logic legal_op;
   logic [31:0] inst;
@@ -573,15 +643,39 @@ module tb_idu_m_encodings;
                       || decoded.uop.execute.int_op.word != 1'(word_op)
                       || decoded.uop.execute.int_op.alu != 6'(24+f3)
                       || decoded.uop.schedule.domain != rapt_pkg::DOMAIN_MULDIV
-                      || decoded.uop.execute.memory != '0
+                      || decoded.uop.execute.memory != expected_memory
                       || decoded.uop.execute.fp.valid || decoded.uop.c
                       || decoded.uop.execute.sys != '0
                       || decoded.uop.execute.branch != '0)
-            $fatal(1, "M decode inst=%h priv=%0d rd=%0d rs1=%0d rs2=%0d", inst, priv, rd, rs1, rs2);
+            $fatal(
+                1,
+                "M inst=%h priv=%0d rd=%0d/%0d rs1=%0d/%0d rs2=%0d/%0d word=%b/%b alu=%d/%d domain=%d/%d memory=%p sys=%p branch=%p fp_valid=%b trap=%b c=%b",
+                inst,
+                priv,
+                decoded.uop.rd,
+                rd,
+                decoded.rs1,
+                rs1,
+                decoded.rs2,
+                rs2,
+                decoded.uop.execute.int_op.word,
+                1'(word_op),
+                decoded.uop.execute.int_op.alu,
+                6'(24 + f3),
+                decoded.uop.schedule.domain,
+                rapt_pkg::DOMAIN_MULDIV,
+                decoded.uop.execute.memory,
+                decoded.uop.execute.sys,
+                decoded.uop.execute.branch,
+                decoded.uop.execute.fp.valid,
+                decoded.uop.trap,
+                decoded.uop.c
+            );
           legal_count++;
         end else begin
-          if (!decoded.uop.trap || decoded.uop.cause != X'(2)
-                      || decoded.uop.tval != X'(inst) || decoded.uop.rd != 0)
+          if (!decoded.uop.trap || decoded.uop.cause != X'(2) ||
+              `RAPT_UOP_TVAL(`RAPT_XLEN, decoded.uop)
+              != X'(inst) || decoded.uop.rd != 0)
             $fatal(1, "reserved M-space encoding inst=%h priv=%0d", inst, priv);
           illegal_count++;
         end
@@ -601,8 +695,9 @@ module tb_idu_m_encodings;
                         op != 0 ? 7'h3b : 7'h1b};
           fetched.inst = inst;
           #1;
-          if (!decoded.uop.trap || decoded.uop.cause != X'(2)
-                    || decoded.uop.tval != X'(inst) || decoded.uop.rd != 0)
+          if (!decoded.uop.trap || decoded.uop.cause != X'(2) ||
+              `RAPT_UOP_TVAL(`RAPT_XLEN, decoded.uop)
+              != X'(inst) || decoded.uop.rd != 0)
             $fatal(1, "RV64 integer space inst=%h priv=%0d", inst, priv);
           other_illegal_count++;
         end
@@ -646,7 +741,9 @@ module tb_idu_privileged;
           legal,
           decoded.uop.trap
       );
-    if (!legal && (decoded.uop.cause != 2 || decoded.uop.tval != XLEN'(inst)))
+    if (!legal && (decoded.uop.cause != 2 ||
+        `RAPT_UOP_TVAL(`RAPT_XLEN, decoded.uop)
+        != XLEN'(inst)))
       $fatal(1, "illegal instruction lost cause/raw tval");
   endtask
 
@@ -837,7 +934,7 @@ module tb_idu_zfhmin;
     ifu_idu.valid[1] = 1'b0;
     ifu_idu.slot[0].trap = 1'b0;
     ifu_idu.slot[0].cause = '0;
-    ifu_idu.slot[0].tval = '0;
+    ifu_idu.slot[0].fetch_tval_plus2 = 1'b0;
     tick(4);
     reset = 1'b0;
     tick(1);

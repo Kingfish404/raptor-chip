@@ -41,8 +41,10 @@ module tb_ioq_acquire_publish;
     tick(1);
     dispatch[0] = '0;
     dispatch[0].uop.pc = XLEN'('h80000000);
-    dispatch[0].uop.pnpc = XLEN'('h80000004);
-    dispatch[0].uop.inst=(amo_path ? 32'h000322af : 32'h100322af) | (32'(aq)<<26); // AMOADD.W or LR.W
+
+    dispatch[0].uop.inst=(amo_path ? 32'h000322af : 32'h100322af) | (32'(aq)<<26);
+    dispatch[0].uop.execute.memory.aq = dispatch[0].uop.inst[26];
+    dispatch[0].uop.execute.memory.rl = dispatch[0].uop.inst[25]; // AMOADD.W or LR.W
     dispatch[0].uop.execute.memory.load = 1;
     dispatch[0].uop.execute.memory.atomic = 1;
     dispatch[0].uop.execute.memory.store = amo_path;
@@ -58,8 +60,10 @@ module tb_ioq_acquire_publish;
     disp.accept[0] = 0;
     dispatch[0] = '0;
     dispatch[0].uop.pc = XLEN'('h80000004);
-    dispatch[0].uop.pnpc = XLEN'('h80000008);
+
     dispatch[0].uop.inst = 32'h00042383;
+    dispatch[0].uop.execute.memory.aq = dispatch[0].uop.inst[26];
+    dispatch[0].uop.execute.memory.rl = dispatch[0].uop.inst[25];
     dispatch[0].uop.execute.memory.load = 1;
     dispatch[0].uop.execute.int_op.alu = `RAPT_ALU_LW__;
     dispatch[0].op1 = XLEN'('h80001000);
@@ -665,7 +669,7 @@ module tb_ioq_amo_fault;
     tick(1);
     dispatch[0] = '0;
     dispatch[0].uop.pc = 'h80000000;
-    dispatch[0].uop.pnpc = 'h80000004;
+
     dispatch[0].uop.execute.memory.load = 1;
     dispatch[0].uop.execute.memory.store = kind == 2;
     dispatch[0].uop.execute.memory.atomic = kind != 0;
@@ -786,8 +790,10 @@ module tb_ioq_atomic_release;
       tick(1);
       dispatch[0] = '0;
       dispatch[0].uop.pc = XLEN'('h80000000);
-      dispatch[0].uop.pnpc = XLEN'('h80000004);
+
       dispatch[0].uop.inst=(kind==0 ? 32'h100022af : kind==1 ? 32'h000022af : 32'h00002283) | (32'(flags)<<25);
+      dispatch[0].uop.execute.memory.aq = dispatch[0].uop.inst[26];
+      dispatch[0].uop.execute.memory.rl = dispatch[0].uop.inst[25];
       dispatch[0].uop.execute.memory.load = 1;
       dispatch[0].uop.execute.memory.store = kind == 1;
       dispatch[0].uop.execute.memory.atomic = kind != 2;
@@ -841,7 +847,7 @@ module tb_ioq_atomic_pma;
       tick(1);
       dispatch[0] = '0;
       dispatch[0].uop.pc = XLEN'('h80000000);
-      dispatch[0].uop.pnpc = XLEN'('h80000004);
+
       dispatch[0].uop.execute.memory.store = 1;
       dispatch[0].uop.execute.memory.load = (sc == 0);
       dispatch[0].uop.execute.memory.atomic = 1;
@@ -904,7 +910,7 @@ module tb_ioq_data_span;
       bytes = 1 << width;
       dispatch[0] = '0;
       dispatch[0].uop.pc = XLEN'('h80000000);
-      dispatch[0].uop.pnpc = XLEN'('h80000004);
+
       dispatch[0].uop.execute.memory.store = 1;
       case (width)
         0: dispatch[0].uop.execute.int_op.alu = `RAPT_SB_WSTRB;
@@ -954,7 +960,7 @@ module tb_ioq_data_span;
       tick(1);
       dispatch[0] = '0;
       dispatch[0].uop.pc = XLEN'('h80000000);
-      dispatch[0].uop.pnpc = XLEN'('h80000004);
+
       dispatch[0].uop.execute.memory.store = 1;
       dispatch[0].uop.execute.int_op.alu = `RAPT_SW_WSTRB;
       dispatch[0].op1 = 'h40000fff;
@@ -1129,7 +1135,7 @@ module tb_ioq_pbmt_order;
   task automatic enqueue_load(input int owner, input logic [XLEN-1:0] addr, input bit atomic_lr);
     dispatch[0] = '0;
     dispatch[0].uop.pc = XLEN'('h80000000);
-    dispatch[0].uop.pnpc = XLEN'('h80000004);
+
     dispatch[0].uop.execute.memory.load = 1;
     dispatch[0].uop.execute.memory.atomic = atomic_lr;
     dispatch[0].uop.execute.int_op.alu = atomic_lr ? `RAPT_ATO_LR__ : `RAPT_ALU_LW__;
@@ -1219,7 +1225,7 @@ module tb_ioq_pending_lock;
       exu_l1d.reservation_valid = reservation_is_valid;
       dispatch[0].uop = '0;
       dispatch[0].uop.pc = 32'h2000_0200;
-      dispatch[0].uop.pnpc = dispatch[0].uop.pc + 32'd4;
+
       dispatch[0].uop.execute.memory.atomic = 1'b1;
       dispatch[0].uop.execute.memory.store = 1'b1;
       dispatch[0].uop.execute.int_op.word = 1'b1;
@@ -1249,7 +1255,7 @@ module tb_ioq_pending_lock;
     begin
       dispatch[0].uop = '0;
       dispatch[0].uop.pc = 32'h2000_0100 + {25'h0, dest, 2'b00};
-      dispatch[0].uop.pnpc = dispatch[0].uop.pc + 32'd4;
+
       dispatch[0].uop.execute.memory.load = 1'b1;
       dispatch[0].uop.execute.memory.store = 1'b0;
       dispatch[0].uop.execute.int_op.alu = `RAPT_ALU_LW__;
@@ -1274,7 +1280,7 @@ module tb_ioq_pending_lock;
     begin
       dispatch[0].uop = '0;
       dispatch[0].uop.pc = 32'h2000_0000 + {25'h0, dest, 2'b00};
-      dispatch[0].uop.pnpc = dispatch[0].uop.pc + 32'd4;
+
       dispatch[0].uop.execute.memory.store = 1'b1;
       dispatch[0].uop.execute.int_op.alu = `RAPT_SW_WSTRB;
       dispatch[0].op1 = addr;
@@ -1572,7 +1578,7 @@ module tb_ioq_plic_width;
       tick(1);
       dispatch[0] = '0;
       dispatch[0].uop.pc = XLEN'('h80000000);
-      dispatch[0].uop.pnpc = XLEN'('h80000004);
+
       dispatch[0].uop.execute.memory.store = 1;
       case (width)
         0: dispatch[0].uop.execute.int_op.alu = `RAPT_SB_WSTRB;
@@ -1638,7 +1644,7 @@ module tb_ioq_readonly_pma;
       tick(1);
       dispatch[0] = '0;
       dispatch[0].uop.pc = XLEN'('h80000000);
-      dispatch[0].uop.pnpc = XLEN'('h80000004);
+
       dispatch[0].uop.execute.memory.store = 1;
       dispatch[0].uop.execute.memory.load = kind == 1;
       dispatch[0].uop.execute.memory.atomic = kind == 1;
@@ -1693,8 +1699,10 @@ module tb_ioq_reservation_extent;
       exu_l1d.reservation_size_m1 = 4'(lrbytes - 1);
       dispatch[0] = '0;
       dispatch[0].uop.inst = 32'h180022af | (32'(flags) << 25);
+      dispatch[0].uop.execute.memory.aq = dispatch[0].uop.inst[26];
+      dispatch[0].uop.execute.memory.rl = dispatch[0].uop.inst[25];
       dispatch[0].uop.pc = XLEN'('h80000000);
-      dispatch[0].uop.pnpc = XLEN'('h80000004);
+
       dispatch[0].uop.execute.memory.store = 1;
       dispatch[0].uop.execute.memory.atomic = 1;
       dispatch[0].uop.execute.int_op.alu = `RAPT_ATO_SC__;
@@ -1778,7 +1786,7 @@ module tb_ioq_sc_external;
       exu_l1d.reservation_blocked = 1;
       dispatch[0] = '0;
       dispatch[0].uop.pc = XLEN'('h80000000);
-      dispatch[0].uop.pnpc = XLEN'('h80000004);
+
       dispatch[0].uop.execute.memory.store = 1;
       dispatch[0].uop.execute.memory.atomic = 1;
       dispatch[0].uop.execute.int_op.alu = `RAPT_ATO_SC__;
@@ -1968,7 +1976,7 @@ module tb_ioq_store_pbmt #(
     crosses = offset + size > 4096;
     dispatch[0] = '0;
     dispatch[0].uop.pc = 'h20000000;
-    dispatch[0].uop.pnpc = 'h20000004;
+
     dispatch[0].uop.execute.memory.store = 1;
     dispatch[0].uop.execute.int_op.alu = size == 1 ?
     `RAPT_SB_WSTRB
@@ -2175,7 +2183,11 @@ module tb_ioq_store_stage;
     // The resident checker retains CBO management's R-or-W PMP policy.
     for (int cmo_mgmt = 0; cmo_mgmt < 2; cmo_mgmt++) begin
       boot();
-      pmp_state.pmp_mode_na4[0] = 1'b1;
+      pmp_state.pmp_mode_off[0] = 0;
+      pmp_state.pmp_mode_na4[0] = `RAPT_PMP_GRANULARITY_LOG2 == 2;
+      pmp_state.pmp_mode_napot[0] = `RAPT_PMP_GRANULARITY_LOG2 != 2;
+      pmp_state.pmp_napot_mask[0] = (`RAPT_PADDR_BITS - 2)'(
+          (1 << (`RAPT_PMP_GRANULARITY_LOG2 - 2)) - 1);
       pmp_state.pmp_raw_addr[0] = 'h20001000;
       pmp_state.pmp_cfg_l[0] = 1'b1;
       pmp_state.pmp_cfg_r[0] = 1'b1;
@@ -2330,7 +2342,7 @@ module tb_ioq_zero_pma;
       tick(1);
       dispatch[0] = '0;
       dispatch[0].uop.pc = 'h80000000;
-      dispatch[0].uop.pnpc = 'h80000004;
+
       dispatch[0].uop.execute.memory.store = 1;
       dispatch[0].uop.execute.memory.load = 0;
       dispatch[0].uop.execute.memory.atomic = 0;

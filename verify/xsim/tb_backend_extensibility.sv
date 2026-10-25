@@ -123,7 +123,7 @@ rapt_iq #(
     u.schedule.domain = CustomDomain;
     u.schedule.issue_ports = '1;
     u.pc = 'h8000_0000 + xlen_t'(4 * (rd - 1));
-    u.pnpc = u.pc + 4;
+
     u.inst = 32'h0000_0013;
     u.rd = arch_reg_t'(rd);
     if (RecoveryExercise && rd == 2) begin
@@ -138,6 +138,7 @@ rapt_iq #(
   task automatic send_one(input int rd, input int rs1, input xlen_t a, input xlen_t b);
     @(negedge clock);
     idu_rnu.slot[0].uop = make_uop(rd);
+    idu_rnu.slot[0].pnpc = idu_rnu.slot[0].uop.pc + XLEN'(idu_rnu.slot[0].uop.c ? 2 : 4);
     idu_rnu.slot[0].rs1 = arch_reg_t'(rs1);
     idu_rnu.slot[0].op1 = a;
     idu_rnu.slot[0].op2 = b;

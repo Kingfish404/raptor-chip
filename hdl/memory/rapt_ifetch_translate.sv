@@ -52,6 +52,7 @@ module rapt_ifetch_translate #(
   wire [1:0] pmp_fault;
   wire [1:0] unused_pmp_fault_lo;
   wire [XLEN-1:12] unused_result_vtag;
+  wire [1:0] unused_result_level;
   wire [XLEN-1:0] pmp_addr[2];
   logic pte_access_fault, target_access_fault;
 
@@ -59,10 +60,10 @@ module rapt_ifetch_translate #(
   assign response_valid = state == REPLY;
   assign pmp_addr[0] = bus_araddr;
   assign pmp_addr[1] = response_paddr;
-  assign pte_access_fault = pmp_fault[0]
-      || !rapt_pkg::addr_ptw_readable(bus_araddr, 4'(XLEN / 8 - 1));
-  assign target_access_fault = pmp_fault[1]
-      || !rapt_pkg::addr_executable(response_paddr, 4'd3);
+  assign pte_access_fault = pmp_fault[0] || !rapt_pkg::addr_ptw_readable(
+      bus_araddr, 4'(XLEN / 8 - 1)
+  );
+  assign target_access_fault = pmp_fault[1] || !rapt_pkg::addr_executable(response_paddr, 4'd3);
   // Do not derive kill from ptw_arvalid: PTW gates arvalid with kill.
   assign ptw_kill = kill || state == DRAIN
       || (state == WALK && ptw_busy && (pte_access_fault || (bus_rvalid && bus_rerror)));
@@ -118,6 +119,7 @@ module rapt_ifetch_translate #(
       .result_vtag(unused_result_vtag),
       .result_pte(pte),
       .result_pbmt(pbmt),
+      .result_level(unused_result_level),
       .busy(ptw_busy)
   );
 

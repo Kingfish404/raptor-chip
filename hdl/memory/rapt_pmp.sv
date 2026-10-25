@@ -13,9 +13,11 @@ module rapt_pmp_state #(
     if (reset) begin
       for (int i = 0; i < N; i++) begin
         state.pmp_raw_addr[i]   <= '0;
-        // pmpaddr resets to zero: raw ^ (raw + 1) is one, encoding
-        // the minimum eight-byte NAPOT region if cfg enables it first.
-        state.pmp_napot_mask[i] <= 1;
+        // Reset raw address zero still describes the minimum NAPOT region
+        // if software enables it before writing pmpaddr.
+        state.pmp_napot_mask[i] <= (`RAPT_PADDR_BITS-2)'(
+            (64'd1 << (`RAPT_PMP_GRANULARITY_LOG2 > 2
+                ? `RAPT_PMP_GRANULARITY_LOG2 - 2 : 1)) - 1);
       end
       state.pmp_cfg_r      <= '0;
       state.pmp_cfg_w      <= '0;
@@ -98,7 +100,10 @@ module rapt_pmp_permissions #(
     input logic [`RAPT_PMP_NUM-1:0] pmp_mode_off,
     /* verilator lint_on UNUSEDSIGNAL */
     input logic [`RAPT_PMP_NUM-1:0] pmp_mode_tor,
+    // Only the legacy four-byte grain implements NA4.
+    /* verilator lint_off UNUSEDSIGNAL */
     input logic [`RAPT_PMP_NUM-1:0] pmp_mode_na4,
+    /* verilator lint_on UNUSEDSIGNAL */
     input logic [`RAPT_PMP_NUM-1:0] pmp_mode_napot,
 
     output logic fault,
@@ -115,95 +120,137 @@ module rapt_pmp_permissions #(
   logic [N-1:0] entry_overlap;
   logic [N-1:0] entry_contains_all;
 
-  // pmpaddr granularity = words (G=0 -> byte_addr >> 2). We compute
-  // addr_hi_w directly via (addr + size_m1) >> 2 to avoid carrying the
-  // unused byte-offset bits of the sum.
-  logic [PADDR_BITS-1:0] addr_phys;
-  logic [PADDR_BITS:0] addr_end;
-  logic [PMPAddrBits-1:0] addr_lo_w;
-  logic [PMPAddrBits-1:0] addr_hi_w;
-  assign addr_phys = addr[PADDR_BITS-1:0];
-  assign addr_end = {1'b0, addr_phys} + (PADDR_BITS+1)'(size_m1);
-  assign addr_lo_w = addr_phys[PADDR_BITS-1:2];
-  assign addr_hi_w = addr_end[PADDR_BITS-1:2];
-  // At most sixteen bytes visit at most two aligned eight-word blocks.
-  // Test a region start with wide equality and three-bit comparisons rather
-  // than cascading full physical-address magnitude comparators after addr_hi.
-  function automatic logic start_inside(input logic [PMPAddrBits-1:0] start_word);
-    logic same_block, in_first, in_last;
-    same_block = addr_lo_w[PMPAddrBits-1:3] == addr_hi_w[PMPAddrBits-1:3];
-    in_first = start_word[PMPAddrBits-1:3] == addr_lo_w[PMPAddrBits-1:3]
+  if (`RAPT_PMP_GRANULARITY_LOG2 >= 4) begin : g_page
+    // A request is at most sixteen bytes, so it touches at most two grains.
+    // No complete region can hide between its endpoints. All range compares
+    // omit the grain offset (20 address bits for PA32 and a 4 KiB grain).
+    localparam int Offset = `RAPT_PMP_GRANULARITY_LOG2;
+    localparam int Bits   = PADDR_BITS - Offset;
+    logic [Offset:0] end_offset;
+    logic [Bits:0] end_page;
+    wire [Bits-1:0] first_page = addr[PADDR_BITS-1:Offset];
+    wire [Bits-1:0] last_page = end_page[Bits-1:0];
+    wire wraps = end_page[Bits];
+    logic [N-1:0] before_first, before_last;
+    assign end_offset = {1'b0, addr[Offset-1:0]} + (Offset+1)'(size_m1);
+    assign end_page = {1'b0, first_page} + (Bits+1)'(end_offset[Offset]);
+    for (genvar i = 0; i < N; i++) begin : g_boundary
+      wire [Bits-1:0] boundary_page = pmp_raw_addr[i][PMPAddrBits-1:Offset-2];
+      assign before_first[i] = first_page < boundary_page;
+      // With at most one carry, the only new boundary is the last page.
+      assign before_last[i] = wraps ? (|boundary_page)
+          : before_first[i] && !(end_offset[Offset] && last_page == boundary_page);
+    end
+    for (genvar i = 0; i < N; i++) begin : g_entry
+      wire [Bits-1:0] mask = pmp_napot_mask[i][PMPAddrBits-1:Offset-2];
+      wire [Bits-1:0] base = pmp_raw_addr[i][PMPAddrBits-1:Offset-2] & ~mask;
+      wire tor_first = before_first[i] && (i == 0 || !before_first[i > 0 ? i-1 : 0]);
+      wire tor_last = before_last[i] && (i == 0 || !before_last[i > 0 ? i-1 : 0]);
+      assign entry_match_lo[i] = (pmp_mode_tor[i] && tor_first)
+          || (pmp_mode_napot[i] && (first_page & ~mask) == base);
+      assign entry_match_hi[i] = (pmp_mode_tor[i] && tor_last)
+          || (pmp_mode_napot[i] && (last_page & ~mask) == base);
+      assign entry_overlap[i] = entry_match_lo[i] || entry_match_hi[i];
+      assign entry_contains_all[i] = entry_match_lo[i] && entry_match_hi[i]
+          && (!wraps || (pmp_mode_napot[i] && (&mask)));
+    end
+  end else begin : g_fine
+    localparam int Grain = `RAPT_PMP_GRANULARITY_LOG2 - 2;
+    wire [PMPAddrBits-1:0] tor_addr[N];
+    for (genvar i = 0; i < N; i++) begin : g_tor_addr
+      assign tor_addr[i] = (pmp_raw_addr[i] >> Grain) << Grain;
+    end
+    // pmpaddr granularity = words (G=0 -> byte_addr >> 2). We compute
+    // addr_hi_w directly via (addr + size_m1) >> 2 to avoid carrying the
+    // unused byte-offset bits of the sum.
+    logic [PADDR_BITS-1:0] addr_phys;
+    logic [PADDR_BITS:0] addr_end;
+    logic [PMPAddrBits-1:0] addr_lo_w;
+    logic [PMPAddrBits-1:0] addr_hi_w;
+    assign addr_phys = addr[PADDR_BITS-1:0];
+    assign addr_end = {1'b0, addr_phys} + (PADDR_BITS+1)'(size_m1);
+    assign addr_lo_w = addr_phys[PADDR_BITS-1:2];
+    assign addr_hi_w = addr_end[PADDR_BITS-1:2];
+    // At most sixteen bytes visit at most two aligned eight-word blocks.
+    // Test a region start with wide equality and three-bit comparisons rather
+    // than cascading full physical-address magnitude comparators after addr_hi.
+    function automatic logic start_inside(input logic [PMPAddrBits-1:0] start_word);
+      logic same_block, in_first, in_last;
+      same_block = addr_lo_w[PMPAddrBits-1:3] == addr_hi_w[PMPAddrBits-1:3];
+      in_first = start_word[PMPAddrBits-1:3] == addr_lo_w[PMPAddrBits-1:3]
         && start_word[2:0] >= addr_lo_w[2:0];
-    in_last = start_word[PMPAddrBits-1:3] == addr_hi_w[PMPAddrBits-1:3]
+      in_last = start_word[PMPAddrBits-1:3] == addr_hi_w[PMPAddrBits-1:3]
         && start_word[2:0] <= addr_hi_w[2:0];
-    return same_block ? (in_first && in_last) : (in_first || in_last);
-  endfunction
-  // Each TOR boundary serves its own upper bound and the next entry's lower
-  // bound. Reuse the first-word comparison for the last word: without wrap,
-  // last < boundary iff first < boundary and boundary is outside the access.
-  logic [N-1:0] tor_before_lo, tor_before_hi, raw_start_inside;
-  for (genvar i = 0; i < N; i++) begin : gen_tor_boundary
-    assign tor_before_lo[i] = addr_lo_w < pmp_raw_addr[i];
-    assign raw_start_inside[i] = start_inside(pmp_raw_addr[i]);
-    // A wrapping access of at most sixteen bytes ends at byte 0..14, so
-    // its last word is at most three. Keep physical wrap fully supported.
-    assign tor_before_hi[i] = addr_end[PADDR_BITS]
-        ? ((|pmp_raw_addr[i][PMPAddrBits-1:2])
-            || addr_hi_w[1:0] < pmp_raw_addr[i][1:0])
+      return same_block ? (in_first && in_last) : (in_first || in_last);
+    endfunction
+    // Each TOR boundary serves its own upper bound and the next entry's lower
+    // bound. Reuse the first-word comparison for the last word: without wrap,
+    // last < boundary iff first < boundary and boundary is outside the access.
+    logic [N-1:0] tor_before_lo, tor_before_hi, raw_start_inside;
+    for (genvar i = 0; i < N; i++) begin : gen_tor_boundary
+      assign tor_before_lo[i] = addr_lo_w < tor_addr[i];
+      assign raw_start_inside[i] = start_inside(tor_addr[i]);
+      // A wrapping access of at most sixteen bytes ends at byte 0..14, so
+      // its last word is at most three. Keep physical wrap fully supported.
+      assign tor_before_hi[i] = addr_end[PADDR_BITS]
+        ? ((|tor_addr[i][PMPAddrBits-1:2])
+            || addr_hi_w[1:0] < tor_addr[i][1:0])
         : (tor_before_lo[i] && !raw_start_inside[i]);
-  end
-  for (genvar i = 0; i < N; i++) begin : gen_entry
-    logic [PMPAddrBits-1:0] napot_base;
-    logic match_tor_lo, match_na4_lo, match_napot_lo;
-    logic match_tor_hi, match_na4_hi, match_napot_hi;
-    logic tor_start_inside, na4_start_inside, napot_start_inside;
-    if (i == 0) begin : gen_first_tor
-      assign match_tor_lo = tor_before_lo[i];
-      assign match_tor_hi = tor_before_hi[i];
-    end else begin : gen_next_tor
-      assign match_tor_lo = !tor_before_lo[i-1] && tor_before_lo[i];
-      assign match_tor_hi = !tor_before_hi[i-1] && tor_before_hi[i];
     end
-    assign napot_base = pmp_raw_addr[i] & ~pmp_napot_mask[i];
-    assign match_na4_lo = (addr_lo_w == pmp_raw_addr[i]);
-    assign match_na4_hi = (addr_hi_w == pmp_raw_addr[i]);
-    assign match_napot_lo = ((addr_lo_w & ~pmp_napot_mask[i]) == napot_base);
-    assign match_napot_hi = ((addr_hi_w & ~pmp_napot_mask[i]) == napot_base);
+    for (genvar i = 0; i < N; i++) begin : gen_entry
+      logic [PMPAddrBits-1:0] napot_base;
+      logic match_tor_lo, match_na4_lo, match_napot_lo;
+      logic match_tor_hi, match_na4_hi, match_napot_hi;
+      logic tor_start_inside, na4_start_inside, napot_start_inside;
+      if (i == 0) begin : gen_first_tor
+        assign match_tor_lo = tor_before_lo[i];
+        assign match_tor_hi = tor_before_hi[i];
+      end else begin : gen_next_tor
+        assign match_tor_lo = !tor_before_lo[i-1] && tor_before_lo[i];
+        assign match_tor_hi = !tor_before_hi[i-1] && tor_before_hi[i];
+      end
+      assign napot_base = pmp_raw_addr[i] & ~pmp_napot_mask[i];
+      assign match_na4_lo = (addr_lo_w == pmp_raw_addr[i]);
+      assign match_na4_hi = (addr_hi_w == pmp_raw_addr[i]);
+      assign match_napot_lo = ((addr_lo_w & ~pmp_napot_mask[i]) == napot_base);
+      assign match_napot_hi = ((addr_hi_w & ~pmp_napot_mask[i]) == napot_base);
 
-    // Endpoints alone miss an entry contained inside the access. For the
-    // contiguous ranges produced by PMP CSR decoding, overlap occurs when
-    // either endpoint matches or the region's start lies inside the access.
-    // Handle wrapping physical-word arithmetic consistently with endpoints.
-    if (i == 0) begin : gen_zero_tor_start
-      // Entry zero starts at word zero: it lies in the access only when
-      // the access starts there or wraps across the physical address limit.
-      assign tor_start_inside = (pmp_raw_addr[i] != '0)
+      // Endpoints alone miss an entry contained inside the access. For the
+      // contiguous ranges produced by PMP CSR decoding, overlap occurs when
+      // either endpoint matches or the region's start lies inside the access.
+      // Handle wrapping physical-word arithmetic consistently with endpoints.
+      if (i == 0) begin : gen_zero_tor_start
+        // Entry zero starts at word zero: it lies in the access only when
+        // the access starts there or wraps across the physical address limit.
+        assign tor_start_inside = (tor_addr[i] != '0)
           && ((addr_lo_w == '0) || addr_end[PADDR_BITS]);
-    end else begin : gen_nonzero_tor_start
-      assign tor_start_inside = (pmp_raw_addr[i-1] < pmp_raw_addr[i]) && raw_start_inside[i-1];
-    end
-    assign na4_start_inside = raw_start_inside[i];
-    assign napot_start_inside = start_inside(napot_base);
+      end else begin : gen_nonzero_tor_start
+        assign tor_start_inside = (tor_addr[i-1] < tor_addr[i]) && raw_start_inside[i-1];
+      end
+      assign na4_start_inside = raw_start_inside[i];
+      assign napot_start_inside = start_inside(napot_base);
 
-    // OR-of-AND with mode one-hot vectors.  Equivalent to the previous
-    // unique-case but synthesises as 4xAND + OR-reduce instead of a
-    // 4-way mux that may share priority logic with the rest of the chain.
-    assign entry_match_lo[i] = (pmp_mode_tor[i]   & match_tor_lo)
+      // OR-of-AND with mode one-hot vectors.  Equivalent to the previous
+      // unique-case but synthesises as 4xAND + OR-reduce instead of a
+      // 4-way mux that may share priority logic with the rest of the chain.
+      assign entry_match_lo[i] = (pmp_mode_tor[i]   & match_tor_lo)
                              | (pmp_mode_na4[i]   & match_na4_lo)
                              | (pmp_mode_napot[i] & match_napot_lo);
-    assign entry_match_hi[i] = (pmp_mode_tor[i]   & match_tor_hi)
+      assign entry_match_hi[i] = (pmp_mode_tor[i]   & match_tor_hi)
                              | (pmp_mode_na4[i]   & match_na4_hi)
                              | (pmp_mode_napot[i] & match_napot_hi);
-    assign entry_overlap[i] = entry_match_lo[i] | entry_match_hi[i]
+      assign entry_overlap[i] = entry_match_lo[i] | entry_match_hi[i]
                              | (pmp_mode_tor[i] & tor_start_inside)
                              | (pmp_mode_na4[i] & na4_start_inside)
                              | (pmp_mode_napot[i] & napot_start_inside);
-    // On physical-address wrap, endpoints in one range do not prove that
-    // the intervening top and bottom addresses are covered. Only a NAPOT
-    // range covering the entire physical address space can contain both.
-    assign entry_contains_all[i] = entry_match_lo[i] & entry_match_hi[i]
+      // On physical-address wrap, endpoints in one range do not prove that
+      // the intervening top and bottom addresses are covered. Only a NAPOT
+      // range covering the entire physical address space can contain both.
+      assign entry_contains_all[i] = entry_match_lo[i] & entry_match_hi[i]
         & ((!addr_end[PADDR_BITS])
            | (pmp_mode_napot[i] && (&pmp_napot_mask[i])));
+    end
+
   end
 
   // Lowest-set-bit one-hot priority encoder.
@@ -346,20 +393,25 @@ module rapt_pmp_line_uniform #(
     output logic uniform_o
 );
   localparam int WordBits = PADDR_BITS - 2;
-  localparam int LowBits  = LineOffset - 2;
+  localparam int Grain = `RAPT_PMP_GRANULARITY_LOG2 - 2;
+  wire [WordBits-1:0] tor_addr[`RAPT_PMP_NUM];
+  for (genvar i = 0; i < `RAPT_PMP_NUM; i++) begin : g_tor_addr
+    assign tor_addr[i] = (state.pmp_raw_addr[i] >> Grain) << Grain;
+  end
+  localparam int LowBits = LineOffset - 2;
   logic [`RAPT_PMP_NUM-1:0] boundary;
   function automatic logic inside_line(input logic [WordBits-1:0] word_addr);
     return word_addr[WordBits-1:LowBits] == addr[PADDR_BITS-1:LineOffset]
         && |word_addr[LowBits-1:0];
   endfunction
   for (genvar i = 0; i < `RAPT_PMP_NUM; i++) begin : g_boundary
-    wire [WordBits-1:0] low = i == 0 ? '0 : state.pmp_raw_addr[i > 0 ? i-1 : 0];
+    wire [WordBits-1:0] low = i == 0 ? '0 : tor_addr[i > 0 ? i-1 : 0];
     wire [WordBits-1:LowBits] base = state.pmp_raw_addr[i][WordBits-1:LowBits]
         & ~state.pmp_napot_mask[i][WordBits-1:LowBits];
     assign boundary[i] = (state.pmp_mode_tor[i] && (inside_line(
         low
     ) || inside_line(
-        state.pmp_raw_addr[i]
+        tor_addr[i]
     ))) || (state.pmp_mode_na4[i] &&
             state.pmp_raw_addr[i][WordBits-1:LowBits] == addr[PADDR_BITS-1:LineOffset]) ||
         (state.pmp_mode_napot[i] && !(&state.pmp_napot_mask[i][LowBits-1:0]) &&
@@ -385,7 +437,12 @@ module rapt_pmp_window_uniform #(
     output logic uniform_o
 );
   localparam int WordBits = PADDR_BITS - 2;
-  localparam int LowBits  = $clog2(Words + 1) > 0 ? $clog2(Words + 1) : 1;
+  localparam int Grain = `RAPT_PMP_GRANULARITY_LOG2 - 2;
+  wire [WordBits-1:0] tor_addr[`RAPT_PMP_NUM];
+  for (genvar i = 0; i < `RAPT_PMP_NUM; i++) begin : g_tor_addr
+    assign tor_addr[i] = (state.pmp_raw_addr[i] >> Grain) << Grain;
+  end
+  localparam int LowBits = $clog2(Words + 1) > 0 ? $clog2(Words + 1) : 1;
   if (AlignedWindow && (Words < 1 || ((Words + 1) & Words) != 0)) begin : g_bad_window
     $error("Aligned PMP window must contain a power of two words");
   end
@@ -419,7 +476,7 @@ module rapt_pmp_window_uniform #(
   logic [`RAPT_PMP_NUM-1:0] raw_starts;
   for (genvar i = 0; i < `RAPT_PMP_NUM; i++) begin : g_raw
     // TOR membership changes exactly at its pmpaddr boundary values.
-    assign raw_starts[i] = starts_inside(state.pmp_raw_addr[i]);
+    assign raw_starts[i] = starts_inside(tor_addr[i]);
   end
   for (genvar i = 0; i < `RAPT_PMP_NUM; i++) begin : g_boundary
     wire [WordBits-1:0] base = state.pmp_raw_addr[i] & ~state.pmp_napot_mask[i];
@@ -432,7 +489,7 @@ module rapt_pmp_window_uniform #(
     end
     assign boundary[i] = (state.pmp_mode_tor[i] && tor_edge)
         || (state.pmp_mode_na4[i] && (raw_starts[i] || ends_inside(
-        state.pmp_raw_addr[i]
+        tor_addr[i]
     ))) || (state.pmp_mode_napot[i] && (starts_inside(
         base
     ) || ends_inside(

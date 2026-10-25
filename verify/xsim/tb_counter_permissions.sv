@@ -43,8 +43,9 @@ module tb_counter_permissions;
           inst = {addresses[a],5'(src),3'(op),dst ? 5'd31 : 5'd0,7'h73};
           fetched.inst = inst;
           #1;
-          if (decoded.uop.trap !== !legal || (!legal &&
-          (decoded.uop.cause != XLEN'(2) || decoded.uop.tval != XLEN'(inst))))
+          if (decoded.uop.trap !== !legal || (!legal && (decoded.uop.cause != XLEN'(2) ||
+              `RAPT_UOP_TVAL(XLEN, decoded.uop)
+              != XLEN'(inst))))
             $fatal(
                 1,
                 "counter permissions RV%0d priv=%0d men=%0d sen=%0d inst=%h legal=%b trap=%b cause=%h tval=%h",
@@ -56,7 +57,7 @@ module tb_counter_permissions;
                 legal,
                 decoded.uop.trap,
                 decoded.uop.cause,
-                decoded.uop.tval
+                `RAPT_UOP_TVAL(XLEN, decoded.uop)
             );
           checks++;
         end

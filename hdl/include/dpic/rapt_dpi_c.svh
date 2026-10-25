@@ -5,6 +5,9 @@
 `define RAPT_DPI_C_NPC_DIFFTEST_SKIP_REF npc_difftest_skip_ref();
 `define RAPT_DPI_C_NPC_GET_EXT_IRQ_VECTOR(rval) npc_consume_ext_irq_vector(rval)
 `define RAPT_DPI_C_MEM_RANDOM_DELAY(rval) rval = npc_mem_random_delay()
+`define RAPT_DPI_C_MEM_READ_LATENCY(rval) rval = npc_mem_read_latency()
+`define RAPT_DPI_C_MEM_WRITE_LATENCY(rval) rval = npc_mem_write_latency()
+`define RAPT_DPI_C_MEM_WRITE_OUTSTANDING(rval) rval = npc_mem_write_outstanding()
 `define RAPT_DPI_C_NPC_DIFFTEST_MEM_DIFF(waddr, wdata, wstrb) \
     npc_difftest_mem_diff(waddr, wdata, wstrb);
 

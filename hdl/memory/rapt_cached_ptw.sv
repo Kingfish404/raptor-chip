@@ -38,6 +38,7 @@ module rapt_cached_ptw #(
     output logic [6:0] result_pte,
     // Leaf PBMT; valid together with result_pte on done. Sv32 always uses PMA.
     output logic [1:0] result_pbmt,
+    output logic [1:0] result_level,
 
     output logic busy
 );
@@ -61,6 +62,7 @@ module rapt_cached_ptw #(
     logic [XLEN-1:12] walk_vtag;
     logic [6:0] walk_pte;
     logic [1:0] walk_pbmt;
+    logic [1:0] walk_level;
     logic done_q, fault_q;
 
     assign busy = state != IDLE;
@@ -70,6 +72,7 @@ module rapt_cached_ptw #(
     assign result_ptag = request_q.ptag;
     assign result_pte = request_q.pte;
     assign result_pbmt = request_q.pbmt;
+    assign result_level = request_q.level;
     always_comb begin
       l2_req_o = request_q;
       l2_req_o.valid = (state == LOOKUP || state == FILL) && !kill && !reset;
@@ -100,6 +103,7 @@ module rapt_cached_ptw #(
         .result_vtag(walk_vtag),
         .result_pte(walk_pte),
         .result_pbmt(walk_pbmt),
+        .result_level(walk_level),
         .busy(walk_busy)
     );
 
@@ -134,15 +138,16 @@ module rapt_cached_ptw #(
               end
             end
             LOOKUP: if (l2_ready_i) state <= RESPONSE;
-            RESPONSE: if (l2_rsp_i.valid) begin
+            RESPONSE:
+            if (l2_rsp_i.valid) begin
               if (l2_rsp_i.hit) begin
                 request_q.ptag <= l2_rsp_i.ptag;
                 request_q.pte <= l2_rsp_i.pte;
                 request_q.pbmt <= l2_rsp_i.pbmt;
+                request_q.level <= l2_rsp_i.level;
                 // Svade still applies when a read-filled entry is reused by
                 // a store. R/W/X/U/SUM/MXR and PMP remain requester checks.
-                if (!l2_rsp_i.pte[5] || (store_q && !l2_rsp_i.pte[6]))
-                  fault_q <= 1'b1;
+                if (!l2_rsp_i.pte[5] || (store_q && !l2_rsp_i.pte[6])) fault_q <= 1'b1;
                 else done_q <= 1'b1;
                 state <= IDLE;
               end else state <= START;
@@ -159,10 +164,12 @@ module rapt_cached_ptw #(
                 request_q.vtag <= walk_vtag;
                 request_q.pte <= walk_pte;
                 request_q.pbmt <= walk_pbmt;
+                request_q.level <= walk_level;
                 state <= FILL;
               end
             end
-            FILL: if (l2_ready_i) begin
+            FILL:
+            if (l2_ready_i) begin
               done_q <= 1'b1;
               state <= IDLE;
             end

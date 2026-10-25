@@ -2,12 +2,50 @@
   "extensions": {
     "Zama16b": {
       "supported": false
+    },
+    "H": {
+      "supported": false
+    },
+    "Sha": {
+      "supported": false
+    },
+    "Shcounterenw": {
+      "supported": false
+    },
+    "Shgatpa": {
+      "supported": false
+    },
+    "Shtvala": {
+      "supported": false
+    },
+    "Shvsatpa": {
+      "supported": false
+    },
+    "Shvstvala": {
+      "supported": false
+    },
+    "Shvstvecd": {
+      "supported": false
+    },
+    "Sdtrig": {
+      "supported": false
+    },
+    "Stateen": {
+      "Smstateen": {
+        "supported": false
+      },
+      "Ssstateen": {
+        "supported": false
+      }
     }
   },
   "memory": {
     "pmp": {
+      "grain": 10,
       "count": 16,
-      "usable_count": 8
+      "usable_count": 8,
+      "na4_supported": false,
+      "check_full_access_before_split": true
     },
     "regions": [
       {
@@ -35,7 +73,8 @@
             "vector": {
               "None": null
             },
-            "amo": "AccessFault"
+            "amo": "AccessFault",
+            "lrsc": "AccessFault"
           },
           "atomic_support": "AMONone",
           "misaligned_atomicity_granule_size_exp": 0,
@@ -72,7 +111,8 @@
             "vector": {
               "None": null
             },
-            "amo": "AccessFault"
+            "amo": "AccessFault",
+            "lrsc": "AccessFault"
           },
           "atomic_support": "AMONone",
           "misaligned_atomicity_granule_size_exp": 0,
@@ -109,7 +149,8 @@
             "vector": {
               "None": null
             },
-            "amo": "AccessFault"
+            "amo": "AccessFault",
+            "lrsc": "AccessFault"
           },
           "atomic_support": "AMOCASQ",
           "misaligned_atomicity_granule_size_exp": 0,
@@ -123,7 +164,15 @@
       }
     ],
     "misaligned": {
-      "default_allowed_within_exp": 12
+      "default_allowed_within_exp": 0
+    }
+  },
+  "base": {
+    "medeleg": {
+      "delegatable_bits": {
+        "len": 64,
+        "value": "0x000000000008b3fe"
+      }
     }
   }
 }

@@ -17,7 +17,8 @@
 
 module rapt_bus #(
     parameter int XLEN = `RAPT_XLEN,
-    // Cacheable write-through L1D stores that may complete to the LSU when
+    parameter bit TargetedCoherence = `RAPT_L1D_TARGETED_COHERENCE,
+    // Cacheable L1D writes that may issue another request when
     // the AXI master accepts them, before their B response. Zero keeps every
     // write synchronous to its B response.
     parameter int PostedWrites = 0,
@@ -30,6 +31,7 @@ module rapt_bus #(
     input logic coherent_ready = 1'b1,
     output logic coherent_request,
     output logic coherent_write,
+    output logic [XLEN-1:0] coherent_addr,
 
     // Internal memory transaction port
     mem_link_if.master mem,
@@ -166,10 +168,13 @@ module rapt_bus #(
     if (reset) begin
       coherent_reads <= '0;
       l1i_arvalid_q  <= 1'b0;
+      coherent_addr <= '0;
     end else begin
       // Register the PTW drain request: a direct valid -> drain -> memory-idle
       // -> IO-authorize -> valid path would form a combinational loop.
       l1i_arvalid_q <= l1i_bus.arvalid && l1i_bus.ar_ptw;
+      if (!TargetedCoherence) coherent_addr <= '0;
+      else if (l1i_bus.arvalid && l1i_bus.ar_ptw) coherent_addr <= l1i_bus.araddr;
       case ({
         l1i_push && l1i_bus.ar_ptw, coherent_read_done
       })
@@ -187,7 +192,8 @@ module rapt_bus #(
                          || (l1i_bus.araddr != l1i_last_push_addr)
                          || (l1i_bus.ar_ptw != l1i_last_push_ptw);
   assign l1i_push       = l1i_bus.arvalid && !l1i_q_full && l1i_new_request
-      && (!l1i_bus.ar_ptw || coherent_ready);
+      && (!l1i_bus.ar_ptw || (coherent_ready && (!TargetedCoherence
+          || (l1i_arvalid_q && coherent_addr == l1i_bus.araddr))));
   assign l1d_push       = l1d_bus.arvalid && !l1d_bus.ar_mshr && !l1d_slot_busy;
   assign l1i_bus.rready = l1i_push;
   assign l1d_bus.rready = l1d_push || miss_push;
@@ -214,9 +220,9 @@ module rapt_bus #(
   logic [XLEN-1:LineLsb] posted_line[PostedSlots];
   logic [PostedIndexW-1:0] posted_head, posted_tail;
   logic [PostedCountW-1:0] posted_count;
-  logic [PostedSlots-1:0] posted_valid;
+  logic [PostedSlots-1:0] posted_valid, posted_buffered;
   logic posted_idle, posted_eligible, posted_fire, posted_response;
-  logic source_read_blocked;
+  logic source_read_blocked, presented_read_conflict;
   function automatic logic posted_line_hit(input logic [XLEN-1:LineLsb] line);
     posted_line_hit = 1'b0;
     for (int i = 0; i < PostedSlots; i++)
@@ -440,26 +446,31 @@ module rapt_bus #(
   assign l1d_bus.idle = !(|miss_busy) && !l1d_slot_busy && !l1d_bus.arvalid
       && write_state == WR_IDLE && !l1d_bus.awvalid && !l1d_bus.wvalid && posted_idle;
 
-  // Posted writes: ordinary cacheable L1D stores that the L1D can retire on
-  // this edge (`wpost`). Every other write waits until all posted B
-  // responses have returned, so a single owner consumes each response.
-  // A posted write also waits for a presented read of the same line.
+  // Posted writes: cacheable stores that can retire on capture, or buffered
+  // writebacks that retain their data until B. Every other write waits until
+  // all posted B responses have returned, preserving response ownership.
+  // A presented same-line read prevents early WT acknowledgement. Buffered
+  // writebacks wait for its AR handshake before capturing another write.
   assign posted_idle = posted_count == '0;
+  assign presented_read_conflict = mem.rd_req_valid
+      && mem.rd_req_addr[XLEN-1:LineLsb] == l1d_bus.awaddr[XLEN-1:LineLsb];
   assign posted_eligible = PostedWrites > 0
       && !l1d_bus.wzero && l1d_bus.wpost && l1d_bus.wpbmt == 2'b00
       && rapt_pkg::addr_cacheable(l1d_bus.awaddr)
-      && !(mem.rd_req_valid && mem.rd_req_addr[XLEN-1:LineLsb] == l1d_bus.awaddr[XLEN-1:LineLsb]);
+      && !presented_read_conflict;
   assign mem.wr_req_valid = (write_state == WR_IDLE) && l1d_bus.awvalid && l1d_bus.wvalid
+      && (PostedWrites == 0 || !l1d_bus.wbuffered || !presented_read_conflict)
       && (posted_eligible ? posted_count < PostedCountW'(PostedWrites) : posted_idle);
   assign posted_fire = mem.wr_req_valid && mem.wr_req_ready && posted_eligible;
-  assign posted_ack_now = posted_fire && (PostedAckDelay == 0 || l1d_bus.wmore);
+  assign posted_ack_now = posted_fire && !l1d_bus.wbuffered && (PostedAckDelay == 0 || l1d_bus.wmore);
   // The L1D still presents the same store while WR_POSTED; acknowledge it
   // once the window ends or a follower queues, when the L1D can complete it.
   assign posted_ack_late = write_state == WR_POSTED && l1d_bus.wpost
       && (post_timer == '0 || l1d_bus.wmore);
   assign posted_response = !posted_idle && write_state != WR_WAIT && mem.wr_rsp_valid;
   assign l1d_bus.posted_busy = !posted_idle;
-  assign l1d_bus.posted_error = posted_response && mem.wr_rsp_error;
+  assign l1d_bus.posted_error = posted_response && !posted_buffered[posted_head]
+      && mem.wr_rsp_error;
   assign l1d_bus.posted_error_addr = {posted_line[posted_head], LineLsb'(0)};
   assign mem.wr_req_zero = l1d_bus.wzero;
   assign mem.wr_req_id = 4'(L1D);
@@ -480,10 +491,14 @@ module rapt_bus #(
 
   logic sync_response;
   assign sync_response = write_state == WR_WAIT && mem.wr_rsp_valid;
-  // A posted store completes at acceptance and never reports `werr`; its
-  // late error is signalled through `posted_error`.
-  assign l1d_bus.wready = posted_ack_now || posted_ack_late || sync_response;
-  assign l1d_bus.werr = sync_response && mem.wr_rsp_error;
+  // Ordinary posted stores complete at capture; late errors use posted_error.
+  // Buffered writebacks advance issue at waccept but retain dirty payload and
+  // line hazards until their B response completes through wready/werr.
+  assign l1d_bus.waccept = mem.wr_req_valid && mem.wr_req_ready;
+  assign l1d_bus.wready = posted_ack_now || posted_ack_late || sync_response
+      || (posted_response && posted_buffered[posted_head]);
+  assign l1d_bus.werr = (sync_response
+      || (posted_response && posted_buffered[posted_head])) && mem.wr_rsp_error;
 
   always_ff @(posedge clock) begin
     if (reset) begin
@@ -494,7 +509,7 @@ module rapt_bus #(
         WR_IDLE: begin
           if (mem.wr_req_valid && mem.wr_req_ready && !posted_eligible) begin
             write_state <= WR_WAIT;
-          end else if (posted_fire && !posted_ack_now) begin
+          end else if (posted_fire && !l1d_bus.wbuffered && !posted_ack_now) begin
             write_state <= WR_POSTED;
             post_timer <= PostTimerW'(PostedAckDelay > 0 ? PostedAckDelay - 1 : 0);
           end
@@ -519,10 +534,12 @@ module rapt_bus #(
       posted_tail <= '0;
       posted_count <= '0;
       posted_valid <= '0;
+      posted_buffered <= '0;
     end else if (PostedWrites > 0) begin
       if (posted_response) posted_valid[posted_head] <= 1'b0;
       if (posted_fire) begin
         posted_valid[posted_tail] <= 1'b1;
+        posted_buffered[posted_tail] <= l1d_bus.wbuffered;
         posted_line[posted_tail] <= l1d_bus.awaddr[XLEN-1:LineLsb];
         posted_tail <= PostedSlots > 1 && int'(posted_tail) == PostedSlots - 1 ? '0
             : posted_tail + PostedIndexW'(PostedSlots > 1);
@@ -543,6 +560,9 @@ module rapt_bus #(
 
   `RAPT_SVA_IMPLY(clock, reset, BUS_STORE_RESPONSE_OWNED, mem.wr_rsp_valid,
                   (write_state == WR_WAIT || !posted_idle) && mem.wr_rsp_id == 4'(L1D))
+  `RAPT_SVA_IMPLY(clock, reset, BUS_BUFFERED_NO_AR_OVERTAKE,
+                  PostedWrites > 0 && l1d_bus.waccept && l1d_bus.wbuffered,
+                  !presented_read_conflict)
   `RAPT_SVA_IMPLY(clock, reset, BUS_POSTED_SYNC_EXCLUSIVE, write_state == WR_WAIT, posted_idle)
   `RAPT_SVA_IMPLY(clock, reset, BUS_POSTED_STORE_HELD, write_state == WR_POSTED,
                   l1d_bus.awvalid && l1d_bus.wvalid)

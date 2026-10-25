@@ -1,4 +1,5 @@
 #include <common.h>
+#include <serial_milestones.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -96,6 +97,7 @@ static bool serial_lf_to_cr;
 static bool serial_console_line_pending;
 static std::string serial_exit_pattern;
 static std::string serial_tx_window;
+static SerialMilestones serial_milestones;
 
 void nsim_plic_raise(uint32_t irq);
 bool sdb_is_batch_mode();
@@ -232,6 +234,29 @@ void serial_set_exit_pattern(const char *pattern)
     serial_tx_window.clear();
 }
 
+bool serial_add_milestone(const char *pattern)
+{
+    return pattern != nullptr && serial_milestones.add(pattern);
+}
+
+void serial_sample_milestones(uint64_t cycles, uint64_t insts, bool force)
+{
+    bool separated = false;
+    serial_milestones.sample(cycles, insts, force || !serial_console_line_pending,
+        [&](const SerialMilestones::Record &record) {
+            if (serial_console_line_pending && !separated)
+            {
+                fputc('\n', stderr);
+                fflush(stderr);
+                separated = true;
+            }
+            Log("serial milestone: cycles=%llu insts=%llu text=%s",
+                (unsigned long long)record.cycles, (unsigned long long)record.insts,
+                record.text.c_str());
+            fflush(stdout);
+        });
+}
+
 static void serial_write_host_byte(uint8_t ch)
 {
     if (fputc((int)ch, stderr) != EOF)
@@ -240,6 +265,9 @@ static void serial_write_host_byte(uint8_t ch)
     // Track guest console line framing so simulator diagnostics (e.g. periodic
     // progress heartbeats) can avoid splitting a guest line in merged logs.
     serial_console_line_pending = (ch != '\n');
+
+    if (npc.state == NPC_RUNNING)
+        serial_milestones.feed((char)ch);
 
     if (serial_exit_pattern.empty() || npc.state != NPC_RUNNING)
         return;

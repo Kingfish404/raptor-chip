@@ -13,7 +13,13 @@ module tb_l1d_ptw_permission_stage;
   ) l2_tlb (
       .clock,
       .reset,
-      .flush(cmu_bcast.fence_time),
+      .flush((`RAPT_SFENCE_SELECTIVE == 0) && cmu_bcast.fence_time),
+      .cancel(cmu_bcast.fence_time || cmu_bcast.flush_pipe),
+      .sfence_valid(cmu_bcast.sfence_valid),
+      .sfence_vpn(cmu_bcast.sfence_vpn),
+      .sfence_asid(cmu_bcast.sfence_asid),
+      .sfence_all_vpn(cmu_bcast.sfence_all_vpn),
+      .sfence_all_asid(cmu_bcast.sfence_all_asid),
       .req_i(l2_req),
       .ready_o(l2_ready),
       .rsp_o(l2_rsp)
@@ -58,6 +64,11 @@ module tb_l1d_ptw_permission_stage;
       .writeback_idle(),
       .writeback_drain(1'b0),
       `TB_L1D_UNUSED_RELEASE_PORTS,
+      .writeback_cbo_done(),
+      .coherent_addr('0),
+      .writeback_cbo(1'b0),
+      .writeback_cbo_invalidate(1'b0),
+      .writeback_block('0),
       .*
   );
   `include "tb_common.svh"
@@ -139,6 +150,11 @@ module tb_l1d_ptw_permission_stage;
   task automatic cancel_walk(input int kind, input bit fence);
     request(kind, 0);
     cmu_bcast.flush_pipe = 1;
+    cmu_bcast.sfence_all_vpn = 1;
+    cmu_bcast.sfence_all_asid = 1;
+    cmu_bcast.sfence_vpn = 0;
+    cmu_bcast.sfence_asid = 0;
+    cmu_bcast.sfence_valid = fence && `RAPT_SFENCE_SELECTIVE != 0;
     cmu_bcast.fence_time = fence;
     l1d_bus.rready = 1;
     #1;
@@ -146,6 +162,7 @@ module tb_l1d_ptw_permission_stage;
     tick(1);
     cmu_bcast.flush_pipe = 0;
     cmu_bcast.fence_time = 0;
+    cmu_bcast.sfence_valid = 0;
     l1d_bus.rready = 0;
     tick(4);
     check(!dut.ptw_busy && !dut.ptw_permission_valid_q && !l1d_bus.arvalid,

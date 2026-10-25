@@ -25,8 +25,9 @@ module tb_zexth_decode_alu;
       if (decoded.uop.trap || decoded.uop.rd!=5'(rd) || decoded.rs1!=5'(rs)
           || decoded.uop.c!=compressed || result!=X'(a[15:0]))
         $fatal(1, "ZEXT.H decode/result RV%0d inst=%h a=%h result=%h", X, inst, a, result);
-    end else if (!decoded.uop.trap || decoded.uop.cause!=X'(2)
-                 || decoded.uop.tval!=X'(inst) || decoded.uop.rd!=0)
+    end else if (!decoded.uop.trap || decoded.uop.cause != X'(2) ||
+        `RAPT_UOP_TVAL(X, decoded.uop)
+        != X'(inst) || decoded.uop.rd != 0)
       $fatal(1, "wrong-XLEN ZEXT.H accepted RV%0d inst=%h", X, inst);
     count++;
   endtask

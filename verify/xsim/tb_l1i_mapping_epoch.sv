@@ -2,7 +2,8 @@
 `include "rapt_if.svh"
 
 module tb_l1i_mapping_epoch #(
-    parameter bit L2Tlb = 0
+    parameter bit L2Tlb = 0,
+    parameter bit InvalidateCache = 1
 );
   localparam int Levels = `RAPT_XLEN == 64 ? 3 : 2;
   `include "tb_l1i_epoch_tasks.svh"
@@ -86,10 +87,12 @@ module tb_l1i_mapping_epoch #(
       accept_ptw_request();
       csr_bcast.satp_ppn='h80010;
       cmu_bcast.fence_time=1;
+      cmu_bcast.sfence_valid = 1;
       cmu_bcast.flush_pipe=1;
       if (delayed) begin
         tick(1);
         cmu_bcast.fence_time=0;
+        cmu_bcast.sfence_valid = 0;
         cmu_bcast.flush_pipe=0;
         repeat (3) begin
           check(!l1i_bus.arvalid && !ifu_l1i.valid, "new translation overtook old PTE response");
@@ -105,6 +108,7 @@ module tb_l1i_mapping_epoch #(
       return_ptw_pte(old_pte);
       l1i_bus.ptw_rerr=0;
       cmu_bcast.fence_time=0;
+      cmu_bcast.sfence_valid = 0;
       cmu_bcast.flush_pipe=0;
       check(!ifu_l1i.valid && !dut.tlb_hit, "old PTE became a new-epoch translation/result");
       new_root_result(spaced_data);
@@ -141,11 +145,13 @@ module tb_l1i_mapping_epoch #(
       l1i_bus.rready=0;
       csr_bcast.satp_ppn='h80010;
       cmu_bcast.fence_time=1;
+      cmu_bcast.sfence_valid = 1;
       cmu_bcast.flush_pipe=1;
-      ifu_l1i.invalid=1;
+      ifu_l1i.invalid=InvalidateCache;
       if (delayed) begin
         tick(1);
         cmu_bcast.fence_time=0;
+        cmu_bcast.sfence_valid = 0;
         cmu_bcast.flush_pipe=0;
         ifu_l1i.invalid=0;
         repeat (3) begin
@@ -160,6 +166,7 @@ module tb_l1i_mapping_epoch #(
       l1i_bus.rvalid=0;
       l1i_bus.rerr=0;
       cmu_bcast.fence_time=0;
+      cmu_bcast.sfence_valid = 0;
       cmu_bcast.flush_pipe=0;
       ifu_l1i.invalid=0;
       check(!ifu_l1i.valid, "cancelled data escaped as new instruction or exception");

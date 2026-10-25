@@ -1,6 +1,6 @@
-/* A first-match PMP region covering only half of an Sv39 PTE must reject
- * instruction/load/store/AMO translation. Sv32 PTEs fit in that same NA4.
- * A second pass expands the entry to NAPOT8 and must succeed on both XLENs. */
+/* A first-match PMP page denying page-table reads must reject instruction,
+ * load, store and AMO translation. A second pass grants that page, testing
+ * permission invalidation and walker checks on both Sv32 and Sv39. */
 #include "raptor_platform.h"
 #if __riscv_xlen == 64
 #define REG_S sd
@@ -22,6 +22,7 @@ _start:
   csrw pmpaddr1, t0
   la t0, level0
   srli t0, t0, 2
+  ori t0, t0, 511
 #ifdef PTW_PMA_TEST
   li t0, -1
 #endif
@@ -75,9 +76,9 @@ enter_supervisor:
 #endif
   li t0, 0x1f
 #else
-  li t0, 0x1f11  /* NA4 R, then unrestricted NAPOT RWX */
+  li t0, 0x1f18  /* NAPOT page denied, then unrestricted NAPOT RWX */
   beqz s5, 1f
-  li t0, 0x1f19  /* NAPOT8 R */
+  li t0, 0x1f19  /* NAPOT page R */
 1:
 #endif
   csrw pmpcfg0, t0
@@ -119,7 +120,6 @@ amo_resume:
   li a3, 0
   jalr ra, s9, 0
 fetch_resume:
-#if __riscv_xlen == 64 || defined(PTW_PMA_TEST)
   bnez s5, successful
   li t0, 4
   bne s7, t0, fail
@@ -127,7 +127,6 @@ fetch_resume:
   li t0, 0x55
   bne s4, t0, fail
   j next_case
-#endif
 successful:
   bnez s7, fail
   li t0, 1

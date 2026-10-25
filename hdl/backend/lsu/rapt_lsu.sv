@@ -35,6 +35,19 @@ module rapt_lsu #(
   lsu_pipe_if #(.XLEN(XLEN)) exu_lsu ();
   pmp_state_if #(.XLEN(XLEN)) pmp_state ();
   CompletionT sq_store_payload;
+  typedef logic [XLEN-1:0] result_word_t;
+  typedef logic [$bits(dispatch[0].uop.pc)-1:0] result_pc_t;
+  typedef logic [PLEN-1:0] result_phys_t;
+  typedef logic [RLEN-1:0] result_arch_t;
+  typedef logic [$bits(dispatch[0].dest)-1:0] result_owner_t;
+  typedef logic [$bits(dispatch[0].generation)-1:0] result_generation_t;
+  `RAPT_LSU_COMPLETION_TYPE_PC(memory_result_t, result_word_t, result_pc_t, result_phys_t,
+                               result_arch_t, result_owner_t, result_generation_t)
+  memory_result_t memory_result;
+  always_comb begin
+    exu_ioq_bcast = '0;
+    `RAPT_LSU_COMPLETION_COPY(exu_ioq_bcast, memory_result)
+  end
   logic pmu_ioq_full_unused;
   logic [XLEN-1:0] sq_waddr_hi;
   logic [XLEN-1:0] sq_waddr_third;
@@ -63,6 +76,7 @@ module rapt_lsu #(
       .PLEN    (PLEN),
       .RLEN    (RLEN),
       .XLEN    (XLEN)
+      , .ResultT(memory_result_t)
   ) u_ioq (
       .completion(completion),
       .local_fp_wake(local_fp_wake),
@@ -76,7 +90,7 @@ module rapt_lsu #(
 
       .exu_lsu      (exu_lsu),
       .exu_l1d      (exu_l1d),
-      .exu_ioq_bcast(exu_ioq_bcast),
+      .exu_ioq_bcast(memory_result),
       .sq_store_payload(sq_store_payload),
       .wb_accept   (wb_accept),
       .sq_handoff_valid(sq_handoff_valid_unused),

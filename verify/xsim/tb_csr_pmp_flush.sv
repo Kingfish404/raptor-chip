@@ -43,7 +43,7 @@ pmp_state_if replica ();
     write_csr(12'h3a0, XLEN'('h99));  // Locked NAPOT, read-only.
     write_csr(12'h3b0, XLEN'('h2007));
     write_csr(12'h3a0, 0);
-    expect_csr(12'h3b0, XLEN'('h1003));
+    expect_csr(12'h3b0, XLEN'('h1003) | ((XLEN'(1) << (`RAPT_PMP_GRANULARITY_LOG2 - 2)) - 1) >> 1);
     expect_csr(12'h3a0, XLEN'('h99));
     if (replica.pmp_raw_addr[0] != (`RAPT_PADDR_BITS - 2)'('h1003)
         || !replica.pmp_cfg_l[0] || !replica.pmp_cfg_r[0]

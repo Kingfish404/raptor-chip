@@ -73,6 +73,14 @@ DIFFTEST := $(strip $(DIFFTEST))
 ifeq ($(filter $(DIFFTEST),0 1),)
 $(error DIFFTEST must be 0 or 1)
 endif
+# Opt-in throughput build. Keep architectural observation, difftest and assertions
+# intact. Retain trace metadata even without waveform dumping: it can affect
+# Verilator's observer aliases. Explicit thread/optimization overrides still win.
+SIM_FAST ?= 0## Use four evaluation threads and C++ -O3 (0=historical defaults)
+SIM_FAST := $(strip $(SIM_FAST))
+ifeq ($(filter $(SIM_FAST),0 1),)
+$(error SIM_FAST must be 0 or 1)
+endif
 NPC_DEFCONFIG ?= $(if $(filter 1,$(DIFFTEST)),o2_difftest_defconfig,o2_defconfig)
 DATA_DIR ?= $(abspath $(BUILD_DIR)/run-$(ISA_NAME)/data)
 RUN_DIR ?= $(abspath $(BUILD_DIR)/run-$(ISA_NAME))
@@ -88,19 +96,20 @@ SUBMAKE_JOBS = $(if $(filter --jobserver-auth=% --jobserver-fds=%,$(MAKEFLAGS)),
 # Verilated translation units are memory-heavy. Keep the recursive C++ build
 # conservative by default; callers with more RAM can override explicitly.
 VERILATOR_JOBS ?= $(shell awk 'BEGIN { n=$(NPROC); print (n < 4 ? n : 4) }')
+# Verilator 5.052 races while ordering packed-struct variables in parallel
+# (https://github.com/verilator/verilator/pull/8451). Serialize code generation
+# independently of the C++ build jobs and generated model evaluation threads.
+VERILATOR_CODEGEN_JOBS ?= 1
 # Verilator otherwise tends to aggregate generated sources into roughly the
 # build-job count.  For this core that produces a few enormous C++ translation
 # units which have repeatedly made GCC die with SIGBUS during parallel gates.
 # More, smaller groups retain compile parallelism while bounding each cc1plus
 # process's working set.
 VERILATOR_OUTPUT_GROUPS ?= 16
-# Verilator multi-threaded evaluation.  1 (default) keeps the historical
-# single-threaded model and artifact names.  Verilator partitions the RTL into
-# independent mtasks, so values >1 produce bit-identical results while cutting
-# wall-clock time roughly linearly with the cores actually available.  Keep the
-# count modest (2-4) on shared machines: a count above the free cores
-# oversubscribes the spin-based thread pool and can slow the run down.
-VERILATOR_THREADS ?= 1
+# Verilator multi-threaded evaluation. 1 keeps the historical single-threaded
+# model and artifact names. Speedup depends on the RTL partition and available
+# cores; oversubscribing the spin-based thread pool can slow the run down.
+VERILATOR_THREADS ?= $(if $(filter 1,$(SIM_FAST)),4,1)
 VERILATOR_THREADS := $(strip $(VERILATOR_THREADS))
 VERILATOR_THREADS := $(if $(VERILATOR_THREADS),$(VERILATOR_THREADS),1)
 
@@ -156,6 +165,7 @@ VERILATOR_FLAG = $(VERILATOR_PROFILE_FLAGS) --public \
 	--autoflush --timescale "1ns/1ns" --no-timing \
 	-Wno-WIDTHEXPAND -Wno-WIDTHTRUNC # -Wall -Wno-DECLFILENAME -Wno-UNUSED
 VERILATOR_FLAG += -Wno-ASCRANGE -Wno-UNSIGNED
+VERILATOR_FLAG += --verilate-jobs $(VERILATOR_CODEGEN_JOBS)
 VERILATOR_EXTRA ?= ## Extra Verilator CLI flags (e.g. --coverage-line --coverage-toggle)
 VERILATOR_EXTRA_EFFECTIVE := --output-groups $(VERILATOR_OUTPUT_GROUPS) $(strip $(VERILATOR_EXTRA))
 ifeq ($(origin CXX),default)
@@ -176,8 +186,8 @@ endif
 # OPT_SLOW, which would optimize the large coverage-registration functions
 # even though they only run at startup. Apply Kconfig's optimization to hot
 # code and the runtime library, and leave cold code at -O0.
-SIM_MAKEFLAGS = CXX=$(CXX) OPT_FAST=$(call remove_quote,$(CONFIG_CC_OPT)) \
-	OPT_GLOBAL=$(call remove_quote,$(CONFIG_CC_OPT)) OPT_SLOW=-O0
+SIM_OPT ?= $(if $(filter 1,$(SIM_FAST)),-O3,$(call remove_quote,$(CONFIG_CC_OPT)))
+SIM_MAKEFLAGS = CXX=$(CXX) OPT_FAST=$(SIM_OPT) OPT_GLOBAL=$(SIM_OPT) OPT_SLOW=-O0
 CXXFLAGS = $(SIM_CXX_WARNING_FLAGS)
 ifeq ($(SIM_MEM_PROFILE),large)
 CXXFLAGS += -DRAPT_LARGE_PMEM
@@ -303,7 +313,9 @@ SIM_BUILD_KEY := $(shell python3 $(NSIM_HOME)/scripts/build_cache.py fingerprint
 
 $(MODEL_BIN): $(VSRCS) $(VHSRCS) $(CCSRCS) $(CHSRCS)
 	@mkdir -p "$(OBJ_DIR)"
-	+$(VERILATOR) --trace-fst -cc --exe --build -j $(VERILATOR_JOBS) $(VERILATOR_FLAG) $(SIM_ASSERT_FLAGS) $(VERILATOR_EXTRA_EFFECTIVE) $(filter-out $(CHSRCS) $(VHSRCS),$^) \
+	+$(VERILATOR) --trace-fst -cc --exe --build -j $(VERILATOR_JOBS) \
+		$(VERILATOR_FLAG) $(SIM_ASSERT_FLAGS) $(VERILATOR_EXTRA_EFFECTIVE) \
+		$(filter-out $(CHSRCS) $(VHSRCS),$^) \
 		--threads $(VERILATOR_THREADS) \
 		--top-module $(VTARGET) \
 		-MAKEFLAGS "$(SIM_MAKEFLAGS)" \
@@ -347,7 +359,15 @@ nemu-reference:
 
 SIM_RANDOM_DELAY ?= 0
 SIM_RANDOM_SEED ?= 1
-SIM_RANDOM_ARGS = $(if $(filter-out 0,$(strip $(SIM_RANDOM_DELAY))),--mem-random-delay=$(strip $(SIM_RANDOM_DELAY)) --mem-random-seed=$(strip $(SIM_RANDOM_SEED)),)
+SIM_MEM_READ_LATENCY ?= 0
+SIM_MEM_WRITE_LATENCY ?= 0
+SIM_MEM_SERIALIZE_WRITES ?= 0
+SIM_MEM_WRITE_OUTSTANDING ?= 1
+SIM_RANDOM_ARGS = $(if $(filter-out 0,$(strip $(SIM_RANDOM_DELAY))),--mem-random-delay=$(strip $(SIM_RANDOM_DELAY)) --mem-random-seed=$(strip $(SIM_RANDOM_SEED)),) \
+  $(if $(filter-out 0,$(strip $(SIM_MEM_READ_LATENCY))),--mem-read-latency=$(strip $(SIM_MEM_READ_LATENCY)),) \
+  $(if $(filter-out 0,$(strip $(SIM_MEM_WRITE_LATENCY))),--mem-write-latency=$(strip $(SIM_MEM_WRITE_LATENCY)),) \
+  $(if $(filter 1,$(strip $(SIM_MEM_SERIALIZE_WRITES))),--mem-serialize-writes,) \
+  $(if $(filter-out 1,$(strip $(SIM_MEM_WRITE_OUTSTANDING))),--mem-write-outstanding=$(strip $(SIM_MEM_WRITE_OUTSTANDING)),)
 
 IMG ?= ## Custom image to load
 DISK ?= ## Virtio block disk image to load with --disk

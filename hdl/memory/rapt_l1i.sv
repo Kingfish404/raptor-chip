@@ -15,7 +15,9 @@ module rapt_l1i #(
     parameter int L1I_LEN = `RAPT_L1I_LEN,
     parameter unsigned L1I_N_WAYS = `RAPT_L1I_N_WAYS,
     parameter int PADDR_BITS = `RAPT_PADDR_BITS,
-    parameter bit L2Tlb = 0
+    parameter bit L2Tlb = 0,
+    // True LRU for 2-16 ways instead of the 2-way fill toggle / tree PLRU.
+    parameter bit CacheLru = `RAPT_CACHE_LRU != 0
 ) (
     input clock,
 
@@ -30,11 +32,14 @@ module rapt_l1i #(
     input reset,
     input logic io_authorized = 1'b0,
     output logic io_start,
-    output logic [XLEN-1:0] io_owner_pc,
+    output logic [`RAPT_PC_BITS_OF(XLEN)-1:0] io_owner_pc,
     output rapt_pkg::l2tlb_req_t l2tlb_req_o,
     input logic l2tlb_ready_i = 1'b0,
     input rapt_pkg::l2tlb_rsp_t l2tlb_rsp_i = '0
 );
+  localparam int PcW = `RAPT_PC_BITS_OF(XLEN);
+  // Fetch PCs arrive narrowed; physical and translation paths use the architectural value.
+  wire [XLEN-1:0] fetch_pc = `RAPT_PC_SEXT(XLEN, ifu_l1i.pc);
   typedef enum logic [2:0] {
     IDLE   = 3'b000,
     PTWAIT = 3'b100,  // waiting for PTW to complete
@@ -79,8 +84,8 @@ module rapt_l1i #(
   logic [15:0] inst_lo, inst_hi;
   logic [XLEN-1:0] pc_ifu_next;
   logic [XLEN-1:0] l1i_addr;
-  logic [XLEN-1:0] rec_addr;
-  logic [XLEN-1:0] rec_tval;
+  logic [PcW-1:0] rec_addr;
+  logic [PcW-1:0] rec_tval;
   logic [XLEN-1:0] fetch_addr;
   // Cache size/tag parameters and per-way line-level tag arrays.
   localparam unsigned L1iSize = 2 ** L1I_LEN;
@@ -197,7 +202,7 @@ module rapt_l1i #(
   logic [31:0] install_data_q;
 
   assign mmu_en = csr_bcast.immu_en;
-  assign pc_ifu = mmu_en ? XLEN'({itlb_ptag, tlb_offset}) : ifu_l1i.pc;
+  assign pc_ifu = mmu_en ? XLEN'({itlb_ptag, tlb_offset}) : fetch_pc;
   assign invalid_l1i = ifu_l1i.invalid;
   assign pc_ifu_next = pc_ifu + 2;
 
@@ -226,7 +231,7 @@ module rapt_l1i #(
   assign pc_ifu_next6 = pc_ifu + 6;
   assign addr_idx_next4 = pc_ifu_next4[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
 
-  assign tlb_offset = ifu_l1i.pc[11:0];
+  assign tlb_offset = fetch_pc[11:0];
 
   assign addr_tag = pc_ifu[PADDR_BITS-1:L1I_LEN+L1I_LINE_LEN+2];
   assign addr_idx = pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
@@ -247,7 +252,7 @@ module rapt_l1i #(
   // A speculative SRAM read cannot publish a packet. Invalidation and
   // cacheability qualify the response below, never this address selection.
   assign target_read_ahead = ifu_l1i.prefetch_valid && (!mmu_en || L1iViptSafe);
-  assign sram_base_addr = (mmu_en && L1iViptSafe) ? ifu_l1i.pc : pc_ifu;
+  assign sram_base_addr = (mmu_en && L1iViptSafe) ? fetch_pc : pc_ifu;
   assign sram_read_idx = target_read_ahead
                        ? ifu_l1i.prefetch_pc[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2]
                        : sram_base_addr[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
@@ -258,8 +263,7 @@ module rapt_l1i #(
   // +2 crosses into the next word only from an upper-halfword PC; +4
   // always advances one word. Carry into the set index occurs at line end.
   assign sram_read_offset_next = sram_read_offset + L1I_LINE_LEN'(sram_read_half);
-  assign sram_read_idx_next = sram_read_idx
-                             + L1I_LEN'(sram_read_half && (&sram_read_offset));
+  assign sram_read_idx_next = sram_read_idx + L1I_LEN'(sram_read_half && (&sram_read_offset));
   assign sram_read_idx_next4 = sram_read_idx + L1I_LEN'(&sram_read_offset);
 
   // Pipeline tracking: valid address was presented in previous cycle
@@ -322,8 +326,7 @@ module rapt_l1i #(
       assign way_tag_match_next[w] = (pc_ifu[1] ? tag_valid_next4[w] : tag_valid_curr[w])
         && ((pc_ifu[1] ? tag_rdata_next4[w] : tag_rdata_curr[w]) == addr_tag_next);
       assign way_hit[w] = way_tag_match[w] && valid_curr[w][addr_offset];
-      assign way_hit_next[w] = way_tag_match_next[w]
-        && valid_next[w][addr_offset_next];
+      assign way_hit_next[w] = way_tag_match_next[w] && valid_next[w][addr_offset_next];
     end
   endgenerate
   always_comb begin
@@ -380,8 +383,7 @@ module rapt_l1i #(
     && |way_hit;
   assign hit_next = (!invalid_l1i && !wait_invalid) && (mmu_en ? tlb_hit : 1'b1) && |way_hit_next;
 
-  assign cache_issue = !slow_active && l1i_bus.arvalid
-      && l1i_bus.rready && !l1i_bus.ar_ptw;
+  assign cache_issue = !slow_active && l1i_bus.arvalid && l1i_bus.rready && !l1i_bus.ar_ptw;
   assign cache_return = !slow_active && l1i_bus.rvalid;
   assign cache_orphan = cache_detached_q && (cache_pending != 0);
   always_ff @(posedge clock) begin
@@ -393,8 +395,7 @@ module rapt_l1i #(
   end
   // Bare page ends also need instruction-length discovery before accessing
   // the next physical region. C instructions use only the first word.
-  assign slow_select = (ifu_l1i.pc[11:0] == 12'hffe)
-      || (mmu_en && tlb_hit && itlb_pbmt != 0);
+  assign slow_select = (fetch_pc[11:0] == 12'hffe) || (mmu_en && tlb_hit && itlb_pbmt != 0);
   assign slow_cancel = ifu_l1i.cancel || invalid_l1i || cmu_bcast.flush_pipe
       || flush_redirect_kills_fetch || cmu_bcast.fence_time
       || (slow_active && io_owner_pc != ifu_l1i.pc);
@@ -483,14 +484,18 @@ module rapt_l1i #(
   localparam int DownstreamLineOffset = $clog2(`RAPT_CACHE_LINE_BYTES);
 `endif
   logic downstream_pmp_uniform;
-  rapt_pmp_line_uniform #(
-      .XLEN(XLEN),
-      .LineOffset(DownstreamLineOffset)
-  ) u_l2_pmp (
-      .addr(l1i_bus.araddr),
-      .state(pmp_state),
-      .uniform_o(downstream_pmp_uniform)
-  );
+  if (DownstreamLineOffset <= `RAPT_PMP_GRANULARITY_LOG2) begin : g_downstream_page
+    assign downstream_pmp_uniform = 1'b1;
+  end else begin : g_downstream_fine
+    rapt_pmp_line_uniform #(
+        .XLEN(XLEN),
+        .LineOffset(DownstreamLineOffset)
+    ) u_l2_pmp (
+        .addr(l1i_bus.araddr),
+        .state(pmp_state),
+        .uniform_o(downstream_pmp_uniform)
+    );
+  end
   assign l1i_bus.noallocate = l1i_bus.ar_ptw || !downstream_pmp_uniform;
 `else
   assign l1i_bus.noallocate = l1i_bus.ar_ptw;
@@ -518,7 +523,7 @@ module rapt_l1i #(
   logic sram_data_ready;
   logic cache_response_owned, cache_error_current, cache_error_second;
   logic first_half_ready, second_error_seen, second_error_pending;
-  logic [XLEN-1:0] second_error_pc;
+  logic [PcW-1:0] second_error_pc;
   assign cache_response_owned = !slow_active && !cache_cancel && !cache_detached_q
       && l1i_bus.rvalid && ifq_valid[ifq_tail];
   // A failed prefetched word is consumed but never installed. Only bytes
@@ -588,15 +593,27 @@ module rapt_l1i #(
   assign ifq_push_en = cache_ar_accept;
 
   logic [1:0] ptw_result_pbmt;
+  logic [1:0] ptw_result_level;
   // --- ITLB ---
+  if (`RAPT_ITLB_POLICY < 0 || `RAPT_ITLB_POLICY > 2) begin : g_invalid_itlb_policy
+    initial $fatal(1, "RAPT_ITLB_POLICY must be 0, 1 or 2");
+  end
   rapt_tlb #(
-      .XLEN   (XLEN),
-      .ENTRIES(`RAPT_ITLB_ENTRIES)
+      .XLEN(XLEN),
+      .ENTRIES(`RAPT_ITLB_ENTRIES),
+      .TlbLru(`RAPT_ITLB_POLICY == 1),
+      .TlbPlru(`RAPT_ITLB_POLICY == 2)
   ) u_itlb (
       .clock(clock),
       .reset(reset),
-      .flush(cmu_bcast.fence_time),
-      .lookup_vtag(ifu_l1i.pc[XLEN-1:12]),
+      .flush(`RAPT_SFENCE_SELECTIVE == 0 && cmu_bcast.fence_time),
+      .sfence_valid(cmu_bcast.sfence_valid),
+      .sfence_vpn(cmu_bcast.sfence_vpn),
+      .sfence_asid(cmu_bcast.sfence_asid),
+      .sfence_all_vpn(cmu_bcast.sfence_all_vpn),
+      .sfence_all_asid(cmu_bcast.sfence_all_asid),
+      .lookup_vtag(fetch_pc[XLEN-1:12]),
+      .lookup_valid(mmu_en && ifu_l1i.consumed && !ifu_l1i.cancel && !cache_cancel),
       .lookup_asid(csr_bcast.satp_asid),
       .hit(tlb_hit),
       .ptag(itlb_ptag),
@@ -607,6 +624,7 @@ module rapt_l1i #(
       .fill_vtag(ptw_result_vtag),
       .fill_asid(csr_bcast.satp_asid),
       .fill_pbmt(ptw_result_pbmt),
+      .fill_level(ptw_result_level),
       .fill_pte(ptw_result_pte)
   );
 
@@ -622,9 +640,8 @@ module rapt_l1i #(
       .clock(clock),
       .reset(reset),
       .req_valid(ptw_req),
-      .kill(cmu_bcast.fence_time || cmu_bcast.flush_pipe
-          || (!slow_active && l1i_bus.ptw_rerr)),
-      .vaddr(ifu_l1i.pc),
+      .kill(cmu_bcast.fence_time || cmu_bcast.flush_pipe || (!slow_active && l1i_bus.ptw_rerr)),
+      .vaddr(fetch_pc),
       .satp_ppn(csr_bcast.satp_ppn),
       .mmu_en(mmu_en),
       .pbmte(csr_bcast.menvcfg_pbmte),
@@ -641,6 +658,7 @@ module rapt_l1i #(
       .result_vtag(ptw_result_vtag),
       .result_pte(ptw_result_pte),
       .result_pbmt(ptw_result_pbmt),
+      .result_level(ptw_result_level),
       .busy(ptw_busy)
   );
 
@@ -760,15 +778,14 @@ module rapt_l1i #(
     end
   endgenerate
 
-  if (L1I_N_WAYS > 2) begin : g_replacement
+  if (L1I_N_WAYS > 2 || (CacheLru && L1I_N_WAYS == 2)) begin : g_replacement
     logic [L1I_LEN-1:0] read_set[2], update_set[3];
     logic [L1iWayW-1:0] update_way[3];
     logic [2:0] update_valid;
     logic hit_accepted;
     assign read_set[0] = addr_idx;
     assign read_set[1] = addr_idx_next;
-    assign hit_accepted = hit && (l1i_state == IDLE || l1i_state == RD_A)
-                          && rec_addr == ifu_l1i.pc;
+    assign hit_accepted = hit && (l1i_state == IDLE || l1i_state == RD_A) && rec_addr == ifu_l1i.pc;
     assign update_valid = {l1i_fill_en, hit_accepted && !is_c && pc_ifu[1], hit_accepted};
     assign update_set[0] = addr_idx;
     assign update_set[1] = addr_idx_next;
@@ -776,20 +793,37 @@ module rapt_l1i #(
     assign update_way[0] = hit_way_sel;
     assign update_way[1] = hit_next_way_sel;
     assign update_way[2] = install_way_q;
-    rapt_cache_plru #(
-        .Ways(L1I_N_WAYS),
-        .SetBits(L1I_LEN),
-        .UpdatePorts(3)
-    ) u_policy (
-        .clock(clock),
-        .reset(reset),
-        .invalidate(invalid_l1i),
-        .read_set(read_set),
-        .victim(fill_victims),
-        .update_valid(update_valid),
-        .update_set(update_set),
-        .update_way(update_way)
-    );
+    if (CacheLru && L1I_N_WAYS <= 16) begin : g_lru
+      rapt_cache_lru #(
+          .Ways(L1I_N_WAYS),
+          .SetBits(L1I_LEN),
+          .UpdatePorts(3)
+      ) u_policy (
+          .clock(clock),
+          .reset(reset),
+          .invalidate(invalid_l1i),
+          .read_set(read_set),
+          .victim(fill_victims),
+          .update_valid(update_valid),
+          .update_set(update_set),
+          .update_way(update_way)
+      );
+    end else begin : g_plru
+      rapt_cache_plru #(
+          .Ways(L1I_N_WAYS),
+          .SetBits(L1I_LEN),
+          .UpdatePorts(3)
+      ) u_policy (
+          .clock(clock),
+          .reset(reset),
+          .invalidate(invalid_l1i),
+          .read_set(read_set),
+          .victim(fill_victims),
+          .update_valid(update_valid),
+          .update_set(update_set),
+          .update_way(update_way)
+      );
+    end
   end else begin : g_toggle
     assign fill_victims[0] = L1iWayW'(L1I_N_WAYS == 2 && replace_bit[addr_idx]);
     assign fill_victims[1] = L1iWayW'(L1I_N_WAYS == 2 && replace_bit[addr_idx_next]);
@@ -851,7 +885,7 @@ module rapt_l1i #(
       ? 'h00000013 : {{inst_hi}, {inst_lo}};
   assign ifu_l1i.trap = slow_active ? slow_fault : (l1i_state == TRAP && rec_addr == ifu_l1i.pc);
   assign ifu_l1i.cause = slow_active ? slow_cause : cause;
-  assign ifu_l1i.tval = slow_active ? slow_tval : rec_tval;
+  assign ifu_l1i.tval = slow_active ? slow_tval : `RAPT_PC_SEXT(XLEN, rec_tval);
   // PMP must gate cache-hit delivery as well: without this, a hit in IDLE
   // streams the instruction to IFU the same cycle the FSM transitions to
   // TRAP, letting the forbidden fetch execute.
@@ -881,15 +915,19 @@ module rapt_l1i #(
   // Translated lookahead never crosses a page. Add in the untranslated
   // offset, then reuse the current PA page; carry suppresses the response.
   // Bare fetch shares the next-page increment across the lookahead slots.
-  assign lookahead_bare_next_page = ifu_l1i.pc[XLEN-1:12] + (XLEN-12)'(1);
-  assign lookahead_n1_page = {1'b0, ifu_l1i.pc[11:2], 2'b00} + 13'd4;
-  assign lookahead_n1_addr = {mmu_en ? pc_ifu[XLEN-1:12]
-      : (lookahead_n1_page[12] ? lookahead_bare_next_page : ifu_l1i.pc[XLEN-1:12]),
-      lookahead_n1_page[11:0]};
-  assign lookahead_n2_page = {1'b0, ifu_l1i.pc[11:2], 2'b00} + 13'd8;
-  assign lookahead_n2_addr = {mmu_en ? pc_ifu[XLEN-1:12]
-      : (lookahead_n2_page[12] ? lookahead_bare_next_page : ifu_l1i.pc[XLEN-1:12]),
-      lookahead_n2_page[11:0]};
+  assign lookahead_bare_next_page = fetch_pc[XLEN-1:12] + (XLEN-12)'(1);
+  assign lookahead_n1_page = {1'b0, fetch_pc[11:2], 2'b00} + 13'd4;
+  assign lookahead_n1_addr = {
+    mmu_en ? pc_ifu[XLEN-1:12]
+      : (lookahead_n1_page[12] ? lookahead_bare_next_page : fetch_pc[XLEN-1:12]),
+    lookahead_n1_page[11:0]
+  };
+  assign lookahead_n2_page = {1'b0, fetch_pc[11:2], 2'b00} + 13'd8;
+  assign lookahead_n2_addr = {
+    mmu_en ? pc_ifu[XLEN-1:12]
+      : (lookahead_n2_page[12] ? lookahead_bare_next_page : fetch_pc[XLEN-1:12]),
+    lookahead_n2_page[11:0]
+  };
 
   assign addr_offset_n1 = addr_offset + L1I_LINE_LEN'(1);
   assign addr_offset_n2 = addr_offset + L1I_LINE_LEN'(2);
@@ -950,14 +988,18 @@ module rapt_l1i #(
   logic [L1iWayW-1:0] hit_n3_way_sel, hit_n4_way_sel;
   logic hit_n3, hit_n4, sram_n3_ready, sram_n4_ready;
   logic n3_same_line_as_next4, n4_same_line_as_next4;
-  assign lookahead_n3_page = {1'b0, ifu_l1i.pc[11:2], 2'b00} + 13'd12;
-  assign lookahead_n3_addr = {mmu_en ? pc_ifu[XLEN-1:12]
-      : (lookahead_n3_page[12] ? lookahead_bare_next_page : ifu_l1i.pc[XLEN-1:12]),
-      lookahead_n3_page[11:0]};
-  assign lookahead_n4_page = {1'b0, ifu_l1i.pc[11:2], 2'b00} + 13'd16;
-  assign lookahead_n4_addr = {mmu_en ? pc_ifu[XLEN-1:12]
-      : (lookahead_n4_page[12] ? lookahead_bare_next_page : ifu_l1i.pc[XLEN-1:12]),
-      lookahead_n4_page[11:0]};
+  assign lookahead_n3_page = {1'b0, fetch_pc[11:2], 2'b00} + 13'd12;
+  assign lookahead_n3_addr = {
+    mmu_en ? pc_ifu[XLEN-1:12]
+      : (lookahead_n3_page[12] ? lookahead_bare_next_page : fetch_pc[XLEN-1:12]),
+    lookahead_n3_page[11:0]
+  };
+  assign lookahead_n4_page = {1'b0, fetch_pc[11:2], 2'b00} + 13'd16;
+  assign lookahead_n4_addr = {
+    mmu_en ? pc_ifu[XLEN-1:12]
+      : (lookahead_n4_page[12] ? lookahead_bare_next_page : fetch_pc[XLEN-1:12]),
+    lookahead_n4_page[11:0]
+  };
   assign addr_offset_n3 = addr_offset + L1I_LINE_LEN'(3);
   assign addr_offset_n4 = addr_offset + L1I_LINE_LEN'(4);
   for (genvar w = 0; w < L1I_N_WAYS; w++) begin : g_way_hit_wide
@@ -1013,9 +1055,11 @@ module rapt_l1i #(
   // Physical execute permission is independent of PMP and PTE.X. Device
   // regions must fault even in Bare mode instead of endlessly retrying.
   logic fetch_unmapped_fault;
-  assign fetch_unmapped_fault = sram_data_ready && is_c
-      ? !rapt_pkg::addr_executable(pc_ifu, 4'd1)
-      : !rapt_pkg::addr_executable(pc_ifu, 4'd3);
+  assign fetch_unmapped_fault = sram_data_ready && is_c ? !rapt_pkg::addr_executable(
+      pc_ifu, 4'd1
+  ) : !rapt_pkg::addr_executable(
+      pc_ifu, 4'd3
+  );
   assign pmp_fetch_fault = pmp_fetch_pmp_fault || fetch_unmapped_fault;
 
 
@@ -1045,7 +1089,7 @@ module rapt_l1i #(
                 end else if (pmp_fetch_fault) begin
                   rec_addr <= ifu_l1i.pc;
                   rec_tval <= (pmp_fetch_fault_lo || fetch_unmapped_fault)
-                    ? ifu_l1i.pc : (ifu_l1i.pc + XLEN'(2));
+                    ? ifu_l1i.pc : (ifu_l1i.pc + PcW'(2));
                   cause <= `RAPT_CAUSE_INSTR_ACC_FAULT;
                   l1i_state <= TRAP;
                 end else begin
@@ -1065,7 +1109,7 @@ module rapt_l1i #(
               end else begin
                 if (!ptw_busy) begin
                   // PTW request issued via ptw_req
-                  l1i_addr  <= ifu_l1i.pc;
+                  l1i_addr  <= fetch_pc;
                   rec_addr  <= ifu_l1i.pc;
                   l1i_state <= PTWAIT;
                 end
@@ -1074,7 +1118,7 @@ module rapt_l1i #(
               if (pmp_fetch_fault) begin
                 rec_addr <= ifu_l1i.pc;
                 rec_tval <= (pmp_fetch_fault_lo || fetch_unmapped_fault)
-                  ? ifu_l1i.pc : (ifu_l1i.pc + XLEN'(2));
+                  ? ifu_l1i.pc : (ifu_l1i.pc + PcW'(2));
                 cause <= `RAPT_CAUSE_INSTR_ACC_FAULT;
                 l1i_state <= TRAP;
               end else begin
@@ -1137,7 +1181,7 @@ module rapt_l1i #(
             // any permitted PMP region for the current privilege level.
             rec_addr <= ifu_l1i.pc;
             rec_tval <= (pmp_fetch_fault_lo || fetch_unmapped_fault)
-              ? ifu_l1i.pc : (ifu_l1i.pc + XLEN'(2));
+              ? ifu_l1i.pc : (ifu_l1i.pc + PcW'(2));
             cause <= `RAPT_CAUSE_INSTR_ACC_FAULT;
             l1i_state <= TRAP;
           end else if (sram_data_ready) begin
@@ -1205,7 +1249,7 @@ module rapt_l1i #(
       l1i_state <= cache_cancel ? IDLE : TRAP;
       if (!cache_cancel && cache_error_current) begin
         rec_addr <= ifu_l1i.pc;
-        rec_tval <= ifu_l1i.pc + (cache_error_second ? XLEN'(2) : XLEN'(0));
+        rec_tval <= ifu_l1i.pc + (cache_error_second ? PcW'(2) : PcW'(0));
         cause <= `RAPT_CAUSE_INSTR_ACC_FAULT;
       end
     end
@@ -1281,14 +1325,10 @@ module rapt_l1i #(
       // Split them by whether a matching line tag already exists: a matching
       // tag with an invalid word is a partial-fill sector hole; no matching
       // tag is a cold/conflict line miss.
-      pmu_l1i_refill_start_line_miss <= pmu_refill_start_current
-                                      && !(|way_tag_match);
-      pmu_l1i_refill_start_current_hole <= pmu_refill_start_current
-                                         && (|way_tag_match);
-      pmu_l1i_refill_start_next_line_miss <= pmu_refill_start_next
-                                           && !(|way_tag_match_next);
-      pmu_l1i_refill_start_next_hole <= pmu_refill_start_next
-                                      && (|way_tag_match_next);
+      pmu_l1i_refill_start_line_miss <= pmu_refill_start_current && !(|way_tag_match);
+      pmu_l1i_refill_start_current_hole <= pmu_refill_start_current && (|way_tag_match);
+      pmu_l1i_refill_start_next_line_miss <= pmu_refill_start_next && !(|way_tag_match_next);
+      pmu_l1i_refill_start_next_hole <= pmu_refill_start_next && (|way_tag_match_next);
     end
   end
 

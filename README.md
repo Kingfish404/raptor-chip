@@ -8,7 +8,7 @@
 
 Welcome to the Raptor Project! Here is an all-in-one repository for exploring, developing, optimizing, and verifying a RISC-V core. Aiming at high quality, full Linux support, FPGA implementation, and ASIC readiness.
 
-Core description: **Super-scalar, out-of-order RISC-V core** with register renaming, a 32-entry ROB, six execution paths fed by five scheduler classes over six unified writeback CDB ports, TAGE branch prediction, and a unified speculative/committed store queue. F/D operations use an out-of-order FPQ, ROB-backed register renaming, overlapping arithmetic pipelines and a dedicated completion endpoint. The 32 x 64-bit architectural FPR bank updates only at retirement. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 (RV32) / Sv39 (RV64) virtual memory (MMU/TLB/PTW), 8 usable PMP entries (TOR/NA4/NAPOT; 16 CSR slots, upper eight read-only zero), LR/SC + AMO atomics, compressed instructions (RVC), CLINT/PLIC interrupts, a RISC-V Debug Module / JTAG DTM bring-up path, and Linux v6.18.x flows via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
+Core description: **Super-scalar, out-of-order RISC-V core** with register renaming, a 32-entry ROB, six execution paths fed by five scheduler classes over six unified writeback CDB ports, TAGE branch prediction, and a unified speculative/committed store queue. F/D operations use an out-of-order FPQ, ROB-backed register renaming, overlapping arithmetic pipelines and a dedicated completion endpoint. The 32 x 64-bit architectural FPR bank updates only at retirement. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 (RV32) / Sv39 (RV64) virtual memory (MMU/TLB/PTW), 8 usable PMP entries (TOR/NAPOT, 4 KiB granularity; 16 CSR slots, upper eight read-only zero), LR/SC + AMO atomics, compressed instructions (RVC), CLINT/PLIC interrupts, a RISC-V Debug Module / JTAG DTM bring-up path, and Linux v6.18.x flows via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
 
 ```
 RV64 (default config, -DRAPT_RV64)
@@ -24,16 +24,26 @@ Modes:       Machine, Supervisor, User
 MMU:         Sv32 / Bare; Svade
 
 Core name:  raptor-falcon (Linux-capable)
-PMP:        8 usable entries, TOR / NA4 / NAPOT, L-bit lockable
+PMP:        8 usable entries, TOR / NAPOT, 4 KiB granularity, L-bit lockable
 Interrupts: CLINT (mtime, mtimecmp, msip) + PLIC (31 sources, M/S contexts)
 
-Bus Interface:  AXI4, XLEN-bit data/addr, 4-bit ID; burst-capable reads (up to 8 outstanding); writes use independent AW/W handshakes (single-beat stores and dirty-line words, multi-beat Zicboz `CBO.ZERO`). With the default write-back L1D each bus write waits for its B response; write-through builds without L2 may post up to 4 cacheable writes (`RAPT_POSTED_WRITES`)
+Bus Interface: AXI4, XLEN-bit data/addr, 4-bit ID; up to 8 outstanding burst-capable reads.
+               Writes use independent AW/W handshakes: single-beat stores and dirty-line words,
+               multi-beat Zicboz CBO.ZERO. Without L2, RAPT_POSTED_WRITES bounds cacheable writes
+               in flight (default 4). Write-through stores may complete at bus capture; buffered
+               writebacks retain their data and complete only on the corresponding B response.
 Default uarch: 2-wide decode / rename / dispatch / commit, 2 integer ALU ports, ROB=32, ALQ=8, BRQ=8, MDQ=4, FPQ=8, IOQ=8, unified SQ=16, 6 completion ports, 16 branch checkpoints, integer PRF=64, FPR=32 x 64-bit, TAGE + 128-entry BTB + 16-entry RAS, L1I=16 KiB, L1D=16 KiB write-back with 4 MSHRs and 2 writeback buffers (both caches 4-way), 64 B cache lines, ITLB=16, DTLB=64 (2-way, load/store replicas) + shared 256-entry L2 TLB, L2 passthrough (cache in `default-l2`)
 
 Verifying:  RISCOF (riscv-arch-test), full-core F/D directed/differential tests, RVFI, SVA
 ```
 
-The default RV64 configuration supports [RVA22S64](./docs/README.md#rva22s64-support). Its ISA summary lists the implemented extensions. Zkt provides data-independent execution latency for the instructions covered by its specification. Svinval implements translation invalidation using a conservative full SFENCE.VMA operation in both XLEN modes. Svpbmt carries page-based memory types through the RV64 Sv39 translation, cache, and bus paths. The [RV64 supervisor verification configuration](verify/riscof/raptor-rv64s/raptor-rv64s.yaml) declares these extensions.
+The default RV64 configuration supports [RVA22S64](./docs/README.md#rva22s64-support). Its ISA summary
+lists the implemented extensions. Zkt provides data-independent execution latency for the instructions
+covered by its specification. Svinval shares committed SFENCE.VMA ordering and selective address/ASID
+invalidation in both XLEN modes. Svpbmt carries page-based memory types through the RV64 Sv39
+translation, cache, and bus paths. The
+[RV64 supervisor verification configuration](verify/riscof/raptor-rv64s/raptor-rv64s.yaml) declares these
+extensions.
 
 The F/D/Zfhmin implementation covers scalar floating-point load/store, arithmetic, FMA, divide/square-root, conversion, comparison/classification, rounding modes, accrued exception flags, and binary16 load/store, transfer, and conversion. The compressed subset includes the C-extension floating-point memory forms required with F/D (C.FLW/C.FSW on RV32 and C.FLD/C.FSD plus their stack-pointer forms on RV32/RV64).
 
@@ -85,7 +95,7 @@ flowchart TD
       DPTW["DPTW (Sv32 / Sv39, Svade)"]
     end
     L2TLB["shared L2 TLB (256, direct-mapped)"]
-    PMPC["PMP x8 (TOR/NA4/NAPOT):<br/>fetch, load/store and PTW checks"]
+    PMPC["PMP x8 (TOR/NAPOT, 4 KiB):<br/>fetch, load/store and PTW checks"]
     BUS["rapt_bus (D/PTW > MSHR > L1I, request IDs)"]
     AXIM["AXI4 master (up to 8 reads)"]
     L2["L2 (default passthrough;<br/>default-l2: 512 KiB, 8-way)"]

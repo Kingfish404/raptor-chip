@@ -210,10 +210,13 @@ help: ## Show this help message
 # ============================================================================
 # Prerequisites: ensure simulator and NEMU are built
 # ============================================================================
-$(NPC_BIN):
-	@echo "[verify] Building NPC simulator (difftest enabled)..."
-	+$(MAKE) -C $(RAPTOR_HOME) build-rv32 BUILD_PROFILE=$(SIM_BUILD_PROFILE)
-	+$(MAKE) -C $(NSIM_HOME) $(SUBMAKE_JOBS) RAPT_CONFIG=$(RAPT_CONFIG) BUILD_PROFILE=$(SIM_BUILD_PROFILE) VFLAGS="$(VFLAGS)"
+.PHONY: verify-npc-build
+verify-npc-build:
+	@echo "[verify] Checking the current NPC simulator build..."
+	+$(MAKE) -C $(RAPTOR_HOME) configure-rv$(ISA_XLEN) \
+		RAPT_CONFIG=$(RAPT_CONFIG) BUILD_PROFILE=$(SIM_BUILD_PROFILE)
+	+$(MAKE) -C $(NSIM_HOME) $(SUBMAKE_JOBS) all RAPT_CONFIG=$(RAPT_CONFIG) \
+		BUILD_PROFILE=$(SIM_BUILD_PROFILE) VFLAGS="$(VFLAGS)"
 
 $(NEMU_SO):
 	@echo "[verify] Building NEMU reference SO..."
@@ -233,10 +236,10 @@ $(BUILD_DIR)/mrom-rv%/mrom-data.bin:
 		BUILD_DIR=$(abspath $(dir $@)) ISA64=$(if $(filter 64,$*),1,0)
 
 .PHONY: check-prereqs
-check-prereqs: $(NPC_BIN) $(NEMU_SO) $(MROM_IMG) ## Verify all prerequisites are built
+check-prereqs: verify-npc-build $(NEMU_SO) $(MROM_IMG) ## Verify all prerequisites are current
 	@echo "[verify] Checking prerequisites..."
-	@test -f $(NPC_BIN)  || (echo "ERROR: NPC binary not found: $(NPC_BIN)"  && echo "  Run: make -C $(RAPTOR_HOME) build-rv32" && exit 1)
-	@test -f $(NEMU_SO)  || (echo "ERROR: NEMU SO not found: $(NEMU_SO)"    && echo "  Run: make -C $(RAPTOR_HOME) build-nemu32-ref" && exit 1)
+	@test -f "$(NPC_BIN)" || { echo "ERROR: NPC binary not found: $(NPC_BIN)"; exit 1; }
+	@test -f "$(NEMU_SO)" || { echo "ERROR: NEMU SO not found: $(NEMU_SO)"; exit 1; }
 	@echo "[verify] All prerequisites OK."
 
 # ============================================================================
@@ -607,6 +610,11 @@ RISCOF_CLASSIC_ENV_PATCH := $(VERIFY_HOME)/scripts/patch_riscof_classic_env.py
 RISCOF_CLASSIC_VENV ?= $(BUILD_DIR)/riscof-classic-venv
 RISCOF_CLASSIC_BIN ?= $(RISCOF_CLASSIC_VENV)/bin/riscof
 RISCOF_CLASSIC_PYTHON ?= $(RISCOF_CLASSIC_VENV)/bin/python
+# Classic needs the full-access PMP precheck in our pinned Sail 0.16 build.
+# ACT4 retains its independent SAIL_VERSION requirement above.
+RISCOF_CLASSIC_SAIL_VERSION ?= 0.16
+RISCOF_CLASSIC_SAIL_PREFIX ?= $(BUILD_DIR)/sail-riscv
+RISCOF_CLASSIC_PATH := $(RISCOF_CLASSIC_SAIL_PREFIX)/bin:$(PATH)
 # Large classic F/D vectors can take minutes in an RTL simulator.  Do not
 # inherit the generic 10-second smoke-test budget unless explicitly requested.
 RISCOF_CLASSIC_TIMEOUT ?= $(if $(filter command line environment override,$(origin TIMEOUT)),$(TIMEOUT),600)
@@ -618,6 +626,11 @@ RISCOF_CLASSIC_SHARD_COUNT ?= 1
 RISCOF_CLASSIC_BRANCH   ?= old-framework-3.x
 
 .PHONY: riscof-classic riscof-classic-setup riscof-classic-run riscof-classic-clean riscof-classic-build-npc
+
+.PHONY: riscof-classic-sail
+riscof-classic-sail: ## Build the pinned classic Sail reference with Raptor's physical access policy
+	JOBS="$(JOBS)" bash "$(VERIFY_HOME)/scripts/build_sail_reference.sh" \
+		"$(BUILD_DIR)/sail-reference" "$(RISCOF_CLASSIC_SAIL_PREFIX)"
 
 riscof-classic: riscof-classic-setup ## Run classic RISCOF compliance flow
 	+$(MAKE) --no-print-directory riscof-classic-run
@@ -647,10 +660,12 @@ riscof-classic-setup: ## Clone upstream riscv-arch-test suite
 			echo "  Manual fix: $(PYTHON) -m venv $(RISCOF_CLASSIC_VENV) && $(RISCOF_CLASSIC_VENV)/bin/pip install riscof"; \
 			exit 1; }; \
 	fi
-	@SAIL_FOUND_VERSION=$$(sail_riscv_sim --version 2>/dev/null) \
-		&& [ "$$SAIL_FOUND_VERSION" = "$(SAIL_VERSION)" ] \
-		|| { echo "[riscof-classic] ERROR: Sail $(SAIL_VERSION) is required (found '$$SAIL_FOUND_VERSION')."; exit 1; }
-	@sail_riscv_sim --rv32 --validate-config >/dev/null
+	@SAIL_FOUND_VERSION=$$(PATH="$(RISCOF_CLASSIC_PATH)" sail_riscv_sim --version 2>/dev/null) \
+		&& [ "$$SAIL_FOUND_VERSION" = "$(RISCOF_CLASSIC_SAIL_VERSION)" ] \
+		|| { echo "[riscof-classic] ERROR: Sail $(RISCOF_CLASSIC_SAIL_VERSION)" \
+			"is required (found '$$SAIL_FOUND_VERSION')."; exit 1; }
+	@PATH="$(RISCOF_CLASSIC_PATH)" sail_riscv_sim --rv32 --validate-config \
+		--config-override "$(RISCOF_CLASSIC_DIR)/plugins/sail_cSim/raptor.json" >/dev/null
 	@echo "[riscof-classic] Setup complete."
 
 riscof-classic-run: $(MROM_IMG) riscof-classic-build-npc ## Execute classic RISCOF flow
@@ -669,7 +684,8 @@ riscof-classic-run: $(MROM_IMG) riscof-classic-build-npc ## Execute classic RISC
 	@$(PYTHON) "$(RISCOF_CLASSIC_ENV_PATCH)" \
 		--env="$(RISCOF_CLASSIC_SUITE)/riscv-test-suite/env"
 	cd "$(RISCOF_CLASSIC_DIR)" && \
-		export NPC_BIN="$(RISCOF_NPC_BIN_32)" MROM_IMG="$(MROM_IMG)" \
+		export PATH="$(RISCOF_CLASSIC_PATH)" \
+			NPC_BIN="$(RISCOF_NPC_BIN_32)" MROM_IMG="$(MROM_IMG)" \
 			NSIM_HOME="$(NSIM_HOME)" RAPT_TIMEOUT="$(RISCOF_CLASSIC_TIMEOUT)" \
 			RAPT_JOBS="$(JOBS)" \
 			RAPT_MEM_RANDOM_DELAY="$(MEM_RANDOM_DELAY)" \
@@ -764,9 +780,10 @@ riscof-classic-nemu-setup: riscof-classic-setup riscof-classic-build-nemu ## Ens
 		echo "[riscof-classic-nemu] ERROR: missing symlink $(RISCOF_CLASSIC_NEMU_SUITE) -> ../classic/riscv-arch-test"; \
 		exit 1; }
 	@test -x "$(RISCOF_CLASSIC_BIN)" || command -v riscof >/dev/null 2>&1 || { echo "[riscof-classic-nemu] ERROR: 'riscof' not found."; exit 1; }
-	@SAIL_FOUND_VERSION=$$(sail_riscv_sim --version 2>/dev/null) \
-		&& [ "$$SAIL_FOUND_VERSION" = "$(SAIL_VERSION)" ] \
-		|| { echo "[riscof-classic-nemu] ERROR: Sail $(SAIL_VERSION) is required (found '$$SAIL_FOUND_VERSION')."; exit 1; }
+	@SAIL_FOUND_VERSION=$$(PATH="$(RISCOF_CLASSIC_PATH)" sail_riscv_sim --version 2>/dev/null) \
+		&& [ "$$SAIL_FOUND_VERSION" = "$(RISCOF_CLASSIC_SAIL_VERSION)" ] \
+		|| { echo "[riscof-classic-nemu] ERROR: Sail $(RISCOF_CLASSIC_SAIL_VERSION)" \
+			"is required (found '$$SAIL_FOUND_VERSION')."; exit 1; }
 	@echo "[riscof-classic-nemu] Setup complete. NEMU_BIN=$(NEMU_BIN)"
 
 riscof-classic-nemu-run: riscof-classic-nemu-setup ## Execute classic RISCOF flow with NEMU as DUT
@@ -784,7 +801,7 @@ riscof-classic-nemu-run: riscof-classic-nemu-setup ## Execute classic RISCOF flo
 	@$(PYTHON) "$(RISCOF_CLASSIC_ENV_PATCH)" \
 		--env="$(RISCOF_CLASSIC_NEMU_SUITE)/riscv-test-suite/env"
 	cd "$(RISCOF_CLASSIC_NEMU_DIR)" && \
-		export NEMU_BIN="$(NEMU_BIN)" NEMU_HOME="$(NEMU_HOME)" \
+		export PATH="$(RISCOF_CLASSIC_PATH)" NEMU_BIN="$(NEMU_BIN)" NEMU_HOME="$(NEMU_HOME)" \
 			RAPT_TIMEOUT="$(or $(strip $(TIMEOUT)),10)" RAPT_JOBS="$(JOBS)" \
 			RAPT_RISCV_PREFIX="$(CROSS_COMPILE)" TMPDIR="$(RISCOF_CLASSIC_NEMU_WORKDIR)/tmp"; \
 		RISCOF_BIN="$(if $(wildcard $(RISCOF_CLASSIC_BIN)),$(RISCOF_CLASSIC_BIN),riscof)"; \
@@ -1341,6 +1358,21 @@ XSIM_TARGETS := \
 # Scenario tops stored in a shared source, as <top pattern>:<file>. The first
 # match wins; other tops, and those in SHARED_TB_STANDALONE, use <top>.sv.
 SHARED_TB_SOURCES := \
+	tb_sfence_selective_walk:tb_sfence_all_contract.sv \
+	tb_sfence_selective_tlb:tb_sfence_all_contract.sv \
+	tb_sfence_selective_l2:tb_sfence_all_contract.sv \
+	tb_sfence_selective_operands:tb_sfence_all_contract.sv \
+	tb_sfence_data_remap:tb_sfence_all_contract.sv \
+	tb_completion_packets:tb_uop_all_contract.sv \
+	tb_uop_instruction_metadata:tb_uop_all_contract.sv \
+	tb_uop_payload:tb_uop_all_contract.sv \
+	tb_cache_lru:tb_replacement_all_contract.sv \
+	tb_tlb_lru:tb_replacement_all_contract.sv \
+	tb_targeted_coherence:tb_l1d_all_contract.sv \
+	tb_dirty_line_select:tb_l1d_all_contract.sv \
+	tb_cbo_refill_order:tb_l1d_all_contract.sv \
+	tb_bus_buffered_writeback:tb_bus_all_contract.sv \
+	tb_bus_read_ownership:tb_bus_all_contract.sv \
 	tb_idu_%:tb_idu_contract.sv \
 	tb_router_%:tb_router_all_contract.sv \
 	tb_ptw_%:tb_ptw_all_contract.sv \
@@ -1979,7 +2011,8 @@ yosys-sq-span-equivalence:
 
 WB_LINE_REFILL ?= 0
 verilator-l1d-writeback-rv32 verilator-l1d-writeback-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1 -GLineRefill=$(WB_LINE_REFILL)
-verilator-l1d-writeback-line-rv32 verilator-l1d-writeback-line-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1 -GLineRefill=1
+verilator-l1d-writeback-line-rv32 verilator-l1d-writeback-line-rv64 \
+verilator-l1d-refill-store-rv32 verilator-l1d-refill-store-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1 -GLineRefill=1
 L1D_BSCAN_TRACE ?= 0
 verilator-l1d-writeback-bscan-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1 -GLineRefill=1 --trace
 

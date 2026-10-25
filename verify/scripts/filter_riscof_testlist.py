@@ -234,7 +234,6 @@ def main() -> None:
     dropped_reference = []
     rewritten_ad = []
     marked_hardware_ad = []
-    relocated_pmp = []
     for test_name, entry in tests.items():
         macros = entry.get("macros", []) or []
         test_path = entry.get("test_path", test_name)
@@ -281,15 +280,6 @@ def main() -> None:
             marked_hardware_ad.append(test_name)
             continue
 
-        if "/rv32i_m/pmp/" in test_path and Path(test_path).name in {
-            "pmpm_misaligned_na4.S", "pmpm_misaligned_napot.S", "pmpm_misaligned_tor.S"
-        }:
-            # Test the same PMP crossings wholly within one page. Otherwise
-            # Sail's page split and Raptor/NEMU's unsplit Bare PMP check
-            # legitimately produce different signatures at 0x80002000-1.
-            entry = copy.deepcopy(entry)
-            entry["macros"] = [*macros, "RVMODEL_PMP_REGION_OFFSET=16"]
-            relocated_pmp.append(test_name)
         kept[test_name] = entry
 
     eligible_count = len(kept)
@@ -308,7 +298,6 @@ def main() -> None:
             "excluded_64_pmp_or_sv48_sv57": dropped_profile,
             "excluded_ad": dropped_ad,
             "excluded_sail_asid_width": dropped_reference,
-            "relocated_pmp_boundaries_within_page": relocated_pmp,
         }
         output.with_suffix(".selection.json").write_text(
             json.dumps(selection, indent=2) + "\n", encoding="utf-8")
@@ -321,8 +310,7 @@ def main() -> None:
         f"dropped {len(dropped_ad)} A/D tests, "
         f"quarantined {len(dropped_incompat)} classic-incompat tests, "
         f"quarantined {len(dropped_profile)} unsupported-profile tests, "
-        f"excluded {len(dropped_reference)} Sail ASID-width incompatibilities, "
-        f"relocated {len(relocated_pmp)} PMP boundary tests within a page"
+        f"excluded {len(dropped_reference)} Sail ASID-width incompatibilities"
     )
 
 

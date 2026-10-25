@@ -5,6 +5,7 @@ module rapt_l1d_writeback #(
     parameter int LineWords = 16,
     parameter int WordBits = $clog2(LineWords),
     parameter int Entries = 1,
+    parameter bit Pipelined = 1'b0,
     parameter bit AllowRetry = 1'b0
 ) (
     input logic clock,
@@ -20,6 +21,7 @@ module rapt_l1d_writeback #(
     output logic write_valid,
     output logic [Xlen-1:0] write_addr,
     output logic [Xlen-1:0] write_data,
+    input logic write_accept = 1'b0,
     input logic write_ready,
     input logic write_error,
     // Physical line hazards: never read old memory behind a pending writeback.
@@ -36,8 +38,11 @@ module rapt_l1d_writeback #(
   // FIFO order preserves stores to the same physical line across evictions.
   logic [Xlen-1:LineBits] line_addr_q[Entries];
   logic [LineWords-1:0] dirty[Entries];
+  logic [LineWords-1:0] issued[Entries];
   logic [LineWords*Xlen-1:0] data[Entries];
-  logic [WordBits-1:0] word_index;
+  logic [WordBits-1:0] word_index, retire_word;
+  logic [PtrBits-1:0] issue_entry;
+  logic issue_valid;
   logic push, pop;
 
   if (Entries < 1 || Entries > 2 || !(Xlen inside {32, 64}) || LineWords < 2
@@ -47,10 +52,37 @@ module rapt_l1d_writeback #(
     $error("Invalid L1D writeback geometry");
   end
 
+  if (Pipelined && AllowRetry) begin : g_invalid_retry
+    $error("Pipelined writebacks require fail-stop error handling");
+  end
+
   always_comb begin
-    word_index = '0;
+    // Requests issue in FIFO/word order; dirty bits remain owned until B.
+    // Separate issued bits let younger words/entries use the downstream
+    // credits without losing either payload or same-line read hazards.
+    retire_word = '0;
     for (int word_idx = LineWords - 1; word_idx >= 0; word_idx--)
-    if (dirty[head][word_idx]) word_index = WordBits'(word_idx);
+    if (dirty[head][word_idx]) retire_word = WordBits'(word_idx);
+    issue_entry = head;
+    word_index = retire_word;
+    issue_valid = |dirty[head];
+    if (Pipelined) begin
+      issue_valid = 0;
+      for (int offset_idx = Entries - 1; offset_idx >= 0; offset_idx--) begin
+        for (int word_idx = LineWords - 1; word_idx >= 0; word_idx--) begin
+          if (dirty[(int'(head)+offset_idx)%Entries][word_idx]
+              && !issued[(int'(head)+offset_idx)%Entries][word_idx]) begin
+            issue_entry = PtrBits'((int'(head)+offset_idx)%Entries);
+            word_index = WordBits'(word_idx);
+            issue_valid = 1;
+          end
+        end
+      end
+    end
+    if (error) begin
+      issue_entry = head;
+      word_index = retire_word;
+    end
     read_match = 0;
     miss_match = 0;
     for (int i = 0; i < Entries; i++) begin
@@ -61,16 +93,19 @@ module rapt_l1d_writeback #(
 
   assign busy = count != 0;
   assign capture_ready = int'(count) < Entries && !error;
-  assign write_valid = busy && !error;
-  assign write_addr = {line_addr_q[head], word_index, {ByteBits{1'b0}}};
-  assign write_data = data[head][word_index*Xlen+:Xlen];
+  assign write_valid = busy && issue_valid && !error;
+  assign write_addr = {line_addr_q[issue_entry], word_index, {ByteBits{1'b0}}};
+  assign write_data = data[issue_entry][word_index*Xlen+:Xlen];
   assign push = capture_valid && capture_ready && |capture_dirty;
-  assign pop = write_valid && write_ready && !write_error
-      && dirty[head] == (LineWords'(1) << word_index);
+  assign pop = busy && !error && write_ready && !write_error
+      && dirty[head] == (LineWords'(1) << retire_word);
 
   always_ff @(posedge clock) begin
     if (reset) begin
-      for (int i = 0; i < Entries; i++) dirty[i] <= '0;
+      for (int i = 0; i < Entries; i++) begin
+        dirty[i] <= '0;
+        issued[i] <= '0;
+      end
       head <= '0;
       tail <= '0;
       count <= '0;
@@ -86,16 +121,18 @@ module rapt_l1d_writeback #(
       if (push) begin
         line_addr_q[tail] <= capture_addr[Xlen-1:LineBits];
         dirty[tail] <= capture_dirty;
+        issued[tail] <= '0;
         data[tail] <= capture_data;
         tail <= int'(tail) == Entries-1 ? '0 : tail + 1'b1;
       end
-      if (write_valid && write_ready) begin
+      if (Pipelined && write_valid && write_accept) issued[issue_entry][word_index] <= 1'b1;
+      if (busy && !error && write_ready) begin
         if (write_error) error <= 1'b1;
         else begin
-          dirty[head][word_index] <= 1'b0;
+          dirty[head][retire_word] <= 1'b0;
           if (pop) head <= int'(head) == Entries - 1 ? '0 : head + 1'b1;
         end
-      end else if (AllowRetry && error && retry) error <= 1'b0;
+      end else if (AllowRetry && error && retry && !Pipelined) error <= 1'b0;
     end
   end
 endmodule

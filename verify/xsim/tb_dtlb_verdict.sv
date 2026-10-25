@@ -8,8 +8,10 @@ module tb_dtlb_verdict;
         : int'(vpn) % (`RAPT_DTLB_ENTRIES / (`RAPT_DTLB_WAYS == 0 ? 1 : `RAPT_DTLB_WAYS));
   endfunction
   localparam int XLEN = `RAPT_XLEN;
-  localparam logic [XLEN-1:0] VA = XLEN'('h40000120);
-  localparam logic [XLEN-1:0] PA = XLEN'('h80000120);
+  localparam logic [XLEN-1:0] VA = `RAPT_PMP_GRANULARITY_LOG2 == 2
+      ? XLEN'('h40000120) : XLEN'('h40001000 - XLEN / 8);
+  localparam logic [XLEN-1:0] PA = `RAPT_PMP_GRANULARITY_LOG2 == 2
+      ? XLEN'('h80000120) : XLEN'('h80001000 - XLEN / 8);
   localparam logic [XLEN-1:0] Value = XLEN'('h76543210);
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
@@ -91,7 +93,8 @@ module tb_dtlb_verdict;
     reset = 0;
     tick(1);
     pmp_read(1);
-    csr_bcast.satp_ppn = 'h80001;
+    // Keep the page table outside the adjacent data page denied below.
+    csr_bcast.satp_ppn = `RAPT_PMP_GRANULARITY_LOG2 == 2 ? 'h80001 : 'h80002;
   endtask
 
   task automatic translate(input logic [6:0] flags = 7'b1100011, input logic [1:0] pbmt = 0);
@@ -151,11 +154,15 @@ module tb_dtlb_verdict;
     pmp_update.addr_idx = 0;
     pmp_update.raw_addr = narrow ? ((PA + 4) >> 2) : ('h80000000 >> 2) | 511;
     pmp_update.napot_mask = narrow ? 1 : 1023;
+    if (narrow && `RAPT_PMP_GRANULARITY_LOG2 != 2) begin
+      pmp_update.raw_addr = ('h80001000 >> 2) | 511;
+      pmp_update.napot_mask = 1023;
+    end
     pmp_update.cfg_we = 1;
     pmp_update.cfg_r = `RAPT_PMP_NUM'(allow_read);
     pmp_update.cfg_w = 1;
-    pmp_update.mode_napot = narrow ? 0 : 1;
-    pmp_update.mode_na4 = narrow ? 1 : 0;
+    pmp_update.mode_napot = narrow && `RAPT_PMP_GRANULARITY_LOG2 == 2 ? 0 : 1;
+    pmp_update.mode_na4 = narrow && `RAPT_PMP_GRANULARITY_LOG2 == 2 ? 1 : 0;
     pmp_update.mode_off = ~`RAPT_PMP_NUM'(1);
     tick(1);
     pmp_update.addr_we = 0;
@@ -189,23 +196,32 @@ module tb_dtlb_verdict;
     check(dut.l1d_state == 3'b101, "uniform denied hit did not trap");
     finish_load(5);
     page_permission(1);
+    cmu_bcast.sfence_all_vpn = 1;
+    cmu_bcast.sfence_all_asid = 1;
+    cmu_bcast.sfence_vpn = 0;
+    cmu_bcast.sfence_asid = 0;
+    cmu_bcast.sfence_valid = `RAPT_SFENCE_SELECTIVE != 0;
     cmu_bcast.fence_time = 1;
     tick(1);
     cmu_bcast.fence_time = 0;
+    cmu_bcast.sfence_valid = 0;
     request();
     finish_load();
-    // A four-byte denied region inside the page must never be cached uniform.
+    // Fine-grain PMP can deny a word inside this page; page-grain PMP denies
+    // the adjacent page. Both require the physical checker for a crossing
+    // footprint even when its starting address remains permitted.
     page_permission(0, 1);
     request();
     finish_load();
-    check(!dut.dtlb_verdict[0], "nonuniform page cached an unconditional verdict");
+    check(dut.dtlb_verdict[0] == (`RAPT_PMP_GRANULARITY_LOG2 != 2),
+          "cached verdict has the wrong page uniformity");
     lsu_l1d.rcheck_valid = 1;
-    lsu_l1d.rcheck_offset = 3;
+    lsu_l1d.rcheck_offset = `RAPT_PMP_GRANULARITY_LOG2 == 2 ? 3'd3 : 3'(XLEN / 8 - 1);
     lsu_l1d.rcheck_size_m1 = 3;
     lsu_l1d.rorig_size_m1 = 3;
     lsu_l1d.rmisaligned = 1;
     request();
-    check(dut.l1d_state == 3'b011, "nonuniform split skipped physical checker");
+    check(dut.l1d_state == 3'b011, "PMP-boundary split skipped physical checker");
     finish_load(5);
     boot();
     page_permission(1);

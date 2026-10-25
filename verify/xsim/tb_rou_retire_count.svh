@@ -13,10 +13,11 @@ task automatic run_retire_count_tests;
         u.execute.sys.ecall=0; u.execute.sys.ebreak=1;
         u.inst=32'h00100073;
         u.c=kind==3;
-        u.pnpc=pc+XLEN'(kind==3 ? 2 : 4);
+
       end
       dispatch_one(u,PLEN'(33),PLEN'(1),RobW'(0));
-      exu_rou.dest='0; exu_rou.npc=u.pnpc;
+      exu_rou.dest='0;
+      exu_rou.npc=(u.pc + XLEN'(u.c ? 2 : 4));
       exu_rou.valid=1; exu_rou.trap=kind>=4;
       exu_rou.cause=XLEN'(kind==4 ? 2 : kind==5 ? 5 : 7);
       tick(1); clear_writebacks(); #1;

@@ -12,6 +12,7 @@ def main():
     parser.add_argument("--source", type=Path)
     parser.add_argument("--test-source", type=Path,
                         help="Alternative host harness (e.g. PMP CSR capacity checks)")
+    parser.add_argument("--granularity-log2", type=int, choices=range(2, 13), default=12)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[3]
     for xlen in (32, 64):
@@ -20,8 +21,9 @@ def main():
             (work / "generated").mkdir()
             (work / "generated/autoconf.h").write_text(
                 "#define CONFIG_ISA_riscv 1\n" +
+                f"#define CONFIG_RV_PMP_GRANULARITY_LOG2 {args.granularity_log2}\n" +
                 ("#define CONFIG_ISA64 1\n#define CONFIG_RV64 1\n"
-                 "#define CONFIG_RV_PMPADDR_BITS 45\n" if xlen == 64 else ""))
+                 "#define CONFIG_RV_PMPADDR_BITS 30\n" if xlen == 64 else ""))
             command = ["cc", "-std=gnu11", "-O2", "-Wall", "-Wextra", "-Werror",
                        "-Wno-unused-parameter", "-fsanitize=undefined", "-fno-sanitize-recover=all",
                        "-D__GUEST_ISA__=riscv", "-I" + str(work),

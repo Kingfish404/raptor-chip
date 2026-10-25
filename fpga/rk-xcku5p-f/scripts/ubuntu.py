@@ -517,7 +517,7 @@ def main():
     parser.add_argument("--jobs", type=int, default=8)
     parser.add_argument("--native-build", type=Path, help="native build containing its verified DTB and manifest")
     parser.add_argument("--native-build-root", type=Path, default=BOARD / "build")
-    parser.add_argument("--preset", default="small-cache16")
+    parser.add_argument("--preset", default="middle-cache")
     parser.add_argument("--clock-mhz", type=int, choices=(25, 50, 100), default=50)
     parser.add_argument("--server", default="192.168.50.1")
     parser.add_argument("--client", default="192.168.50.0/24", help="NFS client subnet or single IPv4/32")

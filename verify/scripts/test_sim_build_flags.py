@@ -63,8 +63,10 @@ class SimulatorBuildFlagsTest(unittest.TestCase):
             verilator.chmod(0o755)
             # The '+' compiler recipe executes even with make -n. Substitute
             # a harmless command printer, and exercise the actual recipe.
+            # The fixture only exercises compiler flags, not the platform map.
             run = subprocess.run(
                 ["make", "-s", "-C", str(root / "sim"), "all",
+                 "-o", "memory-map-check",
                  f"VERILATOR={verilator}", "LZ4_PREFIX=", *options],
                 capture_output=True, text=True)
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
@@ -80,6 +82,18 @@ class SimulatorBuildFlagsTest(unittest.TestCase):
         self.assertIn("-DRAPT_ASSERT_EN", command)
         self.assertIn("--assert", command)
         self.assertIn("obj_dir-riscv32-", object_dir)
+
+    def test_codegen_parallelism_is_separate_from_build_and_evaluation(self):
+        for flags in ("VFLAGS=", "VFLAGS=-DRAPT_RV64"):
+            with self.subTest(flags=flags):
+                command, _ = self.command(flags, "VERILATOR_JOBS=4")
+                self.assertEqual(command[command.index("-j") + 1], "4")
+                self.assertEqual(command[command.index("--verilate-jobs") + 1], "1")
+                self.assertEqual(command[command.index("--threads") + 1], "1")
+
+        command, _ = self.command("VERILATOR_CODEGEN_JOBS=2", "VERILATOR_THREADS=4")
+        self.assertEqual(command[command.index("--verilate-jobs") + 1], "2")
+        self.assertEqual(command[command.index("--threads") + 1], "4")
 
     def test_disabled_omits_both_controls(self):
         command, object_dir = self.command("RAPT_SIM_ASSERT=0")

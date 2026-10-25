@@ -70,7 +70,7 @@ $(NETBOOT_TARGETS) fpga-netboot-host-setup fpga-netboot-host-restore:
 	$(MAKE) -C ../litex $@ FPGA_BOARD=rk_xcku5p_f
 
 # Native Ubuntu targets never dispatch to the LiteX SoC or netboot wrappers.
-$(UBUNTU_TARGETS) $(UBUNTU_FPGA_TARGETS): RAPT_CONFIG = small-cache16
+$(UBUNTU_TARGETS) $(UBUNTU_FPGA_TARGETS): RAPT_CONFIG = middle-cache
 $(UBUNTU_FPGA_TARGETS): override XLEN := 64
 $(UBUNTU_FPGA_TARGETS): override MEMORY := ddr
 $(UBUNTU_FPGA_TARGETS): override WITH_ETHERNET := 1

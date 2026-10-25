@@ -2,8 +2,27 @@
 `define RAPT_SVH
 `include "rapt_config.svh"
 `include "rapt_sva.svh"
+// Keep expanded instruction words for observation only. Synthesis may opt in.
+`ifndef SYNTHESIS
+`define RAPT_UOP_HAS_INST
+`elsif RAPT_RVFI
+`define RAPT_UOP_HAS_INST
+`elsif RAPT_KEEP_UOP_INST
+`define RAPT_UOP_HAS_INST
+`endif
 `ifdef RAPT_SVA_ACTIVE
 `define RAPT_ROB_NPC_SHADOW
+`endif
+
+// SFENCE cache-state preservation: 0 = legacy, 1 = L1D, 2 = L1D + L1I,
+// 3 = caches + branch predictors. Translation invalidation and ordering are unchanged.
+`ifndef RAPT_SFENCE_KEEP_STATE
+`define RAPT_SFENCE_KEEP_STATE 3
+`endif
+
+// Preserve unrelated translations across committed SFENCE.VMA/SINVAL.VMA.
+`ifndef RAPT_SFENCE_SELECTIVE
+`define RAPT_SFENCE_SELECTIVE 1
 `endif
 
 `ifndef RAPT_L1D_MSHRS
@@ -12,9 +31,43 @@
 `ifndef RAPT_L1D_WRITEBACK
 `define RAPT_L1D_WRITEBACK 0
 `endif
-// Write-through L1D stores that may retire to the bus before their AXI B
-// response. Applied only without L2 and with a write-through L1D; zero
-// restores B-synchronous store completion.
+// Write-back configurations clean the physical lines needed by observers.
+// Override to zero to retain the global-drain implementation.
+`ifndef RAPT_L1D_TARGETED_COHERENCE
+`define RAPT_L1D_TARGETED_COHERENCE `RAPT_L1D_WRITEBACK
+`endif
+// Skip clean sets during global write-back maintenance.
+`ifndef RAPT_L1D_DIRTY_SKIP
+`define RAPT_L1D_DIRTY_SKIP `RAPT_L1D_WRITEBACK
+`endif
+// Replacement policy. CACHE_LRU: L1I/L1D with 2-16 ways use true LRU (2-way
+// otherwise toggles on fill; wider sets use tree PLRU). TLB_LRU: ITLB and
+// CAM DTLBs use true LRU instead of round-robin, and 2-way DTLB sets record
+// the last hit. Zero keeps the previous policies.
+`ifndef RAPT_CACHE_LRU
+`define RAPT_CACHE_LRU 0
+`endif
+`ifndef RAPT_TLB_LRU
+`define RAPT_TLB_LRU 0
+`endif
+// Lower-cost tree PLRU for associative TLBs; takes precedence over true LRU.
+`ifndef RAPT_TLB_PLRU
+`define RAPT_TLB_PLRU 0
+`endif
+// Per-instance policies: 0 = existing fill order, 1 = true LRU, 2 = tree PLRU.
+// Explicit instance selectors override the compatibility-wide policy switches.
+`ifndef RAPT_ITLB_POLICY
+`define RAPT_ITLB_POLICY (`RAPT_TLB_PLRU ? 2 : (`RAPT_TLB_LRU ? 1 : 0))
+`endif
+`ifndef RAPT_DTLB_POLICY
+`define RAPT_DTLB_POLICY (`RAPT_TLB_PLRU ? 2 : (`RAPT_TLB_LRU ? 1 : 0))
+`endif
+`ifndef RAPT_DSTLB_POLICY
+`define RAPT_DSTLB_POLICY (`RAPT_TLB_PLRU ? 2 : (`RAPT_TLB_LRU ? 1 : 0))
+`endif
+// Cacheable L1D writes that may issue before prior AXI B responses, without L2.
+// Write-through stores may complete at capture; buffered writebacks retain
+// their data and complete on B. Zero makes every bus write B-synchronous.
 `ifndef RAPT_POSTED_WRITES
 `define RAPT_POSTED_WRITES 4
 `endif
@@ -149,10 +202,12 @@
 // Keep full request VAs until translation/PMA checks have rejected invalid
 // addresses; narrowing a tag must never turn an unmapped address into a hit.
 // Sv39 retains its architectural PPN encoding, while the platform rejects
-// addresses outside this implemented physical-address range.
+// addresses outside this implemented physical-address range. Every platform
+// map (hdl/configs/memory_map.json) lies below 4 GiB, so RV64 also implements
+// 32 bits; widen this only together with a platform map that needs it.
 `ifndef RAPT_PADDR_BITS
 `ifdef RAPT_RV64
-`define RAPT_PADDR_BITS 47
+`define RAPT_PADDR_BITS 32
 `else
 `define RAPT_PADDR_BITS 32
 `endif
@@ -167,6 +222,30 @@
 `define RAPT_PMPADDR_BITS 32
 `endif
 `endif
+
+// Implemented PC width. RV64 PCs, fetch targets and their predictions are held
+// as 40-bit two's-complement values whose sign extension is the architectural
+// address: this covers every Sv39 virtual address, every implemented physical
+// address (PADDR_BITS <= 39) and the all-ones upper-half aliases. Any other
+// address is invalid in every translation mode and may be replaced by another
+// invalid address before it reaches xepc/xtval (privileged spec WARL rule).
+// Define RAPT_PC_FULL_WIDTH to keep XLEN-wide PCs.
+`define RAPT_PC_BITS_OF(xlen) \
+  (((xlen) == 64 && `RAPT_PADDR_BITS <= 39 && !`RAPT_PC_FULL_WIDTH_ON) ? 40 : (xlen))
+`ifdef RAPT_PC_FULL_WIDTH
+`define RAPT_PC_FULL_WIDTH_ON 1
+`else
+`define RAPT_PC_FULL_WIDTH_ON 0
+`endif
+// Convert an XLEN-wide address to a PcW-bit PC. Representable addresses are
+// kept exactly. Others keep their low bits and get differing bits PcW-1 and
+// PcW-2, so the result stays non-canonical for Sv39 and above every
+// implemented physical address; the same fault is raised.
+`define RAPT_PC_LEGALIZE(XW, PW, A) \
+  (((PW) == (XW) || &(A[(XW)-1:(PW)-1]) || !(|(A[(XW)-1:(PW)-1]))) ? (PW)'(A) \
+      : (PW)'({A[(XW)-1], ~A[(XW)-1], A[(PW)-3:0]}))
+// Architectural XLEN-wide value of a PcW-bit PC.
+`define RAPT_PC_SEXT(XW, A) (XW)'($signed(A))
 
 // Cache lines are specified in bytes, not XLEN words. A configuration may
 // select a smaller line for formal/FPGA capacity, but RV32 and RV64 use the
@@ -514,7 +593,11 @@
 
 // Eight usable PMP entries; retain 16 architectural CSR slots. Slots 8..15
 // are WARL read-only zero, without storage or permission comparators.
-// pmp_granularity = 4 bytes -> G=0, NA4 legal; usable pmpaddr fields are WARL.
+// PMP grain is a platform choice, independent of XLEN. The default 4 KiB
+// grain (G=10) permits page-wide permission reuse. Set log2=2 for legacy G=0.
+`ifndef RAPT_PMP_GRANULARITY_LOG2
+`define RAPT_PMP_GRANULARITY_LOG2 12
+`endif
 `define RAPT_PMP_NUM 8
 `define RAPT_PMP_CSR_NUM 16
 // pmpcfg byte field positions

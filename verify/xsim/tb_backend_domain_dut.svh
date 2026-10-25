@@ -25,6 +25,10 @@
 `endif
       .ScanEntries(Cfg.steer_scan_entries)
   ) rob (
+      .writeback_clean(),
+      .writeback_cbo(),
+      .writeback_cbo_invalidate(),
+      .writeback_block(),
       .clock,
       .reset,
       .rnu_rou,

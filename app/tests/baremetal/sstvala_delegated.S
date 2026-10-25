@@ -13,12 +13,12 @@ _start:
   csrw satp, zero
   li t0, 0x3ff
   csrw medeleg, t0
-  /* Deny one physical word, with a lower-priority all-memory allow. */
+  /* Deny one physical page, with a lower-priority all-memory allow. */
   li t0, (0x80400000 >> 2)
   csrw pmpaddr0, t0
   li t0, -1
   csrw pmpaddr1, t0
-  li t0, 0x1f10
+  li t0, 0x1f18
   csrw pmpcfg0, t0
   la t0, supervisor_trap
   csrw stvec, t0

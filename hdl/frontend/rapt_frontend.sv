@@ -37,7 +37,7 @@ module rapt_frontend #(
 
       .ifu_bpu(ifu_bpu),
       .idu_bpu(idu_bpu),
-      .decode_target_q(fqu_idu.resteer_pc[XLEN-1:1]),
+      .decode_target_q(fqu_idu.resteer_pc[`RAPT_PC_BITS_OF(XLEN)-1:1]),
       .execute_recover(history_restore),
       .preserve_fetch(recovery.preserve_fetch),
       .execute_ghr(restore_ghr),

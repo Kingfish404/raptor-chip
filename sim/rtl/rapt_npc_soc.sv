@@ -275,7 +275,8 @@ module raptSoC #(
 endmodule
 
 module rapt_npc_soc #(
-    parameter int XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN,
+    parameter bit SerializeWrites = 1'b0
 ) (
     input clock,
 
@@ -368,6 +369,28 @@ module rapt_npc_soc #(
     return cur + step;
   endfunction
 
+  function automatic logic memory_addr(input logic [XLEN-1:0] addr);
+    return addr[31:0] >= 32'h80000000
+        && (LargePmem || addr[31:0] < 32'h90000000
+            || (addr[31:0] >= 32'ha0000000 && addr[31:0] < 32'ha2000000));
+  endfunction
+
+  function automatic logic [XLEN-1:0] burst_last_addr(input logic [XLEN-1:0] addr,
+                                                      input logic [7:0] len, input logic [2:0] size,
+                                                      input logic [1:0] burst);
+    logic [XLEN:0] last_addr;
+    last_addr = {1'b0, addr} + ((XLEN+1)'(burst == AXIBurstFixed ? 0 : len) << size)
+        + ((XLEN+1)'(1) << size) - 1;
+    return last_addr[XLEN] ? '1 : last_addr[XLEN-1:0];
+  endfunction
+
+  function automatic logic overlaps(input logic [XLEN-1:0] first_a, last_a, first_b, last_b);
+    // The host model aliases canonical RV64 addresses onto the 32-bit map.
+    // Conservatively serialize any burst that wraps that physical map.
+    return first_a[31:0] > last_a[31:0] || first_b[31:0] > last_b[31:0]
+        || (first_a[31:0] <= last_b[31:0] && first_b[31:0] <= last_a[31:0]);
+  endfunction
+
   // -------------------------------------------------------------------------
   // Read pipeline (skid buffer): allows accepting a new AR in the same cycle
   // that the current R beat is being consumed. Average throughput ≈ 1
@@ -385,11 +408,14 @@ module rapt_npc_soc #(
   logic [     2:0] r_size_q;
   logic [     1:0] r_burst_q;
   logic [    31:0] r_delay_q;
+  logic [XLEN-1:0] r_first_addr_q, r_last_addr_q;
+  logic r_memory_q;
 
   // -------------------------------------------------------------------------
-  // Write pipeline. AW captured into a single-entry holding register; W beats
-  // stream in and fire DPI writes; on wlast, a single-entry B response is
-  // posted. A new AW can be accepted while B is still draining.
+  // AW captured into one holding register; W beats stream into backing memory.
+  // Completed writes enter an ordered B queue. Each response becomes ready
+  // independently, so write latency overlaps when multiple slots are enabled.
+  // One slot preserves the original AW lookahead and write-response timing.
   // -------------------------------------------------------------------------
   logic            aw_busy;  // AW captured, W stream in progress
   logic [     3:0] aw_id_q;
@@ -398,17 +424,91 @@ module rapt_npc_soc #(
   logic [     1:0] aw_burst_q;
   logic [     7:0] aw_beats_left;
   logic [     1:0] aw_resp_acc;  // accumulated B response (sticky DECERR)
+  logic [XLEN-1:0] aw_first_addr_q, aw_last_addr_q;
+  logic aw_memory_q;
 
-  logic            b_busy;  // B response pending
-  logic [     3:0] b_id_q;
-  logic [     1:0] b_resp_q;
-  logic [    31:0] w_delay_q;
-  logic [    31:0] b_delay_q;
+  // Keep this bound in sync with --mem-write-outstanding in monitor.cc.
+  localparam int MaxWriteOutstanding = 64;
+  localparam int BIndexWidth = $clog2(MaxWriteOutstanding);
+  logic [3:0] b_id_q [MaxWriteOutstanding];
+  logic [1:0] b_resp_q [MaxWriteOutstanding];
+  longint unsigned b_ready_cycle_q [MaxWriteOutstanding];
+  longint unsigned cycle_q;
+  logic [XLEN-1:0] b_first_addr_q [MaxWriteOutstanding];
+  logic [XLEN-1:0] b_last_addr_q [MaxWriteOutstanding];
+  logic b_memory_q [MaxWriteOutstanding];
+  logic [BIndexWidth-1:0] b_head_q, b_tail_q;
+  logic [BIndexWidth:0] b_count_q;
+  int unsigned write_outstanding_q;
+  logic [31:0] w_delay_q;
+  logic b_push, b_pop;
+  assign b_push = wvalid && out_wready && wlast;
+  assign b_pop = out_bvalid && bready;
 
   // Combinational AR-handshake helpers (skid: free when current beat exits)
+  logic serialize_writes;
+`ifndef SYNTHESIS
+  import "DPI-C" function int unsigned npc_mem_serialize_writes();
+  // Options are parsed before reset. Sample only at reset, not on every
+  // combinational evaluation of the bus handshake.
+  always_ff @(posedge clock) begin
+    if (reset) serialize_writes <= SerializeWrites || (npc_mem_serialize_writes() != 0);
+  end
+`else
+  assign serialize_writes = SerializeWrites;
+`endif
   logic r_slot_free, aw_slot_free;
-  assign r_slot_free  = !r_busy || (out_rvalid && rready && r_last_q);
-  assign aw_slot_free = !aw_busy;
+  logic read_hazard, write_hazard;
+  logic [XLEN-1:0] ar_last_addr, aw_last_addr;
+  assign ar_last_addr = burst_last_addr(araddr, arlen, arsize, arburst);
+  assign aw_last_addr = burst_last_addr(awaddr, awlen, awsize, awburst);
+  always_comb begin
+    read_hazard = 1'b0;
+    write_hazard = 1'b0;
+    // The default retains the legacy one-response model. Pipelined operation
+    // mirrors the native bus: overlapping accesses wait for actual completion;
+    // local devices serialize against memory writes. Independent RAM reads run.
+    if (write_outstanding_q > 1) begin
+      if (aw_busy)
+        read_hazard = !memory_addr(
+          araddr
+        ) || !aw_memory_q || overlaps(
+          araddr, ar_last_addr, aw_first_addr_q, aw_last_addr_q
+        );
+      for (int i = 0; i < MaxWriteOutstanding; i++) begin
+        if (i < int'(b_count_q)) begin
+          read_hazard |= !memory_addr(
+              araddr
+          ) || !b_memory_q[BIndexWidth'(b_head_q+i)] || overlaps(
+              araddr,
+              ar_last_addr,
+              b_first_addr_q[BIndexWidth'(b_head_q+i)],
+              b_last_addr_q[BIndexWidth'(b_head_q+i)]
+          );
+          write_hazard |= !memory_addr(awaddr) || !b_memory_q[BIndexWidth'(b_head_q+i)];
+        end
+      end
+      if (r_busy)
+        write_hazard |= !memory_addr(
+            awaddr
+        ) || !r_memory_q || overlaps(
+            awaddr, aw_last_addr, r_first_addr_q, r_last_addr_q
+        );
+      // Match native-bus write priority for simultaneous conflicting requests.
+      if (awvalid)
+        read_hazard |= !memory_addr(
+            araddr
+        ) || !memory_addr(
+            awaddr
+        ) || overlaps(
+            araddr, ar_last_addr, awaddr, aw_last_addr
+        );
+    end
+  end
+  assign r_slot_free = (!r_busy || (out_rvalid && rready && r_last_q)) && !read_hazard;
+  assign aw_slot_free = !aw_busy && !write_hazard
+      && (!serialize_writes || b_count_q == 0)
+      && (write_outstanding_q == 1 || int'(b_count_q) < write_outstanding_q);
 
   assign out_arready  = r_slot_free;
   assign out_rvalid   = r_busy && (r_delay_q == 0);
@@ -418,16 +518,13 @@ module rapt_npc_soc #(
   assign out_rlast    = r_last_q;
 
   assign out_awready  = aw_slot_free;
-  // Accept W beats whenever AW has been captured (write-data-before-AW is
-  // tolerated by waiting: out_wready stays low until aw_busy). We also gate
-  // on `!b_busy` so the final beat never races a still-occupied B slot —
-  // this is conservative (stalls mid-burst too when B is busy) but avoids
-  // a combinational dependence on the master-driven `wlast`, which would
-  // otherwise close a loop through the AXI interface.
-  assign out_wready   = aw_busy && !b_busy && (w_delay_q == 0);
-  assign out_bvalid   = b_busy && (b_delay_q == 0);
-  assign out_bid      = b_id_q;
-  assign out_bresp    = b_resp_q;
+  // Reserve B space before accepting any W beat, without depending on wlast
+  // or bready. This retains the one-slot model's backpressure behavior and
+  // avoids combinational loops through the master interface.
+  assign out_wready = aw_busy && (int'(b_count_q) < write_outstanding_q) && (w_delay_q == 0);
+  assign out_bvalid = (b_count_q != 0) && (cycle_q >= b_ready_cycle_q[b_head_q]);
+  assign out_bid = b_id_q[b_head_q];
+  assign out_bresp = b_resp_q[b_head_q];
 
   // -------------------------------------------------------------------------
   // Timeout watchdog: catch logic bugs that stall a channel indefinitely.
@@ -446,6 +543,22 @@ module rapt_npc_soc #(
     `RAPT_DPI_C_MEM_RANDOM_DELAY(delay);
     return delay;
   endfunction
+  function automatic logic [31:0] read_latency();
+    logic [31:0] latency;
+    `RAPT_DPI_C_MEM_READ_LATENCY(latency);
+    return latency;
+  endfunction
+  function automatic logic [31:0] write_latency();
+    logic [31:0] latency;
+    `RAPT_DPI_C_MEM_WRITE_LATENCY(latency);
+    return latency;
+  endfunction
+
+  function automatic int unsigned write_outstanding();
+    int unsigned count;
+    `RAPT_DPI_C_MEM_WRITE_OUTSTANDING(count);
+    return count;
+  endfunction
 
   // ==========================================================================
   // Sequential update — single always_ff drives both channels.
@@ -462,6 +575,9 @@ module rapt_npc_soc #(
       r_size_q      <= '0;
       r_burst_q     <= '0;
       r_delay_q     <= '0;
+      r_first_addr_q <= '0;
+      r_last_addr_q <= '0;
+      r_memory_q <= 1'b0;
 
       aw_busy       <= 1'b0;
       aw_id_q       <= '0;
@@ -470,16 +586,31 @@ module rapt_npc_soc #(
       aw_burst_q    <= '0;
       aw_beats_left <= '0;
       aw_resp_acc   <= AXIRespOKAY;
+      aw_first_addr_q <= '0;
+      aw_last_addr_q <= '0;
+      aw_memory_q <= 1'b0;
 
-      b_busy        <= 1'b0;
-      b_id_q        <= '0;
-      b_resp_q      <= AXIRespOKAY;
+      b_id_q        <= '{default: '0};
+      b_resp_q      <= '{default: AXIRespOKAY};
+      b_ready_cycle_q <= '{default: '0};
+      b_first_addr_q <= '{default: '0};
+      b_last_addr_q <= '{default: '0};
+      b_memory_q <= '{default: '0};
+      cycle_q       <= '0;
+      b_head_q      <= '0;
+      b_tail_q      <= '0;
+      b_count_q     <= '0;
+      write_outstanding_q <= write_outstanding();
       w_delay_q     <= '0;
-      b_delay_q     <= '0;
+      if (write_outstanding() < 1 || write_outstanding() > MaxWriteOutstanding)
+        $fatal(
+            1, "NPC_SOC: write outstanding limit must be between 1 and %0d", MaxWriteOutstanding
+        );
 
       r_timeout_cnt <= '0;
       w_timeout_cnt <= '0;
     end else begin
+      cycle_q <= cycle_q + 1;
       // -------------------- READ CHANNEL --------------------
       // (1) Consume current beat if handshake fires.
       if (r_delay_q != 0) begin
@@ -518,6 +649,9 @@ module rapt_npc_soc #(
         end else begin
           $display("NPC_SOC: AXI read decode error addr=%0h, arid=%0d", araddr, arid);
         end
+        r_first_addr_q <= araddr;
+        r_last_addr_q <= ar_last_addr;
+        r_memory_q <= memory_addr(araddr);
         r_busy       <= 1'b1;
         r_id_q       <= arid;
         r_data_q     <= tmp;
@@ -529,18 +663,18 @@ module rapt_npc_soc #(
         r_beats_left <= arlen;  // beats remaining after first
         r_last_q     <= (arlen == 8'd0);
         r_next_addr  <= burst_next_addr(araddr, arsize, arburst);
-        r_delay_q    <= random_delay();
+        r_delay_q    <= random_delay() + read_latency();
       end
 
       // -------------------- WRITE CHANNEL --------------------
       if (w_delay_q != 0) begin
         w_delay_q <= w_delay_q - 1;
       end
-      if (b_delay_q != 0) begin
-        b_delay_q <= b_delay_q - 1;
-      end
       // (1) Accept new AW if slot is free.
       if (awvalid && aw_slot_free) begin
+        aw_first_addr_q <= awaddr;
+        aw_last_addr_q <= aw_last_addr;
+        aw_memory_q <= memory_addr(awaddr);
         aw_busy       <= 1'b1;
         aw_id_q       <= awid;
         aw_addr_q     <= awaddr;
@@ -554,8 +688,7 @@ module rapt_npc_soc #(
         end
       end
 
-      // (2) Consume W beat: gated by the actual wready handshake (which also
-      //     stalls a final beat against a busy B slot, see out_wready above).
+      // (2) Consume W beat, with response capacity guaranteed by out_wready.
       if (wvalid && out_wready) begin
         // Deliver one accepted AXI beat with its complete byte enables.
         // Device models must see a register command once, after all its
@@ -563,13 +696,16 @@ module rapt_npc_soc #(
         if (aw_resp_acc == AXIRespOKAY)
           `RAPT_DPI_C_PMEM_WRITE(aw_addr_q & AlignMask, wdata, 8'(wstrb));
         if (wlast) begin
-          // out_wready gating guarantees b_busy is false here, so the post
-          // always succeeds.
-          b_busy   <= 1'b1;
-          b_id_q   <= aw_id_q;
-          b_resp_q <= aw_resp_acc;
-          aw_busy  <= 1'b0;  // free AW slot for next transaction
-          b_delay_q <= random_delay();
+          b_first_addr_q[b_tail_q] <= aw_first_addr_q;
+          b_last_addr_q[b_tail_q] <= aw_last_addr_q;
+          b_memory_q[b_tail_q] <= aw_memory_q;
+          b_id_q[b_tail_q] <= aw_id_q;
+          b_resp_q[b_tail_q] <= aw_resp_acc;
+          // Timestamp rather than a serialized countdown: younger writes
+          // age even while an older B is delayed or backpressured.
+          b_ready_cycle_q[b_tail_q] <= cycle_q + 64'(random_delay()) + 64'(write_latency()) + 1;
+          b_tail_q <= b_tail_q + 1'b1;
+          aw_busy <= 1'b0;
         end else begin
           aw_addr_q <= burst_next_addr(aw_addr_q, aw_size_q, aw_burst_q);
           aw_beats_left <= aw_beats_left - 8'd1;
@@ -578,9 +714,14 @@ module rapt_npc_soc #(
       end
 
       // (3) Drain B on handshake.
-      if (out_bvalid && bready) begin
-        b_busy <= 1'b0;
-      end
+      if (b_pop) b_head_q <= b_head_q + 1'b1;
+      case ({
+        b_push, b_pop
+      })
+        2'b10: b_count_q <= b_count_q + 1'b1;
+        2'b01: b_count_q <= b_count_q - 1'b1;
+        default: ;
+      endcase
 
       // Diagnostic only: AXI has no response cancellation on timeout.
       // Keep all accepted transaction state and stalled payloads intact.
@@ -592,10 +733,12 @@ module rapt_npc_soc #(
       end else begin
         r_timeout_cnt <= '0;
       end
-      if ((aw_busy || b_busy) && !(out_wready && wvalid) && !(out_bvalid && bready)) begin
+      if ((aw_busy || b_count_q != 0) && !(out_wready && wvalid) && !(out_bvalid && bready)) begin
         if (w_timeout_cnt != AXITimeout) w_timeout_cnt <= w_timeout_cnt + 1'b1;
         if (w_timeout_cnt == AXITimeout - 1'b1)
-          $display("NPC_SOC: [WARNING] AXI write stalled (id=%0d)", aw_busy ? aw_id_q : b_id_q);
+          $display(
+              "NPC_SOC: [WARNING] AXI write stalled (id=%0d)", aw_busy ? aw_id_q : b_id_q[b_head_q]
+          );
       end else begin
         w_timeout_cnt <= '0;
       end

@@ -1,3 +1,253 @@
+// ---- tb_bus_buffered_writeback ----
+`include "rapt.svh"
+`include "rapt_if.svh"
+`include "rapt_soc_if.svh"
+
+module tb_bus_buffered_writeback;
+  localparam int XLEN  = `RAPT_XLEN;
+  localparam int Words = `RAPT_CACHE_LINE_BYTES / (XLEN / 8);
+  logic clock = 0, reset = 1;
+  always #5 clock = ~clock;
+  mem_link_if #(.XLEN(XLEN)) mem ();
+  l1i_bus_if #(.XLEN(XLEN)) l1i_bus ();
+  l1d_bus_if #(.XLEN(XLEN)) l1d_bus ();
+  csr_bcast_if #(.XLEN(XLEN)) csr_bcast ();
+  cmu_bcast_if #(.XLEN(XLEN)) cmu_bcast ();
+  logic capture_valid = 0, capture_ready, busy, error;
+  logic [XLEN-1:0] capture_addr = 0, write_addr, write_data;
+  logic [Words-1:0] capture_dirty = 0;
+  logic [Words*XLEN-1:0] capture_data = 0;
+  logic write_valid, read_match, miss_match;
+  logic mmio = 0;
+  integer accepted = 0;
+  integer accepted_before;
+
+  rapt_bus #(
+      .XLEN(XLEN),
+      .PostedWrites(4),
+      .PostedAckDelay(3)
+  ) bus_dut (
+      .clock,
+      .reset,
+      .mem,
+      .l1i_bus,
+      .l1d_bus,
+      .csr_bcast,
+      .cmu_bcast,
+      .coherent_request(),
+      .coherent_write(),
+      .rd_req_cacheable()
+  );
+  rapt_l1d_writeback #(
+      .Xlen(XLEN),
+      .LineWords(Words),
+      .Entries(2),
+      .Pipelined(1)
+  ) wb (
+      .clock,
+      .reset,
+      .capture_valid,
+      .capture_ready,
+      .capture_addr,
+      .capture_dirty,
+      .capture_data,
+      .busy,
+      .error,
+      .retry(1'b0),
+      .write_valid,
+      .write_addr,
+      .write_data,
+      .write_accept(l1d_bus.waccept),
+      .write_ready(l1d_bus.wready),
+      .write_error(l1d_bus.werr),
+      .read_addr(XLEN'('h80000000)),
+      .miss_addr(XLEN'('h80001000)),
+      .read_match,
+      .miss_match
+  );
+  assign l1d_bus.awvalid = mmio || write_valid;
+  assign l1d_bus.wvalid = mmio || write_valid;
+  assign l1d_bus.awaddr = mmio ? XLEN'('h10000000) : write_addr;
+  assign l1d_bus.wdata = mmio ? XLEN'('h5a) : write_data;
+  assign l1d_bus.wstrb = XLEN == 64 ? 8'hff : 8'h0f;
+  assign l1d_bus.wzero = 0;
+  assign l1d_bus.wpbmt = 0;
+  assign l1d_bus.wpost = !mmio;
+  assign l1d_bus.wbuffered = !mmio;
+  assign l1d_bus.wmore = 0;
+  always @(posedge clock)
+    if (!reset && mem.wr_req_valid && mem.wr_req_ready) begin
+      accepted <= accepted + 1;
+      if (!mmio && mem.wr_req_data != XLEN'('h12340000) + (mem.wr_req_addr & XLEN'('h1fff)))
+        $fatal(1, "write payload/address changed before acceptance");
+    end
+
+  task automatic tick(input int n = 1);
+    repeat (n) @(posedge clock);
+    #1;
+  endtask
+  task automatic check(input bit condition, input string message);
+    if (!condition) $fatal(1, "%s", message);
+  endtask
+  task automatic capture(input logic [XLEN-1:0] address);
+    check(capture_ready, "capture not ready");
+    capture_addr = address;
+    capture_dirty = Words'(3);
+    for (int i = 0; i < Words; i++)
+      capture_data[i*XLEN+:XLEN] = XLEN'('h12340000) + (address & XLEN'('h1fff)) + XLEN'(i*XLEN/8);
+    capture_valid = 1;
+    tick();
+    capture_valid = 0;
+  endtask
+  task automatic reply(input bit failed = 0);
+    mem.wr_rsp_valid = 1;
+    mem.wr_rsp_error = failed;
+    #1;
+    check(l1d_bus.wready && l1d_bus.werr == failed, "buffered B owner/error lost");
+    check(!l1d_bus.posted_error, "buffered error routed to write-through owner");
+    tick();
+    mem.wr_rsp_valid = 0;
+    mem.wr_rsp_error = 0;
+  endtask
+  task automatic request_read(input logic [XLEN-1:0] address);
+    l1d_bus.araddr = address;
+    l1d_bus.arvalid = 1;
+    #1;
+    check(l1d_bus.rready, "read capture unavailable");
+    tick();
+    l1d_bus.arvalid = 0;
+  endtask
+  task automatic finish_read;
+    tick();
+    mem.rd_rsp_valid = 1;
+    tick();
+    mem.rd_rsp_valid = 0;
+  endtask
+
+  initial begin
+    mem.wr_req_ready = 0;
+    mem.wr_rsp_valid = 0;
+    mem.wr_rsp_id = 2;
+    mem.wr_rsp_error = 0;
+    mem.rd_req_ready = 1;
+    mem.rd_rsp_valid = 0;
+    mem.rd_rsp_id = 2;
+    mem.rd_rsp_last = 1;
+    mem.rd_rsp_error = 0;
+    mem.rd_rsp_data = 0;
+    l1i_bus.arvalid = 0;
+    l1i_bus.ar_ptw = 0;
+    l1d_bus.arvalid = 0;
+    l1d_bus.araddr = 0;
+    l1d_bus.ar_mshr = 0;
+    l1d_bus.ar_mshr_id = 0;
+    l1d_bus.ar_ptw = 0;
+    l1d_bus.arlen = 0;
+    l1d_bus.noallocate = 0;
+    l1d_bus.rpbmt = 0;
+    l1d_bus.rstrb = XLEN == 64 ? 8'hff : 8'h0f;
+    tick(2);
+    reset = 0;
+    capture(XLEN'('h80000000));
+    capture(XLEN'('h80001000));
+    tick(3);
+    check(write_addr == XLEN'('h80000000) && !l1d_bus.wready, "stalled payload/ack");
+    mem.wr_req_ready = 1;
+    tick(5);
+    check(accepted == 4, "four buffered writes did not issue before first B");
+    check(busy && !write_valid && !capture_ready && read_match && miss_match,
+          "issuing lost dirty data or line hazards before B");
+    check(!l1d_bus.wready && l1d_bus.posted_busy && !l1d_bus.idle,
+          "issue falsely completed a writeback/drain");
+    request_read(XLEN'('h80002000));
+    check(mem.rd_req_valid, "unrelated read blocked by buffered writes");
+    finish_read();
+    request_read(XLEN'('h80000000));
+    check(!mem.rd_req_valid, "same-line read overtook queued writeback");
+    reply();
+    check(!mem.rd_req_valid && read_match, "first word B released whole line");
+    reply();
+    check(mem.rd_req_valid && !read_match && miss_match, "completed line not released");
+    finish_read();
+    mmio = 1;
+    tick(2);
+    check(!mem.wr_req_valid && accepted == 4, "MMIO overtook pending DDR writes");
+    reply();
+    check(!mem.wr_req_valid, "MMIO overtook final DDR write");
+    reply();
+    check(!busy && mem.wr_req_valid, "final B did not release MMIO");
+    tick();
+    check(accepted == 5 && !l1d_bus.wready, "MMIO was posted");
+    reply();
+    mmio = 0;
+    tick();
+    check(l1d_bus.idle, "drained bus remained busy");
+
+    // Exercise simultaneous issue/retire across both word and entry boundaries.
+    mem.wr_req_ready = 0;
+    capture(XLEN'('h80000000));
+    capture(XLEN'('h80001000));
+    mem.wr_req_ready = 1;
+    tick();
+    repeat (3) begin
+      reply();
+      check(busy, "simultaneous issue/retire released buffer too early");
+    end
+    reply();
+    check(!busy && accepted == 9, "simultaneous issue/retire lost a request");
+
+    // A previously presented AR retains priority while its acceptance stalls.
+    // Falling back to a synchronous WB here would still overtake that AR.
+    accepted_before = accepted;
+    mem.rd_req_ready = 0;
+    request_read(XLEN'('h80000000));
+    capture(XLEN'('h80000000));
+    repeat (3) begin
+      #1;
+      check(mem.rd_req_valid && !mem.wr_req_valid && !l1d_bus.waccept,
+            "buffered writeback overtook a held same-line AR");
+      tick();
+    end
+    check(accepted == accepted_before, "held AR allowed writeback capture");
+    mem.rd_req_ready = 1;
+    tick();
+    check(mem.wr_req_valid, "accepted AR failed to release writeback");
+    finish_read();
+    check(accepted == accepted_before + 2, "released writeback did not issue");
+    reply();
+    reply();
+    check(!busy, "held-AR writeback did not drain");
+
+    mem.wr_req_ready = 0;
+    capture(XLEN'('h80000000));
+    capture(XLEN'('h80001000));
+    mem.wr_req_ready = 1;
+    tick(5);
+    reply();
+    reply(1);
+    check(error && busy && !write_valid && !capture_ready && read_match && miss_match,
+          "late error discarded failing data or released ownership");
+    reply();
+    reply();
+    tick(3);
+    check(error && busy && read_match && miss_match && !write_valid,
+          "younger B responses cleared fail-stop ownership");
+    check(
+        wb.dirty[wb.head][1] && wb.data[wb.head][XLEN+:XLEN] == (XLEN'('h12340000) + XLEN'(XLEN / 8)),
+        "failing word payload was not retained");
+    $display(
+        "PASS: buffered writeback credits, B ownership, read/MMIO ordering and fail-stop RV%0d",
+        XLEN);
+    $finish;
+  end
+  initial begin
+    #10000;
+    $fatal(1, "buffered writeback timeout");
+  end
+endmodule
+
+
+// ---- tb_bus_read_ownership ----
 `include "rapt.svh"
 `include "rapt_if.svh"
 `include "rapt_soc_if.svh"
@@ -34,6 +284,11 @@ module tb_bus_read_ownership;
 
   `include "tb_common.svh"
 
+  task automatic wait_l1i_ready;
+    // Targeted PTW coherence captures the address before allowing acceptance.
+    for (int wait_cycle = 0; wait_cycle < 64 && !l1i_bus.rready; wait_cycle++) tick(1);
+  endtask
+
   task automatic submit_l1d(input logic [XLEN-1:0] address, input logic is_ptw);
     begin
       @(negedge clock);
@@ -60,6 +315,7 @@ module tb_bus_read_ownership;
       l1i_bus.noallocate = 0;
       l1i_bus.arvalid = 1'b1;
       #1;
+      wait_l1i_ready();
       check(l1i_bus.rready, "L1I request was not captured");
       @(posedge clock);
       @(negedge clock);
@@ -367,6 +623,7 @@ module tb_bus_read_ownership;
         @(negedge clock);
         reset = 0;
         #1;
+        wait_l1i_ready();
         check(l1i_bus.rready, "same-identity request was suppressed after reset");
         tick(1);
         check(dut.l1i_captured && !l1i_bus.rready, "held request captured twice");

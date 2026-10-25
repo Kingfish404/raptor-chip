@@ -62,7 +62,7 @@ The mispredict row assumes the branch is at the ROB head. Its recovery transacti
 
 These are ideal sequences, not fixed latencies. Queue or operand waits, `ROB_DP` residence, translation, cache misses, MSHR replay, and bus responses all lengthen a path. Retirement needs the stored `ROB_WB` state and an owner inside the ready head prefix. Reset or flush kills a completion before it is registered.
 
-The `default`, `default-w3`, `default-w4`, `default-w8`, and `default-l2` presets use L1D write-back:
+The `default*`, `small-cache`, and `middle-cache` presets use L1D write-back:
 - Eligible cacheable store hits complete locally. Without inclusive L2, aligned full-word misses can also allocate locally.
 - Device, uncacheable, and other nonallocating stores wait for the B response.
 - Explicit write-through configurations without L2 can set `RAPT_POSTED_WRITES=4`. Eligible stores are then released when AXI accepts the write, with up to four B responses pending.
@@ -126,6 +126,16 @@ RNU owns the speculative register map and free-register state. CSR observers rea
 
 These values refer to `hdl/configs/default/rapt_config.svh`, shared defaults in `hdl/include/rapt.svh`, and top-level parameter defaults; other presets and command-line overrides can differ.
 
+`small-cache` and `middle-cache` each have 128 KiB L1I and L1D caches with
+64-byte lines. L1I uses 1024 sets and two ways; L1D uses 64 sets and 32 ways to
+keep its index within a 4 KiB page. `small-cache` retains the one-wide small
+core, ROB 4, integer PRF 48, SQ 4, and bimodal prediction. It enables L1D
+write-back, 16-entry fully associative L1 TLBs, and a 64-entry shared L2 TLB.
+`middle-cache` uses two-wide ordered stages, ROB 16, integer PRF 64, SQ 8,
+TAGE, write-back L1D, and 8-entry L1 TLBs without an L2 TLB. Both disable
+the L2 data cache. Select the preset explicitly; FPGA timing and utilization
+depend on the board and build constraints.
+
 | Item | Default |
 | --- | --- |
 | XLEN | RV32; `-DRAPT_RV64` selects RV64 |
@@ -148,13 +158,15 @@ These values refer to `hdl/configs/default/rapt_config.svh`, shared defaults in 
 The `default*` presets use a 16-entry fully associative ITLB and 64-entry,
 two-way DTLB replicas. `large` uses ITLB 32 and DTLB 64/two-way.
 `small`/`formal` use 4 entries and `middle`/`middle-cache` use 8 entries in
-both levels of L1 translation; their DTLBs are fully associative (`WAYS=0`).
+both levels of L1 translation. `small-cache` uses 16 entries. All of these
+presets use fully associative DTLBs (`WAYS=0`).
 
 The instruction and data miss paths share one **256-entry, direct-mapped L2
 TLB**, implemented by `rapt_l2tlb` and the `rapt_cached_ptw` adapters. It is
-enabled in all `default*` presets, `large`, and `formal`;
-`small`, `middle`, and `middle-cache` set `RAPT_L2TLB_ENTRIES=0` and
-bypass it. This setting is independent of the L2 data-cache enable.
+enabled in all `default*` presets, `large`, and `formal`; `small-cache` uses
+a 64-entry instance. `small`, `middle`, and `middle-cache` set
+`RAPT_L2TLB_ENTRIES=0` and bypass it. This setting is independent of the L2
+data-cache enable.
 
 The low eight VPN bits index the table. A single synchronous payload port
 arbitrates instruction/data lookups and fills in round-robin order. An L1

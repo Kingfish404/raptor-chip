@@ -29,7 +29,9 @@ module tb_zfhmin_decode_slot;
       );
     if (denied) begin
       trap_checks++;
-      if (decoded.uop.cause != X'(2) || decoded.uop.tval != X'(inst) || decoded.uop.rd != 0)
+      if (decoded.uop.cause != X'(2) ||
+          `RAPT_UOP_TVAL(X, decoded.uop)
+          != X'(inst) || decoded.uop.rd != 0)
         $fatal(1, "trap payload/destination RV%0d inst=%h", X, inst);
     end else begin
       legal_checks++;

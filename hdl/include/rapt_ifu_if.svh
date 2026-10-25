@@ -12,10 +12,11 @@ interface ifu_bpu_if #(
     parameter int BTB_SIZE = `RAPT_BTB_SIZE,
     parameter int RSB_SIZE = `RAPT_RSB_SIZE
 );
-  logic [XLEN-1:0] nextpc;
+  localparam int PcBits = `RAPT_PC_BITS_OF(XLEN);
+  logic [PcBits-1:0] nextpc;
   logic             pc_update;
 
-  logic [XLEN-1:0] npc;
+  logic [PcBits-1:0] npc;
   logic taken;
   // Accepted conditional (primary or auxiliary), never a raw predictor query.
   logic history_valid, history_taken, history_pc_bit;
@@ -23,7 +24,7 @@ interface ifu_bpu_if #(
   // Auxiliary conditional prediction uses a small independent combinational
   // direction table. Its target is derived statically by IFU.
   logic            aux_query;
-  logic [XLEN-1:0] aux_pc;
+  logic [PcBits-1:0] aux_pc;
   // With positional lookup, aux_pc is the fetch-block PC and the branch sits
   // at aux_pc + 2 * (aux_position + 1); otherwise aux_pc is the branch PC.
   logic [3:0]      aux_position;
@@ -81,16 +82,17 @@ endinterface
 interface idu_bpu_if #(
     parameter int XLEN = `RAPT_XLEN
 );
+  localparam int PcBits = `RAPT_PC_BITS_OF(XLEN);
   logic            train_en;     // Accepted decode correction; registered inside BPU
-  logic [XLEN-1:0] train_pc;     // PC of the offending instruction
-  logic [XLEN-1:0] train_target; // Correct target PC
+  logic [PcBits-1:0] train_pc;     // PC of the offending instruction
+  logic [PcBits-1:0] train_target; // Correct target PC
   logic [1:0]      train_type;   // 00=COND, 01=DIRE, 11=RETU (matches BPU enum)
 
   // One accepted decode-order RAS action; both enables mean pop then push.
   // Queries have no side effects. IDU uses the pre-action top for return repair.
   logic push_en, pop_en, ras_valid;
-  logic [XLEN-1:0] push_addr;
-  logic [XLEN-1:0] ras_addr;
+  logic [PcBits-1:0] push_addr;
+  logic [PcBits-1:0] ras_addr;
   logic history_valid, history_taken, history_pc_bit, history_recover;
 
   modport out(
@@ -110,14 +112,15 @@ interface ifu_l1i_if #(
     parameter int L1I_LEN = `RAPT_L1I_LEN,
     parameter int L1I_LINE_LEN = `RAPT_L1I_LINE_LEN
 );
-  logic [XLEN-1:0] pc;
+  localparam int PcBits = `RAPT_PC_BITS_OF(XLEN);
+  logic [PcBits-1:0] pc;
   logic invalid;
   // Response acceptance and frontend cancellation, including same-PC redirects.
   logic consumed, cancel;
   // An accepted predicted non-sequential next PC. L1I uses this only as a
   // data-SRAM read-ahead hint; it neither changes cache state nor issues a
   // request, so incorrect predictions remain architecturally harmless.
-  logic [XLEN-1:0] prefetch_pc;
+  logic [PcBits-1:0] prefetch_pc;
   logic            prefetch_valid;
 
   logic [31:0] inst_n0;
@@ -180,10 +183,11 @@ interface ifu_idu_if #(
     parameter int XLEN = `RAPT_XLEN,
     parameter int Width = rapt_pkg::DecodeWidth
 );
+  localparam int PcBits = `RAPT_PC_BITS_OF(XLEN);
   rapt_pkg::fetch_slot_t slot[Width];
   logic valid[Width], ready[Width];
   logic resteer;
-  logic [XLEN-1:0] resteer_pc;
+  logic [PcBits-1:0] resteer_pc;
   modport master(output slot, valid, input ready, resteer, resteer_pc);
   modport slave(input slot, valid, output ready, resteer, resteer_pc);
 endinterface

@@ -10,12 +10,14 @@
 !*.[cSh]
 !*.cc
 !*.cpp
+!tools/*.py
 !*.mk
 !configs/*
 !scripts/*.sh
 !scripts/configure.py
 !scripts/build_cache.py
 !scripts/sta.py
+!tests/test_npc_write_outstanding.py
 !*.sv
 !*.svh
 !gsim/*.json
@@ -35,3 +37,5 @@ _tmp_*
 /obj_dir
 /include/config
 /include/generated
+!scripts/eval-fpga.py
+!tools/fpga_eval_summary.py

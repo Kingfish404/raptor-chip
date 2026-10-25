@@ -10,6 +10,7 @@ CONFIG_ISA="riscv"
 # ISA-dependent Options for riscv
 #
 # CONFIG_RV64 is not set
+CONFIG_RV_PMP_GRANULARITY_LOG2=12
 CONFIG_RV_F=y
 CONFIG_RV_D=y
 # CONFIG_RVE is not set

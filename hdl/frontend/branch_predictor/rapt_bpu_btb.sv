@@ -21,14 +21,14 @@ module rapt_bpu_btb #(
     input  logic                ren,
     input  logic [ADDR_LEN-1:0] raddr,
     input  logic [ TAG_LEN-1:0] rtag,
-    output logic [    XLEN-1:1] rd_target,
+    output logic [    `RAPT_PC_BITS_OF(XLEN)-1:1] rd_target,
     output logic [         1:0] rd_type,
     output logic                rd_tag_match,
 
     // Write entry (target + tag + valid)
     input logic                wen_entry,
     input logic [ADDR_LEN-1:0] waddr,
-    input logic [    XLEN-1:1] wd_target,
+    input logic [    `RAPT_PC_BITS_OF(XLEN)-1:1] wd_target,
     input logic [ TAG_LEN-1:0] wd_tag,
 
     // Write type (separate enable)
@@ -38,6 +38,7 @@ module rapt_bpu_btb #(
     // Bulk init (fence_time)
     input logic init
 );
+  localparam int PcW = `RAPT_PC_BITS_OF(XLEN);
   // Replacement is a single LRU bit per set, which is only correct for two
   // ways. Reject other associativities instead of silently never replacing
   // ways beyond the first two.
@@ -45,7 +46,7 @@ module rapt_bpu_btb #(
     $error("rapt_bpu_btb replacement policy supports exactly 2 ways");
   end
   logic [   DEPTH-1:0] valid        [WAYS];
-  logic [    XLEN-1:1] way_target   [WAYS];
+  logic [    PcW-1:1] way_target   [WAYS];
   logic [         1:0] way_type     [WAYS];
 
   // LRU tracking: lru[set] = next victim way for replacement
@@ -82,9 +83,9 @@ module rapt_bpu_btb #(
   // explicit forwarding register makes that behavior independent of the RAM's
   // read-during-write mode and keeps its read port on a simple clocked template.
   for (genvar w = 0; w < WAYS; w++) begin : g_way_storage
-    (* ram_style = "block" *) logic [XLEN-1:1] target[DEPTH];
-    logic [XLEN-1:1] target_q;
-    logic [XLEN-1:1] target_forward_q;
+    (* ram_style = "block" *) logic [PcW-1:1] target[DEPTH];
+    logic [PcW-1:1] target_q;
+    logic [PcW-1:1] target_forward_q;
     logic target_forward_valid_q;
     logic target_write;
     logic target_write_observed;

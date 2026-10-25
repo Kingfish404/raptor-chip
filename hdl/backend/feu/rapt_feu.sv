@@ -45,15 +45,22 @@ module rapt_feu #(
   typedef logic [RobBits-1:0] owner_t;
   typedef logic [GenerationBits-1:0] generation_t;
   typedef logic [RLEN-1:0] arch_t;
+  typedef logic [XLEN-1:0] result_word_t;
+  typedef logic [$bits(dispatch[0].uop.pc)-1:0] result_pc_t;
+  typedef logic [PLEN-1:0] result_phys_t;
+  `RAPT_FPU_COMPLETION_TYPE_PC(fp_result_t, result_word_t, result_pc_t, result_phys_t, arch_t,
+                               owner_t, generation_t)
+
   `RAPT_DISPATCH_SLOT_TYPE(fp_slot_t, UopT, fp_word_t, operand_tag_t, owner_t, generation_t,
                            Cfg.completion_dependencies)
   `RAPT_ISSUE_PACKET_TYPE(fp_issue_t, UopT, fp_word_t, operand_tag_t, owner_t, generation_t)
-  `RAPT_COMPLETION_TYPE(fp_wake_t, fp_word_t, operand_tag_t, arch_t, owner_t, generation_t)
+  `RAPT_COMPLETION_TYPE_PC(fp_wake_t, fp_word_t, result_pc_t, operand_tag_t, arch_t, owner_t,
+                           generation_t)
   fp_slot_t fp_dispatch[NumSlots];
   fp_issue_t fp_issue[1];
   fp_issue_t iss;
   // Preserve FP decode boundaries while other issue payload muxes may fold.
-  (* keep = "true" *) logic [31:0] issued_inst;
+  (* keep = "true" *) logic [31:0] issued_encoding;
   (* keep = "true" *) logic [$bits(iss.uop.execute.fp)-1:0] issued_fp;
   fp_wake_t fp_wake[NumCompletions], fp_local_wake[NumCompletions];
   localparam int Simple = 0, AddSub = 1, Product = 2, DivSqrt = 3,
@@ -63,7 +70,7 @@ module rapt_feu #(
   logic [Units-1:0] raw_valid, unit_accept;
   logic [63:0] raw_result[Units];
   logic [4:0] raw_flags[Units];
-  CompletionT launch_packet, unit_launch[Units], unit_completion[Units];
+  fp_result_t launch_packet, unit_launch[Units], unit_completion[Units];
   logic [$clog2(Units)-1:0] completion_cursor, completion_choice;
   logic [$clog2(Units)-1:0] held_choice;
   logic completion_held;
@@ -101,9 +108,9 @@ module rapt_feu #(
       `RAPT_FP_OP_FCVT_W_D, `RAPT_FP_OP_FCVT_WU_D,
       `RAPT_FP_OP_FCVT_L_D, `RAPT_FP_OP_FCVT_LU_D: unit_id = FpToInt;
       `RAPT_FP_OP_ZFHMIN: begin
-        if (uop.inst[31:25] == 7'b0100000 || uop.inst[31:25] == 7'b0100001)
+        if (uop.imm[31:25] == 7'b0100000 || uop.imm[31:25] == 7'b0100001)
           unit_id = HalfToFp;
-        else if (uop.inst[31:25] == 7'b0100010) unit_id = FpToHalf;
+        else if (uop.imm[31:25] == 7'b0100010) unit_id = FpToHalf;
       end
       default: ;
     endcase
@@ -149,7 +156,13 @@ module rapt_feu #(
       fp_dispatch[s].pr1 = float_tag(dispatch[s].fp_tag[0]);
       fp_dispatch[s].pr2 = float_tag(dispatch[s].fp_tag[1]);
       fp_dispatch[s].pr3 = float_tag(dispatch[s].fp_tag[2]);
-      if (rapt_pkg::fp_from_integer(dispatch[s].uop.execute.fp.op, dispatch[s].uop.inst)) begin
+      if (rapt_pkg::fp_from_integer(
+              dispatch[s].uop.execute.fp.op,
+              rapt_pkg::fp_instruction(
+                  dispatch[s].uop.execute.memory.load,
+                  dispatch[s].uop.execute.memory.store,
+                  dispatch[s].uop.imm)
+          )) begin
         fp_dispatch[s].op1 = 64'(dispatch[s].op1);
         fp_dispatch[s].pr1 = operand_tag_t'(dispatch[s].pr1);
       end
@@ -181,11 +194,11 @@ module rapt_feu #(
     assign fp_local_wake[p] = LocalFpWake ? fp_wake_view(local_fp_wake[p]) : '0;
   end
   assign issue_enable = !reset && !cmu_bcast.flush_pipe;
-  assign issued_inst = fp_issue[0].uop.inst;
+  assign issued_encoding = fp_issue[0].uop.imm;
   assign issued_fp = fp_issue[0].uop.execute.fp;
   always_comb begin
     iss = fp_issue[0];
-    iss.uop.inst = issued_inst;
+    iss.uop.imm = issued_encoding;
     iss.uop.execute.fp = issued_fp;
   end
   logic [$clog2(FPQ_SIZE):0] unused_fpq_occupancy;
@@ -329,16 +342,16 @@ module rapt_feu #(
   assign fp_convert_widen = iss.uop.execute.fp.op == `RAPT_FP_OP_FCVT_D_S;
   assign fp_convert_narrow = iss.uop.execute.fp.op == `RAPT_FP_OP_FCVT_S_D;
   assign fp_zfhmin = iss.uop.execute.fp.op == `RAPT_FP_OP_ZFHMIN;
-  assign fp_fmv_x_h = fp_zfhmin && iss.uop.inst[31:25] == 7'b1110010;
-  assign fp_fmv_h_x = fp_zfhmin && iss.uop.inst[31:25] == 7'b1111010;
-  assign fp_fcvt_s_h = fp_zfhmin && iss.uop.inst[31:25] == 7'b0100000
-      && iss.uop.inst[24:20] == 5'b00010;
-  assign fp_fcvt_d_h = fp_zfhmin && iss.uop.inst[31:25] == 7'b0100001
-      && iss.uop.inst[24:20] == 5'b00010;
-  assign fp_fcvt_h_s = fp_zfhmin && iss.uop.inst[31:25] == 7'b0100010
-      && iss.uop.inst[24:20] == 5'b00000;
-  assign fp_fcvt_h_d = fp_zfhmin && iss.uop.inst[31:25] == 7'b0100010
-      && iss.uop.inst[24:20] == 5'b00001;
+  assign fp_fmv_x_h = fp_zfhmin && iss.uop.imm[31:25] == 7'b1110010;
+  assign fp_fmv_h_x = fp_zfhmin && iss.uop.imm[31:25] == 7'b1111010;
+  assign fp_fcvt_s_h = fp_zfhmin && iss.uop.imm[31:25] == 7'b0100000
+      && iss.uop.imm[24:20] == 5'b00010;
+  assign fp_fcvt_d_h = fp_zfhmin && iss.uop.imm[31:25] == 7'b0100001
+      && iss.uop.imm[24:20] == 5'b00010;
+  assign fp_fcvt_h_s = fp_zfhmin && iss.uop.imm[31:25] == 7'b0100010
+      && iss.uop.imm[24:20] == 5'b00000;
+  assign fp_fcvt_h_d = fp_zfhmin && iss.uop.imm[31:25] == 7'b0100010
+      && iss.uop.imm[24:20] == 5'b00001;
   assign fp_half_to_fp = fp_fcvt_s_h || fp_fcvt_d_h;
   assign fp_fp_to_half = fp_fcvt_h_s || fp_fcvt_h_d;
   assign fp_double = iss.uop.execute.fp.op == `RAPT_FP_OP_FDIV_D
@@ -542,14 +555,14 @@ module rapt_feu #(
     launch_packet.prd = PLEN'(iss.prd);
     launch_packet.rd = iss.uop.rd;
     launch_packet.pc = iss.uop.pc;
-    launch_packet.npc = iss.uop.pc + (iss.uop.c ? XLEN'(2) : XLEN'(4));
+    launch_packet.npc = iss.uop.pc + (`RAPT_PC_BITS_OF(XLEN))'(iss.uop.c ? 2 : 4);
     launch_packet.fp_wen = !fp_trap && rapt_pkg::fp_writes_register(
-        iss.uop.execute.fp.valid, iss.uop.execute.fp.op, iss.uop.inst);
+        iss.uop.execute.fp.valid, iss.uop.execute.fp.op, iss.uop.imm);
     launch_packet.fp_flags_valid = !fp_trap && (fp_long_op || fp_minmax || fp_compare);
     launch_packet.trap = fp_trap;
-    launch_packet.tval = iss.uop.trap ? iss.uop.tval : fp_rm_invalid ? XLEN'(iss.uop.inst) : '0;
+    launch_packet.tval = iss.uop.trap ? `RAPT_UOP_TVAL(XLEN, iss.uop) : fp_rm_invalid ? XLEN'(iss.uop.imm) : '0;
     launch_packet.cause = iss.uop.trap ? iss.uop.cause
-        : fp_rm_invalid ? XLEN'(`RAPT_CAUSE_ILLEGAL_INST) : '0;
+        : fp_rm_invalid ? 6'(`RAPT_CAUSE_ILLEGAL_INST) : '0;
     launch_packet.updates = '{control_flow:1'b0, memory:1'b0, system_state:1'b1, exception:1'b1};
   end
 
@@ -631,7 +644,7 @@ module rapt_feu #(
       unit_launch[unit_id].valid = iss.valid && selected_unit == unit_id;
     end
     rapt_fu_result_queue #(
-        .CompletionT(CompletionT),
+        .CompletionT(fp_result_t),
         .Depth(Credits),
         .Entries(ROB_SIZE)
     ) pipe (
@@ -680,7 +693,8 @@ module rapt_feu #(
       completion_choice = held_choice;
     end
     completion_grant = completion_found && !reset && !cmu_bcast.flush_pipe;
-    wb_fpu = unit_completion[completion_choice];
+    wb_fpu = '0;
+    `RAPT_FPU_COMPLETION_COPY(wb_fpu, unit_completion[completion_choice])
     // Arbitrate on registered validity only. Late recovery is the final term,
     // so a packet cancelled in its grant cycle drains instead of publishing.
     wb_fpu.valid = completion_grant && !cancelled_now(wb_fpu.dest);

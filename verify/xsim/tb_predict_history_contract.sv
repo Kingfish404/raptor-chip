@@ -140,6 +140,11 @@ module tb_predict_history_pipeline;
     rou_cmu.jren = 0;
     rou_cmu.atomic_sc = 0;
     rou_cmu.fence_time = 0;
+    rou_cmu.sfence_valid = 0;
+    rou_cmu.sfence_all_vpn = 1;
+    rou_cmu.sfence_all_asid = 1;
+    rou_cmu.sfence_vpn = 0;
+    rou_cmu.sfence_asid = 0;
     rou_cmu.cbo_inval = 0;
     rou_cmu.cbo_block = '0;
     rou_cmu.fence_i = 0;
@@ -232,14 +237,34 @@ module tb_predict_history_pipeline;
     rou_cmu.slot = '{default:'0};
     rou_cmu.flush_pipe = 0;
     rou_cmu.fence_time = 1;
+    rou_cmu.sfence_valid = `RAPT_SFENCE_SELECTIVE != 0;
+    rou_cmu.flush_pipe = 1;
     tick(1);
+    rou_cmu.flush_pipe = 0;
     rou_cmu.fence_time = 0;
+    rou_cmu.sfence_valid = 0;
     rou_cmu.cbo_inval = 0;
     rou_cmu.cbo_block = '0;
-    check(
-        bpu.gshare == 0 && bpu.phr == 0 && bpu.rgshare == 0 && bpu.rphr == 0
-        && bpu.u_history.decode_ghr == 0,
-        "fence_time clears all watermarks");
+    if (`RAPT_SFENCE_KEEP_STATE >= 3) begin
+      check(
+          bpu.gshare == 1 && bpu.phr == 1 && bpu.rgshare == 1 && bpu.rphr == 1
+            && bpu.u_history.decode_ghr == 1 && bpu.u_history.decode_phr == 1,
+          "SFENCE lost committed history or failed to restore speculative watermarks");
+    end else begin
+      check(
+          bpu.gshare == 0 && bpu.phr == 0 && bpu.rgshare == 0 && bpu.rphr == 0
+            && bpu.u_history.decode_ghr == 0 && bpu.u_history.decode_phr == 0,
+          "legacy fence clearing left history watermarks valid");
+    end
+    // The following scenarios start from an explicitly empty baseline,
+    // independently of whether SFENCE preserves prediction state.
+    ifu_idu.slot = '{default:'0};
+    ifu_idu.valid = '{default:0};
+    ifu_bpu.history_valid = 0;
+    reset = 1;
+    tick(2);
+    reset = 0;
+    tick(2);
 
     // Next-PC equality does not encode direction when branch target == PC+4.
     receive(32'h00000263, 'h4000, 'h4004, 1);

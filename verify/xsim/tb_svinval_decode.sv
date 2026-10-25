@@ -10,8 +10,9 @@ module tb_svinval_decode;
   task automatic legality(input logic [31:0] inst, input bit legal);
     fetched.inst = inst;
     #1;
-    if (decoded.uop.trap !== !legal || (!legal &&
-        (decoded.uop.cause != XLEN'(2) || decoded.uop.tval != XLEN'(inst))))
+    if (decoded.uop.trap !== !legal || (!legal && (decoded.uop.cause != XLEN'(2) ||
+        `RAPT_UOP_TVAL(XLEN, decoded.uop)
+        != XLEN'(inst))))
       $fatal(
           1,
           "Svinval RV%0d priv=%0d TVM=%b inst=%h legal=%b trap=%b",
@@ -47,9 +48,49 @@ module tb_svinval_decode;
           reference_decode = decoded;
           for (int rd = 0; rd < 32; rd++) begin
             legality({7'h0b, 5'(rs2), 5'(rs1), 3'b000, 5'(rd), 7'h73}, rd == 0 && permitted);
-            if(rd==0 && permitted && (decoded.uop.execute !== reference_decode.uop.execute
-              || !decoded.uop.execute.sys.fence || !decoded.uop.execute.sys.fence_i))
-              $fatal(1, "SINVAL does not use full SFENCE execution controls");
+            if (rd == 0 && permitted) begin
+              // SINVAL and SFENCE differ in raw aq (instruction bit 26).
+              // Atomic is clear, so this metadata does not order memory.
+              if (rs1 == 0 && rs2 == 0)
+                $display(
+                    "SINVAL/SFENCE memory aq=%b/%b rl=%b/%b atomic=%b/%b kind=%d/%d imm=%h/%h",
+                    decoded.uop.execute.memory.aq,
+                    reference_decode.uop.execute.memory.aq,
+                    decoded.uop.execute.memory.rl,
+                    reference_decode.uop.execute.memory.rl,
+                    decoded.uop.execute.memory.atomic,
+                    reference_decode.uop.execute.memory.atomic,
+                    decoded.uop.execute.sys.kind,
+                    reference_decode.uop.execute.sys.kind,
+                    decoded.uop.imm,
+                    reference_decode.uop.imm
+                );
+              reference_decode.uop.execute.memory.aq = fetched.inst[26];
+              reference_decode.uop.execute.memory.rl = fetched.inst[25];
+              if (decoded.uop.execute !== reference_decode.uop.execute
+                  || !decoded.uop.execute.sys.fence || !decoded.uop.execute.sys.fence_i
+                  || decoded.uop.execute.sys.kind != rapt_pkg::SYS_TRANSLATION
+                  || decoded.uop.rd != 0
+                  || decoded.rs1 != (`RAPT_SFENCE_SELECTIVE != 0 ? 5'(rs1) : 5'b0)
+                  || decoded.rs2 != (`RAPT_SFENCE_SELECTIVE != 0 ? 5'(rs2) : 5'b0)
+                  || decoded.uop.imm != {30'b0, 1'(rs2 == 0), 1'(rs1 == 0)})
+                $fatal(
+                    1,
+                    "SINVAL inst=%h execute=%p expected_execute=%p rd=%d rs1=%d/%d rs2=%d/%d imm=%h expected_imm=%h",
+                    fetched.inst,
+                    decoded.uop.execute,
+                    reference_decode.uop.execute,
+                    decoded.uop.rd,
+                    decoded.rs1,
+                    rs1,
+                    decoded.rs2,
+                    rs2,
+                    decoded.uop.imm,
+                    {
+                      30'b0, 1'(rs2 == 0), 1'(rs1 == 0)
+                    }
+                );
+            end
           end
         end
         fetched.inst = 32'h00000013;
@@ -66,7 +107,13 @@ module tb_svinval_decode;
           reference_decode.uop.execute.fp = decoded.uop.execute.fp;
           if(legal && (decoded.uop.execute.fp.valid
             || decoded.uop.execute !== reference_decode.uop.execute))
-            $fatal(1, "SFENCE ordering-only instruction is not a NOP on this implementation");
+            $fatal(
+                1,
+                "SFENCE ordering inst=%h execute=%p NOP_execute=%p",
+                fetched.inst,
+                decoded.uop.execute,
+                reference_decode.uop.execute
+            );
         end
       end
     $display("PASS: RV%0d Svinval decode/permissions/semantics %0d checks", XLEN, checks);

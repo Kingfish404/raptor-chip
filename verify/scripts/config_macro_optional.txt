@@ -12,3 +12,5 @@ RAPT_FETCH_WIDE # Preset-selected wide instruction window; absent selects the na
 RAPT_LSU_HUM # Preset-selected hit-under-miss path; absent disables it.
 RAPT_L2_EN # Preset-selected L2; absent bypasses it.
 RAPT_L2_STORE_WRITEBACK # L2 store policy; absent selects write-through.
+RAPT_KEEP_UOP_INST # Synthesis opt-in that keeps expanded instruction words in uops; absent drops them.
+RAPT_PC_FULL_WIDTH # Keep XLEN-wide PCs; absent stores RV64 PCs in 40 bits when PA <= 39 bits.

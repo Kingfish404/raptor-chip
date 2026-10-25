@@ -59,6 +59,142 @@ wall-clock heartbeat. `NSIM_PROGRESS_CYCLES` separately controls the periodic
 LightSSS snapshot interval (default 40 million cycles); its progress line
 remains enabled when the heartbeat is suppressed.
 
+Repeat `--serial-milestone=TEXT` to timestamp the first occurrence of each text
+on UART TX without stopping execution. For example, use
+`--serial-milestone='Run /init as init process' --serial-milestone='Starting syslogd'`.
+Reports have the form `serial milestone: cycles=N insts=N text=TEXT`. Counts start
+at the current `cpu_exec` invocation (reset/resume for a batch run), exclude reset
+cycles, include all retire slots in the cycle containing the final matching byte,
+and are independent of benchmark PMU resets. Reporting waits for a UART newline
+to preserve guest log lines; the timestamp still refers to the matching cycle.
+`--serial-exit-on=TEXT` can also be used to stop at a final milestone, and pending
+milestones are reported on that stop even when the guest has not sent a newline.
+Markers must be nonempty single-line text. Repeated identical markers are deduplicated.
+
+Native NPC PMU reports also include AXI channel handshakes, channel backpressure
+(`valid && !ready`), posted-write occupancy, and overlap with SQ-full cycles.
+Signals are captured immediately before the rising edge and accumulated with the
+ordinary per-cycle PMU sample. `wlast_without_bvalid` counts cycles with a completed
+write-data burst still awaiting B and no BVALID. `wlast_pending_sum` is the integral
+of completed write-data bursts awaiting B; divided by B handshakes it gives mean
+WLAST-to-B latency when `wlast_pending_end` and `unmatched_b` are both zero.
+`unmatched_b` exposes measurement boundaries that cut in-flight writes rather than
+allowing a pending counter to underflow. Posted histogram entry N counts cycles
+with N posted writes; `capacity=0` disables posting and never counts as full.
+The AXI master's outstanding count includes its accepted staging/skid requests,
+which can exceed transactions already presented on external AW. These are whole
+PMU-interval counters, include MMIO, and overlap; use a store-only workload to
+isolate store behavior. No RTL or architectural counters are changed.
+
+The L1D activity report labels the observed quantities directly: tag-ready cycles
+in `LD_A`, bus-load starts on `LD_A -> LD_D`, and service cycles in `LD_D`. A held
+write-back lookup may contribute several tag-ready cycles, and bus-load starts
+include uncached loads while MSHR-served misses can bypass `LD_D`. These counters
+therefore do not define a comprehensive cache miss rate or AMAT. `cache_drain`
+measures the memory drain controller's request to L1D, not the backend's raw request.
+
+## Memory response timing
+
+The memory model accepts `--mem-read-latency=N` and `--mem-write-latency=N`
+to add cycles before the first read beat and each write response, respectively.
+Their Make variables are `SIM_MEM_READ_LATENCY` and `SIM_MEM_WRITE_LATENCY`.
+Both default to zero. Random delay, when enabled, remains additive.
+
+`--mem-serialize-writes` (`SIM_MEM_SERIALIZE_WRITES=1`) also holds AWREADY low
+until the previous write response has been consumed, including its handshake
+cycle. This models a strictly serialized write endpoint.
+It defaults off, preserving the existing address lookahead behavior. Reads
+remain independent in the legacy one-response model. Fixed delays approximate aggregate memory service time;
+this option does not model DDR scheduling, bridge address stages, or refresh.
+
+`--mem-write-outstanding=N` (`SIM_MEM_WRITE_OUTSTANDING=N`, range 1..64)
+selects response queue capacity. One preserves the legacy model; larger values
+permit independent writes while preserving overlapping-read and device ordering.
+Use four for the native bus's default capacity. Serialization remains an
+additional admission restriction at any queue capacity.
+
+Run `python3 sim/tools/test_npc_write_serialization.py --output /tmp/npc-write-check`
+to check both modes on RV32/RV64 with delayed/stalled B responses, following
+addresses, independent reads, and multi-beat writes. The output path must not
+already exist.
+
+## FPGA timing evaluation harness
+
+`python3 sim/scripts/eval-fpga.py TREE TAG PRESET "EXTRA_VFLAGS" [WORKLOADS...]`
+builds an isolated simulator and runs the selected existing images. Workloads
+default to `mp cm eb` (Linux requires explicit `lx64`); `mq`, `ms`, and `pf` select the quick memory probe,
+store probe, and Sv39 pagefault probe. Select only one of `mp`, `mq`, and `ms`.
+The default is RV64 with `o2_defconfig`, DIFFTEST=0 and `make -j4`.
+
+All default evaluation inputs and outputs live under
+`TREE/sim/build/fpga-eval` (`EVAL_CAL_DIR`): `latency.env`, `img/`, `build/`,
+and `logs/`. **Provide a calibrated `latency.env` containing `RL=N` and `WL=N`
+before running.** There is no built-in calibration and the harness does not
+create or modify this file. Both values must be in `0..1048574`; `RL`/`WL`
+environment overrides support explicit sweeps after the file is supplied.
+
+```sh
+TREE=$PWD
+mkdir -p "$TREE/sim/build/fpga-eval"
+cp /path/to/calibrated/latency.env "$TREE/sim/build/fpga-eval/latency.env"
+EVAL_COREMARK_IMAGE=/path/to/coremark-riscv64-npc.bin \
+  python3 sim/scripts/eval-fpga.py "$TREE" reference small-cache "" cm
+python3 sim/tools/fpga_eval_summary.py \
+  --logs-root "$TREE/sim/build/fpga-eval/logs" reference
+```
+
+Default image paths are relative to `EVAL_CAL_DIR`:
+
+| Workload | Image path |
+|---|---|
+| `mp` | `img/memprobe-rv64/memprobe-riscv64-npc.bin` |
+| `mq` | `img/memprobe-rv64/memprobe-quick-matched-riscv64-npc.bin` |
+| `ms` | `img/memprobe-rv64/memprobe-store-riscv64-npc.bin` |
+| `pf` | `img/pagefault-rv64/pagefault-riscv64-npc.bin` |
+| `cm` | `img/coremark-rv64/coremark-riscv64-npc.bin` |
+| `eb` | The exact 19 benchmark `.bin` files in `img/embench-rv64/` |
+| `lx64` | `img/linux-rv64/fw_payload.bin` |
+
+Use `EVAL_MEMPROBE_IMAGE`, `EVAL_COREMARK_IMAGE`, or `EVAL_LINUX_IMAGE` to select
+existing images explicitly. Relative overrides resolve from the invocation
+directory. `EVAL_XLEN=32` selects the matching `rv32`/`riscv32` image names for
+bare-metal workloads; `pf` and `lx64` require RV64. No images are downloaded.
+`EVAL_BUILD_ROOT` and `EVAL_LOG_ROOT` override `EVAL_CAL_DIR/build` and
+`EVAL_CAL_DIR/logs`; `EVAL_MAKE` selects a recursive make executable and defaults
+to normal `make`. A published experiment wrapper may set these variables to
+retain its own images, calibration and output layout.
+
+Every invocation needs a new tag. Logs include return codes, image hashes and
+model settings in a manifest. `EVAL_RUN_JOBS` controls workload concurrency;
+the default is 1. Builds use `make -j4` and `VERILATOR_JOBS=4`.
+Apply resource limits and machine scheduling outside the runner (for example,
+invoke it through your batch scheduler). No host-specific thresholds or locks
+are built in. TERM/INT and per-command `.cancel` files cancel owned subprocess
+groups, including children, with TERM followed by KILL after five seconds.
+`-n` disables VCD; this harness
+builds with DIFFTEST=0 and supplies no `-d` reference. `EVAL_MEM_ARGS` accepts only `--mem-serialize-writes`,
+`--mem-random-delay=N`, `--mem-random-seed=N`, and `--mem-write-outstanding=N`
+(also with separate values). Runtime overrides belong in `EVAL_MEM_ARGS`; the
+harness neutralizes Make-level memory options before recording its command.
+Use `RL`/`WL` for fixed delays so recorded settings match the simulator command.
+Keep model arguments and images identical when comparing configurations.
+
+Build evaluation images with `bash sim/scripts/build-fpga-workloads.sh TREE WORKLOAD`
+(`memprobe`, `pagefault`, or `embench`). Memprobe accepts an optional variant:
+`full`, `full-matched`, `quick` (default), `quick-matched`, `store`, or `store-matched`.
+`EVAL_CAL_DIR` selects the image/build directory, and `MEMPROBE_STEPS` overrides
+access counts. Embench uses local source selected by `EMBENCH_SOURCE`; no download
+is performed. CoreMark and Linux images use their existing application build flows.
+For a custom Linux device tree, set `EVAL_DT_SOURCE` when running the evaluation.
+
+The one-off M/S/U `mmu-hit` calibration probe and quick-user DTS fallback were
+removed. Memprobe retains cache/memory latency measurements; pagefault retains
+Sv39 demand, resident, and hot-page measurements. Existing privileged directed
+tests remain the functional translation checks.
+
+Run the runner/summary regression suite with
+`python3 -m unittest discover -s sim/tools -p test_fpga_eval.py`.
+
 ## Static timing analysis
 
 `make sta` defaults to `MEMORY=sram`, `XLEN=32`, `STA_PLATFORM=nangate45` and `CLK_FREQ_MHZ=50`. `sta-detail` adds detailed paths; `sta-check` only checks RTL elaboration. SRAM timing libraries are selected by `SRAM_PLATFORM` (defaults to the normalized STA platform). Missing libraries trigger placeholder generation; a successful default run does not establish characterized SRAM timing. See [OpenRAM integration](sram/README.md) for real macro libraries.

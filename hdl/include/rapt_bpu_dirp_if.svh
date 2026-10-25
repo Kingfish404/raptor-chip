@@ -28,12 +28,12 @@
     input  logic                clock,       \
     input  logic                reset,       \
     input  logic                ren,         \
-    input  logic [XLEN-1:0]     raddr,       \
+    input  logic [`RAPT_PC_BITS_OF(XLEN)-1:0] raddr, \
     input  logic [GHR_LEN-1:0]  r_ghr,       \
     input  logic [PHR_LEN-1:0]  r_phr,       \
     output logic                rd_taken,    \
     input  logic                update_en,   \
-    input  logic [XLEN-1:0]     update_pc,   \
+    input  logic [`RAPT_PC_BITS_OF(XLEN)-1:0] update_pc, \
     input  logic [GHR_LEN-1:0]  update_ghr,  \
     input  logic [PHR_LEN-1:0]  update_phr,  \
     input  logic                update_taken,\

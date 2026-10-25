@@ -248,8 +248,8 @@ module tb_frontend_trace;
             serial = idu_rnu.slot[s].uop.execute.sys.valid
                 || idu_rnu.slot[s].uop.execute.sys.fence_i
                 || idu_rnu.slot[s].uop.execute.sys.fence;
-            mismatch = idu_rnu.slot[s].uop.pnpc != trace_npc[idx];
-            if (raw_pnpc != idu_rnu.slot[s].uop.pnpc) begin
+            mismatch = idu_rnu.slot[s].pnpc != trace_npc[idx];
+            if (raw_pnpc != idu_rnu.slot[s].pnpc) begin
               bp_decode_repairs++;
               if (!mismatch) bp_decode_repairs_correct++;
             end
@@ -317,7 +317,7 @@ module tb_frontend_trace;
                     "FE divergence PC=%h raw=%h predicted=%h actual=%h C=%b J=%b JR=%b sys=%b",
                     trace_pc[idx],
                     trace_inst[idx],
-                    idu_rnu.slot[s].uop.pnpc,
+                    idu_rnu.slot[s].pnpc,
                     trace_npc[idx],
                     idu_rnu.slot[s].uop.execute.branch.conditional,
                     idu_rnu.slot[s].uop.execute.branch.jump,

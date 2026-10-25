@@ -16,6 +16,8 @@ interface rapt_recovery_if #(
     parameter int CheckpointBits = rapt_pkg::BranchCheckpointBits,
     parameter int XLEN = `RAPT_XLEN
 );
+  localparam int PcBits = `RAPT_PC_BITS_OF(XLEN);
+
   logic pending;
   logic redirect_valid;
   logic preserve_fetch;
@@ -26,7 +28,7 @@ interface rapt_recovery_if #(
   /* verilator lint_off UNUSEDSIGNAL */
   logic [GenerationBits-1:0] generation;
   /* verilator lint_on UNUSEDSIGNAL */
-  logic [XLEN-1:0] target;
+  logic [PcBits-1:0] target;
   logic checkpoint_valid;
   logic [CheckpointBits-1:0] checkpoint;
   modport source(

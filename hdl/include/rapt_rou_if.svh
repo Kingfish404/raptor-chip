@@ -28,7 +28,8 @@ endinterface
 interface rou_csr_if #(
     parameter int XLEN = `RAPT_XLEN
 );
-  logic [XLEN-1:0] pc;
+  localparam int PcBits = `RAPT_PC_BITS_OF(XLEN);
+  logic [PcBits-1:0] pc;
 
   logic csr_wen;
   logic [XLEN-1:0] csr_wdata;
@@ -76,7 +77,7 @@ interface rou_lsu_if #(
   // Retirement marks an existing SQ owner; it never transfers store payload.
   // The virtual address remains an independent ownership assertion witness.
   logic [XLEN-1:0] sq_vaddr;
-  logic [XLEN-1:0] pc;
+  logic [`RAPT_PC_BITS_OF(XLEN)-1:0] pc;
   logic valid;
 
   logic sq_ready;
@@ -94,7 +95,8 @@ interface rou_cmu_if #(
   typedef struct packed {
     logic [RLEN-1:0] rd;
     logic [31:0] inst;
-    logic [XLEN-1:0] pc, npc;
+    rapt_pkg::ras_action_t ras;
+    logic [`RAPT_PC_BITS_OF(XLEN)-1:0] pc, npc;
     logic [PLEN-1:0] prd, prs;
     logic ebreak, difftest_skip, valid, c, trap, atomic;
     logic ben, jen, jren, branch_mispredict, btaken;
@@ -105,21 +107,26 @@ interface rou_cmu_if #(
 `endif
   } slot_t;
   slot_t slot[Width];
-  logic [XLEN-1:0] next_pc, redirect_pc;
+  logic [`RAPT_PC_BITS_OF(XLEN)-1:0] next_pc, redirect_pc;
   logic btaken, ben, jen, jren, atomic_sc;
   logic fence_time, fence_i, flush_pipe, flush_redirect, time_trap;
+  logic sfence_valid, sfence_all_vpn, sfence_all_asid;
+  logic [26:0] sfence_vpn;
+  logic [8:0] sfence_asid;
   logic fetch_context_stable;
   logic cbo_inval;
   logic [XLEN-1:6] cbo_block;
   logic [$clog2(`RAPT_ROB_SIZE)-1:0] rob_head;
   modport out(
       output slot, next_pc, redirect_pc, btaken, ben, jen, jren, atomic_sc,
-      fence_time, fence_i, cbo_inval, cbo_block, flush_pipe, flush_redirect,
+      fence_time, fence_i, sfence_valid, sfence_all_vpn, sfence_all_asid, sfence_vpn,
+      sfence_asid, cbo_inval, cbo_block, flush_pipe, flush_redirect,
       fetch_context_stable, time_trap, rob_head
   );
   modport in(
       input slot, next_pc, redirect_pc, btaken, ben, jen, jren, atomic_sc,
-      fence_time, fence_i, cbo_inval, cbo_block, flush_pipe, flush_redirect,
+      fence_time, fence_i, sfence_valid, sfence_all_vpn, sfence_all_asid, sfence_vpn,
+      sfence_asid, cbo_inval, cbo_block, flush_pipe, flush_redirect,
       fetch_context_stable, time_trap, rob_head
   );
 endinterface

@@ -113,12 +113,14 @@ module tb_ifetch_translate;
     finish_case(1, 1);
     allow_all();
     if (XLEN == 64) begin
-      pmp_state.pmp_mode_napot[0]=0;
-      pmp_state.pmp_mode_na4[0]=1;
-      pmp_state.pmp_raw_addr[0]=('h80000008>>2);
-      pmp_state.pmp_napot_mask[0]=0;
+      pmp_state.pmp_mode_napot[0] = `RAPT_PMP_GRANULARITY_LOG2 != 2;
+      pmp_state.pmp_mode_na4[0] = `RAPT_PMP_GRANULARITY_LOG2 == 2;
+      pmp_state.pmp_raw_addr[0] = ('h80000008 >> 2);
+      pmp_state.pmp_napot_mask[0] = (`RAPT_PADDR_BITS - 2)'(
+          (1 << (`RAPT_PMP_GRANULARITY_LOG2 - 2)) - 1);
+      pmp_state.pmp_cfg_r[0] = `RAPT_PMP_GRANULARITY_LOG2 == 2;
       start();
-      check(!bus_arvalid, "half-authorized Sv39 PTE read escaped");
+      check(!bus_arvalid, "restricted Sv39 PTE read escaped");
       finish_case(1, 1);
       allow_all();
       request_vaddr = XLEN'(64'h0000008000000000);

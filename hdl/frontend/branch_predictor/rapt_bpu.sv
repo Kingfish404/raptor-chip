@@ -42,7 +42,7 @@ module rapt_bpu #(
     idu_bpu_if.in idu_bpu,
     input logic execute_recover = 1'b0,
     input logic preserve_fetch = 1'b0,
-    input logic [XLEN-1:1] decode_target_q = '0,
+    input logic [`RAPT_PC_BITS_OF(XLEN)-1:1] decode_target_q = '0,
     input logic [GHR_LEN-1:0] execute_ghr = '0,
     input logic [PHR_LEN-1:0] execute_phr = '0,
     output logic [GHR_LEN-1:0] snapshot_ghr,
@@ -50,6 +50,7 @@ module rapt_bpu #(
 
     input reset
 );
+  localparam int PcW = `RAPT_PC_BITS_OF(XLEN);
   /* verilator lint_off UNUSEDSIGNAL */
   /* verilator lint_off UNUSEDPARAM */
   typedef enum logic [1:0] {
@@ -65,7 +66,7 @@ module rapt_bpu #(
     ST = 'b11   // Strongly Taken
   } pht_t;
 
-  logic [XLEN-1:0] npc;
+  logic [PcW-1:0] npc;
 
   logic [GHR_LEN-1:0] rgshare;
   logic [GHR_LEN-1:0] gshare;
@@ -89,8 +90,8 @@ module rapt_bpu #(
   assign ifu_bpu.aux_taken = ifu_bpu.aux_query && dirp_aux_taken;
 `endif
 
-  logic [XLEN-1:0] rpc;
-  logic [XLEN-1:0] cpc;
+  logic [PcW-1:0] rpc;
+  logic [PcW-1:0] cpc;
 
   /* verilator lint_on UNUSEDSIGNAL */
 
@@ -122,7 +123,7 @@ module rapt_bpu #(
   ) u_history (
       .clock(clock),
       .reset(reset),
-      .clear(cmu_bcast.fence_time),
+      .clear((`RAPT_SFENCE_KEEP_STATE < 3 && cmu_bcast.fence_time)),
       .flush(cmu_bcast.flush_pipe && !preserve_fetch),
       .decode_recover(idu_bpu.history_recover),
       .execute_recover(execute_recover),
@@ -156,7 +157,8 @@ module rapt_bpu #(
   `RAPT_BPU_DIRP_MODULE #(
 `ifdef RAPT_BPU_DIRP_TAGE
 `ifdef RAPT_FETCH_LOOKAHEAD
-      .AuxPositions(rapt_pkg::DecodeWidth > 1 && !`RAPT_FETCH_RESPONSE_STAGE
+      .AuxPositions(rapt_pkg::DecodeWidth > 1 && !
+      `RAPT_FETCH_RESPONSE_STAGE
                     ? 2 * (rapt_pkg::DecodeWidth - 1) : 0),
 `endif
 `endif
@@ -191,7 +193,7 @@ module rapt_bpu #(
       .update_phr    (rphr),
       .update_taken  (rbtaken),
       .update_mispred(dirp_update_mispred),
-      .init          (cmu_bcast.fence_time)
+      .init                ((`RAPT_SFENCE_KEEP_STATE < 3 && cmu_bcast.fence_time))
   );
 
 `ifndef RAPT_BPU_DIRP_TAGE
@@ -200,7 +202,7 @@ module rapt_bpu #(
 `endif
 
   // BTB (synchronous read, separate entry/type writes)
-  logic [XLEN-1:1] btb_rd_target;
+  logic [PcW-1:1] btb_rd_target;
   logic [1:0] btb_rd_type;
   logic btb_rd_tag_match;
 
@@ -209,7 +211,7 @@ module rapt_bpu #(
   // fires alongside an IDU early-resteer (static target derivable from imm).
   logic cmu_wen_entry, cmu_wen_type;
   logic [            1:0] cmu_wd_type;
-  logic [       XLEN-1:1] cmu_wd_full;
+  logic [       PcW-1:1] cmu_wd_full;
   logic [    BTB_LEN-1:0] cmu_waddr;
   logic [BTB_TAG_LEN-1:0] cmu_wd_tag;
   assign cmu_wen_entry = cmu_bcast.flush_pipe
@@ -219,7 +221,7 @@ module rapt_bpu #(
   assign cmu_wen_type  = cmu_bcast.jren || cmu_bcast.jen || (cmu_bcast.ben && rbtaken);
   // RETU identifies a return/coroutine target; IDU supplies RAS repair/training.
   assign cmu_wd_type   = cmu_bcast.ret ? RETU : cmu_bcast.jren ? INDR : cmu_bcast.jen ? DIRE : COND;
-  assign cmu_wd_full   = cpc[XLEN-1:1];
+  assign cmu_wd_full   = cpc[PcW-1:1];
   assign cmu_waddr     = rbtb_idx;
   assign cmu_wd_tag    = rbtb_tag;
 
@@ -228,7 +230,7 @@ module rapt_bpu #(
   logic [    BTB_LEN-1:0] idu_waddr;
   logic [BTB_TAG_LEN-1:0] idu_wd_tag;
   logic idu_wen_q;
-  logic [XLEN-1:1] idu_target_q;
+  logic [PcW-1:1] idu_target_q;
   logic [1:0] idu_type_q;
   // Decode training follows its registered redirect. Store only the BTB key,
   // not another full PC, and let an older recovery cancel the pending write.
@@ -245,7 +247,7 @@ module rapt_bpu #(
   if (SharedDecodeTarget) begin : g_shared_decode_target
     assign idu_target_q = decode_target_q;
   end else begin : g_local_decode_target
-    always_ff @(posedge clock) idu_target_q <= idu_bpu.train_target[XLEN-1:1];
+    always_ff @(posedge clock) idu_target_q <= idu_bpu.train_target[PcW-1:1];
   end
 
   // Final mux: priority = commit-flush entry write > IDU train > commit
@@ -259,7 +261,7 @@ module rapt_bpu #(
   //     it should preempt the type-only refresh.
   logic wen_entry_mux, wen_type_mux;
   logic [    BTB_LEN-1:0] waddr_mux;
-  logic [       XLEN-1:1] wd_target_mux;
+  logic [       PcW-1:1] wd_target_mux;
   logic [BTB_TAG_LEN-1:0] wd_tag_mux;
   logic [            1:0] wd_type_mux;
   logic                   idu_grant;
@@ -294,7 +296,7 @@ module rapt_bpu #(
       .wd_tag(wd_tag_mux),
       .wen_type(wen_type_mux),
       .wd_type(wd_type_mux),
-      .init(cmu_bcast.fence_time)
+      .init((`RAPT_SFENCE_KEEP_STATE < 3 && cmu_bcast.fence_time))
   );
 
   // Prediction logic: all inputs are registered sub-module outputs,
@@ -322,15 +324,15 @@ module rapt_bpu #(
 
   // Independent committed data is necessary: pointer-only repair cannot undo
   // a wrong-path push that overwrote a still-live committed return address.
-  logic [XLEN-1:0] rsb_push_addr;
-  assign rsb_push_addr = rpc + (cmu_bcast.rvc ? XLEN'(2) : XLEN'(4));
+  logic [PcW-1:0] rsb_push_addr;
+  assign rsb_push_addr = rpc + (cmu_bcast.rvc ? PcW'(2) : PcW'(4));
   rapt_ras #(
       .Depth(RSB_SIZE),
-      .Xlen (XLEN)
+      .Xlen (PcW)
   ) u_ras (
       .clock(clock),
       .reset(reset),
-      .clear(cmu_bcast.fence_time),
+      .clear((`RAPT_SFENCE_KEEP_STATE < 3 && cmu_bcast.fence_time)),
       .flush(cmu_bcast.flush_pipe),
       .spec_push(idu_bpu.push_en),
       .spec_pop(idu_bpu.pop_en),

@@ -3,6 +3,7 @@
 module tb_l1d_pmp_shared;
   localparam int XLEN = `RAPT_XLEN;
   localparam int AW = `RAPT_PADDR_BITS - 2;
+  localparam int G = `RAPT_PMP_GRANULARITY_LOG2 - 2;
   localparam int N = `RAPT_PMP_NUM;
   localparam int PteSizeM1 = XLEN / 8 - 1;
   csr_bcast_if csr_bcast ();
@@ -82,16 +83,16 @@ module tb_l1d_pmp_shared;
       pmp_state.pmp_cfg_x = N'(next_random());
       pmp_state.pmp_cfg_l = N'(next_random());
       for (int i = 0; i < N; i++) begin
-        pmp_state.pmp_raw_addr[i] = AW'('h20000000 + i*16);
-        pmp_state.pmp_napot_mask[i] = (AW'(1) << (1+(next_random()%4))) - 1'b1;
-        pmp_state.pmp_mode_off[i] = (trial+i)%4 == 0;
+        pmp_state.pmp_raw_addr[i] = AW'('h20000000 + i*(1 << G));
+        pmp_state.pmp_napot_mask[i] = (AW'(1) << (1+G+(next_random()%4))) - 1'b1;
+        pmp_state.pmp_mode_off[i] = (trial+i)%4 == 0 || (G != 0 && (trial+i)%4 == 2);
         pmp_state.pmp_mode_tor[i] = (trial+i)%4 == 1;
-        pmp_state.pmp_mode_na4[i] = (trial+i)%4 == 2;
+        pmp_state.pmp_mode_na4[i] = (trial+i)%4 == 2 && G == 0;
         pmp_state.pmp_mode_napot[i] = (trial+i)%4 == 3;
       end
-      load_addr = XLEN'('h80000000) + XLEN'(next_random()%2048) - 16;
-      store_addr = XLEN'('h80000000) + XLEN'(next_random()%2048) - 16;
-      ptw_addr = (XLEN'('h80000000) + XLEN'(next_random()%2048) - 16)
+      load_addr = XLEN'('h80000000) + XLEN'(next_random()%(2048 << G)) - 16;
+      store_addr = XLEN'('h80000000) + XLEN'(next_random()%(2048 << G)) - 16;
+      ptw_addr = (XLEN'('h80000000) + XLEN'(next_random()%(2048 << G)) - 16)
           & ~XLEN'(PteSizeM1);
       if (trial % 16 == 0) load_addr = '1;
       if (trial % 16 == 1) ptw_addr = '0;
