@@ -39,9 +39,9 @@ KU15P DDR/PMA host checks (no shared RTL packing or board access):
 
 ```bash
 fpga/litex/.venv/bin/python -B fpga/litex/tests/test_ddr_pma.py
-make -C verify verilator-addr-classification-ku15p-rv32 verilator-addr-classification-ku15p-rv64
-make -C verify verilator-addr-classification-litedram-rv32 verilator-addr-classification-litedram-rv64
-make -C verify verilator-l2-pmem2g
+make -C verification verilator-addr-classification-ku15p-rv32 verilator-addr-classification-ku15p-rv64
+make -C verification verilator-addr-classification-litedram-rv32 verilator-addr-classification-litedram-rv64
+make -C verification verilator-l2-pmem2g
 fpga/litex/.venv/bin/python -B fpga/litex/tests/test_wb64_lanes.py
 ```
 

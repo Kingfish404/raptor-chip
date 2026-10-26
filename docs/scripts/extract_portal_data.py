@@ -254,17 +254,17 @@ LATENCY_NOTES = (
 )
 
 DOMAIN_FROM_PATH = (
-    ("hdl/frontend/branch_predictor", "bpu"),
-    ("hdl/frontend", "frontend"),
-    ("hdl/backend/ieu", "ieu"),
-    ("hdl/backend/feu", "feu"),
-    ("hdl/backend/lsu", "lsu"),
-    ("hdl/backend/vpu", "vpu"),
-    ("hdl/backend", "backend"),
-    ("hdl/memory", "memory"),
-    ("hdl/perip", "cluster"),
-    ("hdl/common", "common"),
-    ("hdl/generated", "frontend"),
+    ("rtl/frontend/branch_predictor", "bpu"),
+    ("rtl/frontend", "frontend"),
+    ("rtl/backend/ieu", "ieu"),
+    ("rtl/backend/feu", "feu"),
+    ("rtl/backend/lsu", "lsu"),
+    ("rtl/backend/vpu", "vpu"),
+    ("rtl/backend", "backend"),
+    ("rtl/memory", "memory"),
+    ("rtl/perip", "cluster"),
+    ("rtl/common", "common"),
+    ("rtl/generated", "frontend"),
 )
 
 COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
@@ -310,7 +310,7 @@ def domain_for(rel_path: str) -> str:
     for prefix, domain in DOMAIN_FROM_PATH:
         if posix.startswith(prefix):
             return domain
-    if posix.startswith("hdl/"):
+    if posix.startswith("rtl/"):
         return "core"
     return "other"
 
@@ -512,13 +512,13 @@ def cache_kib(sets_log2: int, ways: int, line_bytes: int) -> int:
 
 
 def collect_config(repo: Path) -> dict[str, Any]:
-    preset = (repo / "hdl/configs/default/rapt_config.svh").read_text(
+    preset = (repo / "rtl/configs/default/rapt_config.svh").read_text(
         encoding="utf-8", errors="replace"
     )
-    common = (repo / "hdl/include/rapt.svh").read_text(
+    common = (repo / "rtl/include/rapt.svh").read_text(
         encoding="utf-8", errors="replace"
     )
-    pkg = (repo / "hdl/rapt_pkg.sv").read_text(encoding="utf-8", errors="replace")
+    pkg = (repo / "rtl/rapt_pkg.sv").read_text(encoding="utf-8", errors="replace")
     defines = parse_defines_ifdef(preset)
     for name, value in parse_defines_ifdef(common, set(defines)).items():
         defines.setdefault(name, value)
@@ -547,7 +547,7 @@ def collect_config(repo: Path) -> dict[str, Any]:
     completion_ports = issue_ports + extra
 
     return {
-        "preset": "hdl/configs/default/rapt_config.svh",
+        "preset": "rtl/configs/default/rapt_config.svh",
         "macros": {k: v for k, v in sorted(defines.items()) if not v.startswith("$")},
         "values": {
             "decode_width": ival("RAPT_DECODE_WIDTH", default=2),
@@ -596,15 +596,15 @@ def collect_config(repo: Path) -> dict[str, Any]:
         },
         "sources": {
             "brq_entries": {
-                "file": "hdl/rapt_pkg.sv",
+                "file": "rtl/rapt_pkg.sv",
                 "parameter": "BranchQueueEntries (rapt_ieu.BRQ_SIZE)",
             },
             "mdq_entries": {
-                "file": "hdl/backend/ieu/rapt_ieu.sv",
+                "file": "rtl/backend/ieu/rapt_ieu.sv",
                 "parameter": "MDQ_SIZE",
             },
             "fpq_entries": {
-                "file": "hdl/backend/feu/rapt_feu.sv",
+                "file": "rtl/backend/feu/rapt_feu.sv",
                 "parameter": "FPQ_SIZE",
             },
         },
@@ -963,7 +963,7 @@ def layout_nodes(modules: list[dict[str, Any]], values: dict[str, Any], extra: d
             {
                 "id": "rapt_operand_stage",
                 "short": "OPS",
-                "file": "hdl/backend/rapt_rou.sv",
+                "file": "rtl/backend/rapt_rou.sv",
                 "domain": "backend",
                 "stage": 3,
                 "summary": "Operand stage: registers one renamed group before the ROU UOQ reads PRF operands.",
@@ -1015,7 +1015,7 @@ def soc_display_nodes(
             {
                 "id": nid,
                 "short": ARCH_SHORT[nid],
-                "file": "hdl/rapt_pkg.sv",
+                "file": "rtl/rapt_pkg.sv",
                 "domain": domain,
                 "stage": stage,
                 "summary": summary,
@@ -1339,17 +1339,15 @@ def documented_flow() -> list[dict[str, str]]:
 
 
 def build(repo: Path) -> dict[str, Any]:
-    hdl_root = repo / "hdl"
+    hdl_root = repo / "rtl"
     modules: list[dict[str, Any]] = []
     for path in sorted(hdl_root.rglob("*.sv")):
-        if "chisel" in path.parts:
-            continue
         for match in MODULE_RE.finditer(strip_sv_comments(path.read_text())):
             parsed = parse_sv_file(path, repo, match.group(1))
             if parsed:
                 modules.append(parsed)
     config = collect_config(repo)
-    package = strip_sv_comments((repo / "hdl/rapt_pkg.sv").read_text())
+    package = strip_sv_comments((repo / "rtl/rapt_pkg.sv").read_text())
     constants = {f"rapt_pkg::{name}": value for name, value in re.findall(
         r"localparam\s+(?:int\s+)?unsigned\s+(\w+)\s*=\s*(\d+)\s*;", package)}
     constants["Cfg.iq_entries"] = str(config["values"]["alq_entries"])
@@ -1369,7 +1367,7 @@ def build(repo: Path) -> dict[str, Any]:
     return {
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "sources": {
-            "rtl": "hdl/",
+            "rtl": "rtl/",
             "config": config["preset"],
             "makefile": "Makefile",
             "topology_doc": "README.md mermaid + docs/uarch.md",

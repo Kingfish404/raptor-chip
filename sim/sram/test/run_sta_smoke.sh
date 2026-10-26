@@ -44,11 +44,11 @@ SV_OUT="$TMP/rapt_sram_test_pack.sv"
 # The fixture defines macro mode; place it before the SRAM wrapper so the
 # definition is visible without redefining a command-line macro.
 verilator -E -P \
-    -I"$RAPTOR/hdl/configs/default" \
-    -I"$RAPTOR/hdl/include" \
-    "$RAPTOR/hdl/rapt_pkg.sv" \
+    -I"$RAPTOR/rtl/configs/default" \
+    -I"$RAPTOR/rtl/include" \
+    "$RAPTOR/rtl/rapt_pkg.sv" \
     "$HERE/fixtures/rapt_sram_test_top.sv" \
-    "$RAPTOR/hdl/sram/rapt_sram_1rw.sv" \
+    "$RAPTOR/rtl/sram/rapt_sram_1rw.sv" \
     > "$SV_OUT"
 
 # --- Drive yosys-opensta ---------------------------------------------------

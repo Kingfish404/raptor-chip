@@ -26,7 +26,7 @@ runs:
           ~/.ivy2/cache
           ~/.sbt
           ~/.cache/pip
-        key: deps-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.profile }}-${{ steps.deps.outputs.week }}-${{ hashFiles('setup-rtl.sh', '.github/scripts/setup-ci.sh', 'hdl/chisel/build.sbt', 'hdl/chisel/project/**') }}
+        key: deps-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.profile }}-${{ steps.deps.outputs.week }}-${{ hashFiles('setup-rtl.sh', '.github/scripts/setup-ci.sh', 'tools/decodegen/build.sbt', 'tools/decodegen/project/**') }}
         restore-keys: |
           deps-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.profile }}-
           deps-v1-${{ runner.os }}-${{ runner.arch }}-
@@ -44,8 +44,8 @@ runs:
       id: decoders
       uses: actions/cache/restore@v5
       with:
-        path: hdl/generated
-        key: decoders-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('hdl/chisel/src/**', 'hdl/chisel/build.sbt', 'hdl/chisel/project/**', 'hdl/chisel/Makefile', 'setup-rtl.sh', '.github/scripts/setup-ci.sh') }}
+        path: rtl/generated
+        key: decoders-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/decodegen/src/**', 'tools/decodegen/build.sbt', 'tools/decodegen/project/**', 'tools/decodegen/Makefile', 'setup-rtl.sh', '.github/scripts/setup-ci.sh') }}
 
     - name: Prepare generated decoders
       if: inputs.profile != 'nemu' && inputs.profile != 'riscof'
@@ -60,7 +60,7 @@ runs:
       if: inputs.profile != 'nemu' && inputs.profile != 'riscof' && steps.decoders.outputs.cache-hit != 'true'
       uses: actions/cache/save@v5
       with:
-        path: hdl/generated
+        path: rtl/generated
         key: ${{ steps.decoders.outputs.cache-primary-key }}
 
     - name: Prepare workload sources

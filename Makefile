@@ -25,7 +25,7 @@ TIMEOUT ?=## Wall-clock timeout in seconds for selected simulator runs
 TINYOS_OS ?=## TinyOS payload selector: egos or xv6
 QEMU ?=## Override QEMU executable for OS CLI helpers
 
-# Raptor uarch config preset (selects hdl/configs/<name>/rapt_config.svh).
+# Raptor uarch config preset (selects rtl/configs/<name>/rapt_config.svh).
 # Exported so it propagates through chained sub-makes (sim, am-kernels, app, ...).
 # FPGA board builds keep their own preset default unless the user sets one.
 RAPT_CONFIG_FROM_USER := $(filter command line environment%,$(origin RAPT_CONFIG))
@@ -193,7 +193,7 @@ setup-rtl: ## Install dependencies and initialize RTL workspace
 # RTL Generation (Chisel -> SystemVerilog)
 # ============================================================================
 verilog: ## Generate SystemVerilog from Chisel (Scala)
-	$(MAKE) -C $(RAPTOR_HOME)/hdl/chisel verilog
+	$(MAKE) -C $(RAPTOR_HOME)/tools/decodegen verilog
 
 # ============================================================================
 # NEMU Targets
@@ -505,7 +505,7 @@ linux-ticket-spinlock-repro-rv32: build-rv32 repro-tests-build ## Run Linux tick
 		ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" \
 		IMG=$(REPRO_TESTS_DIR)/linux_ticket_spinlock.bin
 
-COREMARK_MAKE = $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc -f Makefile -f $(RAPTOR_HOME)/verify/benchmark-build.mk
+COREMARK_MAKE = $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc -f Makefile -f $(RAPTOR_HOME)/verification/benchmark-build.mk
 
 coremark-rv32: $(AM_KERNELS) build-rv32 ## Run CoreMark on NPC
 	+@set -o pipefail; $(COREMARK_MAKE) ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=$(MAINARGS) $(call tee_npc,coremark-rv32)
@@ -527,7 +527,7 @@ microbench-rv64: $(AM_KERNELS) build-rv64 ## Run MicroBench on NPC (riscv64)
 SIM_RANDOM_DELAY ?= 0## Maximum randomized memory delay (0 disables)
 SIM_RANDOM_SEED ?= 1## Reproducible memory-delay seed
 export SIM_RANDOM_DELAY SIM_RANDOM_SEED
-include $(RAPTOR_HOME)/verify/benchmark-options.mk
+include $(RAPTOR_HOME)/verification/benchmark-options.mk
 
 # Parse a tee'd CoreMark + sim run log and print the CoreMark/MHz score. The pk
 # port publishes cycle/instret deltas for CoreMark's timed region; older ports
@@ -554,16 +554,16 @@ define dhrystone_dmips_report
 endef
 
 dhrystone-rv32: $(AM_KERNELS) build-rv32 ## Run Dhrystone on NPC (DMIPS + DMIPS/MHz)
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone -f Makefile -f $(RAPTOR_HOME)/verify/benchmark-build.mk ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" $(call tee_npc,dhrystone-rv32)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone -f Makefile -f $(RAPTOR_HOME)/verification/benchmark-build.mk ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" $(call tee_npc,dhrystone-rv32)
 	$(call dhrystone_dmips_report,$(NPC_LOG_DIR)/dhrystone-rv32.log)
 
 dhrystone-rv64: VFLAGS := -DRAPT_RV64
 dhrystone-rv64: $(AM_KERNELS) build-rv64 ## Run Dhrystone on NPC (riscv64)
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone -f Makefile -f $(RAPTOR_HOME)/verify/benchmark-build.mk ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(call tee_npc,dhrystone-rv64)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone -f Makefile -f $(RAPTOR_HOME)/verification/benchmark-build.mk ARCH=riscv64-npc run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(call tee_npc,dhrystone-rv64)
 	$(call dhrystone_dmips_report,$(NPC_LOG_DIR)/dhrystone-rv64.log)
 
 dhrystone-nemu32: $(AM_KERNELS) build-nemu32 ## Run Dhrystone on NEMU (riscv32, functional check)
-	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone -f Makefile -f $(RAPTOR_HOME)/verify/benchmark-build.mk ARCH=riscv32-nemu run ARGS="$(ARGS)" $(call tee_nemu,dhrystone-nemu32)
+	@set -o pipefail; $(MAKE) -C $(AM_KERNELS)/benchmarks/dhrystone -f Makefile -f $(RAPTOR_HOME)/verification/benchmark-build.mk ARCH=riscv32-nemu run ARGS="$(ARGS)" $(call tee_nemu,dhrystone-nemu32)
 
 # ============================================================================
 # RISC-V Architecture Tests
@@ -714,7 +714,7 @@ LINUX_MEM_PROGRESS_CYCLES ?= 10000000
 LINUX_MEM_STRESS_MILESTONE ?= SBI misaligned access exception delegation ok
 LINUX_MEM_STRESS_NPC_ARGS ?= $(LINUX_NPC_ARGS) --serial-exit-on='delegation ok' --no-lightsss
 LINUX_CKPT_STRESS_MAX_INST ?= 300000000
-LINUX_BOOT_CHECK := $(RAPTOR_HOME)/verify/scripts/check_linux_boot.py
+LINUX_BOOT_CHECK := $(RAPTOR_HOME)/verification/scripts/check_linux_boot.py
 LINUX_MEM_STRESS_PROFILE := $(or $(strip $(BUILD_PROFILE)),$(RAPT_CONFIG))
 LINUX_MEM_STRESS_DT_SOURCE := $(if $(strip $(DT_SOURCE)),$(DT_SOURCE),spike-rv32ima.dts)
 LINUX_MEM_STRESS_MROM_DIR := $(NSIM_HOME)/csrc/mem/mrom-data/build/rv32-$(basename $(notdir $(LINUX_MEM_STRESS_DT_SOURCE)))
@@ -810,22 +810,22 @@ $(FPGA_TARGETS): fpga-%:
 # ============================================================================
 VERIBLE_FLAGS := $(RAPTOR_HOME)/.verible-format.flags
 HDL_FORMAT_SOURCES := $(addprefix $(RAPTOR_HOME)/,$(shell git -C $(RAPTOR_HOME) ls-files \
-	'hdl/*.v' 'hdl/*.vh' 'hdl/*.sv' 'hdl/*.svh' \
-	'hdl/**/*.v' 'hdl/**/*.vh' 'hdl/**/*.sv' 'hdl/**/*.svh'))
+	'rtl/*.v' 'rtl/*.vh' 'rtl/*.sv' 'rtl/*.svh' \
+	'rtl/**/*.v' 'rtl/**/*.vh' 'rtl/**/*.sv' 'rtl/**/*.svh'))
 # Extend the HDL scope with every tracked SystemVerilog compilation unit.  Keep
 # non-HDL .svh include fragments out: many are not parseable as standalone files.
 ALL_SV_FORMAT_SOURCES := $(sort $(HDL_FORMAT_SOURCES) \
 	$(addprefix $(RAPTOR_HOME)/,$(shell git -C $(RAPTOR_HOME) ls-files '*.sv')))
 
-FORMAT_SCOPE ?= all## Formatting scope: hdl or all (includes testbenches)
+FORMAT_SCOPE ?= all## Formatting scope: rtl or all (includes testbenches)
 FORMAT_SCOPE := $(strip $(FORMAT_SCOPE))
-ifeq ($(filter $(FORMAT_SCOPE),hdl all),)
-$(error FORMAT_SCOPE must be hdl or all)
+ifeq ($(filter $(FORMAT_SCOPE),rtl all),)
+$(error FORMAT_SCOPE must be rtl or all)
 endif
 # A removed source remains in the index until staged; format existing files only.
-VERIBLE_FORMAT_SOURCES = $(wildcard $(if $(filter hdl,$(FORMAT_SCOPE)),$(HDL_FORMAT_SOURCES),$(ALL_SV_FORMAT_SOURCES)))
-format: ## Format tracked HDL/SystemVerilog (FORMAT_SCOPE=hdl|all)
-format-check: ## Check formatting without changing files (FORMAT_SCOPE=hdl|all)
+VERIBLE_FORMAT_SOURCES = $(wildcard $(if $(filter rtl,$(FORMAT_SCOPE)),$(HDL_FORMAT_SOURCES),$(ALL_SV_FORMAT_SOURCES)))
+format: ## Format tracked HDL/SystemVerilog (FORMAT_SCOPE=rtl|all)
+format-check: ## Check formatting without changing files (FORMAT_SCOPE=rtl|all)
 format format-check:
 	@command -v $(VERIBLE_FORMAT) >/dev/null || { echo "ERROR: $(VERIBLE_FORMAT) not found"; exit 1; }
 	@set -e; for source in $(VERIBLE_FORMAT_SOURCES); do \
@@ -837,10 +837,10 @@ pack: ## Pack all SV files into one
 	$(MAKE) -C $(NSIM_HOME) pack VFLAGS="$(VFLAGS)"
 
 memory-map-check: ## Check replicated platform address and RAM constants
-	python3 $(RAPTOR_HOME)/verify/scripts/check_memory_map.py
+	python3 $(RAPTOR_HOME)/verification/scripts/check_memory_map.py
 
-memory-map-header: ## Regenerate app/lib/raptor_platform.h from hdl/configs/memory_map.json
-	python3 $(RAPTOR_HOME)/verify/scripts/gen_platform_header.py
+memory-map-header: ## Regenerate app/lib/raptor_platform.h from rtl/configs/memory_map.json
+	python3 $(RAPTOR_HOME)/verification/scripts/gen_platform_header.py
 
 lint: ## Lint RTL with Verilator
 	$(MAKE) -C $(NSIM_HOME) lint VFLAGS="$(VFLAGS)"
@@ -853,7 +853,7 @@ compile-commands: ## Generate root compile_commands.json from real NEMU+sim buil
 
 STA_PLATFORM ?= nangate45 ## STA platform: nangate45, asap7, sky130hd (alias: sky130)
 CLK_FREQ_MHZ ?= 50 ## Target clock frequency for STA (MHz)
-STA_SUMMARY_DETAIL ?= 0 ## Show per-module LSPD STA rows (0=grouped summary, 1=detail)
+STA_SUMMARY_DETAIL ?= 0 ## Show per-module STA rows (0=grouped summary, 1=detail)
 
 MEMORY ?= sram## STA storage model: sram or dff
 XLEN ?= $(if $(findstring DRAPT_RV64,$(VFLAGS)),64,32)## STA datapath width (32|64)
@@ -866,9 +866,9 @@ sta sta-detail sta-check:
 sta-check: memory-map-check
 
 sta-summary: ## Display all existing STA results without running STA
-	@python3 "$(RAPTOR_HOME)/verify/scripts/sta_summary.py" \
+	@python3 "$(RAPTOR_HOME)/verification/scripts/sta_summary.py" \
 		--whole-root "$(RAPTOR_HOME)/third_party/yosys-opensta/result" \
-		--module-root "$(RAPTOR_HOME)/lspd/syn/build" \
+		--module-root "$(RAPTOR_HOME)/synth/yosys/build" \
 		$(if $(filter 1,$(STA_SUMMARY_DETAIL)),--detail,)
 
 SRAM_PLATFORM ?= $(strip $(STA_PLATFORM)) ## SRAM timing-model platform (defaults to STA_PLATFORM)
@@ -894,14 +894,14 @@ clean-npc: ## Clean NPC build only
 clean: ## Clean all build artifacts
 	-$(MAKE) -C $(NEMU_HOME) clean 2>/dev/null || true
 	-$(MAKE) -C $(NSIM_HOME) clean 2>/dev/null || true
-	-$(MAKE) -C $(RAPTOR_HOME)/hdl/chisel clean 2>/dev/null || true
-	-$(MAKE) -C $(RAPTOR_HOME)/verify clean 2>/dev/null || true
+	-$(MAKE) -C $(RAPTOR_HOME)/tools/decodegen clean 2>/dev/null || true
+	-$(MAKE) -C $(RAPTOR_HOME)/verification clean 2>/dev/null || true
 	-$(MAKE) -C $(RAPTOR_HOME)/app clean 2>/dev/null || true
 
 # ============================================================================
-# Verification Suite (verify/)
+# Verification Suite (verification/)
 # ============================================================================
-VERIFY_HOME := $(RAPTOR_HOME)/verify
+VERIFY_HOME := $(RAPTOR_HOME)/verification
 
 verify-fuzz: ## Random instruction fuzz with difftest
 	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) fuzz $(call tee_verify,fuzz)
@@ -1258,7 +1258,7 @@ app-clean: ## [app] Clean app build artifacts
 # Copy Makefile.local.example -> Makefile.local and fill in site-specific values.
 -include Makefile.local
 
-# Upstream ysyxSoC integration through hdl/perip/wrap_ysyxsoc.sv.
+# Upstream ysyxSoC integration through rtl/perip/wrap_ysyxsoc.sv.
 YSYXSOC_ARCH ?= riscv32-ysyxsoc
 YSYXSOC_HOME ?= $(RAPTOR_HOME)/third_party/OSCPU/ysyxSoC
 build-rv32-ysyxsoc:

@@ -1,6 +1,6 @@
 # gem5 SE-mode runner for raptor-chip
 
-A gem5 model of the raptor-chip parameterized superscalar OoO RISC-V core for **design space exploration** and **performance bug analysis**, parameterised directly from `raptor-chip/hdl/configs/<preset>/rapt_config.svh`.
+A gem5 model of the raptor-chip parameterized superscalar OoO RISC-V core for **design space exploration** and **performance bug analysis**, parameterised directly from `raptor-chip/rtl/configs/<preset>/rapt_config.svh`.
 
 ## Why SE mode?
 

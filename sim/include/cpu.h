@@ -18,7 +18,7 @@ typedef enum
   SIE____,
   STVEC__,
 
-  // NOTE: order MUST match `csr_t` in hdl/frontend/rapt_csr.sv exactly,
+  // NOTE: order MUST match `csr_t` in rtl/frontend/rapt_csr.sv exactly,
   // because difftest indexes into the DUT's csr[] storage by these values.
   SCOUNTE,
   MCOUNTE,

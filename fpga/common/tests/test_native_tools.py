@@ -43,8 +43,8 @@ class NativeToolsTests(unittest.TestCase):
     def test_source_identity_ignores_chisel_cache_but_tracks_generated_rtl(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
-            rtl = repo / "hdl/generated/decoder.sv"
-            cache = repo / "hdl/chisel/target/out/value/cache.json"
+            rtl = repo / "rtl/generated/decoder.sv"
+            cache = repo / "tools/decodegen/target/out/value/cache.json"
             rtl.parent.mkdir(parents=True)
             cache.parent.mkdir(parents=True)
             rtl.write_text("module decoder; endmodule\n")
@@ -53,7 +53,7 @@ class NativeToolsTests(unittest.TestCase):
                     patch.object(build, "COMMON", repo / "fpga/common"), \
                     patch.object(build, "BOARD", repo / "fpga/board"):
                 before = build.input_hashes()
-                self.assertEqual(list(before), ["hdl/generated/decoder.sv"])
+                self.assertEqual(list(before), ["rtl/generated/decoder.sv"])
                 cache.write_text('{"cache": 2}')
                 self.assertEqual(build.input_hashes(), before)
                 rtl.write_text("module decoder(input wire enable); endmodule\n")

@@ -20,7 +20,7 @@ The chip drives its external memory through the single-word **rnp** interface:
 
 ```
 rapt (CPU) --AXI--> axi2rnp --rnp pins--> rnp2axi --AXI4--> rapt_tb_mem
-            (inside rng_chip / soc_pad)   (hdl/perip/wrap_rnp.sv)
+            (inside rng_chip / soc_pad)   (rtl/perip/wrap_rnp.sv)
 ```
 
 - RTL mode (`rng_chip`): vectorised rnp ports.

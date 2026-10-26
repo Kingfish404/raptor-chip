@@ -34,7 +34,7 @@ export function createTerminal(root, data, hooks = {}) {
     out.innerHTML = "";
     write(`Raptor documentation shell`, "ok");
     write(
-      `Commands are parsed from <span class="dim">${escapeHtml(data.makefile?.file || "Makefile")}</span> and <span class="dim">hdl/</span>. This page does not run Verilator or NEMU.`,
+      `Commands are parsed from <span class="dim">${escapeHtml(data.makefile?.file || "Makefile")}</span> and <span class="dim">rtl/</span>. This page does not run Verilator or NEMU.`,
       "dim",
     );
     write(`Type <span class="ok">help</span>. Toggle with <span class="ok">\`</span>.`);
@@ -64,7 +64,7 @@ export function createTerminal(root, data, hooks = {}) {
     },
     about() {
       write(
-        "A static explorer for the published manual. Topology = SystemVerilog instantiations. Numbers = hdl/configs/default. Tokens = RV32 CoreMark from the NPC ELF (matrix, list, CRC, UART MMIO), steered along the documented pipeline and PMA map. This is not a live Verilator trace.",
+        "A static explorer for the published manual. Topology = SystemVerilog instantiations. Numbers = rtl/configs/default. Tokens = RV32 CoreMark from the NPC ELF (matrix, list, CRC, UART MMIO), steered along the documented pipeline and PMA map. This is not a live Verilator trace.",
       );
     },
     payload() {

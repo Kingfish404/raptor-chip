@@ -6,7 +6,7 @@
 
 RAPTOR_HOME ?= $(abspath $(APP_HOME)/..)
 NSIM_HOME ?= $(RAPTOR_HOME)/sim
-include $(RAPTOR_HOME)/verify/benchmark-options.mk
+include $(RAPTOR_HOME)/verification/benchmark-options.mk
 
 # ---- Toolchain auto-detection ----
 # app/ needs a libc-capable toolchain (newlib or glibc), NOT bare-metal riscv64-elf-.

@@ -54,7 +54,7 @@ class ParseSvTest(unittest.TestCase):
     def test_module_and_instance(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
-            path = repo / "hdl" / "frontend" / "rapt_ifu.sv"
+            path = repo / "rtl" / "frontend" / "rapt_ifu.sv"
             path.parent.mkdir(parents=True)
             path.write_text(FIXTURE_SV, encoding="utf-8")
             parsed = ext.parse_sv_file(path, repo)
@@ -83,7 +83,7 @@ endmodule
 """
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
-            path = repo / "hdl" / "memory" / "rapt_l1i.sv"
+            path = repo / "rtl" / "memory" / "rapt_l1i.sv"
             path.parent.mkdir(parents=True)
             path.write_text(src, encoding="utf-8")
             parsed = ext.parse_sv_file(path, repo)
@@ -254,7 +254,7 @@ class LiveRepoTest(unittest.TestCase):
         self.assertEqual(data["config"]["values"]["tage_tagged_entries"], 1024)
         self.assertEqual(data["config"]["values"]["iq_reclaim_on_issue"], 0)
         operand = next(m for m in data["modules"] if m["id"] == "rapt_operand_stage")
-        self.assertEqual(operand["file"], "hdl/backend/rapt_rou.sv")
+        self.assertEqual(operand["file"], "rtl/backend/rapt_rou.sv")
         shown = {n["id"] for n in data["graph"]["nodes"] if n.get("display")}
         for required in (
             "rapt_completion_stage",

@@ -36,7 +36,7 @@
 extern int boot_from_flash;
 extern int ftracedepth_max;
 FILE *pc_trace = NULL, *bpu_trace = NULL, *mem_trace = NULL;
-// Optional request trace for verify/subsystem. Open before executing the first
+// Optional request trace for verification/subsystem. Open before executing the first
 // instruction so vaddr_read/write can record that instruction's accesses.
 FILE *subsystem_mem_trace = NULL;
 static FILE *subsystem_inst_trace = NULL;

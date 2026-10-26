@@ -91,7 +91,7 @@ def main():
     out.mkdir(parents=True, exist_ok=False)
     mock = out / "mock"
     mock.mkdir()
-    data = (root / "hdl/include/dpic_mock/rapt_dpi_c.svh").read_text()
+    data = (root / "rtl/include/dpic_mock/rapt_dpi_c.svh").read_text()
     data += "\n`undef RAPT_DPI_C_MEM_READ_LATENCY\n`define RAPT_DPI_C_MEM_READ_LATENCY(rval) rval = 2\n"
     data += "`undef RAPT_DPI_C_MEM_WRITE_LATENCY\n`define RAPT_DPI_C_MEM_WRITE_LATENCY(rval) rval = 3\n"
     (mock / "rapt_dpi_c.svh").write_text(data)
@@ -105,7 +105,7 @@ def main():
             command += ["-DRAPT_RV64"]
         command += [f"-I{mock}"]
         command += [f"-I{root / p}" for p in
-                    ("hdl/configs/small-cache", "hdl/include", "hdl/include/npc")]
+                    ("rtl/configs/small-cache", "rtl/include", "rtl/include/npc")]
         command += [str(root / "sim/rtl/rapt_npc_soc.sv"), str(driver)]
         with (out / f"build{xlen}.log").open("w") as log:
             subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True)

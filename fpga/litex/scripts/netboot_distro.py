@@ -38,12 +38,12 @@ def require(condition, message):
         raise ValueError(message)
 
 def require_linux_ram(soc, bits):
-    """Check the DTB RAM node against hdl/configs/memory_map.json for this XLEN.
+    """Check the DTB RAM node against rtl/configs/memory_map.json for this XLEN.
 
     Payload placement assumes at least 1 GiB from the RAM base; RV32 Linux may
     advertise only the profiles' rv32_linux_size, RV64 up to the full window.
     """
-    memory_map = json.loads((LITEX.parents[1] / 'hdl/configs/memory_map.json').read_text())
+    memory_map = json.loads((LITEX.parents[1] / 'rtl/configs/memory_map.json').read_text())
     main = memory_map['regions']['main_ram']
     base, limit = int(main['base'], 0), int(main['max_size'], 0)
     if bits == 32:

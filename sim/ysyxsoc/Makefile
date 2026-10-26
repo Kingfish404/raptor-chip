@@ -3,7 +3,7 @@ ROOT := $(abspath ../..)
 SOC_HOME ?= $(ROOT)/third_party/OSCPU/ysyxSoC
 BUILD_DIR ?= $(ROOT)/sim/build/ysyxsoc-memory-test
 VERILATOR ?= verilator
-SOURCES := $(ROOT)/verify/xsim/tb_ysyxsoc_memories.sv sdram.sv psram.sv \
+SOURCES := $(ROOT)/verification/xsim/tb_ysyxsoc_memories.sv sdram.sv psram.sv \
   $(SOC_HOME)/perip/sdram/sdram_top_apb.v \
   $(SOC_HOME)/perip/sdram/core_sdram_axi4/sdram_axi_core.v \
   $(SOC_HOME)/perip/psram/psram_top_apb.v \

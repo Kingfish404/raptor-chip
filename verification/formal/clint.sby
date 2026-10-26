@@ -1,0 +1,45 @@
+[tasks]
+rv32_div1
+rv32_div3
+rv64_div3
+rv32_div100
+rv64_div100
+cover
+
+[options]
+rv32_div1: mode prove
+rv32_div1: depth 4
+rv32_div3: mode prove
+rv32_div3: depth 4
+rv64_div3: mode prove
+rv64_div3: depth 4
+rv32_div100: mode prove
+rv32_div100: depth 4
+rv64_div100: mode prove
+rv64_div100: depth 4
+cover: mode cover
+cover: depth 10
+
+[engines]
+smtbmc --nopresat bitwuzla
+
+[script]
+plugin -i slang
+rv32_div1: read_slang --single-unit -DFORMAL --top formal_clint -G XLEN=32 -G MTIME_DIV=1 perip_formal_if.sv formal_clint.sv rapt_clint.sv
+rv32_div3: read_slang --single-unit -DFORMAL --top formal_clint -G XLEN=32 -G MTIME_DIV=3 perip_formal_if.sv formal_clint.sv rapt_clint.sv
+rv64_div3: read_slang --single-unit -DFORMAL --top formal_clint -G XLEN=64 -G MTIME_DIV=3 perip_formal_if.sv formal_clint.sv rapt_clint.sv
+rv32_div100: read_slang --single-unit -DFORMAL --top formal_clint -G XLEN=32 -G MTIME_DIV=100 perip_formal_if.sv formal_clint.sv rapt_clint.sv
+rv64_div100: read_slang --single-unit -DFORMAL --top formal_clint -G XLEN=64 -G MTIME_DIV=100 perip_formal_if.sv formal_clint.sv rapt_clint.sv
+cover: read_slang --single-unit -DFORMAL --top formal_clint -G XLEN=32 -G MTIME_DIV=3 perip_formal_if.sv formal_clint.sv rapt_clint.sv
+prep -top formal_clint
+
+[files]
+perip_formal_if.sv
+rapt_soc_if.svh
+formal_clint.sv
+rapt_clint.sv ../../rtl/perip/rapt_clint.sv
+rapt.svh ../../rtl/include/rapt.svh
+rapt_fp_ops.svh ../../rtl/include/rapt_fp_ops.svh
+rapt_config.svh ../../rtl/configs/formal/rapt_config.svh
+rapt_sva.svh ../../rtl/include/rapt_sva.svh
+rapt_soc.svh ../../rtl/include/npc/rapt_soc.svh

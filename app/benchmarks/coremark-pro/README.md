@@ -105,7 +105,7 @@ partial suite nor a short simulation is an aggregate or certified score, and
 cycle improvements alone do not establish Fmax or performance on an FPGA.
 
 For an RTL comparison that is practical on a slow simulator,
-`verify/scripts/coremark_pro_performance.py` samples the four floating-point
+`verification/scripts/coremark_pro_performance.py` samples the four floating-point
 workloads. It requires complete NEMU reference-validation runs (`CMP_VERIFY=1`)
 and complete NEMU runs of the measured images (`CMP_VERIFY=0`). It fast-forwards
 those unchanged images to 10%, 50%, and 90% of the timed instruction stream,
@@ -123,8 +123,8 @@ pk/bare-metal modes. All 18 bare-metal reference checks passed on QEMU 8.2.2's
 floating-point workloads in both validation and performance modes. QEMU
 user-mode has a different counter timebase and is not supported by this port's
 default timer settings. Validation logs are kept under
-`verify/build/coremark-pro-qemu-system-validation` and
-`verify/build/coremark-pro-check-rv{32,64}-nemu`.
+`verification/build/coremark-pro-qemu-system-validation` and
+`verification/build/coremark-pro-check-rv{32,64}-nemu`.
 The initial NEMU check passed 16/18 workloads with an explicit 1800-second timeout;
 both `zip-test` runs timed out during string-based initialization. Profiling found
 an additional host bottleneck: NEMU queried an environment variable on every
@@ -136,9 +136,9 @@ These are host validation runtimes, not RTL performance results.
 
 After the fix, all 18 full NEMU reference checks pass. The original timeout logs
 remain intact; the consolidated repair report is
-`verify/build/coremark-pro-fixes/{report.md,results.json,manifest.json}`. Raw logs
+`verification/build/coremark-pro-fixes/{report.md,results.json,manifest.json}`. Raw logs
 are in `coremark-pro-zip-fixed-rv{32,64}`, `coremark-pro-regression-rv{32,64}`,
-and `coremark-pro-rebuilt-rv64` under `verify/build`. The runner's default timeout
+and `coremark-pro-rebuilt-rv64` under `verification/build`. The runner's default timeout
 remains 7200 seconds and is configurable.
 
 ## License and attribution

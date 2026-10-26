@@ -13,7 +13,7 @@ void __am_timer_uptime(AM_TIMER_UPTIME_T *uptime)
     asm volatile("rdtime %0" : "=r"(lo));
     asm volatile("rdtimeh %0" : "=r"(hi1));
   } while (hi0 != hi1);
-  // Match hdl/include/ysyxsoc/rapt_soc.svh: CLINT mtime is 10 MHz,
+  // Match rtl/include/ysyxsoc/rapt_soc.svh: CLINT mtime is 10 MHz,
   // independently of the core clock. Do not interpret mtime as mcycle.
   uptime->us = (((uint64_t)hi0 << 32) | lo) / 10;
 

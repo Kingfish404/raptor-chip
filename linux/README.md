@@ -104,7 +104,7 @@ Standalone NEMU also supports explicit `--disk-mode=persistent` and `readonly`;
 see [disk storage modes](../nemu/README.md#disk-images-and-persistence) for host-file
 modification, flush and locking semantics. The existing distribution checks
 and their manifests remain volatile; persistent storage has a separate
-`make -C verify nemu-storage-linux-check` ext4 reboot-retention check.
+`make -C verification nemu-storage-linux-check` ext4 reboot-retention check.
 
 ## Building and validation
 

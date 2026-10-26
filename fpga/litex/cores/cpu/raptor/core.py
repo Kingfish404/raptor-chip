@@ -152,7 +152,7 @@ class Raptor(CPU):
             os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", ".."),
         )
         raptor_home = os.path.abspath(raptor_home)
-        rtl_dir = os.path.join(raptor_home, "hdl")
+        rtl_dir = os.path.join(raptor_home, "rtl")
 
         # Do not invoke sim/Makefile: its Kconfig includes and shared exports
         # are not independent of concurrent simulator/other-XLEN builds.
@@ -190,7 +190,7 @@ class Raptor(CPU):
         if variant == "linux64" and "-DRAPT_RV64" not in env_vflags:
             env_vflags = (env_vflags + " -DRAPT_RV64").strip()
 
-        # Allow the integrator to pick an RTL config preset (hdl/configs/<name>/).
+        # Allow the integrator to pick an RTL config preset (rtl/configs/<name>/).
         env_config = os.environ.get("RAPT_CONFIG", "") or "default"
         root = Path(os.environ.get("RAPT_PACK_ROOT", os.path.join(raptor_home, "fpga/litex/build/rtl")))
         pack_sv = pack(Path(raptor_home), root, env_config, env_vflags, immutable=True)
@@ -237,7 +237,7 @@ class Raptor(CPU):
             os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", ".."),
         ))
         rapt_config = os.environ.get("RAPT_CONFIG", "") or "default"
-        config_path = os.path.join(raptor_home, "hdl", "configs", rapt_config, "rapt_config.svh")
+        config_path = os.path.join(raptor_home, "rtl", "configs", rapt_config, "rapt_config.svh")
         with open(config_path, encoding="utf-8") as config_file:
             config_text = config_file.read()
 

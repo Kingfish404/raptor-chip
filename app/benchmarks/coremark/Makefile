@@ -14,7 +14,7 @@ PORTME_DIR   := $(_THIS_DIR)portme
 
 # ---- CoreMark config ----
 ITERATIONS ?= 16
-# Match hdl/include/npc/rapt_soc.svh and the selected DTS timebase-frequency.
+# Match rtl/include/npc/rapt_soc.svh and the selected DTS timebase-frequency.
 # Override together with the simulator timer when using a custom clock model.
 COREMARK_TIMEBASE_HZ ?= 10000000
 # COREMARK_OPTIM_CFLAGS: optional aggressive optimization flags injected by the

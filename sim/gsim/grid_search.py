@@ -4,7 +4,7 @@
 Grid-search driver for raptor_se.py (gem5 SE-mode DSE).
 
 Sweeps microarchitecture knobs around the current HDL default preset
-(`hdl/configs/default/rapt_config.svh`, parsed directly by raptor_se.py) by
+(`rtl/configs/default/rapt_config.svh`, parsed directly by raptor_se.py) by
 appending --set overrides, runs CoreMark + Embench workloads in parallel, and
 aggregates IPC / miss-rate / window-pressure stats into one CSV per workload
 plus a merged all-workloads CSV under sim/build/gsim/results/.

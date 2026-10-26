@@ -1,4 +1,4 @@
-/* Generated from hdl/configs/memory_map.json by verify/scripts/gen_platform_header.py.
+/* Generated from rtl/configs/memory_map.json by verification/scripts/gen_platform_header.py.
  * Do not edit: change the JSON and run `make memory-map-header`. */
 #ifndef RAPTOR_PLATFORM_H
 #define RAPTOR_PLATFORM_H

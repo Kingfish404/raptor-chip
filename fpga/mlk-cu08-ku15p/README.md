@@ -93,7 +93,7 @@ make -C fpga/mlk-cu08-ku15p ubuntu-boot UART_PORT='/dev/serial/by-id/<KU15P-UART
 | Option | Default | Meaning |
 |---|---|---|
 | `XLEN` | `64` | `32` or `64` |
-| `RAPT_CONFIG` | `small` | CPU preset from `hdl/configs/` |
+| `RAPT_CONFIG` | `small` | CPU preset from `rtl/configs/` |
 | `MEMORY` | `ddr` | `bram` or `ddr` main RAM |
 | `CM005_BRIDGE` | `1` | CM005 A↔B forwarding; requires `CLOCK_MHZ=50` |
 | `CM005_ETHERNET` | `0` | Add the native CPU NIC; enabled by `ubuntu-bitstream` |
@@ -155,7 +155,7 @@ CU08 platform definition.
 
 ## Memory map and software interface
 
-Addresses are generated from `hdl/configs/memory_map.json`:
+Addresses are generated from `rtl/configs/memory_map.json`:
 
 | Region | Base address | Size / behavior |
 |---|---|---|

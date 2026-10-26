@@ -7,7 +7,7 @@ the *contract* between the four pieces of the integration:
     1. sim/sram/configs/*.py            - macro shape definitions
     2. sim/sram/wrappers/rapt_sram_blackbox.v - Yosys blackbox declarations
     3. sim/sram/scripts/gen_stub_lib.py - placeholder Liberty/Verilog
-    4. hdl/sram/rapt_sram_1rw.sv      - RTL macro instantiations
+    4. rtl/sram/rapt_sram_1rw.sv      - RTL macro instantiations
 
 If any of these drift out of sync (port width changes, missing pin,
 shape removed from one file but not another), STA would either fail to
@@ -59,7 +59,7 @@ SHAPES = [
 
 BLACKBOX_V = SRAM / "wrappers" / "rapt_sram_blackbox.v"
 STUB_GEN   = SRAM / "scripts" / "gen_stub_lib.py"
-RTL_SRAM   = RAPTOR / "hdl" / "sram" / "rapt_sram_1rw.sv"
+RTL_SRAM   = RAPTOR / "rtl" / "sram" / "rapt_sram_1rw.sv"
 CONFIG_DIR = SRAM / "configs"
 
 
@@ -314,7 +314,7 @@ def test_cross_consistency():
               f"{name}: registered for stub generation")
         config = name.replace("rapt_openram_1rw_", "rapt_sram_") + "_1rw"
         check(config in makefile, f"{name}: registered for macro/library generation")
-    preset = read(RAPTOR / "hdl/configs/default/rapt_config.svh")
+    preset = read(RAPTOR / "rtl/configs/default/rapt_config.svh")
     sets = re.search(r"`define\s+RAPT_L1I_LEN\s+(\d+)", preset)
     check(sets is not None, "default L1I set geometry found")
     if sets:

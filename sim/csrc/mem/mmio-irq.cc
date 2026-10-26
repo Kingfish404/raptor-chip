@@ -11,11 +11,11 @@ extern NPCState npc;
 // to fire IRQ N sets bit N. The TB wrapper (sim/rtl/) calls
 // `npc_consume_ext_irq_vector()` once per `posedge clock`, atomically reading
 // and clearing the bitmap, then drives `ext_irq_i[]` for one cycle. The PLIC
-// edge-detect FSM (hdl/perip/rapt_plic.sv) latches the rising edge as
+// edge-detect FSM (rtl/perip/rapt_plic.sv) latches the rising edge as
 // pending, exactly as a real device line would.
 //
 // This replaces the legacy backdoor `*npc.plic_pending |= ...` write into
-// hdl RTL state, removing the cross-hierarchy poke and making the IRQ
+// rtl/ state, removing the cross-hierarchy poke and making the IRQ
 // path synthesizable end-to-end (the TB drives a real port).
 //
 // Bit indexing matches the PLIC: bit `i` <-> source `i` (1..NDEV); bit 0 is

@@ -68,7 +68,7 @@ with each timing or area measurement.
 
 ## Physical Address Contract
 
-[`hdl/configs/memory_map.json`](https://github.com/Kingfish404/raptor-chip/blob/master/hdl/configs/memory_map.json) records the shared 32-bit physical addresses and the main RAM
+[`rtl/configs/memory_map.json`](https://github.com/Kingfish404/raptor-chip/blob/master/rtl/configs/memory_map.json) records the shared 32-bit physical addresses and the main RAM
 capacity of each board or simulator profile. The window starts at `0x80000000`.
 KU15P CU07/CU08 with MIG map 2 GiB through `0xffffffff`; RV32 and RV64 use
 the same hardware map. RV32 Linux advertises only the lower 1 GiB in its device
@@ -79,7 +79,8 @@ remain at 1 GiB. Other board capacities are listed in the JSON file.
 NPC and NEMU constants, and that the generated [`app/lib/raptor_platform.h`](https://github.com/Kingfish404/raptor-chip/blob/master/app/lib/raptor_platform.h) is current.
 Guest test programs include that header (`RAPTOR_<REGION>_BASE`/`_SIZE`,
 `RAPTOR_PTE()`) instead of copying addresses; the verify Makefile adds
-`-I app/lib` to every guest compile. The generator and checker live in `verify/scripts/`. After editing the JSON, run
+`-I app/lib` to every guest compile. The generator and checker live in
+`verification/scripts/`. After editing the JSON, run
 `make memory-map-header`. The FPGA build also validates the selected hardware
 and Linux RAM sizes. When changing a region or capacity, update the JSON and
 the affected implementation together, then rerun the checker and focused

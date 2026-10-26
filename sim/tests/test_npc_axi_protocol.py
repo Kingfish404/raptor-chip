@@ -22,10 +22,10 @@ def main():
             if xlen == 64:
                 command += ['-DRAPT_RV64', '-CFLAGS', '-DTEST_RV64']
             command += [f'-I{root / p}' for p in
-                        ('hdl/configs/default', 'hdl/include', 'hdl/include/npc',
-                         'hdl/include/dpic')]
+                        ('rtl/configs/default', 'rtl/include', 'rtl/include/npc',
+                         'rtl/include/dpic')]
             command += [str(root / p) for p in
-                        ('hdl/perip/rapt_dpi_c.sv', 'sim/rtl/rapt_npc_soc.sv',
+                        ('rtl/perip/rapt_dpi_c.sv', 'sim/rtl/rapt_npc_soc.sv',
                          'sim/tests/npc_axi_protocol.cc')]
             with (out / f'{name}-build.log').open('w') as log:
                 subprocess.run(command, check=True, stdout=log, stderr=subprocess.STDOUT)

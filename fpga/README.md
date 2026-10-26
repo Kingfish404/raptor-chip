@@ -13,7 +13,7 @@
 
 `common/` contains native platform RTL, firmware, UART tools and the shared RTL
 exporter. Both native and LiteX builds consume the same CPU sources and preset
-definitions. Native board addresses come from `hdl/configs/memory_map.json`.
+definitions. Native board addresses come from `rtl/configs/memory_map.json`.
 
 Each native board directory is a standalone build that does not run the
 `fpga/litex` Makefile; only CU08's CM005 bridge is generated from its Migen and

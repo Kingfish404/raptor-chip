@@ -1,7 +1,7 @@
 /***************************************************************************************
  * Physical Memory Protection (PMP) for NEMU RISC-V target.
  *
- * Mirrors the RTL implementation in hdl/memory/rapt_pmp.sv so that the
+ * Mirrors the RTL implementation in rtl/memory/rapt_pmp.sv so that the
  * NEMU reference model and the Raptor DUT produce identical access-fault
  * behaviour for difftest and RISCOF.
  *
@@ -31,7 +31,7 @@
 #define PMP_G (CONFIG_RV_PMP_GRANULARITY_LOG2 - 2)
 #define PMP_TOR_MASK (((word_t)1 << PMP_G) - 1)
 
-/* pmpcfg byte field positions (match hdl/include/rapt.svh). */
+/* pmpcfg byte field positions (match rtl/include/rapt.svh). */
 #define PMPCFG_R_BIT 0
 #define PMPCFG_W_BIT 1
 #define PMPCFG_X_BIT 2

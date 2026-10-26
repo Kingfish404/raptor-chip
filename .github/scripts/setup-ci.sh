@@ -59,12 +59,12 @@ prepare_decoders() {
     # Only the exact content-keyed decoder cache is accepted. Checkouts have
     # newer mtimes than cached files; refresh outputs after validating the hit
     # so sim/Makefile does not invoke sbt again in every consumer.
-    test -s hdl/generated/rapt_idu_decoder.sv
-    test -s hdl/generated/rapt_idu_decoder_c.sv
-    touch hdl/generated/rapt_idu_decoder{,_c}.sv
+    test -s rtl/generated/rapt_idu_decoder.sv
+    test -s rtl/generated/rapt_idu_decoder_c.sv
+    touch rtl/generated/rapt_idu_decoder{,_c}.sv
   else
     clone_build_espresso
-    make -C hdl/chisel verilog
+    make -C tools/decodegen verilog
   fi
 }
 

@@ -38,10 +38,10 @@ endif
 endif
 
 NSIM_HOME = $(abspath .)
-VSRC_PATH ?= $(abspath ../hdl)
+VSRC_PATH ?= $(abspath ../rtl)
 
 # Configuration preset selection. Each preset lives in
-# `$(RAPTOR_HOME)/hdl/configs/<name>/rapt_config.svh` and is picked up first via
+# `$(RAPTOR_HOME)/rtl/configs/<name>/rapt_config.svh` and is picked up first via
 # include path so it takes precedence over any older copy. Override at the
 # command line: `make pack RAPT_CONFIG=small`.
 RAPT_CONFIG ?= default
@@ -49,10 +49,10 @@ RAPT_CONFIG ?= default
 # GNU make's `#` comment can leave trailing whitespace in the value, which
 # corrupts BUILD_DIR (e.g. `./build/default ` with a trailing space).
 RAPT_CONFIG := $(strip $(RAPT_CONFIG))
-CONFIG_DIR  := $(abspath $(RAPTOR_HOME)/hdl/configs/$(RAPT_CONFIG))
+CONFIG_DIR  := $(abspath $(RAPTOR_HOME)/rtl/configs/$(RAPT_CONFIG))
 ifeq ($(wildcard $(CONFIG_DIR)/rapt_config.svh),)
 $(error RAPT_CONFIG='$(RAPT_CONFIG)' but $(CONFIG_DIR)/rapt_config.svh does not exist. \
-Available: $(notdir $(wildcard $(RAPTOR_HOME)/hdl/configs/*)))
+Available: $(notdir $(wildcard $(RAPTOR_HOME)/rtl/configs/*)))
 endif
 
 # Each profile/XLEN owns its Kconfig state, generated headers and run output.
@@ -87,7 +87,7 @@ RUN_DIR ?= $(abspath $(BUILD_DIR)/run-$(ISA_NAME))
 -include $(SIM_AUTOCONFIG)
 -include $(SIM_AUTOCONFIG).cmd
 
-# Config dir MUST come before hdl/include so its rapt_config.svh wins.
+# Config dir MUST come before rtl/include so its rapt_config.svh wins.
 INC_PATH ?= $(CONFIG_DIR) $(SIM_CONFIG_ROOT)/include $(abspath ./include) $(abspath $(VSRC_PATH)/include) $(NEMU_HOME)/include
 
 remove_quote = $(patsubst "%",%,$(1))
@@ -147,7 +147,7 @@ endif
 # build profile matches the RTL preset, but verification flows that require a
 # different simulator configuration (for example, plain RISCOF versus a
 # difftest/coverage build) can select a separate artifact directory without
-# inventing a non-existent hdl/configs preset.
+# inventing a non-existent rtl/configs preset.
 RAPT_SIM_PROFILE ?= 0## Enable Verilator C profiling instrumentation (1=on, 0=off)
 RAPT_SIM_PROFILE := $(strip $(RAPT_SIM_PROFILE))
 PROFILE_SUFFIX = $(if $(filter 1,$(RAPT_SIM_PROFILE)),-profile,)
@@ -247,14 +247,14 @@ INC_PATH += $(NSIM_RTL_PATH)
 GENERATED_RTL_PATH := $(abspath $(VSRC_PATH)/generated)
 GENERATED_DECODERS := $(GENERATED_RTL_PATH)/rapt_idu_decoder.sv \
 	$(GENERATED_RTL_PATH)/rapt_idu_decoder_c.sv
-CHISEL_DECODER_SRCS := $(shell find $(RAPTOR_HOME)/hdl/chisel/src -type f) \
-	$(RAPTOR_HOME)/hdl/chisel/Makefile
+CHISEL_DECODER_SRCS := $(shell find $(RAPTOR_HOME)/tools/decodegen/src -type f) \
+	$(RAPTOR_HOME)/tools/decodegen/Makefile
 
 # The instruction decoders are generated and ignored by Git. Make them explicit
 # prerequisites so a clean checkout can build the simulator without a separate
-# manual `make -C hdl/chisel verilog` step.
+# manual `make -C tools/decodegen verilog` step.
 $(GENERATED_DECODERS) &: $(CHISEL_DECODER_SRCS)
-	$(MAKE) -C $(RAPTOR_HOME)/hdl/chisel verilog
+	$(MAKE) -C $(RAPTOR_HOME)/tools/decodegen verilog
 
 VSRCS_RAW = $(shell find $(VSRC_PATH) $(NSIM_RTL_PATH) -path $(GENERATED_RTL_PATH) -prune -o -name "*.sv" -print) \
 	$(GENERATED_DECODERS)
@@ -287,7 +287,7 @@ $(SOC_VSRC):
 endif
 
 memory-map-check:
-	python3 $(RAPTOR_HOME)/verify/scripts/check_memory_map.py
+	python3 $(RAPTOR_HOME)/verification/scripts/check_memory_map.py
 
 all: memory-map-check $(BIN) ## Build NPC simulator
 
@@ -387,7 +387,7 @@ SDCARD ?= ## LiteX SPI SD-card image to load with --sdcard
 NPC_EXEC = $(abspath $(MODEL_BIN)) $(ARGS) $(SIM_RANDOM_ARGS) $(if $(DISK),--disk $(abspath $(DISK)),) $(if $(SDCARD),--sdcard $(abspath $(SDCARD)),) $(DIFF_REF_SO) -r $(abspath $(MROM_IMG)) $(if $(IMG),$(abspath $(IMG)))
 
 verilog: ## Generate SystemVerilog from Chisel
-	$(MAKE) -C $(RAPTOR_HOME)/hdl/chisel verilog
+	$(MAKE) -C $(RAPTOR_HOME)/tools/decodegen verilog
 
 run: $(BIN) $(MROM_IMG) $(NEMU_REF_DEP) ## Run NPC simulation
 	@mkdir -p "$(RUN_DIR)/data"
@@ -410,7 +410,7 @@ jtag-selftest: ## Build and run JTAG TAP/DTM/DM self-test (no NEMU needed)
 
 # JTAG OpenOCD bridge: spins the live RTL TAP and serves OpenOCD over its
 # `remote_bitbang` TCP protocol on 127.0.0.1:9824. Pair with
-# `openocd -f verify/jtag/openocd.cfg` in another shell.
+# `openocd -f verification/jtag/openocd.cfg` in another shell.
 JTAG_PORT ?= 9824
 jtag-server: ## Build & launch sim as an OpenOCD remote_bitbang server
 	$(MAKE) all
@@ -439,7 +439,7 @@ synth-frontend-check: ## Check the installed Yosys/slang frontend without instal
 		exit 1; }
 
 sta-deps: synth-frontend-check
-	@$(MAKE) -s -C "$(RAPTOR_HOME)/lspd/syn" doctor \
+	@$(MAKE) -s -C "$(RAPTOR_HOME)/synth/yosys" doctor \
 		PDK=$(if $(filter sky130hd,$(STA_PLATFORM)),sky130,$(STA_PLATFORM)) \
 		SRAM_MODE=flops OPENSTA="$(YOSYS_OPENSTA)/third_party/OpenSTA/build/sta" \
 		FLOW_ROOT="$(YOSYS_OPENSTA)" || { \
@@ -504,7 +504,7 @@ pack: $(PACK_VSRCS) $(VHSRCS) ## Pack all SV files into one
 
 STA_PLATFORM ?= nangate45 ## STA platform: nangate45, asap7, sky130hd (alias: sky130)
 CLK_FREQ_MHZ ?= 50 ## Target clock frequency for STA (MHz)
-# The flow calls SkyWater HD sky130hd; LSPD calls the same PDK sky130.
+# The flow calls SkyWater HD sky130hd; synth/ calls the same PDK sky130.
 # Override is required here because ordinary assignments cannot normalize a
 # command-line STA_PLATFORM, including values forwarded by the root Makefile.
 override STA_PLATFORM := $(patsubst sky130,sky130hd,$(strip $(STA_PLATFORM)))

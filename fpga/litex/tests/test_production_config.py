@@ -20,7 +20,7 @@ from ku15p_soc import configure_ku15p_timing
 
 class ProductionConfigTest(unittest.TestCase):
     def test_mshr_lookup_signals_precede_generate(self):
-        source = (REPO / "hdl/memory/rapt_l1d.sv").read_text()
+        source = (REPO / "rtl/memory/rapt_l1d.sv").read_text()
         instance = source.index("begin : g_mshr")
         for signal in ("l1d_addr", "tag_hit", "load_way_hit"):
             with self.subTest(signal=signal):
@@ -62,7 +62,7 @@ class ProductionConfigTest(unittest.TestCase):
                 add_sources.assert_called_once_with(platform, variant, pmem_size=None)
 
     def test_no_board_debug_hooks(self):
-        files = list((REPO / "hdl").rglob("*.sv")) + list((REPO / "hdl").rglob("*.svh")) + [
+        files = list((REPO / "rtl").rglob("*.sv")) + list((REPO / "rtl").rglob("*.svh")) + [
             LITEX / "ku15p_soc.py", LITEX / "cores/cpu/raptor/core.py",
             LITEX / "Makefile", LITEX / "mk/config.mk",
         ]
@@ -82,15 +82,15 @@ class ProductionConfigTest(unittest.TestCase):
                 for synthesis in (False, True):
                     with self.subTest(bits=bits, source=source, synthesis=synthesis):
                         command = ["verilator", "-E", "-P",
-                                   "-I" + str(REPO / "hdl/configs/default"),
-                                   "-I" + str(REPO / "hdl/include"),
-                                   "-I" + str(REPO / "hdl/include/npc"),
-                                   "-I" + str(REPO / "hdl/include/dpic_mock")]
+                                   "-I" + str(REPO / "rtl/configs/default"),
+                                   "-I" + str(REPO / "rtl/include"),
+                                   "-I" + str(REPO / "rtl/include/npc"),
+                                   "-I" + str(REPO / "rtl/include/dpic_mock")]
                         if bits == 64:
                             command.append("-DRAPT_RV64")
                         if synthesis:
                             command.append("-DSYNTHESIS")
-                        command.append(str(REPO / "hdl/backend" / source))
+                        command.append(str(REPO / "rtl/backend" / source))
                         result = subprocess.run(command, capture_output=True, text=True)
                         self.assertEqual(result.returncode, 0, result.stderr)
                         self.assertEqual(probe in result.stdout, not synthesis)

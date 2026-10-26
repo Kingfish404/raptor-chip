@@ -14,10 +14,10 @@ on:
       - "setup-rtl.sh"
       - "nemu/tools/spike-diff/**"
       - "nemu/src/isa/filelist.mk"
-      - "verify/scripts/test_spike_bootstrap.py"
-      - "verify/scripts/test_riscof_*.py"
-      - "verify/scripts/riscof*"
-      - "verify/riscof/**"
+      - "verification/scripts/test_spike_bootstrap.py"
+      - "verification/scripts/test_riscof_*.py"
+      - "verification/scripts/riscof*"
+      - "verification/riscof/**"
       - "app/benchmarks/coremark/portme/**"
       - "app/benchmarks/embench/report.py"
       - "app/benchmarks/embench/test_report.py"
@@ -50,12 +50,12 @@ jobs:
       - name: CI setup helpers
         run: python3 .github/scripts/test_ci_setup.py
       - name: Spike and SoftFloat bootstrap
-        run: python3 verify/scripts/test_spike_bootstrap.py
+        run: python3 verification/scripts/test_spike_bootstrap.py
       - name: Log parsing and CoreMark validation
         run: python3 .github/scripts/test_ci_report.py
       - name: Embench score aggregation
         run: python3 app/benchmarks/embench/test_report.py
       - name: RISCOF runner failure handling
         run: |
-          python3 verify/scripts/test_riscof_classic_runner.py
-          python3 verify/scripts/test_riscof_classic_sail.py
+          python3 verification/scripts/test_riscof_classic_runner.py
+          python3 verification/scripts/test_riscof_classic_sail.py

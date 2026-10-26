@@ -3,7 +3,7 @@ APP_HOME := $(RAPTOR_HOME)/app
 NEMU_HOME := $(RAPTOR_HOME)/nemu
 export NEMU_HOME
 BUILD_DIR := $(APP_HOME)/build/$(ISA)/tests/fp
-LINKER := $(RAPTOR_HOME)/verify/scripts/fuzz_link.ld
+LINKER := $(RAPTOR_HOME)/verification/scripts/fuzz_link.ld
 CC := riscv64-unknown-elf-gcc
 OBJCOPY := riscv64-unknown-elf-objcopy
 SIM_HOME := $(RAPTOR_HOME)/sim

@@ -4,7 +4,7 @@
 gem5 SE-mode model of the Raptor chip out-of-order RISC-V core.
 
 Mirrors the microarchitecture knobs declared in
-`raptor-chip/hdl/configs/<preset>/rapt_config.svh` so DSE / perf-bug runs in
+`raptor-chip/rtl/configs/<preset>/rapt_config.svh` so DSE / perf-bug runs in
 gem5 stay aligned with the RTL configuration matrix.
 
 Why SE mode?
@@ -55,7 +55,7 @@ The JSON override accepts a ChampSim-like schema: top-level `block_size`,
 `physical_memory`, and `simulation` sections. It is normalized internally into
 the uarch/sim knobs used by this script. Config layering order (later wins):
 
-    1. `hdl/configs/<preset>/rapt_config.svh`  (or --config-svh)
+    1. `rtl/configs/<preset>/rapt_config.svh`  (or --config-svh)
     2. `--json-config <file>`              (ChampSim-style JSON; see dse-config.json)
     3. `--set ooo_cpu.0.rob_size=128 --set L1D.mshr_size=4 ...`
   4. legacy CLI flags (--mshrs, --bp, --storeset, --clk-freq, ...) when
@@ -741,7 +741,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--preset",
-        help="raptor-chip uarch preset (matches hdl/configs/<preset>/rapt_config.svh)",
+        help="raptor-chip uarch preset (matches rtl/configs/<preset>/rapt_config.svh)",
     )
     ap.add_argument(
         "--config-svh",
@@ -863,7 +863,7 @@ def main(argv: list[str] | None = None) -> int:
     # ---- 1. Read raptor preset (layer 1: rapt_config.svh) --------------------
     svh = args.config_svh
     if svh is None:
-        svh = RAPT_HOME / "hdl" / "configs" / args.preset / "rapt_config.svh"
+        svh = RAPT_HOME / "rtl" / "configs" / args.preset / "rapt_config.svh"
     if not svh.exists():
         print(f"[raptor_se] cannot find rapt_config.svh at {svh}", file=sys.stderr)
         return 2

@@ -118,7 +118,7 @@ used 230,862 LUTs, exceeding this part's LUT capacity; `default-w3` and
 | Option | Default | Meaning |
 |---|---|---|
 | `XLEN` | `64` | `32` or `64` |
-| `RAPT_CONFIG` | `small` | CPU preset from `hdl/configs/` |
+| `RAPT_CONFIG` | `small` | CPU preset from `rtl/configs/` |
 | `MEMORY` | `ddr` | `ddr` or `bram` main RAM |
 | `CLOCK_MHZ` | `50` | CPU clock target: `25`, `50` or `100` MHz |
 | `RAM_BYTES` | `131072` | BRAM main RAM size; power of two, 16 KiB–1 MiB |
@@ -188,7 +188,7 @@ The 50 MHz single-ended oscillator is unused.
 
 ## Memory map and software interface
 
-Addresses are generated from `hdl/configs/memory_map.json`:
+Addresses are generated from `rtl/configs/memory_map.json`:
 
 | Region | Base address | Size / behavior |
 |---|---|---|

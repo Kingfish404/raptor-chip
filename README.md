@@ -42,7 +42,7 @@ lists the implemented extensions. Zkt provides data-independent execution latenc
 covered by its specification. Svinval shares committed SFENCE.VMA ordering and selective address/ASID
 invalidation in both XLEN modes. Svpbmt carries page-based memory types through the RV64 Sv39
 translation, cache, and bus paths. The
-[RV64 supervisor verification configuration](verify/riscof/raptor-rv64s/raptor-rv64s.yaml) declares these
+[RV64 supervisor verification configuration](verification/riscof/raptor-rv64s/raptor-rv64s.yaml) declares these
 extensions.
 
 The F/D/Zfhmin implementation covers scalar floating-point load/store, arithmetic, FMA, divide/square-root, conversion, comparison/classification, rounding modes, accrued exception flags, and binary16 load/store, transfer, and conversion. The compressed subset includes the C-extension floating-point memory forms required with F/D (C.FLW/C.FSW on RV32 and C.FLD/C.FSD plus their stack-pointer forms on RV32/RV64).
@@ -51,7 +51,7 @@ See [documentation](./docs/README.md) for more details.
 
 ## Microarchitecture
 
-Sizes shown are for the `default` preset (`hdl/configs/default/rapt_config.svh`); other presets differ. See [Microarchitecture](./docs/uarch.md) for the pipeline stages and the per-block contracts.
+Sizes shown are for the `default` preset (`rtl/configs/default/rapt_config.svh`); other presets differ. See [Microarchitecture](./docs/uarch.md) for the pipeline stages and the per-block contracts.
 
 ```mermaid
 flowchart TD
@@ -265,7 +265,7 @@ make verify-riscof
 make verify-coverage
 # Run the lightweight fuzz + signature suites
 make verify-light
-# See verify/README.md for SVA, formal (RVFI), and ACT4 details
+# See verification/README.md for SVA, formal (RVFI), and ACT4 details
 ```
 
 ### 7. FPGA
@@ -317,7 +317,7 @@ cd $NEMU_HOME && make riscv32_defconfig && make && make run
 cd $NEMU_HOME && make riscv32_linux_defconfig && make && make run
 
 # 2. build and run NPC
-cd $RAPTOR_HOME/hdl/chisel && make verilog
+cd $RAPTOR_HOME/tools/decodegen && make verilog
 cd $NSIM_HOME && make o2_difftest_defconfig && make && make run
 cd $NSIM_HOME && make o2linux_difftest_defconfig && make && make run
 cd $NSIM_HOME && make menuconfig && make ARCH=riscv32-npc run

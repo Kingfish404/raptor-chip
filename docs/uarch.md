@@ -124,7 +124,7 @@ RNU owns the speculative register map and free-register state. CSR observers rea
 
 ## Default configuration
 
-These values refer to `hdl/configs/default/rapt_config.svh`, shared defaults in `hdl/include/rapt.svh`, and top-level parameter defaults; other presets and command-line overrides can differ.
+These values refer to `rtl/configs/default/rapt_config.svh`, shared defaults in `rtl/include/rapt.svh`, and top-level parameter defaults; other presets and command-line overrides can differ.
 
 `small-cache` and `middle-cache` each have 128 KiB L1I and L1D caches with
 64-byte lines. L1I uses 1024 sets and two ways; L1D uses 64 sets and 32 ways to

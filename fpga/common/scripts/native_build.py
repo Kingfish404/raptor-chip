@@ -80,14 +80,14 @@ def configuration(args):
 def input_hashes(cm005_bridge=False):
     files = []
     extensions = {".sv", ".svh", ".py", ".c", ".h", ".S", ".tcl", ".xdc", ".json"}
-    for root in (REPO / "hdl", REPO / "sim/include", REPO / "sim/rtl", COMMON, BOARD):
+    for root in (REPO / "rtl", REPO / "sim/include", REPO / "sim/rtl", COMMON, BOARD):
         # Prune generated trees before traversal: Ubuntu rootfs/kernel caches can
         # contain hundreds of thousands of files and are never source inputs.
         for directory, children, names in os.walk(root):
             parent = Path(directory)
             children[:] = [name for name in children
                            if name not in {"build", "tests", "__pycache__"} and
-                           parent / name != REPO / "hdl/chisel/target"]
+                           parent / name != REPO / "tools/decodegen/target"]
             files += [parent / name for name in names
                       if Path(name).suffix in extensions and (parent / name).is_file()]
     if cm005_bridge:
@@ -115,7 +115,7 @@ def identity(args):
 
 
 def region_map():
-    raw = json.loads((REPO / "hdl/configs/memory_map.json").read_text())
+    raw = json.loads((REPO / "rtl/configs/memory_map.json").read_text())
     return {name: {key: int(value, 0) for key, value in reg.items()} for name, reg in raw["regions"].items()}
 
 
@@ -127,7 +127,7 @@ def write_map(args, out):
         if "size" in regions[source]:
             values[name + "Bytes"] = regions[source]["size"]
     # RV32 uses the existing 1 GiB Linux profile, RV64 maps the full 2 GiB.
-    profile = json.loads((REPO / "hdl/configs/memory_map.json").read_text())["profiles"]["ku15p_mig"]
+    profile = json.loads((REPO / "rtl/configs/memory_map.json").read_text())["profiles"]["ku15p_mig"]
     values["DdrBytes"] = int(profile["rv32_linux_size" if args.xlen == 32 else "ram_size"], 0)
     (out / "sources/native_map.sv").write_text("package rapt_native_map_pkg;\n" + "".join(
         f"  localparam longint unsigned {name} = 64'h{value:x};\n" for name, value in values.items()
@@ -404,8 +404,8 @@ def prepare(args, out):
 
 def verilator(args, out, top, testbench=None, binary=False):
     command = ["verilator", "--binary" if binary else "--lint-only", "--timing", "--assert", "-Wno-fatal",
-               "--top-module", top, "-I" + str(out / "sources"), "-I" + str(REPO / "hdl/include"),
-               "-I" + str(REPO / "hdl/include/npc"), "-I" + str(COMMON / "tests"), out / "sources/soc_sources.sv"]
+               "--top-module", top, "-I" + str(out / "sources"), "-I" + str(REPO / "rtl/include"),
+               "-I" + str(REPO / "rtl/include/npc"), "-I" + str(COMMON / "tests"), out / "sources/soc_sources.sv"]
     if testbench:
         command += [testbench]
     if binary:

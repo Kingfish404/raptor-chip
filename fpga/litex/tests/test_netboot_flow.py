@@ -144,9 +144,9 @@ class NetbootFlowTest(unittest.TestCase):
             root = Path(tmp)
             litex = root / 'fpga/litex'
             (litex / 'scripts').mkdir(parents=True)
-            (root / 'hdl').mkdir()
+            (root / 'rtl').mkdir()
             (litex / 'Makefile').write_text('fixed build settings')
-            rtl = root / 'hdl/core.sv'
+            rtl = root / 'rtl/core.sv'
             rtl.write_text('module core; endmodule')
             runtime = litex / 'scripts/netboot_flow.py'
             runtime.write_text('old UART reader')

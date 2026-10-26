@@ -12,7 +12,7 @@ import unittest
 
 LITEX = Path(__file__).resolve().parents[1]
 # CU08 MIG RAM size from the platform contract, not a copied literal.
-KU15P_RAM = int(json.loads((LITEX.parents[1] / 'hdl/configs/memory_map.json').read_text())
+KU15P_RAM = int(json.loads((LITEX.parents[1] / 'rtl/configs/memory_map.json').read_text())
                 ['profiles']['ku15p_mig']['ram_size'], 0)
 REPO = LITEX.parents[1]
 sys.path.insert(0, str(LITEX / "scripts"))
@@ -253,14 +253,14 @@ class BuildIsolationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             repo = root / "repo"
-            (repo / "hdl/configs/default").mkdir(parents=True)
-            (repo / "hdl/generated").mkdir()
-            (repo / "hdl/configs/default/rapt_config.svh").write_text("`define TEST_WIDTH 32\n")
-            (repo / "hdl/rapt_pkg.sv").write_text("package rapt_pkg; endpackage\n")
-            source = repo / "hdl/top.sv"
+            (repo / "rtl/configs/default").mkdir(parents=True)
+            (repo / "rtl/generated").mkdir()
+            (repo / "rtl/configs/default/rapt_config.svh").write_text("`define TEST_WIDTH 32\n")
+            (repo / "rtl/rapt_pkg.sv").write_text("package rapt_pkg; endpackage\n")
+            source = repo / "rtl/top.sv"
             source.write_text('`include "rapt_config.svh"\nmodule top; endmodule\n')
             for name in ("rapt_idu_decoder.sv", "rapt_idu_decoder_c.sv"):
-                (repo / "hdl/generated" / name).write_text("// fixture\n")
+                (repo / "rtl/generated" / name).write_text("// fixture\n")
             command = [sys.executable, str(LITEX / "scripts/isolated_pack.py"), "--repo", str(repo),
                        "--root", str(root / "output"), "--config", "default"]
             ok = subprocess.run(command, capture_output=True, text=True, check=True)
@@ -290,15 +290,15 @@ class BuildIsolationTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             repo = root / "repo"
-            (repo / "hdl/configs/default").mkdir(parents=True)
-            (repo / "hdl/generated").mkdir()
-            header = repo / "hdl/configs/default/rapt_config.svh"
+            (repo / "rtl/configs/default").mkdir(parents=True)
+            (repo / "rtl/generated").mkdir()
+            header = repo / "rtl/configs/default/rapt_config.svh"
             header.write_text("`define TEST_WIDTH 32\n")
-            (repo / "hdl/rapt_pkg.sv").write_text("package rapt_pkg; endpackage\n")
-            source = repo / "hdl/top.sv"
+            (repo / "rtl/rapt_pkg.sv").write_text("package rapt_pkg; endpackage\n")
+            source = repo / "rtl/top.sv"
             source.write_text('`include "rapt_config.svh"\nmodule top; endmodule\n')
             for name in ("rapt_idu_decoder.sv", "rapt_idu_decoder_c.sv"):
-                (repo / "hdl/generated" / name).write_text("// fixture\n")
+                (repo / "rtl/generated" / name).write_text("// fixture\n")
             output_root = root / "output"
             output = isolated_pack.pack(repo, output_root, "default", "").parent
             names = ("rapt_pack.sv", "rapt_pack.svh", ".signature")

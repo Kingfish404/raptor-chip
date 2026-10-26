@@ -14,7 +14,7 @@ The default RV64 configuration supports **RVA22S64**.
 
 ## Default core
 
-Values below describe `hdl/configs/default/rapt_config.svh` and the integrated
+Values below describe `rtl/configs/default/rapt_config.svh` and the integrated
 `rapt_core`. Other presets and build overrides can differ.
 
 | Block | Default configuration |
@@ -48,7 +48,7 @@ Both XLEN modes implement **IMAFDC**, scalar **Zfhmin**, bit manipulation
 Page-table A/D bits use software management (Svade). Svinval uses conservative
 full translation invalidation. The [standalone RVV component](./vpu.md) is
 **not integrated into the scalar core**; V is not part of this core's ISA.
-Decoder sources live in [`hdl/chisel/`](https://github.com/Kingfish404/raptor-chip/tree/master/hdl/chisel).
+Decoder sources live in [`tools/decodegen/`](https://github.com/Kingfish404/raptor-chip/tree/master/tools/decodegen).
 
 ## RVA22S64 support
 
@@ -67,8 +67,8 @@ The profile statement applies to the default **RV64** configuration. RV32 and
 modified presets have their own ISA scope. Vector and hypervisor extensions are
 optional in RVA22S64; the integrated scalar core does not include V or H.
 
-The [RV64 supervisor verification guide](https://github.com/Kingfish404/raptor-chip/blob/master/verify/riscof/raptor-rv64s/README.md)
-and [requirement ledger](https://github.com/Kingfish404/raptor-chip/blob/master/verify/riscof/raptor-rv64s/requirements.json)
+The [RV64 supervisor verification guide](https://github.com/Kingfish404/raptor-chip/blob/master/verification/riscof/raptor-rv64s/README.md)
+and [requirement ledger](https://github.com/Kingfish404/raptor-chip/blob/master/verification/riscof/raptor-rv64s/requirements.json)
 record source mappings, tests, and evidence scopes. Support describes the RTL
 implementation; formal profile certification is a separate verification claim.
 
@@ -80,7 +80,7 @@ NEMU supplies the differential reference for the Verilator simulator.
 
 The repository provides directed F/D tests, ISA signature checks, RISCOF/ACT4,
 RVFI/formal, SVA, and differential fuzzing. Test profiles cover different
-subsets; see the [verification guide](https://github.com/Kingfish404/raptor-chip/blob/master/verify/README.md)
+subsets; see the [verification guide](https://github.com/Kingfish404/raptor-chip/blob/master/verification/README.md)
 for commands and prerequisites. A build target alone does not establish a passing
 regression or board boot for a particular revision.
 
@@ -97,11 +97,13 @@ animation cycle and playback state.
 
 | Directory | Contents |
 | --- | --- |
-| `hdl/` | RTL, configuration presets, and Scala decoder sources |
+| `rtl/` | Synthesizable RTL, configuration presets, and generated decoders |
+| `tools/` | Scala/Chisel instruction-decoder generator |
 | `sim/`, `nemu/` | Verilator simulation and differential reference |
-| `verify/` | Directed, formal, ISA, and fuzz verification |
+| `verification/` | Directed, formal, ISA, and fuzz verification |
 | `app/`, `abstract-machine/` | Programs, benchmarks, and runtime |
-| `fpga/`, `linux/`, `lspd/` | Board integration, boot tooling, and synthesis/STA |
+| `synth/`, `layout/` | Module synthesis, STA, FPGA OOC estimates, and physical design |
+| `fpga/`, `linux/` | Board integration and boot tooling |
 
 [Source repository](https://github.com/Kingfish404/raptor-chip) ·
 [Apache 2.0](https://github.com/Kingfish404/raptor-chip/blob/master/LICENSE) ·

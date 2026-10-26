@@ -19,9 +19,9 @@ def main():
         if xlen == 64:
             command += ['-DRAPT_RV64', '-CFLAGS', '-DTEST_RV64']
         command += [f'-I{root / name}' for name in
-                    ('hdl/configs/default', 'hdl/include', 'hdl/include/npc', 'hdl/include/dpic')]
+                    ('rtl/configs/default', 'rtl/include', 'rtl/include/npc', 'rtl/include/dpic')]
         command += [str(root / name) for name in
-                    ('hdl/rapt_pkg.sv', 'hdl/perip/rapt_dpi_c.sv', 'sim/rtl/rapt_npc_soc.sv',
+                    ('rtl/rapt_pkg.sv', 'rtl/perip/rapt_dpi_c.sv', 'sim/rtl/rapt_npc_soc.sv',
                      'sim/tests/npc_write_outstanding.cc')]
         with (out / f'build{xlen}.log').open('w') as log:
             subprocess.run(command, check=True, stdout=log, stderr=subprocess.STDOUT)

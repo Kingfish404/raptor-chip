@@ -107,7 +107,7 @@ clone_build_espresso
                                   (source / "build/CMakeCache.txt").read_text())
 
     def decoder_fixture(self, root, complete=True):
-        generated = root / "hdl/generated"
+        generated = root / "rtl/generated"
         generated.mkdir(parents=True)
         names = ["rapt_idu_decoder.sv", "rapt_idu_decoder_c.sv"]
         for name in names if complete else names[:1]:
@@ -148,7 +148,7 @@ prepare_decoders "$3"
             result = self.decoders(tmp, "false")
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("espresso-build", result.stdout)
-            self.assertIn("make -C hdl/chisel verilog", result.stdout)
+            self.assertIn("make -C tools/decodegen verilog", result.stdout)
 
     def test_riscof_artifact_preserves_executable_without_object_tree(self):
         with tempfile.TemporaryDirectory() as tmp:

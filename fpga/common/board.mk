@@ -11,7 +11,7 @@ BOARD_MAKEFILE := $(abspath $(firstword $(MAKEFILE_LIST)))
 
 PYTHON ?= python3 ## Python interpreter for the native tools
 XLEN ?= 64 ## Core XLEN (32|64)
-RAPT_CONFIG ?= small ## Microarchitecture preset from hdl/configs/
+RAPT_CONFIG ?= small ## Microarchitecture preset from rtl/configs/
 MEMORY ?= ddr ## Main memory (ddr|bram)
 CLOCK_MHZ ?= 50 ## Core clock in MHz (25|50|100)
 RAM_BYTES ?= 131072 ## Main memory bytes when MEMORY=bram (power of two, 16 KiB-1 MiB)

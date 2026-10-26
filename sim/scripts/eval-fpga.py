@@ -232,7 +232,7 @@ def evaluate(stop):
                     memory_args=extra_memory_args,
                     dtb_source=str(dt_source), dtb_source_sha256=hashlib.sha256(dt_source.read_bytes()).hexdigest())
     manifest['source_sha256'] = {}
-    for folder in ('hdl', 'sim/csrc', 'sim/include', 'sim/rtl'):
+    for folder in ('rtl', 'sim/csrc', 'sim/include', 'sim/rtl'):
         for source in sorted((tree/folder).rglob('*')):
             if source.is_file() and source.suffix in ('.sv', '.svh', '.cc', '.cpp', '.h'):
                 digest = hashlib.sha256(source.read_bytes()).hexdigest()

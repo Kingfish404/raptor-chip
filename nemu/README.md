@@ -207,9 +207,9 @@ existing v9 block-device format and independent reference image. Other disk
 modes are rejected before opening an image when comparison or recording is
 requested; they are not silently skipped.
 
-`make -C verify nemu-storage-check` exercises RV32/RV64 disk modes on both SMP
+`make -C verification nemu-storage-check` exercises RV32/RV64 disk modes on both SMP
 backends, host-file retention, a second invocation, invalid inputs and lock
-conflicts. `make -C verify nemu-storage-linux-check
+conflicts. `make -C verification nemu-storage-linux-check
 NEMU_STORAGE_LINUX_PREPARED=/path/to/prepared/distro` reuses hash-verified firmware
 from `linux/distro_boot.py prepare` and creates a private 64-MiB ext4 root. Four
 Linux boots check discarded volatile writes, persistent creation and `fsync`,
@@ -250,7 +250,7 @@ Forwarding is also supported by slirp journal capture with `--diff-net`: actual
 incoming packets are recorded and independently replayed offline without host
 sockets. Scripted networking, legacy/strict DiffTest, and captures without
 network checking reject forwarding before guest startup.
-`make -C verify nemu-net-check` includes RV32/RV64 forwarding validation, an
+`make -C verification nemu-net-check` includes RV32/RV64 forwarding validation, an
 actual TCP SYN capture/replay and port-release checks; it needs loopback
 socket access, but no external network. Add `NEMU_STORAGE_LINUX_NETWORK=1` to
 `nemu-storage-linux-check` to check an 8192-byte TCP round trip
@@ -339,7 +339,7 @@ from these checks.
 #### Mandatory-feature coverage
 
 The table maps the ratified profile requirements to the model and focused
-single-hart checks. Check names abbreviate `make -C verify nemu-NAME-check`;
+single-hart checks. Check names abbreviate `make -C verification nemu-NAME-check`;
 `rva23-scalar` runs the scalar suite with the entire runtime profile enabled.
 The model is little-endian, uses Svade rather than hardware A/D updates, and
 provides Sv39/Sv39x4 rather than optional Sv48/Sv57. Optional vector crypto,
@@ -378,9 +378,9 @@ user-facing CLI switches. The existing `NEMU_ISA_EXT_V128_PREVIEW` and
 `NEMU_ISA_EXT_H_GSTAGE_PREVIEW` bit names and values remain unchanged for API
 compatibility.
 
-Single-hart checks are available through `make -C verify nemu-isa-check`
+Single-hart checks are available through `make -C verification nemu-isa-check`
 after building the RV32/RV64 reference libraries. Focused targets are defined
-in [`verify/nemu/nemu.mk`](../verify/nemu/nemu.mk), including
+in [`verification/nemu/nemu.mk`](../verification/nemu/nemu.mk), including
 `nemu-vector-misaligned-check` for RVA23 memory accesses and fault restart.
 These checks exercise implemented behavior and illegal encodings, but do not establish complete
 RVA23 conformance.
@@ -398,7 +398,7 @@ Sv39, 64-byte cache-block operations, V and H, and a poweroff finisher.
 An isolated Linux smoke test is available with:
 
 ```sh
-make -C verify nemu-rva23-linux-check NEMU_RVA23_KERNEL=/absolute/path/to/Image
+make -C verification nemu-rva23-linux-check NEMU_RVA23_KERNEL=/absolute/path/to/Image
 ```
 
 This requires `dtc`, `fdtput`, `riscv64-linux-gnu-gcc`, the bundled OpenSBI
@@ -410,7 +410,7 @@ arithmetic, 64-byte user cache-block zeroing, tagged user loads/stores, and one
 KVM vCPU's execution and MMIO exit.
 It requires every probe marker and clean finisher poweroff; panic, timeout and
 partial success fail. Logs and artifact hashes are written under
-`verify/build/nemu-rva23-linux/run-*/`. Override
+`verification/build/nemu-rva23-linux/run-*/`. Override
 `NEMU_RVA23_LINUX_TIMEOUT` for slower hosts (default 1800 seconds).
 This is an integration smoke test, not full kernel or RVA23 compliance coverage.
 
@@ -424,7 +424,7 @@ The live-vector section intentionally makes no system calls: the
 [Linux vector ABI](https://docs.kernel.org/arch/riscv/vector.html) permits
 syscalls to discard caller-saved vector state.
 
-`make -C verify nemu-rva23-multihart-check` checks 2/3/4-hart combined-profile
+`make -C verification nemu-rva23-multihart-check` checks 2/3/4-hart combined-profile
 execution, native completion, strict memory lock-step, offline replay and
 bounded-pipe live replay. It covers per-hart vector/FP state, H/Svnapot/PMM,
 state-enable and overflow CSRs, shared atomics and cross-hart LR/SC invalidation.
@@ -452,7 +452,7 @@ The cached kernel does not replace the release Image or alter the sim/FPGA
 kernel configurations. The boot timeout excludes kernel compilation.
 
 Independent single-hart vector checks are available as
-`make -C verify nemu-vector-spike-check nemu-vector-memory-spike-check`.
+`make -C verification nemu-vector-spike-check nemu-vector-memory-spike-check`.
 They require the bundled Spike libraries (build them with
 `make -C nemu/tools/spike-diff repo/build/spike`) and a C++20 compiler.
 The arithmetic check covers the pinned V opcode table and Zvbb over supported
@@ -463,7 +463,7 @@ NEMU's permitted whole-register alignment traps. Both compare vector state;
 arithmetic also compares scalar results and flags, and memory compares RAM.
 These checks do not establish privileged, MMU or full-profile conformance.
 
-`make -C verify nemu-hypervisor-runtime-check` runs a single-hart HS/VS payload
+`make -C verification nemu-hypervisor-runtime-check` runs a single-hart HS/VS payload
 on native NEMU and the bundled Spike executable. It exercises state-enable
 CSRs, Sv39/Sv39x4, HLV/HSV, delegated traps, guest-page faults, virtual
 instructions, virtual software/timer interrupts and guest vector execution.
@@ -543,9 +543,9 @@ correctness, RVWMO or RTL coherence.
 | Mode | Option | ABI |
 | --- | --- | --- |
 | Lock-step, cooperative | `--diff-mode=multihart --diff=REF_SO` (with `--smp-backend=rr`) | `include/difftest-multi.h` |
-| Record a journal | `--diff-record=FILE` (`--diff-record-max-bytes`, default 256 MiB); inspect with `verify/nemu/check.py inspect FILE` | `include/difftest-journal.h` |
+| Record a journal | `--diff-record=FILE` (`--diff-record-max-bytes`, default 256 MiB); inspect with `verification/nemu/check.py inspect FILE` | `include/difftest-journal.h` |
 | Offline replay | `nemu_difftest_replay_query` from the reference `.so` (driver: `app/tests/host/nemu_journal_replay.c`) | `include/difftest-replay.h` |
-| Live replay over a pipe | `--diff-stream-fd=N`, driven by `verify/nemu/check.py supervise` | `include/difftest-replay.h` |
+| Live replay over a pipe | `--diff-stream-fd=N`, driven by `verification/nemu/check.py supervise` | `include/difftest-replay.h` |
 
 The journal records each hart's instruction begin/retirement, every physical
 access inside outer bus-lock scopes, and the inputs a profile admits. The
@@ -579,9 +579,9 @@ virtio conformance models.
 
 ### Checks
 
-All NEMU checks are `make -C verify nemu-*-check` targets defined in
-[`verify/nemu/nemu.mk`](../verify/nemu/nemu.mk); each runs
-`verify/nemu/check.py NAME` (`check.py NAME --help` lists its options).
+All NEMU checks are `make -C verification nemu-*-check` targets defined in
+[`verification/nemu/nemu.mk`](../verification/nemu/nemu.mk); each runs
+`verification/nemu/check.py NAME` (`check.py NAME --help` lists its options).
 
 Tests are grouped by responsibility rather than adding one wrapper per feature:
 `tests/test_application.py` covers build/install/launch; `test_storage.py` covers
@@ -611,7 +611,7 @@ when their fixtures or correctness oracles genuinely differ.
 | `nemu-dma-check`, `nemu-finisher-check`, `nemu-console-check` | DMA failure paths, finisher, UART routing |
 | `nemu-multihart-check` | SMP, statistics, storage and lock-step/journal/device checks (not application packaging or Linux boot) |
 | `nemu-distro-check` | Full Debian/Ubuntu boot under live DiffTest (long) |
-| `nemu-isa-check` | Single-hart ISA/MMU/PMP/memory-map checks (`verify/nemu/isa/`) |
+| `nemu-isa-check` | Single-hart ISA/MMU/PMP/memory-map checks (`verification/nemu/isa/`) |
 | `nemu-rva23-profile-check` | RV64 combined profile-mask selection, ABI locking, vector-control/Zicond smoke, Sstc CSR gating, DiffTest STIP delivery, tagged U-mode vector load and M/HS `hstatus.GVA` reads/writes |
 | `nemu-rva23-scalar-check` | Mandatory base scalar, FP, atomic, CSR and cache-block regressions with the entire RVA23 extension bundle enabled |
 | `nemu-rva23-diel-check` | Scalar Zkt subset: M/S/U instruction retirement and data-independent virtual-cycle accounting |
@@ -653,7 +653,7 @@ when their fixtures or correctness oracles genuinely differ.
 The multi-hart checks cover RV32/RV64 with 1/2/4 harts and inject corruptions
 that must be rejected. `NEMU_SANITIZE=undefined|thread` builds NEMU with a
 sanitizer (add `NEMU_TSAN_NO_ASLR=1` for TSan) and `NEMU_REPEAT` sets threaded
-repetitions. Results go to `verify/build/nemu-*`. For the distribution check,
+repetitions. Results go to `verification/build/nemu-*`. For the distribution check,
 set `NEMU_DISTRO_PREPARED` to a prepared image directory (default: two-hart
 threaded Debian) and `NEMU_DISTRO_TIMEOUT` (default 3600 s); a pass requires
 both endpoints to complete, matching totals, userspace checks and a clean

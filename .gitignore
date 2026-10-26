@@ -32,7 +32,7 @@
 /.github/*.json
 /.github/results/**
 
-# ---- HDL sources (global whitelist for hdl/) ----
+# ---- HDL sources (global whitelist for rtl/) ----
 !*.v
 !*.vh
 !*.sv
@@ -51,22 +51,24 @@
 # ---- Non-self-contained directories (need root whitelist) ----
 !/docs/*
 !/linux/*
-!/hdl/**
-!/verify/*
-!/lspd/**
+!/rtl/**
+!/verification/*
+!/synth/**
+!/layout/**
+!/tools/**
 
 # ---- Re-ignore: generated, third-party, synthesis, local config ----
-/hdl/generated/
+/rtl/generated/
 /nsim/include/config/
 /nsim/include/generated/
 /nsim/tools/kconfig/build/
 /nsim/csrc/mem/mrom-data/dtb.c
-/hdl/chisel/target/
+/tools/decodegen/target/
 /third_party/
 /docs.*/
 /syn/
-/lspd/syn/build/
-/lspd/syn/.Xil/
+/synth/yosys/build/
+/synth/yosys/.Xil/
 Makefile.local
 
 # ---- Re-ignore: build / simulation outputs (these may contain *.cpp/*.h

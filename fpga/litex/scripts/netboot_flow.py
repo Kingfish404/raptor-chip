@@ -85,7 +85,7 @@ def vivado(value):
 def source_identity(make_args):
     """Conservative hardware-input snapshot; runtime orchestration is not RTL."""
     repo = LITEX.parents[1]
-    roots = (repo / 'hdl', repo / 'sim/rtl', repo / 'sim/include',
+    roots = (repo / 'rtl', repo / 'sim/rtl', repo / 'sim/include',
              LITEX / 'mk', LITEX / 'cores', LITEX / 'scripts')
     paths = {LITEX / 'Makefile', *LITEX.glob('*.py'), *LITEX.glob('*.tcl')}
     if 'FPGA_BOARD=rk_xcku5p_f' in make_args:

@@ -42,7 +42,7 @@ class WidthMappingTest(unittest.TestCase):
         for rv64 in (False, True):
             with self.subTest(rv64=rv64):
                 cfg = parse_rapt_config(
-                    ROOT / "hdl/configs/default/rapt_config.svh", rv64
+                    ROOT / "rtl/configs/default/rapt_config.svh", rv64
                 )
                 self.assertEqual(cfg["RAPT_ROB_SIZE"], 32)
                 self.assertEqual(cfg["RAPT_PHY_SIZE"], 64)
@@ -61,7 +61,7 @@ class WidthMappingTest(unittest.TestCase):
             for rv64 in (False, True):
                 with self.subTest(preset=preset, rv64=rv64):
                     cfg = parse_rapt_config(
-                        ROOT / "hdl" / "configs" / preset / "rapt_config.svh", rv64
+                        ROOT / "rtl" / "configs" / preset / "rapt_config.svh", rv64
                     )
                     u = derive_uarch(cfg)
                     self.assertEqual(u["l1i_size"], f"{icache}B")
@@ -80,12 +80,12 @@ class WidthMappingTest(unittest.TestCase):
         self.assertEqual(
             set(expected),
             {path.parent.name for path in
-             (ROOT / "hdl/configs").glob("*/rapt_config.svh")},
+             (ROOT / "rtl/configs").glob("*/rapt_config.svh")},
         )
         for preset, parameters in expected.items():
             with self.subTest(preset=preset):
                 cfg = parse_rapt_config(
-                    ROOT / "hdl" / "configs" / preset / "rapt_config.svh", False
+                    ROOT / "rtl" / "configs" / preset / "rapt_config.svh", False
                 )
                 self.assertEqual(
                     tuple(cfg[f"RAPT_{stage}_WIDTH"] for stage in
@@ -219,7 +219,7 @@ class WidthMappingTest(unittest.TestCase):
         for preset, kind in expected.items():
             with self.subTest(preset=preset):
                 cfg = parse_rapt_config(
-                    ROOT / "hdl" / "configs" / preset / "rapt_config.svh", False
+                    ROOT / "rtl" / "configs" / preset / "rapt_config.svh", False
                 )
                 self.assertEqual(detect_rtl_dirp(cfg), kind)
 
@@ -242,7 +242,7 @@ class WidthMappingTest(unittest.TestCase):
         for preset, fetch_q in expected.items():
             with self.subTest(preset=preset):
                 cfg = parse_rapt_config(
-                    ROOT / "hdl" / "configs" / preset / "rapt_config.svh", False
+                    ROOT / "rtl" / "configs" / preset / "rapt_config.svh", False
                 )
                 u = derive_uarch(cfg)
                 self.assertEqual(u["fetch_q"], fetch_q)

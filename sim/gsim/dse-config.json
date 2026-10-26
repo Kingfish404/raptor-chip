@@ -1,7 +1,7 @@
 {
   "_comment": [
     "ChampSim-style DSE config for raptor_se.py.",
-    "Aligned to hdl/configs/default/rapt_config.svh and hdl/frontend/branch_predictor/* as of 2026-09-14.",
+    "Aligned to rtl/configs/default/rapt_config.svh and rtl/frontend/branch_predictor/* as of 2026-09-14.",
     "Default BPU mirrors the RTL TAGE flavor (RAPT_BPU_DIRP_TAGE): 256-entry bimodal base + 3 tagged tables of 128 entries (tag widths 7/7/8, histories 8/16/64, 3-bit signed counter, 1-bit useful).",
     "Default caches mirror the current preset: L1I 64 B x 64 sets x 4-way = 16 KiB, L1D 64 B x 64 sets x 4-way = 16 KiB.",
     "Unspecified keys keep the .svh-derived/default simulator value.",
@@ -90,7 +90,7 @@
     "hash_targets": true
   },
   "branch_predictor": {
-    "_comment": "Defaults mirror hdl/frontend/branch_predictor/rapt_bpu_tage.sv: 3 tagged tables of 128 entries with tag widths 7/7/8 and history lengths 8/16/64 over a 256-entry 2-bit bimodal base. ~5.4 Kbit hardware TAGE budget. hist_buffer_size is the gem5 speculative-history rollback buffer, not hardware state. The RTL has no loop predictor or statistical corrector; gem5's plain TAGE wrapper models neither, so those sections are omitted.",
+    "_comment": "Defaults mirror rtl/frontend/branch_predictor/rapt_bpu_tage.sv: 3 tagged tables of 128 entries with tag widths 7/7/8 and history lengths 8/16/64 over a 256-entry 2-bit bimodal base. ~5.4 Kbit hardware TAGE budget. hist_buffer_size is the gem5 speculative-history rollback buffer, not hardware state. The RTL has no loop predictor or statistical corrector; gem5's plain TAGE wrapper models neither, so those sections are omitted.",
     "kind": "tage",
     "btb": {
       "entries": 128,

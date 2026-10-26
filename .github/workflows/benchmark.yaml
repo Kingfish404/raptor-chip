@@ -15,7 +15,8 @@ on:
   push:
     branches: ["master", "main"]
     paths: &benchmark-paths
-      - "hdl/**"
+      - "rtl/**"
+      - "tools/decodegen/**"
       - "sim/**"
       - "abstract-machine/**"
       - "app/**"

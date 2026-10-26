@@ -20,11 +20,12 @@ on:
   push:
     branches: ["master", "main"]
     paths: &app-paths
-      - "hdl/**"
+      - "rtl/**"
+      - "tools/decodegen/**"
       - "sim/**"
       - "nemu/**"
       - "linux/**"
-      - "verify/**"
+      - "verification/**"
       - "fpga/litex/**"
       - ".github/scripts/**"
       - ".github/actions/**"
@@ -66,7 +67,7 @@ jobs:
           build-cache: default-riscof-rv32
       - name: Build shared RISCOF simulator
         run: |
-          make -C verify riscof-classic-build-npc
+          make -C verification riscof-classic-build-npc
           # Follow the simulator symlink and retain executable modes. Capstone
           # is loaded from this workspace path at runtime.
           tar -czhf "$RUNNER_TEMP/riscof-npc.tar.gz" \
@@ -74,7 +75,7 @@ jobs:
             nemu/tools/capstone/repo/libcapstone.so.5
       - name: Build shared Sail reference
         run: |
-          make -C verify riscof-classic-sail JOBS=2 \
+          make -C verification riscof-classic-sail JOBS=2 \
             BUILD_DIR="$RUNNER_TEMP/sail-reference" \
             RISCOF_CLASSIC_SAIL_PREFIX="$GITHUB_WORKSPACE/sail-riscv"
           tar -czf "$RUNNER_TEMP/sail-riscv.tar.gz" sail-riscv
@@ -144,9 +145,9 @@ jobs:
       - name: Cache riscv-arch-test suite
         uses: actions/cache@v5
         with:
-          path: verify/riscof/classic/riscv-arch-test
+          path: verification/riscof/classic/riscv-arch-test
           key:
-            riscv-arch-test-main-${{ hashFiles('verify/riscof/classic/plugins/**',
+            riscv-arch-test-main-${{ hashFiles('verification/riscof/classic/plugins/**',
             '.github/workflows/app.yaml') }}
 
       - name: “Sanity check | sail + toolchain”
@@ -158,7 +159,7 @@ jobs:
           command -v sail_riscv_sim
           test "$(sail_riscv_sim --version)" = "0.16"
           sail_riscv_sim --rv32 --validate-config \
-            --config-override verify/riscof/classic/plugins/sail_cSim/raptor.json
+            --config-override verification/riscof/classic/plugins/sail_cSim/raptor.json
           sail_riscv_sim --validate-config
           echo "=== riscv64-elf-gcc ==="
           command -v riscv64-elf-gcc
@@ -175,7 +176,7 @@ jobs:
         # build prerequisite; each shard still runs its selected suite and
         # constructs its own inexpensive MROM image.
         run: >-
-          make -C verify -o riscof-classic-build-npc riscof-classic-setup riscof-classic-run
+          make -C verification -o riscof-classic-build-npc riscof-classic-setup riscof-classic-run
           RISCOF_CLASSIC_TIMEOUT=600 JOBS=2
           RISCOF_CLASSIC_SHARD_INDEX=${{ matrix.shard }} RISCOF_CLASSIC_SHARD_COUNT=4
 
@@ -183,7 +184,7 @@ jobs:
         if: failure()
         run: |
           set +e
-          WD=verify/build/riscof-classic
+          WD=verification/build/riscof-classic
           echo "## Tests with missing Reference signatures"
           MISSING=0
           while IFS= read -r d; do
@@ -207,8 +208,8 @@ jobs:
         with:
           name: riscof-classic-report-${{ matrix.shard }}
           path: |
-            verify/build/riscof-classic/report.html
-            verify/build/riscof-classic/style.css
+            verification/build/riscof-classic/report.html
+            verification/build/riscof-classic/style.css
           if-no-files-found: warn
 
       - name: Upload RISCOF workdir on failure (postmortem)
@@ -217,8 +218,8 @@ jobs:
         with:
           name: riscof-classic-workdir-${{ matrix.shard }}-${{ github.sha }}
           path: |
-            verify/build/riscof-classic/
-            !verify/build/riscof-classic/**/*.elf
+            verification/build/riscof-classic/
+            !verification/build/riscof-classic/**/*.elf
           if-no-files-found: warn
           retention-days: 7
 
@@ -233,7 +234,7 @@ jobs:
           profile: sim
           build-cache: default-coverage-rv32
       - name: Check parallel Kconfig builds
-        run: python3 verify/scripts/test_kconfig_parallel.py
+        run: python3 verification/scripts/test_kconfig_parallel.py
       - name: Build NEMU-Ref
         # All workloads below use the isolated coverage simulator.
         run: make build-nemu32-ref
@@ -241,7 +242,7 @@ jobs:
         timeout-minutes: 90
         run: |
           set -euo pipefail
-          /usr/bin/time -v make -C verify coverage-build 2>&1 | tee coverage-build.log
+          /usr/bin/time -v make -C verification coverage-build 2>&1 | tee coverage-build.log
 
       - name: Upload coverage build log
         if: always()
@@ -254,16 +255,16 @@ jobs:
 
       - name: Run fuzz + sigtest for coverage
         run: |
-          make -C verify coverage-run-fuzz TIMEOUT=10
-          make -C verify coverage-run-sigtest TIMEOUT=10
+          make -C verification coverage-run-fuzz TIMEOUT=10
+          make -C verification coverage-run-sigtest TIMEOUT=10
 
       - name: Run coremark + isa-tests-pk for coverage
         run: |
-          make -C verify coverage-run-coremark
-          make -C verify coverage-run-isa-tests-pk
+          make -C verification coverage-run-coremark
+          make -C verification coverage-run-isa-tests-pk
 
       - name: Generate coverage report
-        run: make -C verify coverage-report COV_LINE_MIN=50.0
+        run: make -C verification coverage-report COV_LINE_MIN=50.0
 
   linux-rv32-test:
     runs-on: ubuntu-24.04
@@ -290,7 +291,7 @@ jobs:
               "Kernel entry (Linux version)=Linux version" || true
             $REPORT pmu "Linux Boot RV32" /tmp/linux-boot.log
           } >> "$GITHUB_STEP_SUMMARY"
-          python3 verify/scripts/check_linux_boot.py \
+          python3 verification/scripts/check_linux_boot.py \
             --success-marker "Linux version" /tmp/linux-boot.log
 
   release-rtl:
@@ -308,15 +309,15 @@ jobs:
           profile: build
       - name: Pack RTL for every config
         run: |
-          for config_header in hdl/configs/*/rapt_config.svh; do
+          for config_header in rtl/configs/*/rapt_config.svh; do
             config=${config_header%/rapt_config.svh}
             config=${config##*/}
             make pack RAPT_CONFIG="$config"
           done
       - name: Collect release artifacts
         run: |
-          mkdir -p dist/hdl
-          for config_header in hdl/configs/*/rapt_config.svh; do
+          mkdir -p dist/rtl
+          for config_header in rtl/configs/*/rapt_config.svh; do
             config=${config_header%/rapt_config.svh}
             config=${config##*/}
             cp "sim/build/$config/rapt_pack.sv" "dist/rapt_pack-$config.sv"
@@ -325,7 +326,7 @@ jobs:
           done
           cp dist/rapt_pack-default.sv dist/rapt_pack.sv
           cp dist/rapt_pack-default.svh dist/rapt_pack.svh
-          cp -r hdl/. dist/hdl/
+          cp -r rtl/. dist/rtl/
           printf "commit: %s\nref: %s\ndate: %s\n" \
             "$GITHUB_SHA" "$GITHUB_REF_NAME" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > dist/VERSION
           (cd dist && zip -r ../raptor-chip-rtl.zip .)
@@ -347,7 +348,7 @@ jobs:
             "dist/rapt_pack.svh#rapt_pack.svh (default macro definitions)"
             "raptor-chip-rtl.zip#raptor-chip-rtl.zip (full RTL source and all configs)"
           )
-          for config_header in hdl/configs/*/rapt_config.svh; do
+          for config_header in rtl/configs/*/rapt_config.svh; do
             config=${config_header%/rapt_config.svh}
             config=${config##*/}
             assets+=(

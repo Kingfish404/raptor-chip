@@ -1,0 +1,356 @@
+SHELL := /bin/bash
+.SHELLFLAGS := -o pipefail -c
+
+RAPT_HOME := $(abspath ../..)
+SYNTH_DIR := $(RAPT_HOME)/synth
+HDL_ROOT := $(RAPT_HOME)/rtl
+HDL_WRAPPER_DIR := $(SYNTH_DIR)/wrappers
+FLOW_ROOT ?= $(RAPT_HOME)/third_party/yosys-opensta
+PLATFORM_ROOT := $(FLOW_ROOT)/third_party/lib
+
+include $(SYNTH_DIR)/modules.mk
+
+MODULE ?= core
+PDK ?= nangate45
+RAPT_CONFIG ?= default
+# FPGA OOC targets use the same 50 MHz default as the board builds. Keep the
+# ASIC synthesis/STA default independent of that target.
+CLK_FREQ_MHZ ?= $(if $(filter fpga-syn fpga-syn-locked fpga-eval,$(MAKECMDGOALS)),50,100)
+IO_DELAY_FRAC ?= 0.20
+OUTPUT_LOAD_FF ?= 5.0
+EXTRA_DEFINES ?=
+SRAM_MODE ?= macro
+SYNTH_SHARE ?= 1
+ifeq ($(filter $(SYNTH_SHARE),0 1),)
+$(error SYNTH_SHARE must be 0 or 1)
+endif
+SYNTH_GENERIC_ABC ?= 1
+ifeq ($(filter $(SYNTH_GENERIC_ABC),0 1),)
+$(error SYNTH_GENERIC_ABC must be 0 or 1)
+endif
+SYNTH_ABC_SCRIPT ?= default
+ifeq ($(filter $(SYNTH_ABC_SCRIPT),default fast),)
+$(error SYNTH_ABC_SCRIPT must be default or fast)
+endif
+SRAM_PLATFORM ?= sky130
+PYTHON ?= python3
+TIME ?= /usr/bin/time
+VIVADO ?= vivado
+FPGA_PART ?= xcku15p-ffva1156-2-e
+FPGA_THREADS ?= 4
+FPGA_XLEN ?= 64
+FPGA_SYNTH_DIRECTIVE ?= default
+FPGA_BUILD_DIR ?= $(abspath ../fpga/build/$(RAPT_CONFIG)/$(FPGA_PART)/rv$(FPGA_XLEN)/$(MODULE)/$(CLK_FREQ_MHZ)MHz)
+FPGA_LUTRAM_DEFINE := $(if $(filter -DRAPT_FPGA_LUTRAM -DRAPT_FPGA_LUTRAM=%,$(EXTRA_DEFINES)),,-DRAPT_FPGA_LUTRAM=1)
+
+NPROC := $(shell nproc 2>/dev/null || echo 1)
+MEM_AVAILABLE_MB := $(shell awk '/MemAvailable:/ { print int($$2 / 1024) }' /proc/meminfo 2>/dev/null || echo 0)
+JOB_MEMORY_MB ?= 6144
+AUTO_PARALLEL_JOBS := $(shell awk 'BEGIN { \
+	cpu = $(NPROC); mem = int($(MEM_AVAILABLE_MB) / $(JOB_MEMORY_MB)); \
+	if (cpu < 1) cpu = 1; if (mem < 1) mem = 1; \
+	print (cpu < mem) ? cpu : mem; \
+}')
+PARALLEL_JOBS ?= $(AUTO_PARALLEL_JOBS)
+PARALLEL_MAKE_FLAGS = $(if $(filter --jobserver-auth=% --jobserver-fds=%,$(MAKEFLAGS)),,-j$(PARALLEL_JOBS))
+
+SUPPORTED_PDKS := asap7 nangate45 sky130
+PLATFORM_asap7 := asap7
+PLATFORM_nangate45 := nangate45
+PLATFORM_sky130 := sky130hd
+PLATFORM := $(PLATFORM_$(PDK))
+
+TOP := $(TOP_$(MODULE))
+CLOCK_PORT := $(CLOCK_$(MODULE))
+PERIOD_NS := $(shell awk 'BEGIN { printf "%.6f", 1000.0 / $(CLK_FREQ_MHZ) }')
+
+YOSYS ?= yosys
+OPENSTA ?= $(shell command -v sta 2>/dev/null || echo $(FLOW_ROOT)/third_party/OpenSTA/build/sta)
+
+BUILD_DIR := $(abspath build/$(RAPT_CONFIG)/$(PDK)/$(MODULE)/$(CLK_FREQ_MHZ)MHz)
+NETLIST := $(BUILD_DIR)/$(TOP).netlist.v
+SYNTH_CONFIG_STAMP := $(BUILD_DIR)/.synth_config
+SRAM_DIR := $(RAPT_HOME)/sim/sram
+SRAM_BLACKBOX := $(SRAM_DIR)/wrappers/rapt_sram_blackbox.v
+SRAM_STAMP := $(SRAM_DIR)/build/$(SRAM_PLATFORM)/.lspd-stubs.ok
+SRAM_LIB_FILES = $(shell $(MAKE) --no-print-directory -s -C $(SRAM_DIR) print-libs PLATFORM=$(SRAM_PLATFORM))
+
+TOP_WRAPPER := $(wildcard $(HDL_WRAPPER_DIR)/$(TOP).sv)
+HDL_SV := $(HDL_ROOT)/rapt_pkg.sv \
+          $(filter-out $(HDL_ROOT)/rapt_pkg.sv,$(shell find $(HDL_ROOT) -path '$(HDL_ROOT)/generated' -prune -o -name '*.sv' -print | sort)) \
+          $(HDL_ROOT)/generated/rapt_idu_decoder.sv \
+          $(HDL_ROOT)/generated/rapt_idu_decoder_c.sv \
+          $(TOP_WRAPPER)
+INCLUDE_DIRS := $(HDL_ROOT)/configs/$(RAPT_CONFIG) \
+                $(HDL_ROOT) \
+                $(HDL_ROOT)/include \
+                $(HDL_ROOT)/include/npc \
+                $(HDL_ROOT)/include/dpic_mock
+HDL_HEADERS := $(HDL_ROOT)/configs/$(RAPT_CONFIG)/rapt_config.svh \
+               $(shell find $(HDL_ROOT)/include -name '*.svh' -print | sort)
+SLANG_FLAGS := --single-unit --allow-toplevel-iface-ports \
+			   -DSYNTHESIS $(EXTRA_DEFINES) \
+               $(addprefix -I,$(INCLUDE_DIRS))
+
+ifeq ($(SRAM_MODE),macro)
+SLANG_FLAGS += -DRAPT_USE_SRAM_MACRO
+SYNTH_SV_FILES := $(SRAM_BLACKBOX) $(HDL_SV)
+STA_LIB_FILES = $(LIB_FILES) $(SRAM_LIB_FILES)
+SRAM_PREREQUISITES := $(SRAM_STAMP)
+else ifeq ($(SRAM_MODE),flops)
+SYNTH_SV_FILES := $(HDL_SV)
+STA_LIB_FILES = $(LIB_FILES)
+SRAM_PREREQUISITES :=
+else
+$(error Unsupported SRAM_MODE=$(SRAM_MODE). Use one of: macro flops)
+endif
+
+PLATFORM_DIR := $(FLOW_ROOT)/platforms/$(PLATFORM)
+FOUNDRY_PATH := $(PLATFORM_ROOT)/$(PLATFORM)
+
+ifeq ($(PDK),asap7)
+LIB_FILES := $(FOUNDRY_PATH)/lib/NLDM/asap7sc7p5t_AO_RVT_TT_nldm_211120.lib \
+             $(FOUNDRY_PATH)/lib/NLDM/asap7sc7p5t_INVBUF_RVT_TT_nldm_220122.lib \
+             $(FOUNDRY_PATH)/lib/NLDM/asap7sc7p5t_OA_RVT_TT_nldm_211120.lib \
+             $(FOUNDRY_PATH)/lib/NLDM/asap7sc7p5t_SIMPLE_RVT_TT_nldm_211120.lib \
+             $(FOUNDRY_PATH)/lib/NLDM/asap7sc7p5t_SEQ_RVT_TT_nldm_220123.lib
+else ifeq ($(PDK),nangate45)
+LIB_FILES := $(FOUNDRY_PATH)/lib/merged.lib
+else ifeq ($(PDK),sky130)
+LIB_FILES := $(FOUNDRY_PATH)/lib/sky130_fd_sc_hd__tt_025C_1v80.lib
+endif
+
+ifeq ($(filter $(MODULE),$(MODULES)),)
+$(error Unsupported MODULE=$(MODULE). Run 'make list')
+endif
+ifeq ($(filter $(PDK),$(SUPPORTED_PDKS)),)
+$(error Unsupported PDK=$(PDK). Use one of: $(SUPPORTED_PDKS))
+endif
+ifeq ($(wildcard $(HDL_ROOT)/configs/$(RAPT_CONFIG)/rapt_config.svh),)
+$(error Unsupported RAPT_CONFIG=$(RAPT_CONFIG))
+endif
+
+.DEFAULT_GOAL := help
+
+include fpga_eval.mk
+
+MODULE_PPA_TARGETS := $(addprefix ppa-module-,$(MODULES))
+PDK_PPA_TARGETS := $(addprefix ppa-pdk-,$(SUPPORTED_PDKS))
+PDK_MATRIX_TARGETS := $(addprefix ppa-matrix-pdk-,$(SUPPORTED_PDKS))
+PDK_SUMMARY_TARGETS := $(addprefix ppa-summary-pdk-,$(SUPPORTED_PDKS))
+PPA_SUMMARY := $(abspath build/$(RAPT_CONFIG)/$(PDK)/ppa_summary.md)
+PROFILE_SUMMARY := $(abspath build/$(RAPT_CONFIG)/$(PDK)/profile_summary.md)
+GENERATE_PROFILE_SUMMARY ?= 1
+MODULES_TO_RUN ?= $(MODULES)
+
+.PHONY: help list parallel-info doctor sram-model syn sta ppa ppa-all ppa-all-pdks ppa-matrix ppa-summary ppa-summary-all-pdks profile-summary clean FORCE
+
+FORCE:
+
+help: ## Show this help message
+	@echo "Standalone core-module PPA flow"
+	@echo
+	@awk 'BEGIN { FS = ":.*## "; printf "Usage: make <target> [VARIABLE=value ...]\n\nTargets:\n" } \
+		/^[a-zA-Z0-9_-]+:.*## / { printf "  %-24s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
+	@echo
+	@echo "Results: build/<config>/<pdk>/<module>/<frequency>MHz/"
+	@echo "Summaries: build/<config>/<pdk>/{ppa,profile}_summary.md"
+	@echo "SRAM_MODE: macro (abstract macro PPA, default) or flops (logic baseline)"
+
+list: ## List supported modules, top modules, and clock ports
+	@$(foreach module,$(MODULES),printf '%-8s top=%-20s clock=%s\n' '$(module)' '$(TOP_$(module))' '$(CLOCK_$(module))';)
+
+parallel-info: ## Show detected resources and automatic parallelism
+	@echo "logical CPUs       : $(NPROC)"
+	@echo "available memory MB: $(MEM_AVAILABLE_MB)"
+	@echo "memory per job MB  : $(JOB_MEMORY_MB)"
+	@echo "parallel jobs      : $(PARALLEL_JOBS)"
+
+doctor: ## Check synthesis tools and selected PDK libraries
+	@command -v $(YOSYS) >/dev/null || { echo "missing yosys: $(YOSYS)"; exit 1; }
+	@test -x "$(TIME)" || { echo "missing GNU time: $(TIME)"; exit 1; }
+	@$(YOSYS) -m slang -Q -p 'help read_slang' >/dev/null || { echo "yosys slang plugin is unavailable"; exit 1; }
+	@test -x "$(OPENSTA)" || { echo "missing OpenSTA: $(OPENSTA)"; exit 1; }
+	@test -f "$(PLATFORM_DIR)/yosys_config.tcl" || { echo "missing platform config: $(PLATFORM_DIR)"; exit 1; }
+	@for lib in $(LIB_FILES); do test -f "$$lib" || { echo "missing Liberty: $$lib"; exit 1; }; done
+	@if [ "$(SRAM_MODE)" = "macro" ]; then test -f "$(SRAM_BLACKBOX)" || { echo "missing SRAM blackbox: $(SRAM_BLACKBOX)"; exit 1; }; fi
+	@echo "tools and $(PDK) libraries are ready"
+
+sram-model: $(SRAM_STAMP) ## Generate abstract SRAM macro models used by module PPA
+
+$(SRAM_STAMP): $(SRAM_DIR)/Makefile $(SRAM_DIR)/scripts/gen_stub_lib.py $(SRAM_BLACKBOX) $(wildcard $(SRAM_DIR)/configs/*.py)
+	@$(MAKE) -C $(SRAM_DIR) stubs PLATFORM=$(SRAM_PLATFORM)
+	@mkdir -p $(dir $@)
+	@touch $@
+
+syn: $(NETLIST) ## Synthesize MODULE and write its mapped netlist
+
+.PHONY: fpga-syn
+fpga-syn: ## Run module-level Vivado OOC synthesis (SRAM_MODE=flops)
+	@test '$(SRAM_MODE)' = flops || { echo 'FPGA synthesis requires SRAM_MODE=flops (behavioral memories)'; exit 1; }
+	@test '$(FPGA_XLEN)' = 32 -o '$(FPGA_XLEN)' = 64 || { echo 'FPGA_XLEN must be 32 or 64'; exit 1; }
+	@mkdir -p '$(FPGA_BUILD_DIR)'
+	@flock -n '$(FPGA_BUILD_DIR)/.lock' $(MAKE) --no-print-directory fpga-syn-locked
+
+.PHONY: fpga-syn-locked
+fpga-syn-locked:
+	@printf 'status incomplete\n' > '$(FPGA_BUILD_DIR)/status.txt'
+	@command -v $(VIVADO) >/dev/null
+	@printf 'module=%s\ntop=%s\nconfig=%s\nxlen=%s\npart=%s\nperiod_ns=%s\nio_delay_frac=%s\nthreads=%s\nsynth_directive=%s\ndefines=%s\n' \
+		'$(MODULE)' '$(TOP)' '$(RAPT_CONFIG)' '$(FPGA_XLEN)' '$(FPGA_PART)' '$(PERIOD_NS)' '$(IO_DELAY_FRAC)' '$(FPGA_THREADS)' \
+		'$(FPGA_SYNTH_DIRECTIVE)' '$(EXTRA_DEFINES) $(if $(filter 64,$(FPGA_XLEN)),-DRAPT_RV64) -DRAPT_FPGA_DSP=1 $(FPGA_LUTRAM_DEFINE)' > '$(FPGA_BUILD_DIR)/run_config.txt'
+	@sha256sum $(SYNTH_SV_FILES) $(HDL_HEADERS) $(SYNTH_DIR)/modules.mk $(abspath Makefile) $(abspath scripts/fpga_synth.tcl) $(abspath scripts/check_fpga_ram_mapping.py) $(abspath fpga_ram_expectations.tsv) > '$(FPGA_BUILD_DIR)/source_manifest.sha256'
+	@$(YOSYS) -V > '$(FPGA_BUILD_DIR)/tools.txt'
+	@$(VIVADO) -version >> '$(FPGA_BUILD_DIR)/tools.txt'
+	@$(TIME) -o '$(FPGA_BUILD_DIR)/export.profile' -f 'status=%x\nelapsed_sec=%e\nmax_rss_kb=%M' \
+		$(YOSYS) -Q -T -m slang -p 'read_slang $(SLANG_FLAGS) $(if $(filter 64,$(FPGA_XLEN)),-DRAPT_RV64) -DRAPT_FPGA_DSP=1 $(FPGA_LUTRAM_DEFINE) --top $(TOP) $(SYNTH_SV_FILES); hierarchy -check -top $(TOP); select -assert-none t:$$check t:$$assert t:$$assume t:$$cover; proc; opt; bwmuxmap; check -assert; write_verilog $(FPGA_BUILD_DIR)/elaborated.v' \
+		> '$(FPGA_BUILD_DIR)/export.log' 2>&1 || { tail -60 '$(FPGA_BUILD_DIR)/export.log'; exit 1; }
+	@FPGA_TOP='$(TOP)' FPGA_OUT='$(abspath $(FPGA_BUILD_DIR))' FPGA_PART='$(FPGA_PART)' FPGA_THREADS='$(FPGA_THREADS)' \
+	 FPGA_CLOCK='$(CLOCK_PORT)' FPGA_PERIOD='$(PERIOD_NS)' FPGA_IO_FRAC='$(IO_DELAY_FRAC)' FPGA_SYNTH_DIRECTIVE='$(FPGA_SYNTH_DIRECTIVE)' \
+	 $(TIME) -o '$(FPGA_BUILD_DIR)/synth.profile' -f 'status=%x\nelapsed_sec=%e\nmax_rss_kb=%M' \
+		sh -c "cd '$(abspath $(FPGA_BUILD_DIR))' && exec $(VIVADO) -mode batch -nojournal -log vivado.log -source '$(abspath scripts/fpga_synth.tcl)'" \
+		> '$(FPGA_BUILD_DIR)/console.log' 2>&1 || { tail -60 '$(FPGA_BUILD_DIR)/console.log'; exit 1; }
+	@python3 scripts/check_fpga_ram_mapping.py --manifest fpga_ram_expectations.tsv --report '$(FPGA_BUILD_DIR)/utilization.rpt' --module '$(MODULE)' --config '$(RAPT_CONFIG)' --xlen '$(FPGA_XLEN)' --top '$(TOP)' --defines='$(EXTRA_DEFINES) $(FPGA_LUTRAM_DEFINE)'
+	@sha256sum --check --status '$(FPGA_BUILD_DIR)/source_manifest.sha256' || { echo 'Sources changed during synthesis'; exit 1; }
+	@sha256sum '$(FPGA_BUILD_DIR)/elaborated.v' '$(FPGA_BUILD_DIR)/synth.dcp' > '$(FPGA_BUILD_DIR)/artifacts.sha256'
+	@printf 'status ok\n' > '$(FPGA_BUILD_DIR)/status.txt'
+	@echo '[fpga-syn] PASS $(MODULE) RV$(FPGA_XLEN): $(FPGA_BUILD_DIR)'
+
+# Do not leave a newly generated target reusable after a failed source check.
+.DELETE_ON_ERROR:
+
+.PHONY: elaborate structure-check
+structure-check: ## Check optimized RTL connectivity after native elaboration (not technology mapping)
+elaborate structure-check: $(SRAM_PREREQUISITES) ## Check native RTL elaboration with default frontend limits
+	@mkdir -p $(BUILD_DIR)
+	@$(YOSYS) -Q -T -m slang -p 'read_slang $(SLANG_FLAGS) --top $(TOP) $(SYNTH_SV_FILES); hierarchy -check -top $(TOP); select -assert-none t:$$check t:$$assert t:$$assume t:$$cover$(if $(filter structure-check,$@),; opt; check -assert)' \
+		> $(BUILD_DIR)/elaborate.log 2>&1 || { tail -60 $(BUILD_DIR)/elaborate.log; exit 1; }
+	@echo "[$@] PASS $(MODULE) config=$(RAPT_CONFIG) $(EXTRA_DEFINES)"
+
+$(SYNTH_CONFIG_STAMP): FORCE
+	@mkdir -p $(BUILD_DIR)
+	@printf 'module=%s\ntop=%s\npdk=%s\nconfig=%s\nclock_mhz=%s\nperiod_ns=%s\nextra_defines=%s\nsram_mode=%s\nsram_platform=%s\n' \
+		'$(MODULE)' '$(TOP)' '$(PDK)' '$(RAPT_CONFIG)' '$(CLK_FREQ_MHZ)' \
+		'$(PERIOD_NS)' '$(EXTRA_DEFINES)' \
+		'$(SRAM_MODE)' '$(SRAM_PLATFORM)' \
+		> $@.tmp
+	@printf 'synth_share=%s\n' '$(SYNTH_SHARE)' >> $@.tmp
+	@printf 'synth_generic_abc=%s\n' '$(SYNTH_GENERIC_ABC)' >> $@.tmp
+	@printf 'synth_abc_script=%s\n' '$(SYNTH_ABC_SCRIPT)' >> $@.tmp
+	@if ! cmp -s $@.tmp $@; then mv $@.tmp $@; else rm -f $@.tmp; fi
+
+$(NETLIST): $(HDL_SV) $(HDL_HEADERS) scripts/synth.tcl scripts/abc_fast.script $(SYNTH_DIR)/modules.mk Makefile $(SYNTH_CONFIG_STAMP) $(SRAM_PREREQUISITES)
+	@mkdir -p $(BUILD_DIR)
+	@echo "[syn] module=$(MODULE) top=$(TOP) pdk=$(PDK) config=$(RAPT_CONFIG) target=$(CLK_FREQ_MHZ)MHz sram=$(SRAM_MODE)"
+	@printf 'mode=%s\nmodel=%s\nplatform=%s\n' '$(SRAM_MODE)' '$(if $(filter macro,$(SRAM_MODE)),abstract-liberty,logic-mapped)' '$(if $(filter macro,$(SRAM_MODE)),$(SRAM_PLATFORM),none)' > $(BUILD_DIR)/sram_model.txt
+	@sha256sum $(SYNTH_SV_FILES) $(HDL_HEADERS) $(abspath scripts/synth.tcl) $(abspath scripts/abc_fast.script) \
+		$(SYNTH_DIR)/modules.mk $(abspath Makefile) \
+		> $(BUILD_DIR)/source_manifest.sha256
+	@YS_TOP='$(TOP)' \
+	 YS_OUT='$(BUILD_DIR)' \
+	 YS_SV_FILES='$(SYNTH_SV_FILES)' \
+	 YS_SLANG_FLAGS='$(SLANG_FLAGS)' \
+	 YS_SRAM_LIB_FILES='$(if $(filter macro,$(SRAM_MODE)),$(SRAM_LIB_FILES))' \
+	 YS_PLATFORM_DIR='$(PLATFORM_DIR)' \
+	 YS_FOUNDRY_PATH='$(FOUNDRY_PATH)' \
+	 YS_PERIOD_NS='$(PERIOD_NS)' \
+	 YS_SYNTH_SHARE='$(SYNTH_SHARE)' \
+	 YS_SYNTH_GENERIC_ABC='$(SYNTH_GENERIC_ABC)' \
+	 YS_SYNTH_ABC_SCRIPT='$(SYNTH_ABC_SCRIPT)' \
+	 $(TIME) -o '$(BUILD_DIR)/synth.profile' \
+	 	-f 'status=%x\nelapsed_sec=%e\nuser_sec=%U\nsystem_sec=%S\nmax_rss_kb=%M' \
+	 	$(YOSYS) -m slang -p 'tcl scripts/synth.tcl' 2>&1 | tee $(BUILD_DIR)/synth.log
+	@sha256sum --check --status $(BUILD_DIR)/source_manifest.sha256 || \
+		{ echo '[syn] ERROR: sources changed during synthesis; rerun on a stable revision'; exit 1; }
+	@sha256sum $(NETLIST) > $(BUILD_DIR)/netlist.sha256
+
+sta: $(NETLIST) ## Run static timing and vectorless power analysis
+	@echo "[sta] module=$(MODULE) pdk=$(PDK) period=$(PERIOD_NS)ns"
+	@printf 'module=%s\ntop=%s\npdk=%s\nconfig=%s\nclock_mhz=%s\nperiod_ns=%s\nio_delay_frac=%s\noutput_load_ff=%s\nextra_defines=%s\nsram_mode=%s\nsram_platform=%s\nsynth_share=%s\nsynth_generic_abc=%s\nsynth_abc_script=%s\n' \
+		'$(MODULE)' '$(TOP)' '$(PDK)' '$(RAPT_CONFIG)' '$(CLK_FREQ_MHZ)' \
+		'$(PERIOD_NS)' '$(IO_DELAY_FRAC)' '$(OUTPUT_LOAD_FF)' '$(EXTRA_DEFINES)' \
+		'$(SRAM_MODE)' '$(SRAM_PLATFORM)' '$(SYNTH_SHARE)' '$(SYNTH_GENERIC_ABC)' '$(SYNTH_ABC_SCRIPT)' \
+		> $(BUILD_DIR)/run_config.txt
+	@STA_TOP='$(TOP)' \
+	 STA_NETLIST='$(NETLIST)' \
+	 STA_LIB_FILES='$(STA_LIB_FILES)' \
+	 STA_OUT='$(BUILD_DIR)' \
+	 STA_CLK='$(CLOCK_PORT)' \
+	 STA_PERIOD='$(PERIOD_NS)' \
+	 STA_IO_DELAY_FRAC='$(IO_DELAY_FRAC)' \
+	 STA_OUTPUT_LOAD_FF='$(OUTPUT_LOAD_FF)' \
+	 $(TIME) -o '$(BUILD_DIR)/sta.profile' \
+	 	-f 'status=%x\nelapsed_sec=%e\nuser_sec=%U\nsystem_sec=%S\nmax_rss_kb=%M' \
+	 	$(OPENSTA) -exit scripts/run_sta.tcl 2>&1 | tee $(BUILD_DIR)/sta.log
+
+ppa: syn sta ## Run synthesis and STA for one module
+	@echo "PPA reports: $(BUILD_DIR)"
+	@if [ "$(GENERATE_PROFILE_SUMMARY)" = "1" ]; then \
+		$(MAKE) --no-print-directory profile-summary \
+			PDK=$(PDK) RAPT_CONFIG=$(RAPT_CONFIG) CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
+			MODULES_TO_RUN='$(MODULES)'; \
+	fi
+
+ppa-all: ## Evaluate MODULES_TO_RUN in parallel for one PDK
+	@echo "[parallel] pdk=$(PDK) modules='$(MODULES_TO_RUN)' jobs=$(PARALLEL_JOBS)"
+	+$(MAKE) --no-print-directory --output-sync=target $(PARALLEL_MAKE_FLAGS) \
+		GENERATE_PROFILE_SUMMARY=0 $(addprefix ppa-module-,$(MODULES_TO_RUN))
+	+$(MAKE) --no-print-directory profile-summary PDK=$(PDK) \
+		RAPT_CONFIG=$(RAPT_CONFIG) CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
+		MODULES_TO_RUN='$(MODULES_TO_RUN)'
+
+ppa-module-%: FORCE
+	+$(MAKE) --no-print-directory ppa MODULE=$* PDK=$(PDK) \
+		RAPT_CONFIG=$(RAPT_CONFIG) CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
+		GENERATE_PROFILE_SUMMARY=$(GENERATE_PROFILE_SUMMARY)
+
+ppa-all-pdks: ## Evaluate one module across all supported PDKs
+	@echo "[parallel] module=$(MODULE) pdks='$(SUPPORTED_PDKS)' jobs=$(PARALLEL_JOBS)"
+	+$(MAKE) --no-print-directory --output-sync=target $(PARALLEL_MAKE_FLAGS) $(PDK_PPA_TARGETS)
+
+ppa-pdk-%: FORCE
+	+$(MAKE) --no-print-directory ppa MODULE=$(MODULE) PDK=$* \
+		RAPT_CONFIG=$(RAPT_CONFIG) CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
+		GENERATE_PROFILE_SUMMARY=0
+	+$(MAKE) --no-print-directory profile-summary PDK=$* \
+		RAPT_CONFIG=$(RAPT_CONFIG) CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
+		MODULES_TO_RUN='$(MODULE)'
+
+ppa-matrix: ## Evaluate MODULES_TO_RUN across all supported PDKs
+	@echo "[parallel] pdks='$(SUPPORTED_PDKS)' modules='$(MODULES_TO_RUN)' jobs=$(PARALLEL_JOBS)"
+	+$(MAKE) --no-print-directory --output-sync=target $(PARALLEL_MAKE_FLAGS) $(PDK_MATRIX_TARGETS)
+
+ppa-matrix-pdk-%: FORCE
+	+$(MAKE) --no-print-directory ppa-all PDK=$* \
+		RAPT_CONFIG=$(RAPT_CONFIG) CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
+		MODULES_TO_RUN='$(MODULES_TO_RUN)'
+
+ppa-summary: ## Summarize existing PPA reports for one PDK
+	@$(PYTHON) scripts/summarize_ppa.py \
+		--build-root '$(abspath build)' \
+		--config '$(RAPT_CONFIG)' \
+		--pdk '$(PDK)' \
+		--frequency-mhz '$(CLK_FREQ_MHZ)' \
+		--modules $(MODULES_TO_RUN) \
+		--output '$(PPA_SUMMARY)'
+
+ppa-summary-all-pdks: ## Generate PPA summaries for all supported PDKs
+	@echo "[report] pdks='$(SUPPORTED_PDKS)' modules='$(MODULES_TO_RUN)'"
+	+$(MAKE) --no-print-directory --output-sync=target $(PARALLEL_MAKE_FLAGS) $(PDK_SUMMARY_TARGETS)
+
+ppa-summary-pdk-%: FORCE
+	+$(MAKE) --no-print-directory ppa-summary PDK=$* \
+		RAPT_CONFIG=$(RAPT_CONFIG) CLK_FREQ_MHZ=$(CLK_FREQ_MHZ) \
+		MODULES_TO_RUN='$(MODULES_TO_RUN)'
+
+profile-summary: ## Summarize evaluation time, resources, and RTL size
+	@$(PYTHON) scripts/summarize_profile.py \
+		--build-root '$(abspath build)' \
+		--config '$(RAPT_CONFIG)' \
+		--pdk '$(PDK)' \
+		--frequency-mhz '$(CLK_FREQ_MHZ)' \
+		--modules $(MODULES_TO_RUN) \
+		--output '$(PROFILE_SUMMARY)'
+
+clean: ## Remove all module synthesis build outputs
+	rm -rf build

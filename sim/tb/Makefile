@@ -42,7 +42,7 @@
 # =============================================================================
 
 RAPTOR_HOME ?= $(abspath $(CURDIR)/../..)
-HDL_DIR     := $(RAPTOR_HOME)/hdl
+HDL_DIR     := $(RAPTOR_HOME)/rtl
 SIM_RTL     := $(RAPTOR_HOME)/sim/rtl
 TB_DIR      := $(CURDIR)
 # Single-word rnp interface needs a no-L2 preset (see note above).
@@ -59,7 +59,7 @@ INCDIRS := \
 	$(HDL_DIR)/include/dpic_mock
 
 # RTL sources: rapt_pkg.sv first (package before import), then the rest of
-# hdl plus the rng_chip wrapper (sim/rtl/wrap_rnp_soc.sv).
+# rtl/ plus the rng_chip wrapper (sim/rtl/wrap_rnp_soc.sv).
 PKG_SRC  := $(HDL_DIR)/rapt_pkg.sv
 RTL_REST := $(shell find -L $(HDL_DIR) -name '*.sv' ! -name 'rapt_pkg.sv') \
 			$(SIM_RTL)/wrap_rnp_soc.sv

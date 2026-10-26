@@ -40,19 +40,19 @@ def immutable_copy(output):
 def pack_inputs(repo, config_dir, flags):
     # Same package-first source set as sim/Makefile: no upstream SoC models,
     # and only the two supported generated instruction decoders.
-    sources = sorted(p for p in (repo / "hdl").rglob("*.sv") if "generated" not in p.relative_to(repo / "hdl").parts)
+    sources = sorted(p for p in (repo / "rtl").rglob("*.sv") if "generated" not in p.relative_to(repo / "rtl").parts)
     sources += sorted((repo / "sim/rtl").rglob("*.sv"))
-    sources += [repo / "hdl/generated" / name for name in ("rapt_idu_decoder.sv", "rapt_idu_decoder_c.sv")]
-    sources = [repo / "hdl/rapt_pkg.sv"] + [p for p in sources if p.name != "rapt_pkg.sv"]
+    sources += [repo / "rtl/generated" / name for name in ("rapt_idu_decoder.sv", "rapt_idu_decoder_c.sv")]
+    sources = [repo / "rtl/rapt_pkg.sv"] + [p for p in sources if p.name != "rapt_pkg.sv"]
     for source in sources:
         if not source.is_file():
             raise ValueError(f"Missing {source}; generate decoders with make verilog before building")
-    includes = [config_dir, repo / "sim/include", repo / "hdl/include",
-                repo / "hdl/include/npc", repo / "hdl/include/dpic_mock"]
+    includes = [config_dir, repo / "sim/include", repo / "rtl/include",
+                repo / "rtl/include/npc", repo / "rtl/include/dpic_mock"]
     command = ["verilator", "-E", "-P", "-DSYNTHESIS", *shlex.split(flags),
                *(f"-I{p}" for p in includes), *map(str, sources)]
     digest = hashlib.sha256(json.dumps(command).encode())
-    headers = sorted((repo / "hdl").rglob("*.svh")) + sorted((repo / "sim").glob("include/**/*.svh"))
+    headers = sorted((repo / "rtl").rglob("*.svh")) + sorted((repo / "sim").glob("include/**/*.svh"))
     for source in sources + headers:
         digest.update(str(source).encode())
         digest.update(source.read_bytes())
@@ -61,7 +61,7 @@ def pack_inputs(repo, config_dir, flags):
 
 def pack(repo, root, config, flags, *, immutable=False):
     output = root / key(config, flags)
-    config_dir = repo / "hdl/configs" / config
+    config_dir = repo / "rtl/configs" / config
     if not (config_dir / "rapt_config.svh").is_file():
         raise ValueError(f"Unknown RTL preset: {config}")
     output.mkdir(parents=True, exist_ok=True)

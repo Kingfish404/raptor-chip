@@ -1,13 +1,13 @@
 {
   "generated_at": "2026-10-24T10:05:13Z",
   "sources": {
-    "rtl": "hdl/",
-    "config": "hdl/configs/default/rapt_config.svh",
+    "rtl": "rtl/",
+    "config": "rtl/configs/default/rapt_config.svh",
     "makefile": "Makefile",
     "topology_doc": "README.md mermaid + docs/uarch.md"
   },
   "config": {
-    "preset": "hdl/configs/default/rapt_config.svh",
+    "preset": "rtl/configs/default/rapt_config.svh",
     "macros": {
       "RAPT_ALU_ADD_": "'b00000",
       "RAPT_ALU_ADD_UW": "'b111101",
@@ -378,15 +378,15 @@
     },
     "sources": {
       "brq_entries": {
-        "file": "hdl/rapt_pkg.sv",
+        "file": "rtl/rapt_pkg.sv",
         "parameter": "BranchQueueEntries (rapt_ieu.BRQ_SIZE)"
       },
       "mdq_entries": {
-        "file": "hdl/backend/ieu/rapt_ieu.sv",
+        "file": "rtl/backend/ieu/rapt_ieu.sv",
         "parameter": "MDQ_SIZE"
       },
       "fpq_entries": {
-        "file": "hdl/backend/feu/rapt_feu.sv",
+        "file": "rtl/backend/feu/rapt_feu.sv",
         "parameter": "FPQ_SIZE"
       }
     }
@@ -394,7 +394,7 @@
   "modules": [
     {
       "id": "rapt_fpu_addsub",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_addsub.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_addsub.sv",
       "domain": "feu",
       "stage": null,
       "summary": "Compatibility interface for fixed-format users outside the FEU.",
@@ -425,7 +425,7 @@
     },
     {
       "id": "rapt_fpu_classify",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_classify.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_classify.sv",
       "domain": "feu",
       "stage": null,
       "summary": "",
@@ -434,7 +434,7 @@
     },
     {
       "id": "rapt_fpu_compare",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_compare.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_compare.sv",
       "domain": "feu",
       "stage": null,
       "summary": "",
@@ -443,7 +443,7 @@
     },
     {
       "id": "rapt_fpu_convert_narrow",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_convert_narrow.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_convert_narrow.sv",
       "domain": "feu",
       "stage": null,
       "summary": "",
@@ -452,7 +452,7 @@
     },
     {
       "id": "rapt_fpu_convert_widen",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_convert_widen.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_convert_widen.sv",
       "domain": "feu",
       "stage": null,
       "summary": "",
@@ -461,7 +461,7 @@
     },
     {
       "id": "rapt_fpu_divsqrt",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_divsqrt.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_divsqrt.sv",
       "domain": "feu",
       "stage": null,
       "summary": "One-operation-at-a-time IEEE-754 divider/square-root unit, multi-cycle iterative implementation. One quotient/root bit is retired per clock using a restoring shift-and-subtract recurrence (long division for divide, the classic digit-by-digit method for square root), so a double-p",
@@ -472,7 +472,7 @@
     },
     {
       "id": "rapt_fpu_prefix_adder",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_fma.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_fma.sv",
       "domain": "feu",
       "stage": null,
       "summary": "A technology-independent parallel-prefix adder prevents wide FMA sums from degrading into a linear ripple-carry chain in standard-cell synthesis.  The prefix network has O(log2(WIDTH)) logic depth and intentionally drops carry out, matching SystemVerilog's fixed-width addition se",
@@ -483,7 +483,7 @@
     },
     {
       "id": "rapt_fpu_fma",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_fma.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_fma.sv",
       "domain": "feu",
       "stage": null,
       "summary": "A technology-independent parallel-prefix adder prevents wide FMA sums from degrading into a linear ripple-carry chain in standard-cell synthesis.  The prefix network has O(log2(WIDTH)) logic depth and intentionally drops carry out, matching SystemVerilog's fixed-width addition se",
@@ -518,7 +518,7 @@
     },
     {
       "id": "rapt_fpu_fma_pipeline",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_fma.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_fma.sv",
       "domain": "feu",
       "stage": null,
       "summary": "A technology-independent parallel-prefix adder prevents wide FMA sums from degrading into a linear ripple-carry chain in standard-cell synthesis.  The prefix network has O(log2(WIDTH)) logic depth and intentionally drops carry out, matching SystemVerilog's fixed-width addition se",
@@ -548,7 +548,7 @@
     },
     {
       "id": "rapt_fpu_fp_addsub",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_fp_addsub.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_fp_addsub.sv",
       "domain": "feu",
       "stage": null,
       "summary": "Three-stage, one-operation-per-cycle IEEE-754 floating-point add/sub unit. Stage 1: decode operands, classify specials, align mantissas with sticky. Stage 2: add/subtract aligned mantissas and normalize (priority-encoded leading-zero count plus one barrel shift, replacing the old",
@@ -560,7 +560,7 @@
     },
     {
       "id": "rapt_fpu_fp_product",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_fp_product.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_fp_product.sv",
       "domain": "feu",
       "stage": null,
       "summary": "One 53x53 product resource for the S and D MUL/FMA streams. Each operation keeps its original format-specific finishing stages and eight-cycle slot.",
@@ -630,7 +630,7 @@
     },
     {
       "id": "rapt_fpu_fp_to_half",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_fp_to_half.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_fp_to_half.sv",
       "domain": "feu",
       "stage": null,
       "summary": "IEEE-754 binary32/binary64 to binary16 conversion for FCVT.H.S/D. Tininess is detected after rounding, matching the RISC-V floating-point control-state requirement.",
@@ -639,7 +639,7 @@
     },
     {
       "id": "rapt_fpu_fp_to_int",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_fp_to_int.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_fp_to_int.sv",
       "domain": "feu",
       "stage": null,
       "summary": "",
@@ -651,7 +651,7 @@
     },
     {
       "id": "rapt_fpu_half_to_fp",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_half_to_fp.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_half_to_fp.sv",
       "domain": "feu",
       "stage": null,
       "summary": "Exact widening conversion used by FCVT.S.H and FCVT.D.H.  Binary16 is narrow enough that every finite value is represented exactly by both binary32 and binary64, so only NaN-box validation and sNaN invalid flagging need special handling.",
@@ -660,7 +660,7 @@
     },
     {
       "id": "rapt_fpu_int_to_fp",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_int_to_fp.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_int_to_fp.sv",
       "domain": "feu",
       "stage": null,
       "summary": "Compatibility interface for fixed-format users outside the FEU.",
@@ -692,7 +692,7 @@
     },
     {
       "id": "rapt_fpu_integer_to_fp",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_integer_to_fp.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_integer_to_fp.sv",
       "domain": "feu",
       "stage": null,
       "summary": "",
@@ -705,7 +705,7 @@
     },
     {
       "id": "rapt_fpu_mul",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_mul.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_mul.sv",
       "domain": "feu",
       "stage": null,
       "summary": "Four-stage, one-operation-at-a-time IEEE-754 multiplier. Stage 1: decode/classify and normalize input significands. Stage 2: calculate the full-precision significand product. Stage 3: normalize the product and form guard/round/sticky bits. Stage 4: round, pack, and raise flags. S",
@@ -738,7 +738,7 @@
     },
     {
       "id": "rapt_fpu_mul_pipeline",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_mul.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_mul.sv",
       "domain": "feu",
       "stage": null,
       "summary": "Four-stage, one-operation-at-a-time IEEE-754 multiplier. Stage 1: decode/classify and normalize input significands. Stage 2: calculate the full-precision significand product. Stage 3: normalize the product and form guard/round/sticky bits. Stage 4: round, pack, and raise flags. S",
@@ -749,7 +749,7 @@
     },
     {
       "id": "rapt_fpu_mul_fma",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_mul_fma.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_mul_fma.sv",
       "domain": "feu",
       "stage": null,
       "summary": "Streaming FMUL/FMA endpoint with one shared significand multiplier. Both operations use the product in stage 2. Pad the four-stage FMUL result to the FMA's eight-stage latency so a mixed stream has one ordered result per cycle and never collides at the shared result endpoint.",
@@ -805,7 +805,7 @@
     },
     {
       "id": "rapt_fpu_sgnj",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_sgnj.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_sgnj.sv",
       "domain": "feu",
       "stage": null,
       "summary": "",
@@ -814,7 +814,7 @@
     },
     {
       "id": "rapt_fpu_single_to_int_w",
-      "file": "hdl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv",
+      "file": "rtl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv",
       "domain": "feu",
       "stage": null,
       "summary": "Compatibility interface for fixed-format users outside the FEU.",
@@ -845,7 +845,7 @@
     },
     {
       "id": "rapt_feu",
-      "file": "hdl/backend/feu/rapt_feu.sv",
+      "file": "rtl/backend/feu/rapt_feu.sv",
       "domain": "feu",
       "stage": 4,
       "summary": "Floating-point execution unit. Floating-point loads/stores remain in the LSU; this unit owns the FP issue queue, scalar arithmetic, conversions, completion packets. Architectural FPR/flag updates belong to retirement.",
@@ -1091,7 +1091,7 @@
     },
     {
       "id": "rapt_ieu",
-      "file": "hdl/backend/ieu/rapt_ieu.sv",
+      "file": "rtl/backend/ieu/rapt_ieu.sv",
       "domain": "ieu",
       "stage": 4,
       "summary": "",
@@ -1161,7 +1161,7 @@
     },
     {
       "id": "rapt_ieu_alu",
-      "file": "hdl/backend/ieu/rapt_ieu_alu.sv",
+      "file": "rtl/backend/ieu/rapt_ieu_alu.sv",
       "domain": "ieu",
       "stage": null,
       "summary": "",
@@ -1173,7 +1173,7 @@
     },
     {
       "id": "rapt_ieu_mul",
-      "file": "hdl/backend/ieu/rapt_ieu_mul.sv",
+      "file": "rtl/backend/ieu/rapt_ieu_mul.sv",
       "domain": "ieu",
       "stage": null,
       "summary": "",
@@ -1186,7 +1186,7 @@
     },
     {
       "id": "rapt_ieu_muldiv",
-      "file": "hdl/backend/ieu/rapt_ieu_muldiv.sv",
+      "file": "rtl/backend/ieu/rapt_ieu_muldiv.sv",
       "domain": "ieu",
       "stage": null,
       "summary": "MUL/DIV pipeline (4th execution pipe): private issue queue + MUL/DIV FU + dedicated CDB writeback port. Phase 1 of the execution-engine decoupling: carve the multiplier out of the unified RS so MUL/DIV uops no longer occupy RS entries for their whole latency nor consume an ALU-CS",
@@ -1235,7 +1235,7 @@
     },
     {
       "id": "rapt_ieu_pipe_alu",
-      "file": "hdl/backend/ieu/rapt_ieu_pipe_alu.sv",
+      "file": "rtl/backend/ieu/rapt_ieu_pipe_alu.sv",
       "domain": "ieu",
       "stage": null,
       "summary": "",
@@ -1260,7 +1260,7 @@
     },
     {
       "id": "rapt_ieu_pipe_alu_csr",
-      "file": "hdl/backend/ieu/rapt_ieu_pipe_alu_csr.sv",
+      "file": "rtl/backend/ieu/rapt_ieu_pipe_alu_csr.sv",
       "domain": "ieu",
       "stage": null,
       "summary": "Integer ALU, CSR, system and trap execution pipe. Scalar floating-point arithmetic is owned by rapt_feu.",
@@ -1286,7 +1286,7 @@
     },
     {
       "id": "rapt_ieu_pipe_branch",
-      "file": "hdl/backend/ieu/rapt_ieu_pipe_branch.sv",
+      "file": "rtl/backend/ieu/rapt_ieu_pipe_branch.sv",
       "domain": "ieu",
       "stage": null,
       "summary": "",
@@ -1299,7 +1299,7 @@
     },
     {
       "id": "rapt_ioq_overlap",
-      "file": "hdl/backend/lsu/rapt_ioq_overlap.sv",
+      "file": "rtl/backend/lsu/rapt_ioq_overlap.sv",
       "domain": "lsu",
       "stage": null,
       "summary": "Overlap of short, circular word ranges. Each access spans at most four words. Split each word index into a two-bit offset and an upper chunk. A short range can cross at most one chunk boundary; share that successor across comparisons instead of building full-width successors for ",
@@ -1316,7 +1316,7 @@
     },
     {
       "id": "rapt_ioq_store_check",
-      "file": "hdl/backend/lsu/rapt_ioq_store_check.sv",
+      "file": "rtl/backend/lsu/rapt_ioq_store_check.sv",
       "domain": "lsu",
       "stage": null,
       "summary": "",
@@ -1354,7 +1354,7 @@
     },
     {
       "id": "rapt_lsu",
-      "file": "hdl/backend/lsu/rapt_lsu.sv",
+      "file": "rtl/backend/lsu/rapt_lsu.sv",
       "domain": "lsu",
       "stage": 4,
       "summary": "",
@@ -1438,7 +1438,7 @@
     },
     {
       "id": "rapt_lsu_ioq",
-      "file": "hdl/backend/lsu/rapt_lsu_ioq.sv",
+      "file": "rtl/backend/lsu/rapt_lsu_ioq.sv",
       "domain": "lsu",
       "stage": null,
       "summary": "",
@@ -1496,7 +1496,7 @@
     },
     {
       "id": "rapt_lsu_sq",
-      "file": "hdl/backend/lsu/rapt_lsu_sq.sv",
+      "file": "rtl/backend/lsu/rapt_lsu_sq.sv",
       "domain": "lsu",
       "stage": null,
       "summary": "",
@@ -1583,7 +1583,7 @@
     },
     {
       "id": "rapt_sq_forward",
-      "file": "hdl/backend/lsu/rapt_sq_forward.sv",
+      "file": "rtl/backend/lsu/rapt_sq_forward.sv",
       "domain": "lsu",
       "stage": null,
       "summary": "Read-only view of the ordered SQ. All load ports use identical alias and youngest-store rules; a younger partial match must block an older full one.",
@@ -1599,7 +1599,7 @@
     },
     {
       "id": "rapt_store_beats",
-      "file": "hdl/backend/lsu/rapt_store_beats.sv",
+      "file": "rtl/backend/lsu/rapt_store_beats.sv",
       "domain": "lsu",
       "stage": null,
       "summary": "Split-store byte formatting only; the SQ retains beat sequencing and accepted-write ownership. The high address is translated by the IOQ.",
@@ -1610,7 +1610,7 @@
     },
     {
       "id": "rapt_backend",
-      "file": "hdl/backend/rapt_backend.sv",
+      "file": "rtl/backend/rapt_backend.sv",
       "domain": "backend",
       "stage": 4,
       "summary": "Backend composition: rename/checkpoints, ROB, dispatch, operand storage, issue/execute, completion ownership, LSU/SQ and precise retirement remain in one synthesis block. Only decoded uops and memory/control contracts cross.",
@@ -1895,7 +1895,7 @@
     },
     {
       "id": "rapt_cdb_arb",
-      "file": "hdl/backend/rapt_cdb_arb.sv",
+      "file": "rtl/backend/rapt_cdb_arb.sv",
       "domain": "backend",
       "stage": null,
       "summary": "",
@@ -1906,7 +1906,7 @@
     },
     {
       "id": "rapt_cmu",
-      "file": "hdl/backend/rapt_cmu.sv",
+      "file": "rtl/backend/rapt_cmu.sv",
       "domain": "backend",
       "stage": 6,
       "summary": "",
@@ -1918,7 +1918,7 @@
     },
     {
       "id": "rapt_completion_guard",
-      "file": "hdl/backend/rapt_completion_guard.sv",
+      "file": "rtl/backend/rapt_completion_guard.sv",
       "domain": "backend",
       "stage": 5,
       "summary": "Combinational ownership firewall for execution results. The ROB owns the authoritative allocation identity.  Execution producers present dest+generation before shared-port arbitration; only a candidate naming a live executing allocation is admitted. Optional immutable-payload enf",
@@ -1934,7 +1934,7 @@
     },
     {
       "id": "rapt_completion_stage",
-      "file": "hdl/backend/rapt_completion_stage.sv",
+      "file": "rtl/backend/rapt_completion_stage.sv",
       "domain": "backend",
       "stage": 5,
       "summary": "One accepted producer packet per cycle. Ownership validation/arbitration precede this boundary; precise flush is the owner's reclamation boundary.",
@@ -1945,7 +1945,7 @@
     },
     {
       "id": "rapt_dispatch_admit",
-      "file": "hdl/backend/rapt_dispatch_admit.sv",
+      "file": "rtl/backend/rapt_dispatch_admit.sv",
       "domain": "backend",
       "stage": 3,
       "summary": "Ordered admission owns the prefix contract, not routing or queue storage. Reason identifies the first unaccepted slot with an explicit priority when conditions overlap. It is not a counterfactual estimate of lost IPC.",
@@ -1956,7 +1956,7 @@
     },
     {
       "id": "rapt_dispatch_ioq_adapter",
-      "file": "hdl/backend/rapt_dispatch_ioq_adapter.sv",
+      "file": "rtl/backend/rapt_dispatch_ioq_adapter.sv",
       "domain": "backend",
       "stage": 3,
       "summary": "",
@@ -1969,7 +1969,7 @@
     },
     {
       "id": "rapt_dispatch_iq_adapter",
-      "file": "hdl/backend/rapt_dispatch_iq_adapter.sv",
+      "file": "rtl/backend/rapt_dispatch_iq_adapter.sv",
       "domain": "backend",
       "stage": 3,
       "summary": "",
@@ -1982,7 +1982,7 @@
     },
     {
       "id": "rapt_dpu",
-      "file": "hdl/backend/rapt_dpu.sv",
+      "file": "rtl/backend/rapt_dpu.sv",
       "domain": "backend",
       "stage": 3,
       "summary": "Capacity-aware dispatch compactor. The ROB exposes an age-ordered candidate window that may be wider than the physical dispatch bandwidth.  This router skips candidates whose target domain is full, preserves age among every candidate it can accept, and compacts at most NumSlots w",
@@ -2007,7 +2007,7 @@
     },
     {
       "id": "rapt_fp_registers",
-      "file": "hdl/backend/rapt_fp_registers.sv",
+      "file": "rtl/backend/rapt_fp_registers.sv",
       "domain": "backend",
       "stage": 3,
       "summary": "Implicit physical-register renaming: each live ROB owner has one FLEN=64 result slot. The speculative map names that owner, while the architectural bank changes only at retirement. Allocation records only source tags (zero names the architectural bank); a producer's retirement re",
@@ -2041,7 +2041,7 @@
     },
     {
       "id": "rapt_fpr",
-      "file": "hdl/backend/rapt_fpr.sv",
+      "file": "rtl/backend/rapt_fpr.sv",
       "domain": "backend",
       "stage": null,
       "summary": "Architectural registers f0..f31 remain writable, and all words are 64 bits in RV32 and RV64 so single-precision results keep their NaN box. Two fixed 32x64 replicas: bank 0 reads FMA rs1/rs2, bank 1 reads FMA rs3 and the IOQ store operand. Both ports read on a read cycle; both re",
@@ -2067,7 +2067,7 @@
     },
     {
       "id": "rapt_fu_result_queue",
-      "file": "hdl/backend/rapt_fu_result_queue.sv",
+      "file": "rtl/backend/rapt_fu_result_queue.sv",
       "domain": "backend",
       "stage": null,
       "summary": "Common owner transport for pipelined and iterative execution units. Arithmetic returns results in launch order, but different units may complete in any order. Credits reserve room for every launched operation before the arithmetic starts; an output stall therefore never loses a o",
@@ -2081,7 +2081,7 @@
     },
     {
       "id": "rapt_iq",
-      "file": "hdl/backend/rapt_iq.sv",
+      "file": "rtl/backend/rapt_iq.sv",
       "domain": "backend",
       "stage": 4,
       "summary": "Data-capture issue queue. Dispatch slots express program order at allocation; execution ports have independent availability and capability masks. A uop has no persistent association with its original dispatch slot. Payload transport is opaque; only register and completion depende",
@@ -2138,7 +2138,7 @@
     },
     {
       "id": "rapt_execute_stage",
-      "file": "hdl/backend/rapt_iq.sv",
+      "file": "rtl/backend/rapt_iq.sv",
       "domain": "backend",
       "stage": 4,
       "summary": "Data-capture issue queue. Dispatch slots express program order at allocation; execution ports have independent availability and capability masks. A uop has no persistent association with its original dispatch slot. Payload transport is opaque; only register and completion depende",
@@ -2150,7 +2150,7 @@
     },
     {
       "id": "rapt_operand_spill",
-      "file": "hdl/backend/rapt_operand_spill.sv",
+      "file": "rtl/backend/rapt_operand_spill.sv",
       "domain": "backend",
       "stage": null,
       "summary": "Compact storage for execution operands which cannot fall through directly to an execution-domain queue. Physical slots are independent of ROB slots; the ROB retains the returned spill index while its owner is in ROB_DP. Releases are registered before they participate in allocatio",
@@ -2176,7 +2176,7 @@
     },
     {
       "id": "rapt_operand_value_spill",
-      "file": "hdl/backend/rapt_operand_value_spill.sv",
+      "file": "rtl/backend/rapt_operand_value_spill.sv",
       "domain": "backend",
       "stage": null,
       "summary": "Operand-value bank for blocked ROB owners. Each live spill entry carries its own waiting tags and allocation-time values. The FPGA ROU resolves live tags from the PRF at dispatch; other uses capture completion values here. Prediction targets are consumed by the ROB checkpoint fil",
@@ -2219,7 +2219,7 @@
     },
     {
       "id": "rapt_prf",
-      "file": "hdl/backend/rapt_prf.sv",
+      "file": "rtl/backend/rapt_prf.sv",
       "domain": "backend",
       "stage": 3,
       "summary": "Physical Register File - multi-ported register storage with valid/transient tracking. Shared backend resource in rapt_core: - Read by ROU (operand fetch via exu_prf_if) - Written by the typed completion array - Commit/dealloc controlled by CMU (rou_cmu_if, cmu_bcast_if) On flush,",
@@ -2237,7 +2237,7 @@
     },
     {
       "id": "rapt_recovery_pending",
-      "file": "hdl/backend/rapt_recovery_pending.sv",
+      "file": "rtl/backend/rapt_recovery_pending.sv",
       "domain": "backend",
       "stage": 5,
       "summary": "One oldest outstanding recovery transaction. New older requests supersede younger ones; ties keep the existing owner, then the lowest candidate port. Ages are ROB-ring distances from the CURRENT head, never raw index order. The transaction holds slot + generation atomically. A re",
@@ -2252,7 +2252,7 @@
     },
     {
       "id": "rapt_rob_age_mask",
-      "file": "hdl/backend/rapt_rob_age_mask.sv",
+      "file": "rtl/backend/rapt_rob_age_mask.sv",
       "domain": "backend",
       "stage": null,
       "summary": "Keep only pending owners strictly before the recovery owner in ROB order. A circular interval is either [head, owner) or [head, Entries) U [0, owner). XOR the two prefix masks, complementing for wrap. No per-entry subtract or modulo, and no per-entry mux between AND/OR interval e",
@@ -2264,7 +2264,7 @@
     },
     {
       "id": "rapt_rob_dispatch_select",
-      "file": "hdl/backend/rapt_rob_dispatch_select.sv",
+      "file": "rtl/backend/rapt_rob_dispatch_select.sv",
       "domain": "backend",
       "stage": 3,
       "summary": "Select the oldest pending ROB owners for execution-domain steering. The candidate vector is compact and age ordered, but acceptance is deliberately independent per candidate: a blocked older domain does not suppress a ready younger candidate from another domain. Retirement remain",
@@ -2288,7 +2288,7 @@
     },
     {
       "id": "rapt_rob_dispatch_window",
-      "file": "hdl/backend/rapt_rob_dispatch_window.sv",
+      "file": "rtl/backend/rapt_rob_dispatch_window.sv",
       "domain": "backend",
       "stage": null,
       "summary": "Registered ROB dispatch window. This retimes rapt_rob_dispatch_select's age ranking across the clock edge: at the end of each cycle the oldest pending owners that were not accepted are ranked and captured together with their immutable steering payload (domain and spill slot). The",
@@ -2314,7 +2314,7 @@
     },
     {
       "id": "rapt_rou",
-      "file": "hdl/backend/rapt_rou.sv",
+      "file": "rtl/backend/rapt_rou.sv",
       "domain": "backend",
       "stage": 3,
       "summary": "Re-Order Unit (ROU) - dispatch queue + reorder buffer + commit. Sub-sections: 1. Rename skid            - holds a registered group for ROB allocation 2. ROB Dispatch Buffer    - independently steers allocated owners to domains 3. Reorder Buffer (ROB)   - tracks in-flight instruct",
@@ -2501,7 +2501,7 @@
     },
     {
       "id": "rapt_operand_stage",
-      "file": "hdl/backend/rapt_rou.sv",
+      "file": "rtl/backend/rapt_rou.sv",
       "domain": "backend",
       "stage": null,
       "summary": "Re-Order Unit (ROU) - dispatch queue + reorder buffer + commit. Sub-sections: 1. Rename skid            - holds a registered group for ROB allocation 2. ROB Dispatch Buffer    - independently steers allocated owners to domains 3. Reorder Buffer (ROB)   - tracks in-flight instruct",
@@ -2512,7 +2512,7 @@
     },
     {
       "id": "rapt_rvfi",
-      "file": "hdl/backend/rapt_rvfi.sv",
+      "file": "rtl/backend/rapt_rvfi.sv",
       "domain": "backend",
       "stage": 6,
       "summary": "RVFI (RISC-V Formal Interface) output generation. Produces per-channel RVFI signals from commit metadata for formal verification. NRET = CommitWidth: channel order is program order starting at ROB head.",
@@ -2526,7 +2526,7 @@
     },
     {
       "id": "rapt_vpu",
-      "file": "hdl/backend/vpu/rapt_vpu.sv",
+      "file": "rtl/backend/vpu/rapt_vpu.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Standalone, head-authorized vector engine. Integer execution currently uses one natural-aligned element at a time; other RVV classes remain illegal until implemented. Host register access is an idle-only debug/context interface, not an ISA bypass available during execution. No sc",
@@ -3113,7 +3113,7 @@
     },
     {
       "id": "rapt_vpu_alu",
-      "file": "hdl/backend/vpu/rapt_vpu_alu.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_alu.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "One integer element. funct6 is the RVV OPIV encoding; decode/legality is separate. Truncation and signed comparisons use SEW, never scalar XLEN.",
@@ -3122,7 +3122,7 @@
     },
     {
       "id": "rapt_vpu_core",
-      "file": "hdl/backend/vpu/rapt_vpu_core.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_core.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Core-facing composition with immutable retirement metadata. authorize_tag names the current ROB head; head_safe supplies its irrevocability/ordering guarantee. Tags pack generation above slot. Neither memory ordering nor the scalar ROB/CSR update implementation is hidden inside t",
@@ -3174,7 +3174,7 @@
     },
     {
       "id": "rapt_vpu_core_adapter",
-      "file": "hdl/backend/vpu/rapt_vpu_core_adapter.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_core_adapter.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Single-entry core-side control bridge. The core resolves scalar dependencies before cmd acceptance. head_safe means the matching ROB head may execute irrevocably (including required older-memory ordering). After authorization the core must retain that owner until completion; kill",
@@ -3190,7 +3190,7 @@
     },
     {
       "id": "rapt_vpu_csr",
-      "file": "hdl/backend/vpu/rapt_vpu_csr.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_csr.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Architectural vector state. All mutation inputs are already-authorized single-cycle events from the owner; speculative dispatch is NOT a write. The owner serializes configuration, CSR accesses, and execution updates. Flush must not reset this module: a trapping vector instruction",
@@ -3220,7 +3220,7 @@
     },
     {
       "id": "rapt_vpu_decode",
-      "file": "hdl/backend/vpu/rapt_vpu_decode.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_decode.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Standalone raw instruction decoder. Only implemented operations are admitted; unsupported/reserved encodings trap instead of falling through to an ALU op. Scalar-core Chisel decode is untouched until the integration adapter exists.",
@@ -3229,7 +3229,7 @@
     },
     {
       "id": "rapt_vpu_divsqrt",
-      "file": "hdl/backend/vpu/rapt_vpu_divsqrt.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_divsqrt.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Raw element divide/sqrt using one shared, runtime-precision iterative unit. Caller resolves FRM and instruction legality; rm=5..7 and unsupported FP64 requests return illegal without launching the arithmetic unit. Reset aborts.",
@@ -3262,7 +3262,7 @@
     },
     {
       "id": "rapt_vpu_element",
-      "file": "hdl/backend/vpu/rapt_vpu_element.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_element.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Natural-aligned 8/16/32/64-bit element port over the architectural VRF. A single response slot includes write acknowledgments. Addresses are linear byte offsets across all 32 registers; scheduler supplies validated geometry.",
@@ -3277,7 +3277,7 @@
     },
     {
       "id": "rapt_vpu_fixed",
-      "file": "hdl/backend/vpu/rapt_vpu_fixed.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_fixed.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Stateless fixed-point rounding/saturation stage. The caller supplies legal widths: narrowing clip consumes 2*SEW <= 64. Fractional multiplication uses a signed full product from the separately handshaked multiplier, not a new combinational multiplier. No architectural CSR state i",
@@ -3286,7 +3286,7 @@
     },
     {
       "id": "rapt_vpu_fma",
-      "file": "hdl/backend/vpu/rapt_vpu_fma.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_fma.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Independently testable fused element engine. Inputs are raw vector bits; FP32 values do not carry scalar NaN boxing. Caller resolves dynamic FRM, selects operand order, and accumulates flags only for active written elements. No command cancellation after acceptance; reset aborts ",
@@ -3317,7 +3317,7 @@
     },
     {
       "id": "rapt_vpu_fp_arith",
-      "file": "hdl/backend/vpu/rapt_vpu_fp_arith.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_fp_arith.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Raw FP32/FP64 element arithmetic with one shared fused datapath. Operation 0 is FMA with independent sign controls; 1/2/3 are add/subtract/multiply and ignore c and the sign controls. No intermediate product rounding is added.",
@@ -3350,7 +3350,7 @@
     },
     {
       "id": "rapt_vpu_fp_convert",
-      "file": "hdl/backend/vpu/rapt_vpu_fp_convert.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_fp_convert.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Raw FP32/FP64 format conversions. rm=0..4 are IEEE rounding modes; rm=6 means round-to-odd for narrowing only, not an architectural FRM value. Scalar NaN boxing and instruction/FRM legality belong to the caller.",
@@ -3384,7 +3384,7 @@
     },
     {
       "id": "rapt_vpu_fp_decode",
-      "file": "hdl/backend/vpu/rapt_vpu_fp_decode.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_fp_decode.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Same-width and widening floating-point arithmetic admission and raw element operand map. Caller supplies resolved FRM and enabled=(VS!=Off && FS!=Off), validates register geometry, and captures all outputs at execution request acceptance. This module does not authorize architectu",
@@ -3395,7 +3395,7 @@
     },
     {
       "id": "rapt_vpu_fp_estimate",
-      "file": "hdl/backend/vpu/rapt_vpu_fp_estimate.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_fp_estimate.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "RVV 1.0 vfrec7/vfrsqrt7 raw element estimates. Lookup constants are the normative vfrec7.adoc and vfrsqrt7.adoc tables in riscvarchive/riscv-v-spec. Combinational leaf: caller owns instruction admission, masking and flags.",
@@ -3406,7 +3406,7 @@
     },
     {
       "id": "rapt_vpu_fp_misc",
-      "file": "hdl/backend/vpu/rapt_vpu_fp_misc.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_fp_misc.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Combinational raw FP element operations. No scalar NaN-box checking here: the vector decoder owns scalar boxing, mask/FRM legality and authorization. operation: 0=min, 1=max, 2=sgnj, 3=sgnjn, 4=sgnjx, 5=class, 6=eq, 7=ne, 8=lt, 9=le, 10=gt, 11=ge. Comparisons return a single pred",
@@ -3417,7 +3417,7 @@
     },
     {
       "id": "rapt_vpu_fp_reduce",
-      "file": "hdl/backend/vpu/rapt_vpu_fp_reduce.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_fp_reduce.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Sequential floating-point reduction stream, independent of VRF and XLEN. op: 0=sum, 1=min, 2=max. Ordered summation is also a permitted unordered implementation. Caller streams exactly count elements in increasing order, with active=0 for masked entries; seed is vs1[0] at destina",
@@ -3494,7 +3494,7 @@
     },
     {
       "id": "rapt_vpu_fp_reduce_control",
-      "file": "hdl/backend/vpu/rapt_vpu_fp_reduce_control.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_fp_reduce_control.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Sequential floating-point reduction stream, independent of VRF and XLEN. op: 0=sum, 1=min, 2=max. Ordered summation is also a permitted unordered implementation. Caller streams exactly count elements in increasing order, with active=0 for masked entries; seed is vs1[0] at destina",
@@ -3515,7 +3515,7 @@
     },
     {
       "id": "rapt_vpu_fp_reduce_decode",
-      "file": "hdl/backend/vpu/rapt_vpu_fp_reduce_decode.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_fp_reduce_decode.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "RVV 1.0 FP reduction admission. No arithmetic or architectural effects. enabled combines VS and FS. Caller checks VTYPE/LMUL/source-group geometry, VL and nonzero vstart before reading VRF or issuing a numeric request. Seed/destination are scalars independent of LMUL; destination",
@@ -3526,7 +3526,7 @@
     },
     {
       "id": "rapt_vpu_fp_reduce_engine",
-      "file": "hdl/backend/vpu/rapt_vpu_fp_reduce_engine.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_fp_reduce_engine.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Already-authorized FP reduction over an exclusive element VRF port. All source/mask reads precede the sole destination write, including when vd overlaps vs1, vs2 or v0. Tail bytes are preserved. External numeric and VRF services must reset/drain with the engine before reuse.",
@@ -3606,7 +3606,7 @@
     },
     {
       "id": "rapt_vpu_fp_transfer",
-      "file": "hdl/backend/vpu/rapt_vpu_fp_transfer.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_fp_transfer.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Stateless FP transfer admission and element routing. FLEN is 64, independent of XLEN. Caller owns register geometry/overlap, VRF transactions, completion, VS/FS dirty updates and clearing vstart after successful execution. vector_element is the raw value fetched at source_index w",
@@ -3638,7 +3638,7 @@
     },
     {
       "id": "rapt_vpu_fp_wide_arith",
-      "file": "hdl/backend/vpu/rapt_vpu_fp_wide_arith.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_fp_wide_arith.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "FP32 -> FP64 widening arithmetic. operation uses the fp_arith encoding: 0=FMA, 1=add, 2=subtract, 3=multiply. FMA's c is always raw FP64. a_is_wide selects the FP64 source of vfwadd.w/vfwsub.w only; b is FP32. Scalar boxing and ISA register geometry are the caller's responsibilit",
@@ -3686,7 +3686,7 @@
     },
     {
       "id": "rapt_vpu_fp_widen",
-      "file": "hdl/backend/vpu/rapt_vpu_fp_widen.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_fp_widen.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Exact raw FP32 operand expansion for FP64 widening arithmetic. This is NOT an architectural conversion instruction: NaN sign, payload and signaling status are retained so the consuming arithmetic unit raises NV. No rounding, overflow or underflow is possible for finite FP32 opera",
@@ -3695,7 +3695,7 @@
     },
     {
       "id": "rapt_vpu_geometry",
-      "file": "hdl/backend/vpu/rapt_vpu_geometry.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_geometry.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Arithmetic register geometry, independent of the core and execution engine. Size codes are log2(bytes). EMUL exponents are signed log2(register groups).",
@@ -3706,7 +3706,7 @@
     },
     {
       "id": "rapt_vpu_int_fp",
-      "file": "hdl/backend/vpu/rapt_vpu_int_fp.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_int_fp.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Raw integer/FP element conversion. Fixed elaboration widths keep arithmetic independent of XLEN. Caller validates ISA EEW/EMUL and resolves RTZ vs FRM.",
@@ -3754,7 +3754,7 @@
     },
     {
       "id": "rapt_vpu_int_fp_decode",
-      "file": "hdl/backend/vpu/rapt_vpu_int_fp_decode.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_int_fp_decode.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Unary integer/FP conversion admission, independent of scalar XLEN.",
@@ -3765,7 +3765,7 @@
     },
     {
       "id": "rapt_vpu_mask_scan",
-      "file": "hdl/backend/vpu/rapt_vpu_mask_scan.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_mask_scan.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Read-only mask scan, independent of vector element width and scalar ROB. Caller owns exclusive VRF access and has validated the raw instruction. One source byte (and at most one predicate byte) is fetched per eight bits.",
@@ -3779,7 +3779,7 @@
     },
     {
       "id": "rapt_vpu_mask_write",
-      "file": "hdl/backend/vpu/rapt_vpu_mask_write.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_mask_write.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "A single mask-bit update over an exclusive byte read/write VRF interface. The caller owns architectural authorization and excludes other writers until completion. Preserves every other bit, including prestart/inactive/tail bits.",
@@ -3790,7 +3790,7 @@
     },
     {
       "id": "rapt_vpu_memory",
-      "file": "hdl/backend/vpu/rapt_vpu_memory.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_memory.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Sequential vector memory sequencer. The command is already irrevocably authorized. Requests use virtual byte addresses and natural-aligned elements; the integration adapter owns translation, PMP/PMA, ordering and final errors. A successful store response must mean the store is no",
@@ -3806,7 +3806,7 @@
     },
     {
       "id": "rapt_vpu_move",
-      "file": "hdl/backend/vpu/rapt_vpu_move.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_move.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Whole-register copy engine. The owner authorizes exclusive VRF access. Legal aligned equal-sized groups are either identical or disjoint. VL/LMUL do not set transfer length; SEW converts vstart into a byte offset. VILL traps.",
@@ -3819,7 +3819,7 @@
     },
     {
       "id": "rapt_vpu_muldiv",
-      "file": "hdl/backend/vpu/rapt_vpu_muldiv.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_muldiv.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Independent, single-element RVV integer multiply/divide engine. op is the low three funct6 bits for OPMVV/OPMVX 100xxx. Radix-2 shift/add and restoring division avoid technology-dependent combinational multipliers/dividers. Requests are already authorized; reset is not an archite",
@@ -3830,7 +3830,7 @@
     },
     {
       "id": "rapt_vpu_owner",
-      "file": "hdl/backend/vpu/rapt_vpu_owner.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_owner.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "One command's lifetime, independent of execution kind and core ROB layout. Tag must include allocation generation, not just a reusable ROB slot. Cancellation wins over authorization before issue. After authorization the instruction is irrevocable: the host must preserve its retir",
@@ -3843,7 +3843,7 @@
     },
     {
       "id": "rapt_vpu_reduce",
-      "file": "hdl/backend/vpu/rapt_vpu_reduce.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_reduce.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Authorized, sequential integer reduction over an exclusive element VRF port. Seed and destination are scalars in one register regardless of LMUL. No destination write occurs until all source/mask reads have completed, permitting destination/source overlap, including v0 when it is",
@@ -3872,7 +3872,7 @@
     },
     {
       "id": "rapt_vpu_slide",
-      "file": "hdl/backend/vpu/rapt_vpu_slide.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_slide.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Combinational slide element routing, independent of VRF geometry and ports. Caller validates instruction/group legality, supplies VLMAX for current SEW and LMUL, and sign-extends integer scalar data when scalar_select is asserted. Upward slides require disjoint source/destination",
@@ -3885,7 +3885,7 @@
     },
     {
       "id": "rapt_vpu_vrf",
-      "file": "hdl/backend/vpu/rapt_vpu_vrf.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_vrf.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Architectural VRF storage: 32*VLEN bits striped across independent 1RW banks. Linear word k maps to bank k%Banks and row k/Banks. Register layout is byte-stable and independent of SEW/LMUL; the scheduler owns addressing. Writes complete at request acceptance. Reads have a one-ent",
@@ -3899,7 +3899,7 @@
     },
     {
       "id": "rapt_vpu_vtype",
-      "file": "hdl/backend/vpu/rapt_vpu_vtype.sv",
+      "file": "rtl/backend/vpu/rapt_vpu_vtype.sv",
       "domain": "vpu",
       "stage": null,
       "summary": "Stateless RVV configuration calculation. The owning controller commits the outputs only for an accepted, authorized vset instruction. No core package, preset, ROB width, or physical execution-port identity is captured here.",
@@ -3912,7 +3912,7 @@
     },
     {
       "id": "rapt_bulk_clear_bits",
-      "file": "hdl/common/rapt_bulk_clear_bits.sv",
+      "file": "rtl/common/rapt_bulk_clear_bits.sv",
       "domain": "common",
       "stage": null,
       "summary": "Bit array with a single-cycle bulk clear, one addressed write and several asynchronous reads. A per-entry flop array would be needed for the parallel clear; instead entries are grouped into LUTRAM words and only one flag per group is a flop. Clearing drops every group flag; the n",
@@ -3926,7 +3926,7 @@
     },
     {
       "id": "rapt_issue_select",
-      "file": "hdl/common/rapt_issue_select.sv",
+      "file": "rtl/common/rapt_issue_select.sv",
       "domain": "common",
       "stage": null,
       "summary": "Payload-independent oldest-ready selection. older[i][j] means i precedes j. Rows involving invalid entries may be stale; only valid candidates matter. Port-first greedy selection is optionally followed by bounded one-hop augmentation: move an already selected uop to an idle compa",
@@ -3942,7 +3942,7 @@
     },
     {
       "id": "rapt_rank_select",
-      "file": "hdl/common/rapt_rank_select.sv",
+      "file": "rtl/common/rapt_rank_select.sv",
       "domain": "common",
       "stage": null,
       "summary": "Select the first NumSelect available identities in ascending index order. Shared bounded-count up/down trees replace cascaded priority encoders. All ranks are computed independently of acceptance; the owner consumes a prefix.",
@@ -3955,7 +3955,7 @@
     },
     {
       "id": "rapt_stream_queue",
-      "file": "hdl/common/rapt_stream_queue.sv",
+      "file": "rtl/common/rapt_stream_queue.sv",
       "domain": "common",
       "stage": null,
       "summary": "Ordered instruction stream, not a queue of indivisible fetch/rename groups. Valid inputs and accepted outputs are contiguous prefixes. No fall-through: storage decouples producer data from consumer selection. Flush cancels both.",
@@ -3970,7 +3970,7 @@
     },
     {
       "id": "rapt_bpu",
-      "file": "hdl/frontend/branch_predictor/rapt_bpu.sv",
+      "file": "rtl/frontend/branch_predictor/rapt_bpu.sv",
       "domain": "bpu",
       "stage": 0,
       "summary": "",
@@ -4061,7 +4061,7 @@
     },
     {
       "id": "rapt_bpu_btb",
-      "file": "hdl/frontend/branch_predictor/rapt_bpu_btb.sv",
+      "file": "rtl/frontend/branch_predictor/rapt_bpu_btb.sv",
       "domain": "bpu",
       "stage": 0,
       "summary": "",
@@ -4076,7 +4076,7 @@
     },
     {
       "id": "rapt_bpu_gshare",
-      "file": "hdl/frontend/branch_predictor/rapt_bpu_gshare.sv",
+      "file": "rtl/frontend/branch_predictor/rapt_bpu_gshare.sv",
       "domain": "bpu",
       "stage": null,
       "summary": "",
@@ -4092,7 +4092,7 @@
     },
     {
       "id": "rapt_bpu_pht",
-      "file": "hdl/frontend/branch_predictor/rapt_bpu_pht.sv",
+      "file": "rtl/frontend/branch_predictor/rapt_bpu_pht.sv",
       "domain": "bpu",
       "stage": 0,
       "summary": "",
@@ -4107,7 +4107,7 @@
     },
     {
       "id": "rapt_bpu_static",
-      "file": "hdl/frontend/branch_predictor/rapt_bpu_static.sv",
+      "file": "rtl/frontend/branch_predictor/rapt_bpu_static.sv",
       "domain": "bpu",
       "stage": null,
       "summary": "",
@@ -4121,7 +4121,7 @@
     },
     {
       "id": "rapt_bpu_tage",
-      "file": "hdl/frontend/branch_predictor/rapt_bpu_tage.sv",
+      "file": "rtl/frontend/branch_predictor/rapt_bpu_tage.sv",
       "domain": "bpu",
       "stage": 0,
       "summary": "",
@@ -4224,7 +4224,7 @@
     },
     {
       "id": "rapt_predict_history",
-      "file": "hdl/frontend/branch_predictor/rapt_predict_history.sv",
+      "file": "rtl/frontend/branch_predictor/rapt_predict_history.sv",
       "domain": "bpu",
       "stage": 0,
       "summary": "Histories belong to instruction-stream boundaries, not prediction queries. Decode is a recovery watermark for IDU resteers; retirement is the watermark for full flush. Each boundary currently accepts at most one conditional/edge.",
@@ -4236,7 +4236,7 @@
     },
     {
       "id": "rapt_ras",
-      "file": "hdl/frontend/branch_predictor/rapt_ras.sv",
+      "file": "rtl/frontend/branch_predictor/rapt_ras.sv",
       "domain": "bpu",
       "stage": 0,
       "summary": "Decode-ordered speculative return stack with an independent retirement image. Querying never mutates state. A flush restores the POST-commit image, including data overwritten by wrong-path pushes. Pop on empty is a no-op; overflow drops the oldest entry. Simultaneous pop/push is ",
@@ -4250,7 +4250,7 @@
     },
     {
       "id": "rapt_csr",
-      "file": "hdl/frontend/rapt_csr.sv",
+      "file": "rtl/frontend/rapt_csr.sv",
       "domain": "frontend",
       "stage": 6,
       "summary": "",
@@ -4261,7 +4261,7 @@
     },
     {
       "id": "rapt_decode_slot",
-      "file": "hdl/frontend/rapt_decode_slot.sv",
+      "file": "rtl/frontend/rapt_decode_slot.sv",
       "domain": "frontend",
       "stage": 1,
       "summary": "Pure single-instruction decode. No slot identity or pipeline control here.",
@@ -4314,7 +4314,7 @@
     },
     {
       "id": "rapt_fetch_successor",
-      "file": "hdl/frontend/rapt_fetch_successor.sv",
+      "file": "rtl/frontend/rapt_fetch_successor.sv",
       "domain": "frontend",
       "stage": null,
       "summary": "Predict only where to request the next packet. The response stage validates every hint against freshly decoded instructions and the direction predictor before a younger packet can enter the visible stream.",
@@ -4326,7 +4326,7 @@
     },
     {
       "id": "rapt_fqu",
-      "file": "hdl/frontend/rapt_fqu.sv",
+      "file": "rtl/frontend/rapt_fqu.sv",
       "domain": "frontend",
       "stage": 1,
       "summary": "Flatten fetch packets into an ordered stream; decode can regroup across original fetch boundaries. Prediction and fault metadata stays per instruction.",
@@ -4357,7 +4357,7 @@
     },
     {
       "id": "rapt_frontend",
-      "file": "hdl/frontend/rapt_frontend.sv",
+      "file": "rtl/frontend/rapt_frontend.sv",
       "domain": "frontend",
       "stage": 1,
       "summary": "Fetch/predict/decode composition. Rename belongs to the backend so its checkpoint, retirement and physical-register feedback stay within that block.",
@@ -4429,7 +4429,7 @@
     },
     {
       "id": "rapt_idu",
-      "file": "hdl/frontend/rapt_idu.sv",
+      "file": "rtl/frontend/rapt_idu.sv",
       "domain": "frontend",
       "stage": 1,
       "summary": "",
@@ -4453,7 +4453,7 @@
     },
     {
       "id": "rapt_ifetch_io_guard",
-      "file": "hdl/frontend/rapt_ifetch_io_guard.sv",
+      "file": "rtl/frontend/rapt_ifetch_io_guard.sv",
       "domain": "frontend",
       "stage": 0,
       "summary": "Conservative non-speculative fetch authorization. Empty includes all frontend queues and the ROB, so repeated PCs cannot alias older dynamic instructions. A frontend cancel alone never replenishes the permission.",
@@ -4464,7 +4464,7 @@
     },
     {
       "id": "rapt_ifu",
-      "file": "hdl/frontend/rapt_ifu.sv",
+      "file": "rtl/frontend/rapt_ifu.sv",
       "domain": "frontend",
       "stage": 0,
       "summary": "The cache owns cross-word/page assembly of the first instruction. Its fixed lookahead window is an input bandwidth limit, NOT a decode/rename slot count. This stage walks complete 16/32-bit instructions and holds any unconsumed suffix. A control instruction terminates the fetched",
@@ -4512,7 +4512,7 @@
     },
     {
       "id": "rapt_rename_admit",
-      "file": "hdl/frontend/rapt_rename_admit.sv",
+      "file": "rtl/frontend/rapt_rename_admit.sv",
       "domain": "frontend",
       "stage": 2,
       "summary": "Resource qualification is independent of earlier acceptance decisions. If every older slot passed, its demand rank equals its accepted rank. If an older slot did not pass, the prefix blocks this slot regardless of its rank.",
@@ -4523,7 +4523,7 @@
     },
     {
       "id": "rapt_rename_checkpoint",
-      "file": "hdl/frontend/rapt_rename_checkpoint.sv",
+      "file": "rtl/frontend/rapt_rename_checkpoint.sv",
       "domain": "frontend",
       "stage": 2,
       "summary": "Control-flow checkpoint lifetime, ancestry, and predictor history. Rename stays fenced after a redirect and the precise retirement flush rebuilds MAP/free from the committed RAT; no speculative rename snapshot is needed. One age bit per unordered pair represents the order of live",
@@ -4539,7 +4539,7 @@
     },
     {
       "id": "rapt_rnu",
-      "file": "hdl/frontend/rapt_rnu.sv",
+      "file": "rtl/frontend/rapt_rnu.sv",
       "domain": "frontend",
       "stage": 2,
       "summary": "Ordered rename: incoming decode groups are flattened by RNQ. The rename group sees a program-order fold of MAP, including RAW and stale-destination WAW bypass. Free registers are selected once per actual destination writer.",
@@ -4653,7 +4653,7 @@
     },
     {
       "id": "rapt_idu_decoder",
-      "file": "hdl/generated/rapt_idu_decoder.sv",
+      "file": "rtl/generated/rapt_idu_decoder.sv",
       "domain": "frontend",
       "stage": 1,
       "summary": "Generated by CIRCT firtool-1.131.0",
@@ -4662,7 +4662,7 @@
     },
     {
       "id": "rapt_idu_decoder_c",
-      "file": "hdl/generated/rapt_idu_decoder_c.sv",
+      "file": "rtl/generated/rapt_idu_decoder_c.sv",
       "domain": "frontend",
       "stage": 1,
       "summary": "Generated by CIRCT firtool-1.131.0",
@@ -4671,7 +4671,7 @@
     },
     {
       "id": "rapt_axi_master",
-      "file": "hdl/memory/rapt_axi_master.sv",
+      "file": "rtl/memory/rapt_axi_master.sv",
       "domain": "memory",
       "stage": 8,
       "summary": "",
@@ -4686,7 +4686,7 @@
     },
     {
       "id": "rapt_axi_r_buffer",
-      "file": "hdl/memory/rapt_axi_r_buffer.sv",
+      "file": "rtl/memory/rapt_axi_r_buffer.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Register the outer AXI R channel before it enters the cache hierarchy. Two entries let a ready consumer accept one beat on every cycle while rready to the memory controller depends only on registered occupancy.",
@@ -4699,7 +4699,7 @@
     },
     {
       "id": "rapt_bus",
-      "file": "hdl/memory/rapt_bus.sv",
+      "file": "rtl/memory/rapt_bus.sv",
       "domain": "memory",
       "stage": 8,
       "summary": "",
@@ -4712,7 +4712,7 @@
     },
     {
       "id": "rapt_cache_fill_select",
-      "file": "hdl/memory/rapt_cache_fill_select.sv",
+      "file": "rtl/memory/rapt_cache_fill_select.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Reuse a live matching line, otherwise an invalid candidate, otherwise the replacement-policy victim. Way zero is a valid result, not a sentinel.",
@@ -4724,7 +4724,7 @@
     },
     {
       "id": "rapt_cache_plru",
-      "file": "hdl/memory/rapt_cache_plru.sv",
+      "file": "rtl/memory/rapt_cache_plru.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Multi-query tree PLRU. Bits record the most recently used child. Only nodes on an accessed leaf's path change. Update ports are applied in ascending order; a higher port wins only on nodes both ports touch.",
@@ -4739,7 +4739,7 @@
     },
     {
       "id": "rapt_cached_ptw",
-      "file": "hdl/memory/rapt_cached_ptw.sv",
+      "file": "rtl/memory/rapt_cached_ptw.sv",
       "domain": "memory",
       "stage": null,
       "summary": "L1 miss adapter: probe the shared L2 TLB before starting the existing PTW. Cancellation drains accepted PTE reads through the PTW's original protocol.",
@@ -4785,7 +4785,7 @@
     },
     {
       "id": "rapt_ifetch_translate",
-      "file": "hdl/memory/rapt_ifetch_translate.sv",
+      "file": "rtl/memory/rapt_ifetch_translate.sv",
       "domain": "memory",
       "stage": 0,
       "summary": "Translation adapter for the per-word fetch controller. Every accepted request produces one response, even after cancellation. A killed PTW does not itself pulse done/fault, so its busy falling is explicitly acknowledged. The caller discards the response of a cancelled architectur",
@@ -4849,7 +4849,7 @@
     },
     {
       "id": "rapt_ifetch_word",
-      "file": "hdl/memory/rapt_ifetch_word.sv",
+      "file": "rtl/memory/rapt_ifetch_word.sv",
       "domain": "memory",
       "stage": null,
       "summary": "One architectural instruction, with an independently translated second aligned word only when a 32-bit instruction straddles a word boundary. Translation and data channels each accept one obligation and must return exactly one response, including after kill. This unit drains acce",
@@ -4860,7 +4860,7 @@
     },
     {
       "id": "rapt_l1d",
-      "file": "hdl/memory/rapt_l1d.sv",
+      "file": "rtl/memory/rapt_l1d.sv",
       "domain": "memory",
       "stage": 7,
       "summary": "",
@@ -5120,7 +5120,7 @@
     },
     {
       "id": "rapt_l1d_access",
-      "file": "hdl/memory/rapt_l1d_access.sv",
+      "file": "rtl/memory/rapt_l1d_access.sv",
       "domain": "memory",
       "stage": null,
       "summary": "",
@@ -5159,7 +5159,7 @@
     },
     {
       "id": "rapt_l1d_data",
-      "file": "hdl/memory/rapt_l1d_data.sv",
+      "file": "rtl/memory/rapt_l1d_data.sv",
       "domain": "memory",
       "stage": null,
       "summary": "L1D word-write / line-read data array, built from <=128-bit 1RW SRAMs. A write reserves only its selected way/subarray. Other banks read on the same edge; each bank reports which set its output currently represents.",
@@ -5175,7 +5175,7 @@
     },
     {
       "id": "rapt_l1d_mshr",
-      "file": "hdl/memory/rapt_l1d_mshr.sv",
+      "file": "rtl/memory/rapt_l1d_mshr.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Physical-line miss table and refill buffers. Requests replay through L1D (including translation/PMP) before consuming data; no speculative ROB tags are retained here. Completed lines stay until replaced or invalidated.",
@@ -5192,7 +5192,7 @@
     },
     {
       "id": "rapt_l1d_tags",
-      "file": "hdl/memory/rapt_l1d_tags.sv",
+      "file": "rtl/memory/rapt_l1d_tags.sv",
       "domain": "memory",
       "stage": null,
       "summary": "L1D tag/valid ownership and replacement lookup. Reads are combinational; updates and fence invalidation occur on the same edge as the data write. The controller retains transaction sequencing and the two-way toggle.",
@@ -5245,7 +5245,7 @@
     },
     {
       "id": "rapt_l1d_writeback",
-      "file": "hdl/memory/rapt_l1d_writeback.sv",
+      "file": "rtl/memory/rapt_l1d_writeback.sv",
       "domain": "memory",
       "stage": null,
       "summary": "",
@@ -5260,7 +5260,7 @@
     },
     {
       "id": "rapt_l1i",
-      "file": "hdl/memory/rapt_l1i.sv",
+      "file": "rtl/memory/rapt_l1i.sv",
       "domain": "memory",
       "stage": 0,
       "summary": "",
@@ -5501,7 +5501,7 @@
     },
     {
       "id": "rapt_l1i_access",
-      "file": "hdl/memory/rapt_l1i_access.sv",
+      "file": "rtl/memory/rapt_l1i_access.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Fetch permissions are combinational. Fault ownership, SRAM readiness and refill/PTW sequencing remain in the instruction-cache controller.",
@@ -5548,7 +5548,7 @@
     },
     {
       "id": "rapt_l1i_data",
-      "file": "hdl/memory/rapt_l1i_data.sv",
+      "file": "rtl/memory/rapt_l1i_data.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Independently addressed banks let a fetch window straddle adjacent sets. Ways share each bank's read address; each way owns its read validity.",
@@ -5563,7 +5563,7 @@
     },
     {
       "id": "rapt_l1i_tagmem",
-      "file": "hdl/memory/rapt_l1i_tagmem.sv",
+      "file": "rtl/memory/rapt_l1i_tagmem.sv",
       "domain": "memory",
       "stage": null,
       "summary": "",
@@ -5576,7 +5576,7 @@
     },
     {
       "id": "rapt_l2",
-      "file": "hdl/memory/rapt_l2.sv",
+      "file": "rtl/memory/rapt_l2.sv",
       "domain": "memory",
       "stage": 8,
       "summary": "",
@@ -5874,7 +5874,7 @@
     },
     {
       "id": "rapt_l2_bypass_ctrl",
-      "file": "hdl/memory/rapt_l2_bypass_ctrl.sv",
+      "file": "rtl/memory/rapt_l2_bypass_ctrl.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Uncached read phases and the shared registered outer AR channel. The request valid/data ports also admit blocking refills to the same AR register.",
@@ -5886,7 +5886,7 @@
     },
     {
       "id": "rapt_l2_data_array",
-      "file": "hdl/memory/rapt_l2_data_array.sv",
+      "file": "rtl/memory/rapt_l2_data_array.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Medium BOOM data geometry: four 16384 x 64 single-port SRAM banks. bank=chunk[1:0], row={way[2:0],set[9:0],chunk[2]}. Bank priority is SinkC > SourceC > live SinkD > buffered line write > SourceD-write > SourceD-read. A displaced buffered beat retries.",
@@ -5895,7 +5895,7 @@
     },
     {
       "id": "rapt_l2_directory",
-      "file": "hdl/memory/rapt_l2_directory.sv",
+      "file": "rtl/memory/rapt_l2_directory.sv",
       "domain": "memory",
       "stage": null,
       "summary": "BOOM inclusive-cache directory geometry and one-port access contract. Data is stored as one synchronous SRAM per way; a reset wipe clears one set in all ways per cycle before requests become ready.",
@@ -5911,7 +5911,7 @@
     },
     {
       "id": "rapt_l2_evict_ctrl",
-      "file": "hdl/memory/rapt_l2_evict_ctrl.sv",
+      "file": "rtl/memory/rapt_l2_evict_ctrl.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Dirty-victim writeback phases. The parent presents a valid transaction from AW through B; capture data ports carry the victim metadata for that transaction.",
@@ -5924,7 +5924,7 @@
     },
     {
       "id": "rapt_l2_hit_ctrl",
-      "file": "hdl/memory/rapt_l2_hit_ctrl.sv",
+      "file": "rtl/memory/rapt_l2_hit_ctrl.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Resident read phases. Valid/ready selects the hit pipeline; the data ports capture its request and advance the address, word, and remaining beat count.",
@@ -5937,7 +5937,7 @@
     },
     {
       "id": "rapt_l2_mshr_frontend",
-      "file": "hdl/memory/rapt_l2_mshr_frontend.sv",
+      "file": "rtl/memory/rapt_l2_mshr_frontend.sv",
       "domain": "memory",
       "stage": null,
       "summary": "BOOM-sized miss admission and secondary replay fabric. The seven MSHR state machines supply their status and schedule requests; this module arbitrates them and keeps their 21 secondary queues in 33 shared entries. A secondary entry omits the set because its target MSHR already ow",
@@ -5974,7 +5974,7 @@
     },
     {
       "id": "rapt_l2_mshr_scheduler",
-      "file": "hdl/memory/rapt_l2_mshr_scheduler.sv",
+      "file": "rtl/memory/rapt_l2_mshr_scheduler.sv",
       "domain": "memory",
       "stage": null,
       "summary": "BOOM inclusive-cache MSHR allocation and round-robin schedule selection. Five ordinary A slots and the dedicated BC/C slots share one set-conflict table. The secondary request payloads reside in rapt_l2_secondary_buffer.",
@@ -5990,7 +5990,7 @@
     },
     {
       "id": "rapt_l2_put_buffer",
-      "file": "hdl/memory/rapt_l2_put_buffer.sv",
+      "file": "rtl/memory/rapt_l2_put_buffer.sv",
       "domain": "memory",
       "stage": null,
       "summary": "BOOM SinkA's non-flowing put ListBuffer: forty lists share forty beats. A list may hold multiple beats; the caller owns list allocation and retires a list after its last beat has been popped. A full pool does not accept a push merely because another list pops on the same edge.",
@@ -6005,7 +6005,7 @@
     },
     {
       "id": "rapt_l2_refill_ctrl",
-      "file": "hdl/memory/rapt_l2_refill_ctrl.sv",
+      "file": "rtl/memory/rapt_l2_refill_ctrl.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Blocking refill admission and outer read phases. Valid/ready controls the phase; the data ports own the returned line and its merge writes.",
@@ -6019,7 +6019,7 @@
     },
     {
       "id": "rapt_l2_refill_mshrs",
-      "file": "hdl/memory/rapt_l2_refill_mshrs.sv",
+      "file": "rtl/memory/rapt_l2_refill_mshrs.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Independent outer-memory refill contexts for BOOM's seven L2 MSHRs. The outer AXI ID is the context index; the original inner ID is retained for response routing. Different fills may return interleaved beats.",
@@ -6037,7 +6037,7 @@
     },
     {
       "id": "rapt_l2_release_buffer",
-      "file": "hdl/memory/rapt_l2_release_buffer.sv",
+      "file": "rtl/memory/rapt_l2_release_buffer.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Two in-flight L1D release lists share BOOM's lowest-free beat pool. RV64 has 16 shared beats and RV32 has 32. Keep beats until ReleaseAck so a failed nested refill can replay the same ReleaseData without a new C.",
@@ -6053,7 +6053,7 @@
     },
     {
       "id": "rapt_l2_secondary_buffer",
-      "file": "hdl/memory/rapt_l2_secondary_buffer.sv",
+      "file": "rtl/memory/rapt_l2_secondary_buffer.sv",
       "domain": "memory",
       "stage": null,
       "summary": "BOOM inclusive-cache Scheduler uses one shared 33-entry ListBuffer with three virtual request lists for each of its seven MSHRs (A, B and C). The queue is non-flowing: a push into an empty list becomes visible after the clock edge, and a full buffer cannot reuse a simultaneously ",
@@ -6069,7 +6069,7 @@
     },
     {
       "id": "rapt_l2tlb",
-      "file": "hdl/memory/rapt_l2tlb.sv",
+      "file": "rtl/memory/rapt_l2tlb.sv",
       "domain": "memory",
       "stage": 7,
       "summary": "Shared, direct-mapped L2 TLB. VPN low bits select one row; superpage translations are cached as the resolved 4 KiB subpage returned by the PTW. One synchronous row port serves I/D lookups and fills with round-robin arbitration. Payload RAM is not reset; a separate valid vector is",
@@ -6081,7 +6081,7 @@
     },
     {
       "id": "rapt_memory",
-      "file": "hdl/memory/rapt_memory.sv",
+      "file": "rtl/memory/rapt_memory.sv",
       "domain": "memory",
       "stage": null,
       "summary": "",
@@ -6246,7 +6246,7 @@
     },
     {
       "id": "rapt_memory_drain",
-      "file": "hdl/memory/rapt_memory_drain.sv",
+      "file": "rtl/memory/rapt_memory_drain.sv",
       "domain": "memory",
       "stage": null,
       "summary": "A serializing ROB owner holds request_i until its ordering point retires or is cancelled. Completion is a transaction result, not a live cache-idle signal. The store queue and memory must both be quiescent before completion; this also includes posted write responses and late refi",
@@ -6255,7 +6255,7 @@
     },
     {
       "id": "rapt_pmp_state",
-      "file": "hdl/memory/rapt_pmp.sv",
+      "file": "rtl/memory/rapt_pmp.sv",
       "domain": "memory",
       "stage": 7,
       "summary": "",
@@ -6266,7 +6266,7 @@
     },
     {
       "id": "rapt_pmp_permissions",
-      "file": "hdl/memory/rapt_pmp.sv",
+      "file": "rtl/memory/rapt_pmp.sv",
       "domain": "memory",
       "stage": 7,
       "summary": "",
@@ -6278,7 +6278,7 @@
     },
     {
       "id": "rapt_pmp",
-      "file": "hdl/memory/rapt_pmp.sv",
+      "file": "rtl/memory/rapt_pmp.sv",
       "domain": "memory",
       "stage": 7,
       "summary": "",
@@ -6317,7 +6317,7 @@
     },
     {
       "id": "rapt_pmp_line_uniform",
-      "file": "hdl/memory/rapt_pmp.sv",
+      "file": "rtl/memory/rapt_pmp.sv",
       "domain": "memory",
       "stage": null,
       "summary": "",
@@ -6330,7 +6330,7 @@
     },
     {
       "id": "rapt_pmp_window_uniform",
-      "file": "hdl/memory/rapt_pmp.sv",
+      "file": "rtl/memory/rapt_pmp.sv",
       "domain": "memory",
       "stage": null,
       "summary": "",
@@ -6344,7 +6344,7 @@
     },
     {
       "id": "rapt_ptw",
-      "file": "hdl/memory/rapt_ptw.sv",
+      "file": "rtl/memory/rapt_ptw.sv",
       "domain": "memory",
       "stage": 7,
       "summary": "Read-only page-table walker. RV32 uses Sv32 two-level page tables. RV64 uses the Sv39 three-level format expected by upstream xv6-riscv. Permission checks against the access type and current privilege are performed by the requesters (L1I/L1D) using the returned PTE flags.  RVA20S",
@@ -6355,7 +6355,7 @@
     },
     {
       "id": "rapt_tlb",
-      "file": "hdl/memory/rapt_tlb.sv",
+      "file": "rtl/memory/rapt_tlb.sv",
       "domain": "memory",
       "stage": 7,
       "summary": "Fully-associative TLB for Sv32/Sv39 page translation with ASID support. Both configurations implement ASIDLEN=9; the RV64 satp WARL logic clears the seven unimplemented high ASID bits on write. Combinational lookup, sequential fill, invalid-first round-robin replacement.",
@@ -6367,7 +6367,7 @@
     },
     {
       "id": "rapt_data_tlb",
-      "file": "hdl/memory/rapt_tlb.sv",
+      "file": "rtl/memory/rapt_tlb.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Fully-associative TLB for Sv32/Sv39 page translation with ASID support. Both configurations implement ASIDLEN=9; the RV64 satp WARL logic clears the seven unimplemented high ASID bits on write. Combinational lookup, sequential fill, invalid-first round-robin replacement.",
@@ -6380,7 +6380,7 @@
     },
     {
       "id": "rapt_clint",
-      "file": "hdl/perip/rapt_clint.sv",
+      "file": "rtl/perip/rapt_clint.sv",
       "domain": "cluster",
       "stage": 9,
       "summary": "Core Local INTerrupt controller (standard CLINT layout) Register map (base 0x02000000): 0x0000  msip      (32-bit, bit 0 only)  - M-mode software interrupt pending 0x4000  mtimecmp  (64-bit)              - timer compare register 0xBFF8  mtime     (64-bit, read/write)  - real-time",
@@ -6392,7 +6392,7 @@
     },
     {
       "id": "rapt_dm",
-      "file": "hdl/perip/rapt_dm.sv",
+      "file": "rtl/perip/rapt_dm.sv",
       "domain": "cluster",
       "stage": 9,
       "summary": "rapt_dm: minimal RISC-V Debug Module. Register file (DTM-side compliance probe): - dmcontrol  (RW: dmactive, ndmreset, haltreq, resumereq) - dmstatus   (RO: version=3, authenticated=1, {any,all}{halted,running,resumeack}) - hartinfo   (RO: 0) - abstractcs (R: progbufsize=0, datac",
@@ -6403,7 +6403,7 @@
     },
     {
       "id": "rapt_dtm",
-      "file": "hdl/perip/rapt_dtm.sv",
+      "file": "rtl/perip/rapt_dtm.sv",
       "domain": "cluster",
       "stage": 9,
       "summary": "rapt_dtm: minimal RISC-V Debug Transport Module (DTM) implementing IEEE 1149.1 TAP semantics over a single-clock-domain simplification (tck = clock). Implements the four IRs required by RISC-V Debug Spec 1.0: IR=0x01 IDCODE  : 32-bit constant device id IR=0x10 DTMCS   : 32-bit DT",
@@ -6412,7 +6412,7 @@
     },
     {
       "id": "rapt_plic",
-      "file": "hdl/perip/rapt_plic.sv",
+      "file": "rtl/perip/rapt_plic.sv",
       "domain": "cluster",
       "stage": 9,
       "summary": "rapt_plic -- Platform-Level Interrupt Controller (PLIC) Reference: https://github.com/riscv/riscv-plic-spec/blob/master/riscv-plic-1.0.0.pdf nemu/src/device/intr.c (functional reference used by difftest) Configuration (parameterised, defaults from rapt_soc.svh): NDEV  = number of",
@@ -6426,7 +6426,7 @@
     },
     {
       "id": "axi2rnp",
-      "file": "hdl/perip/wrap_rnp.sv",
+      "file": "rtl/perip/wrap_rnp.sv",
       "domain": "cluster",
       "stage": null,
       "summary": "",
@@ -6437,7 +6437,7 @@
     },
     {
       "id": "rnp2axi",
-      "file": "hdl/perip/wrap_rnp.sv",
+      "file": "rtl/perip/wrap_rnp.sv",
       "domain": "cluster",
       "stage": null,
       "summary": "",
@@ -6448,7 +6448,7 @@
     },
     {
       "id": "wrap_rnp",
-      "file": "hdl/perip/wrap_rnp.sv",
+      "file": "rtl/perip/wrap_rnp.sv",
       "domain": "cluster",
       "stage": null,
       "summary": "",
@@ -6457,7 +6457,7 @@
     },
     {
       "id": "wrap_ysyxsoc",
-      "file": "hdl/perip/wrap_ysyxsoc.sv",
+      "file": "rtl/perip/wrap_ysyxsoc.sv",
       "domain": "cluster",
       "stage": null,
       "summary": "",
@@ -6466,7 +6466,7 @@
     },
     {
       "id": "ysyx_00000000",
-      "file": "hdl/perip/wrap_ysyxsoc.sv",
+      "file": "rtl/perip/wrap_ysyxsoc.sv",
       "domain": "cluster",
       "stage": null,
       "summary": "",
@@ -6475,7 +6475,7 @@
     },
     {
       "id": "rapt",
-      "file": "hdl/rapt.sv",
+      "file": "rtl/rapt.sv",
       "domain": "core",
       "stage": 4,
       "summary": "rapt: cluster-level top. Aggregates one or more `rapt_core` instances and the cluster-shared peripherals that, per the RISC-V platform spec, must be shared across all harts (CLINT and PLIC today; IMSIC in the future). The external port set is identical to the historical single-co",
@@ -6592,7 +6592,7 @@
     },
     {
       "id": "rapt_core",
-      "file": "hdl/rapt_core.sv",
+      "file": "rtl/rapt_core.sv",
       "domain": "core",
       "stage": 3,
       "summary": "Single-hart composition of frontend, backend, caches and memory interconnect. A cluster (`rapt.sv`) instantiates cores alongside shared CLINT/PLIC devices. External MMIO targeted at cluster-local CLINT or PLIC register windows leaves through the standard AXI master interface; the",
@@ -6674,7 +6674,7 @@
     },
     {
       "id": "rapt_router",
-      "file": "hdl/rapt_router.sv",
+      "file": "rtl/rapt_router.sv",
       "domain": "core",
       "stage": 8,
       "summary": "",
@@ -6685,7 +6685,7 @@
     },
     {
       "id": "rapt_sram_1rw",
-      "file": "hdl/sram/rapt_sram_1rw.sv",
+      "file": "rtl/sram/rapt_sram_1rw.sv",
       "domain": "core",
       "stage": null,
       "summary": "",
@@ -6778,7 +6778,7 @@
     },
     {
       "id": "rapt_sram_2rw",
-      "file": "hdl/sram/rapt_sram_2rw.sv",
+      "file": "rtl/sram/rapt_sram_2rw.sv",
       "domain": "core",
       "stage": null,
       "summary": "Two independent, clocked read/write ports sharing one memory array. Each enabled port either writes at the rising edge or registers a read result at that edge. Read outputs hold when their port is idle or writes. The caller must avoid same-address cross-port accesses when either ",
@@ -6794,7 +6794,7 @@
       {
         "id": "rapt_fpu_addsub",
         "short": "fpu_addsub",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_addsub.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_addsub.sv",
         "domain": "feu",
         "stage": 8,
         "summary": "Compatibility interface for fixed-format users outside the FEU.",
@@ -6809,7 +6809,7 @@
       {
         "id": "rapt_fpu_classify",
         "short": "fpu_classify",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_classify.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_classify.sv",
         "domain": "feu",
         "stage": 4,
         "summary": "",
@@ -6824,7 +6824,7 @@
       {
         "id": "rapt_fpu_compare",
         "short": "fpu_compare",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_compare.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_compare.sv",
         "domain": "feu",
         "stage": 4,
         "summary": "",
@@ -6839,7 +6839,7 @@
       {
         "id": "rapt_fpu_convert_narrow",
         "short": "fpu_convert_narrow",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_convert_narrow.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_convert_narrow.sv",
         "domain": "feu",
         "stage": 4,
         "summary": "",
@@ -6854,7 +6854,7 @@
       {
         "id": "rapt_fpu_convert_widen",
         "short": "fpu_convert_widen",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_convert_widen.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_convert_widen.sv",
         "domain": "feu",
         "stage": 4,
         "summary": "",
@@ -6869,7 +6869,7 @@
       {
         "id": "rapt_fpu_divsqrt",
         "short": "fpu_divsqrt",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_divsqrt.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_divsqrt.sv",
         "domain": "feu",
         "stage": 4,
         "summary": "One-operation-at-a-time IEEE-754 divider/square-root unit, multi-cycle iterative implementation. One quotient/root bit is retired per clock using a restoring shift-and-subtract recurrence (long division for divide, the classic digit-by-digit method for square root), so a double-p",
@@ -6884,7 +6884,7 @@
       {
         "id": "rapt_fpu_prefix_adder",
         "short": "fpu_prefix_adder",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_fma.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_fma.sv",
         "domain": "feu",
         "stage": 8,
         "summary": "A technology-independent parallel-prefix adder prevents wide FMA sums from degrading into a linear ripple-carry chain in standard-cell synthesis.  The prefix network has O(log2(WIDTH)) logic depth and intentionally drops carry out, matching SystemVerilog's fixed-width addition se",
@@ -6899,7 +6899,7 @@
       {
         "id": "rapt_fpu_fma",
         "short": "fpu_fma",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_fma.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_fma.sv",
         "domain": "feu",
         "stage": 8,
         "summary": "A technology-independent parallel-prefix adder prevents wide FMA sums from degrading into a linear ripple-carry chain in standard-cell synthesis.  The prefix network has O(log2(WIDTH)) logic depth and intentionally drops carry out, matching SystemVerilog's fixed-width addition se",
@@ -6914,7 +6914,7 @@
       {
         "id": "rapt_fpu_fma_pipeline",
         "short": "fpu_fma_pipeline",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_fma.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_fma.sv",
         "domain": "feu",
         "stage": 8,
         "summary": "A technology-independent parallel-prefix adder prevents wide FMA sums from degrading into a linear ripple-carry chain in standard-cell synthesis.  The prefix network has O(log2(WIDTH)) logic depth and intentionally drops carry out, matching SystemVerilog's fixed-width addition se",
@@ -6929,7 +6929,7 @@
       {
         "id": "rapt_fpu_fp_addsub",
         "short": "fpu_fp_addsub",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_fp_addsub.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_fp_addsub.sv",
         "domain": "feu",
         "stage": 8,
         "summary": "Three-stage, one-operation-per-cycle IEEE-754 floating-point add/sub unit. Stage 1: decode operands, classify specials, align mantissas with sticky. Stage 2: add/subtract aligned mantissas and normalize (priority-encoded leading-zero count plus one barrel shift, replacing the old",
@@ -6944,7 +6944,7 @@
       {
         "id": "rapt_fpu_fp_product",
         "short": "fpu_fp_product",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_fp_product.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_fp_product.sv",
         "domain": "feu",
         "stage": 4,
         "summary": "One 53x53 product resource for the S and D MUL/FMA streams. Each operation keeps its original format-specific finishing stages and eight-cycle slot.",
@@ -6959,7 +6959,7 @@
       {
         "id": "rapt_fpu_fp_to_half",
         "short": "fpu_fp_to_half",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_fp_to_half.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_fp_to_half.sv",
         "domain": "feu",
         "stage": 4,
         "summary": "IEEE-754 binary32/binary64 to binary16 conversion for FCVT.H.S/D. Tininess is detected after rounding, matching the RISC-V floating-point control-state requirement.",
@@ -6974,7 +6974,7 @@
       {
         "id": "rapt_fpu_fp_to_int",
         "short": "fpu_fp_to_int",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_fp_to_int.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_fp_to_int.sv",
         "domain": "feu",
         "stage": 8,
         "summary": "",
@@ -6989,7 +6989,7 @@
       {
         "id": "rapt_fpu_half_to_fp",
         "short": "fpu_half_to_fp",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_half_to_fp.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_half_to_fp.sv",
         "domain": "feu",
         "stage": 4,
         "summary": "Exact widening conversion used by FCVT.S.H and FCVT.D.H.  Binary16 is narrow enough that every finite value is represented exactly by both binary32 and binary64, so only NaN-box validation and sNaN invalid flagging need special handling.",
@@ -7004,7 +7004,7 @@
       {
         "id": "rapt_fpu_int_to_fp",
         "short": "fpu_int_to_fp",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_int_to_fp.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_int_to_fp.sv",
         "domain": "feu",
         "stage": 8,
         "summary": "Compatibility interface for fixed-format users outside the FEU.",
@@ -7019,7 +7019,7 @@
       {
         "id": "rapt_fpu_integer_to_fp",
         "short": "fpu_integer_to_fp",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_integer_to_fp.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_integer_to_fp.sv",
         "domain": "feu",
         "stage": 8,
         "summary": "",
@@ -7034,7 +7034,7 @@
       {
         "id": "rapt_fpu_mul",
         "short": "fpu_mul",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_mul.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_mul.sv",
         "domain": "feu",
         "stage": 8,
         "summary": "Four-stage, one-operation-at-a-time IEEE-754 multiplier. Stage 1: decode/classify and normalize input significands. Stage 2: calculate the full-precision significand product. Stage 3: normalize the product and form guard/round/sticky bits. Stage 4: round, pack, and raise flags. S",
@@ -7049,7 +7049,7 @@
       {
         "id": "rapt_fpu_mul_pipeline",
         "short": "fpu_mul_pipeline",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_mul.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_mul.sv",
         "domain": "feu",
         "stage": 8,
         "summary": "Four-stage, one-operation-at-a-time IEEE-754 multiplier. Stage 1: decode/classify and normalize input significands. Stage 2: calculate the full-precision significand product. Stage 3: normalize the product and form guard/round/sticky bits. Stage 4: round, pack, and raise flags. S",
@@ -7064,7 +7064,7 @@
       {
         "id": "rapt_fpu_mul_fma",
         "short": "fpu_mul_fma",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_mul_fma.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_mul_fma.sv",
         "domain": "feu",
         "stage": 8,
         "summary": "Streaming FMUL/FMA endpoint with one shared significand multiplier. Both operations use the product in stage 2. Pad the four-stage FMUL result to the FMA's eight-stage latency so a mixed stream has one ordered result per cycle and never collides at the shared result endpoint.",
@@ -7079,7 +7079,7 @@
       {
         "id": "rapt_fpu_sgnj",
         "short": "fpu_sgnj",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_sgnj.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_sgnj.sv",
         "domain": "feu",
         "stage": 4,
         "summary": "",
@@ -7094,7 +7094,7 @@
       {
         "id": "rapt_fpu_single_to_int_w",
         "short": "fpu_single_to_int_w",
-        "file": "hdl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv",
+        "file": "rtl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv",
         "domain": "feu",
         "stage": 8,
         "summary": "Compatibility interface for fixed-format users outside the FEU.",
@@ -7109,7 +7109,7 @@
       {
         "id": "rapt_feu",
         "short": "FEU",
-        "file": "hdl/backend/feu/rapt_feu.sv",
+        "file": "rtl/backend/feu/rapt_feu.sv",
         "domain": "feu",
         "stage": 4,
         "summary": "Floating-point execution unit. Floating-point loads/stores remain in the LSU; this unit owns the FP issue queue, scalar arithmetic, conversions, completion packets. Architectural FPR/flag updates belong to retirement.",
@@ -7131,7 +7131,7 @@
       {
         "id": "rapt_ieu",
         "short": "IEU",
-        "file": "hdl/backend/ieu/rapt_ieu.sv",
+        "file": "rtl/backend/ieu/rapt_ieu.sv",
         "domain": "ieu",
         "stage": 4,
         "summary": "",
@@ -7153,7 +7153,7 @@
       {
         "id": "rapt_ieu_alu",
         "short": "ieu_alu",
-        "file": "hdl/backend/ieu/rapt_ieu_alu.sv",
+        "file": "rtl/backend/ieu/rapt_ieu_alu.sv",
         "domain": "ieu",
         "stage": 8,
         "summary": "",
@@ -7168,7 +7168,7 @@
       {
         "id": "rapt_ieu_mul",
         "short": "ieu_mul",
-        "file": "hdl/backend/ieu/rapt_ieu_mul.sv",
+        "file": "rtl/backend/ieu/rapt_ieu_mul.sv",
         "domain": "ieu",
         "stage": 8,
         "summary": "",
@@ -7183,7 +7183,7 @@
       {
         "id": "rapt_ieu_muldiv",
         "short": "MDU",
-        "file": "hdl/backend/ieu/rapt_ieu_muldiv.sv",
+        "file": "rtl/backend/ieu/rapt_ieu_muldiv.sv",
         "domain": "ieu",
         "stage": 4,
         "summary": "MUL/DIV pipeline (4th execution pipe): private issue queue + MUL/DIV FU + dedicated CDB writeback port. Phase 1 of the execution-engine decoupling: carve the multiplier out of the unified RS so MUL/DIV uops no longer occupy RS entries for their whole latency nor consume an ALU-CS",
@@ -7205,7 +7205,7 @@
       {
         "id": "rapt_ieu_pipe_alu",
         "short": "ieu_pipe_alu",
-        "file": "hdl/backend/ieu/rapt_ieu_pipe_alu.sv",
+        "file": "rtl/backend/ieu/rapt_ieu_pipe_alu.sv",
         "domain": "ieu",
         "stage": 4,
         "summary": "",
@@ -7220,7 +7220,7 @@
       {
         "id": "rapt_ieu_pipe_alu_csr",
         "short": "ieu_pipe_alu_csr",
-        "file": "hdl/backend/ieu/rapt_ieu_pipe_alu_csr.sv",
+        "file": "rtl/backend/ieu/rapt_ieu_pipe_alu_csr.sv",
         "domain": "ieu",
         "stage": 4,
         "summary": "Integer ALU, CSR, system and trap execution pipe. Scalar floating-point arithmetic is owned by rapt_feu.",
@@ -7235,7 +7235,7 @@
       {
         "id": "rapt_ieu_pipe_branch",
         "short": "ieu_pipe_branch",
-        "file": "hdl/backend/ieu/rapt_ieu_pipe_branch.sv",
+        "file": "rtl/backend/ieu/rapt_ieu_pipe_branch.sv",
         "domain": "ieu",
         "stage": 4,
         "summary": "",
@@ -7250,7 +7250,7 @@
       {
         "id": "rapt_ioq_overlap",
         "short": "ioq_overlap",
-        "file": "hdl/backend/lsu/rapt_ioq_overlap.sv",
+        "file": "rtl/backend/lsu/rapt_ioq_overlap.sv",
         "domain": "lsu",
         "stage": 8,
         "summary": "Overlap of short, circular word ranges. Each access spans at most four words. Split each word index into a two-bit offset and an upper chunk. A short range can cross at most one chunk boundary; share that successor across comparisons instead of building full-width successors for ",
@@ -7265,7 +7265,7 @@
       {
         "id": "rapt_ioq_store_check",
         "short": "ioq_store_check",
-        "file": "hdl/backend/lsu/rapt_ioq_store_check.sv",
+        "file": "rtl/backend/lsu/rapt_ioq_store_check.sv",
         "domain": "lsu",
         "stage": 8,
         "summary": "",
@@ -7280,7 +7280,7 @@
       {
         "id": "rapt_lsu",
         "short": "LSU",
-        "file": "hdl/backend/lsu/rapt_lsu.sv",
+        "file": "rtl/backend/lsu/rapt_lsu.sv",
         "domain": "lsu",
         "stage": 4,
         "summary": "",
@@ -7302,7 +7302,7 @@
       {
         "id": "rapt_lsu_ioq",
         "short": "lsu_ioq",
-        "file": "hdl/backend/lsu/rapt_lsu_ioq.sv",
+        "file": "rtl/backend/lsu/rapt_lsu_ioq.sv",
         "domain": "lsu",
         "stage": 4,
         "summary": "",
@@ -7317,7 +7317,7 @@
       {
         "id": "rapt_lsu_sq",
         "short": "SQ",
-        "file": "hdl/backend/lsu/rapt_lsu_sq.sv",
+        "file": "rtl/backend/lsu/rapt_lsu_sq.sv",
         "domain": "lsu",
         "stage": 4,
         "summary": "",
@@ -7339,7 +7339,7 @@
       {
         "id": "rapt_sq_forward",
         "short": "sq_forward",
-        "file": "hdl/backend/lsu/rapt_sq_forward.sv",
+        "file": "rtl/backend/lsu/rapt_sq_forward.sv",
         "domain": "lsu",
         "stage": 8,
         "summary": "Read-only view of the ordered SQ. All load ports use identical alias and youngest-store rules; a younger partial match must block an older full one.",
@@ -7354,7 +7354,7 @@
       {
         "id": "rapt_store_beats",
         "short": "store_beats",
-        "file": "hdl/backend/lsu/rapt_store_beats.sv",
+        "file": "rtl/backend/lsu/rapt_store_beats.sv",
         "domain": "lsu",
         "stage": 8,
         "summary": "Split-store byte formatting only; the SQ retains beat sequencing and accepted-write ownership. The high address is translated by the IOQ.",
@@ -7369,7 +7369,7 @@
       {
         "id": "rapt_backend",
         "short": "BE",
-        "file": "hdl/backend/rapt_backend.sv",
+        "file": "rtl/backend/rapt_backend.sv",
         "domain": "backend",
         "stage": 4,
         "summary": "Backend composition: rename/checkpoints, ROB, dispatch, operand storage, issue/execute, completion ownership, LSU/SQ and precise retirement remain in one synthesis block. Only decoded uops and memory/control contracts cross.",
@@ -7384,7 +7384,7 @@
       {
         "id": "rapt_cdb_arb",
         "short": "cdb_arb",
-        "file": "hdl/backend/rapt_cdb_arb.sv",
+        "file": "rtl/backend/rapt_cdb_arb.sv",
         "domain": "backend",
         "stage": 8,
         "summary": "",
@@ -7399,7 +7399,7 @@
       {
         "id": "rapt_cmu",
         "short": "CMU",
-        "file": "hdl/backend/rapt_cmu.sv",
+        "file": "rtl/backend/rapt_cmu.sv",
         "domain": "backend",
         "stage": 6,
         "summary": "",
@@ -7421,7 +7421,7 @@
       {
         "id": "rapt_completion_guard",
         "short": "completion_guard",
-        "file": "hdl/backend/rapt_completion_guard.sv",
+        "file": "rtl/backend/rapt_completion_guard.sv",
         "domain": "backend",
         "stage": 5,
         "summary": "Combinational ownership firewall for execution results. The ROB owns the authoritative allocation identity.  Execution producers present dest+generation before shared-port arbitration; only a candidate naming a live executing allocation is admitted. Optional immutable-payload enf",
@@ -7436,7 +7436,7 @@
       {
         "id": "rapt_completion_stage",
         "short": "CPL",
-        "file": "hdl/backend/rapt_completion_stage.sv",
+        "file": "rtl/backend/rapt_completion_stage.sv",
         "domain": "backend",
         "stage": 5,
         "summary": "One accepted producer packet per cycle. Ownership validation/arbitration precede this boundary; precise flush is the owner's reclamation boundary.",
@@ -7458,7 +7458,7 @@
       {
         "id": "rapt_dispatch_admit",
         "short": "dispatch_admit",
-        "file": "hdl/backend/rapt_dispatch_admit.sv",
+        "file": "rtl/backend/rapt_dispatch_admit.sv",
         "domain": "backend",
         "stage": 3,
         "summary": "Ordered admission owns the prefix contract, not routing or queue storage. Reason identifies the first unaccepted slot with an explicit priority when conditions overlap. It is not a counterfactual estimate of lost IPC.",
@@ -7473,7 +7473,7 @@
       {
         "id": "rapt_dispatch_ioq_adapter",
         "short": "dispatch_ioq_adapter",
-        "file": "hdl/backend/rapt_dispatch_ioq_adapter.sv",
+        "file": "rtl/backend/rapt_dispatch_ioq_adapter.sv",
         "domain": "backend",
         "stage": 3,
         "summary": "",
@@ -7488,7 +7488,7 @@
       {
         "id": "rapt_dispatch_iq_adapter",
         "short": "dispatch_iq_adapter",
-        "file": "hdl/backend/rapt_dispatch_iq_adapter.sv",
+        "file": "rtl/backend/rapt_dispatch_iq_adapter.sv",
         "domain": "backend",
         "stage": 3,
         "summary": "",
@@ -7503,7 +7503,7 @@
       {
         "id": "rapt_dpu",
         "short": "DPU",
-        "file": "hdl/backend/rapt_dpu.sv",
+        "file": "rtl/backend/rapt_dpu.sv",
         "domain": "backend",
         "stage": 3,
         "summary": "Capacity-aware dispatch compactor. The ROB exposes an age-ordered candidate window that may be wider than the physical dispatch bandwidth.  This router skips candidates whose target domain is full, preserves age among every candidate it can accept, and compacts at most NumSlots w",
@@ -7525,7 +7525,7 @@
       {
         "id": "rapt_fp_registers",
         "short": "FPR",
-        "file": "hdl/backend/rapt_fp_registers.sv",
+        "file": "rtl/backend/rapt_fp_registers.sv",
         "domain": "backend",
         "stage": 3,
         "summary": "Implicit physical-register renaming: each live ROB owner has one FLEN=64 result slot. The speculative map names that owner, while the architectural bank changes only at retirement. Allocation records only source tags (zero names the architectural bank); a producer's retirement re",
@@ -7547,7 +7547,7 @@
       {
         "id": "rapt_fpr",
         "short": "fpr",
-        "file": "hdl/backend/rapt_fpr.sv",
+        "file": "rtl/backend/rapt_fpr.sv",
         "domain": "backend",
         "stage": 8,
         "summary": "Architectural registers f0..f31 remain writable, and all words are 64 bits in RV32 and RV64 so single-precision results keep their NaN box. Two fixed 32x64 replicas: bank 0 reads FMA rs1/rs2, bank 1 reads FMA rs3 and the IOQ store operand. Both ports read on a read cycle; both re",
@@ -7562,7 +7562,7 @@
       {
         "id": "rapt_fu_result_queue",
         "short": "fu_result_queue",
-        "file": "hdl/backend/rapt_fu_result_queue.sv",
+        "file": "rtl/backend/rapt_fu_result_queue.sv",
         "domain": "backend",
         "stage": 4,
         "summary": "Common owner transport for pipelined and iterative execution units. Arithmetic returns results in launch order, but different units may complete in any order. Credits reserve room for every launched operation before the arithmetic starts; an output stall therefore never loses a o",
@@ -7577,7 +7577,7 @@
       {
         "id": "rapt_iq",
         "short": "iq",
-        "file": "hdl/backend/rapt_iq.sv",
+        "file": "rtl/backend/rapt_iq.sv",
         "domain": "backend",
         "stage": 4,
         "summary": "Data-capture issue queue. Dispatch slots express program order at allocation; execution ports have independent availability and capability masks. A uop has no persistent association with its original dispatch slot. Payload transport is opaque; only register and completion depende",
@@ -7592,7 +7592,7 @@
       {
         "id": "rapt_execute_stage",
         "short": "execute_stage",
-        "file": "hdl/backend/rapt_iq.sv",
+        "file": "rtl/backend/rapt_iq.sv",
         "domain": "backend",
         "stage": 4,
         "summary": "Data-capture issue queue. Dispatch slots express program order at allocation; execution ports have independent availability and capability masks. A uop has no persistent association with its original dispatch slot. Payload transport is opaque; only register and completion depende",
@@ -7607,7 +7607,7 @@
       {
         "id": "rapt_operand_spill",
         "short": "operand_spill",
-        "file": "hdl/backend/rapt_operand_spill.sv",
+        "file": "rtl/backend/rapt_operand_spill.sv",
         "domain": "backend",
         "stage": 3,
         "summary": "Compact storage for execution operands which cannot fall through directly to an execution-domain queue. Physical slots are independent of ROB slots; the ROB retains the returned spill index while its owner is in ROB_DP. Releases are registered before they participate in allocatio",
@@ -7622,7 +7622,7 @@
       {
         "id": "rapt_operand_value_spill",
         "short": "operand_value_spill",
-        "file": "hdl/backend/rapt_operand_value_spill.sv",
+        "file": "rtl/backend/rapt_operand_value_spill.sv",
         "domain": "backend",
         "stage": 3,
         "summary": "Operand-value bank for blocked ROB owners. Each live spill entry carries its own waiting tags and allocation-time values. The FPGA ROU resolves live tags from the PRF at dispatch; other uses capture completion values here. Prediction targets are consumed by the ROB checkpoint fil",
@@ -7637,7 +7637,7 @@
       {
         "id": "rapt_prf",
         "short": "PRF",
-        "file": "hdl/backend/rapt_prf.sv",
+        "file": "rtl/backend/rapt_prf.sv",
         "domain": "backend",
         "stage": 3,
         "summary": "Physical Register File - multi-ported register storage with valid/transient tracking. Shared backend resource in rapt_core: - Read by ROU (operand fetch via exu_prf_if) - Written by the typed completion array - Commit/dealloc controlled by CMU (rou_cmu_if, cmu_bcast_if) On flush,",
@@ -7659,7 +7659,7 @@
       {
         "id": "rapt_recovery_pending",
         "short": "recovery_pending",
-        "file": "hdl/backend/rapt_recovery_pending.sv",
+        "file": "rtl/backend/rapt_recovery_pending.sv",
         "domain": "backend",
         "stage": 5,
         "summary": "One oldest outstanding recovery transaction. New older requests supersede younger ones; ties keep the existing owner, then the lowest candidate port. Ages are ROB-ring distances from the CURRENT head, never raw index order. The transaction holds slot + generation atomically. A re",
@@ -7674,7 +7674,7 @@
       {
         "id": "rapt_rob_age_mask",
         "short": "rob_age_mask",
-        "file": "hdl/backend/rapt_rob_age_mask.sv",
+        "file": "rtl/backend/rapt_rob_age_mask.sv",
         "domain": "backend",
         "stage": 3,
         "summary": "Keep only pending owners strictly before the recovery owner in ROB order. A circular interval is either [head, owner) or [head, Entries) U [0, owner). XOR the two prefix masks, complementing for wrap. No per-entry subtract or modulo, and no per-entry mux between AND/OR interval e",
@@ -7689,7 +7689,7 @@
       {
         "id": "rapt_rob_dispatch_select",
         "short": "rob_dispatch_select",
-        "file": "hdl/backend/rapt_rob_dispatch_select.sv",
+        "file": "rtl/backend/rapt_rob_dispatch_select.sv",
         "domain": "backend",
         "stage": 3,
         "summary": "Select the oldest pending ROB owners for execution-domain steering. The candidate vector is compact and age ordered, but acceptance is deliberately independent per candidate: a blocked older domain does not suppress a ready younger candidate from another domain. Retirement remain",
@@ -7704,7 +7704,7 @@
       {
         "id": "rapt_rob_dispatch_window",
         "short": "rob_dispatch_window",
-        "file": "hdl/backend/rapt_rob_dispatch_window.sv",
+        "file": "rtl/backend/rapt_rob_dispatch_window.sv",
         "domain": "backend",
         "stage": 3,
         "summary": "Registered ROB dispatch window. This retimes rapt_rob_dispatch_select's age ranking across the clock edge: at the end of each cycle the oldest pending owners that were not accepted are ranked and captured together with their immutable steering payload (domain and spill slot). The",
@@ -7719,7 +7719,7 @@
       {
         "id": "rapt_rou",
         "short": "ROU",
-        "file": "hdl/backend/rapt_rou.sv",
+        "file": "rtl/backend/rapt_rou.sv",
         "domain": "backend",
         "stage": 3,
         "summary": "Re-Order Unit (ROU) - dispatch queue + reorder buffer + commit. Sub-sections: 1. Rename skid            - holds a registered group for ROB allocation 2. ROB Dispatch Buffer    - independently steers allocated owners to domains 3. Reorder Buffer (ROB)   - tracks in-flight instruct",
@@ -7741,7 +7741,7 @@
       {
         "id": "rapt_operand_stage",
         "short": "OPS",
-        "file": "hdl/backend/rapt_rou.sv",
+        "file": "rtl/backend/rapt_rou.sv",
         "domain": "backend",
         "stage": 8,
         "summary": "Re-Order Unit (ROU) - dispatch queue + reorder buffer + commit. Sub-sections: 1. Rename skid            - holds a registered group for ROB allocation 2. ROB Dispatch Buffer    - independently steers allocated owners to domains 3. Reorder Buffer (ROB)   - tracks in-flight instruct",
@@ -7763,7 +7763,7 @@
       {
         "id": "rapt_rvfi",
         "short": "rvfi",
-        "file": "hdl/backend/rapt_rvfi.sv",
+        "file": "rtl/backend/rapt_rvfi.sv",
         "domain": "backend",
         "stage": 6,
         "summary": "RVFI (RISC-V Formal Interface) output generation. Produces per-channel RVFI signals from commit metadata for formal verification. NRET = CommitWidth: channel order is program order starting at ROB head.",
@@ -7778,7 +7778,7 @@
       {
         "id": "rapt_vpu",
         "short": "vpu",
-        "file": "hdl/backend/vpu/rapt_vpu.sv",
+        "file": "rtl/backend/vpu/rapt_vpu.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Standalone, head-authorized vector engine. Integer execution currently uses one natural-aligned element at a time; other RVV classes remain illegal until implemented. Host register access is an idle-only debug/context interface, not an ISA bypass available during execution. No sc",
@@ -7793,7 +7793,7 @@
       {
         "id": "rapt_vpu_alu",
         "short": "vpu_alu",
-        "file": "hdl/backend/vpu/rapt_vpu_alu.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_alu.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "One integer element. funct6 is the RVV OPIV encoding; decode/legality is separate. Truncation and signed comparisons use SEW, never scalar XLEN.",
@@ -7808,7 +7808,7 @@
       {
         "id": "rapt_vpu_core",
         "short": "vpu_core",
-        "file": "hdl/backend/vpu/rapt_vpu_core.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_core.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Core-facing composition with immutable retirement metadata. authorize_tag names the current ROB head; head_safe supplies its irrevocability/ordering guarantee. Tags pack generation above slot. Neither memory ordering nor the scalar ROB/CSR update implementation is hidden inside t",
@@ -7823,7 +7823,7 @@
       {
         "id": "rapt_vpu_core_adapter",
         "short": "vpu_core_adapter",
-        "file": "hdl/backend/vpu/rapt_vpu_core_adapter.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_core_adapter.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Single-entry core-side control bridge. The core resolves scalar dependencies before cmd acceptance. head_safe means the matching ROB head may execute irrevocably (including required older-memory ordering). After authorization the core must retain that owner until completion; kill",
@@ -7838,7 +7838,7 @@
       {
         "id": "rapt_vpu_csr",
         "short": "vpu_csr",
-        "file": "hdl/backend/vpu/rapt_vpu_csr.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_csr.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Architectural vector state. All mutation inputs are already-authorized single-cycle events from the owner; speculative dispatch is NOT a write. The owner serializes configuration, CSR accesses, and execution updates. Flush must not reset this module: a trapping vector instruction",
@@ -7853,7 +7853,7 @@
       {
         "id": "rapt_vpu_decode",
         "short": "vpu_decode",
-        "file": "hdl/backend/vpu/rapt_vpu_decode.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_decode.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Standalone raw instruction decoder. Only implemented operations are admitted; unsupported/reserved encodings trap instead of falling through to an ALU op. Scalar-core Chisel decode is untouched until the integration adapter exists.",
@@ -7868,7 +7868,7 @@
       {
         "id": "rapt_vpu_divsqrt",
         "short": "vpu_divsqrt",
-        "file": "hdl/backend/vpu/rapt_vpu_divsqrt.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_divsqrt.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Raw element divide/sqrt using one shared, runtime-precision iterative unit. Caller resolves FRM and instruction legality; rm=5..7 and unsupported FP64 requests return illegal without launching the arithmetic unit. Reset aborts.",
@@ -7883,7 +7883,7 @@
       {
         "id": "rapt_vpu_element",
         "short": "vpu_element",
-        "file": "hdl/backend/vpu/rapt_vpu_element.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_element.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Natural-aligned 8/16/32/64-bit element port over the architectural VRF. A single response slot includes write acknowledgments. Addresses are linear byte offsets across all 32 registers; scheduler supplies validated geometry.",
@@ -7898,7 +7898,7 @@
       {
         "id": "rapt_vpu_fixed",
         "short": "vpu_fixed",
-        "file": "hdl/backend/vpu/rapt_vpu_fixed.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_fixed.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Stateless fixed-point rounding/saturation stage. The caller supplies legal widths: narrowing clip consumes 2*SEW <= 64. Fractional multiplication uses a signed full product from the separately handshaked multiplier, not a new combinational multiplier. No architectural CSR state i",
@@ -7913,7 +7913,7 @@
       {
         "id": "rapt_vpu_fma",
         "short": "vpu_fma",
-        "file": "hdl/backend/vpu/rapt_vpu_fma.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_fma.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Independently testable fused element engine. Inputs are raw vector bits; FP32 values do not carry scalar NaN boxing. Caller resolves dynamic FRM, selects operand order, and accumulates flags only for active written elements. No command cancellation after acceptance; reset aborts ",
@@ -7928,7 +7928,7 @@
       {
         "id": "rapt_vpu_fp_arith",
         "short": "vpu_fp_arith",
-        "file": "hdl/backend/vpu/rapt_vpu_fp_arith.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_fp_arith.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Raw FP32/FP64 element arithmetic with one shared fused datapath. Operation 0 is FMA with independent sign controls; 1/2/3 are add/subtract/multiply and ignore c and the sign controls. No intermediate product rounding is added.",
@@ -7943,7 +7943,7 @@
       {
         "id": "rapt_vpu_fp_convert",
         "short": "vpu_fp_convert",
-        "file": "hdl/backend/vpu/rapt_vpu_fp_convert.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_fp_convert.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Raw FP32/FP64 format conversions. rm=0..4 are IEEE rounding modes; rm=6 means round-to-odd for narrowing only, not an architectural FRM value. Scalar NaN boxing and instruction/FRM legality belong to the caller.",
@@ -7958,7 +7958,7 @@
       {
         "id": "rapt_vpu_fp_decode",
         "short": "vpu_fp_decode",
-        "file": "hdl/backend/vpu/rapt_vpu_fp_decode.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_fp_decode.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Same-width and widening floating-point arithmetic admission and raw element operand map. Caller supplies resolved FRM and enabled=(VS!=Off && FS!=Off), validates register geometry, and captures all outputs at execution request acceptance. This module does not authorize architectu",
@@ -7973,7 +7973,7 @@
       {
         "id": "rapt_vpu_fp_estimate",
         "short": "vpu_fp_estimate",
-        "file": "hdl/backend/vpu/rapt_vpu_fp_estimate.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_fp_estimate.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "RVV 1.0 vfrec7/vfrsqrt7 raw element estimates. Lookup constants are the normative vfrec7.adoc and vfrsqrt7.adoc tables in riscvarchive/riscv-v-spec. Combinational leaf: caller owns instruction admission, masking and flags.",
@@ -7988,7 +7988,7 @@
       {
         "id": "rapt_vpu_fp_misc",
         "short": "vpu_fp_misc",
-        "file": "hdl/backend/vpu/rapt_vpu_fp_misc.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_fp_misc.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Combinational raw FP element operations. No scalar NaN-box checking here: the vector decoder owns scalar boxing, mask/FRM legality and authorization. operation: 0=min, 1=max, 2=sgnj, 3=sgnjn, 4=sgnjx, 5=class, 6=eq, 7=ne, 8=lt, 9=le, 10=gt, 11=ge. Comparisons return a single pred",
@@ -8003,7 +8003,7 @@
       {
         "id": "rapt_vpu_fp_reduce",
         "short": "vpu_fp_reduce",
-        "file": "hdl/backend/vpu/rapt_vpu_fp_reduce.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_fp_reduce.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Sequential floating-point reduction stream, independent of VRF and XLEN. op: 0=sum, 1=min, 2=max. Ordered summation is also a permitted unordered implementation. Caller streams exactly count elements in increasing order, with active=0 for masked entries; seed is vs1[0] at destina",
@@ -8018,7 +8018,7 @@
       {
         "id": "rapt_vpu_fp_reduce_control",
         "short": "vpu_fp_reduce_control",
-        "file": "hdl/backend/vpu/rapt_vpu_fp_reduce_control.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_fp_reduce_control.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Sequential floating-point reduction stream, independent of VRF and XLEN. op: 0=sum, 1=min, 2=max. Ordered summation is also a permitted unordered implementation. Caller streams exactly count elements in increasing order, with active=0 for masked entries; seed is vs1[0] at destina",
@@ -8033,7 +8033,7 @@
       {
         "id": "rapt_vpu_fp_reduce_decode",
         "short": "vpu_fp_reduce_decode",
-        "file": "hdl/backend/vpu/rapt_vpu_fp_reduce_decode.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_fp_reduce_decode.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "RVV 1.0 FP reduction admission. No arithmetic or architectural effects. enabled combines VS and FS. Caller checks VTYPE/LMUL/source-group geometry, VL and nonzero vstart before reading VRF or issuing a numeric request. Seed/destination are scalars independent of LMUL; destination",
@@ -8048,7 +8048,7 @@
       {
         "id": "rapt_vpu_fp_reduce_engine",
         "short": "vpu_fp_reduce_engine",
-        "file": "hdl/backend/vpu/rapt_vpu_fp_reduce_engine.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_fp_reduce_engine.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Already-authorized FP reduction over an exclusive element VRF port. All source/mask reads precede the sole destination write, including when vd overlaps vs1, vs2 or v0. Tail bytes are preserved. External numeric and VRF services must reset/drain with the engine before reuse.",
@@ -8063,7 +8063,7 @@
       {
         "id": "rapt_vpu_fp_transfer",
         "short": "vpu_fp_transfer",
-        "file": "hdl/backend/vpu/rapt_vpu_fp_transfer.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_fp_transfer.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Stateless FP transfer admission and element routing. FLEN is 64, independent of XLEN. Caller owns register geometry/overlap, VRF transactions, completion, VS/FS dirty updates and clearing vstart after successful execution. vector_element is the raw value fetched at source_index w",
@@ -8078,7 +8078,7 @@
       {
         "id": "rapt_vpu_fp_wide_arith",
         "short": "vpu_fp_wide_arith",
-        "file": "hdl/backend/vpu/rapt_vpu_fp_wide_arith.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_fp_wide_arith.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "FP32 -> FP64 widening arithmetic. operation uses the fp_arith encoding: 0=FMA, 1=add, 2=subtract, 3=multiply. FMA's c is always raw FP64. a_is_wide selects the FP64 source of vfwadd.w/vfwsub.w only; b is FP32. Scalar boxing and ISA register geometry are the caller's responsibilit",
@@ -8093,7 +8093,7 @@
       {
         "id": "rapt_vpu_fp_widen",
         "short": "vpu_fp_widen",
-        "file": "hdl/backend/vpu/rapt_vpu_fp_widen.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_fp_widen.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Exact raw FP32 operand expansion for FP64 widening arithmetic. This is NOT an architectural conversion instruction: NaN sign, payload and signaling status are retained so the consuming arithmetic unit raises NV. No rounding, overflow or underflow is possible for finite FP32 opera",
@@ -8108,7 +8108,7 @@
       {
         "id": "rapt_vpu_geometry",
         "short": "vpu_geometry",
-        "file": "hdl/backend/vpu/rapt_vpu_geometry.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_geometry.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Arithmetic register geometry, independent of the core and execution engine. Size codes are log2(bytes). EMUL exponents are signed log2(register groups).",
@@ -8123,7 +8123,7 @@
       {
         "id": "rapt_vpu_int_fp",
         "short": "vpu_int_fp",
-        "file": "hdl/backend/vpu/rapt_vpu_int_fp.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_int_fp.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Raw integer/FP element conversion. Fixed elaboration widths keep arithmetic independent of XLEN. Caller validates ISA EEW/EMUL and resolves RTZ vs FRM.",
@@ -8138,7 +8138,7 @@
       {
         "id": "rapt_vpu_int_fp_decode",
         "short": "vpu_int_fp_decode",
-        "file": "hdl/backend/vpu/rapt_vpu_int_fp_decode.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_int_fp_decode.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Unary integer/FP conversion admission, independent of scalar XLEN.",
@@ -8153,7 +8153,7 @@
       {
         "id": "rapt_vpu_mask_scan",
         "short": "vpu_mask_scan",
-        "file": "hdl/backend/vpu/rapt_vpu_mask_scan.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_mask_scan.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Read-only mask scan, independent of vector element width and scalar ROB. Caller owns exclusive VRF access and has validated the raw instruction. One source byte (and at most one predicate byte) is fetched per eight bits.",
@@ -8168,7 +8168,7 @@
       {
         "id": "rapt_vpu_mask_write",
         "short": "vpu_mask_write",
-        "file": "hdl/backend/vpu/rapt_vpu_mask_write.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_mask_write.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "A single mask-bit update over an exclusive byte read/write VRF interface. The caller owns architectural authorization and excludes other writers until completion. Preserves every other bit, including prestart/inactive/tail bits.",
@@ -8183,7 +8183,7 @@
       {
         "id": "rapt_vpu_memory",
         "short": "vpu_memory",
-        "file": "hdl/backend/vpu/rapt_vpu_memory.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_memory.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Sequential vector memory sequencer. The command is already irrevocably authorized. Requests use virtual byte addresses and natural-aligned elements; the integration adapter owns translation, PMP/PMA, ordering and final errors. A successful store response must mean the store is no",
@@ -8198,7 +8198,7 @@
       {
         "id": "rapt_vpu_move",
         "short": "vpu_move",
-        "file": "hdl/backend/vpu/rapt_vpu_move.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_move.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Whole-register copy engine. The owner authorizes exclusive VRF access. Legal aligned equal-sized groups are either identical or disjoint. VL/LMUL do not set transfer length; SEW converts vstart into a byte offset. VILL traps.",
@@ -8213,7 +8213,7 @@
       {
         "id": "rapt_vpu_muldiv",
         "short": "vpu_muldiv",
-        "file": "hdl/backend/vpu/rapt_vpu_muldiv.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_muldiv.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Independent, single-element RVV integer multiply/divide engine. op is the low three funct6 bits for OPMVV/OPMVX 100xxx. Radix-2 shift/add and restoring division avoid technology-dependent combinational multipliers/dividers. Requests are already authorized; reset is not an archite",
@@ -8228,7 +8228,7 @@
       {
         "id": "rapt_vpu_owner",
         "short": "vpu_owner",
-        "file": "hdl/backend/vpu/rapt_vpu_owner.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_owner.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "One command's lifetime, independent of execution kind and core ROB layout. Tag must include allocation generation, not just a reusable ROB slot. Cancellation wins over authorization before issue. After authorization the instruction is irrevocable: the host must preserve its retir",
@@ -8243,7 +8243,7 @@
       {
         "id": "rapt_vpu_reduce",
         "short": "vpu_reduce",
-        "file": "hdl/backend/vpu/rapt_vpu_reduce.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_reduce.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Authorized, sequential integer reduction over an exclusive element VRF port. Seed and destination are scalars in one register regardless of LMUL. No destination write occurs until all source/mask reads have completed, permitting destination/source overlap, including v0 when it is",
@@ -8258,7 +8258,7 @@
       {
         "id": "rapt_vpu_slide",
         "short": "vpu_slide",
-        "file": "hdl/backend/vpu/rapt_vpu_slide.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_slide.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Combinational slide element routing, independent of VRF geometry and ports. Caller validates instruction/group legality, supplies VLMAX for current SEW and LMUL, and sign-extends integer scalar data when scalar_select is asserted. Upward slides require disjoint source/destination",
@@ -8273,7 +8273,7 @@
       {
         "id": "rapt_vpu_vrf",
         "short": "vpu_vrf",
-        "file": "hdl/backend/vpu/rapt_vpu_vrf.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_vrf.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Architectural VRF storage: 32*VLEN bits striped across independent 1RW banks. Linear word k maps to bank k%Banks and row k/Banks. Register layout is byte-stable and independent of SEW/LMUL; the scheduler owns addressing. Writes complete at request acceptance. Reads have a one-ent",
@@ -8288,7 +8288,7 @@
       {
         "id": "rapt_vpu_vtype",
         "short": "vpu_vtype",
-        "file": "hdl/backend/vpu/rapt_vpu_vtype.sv",
+        "file": "rtl/backend/vpu/rapt_vpu_vtype.sv",
         "domain": "vpu",
         "stage": 8,
         "summary": "Stateless RVV configuration calculation. The owning controller commits the outputs only for an accepted, authorized vset instruction. No core package, preset, ROB width, or physical execution-port identity is captured here.",
@@ -8303,7 +8303,7 @@
       {
         "id": "rapt_bulk_clear_bits",
         "short": "bulk_clear_bits",
-        "file": "hdl/common/rapt_bulk_clear_bits.sv",
+        "file": "rtl/common/rapt_bulk_clear_bits.sv",
         "domain": "common",
         "stage": 0,
         "summary": "Bit array with a single-cycle bulk clear, one addressed write and several asynchronous reads. A per-entry flop array would be needed for the parallel clear; instead entries are grouped into LUTRAM words and only one flag per group is a flop. Clearing drops every group flag; the n",
@@ -8318,7 +8318,7 @@
       {
         "id": "rapt_issue_select",
         "short": "issue_select",
-        "file": "hdl/common/rapt_issue_select.sv",
+        "file": "rtl/common/rapt_issue_select.sv",
         "domain": "common",
         "stage": 4,
         "summary": "Payload-independent oldest-ready selection. older[i][j] means i precedes j. Rows involving invalid entries may be stale; only valid candidates matter. Port-first greedy selection is optionally followed by bounded one-hop augmentation: move an already selected uop to an idle compa",
@@ -8333,7 +8333,7 @@
       {
         "id": "rapt_rank_select",
         "short": "rank_select",
-        "file": "hdl/common/rapt_rank_select.sv",
+        "file": "rtl/common/rapt_rank_select.sv",
         "domain": "common",
         "stage": 8,
         "summary": "Select the first NumSelect available identities in ascending index order. Shared bounded-count up/down trees replace cascaded priority encoders. All ranks are computed independently of acceptance; the owner consumes a prefix.",
@@ -8348,7 +8348,7 @@
       {
         "id": "rapt_stream_queue",
         "short": "stream_queue",
-        "file": "hdl/common/rapt_stream_queue.sv",
+        "file": "rtl/common/rapt_stream_queue.sv",
         "domain": "common",
         "stage": 1,
         "summary": "Ordered instruction stream, not a queue of indivisible fetch/rename groups. Valid inputs and accepted outputs are contiguous prefixes. No fall-through: storage decouples producer data from consumer selection. Flush cancels both.",
@@ -8363,7 +8363,7 @@
       {
         "id": "rapt_bpu",
         "short": "BPU",
-        "file": "hdl/frontend/branch_predictor/rapt_bpu.sv",
+        "file": "rtl/frontend/branch_predictor/rapt_bpu.sv",
         "domain": "bpu",
         "stage": 0,
         "summary": "",
@@ -8385,7 +8385,7 @@
       {
         "id": "rapt_bpu_btb",
         "short": "bpu_btb",
-        "file": "hdl/frontend/branch_predictor/rapt_bpu_btb.sv",
+        "file": "rtl/frontend/branch_predictor/rapt_bpu_btb.sv",
         "domain": "bpu",
         "stage": 0,
         "summary": "",
@@ -8400,7 +8400,7 @@
       {
         "id": "rapt_bpu_gshare",
         "short": "bpu_gshare",
-        "file": "hdl/frontend/branch_predictor/rapt_bpu_gshare.sv",
+        "file": "rtl/frontend/branch_predictor/rapt_bpu_gshare.sv",
         "domain": "bpu",
         "stage": 8,
         "summary": "",
@@ -8415,7 +8415,7 @@
       {
         "id": "rapt_bpu_pht",
         "short": "bpu_pht",
-        "file": "hdl/frontend/branch_predictor/rapt_bpu_pht.sv",
+        "file": "rtl/frontend/branch_predictor/rapt_bpu_pht.sv",
         "domain": "bpu",
         "stage": 0,
         "summary": "",
@@ -8430,7 +8430,7 @@
       {
         "id": "rapt_bpu_static",
         "short": "bpu_static",
-        "file": "hdl/frontend/branch_predictor/rapt_bpu_static.sv",
+        "file": "rtl/frontend/branch_predictor/rapt_bpu_static.sv",
         "domain": "bpu",
         "stage": 8,
         "summary": "",
@@ -8445,7 +8445,7 @@
       {
         "id": "rapt_bpu_tage",
         "short": "bpu_tage",
-        "file": "hdl/frontend/branch_predictor/rapt_bpu_tage.sv",
+        "file": "rtl/frontend/branch_predictor/rapt_bpu_tage.sv",
         "domain": "bpu",
         "stage": 0,
         "summary": "",
@@ -8460,7 +8460,7 @@
       {
         "id": "rapt_predict_history",
         "short": "predict_history",
-        "file": "hdl/frontend/branch_predictor/rapt_predict_history.sv",
+        "file": "rtl/frontend/branch_predictor/rapt_predict_history.sv",
         "domain": "bpu",
         "stage": 0,
         "summary": "Histories belong to instruction-stream boundaries, not prediction queries. Decode is a recovery watermark for IDU resteers; retirement is the watermark for full flush. Each boundary currently accepts at most one conditional/edge.",
@@ -8475,7 +8475,7 @@
       {
         "id": "rapt_ras",
         "short": "ras",
-        "file": "hdl/frontend/branch_predictor/rapt_ras.sv",
+        "file": "rtl/frontend/branch_predictor/rapt_ras.sv",
         "domain": "bpu",
         "stage": 0,
         "summary": "Decode-ordered speculative return stack with an independent retirement image. Querying never mutates state. A flush restores the POST-commit image, including data overwritten by wrong-path pushes. Pop on empty is a no-op; overflow drops the oldest entry. Simultaneous pop/push is ",
@@ -8490,7 +8490,7 @@
       {
         "id": "rapt_csr",
         "short": "CSR",
-        "file": "hdl/frontend/rapt_csr.sv",
+        "file": "rtl/frontend/rapt_csr.sv",
         "domain": "frontend",
         "stage": 6,
         "summary": "",
@@ -8512,7 +8512,7 @@
       {
         "id": "rapt_decode_slot",
         "short": "decode_slot",
-        "file": "hdl/frontend/rapt_decode_slot.sv",
+        "file": "rtl/frontend/rapt_decode_slot.sv",
         "domain": "frontend",
         "stage": 1,
         "summary": "Pure single-instruction decode. No slot identity or pipeline control here.",
@@ -8527,7 +8527,7 @@
       {
         "id": "rapt_fetch_successor",
         "short": "fetch_successor",
-        "file": "hdl/frontend/rapt_fetch_successor.sv",
+        "file": "rtl/frontend/rapt_fetch_successor.sv",
         "domain": "frontend",
         "stage": 0,
         "summary": "Predict only where to request the next packet. The response stage validates every hint against freshly decoded instructions and the direction predictor before a younger packet can enter the visible stream.",
@@ -8542,7 +8542,7 @@
       {
         "id": "rapt_fqu",
         "short": "FQU",
-        "file": "hdl/frontend/rapt_fqu.sv",
+        "file": "rtl/frontend/rapt_fqu.sv",
         "domain": "frontend",
         "stage": 1,
         "summary": "Flatten fetch packets into an ordered stream; decode can regroup across original fetch boundaries. Prediction and fault metadata stays per instruction.",
@@ -8564,7 +8564,7 @@
       {
         "id": "rapt_frontend",
         "short": "FE",
-        "file": "hdl/frontend/rapt_frontend.sv",
+        "file": "rtl/frontend/rapt_frontend.sv",
         "domain": "frontend",
         "stage": 1,
         "summary": "Fetch/predict/decode composition. Rename belongs to the backend so its checkpoint, retirement and physical-register feedback stay within that block.",
@@ -8579,7 +8579,7 @@
       {
         "id": "rapt_idu",
         "short": "IDU",
-        "file": "hdl/frontend/rapt_idu.sv",
+        "file": "rtl/frontend/rapt_idu.sv",
         "domain": "frontend",
         "stage": 1,
         "summary": "",
@@ -8601,7 +8601,7 @@
       {
         "id": "rapt_ifetch_io_guard",
         "short": "IOG",
-        "file": "hdl/frontend/rapt_ifetch_io_guard.sv",
+        "file": "rtl/frontend/rapt_ifetch_io_guard.sv",
         "domain": "frontend",
         "stage": 0,
         "summary": "Conservative non-speculative fetch authorization. Empty includes all frontend queues and the ROB, so repeated PCs cannot alias older dynamic instructions. A frontend cancel alone never replenishes the permission.",
@@ -8616,7 +8616,7 @@
       {
         "id": "rapt_ifu",
         "short": "IFU",
-        "file": "hdl/frontend/rapt_ifu.sv",
+        "file": "rtl/frontend/rapt_ifu.sv",
         "domain": "frontend",
         "stage": 0,
         "summary": "The cache owns cross-word/page assembly of the first instruction. Its fixed lookahead window is an input bandwidth limit, NOT a decode/rename slot count. This stage walks complete 16/32-bit instructions and holds any unconsumed suffix. A control instruction terminates the fetched",
@@ -8638,7 +8638,7 @@
       {
         "id": "rapt_rename_admit",
         "short": "rename_admit",
-        "file": "hdl/frontend/rapt_rename_admit.sv",
+        "file": "rtl/frontend/rapt_rename_admit.sv",
         "domain": "frontend",
         "stage": 2,
         "summary": "Resource qualification is independent of earlier acceptance decisions. If every older slot passed, its demand rank equals its accepted rank. If an older slot did not pass, the prefix blocks this slot regardless of its rank.",
@@ -8653,7 +8653,7 @@
       {
         "id": "rapt_rename_checkpoint",
         "short": "rename_checkpoint",
-        "file": "hdl/frontend/rapt_rename_checkpoint.sv",
+        "file": "rtl/frontend/rapt_rename_checkpoint.sv",
         "domain": "frontend",
         "stage": 2,
         "summary": "Control-flow checkpoint lifetime, ancestry, and predictor history. Rename stays fenced after a redirect and the precise retirement flush rebuilds MAP/free from the committed RAT; no speculative rename snapshot is needed. One age bit per unordered pair represents the order of live",
@@ -8668,7 +8668,7 @@
       {
         "id": "rapt_rnu",
         "short": "RNU",
-        "file": "hdl/frontend/rapt_rnu.sv",
+        "file": "rtl/frontend/rapt_rnu.sv",
         "domain": "frontend",
         "stage": 2,
         "summary": "Ordered rename: incoming decode groups are flattened by RNQ. The rename group sees a program-order fold of MAP, including RAW and stale-destination WAW bypass. Free registers are selected once per actual destination writer.",
@@ -8690,7 +8690,7 @@
       {
         "id": "rapt_idu_decoder",
         "short": "idu_decoder",
-        "file": "hdl/generated/rapt_idu_decoder.sv",
+        "file": "rtl/generated/rapt_idu_decoder.sv",
         "domain": "frontend",
         "stage": 1,
         "summary": "Generated by CIRCT firtool-1.131.0",
@@ -8705,7 +8705,7 @@
       {
         "id": "rapt_idu_decoder_c",
         "short": "idu_decoder_c",
-        "file": "hdl/generated/rapt_idu_decoder_c.sv",
+        "file": "rtl/generated/rapt_idu_decoder_c.sv",
         "domain": "frontend",
         "stage": 1,
         "summary": "Generated by CIRCT firtool-1.131.0",
@@ -8720,7 +8720,7 @@
       {
         "id": "rapt_axi_master",
         "short": "AXI",
-        "file": "hdl/memory/rapt_axi_master.sv",
+        "file": "rtl/memory/rapt_axi_master.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "",
@@ -8742,7 +8742,7 @@
       {
         "id": "rapt_axi_r_buffer",
         "short": "axi_r_buffer",
-        "file": "hdl/memory/rapt_axi_r_buffer.sv",
+        "file": "rtl/memory/rapt_axi_r_buffer.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "Register the outer AXI R channel before it enters the cache hierarchy. Two entries let a ready consumer accept one beat on every cycle while rready to the memory controller depends only on registered occupancy.",
@@ -8757,7 +8757,7 @@
       {
         "id": "rapt_bus",
         "short": "BUS",
-        "file": "hdl/memory/rapt_bus.sv",
+        "file": "rtl/memory/rapt_bus.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "",
@@ -8779,7 +8779,7 @@
       {
         "id": "rapt_cache_fill_select",
         "short": "cache_fill_select",
-        "file": "hdl/memory/rapt_cache_fill_select.sv",
+        "file": "rtl/memory/rapt_cache_fill_select.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "Reuse a live matching line, otherwise an invalid candidate, otherwise the replacement-policy victim. Way zero is a valid result, not a sentinel.",
@@ -8794,7 +8794,7 @@
       {
         "id": "rapt_cache_plru",
         "short": "cache_plru",
-        "file": "hdl/memory/rapt_cache_plru.sv",
+        "file": "rtl/memory/rapt_cache_plru.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "Multi-query tree PLRU. Bits record the most recently used child. Only nodes on an accessed leaf's path change. Update ports are applied in ascending order; a higher port wins only on nodes both ports touch.",
@@ -8809,7 +8809,7 @@
       {
         "id": "rapt_cached_ptw",
         "short": "cached_ptw",
-        "file": "hdl/memory/rapt_cached_ptw.sv",
+        "file": "rtl/memory/rapt_cached_ptw.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "L1 miss adapter: probe the shared L2 TLB before starting the existing PTW. Cancellation drains accepted PTE reads through the PTW's original protocol.",
@@ -8824,7 +8824,7 @@
       {
         "id": "rapt_ifetch_translate",
         "short": "ifetch_translate",
-        "file": "hdl/memory/rapt_ifetch_translate.sv",
+        "file": "rtl/memory/rapt_ifetch_translate.sv",
         "domain": "memory",
         "stage": 0,
         "summary": "Translation adapter for the per-word fetch controller. Every accepted request produces one response, even after cancellation. A killed PTW does not itself pulse done/fault, so its busy falling is explicitly acknowledged. The caller discards the response of a cancelled architectur",
@@ -8839,7 +8839,7 @@
       {
         "id": "rapt_ifetch_word",
         "short": "ifetch_word",
-        "file": "hdl/memory/rapt_ifetch_word.sv",
+        "file": "rtl/memory/rapt_ifetch_word.sv",
         "domain": "memory",
         "stage": 0,
         "summary": "One architectural instruction, with an independently translated second aligned word only when a 32-bit instruction straddles a word boundary. Translation and data channels each accept one obligation and must return exactly one response, including after kill. This unit drains acce",
@@ -8854,7 +8854,7 @@
       {
         "id": "rapt_l1d",
         "short": "L1D",
-        "file": "hdl/memory/rapt_l1d.sv",
+        "file": "rtl/memory/rapt_l1d.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "",
@@ -8876,7 +8876,7 @@
       {
         "id": "rapt_l1d_access",
         "short": "l1d_access",
-        "file": "hdl/memory/rapt_l1d_access.sv",
+        "file": "rtl/memory/rapt_l1d_access.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "",
@@ -8891,7 +8891,7 @@
       {
         "id": "rapt_l1d_data",
         "short": "l1d_data",
-        "file": "hdl/memory/rapt_l1d_data.sv",
+        "file": "rtl/memory/rapt_l1d_data.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "L1D word-write / line-read data array, built from <=128-bit 1RW SRAMs. A write reserves only its selected way/subarray. Other banks read on the same edge; each bank reports which set its output currently represents.",
@@ -8906,7 +8906,7 @@
       {
         "id": "rapt_l1d_mshr",
         "short": "MSHR",
-        "file": "hdl/memory/rapt_l1d_mshr.sv",
+        "file": "rtl/memory/rapt_l1d_mshr.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "Physical-line miss table and refill buffers. Requests replay through L1D (including translation/PMP) before consuming data; no speculative ROB tags are retained here. Completed lines stay until replaced or invalidated.",
@@ -8928,7 +8928,7 @@
       {
         "id": "rapt_l1d_tags",
         "short": "l1d_tags",
-        "file": "hdl/memory/rapt_l1d_tags.sv",
+        "file": "rtl/memory/rapt_l1d_tags.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "L1D tag/valid ownership and replacement lookup. Reads are combinational; updates and fence invalidation occur on the same edge as the data write. The controller retains transaction sequencing and the two-way toggle.",
@@ -8943,7 +8943,7 @@
       {
         "id": "rapt_l1d_writeback",
         "short": "l1d_writeback",
-        "file": "hdl/memory/rapt_l1d_writeback.sv",
+        "file": "rtl/memory/rapt_l1d_writeback.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "",
@@ -8958,7 +8958,7 @@
       {
         "id": "rapt_l1i",
         "short": "L1I",
-        "file": "hdl/memory/rapt_l1i.sv",
+        "file": "rtl/memory/rapt_l1i.sv",
         "domain": "memory",
         "stage": 0,
         "summary": "",
@@ -8980,7 +8980,7 @@
       {
         "id": "rapt_l1i_access",
         "short": "l1i_access",
-        "file": "hdl/memory/rapt_l1i_access.sv",
+        "file": "rtl/memory/rapt_l1i_access.sv",
         "domain": "memory",
         "stage": 0,
         "summary": "Fetch permissions are combinational. Fault ownership, SRAM readiness and refill/PTW sequencing remain in the instruction-cache controller.",
@@ -8995,7 +8995,7 @@
       {
         "id": "rapt_l1i_data",
         "short": "l1i_data",
-        "file": "hdl/memory/rapt_l1i_data.sv",
+        "file": "rtl/memory/rapt_l1i_data.sv",
         "domain": "memory",
         "stage": 0,
         "summary": "Independently addressed banks let a fetch window straddle adjacent sets. Ways share each bank's read address; each way owns its read validity.",
@@ -9010,7 +9010,7 @@
       {
         "id": "rapt_l1i_tagmem",
         "short": "l1i_tagmem",
-        "file": "hdl/memory/rapt_l1i_tagmem.sv",
+        "file": "rtl/memory/rapt_l1i_tagmem.sv",
         "domain": "memory",
         "stage": 0,
         "summary": "",
@@ -9025,7 +9025,7 @@
       {
         "id": "rapt_l2",
         "short": "L2",
-        "file": "hdl/memory/rapt_l2.sv",
+        "file": "rtl/memory/rapt_l2.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "",
@@ -9047,7 +9047,7 @@
       {
         "id": "rapt_l2_bypass_ctrl",
         "short": "l2_bypass_ctrl",
-        "file": "hdl/memory/rapt_l2_bypass_ctrl.sv",
+        "file": "rtl/memory/rapt_l2_bypass_ctrl.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "Uncached read phases and the shared registered outer AR channel. The request valid/data ports also admit blocking refills to the same AR register.",
@@ -9062,7 +9062,7 @@
       {
         "id": "rapt_l2_data_array",
         "short": "l2_data_array",
-        "file": "hdl/memory/rapt_l2_data_array.sv",
+        "file": "rtl/memory/rapt_l2_data_array.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "Medium BOOM data geometry: four 16384 x 64 single-port SRAM banks. bank=chunk[1:0], row={way[2:0],set[9:0],chunk[2]}. Bank priority is SinkC > SourceC > live SinkD > buffered line write > SourceD-write > SourceD-read. A displaced buffered beat retries.",
@@ -9077,7 +9077,7 @@
       {
         "id": "rapt_l2_directory",
         "short": "l2_directory",
-        "file": "hdl/memory/rapt_l2_directory.sv",
+        "file": "rtl/memory/rapt_l2_directory.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "BOOM inclusive-cache directory geometry and one-port access contract. Data is stored as one synchronous SRAM per way; a reset wipe clears one set in all ways per cycle before requests become ready.",
@@ -9092,7 +9092,7 @@
       {
         "id": "rapt_l2_evict_ctrl",
         "short": "l2_evict_ctrl",
-        "file": "hdl/memory/rapt_l2_evict_ctrl.sv",
+        "file": "rtl/memory/rapt_l2_evict_ctrl.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "Dirty-victim writeback phases. The parent presents a valid transaction from AW through B; capture data ports carry the victim metadata for that transaction.",
@@ -9107,7 +9107,7 @@
       {
         "id": "rapt_l2_hit_ctrl",
         "short": "l2_hit_ctrl",
-        "file": "hdl/memory/rapt_l2_hit_ctrl.sv",
+        "file": "rtl/memory/rapt_l2_hit_ctrl.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "Resident read phases. Valid/ready selects the hit pipeline; the data ports capture its request and advance the address, word, and remaining beat count.",
@@ -9122,7 +9122,7 @@
       {
         "id": "rapt_l2_mshr_frontend",
         "short": "l2_mshr_frontend",
-        "file": "hdl/memory/rapt_l2_mshr_frontend.sv",
+        "file": "rtl/memory/rapt_l2_mshr_frontend.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "BOOM-sized miss admission and secondary replay fabric. The seven MSHR state machines supply their status and schedule requests; this module arbitrates them and keeps their 21 secondary queues in 33 shared entries. A secondary entry omits the set because its target MSHR already ow",
@@ -9137,7 +9137,7 @@
       {
         "id": "rapt_l2_mshr_scheduler",
         "short": "l2_mshr_scheduler",
-        "file": "hdl/memory/rapt_l2_mshr_scheduler.sv",
+        "file": "rtl/memory/rapt_l2_mshr_scheduler.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "BOOM inclusive-cache MSHR allocation and round-robin schedule selection. Five ordinary A slots and the dedicated BC/C slots share one set-conflict table. The secondary request payloads reside in rapt_l2_secondary_buffer.",
@@ -9152,7 +9152,7 @@
       {
         "id": "rapt_l2_put_buffer",
         "short": "l2_put_buffer",
-        "file": "hdl/memory/rapt_l2_put_buffer.sv",
+        "file": "rtl/memory/rapt_l2_put_buffer.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "BOOM SinkA's non-flowing put ListBuffer: forty lists share forty beats. A list may hold multiple beats; the caller owns list allocation and retires a list after its last beat has been popped. A full pool does not accept a push merely because another list pops on the same edge.",
@@ -9167,7 +9167,7 @@
       {
         "id": "rapt_l2_refill_ctrl",
         "short": "l2_refill_ctrl",
-        "file": "hdl/memory/rapt_l2_refill_ctrl.sv",
+        "file": "rtl/memory/rapt_l2_refill_ctrl.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "Blocking refill admission and outer read phases. Valid/ready controls the phase; the data ports own the returned line and its merge writes.",
@@ -9182,7 +9182,7 @@
       {
         "id": "rapt_l2_refill_mshrs",
         "short": "l2_refill_mshrs",
-        "file": "hdl/memory/rapt_l2_refill_mshrs.sv",
+        "file": "rtl/memory/rapt_l2_refill_mshrs.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "Independent outer-memory refill contexts for BOOM's seven L2 MSHRs. The outer AXI ID is the context index; the original inner ID is retained for response routing. Different fills may return interleaved beats.",
@@ -9197,7 +9197,7 @@
       {
         "id": "rapt_l2_release_buffer",
         "short": "l2_release_buffer",
-        "file": "hdl/memory/rapt_l2_release_buffer.sv",
+        "file": "rtl/memory/rapt_l2_release_buffer.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "Two in-flight L1D release lists share BOOM's lowest-free beat pool. RV64 has 16 shared beats and RV32 has 32. Keep beats until ReleaseAck so a failed nested refill can replay the same ReleaseData without a new C.",
@@ -9212,7 +9212,7 @@
       {
         "id": "rapt_l2_secondary_buffer",
         "short": "l2_secondary_buffer",
-        "file": "hdl/memory/rapt_l2_secondary_buffer.sv",
+        "file": "rtl/memory/rapt_l2_secondary_buffer.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "BOOM inclusive-cache Scheduler uses one shared 33-entry ListBuffer with three virtual request lists for each of its seven MSHRs (A, B and C). The queue is non-flowing: a push into an empty list becomes visible after the clock edge, and a full buffer cannot reuse a simultaneously ",
@@ -9227,7 +9227,7 @@
       {
         "id": "rapt_l2tlb",
         "short": "L2 TLB",
-        "file": "hdl/memory/rapt_l2tlb.sv",
+        "file": "rtl/memory/rapt_l2tlb.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "Shared, direct-mapped L2 TLB. VPN low bits select one row; superpage translations are cached as the resolved 4 KiB subpage returned by the PTW. One synchronous row port serves I/D lookups and fills with round-robin arbitration. Payload RAM is not reset; a separate valid vector is",
@@ -9249,7 +9249,7 @@
       {
         "id": "rapt_memory",
         "short": "memory",
-        "file": "hdl/memory/rapt_memory.sv",
+        "file": "rtl/memory/rapt_memory.sv",
         "domain": "memory",
         "stage": 3,
         "summary": "",
@@ -9264,7 +9264,7 @@
       {
         "id": "rapt_memory_drain",
         "short": "memory_drain",
-        "file": "hdl/memory/rapt_memory_drain.sv",
+        "file": "rtl/memory/rapt_memory_drain.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "A serializing ROB owner holds request_i until its ordering point retires or is cancelled. Completion is a transaction result, not a live cache-idle signal. The store queue and memory must both be quiescent before completion; this also includes posted write responses and late refi",
@@ -9279,7 +9279,7 @@
       {
         "id": "rapt_pmp_state",
         "short": "PMP",
-        "file": "hdl/memory/rapt_pmp.sv",
+        "file": "rtl/memory/rapt_pmp.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "",
@@ -9301,7 +9301,7 @@
       {
         "id": "rapt_pmp_permissions",
         "short": "pmp_permissions",
-        "file": "hdl/memory/rapt_pmp.sv",
+        "file": "rtl/memory/rapt_pmp.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "",
@@ -9316,7 +9316,7 @@
       {
         "id": "rapt_pmp",
         "short": "pmp",
-        "file": "hdl/memory/rapt_pmp.sv",
+        "file": "rtl/memory/rapt_pmp.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "",
@@ -9331,7 +9331,7 @@
       {
         "id": "rapt_pmp_line_uniform",
         "short": "pmp_line_uniform",
-        "file": "hdl/memory/rapt_pmp.sv",
+        "file": "rtl/memory/rapt_pmp.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "",
@@ -9346,7 +9346,7 @@
       {
         "id": "rapt_pmp_window_uniform",
         "short": "pmp_window_uniform",
-        "file": "hdl/memory/rapt_pmp.sv",
+        "file": "rtl/memory/rapt_pmp.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "",
@@ -9361,7 +9361,7 @@
       {
         "id": "rapt_ptw",
         "short": "PTW",
-        "file": "hdl/memory/rapt_ptw.sv",
+        "file": "rtl/memory/rapt_ptw.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "Read-only page-table walker. RV32 uses Sv32 two-level page tables. RV64 uses the Sv39 three-level format expected by upstream xv6-riscv. Permission checks against the access type and current privilege are performed by the requesters (L1I/L1D) using the returned PTE flags.  RVA20S",
@@ -9383,7 +9383,7 @@
       {
         "id": "rapt_tlb",
         "short": "TLB",
-        "file": "hdl/memory/rapt_tlb.sv",
+        "file": "rtl/memory/rapt_tlb.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "Fully-associative TLB for Sv32/Sv39 page translation with ASID support. Both configurations implement ASIDLEN=9; the RV64 satp WARL logic clears the seven unimplemented high ASID bits on write. Combinational lookup, sequential fill, invalid-first round-robin replacement.",
@@ -9405,7 +9405,7 @@
       {
         "id": "rapt_data_tlb",
         "short": "data_tlb",
-        "file": "hdl/memory/rapt_tlb.sv",
+        "file": "rtl/memory/rapt_tlb.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "Fully-associative TLB for Sv32/Sv39 page translation with ASID support. Both configurations implement ASIDLEN=9; the RV64 satp WARL logic clears the seven unimplemented high ASID bits on write. Combinational lookup, sequential fill, invalid-first round-robin replacement.",
@@ -9420,7 +9420,7 @@
       {
         "id": "rapt_clint",
         "short": "CLINT",
-        "file": "hdl/perip/rapt_clint.sv",
+        "file": "rtl/perip/rapt_clint.sv",
         "domain": "cluster",
         "stage": 9,
         "summary": "Core Local INTerrupt controller (standard CLINT layout) Register map (base 0x02000000): 0x0000  msip      (32-bit, bit 0 only)  - M-mode software interrupt pending 0x4000  mtimecmp  (64-bit)              - timer compare register 0xBFF8  mtime     (64-bit, read/write)  - real-time",
@@ -9442,7 +9442,7 @@
       {
         "id": "rapt_dm",
         "short": "DM",
-        "file": "hdl/perip/rapt_dm.sv",
+        "file": "rtl/perip/rapt_dm.sv",
         "domain": "cluster",
         "stage": 9,
         "summary": "rapt_dm: minimal RISC-V Debug Module. Register file (DTM-side compliance probe): - dmcontrol  (RW: dmactive, ndmreset, haltreq, resumereq) - dmstatus   (RO: version=3, authenticated=1, {any,all}{halted,running,resumeack}) - hartinfo   (RO: 0) - abstractcs (R: progbufsize=0, datac",
@@ -9464,7 +9464,7 @@
       {
         "id": "rapt_dtm",
         "short": "DTM",
-        "file": "hdl/perip/rapt_dtm.sv",
+        "file": "rtl/perip/rapt_dtm.sv",
         "domain": "cluster",
         "stage": 9,
         "summary": "rapt_dtm: minimal RISC-V Debug Transport Module (DTM) implementing IEEE 1149.1 TAP semantics over a single-clock-domain simplification (tck = clock). Implements the four IRs required by RISC-V Debug Spec 1.0: IR=0x01 IDCODE  : 32-bit constant device id IR=0x10 DTMCS   : 32-bit DT",
@@ -9479,7 +9479,7 @@
       {
         "id": "rapt_plic",
         "short": "PLIC",
-        "file": "hdl/perip/rapt_plic.sv",
+        "file": "rtl/perip/rapt_plic.sv",
         "domain": "cluster",
         "stage": 9,
         "summary": "rapt_plic -- Platform-Level Interrupt Controller (PLIC) Reference: https://github.com/riscv/riscv-plic-spec/blob/master/riscv-plic-1.0.0.pdf nemu/src/device/intr.c (functional reference used by difftest) Configuration (parameterised, defaults from rapt_soc.svh): NDEV  = number of",
@@ -9501,7 +9501,7 @@
       {
         "id": "rapt",
         "short": "cluster",
-        "file": "hdl/rapt.sv",
+        "file": "rtl/rapt.sv",
         "domain": "core",
         "stage": 4,
         "summary": "rapt: cluster-level top. Aggregates one or more `rapt_core` instances and the cluster-shared peripherals that, per the RISC-V platform spec, must be shared across all harts (CLINT and PLIC today; IMSIC in the future). The external port set is identical to the historical single-co",
@@ -9516,7 +9516,7 @@
       {
         "id": "rapt_core",
         "short": "core",
-        "file": "hdl/rapt_core.sv",
+        "file": "rtl/rapt_core.sv",
         "domain": "core",
         "stage": 3,
         "summary": "Single-hart composition of frontend, backend, caches and memory interconnect. A cluster (`rapt.sv`) instantiates cores alongside shared CLINT/PLIC devices. External MMIO targeted at cluster-local CLINT or PLIC register windows leaves through the standard AXI master interface; the",
@@ -9531,7 +9531,7 @@
       {
         "id": "rapt_router",
         "short": "RTR",
-        "file": "hdl/rapt_router.sv",
+        "file": "rtl/rapt_router.sv",
         "domain": "core",
         "stage": 8,
         "summary": "",
@@ -9553,7 +9553,7 @@
       {
         "id": "rapt_sram_2rw",
         "short": "sram_2rw",
-        "file": "hdl/sram/rapt_sram_2rw.sv",
+        "file": "rtl/sram/rapt_sram_2rw.sv",
         "domain": "core",
         "stage": 8,
         "summary": "Two independent, clocked read/write ports sharing one memory array. Each enabled port either writes at the rising edge or registers a read result at that edge. Read outputs hold when their port is idle or writes. The caller must avoid same-address cross-port accesses when either ",
@@ -9568,7 +9568,7 @@
       {
         "id": "soc_pmem",
         "short": "PMEM",
-        "file": "hdl/rapt_pkg.sv",
+        "file": "rtl/rapt_pkg.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "Cacheable PMEM window at 0x80000000 from rapt_pkg::addr_mapped.",
@@ -9590,7 +9590,7 @@
       {
         "id": "soc_uart",
         "short": "UART",
-        "file": "hdl/rapt_pkg.sv",
+        "file": "rtl/rapt_pkg.sv",
         "domain": "cluster",
         "stage": 9,
         "summary": "MMIO UART/GPIO window at 0x10000000 from rapt_pkg::addr_mapped; LiteX UART at 0x11001800.",
@@ -19107,12 +19107,12 @@
       },
       {
         "name": "format",
-        "description": "Format tracked HDL/SystemVerilog (FORMAT_SCOPE=hdl|all)",
+        "description": "Format tracked HDL/SystemVerilog (FORMAT_SCOPE=rtl|all)",
         "section": "Utilities"
       },
       {
         "name": "format-check",
-        "description": "Check formatting without changing files (FORMAT_SCOPE=hdl|all)",
+        "description": "Check formatting without changing files (FORMAT_SCOPE=rtl|all)",
         "section": "Utilities"
       },
       {
@@ -19127,7 +19127,7 @@
       },
       {
         "name": "memory-map-header",
-        "description": "Regenerate app/lib/raptor_platform.h from hdl/configs/memory_map.json",
+        "description": "Regenerate app/lib/raptor_platform.h from rtl/configs/memory_map.json",
         "section": "Utilities"
       },
       {
@@ -19203,147 +19203,147 @@
       {
         "name": "verify-fuzz",
         "description": "Random instruction fuzz with difftest",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-unit-fpu",
         "description": "Run all Verilator FPU component tests",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-fp-smoke-rv32",
         "description": "Run the NEMU RV32F directed smoke test",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-fp-smoke-rv64",
         "description": "Run the NEMU RV64F directed smoke test",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-fp-spike-rv32",
         "description": "Run the RV32F smoke test with NEMU versus Spike",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-fp-spike-rv64",
         "description": "Run the RV64F smoke test with NEMU versus Spike",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-fp-arith-rv32",
         "description": "Run RV32F SoftFloat arithmetic regression",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-fp-arith-rv64",
         "description": "Run RV64F SoftFloat arithmetic regression",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-fp-arith-spike-rv32",
         "description": "Run RV32F arithmetic against Spike",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-fp-arith-spike-rv64",
         "description": "Run RV64F arithmetic against Spike",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-fp-double-rv32",
         "description": "Run RV32D NEMU directed regression",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-fp-double-rv64",
         "description": "Run RV64D NEMU directed regression",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-fuzz-inf",
         "description": "Continuous fuzz until Ctrl-C or failure",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-fuzz-replay",
         "description": "Replay the last failing fuzz-inf batch",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-sigtest",
         "description": "Signature-based ISA corner-case tests",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-riscof-classic",
         "description": "RISCOF classic compliance tests (legacy, no difftest)",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-riscof-classic-nemu",
         "description": "RISCOF classic compliance tests on NEMU reference",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-riscof",
         "description": "RISCOF official compliance tests",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-riscv-dv",
         "description": "riscv-dv privileged smoke across the memory-delay matrix",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-riscv-dv-stress",
         "description": "riscv-dv exception stress across delay/seed matrix",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-riscv-dv-mmu",
         "description": "Check riscv-dv Sv32/MMU generator availability",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-coverage",
         "description": "Verilator line/toggle coverage",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-light",
         "description": "Run lightweight fuzz and signature tests",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "regression",
         "description": "Format, then run CoreMark and serialized FPGA/STA lanes with logs and a JSON summary",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "regression-plan",
         "description": "Print regression commands and concurrency without running any submake",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "regression-test",
         "description": "Test regression scheduling, failure handling and output validation without EDA tools",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-memory-stress-rv32",
         "description": "RaptOS: randomized Sv32 memory/atomic integration matrix",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-verilator",
         "description": "Pure-Verilator parallel regression: modules, RV32/RV64, apps, random AXI, RISCOF, Linux",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "verify-clean",
         "description": "Clean verification artifacts",
-        "section": "Verification Suite (verify/)"
+        "section": "Verification Suite (verification/)"
       },
       {
         "name": "app-run",
@@ -21460,7 +21460,7 @@
       "name": "vpu.md",
       "title": "Standalone Raptor VPU",
       "url": "vpu.html",
-      "summary": "The VPU is a standalone RVV 1.0 component in `hdl/backend/vpu/`. It implements integer, fixed-point, permutation, configuration/CSR, vector memory and FP32/FP64 instruction families. `rapt_vpu_core` composes the numerica"
+      "summary": "The VPU is a standalone RVV 1.0 component in `rtl/backend/vpu/`. It implements integer, fixed-point, permutation, configuration/CSR, vector memory and FP32/FP64 instruction families. `rapt_vpu_core` composes the numerica"
     }
   ],
   "github": "https://github.com/Kingfish404/raptor-chip",

@@ -17,7 +17,7 @@ endif
 override FPGA_BOARD := $(_nb_board)
 RAPT_CONFIG ?= $(if $(filter rk_xcku5p_f,$(_nb_board)),small,default)
 override RAPT_CONFIG := $(strip $(RAPT_CONFIG))
-_nb_configs := $(notdir $(patsubst %/rapt_config.svh,%,$(wildcard $(_NETBOOT_ROOT)/hdl/configs/*/rapt_config.svh)))
+_nb_configs := $(notdir $(patsubst %/rapt_config.svh,%,$(wildcard $(_NETBOOT_ROOT)/rtl/configs/*/rapt_config.svh)))
 ifneq ($(filter-out fpga-netboot-host-setup fpga-netboot-host-restore,$(MAKECMDGOALS)),)
 ifneq ($(words $(RAPT_CONFIG)),1)
 $(error RAPT_CONFIG must name one preset)

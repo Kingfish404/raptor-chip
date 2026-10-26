@@ -125,10 +125,10 @@ prepare_rtl_sources() {
   step=$((step + 1))
   echo "Step $step: Running RTL build pipeline..."
   source "$ROOT_DIR/env.sh"
-  if [ -d "$ROOT_DIR/hdl/generated" ] && [ "$(ls -A "$ROOT_DIR/hdl/generated" 2>/dev/null)" ]; then
-    echo "hdl/generated/ exists, skipping Chisel verilog generation"
+  if [ -d "$ROOT_DIR/rtl/generated" ] && [ "$(ls -A "$ROOT_DIR/rtl/generated" 2>/dev/null)" ]; then
+    echo "rtl/generated/ exists, skipping Chisel verilog generation"
   else
-    make -C "$ROOT_DIR/hdl/chisel" verilog -j"$(host_nproc)"
+    make -C "$ROOT_DIR/tools/decodegen" verilog -j"$(host_nproc)"
   fi
   make -C "$ROOT_DIR/sim" pack
 

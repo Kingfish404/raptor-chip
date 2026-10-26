@@ -13,7 +13,7 @@
 //     https://github.com/openocd-org/openocd/blob/master/doc/manual/jtag/drivers/remote_bitbang.txt
 //
 // Pairing:
-//   * verify/jtag/openocd.cfg points OpenOCD at TCP 127.0.0.1:9824 (default;
+//   * verification/jtag/openocd.cfg points OpenOCD at TCP 127.0.0.1:9824 (default;
 //     overridable via `--jtag-port=<n>`).
 //   * Build: only the npc top exposes JTAG pins; wrapBus ties them off
 //     internally, so this mode is a no-op there (matches jtag_selftest).
@@ -24,7 +24,7 @@
 //     (dmcontrol), `0x04` (data0) all transact correctly.
 //   * `target halt` will *fail* -- `haltreq_o` is wired but the core's
 //     CMU/IFU do not yet act on it. That is expected and is the next RTL
-//     milestone in verify/jtag/README.md.
+//     milestone in verification/jtag/README.md.
 // =============================================================================
 
 #include <common.h>

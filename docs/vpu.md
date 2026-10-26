@@ -4,7 +4,7 @@ title: Standalone VPU
 
 # Standalone Raptor VPU
 
-The VPU is a standalone RVV 1.0 component in `hdl/backend/vpu/`. It implements
+The VPU is a standalone RVV 1.0 component in `rtl/backend/vpu/`. It implements
 integer, fixed-point, permutation, configuration/CSR, vector memory and
 FP32/FP64 instruction families. `rapt_vpu_core` composes the numerical VPU with
 an ownership and metadata adapter; it is not instantiated in the scalar Raptor
@@ -19,41 +19,41 @@ vector extensions such as Zvfh are outside this component's baseline.
 
 | Module | Implemented behavior | Verification |
 | --- | --- | --- |
-| `hdl/backend/vpu/rapt_vpu_vtype.sv` | Stateless VTYPE legality, VLMAX, deterministic `min(AVL,VLMAX)`, maximum and keep-VL modes | Exhaustive low-byte type pairs, unsupported upper bits, AVL boundaries |
-| `hdl/backend/vpu/rapt_vpu_vrf.sv` | 32 architectural registers, configurable 1RW SRAM banks, byte writes, independently backpressured read responses | Byte-level reference memory, random requests/stalls, full final sweep, reset with pending reads |
-| `hdl/backend/vpu/rapt_vpu_csr.sv` | Seven vector CSRs, configuration updates, restart/FOF/completion updates, VS gating and dirty events | CSR address sweep, permissions, aliases, WARL, faults, FOF and sticky saturation |
-| `hdl/backend/vpu/rapt_vpu_owner.sv` | Capture, tag-matched authorization, cancellation before authorization, irrevocable issue, completion holding and stale-result drain | Tag reuse, cancellation races, issue/response stalls, zero-cycle and duplicate results; inductive public-interface proof with reachability and mutation checks |
-| `hdl/backend/vpu/rapt_vpu_element.sv` | Natural-aligned 8/16/32/64-bit element accesses across VRF banks | Integrated full-array byte comparisons, all supported SEWs and multiple bank shapes |
-| `hdl/backend/vpu/rapt_vpu_decode.sv` | Raw encoding admission for the implemented subset | Real instruction tests and illegal encoding tests, including Spike comparison |
-| `hdl/backend/vpu/rapt_vpu_memory.sv` | Sequential unit/strided/indexed/segment/whole/mask/FOF accesses with precise restart metadata | Independent byte model, Spike, transaction scoreboard, injected access/page faults, backpressure and ownership mismatch tests |
-| `hdl/backend/vpu/rapt_vpu_muldiv.sv` | Independent ready/valid SEW=8/16/32/64 iterative multiply/divide element engine, optional early completion | Exhaustive e8, wider edge/random cases, reset/backpressure, baseline/optimized comparison; integrated Spike including destructive multiply-add |
-| `hdl/backend/vpu/rapt_vpu_mask_write.sv` | Exclusive byte read-modify-write for one mask result bit | All 4,096 byte/bit/value combinations, request stalls, response delays, completion backpressure and reset boundaries; integrated mask results against Spike |
-| `hdl/backend/vpu/rapt_vpu_geometry.sv` | Stateless per-operand EEW/EMUL, alignment, extent and legal overlap checks for arithmetic | Integrated raw-encoding tests against Spike including mixed widths, fractional groups, mask results and illegal geometry; ELEN32/64 synthesis |
-| `hdl/backend/vpu/rapt_vpu_fixed.sv` | Stateless fixed-point rounding/saturation, consuming the full signed product for vsmul | Independent numerical quotient/remainder rounding, exhaustive small inputs, wider edge/random cases; integrated VXRM/VXSAT and Spike checks |
-| `hdl/backend/vpu/rapt_vpu_mask_scan.sv` | Independent byte-based vcpop/vfirst scan, predicate reuse for v0 and first-bit early completion | Exhaustive source/predicate byte and partial-byte lengths, multi-byte scans, exact request counts, backpressure and top-level Spike |
-| `hdl/backend/vpu/rapt_vpu_move.sv` | Independent whole-register move sequencer with command capture, aligned groups, SEW-based restart and no-op elision | Standalone byte model with backpressure and delayed acknowledgements; integrated encoded-instruction comparison |
-| `hdl/backend/vpu/rapt_vpu_reduce.sv` | Independent sequential integer sum/logical/min/max and widening-sum reduction engine; scalar seed/destination, delayed destination write | Integrated independent numeric model and Spike: masks, zero VL, arbitrary destination overlap, fractional/integer LMUL and illegal vstart/geometry |
-| `hdl/backend/vpu/rapt_vpu_alu.sv` | Single-element arithmetic, logical, shift, min/max, merge, compare and carry/borrow | Independent wide-integer reference and Spike through the top |
-| `hdl/backend/vpu/rapt_vpu_slide.sv` | Stateless slide/slide1 element routing, full-XLEN offsets, scalar insertion and out-of-range zero selection; integrated integer slide/slide1 scheduling | Independent signed-128-bit coordinate model, RV32/RV64 and VLEN128/512; encoded top tests and leaf synthesis |
-| `hdl/backend/vpu/rapt_vpu_divsqrt.sv` | Independent runtime-precision FP32/FP64 divide/sqrt wrapper with held result/flags; integrated with top | SoftFloat result/flags comparison, precision/op capture, reset-age sweep and strict lint |
-| `hdl/backend/vpu/rapt_vpu_fp_decode.sv` | FP arithmetic, widening, format conversion, divide/sqrt and miscellaneous admission/operand mapping; integrated with top | Opcode/form sweep, FRM/SEW/enable/VILL matrix and operand-bit/NaN-boxing tests |
-| `hdl/backend/vpu/rapt_vpu_fp_arith.sv` | Raw FP32/FP64 add/subtract/multiply/FMA through one shared fused datapath; integrated with top | Independent SoftFloat operation references, all rounding modes, result/flags and protocol checks |
-| `hdl/backend/vpu/rapt_vpu_fma.sv` | Independent FP32/FP64 fused element wrapper with backpressured result/flags and raw vector inputs; integrated with top | SoftFloat result/flags tests, request capture, stalled responses, invalid rounding and reset boundaries |
-| `hdl/backend/vpu/rapt_vpu_int_fp_decode.sv` | Eighteen unary integer/FP conversion selectors, operand EEWs, signedness and resolved RTZ/FRM; integrated with top | Exhaustive encoding/SEW/FRM/enable sweeps for ELEN32/64 and encoded top differential tests |
-| `hdl/backend/vpu/rapt_vpu_int_fp.sv` | Bidirectional integer16/32/64 and FP32/64 element conversion; five legal ISA width pairs integrated with top | Independent SoftFloat leaves plus encoded top results, flags, masking, restart and finite clipping |
-| `hdl/backend/vpu/rapt_vpu_fp_estimate.sv` | Combinational raw FP32/FP64 reciprocal and reciprocal-square-root seven-bit estimates; integrated with top | Spike SoftFloat estimates, all exponent/table interval endpoints, normalized subnormal boundaries, signed special values and normative examples |
-| `hdl/backend/vpu/rapt_vpu_fp_transfer.sv` | Stateless admission/routing for FP merge, broadcast, scalar extraction/insertion and slide1; integrated with top | Independent encoding masks, scalar boxing/raw payloads, VL/vstart/mask boundaries and parameter sweeps |
-| `hdl/backend/vpu/rapt_vpu_fp_reduce.sv` | Independent numerical sum/min/max and FP32-to-FP64 widening-sum wrapper; the integrated top shares its stream control and existing arithmetic services | SoftFloat sequences, masked seed preservation, count boundaries, metadata capture, source/response stalls and reset-age sweeps |
-| `hdl/backend/vpu/rapt_vpu_core_adapter.sv` | Core-side ROB head authorization and immutable retirement metadata | Owner composition tests, inductive control proof, reachable witnesses and mutation detection |
-| `hdl/backend/vpu/rapt_vpu_core.sv` | Actual numerical VPU composed with core-side metadata bridge; explicit command/result packing | RV32/RV64 full Spike suites, FP64-on-RV32 and context tests, structural synthesis |
-| `hdl/backend/vpu/rapt_vpu.sv` | Composition, sequential element scheduling, mask/vstart/group legality, idle host register port | Standalone encoded programs, authorization races, full VRF comparison and reference differential tests |
+| `rtl/backend/vpu/rapt_vpu_vtype.sv` | Stateless VTYPE legality, VLMAX, deterministic `min(AVL,VLMAX)`, maximum and keep-VL modes | Exhaustive low-byte type pairs, unsupported upper bits, AVL boundaries |
+| `rtl/backend/vpu/rapt_vpu_vrf.sv` | 32 architectural registers, configurable 1RW SRAM banks, byte writes, independently backpressured read responses | Byte-level reference memory, random requests/stalls, full final sweep, reset with pending reads |
+| `rtl/backend/vpu/rapt_vpu_csr.sv` | Seven vector CSRs, configuration updates, restart/FOF/completion updates, VS gating and dirty events | CSR address sweep, permissions, aliases, WARL, faults, FOF and sticky saturation |
+| `rtl/backend/vpu/rapt_vpu_owner.sv` | Capture, tag-matched authorization, cancellation before authorization, irrevocable issue, completion holding and stale-result drain | Tag reuse, cancellation races, issue/response stalls, zero-cycle and duplicate results; inductive public-interface proof with reachability and mutation checks |
+| `rtl/backend/vpu/rapt_vpu_element.sv` | Natural-aligned 8/16/32/64-bit element accesses across VRF banks | Integrated full-array byte comparisons, all supported SEWs and multiple bank shapes |
+| `rtl/backend/vpu/rapt_vpu_decode.sv` | Raw encoding admission for the implemented subset | Real instruction tests and illegal encoding tests, including Spike comparison |
+| `rtl/backend/vpu/rapt_vpu_memory.sv` | Sequential unit/strided/indexed/segment/whole/mask/FOF accesses with precise restart metadata | Independent byte model, Spike, transaction scoreboard, injected access/page faults, backpressure and ownership mismatch tests |
+| `rtl/backend/vpu/rapt_vpu_muldiv.sv` | Independent ready/valid SEW=8/16/32/64 iterative multiply/divide element engine, optional early completion | Exhaustive e8, wider edge/random cases, reset/backpressure, baseline/optimized comparison; integrated Spike including destructive multiply-add |
+| `rtl/backend/vpu/rapt_vpu_mask_write.sv` | Exclusive byte read-modify-write for one mask result bit | All 4,096 byte/bit/value combinations, request stalls, response delays, completion backpressure and reset boundaries; integrated mask results against Spike |
+| `rtl/backend/vpu/rapt_vpu_geometry.sv` | Stateless per-operand EEW/EMUL, alignment, extent and legal overlap checks for arithmetic | Integrated raw-encoding tests against Spike including mixed widths, fractional groups, mask results and illegal geometry; ELEN32/64 synthesis |
+| `rtl/backend/vpu/rapt_vpu_fixed.sv` | Stateless fixed-point rounding/saturation, consuming the full signed product for vsmul | Independent numerical quotient/remainder rounding, exhaustive small inputs, wider edge/random cases; integrated VXRM/VXSAT and Spike checks |
+| `rtl/backend/vpu/rapt_vpu_mask_scan.sv` | Independent byte-based vcpop/vfirst scan, predicate reuse for v0 and first-bit early completion | Exhaustive source/predicate byte and partial-byte lengths, multi-byte scans, exact request counts, backpressure and top-level Spike |
+| `rtl/backend/vpu/rapt_vpu_move.sv` | Independent whole-register move sequencer with command capture, aligned groups, SEW-based restart and no-op elision | Standalone byte model with backpressure and delayed acknowledgements; integrated encoded-instruction comparison |
+| `rtl/backend/vpu/rapt_vpu_reduce.sv` | Independent sequential integer sum/logical/min/max and widening-sum reduction engine; scalar seed/destination, delayed destination write | Integrated independent numeric model and Spike: masks, zero VL, arbitrary destination overlap, fractional/integer LMUL and illegal vstart/geometry |
+| `rtl/backend/vpu/rapt_vpu_alu.sv` | Single-element arithmetic, logical, shift, min/max, merge, compare and carry/borrow | Independent wide-integer reference and Spike through the top |
+| `rtl/backend/vpu/rapt_vpu_slide.sv` | Stateless slide/slide1 element routing, full-XLEN offsets, scalar insertion and out-of-range zero selection; integrated integer slide/slide1 scheduling | Independent signed-128-bit coordinate model, RV32/RV64 and VLEN128/512; encoded top tests and leaf synthesis |
+| `rtl/backend/vpu/rapt_vpu_divsqrt.sv` | Independent runtime-precision FP32/FP64 divide/sqrt wrapper with held result/flags; integrated with top | SoftFloat result/flags comparison, precision/op capture, reset-age sweep and strict lint |
+| `rtl/backend/vpu/rapt_vpu_fp_decode.sv` | FP arithmetic, widening, format conversion, divide/sqrt and miscellaneous admission/operand mapping; integrated with top | Opcode/form sweep, FRM/SEW/enable/VILL matrix and operand-bit/NaN-boxing tests |
+| `rtl/backend/vpu/rapt_vpu_fp_arith.sv` | Raw FP32/FP64 add/subtract/multiply/FMA through one shared fused datapath; integrated with top | Independent SoftFloat operation references, all rounding modes, result/flags and protocol checks |
+| `rtl/backend/vpu/rapt_vpu_fma.sv` | Independent FP32/FP64 fused element wrapper with backpressured result/flags and raw vector inputs; integrated with top | SoftFloat result/flags tests, request capture, stalled responses, invalid rounding and reset boundaries |
+| `rtl/backend/vpu/rapt_vpu_int_fp_decode.sv` | Eighteen unary integer/FP conversion selectors, operand EEWs, signedness and resolved RTZ/FRM; integrated with top | Exhaustive encoding/SEW/FRM/enable sweeps for ELEN32/64 and encoded top differential tests |
+| `rtl/backend/vpu/rapt_vpu_int_fp.sv` | Bidirectional integer16/32/64 and FP32/64 element conversion; five legal ISA width pairs integrated with top | Independent SoftFloat leaves plus encoded top results, flags, masking, restart and finite clipping |
+| `rtl/backend/vpu/rapt_vpu_fp_estimate.sv` | Combinational raw FP32/FP64 reciprocal and reciprocal-square-root seven-bit estimates; integrated with top | Spike SoftFloat estimates, all exponent/table interval endpoints, normalized subnormal boundaries, signed special values and normative examples |
+| `rtl/backend/vpu/rapt_vpu_fp_transfer.sv` | Stateless admission/routing for FP merge, broadcast, scalar extraction/insertion and slide1; integrated with top | Independent encoding masks, scalar boxing/raw payloads, VL/vstart/mask boundaries and parameter sweeps |
+| `rtl/backend/vpu/rapt_vpu_fp_reduce.sv` | Independent numerical sum/min/max and FP32-to-FP64 widening-sum wrapper; the integrated top shares its stream control and existing arithmetic services | SoftFloat sequences, masked seed preservation, count boundaries, metadata capture, source/response stalls and reset-age sweeps |
+| `rtl/backend/vpu/rapt_vpu_core_adapter.sv` | Core-side ROB head authorization and immutable retirement metadata | Owner composition tests, inductive control proof, reachable witnesses and mutation detection |
+| `rtl/backend/vpu/rapt_vpu_core.sv` | Actual numerical VPU composed with core-side metadata bridge; explicit command/result packing | RV32/RV64 full Spike suites, FP64-on-RV32 and context tests, structural synthesis |
+| `rtl/backend/vpu/rapt_vpu.sv` | Composition, sequential element scheduling, mask/vstart/group legality, idle host register port | Standalone encoded programs, authorization races, full VRF comparison and reference differential tests |
 
 These modules do not import `rapt_pkg` or scalar preset macros. VLEN, ELEN,
 bank geometry, XLEN and eventual owner-tag widths must remain independent.
 
 ## Relocatable RTL source export
 
-`python3 verify/vpu/export_rtl.py /tmp/my-vpu-rtl` creates a new directory
+`python3 verification/vpu/export_rtl.py /tmp/my-vpu-rtl` creates a new directory
 containing the required source/license files, a relative-path `sources.f`, a short
 integration README and a SHA-256 manifest. Existing destinations are refused.
 The export includes both `rapt_vpu` and `rapt_vpu_core`, shared scalar numerical
@@ -65,10 +65,10 @@ From the exported directory:
 
 ```sh
 verilator --lint-only --assert -Wall -DRAPT_ASSERT_EN \
-  verify/vpu/fma_legacy.vlt -f sources.f --top-module rapt_vpu_core
+  verification/vpu/fma_legacy.vlt -f sources.f --top-module rapt_vpu_core
 ```
 
-`python3 verify/vpu/test_export_rtl.py` relocates a fresh export outside the
+`python3 verification/vpu/test_export_rtl.py` relocates a fresh export outside the
 repository into a directory containing a space, then checks both tops in the
 four acceptance configurations: RV32/128/32/64/1, RV64/128/64/64/2,
 RV32/256/64/64/4 and RV64/512/64/128/4 (XLEN/VLEN/ELEN/BankBits/Banks).
@@ -76,35 +76,35 @@ The eight lint/elaboration checks retain the existing narrow FMA waivers;
 they are not functional simulations or physical implementation checks.
 The test also requires a missing shared header to fail and an existing export
 destination to remain untouched. Logs and source-current evidence are recorded
-under `verify/build/vpu/export-rtl/`.
+under `verification/build/vpu/export-rtl/`.
 
 ## Independent tests
 
 From the repository root:
 
 ```sh
-make -C verify/vpu test
-make -C verify/vpu matrix
-make -C verify/vpu top-matrix
-make -C verify/vpu synth
-make -C verify/vpu opt-check
-make -C verify/vpu muldiv-opt-check
-make -C verify/vpu mask-write
-make -C verify/vpu fixed
-make -C verify/vpu move
-make -C verify/vpu move VLEN=512
-make -C verify/vpu mask-scan
-make -C verify/vpu slide
-make -C verify/vpu slide XLEN=32 VLEN=512
-make -C verify/vpu owner-formal
-make -C verify/vpu mask-scan XLEN=32 VLEN=512
-make -C verify/vpu csr XLEN=32 VLEN=256 ELEN=64
-make -C verify/vpu vrf VLEN=512 BANK_BITS=128 BANKS=4
+make -C verification/vpu test
+make -C verification/vpu matrix
+make -C verification/vpu top-matrix
+make -C verification/vpu synth
+make -C verification/vpu opt-check
+make -C verification/vpu muldiv-opt-check
+make -C verification/vpu mask-write
+make -C verification/vpu fixed
+make -C verification/vpu move
+make -C verification/vpu move VLEN=512
+make -C verification/vpu mask-scan
+make -C verification/vpu slide
+make -C verification/vpu slide XLEN=32 VLEN=512
+make -C verification/vpu owner-formal
+make -C verification/vpu mask-scan XLEN=32 VLEN=512
+make -C verification/vpu csr XLEN=32 VLEN=256 ELEN=64
+make -C verification/vpu vrf VLEN=512 BANK_BITS=128 BANKS=4
 ```
 
 The Makefile requires Verilator and a host C++ toolchain. It does not load the
 root or simulation Makefile, rewrite `sim/.config`, generate scalar decode, or
-install dependencies. Build and run logs are under `verify/build/vpu/`, separated
+install dependencies. Build and run logs are under `verification/build/vpu/`, separated
 by module and configuration. Assertions are enabled; warnings remain fatal,
 apart from narrowly annotated unused architectural bits and the scoped shared scalar FMA waivers. Pipeline failures are
 propagated through `tee`. The VRF random test uses seed `0x6a09e667`.
@@ -121,13 +121,13 @@ the leaves, owner and top in several parameter configurations, rejects latches a
 unexpected blackboxes/assertion cells, and checks VRF capacity, one write port
 per bank and registered read ports. Source SHA256
 fingerprints and cell/memory summaries are in
-`verify/build/vpu/synth/summary.json`.
+`verification/build/vpu/synth/summary.json`.
 
 ### Independent Spike differential tests
 
 ```sh
-make -C verify/vpu top-matrix DIFF=1 SPIKE_BUILD=/path/to/spike-source-build
-make -C verify/vpu opt-check DIFF=1 SPIKE_BUILD=/path/to/spike-source-build
+make -C verification/vpu top-matrix DIFF=1 SPIKE_BUILD=/path/to/spike-source-build
+make -C verification/vpu opt-check DIFF=1 SPIKE_BUILD=/path/to/spike-source-build
 ```
 
 The optional adapter requires a separately built Spike source/build tree with
@@ -282,7 +282,7 @@ completed prefix's saturation along with restart state.
 
 `fixed_reference.h` computes rounding numerically using floor quotient and
 nonnegative remainder, independently of the RTL's discarded-bit implementation.
-`make -C verify/vpu fixed` checks exhaustive 8-bit input pairs for
+`make -C verification/vpu fixed` checks exhaustive 8-bit input pairs for
 the non-clip operations across all four modes, exhaustive 16-bit clip inputs with
 five boundary shift amounts across all modes, and 16/32/64-bit edge cross-products
 and random cases. It supplies independently calculated full products to test the
@@ -402,10 +402,10 @@ VRF access protocol as other operands. Every active element completes before the
 next element begins, preserving legal same-width overlaps. Future instruction
 chaining must account explicitly for the old-destination dependency.
 
-`make -C verify/vpu muldiv` checks exhaustive 8-bit inputs, wider edge and
+`make -C verification/vpu muldiv` checks exhaustive 8-bit inputs, wider edge and
 random cases, backpressure and reset. `muldiv-opt-check` compares both early-out
 settings with the same input workload and records source fingerprints and
-simulation-cycle counts in `verify/build/vpu/muldiv-optimization.json`.
+simulation-cycle counts in `verification/build/vpu/muldiv-optimization.json`.
 
 The integrated encoded-instruction tests cover vv/vx, all supported SEWs and
 fractional/integer LMUL through m8, extrema and random operands, division by zero,
@@ -607,7 +607,7 @@ and 3, and verifies that successful completion clears VSTART. Full VRF, RAM,
 saved CSR values, trap metadata and Spike results are checked.
 
 ```sh
-make -C verify/vpu top TOP_SUITE=context DIFF=1 SPIKE_BUILD=/path/to/pinned/spike XLEN=64 VLEN=128 ELEN=64 BANK_BITS=64 BANKS=2
+make -C verification/vpu top TOP_SUITE=context DIFF=1 SPIKE_BUILD=/path/to/pinned/spike XLEN=64 VLEN=128 ELEN=64 BANK_BITS=64 BANKS=2
 ```
 
 This tests the standalone architectural sequence. The scalar adapter still
@@ -667,9 +667,9 @@ checks captured metadata throughout completion backpressure. Existing numerical,
 CSR, memory, cancellation and Spike comparisons run through the wrapper.
 
 ```sh
-make -C verify/vpu top CORE_ADAPTER=1 DIFF=1 SPIKE_BUILD=/path/to/pinned/spike XLEN=64 VLEN=128 ELEN=64 BANK_BITS=64 BANKS=2
-make -C verify/vpu top CORE_ADAPTER=1 TOP_SUITE=context DIFF=1 SPIKE_BUILD=/path/to/pinned/spike
-python3 verify/vpu/synth_check.py --leaf top_core --build-dir verify/build/vpu/synth-core-top
+make -C verification/vpu top CORE_ADAPTER=1 DIFF=1 SPIKE_BUILD=/path/to/pinned/spike XLEN=64 VLEN=128 ELEN=64 BANK_BITS=64 BANKS=2
+make -C verification/vpu top CORE_ADAPTER=1 TOP_SUITE=context DIFF=1 SPIKE_BUILD=/path/to/pinned/spike
+python3 verification/vpu/synth_check.py --leaf top_core --build-dir verification/build/vpu/synth-core-top
 ```
 
 The wrapper supplies a concrete core-facing numerical module; it does not
@@ -709,11 +709,11 @@ module and compositional checks do not establish full-vector ISA correctness,
 external-memory drain, real MMU behavior or whole-system liveness.
 
 ```sh
-python3 verify/vpu/check_acceptance.py
-python3 verify/vpu/test_check_acceptance.py
+python3 verification/vpu/check_acceptance.py
+python3 verification/vpu/test_check_acceptance.py
 ```
 
-The acceptance checker audits completed artifacts in `verify/build/vpu/`,
+The acceptance checker audits completed artifacts in `verification/build/vpu/`,
 including source fingerprints, configuration, completion markers and reference
 identity. It writes `acceptance.json`; it does not rerun simulations or proofs.
 A result applies only to the source and configuration recorded in its manifest.

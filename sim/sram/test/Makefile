@@ -18,7 +18,7 @@ check: ## Static cross-file consistency (configs / blackbox / RTL / stub gen)
 rtl-sync: ## Verify synchronous read, output hold, and byte-write behavior
 	@verilator --binary --timing -Wno-fatal --top-module tb_rapt_sram_1rw \
 		-Mdir $(HERE)/_tmp_rtl_sync \
-		$(SRAM)/../../hdl/sram/rapt_sram_1rw.sv \
+		$(SRAM)/../../rtl/sram/rapt_sram_1rw.sv \
 		$(HERE)/fixtures/tb_rapt_sram_1rw.sv
 	@$(HERE)/_tmp_rtl_sync/Vtb_rapt_sram_1rw
 
@@ -26,7 +26,7 @@ macro-fallback: ## Verify wrapper pins and timing with a functional 8x32 macro f
 	@verilator --binary --timing -Wno-fatal -DRAPT_USE_SRAM_MACRO \
 		--top-module tb_rapt_sram_1rw -Mdir $(HERE)/_tmp_macro_fallback \
 		$(HERE)/fixtures/rapt_openram_1rw_8x32_model.sv \
-		$(SRAM)/../../hdl/sram/rapt_sram_1rw.sv \
+		$(SRAM)/../../rtl/sram/rapt_sram_1rw.sv \
 		$(HERE)/fixtures/tb_rapt_sram_1rw.sv
 	@$(HERE)/_tmp_macro_fallback/Vtb_rapt_sram_1rw
 

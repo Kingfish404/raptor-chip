@@ -1,0 +1,36 @@
+[tasks]
+rv32
+rv32_clmul
+rv32_clmulh_basis
+rv32_clmulr
+
+[options]
+mode bmc
+depth 1
+
+[engines]
+rv32: smtbmc
+# Carry-less products are XOR trees: bitwuzla closes them in seconds, z3 did
+# not finish within 14 hours.
+rv32_clmul: smtbmc bitwuzla
+rv32_clmulh_basis: smtbmc bitwuzla
+rv32_clmulr: smtbmc bitwuzla
+
+[script]
+rv32: plugin -i slang
+rv32: read_slang --single-unit formal_ieu_alu.sv rapt_ieu_alu.sv
+rv32_clmul: plugin -i slang
+rv32_clmul: read_slang --single-unit -DFORMAL_ALU_CLMUL formal_ieu_alu.sv rapt_ieu_alu.sv
+rv32_clmulh_basis: plugin -i slang
+rv32_clmulh_basis: read_slang --single-unit -DFORMAL_ALU_CLMUL -DFORMAL_ALU_CLMULH formal_ieu_alu.sv rapt_ieu_alu.sv
+rv32_clmulr: plugin -i slang
+rv32_clmulr: read_slang --single-unit -DFORMAL_ALU_CLMUL -DFORMAL_ALU_CLMULR formal_ieu_alu.sv rapt_ieu_alu.sv
+prep -top formal_ieu_alu
+
+[files]
+formal_ieu_alu.sv
+rapt_ieu_alu.sv ../../rtl/backend/ieu/rapt_ieu_alu.sv
+rapt.svh ../../rtl/include/rapt.svh
+rapt_fp_ops.svh ../../rtl/include/rapt_fp_ops.svh
+rapt_config.svh ../../rtl/configs/formal/rapt_config.svh
+rapt_sva.svh ../../rtl/include/rapt_sva.svh

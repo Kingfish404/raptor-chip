@@ -479,8 +479,8 @@ class SummaryTests(unittest.TestCase):
         self.assertEqual(summary.cell(partial, "CoreMark ROI cycles", ref), "100 [partial]")
 
     def test_source_provenance_is_separate_from_workload_compatibility(self):
-        ref = {"metadata": {"source_sha256": {"hdl/top.sv": "a", "sim/rtl/mem.sv": "m"}}}
-        candidate = {"metadata": {"source_sha256": {"hdl/top.sv": "b", "sim/rtl/mem.sv": "m"}}}
+        ref = {"metadata": {"source_sha256": {"rtl/top.sv": "a", "sim/rtl/mem.sv": "m"}}}
+        candidate = {"metadata": {"source_sha256": {"rtl/top.sv": "b", "sim/rtl/mem.sv": "m"}}}
         self.assertIn("matching simulator sources", summary.provenance_note(candidate, ref))
         candidate["metadata"]["source_sha256"]["sim/rtl/mem.sv"] = "n"
         self.assertIn("sim/rtl/mem.sv", summary.provenance_note(candidate, ref))

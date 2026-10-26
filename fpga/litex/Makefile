@@ -16,7 +16,7 @@ SHELL         := /bin/bash
 LITEX_DIR   := $(abspath .)
 RAPTOR_HOME := $(abspath ../..)
 NSIM_DIR    := $(RAPTOR_HOME)/sim
-RTL_DIR     := $(RAPTOR_HOME)/hdl
+RTL_DIR     := $(RAPTOR_HOME)/rtl
 BUILD_DIR   := $(LITEX_DIR)/build
 VENV_DIR    := $(LITEX_DIR)/.venv
 PYTHON      := $(VENV_DIR)/bin/python3
@@ -272,7 +272,7 @@ _ISOLATED_PACK = $(HOST_PYTHON) $(LITEX_DIR)/scripts/isolated_pack.py --repo "$(
 PACK_SV := $(shell $(_ISOLATED_PACK) --path-only)
 
 NSIM_RTL_DIR := $(RAPTOR_HOME)/sim/rtl
-CHISEL_DIR := $(RTL_DIR)/chisel
+CHISEL_DIR := $(RAPTOR_HOME)/tools/decodegen
 CHISEL_GENERATED_SRCS := $(RTL_DIR)/generated/rapt_idu_decoder.sv \
 	$(RTL_DIR)/generated/rapt_idu_decoder_c.sv
 CHISEL_INPUTS := $(shell find $(CHISEL_DIR)/src $(CHISEL_DIR)/project -type f 2>/dev/null) \
@@ -432,7 +432,7 @@ LINUX_FPGA_PAYLOAD_SIZE = $(shell stat -c%s "$(LINUX_FPGA_PAYLOAD)" 2>/dev/null 
 LINUX_FPGA_OPENSBI_PAYLOAD_SIZE = $(shell stat -c%s "$(LINUX_FPGA_OPENSBI_PAYLOAD)" 2>/dev/null || echo 0)
 LINUX_FPGA_DTB_SIZE = $(shell stat -c%s "$(FW_LINUX_FPGA_DTB)" 2>/dev/null || echo 0)
 RAPT_CACHE_LINE_BYTES := $(word 3,$(shell grep '^`define RAPT_CACHE_LINE_BYTES ' \
-	$(RAPTOR_HOME)/hdl/configs/$(RAPT_CONFIG)/rapt_config.svh))
+	$(RAPTOR_HOME)/rtl/configs/$(RAPT_CONFIG)/rapt_config.svh))
 
 
 FW_LINUX_FPGA_SRC    := $(FW_BASE)/linux-fpga
@@ -790,7 +790,7 @@ fpga-detect: ## Refresh and show connected FPGA count, target info, and board ma
 
 
 memory-map-check:
-	python3 $(RAPTOR_HOME)/verify/scripts/check_memory_map.py
+	python3 $(RAPTOR_HOME)/verification/scripts/check_memory_map.py
 
 ram-profile-check:
 	python3 $(LITEX_DIR)/scripts/check_ram_profile.py --hardware=$(FPGA_PMEM_SIZE) --linux=$(LINUX_FPGA_RAM_SIZE) --xlen=$(LINUX_XLEN)
