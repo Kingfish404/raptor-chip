@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 LITEX = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(LITEX / 'scripts'))
+sys.path.insert(0, str(LITEX.parent / 'common/scripts'))
 import vivado_reports_index as reports
 
 

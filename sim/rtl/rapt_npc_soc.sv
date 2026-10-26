@@ -8,7 +8,8 @@
 // verilator lint_off UNUSEDSIGNAL
 module raptSoC #(
     parameter int XLEN = `RAPT_XLEN,
-    parameter bit L1dWriteBack = `RAPT_L1D_WRITEBACK
+    parameter bit L1dWriteBack = `RAPT_L1D_WRITEBACK,
+    parameter int ReadOutstanding = 8
 ) (
     input  clock,
     output logic writeback_error_o,
@@ -239,7 +240,9 @@ module raptSoC #(
 
       .reset(reset)
   );
-  rapt_npc_soc perip (
+  rapt_npc_soc #(
+      .ReadOutstanding(ReadOutstanding)
+  ) perip (
       .clock(clock),
       .arburst(auto_master_out_arburst),
       .arsize(auto_master_out_arsize),
@@ -276,7 +279,8 @@ endmodule
 
 module rapt_npc_soc #(
     parameter int XLEN = `RAPT_XLEN,
-    parameter bit SerializeWrites = 1'b0
+    parameter bit SerializeWrites = 1'b0,
+    parameter int ReadOutstanding = 8
 ) (
     input clock,
 
@@ -316,28 +320,25 @@ module rapt_npc_soc #(
 
     input reset
 );
-  // AXI4 response encoding
-  localparam logic [1:0] AXIRespOKAY   = 2'b00;
+  localparam int ByteLanes = XLEN / 8;
+  localparam int MaxSize = $clog2(ByteLanes);
+  localparam int ReadIndexWidth = ReadOutstanding > 1 ? $clog2(ReadOutstanding) : 1;
+  localparam int ReadCountWidth = $clog2(ReadOutstanding + 1);
+  localparam int MaxWriteOutstanding = 64;
+  localparam int BIndexWidth = $clog2(MaxWriteOutstanding);
+  localparam logic [1:0] AXIRespOKAY = 2'b00;
+  localparam logic [1:0] AXIRespSlverr = 2'b10;
   localparam logic [1:0] AXIRespDecerr = 2'b11;
-  // AXI4 burst type encoding (FIXED/INCR exercised; WRAP folded into INCR by
-  // burst_next_addr below — no current master uses WRAP).
   localparam logic [1:0] AXIBurstFixed = 2'b00;
-
+  localparam logic [1:0] AXIBurstIncr = 2'b01;
+  localparam logic [1:0] AXIBurstWrap = 2'b10;
+  localparam logic [XLEN-1:0] AlignMask = ~XLEN'(ByteLanes - 1);
 `ifdef RAPT_LARGE_PMEM
   localparam bit LargePmem = 1'b1;
 `else
   localparam bit LargePmem = 1'b0;
 `endif
 
-  localparam logic [XLEN-1:0] AlignMask = ~XLEN'(int'(XLEN / 8 - 1));
-
-  // -------------------------------------------------------------------------
-  // Address range validation: check if address falls within any known region.
-  // In RV64 mode with `-mcmodel=medany`, code linked at 0x80000000 is loaded
-  // so that `lui`-materialised addresses are sign-extended (e.g. a5 = 0xffffffff80000000).
-  // The physical memory map is 32-bit, so compare the low 32 bits only and
-  // require the upper bits to be either all-zero or all-one (canonical sign-extension).
-  // -------------------------------------------------------------------------
   function automatic logic addr_valid(input logic [XLEN-1:0] addr);
     logic [31:0] a = addr[31:0];
     logic        upper_ok;
@@ -353,20 +354,12 @@ module rapt_npc_soc #(
     || (a >= 32'h0f000000 && a < 32'h0f002000)  // SRAM
     || (a >= 32'h10000000 && a < 32'h10012000)  // serial / peripherals
     || (a >= 32'h20000000 && a < 32'h20010000)  // MROM
-    || (a >= 32'h30000000 && a < 32'h40000000)  // FLASH
+    || (a >= 32'h30000000 && a < 32'h40000000)  // FLASH / SDHCI PCI ECAM
+    || (a >= 32'h40000000 && a < 32'h40000100)  // QEMU SDHCI BAR
     || (a >= 32'h80000000 && (LargePmem || a < 32'h90000000))  // PMEM
     || (!LargePmem && a >= 32'ha0000000 && a < 32'ha2000000)  // legacy SDRAM
     || (a >= 32'h11000000 && a < 32'h12000000)  // LiteX CSR banks
     || (a >= 32'h18000000 && a < 32'h19000000));  // LiteEth buffers
-  endfunction
-
-  // INCR/FIXED address step. WRAP not exercised by current masters; emulated as INCR.
-  function automatic logic [XLEN-1:0] burst_next_addr(input logic [XLEN-1:0] cur,
-                                                      input logic [2:0] sz, input logic [1:0] bt);
-    logic [XLEN-1:0] step;
-    step = (XLEN'(1) << sz);
-    if (bt == AXIBurstFixed) return cur;
-    return cur + step;
   endfunction
 
   function automatic logic memory_addr(input logic [XLEN-1:0] addr);
@@ -375,112 +368,206 @@ module rapt_npc_soc #(
             || (addr[31:0] >= 32'ha0000000 && addr[31:0] < 32'ha2000000));
   endfunction
 
-  function automatic logic [XLEN-1:0] burst_last_addr(input logic [XLEN-1:0] addr,
-                                                      input logic [7:0] len, input logic [2:0] size,
-                                                      input logic [1:0] burst);
-    logic [XLEN:0] last_addr;
-    last_addr = {1'b0, addr} + ((XLEN+1)'(burst == AXIBurstFixed ? 0 : len) << size)
-        + ((XLEN+1)'(1) << size) - 1;
-    return last_addr[XLEN] ? '1 : last_addr[XLEN-1:0];
+  function automatic logic [XLEN-1:0] burst_first_addr(
+      input logic [XLEN-1:0] addr, input logic [7:0] len, input logic [2:0] size,
+      input logic [1:0] burst);
+    logic [XLEN-1:0] span;
+    span = (XLEN'(len) + 1) << size;
+    return burst == AXIBurstWrap ? addr & ~(span - 1) : addr;
+  endfunction
+
+  function automatic logic [XLEN:0] burst_end_addr(input logic [XLEN-1:0] addr,
+                                                   input logic [7:0] len, input logic [2:0] size,
+                                                   input logic [1:0] burst);
+    logic [XLEN:0] step, base;
+    step = (XLEN+1)'(1) << size;
+    base = {1'b0, burst_first_addr(addr, len, size, burst)};
+    if (burst == AXIBurstWrap) return base + (((XLEN + 1)'(len) + 1) << size) - 1;
+    return ({1'b0, addr} & ~(step - 1))
+        + ((XLEN+1)'(burst == AXIBurstFixed ? 0 : len) << size) + step - 1;
+  endfunction
+
+  function automatic logic [1:0] burst_response(input logic [XLEN-1:0] addr, input logic [7:0] len,
+                                                input logic [2:0] size, input logic [1:0] burst);
+    logic [XLEN:0] last;
+    logic [XLEN-1:0] first;
+    if (size > 3'(MaxSize) || burst == 2'b11) return AXIRespSlverr;
+    if (burst == AXIBurstFixed && len > 15) return AXIRespSlverr;
+    if (burst == AXIBurstWrap && (!(len inside {1, 3, 7, 15})
+        || (addr & ((XLEN'(1) << size) - 1)) != 0))
+      return AXIRespSlverr;
+    first = burst_first_addr(addr, len, size, burst);
+    last = burst_end_addr(addr, len, size, burst);
+    if (last[XLEN] || first[XLEN-1:12] != last[XLEN-1:12]) return AXIRespSlverr;
+    if (!addr_valid(first) || !addr_valid(last[XLEN-1:0])) return AXIRespDecerr;
+    return AXIRespOKAY;
+  endfunction
+
+  typedef struct packed {
+    logic [XLEN-1:0] addr, first_addr, last_addr, wrap_mask;
+    logic [7:0] len;
+    logic [3:0] id;
+    logic [2:0] size;
+    logic [1:0] burst, resp;
+    logic memory_access;
+  } request_t;
+
+  function automatic request_t make_request(input logic [XLEN-1:0] addr, input logic [7:0] len,
+                                            input logic [3:0] id, input logic [2:0] size,
+                                            input logic [1:0] burst);
+    request_t req;
+    req.addr = addr;
+    req.first_addr = burst_first_addr(addr, len, size, burst);
+    req.last_addr = XLEN'(burst_end_addr(addr, len, size, burst));
+    req.wrap_mask = ((XLEN'(len) + 1) << size) - 1;
+    req.len = len;
+    req.id = id;
+    req.size = size;
+    req.burst = burst;
+    req.resp = burst_response(addr, len, size, burst);
+    req.memory_access = memory_addr(addr);
+    return req;
+  endfunction
+
+  function automatic logic [XLEN-1:0] burst_next_addr(input request_t req);
+    logic [XLEN-1:0] step, next_addr;
+    step = XLEN'(1) << req.size;
+    next_addr = (req.addr & ~(step - 1)) + step;
+    if (req.burst == AXIBurstFixed) return req.addr;
+    if (req.burst == AXIBurstWrap) return (req.addr & ~req.wrap_mask) | (next_addr & req.wrap_mask);
+    return next_addr;
+  endfunction
+
+  function automatic logic [ByteLanes-1:0] write_lane_mask(input request_t req);
+    logic [ByteLanes-1:0] mask;
+    int first, limit;
+    mask = '0;
+    if (req.size > 3'(MaxSize)) return mask;
+    first = int'(req.addr & XLEN'(ByteLanes - 1));
+    limit = (first & ~((1 << req.size) - 1)) + (1 << req.size);
+    for (int i = 0; i < ByteLanes; i++) if (i >= first && i < limit) mask[i] = 1'b1;
+    return mask;
   endfunction
 
   function automatic logic overlaps(input logic [XLEN-1:0] first_a, last_a, first_b, last_b);
-    // The host model aliases canonical RV64 addresses onto the 32-bit map.
-    // Conservatively serialize any burst that wraps that physical map.
+    // The host map aliases canonical RV64 addresses onto the low 32 bits.
     return first_a[31:0] > last_a[31:0] || first_b[31:0] > last_b[31:0]
         || (first_a[31:0] <= last_b[31:0] && first_b[31:0] <= last_a[31:0]);
   endfunction
 
-  // -------------------------------------------------------------------------
-  // Read pipeline (skid buffer): allows accepting a new AR in the same cycle
-  // that the current R beat is being consumed. Average throughput ≈ 1
-  // transaction / cycle instead of the previous 2 cycles/transaction.
-  // For multi-beat bursts (arlen > 0), beats stream out one per cycle while
-  // rready is held; new ARs queue once the burst's last beat handshakes.
-  // -------------------------------------------------------------------------
-  logic            r_busy;  // a beat is currently presented on R channel
-  logic [     3:0] r_id_q;
+  function automatic logic [31:0] random_delay();
+    logic [31:0] delay;
+    `RAPT_DPI_C_MEM_RANDOM_DELAY(delay);
+    return delay;
+  endfunction
+
+  // Queue payloads are meaningful only when their corresponding valid bit is
+  // set. Independent IDs can interleave; same-ID dependencies clear on RLAST.
+  request_t read_q[ReadOutstanding];
+  logic [ReadOutstanding-1:0] read_valid_q, read_last_issued_q;
+  logic [ReadOutstanding-1:0] read_older_q[ReadOutstanding];
+  longint unsigned read_ready_cycle_q[ReadOutstanding];
+  logic [ReadCountWidth-1:0] read_count_q;
+  logic [ReadIndexWidth-1:0] read_rr_q, r_slot_q, read_free_slot;
+  logic read_has_space, read_hazard, write_hazard;
+  logic [XLEN-1:0] ar_first_addr, ar_last_addr, aw_first_addr, aw_last_addr;
+  logic r_busy, r_last_q;
+  logic [3:0] r_id_q;
   logic [XLEN-1:0] r_data_q;
-  logic [     1:0] r_resp_q;
-  logic            r_last_q;
-  logic [     7:0] r_beats_left;  // beats remaining AFTER current (counts down)
-  logic [XLEN-1:0] r_next_addr;  // address for the NEXT beat
-  logic [     2:0] r_size_q;
-  logic [     1:0] r_burst_q;
-  logic [    31:0] r_delay_q;
-  logic [XLEN-1:0] r_first_addr_q, r_last_addr_q;
-  logic r_memory_q;
+  logic [1:0] r_resp_q;
+  logic r_pop, read_release, accept_ar, accept_aw;
+  logic [ReadOutstanding-1:0] read_release_mask;
 
-  // -------------------------------------------------------------------------
-  // AW captured into one holding register; W beats stream into backing memory.
-  // Completed writes enter an ordered B queue. Each response becomes ready
-  // independently, so write latency overlaps when multiple slots are enabled.
-  // One slot preserves the original AW lookahead and write-response timing.
-  // -------------------------------------------------------------------------
-  logic            aw_busy;  // AW captured, W stream in progress
-  logic [     3:0] aw_id_q;
-  logic [XLEN-1:0] aw_addr_q;  // current beat address
-  logic [     2:0] aw_size_q;
-  logic [     1:0] aw_burst_q;
-  logic [     7:0] aw_beats_left;
-  logic [     1:0] aw_resp_acc;  // accumulated B response (sticky DECERR)
-  logic [XLEN-1:0] aw_first_addr_q, aw_last_addr_q;
-  logic aw_memory_q;
+  request_t aw_q;
+  logic aw_busy;
+  logic [31:0] w_delay_q;
+  logic w_pending;
+  logic [XLEN-1:0] w_data_q;
+  logic [ByteLanes-1:0] w_strb_q;
+  logic w_last_q;
+  logic w_accept, write_space, old_write_ready, old_write_finish;
 
-  // Keep this bound in sync with --mem-write-outstanding in monitor.cc.
-  localparam int MaxWriteOutstanding = 64;
-  localparam int BIndexWidth = $clog2(MaxWriteOutstanding);
-  logic [3:0] b_id_q [MaxWriteOutstanding];
-  logic [1:0] b_resp_q [MaxWriteOutstanding];
-  longint unsigned b_ready_cycle_q [MaxWriteOutstanding];
-  longint unsigned cycle_q;
-  logic [XLEN-1:0] b_first_addr_q [MaxWriteOutstanding];
-  logic [XLEN-1:0] b_last_addr_q [MaxWriteOutstanding];
-  logic b_memory_q [MaxWriteOutstanding];
+  logic [3:0] b_id_q[MaxWriteOutstanding];
+  logic [1:0] b_resp_q[MaxWriteOutstanding];
+  logic [XLEN-1:0] b_first_addr_q[MaxWriteOutstanding], b_last_addr_q[MaxWriteOutstanding];
+  logic b_memory_q[MaxWriteOutstanding];
+  longint unsigned b_ready_cycle_q[MaxWriteOutstanding];
   logic [BIndexWidth-1:0] b_head_q, b_tail_q;
   logic [BIndexWidth:0] b_count_q;
+  logic b_pop, serialize_writes;
   int unsigned write_outstanding_q;
-  logic [31:0] w_delay_q;
-  logic b_push, b_pop;
-  assign b_push = wvalid && out_wready && wlast;
-  assign b_pop = out_bvalid && bready;
+  logic [31:0] read_latency_q, write_latency_q;
+  longint unsigned cycle_q;
 
-  // Combinational AR-handshake helpers (skid: free when current beat exits)
-  logic serialize_writes;
-`ifndef SYNTHESIS
-  import "DPI-C" function int unsigned npc_mem_serialize_writes();
-  // Options are parsed before reset. Sample only at reset, not on every
-  // combinational evaluation of the bus handshake.
-  always_ff @(posedge clock) begin
-    if (reset) serialize_writes <= SerializeWrites || (npc_mem_serialize_writes() != 0);
-  end
-`else
-  assign serialize_writes = SerializeWrites;
-`endif
-  logic r_slot_free, aw_slot_free;
-  logic read_hazard, write_hazard;
-  logic [XLEN-1:0] ar_last_addr, aw_last_addr;
-  assign ar_last_addr = burst_last_addr(araddr, arlen, arsize, arburst);
-  assign aw_last_addr = burst_last_addr(awaddr, awlen, awsize, awburst);
+  localparam logic [19:0] AXITimeout = 20'hf_ffff;
+  logic [19:0] r_timeout_cnt, w_timeout_cnt;
+
+  assign out_rvalid = !reset && r_busy;
+  assign out_rid = r_id_q;
+  assign out_rdata = r_data_q;
+  assign out_rresp = r_resp_q;
+  assign out_rlast = r_last_q;
+  assign r_pop = out_rvalid && rready;
+  assign read_release = r_pop && r_last_q;
+  assign read_release_mask = read_release ? ReadOutstanding'(1) << r_slot_q : '0;
+
+  assign out_bvalid = !reset && b_count_q != 0 && cycle_q >= b_ready_cycle_q[b_head_q];
+  assign out_bid = b_id_q[b_head_q];
+  assign out_bresp = b_resp_q[b_head_q];
+  assign b_pop = out_bvalid && bready;
+  assign write_space = int'(b_count_q) < write_outstanding_q || b_pop;
+  assign old_write_ready = aw_busy && w_delay_q == 0 && write_space;
+  assign old_write_finish = old_write_ready && (w_pending || wvalid)
+      && ((w_pending ? w_last_q : wlast) || aw_q.len == 0);
+  // One elastic W beat permits W-before-AW without applying an unidentified
+  // device write. A consumed buffered beat may be replaced on the same edge.
+  assign out_wready = !reset && (!w_pending || old_write_ready);
+  assign w_accept = wvalid && out_wready;
+
   always_comb begin
+    ar_first_addr = burst_first_addr(araddr, arlen, arsize, arburst);
+    ar_last_addr = XLEN'(burst_end_addr(araddr, arlen, arsize, arburst));
+    aw_first_addr = burst_first_addr(awaddr, awlen, awsize, awburst);
+    aw_last_addr = XLEN'(burst_end_addr(awaddr, awlen, awsize, awburst));
+    read_has_space = 1'b0;
+    read_free_slot = '0;
+    for (int i = 0; i < ReadOutstanding; i++) begin
+      if (!read_has_space && (!read_valid_q[i] || read_release_mask[i])) begin
+        read_has_space = 1'b1;
+        read_free_slot = ReadIndexWidth'(i);
+      end
+    end
     read_hazard = 1'b0;
     write_hazard = 1'b0;
-    // The default retains the legacy one-response model. Pipelined operation
-    // mirrors the native bus: overlapping accesses wait for actual completion;
-    // local devices serialize against memory writes. Independent RAM reads run.
-    if (write_outstanding_q > 1) begin
-      if (aw_busy)
-        read_hazard = !memory_addr(
-          araddr
-        ) || !aw_memory_q || overlaps(
-          araddr, ar_last_addr, aw_first_addr_q, aw_last_addr_q
+    // Devices are barriers. RAM hazards cover the complete burst footprint.
+    // Scan only on offered requests to keep idle simulator evaluation cheap.
+    if (arvalid || awvalid) begin
+      for (int i = 0; i < ReadOutstanding; i++) begin
+        if (read_valid_q[i] && !read_release_mask[i]) begin
+          read_hazard |= !memory_addr(araddr) || !read_q[i].memory_access;
+          write_hazard |= !memory_addr(
+              awaddr
+          ) || !read_q[i].memory_access || overlaps(
+              aw_first_addr, aw_last_addr, read_q[i].first_addr, read_q[i].last_addr
+          );
+        end
+      end
+      if (aw_busy) begin
+        read_hazard |= !memory_addr(
+            araddr
+        ) || !aw_q.memory_access || overlaps(
+            ar_first_addr, ar_last_addr, aw_q.first_addr, aw_q.last_addr
         );
-      for (int i = 0; i < MaxWriteOutstanding; i++) begin
-        if (i < int'(b_count_q)) begin
+        // Address lookahead must not admit a device boundary before the
+        // finishing write has also retired its B response.
+        write_hazard |= !memory_addr(awaddr) || !aw_q.memory_access;
+      end
+      for (int i = 0; i < int'(b_count_q); i++) begin
+        if (!(i == 0 && b_pop)) begin
           read_hazard |= !memory_addr(
               araddr
           ) || !b_memory_q[BIndexWidth'(b_head_q+i)] || overlaps(
-              araddr,
+              ar_first_addr,
               ar_last_addr,
               b_first_addr_q[BIndexWidth'(b_head_q+i)],
               b_last_addr_q[BIndexWidth'(b_head_q+i)]
@@ -488,265 +575,226 @@ module rapt_npc_soc #(
           write_hazard |= !memory_addr(awaddr) || !b_memory_q[BIndexWidth'(b_head_q+i)];
         end
       end
-      if (r_busy)
-        write_hazard |= !memory_addr(
-            awaddr
-        ) || !r_memory_q || overlaps(
-            awaddr, aw_last_addr, r_first_addr_q, r_last_addr_q
-        );
-      // Match native-bus write priority for simultaneous conflicting requests.
+      // Give a concurrent conflicting write priority, matching the core bus.
       if (awvalid)
         read_hazard |= !memory_addr(
             araddr
         ) || !memory_addr(
             awaddr
         ) || overlaps(
-            araddr, ar_last_addr, awaddr, aw_last_addr
+            ar_first_addr, ar_last_addr, aw_first_addr, aw_last_addr
         );
     end
   end
-  assign r_slot_free = (!r_busy || (out_rvalid && rready && r_last_q)) && !read_hazard;
-  assign aw_slot_free = !aw_busy && !write_hazard
+  assign out_arready = !reset && read_has_space && !read_hazard;
+  assign out_awready = !reset && !write_hazard
+      && (!aw_busy || (!serialize_writes && old_write_finish))
       && (!serialize_writes || b_count_q == 0)
-      && (write_outstanding_q == 1 || int'(b_count_q) < write_outstanding_q);
+      && (write_outstanding_q == 1 || write_space);
+  assign accept_ar = arvalid && out_arready;
+  assign accept_aw = awvalid && out_awready;
 
-  assign out_arready  = r_slot_free;
-  assign out_rvalid   = r_busy && (r_delay_q == 0);
-  assign out_rdata    = r_data_q;
-  assign out_rid      = r_id_q;
-  assign out_rresp    = r_resp_q;
-  assign out_rlast    = r_last_q;
+`ifndef SYNTHESIS
+  import "DPI-C" function int unsigned npc_mem_serialize_writes();
+`endif
+  initial begin
+    if (ReadOutstanding < 1 || ReadOutstanding > 16)
+      $fatal(1, "NPC_SOC: read capacity must be between 1 and 16");
+  end
 
-  assign out_awready  = aw_slot_free;
-  // Reserve B space before accepting any W beat, without depending on wlast
-  // or bready. This retains the one-slot model's backpressure behavior and
-  // avoids combinational loops through the master interface.
-  assign out_wready = aw_busy && (int'(b_count_q) < write_outstanding_q) && (w_delay_q == 0);
-  assign out_bvalid = (b_count_q != 0) && (cycle_q >= b_ready_cycle_q[b_head_q]);
-  assign out_bid = b_id_q[b_head_q];
-  assign out_bresp = b_resp_q[b_head_q];
-
-  // -------------------------------------------------------------------------
-  // Timeout watchdog: catch logic bugs that stall a channel indefinitely.
-  // -------------------------------------------------------------------------
-  localparam logic [19:0] AXITimeout = 20'hf_ffff;  // ~1M cycles
-  logic [19:0] r_timeout_cnt;
-  logic [19:0] w_timeout_cnt;
-
-  // Per-cycle "next-state" helpers for the read pipeline (combinational).
-  // These let us simultaneously consume the current beat AND accept a new AR.
-  logic accept_ar;
-  assign accept_ar = arvalid && r_slot_free;
-
-  function automatic logic [31:0] random_delay();
-    logic [31:0] delay;
-    `RAPT_DPI_C_MEM_RANDOM_DELAY(delay);
-    return delay;
-  endfunction
-  function automatic logic [31:0] read_latency();
-    logic [31:0] latency;
-    `RAPT_DPI_C_MEM_READ_LATENCY(latency);
-    return latency;
-  endfunction
-  function automatic logic [31:0] write_latency();
-    logic [31:0] latency;
-    `RAPT_DPI_C_MEM_WRITE_LATENCY(latency);
-    return latency;
-  endfunction
-
-  function automatic int unsigned write_outstanding();
-    int unsigned count;
-    `RAPT_DPI_C_MEM_WRITE_OUTSTANDING(count);
-    return count;
-  endfunction
-
-  // ==========================================================================
-  // Sequential update — single always_ff drives both channels.
-  // ==========================================================================
   always_ff @(posedge clock) begin
     if (reset) begin
-      r_busy        <= 1'b0;
-      r_id_q        <= '0;
-      r_data_q      <= '0;
-      r_resp_q      <= AXIRespOKAY;
-      r_last_q      <= 1'b0;
-      r_beats_left  <= '0;
-      r_next_addr   <= '0;
-      r_size_q      <= '0;
-      r_burst_q     <= '0;
-      r_delay_q     <= '0;
-      r_first_addr_q <= '0;
-      r_last_addr_q <= '0;
-      r_memory_q <= 1'b0;
-
-      aw_busy       <= 1'b0;
-      aw_id_q       <= '0;
-      aw_addr_q     <= '0;
-      aw_size_q     <= '0;
-      aw_burst_q    <= '0;
-      aw_beats_left <= '0;
-      aw_resp_acc   <= AXIRespOKAY;
-      aw_first_addr_q <= '0;
-      aw_last_addr_q <= '0;
-      aw_memory_q <= 1'b0;
-
-      b_id_q        <= '{default: '0};
-      b_resp_q      <= '{default: AXIRespOKAY};
-      b_ready_cycle_q <= '{default: '0};
+      automatic int unsigned read_latency, write_latency, write_capacity;
+      `RAPT_DPI_C_MEM_READ_LATENCY(read_latency);
+      `RAPT_DPI_C_MEM_WRITE_LATENCY(write_latency);
+      `RAPT_DPI_C_MEM_WRITE_OUTSTANDING(write_capacity);
+      if (write_capacity < 1 || write_capacity > MaxWriteOutstanding)
+        $fatal(1, "NPC_SOC: invalid write response capacity");
+      read_q <= '{default: '0};
+      read_valid_q <= '0;
+      read_last_issued_q <= '0;
+      read_older_q <= '{default: '0};
+      read_ready_cycle_q <= '{default: '0};
+      read_count_q <= '0;
+      read_rr_q <= '0;
+      r_slot_q <= '0;
+      r_busy <= 1'b0;
+      r_id_q <= '0;
+      r_data_q <= '0;
+      r_resp_q <= AXIRespOKAY;
+      r_last_q <= 1'b0;
+      aw_q <= '0;
+      aw_busy <= 1'b0;
+      w_delay_q <= '0;
+      w_pending <= 1'b0;
+      w_data_q <= '0;
+      w_strb_q <= '0;
+      w_last_q <= 1'b0;
+      b_id_q <= '{default: '0};
+      b_resp_q <= '{default: AXIRespOKAY};
       b_first_addr_q <= '{default: '0};
       b_last_addr_q <= '{default: '0};
       b_memory_q <= '{default: '0};
-      cycle_q       <= '0;
-      b_head_q      <= '0;
-      b_tail_q      <= '0;
-      b_count_q     <= '0;
-      write_outstanding_q <= write_outstanding();
-      w_delay_q     <= '0;
-      if (write_outstanding() < 1 || write_outstanding() > MaxWriteOutstanding)
-        $fatal(
-            1, "NPC_SOC: write outstanding limit must be between 1 and %0d", MaxWriteOutstanding
-        );
-
+      b_ready_cycle_q <= '{default: '0};
+      b_head_q <= '0;
+      b_tail_q <= '0;
+      b_count_q <= '0;
+      cycle_q <= '0;
+      read_latency_q <= read_latency;
+      write_latency_q <= write_latency;
+      write_outstanding_q <= write_capacity;
+`ifndef SYNTHESIS
+      serialize_writes <= SerializeWrites || npc_mem_serialize_writes() != 0;
+`else
+      serialize_writes <= SerializeWrites;
+`endif
       r_timeout_cnt <= '0;
       w_timeout_cnt <= '0;
     end else begin
+      automatic request_t incoming = '0;
+      automatic logic [ReadOutstanding-1:0] incoming_older = '0;
+      automatic logic [31:0] incoming_delay = 0;
+      automatic logic [31:0] next_read_delay = 0;
+      automatic logic push_b = 1'b0;
       cycle_q <= cycle_q + 1;
-      // -------------------- READ CHANNEL --------------------
-      // (1) Consume current beat if handshake fires.
-      if (r_delay_q != 0) begin
-        r_delay_q <= r_delay_q - 1;
-      end
-      if (out_rvalid && rready) begin
-        if (r_last_q) begin
-          // Burst complete; slot becomes free this cycle.
-          r_busy <= 1'b0;
-        end else begin
-          // Advance to next beat in burst (same cycle issuance of DPI read).
-          automatic logic [XLEN-1:0] na = r_next_addr;
-          automatic logic [XLEN-1:0] tmp = '0;
-          if (addr_valid(na)) begin
-            `RAPT_DPI_C_PMEM_READ(na, {5'b0, r_size_q}, tmp);
-            r_data_q <= tmp;
-            r_resp_q <= AXIRespOKAY;
-          end else begin
-            r_data_q <= '0;
-            r_resp_q <= AXIRespDecerr;
-          end
-          r_next_addr  <= burst_next_addr(na, r_size_q, r_burst_q);
-          r_beats_left <= r_beats_left - 8'd1;
-          r_last_q     <= (r_beats_left == 8'd1);
-          r_delay_q    <= random_delay();
-        end
-      end
 
-      // (2) Accept new AR if slot is free. Note: when r_last_q + rready fires,
-      //     r_slot_free is high and we can overwrite r_busy in the SAME cycle.
+      if (r_pop && !r_last_q) begin
+        next_read_delay = random_delay();
+        read_ready_cycle_q[r_slot_q] <= cycle_q + 64'(next_read_delay);
+      end
+      if (read_release) begin
+        read_valid_q[r_slot_q] <= 1'b0;
+        read_last_issued_q[r_slot_q] <= 1'b0;
+        for (int i = 0; i < ReadOutstanding; i++) read_older_q[i][r_slot_q] <= 1'b0;
+      end
       if (accept_ar) begin
-        automatic logic [XLEN-1:0] tmp = '0;
-        automatic logic v = addr_valid(araddr);
-        if (v) begin
-          `RAPT_DPI_C_PMEM_READ(araddr, {5'b0, arsize}, tmp);
-        end else begin
-          $display("NPC_SOC: AXI read decode error addr=%0h, arid=%0d", araddr, arid);
-        end
-        r_first_addr_q <= araddr;
-        r_last_addr_q <= ar_last_addr;
-        r_memory_q <= memory_addr(araddr);
-        r_busy       <= 1'b1;
-        r_id_q       <= arid;
-        r_data_q     <= tmp;
-        // Speculative consumers own cancellation; the target must report an
-        // actual decode error rather than turn an invalid read into data.
-        r_resp_q     <= v ? AXIRespOKAY : AXIRespDecerr;
-        r_size_q     <= arsize;
-        r_burst_q    <= arburst;
-        r_beats_left <= arlen;  // beats remaining after first
-        r_last_q     <= (arlen == 8'd0);
-        r_next_addr  <= burst_next_addr(araddr, arsize, arburst);
-        r_delay_q    <= random_delay() + read_latency();
+        incoming = make_request(araddr, arlen, arid, arsize, arburst);
+        incoming_delay = read_latency_q + random_delay();
+        for (int i = 0; i < ReadOutstanding; i++)
+        incoming_older[i] = read_valid_q[i] && !read_release_mask[i] && read_q[i].id == arid;
+        read_q[read_free_slot] <= incoming;
+        read_valid_q[read_free_slot] <= 1'b1;
+        read_last_issued_q[read_free_slot] <= 1'b0;
+        read_older_q[read_free_slot] <= incoming_older;
+        read_ready_cycle_q[read_free_slot] <= cycle_q + 64'(incoming_delay);
       end
+      case ({
+        accept_ar, read_release
+      })
+        2'b10: read_count_q <= read_count_q + 1'b1;
+        2'b01: read_count_q <= read_count_q - 1'b1;
+        default: ;
+      endcase
 
-      // -------------------- WRITE CHANNEL --------------------
-      if (w_delay_q != 0) begin
-        w_delay_q <= w_delay_q - 1;
-      end
-      // (1) Accept new AW if slot is free.
-      if (awvalid && aw_slot_free) begin
-        aw_first_addr_q <= awaddr;
-        aw_last_addr_q <= aw_last_addr;
-        aw_memory_q <= memory_addr(awaddr);
-        aw_busy       <= 1'b1;
-        aw_id_q       <= awid;
-        aw_addr_q     <= awaddr;
-        aw_size_q     <= awsize;
-        aw_burst_q    <= awburst;
-        aw_beats_left <= awlen;  // beats after first
-        aw_resp_acc   <= addr_valid(awaddr) ? AXIRespOKAY : AXIRespDecerr;
-        w_delay_q     <= random_delay();
-        if (!addr_valid(awaddr)) begin
-          $display("NPC_SOC: AXI write decode error addr=%0h, awid=%0d", awaddr, awid);
-        end
-      end
-
-      // (2) Consume W beat, with response capacity guaranteed by out_wready.
-      if (wvalid && out_wready) begin
-        // Deliver one accepted AXI beat with its complete byte enables.
-        // Device models must see a register command once, after all its
-        // selected bytes are available; RAM applies the same byte mask.
-        if (aw_resp_acc == AXIRespOKAY)
-          `RAPT_DPI_C_PMEM_WRITE(aw_addr_q & AlignMask, wdata, 8'(wstrb));
-        if (wlast) begin
-          b_first_addr_q[b_tail_q] <= aw_first_addr_q;
-          b_last_addr_q[b_tail_q] <= aw_last_addr_q;
-          b_memory_q[b_tail_q] <= aw_memory_q;
-          b_id_q[b_tail_q] <= aw_id_q;
-          b_resp_q[b_tail_q] <= aw_resp_acc;
-          // Timestamp rather than a serialized countdown: younger writes
-          // age even while an older B is delayed or backpressured.
-          b_ready_cycle_q[b_tail_q] <= cycle_q + 64'(random_delay()) + 64'(write_latency()) + 1;
-          b_tail_q <= b_tail_q + 1'b1;
-          aw_busy <= 1'b0;
-        end else begin
-          aw_addr_q <= burst_next_addr(aw_addr_q, aw_size_q, aw_burst_q);
-          aw_beats_left <= aw_beats_left - 8'd1;
-          w_delay_q <= random_delay();
+      // The single output register owns a beat through all R backpressure.
+      // A new zero-latency AR may feed that register at its acceptance edge:
+      // no extra queue cycle, and never a response before the AR handshake.
+      if ((read_valid_q != '0 || accept_ar) && (!r_busy || r_pop)) begin
+        automatic logic found = 1'b0;
+        r_busy <= 1'b0;
+        for (int offset = 0; offset < ReadOutstanding; offset++) begin
+          automatic int index = int'(read_rr_q) + offset;
+          automatic logic eligible;
+          if (index >= ReadOutstanding) index -= ReadOutstanding;
+          eligible = read_valid_q[index] && !read_last_issued_q[index]
+              && (read_older_q[index] & ~read_release_mask) == '0
+              && cycle_q >= read_ready_cycle_q[index];
+          if (r_pop && !r_last_q && index == int'(r_slot_q)) eligible &= next_read_delay == 0;
+          if (accept_ar && index == int'(read_free_slot)) begin
+            eligible = incoming_delay == 0 && incoming_older == '0;
+          end
+          if (!found && eligible) begin
+            automatic request_t selected = accept_ar && index == int'(read_free_slot)
+                ? incoming : read_q[index];
+            automatic logic [XLEN-1:0] data = '0;
+            if (selected.resp == AXIRespOKAY)
+              `RAPT_DPI_C_PMEM_READ(selected.addr, {5'b0, selected.size}, data);
+            r_busy <= 1'b1;
+            r_id_q <= selected.id;
+            r_data_q <= data;
+            r_resp_q <= selected.resp;
+            r_last_q <= selected.len == 0;
+            r_slot_q <= ReadIndexWidth'(index);
+            read_q[index].addr <= burst_next_addr(selected);
+            read_q[index].len <= selected.len == 0 ? 0 : selected.len - 1'b1;
+            read_last_issued_q[index] <= selected.len == 0;
+            read_rr_q <= index == ReadOutstanding - 1 ? '0 : ReadIndexWidth'(index + 1);
+            found = 1'b1;
+          end
         end
       end
 
-      // (3) Drain B on handshake.
+      if (w_delay_q != 0) w_delay_q <= w_delay_q - 1'b1;
+      if (w_accept) begin
+        w_data_q <= wdata;
+        w_strb_q <= wstrb;
+        w_last_q <= wlast;
+        w_pending <= 1'b1;
+      end
+      if (aw_busy || accept_aw) begin
+        automatic request_t current = aw_q;
+        automatic logic [31:0] delay = w_delay_q;
+        if (accept_aw) begin
+          automatic request_t next_aw = make_request(awaddr, awlen, awid, awsize, awburst);
+          automatic logic [31:0] next_delay = random_delay();
+          aw_q <= next_aw;
+          aw_busy <= 1'b1;
+          w_delay_q <= next_delay;
+          if (!aw_busy) begin
+            current = next_aw;
+            delay = next_delay;
+          end
+        end
+        if ((aw_busy || accept_aw) && (w_pending || w_accept) && delay == 0 && write_space) begin
+          automatic logic [XLEN-1:0] data = w_pending ? w_data_q : wdata;
+          automatic logic [ByteLanes-1:0] strb = w_pending ? w_strb_q : wstrb;
+          automatic logic last = w_pending ? w_last_q : wlast;
+          automatic logic [1:0] resp = current.resp;
+          if (resp == AXIRespOKAY && ((strb & ~write_lane_mask(
+                  current
+              )) != 0 || last != (current.len == 0)))
+            resp = AXIRespSlverr;
+          if (resp == AXIRespOKAY && strb != 0)
+            `RAPT_DPI_C_PMEM_WRITE(current.addr & AlignMask, data, 8'(strb));
+          if (!w_pending || !w_accept) w_pending <= 1'b0;
+          if (last || current.len == 0) begin
+            b_id_q[b_tail_q] <= current.id;
+            b_resp_q[b_tail_q] <= resp;
+            b_first_addr_q[b_tail_q] <= current.first_addr;
+            b_last_addr_q[b_tail_q] <= current.last_addr;
+            b_memory_q[b_tail_q] <= current.memory_access;
+            b_ready_cycle_q[b_tail_q] <= cycle_q + 64'(write_latency_q)
+                + 64'(random_delay()) + 1;
+            b_tail_q <= b_tail_q + 1'b1;
+            push_b = 1'b1;
+            if (!aw_busy || !accept_aw) aw_busy <= 1'b0;
+          end else begin
+            aw_q.addr <= burst_next_addr(current);
+            aw_q.len <= current.len - 1'b1;
+            aw_q.resp <= resp;
+            w_delay_q <= random_delay();
+          end
+        end
+      end
       if (b_pop) b_head_q <= b_head_q + 1'b1;
       case ({
-        b_push, b_pop
+        push_b, b_pop
       })
         2'b10: b_count_q <= b_count_q + 1'b1;
         2'b01: b_count_q <= b_count_q - 1'b1;
         default: ;
       endcase
 
-      // Diagnostic only: AXI has no response cancellation on timeout.
-      // Keep all accepted transaction state and stalled payloads intact.
-      // Count cycles without progress, saturating to report once per stall.
-      if (r_busy && !(out_rvalid && rready)) begin
+      // Watchdogs diagnose a stuck manager; they never cancel AXI responses.
+      if ((read_valid_q != '0 || r_busy) && !r_pop) begin
         if (r_timeout_cnt != AXITimeout) r_timeout_cnt <= r_timeout_cnt + 1'b1;
         if (r_timeout_cnt == AXITimeout - 1'b1)
           $display("NPC_SOC: [WARNING] AXI read stalled (rid=%0d)", r_id_q);
-      end else begin
-        r_timeout_cnt <= '0;
-      end
-      if ((aw_busy || b_count_q != 0) && !(out_wready && wvalid) && !(out_bvalid && bready)) begin
+      end else r_timeout_cnt <= '0;
+      if ((aw_busy || w_pending || b_count_q != 0) && !(wvalid && out_wready) && !b_pop) begin
         if (w_timeout_cnt != AXITimeout) w_timeout_cnt <= w_timeout_cnt + 1'b1;
-        if (w_timeout_cnt == AXITimeout - 1'b1)
-          $display(
-              "NPC_SOC: [WARNING] AXI write stalled (id=%0d)", aw_busy ? aw_id_q : b_id_q[b_head_q]
-          );
-      end else begin
-        w_timeout_cnt <= '0;
-      end
+        if (w_timeout_cnt == AXITimeout - 1'b1) $display("NPC_SOC: [WARNING] AXI write stalled");
+      end else w_timeout_cnt <= '0;
     end
   end
 endmodule
-
-// verilator lint_on PINCONNECTEMPTY
-// verilator lint_on UNDRIVEN
-// verilator lint_on DECLFILENAME
-// verilator lint_on UNUSEDSIGNAL

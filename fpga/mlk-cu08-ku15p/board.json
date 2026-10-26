@@ -11,5 +11,22 @@
   "model": "Raptor native MLK-CU08-KU15P",
   "banner": "CU08",
   "cm005_bridge": 1,
-  "default_memory": "ddr"
+  "cm005_cpu_ethernet": {
+    "phy_base": "0x18001000",
+    "csr_base": "0x18002000",
+    "buffer_base": "0x18004000",
+    "rx_slots": 8,
+    "tx_slots": 2,
+    "slot_size": 2048,
+    "mac": "02:52:41:50:15:01"
+  },
+  "default_memory": "ddr",
+  "ubuntu": {
+    "transport": "tftp",
+    "network_driver": "liteeth",
+    "ethernet_node": "/soc/ethernet@18002000",
+    "boot_ip": "192.168.50.90",
+    "hostname": "raptor-ku15p",
+    "preserve_cm005": true
+  }
 }

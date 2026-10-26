@@ -23,7 +23,8 @@ config RV_PMPADDR_BITS
     pmpaddr holds physical-address bits [N+1:2]. The architectural maximum
     for RV64 is 54 (56-bit physical addresses). Set to 30 for the Raptor
     reference model, whose RTL implements 32 physical-address bits
-    (RAPT_PADDR_BITS). Unimplemented high bits read as zero.
+    (RAPT_PADDR_BITS). Configurable Raptor references use 30..36
+    for PA 32..38. Unimplemented high bits read as zero.
 
 config RV_PC_BITS
   int "Implemented RV64 PC bits"

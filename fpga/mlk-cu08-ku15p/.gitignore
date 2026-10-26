@@ -1,5 +1,3 @@
-!/build.py
-!/build.tcl
 !/constraints/*.xdc
 !/ip/*.tcl
 /build/

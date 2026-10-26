@@ -1,0 +1,94 @@
+--- a/drivers/net/ethernet/litex/litex_liteeth.c
++++ b/drivers/net/ethernet/litex/litex_liteeth.c
+@@ -12,6 +12,7 @@
+ #include <linux/module.h>
+ #include <linux/of_net.h>
+ #include <linux/platform_device.h>
++#include <linux/unaligned.h>
+ 
+ #define LITEETH_WRITER_SLOT       0x00
+ #define LITEETH_WRITER_LENGTH     0x04
+@@ -54,6 +55,47 @@
+ 	void __iomem *rx_base;
+ };
+ 
++/* The native peripheral window accepts aligned 32-bit accesses only. */
++static void liteeth_read_packet(void *destination, const void __iomem *source, unsigned int len)
++{
++	u8 *out = destination;
++
++	while (len >= 4) {
++		put_unaligned_le32(readl(source), out);
++		source += 4;
++		out += 4;
++		len -= 4;
++	}
++	if (len) {
++		u32 tail = readl(source);
++
++		while (len--) {
++			*out++ = tail;
++			tail >>= 8;
++		}
++	}
++}
++
++static void liteeth_write_packet(void __iomem *destination, const void *source, unsigned int len)
++{
++	const u8 *in = source;
++
++	while (len >= 4) {
++		writel(get_unaligned_le32(in), destination);
++		destination += 4;
++		in += 4;
++		len -= 4;
++	}
++	if (len) {
++		u32 tail = 0;
++		unsigned int i;
++
++		for (i = 0; i < len; i++)
++			tail |= (u32)in[i] << (8 * i);
++		writel(tail, destination);
++	}
++}
++
+ static int liteeth_rx(struct net_device *netdev)
+ {
+ 	struct liteeth *priv = netdev_priv(netdev);
+@@ -65,7 +107,7 @@
+ 	rx_slot = litex_read8(priv->base + LITEETH_WRITER_SLOT);
+ 	len = litex_read32(priv->base + LITEETH_WRITER_LENGTH);
+ 
+-	if (len == 0 || len > 2048)
++	if (len == 0 || len > 1536 || rx_slot >= priv->num_rx_slots)
+ 		goto rx_drop;
+ 
+ 	skb = netdev_alloc_skb_ip_align(netdev, len);
+@@ -75,7 +117,7 @@
+ 	}
+ 
+ 	data = skb_put(skb, len);
+-	memcpy_fromio(data, priv->rx_base + rx_slot * priv->slot_size, len);
++	liteeth_read_packet(data, priv->rx_base + rx_slot * priv->slot_size, len);
+ 	skb->protocol = eth_type_trans(skb, netdev);
+ 
+ 	dev_sw_netstats_rx_add(netdev, len);
+@@ -167,7 +209,7 @@
+ 	}
+ 
+ 	/* Reject oversize packets */
+-	if (unlikely(skb->len > priv->slot_size)) {
++	if (unlikely(skb->len > min_t(u32, priv->slot_size, 1536))) {
+ 		if (net_ratelimit())
+ 			netdev_err(netdev, "tx packet too big\n");
+ 
+@@ -179,7 +221,7 @@
+ 	}
+ 
+ 	txbuffer = priv->tx_base + priv->tx_slot * priv->slot_size;
+-	memcpy_toio(txbuffer, skb->data, skb->len);
++	liteeth_write_packet(txbuffer, skb->data, skb->len);
+ 	litex_write8(priv->base + LITEETH_READER_SLOT, priv->tx_slot);
+ 	litex_write16(priv->base + LITEETH_READER_LENGTH, skb->len);
+ 	litex_write8(priv->base + LITEETH_READER_START, 1);

@@ -5,8 +5,10 @@ Vivado. The native SoC supports RV32/RV64 with BRAM or DDR4 main memory, a boot
 ROM, scratch SRAM, an 8250-compatible UART, CLINT and PLIC. The default native
 build includes DDR4 and the CM005 A↔B Ethernet forwarder. Its two-port forwarding
 path runs independently of CPU execution and DDR calibration; the native UART
-remains the CPU console. The separate LiteX netboot profile supplies an Ethernet
-interface for the KU15P CPU itself.
+remains the CPU console. `CM005_ETHERNET=1` adds a CPU NIC through the existing
+three-port switch. The native `ubuntu-*` targets select that NIC and NFS root
+boot. This directory is a standalone build; the LiteX SoC for the same board
+is a separate flow in `fpga/litex`.
 
 All commands below run from the **repository root**.
 
@@ -50,49 +52,40 @@ make -C fpga/mlk-cu08-ku15p load XLEN=64 MEMORY=ddr
 
 Use the same configuration options for `build`, `info` and `load`. `load`
 checks source/configuration freshness, artifact hashes and a passing routed
-build, then requires exactly one matching FPGA on JTAG. Programming is volatile;
-it does not write configuration flash or automatically rebuild stale outputs.
+build, then requires exactly one matching FPGA on JTAG unless `HW_TARGET`
+selects one. Programming is volatile; it does not write configuration flash or
+automatically rebuild stale outputs.
 
-For native builds, `fpga-rv32-build`, `fpga-rv64-build` and the matching `load`,
-`info`, `prepare`, `lint`, `test`, `sim`, `ip-check`, `peripheral-synth` and `synth`
-targets select XLEN directly. For example:
+Add `XLEN=32` for RV32. `make -C fpga/mlk-cu08-ku15p help` lists every target
+and variable. Native builds default to DDR and A↔B forwarding; their CM005 block
+preserves the external KU5P network path while KU15P runs its native
+CPU/DDR/console. Add `CM005_ETHERNET=1` for the native CPU NIC, or use
+`ubuntu-*` below.
 
-```sh
-make -C fpga/mlk-cu08-ku15p fpga-rv32-build MEMORY=ddr RAPT_CONFIG=small
-```
+The LiteX SoC, including the fixed DDR4 plus CM005 Ethernet netboot profile, is
+a separate flow in `fpga/litex`; this directory does not build it. For example,
+`make -C fpga/litex FPGA_BOARD=mlk_cu08_ku15p fpga-netboot-rv64-build`. See the
+[netboot workflow](../litex/NETBOOT.md#fixed-cu08-and-rk-end-to-end-targets).
 
-For DDR4 plus CM005 Ethernet network boot, the board Makefile forwards the
-`fpga-netboot-rv32-*` and `fpga-netboot-rv64-*` targets to the fixed LiteX CU08
-profile. The same targets also work from the repository root:
+## Native Ubuntu 24.04 NFS root
 
-```sh
-make -C fpga/mlk-cu08-ku15p fpga-netboot-rv32-build
-make -C fpga/mlk-cu08-ku15p fpga-netboot-rv64-build
-```
-
-Use the matching `check`, `info`, `load`, `bundle`, `serve`, `console` and `test`
-targets for each XLEN. This profile defaults to `RAPT_CONFIG=default`, 50 MHz,
-DDR4 MIG and gigabit Ethernet. See the [netboot workflow](../litex/NETBOOT.md#fixed-cu08-and-rk-end-to-end-targets)
-for host setup and Linux boot steps. Native `fpga-rv*` builds default to DDR and A↔B forwarding. Their CM005 block
-does not provide a CPU NIC or network boot; it preserves the external KU5P
-network path while KU15P runs its native CPU/DDR/console.
-
-For the general LiteX FPGA flow, the board Makefile also forwards `fpga-gen`,
-`fpga-build`, `fpga-load`, `fpga-console`, `fpga-info`, `fpga-reports-index` and
-`fpga-timing-ok`, fixing board selection to CU08:
+Follow the [shared Ubuntu workflow](../common/UBUNTU.md). `ubuntu-bitstream`
+defaults to RV64 `middle-cache`, DDR4, 50 MHz, `CM005_BRIDGE=1` and
+`CM005_ETHERNET=1`. The CPU uses the Linux LiteEth ABI on a virtual third
+CM005 port. CPU queue congestion and virtual-PHY reset do not block/reset the
+A/B forwarding path. The loader MAC/IP are distinct from KU5P; prepare a
+separate NFS root and reserve the board's loader address.
 
 ```sh
-make -C fpga/mlk-cu08-ku15p fpga-build VARIANT=linux64
-make -C fpga/mlk-cu08-ku15p fpga-load VARIANT=linux64
-make -C fpga/mlk-cu08-ku15p fpga-console UART_PORT=/dev/ttyUSB1
-```
-
-Native root shortcuts are also available; select the preset explicitly because
-the repository root defaults to `RAPT_CONFIG=default`:
-
-```sh
-make fpga-rv32-build FPGA_BOARD=mlk-cu08-ku15p MEMORY=ddr RAPT_CONFIG=small
-make fpga-rv64-build FPGA_BOARD=mlk-cu08-ku15p MEMORY=ddr RAPT_CONFIG=small
+make -C fpga/mlk-cu08-ku15p ubuntu-test
+make -C fpga/mlk-cu08-ku15p ubuntu-bitstream
+make -C fpga/mlk-cu08-ku15p ubuntu-kernel JOBS=8
+make -C fpga/mlk-cu08-ku15p ubuntu-rootfs UBUNTU_SSH_KEY=/path/to/your.pub
+make -C fpga/mlk-cu08-ku15p ubuntu-bundle ubuntu-check
+make -C fpga/mlk-cu08-ku15p ubuntu-serve
+# Reprogram only after work depending on this board's A/B bridge has finished.
+make -C fpga/mlk-cu08-ku15p ubuntu-load HW_TARGET='*/<KU15P-JTAG-ID>'
+make -C fpga/mlk-cu08-ku15p ubuntu-boot UART_PORT='/dev/serial/by-id/<KU15P-UART>'
 ```
 
 ## Configuration and outputs
@@ -103,6 +96,7 @@ make fpga-rv64-build FPGA_BOARD=mlk-cu08-ku15p MEMORY=ddr RAPT_CONFIG=small
 | `RAPT_CONFIG` | `small` | CPU preset from `hdl/configs/` |
 | `MEMORY` | `ddr` | `bram` or `ddr` main RAM |
 | `CM005_BRIDGE` | `1` | CM005 A↔B forwarding; requires `CLOCK_MHZ=50` |
+| `CM005_ETHERNET` | `0` | Add the native CPU NIC; enabled by `ubuntu-bitstream` |
 | `CLOCK_MHZ` | `50` | CPU clock target: `25`, `50` or `100` MHz |
 | `RAM_BYTES` | `131072` | BRAM main RAM size; power of two, 16 KiB–1 MiB |
 | `USE_RESET_BUTTON` | `0` | Set to `1` to enable the active-low reset button |
@@ -304,7 +298,7 @@ done
 ```
 
 DDR simulation uses a delayed AXI RAM model, not a physical DDR model. For a
-focused boot waveform, run `python3 fpga/mlk-cu08-ku15p/build.py --xlen 64 --memory ddr --trace sim`.
+focused boot waveform, run `make -C fpga/mlk-cu08-ku15p sim XLEN=64 MEMORY=ddr TRACE=1`.
 Review `timing_summary.rpt`, `check_timing.rpt`, `cdc.rpt`, `drc.rpt` and
 `utilization.rpt` for the exact source/configuration in `manifest.json`.
 The output directory also contains `index.html` for browsing all Vivado

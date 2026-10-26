@@ -120,10 +120,12 @@ Details: **[Linux Kernel Boot](./linux_kernel.md)**.
 The root FPGA targets select native **MLK-CU08-KU15P** by default:
 
 ```shell
-make fpga-syn
-make fpga-pnr
+make fpga-synth
+make fpga-build
 # Select another native board explicitly
-make fpga-syn FPGA_BOARD=rk-xcku5p-f
+make fpga-build FPGA_BOARD=rk-xcku5p-f
+# Board-local targets and variables
+make -C fpga/rk-xcku5p-f help
 ```
 
 For LiteX BIOS/Linux flows:
@@ -135,8 +137,7 @@ make -C fpga/litex fpga-detect
 
 See [native FPGA support](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/README.md) and
 [LiteX board setup](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/litex/README.md) for toolchains and constraints.
-The Tang Nano 20K directory is an archived example. Synthesis does not establish
-routed timing closure or a working board image.
+Synthesis does not establish routed timing closure or a working board image.
 
 ## 8. Utilities
 

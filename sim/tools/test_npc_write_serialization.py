@@ -39,7 +39,9 @@ int main(int argc, char **argv) {
   d.awid=4; d.awaddr=0x80000010; d.awvalid=1;
   tick();
   if (!serialize) d.awvalid=0;
-  check(!d.out_wready, "follower W cannot overwrite pending B");
+  check(d.out_wready, "empty W buffer accepts one early follower");
+  d.wdata=0x87654321; d.wvalid=1; tick(); d.wvalid=0;
+  check(!d.out_wready, "full W buffer backpressures a second follower");
   // Reads stay independent of write response backpressure.
   d.arvalid=1; tick(); d.arvalid=0;
   for (unsigned i=0; i<12; ++i) {
@@ -51,24 +53,25 @@ int main(int argc, char **argv) {
     }
   }
   d.rready=1; d.bready=1; d.eval();
-  check(!d.out_awready && !d.out_wready, "no same-edge B/AW or B/W reuse");
+  check(bool(d.out_awready) == !serialize, "strict AW waits through B handshake");
+  check(bool(d.out_wready) == !serialize, "buffer may advance with B dequeue");
   tick();
   check(!d.out_bvalid, "first B consumed exactly once");
   if (serialize) {
-    check(d.out_awready && !d.out_wready, "AW opens after B edge");
+    check(d.out_awready && !d.out_wready, "strict AW opens with follower W buffered");
     tick(); d.awvalid=0;
   }
-  check(d.out_wready, "follower W opens after B");
-  d.wvalid=1; tick(); d.wvalid=0; d.bready=0;
+  check(d.out_wready, "buffered follower serviced once ownership opens");
+  d.bready=0;
   for (unsigned i=0; i<8; ++i) tick();
   check(d.out_bvalid && d.out_bid==4 && d.out_bresp==0, "follower response identity");
   d.bready=1; tick();
   check(!d.out_bvalid && d.out_awready, "all writes drained");
   // A multi-beat write retains AW ownership until its final beat and B.
   d.awlen=1; d.awid=5; d.awvalid=1; tick(); d.awvalid=0;
-  d.wvalid=1; d.wlast=0; tick();
+  d.wvalid=1; d.wlast=0; tick(); d.wvalid=0; d.eval();
   check(!d.out_awready && !d.out_bvalid && d.out_wready, "burst ownership");
-  d.wlast=1; tick(); d.wvalid=0; d.bready=0;
+  d.wvalid=1; d.wlast=1; tick(); d.wvalid=0; d.bready=0;
   check(bool(d.out_awready)==!serialize, "burst final beat applies AW policy");
   for (unsigned i=0; i<8; ++i) tick();
   check(d.out_bvalid && d.out_bid==5, "burst response");

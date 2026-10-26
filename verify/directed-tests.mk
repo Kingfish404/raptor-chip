@@ -48,6 +48,7 @@ $(eval $(call XLEN_TEST,pmp-reset-napot,tb_pmp_reset_napot,"$$(VERIFY_HOME)/form
 $(eval $(call XLEN_TEST,hum-request-stage,tb_hum_request_stage,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,ioq-mmio-retry,tb_mmio_load_retry,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,translated-mmio-retry,tb_translated_mmio_retry,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,l1d-mmio-retry-wb,tb_l1d_mmio_retry_wb,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,split-load-retry,tb_split_load_retry,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,ioq-store-pbmt,tb_ioq_store_pbmt,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,sq-store-pbmt,tb_sq_store_pbmt,,-d RAPT_ASSERT_EN))

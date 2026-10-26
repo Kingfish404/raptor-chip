@@ -332,13 +332,20 @@ module rapt_lsu_ioq #(
   end
   logic [1:0] ioq_span_words[IOQ_SIZE];
   logic [IOQ_SIZE-1:0] ioq_overlap[IOQ_SIZE];
+  logic [XLEN-1:0] ioq_compare_addr[IOQ_SIZE];
+  for (genvar e = 0; e < IOQ_SIZE; e++) begin : g_compare_addr
+    assign ioq_compare_addr[e] = ioq_context[e].mmu_en ? ioq_eff_addr[e]
+        : rapt_pkg::canonical_paddr(
+        ioq_eff_addr[e]
+    );
+  end
   rapt_ioq_overlap #(
       .Xlen(XLEN),
       .Entries(IOQ_SIZE),
       .WordOffBits(WordOffBits),
       .PageOffBits(PageOffBits)
   ) overlap_check (
-      .addr(ioq_eff_addr),
+      .addr(ioq_compare_addr),
       .span(ioq_span_words),
       .page_only(ioq_context[ioq_head].mmu_en),
       .overlap(ioq_overlap)
@@ -1013,7 +1020,7 @@ module rapt_lsu_ioq #(
   wire head_is_sc = ioq_valid[ioq_head] && ioq_atom[ioq_head]
       && ioq_alu[ioq_head] == `RAPT_ATO_SC__;
   assign sc_paddr = ioq_context[ioq_head].mmu_en ? ioq_paddr[ioq_head]
-      : ioq_eff_addr[ioq_head];
+      : rapt_pkg::canonical_paddr(ioq_eff_addr[ioq_head]);
   assign sc_size_m1 = (ioq_word[ioq_head] || XLEN == 32) ? 4'd3 : 4'd7;
   assign reservation_match_live = exu_l1d.reservation_valid
       && sc_paddr >= exu_l1d.reservation
@@ -1288,8 +1295,10 @@ module rapt_lsu_ioq #(
   assign ioq_completion_result.alu = early_bcast_select ? `RAPT_IOQ_EARLY_PICK(ioq_alu)
       : ioq_atom[ioq_head] ? {1'b0, head_store_walu} : ioq_alu[ioq_head];
   logic [XLEN-1:0] head_store_paddr;
-  assign head_store_paddr = ioq_context[ioq_head].mmu_en ? ioq_paddr[ioq_head] : head_store_vaddr;
-  assign ioq_completion_result.sq_waddr = early_bcast_select ? `RAPT_IOQ_EARLY_PICK(ioq_eff_addr)
+  assign head_store_paddr = ioq_context[ioq_head].mmu_en ? ioq_paddr[ioq_head]
+      : rapt_pkg::canonical_paddr(head_store_vaddr);
+  assign ioq_completion_result.sq_waddr = early_bcast_select
+      ? rapt_pkg::canonical_paddr(`RAPT_IOQ_EARLY_PICK(ioq_eff_addr))
       : head_store_paddr;
   // The next aligned beat need not be on the second page: an unaligned
   // RV32 FSD can span three words with only its third word crossing pages.
@@ -1306,7 +1315,7 @@ module rapt_lsu_ioq #(
     assign second_page = store_beat_vaddr[beat][XLEN-1:12] != head_store_vaddr[XLEN-1:12];
     assign store_beat_paddr[beat] = ioq_context[ioq_head].mmu_en
         ? {second_page ? ioq_paddr_hi[ioq_head][XLEN-1:12] : ioq_paddr[ioq_head][XLEN-1:12],
-           store_beat_vaddr[beat][11:0]} : store_beat_vaddr[beat];
+           store_beat_vaddr[beat][11:0]} : rapt_pkg::canonical_paddr(store_beat_vaddr[beat]);
     assign sq_wpbmt[beat] = ioq_context[ioq_head].mmu_en
         ? (second_page ? ioq_pbmt_hi[ioq_head] : ioq_pbmt[ioq_head]) : 2'b00;
   end

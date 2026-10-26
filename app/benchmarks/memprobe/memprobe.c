@@ -1,4 +1,4 @@
-// Bare-metal port of fpga/rk-xcku5p-f/tests/ubuntu_bench/memory_probe.c.
+// Bare-metal port of fpga/common/tests/ubuntu_bench/memory_probe.c.
 #include <am.h>
 #include <klib.h>
 #include <stdint.h>

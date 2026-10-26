@@ -100,7 +100,9 @@ static void queue_and_latency() {
   if (slots == 1) {
     assert(h.dut.out_awready); h.tick(); h.dut.awvalid = 0;
     h.dut.wvalid = 1; h.dut.wlast = 1; h.eval();
-    assert(!h.dut.out_wready); h.dut.wvalid = 0;
+    // An empty elastic W slot may accept one beat while B is stalled. This
+    // check offers a beat without a clock edge; it must not alter memory.
+    assert(h.dut.out_wready); h.dut.wvalid = 0;
   } else {
     assert(!h.dut.out_awready); h.dut.awvalid = 0;
   }

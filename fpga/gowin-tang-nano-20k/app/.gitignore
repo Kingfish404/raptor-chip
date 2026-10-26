@@ -1,6 +1,0 @@
-*.s
-*.bin
-*.h
-*.mem
-
-!start.s

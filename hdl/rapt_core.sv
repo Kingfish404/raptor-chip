@@ -98,6 +98,19 @@ module rapt_core #(
 
     input reset
 );
+  if ((XLEN == 64 && (`RAPT_PADDR_BITS < 32 || `RAPT_PADDR_BITS > 38))
+      || (XLEN == 32 && `RAPT_PADDR_BITS != 32)) begin : g_invalid_pa_config
+    $error(
+        "RAPT_PADDR_BITS: RV64 supports 32..38; RV32 requires 32. PMA is 32-bit with a Bare all-ones alias; PC40 requires PA <= 39."
+    );
+    // Also reject when the caller permits nonfatal Verilator warnings.
+    RAPT_PADDR_BITS_OUT_OF_RANGE_RV64_32_TO_38_RV32_32 invalid_pa_configuration ();
+  end
+  if (XLEN == 64 && `RAPT_PMPADDR_BITS != `RAPT_PADDR_BITS - 2) begin : g_invalid_pmp_width
+    $error("RAPT_PMPADDR_BITS must equal RAPT_PADDR_BITS - 2 on RV64");
+    RAPT_PMPADDR_BITS_MUST_EQUAL_PADDR_BITS_MINUS_2 invalid_pmp_configuration ();
+  end
+
   idu_rnu_if idu_rnu ();
   ifu_l1i_if ifu_l1i ();
   cmu_bcast_if cmu_bcast ();

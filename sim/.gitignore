@@ -16,7 +16,9 @@
 !scripts/*.sh
 !scripts/configure.py
 !scripts/build_cache.py
+!scripts/paddr_config.py
 !scripts/sta.py
+!tests/test_npc_axi_protocol.py
 !tests/test_npc_write_outstanding.py
 !*.sv
 !*.svh

@@ -270,7 +270,7 @@ make verify-light
 
 ### 7. FPGA
 
-For a CU08-KU15P flow without LiteX/Migen, see [native board support](fpga/mlk-cu08-ku15p/README.md).
+For a native CU08-KU15P flow without the LiteX SoC, see [native board support](fpga/mlk-cu08-ku15p/README.md).
 It provides a SystemVerilog SoC, UART boot ROM, BRAM/DDR4 configurations and batch Vivado builds.
 For example: `make -C fpga/mlk-cu08-ku15p sim XLEN=64 MEMORY=bram`.
 

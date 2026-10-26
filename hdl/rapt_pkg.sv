@@ -838,6 +838,13 @@ package rapt_pkg;
     return (addr == zero_extended) || (addr == ones_extended);
   endfunction
 
+  // Identity translation has two accepted encodings of the 32-bit map.
+  // Merge those aliases before tags/PMP/forwarding, but preserve invalid
+  // upper bits so the PMA check cannot turn an invalid address into memory.
+  function automatic logic [XLENPkg-1:0] canonical_paddr(input logic [XLENPkg-1:0] addr);
+    return addr_upper_valid(addr) ? canonical_addr(addr) : addr;
+  endfunction
+
   function automatic logic addr_in_pmem(input logic [XLENPkg-1:0] addr);
     return addr_upper_valid(addr) && pma_has_attr(addr[31:0], PmaPmem);
   endfunction

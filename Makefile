@@ -27,6 +27,8 @@ QEMU ?=## Override QEMU executable for OS CLI helpers
 
 # Raptor uarch config preset (selects hdl/configs/<name>/rapt_config.svh).
 # Exported so it propagates through chained sub-makes (sim, am-kernels, app, ...).
+# FPGA board builds keep their own preset default unless the user sets one.
+RAPT_CONFIG_FROM_USER := $(filter command line environment%,$(origin RAPT_CONFIG))
 RAPT_CONFIG ?= default ## Raptor uarch config preset (default|small|...)
 # `?=` keeps the trailing space before `##` in the value; strip it so paths
 # like `$(NSIM_HOME)/build/$(RAPT_CONFIG)/...` don't end up with a stray
@@ -242,7 +244,7 @@ build-nemu64: ## Build NEMU (riscv64)
 	$(call nemu_build,$(NEMU64_DEFCONFIG))
 
 build-nemu64-ref:
-	+$(MAKE) -C $(NEMU_HOME) reference REF_DEFCONFIG=riscv64_ref_defconfig $(SUBMAKE_JOBS)
+	+$(MAKE) -C $(NSIM_HOME) nemu-reference VFLAGS="$(RV64_VFLAGS)" $(SUBMAKE_JOBS)
 
 run-nemu64: build-nemu64 ## Build and run NEMU (riscv64)
 	$(MAKE) -C $(NEMU_HOME) run $(if $(IMG),IMG=$(IMG)) ARGS="$(ARGS) $(NEMU_DISK_ARG) $(NEMU_SDCARD_ARG)"
@@ -304,6 +306,8 @@ NPC_ARCH ?= riscv32-npc ## Override ARCH for AM targets
 # sim Verilator simulation enables RTL assertions by default via RAPT_SIM_ASSERT;
 # pack/STA/FPGA synthesis paths do not receive the default assertion define.
 VFLAGS ?= ## Extra RTL defines for NPC (-DRAPT_RV64, etc.)
+# RV64 convenience targets must preserve PA and other caller overrides.
+RV64_VFLAGS = -DRAPT_RV64 $(filter-out -DRAPT_RV64,$(VFLAGS))
 RAPT_SIM_ASSERT ?= 1## Enable RTL SVA assertions by default in NPC Verilator simulation (1=on, 0=off)
 RAPT_SIM_ASSERT := $(strip $(RAPT_SIM_ASSERT))
 export RAPT_SIM_ASSERT
@@ -311,7 +315,7 @@ export RAPT_SIM_ASSERT
 configure-rv32: ## Apply RV32 simulator configuration only
 configure-rv64: ## Apply RV64 simulator configuration only
 configure-rv32 configure-rv64:
-	$(MAKE) -C $(NSIM_HOME) $(NPC_DEFCONFIG) VFLAGS="$(if $(filter configure-rv64,$@),-DRAPT_RV64,$(VFLAGS))"
+	$(MAKE) -C $(NSIM_HOME) $(NPC_DEFCONFIG) VFLAGS="$(if $(filter configure-rv64,$@),$(RV64_VFLAGS),$(VFLAGS))"
 
 menuconfig-rv32: ## Open simulator Kconfig for the selected profile
 	$(MAKE) -C $(NSIM_HOME) menuconfig VFLAGS="$(VFLAGS)"
@@ -322,19 +326,19 @@ build-rv32: ## Configure and build the RV32 simulator
 build-rv64: ## Configure and build the RV64 simulator
 build-rv32 build-rv64:
 	$(MAKE) --no-print-directory configure-$(lastword $(subst -, ,$@))
-	$(MAKE) -C $(NSIM_HOME) all VFLAGS="$(if $(filter build-rv64,$@),-DRAPT_RV64,$(VFLAGS))"
+	$(MAKE) -C $(NSIM_HOME) all VFLAGS="$(if $(filter build-rv64,$@),$(RV64_VFLAGS),$(VFLAGS))"
 
 build-rv32-linux: ## Configure and build the RV32 Linux simulator
 build-rv64-linux: ## Configure and build the RV64 Linux simulator
 build-rv32-linux build-rv64-linux:
-	$(MAKE) -C $(NSIM_HOME) $(if $(filter 1,$(DIFFTEST)),o2linux_difftest_defconfig,o2linux_defconfig) VFLAGS="$(if $(filter build-rv64-linux,$@),-DRAPT_RV64,$(VFLAGS))"
-	$(MAKE) -C $(NSIM_HOME) all VFLAGS="$(if $(filter build-rv64-linux,$@),-DRAPT_RV64,$(VFLAGS))"
+	$(MAKE) -C $(NSIM_HOME) $(if $(filter 1,$(DIFFTEST)),o2linux_difftest_defconfig,o2linux_defconfig) VFLAGS="$(if $(filter build-rv64-linux,$@),$(RV64_VFLAGS),$(VFLAGS))"
+	$(MAKE) -C $(NSIM_HOME) all VFLAGS="$(if $(filter build-rv64-linux,$@),$(RV64_VFLAGS),$(VFLAGS))"
 
 run-rv32: build-rv32 ## Build and run the RV32 simulator
 	$(MAKE) -C $(NSIM_HOME) run ARGS="$(ARGS)" VFLAGS="$(VFLAGS)" $(if $(IMG),IMG=$(IMG)) $(if $(DISK),DISK=$(DISK)) $(if $(SDCARD),SDCARD=$(SDCARD))
 
 run-rv64: build-rv64 ## Build and run the RV64 simulator
-	$(MAKE) -C $(NSIM_HOME) run ARGS="$(ARGS)" VFLAGS="-DRAPT_RV64" $(if $(IMG),IMG=$(IMG)) $(if $(DISK),DISK=$(DISK)) $(if $(SDCARD),SDCARD=$(SDCARD))
+	$(MAKE) -C $(NSIM_HOME) run ARGS="$(ARGS)" VFLAGS="$(RV64_VFLAGS)" $(if $(IMG),IMG=$(IMG)) $(if $(DISK),DISK=$(DISK)) $(if $(SDCARD),SDCARD=$(SDCARD))
 
 lint-rv64: VFLAGS := -DRAPT_RV64
 lint-rv64: lint ## Lint RTL in RV64 mode
@@ -784,27 +788,22 @@ linux-boot-rv32-ckpt-load: build-nemu32-ref build-rv32-linux ## Resume Linux boo
 # ============================================================================
 # FPGA Targets
 # ============================================================================
-FPGA_BOARD ?= mlk-cu08-ku15p
-NATIVE_FPGA_ACTIONS := prepare refresh-software lint test sim ip-check peripheral-synth synth build load info
-NATIVE_FPGA_TARGETS := $(addprefix fpga-,$(NATIVE_FPGA_ACTIONS))
-NATIVE_FPGA_RV_TARGETS := $(foreach x,32 64,$(addprefix fpga-rv$(x)-,$(filter-out refresh-software,$(NATIVE_FPGA_ACTIONS))))
-.PHONY: $(NATIVE_FPGA_TARGETS) $(NATIVE_FPGA_RV_TARGETS)
+# fpga-<target> runs <target> in fpga/$(FPGA_BOARD), a standalone native board
+# build; `make -C fpga/<board> help` lists its targets and variables. The board
+# keeps its own preset default unless RAPT_CONFIG is set by the user.
+FPGA_BOARD ?= mlk-cu08-ku15p ## Native board directory under fpga/ (mlk-cu08-ku15p|rk-xcku5p-f)
+FPGA_BOARD := $(strip $(FPGA_BOARD))
+FPGA_TARGETS := fpga-info fpga-prepare fpga-lint fpga-test fpga-sim fpga-ip-check \
+	fpga-peripheral-synth fpga-synth fpga-build fpga-load fpga-refresh-software
+FPGA_ENV := $(if $(RAPT_CONFIG_FROM_USER),,env -u RAPT_CONFIG)
+.PHONY: $(FPGA_TARGETS)
 
-fpga-build: ## Build and timing-check the selected native FPGA board (RK defaults to DDR)
-fpga-load: ## Program the selected native FPGA board from a matching validated build
-fpga-info: ## Show native FPGA configuration and output path
-fpga-rv32-build: ## Build the selected native board for RV32
-fpga-rv64-build: ## Build the selected native board for RV64
-$(NATIVE_FPGA_TARGETS):
-	$(MAKE) -C $(RAPTOR_HOME)/fpga/$(FPGA_BOARD) $(patsubst fpga-%,%,$@)
-$(NATIVE_FPGA_RV_TARGETS):
-	$(MAKE) -C $(RAPTOR_HOME)/fpga/$(FPGA_BOARD) $@
-
-fpga-syn: ## Synthesize the selected native FPGA board
-	$(MAKE) -C $(RAPTOR_HOME)/fpga/$(FPGA_BOARD) synth
-
-fpga-pnr: ## Build and timing-check the selected native FPGA board
-	$(MAKE) -C $(RAPTOR_HOME)/fpga/$(FPGA_BOARD) build
+fpga-info: ## Print the native board configuration and output directory
+fpga-synth: ## Synthesize the native board SoC (XLEN, MEMORY, ... as in the board Makefile)
+fpga-build: ## Build and timing-check the native board bitstream
+fpga-load: ## Program the native board from a matching timing-clean build
+$(FPGA_TARGETS): fpga-%:
+	$(FPGA_ENV) $(MAKE) -C $(RAPTOR_HOME)/fpga/$(FPGA_BOARD) $*
 
 # ============================================================================
 # Utilities
@@ -1292,7 +1291,7 @@ ysyxsoc-setup: ## Fetch and generate the pinned, unmodified upstream ysyxSoC
 	clean clean-npc compile-commands configure-rv32 configure-rv64 coremark-nemu32 \
 	coremark-nemu64 coremark-rv32 coremark-rv64 coremark-ysyxsoc cpu-tests-nemu32 cpu-tests-rv32 \
 	cpu-tests-rv32-run cpu-tests-rv64 cpu-tests-rv64-run dhrystone-nemu32 dhrystone-rv32 dhrystone-rv64 \
-	format format-check fpga-pnr fpga-syn help irq-tests-build \
+	format format-check help irq-tests-build \
 	irq-tests-rv32 irq-tests-rv32-run lint lint-rv64 lint-verible linux-boot-nemu32 \
 	linux-boot-nemu32-device linux-boot-nemu32gc linux-boot-nemu64 linux-boot-nemu64-device linux-boot-nemu64gc linux-boot-rv32 \
 	linux-boot-rv32-ckpt-load linux-boot-rv32-ckpt-save linux-boot-rv32gc linux-boot-rv64 linux-boot-rv64gc linux-download \

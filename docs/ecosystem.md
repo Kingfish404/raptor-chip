@@ -36,10 +36,9 @@ NPC is the primary development simulator. With `DIFFTEST=1` (the default), NEMU 
 | **Alinx AXAU15 / LiteX**       | Vivado AU15P, auto-detected when that part is on the cable              | `fpga/litex/`                                |
 | **Xilinx VCU118 / LiteX**      | Vivado VU9P, auto-detected when that part is on the cable               | `fpga/litex/`                                |
 | **Tang Mega 138K Pro / LiteX** | Gowin LiteX FPGA flow                                                   | `fpga/litex/`                                |
-| **Gowin Tang Nano 20K**        | Archived example; outside active board support | `fpga/gowin-tang-nano-20k/` |
 | **OOC partitions**             | Frontend/backend/cache checkpoints, not a board flow                    | `fpga/ooc/README.md`                         |
 
-Root `make fpga-syn` and `make fpga-pnr` select native CU08-KU15P by default;
+Root `make fpga-synth` and `make fpga-build` select native CU08-KU15P by default;
 use `FPGA_BOARD=rk-xcku5p-f` for RK. See [native FPGA support](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/README.md)
 for board build options and [LiteX](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/litex/README.md) for BIOS and Linux.
 

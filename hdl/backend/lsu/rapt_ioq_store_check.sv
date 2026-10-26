@@ -34,7 +34,7 @@ module rapt_ioq_store_check #(
   rapt_pmp_permissions #(
       .XLEN(XLEN)
   ) u_pmp_store_cbo (
-      .addr          (store_addr),
+      .addr          (rapt_pkg::canonical_paddr(store_addr)),
       .size_m1       (store_size_m1),
       .priv          (ioq_store_eff_priv),
       .op_r          (1'b0),

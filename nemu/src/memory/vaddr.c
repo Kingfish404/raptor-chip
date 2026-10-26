@@ -33,6 +33,17 @@ extern NEMU_TLS word_t pmp_last_fault_addr;
 
 NEMU_TLS word_t g_vaddr = 0;
 
+/* The Raptor 32-bit platform accepts both zero and all-ones upper halves
+ * in Bare mode. Preserve other upper bits for PMA rejection, and never
+ * apply this alias rule to translated PPNs or other NEMU platforms. */
+static paddr_t bare_paddr(vaddr_t addr)
+{
+#if defined(CONFIG_RAPTOR_MEMORY_MAP) && defined(CONFIG_RV64)
+  if ((addr >> 32) == UINT32_MAX) return (uint32_t)addr;
+#endif
+  return addr;
+}
+
 static word_t subsystem_log_read(vaddr_t addr, int len, word_t data)
 {
   if (subsystem_mem_trace != NULL)
@@ -97,7 +108,7 @@ word_t get_paddr(vaddr_t addr, int len)
   // divergence vs the RTL which correctly classifies LR/SC as data ops.
   if (isa_mmu_check(addr, len, MEM_TYPE_READ) == MMU_DIRECT)
   {
-    paddr = addr;
+    paddr = bare_paddr(addr);
   }
   else
   {
@@ -125,7 +136,7 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
   uint8_t pbmt = 0;
   if (isa_mmu_check(addr, len, MEM_TYPE_IFETCH) == MMU_DIRECT)
   {
-    paddr = addr;
+    paddr = bare_paddr(addr);
   }
   else
   {
@@ -152,7 +163,7 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
   {
     if (!mmu_on)
     {
-      g_vaddr = pmp_last_fault_addr;
+      g_vaddr = addr + (pmp_last_fault_addr - paddr);
     }
     cause = MCA_INS_ACC_FAU;
     nemu_memory_longjmp(22);
@@ -221,13 +232,13 @@ static paddr_t checked_data_piece_attrs(vaddr_t addr, int len, bool store, bool 
   const int type = store ? MEM_TYPE_WRITE : MEM_TYPE_READ;
   const bool translated = isa_mmu_check(addr, len, type) != MMU_DIRECT;
   uint8_t pbmt = 0;
-  paddr_t pa = translated ? isa_mmu_translate_attrs(addr, len, type, &pbmt) : addr;
+  paddr_t pa = translated ? isa_mmu_translate_attrs(addr, len, type, &pbmt) : bare_paddr(addr);
   if (pbmt_out) *pbmt_out = pbmt;
   check_data_type(pa, pbmt, misaligned, store, original_len);
   check_data_pma(pa, len, store);
   if (pmp_check(pa, len, pmp_effective_priv_ls(), !store, store, false))
   {
-    if (!translated) g_vaddr = pmp_last_fault_addr;
+    if (!translated) g_vaddr = addr + (pmp_last_fault_addr - pa);
     cause = store ? MCA_STO_ACC_FAU : MCA_LOA_ACC_FAU;
     nemu_memory_longjmp(store ? 24 : 23);
   }
@@ -348,7 +359,7 @@ word_t vaddr_read_piece(vaddr_t addr, int len, int original_len, bool original_m
   uint8_t pbmt = 0;
   if (isa_mmu_check(addr, len, MEM_TYPE_READ) == MMU_DIRECT)
   {
-    paddr = addr;
+    paddr = bare_paddr(addr);
   }
   else
   {
@@ -361,7 +372,7 @@ word_t vaddr_read_piece(vaddr_t addr, int len, int original_len, bool original_m
       {
         if (!mmu_on)
         {
-          g_vaddr = pmp_last_fault_addr;
+          g_vaddr = addr + (pmp_last_fault_addr - paddr);
         }
         cause = MCA_LOA_ACC_FAU;
         nemu_memory_longjmp(23);
@@ -379,7 +390,7 @@ word_t vaddr_read_piece(vaddr_t addr, int len, int original_len, bool original_m
   {
     if (!mmu_on)
     {
-      g_vaddr = pmp_last_fault_addr;
+      g_vaddr = addr + (pmp_last_fault_addr - paddr);
     }
     cause = MCA_LOA_ACC_FAU;
     nemu_memory_longjmp(23);
@@ -427,7 +438,7 @@ static void vaddr_write_unlocked(vaddr_t addr, int len, word_t data)
   uint8_t pbmt = 0;
   if (isa_mmu_check(addr, len, MEM_TYPE_WRITE) == MMU_DIRECT)
   {
-    paddr = addr;
+    paddr = bare_paddr(addr);
   }
   else
   {
@@ -440,7 +451,7 @@ static void vaddr_write_unlocked(vaddr_t addr, int len, word_t data)
       {
         if (!mmu_on)
         {
-          g_vaddr = pmp_last_fault_addr;
+          g_vaddr = addr + (pmp_last_fault_addr - paddr);
         }
         cause = MCA_STO_ACC_FAU;
         nemu_memory_longjmp(24);
@@ -464,7 +475,7 @@ static void vaddr_write_unlocked(vaddr_t addr, int len, word_t data)
   {
     if (!mmu_on)
     {
-      g_vaddr = pmp_last_fault_addr;
+      g_vaddr = addr + (pmp_last_fault_addr - paddr);
     }
     cause = MCA_STO_ACC_FAU;
     nemu_memory_longjmp(24);
@@ -500,6 +511,7 @@ void vaddr_check_cmo(vaddr_t addr)
     uint8_t pbmt;
     paddr = isa_mmu_translate_attrs(addr, 1, MEM_TYPE_CMO, &pbmt);
   }
+  else paddr = bare_paddr(addr);
 
   if (!paddr_is_mapped(paddr))
   {
@@ -512,7 +524,7 @@ void vaddr_check_cmo(vaddr_t addr)
   if (read_fault && write_fault)
   {
     // PMP checks physical addresses; tval must retain the virtual operand.
-    if (!translated) g_vaddr = pmp_last_fault_addr;
+    if (!translated) g_vaddr = addr + (pmp_last_fault_addr - paddr);
     cause = MCA_STO_ACC_FAU;
     nemu_memory_longjmp(24);
   }

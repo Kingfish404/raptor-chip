@@ -14,11 +14,25 @@ COMMON = Path(__file__).resolve().parents[1]
 REPO = COMMON.parents[1]
 from rtl_pack import pack
 
+BOARD = PROFILE = None
+
 
 def configure(board):
     global BOARD, PROFILE
     BOARD = Path(board).resolve()
     PROFILE = json.loads((BOARD / "board.json").read_text())
+
+
+def board_parser():
+    """Parse --board first, because the board profile supplies other defaults."""
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--board", type=Path, help="board directory containing board.json")
+    args, _ = parser.parse_known_args()
+    if args.board:
+        configure(args.board)
+    elif BOARD is None:
+        parser.error("--board is required")
+    return parser
 
 
 def run(command, *, cwd=None, log=None):
@@ -35,7 +49,7 @@ def run(command, *, cwd=None, log=None):
 
 def write_reports(out, failed=False):
     """Keep an offline HTML dashboard and a short resource summary with each run."""
-    command = [sys.executable, REPO / "fpga/litex/scripts/vivado_reports_index.py", out,
+    command = [sys.executable, COMMON / "scripts/vivado_reports_index.py", out,
                "--title", f"Native FPGA reports - {BOARD.name} / {out.name}"]
     if failed:
         command.append("--build-failed")
@@ -59,6 +73,7 @@ def configuration(args):
     )}
     if PROFILE.get("cm005_bridge"):
         result["cm005_bridge"] = args.cm005_bridge
+        result["cm005_ethernet"] = args.cm005_ethernet
     return result
 
 
@@ -77,7 +92,7 @@ def input_hashes(cm005_bridge=False):
                       if Path(name).suffix in extensions and (parent / name).is_file()]
     if cm005_bridge:
         bridge_sources = (
-            "cm005_native.py", "cm005_bridge.py", "cm005_bridge_queue.py", "cm005.py",
+            "cm005_native.py", "cm005_bridge.py", "cm005_bridge_queue.py", "cm005_switch.py", "cm005.py",
             "cm005_oversample.py", "cm005_timing.py", "usp_clock.py", "ku15p_soc.py",
             "mlk_cu08_ku15p.py", "mlk_cu08_ku15p_platform.py",
             "cores/cpu/raptor/core.py", "cores/cpu/raptor/__init__.py",
@@ -191,8 +206,27 @@ def device_tree(args, out, ram_bytes):
         ethernet = '''
         bridge@18000000 {
             compatible = "raptor,cm005-forwarder-v1";
-            reg = <0 0x18000000 0 0x10000>;
+            reg = <0 0x18000000 0 0x1000>;
         };
+'''
+    if getattr(args, "cm005_ethernet", 0):
+        layout = PROFILE["cm005_cpu_ethernet"]
+        base = {key: int(layout[key], 0) for key in ("phy_base", "csr_base", "buffer_base")}
+        mac = layout["mac"].replace(":", " ")
+        buffer_bytes = (layout["rx_slots"] + layout["tx_slots"]) * layout["slot_size"]
+        ethernet += f'''
+        ethernet@{base['csr_base']:x} {{
+            compatible = "litex,liteeth";
+            reg = <0 0x{base['csr_base']:x} 0 0x100>,
+                  <0 0x{base['phy_base']:x} 0 4>,
+                  <0 0x{base['buffer_base']:x} 0 0x{buffer_bytes:x}>;
+            reg-names = "mac", "mdio", "buffer";
+            interrupt-parent = <&plic>; interrupts = <2>;
+            local-mac-address = [{mac}];
+            litex,rx-slots = <{layout['rx_slots']}>;
+            litex,tx-slots = <{layout['tx_slots']}>;
+            litex,slot-size = <{layout['slot_size']}>;
+        }};
 '''
     def cells(name):
         return f"0 0x{reg[name]['base']:x} 0 0x{reg[name]['size']:x}"
@@ -313,7 +347,10 @@ def prepare(args, out):
                 shutil.copyfile(path, sources / path.name)
     if args.cm005_bridge:
         generated = out / "cm005-generated"
-        run([args.bridge_python, REPO / "fpga/litex/cm005_native.py", "--output", generated],
+        command = [args.bridge_python, REPO / "fpga/litex/cm005_native.py", "--output", generated]
+        if args.cm005_ethernet:
+            command += ["--with-cpu-ethernet"]
+        run(command,
             log=out / "cm005-generation.log")
         for path in generated.iterdir():
             if path.is_file():
@@ -324,6 +361,7 @@ def prepare(args, out):
 `define NATIVE_DDR {int(args.memory == 'ddr')}
 `define NATIVE_ETHERNET {args.ethernet}
 `define NATIVE_CM005_BRIDGE {args.cm005_bridge}
+`define NATIVE_CM005_ETHERNET {args.cm005_ethernet}
 `define NATIVE_RAM_BYTES {args.ram_bytes}
 `define NATIVE_USE_RESET_BUTTON {args.reset_button}
 `define NATIVE_ROM_FILE "{out / 'boot.hex'}"
@@ -442,7 +480,7 @@ def refresh_software(args, out):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, parents=[board_parser()])
     parser.add_argument("action", choices=("prepare", "refresh-software", "lint", "test", "sim", "ip-check", "peripheral-synth",
                                           "synth", "build", "load", "info"))
     parser.add_argument("--xlen", type=int, choices=(32, 64), default=64)
@@ -455,6 +493,8 @@ def main():
                         help="enable native gigabit Ethernet on supported boards")
     parser.add_argument("--cm005-bridge", type=int, choices=(0, 1), default=PROFILE.get("cm005_bridge", 0),
                         help="retain independent CM005 A/B forwarding on CU08 (50 MHz)")
+    parser.add_argument("--cm005-ethernet", type=int, choices=(0, 1), default=0,
+                        help="attach the native CPU to CM005 while retaining A/B forwarding")
     parser.add_argument("--bridge-python", default=str(REPO / "fpga/litex/.venv/bin/python"),
                         help="Python environment for the pinned CM005 Migen/LiteEth generator")
     parser.add_argument("--ddr-part", default=PROFILE["ddr_part"])
@@ -469,6 +509,8 @@ def main():
         parser.error("native Ethernet is not supported by this board")
     if args.cm005_bridge and not PROFILE.get("cm005_bridge"):
         parser.error("CM005 forwarding is not supported by this board")
+    if args.cm005_ethernet and not (args.cm005_bridge and PROFILE.get("cm005_cpu_ethernet")):
+        parser.error("CM005 CPU Ethernet requires this board's CM005 forwarder")
     if args.cm005_bridge and args.clock_mhz != 50:
         parser.error("CM005 forwarding currently requires CLOCK_MHZ=50; disable it explicitly for other clocks")
     if args.jobs <= 0 or args.jobs > 32:
@@ -539,3 +581,10 @@ def main():
             if args.action in ("build", "synth"):
                 write_reports(out)
         print(f"{args.action}: PASS ({out})")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
+        raise SystemExit(str(exc)) from exc

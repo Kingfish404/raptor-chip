@@ -10,5 +10,12 @@
   "ddr_rtl": "rapt_rk_ddr.sv",
   "compatible": "raptor,rk-xcku5p-f-native",
   "model": "Raptor native RK-XCKU5P-F V1.2",
-  "banner": "RK-XCKU5P-F"
+  "banner": "RK-XCKU5P-F",
+  "ubuntu": {
+    "transport": "tftp",
+    "network_driver": "native",
+    "boot_ip": "192.168.50.88",
+    "hostname": "raptor-ku5p",
+    "ethernet_node": "/soc/ethernet@18000000"
+  }
 }

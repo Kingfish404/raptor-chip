@@ -175,6 +175,17 @@ module rapt_l2 #(
   if (PADDR_BITS > XLEN || PADDR_BITS <= IndexBits + OffsetBits) begin : g_invalid_paddr_width
     $error("L2 physical address width must fit its request and cache geometry");
   end
+  // The fixed BOOM directory must represent every enabled cacheable PMA
+  // byte. Reject future map growth instead of silently aliasing its tag.
+  for (genvar r = 0; r < rapt_pkg::PmaRegionCount; r++) begin : g_pma_tag_capacity
+    if (BoomBankedStore && rapt_pkg::PmaRegions[r].enabled
+        && rapt_pkg::PmaRegions[r].attrs.cacheable
+        && ((rapt_pkg::PmaRegions[r].end_addr - 64'd1)
+            >> (TagBits + IndexBits + OffsetBits)) != 0) begin : g_invalid
+      $error("BOOM L2 tag capacity does not cover a cacheable PMA region");
+      RAPT_BOOM_L2_TAG_TOO_NARROW_FOR_CACHEABLE_PMA invalid_tag_capacity ();
+    end
+  end
   localparam int ByteOffsetBits = $clog2(WordBytes);
   localparam int WordOffsetLsb = ByteOffsetBits;
   localparam int WordOffsetMsb = ByteOffsetBits + L2_LINE_LEN - 1;

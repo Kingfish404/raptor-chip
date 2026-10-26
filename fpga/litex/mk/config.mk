@@ -459,7 +459,7 @@ _FPGA_HASH_COMMAND = { cat $(_FPGA_HASH_INPUTS) 2>/dev/null; printf '%s' '$(_FPG
 
 GOWIN_REPORTS_INDEX_SRC  := $(LITEX_DIR)/scripts/reports_index.html
 GOWIN_REPORTS_INDEX_DST  := $(FPGA_BUILD_DIR)/impl/index.html
-VIVADO_REPORTS_INDEX_GEN := $(LITEX_DIR)/scripts/vivado_reports_index.py
+VIVADO_REPORTS_INDEX_GEN := $(RAPTOR_HOME)/fpga/common/scripts/vivado_reports_index.py
 VIVADO_REPORTS_INDEX_DST := $(FPGA_BUILD_DIR)/index.html
 
 else

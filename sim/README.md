@@ -100,23 +100,62 @@ to add cycles before the first read beat and each write response, respectively.
 Their Make variables are `SIM_MEM_READ_LATENCY` and `SIM_MEM_WRITE_LATENCY`.
 Both default to zero. Random delay, when enabled, remains additive.
 
-`--mem-serialize-writes` (`SIM_MEM_SERIALIZE_WRITES=1`) also holds AWREADY low
+The simulation-only AXI endpoint (`sim/rtl/rapt_npc_soc.sv`) supports FIXED,
+INCR and WRAP bursts, including narrow transfers and unaligned INCR starts.
+WRAP lengths are 2, 4, 8 or 16 beats. Invalid burst geometry, oversized
+transfers, 4 KiB crossings, illegal WSTRB lanes and WLAST/AWLEN mismatches
+produce SLVERR; unmapped addresses produce DECERR. Descriptor errors cause no
+host memory/device access. A write-data error suppresses that beat and later
+beats; earlier valid writes are already visible. Early WLAST ends the malformed
+burst; missing WLAST at AWLEN also terminates it with an error so the endpoint
+can recover. This diagnostic behavior does not make malformed traffic legal AXI.
+
+`ReadOutstanding` is a top-level RTL parameter (default 8, range 1..16).
+Reads preserve order within each ID and can interleave beats across IDs.
+Round-robin arbitration and a registered R output maintain one beat per cycle
+at zero additional delay while holding the complete response stable under
+backpressure. Host reads occur when a beat enters that output register, once
+per beat. A queued request does not perform an early MMIO read.
+
+AW and W are independent: one elastic W slot accepts data before its address,
+and zero-delay AW/W can be serviced together. No host write occurs before both
+channels have handshaken. Valid strobes are passed in one host callback per
+beat, preserving device register write atomicity; a zero strobe has no effect.
+
+`--mem-serialize-writes` (`SIM_MEM_SERIALIZE_WRITES=1`) holds AWREADY low
 until the previous write response has been consumed, including its handshake
-cycle. This models a strictly serialized write endpoint.
-It defaults off, preserving the existing address lookahead behavior. Reads
-remain independent in the legacy one-response model. Fixed delays approximate aggregate memory service time;
-this option does not model DDR scheduling, bridge address stages, or refresh.
+cycle. It defaults off. The W slot can still hold one early beat in this mode.
+Fixed delays approximate aggregate memory service time; this option does not
+model DDR scheduling, bridge address stages, or refresh.
 
 `--mem-write-outstanding=N` (`SIM_MEM_WRITE_OUTSTANDING=N`, range 1..64)
-selects response queue capacity. One preserves the legacy model; larger values
-permit independent writes while preserving overlapping-read and device ordering.
-Use four for the native bus's default capacity. Serialization remains an
-additional admission restriction at any queue capacity.
+selects response queue capacity, default 1. Larger values permit independent
+writes; B responses remain ordered. RAM read/write hazards cover complete burst
+footprints, including wrapped addresses and canonical aliases. Device accesses
+are conservative barriers through final R/B consumption. Independent RAM reads
+can pass pending write responses. Serialization adds an AW admission restriction
+at any queue capacity. Fixed latency, capacity and serialization options are
+sampled at reset; random delay is sampled per request/beat/response.
 
-Run `python3 sim/tools/test_npc_write_serialization.py --output /tmp/npc-write-check`
-to check both modes on RV32/RV64 with delayed/stalled B responses, following
-addresses, independent reads, and multi-beat writes. The output path must not
-already exist.
+Run the endpoint regressions without building the core:
+
+```sh
+python3 sim/tests/test_npc_axi_protocol.py --output /tmp/npc-axi-check
+python3 sim/tests/test_npc_write_outstanding.py --output /tmp/npc-write-queue-check
+python3 sim/tools/test_npc_write_serialization.py --output /tmp/npc-write-check
+```
+
+The protocol scoreboard covers both XLENs, read capacities 1/3/8, fixed and
+seeded random delays, same-ID ordering, interleaving, response backpressure,
+burst geometry, errors, side effects, reset, and zero-delay streaming throughput.
+The write regressions cover capacities 1/2/4/8/64 and both serialization modes.
+The serialization output path must not already exist.
+
+For performance comparisons, freeze the core configuration and executable image,
+keep difftest/assertion/wave options and host compiler settings identical, and
+report ROI cycles separately from elapsed host time. A lower AXI wait count can
+have little effect on CoreMark/MHz when the benchmark runs mostly from cache.
+Exclude build time and use repeated alternating runs for host throughput.
 
 ## FPGA timing evaluation harness
 

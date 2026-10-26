@@ -1,4 +1,4 @@
-# Invoked by build.py with an immutable source snapshot and generated config.
+# Invoked by native_build.py with an immutable source snapshot and generated config.
 if {$argc != 2} {error "usage: build.tcl config.tcl ip-check|peripheral-synth|synth|build"}
 source [lindex $argv 0]
 set action [lindex $argv 1]

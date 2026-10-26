@@ -25,6 +25,21 @@ build.configure(FPGA / "mlk-cu08-ku15p")
 
 
 class NativeToolsTests(unittest.TestCase):
+    def test_cu08_cpu_nic_device_tree_keeps_forwarder_and_packet_geometry(self):
+        build.configure(FPGA / "mlk-cu08-ku15p")
+        with tempfile.TemporaryDirectory() as temp, patch.object(build, "run"):
+            args = types.SimpleNamespace(xlen=64, clock_mhz=50, cm005_bridge=1, cm005_ethernet=1)
+            build.device_tree(args, Path(temp), 0x80000000)
+            tree = (Path(temp) / "native.dts").read_text()
+            self.assertIn('compatible = "raptor,cm005-forwarder-v1"', tree)
+            self.assertIn('compatible = "litex,liteeth"', tree)
+            self.assertIn('reg-names = "mac", "mdio", "buffer"', tree)
+            self.assertIn('0 0x18004000 0 0x5000', tree)
+            self.assertIn('local-mac-address = [02 52 41 50 15 01]', tree)
+            self.assertIn('litex,rx-slots = <8>', tree)
+            self.assertIn('litex,tx-slots = <2>', tree)
+            self.assertIn('interrupts = <2>', tree)
+
     def test_source_identity_ignores_chisel_cache_but_tracks_generated_rtl(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)

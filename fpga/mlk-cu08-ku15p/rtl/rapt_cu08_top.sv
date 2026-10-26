@@ -144,7 +144,7 @@ module rapt_cu08_top (
   assign ddr.rlast = 0;
   assign ddr.rvalid = 0;
 `endif
-  logic peripheral_rd, peripheral_wr;
+  logic peripheral_rd, peripheral_wr, peripheral_irq;
   logic [15:0] peripheral_raddr, peripheral_waddr;
   logic [31:0] peripheral_wdata, peripheral_rdata;
   logic [3:0] peripheral_wstrb;
@@ -165,6 +165,7 @@ module rapt_cu08_top (
       .native_wdata(peripheral_wdata),
       .native_wstrb(peripheral_wstrb),
       .native_rdata(peripheral_rdata),
+      .native_irq(peripheral_irq),
       .cm005_clocks_rx,
       .cm005_clocks_tx,
       .cm005_rx_ctl,
@@ -185,6 +186,7 @@ module rapt_cu08_top (
   );
 `else
   assign peripheral_rdata = '0;
+  assign peripheral_irq = 1'b0;
 `endif
   rapt_native_soc #(
       .WithDdr(`NATIVE_DDR),
@@ -202,7 +204,7 @@ module rapt_cu08_top (
       .peripheral_wdata,
       .peripheral_wstrb,
       .peripheral_rdata,
-      .peripheral_irq(1'b0),
+      .peripheral_irq,
       .uart_rx(serial_rx),
       .uart_tx(serial_tx),
       .writeback_error,

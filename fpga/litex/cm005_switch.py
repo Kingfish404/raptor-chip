@@ -8,8 +8,9 @@ from litex.gen import LiteXModule
 from litex.soc.interconnect import packet, stream
 from litex.soc.interconnect.csr import CSRConstant, CSRStatus, CSRStorage
 from litex.soc.integration.soc import SoCRegion
-from liteeth.common import eth_phy_description
+from liteeth.common import eth_mtu_default, eth_phy_description
 from liteeth.mac.wishbone import LiteEthMACWishboneInterface
+from liteeth.mac.sram import LiteEthMACSRAM
 
 from cm005_bridge_queue import EthernetFrameQueue
 
@@ -43,14 +44,20 @@ class CM005Switch(LiteXModule):
 
 class CPUFrameMAC(LiteXModule):
     """Standard LiteEth CSR/IRQ/SRAM ABI, attached after physical FCS checking."""
-    def __init__(self, endianness):
+    def __init__(self, endianness, with_wishbone=True, eth_mtu=eth_mtu_default):
         self.rx_slots = CSRConstant(8)
         self.tx_slots = CSRConstant(2)
         self.slot_size = CSRConstant(2048)
-        self.interface = LiteEthMACWishboneInterface(32, nrxslots=8, ntxslots=2,
-                                                    endianness=endianness)
+        if with_wishbone:
+            self.interface = LiteEthMACWishboneInterface(32, nrxslots=8, ntxslots=2,
+                                                        endianness=endianness, eth_mtu=eth_mtu)
+            self.bus_rx, self.bus_tx = self.interface.bus_rx, self.interface.bus_tx
+        else:
+            self.interface = LiteXModule()
+            self.interface.sram = sram = LiteEthMACSRAM(
+                32, (eth_mtu + 3) // 4, 8, 2, endianness, eth_mtu=eth_mtu)
+            self.interface.sink, self.interface.source = sram.sink, sram.source
         self.ev = self.interface.sram.ev
-        self.bus_rx, self.bus_tx = self.interface.bus_rx, self.interface.bus_tx
         self.sink, self.source = self.interface.sink, self.interface.source
         # BIOS selects software or hardware framing from this CSR's presence.
         # The physical MACs already insert/check preamble and FCS for this

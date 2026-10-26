@@ -1329,7 +1329,9 @@ module rapt_l1d #(
   end
 
   // B-side decode + tag compare (parallel to A's, on the registered B addr)
-  assign b_tag = b_addr_r[PADDR_BITS-1:L1D_LEN+L1D_LINE_LEN+L1dOffsetBits];
+  logic [XLEN-1:0] b_paddr;
+  assign b_paddr = rapt_pkg::canonical_paddr(b_addr_r);
+  assign b_tag = b_paddr[PADDR_BITS-1:L1D_LEN+L1D_LINE_LEN+L1dOffsetBits];
   assign b_idx = b_addr_r[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits];
   assign b_off = b_addr_r[L1D_LINE_LEN+L1dOffsetBits-1:L1dOffsetBits];
   logic [L1D_N_WAYS-1:0] b_way_data_ready;
@@ -1396,7 +1398,7 @@ module rapt_l1d #(
   assign idle_load_perm = (l1d_state == IDLE) && !lsu_l1d.rcontext.mmu_en;
   // PTE policy in IDLE uses the incoming context even for translated loads.
   assign perm_load_context = (l1d_state == IDLE) ? lsu_l1d.rcontext : load_context_q;
-  assign perm_base_addr = idle_load_perm ? lsu_l1d.raddr : l1d_addr;
+  assign perm_base_addr = idle_load_perm ? rapt_pkg::canonical_paddr(lsu_l1d.raddr) : l1d_addr;
   logic perm_check_valid;
   logic [2:0] perm_check_offset;
   logic [3:0] perm_check_size_m1;
@@ -1802,7 +1804,7 @@ module rapt_l1d #(
               if (load_admit) begin
                 rec_store <= 1'b0;
                 load_context_q <= lsu_l1d.rcontext;
-                l1d_addr <= lsu_l1d.raddr;
+                l1d_addr <= rapt_pkg::canonical_paddr(lsu_l1d.raddr);
                 l1d_pbmt <= 2'b00;
                 rec_addr <= lsu_l1d.raddr;
                 l1d_ralu <= lsu_l1d.ralu;
@@ -1900,6 +1902,12 @@ module rapt_l1d #(
           end else if (cmu_bcast.flush_pipe) begin
             l1d_addr  <= '0;
             l1d_state <= IDLE;
+          end else if (!cacheable_r && !lsu_l1d.ordered) begin
+            // Retry releases the LSU owner on this edge, even while dirty
+            // writeback is pending. Do not retain a request whose ordered
+            // permission can next belong to a different load.
+            l1d_addr <= '0;
+            l1d_state <= IDLE;
           end else if (load_miss_wb_hold) begin
             l1d_state <= LD_A;
           end else if (mshr_complete) begin
@@ -1910,9 +1918,6 @@ module rapt_l1d #(
               l1d_state <= LD_MSHR_RSP;
             end
           end else if (mshr_release || mshr_store_yield) begin
-            l1d_state <= IDLE;
-          end else if (!cacheable_r && !lsu_l1d.ordered) begin
-            l1d_addr  <= '0;
             l1d_state <= IDLE;
           end else if (l1d_atomic_lock) begin
             if (tag_hit) begin
@@ -2093,6 +2098,7 @@ module rapt_l1d #(
                   legacy_arvalid && !l1d_bus.ar_ptw && !cacheable_r, lsu_l1d.ordered)
   `RAPT_SVA_IMPLY(clock, reset, L1D_RETRY_NO_COMPLETION_OR_READ, lsu_l1d.rretry,
                   !lsu_l1d.rready && !lsu_l1d.trap && !(legacy_arvalid && !l1d_bus.ar_ptw))
+  `RAPT_SVA_NEXT(clock, reset, L1D_RETRY_RELEASES_OWNER, lsu_l1d.rretry, l1d_state == IDLE)
   `RAPT_SVA_IMPLY(clock, reset, L1D_FLUSH_BLOCKS_NEW_READ, cmu_bcast.flush_pipe, !l1d_bus.arvalid)
   `RAPT_SVA_IMPLY(clock, reset, L1D_PTW_PERMISSION_BLOCKS_READ, legacy_arvalid && ptw_arvalid,
                   ptw_permission_valid_q && !ptw_permission_fault_q)

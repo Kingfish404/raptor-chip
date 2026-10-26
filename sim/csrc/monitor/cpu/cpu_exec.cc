@@ -181,7 +181,7 @@ static void dump_pipeline_stall_state()
   }
 #if !defined(RAPT_SOC) && !defined(CONFIG_wrapBus)
   Log("stall AXI model: AR v/r=%u/%u addr=%08x; R busy=%u v/r=%u/%u "
-      "id=%u delay=%u beats=%u timeout=%u",
+      "id=%u pending=%u timeout=%u",
       (unsigned)top->rootp->raptSoC->perip__DOT__arvalid,
       (unsigned)top->rootp->raptSoC->perip__DOT__out_arready,
       (unsigned)top->rootp->raptSoC->perip__DOT__araddr,
@@ -189,8 +189,7 @@ static void dump_pipeline_stall_state()
       (unsigned)top->rootp->raptSoC->perip__DOT__out_rvalid,
       (unsigned)top->rootp->raptSoC->perip__DOT__rready,
       (unsigned)top->rootp->raptSoC->perip__DOT__r_id_q,
-      (unsigned)top->rootp->raptSoC->perip__DOT__r_delay_q,
-      (unsigned)top->rootp->raptSoC->perip__DOT__r_beats_left,
+      (unsigned)top->rootp->raptSoC->perip__DOT__read_count_q,
       (unsigned)top->rootp->raptSoC->perip__DOT__r_timeout_cnt);
 #endif
 }

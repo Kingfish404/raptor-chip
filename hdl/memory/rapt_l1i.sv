@@ -202,7 +202,7 @@ module rapt_l1i #(
   logic [31:0] install_data_q;
 
   assign mmu_en = csr_bcast.immu_en;
-  assign pc_ifu = mmu_en ? XLEN'({itlb_ptag, tlb_offset}) : fetch_pc;
+  assign pc_ifu = mmu_en ? XLEN'({itlb_ptag, tlb_offset}) : rapt_pkg::canonical_paddr(fetch_pc);
   assign invalid_l1i = ifu_l1i.invalid;
   assign pc_ifu_next = pc_ifu + 2;
 
@@ -917,17 +917,17 @@ module rapt_l1i #(
   // Bare fetch shares the next-page increment across the lookahead slots.
   assign lookahead_bare_next_page = fetch_pc[XLEN-1:12] + (XLEN-12)'(1);
   assign lookahead_n1_page = {1'b0, fetch_pc[11:2], 2'b00} + 13'd4;
-  assign lookahead_n1_addr = {
+  assign lookahead_n1_addr = rapt_pkg::canonical_paddr({
     mmu_en ? pc_ifu[XLEN-1:12]
       : (lookahead_n1_page[12] ? lookahead_bare_next_page : fetch_pc[XLEN-1:12]),
     lookahead_n1_page[11:0]
-  };
+  });
   assign lookahead_n2_page = {1'b0, fetch_pc[11:2], 2'b00} + 13'd8;
-  assign lookahead_n2_addr = {
+  assign lookahead_n2_addr = rapt_pkg::canonical_paddr({
     mmu_en ? pc_ifu[XLEN-1:12]
       : (lookahead_n2_page[12] ? lookahead_bare_next_page : fetch_pc[XLEN-1:12]),
     lookahead_n2_page[11:0]
-  };
+  });
 
   assign addr_offset_n1 = addr_offset + L1I_LINE_LEN'(1);
   assign addr_offset_n2 = addr_offset + L1I_LINE_LEN'(2);
@@ -989,17 +989,17 @@ module rapt_l1i #(
   logic hit_n3, hit_n4, sram_n3_ready, sram_n4_ready;
   logic n3_same_line_as_next4, n4_same_line_as_next4;
   assign lookahead_n3_page = {1'b0, fetch_pc[11:2], 2'b00} + 13'd12;
-  assign lookahead_n3_addr = {
+  assign lookahead_n3_addr = rapt_pkg::canonical_paddr({
     mmu_en ? pc_ifu[XLEN-1:12]
       : (lookahead_n3_page[12] ? lookahead_bare_next_page : fetch_pc[XLEN-1:12]),
     lookahead_n3_page[11:0]
-  };
+  });
   assign lookahead_n4_page = {1'b0, fetch_pc[11:2], 2'b00} + 13'd16;
-  assign lookahead_n4_addr = {
+  assign lookahead_n4_addr = rapt_pkg::canonical_paddr({
     mmu_en ? pc_ifu[XLEN-1:12]
       : (lookahead_n4_page[12] ? lookahead_bare_next_page : fetch_pc[XLEN-1:12]),
     lookahead_n4_page[11:0]
-  };
+  });
   assign addr_offset_n3 = addr_offset + L1I_LINE_LEN'(3);
   assign addr_offset_n4 = addr_offset + L1I_LINE_LEN'(4);
   for (genvar w = 0; w < L1I_N_WAYS; w++) begin : g_way_hit_wide

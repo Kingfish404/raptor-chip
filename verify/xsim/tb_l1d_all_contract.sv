@@ -5037,7 +5037,8 @@ endmodule
 // Real D-side walker and I-side bus owner share delayed backing memory.
 // Writes become visible only on B; unrelated dirty data must remain private.
 module tb_targeted_coherence #(
-    parameter bit DirtySkip = 0
+    parameter bit DirtySkip = 0,
+    parameter bit RetryWriteback = 0
 );
   localparam int XLEN = `RAPT_XLEN;
   localparam int Bytes = XLEN / 8;
@@ -5085,6 +5086,7 @@ module tb_targeted_coherence #(
   end
   rapt_l1d #(
       .WriteBack(1),
+      .TargetedCoherence(RetryWriteback ? 0 : `RAPT_L1D_TARGETED_COHERENCE),
       .DirtySkip(DirtySkip),
       .L2Tlb(`RAPT_L2TLB_ENTRIES > 0)
   ) dut (
@@ -5112,7 +5114,7 @@ module tb_targeted_coherence #(
   logic [XLEN-1:0] read_addr, write_addr, write_data;
   logic [Bytes-1:0] write_strb;
   int read_beats, read_step, read_delay, write_delay;
-  int writes, dptw_reads, iptw_reads, device_writes;
+  int writes, dptw_reads, iptw_reads, device_writes, device_reads;
   bit fail_writes = 0;
   int delay_max = 7;
   int unsigned rng = 1;
@@ -5147,6 +5149,7 @@ module tb_targeted_coherence #(
       dptw_reads = 0;
       iptw_reads = 0;
       device_writes = 0;
+      device_reads = 0;
     end else begin
       rng = rng * 1664525 + 1013904223;
       if (mem.rd_req_valid && mem.rd_req_ready) begin
@@ -5162,6 +5165,7 @@ module tb_targeted_coherence #(
         if (writing && ((mem.rd_req_addr ^ write_addr) >> $clog2(`RAPT_CACHE_LINE_BYTES)) == 0)
           $fatal(1, "read escaped before target write response addr=%h", mem.rd_req_addr);
         reading <= 1;
+        if (mem.rd_req_addr == XLEN'('h10000000)) device_reads++;
         read_addr <= mem.rd_req_addr;
         read_id <= mem.rd_req_id;
         read_beats <= int'(mem.rd_req_len) + 1;
@@ -5382,11 +5386,90 @@ module tb_targeted_coherence #(
     load(Other, XLEN'('h2468ace0));
   endtask
 
+  task automatic retry_during_writeback;
+    localparam logic [XLEN-1:0] Device = XLEN'('h10000000);
+    int reads_before;
+    bit retried, completed;
+    init();
+    // Warm a device translation before making the unrelated cached word dirty.
+    // The following retry must therefore collide with writeback in LD_A.
+    seed_word(Base + 'h10000 + XLEN'(XLEN == 64 ? 8 : 1024),
+              XLEN == 64 ? XLEN'(('h80011 << 10) | 1) : (Device >> 2) | XLEN'('hcf));
+    if (XLEN == 64) seed_word(Base + 'h11000, (Device >> 2) | XLEN'('hcf));
+    seed_word(Base + 'h10000 + XLEN'(XLEN == 64 ? 16 : 2048), (Base >> 2) | XLEN'('hcf));
+    pmp_update.addr_we = 1;
+    pmp_update.raw_addr = '1;
+    pmp_update.napot_mask = '1;
+    pmp_update.cfg_we = 1;
+    pmp_update.cfg_r = 1;
+    pmp_update.cfg_w = 1;
+    pmp_update.mode_off[0] = 0;
+    pmp_update.mode_napot = 1;
+    @(negedge clock);
+    pmp_update.addr_we = 0;
+    pmp_update.cfg_we = 0;
+    csr_bcast.mprv = 1;
+    csr_bcast.mpp = `RAPT_PRIV_S;
+    csr_bcast.dmmu_en = 1;
+    csr_bcast.satp_ppn = 'h80010;
+    load(Va, XLEN'('h13579bdf));
+    store(Target, XLEN'('h12345678));
+    reads_before = device_reads;
+    retried = 0;
+    completed = 0;
+    @(negedge clock);
+    lsu_l1d.rvalid = 1;
+    lsu_l1d.raddr = Va;
+    lsu_l1d.ralu = `RAPT_ALU_LW__;
+    lsu_l1d.ordered = 0;
+    for (int n = 0; n < 1000; n++) begin
+      @(posedge clock);
+      if (lsu_l1d.rretry) begin
+        if (!dut.load_miss_wb_hold || lsu_l1d.rready)
+          $fatal(1, "retry did not overlap a dirty writeback hold");
+        retried = 1;
+        break;
+      end
+    end
+    if (!retried) $fatal(1, "translated device retry timeout");
+    // Model IOQ releasing the old owner and selecting an older ordered RAM
+    // load. That owner's permission must never authorize the abandoned IO.
+    @(negedge clock);
+    lsu_l1d.raddr = Other;
+    lsu_l1d.ralu = XLEN == 64 ? `RAPT_ALU_LD__ : `RAPT_ALU_LW__;
+    lsu_l1d.ordered = 1;
+    for (int n = 0; n < 10000; n++) begin
+      @(posedge clock);
+      if (device_reads != reads_before)
+        $fatal(1, "retried MMIO request borrowed the next owner's ordered permission");
+      if (lsu_l1d.rready) begin
+        if (lsu_l1d.trap || lsu_l1d.rdata != 0)
+          $fatal(1, "replacement RAM owner received an incorrect response");
+        completed = 1;
+        break;
+      end
+    end
+    if (!completed) $fatal(1, "replacement RAM load timeout");
+    @(negedge clock);
+    lsu_l1d.rvalid = 0;
+    repeat (20) @(negedge clock);
+    if (memory_word(Target) != XLEN'('h12345678))
+      $fatal(1, "retry lost the dirty writeback payload");
+    load(Va, XLEN'('h13579bdf));
+    if (device_reads != reads_before + 1)
+      $fatal(1, "ordered device retry was not issued exactly once");
+    $display("PASS: RV%0d translated MMIO retry releases ownership during writeback", XLEN);
+  endtask
+
   logic [XLEN-1:0] root_addr, root_pte, middle_pte, leaf_pte;
   logic [XLEN-1:0] mixed_value[4];
   logic [3:0] mixed_coverage;
   int sparse_drain_cycles;
   initial begin
+    if (RetryWriteback) begin
+      retry_during_writeback();
+      $finish;
+    end
     if ($value$plusargs("BUS_DELAY_MAX=%d", delay_max)) begin
     end
     root_addr = Base + 'h10000 + XLEN'(XLEN == 64 ? 8 : 1024);
@@ -5975,4 +6058,9 @@ module tb_cbo_refill_order;
     #10000000;
     $fatal(1, "CBO refill order timeout");
   end
+endmodule
+
+
+module tb_l1d_mmio_retry_wb;
+  tb_targeted_coherence #(.RetryWriteback(1)) test ();
 endmodule

@@ -24,7 +24,7 @@ sim-build-isolation-check: ## Check build-local Kconfig and non-destructive mode
 	python3 "$(VERIFY_HOME)/scripts/test_sim_build_isolation.py"
 
 # Tool-free unit tests for helper scripts that have no dedicated check target.
-SCRIPT_UNITTESTS := test_config_macro_check test_fp_test_makefile test_closeout_config_check test_litex_sdcard_linux_override \
+SCRIPT_UNITTESTS := test_config_macro_check test_paddr_config test_fp_test_makefile test_closeout_config_check test_litex_sdcard_linux_override \
 	test_lrsc_trace_check test_run_act4 \
 	test_sta.SummaryStatusTest test_subsystem_build_cache
 
@@ -104,7 +104,10 @@ NPC_BIN_64  := $(NSIM_HOME)/build/$(SIM_BUILD_PROFILE)/riscv64-npc-sim
 RISCOF_BUILD_PROFILE ?= $(RAPT_CONFIG)-riscof
 RISCOF_NPC_BIN_32 := $(NSIM_HOME)/build/$(RISCOF_BUILD_PROFILE)/riscv32-npc-sim
 NEMU_SO_32  := $(NEMU_HOME)/build/ref/riscv32_ref_defconfig/riscv32-nemu-interpreter-so
-NEMU_SO_64  := $(NEMU_HOME)/build/ref/riscv64_ref_defconfig/riscv64-nemu-interpreter-so
+NEMU_REF_PMPADDR_BITS ?= $(shell $(PYTHON) "$(RAPTOR_HOME)/sim/scripts/paddr_config.py" \
+  --pmp-only --config "$(RAPTOR_HOME)/hdl/configs/$(or $(strip $(RAPT_CONFIG)),default)" \
+  --hdl "$(RAPTOR_HOME)/hdl" -- -DRAPT_RV64 $(VFLAGS))
+NEMU_SO_64  := $(NEMU_HOME)/build/ref/riscv64_ref_defconfig$(if $(filter 30,$(NEMU_REF_PMPADDR_BITS)),,-pmp$(NEMU_REF_PMPADDR_BITS))/riscv64-nemu-interpreter-so
 MROM_IMG    = $(BUILD_DIR)/mrom-rv$(ISA_XLEN)/mrom-data.bin
 # RVA22S64 and SQ checkpoint flows follow their own XLEN variable, independent of ISA.
 RVA22S64_XLEN ?= 64
@@ -2035,6 +2038,7 @@ rva22s64-zkt-core-timing-run: $(RVA22S64_MROM)
 # Separate build/run targets keep shared simulator configuration mutations
 # explicit and allow repeated memory timing runs with the exact same binaries.
 RVA22S64_CORE_PROFILE ?= rva22s64-rv$(RVA22S64_XLEN)
+RVA22S64_VFLAGS = $(if $(filter 64,$(RVA22S64_XLEN)),-DRAPT_RV64,) $(VFLAGS)
 RVA22S64_PRIV_DIR := $(BUILD_DIR)/rva22s64-privileged-rv$(RVA22S64_XLEN)
 RVA22S64_NPC ?= $(NSIM_HOME)/build/$(RVA22S64_CORE_PROFILE)/riscv$(RVA22S64_XLEN)-npc-sim
 .PHONY: rva22s64-privileged-build rva22s64-privileged-run rva22s64-privileged-run-rv32 rva22s64-privileged-run-rv64
@@ -2044,8 +2048,7 @@ rva22s64-privileged-run-rv64:
 	$(MAKE) rva22s64-privileged-run RVA22S64_XLEN=64
 rva22s64-privileged-build:
 	$(MAKE) -C "$(RAPTOR_HOME)" verilog
-	$(MAKE) -C "$(RAPTOR_HOME)" build-nemu$(RVA22S64_XLEN)-ref
-	$(MAKE) -C "$(NSIM_HOME)" RAPT_CONFIG=default BUILD_PROFILE="$(RVA22S64_CORE_PROFILE)" VFLAGS="$(if $(filter 64,$(RVA22S64_XLEN)),-DRAPT_RV64,)"
+	$(MAKE) -C "$(NSIM_HOME)" RAPT_CONFIG=default BUILD_PROFILE="$(RVA22S64_CORE_PROFILE)" VFLAGS="$(RVA22S64_VFLAGS)" nemu-reference all
 rva22s64-privileged-run: $(RVA22S64_MROM)
 	@mkdir -p "$(RVA22S64_PRIV_DIR)"
 	$(CC) $(GUEST_CPPFLAGS) -march=rv$(RVA22S64_XLEN)imac_zicsr_zifencei -mabi=$(if $(filter 64,$(RVA22S64_XLEN)),lp64,ilp32) -nostdlib -nostartfiles -static \
@@ -2059,7 +2062,7 @@ rva22s64-privileged-run: $(RVA22S64_MROM)
 # Directed guest programs, one name each: app/tests/baremetal/<name with _>.S
 # unless a per-case RVA22S64_TEST_SOURCE override below says otherwise.
 RVA22S64_CASES := \
-	amo-access-fault amo-minmax amo-page-fault atomic-pma bare-mode-switch bit-xlen-legality \
+	amo-access-fault amo-minmax amo-page-fault atomic-pma bare-mode-switch bare-pa-alias bit-xlen-legality \
 	branch-sq-forward btb-amo-slot-reuse btb-exception-slot-reuse \
 	bus-read-error bus-write-error cycle-counter clint-mtime-shared clint-mtime-write \
 	clint-subword clint-subword-msip clint-subword-time clint-subword-write clint-width \
@@ -2075,7 +2078,7 @@ RVA22S64_CASES := \
 	zero-pma zexth-xlen
 # Cases whose sources #error on RV32 (Sv39, high PMP or mode-switch scope).
 RVA22S64_RV64_CASES := \
-	bare-mode-switch fp-page-nested-irq fp-page-retry ifetch-superpage-replace pmp-address-span \
+	bare-mode-switch bare-pa-alias fp-page-nested-irq fp-page-retry ifetch-superpage-replace pmp-address-span \
 	svinval-page-retry svpbmt-enabled svpbmt-wrong-ifetch svpbmt-wrong-path
 RVA22S64_CASE_TARGETS := $(RVA22S64_CASES:%=rva22s64-%-run)
 .PHONY: $(RVA22S64_CASE_TARGETS) rva22s64-directed

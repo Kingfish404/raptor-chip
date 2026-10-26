@@ -144,7 +144,7 @@ module rapt_ifetch_translate #(
           root_q <= satp_ppn;
           pbmte_q <= pbmte;
           sbe_q <= sbe;
-          response_paddr <= request_vaddr;
+          response_paddr <= rapt_pkg::canonical_paddr(request_vaddr);
           response_pbmt <= 0;
           response_fault <= 0;
           response_cause <= 0;

@@ -1,14 +1,8 @@
-!/build.py
-!/build.tcl
 !/constraints/*.xdc
 !/constraints/*.tcl
 !/ip/*.tcl
 !/scripts/*.py
 !/scripts/*.tcl
-!/tests/ubuntu_bench/*.py
-!/linux/Kconfig
-!/linux/Makefile
-!/linux/*.config
 !/vendor/ethernet/provenance.json
 !/ETHERNET.md
 /build/
@@ -17,9 +11,6 @@
 .Xil/
 __pycache__/
 !/board.json
-
-!firmware/
-!firmware/*.c
 
 !keys/
 !keys/ubuntu-test.pub

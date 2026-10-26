@@ -330,9 +330,20 @@ sim-publish-force:
 $(BIN): $(MODEL_BIN) sim-publish-force
 	@python3 "$(NSIM_HOME)/scripts/build_cache.py" publish "$(MODEL_BIN)" "$@"
 
+RTL_PA_WIDTHS := $(shell python3 "$(NSIM_HOME)/scripts/paddr_config.py" \
+  --verilator "$(VERILATOR)" --config "$(CONFIG_DIR)" --hdl "$(VSRC_PATH)" -- $(SIM_VFLAGS))
+ifneq ($(filter ERROR,$(RTL_PA_WIDTHS)),)
+$(error Invalid RTL physical-address configuration; see PA configuration error above)
+endif
+RTL_PMPADDR_BITS := $(word 2,$(RTL_PA_WIDTHS))
+NEMU_REF_PMPADDR_BITS ?= $(RTL_PMPADDR_BITS)
 ifeq ($(ISA64),1)
+ifneq ($(NEMU_REF_PMPADDR_BITS),$(RTL_PMPADDR_BITS))
+$(error NEMU PMP width mismatch: reference $(NEMU_REF_PMPADDR_BITS), RTL $(RTL_PMPADDR_BITS))
+endif
+NEMU_REF_WIDTH_SUFFIX := $(if $(filter 30,$(NEMU_REF_PMPADDR_BITS)),,-pmp$(NEMU_REF_PMPADDR_BITS))
 NEMU_REF_DEFCONFIG := $(if $(filter large,$(SIM_MEM_PROFILE)),riscv64_ref_2g_defconfig,riscv64_ref_defconfig)
-NEMU_REF_SO := $(abspath $(NEMU_HOME)/build/ref/$(NEMU_REF_DEFCONFIG)/riscv64-nemu-interpreter-so)
+NEMU_REF_SO := $(abspath $(NEMU_HOME)/build/ref/$(NEMU_REF_DEFCONFIG)$(NEMU_REF_WIDTH_SUFFIX)/riscv64-nemu-interpreter-so)
 else
 NEMU_REF_DEFCONFIG := $(if $(filter large,$(SIM_MEM_PROFILE)),riscv32_ref_2g_defconfig,riscv32_ref_defconfig)
 NEMU_REF_SO := $(abspath $(NEMU_HOME)/build/ref/$(NEMU_REF_DEFCONFIG)/riscv32-nemu-interpreter-so)
@@ -355,7 +366,8 @@ endif
 
 .PHONY: nemu-reference
 nemu-reference:
-	+$(MAKE) -C $(NEMU_HOME) reference REF_DEFCONFIG=$(NEMU_REF_DEFCONFIG) $(SUBMAKE_JOBS)
+	+$(MAKE) -C $(NEMU_HOME) reference REF_DEFCONFIG=$(NEMU_REF_DEFCONFIG) \
+		$(if $(filter 1,$(ISA64)),REF_PMPADDR_BITS=$(NEMU_REF_PMPADDR_BITS),) $(SUBMAKE_JOBS)
 
 SIM_RANDOM_DELAY ?= 0
 SIM_RANDOM_SEED ?= 1

@@ -121,7 +121,12 @@ module rapt_lsu_sq #(
   logic [ROBLen-1:0] sq_dest[SQ_SIZE];  // ROB id: assertions/debug only
   /* verilator lint_on UNUSEDSIGNAL */
 `endif
-  logic [XLEN-1:0] sq_vaddr[SQ_SIZE];  // virtual : forwarding comparison
+  logic [XLEN-1:0] sq_vaddr[SQ_SIZE];  // virtual: retirement/exception identity
+  logic [XLEN-1:0] sq_compare_addr[SQ_SIZE];
+  logic [XLEN-1:0] alloc_compare_addr;
+  assign alloc_compare_addr = sq_context.mmu_en ? exu_ioq_bcast.tval : rapt_pkg::canonical_paddr(
+      exu_ioq_bcast.tval
+  );
   // Neighbouring CAM block numbers, computed once when the store enters.
   localparam int SqBlockLsb = $clog2(XLEN / 8) + 2;
   logic [XLEN-SqBlockLsb-1:0] sq_next_block[SQ_SIZE], sq_prev_block[SQ_SIZE];
@@ -129,7 +134,7 @@ module rapt_lsu_sq #(
   // IOQ supplies word-aligned later beats, including across page boundaries.
   // Store only their word addresses; reconstruct constant byte-offset bits
   // at each consumer without merging any address drivers. Preserve all upper
-  // bits: the platform also accepts RV64 all-ones upper-half address aliases.
+  // bits: IOQ has already canonicalized accepted Bare aliases.
   logic [XLEN-1:WordOffBits] sq_paddr_hi[SQ_SIZE];
   logic [XLEN-1:WordOffBits] sq_paddr_third[SQ_SIZE];
   logic [2:0][1:0] sq_pbmt[SQ_SIZE];
@@ -283,8 +288,9 @@ module rapt_lsu_sq #(
       sq_dest[sq_tail] <= exu_ioq_bcast.dest;
 `endif
       sq_vaddr[sq_tail] <= exu_ioq_bcast.tval;      // virtual (forwarding)
-      sq_next_block[sq_tail] <= exu_ioq_bcast.tval[XLEN-1:SqBlockLsb] + 1'b1;
-      sq_prev_block[sq_tail] <= exu_ioq_bcast.tval[XLEN-1:SqBlockLsb] - 1'b1;
+      sq_compare_addr[sq_tail] <= alloc_compare_addr;
+      sq_next_block[sq_tail] <= alloc_compare_addr[XLEN-1:SqBlockLsb] + 1'b1;
+      sq_prev_block[sq_tail] <= alloc_compare_addr[XLEN-1:SqBlockLsb] - 1'b1;
       sq_paddr[sq_tail] <= exu_ioq_bcast.sq_waddr;  // physical (drain)
       sq_paddr_hi[sq_tail] <= sq_waddr_hi[XLEN-1:WordOffBits];
       sq_paddr_third[sq_tail] <= sq_waddr_third[XLEN-1:WordOffBits];
@@ -392,7 +398,7 @@ module rapt_lsu_sq #(
   logic [3:0] lsu_load_size_m1;
   logic [ForwardPorts-1:0] forward_conflict, forward_valid;
   logic [1:0] lsu_eff_priv;
-  assign forward_addr[0] = raddr;
+  assign forward_addr[0] = exu_lsu.rcontext.mmu_en ? raddr : rapt_pkg::canonical_paddr(raddr);
   assign forward_size_m1[0] = lsu_load_size_m1;
   assign load_in_sq = forward_conflict[0];
   assign sq_fwd_ok = forward_valid[0];
@@ -414,7 +420,7 @@ module rapt_lsu_sq #(
       .head(sq_head),
       .valid(sq_valid),
       .stale_context(sq_stale_context),
-      .store_addr(sq_vaddr),
+      .store_addr(sq_compare_addr),
       .store_next_block(sq_next_block),
       .store_prev_block(sq_prev_block),
       .store_data(sq_wdata),
@@ -563,7 +569,7 @@ module rapt_lsu_sq #(
   logic load_in_sq_b;
   logic sq_fwd_ok_b;
   logic [XLEN-1:0] sq_fwd_data_b;
-  assign forward_addr[1] = raddr_b;
+  assign forward_addr[1] = exu_lsu.rcontext_b.mmu_en ? raddr_b : rapt_pkg::canonical_paddr(raddr_b);
   assign load_in_sq_b = forward_conflict[1];
   assign sq_fwd_ok_b = forward_valid[1];
   assign sq_fwd_data_b = forward_data[1];
@@ -693,7 +699,7 @@ module rapt_lsu_sq #(
   rapt_pmp #(
       .XLEN(XLEN)
   ) u_pmp_load_lsu (
-      .addr   (raddr),
+      .addr   (rapt_pkg::canonical_paddr(raddr)),
       .size_m1(lsu_load_size_m1),
       .priv   (lsu_eff_priv),
       .op_r   (1'b1),

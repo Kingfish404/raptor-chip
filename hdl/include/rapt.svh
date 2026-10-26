@@ -203,8 +203,9 @@
 // addresses; narrowing a tag must never turn an unmapped address into a hit.
 // Sv39 retains its architectural PPN encoding, while the platform rejects
 // addresses outside this implemented physical-address range. Every platform
-// map (hdl/configs/memory_map.json) lies below 4 GiB, so RV64 also implements
-// 32 bits; widen this only together with a platform map that needs it.
+// map (hdl/configs/memory_map.json) lies below 4 GiB. RV64 permits 32..38
+// bits (default 32); Bare aliases are canonicalized before physical use.
+// A wider PA does not extend the platform PMA map. PC40 requires PA <= 39.
 `ifndef RAPT_PADDR_BITS
 `ifdef RAPT_RV64
 `define RAPT_PADDR_BITS 32

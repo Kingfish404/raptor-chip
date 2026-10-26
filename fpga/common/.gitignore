@@ -1,4 +1,13 @@
 !/scripts/*.py
 !/scripts/*.tcl
+!/scripts/*.awk
 !/tests/test_*.py
+!/tests/ubuntu_bench/*.py
+!/linux/Kconfig
+!/linux/Makefile
+!/linux/*.config
+!/linux/*.patch
+!/board.mk
+!/ubuntu.mk
+!/UBUNTU.md
 __pycache__/

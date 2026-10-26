@@ -38,6 +38,15 @@
 `endif
 `define RAPT_M_EXTENSION 'h1
 
+// RV64 physical-address capacity: 32..38 bits; RV32 remains 32 bits.
+// The platform PMA map stays 32-bit, including its all-ones Bare alias.
+`ifdef RAPT_RV64
+`ifndef RAPT_PADDR_BITS
+`define RAPT_PADDR_BITS 32
+`endif
+`endif
+
+
 /**
  * Microarchitecture (uarch) Parameters
  * @param RAPT_M_FAST: M Extension Fast Mode (one cycle)
