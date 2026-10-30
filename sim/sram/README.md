@@ -21,7 +21,10 @@ For the default config (see [rtl/configs/default/rapt_config.svh](../../rtl/conf
 | `64 × 32`             | `rapt_l1i.sv` data banks        | `L1I_N_WAYS × L1I_LINE_SIZE` = `4 × 16` = 64 |
 | `64 × 128` | `rapt_l1d_data.sv` data subarrays (RV32/RV64) | `L1D_N_WAYS × subarrays/way` = `4 × 4` = 16 |
 
-All macros are **single-port (1RW)** since the RTL was migrated to [rapt_sram_1rw.sv](../../rtl/sram/rapt_sram_1rw.sv): the cache controllers time-multiplex reads and writes onto the shared port. Legacy 1R1W configs are kept for reference; the current Makefile explicitly selects its 1RW config list, so overriding `PORTS` alone does not select a legacy build.
+All macros are **single-port (1RW)** since the RTL was migrated to
+[rapt_sram_1rw.sv](../../rtl/sram/rapt_sram_1rw.sv): the cache controllers
+time-multiplex reads and writes onto the shared port. The Makefile generates its
+selected 1RW config list; overriding `PORTS` alone does not change the port shape.
 
 The RTL and OpenRAM models share the same port contract: writes occur on the rising edge, reads register `rdata` on the rising edge, and `rdata` holds during disabled and write cycles.
 
@@ -56,7 +59,9 @@ With `RAPT_USE_SRAM_MACRO`, unregistered shapes intentionally fail elaboration t
 
 ## Adding a new shape
 
-1. Drop a Python config under [configs/](configs/) (use `rapt_sram_32x32_1rw_sky130.py` as a template — set `word_size`, `num_words`, `tech_name`).
+1. Add the shape to `CONFIGS` in [Makefile](Makefile). `make configs` generates
+   each Python config under `build/<PLATFORM>/configs/` using
+   [the template](configs/sram_config.py.in) and the platform's common settings.
 2. Add a matching blackbox stub to [wrappers/rapt_sram_blackbox.v](wrappers/rapt_sram_blackbox.v).
 3. Extend the generate-if cascade in [rtl/sram/rapt_sram_1rw.sv](../../rtl/sram/rapt_sram_1rw.sv) under `` `ifdef RAPT_USE_SRAM_MACRO ``.
 4. Register the shape in `CONFIGS` and `STUB_SHAPES` in `Makefile`, and in `test/test_sram_integration.py`. Run `make -C sim/sram test` to check the registrations and default L1I/L1D geometry.

@@ -24,9 +24,13 @@ sim-build-isolation-check: ## Check build-local Kconfig and non-destructive mode
 	python3 "$(VERIFY_HOME)/scripts/test_sim_build_isolation.py"
 
 # Tool-free unit tests for helper scripts that have no dedicated check target.
-SCRIPT_UNITTESTS := test_config_macro_check test_paddr_config test_fp_test_makefile test_closeout_config_check test_litex_sdcard_linux_override \
+SCRIPT_UNITTESTS := test_config_macro_check test_paddr_config test_fp_test_makefile \
+	test_closeout_config_check test_litex_sdcard_linux_override \
 	test_lrsc_trace_check test_run_act4 \
-	test_sta.SummaryStatusTest test_subsystem_build_cache
+	test_sta.SummaryStatusTest test_subsystem_build_cache \
+	test_external_drivers $(addprefix test_formal_drivers.,SnapshotOutputTests \
+	AbcCompatibilityTest StateAbstractionAudit QualificationEvidenceTests WitnessTests \
+	ToolTimeoutTest)
 
 .PHONY: script-unittests
 script-unittests: config-macro-check ## Run helper-script unit tests that need no EDA tools
@@ -138,7 +142,7 @@ RISCV_DV_DIR        := $(VERIFY_HOME)/riscv-dv
 RISCV_DV_TARGET     := $(VERIFY_HOME)/riscv-dv-target
 RISCV_DV_VENV       := $(BUILD_DIR)/riscv-dv-venv
 RISCV_DV_PYTHON     ?= $(shell command -v python3.11 2>/dev/null || command -v python3.10 2>/dev/null)## Optional installed Python 3.10/3.11 interpreter
-RISCV_DV_OUT        ?= $(BUILD_DIR)/riscv-dv## Generated programs and logs
+RISCV_DV_OUT        ?= $(BUILD_DIR)/riscv-dv/$(ISA)## XLEN-isolated generated programs and logs
 RISCV_DV_TEST       ?= raptor_privileged_smoke## Test name from riscv-dv-target/testlist.yaml
 RISCV_DV_ITERATIONS ?= 1## Override generated program count
 RISCV_DV_SEED       ?= 1## Reproducible first random seed
@@ -149,10 +153,12 @@ RISCV_DV_MEM_SEEDS  ?= 1## Reproducible AXI delay seeds
 RISCV_DV_ENV = PATH="$(RISCV_DV_VENV)/bin:$$PATH" \
 	PYTHONPATH="$(RISCV_DV_TARGET):$$PYTHONPATH" \
 	RISCV_GCC="$(CC)" RISCV_OBJCOPY="$(OBJCOPY)"
+RISCV_DV_TARGET_NAME = raptor_rv$(ISA_XLEN)imac
+RISCV_DV_ABI = $(if $(filter rv64,$(ISA)),lp64,ilp32)
 RISCV_DV_RUN = cd $(RISCV_DV_DIR) && $(RISCV_DV_ENV) \
 	$(RISCV_DV_VENV)/bin/python ./run.py --simulator pyflow \
-	--target raptor_rv32imac --custom_target $(RISCV_DV_TARGET) \
-	--isa rv32imac_zicsr_zifencei --mabi ilp32
+	--target $(RISCV_DV_TARGET_NAME) --custom_target $(RISCV_DV_TARGET) \
+	--isa $(ISA)imac_zicsr_zifencei --mabi $(RISCV_DV_ABI)
 
 define RISCV_DV_TIMEOUT_CMD
 $(if $(TIMEOUT_BIN),$(TIMEOUT_RUN) --kill-after=2 $(1),$(TIMEOUT_RUN) $(1))
@@ -246,6 +252,8 @@ check-prereqs: verify-npc-build $(NEMU_SO) $(MROM_IMG) ## Verify all prerequisit
 	@echo "[verify] All prerequisites OK."
 
 # ============================================================================
+include $(VERIFY_HOME)/external-verification.mk
+
 # riscv-dv privileged random verification
 # ============================================================================
 .PHONY: riscv-dv riscv-dv-setup riscv-dv-gen riscv-dv-run riscv-dv-smoke \
@@ -1117,8 +1125,80 @@ formal-memory-progress-negative: ## Require the isolated old refill gate to fail
 formal-ieu-mul: ## Formal: verify IEU multiplier
 	$(MAKE) -C $(FORMAL_DIR) formal_ieu_mul
 
-formal-ieu-alu: ## Formal: verify RV32 IEU ALU and bit-manipulation operations
+.PHONY: formal-ieu-div formal-ieu-muldiv
+formal-ieu-div: ## Prove RV32/RV64 DIV/REM values, W forms, ownership and completion
+	$(MAKE) -C $(FORMAL_DIR) formal_ieu_div
+
+formal-ieu-muldiv: ## Prove mixed RV32/RV64 MUL/DIV values, arbitration and cancellation
+	$(MAKE) -C $(FORMAL_DIR) formal_ieu_muldiv
+
+.PHONY: formal-rvfi-metadata formal-rvfi-platform formal-rou-rvfi formal-rou-rvfi-composed
+.PHONY: formal-cache-nru
+formal-cache-nru: ## Prove NRU replacement priority, epoch renewal and invalidation
+	$(MAKE) -C $(FORMAL_DIR) formal_cache_nru
+
+.PHONY: formal-recovery-pending formal-stream-queue
+formal-recovery-pending: ## Prove masked recovery selection and stale-owner cancellation
+	$(MAKE) -C $(FORMAL_DIR) formal_recovery_pending
+
+formal-stream-queue: ## Prove banked/BRAM stream queue transport against flop reference
+	$(MAKE) -C $(FORMAL_DIR) formal_stream_queue
+
+.PHONY: formal-rou-retire
+formal-rou-retire: ## Prove actual retirement banks and serialized immediate transport
+	$(MAKE) -C $(FORMAL_DIR) formal_rou_retire
+
+.PHONY: formal-l1d-data
+formal-l1d-data: ## Prove diagonal L1D data mapping for every production geometry
+	$(MAKE) -C $(FORMAL_DIR) formal_l1d_data
+
+.PHONY: formal-prf formal-prf-zero
+formal-prf: ## Check PRF x0, physical data/state history and late-read forwarding
+	$(MAKE) -C $(FORMAL_DIR) formal_prf
+
+formal-prf-zero: ## Prove the PRF architectural/debug x0 reset contract
+	$(MAKE) -C $(FORMAL_DIR) formal_prf_zero
+
+formal-rvfi-metadata: ## Prove RVFI fault effects, order numbering and compressed HINT metadata
+	$(MAKE) -C $(FORMAL_DIR) formal_rvfi_metadata
+
+formal-rvfi-platform: ## Qualify the default/formal Bare physical PMA reference
+	$(MAKE) -C $(FORMAL_DIR) formal_rvfi_platform
+
+formal-rou-rvfi: ## Prove actual ROU/RVFI memory transport and retirement prefix
+	$(MAKE) -C $(FORMAL_DIR) formal_rou_rvfi
+
+formal-rou-rvfi-composed: ## Prove ROU/RVFI transport with audited cuts and uncut activation
+	$(MAKE) -C $(FORMAL_DIR) formal_rou_rvfi_composed
+
+FORMAL_SCOPE_OUTPUT ?= $(or $(TMPDIR),/tmp)/raptor-formal/scope
+FORMAL_RECEIPTS ?=
+FORMAL_CONTRACT_REVIEW ?=
+.PHONY: formal-scope formal-signoff formal-vpu-memory-response formal-sram
+formal-scope: ## Inventory all RTL units, interfaces and supported configuration profiles
+	$(PYTHON) scripts/formal_scope.py scope --output "$(FORMAL_SCOPE_OUTPUT)"
+
+formal-signoff: ## Fail unless reviewed contracts and current whole-RTL proof evidence close
+	$(PYTHON) scripts/formal_scope.py scope --output "$(FORMAL_SCOPE_OUTPUT)" --signoff \
+	  $(if $(FORMAL_CONTRACT_REVIEW),--contract-review "$(FORMAL_CONTRACT_REVIEW)",) \
+	  --receipts $(foreach receipt,$(FORMAL_RECEIPTS),"$(receipt)")
+
+formal-vpu-memory-response: ## Prove RV32/RV64 stale vector-memory response payload isolation
+	$(MAKE) -C vpu memory-response-formal
+
+formal-sram: ## Prove all registered 1RW SRAM shapes, masks, read latency and output hold
+	$(MAKE) -C $(FORMAL_DIR) formal_sram
+
+formal-ieu-alu: ## Formal: verify RV32/RV64 IEU ALU and bit-manipulation operations
 	$(MAKE) -C $(FORMAL_DIR) formal_ieu_alu
+
+.PHONY: formal-ioq-owner
+formal-ioq-owner: ## Formal: prove IOQ dispatch/response provenance and single completion
+	$(MAKE) -C $(FORMAL_DIR) formal_ioq_owner
+
+.PHONY: formal-ioq-store
+formal-ioq-store: ## Formal: prove owned store operands, AMO bytes and sampled SC decisions
+	$(MAKE) -C $(FORMAL_DIR) formal_ioq_store
 
 formal-pmp: ## Formal: prove RV32/RV64 PMP per entry, then compose priority/permissions
 	$(MAKE) -C $(FORMAL_DIR) formal_pmp_composed
@@ -1144,8 +1224,12 @@ formal-dtm: ## Formal: verify the single-clock JTAG TAP and DMI transport
 formal-divsqrt: ## Formal: verify FPU divide/square-root control contract
 	$(MAKE) -C $(FORMAL_DIR) formal_divsqrt
 
-formal: formal-ieu-alu formal-ieu-mul formal-pmp formal-zkt formal-plru formal-memory-progress \
-	formal-clint formal-plic formal-dtm formal-bus formal-divsqrt ## Run all standalone formal checks
+formal: formal-ieu-alu formal-ieu-muldiv formal-pmp formal-zkt formal-plru \
+	formal-memory-progress \
+	formal-clint formal-plic formal-dtm formal-bus formal-divsqrt formal-sram \
+	formal-vpu-memory-response formal-rvfi-metadata formal-rvfi-platform formal-cache-nru \
+	formal-recovery-pending formal-stream-queue formal-rou-retire \
+	formal-l1d-data formal-prf ## Run standalone checks
 
 formal-rvfi-gen: ## Formal: generate riscv-formal checks (auto-clones repo)
 	$(MAKE) -C $(FORMAL_DIR) formal_rvfi_gen
@@ -1371,6 +1455,7 @@ SHARED_TB_SOURCES := \
 	tb_uop_payload:tb_uop_all_contract.sv \
 	tb_cache_lru:tb_replacement_all_contract.sv \
 	tb_tlb_lru:tb_replacement_all_contract.sv \
+	tb_pmp_shared_equiv:tb_pmp_permissions.sv \
 	tb_targeted_coherence:tb_l1d_all_contract.sv \
 	tb_dirty_line_select:tb_l1d_all_contract.sv \
 	tb_cbo_refill_order:tb_l1d_all_contract.sv \
@@ -2550,3 +2635,33 @@ verilator-wb-mshr-l2-rv32 verilator-wb-mshr-l2-rv64: override XSIM_COMMON_INCLUD
 FP_ARCH_BANK_LUTRAM ?= 1
 
 include $(VERIFY_HOME)/directed-tests.mk
+
+# M: compare the shared checker with independent legacy permission checkers.
+$(eval $(call XLEN_TEST,pmp-shared-equiv,tb_pmp_shared_equiv,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,l2tlb-1024,tb_l2tlb,,-d RAPT_ASSERT_EN -GEntries=1024))
+$(eval $(call XLEN_TEST,l2tlb-2048,tb_l2tlb,,-d RAPT_ASSERT_EN -GEntries=2048))
+$(eval $(call XLEN_TEST,l2tlb-4096,tb_l2tlb,,-d RAPT_ASSERT_EN -GEntries=4096))
+# end M
+
+# Job D: target-neutral L1D replacement checks.
+.PHONY: verilator-l1d-nru
+verilator-l1d-nru:
+	$(call VERILATOR_DIRECTED_RUN,l1d_nru,tb_l1d_nru,,-d RAPT_ASSERT_EN,)
+# End Job D.
+
+# Job D: compare consumed shared tag reads against independent ports.
+.PHONY: verilator-l1d-shared-tags
+verilator-l1d-shared-tags:
+	$(call VERILATOR_DIRECTED_RUN,l1d_shared_tags,tb_l1d_shared_tags,,-d RAPT_ASSERT_EN,)
+# End Job D.
+
+# Job D: preserve held-load data and response cycles across a probe writeback.
+.PHONY: verilator-l1d-wb-resume-rv32 verilator-l1d-wb-resume-rv64
+verilator-l1d-wb-resume-rv32 verilator-l1d-wb-resume-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1
+verilator-l1d-wb-resume-rv32:
+	$(call VERILATOR_DIRECTED_RUN,l1d_wb_resume_rv32,tb_l1d_store_coherence,,\
+		-d RAPT_ASSERT_EN,+MIN_WB_RESUME +BUS_DELAY_MAX=0)
+verilator-l1d-wb-resume-rv64:
+	$(call VERILATOR_DIRECTED_RUN,l1d_wb_resume_rv64,tb_l1d_store_coherence,,\
+		-d RAPT_RV64 -d RAPT_ASSERT_EN,+MIN_WB_RESUME +BUS_DELAY_MAX=0)
+# End Job D.

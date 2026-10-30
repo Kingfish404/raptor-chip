@@ -1,4 +1,5 @@
 `include "rapt.svh"
+`include "stream_queue_shadow.sv"
 
 module stream_queue_case #(
     parameter int Depth = 7,
@@ -10,14 +11,22 @@ module stream_queue_case #(
     output logic done
 );
   logic reset = 1, flush = 0;
-  int unsigned in_data[InWidth], out_data[OutWidth];
+  typedef struct packed {
+    logic [31:0] tag;
+    logic [31:0] inverse_tag;
+    logic [32:0] sequence_id;
+  } payload_t;
+  payload_t in_data[InWidth], out_data[OutWidth], shadow_data[OutWidth];
   logic in_valid[InWidth], in_ready[InWidth], out_valid[OutWidth], out_ready[OutWidth];
+  logic shadow_ready[InWidth], shadow_valid[OutWidth];
   logic [$clog2(Depth+1)-1:0] occupancy;
-  int unsigned model[$], expected, sequence_id = 1;
+  logic [$clog2(Depth+1)-1:0] shadow_occupancy;
+  payload_t model[$], expected;
+  int unsigned sequence_id = 1;
   logic [31:0] random_state = 32'h51a7c001;
   int pushes, pops, simultaneous = 0, full_seen = 0, flush_seen = 0;
   rapt_stream_queue #(
-      .ItemT(int unsigned),
+      .ItemT(payload_t),
       .Depth(Depth),
       .InWidth(InWidth),
       .OutWidth(OutWidth),
@@ -25,8 +34,42 @@ module stream_queue_case #(
   ) dut (
       .*
   );
+  stream_queue_shadow #(
+      .ItemT(payload_t),
+      .Depth(Depth),
+      .InWidth(InWidth),
+      .OutWidth(OutWidth),
+      .ReclaimSameCycle(ReclaimSameCycle)
+  ) shadow (
+      .clock,
+      .reset,
+      .flush,
+      .in_data,
+      .in_valid,
+      .in_ready(shadow_ready),
+      .out_data(shadow_data),
+      .out_valid(shadow_valid),
+      .out_ready,
+      .occupancy(shadow_occupancy)
+  );
+  // Check settled outputs on both sides of the accepting edge. The first
+  // post-edge check catches empty-queue enqueue visibility without a bypass.
+  always @(posedge clock or negedge clock) begin
+    #1;
+    `RAPT_SVA_IMM(STREAM_SHADOW_OCCUPANCY, occupancy == shadow_occupancy)
+    for (int s = 0; s < InWidth; s++) begin
+      `RAPT_SVA_IMM(STREAM_SHADOW_READY, in_ready[s] == shadow_ready[s])
+    end
+    for (int s = 0; s < OutWidth; s++) begin
+      `RAPT_SVA_IMM(STREAM_SHADOW_VALID, out_valid[s] == shadow_valid[s])
+      if (out_valid[s]) begin
+        `RAPT_SVA_IMM(STREAM_SHADOW_PAYLOAD, out_data[s] == shadow_data[s])
+      end
+    end
+  end
   initial begin
     done = 0;
+    void'($value$plusargs("SEED=%d", random_state));
     // Exhaust the legal arithmetic domain independently of traffic reachability.
     // Include amount == Depth: truncating an increment before adding is wrong
     // for non-power-of-two depths and must not replace bounded wrapping.
@@ -45,10 +88,11 @@ module stream_queue_case #(
       random_state = {
         random_state[30:0], random_state[31] ^ random_state[21] ^ random_state[1] ^ random_state[0]
       };
-      flush = cycle % 97 == 96;
+      flush = cycle % 97 == 96 || cycle == 997;
+      reset = cycle % 211 == 210 || cycle == 997;
       for (int s = 0; s < InWidth; s++) begin
         in_valid[s] = s < int'(random_state[7:0]) % (InWidth + 1);
-        in_data[s]  = sequence_id + s;
+        in_data[s]  = {random_state, ~random_state, 33'(sequence_id + s)};
       end
       for (int s = 0; s < OutWidth; s++)
       out_ready[s] = s < int'(random_state[15:8]) % (OutWidth + 1);
@@ -63,7 +107,7 @@ module stream_queue_case #(
       assert (int'(occupancy) == model.size())
       else $fatal(1, "occupancy mismatch");
       for (int s = 0; s < OutWidth; s++) begin
-        assert (out_valid[s] == (!flush && s < model.size()))
+        assert (out_valid[s] == (!flush && !reset && s < model.size()))
         else $fatal(1, "output validity mismatch");
         if (out_valid[s]) begin
           assert (out_data[s] == model[s])
@@ -73,13 +117,15 @@ module stream_queue_case #(
       if (int'(occupancy) == Depth) full_seen++;
       pushes = 0;
       pops   = 0;
-      for (int s = 0; s < OutWidth; s++) if (!flush && s < model.size() && out_ready[s]) pops++;
+      for (int s = 0; s < OutWidth; s++)
+      if (!flush && !reset && s < model.size() && out_ready[s]) pops++;
       for (int s = 0; s < InWidth; s++) begin
-        assert (in_ready[s] == (!flush && s < Depth - model.size() + (ReclaimSameCycle ? pops : 0)))
+        assert (in_ready[s] ==
+                (!flush && !reset && s < Depth - model.size() + (ReclaimSameCycle ? pops : 0)))
         else $fatal(1, "input capacity/full reclaim mismatch");
       end
       pops = 0;
-      if (flush) begin
+      if (flush || reset) begin
         foreach (in_ready[s])
         assert (!in_ready[s])
         else $fatal(1, "flush accepted input");
@@ -123,6 +169,7 @@ module tb_stream_queue #(
   logic clock = 0;
   always #5 clock = ~clock;
   logic [10:0] done;
+  wire [29:0] bank_done;
   wire sweep_done;
   if (SweepDepth > 0) begin : g_sweep
     wire [SweepDepth-1:0] depth_done;
@@ -145,6 +192,26 @@ module tb_stream_queue #(
     assign sweep_done = &depth_done;
   end else begin : g_no_sweep
     assign sweep_done = 1'b1;
+  end
+  // Widths 1..4 and 8: power-of-two, divisible non-power-of-two and
+  // incompatible geometries, under both reclaim contracts. Width three /
+  // depth eight is the default-w3 RNQ; width eight / depth sixteen is w8.
+  for (genvar w = 0; w < 5; w++) begin : g_bank_width
+    localparam int Width = w == 4 ? 8 : w + 1;
+    for (genvar d = 0; d < 3; d++) begin : g_bank_depth
+      localparam int Entries = d == 0 ? 2 * Width : d == 1 ? 8 * Width : 2 * Width + 2;
+      for (genvar r = 0; r < 2; r++) begin : g_reclaim
+        stream_queue_case #(
+            .Depth(Entries),
+            .InWidth(Width),
+            .OutWidth(Width),
+            .ReclaimSameCycle(r == 1)
+        ) banked (
+            .clock,
+            .done(bank_done[6*w+2*d+r])
+        );
+      end
+    end
   end
   stream_queue_case #(
       .Depth(7),
@@ -217,7 +284,7 @@ module tb_stream_queue #(
     );
   end
   initial begin
-    wait ((&done) && sweep_done);
+    wait ((&done) && (&bank_done) && sweep_done);
     $display("PASS: randomized stream widths, wrap, full reclaim and flush");
     $finish;
   end

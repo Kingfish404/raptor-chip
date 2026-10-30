@@ -19,7 +19,12 @@ module rapt_ieu #(
     parameter unsigned RLEN     = rapt_pkg::index_bits(Cfg.arch_regs),
     parameter unsigned XLEN     = Cfg.xlen
 ) (
+    input logic [1:0][PLEN-1:0] int_source_regs[NumSlots],
+    output logic [PLEN-1:0] operand_read_address[2],
+    input logic [XLEN-1:0] operand_read_value[2],
+    input logic operand_read_valid[2],
     input CompletionT completion[NumCompletions],
+    input CompletionT early_completion[NumCompletions],
     input CompletionT local_integer_wake[NumCompletions] = '{default: '0},
     input CompletionT branch_wake[NumCompletions] = '{default: '0},
     input CompletionT memory_wake = '0,
@@ -284,6 +289,11 @@ module rapt_ieu #(
       .XLEN    (XLEN)
       , .ResultT(mdu_result_t)
   ) u_muldiv (
+      .early_completion,
+      .int_source_regs,
+      .operand_read_address,
+      .operand_read_value,
+      .operand_read_valid,
       .cancel_valid(cancel_valid),
       .cancel_head(cancel_head),
       .cancel_owner(cancel_owner),

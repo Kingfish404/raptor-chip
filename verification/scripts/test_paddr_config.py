@@ -13,18 +13,19 @@ SCRIPT = ROOT / "sim/scripts/paddr_config.py"
 
 
 class PaddrConfigTest(unittest.TestCase):
-    def widths(self, *flags, config="small-cache16"):
+    def widths(self, *flags, config="small-cache"):
         return subprocess.run([sys.executable, str(SCRIPT), "--config",
                                str(ROOT / "rtl/configs" / config), "--hdl",
                                str(ROOT / "rtl"), "--", *flags],
                               capture_output=True, text=True)
 
-    def test_all_presets_default_to_32(self):
+    def test_all_presets_use_expected_width(self):
         for preset in (ROOT / "rtl/configs").glob("*/rapt_config.svh"):
             with self.subTest(preset=preset.parent.name):
                 result = self.widths("-DRAPT_RV64", config=preset.parent.name)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout.strip(), "32 30")
+                expected = "38 36" if preset.parent.name == "default-pa38" else "32 30"
+                self.assertEqual(result.stdout.strip(), expected)
 
     def test_every_supported_width(self):
         for pa in range(32, 39):
@@ -83,7 +84,7 @@ class PaddrConfigTest(unittest.TestCase):
                     calls.write_text("")
                     result = subprocess.run(["make", "--no-print-directory", "-C", str(ROOT),
                                              "-o", "verilog", target, "MAKE=" + str(capture),
-                                             "VFLAGS=" + flags, "RAPT_CONFIG=small-cache16",
+                                             "VFLAGS=" + flags, "RAPT_CONFIG=small-cache",
                                              "HDL_FORMAT_SOURCES=", "ALL_SV_FORMAT_SOURCES="],
                                             capture_output=True, text=True)
                     self.assertEqual(result.returncode, 0, result.stderr)

@@ -9,7 +9,7 @@ endif
 RAPTOR_HOME ?= $(abspath $(CURDIR)/../..)
 SRAM_DIR    := $(abspath $(CURDIR))
 OPENRAM_DIR ?= $(RAPTOR_HOME)/third_party/OpenRAM
-CONFIG_DIR  := $(SRAM_DIR)/configs
+CONFIG_SOURCE_DIR := $(SRAM_DIR)/configs
 
 # ---------------------------------------------------------------------------
 # Platform selection. `sky130` matches the sky130hd STA platform under
@@ -18,6 +18,7 @@ CONFIG_DIR  := $(SRAM_DIR)/configs
 PLATFORM    ?= sky130
 BUILD_DIR   := $(SRAM_DIR)/build/$(PLATFORM)
 MACRO_DIR   := $(BUILD_DIR)/macro
+CONFIG_DIR  := $(BUILD_DIR)/configs
 
 # SRAM configurations to compile for this platform. The naming convention is
 # `<basename>_1rw_<PLATFORM>.py`; each must produce a macro under
@@ -31,6 +32,14 @@ CONFIGS := \
 	rapt_sram_64x32_1rw \
   rapt_sram_16x32_1rw \
 	rapt_sram_16x64_1rw \
+	rapt_sram_2x64_1rw \
+	rapt_sram_4x64_1rw \
+	rapt_sram_8x64_1rw \
+	rapt_sram_32x64_1rw \
+	rapt_sram_64x64_1rw \
+	rapt_sram_128x64_1rw \
+	rapt_sram_256x64_1rw \
+	rapt_sram_512x64_1rw \
 	rapt_sram_512x32_1rw \
 	rapt_sram_1024x22_1rw \
 	rapt_sram_1024x32_1rw \
@@ -41,6 +50,7 @@ CONFIGS := \
 	rapt_sram_32x128_1rw \
 	rapt_sram_64x128_1rw \
 	rapt_sram_512x128_1rw \
+	rapt_sram_1024x128_1rw \
 	rapt_sram_2048x32_1rw \
 	rapt_sram_2048x64_1rw \
 	rapt_sram_4096x64_1rw
@@ -78,6 +88,7 @@ ifeq ($(USE_DOCKER),1)
 RUN_OPENRAM = docker run --rm               	\
     -v $(OPENRAM_DIR):/openram              	\
     -v $(SRAM_DIR):/sram                    	\
+    -v $(BUILD_DIR):/sram-build             	\
     -v $(PDK_ROOT):/pdk                     	\
     -e PDK_ROOT=/pdk -e PDKPATH=/pdk/sky130A	\
     -e OPENRAM_HOME=/openram/compiler       	\
@@ -86,8 +97,8 @@ RUN_OPENRAM = docker run --rm               	\
     --user $(UID):$(GID)                    	\
     $(OPENRAM_IMAGE)                        	\
     python3 -u /openram/sram_compiler.py    	\
-      -o /sram/build/$(PLATFORM)/macro      	\
-      -v /sram/configs/$(notdir $<)
+      -o /sram-build/macro                 	\
+      -v /sram-build/configs/$(notdir $<)
 else
 RUN_OPENRAM = OPENRAM_HOME=$(OPENRAM_DIR)/compiler  	\
               OPENRAM_TECH=$(OPENRAM_DIR)/technology	\
@@ -120,6 +131,14 @@ STUB_SHAPES := \
 	rapt_openram_1rw_64x32,64,32,8 \
   rapt_openram_1rw_16x32,16,32,8 \
 	rapt_openram_1rw_16x64,16,64,8 \
+	rapt_openram_1rw_2x64,2,64,8 \
+	rapt_openram_1rw_4x64,4,64,8 \
+	rapt_openram_1rw_8x64,8,64,8 \
+	rapt_openram_1rw_32x64,32,64,8 \
+	rapt_openram_1rw_64x64,64,64,8 \
+	rapt_openram_1rw_128x64,128,64,8 \
+	rapt_openram_1rw_256x64,256,64,8 \
+	rapt_openram_1rw_512x64,512,64,8 \
 	rapt_openram_1rw_512x32,512,32,8 \
 	rapt_openram_1rw_1024x22,1024,22,22 \
 	rapt_openram_1rw_1024x32,1024,32,8 \
@@ -130,6 +149,7 @@ STUB_SHAPES := \
 	rapt_openram_1rw_32x128,32,128,8 \
 	rapt_openram_1rw_64x128,64,128,8 \
 	rapt_openram_1rw_512x128,512,128,8 \
+	rapt_openram_1rw_1024x128,1024,128,8 \
 	rapt_openram_1rw_2048x32,2048,32,8 \
 	rapt_openram_1rw_2048x64,2048,64,8 \
 	rapt_openram_1rw_4096x64,4096,64,8
@@ -163,7 +183,7 @@ doctor: ## Diagnose OpenRAM / PDK / docker prerequisites
 	  command -v klayout >/dev/null && echo "    klayout: OK" || echo "    klayout: MISSING"; \
 	  command -v ngspice >/dev/null && echo "    ngspice: OK" || echo "    ngspice: MISSING"
 
-configs: ## List configured SRAM shapes
+configs: $(CONFIG_FILES) ## Generate configs and list configured SRAM shapes
 	@echo "PLATFORM     = $(PLATFORM)"
 	@echo "BUILD_DIR    = $(BUILD_DIR)"
 	@echo "CONFIGS:"
@@ -183,17 +203,27 @@ setup: ## Show OpenRAM dependency setup hints
 	  echo ">>>   git clone https://github.com/VLSIDA/OpenRAM $(OPENRAM_DIR)"; \
 	fi
 
-# Per-config rule. `$*` is the macro name (rapt_openram_1rw_<WxD>);
-# the matching config file is rapt_sram_<WxD>_1rw_<PLATFORM>.py.
-$(BUILD_DIR)/%.ok:
+# Keep generated configs and their common settings together for native and
+# Docker OpenRAM invocations. CONFIGS is the only stored list of config shapes.
+$(CONFIG_DIR)/sky130_common.py: $(CONFIG_SOURCE_DIR)/sky130_common.py
+	@mkdir -p $(@D)
+	cp $< $@
+
+$(CONFIG_DIR)/rapt_sram_%_1rw_$(PLATFORM).py: $(CONFIG_SOURCE_DIR)/sram_config.py.in \
+		$(CONFIG_DIR)/$(PLATFORM)_common.py
+	@mkdir -p $(@D)
+	@shape='$*'; depth=$${shape%x*}; width=$${shape#*x}; \
+		write_size=8; if [ $$((width % 8)) -ne 0 ]; then write_size=$$width; fi; \
+		sed -e "s/@NUM_WORDS@/$$depth/g" -e "s/@WORD_SIZE@/$$width/g" \
+			-e "s/@WRITE_SIZE@/$$write_size/g" -e 's/@PLATFORM@/$(PLATFORM)/g' $< > $@
+
+$(STAMPS): $(BUILD_DIR)/rapt_openram_1rw_%.ok: $(CONFIG_DIR)/rapt_sram_%_1rw_$(PLATFORM).py
 	@if [ ! -f $(SRAM_COMPILER) ]; then \
 	  echo "ERROR: OpenRAM compiler missing at $(SRAM_COMPILER)"; \
 	  echo "       Run: make -C $(SRAM_DIR) setup"; exit 1; \
 	fi
-	mkdir -p $(MACRO_DIR)
-	$(eval CFG := $(CONFIG_DIR)/rapt_sram_$(subst rapt_openram_1rw_,,$*)_1rw_$(PLATFORM).py)
-	@echo ">>> OpenRAM: compiling $* from $(CFG)"
-	$(eval $< := $(CFG))
+	@mkdir -p $(MACRO_DIR)
+	@echo ">>> OpenRAM: compiling $* from $<"
 	$(RUN_OPENRAM)
 	touch $@
 

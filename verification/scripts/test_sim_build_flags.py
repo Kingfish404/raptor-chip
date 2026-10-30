@@ -17,14 +17,16 @@ class SimulatorBuildFlagsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="rapt-build-flags-") as tmp:
             root = Path(tmp)
             for directory in ("sim/csrc", "sim/include/config", "sim/scripts",
-                              "rtl/configs/default", "tools/decodegen/src", "rtl/generated"):
+                              "rtl/configs/default", "tools/decodegen/src", "rtl/generated",
+                              "tools/decodegen/project"):
                 (root / directory).mkdir(parents=True, exist_ok=True)
             for source in ("Makefile", "sim/Makefile", "sim/Kconfig",
                            "sim/scripts/config.mk", "sim/scripts/build_cache.py",
-                           "sim/scripts/configure.py"):
+                           "sim/scripts/configure.py", "sim/scripts/paddr_config.py"):
                 shutil.copy2(ROOT / source, root / source)
             for source in ("sim/.config", "rtl/configs/default/rapt_config.svh",
-                           "tools/decodegen/Makefile"):
+                           "tools/decodegen/Makefile", "tools/decodegen/build.sbt",
+                           "tools/decodegen/project/build.properties"):
                 (root / source).write_text("\n")
             (root / "sim/include/config/auto.conf").write_text('# CONFIG_wrapBus is not set\n')
             # configure.py owns build-local Kconfig output.  A tiny conf stub is
@@ -48,6 +50,14 @@ class SimulatorBuildFlagsTest(unittest.TestCase):
             verilator = root / "verilator-stub"
             verilator.write_text(
                 "#!/bin/sh\n"
+                "case \" $* \" in\n"
+                "  *\" --dump-defines \"*)\n"
+                "    xlen=32; pmp=32\n"
+                "    case \" $* \" in *\" -DRAPT_RV64 \"*) xlen=64; pmp=30;; esac\n"
+                "    printf '`define RAPT_XLEN %s\\n`define RAPT_PADDR_BITS 32\\n' \"$xlen\"\n"
+                "    printf '`define RAPT_PMPADDR_BITS %s\\n' \"$pmp\"\n"
+                "    exit 0;;\n"
+                "esac\n"
                 "printf 'verilator'\n"
                 "printf ' %s' \"$@\"\n"
                 "printf '\\n'\n"

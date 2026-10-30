@@ -5,6 +5,7 @@
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
+#include <htif.h>
 #ifdef RAPT_LARGE_PMEM
 #include <sys/mman.h>
 #endif
@@ -535,6 +536,7 @@ extern "C" void pmem_write(word_t waddr, word_t wdata, char wmask)
     log_watched_write(addr + i, byte, 1, host_addr, 1);
     host_write(host_addr, byte, 1);
   }
+  htif_observe_write((paddr_t)addr, mask);
 }
 
 void vaddr_show(vaddr_t addr, int n)

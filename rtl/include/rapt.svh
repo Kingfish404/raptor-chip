@@ -25,6 +25,15 @@
 `define RAPT_SFENCE_SELECTIVE 1
 `endif
 
+// Optional L1D capacity/replacement experiments. The preset still supplies
+// today's geometry; explicit overrides keep its set index and line size.
+`ifndef RAPT_L1D_WAYS
+`define RAPT_L1D_WAYS `RAPT_L1D_N_WAYS
+`endif
+`ifndef RAPT_L1D_NRU
+`define RAPT_L1D_NRU 0
+`endif
+
 `ifndef RAPT_L1D_MSHRS
 `define RAPT_L1D_MSHRS 0
 `endif
@@ -175,9 +184,9 @@
 `define RAPT_BRANCH_CHECKPOINTS 16
 `endif
 
-// Cache data-SRAM subarray width in bits. The L1D data banks clamp their
-// per-bank word count so each `rapt_sram_1rw` instance is at most this wide;
-// presets that do not set it keep the historical 128-bit subarray.
+// Conventional cache data-SRAM subarray width in bits. The diagonal L1D
+// uses fixed 64-bit chunks; other arrays retain this width limit.
+// Presets that do not set it keep the historical 128-bit subarray.
 `ifndef RAPT_CACHE_SRAMLEN
 `define RAPT_CACHE_SRAMLEN 128
 `endif

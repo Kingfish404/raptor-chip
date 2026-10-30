@@ -4,6 +4,7 @@ SHELL := /bin/bash
 .SHELLFLAGS := -e -o pipefail -c
 ROOT := $(abspath ../..)
 BUILD_DIR ?= $(ROOT)/verification/build/vpu
+FORMAL_RESULTS_DIR ?= $(or $(TMPDIR),/tmp)/raptor-vpu-formal
 VERILATOR ?= verilator
 JOBS ?= 2
 XLEN ?= 64
@@ -177,6 +178,11 @@ mask-scan:
 .PHONY: owner-formal
 owner-formal:
 	python3 $(CURDIR)/owner_formal.py --build-dir $(BUILD_DIR)/formal-owner
+
+.PHONY: memory-response-formal
+memory-response-formal:
+	python3 $(CURDIR)/memory_response_formal.py \
+	  --build-dir $(FORMAL_RESULTS_DIR)/memory-response
 
 .PHONY: slide
 slide:

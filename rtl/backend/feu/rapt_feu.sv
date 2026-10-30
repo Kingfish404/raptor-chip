@@ -20,7 +20,25 @@ module rapt_feu #(
     // FPQ residents also capture this live view; allocation uses `completion`.
     parameter bit LocalFpWake = 1'b0
 ) (
+    input logic [1:0][PLEN-1:0] int_source_regs[NumSlots],
+    input logic [2:0][$clog2(ROB_SIZE):0] fp_dispatch_tag[NumSlots],
+    input logic [2:0][Cfg.rob_generation_bits-1:0] fp_dispatch_generation[NumSlots],
+    input logic fp_retire_valid[Cfg.commit_width],
+    /* verilator lint_off UNUSEDSIGNAL */
+    input logic [63:0] fp_retire_value[Cfg.commit_width],
+    /* verilator lint_on UNUSEDSIGNAL */
+    input logic [$clog2(ROB_SIZE)-1:0] fp_retire_owner[Cfg.commit_width],
+    input logic [Cfg.rob_generation_bits-1:0] fp_retire_generation[Cfg.commit_width],
+    output UopT fp_queue_read_uop,
+    output logic [2:0][$clog2(ROB_SIZE):0] fp_queue_read_tag,
+    input logic [2:0][63:0] operand_read_value,
+    input logic [2:0][$clog2(ROB_SIZE):0] fp_queue_ready_tag,
+    input logic [2:0][Cfg.rob_generation_bits-1:0] fp_queue_read_generation,
+    output logic [PLEN-1:0] int_operand_address,
+    input logic [XLEN-1:0] int_operand_value,
+    input logic int_operand_valid,
     input CompletionT completion[NumCompletions],
+    input CompletionT early_completion[NumCompletions],
     input CompletionT local_fp_wake[NumCompletions] = '{default: '0},
     input clock,
     input reset,
@@ -53,12 +71,22 @@ module rapt_feu #(
 
   `RAPT_DISPATCH_SLOT_TYPE(fp_slot_t, UopT, fp_word_t, operand_tag_t, owner_t, generation_t,
                            Cfg.completion_dependencies)
-  `RAPT_ISSUE_PACKET_TYPE(fp_issue_t, UopT, fp_word_t, operand_tag_t, owner_t, generation_t)
+  typedef struct packed {
+    logic valid;
+    UopT uop;
+    fp_word_t op1, op2, op3;
+    owner_t dest;
+    generation_t generation;
+    operand_tag_t prd;
+    logic [rapt_pkg::index_bits(FPQ_SIZE)-1:0] entry_index;
+  } fp_issue_t;
   `RAPT_COMPLETION_TYPE_PC(fp_wake_t, fp_word_t, result_pc_t, operand_tag_t, arch_t, owner_t,
                            generation_t)
   fp_slot_t fp_dispatch[NumSlots];
   fp_issue_t fp_issue[1];
+  /* verilator lint_off UNUSEDSIGNAL */
   fp_issue_t iss;
+  /* verilator lint_on UNUSEDSIGNAL */
   // Preserve FP decode boundaries while other issue payload muxes may fold.
   (* keep = "true" *) logic [31:0] issued_encoding;
   (* keep = "true" *) logic [$bits(iss.uop.execute.fp)-1:0] issued_fp;
@@ -66,6 +94,20 @@ module rapt_feu #(
   localparam int Simple = 0, AddSub = 1, Product = 2, DivSqrt = 3,
       Widen = 4, Narrow = 5, IntToFp = 6, FpToInt = 7,
       HalfToFp = 8, FpToHalf = 9, Units = 10;
+  // Empty-queue bypass depends on registered residents and ticket state.
+  // Completion arbitration and the age selector do not control allocation.
+  logic [$clog2(FPQ_SIZE):0] fpq_occupancy;
+  int dispatch_bypass_choice;
+  dpu_iq_if #(
+      .RS_SIZE(FPQ_SIZE),
+      .Width(NumSlots)
+  ) fpq_dispatch ();
+  for (genvar s = 0; s < NumSlots; s++) begin : g_operand_dispatch
+    assign disp_fpq.free_found[s] = fpq_dispatch.free_found[s];
+    assign disp_fpq.free_idx[s] = fpq_dispatch.free_idx[s];
+    assign fpq_dispatch.rs_idx[s] = disp_fpq.rs_idx[s];
+    assign fpq_dispatch.accept[s] = disp_fpq.accept[s] && dispatch_bypass_choice != int'(s);
+  end
   logic [Units-1:0] unit_ready, unit_credit, unit_transfer_ready, arithmetic_ready;
   logic [Units-1:0] raw_valid, unit_accept;
   logic [63:0] raw_result[Units];
@@ -193,6 +235,10 @@ module rapt_feu #(
     assign fp_wake[p] = fp_wake_view(completion[p]);
     assign fp_local_wake[p] = LocalFpWake ? fp_wake_view(local_fp_wake[p]) : '0;
   end
+  fp_wake_t early_fp_wake[NumCompletions];
+  for (genvar p = 0; p < NumCompletions; p++) begin : g_operand_early
+    assign early_fp_wake[p] = fp_wake_view(early_completion[p]);
+  end
   assign issue_enable = !reset && !cmu_bcast.flush_pipe;
   assign issued_encoding = fp_issue[0].uop.imm;
   assign issued_fp = fp_issue[0].uop.execute.fp;
@@ -201,7 +247,187 @@ module rapt_feu #(
     iss.uop.imm = issued_encoding;
     iss.uop.execute.fp = issued_fp;
   end
-  logic [$clog2(FPQ_SIZE):0] unused_fpq_occupancy;
+  // One elastic register-read ticket. Queue payload/data remains the
+  // simulation oracle and is dead in synthesis.
+  fp_issue_t fpq_selected[1], read_ticket, read_ticket_incoming;
+  logic [2:0][RobBits:0] fp_queue_source_tag[FPQ_SIZE], read_ticket_tag;
+  logic [2:0][GenerationBits-1:0] fp_queue_source_generation[FPQ_SIZE], read_ticket_generation;
+  logic [PLEN-1:0] fp_queue_source_int[FPQ_SIZE], read_ticket_int;
+  logic [FPQ_SIZE-1:0] fp_queue_source_valid;
+  owner_t fp_queue_source_owner[FPQ_SIZE];
+  generation_t fp_queue_source_owner_generation[FPQ_SIZE];
+  logic fpq_selected_owner_matches;
+  /* verilator lint_off UNUSEDSIGNAL */
+  int fpq_selected_index;
+  /* verilator lint_on UNUSEDSIGNAL */
+  logic read_ticket_fire, read_ticket_space, read_ticket_ready;
+  assign fpq_selected_index = int'(fpq_selected[0].entry_index);
+  assign fpq_selected_owner_matches = fp_queue_source_valid[fpq_selected_index]
+      && fp_queue_source_owner[fpq_selected_index] == fpq_selected[0].dest
+      && fp_queue_source_owner_generation[fpq_selected_index] == fpq_selected[0].generation;
+  logic [Units-1:0] fpq_resource_ready;
+  logic [2:0] fp_sources_used, source_retire_hit;
+  logic [2:0][63:0] read_operands;
+  logic fp_from_int;
+  int read_ticket_unit;
+  function automatic logic [2:0][RobBits:0] retag_retired_sources(
+      input logic [2:0][RobBits:0] tags, input logic [2:0][GenerationBits-1:0] generations);
+    logic [2:0][RobBits:0] migrated;
+    migrated = tags;
+    for (int k = 0; k < 3; k++) begin
+      for (int c = 0; c < Cfg.commit_width; c++) begin
+        if (tags[k] != '0 && fp_retire_valid[c]
+            && tags[k] == (RobBits+1)'(fp_retire_owner[c]) + (RobBits+1)'(1)
+            && generations[k] == fp_retire_generation[c])
+          migrated[k] = '0;
+      end
+    end
+    return migrated;
+  endfunction
+  assign fp_queue_read_uop = read_ticket.uop;
+  // An invalidated ticket may retain tags whose owners were flushed or reused.
+  // Only a live ticket requests producer resolution from the ROB result bank.
+  assign fp_queue_read_tag = read_ticket.valid ? read_ticket_tag : '0;
+  assign int_operand_address = read_ticket_int;
+  assign read_ticket_unit = execution_unit(read_ticket.uop);
+  assign fp_sources_used = rapt_pkg::fp_sources(read_ticket.uop.execute.fp.valid,
+      read_ticket.uop.execute.fp.op,
+      rapt_pkg::fp_instruction(read_ticket.uop.execute.memory.load,
+          read_ticket.uop.execute.memory.store, read_ticket.uop.imm));
+  assign fp_from_int = rapt_pkg::fp_from_integer(read_ticket.uop.execute.fp.op,
+      rapt_pkg::fp_instruction(read_ticket.uop.execute.memory.load,
+          read_ticket.uop.execute.memory.store, read_ticket.uop.imm));
+  always_comb begin
+    read_ticket_ready = !fp_from_int || int_operand_valid;
+    source_retire_hit = '0;
+    read_operands = operand_read_value;
+    for (int k = 0; k < 3; k++) begin
+      for (int c = 0; c < Cfg.commit_width; c++) begin
+        if (read_ticket_tag[k] != '0 && fp_retire_valid[c]
+            && read_ticket_tag[k] == (RobBits+1)'(fp_retire_owner[c]) + (RobBits+1)'(1)
+            && read_ticket_generation[k] == fp_retire_generation[c]) begin
+          source_retire_hit[k] = 1'b1;
+          // The ticket retags to the architectural bank on the retirement edge.
+          // Before that edge the producer result is still readable by its tag.
+        end
+      end
+    end
+    for (int k = 0; k < 3; k++) begin
+      if (fp_sources_used[k])
+        read_ticket_ready &= source_retire_hit[k] || (fp_queue_ready_tag[k] == '0
+          && (read_ticket_tag[k] == '0
+              || fp_queue_read_generation[k] == read_ticket_generation[k]));
+    end
+    for (int u = 0; u < Units; u++) begin
+      fpq_resource_ready[u] = (unit_credit[u]
+          || (unit_completion[u].valid && unit_accept[u]))
+          && (u == DivSqrt ? arithmetic_ready[u] : 1'b1);
+    end
+    if (read_ticket.valid && read_ticket_unit == DivSqrt) fpq_resource_ready[DivSqrt] = 1'b0;
+  end
+  always_comb begin
+    dispatch_bypass_choice = -1;
+    for (int s = 0; s < NumSlots; s++) begin
+      if (dispatch_bypass_choice < 0 && !read_ticket.valid && fpq_occupancy == '0
+          && disp_fpq.accept[s] && fp_dispatch[s].pr1 == '0
+          && fp_dispatch[s].pr2 == '0 && fp_dispatch[s].pr3 == '0
+          && unit_ready[execution_unit(
+              fp_dispatch[s].uop
+          )])
+        dispatch_bypass_choice = s;
+    end
+    read_ticket_incoming = fpq_selected[0];
+    if (dispatch_bypass_choice >= 0) begin
+      read_ticket_incoming = '0;
+      read_ticket_incoming.valid = 1'b1;
+      read_ticket_incoming.uop = fp_dispatch[dispatch_bypass_choice].uop;
+      read_ticket_incoming.prd = fp_dispatch[dispatch_bypass_choice].prd;
+      read_ticket_incoming.dest = fp_dispatch[dispatch_bypass_choice].dest;
+      read_ticket_incoming.generation = fp_dispatch[dispatch_bypass_choice].generation;
+      // The bypass requires resolved tags; dispatch already captured any wake.
+      read_ticket_incoming.op1 = fp_dispatch[dispatch_bypass_choice].op1;
+      read_ticket_incoming.op2 = fp_dispatch[dispatch_bypass_choice].op2;
+      read_ticket_incoming.op3 = fp_dispatch[dispatch_bypass_choice].op3;
+    end
+  end
+  assign read_ticket_fire = read_ticket.valid && unit_ready[read_ticket_unit]
+      && !cancelled_now(read_ticket.dest) && !reset && !cmu_bcast.flush_pipe;
+  assign read_ticket_space = !read_ticket.valid || read_ticket_fire;
+  always_comb begin
+    fp_issue[0] = read_ticket;
+    fp_issue[0].valid = read_ticket_fire;
+    fp_issue[0].op1 = fp_from_int
+        ? (read_ticket_int == '0 ? '0 : 64'(int_operand_value)) : read_operands[0];
+    fp_issue[0].op2 = read_operands[1];
+    fp_issue[0].op3 = read_operands[2];
+  end
+  always_ff @(posedge clock) begin
+    for (int e = 0; e < FPQ_SIZE; e++)
+    fp_queue_source_tag[e] <= retag_retired_sources(
+        fp_queue_source_tag[e], fp_queue_source_generation[e]
+    );
+    for (int e = 0; e < FPQ_SIZE; e++) begin
+      if (cancelled_now(fp_queue_source_owner[e])) fp_queue_source_valid[e] <= 1'b0;
+    end
+    if (fpq_selected[0].valid) fp_queue_source_valid[fpq_selected_index] <= 1'b0;
+    for (int s = 0; s < NumSlots; s++) begin
+      if (fpq_dispatch.accept[s]) begin
+        fp_queue_source_valid[disp_fpq.rs_idx[s]] <= 1'b1;
+        fp_queue_source_owner[disp_fpq.rs_idx[s]] <= dispatch[s].dest;
+        fp_queue_source_owner_generation[disp_fpq.rs_idx[s]] <= dispatch[s].generation;
+        fp_queue_source_tag[disp_fpq.rs_idx[s]] <= retag_retired_sources(
+            fp_dispatch_tag[s], fp_dispatch_generation[s]);
+        fp_queue_source_generation[disp_fpq.rs_idx[s]] <= fp_dispatch_generation[s];
+        fp_queue_source_int[disp_fpq.rs_idx[s]] <= int_source_regs[s][0];
+      end
+    end
+    read_ticket_tag <= retag_retired_sources(read_ticket_tag, read_ticket_generation);
+    if (read_ticket_fire) read_ticket.valid <= 1'b0;
+    if (read_ticket_incoming.valid) begin
+      read_ticket <= read_ticket_incoming;
+      if (dispatch_bypass_choice >= 0) begin
+        read_ticket_tag <= retag_retired_sources(fp_dispatch_tag[dispatch_bypass_choice],
+            fp_dispatch_generation[dispatch_bypass_choice]);
+        read_ticket_generation <= fp_dispatch_generation[dispatch_bypass_choice];
+        read_ticket_int <= int_source_regs[dispatch_bypass_choice][0];
+      end else begin
+        read_ticket_tag <= retag_retired_sources(fp_queue_source_tag[fpq_selected_index],
+            fp_queue_source_generation[fpq_selected_index]);
+        read_ticket_generation <= fp_queue_source_generation[fpq_selected_index];
+        read_ticket_int <= fp_queue_source_int[fpq_selected_index];
+      end
+    end
+    if (reset || cmu_bcast.flush_pipe) fp_queue_source_valid <= '0;
+    if (reset || cmu_bcast.flush_pipe || (read_ticket_incoming.valid ? cancelled_now(
+            read_ticket_incoming.dest
+        ) : read_ticket.valid && cancelled_now(
+            read_ticket.dest
+        )))
+      read_ticket.valid <= 1'b0;
+  end
+`ifndef SYNTHESIS
+  always_ff @(posedge clock) begin
+    if (fpq_selected[0].valid && !fpq_selected_owner_matches) begin
+      $display("[%0t] SVA FAIL: %m.N1_FP_SOURCE_OWNER", $time);
+      $fatal(1);
+    end
+    if (read_ticket.valid && !reset && !cmu_bcast.flush_pipe && !cancelled_now(
+            read_ticket.dest
+        )) begin
+      if (!read_ticket_ready) begin
+        $display("[%0t] SVA FAIL: %m.N1_FP_RR_READY", $time);
+        $fatal(1);
+      end
+      if (read_ticket_fire && ((fp_from_int && fp_issue[0].op1 !== read_ticket.op1)
+          || (fp_sources_used[0] && fp_issue[0].op1 !== read_ticket.op1)
+          || (fp_sources_used[1] && fp_issue[0].op2 !== read_ticket.op2)
+          || (fp_sources_used[2] && fp_issue[0].op3 !== read_ticket.op3))) begin
+        $display("[%0t] SVA FAIL: %m.N1_FP_RR_OPERAND", $time);
+        $fatal(1);
+      end
+    end
+  end
+`endif
   logic unused_fpq_full;
   rapt_iq #(
       .Cfg(Cfg),
@@ -217,6 +443,10 @@ module rapt_feu #(
       .RLEN(RLEN),
       .XLEN(64),
       .ThirdOperand(1'b1),
+      .ComboCdbWake(1'b1),
+      .ComboThirdWake(1'b1),
+      .ReadAfterSelect(1'b1),
+      .ExposeEntryIndex(1'b1),
       .FilterResources(1'b1),
       .LocalOperandWake(LocalFpWake),
       .NumResources(Units)
@@ -229,14 +459,15 @@ module rapt_feu #(
       .cancel_owner,
       .cmu_bcast,
       .completion(fp_wake),
+      .combo_source(early_fp_wake),
       .dispatch(fp_dispatch),
-      .disp(disp_fpq),
+      .disp(fpq_dispatch),
       // IQ cancels issue.valid on reset/flush. Keep identity selection live so
       // recovery cannot steer the payload mux ahead of FP arithmetic.
-      .issue_enable(1'b1),
-      .resource_ready(unit_ready),
-      .issue(fp_issue),
-      .occ_o(unused_fpq_occupancy),
+      .issue_enable(read_ticket_space),
+      .resource_ready(fpq_resource_ready),
+      .issue(fpq_selected),
+      .occ_o(fpq_occupancy),
       .pmu_iq_full(unused_fpq_full)
   );
   logic [63:0] fp_operand_a, fp_operand_b, fp_operand_c;

@@ -248,13 +248,14 @@ GENERATED_RTL_PATH := $(abspath $(VSRC_PATH)/generated)
 GENERATED_DECODERS := $(GENERATED_RTL_PATH)/rapt_idu_decoder.sv \
 	$(GENERATED_RTL_PATH)/rapt_idu_decoder_c.sv
 CHISEL_DECODER_SRCS := $(shell find $(RAPTOR_HOME)/tools/decodegen/src -type f) \
-	$(RAPTOR_HOME)/tools/decodegen/Makefile
+	$(RAPTOR_HOME)/tools/decodegen/Makefile $(RAPTOR_HOME)/tools/decodegen/build.sbt \
+	$(RAPTOR_HOME)/tools/decodegen/project/build.properties
 
 # The instruction decoders are generated and ignored by Git. Make them explicit
 # prerequisites so a clean checkout can build the simulator without a separate
 # manual `make -C tools/decodegen verilog` step.
 $(GENERATED_DECODERS) &: $(CHISEL_DECODER_SRCS)
-	$(MAKE) -C $(RAPTOR_HOME)/tools/decodegen verilog
+	$(MAKE) -C $(RAPTOR_HOME)/tools/decodegen verilog BUILD_DIR="$(GENERATED_RTL_PATH)"
 
 VSRCS_RAW = $(shell find $(VSRC_PATH) $(NSIM_RTL_PATH) -path $(GENERATED_RTL_PATH) -prune -o -name "*.sv" -print) \
 	$(GENERATED_DECODERS)

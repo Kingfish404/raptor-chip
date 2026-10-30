@@ -51,6 +51,18 @@ class MakeTargetsTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("must be", result.stderr)
 
+    def test_decoder_prerequisite_keeps_canonical_output_directory(self):
+        # A command-line BUILD_DIR propagates through recursive Make calls.
+        # A successful prerequisite must create the generated file it names.
+        generated = ROOT / "rtl/generated"
+        for folder in ("sim", "verification/formal"):
+            with self.subTest(folder=folder):
+                result = self.make("-n", "-B", str(generated / "rapt_idu_decoder.sv"),
+                                   f"BUILD_DIR={self.work}", cwd=ROOT / folder)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f"--target-dir {generated}", result.stdout)
+                self.assertNotIn(f"--target-dir {self.work}", result.stdout)
+
     def test_benchmark_flag_changes_rebuild_objects(self):
         (self.work / "Makefile").write_text(f'''NAME := coremark
 PLATFORM := npc

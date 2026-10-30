@@ -4,6 +4,8 @@
 !.gitignore
 !rvfi/
 !rvfi/**
+!lemmas/
+!lemmas/*.smt2
 !formal_*.sv
 !npc_response_stability_main.cpp
 !synthesis_driver_fixture.sv

@@ -54,6 +54,17 @@ module rapt_rou #(
     // Zero-tag operands arrive as rapt_pkg::derive_op* selectors.
     parameter bit DerivedConstants = 1'b0
 ) (
+    input UopT fp_queue_read_uop,
+    input logic [2:0][$clog2(ROB_SIZE):0] fp_queue_read_tag,
+    output logic [2:0][63:0] operand_read_value,
+    output logic [2:0][$clog2(ROB_SIZE):0] fp_queue_ready_tag,
+    output logic [2:0][Cfg.rob_generation_bits-1:0] fp_queue_read_generation,
+    output logic [2:0][$clog2(ROB_SIZE):0] fp_queue_dispatch_tag[NumSlots],
+    output logic [2:0][Cfg.rob_generation_bits-1:0] fp_queue_dispatch_generation[NumSlots],
+    output logic fp_retire_valid[CommitWidth],
+    output logic [63:0] fp_retire_value[CommitWidth],
+    output logic [$clog2(ROB_SIZE)-1:0] fp_retire_owner[CommitWidth],
+    output logic [Cfg.rob_generation_bits-1:0] fp_retire_generation[CommitWidth],
     input CompletionT completion[NumCompletions],
     input CompletionT operand_wake[NumCompletions] = '{default: '0},
     rob_completion_owner_if.owner completion_owner,
@@ -120,6 +131,10 @@ module rapt_rou #(
   // The CSR vector is XLEN-wide WARL state; fetch uses its PC representation.
   wire [PcW-1:0] trap_vector = `RAPT_PC_LEGALIZE(XLEN, PcW, csr_bcast.tvec);
 
+  localparam logic [NumCompletions-1:0] ControlFlowPorts =
+      NumCompletions'(rapt_pkg::completion_control_flow_mask(
+      Cfg
+  ));
   localparam int RBits = rapt_pkg::index_bits(ROB_SIZE);
   localparam int QBits = rapt_pkg::index_bits(IIQ_SIZE);
   localparam int SlotBits = rapt_pkg::index_bits(NumSlots);
@@ -145,21 +160,20 @@ module rapt_rou #(
   end
 `ifdef RAPT_RVFI
   // Optional per-owner trace, separate from functional retirement metadata.
-  logic [XLEN-1:0] rvfi_mem_addr[ROB_SIZE], rvfi_mem_data[ROB_SIZE];
+  logic [XLEN-1:0] rvfi_mem_addr[ROB_SIZE], rvfi_mem_data[ROB_SIZE], rvfi_mem_result[ROB_SIZE];
 `endif
   // The complete uop lives only while its owner waits for execution dispatch
   // in the 16-entry spill. ROB retirement needs a much narrower, immutable
   // summary; storing the full execution payload in every ROB slot duplicates
   // the spill and makes the dispatch read a 32:1 wide mux.
   typedef struct packed {rapt_pkg::execution_domain_t domain;} retire_schedule_t;
-  typedef struct packed {logic [5:0] alu;} retire_int_t;
+  typedef struct packed {logic atomic_sc;} retire_int_t;
   typedef struct packed {
     logic conditional;
     logic jump;
     logic indirect;
     rapt_pkg::ras_action_t ras;
   } retire_branch_t;
-  typedef struct packed {logic [5:0] op;} retire_fp_t;
   typedef struct packed {
     logic valid;
     logic ecall;
@@ -173,14 +187,13 @@ module rapt_rou #(
   typedef struct packed {
     retire_int_t int_op;
     retire_branch_t branch;
-    retire_fp_t fp;
     retire_sys_t sys;
   } retire_execute_t;
   typedef struct packed {
     retire_schedule_t schedule;
     retire_execute_t execute;
+    logic fetch_csr_change;
     logic c;
-    logic [11:0] imm;
 `ifdef RAPT_UOP_HAS_INST
     logic [31:0] inst;
 `endif
@@ -191,6 +204,55 @@ module rapt_rou #(
     logic [PcW-1:1] pc;
   } retire_uop_t;
   retire_uop_t uop_pl[ROB_SIZE];
+  localparam int RetireDataBits = $bits(retire_uop_t) - $bits(retire_schedule_t);
+  typedef logic [RetireDataBits-1:0] retire_data_t;
+  retire_schedule_t retire_schedule[ROB_SIZE];
+  retire_data_t retire_data[ROB_SIZE];
+  retire_uop_t commit_uop[CommitWidth+1];
+  // These retirement views each consume only their relevant fields.
+  /* verilator lint_off UNUSEDSIGNAL */
+  retire_uop_t youngest_uop, branch_uop, store_uop;
+  /* verilator lint_on UNUSEDSIGNAL */
+  localparam int CommitSlotBits = rapt_pkg::index_bits(CommitWidth);
+  localparam int CommitReadBits = rapt_pkg::index_bits(CommitWidth + 1);
+  logic [CommitSlotBits-1:0] branch_commit_slot, store_commit_slot;
+  logic [RBits-1:0] retire_read_index[CommitWidth+1];
+  retire_data_t retire_read_data[CommitWidth+1];
+  // Round up for widths such as three: wraparound must not send two writes
+  // to the same bank. Unusual ROB sizes retain the ordinary flop storage.
+  localparam int RetireBanks = 1 << $clog2(NumSlots);
+  localparam bit BankRetireData = ROB_SIZE % RetireBanks == 0;
+`ifdef SYNTHESIS
+  localparam bit RetireShadow = !BankRetireData;
+`else
+  localparam bit RetireShadow = 1'b1;
+`endif
+  for (genvar e = 0; e < ROB_SIZE; e++) begin : g_retire_view
+    assign uop_pl[e] = {retire_schedule[e], retire_data[e]};
+  end
+  for (genvar c = 0; c <= CommitWidth; c++) begin : g_retire_read
+    assign retire_read_index[c] = RBits'((int'(rob_head) + c) % ROB_SIZE);
+    assign commit_uop[c] = {retire_schedule[retire_read_index[c]], retire_read_data[c]};
+    if (!BankRetireData) begin : g_flop_data
+      assign retire_read_data[c] = retire_data[retire_read_index[c]];
+    end
+    `RAPT_SVA_IMPLY(clock, reset, ROB_RETIRE_PAYLOAD_EQUIVALENT,
+                    rob_entry_busy[retire_read_index[c]],
+                    commit_uop[c] == uop_pl[retire_read_index[c]])
+`ifdef RAPT_SVA_ACTIVE
+    wire csr_context_matches = commit_uop[c].fetch_csr_change == fetch_csr_changes(
+        retire_imm_shadow[retire_read_index[c]]
+    );
+    `RAPT_SVA_IMPLY(clock, reset, ROB_RETIRE_CSR_CONTEXT, rob_entry_busy[retire_read_index[c]],
+                    csr_context_matches)
+`endif
+  end
+  // CSR addresses and selective-fence selectors belong to the one serialized
+  // system owner, like csr_wdata_q. Illegal-instruction tval is stored separately.
+  logic [11:0] serial_imm;
+`ifdef RAPT_SVA_ACTIVE
+  logic [11:0] retire_imm_shadow[ROB_SIZE];
+`endif
   // One registered rename group absorbs allocation backpressure. The final
   // allocation can replace it with the next group on the same edge.
   localparam int SkidIndexBits = rapt_pkg::index_bits(RenameWidth);
@@ -228,6 +290,9 @@ module rapt_rou #(
       endpoint_fire[ScanEntries],
       commit_fire[CommitWidth];
   int unsigned enqueue_count, dispatch_count, endpoint_count, commit_count;
+  assign youngest_uop = commit_uop[commit_count != 0 ? commit_count-1 : 0];
+  assign branch_uop = commit_uop[CommitReadBits'(branch_commit_slot)];
+  assign store_uop = commit_uop[CommitReadBits'(store_commit_slot)];
   wire skid_replace = skid_empty || dispatch_count == int'(skid_count);
   logic admission_present[NumSlots], admission_rob_available[NumSlots], admission_serial[NumSlots];
   logic admission_eligible[NumSlots], allocation_endpoint_ready[NumSlots];
@@ -273,6 +338,7 @@ module rapt_rou #(
   logic [ROB_SIZE-1:0] rob_entry_busy;
   logic [ROB_SIZE-1:0] rob_entry_executing;
   logic rob_control_flow[ROB_SIZE];
+  logic rob_conditional[ROB_SIZE];
   // Compact retirement controls are decoded once at allocation, before the
   // wide ROB uop read and the commit-prefix chain.
   logic rob_serializing[ROB_SIZE];
@@ -418,16 +484,22 @@ module rapt_rou #(
   function automatic logic control_flow(input UopT u);
     return u.execute.branch.conditional || u.execute.branch.jump || u.execute.branch.indirect;
   endfunction
+  function automatic logic fetch_csr_changes(input logic [11:0] addr);
+    return addr == `RAPT_CSR_SATP___ || addr == `RAPT_CSR_PMPCFG0 || addr ==
+    `RAPT_CSR_PMPCFG1
+    || addr == `RAPT_CSR_PMPCFG2 || addr ==
+    `RAPT_CSR_PMPCFG3
+    || (addr >= `RAPT_CSR_PMPADDR0 && addr <= `RAPT_CSR_PMPADDR15);
+  endfunction
   function automatic retire_uop_t compact_retire_uop(input UopT u);
     retire_uop_t result;
     result = '0;
     result.schedule.domain = u.schedule.domain;
-    result.execute.int_op.alu = u.execute.int_op.alu;
+    result.execute.int_op.atomic_sc = u.execute.int_op.alu == `RAPT_ATO_SC__;
     result.execute.branch.conditional = u.execute.branch.conditional;
     result.execute.branch.jump = u.execute.branch.jump;
     result.execute.branch.indirect = u.execute.branch.indirect;
     result.execute.branch.ras = u.execute.branch.ras;
-    result.execute.fp.op = u.execute.fp.op;
     result.execute.sys.valid = u.execute.sys.valid;
     result.execute.sys.ecall = u.execute.sys.ecall;
     result.execute.sys.ebreak = u.execute.sys.ebreak;
@@ -436,8 +508,8 @@ module rapt_rou #(
     result.execute.sys.mret = u.execute.sys.mret;
     result.execute.sys.sret = u.execute.sys.sret;
     result.execute.sys.kind = u.execute.sys.kind;
+    result.fetch_csr_change = fetch_csr_changes(u.imm[11:0]);
     result.c = u.c;
-    result.imm = u.imm[11:0];
 `ifdef RAPT_UOP_HAS_INST
     result.inst = u.inst;
 `endif
@@ -468,21 +540,14 @@ module rapt_rou #(
     return rob_serializing[e] || rob_entry[e].trap || rob_entry[e].mispredict ||
         rob_atomic[e] || rob_entry[e].difftest_skip;
   endfunction
-  function automatic logic fetch_csr_changes(input logic [11:0] addr);
-    return addr == `RAPT_CSR_SATP___ || addr == `RAPT_CSR_PMPCFG0 || addr ==
-    `RAPT_CSR_PMPCFG1
-    || addr == `RAPT_CSR_PMPCFG2 || addr ==
-    `RAPT_CSR_PMPCFG3
-    || (addr >= `RAPT_CSR_PMPADDR0 && addr <= `RAPT_CSR_PMPADDR15);
-  endfunction
   function automatic logic fetch_uop_changes(input logic [RBits-1:0] idx);
+    /* verilator lint_off UNUSEDSIGNAL */
     retire_uop_t u;
-    u = uop_pl[idx];
+    /* verilator lint_on UNUSEDSIGNAL */
+    u = commit_uop[0];
     return rob_entry[idx].trap || u.execute.sys.ecall || u.execute.sys.ebreak
         || u.execute.sys.mret || u.execute.sys.sret || u.execute.sys.fence_i
-        || (rob_entry[idx].csr_wen && fetch_csr_changes(
-        u.imm
-    ));
+        || (rob_entry[idx].csr_wen && u.fetch_csr_change);
   endfunction
   if (!(NumSlots > 0 && ScanEntries >= NumSlots && RenameWidth > 0
       && CommitWidth > 0)) begin : g_invalid_config_0
@@ -597,23 +662,45 @@ module rapt_rou #(
           && rob_owner_rd[completion[p].dest] == completion[p].rd)
     end
   end
-  for (genvar p = 0; p < NumCompletions; p++) begin : g_recovery_candidate
-    always_comb begin
-      recovery_candidate_valid[p] = 0;
-      recovery_candidate_index[p] = completion[p].dest;
-      recovery_candidate_target[p] = '0;
-      if (completion_valid[p] && int'(completion[p].dest) < ROB_SIZE) begin
-        recovery_candidate_valid[p] = completion[p].updates.control_flow
-            && completion_mispredict[p] && !completion[p].trap
-            && rob_entry_busy[completion[p].dest] && !rob_trap[completion[p].dest]
-            && rob_control_flow[completion[p].dest];
-        if (recovery_candidate_valid[p]) recovery_candidate_target[p] = completion[p].npc;
-      end
+  for (genvar p = 0; p < NumCompletions; p++) begin : g_control_flow_completion
+    if (ControlFlowPorts[p]) begin : g_resolve
+      wire [RBits-1:0] owner = completion[p].dest;
+      wire [CheckpointBits-1:0] checkpoint = rob_checkpoint[owner];
+      wire has_target = int'(owner) < ROB_SIZE && rob_checkpoint_valid[owner]
+          && int'(checkpoint) < CheckpointEntries;
+      // The fallback serves standalone/hostile-input harnesses. Normal rename
+      // allocates a checkpoint for every control-flow instruction.
+      assign completion_mispredict[p] = has_target
+          ? (completion[p].npc[PcW-1:1] != predicted_npc[checkpoint]
+              || (rob_conditional[owner]
+                  && completion[p].btaken != predicted_taken[checkpoint]))
+          : completion[p].mispredict;
+      assign recovery_candidate_valid[p] = completion_valid[p]
+          && int'(owner) < ROB_SIZE && completion[p].updates.control_flow
+          && completion_mispredict[p] && !completion[p].trap
+          && rob_entry_busy[owner] && !rob_trap[owner] && rob_control_flow[owner];
+      // Only valid publishes this payload; the verdict need not gate target data.
+      assign recovery_candidate_index[p] = owner;
+      assign recovery_candidate_target[p] = completion[p].npc;
+      assign checkpoint_release.valid[p] = completion_valid[p]
+          && completion[p].updates.control_flow && !completion_mispredict[p] && !completion[p].trap
+          && int'(owner) < ROB_SIZE && rob_checkpoint_valid[owner] && rob_control_flow[owner];
+      assign checkpoint_release.checkpoint[p] = checkpoint_release.valid[p] ? checkpoint : '0;
+    end else begin : g_no_control_flow
+      assign completion_mispredict[p] = 1'b0;
+      assign recovery_candidate_valid[p] = 1'b0;
+      assign recovery_candidate_index[p] = '0;
+      assign recovery_candidate_target[p] = '0;
+      assign checkpoint_release.valid[p] = 1'b0;
+      assign checkpoint_release.checkpoint[p] = '0;
+      `RAPT_SVA_IMPLY(clock, reset, ROU_CONTROL_FLOW_PORT, completion[p].valid,
+                      !completion[p].updates.control_flow)
     end
   end
   rapt_recovery_pending #(
       .Entries(ROB_SIZE),
       .Ports(NumCompletions),
+      .PortMask(ControlFlowPorts),
       .Xlen(PcW),
       .GenerationBits(GenerationBits)
   ) recovery_request (
@@ -673,28 +760,6 @@ module rapt_rou #(
       recovery_announced_generation <= recovery_generation;
     end
   end
-  for (genvar p = 0; p < NumCompletions; p++) begin : g_rename_checkpoint_resolve
-    assign checkpoint_release.valid[p] = completion_valid[p]
-        && completion[p].updates.control_flow && !completion_mispredict[p] && !completion[p].trap
-        && int'(completion[p].dest) < ROB_SIZE && rob_checkpoint_valid[completion[p].dest]
-        && rob_control_flow[completion[p].dest];
-    assign checkpoint_release.checkpoint[p] = checkpoint_release.valid[p]
-        ? rob_checkpoint[completion[p].dest] : '0;
-  end
-  for (genvar p = 0; p < NumCompletions; p++) begin : g_prediction_check
-    wire [RBits-1:0] owner = completion[p].dest;
-    wire has_target = int'(owner) < ROB_SIZE && rob_checkpoint_valid[owner]
-        && int'(rob_checkpoint[owner]) < CheckpointEntries;
-    wire [CheckpointBits-1:0] checkpoint = rob_checkpoint[owner];
-    // The fallback only serves standalone/hostile-input harnesses. Normal
-    // rename allocates a checkpoint for every control-flow instruction.
-    assign completion_mispredict[p] = has_target
-        ? (completion[p].npc[PcW-1:1] != predicted_npc[checkpoint]
-            || (uop_pl[owner].execute.branch.conditional
-                && completion[p].btaken != predicted_taken[checkpoint]))
-        : completion[p].mispredict;
-  end
-
   // UOQ -> ROB allocation remains an ordered prefix. In buffered mode this
   // boundary depends only on ROB/serialization resources; execution-domain
   // capacity is consumed by the independent ROB_DP steering boundary below.
@@ -883,12 +948,47 @@ module rapt_rou #(
   for (genvar c = 0; c < CommitWidth; c++) begin : g_fp_commit_ports
     assign fp_commit_valid[c] = commit_fire[c] && !rob_entry[commit_index[c]].trap;
   end
+  UopT fp_queue_resolve_uop[NumSlots+1];
+  logic [2:0][RBits:0] fp_queue_resolve_tag[NumSlots+1], fp_queue_resolve_ready[NumSlots+1];
+  logic [2:0][GenerationBits-1:0] fp_queue_resolve_generation[NumSlots+1];
+  logic [2:0][63:0] fp_queue_resolve_value[NumSlots+1];
+  logic [RBits-1:0] fp_queue_source_index[NumSlots+1];
+  logic [2:0][RBits:0] fp_queue_source_tag[NumSlots+1];
+  logic fp_queue_release_valid[NumSlots+1], fp_queue_source_valid[NumSlots+1];
+  logic [SpillBits-1:0] fp_queue_release_index[NumSlots+1], fp_queue_source_slot[NumSlots+1];
+  for (genvar s = 0; s < NumSlots; s++) begin : g_operand_dispatch
+    assign fp_queue_resolve_uop[s] = fp_resolve_uop[s];
+    assign fp_queue_resolve_tag[s] = fp_resolve_tag[s];
+    assign fp_resolve_ready_tag[s] = fp_queue_resolve_ready[s];
+    assign fp_resolve_value[s] = fp_queue_resolve_value[s];
+    assign fp_queue_dispatch_tag[s] = fp_resolve_tag[s];
+    assign fp_queue_dispatch_generation[s] = fp_queue_resolve_generation[s];
+    assign fp_queue_source_index[s] = fp_read_index[s];
+    assign fp_read_tag[s] = fp_queue_source_tag[s];
+    assign fp_queue_release_valid[s] = spill_release_valid[s];
+    assign fp_queue_release_index[s] = spill_release_index[s];
+    assign fp_queue_source_valid[s] = fp_operand_read_valid[s];
+    assign fp_queue_source_slot[s] = fp_operand_read_index[s];
+  end
+  assign fp_queue_resolve_uop[NumSlots] = fp_queue_read_uop;
+  assign fp_queue_resolve_tag[NumSlots] = fp_queue_read_tag;
+  assign operand_read_value = fp_queue_resolve_value[NumSlots];
+  assign fp_queue_ready_tag = fp_queue_resolve_ready[NumSlots];
+  assign fp_queue_read_generation = fp_queue_resolve_generation[NumSlots];
+  assign fp_queue_source_index[NumSlots] = '0;
+  assign fp_queue_release_valid[NumSlots] = 1'b0;
+  assign fp_queue_release_index[NumSlots] = '0;
+  assign fp_queue_source_valid[NumSlots] = 1'b0;
+  assign fp_queue_source_slot[NumSlots] = '0;
+  for (genvar c = 0; c < CommitWidth; c++) begin : g_operand_commit
+    assign fp_retire_owner[c] = commit_index[c];
+  end
   rapt_fp_registers #(
       .UopT(UopT),
       .CompletionT(CompletionT),
       .Entries(ROB_SIZE),
       .AllocateWidth(NumSlots),
-      .ReadPorts(NumSlots),
+      .ReadPorts(NumSlots+1),
       .CommitWidth(CommitWidth),
       .CompletionPorts(NumCompletions),
       .GenerationBits(GenerationBits),
@@ -897,6 +997,10 @@ module rapt_rou #(
       .OperandBits(SpillBits),
       .WritePorts(FpWritePorts)
   ) fp_registers (
+      .resolve_generation(fp_queue_resolve_generation),
+      .retire_fp(fp_retire_valid),
+      .retire_value(fp_retire_value),
+      .retire_generation(fp_retire_generation),
       .clock,
       .reset,
       .flush(flush_pipe),
@@ -906,16 +1010,16 @@ module rapt_rou #(
       .allocate_generation(fp_allocate_generation),
       .allocate_tag(fp_allocate_tag),
       .operand_allocate_index(spill_allocate_index),
-      .operand_release_valid(spill_release_valid),
-      .operand_release_index(spill_release_index),
-      .operand_read_valid(fp_operand_read_valid),
-      .operand_read_index(fp_operand_read_index),
-      .read_index(fp_read_index),
-      .read_tag(fp_read_tag),
-      .resolve_uop(fp_resolve_uop),
-      .resolve_tag(fp_resolve_tag),
-      .resolve_value(fp_resolve_value),
-      .resolve_ready_tag(fp_resolve_ready_tag),
+      .operand_release_valid(fp_queue_release_valid),
+      .operand_release_index(fp_queue_release_index),
+      .operand_read_valid(fp_queue_source_valid),
+      .operand_read_index(fp_queue_source_slot),
+      .read_index(fp_queue_source_index),
+      .read_tag(fp_queue_source_tag),
+      .resolve_uop(fp_queue_resolve_uop),
+      .resolve_tag(fp_queue_resolve_tag),
+      .resolve_value(fp_queue_resolve_value),
+      .resolve_ready_tag(fp_queue_resolve_ready),
       .completion(fp_operand_wake),
       .commit_valid(fp_commit_valid),
       .commit_index
@@ -942,6 +1046,58 @@ module rapt_rou #(
         allocation[s].dep_generation[d] = '0;
       end
     end
+  end
+  if (BankRetireData) begin : g_retire_banks
+    retire_data_t read_data[CommitWidth+1][RetireBanks];
+    for (genvar c = 0; c <= CommitWidth; c++) begin : g_select_bank
+      assign retire_read_data[c] = read_data[c][int'(retire_read_index[c])%RetireBanks];
+    end
+    for (genvar b = 0; b < RetireBanks; b++) begin : g_bank
+      localparam int Rows = ROB_SIZE / RetireBanks;
+      localparam int RowBits = rapt_pkg::index_bits(Rows);
+      retire_data_t data[Rows];
+      logic write_valid;
+      logic [RowBits-1:0] write_row;
+      retire_data_t write_data;
+`ifdef RAPT_SVA_ACTIVE
+      logic [NumSlots-1:0] writers;
+      for (genvar s = 0; s < NumSlots; s++) begin : g_writer
+        assign writers[s] = deq_fire[s] && int'(rob_alloc[s]) % RetireBanks == b;
+      end
+      `RAPT_SVA(clock, reset, ROB_RETIRE_BANK_ONE_WRITER, $onehot0(writers))
+`endif
+      always_comb begin
+        write_valid = 1'b0;
+        write_row = '0;
+        write_data = '0;
+        for (int s = 0; s < NumSlots; s++) begin
+          // rob_alloc is derived only from the registered tail. Admission
+          // qualifies the write without entering its address or data mux.
+          if (int'(rob_alloc[s]) % RetireBanks == b) begin
+            write_row = RowBits'(int'(rob_alloc[s]) / RetireBanks);
+            write_data = RetireDataBits'(compact_retire_uop(allocation[s].uop));
+            write_valid = deq_fire[s];
+          end
+        end
+      end
+      always_ff @(posedge clock) if (write_valid) data[write_row] <= write_data;
+      for (genvar c = 0; c <= CommitWidth; c++) begin : g_read
+        assign read_data[c][b] = data[RowBits'(int'(retire_read_index[c])/RetireBanks)];
+      end
+    end
+  end
+`ifdef SYNTHESIS
+  if (BankRetireData) begin : g_retire_shadow_unused
+    for (genvar e = 0; e < ROB_SIZE; e++) assign retire_data[e] = '0;
+  end
+`endif
+  always_ff @(posedge clock) begin
+    for (int s = 0; s < NumSlots; s++)
+    if (deq_fire[s] && admission_serial[s]) serial_imm <= allocation[s].uop.imm[11:0];
+  end
+  for (genvar e = 0; e < ROB_SIZE; e++) begin : g_serial_imm_contract
+    `RAPT_SVA_IMPLY(clock, reset || flush_pipe, ROB_SERIAL_IMMEDIATE,
+                    rob_entry_busy[e] && rob_serializing[e], serial_imm == retire_imm_shadow[e])
   end
   for (genvar s = 0; s < NumSlots; s++) begin : g_spill_route
     always_comb begin
@@ -1260,7 +1416,7 @@ module rapt_rou #(
   // ordinary FENCE preserve the physically tagged cache's dirty contents.
   // The decoded kind distinguishes FENCE.I from SFENCE, which also carries fence_i.
   assign writeback_clean = writeback_drain && !rob_entry[h0].trap
-      && uop_pl[h0].execute.sys.kind == rapt_pkg::SYS_FENCE_I;
+      && commit_uop[0].execute.sys.kind == rapt_pkg::SYS_FENCE_I;
   // The IOQ completion has already translated and checked this block. ZERO
   // owns an SQ entry and therefore never requests this precommit operation.
   assign writeback_cbo = writeback_drain && !rob_entry[h0].trap && head_cbo;
@@ -1283,6 +1439,8 @@ module rapt_rou #(
     youngest_commit = h0;
     store_commit = h0;
     branch_commit = h0;
+    branch_commit_slot = '0;
+    store_commit_slot = '0;
     store_commit_valid = 1'b0;
     branch_commit_valid = 1'b0;
     for (int c = 0; c < CommitWidth; c++) begin
@@ -1297,10 +1455,12 @@ module rapt_rou #(
         youngest_commit = commit_index[c];
         if (rob_entry[commit_index[c]].wen) begin
           store_commit = commit_index[c];
+          store_commit_slot = CommitSlotBits'(c);
           store_commit_valid = 1'b1;
         end
         if (rob_control_flow[commit_index[c]]) begin
           branch_commit = commit_index[c];
+          branch_commit_slot = CommitSlotBits'(c);
           branch_commit_valid = 1'b1;
         end
       end
@@ -1327,16 +1487,16 @@ module rapt_rou #(
     always_comb begin
       if (recovery_pending && recovery_owner_current && owner == recovery_owner)
         commit_npc[c] = recovery_target;
-      else if (uop_pl[owner].execute.sys.mret || uop_pl[owner].execute.sys.sret)
+      else if (commit_uop[c].execute.sys.mret || commit_uop[c].execute.sys.sret)
         commit_npc[c] = xret_npc_q;
       else if (successor != rob_tail && rob_entry_busy[successor])
-        commit_npc[c] = {uop_pl[successor].pc, 1'b0};
+        commit_npc[c] = {commit_uop[c+1].pc, 1'b0};
       else commit_npc[c] = youngest_npc;
     end
   end
   assign rou_cmu.next_pc = debug_halt_flush ? commit_npc_q :
       recieved_trap || rob_entry[youngest_commit].trap
-      || uop_pl[youngest_commit].execute.sys.ecall || uop_pl[youngest_commit].execute.sys.ebreak
+      || youngest_uop.execute.sys.ecall || youngest_uop.execute.sys.ebreak
       ? trap_vector : commit_npc[commit_count != 0 ? commit_count-1 : 0];
   for (genvar entry = 0; entry < ROB_SIZE; entry++) begin : g_generation
     always_ff @(posedge clock) begin
@@ -1376,9 +1536,8 @@ module rapt_rou #(
     end
     if (recovery_pending && recovery_owner_current) youngest_npc <= recovery_target;
     for (int p = 0; p < NumCompletions; p++) begin
-      if (completion_valid[p] && int'(completion[p].dest) < ROB_SIZE
-          && (uop_pl[completion[p].dest].execute.sys.mret
-              || uop_pl[completion[p].dest].execute.sys.sret))
+      if (completion_valid[p] && completion[p].dest == h0
+          && (commit_uop[0].execute.sys.mret || commit_uop[0].execute.sys.sret))
         xret_npc_q <= completion[p].npc;
     end
   end
@@ -1457,6 +1616,7 @@ module rapt_rou #(
         rob_entry[entry].prs        <= allocation[allocate_lane].prs;
         rob_entry[entry].generation <= allocation[allocate_lane].generation;
         rob_control_flow[entry] <= control_flow(allocation[allocate_lane].uop);
+        rob_conditional[entry] <= allocation[allocate_lane].uop.execute.branch.conditional;
         rob_serializing[entry] <= serializing(allocation[allocate_lane].uop);
         rob_drains_sq[entry] <= drains_sq_before_commit(allocation[allocate_lane].uop);
         rob_atomic[entry] <= allocation[allocate_lane].uop.execute.memory.atomic;
@@ -1482,7 +1642,12 @@ module rapt_rou #(
 `endif
 
         // Immutable metadata belongs to the ROB, not execution-unit ports.
-        uop_pl[entry] <= compact_retire_uop(allocation[allocate_lane].uop);
+        retire_schedule[entry].domain <= allocation[allocate_lane].uop.schedule.domain;
+        if (RetireShadow)
+          retire_data[entry] <= RetireDataBits'(compact_retire_uop(allocation[allocate_lane].uop));
+`ifdef RAPT_SVA_ACTIVE
+        retire_imm_shadow[entry] <= allocation[allocate_lane].uop.imm[11:0];
+`endif
 
         rob_dp_spill[entry] <= spill_allocate_index[allocate_lane];
       end
@@ -1496,15 +1661,20 @@ module rapt_rou #(
       end
       for (int p = 0; p < NumCompletions; p++) begin
         if (completion_valid[p] && int'(completion[p].dest) == entry) begin
-          if (completion[p].updates.control_flow) begin
+          if (ControlFlowPorts[p] && completion[p].updates.control_flow) begin
             rob_entry[entry].btaken <= completion[p].btaken;
             rob_entry[entry].mispredict <= completion_mispredict[p];
           end
           if (completion[p].updates.memory) begin
             rob_entry[entry].wen <= completion[p].wen && !completion[p].trap;
 `ifdef RAPT_RVFI
-            rvfi_mem_addr[entry] <= completion[p].sq_waddr;
+            // Non-trapping tval carries the original effective address; the
+            // SQ address is physical and may have canonicalized a Bare alias.
+            rvfi_mem_addr[entry] <= completion[p].tval;
             rvfi_mem_data[entry] <= completion[p].sq_wdata;
+            // x0 has no PRF write. Keep the actual load/AMO result independently
+            // so tracing it cannot collapse to the architectural x0 value.
+            rvfi_mem_result[entry] <= completion[p].result;
 `endif
           end
           if (completion[p].updates.system_state) begin
@@ -1545,32 +1715,34 @@ module rapt_rou #(
       rou_cmu.slot[c].rd = rob_entry[commit_index[c]].rd;
       rou_cmu.slot[c].prd = rob_entry[commit_index[c]].prd;
       rou_cmu.slot[c].prs = rob_entry[commit_index[c]].prs;
-      rou_cmu.slot[c].pc = {uop_pl[commit_index[c]].pc, 1'b0};
+      rou_cmu.slot[c].pc = {commit_uop[c].pc, 1'b0};
 `ifdef RAPT_UOP_HAS_INST
-      rou_cmu.slot[c].inst = uop_pl[commit_index[c]].inst;
+      rou_cmu.slot[c].inst = commit_uop[c].inst;
 `else
       rou_cmu.slot[c].inst = '0;
 `endif
-      rou_cmu.slot[c].ras = uop_pl[commit_index[c]].execute.branch.ras;
-      rou_cmu.slot[c].c = uop_pl[commit_index[c]].c;
+      rou_cmu.slot[c].ras = commit_uop[c].execute.branch.ras;
+      rou_cmu.slot[c].c = commit_uop[c].c;
       rou_cmu.slot[c].trap = rob_entry[commit_index[c]].trap;
       rou_cmu.slot[c].atomic = rob_atomic[commit_index[c]];
       rou_cmu.slot[c].npc = rob_entry[commit_index[c]].trap
-          || uop_pl[commit_index[c]].execute.sys.ecall || uop_pl[commit_index[c]].execute.sys.ebreak
+          || commit_uop[c].execute.sys.ecall || commit_uop[c].execute.sys.ebreak
           ? trap_vector : commit_npc[c];
-      rou_cmu.slot[c].ebreak = uop_pl[commit_index[c]].execute.sys.ebreak;
+      rou_cmu.slot[c].ebreak = commit_uop[c].execute.sys.ebreak;
       rou_cmu.slot[c].difftest_skip = rob_entry[commit_index[c]].difftest_skip;
-      rou_cmu.slot[c].ben = uop_pl[commit_index[c]].execute.branch.conditional;
-      rou_cmu.slot[c].jen = uop_pl[commit_index[c]].execute.branch.jump;
-      rou_cmu.slot[c].jren = uop_pl[commit_index[c]].execute.branch.indirect;
+      rou_cmu.slot[c].ben = commit_uop[c].execute.branch.conditional;
+      rou_cmu.slot[c].jen = commit_uop[c].execute.branch.jump;
+      rou_cmu.slot[c].jren = commit_uop[c].execute.branch.indirect;
       rou_cmu.slot[c].branch_mispredict = rob_entry[commit_index[c]].mispredict;
       rou_cmu.slot[c].btaken = rob_entry[commit_index[c]].btaken;
 `ifdef RAPT_RVFI
       rou_cmu.slot[c].rvfi_trap = rob_entry[commit_index[c]].trap;
       rou_cmu.slot[c].rvfi_npc = rou_cmu.slot[c].npc;
-      rou_cmu.slot[c].rvfi_sq_waddr = rvfi_mem_addr[commit_index[c]];
-      rou_cmu.slot[c].rvfi_sq_wdata = rvfi_mem_data[commit_index[c]];
-      rou_cmu.slot[c].rvfi_inst = uop_pl[commit_index[c]].rvfi_inst;
+      rou_cmu.slot[c].rvfi_mem_addr = rvfi_mem_addr[commit_index[c]];
+      rou_cmu.slot[c].rvfi_mem_wdata = rvfi_mem_data[commit_index[c]];
+      rou_cmu.slot[c].rvfi_mem_result = rvfi_mem_result[commit_index[c]];
+      rou_cmu.slot[c].rvfi_mem_wen = rob_entry[commit_index[c]].wen;
+      rou_cmu.slot[c].rvfi_inst = commit_uop[c].rvfi_inst;
 `endif
     end
   end
@@ -1578,30 +1750,30 @@ module rapt_rou #(
   for (genvar c = 0; c < CommitWidth; c++) begin : g_npc_shadow_check
     wire [RBits-1:0] owner = commit_index[c];
     wire [PcW-1:0] shadow_npc = rob_entry[owner].trap
-        || uop_pl[owner].execute.sys.ecall || uop_pl[owner].execute.sys.ebreak
+        || commit_uop[c].execute.sys.ecall || commit_uop[c].execute.sys.ebreak
         ? trap_vector : {rob_entry[owner].npc, 1'b0};
     `RAPT_SVA_IMPLY(clock, reset, ROB_NPC_MATCHES_SHADOW, commit_fire[c],
                     rou_cmu.slot[c].npc == shadow_npc)
   end
 `endif
-  assign rou_cmu.ben = branch_commit_valid && uop_pl[branch_commit].execute.branch.conditional;
-  assign rou_cmu.jen = branch_commit_valid && uop_pl[branch_commit].execute.branch.jump;
-  assign rou_cmu.jren = branch_commit_valid && uop_pl[branch_commit].execute.branch.indirect;
+  assign rou_cmu.ben = branch_commit_valid && branch_uop.execute.branch.conditional;
+  assign rou_cmu.jen = branch_commit_valid && branch_uop.execute.branch.jump;
+  assign rou_cmu.jren = branch_commit_valid && branch_uop.execute.branch.indirect;
   assign rou_cmu.btaken = rob_entry[branch_commit].btaken;
-  assign rou_cmu.atomic_sc = rob_atomic[h0] && uop_pl[h0].execute.int_op.alu == `RAPT_ATO_SC__;
+  assign rou_cmu.atomic_sc = rob_atomic[h0] && commit_uop[0].execute.int_op.atomic_sc;
   // Interrupts and faulting heads must not publish instruction maintenance.
   // Keep the decoder serialization flags; SFENCE/SINVAL only maintain translation.
   assign rou_cmu.fence_i = commit_fire[0] && !rob_entry[h0].trap
-      && uop_pl[h0].execute.sys.fence_i
-      && (`RAPT_SFENCE_KEEP_STATE < 2 || !uop_pl[h0].execute.sys.fence);
+      && commit_uop[0].execute.sys.fence_i
+      && (`RAPT_SFENCE_KEEP_STATE < 2 || !commit_uop[0].execute.sys.fence);
   // Decoder fence flags still serialize CBO dispatch/retirement and replay
   // younger work. They must not turn CBO into a whole-cache/TLB flush.
-  assign head_cbo = uop_pl[h0].execute.sys.kind == rapt_pkg::SYS_CBO_CLEAN
-      || uop_pl[h0].execute.sys.kind == rapt_pkg::SYS_CBO_INVAL
-      || uop_pl[h0].execute.sys.kind == rapt_pkg::SYS_CBO_ZERO;
-  assign head_cbo_inval = uop_pl[h0].execute.sys.kind == rapt_pkg::SYS_CBO_INVAL;
+  assign head_cbo = commit_uop[0].execute.sys.kind == rapt_pkg::SYS_CBO_CLEAN
+      || commit_uop[0].execute.sys.kind == rapt_pkg::SYS_CBO_INVAL
+      || commit_uop[0].execute.sys.kind == rapt_pkg::SYS_CBO_ZERO;
+  assign head_cbo_inval = commit_uop[0].execute.sys.kind == rapt_pkg::SYS_CBO_INVAL;
   assign rou_cmu.fence_time = commit_fire[0] && !rob_entry[h0].trap
-      && uop_pl[h0].execute.sys.fence && !head_cbo;
+      && commit_uop[0].execute.sys.fence && !head_cbo;
   // A serializing fence owns the head while its resolved completion arrives.
   // Use the accepted completion, not dispatch operands that may still have tags.
   if (`RAPT_SFENCE_SELECTIVE != 0) begin : g_sfence_descriptor
@@ -1611,7 +1783,7 @@ module rapt_rou #(
     logic [RBits-1:0] owner_q;
     logic [GenerationBits-1:0] generation_q;
     logic head_sfence, owner_matches;
-    assign head_sfence = uop_pl[h0].execute.sys.kind == rapt_pkg::SYS_TRANSLATION;
+    assign head_sfence = commit_uop[0].execute.sys.kind == rapt_pkg::SYS_TRANSLATION;
     assign owner_matches = valid_q && owner_q == h0 && generation_q == rob_entry[h0].generation;
     always_ff @(posedge clock) begin
       if (reset || flush_pipe || (commit_fire[0] && head_sfence)) begin
@@ -1628,8 +1800,8 @@ module rapt_rou #(
         end
       end
     end
-    assign rou_cmu.sfence_all_vpn = uop_pl[h0].imm[0];
-    assign rou_cmu.sfence_all_asid = uop_pl[h0].imm[1];
+    assign rou_cmu.sfence_all_vpn = serial_imm[0];
+    assign rou_cmu.sfence_all_asid = serial_imm[1];
     assign rou_cmu.sfence_vpn = 27'(payload_q[VpnBits-1:0]);
     assign rou_cmu.sfence_asid = payload_q[VpnBits+:9];
     assign rou_cmu.sfence_valid = rou_cmu.fence_time && head_sfence && owner_matches
@@ -1682,29 +1854,29 @@ module rapt_rou #(
   assign commit_trap = rob_entry[h0].trap;
   `RAPT_SVA_IMPLY(clock, reset, ROB_TRAP_HAS_OLDEST_CAUSE, commit_fire[0] && commit_trap,
                   oldest_exception_valid && oldest_exception_owner == h0)
-  assign rou_csr.pc = recieved_trap ? trap_pc : {uop_pl[h0].pc, 1'b0};
-  assign rou_csr.csr_wen = !recieved_trap && !commit_trap && uop_pl[h0].execute.sys.valid
+  assign rou_csr.pc = recieved_trap ? trap_pc : {commit_uop[0].pc, 1'b0};
+  assign rou_csr.csr_wen = !recieved_trap && !commit_trap && commit_uop[0].execute.sys.valid
       && rob_entry[h0].csr_wen;
   assign rou_csr.csr_wdata = csr_wdata_q;
-  assign rou_csr.csr_addr = uop_pl[h0].imm[11:0];
+  assign rou_csr.csr_addr = serial_imm;
   assign rou_csr.fp_flags_valid = fp_commit_flags_valid;
   assign rou_csr.fp_flags = fp_commit_flags;
   assign rou_csr.fp_dirty = fp_commit_dirty;
-  assign rou_csr.ecall = !recieved_trap && !commit_trap && uop_pl[h0].execute.sys.ecall;
-  assign rou_csr.ebreak = !recieved_trap && !commit_trap && uop_pl[h0].execute.sys.ebreak;
-  assign rou_csr.mret = !recieved_trap && !commit_trap && uop_pl[h0].execute.sys.mret;
-  assign rou_csr.sret = !recieved_trap && !commit_trap && uop_pl[h0].execute.sys.sret;
+  assign rou_csr.ecall = !recieved_trap && !commit_trap && commit_uop[0].execute.sys.ecall;
+  assign rou_csr.ebreak = !recieved_trap && !commit_trap && commit_uop[0].execute.sys.ebreak;
+  assign rou_csr.mret = !recieved_trap && !commit_trap && commit_uop[0].execute.sys.mret;
+  assign rou_csr.sret = !recieved_trap && !commit_trap && commit_uop[0].execute.sys.sret;
   assign rou_csr.trap = recieved_trap || commit_trap;
   assign rou_csr.tval = recieved_trap ? '0 : commit_trap && oldest_exception_valid ? oldest_exception_tval : '0;
   assign rou_csr.cause = recieved_trap ? trap_cause
       : oldest_exception_valid ? {oldest_exception_cause[5], {(XLEN-6){1'b0}}, oldest_exception_cause[4:0]} : '0;
-  assign rou_csr.valid = recieved_trap || (commit_fire[0] && (uop_pl[h0].execute.sys.valid
+  assign rou_csr.valid = recieved_trap || (commit_fire[0] && (commit_uop[0].execute.sys.valid
       || commit_trap)) || fp_commit_flags_valid || fp_commit_dirty;
   // Faulting instructions still leave the ROB and deliver their exception,
   // but do not retire architecturally. commit_special confines these events
   // to a single head entry; interrupts already suppress commit_count.
   assign rou_csr.retire_count = (commit_fire[0] && (commit_trap
-      || uop_pl[h0].execute.sys.ecall || uop_pl[h0].execute.sys.ebreak))
+      || commit_uop[0].execute.sys.ecall || commit_uop[0].execute.sys.ebreak))
       ? '0 : RetireBits'(commit_count);
   assign rou_lsu.store = store_commit_valid && !rob_entry[store_commit].trap;
   assign rou_lsu.dest = store_commit;
@@ -1713,7 +1885,7 @@ module rapt_rou #(
 `else
   assign rou_lsu.sq_vaddr = '0;
 `endif
-  assign rou_lsu.pc = {uop_pl[store_commit].pc, 1'b0};
+  assign rou_lsu.pc = {store_uop.pc, 1'b0};
   assign rou_lsu.valid = store_commit_valid;
   // Narrow PMU state remains independent of the wide commit record muxes.
   logic pmu_branch_flush, pmu_nonbranch_flush, pmu_sq_stall;
@@ -1759,10 +1931,10 @@ module rapt_rou #(
   always_ff @(posedge clock) begin
     pmu_cf_head_busy <= !reset && rob_entry_busy[h0];
     pmu_cf_head_waiting <= !reset && rob_entry_busy[h0] && rob_entry[h0].state != rapt_pkg::ROB_WB;
-    pmu_cf_head_domain <= reset ? '0 : 32'(uop_pl[h0].schedule.domain);
+    pmu_cf_head_domain <= reset ? '0 : 32'(commit_uop[0].schedule.domain);
     pmu_head_busy <= !reset && rob_entry_busy[h0];
     pmu_head_state <= reset ? rapt_pkg::ROB_CM : rob_entry[h0].state;
-    pmu_head_domain <= reset ? '0 : 32'(uop_pl[h0].schedule.domain);
+    pmu_head_domain <= reset ? '0 : 32'(commit_uop[0].schedule.domain);
     pmu_head_store_wait <= !reset && rob_entry_busy[h0]
         && rob_entry[h0].state == rapt_pkg::ROB_WB && rob_entry[h0].wen
         && !rou_lsu.sq_ready;
@@ -1835,9 +2007,10 @@ module rapt_rou #(
                       endpoint_fire[s] && endpoint_fire[t], dispatch_index[s] != dispatch_index[t])
     end
   end
-  `RAPT_SVA_IMPLY(clock, reset, ROB_SYS_SERIALIZING_FLUSH,
-                  commit_fire[0] && (uop_pl[h0].execute.sys.valid || uop_pl[h0].execute.sys.fence),
-                  flush_pipe)
+  `RAPT_SVA_IMPLY(
+      clock, reset, ROB_SYS_SERIALIZING_FLUSH,
+      commit_fire[0] && (commit_uop[0].execute.sys.valid || commit_uop[0].execute.sys.fence),
+      flush_pipe)
   `RAPT_SVA_NEXT(clock, reset, ROB_COMMIT_NPC_IS_ARCHITECTURAL, commit_count != 0,
                  commit_npc_q == $past(rou_cmu.next_pc))
   `RAPT_SVA_NEXT(clock, reset, ROB_IDLE_INTERRUPT_CAPTURE,

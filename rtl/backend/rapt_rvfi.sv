@@ -79,10 +79,24 @@ module rapt_rvfi #(
   for (genvar c = 0; c < NRET; c++) begin : g_retirement
     logic [4:0] rs1, rs2;
     logic [XLEN-1:0] source1, source2;
+    logic [15:0] raw_c;
+    logic normalized_c_nop, c_addi_identity, c_zero_destination, identity_write;
     logic load_op, store_op, atomic_op, lr_op, sc_op, atomic_rw, reads_mem, writes_mem;
     logic [XLEN/8-1:0] mask;
-    assign rs1 = rou_cmu.slot[c].inst[19:15];
-    assign rs2 = rou_cmu.slot[c].inst[24:20];
+    assign raw_c = rou_cmu.slot[c].rvfi_inst[15:0];
+    assign normalized_c_nop = rou_cmu.slot[c].c && rou_cmu.slot[c].inst == 32'h0000_0013
+        && rou_cmu.slot[c].rd == 0;
+    // The decompressor normalizes these HINTs to ADDI x0,x0,0. RVFI still
+    // describes the original instruction's source and identity-write fields.
+    assign c_addi_identity = normalized_c_nop && raw_c[1:0] == 2'b01
+        && raw_c[15:13] == 3'b000
+        && {raw_c[12], raw_c[6:2]} == 0 && raw_c[11:7] != 0;
+    assign c_zero_destination = normalized_c_nop && raw_c[1:0] == 2'b10
+        && raw_c[15:13] == 3'b100
+        && raw_c[11:7] == 0 && raw_c[6:2] != 0;
+    assign rs1 = c_addi_identity ? raw_c[11:7] : rou_cmu.slot[c].inst[19:15];
+    assign rs2 = c_zero_destination ? raw_c[6:2] : rou_cmu.slot[c].inst[24:20];
+    assign identity_write = c_addi_identity && !rou_cmu.slot[c].rvfi_trap;
     // Forward the youngest older retirement to each source's pre-state.
     always_comb begin
       source1 = rs1 == 0 ? '0 : rf[rs1];
@@ -101,7 +115,9 @@ module rapt_rvfi #(
     assign sc_op = atomic_op && rou_cmu.slot[c].inst[31:27] == `RAPT_F5_AMO_SC;
     assign atomic_rw = atomic_op && !lr_op && !sc_op;
     assign reads_mem = load_op || lr_op || atomic_rw;
-    assign writes_mem = store_op || (sc_op && rd_wdata[c] == 0) || atomic_rw;
+    // Use actual store permission, including a failed SC with rd=x0. Its
+    // architectural PRF value is zero regardless of reservation success.
+    assign writes_mem = (store_op || sc_op || atomic_rw) && rou_cmu.slot[c].rvfi_mem_wen;
     assign mask = (XLEN / 8)'((1 << (1 << rou_cmu.slot[c].inst[13:12])) - 1);
     assign rvfi_valid[c] = rou_cmu.slot[c].valid;
     assign rvfi_order[c*64+:64] = order_cnt + 64'(c);
@@ -118,16 +134,22 @@ module rapt_rvfi #(
     assign rvfi_rs2_addr[c*5+:5] = rs2;
     assign rvfi_rs1_rdata[c*XLEN+:XLEN] = source1;
     assign rvfi_rs2_rdata[c*XLEN+:XLEN] = source2;
-    assign rvfi_rd_addr[c*5+:5] = rou_cmu.slot[c].rd;
-    assign rvfi_rd_wdata[c*XLEN+:XLEN] = rd_wdata[c];
+    // Faulting instructions do not publish a GPR write or a completed memory
+    // access. Physical completion payloads may still contain speculative data.
+    assign rvfi_rd_addr[c*5+:5] = rou_cmu.slot[c].rvfi_trap ? 5'b0
+        : identity_write ? raw_c[11:7] : rou_cmu.slot[c].rd;
+    assign rvfi_rd_wdata[c*XLEN+:XLEN] = rvfi_rd_addr[c*5+:5] == 0 ? '0
+        : identity_write ? source1 : rd_wdata[c];
     assign rvfi_pc_rdata[c*XLEN+:XLEN] = `RAPT_PC_SEXT(XLEN, rou_cmu.slot[c].pc);
     assign rvfi_pc_wdata[c*XLEN+:XLEN] = `RAPT_PC_SEXT(XLEN, rou_cmu.slot[c].npc);
     assign rvfi_mem_addr[c*XLEN+:XLEN] = (load_op || store_op || atomic_op)
-        ? rou_cmu.slot[c].rvfi_sq_waddr : '0;
-    assign rvfi_mem_rmask[c*(XLEN/8)+:(XLEN/8)] = reads_mem ? mask : '0;
-    assign rvfi_mem_wmask[c*(XLEN/8)+:(XLEN/8)] = writes_mem ? mask : '0;
-    assign rvfi_mem_rdata[c*XLEN+:XLEN] = reads_mem ? rd_wdata[c] : '0;
-    assign rvfi_mem_wdata[c*XLEN+:XLEN] = writes_mem ? rou_cmu.slot[c].rvfi_sq_wdata : '0;
+        ? rou_cmu.slot[c].rvfi_mem_addr : '0;
+    assign rvfi_mem_rmask[c*(XLEN/8)+:(XLEN/8)] = reads_mem && !rou_cmu.slot[c].rvfi_trap
+        ? mask : '0;
+    assign rvfi_mem_wmask[c*(XLEN/8)+:(XLEN/8)] = writes_mem && !rou_cmu.slot[c].rvfi_trap
+        ? mask : '0;
+    assign rvfi_mem_rdata[c*XLEN+:XLEN] = reads_mem ? rou_cmu.slot[c].rvfi_mem_result : '0;
+    assign rvfi_mem_wdata[c*XLEN+:XLEN] = writes_mem ? rou_cmu.slot[c].rvfi_mem_wdata : '0;
   end
 endmodule
 `endif

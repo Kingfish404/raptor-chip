@@ -321,6 +321,49 @@ module rapt_pmp_permissions #(
 
 endmodule
 
+// Shared request interface for owners that arbitrate before the checker.
+// Keep the grain-specialized TOR/NAPOT comparison network in one place.
+module rapt_pmp_check #(
+    parameter int XLEN = `RAPT_XLEN
+) (
+    input logic [XLEN-1:0] addr,
+    input logic [3:0] size_m1,
+    input logic [1:0] priv,
+    input logic op_r,
+    op_w,
+    op_x,
+    pmp_state_if.in state,
+    output logic fault,
+    fault_lo_o,
+    fault_read_o,
+    fault_write_o
+);
+  rapt_pmp_permissions #(
+      .XLEN(XLEN)
+  ) check_permissions (
+      .addr(addr),
+      .size_m1(size_m1),
+      .priv(priv),
+      .op_r(op_r),
+      .op_w(op_w),
+      .op_x(op_x),
+      .pmp_raw_addr(state.pmp_raw_addr),
+      .pmp_napot_mask(state.pmp_napot_mask),
+      .pmp_cfg_r(state.pmp_cfg_r),
+      .pmp_cfg_w(state.pmp_cfg_w),
+      .pmp_cfg_x(state.pmp_cfg_x),
+      .pmp_cfg_l(state.pmp_cfg_l),
+      .pmp_mode_off(state.pmp_mode_off),
+      .pmp_mode_tor(state.pmp_mode_tor),
+      .pmp_mode_na4(state.pmp_mode_na4),
+      .pmp_mode_napot(state.pmp_mode_napot),
+      .fault(fault),
+      .fault_lo_o(fault_lo_o),
+      .fault_read_o(fault_read_o),
+      .fault_write_o(fault_write_o)
+  );
+endmodule
+
 // Compatibility request interface; unused permission outputs are pruned.
 module rapt_pmp #(
     parameter int XLEN = `RAPT_XLEN,

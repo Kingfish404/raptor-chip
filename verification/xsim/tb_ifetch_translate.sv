@@ -22,7 +22,15 @@ module tb_ifetch_translate;
       if (request_valid && request_ready) requests <= requests + 1;
       if (response_valid) responses <= responses + 1;
     end
-  rapt_ifetch_translate dut (.*);
+  rapt_ifetch_translate dut (
+      .pmp_addr_o(),
+      .pmp_size_m1_o(),
+      .pmp_priv_o(),
+      .pmp_read_o(),
+      .pmp_fault_i(1'b0),
+      .pmp_read_fault_i(1'b0),
+      .*
+  );
   `include "tb_common.svh"
   `include "tb_pmp_state_defaults.svh"
   task automatic allow_all;

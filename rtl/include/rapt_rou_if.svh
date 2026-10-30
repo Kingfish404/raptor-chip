@@ -102,7 +102,8 @@ interface rou_cmu_if #(
     logic ben, jen, jren, branch_mispredict, btaken;
 `ifdef RAPT_RVFI
     logic rvfi_trap;
-    logic [XLEN-1:0] rvfi_npc, rvfi_sq_waddr, rvfi_sq_wdata;
+    logic [XLEN-1:0] rvfi_npc, rvfi_mem_addr, rvfi_mem_wdata, rvfi_mem_result;
+    logic rvfi_mem_wen;
     logic [31:0] rvfi_inst;
 `endif
   } slot_t;

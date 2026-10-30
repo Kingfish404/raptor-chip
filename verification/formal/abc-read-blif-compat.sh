@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The legacy parser can reject large flattened BLIF files. Keep ABC's native
+# parser by default; older tool distributions can explicitly select legacy.
+parser="${RAPTOR_ABC_BLIF_PARSER:-default}"
+case "$parser" in
+  default) ;;
+  legacy) ;;
+  *) echo "ERROR: RAPTOR_ABC_BLIF_PARSER must be default or legacy" >&2; exit 2 ;;
+esac
+
+abc_path="${RAPTOR_ABC_REAL:-}"
+if [[ -z $abc_path ]]; then
+  tools_bin=$(cd "$(dirname "$0")/../../third_party/oss-cad-suite/bin" && pwd)
+  abc_path="$tools_bin/yosys-abc"
+fi
+
 script_file=""
 args=()
 while (($#)); do
@@ -14,8 +29,8 @@ while (($#)); do
   fi
 done
 
-if [[ -z $script_file || ! -f $script_file ]]; then
-  exec "${RAPTOR_ABC_REAL:-$(cd "$(dirname "$0")/../../third_party/oss-cad-suite/bin" && pwd)/yosys-abc}" "${args[@]}"
+if [[ $parser == default || -z $script_file || ! -f $script_file ]]; then
+  exec "$abc_path" "${args[@]}"
 fi
 
 compat_script=$(mktemp "${TMPDIR:-/tmp}/yosys-abc-compat.XXXXXX")
@@ -29,4 +44,5 @@ for index in "${!args[@]}"; do
   fi
 done
 
-exec "${RAPTOR_ABC_REAL:-$(cd "$(dirname "$0")/../../third_party/oss-cad-suite/bin" && pwd)/yosys-abc}" "${args[@]}"
+# Return through this shell so its EXIT trap removes the temporary script.
+"$abc_path" "${args[@]}"

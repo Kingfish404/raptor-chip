@@ -368,6 +368,11 @@ module rapt_l1i #(
   logic slow_read, slow_ptw;
   logic [XLEN-1:0] slow_read_addr, slow_ptw_addr;
   logic [1:0] slow_read_pbmt;
+  localparam bit SharedFetchPmp = `RAPT_PMP_GRANULARITY_LOG2 >= 12;
+  logic [XLEN-1:0] slow_pmp_addr;
+  logic [3:0] slow_pmp_size_m1;
+  logic [1:0] slow_pmp_priv;
+  logic slow_pmp_read, slow_pmp_fault, slow_pmp_read_fault;
   localparam int PendingBits = $clog2(IFQ_SIZE + 1) + 1;
   logic [PendingBits-1:0] cache_pending;
   logic cache_issue, cache_return, cache_orphan, cache_cancel;
@@ -449,7 +454,8 @@ module rapt_l1i #(
       .result_tval(slow_tval)
   );
   rapt_ifetch_translate #(
-      .XLEN(XLEN)
+      .XLEN(XLEN),
+      .ExternalPmp(SharedFetchPmp)
   ) u_word_translate (
       .clock(clock),
       .reset(reset),
@@ -463,6 +469,12 @@ module rapt_l1i #(
       .priv(csr_bcast.priv),
       .satp_ppn(csr_bcast.satp_ppn),
       .pmp_state(pmp_state),
+      .pmp_addr_o(slow_pmp_addr),
+      .pmp_size_m1_o(slow_pmp_size_m1),
+      .pmp_priv_o(slow_pmp_priv),
+      .pmp_read_o(slow_pmp_read),
+      .pmp_fault_i(slow_pmp_fault),
+      .pmp_read_fault_i(slow_pmp_read_fault),
       .response_valid(slow_xresponse),
       .response_paddr(slow_pa),
       .response_pbmt(slow_pbmt),
@@ -676,6 +688,7 @@ module rapt_l1i #(
 `endif
   rapt_l1i_access #(
       .XLEN(XLEN),
+      .ShareSlowPath(SharedFetchPmp),
 `ifdef RAPT_FETCH_WIDE
       .WideLookahead(1'b1),
 `endif
@@ -687,6 +700,13 @@ module rapt_l1i #(
   ) u_access (
       .csr_bcast(csr_bcast),
       .pmp_state(pmp_state),
+      .shared_check_active(slow_active),
+      .shared_check_addr(slow_pmp_addr),
+      .shared_check_size_m1(slow_pmp_size_m1),
+      .shared_check_priv(slow_pmp_priv),
+      .shared_check_read(slow_pmp_read),
+      .shared_check_fault(slow_pmp_fault),
+      .shared_check_read_fault(slow_pmp_read_fault),
       .pc_ifu(pc_ifu),
       .ptw_araddr(ptw_araddr),
       .sram_data_ready(sram_data_ready),
@@ -1334,6 +1354,7 @@ module rapt_l1i #(
 
   `RAPT_SVA_IMPLY(clock, reset, L1I_REDIRECT_BLOCKS_PTW_REQUEST, flush_redirect_kills_fetch,
                   !ptw_req)
+  `RAPT_SVA_IMPLY(clock, reset, L1I_SHARED_PMP_SLOW_OWNER, slow_active, l1i_state == IDLE)
 
 endmodule
 /* verilator lint_on PINCONNECTEMPTY */

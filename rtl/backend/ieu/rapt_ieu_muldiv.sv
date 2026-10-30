@@ -34,7 +34,12 @@ module rapt_ieu_muldiv #(
     parameter unsigned RLEN     = rapt_pkg::index_bits(Cfg.arch_regs),
     parameter unsigned XLEN     = Cfg.xlen
 ) (
+    input logic [1:0][PLEN-1:0] int_source_regs[NumSlots],
+    output logic [PLEN-1:0] operand_read_address[2],
+    input logic [XLEN-1:0] operand_read_value[2],
+    input logic operand_read_valid[2],
     input CompletionT completion[NumCompletions],
+    input CompletionT early_completion[NumCompletions],
     input clock,
     input reset,
     // Validated oldest-owner event; all cancellation takes effect on this edge.
@@ -201,12 +206,24 @@ module rapt_ieu_muldiv #(
     return bin;
   endfunction
 
+  function automatic logic early_operand_hit(input logic [PLEN-1:0] preg);
+    logic found;
+    found = 1'b0;
+    for (int p = 0; p < NumCompletions; p++)
+    found |= preg != '0 && early_completion[p].valid && early_completion[p].prd == preg;
+    return found;
+  endfunction
   // === Issue selection: oldest ready, not yet issued ===
+  logic read_ticket_valid, read_ticket_fire, md_selected;
+  logic [MDQLen-1:0] read_ticket_index;
+  logic fu_in_ready;
   logic [MDQ_SIZE-1:0] mdq_elig_vec;
   always_comb begin
     for (int i = 0; i < MDQ_SIZE; i++) begin
-      mdq_elig_vec[i] = mdq_valid[i] && !cancel_tags[i] && !mdq_issued[i] && (!mdq_pr1_busy[i] || mdq_fwd1_hit[i])
-          && (!mdq_pr2_busy[i] || mdq_fwd2_hit[i]);
+      mdq_elig_vec[i] = mdq_valid[i] && !cancel_tags[i] && !mdq_issued[i]
+          && !(read_ticket_fire && read_ticket_index == MDQLen'(i))
+          && (!mdq_pr1_busy[i] || mdq_fwd1_hit[i] || early_operand_hit(mdq_pr1[i])) &&
+          (!mdq_pr2_busy[i] || mdq_fwd2_hit[i] || early_operand_hit(mdq_pr2[i]));
     end
   end
 
@@ -217,11 +234,67 @@ module rapt_ieu_muldiv #(
   assign sel_found  = |sel_onehot;
   assign sel_idx    = oh2bin(sel_onehot);
 
+  logic [1:0][PLEN-1:0] md_selected_identity[MDQ_SIZE];
+  int dispatch_bypass_choice;
+  always_comb begin
+    dispatch_bypass_choice = -1;
+    for (int s = 0; s < NumSlots; s++) begin
+      if (dispatch_bypass_choice < 0 && disp.accept[s] && !cancelled(
+              dispatch[s].dest
+          ) && (dispatch[s].pr1 == '0 || wb_hit(
+              dispatch[s].pr1
+          ) || early_operand_hit(
+              dispatch[s].pr1
+          )) && (dispatch[s].pr2 == '0 || wb_hit(
+              dispatch[s].pr2
+          ) || early_operand_hit(
+              dispatch[s].pr2
+          )))
+        dispatch_bypass_choice = s;
+    end
+  end
+  assign read_ticket_fire = read_ticket_valid && fu_in_ready
+      && !cancel_tags[read_ticket_index] && !reset && !cmu_bcast.flush_pipe;
+  // A held MD ticket has no FU side effects and may be replaced by an older
+  // ready owner while DIV is busy. Mark issued only when the FU accepts it.
+  assign md_selected = (sel_found || dispatch_bypass_choice >= 0)
+      && !reset && !cmu_bcast.flush_pipe;
+  always_ff @(posedge clock) begin
+    for (int e = 0; e < MDQ_SIZE; e++) begin
+      if (alloc_slot[e] >= 0) md_selected_identity[e] <= int_source_regs[alloc_slot[e]];
+    end
+    if (read_ticket_fire || (read_ticket_valid && cancel_tags[read_ticket_index]))
+      read_ticket_valid <= 1'b0;
+    if (md_selected) begin
+      read_ticket_valid <= 1'b1;
+      if (sel_found) begin
+        read_ticket_index <= sel_idx;
+        operand_read_address[0] <= md_selected_identity[sel_idx][0];
+        operand_read_address[1] <= md_selected_identity[sel_idx][1];
+      end else begin
+        read_ticket_index <= disp.rs_idx[dispatch_bypass_choice];
+        operand_read_address[0] <= int_source_regs[dispatch_bypass_choice][0];
+        operand_read_address[1] <= int_source_regs[dispatch_bypass_choice][1];
+      end
+    end
+    if (reset || cmu_bcast.flush_pipe) read_ticket_valid <= 1'b0;
+  end
+`ifndef SYNTHESIS
+  always_ff @(posedge clock) begin
+    if (read_ticket_fire) begin
+      if (!(operand_read_valid[0] && operand_read_valid[1])
+          || operand_read_value[0] !== mdq_fwd1_val[read_ticket_index]
+          || operand_read_value[1] !== mdq_fwd2_val[read_ticket_index]) begin
+        $display("[%0t] SVA FAIL: %m.N1_MD_RR_OPERAND", $time);
+        $fatal(1);
+      end
+    end
+  end
+`endif
   // === MUL/DIV function unit ===
   logic [XLEN-1:0] fu_out_r;
   logic [MDQLen-1:0] fu_out_tag;
   logic fu_out_valid;
-  logic fu_in_ready;
 
 `ifdef RAPT_M_EXTENSION
   rapt_ieu_mul #(
@@ -232,12 +305,12 @@ module rapt_ieu_muldiv #(
       .reset(reset),
       .flush(cmu_bcast.flush_pipe),
       .cancel_tags(cancel_tags),
-      .in_a(mdq_fwd1_hit[sel_idx] ? mdq_fwd1_val[sel_idx] : mdq_vj[sel_idx]),
-      .in_b(mdq_fwd2_hit[sel_idx] ? mdq_fwd2_val[sel_idx] : mdq_vk[sel_idx]),
-      .in_op(mdq_alu[sel_idx]),
-      .in_word(mdq_word[sel_idx]),
-      .in_tag(sel_idx),
-      .in_valid(sel_found && fu_in_ready),
+      .in_a(operand_read_address[0] == '0 ? '0 : operand_read_value[0]),
+      .in_b(operand_read_address[1] == '0 ? '0 : operand_read_value[1]),
+      .in_op(mdq_alu[read_ticket_index]),
+      .in_word(mdq_word[read_ticket_index]),
+      .in_tag(read_ticket_index),
+      .in_valid(read_ticket_fire),
       .in_ready(fu_in_ready),
       .out_r(fu_out_r),
       .out_tag(fu_out_tag),
@@ -307,8 +380,8 @@ module rapt_ieu_muldiv #(
     end
 
     // ---- FU issue bookkeeping ----
-    if (sel_found && fu_in_ready) begin
-      mdq_issued[sel_idx] <= 1'b1;
+    if (read_ticket_fire) begin
+      mdq_issued[read_ticket_index] <= 1'b1;
     end
 
     // ---- Completion: free the entry on tag return ----

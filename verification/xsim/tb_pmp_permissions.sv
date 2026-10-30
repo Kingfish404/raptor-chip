@@ -119,3 +119,157 @@ module tb_pmp_permissions;
     $finish;
   end
 endmodule
+
+// ---- tb_pmp_shared_equiv ----
+`include "rapt.svh"
+`include "rapt_if.svh"
+
+// Compare the shared fetch/PTW/slow checker against three independent
+// instances of the original permission checker for arbitrary decoded PMP state.
+module tb_pmp_shared_equiv;
+  localparam int X = `RAPT_XLEN;
+  localparam int P = `RAPT_PADDR_BITS;
+  localparam int A = P - 2;
+  localparam int G = `RAPT_PMP_GRANULARITY_LOG2 - 2;
+  localparam int N = `RAPT_PMP_NUM;
+  localparam logic [A-1:0] LowMask = (A'(1) << G) - 1;
+  csr_bcast_if csr ();
+  pmp_state_if pmp ();
+  logic [X-1:0] addr[3];
+  logic [3:0] shared_size;
+  logic [1:0] shared_priv;
+  logic shared_read, shared_active, is_c;
+  logic fetch_fault, fetch_lo, ptw_fault, shared_fault, shared_read_fault;
+  wire selected_fault = shared_read ? shared_read_fault : shared_fault;
+  logic [2:0] reference_fault, reference_lo;
+  wire reference_fetch = is_c ? reference_lo[0] : reference_fault[0];
+  rapt_l1i_access #(
+      .Lookahead(1'b0),
+      .ShareSlowPath(1'b1)
+  ) u_shared (
+      .csr_bcast(csr),
+      .pmp_state(pmp),
+      .shared_check_active(shared_active),
+      .shared_check_addr(addr[2]),
+      .shared_check_size_m1(shared_size),
+      .shared_check_priv(shared_priv),
+      .shared_check_read(shared_read),
+      .shared_check_fault(shared_fault),
+      .shared_check_read_fault(shared_read_fault),
+      .pc_ifu(addr[0]),
+      .ptw_araddr(addr[1]),
+      .lookahead_n1_addr('0),
+      .lookahead_n2_addr('0),
+      .lookahead_n3_addr('0),
+      .lookahead_n4_addr('0),
+      .sram_data_ready(1'b1),
+      .is_c(is_c),
+      .tlb_hit(1'b0),
+      .itlb_pte('0),
+      .ptw_result_pte('0),
+      .pf_fetch_tlb(),
+      .pf_fetch_ptw(),
+      .pmp_fetch_pmp_fault(fetch_fault),
+      .pmp_fetch_fault_lo(fetch_lo),
+      .pmp_iptw_fault(ptw_fault),
+      .pmp_n1_fetch_fault(),
+      .pmp_n2_fetch_fault(),
+      .pmp_n3_fetch_fault(),
+      .pmp_n4_fetch_fault()
+  );
+  for (genvar i = 0; i < 3; i++) begin : g_original
+    wire read_op = i == 1 || (i == 2 && shared_read);
+    rapt_pmp_permissions u_check (
+        .addr(addr[i]),
+        .size_m1(i == 0 ? 4'd3 : (i == 1 ? 4'(X / 8 - 1) : shared_size)),
+        .priv(i == 0 ? csr.priv : (i == 1 ? `RAPT_PRIV_S : shared_priv)),
+        .op_r(read_op),
+        .op_w(1'b0),
+        .op_x(!read_op),
+        .pmp_raw_addr(pmp.pmp_raw_addr),
+        .pmp_napot_mask(pmp.pmp_napot_mask),
+        .pmp_cfg_r(pmp.pmp_cfg_r),
+        .pmp_cfg_w(pmp.pmp_cfg_w),
+        .pmp_cfg_x(pmp.pmp_cfg_x),
+        .pmp_cfg_l(pmp.pmp_cfg_l),
+        .pmp_mode_off(pmp.pmp_mode_off),
+        .pmp_mode_tor(pmp.pmp_mode_tor),
+        .pmp_mode_na4(pmp.pmp_mode_na4),
+        .pmp_mode_napot(pmp.pmp_mode_napot),
+        .fault(reference_fault[i]),
+        .fault_lo_o(reference_lo[i]),
+        .fault_read_o(),
+        .fault_write_o()
+    );
+  end
+  int unsigned rng = 32'h504d5039;
+  function automatic int unsigned random_word();
+    rng ^= rng << 13;
+    rng ^= rng >> 17;
+    rng ^= rng << 5;
+    return rng;
+  endfunction
+  int queries = 0;
+  initial begin
+    for (int trial = 0; trial < 4096; trial++) begin
+      pmp.pmp_cfg_r = N'(random_word());
+      pmp.pmp_cfg_w = N'(random_word());
+      pmp.pmp_cfg_x = N'(random_word());
+      pmp.pmp_cfg_l = N'(random_word());
+      for (int e = 0; e < N; e++) begin
+        automatic int mode = int'(random_word() % 4);
+        pmp.pmp_raw_addr[e] = A'({random_word(), random_word()});
+        if (trial % 3 == 0) pmp.pmp_raw_addr[e] &= A'(255 << G);
+        if (trial % 17 == 0) pmp.pmp_raw_addr[e] = '0;
+        if (trial % 19 == 0) pmp.pmp_raw_addr[e] = '1;
+        pmp.pmp_napot_mask[e] = (pmp.pmp_raw_addr[e] | (LowMask >> 1))
+            ^ ((pmp.pmp_raw_addr[e] | (LowMask >> 1)) + A'(1));
+        pmp.pmp_mode_off[e] = mode == 0 || (G != 0 && mode == 2);
+        pmp.pmp_mode_tor[e] = mode == 1;
+        pmp.pmp_mode_na4[e] = G == 0 && mode == 2;
+        pmp.pmp_mode_napot[e] = mode == 3;
+      end
+      for (int sample = 0; sample < 48; sample ++) begin
+        automatic int owner = sample % 3;
+        for (int port_idx = 0; port_idx < 3; port_idx++) begin
+          automatic int entry = int'(random_word() % N);
+          automatic logic [A-1:0] word_addr = pmp.pmp_raw_addr[entry] & ~LowMask;
+          case (sample % 4)
+            0: word_addr &= ~pmp.pmp_napot_mask[entry];
+            1: word_addr |= pmp.pmp_napot_mask[entry];
+            2: word_addr = A'({random_word(), random_word()});
+            default: if (trial % 2 == 0) word_addr = '1;
+          endcase
+          addr[port_idx] = X'({word_addr, 2'b0}) + X'(int'(random_word() % 33) - 16);
+        end
+        addr[0][0] = 0;
+        addr[1] &= ~X'(X / 8 - 1);
+        csr.priv = 2'(random_word());
+        shared_priv = 2'(random_word());
+        shared_size = 4'(sample / 3);
+        shared_read = 1'(random_word());
+        shared_active = owner == 2;
+        is_c = 1'(random_word());
+        #1;
+        if (owner == 0) begin
+          `RAPT_SVA_IMM(PMP_SHARED_FETCH, fetch_fault == reference_fetch)
+          `RAPT_SVA_IMM(PMP_SHARED_FETCH_LOW, fetch_lo == reference_lo[0])
+        end else if (owner == 1) begin
+          automatic
+          logic
+          expected = reference_fault[1] || !rapt_pkg::addr_ptw_readable(
+              addr[1], 4'(X / 8 - 1)
+          );
+          `RAPT_SVA_IMM(PMP_SHARED_WALK, ptw_fault == expected)
+        end else begin
+          `RAPT_SVA_IMM(PMP_SHARED_SLOW, selected_fault == reference_fault[2])
+        end
+        queries++;
+      end
+    end
+`ifdef RAPT_SVA_ACTIVE
+    $display("PASS: PMP shared fetch/PTW/slow equivalence XLEN=%0d queries=%0d", X, queries);
+`endif
+    $finish;
+  end
+endmodule

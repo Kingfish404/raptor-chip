@@ -10,13 +10,23 @@ feu	default	64	0	2000
 feu	default-w4	64	0	2400
 l2tlb	default-w4	64	2	0
 rnu	default-w4	64	64	0
+# Stream queue payload banks use one indexed writer and asynchronous reader.
+stream_queue	default	64	0	32
+rnu	default	64	0	750
+fqu	default	64	0	140
+fqu	small	64	0	64
+fqu	small-cache	64	0	64
+frontend	default	64	0	3000
 l1i	default-w4	*	32	0
 l1i	default-l2	*	32	0
-l1d	default-w4	32	32	350
-l1d	default-w4	64	32	600
-l1d	default-l2	*	32	0
-memory	default-w4	*	64	0
-memory	default-l2	*	64	0
+l1d	default-w4	32	8	350
+l1d	default-w4	64	8	600
+l1d	default-l2	*	8	0
+memory	default-w4	*	40	0
+memory	default-l2	*	40	0
 # ROU allocation-lane operand banks and FP result banks must remain distributed RAM.
 rou	default	64	0	3400
 rou	default-w4	64	0	9500
+# Job D: diagonal 64-bit banks; partial four-way groups compact to 256 rows.
+l1d	default	*	8	0
+memory	default	*	40	0

@@ -42,8 +42,16 @@ def main() -> None:
         ),
         (
             r"^(\s*)sw\s+gp,\s*tohost,\s*t5\s*$",
-            r"\1li t5, 0x00100000\n\1li t4, 0x5555\n\1sw t4, 0(t5)",
-            r"^\s*li t5, 0x00100000\s*\n\s*li t4, 0x5555\s*\n\s*sw t4, 0\(t5\)\s*$",
+            r"\1li t5, 1\n"
+            r"\1bne gp, t5, .Lraptor_finisher_fail\n"
+            r"\1li t4, 0x5555\n"
+            r"\1j .Lraptor_finisher\n"
+            r".Lraptor_finisher_fail:\n"
+            r"\1li t4, 0x3333\n"
+            r".Lraptor_finisher:\n"
+            r"\1li t5, 0x00100000\n"
+            r"\1sw t4, 0(t5)",
+            r"^\.Lraptor_finisher:\s*$",
         ),
     )
     for source in sources:
@@ -76,7 +84,7 @@ def main() -> None:
                     f"{illegal_burst}\n"
                     f"{end_marker}\n"
                     r"                  \1",
-                    r"$^",
+                    r"(?!)",
                     source,
                 )
             else:

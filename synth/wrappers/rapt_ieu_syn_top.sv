@@ -14,6 +14,10 @@ module rapt_ieu_syn_top #(
     parameter int unsigned BRQ_SIZE = 4,
     parameter int unsigned MDQ_SIZE = 4
 ) (
+    input logic [1:0][rapt_pkg::PLENPkg-1:0] int_source_regs[NumSlots],
+    output logic [rapt_pkg::PLENPkg-1:0] operand_read_address[2],
+    input logic [`RAPT_XLEN-1:0] operand_read_value[2],
+    input logic operand_read_valid[2],
     input logic clock,
     reset,
     cancel_valid,
@@ -21,6 +25,7 @@ module rapt_ieu_syn_top #(
     cancel_owner,
     input rapt_pkg::dispatch_slot_t dispatch[NumSlots],
     input rapt_pkg::completion_t completion[NumCompletions],
+    input rapt_pkg::completion_t early_completion[NumCompletions],
     input rapt_pkg::completion_t local_integer_input[NumIntegerPorts+1],
     input rapt_pkg::completion_t branch_wake[NumCompletions],
     input rapt_pkg::completion_t memory_wake,
@@ -91,6 +96,11 @@ module rapt_ieu_syn_top #(
       .BRQ_SIZE(BRQ_SIZE),
       .MDQ_SIZE(MDQ_SIZE)
   ) dut (
+      .early_completion,
+      .int_source_regs,
+      .operand_read_address,
+      .operand_read_value,
+      .operand_read_valid,
       .clock,
       .reset,
       .cancel_valid,

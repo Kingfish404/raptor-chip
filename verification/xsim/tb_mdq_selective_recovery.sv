@@ -17,9 +17,34 @@ module tb_mdq_selective_recovery;
   assign completion[0] = external_wb;
   assign completion[1] = wb;
   for (genvar p = 2; p < rapt_pkg::CompletionPorts; p++) assign completion[p] = '0;
+  // JOB N: immutable source identities and an independent late-read RF model.
+  logic [1:0][`RAPT_PHY_LEN-1:0] int_source_regs[rapt_pkg::DispatchWidth];
+  logic [`RAPT_PHY_LEN-1:0] operand_read_address[2];
+  logic [Xlen-1:0] operand_read_value[2];
+  logic operand_read_valid[2];
+  logic [Xlen-1:0] source_rf[rapt_pkg::CoreConfig.phys_regs];
+  int next_source = 16;
+  for (genvar r = 0; r < 2; r++) begin : g_n1_read
+    assign operand_read_value[r] = source_rf[operand_read_address[r]];
+    assign operand_read_valid[r] = 1'b1;
+  end
+  always @(posedge clock) begin
+    for (int p = 0; p < rapt_pkg::CompletionPorts; p++) begin
+      if (!reset && completion[p].valid && completion[p].prd != '0)
+        source_rf[completion[p].prd] = completion[p].result;
+    end
+  end
+  // end JOB N
   rapt_ieu_muldiv #(
       .MDQ_SIZE(4)
   ) dut (
+      // JOB N
+      .int_source_regs,
+      .operand_read_address,
+      .operand_read_value,
+      .operand_read_valid,
+      .early_completion(completion),
+      // end JOB N
       .clock,
       .reset,
       .cancel_valid,
@@ -68,6 +93,13 @@ module tb_mdq_selective_recovery;
     dispatch[0].op1 = a;
     dispatch[0].op2 = b;
     dispatch[0].pr1 = `RAPT_PHY_LEN'(wait_tag);
+    // JOB N: ready operands still retain their immutable, nonzero RF identities.
+    int_source_regs[0][0] = `RAPT_PHY_LEN'(wait_tag == 0 ? next_source : wait_tag);
+    int_source_regs[0][1] = `RAPT_PHY_LEN'(next_source + 1);
+    source_rf[int_source_regs[0][0]] = a;
+    source_rf[int_source_regs[0][1]] = b;
+    next_source = next_source >= 38 ? 16 : next_source + 2;
+    // end JOB N
     disp.accept[0] = 1;
     disp.rs_idx[0] = disp.free_idx[0];
     expected[dest] = survives;
@@ -94,7 +126,9 @@ module tb_mdq_selective_recovery;
   initial begin
     init_cmu_bcast_defaults();
     external_wb = '0;
+    foreach (source_rf[p]) source_rf[p] = '0;  // JOB N
     foreach (dispatch[s]) begin
+      int_source_regs[s] = '0;  // JOB N
       dispatch[s] = '0;
       disp.accept[s] = 0;
       disp.rs_idx[s] = '0;

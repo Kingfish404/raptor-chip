@@ -43,6 +43,14 @@ SHAPES = [
     ("rapt_openram_1rw_64x32", 64, 32, 8),
     ("rapt_openram_1rw_16x32", 16, 32, 8),
     ("rapt_openram_1rw_16x64", 16, 64, 8),
+    ("rapt_openram_1rw_2x64", 2, 64, 8),
+    ("rapt_openram_1rw_4x64", 4, 64, 8),
+    ("rapt_openram_1rw_8x64", 8, 64, 8),
+    ("rapt_openram_1rw_32x64", 32, 64, 8),
+    ("rapt_openram_1rw_64x64", 64, 64, 8),
+    ("rapt_openram_1rw_128x64", 128, 64, 8),
+    ("rapt_openram_1rw_256x64", 256, 64, 8),
+    ("rapt_openram_1rw_512x64", 512, 64, 8),
     ("rapt_openram_1rw_512x32", 512, 32, 8),
     ("rapt_openram_1rw_1024x22", 1024, 22, 22),
     ("rapt_openram_1rw_1024x32", 1024, 32, 8),
@@ -52,6 +60,8 @@ SHAPES = [
     ("rapt_openram_1rw_16x128", 16, 128, 8),
     ("rapt_openram_1rw_32x128", 32, 128, 8),
     ("rapt_openram_1rw_64x128", 64, 128, 8),
+    ("rapt_openram_1rw_512x128", 512, 128, 8),
+    ("rapt_openram_1rw_1024x128", 1024, 128, 8),
     ("rapt_openram_1rw_2048x32", 2048, 32, 8),
     ("rapt_openram_1rw_2048x64", 2048, 64, 8),
     ("rapt_openram_1rw_4096x64", 4096, 64, 8),
@@ -60,7 +70,7 @@ SHAPES = [
 BLACKBOX_V = SRAM / "wrappers" / "rapt_sram_blackbox.v"
 STUB_GEN   = SRAM / "scripts" / "gen_stub_lib.py"
 RTL_SRAM   = RAPTOR / "rtl" / "sram" / "rapt_sram_1rw.sv"
-CONFIG_DIR = SRAM / "configs"
+CONFIG_DIR = SRAM / "build/sky130/configs"
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +109,9 @@ def read(path: Path) -> str:
 # 1. Configs declare the right shapes
 # ---------------------------------------------------------------------------
 def test_configs():
-    section("Configs (sim/sram/configs/*_sky130.py)")
+    section("Generated OpenRAM configs")
+    subprocess.run(["make", "-C", str(SRAM), "configs"], check=True,
+                   stdout=subprocess.DEVNULL)
     for name, depth, width, ws in SHAPES:
         # rapt_openram_1rw_32x32 -> rapt_sram_32x32_1rw_sky130.py
         shape = name.replace("rapt_openram_1rw_", "")
@@ -321,20 +333,23 @@ def test_cross_consistency():
         depth = 1 << int(sets.group(1))
         check(f"rapt_openram_1rw_{depth}x32" in expected,
               f"default L1I {depth}x32 word banks have a macro")
-    l1d_geometry = {}
-    for macro in ("RAPT_L1D_LEN", "RAPT_CACHE_LINE_BYTES", "RAPT_CACHE_SRAMLEN"):
-        value = re.search(rf"`define\s+{macro}\s+(\d+)", preset)
-        check(value is not None, f"default {macro} geometry found")
-        if value:
-            l1d_geometry[macro] = int(value.group(1))
-    if len(l1d_geometry) == 3:
-        depth = 1 << l1d_geometry["RAPT_L1D_LEN"]
-        for xlen in (32, 64):
-            line_words = l1d_geometry["RAPT_CACHE_LINE_BYTES"] // (xlen // 8)
-            subarray_words = min(line_words, l1d_geometry["RAPT_CACHE_SRAMLEN"] // xlen)
-            width = subarray_words * xlen
-            check(f"rapt_openram_1rw_{depth}x{width}" in expected,
-                  f"default RV{xlen} L1D {depth}x{width} banks have a macro")
+    # Diagonal banks contain 64-bit chunks. Partial way groups compact
+    # chunk rows modulo min(ways, chunks), with no unreachable macro rows.
+    for config in (RAPTOR / "rtl/configs").glob("*/rapt_config.svh"):
+        text = read(config)
+        geometry = {}
+        for macro in ("RAPT_L1D_LEN", "RAPT_CACHE_LINE_BYTES", "RAPT_L1D_N_WAYS"):
+            match = re.search(rf"`define\s+{macro}\s+(\d+)", text)
+            check(bool(match), f"{config.parent.name} {macro} geometry found")
+            if match:
+                geometry[macro] = int(match.group(1))
+        if len(geometry) != 3:
+            continue
+        chunks = geometry["RAPT_CACHE_LINE_BYTES"] // 8
+        for ways in (1, 2, 4, 8, 16, 32):
+            depth = (1 << geometry["RAPT_L1D_LEN"]) * min(ways, chunks)
+            check(f"rapt_openram_1rw_{depth}x64" in expected,
+                  f"{config.parent.name} ways={ways} L1D {depth}x64 has a macro")
 
 
 # ---------------------------------------------------------------------------

@@ -33,6 +33,12 @@ task automatic fp_ooo_enqueue(input uop_t u, input int owner, input logic [XLEN-
   rnu_rou.slot[0].uop = u;
   rnu_rou.slot[0].pnpc = rnu_rou.slot[0].uop.pc + XLEN'(rnu_rou.slot[0].uop.c ? 2 : 4);
   rnu_rou.slot[0].op1 = gpr;
+  // JOB N: literal integer seeds also allocate an immutable RF identity.
+  if (rapt_pkg::fp_from_integer(u.execute.fp.op, u.imm)) begin
+    rnu_rou.slot[0].pr1 = PLEN'(owner + 1);
+    n1_gpr[PLEN'(owner + 1)] = gpr;
+  end
+  // end JOB N
   rnu_rou.checkpoint_valid[0] = 0;
   rnu_rou.valid[0] = 1;
   #1;

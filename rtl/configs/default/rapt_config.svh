@@ -141,7 +141,9 @@
 // L1D (64 B line * 64 sets * 4-way = 16 KiB, VIPT-safe for RV32/RV64).
 `define RAPT_L1D_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
 `define RAPT_L1D_LEN 6
+`ifndef RAPT_L1D_N_WAYS
 `define RAPT_L1D_N_WAYS 4
+`endif
 // Dirty data is published at fences, PTW coherence points and eviction.
 `ifndef RAPT_L1D_WRITEBACK
 `define RAPT_L1D_WRITEBACK 1

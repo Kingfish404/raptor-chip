@@ -33,6 +33,12 @@ module tb_fp_registers;
       .CommitWidth(2),
       .CompletionPorts(2)
   ) dut (
+      // JOB N: these fixtures do not consume late-read provenance.
+      .resolve_generation(),
+      .retire_fp(),
+      .retire_value(),
+      .retire_generation(),
+      // end JOB N
 `ifndef RAPT_TEST_COMPACT_FP
       .operand_allocate_index('{default: '0}),
       .operand_release_valid('{default: '0}),

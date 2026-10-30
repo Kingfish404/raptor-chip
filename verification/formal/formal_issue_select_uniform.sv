@@ -59,11 +59,15 @@ module formal_issue_select_uniform #(
       .claimed(reference_claimed)
   );
   logic legal, equal_results;
+  wire [Entries*Entries-1:0] legal_pairs;
+  for (genvar e = 0; e < Entries; e++) begin : g_legal_entry
+    for (genvar o = 0; o < Entries; o++) begin : g_pair
+      assign legal_pairs[e*Entries+o] = o <= e || !(valid[e] && valid[o])
+          || age_rank[e] != age_rank[o];
+    end
+  end
+  assign legal = &legal_pairs;
   always_comb begin
-    legal = 1'b1;
-    for (int e = 0; e < Entries; e++)
-    for (int o = e + 1; o < Entries; o++)
-    legal &= !(valid[e] && valid[o]) || age_rank[e] != age_rank[o];
     equal_results = claimed == reference_claimed && baseline == reference_claimed;
     for (int rank = 0; rank < Ports; rank++) begin
       automatic int p = rank == Ports - 1 ? LastPort : rank < LastPort ? rank : rank + 1;

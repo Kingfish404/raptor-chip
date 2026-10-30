@@ -17,7 +17,7 @@ module rapt_l1d #(
     parameter int L1D_LEN = `RAPT_L1D_LEN,
     parameter int unsigned L1D_SIZE = 2 ** L1D_LEN,
     parameter int XLEN = `RAPT_XLEN,
-    parameter unsigned L1D_N_WAYS = `RAPT_L1D_N_WAYS,
+    parameter unsigned L1D_N_WAYS = `RAPT_L1D_WAYS,
     parameter int PADDR_BITS = `RAPT_PADDR_BITS,
     parameter bit L2Tlb = 0
 ) (
@@ -479,6 +479,8 @@ module rapt_l1d #(
   logic [L1D_LEN-1:0] tag_store_idx;
   logic [L1dTagW-1:0] tag_store_tag;
   logic [L1dTagW-1:0] wb_tag;
+  logic [L1D_LEN-1:0] tag_inspect_set, tag_load_read_set;
+  logic [1:0] tag_inspect_source;
   logic [L1D_LINE_SIZE-1:0] wb_dirty, wb_valid_words;
   logic [L1D_LINE_SIZE*XLEN-1:0] wb_line_data;
   logic [L1D_LINE_SIZE*XLEN-1:0] release_line_q;
@@ -503,7 +505,9 @@ module rapt_l1d #(
   assign mshr_evict_valid = release_clearing || local_cbo_line_clear || target_clear;
   assign mshr_evict_addr = XLEN'({line_clear_tag, line_clear_set, {L1dLineOffset{1'b0}}});
   logic [XLEN-1:0] wb_addr, wb_data;
-  logic [XLEN-1:0] data_bank_rdata[L1D_N_WAYS][L1D_LINE_SIZE];
+  localparam int DataChunks = L1D_LINE_SIZE * XLEN / 64;
+  localparam int DataBanks  = ((L1D_N_WAYS + DataChunks - 1) / DataChunks) * DataChunks;
+  logic [63:0] data_bank_rdata[DataBanks];
   logic wb_drain_request;
   localparam logic [7:0] FullStoreWstrb = 8'({XLEN / 8{1'b1}});
   logic [L1dWayW-1:0] store_hit_way, store_fill_way;
@@ -671,9 +675,6 @@ module rapt_l1d #(
       && l1d_state == IDLE && wb_state == WB_IDLE
       && !writeback_error && !l1d_update && !ptw_busy
       && !coherent_request && !fence_clear_busy && !mshr_busy && !wb_busy;
-  for (genvar word_idx = 0; word_idx < L1D_LINE_SIZE; word_idx++) begin : g_wb_data
-    assign wb_line_data[word_idx*XLEN+:XLEN] = data_bank_rdata[wb_way][word_idx];
-  end
   assign probe_release_valid_o = wb_probe_mode && wb_valid;
   assign probe_release_addr_o = wb_addr;
   assign probe_release_data_o = wb_data;
@@ -842,6 +843,7 @@ module rapt_l1d #(
   // l1d_addr holds the virtual address during PTW, whose index equals the
   // final physical index.
   logic [L1D_LEN-1:0] sram_raddr;
+  logic [L1D_LINE_LEN-1:0] sram_rword;
   logic [L1D_LEN-1:0] sram_expected_idx;
   logic sram_read_authorized_r;
   logic load_read_early;
@@ -871,6 +873,18 @@ module rapt_l1d #(
       ? lsu_l1d.raddr[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits]
       : addr_idx;
 `endif
+`ifdef RAPT_LSU_HUM
+  assign sram_rword = WriteBack && wb_state != WB_IDLE ? addr_offset : load_read_early
+      ? lsu_l1d.raddr[L1dOffsetBits+:L1D_LINE_LEN]
+      : b_read_early ? lsu_l1d.raddr_b[L1dOffsetBits+:L1D_LINE_LEN] : addr_offset;
+`else
+  assign sram_rword = WriteBack && wb_state != WB_IDLE ? addr_offset : load_read_early
+      ? lsu_l1d.raddr[L1dOffsetBits+:L1D_LINE_LEN] : addr_offset;
+`endif
+  // Only the capture phases need a whole victim line. Later WB phases read
+  // the held load's chunk across all ways, preserving its same-set resume cycle.
+  logic sram_read_line;
+  assign sram_read_line = WriteBack && (wb_state == WB_READ || wb_state == WB_CAPTURE);
   // Late arbitration reaches only tracking flops, never the SRAM address.
   // Record that the actual address matched the originally authorized index.
   always_ff @(posedge clock) begin
@@ -878,8 +892,9 @@ module rapt_l1d #(
   end
 
   // Data-array ownership includes SRAM geometry and read-valid tracking.
-  wire [L1D_N_WAYS-1:0][L1D_LINE_SIZE-1:0] sram_word_valid;
+  wire [DataBanks-1:0] sram_bank_valid;
   logic [L1D_LEN-1:0] sram_read_idx_r;
+  logic [L1D_LINE_LEN-1:0] sram_read_word_r;
   rapt_l1d_data #(
       .Xlen(XLEN),
       .SetBits(L1D_LEN),
@@ -890,6 +905,9 @@ module rapt_l1d #(
       .clock(clock),
       .reset(reset),
       .read_addr(sram_raddr),
+      .read_word(sram_rword),
+      .read_line(sram_read_line),
+      .read_way(wb_way),
       .write_valid(l1d_update && l1d_valid_u),
       .write_blocked(wb_blocked),
       .write_addr(l1d_idx),
@@ -900,11 +918,12 @@ module rapt_l1d #(
       .write_line(line_update),
       .write_mask(line_update_mask),
       .write_line_data(line_update_data),
-      .read_valid(),
       .read_index(sram_read_idx_r),
-      .read_word_valid(sram_word_valid),
-      .read_word_index(),
-      .read_data(data_bank_rdata)
+      .read_word_index(sram_read_word_r),
+      .read_bank_valid(sram_bank_valid),
+      .read_data(data_bank_rdata),
+      .read_line_valid(),
+      .read_line_data(wb_line_data)
   );
 
   assign mmu_en = (exu_l1d.mmu_en && exu_l1d.valid) || (lsu_l1d.rvalid && lsu_l1d.rcontext.mmu_en);
@@ -1162,6 +1181,22 @@ module rapt_l1d #(
   assign addr_idx = l1d_addr[L1D_LEN+L1D_LINE_LEN+L1dOffsetBits-1:L1D_LINE_LEN+L1dOffsetBits];
   assign addr_offset = l1d_addr[L1D_LINE_LEN+L1dOffsetBits-1:L1dOffsetBits];
 
+  // The B response follows a completed A hit, an idle cycle, or a miss
+  // wait. It never overlaps LD_A. Writeback inspection borrows the store
+  // lookup while its registered state holds off stores/refills.
+  assign tag_inspect_source = wb_state != WB_IDLE ? 2'd1
+      : (probe_dirty_request || target_dirty_request) ? 2'd2
+      : (wb_store_lookup || wb_fill_probe) ? 2'd1 : 2'd0;
+`ifdef RAPT_LSU_HUM
+  `RAPT_SVA_IMPLY(clock, reset, L1D_SHARED_TAG_PHASES, b_armed, l1d_state != LD_A)
+  assign tag_load_read_set = b_armed ? b_idx : addr_idx;
+`else
+  assign tag_load_read_set = addr_idx;
+`endif
+  assign tag_inspect_set = wb_state != WB_IDLE ? wb_set
+      : (probe_dirty_request || target_dirty_request) ? line_clear_set
+      : (wb_store_lookup || wb_fill_probe) ? tag_store_idx : tag_load_read_set;
+
   rapt_l1d_tags #(
       .L1D_LEN(L1D_LEN),
       .L1D_LINE_LEN(L1D_LINE_LEN),
@@ -1170,10 +1205,13 @@ module rapt_l1d #(
       .L1D_N_WAYS(L1D_N_WAYS),
       .L1dTagW(L1dTagW),
       .WriteBack(WriteBack),
-      .DirtySkip(DirtySkip)
+      .DirtySkip(DirtySkip),
+      .SharedReadPorts(1'b1)
   ) u_tags (
       .update_dirty(update_dirty),
-      .inspect_set(wb_state == WB_IDLE ? wb_probe_set : wb_set),
+      .inspect_set(tag_inspect_set),
+      .inspect_read(wb_state != WB_IDLE),
+      .inspect_source(tag_inspect_source),
       .inspect_way(wb_state == WB_IDLE ? wb_probe_way : wb_way),
       .clean_valid(WriteBack && wb_state == WB_CLEAN),
       .clean_mask('1),
@@ -1201,11 +1239,13 @@ module rapt_l1d #(
       .waddr_offset(waddr_offset),
       .waddr_tag(tag_store_tag),
 `ifdef RAPT_LSU_HUM
+      .probe_read(b_armed),
       .probe_idx(b_idx),
       .probe_offset(b_off),
       .probe_tag(b_tag),
       .probe_way_hit(b_way_hit),
 `else
+      .probe_read(1'b0),
       .probe_idx('0),
       .probe_offset('0),
       .probe_tag('0),
@@ -1254,8 +1294,11 @@ module rapt_l1d #(
   // A tag miss needs no SRAM data. On a hit, only the matching way and word's
   // bank must have read this set; unrelated banks can read during a write.
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_load_bank_ready
-    assign load_way_data_ready[way] = sram_word_valid[way][addr_offset]
-        && sram_read_idx_r == addr_idx && sram_read_authorized_r;
+    wire bank_ready = sram_bank_valid[(way / DataChunks) * DataChunks
+        + ((way + int'(addr_offset) / (64 / XLEN)) % DataChunks)];
+    assign load_way_data_ready[way] = bank_ready && sram_read_idx_r == addr_idx
+        && int'(sram_read_word_r) / (64 / XLEN) == int'(addr_offset) / (64 / XLEN)
+        && sram_read_authorized_r;
   end
   logic l1d_sram_busy;
   assign l1d_sram_busy = l1d_update || |(load_way_hit & ~load_way_data_ready);
@@ -1278,17 +1321,28 @@ module rapt_l1d #(
       || wb_state != WB_IDLE || writeback_error
           || (update_dirty && l1d_update));
   assign data_hit = (l1d_state == LD_A) && tag_hit && !load_hit_wb_hold;
-  // AND-OR mux: each way gates its data with its hit, then all ways OR.
-  // Replaces the priority-encoder → indexed-mux chain.
-  logic [XLEN-1:0] way_data_masked[L1D_N_WAYS];
-  generate
-    for (genvar w = 0; w < L1D_N_WAYS; w++) begin : gen_ao_load
-      assign way_data_masked[w] = load_way_hit[w] ? data_bank_rdata[w][addr_offset] : '0;
+  // Rotate the small hit vector into physical bank order. Data stays in
+  // place: one AND/OR selection across the chunks, independent of way count.
+  logic [XLEN-1:0] bank_data_masked[DataBanks];
+  for (genvar bank = 0; bank < DataBanks; bank++) begin : g_load_bank_select
+    logic selected;
+    always_comb begin
+      selected = 1'b0;
+      for (
+          int way = (bank / DataChunks) * DataChunks;
+          way < L1D_N_WAYS && way < (bank / DataChunks + 1) * DataChunks;
+          way++
+      ) begin
+        selected |= load_way_hit[way]
+            && (way + int'(addr_offset) / (64 / XLEN)) % DataChunks == bank % DataChunks;
+      end
     end
-  endgenerate
+    assign bank_data_masked[bank] = selected
+        ? XLEN'(data_bank_rdata[bank] >> ((int'(addr_offset) % (64 / XLEN)) * XLEN)) : '0;
+  end
   always_comb begin
     l1d_data = '0;
-    for (int w = 0; w < int'(L1D_N_WAYS); w++) l1d_data |= way_data_masked[w];
+    for (int bank = 0; bank < DataBanks; bank++) l1d_data |= bank_data_masked[bank];
   end
 
   // ==========================================================================
@@ -1336,7 +1390,10 @@ module rapt_l1d #(
   assign b_off = b_addr_r[L1D_LINE_LEN+L1dOffsetBits-1:L1dOffsetBits];
   logic [L1D_N_WAYS-1:0] b_way_data_ready;
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_b_bank_ready
-    assign b_way_data_ready[way] = sram_word_valid[way][b_off] && sram_read_idx_r == b_idx
+    wire bank_ready = sram_bank_valid[(way / DataChunks) * DataChunks
+        + ((way + int'(b_off) / (64 / XLEN)) % DataChunks)];
+    assign b_way_data_ready[way] = bank_ready && sram_read_idx_r == b_idx
+        && int'(sram_read_word_r) / (64 / XLEN) == int'(b_off) / (64 / XLEN)
         && sram_read_authorized_r;
   end
   // The arm edge already checked writeback arbitration. A new victim
@@ -1345,17 +1402,27 @@ module rapt_l1d #(
   // Do not let this cycle's refill/tag/victim lookup cancel that response.
   assign b_sram_ready = |(b_way_hit & b_way_data_ready);
 
-  logic [XLEN-1:0] b_way_data_masked[L1D_N_WAYS];
+  logic [XLEN-1:0] b_bank_data_masked[DataBanks];
   logic [XLEN-1:0] b_data;
-  generate
-    for (genvar w = 0; w < L1D_N_WAYS; w++) begin : gen_b_ao
-      assign b_way_data_masked[w] = b_way_hit[w] && b_way_data_ready[w]
-          ? data_bank_rdata[w][b_off] : '0;
+  for (genvar bank = 0; bank < DataBanks; bank++) begin : g_b_bank_select
+    logic selected;
+    always_comb begin
+      selected = 1'b0;
+      for (
+          int way = (bank / DataChunks) * DataChunks;
+          way < L1D_N_WAYS && way < (bank / DataChunks + 1) * DataChunks;
+          way++
+      ) begin
+        selected |= b_way_hit[way] && b_way_data_ready[way]
+            && (way + int'(b_off) / (64 / XLEN)) % DataChunks == bank % DataChunks;
+      end
     end
-  endgenerate
+    assign b_bank_data_masked[bank] = selected
+        ? XLEN'(data_bank_rdata[bank] >> ((int'(b_off) % (64 / XLEN)) * XLEN)) : '0;
+  end
   always_comb begin
     b_data = '0;
-    for (int w = 0; w < int'(L1D_N_WAYS); w++) b_data |= b_way_data_masked[w];
+    for (int bank = 0; bank < DataBanks; bank++) b_data |= b_bank_data_masked[bank];
   end
 
   // Complete only while the held request is unchanged and no write raced us.
@@ -1577,18 +1644,26 @@ module rapt_l1d #(
   // become resident/dirty in L1. No-allocate would bypass that directory mark.
   assign l1d_bus.noallocate = mshr_select ? !L2Inclusive : ptw_arvalid || !refill_safe;
   assign l1d_bus.arlen = (mshr_select || (!ptw_arvalid && line_read_request)) ? 8'(L1D_LINE_SIZE-1) : 8'd0;
+  // A line install (the last legacy refill beat or an MSHR fill) becomes
+  // visible to hit_w one cycle after its update is queued. A store to that
+  // line offered meanwhile would complete as write-through by its B response,
+  // which cannot update the now-resident copy under wb_hold. Delay only a new
+  // offer to that line; an offered store keeps its request and response.
+  logic store_line_installing;
+  assign store_line_installing = l1d_update && l1d_valid_u && !lsu_bus_write_pending_q
+      && l1d_idx == waddr_idx && l1d_tag_u == waddr_tag;
   // An all-issued writeback still owns its B responses. Do not let a younger
   // SQ request claim response ownership while wb_busy remains asserted.
   assign l1d_bus.awvalid = (wb_valid && !wb_probe_mode) || (!wb_hold
       && lsu_l1d.wvalid && !store_rsp_valid_q && lsu_bus_write_allowed && !local_store && !mshr_busy
-      && !wb_busy
+      && !wb_busy && !store_line_installing
       && !(l1d_state == LD_D && refill_line));
   assign l1d_bus.awaddr = wb_valid ? wb_addr : lsu_l1d.waddr;
   assign l1d_bus.wpbmt = wb_valid ? 2'b00 : lsu_l1d.wpbmt;
   assign l1d_bus.wstrb = wb_valid ? FullStoreWstrb : lsu_l1d.walu;
   assign l1d_bus.wvalid = (wb_valid && !wb_probe_mode) || (!wb_hold
       && lsu_l1d.wvalid && !store_rsp_valid_q && lsu_bus_write_allowed && !local_store && !mshr_busy
-      && !wb_busy
+      && !wb_busy && !store_line_installing
       && !(l1d_state == LD_D && refill_line));
   assign l1d_bus.wdata = wb_valid ? wb_data : lsu_l1d.wdata;
 
@@ -2094,6 +2169,14 @@ module rapt_l1d #(
                   l1d_bus.rlast == (refill_word == L1D_LINE_LEN'(L1D_LINE_SIZE - 1)))
   `RAPT_SVA_IMPLY(clock, reset, L1D_REFILL_STORE_EXCLUSION, l1d_state == LD_D && refill_line,
                   !store_accept && !l1d_bus.awvalid)
+`ifdef RAPT_SVA_ACTIVE
+  // A store completed by its bus response must update a resident copy; the
+  // update chain drops it under wb_hold, leaving a stale clean word.
+  logic sva_bus_store_hit;
+  assign sva_bus_store_hit = WriteBack && lsu_l1d.wvalid && store_accept && !local_store_ready
+      && !store_error && cacheable_w && !lsu_l1d.wzero && hit_w;
+  `RAPT_SVA_IMPLY(clock, reset, L1D_BUS_STORE_HIT_UPDATES, sva_bus_store_hit, !wb_hold)
+`endif
   `RAPT_SVA_IMPLY(clock, reset, L1D_MMIO_READ_REQUIRES_ORDER,
                   legacy_arvalid && !l1d_bus.ar_ptw && !cacheable_r, lsu_l1d.ordered)
   `RAPT_SVA_IMPLY(clock, reset, L1D_RETRY_NO_COMPLETION_OR_READ, lsu_l1d.rretry,

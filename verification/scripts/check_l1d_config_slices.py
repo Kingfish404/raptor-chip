@@ -65,9 +65,13 @@ def main() -> None:
         if missing:
             parser.error(f"missing required wide configs: {', '.join(sorted(missing))}")
     xlens = args.xlen or [32, 64]
+    variants = [(config, []) for config in configs]
+    if args.config is None:
+        variants += [('default', [f'-DRAPT_L1D_N_WAYS={ways}', f'-DRAPT_L1D_NRU={nru}'])
+                     for ways in (8, 16) for nru in (0, 1)]
 
     with tempfile.TemporaryDirectory(prefix="rapt-l1d-slices-") as temp:
-        for config in configs:
+        for config, overrides in variants:
             config_path = CONFIGS / config / "rapt_config.svh"
             if not config_path.is_file():
                 parser.error(f"unknown config: {config}")
@@ -76,8 +80,11 @@ def main() -> None:
                 for forced in (False, True):
                     mode = "forced-l2-writeback" if forced else "native"
                     label = f"{config} RV{xlen} {mode}"
-                    build_dir = Path(temp) / config / f"rv{xlen}" / mode
-                    flags = ["-DRAPT_RV64"] if xlen == 64 else []
+                    profile = config + ''.join('-' + flag.removeprefix('-D') for flag in overrides)
+                    if overrides:
+                        label += ' ' + ' '.join(overrides)
+                    build_dir = Path(temp) / profile / f"rv{xlen}" / mode
+                    flags = (["-DRAPT_RV64"] if xlen == 64 else []) + overrides
                     if forced:
                         flags += forced_l2_flags(config_text)
                     run(

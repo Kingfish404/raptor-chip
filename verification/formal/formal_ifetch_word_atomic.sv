@@ -22,14 +22,16 @@ module formal_ifetch_word_atomic (
     output logic mismatch
 );
   localparam int X = `RAPT_XLEN;
+  localparam int PcBits = `RAPT_PC_BITS_OF(X);
   logic request_ready, busy, io_start, translate_valid, translation_valid;
   logic read_valid, response_valid, result_valid, result_fault;
-  logic [X-1:0] request_pc, owner_pc, translate_vaddr, translation_paddr;
+  logic [PcBits-1:0] request_pc, owner_pc;
+  logic [X-1:0] translate_vaddr, translation_paddr;
   logic [X-1:0] read_paddr, result_cause, result_tval;
   logic [1:0] read_pbmt;
   logic [31:0] result_inst, last_word;
   logic translation_pending, data_pending, have_word;
-  assign request_pc = {pc_bits[X-1:2],2'b00};
+  assign request_pc = {pc_bits[PcBits-1:2],2'b00};
   assign translation_paddr = {pa_bits[X-1:2],2'b00};
   assign translation_valid = translation_pending && return_translation;
   assign response_valid = data_pending && return_data;

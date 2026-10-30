@@ -42,6 +42,10 @@ module rapt_fp_registers #(
     input logic [2:0][TagBits-1:0] resolve_tag[ReadPorts],
     output logic [2:0][63:0] resolve_value[ReadPorts],
     output logic [2:0][TagBits-1:0] resolve_ready_tag[ReadPorts],
+    output logic [2:0][GenerationBits-1:0] resolve_generation[ReadPorts],
+    output logic retire_fp[CommitWidth],
+    output logic [63:0] retire_value[CommitWidth],
+    output logic [GenerationBits-1:0] retire_generation[CommitWidth],
     input CompletionT completion[CompletionPorts],
     input logic commit_valid[CommitWidth],
     input logic [IndexBits-1:0] commit_index[CommitWidth],
@@ -364,6 +368,23 @@ module rapt_fp_registers #(
     end
     for (genvar c = 0; c < CommitWidth; c++) begin : g_commit_read
       assign result_commit[c] = result_q[commit_index[c]];
+    end
+  end
+  for (genvar c = 0; c < CommitWidth; c++) begin : g_operand_retire
+    assign retire_fp[c] = commit_valid[c] && destination_valid[commit_index[c]];
+    assign retire_value[c] = result_commit[c];
+    assign retire_generation[c] = owner_generation[commit_index[c]];
+  end
+  for (genvar r = 0; r < ReadPorts; r++) begin : g_operand_generation
+    for (genvar k = 0; k < 3; k++) begin : g_source
+      always_comb begin
+        resolve_generation[r][k] = resolve_tag[r][k] == '0 ? '0
+            : owner_generation[IndexBits'(resolve_tag[r][k] - TagBits'(1))];
+        for (int a = 0; a < AllocateWidth; a++) begin
+          if (allocate_valid[a] && resolve_tag[r][k] == TagBits'(allocate_index[a]) + TagBits'(1))
+            resolve_generation[r][k] = allocate_generation[a];
+        end
+      end
     end
   end
   // Each source slot holds only its producer tag. Retirement and completion

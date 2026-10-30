@@ -29,6 +29,6 @@ obj_*
 *.o
 *.out
 
-# Keep operational READMEs; archive task reviews and progress notes outside Git.
+# Keep maintained guides; archive task reviews and run reports outside Git.
 *.md
 !README.md

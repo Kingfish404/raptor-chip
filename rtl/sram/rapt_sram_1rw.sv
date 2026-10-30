@@ -57,8 +57,8 @@ module rapt_sram_1rw #(
   // and registered as blackboxes in
   //   $(RAPTOR_HOME)/sim/sram/wrappers/rapt_sram_blackbox.v
   //
-  // OpenRAM single-port macros are read-first: a read concurrent with a
-  // write to the same address returns the OLD data.
+  // A single shared port performs a read or a write. Output holds on writes
+  // and while disabled, as specified by the functional macro contract.
   // ============================================================
   generate
     if (DEPTH == 2 && DATA_WIDTH == 32) begin : g_2x32
@@ -113,6 +113,86 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 16 && DATA_WIDTH == 64) begin : g_16x64
       rapt_openram_1rw_16x64 u_sram (
+          .clk0(clock),
+          .csb0(~en),
+          .web0(~wen),
+          .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+          .addr0(addr),
+          .din0(wdata),
+          .dout0(rdata)
+      );
+    end else if (DEPTH == 2 && DATA_WIDTH == 64) begin : g_2x64
+      rapt_openram_1rw_2x64 u_sram (
+          .clk0(clock),
+          .csb0(~en),
+          .web0(~wen),
+          .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+          .addr0(addr),
+          .din0(wdata),
+          .dout0(rdata)
+      );
+    end else if (DEPTH == 4 && DATA_WIDTH == 64) begin : g_4x64
+      rapt_openram_1rw_4x64 u_sram (
+          .clk0(clock),
+          .csb0(~en),
+          .web0(~wen),
+          .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+          .addr0(addr),
+          .din0(wdata),
+          .dout0(rdata)
+      );
+    end else if (DEPTH == 8 && DATA_WIDTH == 64) begin : g_8x64
+      rapt_openram_1rw_8x64 u_sram (
+          .clk0(clock),
+          .csb0(~en),
+          .web0(~wen),
+          .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+          .addr0(addr),
+          .din0(wdata),
+          .dout0(rdata)
+      );
+    end else if (DEPTH == 32 && DATA_WIDTH == 64) begin : g_32x64
+      rapt_openram_1rw_32x64 u_sram (
+          .clk0(clock),
+          .csb0(~en),
+          .web0(~wen),
+          .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+          .addr0(addr),
+          .din0(wdata),
+          .dout0(rdata)
+      );
+    end else if (DEPTH == 64 && DATA_WIDTH == 64) begin : g_64x64
+      rapt_openram_1rw_64x64 u_sram (
+          .clk0(clock),
+          .csb0(~en),
+          .web0(~wen),
+          .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+          .addr0(addr),
+          .din0(wdata),
+          .dout0(rdata)
+      );
+    end else if (DEPTH == 128 && DATA_WIDTH == 64) begin : g_128x64
+      rapt_openram_1rw_128x64 u_sram (
+          .clk0(clock),
+          .csb0(~en),
+          .web0(~wen),
+          .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+          .addr0(addr),
+          .din0(wdata),
+          .dout0(rdata)
+      );
+    end else if (DEPTH == 256 && DATA_WIDTH == 64) begin : g_256x64
+      rapt_openram_1rw_256x64 u_sram (
+          .clk0(clock),
+          .csb0(~en),
+          .web0(~wen),
+          .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+          .addr0(addr),
+          .din0(wdata),
+          .dout0(rdata)
+      );
+    end else if (DEPTH == 512 && DATA_WIDTH == 64) begin : g_512x64
+      rapt_openram_1rw_512x64 u_sram (
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -224,6 +304,17 @@ module rapt_sram_1rw #(
     end else if (DEPTH == 512 && DATA_WIDTH == 128) begin : g_512x128
       // Quad-banked L1I data of the large preset (512 sets).
       rapt_openram_1rw_512x128 u_sram (
+          .clk0(clock),
+          .csb0(~en),
+          .web0(~wen),
+          .wmask0(USE_BWE ? bwe : {(DATA_WIDTH/8){1'b1}}),
+          .addr0(addr),
+          .din0(wdata),
+          .dout0(rdata)
+      );
+    end else if (DEPTH == 1024 && DATA_WIDTH == 128) begin : g_1024x128
+      // Quad-banked L1I data in the 128 KiB cache presets.
+      rapt_openram_1rw_1024x128 u_sram (
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),

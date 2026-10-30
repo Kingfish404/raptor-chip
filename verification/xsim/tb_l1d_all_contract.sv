@@ -336,128 +336,152 @@ endmodule
 
 
 // ---- tb_l1d_data ----
+// Job D: diagonal SRAM scoreboard, including partial groups and port conflicts.
 module tb_l1d_data;
   logic clock = 1'b0;
-  logic [11:0] done = '0;
+  logic [23:0] done = '0;
   always #5 clock = ~clock;
+  `include "tb_common.svh"
 
-  // RV32/RV64, direct/2/4-way, and narrow/multi-bank lines.
   for (genvar width_idx = 0; width_idx < 2; width_idx++) begin : g_width
-    for (genvar way_idx = 0; way_idx < 3; way_idx++) begin : g_ways
+    for (genvar way_idx = 0; way_idx < 6; way_idx++) begin : g_ways
       for (genvar line_idx = 0; line_idx < 2; line_idx++) begin : g_line
         localparam int Xlen = 32 << width_idx;
         localparam int Ways = 1 << way_idx;
         localparam int WayBits = Ways > 1 ? $clog2(Ways) : 1;
-        localparam int WordBits = line_idx == 0 ? 1 : 3;
+        localparam int WordBits = line_idx == 0 ? 1 : $clog2(512 / Xlen);
         localparam int Words = 1 << WordBits;
-        localparam int MaxSubarrayWords = `RAPT_CACHE_SRAMLEN / Xlen;
-        localparam int SubarrayWords = Words < MaxSubarrayWords ? Words : MaxSubarrayWords;
-        localparam int CaseId = width_idx * 6 + way_idx * 2 + line_idx;
-        logic reset = 1'b1, write_valid = 1'b0;
+        localparam int Chunks = Words * Xlen / 64;
+        localparam int Banks = ((Ways + Chunks - 1) / Chunks) * Chunks;
+        localparam int ChunkWords = 64 / Xlen;
+        localparam int CaseId = width_idx * 12 + way_idx * 2 + line_idx;
+        logic reset = 1'b1, write_valid = 1'b0, write_blocked = 1'b0;
+        logic read_line = 1'b0, write_line = 1'b0;
         logic [1:0] read_addr = '0, write_addr = '0;
-        logic [WordBits-1:0] write_word = '0;
-        logic [WayBits-1:0] write_way = '0;
+        logic [WordBits-1:0] read_word = '0, write_word = '0;
+        logic [WayBits-1:0] read_way = '0, write_way = '0;
         logic [Xlen-1:0] write_data = '0;
         logic [Xlen/8-1:0] write_strobe = '1;
-        wire read_valid;
+        logic [Words-1:0] write_mask = '0;
+        logic [Words*Xlen-1:0] write_line_data;
         wire [1:0] read_index;
-        wire [Ways-1:0][Words-1:0] read_word_valid;
-        wire [1:0] read_word_index[Ways][Words];
-        wire [Xlen-1:0] read_data[Ways][Words];
+        wire [WordBits-1:0] read_word_index;
+        wire [Banks-1:0] read_bank_valid;
+        wire [63:0] read_data[Banks];
+        wire read_line_valid;
+        wire [Words*Xlen-1:0] read_line_data;
         logic [Xlen-1:0] model[Ways][4][Words];
         bit model_ready = 1'b0;
         logic [63:0] rng = 64'h123456789abcdef0 ^ 64'(CaseId);
 
+        for (genvar word_idx = 0; word_idx < Words; word_idx++) begin : g_fill
+          assign write_line_data[word_idx*Xlen+:Xlen] = write_data ^ Xlen'('ha5a50000 + word_idx);
+        end
         rapt_l1d_data #(
             .Xlen(Xlen),
             .SetBits(2),
             .WordBits(WordBits),
             .Ways(Ways)
         ) dut (
-            .write_blocked(1'b0),
-            .write_line(1'b0),
-            .write_mask('0),
-            .write_line_data('0),
             .*
         );
 
-        task automatic step(input bit wr, input int set_idx, input int way, input int word_idx,
-                            input logic [63:0] data, input bit rst = 1'b0,
-                            input logic [Xlen/8-1:0] strobe = '1, input int read_set_idx = -1);
-          @(negedge clock);
-          reset = rst;
-          write_valid = wr;
-          read_addr = 2'(read_set_idx < 0 ? set_idx : read_set_idx);
-          write_addr = 2'(set_idx);
-          write_way = WayBits'(way);
-          write_word = WordBits'(word_idx);
-          write_data = Xlen'(data);
-          write_strobe = strobe;
+        task automatic step;
+          bit [Banks-1:0] reserved;
+          int chunk, bank;
           @(posedge clock);
-          if (wr)
-            for (int byte_idx = 0; byte_idx < Xlen / 8; byte_idx++)
-              if (strobe[byte_idx])
-                model[way][set_idx][word_idx][byte_idx*8+:8] = data[byte_idx*8+:8];
-          #1;
-          if (read_valid !== (!rst && !wr)) $fatal(1, "case %0d: read-valid contract", CaseId);
-          if (!rst && !wr) begin
-            if (read_index !== read_addr) $fatal(1, "case %0d: read index", CaseId);
-            for (int w = 0; w < Ways; w++)
-            for (int word_offset = 0; word_offset < Words; word_offset++)
-            if (read_data[w][word_offset] !== model[w][int'(read_addr)][word_offset])
-              $fatal(
-                  1,
-                  "case %0d: SRAM mismatch set=%0d way=%0d word=%0d",
-                  CaseId,
-                  set_idx,
-                  w,
-                  word_offset
-              );
+          reserved = '0;
+          if (write_valid) begin
+            for (int wi = 0; wi < Words; wi++) begin
+              bit [Xlen/8-1:0] strobe;
+              strobe = write_line ? {Xlen / 8{write_mask[wi]}}
+                  : (write_word == WordBits'(wi) ? write_strobe : '0);
+              bank = (int'(write_way) / Chunks) * Chunks
+                  + (int'(write_way) + wi / ChunkWords) % Chunks;
+              reserved[bank] |= |strobe;
+              if (!write_blocked)
+                for (int byte_idx = 0; byte_idx < Xlen / 8; byte_idx++)
+                if (strobe[byte_idx])
+                  model[write_way][write_addr][wi][byte_idx*8+:8] = write_line
+                        ? write_line_data[wi*Xlen+byte_idx*8+:8] : write_data[byte_idx*8+:8];
+            end
           end
-          for (int w = 0; w < Ways; w++) begin
-            for (int word_offset = 0; word_offset < Words; word_offset++) begin
-              bit bank_wrote;
-              bank_wrote = wr && w == way && (|strobe)
-                  && word_offset / SubarrayWords == word_idx / SubarrayWords;
-              if (read_word_valid[w][word_offset] !== (!rst && !bank_wrote))
-                $fatal(1, "case %0d: bank read-valid way=%0d word=%0d", CaseId, w, word_offset);
-              if (!rst && !bank_wrote) begin
-                if (read_word_index[w][word_offset] !== read_addr)
-                  $fatal(1, "case %0d: bank read index way=%0d word=%0d", CaseId, w, word_offset);
-                if (model_ready && read_data[w][word_offset] !== model[w][int'(read_addr)][word_offset])
-                  $fatal(
-                      1,
-                      "case %0d: parallel bank read mismatch way=%0d word=%0d",
-                      CaseId,
-                      w,
-                      word_offset
-                  );
+          #1;
+          check(read_index == read_addr && read_word_index == read_word, $sformatf(
+                "case %0d: read metadata", CaseId));
+          check(read_bank_valid == (reset ? '0 : ~reserved), $sformatf(
+                "case %0d: reserved bank validity", CaseId));
+          if (model_ready && !reset) begin
+            if (read_line) begin
+              bit complete;
+              complete = 1'b1;
+              for (int wi = 0; wi < Words; wi++) begin
+                bank = (int'(read_way) / Chunks) * Chunks
+                    + (int'(read_way) + wi / ChunkWords) % Chunks;
+                complete &= !reserved[bank];
+                if (!reserved[bank])
+                  check(read_line_data[wi*Xlen+:Xlen] == model[read_way][read_addr][wi], $sformatf(
+                        "case %0d: line word %0d set=%0d got=%h want=%h",
+                        CaseId,
+                        wi,
+                        read_addr,
+                        read_line_data[wi*Xlen+:Xlen],
+                        model[read_way][read_addr][wi]
+                        ));
+              end
+              check(read_line_valid == complete, $sformatf("case %0d: line valid", CaseId));
+            end else begin
+              check(!read_line_valid, "word read cannot publish a complete line");
+              chunk = int'(read_word) / ChunkWords;
+              for (int way = 0; way < Ways; way++) begin
+                bank = (way / Chunks) * Chunks + (way + chunk) % Chunks;
+                if (!reserved[bank])
+                  for (int lane = 0; lane < ChunkWords; lane++)
+                  check(
+                      read_data[bank][lane*Xlen+:Xlen]
+                          == model[way][read_addr][chunk*ChunkWords+lane],
+                      $sformatf("case %0d: word read way %0d", CaseId, way));
               end
             end
           end
+          @(negedge clock);
         endtask
 
         initial begin
-          @(posedge clock);
-          #1;
-          if (read_valid !== 1'b0) $fatal(1, "reset must invalidate read");
-          // Initialize via real writes; SRAM contents have no reset value.
+          @(negedge clock);
+          reset = 1'b0;
+          // Initialize through the byte-write port; the SRAM has no reset.
           for (int set_idx = 0; set_idx < 4; set_idx++)
           for (int way = 0; way < Ways; way++)
-          for (int word_idx = 0; word_idx < Words; word_idx++)
-          step(1, set_idx, way, word_idx,
-               64'hfedcba9876543210 ^ 64'(set_idx * 256 + way * 16 + word_idx));
+          for (int wi = 0; wi < Words; wi++) begin
+            write_valid = 1'b1;
+            write_addr = 2'(set_idx);
+            write_way = WayBits'(way);
+            write_word = WordBits'(wi);
+            write_data = Xlen'(64'hfedcba9876543210 ^ 64'(set_idx * 256 + way * 16 + wi));
+            step();
+          end
           model_ready = 1'b1;
           for (int cycle_idx = 0; cycle_idx < 2000; cycle_idx++) begin
             rng ^= rng << 13;
             rng ^= rng >> 7;
             rng ^= rng << 17;
-            step(rng[0], int'(rng[2:1]), int'(rng[4:3]) % Ways, int'(rng[7:5]) % Words, rng,
-                 cycle_idx % 97 == 0, (Xlen / 8)'(rng[15:8]), int'(rng[17:16]));
+            reset = cycle_idx % 97 == 0;
+            write_valid = rng[0];
+            write_addr = rng[2:1];
+            write_way = WayBits'(int'(rng[53:49]) % Ways);
+            write_word = WordBits'(rng[10:7]);
+            write_data = Xlen'(rng);
+            write_strobe = (Xlen / 8)'(rng[18:11]);
+            read_addr = rng[20:19];
+            read_word = WordBits'(rng[24:21]);
+            read_way = WayBits'(int'(rng[58:54]) % Ways);
+            read_line = rng[29];
+            write_line = rng[30];
+            write_mask = Words'(rng[47:32]);
+            write_blocked = rng[48];
+            step();
           end
-          // Reset must not erase SRAM, and the next read must recover validity.
-          step(0, 0, 0, 0, '0, 1);
-          for (int set_idx = 0; set_idx < 4; set_idx++) step(0, set_idx, 0, 0, '0);
           done[CaseId] = 1'b1;
         end
       end
@@ -466,14 +490,15 @@ module tb_l1d_data;
 
   initial begin
     wait (&done);
-    $display("PASS: L1D data array: 12 geometries, 2000 random cycles each");
+    $display("PASS: L1D diagonal data: 24 geometries, byte/fill/line/blocked accesses");
     $finish;
   end
   initial begin
     #100000;
-    $fatal(1, "L1D data-array timeout");
+    fail("L1D diagonal data-array timeout");
   end
 endmodule
+// End Job D.
 
 
 // ---- tb_l1d_flush_ordered ----
@@ -1280,6 +1305,7 @@ module tb_l1d_permission_stage;
   localparam logic [2:0] StLdA = 3'b001;
   localparam int OffBits = $clog2(XLEN / 8);
   localparam int IdxLo = `RAPT_L1D_LINE_LEN + OffBits;
+  localparam int LineWords = 1 << `RAPT_L1D_LINE_LEN;
   initial begin
     for (int bytes = 4; bytes <= XLEN / 8; bytes += 4) begin
       for (int scenario = 0; scenario < 5; scenario++) begin
@@ -1375,8 +1401,9 @@ module tb_l1d_permission_stage;
       idx = int'(PA[`RAPT_L1D_LEN+IdxLo-1:IdxLo]);
       off = int'(PA[IdxLo-1:OffBits]);
       force dut.u_tags.tag_addr_data[0] = PA[`RAPT_PADDR_BITS-1:`RAPT_L1D_LEN+IdxLo];
-      dut.u_tags.g_word_state[0].valid_words[idx] = '0;
-      dut.u_tags.g_word_state[0].valid_words[idx][off] = 1'b1;
+      // Word-valid bits occupy the low portion of each combined tag entry.
+      dut.u_tags.g_tag_storage[0].entries[idx][LineWords-1:0] = '0;
+      dut.u_tags.g_tag_storage[0].entries[idx][off] = 1'b1;
       dut.u_tags.line_live[0][idx] = 1'b1;
     end
     lsu_l1d.raddr = PA;
@@ -2272,6 +2299,10 @@ module tb_l1d_replacement;
       .L1D_N_WAYS(4),
       .L1dTagW(4)
   ) dut (
+      // Job D: independent standalone lookup ports.
+      .probe_read(1'b0),
+      .inspect_read(1'b0),
+      .inspect_source(2'b0),
       .clear_line_valid(1'b0),
       .clear_line_idx('0),
       .clear_line_tag('0),
@@ -2668,6 +2699,10 @@ module tb_l1d_store_coherence #(
     parameter bit TargetedCoherence = `RAPT_L1D_TARGETED_COHERENCE,
     parameter bit LineRefill = 1'b0
 );
+  // Job D: public probe inputs for writeback/load handoff coverage.
+  logic probe_valid = 0;
+  logic [`RAPT_XLEN-1:0] probe_addr = '0;
+  // End Job D.
   logic coherent_request = 0, coherent_write = 0;
   logic coherent_ready, writeback_error, writeback_idle;
   logic writeback_drain = 0;
@@ -2726,6 +2761,11 @@ module tb_l1d_store_coherence #(
       .l2tlb_req_o(),
       .l2tlb_ready_i(1'b0),
       .l2tlb_rsp_i('0),
+      // Job D: exercise a probe while an A load is held.
+      .probe_valid_i(probe_valid),
+      .probe_addr_i(probe_addr),
+      .probe_release_ready_i(1'b1),
+      // End Job D.
       .coherent_request(coherent_request),
       .coherent_addr(coherent_addr),
       .coherent_write(coherent_write),
@@ -2826,6 +2866,56 @@ module tb_l1d_store_coherence #(
            ));
     end
   endtask
+
+  // Job D: a probe can hold a same-set hit in another way until WB exits.
+  task automatic probe_load_resume(input bit same_set, input int word_index);
+    logic [31:0] load_addr;
+    int idle_cycles;
+    bit saw_idle;
+    load_addr = TestAddr + (same_set ? (1 << ConflictShift) : LineWords * 4);
+    for (int word_idx = 0; word_idx < LineWords; word_idx += XLEN / 32) begin
+      write_store(TestAddr + word_idx * 4, XLEN'(32'h1090 + word_idx), {XLEN / 8{1'b1}}, 0);
+      write_store(load_addr + word_idx * 4, XLEN'(32'h2050 + word_idx), {XLEN / 8{1'b1}}, 0);
+    end
+    tick(3);
+    @(negedge clock);
+    lsu_l1d.raddr = XLEN'(load_addr + word_index * (XLEN / 8));
+    lsu_l1d.ralu = `RAPT_ALU_LW__;
+    lsu_l1d.rvalid = 1;
+    @(posedge clock);
+    @(negedge clock);
+    check(dut.l1d_state == 1, "probe/load handoff did not enter LD_A");
+    probe_addr = XLEN'(TestAddr);
+    probe_valid = 1;
+    #1;
+    check(!lsu_l1d.rready, "probe did not hold the A response");
+    idle_cycles = 0;
+    saw_idle = 0;
+    for (int n = 0; n < 512; n++) begin
+      @(negedge clock);
+      #1;
+      if (dut.wb_state == 0) begin
+        if (saw_idle) idle_cycles++;
+        saw_idle = 1;
+      end
+      if (lsu_l1d.rready) begin
+        check(!lsu_l1d.trap && lsu_l1d.rdata[31:0] == 32'h2050 + word_index * (XLEN / 32),
+              "held A consumed a victim line chunk after writeback");
+        check(saw_idle && idle_cycles == (same_set ? 0 : 1),
+              "writeback handoff changed the original load response cycle");
+        $display("PASS: WB resume XLEN=%0d same_set=%0d word=%0d idle_cycles=%0d", XLEN, same_set,
+                 word_index, idle_cycles);
+        @(posedge clock);
+        @(negedge clock);
+        lsu_l1d.rvalid = 0;
+        probe_valid = 0;
+        tick(3);
+        return;
+      end
+    end
+    fail("probe/load handoff timed out");
+  endtask
+  // End Job D.
 
   task automatic write_word(input logic [31:0] addr, input logic [31:0] data);
     write_store(addr, data, `RAPT_SW_WSTRB, 4);
@@ -3223,6 +3313,18 @@ module tb_l1d_store_coherence #(
     reset = 1'b0;
     tick(2);
 
+    // Job D: cover each SRAM chunk and the unchanged different-set bubble.
+    if ($test$plusargs("MIN_WB_RESUME")) begin
+      check(WriteBack && `RAPT_L1D_N_WAYS >= 2, "WB resume needs at least two writeback ways");
+      for (int word_idx = 0; word_idx < (1 << `RAPT_L1D_LINE_LEN); word_idx++) begin
+        probe_load_resume(1, word_idx);
+        probe_load_resume(0, word_idx);
+      end
+      $display("PASS: probe/writeback load handoff all chunks");
+      $finish;
+    end
+    // End Job D.
+
     if ($test$plusargs("MIN_REFILL_STORE")) begin
       logic [31:0] last_word_addr;
       last_word_addr = TestAddr + 4 * (LineWords - 1);
@@ -3245,14 +3347,24 @@ module tb_l1d_store_coherence #(
       lsu_l1d.walu = `RAPT_SB_WSTRB;
       lsu_l1d.wvalid = 1;
       #1;
-      check(!dut.hit_w && l1d_bus.wvalid, "store did not precede final tag installation");
-      for (int n = 0; n < 32 && !lsu_l1d.wready; n++) tick(1);
+      // The final beat is not yet visible to hit_w. Offering the store now
+      // would send a hit as write-through; its B response could then be
+      // unable to update the resident copy, leaving a stale clean word.
+      check(!dut.hit_w && !l1d_bus.wvalid, "store offered before final tag installation");
+      for (int n = 0; n < 32 && !lsu_l1d.wready; n++) begin
+        check(!l1d_bus.wvalid, "refill-adjacent hit store went to the bus");
+        tick(1);
+      end
       check(lsu_l1d.wready, "refill-adjacent store did not complete");
       @(posedge clock);
       @(negedge clock);
       lsu_l1d.wvalid = 0;
       tick(2);
       read_word(last_word_addr, LineWords == 4 ? 32'hddee_ff6f : 32'h0000_006f);
+      writeback_drain = 1'b1;
+      for (int n = 0; n < 4096 && !writeback_idle; n++) tick(1);
+      check(writeback_idle, "refill-adjacent store writeback timed out");
+      writeback_drain = 1'b0;
       check(mem_word[0][LineWords-1][7:0] == 8'h6f, "store did not reach backing memory");
       $display("PASS: final refill beat followed by byte store XLEN=%0d", XLEN);
       $finish;
@@ -3880,6 +3992,10 @@ module tb_l1d_tags;
           .L1dTagW(2),
           .WriteBack(1'b1)
       ) dut (
+          // Job D: standalone test retains independent asynchronous ports.
+          .probe_read(1'b0),
+          .inspect_read(1'b0),
+          .inspect_source(2'b0),
           .clear_line_valid(1'b0),
           .clear_line_idx('0),
           .clear_line_tag('0),
@@ -5741,6 +5857,10 @@ module tb_dirty_line_select;
       .WriteBack(1'b1),
       .DirtySkip(1'b1)
   ) dut (
+      // Job D: independent standalone lookup ports.
+      .probe_read(1'b0),
+      .inspect_read(1'b0),
+      .inspect_source(2'b0),
       .clock,
       .reset,
       .fence_time(1'b0),
@@ -6063,4 +6183,212 @@ endmodule
 
 module tb_l1d_mmio_retry_wb;
   tb_targeted_coherence #(.RetryWriteback(1)) test ();
+endmodule
+
+// ---- tb_l1d_nru ----
+`include "rapt.svh"
+
+module tb_l1d_nru;
+  logic clock = 0;
+  logic [4:0] done = '0;
+  always #5 clock = ~clock;
+  `include "tb_common.svh"
+
+  for (genvar size_idx = 0; size_idx < 5; size_idx++) begin : g_size
+    localparam int Ways = 2 << size_idx;
+    localparam int WayBits = $clog2(Ways);
+    logic reset = 1, invalidate = 0, update_valid = 0;
+    logic [1:0] read_set[2], update_set = 0;
+    logic [WayBits-1:0] victim[2], update_way = 0;
+    bit used[4][Ways];
+    logic [63:0] rng = 64'h123456789abcdef0 ^ 64'(Ways);
+    rapt_cache_nru #(
+        .Ways(Ways),
+        .SetBits(2)
+    ) dut (
+        .*
+    );
+
+    initial begin
+      read_set[0] = 0;
+      read_set[1] = 1;
+      for (int cycle_idx = 0; cycle_idx < 2000; cycle_idx++) begin
+        @(negedge clock);
+        rng ^= rng << 13;
+        rng ^= rng >> 7;
+        rng ^= rng << 17;
+        reset = cycle_idx == 0;
+        invalidate = cycle_idx % 101 == 0;
+        update_valid = rng[0];
+        update_set = rng[2:1];
+        update_way = WayBits'(rng[7:3]);
+        read_set[0] = rng[9:8];
+        read_set[1] = rng[11:10];
+        @(posedge clock);
+        if (reset || invalidate) begin
+          for (int s = 0; s < 4; s++) for (int way = 0; way < Ways; way++) used[s][way] = 0;
+        end else if (update_valid) begin
+          bit all_used;
+          used[update_set][update_way] = 1;
+          all_used = 1;
+          for (int way = 0; way < Ways; way++) all_used &= used[update_set][way];
+          if (all_used)
+            for (int way = 0; way < Ways; way++)
+            if (way != int'(update_way)) used[update_set][way] = 0;
+        end
+        #1;
+        for (int port_idx = 0; port_idx < 2; port_idx++) begin
+          int expected;
+          expected = -1;
+          for (int way = 0; way < Ways; way++)
+          if (!used[read_set[port_idx]][way] && expected < 0) expected = way;
+          check(expected >= 0 && victim[port_idx] == WayBits'(expected), $sformatf(
+                "NRU victim mismatch Ways=%0d cycle=%0d", Ways, cycle_idx));
+        end
+      end
+      done[size_idx] = 1;
+    end
+  end
+  initial begin
+    wait (&done);
+    $display("PASS: L1D NRU: 2/4/8/16/32 ways, two queries, epoch rollover and invalidation");
+    $finish;
+  end
+endmodule
+
+// ---- tb_l1d_shared_tags ----
+`include "rapt.svh"
+
+module tb_l1d_shared_tags;
+  logic clock = 0, reset = 1, fence_time = 0;
+  logic [3:0] clear_set = 0;
+  logic clear_enable = 1, clear_line_valid = 0;
+  logic [1:0] clear_line_idx = 0, addr_idx = 0, waddr_idx = 0, probe_idx = 0;
+  logic [1:0] addr_offset = 0, waddr_offset = 0, probe_offset = 0;
+  logic [3:0] clear_line_tag = 0, addr_tag = 0, waddr_tag = 0, probe_tag = 0;
+  logic load_hit = 0, load_replace = 0, store_replace = 0;
+  logic l1d_update = 0, l1d_valid_u = 0, line_update = 0, l1d_inv_all_ways = 0;
+  logic [3:0] line_mask = 0, l1d_tag_u = 0, clean_mask = '1;
+  logic [1:0] l1d_idx = 0, l1d_off = 0, l1d_way = 0;
+  logic update_dirty = 0, clean_valid = 0, probe_read = 0, inspect_read = 0;
+  logic [1:0] inspect_source = 0, inspect_set, inspect_way = 0, inspect_request = 0;
+  logic [63:0] rng = 64'hbadd00d123456789;
+  always #5 clock = ~clock;
+  `include "tb_common.svh"
+
+  assign inspect_set = inspect_read ? inspect_request
+      : inspect_source == 0 ? (probe_read ? probe_idx : addr_idx)
+      : inspect_source == 1 ? waddr_idx : inspect_source == 2 ? clear_line_idx : l1d_idx;
+
+  wire [3:0] load_way_hit[2], probe_way_hit[2], clear_line_dirty_way[2];
+  wire hit_w[2], load_victim_valid[2], load_victim_dirty[2];
+  wire dirty_any[2], inspect_dirty_any[2], update_blocked[2];
+  wire [1:0] store_hit_way[2], store_fill_way[2], ld_fill_way[2];
+  wire [1:0] first_dirty_set[2], first_dirty_way[2];
+  wire [3:0] load_victim_tag[2], inspect_tag[2], inspect_valid[2], inspect_dirty[2];
+  for (genvar shared_idx = 0; shared_idx < 2; shared_idx++) begin : g_impl
+    rapt_l1d_tags #(
+        .L1D_LEN(2),
+        .L1D_LINE_LEN(2),
+        .L1D_N_WAYS(4),
+        .L1dTagW(4),
+        .WriteBack(1'b1),
+        .DirtySkip(1'b1),
+        .SharedReadPorts(shared_idx != 0)
+    ) dut (
+        .load_way_hit(load_way_hit[shared_idx]),
+        .probe_way_hit(probe_way_hit[shared_idx]),
+        .clear_line_dirty_way(clear_line_dirty_way[shared_idx]),
+        .hit_w(hit_w[shared_idx]),
+        .store_hit_way(store_hit_way[shared_idx]),
+        .store_fill_way(store_fill_way[shared_idx]),
+        .ld_fill_way(ld_fill_way[shared_idx]),
+        .load_victim_tag(load_victim_tag[shared_idx]),
+        .load_victim_valid(load_victim_valid[shared_idx]),
+        .load_victim_dirty(load_victim_dirty[shared_idx]),
+        .inspect_tag(inspect_tag[shared_idx]),
+        .inspect_valid(inspect_valid[shared_idx]),
+        .inspect_dirty(inspect_dirty[shared_idx]),
+        .dirty_any(dirty_any[shared_idx]),
+        .first_dirty_set(first_dirty_set[shared_idx]),
+        .first_dirty_way(first_dirty_way[shared_idx]),
+        .inspect_dirty_any(inspect_dirty_any[shared_idx]),
+        .update_blocked(update_blocked[shared_idx]),
+        .*
+    );
+  end
+
+  task automatic compare;
+    if (!probe_read) begin
+      check(load_way_hit[0] == load_way_hit[1], "shared A lookup mismatch");
+      check(ld_fill_way[0] == ld_fill_way[1], "shared A replacement mismatch");
+      if (load_victim_valid[0])
+        check(load_victim_tag[0] == load_victim_tag[1], "shared A victim tag mismatch");
+    end else check(probe_way_hit[0] == probe_way_hit[1], "shared B lookup mismatch");
+    if (!inspect_read) begin
+      check(hit_w[0] == hit_w[1] && store_hit_way[0] == store_hit_way[1],
+            "shared store lookup mismatch");
+      check(store_fill_way[0] == store_fill_way[1], "shared store replacement mismatch");
+    end
+    check(inspect_valid[0] == inspect_valid[1], "shared inspect validity mismatch");
+    if (|inspect_valid[0]) check(inspect_tag[0] == inspect_tag[1], "shared inspect tag mismatch");
+    check(inspect_dirty[0] == inspect_dirty[1], "shared inspect dirty mask mismatch");
+    check(clear_line_dirty_way[0] == clear_line_dirty_way[1], "shared physical clear mismatch");
+    check(
+        dirty_any[0] == dirty_any[1] && first_dirty_set[0] == first_dirty_set[1]
+          && first_dirty_way[0] == first_dirty_way[1],
+        "shared dirty summary mismatch");
+    check(update_blocked[0] == update_blocked[1], "shared pending-update conflict mismatch");
+  endtask
+
+  initial begin
+    tick(2);
+    for (int cycle_idx = 0; cycle_idx < 5000; cycle_idx++) begin
+      @(negedge clock);
+      rng ^= rng << 13;
+      rng ^= rng >> 7;
+      rng ^= rng << 17;
+      reset = cycle_idx % 103 == 0;
+      clear_set = rng[0] ? 4'(1 << rng[2:1]) : 0;
+      clear_enable = rng[3];
+      clear_line_valid = rng[4];
+      clear_line_idx = rng[6:5];
+      clear_line_tag = rng[10:7];
+      addr_idx = rng[12:11];
+      waddr_idx = rng[14:13];
+      probe_idx = rng[16:15];
+      addr_tag = rng[20:17];
+      waddr_tag = rng[24:21];
+      probe_tag = rng[28:25];
+      addr_offset = rng[30:29];
+      waddr_offset = rng[32:31];
+      probe_offset = rng[34:33];
+      l1d_update = rng[35];
+      l1d_valid_u = rng[36];
+      line_update = rng[37];
+      l1d_inv_all_ways = rng[38];
+      line_mask = rng[42:39];
+      l1d_tag_u = rng[46:43];
+      l1d_idx = rng[48:47];
+      l1d_way = rng[50:49];
+      l1d_off = rng[52:51];
+      update_dirty = rng[53];
+      clean_valid = rng[54];
+      clean_mask = '1;
+      probe_read = rng[55];
+      inspect_read = rng[56];
+      inspect_source = inspect_read ? 2'd1 : rng[58:57];
+      inspect_request = rng[60:59];
+      inspect_way = rng[62:61];
+      // The load hit and install phases are exclusive in the controller.
+      load_hit = !probe_read && !l1d_update && rng[63];
+      #1;
+      compare();
+      @(posedge clock);
+      #1;
+      compare();
+    end
+    $display("PASS: L1D shared tag ports match independent ports across 5000 random cycles");
+    $finish;
+  end
 endmodule

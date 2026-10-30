@@ -29,6 +29,66 @@ module tb_feu_ooo;
     else assign completion[p] = '0;
   end
   for (genvar s = 0; s < DispatchWidth; s++) assign disp_fpq.rs_idx[s] = disp_fpq.free_idx[s];
+  // JOB N: an independent read provider for this arithmetic-only fixture.
+  // PC identifies immutable literal-source slots; nonzero tags name producer RF slots.
+  logic [1:0][PLENPkg-1:0] int_source_regs[DispatchWidth];
+  logic [2:0][ROBIndexBits:0] fp_dispatch_tag[DispatchWidth];
+  logic [2:0][CoreConfig.rob_generation_bits-1:0]
+      fp_dispatch_generation[DispatchWidth];
+  logic fp_retire_valid[CommitWidth] = '{default:0};
+  logic [63:0] fp_retire_value[CommitWidth] = '{default:0};
+  logic [ROBIndexBits-1:0] fp_retire_owner[CommitWidth] = '{default:0};
+  logic [CoreConfig.rob_generation_bits-1:0]
+      fp_retire_generation[CommitWidth] = '{default:0};
+  uop_t fp_queue_read_uop;
+  logic [2:0][ROBIndexBits:0] fp_queue_read_tag, fp_queue_ready_tag;
+  logic [2:0][63:0] operand_read_value;
+  logic [2:0][CoreConfig.rob_generation_bits-1:0] fp_queue_read_generation;
+  logic [PLENPkg-1:0] int_operand_address;
+  logic [XLEN-1:0] int_operand_value, n1_gpr[CoreConfig.phys_regs];
+  logic int_operand_valid = 1;
+  completion_t early_completion[CompletionPorts];
+  logic [2:0][63:0] n1_literal[Owners];
+  logic [63:0] n1_fp_value[Owners];
+  logic [Owners-1:0] n1_fp_valid;
+  for (genvar s = 0; s < DispatchWidth; s++) begin : g_n1_source
+    assign fp_dispatch_tag[s] = dispatch[s].fp_tag;
+    assign fp_dispatch_generation[s] = '0;
+    assign int_source_regs[s] = {'0, dispatch[s].pr1 == '0
+        ? PLENPkg'(dispatch[s].dest + 1) : dispatch[s].pr1};
+  end
+  for (genvar p = 0; p < CompletionPorts; p++) assign early_completion[p] = completion[p];
+  assign int_operand_value = n1_gpr[int_operand_address];
+  always_comb begin
+    fp_queue_ready_tag = fp_queue_read_tag;
+    fp_queue_read_generation = '0;
+    operand_read_value = n1_literal[ROBIndexBits'(fp_queue_read_uop.pc >> 2)];
+    for (int k = 0; k < 3; k++) begin
+      if (fp_queue_read_tag[k] != '0) begin
+        operand_read_value[k] = n1_fp_value[ROBIndexBits'(fp_queue_read_tag[k]-1)];
+        if (n1_fp_valid[ROBIndexBits'(fp_queue_read_tag[k]-1)]) fp_queue_ready_tag[k] = '0;
+        for (int p = 0; p < CompletionPorts; p++) begin
+          if (completion[p].valid && completion[p].fp_wen
+              && fp_queue_read_tag[k] == (ROBIndexBits+1)'(completion[p].dest) + 1) begin
+            fp_queue_ready_tag[k] = '0;
+            operand_read_value[k] = completion[p].fp_result;
+          end
+        end
+      end
+    end
+  end
+  always @(posedge clock) begin
+    for (int p = 0; p < CompletionPorts; p++) begin
+      if (completion[p].valid && completion[p].fp_wen) begin
+        n1_fp_value[completion[p].dest] = completion[p].fp_result;
+        n1_fp_valid[completion[p].dest] = 1;
+      end
+      if (completion[p].valid && completion[p].rd != 0)
+        n1_gpr[completion[p].prd] = completion[p].result;
+    end
+    if (reset || cmu_bcast.flush_pipe) n1_fp_valid = '0;
+  end
+  // end JOB N
   rapt_feu #(.FPQ_SIZE(8)) dut (.*);
   `include "tb_core_bcast_defaults.svh"
   bit expected_valid[Owners], expected_trap[Owners], expected_fp[Owners];
@@ -109,6 +169,10 @@ module tb_feu_ooo;
       @(negedge clock);
     end
   endtask
+  always @(posedge clock) begin
+    if (!reset && !dut.read_ticket.valid && fp_queue_read_tag != '0)
+      $fatal(1, "invalid FP read ticket exposed stale producer tags");
+  end
   task automatic clear_scoreboard;
     outstanding = 0;
     active = 0;
@@ -158,6 +222,14 @@ module tb_feu_ooo;
     finished_at[packet.dest] = -1;
     outstanding++;
     dispatch[0] = packet;
+    // JOB N: seed the external RF provider before the allocation edge.
+    n1_literal[packet.dest] = packet.fp_value;
+    for (int k = 0; k < 3; k++) begin
+      if (packet.fp_tag[k] != '0) n1_fp_valid[ROBIndexBits'(packet.fp_tag[k]-1)] = 0;
+    end
+    if (rapt_pkg::fp_from_integer(packet.uop.execute.fp.op, packet.uop.imm))
+      n1_gpr[packet.pr1=='0?PLENPkg'(packet.dest+1) : packet.pr1] = packet.op1;
+    // end JOB N
     disp_fpq.accept[0] = 1;
     tick();
     disp_fpq.accept[0] = 0;
@@ -200,6 +272,9 @@ module tb_feu_ooo;
         if (unit_id == 8) packet.uop.imm = 32'h40200053;  // FCVT.S.H
         if (unit_id == 9) packet.uop.imm = 32'h44100053;  // FCVT.H.D
         enqueue(packet, 0);
+        // JOB N: observe a populated read ticket before probing its transfer gate.
+        for (int wait_cycle = 0; wait_cycle < 4 && !dut.iss.valid; wait_cycle++) tick();
+        // end JOB N
         #1;
         if (!dut.iss.valid) $fatal(1, "recovery test has no ready issue");
         payload = dut.iss[$bits(dut.iss)-2:0];

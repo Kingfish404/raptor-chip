@@ -157,7 +157,10 @@ rapt_iq #(
     completion[port].rd = issued[entry].uop.rd;
     completion[port].result = issued[entry].op1 + issued[entry].op2;
     completion[port].npc = issued[entry].uop.pc + 4;
-    completion[port].updates.control_flow = 1;
+    // Job R: custom arithmetic on a fixed FP endpoint is not control flow.
+    completion[port].updates.control_flow = issued[entry].uop.execute.branch.conditional
+        || issued[entry].uop.execute.branch.jump || issued[entry].uop.execute.branch.indirect;
+    // end Job R
   endtask
 
   initial begin

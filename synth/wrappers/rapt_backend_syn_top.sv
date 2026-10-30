@@ -43,7 +43,7 @@ module rapt_backend_syn_top #(
     input logic [XLEN-1:0] hart_id_i,
     input logic dm_haltreq_i,
     output logic halted_o,
-    output logic [XLEN-1:0] halt_pc_o,
+    output logic [`RAPT_PC_BITS_OF(XLEN)-1:0] halt_pc_o,
     output logic commit_fire_o,
     output logic [XLEN-1:0] dbg_gpr_rdata_o,
     input logic dbg_gpr_we_i,

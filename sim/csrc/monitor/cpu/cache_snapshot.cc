@@ -55,10 +55,16 @@ template <typename Array> Bank bank(const Array &array)
   template <typename Top> auto name(Top *top, int) -> decltype(bank(field)) \
   { return bank(field); } \
   template <typename Top> Bank name(Top *, long) { return {}; }
-#define L1_BANK(w, b) CACHE_BANK(l1_##w##_##b, \
-  L1(u_data__DOT__g_way__BRA__##w##__KET____DOT__g_bank__BRA__##b##__KET____DOT__u_sram__DOT__mem))
-#define L1_WAY(w) L1_BANK(w, 0) L1_BANK(w, 1) L1_BANK(w, 2) L1_BANK(w, 3)
-L1_WAY(0) L1_WAY(1) L1_WAY(2) L1_WAY(3)
+#define L1_BANK(b) CACHE_BANK(l1_##b, \
+  L1(u_data__DOT__g_bank__BRA__##b##__KET____DOT__u_sram__DOT__mem))
+L1_BANK(0) L1_BANK(1) L1_BANK(2) L1_BANK(3)
+L1_BANK(4) L1_BANK(5) L1_BANK(6) L1_BANK(7)
+L1_BANK(8) L1_BANK(9) L1_BANK(10) L1_BANK(11)
+L1_BANK(12) L1_BANK(13) L1_BANK(14) L1_BANK(15)
+L1_BANK(16) L1_BANK(17) L1_BANK(18) L1_BANK(19)
+L1_BANK(20) L1_BANK(21) L1_BANK(22) L1_BANK(23)
+L1_BANK(24) L1_BANK(25) L1_BANK(26) L1_BANK(27)
+L1_BANK(28) L1_BANK(29) L1_BANK(30) L1_BANK(31)
 #define DIRECTORY_BANK(w) CACHE_BANK(dir_##w, \
   DIR(g_way__BRA__##w##__KET____DOT__u_directory__DOT__mem))
 DIRECTORY_BANK(0) DIRECTORY_BANK(1) DIRECTORY_BANK(2) DIRECTORY_BANK(3)
@@ -129,13 +135,22 @@ void read_l2(std::vector<CacheSnapshotWord> &words)
 void read_l1(std::vector<CacheSnapshotWord> &words)
 {
   if (!L1(WriteBack)) return;
-#define L1_VIEWS(w) {l1_##w##_0(top, 0), l1_##w##_1(top, 0), \
-                     l1_##w##_2(top, 0), l1_##w##_3(top, 0)}
-  Bank data[4][4] = {L1_VIEWS(0), L1_VIEWS(1), L1_VIEWS(2), L1_VIEWS(3)};
+  Bank data[] = {
+    l1_0(top, 0), l1_1(top, 0), l1_2(top, 0), l1_3(top, 0),
+    l1_4(top, 0), l1_5(top, 0), l1_6(top, 0), l1_7(top, 0),
+    l1_8(top, 0), l1_9(top, 0), l1_10(top, 0), l1_11(top, 0),
+    l1_12(top, 0), l1_13(top, 0), l1_14(top, 0), l1_15(top, 0),
+    l1_16(top, 0), l1_17(top, 0), l1_18(top, 0), l1_19(top, 0),
+    l1_20(top, 0), l1_21(top, 0), l1_22(top, 0), l1_23(top, 0),
+    l1_24(top, 0), l1_25(top, 0), l1_26(top, 0), l1_27(top, 0),
+    l1_28(top, 0), l1_29(top, 0), l1_30(top, 0), l1_31(top, 0),
+  };
   const unsigned ways = L1(L1D_N_WAYS), sets = L1(L1D_SIZE);
   const unsigned line_words = L1(L1D_LINE_SIZE);
-  const unsigned bank_words = L1(u_data__DOT__SubarrayWords);
-  Assert(ways <= 4 && L1(u_data__DOT__Subarrays) <= 4,
+  const unsigned chunks = L1(u_data__DOT__Chunks);
+  const unsigned group_ways = ways < chunks ? ways : chunks;
+  const unsigned chunk_words = 8 / sizeof(word_t);
+  Assert(L1(u_data__DOT__Banks) <= sizeof(data) / sizeof(data[0]),
          "checkpoint: unsupported L1D cache geometry");
   for (unsigned way = 0; way < ways; ++way)
     for (unsigned set = 0; set < sets; ++set)
@@ -145,9 +160,14 @@ void read_l1(std::vector<CacheSnapshotWord> &words)
           * line_words * sizeof(word_t);
       for (unsigned word = 0; word < line_words; ++word)
         if ((dirty >> word) & 1u)
+        {
+          unsigned chunk = word / chunk_words;
+          unsigned bank_id = (way / chunks) * chunks + (way + chunk) % chunks;
+          unsigned row = set * group_ways + chunk % group_ways;
+          unsigned byte = (word % chunk_words) * sizeof(word_t);
           words.push_back({paddr_t(base + word * sizeof(word_t)),
-              data[way][word / bank_words].word(set, (word % bank_words) * sizeof(word_t),
-                                               sizeof(word_t)), sizeof(word_t)});
+                           data[bank_id].word(row, byte, sizeof(word_t)), sizeof(word_t)});
+        }
     }
 }
 } // namespace

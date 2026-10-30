@@ -1,5 +1,5 @@
 # Common OpenRAM settings for raptor-chip cache SRAMs on sky130.
-# Sourced by the per-shape configs in this directory.
+# Copied beside the generated shape configs in the build directory.
 
 tech_name = "sky130"
 nominal_corner_only = True

@@ -1,18 +1,23 @@
 [tasks]
-basic bmc
-basic: default
+basic bmc rv32
+rv64 bmc rv64
+cover32 cover rv32
+cover64 cover rv64
 
 [options]
-bmc:
-mode bmc
-depth 3
+bmc: mode bmc
+cover: mode cover
+# Frame 3 is the first observable result after the initial reset.
+depth 5
+timeout 600
 
 [engines]
-smtbmc
+smtbmc bitwuzla
 
 [script]
 plugin -i slang
-read_slang --single-unit -DFORMAL formal_ieu_mul.sv rapt_ieu_mul.sv
+rv32: read_slang --single-unit -DFORMAL formal_ieu_mul.sv rapt_ieu_mul.sv
+rv64: read_slang --single-unit -DFORMAL -DRAPT_RV64 formal_ieu_mul.sv rapt_ieu_mul.sv
 prep -top formal_ieu_mul
 
 [files]

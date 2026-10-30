@@ -3,6 +3,7 @@ module tb_l2tlb #(
     parameter int Entries = 256
 );
   localparam int XLEN = `RAPT_XLEN;
+  localparam int LowerHalfVpn = (1 << (XLEN == 64 ? 26 : 19)) - 1;
   logic clock = 0;
   always #5 clock = ~clock;
   logic reset = 1, flush = 0;
@@ -117,6 +118,12 @@ module tb_l2tlb #(
     @(negedge clock);
     req[0] = '0;
 `endif
+    // These canonical VPNs differ only in the highest stored tag bit.
+    transfer(0, 1, LowerHalfVpn, 3, 0, 0);
+    transfer(1, 0, -1, 3, 0, 0);
+    transfer(1, 1, -1, 3, 0, 0);
+    transfer(0, 0, LowerHalfVpn, 3, 0, 0);
+    transfer(0, 0, -1, 3, 0, 1);
     // Continuous contention must alternate grants, including fill traffic.
     req[0].valid = 1;
     req[1].valid = 1;
@@ -146,7 +153,7 @@ module tb_l2tlb #(
     $finish;
   end
   initial begin
-    #100000;
+    #(1000 * Entries);
     $fatal(1, "timeout");
   end
 endmodule

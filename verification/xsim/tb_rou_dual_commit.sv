@@ -136,6 +136,36 @@ module tb_rou_dual_commit #(
 `endif
   cmu_bcast_if cmu_bcast ();
 
+  // JOB N: connect the actual late FP read/provenance bridge in composed tests.
+  uop_t n1_read_uop;
+  logic [2:0][RobW:0] n1_read_tag, n1_ready_tag;
+  logic [2:0][63:0] n1_read_value;
+  logic [2:0][CoreConfig.rob_generation_bits-1:0] n1_read_generation;
+  logic [2:0][RobW:0] n1_dispatch_tag[DispatchWidth];
+  logic [2:0][CoreConfig.rob_generation_bits-1:0] n1_dispatch_generation[DispatchWidth];
+  logic n1_commit_valid[CommitWidth];
+  logic [63:0] n1_commit_value[CommitWidth];
+  logic [RobW-1:0] n1_commit_owner[CommitWidth];
+  logic [CoreConfig.rob_generation_bits-1:0] n1_commit_generation[CommitWidth];
+`ifndef RAPT_TEST_FP_IRQ_COMPOSE
+  assign n1_read_uop = '0;
+  assign n1_read_tag = '0;
+`endif
+  logic [XLEN-1:0] n1_gpr[CoreConfig.phys_regs];
+`ifdef RAPT_TEST_FP_OOO
+  for (genvar s = 0; s < DispatchWidth; s++) begin : g_n1_gpr_read
+    assign exu_prf.pv1[s] = n1_gpr[exu_prf.pr1[s]];
+    assign exu_prf.pv2[s] = n1_gpr[exu_prf.pr2[s]];
+  end
+`endif
+  always @(posedge clock) begin
+    for (int p = 0; p < CompletionPorts; p++) begin
+      if (completion[p].valid && !completion[p].fp_wen && completion[p].rd != 0)
+        n1_gpr[completion[p].prd] = completion[p].result;
+    end
+    if (reset) foreach (n1_gpr[p]) n1_gpr[p] = '0;
+  end
+  // end JOB N
   rapt_rou #(
 `ifdef RAPT_TEST_COMPACT_FP
       .CompactFpOperands(1'b1),
@@ -150,6 +180,19 @@ module tb_rou_dual_commit #(
       .SeparateOperandWake(1'b1)
 `endif
   ) dut_rou (
+      // JOB N
+      .fp_queue_read_uop(n1_read_uop),
+      .fp_queue_read_tag(n1_read_tag),
+      .operand_read_value(n1_read_value),
+      .fp_queue_ready_tag(n1_ready_tag),
+      .fp_queue_read_generation(n1_read_generation),
+      .fp_queue_dispatch_tag(n1_dispatch_tag),
+      .fp_queue_dispatch_generation(n1_dispatch_generation),
+      .fp_retire_valid(n1_commit_valid),
+      .fp_retire_value(n1_commit_value),
+      .fp_retire_owner(n1_commit_owner),
+      .fp_retire_generation(n1_commit_generation),
+      // end JOB N
       .writeback_done(tb_writeback_done),
       .writeback_drain(tb_writeback_drain),
       .writeback_clean(tb_writeback_clean),
@@ -207,7 +250,9 @@ rapt_cmu dut_cmu (
   assign exu_rou_b.updates = '{control_flow:1'b1, default:'0};
   assign exu_rou_c.updates = '{control_flow:1'b1, default:'0};
   assign exu_ioq_bcast.updates = '{memory:1'b1, exception:1'b1, default:'0};
-  assign exu_wb_mul.updates = '{control_flow:1'b1, default:'0};
+  // Job R: the MUL endpoint cannot resolve control flow.
+  assign exu_wb_mul.updates = '0;
+  // end Job R
 `ifdef RAPT_TEST_ATOMIC_REPLAY
   `include "tb_rou_atomic_replay.svh"
 `endif
@@ -243,8 +288,12 @@ rapt_cmu dut_cmu (
         rnu_rou.valid[s] = 1'b0;
         rnu_rou.checkpoint_valid[s] = 1'b0;
         rnu_rou.checkpoint[s] = '0;
+        // JOB N: composed FP tests use the independent RF read provider.
+`ifndef RAPT_TEST_FP_OOO
         exu_prf.pv1[s] = '0;
         exu_prf.pv2[s] = '0;
+`endif
+        // end JOB N
         exu_prf.pv1_valid[s] = 1'b1;
         exu_prf.pv2_valid[s] = 1'b1;
       end
@@ -1048,8 +1097,11 @@ rapt_cmu dut_cmu (
 
       check(commit_fire && rou_csr.valid, "reused FP load did not produce an FP-dirty commit");
       check(rou_csr.fp_dirty, "reused FP load did not mark FS dirty");
-      check(rou_csr.csr_addr == 12'h100,
-            "reused FP load did not retain the sstatus-aliasing immediate");
+      // Job R: CSR addresses are shared by the serialized system owner.
+      // For an FP-dirty retirement, only csr_wen qualifies that side record.
+      check(!dut_rou.uop_pl[1].execute.sys.valid,
+            "reused FP load retained the stale system-instruction flag");
+      // end Job R
       check(!rou_csr.csr_wen, "non-system FP load exposed stale csr_wen at retirement");
       exu_ioq_bcast.fp_wen = 1'b0;
       tick(1);
@@ -1414,6 +1466,7 @@ rapt_cmu dut_cmu (
     localparam logic [XLEN-1:0] Pc = XLEN'(64'hffff_ffd2_8009_0000);
     localparam logic [XLEN-1:0] NextPc = Pc + XLEN'(4);
     localparam logic [XLEN-1:0] Address = XLEN'(64'h89ab_cdef_800a_0000);
+    localparam logic [XLEN-1:0] Physical = XLEN'(64'h0000_0000_a000_0100);
     localparam logic [XLEN-1:0] Data = XLEN'(64'hfedc_ba98_7654_3210);
     localparam logic [63:0] FpData = 64'hd00d_beef_1357_2468;
     begin
@@ -1437,9 +1490,10 @@ rapt_cmu dut_cmu (
       exu_ioq_bcast.dest = RobW'(0);
       exu_ioq_bcast.npc = NextPc;
       exu_ioq_bcast.wen = 1'b1;
-      exu_ioq_bcast.sq_waddr = Address;
+      exu_ioq_bcast.sq_waddr = Physical;
       exu_ioq_bcast.tval = Address;
       exu_ioq_bcast.sq_wdata = Data;
+      exu_ioq_bcast.result = ~Data;
       exu_ioq_bcast.sq_wdata64 = FpData;
       exu_ioq_bcast.sq_fp64 = 1'b1;
       exu_ioq_bcast.valid = 1'b1;
@@ -1448,6 +1502,7 @@ rapt_cmu dut_cmu (
       exu_ioq_bcast.sq_waddr = ~Address;
       exu_ioq_bcast.tval = ~Address;
       exu_ioq_bcast.sq_wdata = ~Data;
+      exu_ioq_bcast.result = Data;
       exu_ioq_bcast.sq_wdata64 = ~FpData;
       exu_ioq_bcast.sq_fp64 = 1'b0;
       tick(2);
@@ -1459,8 +1514,10 @@ rapt_cmu dut_cmu (
       check(rou_lsu.dest == RobW'(0) && rou_lsu.sq_vaddr == Address,
             "store retirement identity/address witness was truncated or transient");
 `ifdef RAPT_RVFI
-      check(rou_cmu.slot[0].rvfi_sq_waddr == Address && rou_cmu.slot[0].rvfi_sq_wdata == Data,
-            "dedicated RVFI memory trace did not retain the completion payload");
+      check(
+          rou_cmu.slot[0].rvfi_mem_addr == Address && rou_cmu.slot[0].rvfi_mem_wdata == Data
+            && rou_cmu.slot[0].rvfi_mem_result == ~Data && rou_cmu.slot[0].rvfi_mem_wen,
+          "dedicated RVFI memory trace did not retain the completion payload");
 `endif
       tick(1);
     end
@@ -1616,6 +1673,40 @@ rapt_cmu dut_cmu (
   `include "tb_e67_skid.svh"
 `endif
 
+  // Job R: a completed CSR can leave csr_wen set across a warm reset.
+  task automatic expect_csr_context_after_reset;
+    rapt_pkg::uop_t u;
+    begin
+      reset_dut();
+      u = make_alu_uop(XLEN'('h800c_0000), 32'h3000_1073, 5'd0);
+      u.execute.sys.valid = 1'b1;
+      u.imm = 32'h300;
+      dispatch_one(u, '0, '0, RobW'(0));
+      exu_rou.dest = RobW'(0);
+      exu_rou.npc = u.pc + XLEN'(4);
+      exu_rou.csr_wen = 1'b1;
+      exu_rou.valid = 1'b1;
+      tick(1);
+      clear_writebacks();
+      reset_dut();
+      `RAPT_SVA_IMM(ROU_CONTEXT_STALE_CSR_SETUP, dut_rou.rob_entry[0].csr_wen)
+      u = make_branch_uop(XLEN'('h800c_1000), 32'h1800_0063);
+      u.imm = 32'(`RAPT_CSR_SATP___);
+      dispatch_one(u, '0, '0, RobW'(0));
+      exu_rou_c.dest = RobW'(0);
+      exu_rou_c.npc = u.pc + XLEN'('h180);
+      exu_rou_c.btaken = 1'b1;
+      exu_rou_c.valid = 1'b1;
+      tick(1);
+      clear_writebacks();
+      `RAPT_SVA_IMM(ROU_CONTEXT_STALE_CSR_RETAINED, dut_rou.rob_entry[0].csr_wen)
+      `RAPT_SVA_IMM(ROU_CONTEXT_ORIGINAL_IMMEDIATE_CLASS, dut_rou.fetch_uop_changes(RobW'(0)))
+      tick(1);
+      `RAPT_SVA_IMM(ROU_CONTEXT_ORIGINAL_FLUSH, !rou_cmu.fetch_context_stable)
+    end
+  endtask
+  // end Job R
+
   initial begin
 `ifndef RAPT_TEST_FENCE_COMMIT
     if (rapt_pkg::CommitWidth < 2) fail("tb_rou_dual_commit requires commit width >= 2");
@@ -1689,6 +1780,9 @@ rapt_cmu dut_cmu (
     expect_rob_wrap_reuse_and_sret();
     expect_oldest_exception_cause();
     expect_single_csr_payload();
+    // Job R: preserve the original immediate classification across warm reset.
+    expect_csr_context_after_reset();
+    // end Job R
     expect_stale_csr_wen_is_not_exposed();
     expect_full_width_retirement();
     expect_cbo_zero_commit_with_resident_sq();

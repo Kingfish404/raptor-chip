@@ -463,6 +463,25 @@ module rapt_backend #(
     end
   end
 
+  localparam int OperandOwnerBits = rapt_pkg::index_bits(rapt_pkg::CoreConfig.rob_entries);
+  localparam int OperandGenerationBits = rapt_pkg::CoreConfig.rob_generation_bits;
+  logic [rapt_pkg::PLENPkg-1:0] int_operand_address[3];
+  logic [XLEN-1:0] int_operand_value[3];
+  logic int_operand_valid[3];
+  logic [1:0][rapt_pkg::PLENPkg-1:0] int_source_regs[rapt_pkg::DispatchWidth];
+  rapt_pkg::uop_t fp_queue_read_uop;
+  logic [2:0][OperandOwnerBits:0] fp_queue_read_tag, fp_queue_read_ready_tag;
+  logic [2:0][63:0] fp_queue_read_value;
+  logic [2:0][OperandGenerationBits-1:0] fp_queue_read_generation;
+  logic [2:0][OperandOwnerBits:0] fp_dispatch_tag[rapt_pkg::DispatchWidth];
+  logic [2:0][OperandGenerationBits-1:0] fp_dispatch_generation[rapt_pkg::DispatchWidth];
+  logic fp_retire_valid[rapt_pkg::CommitWidth];
+  logic [63:0] fp_retire_value[rapt_pkg::CommitWidth];
+  logic [OperandOwnerBits-1:0] fp_retire_owner[rapt_pkg::CommitWidth];
+  logic [OperandGenerationBits-1:0] fp_retire_generation[rapt_pkg::CommitWidth];
+  for (genvar s = 0; s < rapt_pkg::DispatchWidth; s++) begin : g_operand_int_dispatch
+    assign int_source_regs[s] = {exu_prf.pr2[s], exu_prf.pr1[s]};
+  end
   rapt_rou #(
       // Only memory (FP loads) and FEU completions write an FPR.
       .FpWritePorts((32'(1) << MemoryPort) | (32'(1) << FpuPort)),
@@ -472,6 +491,17 @@ module rapt_backend #(
       .RegisteredDispatchPayload(RegisteredDispatchPayload),
       .DerivedConstants(DerivedConstants)
   ) rou (
+      .fp_queue_read_uop(fp_queue_read_uop),
+      .fp_queue_read_tag(fp_queue_read_tag),
+      .operand_read_value(fp_queue_read_value),
+      .fp_queue_ready_tag(fp_queue_read_ready_tag),
+      .fp_queue_read_generation(fp_queue_read_generation),
+      .fp_queue_dispatch_tag(fp_dispatch_tag),
+      .fp_queue_dispatch_generation(fp_dispatch_generation),
+      .fp_retire_valid,
+      .fp_retire_value,
+      .fp_retire_owner,
+      .fp_retire_generation,
       .operand_wake(operand_wake),
       .writeback_done(drain_completion),
       .writeback_drain(writeback_drain),
@@ -529,7 +559,12 @@ module rapt_backend #(
   logic [XLEN-1:0] rvfi_rd_data[rapt_pkg::CommitWidth];
 `endif
 
-  rapt_prf prf (
+  rapt_prf #(
+      .ExtraReadPorts(3)
+  ) prf (
+      .extra_address(int_operand_address),
+      .extra_value(int_operand_value),
+      .extra_valid(int_operand_valid),
       .completion(operand_wake),
       .clock(clock),
       .reset(reset),
@@ -626,6 +661,11 @@ module rapt_backend #(
   rapt_ieu #(
       .LocalIntegerWake(LocalIntegerWake)
   ) ieu (
+      .early_completion(completion_accepted),
+      .int_source_regs,
+      .operand_read_address(int_operand_address[0:1]),
+      .operand_read_value(int_operand_value[0:1]),
+      .operand_read_valid(int_operand_valid[0:1]),
       .local_integer_wake(local_integer_wake),
       .branch_wake(branch_wake),
       .memory_wake(memory_wake),
@@ -656,6 +696,22 @@ module rapt_backend #(
   rapt_feu #(
       .LocalFpWake(LocalFpWake)
   ) feu (
+      .early_completion(completion_accepted),
+      .int_source_regs,
+      .fp_dispatch_tag,
+      .fp_dispatch_generation,
+      .fp_retire_valid,
+      .fp_retire_value,
+      .fp_retire_owner,
+      .fp_retire_generation,
+      .fp_queue_read_uop(fp_queue_read_uop),
+      .fp_queue_read_tag(fp_queue_read_tag),
+      .operand_read_value(fp_queue_read_value),
+      .fp_queue_ready_tag(fp_queue_read_ready_tag),
+      .fp_queue_read_generation(fp_queue_read_generation),
+      .int_operand_address(int_operand_address[2]),
+      .int_operand_value(int_operand_value[2]),
+      .int_operand_valid(int_operand_valid[2]),
       .local_fp_wake(local_fp_wake),
       .cancel_valid(recovery.redirect_valid),
       .cancel_head(recovery.head),

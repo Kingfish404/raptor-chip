@@ -51,18 +51,22 @@ endmodule
 ''')
     cases = [("rv32", "rapt_prf", "", None),
              ("rv64", "rapt_prf", "-DRAPT_RV64", None),
-             ("non-power-of-two", "rapt_prf", "-GPNUM=96", None),
+             ("non-power-of-two", "rapt_prf", "-DRAPT_PHY_SIZE=96", None),
+             ("extra-reads", "rapt_prf", "-GExtraReadPorts=3", None),
              ("completion32", "rapt_prf", "-GNumCompletions=32", None),
              ("typed-legal", "prf_type_contract", "", None)]
     for name, parameter in (("no-completions", "NumCompletions=0"),
-                            ("no-read-slots", "RenameWidth=0"),
+                            ("no-read-slots", "ReadWidth=0"),
+                            ("negative-extra-ports", "ExtraReadPorts=-1"),
+                            ("empty-extra-slots", "ExtraReadSlots=0"),
+                            ("short-extra-slots", "ExtraReadPorts=3 -GExtraReadSlots=2"),
                             ("no-commit-slots", "CommitWidth=0"),
                             ("too-few-physical", "PNUM=16"),
-                            ("short-address", "PLEN=6"),
+                            ("short-address", "PLEN=5"),
                             ("no-arch-regs", "RNUM=0"),
                             ("oversized-arch-view", "RNUM=33")):
         cases.append((name, "rapt_prf", f"-G{parameter}", "storage/port shape"))
-    for name, parameter in (("read-interface", "RenameWidth=1"),
+    for name, parameter in (("read-interface", "ReadWidth=1"),
                             ("commit-interface", "CommitWidth=1")):
         cases.append((name, "rapt_prf", f"-G{parameter}", "interface dimensions"))
     for name, parameter in (("result-type", "ResultBits=33"),
@@ -76,7 +80,7 @@ endmodule
         if top == "prf_type_contract":
             source += f" {fixture}"
         command = ["yosys", "-Q", "-T", "-m", "slang", "-p",
-                   f"read_slang --single-unit --allow-toplevel-iface-ports -DSYNTHESIS "
+                   f"read_slang --threads 1 --single-unit --allow-toplevel-iface-ports -DSYNTHESIS "
                    f"{includes} {options} --top {top} {source}; hierarchy -check -top {top}; "
                    "select -assert-none t:$check t:$assert t:$assume t:$cover"]
         run = subprocess.run(command, capture_output=True, text=True, timeout=60)

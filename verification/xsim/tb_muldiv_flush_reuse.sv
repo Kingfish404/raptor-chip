@@ -31,9 +31,35 @@ module tb_muldiv_flush_reuse #(
     else assign completion[p] = '0;
   end
 
+  // JOB N: independent RF banks for the normal and complemented streams.
+  logic [1:0][`RAPT_PHY_LEN-1:0] n1_dispatch_int[rapt_pkg::DispatchWidth];
+  logic [`RAPT_PHY_LEN-1:0] n1_read_address[2];
+  logic [XLEN-1:0] n1_read_value[2];
+  logic n1_read_valid[2];
+  logic [XLEN-1:0] n1_rf[rapt_pkg::CoreConfig.phys_regs];
+  logic [XLEN-1:0] n1_other_rf[rapt_pkg::CoreConfig.phys_regs];
+  int n1_next_source = 40;
+  for (genvar r = 0; r < 2; r++) begin : g_n1_read
+    assign n1_read_value[r] = n1_rf[n1_read_address[r]];
+    assign n1_read_valid[r] = 1'b1;
+  end
+  always @(posedge clock) begin
+    for (int p = 0; p < rapt_pkg::CompletionPorts; p++) begin
+      if (!reset && completion[p].valid && completion[p].prd != '0)
+        n1_rf[completion[p].prd] = completion[p].result;
+    end
+  end
+  // end JOB N
   rapt_ieu_muldiv #(
       .MDQ_SIZE(MdqSize)
   ) dut (
+      // JOB N
+      .int_source_regs(n1_dispatch_int),
+      .operand_read_address(n1_read_address),
+      .operand_read_value(n1_read_value),
+      .operand_read_valid(n1_read_valid),
+      .early_completion(completion),
+      // end JOB N
       .completion(completion),
       .clock(clock),
       .reset(reset),
@@ -57,6 +83,7 @@ module tb_muldiv_flush_reuse #(
       init_cmu_bcast_defaults();
 
       for (int s = 0; s < rapt_pkg::DispatchWidth; s++) begin
+        n1_dispatch_int[s] = '0;  // JOB N
         dispatch[s].uop = '0;
         dispatch[s].op1 = '0;
         dispatch[s].op2 = '0;
@@ -100,6 +127,15 @@ module tb_muldiv_flush_reuse #(
       dispatch[0].pr2 = '0;
       dispatch[0].prd = prd;
       dispatch[0].dest = dest;
+      // JOB N: ready tags may be zero; RF identities remain nonzero.
+      n1_dispatch_int[0][0] = wait_pr1 == '0 ? `RAPT_PHY_LEN'(n1_next_source) : wait_pr1;
+      n1_dispatch_int[0][1] = `RAPT_PHY_LEN'(n1_next_source + 1);
+      n1_rf[n1_dispatch_int[0][0]] = op1;
+      n1_rf[n1_dispatch_int[0][1]] = op2;
+      n1_other_rf[n1_dispatch_int[0][0]] = ~op1;
+      n1_other_rf[n1_dispatch_int[0][1]] = ~op2;
+      n1_next_source = n1_next_source >= 62 ? 40 : n1_next_source + 2;
+      // end JOB N
 
       disp.accept[0] = 1'b1;
       tick(1);
@@ -117,9 +153,29 @@ module tb_muldiv_flush_reuse #(
     rapt_pkg::completion_t other_completion[rapt_pkg::CompletionPorts];
     rapt_pkg::completion_t other_wb;
     dpu_iq_if #(.RS_SIZE(MdqSize)) other_disp ();
+    // JOB N
+    logic [`RAPT_PHY_LEN-1:0] other_read_address[2];
+    logic [XLEN-1:0] other_read_value[2];
+    for (genvar r = 0; r < 2; r++) begin : g_n1_other_read
+      assign other_read_value[r] = n1_other_rf[other_read_address[r]];
+    end
+    always @(posedge clock) begin
+      for (int p = 0; p < rapt_pkg::CompletionPorts; p++) begin
+        if (!reset && other_completion[p].valid && other_completion[p].prd != '0)
+          n1_other_rf[other_completion[p].prd] = other_completion[p].result;
+      end
+    end
+    // end JOB N
     rapt_ieu_muldiv #(
         .MDQ_SIZE(MdqSize)
     ) other (
+        // JOB N
+        .int_source_regs(n1_dispatch_int),
+        .operand_read_address(other_read_address),
+        .operand_read_value(other_read_value),
+        .operand_read_valid(n1_read_valid),
+        .early_completion(other_completion),
+        // end JOB N
         .completion(other_completion),
         .clock,
         .reset,
@@ -158,12 +214,17 @@ module tb_muldiv_flush_reuse #(
         if (dut.sel_found)
           assert (dut.sel_idx == other.sel_idx)
           else $fatal(1, "operand-dependent MDQ issue identity");
-        if (!cmu_bcast.flush_pipe && dut.sel_found && dut.fu_in_ready) begin
+        // JOB N: coverage follows FU acceptance, including dispatch-to-RR bypass.
+        assert (dut.read_ticket_fire == other.read_ticket_fire)
+        else $fatal(1, "operand-dependent MDQ register-read acceptance");
+        if (dut.read_ticket_fire) begin
+          assert (dut.read_ticket_index == other.read_ticket_index)
+          else $fatal(1, "operand-dependent MDQ register-read identity");
           paired_mdq_issues++;
-          if (dut.mdq_vj[dut.sel_idx] != other.mdq_vj[other.sel_idx]
-            || dut.mdq_vk[dut.sel_idx] != other.mdq_vk[other.sel_idx])
+          if (n1_read_value[0] != other_read_value[0] || n1_read_value[1] != other_read_value[1])
             differing_mdq_issues++;
         end
+        // end JOB N
         assert (exu_wb_mul.valid == other_wb.valid)
         else $fatal(1, "operand-dependent MDQ completion timing");
         if (exu_wb_mul.valid) begin

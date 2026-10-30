@@ -1,31 +1,38 @@
 [tasks]
-rv32
-rv32_clmul
-rv32_clmulh_basis
-rv32_clmulr
+rv32 prove full32
+rv32_cover cover full32
+rv64 prove full64
+rv64_cover cover full64
+rv32_simple prove simple32
+rv32_simple_cover cover simple32
+rv64_simple prove simple64
+rv64_simple_cover cover simple64
 
 [options]
-mode bmc
+prove: mode prove
+cover: mode cover
 depth 1
+timeout 300
 
 [engines]
-rv32: smtbmc
-# Carry-less products are XOR trees: bitwuzla closes them in seconds, z3 did
-# not finish within 14 hours.
-rv32_clmul: smtbmc bitwuzla
-rv32_clmulh_basis: smtbmc bitwuzla
-rv32_clmulr: smtbmc bitwuzla
+smtbmc bitwuzla
 
 [script]
-rv32: plugin -i slang
-rv32: read_slang --single-unit formal_ieu_alu.sv rapt_ieu_alu.sv
-rv32_clmul: plugin -i slang
-rv32_clmul: read_slang --single-unit -DFORMAL_ALU_CLMUL formal_ieu_alu.sv rapt_ieu_alu.sv
-rv32_clmulh_basis: plugin -i slang
-rv32_clmulh_basis: read_slang --single-unit -DFORMAL_ALU_CLMUL -DFORMAL_ALU_CLMULH formal_ieu_alu.sv rapt_ieu_alu.sv
-rv32_clmulr: plugin -i slang
-rv32_clmulr: read_slang --single-unit -DFORMAL_ALU_CLMUL -DFORMAL_ALU_CLMULR formal_ieu_alu.sv rapt_ieu_alu.sv
+plugin -i slang
+full32: read_slang --threads 1 --unroll-limit 20000 --single-unit -GXLEN=32 \
+full32:   -GEnableRareOps=1 formal_ieu_alu.sv rapt_ieu_alu.sv
+full64: read_slang --threads 1 --unroll-limit 20000 --single-unit -DRAPT_RV64 -GXLEN=64 \
+full64:   -GEnableRareOps=1 formal_ieu_alu.sv rapt_ieu_alu.sv
+simple32: read_slang --threads 1 --unroll-limit 20000 --single-unit -GXLEN=32 \
+simple32:   -GEnableRareOps=0 formal_ieu_alu.sv rapt_ieu_alu.sv
+simple64: read_slang --threads 1 --unroll-limit 20000 --single-unit -DRAPT_RV64 -GXLEN=64 \
+simple64:   -GEnableRareOps=0 formal_ieu_alu.sv rapt_ieu_alu.sv
+chformal -lower
 prep -top formal_ieu_alu
+check -assert
+select -assert-none t:$assume t:$anyseq t:$anyconst A:blackbox=1
+select -assert-count 1 t:$assert
+select -assert-any t:$cover
 
 [files]
 formal_ieu_alu.sv

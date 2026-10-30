@@ -17,6 +17,8 @@
 module rapt_prf #(
     parameter rapt_pkg::core_config_t Cfg = rapt_pkg::CoreConfig,
     parameter int ReadWidth = Cfg.dispatch_width,
+    parameter int ExtraReadPorts = 0,
+    parameter int ExtraReadSlots = ExtraReadPorts > 0 ? ExtraReadPorts : 1,
     parameter int CommitWidth = Cfg.commit_width,
     parameter int unsigned NumCompletions = Cfg.completion_ports,
     parameter type CompletionT = rapt_pkg::completion_t,
@@ -26,6 +28,9 @@ module rapt_prf #(
     parameter unsigned XLEN = Cfg.xlen
 ) (
     input CompletionT completion[NumCompletions],
+    input logic [PLEN-1:0] extra_address[ExtraReadSlots] = '{default: '0},
+    output logic [XLEN-1:0] extra_value[ExtraReadSlots],
+    output logic extra_valid[ExtraReadSlots],
     input clock,
     input reset,
 
@@ -58,6 +63,7 @@ module rapt_prf #(
     `RAPT_PRF_RVFI_PORTS
 );
   if (ReadWidth < 1 || CommitWidth < 1 || NumCompletions < 1
+      || ExtraReadPorts < 0 || ExtraReadSlots < 1 || ExtraReadSlots < ExtraReadPorts
       || RNUM < 1 || RNUM > 32 || PNUM < RNUM || XLEN < 1
       || PLEN < rapt_pkg::index_bits(
           PNUM
@@ -79,6 +85,7 @@ module rapt_prf #(
     $error("Invalid rapt_prf configuration: completion field widths");
   end
 
+  logic [XLEN-1:0] extra_stored[ExtraReadSlots];
   logic [XLEN-1:0] prf_arr           [PNUM];
   logic [PNUM-1:0] prf_valid;
   logic [PNUM-1:0] prf_transient;
@@ -98,6 +105,20 @@ module rapt_prf #(
   for (genvar s = 0; s < ReadWidth; s++) begin : g_read_valid
     assign prf_rd.pv1_valid[s] = prf_valid[prf_rd.pr1[s]];
     assign prf_rd.pv2_valid[s] = prf_valid[prf_rd.pr2[s]];
+  end
+  // Late consumers suppress transfer on flush. Keep flush off the data mux.
+  for (genvar r = 0; r < ExtraReadPorts; r++) begin : g_extra_forward
+    always_comb begin
+      extra_value[r] = extra_stored[r];
+      extra_valid[r] = extra_address[r] == '0 || prf_valid[extra_address[r]];
+      for (int w = 0; w < NumCompletions; w++) begin
+        if (extra_address[r] != '0 && completion[w].valid && completion[w].rd != '0
+            && completion[w].prd == extra_address[r]) begin
+          extra_value[r] = completion[w].result;
+          extra_valid[r] = 1'b1;
+        end
+      end
+    end
   end
   // ---- Write port extraction (unified CDB) ----
   // Every completion may carry a register write; non-writers have rd=0.
@@ -186,7 +207,7 @@ module rapt_prf #(
     // table names the bank holding each register's latest value. Halt-time
     // debug writes (no completions in flight) share writer zero's bank.
     localparam int BankBits = NWB > 1 ? $clog2(NWB) : 1;
-    localparam int Reads = 2 * ReadWidth + 1;
+    localparam int Reads = 2 * ReadWidth + 1 + ExtraReadPorts;
     logic [BankBits-1:0] lvt[PNUM];
     logic bank_we[NWB];
     logic [PLEN-1:0] bank_addr[NWB];
@@ -224,11 +245,15 @@ module rapt_prf #(
       assign prf_rd.pv1[s] = read_data[2*s];
       assign prf_rd.pv2[s] = read_data[2*s+1];
     end
-    assign read_addr[Reads-1] = dbg_read_index;
+    assign read_addr[2*ReadWidth] = dbg_read_index;
+    for (genvar r = 0; r < ExtraReadPorts; r++) begin : g_extra
+      assign read_addr[2*ReadWidth+1+r] = extra_address[r];
+      assign extra_stored[r] = extra_address[r] == '0 ? '0 : read_data[2*ReadWidth+1+r];
+    end
     for (genvar r = 0; r < Reads; r++) begin : g_read
       assign read_data[r] = bank_read[r][lvt[read_addr[r]]];
     end
-    assign dbg_rdata_o = int'(dbg_addr_i) < RNUM ? read_data[Reads-1] : '0;
+    assign dbg_rdata_o = dbg_addr_i != 0 && int'(dbg_addr_i) < RNUM ? read_data[2*ReadWidth] : '0;
 `ifndef SYNTHESIS
     // Full-file view for difftest, RVFI and module checks.
     for (genvar i = 0; i < PNUM; i++) begin : g_view
@@ -247,6 +272,9 @@ module rapt_prf #(
 `endif
 `endif
   end else begin : g_flops
+    for (genvar r = 0; r < ExtraReadPorts; r++) begin : g_extra
+      assign extra_stored[r] = extra_address[r] == '0 ? '0 : prf_arr[extra_address[r]];
+    end
     for (genvar i = 0; i < PNUM; i++) begin : g_entry_data
       // A completion writes a newly renamed, uncommitted destination, which is
       // never deallocated or settled in the same cycle. Validity, not data,
@@ -271,13 +299,14 @@ module rapt_prf #(
       assign prf_rd.pv1[s] = prf_arr[prf_rd.pr1[s]];
       assign prf_rd.pv2[s] = prf_arr[prf_rd.pr2[s]];
     end
-    assign dbg_rdata_o = int'(dbg_addr_i) < RNUM ? prf_arr[dbg_read_index] : '0;
+    assign dbg_rdata_o = dbg_addr_i != 0 && int'(dbg_addr_i) < RNUM ? prf_arr[dbg_read_index] : '0;
   end
 
   // ---- Debug: architectural register view ----
   for (genvar r = 0; r < RNUM; r++) begin : gen_rf_debug
-    assign rf[r]     = prf_arr[rat_snapshot[r]];
-    assign rf_map[r] = prf_arr[map_snapshot[r]];
+    // Physical payload has no reset value; architectural x0 is always zero.
+    assign rf[r]     = r == 0 ? '0 : prf_arr[rat_snapshot[r]];
+    assign rf_map[r] = r == 0 ? '0 : prf_arr[map_snapshot[r]];
   end
 endmodule
 

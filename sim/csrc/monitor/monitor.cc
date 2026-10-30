@@ -4,6 +4,7 @@
 #include <difftest-isa.h>
 #include <lightsss.h>
 #include <memory.h>
+#include <htif.h>
 #include <errno.h>
 #include <getopt.h>
 #include <stdio.h>
@@ -196,6 +197,7 @@ static void usage(const char *prog)
   printf("  -t, --timeout=SECONDS    set wall-clock timeout in seconds\n");
   printf("      --sig=SPEC           dump RISCOF signature (SPEC=<hex_begin>-<hex_end>:<path>)\n");
   printf("      --trap-on-ebreak     don't halt on ebreak; let RTL take the exception\n");
+  printf("      --tohost=ADDRESS     observe an aligned RAM HTIF exit mailbox\n");
   printf("      --ckpt-save[=DIR]    save checkpoint (arch state + memory) when a ckpt trigger fires\n");
   printf("                           (DIR defaults to <build>/checkpoint)\n");
   printf("      --ckpt-cycle=N       save after N cycles from reset/resume (default 0 if no trigger)\n");
@@ -261,6 +263,7 @@ static int parse_args(int argc, char *argv[])
       {"serial-exit-on", required_argument, NULL, 271},
       {"diff-isa", required_argument, NULL, 272},
       {"serial-milestone", required_argument, NULL, 275},
+      {"tohost", required_argument, NULL, 278},
       {0, 0, NULL, 0},
   };
   int o;
@@ -344,6 +347,13 @@ static int parse_args(int argc, char *argv[])
       sdb_set_trap_on_ebreak(true);
       break;
     }
+    case 278:
+      if (htif_set_tohost(optarg) != 0)
+      {
+        fprintf(stderr, "ERROR: --tohost requires an 8-byte-aligned address within RAM\n");
+        exit(1);
+      }
+      break;
     case 258:
       ckpt_save_dir = optarg; /* NULL when given as bare --ckpt-save */
       ckpt_save_requested = true;

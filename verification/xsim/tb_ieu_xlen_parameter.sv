@@ -47,12 +47,32 @@ module tb_ieu_xlen_parameter #(
       .exu_csr,
       .wb_alu_csr(alu_result)
   );
+  // JOB N: the RF model follows the instance XLEN, independently of the macro.
+  logic [1:0][PLENPkg-1:0] int_source_regs[DispatchWidth];
+  logic [PLENPkg-1:0] operand_read_address[2];
+  word_t operand_read_value[2], n1_rf[4];
+  logic operand_read_valid[2];
+  for (genvar s = 0; s < DispatchWidth; s++) begin : g_n1_identity
+    assign int_source_regs[s] = {phys_reg_t'(2), phys_reg_t'(1)};
+  end
+  for (genvar r = 0; r < 2; r++) begin : g_n1_read
+    assign operand_read_value[r] = n1_rf[operand_read_address[r]];
+    assign operand_read_valid[r] = 1'b1;
+  end
+  // end JOB N
   rapt_ieu_muldiv #(
       .Cfg(Cfg),
       .SlotT(test_slot_t),
       .CompletionT(test_completion_t),
       .MDQ_SIZE(4)
   ) mdq (
+      // JOB N
+      .int_source_regs,
+      .operand_read_address,
+      .operand_read_value,
+      .operand_read_valid,
+      .early_completion(completion),
+      // end JOB N
       .clock,
       .reset,
       .completion,
@@ -100,6 +120,8 @@ module tb_ieu_xlen_parameter #(
     dispatch[0].uop.execute.int_op.alu = {1'b0, op};
     dispatch[0].op1 = a;
     dispatch[0].op2 = b;
+    n1_rf[1] = a;  // JOB N
+    n1_rf[2] = b;  // JOB N
     disp.rs_idx[0] = disp.free_idx[0];
     disp.accept[0] = 1'b1;
     @(negedge clock);

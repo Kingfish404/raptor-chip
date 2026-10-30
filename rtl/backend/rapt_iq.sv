@@ -28,6 +28,11 @@ module rapt_iq #(
     // Same-cycle CDB operand wake. Mask must exclude any completion port
     // this queue produces combinationally (BRQ skips the branch port).
     parameter bit                     ComboCdbWake    = 1'b0,
+    parameter bit                     ComboThirdWake  = 1'b0,
+    // The consumer registers selection before reading/executing operands.
+    parameter bit                     ReadAfterSelect = 1'b0,
+    // IssueT supplies entry_index when the consumer owns per-entry metadata.
+    parameter bit                     ExposeEntryIndex = 1'b0,
     // A local producer may capture resident operands before its global packet
     // reaches the registered broadcast. Allocation still uses the global view.
     parameter bit                     LocalOperandWake = 1'b0,
@@ -188,7 +193,10 @@ module rapt_iq #(
   logic [IQ_SIZE-1:0]              iq_pr1_busy;
   logic [IQ_SIZE-1:0]              iq_pr2_busy;
   logic [IQ_SIZE-1:0] pr3_ready, resources_ready;
+  /* verilator lint_off UNUSEDSIGNAL */
   logic [XLEN-1:0]                 iq_vl[IQ_SIZE];
+  /* verilator lint_on UNUSEDSIGNAL */
+  logic [XLEN-1:0] third_issue_value[IQ_SIZE];
   logic [IQ_SIZE-1:0]              iq_dep_busy            [NumDependencies];
   logic [ ROBLen-1:0]              iq_dep_tag             [NumDependencies] [IQ_SIZE];
   logic [GenBits-1:0]              iq_dep_generation      [NumDependencies] [IQ_SIZE];
@@ -303,7 +311,7 @@ module rapt_iq #(
     end
   end
 
-  if (LocalOperandWake && ComboCdbWake) begin : g_invalid_local_wake
+  if (LocalOperandWake && ComboCdbWake && !ReadAfterSelect) begin : g_invalid_local_wake
     $error("Local operand wake requires registered-only issue readiness");
   end
 
@@ -356,7 +364,9 @@ module rapt_iq #(
     if (ThirdOperand) begin : g_third
       logic [PLEN-1:0] tag;
       logic busy;
-      assign pr3_ready[e] = !busy;
+      assign pr3_ready[e] = !busy || (ComboThirdWake && combo_wb_hit(tag));
+      assign third_issue_value[e] = ComboThirdWake && busy
+          ? combo_wb_val(tag, iq_vl[e]) : iq_vl[e];
       always_ff @(posedge clock) begin
         if (reset || cmu_bcast.flush_pipe) busy <= 1'b0;
         else if (alloc_hit[e]) begin
@@ -373,6 +383,7 @@ module rapt_iq #(
     end else begin : g_two
       assign pr3_ready[e] = 1'b1;
       assign iq_vl[e] = '0;
+      assign third_issue_value[e] = '0;
     end
     if (FilterResources) begin : g_resources
       logic [NumResources-1:0] mask_q;
@@ -555,7 +566,9 @@ module rapt_iq #(
     logic [IQLen-1:0] index;
     logic [IQ_SIZE-1:0] data_select;
     logic [StoredPayloadBits-1:0] payload;
+    /* verilator lint_off UNUSEDSIGNAL */
     logic [XLEN-1:0] stored_op1, stored_op2;
+    /* verilator lint_on UNUSEDSIGNAL */
     if (IN_ORDER_ISSUE && NumIssuePorts == 1) begin : g_ordered_head_data
       // A single ordered port can only issue the oldest resident. The
       // payload view below is deliberately independent of readiness, port
@@ -585,6 +598,9 @@ module rapt_iq #(
     end
     assign index = oh2bin(data_select);
     assign issue_data_index[p] = index;
+    if (ExposeEntryIndex) begin : g_entry_index
+      assign issue[p].entry_index = index;
+    end
     // Share the encoded selector across the wide payload bus.
     assign payload = stored_payload[index];
     if (BankUop) begin : g_banked_payload
@@ -597,7 +613,7 @@ module rapt_iq #(
     // Cancellation gates only this valid bit; the selected identity and
     // payload above do not depend on the recovery transaction.
     assign issue[p].valid = |selected[p] && !cancelled[index];
-    assign issue[p].op3 = iq_vl[index];
+    assign issue[p].op3 = third_issue_value[index];
     // Resolve every entry's operand (same-cycle wake or
     // stored value) in parallel, then reduce with the one-hot selection. The
     // late select drives only the final AND-OR instead of an encoded index
@@ -657,6 +673,17 @@ module rapt_iq #(
   // only while the owner's valid bit is set.
   for (genvar i = 0; i < IQ_SIZE; i++) begin : g_entry_state
     always_ff @(posedge clock) begin
+      if (ReadAfterSelect) begin
+        // Invalid entries retain readiness. Selection must not feed back into
+        // these bits; allocation overwrites them before the next owner is live.
+        if (alloc_hit[i]) begin
+          iq_pr1_busy[i] <= |dispatch[alloc_lane[i]].pr1;
+          iq_pr2_busy[i] <= |dispatch[alloc_lane[i]].pr2;
+        end else begin
+          if (pr1_slow_hit[i]) iq_pr1_busy[i] <= 1'b0;
+          if (pr2_slow_hit[i]) iq_pr2_busy[i] <= 1'b0;
+        end
+      end
       begin
         if (alloc_hit[i]) begin
           // Allocation owns the new identity, even when the former resident
@@ -673,8 +700,10 @@ module rapt_iq #(
           iq_dest[i] <= dispatch[alloc_lane[i]].dest;
           iq_pr1[i] <= dispatch[alloc_lane[i]].pr1;
           iq_pr2[i] <= dispatch[alloc_lane[i]].pr2;
-          iq_pr1_busy[i] <= |dispatch[alloc_lane[i]].pr1;
-          iq_pr2_busy[i] <= |dispatch[alloc_lane[i]].pr2;
+          if (!ReadAfterSelect) begin
+            iq_pr1_busy[i] <= |dispatch[alloc_lane[i]].pr1;
+            iq_pr2_busy[i] <= |dispatch[alloc_lane[i]].pr2;
+          end
 
           for (int d = 0; d < NumDependencies; d++) begin
             iq_dep_busy[d][i] <= lane_dep_busy[d][alloc_lane[i]];
@@ -689,17 +718,19 @@ module rapt_iq #(
         end else if (iq_valid[i] && claimed[i]) begin
           // A ready entry that loses port arbitration still captures wakeup.
           // Only an accepted issue may suppress the operand state update.
-          iq_valid[i]    <= 1'b0;
-          iq_pr1_busy[i] <= 1'b0;
-          iq_pr2_busy[i] <= 1'b0;
+          iq_valid[i] <= 1'b0;
+          if (!ReadAfterSelect) begin
+            iq_pr1_busy[i] <= 1'b0;
+            iq_pr2_busy[i] <= 1'b0;
+          end
           for (int d = 0; d < NumDependencies; d++) iq_dep_busy[d][i] <= 1'b0;
         end else if (iq_valid[i]) begin
           // Capture readiness only on an accepted data wake.
-          if (pr1_slow_hit[i]) iq_pr1_busy[i] <= 1'b0;
+          if (!ReadAfterSelect && pr1_slow_hit[i]) iq_pr1_busy[i] <= 1'b0;
           for (int d = 0; d < NumDependencies; d++)
           if (iq_dep_busy[d][i] && completion_hit(iq_dep_tag[d][i], iq_dep_generation[d][i]))
             iq_dep_busy[d][i] <= 1'b0;
-          if (pr2_slow_hit[i]) iq_pr2_busy[i] <= 1'b0;
+          if (!ReadAfterSelect && pr2_slow_hit[i]) iq_pr2_busy[i] <= 1'b0;
         end
 
       end

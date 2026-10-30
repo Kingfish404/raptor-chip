@@ -130,7 +130,10 @@ module tb_prf_state #(
       end
     end
     #1;
-    if (int'(dbg_addr) < ArchRegs) begin
+    if (dbg_addr == 0) begin
+      assert (dbg_rdata === Xlen'(0))
+      else $fatal(1, "architectural debug x0 must be zero");
+    end else if (int'(dbg_addr) < ArchRegs) begin
       assert (dbg_rdata === rf[ArchIndexBits'(dbg_addr)])
       else $fatal(1, "addressed debug read mismatch");
     end else begin
@@ -158,8 +161,13 @@ module tb_prf_state #(
 `endif
     end
     for (int r = 0; r < ArchRegs; r++) begin
-      if (known[rat[r]]) assert (rf[r] === data[rat[r]]);
-      if (known[maps[r]]) assert (rf_map[r] === data[maps[r]]);
+      if (r == 0) begin
+        assert (rf[r] === Xlen'(0) && rf_map[r] === Xlen'(0))
+        else $fatal(1, "architectural x0 views must be zero");
+      end else begin
+        if (known[rat[r]]) assert (rf[r] === data[rat[r]]);
+        if (known[maps[r]]) assert (rf_map[r] === data[maps[r]]);
+      end
     end
   endtask
 
@@ -182,6 +190,18 @@ module tb_prf_state #(
       maps[r] = Bits'(r);
       rat[r] = Bits'(r);
     end
+    step();
+    // Keep x0 architectural even when the observation inputs name a known
+    // nonzero physical word. The idle-reset formal harness separately checks
+    // the real reset mapping without assuming physical data initializes to 0.
+    @(negedge clock);
+    reset = 0;
+    completion[0].valid = 1;
+    completion[0].rd = 1;
+    completion[0].prd = Bits'(ArchRegs);
+    completion[0].result = Xlen'(32'h5a3900f1);
+    rat[0] = Bits'(ArchRegs);
+    maps[0] = Bits'(ArchRegs);
     step();
     for (int cycle = 0; cycle < 3000; cycle++) begin
       @(negedge clock);

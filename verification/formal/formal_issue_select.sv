@@ -11,24 +11,29 @@ module issue_select_reference #(
     output logic [Entries-1:0] selected[Ports],
     output logic [Entries-1:0] claimed
 );
-  logic [Entries-1:0] candidates;
-  logic preceded;
-  always_comb begin
-    claimed = '0;
-    candidates = '0;
-    preceded = 0;
-    for (int p = 0; p < Ports; p++) begin
-      for (int e = 0; e < Entries; e++)
-      candidates[e] = valid[e] && !claimed[e] && (InOrder || (ready[e] && compatible[e][p]));
-      selected[p] = '0;
-      for (int e = 0; e < Entries; e++) begin
-        preceded = 0;
-        for (int o = 0; o < Entries; o++) preceded |= o != e && candidates[o] && older[o][e];
-        selected[p][e] = enabled[p] && candidates[e] && !preceded && ready[e] && compatible[e][p];
+  // Retain the port-first reference equations, but elaborate each comparison
+  // structurally. One procedural Ports*Entries*Entries loop hits frontend
+  // interpreter limits at production-sized geometries.
+  for (genvar p = 0; p < Ports; p++) begin : g_port
+    wire [Entries-1:0] used_before, used_after, candidates;
+    if (p == 0) assign used_before = '0;
+    else assign used_before = g_port[p-1].used_after;
+    for (genvar e = 0; e < Entries; e++) begin : g_entry
+      logic [Entries-1:0] predecessors;
+      assign candidates[e] = valid[e] && !used_before[e]
+          && (InOrder || (ready[e] && compatible[e][p]));
+      // Keep this bounded loop local to one entry. Generating all
+      // Ports*Entries*Entries comparisons exhausts the generate budget at
+      // 128 entries and 8 ports; a single procedural loop stays small.
+      always_comb begin
+        for (int o = 0; o < Entries; o++) predecessors[o] = o != e && candidates[o] && older[o][e];
       end
-      claimed |= selected[p];
+      assign selected[p][e] = enabled[p] && candidates[e] && !(|predecessors)
+          && ready[e] && compatible[e][p];
     end
+    assign used_after = used_before | selected[p];
   end
+  assign claimed = g_port[Ports-1].used_after;
 endmodule
 
 module formal_issue_select #(
@@ -79,11 +84,25 @@ module formal_issue_select #(
   );
   logic legal, properties;
   logic [Entries-1:0] union_selected;
+  wire [Entries*Entries-1:0] legal_pairs;
+  wire [Entries*Entries-1:0] cardinality_pairs;
+  for (genvar e = 0; e < Entries; e++) begin : g_legal_entry
+    for (genvar o = 0; o < Entries; o++) begin : g_pair
+      assign legal_pairs[e*Entries+o] = o <= e || !(valid[e] && valid[o])
+          || age_rank[e] != age_rank[o];
+      if (Ports == 2 && !InOrder) begin : g_two_ports
+        assign cardinality_pairs[e*Entries+o] = !(e != o && valid[e] && ready[e]
+            && compatible[e][0] && enabled[0] && valid[o] && ready[o]
+            && compatible[o][1] && enabled[1]) || $countones(
+            claimed
+        ) == 2;
+      end else begin : g_other_ports
+        assign cardinality_pairs[e*Entries+o] = 1'b1;
+      end
+    end
+  end
+  assign legal = &legal_pairs;
   always_comb begin
-    legal = 1;
-    for (int e = 0; e < Entries; e++)
-    for (int o = e + 1; o < Entries; o++)
-    legal &= !(valid[e] && valid[o]) || age_rank[e] != age_rank[o];
     properties = baseline == reference_claimed && disabled_claimed == reference_claimed
         && (baseline & ~claimed) == '0 && (claimed & ~(valid & ready)) == '0;
     union_selected = '0;
@@ -98,12 +117,7 @@ module formal_issue_select #(
     properties &= union_selected == claimed;
     // For two ports, every augmenting path needed after greedy is one hop.
     // Prove maximum instantaneous cardinality, not maximum program IPC.
-    if (Ports == 2 && !InOrder)
-      for (int a = 0; a < Entries; a++)
-      for (int b = 0; b < Entries; b++)
-      if (a != b && valid[a] && ready[a] && compatible[a][0] && enabled[0]
-              && valid[b] && ready[b] && compatible[b][1] && enabled[1])
-        properties &= $countones(claimed) == 2;
+    properties &= &cardinality_pairs;
     correct = !legal || properties;
   end
 endmodule

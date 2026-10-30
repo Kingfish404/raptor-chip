@@ -162,6 +162,17 @@ package rapt_pkg;
   function automatic int unsigned completion_fpu_port(input core_config_t cfg);
     return cfg.integer_issue_ports + 3;
   endfunction
+  // Every integer port can resolve JAL/JALR; the dedicated branch port
+  // resolves conditional branches. Memory, MUL and FEU never update control flow.
+  // Appended integration-defined endpoints may also resolve control flow.
+  function automatic logic [31:0] completion_control_flow_mask(input core_config_t cfg);
+    logic [31:0] result;
+    result = '0;
+    for (int p = 0; p < 32; p++)
+    result[p] = p < cfg.integer_issue_ports || p == completion_branch_port(cfg) ||
+        (p >= cfg.integer_issue_ports + CompletionFixedPorts && p < cfg.completion_ports);
+    return result;
+  endfunction
   /* verilator lint_on UNUSEDSIGNAL */
   function automatic int unsigned index_bits(input int unsigned entries);
     return entries > 1 ? $clog2(entries) : 1;

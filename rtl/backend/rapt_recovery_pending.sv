@@ -9,7 +9,8 @@ module rapt_recovery_pending #(
     parameter int Ports = 5,
     parameter int Xlen = 32,
     parameter int GenerationBits = 4,
-    parameter int IndexBits = Entries > 1 ? $clog2(Entries) : 1
+    parameter int IndexBits = Entries > 1 ? $clog2(Entries) : 1,
+    parameter logic [Ports-1:0] PortMask = '1
 ) (
     input logic clock,
     reset,
@@ -26,13 +27,30 @@ module rapt_recovery_pending #(
     output logic [Xlen-1:0] target,
     output logic [GenerationBits-1:0] generation
 );
-  localparam int Sources = Ports + 1;
+  localparam int ActivePorts = $countones(PortMask);
+  localparam int Sources = ActivePorts + 1;
   localparam int TreeLeaves = 1 << $clog2(Sources);
   localparam int TreeNodes = 2 * TreeLeaves;
   wire tree_valid[TreeNodes];
   wire [IndexBits-1:0] tree_owner[TreeNodes], tree_age[TreeNodes];
   wire [Xlen-1:0] tree_target[TreeNodes];
   wire [GenerationBits-1:0] tree_generation[TreeNodes];
+
+  logic [IndexBits-1:0] owner_q;
+  logic [Xlen-1:0] target_q;
+  logic [GenerationBits-1:0] generation_q;
+
+  function automatic int active_port(input int ordinal);
+    int count;
+    count = 0;
+    for (int p = 0; p < Ports; p++) begin
+      if (PortMask[p]) begin
+        if (count == ordinal) return p;
+        count++;
+      end
+    end
+    return 0;
+  endfunction
 
   function automatic logic [IndexBits-1:0] age(input logic [IndexBits-1:0] index);
     return IndexBits'(index >= head ? int'(index) - int'(head)
@@ -51,7 +69,7 @@ module rapt_recovery_pending #(
       assign tree_target[TreeLeaves + leaf] = target;
       assign tree_age[TreeLeaves + leaf] = age(owner);
     end else if (leaf < Sources) begin : g_candidate
-      localparam int Port = leaf - 1;
+      localparam int Port = active_port(leaf - 1);
       assign tree_valid[TreeLeaves + leaf] = candidate_valid[Port]
           && int'(candidate_index[Port]) < Entries && live[candidate_index[Port]]
           && owner_generation[candidate_index[Port]] == candidate_generation[Port];
@@ -81,9 +99,6 @@ module rapt_recovery_pending #(
     assign tree_age[node] = choose_left ? tree_age[2*node] : tree_age[2*node+1];
   end
 
-  logic [IndexBits-1:0] owner_q;
-  logic [Xlen-1:0] target_q;
-  logic [GenerationBits-1:0] generation_q;
   assign owner = pending ? owner_q : '0;
   assign target = pending ? target_q : '0;
   assign generation = pending ? generation_q : '0;

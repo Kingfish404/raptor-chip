@@ -7,7 +7,8 @@ module formal_recovery_pending #(
     parameter int Ports = 3,
     parameter int Xlen = 8,
     parameter int GenerationBits = 4,
-    parameter int IndexBits = Entries > 1 ? $clog2(Entries) : 1
+    parameter int IndexBits = Entries > 1 ? $clog2(Entries) : 1,
+    parameter logic [Ports-1:0] PortMask = '1
 ) (
     input logic clock,
     reset,
@@ -30,12 +31,14 @@ module formal_recovery_pending #(
       .Ports(Ports),
       .Xlen(Xlen),
       .GenerationBits(GenerationBits),
-      .IndexBits(IndexBits)
+      .IndexBits(IndexBits),
+      .PortMask(PortMask)
   ) dut (
       .*
   );
 
   logic ref_pending, next_ref_pending;
+  (* keep *) logic [6:0] activated;
   logic [IndexBits-1:0] ref_owner, next_ref_owner;
   logic [Xlen-1:0] ref_target, next_ref_target;
   logic [GenerationBits-1:0] ref_generation, next_ref_generation;
@@ -66,7 +69,7 @@ module formal_recovery_pending #(
       selected = 1'b1;
     end
     for (int p = 0; p < Ports; p++) begin
-      if (candidate_valid[p] && int'(candidate_index[p]) < Entries
+      if (PortMask[p] && candidate_valid[p] && int'(candidate_index[p]) < Entries
           && live[candidate_index[p]]
           && candidate_generation[p] == owner_generation[candidate_index[p]]
           && (!selected || before_in_ring(
@@ -93,7 +96,7 @@ module formal_recovery_pending #(
           selected = 1'b1;
         end else begin
           for (int p = 0; p < Ports; p++) begin
-            if (!selected && candidate_valid[p] && int'(candidate_index[p]) == index
+            if (!selected && PortMask[p] && candidate_valid[p] && int'(candidate_index[p]) == index
                 && candidate_generation[p] == owner_generation[index]) begin
               next_ref_pending = 1'b1;
               next_ref_owner = candidate_index[p];
@@ -121,10 +124,53 @@ module formal_recovery_pending #(
     ref_generation <= next_ref_generation;
   end
 
+  logic past_valid = 0;
+  logic prior_pending, prior_reset, prior_flush, prior_tie;
+  logic [IndexBits-1:0] prior_owner;
+  logic [Xlen-1:0] prior_target;
+  logic [GenerationBits-1:0] prior_generation, prior_owner_generation;
+  logic enabled_valid, disabled_valid, tie_request;
   always_comb begin
-    correct = pending == ref_pending;
-    if (pending || ref_pending)
+    enabled_valid = 0;
+    disabled_valid = 0;
+    tie_request = 0;
+    for (int p = 0; p < Ports; p++) begin
+      enabled_valid |= PortMask[p] && candidate_valid[p];
+      disabled_valid |= !PortMask[p] && candidate_valid[p];
+      tie_request |= PortMask[p] && candidate_valid[p] && pending
+          && int'(owner) < Entries && live[owner]
+          && owner_generation[owner] == generation && candidate_index[p] == owner
+          && candidate_generation[p] == generation && candidate_target[p] != target;
+    end
+    correct = !past_valid || pending == ref_pending;
+    if (past_valid && (pending || ref_pending))
       correct &= owner == ref_owner && target == ref_target && generation == ref_generation;
+  end
+  always_ff @(posedge clock) begin
+    past_valid <= 1;
+    prior_pending <= pending;
+    prior_reset <= reset;
+    prior_flush <= flush;
+    prior_owner <= owner;
+    prior_target <= target;
+    prior_generation <= generation;
+    prior_owner_generation <= owner_generation[owner];
+    prior_tie <= tie_request;
+  end
+  always_comb begin
+    activated = '0;
+    if (past_valid && !reset && !flush) begin
+      activated[0] = !pending;
+      activated[1] = pending;
+      activated[2] = pending && prior_pending && !enabled_valid && owner == prior_owner
+          && generation == prior_generation && target == prior_target;
+      activated[3] = prior_pending && prior_flush && !pending;
+      activated[4] = prior_pending && !prior_reset && !prior_flush && !pending
+          && prior_owner_generation != prior_generation;
+      activated[5] = !pending && disabled_valid && !enabled_valid;
+      activated[6] = prior_tie && !prior_reset && !prior_flush && pending
+          && owner == prior_owner && generation == prior_generation && target == prior_target;
+    end
   end
 
 `ifdef FORMAL

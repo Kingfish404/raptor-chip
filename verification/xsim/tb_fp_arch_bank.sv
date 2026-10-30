@@ -36,6 +36,12 @@ module tb_fp_arch_bank;
       .CommitWidth(Width),
       .CompletionPorts(Width)
   ) dut (
+      // JOB N: these fixtures do not consume late-read provenance.
+      .resolve_generation(),
+      .retire_fp(),
+      .retire_value(),
+      .retire_generation(),
+      // end JOB N
       .operand_allocate_index('{default: '0}),
       .operand_release_valid('{default: '0}),
       .operand_release_index('{default: '0}),

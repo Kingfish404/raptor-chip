@@ -9,11 +9,11 @@
 //   liveness      : every launched operation completes within 64 cycles
 //   no_spurious   : result_valid only rises while an operation is in flight
 //   special_case  : NaN / Inf / zero / div-by-zero complete in ONE cycle
-//   stability     : result/flags only change when result_valid fires
+//   result_owner  : every result belongs to a previously launched operation
 //   flush_clean   : a flushed operation never asserts result_valid
 //
-// Numeric correctness is established separately by the exhaustive host-FPU
-// differential testbench in verification/xsim/fpu/divsqrt (300k vectors,
+// Numeric correctness is checked separately by the host-FPU differential
+// testbench in verification/xsim/fpu/divsqrt (300k vectors,
 // bit-exact). This wrapper complements it with proof of the control contract.
 //
 //   make formal_divsqrt        -> BMC  (finds counterexamples up to depth 70)
@@ -83,17 +83,22 @@ module formal_divsqrt (
   logic [10:0] exp_a, exp_b;
   logic [51:0] frac_a, frac_b;
   logic sign_a, a_nan, b_nan, a_inf, b_inf, a_zero, b_zero;
+  logic a_boxed, b_boxed, exp_a_all_ones, exp_b_all_ones;
   assign exp_a  = src_is_double ? operand_a[62:52] : {3'b0, operand_a[30:23]};
   assign exp_b  = src_is_double ? operand_b[62:52] : {3'b0, operand_b[30:23]};
   assign frac_a = src_is_double ? operand_a[51:0]  : {29'b0, operand_a[22:0]};
   assign frac_b = src_is_double ? operand_b[51:0]  : {29'b0, operand_b[22:0]};
   assign sign_a = src_is_double ? operand_a[63]    : operand_a[31];
-  assign a_nan  = (&exp_a) && (frac_a != '0);
-  assign b_nan  = (&exp_b) && (frac_b != '0);
-  assign a_inf  = (&exp_a) && (frac_a == '0);
-  assign b_inf  = (&exp_b) && (frac_b == '0);
-  assign a_zero = (exp_a == '0) && (frac_a == '0);
-  assign b_zero = (exp_b == '0) && (frac_b == '0);
+  assign a_boxed = src_is_double || operand_a[63:32] == '1;
+  assign b_boxed = src_is_double || operand_b[63:32] == '1;
+  assign exp_a_all_ones = src_is_double ? &exp_a : &exp_a[7:0];
+  assign exp_b_all_ones = src_is_double ? &exp_b : &exp_b[7:0];
+  assign a_nan  = !a_boxed || (exp_a_all_ones && frac_a != '0);
+  assign b_nan  = !b_boxed || (exp_b_all_ones && frac_b != '0);
+  assign a_inf  = a_boxed && exp_a_all_ones && frac_a == '0;
+  assign b_inf  = b_boxed && exp_b_all_ones && frac_b == '0;
+  assign a_zero = a_boxed && exp_a == '0 && frac_a == '0;
+  assign b_zero = b_boxed && exp_b == '0 && frac_b == '0;
 
   wire is_special = a_nan || (divide && b_nan)
       || (!divide && sign_a && !a_zero)
@@ -131,36 +136,42 @@ module formal_divsqrt (
   // Properties
   // ------------------------------------------------------------------------
 `ifdef FORMAL
-  // Delayed signals for the temporal properties (this slang build does not
-  // support $past/$stable, so we register the previous-cycle values).
-  logic        result_valid_d;
-  logic [63:0] dut_result_d;
-  logic [4:0]  dut_flags_d;
+  // Payload is owned only while dut_valid is asserted. Idle preloading may
+  // change result/flags at any other time, including immediately after a result.
+  logic launched_double_q, launched_divide_q;
+  logic [6:0] expected_iterations;
+  assign expected_iterations = launched_double_q ? (launched_divide_q ? 7'd55 : 7'd56)
+      : (launched_divide_q ? 7'd26 : 7'd27);
   always_ff @(posedge clock) begin
     if (reset) begin
-      result_valid_d <= 1'b0;
-      dut_result_d   <= '0;
-      dut_flags_d    <= '0;
-    end else begin
-      result_valid_d <= dut_valid;
-      dut_result_d   <= dut_result;
-      dut_flags_d    <= dut_flags;
+      launched_double_q <= 1'b0;
+      launched_divide_q <= 1'b0;
+    end else if (launch && !flush) begin
+      launched_double_q <= src_is_double;
+      launched_divide_q <= divide;
     end
   end
 
   always_ff @(posedge clock) begin
     if (!reset) begin
+      // Prove the relation between the independent age monitor and the DUT
+      // countdown. These are assertions, not assumptions about internal progress.
+      if (!dut_ready) begin
+        busy_owner : assert (in_flight_q && any_op_q && !dut_valid);
+      end
+      if (in_flight_q && !dut_valid) begin
+        iter_busy : assert (!dut_ready);
+        iter_age : assert (cycles_q < expected_iterations);
+        iter_count : assert ({1'b0, cycles_q} + {1'b0, dut.cnt_q} == {1'b0, expected_iterations});
+      end
+      if (in_flight_q && dut_valid) begin
+        iter_done : assert (cycles_q == expected_iterations);
+      end
       // ---- Liveness: an iterative op completes within 63 cycles ----
       live : assert (!(in_flight_q && cycles_q == 7'd62) || dut_valid || flush);
 
       // ---- No spurious result_valid without a launched operation ----
-      nospur : assert (!(dut_valid && !any_op_q && !launch));
-
-      // ---- Stability: result/flags only change when result_valid fires ----
-      if (result_valid_d && !dut_valid) begin
-        stab_r : assert (dut_result == dut_result_d);
-        stab_f : assert (dut_flags == dut_flags_d);
-      end
+      nospur : assert (!dut_valid || any_op_q);
     end
   end
 
@@ -193,11 +204,18 @@ module formal_divsqrt (
   // ---- Coverage witnesses ----
   always_ff @(posedge clock) begin
     if (!reset) begin
-      cov_div_dp : cover (dut_valid && divide && src_is_double);
-      cov_div_sp : cover (dut_valid && divide && !src_is_double);
-      cov_sqrt_dp : cover (dut_valid && sqrt && src_is_double);
-      cov_sqrt_sp : cover (dut_valid && sqrt && !src_is_double);
+      cov_div_dp : cover (dut_valid && launched_divide_q && launched_double_q);
+      cov_div_sp : cover (dut_valid && launched_divide_q && !launched_double_q);
+      cov_sqrt_dp : cover (dut_valid && !launched_divide_q && launched_double_q);
+      cov_sqrt_sp : cover (dut_valid && !launched_divide_q && !launched_double_q);
       cov_special : cover (dut_valid && launch_special_q);
+      cov_iter_div_dp : cover (dut_valid && in_flight_q && launched_divide_q && launched_double_q);
+      cov_iter_div_sp : cover (dut_valid && in_flight_q && launched_divide_q && !launched_double_q);
+      cov_iter_sqrt_dp :
+      cover (dut_valid && in_flight_q && !launched_divide_q && launched_double_q);
+      cov_iter_sqrt_sp :
+      cover (dut_valid && in_flight_q && !launched_divide_q && !launched_double_q);
+      cov_flush_busy : cover (flush && in_flight_q);
     end
   end
 `endif

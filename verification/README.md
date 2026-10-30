@@ -1,13 +1,17 @@
 # Raptor Chip: Verification Suite
 
-新增
-`make -C verification verilator-l1d-permission-stage-rv32 verilator-l1d-permission-stage-rv64`：
-检查加载权限阶段的 LR 外部干扰、取消和后续恢复。
+`make -C verification verilator-l1d-permission-stage-rv32
+verilator-l1d-permission-stage-rv64` checks LR interference, cancellation and subsequent
+recovery in the load permission stage.
 
 M-extension privilege/edge regression: `make -C verification rva22s64-m-privileged-edges-run` uses the configured `RVA22S64_XLEN`, `RVA22S64_NPC` and matching reference library. Set `RVA22S64_TEST_CPPFLAGS=-DM_TEST_PRIV=0` (U), `1` (S), or `3` (M, default), and use distinct `BUILD_DIR` values for different configurations. The test checks literal arithmetic edge results, source/destination overlap, and RV64 word sign extension. Three reserved OP-32 encodings exercise this platform's illegal instruction policy, including cause, EPC, original instruction and unchanged rd.
 
 
 Unified verification infrastructure for the Raptor Chip RISC-V processor. Full-core tests use the Verilator simulator (`sim/`); differential tests use NEMU. Module, formal, ACT4/Sail and UVM checks have separate harnesses and references. Each target defines its own tool and configuration requirements.
+
+The pinned upstream `riscv-tests`, RV32/RV64 RISCV-DV, Pono and Cascade flows are described
+under [External verification flows](#external-verification-flows). Each flow has its own
+reference model, configuration limits and result checks.
 
 Software test sources live in `app/tests/baremetal/` (freestanding RISC-V programs and shared headers) and `app/tests/host/` (native simulator/reference tests). Build rules, runners, linker scripts and generated vectors stay in `verify`. C++ drivers coupled to RTL testbenches stay with their `xsim` or `vpu` harnesses. Use the current targets below; simulator and STA artifacts follow the profile-isolation rules in `sim/README.md`.
 
@@ -63,6 +67,12 @@ The PMA capability/span and instruction-word proofs use the subcommands `pma-cap
 
 `scripts/logic_check.py` runs the `rank-select`, `rob-age-mask`, `rob-dispatch-select`, `issue-select`, `ras`, `predict-history` and `dispatch-admit` proof matrices. Existing Make targets retain their matrices and output directories. The shared runner preserves each harness's assumptions, reset/induction bounds, success marker and generic synthesis command; `--mode prove|synth|all` selects the work (dispatch admission is proof-only). Reports retain the existing case fields and mark completion only after all selected cases pass and source hashes remain unchanged. `issue-select-audit-test` checks this shared failure/reporting behavior. Generic cell counts and logic depth remain synthesis proxies, not physical area or timing.
 
+Issue-selection references use structural per-port/per-entry comparisons and
+structural legality/cardinality checks so large geometries do not require a larger
+procedural-loop interpretation limit. The port-first oracle, unique active ages,
+compatibility, one-hot/disjoint grants and two-port matching conditions are retained.
+`yosys_common` respects `RAPTOR_YOSYS_REAL` when selecting a compatible frontend.
+
 Checkpoint scenarios use `scripts/checkpoint_milestones.py fp` or `bus-error`, followed by the existing input/output options. Both run fresh save/exit/load sequences at each named milestone and delay; FP register-state checks and posted-write status/address/error-count checks remain distinct. `rva22s64-bus-error-checkpoint-run` selects the latter.
 
 Scripts in `scripts`, `tests` and `experimental` need a documented consumer. Requirement scenarios named by the RISCOF ledger must remain identifiable; when they share a source, record its selection parameters in the ledger. Experimental RTL is retained only when it has a formal/synthesis consumer or a documented opt-in experiment.
@@ -80,6 +90,22 @@ The floating-point boundary programs `fp_tininess_boundary.S`, `fp_product_tinin
 Backend extensibility/recovery and superscalar-width tests share rename/ROB/commit/PRF/router wiring in `xsim/tb_backend_domain_dut.svh`. The callers retain their configuration, IQ sizes, stimuli and assertions; `TB_BACKEND_VALIDATE_COMPLETIONS` is an optional override consumed by the include.
 
 Bare-metal page-fault tests share Sv32/Sv39 two-page setup and M-mode fault checks in `app/tests/baremetal/page_fault_macros.h`. The `rva22s64-store-cross-page-run` target selects the successful-store portion of `split_page_fault.S` with `CROSS_PAGE_ONLY=1`; `rva22s64-split-page-permissions-run` selects its executable-only second-page fault scenario with `SPLIT_EXEC_ONLY=1`. RV64 delegated-trap and Sv39 tests use `supervisor_trap_macros.h`; Svade repair/retry retains its own handler because it must retry the faulting EPC. Keep register use, trap records and instruction order stable when editing these macros, and compare each caller's compiled image, including both XLEN modes where supported.
+
+RVFI adapter effects, HINT metadata and Bare PMA checks share
+`scripts/rvfi_contract.py --contract effects|hints|platform`. The existing
+`formal-rvfi-metadata` and `formal-rvfi-platform` Make targets retain separate output
+directories, parameter matrices, scopes and required witnesses. Shared Yosys execution
+terminates its process group on timeout and requires a conclusive result before recording
+an entry; covers and negative controls also require a nonempty waveform. `check-tools`
+loads Slang before launching checks; set `RAPTOR_YOSYS_REAL` to a compatible installation.
+
+The NRU, recovery, stream queue, SRAM and L1D data contracts are subcommands of
+`scripts/unit_contracts.py`, which shares output, fingerprint and mutation handling.
+NRU, stream queue and SRAM use `yosys_common.run_sby` for bounded execution,
+status handling and waveform validation. Positive cases require successful prove/cover tasks
+and nonempty VCDs; negative controls require an assertion counterexample with a nonempty VCD
+and reject tool errors. Each subcommand retains its model construction and parameter matrix.
+
 
 ## Parameterized test scenarios
 
@@ -341,10 +367,17 @@ is omitted when its whole page would become unreadable, while the leaf-table che
 
 ### 4. RISCV-DV Privileged Stress (`make riscv-dv`)
 
-Uses the upstream [chipsalliance/riscv-dv](https://github.com/chipsalliance/riscv-dv) pure-Python generator with a Raptor RV32IMC M-mode target. Generated binaries run on NPC with NEMU instruction-by-instruction difftest; no commercial UVM simulator is needed for M-mode CSR and trap-handler stress. This riscv-dv target is an IMAC smoke configuration and does not represent the full implemented ISA; use the ACT4 RV32GC profile, the RISCOF classic profile, and `app/tests/fp` for broader architectural and F/D coverage.
+Uses the upstream [chipsalliance/riscv-dv](https://github.com/chipsalliance/riscv-dv)
+pure-Python generator with Raptor RV32/RV64 IMC M-mode targets selected by `ISA=rv32|rv64`.
+Generated binaries run on NPC with NEMU instruction-by-instruction difftest; no commercial
+UVM simulator is needed for M-mode CSR and trap-handler stress. The generator projections
+do not represent the full implemented ISA or include random atomic/F/D instructions;
+use the ACT4 profiles, RISCOF classic and `app/tests/fp` for additional architectural coverage.
+Generated programs and logs default to `build/riscv-dv/<ISA>/<test>/`.
 
 ```bash
 make riscv-dv                         # one short privileged smoke test
+make riscv-dv ISA=rv64                # RV64 target, lp64 ABI and matching NPC/MROM
 make riscv-dv-stress                  # illegal-instruction exception stress
 make riscv-dv-gen RISCV_DV_TEST=raptor_exception_stress RISCV_DV_SEED=42
 make riscv-dv-run RISCV_DV_TEST=raptor_exception_stress
@@ -402,7 +435,7 @@ make -C formal setup      # Download oss-cad-suite (yosys, sby, solvers)
 **Standalone property checks:**
 ```bash
 make -C formal formal_bus       # AXI bus protocol properties
-make -C formal formal_ieu_alu   # RV32 ALU + Zb*/Zicond equivalence
+make -C formal formal_ieu_alu   # RV32/RV64 ALU + Zb*/Zicond equivalence
 make -C formal formal_ieu_mul   # Multiplier correctness properties
 make -C formal formal_pmp       # RV32/RV64 PMP priority and permissions
 make -C formal formal_plru      # 2/4/8-way replacement + invalid priority
@@ -413,11 +446,444 @@ make -C formal formal_divsqrt   # FPU div/sqrt control, flush, and liveness
 make -C formal all              # All standalone checks above
 ```
 
-The ALU proof is exhaustive over symbolic RV32 operands for all non-CLMUL operations. CLMUL and CLMULR are also exhaustive; CLMULH exhaustively proves all polynomial basis terms (the implementation is their linear XOR accumulation). PLRU, CLINT, and PLIC use k-induction and include reachable cover witnesses. CLINT checks RV32/RV64 plus divider-bypass and divided timer paths. PLIC uses k-induction for reduced RV32/RV64 geometries and a four-cycle BMC on the production RV32 geometry (31 sources, two contexts). Its lifecycle covers use three symbolic sources and two contexts to preserve arbitration ties, M/S interrupt routing, and claim/complete behavior while keeping witnesses short. The bus check explores 12 cycles of arbitrary backpressure, while div/sqrt explores 70 cycles to exceed the longest iterative operation.
+The ALU target proves all 64 internal operation codes and both word-flag values for arbitrary
+RV32/RV64 operands, including unrestricted CLMULH inputs. Its polynomial-coefficient reference
+uses the GF(2) definition and result ranges in the
+[RISC-V Zbc specification](https://docs.riscv.org/reference/isa/v20260120/unpriv/b-st-ext.html).
+It also checks `EnableRareOps=0`: the six documented rare operations return zero. Every preset,
+XLEN, DFF/SRAM define, LUTRAM define and synthesis/simulation context is elaborated. Only exact
+unoptimized model identity permits sharing proof and activation evidence across bindings.
+`FORMAL_ALU_PRESETS` selects focused contexts and `FORMAL_ALU_TIMEOUT` bounds each tool query.
+
+A positive ALU certificate requires no assumptions, initializers, clocked checks or state
+transition relation. A direct query over an arbitrary snapshot must prove the entire assertion
+predicate UNSAT when negated; one-frame BMC is an additional check. Every opcode/word pair,
+counting edge and multi-bit carry-less-product case has a reached waveform. Six mutations
+require unrestricted counterexamples. A preserved `--baseline-harness` can demonstrate that
+the former one-hot CLMULH test accepts a fault triggered only by multi-bit operands.
+The generated gate receipts bind each actual parameter/define combination to its complete
+model and activation inventory. Decode legality, dispatch routing, execution-port transport
+and architectural instruction retirement require separate contracts.
+
+The shared `scripts/ioq_contract.py prove --contract owner|store` runner selects an explicit
+contract without changing module globals; the Make targets below select the same profiles.
+
+`make -C verification formal-ioq-owner` composes the full production IOQ with the actual
+dispatch arbiter and capacity adapter. An independent allocation ring records accepted
+identities, PC and operation metadata. Independent response histories check A/B request
+ownership, held descriptors, scalar data, FP boxing and at-most-once completion. All dispatch
+payloads, wakeups, memory responses, CSR/PMP inputs and recovery remain arbitrary; only the
+first sampled edge must reset. Internal queue, request and permission-check invariants are
+proved rather than assumed. The request's ordered flag may promote while held.
+Completion acceptance follows the backend's always-accepted trusted memory port.
+
+Every preset, XLEN, DFF/SRAM define, LUTRAM define, synthesis context, instruction-observation
+mode and load-response-stage setting is elaborated at its native queue/dispatch geometry.
+Full unoptimized JSON models retain memory, initialization, logic and clocked formal checks;
+only source-location attributes are removed for exact model grouping. Proof reads the
+archived full model without state cuts. Every original cover requires a reached waveform,
+including both response lanes where supported, queue fill/reuse, recovery, atomics and FP
+responses. Seven mutations check identity banking, generation, duplicate completion, flush,
+response data and FP boxing. Set `FORMAL_IOQ_OWNER_PRESETS` for a focused matrix and
+`FORMAL_IOQ_OWNER_TIMEOUT` for each proof task (default 1800 seconds). Results stay under
+`FORMAL_RESULTS_DIR`.
+`FORMAL_IOQ_OWNER_DEPTH` controls the standard k-induction search and its initial-state check;
+reducing it never accepts a bounded result as full safety. `FORMAL_IOQ_OWNER_SOLVER=auto`
+uses Bitwuzla for eight-slot dispatch and Yices for smaller native geometries; either engine
+can also be selected explicitly. CPU-heavy model compilation/normalization uses separate
+worker processes.
+
+The target also reaches each bank/row metadata guard and each per-entry stored-response,
+FP-response, early-completion and permission-check history guard. These additional clocked
+covers read the original assertion enables. They add no drivers, assumptions or functional
+state; deleting the observer cells must recover the exact original unoptimized graph.
+Every added guard needs its own reached waveform before the target succeeds.
+The activation runner retains VCD and suppresses unused witness export formats; all model,
+solver, initialization and reachability arguments remain unchanged.
+
+This is the IOQ producer layer of the backend's trusted memory-completion contract. ROB
+allocation/lifetime composition, store-data semantics, address translation, exception
+classification and memory/bus correctness still require separate proofs. It does not by
+itself qualify the complete LSU, backend or architectural memory behavior.
+The signoff inventory keeps admission, identity, response provenance, single completion,
+store-data ownership and atomic semantics as distinct required contracts; the producer-layer
+proof cannot replace the outstanding store and atomic contracts.
+
+`make -C verification formal-ioq-store` retains that complete producer fixture and adds
+independent integer/FP store operand histories from accepted dispatches and registered/live
+wakeups. It checks the head SQ payload against those histories, all eleven LR/SC/AMO data
+operations at native word/doubleword widths, and old-value response provenance. AMO.W checks
+only the bytes enabled for the store; arbitrary upper rs2 bits remain legal. Per-entry
+integer and FP wake covers, each supported operation/width, ordinary/FP stores, successful
+and failed SC, and notification-blocked SC all require reached VCDs. Eight RTL mutations
+must fail. The target uses the same complete native configuration matrix as the producer
+runner. Set `FORMAL_IOQ_STORE_PRESETS`, `FORMAL_IOQ_STORE_TIMEOUT` (default 1800 seconds),
+`FORMAL_IOQ_STORE_SOLVER` (default Bitwuzla), and `FORMAL_JOBS` as needed.
+
+The SC reference checks a decision sampled from the presented physical address and
+reservation interval, and requires notifications to cancel/block it. Reservation inputs
+stay arbitrary; this does not establish reservation creation/invalidation, SQ/bus transport,
+cache/bus atomicity, address translation, producer lifetime or architectural memory ordering.
+It cannot replace those composition obligations or issue whole-RTL signoff.
+
+PLRU, CLINT, and PLIC use k-induction
+and include reachable cover witnesses. CLINT checks RV32/RV64 plus divider-bypass and divided
+timer paths. PLIC uses k-induction for reduced and production RV32/RV64 geometries (31 sources,
+two contexts). Its lifecycle covers use three symbolic sources and two contexts to preserve
+arbitration ties, M/S interrupt routing, and claim/complete behavior while keeping witnesses
+short. The bus check explores 12 cycles of arbitrary backpressure, while div/sqrt explores
+70 cycles to exceed the longest iterative operation.
+
+The default multiplier target composes exhaustive RV32/RV64 arithmetic cases, including
+MULW, with an unbounded owner/data transport proof. Arithmetic replaces only the registered
+stage-one operands, opcode and word selector. Transport cuts only the combinational result
+and proves operand/opcode/word/tag capture and result delivery for arbitrary result values,
+flushes and per-tag cancellation. Both DSP attribute paths are checked. Driver checks reject
+extra input drivers and leftover arithmetic in the transport abstraction. Operation and
+recovery covers plus signedness/result-register mutations validate the model boundaries.
+This closes pure multiply streams, not DIV/REM arithmetic or mixed multiply/divide arbitration.
+Use `formal_ieu_mul_monolithic` for the optional five-frame BMC reference; a shallow PASS
+before the first result is observable does not establish arithmetic correctness.
+
+`make -C verification formal-ieu-div` proves pure DIV/DIVU/REM/REMU streams for
+RV32/RV64, including all RV64 W forms, tag widths 1/2/3 and both DSP attribute paths.
+The RTL refines a canonical MSB-first divider that appends a dividend bit before
+comparing/subtracting, whereas the DUT stores a lookahead bit and places quotient
+bits by index. Checked state relations bind the consumed prefix, normalization,
+operand signs, tags, remainder bounds and every widened intermediate's truncation.
+An age/ranking invariant bounds uninterrupted completion by `XLEN/2 + 2` cycles
+after acceptance. Reset, flush, blocked presentations and cancellation remain free.
+
+Four SMT integer lemmas prove the reference's zero-prefix base, Euclidean-step
+preservation, quotient/remainder uniqueness and signed truncation. Together with
+the RTL's prefix and no-truncation invariants, they establish numerical division;
+zero-divisor and modular XLEN/W result encoding are compared directly. This uses
+no assumed DUT state or internal progress. Reachability cases include all opcodes,
+W encoding, zero operands, sign combinations, MIN/-1, cancellation and busy flush.
+Normalization, sign-correction and zero-divisor mutations must yield real RTL
+counterexamples. Set `FORMAL_RESULTS_DIR` to a fresh run directory.
+
+`make -C verification formal-ieu-muldiv` first establishes those multiplication
+and division prerequisites, then proves arbitrary mixed streams in RV32/RV64,
+tag widths 1/2/3 and both DSP attribute paths. The concrete canonical division
+state remains checked; only the multiplier's combinational result is free, with
+its arithmetic discharged by the prerequisite. Operand/opcode/tag capture,
+result transport, output mutual exclusion, cancellation/reuse and synchronous
+flush/reset are inductive invariants. Legal requests may be presented while
+blocked; invalid-cycle word inputs remain unconstrained. Covers retain the actual
+multiplier and include zero-dividend shortcuts, full-width unsigned division,
+older MUL drain, DIV-to-MUL reuse, canceled DIV with older MUL, and simultaneous
+flush. Ready-while-busy, wrong-unit acceptance and lost older-MUL mutations must
+produce real counterexamples. The parent MDQ and architectural retirement still
+require separate composition proofs.
+
+The div/sqrt harness checks the result-valid/control contract, including bounded completion,
+special cases, and flush. Its induction proof asserts the relation between request age and
+the RTL iteration counter. SP/DP iterative completion and busy flush have cover witnesses.
+Result and flags may change while result-valid is low; floating-point numeric equivalence
+is outside this harness.
 
 The DTM proof covers the implemented single-clock simulation transport: all 16 TAP states, IR/DR shifting, IDCODE/DTMCS capture, and DMI request/response sequencing. CDC, busy/sticky status, and reset side effects remain explicitly outside `rapt_dtm`'s current implementation contract.
 
+`make -C verification/vpu memory-response-formal` proves the full stale-response payload
+isolation contract in RV32/RV64. It composes the original reset base and public request-ledger
+invariant with one-step corresponding-state equivalence. Only register bits and their direct
+constant aliases are induction points; all register bits must be accounted for, and common
+combinational names are blacklisted. Stale pending-response covers and a mutation that consumes
+unaccepted payloads check reachability and sensitivity. This is not full RVV memory semantics,
+external-drain liveness or freshness of a reused tag. `FORMAL_RESULTS_DIR` controls the output
+directory and defaults outside the checkout.
+
+`make -C verification formal-scope` inventories every RTL module, interface, package and
+conditional/external boundary, including generated decoders, across the discovered presets,
+both XLENs and both storage models. Its proposed contract families require semantic review and
+actual parameter/configuration bindings. They are not an automatically complete specification.
+Review may add contracts but cannot drop candidate obligations or omit supported profiles.
+The inventory also names the transport, banking, replacement and recovery contracts of the
+recently changed blocks, rather than treating a generic functional receipt as sufficient.
+`make -C verification formal-signoff` fails until that review and all current proof receipts
+close the required contracts. Set `FORMAL_CONTRACT_REVIEW` and `FORMAL_RECEIPTS` to explicit
+review/evidence files; `FORMAL_SCOPE_OUTPUT` selects the output directory. Receipts must bind
+current RTL/configuration and harness hashes, raw proof artifacts, parameters, assumptions and
+nonempty property-activation witnesses. A bounded or cover result cannot close a sequential
+module's unbounded obligation. Elaboration success or a file's presence in a harness does not
+grant formal signoff.
+
+Review schema 2 maps each unit's `parameter_bindings` from every supported profile to a
+nonempty list of parameter/define dictionaries. Each dictionary creates a separate required
+binding for every obligation. A receipt's `parameters` must match one reviewed dictionary
+exactly; one geometry cannot close another geometry in the same preset. Missing, duplicate
+or legacy unqualified binding tables are rejected. The signoff report records binding hashes
+and their definitions alongside pending obligations.
+
+For a combinational unit, `combinational-smt` receipts additionally require an unrestricted
+snapshot query with no initialization, assumptions or transition relation. The gate compares
+the complete binding model with the proved frontend, verifies the actual parameter/define
+settings, and matches every model cover to its reached log entry and fingerprinted waveform.
+Extra query constraints, missing covers or mismatched witnesses invalidate the receipt.
+
+`verification/scripts/formal_scope.py graph-identity` can compare two checkouts using an
+explicit JSON list of `read_slang` commands with `@ROOT@` paths. It compares unoptimized
+RTLIL byte for byte after removing only source-location attributes, preserving initial
+state, assumptions and assertions. Compressed original models and source hashes remain
+in the external result directory. This establishes elaboration identity only. Reusing
+a prior proof additionally requires its original input and toolchain fingerprints,
+identical read settings, qualified proof results and nonempty activation witnesses.
+The scope gate still requires current receipts and never accepts graph identity alone.
+
+`verification/scripts/formal_scope.py model-classes` uses the same command-manifest format to
+elaborate every binding in one checkout and group identical unoptimized models. It retains
+all initialization, assumptions, assertions and covers; only source-location attributes are
+removed. Each group still needs qualified unbounded proof and activation evidence. Equal
+dimensions, successful elaboration or group membership alone grant no formal PASS.
+
+`make -C verification formal-sram` checks every registered 1RW macro shape and the
+four-segment 16384x64 wrapper, with byte enables on and off where supported. A stable
+symbolic observer address represents every row. Known-bit tracking leaves initial memory
+and output values unconstrained, and proves masked/full writes, synchronous reads and
+output hold by induction. Every case must also reach read/write/disabled covers; byte-mask,
+output-hold and macro-polarity mutations must produce real counterexamples. The macro branch
+uses the repository's generated functional stub. This establishes its wrapper contract,
+not equivalence to a characterized physical SRAM, other SRAM port types, or cache ordering.
+Set `FORMAL_RESULTS_DIR` to a fresh directory for each run. The multiply and VPU response
+runners likewise reject nonempty output directories to preserve earlier evidence.
+
+`make -C verification formal-cache-nru` proves lowest-cold-way selection, epoch renewal,
+reset and invalidation for 2/4/8/16/32 ways, two or 64 sets and one/two query ports. A stable
+symbolic observer represents every set; DUT updates and queries remain unconstrained in
+the safety proof. The reference counts marks other than the touched way. Activation
+covers use a deterministic sequence of external way touches, invalidation and an update
+to another set, avoiding a permutation search for large-way epochs. They assume no DUT
+state or progress. Epoch, priority and invalidation mutations must produce counterexamples.
+Tag/data arrays and hit/install arbitration require their own contracts.
+
+`make -C verification formal-recovery-pending` proves the oldest live request, held-request
+tie priority, enabled-port priority, complete owner/target/generation transport and stale
+generation cancellation. Sixteen bindings include sparse/empty masks, non-power-of-two
+ROB sizes and 32/40-bit targets, with arbitrary flush and reset after the initial reset.
+Activation witnesses exercise applicable idle, new, held, flush, generation, mask and tie
+paths. Mask compression, held ties and generation-check mutations must fail. Producer
+publication, checkpoint restoration and redirect application remain separate contracts.
+
+`make -C verification formal-stream-queue` compares the production queue with the original
+flop reference, including occupancy, pointers, ready/valid and every occupied payload bit.
+The matrix exercises asymmetric lanes, non-power-of-two depths, same-cycle reclaim,
+banked storage and BRAM prefetch/collision forwarding, including 97-bit payloads.
+A stable, arbitrary observer bit proves each payload bit without constraining queue data.
+Invalid-address leaves introduced by memory mapping remain unconstrained. Only the first
+edge must reset; subsequent reset, flush, input-valid and output-ready patterns are free.
+Activation covers exercise full/stalled, simultaneous transfer, wrap, flush and every
+output lane where applicable. Wrong-bank-row, missing-forwarding and ignored-flush
+mutations must produce counterexamples. This is transport equivalence to the pre-banking
+reference; producer packet formation and core-level ordering need separate contracts.
+Use a fresh `FORMAL_RESULTS_DIR` for all three targets; an incomplete proof or cover fails
+the runner and is never promoted to whole-RTL signoff.
+
+`make -C verification formal-rou-retire` checks the uncut ROU's immutable retirement
+metadata against independent allocation histories. It reads the actual banks under
+`SYNTHESIS`; the simulation-only payload shadow is not used as a golden memory. An
+independently declared schema and full-width PC/instruction histories check every stored
+word, all commit reads, the extra next-PC lookahead read, CSR context decoding and the
+serialized CSR/fence immediate. Both XLENs and functional/instruction/RVFI layouts run
+with both completion-validation modes. Only the first edge must reset. Activation covers
+require every physical ROB owner, every retirement lane, lookahead, genuine circular
+allocation excluding flush-induced pointer reset, and allocation after flush. Five
+mutations exercise write-row selection, read-bank selection, PC, original RVFI identity
+and serial-immediate transport. Set `FORMAL_ROU_RETIRE_PRESETS` to a space-separated list
+to check production presets, for example `"default default-w3 default-w4 default-w8"`.
+
+In production mode this harness composes actual ownership guard instances with the ROU,
+leaving raw completions arbitrary. The real backend trusts its memory completion producer;
+the extra guard on that port in this composition explicitly qualifies the boundary. The
+LSU producer's ownership contract still needs separate proof. With local validation enabled,
+raw requests go directly to the ROU's own guard. These proofs do not establish instruction
+execution, rename correctness, complete backend composition or whole-core ISA semantics.
+Reports preserve the exact inputs, modes, proof/cover outcomes and counterexample hashes.
+
+`make -C verification formal-l1d-data` independently elaborates the actual L1D geometry
+of every preset in both XLEN modes, then proves each distinct geometry with behavioral
+SRAM and ideal functional macro stubs. Extra small geometries exercise full, partial and
+multiple way groups. `FORMAL_L1D_DATA_PRESETS` optionally selects a subset. Geometry reuse
+is guarded by a source audit that rejects additional configuration-sensitive macros.
+
+A stable symbolic set/way/word/byte tracks arbitrary byte strobes and line masks against
+the physical diagonal banks. Read/write ways must be legal; other transactions, reset
+patterns and initial contents are free. The contract checks synchronous read addressing,
+bank and line validity, assembled lines, blocked-write preservation and reserved-port
+output hold. A blocked write still reserves its bank. Reset suppresses read validity but
+does not erase storage or suppress otherwise enabled writes. Covers exercise every bank
+and byte lane, both RV32 words in a chunk, full/partial line writes, partial word writes,
+blocked writes, reset-time writes and independent way-group traffic where applicable.
+Six mutations must produce real counterexamples.
+
+Narrow division/modulo cells use standard Yosys arithmetic mapping to avoid a known
+small-operand slicing failure during preparation. No sequential state or memory is cut.
+Assumption count is audited before this optimization; tautological way-range checks may
+then disappear. Physical macro equivalence, tag selection, parent arbitration, coherence
+and architectural memory ordering require separate proofs. Use a fresh result directory
+to preserve the exact configuration-discovery and proof artifacts.
+
+`make -C verification formal-prf` checks architectural/debug x0 in RV32/RV64 with
+flop and LUTRAM storage. Physical payload is uninitialized; reset maps do not make
+physical register zero contain zero. The x0 checks use the production preset shape.
+All discovered presets are selected by default. `FORMAL_PRF_PRESETS` selects a subset,
+and `FORMAL_PRF_TIMEOUT` sets the
+per-task timeout in seconds. Use a fresh `FORMAL_RESULTS_DIR` for each run.
+`RAPTOR_YOSYS_REAL` selects the native Yosys launcher. All branches resolve it before adding
+bundled solver tools to `PATH`, and the report records the selected launcher and version.
+`make -C verification formal-prf-zero` is a fast regression for just the idle-reset
+x0 contract and its two masking mutations; its result explicitly excludes general
+data/state history. The full `formal-prf` target retains the larger matrix below.
+
+The full target first elaborates `CoreConfig` for every selected preset and XLEN,
+recording its actual architectural/physical counts, read/retirement/writer widths and
+address width. It compiles each native binding directly with zero/three late-read ports
+and both storage implementations, plus flop-synthesis and LUTRAM-simulation RVFI views.
+Equal dimensions do not silently qualify another preset. For example, `default-w8`
+requires its actual 128-entry storage, independently of the 96-entry stress geometry.
+
+The same target checks byte history at a stable symbolic physical address, validity
+and transient-state priorities, flush, ordinary and late reads, quiescent debug writes,
+all LUTRAM read copies and available architectural/RVFI views. It includes 64/96-entry
+production-sized shapes, one/eight read and retirement ports, six writers and zero/three
+late-read ports. Reset forgets knowledge of payload contents. Active addresses must be
+legal, accepted writers must have unique physical destinations, and debug writes must
+be quiescent outside reset/flush. Covers exercise writes, debug, overlapping retirement
+events and late forwarding during flush. Eight state/forwarding mutations and five view
+mapping mutations must yield counterexamples. View mutations also run against the original
+uncut monolithic assertions, so a counterexample in a stronger auxiliary lemma alone
+cannot satisfy those controls.
+An optional `prf_formal.py prove --baseline` supplies preserved pre-fix RTL for four additional
+x0 counterexamples. Producer ownership, rename mapping and debug halt delivery need
+integration proofs.
+
+The default `FORMAL_PRF_PROOF_STYLE=composed` keeps the actual DUT and its entire storage
+transition system. Only the five architectural/RVFI view assertions become their original
+activation covers in the history harness. Independent view identities check every physical
+row, every byte lane and every committed/speculative/RVFI output. Their direct SMT snapshot
+query applies no initialization, transition or environmental predicates. The verifier also
+rejects initializers, `$initstate`, clocked property sampling and nontrivial initial,
+hierarchical or assumption predicates. This makes the identity a combinational all-state
+lemma; a shallow BMC PASS alone cannot certify it.
+The direct query uses the bundled Yosys SMT unroller and Bitwuzla; both its original and
+expanded formulas are retained. Every activation witness gets its own waveform. Tool
+timeouts terminate the process group and produce an incomplete result.
+
+An SMT composition theorem derives the removed byte assertions from unbounded history,
+LVT validity and the view identities. Removing any essential premise must make its negative
+control satisfiable. Legal-address premises are retained for non-power-of-two zero views.
+History, all-state identities, the composition theorem and all activation covers must pass
+before a binding is certified. `FORMAL_PRF_PROOF_STYLE=monolithic` retains the original full
+induction model for comparison. A standalone `prf_formal.py composed` run requires explicit native
+dimensions and records all components and their source fingerprints outside the checkout.
+
+For a flop history timeout, `verification/scripts/prf_formal.py byte-partition` accepts the existing
+composed output through `--reference` and writes to an empty `--output` directory. It checks
+the current RTL and original history fingerprints, then proves every observer-byte value
+without changing DUT inputs or transitions. Three whole-word zero checks are split into
+their byte clauses. SMT lemmas check both domain exhaustiveness and whole-word reconstruction;
+omitting any byte must fail the corresponding negative control. Certification also requires
+the original full activation cover, fresh all-state views and the view-composition theorem.
+This is an optional recovery flow; an unfinished partition is never promoted to PASS.
+The full composed runner applies this recovery automatically to flop history timeouts or
+preparation errors when full activation, views and the composition lemma passed. It starts
+with byte decomposition for flop geometries with at least 128 entries. Each binding uses
+one byte worker so `FORMAL_JOBS` controls aggregate concurrency. Genuine assertion failures
+are retained, and negative controls never use this recovery. Original component statuses
+remain in their reports; the qualified row also names and hashes the byte-recovery receipt.
+`prf_formal.py composed --history-cover-only` can prepare an uncertified full activation reference
+when byte decomposition is planned from the start. `prf_formal.py byte-partition --engine abc-pdr`
+changes only the safety engine, retaining the original cover evidence and all property/state
+transformations. Byte recovery rejects a bounded history mode even if its metadata says PASS.
+
+Production-sized flop safety jobs use ABC PDR. LUTRAM safety jobs use Bitwuzla after
+standard Yosys mapping of only the LVT to registers; all payload RAM copies remain native
+SMT arrays. This avoids hundreds of redundant LVT write ports without changing state,
+addresses, data bits or assumptions. The original model passes `check -assert` before
+mapping. Only generated out-of-range LVT read-mux leaves may become unconstrained inputs;
+non-power-of-two geometries retain their legal-address assumptions. Payload memory counts
+and single-write-port shapes are audited after mapping. Smaller safety jobs and all covers
+also use Bitwuzla. Large jobs may time out. A timeout leaves `complete` false and makes the
+target fail even if all covers and smaller shapes pass; it is never treated as proof.
+These block contracts do not constitute whole-RTL signoff.
+
 #### riscv-formal (RVFI)
+
+`make -C verification formal-rvfi-metadata` checks the adapter independently of the core.
+It proves fault suppression for GPR destinations and memory masks, zero data for `rd=x0`,
+integer load/store/LR/SC/AMO mask decoding, metadata passthrough and the unbounded 64-bit
+modular order/reset recurrence in RV32/RV64 with 1/2/3/4/8 lanes. Covers activate faulting load/store,
+successful/failed SC, LR/AMO and both GPR destination cases on the last lane. Six mutations
+must produce genuine counterexamples. The same target checks compressed HINT metadata and
+same-group forwarding on every channel of those widths, including a reversed-forwarding
+mutation that must choose the wrong older writer. It assumes a contiguous retirement prefix; execution,
+producer legality, memory contents, fault cause and complete ISA semantics remain separate.
+Select a fresh `FORMAL_RESULTS_DIR` to preserve earlier evidence.
+
+Memory read data comes from the saved completion result, including when `rd=x0` suppresses
+the PRF write. Write masks use the saved actual write permission rather than inferred SC
+status from the PRF. The address is the original effective address, before physical address
+translation or Bare alias canonicalization. Producer correspondence and memory contents
+still require separate checks; adapter-input transformation proofs alone do not establish them.
+
+`make -C verification formal-rou-rvfi` checks the actual ROU and RVFI adapter together,
+retaining all DUT state. It proves saved memory-completion payloads, effective addresses,
+x0 read results, write-mask correspondence to the scalar store-commit endpoint, and the
+contiguous retirement prefix. Only the first sampled edge requires reset; rename,
+completion, CSR, PRF and backpressure inputs are arbitrary. Covers exercise both lanes,
+failed/successful SC and different virtual/physical addresses under these block inputs.
+Three mutations must yield bounded counterexamples. This does not establish decoder or
+producer legality, core-level reachability, execution/bus data or complete ISA correctness.
+The default preset is `formal`; use `FORMAL_ROU_RVFI_PRESETS="formal default"` and
+`FORMAL_JOBS` to select independent configurations and concurrency.
+
+`make -C verification formal-rou-rvfi-composed` checks the same safety properties with a
+state overapproximation. It preserves payload, reference-history and assertion-monitor
+registers, replaces only identifiable DUT control-register outputs with free values, and
+audits the resulting graph before proving it. Every original wire, initial attribute,
+uncut cell, property and assumption must remain unchanged; each removed FF output must
+receive exactly one free driver. This adds possible trajectories without constraining
+outputs or private progress. Activation covers run separately on the uncut model.
+Both local completion validation and the production externally accepted completion
+binding are checked in each XLEN/preset. Address, result-loss and write-permission
+mutations must fail on both the abstract and uncut models under both bindings. This target
+is optional and is excluded from the default standalone aggregate. Larger presets may
+still time out; a timeout never qualifies a contract. As with the uncut check, block-level covers do
+not establish complete-core architectural reachability or execution/bus correspondence.
+
+After an RTL merge, regenerate decoders and use a fresh result directory. Prior results
+remain evidence for their recorded source fingerprints; they cannot qualify changed RTL.
+The following small gate checks configuration, inventory and RVFI contracts in both XLENs:
+
+```bash
+make verilog
+formal_results=$(mktemp -d)
+make -C verification config-macro-check
+make -C verification formal-scope FORMAL_SCOPE_OUTPUT="$formal_results/scope"
+make -C verification formal-rvfi-metadata formal-rvfi-platform formal-rou-rvfi \
+  FORMAL_RESULTS_DIR="$formal_results"
+# Optional state-abstraction check, including both completion bindings:
+make -C verification formal-rou-rvfi-composed FORMAL_RESULTS_DIR="$formal_results" \
+  FORMAL_JOBS=2
+```
+
+Select a compatible Slang-enabled Yosys with `RAPTOR_YOSYS_REAL` when needed. Follow this
+gate with affected block/ISA regressions and production presets. Neither this gate nor
+the generated inventory establishes whole-RTL signoff.
+
+`make -C verification formal-rvfi-platform` qualifies `formal_rvfi_metadata.sv` against the
+production physical-access predicates for the `default` and `formal` presets in both XLENs.
+It covers all addresses and scalar sizes, including misaligned RAM, holes, read-only memory,
+device alignment, PLIC width and RV64 address aliases. Boundary, permission, width and alias
+mutations must fail. The reference binds the 256 MiB PMEM/32 MiB SDRAM/8 KiB SRAM map and
+selects XLEN from `RISCV_FORMAL_XLEN`. Use it through `RISCV_FORMAL_PMA_MAP` only for Bare
+physical-address checks with that map. Different platform overrides and translated addresses
+require their own qualified models; PMP and integrated exception delivery remain separate.
+
+The AIG compatibility wrapper keeps ABC's native BLIF parser by default. Tool distributions
+that require the older parser can explicitly set `RAPTOR_ABC_BLIF_PARSER=legacy`; that parser
+can reject large flattened input files. Parser or mapping failures are tool errors and must
+be resolved before interpreting any proof result.
 
 [riscv-formal](https://github.com/YosysHQ/riscv-formal) performs per-instruction formal verification via the RVFI (RISC-V Formal Interface). The Raptor core exposes RVFI signals through `rtl/backend/rapt_rvfi.sv` (enabled by `-DRAPT_RVFI`), with NRET=2 for dual-commit.
 
@@ -439,7 +905,24 @@ make -C formal formal_rvfi
 make -C formal formal_rvfi_clean
 ```
 
-**Engine:** Uses `abc bmc3` (AIGER-based BMC) instead of SMT-based solvers to avoid a false-positive combinational loop detection in the `write_smt2` backend. `checks.cfg` uses depth 8 for instruction checks and final depth 10 for register, forward/backward PC, uniqueness, and causality checks. Shallow bounds can pass vacuously before retirement is reachable; runtime depends on the check and bound.
+**Engine:** Uses `abc bmc3` (AIGER-based BMC) instead of SMT-based solvers to avoid a
+combinational loop diagnostic in the `write_smt2` backend. `checks.cfg` uses depth 8 for
+instruction checks and final depth 10 for register, forward/backward PC, uniqueness, and
+causality checks. These are smoke bounds. Before claiming ISA correctness, require covers
+for the selected non-trapping instruction on each channel at its check cycle, and reachable
+triggering retirements for consistency checks. A shallow PASS without those witnesses can
+be vacuous. Check the SBY status files: generated jobs may accept both PASS and FAIL as
+expected outcomes. Tool errors and timeouts do not establish correctness.
+
+The optional `RAPT_RVFI_PROTOCOL_ENV` wrapper supplies transaction-driven, error-free AXI
+responses with unconstrained per-beat data. It does not establish memory coherence or remove
+platform access faults. Match the reference's address validity, PMA spans and memory-mask
+conventions to the selected configuration. The compact RV64 PC implementation can replace an
+unrepresentable jump target with another invalid address before the subsequent fetch faults;
+an all-address-valid reference comparison will reject that representation. Ordinary RAM
+supports misaligned splitting, while a span across a permission boundary can fault. Preserve
+such counterexamples until independent policy checks and integrated exception proofs explain
+them; a corrected model or a component policy proof alone does not close the original job.
 
 **Configuration files** (`formal/rvfi/`):
 - `checks.cfg` — ISA, nret, solver, depth, yosys-slang script
@@ -656,51 +1139,53 @@ These assertion-enabled tests cover the reusable buffered completion arbiter, is
 
 `verilator-rou-fp-irq-compose-rv32/rv64` exercises the actual FP queue, execution, committed FPR storage and interrupt recovery composition. `formal/zkt_cdb.sby` checks control independence from result data across the buffered arbiter using 12-step BMC; this is a bounded check, not an unbounded proof.
 
-### UART 平台一致性
+### UART platform consistency
 
 ```sh
-python3 verification/scripts/test_uart_platform.py
-# 或 make -C verification uart-platform-check
+make -C verification uart-platform-check
 ```
 
-独立编译生产 NEMU/sim 串口模型，覆盖 RV32/RV64 的 NS16550 RX IRQ10、CU08
-LiteUART `0x11001800` 的收发、旧高地址 alias 拒绝，以及 sim CSR 写掩码。
-同时编译规范 DTS，检查 NS16550 interrupt cell 与 NEMU Linux presets 一致。
-仅提供宿主环境/MMIO 注册/IRQ 接收端桩，不修改共享 `.config`，不加载 FPGA。
-这不是完整 Linux/RTL/PLIC 集成回归，也不验证 LiteUART 完整事件中断仿真。
+This builds the production NEMU/simulator UART models independently for RV32/RV64. Checks
+cover NS16550 RX IRQ10, CU08 LiteUART transmit/receive at `0x11001800`, rejection of the old
+high-address alias, and simulator CSR write masks. Canonical DTS compilation checks that the
+NS16550 interrupt cells match NEMU Linux presets. Host/MMIO/IRQ receiver stubs keep shared
+`.config` files untouched. This does not run a board, Linux/RTL/PLIC integration, or complete
+LiteUART event interrupt emulation.
 
-整核入口 `mmio-transaction-check` 检查 LiteUART 低地址，每个地址覆盖
-总线延迟 0/7/63、随机种子 1/42，核对 AXI 响应及实际发送字节；
-`mmio-uart-read-check` 检查 NS16550 byte lane 和 read-to-clear 副作用。
-`mmio-uart-irq-check` 向 stdin 注入 `K`，由裸机程序检查 M-mode 外部中断、
-PLIC claim=10、收到的字符与 completion，然后打印成功标记并写 finisher。
-IRQ 测试使用不启用 difftest 的 sim，避免参考模型的异步输入时序干扰。
-这些入口需要 `RAPT_AXI_OBSERVE` 构建的 sim；可用脚本直接指定独立构建产物：
+`mmio-transaction-check` exercises the low LiteUART address with bus delays 0/7/63 and seeds
+1/42, checking AXI responses and transmitted bytes. `mmio-uart-read-check` checks NS16550
+byte lanes and read-to-clear effects. `mmio-uart-irq-check` injects `K` through stdin; a
+bare-metal program checks the M-mode external interrupt, PLIC claim 10, received character
+and completion, then prints success and writes the finisher. The IRQ check uses a simulator
+without difftest to avoid reference-model asynchronous input timing differences.
+
+These flows require a simulator built with `RAPT_AXI_OBSERVE`. An isolated build can be used
+explicitly:
 
 ```sh
 python3 verification/scripts/mmio_transaction_check.py \
   --npc /path/to/riscv64-npc-sim --no-difftest \
   --mrom /path/to/mrom-data.bin --xlen 64 --output /tmp/raptor-chip-mmio64
-# 添加 --uart-read 或 --uart-irq 分别运行读副作用或中断测试；RV32 使用对应产物和 --xlen 32。
+# Add --uart-read or --uart-irq; RV32 requires matching binaries and --xlen 32.
 ```
 
-`--no-difftest` 表示仅检查端点/整核测试结果，要求传入关闭 difftest 的 sim，
-不会替调用者重建模型。构建开启 difftest 的模型时应传入 `--reference`。
+`--no-difftest` checks endpoint/core behavior using a simulator built without difftest; it
+does not rebuild that simulator. Use `--reference` with a difftest-enabled model.
 
+### L1D MSHRs and replay
 
-### L1D MSHR 与重放
+`make -C verification verilator-wb-mshr-rv32 verilator-wb-mshr-rv64` exercises the real
+L1D/bus composition: cold Sv32/Sv39 walks overlapping four refills, same-line merging,
+interleaved responses across IDs, early critical-word return, independent reads while both
+writeback buffers await B, same-address read ordering, full-queue backpressure, late stores
+versus accepted loads, store/refill collisions, dirty PTE publication, cancellation,
+permission errors and bus errors.
 
-`make -C verification verilator-wb-mshr-rv32 verilator-wb-mshr-rv64` 检查真实 L1D/bus
-组合：Sv32/Sv39 冷页表遍历与四条独立回填重叠、同一物理行合并、跨 ID 交错响应、
-关键字提前返回、两个写回缓冲在 B 阻塞时允许无关读推进、同地址读等待写回、队列满
-背压、晚到本地存储与已接受 load 的让行/唤醒、存储与回填安装冲突、脏 PTE 发布、
-取消、权限错误和总线错误。
-`verilator-wb-mshr-l2-rv32/-rv64` 固定使用 `default-l2`，检查 MSHR 回填取得
-包含式 L2 的 D-client 所有权，以及脏受害行 Release/ReleaseAck。
-`verilator-mshr-ioq-translated-rv32/-rv64` 检查开启翻译后的 IOQ park/wake、
-年轻 load 前进和重放上下文保持。
-`verilator-l2tlb-cbo-rv32/-rv64` 还检查脏 L1D 下冷 L1 TLB、热 L2 TLB
-不会产生页表读取或无关写回。
+`verilator-wb-mshr-l2-rv32/-rv64` uses `default-l2` and checks inclusive L2 D-client ownership
+and dirty victim Release/ReleaseAck. `verilator-mshr-ioq-translated-rv32/-rv64` checks IOQ
+park/wake, younger load progress and replay context with translation enabled.
+`verilator-l2tlb-cbo-rv32/-rv64` checks that cold L1 TLBs and a warm L2 TLB under a dirty L1D
+cause neither page-table reads nor unrelated writebacks.
 
 
 ```sh
@@ -709,20 +1194,23 @@ make -C verification verilator-mshr-cache-rv32 verilator-mshr-cache-rv64 \
   verilator-bus-read-ownership-rv32 verilator-bus-read-ownership-rv64
 ```
 
-Cache 测试覆盖两行在途、同一行合并、表满重放、不同 ID 反序返回、逐 beat 错误、
-权限重检、store/refill 排序及取消后排空；IOQ 测试检查不提前完成、年轻 load 前进、
-同周期 wake 与 park、flush 清理。Cache 测试强制双 MSHR；bus 测试使用 default。
+Cache scenarios cover two concurrent lines, same-line merging, replay with a full table,
+responses out of ID order, per-beat errors, permission rechecks, store/refill ordering and
+drain after cancellation. IOQ scenarios check deferred completion, younger load progress,
+simultaneous wake/park and flush. Cache tests force two MSHRs; bus tests use `default`.
 
-整核定向程序校验独立 load、同一行多个消费者、store 后读取和拆分访问：
+Core directed programs check independent loads, multiple consumers of one line,
+read-after-store and split accesses:
 
 ```sh
 python3 verification/scripts/mshr_check.py --npc /path/to/riscv64-npc-sim \
   --mrom /path/to/mrom-data.bin --xlen 64 --output /tmp/raptor-chip-mshr-core64
 ```
 
-要求 sim 启用 `RAPT_AXI_OBSERVE`、至少两个 MSHR（default 为四个），关闭 difftest。脚本检查实际运算结果、
-AXI 响应和 cache→bus 两个同时存活的 miss owner；单独记录外部 AXI 是否重叠，
-不把串行 slave 的行为当成并行 DRAM 性能证据。`MSHR_OBS` 仅在仿真观测构建中生成。
+The simulator must enable `RAPT_AXI_OBSERVE`, provide at least two MSHRs (`default` has
+four), and disable difftest. The script checks computed values, AXI responses and two live
+cache-to-bus miss owners. It records external AXI overlap separately; a serial slave is not
+evidence of parallel DRAM performance. `MSHR_OBS` exists only in simulation observer builds.
 
 ## Whole-project regression
 
@@ -864,3 +1352,87 @@ preset, XLEN, memory model, guest binary hash, seeds and completion status.
 Compare cycle counts only for matching workloads and configurations; keep
 functional failures and timeouts visible in the result set. Timing and resource
 claims require separate synthesis or FPGA implementation measurements.
+
+## External verification flows
+
+Run from the repository root with Verilator, a compatible RISC-V cross compiler and the
+project dependencies installed. These commands are opt-in; each output directory should
+belong to one configuration/run. Store large outputs outside the source checkout.
+
+| Flow | Entry point | Scope and prerequisites |
+| --- | --- | --- |
+| Upstream self-checking ISA programs | `riscv-tests` | Unmodified physical/single-hart tests, HTIF exit, NEMU lockstep and optional Spike |
+| Constrained instruction generation | `riscv-dv` | Python M-mode I/M/C projection, matching RV32/RV64 target, ABI, NPC and MROM |
+| Independent recovery model checking | `formal-pono-recovery` | Native Slang/Yosys, Pono and btorsim; complete recovery selector/reference relation |
+| Dependency-rich CPU fuzzing | `cascade-fuzz` | Pinned upstream generator, Spike, NPC, matching NEMU, Python 3.11+ |
+| Snapshotted long campaigns | `extended-campaign` | Per-lane time budgets, isolated builds, retained failures and source fingerprints |
+
+### Upstream ISA tests and RISCV-DV
+
+`riscv-tests` pins source `3df703cd52d5f0d8224e3c50bf03c6cb70efff98` and test-env
+`6de71edb142be36319e380ce782c3d1830c65d68`. Test selection comes from upstream Makefrags;
+default groups are `ui um ua uc uf ud uzba uzbb uzbc uzbs uzicond` in the physical `p`
+environment. Setup refuses mismatched revisions or dirty dependency checkouts.
+
+```sh
+make -C verification riscv-tests-driver-check
+make -C verification riscv-tests-setup RISCV_TESTS_ROOT=/tmp/raptor-upstream-tests
+make -C verification riscv-tests-list ISA=rv64
+make -C verification riscv-tests ISA=rv32 RAPT_CONFIG=small \
+  RISCV_TESTS_ROOT=/tmp/raptor-upstream-tests
+make -C verification riscv-tests ISA=rv64 RAPT_CONFIG=small \
+  RISCV_TESTS_ROOT=/tmp/raptor-upstream-tests
+make -C verification riscv-dv ISA=rv32
+make -C verification riscv-dv ISA=rv64
+```
+
+Override `CROSS_COMPILE`, `RISCV_TESTS_SPIKE`, `RISCV_TESTS_SELECT`, `RISCV_TESTS_GROUPS`,
+`RISCV_TESTS_TIMEOUT`, `RISCV_TESTS_JOBS`, `RISCV_TESTS_MEM_DELAYS` and
+`RISCV_TESTS_MEM_SEEDS` as needed. NPC and MROM builds are isolated by XLEN/preset.
+The optional `--tohost` mailbox requires a RAM address aligned to eight bytes; device/command
+zero and odd payload encode exit, with payload one meaning success. Reports require the
+actual XLEN, HTIF success, GOOD TRAP and requested difftest activation, and record commands,
+exit codes and binary hashes. Empty/misspelled selections, timeouts and changed inputs fail.
+Spike uses `Zicclsm` to match ordinary RAM misalignment behavior. A caller-supplied NPC needs
+independent build provenance; observing source hashes does not establish binary provenance.
+
+RISCV-DV remains pinned at `b7a0b4b0b51346a3c64f159f81ea262d867c14a9`. The Python flow's
+M-mode projection does not establish supervisor paging, real interrupt injection, random
+atomics, or complete IMAFDC coverage. Upstream ACT4/Sail architecture tests and RVFI checks
+remain separate verification methods.
+
+### Pono and Cascade
+
+```sh
+make -C verification advanced-driver-check
+make -C verification formal-pono-recovery PONO_OUT=/tmp/raptor-pono-run
+make -C verification cascade-setup CASCADE_ROOT=/tmp/raptor-cascade
+make -C verification cascade-fuzz ISA=rv64 RAPT_CONFIG=small \
+  CASCADE_ROOT=/tmp/raptor-cascade CASCADE_OUT=/tmp/raptor-cascade/run64
+```
+
+Pono requires a checked IC3 invariant for safety, a btorsim-replayed cumulative event cover,
+and replayable counterexamples for mask, held-tie and generation mutations. The recovery
+model assumes first-edge reset and an in-range ROB head; it preserves the complete DUT
+transition relation. Set `RAPTOR_YOSYS_REAL`, `PONO`, `BTORSIM` and `PONO_ARGS` explicitly
+when using externally installed tools. A bounded run is not an unbounded proof.
+
+Cascade pins `cascade-meta` at `c3de482f2c5451b4c571bc0384da45a84f892084`; setup installs
+the dependency pins in `external-verification.mk` in an isolated environment. Build Spike beforehand and set
+`CASCADE_SPIKE` if necessary. Controls include `CASCADE_SEEDS`, `CASCADE_BLOCKS`,
+`CASCADE_INSTRUCTIONS`, `CASCADE_MEM_DELAYS`, `CASCADE_TIMEOUT`, `CASCADE_ISA_PROFILE`,
+`CASCADE_MEM_BYTES` and `CASCADE_MEMORY_SEED`. The adapter compares GPR/FPR checkpoints
+against upstream Spike expectations, with NEMU lockstep and memory delays 0/31 by default.
+Wrong XLEN/checkpoint, missing registers, failed generation, timeout or mismatch fail the run;
+failed seeds are retained. Scope is single-hart M-mode without translation, coverage-feedback
+scheduling, automated reduction or supervisor/VM profiling. Optional line/toggle collection
+measures that instrumentation only.
+
+`extended-campaign` snapshots the source, builds isolated simulators, and defaults to six
+RV32/RV64 fuzz lanes (`small`, `middle-cache`, `default-w4-cache`), one Pono lane and one block
+formal lane, each with 10800 seconds of active verification. Builds do not count toward the
+budget. Use `EXTENDED_CAMPAIGN_OUT`, `EXTENDED_CAMPAIGN_SECONDS`,
+`EXTENDED_CAMPAIGN_PRESETS` and `EXTENDED_CAMPAIGN_XLENS` to configure it; inspect resources
+before launching. Direct `scripts/extended_campaign.py --resume` requires the unchanged
+snapshot and preserves failures. Elapsed duration and a successful tool installation do not
+establish whole-RTL correctness or architecture/profile certification.

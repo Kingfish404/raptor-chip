@@ -258,6 +258,15 @@ $(eval $(call DIRECTED_TEST,stream-queue,stream_queue,tb_stream_queue,,-d RAPT_A
 $(eval $(call DIRECTED_TEST,stream-queue-bram,stream_queue_bram,tb_stream_queue,,-d RAPT_ASSERT_EN -d RAPT_FPGA_STREAM_BRAM=1))
 $(eval $(call DIRECTED_TEST,stream-queue-lutram,stream_queue_lutram,tb_stream_queue,,-d RAPT_ASSERT_EN -d RAPT_FPGA_LUTRAM=1))
 $(eval $(call DIRECTED_TEST,stream-queue-sweep,stream_queue_sweep,tb_stream_queue,,-d RAPT_ASSERT_EN -GSweepDepth=5))
+# JOB Q
+JOBQ_STREAM_LUTRAM_FLAGS := -d RAPT_ASSERT_EN -d RAPT_FPGA_LUTRAM=1
+$(eval $(call XLEN_TEST,stream-queue-banked,tb_stream_queue,,-d RAPT_ASSERT_EN,\
+    +SEED=$$(VERILATOR_DIRECTED_SEED)))
+$(eval $(call XLEN_TEST,stream-queue-banked-lutram,tb_stream_queue,,\
+    $(JOBQ_STREAM_LUTRAM_FLAGS) -d RAPT_FPGA_STREAM_BRAM=0,+SEED=$$(VERILATOR_DIRECTED_SEED)))
+$(eval $(call XLEN_TEST,stream-queue-banked-bram,tb_stream_queue,,\
+    $(JOBQ_STREAM_LUTRAM_FLAGS),+SEED=$$(VERILATOR_DIRECTED_SEED)))
+# end JOB Q
 $(eval $(call DIRECTED_TEST,rename-checkpoint,rename_checkpoint,tb_rename_checkpoint,,-d RAPT_ASSERT_EN))
 $(eval $(call DIRECTED_TEST,rename-checkpoint-pipeline,rename_checkpoint_pipeline,tb_rename_checkpoint_pipeline,,-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=2 -d RAPT_RENAME_WIDTH=2 -d RAPT_COMMIT_WIDTH=2 -d RAPT_BRANCH_CHECKPOINTS=2))
 $(eval $(call DIRECTED_TEST,rename-checkpoint-pipeline-rv64,rename_checkpoint_pipeline_rv64,tb_rename_checkpoint_pipeline,,-d RAPT_ASSERT_EN -d RAPT_RV64 -d RAPT_DECODE_WIDTH=2 -d RAPT_RENAME_WIDTH=2 -d RAPT_COMMIT_WIDTH=2 -d RAPT_BRANCH_CHECKPOINTS=2))

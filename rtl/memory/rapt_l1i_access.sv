@@ -6,10 +6,18 @@
 module rapt_l1i_access #(
     parameter int XLEN = `RAPT_XLEN,
     parameter bit Lookahead = 1'b1,
-    parameter bit WideLookahead = 1'b0
+    parameter bit WideLookahead = 1'b0,
+    parameter bit ShareSlowPath = 1'b0
 ) (
     csr_bcast_if.in csr_bcast,
     pmp_state_if.in pmp_state,
+    input logic shared_check_active = 1'b0,
+    input logic [XLEN-1:0] shared_check_addr = '0,
+    input logic [3:0] shared_check_size_m1 = '0,
+    input logic [1:0] shared_check_priv = '0,
+    input logic shared_check_read = 1'b0,
+    output logic shared_check_fault,
+    shared_check_read_fault,
     input logic [XLEN-1:0] pc_ifu,
     ptw_araddr,
     lookahead_n1_addr,
@@ -54,13 +62,40 @@ module rapt_l1i_access #(
 
 
   localparam int Checks = WideLookahead ? 6 : Lookahead ? 4 : 2;
+  localparam bit ShareChecks = ShareSlowPath && `RAPT_PMP_GRANULARITY_LOG2 >= 12;
+  logic [XLEN-1:0] primary_addr;
+  logic [3:0] primary_size;
+  logic [1:0] primary_priv;
+  logic [XLEN-1:0] walk_addr;
+  logic [3:0] walk_size;
+  logic [1:0] walk_priv;
+  always_comb begin
+    primary_addr = pc_ifu;
+    primary_size = 4'd3;
+    primary_priv = csr_bcast.priv;
+    walk_addr = ptw_araddr;
+    walk_size = 4'(XLEN / 8 - 1);
+    walk_priv = `RAPT_PRIV_S;
+    // Keep read and execute checks separate: PC must not feed the walk
+    // permission cone and return through bus readiness into IO admission.
+    if (ShareChecks && shared_check_active && !shared_check_read) begin
+      primary_addr = shared_check_addr;
+      primary_size = shared_check_size_m1;
+      primary_priv = shared_check_priv;
+    end
+    if (ShareChecks && shared_check_active && shared_check_read) begin
+      walk_addr = shared_check_addr;
+      walk_size = shared_check_size_m1;
+      walk_priv = shared_check_priv;
+    end
+  end
   wire [XLEN-1:0] addr[6];
   wire [5:0] fault;
   /* verilator lint_off UNUSEDSIGNAL */
   wire [5:0] fault_lo;
   /* verilator lint_on UNUSEDSIGNAL */
-  assign addr[0] = pc_ifu;
-  assign addr[1] = ptw_araddr;
+  assign addr[0] = primary_addr;
+  assign addr[1] = walk_addr;
   assign addr[2] = lookahead_n1_addr;
   assign addr[3] = lookahead_n2_addr;
   assign addr[4] = lookahead_n3_addr;
@@ -86,6 +121,10 @@ module rapt_l1i_access #(
   // lookahead is suppressed and the primary path checks it precisely later.
   localparam int LookaheadWords = WideLookahead ? 4 : 2;
   logic primary_word_fault, lookahead_uniform;
+  // Return read and execute verdicts separately so an unused execute
+  // address cannot enter the PTE bus-admission cone.
+  assign shared_check_fault = primary_word_fault;
+  assign shared_check_read_fault = fault[1];
   if ((Lookahead || WideLookahead) && `RAPT_PMP_GRANULARITY_LOG2 >= 12) begin : g_page_window
     // A page has one PMP match vector. Suppress speculation at the page
     // edge; the demand/slow path checks the next page independently.
@@ -133,12 +172,13 @@ module rapt_l1i_access #(
             .XLEN(XLEN)
         ) u_pmp (
             .addr(addr[port_idx]),
-            .size_m1(port_idx == 1 ? 4'(XLEN / 8 - 1)
+            .size_m1(port_idx == 0 && ShareChecks ? primary_size
+                : port_idx == 1 ? walk_size
                 : ((port_idx == 0 && size_idx == 0 && !PageGrain) || port_idx == 5 ? 4'd1 : 4'd3)),
-            .priv(port_idx == 1 ? `RAPT_PRIV_S : csr_bcast.priv),
+            .priv(port_idx == 0 ? primary_priv : walk_priv),
             .op_r(port_idx == 1),
             .op_w(1'b0),
-            .op_x(port_idx != 1),
+            .op_x(port_idx == 0),
             .pmp_raw_addr(pmp_state.pmp_raw_addr),
             .pmp_napot_mask(pmp_state.pmp_napot_mask),
             .pmp_cfg_r(pmp_state.pmp_cfg_r),

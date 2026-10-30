@@ -22,6 +22,15 @@ class BuildIsolationTest(unittest.TestCase):
         self.compiler.write_text("""#!/usr/bin/env python3
 import pathlib, sys
 args = sys.argv[1:]
+if '--dump-defines' in args:
+    xlen = 64 if '-DRAPT_RV64' in args else 32
+    print(f'`define RAPT_XLEN {xlen}')
+    print('`define RAPT_PADDR_BITS 32')
+    print(f'`define RAPT_PMPADDR_BITS {30 if xlen == 64 else 32}')
+    sys.exit(0)
+if '--version' in args:
+    print('Verilator build-isolation fixture')
+    sys.exit(0)
 out = pathlib.Path(args[args.index('-o') + 1])
 if not out.is_absolute() and '--Mdir' in args:
     out = pathlib.Path(args[args.index('--Mdir') + 1]) / out

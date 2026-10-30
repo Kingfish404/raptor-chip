@@ -28,6 +28,7 @@
 # SRAM macro integration sources (sim/sram/**)
 !sram/scripts/*.py
 !sram/configs/*.py
+!sram/configs/*.py.in
 !sram/test/*.py
 !sram/test/*.sh
 !sram/wrappers/*.v

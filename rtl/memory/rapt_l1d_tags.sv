@@ -8,17 +8,24 @@ module rapt_l1d_tags #(
     parameter int L1D_LINE_LEN = `RAPT_L1D_LINE_LEN,
     parameter int L1D_SIZE = 2 ** L1D_LEN,
     parameter int L1D_LINE_SIZE = 2 ** L1D_LINE_LEN,
-    parameter int L1D_N_WAYS = `RAPT_L1D_N_WAYS,
+    parameter int L1D_N_WAYS = `RAPT_L1D_WAYS,
     parameter int L1dTagW = `RAPT_PADDR_BITS - L1D_LEN - L1D_LINE_LEN - $clog2(`RAPT_XLEN / 8),
     parameter int L1dWayW = L1D_N_WAYS > 1 ? $clog2(L1D_N_WAYS) : 1,
     parameter bit WriteBack = 1'b0,
     parameter bit DirtySkip = 1'b0,
     // True LRU for 2-16 ways instead of the 2-way fill toggle / tree PLRU.
-    parameter bit CacheLru = `RAPT_CACHE_LRU != 0
+    parameter bit CacheLru = `RAPT_CACHE_LRU != 0,
+    // Controller phases share A/B lookup and store/writeback inspection.
+    parameter bit SharedReadPorts = 1'b0,
+    parameter bit CacheNru = `RAPT_L1D_NRU != 0
 ) (
     input logic clock,
     input logic reset,
     input logic fence_time,
+    input logic probe_read = 1'b0,
+    input logic inspect_read = 1'b0,
+    // 0: load/probe, 1: store/inspect, 2: physical clear, 3: update.
+    input logic [1:0] inspect_source = 2'b0,
     input logic [L1D_SIZE-1:0] clear_set,
     input logic clear_enable = 1'b1,
     input logic clear_line_valid = 1'b0,
@@ -70,11 +77,14 @@ module rapt_l1d_tags #(
     output logic inspect_dirty_any,
     output logic update_blocked
 );
-  // Per-line live/dirty flags stay in flops: fence clears and the global
-  // summaries need every line at once. Word masks have one writer per way,
-  // so they map to distributed RAM with replicated asynchronous reads.
+  // Bulk set invalidation still needs one live bit per line. Tags and word
+  // validity share one entry, with one indexed writer per way. Independent
+  // asynchronous reads are replicated by synthesis only where needed.
+  localparam int EntryBits = L1dTagW + L1D_LINE_SIZE;
   logic line_live[L1D_N_WAYS][L1D_SIZE];
   logic line_dirty_q[L1D_N_WAYS][L1D_SIZE];
+  logic [L1D_N_WAYS-1:0] dirty_next[L1D_SIZE];
+  logic [L1D_SIZE-1:0] dirty_set_q, dirty_set_next;
   logic [L1D_LINE_SIZE-1:0] valid_addr[L1D_N_WAYS], valid_waddr[L1D_N_WAYS];
   logic [L1D_LINE_SIZE-1:0] valid_probe[L1D_N_WAYS], valid_inspect[L1D_N_WAYS];
   logic [L1D_LINE_SIZE-1:0] valid_update[L1D_N_WAYS];
@@ -85,55 +95,50 @@ module rapt_l1d_tags #(
   logic update_allowed;
   logic clear_any;
   assign clear_any = clear_enable && |clear_set;
-  // Retain the generic flop layout and its stable verification view.
-  logic [L1dTagW-1:0] l1d_tag[L1D_N_WAYS][L1D_SIZE];
+  logic [L1D_LEN-1:0] load_read_idx, store_read_idx;
+  assign load_read_idx = SharedReadPorts && probe_read ? probe_idx : addr_idx;
+  assign store_read_idx = SharedReadPorts && inspect_read ? inspect_set : waddr_idx;
   logic [L1dTagW-1:0] tag_addr_data[L1D_N_WAYS];
   logic [L1dTagW-1:0] tag_waddr_data[L1D_N_WAYS];
   logic [L1dTagW-1:0] tag_probe_data[L1D_N_WAYS];
   logic [L1dTagW-1:0] tag_update_data[L1D_N_WAYS];
   logic [L1dTagW-1:0] tag_clear_data[L1D_N_WAYS];
   logic [L1dTagW-1:0] tag_inspect_data[L1D_N_WAYS];
-  logic [L1D_N_WAYS-1:0] tag_write, clear_tag_match;
+  logic [EntryBits-1:0] entry_addr[L1D_N_WAYS], entry_waddr[L1D_N_WAYS];
+  logic [EntryBits-1:0] entry_probe[L1D_N_WAYS], entry_update[L1D_N_WAYS];
+  logic [EntryBits-1:0] entry_clear[L1D_N_WAYS], entry_inspect[L1D_N_WAYS];
+  logic [L1D_N_WAYS-1:0] clear_tag_match;
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_tag_storage
-    assign tag_write[way] = !reset && !clear_any && !clear_line_valid
-        && l1d_update && l1d_valid_u && update_allowed && l1d_way == L1dWayW'(way);
-    assign clear_tag_match[way] = tag_clear_data[way] == clear_line_tag;
-    if (`RAPT_FPGA_LUTRAM) begin : g_lutram
-      // One write per way, replicated for each independent asynchronous read.
-      (* ram_style = "distributed" *) logic [L1dTagW-1:0] addr_words[L1D_SIZE];
-      (* ram_style = "distributed" *) logic [L1dTagW-1:0] waddr_words[L1D_SIZE];
-      (* ram_style = "distributed" *) logic [L1dTagW-1:0] probe_words[L1D_SIZE];
-      (* ram_style = "distributed" *) logic [L1dTagW-1:0] update_words[L1D_SIZE];
-      (* ram_style = "distributed" *) logic [L1dTagW-1:0] clear_words[L1D_SIZE];
-      (* ram_style = "distributed" *) logic [L1dTagW-1:0] inspect_words[L1D_SIZE];
-      always_ff @(posedge clock)
-        if (tag_write[way]) begin
-          addr_words[l1d_idx] <= l1d_tag_u;
-          waddr_words[l1d_idx] <= l1d_tag_u;
-          probe_words[l1d_idx] <= l1d_tag_u;
-          update_words[l1d_idx] <= l1d_tag_u;
-          clear_words[l1d_idx] <= l1d_tag_u;
-          inspect_words[l1d_idx] <= l1d_tag_u;
-        end
-      assign tag_addr_data[way] = addr_words[addr_idx];
-      assign tag_waddr_data[way] = waddr_words[waddr_idx];
-      assign tag_probe_data[way] = probe_words[probe_idx];
-      assign tag_update_data[way] = update_words[l1d_idx];
-      assign tag_clear_data[way] = clear_words[clear_line_idx];
-      assign tag_inspect_data[way] = inspect_words[inspect_set];
-    end else begin : g_flops
-      for (genvar set_idx = 0; set_idx < L1D_SIZE; set_idx++) begin : g_set
-        always_ff @(posedge clock)
-          if (tag_write[way] && l1d_idx == L1D_LEN'(set_idx))
-            l1d_tag[way][set_idx] <= l1d_tag_u;
+    logic [EntryBits-1:0] entries[L1D_SIZE];
+    wire [L1dTagW-1:0] write_tag = l1d_valid_u ? l1d_tag_u : tag_update_data[way];
+    always_ff @(posedge clock)
+      if (word_write[way])
+        entries[l1d_idx] <= {write_tag, valid_write_data[way]};
+    assign entry_addr[way] = entries[load_read_idx];
+    assign entry_waddr[way] = entries[store_read_idx];
+    assign entry_update[way] = entries[l1d_idx];
+    assign entry_clear[way] = entries[clear_line_idx];
+    if (SharedReadPorts) begin : g_shared
+      assign entry_probe[way] = entry_addr[way];
+      always_comb begin
+        case (inspect_source)
+          2'd0: entry_inspect[way] = entry_addr[way];
+          2'd1: entry_inspect[way] = entry_waddr[way];
+          2'd2: entry_inspect[way] = entry_clear[way];
+          default: entry_inspect[way] = entry_update[way];
+        endcase
       end
-      assign tag_addr_data[way] = l1d_tag[way][addr_idx];
-      assign tag_waddr_data[way] = l1d_tag[way][waddr_idx];
-      assign tag_probe_data[way] = l1d_tag[way][probe_idx];
-      assign tag_update_data[way] = l1d_tag[way][l1d_idx];
-      assign tag_clear_data[way] = l1d_tag[way][clear_line_idx];
-      assign tag_inspect_data[way] = l1d_tag[way][inspect_set];
+    end else begin : g_independent
+      assign entry_probe[way] = entries[probe_idx];
+      assign entry_inspect[way] = entries[inspect_set];
     end
+    assign tag_addr_data[way] = entry_addr[way][L1D_LINE_SIZE+:L1dTagW];
+    assign tag_waddr_data[way] = entry_waddr[way][L1D_LINE_SIZE+:L1dTagW];
+    assign tag_update_data[way] = entry_update[way][L1D_LINE_SIZE+:L1dTagW];
+    assign tag_clear_data[way] = entry_clear[way][L1D_LINE_SIZE+:L1dTagW];
+    assign tag_probe_data[way] = entry_probe[way][L1D_LINE_SIZE+:L1dTagW];
+    assign tag_inspect_data[way] = entry_inspect[way][L1D_LINE_SIZE+:L1dTagW];
+    assign clear_tag_match[way] = tag_clear_data[way] == clear_line_tag;
   end
   logic [L1D_N_WAYS-1:0] dirty_conflict;
   logic [L1D_N_WAYS-1:0] update_tag_match;
@@ -155,32 +160,22 @@ module rapt_l1d_tags #(
   // clear test and the cache-wide reduction before reaching update_allowed.
   assign update_blocked = WriteBack && ((clear_enable && clear_blocked) || |dirty_conflict);
 
-  always_comb begin
-    dirty_any = 1'b0;
-    clear_blocked = 1'b0;
-    for (int way = 0; way < L1D_N_WAYS; way++) begin
-      for (int set_idx = 0; set_idx < L1D_SIZE; set_idx++) begin
-        dirty_any |= line_dirty_q[way][set_idx];
-        clear_blocked |= clear_set[set_idx] && line_dirty_q[way][set_idx];
-      end
-    end
+  // Summaries describe the same edge as the per-line flags. Computing
+  // them from next state moves the cache-wide reduction off arbitration.
+  for (genvar set_idx = 0; set_idx < L1D_SIZE; set_idx++) begin : g_dirty_summary
+    assign dirty_set_next[set_idx] = |dirty_next[set_idx];
   end
+  always_ff @(posedge clock) begin
+    dirty_set_q <= dirty_set_next;
+    dirty_any <= |dirty_set_next;
+  end
+  assign clear_blocked = |(clear_set & dirty_set_q);
 
-  // Optional sparse maintenance selection. The controller consumes these
-  // registered-state summaries only when dirty_any is true, and rereads them
-  // after cleaning each line. No clean set needs a tag-array inspection.
   if (WriteBack && DirtySkip) begin : g_dirty_select
-    logic [L1D_SIZE-1:0] dirty_set;
-    for (genvar set_idx = 0; set_idx < L1D_SIZE; set_idx++) begin : g_set
-      always_comb begin
-        dirty_set[set_idx] = 1'b0;
-        for (int way = 0; way < L1D_N_WAYS; way++) dirty_set[set_idx] |= line_dirty_q[way][set_idx];
-      end
-    end
     always_comb begin
       first_dirty_set = '0;
       for (int set_idx = L1D_SIZE - 1; set_idx >= 0; set_idx--)
-      if (dirty_set[set_idx]) first_dirty_set = L1D_LEN'(set_idx);
+      if (dirty_set_q[set_idx]) first_dirty_set = L1D_LEN'(set_idx);
       first_dirty_way = '0;
       for (int way = L1D_N_WAYS - 1; way >= 0; way--)
       if (line_dirty_q[way][first_dirty_set]) first_dirty_way = L1dWayW'(way);
@@ -235,7 +230,7 @@ module rapt_l1d_tags #(
     assign load_line_valid[way] = |valid_addr[way];
     assign store_line_valid[way] = |valid_waddr[way];
   end
-  if (L1D_N_WAYS > 2 || (CacheLru && L1D_N_WAYS == 2)) begin : g_replacement
+  if (L1D_N_WAYS > 2 || ((CacheLru || CacheNru) && L1D_N_WAYS == 2)) begin : g_replacement
     logic [L1D_LEN-1:0] read_set[2], update_set[2];
     logic [L1dWayW-1:0] update_way[2];
     logic [1:0] update_valid;
@@ -252,7 +247,26 @@ module rapt_l1d_tags #(
       for (int way = L1D_N_WAYS - 1; way >= 0; way--)
       if (load_way_hit[way]) update_way[0] = L1dWayW'(way);
     end
-    if (CacheLru && L1D_N_WAYS <= 16) begin : g_lru
+    if (CacheNru) begin : g_nru
+      // A cache hit excludes every pending array update in the controller.
+      // Reserve the row from registered metadata; late conflict checks only
+      // gate the write enable, never the RAM address.
+      rapt_cache_nru #(
+          .Ways(L1D_N_WAYS),
+          .SetBits(L1D_LEN)
+      ) u_policy (
+          .clock(clock),
+          .reset(reset),
+          .invalidate(`RAPT_SFENCE_KEEP_STATE < 1 && fence_time),
+          .read_set(read_set),
+          .victim(victims),
+          .update_valid(|update_valid),
+          .update_set(l1d_update ? update_set[1] : update_set[0]),
+          .update_way(l1d_update ? update_way[1] : update_way[0])
+      );
+      `RAPT_SVA(clock, reset, L1D_NRU_EXCLUSIVE_UPDATES, !(&update_valid))
+      `RAPT_SVA_IMPLY(clock, reset, L1D_NRU_REGISTERED_ADDRESS, load_hit, !l1d_update)
+    end else if (CacheLru && L1D_N_WAYS <= 16) begin : g_lru
       rapt_cache_lru #(
           .Ways(L1D_N_WAYS),
           .SetBits(L1D_LEN)
@@ -357,56 +371,26 @@ module rapt_l1d_tags #(
   end
 
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_word_state
-    (* ram_style = "distributed" *) logic [L1D_LINE_SIZE-1:0] valid_words[L1D_SIZE];
-    logic [L1D_LINE_SIZE-1:0] raw_addr, raw_waddr, raw_probe, raw_inspect;
     logic [L1D_LINE_SIZE-1:0] raw_dirty_update, raw_dirty_inspect;
-    always_ff @(posedge clock) if (word_write[way]) valid_words[l1d_idx] <= valid_write_data[way];
-    // Dirty masks exist only for write-back caches; write-through reads zero.
     if (WriteBack) begin : g_dirty_words
-      (* ram_style = "distributed" *) logic [L1D_LINE_SIZE-1:0] dirty_words[L1D_SIZE];
+      logic [L1D_LINE_SIZE-1:0] dirty_words[L1D_SIZE];
       always_ff @(posedge clock) if (word_write[way]) dirty_words[l1d_idx] <= dirty_write_data[way];
       assign raw_dirty_update = dirty_words[l1d_idx];
-      if (`RAPT_FPGA_LUTRAM) begin : g_inspect_copy
-        (* ram_style = "distributed" *) logic [L1D_LINE_SIZE-1:0] inspect_dirty_words[L1D_SIZE];
-        always_ff @(posedge clock)
-          if (word_write[way])
-            inspect_dirty_words[l1d_idx] <= dirty_write_data[way];
-        assign raw_dirty_inspect = inspect_dirty_words[inspect_set];
-      end else begin : g_inspect_shared
-        assign raw_dirty_inspect = dirty_words[inspect_set];
-      end
+      assign raw_dirty_inspect = dirty_words[inspect_set];
     end else begin : g_no_dirty_words
       assign raw_dirty_update = '0;
       assign raw_dirty_inspect = '0;
     end
-    if (`RAPT_FPGA_LUTRAM) begin : g_lutram
-      // Same write as valid_words, one copy per asynchronous read.
-      (* ram_style = "distributed" *) logic [L1D_LINE_SIZE-1:0] addr_words[L1D_SIZE];
-      (* ram_style = "distributed" *) logic [L1D_LINE_SIZE-1:0] waddr_words[L1D_SIZE];
-      (* ram_style = "distributed" *) logic [L1D_LINE_SIZE-1:0] probe_words[L1D_SIZE];
-      (* ram_style = "distributed" *) logic [L1D_LINE_SIZE-1:0] inspect_words[L1D_SIZE];
-      always_ff @(posedge clock)
-        if (word_write[way]) begin
-          addr_words[l1d_idx] <= valid_write_data[way];
-          waddr_words[l1d_idx] <= valid_write_data[way];
-          probe_words[l1d_idx] <= valid_write_data[way];
-          inspect_words[l1d_idx] <= valid_write_data[way];
-        end
-      assign raw_addr = addr_words[addr_idx];
-      assign raw_waddr = waddr_words[waddr_idx];
-      assign raw_probe = probe_words[probe_idx];
-      assign raw_inspect = inspect_words[inspect_set];
-    end else begin : g_shared
-      assign raw_addr = valid_words[addr_idx];
-      assign raw_waddr = valid_words[waddr_idx];
-      assign raw_probe = valid_words[probe_idx];
-      assign raw_inspect = valid_words[inspect_set];
-    end
-    assign valid_addr[way] = line_live[way][addr_idx] ? raw_addr : '0;
-    assign valid_waddr[way] = line_live[way][waddr_idx] ? raw_waddr : '0;
-    assign valid_probe[way] = line_live[way][probe_idx] ? raw_probe : '0;
-    assign valid_inspect[way] = line_live[way][inspect_set] ? raw_inspect : '0;
-    assign valid_update[way] = line_live[way][l1d_idx] ? valid_words[l1d_idx] : '0;
+    assign valid_addr[way] = line_live[way][load_read_idx]
+        ? entry_addr[way][L1D_LINE_SIZE-1:0] : '0;
+    assign valid_waddr[way] = line_live[way][store_read_idx]
+        ? entry_waddr[way][L1D_LINE_SIZE-1:0] : '0;
+    assign valid_probe[way] = line_live[way][probe_idx]
+        ? entry_probe[way][L1D_LINE_SIZE-1:0] : '0;
+    assign valid_inspect[way] = line_live[way][inspect_set]
+        ? entry_inspect[way][L1D_LINE_SIZE-1:0] : '0;
+    assign valid_update[way] = line_live[way][l1d_idx]
+        ? entry_update[way][L1D_LINE_SIZE-1:0] : '0;
     assign dirty_inspect[way] = line_dirty_q[way][inspect_set] ? raw_dirty_inspect : '0;
     assign dirty_update[way] = line_dirty_q[way][l1d_idx] ? raw_dirty_update : '0;
 `ifndef SYNTHESIS
@@ -432,26 +416,45 @@ module rapt_l1d_tags #(
         end
       end
       if (WriteBack) begin : g_dirty_state
-        always_ff @(posedge clock) begin
-          if (reset || line_clear) line_dirty_q[way][set_idx] <= 1'b0;
+        always_comb begin
+          dirty_next[set_idx][way] = line_dirty_q[way][set_idx];
+          if (reset || line_clear) dirty_next[set_idx][way] = 1'b0;
           else if (word_write[way] && l1d_idx == L1D_LEN'(set_idx))
-            line_dirty_q[way][set_idx] <= |dirty_write_data[way];
+            dirty_next[set_idx][way] = |dirty_write_data[way];
           else if (clean_valid && inspect_set == L1D_LEN'(set_idx) && inspect_way == L1dWayW'(way))
-            line_dirty_q[way][set_idx] <= 1'b0;
+            dirty_next[set_idx][way] = 1'b0;
         end
+        always_ff @(posedge clock) line_dirty_q[way][set_idx] <= dirty_next[set_idx][way];
       end else begin : g_no_dirty
         assign line_dirty_q[way][set_idx] = 1'b0;
+        assign dirty_next[set_idx][way] = 1'b0;
       end
     end
   end
+`ifdef RAPT_SVA_ACTIVE
+  logic [L1D_SIZE-1:0] observed_dirty_set;
+  for (genvar set_idx = 0; set_idx < L1D_SIZE; set_idx++) begin : g_summary_check
+    always_comb begin
+      observed_dirty_set[set_idx] = 1'b0;
+      for (int way = 0; way < L1D_N_WAYS; way++)
+      observed_dirty_set[set_idx] |= line_dirty_q[way][set_idx];
+    end
+  end
+  `RAPT_SVA(clock, reset, L1D_DIRTY_SET_SUMMARY, observed_dirty_set == dirty_set_q)
+  `RAPT_SVA(clock, reset, L1D_DIRTY_ANY_SUMMARY, dirty_any == (|observed_dirty_set))
+`endif
 `ifndef SYNTHESIS
   // Effective per-word state for testbench observation.
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [L1dTagW-1:0] l1d_tag[L1D_N_WAYS][L1D_SIZE];
+  /* verilator lint_on UNUSEDSIGNAL */
   logic [L1D_LINE_SIZE-1:0] l1d_valid[L1D_N_WAYS][L1D_SIZE];
   logic [L1D_LINE_SIZE-1:0] dirty[L1D_N_WAYS][L1D_SIZE];
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_view
     for (genvar set_idx = 0; set_idx < L1D_SIZE; set_idx++) begin : g_set
+      assign l1d_tag[way][set_idx] = g_tag_storage[way].entries[set_idx][L1D_LINE_SIZE+:L1dTagW];
       assign l1d_valid[way][set_idx] = line_live[way][set_idx]
-          ? g_word_state[way].valid_words[set_idx] : '0;
+          ? g_tag_storage[way].entries[set_idx][L1D_LINE_SIZE-1:0] : '0;
       if (WriteBack) begin : g_dirty_view
         assign dirty[way][set_idx] = line_dirty_q[way][set_idx]
             ? g_word_state[way].g_dirty_words.dirty_words[set_idx] : '0;

@@ -3,11 +3,12 @@
 // Combinational equivalence against a deliberately direct ISA-level model.
 // Symbolic operands exhaustively cover every input value in one proof step.
 module formal_ieu_alu #(
-    parameter int XLEN = `RAPT_XLEN
+    parameter int XLEN = `RAPT_XLEN,
+    parameter bit EnableRareOps = 1
 ) (
     input logic [XLEN-1:0] s1,
     input logic [XLEN-1:0] s2,
-    input logic [5:0]      op,
+    input logic [5:0] op,
     input logic            word
 );
   logic [XLEN-1:0] dut_result;
@@ -20,19 +21,28 @@ module formal_ieu_alu #(
   logic is_uw_op;
 
   rapt_ieu_alu #(
-      .XLEN(XLEN)
+      .XLEN(XLEN),
+      .EnableRareOps(EnableRareOps)
   ) dut (
       .*,
       .out_r(dut_result)
   );
 
-  always_comb begin
-    cl_product = '0;
-`ifdef FORMAL_ALU_CLMUL
-    for (int i = 0; i < XLEN; i++) if (s2[i]) cl_product = cl_product ^ (2 * XLEN)'(s1) << i;
-`endif
+  // Each coefficient is the parity of products whose polynomial degrees sum
+  // to this bit. This is independent of the DUT's shifted-word XOR tree.
+  for (genvar degree = 0; degree < 2 * XLEN; degree++) begin : g_polynomial_coefficient
+    wire [XLEN-1:0] terms;
+    for (genvar left = 0; left < XLEN; left++) begin : g_term
+      if (degree >= left && degree - left < XLEN) assign terms[left] = s1[left] & s2[degree-left];
+      else assign terms[left] = 1'b0;
+    end
+    assign cl_product[degree] = ^terms;
+  end
 
+  always_comb begin
     ref_base = '0;
+    count = 0;
+    found = 0;
     shamt = (word && XLEN > 32) ? int'(s2[4:0]) : int'(s2[$clog2(XLEN)-1:0]);
     unique case (op)
       `RAPT_ALU_ADD_: ref_base = s1 + s2;
@@ -125,6 +135,9 @@ module formal_ieu_alu #(
       default: ref_base = '0;
     endcase
 
+    if (!EnableRareOps && (op inside {`RAPT_ALU_CLZ_, `RAPT_ALU_CTZ_, `RAPT_ALU_CPOP,
+        `RAPT_ALU_CLMUL, `RAPT_ALU_CLMULH, `RAPT_ALU_CLMULR}))
+      ref_base = '0;
     is_uw_op = (op == `RAPT_ALU_ADD_UW) || (op == `RAPT_ALU_SLLI_UW)
         || (op == `RAPT_ALU_SH1ADD) || (op == `RAPT_ALU_SH2ADD)
         || (op == `RAPT_ALU_SH3ADD);
@@ -132,23 +145,32 @@ module formal_ieu_alu #(
     else ref_result = ref_base;
   end
 
-  always_comb begin
-`ifdef FORMAL_ALU_CLMUL
-`ifdef FORMAL_ALU_CLMULH
-    assume (op == `RAPT_ALU_CLMULH);
-    // CLMULH's upper-half XOR cone is expensive for SMT.  Exhaustively prove
-    // every polynomial basis term (and zero); the RTL accumulation is a
-    // linear XOR reduction of exactly these terms.
-    assume ((s2 & (s2 - XLEN'(1))) == '0);
-`elsif FORMAL_ALU_CLMULR
-    assume (op == `RAPT_ALU_CLMULR);
-`else
-    assume (op == `RAPT_ALU_CLMUL);
-`endif
-`else
-    assume (!(op inside {`RAPT_ALU_CLMUL, `RAPT_ALU_CLMULH, `RAPT_ALU_CLMULR}));
-`endif
+  for (genvar code = 0; code < 64; code++) begin : g_opcode
+    always_comb begin
+      native_word : cover (op == 6'(code) && !word);
+      word_flag : cover (op == 6'(code) && word);
+    end
   end
-
+  for (genvar mode = 0; mode < 2; mode++) begin : g_edges
+    always_comb begin
+      clz_zero : cover (op == `RAPT_ALU_CLZ_ && s1 == 0 && word == 1'(mode));
+      ctz_zero : cover (op == `RAPT_ALU_CTZ_ && s1 == 0 && word == 1'(mode));
+      popcount_max : cover (op == `RAPT_ALU_CPOP && s1 == '1 && word == 1'(mode));
+    end
+    if (EnableRareOps) begin : g_polynomial
+      wire multi_bit = s1 != 0 && (s2 & (s2 - XLEN'(1))) != 0 && ref_result != 0;
+      always_comb begin
+        low : cover (op == `RAPT_ALU_CLMUL && multi_bit && word == 1'(mode));
+        high : cover (op == `RAPT_ALU_CLMULH && multi_bit && word == 1'(mode));
+        reversed : cover (op == `RAPT_ALU_CLMULR && multi_bit && word == 1'(mode));
+      end
+    end
+  end
+  always_comb begin
+    zero_operands : cover (s1 == 0 && s2 == 0);
+    ones_operands : cover (s1 == '1 && s2 == '1);
+    negative_first : cover (s1 == (XLEN'(1) << (XLEN - 1)) && s2 == 0);
+    negative_second : cover (s1 == 0 && s2 == (XLEN'(1) << (XLEN - 1)));
+  end
   always_comb result_equivalence : assert (dut_result == ref_result);
 endmodule

@@ -2,7 +2,10 @@ module recovery_pending_case #(
     parameter int Entries = 7,
     parameter int Ports = 3,
     parameter int GenerationBits = 4,
-    parameter int IndexBits = Entries > 1 ? $clog2(Entries) : 1
+    parameter int IndexBits = Entries > 1 ? $clog2(Entries) : 1,
+    // Job R: independently mask the reference, while the DUT receives raw ports.
+    parameter logic [Ports-1:0] PortMask = '1
+    // end Job R
 ) (
     output bit done
 );
@@ -22,6 +25,25 @@ module recovery_pending_case #(
   int unsigned rng;
   int seed;
 
+  // Job R: excluded ports deliberately remain valid in randomized stimulus.
+  logic reference_valid[Ports];
+  logic reference_pending, reference_correct;
+  logic [IndexBits-1:0] reference_owner;
+  logic [31:0] reference_target;
+  logic [GenerationBits-1:0] reference_generation;
+  for (genvar p = 0; p < Ports; p++) begin : g_reference_mask
+    assign reference_valid[p] = candidate_valid[p] && PortMask[p];
+  end
+  rapt_recovery_pending #(
+      .Entries(Entries),
+      .Ports(Ports),
+      .Xlen(32),
+      .IndexBits(IndexBits),
+      .GenerationBits(GenerationBits),
+      .PortMask(PortMask)
+  ) dut (
+      .*
+  );
   formal_recovery_pending #(
       .Entries(Entries),
       .Ports(Ports),
@@ -29,8 +51,18 @@ module recovery_pending_case #(
       .IndexBits(IndexBits),
       .GenerationBits(GenerationBits)
   ) reference (
+      .candidate_valid(reference_valid),
+      .pending(reference_pending),
+      .owner(reference_owner),
+      .target(reference_target),
+      .generation(reference_generation),
+      .correct(reference_correct),
       .*
   );
+  assign correct = reference_correct && pending == reference_pending
+      && (!pending || (owner == reference_owner && target == reference_target
+          && generation == reference_generation));
+  // end Job R
 
   function automatic int unsigned random_word();
     rng ^= rng << 13;
@@ -66,7 +98,8 @@ module recovery_pending_case #(
     reset = 0;
     live = '1;
 
-    if (Entries > 2 && Ports > 1) begin
+    // Job R: the directed two-port sequence needs both of those active ports.
+    if (Entries > 2 && Ports > 1 && PortMask[0] && PortMask[1]) begin
       // head=Entries-2 gives the ring order Entries-2, Entries-1, 0, 1...
       head = IndexBits'(Entries - 2);
       candidate_valid[0] = 1'b1;
@@ -127,26 +160,32 @@ module recovery_pending_case #(
       assert (!pending);
     end
 
-    // Reuse the same still-live slot: neither the held transaction nor a
-    // delayed candidate with its previous generation may survive the reuse.
-    head = '0;
-    clear_candidates();
-    candidate_valid[0] = 1;
-    candidate_target[0] = 32'h900;
-    tick();
-    assert (pending && owner == '0 && generation == '0 && target == 32'h900);
-    owner_generation[0] = GenerationBits'(1);
-    tick();
-    assert (!pending)
-    else $fatal(1, "reused owner or stale candidate survived");
-    candidate_generation[0] = GenerationBits'(1);
-    tick();
-    assert (pending && owner == '0 && generation == GenerationBits'(1) && target == 32'h900);
-    candidate_generation[0] = '0;
-    candidate_target[0] = 32'hbad;
-    tick();
-    assert (pending && generation == GenerationBits'(1) && target == 32'h900)
-    else $fatal(1, "stale candidate rewrote current transaction");
+    // end Job R
+
+    // Job R: the empty mask has no candidate capable of establishing an owner.
+    if (PortMask[0]) begin
+      // Reuse the same still-live slot: neither the held transaction nor a
+      // delayed candidate with its previous generation may survive the reuse.
+      head = '0;
+      clear_candidates();
+      candidate_valid[0] = 1;
+      candidate_target[0] = 32'h900;
+      tick();
+      assert (pending && owner == '0 && generation == '0 && target == 32'h900);
+      owner_generation[0] = GenerationBits'(1);
+      tick();
+      assert (!pending)
+      else $fatal(1, "reused owner or stale candidate survived");
+      candidate_generation[0] = GenerationBits'(1);
+      tick();
+      assert (pending && owner == '0 && generation == GenerationBits'(1) && target == 32'h900);
+      candidate_generation[0] = '0;
+      candidate_target[0] = 32'hbad;
+      tick();
+      assert (pending && generation == GenerationBits'(1) && target == 32'h900)
+      else $fatal(1, "stale candidate rewrote current transaction");
+    end
+    // end Job R
 
     for (int iteration = 0; iteration < 10000; iteration++) begin
       automatic int unsigned controls = random_word();
@@ -175,7 +214,37 @@ module recovery_pending_case #(
 endmodule
 
 module tb_recovery_pending;
-  bit [4:0] done;
+  // Job R: sparse, one-port, empty and wide masks preserve reference semantics.
+  bit [8:0] done;
+  recovery_pending_case #(
+      .Entries(7),
+      .Ports(5),
+      .PortMask(5'b01011)
+  ) sparse (
+      done[5]
+  );
+  recovery_pending_case #(
+      .Entries(8),
+      .Ports(5),
+      .PortMask(5'b00001)
+  ) single (
+      done[6]
+  );
+  recovery_pending_case #(
+      .Entries(7),
+      .Ports(5),
+      .PortMask(5'b00000)
+  ) empty (
+      done[7]
+  );
+  recovery_pending_case #(
+      .Entries(64),
+      .Ports(12),
+      .PortMask(12'h1ff)
+  ) wide (
+      done[8]
+  );
+  // end Job R
   recovery_pending_case #(
       .Entries(127),
       .Ports(5)
