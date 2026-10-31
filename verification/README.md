@@ -9,11 +9,20 @@ M-extension privilege/edge regression: `make -C verification rva22s64-m-privileg
 
 Unified verification infrastructure for the Raptor Chip RISC-V processor. Full-core tests use the Verilator simulator (`sim/`); differential tests use NEMU. Module, formal, ACT4/Sail and UVM checks have separate harnesses and references. Each target defines its own tool and configuration requirements.
 
+The current core contains frontend, backend and private L1 memory. Its
+`l2_client_if` connects to `rapt_l2_subsystem` at the `rapt` cluster level;
+that subsystem supplies AXI IDs, read/write credits, optional L2 storage and
+the outer R buffer. Core/memory-only proofs and PPA stop at the client port.
+Whole-chip checks include the subsystem and router. Preserve that distinction
+when updating harnesses or comparing historical results. Native elaboration,
+individual contract proofs and their negative controls do not establish
+whole-core architectural signoff.
+
 The pinned upstream `riscv-tests`, RV32/RV64 RISCV-DV, Pono and Cascade flows are described
 under [External verification flows](#external-verification-flows). Each flow has its own
 reference model, configuration limits and result checks.
 
-Software test sources live in `app/tests/baremetal/` (freestanding RISC-V programs and shared headers) and `app/tests/host/` (native simulator/reference tests). Build rules, runners, linker scripts and generated vectors stay in `verify`. C++ drivers coupled to RTL testbenches stay with their `xsim` or `vpu` harnesses. Use the current targets below; simulator and STA artifacts follow the profile-isolation rules in `sim/README.md`.
+Software test sources live in `app/tests/baremetal/` (freestanding RISC-V programs and shared headers) and `app/tests/host/` (native simulator/reference tests). Build rules, runners, linker scripts and generated vectors stay in `verification/`. C++ drivers coupled to RTL testbenches stay with their `xsim` or `vpu` harnesses. Use the current targets below; simulator and STA artifacts follow the profile-isolation rules in `sim/README.md`.
 
 ## Maintaining verification drivers
 
@@ -1107,7 +1116,7 @@ The BOOM-style write-back preset has a separate L1D/L2 ownership regression: `ma
 
 `make -C verification verilator-l2-forwarded-client-rv32 verilator-l2-forwarded-client-rv64 XSIM_RAPT_CONFIG=default-l2` checks cacheable non-bufferable scalar and burst writes to resident lines held by the D client. Both paths must issue Probe, hold the successful B until Probe Ack, clear the client owner, preserve unrelated dirty ProbeAckData, and return the updated resident data after B. The two-beat same-line burst permits one Probe; a boundary-crossing burst requires a separate Probe and Ack for each owned line. The test also holds Probe Ack until an unrelated clean C Release receives ReleaseAck while either forwarded path waits for outer B, preventing a Release/Probe wait cycle. C must also finish between the first and last W beats of an active forwarded burst while the next W is stalled. A same-line dirty ReleaseData must commit before the forwarded scalar store and retain its unrelated dirty word; the burst case checks the same ordering when C arrives between W beats. A failed outer B must return an error without probing or changing the old resident data and ownership.
 
-`make -C verification verilator-axi-r-buffer-rv32 verilator-axi-r-buffer-rv64 XSIM_RAPT_CONFIG=default-l2` checks the two-entry outer AXI R buffer, including full backpressure, alternating IDs, error/last fields, sustained one-beat-per-cycle delivery, and AR/AW/W/B passthrough. The write-back L1D/L2 cache-stream targets also instantiate the buffer, matching the `rapt_memory` integration.
+`make -C verification verilator-axi-r-buffer-rv32 verilator-axi-r-buffer-rv64 XSIM_RAPT_CONFIG=default-l2` checks the two-entry outer AXI R buffer, including full backpressure, alternating IDs, error/last fields, sustained one-beat-per-cycle delivery, and AR/AW/W/B passthrough. The write-back L1D/L2 cache-stream targets also instantiate the buffer, matching the cluster-level `rapt_l2_subsystem` integration.
 
 `make -C verification verilator-l2-pbmt-boom-rv32 verilator-l2-pbmt-boom-rv64 XSIM_RAPT_CONFIG=default-l2` checks PBMT NC/IO bypass against a hot cacheable alias, preservation of AXI cache attributes and real outer B responses, no allocation for a cold typed write, and alias invalidation after a failed typed write. The older `verilator-l2-pbmt*` targets exercise the legacy posted external DDR-write policy and should be run with the legacy geometry.
 

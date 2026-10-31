@@ -22,7 +22,7 @@ If you need OS-level workloads on raptor-chip, run them on [sim](../) (Verilator
 | `RAPT_L1{I,D}_LEN`        | sets = `1 << LEN`                                |
 | `RAPT_L1{I,D}_N_WAYS`     | `Cache.assoc`                                    |
 | `RAPT_ROB_SIZE`           | `numROBEntries`                                  |
-| `RAPT_PHY_SIZE`           | `numPhysIntRegs`, `numPhysFloatRegs`             |
+| `RAPT_PHY_SIZE`           | `numPhysIntRegs`; FP model uses `max(PHY_SIZE, 64)`             |
 | `RAPT_RS_SIZE+IOQ_SIZE`   | `IQUnit.numEntries`                              |
 | `RAPT_SQ_SIZE`            | `LQEntries`, `SQEntries`                         |
 | `RAPT_DECODE_WIDTH`       | `fetchWidth`, `decodeWidth`                      |
@@ -32,13 +32,35 @@ If you need OS-level workloads on raptor-chip, run them on [sim](../) (Verilator
 | `RAPT_RIQ_SIZE`           | `fetchQueueSize` (fetch→rename decoupling queue; gem5 has no IIQ analogue) |
 | `RAPT_BPU_DIRP_*`         | selects the gem5 conditional predictor by default: TAGE→`tage` (RTL TAGE geometry), GSHARE→`gshare`, BIMODAL→`local`, STATIC→`local` (approximation) |
 | `RAPT_INTEGER_ISSUE_PORTS`| `IntALU.count` with `--rtl-execution-resources`  |
-| `RAPT_M_FAST`             | `IntMult` opLat=1 (pipelined MUL) with `--rtl-execution-resources` |
+| `RAPT_M_FAST`             | `IntMult` opLat=1 approximation with `--rtl-execution-resources` |
 | `RAPT_INTEGER_SYSTEM_PORT`| Validated against the RTL port count; physical index has no gem5 O3 analogue |
 | `RAPT_BTB_SIZE/WAYS`      | `SimpleBTB(numEntries, associativity)`           |
 | `RAPT_PHT_SIZE`           | `BiModeBP(globalPredictorSize, choicePredictorSize)` |
 | `RAPT_RSB_SIZE`           | `ReturnAddrStack(numEntries)`                    |
 
-L1I stores 32-bit instruction words; L1D stores XLEN-bit data words. Current presets derive both from `RAPT_CACHE_LINE_BYTES`, so byte capacities stay constant across RV32/RV64. Default lines are 64 B with 16 KiB L1I (64 sets × 4-way) and 16 KiB L1D (64 sets × 4-way); `large` has 32 KiB L1I (1-way) and 8 KiB L1D (2-way); `small` 512 B/256 B and `middle` 1 KiB/256 B on 16 B lines. The model uses the larger derived line size as gem5's global cache line size for historical unequal-line presets. gem5's default L1 MSHR count is 1, a model default that does not match the current default RTL's two L1D MSHRs with IOQ replay; `--mshrs=2` explores more miss concurrency but does not reproduce that replay protocol. `RAPT_L1I_REFILL_WORDS` (32 B sector refill) has no gem5 cache-level analogue — gem5 refills a full line on a miss. The FP register count is a gem5 OoO modeling choice: RTL has a separate 32 × 64-bit architectural FPR bank, not a renamed FP register file. RV64 DSE results produced before the XLEN-aware cache fix used half the configured L1D capacity and must be rerun for comparisons with current RTL. Current presets declare ordered-stage widths directly; the gem5 bridge accepts the old `RAPT_ISSUE_WIDTH` and `RAPT_DUAL_*` declarations only when reading historical presets. Raptor's heterogeneous execution domains do not have a single RTL issue-width boundary, so gem5's global issue/writeback widths are a throughput approximation rather than a structural equivalence.
+L1I stores 32-bit instruction words; L1D stores XLEN-bit data words. Current
+presets derive both from `RAPT_CACHE_LINE_BYTES`, preserving byte capacities
+across RV32/RV64. Default lines are 64 B with 16 KiB L1I and L1D (64 sets,
+four-way); `large` has 32 KiB L1I (one-way) and 8 KiB L1D (two-way).
+`small` uses 512 B/256 B and `middle` 1 KiB/256 B on 16 B lines.
+
+The model uses the larger derived line size as gem5's global line size for
+historical unequal-line presets. Its default L1 MSHR count is one; the current
+default RTL has four L1D MSHRs and IOQ replay. `--mshrs=4` explores concurrency
+without reproducing that replay protocol. `RAPT_L1I_REFILL_WORDS` (32 B sectors)
+has no cache-level analogue here: gem5 refills full lines.
+
+The gem5 FP register count is a modeling choice. RTL uses ROB-backed FP
+renaming and speculative results plus a committed 32 × 64-bit FPR bank; it
+does not allocate FP destinations from gem5's free-list-style physical file.
+RV64 DSE results from before the XLEN-aware cache fix used half the configured
+L1D capacity and require new runs for comparison with current RTL.
+
+Current presets declare ordered-stage widths directly. The bridge accepts
+`RAPT_ISSUE_WIDTH` and `RAPT_DUAL_*` only for historical presets. Raptor's
+heterogeneous execution domains have no single global issue-width boundary;
+gem5 issue/writeback widths and its one-cycle MUL setting are approximations,
+not structural or cycle equivalence to the two-stage RTL multiplier.
 
 ## Prerequisites
 
@@ -140,7 +162,7 @@ Useful flags:
 * `--config-svh <path>` — point at a custom `rapt_config.svh` (skips `--preset`).
 * `--cpu timing|atomic` — in-order timing / functional no-cache baselines for triage.
 * `--no-l2` — drop the model L2; L1s connect directly to membus (matching the default RTL preset, where the optional L2 is disabled).
-* `--rtl-execution-resources` — use the configured integer-ALU port count, one MULDIV unit, and one load/store request port. This is opt-in because gem5's default FUPool is deliberately more provisioned; it isolates execution-resource effects from branch-predictor DSE results.
+* `--rtl-execution-resources` — use the configured integer-ALU port count, one MULDIV unit, and one load/store request port. The Make wrapper enables it with `RTL_EXEC=1` by default; direct script use is opt-in. Set `RTL_EXEC=0` to compare against gem5's broader FUPool.
 * `--fetch-queue-size N` — override gem5's default 32-uop per-thread fetch queue. A small value helps quantify frontend-buffer decoupling separately from `fetchWidth`.
 * `--max-insts N` — early stop for long workloads.
 * `--mem-latency 30ns` — flat backing-memory latency.
@@ -155,7 +177,7 @@ Useful flags:
    * `system.cpu.branchPred.condPredicted` /
      `condIncorrect` → BPU accuracy vs. raptor's BPU.
    * `system.cpu.icache.overall_miss_rate`, `dcache.*` → cache pressure.
-3. Compare against the same numbers from `make coremark-rv32` on the matching `RAPT_CONFIG`. Divergence localises uarch perf bugs (e.g. dispatch stall not modelled in gem5, or a real RTL bug you can fix in the SV).
+3. Compare against the same numbers from `make coremark-rv32` on the matching `RAPT_CONFIG`. Use divergence to select hypotheses for RTL traces; differences can also come from the model approximations above and do not by themselves establish an RTL defect.
 4. Sweep `PRESET` to bracket the design — e.g. if `large` doesn't beat `default` in gem5 but does in your hopes, you have a bottleneck the gem5 model surfaces (LSU, BPU, MSHR count, etc.).
 
 ## Limitations / known caveats

@@ -68,6 +68,13 @@ with each timing or area measurement.
 
 ## Physical Address Contract
 
+The default physical address width is 32 bits for both XLEN modes. RV64 permits
+`RAPT_PADDR_BITS=32..38` (`default-pa38` selects 38); RV32 requires 32. The
+architectural Sv39 PPN encoding stays intact, and unsupported addresses fault
+before cache lookup can alias. RV64 stores PCs/fetch targets in 40 bits and
+sign-extends them to XLEN; `RAPT_PC_FULL_WIDTH` retains full-width storage.
+These storage choices do not enlarge the platform PMA windows below.
+
 [`rtl/configs/memory_map.json`](https://github.com/Kingfish404/raptor-chip/blob/master/rtl/configs/memory_map.json) records the shared 32-bit physical addresses and the main RAM
 capacity of each board or simulator profile. The window starts at `0x80000000`.
 KU15P CU07/CU08 with MIG map 2 GiB through `0xffffffff`; RV32 and RV64 use

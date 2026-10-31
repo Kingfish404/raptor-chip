@@ -95,7 +95,7 @@ export function sampleArchitecture(view, data, frame) {
       'several structures is counted once; retirement is shown separately.',
     );
     const external = unique(occ('soc_pmem'), occ('soc_uart'));
-    for (const id of ['bus', 'axi', 'l2', 'core-port', 'router', 'external']) {
+    for (const id of ['bus', 'axi', 'l2', 'l2-port', 'router', 'external']) {
       put(
         id,
         external,

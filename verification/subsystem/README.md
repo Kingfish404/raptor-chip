@@ -1,8 +1,10 @@
 # FE, BE and MEM trace experiments
 
-These test tops use the production `rapt_frontend`, `rapt_backend` and
-`rapt_memory` instances. They are simulation environments, separate from the
-production RTL and from the existing module synthesis tops.
+These test tops use the production `rapt_frontend`, `rapt_backend`,
+`rapt_memory` and `rapt_l2_subsystem` instances. The BE/MEM data fixtures connect
+private L1 memory to the cluster L2 subsystem through `l2_client_if`; that
+subsystem supplies their external AXI port even when its cache is disabled.
+These simulation environments are separate from production RTL and module synthesis tops.
 
 ## Trace source
 
@@ -94,8 +96,10 @@ to check rebuild behavior without compiling RTL.
 The denominator is every accepted, trace-matched control instruction. A
 conditional's `raw_miss` compares the IFU prediction before IDU repair with
 the actual next PC; direction and target misses are separated. Primary means
-the packet's first branch uses TAGE/BTB; auxiliary means a later conditional
-uses the combinational bimodal/gshare chooser. Direct jumps in the raw count
+the packet's first branch uses the primary predictor; auxiliary identifies a
+non-first conditional query. With the current default TAGE selection, this
+query uses the same TAGE tables, not a separate bimodal/gshare chooser.
+Direct jumps in the raw count
 can use an IFU static immediate rather than a BPU table, and returns may be
 repaired by IDU's RAS. The `final_miss` in the event CSV is after IDU repair.
 Prediction and feedback are causally ordered: the trace supplies an outcome
@@ -109,12 +113,14 @@ For width scaling, run `CONFIG=default-w4` or `default-w8` and set
 `CONFIG=default-w8 EXTRA_DEFINES=-DRAPT_DECODE_WIDTH=16` and
 `SINK_WIDTH=16`; this does not create a 16-wide fetch interface or backend.
 `check_trace.py` reports width-only and 6/8-halfword-window packet bounds for
-2, 4, 8 and 16 slots. Those bounds assume one packet per cycle and omit cache,
-prediction and pipeline delays. Current IFU ends each packet at the first
-control instruction and has one primary plus at most one auxiliary prediction
-query per packet. Its wide fetch window contains only eight halfwords, so
-larger decode width alone cannot raise the bound past the eight-halfword
-limit. Record measurements with their source revision, configuration and trace metadata.
+2, 4, 8 and 16 slots. These legacy estimates assume one packet per cycle,
+cut at the first control instruction and omit cache, prediction and pipeline
+delays. The current IFU permits ordinary instructions after a predicted-not-taken
+branch; the legacy figures therefore are not strict current-RTL throughput
+bounds. The IFU has one primary plus at most one auxiliary conditional query
+per packet. Its wide fetch window contains eight halfwords, so a larger decode
+width alone does not add fetch bytes. Record the source revision, configuration
+and trace metadata with each measurement.
 
 ## Other FE and MEM metrics
 
@@ -131,10 +137,10 @@ finite startup, branches and serial instructions contribute to it. Stall
 counters may overlap and must not be summed into a partition of the loss.
 The trace metadata also gives `optimistic_fe_packet_bound` for widths 2, 4, 8
 and 16, plus `window_limited_fe_packet_bound` for six and eight halfwords.
-These assume at most one fetch packet per cycle, end a packet at a branch or
-jump, and start a new packet for a non-first-slot JALR. They omit serial
-boundaries, cache, prediction, feedback and pipeline costs, so remain
-optimistic.
+The field names are retained for compatibility. Their model assumes at most
+one packet per cycle, ends at a branch/jump and starts a new packet for a
+non-first-slot JALR. It omits serial boundaries, cache, prediction, feedback
+and pipeline costs, and does not model current not-taken-branch followers.
 
 The MEM top retains aligned, supported-size PMEM accesses and reports skipped
 events. Its load responses are checked against NEMU's recorded values; a
@@ -154,15 +160,17 @@ provenance, configuration, traffic splits and limitations when reporting results
 
 ## PPA boundary
 
-The independent synthesis tops already live in `synth`: `rapt_frontend`,
-`rapt_backend_syn_top` and `rapt_memory`. The testbench stimulus, decoder
+The independent synthesis tops live in `synth`: `rapt_frontend`,
+`rapt_backend_syn_top`, `rapt_memory` and `rapt_l2_subsystem`. The `memory`
+scope ends at `l2_client_if`; `l2_subsystem` contains AXI and optional L2 storage.
+The testbench stimulus, decoder
 feeder and AXI image model are outside that PPA boundary. For example:
 
 ```sh
-for module in frontend backend memory; do
+for module in frontend backend memory l2_subsystem; do
   make -C synth/yosys structure-check MODULE=$module RAPT_CONFIG=default
 done
-make -C synth ppa-all MODULES_TO_RUN='frontend backend memory' \
+make -C synth ppa-all MODULES_TO_RUN='frontend backend memory l2_subsystem' \
   RAPT_CONFIG=default PDK=nangate45 CLK_FREQ_MHZ=50 SRAM_MODE=macro
 ```
 

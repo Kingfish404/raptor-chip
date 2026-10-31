@@ -52,8 +52,17 @@ class WidthMappingTest(unittest.TestCase):
         # bridge's LINE_LEN arithmetic. RV64 data words must not halve L1D.
         expected = {
             "small": (512, 256, 16),
+            "small-cache": (131072, 131072, 64),
             "default": (16384, 16384, 64),
+            "default-cache": (131072, 131072, 64),
+            "default-l2": (16384, 16384, 64),
+            "default-pa38": (16384, 16384, 64),
+            "default-w3": (16384, 16384, 64),
+            "default-w4": (16384, 16384, 64),
+            "default-w4-cache": (131072, 131072, 64),
+            "default-w8": (16384, 16384, 64),
             "middle": (1024, 256, 16),
+            "middle-cache": (131072, 131072, 64),
             "large": (32768, 8192, 64),
             "formal": (32, 32, 16),
         }
@@ -71,11 +80,19 @@ class WidthMappingTest(unittest.TestCase):
     def test_current_presets_export_authoritative_widths(self) -> None:
         expected = {
             "small": (1, 1, 1, 1, 1),
+            "small-cache": (1, 1, 1, 1, 1),
             "default": (2, 2, 2, 2, 2),
+            "default-cache": (2, 2, 2, 2, 2),
+            "default-l2": (2, 2, 2, 2, 2),
+            "default-pa38": (2, 2, 2, 2, 2),
             "middle": (2, 2, 2, 2, 2),
+            "middle-cache": (2, 2, 2, 2, 2),
             "large": (2, 2, 2, 2, 2),
             "formal": (2, 2, 2, 2, 2),
-            "default-w4": (4, 4, 4, 4, 4),
+            "default-w3": (3, 3, 3, 3, 2),
+            "default-w4": (4, 4, 4, 4, 2),
+            "default-w4-cache": (4, 4, 4, 4, 2),
+            "default-w8": (8, 8, 8, 8, 8),
         }
         self.assertEqual(
             set(expected),
@@ -237,7 +254,7 @@ class WidthMappingTest(unittest.TestCase):
             "small": 2,
             "default": 8,
             "middle": 4,
-            "large": 16,
+            "large": 8,
         }
         for preset, fetch_q in expected.items():
             with self.subTest(preset=preset):

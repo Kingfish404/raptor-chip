@@ -7,7 +7,7 @@
 extern TOP_NAME *top;
 
 #define L1(m) VERILOG_CPU(CONCAT(memory_subsystem__DOT__l1d_cache__DOT__, m))
-#define L2(m) VERILOG_CPU(CONCAT(memory_subsystem__DOT__l2__DOT__, m))
+#define L2(m) VERILOG_L2(CONCAT(l2__DOT__, m))
 #define DIR(m) L2(CONCAT(g_boom_directory__DOT__u_directory__DOT__, m))
 
 namespace {

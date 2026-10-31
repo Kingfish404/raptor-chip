@@ -13,16 +13,27 @@
 //
 // Today (NR_HARTS = 1) the cluster instantiates a single core; the structure
 // is laid out with multi-core scaling in mind:
+//
+//   core (L1s) --l2_client_if--> rapt_l2_subsystem --AXI4--> rapt_router
+//                                                          +-> CLINT / PLIC
+//                                                          +-> io_master
+//
+//   - A core holds only its private L1 memory block. The L2 subsystem lives
+//     here, outside every core, and always exists: it owns AXI and the
+//     outstanding-transaction budgets, plus the L2 cache when RAPT_L2_EN
+//     selects one. Its capabilities reach the cores as one parameter,
+//     rapt_pkg::L2LinkConfig, so cores never test an L2 macro.
 //   - CLINT lives here (was previously inside rapt_bus). A single CLINT
 //     services all harts so `mtime` stays globally coherent and IPI / timer
 //     interrupts have a single arbitration point.
-//   - CLINT register accesses arrive via the regular AXI master port of each
-//     core. A small 1-master / 3-target AXI router below decodes the CLINT
-//     and PLIC address windows and dispatches transactions to on-cluster
-//     peripherals or the off-chip `io_master` port. The per-core bus is
+//   - CLINT register accesses arrive via the L2 subsystem's AXI master. A
+//     small 1-master / 3-target AXI router below decodes the CLINT and PLIC
+//     address windows and dispatches transactions to on-cluster peripherals
+//     or the off-chip `io_master` port. Cores and the L2 subsystem are
 //     therefore entirely SoC-memory-map agnostic.
-//   - When multi-core / IMSIC arrive, the router grows to NxM and the
-//     interrupt fabric scales from the existing single-hart CLINT/PLIC base.
+//   - When multi-core / IMSIC arrive, each core gets its own l2_client_if
+//     port on the L2 subsystem, and the interrupt fabric scales from the
+//     existing single-hart CLINT/PLIC base.
 module rapt #(
     parameter int XLEN   = `RAPT_XLEN,
     parameter int MemoryReadCredits = 8,
@@ -31,8 +42,9 @@ module rapt #(
     // value is threaded through CSR `mhartid`, the CLINT msip/mtimecmp
     // arrays, and PLIC NCTX so that scaling to N>1 only requires (a) a
     // generate block around `rapt_core`, (b) per-hart CLINT register
-    // banks (already parameterised inside rapt_clint), and (c) an NxM
-    // AXI router (today 1x3). Do NOT raise this without those follow-ups.
+    // banks (already parameterised inside rapt_clint), and (c) a client
+    // arbiter in rapt_l2_subsystem that extends request IDs with the hart
+    // index. Do NOT raise this without those follow-ups.
     /* verilator lint_off UNUSEDPARAM */
     parameter int NHARTS = 1
     /* verilator lint_on UNUSEDPARAM */
@@ -129,10 +141,12 @@ module rapt #(
 );
 
   // ------------------------------------------------------------------
-  // Per-core AXI master signals (internal).
-  // The cluster-level router muxes these between cluster-internal slaves
-  // and the external io_master port.
+  // Core -> L2 subsystem client port, and the L2 subsystem's AXI master.
+  // The cluster-level router muxes the AXI master between cluster-internal
+  // slaves and the external io_master port.
   // ------------------------------------------------------------------
+  localparam rapt_pkg::l2_link_config_t L2Link = rapt_pkg::L2LinkConfig;
+  l2_client_if #(.XLEN(XLEN)) core_l2 ();
   axi4_if #(.XLEN(XLEN)) core_axi ();
   axi4_if #(.XLEN(XLEN)) offchip_axi ();
 
@@ -238,7 +252,8 @@ module rapt #(
   );
 
   rapt_router #(
-      .XLEN(XLEN)
+      .XLEN(XLEN),
+      .WriteOutstanding(L2Link.posted_writes > 0 ? L2Link.posted_writes : 1)
   ) axi_router (
       .clock(clock),
       .reset(reset),
@@ -250,11 +265,26 @@ module rapt #(
   );
 
   // ------------------------------------------------------------------
+  // L2 subsystem: the only path from the cores to memory and devices.
+  // ------------------------------------------------------------------
+  rapt_l2_subsystem #(
+      .XLEN(XLEN),
+      .L2Link(L2Link),
+      .MemoryReadCredits(MemoryReadCredits)
+  ) l2_subsystem (
+      .clock(clock),
+      .reset(reset),
+      .client(core_l2),
+      .io_master(core_axi)
+  );
+
+  // ------------------------------------------------------------------
   // CPU core (single hart today; instantiate-per-hart loop in the future).
   // ------------------------------------------------------------------
+  // The core's L2Link default is the same rapt_pkg::L2LinkConfig; leaving
+  // it implicit keeps the simulator's generated core class name stable.
   rapt_core #(
       .XLEN(XLEN),
-      .MemoryReadCredits(MemoryReadCredits),
       .L1dWriteBack(L1dWriteBack)
   ) core (
       .writeback_error_o(writeback_error_o),
@@ -268,7 +298,7 @@ module rapt #(
       // L1D eviction-store errors are sticky and exported for platform-level
       // fatal-error handling; the cache remains blocked until reset.
 
-      .io_master(core_axi),
+      .l2_client(core_l2),
 
       .clint_timer_int_i(clint_bus.timer_int),
       .clint_sw_int_i   (clint_bus.sw_int),

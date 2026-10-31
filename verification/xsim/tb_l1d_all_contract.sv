@@ -5999,6 +5999,7 @@ module tb_cbo_refill_order;
   lsu_l1d_mmu_if exu_l1d ();
   rou_cmu_if rou_cmu ();
   ifu_l1i_if ifu_l1i ();
+  l2_client_if l2_client ();
   axi4_if io_master ();
   logic writeback_drain_i = 0, writeback_cbo_i = 0;
   logic stores_empty_i = 1;
@@ -6020,6 +6021,12 @@ module tb_cbo_refill_order;
       .external_write_first_i('0),
       .external_write_last_i('0),
       .*
+  );
+  rapt_l2_subsystem l2_subsystem (
+      .clock,
+      .reset,
+      .client(l2_client),
+      .io_master
   );
   `define TB_L1D_EXTERNAL_BUS
   `include "tb_l1d_defaults.svh"

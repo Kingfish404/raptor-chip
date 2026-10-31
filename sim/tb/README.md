@@ -73,14 +73,25 @@ Storage uses sparse associative byte arrays, so the large PMEM/FLASH windows are
 | `LIBS`            | space-separated stdcell/SRAM/PAD simulation models (`-v` each) |
 | `RAPT_CONFIG`     | config preset (default `small`)                                |
 
-## Configuration requirement: single-beat / no-L2
+## RNP configuration and burst scope
 
-The rnp interface and its `axi2rnp`/`rnp2axi` adapters carry exactly **one word per transaction** (the adapters hardwire `arlen=0`, `arsize=2`, `arburst=0`). The chip's internal AXI master must therefore **never issue a burst**. This requires:
+The external RNP transaction carries one 32-bit word. `rnp2axi` presents that
+as a single-beat AXI access (`arlen=0`, `arsize=2`, `arburst=0`). The chip-side
+`axi2rnp` now decomposes FIXED/INCR AXI bursts into successive RNP word
+transactions, retaining the original ID and returning RLAST/B at the original
+AXI boundary. The external single-beat port does not imply ARLEN=0 inside the chip.
 
-- `MemoryReadCredits=1` — explicitly set by `wrap_rnp_soc.sv` for the single-outstanding RNP adapter.
-- a config **without** the L2 cache (`RAPT_L2_EN`). The `large` preset enables `RAPT_L2_EN` and is **not** compatible with the rnp interface. The current `default` preset disables L2; any explicit L2 enable must also be excluded. The Makefile defaults to the no-L2 `small` preset.
+- `sim/rtl/wrap_rnp_soc.sv` sets `MemoryReadCredits=1` on `rapt`; the cluster
+  L2 subsystem owns that read-credit limit. The adapter handles one AXI owner at a time.
+- Use the maintained no-L2 `small` default or the `middle` smoke configuration.
+  The UVM RNP matrix also uses a no-L2 preset and explicitly rejects L2 requests.
+  L2-enabled RNP integration is outside that supported validation scope; no
+  new compatibility claim follows from burst decomposition alone.
 
-If you build with an L2-enabled config the chip will issue `arlen=15` bursts, the single-word host returns `rlast` after the first beat, and the chip deadlocks waiting for the remaining beats.
+RNP carries neither AXI response errors nor IRQ/JTAG/external-write sidebands.
+Use the AXI whole-chip environment for those contracts. The focused
+`verilator-rnp-handshake-rv32` check covers owner retention, burst completion
+and request/response backpressure.
 
 The rnp data path is 32-bit, so the harness is **RV32 only**. `ISA64=1` is rejected with an error; use the AXI-based `sim` flow for RV64.
 

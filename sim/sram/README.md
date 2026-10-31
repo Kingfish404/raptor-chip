@@ -1,6 +1,6 @@
 # sim/sram — OpenRAM integration
 
-Build infrastructure that compiles real SRAM macros via [OpenRAM](https://github.com/VLSIDA/OpenRAM) for the cache data arrays under [rtl/memory/](../../rtl/memory/), and wires the resulting Verilog blackboxes + Liberty timing into the Yosys / OpenSTA flow used by [sim/Makefile](../Makefile) `sta`.
+Build infrastructure that compiles real SRAM macros via [OpenRAM](https://github.com/VLSIDA/OpenRAM) for the cache data arrays under [rtl/memory/](../../rtl/memory/) and [rtl/uncore/l2cache/](../../rtl/uncore/l2cache/), and wires the resulting Verilog blackboxes + Liberty timing into the Yosys / OpenSTA flow used by [sim/Makefile](../Makefile) `sta`.
 
 ## Why
 
@@ -18,8 +18,14 @@ For the default config (see [rtl/configs/default/rapt_config.svh](../../rtl/conf
 
 | Shape (depth × width) | Use site                        | Instances                                    |
 | --------------------- | ------------------------------- | -------------------------------------------- |
-| `64 × 32`             | `rapt_l1i.sv` data banks        | `L1I_N_WAYS × L1I_LINE_SIZE` = `4 × 16` = 64 |
-| `64 × 128` | `rapt_l1d_data.sv` data subarrays (RV32/RV64) | `L1D_N_WAYS × subarrays/way` = `4 × 4` = 16 |
+| `64 × 128` | `rapt_l1i_data.sv` quad-word banks (RV32/RV64) | 4 ways × 4 banks = 16 |
+| `256 × 64` | `rapt_l1d_data.sv` diagonal banks (RV32/RV64) | 8 banks; four-way row compaction |
+
+L1I lines with at least eight 32-bit words use 128-bit banks; smaller-line
+presets retain independently addressed 32-bit word banks. L1D always uses
+64-bit chunks, independently of `RAPT_CACHE_SRAMLEN`. At 64 sets and 64-byte
+lines, eight-way L1D uses eight `512 × 64` banks and sixteen-way uses sixteen.
+See [L1D geometry and replacement](../../docs/uarch.md#optional-l1d-capacities).
 
 All macros are **single-port (1RW)** since the RTL was migrated to
 [rapt_sram_1rw.sv](../../rtl/sram/rapt_sram_1rw.sv): the cache controllers
@@ -28,7 +34,15 @@ selected 1RW config list; overriding `PORTS` alone does not change the port shap
 
 The RTL and OpenRAM models share the same port contract: writes occur on the rising edge, reads register `rdata` on the rising edge, and `rdata` holds during disabled and write cycles.
 
-The FPR uses a separate [two-port synchronous wrapper](../../rtl/sram/rapt_sram_2rw.sv). Two fixed 32 × 64 replicas serve the three FEU operands and one IOQ store operand, with two readers assigned to each replica; writes update both. Writes pause reads for that edge. The data arrays have no reset; FPR valid bits supply architectural zero after reset. On KU15P, RAMB36E2 true-dual-port mode provides up to 36 bits per port, so each 64-bit replica needs two blocks. Vivado 2025.2 OOC synthesis of `fpr`, default RV64 at 100 MHz, inferred four RAMB36E2 and no LUTRAM. The existing `RAPT_USE_SRAM_MACRO` path only replaces 1RW cache arrays; mapping this 2RW wrapper to an ASIC dual-port macro still needs a matching macro and timing model.
+The standalone `rapt_fpr` leaf uses a separate
+[two-port synchronous wrapper](../../rtl/sram/rapt_sram_2rw.sv) and two 32 × 64
+replicas. Its historical Vivado 2025.2 RV64/100 MHz OOC result inferred four
+RAMB36E2 and no LUTRAM. The integrated core instead instantiates
+`rapt_fp_registers`: ROB-backed speculative results, source renaming and a
+committed 32 × 64 architectural bank, with a separate FPGA LUTRAM path.
+Do not apply the leaf's BRAM result to the integrated FP register subsystem.
+`RAPT_USE_SRAM_MACRO` replaces 1RW arrays; ASIC mapping of the 2RW wrapper
+requires a matching macro and timing model.
 
 Each shape becomes one OpenRAM-compiled macro under `build/<PLATFORM>/macro/<openram_name>/` with the standard OpenRAM artefacts:
 

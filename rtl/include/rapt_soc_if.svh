@@ -147,6 +147,123 @@ interface mem_link_if #(
   );
 endinterface
 
+// Client port of one hart's memory block towards the L2 subsystem, the only
+// path from a core to memory and devices. The roles follow TileLink:
+//   A  client -> L2  Get/Put requests (rd_req_*, wr_req_*); a write carries
+//                    its address and data together, as in mem_link_if
+//   D  L2 -> client  read data (rd_rsp_*) and write acknowledgements (wr_rsp_*)
+//   B  L2 -> client  probes of L1D lines (probe_*)
+//   C  client -> L2  probe responses (probe_release_*) and voluntary victim
+//                    releases (release_*); release_ack completes a release
+// Request IDs are the client's own (rapt_axi_ids_pkg); a multi-client L2
+// extends them with the client index. Probe and release traffic is used only
+// by an inclusive L2 (rapt_pkg::l2_link_config_t); a management-only L2 never
+// probes and keeps release_ready low.
+interface l2_client_if #(
+    parameter int XLEN = `RAPT_XLEN,
+    parameter int ID_W = 4
+);
+  // A: reads. The client resolves the PMA once and carries it with the request.
+  logic              rd_req_valid;
+  logic              rd_req_ready;
+  logic [  ID_W-1:0] rd_req_id;
+  logic [  XLEN-1:0] rd_req_addr;
+  logic [       2:0] rd_req_size;
+  logic [       7:0] rd_req_len;
+  logic [       1:0] rd_req_burst;
+  logic [       1:0] rd_req_pbmt;
+  logic              rd_req_noallocate;
+  logic              rd_req_cacheable;
+  // D: read data.
+  logic              rd_rsp_valid;
+  logic              rd_rsp_ready;
+  logic [  ID_W-1:0] rd_rsp_id;
+  logic [  XLEN-1:0] rd_rsp_data;
+  logic              rd_rsp_last;
+  logic              rd_rsp_error;
+  // A: writes.
+  logic                wr_req_valid;
+  logic                wr_req_zero;  // Generate a 64-byte INCR zero burst.
+  logic                wr_req_ready;
+  logic [    ID_W-1:0] wr_req_id;
+  logic [    XLEN-1:0] wr_req_addr;
+  logic [         2:0] wr_req_size;
+  logic [         1:0] wr_req_pbmt;
+  logic [    XLEN-1:0] wr_req_data;
+  logic [XLEN/8-1:0] wr_req_strb;
+  // D: write acknowledgements.
+  logic              wr_rsp_valid;
+  logic              wr_rsp_ready;
+  logic [  ID_W-1:0] wr_rsp_id;
+  logic              wr_rsp_error;
+  // B: probes. probe_window marks cycles in which a probe may still start.
+  logic              probe_valid;
+  logic              probe_ready;
+  logic [  XLEN-1:0] probe_addr;
+  logic              probe_window;
+  // C: probe responses carrying dirty data.
+  logic              probe_release_valid;
+  logic              probe_release_ready;
+  logic [  XLEN-1:0] probe_release_addr;
+  logic [  XLEN-1:0] probe_release_data;
+  // C: voluntary releases, one XLEN beat at a time.
+  logic              release_valid;
+  logic              release_ready;
+  logic [  XLEN-1:0] release_addr;
+  logic [  XLEN-1:0] release_data;
+  logic              release_has_data;
+  logic              release_mask;
+  logic              release_last;
+  logic              release_ack;
+  // Client state the L2 orders against: a victim write-back is on the A
+  // channel, or a committed CBO.INVAL names a 64-byte block.
+  logic              writeback_pending;
+  logic              cbo_inval;
+  logic [XLEN-1:6]   cbo_block;
+
+  modport client(
+      output rd_req_valid, rd_req_id, rd_req_addr, rd_req_size, rd_req_len, rd_req_burst,
+      output rd_req_pbmt, rd_req_noallocate, rd_req_cacheable,
+      input rd_req_ready,
+      input rd_rsp_valid, rd_rsp_id, rd_rsp_data, rd_rsp_last, rd_rsp_error,
+      output rd_rsp_ready,
+      output wr_req_valid, wr_req_zero, wr_req_id, wr_req_addr, wr_req_size, wr_req_pbmt,
+      output wr_req_data, wr_req_strb,
+      input wr_req_ready,
+      input wr_rsp_valid, wr_rsp_id, wr_rsp_error,
+      output wr_rsp_ready,
+      input probe_valid, probe_addr, probe_window,
+      output probe_ready,
+      output probe_release_valid, probe_release_addr, probe_release_data,
+      input probe_release_ready,
+      output release_valid, release_addr, release_data, release_has_data, release_mask,
+      output release_last,
+      input release_ready, release_ack,
+      output writeback_pending, cbo_inval, cbo_block
+  );
+
+  modport manager(
+      input rd_req_valid, rd_req_id, rd_req_addr, rd_req_size, rd_req_len, rd_req_burst,
+      input rd_req_pbmt, rd_req_noallocate, rd_req_cacheable,
+      output rd_req_ready,
+      output rd_rsp_valid, rd_rsp_id, rd_rsp_data, rd_rsp_last, rd_rsp_error,
+      input rd_rsp_ready,
+      input wr_req_valid, wr_req_zero, wr_req_id, wr_req_addr, wr_req_size, wr_req_pbmt,
+      input wr_req_data, wr_req_strb,
+      output wr_req_ready,
+      output wr_rsp_valid, wr_rsp_id, wr_rsp_error,
+      input wr_rsp_ready,
+      output probe_valid, probe_addr, probe_window,
+      input probe_ready,
+      input probe_release_valid, probe_release_addr, probe_release_data,
+      output probe_release_ready,
+      input release_valid, release_addr, release_data, release_has_data, release_mask,
+      input release_last,
+      output release_ready, release_ack,
+      input writeback_pending, cbo_inval, cbo_block
+  );
+endinterface
+
 interface clint_bus_if #(
     parameter int XLEN = `RAPT_XLEN
 );

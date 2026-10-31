@@ -27,12 +27,21 @@ Core name:  raptor-falcon (Linux-capable)
 PMP:        8 usable entries, TOR / NAPOT, 4 KiB granularity, L-bit lockable
 Interrupts: CLINT (mtime, mtimecmp, msip) + PLIC (31 sources, M/S contexts)
 
-Bus Interface: AXI4, XLEN-bit data/addr, 4-bit ID; up to 8 outstanding burst-capable reads.
+Core boundary: l2_client_if to the cluster-level rapt_l2_subsystem (always present).
+Bus Interface: AXI4, XLEN-bit data/addr containers, 4-bit ID; up to 8 burst-capable reads.
                Writes use independent AW/W handshakes: single-beat stores and dirty-line words,
                multi-beat Zicboz CBO.ZERO. Without L2, RAPT_POSTED_WRITES bounds cacheable writes
                in flight (default 4). Write-through stores may complete at bus capture; buffered
                writebacks retain their data and complete only on the corresponding B response.
-Default uarch: 2-wide decode / rename / dispatch / commit, 2 integer ALU ports, ROB=32, ALQ=8, BRQ=8, MDQ=4, FPQ=8, IOQ=8, unified SQ=16, 6 completion ports, 16 branch checkpoints, integer PRF=64, FPR=32 x 64-bit, TAGE + 128-entry BTB + 16-entry RAS, L1I=16 KiB, L1D=16 KiB write-back with 4 MSHRs and 2 writeback buffers (both caches 4-way), 64 B cache lines, ITLB=16, DTLB=64 (2-way, load/store replicas) + shared 256-entry L2 TLB, L2 passthrough (cache in `default-l2`)
+Addresses: 32-bit physical by default in both modes; RV64 RAPT_PADDR_BITS=32..38.
+           RV64 stores PCs in 40 bits and sign-extends to XLEN; the PMA map stays 32-bit.
+Default uarch: decode / rename / dispatch / commit = 2; 2 integer ALU ports, ROB=32,
+               ALQ=8, BRQ=8, MDQ=4, FPQ=8, IOQ=8, SQ=16, 6 completion ports,
+               16 branch checkpoints, integer PRF=64, committed FPR=32 x 64-bit.
+Prediction: TAGE + 128-entry BTB + 16-entry RAS.
+Caches: L1I/L1D = 16 KiB each, 4-way, 64 B lines; L1D write-back, 4 MSHRs,
+        2 writeback buffers. ITLB=16; DTLB=64 (2-way, load/store replicas);
+        shared L2 TLB=256. No L2 cache in default; default-l2 enables 512 KiB / 8 ways.
 
 Verifying:  RISCOF (riscv-arch-test), full-core F/D directed/differential tests, RVFI, SVA
 ```
@@ -97,11 +106,13 @@ flowchart TD
     L2TLB["shared L2 TLB (256, direct-mapped)"]
     PMPC["PMP x8 (TOR/NAPOT, 4 KiB):<br/>fetch, load/store and PTW checks"]
     BUS["rapt_bus (D/PTW > MSHR > L1I, request IDs)"]
-    AXIM["AXI4 master (up to 8 reads)"]
-    L2["L2 (default passthrough;<br/>default-l2: 512 KiB, 8-way)"]
-    RBUF["AXI R buffer (default-l2 only)"]
   end
   subgraph CLU["rapt (cluster top)"]
+    subgraph L2S["rapt_l2_subsystem (always present)"]
+      AXIM["AXI4 master (up to 8 reads)"]
+      L2["L2 cache (default: none, management only;<br/>default-l2: 512 KiB, 8-way)"]
+      RBUF["AXI R buffer (default-l2 only)"]
+    end
     RTR["AXI router (1 master / 3 targets)"]
     CLINT["CLINT (mtime / mtimecmp / msip)"]
     PLIC["PLIC (31 sources, M/S contexts)"]
@@ -133,7 +144,8 @@ flowchart TD
   CSR -. "PMP / satp state" .-> PMPC
   PMPC -.-> L1I & L1D & IPTW & DPTW
   L1I & L1D & IPTW & DPTW --> BUS
-  BUS --> AXIM --> L2 --> RBUF --> RTR
+  BUS -->|"l2_client_if"| AXIM
+  AXIM --> L2 --> RBUF --> RTR
   RTR --> CLINT & PLIC & EXT
   CLINT & PLIC -. "interrupts" .-> CSR
   DBG -. "halt / GPR access" .-> BE

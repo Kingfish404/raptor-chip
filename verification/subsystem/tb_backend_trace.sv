@@ -21,6 +21,7 @@ module tb_backend_trace;
   lsu_l1d_if lsu_l1d ();
   lsu_l1d_mmu_if exu_l1d ();
   ifu_l1i_if ifu_l1i ();
+  l2_client_if l2_client ();
   axi4_if axi ();
   logic backend_empty, sq_empty, writeback_done, writeback_drain;
   logic memory_data_idle, memory_wb_error, io_start, halted, commit_fire;
@@ -74,7 +75,7 @@ module tb_backend_trace;
       .cmu_bcast,
       .csr_bcast,
       .pmp_update,
-      .io_master(axi),
+      .l2_client,
       .ifetch_io_authorized_i(1'b0),
       .ifetch_io_start_o(io_start),
       .ifetch_io_owner_pc_o(io_owner),
@@ -84,6 +85,12 @@ module tb_backend_trace;
       .stores_empty_i(sq_empty),
       .writeback_drain_i(writeback_drain),
       .writeback_error_o(memory_wb_error)
+  );
+  rapt_l2_subsystem l2_subsystem (
+      .clock,
+      .reset,
+      .client(l2_client),
+      .io_master(axi)
   );
   tb_axi_image #(
       .XLEN(XLEN)

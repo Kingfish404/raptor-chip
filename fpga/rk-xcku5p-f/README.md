@@ -109,7 +109,7 @@ CLB sites (96.46%). Final WNS was +0.024 ns and WHS was +0.005 ns, so the
 implementation has very little margin. The `middle` bitstream loaded on the
 XCKU5P-F, its interactive BIOS passed a 16 MiB DDR4 test, and a UART serialboot
 of Linux 6.18.51 reached the initramfs `tinysh#` prompt. `uname -a`, `free`
-and `uptime` worked there too. The native `default` RV64 DDR4 synthesis alone
+and `uptime` worked there too. The historical native `default` RV64 DDR4 synthesis alone
 used 230,862 LUTs, exceeding this part's LUT capacity; `default-w3` and
 `default-w4` are larger still.
 

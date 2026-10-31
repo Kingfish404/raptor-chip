@@ -24,4 +24,4 @@ prep -top formal_plru
 
 [files]
 formal_plru.sv
-rapt_cache_plru.sv ../../rtl/memory/rapt_cache_plru.sv
+rapt_cache_plru.sv ../../rtl/memory/replacement/rapt_cache_plru.sv

@@ -32,7 +32,7 @@ make -C app security-tests-build
 
 # Run a single test
 make -C app security-tests-build
-make -C app pk-run USER_ELF=app/build/rv32/tests/security/spectre-v1.elf
+make -C app pk-run USER_ELF="$PWD/app/build/rv32/tests/security/spectre-v1.elf"
 ```
 
 ## Interpreting Results

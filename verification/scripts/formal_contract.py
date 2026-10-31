@@ -27,7 +27,7 @@ CONTRACTS = {
         label='bytewise PMA span equivalence'),
     'ifetch-word-atomic': dict(
         description='Prove aligned instruction-word assembly integrity under arbitrary backpressure.',
-        top='formal_ifetch_word_atomic', source='rtl/memory/rapt_ifetch_word.sv', option='rtl',
+        top='formal_ifetch_word_atomic', source='rtl/memory/icache/rapt_ifetch_word.sv', option='rtl',
         option_help='Optional isolated instruction-word module under test',
         scope='Aligned word assembly safety; reset state and explicit responder protocol; no bus/cache/fairness claim',
         label='aligned instruction-word integrity proof',

@@ -14,7 +14,8 @@ If any of these drift (e.g. port width change in the blackbox without a matching
 ## Targets
 
 ```
-make -C sim/sram/test           # static checks (default)
+make -C sim/sram/test check     # static checks; no HDL tools
+make -C sim/sram/test           # static checks + Verilator read/write-contract tests
 make -C sim/sram/test sta-smoke # end-to-end STA flow (opt-in)
 make -C sim/sram/test clean
 ```
@@ -29,7 +30,13 @@ make -C sim/sram/test clean
 
 ## What `make sta-smoke` verifies (needs yosys + slang + OpenSTA)
 
-Generates stubs if needed, preprocesses `fixtures/rapt_sram_test_top.sv` (a 1-instance wrapper around a registered 32×32 shape (current default L1I data banks use 64×32)), and drives the `third_party/yosys-opensta` flow with `EXTRA_LIB_FILES` set to the stub Liberty. The flow imports macro port definitions from Liberty before reading RTL; loading the same macro again as a Verilog blackbox would duplicate the module. Then it asserts:
+Generates stubs if needed, preprocesses `fixtures/rapt_sram_test_top.sv` (one
+registered 32×32 instance), and drives `third_party/yosys-opensta` with
+`EXTRA_LIB_FILES` set to the stub Liberty. The default cache data arrays now
+use 64×128 L1I banks and 256×64 diagonal L1D banks; this small smoke fixture
+checks macro integration, not the whole cache geometry. The flow imports macro
+ports from Liberty before reading RTL; loading the same macro again as a Verilog
+blackbox would duplicate the module. It asserts:
 
 - Yosys produced a synthesised netlist.
 - The macro instance (`rapt_openram_1rw_32x32`) survives synthesis (i.e. the blackbox was preserved, not flattened).

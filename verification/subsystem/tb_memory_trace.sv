@@ -15,6 +15,7 @@ module tb_memory_trace;
   cmu_bcast_if cmu_bcast ();
   csr_bcast_if csr_bcast ();
   pmp_update_if pmp_update ();
+  l2_client_if l2_client ();
   axi4_if axi ();
   logic data_idle, wb_idle, wb_error, io_start;
   logic [XLEN-1:0] io_owner;
@@ -30,7 +31,7 @@ module tb_memory_trace;
       .cmu_bcast,
       .csr_bcast,
       .pmp_update,
-      .io_master(axi),
+      .l2_client,
       .ifetch_io_authorized_i(1'b0),
       .ifetch_io_start_o(io_start),
       .ifetch_io_owner_pc_o(io_owner),
@@ -38,6 +39,12 @@ module tb_memory_trace;
       .writeback_idle_o(wb_idle),
       .writeback_drain_i(1'b0),
       .writeback_error_o(wb_error)
+  );
+  rapt_l2_subsystem l2_subsystem (
+      .clock,
+      .reset,
+      .client(l2_client),
+      .io_master(axi)
   );
 
   tb_axi_image #(

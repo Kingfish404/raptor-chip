@@ -97,7 +97,11 @@ The four negative checker tests corrupt one monitor sample's RID, RLAST, RDATA o
 - A read following an early-restarted L2 miss waits through the SRAM install cycle before its lookup; it cannot consume the previous SRAM output.
 - L2 cached bursts advance by ARSIZE and honor FIXED addressing. This covers the RV64 instruction port's 32-bit transfers within a 64-bit SRAM word.
 - Failed L2 writes invalidate a matching cached alias, including NC/IO aliases whose backing memory may have been partially modified.
-- CPU AXI writes clear the bufferable attribute so L2 forwards the actual downstream B response to the core's machine bus-error handler. Cacheability and allocation attributes remain enabled. This removes early L2 write completion for CPU writes; its performance impact has not been measured.
+- CPU writes normally clear the bufferable attribute, retaining the downstream
+  B response for SQ/MBERR while preserving cacheability/allocation attributes.
+  `RAPT_L2_STORE_WRITEBACK` (as in `default-l2`) instead preserves bufferability
+  and allows local L2 write-back/allocation completion. A later dirty-eviction
+  error cannot be attributed as a precise fault to an already completed store.
 
 - The RNP bridge serializes address/data phases, retains accepted AXI IDs, and keeps RLAST/WLAST independent of READY. It no longer acknowledges W while its shared pins carry AW. Transactions now remain owned until their response handshake or reset, without a timeout silently discarding them.
 

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-24T10:05:13Z",
+  "generated_at": "2026-10-30T18:54:44Z",
   "sources": {
     "rtl": "rtl/",
     "config": "rtl/configs/default/rapt_config.svh",
@@ -92,6 +92,7 @@
       "RAPT_BTB_WAYS": "2",
       "RAPT_BUS_ERROR_IRQ": "16",
       "RAPT_CACHE_LINE_BYTES": "64",
+      "RAPT_CACHE_LRU": "0",
       "RAPT_CACHE_SRAMLEN": "128",
       "RAPT_CAUSE_BREAKPOINT": "'h3",
       "RAPT_CAUSE_ECALL_M": "'hb",
@@ -230,7 +231,9 @@
       "RAPT_CTR_SEL_TM__": "3'b010",
       "RAPT_DECODE_WIDTH": "2",
       "RAPT_DISPATCH_WIDTH": "2",
+      "RAPT_DSTLB_POLICY": "(`RAPT_TLB_PLRU ? 2 : (`RAPT_TLB_LRU ? 1 : 0))",
       "RAPT_DTLB_ENTRIES": "64",
+      "RAPT_DTLB_POLICY": "(`RAPT_TLB_PLRU ? 2 : (`RAPT_TLB_LRU ? 1 : 0))",
       "RAPT_DTLB_WAYS": "2",
       "RAPT_F3_AMO_W_": "3'b010",
       "RAPT_F3_CSRRCI": "3'b111",
@@ -256,9 +259,14 @@
       "RAPT_IOQ_LOAD_RESPONSE_STAGE": "0",
       "RAPT_IOQ_SIZE": "8",
       "RAPT_ITLB_ENTRIES": "16",
+      "RAPT_ITLB_POLICY": "(`RAPT_TLB_PLRU ? 2 : (`RAPT_TLB_LRU ? 1 : 0))",
+      "RAPT_L1D_DIRTY_SKIP": "`RAPT_L1D_WRITEBACK",
       "RAPT_L1D_LEN": "6",
       "RAPT_L1D_MSHRS": "4",
+      "RAPT_L1D_NRU": "0",
       "RAPT_L1D_N_WAYS": "4",
+      "RAPT_L1D_TARGETED_COHERENCE": "`RAPT_L1D_WRITEBACK",
+      "RAPT_L1D_WAYS": "`RAPT_L1D_N_WAYS",
       "RAPT_L1D_WRITEBACK": "1",
       "RAPT_L1I_LEN": "6",
       "RAPT_L1I_N_WAYS": "4",
@@ -290,6 +298,7 @@
       "RAPT_OP_SYSTEM": "7'b1110011",
       "RAPT_OP_S_TYPE_": "7'b0100011",
       "RAPT_PADDR_BITS": "32",
+      "RAPT_PC_FULL_WIDTH_ON": "0",
       "RAPT_PHT_SIZE": "256",
       "RAPT_PHY_SIZE": "64",
       "RAPT_PMPADDR_BITS": "32",
@@ -303,6 +312,7 @@
       "RAPT_PMP_A_OFF": "2'd0",
       "RAPT_PMP_A_TOR": "2'd1",
       "RAPT_PMP_CSR_NUM": "16",
+      "RAPT_PMP_GRANULARITY_LOG2": "12",
       "RAPT_PMP_NUM": "8",
       "RAPT_POSTED_WRITES": "4",
       "RAPT_PRIV_M": "2'h3",
@@ -313,11 +323,12 @@
       "RAPT_RIQ_SIZE": "8",
       "RAPT_ROB_GENERATION_BITS": "4",
       "RAPT_ROB_SIZE": "32",
-      "RAPT_ROB_YOUNGER": "1",
       "RAPT_RSB_SIZE": "16",
       "RAPT_RS_SIZE": "8",
       "RAPT_SB_WSTRB": "'b00001",
       "RAPT_SD_WSTRB": "'b11111",
+      "RAPT_SFENCE_KEEP_STATE": "3",
+      "RAPT_SFENCE_SELECTIVE": "1",
       "RAPT_SH_WSTRB": "'b00011",
       "RAPT_SQ_SIZE": "16",
       "RAPT_STEER_SCAN_ENTRIES": "(2 * `RAPT_DISPATCH_WIDTH + ((`RAPT_ROB_SIZE < 8) ? `RAPT_ROB_SIZE : 8))",
@@ -325,8 +336,11 @@
       "RAPT_SW_WSTRB": "'b01111",
       "RAPT_TAGE_BIM_BITS": "10",
       "RAPT_TAGE_INDEX_BITS": "10",
+      "RAPT_TLB_LRU": "0",
+      "RAPT_TLB_PLRU": "0",
       "RAPT_TVEC_MODE_DIRECT": "2'b00",
       "RAPT_TVEC_MODE_VECTORED": "2'b01",
+      "RAPT_UOP_HAS_INST": "1",
       "RAPT_XLEN": "32"
     },
     "values": {
@@ -343,6 +357,8 @@
       "sq_entries": 16,
       "phys_regs": 64,
       "arch_regs": 32,
+      "paddr_bits": 32,
+      "rv64_paddr_bits": 32,
       "pht_entries": 256,
       "tage_base_entries": 1024,
       "tage_tagged_entries": 1024,
@@ -369,6 +385,8 @@
       "dirp": "TAGE",
       "pmp_usable": 8,
       "pmp_csr_slots": 16,
+      "pmp_grain_bytes": 4096,
+      "sfence_selective": 1,
       "fetch_response_stage": 0,
       "iq_reclaim_on_issue": 0,
       "l1d_mshrs": 4,
@@ -870,6 +888,7 @@
           "ports": [
             "local_operand_wake",
             "completion",
+            "combo_source",
             "dispatch",
             "disp",
             "issue_enable",
@@ -1195,6 +1214,7 @@
         "NumSlots": "Cfg.dispatch_width",
         "NumCompletions": "Cfg.completion_ports",
         "CompletionT": "rapt_pkg::completion_t",
+        "ResultT": "CompletionT",
         "MDQ_SIZE": "4",
         "ROB_SIZE": "Cfg.rob_entries",
         "PLEN": "rapt_pkg::index_bits(Cfg.phys_regs",
@@ -1447,6 +1467,7 @@
         "NumSlots": "Cfg.dispatch_width",
         "NumCompletions": "Cfg.completion_ports",
         "CompletionT": "rapt_pkg::completion_t",
+        "ResultT": "CompletionT",
         "IOQ_SIZE": "Cfg.ioq_entries",
         "ROB_SIZE": "Cfg.rob_entries",
         "PLEN": "rapt_pkg::index_bits(Cfg.phys_regs",
@@ -1637,6 +1658,61 @@
           ]
         },
         {
+          "type": "rapt_completion_stage",
+          "name": "stage",
+          "ports": [
+            "clock",
+            "reset",
+            "flush",
+            "accepted",
+            "completion"
+          ]
+        },
+        {
+          "type": "rapt_completion_stage",
+          "name": "stage",
+          "ports": [
+            "clock",
+            "reset",
+            "flush",
+            "accepted",
+            "completion"
+          ]
+        },
+        {
+          "type": "rapt_completion_stage",
+          "name": "stage",
+          "ports": [
+            "clock",
+            "reset",
+            "flush",
+            "accepted",
+            "completion"
+          ]
+        },
+        {
+          "type": "rapt_completion_stage",
+          "name": "stage",
+          "ports": [
+            "clock",
+            "reset",
+            "flush",
+            "accepted",
+            "completion"
+          ]
+        },
+        {
+          "type": "rapt_completion_stage",
+          "name": "stage",
+          "ports": [
+            "clock",
+            "reset",
+            "flush",
+            "accepted",
+            "completion"
+          ]
+        },
+        {
           "type": "rapt_completion_guard",
           "name": "guard",
           "ports": [
@@ -1680,6 +1756,9 @@
           "type": "rapt_prf",
           "name": "prf",
           "ports": [
+            "extra_address",
+            "extra_value",
+            "extra_valid",
             "completion",
             "clock",
             "reset",
@@ -1761,6 +1840,10 @@
           "type": "rapt_ieu",
           "name": "ieu",
           "ports": [
+            "early_completion",
+            "operand_read_address",
+            "operand_read_value",
+            "operand_read_valid",
             "local_integer_wake",
             "branch_wake",
             "memory_wake",
@@ -1780,16 +1863,22 @@
             "exu_csr",
             "wb_integer_raw",
             "wb_branch",
-            "exu_wb_mul",
-            "pmu_ooo_valid",
-            "pmu_ooo_valid_found",
-            "pmu_ooo_full"
+            "exu_wb_mul"
           ]
         },
         {
           "type": "rapt_feu",
           "name": "feu",
           "ports": [
+            "early_completion",
+            "fp_queue_read_uop",
+            "fp_queue_read_tag",
+            "operand_read_value",
+            "fp_queue_ready_tag",
+            "fp_queue_read_generation",
+            "int_operand_address",
+            "int_operand_value",
+            "int_operand_valid",
             "local_fp_wake",
             "cancel_valid",
             "cancel_head",
@@ -2104,6 +2193,9 @@
         "FilterResources": "1'b0",
         "NumResources": "1",
         "ComboCdbWake": "1'b0",
+        "ComboThirdWake": "1'b0",
+        "ReadAfterSelect": "1'b0",
+        "ExposeEntryIndex": "1'b0",
         "LocalOperandWake": "1'b0",
         "ROB_SIZE": "Cfg.rob_entries",
         "PLEN": "rapt_pkg::index_bits(Cfg.phys_regs",
@@ -2225,6 +2317,8 @@
       "summary": "Physical Register File - multi-ported register storage with valid/transient tracking. Shared backend resource in rapt_core: - Read by ROU (operand fetch via exu_prf_if) - Written by the typed completion array - Commit/dealloc controlled by CMU (rou_cmu_if, cmu_bcast_if) On flush,",
       "params": {
         "ReadWidth": "Cfg.dispatch_width",
+        "ExtraReadPorts": "0",
+        "ExtraReadSlots": "ExtraReadPorts > 0 ? ExtraReadPorts : 1",
         "CommitWidth": "Cfg.commit_width",
         "NumCompletions": "Cfg.completion_ports",
         "CompletionT": "rapt_pkg::completion_t",
@@ -2476,6 +2570,10 @@
           "type": "rapt_fp_registers",
           "name": "fp_registers",
           "ports": [
+            "resolve_generation",
+            "retire_fp",
+            "retire_value",
+            "retire_generation",
             "flush",
             "allocate_valid",
             "allocate_uop",
@@ -4670,211 +4768,28 @@
       "instances": []
     },
     {
-      "id": "rapt_axi_master",
-      "file": "rtl/memory/rapt_axi_master.sv",
-      "domain": "memory",
-      "stage": 8,
-      "summary": "",
-      "params": {
-        "XLEN": "`RAPT_XLEN",
-        "ID_W": "4",
-        "MAX_READ_OUTSTANDING": "8",
-        "USE_CARRIED_READ_CACHEABLE": "0",
-        "MAX_WRITE_OUTSTANDING": "1"
-      },
-      "instances": []
-    },
-    {
-      "id": "rapt_axi_r_buffer",
-      "file": "rtl/memory/rapt_axi_r_buffer.sv",
-      "domain": "memory",
-      "stage": null,
-      "summary": "Register the outer AXI R channel before it enters the cache hierarchy. Two entries let a ready consumer accept one beat on every cycle while rready to the memory controller depends only on registered occupancy.",
-      "params": {
-        "XLEN": "`RAPT_XLEN",
-        "ID_W": "4",
-        "Enable": "1'b1"
-      },
-      "instances": []
-    },
-    {
-      "id": "rapt_bus",
-      "file": "rtl/memory/rapt_bus.sv",
-      "domain": "memory",
-      "stage": 8,
-      "summary": "",
-      "params": {
-        "XLEN": "`RAPT_XLEN",
-        "PostedWrites": "0",
-        "PostedAckDelay": "`RAPT_POSTED_ACK_DELAY"
-      },
-      "instances": []
-    },
-    {
-      "id": "rapt_cache_fill_select",
-      "file": "rtl/memory/rapt_cache_fill_select.sv",
-      "domain": "memory",
-      "stage": null,
-      "summary": "Reuse a live matching line, otherwise an invalid candidate, otherwise the replacement-policy victim. Way zero is a valid result, not a sentinel.",
-      "params": {
-        "Ways": "2",
-        "WayBits": "Ways > 1 ? $clog2(Ways"
-      },
-      "instances": []
-    },
-    {
-      "id": "rapt_cache_plru",
-      "file": "rtl/memory/rapt_cache_plru.sv",
-      "domain": "memory",
-      "stage": null,
-      "summary": "Multi-query tree PLRU. Bits record the most recently used child. Only nodes on an accessed leaf's path change. Update ports are applied in ascending order; a higher port wins only on nodes both ports touch.",
-      "params": {
-        "Ways": "4",
-        "SetBits": "4",
-        "ReadPorts": "2",
-        "UpdatePorts": "2",
-        "WayBits": "$clog2(Ways"
-      },
-      "instances": []
-    },
-    {
-      "id": "rapt_cached_ptw",
-      "file": "rtl/memory/rapt_cached_ptw.sv",
-      "domain": "memory",
-      "stage": null,
-      "summary": "L1 miss adapter: probe the shared L2 TLB before starting the existing PTW. Cancellation drains accepted PTE reads through the PTW's original protocol.",
-      "params": {
-        "XLEN": "`RAPT_XLEN",
-        "Enable": "0"
-      },
-      "instances": [
-        {
-          "type": "rapt_ptw",
-          "name": "walker",
-          "ports": []
-        },
-        {
-          "type": "rapt_ptw",
-          "name": "walker",
-          "ports": [
-            "clock",
-            "reset",
-            "req_valid",
-            "kill",
-            "vaddr",
-            "satp_ppn",
-            "mmu_en",
-            "pbmte",
-            "sbe",
-            "req_store",
-            "bus_arvalid",
-            "bus_araddr",
-            "bus_arready",
-            "bus_rvalid",
-            "bus_rdata",
-            "done",
-            "fault",
-            "result_ptag",
-            "result_vtag",
-            "result_pte",
-            "result_pbmt",
-            "busy"
-          ]
-        }
-      ]
-    },
-    {
-      "id": "rapt_ifetch_translate",
-      "file": "rtl/memory/rapt_ifetch_translate.sv",
-      "domain": "memory",
-      "stage": 0,
-      "summary": "Translation adapter for the per-word fetch controller. Every accepted request produces one response, even after cancellation. A killed PTW does not itself pulse done/fault, so its busy falling is explicitly acknowledged. The caller discards the response of a cancelled architectur",
-      "params": {
-        "XLEN": "`RAPT_XLEN"
-      },
-      "instances": [
-        {
-          "type": "rapt_pmp",
-          "name": "u_pmp",
-          "ports": [
-            "addr",
-            "size_m1",
-            "priv",
-            "op_r",
-            "op_w",
-            "op_x",
-            "pmp_raw_addr",
-            "pmp_napot_mask",
-            "pmp_cfg_r",
-            "pmp_cfg_w",
-            "pmp_cfg_x",
-            "pmp_cfg_l",
-            "pmp_mode_off",
-            "pmp_mode_tor",
-            "pmp_mode_na4",
-            "pmp_mode_napot",
-            "fault",
-            "fault_lo_o"
-          ]
-        },
-        {
-          "type": "rapt_ptw",
-          "name": "u_ptw",
-          "ports": [
-            "clock",
-            "reset",
-            "req_valid",
-            "kill",
-            "vaddr",
-            "satp_ppn",
-            "mmu_en",
-            "pbmte",
-            "sbe",
-            "req_store",
-            "bus_arvalid",
-            "bus_araddr",
-            "bus_arready",
-            "bus_rvalid",
-            "bus_rdata",
-            "done",
-            "fault",
-            "result_ptag",
-            "result_vtag",
-            "result_pte",
-            "result_pbmt",
-            "busy"
-          ]
-        }
-      ]
-    },
-    {
-      "id": "rapt_ifetch_word",
-      "file": "rtl/memory/rapt_ifetch_word.sv",
-      "domain": "memory",
-      "stage": null,
-      "summary": "One architectural instruction, with an independently translated second aligned word only when a 32-bit instruction straddles a word boundary. Translation and data channels each accept one obligation and must return exactly one response, including after kill. This unit drains acce",
-      "params": {
-        "XLEN": "`RAPT_XLEN"
-      },
-      "instances": []
-    },
-    {
       "id": "rapt_l1d",
-      "file": "rtl/memory/rapt_l1d.sv",
+      "file": "rtl/memory/dcache/rapt_l1d.sv",
       "domain": "memory",
       "stage": 7,
       "summary": "",
       "params": {
         "WriteBack": "`RAPT_L1D_WRITEBACK",
+        "TargetedCoherence": "`RAPT_L1D_TARGETED_COHERENCE",
         "LineRefill": "1",
+        "DirtySkip": "0",
         "L1D_LINE_LEN": "`RAPT_L1D_LINE_LEN",
         "L1D_LINE_SIZE": "2 ** L1D_LINE_LEN",
         "L1D_LEN": "`RAPT_L1D_LEN",
         "L1D_SIZE": "2 ** L1D_LEN",
         "XLEN": "`RAPT_XLEN",
-        "L1D_N_WAYS": "`RAPT_L1D_N_WAYS",
+        "L1D_N_WAYS": "`RAPT_L1D_WAYS",
         "PADDR_BITS": "`RAPT_PADDR_BITS",
-        "L2Tlb": "0"
+        "L2Tlb": "0",
+        "L2Cache": "rapt_pkg::L2LinkConfig.cache",
+        "L2Inclusive": "rapt_pkg::L2LinkConfig.inclusive",
+        "L2Release": "rapt_pkg::L2LinkConfig.victim_release",
+        "L2LineOffset": "rapt_pkg::L2LinkConfig.line_offset"
       },
       "instances": [
         {
@@ -4913,6 +4828,7 @@
             "write_valid",
             "write_addr",
             "write_data",
+            "write_accept",
             "write_ready",
             "write_error",
             "read_addr",
@@ -4928,6 +4844,9 @@
             "clock",
             "reset",
             "read_addr",
+            "read_word",
+            "read_line",
+            "read_way",
             "write_valid",
             "write_blocked",
             "write_addr",
@@ -4938,11 +4857,12 @@
             "write_line",
             "write_mask",
             "write_line_data",
-            "read_valid",
             "read_index",
-            "read_word_valid",
             "read_word_index",
-            "read_data"
+            "read_bank_valid",
+            "read_data",
+            "read_line_valid",
+            "read_line_data"
           ]
         },
         {
@@ -4987,7 +4907,13 @@
             "clock",
             "reset",
             "flush",
+            "sfence_valid",
+            "sfence_vpn",
+            "sfence_asid",
+            "sfence_all_vpn",
+            "sfence_all_asid",
             "lookup_vtag",
+            "lookup_valid",
             "lookup_asid",
             "hit",
             "ptag",
@@ -5000,6 +4926,7 @@
             "fill_vtag",
             "fill_asid",
             "fill_pbmt",
+            "fill_level",
             "fill_pte"
           ]
         },
@@ -5010,7 +4937,13 @@
             "clock",
             "reset",
             "flush",
+            "sfence_valid",
+            "sfence_vpn",
+            "sfence_asid",
+            "sfence_all_vpn",
+            "sfence_all_asid",
             "lookup_vtag",
+            "lookup_valid",
             "lookup_asid",
             "hit",
             "ptag",
@@ -5023,6 +4956,7 @@
             "fill_vtag",
             "fill_asid",
             "fill_pbmt",
+            "fill_level",
             "fill_pte"
           ]
         },
@@ -5062,6 +4996,8 @@
           "ports": [
             "update_dirty",
             "inspect_set",
+            "inspect_read",
+            "inspect_source",
             "inspect_way",
             "clean_valid",
             "clean_mask",
@@ -5070,6 +5006,8 @@
             "inspect_dirty",
             "inspect_dirty_any",
             "dirty_any",
+            "first_dirty_set",
+            "first_dirty_way",
             "update_blocked",
             "clock",
             "reset",
@@ -5079,11 +5017,7 @@
             "clear_line_valid",
             "clear_line_idx",
             "clear_line_tag",
-            "clear_line_dirty_way",
-            "addr_idx",
-            "addr_offset",
-            "addr_tag",
-            "waddr_idx"
+            "clear_line_dirty_way"
           ]
         },
         {
@@ -5120,7 +5054,7 @@
     },
     {
       "id": "rapt_l1d_access",
-      "file": "rtl/memory/rapt_l1d_access.sv",
+      "file": "rtl/memory/dcache/rapt_l1d_access.sv",
       "domain": "memory",
       "stage": null,
       "summary": "",
@@ -5159,23 +5093,25 @@
     },
     {
       "id": "rapt_l1d_data",
-      "file": "rtl/memory/rapt_l1d_data.sv",
+      "file": "rtl/memory/dcache/rapt_l1d_data.sv",
       "domain": "memory",
       "stage": null,
-      "summary": "L1D word-write / line-read data array, built from <=128-bit 1RW SRAMs. A write reserves only its selected way/subarray. Other banks read on the same edge; each bank reports which set its output currently represents.",
+      "summary": "Chunk c of way w is in bank (w + c) modulo Chunks, within w's group. A word read visits chunk c in every bank; a line read visits all chunks of one way. Partial groups compact the row to c modulo GroupWays, so four-way caches use 256x64 banks without allocating unreachable rows.",
       "params": {
         "Xlen": "32",
         "SetBits": "4",
         "WordBits": "2",
         "Ways": "2",
         "LineWords": "2 ** WordBits",
-        "WayBits": "Ways > 1 ? $clog2(Ways"
+        "WayBits": "Ways > 1 ? $clog2(Ways",
+        "Chunks": "LineWords * Xlen / 64",
+        "Banks": "((Ways + Chunks - 1"
       },
       "instances": []
     },
     {
       "id": "rapt_l1d_mshr",
-      "file": "rtl/memory/rapt_l1d_mshr.sv",
+      "file": "rtl/memory/dcache/rapt_l1d_mshr.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Physical-line miss table and refill buffers. Requests replay through L1D (including translation/PMP) before consuming data; no speculative ROB tags are retained here. Completed lines stay until replaced or invalidated.",
@@ -5192,7 +5128,7 @@
     },
     {
       "id": "rapt_l1d_tags",
-      "file": "rtl/memory/rapt_l1d_tags.sv",
+      "file": "rtl/memory/dcache/rapt_l1d_tags.sv",
       "domain": "memory",
       "stage": null,
       "summary": "L1D tag/valid ownership and replacement lookup. Reads are combinational; updates and fence invalidation occur on the same edge as the data write. The controller retains transaction sequencing and the two-way toggle.",
@@ -5201,12 +5137,44 @@
         "L1D_LINE_LEN": "`RAPT_L1D_LINE_LEN",
         "L1D_SIZE": "2 ** L1D_LEN",
         "L1D_LINE_SIZE": "2 ** L1D_LINE_LEN",
-        "L1D_N_WAYS": "`RAPT_L1D_N_WAYS",
+        "L1D_N_WAYS": "`RAPT_L1D_WAYS",
         "L1dTagW": "`RAPT_PADDR_BITS - L1D_LEN - L1D_LINE_LEN - $clog2(`RAPT_XLEN / 8",
         "L1dWayW": "L1D_N_WAYS > 1 ? $clog2(L1D_N_WAYS",
-        "WriteBack": "1'b0"
+        "WriteBack": "1'b0",
+        "DirtySkip": "1'b0",
+        "CacheLru": "`RAPT_CACHE_LRU != 0",
+        "SharedReadPorts": "1'b0",
+        "CacheNru": "`RAPT_L1D_NRU != 0"
       },
       "instances": [
+        {
+          "type": "rapt_cache_nru",
+          "name": "u_policy",
+          "ports": [
+            "clock",
+            "reset",
+            "invalidate",
+            "read_set",
+            "victim",
+            "update_valid",
+            "update_set",
+            "update_way"
+          ]
+        },
+        {
+          "type": "rapt_cache_lru",
+          "name": "u_policy",
+          "ports": [
+            "clock",
+            "reset",
+            "invalidate",
+            "read_set",
+            "victim",
+            "update_valid",
+            "update_set",
+            "update_way"
+          ]
+        },
         {
           "type": "rapt_cache_plru",
           "name": "u_policy",
@@ -5245,7 +5213,7 @@
     },
     {
       "id": "rapt_l1d_writeback",
-      "file": "rtl/memory/rapt_l1d_writeback.sv",
+      "file": "rtl/memory/dcache/rapt_l1d_writeback.sv",
       "domain": "memory",
       "stage": null,
       "summary": "",
@@ -5254,13 +5222,84 @@
         "LineWords": "16",
         "WordBits": "$clog2(LineWords",
         "Entries": "1",
+        "Pipelined": "1'b0",
         "AllowRetry": "1'b0"
       },
       "instances": []
     },
     {
+      "id": "rapt_ifetch_translate",
+      "file": "rtl/memory/icache/rapt_ifetch_translate.sv",
+      "domain": "memory",
+      "stage": 0,
+      "summary": "Translation adapter for the per-word fetch controller. Every accepted request produces one response, even after cancellation. A killed PTW does not itself pulse done/fault, so its busy falling is explicitly acknowledged. The caller discards the response of a cancelled architectur",
+      "params": {
+        "XLEN": "`RAPT_XLEN",
+        "ExternalPmp": "1'b0"
+      },
+      "instances": [
+        {
+          "type": "rapt_pmp_check",
+          "name": "u_pmp",
+          "ports": [
+            "addr",
+            "size_m1",
+            "priv",
+            "op_r",
+            "op_w",
+            "op_x",
+            "state",
+            "fault",
+            "fault_lo_o",
+            "fault_read_o",
+            "fault_write_o"
+          ]
+        },
+        {
+          "type": "rapt_ptw",
+          "name": "u_ptw",
+          "ports": [
+            "clock",
+            "reset",
+            "req_valid",
+            "kill",
+            "vaddr",
+            "satp_ppn",
+            "mmu_en",
+            "pbmte",
+            "sbe",
+            "req_store",
+            "bus_arvalid",
+            "bus_araddr",
+            "bus_arready",
+            "bus_rvalid",
+            "bus_rdata",
+            "done",
+            "fault",
+            "result_ptag",
+            "result_vtag",
+            "result_pte",
+            "result_pbmt",
+            "result_level",
+            "busy"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rapt_ifetch_word",
+      "file": "rtl/memory/icache/rapt_ifetch_word.sv",
+      "domain": "memory",
+      "stage": null,
+      "summary": "One architectural instruction, with an independently translated second aligned word only when a 32-bit instruction straddles a word boundary. Translation and data channels each accept one obligation and must return exactly one response, including after kill. This unit drains acce",
+      "params": {
+        "XLEN": "`RAPT_XLEN"
+      },
+      "instances": []
+    },
+    {
       "id": "rapt_l1i",
-      "file": "rtl/memory/rapt_l1i.sv",
+      "file": "rtl/memory/icache/rapt_l1i.sv",
       "domain": "memory",
       "stage": 0,
       "summary": "",
@@ -5272,7 +5311,10 @@
         "L1I_LEN": "`RAPT_L1I_LEN",
         "L1I_N_WAYS": "`RAPT_L1I_N_WAYS",
         "PADDR_BITS": "`RAPT_PADDR_BITS",
-        "L2Tlb": "0"
+        "L2Tlb": "0",
+        "L2Cache": "rapt_pkg::L2LinkConfig.cache",
+        "L2LineOffset": "rapt_pkg::L2LinkConfig.line_offset",
+        "CacheLru": "`RAPT_CACHE_LRU != 0"
       },
       "instances": [
         {
@@ -5341,17 +5383,18 @@
             "priv",
             "satp_ppn",
             "pmp_state",
+            "pmp_addr_o",
+            "pmp_size_m1_o",
+            "pmp_priv_o",
+            "pmp_read_o",
+            "pmp_fault_i",
+            "pmp_read_fault_i",
             "response_valid",
             "response_paddr",
             "response_pbmt",
             "response_fault",
             "response_cause",
-            "bus_arvalid",
-            "bus_araddr",
-            "bus_arready",
-            "bus_rvalid",
-            "bus_rerror",
-            "bus_rdata"
+            "bus_arvalid"
           ]
         },
         {
@@ -5370,7 +5413,13 @@
             "clock",
             "reset",
             "flush",
+            "sfence_valid",
+            "sfence_vpn",
+            "sfence_asid",
+            "sfence_all_vpn",
+            "sfence_all_asid",
             "lookup_vtag",
+            "lookup_valid",
             "lookup_asid",
             "hit",
             "ptag",
@@ -5381,6 +5430,7 @@
             "fill_vtag",
             "fill_asid",
             "fill_pbmt",
+            "fill_level",
             "fill_pte"
           ]
         },
@@ -5420,6 +5470,13 @@
           "ports": [
             "csr_bcast",
             "pmp_state",
+            "shared_check_active",
+            "shared_check_addr",
+            "shared_check_size_m1",
+            "shared_check_priv",
+            "shared_check_read",
+            "shared_check_fault",
+            "shared_check_read_fault",
             "pc_ifu",
             "ptw_araddr",
             "sram_data_ready",
@@ -5434,14 +5491,7 @@
             "pmp_iptw_fault",
             "lookahead_n2_addr",
             "pmp_n1_fetch_fault",
-            "lookahead_n1_addr",
-            "lookahead_n2_addr",
-            "pmp_n1_fetch_fault",
-            "pmp_n2_fetch_fault",
-            "lookahead_n3_addr",
-            "lookahead_n4_addr",
-            "pmp_n3_fetch_fault",
-            "pmp_n4_fetch_fault"
+            "lookahead_n1_addr"
           ]
         },
         {
@@ -5463,6 +5513,20 @@
             "valid_set",
             "valid_set_idx",
             "inv"
+          ]
+        },
+        {
+          "type": "rapt_cache_lru",
+          "name": "u_policy",
+          "ports": [
+            "clock",
+            "reset",
+            "invalidate",
+            "read_set",
+            "victim",
+            "update_valid",
+            "update_set",
+            "update_way"
           ]
         },
         {
@@ -5501,14 +5565,15 @@
     },
     {
       "id": "rapt_l1i_access",
-      "file": "rtl/memory/rapt_l1i_access.sv",
+      "file": "rtl/memory/icache/rapt_l1i_access.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Fetch permissions are combinational. Fault ownership, SRAM readiness and refill/PTW sequencing remain in the instruction-cache controller.",
       "params": {
         "XLEN": "`RAPT_XLEN",
         "Lookahead": "1'b1",
-        "WideLookahead": "1'b0"
+        "WideLookahead": "1'b0",
+        "ShareSlowPath": "1'b0"
       },
       "instances": [
         {
@@ -5548,7 +5613,7 @@
     },
     {
       "id": "rapt_l1i_data",
-      "file": "rtl/memory/rapt_l1i_data.sv",
+      "file": "rtl/memory/icache/rapt_l1i_data.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Independently addressed banks let a fetch window straddle adjacent sets. Ways share each bank's read address; each way owns its read validity.",
@@ -5563,7 +5628,7 @@
     },
     {
       "id": "rapt_l1i_tagmem",
-      "file": "rtl/memory/rapt_l1i_tagmem.sv",
+      "file": "rtl/memory/icache/rapt_l1i_tagmem.sv",
       "domain": "memory",
       "stage": null,
       "summary": "",
@@ -5575,8 +5640,1013 @@
       "instances": []
     },
     {
+      "id": "rapt_cached_ptw",
+      "file": "rtl/memory/mmu/rapt_cached_ptw.sv",
+      "domain": "memory",
+      "stage": null,
+      "summary": "L1 miss adapter: probe the shared L2 TLB before starting the existing PTW. Cancellation drains accepted PTE reads through the PTW's original protocol.",
+      "params": {
+        "XLEN": "`RAPT_XLEN",
+        "Enable": "0"
+      },
+      "instances": [
+        {
+          "type": "rapt_ptw",
+          "name": "walker",
+          "ports": []
+        },
+        {
+          "type": "rapt_ptw",
+          "name": "walker",
+          "ports": [
+            "clock",
+            "reset",
+            "req_valid",
+            "kill",
+            "vaddr",
+            "satp_ppn",
+            "mmu_en",
+            "pbmte",
+            "sbe",
+            "req_store",
+            "bus_arvalid",
+            "bus_araddr",
+            "bus_arready",
+            "bus_rvalid",
+            "bus_rdata",
+            "done",
+            "fault",
+            "result_ptag",
+            "result_vtag",
+            "result_pte",
+            "result_pbmt",
+            "result_level",
+            "busy"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rapt_l2tlb",
+      "file": "rtl/memory/mmu/rapt_l2tlb.sv",
+      "domain": "memory",
+      "stage": 7,
+      "summary": "Shared, direct-mapped L2 TLB. VPN low bits select one row; superpage translations are cached as the resolved 4 KiB subpage returned by the PTW. One synchronous row port serves I/D lookups and fills with round-robin arbitration. Payload RAM is not reset; a separate valid vector is",
+      "params": {
+        "Entries": "256",
+        "XLEN": "`RAPT_XLEN"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_pmp_state",
+      "file": "rtl/memory/mmu/rapt_pmp.sv",
+      "domain": "memory",
+      "stage": 7,
+      "summary": "",
+      "params": {
+        "N": "`RAPT_PMP_NUM"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_pmp_permissions",
+      "file": "rtl/memory/mmu/rapt_pmp.sv",
+      "domain": "memory",
+      "stage": 7,
+      "summary": "",
+      "params": {
+        "XLEN": "`RAPT_XLEN",
+        "PADDR_BITS": "`RAPT_PADDR_BITS"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_pmp_check",
+      "file": "rtl/memory/mmu/rapt_pmp.sv",
+      "domain": "memory",
+      "stage": null,
+      "summary": "",
+      "params": {
+        "XLEN": "`RAPT_XLEN"
+      },
+      "instances": [
+        {
+          "type": "rapt_pmp_permissions",
+          "name": "check_permissions",
+          "ports": [
+            "addr",
+            "size_m1",
+            "priv",
+            "op_r",
+            "op_w",
+            "op_x",
+            "pmp_raw_addr",
+            "pmp_napot_mask",
+            "pmp_cfg_r",
+            "pmp_cfg_w",
+            "pmp_cfg_x",
+            "pmp_cfg_l",
+            "pmp_mode_off",
+            "pmp_mode_tor",
+            "pmp_mode_na4",
+            "pmp_mode_napot",
+            "fault",
+            "fault_lo_o",
+            "fault_read_o",
+            "fault_write_o"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rapt_pmp",
+      "file": "rtl/memory/mmu/rapt_pmp.sv",
+      "domain": "memory",
+      "stage": 7,
+      "summary": "",
+      "params": {
+        "XLEN": "`RAPT_XLEN",
+        "PADDR_BITS": "`RAPT_PADDR_BITS"
+      },
+      "instances": [
+        {
+          "type": "rapt_pmp_permissions",
+          "name": "check_permissions",
+          "ports": [
+            "addr",
+            "size_m1",
+            "priv",
+            "op_r",
+            "op_w",
+            "op_x",
+            "pmp_raw_addr",
+            "pmp_napot_mask",
+            "pmp_cfg_r",
+            "pmp_cfg_w",
+            "pmp_cfg_x",
+            "pmp_cfg_l",
+            "pmp_mode_off",
+            "pmp_mode_tor",
+            "pmp_mode_na4",
+            "pmp_mode_napot",
+            "fault",
+            "fault_lo_o",
+            "fault_read_o",
+            "fault_write_o"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rapt_pmp_line_uniform",
+      "file": "rtl/memory/mmu/rapt_pmp.sv",
+      "domain": "memory",
+      "stage": null,
+      "summary": "",
+      "params": {
+        "XLEN": "`RAPT_XLEN",
+        "PADDR_BITS": "`RAPT_PADDR_BITS",
+        "LineOffset": "6"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_pmp_window_uniform",
+      "file": "rtl/memory/mmu/rapt_pmp.sv",
+      "domain": "memory",
+      "stage": null,
+      "summary": "",
+      "params": {
+        "XLEN": "`RAPT_XLEN",
+        "PADDR_BITS": "`RAPT_PADDR_BITS",
+        "Words": "4",
+        "AlignedWindow": "1'b0"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_ptw",
+      "file": "rtl/memory/mmu/rapt_ptw.sv",
+      "domain": "memory",
+      "stage": 7,
+      "summary": "Read-only page-table walker. RV32 uses Sv32 two-level page tables. RV64 uses the Sv39 three-level format expected by upstream xv6-riscv. Permission checks against the access type and current privilege are performed by the requesters (L1I/L1D) using the returned PTE flags.  RVA20S",
+      "params": {
+        "XLEN": "`RAPT_XLEN"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_tlb",
+      "file": "rtl/memory/mmu/rapt_tlb.sv",
+      "domain": "memory",
+      "stage": 7,
+      "summary": "Fully-associative TLB for Sv32/Sv39 page translation with ASID support. Both configurations implement ASIDLEN=9; the RV64 satp WARL logic clears the seven unimplemented high ASID bits on write. Combinational lookup, sequential fill, invalid-first round-robin replacement.",
+      "params": {
+        "XLEN": "`RAPT_XLEN",
+        "ENTRIES": "4",
+        "TlbLru": "`RAPT_TLB_LRU != 0",
+        "TlbPlru": "`RAPT_TLB_PLRU != 0"
+      },
+      "instances": [
+        {
+          "type": "rapt_tlb_lru",
+          "name": "u_lru",
+          "ports": [
+            "lookup_valid",
+            "fill_valid",
+            "victim"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rapt_data_tlb",
+      "file": "rtl/memory/mmu/rapt_tlb.sv",
+      "domain": "memory",
+      "stage": null,
+      "summary": "Fully-associative TLB for Sv32/Sv39 page translation with ASID support. Both configurations implement ASIDLEN=9; the RV64 satp WARL logic clears the seven unimplemented high ASID bits on write. Combinational lookup, sequential fill, invalid-first round-robin replacement.",
+      "params": {
+        "XLEN": "`RAPT_XLEN",
+        "ENTRIES": "64",
+        "WAYS": "1",
+        "TlbLru": "`RAPT_TLB_LRU != 0",
+        "TlbPlru": "`RAPT_TLB_PLRU != 0"
+      },
+      "instances": [
+        {
+          "type": "rapt_tlb_lru",
+          "name": "u_lru",
+          "ports": [
+            "lookup_valid",
+            "fill_valid",
+            "victim"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rapt_tlb_lru",
+      "file": "rtl/memory/mmu/rapt_tlb.sv",
+      "domain": "memory",
+      "stage": null,
+      "summary": "Fully-associative TLB for Sv32/Sv39 page translation with ASID support. Both configurations implement ASIDLEN=9; the RV64 satp WARL logic clears the seven unimplemented high ASID bits on write. Combinational lookup, sequential fill, invalid-first round-robin replacement.",
+      "params": {
+        "Entries": "16",
+        "Plru": "0",
+        "EntryIdxW": "$clog2(Entries"
+      },
+      "instances": [
+        {
+          "type": "rapt_cache_plru",
+          "name": "u_policy",
+          "ports": [
+            "invalidate",
+            "victim"
+          ]
+        },
+        {
+          "type": "rapt_cache_lru",
+          "name": "u_policy",
+          "ports": [
+            "invalidate",
+            "victim"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rapt_bus",
+      "file": "rtl/memory/rapt_bus.sv",
+      "domain": "memory",
+      "stage": 8,
+      "summary": "",
+      "params": {
+        "XLEN": "`RAPT_XLEN",
+        "TargetedCoherence": "`RAPT_L1D_TARGETED_COHERENCE",
+        "PostedWrites": "0",
+        "PostedAckDelay": "`RAPT_POSTED_ACK_DELAY"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_memory",
+      "file": "rtl/memory/rapt_memory.sv",
+      "domain": "memory",
+      "stage": 7,
+      "summary": "Per-hart memory block: L1I, L1D, TLBs/PTWs, PMP and the bus interface unit (rapt_bus). Every access leaves through the L2 client port; AXI, outstanding-transaction management and any L2 cache live in the L2 subsystem outside the core (rapt_l2_subsystem).",
+      "params": {
+        "XLEN": "`RAPT_XLEN",
+        "L1dWriteBack": "`RAPT_L1D_WRITEBACK",
+        "TargetedCoherence": "`RAPT_L1D_TARGETED_COHERENCE"
+      },
+      "instances": [
+        {
+          "type": "rapt_memory_drain",
+          "name": "drain_control",
+          "ports": [
+            "clock",
+            "reset",
+            "request_i",
+            "stores_empty_i",
+            "memory_idle_i",
+            "writeback_idle_i",
+            "drain_o",
+            "done_o"
+          ]
+        },
+        {
+          "type": "rapt_pmp_state",
+          "name": "pmp_fetch_state_regs",
+          "ports": [
+            "clock",
+            "reset",
+            "update",
+            "state"
+          ]
+        },
+        {
+          "type": "rapt_l2tlb",
+          "name": "u_l2tlb",
+          "ports": [
+            "clock",
+            "reset",
+            "flush",
+            "cancel",
+            "sfence_valid",
+            "sfence_vpn",
+            "sfence_asid",
+            "sfence_all_vpn",
+            "sfence_all_asid",
+            "req_i",
+            "ready_o",
+            "rsp_o"
+          ]
+        },
+        {
+          "type": "rapt_l1i",
+          "name": "l1i_cache",
+          "ports": [
+            "l2tlb_req_o",
+            "l2tlb_ready_i",
+            "l2tlb_rsp_i",
+            "clock",
+            "reset",
+            "io_authorized",
+            "io_start",
+            "io_owner_pc",
+            "cmu_bcast",
+            "ifu_l1i",
+            "l1i_bus",
+            "csr_bcast",
+            "pmp_state"
+          ]
+        },
+        {
+          "type": "rapt_l1d",
+          "name": "l1d_cache",
+          "ports": [
+            "l2tlb_req_o",
+            "l2tlb_ready_i",
+            "l2tlb_rsp_i",
+            "clock",
+            "reset",
+            "coherent_ready",
+            "coherent_request",
+            "coherent_write",
+            "coherent_addr",
+            "probe_valid_i",
+            "probe_addr_i",
+            "probe_ready_o",
+            "probe_release_valid_o",
+            "probe_release_addr_o",
+            "probe_release_data_o",
+            "probe_release_ready_i",
+            "release_valid_o",
+            "release_addr_o",
+            "release_data_o",
+            "release_has_data_o",
+            "release_mask_o",
+            "release_last_o",
+            "release_ready_i",
+            "release_ack_i"
+          ]
+        },
+        {
+          "type": "rapt_bus",
+          "name": "bus",
+          "ports": [
+            "clock",
+            "reset",
+            "coherent_ready",
+            "coherent_request",
+            "coherent_write",
+            "coherent_addr",
+            "mem",
+            "rd_req_cacheable",
+            "l1i_bus",
+            "l1d_bus",
+            "csr_bcast",
+            "cmu_bcast"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rapt_memory_drain",
+      "file": "rtl/memory/rapt_memory_drain.sv",
+      "domain": "memory",
+      "stage": null,
+      "summary": "A serializing ROB owner holds request_i until its ordering point retires or is cancelled. Completion is a transaction result, not a live cache-idle signal. The store queue and memory must both be quiescent before completion; this also includes posted write responses and late refi",
+      "params": {},
+      "instances": []
+    },
+    {
+      "id": "rapt_cache_fill_select",
+      "file": "rtl/memory/replacement/rapt_cache_fill_select.sv",
+      "domain": "memory",
+      "stage": null,
+      "summary": "Reuse a live matching line, otherwise an invalid candidate, otherwise the replacement-policy victim. Way zero is a valid result, not a sentinel.",
+      "params": {
+        "Ways": "2",
+        "WayBits": "Ways > 1 ? $clog2(Ways"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_cache_lru",
+      "file": "rtl/memory/replacement/rapt_cache_lru.sv",
+      "domain": "memory",
+      "stage": null,
+      "summary": "Multi-query true LRU, interface-compatible with rapt_cache_plru. Each set keeps one bit per way pair (i < j): set when way j was used after way i. A touch makes its way newer than every other way; update ports are applied in ascending order, so a higher port wins on pairs both po",
+      "params": {
+        "Ways": "4",
+        "SetBits": "4",
+        "ReadPorts": "2",
+        "UpdatePorts": "2",
+        "WayBits": "$clog2(Ways"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_cache_nru",
+      "file": "rtl/memory/replacement/rapt_cache_nru.sv",
+      "domain": "memory",
+      "stage": null,
+      "summary": "One recent bit per way. Touching the last cold way starts a new epoch, retaining only the touched way. The caller merges mutually exclusive hit and install updates before this single indexed write port.",
+      "params": {
+        "Ways": "8",
+        "SetBits": "6",
+        "ReadPorts": "2",
+        "WayBits": "$clog2(Ways"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_cache_plru",
+      "file": "rtl/memory/replacement/rapt_cache_plru.sv",
+      "domain": "memory",
+      "stage": null,
+      "summary": "Multi-query tree PLRU. Bits record the most recently used child. Only nodes on an accessed leaf's path change. Update ports are applied in ascending order; a higher port wins only on nodes both ports touch.",
+      "params": {
+        "Ways": "4",
+        "SetBits": "4",
+        "ReadPorts": "2",
+        "UpdatePorts": "2",
+        "WayBits": "$clog2(Ways"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_clint",
+      "file": "rtl/perip/rapt_clint.sv",
+      "domain": "cluster",
+      "stage": 9,
+      "summary": "Core Local INTerrupt controller (standard CLINT layout) Register map (base 0x02000000): 0x0000  msip      (32-bit, bit 0 only)  - M-mode software interrupt pending 0x4000  mtimecmp  (64-bit)              - timer compare register 0xBFF8  mtime     (64-bit, read/write)  - real-time",
+      "params": {
+        "XLEN": "`RAPT_XLEN",
+        "MTIME_DIV": "`RAPT_MTIME_DIV"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_dm",
+      "file": "rtl/perip/rapt_dm.sv",
+      "domain": "cluster",
+      "stage": 9,
+      "summary": "rapt_dm: minimal RISC-V Debug Module. Register file (DTM-side compliance probe): - dmcontrol  (RW: dmactive, ndmreset, haltreq, resumereq) - dmstatus   (RO: version=3, authenticated=1, {any,all}{halted,running,resumeack}) - hartinfo   (RO: 0) - abstractcs (R: progbufsize=0, datac",
+      "params": {
+        "XLEN": "`RAPT_XLEN"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_dtm",
+      "file": "rtl/perip/rapt_dtm.sv",
+      "domain": "cluster",
+      "stage": 9,
+      "summary": "rapt_dtm: minimal RISC-V Debug Transport Module (DTM) implementing IEEE 1149.1 TAP semantics over a single-clock-domain simplification (tck = clock). Implements the four IRs required by RISC-V Debug Spec 1.0: IR=0x01 IDCODE  : 32-bit constant device id IR=0x10 DTMCS   : 32-bit DT",
+      "params": {},
+      "instances": []
+    },
+    {
+      "id": "rapt_plic",
+      "file": "rtl/perip/rapt_plic.sv",
+      "domain": "cluster",
+      "stage": 9,
+      "summary": "rapt_plic -- Platform-Level Interrupt Controller (PLIC) Reference: https://github.com/riscv/riscv-plic-spec/blob/master/riscv-plic-1.0.0.pdf nemu/src/device/intr.c (functional reference used by difftest) Configuration (parameterised, defaults from rapt_soc.svh): NDEV  = number of",
+      "params": {
+        "XLEN": "`RAPT_XLEN",
+        "NDEV": "`RAPT_PLIC_NDEV",
+        "NCTX": "`RAPT_PLIC_NCTX",
+        "NHART": "(NCTX + 1"
+      },
+      "instances": []
+    },
+    {
+      "id": "axi2rnp",
+      "file": "rtl/perip/wrap_rnp.sv",
+      "domain": "cluster",
+      "stage": null,
+      "summary": "",
+      "params": {
+        "XLEN": "32"
+      },
+      "instances": []
+    },
+    {
+      "id": "rnp2axi",
+      "file": "rtl/perip/wrap_rnp.sv",
+      "domain": "cluster",
+      "stage": null,
+      "summary": "",
+      "params": {
+        "XLEN": "32"
+      },
+      "instances": []
+    },
+    {
+      "id": "wrap_rnp",
+      "file": "rtl/perip/wrap_rnp.sv",
+      "domain": "cluster",
+      "stage": null,
+      "summary": "",
+      "params": {},
+      "instances": []
+    },
+    {
+      "id": "wrap_ysyxsoc",
+      "file": "rtl/perip/wrap_ysyxsoc.sv",
+      "domain": "cluster",
+      "stage": null,
+      "summary": "",
+      "params": {},
+      "instances": []
+    },
+    {
+      "id": "ysyx_00000000",
+      "file": "rtl/perip/wrap_ysyxsoc.sv",
+      "domain": "cluster",
+      "stage": null,
+      "summary": "",
+      "params": {},
+      "instances": []
+    },
+    {
+      "id": "rapt",
+      "file": "rtl/rapt.sv",
+      "domain": "core",
+      "stage": 4,
+      "summary": "rapt: cluster-level top. Aggregates one or more `rapt_core` instances and the cluster-shared peripherals that, per the RISC-V platform spec, must be shared across all harts (CLINT and PLIC today; IMSIC in the future). The external port set is identical to the historical single-co",
+      "params": {
+        "XLEN": "`RAPT_XLEN",
+        "MemoryReadCredits": "8",
+        "L1dWriteBack": "`RAPT_L1D_WRITEBACK",
+        "NHARTS": "1"
+      },
+      "instances": [
+        {
+          "type": "rapt_clint",
+          "name": "clint_inst",
+          "ports": [
+            "clock",
+            "clint_bus",
+            "reset"
+          ]
+        },
+        {
+          "type": "rapt_plic",
+          "name": "plic",
+          "ports": [
+            "clock",
+            "reset",
+            "plic_bus"
+          ]
+        },
+        {
+          "type": "rapt_router",
+          "name": "axi_router",
+          "ports": [
+            "clock",
+            "reset",
+            "core_axi",
+            "offchip_axi",
+            "clint_bus",
+            "plic_bus"
+          ]
+        },
+        {
+          "type": "rapt_l2_subsystem",
+          "name": "l2_subsystem",
+          "ports": [
+            "clock",
+            "reset",
+            "client",
+            "io_master"
+          ]
+        },
+        {
+          "type": "rapt_core",
+          "name": "core",
+          "ports": [
+            "writeback_error_o",
+            "external_write_valid_i",
+            "external_write_pending_i",
+            "external_write_first_i",
+            "external_write_last_i",
+            "clock",
+            "l2_client",
+            "clint_timer_int_i",
+            "clint_sw_int_i",
+            "mtime_i",
+            "rvfi_valid",
+            "rvfi_order",
+            "rvfi_insn",
+            "rvfi_trap",
+            "rvfi_halt",
+            "rvfi_intr",
+            "rvfi_mode",
+            "rvfi_ixl",
+            "rvfi_rs1_addr",
+            "rvfi_rs2_addr",
+            "rvfi_rs1_rdata",
+            "rvfi_rs2_rdata",
+            "rvfi_rd_addr",
+            "rvfi_rd_wdata"
+          ]
+        },
+        {
+          "type": "rapt_dtm",
+          "name": "dtm_inst",
+          "ports": [
+            "clock",
+            "reset",
+            "trst_n",
+            "tms",
+            "tdi",
+            "tdo",
+            "dmi_req",
+            "dmi_wr",
+            "dmi_addr",
+            "dmi_wdata",
+            "dmi_rdata",
+            "dmi_resp"
+          ]
+        },
+        {
+          "type": "rapt_dm",
+          "name": "dm_inst",
+          "ports": [
+            "clock",
+            "reset",
+            "dmi_req",
+            "dmi_wr",
+            "dmi_addr",
+            "dmi_wdata",
+            "dmi_rdata",
+            "dmi_resp",
+            "halted_i",
+            "halt_pc_i",
+            "commit_fire_i",
+            "haltreq_o",
+            "resumereq_o",
+            "ndmreset_o",
+            "dbg_gpr_rdata_i",
+            "dbg_gpr_we_o",
+            "dbg_gpr_addr_o",
+            "dbg_gpr_wdata_o"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rapt_core",
+      "file": "rtl/rapt_core.sv",
+      "domain": "core",
+      "stage": 3,
+      "summary": "Single-hart composition of frontend, backend and the private L1 memory block. A cluster (`rapt.sv`) instantiates cores alongside the L2 subsystem and the shared CLINT/PLIC devices. Every memory and MMIO access, including cluster-local CLINT or PLIC register windows, leaves throug",
+      "params": {
+        "XLEN": "`RAPT_XLEN",
+        "L1dWriteBack": "`RAPT_L1D_WRITEBACK"
+      },
+      "instances": [
+        {
+          "type": "rapt_recovery_if",
+          "name": "recovery",
+          "ports": []
+        },
+        {
+          "type": "rapt_frontend",
+          "name": "frontend",
+          "ports": [
+            "clock",
+            "reset",
+            "cmu_bcast",
+            "csr_bcast",
+            "recovery",
+            "ifu_l1i",
+            "idu_rnu",
+            "empty_o",
+            "snapshot_ghr",
+            "snapshot_phr",
+            "history_restore",
+            "restore_ghr",
+            "restore_phr"
+          ]
+        },
+        {
+          "type": "rapt_ifetch_io_guard",
+          "name": "ifetch_io_guard",
+          "ports": [
+            "clock",
+            "reset",
+            "owner_pc",
+            "frontier_pc",
+            "frontier_advance",
+            "blocked",
+            "pipeline_empty",
+            "memory_idle",
+            "io_start",
+            "authorized"
+          ]
+        },
+        {
+          "type": "rapt_memory",
+          "name": "memory_subsystem",
+          "ports": [
+            "clock",
+            "reset",
+            "ifu_l1i",
+            "lsu_l1d",
+            "exu_l1d",
+            "cmu_bcast",
+            "csr_bcast",
+            "pmp_update",
+            "l2_client",
+            "ifetch_io_authorized_i",
+            "ifetch_io_start_o",
+            "ifetch_io_owner_pc_o",
+            "data_idle_o",
+            "writeback_idle_o",
+            "writeback_done_o",
+            "stores_empty_i",
+            "writeback_drain_i",
+            "writeback_clean_i",
+            "writeback_cbo_i",
+            "writeback_cbo_invalidate_i",
+            "writeback_block_i",
+            "writeback_error_o",
+            "external_write_valid_i",
+            "external_write_pending_i"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rapt_sram_1rw",
+      "file": "rtl/sram/rapt_sram_1rw.sv",
+      "domain": "core",
+      "stage": null,
+      "summary": "",
+      "params": {
+        "ADDR_WIDTH": "7",
+        "DATA_WIDTH": "32",
+        "INST_ID": "0",
+        "USE_BWE": "0"
+      },
+      "instances": [
+        {
+          "type": "rapt_openram_1rw_2x64",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        },
+        {
+          "type": "rapt_openram_1rw_4x64",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        },
+        {
+          "type": "rapt_openram_1rw_8x64",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        },
+        {
+          "type": "rapt_openram_1rw_32x64",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        },
+        {
+          "type": "rapt_openram_1rw_64x64",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        },
+        {
+          "type": "rapt_openram_1rw_128x64",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        },
+        {
+          "type": "rapt_openram_1rw_256x64",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        },
+        {
+          "type": "rapt_openram_1rw_512x64",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        },
+        {
+          "type": "rapt_openram_1rw_1024x22",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        },
+        {
+          "type": "rapt_openram_1rw_1024x32",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        },
+        {
+          "type": "rapt_openram_1rw_1024x64",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        },
+        {
+          "type": "rapt_openram_1rw_512x128",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        },
+        {
+          "type": "rapt_openram_1rw_1024x128",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        },
+        {
+          "type": "rapt_openram_1rw_4096x64",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        },
+        {
+          "type": "rapt_openram_1rw_4096x64",
+          "name": "u_sram",
+          "ports": [
+            "clk0",
+            "csb0",
+            "web0",
+            "wmask0",
+            "addr0",
+            "din0",
+            "dout0"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rapt_sram_2rw",
+      "file": "rtl/sram/rapt_sram_2rw.sv",
+      "domain": "core",
+      "stage": null,
+      "summary": "Two independent, clocked read/write ports sharing one memory array. Each enabled port either writes at the rising edge or registers a read result at that edge. Read outputs hold when their port is idle or writes. The caller must avoid same-address cross-port accesses when either ",
+      "params": {
+        "ADDR_WIDTH": "5",
+        "DATA_WIDTH": "64"
+      },
+      "instances": []
+    },
+    {
       "id": "rapt_l2",
-      "file": "rtl/memory/rapt_l2.sv",
+      "file": "rtl/uncore/l2cache/rapt_l2.sv",
       "domain": "memory",
       "stage": 8,
       "summary": "",
@@ -5874,7 +6944,7 @@
     },
     {
       "id": "rapt_l2_bypass_ctrl",
-      "file": "rtl/memory/rapt_l2_bypass_ctrl.sv",
+      "file": "rtl/uncore/l2cache/rapt_l2_bypass_ctrl.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Uncached read phases and the shared registered outer AR channel. The request valid/data ports also admit blocking refills to the same AR register.",
@@ -5886,7 +6956,7 @@
     },
     {
       "id": "rapt_l2_data_array",
-      "file": "rtl/memory/rapt_l2_data_array.sv",
+      "file": "rtl/uncore/l2cache/rapt_l2_data_array.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Medium BOOM data geometry: four 16384 x 64 single-port SRAM banks. bank=chunk[1:0], row={way[2:0],set[9:0],chunk[2]}. Bank priority is SinkC > SourceC > live SinkD > buffered line write > SourceD-write > SourceD-read. A displaced buffered beat retries.",
@@ -5895,7 +6965,7 @@
     },
     {
       "id": "rapt_l2_directory",
-      "file": "rtl/memory/rapt_l2_directory.sv",
+      "file": "rtl/uncore/l2cache/rapt_l2_directory.sv",
       "domain": "memory",
       "stage": null,
       "summary": "BOOM inclusive-cache directory geometry and one-port access contract. Data is stored as one synchronous SRAM per way; a reset wipe clears one set in all ways per cycle before requests become ready.",
@@ -5911,7 +6981,7 @@
     },
     {
       "id": "rapt_l2_evict_ctrl",
-      "file": "rtl/memory/rapt_l2_evict_ctrl.sv",
+      "file": "rtl/uncore/l2cache/rapt_l2_evict_ctrl.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Dirty-victim writeback phases. The parent presents a valid transaction from AW through B; capture data ports carry the victim metadata for that transaction.",
@@ -5924,7 +6994,7 @@
     },
     {
       "id": "rapt_l2_hit_ctrl",
-      "file": "rtl/memory/rapt_l2_hit_ctrl.sv",
+      "file": "rtl/uncore/l2cache/rapt_l2_hit_ctrl.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Resident read phases. Valid/ready selects the hit pipeline; the data ports capture its request and advance the address, word, and remaining beat count.",
@@ -5937,7 +7007,7 @@
     },
     {
       "id": "rapt_l2_mshr_frontend",
-      "file": "rtl/memory/rapt_l2_mshr_frontend.sv",
+      "file": "rtl/uncore/l2cache/rapt_l2_mshr_frontend.sv",
       "domain": "memory",
       "stage": null,
       "summary": "BOOM-sized miss admission and secondary replay fabric. The seven MSHR state machines supply their status and schedule requests; this module arbitrates them and keeps their 21 secondary queues in 33 shared entries. A secondary entry omits the set because its target MSHR already ow",
@@ -5974,7 +7044,7 @@
     },
     {
       "id": "rapt_l2_mshr_scheduler",
-      "file": "rtl/memory/rapt_l2_mshr_scheduler.sv",
+      "file": "rtl/uncore/l2cache/rapt_l2_mshr_scheduler.sv",
       "domain": "memory",
       "stage": null,
       "summary": "BOOM inclusive-cache MSHR allocation and round-robin schedule selection. Five ordinary A slots and the dedicated BC/C slots share one set-conflict table. The secondary request payloads reside in rapt_l2_secondary_buffer.",
@@ -5990,7 +7060,7 @@
     },
     {
       "id": "rapt_l2_put_buffer",
-      "file": "rtl/memory/rapt_l2_put_buffer.sv",
+      "file": "rtl/uncore/l2cache/rapt_l2_put_buffer.sv",
       "domain": "memory",
       "stage": null,
       "summary": "BOOM SinkA's non-flowing put ListBuffer: forty lists share forty beats. A list may hold multiple beats; the caller owns list allocation and retires a list after its last beat has been popped. A full pool does not accept a push merely because another list pops on the same edge.",
@@ -6005,7 +7075,7 @@
     },
     {
       "id": "rapt_l2_refill_ctrl",
-      "file": "rtl/memory/rapt_l2_refill_ctrl.sv",
+      "file": "rtl/uncore/l2cache/rapt_l2_refill_ctrl.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Blocking refill admission and outer read phases. Valid/ready controls the phase; the data ports own the returned line and its merge writes.",
@@ -6019,7 +7089,7 @@
     },
     {
       "id": "rapt_l2_refill_mshrs",
-      "file": "rtl/memory/rapt_l2_refill_mshrs.sv",
+      "file": "rtl/uncore/l2cache/rapt_l2_refill_mshrs.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Independent outer-memory refill contexts for BOOM's seven L2 MSHRs. The outer AXI ID is the context index; the original inner ID is retained for response routing. Different fills may return interleaved beats.",
@@ -6037,7 +7107,7 @@
     },
     {
       "id": "rapt_l2_release_buffer",
-      "file": "rtl/memory/rapt_l2_release_buffer.sv",
+      "file": "rtl/uncore/l2cache/rapt_l2_release_buffer.sv",
       "domain": "memory",
       "stage": null,
       "summary": "Two in-flight L1D release lists share BOOM's lowest-free beat pool. RV64 has 16 shared beats and RV32 has 32. Keep beats until ReleaseAck so a failed nested refill can replay the same ReleaseData without a new C.",
@@ -6053,7 +7123,7 @@
     },
     {
       "id": "rapt_l2_secondary_buffer",
-      "file": "rtl/memory/rapt_l2_secondary_buffer.sv",
+      "file": "rtl/uncore/l2cache/rapt_l2_secondary_buffer.sv",
       "domain": "memory",
       "stage": null,
       "summary": "BOOM inclusive-cache Scheduler uses one shared 33-entry ListBuffer with three virtual request lists for each of its seven MSHRs (A, B and C). The queue is non-flowing: a push into an empty list becomes visible after the clock edge, and a full buffer cannot reuse a simultaneously ",
@@ -6068,132 +7138,44 @@
       "instances": []
     },
     {
-      "id": "rapt_l2tlb",
-      "file": "rtl/memory/rapt_l2tlb.sv",
+      "id": "rapt_axi_master",
+      "file": "rtl/uncore/rapt_axi_master.sv",
       "domain": "memory",
-      "stage": 7,
-      "summary": "Shared, direct-mapped L2 TLB. VPN low bits select one row; superpage translations are cached as the resolved 4 KiB subpage returned by the PTW. One synchronous row port serves I/D lookups and fills with round-robin arbitration. Payload RAM is not reset; a separate valid vector is",
+      "stage": 8,
+      "summary": "",
       "params": {
-        "Entries": "256",
-        "XLEN": "`RAPT_XLEN"
+        "XLEN": "`RAPT_XLEN",
+        "ID_W": "4",
+        "MAX_READ_OUTSTANDING": "8",
+        "USE_CARRIED_READ_CACHEABLE": "0",
+        "MAX_WRITE_OUTSTANDING": "1"
       },
       "instances": []
     },
     {
-      "id": "rapt_memory",
-      "file": "rtl/memory/rapt_memory.sv",
+      "id": "rapt_axi_r_buffer",
+      "file": "rtl/uncore/rapt_axi_r_buffer.sv",
       "domain": "memory",
       "stage": null,
-      "summary": "",
+      "summary": "Register the outer AXI R channel before it enters the cache hierarchy. Two entries let a ready consumer accept one beat on every cycle while rready to the memory controller depends only on registered occupancy.",
       "params": {
         "XLEN": "`RAPT_XLEN",
-        "MemoryReadCredits": "8",
-        "L1dWriteBack": "`RAPT_L1D_WRITEBACK",
-        "PostedWrites": "L1dWriteBack ? 0 : `RAPT_POSTED_WRITES"
+        "ID_W": "4",
+        "Enable": "1'b1"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_l2_subsystem",
+      "file": "rtl/uncore/rapt_l2_subsystem.sv",
+      "domain": "memory",
+      "stage": 8,
+      "summary": "rapt_l2_subsystem: the memory side of the cluster, outside every core. core (L1I/L1D/PTW -> rapt_bus) --l2_client_if--> rapt_l2_subsystem --AXI4--> router It always exists. Without an L2 cache it is the management-only L2: AXI4 protocol conversion, AXI IDs and the outstanding rea",
+      "params": {
+        "XLEN": "`RAPT_XLEN",
+        "MemoryReadCredits": "8"
       },
       "instances": [
-        {
-          "type": "rapt_memory_drain",
-          "name": "drain_control",
-          "ports": [
-            "clock",
-            "reset",
-            "request_i",
-            "stores_empty_i",
-            "memory_idle_i",
-            "writeback_idle_i",
-            "drain_o",
-            "done_o"
-          ]
-        },
-        {
-          "type": "rapt_pmp_state",
-          "name": "pmp_fetch_state_regs",
-          "ports": [
-            "clock",
-            "reset",
-            "update",
-            "state"
-          ]
-        },
-        {
-          "type": "rapt_l2tlb",
-          "name": "u_l2tlb",
-          "ports": [
-            "clock",
-            "reset",
-            "flush",
-            "req_i",
-            "ready_o",
-            "rsp_o"
-          ]
-        },
-        {
-          "type": "rapt_l1i",
-          "name": "l1i_cache",
-          "ports": [
-            "l2tlb_req_o",
-            "l2tlb_ready_i",
-            "l2tlb_rsp_i",
-            "clock",
-            "reset",
-            "io_authorized",
-            "io_start",
-            "io_owner_pc",
-            "cmu_bcast",
-            "ifu_l1i",
-            "l1i_bus",
-            "csr_bcast",
-            "pmp_state"
-          ]
-        },
-        {
-          "type": "rapt_l1d",
-          "name": "l1d_cache",
-          "ports": [
-            "l2tlb_req_o",
-            "l2tlb_ready_i",
-            "l2tlb_rsp_i",
-            "clock",
-            "reset",
-            "coherent_ready",
-            "coherent_request",
-            "coherent_write",
-            "probe_valid_i",
-            "probe_addr_i",
-            "probe_ready_o",
-            "probe_release_valid_o",
-            "probe_release_addr_o",
-            "probe_release_data_o",
-            "probe_release_ready_i",
-            "release_valid_o",
-            "release_addr_o",
-            "release_data_o",
-            "release_has_data_o",
-            "release_mask_o",
-            "release_last_o",
-            "release_ready_i",
-            "release_ack_i",
-            "probe_window_i"
-          ]
-        },
-        {
-          "type": "rapt_bus",
-          "name": "bus",
-          "ports": [
-            "clock",
-            "reset",
-            "coherent_ready",
-            "coherent_request",
-            "coherent_write",
-            "mem",
-            "rd_req_cacheable",
-            "l1i_bus",
-            "l1d_bus",
-            "csr_bcast",
-            "cmu_bcast"
-          ]
-        },
         {
           "type": "rapt_axi_master",
           "name": "axi_master",
@@ -6245,546 +7227,14 @@
       ]
     },
     {
-      "id": "rapt_memory_drain",
-      "file": "rtl/memory/rapt_memory_drain.sv",
-      "domain": "memory",
-      "stage": null,
-      "summary": "A serializing ROB owner holds request_i until its ordering point retires or is cancelled. Completion is a transaction result, not a live cache-idle signal. The store queue and memory must both be quiescent before completion; this also includes posted write responses and late refi",
-      "params": {},
-      "instances": []
-    },
-    {
-      "id": "rapt_pmp_state",
-      "file": "rtl/memory/rapt_pmp.sv",
-      "domain": "memory",
-      "stage": 7,
-      "summary": "",
-      "params": {
-        "N": "`RAPT_PMP_NUM"
-      },
-      "instances": []
-    },
-    {
-      "id": "rapt_pmp_permissions",
-      "file": "rtl/memory/rapt_pmp.sv",
-      "domain": "memory",
-      "stage": 7,
-      "summary": "",
-      "params": {
-        "XLEN": "`RAPT_XLEN",
-        "PADDR_BITS": "`RAPT_PADDR_BITS"
-      },
-      "instances": []
-    },
-    {
-      "id": "rapt_pmp",
-      "file": "rtl/memory/rapt_pmp.sv",
-      "domain": "memory",
-      "stage": 7,
-      "summary": "",
-      "params": {
-        "XLEN": "`RAPT_XLEN",
-        "PADDR_BITS": "`RAPT_PADDR_BITS"
-      },
-      "instances": [
-        {
-          "type": "rapt_pmp_permissions",
-          "name": "check_permissions",
-          "ports": [
-            "addr",
-            "size_m1",
-            "priv",
-            "op_r",
-            "op_w",
-            "op_x",
-            "pmp_raw_addr",
-            "pmp_napot_mask",
-            "pmp_cfg_r",
-            "pmp_cfg_w",
-            "pmp_cfg_x",
-            "pmp_cfg_l",
-            "pmp_mode_off",
-            "pmp_mode_tor",
-            "pmp_mode_na4",
-            "pmp_mode_napot",
-            "fault",
-            "fault_lo_o",
-            "fault_read_o",
-            "fault_write_o"
-          ]
-        }
-      ]
-    },
-    {
-      "id": "rapt_pmp_line_uniform",
-      "file": "rtl/memory/rapt_pmp.sv",
-      "domain": "memory",
-      "stage": null,
-      "summary": "",
-      "params": {
-        "XLEN": "`RAPT_XLEN",
-        "PADDR_BITS": "`RAPT_PADDR_BITS",
-        "LineOffset": "6"
-      },
-      "instances": []
-    },
-    {
-      "id": "rapt_pmp_window_uniform",
-      "file": "rtl/memory/rapt_pmp.sv",
-      "domain": "memory",
-      "stage": null,
-      "summary": "",
-      "params": {
-        "XLEN": "`RAPT_XLEN",
-        "PADDR_BITS": "`RAPT_PADDR_BITS",
-        "Words": "4",
-        "AlignedWindow": "1'b0"
-      },
-      "instances": []
-    },
-    {
-      "id": "rapt_ptw",
-      "file": "rtl/memory/rapt_ptw.sv",
-      "domain": "memory",
-      "stage": 7,
-      "summary": "Read-only page-table walker. RV32 uses Sv32 two-level page tables. RV64 uses the Sv39 three-level format expected by upstream xv6-riscv. Permission checks against the access type and current privilege are performed by the requesters (L1I/L1D) using the returned PTE flags.  RVA20S",
-      "params": {
-        "XLEN": "`RAPT_XLEN"
-      },
-      "instances": []
-    },
-    {
-      "id": "rapt_tlb",
-      "file": "rtl/memory/rapt_tlb.sv",
-      "domain": "memory",
-      "stage": 7,
-      "summary": "Fully-associative TLB for Sv32/Sv39 page translation with ASID support. Both configurations implement ASIDLEN=9; the RV64 satp WARL logic clears the seven unimplemented high ASID bits on write. Combinational lookup, sequential fill, invalid-first round-robin replacement.",
-      "params": {
-        "XLEN": "`RAPT_XLEN",
-        "ENTRIES": "4"
-      },
-      "instances": []
-    },
-    {
-      "id": "rapt_data_tlb",
-      "file": "rtl/memory/rapt_tlb.sv",
-      "domain": "memory",
-      "stage": null,
-      "summary": "Fully-associative TLB for Sv32/Sv39 page translation with ASID support. Both configurations implement ASIDLEN=9; the RV64 satp WARL logic clears the seven unimplemented high ASID bits on write. Combinational lookup, sequential fill, invalid-first round-robin replacement.",
-      "params": {
-        "XLEN": "`RAPT_XLEN",
-        "ENTRIES": "64",
-        "WAYS": "1"
-      },
-      "instances": []
-    },
-    {
-      "id": "rapt_clint",
-      "file": "rtl/perip/rapt_clint.sv",
-      "domain": "cluster",
-      "stage": 9,
-      "summary": "Core Local INTerrupt controller (standard CLINT layout) Register map (base 0x02000000): 0x0000  msip      (32-bit, bit 0 only)  - M-mode software interrupt pending 0x4000  mtimecmp  (64-bit)              - timer compare register 0xBFF8  mtime     (64-bit, read/write)  - real-time",
-      "params": {
-        "XLEN": "`RAPT_XLEN",
-        "MTIME_DIV": "`RAPT_MTIME_DIV"
-      },
-      "instances": []
-    },
-    {
-      "id": "rapt_dm",
-      "file": "rtl/perip/rapt_dm.sv",
-      "domain": "cluster",
-      "stage": 9,
-      "summary": "rapt_dm: minimal RISC-V Debug Module. Register file (DTM-side compliance probe): - dmcontrol  (RW: dmactive, ndmreset, haltreq, resumereq) - dmstatus   (RO: version=3, authenticated=1, {any,all}{halted,running,resumeack}) - hartinfo   (RO: 0) - abstractcs (R: progbufsize=0, datac",
-      "params": {
-        "XLEN": "`RAPT_XLEN"
-      },
-      "instances": []
-    },
-    {
-      "id": "rapt_dtm",
-      "file": "rtl/perip/rapt_dtm.sv",
-      "domain": "cluster",
-      "stage": 9,
-      "summary": "rapt_dtm: minimal RISC-V Debug Transport Module (DTM) implementing IEEE 1149.1 TAP semantics over a single-clock-domain simplification (tck = clock). Implements the four IRs required by RISC-V Debug Spec 1.0: IR=0x01 IDCODE  : 32-bit constant device id IR=0x10 DTMCS   : 32-bit DT",
-      "params": {},
-      "instances": []
-    },
-    {
-      "id": "rapt_plic",
-      "file": "rtl/perip/rapt_plic.sv",
-      "domain": "cluster",
-      "stage": 9,
-      "summary": "rapt_plic -- Platform-Level Interrupt Controller (PLIC) Reference: https://github.com/riscv/riscv-plic-spec/blob/master/riscv-plic-1.0.0.pdf nemu/src/device/intr.c (functional reference used by difftest) Configuration (parameterised, defaults from rapt_soc.svh): NDEV  = number of",
-      "params": {
-        "XLEN": "`RAPT_XLEN",
-        "NDEV": "`RAPT_PLIC_NDEV",
-        "NCTX": "`RAPT_PLIC_NCTX",
-        "NHART": "(NCTX + 1"
-      },
-      "instances": []
-    },
-    {
-      "id": "axi2rnp",
-      "file": "rtl/perip/wrap_rnp.sv",
-      "domain": "cluster",
-      "stage": null,
-      "summary": "",
-      "params": {
-        "XLEN": "32"
-      },
-      "instances": []
-    },
-    {
-      "id": "rnp2axi",
-      "file": "rtl/perip/wrap_rnp.sv",
-      "domain": "cluster",
-      "stage": null,
-      "summary": "",
-      "params": {
-        "XLEN": "32"
-      },
-      "instances": []
-    },
-    {
-      "id": "wrap_rnp",
-      "file": "rtl/perip/wrap_rnp.sv",
-      "domain": "cluster",
-      "stage": null,
-      "summary": "",
-      "params": {},
-      "instances": []
-    },
-    {
-      "id": "wrap_ysyxsoc",
-      "file": "rtl/perip/wrap_ysyxsoc.sv",
-      "domain": "cluster",
-      "stage": null,
-      "summary": "",
-      "params": {},
-      "instances": []
-    },
-    {
-      "id": "ysyx_00000000",
-      "file": "rtl/perip/wrap_ysyxsoc.sv",
-      "domain": "cluster",
-      "stage": null,
-      "summary": "",
-      "params": {},
-      "instances": []
-    },
-    {
-      "id": "rapt",
-      "file": "rtl/rapt.sv",
-      "domain": "core",
-      "stage": 4,
-      "summary": "rapt: cluster-level top. Aggregates one or more `rapt_core` instances and the cluster-shared peripherals that, per the RISC-V platform spec, must be shared across all harts (CLINT and PLIC today; IMSIC in the future). The external port set is identical to the historical single-co",
-      "params": {
-        "XLEN": "`RAPT_XLEN",
-        "MemoryReadCredits": "8",
-        "L1dWriteBack": "`RAPT_L1D_WRITEBACK",
-        "NHARTS": "1"
-      },
-      "instances": [
-        {
-          "type": "rapt_clint",
-          "name": "clint_inst",
-          "ports": [
-            "clock",
-            "clint_bus",
-            "reset"
-          ]
-        },
-        {
-          "type": "rapt_plic",
-          "name": "plic",
-          "ports": [
-            "clock",
-            "reset",
-            "plic_bus"
-          ]
-        },
-        {
-          "type": "rapt_router",
-          "name": "axi_router",
-          "ports": [
-            "clock",
-            "reset",
-            "core_axi",
-            "offchip_axi",
-            "clint_bus",
-            "plic_bus"
-          ]
-        },
-        {
-          "type": "rapt_core",
-          "name": "core",
-          "ports": [
-            "writeback_error_o",
-            "external_write_valid_i",
-            "external_write_pending_i",
-            "external_write_first_i",
-            "external_write_last_i",
-            "clock",
-            "io_master",
-            "clint_timer_int_i",
-            "clint_sw_int_i",
-            "mtime_i",
-            "rvfi_valid",
-            "rvfi_order",
-            "rvfi_insn",
-            "rvfi_trap",
-            "rvfi_halt",
-            "rvfi_intr",
-            "rvfi_mode",
-            "rvfi_ixl",
-            "rvfi_rs1_addr",
-            "rvfi_rs2_addr",
-            "rvfi_rs1_rdata",
-            "rvfi_rs2_rdata",
-            "rvfi_rd_addr",
-            "rvfi_rd_wdata"
-          ]
-        },
-        {
-          "type": "rapt_dtm",
-          "name": "dtm_inst",
-          "ports": [
-            "clock",
-            "reset",
-            "trst_n",
-            "tms",
-            "tdi",
-            "tdo",
-            "dmi_req",
-            "dmi_wr",
-            "dmi_addr",
-            "dmi_wdata",
-            "dmi_rdata",
-            "dmi_resp"
-          ]
-        },
-        {
-          "type": "rapt_dm",
-          "name": "dm_inst",
-          "ports": [
-            "clock",
-            "reset",
-            "dmi_req",
-            "dmi_wr",
-            "dmi_addr",
-            "dmi_wdata",
-            "dmi_rdata",
-            "dmi_resp",
-            "halted_i",
-            "halt_pc_i",
-            "commit_fire_i",
-            "haltreq_o",
-            "resumereq_o",
-            "ndmreset_o",
-            "dbg_gpr_rdata_i",
-            "dbg_gpr_we_o",
-            "dbg_gpr_addr_o",
-            "dbg_gpr_wdata_o"
-          ]
-        }
-      ]
-    },
-    {
-      "id": "rapt_core",
-      "file": "rtl/rapt_core.sv",
-      "domain": "core",
-      "stage": 3,
-      "summary": "Single-hart composition of frontend, backend, caches and memory interconnect. A cluster (`rapt.sv`) instantiates cores alongside shared CLINT/PLIC devices. External MMIO targeted at cluster-local CLINT or PLIC register windows leaves through the standard AXI master interface; the",
-      "params": {
-        "XLEN": "`RAPT_XLEN",
-        "MemoryReadCredits": "8",
-        "L1dWriteBack": "`RAPT_L1D_WRITEBACK"
-      },
-      "instances": [
-        {
-          "type": "rapt_recovery_if",
-          "name": "recovery",
-          "ports": []
-        },
-        {
-          "type": "rapt_frontend",
-          "name": "frontend",
-          "ports": [
-            "clock",
-            "reset",
-            "cmu_bcast",
-            "csr_bcast",
-            "recovery",
-            "ifu_l1i",
-            "idu_rnu",
-            "empty_o",
-            "snapshot_ghr",
-            "snapshot_phr",
-            "history_restore",
-            "restore_ghr",
-            "restore_phr"
-          ]
-        },
-        {
-          "type": "rapt_ifetch_io_guard",
-          "name": "ifetch_io_guard",
-          "ports": [
-            "clock",
-            "reset",
-            "owner_pc",
-            "frontier_pc",
-            "frontier_advance",
-            "blocked",
-            "pipeline_empty",
-            "memory_idle",
-            "io_start",
-            "authorized"
-          ]
-        },
-        {
-          "type": "rapt_memory",
-          "name": "memory_subsystem",
-          "ports": [
-            "clock",
-            "reset",
-            "ifu_l1i",
-            "lsu_l1d",
-            "exu_l1d",
-            "cmu_bcast",
-            "csr_bcast",
-            "pmp_update",
-            "io_master",
-            "ifetch_io_authorized_i",
-            "ifetch_io_start_o",
-            "ifetch_io_owner_pc_o",
-            "data_idle_o",
-            "writeback_idle_o",
-            "writeback_done_o",
-            "stores_empty_i",
-            "writeback_drain_i",
-            "writeback_error_o",
-            "external_write_valid_i",
-            "external_write_pending_i",
-            "external_write_first_i",
-            "external_write_last_i"
-          ]
-        }
-      ]
-    },
-    {
       "id": "rapt_router",
-      "file": "rtl/rapt_router.sv",
-      "domain": "core",
+      "file": "rtl/uncore/rapt_router.sv",
+      "domain": "memory",
       "stage": 8,
       "summary": "",
       "params": {
-        "XLEN": "`RAPT_XLEN"
-      },
-      "instances": []
-    },
-    {
-      "id": "rapt_sram_1rw",
-      "file": "rtl/sram/rapt_sram_1rw.sv",
-      "domain": "core",
-      "stage": null,
-      "summary": "",
-      "params": {
-        "ADDR_WIDTH": "7",
-        "DATA_WIDTH": "32",
-        "INST_ID": "0",
-        "USE_BWE": "0"
-      },
-      "instances": [
-        {
-          "type": "rapt_openram_1rw_1024x22",
-          "name": "u_sram",
-          "ports": [
-            "clk0",
-            "csb0",
-            "web0",
-            "wmask0",
-            "addr0",
-            "din0",
-            "dout0"
-          ]
-        },
-        {
-          "type": "rapt_openram_1rw_1024x32",
-          "name": "u_sram",
-          "ports": [
-            "clk0",
-            "csb0",
-            "web0",
-            "wmask0",
-            "addr0",
-            "din0",
-            "dout0"
-          ]
-        },
-        {
-          "type": "rapt_openram_1rw_1024x64",
-          "name": "u_sram",
-          "ports": [
-            "clk0",
-            "csb0",
-            "web0",
-            "wmask0",
-            "addr0",
-            "din0",
-            "dout0"
-          ]
-        },
-        {
-          "type": "rapt_openram_1rw_512x128",
-          "name": "u_sram",
-          "ports": [
-            "clk0",
-            "csb0",
-            "web0",
-            "wmask0",
-            "addr0",
-            "din0",
-            "dout0"
-          ]
-        },
-        {
-          "type": "rapt_openram_1rw_4096x64",
-          "name": "u_sram",
-          "ports": [
-            "clk0",
-            "csb0",
-            "web0",
-            "wmask0",
-            "addr0",
-            "din0",
-            "dout0"
-          ]
-        },
-        {
-          "type": "rapt_openram_1rw_4096x64",
-          "name": "u_sram",
-          "ports": [
-            "clk0",
-            "csb0",
-            "web0",
-            "wmask0",
-            "addr0",
-            "din0",
-            "dout0"
-          ]
-        }
-      ]
-    },
-    {
-      "id": "rapt_sram_2rw",
-      "file": "rtl/sram/rapt_sram_2rw.sv",
-      "domain": "core",
-      "stage": null,
-      "summary": "Two independent, clocked read/write ports sharing one memory array. Each enabled port either writes at the rising edge or registers a read result at that edge. Read outputs hold when their port is idle or writes. The caller must avoid same-address cross-port accesses when either ",
-      "params": {
-        "ADDR_WIDTH": "5",
-        "DATA_WIDTH": "64"
+        "XLEN": "`RAPT_XLEN",
+        "WriteOutstanding": "rapt_pkg::L2LinkConfig.posted_writes > 0"
       },
       "instances": []
     }
@@ -7379,7 +7829,7 @@
         "y": 0.0,
         "z": 0.0,
         "h": 22,
-        "child_count": 16
+        "child_count": 21
       },
       {
         "id": "rapt_cdb_arb",
@@ -8718,143 +9168,9 @@
         "child_count": 0
       },
       {
-        "id": "rapt_axi_master",
-        "short": "AXI",
-        "file": "rtl/memory/rapt_axi_master.sv",
-        "domain": "memory",
-        "stage": 8,
-        "summary": "",
-        "parent": "rapt_memory",
-        "display": true,
-        "x": 18.4,
-        "y": 0.0,
-        "z": 23.2,
-        "h": 6,
-        "child_count": 0,
-        "sx": 6.8,
-        "sz": 4.4,
-        "sy": 0.364,
-        "latency": 2,
-        "capacity": 8,
-        "kind": "bus",
-        "model_note": "AXI4 master"
-      },
-      {
-        "id": "rapt_axi_r_buffer",
-        "short": "axi_r_buffer",
-        "file": "rtl/memory/rapt_axi_r_buffer.sv",
-        "domain": "memory",
-        "stage": 8,
-        "summary": "Register the outer AXI R channel before it enters the cache hierarchy. Two entries let a ready consumer accept one beat on every cycle while rready to the memory controller depends only on registered occupancy.",
-        "parent": "rapt_memory",
-        "display": false,
-        "x": 8.0,
-        "y": 0.0,
-        "z": 1.4,
-        "h": 6,
-        "child_count": 0
-      },
-      {
-        "id": "rapt_bus",
-        "short": "BUS",
-        "file": "rtl/memory/rapt_bus.sv",
-        "domain": "memory",
-        "stage": 8,
-        "summary": "",
-        "parent": "rapt_memory",
-        "display": true,
-        "x": 10.9,
-        "y": 0.0,
-        "z": 23.2,
-        "h": 6,
-        "child_count": 0,
-        "sx": 6.8,
-        "sz": 4.4,
-        "sy": 0.364,
-        "latency": 2,
-        "capacity": 8,
-        "kind": "bus",
-        "model_note": "outstanding reads up to 8"
-      },
-      {
-        "id": "rapt_cache_fill_select",
-        "short": "cache_fill_select",
-        "file": "rtl/memory/rapt_cache_fill_select.sv",
-        "domain": "memory",
-        "stage": 8,
-        "summary": "Reuse a live matching line, otherwise an invalid candidate, otherwise the replacement-policy victim. Way zero is a valid result, not a sentinel.",
-        "parent": "rapt_l1d_tags",
-        "display": false,
-        "x": 8.0,
-        "y": 0.0,
-        "z": 1.62,
-        "h": 6,
-        "child_count": 0
-      },
-      {
-        "id": "rapt_cache_plru",
-        "short": "cache_plru",
-        "file": "rtl/memory/rapt_cache_plru.sv",
-        "domain": "memory",
-        "stage": 8,
-        "summary": "Multi-query tree PLRU. Bits record the most recently used child. Only nodes on an accessed leaf's path change. Update ports are applied in ascending order; a higher port wins only on nodes both ports touch.",
-        "parent": "rapt_l1d_tags",
-        "display": false,
-        "x": 8.0,
-        "y": 0.0,
-        "z": 1.84,
-        "h": 6,
-        "child_count": 0
-      },
-      {
-        "id": "rapt_cached_ptw",
-        "short": "cached_ptw",
-        "file": "rtl/memory/rapt_cached_ptw.sv",
-        "domain": "memory",
-        "stage": 7,
-        "summary": "L1 miss adapter: probe the shared L2 TLB before starting the existing PTW. Cancellation drains accepted PTE reads through the PTW's original protocol.",
-        "parent": "rapt_l1d",
-        "display": false,
-        "x": 7.0,
-        "y": 0.0,
-        "z": 2.06,
-        "h": 6,
-        "child_count": 2
-      },
-      {
-        "id": "rapt_ifetch_translate",
-        "short": "ifetch_translate",
-        "file": "rtl/memory/rapt_ifetch_translate.sv",
-        "domain": "memory",
-        "stage": 0,
-        "summary": "Translation adapter for the per-word fetch controller. Every accepted request produces one response, even after cancellation. A killed PTW does not itself pulse done/fault, so its busy falling is explicitly acknowledged. The caller discards the response of a cancelled architectur",
-        "parent": "rapt_l1i",
-        "display": false,
-        "x": 0.0,
-        "y": 0.0,
-        "z": 2.28,
-        "h": 6,
-        "child_count": 2
-      },
-      {
-        "id": "rapt_ifetch_word",
-        "short": "ifetch_word",
-        "file": "rtl/memory/rapt_ifetch_word.sv",
-        "domain": "memory",
-        "stage": 0,
-        "summary": "One architectural instruction, with an independently translated second aligned word only when a 32-bit instruction straddles a word boundary. Translation and data channels each accept one obligation and must return exactly one response, including after kill. This unit drains acce",
-        "parent": "rapt_l1i",
-        "display": false,
-        "x": 0.0,
-        "y": 0.0,
-        "z": 1.4,
-        "h": 6,
-        "child_count": 0
-      },
-      {
         "id": "rapt_l1d",
         "short": "L1D",
-        "file": "rtl/memory/rapt_l1d.sv",
+        "file": "rtl/memory/dcache/rapt_l1d.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "",
@@ -8876,7 +9192,7 @@
       {
         "id": "rapt_l1d_access",
         "short": "l1d_access",
-        "file": "rtl/memory/rapt_l1d_access.sv",
+        "file": "rtl/memory/dcache/rapt_l1d_access.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "",
@@ -8884,29 +9200,29 @@
         "display": false,
         "x": 7.0,
         "y": 0.0,
-        "z": 1.62,
+        "z": 1.4,
         "h": 6,
         "child_count": 1
       },
       {
         "id": "rapt_l1d_data",
         "short": "l1d_data",
-        "file": "rtl/memory/rapt_l1d_data.sv",
+        "file": "rtl/memory/dcache/rapt_l1d_data.sv",
         "domain": "memory",
         "stage": 7,
-        "summary": "L1D word-write / line-read data array, built from <=128-bit 1RW SRAMs. A write reserves only its selected way/subarray. Other banks read on the same edge; each bank reports which set its output currently represents.",
+        "summary": "Chunk c of way w is in bank (w + c) modulo Chunks, within w's group. A word read visits chunk c in every bank; a line read visits all chunks of one way. Partial groups compact the row to c modulo GroupWays, so four-way caches use 256x64 banks without allocating unreachable rows.",
         "parent": "rapt_l1d",
         "display": false,
         "x": 7.0,
         "y": 0.0,
-        "z": 1.84,
+        "z": 1.62,
         "h": 6,
         "child_count": 0
       },
       {
         "id": "rapt_l1d_mshr",
         "short": "MSHR",
-        "file": "rtl/memory/rapt_l1d_mshr.sv",
+        "file": "rtl/memory/dcache/rapt_l1d_mshr.sv",
         "domain": "memory",
         "stage": 8,
         "summary": "Physical-line miss table and refill buffers. Requests replay through L1D (including translation/PMP) before consuming data; no speculative ROB tags are retained here. Completed lines stay until replaced or invalidated.",
@@ -8928,7 +9244,7 @@
       {
         "id": "rapt_l1d_tags",
         "short": "l1d_tags",
-        "file": "rtl/memory/rapt_l1d_tags.sv",
+        "file": "rtl/memory/dcache/rapt_l1d_tags.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "L1D tag/valid ownership and replacement lookup. Reads are combinational; updates and fence invalidation occur on the same edge as the data write. The controller retains transaction sequencing and the two-way toggle.",
@@ -8936,14 +9252,14 @@
         "display": false,
         "x": 7.0,
         "y": 0.0,
-        "z": 2.06,
+        "z": 1.84,
         "h": 6,
-        "child_count": 3
+        "child_count": 5
       },
       {
         "id": "rapt_l1d_writeback",
         "short": "l1d_writeback",
-        "file": "rtl/memory/rapt_l1d_writeback.sv",
+        "file": "rtl/memory/dcache/rapt_l1d_writeback.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "",
@@ -8951,14 +9267,44 @@
         "display": false,
         "x": 7.0,
         "y": 0.0,
+        "z": 2.06,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_ifetch_translate",
+        "short": "ifetch_translate",
+        "file": "rtl/memory/icache/rapt_ifetch_translate.sv",
+        "domain": "memory",
+        "stage": 0,
+        "summary": "Translation adapter for the per-word fetch controller. Every accepted request produces one response, even after cancellation. A killed PTW does not itself pulse done/fault, so its busy falling is explicitly acknowledged. The caller discards the response of a cancelled architectur",
+        "parent": "rapt_l1i",
+        "display": false,
+        "x": 0.0,
+        "y": 0.0,
         "z": 2.28,
+        "h": 6,
+        "child_count": 2
+      },
+      {
+        "id": "rapt_ifetch_word",
+        "short": "ifetch_word",
+        "file": "rtl/memory/icache/rapt_ifetch_word.sv",
+        "domain": "memory",
+        "stage": 0,
+        "summary": "One architectural instruction, with an independently translated second aligned word only when a 32-bit instruction straddles a word boundary. Translation and data channels each accept one obligation and must return exactly one response, including after kill. This unit drains acce",
+        "parent": "rapt_l1i",
+        "display": false,
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.4,
         "h": 6,
         "child_count": 0
       },
       {
         "id": "rapt_l1i",
         "short": "L1I",
-        "file": "rtl/memory/rapt_l1i.sv",
+        "file": "rtl/memory/icache/rapt_l1i.sv",
         "domain": "memory",
         "stage": 0,
         "summary": "",
@@ -8968,7 +9314,7 @@
         "y": 0.0,
         "z": 2.2,
         "h": 16,
-        "child_count": 11,
+        "child_count": 12,
         "sx": 6.8,
         "sz": 4.4,
         "sy": 0.508,
@@ -8980,7 +9326,7 @@
       {
         "id": "rapt_l1i_access",
         "short": "l1i_access",
-        "file": "rtl/memory/rapt_l1i_access.sv",
+        "file": "rtl/memory/icache/rapt_l1i_access.sv",
         "domain": "memory",
         "stage": 0,
         "summary": "Fetch permissions are combinational. Fault ownership, SRAM readiness and refill/PTW sequencing remain in the instruction-cache controller.",
@@ -8988,14 +9334,14 @@
         "display": false,
         "x": 0.0,
         "y": 0.0,
-        "z": 1.4,
+        "z": 1.62,
         "h": 6,
         "child_count": 2
       },
       {
         "id": "rapt_l1i_data",
         "short": "l1i_data",
-        "file": "rtl/memory/rapt_l1i_data.sv",
+        "file": "rtl/memory/icache/rapt_l1i_data.sv",
         "domain": "memory",
         "stage": 0,
         "summary": "Independently addressed banks let a fetch window straddle adjacent sets. Ways share each bank's read address; each way owns its read validity.",
@@ -9003,14 +9349,14 @@
         "display": false,
         "x": 0.0,
         "y": 0.0,
-        "z": 1.62,
+        "z": 1.84,
         "h": 6,
         "child_count": 0
       },
       {
         "id": "rapt_l1i_tagmem",
         "short": "l1i_tagmem",
-        "file": "rtl/memory/rapt_l1i_tagmem.sv",
+        "file": "rtl/memory/icache/rapt_l1i_tagmem.sv",
         "domain": "memory",
         "stage": 0,
         "summary": "",
@@ -9018,216 +9364,29 @@
         "display": false,
         "x": 0.0,
         "y": 0.0,
-        "z": 1.84,
-        "h": 6,
-        "child_count": 0
-      },
-      {
-        "id": "rapt_l2",
-        "short": "L2",
-        "file": "rtl/memory/rapt_l2.sv",
-        "domain": "memory",
-        "stage": 8,
-        "summary": "",
-        "parent": "rapt_memory",
-        "display": true,
-        "x": 25.9,
-        "y": 0.0,
-        "z": 23.2,
-        "h": 6,
-        "child_count": 10,
-        "sx": 6.8,
-        "sz": 4.4,
-        "sy": 0.28,
-        "latency": 0,
-        "capacity": 0,
-        "kind": "cache",
-        "model_note": "default combinational passthrough; default-l2 enables 512 KiB / 8 ways"
-      },
-      {
-        "id": "rapt_l2_bypass_ctrl",
-        "short": "l2_bypass_ctrl",
-        "file": "rtl/memory/rapt_l2_bypass_ctrl.sv",
-        "domain": "memory",
-        "stage": 8,
-        "summary": "Uncached read phases and the shared registered outer AR channel. The request valid/data ports also admit blocking refills to the same AR register.",
-        "parent": "rapt_l2",
-        "display": false,
-        "x": 8.0,
-        "y": 0.0,
         "z": 2.06,
         "h": 6,
         "child_count": 0
       },
       {
-        "id": "rapt_l2_data_array",
-        "short": "l2_data_array",
-        "file": "rtl/memory/rapt_l2_data_array.sv",
+        "id": "rapt_cached_ptw",
+        "short": "cached_ptw",
+        "file": "rtl/memory/mmu/rapt_cached_ptw.sv",
         "domain": "memory",
-        "stage": 8,
-        "summary": "Medium BOOM data geometry: four 16384 x 64 single-port SRAM banks. bank=chunk[1:0], row={way[2:0],set[9:0],chunk[2]}. Bank priority is SinkC > SourceC > live SinkD > buffered line write > SourceD-write > SourceD-read. A displaced buffered beat retries.",
-        "parent": "rapt_l2",
+        "stage": 7,
+        "summary": "L1 miss adapter: probe the shared L2 TLB before starting the existing PTW. Cancellation drains accepted PTE reads through the PTW's original protocol.",
+        "parent": "rapt_l1d",
         "display": false,
-        "x": 8.0,
+        "x": 7.0,
         "y": 0.0,
         "z": 2.28,
-        "h": 6,
-        "child_count": 0
-      },
-      {
-        "id": "rapt_l2_directory",
-        "short": "l2_directory",
-        "file": "rtl/memory/rapt_l2_directory.sv",
-        "domain": "memory",
-        "stage": 8,
-        "summary": "BOOM inclusive-cache directory geometry and one-port access contract. Data is stored as one synchronous SRAM per way; a reset wipe clears one set in all ways per cycle before requests become ready.",
-        "parent": "rapt_l2",
-        "display": false,
-        "x": 8.0,
-        "y": 0.0,
-        "z": 1.4,
-        "h": 6,
-        "child_count": 0
-      },
-      {
-        "id": "rapt_l2_evict_ctrl",
-        "short": "l2_evict_ctrl",
-        "file": "rtl/memory/rapt_l2_evict_ctrl.sv",
-        "domain": "memory",
-        "stage": 8,
-        "summary": "Dirty-victim writeback phases. The parent presents a valid transaction from AW through B; capture data ports carry the victim metadata for that transaction.",
-        "parent": "rapt_l2",
-        "display": false,
-        "x": 8.0,
-        "y": 0.0,
-        "z": 1.62,
-        "h": 6,
-        "child_count": 0
-      },
-      {
-        "id": "rapt_l2_hit_ctrl",
-        "short": "l2_hit_ctrl",
-        "file": "rtl/memory/rapt_l2_hit_ctrl.sv",
-        "domain": "memory",
-        "stage": 8,
-        "summary": "Resident read phases. Valid/ready selects the hit pipeline; the data ports capture its request and advance the address, word, and remaining beat count.",
-        "parent": "rapt_l2",
-        "display": false,
-        "x": 8.0,
-        "y": 0.0,
-        "z": 1.84,
-        "h": 6,
-        "child_count": 0
-      },
-      {
-        "id": "rapt_l2_mshr_frontend",
-        "short": "l2_mshr_frontend",
-        "file": "rtl/memory/rapt_l2_mshr_frontend.sv",
-        "domain": "memory",
-        "stage": 8,
-        "summary": "BOOM-sized miss admission and secondary replay fabric. The seven MSHR state machines supply their status and schedule requests; this module arbitrates them and keeps their 21 secondary queues in 33 shared entries. A secondary entry omits the set because its target MSHR already ow",
-        "parent": "rapt_l2",
-        "display": false,
-        "x": 8.0,
-        "y": 0.0,
-        "z": 2.06,
         "h": 6,
         "child_count": 2
       },
       {
-        "id": "rapt_l2_mshr_scheduler",
-        "short": "l2_mshr_scheduler",
-        "file": "rtl/memory/rapt_l2_mshr_scheduler.sv",
-        "domain": "memory",
-        "stage": 8,
-        "summary": "BOOM inclusive-cache MSHR allocation and round-robin schedule selection. Five ordinary A slots and the dedicated BC/C slots share one set-conflict table. The secondary request payloads reside in rapt_l2_secondary_buffer.",
-        "parent": "rapt_l2_mshr_frontend",
-        "display": false,
-        "x": 8.0,
-        "y": 0.0,
-        "z": 2.28,
-        "h": 6,
-        "child_count": 0
-      },
-      {
-        "id": "rapt_l2_put_buffer",
-        "short": "l2_put_buffer",
-        "file": "rtl/memory/rapt_l2_put_buffer.sv",
-        "domain": "memory",
-        "stage": 8,
-        "summary": "BOOM SinkA's non-flowing put ListBuffer: forty lists share forty beats. A list may hold multiple beats; the caller owns list allocation and retires a list after its last beat has been popped. A full pool does not accept a push merely because another list pops on the same edge.",
-        "parent": "rapt_l2",
-        "display": false,
-        "x": 8.0,
-        "y": 0.0,
-        "z": 1.4,
-        "h": 6,
-        "child_count": 0
-      },
-      {
-        "id": "rapt_l2_refill_ctrl",
-        "short": "l2_refill_ctrl",
-        "file": "rtl/memory/rapt_l2_refill_ctrl.sv",
-        "domain": "memory",
-        "stage": 8,
-        "summary": "Blocking refill admission and outer read phases. Valid/ready controls the phase; the data ports own the returned line and its merge writes.",
-        "parent": "rapt_l2",
-        "display": false,
-        "x": 8.0,
-        "y": 0.0,
-        "z": 1.62,
-        "h": 6,
-        "child_count": 0
-      },
-      {
-        "id": "rapt_l2_refill_mshrs",
-        "short": "l2_refill_mshrs",
-        "file": "rtl/memory/rapt_l2_refill_mshrs.sv",
-        "domain": "memory",
-        "stage": 8,
-        "summary": "Independent outer-memory refill contexts for BOOM's seven L2 MSHRs. The outer AXI ID is the context index; the original inner ID is retained for response routing. Different fills may return interleaved beats.",
-        "parent": "rapt_l2",
-        "display": false,
-        "x": 8.0,
-        "y": 0.0,
-        "z": 1.84,
-        "h": 6,
-        "child_count": 0
-      },
-      {
-        "id": "rapt_l2_release_buffer",
-        "short": "l2_release_buffer",
-        "file": "rtl/memory/rapt_l2_release_buffer.sv",
-        "domain": "memory",
-        "stage": 8,
-        "summary": "Two in-flight L1D release lists share BOOM's lowest-free beat pool. RV64 has 16 shared beats and RV32 has 32. Keep beats until ReleaseAck so a failed nested refill can replay the same ReleaseData without a new C.",
-        "parent": "rapt_l2",
-        "display": false,
-        "x": 8.0,
-        "y": 0.0,
-        "z": 2.06,
-        "h": 6,
-        "child_count": 0
-      },
-      {
-        "id": "rapt_l2_secondary_buffer",
-        "short": "l2_secondary_buffer",
-        "file": "rtl/memory/rapt_l2_secondary_buffer.sv",
-        "domain": "memory",
-        "stage": 8,
-        "summary": "BOOM inclusive-cache Scheduler uses one shared 33-entry ListBuffer with three virtual request lists for each of its seven MSHRs (A, B and C). The queue is non-flowing: a push into an empty list becomes visible after the clock edge, and a full buffer cannot reuse a simultaneously ",
-        "parent": "rapt_l2_mshr_frontend",
-        "display": false,
-        "x": 8.0,
-        "y": 0.0,
-        "z": 2.28,
-        "h": 6,
-        "child_count": 0
-      },
-      {
         "id": "rapt_l2tlb",
         "short": "L2 TLB",
-        "file": "rtl/memory/rapt_l2tlb.sv",
+        "file": "rtl/memory/mmu/rapt_l2tlb.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "Shared, direct-mapped L2 TLB. VPN low bits select one row; superpage translations are cached as the resolved 4 KiB subpage returned by the PTW. One synchronous row port serves I/D lookups and fills with round-robin arbitration. Payload RAM is not reset; a separate valid vector is",
@@ -9247,39 +9406,9 @@
         "model_note": "shared direct-mapped translation cache before I/D page-table walkers"
       },
       {
-        "id": "rapt_memory",
-        "short": "memory",
-        "file": "rtl/memory/rapt_memory.sv",
-        "domain": "memory",
-        "stage": 3,
-        "summary": "",
-        "parent": "rapt_core",
-        "display": false,
-        "x": 3.0,
-        "y": 0.0,
-        "z": 1.4,
-        "h": 6,
-        "child_count": 9
-      },
-      {
-        "id": "rapt_memory_drain",
-        "short": "memory_drain",
-        "file": "rtl/memory/rapt_memory_drain.sv",
-        "domain": "memory",
-        "stage": 8,
-        "summary": "A serializing ROB owner holds request_i until its ordering point retires or is cancelled. Completion is a transaction result, not a live cache-idle signal. The store queue and memory must both be quiescent before completion; this also includes posted write responses and late refi",
-        "parent": "rapt_memory",
-        "display": false,
-        "x": 8.0,
-        "y": 0.0,
-        "z": 1.62,
-        "h": 6,
-        "child_count": 0
-      },
-      {
         "id": "rapt_pmp_state",
         "short": "PMP",
-        "file": "rtl/memory/rapt_pmp.sv",
+        "file": "rtl/memory/mmu/rapt_pmp.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "",
@@ -9301,7 +9430,7 @@
       {
         "id": "rapt_pmp_permissions",
         "short": "pmp_permissions",
-        "file": "rtl/memory/rapt_pmp.sv",
+        "file": "rtl/memory/mmu/rapt_pmp.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "",
@@ -9309,14 +9438,29 @@
         "display": false,
         "x": 7.0,
         "y": 0.0,
-        "z": 1.84,
+        "z": 1.4,
         "h": 6,
         "child_count": 0
       },
       {
+        "id": "rapt_pmp_check",
+        "short": "pmp_check",
+        "file": "rtl/memory/mmu/rapt_pmp.sv",
+        "domain": "memory",
+        "stage": 0,
+        "summary": "",
+        "parent": "rapt_ifetch_translate",
+        "display": false,
+        "x": 0.0,
+        "y": 0.0,
+        "z": 1.62,
+        "h": 6,
+        "child_count": 1
+      },
+      {
         "id": "rapt_pmp",
         "short": "pmp",
-        "file": "rtl/memory/rapt_pmp.sv",
+        "file": "rtl/memory/mmu/rapt_pmp.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "",
@@ -9324,14 +9468,29 @@
         "display": false,
         "x": 7.0,
         "y": 0.0,
-        "z": 2.06,
+        "z": 1.84,
         "h": 6,
         "child_count": 1
       },
       {
         "id": "rapt_pmp_line_uniform",
         "short": "pmp_line_uniform",
-        "file": "rtl/memory/rapt_pmp.sv",
+        "file": "rtl/memory/mmu/rapt_pmp.sv",
+        "domain": "memory",
+        "stage": 7,
+        "summary": "",
+        "parent": "rapt_l1d",
+        "display": false,
+        "x": 7.0,
+        "y": 0.0,
+        "z": 2.06,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_pmp_window_uniform",
+        "short": "pmp_window_uniform",
+        "file": "rtl/memory/mmu/rapt_pmp.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "",
@@ -9344,28 +9503,13 @@
         "child_count": 0
       },
       {
-        "id": "rapt_pmp_window_uniform",
-        "short": "pmp_window_uniform",
-        "file": "rtl/memory/rapt_pmp.sv",
-        "domain": "memory",
-        "stage": 7,
-        "summary": "",
-        "parent": "rapt_l1d",
-        "display": false,
-        "x": 7.0,
-        "y": 0.0,
-        "z": 1.4,
-        "h": 6,
-        "child_count": 0
-      },
-      {
         "id": "rapt_ptw",
         "short": "PTW",
-        "file": "rtl/memory/rapt_ptw.sv",
+        "file": "rtl/memory/mmu/rapt_ptw.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "Read-only page-table walker. RV32 uses Sv32 two-level page tables. RV64 uses the Sv39 three-level format expected by upstream xv6-riscv. Permission checks against the access type and current privilege are performed by the requesters (L1I/L1D) using the returned PTE flags.  RVA20S",
-        "parent": "rapt_cached_ptw",
+        "parent": "rapt_ifetch_translate",
         "display": true,
         "x": 55.9,
         "y": 0.0,
@@ -9383,7 +9527,7 @@
       {
         "id": "rapt_tlb",
         "short": "TLB",
-        "file": "rtl/memory/rapt_tlb.sv",
+        "file": "rtl/memory/mmu/rapt_tlb.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "Fully-associative TLB for Sv32/Sv39 page translation with ASID support. Both configurations implement ASIDLEN=9; the RV64 satp WARL logic clears the seven unimplemented high ASID bits on write. Combinational lookup, sequential fill, invalid-first round-robin replacement.",
@@ -9393,7 +9537,7 @@
         "y": 0.0,
         "z": 23.2,
         "h": 6,
-        "child_count": 0,
+        "child_count": 1,
         "sx": 6.8,
         "sz": 4.4,
         "sy": 0.28,
@@ -9405,7 +9549,7 @@
       {
         "id": "rapt_data_tlb",
         "short": "data_tlb",
-        "file": "rtl/memory/rapt_tlb.sv",
+        "file": "rtl/memory/mmu/rapt_tlb.sv",
         "domain": "memory",
         "stage": 7,
         "summary": "Fully-associative TLB for Sv32/Sv39 page translation with ASID support. Both configurations implement ASIDLEN=9; the RV64 satp WARL logic clears the seven unimplemented high ASID bits on write. Combinational lookup, sequential fill, invalid-first round-robin replacement.",
@@ -9413,7 +9557,134 @@
         "display": false,
         "x": 7.0,
         "y": 0.0,
+        "z": 1.4,
+        "h": 6,
+        "child_count": 1
+      },
+      {
+        "id": "rapt_tlb_lru",
+        "short": "tlb_lru",
+        "file": "rtl/memory/mmu/rapt_tlb.sv",
+        "domain": "memory",
+        "stage": 7,
+        "summary": "Fully-associative TLB for Sv32/Sv39 page translation with ASID support. Both configurations implement ASIDLEN=9; the RV64 satp WARL logic clears the seven unimplemented high ASID bits on write. Combinational lookup, sequential fill, invalid-first round-robin replacement.",
+        "parent": "rapt_tlb",
+        "display": false,
+        "x": 7.0,
+        "y": 0.0,
         "z": 1.62,
+        "h": 6,
+        "child_count": 2
+      },
+      {
+        "id": "rapt_bus",
+        "short": "BUS",
+        "file": "rtl/memory/rapt_bus.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "",
+        "parent": "rapt_memory",
+        "display": true,
+        "x": 10.9,
+        "y": 0.0,
+        "z": 23.2,
+        "h": 6,
+        "child_count": 0,
+        "sx": 6.8,
+        "sz": 4.4,
+        "sy": 0.364,
+        "latency": 2,
+        "capacity": 8,
+        "kind": "bus",
+        "model_note": "private L1/PTW arbitration to l2_client_if"
+      },
+      {
+        "id": "rapt_memory",
+        "short": "MEM",
+        "file": "rtl/memory/rapt_memory.sv",
+        "domain": "memory",
+        "stage": 7,
+        "summary": "Per-hart memory block: L1I, L1D, TLBs/PTWs, PMP and the bus interface unit (rapt_bus). Every access leaves through the L2 client port; AXI, outstanding-transaction management and any L2 cache live in the L2 subsystem outside the core (rapt_l2_subsystem).",
+        "parent": "rapt_core",
+        "display": false,
+        "x": 7.0,
+        "y": 0.0,
+        "z": 1.84,
+        "h": 6,
+        "child_count": 6
+      },
+      {
+        "id": "rapt_memory_drain",
+        "short": "memory_drain",
+        "file": "rtl/memory/rapt_memory_drain.sv",
+        "domain": "memory",
+        "stage": 7,
+        "summary": "A serializing ROB owner holds request_i until its ordering point retires or is cancelled. Completion is a transaction result, not a live cache-idle signal. The store queue and memory must both be quiescent before completion; this also includes posted write responses and late refi",
+        "parent": "rapt_memory",
+        "display": false,
+        "x": 7.0,
+        "y": 0.0,
+        "z": 2.06,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_cache_fill_select",
+        "short": "cache_fill_select",
+        "file": "rtl/memory/replacement/rapt_cache_fill_select.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "Reuse a live matching line, otherwise an invalid candidate, otherwise the replacement-policy victim. Way zero is a valid result, not a sentinel.",
+        "parent": "rapt_l1d_tags",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 2.28,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_cache_lru",
+        "short": "cache_lru",
+        "file": "rtl/memory/replacement/rapt_cache_lru.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "Multi-query true LRU, interface-compatible with rapt_cache_plru. Each set keeps one bit per way pair (i < j): set when way j was used after way i. A touch makes its way newer than every other way; update ports are applied in ascending order, so a higher port wins on pairs both po",
+        "parent": "rapt_l1d_tags",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 1.4,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_cache_nru",
+        "short": "cache_nru",
+        "file": "rtl/memory/replacement/rapt_cache_nru.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "One recent bit per way. Touching the last cold way starts a new epoch, retaining only the touched way. The caller merges mutually exclusive hit and install updates before this single indexed write port.",
+        "parent": "rapt_l1d_tags",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 1.62,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_cache_plru",
+        "short": "cache_plru",
+        "file": "rtl/memory/replacement/rapt_cache_plru.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "Multi-query tree PLRU. Bits record the most recently used child. Only nodes on an accessed leaf's path change. Update ports are applied in ascending order; a higher port wins only on nodes both ports touch.",
+        "parent": "rapt_l1d_tags",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 1.84,
         "h": 6,
         "child_count": 0
       },
@@ -9511,7 +9782,7 @@
         "y": 0.0,
         "z": -0.2,
         "h": 14,
-        "child_count": 6
+        "child_count": 7
       },
       {
         "id": "rapt_core",
@@ -9519,7 +9790,7 @@
         "file": "rtl/rapt_core.sv",
         "domain": "core",
         "stage": 3,
-        "summary": "Single-hart composition of frontend, backend, caches and memory interconnect. A cluster (`rapt.sv`) instantiates cores alongside shared CLINT/PLIC devices. External MMIO targeted at cluster-local CLINT or PLIC register windows leaves through the standard AXI master interface; the",
+        "summary": "Single-hart composition of frontend, backend and the private L1 memory block. A cluster (`rapt.sv`) instantiates cores alongside the L2 subsystem and the shared CLINT/PLIC devices. Every memory and MMIO access, including cluster-local CLINT or PLIC register windows, leaves throug",
         "parent": "rapt",
         "display": false,
         "x": 3.0,
@@ -9529,10 +9800,279 @@
         "child_count": 3
       },
       {
+        "id": "rapt_sram_2rw",
+        "short": "sram_2rw",
+        "file": "rtl/sram/rapt_sram_2rw.sv",
+        "domain": "core",
+        "stage": 8,
+        "summary": "Two independent, clocked read/write ports sharing one memory array. Each enabled port either writes at the rising edge or registers a read result at that edge. Read outputs hold when their port is idle or writes. The caller must avoid same-address cross-port accesses when either ",
+        "parent": "rapt_fpr",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 0.24,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_l2",
+        "short": "L2",
+        "file": "rtl/uncore/l2cache/rapt_l2.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "",
+        "parent": "rapt_l2_subsystem",
+        "display": true,
+        "x": 25.9,
+        "y": 0.0,
+        "z": 23.2,
+        "h": 6,
+        "child_count": 10,
+        "sx": 6.8,
+        "sz": 4.4,
+        "sy": 0.28,
+        "latency": 0,
+        "capacity": 0,
+        "kind": "cache",
+        "model_note": "cache disabled in default; cluster AXI management remains; default-l2 adds 512 KiB / 8 ways"
+      },
+      {
+        "id": "rapt_l2_bypass_ctrl",
+        "short": "l2_bypass_ctrl",
+        "file": "rtl/uncore/l2cache/rapt_l2_bypass_ctrl.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "Uncached read phases and the shared registered outer AR channel. The request valid/data ports also admit blocking refills to the same AR register.",
+        "parent": "rapt_l2",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 2.06,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_l2_data_array",
+        "short": "l2_data_array",
+        "file": "rtl/uncore/l2cache/rapt_l2_data_array.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "Medium BOOM data geometry: four 16384 x 64 single-port SRAM banks. bank=chunk[1:0], row={way[2:0],set[9:0],chunk[2]}. Bank priority is SinkC > SourceC > live SinkD > buffered line write > SourceD-write > SourceD-read. A displaced buffered beat retries.",
+        "parent": "rapt_l2",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 2.28,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_l2_directory",
+        "short": "l2_directory",
+        "file": "rtl/uncore/l2cache/rapt_l2_directory.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "BOOM inclusive-cache directory geometry and one-port access contract. Data is stored as one synchronous SRAM per way; a reset wipe clears one set in all ways per cycle before requests become ready.",
+        "parent": "rapt_l2",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 1.4,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_l2_evict_ctrl",
+        "short": "l2_evict_ctrl",
+        "file": "rtl/uncore/l2cache/rapt_l2_evict_ctrl.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "Dirty-victim writeback phases. The parent presents a valid transaction from AW through B; capture data ports carry the victim metadata for that transaction.",
+        "parent": "rapt_l2",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 1.62,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_l2_hit_ctrl",
+        "short": "l2_hit_ctrl",
+        "file": "rtl/uncore/l2cache/rapt_l2_hit_ctrl.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "Resident read phases. Valid/ready selects the hit pipeline; the data ports capture its request and advance the address, word, and remaining beat count.",
+        "parent": "rapt_l2",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 1.84,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_l2_mshr_frontend",
+        "short": "l2_mshr_frontend",
+        "file": "rtl/uncore/l2cache/rapt_l2_mshr_frontend.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "BOOM-sized miss admission and secondary replay fabric. The seven MSHR state machines supply their status and schedule requests; this module arbitrates them and keeps their 21 secondary queues in 33 shared entries. A secondary entry omits the set because its target MSHR already ow",
+        "parent": "rapt_l2",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 2.06,
+        "h": 6,
+        "child_count": 2
+      },
+      {
+        "id": "rapt_l2_mshr_scheduler",
+        "short": "l2_mshr_scheduler",
+        "file": "rtl/uncore/l2cache/rapt_l2_mshr_scheduler.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "BOOM inclusive-cache MSHR allocation and round-robin schedule selection. Five ordinary A slots and the dedicated BC/C slots share one set-conflict table. The secondary request payloads reside in rapt_l2_secondary_buffer.",
+        "parent": "rapt_l2_mshr_frontend",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 2.28,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_l2_put_buffer",
+        "short": "l2_put_buffer",
+        "file": "rtl/uncore/l2cache/rapt_l2_put_buffer.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "BOOM SinkA's non-flowing put ListBuffer: forty lists share forty beats. A list may hold multiple beats; the caller owns list allocation and retires a list after its last beat has been popped. A full pool does not accept a push merely because another list pops on the same edge.",
+        "parent": "rapt_l2",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 1.4,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_l2_refill_ctrl",
+        "short": "l2_refill_ctrl",
+        "file": "rtl/uncore/l2cache/rapt_l2_refill_ctrl.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "Blocking refill admission and outer read phases. Valid/ready controls the phase; the data ports own the returned line and its merge writes.",
+        "parent": "rapt_l2",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 1.62,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_l2_refill_mshrs",
+        "short": "l2_refill_mshrs",
+        "file": "rtl/uncore/l2cache/rapt_l2_refill_mshrs.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "Independent outer-memory refill contexts for BOOM's seven L2 MSHRs. The outer AXI ID is the context index; the original inner ID is retained for response routing. Different fills may return interleaved beats.",
+        "parent": "rapt_l2",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 1.84,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_l2_release_buffer",
+        "short": "l2_release_buffer",
+        "file": "rtl/uncore/l2cache/rapt_l2_release_buffer.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "Two in-flight L1D release lists share BOOM's lowest-free beat pool. RV64 has 16 shared beats and RV32 has 32. Keep beats until ReleaseAck so a failed nested refill can replay the same ReleaseData without a new C.",
+        "parent": "rapt_l2",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 2.06,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_l2_secondary_buffer",
+        "short": "l2_secondary_buffer",
+        "file": "rtl/uncore/l2cache/rapt_l2_secondary_buffer.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "BOOM inclusive-cache Scheduler uses one shared 33-entry ListBuffer with three virtual request lists for each of its seven MSHRs (A, B and C). The queue is non-flowing: a push into an empty list becomes visible after the clock edge, and a full buffer cannot reuse a simultaneously ",
+        "parent": "rapt_l2_mshr_frontend",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 2.28,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_axi_master",
+        "short": "AXI",
+        "file": "rtl/uncore/rapt_axi_master.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "",
+        "parent": "rapt_l2_subsystem",
+        "display": true,
+        "x": 18.4,
+        "y": 0.0,
+        "z": 23.2,
+        "h": 6,
+        "child_count": 0,
+        "sx": 6.8,
+        "sz": 4.4,
+        "sy": 0.364,
+        "latency": 2,
+        "capacity": 8,
+        "kind": "bus",
+        "model_note": "cluster L2 subsystem AXI master; 8 read credits"
+      },
+      {
+        "id": "rapt_axi_r_buffer",
+        "short": "axi_r_buffer",
+        "file": "rtl/uncore/rapt_axi_r_buffer.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "Register the outer AXI R channel before it enters the cache hierarchy. Two entries let a ready consumer accept one beat on every cycle while rready to the memory controller depends only on registered occupancy.",
+        "parent": "rapt_l2_subsystem",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 1.4,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_l2_subsystem",
+        "short": "L2 subsystem",
+        "file": "rtl/uncore/rapt_l2_subsystem.sv",
+        "domain": "memory",
+        "stage": 8,
+        "summary": "rapt_l2_subsystem: the memory side of the cluster, outside every core. core (L1I/L1D/PTW -> rapt_bus) --l2_client_if--> rapt_l2_subsystem --AXI4--> router It always exists. Without an L2 cache it is the management-only L2: AXI4 protocol conversion, AXI IDs and the outstanding rea",
+        "parent": "rapt",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 1.62,
+        "h": 6,
+        "child_count": 3
+      },
+      {
         "id": "rapt_router",
         "short": "RTR",
-        "file": "rtl/rapt_router.sv",
-        "domain": "core",
+        "file": "rtl/uncore/rapt_router.sv",
+        "domain": "memory",
         "stage": 8,
         "summary": "",
         "parent": "rapt",
@@ -9549,21 +10089,6 @@
         "capacity": 4,
         "kind": "bus",
         "model_note": "cluster device router"
-      },
-      {
-        "id": "rapt_sram_2rw",
-        "short": "sram_2rw",
-        "file": "rtl/sram/rapt_sram_2rw.sv",
-        "domain": "core",
-        "stage": 8,
-        "summary": "Two independent, clocked read/write ports sharing one memory array. Each enabled port either writes at the rising edge or registers a read result at that edge. Read outputs hold when their port is idle or writes. The caller must avoid same-address cross-port accesses when either ",
-        "parent": "rapt_fpr",
-        "display": false,
-        "x": 8.0,
-        "y": 0.0,
-        "z": 0.24,
-        "h": 6,
-        "child_count": 0
       },
       {
         "id": "soc_pmem",
@@ -9849,6 +10374,7 @@
         "ports": [
           "local_operand_wake",
           "completion",
+          "combo_source",
           "dispatch",
           "disp",
           "issue_enable",
@@ -10426,6 +10952,9 @@
         "instance": "prf",
         "kind": "instance",
         "ports": [
+          "extra_address",
+          "extra_value",
+          "extra_valid",
           "completion",
           "clock",
           "reset",
@@ -10434,10 +10963,7 @@
           "cmu_bcast",
           "map_snapshot",
           "rat_snapshot",
-          "rf",
-          "rf_map",
-          "dbg_we_i",
-          "dbg_addr_i"
+          "rf"
         ]
       },
       {
@@ -10518,6 +11044,10 @@
         "instance": "ieu",
         "kind": "instance",
         "ports": [
+          "early_completion",
+          "operand_read_address",
+          "operand_read_value",
+          "operand_read_valid",
           "local_integer_wake",
           "branch_wake",
           "memory_wake",
@@ -10525,11 +11055,7 @@
           "cancel_head",
           "cancel_owner",
           "completion",
-          "clock",
-          "reset",
-          "cmu_bcast",
-          "csr_bcast",
-          "dispatch"
+          "clock"
         ]
       },
       {
@@ -10538,18 +11064,18 @@
         "instance": "feu",
         "kind": "instance",
         "ports": [
+          "early_completion",
+          "fp_queue_read_uop",
+          "fp_queue_read_tag",
+          "operand_read_value",
+          "fp_queue_ready_tag",
+          "fp_queue_read_generation",
+          "int_operand_address",
+          "int_operand_value",
+          "int_operand_valid",
           "local_fp_wake",
           "cancel_valid",
-          "cancel_head",
-          "cancel_owner",
-          "completion",
-          "clock",
-          "reset",
-          "cmu_bcast",
-          "csr_bcast",
-          "dispatch",
-          "disp_fpq",
-          "wb_fpu"
+          "cancel_head"
         ]
       },
       {
@@ -10858,6 +11384,10 @@
         "instance": "fp_registers",
         "kind": "instance",
         "ports": [
+          "resolve_generation",
+          "retire_fp",
+          "retire_value",
+          "retire_generation",
           "flush",
           "allocate_valid",
           "allocate_uop",
@@ -10865,11 +11395,7 @@
           "allocate_generation",
           "allocate_tag",
           "operand_allocate_index",
-          "operand_release_valid",
-          "operand_release_index",
-          "operand_read_valid",
-          "operand_read_index",
-          "read_index"
+          "operand_release_valid"
         ]
       },
       {
@@ -12152,53 +12678,6 @@
         ]
       },
       {
-        "from": "rapt_cached_ptw",
-        "to": "rapt_ptw",
-        "instance": "walker",
-        "kind": "instance",
-        "ports": []
-      },
-      {
-        "from": "rapt_ifetch_translate",
-        "to": "rapt_pmp",
-        "instance": "u_pmp",
-        "kind": "instance",
-        "ports": [
-          "addr",
-          "size_m1",
-          "priv",
-          "op_r",
-          "op_w",
-          "op_x",
-          "pmp_raw_addr",
-          "pmp_napot_mask",
-          "pmp_cfg_r",
-          "pmp_cfg_w",
-          "pmp_cfg_x",
-          "pmp_cfg_l"
-        ]
-      },
-      {
-        "from": "rapt_ifetch_translate",
-        "to": "rapt_ptw",
-        "instance": "u_ptw",
-        "kind": "instance",
-        "ports": [
-          "clock",
-          "reset",
-          "req_valid",
-          "kill",
-          "vaddr",
-          "satp_ppn",
-          "mmu_en",
-          "pbmte",
-          "sbe",
-          "req_store",
-          "bus_arvalid",
-          "bus_araddr"
-        ]
-      },
-      {
         "from": "rapt_l1d",
         "to": "rapt_pmp_state",
         "instance": "pmp_state_regs",
@@ -12250,15 +12729,15 @@
           "clock",
           "reset",
           "read_addr",
+          "read_word",
+          "read_line",
+          "read_way",
           "write_valid",
           "write_blocked",
           "write_addr",
           "write_word",
           "write_way",
-          "write_data",
-          "write_strobe",
-          "write_line",
-          "write_mask"
+          "write_data"
         ]
       },
       {
@@ -12301,15 +12780,15 @@
           "clock",
           "reset",
           "flush",
+          "sfence_valid",
+          "sfence_vpn",
+          "sfence_asid",
+          "sfence_all_vpn",
+          "sfence_all_asid",
           "lookup_vtag",
+          "lookup_valid",
           "lookup_asid",
-          "hit",
-          "ptag",
-          "pte_flags",
-          "pbmt",
-          "verdict",
-          "fill_verdict",
-          "fill_valid"
+          "hit"
         ]
       },
       {
@@ -12321,15 +12800,15 @@
           "clock",
           "reset",
           "flush",
+          "sfence_valid",
+          "sfence_vpn",
+          "sfence_asid",
+          "sfence_all_vpn",
+          "sfence_all_asid",
           "lookup_vtag",
+          "lookup_valid",
           "lookup_asid",
-          "hit",
-          "ptag",
-          "pte_flags",
-          "pbmt",
-          "verdict",
-          "fill_verdict",
-          "fill_valid"
+          "hit"
         ]
       },
       {
@@ -12360,6 +12839,8 @@
         "ports": [
           "update_dirty",
           "inspect_set",
+          "inspect_read",
+          "inspect_source",
           "inspect_way",
           "clean_valid",
           "clean_mask",
@@ -12367,9 +12848,7 @@
           "inspect_valid",
           "inspect_dirty",
           "inspect_dirty_any",
-          "dirty_any",
-          "update_blocked",
-          "clock"
+          "dirty_any"
         ]
       },
       {
@@ -12414,6 +12893,38 @@
       },
       {
         "from": "rapt_l1d_tags",
+        "to": "rapt_cache_nru",
+        "instance": "u_policy",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "invalidate",
+          "read_set",
+          "victim",
+          "update_valid",
+          "update_set",
+          "update_way"
+        ]
+      },
+      {
+        "from": "rapt_l1d_tags",
+        "to": "rapt_cache_lru",
+        "instance": "u_policy",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "invalidate",
+          "read_set",
+          "victim",
+          "update_valid",
+          "update_set",
+          "update_way"
+        ]
+      },
+      {
+        "from": "rapt_l1d_tags",
         "to": "rapt_cache_plru",
         "instance": "u_policy",
         "kind": "instance",
@@ -12450,6 +12961,45 @@
           "valid_way",
           "victim",
           "selected"
+        ]
+      },
+      {
+        "from": "rapt_ifetch_translate",
+        "to": "rapt_pmp_check",
+        "instance": "u_pmp",
+        "kind": "instance",
+        "ports": [
+          "addr",
+          "size_m1",
+          "priv",
+          "op_r",
+          "op_w",
+          "op_x",
+          "state",
+          "fault",
+          "fault_lo_o",
+          "fault_read_o",
+          "fault_write_o"
+        ]
+      },
+      {
+        "from": "rapt_ifetch_translate",
+        "to": "rapt_ptw",
+        "instance": "u_ptw",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "req_valid",
+          "kill",
+          "vaddr",
+          "satp_ppn",
+          "mmu_en",
+          "pbmte",
+          "sbe",
+          "req_store",
+          "bus_arvalid",
+          "bus_araddr"
         ]
       },
       {
@@ -12536,15 +13086,15 @@
           "clock",
           "reset",
           "flush",
+          "sfence_valid",
+          "sfence_vpn",
+          "sfence_asid",
+          "sfence_all_vpn",
+          "sfence_all_asid",
           "lookup_vtag",
+          "lookup_valid",
           "lookup_asid",
-          "hit",
-          "ptag",
-          "pte_flags",
-          "pbmt",
-          "fill_valid",
-          "fill_ptag",
-          "fill_vtag"
+          "hit"
         ]
       },
       {
@@ -12575,16 +13125,16 @@
         "ports": [
           "csr_bcast",
           "pmp_state",
+          "shared_check_active",
+          "shared_check_addr",
+          "shared_check_size_m1",
+          "shared_check_priv",
+          "shared_check_read",
+          "shared_check_fault",
+          "shared_check_read_fault",
           "pc_ifu",
           "ptw_araddr",
-          "sram_data_ready",
-          "is_c",
-          "tlb_hit",
-          "itlb_pte",
-          "ptw_result_pte",
-          "pf_fetch_tlb",
-          "pf_fetch_ptw",
-          "pmp_fetch_pmp_fault"
+          "sram_data_ready"
         ]
       },
       {
@@ -12605,6 +13155,22 @@
           "waddr_idx",
           "wtag",
           "wtag_match"
+        ]
+      },
+      {
+        "from": "rapt_l1i",
+        "to": "rapt_cache_lru",
+        "instance": "u_policy",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "invalidate",
+          "read_set",
+          "victim",
+          "update_valid",
+          "update_set",
+          "update_way"
         ]
       },
       {
@@ -12672,6 +13238,369 @@
           "pmp_cfg_w",
           "pmp_cfg_x",
           "pmp_cfg_l"
+        ]
+      },
+      {
+        "from": "rapt_cached_ptw",
+        "to": "rapt_ptw",
+        "instance": "walker",
+        "kind": "instance",
+        "ports": []
+      },
+      {
+        "from": "rapt_pmp_check",
+        "to": "rapt_pmp_permissions",
+        "instance": "check_permissions",
+        "kind": "instance",
+        "ports": [
+          "addr",
+          "size_m1",
+          "priv",
+          "op_r",
+          "op_w",
+          "op_x",
+          "pmp_raw_addr",
+          "pmp_napot_mask",
+          "pmp_cfg_r",
+          "pmp_cfg_w",
+          "pmp_cfg_x",
+          "pmp_cfg_l"
+        ]
+      },
+      {
+        "from": "rapt_pmp",
+        "to": "rapt_pmp_permissions",
+        "instance": "check_permissions",
+        "kind": "instance",
+        "ports": [
+          "addr",
+          "size_m1",
+          "priv",
+          "op_r",
+          "op_w",
+          "op_x",
+          "pmp_raw_addr",
+          "pmp_napot_mask",
+          "pmp_cfg_r",
+          "pmp_cfg_w",
+          "pmp_cfg_x",
+          "pmp_cfg_l"
+        ]
+      },
+      {
+        "from": "rapt_tlb",
+        "to": "rapt_tlb_lru",
+        "instance": "u_lru",
+        "kind": "instance",
+        "ports": [
+          "lookup_valid",
+          "fill_valid",
+          "victim"
+        ]
+      },
+      {
+        "from": "rapt_data_tlb",
+        "to": "rapt_tlb_lru",
+        "instance": "u_lru",
+        "kind": "instance",
+        "ports": [
+          "lookup_valid",
+          "fill_valid",
+          "victim"
+        ]
+      },
+      {
+        "from": "rapt_tlb_lru",
+        "to": "rapt_cache_plru",
+        "instance": "u_policy",
+        "kind": "instance",
+        "ports": [
+          "invalidate",
+          "victim"
+        ]
+      },
+      {
+        "from": "rapt_tlb_lru",
+        "to": "rapt_cache_lru",
+        "instance": "u_policy",
+        "kind": "instance",
+        "ports": [
+          "invalidate",
+          "victim"
+        ]
+      },
+      {
+        "from": "rapt_memory",
+        "to": "rapt_memory_drain",
+        "instance": "drain_control",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "request_i",
+          "stores_empty_i",
+          "memory_idle_i",
+          "writeback_idle_i",
+          "drain_o",
+          "done_o"
+        ]
+      },
+      {
+        "from": "rapt_memory",
+        "to": "rapt_pmp_state",
+        "instance": "pmp_fetch_state_regs",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "update",
+          "state"
+        ]
+      },
+      {
+        "from": "rapt_memory",
+        "to": "rapt_l2tlb",
+        "instance": "u_l2tlb",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "flush",
+          "cancel",
+          "sfence_valid",
+          "sfence_vpn",
+          "sfence_asid",
+          "sfence_all_vpn",
+          "sfence_all_asid",
+          "req_i",
+          "ready_o",
+          "rsp_o"
+        ]
+      },
+      {
+        "from": "rapt_memory",
+        "to": "rapt_l1i",
+        "instance": "l1i_cache",
+        "kind": "instance",
+        "ports": [
+          "l2tlb_req_o",
+          "l2tlb_ready_i",
+          "l2tlb_rsp_i",
+          "clock",
+          "reset",
+          "io_authorized",
+          "io_start",
+          "io_owner_pc",
+          "cmu_bcast",
+          "ifu_l1i",
+          "l1i_bus",
+          "csr_bcast"
+        ]
+      },
+      {
+        "from": "rapt_memory",
+        "to": "rapt_l1d",
+        "instance": "l1d_cache",
+        "kind": "instance",
+        "ports": [
+          "l2tlb_req_o",
+          "l2tlb_ready_i",
+          "l2tlb_rsp_i",
+          "clock",
+          "reset",
+          "coherent_ready",
+          "coherent_request",
+          "coherent_write",
+          "coherent_addr",
+          "probe_valid_i",
+          "probe_addr_i",
+          "probe_ready_o"
+        ]
+      },
+      {
+        "from": "rapt_memory",
+        "to": "rapt_bus",
+        "instance": "bus",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "coherent_ready",
+          "coherent_request",
+          "coherent_write",
+          "coherent_addr",
+          "mem",
+          "rd_req_cacheable",
+          "l1i_bus",
+          "l1d_bus",
+          "csr_bcast",
+          "cmu_bcast"
+        ]
+      },
+      {
+        "from": "rapt",
+        "to": "rapt_clint",
+        "instance": "clint_inst",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "clint_bus",
+          "reset"
+        ]
+      },
+      {
+        "from": "rapt",
+        "to": "rapt_plic",
+        "instance": "plic",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "plic_bus"
+        ]
+      },
+      {
+        "from": "rapt",
+        "to": "rapt_router",
+        "instance": "axi_router",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "core_axi",
+          "offchip_axi",
+          "clint_bus",
+          "plic_bus"
+        ]
+      },
+      {
+        "from": "rapt",
+        "to": "rapt_l2_subsystem",
+        "instance": "l2_subsystem",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "client",
+          "io_master"
+        ]
+      },
+      {
+        "from": "rapt",
+        "to": "rapt_core",
+        "instance": "core",
+        "kind": "instance",
+        "ports": [
+          "writeback_error_o",
+          "external_write_valid_i",
+          "external_write_pending_i",
+          "external_write_first_i",
+          "external_write_last_i",
+          "clock",
+          "l2_client",
+          "clint_timer_int_i",
+          "clint_sw_int_i",
+          "mtime_i",
+          "rvfi_valid",
+          "rvfi_order"
+        ]
+      },
+      {
+        "from": "rapt",
+        "to": "rapt_dtm",
+        "instance": "dtm_inst",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "trst_n",
+          "tms",
+          "tdi",
+          "tdo",
+          "dmi_req",
+          "dmi_wr",
+          "dmi_addr",
+          "dmi_wdata",
+          "dmi_rdata",
+          "dmi_resp"
+        ]
+      },
+      {
+        "from": "rapt",
+        "to": "rapt_dm",
+        "instance": "dm_inst",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "dmi_req",
+          "dmi_wr",
+          "dmi_addr",
+          "dmi_wdata",
+          "dmi_rdata",
+          "dmi_resp",
+          "halted_i",
+          "halt_pc_i",
+          "commit_fire_i",
+          "haltreq_o"
+        ]
+      },
+      {
+        "from": "rapt_core",
+        "to": "rapt_frontend",
+        "instance": "frontend",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "cmu_bcast",
+          "csr_bcast",
+          "recovery",
+          "ifu_l1i",
+          "idu_rnu",
+          "empty_o",
+          "snapshot_ghr",
+          "snapshot_phr",
+          "history_restore",
+          "restore_ghr"
+        ]
+      },
+      {
+        "from": "rapt_core",
+        "to": "rapt_ifetch_io_guard",
+        "instance": "ifetch_io_guard",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "owner_pc",
+          "frontier_pc",
+          "frontier_advance",
+          "blocked",
+          "pipeline_empty",
+          "memory_idle",
+          "io_start",
+          "authorized"
+        ]
+      },
+      {
+        "from": "rapt_core",
+        "to": "rapt_memory",
+        "instance": "memory_subsystem",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "ifu_l1i",
+          "lsu_l1d",
+          "exu_l1d",
+          "cmu_bcast",
+          "csr_bcast",
+          "pmp_update",
+          "l2_client",
+          "ifetch_io_authorized_i",
+          "ifetch_io_start_o",
+          "ifetch_io_owner_pc_o"
         ]
       },
       {
@@ -12898,108 +13827,7 @@
         "ports": []
       },
       {
-        "from": "rapt_memory",
-        "to": "rapt_memory_drain",
-        "instance": "drain_control",
-        "kind": "instance",
-        "ports": [
-          "clock",
-          "reset",
-          "request_i",
-          "stores_empty_i",
-          "memory_idle_i",
-          "writeback_idle_i",
-          "drain_o",
-          "done_o"
-        ]
-      },
-      {
-        "from": "rapt_memory",
-        "to": "rapt_pmp_state",
-        "instance": "pmp_fetch_state_regs",
-        "kind": "instance",
-        "ports": [
-          "clock",
-          "reset",
-          "update",
-          "state"
-        ]
-      },
-      {
-        "from": "rapt_memory",
-        "to": "rapt_l2tlb",
-        "instance": "u_l2tlb",
-        "kind": "instance",
-        "ports": [
-          "clock",
-          "reset",
-          "flush",
-          "req_i",
-          "ready_o",
-          "rsp_o"
-        ]
-      },
-      {
-        "from": "rapt_memory",
-        "to": "rapt_l1i",
-        "instance": "l1i_cache",
-        "kind": "instance",
-        "ports": [
-          "l2tlb_req_o",
-          "l2tlb_ready_i",
-          "l2tlb_rsp_i",
-          "clock",
-          "reset",
-          "io_authorized",
-          "io_start",
-          "io_owner_pc",
-          "cmu_bcast",
-          "ifu_l1i",
-          "l1i_bus",
-          "csr_bcast"
-        ]
-      },
-      {
-        "from": "rapt_memory",
-        "to": "rapt_l1d",
-        "instance": "l1d_cache",
-        "kind": "instance",
-        "ports": [
-          "l2tlb_req_o",
-          "l2tlb_ready_i",
-          "l2tlb_rsp_i",
-          "clock",
-          "reset",
-          "coherent_ready",
-          "coherent_request",
-          "coherent_write",
-          "probe_valid_i",
-          "probe_addr_i",
-          "probe_ready_o",
-          "probe_release_valid_o"
-        ]
-      },
-      {
-        "from": "rapt_memory",
-        "to": "rapt_bus",
-        "instance": "bus",
-        "kind": "instance",
-        "ports": [
-          "clock",
-          "reset",
-          "coherent_ready",
-          "coherent_request",
-          "coherent_write",
-          "mem",
-          "rd_req_cacheable",
-          "l1i_bus",
-          "l1d_bus",
-          "csr_bcast",
-          "cmu_bcast"
-        ]
-      },
-      {
-        "from": "rapt_memory",
+        "from": "rapt_l2_subsystem",
         "to": "rapt_axi_master",
         "instance": "axi_master",
         "kind": "instance",
@@ -13012,7 +13840,7 @@
         ]
       },
       {
-        "from": "rapt_memory",
+        "from": "rapt_l2_subsystem",
         "to": "rapt_l2",
         "instance": "l2",
         "kind": "instance",
@@ -13032,187 +13860,13 @@
         ]
       },
       {
-        "from": "rapt_memory",
+        "from": "rapt_l2_subsystem",
         "to": "rapt_axi_r_buffer",
         "instance": "outer_r_buffer",
         "kind": "instance",
         "ports": [
           "upstream",
           "downstream"
-        ]
-      },
-      {
-        "from": "rapt_pmp",
-        "to": "rapt_pmp_permissions",
-        "instance": "check_permissions",
-        "kind": "instance",
-        "ports": [
-          "addr",
-          "size_m1",
-          "priv",
-          "op_r",
-          "op_w",
-          "op_x",
-          "pmp_raw_addr",
-          "pmp_napot_mask",
-          "pmp_cfg_r",
-          "pmp_cfg_w",
-          "pmp_cfg_x",
-          "pmp_cfg_l"
-        ]
-      },
-      {
-        "from": "rapt",
-        "to": "rapt_clint",
-        "instance": "clint_inst",
-        "kind": "instance",
-        "ports": [
-          "clock",
-          "clint_bus",
-          "reset"
-        ]
-      },
-      {
-        "from": "rapt",
-        "to": "rapt_plic",
-        "instance": "plic",
-        "kind": "instance",
-        "ports": [
-          "clock",
-          "reset",
-          "plic_bus"
-        ]
-      },
-      {
-        "from": "rapt",
-        "to": "rapt_router",
-        "instance": "axi_router",
-        "kind": "instance",
-        "ports": [
-          "clock",
-          "reset",
-          "core_axi",
-          "offchip_axi",
-          "clint_bus",
-          "plic_bus"
-        ]
-      },
-      {
-        "from": "rapt",
-        "to": "rapt_core",
-        "instance": "core",
-        "kind": "instance",
-        "ports": [
-          "writeback_error_o",
-          "external_write_valid_i",
-          "external_write_pending_i",
-          "external_write_first_i",
-          "external_write_last_i",
-          "clock",
-          "io_master",
-          "clint_timer_int_i",
-          "clint_sw_int_i",
-          "mtime_i",
-          "rvfi_valid",
-          "rvfi_order"
-        ]
-      },
-      {
-        "from": "rapt",
-        "to": "rapt_dtm",
-        "instance": "dtm_inst",
-        "kind": "instance",
-        "ports": [
-          "clock",
-          "reset",
-          "trst_n",
-          "tms",
-          "tdi",
-          "tdo",
-          "dmi_req",
-          "dmi_wr",
-          "dmi_addr",
-          "dmi_wdata",
-          "dmi_rdata",
-          "dmi_resp"
-        ]
-      },
-      {
-        "from": "rapt",
-        "to": "rapt_dm",
-        "instance": "dm_inst",
-        "kind": "instance",
-        "ports": [
-          "clock",
-          "reset",
-          "dmi_req",
-          "dmi_wr",
-          "dmi_addr",
-          "dmi_wdata",
-          "dmi_rdata",
-          "dmi_resp",
-          "halted_i",
-          "halt_pc_i",
-          "commit_fire_i",
-          "haltreq_o"
-        ]
-      },
-      {
-        "from": "rapt_core",
-        "to": "rapt_frontend",
-        "instance": "frontend",
-        "kind": "instance",
-        "ports": [
-          "clock",
-          "reset",
-          "cmu_bcast",
-          "csr_bcast",
-          "recovery",
-          "ifu_l1i",
-          "idu_rnu",
-          "empty_o",
-          "snapshot_ghr",
-          "snapshot_phr",
-          "history_restore",
-          "restore_ghr"
-        ]
-      },
-      {
-        "from": "rapt_core",
-        "to": "rapt_ifetch_io_guard",
-        "instance": "ifetch_io_guard",
-        "kind": "instance",
-        "ports": [
-          "clock",
-          "reset",
-          "owner_pc",
-          "frontier_pc",
-          "frontier_advance",
-          "blocked",
-          "pipeline_empty",
-          "memory_idle",
-          "io_start",
-          "authorized"
-        ]
-      },
-      {
-        "from": "rapt_core",
-        "to": "rapt_memory",
-        "instance": "memory_subsystem",
-        "kind": "instance",
-        "ports": [
-          "clock",
-          "reset",
-          "ifu_l1i",
-          "lsu_l1d",
-          "exu_l1d",
-          "cmu_bcast",
-          "csr_bcast",
-          "pmp_update",
-          "io_master",
-          "ifetch_io_authorized_i",
-          "ifetch_io_start_o",
-          "ifetch_io_owner_pc_o"
         ]
       }
     ],
@@ -13356,7 +14010,7 @@
       "RNQ and rename_pipe are inside RNU. rapt_operand_stage buffers renamed packets; ROU owns the operand-reading UOQ.",
       "All accepted completions are registered before ROB writeback. Local ALQ/BRQ and FPQ operand capture can precede the global registered wakeup.",
       "L1D hit returns from the registered access state. ITLB/DTLB misses probe the shared 256-entry direct-mapped L2 TLB before rapt_ptw.",
-      "Default write-back L1D has 4 MSHRs and 2 writeback buffers; translated misses replay through IOQ. L2 is passthrough unless RAPT_L2_EN is set.",
+      "Default write-back L1D has 4 MSHRs and 2 writeback buffers; translated misses replay through IOQ. The cluster L2 subsystem always manages AXI; presets such as default-l2 add its cache.",
       "PMEM/UART cycle costs are abstract PMA-window delays, not board measurements.",
       "Animation uses simplified queues, one completion delay, and conservative retirement; it omits redirects, replay, and actual ALU bypass timing. Model IPC is not RTL IPC."
     ],
@@ -19071,38 +19725,23 @@
         "section": "Linux Kernel Boot (via OpenSBI on NEMU)"
       },
       {
+        "name": "fpga-info",
+        "description": "Print the native board configuration and output directory",
+        "section": "FPGA Targets"
+      },
+      {
+        "name": "fpga-synth",
+        "description": "Synthesize the native board SoC (XLEN, MEMORY, ... as in the board Makefile)",
+        "section": "FPGA Targets"
+      },
+      {
         "name": "fpga-build",
-        "description": "Build and timing-check the selected native FPGA board (RK defaults to DDR)",
+        "description": "Build and timing-check the native board bitstream",
         "section": "FPGA Targets"
       },
       {
         "name": "fpga-load",
-        "description": "Program the selected native FPGA board from a matching validated build",
-        "section": "FPGA Targets"
-      },
-      {
-        "name": "fpga-info",
-        "description": "Show native FPGA configuration and output path",
-        "section": "FPGA Targets"
-      },
-      {
-        "name": "fpga-rv32-build",
-        "description": "Build the selected native board for RV32",
-        "section": "FPGA Targets"
-      },
-      {
-        "name": "fpga-rv64-build",
-        "description": "Build the selected native board for RV64",
-        "section": "FPGA Targets"
-      },
-      {
-        "name": "fpga-syn",
-        "description": "Synthesize the selected native FPGA board",
-        "section": "FPGA Targets"
-      },
-      {
-        "name": "fpga-pnr",
-        "description": "Build and timing-check the selected native FPGA board",
+        "description": "Program the native board from a matching timing-clean build",
         "section": "FPGA Targets"
       },
       {
@@ -19631,7 +20270,7 @@
       },
       {
         "id": "PMPC",
-        "label": "\"PMP x8 (TOR/NA4/NAPOT):<br/>fetch, load/store and PTW checks"
+        "label": "\"PMP x8 (TOR/NAPOT, 4 KiB):<br/>fetch, load/store and PTW checks"
       },
       {
         "id": "BUS",
@@ -19643,7 +20282,7 @@
       },
       {
         "id": "L2",
-        "label": "\"L2 (default passthrough;<br/>default-l2: 512 KiB, 8-way)"
+        "label": "\"L2 cache (default: none, management only;<br/>default-l2: 512 KiB, 8-way)"
       },
       {
         "id": "RBUF",
@@ -19945,7 +20584,7 @@
         "from": "BUS",
         "to": "AXIM",
         "kind": "data",
-        "label": ""
+        "label": "\"l2_client_if\""
       },
       {
         "from": "AXIM",

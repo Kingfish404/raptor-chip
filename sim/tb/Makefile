@@ -34,18 +34,17 @@
 #
 # NOTE: the chip drives the host memory through the single-word rnp interface
 # (axi2rnp -> pins -> rnp2axi), which only carries one beat per transaction.
-# The DUT must therefore be built so its internal AXI master never issues a
-# burst (arlen must stay 0). The wrapper sets MemoryReadCredits=1 and
-# requires a config WITHOUT the L2 cache (RAPT_L2_EN). The `large`
-# preset enables L2 and is incompatible. Current `default` disables L2;
-# this harness defaults to the no-L2 `small` preset.
+# axi2rnp decomposes FIXED/INCR bursts while retaining their AXI owner.
+# The wrapper sets MemoryReadCredits=1; maintained RNP validation uses no-L2
+# presets (small by default, plus a middle smoke test). L2-enabled RNP
+# composition is not qualified by those checks.
 # =============================================================================
 
 RAPTOR_HOME ?= $(abspath $(CURDIR)/../..)
 HDL_DIR     := $(RAPTOR_HOME)/rtl
 SIM_RTL     := $(RAPTOR_HOME)/sim/rtl
 TB_DIR      := $(CURDIR)
-# Single-word rnp interface needs a no-L2 preset (see note above).
+# Maintained no-L2 RNP preset (see validation scope above).
 RAPT_CONFIG ?= small
 CONFIG_DIR  := $(HDL_DIR)/configs/$(RAPT_CONFIG)
 
@@ -254,8 +253,8 @@ vsim: ## RTL sim under Questa
 # Vivado XSIM (xvlog -> xelab -> xsim).
 # Works with Vivado 2022.1+. The three tools must be on PATH (source
 # Vivado's settings64.sh / settings64.bat first).
-# The rnp-interface single-word constraint and RAPT_CONFIG=small requirement
-# are the same as for all other targets in this Makefile (see top note).
+# The RV32 RNP interface and maintained no-L2 validation scope are shared
+# with the other targets in this Makefile (see top note).
 # -----------------------------------------------------------------------------
 XVLOG ?= xvlog
 XELAB ?= xelab

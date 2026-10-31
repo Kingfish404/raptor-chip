@@ -75,7 +75,7 @@ def load_sram_generator():
 
 # --- NRU replacement: priority, epoch rollover and invalidation for every set ---
 
-NRU_RTL = ROOT / "rtl/memory/rapt_cache_nru.sv"
+NRU_RTL = ROOT / "rtl/memory/replacement/rapt_cache_nru.sv"
 NRU_HARNESS = FORMAL / "formal_cache_nru.sv"
 NRU_MUTATIONS = {
     "epoch": ("assign next_recent = (&touched) ? (Ways'(1) << update_way) : touched;",
@@ -503,7 +503,7 @@ def sram(parser, args):
 
 # --- L1D data: diagonal banks for every production geometry and memory binding ---
 
-L1D_DATA_RTL = ROOT / "rtl/memory/rapt_l1d_data.sv"
+L1D_DATA_RTL = ROOT / "rtl/memory/dcache/rapt_l1d_data.sv"
 L1D_DATA_HARNESS = FORMAL / "formal_l1d_data.sv"
 L1D_DATA_MUTATIONS = {
     "byte-mask": [(" : write_strobe);", " : {WordBytes{write_strobe[0]}});")],

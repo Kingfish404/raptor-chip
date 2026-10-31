@@ -107,8 +107,7 @@ payload and simulator ROM flow. The RTL-visible platform devices are:
 
 The KU15P Linux DT advertises `zicbom` and `riscv,cbom-block-size` using the
 selected RTL preset's `RAPT_CACHE_LINE_BYTES`. LiteSDCard DMA is non-coherent;
-the BIOS calls the CPU cache-maintenance hook after DMA, and Raptor currently
-implements that hook as a conservative whole-L1D `cbo.flush` operation.
+the BIOS calls a legacy no-range CPU cache-maintenance hook after DMA.
 
 The NEMU RV32GC/RV64GC configurations inject a fresh 256-bit host-random seed
 into the external DTB `/chosen/rng-seed` property before each boot. This matches

@@ -11,7 +11,7 @@ still required: no RV64 routed-timing or board-network PASS is implied.
   This uses the gigabit oversampling receiver and common-source-clock DDR TX; full-SoC timing and board
   traffic validation are required. Confirm the FMC IO supply is 1.8 V.
 - BIOS stops at `litex>` after initialization. Select `sdcardboot` or `netboot` manually.
-- RV64 **Buildroot** release `linux-riscv-rv64-qemu-rv64-fast-buildroot-v6.18.50`,
+- RV64 **Buildroot** release `linux-riscv-rv64-qemu-rv64-fast-buildroot-v6.18.51`,
   not the tiny-shell image. “fast” describes the kernel preset; this package
   still contains the normal Buildroot `/init` and network services.
 - F/D advertised in both device-tree ISA properties for LP64D userspace;

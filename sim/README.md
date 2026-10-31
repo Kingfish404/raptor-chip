@@ -9,7 +9,7 @@ It reads the mailbox after actual memory writes, including byte enables and RV32
 Device/command zero with value 1 passes; other odd exit values fail independently of `a0`.
 Zero, even values and other HTIF device messages do not exit. This is an exit-only adapter,
 not a general HTIF console or syscall implementation. It is disabled unless requested.
-Use the [upstream riscv-tests runner](../verification/external-tools.md) to obtain the symbol
+Use the [upstream riscv-tests runner](../verification/README.md#upstream-isa-tests-and-riscv-dv) to obtain the symbol
 address from the ELF and run the unmodified tests with matched reference settings.
 
 ## Independent builds

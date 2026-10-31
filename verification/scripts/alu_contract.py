@@ -59,7 +59,7 @@ def read_command(case, dut=DUT, harness=HARNESS, baseline=False):
     flags += '-DRAPT_USE_SRAM_MACRO ' if case['memory'] == 'sram' else '-URAPT_USE_SRAM_MACRO '
     if baseline:
         flags += '-DFORMAL_ALU_CLMUL -DFORMAL_ALU_CLMULH '
-    return (f'read_slang --threads 1 --unroll-limit 20000 --single-unit --top {TOP} {flags}'
+    return (f'read_slang --threads 1 --single-unit --top {TOP} {flags}'
             + f'-I{ROOT}/rtl/configs/{case["preset"]} -I{ROOT}/rtl/include '
             + f'-I{ROOT}/rtl/include/npc -I{ROOT}/rtl/include/dpic_mock {harness} {dut}')
 

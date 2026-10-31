@@ -19,13 +19,14 @@ def digest(path: Path) -> str:
 def control_packet_bound(
     instructions: list[tuple[int, int]], width: int, window_halfwords: int | None = None
 ) -> dict[str, float | int]:
-    """Optimistic one-fetch-packet-per-cycle bound for the traced control flow.
+    """Legacy one-control-instruction packet estimate for the traced flow.
 
     A packet ends at its first control instruction. A JALR after slot zero
     starts the next packet because the IFU needs a fresh primary BTB query.
     A finite halfword window limits the number of instructions per packet.
     Serial-instruction boundaries, cache, prediction, and pipeline costs are
-    intentionally omitted.
+    intentionally omitted. Current IFU packets may include ordinary followers
+    after a not-taken branch, so this is not a strict current-RTL IPC bound.
     """
     packets = index = 0
     while index < len(instructions):

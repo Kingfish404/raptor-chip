@@ -19,7 +19,14 @@ module rapt_l1d #(
     parameter int XLEN = `RAPT_XLEN,
     parameter unsigned L1D_N_WAYS = `RAPT_L1D_WAYS,
     parameter int PADDR_BITS = `RAPT_PADDR_BITS,
-    parameter bit L2Tlb = 0
+    parameter bit L2Tlb = 0,
+    // L2 subsystem capabilities (rapt_pkg::L2LinkConfig). An inclusive L2
+    // tracks L1D lines and probes them; a release-capable L2 also accepts
+    // voluntary victim releases. An L2 cache allocates 2**L2LineOffset bytes.
+    parameter bit L2Cache = rapt_pkg::L2LinkConfig.cache,
+    parameter bit L2Inclusive = rapt_pkg::L2LinkConfig.inclusive,
+    parameter bit L2Release = rapt_pkg::L2LinkConfig.victim_release,
+    parameter int L2LineOffset = rapt_pkg::L2LinkConfig.line_offset
 ) (
     input clock,
     input logic coherent_request = 1'b0,
@@ -278,15 +285,6 @@ module rapt_l1d #(
   // lines (small, middle and formal presets).
   logic [XLEN-1:0] cbo_addr;
   assign cbo_addr = {cmu_bcast.cbo_block, 6'b0};
-`ifdef RAPT_L2_EN
-  localparam bit L2Inclusive = 1'b1;
-  localparam bit L2Release = `RAPT_L2_N_WAYS == 8 && `RAPT_L2_LEN == 10
-      && `RAPT_CACHE_LINE_BYTES == 64
-      && ((1 << `RAPT_L2_LINE_LEN) * XLEN == 512);
-`else
-  localparam bit L2Inclusive = 1'b0;
-  localparam bit L2Release   = 1'b0;
-`endif
   assign probe_set = probe_addr_i[L1dLineOffset+:L1D_LEN];
   assign probe_tag = probe_addr_i[L1dLineOffset+L1D_LEN+:L1dTagW];
   assign local_cbo_line_clear = WriteBack && L2Inclusive && cmu_bcast.cbo_inval;
@@ -327,15 +325,8 @@ module rapt_l1d #(
   assign refill_last = refill_base | XLEN'((1 << L1dLineOffset) - 1);
   assign line_read_request = LineRefill && refill_safe;
   assign demand_beat = !refill_line || refill_word == addr_offset;
-`ifdef RAPT_L2_EN
-`ifdef RAPT_L2_LINE_LEN
-  localparam int DownstreamLineOffset = `RAPT_L2_LINE_LEN + $clog2(XLEN / 8);
-`else
-  localparam int DownstreamLineOffset = $clog2(`RAPT_CACHE_LINE_BYTES);
-`endif
-`else
-  localparam int DownstreamLineOffset = L1dLineOffset;
-`endif
+  // An L2 cache allocates whole L2 lines; refills guard the larger line.
+  localparam int DownstreamLineOffset = L2Cache ? L2LineOffset : L1dLineOffset;
   localparam int GuardOffset = DownstreamLineOffset > L1dLineOffset
       ? DownstreamLineOffset : L1dLineOffset;
   if (GuardOffset <= `RAPT_PMP_GRANULARITY_LOG2) begin : g_refill_page

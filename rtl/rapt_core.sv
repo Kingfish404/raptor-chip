@@ -4,17 +4,18 @@
 `include "rapt_soc_if.svh"
 `include "rapt_dpi_c.svh"
 
-// Single-hart composition of frontend, backend, caches and memory interconnect.
-// A cluster (`rapt.sv`) instantiates cores alongside shared CLINT/PLIC devices.
-// External MMIO targeted at cluster-local CLINT or
-// PLIC register windows leaves through the standard AXI master interface; the
-// cluster router handles the decode, and the resulting timer/software/external
-// interrupt levels are gated locally by the per-hart CSR enables before
-// reaching the trap/commit logic.
+// Single-hart composition of frontend, backend and the private L1 memory
+// block. A cluster (`rapt.sv`) instantiates cores alongside the L2 subsystem
+// and the shared CLINT/PLIC devices. Every memory and MMIO access, including
+// cluster-local CLINT or PLIC register windows, leaves through the L2 client
+// port; the L2 subsystem owns AXI and the cluster router decodes devices. The
+// resulting timer/software/external interrupt levels are gated locally by the
+// per-hart CSR enables before reaching the trap/commit logic.
 module rapt_core #(
     parameter int XLEN = `RAPT_XLEN,
-    parameter int MemoryReadCredits = 8,
-    parameter bit L1dWriteBack = `RAPT_L1D_WRITEBACK
+    parameter bit L1dWriteBack = `RAPT_L1D_WRITEBACK,
+    // Capabilities of the L2 subsystem behind this hart.
+    parameter rapt_pkg::l2_link_config_t L2Link = rapt_pkg::L2LinkConfig
 ) (
     input clock,
     output logic writeback_error_o,
@@ -25,12 +26,11 @@ module rapt_core #(
     input logic [XLEN-1:0] external_write_first_i = '0,
     input logic [XLEN-1:0] external_write_last_i = '0,
 
-
-    // AXI4 Master
-    axi4_if.master io_master,
+    // Client port to the cluster's L2 subsystem.
+    l2_client_if.client l2_client,
 
     // CLINT (cluster-level) interrupt levels. CLINT register accesses are
-    // routed through the standard AXI master port; the cluster's address
+    // routed through the L2 subsystem's AXI master port; the cluster's address
     // decoder forwards them to the shared rapt_clint instance. Interrupt
     // levels and the shared counter feed per-hart CSR/commit logic; CSR
     // time and Sstc must observe software writes to the same counter.
@@ -251,8 +251,8 @@ module rapt_core #(
   );
   rapt_memory #(
       .XLEN(XLEN),
-      .MemoryReadCredits(MemoryReadCredits),
-      .L1dWriteBack(L1dWriteBack)
+      .L1dWriteBack(L1dWriteBack),
+      .L2Link(L2Link)
   ) memory_subsystem (
       .clock(clock),
       .reset(reset),
@@ -262,7 +262,7 @@ module rapt_core #(
       .cmu_bcast(cmu_bcast),
       .csr_bcast(csr_bcast),
       .pmp_update(pmp_update),
-      .io_master(io_master),
+      .l2_client(l2_client),
       .ifetch_io_authorized_i(ifetch_io_authorized),
       .ifetch_io_start_o(ifetch_io_start),
       .ifetch_io_owner_pc_o(ifetch_io_owner_pc),

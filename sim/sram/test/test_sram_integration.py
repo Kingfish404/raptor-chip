@@ -328,11 +328,16 @@ def test_cross_consistency():
         check(config in makefile, f"{name}: registered for macro/library generation")
     preset = read(RAPTOR / "rtl/configs/default/rapt_config.svh")
     sets = re.search(r"`define\s+RAPT_L1I_LEN\s+(\d+)", preset)
+    line_bytes = re.search(r"`define\s+RAPT_CACHE_LINE_BYTES\s+(\d+)", preset)
     check(sets is not None, "default L1I set geometry found")
-    if sets:
+    check(line_bytes is not None, "default L1I byte line geometry found")
+    if sets and line_bytes:
         depth = 1 << int(sets.group(1))
-        check(f"rapt_openram_1rw_{depth}x32" in expected,
-              f"default L1I {depth}x32 word banks have a macro")
+        # rapt_l1i_data groups four 32-bit words per bank for lines >= 32 B.
+        # Smaller lines retain independently addressed word banks.
+        width = 128 if int(line_bytes.group(1)) >= 32 else 32
+        check(f"rapt_openram_1rw_{depth}x{width}" in expected,
+              f"default L1I {depth}x{width} data banks have a macro")
     # Diagonal banks contain 64-bit chunks. Partial way groups compact
     # chunk rows modulo min(ways, chunks), with no unreachable macro rows.
     for config in (RAPTOR / "rtl/configs").glob("*/rapt_config.svh"):

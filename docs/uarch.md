@@ -69,7 +69,22 @@ The `default*`, `small-cache`, and `middle-cache` presets use L1D write-back:
 
 ## Organization
 
-Raptor is a configurable RV32/RV64 out-of-order core with a two-wide default preset. `rapt_core` composes `rapt_frontend` (prediction, fetch, FQU, decode), `rapt_backend` (rename, operand stage, ROB, dispatch, issue, completion, LSU, precise commit), and `rapt_memory` (L1I, L1D, translation, bus, optional L2). Registers inside the blocks define the stage boundaries. The default decode, rename, dispatch, and commit widths are each two; instruction queues hold individual instructions rather than fixed pairs.
+Raptor is a configurable RV32/RV64 out-of-order core with a two-wide default
+preset. `rapt_core` composes `rapt_frontend` (prediction, fetch, FQU, decode),
+`rapt_backend` (rename, operand stage, ROB, dispatch, issue, completion, LSU,
+precise commit), and `rapt_memory` (L1I, L1D, translation, bus interface unit).
+The cluster top `rapt` places `rapt_l2_subsystem` between the core and device
+router. Every core memory/device access leaves through `l2_client_if`; the
+L2 subsystem always owns AXI and the outstanding-transaction budgets, with
+cache storage only when enabled by a preset. `rapt_pkg::L2LinkConfig` adapts
+the L2 macros into typed capabilities passed to the core, L1s, bus and router.
+The current cluster has one core/client; a multi-client arbiter is future work.
+
+Registers inside the blocks define the stage boundaries. Default decode,
+rename, dispatch and commit widths are each two; instruction queues hold
+individual instructions rather than fixed pairs. The `core` and `memory`
+synthesis scopes exclude the L2 subsystem. Historical PPA from before this
+split requires a matching-boundary comparison.
 
 The [pipeline explorer](./explore.md) is an illustrative cycle model. It does not model current branch recovery, MSHR replay, or the direct integer completion path, so its cycle counts are not RTL timing or CoreMark IPC.
 
@@ -101,7 +116,17 @@ The predictor query PC is `ifu_bpu.nextpc`. IFU and IDU report accepted branch-h
 - **Store policy:** All `default*` presets set `RAPT_L1D_WRITEBACK=1` and `RAPT_L1D_MSHRS=4`; both macros remain overridable. L1D has two full-line writeback buffers with per-word dirty masks. Without inclusive L2, a captured dirty victim releases its array slot before B, while unrelated replayable loads continue. A read of a buffered physical line waits for its writeback; full queues backpressure victim capture, and failed B responses retain queued data until reset. Stores drain active refills, and local stores wait for queued writebacks. A store to a line whose install is still queued waits for the install, so it completes as a local hit rather than a write-through whose response cannot update the resident copy. Inclusive L2 victim Release/ReleaseAck and Probe operations retain their serialized ownership protocol. MSHR refills acquire the L2 D-client mark, and a Release also invalidates any retained refill copy. Fences and coherence wait for dirty resident data and queued writebacks. A D-side L1 TLB miss first probes L2 TLB; only an actual PTE bus request triggers dirty publication. I-side PTW reads similarly require publication when they reach the bus. Earlier bus stores retain their response ownership, and new stores wait while a walk is active. DMA coherence remains a platform/software responsibility.
 - **Translation and protection:** The fully associative ITLB has 16 entries by default; load/store DTLB replicas each have 64 entries with two-way set associativity. Their miss paths share a 256-entry direct-mapped L2 TLB before the separate Sv32/Sv39 instruction and data PTWs. PMP checks fetch, data, and PTW accesses. Split loads carry both their architectural width and each physical fragment's permission footprint, so a narrower fragment cannot bypass a device-width restriction.
 - **Cache-block operations:** `cbo.inval`, `cbo.clean`, and `cbo.flush` check the translated address before retirement, then wait for the SQ to drain; invalidation/flush remove matching L1D blocks. `cbo.zero` commits an aligned 64-byte zero descriptor through SQ and waits for its final write response. Zicbop prefetch encodings are nonfaulting hints.
-- **Bus:** `rapt_bus` arbitrates L1I, L1D, and PTW requests; `rapt_axi_master` supports up to eight outstanding reads. Without L2 and with a write-through L1D, it accepts up to `RAPT_POSTED_WRITES` (default four) posted cacheable writes; otherwise one write is outstanding. A read cannot overtake a posted write to its line, and an uncacheable read waits for every posted write. A failed posted write's B response reports the affected line to L1D. The default preset leaves L2 as a combinational passthrough. The outer AXI R channel has a two-entry registered buffer when `RAPT_L2_STORE_WRITEBACK` is defined (as in `default-l2`); the generic default bypasses it.
+- **Bus and cluster link:** `rapt_bus` arbitrates L1I, L1D, and PTW requests inside
+  `rapt_memory` and exports `l2_client_if`. The always-present cluster-level
+  `rapt_l2_subsystem` contains `rapt_axi_master`, which defaults to eight outstanding
+  reads. Without an L2 cache, `RAPT_POSTED_WRITES` (default four) bounds eligible
+  cacheable writes in flight. Write-through stores may complete at bus capture;
+  buffered writebacks retain data until their matching B response. Other writes
+  wait for older posted responses and complete on B. Reads cannot overtake a
+  posted write to the same line; uncacheable reads wait for all posted writes.
+  A failed early-acknowledged store reports its line to L1D. The optional L2 cache
+  and the two-entry outer AXI R buffer also live in `rapt_l2_subsystem`.
+  `L2LinkConfig.store_writeback` enables that buffer (`default-l2`); `default` bypasses it.
 - **Optional L2:** `default-l2` enables a 512 KiB, eight-way L2 with 1024 sets and 64-byte lines. Eight 1024x22 directory SRAMs hold tag/state/dirty/client metadata. Four logical 16384x64 data banks support Vivado RAM inference and optional segmented SRAM macros. This banked geometry stores 18 tag bits and bypasses addresses above its 34-bit cache-address aperture instead of truncating them into an alias.
 - **L2 reads and coherence:** Independent clean misses use three ordinary refill contexts in RV32 or five in RV64, interleave outer responses by ID, and return the critical scalar word early. The shared secondary buffer has 15 queues/35 entries in RV32 and 21 queues/33 entries in RV64. Same-tag requests reuse current metadata; different tags re-read the directory. A foreign Get probes a Trunk L1D owner before reading its latest data. C Release can pre-empt a waiting victim/CBO Probe and forward its updated dirty/client metadata. The main L1D replies by invalidating its copy; retained Branch copies and permission upgrades are not enabled.
 - **L2 writes:** A 40-list/40-beat Put pool and 40 ordered B slots retain incoming writes. Bufferable scalar stores and supported narrow, masked, FIXED, INCR and WRAP bursts allocate each touched cacheable line. Partial misses merge a refill; complete full-line writes skip the outer read. Non-bufferable writes forward, preserve resident dirty data on an outer error, and commit their resident-byte journal only after successful B. Dirty/client-owned victim misses and allocated Put execution remain serialized.
@@ -118,7 +143,13 @@ A nonfaulting branch misprediction produces a registered oldest-owner recovery t
 
 Fetch then continues down the target path into FQU. While `recovery.pending` is set, IDU, RNQ, `rename_pipe` and the operand stage stay empty, so no new ROB allocation occurs; older ROB work continues until the mispredicted instruction reaches the head. Retirement then performs the precise whole-pipe flush and rebuilds rename state from committed state. When the announced owner retires cleanly, IFU and FQU keep the target stream they already fetched (`recovery.preserve_fetch`). An older exception, interrupt, serializing operation or superseding recovery discards that stream. The announcement selectively cancels younger integer/branch issue entries, issue packets, and MUL/DIV owners. Younger MUL pipeline and iterative DIV owners are cancelled before their MDQ slots can be reused; older operations and the recovery owner survive. ROB/IOQ/SQ and rename still use the retirement-time precise flush, so correct-path execution cannot restart at the announcement. Correct branch resolutions release checkpoints independently, and completion ownership guards reject stale generations. The 4-bit generation guard is used together with producer cancellation and flush ownership; its finite width alone does not establish safety for arbitrarily late completions.
 
-The CSR file supports M/S/U privilege, traps, delegation, Sv32/Sv39 controls, and cycle/time state. Eight PMP entries implement TOR, NA4, and NAPOT across 16 architectural CSR slots; slots 8-15 read as zero and ignore writes. The cluster routes CLINT timer/software interrupts and PLIC external interrupts to the core. CLINT supplies `mtime`, `mtimecmp`, and `msip`; PLIC has 31 sources and M/S contexts by default. The PLIC window accepts naturally aligned 32-bit ordinary loads/stores; other ordinary widths fault before a device access.
+The CSR file supports M/S/U privilege, traps, delegation, Sv32/Sv39 controls, and cycle/time state.
+Eight PMP entries implement TOR and NAPOT at the default 4 KiB granularity across 16
+architectural CSR slots; slots 8–15 read as zero and ignore writes. NA4 is available only
+with an explicit four-byte-grain configuration. The cluster routes CLINT timer/software
+interrupts and PLIC external interrupts to the core. CLINT supplies `mtime`, `mtimecmp`,
+and `msip`; PLIC has 31 sources and M/S contexts by default. The PLIC window accepts
+naturally aligned 32-bit ordinary loads/stores; other ordinary widths fault before a device access.
 
 RNU owns the speculative register map and free-register state. CSR observers read the machine trap-vector base through `csr_bcast.mtvec`.
 
@@ -139,7 +170,8 @@ depend on the board and build constraints.
 | Item | Default |
 | --- | --- |
 | XLEN | RV32; `-DRAPT_RV64` selects RV64 |
-| Physical address | 32 bits (RV32), 47 bits (RV64) |
+| Physical address | 32 bits by default in both modes; RV64 `RAPT_PADDR_BITS` supports 32–38 |
+| Stored PC | 32 bits (RV32); 40 bits sign-extended to RV64 (`RAPT_PC_FULL_WIDTH` retains 64) |
 | Ordered widths | Decode 2, rename 2, dispatch 2, commit 2 |
 | Integer issue | 2 ports; CSR/system on port 0; 6 completion endpoints (`N+4`) |
 | Fetch | Six-halfword L1I lookahead; no IFU response register |
@@ -151,8 +183,8 @@ depend on the board and build constraints.
 | L1I | 16 KiB, four-way, 64 sets, 64-byte lines, 32-byte refill sector |
 | L1D | 16 KiB, four-way, 64 sets, 64-byte lines, write-back, 4 MSHRs, 2 writeback buffers, Sv32/Sv39 miss replay |
 | TLB | ITLB 16 (fully associative), DTLB 64 (two-way, replicated load/store lookup); shared direct-mapped L2 TLB 256 |
-| L2 | Disabled (combinational passthrough) |
-| AXI master | 4-bit ID, XLEN-bit data, up to 8 reads; one B-synchronous bus write (local L1D store completion on eligible hits) |
+| L2 | No cache: the L2 subsystem only bridges to AXI (`default-l2` adds the cache) |
+| AXI master | In `rapt_l2_subsystem`: 4-bit ID, XLEN-bit data, up to 8 reads; up to 4 eligible cacheable writes without L2; buffered writebacks complete on B |
 | PMP / PLIC | 8 PMP entries in 16 CSR slots; 31 PLIC sources, M/S contexts |
 
 The `default*` presets use a 16-entry fully associative ITLB and 64-entry,
@@ -178,8 +210,14 @@ prevents reuse across different roots. Cached PTE flags and the full
 architectural PPN preserve permission, Svade A/D, PBMT and physical-address
 checks. Access faults and page faults are not cached.
 
-`fence_time` invalidates all L1 and L2 translation entries and takes priority
-over fills. A cancelled walk drains an already accepted PTE read without
+Committed SFENCE.VMA and SINVAL.VMA use address/ASID-selective invalidation in
+both L1 TLBs and the shared L2 TLB by default (`RAPT_SFENCE_SELECTIVE=1`).
+An ASID-specific fence preserves global mappings; an address-specific fence
+also matches every cached fragment of the corresponding superpage. Full fences
+and `RAPT_SFENCE_SELECTIVE=0` invalidate all entries. Invalidation takes priority
+over fills. `RAPT_SFENCE_KEEP_STATE=3` independently preserves caches and predictor
+state across translation fences; it does not weaken translation invalidation or
+ordering. A cancelled walk drains an already accepted PTE read without
 refilling either level. The dedicated per-word IO instruction-fetch translation
 path continues to use its own walker directly. Standalone L1 cache instances
 default to `L2Tlb=0`; `rapt_memory` enables and connects the shared table according

@@ -16,6 +16,10 @@ module rapt_l1i #(
     parameter unsigned L1I_N_WAYS = `RAPT_L1I_N_WAYS,
     parameter int PADDR_BITS = `RAPT_PADDR_BITS,
     parameter bit L2Tlb = 0,
+    // L2 subsystem capabilities (rapt_pkg::L2LinkConfig): whether it holds a
+    // cache, and the log2 byte size of the lines that cache allocates.
+    parameter bit L2Cache = rapt_pkg::L2LinkConfig.cache,
+    parameter int L2LineOffset = rapt_pkg::L2LinkConfig.line_offset,
     // True LRU for 2-16 ways instead of the 2-way fill toggle / tree PLRU.
     parameter bit CacheLru = `RAPT_CACHE_LRU != 0
 ) (
@@ -489,19 +493,15 @@ module rapt_l1i #(
   );
 
   // Bus mux: PTW takes priority over cache fill
-`ifdef RAPT_L2_EN
-`ifdef RAPT_L2_LINE_LEN
-  localparam int DownstreamLineOffset = `RAPT_L2_LINE_LEN + $clog2(XLEN / 8);
-`else
-  localparam int DownstreamLineOffset = $clog2(`RAPT_CACHE_LINE_BYTES);
-`endif
+  // An L2 cache allocates whole L2 lines; a fetch whose L2 line is not
+  // PMP-uniform must not allocate one.
   logic downstream_pmp_uniform;
-  if (DownstreamLineOffset <= `RAPT_PMP_GRANULARITY_LOG2) begin : g_downstream_page
+  if (!L2Cache || L2LineOffset <= `RAPT_PMP_GRANULARITY_LOG2) begin : g_downstream_page
     assign downstream_pmp_uniform = 1'b1;
   end else begin : g_downstream_fine
     rapt_pmp_line_uniform #(
         .XLEN(XLEN),
-        .LineOffset(DownstreamLineOffset)
+        .LineOffset(L2LineOffset)
     ) u_l2_pmp (
         .addr(l1i_bus.araddr),
         .state(pmp_state),
@@ -509,9 +509,6 @@ module rapt_l1i #(
     );
   end
   assign l1i_bus.noallocate = l1i_bus.ar_ptw || !downstream_pmp_uniform;
-`else
-  assign l1i_bus.noallocate = l1i_bus.ar_ptw;
-`endif
   assign cache_refill_addr = (RefillWords == 2)
       ? ((l1i_state == RD_0) ? (l1i_addr & ~'h4) : (l1i_addr | 'h4))
       : ((l1i_addr & ~XLEN'(RefillBytes - 1))

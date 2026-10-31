@@ -26,7 +26,7 @@ def main():
     output.mkdir(parents=True, exist_ok=False)
     files = sorted((source / 'rtl/include').rglob('*.svh')) + [
         source / name for name in (
-            'rtl/configs/default/rapt_config.svh', 'rtl/memory/rapt_pmp.sv',
+            'rtl/configs/default/rapt_config.svh', 'rtl/memory/mmu/rapt_pmp.sv',
             'verification/formal/formal_pmp.sv', 'verification/formal/pmp_formal_if.sv')]
     hashes = {str(p.relative_to(source)): sha(p) for p in files}
     (output / 'source-manifest.json').write_text(json.dumps(hashes, indent=2) + '\n')
@@ -41,7 +41,7 @@ def main():
                   + '-I' + quoted('rtl/include') + ' -I' + quoted('rtl/configs/default')
                   + ' ' + ' '.join(quoted(p) for p in (
                       'verification/formal/pmp_formal_if.sv', 'verification/formal/formal_pmp.sv',
-                      'rtl/memory/rapt_pmp.sv'))
+                      'rtl/memory/mmu/rapt_pmp.sv'))
                   + '; chformal -assert -lower; chformal -assume -lower; '
                     'select -assert-count 2 t:$assert; select -assert-count 32 t:$assume; '
                     'select -assert-none t:$check t:$cover; '

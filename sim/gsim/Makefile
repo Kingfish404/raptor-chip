@@ -25,7 +25,7 @@ ARGS    ?= ## Extra args forwarded verbatim to raptor_se.py
 # and one load/store request port. Set RTL_EXEC=0 to fall back to gem5's
 # broader default FUPool (useful to isolate execution-resource effects).
 BP          ?= local ## Branch predictor flavor (local|bimodal|bimode|gshare|tage|ltage|...)
-MSHRS       ?= 1 ## L1 MSHRs per cache (RTL default: 1)
+MSHRS       ?= 1 ## L1 MSHRs per cache (model: 1; RTL L1D: 4)
 MEM_LATENCY ?= ## Override raptor_se.py default --mem-latency (e.g. 30ns)
 WITH_L2     ?= 0 ## Set to 1 to re-enable gem5's optional 64KiB L2
 RTL_EXEC    ?= 1 ## 1 = RTL execution resources (RAPT_INTEGER_ISSUE_PORTS ALUs, 1 MULDIV, 1 LSU port)

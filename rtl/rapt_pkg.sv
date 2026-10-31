@@ -145,6 +145,48 @@ package rapt_pkg;
       execution_domains: 5,
       completion_dependencies: 3
   };
+
+  // Contract between a hart's memory block and the L2 subsystem outside the
+  // core (see l2_client_if). The L2 presets are interpreted only here; the
+  // L1s, rapt_bus, the L2 subsystem and the cluster router receive these
+  // capabilities as parameters, so a core never tests an L2 macro itself.
+  typedef struct packed {
+    bit cache;  // the L2 subsystem holds a cache; otherwise it only manages AXI
+    bit inclusive;  // the L2 tracks L1D lines; probes and CBO invalidates pass through it
+    bit victim_release;  // the L2 accepts voluntary L1D victim releases
+    bit store_writeback;  // the L2 completes bufferable cacheable stores itself
+    int unsigned line_offset;  // log2 bytes of an L2 line; meaningful when cache is set
+    int unsigned posted_writes;  // client writes that may complete before their B response
+  } l2_link_config_t;
+`ifdef RAPT_L2_STORE_WRITEBACK
+  localparam bit L2StoreWriteBack = 1'b1;
+`else
+  localparam bit L2StoreWriteBack = 1'b0;
+`endif
+`ifdef RAPT_L2_EN
+  // Victim releases use the BOOM-layout 512 KiB, 64-byte-line directory.
+  localparam bit L2VictimRelease = `RAPT_L2_N_WAYS == 8 && `RAPT_L2_LEN == 10
+      && `RAPT_CACHE_LINE_BYTES == 64
+      && (1 << `RAPT_L2_LINE_LEN) * `RAPT_XLEN == 512;
+  // The L2 cache owns write ordering; clients wait for every B response.
+  localparam l2_link_config_t L2LinkConfig = '{
+      cache: 1'b1,
+      inclusive: 1'b1,
+      victim_release: L2VictimRelease,
+      store_writeback: L2StoreWriteBack,
+      line_offset: `RAPT_L2_LINE_LEN + $clog2(`RAPT_XLEN / 8),
+      posted_writes: 0
+  };
+`else
+  localparam l2_link_config_t L2LinkConfig = '{
+      cache: 1'b0,
+      inclusive: 1'b0,
+      victim_release: 1'b0,
+      store_writeback: L2StoreWriteBack,
+      line_offset: $clog2(`RAPT_CACHE_LINE_BYTES),
+      posted_writes: `RAPT_POSTED_WRITES
+  };
+`endif
   // Completion slot layout shared by rapt_backend, its consumers and
   // testbenches: integer ports, then branch, memory, MUL and FPU. Index slots
   // through these helpers rather than offsets from the port count.

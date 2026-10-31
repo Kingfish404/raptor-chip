@@ -58,7 +58,11 @@ Use `make -n nemu-run-rv32` or `make -n nemu-run-rv64` to inspect the full NEMU 
 
 ## RTL simulation
 
-RTL simulation consumes the same flat payload through `IMG` and the GPT disk through `DISK`. Build the payloads with `make sim-payload-rv32` or `make sim-payload-rv64`, then use the simulator Makefile with the matching ISA configuration. The payload DTBs are generated for the current 128 MiB RTL RAM window.
+RTL simulation consumes the same flat payload through `IMG` and the GPT disk
+through `DISK`. Build with `make sim-payload-rv32` or `make sim-payload-rv64`,
+then use the simulator Makefile with the matching ISA configuration. The
+payload DTB advertises 128 MiB, a conservative subset of the default NPC
+256 MiB PMEM window. It does not describe the optional 2 GiB simulator profile.
 
 Use `make -n sim-payload-rv32` and `make -n sim-payload-rv64` to inspect payload generation. The current RTL path has been verified to load the payload and disk; complete NetBSD guest boot still requires further backend/device validation.
 

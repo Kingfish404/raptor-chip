@@ -2297,7 +2297,7 @@ rename-admit-native:
 		timeout 60s yosys -Q -T -m slang -p "read_slang --single-unit -DSYNTHESIS --top rapt_rename_admit -GWidth=$$width $(RAPTOR_HOME)/rtl/frontend/rapt_rename_admit.sv; select -assert-none t:\$$check t:\$$assert t:\$$assume t:\$$cover; prep -top rapt_rename_admit -flatten; check -assert; select -assert-none t:\$$*latch* t:\$$*ff*" > "$(BUILD_DIR)/rename-admit/native-$$width.log" 2>&1; \
 	done
 	@if yosys -Q -T -m slang -p 'read_slang --single-unit --top rapt_rename_admit -GWidth=0 $(RAPTOR_HOME)/rtl/frontend/rapt_rename_admit.sv' > "$(BUILD_DIR)/rename-admit/native-invalid.log" 2>&1; then exit 1; fi
-	@rg -q 'error: \$$error encountered: Invalid rapt_rename_admit configuration' "$(BUILD_DIR)/rename-admit/native-invalid.log"
+	@rg -qi 'error: \$$error encountered: Invalid rapt_rename_admit configuration' "$(BUILD_DIR)/rename-admit/native-invalid.log"
 
 rename-admit-prove:
 	@mkdir -p "$(BUILD_DIR)/rename-admit"

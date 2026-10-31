@@ -34,7 +34,9 @@ def source_manifest(hdl_root):
 
 def contract_rejected(returncode, log, top):
     # Match the diagnostic, not an echoed source line containing the message.
-    diagnostic = rf"\berror: \$error encountered: Invalid {re.escape(top)} configuration(?::|\s|$)"
+    # Frontend versions print the severity as either "error:" or "ERROR:".
+    diagnostic = (rf"\b(?:error|ERROR): \$error encountered: "
+                  rf"Invalid {re.escape(top)} configuration(?::|\s|$)")
     return returncode > 0 and re.search(diagnostic, log) is not None
 
 

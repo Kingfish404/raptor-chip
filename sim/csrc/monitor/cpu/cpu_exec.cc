@@ -76,7 +76,7 @@ bool cpu_read_axi_write_snapshot(bool skid, word_t *addr, word_t *data, uint8_t 
     return false;
   const auto &request = skid ? VERILOG_AXI_MASTER(write_skid) : VERILOG_AXI_MASTER(write_stage);
   // Verilator packs write_request_t from its LSB: strb, data, cache, size,
-  // addr, id (4 bits in rapt_memory), zero. Extract across 32-bit limbs.
+  // addr, id (4 bits in l2_client_if), zero. Extract across 32-bit limbs.
   constexpr unsigned lanes = sizeof(word_t), bits = lanes * 8;
   auto field = [&](unsigned low, unsigned width) {
     word_t value = 0;
@@ -132,9 +132,9 @@ static void dump_pipeline_stall_state()
       (unsigned)instruction_ptw_state(top, 0),
       (unsigned)VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__l1d_state),
       (unsigned)data_ptw_state(top, 0),
-      (unsigned)VERILOG_CPU(memory_subsystem__DOT__axi_master__DOT__read_outstanding),
-      (unsigned)VERILOG_CPU(memory_subsystem__DOT__axi_master__DOT__read_request_fire),
-      (unsigned)VERILOG_CPU(memory_subsystem__DOT__axi_master__DOT__read_response_fire),
+      (unsigned)VERILOG_AXI_MASTER(read_outstanding),
+      (unsigned)VERILOG_AXI_MASTER(read_request_fire),
+      (unsigned)VERILOG_AXI_MASTER(read_response_fire),
       (unsigned)VERILOG_CPU(memory_subsystem__DOT__bus__DOT__l1d_slot_busy),
       (unsigned)VERILOG_CPU(memory_subsystem__DOT__bus__DOT__l1d_slot_issued),
       (unsigned)VERILOG_CPU(memory_subsystem__DOT__bus__DOT__l1d_slot_mmio),

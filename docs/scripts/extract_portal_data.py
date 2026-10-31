@@ -94,6 +94,7 @@ STAGE_OF = {
     "rapt_ptw": 7,
     "rapt_bus": 8,
     "rapt_axi_master": 8,
+    "rapt_l2_subsystem": 8,
     "rapt_l2": 8,
     "rapt_router": 8,
     "rapt_clint": 9,
@@ -103,6 +104,7 @@ STAGE_OF = {
     "rapt_core": 3,
     "rapt_frontend": 1,
     "rapt_backend": 4,
+    "rapt_memory": 7,
     "rapt": 4,
 }
 
@@ -111,6 +113,8 @@ ARCH_SHORT = {
     "rapt_core": "core",
     "rapt_frontend": "FE",
     "rapt_backend": "BE",
+    "rapt_memory": "MEM",
+    "rapt_l2_subsystem": "L2 subsystem",
     "rapt_bpu": "BPU",
     "rapt_ifu": "IFU",
     "rapt_fqu": "FQU",
@@ -247,7 +251,7 @@ LATENCY_NOTES = (
     "L1D hit returns from the registered access state. ITLB/DTLB misses probe the shared 256-entry "
     "direct-mapped L2 TLB before rapt_ptw.",
     "Default write-back L1D has 4 MSHRs and 2 writeback buffers; translated misses replay through "
-    "IOQ. L2 is passthrough unless RAPT_L2_EN is set.",
+    "IOQ. The cluster L2 subsystem always manages AXI; presets such as default-l2 add its cache.",
     "PMEM/UART cycle costs are abstract PMA-window delays, not board measurements.",
     "Animation uses simplified queues, one completion delay, and conservative retirement; it omits "
     "redirects, replay, and actual ALU bypass timing. Model IPC is not RTL IPC.",
@@ -262,6 +266,7 @@ DOMAIN_FROM_PATH = (
     ("rtl/backend/vpu", "vpu"),
     ("rtl/backend", "backend"),
     ("rtl/memory", "memory"),
+    ("rtl/uncore", "memory"),
     ("rtl/perip", "cluster"),
     ("rtl/common", "common"),
     ("rtl/generated", "frontend"),
@@ -279,7 +284,8 @@ INST_RE = re.compile(
     re.S,
 )
 DEFINE_RE = re.compile(
-    r"^[ \t]*`define[ \t]+(RAPT_[A-Z0-9_]+|L1[ID]_[A-Z0-9_]+)(?:[ \t]+([^\r\n]*))?",
+    r"^[ \t]*`define[ \t]+(RAPT_[A-Z0-9_]+|L1[ID]_[A-Z0-9_]+)(?![\w(])"
+    r"(?:[ \t]+([^\r\n]*))?",
     re.M,
 )
 PARAM_RE = re.compile(
@@ -522,6 +528,9 @@ def collect_config(repo: Path) -> dict[str, Any]:
     defines = parse_defines_ifdef(preset)
     for name, value in parse_defines_ifdef(common, set(defines)).items():
         defines.setdefault(name, value)
+    rv64_defines = parse_defines_ifdef(preset, {"RAPT_RV64"})
+    for name, value in parse_defines_ifdef(common, set(rv64_defines)).items():
+        rv64_defines.setdefault(name, value)
 
     def ival(*names: str, default: int | None = None) -> int | None:
         for name in names:
@@ -563,6 +572,8 @@ def collect_config(repo: Path) -> dict[str, Any]:
             "sq_entries": ival("RAPT_SQ_SIZE", default=16),
             "phys_regs": ival("RAPT_PHY_SIZE", default=64),
             "arch_regs": ival("RAPT_REG_SIZE", default=32),
+            "paddr_bits": ival("RAPT_PADDR_BITS", default=32),
+            "rv64_paddr_bits": eval_simple_int(rv64_defines["RAPT_PADDR_BITS"], rv64_defines),
             "pht_entries": ival("RAPT_PHT_SIZE", default=256),
             "tage_base_entries": 2 ** ival("RAPT_TAGE_BIM_BITS", default=8),
             "tage_tagged_entries": 2 ** ival("RAPT_TAGE_INDEX_BITS", default=7),
@@ -589,6 +600,8 @@ def collect_config(repo: Path) -> dict[str, Any]:
             "dirp": "TAGE" if "RAPT_BPU_DIRP_TAGE" in defines else "bimodal",
             "pmp_usable": ival("RAPT_PMP_NUM", default=8),
             "pmp_csr_slots": ival("RAPT_PMP_CSR_NUM", default=16),
+            "pmp_grain_bytes": 2 ** ival("RAPT_PMP_GRANULARITY_LOG2", default=12),
+            "sfence_selective": ival("RAPT_SFENCE_SELECTIVE", default=1),
             "fetch_response_stage": ival("RAPT_FETCH_RESPONSE_STAGE", default=0) or 0,
             "iq_reclaim_on_issue": 0,  # replaced by the parsed rapt_iq.ReclaimOnIssue default
             "l1d_mshrs": ival("RAPT_L1D_MSHRS", default=0) or 0,
@@ -849,9 +862,12 @@ def buffer_model(values: dict[str, Any], extra: dict[str, int]) -> dict[str, dic
             "shared direct-mapped translation cache before I/D page-table walkers", "cache"),
         "rapt_ptw": tile(0.9, 0.85, 1, 1, "Sv32/Sv39 page-table walk", "stage"),
         "rapt_pmp_state": tile(0.85, 0.8, pmp, 1, f"{pmp} usable PMP entries; checks fetch, data, and PTW", "stage"),
-        "rapt_bus": tile(1.0, 0.95, 8, 2, "outstanding reads up to 8", "bus"),
-        "rapt_l2": tile(1.15, 1.1, 0, 0, "default combinational passthrough; default-l2 enables 512 KiB / 8 ways", "cache"),
-        "rapt_axi_master": tile(1.0, 0.95, 8, 2, "AXI4 master", "bus"),
+        "rapt_bus": tile(1.0, 0.95, 8, 2, "private L1/PTW arbitration to l2_client_if", "bus"),
+        "rapt_l2": tile(
+            1.15, 1.1, 0, 0,
+            "cache disabled in default; cluster AXI management remains; default-l2 adds 512 KiB / 8 ways",
+            "cache"),
+        "rapt_axi_master": tile(1.0, 0.95, 8, 2, "cluster L2 subsystem AXI master; 8 read credits", "bus"),
         "rapt_router": tile(0.95, 0.9, 4, 1, "cluster device router", "bus"),
         "rapt_clint": tile(0.9, 0.8, 3, 2, "CLINT mtime/mtimecmp/msip", "device"),
         "rapt_plic": tile(0.95, 0.85, 31, 2, "PLIC 31 sources", "device"),

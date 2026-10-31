@@ -1,22 +1,28 @@
-# BOOM PPA evaluation
+# Historical BOOM PPA evaluation
 
-This directory records the first reproducible comparison against the existing
-module flow. The reference run uses the current Chipyard-generated BOOM v4
+This directory preserves an exploratory comparison against an earlier module
+flow. The reference run used Chipyard-generated BOOM v4
 `SmallBoomV4Config`, Nangate45, a 10 ns clock, 20% I/O delay, 5 fF output
 load, and vectorless activity of 0.1/0.5, matching the Raptor STA settings.
 
-The generated BOOM RTL was emitted with firtool 1.75. The primary tile run uses
+The generated BOOM RTL was emitted with firtool 1.75. The primary tile run used
 firtool's sequential-memory replacement and an abstract memory Liberty model;
 the retained `BoomCore` reference uses the no-replacement register form. The
-comparable Raptor result is the existing default `rapt_core` run with
+Raptor column is the historical default `rapt_core` run with
 `SRAM_MODE=macro`; memory characterization remains approximate for BOOM.
+
+The source revisions/fingerprints and full environment are not retained in this
+page. The current `rapt_core` ends at `l2_client_if` and excludes the cluster
+AXI/L2 subsystem, so these values are not current-core PPA or an equivalent
+comparison against a freshly built BOOM tile. Pin both source trees and rebuild
+matching boundaries before drawing a new area, power or timing conclusion.
 
 ## Full BOOM tile result
 
 The primary comparison uses the generated `BoomTile`, which includes the BOOM
 frontend, backend, and L1 memory hierarchy. BOOM SRAMs remain black-box cells
 and are assigned an abstract area of 2.2 um²/bit, calibrated from the SRAM
-macro Liberty files used by the current Raptor run. This lets the mapped
+macro Liberty files used by that Raptor run. This lets the mapped
 logic and macro area appear in the same Yosys area report.
 
 | metric | Raptor `rapt_core` | BOOM v4 `BoomTile` |
@@ -54,5 +60,5 @@ the primary chip comparison because it excludes the BOOM frontend and caches.
   load, and vectorless-power conventions.
 
 The BOOM source and generated RTL are intentionally kept outside tracked
-source directories; regenerate them from the pinned Chipyard/BOOM workspace
+source directories; select and record a pinned Chipyard/BOOM workspace
 before changing configuration or memory modeling.

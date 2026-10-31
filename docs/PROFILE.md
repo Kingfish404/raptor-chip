@@ -4,7 +4,9 @@ title: Legacy Performance Archive
 
 # Legacy Performance Archive
 
-> Legacy performance archive. These tables preserve early NPC/SoC measurements and do not describe the current default RTL configuration. For benchmark history of the current default two-wide parameterized OoO configuration, cache/window sizes, and STA baselines, use [Performance Iterations](./perf-iterations.md).
+> Legacy performance archive. These tables preserve early NPC/SoC measurements.
+> See [microarchitecture](./uarch.md) for current RTL capacities and
+> [performance iterations](./perf-iterations.md) for subsequent historical benchmarks and STA.
 
 使用`am-kernels`中的`microbench`测试程序进行性能测试.
 

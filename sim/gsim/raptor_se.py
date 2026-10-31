@@ -594,9 +594,9 @@ def build_o3_cpu(
     if rtl_execution_resources:
         # Preserve the default pool's non-integer capabilities, while matching
         # Raptor's RAPT_INTEGER_ISSUE_PORTS ALU pipes, one MULDIV pipe, and one
-        # L1D request path.  RAPT_M_FAST (one-cycle pipelined multiplier) maps
-        # to IntMult opLat=1; division keeps gem5's unpipelined 20-cycle
-        # latency, which the RTL's iterative divider approximates.
+        # L1D request path. IntMult opLat=1 approximates the two-stage RTL MUL;
+        # division retains gem5's fixed unpipelined 20-cycle latency, unlike
+        # the RTL divider's operand-dependent normalization and iteration.
         mdiv_ops = [
             OpDesc(opClass="IntMult", opLat=1 if u.get("m_fast") else 3),
             OpDesc(opClass="IntDiv", opLat=20, pipelined=False),
@@ -637,9 +637,9 @@ def build_o3_cpu(
 
 
 def build_l1(size: str, assoc: int, is_data: bool, mshrs: int = 1) -> Cache:
-    # raptor-chip's L1 FSM today services exactly one outstanding miss
-    # (LD_A -> LD_D -> back to IDLE), so default mshrs=1. Override via
-    # --mshrs to explore miss-under-miss behavior.
+    # This model defaults to one MSHR. The current default RTL has four L1D
+    # MSHRs and IOQ replay; --mshrs explores concurrency without modeling
+    # that protocol.
     return Cache(
         size=size,
         assoc=assoc,

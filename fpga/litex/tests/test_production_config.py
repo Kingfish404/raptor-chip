@@ -20,7 +20,7 @@ from ku15p_soc import configure_ku15p_timing
 
 class ProductionConfigTest(unittest.TestCase):
     def test_mshr_lookup_signals_precede_generate(self):
-        source = (REPO / "rtl/memory/rapt_l1d.sv").read_text()
+        source = (REPO / "rtl/memory/dcache/rapt_l1d.sv").read_text()
         instance = source.index("begin : g_mshr")
         for signal in ("l1d_addr", "tag_hit", "load_way_hit"):
             with self.subTest(signal=signal):

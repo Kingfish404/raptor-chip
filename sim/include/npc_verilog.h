@@ -15,14 +15,14 @@
 #ifdef RAPT_SOC
 // Verilator 5.x hierarchical cell access:
 //   rootp -> ysyxSoCFull -> asic -> cpu -> cpu -> adapter -> cpu (rapt) -> core
-// MemoryReadCredits=1 gives the generated rapt/core classes their __M1 suffix.
+// MemoryReadCredits=1 gives the generated rapt class its __M1 suffix.
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyxSoCFull))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyxSoCASIC__pi1))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _CPU))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyx_00000000))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _wrap_ysyxsoc))
 #include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt__M1))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_core__M1))
+#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_core))
 // The symbol header includes the actual parameter-specialized backend and ROU classes.
 #include CONCAT_HEAD(CONCAT(TOP_NAME, __Syms))
 #define VERILOG_CPU(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->adapter->cpu->core->m)
@@ -78,7 +78,9 @@
 
 #endif
 
-#define VERILOG_AXI_MASTER(m) VERILOG_CPU(CONCAT(memory_subsystem__DOT__axi_master__DOT__, m))
+// The L2 subsystem sits beside the core in `rapt` and is always inlined there.
+#define VERILOG_L2(m) VERILOG_CLUSTER(CONCAT(l2_subsystem__DOT__, m))
+#define VERILOG_AXI_MASTER(m) VERILOG_L2(CONCAT(axi_master__DOT__, m))
 
 static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
 {

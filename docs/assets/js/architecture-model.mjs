@@ -244,7 +244,7 @@ export function buildArchitecture(data) {
         'memory'),
       group('DATA MISS HANDLING', 'Inside L1D', 880, 282, 248, 252, 'memory'),
       group(
-        'CORE MEMORY INTERCONNECT', 'Request path; responses return to their owners',
+        'CORE BIU → CLUSTER L2 SUBSYSTEM', 'l2_client_if boundary; AXI outside the core',
         32, 558, 1096, 248, 'memory'),
       group(
         'CLUSTER & PLATFORM', 'rapt cluster boundary · off-core devices', 32, 834, 1096, 252,
@@ -278,13 +278,16 @@ export function buildArchitecture(data) {
         'pmp', 'Physical protection', `${value('pmp_usable')} usable PMP entries`, 60, 328, 188, 70,
         'backend', ['rapt_pmp', 'rapt_pmp_state'],
         'PMP checks instruction, data, and page-table accesses. Eight usable entries ' +
-        'support TOR, NA4, and NAPOT; upper architectural slots read as zero.'),
+        'support TOR and NAPOT at the default 4 KiB grain; upper slots read as zero. ' +
+        'NA4 requires an explicit four-byte-grain configuration.',
+        [['PMP grain', `${value('pmp_grain_bytes')} bytes`]]),
       block(
         'attributes', 'Memory attributes', 'PMA · RV64 Svpbmt', 60, 436, 188, 70, 'backend',
         ['rapt_memory', 'rapt_ptw'],
         'Physical-region attributes and translated RV64 page-based ' +
         'memory types govern cacheability, ordering, and supported ' +
-        'device accesses. Checks are not a serial pipeline stage.'),
+        'device accesses. Checks are not a serial pipeline stage.',
+        [['Default PA bits', `RV32: ${value('paddr_bits')}; RV64: ${value('rv64_paddr_bits')}`]]),
       block(
         'l2tlb', 'Shared L2 TLB', `${value('l2tlb_entries')} entries · direct-mapped`,
         384, 328, 392, 70, 'memory', ['rapt_l2tlb', 'rapt_cached_ptw'],
@@ -311,7 +314,7 @@ export function buildArchitecture(data) {
         'Buffers capture dirty victims with per-word masks. Failed write ' +
         'responses retain dirty data; fences and coherence wait for publication.'),
       block(
-        'bus', 'Memory request arbitration', 'L1I + L1D + PTW · up to 8 outstanding reads',
+        'bus', 'Core memory request arbitration', 'L1I + L1D + PTW → l2_client_if',
         60, 606, 1040, 60, 'memory', ['rapt_bus'],
         'Arbitrates cache and page-table traffic and maintains request ownership. ' +
         'Default write-back L1D bus writes retain ownership until the AXI B response.'),
@@ -319,9 +322,10 @@ export function buildArchitecture(data) {
         'axi', 'AXI4 adapter', 'XLEN-bit data / address · 4-bit ID', 60, 708, 300, 66, 'memory',
         ['rapt_axi_master'],
         'Converts the internal memory link to AXI. The adapter is ' +
-        'before the optional L2 cache in the actual composition.'),
+        'inside the cluster-level rapt_l2_subsystem, before its optional cache. ' +
+        'The subsystem owns AXI IDs and defaults to eight outstanding reads.'),
       block(
-        'l2', 'L2 cache stage', v.l2_enabled ? 'Enabled in this preset' : 'Default: passthrough',
+        'l2', 'L2 cache storage', v.l2_enabled ? 'Enabled in this preset' : 'Default: no cache',
         412, 708, 300, 66, 'optional', ['rapt_l2'],
         'The default preset bypasses L2 storage. The separate default-l2 preset enables a ' +
         '512 KiB, eight-way inclusive write-back cache; that capacity is not active here.',
@@ -329,14 +333,14 @@ export function buildArchitecture(data) {
           ['Selected preset', v.l2_enabled ? 'L2 enabled' : 'L2 cache disabled'],
           ['default-l2 only', '512 KiB · 8-way · inclusive']]),
       block(
-        'core-port', 'Core AXI port', 'Response buffer only with L2 enabled', 764, 708, 336, 66,
-        'memory', ['rapt_memory', 'rapt_axi_r_buffer', 'rapt_core'],
-        'The optional AXI read-response buffer follows L2. With L2 ' +
-        'disabled the path connects directly to the core AXI port.'),
+        'l2-port', 'L2 subsystem AXI port', 'Outer R buffer in default-l2', 764, 708, 336, 66,
+        'memory', ['rapt_l2_subsystem', 'rapt_axi_r_buffer', 'rapt_memory', 'rapt_core'],
+        'The optional outer AXI read-response buffer follows L2 storage. ' +
+        'The core ends at l2_client_if; the L2 subsystem supplies AXI even without a cache.'),
       block(
         'router', 'Cluster address router', 'CLINT · PLIC · off-chip AXI', 400, 886, 360, 66,
         'platform', ['rapt_router', 'rapt'],
-        'Routes the core AXI master to the shared interrupt devices or the ' +
+        'Routes the L2 subsystem AXI master to the shared interrupt devices or the ' +
         'external platform. CLINT and PLIC are parallel targets, not a chain.'),
       block(
         'clint', 'CLINT', 'mtime · mtimecmp · msip', 60, 996, 240, 64, 'platform', ['rapt_clint'],
@@ -373,8 +377,8 @@ export function buildArchitecture(data) {
       edge('mshr', 'bus', 'memory', 'right', 'right', [[1122, 363], [1122, 636]]),
       edge('bus', 'axi', 'memory', 'bottom', 'top', [[580, 688], [210, 688]]),
       edge('axi', 'l2', 'memory', 'right', 'left'),
-      edge('l2', 'core-port', 'memory', 'right', 'left'),
-      edge('core-port', 'router', 'memory', 'bottom', 'top', [[932, 820], [580, 820]]),
+      edge('l2', 'l2-port', 'memory', 'right', 'left'),
+      edge('l2-port', 'router', 'memory', 'bottom', 'top', [[932, 820], [580, 820]]),
       ...[['clint', 180], ['plic', 460], ['external', 860]].map(
         ([id, x]) => edge('router', id, 'memory', 'bottom', 'top', [[580, 976], [x, 976]])),
     ],
@@ -395,7 +399,8 @@ export function buildArchitecture(data) {
       'memory-system', 'Memory & platform',
       'TLBs & page walkers · memory bus · optional L2 · CLINT / PLIC · debug · external RAM / MMIO',
       48, 950, 1344, 104, 'memory',
-      ['rapt_memory', 'rapt_router', 'rapt_clint', 'rapt_plic', 'rapt_dm', 'rapt_dtm', 'rapt'],
+      ['rapt_memory', 'rapt_l2_subsystem', 'rapt_router', 'rapt_clint',
+        'rapt_plic', 'rapt_dm', 'rapt_dtm', 'rapt'],
       'Translation and protection serve instruction and data accesses. Cache ' +
       'and page-table traffic share the memory bus, AXI adapter, and optional ' +
       'L2 before the cluster router reaches interrupt devices and the external ' +

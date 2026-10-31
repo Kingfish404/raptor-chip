@@ -12,7 +12,7 @@ test('default capacity labels follow extracted configuration', () => {
   assert.match(model.widths, /^2 decode · 2 rename · 2 dispatch · 2 commit$/);
   assert.match(model.core.nodes.find((n) => n.id === 'dispatch').subtitle, /ROB 32/);
   assert.equal(model.memory.nodes.find((n) => n.id === 'dtlb').subtitle, '64 entries · 2-way');
-  assert.equal(model.memory.nodes.find((n) => n.id === 'l2').subtitle, 'Default: passthrough');
+  assert.equal(model.memory.nodes.find((n) => n.id === 'l2').subtitle, 'Default: no cache');
   const alternate = structuredClone(data);
   alternate.config.values.dtlb_entries = 128;
   alternate.config.values.l2_enabled = true;
@@ -36,8 +36,11 @@ test('diagram preserves integrated execution and memory topology', () => {
     assert.ok(hasEdge(model.core, unit, 'completion'));
   }
   assert.ok(hasEdge(model.core, 'completion', 'commit'));
-  const chain = ['bus', 'axi', 'l2', 'core-port', 'router'];
+  const chain = ['bus', 'axi', 'l2', 'l2-port', 'router'];
   chain.slice(1).forEach((id, i) => assert.ok(hasEdge(model.memory, chain[i], id)));
+  const port = model.memory.nodes.find((n) => n.id === 'l2-port');
+  assert.ok(port.sources.some((s) => s.id === 'rapt_l2_subsystem'));
+  assert.match(port.summary, /core ends at l2_client_if/);
   for (const id of ['clint', 'plic', 'external']) assert.ok(hasEdge(model.memory, 'router', id));
   assert.ok(
     !model.memory.edges.some(

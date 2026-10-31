@@ -109,7 +109,7 @@ def read_command(case, rtl, *, dut=DUT):
     flags += '-DRAPT_RVFI ' if case['metadata'] == 'rvfi' else '-URAPT_RVFI '
     flags += '-DRAPT_KEEP_UOP_INST ' if case['metadata'] == 'instruction' else '-URAPT_KEEP_UOP_INST '
     files = [dut if path == DUT else path for path in rtl]
-    return ('read_slang --threads 1 --unroll-limit 20000 --single-unit '
+    return ('read_slang --threads 1 --single-unit '
             '--allow-toplevel-iface-ports ' + flags
             + f'-I{ROOT}/rtl/configs/{case["preset"]} -I{ROOT}/rtl/include '
             + f'-I{ROOT}/rtl/include/npc -I{ROOT}/rtl/include/dpic_mock --top {top} '

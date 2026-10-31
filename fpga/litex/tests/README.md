@@ -248,7 +248,13 @@ Checks firmware packaging, fixed Make profiles, source/bitstream and timing cove
 python3 fpga/litex/tests/test_cache_maintenance.py
 ```
 
-Checks all 64 mapped SRAM CBO addresses and surrounding fences, the current set-selection coverage contract, and real RV32/RV64 compilation (when the cross-toolchain is installed). The no-argument LiteX hook must cover every set; `cbo.flush 0(x0)` faults on KU15P and is not a whole-cache trigger. These firmware tests do not replace SD DMA buffer-reuse checks on hardware.
+Checks all 64 mapped SRAM CBO addresses and surrounding fences, the legacy
+set-selection sweep, and real RV32/RV64 compilation when the cross-toolchain
+is installed. These checks do not establish whole-cache maintenance under
+targeted write-back: the hook names SRAM blocks, not an arbitrary DMA buffer.
+See the [policy limits](../README.md#dma-cache-maintenance).
+`cbo.flush 0(x0)` faults on KU15P and is not a whole-cache trigger. Hardware
+SD DMA buffer-reuse checks remain separate.
 
 ## CU08 CPU-integrated forwarding
 

@@ -190,7 +190,8 @@ def obligations(path, name, kind, sequential, body):
         return ["multiply", "divide-remainder", "mixed-arbitration", "flush-cancel"]
     if name == "rapt_vpu_memory":
         return ["rvv-memory", "response-isolation", "fault-restart", "ownership", "progress"]
-    if name in {"rapt", "rapt_core", "rapt_frontend", "rapt_backend", "rapt_memory"}:
+    if name in {"rapt", "rapt_core", "rapt_frontend", "rapt_backend", "rapt_memory",
+                "rapt_l2_subsystem"}:
         return ["end-to-end", "precise-recovery", "ordering", "interface-contracts", "progress"]
     if name.startswith("rapt_sram_"):
         return ["read-write", "read-hold", "port-collision", "macro-equivalence"]
@@ -204,7 +205,7 @@ def obligations(path, name, kind, sequential, body):
         result = ["instruction-decode", "illegal-encoding", "xlen-semantics"]
     elif name.startswith("wrap_") or name in {"axi2rnp", "rnp2axi", "ysyx_00000000"}:
         result = ["protocol", "integration", "external-boundary"]
-    elif "memory" in path.parts or "lsu" in path.parts:
+    elif {"memory", "uncore", "lsu"} & set(path.parts):
         result = ["functional", "ordering"]
         if any(token in name for token in ("pmp", "tlb", "ptw", "access")):
             result.append("permissions")

@@ -27,10 +27,12 @@ Values below describe `rtl/configs/default/rapt_config.svh` and the integrated
 | Prediction | TAGE: 1024 bimodal + 3 × 1024 tagged; 128-entry two-way BTB; RAS 16 |
 | L1 caches | 16 KiB each, four-way, 64-byte lines; L1D write-back, 4 MSHRs, 2 writeback buffers |
 | Translation | ITLB 16, fully associative; DTLB 64, two-way, replicated for load/store; shared L2 TLB 256 |
-| L2 cache | Passthrough; `default-l2` enables 512 KiB, eight-way inclusive write-back |
+| Core boundary | `l2_client_if` to the always-present cluster-level `rapt_l2_subsystem` |
+| L2 cache | Disabled; `default-l2` enables 512 KiB, eight-way inclusive write-back |
+| Addresses | Physical: 32 bits by default; RV64 allows 32–38. RV64 stored PC: 40 bits |
 | Platform | M/S/U; Sv32 (RV32), Sv39 (RV64), Bare; 8 usable PMP entries |
 | Interrupts / debug | CLINT; PLIC with 31 sources and M/S contexts; Debug Module / JTAG DTM bring-up path |
-| Bus | AXI4, XLEN-bit data/address, 4-bit ID, up to 8 reads; default bus writes wait for B |
+| Bus | Cluster AXI4, XLEN-bit data/address containers, 4-bit ID, up to 8 reads; buffered writebacks wait for B |
 
 See [pipeline contracts and configuration](./uarch.md) for forwarding, recovery,
 cache policy, and preset differences.
@@ -45,8 +47,9 @@ Both XLEN modes implement **IMAFDC**, scalar **Zfhmin**, bit manipulation
 - **Compressed:** Zca, Zcb, Zcmop, alongside C's F/D memory forms.
 - **Supervisor:** Svinval in both modes; Svpbmt and Zkt in the default RV64 configuration.
 
-Page-table A/D bits use software management (Svade). Svinval uses conservative
-full translation invalidation. The [standalone RVV component](./vpu.md) is
+Page-table A/D bits use software management (Svade). Committed Svinval and
+SFENCE.VMA select translations by address and ASID by default, preserving unrelated
+entries; `RAPT_SFENCE_SELECTIVE=0` restores full invalidation. The [standalone RVV component](./vpu.md) is
 **not integrated into the scalar core**; V is not part of this core's ISA.
 Decoder sources live in [`tools/decodegen/`](https://github.com/Kingfish404/raptor-chip/tree/master/tools/decodegen).
 
@@ -84,7 +87,7 @@ subsets; see the [verification guide](https://github.com/Kingfish404/raptor-chip
 for commands and prerequisites. A build target alone does not establish a passing
 regression or board boot for a particular revision.
 
-[Performance history](./perf-iterations.md) records earlier measurements.
+[Performance history](./perf-iterations.md) preserves earlier measurements.
 Compare results only with matching revision, preset, XLEN, workload, memory
 model, and constraints. The homepage and Explorer share one interactive architecture diagram and
 illustrative queue-occupancy model. Animation cycles are not RTL measurements.

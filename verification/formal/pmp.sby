@@ -19,7 +19,7 @@ prep -top formal_pmp
 
 [files]
 formal_pmp.sv
-rapt_pmp.sv ../../rtl/memory/rapt_pmp.sv
+rapt_pmp.sv ../../rtl/memory/mmu/rapt_pmp.sv
 rapt.svh ../../rtl/include/rapt.svh
 rapt_config.svh ../../rtl/configs/formal/rapt_config.svh
 rapt_sva.svh ../../rtl/include/rapt_sva.svh

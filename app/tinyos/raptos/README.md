@@ -41,7 +41,7 @@ The RFS3 RAM filesystem supports hierarchical directories, 16 inodes, and 29 all
 make -C app/tinyos/raptos build
 make -C app/tinyos/raptos nemu
 make -C app/tinyos/raptos sim
-make -C fpga/litex fpga-raptos-run
+make -C fpga/litex fpga-raptos-rv32-run
 ```
 
 Use NEMU first for fast functional iteration. Run `source /etc/diagnostics.rc` for identity, layout, filesystem, and counter output; run `devtest` for character devices and `fstest` for descriptor, namespace, and block-allocation semantics. Use NPC after those pass to cover RTL behavior and randomized memory latency, followed by KU15P.
@@ -60,16 +60,22 @@ make -C app/tinyos/raptos sim \
 	ARGS="-n --mem-random-delay=4 --mem-random-seed=1"
 ```
 
-For FPGA, the build and upload targets use the same `build/ku15p/raptos.bin`:
+For FPGA, RV32 build and upload use the same `build/ku15p-rv32/raptos.bin`.
+Upload/run require an already loaded, matching LiteX BIOS and do not build or
+program a bitstream:
 
 ```bash
-make -C fpga/litex fpga-raptos-build
-make -C fpga/litex fpga-raptos-upload
+make -C fpga/litex fpga-raptos-rv32-build
+make -C fpga/litex fpga-raptos-rv32-upload
 # Then run in the serial shell:
 payload slub_freelist
 ```
 
 `slub_freelist` stresses encoded bit-30 freelist pointers, mixed-width stores, store-to-load forwarding, repeated object reuse, and the Sv32/PTW path. A metadata mismatch reports the failing iteration and values before returning an error to the shell.
 
-Set `PLATFORM=sim|ku15p`, `ARGS`, `MAX_INST`, or `CROSS` as needed. Outputs are isolated under `build/sim/` and `build/ku15p/`.
+Use `fpga-raptos-rv64-build`, `fpga-raptos-rv64-upload` and
+`fpga-raptos-rv64-run` for the RV64 board profile. Direct builds select
+`PLATFORM=sim|ku15p-rv32|ku15p-rv64`; outputs are isolated under
+`build/<PLATFORM>/`. The `sim` and `nemu` shell helpers select the RV32
+`sim` image. Override `ARGS`, `MAX_INST` or `CROSS` as needed.
 

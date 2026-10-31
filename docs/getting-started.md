@@ -95,6 +95,8 @@ make microbench-nemu32     ARGS="-b -n"
 
 For reproducible comparisons, record the source revision, HDL preset, XLEN,
 benchmark binary, compiler options, and memory-delay settings with each result.
+A valid CoreMark score also requires successful CRCs and a timed interval of at
+least 10 seconds.
 
 ## 5. Apps on riscv-pk
 
@@ -157,6 +159,9 @@ make clean    # clean NEMU, selected sim profile, generated RTL, verify and app 
 | Option | Purpose |
 | --- | --- |
 | `ARGS`, `IMG` | Runtime flags and custom binary |
+| `RAPT_CONFIG` | RTL preset, e.g. `default`, `default-w4`, `default-l2`, `middle-cache` |
+| `BUILD_ROOT`, `BUILD_PROFILE` | Isolate simulator outputs and configuration variants |
+| `VFLAGS` | Extra RTL defines; RV64 targets add `-DRAPT_RV64` automatically |
 | `DIFFTEST=0` / `1` | Disable / enable the NEMU differential reference |
 | `BENCH_OPT=baseline` / `optimized` | Benchmark compiler preset |
 | `SIM_RANDOM_DELAY`, `SIM_RANDOM_SEED` | Reproducible memory wait states |
@@ -166,3 +171,8 @@ make clean    # clean NEMU, selected sim profile, generated RTL, verify and app 
 For direct shell workflows, run `source env.sh`. See the
 [simulator guide](https://github.com/Kingfish404/raptor-chip/blob/master/sim/README.md)
 for configuration caches and lower-level commands.
+
+RV64 defaults to 32 physical address bits. To exercise the supported 38-bit
+capacity, select `RAPT_CONFIG=default-pa38` or explicitly set
+`VFLAGS=-DRAPT_PADDR_BITS=38` in an isolated profile. The PMA region map remains
+32-bit; a wider cache/PMP address does not add RAM or devices.

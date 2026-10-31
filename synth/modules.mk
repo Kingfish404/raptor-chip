@@ -2,7 +2,7 @@
 # Core hierarchy blocks and selected scalable leaves for isolated comparison.
 MODULES := core frontend backend memory bpu ifu fqu stream_queue l1i idu rnu rename_checkpoint rou prf fpr dpu dispatch_select dispatch_steer issue_select muldiv_fu ieu feu cmu csr lsu l1d bus axi l2
 MODULES += recovery_pending
-MODULES += l2_data_array l2_refill_mshrs
+MODULES += l2_data_array l2_refill_mshrs l2_subsystem
 
 TOP_recovery_pending := rapt_recovery_pending
 TOP_l2_refill_mshrs := rapt_l2_refill_mshrs
@@ -37,6 +37,7 @@ TOP_l1d  := rapt_l1d
 TOP_bus  := rapt_bus
 TOP_axi  := rapt_axi_master
 TOP_l2   := rapt_l2
+TOP_l2_subsystem := rapt_l2_subsystem
 
 $(foreach module,$(MODULES),$(eval CLOCK_$(module) := clock))
 

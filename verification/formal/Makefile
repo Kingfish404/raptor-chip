@@ -151,7 +151,7 @@ formal_memory_progress: ## Check reduced L1D/bus bounded progress and cover coll
 FORMAL_BUS_SRCS := \
 		$(RAPTOR_HOME)/rtl/rapt_pkg.sv \
 		$(RAPTOR_HOME)/rtl/memory/rapt_bus.sv \
-		$(RAPTOR_HOME)/rtl/memory/rapt_axi_master.sv
+		$(RAPTOR_HOME)/rtl/uncore/rapt_axi_master.sv
 # Preprocessing consumes these headers too. Keep them as dependencies, not
 # standalone Verilator inputs, so header/config edits invalidate cached packs.
 FORMAL_COMMON_HEADERS := $(wildcard $(RAPTOR_HOME)/rtl/include/*.svh)

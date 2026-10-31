@@ -10,11 +10,18 @@ module tb_e67_latency;
   localparam logic [XLEN-1:0] Base = XLEN'('h80000000);
   logic clock = 0, reset = 1;
   always #5 clock = ~clock;
+  l2_client_if l2_client ();
   axi4_if axi ();
+  rapt_l2_subsystem l2_subsystem (
+      .clock,
+      .reset,
+      .client(l2_client),
+      .io_master(axi)
+  );
   rapt_core dut (
       .clock,
       .reset,
-      .io_master(axi),
+      .l2_client,
       .writeback_error_o(),
       .clint_timer_int_i(1'b0),
       .clint_sw_int_i(1'b0),

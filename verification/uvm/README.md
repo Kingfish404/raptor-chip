@@ -38,11 +38,18 @@ make -C verification uvm
 
 `uvm-smoke` runs UVM 1.2. `uvm-iq-compile` compiles the complete IQ environment and RTL. The IQ random sequence defaults to 500 cycles and accepts `+IQ_CYCLES=<n>` when run on a supported class-capable simulator.
 
-## XSim 2025.2 limitation
+## Historical XSim 2025.2 limitation
 
-The installed XSim 2025.2 runs a minimal UVM test and parses the complete IQ environment with `xvlog`, but `xelab` crashes internally while analyzing the larger class-task package (`XSIM 43-3316`, SIGSEGV). This is a simulator crash, not an HDL diagnostic. Consequently, the Makefile deliberately names the IQ target `uvm-iq-compile` and does not claim a passing dynamic UVM run.
+The evaluated XSim 2025.2 installation ran a minimal UVM test and parsed the
+complete IQ environment with `xvlog`, but `xelab` crashed internally while
+analyzing the larger class-task package (`XSIM 43-3316`, SIGSEGV). This was a
+simulator crash, not an HDL diagnostic. The Makefile therefore names the IQ
+target `uvm-iq-compile` and does not claim a passing dynamic IQ UVM run.
+That historical result does not establish behavior for another XSim release.
 
-Use Questa, VCS, or Xcelium for the complete UVM test until the XSim issue is resolved. Keep XSim directed checks and full-core difftest as executable gates in this environment.
+Use a supported class-capable simulator for the complete IQ test and retain
+directed checks and full-core difftest. The whole-chip Verilator UVM flow above
+has a separate environment and acceptance ledger.
 
 ## Environment layout
 

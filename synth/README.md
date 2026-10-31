@@ -1,6 +1,7 @@
 # Standalone module synthesis and physical design
 
-This directory provides fast, independent synthesis and static timing analysis for the major first-level modules instantiated by `rtl/rapt_core.sv`.
+This directory provides independent synthesis and static timing analysis for core
+composition blocks, their submodules, and the cluster-level L2 subsystem.
 
 The flow uses Yosys with the slang SystemVerilog frontend and OpenSTA. It reuses the open PDK data and mapping configuration under `third_party/yosys-opensta` for ASAP7, NanGate45, and SKY130 HD.
 
@@ -10,15 +11,17 @@ The physical-design flow uses the mapped synthesis netlist as OpenROAD input. It
 
 ## Subsystem evaluation
 
-The three composition blocks are registered as `frontend`, `backend`, and
-`memory`. They share the existing `syn`, `sta`, `ppa`, `fpga-syn`, and physical
-design entry points with `core`:
+The three core composition blocks are registered as `frontend`, `backend`, and
+`memory`; the cluster-level L2 subsystem is `l2_subsystem`. They share the
+existing `syn`, `sta`, `ppa`, `fpga-syn`, and physical design entry points with
+`core`, which ends at the L2 client port and excludes the L2 subsystem:
 
 | Module | Synthesis top | Boundary |
 | --- | --- | --- |
 | `frontend` | `rapt_frontend` | Fetch/prediction/decode; instruction cache remains in memory |
 | `backend` | `rapt_backend_syn_top` | Rename, scheduling, execution, retirement, LSU/SQ, CSR |
-| `memory` | `rapt_memory` | L1I/L1D, translation, bus, AXI bridge, optional L2 |
+| `memory` | `rapt_memory` | L1I/L1D, translation, PMP, bus interface unit; ends at `l2_client_if` |
+| `l2_subsystem` | `rapt_l2_subsystem` | AXI bridge, outstanding budgets, optional L2 cache, outer R buffer |
 
 The backend adapter preserves independent native inputs and exports all fields
 of its four internally produced broadcast interfaces. Internal interface instances
@@ -28,13 +31,13 @@ registers, stimulus correlation, or output reduction. This baseline does not ena
 
 ```sh
 source env.sh
-for module in frontend backend memory; do
+for module in frontend backend memory l2_subsystem; do
   make -C synth/yosys structure-check MODULE=$module EXTRA_DEFINES=-DRAPT_RV64
 done
-make -C synth ppa-all MODULES_TO_RUN="frontend backend memory" \
+make -C synth ppa-all MODULES_TO_RUN="frontend backend memory l2_subsystem" \
   RAPT_CONFIG=default PDK=nangate45 EXTRA_DEFINES=-DRAPT_RV64 \
   CLK_FREQ_MHZ=50 SRAM_MODE=macro PARALLEL_JOBS=3
-for module in frontend backend memory; do
+for module in frontend backend memory l2_subsystem; do
   make -C synth fpga-syn MODULE=$module RAPT_CONFIG=default FPGA_XLEN=64 \
     CLK_FREQ_MHZ=50 FPGA_PART=xcku15p-ffva1156-2-e
 done
@@ -43,8 +46,9 @@ done
 For RV32, omit `EXTRA_DEFINES=-DRAPT_RV64` and set `FPGA_XLEN=32`.
 ASIC output paths do not encode XLEN or SRAM mode: archive results or override
 `BUILD_DIR` for individual runs before switching either setting. FPGA output paths
-include XLEN. The `default` preset selects eight read credits, write-back L1D
-and disabled L2; other presets and explicit defines select their own memory policy.
+include XLEN. The cluster L2 subsystem defaults to eight read credits. The
+`default` preset selects write-back L1D and no L2 cache; the AXI bridge remains
+present in `l2_subsystem`. Other presets and explicit defines select their own memory policy.
 
 ASIC macro-mode results use abstract SRAM Liberty models, not a fabricated
 Nangate45 SRAM implementation. FPGA uses behavioral memories and Vivado OOC
@@ -65,7 +69,7 @@ make -C layout viz MODULE=frontend PDK=nangate45 EXTRA_DEFINES=-DRAPT_RV64 \
   RAPT_CONFIG=default CLK_FREQ_MHZ=50 SRAM_MODE=flops
 ```
 
-Replace `frontend` with `backend` or `memory` for the other blocks. These commands
+Replace `frontend` with `backend`, `memory` or `l2_subsystem` for the other blocks. These commands
 rebuild the ASIC baseline with flop-mapped memories; preserve macro-mode reports
 first. Physical implementation is a separate evaluation, not implied by an OOC
 synthesis pass.
@@ -105,7 +109,7 @@ make -C synth ppa-all PDK=sky130 JOB_MEMORY_MB=8192
 
 Large cache/core configurations can consume substantially more memory than small frontend blocks. Reduce `PARALLEL_JOBS` or increase `JOB_MEMORY_MB` when running `core`, `l1i`, `l1d`, and enabled `l2` together.
 
-Supported module names are `core`, `frontend`, `backend`, `memory`, `bpu`, `ifu`, `fqu`, `stream_queue`, `l1i`, `idu`, `rnu`, `rename_checkpoint`, `rou`, `prf`, `fpr`, `fp_registers`, `dpu`, `dispatch_select`, `dispatch_steer`, `issue_select`, `muldiv_fu`, `ieu`, `feu`, `cmu`, `csr`, `lsu`, `l1d`, `bus`, `axi`, `l2`, `l2_data_array`, `l2_refill_mshrs`, `l2tlb`, and `recovery_pending`. `dpu` isolates K-to-W domain/token compaction; `dispatch_select` isolates ROB rotation/rank and acceptance accounting; `dispatch_steer` combines both with indexed domain lookup and selected physical identities, but not the wide operand payload read. `issue_select` exposes the combinational issue-selection cone with a clock port used only as an IO timing reference; it inserts no pipeline registers. `muldiv_fu` exposes the complete `rapt_ieu_mul` arithmetic unit, including both multiply and divide paths, with native independent operands, operation, word mode, tag, and handshake ports. It excludes the MDQ and completion arbiter. For the RV64 four-entry MDQ tag shape, use `EXTRA_DEFINES='-DRAPT_RV64 -GTAG_W=2'`; select `SRAM_MODE=flops` because this leaf contains no SRAM. A full-unit worst path can be in the multiplier and need not describe divider-specific timing. Use `make -C synth list` to show the corresponding RTL top modules.
+Supported module names are `core`, `frontend`, `backend`, `memory`, `l2_subsystem`, `bpu`, `ifu`, `fqu`, `stream_queue`, `l1i`, `idu`, `rnu`, `rename_checkpoint`, `rou`, `prf`, `fpr`, `fp_registers`, `dpu`, `dispatch_select`, `dispatch_steer`, `issue_select`, `muldiv_fu`, `ieu`, `feu`, `cmu`, `csr`, `lsu`, `l1d`, `bus`, `axi`, `l2`, `l2_data_array`, `l2_refill_mshrs`, `l2tlb`, and `recovery_pending`. `dpu` isolates K-to-W domain/token compaction; `dispatch_select` isolates ROB rotation/rank and acceptance accounting; `dispatch_steer` combines both with indexed domain lookup and selected physical identities, but not the wide operand payload read. `issue_select` exposes the combinational issue-selection cone with a clock port used only as an IO timing reference; it inserts no pipeline registers. `muldiv_fu` exposes the complete `rapt_ieu_mul` arithmetic unit, including both multiply and divide paths, with native independent operands, operation, word mode, tag, and handshake ports. It excludes the MDQ and completion arbiter. For the RV64 four-entry MDQ tag shape, use `EXTRA_DEFINES='-DRAPT_RV64 -GTAG_W=2'`; select `SRAM_MODE=flops` because this leaf contains no SRAM. A full-unit worst path can be in the multiplier and need not describe divider-specific timing. Use `make -C synth list` to show the corresponding RTL top modules.
 
 Module-only synthesis adapters live in `synth/wrappers/`. Only the selected top's adapter is parsed, so an unrelated stale wrapper cannot invalidate a module's report after an interface refactor. They do not enter the product `rtl/` tree, simulator pack, or tapeout RTL file list. DPU retains its `stimulus` / `response` adapter. IEU, FEU and LSU expose independent typed dispatch and completion arrays plus native interface ports; their queue grants and capacity outputs are flattened per slot with queue-specific index widths. They add no output reduction or correlated stimulus fan-in to the measured logic. Select XLEN/ROB/payload types through the preset and `-DRAPT_RV64`, not independent wrapper width overrides. FPR A/B/C names denote three operands, not dispatch lanes.
 
@@ -269,7 +273,7 @@ parameters. Module-local improvements still require integration validation.
 
 This is a pre-layout comparison flow. STA uses ideal clocks, a default input and output delay of 20% of the requested period, a 5 fF output load, and uniform vectorless switching activity. Override these with `IO_DELAY_FRAC` and `OUTPUT_LOAD_FF` when needed.
 
-L1I, L1D, and enabled L2 data arrays are represented by abstract SRAM macros in the default mode so register and mux expansion does not dominate area and timing. The bundled placeholder area and timing values are not characterized for ASAP7, NanGate45, or SKY130 HD and must not be treated as SRAM signoff PPA. They are intended for architecture-level comparisons until foundry- and compiler-characterized macro views are supplied. L2 is a passthrough unless the selected RTL configuration enables `RAPT_L2_EN`.
+L1I, L1D, and enabled L2 data arrays are represented by abstract SRAM macros in the default mode so register and mux expansion does not dominate area and timing. The bundled placeholder area and timing values are not characterized for ASAP7, NanGate45, or SKY130 HD and must not be treated as SRAM signoff PPA. They are intended for architecture-level comparisons until foundry- and compiler-characterized macro views are supplied. The cluster-level `l2_subsystem` always contains AXI management; its `rapt_l2` cache body is bypassed unless the preset enables `RAPT_L2_EN`. The `core` and `memory` scopes exclude that subsystem.
 
 The three PDKs use different architectures and corners. Compare variants within one PDK directly; use cross-PDK numbers as directional estimates only.
 

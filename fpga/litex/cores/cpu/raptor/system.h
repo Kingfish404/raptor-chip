@@ -20,10 +20,10 @@ extern "C"
   __attribute__((unused)) static void flush_cpu_dcache(void)
   {
 #if defined(CONFIG_CPU_HAS_DCACHE)
-    /* Legacy LiteX whole-cache hook. Raptor CBO clears all ways selected
-     * by VA bits 11:6, including higher physical colors. Sweep a mapped
-     * SRAM page in 64-byte CBO blocks to cover every set. This relies on
-     * Raptor's set-wide implementation, not generic Zicbom semantics.
+    /* Legacy no-range hook: sweep SRAM sets for write-through CBOs.
+     * Targeted write-back CBOs maintain only these SRAM physical blocks;
+     * arbitrary DMA buffers require maintenance at their actual addresses.
+     * See fpga/litex/README.md, DMA Cache Maintenance, for the policy limits.
      * Address zero is unmapped and must not be used as a flush trigger.
      */
 #if !defined(SRAM_BASE) || !defined(SRAM_SIZE) || SRAM_SIZE < 4096

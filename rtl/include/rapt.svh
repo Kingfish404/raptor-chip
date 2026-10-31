@@ -265,6 +265,18 @@
 `define RAPT_CACHE_LINE_BYTES 64
 `endif
 
+// L2 cache geometry fallbacks for presets that enable RAPT_L2_EN without
+// selecting one. Only rapt_pkg::L2LinkConfig and the L2 subsystem read these.
+`ifndef RAPT_L2_LEN
+`define RAPT_L2_LEN 7
+`endif
+`ifndef RAPT_L2_LINE_LEN
+`define RAPT_L2_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
+`endif
+`ifndef RAPT_L2_N_WAYS
+`define RAPT_L2_N_WAYS 1
+`endif
+
 // Translation-cache sizing. Presets may override these before including this
 // file; the fallbacks preserve the original small implementation for external
 // configurations that have not selected explicit TLB depths yet.

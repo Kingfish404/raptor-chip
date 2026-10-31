@@ -123,6 +123,16 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(defs["RAPT_ROB_SIZE"], "32")
         self.assertIn("RAPT_BPU_DIRP_TAGE", defs)
 
+    def test_function_macros_are_not_numeric_flags(self) -> None:
+        text = "`define RAPT_PC_BITS_OF(xlen) ((xlen) == 64 ? 40 : 32)\n"
+        text += "`define RAPT_FEATURE_FLAG\n`define RAPT_PADDR_BITS 32\n"
+        for parse in (ext.parse_defines, ext.parse_defines_ifdef):
+            defs = parse(text)
+            self.assertNotIn("RAPT_PC_BITS_OF", defs)
+            self.assertFalse(any(name.startswith("RAPT_PC_BITS") for name in defs))
+            self.assertEqual(defs["RAPT_FEATURE_FLAG"], "1")
+            self.assertEqual(defs["RAPT_PADDR_BITS"], "32")
+
 
 class MakefileTest(unittest.TestCase):
     def test_help_comments(self) -> None:
@@ -240,6 +250,10 @@ class LiveRepoTest(unittest.TestCase):
         self.assertEqual(data["config"]["values"]["arch_regs"], 32)
         self.assertEqual(data["config"]["values"]["pmp_usable"], 8)
         self.assertEqual(data["config"]["values"]["pmp_csr_slots"], 16)
+        self.assertEqual(data["config"]["values"]["pmp_grain_bytes"], 4096)
+        self.assertEqual(data["config"]["values"]["paddr_bits"], 32)
+        self.assertEqual(data["config"]["values"]["rv64_paddr_bits"], 32)
+        self.assertEqual(data["config"]["values"]["sfence_selective"], 1)
         self.assertEqual(data["config"]["values"]["l1i_kib"], 16)
         self.assertEqual(data["config"]["values"]["l1d_kib"], 16)
         self.assertEqual(data["config"]["values"]["phys_regs"], 64)
@@ -279,6 +293,12 @@ class LiveRepoTest(unittest.TestCase):
         self.assertEqual(data["config"]["values"]["fpq_entries"], 8)
         inst = {(e["from"], e["to"]) for e in data["graph"]["instance_edges"]}
         self.assertIn(("rapt", "rapt_core"), inst)
+        self.assertIn(("rapt", "rapt_l2_subsystem"), inst)
+        self.assertIn(("rapt_l2_subsystem", "rapt_axi_master"), inst)
+        self.assertIn(("rapt_l2_subsystem", "rapt_l2"), inst)
+        self.assertIn(("rapt_core", "rapt_memory"), inst)
+        self.assertNotIn(("rapt_memory", "rapt_l2"), inst)
+        self.assertNotIn(("rapt_memory", "rapt_axi_master"), inst)
         self.assertIn(("rapt_core", "rapt_frontend"), inst)
         self.assertIn(("rapt_frontend", "rapt_ifu"), inst)
         self.assertTrue(any(c["name"] == "run-rv32" for c in data["makefile"]["commands"]))

@@ -117,6 +117,11 @@ class EvidenceTest(unittest.TestCase):
             'queue.sv:36:5: error: $error encountered: Invalid rapt_stream_queue configuration\n',
             'rapt_stream_queue'))
 
+    def test_uppercase_severity_diagnostic(self):
+        self.assertTrue(contract_rejected(1,
+            'queue.sv:47: ERROR: $error encountered: Invalid rapt_stream_queue configuration\n',
+            'rapt_stream_queue'))
+
     def test_echo_is_not_diagnostic(self):
         self.assertFalse(contract_rejected(1,
             'error: syntax error\n $error("Invalid rapt_stream_queue configuration");',

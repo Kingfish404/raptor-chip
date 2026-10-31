@@ -63,19 +63,14 @@ make -C app os-cli-nsim OS=xv6 SYNC=0 ARGS="-b -n --ckpt-pc=0x80000f82 --ckpt-sa
 make -C app os-cli-nsim OS=xv6 SYNC=0 ARGS="-b -n" MAX_INST=12000000 TIMEOUT=120
 ```
 
-From `app/`:
+From the repository root:
 
 ```bash
 # Enter upstream OS CLI via QEMU
 make -C app os-cli-qemu OS=xv6
 make -C app os-cli-qemu OS=egos
-make -C app os-cli-qemu OS=xv6
-make -C app os-cli-qemu OS=egos
 
 # Boot OS images on NPC/sim where supported
-make -C app os-cli-nsim OS=xv6 ARGS="-b -n"
-make -C app os-cli-nsim OS=egos ARGS="-b -n"
-make -C app os-cli-nemu OS=egos ARGS="-b -n"
 make -C app os-cli-nsim OS=xv6 ARGS="-b -n"
 make -C app os-cli-nsim OS=egos ARGS="-b -n"
 make -C app os-cli-nemu OS=xv6 ARGS="-b -n"

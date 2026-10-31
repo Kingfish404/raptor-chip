@@ -4,11 +4,9 @@
 
 module rapt_router #(
     parameter int XLEN = `RAPT_XLEN,
-`ifdef RAPT_L2_EN
-    parameter int WriteOutstanding = 1
-`else
-    parameter int WriteOutstanding = `RAPT_POSTED_WRITES > 0 ? `RAPT_POSTED_WRITES : 1
-`endif
+    // Writes the L2 subsystem may have awaiting B responses.
+    parameter int WriteOutstanding = rapt_pkg::L2LinkConfig.posted_writes > 0
+        ? rapt_pkg::L2LinkConfig.posted_writes : 1
 ) (
     input clock,
     input reset,
@@ -387,8 +385,12 @@ module rapt_router #(
       end
     end
   end
-  `RAPT_SVA_IMPLY(clock, reset, ROUTER_WRITE_CAPACITY, 1'b1,
-                  offchip_write_count <= WriteCountW'(WriteOutstanding))
+  // When WriteOutstanding + 1 is a power of two, the counter cannot encode a
+  // value above capacity and the check would be constant.
+  if ((WriteOutstanding & (WriteOutstanding + 1)) != 0) begin : g_write_capacity_check
+    `RAPT_SVA_IMPLY(clock, reset, ROUTER_WRITE_CAPACITY, 1'b1,
+                    offchip_write_count <= WriteCountW'(WriteOutstanding))
+  end
   `RAPT_SVA_IMPLY(clock, reset, ROUTER_INTERNAL_WRITE_DRAIN,
                   w_state == W_INT_W || w_state == W_INT_B, offchip_write_count == '0)
   `RAPT_SVA_IMPLY(clock, reset, ROUTER_INTERNAL_READ_DRAIN, push_int_resp, !offchip_write_pending)

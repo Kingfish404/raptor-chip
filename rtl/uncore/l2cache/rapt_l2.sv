@@ -2,15 +2,13 @@
  * rapt_l2 -- L2 unified cache (AXI4-slave on CPU side, AXI4-master on
  * memory side).
  *
- * Sits between `rapt_bus` and the external `io_master` AXI port:
+ * Sits inside `rapt_l2_subsystem`, behind that block's AXI master:
  *
- *   L1I -+
- *        +-> rapt_bus --> rapt_l2 --> io_master (external)
- *   L1D -+
+ *   core --l2_client_if--> rapt_axi_master --> rapt_l2 --> rapt_axi_r_buffer --> router
  *
- * Both ports are AXI4. When `RAPT_L2_EN` is not defined the module
- * collapses to a transparent passthrough, so adding the instantiation
- * is a no-op until L2 is opted in.
+ * Both AXI ports are AXI4. When `RAPT_L2_EN` is not defined the module
+ * collapses to a transparent passthrough, which leaves the subsystem as
+ * the management-only L2.
  *
  * --- Design summary (RAPT_L2_EN) ---
  *
@@ -59,15 +57,6 @@
 `include "rapt_soc.svh"
 `include "rapt_soc_if.svh"
 
-`ifndef RAPT_L2_LEN
-`define RAPT_L2_LEN 7
-`endif
-`ifndef RAPT_L2_LINE_LEN
-`define RAPT_L2_LINE_LEN $clog2(`RAPT_CACHE_LINE_BYTES / (`RAPT_XLEN / 8))
-`endif
-`ifndef RAPT_L2_N_WAYS
-`define RAPT_L2_N_WAYS 1
-`endif
 /* verilator lint_off UNUSEDPARAM */
 /* verilator lint_off UNUSEDSIGNAL */
 module rapt_l2 #(

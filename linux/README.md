@@ -269,7 +269,14 @@ make fpga-opensbi-img-rv64
 make opensbi-fpga-rv64-upload
 ```
 
-The image targets run the matching OpenSBI build as needed and write `fpga/litex/build/firmware/linux-fpga/rv32/linux-fpga-opensbi.img` or `fpga/litex/build/firmware/linux-fpga/rv64/linux-fpga-opensbi.img` with stage0 at `0x80000000`, OpenSBI's `fw_payload.bin` staged at `0x80100000`, and the LiteX DTB staged at `0x80800000` by default. Stage0 copies OpenSBI back to `0x80000000`, copies the DTB to `0x83f00000`, then jumps with `a0=0` and `a1=0x83f00000`. Override `LINUX_FPGA_OPENSBI_DTB_OFFSET` if you build a larger custom OpenSBI payload that needs more than the default 8 MiB staging window.
+The targets build the matching OpenSBI as needed. The image is
+`fpga/litex/build/firmware/linux-fpga/rv<XLEN>-<board>-<preset>-<config-id>/linux-fpga-opensbi.img`;
+the configuration-specific path prevents reuse across board/ISA/preset variants.
+Stage0 starts at `0x80000000`, OpenSBI's `fw_payload.bin` is staged at
+`0x80100000`, and the LiteX DTB at `0x80800000` by default. Stage0 copies
+OpenSBI back to `0x80000000`, copies the DTB to `0x83f00000`, then jumps with
+`a0=0` and `a1=0x83f00000`. Override `LINUX_FPGA_OPENSBI_DTB_OFFSET` for a
+custom OpenSBI payload requiring more than the default 8 MiB staging window.
 
 This path uses OpenSBI's standalone `fw_payload.bin`. `fw_dynamic.bin` would need an `fw_dynamic_info` handoff block from stage0, and `fw_jump.bin` needs a defined next-stage address/payload convention, so they are not direct replacements for `fpga-opensbi-upload`.
 

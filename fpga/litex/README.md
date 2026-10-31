@@ -61,7 +61,7 @@ The RK-XCKU5P-F V1.2 has a separate LiteX profile using its onboard RTL8211F
 RGMII PHY and 2 GiB DDR4 MIG. Use
 `make fpga-netboot-rv64-build FPGA_BOARD=rk_xcku5p_f` (or `rv32`), then the
 matching `info`, `load`, `serve`, and `test` targets. The fixed profile defaults
-to the `small` CPU preset. See the [RK board guide](../rk-xcku5p-f/README.md#onboard-ethernet-netboot)
+to the `small` CPU preset. See the [RK board guide](../rk-xcku5p-f/README.md#litex-soc-separate-flow)
 and [netboot workflow](NETBOOT.md) for the full command sequence and host setup.
 The RV64 `small` profile completed Vivado 2025.2 routing at 50 MHz: WNS was
 +0.118 ns, WHS was +0.005 ns, and there were no failing setup or hold endpoints.
@@ -126,7 +126,7 @@ Each Vivado `soc/gateware/` result has `index.html` for browsing reports and
 The matching `fpga-netboot-rv64-reports` or `fpga-netboot-rv32-reports` target
 regenerates these files from existing reports without rebuilding the bitstream.
 
-The default payloads are downloaded by the paired `build` target when absent: `linux/build/linux-riscv-rv32-qemu-rv32-buildroot-v6.18.50/fw_payload.bin` and `linux/build/linux-riscv-rv64-qemu-rv64-fast-buildroot-v6.18.50/fw_payload.bin`. Repeat `RAPT_CONFIG` for build/load/test steps. Host setup/restore shares `NETBOOT_STATE_ROOT` (default `build/netboot-default`) across presets. Supported location/tool overrides are `NETBOOT_BUILD_ROOT`, `NETBOOT_STATE_ROOT`, `NETBOOT_PAYLOAD_RV32`, `NETBOOT_PAYLOAD_RV64`, `VIVADO`, `VIVADO_JOBS`, and `CROSS`; use absolute paths for custom build/payload locations and repeat them for all workflow steps, or put them in ignored `netboot.local.mk`. Custom build outputs use `<NETBOOT_BUILD_ROOT>/<RAPT_CONFIG>/rvXX/`; older custom-root builds need rebuilding in this layout. Conflicting fixed board/variant/hardware overrides fail explicitly. Use the manual flow below for a different hardware configuration. Do not mix fixed-profile and ordinary targets in the same Make invocation. For the complete flow, including explicit host setup, namespaced TFTP deployment, manual BIOS netboot, Linux startup and network checks, see [NETBOOT.md](NETBOOT.md#fixed-cu08-end-to-end-targets). In short, after build use `make fpga-netboot-host-setup`, `make fpga-netboot-rv64-serve`, `make fpga-netboot-rv64-load` and `make fpga-netboot-rv64-console`; manually enter the namespaced `netboot` command printed by `serve` at `litex>`. After Linux starts, close the console and use `make fpga-netboot-rv64-test` (substitute `rv32` throughout as needed). Restore recorded host changes with `make fpga-netboot-host-restore` when finished. Never boot an RV32 SD payload on RV64. Source edits during or after a netboot build do not block it: the stamp and `build.json` record the pre-build input identity (with `sources_changed_during_build`), and `load` warns about stale sources. The bitstream hash and timing checks remain hard failures.
+The default payloads are downloaded by the paired `build` target when absent: `linux/build/linux-riscv-rv32-qemu-rv32-buildroot-v6.18.51/fw_payload.bin` and `linux/build/linux-riscv-rv64-qemu-rv64-fast-buildroot-v6.18.51/fw_payload.bin`. Repeat `RAPT_CONFIG` for build/load/test steps. Host setup/restore shares `NETBOOT_STATE_ROOT` (default `build/netboot-default`) across presets. Supported location/tool overrides are `NETBOOT_BUILD_ROOT`, `NETBOOT_STATE_ROOT`, `NETBOOT_PAYLOAD_RV32`, `NETBOOT_PAYLOAD_RV64`, `VIVADO`, `VIVADO_JOBS`, and `CROSS`; use absolute paths for custom build/payload locations and repeat them for all workflow steps, or put them in ignored `netboot.local.mk`. Custom build outputs use `<NETBOOT_BUILD_ROOT>/<RAPT_CONFIG>/rvXX/`; older custom-root builds need rebuilding in this layout. Conflicting fixed board/variant/hardware overrides fail explicitly. Use the manual flow below for a different hardware configuration. Do not mix fixed-profile and ordinary targets in the same Make invocation. For the complete flow, including explicit host setup, namespaced TFTP deployment, manual BIOS netboot, Linux startup and network checks, see [NETBOOT.md](NETBOOT.md#fixed-cu08-and-rk-end-to-end-targets). In short, after build use `make fpga-netboot-host-setup`, `make fpga-netboot-rv64-serve`, `make fpga-netboot-rv64-load` and `make fpga-netboot-rv64-console`; manually enter the namespaced `netboot` command printed by `serve` at `litex>`. After Linux starts, close the console and use `make fpga-netboot-rv64-test` (substitute `rv32` throughout as needed). Restore recorded host changes with `make fpga-netboot-host-restore` when finished. Never boot an RV32 SD payload on RV64. Source edits during or after a netboot build do not block it: the stamp and `build.json` record the pre-build input identity (with `sources_changed_during_build`), and `load` warns about stale sources. The bitstream hash and timing checks remain hard failures.
 
 #### Manual configurable flow
 
@@ -366,7 +366,26 @@ The RV32 wrappers force `VARIANT=linux32`, while the RV64 wrappers force `VARIAN
 
 ### DMA Cache Maintenance
 
-LiteSDCard DMA is not coherent with Raptor's write-through L1D. Current `cbo.inval` and `cbo.flush` invalidate all ways of the addressed set; `cbo.clean` only drains write-through stores. LiteX's legacy no-argument `flush_cpu_dcache()` hook sweeps a mapped 4 KiB SRAM page in 64-byte CBO blocks, covering every set under Raptor's VA-bit-11:6 selection contract (higher physical colors are cleared together). A single `cbo.flush 0(x0)` is not a whole-cache operation, and address zero is unmapped on KU15P. This sweep is Raptor-specific, not a portable generic Zicbom whole-cache algorithm. The Linux DT advertises `zicbom` and the configured `riscv,cbom-block-size`.
+LiteSDCard DMA is non-coherent. The `default*`, `small-cache` and `middle-cache`
+presets use write-back L1D; dirty bytes must reach the DMA-visible memory before
+a device reads them. CPU copies must also be invalidated at the appropriate
+device-to-CPU ownership transition. The Linux DT advertises `zicbom` and the
+configured `riscv,cbom-block-size`.
+
+With the default `RAPT_L1D_TARGETED_COHERENCE=1` and no inclusive L2, CBO
+clean/flush publishes the matching physical block; inval/flush removes it.
+The write-through compatibility path instead clears all ways of the addressed
+set for inval/flush. `cbo.zero` has its own ordered SQ/write-response contract.
+
+The legacy no-argument `flush_cpu_dcache()` in `cores/cpu/raptor/system.h`
+still sweeps a mapped 4 KiB SRAM page in 64-byte CBO blocks, with fences.
+That covers the write-through set-wide invalidation path, including physical
+colors. **It does not provide whole-cache maintenance for arbitrary DMA buffers
+with targeted write-back CBOs**: the SRAM addresses do not name those buffers'
+physical blocks. Such users need buffer-range maintenance with the actual DMA
+addresses or an explicitly validated whole-cache path. Do not infer DMA
+coherence from the hook's name or its host-side instruction-emission tests.
+A single `cbo.flush 0(x0)` is not a whole-cache operation; zero is unmapped on KU15P.
 
 ### SD Card Boot Image
 
