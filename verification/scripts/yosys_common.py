@@ -12,6 +12,12 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def rtl_manifest(root):
+    """Fingerprint RTL inputs independently of any implementation's state names."""
+    return {str(p.relative_to(root)): sha(p) for p in sorted(root.rglob("*"))
+            if p.suffix in (".sv", ".svh")}
+
+
 def run_yosys(command, log, timeout):
     with log.open("w") as stream:
         result = run_bounded(

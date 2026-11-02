@@ -761,9 +761,10 @@ def main(unit=None):
         rtl_names += ('alu',)
     rtl_files = [ROOT / f'rtl/backend/vpu/rapt_vpu_{name}.sv' for name in rtl_names]
     top = 'tb_vector_' + unit + '_rtl'
-    testbench = ROOT / 'verification/nemu' / (top + '.sv')
+    testbench = ROOT / 'verification/nemu/tb_vector_units.sv'
     build = args.output / 'obj_dir'
-    command = ['verilator', '--binary', '--timing', '-Wall', '--top-module', top,
+    command = ['verilator', '--binary', '--timing', '-Wall', '-Wno-DECLFILENAME',
+               '--top-module', top,
                '--Mdir', str(build), '-I' + str(ROOT / 'rtl/include')]
     if decode_only:
         command.append('-Wno-PINMISSING')

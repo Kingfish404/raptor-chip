@@ -201,15 +201,32 @@ make llm-train-rv32
 make llm-bench-report-rv32
 make llm-native-test
 
-# Reports from the full suite
-ls build/rv32/benchmarks/llm/reports/
-ls build/native/benchmarks/llm/reports/
+# Reports from the default profile
+ls build/rv32/benchmarks/llm/ops8-gen12x1-train4/reports/
+ls build/native/benchmarks/llm/ops8-gen12x1-train4/reports/
 
 # Tune workload size
 make llm-bench-report-rv32 LLM_OP_ITERS=16 LLM_GEN_TOKENS=16 LLM_TRAIN_STEPS=8
 ```
 
-The profile name encodes the workload knobs as `ops<LLM_OP_ITERS>-gen<LLM_GEN_TOKENS>-train<LLM_TRAIN_STEPS>`; the default comparable profile is `ops8-gen12-train4`. `make llm-bench-report-rv32` and `make llm-bench-report-nemu` keep per-run logs and emits Markdown/CSV/JSON reports. The headline metric is `score_per_sec`: benchmark work items per physical second, higher is better. Reports use only elapsed physical seconds and do not expose cycles, implementation-specific ticks, or IPC. When a core clock is supplied, reports also include `score_per_mhz = score_per_sec / core_clock_mhz`, a CoreMark/MHz-style metric equivalent to work items per million core cycles. Deterministic checksums are emitted for each mode. The benchmark itself emits stable `RLLMBENCH_RESULT` / `RLLMBENCH_SCORE` lines so results are easy to grep, paste into issue reports, or compare with CoreMark and Embench dashboards.
+The profile name encodes the workload knobs as
+`ops<LLM_OP_ITERS>-gen<LLM_GEN_TOKENS>x<LLM_INFER_REPEATS>-train<LLM_TRAIN_STEPS>`;
+the default profile is `ops8-gen12x1-train4`. Single-mode targets and report
+targets select the same profile's images. `make llm-bench-report-rv32` and
+`make llm-bench-report-nemu` retain logs and emit Markdown/CSV/JSON reports.
+The headline metric is `score_per_sec`: benchmark work items per physical
+second, higher is better. Reports use elapsed physical seconds. When a core
+clock is supplied, they also include
+`score_per_mhz = score_per_sec / core_clock_mhz`, equivalent to work items per
+million core cycles. Each mode emits deterministic checksums and stable
+`RLLMBENCH_RESULT` / `RLLMBENCH_SCORE` lines for comparisons.
+
+LLM and Agent builds share `benchmarks/bench.mk` for pk, LiteX and native hosts;
+their leaf Makefiles declare modes and workload defaults. Shared rules in
+`common.mk` also build the simple C test suites and demos. Compiler/flag or
+workload changes update a build stamp, and source/header changes rebuild the
+affected executables. Select `BUILD_DIR`, `LITEX_BUILD_DIR` or `NATIVE_BUILD_DIR`
+to keep artifacts outside the checkout.
 
 For native host comparisons, use a larger profile so the timed regions are long enough on modern CPUs:
 
@@ -275,4 +292,8 @@ sudo apt install gcc-riscv64-linux-gnu    # glibc
 
 ## LiteX-Native App Payloads
 
-For FPGA-facing app code, prefer a dual-build pattern: keep the algorithm in ordinary C, then add a Makefile path that links it with `app/lib/litex/start.S`, `app/lib/litex/link.ld`, and `app/lib/litex/runtime.c`. That produces a flat `.bin` loaded at `0x80000000`, avoiding pk/newlib and avoiding a bitstream rebuild for every test. The LLM benchmark Makefile is the reference pattern.
+For FPGA-facing app code, keep the algorithm in ordinary C and link it with
+`app/lib/litex/start.S`, `app/lib/litex/link.ld`, and `app/lib/litex/runtime.c`.
+That produces a flat `.bin` loaded at `0x80000000`, so payload changes do not
+require a bitstream rebuild. The shared `benchmarks/bench.mk` rules provide this
+path for LLM and Agent benchmarks.

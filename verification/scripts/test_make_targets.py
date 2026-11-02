@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Check consolidated public Make interfaces without running workloads."""
+import json
 import os
 from pathlib import Path
 import shlex
@@ -52,6 +53,11 @@ class MakeTargetsTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("must be", result.stderr)
 
+    def test_invalid_directed_backend_fails(self):
+        result = self.make("-C", "verification", "help", "DIRECTED_SIMULATOR=invalid")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must be", result.stderr)
+
     def test_xsim_zero_exit_requires_completion_without_tool_or_uvm_errors(self):
         tools = self.work / "tools"
         tools.mkdir()
@@ -78,6 +84,111 @@ class MakeTargetsTest(unittest.TestCase):
                         result = self.make("-C", "verification", target,
                                            f"BUILD_DIR={self.work / 'build'}")
                     self.assertEqual(result.returncode == 0, log == marker, result.stdout)
+
+    def test_benchmark_program_uses_the_selected_profile_image(self):
+        for xlen in (32, 64):
+            for backend, runner in (("sim", "pk-run"), ("nemu", "nemu-run")):
+                with self.subTest(xlen=xlen, backend=backend):
+                    result = self.make("-C", "app", "-n", "llm-infer-" + backend, "MAKE=:",
+                                       f"ISA64={int(xlen == 64)}", "LLM_OP_ITERS=2",
+                                       "LLM_GEN_TOKENS=3", "LLM_INFER_REPEATS=4", "LLM_TRAIN_STEPS=5")
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    expected = f"benchmarks/llm/ops2-gen3x4-train5/llm-infer.elf"
+                    self.assertIn(expected, result.stdout)
+                    self.assertIn(runner, result.stdout)
+
+    def test_xsim_aliases_forward_xlen_and_shared_runtime_arguments(self):
+        from unittest.mock import patch
+        tools = self.work / "tools"
+        tools.mkdir()
+        calls = self.work / "calls.jsonl"
+        script = r'''#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+import sys
+name = Path(sys.argv[0]).name
+with open(os.environ['RAPTOR_TEST_TOOL_CALLS'], 'a') as stream:
+    stream.write(json.dumps([name, *sys.argv[1:]]) + '\n')
+if name == 'xsim':
+    Path('xsim.log').write_text('PASS: captured shared directed invocation\n')
+'''
+        for name in ("xvlog", "xelab", "xsim"):
+            tool = tools / name
+            tool.write_text(script)
+            tool.chmod(0o755)
+        environment = {"PATH": str(tools) + os.pathsep + os.environ["PATH"],
+                       "RAPTOR_TEST_TOOL_CALLS": str(calls)}
+        cases = (("csr-sret-roundtrip", "rv32", "tb_csr_sret_roundtrip", (), ()),
+                 ("csr-sret-roundtrip", "rv64", "tb_csr_sret_roundtrip", (), ()),
+                 ("lsu-sq-random", "rv32", "tb_lsu_sq_random",
+                  ("LSU_SQ_RANDOM_SEED=17",), ("SEED=17",)),
+                 ("l1d-store-coherence", "rv32", "tb_l1d_store_coherence",
+                  ("VERILATOR_DIRECTED_SEED=19", "VERILATOR_DIRECTED_DELAY=9"),
+                  ("SEED=19", "BUS_DELAY_MAX=9")))
+        for target, isa, top, settings, plusargs in cases:
+            with self.subTest(target=target, isa=isa):
+                calls.write_text("")
+                with patch.dict(os.environ, environment):
+                    result = self.make("-C", "verification", "xsim-" + target, f"ISA={isa}",
+                                       f"BUILD_DIR={self.work / 'build'}", *settings,
+                                       "VERILATOR=unavailable-directed-backend")
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                invocations = [json.loads(line) for line in calls.read_text().splitlines()]
+                self.assertEqual([row[0] for row in invocations], ["xvlog", "xelab", "xsim"])
+                compile_args, elaborate_args, run_args = invocations
+                self.assertEqual("RAPT_RV64" in compile_args, isa == "rv64")
+                self.assertIn(top, elaborate_args)
+                self.assertIn(top + "_sim", run_args)
+                for value in plusargs:
+                    self.assertIn(["-testplusarg", value],
+                                  [run_args[i:i + 2] for i in range(len(run_args) - 1)])
+
+    def test_shared_app_build_tracks_flags_and_headers(self):
+        compiler = self.work / "compiler"
+        compiler.write_text(r'''#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+import sys
+if '-print-libgcc-file-name' in sys.argv:
+    print('/unused/libgcc.a')
+else:
+    output = Path(sys.argv[sys.argv.index('-o') + 1])
+    output.write_text('test executable')
+    with open(os.environ['RAPTOR_TEST_COMPILE_LOG'], 'a') as stream:
+        stream.write(json.dumps(sys.argv[1:]) + '\n')
+''')
+        compiler.chmod(0o755)
+        from unittest.mock import patch
+        cases = (("hello", "app/tests/hello", "build", {}, {}, 1),
+                 ("llm", "app/benchmarks/llm", "native-build",
+                  {"LLM_OP_ITERS": 1}, {"LLM_OP_ITERS": 2}, 3),
+                 ("agent", "app/benchmarks/agent", "native-build",
+                  {"AGENT_TOOL_ITERS": 1}, {"AGENT_TOOL_ITERS": 2}, 3))
+        for name, folder, target, initial, changed, count in cases:
+            with self.subTest(suite=name):
+                log = self.work / (name + '.jsonl')
+                output = self.work / name
+                header = self.work / (name + '.h')
+                header.write_text('/* first header */\n')
+                path_variable = 'BUILD_DIR' if name == 'hello' else 'NATIVE_BUILD_DIR'
+                flags_variable = 'CFLAGS' if name == 'hello' else 'NATIVE_CFLAGS'
+                args = ['-C', folder, target, f'CC={compiler}', f'HOST_CC={compiler}',
+                        f'{path_variable}={output}', f'PORT_HDR={header}']
+                def build(values):
+                    settings = [f'{key}={value}' for key, value in values.items()]
+                    result = self.make(*args, *settings)
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    return len(log.read_text().splitlines())
+                with patch.dict(os.environ, RAPTOR_TEST_COMPILE_LOG=str(log)):
+                    self.assertEqual(build(initial), count)
+                    self.assertEqual(build(initial), count)
+                    changed = dict(changed, **{flags_variable: '-O1'})
+                    self.assertEqual(build(changed), 2 * count)
+                    if name != 'hello':
+                        header.write_text('/* changed header */\n')
+                        self.assertEqual(build(changed), 3 * count)
 
     def test_ioq_solver_and_reuse_options_reach_the_correct_stages(self):
         for contract in ("owner", "store"):

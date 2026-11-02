@@ -63,6 +63,10 @@ while target suffixes select RV32/RV64. Some tests explicitly select a preset or
 parameter matrix; inspect their row in `directed-tests.mk` before overriding it.
 `VERILATOR_DIRECTED_DELAY` and `VERILATOR_DIRECTED_SEED` control tests that expose
 random bus timing. Shared flags are in `VERILATOR_DIRECTED_FLAGS`.
+The supported `xsim-*` aliases select the same rows in `directed-tests.mk`;
+there is no separate XSim source/define table. They forward shared delay/seed
+settings and translate plusargs for XSim. `LSU_SQ_RANDOM_SEED` still supplies the
+legacy SQ seed unless `VERILATOR_DIRECTED_SEED` is explicitly set.
 XSim/UVM runners require their completion marker and reject tool/UVM errors even
 when the simulator process returns zero.
 
@@ -176,7 +180,9 @@ from a DUT failure.
 
 NEMU checks use `nemu/check.py NAME`; `NAME --help` lists per-check options.
 `nemu/nemu.mk` defines targets, while `nemu/lib`, `nemu/isa`, `nemu/multihart` and
-`nemu/tests` hold shared adapters and suites. The
+`nemu/tests` hold shared adapters and suites. Vector unit comparisons share
+`nemu/tb_vector_units.sv`, with a separate top for each operator and the existing
+`vector-<unit>-rtl` commands. The
 [NEMU guide](../nemu/README.md#checks) documents model capabilities and VM/replay
 limits. These reference-only features are distinct from current RTL support.
 
@@ -201,3 +207,12 @@ Application benchmarks and their comparison limits are documented in
 [app/README.md](../app/README.md). Physical timing/area checks belong in `synth/`
 and `layout/`; run small blocks before composition blocks and reserve full STA
 or FPGA implementation for candidates that pass those checks.
+
+For comparisons between prebuilt simulators, use `scripts/width_evaluate.py`
+with repeated `--profile LABEL=BINARY` arguments, or
+`scripts/execution_port_workloads.py` with profiles and `--workload LABEL=IMAGE`.
+Their `--help` output lists input/reference and output options;
+`scripts/execution_port_report.py` summarizes the latter's results. Keep the
+compared images and memory settings identical. Fixed port/scan-width experiment
+targets and PRF/RNU snapshot proofs have been retired; current contract checks,
+formal entry points and generic synthesis flows remain available.

@@ -25,9 +25,10 @@ sim-build-isolation-check: ## Check build-local Kconfig and non-destructive mode
 
 # Tool-free unit tests for helper scripts that have no dedicated check target.
 SCRIPT_UNITTESTS := test_config_macro_check test_paddr_config test_fp_test_makefile \
-	test_closeout_config_check test_litex_sdcard_linux_override \
+	test_litex_sdcard_linux_override \
 	test_lrsc_trace_check test_run_act4 \
 	test_sta.SummaryStatusTest test_subsystem_build_cache \
+	test_execution_port_workloads test_width_evaluate \
 	test_external_drivers test_logic_check $(addprefix test_formal_drivers.,SnapshotOutputTests \
 	AbcCompatibilityTest StateAbstractionAudit QualificationEvidenceTests WitnessTests \
 	PrimaryReplayTests)
@@ -1405,6 +1406,10 @@ uvm-clean: ## UVM: clean module-level UVM artifacts
 XSIM_DIR := $(VERIFY_HOME)/xsim
 XSIM_BUILD_DIR := $(BUILD_DIR)/xsim
 XSIM_RAPT_CONFIG ?= default
+DIRECTED_SIMULATOR ?= verilator## Directed execution backend: verilator or xsim
+ifeq ($(filter $(DIRECTED_SIMULATOR),verilator xsim),)
+$(error DIRECTED_SIMULATOR must be verilator or xsim)
+endif
 VIVADO_SETTINGS ?= /opt/Xilinx/2025.2/Vivado/settings64.sh
 
 # RTL is resolved by module name, so adding, splitting or renaming files under
@@ -1426,34 +1431,6 @@ XSIM_COMMON_INCLUDES := \
 	-i "$(RAPTOR_HOME)/rtl/include/npc" \
 	-i "$(XSIM_DIR)"
 
-XSIM_TARGETS := \
-	xsim-l2 \
-	xsim-l1d-byte-rom \
-	xsim-l1d-store-coherence \
-	xsim-l1d-flush-ordered \
-	xsim-l1d-cmo-permissions \
-	xsim-l1i-sret-priv-epoch \
-	xsim-ptw-kill-drain \
-	xsim-ptw-profile-negative \
-	xsim-idu-illegal-stval \
-	xsim-idu-zfhmin \
-	xsim-idu-cmo \
-	xsim-tlb-flush-asid \
-	xsim-bus-axi \
-	xsim-bus-read-ownership \
-	xsim-csr-sret-roundtrip \
-	xsim-addr-classification \
-	xsim-pmp-endpoint \
-	xsim-lsu-lr-sq-forward \
-	xsim-lsu-cbo-zero \
-	xsim-lsu-sq-random \
-	xsim-ioq \
-	xsim-clint \
-	xsim-plic-gateway \
-	xsim-alu-zbb-strlen \
-	xsim-muldiv-flush-reuse \
-	xsim-rou-dual-commit
-
 # Every top resolves to its actual declaration, including shared scenario files.
 SHARED_TB_SOURCES := $(shell $(PYTHON) "$(VERIFY_HOME)/scripts/directed_registry.py" sources \
 	|| echo SOURCE_DISCOVERY_FAILED)
@@ -1464,7 +1441,9 @@ shared_tb_matches = $(filter $(1):%,$(SHARED_TB_SOURCES))
 shared_tb_file = $(patsubst $(1):%,%,$(call shared_tb_matches,$(1)))
 SHARED_TB_SOURCE = $(or $(call shared_tb_file,$(1)),$(error No testbench declares $(1)))
 
+# Both backends consume the same top, helpers, defines and plusargs.
 define XSIM_RUN
+$(if $(strip $(6)),$(error XSim does not support this test's Verilator follow-up))
 	@set -e; \
 	if ! command -v xvlog >/dev/null 2>&1; then \
 		if [ -f "$(VIVADO_SETTINGS)" ]; then source "$(VIVADO_SETTINGS)"; fi; \
@@ -1482,100 +1461,47 @@ define XSIM_RUN
 		"$(XSIM_DIR)/$(call SHARED_TB_SOURCE,$(2))"; \
 	xelab -debug typical --timescale 1ns/1ps --override_timeunit \
 		--override_timeprecision $(2) -s $(2)_sim; \
-	xsim $(2)_sim $(5) -runall; \
+	xsim $(2)_sim $(addprefix -testplusarg ,$(patsubst +%,%,$(5))) -runall; \
 	$(call XSIM_CHECK_LOG,xsim.log,PASS:)
 endef
 
-.PHONY: xsim $(XSIM_TARGETS) xsim-l2-ordered-mmio xsim-l2-write-stream \
-	xsim-bus-l1d-rlast xsim-bus-write-aw-before-w \
-	xsim-ioq-lrsc-reservation xsim-ioq-pending-lock xsim-clean
+# Legacy XSim names select canonical directed cases instead of duplicating
+# their top names, source lists and compilation options.
+XSIM_CASES := l2:l2 l1d-byte-rom:l1d-byte-rom l1d-store-coherence:l1d-store-coherence \
+	l1d-flush-ordered:l1d-flush-ordered l1d-cmo-permissions:l1d-cmo-permissions \
+	l1i-sret-priv-epoch:l1i-sret-priv-epoch ptw-kill-drain:ptw-kill-drain \
+	ptw-profile-negative:ptw-profile-negative idu-illegal-stval:idu-illegal-stval \
+	idu-zfhmin:idu-zfhmin idu-cmo:idu-cmo tlb-flush-asid:tlb-flush-asid \
+	bus-axi:bus-axi bus-read-ownership:bus-read-ownership \
+	csr-sret-roundtrip:csr-sret-roundtrip-$(ISA) addr-classification:addr-classification \
+	pmp-endpoint:pmp-endpoint lsu-lr-sq-forward:lsu-lr-sq-forward lsu-cbo-zero:lsu-cbo-zero \
+	lsu-sq-random:lsu-sq-random ioq:ioq clint:clint plic-gateway:plic-gateway \
+	alu-zbb-strlen:alu-zbb-strlen muldiv-flush-reuse:muldiv-flush-reuse \
+	rou-dual-commit:rou-dual-commit
+xsim_alias_name = $(firstword $(subst :, ,$(1)))
+xsim_alias_target = $(lastword $(subst :, ,$(1)))
+XSIM_NAMES := $(foreach entry,$(XSIM_CASES),$(call xsim_alias_name,$(entry)))
+XSIM_TARGETS := $(addprefix xsim-,$(XSIM_NAMES))
+define XSIM_ALIAS_RULE
+.PHONY: xsim-$(call xsim_alias_name,$(1))
+xsim-$(call xsim_alias_name,$(1)):
+	+$$(MAKE) --no-print-directory verilator-$(call xsim_alias_target,$(1)) \
+		DIRECTED_SIMULATOR=xsim VERILATOR_DIRECTED_DELAY=$$(VERILATOR_DIRECTED_DELAY) \
+		VERILATOR_DIRECTED_SEED=$$(VERILATOR_DIRECTED_SEED)
+endef
+xsim_alias_rule = $(eval $(call XSIM_ALIAS_RULE,$(1)))
+$(foreach entry,$(XSIM_CASES),$(call xsim_alias_rule,$(entry)))
 
-xsim: $(XSIM_TARGETS) ## xsim: run all directed checks
-
-xsim-alu-zbb-strlen: ## xsim: verify the RV64 ORC.B/CTZ strlen sequence
-	$(call XSIM_RUN,alu_zbb_strlen,tb_alu_zbb_strlen,,-d RAPT_RV64)
-
-xsim-l2: ## xsim: verify L2 ordering, cache fills, and posted write streams
-	$(call XSIM_RUN,l2,tb_l2_ordered_mmio,,-d RAPT_L2_EN)
-
-xsim-l2-ordered-mmio xsim-l2-write-stream: xsim-l2
-
-xsim-l1d-byte-rom: ## xsim: verify L1D ROM byte reads across cache fills/hits
-	$(call XSIM_RUN,l1d_byte_rom,tb_l1d_byte_rom,,)
-
-xsim-l1d-store-coherence: ## xsim: verify L1D load-after-store coherence
-	$(call XSIM_RUN,l1d_store_coherence,tb_l1d_store_coherence,,)
-
-xsim-l1d-flush-ordered: ## xsim: verify L1D flush drain and non-cacheable ordering
-	$(call XSIM_RUN,l1d_flush_ordered,tb_l1d_flush_ordered,,-d RAPT_ASSERT_EN)
-
-xsim-l1d-cmo-permissions: ## xsim: verify Zicbom R-or-W/A-only PTE checks and store faults
-	$(call XSIM_RUN,l1d_cmo_permissions,tb_l1d_cmo_permissions,,-d RAPT_RV64 -d RAPT_ASSERT_EN)
-
-xsim-l1i-sret-priv-epoch: ## xsim: verify SRET target privilege and stale PTW response kill
-	$(call XSIM_RUN,l1i_sret_priv_epoch,tb_l1i_sret_priv_epoch,,-d RAPT_ASSERT_EN)
-
-xsim-ptw-kill-drain: ## xsim: verify PTW cancel-before-accept and drain-after-accept
-	$(call XSIM_RUN,ptw_kill_drain,tb_ptw_kill_drain,,-d RAPT_ASSERT_EN)
-
-xsim-ptw-profile-negative: ## xsim: verify RVA20S64 Svade and Sv39 canonical faults
-	$(call XSIM_RUN,ptw_profile_negative,tb_ptw_profile_negative,,-d RAPT_RV64 -d RAPT_ASSERT_EN)
-
-xsim-idu-illegal-stval: ## xsim: verify Sstvala reports raw illegal C instruction bits
-	$(call XSIM_RUN,idu_illegal_stval,tb_idu_illegal_stval,,-d RAPT_RV64 -d RAPT_ASSERT_EN)
-
-xsim-idu-zfhmin: ## xsim: verify all mandatory Zfhmin instructions decode and use halfword LSU widths
-	$(call XSIM_RUN,idu_zfhmin,tb_idu_zfhmin,,-d RAPT_RV64 -d RAPT_ASSERT_EN)
-
-xsim-idu-cmo: ## xsim: verify RVA22 CMO decode and xenvcfg privilege gating
-	$(call XSIM_RUN,idu_cmo,tb_idu_cmo,,-d RAPT_RV64 -d RAPT_ASSERT_EN)
-
-xsim-tlb-flush-asid: ## xsim: verify TLB ASID matching and flush priority
-	$(call XSIM_RUN,tlb_flush_asid,tb_tlb_flush_asid,,-d RAPT_ASSERT_EN)
-
-xsim-bus-axi: ## xsim: verify bus AXI reads and independent AW/W handshakes
-	$(call XSIM_RUN,bus_axi,tb_bus_l1d_rlast,,)
-
-xsim-bus-l1d-rlast xsim-bus-write-aw-before-w: xsim-bus-axi
-
-xsim-bus-read-ownership: ## xsim: verify read response ID ownership and interleaving
-	$(call XSIM_RUN,bus_read_ownership,tb_bus_read_ownership,,)
-
-xsim-csr-sret-roundtrip: ## xsim: verify CSR reset and U-ecall/SRET round trip
-	$(call XSIM_RUN,csr_sret_roundtrip_$(ISA),tb_csr_sret_roundtrip,,$(if $(filter rv64,$(ISA)),-d RAPT_RV64,))
-
-xsim-addr-classification: ## xsim: reject malformed RV64 physical-address upper bits
-	$(call XSIM_RUN,addr_classification,tb_addr_classification,,-d RAPT_RV64)
-
-xsim-pmp-endpoint: ## xsim: verify variable-size PMP endpoint boundary checks
-	$(call XSIM_RUN,pmp_endpoint,tb_pmp_endpoint,,)
-
-xsim-lsu-lr-sq-forward: ## xsim: verify LR waits for SQ drain instead of forwarding
-	$(call XSIM_RUN,lsu_lr_sq_forward,tb_lsu_lr_sq_forward,,-d RAPT_ASSERT_EN)
-
-xsim-lsu-cbo-zero: ## xsim: verify Zicboz emits eight aligned zero dword stores
-	$(call XSIM_RUN,lsu_cbo_zero,tb_lsu_cbo_zero,,-d RAPT_RV64 -d RAPT_ASSERT_EN)
-
+# Preserve the legacy SQ seed; command-line overrides win.
 LSU_SQ_RANDOM_SEED ?= 1370169382
-xsim-lsu-sq-random: ## xsim: constrained-random SQ ordering, alias, wrap, flush, and backpressure
-	$(call XSIM_RUN,lsu_sq_random,tb_lsu_sq_random,,-d RAPT_ASSERT_EN,-testplusarg SEED=$(LSU_SQ_RANDOM_SEED))
+xsim-lsu-sq-random: VERILATOR_DIRECTED_SEED = $(LSU_SQ_RANDOM_SEED)
 
-xsim-ioq: ## xsim: verify IOQ LR/SC reservations, pending loads, and flush kills
-	$(call XSIM_RUN,ioq,tb_ioq_pending_lock,,)
-
+.PHONY: xsim xsim-clean xsim-l2-ordered-mmio xsim-l2-write-stream \
+	xsim-bus-l1d-rlast xsim-bus-write-aw-before-w xsim-ioq-lrsc-reservation xsim-ioq-pending-lock
+xsim: $(XSIM_TARGETS) ## Run the shared directed cases with XSim
+xsim-l2-ordered-mmio xsim-l2-write-stream: xsim-l2
+xsim-bus-l1d-rlast xsim-bus-write-aw-before-w: xsim-bus-axi
 xsim-ioq-lrsc-reservation xsim-ioq-pending-lock: xsim-ioq
-
-xsim-clint: ## xsim: verify CLINT divider, compare, and software interrupt semantics
-	$(call XSIM_RUN,clint,tb_clint,,)
-
-xsim-plic-gateway: ## xsim: verify PLIC gateway and claim/complete semantics
-	$(call XSIM_RUN,plic_gateway,tb_plic_gateway,,)
-
-xsim-muldiv-flush-reuse: ## xsim: verify flush kills DIV completion before MDQ slot reuse
-	$(call XSIM_RUN,muldiv_flush_reuse,tb_muldiv_flush_reuse,,-d RAPT_ASSERT_EN)
-
-xsim-rou-dual-commit: ## xsim: verify ROU dual commit and slot1 flush serialization
-	$(call XSIM_RUN,rou_dual_commit,tb_rou_dual_commit,,-d RAPT_ASSERT_EN)
 
 xsim-clean: ## Clean xsim directed-check artifacts
 	rm -rf $(XSIM_BUILD_DIR)
@@ -1727,7 +1653,7 @@ VERILATOR_DIRECTED_TARGETS := \
 # $(4)=XSim-style defines (`-d NAME`, translated to `-DNAME`),
 # $(5)=runtime plusargs; $(6)=optional follow-up commands using $$model_dir.
 _verify_quote = '$(subst ','"'"',$(1))'
-define VERILATOR_DIRECTED_RUN
+define VERILATOR_ONLY_RUN
 	+@set -e -o pipefail; \
 	command -v $(VERILATOR) >/dev/null 2>&1 || { \
 		echo "[verilator-directed] ERROR: $(VERILATOR) not found"; exit 1; }; \
@@ -1748,6 +1674,12 @@ define VERILATOR_DIRECTED_RUN
 	grep -q "PASS:" "$(VERILATOR_DIRECTED_BUILD_DIR)/$(1)/run.log" || { \
 		echo "[verilator-directed] ERROR: $(2) did not report PASS"; exit 1; }; \
 	echo "[verilator-directed] PASS $(1)"$(if $(strip $(6)),; $(6))
+endef
+
+define VERILATOR_DIRECTED_RUN
+$(if $(filter xsim,$(DIRECTED_SIMULATOR)),\
+$(call XSIM_RUN,$(1),$(2),$(3),$(4),$(5),$(6)),\
+$(call VERILATOR_ONLY_RUN,$(1),$(2),$(3),$(4),$(5),$(6)))
 endef
 
 # Paired -rv32/-rv64 form: the target name selects XLEN and the build stem
@@ -1829,151 +1761,11 @@ verilator-execution-port-relocated-system:
 		report=$$(grep 'Built from' "$$log" | tail -1); \
 		echo "[verilator-port-matrix] port=3 system=1 warnings=$$warnings $${report#*- Verilator: }"
 
-INTEGER_PORT2_BIN ?= $(NSIM_HOME)/build/integer-ports-2-current/riscv32-npc-sim## Current default two-port simulator
-INTEGER_PORT3_BIN ?= $(NSIM_HOME)/build/integer-ports-3/riscv32-npc-sim## Current default three-port simulator
-INTEGER_PORT_COREMARK_IMG ?= $(AM_KERNELS)/benchmarks/coremark_eembc/build/coremark-riscv32-npc.bin## Prebuilt CoreMark comparison image
-INTEGER_PORT_MICROBENCH_IMG ?= $(AM_KERNELS)/benchmarks/microbench/build/microbench-riscv32-npc.bin## Prebuilt MicroBench image
-INTEGER_PORT_WORKLOAD_TIMEOUT ?= 600## Per long-workload simulator timeout
-INTEGER_SYSTEM_PORT_BIN ?= $(NSIM_HOME)/build/integer-ports-3-system-1/riscv32-npc-sim## Three-port simulator with system capability at port 1
+# Compare arbitrary simulator profiles with the shared workload tools; keep
+# per-experiment port counts, scan windows and PPA snapshots outside this file.
+INTEGER_SYSTEM_PORT_BIN ?= $(NSIM_HOME)/build/integer-ports-3-system-1/riscv32-npc-sim
 INTEGER_SYSTEM_PORT_FP_DIR := $(BUILD_DIR)/integer-system-port-fp
-ROB_DISPATCH_SCAN6_BIN ?= $(NSIM_HOME)/build/rob-dispatch-scan6-n2/riscv32-npc-sim## W2 window with six lanes
-ROB_DISPATCH_SCAN8_BIN ?= $(NSIM_HOME)/build/rob-dispatch-scan8-n2/riscv32-npc-sim## W2 window with eight lanes
-ROB_DISPATCH_SCAN12_BIN ?= $(NSIM_HOME)/build/rob-dispatch-scan12-n2/riscv32-npc-sim## W2 window with twelve lanes
-DISPATCH_STEER_PPA_PDK ?= nangate45## Standard-cell library for steering PPA comparison
-DISPATCH_STEER_PPA_CONFIG ?= default## Core configuration used for W/ROB dimensions
-DISPATCH_STEER_PPA_ROOT ?= $(BUILD_DIR)/dispatch-timing/$(DISPATCH_STEER_PPA_PDK)## Isolated PPA artifacts
-DISPATCH_STEER_PPA_COMMON = PDK=$(DISPATCH_STEER_PPA_PDK) \
-	RAPT_CONFIG=$(DISPATCH_STEER_PPA_CONFIG) CLK_FREQ_MHZ=100 IO_DELAY_FRAC=0 \
-	OUTPUT_LOAD_FF=5.0 SRAM_MODE=flops GENERATE_PROFILE_SUMMARY=0
-DISPATCH_STEER_PPA_CASE_TARGETS := dispatch-steer-ppa-dpu-k4 \
-	dispatch-steer-ppa-dpu-k8 dispatch-steer-ppa-select-k4 \
-	dispatch-steer-ppa-select-k8 dispatch-steer-ppa-steer-k4 \
-	dispatch-steer-ppa-steer-k8
-.PHONY: integer-issue-port-evaluate integer-issue-port-workloads \
-	execution-port-workload-parser-test integer-system-port-fp-test \
-	rob-dispatch-scan-build rob-dispatch-scan-evaluate \
-	rob-dispatch-scan-workloads rob-dispatch-scan-report \
-	dispatch-steer-ppa dispatch-steer-ppa-build dispatch-steer-ppa-report \
-	dispatch-steer-ppa-parser-test $(DISPATCH_STEER_PPA_CASE_TARGETS)
-integer-issue-port-evaluate: ## Compare two/three-port simulators over all RV32 cpu-tests
-	@test -x "$(INTEGER_PORT2_BIN)" || { echo "missing $(INTEGER_PORT2_BIN)"; exit 1; }
-	@test -x "$(INTEGER_PORT3_BIN)" || { echo "missing $(INTEGER_PORT3_BIN)"; exit 1; }
-	$(PYTHON) "$(VERIFY_HOME)/scripts/width_evaluate.py" --all-cases \
-		--profile ports2="$(INTEGER_PORT2_BIN)" \
-		--profile ports3="$(INTEGER_PORT3_BIN)" \
-		--output "$(BUILD_DIR)/integer-ports-2-vs-3-current"
-
-integer-issue-port-workloads: ## Compare two/three-port simulators on CoreMark and MicroBench
-	@test -x "$(INTEGER_PORT2_BIN)" || { echo "missing $(INTEGER_PORT2_BIN)"; exit 1; }
-	@test -x "$(INTEGER_PORT3_BIN)" || { echo "missing $(INTEGER_PORT3_BIN)"; exit 1; }
-	@test -f "$(INTEGER_PORT_COREMARK_IMG)" || { echo "missing $(INTEGER_PORT_COREMARK_IMG)"; exit 1; }
-	@test -f "$(INTEGER_PORT_MICROBENCH_IMG)" || { echo "missing $(INTEGER_PORT_MICROBENCH_IMG)"; exit 1; }
-	$(PYTHON) "$(VERIFY_HOME)/scripts/execution_port_workloads.py" \
-		--profile ports2="$(INTEGER_PORT2_BIN)" \
-		--profile ports3="$(INTEGER_PORT3_BIN)" \
-		--workload coremark="$(INTEGER_PORT_COREMARK_IMG)" \
-		--workload microbench="$(INTEGER_PORT_MICROBENCH_IMG)" \
-		--timeout "$(INTEGER_PORT_WORKLOAD_TIMEOUT)" \
-		--output "$(BUILD_DIR)/integer-port-workloads"
-
-execution-port-workload-parser-test:
-	$(PYTHON) "$(VERIFY_HOME)/scripts/test_execution_port_workloads.py"
-
-.PHONY: integer-issue-port-report
-integer-issue-port-report: ## Summarize dispatch-domain bottlenecks in the latest long-workload result
-	$(PYTHON) "$(VERIFY_HOME)/scripts/execution_port_report.py" \
-		"$(BUILD_DIR)/integer-port-workloads/results.json"
-
-rob-dispatch-scan-build: ## Build W2 dispatch-window profiles with 6, 8 and 12 lanes
-	$(MAKE) -C $(NSIM_HOME) all RAPT_CONFIG=default BUILD_PROFILE=rob-dispatch-scan6-n2 \
-		VFLAGS="-DRAPT_STEER_SCAN_ENTRIES=6"
-	$(MAKE) -C $(NSIM_HOME) all RAPT_CONFIG=default BUILD_PROFILE=rob-dispatch-scan8-n2 \
-		VFLAGS="-DRAPT_STEER_SCAN_ENTRIES=8"
-	$(MAKE) -C $(NSIM_HOME) all RAPT_CONFIG=default BUILD_PROFILE=rob-dispatch-scan12-n2 \
-		VFLAGS="-DRAPT_STEER_SCAN_ENTRIES=12"
-
-rob-dispatch-scan-evaluate: ## Compare W2 dispatch windows with 6, 8 and 12 lanes over all RV32 cpu-tests
-	@test -x "$(ROB_DISPATCH_SCAN6_BIN)" || { echo "missing $(ROB_DISPATCH_SCAN6_BIN)"; exit 1; }
-	@test -x "$(ROB_DISPATCH_SCAN8_BIN)" || { echo "missing $(ROB_DISPATCH_SCAN8_BIN)"; exit 1; }
-	@test -x "$(ROB_DISPATCH_SCAN12_BIN)" || { echo "missing $(ROB_DISPATCH_SCAN12_BIN)"; exit 1; }
-	$(PYTHON) "$(VERIFY_HOME)/scripts/width_evaluate.py" --all-cases \
-		--profile scan6="$(ROB_DISPATCH_SCAN6_BIN)" \
-		--profile scan8="$(ROB_DISPATCH_SCAN8_BIN)" \
-		--profile scan12="$(ROB_DISPATCH_SCAN12_BIN)" \
-		--output "$(BUILD_DIR)/rob-dispatch-scan-sweep-cpu"
-
-rob-dispatch-scan-workloads: ## Compare W2 dispatch windows with 6, 8 and 12 lanes on long workloads
-	@test -x "$(ROB_DISPATCH_SCAN6_BIN)" || { echo "missing $(ROB_DISPATCH_SCAN6_BIN)"; exit 1; }
-	@test -x "$(ROB_DISPATCH_SCAN8_BIN)" || { echo "missing $(ROB_DISPATCH_SCAN8_BIN)"; exit 1; }
-	@test -x "$(ROB_DISPATCH_SCAN12_BIN)" || { echo "missing $(ROB_DISPATCH_SCAN12_BIN)"; exit 1; }
-	@test -f "$(INTEGER_PORT_COREMARK_IMG)" || { echo "missing $(INTEGER_PORT_COREMARK_IMG)"; exit 1; }
-	@test -f "$(INTEGER_PORT_MICROBENCH_IMG)" || { echo "missing $(INTEGER_PORT_MICROBENCH_IMG)"; exit 1; }
-	$(PYTHON) "$(VERIFY_HOME)/scripts/execution_port_workloads.py" \
-		--profile scan6="$(ROB_DISPATCH_SCAN6_BIN)" \
-		--profile scan8="$(ROB_DISPATCH_SCAN8_BIN)" \
-		--profile scan12="$(ROB_DISPATCH_SCAN12_BIN)" \
-		--workload coremark="$(INTEGER_PORT_COREMARK_IMG)" \
-		--workload microbench="$(INTEGER_PORT_MICROBENCH_IMG)" \
-		--timeout "$(INTEGER_PORT_WORKLOAD_TIMEOUT)" \
-		--output "$(BUILD_DIR)/rob-dispatch-scan-sweep-workloads"
-
-rob-dispatch-scan-report: ## Report endpoint pressure for the dispatch-window sweep
-	$(PYTHON) "$(VERIFY_HOME)/scripts/execution_port_report.py" \
-		"$(BUILD_DIR)/rob-dispatch-scan-sweep-workloads/results.json"
-
-dispatch-steer-ppa: dispatch-steer-ppa-report ## Map and compare K4/K8 steering cones
-
-dispatch-steer-ppa-build: ## Build six zero-I/O-delay technology-mapped steering cases
-	+$(MAKE) --no-print-directory --output-sync=target $(SUBMAKE_JOBS) \
-		$(DISPATCH_STEER_PPA_CASE_TARGETS)
-
-dispatch-steer-ppa-dpu-k4:
-	+$(MAKE) -C "$(RAPTOR_HOME)/synth/yosys" ppa MODULE=dpu \
-		$(DISPATCH_STEER_PPA_COMMON) EXTRA_DEFINES=-DRAPT_STEER_SCAN_ENTRIES=4 \
-		BUILD_DIR="$(DISPATCH_STEER_PPA_ROOT)/dpu-k4-io0"
-
-dispatch-steer-ppa-dpu-k8:
-	+$(MAKE) -C "$(RAPTOR_HOME)/synth/yosys" ppa MODULE=dpu \
-		$(DISPATCH_STEER_PPA_COMMON) EXTRA_DEFINES=-DRAPT_STEER_SCAN_ENTRIES=8 \
-		BUILD_DIR="$(DISPATCH_STEER_PPA_ROOT)/dpu-k8-io0"
-
-dispatch-steer-ppa-select-k4:
-	+$(MAKE) -C "$(RAPTOR_HOME)/synth/yosys" ppa MODULE=dispatch_select \
-		$(DISPATCH_STEER_PPA_COMMON) EXTRA_DEFINES=-DRAPT_STEER_SCAN_ENTRIES=4 \
-		BUILD_DIR="$(DISPATCH_STEER_PPA_ROOT)/select-k4-io0"
-
-dispatch-steer-ppa-select-k8:
-	+$(MAKE) -C "$(RAPTOR_HOME)/synth/yosys" ppa MODULE=dispatch_select \
-		$(DISPATCH_STEER_PPA_COMMON) EXTRA_DEFINES=-DRAPT_STEER_SCAN_ENTRIES=8 \
-		BUILD_DIR="$(DISPATCH_STEER_PPA_ROOT)/select-k8-io0"
-
-dispatch-steer-ppa-steer-k4:
-	+$(MAKE) -C "$(RAPTOR_HOME)/synth/yosys" ppa MODULE=dispatch_steer \
-		$(DISPATCH_STEER_PPA_COMMON) EXTRA_DEFINES=-DRAPT_STEER_SCAN_ENTRIES=4 \
-		BUILD_DIR="$(DISPATCH_STEER_PPA_ROOT)/steer-k4-io0"
-
-dispatch-steer-ppa-steer-k8:
-	+$(MAKE) -C "$(RAPTOR_HOME)/synth/yosys" ppa MODULE=dispatch_steer \
-		$(DISPATCH_STEER_PPA_COMMON) EXTRA_DEFINES=-DRAPT_STEER_SCAN_ENTRIES=8 \
-		BUILD_DIR="$(DISPATCH_STEER_PPA_ROOT)/steer-k8-io0"
-
-dispatch-steer-ppa-report: dispatch-steer-ppa-build ## Validate provenance and emit JSON/Markdown K4/K8 PPA comparison
-	$(PYTHON) "$(VERIFY_HOME)/scripts/dispatch_steer_ppa.py" \
-		--root "$(DISPATCH_STEER_PPA_ROOT)" \
-		--output "$(BUILD_DIR)/dispatch-timing/report"
-
-dispatch-steer-ppa-parser-test: ## Unit-test steering PPA parser and provenance rejection
-	$(PYTHON) "$(VERIFY_HOME)/scripts/test_dispatch_steer_ppa.py"
-
-ROU_STATE_PPA_BASELINE ?= $(BUILD_DIR)/rou-array-state-ppa
-ROU_STATE_PPA_CANDIDATE ?= $(BUILD_DIR)/rou-local-state-ppa
-.PHONY: rou-state-ppa-report rou-state-ppa-parser-test
-rou-state-ppa-report: ## Compare existing full-ROU runs; does not launch synthesis
-	$(PYTHON) "$(VERIFY_HOME)/scripts/rou_state_evaluate.py" \
-		--baseline "$(ROU_STATE_PPA_BASELINE)" --candidate "$(ROU_STATE_PPA_CANDIDATE)" \
-		--output "$(BUILD_DIR)/rou-state-evaluation"
-rou-state-ppa-parser-test: ## Test full-ROU comparison and provenance rejection
-	$(PYTHON) "$(VERIFY_HOME)/scripts/test_rou_state_evaluate.py"
+.PHONY: integer-system-port-fp-test
 
 ORDERED_HEAD_FP_BIN ?= $(NPC_BIN_32)
 ORDERED_HEAD_FP_DIR := $(BUILD_DIR)/ordered-head-fp-rv32
@@ -2326,27 +2118,11 @@ iq-reclaim-width-matrix: verilator-iq-reclaim-random verilator-iq-reclaim-random
 .PHONY: iq-repair-lifecycle-matrix
 iq-repair-lifecycle-matrix: verilator-iq-repair-three verilator-iq-repair-six-rv64
 
-.PHONY: sim-build-flags-test width-evaluate-parser-test
-
-.PHONY: prf-equivalence-audit-test
-.PHONY: rnu-equivalence-audit-test
-rnu-equivalence-audit-test:
-	python3 "$(RAPTOR_HOME)/verification/scripts/test_rnu_equivalence.py"
-.PHONY: rnu-equivalence
-RNU_EQ_DECODE_WIDTH ?= 4
-RNU_EQ_RENAME_WIDTH ?= 3
-RNU_EQ_COMMIT_WIDTH ?= 4
-rnu-equivalence:
-	@test -n "$(BASELINE_RNU)" || { echo 'Set BASELINE_RNU to the preserved pre-change rapt_rnu.sv'; exit 2; }
-	python3 "$(RAPTOR_HOME)/verification/scripts/rnu_equivalence.py" --baseline-rnu "$(BASELINE_RNU)" --output "$(BUILD_DIR)/rnu-equivalence" \
-	  --decode-width "$(RNU_EQ_DECODE_WIDTH)" --rename-width "$(RNU_EQ_RENAME_WIDTH)" --commit-width "$(RNU_EQ_COMMIT_WIDTH)"
+.PHONY: sim-build-flags-test
 
 .PHONY: prf-contract-check
 prf-contract-check:
 	python3 "$(RAPTOR_HOME)/verification/scripts/prf_contract_check.py"
-
-prf-equivalence-audit-test:
-	python3 "$(RAPTOR_HOME)/verification/scripts/test_prf_equivalence.py"
 
 sim-build-flags-test: ## Check assertion compiler flags in an isolated simulator fixture
 	python3 "$(RAPTOR_HOME)/verification/scripts/test_sim_build_flags.py"
@@ -2355,8 +2131,6 @@ sim-build-flags-test: ## Check assertion compiler flags in an isolated simulator
 sta-entrypoints-test: ## Check offline STA preflight and dependency failure diagnostics
 	python3 "$(RAPTOR_HOME)/verification/scripts/test_sta.py" StaEntrypointsTest
 
-width-evaluate-parser-test:
-	python3 "$(RAPTOR_HOME)/verification/scripts/test_width_evaluate.py"
 
 verilator-ras-pipeline:
 	$(call VERILATOR_DIRECTED_RUN,ras_pipeline,tb_ras_pipeline, $(wildcard $(RAPTOR_HOME)/rtl/frontend/branch_predictor/*.sv),-d RAPT_ASSERT_EN,)

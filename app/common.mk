@@ -71,3 +71,38 @@ Q     := --no-print-directory
 NPROC := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 CFLAGS_COMMON := $(_PICOLIBC_SPECS) -march=$(ARCH) -mabi=$(ABI) -mcmodel=medany -O2 -Wall -g -static
+
+# Opt-in build rules for the C program suites and shared benchmark backends.
+# A content-stable stamp rebuilds ELFs when flags/knobs change, without forcing
+# an identical build on every invocation. Artifacts remain in the build directory.
+ifneq ($(strip $(APP_SUITE)$(APP_BENCHMARK)),)
+.PHONY: app-build-force
+app-build-force:
+app_quote = '$(subst ','"'"',$(1))'
+.PRECIOUS: %/.build-args
+%/.build-args: app-build-force
+	@mkdir -p $(dir $@)
+	@set -e; args_tmp="$@.$$$$.tmp"; trap 'rm -f "$$args_tmp"' EXIT; \
+	printf '%s\n' $(call app_quote,$(APP_BUILD_COMMAND)) > "$$args_tmp"; \
+	cmp -s "$$args_tmp" "$@" || cp "$$args_tmp" "$@"
+endif
+
+ifneq ($(strip $(APP_SUITE)),)
+.DEFAULT_GOAL := build
+APP_SOURCE_DIR := $(APP_HOME)/$(APP_SUITE)
+BUILD_DIR := $(APP_HOME)/build/rv$(XLEN)/$(APP_SUITE)$(APP_BUILD_SUFFIX)
+CFLAGS := $(CFLAGS_COMMON) $(APP_EXTRA_CFLAGS)
+SRCS := $(wildcard $(APP_SOURCE_DIR)/*.c)
+ELFS := $(patsubst $(APP_SOURCE_DIR)/%.c,$(BUILD_DIR)/%.elf,$(SRCS))
+$(BUILD_DIR)/.build-args: APP_BUILD_COMMAND = $(CC) $(CFLAGS)
+$(ELFS): $(BUILD_DIR)/.build-args $(wildcard $(APP_SOURCE_DIR)/*.h) \
+	$(APP_HOME)/lib/raptor_platform.h $(APP_HOME)/lib/pk-user.ld
+$(BUILD_DIR)/%.elf: $(APP_SOURCE_DIR)/%.c $(_PICOLIBC_IO)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $< $(_PICOLIBC_IO) -o $@
+.PHONY: build clean
+build: $(ELFS)
+	@echo "Built $(words $(ELFS)) $(APP_SUITE) programs in $(BUILD_DIR)/"
+clean:
+	rm -rf $(BUILD_DIR)
+endif

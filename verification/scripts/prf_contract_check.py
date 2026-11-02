@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import subprocess
 
-from prf_equivalence import manifest
+from yosys_common import rtl_manifest as manifest
 
 ROOT = Path(__file__).resolve().parents[2]
 

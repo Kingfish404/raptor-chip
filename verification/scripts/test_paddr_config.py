@@ -19,13 +19,16 @@ class PaddrConfigTest(unittest.TestCase):
                                str(ROOT / "rtl"), "--", *flags],
                               capture_output=True, text=True)
 
-    def test_all_presets_use_expected_width(self):
-        for preset in (ROOT / "rtl/configs").glob("*/rapt_config.svh"):
-            with self.subTest(preset=preset.parent.name):
-                result = self.widths("-DRAPT_RV64", config=preset.parent.name)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                expected = "38 36" if preset.parent.name == "default-pa38" else "32 30"
-                self.assertEqual(result.stdout.strip(), expected)
+    def test_default_and_wide_pa_presets(self):
+        for config in ("default", "default-pa38"):
+            for xlen in (32, 64):
+                with self.subTest(config=config, xlen=xlen):
+                    flags = ("-DRAPT_RV64",) if xlen == 64 else ()
+                    result = self.widths(*flags, config=config)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    pa = 38 if config == "default-pa38" and xlen == 64 else 32
+                    pmp = pa - 2 if xlen == 64 else 32
+                    self.assertEqual(result.stdout.strip(), f"{pa} {pmp}")
 
     def test_every_supported_width(self):
         for pa in range(32, 39):

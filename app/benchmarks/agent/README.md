@@ -1,93 +1,65 @@
-# RAgentBench — agentic-workload CPU benchmark
+# RAgentBench
 
-RAgentBench measures how well the Raptor RISC-V core (and any other RV32/RV64 target reachable via pk, NEMU, LiteX BIOS, or host-native) executes the *compute pattern* that LLM-agent runtimes spend most of their wall time on: function-call dispatch, retrieval scoring, and multi-turn policy loops.
+RAgentBench measures CPU execution of synthetic tool dispatch, retrieval scoring
+and multi-turn policy loops. It uses deterministic static inputs and integer
+arithmetic, with ports for native hosts, pk/NPC, NEMU and LiteX/FPGA. These are CPU
+workloads; their scores do not measure an LLM agent's task-solving ability.
 
-> **Scope.** RAgentBench evaluates the **CPU/SoC**, not the LLM. There is no
-> language model, no tokenizer, no network. All inputs are deterministic and
-> synthesized from fixed seeds. The benchmark does not claim to predict how
-> well a real LLM agent would behave on this hardware.
+See [application commands and shared build rules](../../README.md#ragentbench) for
+run targets. Builds use the same `bench.mk` backend rules as RLLMBench.
 
-## Why a separate benchmark from RLLMBench
+| Mode | Workload |
+| --- | --- |
+| `tools` | Switch-table dispatch, small-state mutation and error paths |
+| `rag` | Term-frequency scoring and heap-free top-k selection |
+| `workflow` | Multi-turn policy loops with subcheckpoint validation |
 
-| dimension              | RLLMBench (`app/benchmarks/llm`) | RAgentBench (this dir)         |
-| ---------------------- | -------------------------------- | ------------------------------ |
-| pressure on            | dense int8/int16 GEMM, softmax   | branch-heavy dispatch, top-k   |
-| dominant kernel        | matvec, RMSNorm, attention       | switch tables, BM25-lite, FSM  |
-| ILP profile            | regular, loop-friendly           | irregular, mispredict-heavy    |
-| memory pattern         | contiguous tensor sweeps         | scattered small-state mutation |
-| representative of      | model inference / training       | tool-calling agent runtime     |
+These patterns complement RLLMBench's dense arithmetic. Missing tools or
+parameters and step-cap termination exercise alternate control-flow paths.
 
-The two benchmarks are complementary; a core that wins on RLLMBench can still lose on RAgentBench (and vice versa) because the bottlenecks differ.
+## Profiles and ports
 
-## Modes
+| Setting | Meaning |
+| --- | --- |
+| `AGENT_TOOL_ITERS` | Tool-mode iterations, 32 calls each |
+| `AGENT_RAG_QUERIES` | Queries scored over the synthetic corpus |
+| `AGENT_FLOW_TURNS` | Workflow loop turns |
 
-| mode       | what it stresses                                    | inspired by                               |
-| ---------- | --------------------------------------------------- | ----------------------------------------- |
-| `tools`    | switch-table dispatch, small-state mutation, error path | Berkeley Function Calling Leaderboard v3 |
-| `rag`      | term-frequency scoring + heap-free top-k selection  | tau-bench domain knowledge / GAIA file Q&A |
-| `workflow` | multi-turn policy loop with subcheckpoint validation | tau-bench / TheAgentCompany subchecks     |
+The profile string is `tools<N>-rag<N>-flow<N>`. Workload defaults live in the
+Makefiles; select the same explicit values when comparing backends. For a small
+native build/run/report check from the repository root:
 
-All three include intentional "augmented" branches (missing tool, missing parameter, force-termination on step cap) modelled after BFCL v3's augmented categories so branch-predictor pressure matches a real agent runtime.
-
-## Log contract
-
-Each run emits a fixed set of grep-friendly lines (one log file per mode):
-
-```
-RAGENTBENCH_INFO    version=0.1 profile=... arch=... xlen=... target=... time_unit=s score=score_per_sec
-RAGENTBENCH_BEGIN   mode=<tools|rag|workflow> kind=... profile=...
-RAGENTBENCH_CONFIG  mode=... arch=... xlen=... target=... tool_iters=... rag_queries=... flow_turns=... ...
-RAGENTBENCH_RESULT  name=... class=... unit=... work=... seconds=... score_per_sec=... checksum=0x...
-RAGENTBENCH_SCORE   mode=... work=... seconds=... score_per_sec=... checksum=0x...
-RAGENTBENCH_END     mode=... status=PASS sink=0x...
+```sh
+make -C app/benchmarks/agent native-test \
+    AGENT_TOOL_ITERS=1 AGENT_RAG_QUERIES=1 AGENT_FLOW_TURNS=1
 ```
 
-Headline metric: **`score_per_sec`** (work units per physical second). Frequency-normalized metric: `score_per_mhz = score_per_sec / core_clock_mhz`.
+[ragentbench_port.h](ragentbench_port.h) provides the timing interface. Set
+`RAGENTBENCH_TIMEBASE_HZ` to the RISC-V `time` CSR rate.
+`RAGENTBENCH_CORE_CLOCK_MHZ` supplies optional report metadata for score/MHz.
+RISC-V reports live under `app/build/rv<XLEN>/benchmarks/agent/{logs,reports}/`;
+native reports use `app/build/native/benchmarks/agent/reports/`. Output directories
+and host compiler/flags can be overridden through the shared build rules.
 
-The deterministic `checksum` lets you cross-check that a port did not silently change behavior — e.g. RV32 vs RV64, NPC vs NEMU, native vs LiteX.
+## Result contract
 
-## Profile knobs
+Each mode emits these record types:
 
-| variable             | default | meaning                                |
-| -------------------- | ------- | -------------------------------------- |
-| `AGENT_TOOL_ITERS`   | 16      | tool-mode iterations (32 calls each)   |
-| `AGENT_RAG_QUERIES`  | 16      | retrieval queries scored over the corpus |
-| `AGENT_FLOW_TURNS`   | 16      | workflow agent loop turns              |
-| `RAGENTBENCH_TIMEBASE_HZ` | depends | RV `time` CSR Hz (NPC default 10 MHz) |
-| `RAGENTBENCH_CORE_CLOCK_MHZ` | 0 | report core clock (0 = omit score/MHz) |
-
-Profile string format: `tools<N>-rag<N>-flow<N>` (e.g. `tools16-rag16-flow16`).
-
-## Commands (from project root)
-
-```shell
-# host-native smoke test — fast, build/run/report end-to-end
-make -C app/benchmarks/agent native-test
-
-# pk-on-NPC and NEMU full reports (markdown/csv/json)
-make -C app agent-bench-report-rv32
-make -C app agent-bench-report-nemu
-
-# single mode
-make -C app agent-tools-rv32
-make -C app agent-rag-rv32
-make -C app agent-workflow-rv32
-
-# LiteX flat binaries for FPGA bring-up
-make -C app/benchmarks/agent litex-build
+```text
+RAGENTBENCH_INFO version=0.1 profile=... arch=... xlen=... target=... time_unit=s score=score_per_sec
+RAGENTBENCH_BEGIN mode=tools kind=... profile=...
+RAGENTBENCH_CONFIG mode=... tool_iters=... rag_queries=... flow_turns=... ...
+RAGENTBENCH_RESULT name=... class=... unit=... work=... seconds=... score_per_sec=... checksum=0x...
+RAGENTBENCH_SCORE mode=... work=... seconds=... score_per_sec=... checksum=0x...
+RAGENTBENCH_END mode=... status=PASS sink=0x...
 ```
 
-Reports land under `app/build/rv$XLEN/benchmarks/agent/{logs,reports}/`.
+`score_per_sec` is work per physical second. Reports can derive
+`score_per_mhz = score_per_sec / core_clock_mhz`. The shared
+[report script](../report.py) writes Markdown, CSV and JSON; runners require the
+ending `status=PASS` marker.
 
-## Determinism guarantees
-
-- No `malloc`, no floating point, no syscalls beyond `printf`.
-- All state arrays are statically sized and zero-initialized at mode entry.
-- Seeds are fixed compile-time constants in `agent_bench.c`.
-- The `RAGENTBENCH_RESULT` `checksum` field is FNV-style mixed over every state mutation; identical builds on identical XLEN must produce identical checksums.
-
-## Non-goals
-
-- Not an LLM agent capability benchmark (use BFCL / tau-bench / SWE-bench / WebArena for that).
-- Not a replacement for CoreMark or MicroBench — RAgentBench specifically targets the irregular-control-flow regime that those two miss.
-- Not a marketing claim that Raptor is AI-infrastructure silicon.
+All state arrays are initialized at mode entry and seeds are fixed in
+`agent_bench.c`. Checksums mix state mutations and can be compared across ports
+using the same workload settings. The workloads use no dynamic allocation or
+floating point.

@@ -440,11 +440,15 @@ LLM_VARS = LLM_OP_ITERS=$(LLM_OP_ITERS) \
 LLM_PROFILE_TAG = ops$(LLM_OP_ITERS)-gen$(LLM_GEN_TOKENS)x$(LLM_INFER_REPEATS)-train$(LLM_TRAIN_STEPS)
 LLM_BUILD_DIR = $(APP_HOME)/build/rv$(XLEN)/benchmarks/llm/$(LLM_PROFILE_TAG)
 LLM_LOG_DIR = $(LLM_BUILD_DIR)/logs/$(RLLMBENCH_BACKEND)
-LLM_REPORT_DIR := $(LLM_BUILD_DIR)/reports
+LLM_REPORT_DIR = $(LLM_BUILD_DIR)/reports
 LLM_REPORT_MD = $(LLM_REPORT_DIR)/rllmbench-$(RLLMBENCH_BACKEND).md
 LLM_REPORT_CSV = $(LLM_REPORT_DIR)/rllmbench-$(RLLMBENCH_BACKEND).csv
 LLM_REPORT_JSON = $(LLM_REPORT_DIR)/rllmbench-$(RLLMBENCH_BACKEND).json
-LLM_REPORT_SCRIPT := $(APP_HOME)/benchmarks/report.py
+BENCH_REPORT_SCRIPT := $(APP_HOME)/benchmarks/report.py
+LLM_SUITE := RLLMBench
+LLM_LOG_PREFIX := RLLMBENCH
+LLM_BACKEND = $(RLLMBENCH_BACKEND)
+LLM_CORE_CLOCK_MHZ = $(RLLMBENCH_CORE_CLOCK_MHZ)
 LLM_NPC_TARGETS := llm-ops-sim llm-infer-sim llm-train-sim llm-bench-run-sim llm-bench-report-sim
 LLM_NEMU_TARGETS := llm-ops-nemu llm-infer-nemu llm-train-nemu llm-bench-run-nemu llm-bench-report-nemu
 
@@ -480,57 +484,33 @@ llm-native-test: ## Build, run, and report host-native RLLMBench
 	@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/llm native-test $(LLM_VARS) PYTHON=$(PYTHON) \
 		RLLMBENCH_CORE_CLOCK_MHZ=$(RLLMBENCH_NATIVE_CORE_CLOCK_MHZ)
 
-define _llm_bench_report_with
-	@mkdir -p $(LLM_LOG_DIR) $(LLM_REPORT_DIR)
-	@find $(LLM_LOG_DIR) -type f -name '*.log' -delete
-	@rm -f $(LLM_REPORT_MD) $(LLM_REPORT_CSV) $(LLM_REPORT_JSON)
-	@echo "=== Running RLLMBench ($(RLLMBENCH_BACKEND), profile=ops$(LLM_OP_ITERS)-gen$(LLM_GEN_TOKENS)x$(LLM_INFER_REPEATS)-train$(LLM_TRAIN_STEPS)) ==="
-	@fail=0; for bench in $(LLM_BENCHMARKS); do \
-		elf=$(LLM_BUILD_DIR)/$$bench.elf; \
-		log=$(LLM_LOG_DIR)/$$bench.log; \
+define BENCH_REPORT
+	@mkdir -p $($(1)_LOG_DIR) $($(1)_REPORT_DIR)
+	@find $($(1)_LOG_DIR) -type f -name '*.log' -delete
+	@rm -f $($(1)_REPORT_MD) $($(1)_REPORT_CSV) $($(1)_REPORT_JSON)
+	@echo "=== Running $($(1)_SUITE) ($($(1)_BACKEND), profile=$($(1)_PROFILE_TAG)) ==="
+	@fail=0; for bench in $($(1)_BENCHMARKS); do \
+		elf=$($(1)_BUILD_DIR)/$$bench.elf; log=$($(1)_LOG_DIR)/$$bench.log; \
 		echo "--- $$bench ---"; \
-		if $(MAKE) $(Q) -C $(APP_HOME)/pk $(1) USER_ELF=$$elf > $$log 2>&1; then \
-			grep -E '^(RLLMBench|RLLMBENCH_|last_token=|llm_bench_done)' $$log || cat $$log; \
-			if ! grep -q 'RLLMBENCH_END .*status=PASS' $$log; then \
-				echo "[RLLMBench] $$bench log missing PASS marker"; fail=1; \
-			fi; \
-		else \
-			rc=$$?; cat $$log; echo "[RLLMBench] $$bench failed (exit $$rc)"; fail=1; \
-		fi; \
+		$(MAKE) $(Q) -C $(APP_HOME)/pk $(2) USER_ELF=$$elf > $$log 2>&1 || fail=1; \
+		cat $$log; \
+		grep -q '^$($(1)_LOG_PREFIX)_END .*status=PASS' $$log || fail=1; \
 	done; \
-	for bench in $(LLM_BENCHMARKS); do \
-		log=$(LLM_LOG_DIR)/$$bench.log; \
-		if [ ! -s $$log ]; then echo "[RLLMBench] missing or empty log: $$log"; fail=1; fi; \
-	done; \
-	$(PYTHON) $(LLM_REPORT_SCRIPT) \
-		--log-dir $(LLM_LOG_DIR) \
-		--markdown $(LLM_REPORT_MD) \
-		--csv $(LLM_REPORT_CSV) \
-		--json $(LLM_REPORT_JSON) \
-		--core-clock-mhz $(RLLMBENCH_CORE_CLOCK_MHZ) \
-		--suite RLLMBench; \
-	report_rc=$$?; \
-	if [ $$report_rc -ne 0 ]; then exit $$report_rc; fi; \
+	$(PYTHON) $(BENCH_REPORT_SCRIPT) --log-dir $($(1)_LOG_DIR) \
+		--markdown $($(1)_REPORT_MD) --csv $($(1)_REPORT_CSV) --json $($(1)_REPORT_JSON) \
+		--core-clock-mhz $($(1)_CORE_CLOCK_MHZ) --suite $($(1)_SUITE) || exit $$?; \
 	exit $$fail
 endef
 
-llm-ops-sim: llm-bench-build ## Build and run LLM operator benchmark on NPC/sim via pk
-	@$(call _pk_run_with,pk-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/llm/llm-ops.elf)
-
-llm-ops-nemu: llm-bench-build ## Build and run LLM operator benchmark on NEMU via pk
-	@$(call _pk_run_with,nemu-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/llm/llm-ops.elf)
-
-llm-infer-sim: llm-bench-build ## Build and run LLM E2E inference benchmark on NPC/sim via pk
-	@$(call _pk_run_with,pk-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/llm/llm-infer.elf)
-
-llm-infer-nemu: llm-bench-build ## Build and run LLM E2E inference benchmark on NEMU via pk
-	@$(call _pk_run_with,nemu-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/llm/llm-infer.elf)
-
-llm-train-sim: llm-bench-build ## Build and run LLM E2E training benchmark on NPC/sim via pk
-	@$(call _pk_run_with,pk-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/llm/llm-train.elf)
-
-llm-train-nemu: llm-bench-build ## Build and run LLM E2E training benchmark on NEMU via pk
-	@$(call _pk_run_with,nemu-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/llm/llm-train.elf)
+define BENCH_PROGRAM
+.PHONY: $(1)-sim $(1)-nemu
+$(1)-sim: $(2)-bench-build
+	@$$(call _pk_run_with,pk-run,$$($(3)_BUILD_DIR)/$(1).elf)
+$(1)-nemu: $(2)-bench-build
+	@$$(call _pk_run_with,nemu-run,$$($(3)_BUILD_DIR)/$(1).elf)
+endef
+bench_program = $(eval $(call BENCH_PROGRAM,$(1),$(2),$(3)))
+$(foreach bench,$(LLM_BENCHMARKS),$(call bench_program,$(bench),llm,LLM))
 
 llm-bench-run-sim: llm-bench-build ## Build and run all LLM benchmarks on NPC/sim via pk without report files
 	$(call _pk_run_suite_with,RLLMBench,npc,pk-run,$(LLM_BUILD_DIR),$(LLM_BENCHMARKS))
@@ -539,10 +519,10 @@ llm-bench-run-nemu: llm-bench-build ## Build and run all LLM benchmarks on NEMU 
 	$(call _pk_run_suite_with,RLLMBench,nemu,nemu-run,$(LLM_BUILD_DIR),$(LLM_BENCHMARKS))
 
 llm-bench-report-sim: llm-bench-build ## Build, run, log, and summarize RLLMBench on NPC/sim
-	$(call _llm_bench_report_with,pk-run)
+	$(call BENCH_REPORT,LLM,pk-run)
 
 llm-bench-report-nemu: llm-bench-build ## Build, run, log, and summarize RLLMBench on NEMU
-	$(call _llm_bench_report_with,nemu-run)
+	$(call BENCH_REPORT,LLM,nemu-run)
 
 # ============================================================================
 # RAgentBench: agentic-workload CPU benchmarks
@@ -558,7 +538,11 @@ AGENT_REPORT_DIR := $(AGENT_BUILD_DIR)/reports
 AGENT_REPORT_MD = $(AGENT_REPORT_DIR)/ragentbench-$(RAGENTBENCH_BACKEND).md
 AGENT_REPORT_CSV = $(AGENT_REPORT_DIR)/ragentbench-$(RAGENTBENCH_BACKEND).csv
 AGENT_REPORT_JSON = $(AGENT_REPORT_DIR)/ragentbench-$(RAGENTBENCH_BACKEND).json
-AGENT_REPORT_SCRIPT := $(APP_HOME)/benchmarks/report.py
+AGENT_SUITE := RAgentBench
+AGENT_LOG_PREFIX := RAGENTBENCH
+AGENT_BACKEND = $(RAGENTBENCH_BACKEND)
+AGENT_CORE_CLOCK_MHZ = $(RAGENTBENCH_CORE_CLOCK_MHZ)
+AGENT_PROFILE_TAG = tools$(AGENT_TOOL_ITERS)-rag$(AGENT_RAG_QUERIES)-flow$(AGENT_FLOW_TURNS)
 AGENT_NPC_TARGETS := agent-tools-sim agent-rag-sim agent-workflow-sim agent-bench-run-sim agent-bench-report-sim
 AGENT_NEMU_TARGETS := agent-tools-nemu agent-rag-nemu agent-workflow-nemu agent-bench-run-nemu agent-bench-report-nemu
 
@@ -593,57 +577,7 @@ agent-native-test: ## Build, run, and report host-native RAgentBench
 	@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/agent native-test $(AGENT_VARS) PYTHON=$(PYTHON) \
 		RAGENTBENCH_CORE_CLOCK_MHZ=$(RAGENTBENCH_NATIVE_CORE_CLOCK_MHZ)
 
-define _agent_bench_report_with
-	@mkdir -p $(AGENT_LOG_DIR) $(AGENT_REPORT_DIR)
-	@find $(AGENT_LOG_DIR) -type f -name '*.log' -delete
-	@rm -f $(AGENT_REPORT_MD) $(AGENT_REPORT_CSV) $(AGENT_REPORT_JSON)
-	@echo "=== Running RAgentBench ($(RAGENTBENCH_BACKEND), profile=tools$(AGENT_TOOL_ITERS)-rag$(AGENT_RAG_QUERIES)-flow$(AGENT_FLOW_TURNS)) ==="
-	@fail=0; for bench in $(AGENT_BENCHMARKS); do \
-		elf=$(AGENT_BUILD_DIR)/$$bench.elf; \
-		log=$(AGENT_LOG_DIR)/$$bench.log; \
-		echo "--- $$bench ---"; \
-		if $(MAKE) $(Q) -C $(APP_HOME)/pk $(1) USER_ELF=$$elf > $$log 2>&1; then \
-			grep -E '^(RAgentBench|RAGENTBENCH_|agent_bench_done)' $$log || cat $$log; \
-			if ! grep -q 'RAGENTBENCH_END .*status=PASS' $$log; then \
-				echo "[RAgentBench] $$bench log missing PASS marker"; fail=1; \
-			fi; \
-		else \
-			rc=$$?; cat $$log; echo "[RAgentBench] $$bench failed (exit $$rc)"; fail=1; \
-		fi; \
-	done; \
-	for bench in $(AGENT_BENCHMARKS); do \
-		log=$(AGENT_LOG_DIR)/$$bench.log; \
-		if [ ! -s $$log ]; then echo "[RAgentBench] missing or empty log: $$log"; fail=1; fi; \
-	done; \
-	$(PYTHON) $(AGENT_REPORT_SCRIPT) \
-		--log-dir $(AGENT_LOG_DIR) \
-		--markdown $(AGENT_REPORT_MD) \
-		--csv $(AGENT_REPORT_CSV) \
-		--json $(AGENT_REPORT_JSON) \
-		--core-clock-mhz $(RAGENTBENCH_CORE_CLOCK_MHZ) \
-		--suite RAgentBench; \
-	report_rc=$$?; \
-	if [ $$report_rc -ne 0 ]; then exit $$report_rc; fi; \
-	exit $$fail
-endef
-
-agent-tools-sim: agent-bench-build ## Build and run RAgentBench tool dispatch benchmark on NPC/sim via pk
-	@$(call _pk_run_with,pk-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/agent/agent-tools.elf)
-
-agent-tools-nemu: agent-bench-build ## Build and run RAgentBench tool dispatch benchmark on NEMU via pk
-	@$(call _pk_run_with,nemu-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/agent/agent-tools.elf)
-
-agent-rag-sim: agent-bench-build ## Build and run RAgentBench RAG benchmark on NPC/sim via pk
-	@$(call _pk_run_with,pk-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/agent/agent-rag.elf)
-
-agent-rag-nemu: agent-bench-build ## Build and run RAgentBench RAG benchmark on NEMU via pk
-	@$(call _pk_run_with,nemu-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/agent/agent-rag.elf)
-
-agent-workflow-sim: agent-bench-build ## Build and run RAgentBench workflow benchmark on NPC/sim via pk
-	@$(call _pk_run_with,pk-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/agent/agent-workflow.elf)
-
-agent-workflow-nemu: agent-bench-build ## Build and run RAgentBench workflow benchmark on NEMU via pk
-	@$(call _pk_run_with,nemu-run,$(APP_HOME)/build/rv$(XLEN)/benchmarks/agent/agent-workflow.elf)
+$(foreach bench,$(AGENT_BENCHMARKS),$(call bench_program,$(bench),agent,AGENT))
 
 agent-bench-run-sim: agent-bench-build ## Build and run all RAgentBench benchmarks on NPC/sim via pk without report files
 	$(call _pk_run_suite_with,RAgentBench,npc,pk-run,$(AGENT_BUILD_DIR),$(AGENT_BENCHMARKS))
@@ -652,10 +586,10 @@ agent-bench-run-nemu: agent-bench-build ## Build and run all RAgentBench benchma
 	$(call _pk_run_suite_with,RAgentBench,nemu,nemu-run,$(AGENT_BUILD_DIR),$(AGENT_BENCHMARKS))
 
 agent-bench-report-sim: agent-bench-build ## Build, run, log, and summarize RAgentBench on NPC/sim
-	$(call _agent_bench_report_with,pk-run)
+	$(call BENCH_REPORT,AGENT,pk-run)
 
 agent-bench-report-nemu: agent-bench-build ## Build, run, log, and summarize RAgentBench on NEMU
-	$(call _agent_bench_report_with,nemu-run)
+	$(call BENCH_REPORT,AGENT,nemu-run)
 
 # ============================================================================
 # TinyOS / OS bring-up targets (delegate to tinyos/Makefile)
