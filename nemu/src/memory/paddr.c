@@ -22,6 +22,8 @@
 #include <device/mmio.h>
 #include <cpu/difftest.h>
 #include <cpu/cpu.h>
+#include <cpu/bbv.h>
+#include <cpu/sample.h>
 #include <cpu/thread.h>
 #include <cpu/multidiff.h>
 #include <cpu/diffjournal.h>
@@ -171,6 +173,14 @@ static void inject_dtb_rng_seed(uint8_t *dtb, size_t blob_size)
   Assert(seed_size == DTB_RNG_SEED_SIZE,
          "/chosen/rng-seed must be %u bytes, got %zu",
          DTB_RNG_SEED_SIZE, seed_size);
+  if (nemu_bbv_enabled || nemu_sample_enabled) {
+    // Sampling and its second capture pass must see identical boot entropy.
+    // Ordinary VM boots retain their host-random seed below. The fixed bytes
+    // are an experiment input, not a source of unpredictable guest entropy.
+    for (size_t i = 0; i < seed_size; i++) seed[i] = (uint8_t)(0x53u + i * 37u);
+    Log("Using deterministic DTB RNG seed for workload sampling (v1)");
+    return;
+  }
   FILE *fp = fopen("/dev/urandom", "rb");
   Assert(fp != NULL, "Can not open /dev/urandom for the DTB RNG seed");
   size_t bytes_read = fread(seed, 1, seed_size, fp);
@@ -294,8 +304,30 @@ void init_mem()
   assert(ret == 1);
   fclose(fp);
   inject_dtb_rng_seed(rom + reset_vec_size * 4, (size_t)size);
+#ifdef CONFIG_RAPTOR_MEMORY_MAP
+  // Raptor does not map QEMU's low boot ROM. Keep the firmware handoff in
+  // MROM, and put the FDT in RAM so a later restore trampoline can replace
+  // MROM without destroying live firmware data. Linux reserves its FDT.
+  Assert(size > 0 && size <= 0x10000 && CONFIG_MSIZE >= 0x10000,
+         "Raptor FDT must fit in the reserved final 64 KiB of RAM");
+  uint64_t dtb_address = (uint64_t)CONFIG_MBASE + CONFIG_MSIZE - 0x10000;
+  memcpy(guest_to_host((paddr_t)dtb_address), rom + reset_vec_size * 4, (size_t)size);
+  uint32_t native_reset[] = {
+    0x00000297u, // auipc t0,0
+    MUXDEF(CONFIG_ISA64, 0x0202b583u, 0x0202a583u), // l[wd] a1,32(t0)
+    0xf1402573u, // csrr a0,mhartid
+    MUXDEF(CONFIG_ISA64, 0x0182b283u, 0x0182a283u), // l[wd] t0,24(t0)
+    0x00028067u, // jr t0
+    0x00000013u,
+    (uint32_t)pc, (uint32_t)(pc >> 32),
+    (uint32_t)dtb_address, (uint32_t)(dtb_address >> 32)
+  };
+  memcpy(mrom, native_reset, sizeof(native_reset));
+  Log("Raptor MROM boot; FDT relocated to RAM at 0x%" PRIx64, dtb_address);
+#else
   Log("The dtb: %s, size: %ld, loaded to " FMT_PADDR "",
       filename, size, (paddr_t)(CONFIG_ROM_BASE + reset_vec_size * 4));
+#endif
 #endif
 #endif
 }

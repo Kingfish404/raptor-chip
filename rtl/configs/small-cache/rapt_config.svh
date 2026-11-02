@@ -93,6 +93,10 @@
 `ifndef RAPT_L1D_WRITEBACK
 `define RAPT_L1D_WRITEBACK 1
 `endif
+// Four physical-line refills may overlap after translation; IOQ replays on wake.
+`ifndef RAPT_L1D_MSHRS
+`define RAPT_L1D_MSHRS 4
+`endif
 
 `define RAPT_ITLB_ENTRIES 16
 `define RAPT_DTLB_ENTRIES 16

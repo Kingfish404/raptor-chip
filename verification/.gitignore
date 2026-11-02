@@ -14,6 +14,7 @@
 !/directed-tests.mk
 !/vpu/vendor/riscv-opcodes/rv_v
 !/riscof/sail/*.patch
+!/performance/*.tcl
 
 __pycache__/
 build/

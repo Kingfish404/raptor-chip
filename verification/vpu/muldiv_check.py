@@ -14,7 +14,7 @@ args = parser.parse_args()
 build = args.build_dir.resolve()
 files = ['rtl/backend/vpu/rapt_vpu_muldiv.sv', 'rtl/include/rapt_sva.svh',
          'verification/vpu/test_muldiv.cpp', 'verification/vpu/muldiv_reference.h',
-         'verification/vpu/Makefile', 'verification/vpu/muldiv_check.py', 'verification/vpu/record_leaf.py']
+         'verification/vpu/Makefile', 'verification/vpu/muldiv_check.py', 'verification/vpu/record_run.py']
 def fingerprints():
     return {p: hashlib.sha256((root/p).read_bytes()).hexdigest() for p in files}
 sources = fingerprints()

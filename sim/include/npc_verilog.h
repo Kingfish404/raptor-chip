@@ -4,6 +4,7 @@
 
 #include <common.h>
 #include <cpu.h>
+#include <checkpoint.h>
 
 #include CONCAT_HEAD(TOP_NAME)
 #include CONCAT_HEAD(CONCAT(TOP_NAME, ___024root))
@@ -15,15 +16,8 @@
 #ifdef RAPT_SOC
 // Verilator 5.x hierarchical cell access:
 //   rootp -> ysyxSoCFull -> asic -> cpu -> cpu -> adapter -> cpu (rapt) -> core
-// MemoryReadCredits=1 gives the generated rapt class its __M1 suffix.
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyxSoCFull))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyxSoCASIC__pi1))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _CPU))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _ysyx_00000000))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _wrap_ysyxsoc))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt__M1))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_core))
-// The symbol header includes the actual parameter-specialized backend and ROU classes.
+// The symbol header includes every class on that path. Parameter-specialized
+// class names differ between Verilator releases (__pi1 vs. a hash suffix).
 #include CONCAT_HEAD(CONCAT(TOP_NAME, __Syms))
 #define VERILOG_CPU(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->adapter->cpu->core->m)
 #define VERILOG_BACKEND(m) (top->rootp->ysyxSoCFull->asic->cpu->cpu->adapter->cpu->core->backend->m)
@@ -53,18 +47,8 @@
 // CLINT lives at the cluster level (rapt.clint_inst), shared across harts.
 // rapt_clint is inlined by Verilator, so its registers are reached via the
 // __DOT__ name from the parent `rapt` cell (`cpu`).
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _raptSoC))
-#if __has_include(CONCAT_HEAD(CONCAT(TOP_NAME, _rapt)))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_core))
-#elif __has_include(CONCAT_HEAD(CONCAT(TOP_NAME, _rapt__Lz1)))
-// A write-back top parameter (including default-l2's default) specializes these classes.
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt__Lz1))
-#include CONCAT_HEAD(CONCAT(TOP_NAME, _rapt_core__Lz1))
-#else
-#error Unsupported Verilator rapt hierarchy
-#endif
-// The symbol header includes the actual parameter-specialized backend and ROU classes.
+// The symbol header includes every class on that path, whatever suffix a
+// parameter specialization (such as default-l2's write-back top) gives it.
 #include CONCAT_HEAD(CONCAT(TOP_NAME, __Syms))
 #define VERILOG_CPU(m) (top->rootp->raptSoC->cpu->core->m)
 #define VERILOG_BACKEND(m) (top->rootp->raptSoC->cpu->core->backend->m)
@@ -160,7 +144,7 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->plic_ext_irq = (uint32_t *)&VERILOG_PLIC(ext_irq_q);
 
   npc->pmpcfg = (uint8_t *)&VERILOG_BACKEND(csrs__DOT__pmpcfg_r);
-  npc->pmpaddr = (word_t *)&VERILOG_BACKEND(csrs__DOT__pmpaddr_r);
+  npc->pmpaddr = cpu_read_pmpaddr_snapshot();
 
   /* Pipeline quiesce probes (for checkpoint save: defer until SQ/ROB are
    * empty so in-flight stores don't get truncated by host-side memory dump).

@@ -16,6 +16,8 @@
 #include <common.h>
 #include <cpu/thread.h>
 #include <cpu/multidiff.h>
+#include <cpu/bbv.h>
+#include <cpu/sample.h>
 #include <device/alarm.h>
 #include <sys/time.h>
 #include <signal.h>
@@ -42,7 +44,10 @@ static void alarm_sig_handler(int signum)
 
 void init_alarm()
 {
-  if (nemu_threaded || multidiff_active()) return;
+  // Instruction-clock sampling updates CLINT synchronously in the CPU loop.
+  // A host SIGVTALRM can otherwise change the interrupt boundary between two
+  // identical profiling/capture passes, depending on host execution speed.
+  if (nemu_threaded || multidiff_active() || nemu_bbv_enabled || nemu_sample_enabled) return;
   struct sigaction s;
   memset(&s, 0, sizeof(s));
   s.sa_handler = alarm_sig_handler;

@@ -26,6 +26,11 @@ class UARTPlatformTest(unittest.TestCase):
 #include <utils.h>
 static inline bool multidiff_uart_active(void) { return false; }
 ''')
+            (nemu/'cpu/bbv.h').write_text('''#pragma once
+#include <utils.h>
+static const bool nemu_bbv_enabled = false;
+static inline void nemu_bbv_serial(uint8_t byte) { (void)byte; }
+''')
             (nemu/'cpu/diffjournal.h').write_text('''#pragma once
 #include <utils.h>
 void nemu_journal_uart_tx(uint8_t, bool) __attribute__((weak));

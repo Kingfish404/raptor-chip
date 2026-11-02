@@ -3,6 +3,7 @@
 #include <common.h>
 #include <cpu.h>
 #include <memory.h>
+#include <serial_checkpoint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -92,6 +93,8 @@ typedef struct
   uint32_t plic_enable[NPC_PLIC_NCTX];
   uint8_t plic_threshold[NPC_PLIC_NCTX];
   uint32_t plic_ext_irq;
+  SerialCheckpoint uart;
+  unsigned uart_seen;
   uint64_t cycle, instr;
 } arch_snapshot_t;
 
@@ -101,6 +104,11 @@ static arch_snapshot_t loaded_snap = {0};
  * the first time a committed instruction's rpc matches loaded_snap.pc.
  * Drives the post-trampoline fixup (counters/mepc). */
 static int post_trampoline_pending = 0;
+static bool reference_ready = true;
+static word_t trampoline_mret_pc;
+void cpu_checkpoint_restore_arch(word_t mstatus, word_t mstatush,
+                                 word_t cycle, word_t cycleh,
+                                 word_t instret, word_t instreth);
 
 /* ---------------------------------------------------------------------------
  * Memory regions to dump/restore
@@ -329,6 +337,7 @@ static void write_state_txt(const char *path)
     fprintf(fp, "csr_minstreth=" FMT_WORD "\n", *npc.minstreth);
 
   /* PMP state */
+  cpu_read_pmpaddr_snapshot();
   if (npc.pmpcfg != NULL && npc.pmpaddr != NULL)
   {
     for (int i = 0; i < NPC_PMP_NUM; i++)
@@ -761,7 +770,7 @@ bool checkpoint_save_tick(void)
  * Load
  * ------------------------------------------------------------------------ */
 int checkpoint_load_configured(void) { return load_enabled; }
-int checkpoint_load_pending(void) { return load_enabled && !resume_ready; }
+int checkpoint_load_pending(void) { return load_enabled && !reference_ready; }
 
 static int parse_word(const char *s, word_t *out)
 {
@@ -793,6 +802,31 @@ static int read_state_txt(const char *path, arch_snapshot_t *s)
     if (sscanf(line, "%63[^=]=%127s", key, val) != 2)
       continue;
     word_t w = 0;
+    if (strncmp(key, "uart_", 5) == 0) {
+      static const char *names[] = {"uart_ier", "uart_lcr", "uart_mcr", "uart_scr",
+                                    "uart_dll", "uart_dlm", "uart_fcr", "uart_tx_pending"};
+      bool found = false;
+      for (unsigned i = 0; i < 8; i++) {
+        if (strcmp(key, names[i]) != 0) continue;
+        unsigned long long value;
+        char trailing;
+        if (sscanf(val, "%llx%c", &value, &trailing) != 1 || value > 255 ||
+            (s->uart_seen & (1u << i))) {
+          fclose(fp);
+          Error("checkpoint: invalid or duplicate quiet UART field %s", key);
+          return -1;
+        }
+        s->uart.values[i] = uint32_t(value);
+        s->uart_seen |= 1u << i;
+        found = true;
+      }
+      if (!found) {
+        fclose(fp);
+        Error("checkpoint: unknown UART field %s", key);
+        return -1;
+      }
+      continue;
+    }
     if (strncmp(key, "fpr", 3) == 0 || strcmp(key, "csr_fcsr") == 0)
     {
       unsigned long long v;
@@ -985,6 +1019,11 @@ static int read_state_txt(const char *path, arch_snapshot_t *s)
     }
   }
   fclose(fp);
+  if (s->uart_seen && (s->uart_seen != 0xff || (s->uart.values[1] & 0x80) ||
+                       s->uart.values[7] > 1)) {
+    Error("checkpoint: incomplete or non-quiescent UART state");
+    return -1;
+  }
   if (fp_seen != UINT32_MAX || !fcsr_seen)
   {
     Error("checkpoint: missing FPR/FCSR state; regenerate this legacy or incomplete snapshot");
@@ -1264,6 +1303,7 @@ static void build_trampoline(uint8_t *mrom, const arch_snapshot_t *s)
   const int n_total = n_setup + n_fp + n_pmp + n_csr + n_sfence + n_gpr + n_mstatus +
                       n_final + n_fencei + n_mret;
   const int code_bytes = n_total * 4;
+  trampoline_mret_pc = MROM_BASE + (n_total - 1) * 4;
   const int data_off = (code_bytes + 7) & ~7;
   const int fcsr_off = (SLOT_OTHER_CSR0 + NR_CSR_RESTORE) * XLEN_BYTES;
   const int fpr_off = (fcsr_off + XLEN_BYTES + 7) & ~7;
@@ -1409,8 +1449,25 @@ static void build_trampoline(uint8_t *mrom, const arch_snapshot_t *s)
       n_total, data_off, s->pc, s->priv, mstatus_for_mret);
 }
 
+void checkpoint_export_trampoline(const char *state_file, const char *output_file)
+{
+  arch_snapshot_t snapshot = {};
+  snapshot.stimecmp = ~(word_t)0;
+  snapshot.stimecmph = ~(word_t)0;
+  if (read_state_txt(state_file, &snapshot) != 0)
+    Error("checkpoint: cannot read export state %s", state_file);
+  uint8_t image[4096] = {};
+  build_trampoline(image, &snapshot);
+  FILE *output = fopen(output_file, "wbx");
+  if (!output)
+    Error("checkpoint: cannot create export %s", output_file);
+  if (fwrite(image, 1, sizeof(image), output) != sizeof(image) || fclose(output) != 0)
+    Error("checkpoint: cannot write export %s", output_file);
+}
+
 void checkpoint_configure_load(const char *dir)
 {
+  reference_ready = false;
   load_enabled = 1;
   resume_ready = 0;
   resume_pmu_cycle_base = 0;
@@ -1455,6 +1512,7 @@ void checkpoint_inject_after_reset(void)
 {
   if (!load_enabled)
     return;
+  if (loaded_snap.uart_seen) serial_restore_checkpoint(loaded_snap.uart);
 
   /* WARL sanity check on host-write fields (cross-version replay safety).
    * Trampoline csrw paths are self-WARL-correcting; these direct host
@@ -1580,6 +1638,22 @@ void checkpoint_inject_after_reset(void)
   post_trampoline_pending = 1;
 }
 
+bool checkpoint_load_reference_tick(word_t committed_pc)
+{
+  if (!load_enabled || reference_ready || committed_pc != trampoline_mret_pc)
+    return false;
+  // Seed REF before the first guest instruction. Synchronizing after it would
+  // skip a first store still in the SQ/cache, losing its memory effect in REF.
+  cpu_checkpoint_restore_arch(loaded_snap.mstatus, loaded_snap.mstatush,
+                              loaded_snap.mcycle, loaded_snap.mcycleh,
+                              loaded_snap.minstret, loaded_snap.minstreth);
+  if (npc.mepc_half_q != NULL) *npc.mepc_half_q = loaded_snap.mepc >> 1;
+  if (npc.mepc___ != NULL) *npc.mepc___ = loaded_snap.mepc & ~(word_t)1;
+  if (npc.clint_mtime != NULL) *npc.clint_mtime = loaded_snap.clint_mtime;
+  reference_ready = true;
+  return true;
+}
+
 bool checkpoint_load_post_trampoline_tick(word_t committed_pc)
 {
   if (!post_trampoline_pending)
@@ -1589,26 +1663,8 @@ bool checkpoint_load_post_trampoline_tick(word_t committed_pc)
 
   post_trampoline_pending = 0;
 
-  /* Trampoline has retired (first commit at ckpt_pc means mret transferred
-   * control). Now overwrite host-visible state that the trampoline perturbed:
-   *   - mcycle/h, minstret/h: skid during trampoline execution
-   *   - mepc: trampoline wrote ckpt_pc into mepc to drive mret; saved mepc
-   *           is recoverable now since mret has already consumed it.
-   * Note: mret itself also forced mstatus.MPP/MPIE/MPRV per spec (architectural
-   * -- no fixup needed; matches what would happen on any natural mret). */
-  if (npc.mcycle_ != NULL)
-    *npc.mcycle_ = loaded_snap.mcycle;
-  if (npc.mcycleh != NULL)
-    *npc.mcycleh = loaded_snap.mcycleh;
-  if (npc.minstret != NULL)
-    *npc.minstret = loaded_snap.minstret;
-  if (npc.minstreth != NULL)
-    *npc.minstreth = loaded_snap.minstreth;
-  if (npc.mepc_half_q != NULL)
-    *npc.mepc_half_q = loaded_snap.mepc >> 1;
-  if (npc.mepc___ != NULL)
-    *npc.mepc___ = loaded_snap.mepc & ~(word_t)1;
-
+  // Architectural restoration happened at mret. Do not overwrite effects of
+  // the first guest instruction, which may itself update a CSR or memory.
   resume_pmu_cycle_base = current_pmu_cycle();
   resume_pmu_instr_base = current_pmu_instr();
   if (resume_pmu_instr_base > 0)
@@ -1616,7 +1672,7 @@ bool checkpoint_load_post_trampoline_tick(word_t committed_pc)
   resume_ready = 1;
 
   Log("checkpoint: post-trampoline fixup applied at pc=" FMT_WORD_NO_PREFIX
-      " (mepc/counters restored from snapshot, relative triggers armed)",
+      " (relative triggers armed)",
       committed_pc);
   return true;
 }

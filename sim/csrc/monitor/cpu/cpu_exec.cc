@@ -1,5 +1,6 @@
 #include <common.h>
 #include <checkpoint.h>
+#include <sample_window.h>
 #include <difftest.h>
 #include <flow_check.h>
 #include <lightsss.h>
@@ -19,6 +20,13 @@ extern word_t g_timer;
 extern VerilatedContext *contextp;
 extern TOP_NAME *top;
 extern VerilatedFstC *tfp;
+word_t *cpu_read_pmpaddr_snapshot(void)
+{
+  static word_t addresses[NPC_PMP_NUM];
+  for (unsigned i = 0; i < NPC_PMP_NUM; i++)
+    addresses[i] = VERILOG_BACKEND(csrs__DOT__pmpaddr_r)[i];
+  return addresses;
+}
 void serial_tick();
 unsigned serial_rx_pending();
 const char *serial_input_source();
@@ -202,10 +210,49 @@ void cpu_exec_set_threshold(uint64_t cycle, uint64_t inst)
   tfp_inst = inst;
 }
 
+static bool sampled_commit_trap;
+static unsigned sampled_privilege;
+static word_t sampled_satp;
+static word_t sampled_thread_pointer;
+
+void cpu_checkpoint_restore_arch(word_t mstatus, word_t mstatush,
+                                 word_t cycle, word_t cycleh,
+                                 word_t instret, word_t instreth)
+{
+  // Checkpoint writes must reach storage, not the read-only CSR view array.
+  auto &storage = VERILOG_BACKEND(csrs__DOT__csr_state);
+  auto &view = VERILOG_BACKEND(csrs__DOT__csr);
+  storage[MSTATUS] = mstatus;
+  storage[MSTATUSH] = mstatush;
+  storage[MCYCLE_] = cycle;
+  storage[MCYCLEH] = cycleh;
+  storage[MINSTRET] = instret;
+  storage[MINSTRETH] = instreth;
+  // A same-level eval does not necessarily rerun Verilator's combinational
+  // view after an internal backdoor write. REF is seeded in this cycle.
+  view[MSTATUS] = mstatus;
+  view[MSTATUSH] = mstatush;
+  view[MCYCLE_] = cycle;
+  view[MCYCLEH] = cycleh;
+  view[MINSTRET] = instret;
+  view[MINSTRETH] = instreth;
+}
+
+static void capture_before_edge()
+{
+  perf_capture_axi_before_edge();
+  // CMU's registered packet includes fault delivery. Capture its matching
+  // combinational trap classification before the ROB head advances.
+  sampled_commit_trap = VERILOG_ROU(commit_trap);
+  sampled_privilege = VERILOG_BACKEND(csrs__DOT__priv_mode);
+  sampled_satp = VERILOG_BACKEND(csrs__DOT__csr)[16];
+  sampled_thread_pointer = npc.gpr[4];
+}
+
 static void cpu_exec_one_cycle()
 {
 
-  if (!top->clock) perf_capture_axi_before_edge();
+  if (!top->clock) capture_before_edge();
   top->clock = (top->clock == 0) ? 1 : 0;
   npc_eval(top);
   // Dump-gating semantics: -c/-i specify the START point of waveform capture.
@@ -218,7 +265,7 @@ static void cpu_exec_one_cycle()
   }
   contextp->timeInc(1);
 
-  if (!top->clock) perf_capture_axi_before_edge();
+  if (!top->clock) capture_before_edge();
   top->clock = (top->clock == 0) ? 1 : 0;
   npc_eval(top);
   if ((tfp) && ((pmu.active_cycle >= tfp_cycle) | (pmu.instr_cnt >= tfp_inst)))
@@ -316,6 +363,7 @@ void cpu_exec(uint64_t n)
   uint64_t cur_inst_cycle = 0;
   uint64_t progress_cycle = 0;
   uint64_t milestone_insts = 0;
+  uint64_t sample_retirements = 0;
   uint64_t timeout_us = (max_timeout > 0) ? (uint64_t)max_timeout * 1000000 : 0;
   // Progress/LightSSS-fork interval. Defaults to 40M cycles; overridable via
   // NSIM_PROGRESS_CYCLES (mainly to validate LightSSS without billion-cycle
@@ -440,7 +488,17 @@ void cpu_exec(uint64_t n)
       {
         word_t slot_pc = VERILOG_BACKEND(cmu__DOT__rpc_slots)[slot];
         word_t slot_next = VERILOG_BACKEND(cmu__DOT__npc_slots)[slot];
-        checkpoint_resumed |= checkpoint_load_post_trampoline_tick(slot_pc);
+        bool reference_ready = checkpoint_load_reference_tick(slot_pc);
+        if (reference_ready) npc_eval(top);
+        checkpoint_resumed |= reference_ready;
+        bool resumed_here = checkpoint_load_post_trampoline_tick(slot_pc);
+        uint32_t instruction = VERILOG_BACKEND(cmu__DOT__inst_slots)[slot];
+        if (sample_is_retired(instruction, sampled_commit_trap) &&
+            sample_window_accept(sampled_privilege, sampled_satp, sampled_thread_pointer)) {
+          sample_window_commit(slot_pc, instruction, progress_cycle,
+                               sample_retirements, resumed_here);
+          sample_retirements++;
+        }
         checkpoint_note_commit(slot_pc);
         flow_check_commit(slot_pc, slot_next, char('0' + slot));
         if (npc.state != NPC_RUNNING) break;
@@ -611,10 +669,13 @@ void cpu_exec(uint64_t n)
     {
       lightsss_trigger_save();
     }
+    if (sample_window_cycle(progress_cycle, sample_retirements) && npc.state == NPC_RUNNING)
+      npc.state = NPC_QUIT;
     // -c/-i thresholds only START waveform dumping; they no longer halt the
     // simulator.  Use -m / --maximum to bound execution length explicitly.
   }
   serial_sample_milestones(progress_cycle, milestone_insts, true);
+  if (!sample_window_finish(npc.state != NPC_ABORT)) npc.state = NPC_ABORT;
   g_timer += get_time() - now;
 
   switch (npc.state)

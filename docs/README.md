@@ -71,7 +71,7 @@ modified presets have their own ISA scope. Vector and hypervisor extensions are
 optional in RVA22S64; the integrated scalar core does not include V or H.
 
 The [RV64 supervisor verification guide](https://github.com/Kingfish404/raptor-chip/blob/master/verification/riscof/raptor-rv64s/README.md)
-and [requirement ledger](https://github.com/Kingfish404/raptor-chip/blob/master/verification/riscof/raptor-rv64s/requirements.json)
+and the current verification commands
 record source mappings, tests, and evidence scopes. Support describes the RTL
 implementation; formal profile certification is a separate verification claim.
 

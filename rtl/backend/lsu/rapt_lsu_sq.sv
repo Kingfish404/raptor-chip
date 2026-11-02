@@ -376,7 +376,7 @@ module rapt_lsu_sq #(
   //  head" == youngest matching store -- this replaces the former separate
   //  STQ/SQ CAMs and their STQ-over-SQ priority mux.
   // ==========================================================================
-  logic load_in_sq;
+  logic load_in_sq  /* verilator public_flat_rd */;
   logic sq_fwd_ok;
   // A typed store cannot satisfy an untranslated load by VA forwarding:
   // the load may be an IO access whose external read has a side effect.

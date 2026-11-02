@@ -1,10 +1,12 @@
 // Console UART: NS16550 register layout, 16-byte receive FIFO, fixed 8N1.
 // Divisor is in units of 16 input clocks. THR has one holding slot in addition
 // to the shift register. FIFO identification stays disabled (16450 TX depth),
-// so the Linux 8250 driver never assumes a 16-byte transmit FIFO.
+// so the Linux 8250 driver never assumes a 16-byte transmit FIFO. QuietFifoIds
+// matches a captured functional UART only when data traffic is prohibited.
 module rapt_native_uart #(
     parameter int ClockHz = 50_000_000,
-    parameter int Baud = 115200
+    parameter int Baud = 115200,
+    parameter bit QuietFifoIds = 1'b0
 ) (
     input logic clk,
     input logic reset,
@@ -20,7 +22,7 @@ module rapt_native_uart #(
   localparam int DefaultDivisor = (ClockHz + Baud * 8) / (Baud * 16);
   (* ASYNC_REG = "TRUE" *) logic [1:0] rx_sync = '1;
   logic [15:0] divisor;
-  logic [7:0] lcr, mcr, scratch;
+  logic [7:0] lcr, mcr, scratch, fcr;
   logic [3:0] ier;
   logic [19:0] bit_ticks;
   logic [19:0] tx_ticks, rx_ticks;
@@ -45,6 +47,7 @@ module rapt_native_uart #(
     if (ier[2] && (overrun || framing)) iir = 8'h06;
     else if (ier[0] && rx_count != 0) iir = 8'h04;
     else if (ier[1] && tx_irq) iir = 8'h02;
+    if (QuietFifoIds && fcr[0]) iir[7:6] = 2'b11;
     irq = !iir[0];
     case (addr)
       0: rdata = lcr[7] ? divisor[7:0] : (rx_count != 0 ? rx_fifo[rx_head] : 8'b0);
@@ -67,6 +70,7 @@ module rapt_native_uart #(
       lcr <= 8'h03;
       mcr <= 0;
       scratch <= 0;
+      fcr <= 0;
       ier <= 0;
       tx_ticks <= 0;
       tx_shift <= '1;
@@ -84,7 +88,7 @@ module rapt_native_uart #(
       overrun <= 0;
       framing <= 0;
     end else begin
-      if (rd && addr == 2 && iir == 8'h02) tx_irq <= 0;
+      if (rd && addr == 2 && iir[3:0] == 4'h2) tx_irq <= 0;
       if (rd && addr == 5) begin
         overrun <= 0;
         framing <= 0;
@@ -118,6 +122,7 @@ module rapt_native_uart #(
             ier <= wdata[3:0];
             if (wdata[1] && !ier[1] && !tx_pending) tx_irq <= 1;
           end
+          2: fcr <= wdata;
           3: lcr <= wdata;
           4: mcr <= wdata;
           7: scratch <= wdata;

@@ -58,6 +58,15 @@ static uint64_t clint_get_ticks(void)
 #endif
 }
 
+bool clint_sample_state(FILE *out)
+{
+  if (!out) return true;
+  fprintf(out, "clint_mtime=0x%" PRIx64 "\nclint_mtimecmp=0x%" PRIx64
+          "\nclint_msip=0x%x\n", clint_get_ticks(), cpu.mtimecmp,
+          clint_msip[nemu_hartid] & 1u);
+  return true;
+}
+
 static uint64_t sstc_get_stimecmp(const CPU_state *hart)
 {
 #if defined(CONFIG_RV64)

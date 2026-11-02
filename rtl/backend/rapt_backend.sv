@@ -465,6 +465,13 @@ module rapt_backend #(
 
   localparam int OperandOwnerBits = rapt_pkg::index_bits(rapt_pkg::CoreConfig.rob_entries);
   localparam int OperandGenerationBits = rapt_pkg::CoreConfig.rob_generation_bits;
+  localparam int IOQIntegerReadPorts = 1;
+  logic [rapt_pkg::PLENPkg-1:0] ioq_operand_address[IOQIntegerReadPorts];
+  logic [XLEN-1:0] ioq_operand_value[IOQIntegerReadPorts];
+  logic ioq_operand_valid[IOQIntegerReadPorts];
+  logic [rapt_pkg::PLENPkg-1:0] extra_operand_address[3+IOQIntegerReadPorts];
+  logic [XLEN-1:0] extra_operand_value[3+IOQIntegerReadPorts];
+  logic extra_operand_valid[3+IOQIntegerReadPorts];
   logic [rapt_pkg::PLENPkg-1:0] int_operand_address[3];
   logic [XLEN-1:0] int_operand_value[3];
   logic int_operand_valid[3];
@@ -551,7 +558,7 @@ module rapt_backend #(
   // PRF (Physical Register File): top-level shared resource
   // Debug: architectural register view (committed + speculative)
   /* verilator lint_off UNUSEDSIGNAL */
-  logic [XLEN-1:0] rf    [`RAPT_REG_SIZE];
+  logic [XLEN-1:0] rf    [`RAPT_REG_SIZE]  /* verilator public_flat_rd */;
   logic [XLEN-1:0] rf_map[`RAPT_REG_SIZE];
   /* verilator lint_on UNUSEDSIGNAL */
 
@@ -559,12 +566,22 @@ module rapt_backend #(
   logic [XLEN-1:0] rvfi_rd_data[rapt_pkg::CommitWidth];
 `endif
 
+  for (genvar r = 0; r < 3; r++) begin : g_existing_integer_read
+    assign extra_operand_address[r] = int_operand_address[r];
+    assign int_operand_value[r] = extra_operand_value[r];
+    assign int_operand_valid[r] = extra_operand_valid[r];
+  end
+  for (genvar r = 0; r < IOQIntegerReadPorts; r++) begin : g_ioq_integer_read
+    assign extra_operand_address[3+r] = ioq_operand_address[r];
+    assign ioq_operand_value[r] = extra_operand_value[3+r];
+    assign ioq_operand_valid[r] = extra_operand_valid[3+r];
+  end
   rapt_prf #(
-      .ExtraReadPorts(3)
+      .ExtraReadPorts(3 + IOQIntegerReadPorts)
   ) prf (
-      .extra_address(int_operand_address),
-      .extra_value(int_operand_value),
-      .extra_valid(int_operand_valid),
+      .extra_address(extra_operand_address),
+      .extra_value(extra_operand_value),
+      .extra_valid(extra_operand_valid),
       .completion(operand_wake),
       .clock(clock),
       .reset(reset),
@@ -767,7 +784,14 @@ module rapt_backend #(
   );
 
   // LSU (Load/Store Unit)
-  rapt_lsu lsu (
+  rapt_lsu #(
+      .LateOperands(1'b1),
+      .IntegerReadPorts(IOQIntegerReadPorts)
+  ) lsu (
+      .int_source_regs,
+      .operand_read_address(ioq_operand_address),
+      .operand_read_value(ioq_operand_value),
+      .operand_read_valid(ioq_operand_valid),
       .completion(operand_wake),
       .local_fp_wake(local_fp_wake),
       .clock(clock),

@@ -1,7 +1,7 @@
 # Retry setup closure after the initial route and post-route physical
 # optimization. Frequencies, timing exceptions and uncertainty stay unchanged.
 # Called before bitstream generation; refresh every report affected by rerouting.
-proc raptor_fix_phy_min_skew {} {
+proc raptor_fix_phy_min_skew {{phy_pattern {raptor_ddr4_0/*}} {margin_ps 100}} {
     set changed 0
     for {set pass 0} {$pass < 3} {incr pass} {
         set report [report_pulse_width -min_skew -all_violators -limit 1000 \
@@ -14,7 +14,7 @@ proc raptor_fix_phy_min_skew {} {
             set name [lindex $fields 9]
             if {![string is double -strict $slack] || $slack >= 0} {continue}
             if {![string match {RXTX_BITSLICE/*} [lindex $fields 3]] \
-                || ![string match {raptor_ddr4_0/*} $name]} {continue}
+                || ![string match $phy_pattern $name]} {continue}
             dict set targets $name $slack
         }
         if {[dict size $targets] == 0} {break}
@@ -29,7 +29,7 @@ proc raptor_fix_phy_min_skew {} {
             # Increase the route's minimum delay; allow the corresponding
             # slow-corner maximum to grow as well. These are routing goals,
             # not changes to setup/hold/pulse-width timing constraints.
-            set extra [expr {int(ceil(-1000.0 * $slack)) + 100}]
+            set extra [expr {int(ceil(-1000.0 * $slack)) + $margin_ps}]
             set minimum [expr {[get_property FAST_MIN $delays] + $extra}]
             set maximum [expr {[get_property SLOW_MAX $delays] + 3 * $extra}]
             puts "INFO: repairing PHY min skew on $name; route goal $minimum..$maximum ps"

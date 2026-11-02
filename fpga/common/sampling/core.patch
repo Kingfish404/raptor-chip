@@ -1,0 +1,286 @@
+--- a/rtl/rapt.sv
++++ b/rtl/rapt.sv
+@@ -50,6 +50,9 @@
+     /* verilator lint_on UNUSEDPARAM */
+ ) (
+     input clock,
++`ifdef RAPT_SAMPLING
++    rapt_sample_if sample,
++`endif
+     output logic writeback_error_o,
+     // Device writes are reported before a later SC may complete. Pending
+     // holds SC while the platform drains a finite batch of notifications.
+@@ -177,6 +180,21 @@
+   logic            dm_dbg_gpr_we;
+   logic [     4:0] dm_dbg_gpr_addr;
+   logic [XLEN-1:0] dm_dbg_gpr_wdata;
++  logic core_haltreq;
++  logic [4:0] core_dbg_gpr_addr;
++`ifdef RAPT_SAMPLING
++  logic sample_debug_quiescent;
++  always_ff @(posedge clock) begin
++    sample_debug_quiescent <= !reset && sample.quiescent;
++  end
++  assign core_haltreq = dm_haltreq || sample.halt_req;
++  // Reuse the committed debug read port for the Linux TLS thread key while
++  // running/draining. Host GPR selection becomes visible after quiescence.
++  assign core_dbg_gpr_addr = sample_debug_quiescent ? sample.gpr_addr : 5'd4;
++`else
++  assign core_haltreq = dm_haltreq;
++  assign core_dbg_gpr_addr = dm_dbg_gpr_addr;
++`endif
+ 
+   assign io_master_arburst = offchip_axi.arburst;
+   assign io_master_arcache = offchip_axi.arcache;
+@@ -221,6 +239,12 @@
+ 
+   rapt_clint clint_inst (
+       .clock(clock),
++`ifdef RAPT_SAMPLING
++      .restore_i(sample.restore_fire),
++      .restore_time_i(sample.saved_time),
++      .restore_timecmp_i(sample.saved_timecmp),
++      .restore_msip_i(sample.saved_msip),
++`endif
+ 
+       .clint_bus(clint_bus),
+ 
+@@ -287,6 +311,9 @@
+       .XLEN(XLEN),
+       .L1dWriteBack(L1dWriteBack)
+   ) core (
++`ifdef RAPT_SAMPLING
++      .sample(sample),
++`endif
+       .writeback_error_o(writeback_error_o),
+       .external_write_valid_i(external_write_valid_i),
+       .external_write_pending_i(external_write_pending_i),
+@@ -337,14 +364,14 @@
+       // Hart 0; multi-core build will replace with a generate index.
+       .hart_id_i({XLEN{1'b0}}),
+ 
+-      .dm_haltreq_i (dm_haltreq),
++      .dm_haltreq_i (core_haltreq),
+       .halted_o     (dm_halted),
+       .halt_pc_o    (dm_halt_pc),
+       .commit_fire_o(dm_commit_fire),
+ 
+       .dbg_gpr_rdata_o(dm_dbg_gpr_rdata),
+       .dbg_gpr_we_i   (dm_dbg_gpr_we),
+-      .dbg_gpr_addr_i (dm_dbg_gpr_addr),
++      .dbg_gpr_addr_i (core_dbg_gpr_addr),
+       .dbg_gpr_wdata_i(dm_dbg_gpr_wdata),
+ 
+       .reset(reset)
+@@ -352,6 +379,9 @@
+ 
+   assign dm_resumereq_unused = dm_resumereq;
+   assign dm_ndmreset_unused  = dm_ndmreset;
++`ifdef RAPT_SAMPLING
++  assign sample.gpr_data = dm_dbg_gpr_rdata;
++`endif
+ 
+ 
+   rapt_dtm dtm_inst (
+--- a/rtl/rapt_core.sv
++++ b/rtl/rapt_core.sv
+@@ -18,6 +18,9 @@
+     parameter rapt_pkg::l2_link_config_t L2Link = rapt_pkg::L2LinkConfig
+ ) (
+     input clock,
++`ifdef RAPT_SAMPLING
++    rapt_sample_if sample,
++`endif
+     output logic writeback_error_o,
+     // Device writes are reported before a later SC may complete. Pending
+     // holds SC while the platform drains a finite batch of notifications.
+@@ -122,6 +125,12 @@
+   logic memory_data_idle;
+   logic unused_writeback_idle;
+   logic frontend_empty, backend_empty, sq_empty;
++`ifdef RAPT_SAMPLING
++  // Debug halt drains the ROB but frontend/rename may retain younger work.
++  // That speculative work is discarded by the subsequent replay reset.
++  assign sample.quiescent = halted_o && sq_empty && memory_data_idle && unused_writeback_idle;
++  assign sample.drain_ready = {unused_writeback_idle, memory_data_idle, sq_empty, halted_o};
++`endif
+   logic history_restore;
+   logic [63:0] snapshot_ghr, restore_ghr;
+   logic [7:0] snapshot_phr, restore_phr;
+@@ -149,8 +158,17 @@
+ 
+   logic cache_writeback_done;
+   logic cache_writeback_drain;
++  logic sample_writeback_drain;
+   logic cache_writeback_clean, cache_writeback_cbo, cache_writeback_cbo_invalidate;
+   logic [XLEN-1:6] cache_writeback_block;
++`ifdef RAPT_SAMPLING
++  // A halted ROB and empty SQ can still leave dirty write-back cache lines.
++  // Publish them through the normal global drain before reporting quiescence;
++  // its completion includes the final DDR write responses and late refills.
++  assign sample_writeback_drain = sample.halt_req && halted_o && sq_empty;
++`else
++  assign sample_writeback_drain = 1'b0;
++`endif
+   rapt_backend #(
+       .XLEN(XLEN),
+       .RegisteredDrainCompletion(1'b1),
+@@ -169,6 +187,9 @@
+           | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_mul_port(rapt_pkg::CoreConfig))
+           | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_fpu_port(rapt_pkg::CoreConfig)))
+   ) backend (
++`ifdef RAPT_SAMPLING
++      .sample(sample),
++`endif
+       .writeback_done(cache_writeback_done),
+       .writeback_drain(cache_writeback_drain),
+       .writeback_clean(cache_writeback_clean),
+@@ -270,10 +291,10 @@
+       .writeback_idle_o(unused_writeback_idle),
+       .writeback_done_o(cache_writeback_done),
+       .stores_empty_i(sq_empty),
+-      .writeback_drain_i(cache_writeback_drain),
+-      .writeback_clean_i(cache_writeback_clean),
+-      .writeback_cbo_i(cache_writeback_cbo),
+-      .writeback_cbo_invalidate_i(cache_writeback_cbo_invalidate),
++      .writeback_drain_i(cache_writeback_drain || sample_writeback_drain),
++      .writeback_clean_i(cache_writeback_clean || sample_writeback_drain),
++      .writeback_cbo_i(cache_writeback_cbo && !sample_writeback_drain),
++      .writeback_cbo_invalidate_i(cache_writeback_cbo_invalidate && !sample_writeback_drain),
+       .writeback_block_i(cache_writeback_block),
+       .writeback_error_o(writeback_error_o),
+       .external_write_valid_i(external_write_valid_i),
+--- a/rtl/backend/rapt_backend.sv
++++ b/rtl/backend/rapt_backend.sv
+@@ -23,6 +23,9 @@
+     parameter logic [rapt_pkg::CompletionPorts-1:0] RegisteredOperandWakePorts = '0
+ ) (
+     input logic clock,
++`ifdef RAPT_SAMPLING
++    rapt_sample_if sample,
++`endif
+     input logic writeback_done = 1'b1,
+     output logic writeback_drain,
+     output logic writeback_clean,
+@@ -108,6 +111,21 @@
+   rou_cmu_if rou_cmu ();  // Commit
+ 
+   rou_csr_if rou_csr ();
++`ifdef RAPT_SAMPLING
++  // Keep the observer off the core's combinational retirement fanout.
++  always_ff @(posedge clock) begin
++    sample.count <= reset ? '0 : rou_csr.retire_count;
++    sample.mret <= !reset && rou_csr.valid && rou_csr.mret;
++    sample.privilege <= csr_bcast.priv;
++    sample.thread_pointer <= dbg_gpr_rdata_o;
++    for (int c = 0; c < rapt_pkg::CommitWidth; c++) begin
++      sample.pc[c] <= `RAPT_PC_SEXT(XLEN, rou_cmu.slot[c].pc);
++    end
++  end
++  assign sample.restore_fire = sample.restore_armed && rou_csr.valid && rou_csr.mret &&
++      `RAPT_PC_SEXT(XLEN, rou_csr.pc)
++      == sample.restore_pc;
++`endif
+ 
+   dpu_iq_if disp_alq ();
+   dpu_iq_if #(.RS_SIZE(rapt_pkg::BranchQueueEntries)) disp_brq ();
+@@ -759,6 +777,9 @@
+ 
+   rapt_csr csrs (
+       .clock(clock),
++`ifdef RAPT_SAMPLING
++      .sample(sample),
++`endif
+       .mtime_i(mtime_i),
+ 
+       .hart_id_i(hart_id_i),
+--- a/rtl/frontend/rapt_csr.sv
++++ b/rtl/frontend/rapt_csr.sv
+@@ -10,6 +10,9 @@
+     parameter bit [XLEN-1:0] RESET_VAL = 0
+ ) (
+     input clock,
++`ifdef RAPT_SAMPLING
++    rapt_sample_if sample,
++`endif
+ 
+     // Hart identifier injected by the cluster top. Returned verbatim by
+     // CSR reads of `mhartid` (RV Priv Sec.3.1.5). Tied to '0 today since the
+@@ -115,6 +118,12 @@
+   // Preserve the simulator's legacy observation array while storing shared
+   // status bits only once. RESET_VAL reaches SSTATUS through MSTATUS as well.
+   wire [XLEN-1:0] csr[64] /* verilator public_flat_rd */;
++`ifdef RAPT_SAMPLING
++  localparam logic [XLEN-1:0] SampleRootMask = XLEN == 64
++      ? XLEN'(64'hf000_0fff_ffff_ffff) : XLEN'(32'h803f_ffff);
++  // Align address-space identity with the registered retirement packet.
++  always_ff @(posedge clock) sample.satp_root <= csr[SATP___] & SampleRootMask;
++`endif
+   for (genvar i = 0; i < 64; i++) begin : g_csr_view
+     if (i == int'(SSTATUS)) begin : g_sstatus
+       assign csr[i] = (csr_state[MSTATUS] & `RAPT_CSR_SSTATUS_CMASK) | `RAPT_CSR_SSTATUS_HW;
+@@ -962,7 +971,21 @@
+           csr_state[MSTATUS] <= sret_mstatus_next;
+         end
+       end
+-
++`ifdef RAPT_SAMPLING
++      // mret consumes the temporary checkpoint PC before these NBA writes.
++      // Only the saved counters and architectural mepc need this fixup;
++      // GPR/FPR/PMP and other CSRs are restored by real instructions.
++      if (sample.restore_fire) begin
++        mepc_half_q <= sample.saved_mepc[XLEN-1:1];
++        csr_state[MSTATUS] <= sample.saved_status | `RAPT_CSR_MSTATUS_HW;
++        csr_state[MCYCLE_] <= XLEN'(sample.saved_cycle);
++        csr_state[MINSTRET] <= XLEN'(sample.saved_instret);
++        if (XLEN == 32) begin
++          csr_state[MCYCLEH] <= XLEN'(sample.saved_cycle >> 32);
++          csr_state[MINSTRETH] <= XLEN'(sample.saved_instret >> 32);
++        end
++      end
++`endif
+     end
+   end
+ 
+--- a/rtl/perip/rapt_clint.sv
++++ b/rtl/perip/rapt_clint.sv
+@@ -20,6 +20,12 @@
+     parameter int MTIME_DIV = `RAPT_MTIME_DIV
+ ) (
+     input clock,
++`ifdef RAPT_SAMPLING
++    input logic restore_i,
++    input logic [63:0] restore_time_i,
++    restore_timecmp_i,
++    input logic restore_msip_i,
++`endif
+ 
+     clint_bus_if.slave clint_bus,
+ 
+@@ -98,6 +104,14 @@
+       end
+       if (clint_bus.wvalid && clint_bus.awaddr == (`RAPT_CLINT_MSIP) && clint_bus.wstrb[0])
+         msip_reg <= clint_bus.wdata[0];
++`ifdef RAPT_SAMPLING
++      if (restore_i) begin
++        mtime <= restore_time_i;
++        mtimecmp <= restore_timecmp_i;
++        msip_reg <= restore_msip_i;
++        mtime_div_cnt <= '0;
++      end
++`endif
+     end
+   end
+ endmodule
+--- a/rtl/include/rapt_if.svh
++++ b/rtl/include/rapt_if.svh
+@@ -10,6 +10,9 @@
+ `include "rapt_dpu_if.svh"
+ `include "rapt_eu_if.svh"
+ `include "rapt_lsu_if.svh"
++`ifdef RAPT_SAMPLING
++`include "rapt_sample_if.svh"
++`endif
+ 
+ /* verilator lint_off UNUSEDSIGNAL */
+ /* verilator lint_off UNUSEDPARAM */

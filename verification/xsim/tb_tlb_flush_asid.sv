@@ -44,8 +44,8 @@ module tb_tlb_flush_asid #(
   initial begin
     check($bits(dut.vtags[0]) == (XLEN == 64 ? 27 : 20),
           "TLB stores redundant virtual-address bits");
-    check($bits(dut.ptags[0]) == (XLEN == 64 ? 44 : 22),
-          "TLB PPN width does not match the translation format");
+    check($bits(dut.ptags[0]) == (`RAPT_PADDR_BITS - 12),
+          "TLB PPN width does not match implemented PA width");
     flush = 1'b0;
     lookup_vtag = (XLEN-12)'('h12345);
     lookup_asid = 9'h12;
@@ -123,6 +123,28 @@ module tb_tlb_flush_asid #(
     flush = 1'b0;
     check(!hit && pbmt == 0, "flushed PBMT remained visible");
 
+    // Overlapping local/global refills must return one complete resident tuple.
+    for (int global_first = 0; global_first < 2; global_first++) begin
+      for (int owner = 0; owner < 2; owner++) begin
+        fill_vtag = (XLEN-12)'('h40001);
+        fill_asid = 9'(owner == global_first ? 4 : 3);
+        fill_pte = owner == global_first ? 7'h73 : 7'h63;
+        fill_ptag = (XLEN-10)'('h80001 + owner);
+        fill_pbmt = 2'(owner + 1);
+        fill_valid = 1;
+        tick(1);
+      end
+      fill_valid = 0;
+      lookup_vtag = fill_vtag;
+      lookup_asid = 3;
+      #1;
+      check(hit && ptag == fill_ptag && pte_flags == fill_pte && pbmt == fill_pbmt,
+            "overlapping local/global entries mixed translation payloads");
+      flush = 1;
+      tick(1);
+      flush = 0;
+    end
+
     // Fill past capacity with alternating attributes and unrelated lookup.
     fill_pte = 7'b110_0011;
     for (int entry = 0; entry < 2 * Entries + 1; entry++) begin
@@ -162,10 +184,10 @@ module tb_tlb_flush_asid #(
     check(!hit && pbmt == 0, "simultaneous PBMT fill defeated flush");
 
     if (XLEN == 64) begin
-      // Both canonical halves, including a PPN using PA bit 55. The legacy
-      // port's ten padding bits are zero, not part of the stored translation.
+      // Both canonical halves use compact tags; unsupported PPNs are rejected
+      // rather than truncated into a mapping of low physical memory.
       fill_vtag = (XLEN-12)'(64'hffffffc012345000 >> 12);
-      fill_ptag = (XLEN-10)'(64'h80000012345);
+      fill_ptag = (XLEN-10)'(64'h12345);
       fill_pte = 7'b110_0011;
       fill_asid = 9'h17;
       fill_pbmt = 1;
@@ -175,8 +197,7 @@ module tb_tlb_flush_asid #(
       lookup_vtag = fill_vtag;
       lookup_asid = fill_asid;
       #1;
-      check(hit && ptag == fill_ptag && pbmt == 1,
-            "compact TLB lost canonical high VA or high PPN bits");
+      check(hit && ptag == fill_ptag && pbmt == 1, "compact TLB lost canonical high VA");
       // Same stored VPN, different upper bits: must not alias a legal entry.
       for (int bit_idx = 39; bit_idx < XLEN; bit_idx++) begin
         lookup_vtag = fill_vtag ^ ((XLEN - 12)'(1) << (bit_idx - 12));
@@ -190,15 +211,13 @@ module tb_tlb_flush_asid #(
       fill_valid = 1;
       tick(1);
       fill_valid = 0;
-      check(hit && ptag == (XLEN - 10)'(64'h80000012345),
-            "non-canonical fill overwrote a legal VPN");
+      check(hit && ptag == (XLEN - 10)'(64'h12345), "non-canonical fill overwrote a legal VPN");
       fill_vtag = lookup_vtag;
-      fill_ptag = (XLEN-10)'(1) << 44;
+      fill_ptag = (XLEN-10)'(1) << (`RAPT_PADDR_BITS - 12);
       fill_valid = 1;
       tick(1);
       fill_valid = 0;
-      check(hit && ptag == (XLEN - 10)'(64'h80000012345),
-            "nonzero PPN transport padding was silently truncated");
+      check(hit && ptag == (XLEN - 10)'(64'h12345), "unsupported PA bits were silently truncated");
     end
 
     $display("PASS: TLB %0d entries, compact tags, canonical lookup, flush and ASID checks passed",

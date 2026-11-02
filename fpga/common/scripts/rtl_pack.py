@@ -38,6 +38,9 @@ def immutable_copy(output):
 
 
 def pack_inputs(repo, config_dir, flags):
+    if (any(flag.split("=", 1)[0] == "-DRAPT_SAMPLING" for flag in shlex.split(flags)) and
+            not (repo / "rtl/include/rapt_sample_if.svh").is_file()):
+        raise ValueError("RAPT_SAMPLING requires the FPGA --sampling source overlay")
     # Same package-first source set as sim/Makefile: no upstream SoC models,
     # and only the two supported generated instruction decoders.
     sources = sorted(p for p in (repo / "rtl").rglob("*.sv") if "generated" not in p.relative_to(repo / "rtl").parts)

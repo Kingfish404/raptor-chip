@@ -161,7 +161,12 @@ VERILATOR_PROFILE_FLAGS :=
 ifeq ($(RAPT_SIM_PROFILE),1)
 VERILATOR_PROFILE_FLAGS := --prof-c --prof-cfuncs
 endif
-VERILATOR_FLAG = $(VERILATOR_PROFILE_FLAGS) --public \
+# The C++ monitor reads internal signals, so --public stays. Verilator 5.054
+# warns about it (UNOPTPUBLIC) while parsing --public, so the waiver must come
+# first; older releases reject that warning name.
+VERILATOR_PUBLIC_WAIVER := $(shell $(VERILATOR) -Wno-UNOPTPUBLIC --version >/dev/null 2>&1 \
+	&& echo -Wno-UNOPTPUBLIC)
+VERILATOR_FLAG = $(VERILATOR_PROFILE_FLAGS) $(VERILATOR_PUBLIC_WAIVER) --public \
 	--autoflush --timescale "1ns/1ns" --no-timing \
 	-Wno-WIDTHEXPAND -Wno-WIDTHTRUNC # -Wall -Wno-DECLFILENAME -Wno-UNUSED
 VERILATOR_FLAG += -Wno-ASCRANGE -Wno-UNSIGNED

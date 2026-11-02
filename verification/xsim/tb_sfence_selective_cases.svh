@@ -29,7 +29,7 @@ task automatic run_selective_cases;
           for (int n = 0; n < 4; n++) begin
             resident_asid = n == 0 ? 0 : n == 3 ? 8 : 7;
             global_bit = n == 2;
-            expected = !((all_vpn != 0 || target_vpn == n)
+            expected = !BulkInvalidate && !((all_vpn != 0 || target_vpn == n)
                          && (all_asid != 0 || (!global_bit && target_asid == resident_asid)));
             probe(n, resident_asid, expected, global_bit, 0);
             if (global_bit) probe(n, 500, expected, 1, 0);
@@ -46,7 +46,7 @@ task automatic run_selective_cases;
     put(5, 8, 0, 0);
     fence(0, 0, 5, 7);
     probe(5, 7, 0, 0, 0);
-    probe(5, 8, 1, 0, 0);
+    probe(5, 8, !BulkInvalidate, 0, 0);
     checked_cases++;
   end
 
@@ -61,15 +61,15 @@ task automatic run_selective_cases;
     fence(0, 0, 27'(base + 7), 7);
     probe(base + 1, 7, 0, 0, level);
     probe(base + 2, 7, 0, 0, level);
-    probe(base + span + 3, 7, 1, 0, level);
+    probe(base + span + 3, 7, !BulkInvalidate, 0, level);
     checked_cases++;
 
     clear_all();
     put(base + 1, 7, 1, level);
     put(base + 2, 7, 1, level);
     fence(0, 0, 27'(base + 7), 7);
-    probe(base + 1, 500, 1, 1, level);
-    probe(base + 2, 500, 1, 1, level);
+    probe(base + 1, 500, !BulkInvalidate, 1, level);
+    probe(base + 2, 500, !BulkInvalidate, 1, level);
     fence(0, 1, 27'(base + 7), 0);
     probe(base + 1, 500, 0, 1, level);
     probe(base + 2, 500, 0, 1, level);
@@ -80,7 +80,7 @@ task automatic run_selective_cases;
     put(base + 1, 7, 0, level);
     put(base + 1, 7, 0, 0);
     fence(0, 0, 27'(base + 7), 7);
-    probe(base + 1, 7, 1, 0, 0);
+    probe(base + 1, 7, !BulkInvalidate, 0, 0);
     put(base + 1, 7, 0, level);
     fence(0, 0, 27'(base + 7), 7);
     probe(base + 1, 7, 0, 0, level);
@@ -107,7 +107,7 @@ task automatic run_selective_cases;
   sfence_vpn = 9;
   sfence_asid = 9;
   put(4, 7, 0, 0, 1, 0);
-  probe(1, 7, 1, 0, 0);
+  probe(1, 7, !BulkInvalidate, 0, 0);
   probe(4, 7, 0, 0, 0);
   put(4, 7, 0, 0);
   probe(4, 7, 1, 0, 0);
@@ -117,4 +117,18 @@ task automatic run_selective_cases;
   probe(4, 7, 0, 0, 0);
   probe(5, 7, 0, 0, 0);
   checked_cases++;
+
+  // A bounded valid vector has no epoch wrap. Repeated fences must never
+  // revive an old entry, even when fills are interspersed with invalidations.
+  if (BulkInvalidate) begin
+    clear_all();
+    put(1, 7, 0, 0);
+    for (int n = 0; n < 1024; n++) begin
+      put(2, 7, 1, 0);
+      fence(0, 0, 9, 9);
+      probe(1, 7, 0, 0, 0);
+      probe(2, 500, 0, 1, 0);
+    end
+    checked_cases++;
+  end
 endtask

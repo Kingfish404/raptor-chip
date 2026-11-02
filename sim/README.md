@@ -256,7 +256,7 @@ make sta-detail MEMORY=dff RAPT_CONFIG=small STA_PLATFORM=asap7 VFLAGS=-DRAPT_RV
 make sta-check MEMORY=dff RAPT_CONFIG=default VFLAGS=-DRAPT_RV64
 ```
 
-`sta-check MEMORY=dff` only preprocesses and elaborates the full core; it does not run technology mapping or STA. The SRAM-macro define is explicitly disabled, and no extra macro Liberty or blackbox files are supplied to the backend. Standard-cell timing still comes from the selected PDK. Supported in-tree platforms are `nangate45`, `asap7`, and `sky130hd` (`sky130` is an alias). A proprietary PDK such as TSMC 22 nm requires licensed libraries and a corresponding platform configuration in the `YOSYS_OPENSTA` backend; these targets do not provide that PDK.
+`sta-check MEMORY=dff` only preprocesses and elaborates the full core; it does not run technology mapping or STA. The SRAM-macro define is explicitly disabled, and no extra macro Liberty or blackbox files are supplied to the backend. Standard-cell timing still comes from the selected PDK. Supported in-tree platforms are `nangate45`, `asap7`, and `sky130hd` (`sky130` is an alias). A proprietary PDK requires licensed libraries and a corresponding platform configuration in the `YOSYS_OPENSTA` backend; these targets do not provide that PDK.
 
 Outputs are isolated by build profile, HDL preset, XLEN, PDK, and frequency:
 

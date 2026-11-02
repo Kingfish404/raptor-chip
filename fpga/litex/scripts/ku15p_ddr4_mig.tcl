@@ -1,14 +1,14 @@
 # Vivado DDR4 MIG for Milianke MLK-CU07/CU08-KU15P.
-# Physical parameters mirror the board reference design. LiteX's width
-# adapter retains narrow AWSIZE/ARSIZE beats on the 512-bit interface, so
+# LiteX's width adapter retains narrow AWSIZE/ARSIZE beats on the 512-bit interface, so
 # MIG must explicitly support narrow transfers (including RV32 word access).
 
-# CU07 retains the 2400 MT/s defaults. LiteX inlines CU08's overrides before
-# this script so an experimental memory speed does not change the other board.
-if {![info exists raptor_ddr4_time_period]} {set raptor_ddr4_time_period 833}
-if {![info exists raptor_ddr4_input_clock_period]} {set raptor_ddr4_input_clock_period 9996}
-if {![info exists raptor_ddr4_cas_latency]} {set raptor_ddr4_cas_latency 17}
-if {![info exists raptor_ddr4_cas_write_latency]} {set raptor_ddr4_cas_write_latency 12}
+# CU07 and CU08 default to DDR4-2666 / 333.333 MHz UI with a 100 MHz reference.
+# LiteX inlines board-specific parameters before this shared script.
+if {![info exists raptor_ddr4_time_period]} {set raptor_ddr4_time_period 750}
+if {![info exists raptor_ddr4_input_clock_period]} {set raptor_ddr4_input_clock_period 10000}
+if {![info exists raptor_ddr4_cas_latency]} {set raptor_ddr4_cas_latency 19}
+if {![info exists raptor_ddr4_cas_write_latency]} {set raptor_ddr4_cas_write_latency 14}
+if {![info exists raptor_ddr4_memory_part]} {set raptor_ddr4_memory_part MT40A512M16LY-075}
 
 set raptor_ddr4_ip [get_ips -quiet raptor_ddr4_0]
 if { $raptor_ddr4_ip eq "" } {
@@ -19,7 +19,7 @@ if { $raptor_ddr4_ip eq "" } {
 set_property -dict [list \
     CONFIG.C0.DDR4_TimePeriod $raptor_ddr4_time_period \
     CONFIG.C0.DDR4_InputClockPeriod $raptor_ddr4_input_clock_period \
-    CONFIG.C0.DDR4_MemoryPart {MT40A512M16HA-083E} \
+    CONFIG.C0.DDR4_MemoryPart $raptor_ddr4_memory_part \
     CONFIG.C0.DDR4_CasLatency $raptor_ddr4_cas_latency \
     CONFIG.C0.DDR4_CasWriteLatency $raptor_ddr4_cas_write_latency \
     CONFIG.C0.DDR4_DataWidth {64} \

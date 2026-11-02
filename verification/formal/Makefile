@@ -142,7 +142,7 @@ all: formal_ieu_alu formal_ieu_muldiv formal_pmp formal_plru formal_clint formal
 	formal_dtm formal_bus formal_divsqrt formal_memory_progress formal_sram \
 	formal_rvfi_metadata formal_rvfi_platform formal_rou_rvfi formal_cache_nru \
 	formal_recovery_pending formal_stream_queue formal_rou_retire formal_l1d_data formal_prf \
-	formal_ioq_owner formal_ioq_store
+	formal_ioq_owner formal_ioq_store formal_axi_r_buffer
 
 .PHONY: formal_memory_progress
 formal_memory_progress: ## Check reduced L1D/bus bounded progress and cover collision recovery
@@ -276,31 +276,55 @@ formal_ieu_alu: check-tools ## Prove unrestricted ALU values, opcode activation 
 	python3 "$(RAPTOR_HOME)/verification/scripts/alu_contract.py" receipts \
 	  --evidence "$(FORMAL_RESULTS_DIR)/alu"
 
+# Keep in step with the rapt_lsu parameters in rtl/backend/rapt_backend.sv.
+FORMAL_IOQ_PRODUCTION_ARGS = --late-operands --operand-read-ports 1
 FORMAL_IOQ_OWNER_PRESETS ?=
-FORMAL_IOQ_OWNER_ARGS = $(if $(strip $(FORMAL_IOQ_OWNER_PRESETS)),--presets $(FORMAL_IOQ_OWNER_PRESETS))
+FORMAL_IOQ_OWNER_REUSE_EVIDENCE ?=
+FORMAL_IOQ_OWNER_NEGATIVE_REPLAYS ?=
 FORMAL_IOQ_OWNER_TIMEOUT ?= 1800
 FORMAL_IOQ_OWNER_DEPTH ?= 4
-FORMAL_IOQ_OWNER_SOLVER ?= auto
-.PHONY: formal_ioq_owner
-formal_ioq_owner: check-tools ## Prove production IOQ allocation and request/response provenance
-	python3 "$(RAPTOR_HOME)/verification/scripts/ioq_contract.py" prove \
-	  --output "$(FORMAL_RESULTS_DIR)/ioq-owner" --jobs "$(FORMAL_JOBS)" \
-	  --timeout "$(FORMAL_IOQ_OWNER_TIMEOUT)" --depth "$(FORMAL_IOQ_OWNER_DEPTH)" \
-	  --solver "$(FORMAL_IOQ_OWNER_SOLVER)" $(FORMAL_IOQ_OWNER_ARGS)
-	python3 "$(RAPTOR_HOME)/verification/scripts/ioq_contract.py" activate \
-	  --evidence "$(FORMAL_RESULTS_DIR)/ioq-owner" --jobs "$(FORMAL_JOBS)" \
-	  --timeout "$(FORMAL_IOQ_OWNER_TIMEOUT)"
-
+FORMAL_IOQ_OWNER_SOLVER ?= bitwuzla
 FORMAL_IOQ_STORE_PRESETS ?=
-FORMAL_IOQ_STORE_ARGS = $(if $(strip $(FORMAL_IOQ_STORE_PRESETS)),--presets $(FORMAL_IOQ_STORE_PRESETS))
+FORMAL_IOQ_STORE_REUSE_EVIDENCE ?=
+FORMAL_IOQ_STORE_NEGATIVE_REPLAYS ?=
 FORMAL_IOQ_STORE_TIMEOUT ?= 1800
 FORMAL_IOQ_STORE_SOLVER ?= bitwuzla
-.PHONY: formal_ioq_store
+
+# $(1): contract name; $(2): public option prefix; $(3): additional proof options.
+define run-ioq-contract
+	python3 "$(RAPTOR_HOME)/verification/scripts/ioq_contract.py" prove --contract $(1) \
+	  --output "$(FORMAL_RESULTS_DIR)/ioq-$(1)" --jobs "$(FORMAL_JOBS)" \
+	  --timeout "$($(2)_TIMEOUT)" --solver "$($(2)_SOLVER)" $(3) $(FORMAL_IOQ_PRODUCTION_ARGS) \
+	  $(if $(strip $($(2)_PRESETS)),--presets $($(2)_PRESETS)) \
+	  $(if $($(2)_REUSE_EVIDENCE),--reuse-evidence "$($(2)_REUSE_EVIDENCE)") \
+	  $(if $($(2)_NEGATIVE_REPLAYS),--negative-replays "$($(2)_NEGATIVE_REPLAYS)")
+	python3 "$(RAPTOR_HOME)/verification/scripts/ioq_contract.py" activate \
+	  --evidence "$(FORMAL_RESULTS_DIR)/ioq-$(1)" --jobs "$(FORMAL_JOBS)" \
+	  --timeout "$($(2)_TIMEOUT)" --solver "$($(2)_SOLVER)"
+endef
+
+.PHONY: formal_ioq_owner formal_ioq_store
+formal_ioq_owner: check-tools ## Prove production IOQ allocation and request/response provenance
+	$(call run-ioq-contract,owner,FORMAL_IOQ_OWNER,--depth "$(FORMAL_IOQ_OWNER_DEPTH)")
+
 formal_ioq_store: check-tools ## Prove IOQ store operands, AMO payload bytes and sampled SC decisions
-	python3 "$(RAPTOR_HOME)/verification/scripts/ioq_contract.py" prove --contract store \
-	  --output "$(FORMAL_RESULTS_DIR)/ioq-store" --jobs "$(FORMAL_JOBS)" \
-	  --timeout "$(FORMAL_IOQ_STORE_TIMEOUT)" --solver "$(FORMAL_IOQ_STORE_SOLVER)" \
-	  $(FORMAL_IOQ_STORE_ARGS)
+	$(call run-ioq-contract,store,FORMAL_IOQ_STORE)
+
+FORMAL_AXI_R_BUFFER_PRESETS ?=
+FORMAL_AXI_R_BUFFER_TIMEOUT ?= 120
+FORMAL_CLINT_PRESETS ?=
+FORMAL_CLINT_TIMEOUT ?= 600
+
+define run-native-contract
+	python3 "$(RAPTOR_HOME)/verification/scripts/formal_contract.py" $(1) \
+	  --output "$(FORMAL_RESULTS_DIR)/$(1)" --jobs "$(FORMAL_JOBS)" \
+	  --timeout "$($(2)_TIMEOUT)" \
+	  $(if $(strip $($(2)_PRESETS)),--presets $($(2)_PRESETS))
+endef
+
+.PHONY: formal_axi_r_buffer
+formal_axi_r_buffer: check-tools ## Prove buffered/bypass AXI R ordering and channel passthrough
+	$(call run-native-contract,axi-r-buffer,FORMAL_AXI_R_BUFFER)
 
 formal_pmp: check-tools ## Prove RV32/RV64 PMP matching, priority and permissions
 	$(SBY_RUN) -f pmp.sby
@@ -323,8 +347,8 @@ formal_pmp_composed: check-tools ## Prove every PMP range, then compose with pri
 formal_plru: check-tools ## Prove 2/4/8-way PLRU selection and state updates
 	$(SBY_RUN) -f plru.sby
 
-formal_clint: check-tools ## Prove CLINT timer, compare, register and interrupt behavior
-	$(SBY_RUN) -f clint.sby
+formal_clint: check-tools ## Qualify CLINT byte lanes and timer/interrupt state
+	$(call run-native-contract,clint,FORMAL_CLINT)
 
 formal_plic: check-tools ## Prove RV32/RV64 PLIC arbitration, contexts and gateway lifecycle
 	$(SBY_RUN) -f plic.sby

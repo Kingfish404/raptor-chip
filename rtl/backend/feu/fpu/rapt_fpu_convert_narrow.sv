@@ -38,16 +38,13 @@ module rapt_fpu_convert_narrow (
   logic special_c;
   logic [63:0] special_result_c;
   logic [4:0] special_flags_c;
-  logic leading_found_c;
-  integer leading_index_c;
-  integer leading_scan_index_c;
 
   logic normal_c;
   logic precision_guard_c, precision_sticky_c, precision_round_up_c, tiny_c;
   logic [23:0] retained_c;
   logic guard_c, sticky_c;
-  integer shift_count_c;
-  integer sticky_index_c;
+  logic [5:0] shift_count_c;
+  logic [52:0] sticky_mask_c;
 
   logic [63:0] stage3_result_c;
   logic [4:0] stage3_flags_c;
@@ -64,8 +61,6 @@ module rapt_fpu_convert_narrow (
     special_c = 1'b0;
     special_result_c = 64'hffff_ffff_7fc0_0000;
     special_flags_c = '0;
-    leading_found_c = 1'b0;
-    leading_index_c = 0;
 
     if (exponent_c == 11'h7ff) begin
       special_c = 1'b1;
@@ -75,18 +70,11 @@ module rapt_fpu_convert_narrow (
       special_c = 1'b1;
       special_result_c = {32'hffff_ffff, sign_c, 31'b0};
     end else if (exponent_c == '0) begin
-      for (
-          leading_scan_index_c = 51;
-          leading_scan_index_c >= 0;
-          leading_scan_index_c = leading_scan_index_c - 1
-      ) begin
-        if (!leading_found_c && fraction_c[leading_scan_index_c]) begin
-          leading_index_c = leading_scan_index_c;
-          leading_found_c = 1'b1;
-        end
-      end
-      significand_c = {1'b0, fraction_c} << (52 - leading_index_c);
-      exponent_value_c = 13'(-1022 - (52 - leading_index_c));
+      // Every nonzero D subnormal is below half the smallest S subnormal.
+      // Only sign and sticky affect rounding, so a leading-one detector and
+      // normalization barrel shifter cannot contribute to the result.
+      significand_c = 53'd1;
+      exponent_value_c = -13'sd151;
     end else begin
       significand_c = {1'b1, fraction_c};
       exponent_value_c = $signed({1'b0, exponent_c}) - 13'sd1023;
@@ -110,17 +98,21 @@ module rapt_fpu_convert_narrow (
     endcase
     tiny_c = !normal_c && !((s1_exponent_q == -13'sd127)
         && precision_round_up_c && (&s1_significand_q[52:29]));
-    shift_count_c = normal_c ? 29 : -integer'(s1_exponent_q) - 97;
+    // Beyond 53 bits, retained and guard are both zero. Saturate the shift
+    // before indexing the window so exponent range does not widen the muxes.
+    shift_count_c = normal_c ? 6'd29 : s1_exponent_q < -13'sd150
+        ? 6'd54 : 6'(-s1_exponent_q - 13'sd97);
     retained_c = '0;
     guard_c = 1'b0;
     sticky_c = 1'b0;
-    if (shift_count_c < 64) retained_c = 24'(s1_significand_q >> shift_count_c);
-    if (shift_count_c > 0 && shift_count_c <= 53) guard_c = s1_significand_q[shift_count_c-1];
+    sticky_mask_c = '0;
+    if (shift_count_c <= 53) retained_c = 24'(s1_significand_q >> shift_count_c);
+    if (shift_count_c > 0 && shift_count_c <= 53) guard_c = s1_significand_q[shift_count_c-6'd1];
     if (shift_count_c > 53) sticky_c = |s1_significand_q;
-    else if (shift_count_c > 1)
-      for (sticky_index_c = 0; sticky_index_c < 53; sticky_index_c = sticky_index_c + 1)
-      if (sticky_index_c < shift_count_c - 1)
-        sticky_c = sticky_c | s1_significand_q[sticky_index_c];
+    else if (shift_count_c > 1) begin
+      sticky_mask_c = {53{1'b1}} >> (6'd54 - shift_count_c);
+      sticky_c = |(s1_significand_q & sticky_mask_c);
+    end
   end
 
   always_comb begin

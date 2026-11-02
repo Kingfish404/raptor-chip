@@ -44,6 +44,7 @@ module sfence_walk_case #(
       .XLEN  (XLEN),
       .Enable(Enable)
   ) walker (
+      .access_fault(),
       .*
   );
   rapt_l2tlb #(
@@ -214,6 +215,7 @@ module sfence_tlb_case #(
 );
   localparam int XLEN = `RAPT_XLEN;
   localparam bit CanKeepSameVpn = !DataTlb || Ways != 1;
+  localparam bit BulkInvalidate = DataTlb;
   logic clock = 0, reset = 1, flush = 0;
   always #5 clock = ~clock;
   logic sfence_valid = 0, sfence_all_vpn = 0, sfence_all_asid = 0;
@@ -234,6 +236,14 @@ module sfence_tlb_case #(
         .ENTRIES(16),
         .WAYS(Ways)
     ) dut (
+        .hit_b(),
+        .ptag_b(),
+        .pte_flags_b(),
+        .pbmt_b(),
+        .verdict_b(),
+        .lookup_b_valid(1'b0),
+        .lookup_b_vtag('0),
+        .lookup_b_asid('0),
         .*
     );
   end else begin : g_instruction
@@ -255,7 +265,7 @@ module sfence_tlb_case #(
                      input bit with_fence = 0, input bit with_flush = 0);
     @(negedge clock);
     fill_vtag = tag(vpn);
-    fill_ptag = (XLEN - 10)'('h80000 + vpn);
+    fill_ptag = test_ppn(vpn);
     fill_asid = 9'(asid);
     fill_pte = 7'h63 | (global_bit ? 7'h10 : 0);
     fill_pbmt = 2'(vpn % 3);
@@ -279,7 +289,7 @@ module sfence_tlb_case #(
     check(hit == expected, $sformatf("vpn=%x asid=%0d hit=%b expected=%b", vpn, asid, hit, expected
           ));
     if (expected) begin
-      check(ptag == (XLEN - 10)'('h80000 + vpn), "PPN changed");
+      check(ptag == test_ppn(vpn), "PPN changed");
       check(pte_flags == (7'h63 | (global_bit ? 7'h10 : 0)), "PTE flags changed");
       check(pbmt == 2'(vpn % 3), "PBMT changed");
       if (DataTlb) check(verdict == 10'h2bf, "PMP verdict changed");
@@ -357,6 +367,7 @@ endmodule
 module tb_sfence_selective_l2;
   localparam int XLEN = `RAPT_XLEN;
   localparam bit CanKeepSameVpn = 0;
+  localparam bit BulkInvalidate = 1;
   logic clock = 0, reset = 1, flush = 0, cancel = 0;
   always #5 clock = ~clock;
   logic sfence_valid = 0, sfence_all_vpn = 0, sfence_all_asid = 0;
@@ -368,7 +379,8 @@ module tb_sfence_selective_l2;
   logic [`RAPT_CSR_SATP_PPN_W-1:0] context_root = 1;
   rapt_l2tlb #(
       .Entries(16),
-      .XLEN(XLEN)
+      .XLEN(XLEN),
+      .GenerationBits(2)
   ) dut (
       .clock(clock),
       .reset(reset),
@@ -390,12 +402,13 @@ module tb_sfence_selective_l2;
   `include "tb_sfence_helpers.svh"
   task automatic put(input int unsigned vpn, input int asid, input bit global_bit, input int level,
                      input bit with_fence = 0, input bit with_flush = 0);
+    while (ready == 0 && !cancel) tick();
     @(negedge clock);
     req[0] = '0;
     req[0].valid = 1;
     req[0].fill = 1;
     req[0].vtag = tag(vpn);
-    req[0].ptag = (XLEN - 10)'('h80000 + vpn);
+    req[0].ptag = test_ppn(vpn);
     req[0].asid = 9'(asid);
     req[0].pte = 7'h63 | (global_bit ? 7'h10 : 0);
     req[0].pbmt = 2'(vpn % 3);
@@ -413,6 +426,7 @@ module tb_sfence_selective_l2;
   endtask
   task automatic probe(input int unsigned vpn, input int asid, input bit expected,
                        input bit global_bit, input int level);
+    while (ready == 0) tick();
     @(negedge clock);
     req[1] = '0;
     req[1].valid = 1;
@@ -426,7 +440,7 @@ module tb_sfence_selective_l2;
     check(rsp[1].hit == expected, $sformatf(
           "vpn=%x asid=%0d hit=%b expected=%b", vpn, asid, rsp[1].hit, expected));
     if (expected) begin
-      check(rsp[1].ptag == (XLEN - 10)'('h80000 + vpn), "PPN changed");
+      check(rsp[1].ptag == test_ppn(vpn), "PPN changed");
       check(rsp[1].pte == (7'h63 | (global_bit ? 7'h10 : 0)), "PTE flags changed");
       check(rsp[1].pbmt == 2'(vpn % 3), "PBMT changed");
       check(rsp[1].level == 2'(level), "leaf level changed");

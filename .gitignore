@@ -82,3 +82,27 @@ tmp
 
 # ---- OS artifacts ----
 .DS_Store
+
+# ---- Physical-design data: never tracked, whatever whitelist matched above ----
+*.lib
+*.db
+*.lef
+*.tlef
+*.def
+*.gds
+*.gds2
+*.oas
+*.spef
+*.sdf
+*.tf
+*.itf
+*.tluplus
+*.ndm
+*.cdl
+*.mcm
+*.upf
+*.cpf
+**/mapped*.v
+**/*.mapped.v
+**/*_netlist.v
+*.sdc

@@ -14,7 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
-from yosys_common import ROOT, run_bounded
+from yosys_common import ROOT, run_bounded, run_sby_task, sha, task_status
 
 
 TOP = 'formal_ioq_owner'
@@ -23,8 +23,6 @@ HARNESS = ROOT / 'verification/formal/formal_ioq.sv'
 
 DUT = ROOT / 'rtl/backend/lsu/rapt_lsu_ioq.sv'
 
-TOOLS = ROOT / 'third_party/oss-cad-suite/bin'
-
 SCOPE = ('Full production IOQ + actual DPU and capacity adapter; independent dispatch '
          'and response histories prove admission, queue ownership, request hold, A/B '
          'response attribution, integer/FP completion provenance and at-most-once '
@@ -32,8 +30,10 @@ SCOPE = ('Full production IOQ + actual DPU and capacity adapter; independent dis
          'address translation, exception classification and store-data semantics remain open.')
 
 
-def sha(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def select_solver(solver, frontend):
+    if solver != 'auto':
+        return solver
+    return 'bitwuzla' if frontend['geometry']['dispatch_width'] >= 8 else 'yices'
 
 
 def canonical_model(model):
@@ -56,7 +56,7 @@ def audit_frontend(model):
     if top not in ('formal_ioq_owner', 'formal_ioq_store'):
         raise ValueError('Expected a fully elaborated production IOQ/dispatch composition')
     module = model['modules'][top]
-    prefix = 'base.' if top == 'formal_ioq_store' else ''
+    prefix = '' if top == TOP else 'base.'
     counts = dict(assertions=0, covers=0, assumptions=0)
     covers = []
     for name, cell in module['cells'].items():
@@ -92,15 +92,24 @@ def audit_frontend(model):
         generation_bits=memories[prefix + 'generation']['width'],
         physical_index_bits=memories[prefix + 'prd']['width'],
         arch_index_bits=memories[prefix + 'rd']['width'])
+    read_bits = len(netnames[prefix + 'dut.operand_read_address']['bits'])
+    physical_bits = counts['geometry']['physical_index_bits']
+    if read_bits % physical_bits:
+        raise ValueError('Native IOQ operand read ports have an invalid width')
+    counts['geometry'].update(
+        late_operands=prefix + 'dut.g_late_operands.operands.addr_ready' in netnames,
+        operand_read_ports=read_bits // physical_bits)
     return counts
 
 
 def read_command(case, rtl, *, dut=DUT):
     profile = contract_profile(case.get('contract', 'owner'))
-    top, harness = profile['top'], profile['harness']
+    top = profile['top']
     flags = '-DRAPT_RV64 ' if case['xlen'] == 64 else '-URAPT_RV64 '
-    if profile['top'] == 'formal_ioq_store':
-        flags += '-DRAPT_FORMAL_IOQ_STORE '
+    if profile['define']:
+        flags += '-D' + profile['define'] + ' '
+    flags += '-DRAPT_FORMAL_IOQ_LATE ' if case.get('late_operands') else '-URAPT_FORMAL_IOQ_LATE '
+    flags += f'-DRAPT_FORMAL_IOQ_READ_PORTS={case.get("operand_read_ports", 1)} '
     flags += '-DSYNTHESIS ' if case['synthesis'] else '-USYNTHESIS '
     flags += '-URAPT_ASSERT_EN -URAPT_SVA_ACTIVE '
     flags += '-DRAPT_USE_SRAM_MACRO ' if case['memory'] == 'sram' else '-URAPT_USE_SRAM_MACRO '
@@ -113,7 +122,7 @@ def read_command(case, rtl, *, dut=DUT):
             '--allow-toplevel-iface-ports ' + flags
             + f'-I{ROOT}/rtl/configs/{case["preset"]} -I{ROOT}/rtl/include '
             + f'-I{ROOT}/rtl/include/npc -I{ROOT}/rtl/include/dpic_mock --top {top} '
-            + ' '.join(map(str, files + [harness])))
+            + ' '.join(map(str, files + [HARNESS])))
 
 
 def compile_case(directory, case, rtl, timeout, yosys, *, dut=DUT):
@@ -130,6 +139,10 @@ def compile_case(directory, case, rtl, timeout, yosys, *, dut=DUT):
     if child.returncode == 0:
         model = json.loads(raw.read_text())
         row['frontend'] = audit_frontend(model)
+        geometry = row['frontend']['geometry']
+        if (geometry['late_operands'] != bool(case.get('late_operands', False))
+                or geometry['operand_read_ports'] != case.get('operand_read_ports', 1)):
+            raise ValueError('Native operand implementation differs from selected parameters')
         canonical = canonical_model(model)
         row['canonical_sha256'] = hashlib.sha256(canonical.encode()).hexdigest()
         row['original_sha256'] = sha(raw)
@@ -145,6 +158,49 @@ def compile_case(directory, case, rtl, timeout, yosys, *, dut=DUT):
     return row
 
 
+def load_primary_replay(model, specification, expected_hash, depth):
+    """Accept only concrete primary-input assignments for bounded negative BMC."""
+    if (not isinstance(specification, dict)
+            or set(specification) != {'model_sha256', 'inputs'}
+            or specification['model_sha256'] != expected_hash):
+        raise ValueError('Negative replay does not bind the current complete mutant model')
+    source = Path(specification['inputs'])
+    data = source.read_bytes()
+    module = next(iter(model['modules'].values()))
+    ports = {name: len(port['bits']) for name, port in module['ports'].items()
+             if port['direction'] == 'input'}
+    lines, state, assignments = [], -1, 0
+    for number, line in enumerate(data.decode().splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        frame = re.fullmatch(r'state (0|[1-9][0-9]*)', line)
+        if frame:
+            selected = int(frame[1])
+            if selected != state + 1 or selected >= depth:
+                raise ValueError('Replay frames must be consecutive and within the BMC bound')
+            state = selected
+            lines.append(line)
+            continue
+        vector = re.fullmatch(r'assume \(= \[(.+)\] #b([01]+)\)', line)
+        scalar = re.fullmatch(r'assume (?:\[([^\]]+)\]|\(not \[([^\]]+)\]\))', line)
+        if state < 0 or not (vector or scalar):
+            raise ValueError(f'Unsupported primary-input replay statement at line {number}')
+        name = vector[1] if vector else scalar[1] or scalar[2]
+        value = vector[2] if vector else ('1' if scalar[1] else '0')
+        if name not in ports or len(value) != ports[name]:
+            raise ValueError('Replay must match a primary input and its width: ' + name)
+        if ports[name] == 1:
+            line = f'assume [{name}]' if value == '1' else f'assume (not [{name}])'
+        lines.append(line)
+        assignments += 1
+    if not assignments:
+        raise ValueError('Negative replay contains no primary-input assignments')
+    return '\n'.join(lines) + '\n', dict(model_sha256=expected_hash,
+        source=str(source), source_sha256=hashlib.sha256(data).hexdigest(),
+        frames=state + 1, primary_input_assignments=assignments, internal_state_constraints=0)
+
+
 def prove(directory, compiled, model_directory, timeout, depth, cover_depth, yosys,
           *, negative=False, solver='auto'):
     top = contract_profile(compiled['case'].get('contract', 'owner'))['top']
@@ -153,8 +209,9 @@ def prove(directory, compiled, model_directory, timeout, depth, cover_depth, yos
     raw.write_bytes(gzip.decompress((model_directory / 'frontend.json.gz').read_bytes()))
     if sha(raw) != compiled['original_sha256']:
         raise ValueError('Archived full frontend changed')
-    frontend = audit_frontend(json.loads(raw.read_text()))
-    if hashlib.sha256(canonical_model(json.loads(raw.read_text())).encode()).hexdigest() != (
+    model = json.loads(raw.read_text())
+    frontend = audit_frontend(model)
+    if hashlib.sha256(canonical_model(model).encode()).hexdigest() != (
             compiled['canonical_sha256']):
         raise ValueError('Proof differs from its complete classified model')
     script = (f'read_json {raw}\nhierarchy -check -top {top}\n'
@@ -167,27 +224,37 @@ def prove(directory, compiled, model_directory, timeout, depth, cover_depth, yos
     tasks = '[tasks]\nprove\n' if negative else '[tasks]\nprove\ncover\n'
     options = (f'[options]\nprove: mode {"bmc" if negative else "prove"}\n'
                + f'prove: depth {depth}\ntimeout {timeout}\n')
-    if not negative:
+    replay = None
+    if negative:
+        specification = compiled['case'].get('negative_replay')
+        if specification is not None:
+            inputs, replay = load_primary_replay(model, specification,
+                                                compiled['canonical_sha256'], depth)
+            (directory / 'negative-inputs.smtc').write_text(inputs)
+            options += 'prove: smtc negative-inputs.smtc\n'
+        else:
+            # Search a reachable failure at the end of the complete transition prefix.
+            # Earlier assertions are neither checked nor assumed in mutation queries.
+            options += f'prove: skip {depth - 1}\n'
+    else:
         options += f'cover: mode cover\ncover: depth {cover_depth}\n'
-    chosen_solver = solver
-    if chosen_solver == 'auto':
-        chosen_solver = 'bitwuzla' if frontend['geometry']['dispatch_width'] >= 8 else 'yices'
+    chosen_solver = select_solver(solver, frontend)
     config = tasks + options + f'[engines]\nsmtbmc {chosen_solver}\n[script]\n' + script
+    if replay:
+        config += '[files]\nnegative-inputs.smtc\n'
     (directory / 'contract.sby').write_text(config)
-    env = dict(os.environ, PATH=str(TOOLS) + ':' + os.environ['PATH'], RAPTOR_YOSYS_REAL=yosys)
-    with (directory / 'run.log').open('w') as stream:
-        child = run_bounded([str(TOOLS / 'sby'), '--yosys',
-            str(ROOT / 'verification/formal/yosys-rvfi-compat.sh'), 'contract.sby'],
-            cwd=directory, env=env, stdout=stream, stderr=subprocess.STDOUT,
-            timeout=timeout + 120)
+    child = run_sby_task(directory, timeout, yosys)
     result = dict(case=compiled['case'], full_model_sha256=compiled['canonical_sha256'],
                   frontend=frontend, exit=child.returncode, statuses={}, activation={},
                   certified=False, negative_detected=False, whole_rtl_signoff=False,
                   solver=chosen_solver)
     for task in (('prove',) if negative else ('prove', 'cover')):
-        status = directory / ('contract_' + task) / 'status'
-        result['statuses'][task] = status.read_text().split()[0] if status.exists() else 'ERROR'
+        result['statuses'][task] = task_status(directory, task)
     if negative:
+        result.update(counterexample_frame=depth - 1, prefix_assertions_assumed=False)
+        if replay:
+            result.update(primary_input_replay=replay,
+                          checked_frames=list(range(depth)), counterexample_frame=None)
         traces = sorted((directory / 'contract_prove/engine_0').glob('trace*.vcd'))
         text = (directory / 'run.log').read_text()
         result['negative_detected'] = (result['statuses']['prove'] == 'FAIL'
@@ -236,13 +303,92 @@ def compile_worker(arguments):
     return compile_case(*arguments)
 
 
+def checked_proof(directory, expected_report, expected_model):
+    """Check the same safety and witness evidence before reuse or guard activation."""
+    report_path = directory / 'results.json'
+    if sha(report_path) != expected_report:
+        raise ValueError('Cached IOQ proof report changed')
+    report = json.loads(report_path.read_text())
+    if (not report['certified'] or report['statuses'] != dict(prove='PASS', cover='PASS')
+            or report['exit'] != 0 or report['full_model_sha256'] != expected_model):
+        raise ValueError('Cached IOQ proof is incomplete or belongs to another full model')
+    required = {'frontend.json', 'contract.sby', 'run.log', 'contract_prove/status',
+                'contract_cover/status', 'contract_cover/engine_0/logfile.txt'}
+    if not required <= report['artifacts'].keys():
+        raise ValueError('IOQ proof artifact inventory is incomplete')
+    for name, digest in report['artifacts'].items():
+        member = (directory / name).resolve()
+        if (Path(name).is_absolute() or not member.is_relative_to(directory.resolve())
+                or not member.is_file() or sha(member) != digest):
+            raise ValueError('Cached IOQ proof artifact changed: ' + name)
+    for task in ('prove', 'cover'):
+        if task_status(directory, task) != 'PASS':
+            raise ValueError('Cached IOQ task is not PASS')
+    activation = activation_witnesses(
+        (directory / 'contract_cover/engine_0/logfile.txt').read_text(), directory)
+    if (set(activation) != set(report['frontend']['cover_names'])
+            or activation != report['activation']
+            or not set(activation.values()) <= report['artifacts'].keys()):
+        raise ValueError('Cached IOQ proof lacks original activation witnesses')
+    return report
+
+
+def reuse_proof(directory, compiled, model_directory, previous, expected_report):
+    """Transfer only a fully checked proof of the identical complete native graph."""
+    group = compiled['canonical_sha256']
+    report = checked_proof(previous, expected_report, group)
+    current = gzip.decompress((model_directory / 'frontend.json.gz').read_bytes())
+    if hashlib.sha256(current).hexdigest() != compiled['original_sha256']:
+        raise ValueError('Current classified IOQ model changed')
+    model = json.loads(current)
+    canonical = canonical_model(model)
+    previous_model = json.loads((previous / 'frontend.json').read_text())
+    frontend = audit_frontend(model)
+    if (canonical != canonical_model(previous_model)
+            or hashlib.sha256(canonical.encode()).hexdigest() != group
+            or frontend != audit_frontend(previous_model)
+            or any(frontend[key] != report['frontend'][key]
+                   for key in ('assertions', 'covers', 'assumptions', 'cover_names'))):
+        raise ValueError('Current and cached IOQ state, init or predicates differ')
+    shutil.copytree(previous, directory)
+    report['frontend'] = frontend
+    report['reused_evidence'] = dict(source=str(previous), report_sha256=expected_report,
+        current_case=compiled['case'], current_frontend_sha256=compiled['original_sha256'],
+        canonical_sha256=group,
+        identity='Only source locations removed from both full unoptimized graphs')
+    (directory / 'results.json').write_text(json.dumps(report, indent=2) + '\n')
+    return report
+
+
 def proof_worker(arguments):
-    group, row, output, timeout, depth, cover_depth, yosys, solver = arguments
-    evidence = prove(output / 'proofs' / group, row,
-        output / 'models' / row['case']['id'], timeout, depth, cover_depth, yosys, solver=solver)
+    group, row, output, timeout, depth, cover_depth, yosys, solver, cached = arguments
+    directory = output / 'proofs' / group
+    model = output / 'models' / row['case']['id']
+    if cached:
+        previous, expected_report = cached
+        evidence = reuse_proof(directory, row, model, previous, expected_report)
+    else:
+        evidence = prove(directory, row, model, timeout, depth, cover_depth, yosys, solver=solver)
     return dict(model_sha256=group, representative=row['case']['id'],
-                certified=evidence['certified'],
-                report_sha256=sha(output / 'proofs' / group / 'results.json'))
+                certified=evidence['certified'], reused=bool(cached),
+                report_sha256=sha(directory / 'results.json'))
+
+
+def negative_worker(arguments):
+    name, mutation, case, output, rtl, timeout, depth, cover_depth, yosys, solver = arguments
+    directory = output / 'controls' / name
+    directory.mkdir(parents=True)
+    old, new = mutation
+    text = DUT.read_text()
+    if text.count(old) != 1:
+        raise ValueError('IOQ mutation anchor changed: ' + name)
+    dut = directory / 'mutant.sv'
+    dut.write_text(text.replace(old, new))
+    compiled = compile_case(directory / 'model', case, rtl, timeout, yosys, dut=dut)
+    evidence = prove(directory / 'proof', compiled, directory / 'model', timeout,
+                     max(8, depth), cover_depth, yosys, negative=True, solver=solver)
+    return dict(name=name, detected=evidence['negative_detected'],
+                report_sha256=sha(directory / 'proof/results.json'))
 
 
 MUTATIONS = {
@@ -250,8 +396,8 @@ MUTATIONS = {
                    "generation: dispatch[s].generation ^ GenBits'(1),"),
     'completion-bank': ('completion_head_lane[ioq_payload_lane[ioq_head]]',
                         'completion_head_lane[0]'),
-    'destination': ('assign ioq_completion_result.dest = `RAPT_IOQ_BCAST_PICK(ioq_dest);',
-                    "assign ioq_completion_result.dest = `RAPT_IOQ_BCAST_PICK(ioq_dest) ^ 1'b1;"),
+    'destination': ('assign ioq_completion_result.dest = completion_control.destination;',
+                    "assign ioq_completion_result.dest = completion_control.destination ^ 1'b1;"),
     'early-duplicate': ("ioq_early_bcasted[early_bcast_idx] <= 1'b1;",
                         "ioq_early_bcasted[early_bcast_idx] <= 1'b0;"),
     'flush-completion': ('wire completion_kill = reset || cmu_bcast.flush_pipe;',
@@ -273,16 +419,18 @@ STORE_SCOPE = (
 
 STORE_MUTATIONS = {
     'integer-allocation': (
-        'ioq_vk[i] <= wake_val(dispatch[alloc_slot[i]].pr2, dispatch[alloc_slot[i]].op2);',
-        'ioq_vk[i] <= wake_val(dispatch[alloc_slot[i]].pr2, dispatch[alloc_slot[i]].op1);'),
-    'integer-wake': ('ioq_vk[i]  <= ioq_fwd2_val[i];',
-                     "ioq_vk[i]  <= ioq_fwd2_val[i] ^ XLEN'(1);"),
-    'fp-allocation': ('ioq_fp_store_data[e] <= dispatch[alloc_slot[e]].fp_value[1];',
-                      'ioq_fp_store_data[e] <= dispatch[alloc_slot[e]].fp_value[0];'),
-    'fp-local-wake': ('ioq_fp_store_data[e] <= local_fp_wake[p].fp_result;',
-                     "ioq_fp_store_data[e] <= local_fp_wake[p].fp_result ^ 64'(1);"),
-    'amo-add': ('head_amo_wdata = ioq_vk[ioq_head] + ioq_rdata[ioq_head];',
-                'head_amo_wdata = ioq_vk[ioq_head] - ioq_rdata[ioq_head];'),
+        'assign alloc_vk[s] = wake_val(dispatch[s].pr2, dispatch[s].op2);',
+        'assign alloc_vk[s] = wake_val(dispatch[s].pr2, dispatch[s].op1);'),
+    'integer-wake': ('ioq_vk[i] <= ioq_fwd2_val[i];',
+                     "ioq_vk[i] <= ioq_fwd2_val[i] ^ XLEN'(1);"),
+    'fp-allocation': (
+        'alloc_fp_value[s] = dispatch[s].fp_value[1] & {64{!(|hit)}};',
+        'alloc_fp_value[s] = dispatch[s].fp_value[0] & {64{!(|hit)}};'),
+    'fp-local-wake': (
+        'assign fp_wake_data[2*p+1] = local_fp_wake[p].fp_result;',
+        "assign fp_wake_data[2*p+1] = local_fp_wake[p].fp_result ^ 64'(1);"),
+    'amo-add': ('head_amo_wdata = head_store_data + ioq_rdata[ioq_head];',
+                'head_amo_wdata = head_store_data - ioq_rdata[ioq_head];'),
     'amo-word-compare': ('assign head_amo_less_unsigned = ioq_word[ioq_head]',
                         "assign head_amo_less_unsigned = 1'b0"),
     'sc-result': ('? (reservation_match ? 0 : 1)', '? (reservation_match ? 1 : 0)'),
@@ -294,18 +442,18 @@ STORE_MUTATIONS = {
 def contract_profile(name):
     """Select a contract without modifying shared runner state."""
     if name == 'owner':
-        return dict(top=TOP, harness=HARNESS, scope=SCOPE, mutations=MUTATIONS,
-                    extra_sources=())
+        return dict(top=TOP, scope=SCOPE, mutations=MUTATIONS, define=None)
     if name == 'store':
-        return dict(top='formal_ioq_store',
-                    harness=ROOT / 'verification/formal/formal_ioq.sv',
-                    scope=STORE_SCOPE, mutations=STORE_MUTATIONS, extra_sources=())
+        return dict(top='formal_ioq_store', scope=STORE_SCOPE, mutations=STORE_MUTATIONS,
+                    define='RAPT_FORMAL_IOQ_STORE')
     raise ValueError('Unknown IOQ contract: ' + name)
 
 
 def prove_main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--contract', choices=('owner', 'store'), default='owner')
+    parser.add_argument('--late-operands', action='store_true')
+    parser.add_argument('--operand-read-ports', type=int, choices=(1, 2), default=1)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--presets', nargs='+')
     parser.add_argument('--xlens', nargs='+', type=int, choices=(32, 64), default=[32, 64])
@@ -322,9 +470,37 @@ def prove_main():
     parser.add_argument('--cover-depth', type=int, default=96)
     parser.add_argument('--negative-controls', choices=('run', 'skip'), default='run')
     parser.add_argument('--controls-only', action='store_true')
+    parser.add_argument('--negative-replays', type=Path,
+                        help='JSON index of model-bound primary-input stimuli for negative BMC')
+    parser.add_argument('--reuse-evidence', type=Path,
+                        help='Audit and reuse only identical complete native models from this run')
     args = parser.parse_args()
     profile = contract_profile(args.contract)
-    mutations = profile['mutations']
+    mutations = dict(profile['mutations'])
+    if args.late_operands and args.contract == 'store':
+        mutations['integer-allocation'] = (
+            'assign late_alloc_sources[s][1] = int_source_regs[s][1];',
+            'assign late_alloc_sources[s][1] = int_source_regs[s][0];')
+        mutations['integer-wake'] = (
+            'assign late_read_data[p] = operand_read_value[p];',
+            "assign late_read_data[p] = operand_read_value[p] ^ XLEN'(1);")
+    replays = {}
+    if args.negative_replays:
+        if args.negative_controls != 'run':
+            parser.error('Negative replays require negative controls to run')
+        index = args.negative_replays.resolve()
+        replays = json.loads(index.read_text())
+        if not isinstance(replays, dict) or set(replays) - set(mutations):
+            parser.error('Replay index must map selected mutation names to input specifications')
+        for specification in replays.values():
+            if (not isinstance(specification, dict)
+                    or set(specification) != {'model_sha256', 'inputs'}
+                    or not isinstance(specification['inputs'], str)):
+                parser.error('Replay specifications require model_sha256 and inputs')
+            path = (index.parent / specification['inputs']).resolve()
+            if Path(specification['inputs']).is_absolute() or not path.is_relative_to(index.parent):
+                parser.error('Replay inputs must stay within their index directory')
+            specification['inputs'] = str(path)
     presets = args.presets or sorted(p.parent.name for p in
                                     (ROOT / 'rtl/configs').glob('*/rapt_config.svh'))
     for values in (presets, args.xlens, args.memory, args.response_stages, args.lutram,
@@ -342,19 +518,21 @@ def prove_main():
     for path in (ROOT, output):
         if any(c.isspace() or c in ';"' for c in str(path)):
             parser.error('Unsupported formal path')
-    output.mkdir(parents=True)
+    output.mkdir(parents=True, exist_ok=True)
     yosys = shutil.which(os.environ.get('RAPTOR_YOSYS_REAL', 'yosys'))
     if not yosys:
         parser.error('Native Yosys is missing')
     rtl = [ROOT / 'rtl/rapt_pkg.sv']
     rtl += sorted(p for p in (ROOT / 'rtl').rglob('*.sv') if p not in rtl)
     sources = sorted(set(rtl + list((ROOT / 'rtl').rglob('*.svh'))
-        + [profile['harness'], Path(__file__), Path(__file__).with_name('yosys_common.py'),
-           ROOT / 'verification/formal/yosys-rvfi-compat.sh'] + list(profile['extra_sources'])))
+        + [HARNESS, Path(__file__), Path(__file__).with_name('yosys_common.py'),
+           ROOT / 'verification/formal/yosys-rvfi-compat.sh']))
     fingerprints = {str(p.relative_to(ROOT)): sha(p) for p in sources}
     result = dict(complete=False, whole_rtl_signoff=False, sources=fingerprints, bindings=[],
         proofs=[], negative_controls=[],
-        scope=profile['scope'],
+        scope=profile['scope'] + (
+            ' PRF reads bind accepted consumer source versions; physical bank and source '
+            'lifetime remain separate composition obligations.' if args.late_operands else ''),
         assumptions=['First sampled edge resets'],
         normalization='Original unoptimized JSON, removing only source-location attributes; '
                       'all memory, initialization, logic and clocked formal checks remain.',
@@ -363,13 +541,23 @@ def prove_main():
         (output / 'results.json').write_text(json.dumps(result, indent=2) + '\n')
     save()
     if not args.controls_only:
+        cached = {}
+        if args.reuse_evidence:
+            previous = args.reuse_evidence.resolve()
+            prior = json.loads((previous / 'results.json').read_text())
+            if prior['yosys_version'] != result['yosys_version']:
+                parser.error('Cached IOQ proofs use a different native Yosys version')
+            cached = {row['model_sha256']: (previous / 'proofs' / row['model_sha256'],
+                                           row['report_sha256'])
+                      for row in prior['proofs'] if row['certified']}
         cases = []
         for index, values in enumerate(itertools.product(presets, args.xlens, args.memory,
                 args.response_stages, args.lutram, args.synthesis, args.metadata)):
             p, x, memory, stage, lutram, synthesis, metadata = values
             cases.append(dict(id=f'ioq-{index:05d}', preset=p, xlen=x, memory=memory,
                 response_stage=stage, lutram=lutram, synthesis=bool(synthesis),
-                metadata=metadata, contract=args.contract))
+                metadata=metadata, contract=args.contract, late_operands=args.late_operands,
+                operand_read_ports=args.operand_read_ports))
         work = [(output / 'models' / c['id'], c, rtl, args.timeout, yosys) for c in cases]
         with ProcessPoolExecutor(max_workers=args.jobs, mp_context=get_context('spawn')) as pool:
             for row in pool.map(compile_worker, work):
@@ -383,29 +571,28 @@ def prove_main():
         result['groups'] = {h: [r['case']['id'] for r in rows] for h, rows in groups.items()}
         save()
         print(f'IOQ bindings={len(cases)}, exact models={len(groups)}', flush=True)
-        work = [(group, rows[0], output, args.timeout, args.depth, args.cover_depth, yosys, args.solver)
+        work = [(group, rows[0], output, args.timeout, args.depth, args.cover_depth, yosys,
+                 args.solver, cached.get(group))
                 for group, rows in groups.items()]
         with ProcessPoolExecutor(max_workers=args.jobs, mp_context=get_context('spawn')) as pool:
             for row in pool.map(proof_worker, work):
                 result['proofs'].append(row)
                 save()
     if args.negative_controls == 'run':
-        for name, (old, new) in mutations.items():
-            directory = output / 'controls' / name
-            directory.mkdir(parents=True)
-            text = DUT.read_text()
-            if text.count(old) != 1:
-                raise ValueError('IOQ mutation anchor changed: ' + name)
-            dut = directory / 'mutant.sv'
-            dut.write_text(text.replace(old, new))
+        work = []
+        for name, mutation in mutations.items():
             case = dict(id=name, preset='formal', xlen=64, memory='dff', lutram=0,
-                        synthesis=True, response_stage=0, metadata='functional', contract=args.contract)
-            compiled = compile_case(directory / 'model', case, rtl, args.timeout, yosys, dut=dut)
-            evidence = prove(directory / 'proof', compiled, directory / 'model', args.timeout,
-                max(8, args.depth), args.cover_depth, yosys, negative=True, solver=args.solver)
-            result['negative_controls'].append(dict(name=name, detected=evidence['negative_detected'],
-                report_sha256=sha(directory / 'proof/results.json')))
-            save()
+                        synthesis=True, response_stage=0, metadata='functional',
+                        contract=args.contract, late_operands=args.late_operands,
+                        operand_read_ports=args.operand_read_ports)
+            if name in replays:
+                case['negative_replay'] = replays[name]
+            work.append((name, mutation, case, output, rtl, args.timeout, args.depth,
+                         args.cover_depth, yosys, args.solver))
+        with ProcessPoolExecutor(max_workers=args.jobs, mp_context=get_context('spawn')) as pool:
+            for row in pool.map(negative_worker, work):
+                result['negative_controls'].append(row)
+                save()
     if fingerprints != {str(p.relative_to(ROOT)): sha(p) for p in sources}:
         raise RuntimeError('IOQ verification source epoch changed')
     result['complete'] = (bool(result['proofs']) and all(p['certified'] for p in result['proofs'])
@@ -431,25 +618,27 @@ def augment(model, expected_hash):
     if actual != expected_hash:
         raise ValueError('Full input model differs from its qualified model class')
     information = audit_frontend(model)
-    module = model['modules'][TOP]
+    top = next(iter(model['modules']))
+    module = model['modules'][top]
     cells = module['cells']
     if any(name.startswith(PREFIX) for name in cells):
         raise ValueError('Observer namespace already exists')
     geometry = information['geometry']
-    expected = {f'g_resident[{e}].g_bank[{s}].resident_metadata'
+    prefix = '' if top == TOP else 'base.'
+    expected = {f'{prefix}g_resident[{e}].g_bank[{s}].resident_metadata'
                 for e in range(geometry['ioq_entries'])
                 for s in range(geometry['dispatch_width'])}
-    expected |= {f'g_resident[{e}].{name}' for e in range(geometry['ioq_entries'])
+    expected |= {f'{prefix}g_resident[{e}].{name}' for e in range(geometry['ioq_entries'])
                  for name in HISTORY}
     if not expected <= set(cells):
         raise ValueError('Missing original bank/history assertion guard')
     prototype = next(c for c in cells.values()
                      if c['type'] == '$check' and c['parameters']['FLAVOR'] == 'cover')
     names = {}
-    for name in sorted(expected):
+    assertions = {name for name, cell in cells.items()
+                  if cell['type'] == '$check' and cell['parameters']['FLAVOR'] == 'assert'}
+    for name in sorted(assertions):
         original = cells[name]
-        if original['type'] != '$check' or original['parameters']['FLAVOR'] != 'assert':
-            raise ValueError('Guard does not belong to an original assertion')
         if original['parameters']['TRG_ENABLE'] != format(1, '032b'):
             raise ValueError('Expected original clocked assertion sampling')
         observer = copy.deepcopy(prototype)
@@ -462,17 +651,21 @@ def augment(model, expected_hash):
         observer['connections']['TRG'] = list(original['connections']['TRG'])
         observer['attributes'] = dict(original.get('attributes', {}))
         cells[PREFIX + name] = observer
-        names[TOP + ': ' + PREFIX + name] = name
+        names[top + ': ' + PREFIX + name] = name
     audit_extension(model, expected_hash)
     return names
 
 
 def audit_extension(model, expected_hash):
     """No old cell, port, memory, init, assertion or assumption may change."""
-    module = model['modules'][TOP]
+    module = next(iter(model['modules'].values()))
     added = {n: c for n, c in module['cells'].items() if n.startswith(PREFIX)}
     if not added:
         raise ValueError('Missing read-only activation observers')
+    expected = {PREFIX + name for name, cell in module['cells'].items()
+                if cell['type'] == '$check' and cell['parameters']['FLAVOR'] == 'assert'}
+    if set(added) != expected:
+        raise ValueError('Observer inventory differs from the complete assertion inventory')
     for name, cell in added.items():
         if (cell['type'] != '$check' or cell['parameters']['FLAVOR'] != 'cover'
                 or any(v != 'input' for v in cell['port_directions'].values())):
@@ -498,20 +691,22 @@ def audit_extension(model, expected_hash):
         raise ValueError('Observer projection changed original state, logic or formal predicates')
 
 
-def activate(directory, model_path, expected_hash, timeout, depth, yosys):
+def activate(directory, model_path, expected_hash, timeout, depth, yosys, solver='auto'):
     directory.mkdir(parents=True)
     fingerprint = sha(model_path)
     model = json.loads(model_path.read_text())
     selected = augment(model, expected_hash)
     frontend = audit_frontend(model)
+    top = next(iter(model['modules']))
+    solver = select_solver(solver, frontend)
     augmented = directory / 'augmented.json'
     augmented.write_text(json.dumps(model, separators=(',', ':')) + '\n')
-    script = (f'read_json {augmented}\nhierarchy -check -top {TOP}\n'
-        'setattr -set keep 1 t:$check\n' + f'prep -top {TOP} -flatten\n'
+    script = (f'read_json {augmented}\nhierarchy -check -top {top}\n'
+        'setattr -set keep 1 t:$check\n' + f'prep -top {top} -flatten\n'
         'async2sync\nchformal -lower\nmemory_map\nopt\ncheck -assert\n'
         'select -assert-count 1 t:$assume\nselect -assert-any t:$cover\n')
     config = ('[tasks]\ncover\n[options]\nmode cover\n'
-        + f'depth {depth}\ntimeout {timeout}\n[engines]\nsmtbmc yices\n[script]\n' + script)
+        + f'depth {depth}\ntimeout {timeout}\n[engines]\nsmtbmc {solver}\n[script]\n' + script)
     (directory / 'contract.sby').write_text(config)
     # SBY normally exports three additional formats for every cover witness. Keep
     # the complete VCD while avoiding repeated full-design value extraction for
@@ -529,20 +724,13 @@ done
 exec "$RAPTOR_SMTBMC_REAL" "${selected[@]}"
 ''')
     wrapper.chmod(0o755)
-    env = dict(os.environ, PATH=str(TOOLS) + ':' + os.environ['PATH'], RAPTOR_YOSYS_REAL=yosys,
-               RAPTOR_SMTBMC_REAL=str(TOOLS / 'yosys-smtbmc'))
-    with (directory / 'run.log').open('w') as stream:
-        child = run_bounded([str(TOOLS / 'sby'), '--yosys',
-            str(ROOT / 'verification/formal/yosys-rvfi-compat.sh'),
-            '--smtbmc', str(wrapper), 'contract.sby'],
-            cwd=directory, env=env, stdout=stream, stderr=subprocess.STDOUT,
-            timeout=timeout + 120)
-    status = directory / 'contract_cover/status'
+    child = run_sby_task(directory, timeout, yosys, smtbmc=wrapper)
     result = dict(complete_guard_activation=False, whole_rtl_signoff=False,
         original_model_sha256=fingerprint, full_class_sha256=expected_hash,
         source_model=str(model_path), selected_assertion_guards=selected,
         witness_formats=['vcd'],
-        status=status.read_text().split()[0] if status.exists() else 'ERROR',
+        solver=solver,
+        status=task_status(directory, 'cover'),
         original_state_and_assertions_unchanged=True, activation={})
     if child.returncode == 0 and result['status'] == 'PASS':
         result['activation'] = activation_witnesses(
@@ -569,17 +757,18 @@ def activate_main():
     parser.add_argument('--jobs', type=int, default=4)
     parser.add_argument('--timeout', type=int, default=1800)
     parser.add_argument('--depth', type=int, default=96)
+    parser.add_argument('--solver', choices=('auto', 'yices', 'bitwuzla'), default='auto')
     args = parser.parse_args()
     if min(args.jobs, args.timeout, args.depth) < 1:
         parser.error('Jobs, timeout and depth must be positive')
     evidence = args.evidence.resolve()
     report = json.loads((evidence / 'results.json').read_text())
-    if not report['complete']:
+    if not report['complete'] or not report['proofs']:
         parser.error('Original selected IOQ matrix is not qualified')
     output = evidence / 'guard-activation'
     if output.exists() and any(output.iterdir()):
         parser.error('Activation output must be empty')
-    output.mkdir(parents=True)
+    output.mkdir(parents=True, exist_ok=True)
     for name, digest in report['sources'].items():
         if sha(ROOT / name) != digest:
             parser.error('Original IOQ source fingerprint is stale: ' + name)
@@ -593,13 +782,9 @@ def activate_main():
     for proof in report['proofs']:
         group = proof['model_sha256']
         path = evidence / 'proofs' / group / 'results.json'
-        positive = json.loads(path.read_text())
-        if not positive['certified'] or sha(path) != proof['report_sha256']:
-            parser.error('Original full safety proof is stale or incomplete')
+        checked_proof(path.parent, proof['report_sha256'], group)
         model = path.parent / 'frontend.json'
-        if sha(model) != positive['artifacts']['frontend.json']:
-            parser.error('Original full frontend changed')
-        work.append((output / group, model, group, args.timeout, args.depth, yosys))
+        work.append((output / group, model, group, args.timeout, args.depth, yosys, args.solver))
     results = []
     with ProcessPoolExecutor(max_workers=args.jobs, mp_context=get_context('spawn')) as pool:
         for result in pool.map(worker, work):
@@ -614,7 +799,7 @@ def activate_main():
         guards=sum(len(r['selected_assertion_guards']) for r in results), sources=fingerprints)
     (output / 'results.json').write_text(json.dumps(final, indent=2) + '\n')
     if not final['complete_guard_activation']:
-        raise SystemExit('IOQ bank/history guards lack nonempty activation witnesses')
+        raise SystemExit('IOQ assertion guards lack nonempty activation witnesses')
     print(f'IOQ assertion-guard activation models={len(results)}, guards={final["guards"]}')
 
 
@@ -625,8 +810,6 @@ ENTRY_POINTS = {
 
 
 def main():
-    import sys
-
     command = sys.argv[1] if len(sys.argv) > 1 else ''
     if command not in ENTRY_POINTS:
         parser = argparse.ArgumentParser(description=__doc__)

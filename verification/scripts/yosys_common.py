@@ -8,6 +8,10 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def sha(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def run_yosys(command, log, timeout):
     with log.open("w") as stream:
         result = run_bounded(
@@ -32,44 +36,57 @@ def run_yosys_check(command, output, name, timeout, marker, witness=None):
     if marker not in text or "ERROR:" in text:
         raise RuntimeError(f"Incomplete formal check: {name}; see {log}")
     row = dict(script=script.name, log=log.name, exit=0,
-               log_sha256=hashlib.sha256(log.read_bytes()).hexdigest())
+               log_sha256=sha(log))
     if witness is not None:
         if not witness.is_file() or not witness.stat().st_size:
             raise RuntimeError("Missing activation/counterexample witness: " + name)
-        row.update(witness=witness.name,
-                   witness_sha256=hashlib.sha256(witness.read_bytes()).hexdigest())
+        row.update(witness=witness.name, witness_sha256=sha(witness))
     return row
+
+
+def run_sby_task(directory, timeout, yosys=None, *, smtbmc=None, force=False, grace=120):
+    """Execute a contract; leave task-specific proof and witness checks to its caller."""
+    bundled = ROOT / "third_party/oss-cad-suite/bin"
+    env = dict(os.environ, PATH=str(bundled) + os.pathsep + os.environ["PATH"])
+    if yosys is not None:
+        env["RAPTOR_YOSYS_REAL"] = str(yosys)
+    command = [str(bundled / "sby"), "--yosys",
+               str(ROOT / "verification/formal/yosys-rvfi-compat.sh")]
+    if smtbmc is not None:
+        command += ["--smtbmc", str(smtbmc)]
+        env["RAPTOR_SMTBMC_REAL"] = str(bundled / "yosys-smtbmc")
+    command += ["-f", "contract.sby"] if force else ["contract.sby"]
+    with (directory / "run.log").open("w") as stream:
+        return run_bounded(command, cwd=directory, env=env, stdout=stream,
+                           stderr=subprocess.STDOUT, timeout=timeout + grace)
+
+
+def read_status(path, *, default="ERROR"):
+    """Treat missing or empty task status as incomplete evidence."""
+    words = path.read_text().split() if path.is_file() else []
+    return words[0] if words else default
+
+
+def task_status(directory, task):
+    return read_status(directory / ("contract_" + task) / "status")
 
 
 def run_sby(directory, timeout, *, negative=False, force=False, grace=120):
     """Run a standard prove/cover contract and require nonempty VCD evidence."""
-    bundled = ROOT / "third_party/oss-cad-suite/bin"
-    env = dict(os.environ, PATH=str(bundled) + os.pathsep + os.environ["PATH"])
-    command = [str(bundled / "sby"), "--yosys",
-               str(ROOT / "verification/formal/yosys-rvfi-compat.sh")]
-    command += ["-f", "contract.sby"] if force else ["contract.sby"]
-    log = directory / "run.log"
-    with log.open("w") as stream:
-        process = run_bounded(command, cwd=directory, env=env, stdout=stream,
-                              stderr=subprocess.STDOUT, timeout=timeout + grace)
+    process = run_sby_task(directory, timeout, force=force, grace=grace)
     if process.returncode == 124:
-        raise subprocess.TimeoutExpired(command, timeout + grace)
-
-    def status(task):
-        path = directory / ("contract_" + task) / "status"
-        words = path.read_text().split() if path.is_file() else []
-        return words[0] if words else "ERROR"
-
-    text = log.read_text()
-    row = dict(exit=process.returncode, proof=status("prove"))
+        raise subprocess.TimeoutExpired(process.args, timeout + grace)
+    text = (directory / "run.log").read_text()
+    row = dict(exit=process.returncode, proof=task_status(directory, "prove"))
     task = "prove" if negative else "cover"
     traces = sorted((directory / ("contract_" + task) / "engine_0").glob("trace*.vcd"))
     witnessed = bool(traces) and all(p.is_file() and p.stat().st_size for p in traces)
     if negative:
-        row["passed"] = (row["proof"] == "FAIL" and "Assert failed" in text
+        row["passed"] = (process.returncode in (0, 2) and row["proof"] == "FAIL"
+                         and "Assert failed" in text
                          and "ERROR:" not in text and witnessed)
     else:
-        row["cover"] = status("cover")
+        row["cover"] = task_status(directory, "cover")
         row["passed"] = (process.returncode == 0 and row["proof"] == "PASS"
                          and row["cover"] == "PASS" and "ERROR:" not in text and witnessed)
     return row, traces

@@ -17,7 +17,12 @@ module tb_ptw_global;
   logic [6:0] result_pte;
   logic pbmte = 0;
   logic [1:0] result_pbmt, result_level;
-  rapt_ptw #(.XLEN(XLEN)) dut (.*);
+  rapt_ptw #(
+      .XLEN(XLEN)
+  ) dut (
+      .access_fault(),
+      .*
+  );
   always #5 clock = ~clock;
   `include "tb_common.svh"
 
@@ -135,7 +140,12 @@ module tb_ptw_kill_drain;
 
   logic pbmte = 0;
   logic [1:0] result_pbmt, result_level;
-  rapt_ptw #(.XLEN(XLEN)) dut (.*);
+  rapt_ptw #(
+      .XLEN(XLEN)
+  ) dut (
+      .access_fault(),
+      .*
+  );
 
   always #5 clock = ~clock;
 
@@ -325,7 +335,12 @@ module tb_ptw_pbmt;
   logic [6:0] result_pte;
   logic pbmte = 0;
   logic [1:0] result_pbmt, result_level;
-  rapt_ptw #(.XLEN(XLEN)) dut (.*);
+  rapt_ptw #(
+      .XLEN(XLEN)
+  ) dut (
+      .access_fault(),
+      .*
+  );
   always #5 clock = ~clock;
   `include "tb_common.svh"
 
@@ -626,7 +641,12 @@ module tb_ptw_profile_negative;
 
   logic pbmte = 0;
   logic [1:0] result_pbmt, result_level;
-  rapt_ptw #(.XLEN(XLEN)) dut (.*);
+  rapt_ptw #(
+      .XLEN(XLEN)
+  ) dut (
+      .access_fault(),
+      .*
+  );
 
   always #5 clock = ~clock;
 

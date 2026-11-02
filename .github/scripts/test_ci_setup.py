@@ -121,6 +121,7 @@ clone_build_espresso
 source "$1"
 cd "$2"
 clone_build_espresso() { echo espresso-build; }
+install_verible_linux() { echo verible-install; }
 make() { printf 'make %s\\n' "$*"; }
 prepare_decoders "$3"
 ''', SETUP, root, hit)
@@ -132,6 +133,7 @@ prepare_decoders "$3"
             result = self.decoders(tmp, "true")
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertNotIn("espresso-build", result.stdout)
+            self.assertNotIn("verible-install", result.stdout)
             self.assertNotIn("make -C", result.stdout)
             for path, content in before.items():
                 self.assertEqual(path.read_bytes(), content)
@@ -148,7 +150,8 @@ prepare_decoders "$3"
             result = self.decoders(tmp, "false")
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("espresso-build", result.stdout)
-            self.assertIn("make -C tools/decodegen verilog", result.stdout)
+            self.assertLess(result.stdout.index("verible-install"),
+                            result.stdout.index("make -C tools/decodegen verilog"))
 
     def test_riscof_artifact_preserves_executable_without_object_tree(self):
         with tempfile.TemporaryDirectory() as tmp:

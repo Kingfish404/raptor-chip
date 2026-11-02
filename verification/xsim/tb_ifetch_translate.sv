@@ -107,6 +107,19 @@ module tb_ifetch_translate;
     start();
     leaf(0, 8'h5b);
     finish_case(1, 12);
+    // Check the complete PTE PPN before an RV32 PA cast or a narrow TLB
+    // can turn an unsupported target into a low-memory instruction fetch.
+    for (int bit_idx = `RAPT_PADDR_BITS - 12; bit_idx < (XLEN == 64 ? 44 : 22); bit_idx++) begin
+      start();
+      for (int level = 0; level < Levels; level++) begin
+        accept_pte();
+        respond_pte(
+            level == Levels - 1
+            ? ((XLEN'('h81000) | (XLEN'(1) << bit_idx)) << 10) | XLEN'('h4b)
+            : (XLEN'('h80001) << 10) | XLEN'(1));
+      end
+      finish_case(1, 1);
+    end
     // PTE bus errors are access faults; arbitrary returned data is discarded.
     start();
     accept_pte();

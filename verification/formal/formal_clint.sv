@@ -13,7 +13,9 @@ module formal_clint #(
     input logic [XLEN-1:0] awaddr,
     input logic [XLEN-1:0] wdata,
     input logic [XLEN/8-1:0] wstrb,
-    input logic wvalid
+    input logic wvalid,
+    output logic correct,
+    output logic [9:0] activated
 );
   localparam int DivW = (MTIME_DIV <= 1) ? 1 : $clog2(MTIME_DIV);
 
@@ -105,9 +107,23 @@ module formal_clint #(
   logic f_past_valid = 1'b0;
   always_ff @(posedge clock) f_past_valid <= 1'b1;
 
+  logic state_known;
+  // Prove this reset invariant as part of the contract. Otherwise optimization
+  // can merge matching history flops and leave an X-valued inductive state
+  // unconstrained until a later read selects it.
+  assign state_known = ((^{dut_mtime, dut_mtimecmp, dut_msip, dut_div_cnt}) !== 1'bx)
+      && ((^{ref_mtime, ref_mtimecmp, ref_msip, ref_div_cnt}) !== 1'bx);
+  assign correct = !f_past_valid || (state_known && dut_mtime == ref_mtime
+      && bus.mtime_value == ref_mtime && dut_mtimecmp == ref_mtimecmp
+      && dut_msip == ref_msip && dut_div_cnt == ref_div_cnt && bus.rdata == ref_rdata
+      && bus.timer_int == (ref_mtime >= ref_mtimecmp) && bus.sw_int == ref_msip);
+
   always_comb begin
+`ifndef RAPT_FORMAL_NATIVE
     assume (f_past_valid || reset);
+`endif
     if (f_past_valid) begin
+      assert (state_known);
       assert (dut_mtime == ref_mtime);
       assert (bus.mtime_value == ref_mtime);
       assert (dut_mtimecmp == ref_mtimecmp);
@@ -119,12 +135,37 @@ module formal_clint #(
     end
   end
 
-  always_ff @(posedge clock) begin
-    if (f_past_valid && !reset) begin
-      cover (bus.timer_int);
-      cover (bus.sw_int);
-      cover (wvalid && awaddr == XLEN'(`RAPT_BUS_RTC_ADDR) + XLEN'(7) && wstrb[0]);
-      cover (MTIME_DIV > 1 && ref_mtime >= 64'd2);
+  logic tick;
+  logic [9:0] events;
+  localparam int ActiveEvents = 10;
+  assign tick = MTIME_DIV <= 1 || ref_div_cnt == DivW'(MTIME_DIV - 1);
+  always_comb begin
+    events = '0;
+    if (f_past_valid) begin
+      events[7] = reset && (ref_msip || ref_mtimecmp != '1);
+      if (!reset) begin
+        events[0] = tick && !(|time_mask);
+        events[1] = |time_mask;
+        events[2] = |cmp_mask;
+        events[3] = wvalid && awaddr == XLEN'(`RAPT_CLINT_MSIP) && wstrb[0] && wdata[0];
+        events[4] = ref_msip && wvalid && awaddr == XLEN'(`RAPT_CLINT_MSIP)
+            && wstrb[0] && !wdata[0];
+        events[5] = bus.timer_int;
+        events[6] = tick && wvalid && awaddr == XLEN'(`RAPT_BUS_RTC_ADDR) + XLEN'(7)
+            && wstrb[0];
+        events[8] = araddr == '1;
+        events[9] = araddr == XLEN'(`RAPT_BUS_RTC_ADDR) + XLEN'(7) && |ref_rdata;
+      end
     end
   end
+  always_ff @(posedge clock) begin
+    if (!f_past_valid) activated <= '0;
+    else activated <= activated | events;
+  end
+  // Native qualification queries each active event with an explicit SAT witness.
+`ifndef RAPT_FORMAL_NATIVE
+  for (genvar event_index = 0; event_index < ActiveEvents; event_index++) begin : g_activation
+    always_ff @(posedge clock) cover (f_past_valid && activated[event_index]);
+  end
+`endif
 endmodule

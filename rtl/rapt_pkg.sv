@@ -222,6 +222,13 @@ package rapt_pkg;
 
   localparam int unsigned XLENPkg = CoreConfig.xlen;
 
+  // cache only implemented physical page numbers. Bare-mode aliases
+  // are handled separately by canonical_paddr, never by truncating a PTE PPN.
+  localparam int TlbPpnBits = `RAPT_PADDR_BITS - 12;
+  function automatic logic tlb_ppn_fits(input logic [XLENPkg-1:10] ptag);
+    return ptag == (XLENPkg - 10)'(TlbPpnBits'(ptag));
+  endfunction
+
   localparam unsigned RNUMPkg = CoreConfig.arch_regs;
   localparam unsigned RLENPkg = index_bits(CoreConfig.arch_regs);
 

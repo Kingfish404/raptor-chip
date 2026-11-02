@@ -32,7 +32,26 @@ for (genvar p = 0; p < rapt_pkg::CompletionPorts; p++) begin : g_completion
 end
 
 
-rapt_lsu_ioq dut (
+`ifdef RAPT_IOQ_LATE_TEST
+logic [1:0][rapt_pkg::PLENPkg-1:0] test_int_sources[rapt_pkg::DispatchWidth];
+logic [rapt_pkg::PLENPkg-1:0] test_operand_address[1];
+logic [XLEN-1:0] test_operand_value[1];
+logic test_operand_valid[1];
+`endif
+
+rapt_lsu_ioq #(
+`ifdef RAPT_IOQ_LATE_TEST
+    .LateOperands(1'b1)
+`else
+    .LateOperands(1'b0)
+`endif
+) dut (
+`ifdef RAPT_IOQ_LATE_TEST
+    .int_source_regs(test_int_sources),
+    .operand_read_address(test_operand_address),
+    .operand_read_value(test_operand_value),
+    .operand_read_valid(test_operand_valid),
+`endif
     .completion(completion),
     .clock(clock),
     .reset(reset),
@@ -61,6 +80,13 @@ rapt_lsu_ioq dut (
     .sq_context,
     .pmu_ioq_full(pmu_ioq_full)
 );
+
+`ifdef RAPT_IOQ_LATE_TEST
+wire test_allocate[rapt_pkg::DispatchWidth];
+wire test_retire = dut.ioq_valid_found;
+assign test_allocate = disp.accept;
+`include "tb_ioq_integer_reads.svh"
+`endif
 
 always #5 clock = ~clock;
 

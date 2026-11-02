@@ -13,6 +13,10 @@ module rapt_lsu_syn_top #(
     input logic clock,
     reset,
     input rapt_pkg::dispatch_slot_t dispatch[NumSlots],
+    input logic [1:0][rapt_pkg::PLENPkg-1:0] int_source_regs[NumSlots],
+    output logic [rapt_pkg::PLENPkg-1:0] operand_read_address[1],
+    input logic [rapt_pkg::XLENPkg-1:0] operand_read_value[1],
+    input logic operand_read_valid[1],
     input rapt_pkg::completion_t completion[NumCompletions],
     input logic ioq_accept[NumSlots],
     output logic ioq_ready[NumSlots],
@@ -35,6 +39,7 @@ module rapt_lsu_syn_top #(
     assign ioq_ready[s] = disp_ioq.ready[s];
   end
   rapt_lsu #(
+      .LateOperands(1'b1),
       .NumSlots(NumSlots),
       .NumCompletions(NumCompletions),
       .SQ_SIZE(SQ_SIZE),
@@ -43,6 +48,10 @@ module rapt_lsu_syn_top #(
       .clock,
       .reset,
       .dispatch,
+      .int_source_regs,
+      .operand_read_address,
+      .operand_read_value,
+      .operand_read_valid,
       .completion,
       .disp_ioq,
       .cmu_bcast,

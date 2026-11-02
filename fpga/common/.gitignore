@@ -7,6 +7,8 @@
 !/linux/Makefile
 !/linux/*.config
 !/linux/*.patch
+# Versioned FPGA-only RTL instrumentation, not generated run artifacts.
+!/sampling/*.patch
 !/board.mk
 !/ubuntu.mk
 !/UBUNTU.md

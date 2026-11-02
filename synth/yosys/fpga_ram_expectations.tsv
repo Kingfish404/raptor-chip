@@ -1,4 +1,4 @@
-# module	config	xlen	min_ramb36	min_lutram
+# module	config	xlen	min_ramb36	min_lutram	[optional min_ramb18]
 bpu	default-w4	64	2	0
 bpu	default-l2	64	2	0
 fpr	default-w4	*	4	0
@@ -8,7 +8,8 @@ ieu	default	64	0	600
 ieu	default-w4	64	0	1200
 feu	default	64	0	2000
 feu	default-w4	64	0	2400
-l2tlb	default-w4	64	2	0
+# compact PA32 PPN/root rows fit three RAMB18 rather than two RAMB36.
+l2tlb	default-w4	64	0	0	3
 rnu	default-w4	64	64	0
 # Stream queue payload banks use one indexed writer and asynchronous reader.
 stream_queue	default	64	0	32
@@ -17,16 +18,19 @@ fqu	default	64	0	140
 fqu	small	64	0	64
 fqu	small-cache	64	0	64
 frontend	default	64	0	3000
-l1i	default-w4	*	32	0
-l1i	default-l2	*	32	0
+# diagonal 64-bit I-cache banks use 16 RAMB36.
+l1i	default-w4	*	16	0
+l1i	default-l2	*	16	0
 l1d	default-w4	32	8	350
 l1d	default-w4	64	8	600
 l1d	default-l2	*	8	0
-memory	default-w4	*	40	0
-memory	default-l2	*	40	0
+memory	default-w4	*	24	0
+memory	default-l2	*	24	0
 # ROU allocation-lane operand banks and FP result banks must remain distributed RAM.
 rou	default	64	0	3400
 rou	default-w4	64	0	9500
-# Job D: diagonal 64-bit banks; partial four-way groups compact to 256 rows.
+# diagonal 64-bit banks; partial four-way groups compact to 256 rows.
 l1d	default	*	8	0
-memory	default	*	40	0
+# I-cache 16 banks plus the unchanged D-cache 8 banks.
+l1i	default	*	16	0
+memory	default	*	24	0

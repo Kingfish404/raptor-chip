@@ -12,9 +12,15 @@ module rapt_lsu #(
     parameter unsigned ROB_SIZE = Cfg.rob_entries,
     parameter unsigned PLEN     = rapt_pkg::index_bits(Cfg.phys_regs),
     parameter unsigned RLEN     = rapt_pkg::index_bits(Cfg.arch_regs),
-    parameter unsigned XLEN     = Cfg.xlen
+    parameter unsigned XLEN     = Cfg.xlen,
+    parameter bit LateOperands = 1'b0,
+    parameter int IntegerReadPorts = 1
 ) (
     input CompletionT completion[NumCompletions],
+    input logic [1:0][PLEN-1:0] int_source_regs[NumSlots] = '{default: '0},
+    output logic [PLEN-1:0] operand_read_address[IntegerReadPorts],
+    input logic [XLEN-1:0] operand_read_value[IntegerReadPorts] = '{default: '0},
+    input logic operand_read_valid[IntegerReadPorts] = '{default: '0},
     // Live FEU result; only resident FP store data captures it.
     input CompletionT local_fp_wake[NumCompletions] = '{default: '0},
     input clock,
@@ -66,6 +72,8 @@ module rapt_lsu #(
   );
 
   rapt_lsu_ioq #(
+      .LateOperands(LateOperands),
+      .IntegerReadPorts(IntegerReadPorts),
       .SlotT(SlotT),
       .NumSlots(NumSlots),
       .Cfg(Cfg),
@@ -78,6 +86,10 @@ module rapt_lsu #(
       .XLEN    (XLEN)
       , .ResultT(memory_result_t)
   ) u_ioq (
+      .int_source_regs,
+      .operand_read_address,
+      .operand_read_value,
+      .operand_read_valid,
       .completion(completion),
       .local_fp_wake(local_fp_wake),
       .clock        (clock),

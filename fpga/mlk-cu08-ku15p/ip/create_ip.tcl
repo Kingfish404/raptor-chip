@@ -1,13 +1,14 @@
 # Native CU08 DDR4 path. Parameters match the existing CU08 LiteX MIG profile.
-# The Micron part is a reference-design proxy: confirm fitted DRAM and validate
-# calibration on the actual board before making hardware-support claims.
+# The manual lists H5AN8G6NCJR-VKI; its data sheet rates the 8 Gb x16 part at 2666.
+# Use Vivado's MT40A512M16LY-075 as the matching geometry/speed timing proxy.
+# A 100 MHz reference gives a 333.333 MHz UI clock; validate calibration on board.
 create_ip -vendor xilinx.com -library ip -name ddr4 -version 2.2 -module_name raptor_ddr4_0
 set_property -dict [list \
-    CONFIG.C0.DDR4_TimePeriod 1250 \
+    CONFIG.C0.DDR4_TimePeriod 750 \
     CONFIG.C0.DDR4_InputClockPeriod 10000 \
     CONFIG.C0.DDR4_MemoryPart $ddr_part \
-    CONFIG.C0.DDR4_CasLatency 12 \
-    CONFIG.C0.DDR4_CasWriteLatency 9 \
+    CONFIG.C0.DDR4_CasLatency 19 \
+    CONFIG.C0.DDR4_CasWriteLatency 14 \
     CONFIG.C0.DDR4_DataWidth 64 \
     CONFIG.C0.DDR4_AxiSelection true \
     CONFIG.C0.DDR4_AxiDataWidth 512 \

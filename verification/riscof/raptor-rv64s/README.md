@@ -1,6 +1,6 @@
 # RV64 supervisor ACT4 验证配置
 
-default RV64 RTL 完全支持 RVA22S64。本目录提供特权测试配置，保留既有 `raptor-rv64gc` M-mode 配置，并开放 S/U、Sv39/Svade 等验证所需能力。
+本目录提供 RV64 特权测试配置，覆盖 S/U、Sv39/Svade 等能力。支持范围应以当前 RTL、配置和本次测试结果为准。
 
 首次验证集合为上游 `Svade` 目录中的 Sv39 S-mode/U-mode 两例；Sv32、Sv48、 Sv57 因目标配置不支持而排除。测试源码不修改，保留上游 NORUN 标签。 Sail 0.13.1 生成期望签名，DUT 执行自检查 ELF，无需 NEMU 差分。
 
@@ -56,11 +56,5 @@ python3 verification/scripts/prepare_act4_zfhmin_d.py \
 
 Run the upstream ACT4 `act` entrypoint with the chosen supervisor config, `--test-dir /tmp/raptor-zfhmin-d-tests --extensions all --workdir <isolated-dir>`. Use the same Ruby/Sail PATH and XDG environment as the normal `riscof-gen` command. The adapter changes only REQUIRED_EXTENSIONS and MARCH in copied files; `adaptation.json` records original, adapted, and unchanged-body hashes. It leaves the upstream checkout, test instruction bodies, and signature contents unchanged. Compile and generate new signatures with Sail before running the self-checking ELFs on the frozen DUT.
 
-The phase 46 progress record contains exact frozen inputs and execution results for these instruction tests. Privileged FS-state, context-switch and exception scenarios have separate directed tests.
-
-
-## 要求台账与本地记录
-
-`requirements.json` 记录强制要求、源码与测试定位、冻结证据以及逐项验证状态。default RV64 RTL 对 RVA22S64 的支持状态见台账总述。
-
-过程性审查、历史进展和收尾规划应归档在源码树之外，不作为配置和验证脚本的运行依赖。
+Privileged FS-state, context-switch and exception scenarios have separate directed tests.
+Keep commands, source fingerprints and results outside the source tree for each run.

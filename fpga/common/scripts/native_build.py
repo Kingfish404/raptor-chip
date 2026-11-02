@@ -13,6 +13,7 @@ import sys
 COMMON = Path(__file__).resolve().parents[1]
 REPO = COMMON.parents[1]
 from rtl_pack import pack
+from sampling_overlay import sampling_sources
 
 BOARD = PROFILE = None
 
@@ -74,12 +75,14 @@ def configuration(args):
     if PROFILE.get("cm005_bridge"):
         result["cm005_bridge"] = args.cm005_bridge
         result["cm005_ethernet"] = args.cm005_ethernet
+    if getattr(args, "sampling", False):
+        result["sampling"] = True
     return result
 
 
 def input_hashes(cm005_bridge=False):
     files = []
-    extensions = {".sv", ".svh", ".py", ".c", ".h", ".S", ".tcl", ".xdc", ".json"}
+    extensions = {".sv", ".svh", ".py", ".c", ".h", ".S", ".tcl", ".xdc", ".json", ".patch"}
     for root in (REPO / "rtl", REPO / "sim/include", REPO / "sim/rtl", COMMON, BOARD):
         # Prune generated trees before traversal: Ubuntu rootfs/kernel caches can
         # contain hundreds of thousands of files and are never source inputs.
@@ -90,6 +93,7 @@ def input_hashes(cm005_bridge=False):
                            parent / name != REPO / "tools/decodegen/target"]
             files += [parent / name for name in names
                       if Path(name).suffix in extensions and (parent / name).is_file()]
+    files.append(REPO / "fpga/litex/scripts/vivado_retry_timing.tcl")
     if cm005_bridge:
         bridge_sources = (
             "cm005_native.py", "cm005_bridge.py", "cm005_bridge_queue.py", "cm005_switch.py", "cm005.py",
@@ -167,6 +171,8 @@ def firmware(args, out, values):
     flags = [f"-march={isa}", f"-mabi={abi}", "-mcmodel=medany", "-Os", "-g", "-ffreestanding",
              "-fno-builtin", "-fno-stack-protector", "-msmall-data-limit=0", "-nostdlib", "-Werror", "-Wall",
              "-Wextra", "-Wl,--build-id=none", "-Wl,--no-relax"]
+    if getattr(args, "sampling", False):
+        flags.append("-DNATIVE_SAMPLING")
     run([args.cross + "gcc", *flags, "-I", out, "-T", out / "boot.ld",
          COMMON / "firmware/start.S", COMMON / "firmware/boot.c", "-o", out / "boot.elf"])
     run([args.cross + "objcopy", "-O", "binary", out / "boot.elf", out / "boot.bin"])
@@ -243,7 +249,7 @@ def device_tree(args, out, ram_bytes):
     cpus {{
         #address-cells = <1>;
         #size-cells = <0>;
-        timebase-frequency = <1000000>;
+        timebase-frequency = <{10000000 if getattr(args, 'sampling', False) else 1000000}>;
         cpu@0 {{
             device_type = "cpu"; reg = <0>; status = "okay"; compatible = "riscv";
             riscv,isa = "{isa}";
@@ -330,17 +336,29 @@ def prepare(args, out):
     values, ram_bytes = write_map(args, out)
     firmware(args, out, values)
     device_tree(args, out, ram_bytes)
+    mtime_mhz = 10 if args.sampling else 1
     flags = ("-DRAPT_RV64 " if args.xlen == 64 else "") + (
         f"-DRAPT_FPGA_DSP=1 -DRAPT_FPGA_LUTRAM=1 -DRAPT_CORE_CLOCK_MHZ={args.clock_mhz} "
-        f"-DRAPT_MTIME_FREQ_MHZ=1 -DRAPT_PMEM_BYTES={ram_bytes}"
+        f"-DRAPT_MTIME_FREQ_MHZ={mtime_mhz} -DRAPT_PMEM_BYTES={ram_bytes}"
     )
-    packed = pack(REPO, args.build_root / "rtl-cache", args.preset, flags, immutable=True)
+    if args.sampling:
+        flags += " -DRAPT_SAMPLING"
+    cache = args.build_root / "rtl-cache"
+    if args.sampling:
+        with sampling_sources(REPO) as (shadow, receipt):
+            packed = pack(shadow, cache / "sampling", args.preset, flags, immutable=True)
+        (sources / "sampling-overlay.json").write_text(json.dumps(receipt, indent=2) + "\n")
+    else:
+        packed = pack(REPO, cache, args.preset, flags, immutable=True)
     for name in ("rapt_pack.sv", "rapt_pack.svh"):
         shutil.copyfile(packed.parent / name, sources / name)
     for root in (COMMON / "rtl", BOARD / "rtl", BOARD / "constraints", BOARD / "ip"):
         for path in root.iterdir():
             if path.is_file():
                 shutil.copyfile(path, sources / path.name)
+    if args.memory == "ddr":
+        shutil.copyfile(REPO / "fpga/litex/scripts/vivado_retry_timing.tcl",
+                        sources / "vivado_retry_timing.tcl")
     if args.ethernet:
         for path in (BOARD / "vendor/ethernet").glob("*"):
             if path.is_file():
@@ -365,6 +383,7 @@ def prepare(args, out):
 `define NATIVE_RAM_BYTES {args.ram_bytes}
 `define NATIVE_USE_RESET_BUTTON {args.reset_button}
 `define NATIVE_ROM_FILE "{out / 'boot.hex'}"
+`define NATIVE_SOURCE_ID 128'h{before['sha256'][:32]}
 """
     if args.memory == "ddr":
         config += "`define NATIVE_WITH_DDR\n"
@@ -372,14 +391,21 @@ def prepare(args, out):
         config += "`define NATIVE_WITH_ETHERNET\n"
     if args.cm005_bridge:
         config += "`define NATIVE_WITH_CM005_BRIDGE\n"
+    if args.sampling:
+        config += "`define RAPT_SAMPLING\n`define NATIVE_WITH_SAMPLING\n"
     (sources / "native_config.svh").write_text(config)
     names = ["native_config.svh", "rapt_pack.sv", "native_map.sv",
-             "rapt_native_uart.sv", "rapt_native_bus.sv", "rapt_native_soc.sv"]
+             "rapt_native_uart.sv", "rapt_native_bus.sv"]
+    if args.sampling:
+        names += ["rapt_sample_window.sv", "rapt_sample_bridge.sv"]
+    names.append("rapt_native_soc.sv")
     (sources / "soc_sources.sv").write_text("".join(f'`include "{name}"\n' for name in names))
     eth_names = ["rgmii_lfsr.sv", "axis_gmii_rx.sv", "axis_gmii_tx.sv", "eth_mac_1g.sv",
                  "rapt_native_eth.sv", "rapt_rk_rgmii_rx.sv", "rapt_rk_ethernet.sv"] if args.ethernet else []
     (sources / "ethernet_sources.sv").write_text("".join(f'`include "{name}"\n' for name in eth_names))
     names = ["soc_sources.sv"]
+    if args.sampling:
+        names.append("rapt_replay_jtag_port.sv")
     if args.memory == "ddr":
         names.append(PROFILE["ddr_rtl"])
     names += eth_names
@@ -390,6 +416,7 @@ def prepare(args, out):
     peripheral_wrapper(args, out)
     cfg = {"out": out, "xlen": args.xlen, "with_ddr": int(args.memory == "ddr"),
            "with_ethernet": args.ethernet, "with_cm005_bridge": args.cm005_bridge,
+           "with_sampling": int(args.sampling),
            "ddr_part": args.ddr_part, "jobs": args.jobs, "clock_mhz": args.clock_mhz,
            **{key: PROFILE[key] for key in ("part", "top", "bitstream", "ddr_clock_port", "reference_hz")}}
     (out / "config.tcl").write_text("".join(f"set {key} {tcl(value)}\n" for key, value in cfg.items()))
@@ -491,6 +518,8 @@ def main():
     parser.add_argument("--reset-button", type=int, choices=(0, 1), default=0)
     parser.add_argument("--ethernet", type=int, choices=(0, 1), default=0,
                         help="enable native gigabit Ethernet on supported boards")
+    parser.add_argument("--sampling", action="store_true",
+                        help="enable JTAG checkpoint replay and hardware sample windows (RV64 CU08)")
     parser.add_argument("--cm005-bridge", type=int, choices=(0, 1), default=PROFILE.get("cm005_bridge", 0),
                         help="retain independent CM005 A/B forwarding on CU08 (50 MHz)")
     parser.add_argument("--cm005-ethernet", type=int, choices=(0, 1), default=0,
@@ -505,6 +534,10 @@ def main():
     parser.add_argument("--trace", action="store_true", help="capture the focused boot AXI waveform")
     parser.add_argument("--build-root", type=Path, default=BOARD / "build")
     args = parser.parse_args()
+    if args.sampling and (args.xlen != 64 or BOARD.name != "mlk-cu08-ku15p"):
+        parser.error("sampling transport currently supports RV64 on mlk-cu08-ku15p")
+    if args.sampling and args.clock_mhz % 10:
+        parser.error("sampling requires an integer 10 MHz timer divider; use 50 or 100 MHz")
     if args.ethernet and not PROFILE.get("ethernet"):
         parser.error("native Ethernet is not supported by this board")
     if args.cm005_bridge and not PROFILE.get("cm005_bridge"):

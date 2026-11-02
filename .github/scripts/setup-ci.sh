@@ -64,6 +64,8 @@ prepare_decoders() {
     touch rtl/generated/rapt_idu_decoder{,_c}.sv
   else
     clone_build_espresso
+    # Generation formats its output, so the generator needs Verible too.
+    install_verible_linux
     make -C tools/decodegen verilog
   fi
 }

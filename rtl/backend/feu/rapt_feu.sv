@@ -897,7 +897,7 @@ module rapt_feu #(
   end
   // Fair completion arbitration. Prefer valid units at or after the cursor,
   // wrapping to the first valid unit only when that suffix is empty.
-  logic [Units-1:0] completion_after_cursor, completion_candidates;
+  logic [Units-1:0] completion_after_cursor, completion_candidates, completion_first;
   typedef logic [$clog2(Units)-1:0] completion_index_t;
   completion_index_t normalized_cursor;
   assign normalized_cursor = completion_cursor >= completion_index_t'(Units)
@@ -909,15 +909,20 @@ module rapt_feu #(
     completion_candidates[u] = (|completion_after_cursor)
         ? completion_after_cursor[u] : unit_completion[u].valid;
   end
+  // Parallel prefixes avoid feeding each unit's choice through the next unit.
+  for (genvar u = 0; u < Units; u++) begin : g_completion_first
+    if (u == 0) begin : g_first
+      assign completion_first[u] = completion_candidates[u];
+    end else begin : g_later
+      assign completion_first[u] = completion_candidates[u] && !(|completion_candidates[u-1:0]);
+    end
+  end
   always_comb begin
-    completion_found = 1'b0;
+    completion_found = |completion_candidates;
     completion_choice = '0;
     unit_accept = '0;
     for (int u = 0; u < Units; u++) begin
-      if (!completion_found && completion_candidates[u]) begin
-        completion_found = 1'b1;
-        completion_choice = $clog2(Units)'(u);
-      end
+      completion_choice |= $clog2(Units)'(u) & {$clog2(Units) {completion_first[u]}};
     end
     if (completion_held && unit_completion[held_choice].valid) begin
       completion_found = 1'b1;

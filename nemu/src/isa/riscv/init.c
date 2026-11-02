@@ -41,7 +41,11 @@ static void restart()
     cpu.pc = CONFIG_FLASH_BASE;
   }
 #if defined(CONFIG_ROM_DTB)
+#ifdef CONFIG_RAPTOR_MEMORY_MAP
+  cpu.pc = CONFIG_MROM_BASE;
+#else
   cpu.pc = CONFIG_ROM_BASE;
+#endif
 #endif
 
   /* The zero register is always 0. */

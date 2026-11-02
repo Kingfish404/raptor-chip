@@ -1,5 +1,6 @@
 #include <common.h>
 #include <checkpoint.h>
+#include <sample_window.h>
 #include <difftest.h>
 #include <difftest-isa.h>
 #include <lightsss.h>
@@ -198,6 +199,12 @@ static void usage(const char *prog)
   printf("      --sig=SPEC           dump RISCOF signature (SPEC=<hex_begin>-<hex_end>:<path>)\n");
   printf("      --trap-on-ebreak     don't halt on ebreak; let RTL take the exception\n");
   printf("      --tohost=ADDRESS     observe an aligned RAM HTIF exit mailbox\n");
+  printf("      --sample-output=FILE write bounded retirement observations as JSON\n");
+  printf("      --sample-warmup=N   exclude N retired guest instructions\n");
+  printf("      --sample-instructions=N  measure N instructions, then stop after boundary band\n");
+  printf("      --sample-start-pc=PC start before PC; checkpoint loads start at resume by default\n");
+  printf("      --sample-user-satp=ROOT count this user address space; include all elapsed cycles\n");
+  printf("      --sample-user-tp=TP restrict user progress to one Linux TLS thread pointer\n");
   printf("      --ckpt-save[=DIR]    save checkpoint (arch state + memory) when a ckpt trigger fires\n");
   printf("                           (DIR defaults to <build>/checkpoint)\n");
   printf("      --ckpt-cycle=N       save after N cycles from reset/resume (default 0 if no trigger)\n");
@@ -205,6 +212,7 @@ static void usage(const char *prog)
   printf("      --ckpt-pc=HEX        save after first committed instruction at PC HEX\n");
   printf("      --ckpt-save-exit     exit simulator immediately after writing the checkpoint\n");
   printf("      --ckpt-load=DIR      restore architectural state from checkpoint DIR before run\n");
+  printf("      --ckpt-export=STATE,FILE  export restore trampoline and exit\n");
   printf("      --lightsss[=DIR]     LightSSS: fork a snapshot each progress point; on difftest\n");
   printf("                           divergence dump a checkpoint a window behind the failure\n");
   printf("                           into DIR (default <build>/lightsss-snapshot). ON by default\n");
@@ -264,9 +272,19 @@ static int parse_args(int argc, char *argv[])
       {"diff-isa", required_argument, NULL, 272},
       {"serial-milestone", required_argument, NULL, 275},
       {"tohost", required_argument, NULL, 278},
+      {"sample-output", required_argument, NULL, 279},
+      {"sample-warmup", required_argument, NULL, 280},
+      {"sample-instructions", required_argument, NULL, 281},
+      {"sample-start-pc", required_argument, NULL, 282},
+      {"ckpt-export", required_argument, NULL, 283},
+      {"sample-user-satp", required_argument, NULL, 284},
+      {"sample-user-tp", required_argument, NULL, 285},
       {0, 0, NULL, 0},
   };
   int o;
+  const char *sample_output = nullptr;
+  uint64_t sample_warmup = 0, sample_instructions = 0, sample_start_pc = 0;
+  bool sample_has_pc = false, sample_options = false;
   size_t cycle_threshold = 0, instr_threshold = 0;
   const char *ckpt_save_dir = NULL;
   bool ckpt_save_requested = false;
@@ -291,6 +309,26 @@ static int parse_args(int argc, char *argv[])
   {
     switch (o)
     {
+    case 279:
+      sample_output = optarg;
+      break;
+    case 280:
+    case 281:
+    case 282: {
+      char *end;
+      errno = 0;
+      uint64_t value = strtoull(optarg, &end, 0);
+      if (errno || !*optarg || *optarg == '-' || *end ||
+          (o == 282 && (value != (word_t)value || (value & 1)))) {
+        fprintf(stderr, "Invalid sample count or instruction PC: %s\n", optarg);
+        exit(1);
+      }
+      sample_options = true;
+      if (o == 280) sample_warmup = value;
+      if (o == 281) sample_instructions = value;
+      if (o == 282) { sample_start_pc = value; sample_has_pc = true; }
+      break;
+    }
     case 'b':
       sdb_set_batch_mode();
       break;
@@ -368,6 +406,26 @@ static int parse_args(int argc, char *argv[])
     case 261:
       ckpt_load_dir = optarg;
       break;
+    case 284:
+      sample_window_set_user_satp(parse_u64_auto(optarg));
+      sample_options = true;
+      break;
+    case 285:
+      sample_window_set_user_thread(parse_u64_auto(optarg));
+      sample_options = true;
+      break;
+    case 283:
+    {
+      char *separator = strrchr(optarg, ',');
+      if (!separator || separator == optarg || !separator[1])
+      {
+        fprintf(stderr, "--ckpt-export requires STATE,FILE\n");
+        exit(1);
+      }
+      *separator = '\0';
+      checkpoint_export_trampoline(optarg, separator + 1);
+      exit(0);
+    }
     case 262:
       ckpt_save_instr = parse_u64_auto(optarg);
       ckpt_save_has_instr = true;
@@ -518,6 +576,12 @@ static int parse_args(int argc, char *argv[])
     lightsss_configure(lightsss_dir);
   }
   /* ckpt_load_dir handling is deferred -- see init_monitor() below. */
+  if (sample_options && !sample_output) {
+    fprintf(stderr, "Sample window options require --sample-output=FILE\n");
+    exit(1);
+  }
+  sample_window_configure(sample_output, sample_warmup, sample_instructions,
+                          sample_has_pc, sample_start_pc, ckpt_load_dir != nullptr);
   if (ckpt_load_dir != NULL)
   {
     /* Stash via a static so init_monitor can pick it up after load_img(). */
@@ -570,4 +634,5 @@ void init_monitor(int argc, char *argv[])
   void init_disasm();
   init_disasm();
 #endif
+  sample_window_activate();
 }

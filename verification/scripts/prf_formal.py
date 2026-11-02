@@ -3,7 +3,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -11,7 +10,7 @@ import shutil
 import subprocess
 import sys
 import threading
-from yosys_common import ROOT, run_bounded, run_yosys
+from yosys_common import ROOT, read_status, run_bounded, run_sby_task, run_yosys, sha
 
 
 FORMAL = ROOT / 'verification/formal'
@@ -45,10 +44,6 @@ def snapshot_query(query, expanded):
                 solver.write(line)
         solver.write('(exit)')
         solver.wait()
-
-
-def sha(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def history_harness(text):
@@ -344,14 +339,10 @@ def views_main():
         raise SystemExit('Uncertified PRF view lemma')
 
 
-HARNESS = HARNESS
-
-
 def counterexample(folder, log):
-    path = folder / 'status'
     text = log.read_text()
     traces = sorted((folder / 'engine_0').glob('trace*.vcd'))
-    return (path.exists() and path.read_text().split()[0] == 'FAIL'
+    return (read_status(folder / 'status') == 'FAIL'
             and 'Assert failed' in text and 'ERROR:' not in text
             and bool(traces) and all(p.stat().st_size for p in traces))
 
@@ -433,8 +424,8 @@ def run_composed(directory, *, preset, xlen, lutram, shape, synthesis, rvfi,
     for task in (('prove',) if negative else ('prove', 'cover')):
         path = directory / ('history_' + task) / 'status'
         statuses[task] = ('NOT_RUN' if task == 'prove' and not history_proof else
-                          path.read_text().split()[0] if path.exists()
-                          else 'TIMEOUT' if process.returncode == 124 else 'ERROR')
+                          read_status(path, default='TIMEOUT' if process.returncode == 124
+                                      else 'ERROR'))
     views = run_views(directory / 'views', preset=preset, xlen=xlen, lutram=lutram,
                       shape=shape, synthesis=synthesis, rvfi=rvfi, dut=dut, timeout=timeout)
     derivation = composition_lemma(directory / 'composition', lutram)
@@ -612,7 +603,7 @@ def byte_partition_main():
         parser.error('An unbounded history proof mode is required')
     cover_status = reference / 'history_cover/status'
     if (evidence['history']['statuses']['cover'] != 'PASS'
-            or not cover_status.exists() or cover_status.read_text().split()[0] != 'PASS'):
+            or read_status(cover_status) != 'PASS'):
         parser.error('Full unpartitioned activation cover is required')
     witnesses = evidence['history']['witnesses']
     if not witnesses or any(sha(reference / p) != value for p, value in witnesses.items()):
@@ -670,8 +661,7 @@ def byte_partition_main():
             child = run_bounded(command, cwd=directory, env=env, stdout=stream,
                                 stderr=subprocess.STDOUT, timeout=args.timeout + 120)
         path = directory / 'history_prove/status'
-        status = (path.read_text().split()[0] if path.exists()
-                  else 'TIMEOUT' if child.returncode == 124 else 'ERROR')
+        status = read_status(path, default='TIMEOUT' if child.returncode == 124 else 'ERROR')
         row = dict(lane=lane, exit=child.returncode, status=status, engine=engine,
                    passed=child.returncode == 0 and status == 'PASS',
                    harness_sha256=sha(derived), configuration_sha256=sha(candidate),
@@ -973,27 +963,21 @@ def prove_main():
                 config += f'select -assert-count {shape[4] * copies} t:$mem_v2\n'
                 config += 'select -assert-none t:$mem_v2 r:WR_PORTS>1 %i\n'
         (directory / 'contract.sby').write_text(config)
-        bundled = ROOT / 'third_party/oss-cad-suite/bin'
-        env = dict(os.environ, PATH=str(bundled) + os.pathsep + os.environ['PATH'],
-                   RAPTOR_YOSYS_REAL=real_yosys)
         log = directory / 'run.log'
-        command = [str(bundled / 'sby'), '--yosys', str(FORMAL / 'yosys-rvfi-compat.sh'),
-                   'contract.sby']
-        with log.open('w') as stream:
-            process = subprocess.run(command, cwd=directory, env=env, stdout=stream,
-                                     stderr=subprocess.STDOUT, timeout=args.timeout + 120)
+        process = run_sby_task(directory, args.timeout, real_yosys)
         row = dict(preset=preset, xlen=xlen, lutram=lutram, kind=kind, shape=shape,
                    synthesis=synthesis, rvfi=rvfi, engine=engine, exit=process.returncode,
                    log=str(log.relative_to(output)), log_sha256=sha(log))
         for task in (('prove',) if mutation else ('prove', 'cover')):
             status = directory / ('contract_' + task) / 'status'
-            row[task] = status.read_text().split()[0] if status.exists() else 'ERROR'
+            row[task] = read_status(status)
         folder = directory / ('contract_prove' if mutation else 'contract_cover') / 'engine_0'
         traces = sorted(folder.glob('trace*.vcd'))
         row['witnesses'] = {str(p.relative_to(output)): sha(p) for p in traces}
         if mutation:
             row['name'] = mutation
-            row['passed'] = (row['prove'] == 'FAIL' and 'Assert failed' in log.read_text()
+            row['passed'] = (process.returncode in (0, 2) and row['prove'] == 'FAIL'
+                             and 'Assert failed' in log.read_text()
                              and 'ERROR:' not in log.read_text() and bool(traces)
                              and all(p.stat().st_size for p in traces))
         else:

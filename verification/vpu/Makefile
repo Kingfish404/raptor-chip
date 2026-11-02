@@ -81,7 +81,8 @@ synth:
 
 top-build:
 	@mkdir -p $(TOP_BUILD)
-	python3 $(CURDIR)/record_run.py $(TOP_BUILD)/sources.json $(XLEN) $(VLEN) $(ELEN) $(BANK_BITS) $(BANKS) $(OPT_READS) $(DIFF) $(CORE_ADAPTER) $(TOP_SUITE)
+	python3 $(CURDIR)/record_run.py top $(TOP_BUILD)/sources.json $(XLEN) $(VLEN) $(ELEN) \
+		$(BANK_BITS) $(BANKS) $(OPT_READS) $(DIFF) $(CORE_ADAPTER) $(TOP_SUITE)
 ifeq ($(DIFF),1)
 	python3 $(CURDIR)/reference_manifest.py $(SPIKE_BUILD) $(TOP_BUILD)/reference.json
 endif
@@ -124,7 +125,8 @@ opt-check:
 .PHONY: muldiv
 muldiv:
 	@mkdir -p $(BUILD_DIR)/muldiv-$(MULDIV_EARLY_OUT)
-	python3 $(CURDIR)/record_leaf.py $(BUILD_DIR)/muldiv-$(MULDIV_EARLY_OUT)/sources.json rapt_vpu_muldiv EarlyOut=$(MULDIV_EARLY_OUT)
+	python3 $(CURDIR)/record_run.py leaf $(BUILD_DIR)/muldiv-$(MULDIV_EARLY_OUT)/sources.json \
+		rapt_vpu_muldiv EarlyOut=$(MULDIV_EARLY_OUT)
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  --top-module rapt_vpu_muldiv -GEarlyOut=$(MULDIV_EARLY_OUT) --Mdir $(BUILD_DIR)/muldiv-$(MULDIV_EARLY_OUT) \
 	  $(VPU)/rapt_vpu_muldiv.sv $(CURDIR)/test_muldiv.cpp \
@@ -138,7 +140,8 @@ muldiv-opt-check:
 .PHONY: mask-write
 mask-write:
 	@mkdir -p $(BUILD_DIR)/mask-write
-	python3 $(CURDIR)/record_leaf.py $(BUILD_DIR)/mask-write/sources.json rapt_vpu_mask_write AddrBits=9
+	python3 $(CURDIR)/record_run.py leaf $(BUILD_DIR)/mask-write/sources.json \
+		rapt_vpu_mask_write AddrBits=9
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  --top-module rapt_vpu_mask_write --Mdir $(BUILD_DIR)/mask-write \
 	  $(VPU)/rapt_vpu_mask_write.sv $(CURDIR)/test_mask_write.cpp \
@@ -148,7 +151,7 @@ mask-write:
 .PHONY: fixed
 fixed:
 	@mkdir -p $(BUILD_DIR)/fixed
-	python3 $(CURDIR)/record_leaf.py $(BUILD_DIR)/fixed/sources.json rapt_vpu_fixed
+	python3 $(CURDIR)/record_run.py leaf $(BUILD_DIR)/fixed/sources.json rapt_vpu_fixed
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  --top-module rapt_vpu_fixed --Mdir $(BUILD_DIR)/fixed \
 	  $(VPU)/rapt_vpu_fixed.sv $(CURDIR)/test_fixed.cpp \
@@ -158,7 +161,8 @@ fixed:
 .PHONY: move
 move:
 	@mkdir -p $(BUILD_DIR)/move-$(VLEN)
-	python3 $(CURDIR)/record_leaf.py $(BUILD_DIR)/move-$(VLEN)/sources.json rapt_vpu_move VLEN=$(VLEN)
+	python3 $(CURDIR)/record_run.py leaf $(BUILD_DIR)/move-$(VLEN)/sources.json rapt_vpu_move \
+		VLEN=$(VLEN)
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  --top-module rapt_vpu_move -GVLEN=$(VLEN) --Mdir $(BUILD_DIR)/move-$(VLEN) \
 	  -CFLAGS '-DTEST_VLEN=$(VLEN)' $(VPU)/rapt_vpu_move.sv $(CURDIR)/test_move.cpp \
@@ -168,7 +172,8 @@ move:
 .PHONY: mask-scan
 mask-scan:
 	@mkdir -p $(BUILD_DIR)/mask-scan-$(XLEN)-$(VLEN)
-	python3 $(CURDIR)/record_leaf.py $(BUILD_DIR)/mask-scan-$(XLEN)-$(VLEN)/sources.json rapt_vpu_mask_scan XLEN=$(XLEN) VLEN=$(VLEN)
+	python3 $(CURDIR)/record_run.py leaf $(BUILD_DIR)/mask-scan-$(XLEN)-$(VLEN)/sources.json \
+		rapt_vpu_mask_scan XLEN=$(XLEN) VLEN=$(VLEN)
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  --top-module rapt_vpu_mask_scan -GXLEN=$(XLEN) -GVLEN=$(VLEN) --Mdir $(BUILD_DIR)/mask-scan-$(XLEN)-$(VLEN) \
 	  -CFLAGS '-DTEST_XLEN=$(XLEN) -DTEST_VLEN=$(VLEN)' $(VPU)/rapt_vpu_mask_scan.sv $(CURDIR)/test_mask_scan.cpp \
@@ -187,7 +192,8 @@ memory-response-formal:
 .PHONY: slide
 slide:
 	@mkdir -p $(BUILD_DIR)/slide-$(XLEN)-$(VLEN)
-	python3 $(CURDIR)/record_leaf.py $(BUILD_DIR)/slide-$(XLEN)-$(VLEN)/sources.json rapt_vpu_slide XLEN=$(XLEN) VLEN=$(VLEN)
+	python3 $(CURDIR)/record_run.py leaf $(BUILD_DIR)/slide-$(XLEN)-$(VLEN)/sources.json \
+		rapt_vpu_slide XLEN=$(XLEN) VLEN=$(VLEN)
 	$(VERILATOR) --cc --exe --build --assert -Wall -j $(JOBS) \
 	  --top-module rapt_vpu_slide -GXLEN=$(XLEN) -GVLEN=$(VLEN) --Mdir $(BUILD_DIR)/slide-$(XLEN)-$(VLEN) \
 	  -CFLAGS '-DTEST_XLEN=$(XLEN) -DTEST_VLEN=$(VLEN)' $(VPU)/rapt_vpu_slide.sv $(CURDIR)/test_slide.cpp \
@@ -200,7 +206,7 @@ FMA_BUILD := $(BUILD_DIR)/fma-$(FMA_DOUBLE)
 fma:
 	@test -n "$(SPIKE_BUILD)" || { echo 'fma requires SPIKE_BUILD for independent SoftFloat'; exit 1; }
 	@mkdir -p $(FMA_BUILD)
-	python3 $(CURDIR)/record_leaf.py $(FMA_BUILD)/sources.json rapt_vpu_fma Double=$(FMA_DOUBLE)
+	python3 $(CURDIR)/record_run.py leaf $(FMA_BUILD)/sources.json rapt_vpu_fma Double=$(FMA_DOUBLE)
 	python3 $(CURDIR)/reference_manifest.py $(SPIKE_BUILD) $(FMA_BUILD)/reference.json
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  $(CURDIR)/fma_legacy.vlt --top-module rapt_vpu_fma -GDouble=$(FMA_DOUBLE) --Mdir $(FMA_BUILD) \
@@ -214,7 +220,8 @@ FP_ARITH_BUILD := $(BUILD_DIR)/fp-arith-$(FMA_DOUBLE)
 fp-arith:
 	@test -n "$(SPIKE_BUILD)" || { echo 'fp-arith requires SPIKE_BUILD for independent SoftFloat'; exit 1; }
 	@mkdir -p $(FP_ARITH_BUILD)
-	python3 $(CURDIR)/record_leaf.py $(FP_ARITH_BUILD)/sources.json rapt_vpu_fp_arith Double=$(FMA_DOUBLE)
+	python3 $(CURDIR)/record_run.py leaf $(FP_ARITH_BUILD)/sources.json rapt_vpu_fp_arith \
+		Double=$(FMA_DOUBLE)
 	python3 $(CURDIR)/reference_manifest.py $(SPIKE_BUILD) $(FP_ARITH_BUILD)/reference.json
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  $(CURDIR)/fma_legacy.vlt --top-module rapt_vpu_fp_arith -GDouble=$(FMA_DOUBLE) --Mdir $(FP_ARITH_BUILD) \
@@ -226,7 +233,8 @@ fp-arith:
 .PHONY: fp-decode
 fp-decode:
 	@mkdir -p $(BUILD_DIR)/fp-decode-$(ELEN)
-	python3 $(CURDIR)/record_leaf.py $(BUILD_DIR)/fp-decode-$(ELEN)/sources.json rapt_vpu_fp_decode ELEN=$(ELEN)
+	python3 $(CURDIR)/record_run.py leaf $(BUILD_DIR)/fp-decode-$(ELEN)/sources.json \
+		rapt_vpu_fp_decode ELEN=$(ELEN)
 	$(VERILATOR) --cc --exe --build -Wall -j $(JOBS) --top-module rapt_vpu_fp_decode -GELEN=$(ELEN) \
 	  --Mdir $(BUILD_DIR)/fp-decode-$(ELEN) -CFLAGS '-DTEST_ELEN=$(ELEN)' \
 	  $(VPU)/rapt_vpu_fp_decode.sv $(CURDIR)/test_fp_decode.cpp \
@@ -237,7 +245,8 @@ fp-decode:
 divsqrt:
 	@test -n "$(SPIKE_BUILD)" || { echo 'divsqrt requires SPIKE_BUILD for independent SoftFloat'; exit 1; }
 	@mkdir -p $(BUILD_DIR)/divsqrt-$(ELEN)
-	python3 $(CURDIR)/record_leaf.py $(BUILD_DIR)/divsqrt-$(ELEN)/sources.json rapt_vpu_divsqrt ELEN=$(ELEN)
+	python3 $(CURDIR)/record_run.py leaf $(BUILD_DIR)/divsqrt-$(ELEN)/sources.json \
+		rapt_vpu_divsqrt ELEN=$(ELEN)
 	python3 $(CURDIR)/reference_manifest.py $(SPIKE_BUILD) $(BUILD_DIR)/divsqrt-$(ELEN)/reference.json
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  --top-module rapt_vpu_divsqrt -GELEN=$(ELEN) --Mdir $(BUILD_DIR)/divsqrt-$(ELEN) \
@@ -251,7 +260,8 @@ FP_MISC_BUILD := $(BUILD_DIR)/fp-misc-$(FMA_DOUBLE)
 fp-misc:
 	@test -n "$(SPIKE_BUILD)" || { echo 'fp-misc requires SPIKE_BUILD for independent SoftFloat'; exit 1; }
 	@mkdir -p $(FP_MISC_BUILD)
-	python3 $(CURDIR)/record_leaf.py $(FP_MISC_BUILD)/sources.json rapt_vpu_fp_misc Double=$(FMA_DOUBLE)
+	python3 $(CURDIR)/record_run.py leaf $(FP_MISC_BUILD)/sources.json rapt_vpu_fp_misc \
+		Double=$(FMA_DOUBLE)
 	python3 $(CURDIR)/reference_manifest.py $(SPIKE_BUILD) $(FP_MISC_BUILD)/reference.json
 	$(VERILATOR) --cc --exe --build -Wall -j $(JOBS) \
 	  --top-module rapt_vpu_fp_misc -GDouble=$(FMA_DOUBLE) --Mdir $(FP_MISC_BUILD) \
@@ -264,7 +274,7 @@ fp-misc:
 fp-widen:
 	@test -n "$(SPIKE_BUILD)" || { echo 'fp-widen requires SPIKE_BUILD for independent SoftFloat'; exit 1; }
 	@mkdir -p $(BUILD_DIR)/fp-widen
-	python3 $(CURDIR)/record_leaf.py $(BUILD_DIR)/fp-widen/sources.json rapt_vpu_fp_widen
+	python3 $(CURDIR)/record_run.py leaf $(BUILD_DIR)/fp-widen/sources.json rapt_vpu_fp_widen
 	python3 $(CURDIR)/reference_manifest.py $(SPIKE_BUILD) $(BUILD_DIR)/fp-widen/reference.json
 	$(VERILATOR) --cc --exe --build -Wall -j $(JOBS) \
 	  --top-module rapt_vpu_fp_widen --Mdir $(BUILD_DIR)/fp-widen \
@@ -277,7 +287,7 @@ fp-widen:
 fp-wide-arith:
 	@test -n "$(SPIKE_BUILD)" || { echo 'fp-wide-arith requires SPIKE_BUILD for independent SoftFloat'; exit 1; }
 	@mkdir -p $(BUILD_DIR)/fp-wide-arith
-	python3 $(CURDIR)/record_leaf.py $(BUILD_DIR)/fp-wide-arith/sources.json rapt_vpu_fp_wide_arith
+	python3 $(CURDIR)/record_run.py leaf $(BUILD_DIR)/fp-wide-arith/sources.json rapt_vpu_fp_wide_arith
 	python3 $(CURDIR)/reference_manifest.py $(SPIKE_BUILD) $(BUILD_DIR)/fp-wide-arith/reference.json
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  $(CURDIR)/fma_legacy.vlt --top-module rapt_vpu_fp_wide_arith --Mdir $(BUILD_DIR)/fp-wide-arith \
@@ -291,7 +301,7 @@ fp-wide-arith:
 fp-convert:
 	@test -n "$(SPIKE_BUILD)" || { echo 'fp-convert requires SPIKE_BUILD for independent SoftFloat'; exit 1; }
 	@mkdir -p $(BUILD_DIR)/fp-convert
-	python3 $(CURDIR)/record_leaf.py $(BUILD_DIR)/fp-convert/sources.json rapt_vpu_fp_convert
+	python3 $(CURDIR)/record_run.py leaf $(BUILD_DIR)/fp-convert/sources.json rapt_vpu_fp_convert
 	python3 $(CURDIR)/reference_manifest.py $(SPIKE_BUILD) $(BUILD_DIR)/fp-convert/reference.json
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  --top-module rapt_vpu_fp_convert --Mdir $(BUILD_DIR)/fp-convert \
@@ -307,7 +317,8 @@ INT_FP_BUILD := $(BUILD_DIR)/int-fp-$(FMA_DOUBLE)-$(INT_BITS)
 int-fp:
 	@test -n "$(SPIKE_BUILD)" || { echo 'int-fp requires SPIKE_BUILD for independent SoftFloat'; exit 1; }
 	@mkdir -p $(INT_FP_BUILD)
-	python3 $(CURDIR)/record_leaf.py $(INT_FP_BUILD)/sources.json rapt_vpu_int_fp FloatDouble=$(FMA_DOUBLE) IntBits=$(INT_BITS)
+	python3 $(CURDIR)/record_run.py leaf $(INT_FP_BUILD)/sources.json rapt_vpu_int_fp \
+		FloatDouble=$(FMA_DOUBLE) IntBits=$(INT_BITS)
 	python3 $(CURDIR)/reference_manifest.py $(SPIKE_BUILD) $(INT_FP_BUILD)/reference.json
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  --top-module rapt_vpu_int_fp -GFloatDouble=$(FMA_DOUBLE) -GIntBits=$(INT_BITS) --Mdir $(INT_FP_BUILD) \
@@ -320,7 +331,8 @@ int-fp:
 .PHONY: int-fp-decode
 int-fp-decode:
 	@mkdir -p $(BUILD_DIR)/int-fp-decode-$(ELEN)
-	python3 $(CURDIR)/record_leaf.py $(BUILD_DIR)/int-fp-decode-$(ELEN)/sources.json rapt_vpu_int_fp_decode ELEN=$(ELEN)
+	python3 $(CURDIR)/record_run.py leaf $(BUILD_DIR)/int-fp-decode-$(ELEN)/sources.json \
+		rapt_vpu_int_fp_decode ELEN=$(ELEN)
 	$(VERILATOR) --cc --exe --build -Wall -j $(JOBS) --top-module rapt_vpu_int_fp_decode -GELEN=$(ELEN) \
 	  --Mdir $(BUILD_DIR)/int-fp-decode-$(ELEN) -CFLAGS '-DTEST_ELEN=$(ELEN)' \
 	  $(VPU)/rapt_vpu_int_fp_decode.sv $(CURDIR)/test_int_fp_decode.cpp \
@@ -331,7 +343,8 @@ int-fp-decode:
 fp-estimate:
 	@test -n "$(SPIKE_BUILD)" || { echo 'fp-estimate requires SPIKE_BUILD for independent SoftFloat'; exit 1; }
 	@mkdir -p $(BUILD_DIR)/fp-estimate-$(FMA_DOUBLE)
-	python3 $(CURDIR)/record_leaf.py $(BUILD_DIR)/fp-estimate-$(FMA_DOUBLE)/sources.json rapt_vpu_fp_estimate Double=$(FMA_DOUBLE)
+	python3 $(CURDIR)/record_run.py leaf $(BUILD_DIR)/fp-estimate-$(FMA_DOUBLE)/sources.json \
+		rapt_vpu_fp_estimate Double=$(FMA_DOUBLE)
 	python3 $(CURDIR)/reference_manifest.py $(SPIKE_BUILD) $(BUILD_DIR)/fp-estimate-$(FMA_DOUBLE)/reference.json
 	$(VERILATOR) --cc --exe --build -Wall -j $(JOBS) --top-module rapt_vpu_fp_estimate --Mdir $(BUILD_DIR)/fp-estimate-$(FMA_DOUBLE) \
 	  -GDouble=$(FMA_DOUBLE) -CFLAGS '-DTEST_DOUBLE=$(FMA_DOUBLE) -I$(SPIKE_BUILD)/softfloat' -LDFLAGS '$(SPIKE_BUILD)/libsoftfloat.a' \
@@ -342,7 +355,9 @@ fp-estimate:
 .PHONY: fp-transfer
 fp-transfer:
 	@mkdir -p $(BUILD_DIR)/fp-transfer-$(ELEN)-$(VLEN)
-	python3 $(CURDIR)/record_leaf.py $(BUILD_DIR)/fp-transfer-$(ELEN)-$(VLEN)/sources.json rapt_vpu_fp_transfer ELEN=$(ELEN) VLEN=$(VLEN)
+	python3 $(CURDIR)/record_run.py leaf \
+		$(BUILD_DIR)/fp-transfer-$(ELEN)-$(VLEN)/sources.json rapt_vpu_fp_transfer \
+		ELEN=$(ELEN) VLEN=$(VLEN)
 	$(VERILATOR) --cc --exe --build -Wall -j $(JOBS) --top-module rapt_vpu_fp_transfer --Mdir $(BUILD_DIR)/fp-transfer-$(ELEN)-$(VLEN) \
 	  -GELEN=$(ELEN) -GVLEN=$(VLEN) -CFLAGS '-DTEST_ELEN=$(ELEN) -DTEST_VLEN=$(VLEN)' \
 	  $(VPU)/rapt_vpu_slide.sv $(VPU)/rapt_vpu_fp_transfer.sv $(CURDIR)/test_fp_transfer.cpp \
@@ -353,7 +368,8 @@ fp-transfer:
 fp-reduce:
 	@test -n "$(SPIKE_BUILD)" || { echo 'fp-reduce requires SPIKE_BUILD for independent SoftFloat'; exit 1; }
 	@mkdir -p $(BUILD_DIR)/fp-reduce-$(ELEN)
-	python3 $(CURDIR)/record_leaf.py $(BUILD_DIR)/fp-reduce-$(ELEN)/sources.json rapt_vpu_fp_reduce ELEN=$(ELEN) CountBits=10
+	python3 $(CURDIR)/record_run.py leaf $(BUILD_DIR)/fp-reduce-$(ELEN)/sources.json \
+		rapt_vpu_fp_reduce ELEN=$(ELEN) CountBits=10
 	python3 $(CURDIR)/reference_manifest.py $(SPIKE_BUILD) $(BUILD_DIR)/fp-reduce-$(ELEN)/reference.json
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  $(CURDIR)/fma_legacy.vlt --top-module rapt_vpu_fp_reduce --Mdir $(BUILD_DIR)/fp-reduce-$(ELEN) \
@@ -366,7 +382,8 @@ fp-reduce:
 .PHONY: fp-reduce-control
 fp-reduce-control:
 	@mkdir -p $(BUILD_DIR)/fp-reduce-control-$(ELEN)
-	python3 $(CURDIR)/record_leaf.py $(BUILD_DIR)/fp-reduce-control-$(ELEN)/sources.json rapt_vpu_fp_reduce_control ELEN=$(ELEN) CountBits=10
+	python3 $(CURDIR)/record_run.py leaf $(BUILD_DIR)/fp-reduce-control-$(ELEN)/sources.json \
+		rapt_vpu_fp_reduce_control ELEN=$(ELEN) CountBits=10
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  --top-module rapt_vpu_fp_reduce_control --Mdir $(BUILD_DIR)/fp-reduce-control-$(ELEN) -GELEN=$(ELEN) \
 	  $(VPU)/rapt_vpu_fp_widen.sv $(VPU)/rapt_vpu_fp_reduce_control.sv $(CURDIR)/test_fp_reduce_control.cpp \
@@ -376,7 +393,8 @@ fp-reduce-control:
 .PHONY: fp-reduce-decode
 fp-reduce-decode:
 	@mkdir -p $(BUILD_DIR)/fp-reduce-decode-$(ELEN)
-	python3 $(CURDIR)/record_leaf.py $(BUILD_DIR)/fp-reduce-decode-$(ELEN)/sources.json rapt_vpu_fp_reduce_decode ELEN=$(ELEN)
+	python3 $(CURDIR)/record_run.py leaf $(BUILD_DIR)/fp-reduce-decode-$(ELEN)/sources.json \
+		rapt_vpu_fp_reduce_decode ELEN=$(ELEN)
 	$(VERILATOR) --cc --exe --build -Wall -j $(JOBS) --top-module rapt_vpu_fp_reduce_decode \
 	  --Mdir $(BUILD_DIR)/fp-reduce-decode-$(ELEN) -GELEN=$(ELEN) -CFLAGS '-DTEST_ELEN=$(ELEN)' \
 	  $(VPU)/rapt_vpu_fp_reduce_decode.sv $(CURDIR)/test_fp_reduce_decode.cpp \
@@ -386,7 +404,10 @@ fp-reduce-decode:
 .PHONY: fp-reduce-engine
 fp-reduce-engine:
 	@mkdir -p $(BUILD_DIR)/fp-reduce-engine-$(XLEN)-$(VLEN)-$(ELEN)-cache$(REDUCE_MASK_CACHE)
-	python3 $(CURDIR)/record_leaf.py $(BUILD_DIR)/fp-reduce-engine-$(XLEN)-$(VLEN)-$(ELEN)-cache$(REDUCE_MASK_CACHE)/sources.json rapt_vpu_fp_reduce_engine XLEN=$(XLEN) VLEN=$(VLEN) ELEN=$(ELEN) CacheMask=$(REDUCE_MASK_CACHE)
+	python3 $(CURDIR)/record_run.py leaf \
+		$(BUILD_DIR)/fp-reduce-engine-$(XLEN)-$(VLEN)-$(ELEN)-cache$(REDUCE_MASK_CACHE)/sources.json \
+		rapt_vpu_fp_reduce_engine XLEN=$(XLEN) VLEN=$(VLEN) ELEN=$(ELEN) \
+		CacheMask=$(REDUCE_MASK_CACHE)
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  --top-module rapt_vpu_fp_reduce_engine --Mdir $(BUILD_DIR)/fp-reduce-engine-$(XLEN)-$(VLEN)-$(ELEN)-cache$(REDUCE_MASK_CACHE) \
 	  -GXLEN=$(XLEN) -GVLEN=$(VLEN) -GELEN=$(ELEN) -GCacheMask=$(REDUCE_MASK_CACHE) -CFLAGS '-DTEST_XLEN=$(XLEN) -DTEST_VLEN=$(VLEN) -DTEST_ELEN=$(ELEN) -DTEST_CACHE_MASK=$(REDUCE_MASK_CACHE)' \
@@ -401,7 +422,8 @@ ADAPTER_BUILD := $(BUILD_DIR)/core-adapter-$(ADAPTER_ROB_BITS)-$(ADAPTER_GENERAT
 .PHONY: core-adapter
 core-adapter:
 	@mkdir -p $(ADAPTER_BUILD)
-	python3 $(CURDIR)/record_adapter.py $(ADAPTER_BUILD)/sources.json $(ADAPTER_ROB_BITS) $(ADAPTER_GENERATION_BITS)
+	python3 $(CURDIR)/record_run.py adapter $(ADAPTER_BUILD)/sources.json $(ADAPTER_ROB_BITS) \
+		$(ADAPTER_GENERATION_BITS)
 	$(VERILATOR) $(FLAGS) --top-module tb_vpu_core_adapter --Mdir $(ADAPTER_BUILD) \
 	  -GRobBits=$(ADAPTER_ROB_BITS) -GGenerationBits=$(ADAPTER_GENERATION_BITS) $(VPU)/rapt_vpu_core_adapter.sv $(VPU)/rapt_vpu_owner.sv $(CURDIR)/tb_vpu_core_adapter.sv \
 	  >$(ADAPTER_BUILD)/build.log 2>&1 \

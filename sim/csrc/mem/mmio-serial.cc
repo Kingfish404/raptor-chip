@@ -1,5 +1,6 @@
 #include <common.h>
 #include <serial_milestones.h>
+#include <serial_checkpoint.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -98,6 +99,19 @@ static bool serial_console_line_pending;
 static std::string serial_exit_pattern;
 static std::string serial_tx_window;
 static SerialMilestones serial_milestones;
+
+void serial_restore_checkpoint(const SerialCheckpoint &state)
+{
+    ier = state.values[0];
+    lcr = state.values[1];
+    mcr = state.values[2];
+    scr = state.values[3];
+    dll = state.values[4];
+    dlm = state.values[5];
+    fcr = state.values[6];
+    rx_head = rx_tail = rx_count = 0;
+    tx_irq_pending = state.values[7] != 0;
+}
 
 void nsim_plic_raise(uint32_t irq);
 bool sdb_is_batch_mode();

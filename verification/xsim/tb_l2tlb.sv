@@ -59,6 +59,7 @@ module tb_l2tlb #(
     tick();
     tick();
     reset = 0;
+    while (ready == 0) tick();
     // Exercise every row, then read from the other client.
     for (int n = 0; n < Entries; n++) transfer(0, 1, n, 3, 0, 0);
     for (int n = 0; n < Entries; n++) transfer(1, 0, n, 3, 0, 1);
@@ -88,6 +89,26 @@ module tb_l2tlb #(
     check(!rsp[0].hit, "SBE alias");
     @(negedge clock);
     req[0] = '0;
+    // A compact root tag must reject high root bits before comparing low
+    // bits, and an unrepresentable root fill must preserve the legal row.
+    for (int bit_idx = `RAPT_PADDR_BITS - 12; bit_idx < `RAPT_CSR_SATP_PPN_W; bit_idx++) begin
+      req[0].valid = 1;
+      req[0].vtag = 7;
+      req[0].root = (`RAPT_CSR_SATP_PPN_W'(1) << bit_idx) | `RAPT_CSR_SATP_PPN_W'(1);
+      req[0].fill = 0;
+      tick();
+      check(rsp[0].valid && !rsp[0].hit, "high root PPN aliased compact context");
+      @(negedge clock);
+      req[0].fill = 1;
+      tick();
+      @(negedge clock);
+    end
+    req[0].root = 1;
+    req[0].fill = 0;
+    tick();
+    check(rsp[0].hit && rsp[0].ptag == (XLEN - 10)'(1031), "bad root fill replaced legal row");
+    @(negedge clock);
+    req[0] = '0;
 `ifdef RAPT_RV64
     req[0].valid = 1;
     req[0].vtag = (52'(1) << 40) | 7;
@@ -96,7 +117,7 @@ module tb_l2tlb #(
     check(!rsp[0].hit, "noncanonical alias");
     @(negedge clock);
     req[0] = '0;
-    // Preserve all 44 architectural PPN bits; reject transport padding.
+    // Unsupported physical PPN bits must not be truncated into the cache.
     req[0].valid = 1;
     req[0].fill = 1;
     req[0].vtag = 8;
@@ -105,7 +126,7 @@ module tb_l2tlb #(
     @(negedge clock);
     req[0].fill = 0;
     tick();
-    check(rsp[0].hit && rsp[0].ptag == (54'(1) << 43), "high PPN truncated");
+    check(!rsp[0].hit, "unsupported high PPN cached");
     @(negedge clock);
     req[0].fill = 1;
     req[0].vtag = 9;

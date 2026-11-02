@@ -1,10 +1,20 @@
 `timescale 1ns / 1ps
-module tb_native_uart;
+module tb_native_uart #(
+    parameter bit QuietFifoIds = 1'b0
+);
   logic clk = 0, reset = 1, rx = 1, tx, irq, rd = 0, wr = 0;
   logic [2:0] addr = 0;
   logic [7:0] wdata = 0, rdata, value;
   always #5 clk = ~clk;
-  rapt_native_uart #(.ClockHz(1843200)) dut (.*);
+  rapt_native_uart #(
+      .ClockHz(1843200),
+      .QuietFifoIds(QuietFifoIds)
+  ) dut (
+      .*
+  );
+  function automatic logic [7:0] iir_code(input logic [7:0] code);
+    return code | (QuietFifoIds ? 8'hc0 : 8'h00);
+  endfunction
   task automatic write_reg(input logic [2:0] a, input logic [7:0] d);
     @(negedge clk);
     addr = a;
@@ -51,6 +61,9 @@ module tb_native_uart;
     reset = 0;
     read_reg(5, value);
     if (value != 'h60) $fatal(1, "reset LSR");
+    write_reg(2, 1);
+    read_reg(2, value);
+    if (value != iir_code(1)) $fatal(1, "FIFO identification mode");
     write_reg(3, 'h83);
     write_reg(0, 2);
     read_reg(0, value);
@@ -60,7 +73,7 @@ module tb_native_uart;
     write_reg(1, 2);
     if (!irq) $fatal(1, "THRE interrupt enable");
     read_reg(2, value);
-    if (value != 2 || irq) $fatal(1, "THRE IIR acknowledge");
+    if (value != iir_code(2) || irq) $fatal(1, "THRE IIR acknowledge");
     fork
       write_reg(0, 'ha6);
       expect_tx('ha6);
@@ -72,12 +85,12 @@ module tb_native_uart;
     send_byte('h5a);
     if (!irq) $fatal(1, "RX interrupt missing");
     read_reg(2, value);
-    if (value != 4) $fatal(1, "RX IIR");
+    if (value != iir_code(4)) $fatal(1, "RX IIR");
     read_reg(0, value);
     if (value != 'h5a || irq) $fatal(1, "RX data/interrupt clear");
     for (int i = 0; i < 17; i++) send_byte(8'(i));
     read_reg(2, value);
-    if (value != 6) $fatal(1, "overrun priority");
+    if (value != iir_code(6)) $fatal(1, "overrun priority");
     read_reg(5, value);
     if (!(value & 2)) $fatal(1, "overrun LSR");
     for (int i = 0; i < 16; i++) begin
@@ -91,6 +104,8 @@ module tb_native_uart;
     write_reg(2, 2);
     read_reg(5, value);
     if (value & 1) $fatal(1, "FIFO reset");
+    read_reg(2, value);
+    if (value != 1) $fatal(1, "FIFO identification disable");
     $display("PASS native UART: serial data, divisor, IRQs, FIFO, overrun, framing");
     $finish;
   end

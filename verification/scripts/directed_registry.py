@@ -15,6 +15,7 @@ directed check (gated + extended) for verilator-directed-all.
 
 import argparse
 import os
+from pathlib import Path
 import re
 import subprocess
 import sys
@@ -24,6 +25,19 @@ RULE_RE = re.compile(r"^(verilator-[A-Za-z0-9_.+-]+):(?![:=])")
 TARGET_VAR_RE = re.compile(r"^(verilator-[A-Za-z0-9_.+-]+): (?:override |export )?"
                            r"[A-Za-z_][A-Za-z0-9_]* *[:+?!]?=")
 VAR_RE = re.compile(r"^(VERILATOR_DIRECTED_(?:TARGETS|NONTEST|REGISTERED)) :?= ?(.*)$")
+
+
+def source_map(verify_home):
+    """Resolve tops by their declaration; do not maintain a second filename registry."""
+    sources = {}
+    for path in sorted((Path(verify_home) / "xsim").glob("tb_*.sv")):
+        code = re.sub(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*.*?\*/', ' ',
+                      path.read_text(), flags=re.S)
+        for top in re.findall(r"(?m)^\s*module\s+(tb_\w+)\b", code):
+            if top in sources:
+                raise ValueError(f"Duplicate testbench {top}: {sources[top]} and {path.name}")
+            sources[top] = path.name
+    return sources
 
 
 def make_database(make, verify_home):
@@ -46,10 +60,12 @@ def make_database(make, verify_home):
 
 def parse(database):
     rules, target_vars, variables = set(), set(), {}
+    nonempty, active_rule = {}, None
     not_a_target = False
     for line in database.splitlines():
         if line.startswith("# Not a target:"):
             not_a_target = True
+            active_rule = None
             continue
         match = VAR_RE.match(line)
         if match:
@@ -58,13 +74,21 @@ def parse(database):
         match = TARGET_VAR_RE.match(line)
         if match:
             target_vars.add(match.group(1))
+            active_rule = None
             continue
         match = RULE_RE.match(line)
         if match and not not_a_target:
-            rules.add(match.group(1))
+            active_rule = match.group(1)
+            rules.add(active_rule)
+            nonempty[active_rule] = bool(line.split(":", 1)[1].strip())
+        elif line.startswith("\t") and active_rule:
+            nonempty[active_rule] = True
+        elif line and not line.startswith("#"):
+            active_rule = None
         if line and not line.startswith("#"):
             not_a_target = False
     variables["_TARGET_VARIABLES"] = sorted(target_vars)
+    variables["_EMPTY_RULES"] = sorted(name for name in rules if not nonempty.get(name))
     return rules, variables
 
 
@@ -84,6 +108,8 @@ def classify(rules, variables):
     # to nothing while the intended check keeps the wrong configuration.
     for target in sorted(set(variables.get("_TARGET_VARIABLES", [])) - rules):
         errors.append(f"target-specific variables set for {target}, which has no rule")
+    for target in variables.get("_EMPTY_RULES", []):
+        errors.append(f"{target} has neither a recipe nor prerequisites")
     overlap = sorted(set(gated) & set(nontest))
     for target in overlap:
         errors.append(f"{target} is both gated and listed as non-test")
@@ -94,10 +120,14 @@ def classify(rules, variables):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("mode", choices=("check", "list", "extended"))
+    parser.add_argument("mode", choices=("check", "list", "extended", "sources"))
     parser.add_argument("--make", default=os.environ.get("MAKE", "make"))
     parser.add_argument("--verify-home", default=VERIFY_HOME)
     args = parser.parse_args()
+
+    if args.mode == "sources":
+        print(" ".join(f"{top}:{name}" for top, name in source_map(args.verify_home).items()))
+        return 0
 
     rules, variables = parse(make_database(args.make, args.verify_home))
     checks, extended, errors = classify(rules, variables)

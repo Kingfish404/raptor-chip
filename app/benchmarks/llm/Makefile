@@ -18,7 +18,7 @@ NATIVE_LOG_DIR   := $(NATIVE_BUILD_DIR)/logs/native
 NATIVE_REPORT_DIR := $(NATIVE_BUILD_DIR)/reports
 SRC            := $(_THIS_DIR)llm_bench.c
 PORT_HDR       := $(_THIS_DIR)rllmbench_port.h
-REPORT_SCRIPT  := $(_THIS_DIR)report.py
+REPORT_SCRIPT  := $(_THIS_DIR)../report.py
 
 LLM_OP_ITERS     ?= 8## Operator benchmark repeat count
 LLM_GEN_TOKENS   ?= 12## E2E inference generated token count (max 16)

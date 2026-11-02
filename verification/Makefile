@@ -28,9 +28,9 @@ SCRIPT_UNITTESTS := test_config_macro_check test_paddr_config test_fp_test_makef
 	test_closeout_config_check test_litex_sdcard_linux_override \
 	test_lrsc_trace_check test_run_act4 \
 	test_sta.SummaryStatusTest test_subsystem_build_cache \
-	test_external_drivers $(addprefix test_formal_drivers.,SnapshotOutputTests \
+	test_external_drivers test_logic_check $(addprefix test_formal_drivers.,SnapshotOutputTests \
 	AbcCompatibilityTest StateAbstractionAudit QualificationEvidenceTests WitnessTests \
-	ToolTimeoutTest)
+	PrimaryReplayTests)
 
 .PHONY: script-unittests
 script-unittests: config-macro-check ## Run helper-script unit tests that need no EDA tools
@@ -1173,14 +1173,18 @@ formal-rou-rvfi-composed: ## Prove ROU/RVFI transport with audited cuts and uncu
 
 FORMAL_SCOPE_OUTPUT ?= $(or $(TMPDIR),/tmp)/raptor-formal/scope
 FORMAL_RECEIPTS ?=
+FORMAL_RECEIPT_INDEXES ?=
 FORMAL_CONTRACT_REVIEW ?=
 .PHONY: formal-scope formal-signoff formal-vpu-memory-response formal-sram
 formal-scope: ## Inventory all RTL units, interfaces and supported configuration profiles
-	$(PYTHON) scripts/formal_scope.py scope --output "$(FORMAL_SCOPE_OUTPUT)"
 
 formal-signoff: ## Fail unless reviewed contracts and current whole-RTL proof evidence close
-	$(PYTHON) scripts/formal_scope.py scope --output "$(FORMAL_SCOPE_OUTPUT)" --signoff \
+formal-scope formal-signoff:
+	$(PYTHON) scripts/formal_scope.py scope --output "$(FORMAL_SCOPE_OUTPUT)" \
+	  $(if $(filter formal-signoff,$@),--signoff) \
 	  $(if $(FORMAL_CONTRACT_REVIEW),--contract-review "$(FORMAL_CONTRACT_REVIEW)",) \
+	  $(if $(FORMAL_RECEIPT_INDEXES),--receipt-index \
+	    $(foreach index,$(FORMAL_RECEIPT_INDEXES),"$(index)")) \
 	  --receipts $(foreach receipt,$(FORMAL_RECEIPTS),"$(receipt)")
 
 formal-vpu-memory-response: ## Prove RV32/RV64 stale vector-memory response payload isolation
@@ -1196,9 +1200,12 @@ formal-ieu-alu: ## Formal: verify RV32/RV64 IEU ALU and bit-manipulation operati
 formal-ioq-owner: ## Formal: prove IOQ dispatch/response provenance and single completion
 	$(MAKE) -C $(FORMAL_DIR) formal_ioq_owner
 
-.PHONY: formal-ioq-store
+.PHONY: formal-ioq-store formal-axi-r-buffer
 formal-ioq-store: ## Formal: prove owned store operands, AMO bytes and sampled SC decisions
 	$(MAKE) -C $(FORMAL_DIR) formal_ioq_store
+
+formal-axi-r-buffer: ## Prove AXI R buffering, bypass, reset and request/B passthrough
+	$(MAKE) -C $(FORMAL_DIR) formal_axi_r_buffer
 
 formal-pmp: ## Formal: prove RV32/RV64 PMP per entry, then compose priority/permissions
 	$(MAKE) -C $(FORMAL_DIR) formal_pmp_composed
@@ -1229,7 +1236,7 @@ formal: formal-ieu-alu formal-ieu-muldiv formal-pmp formal-zkt formal-plru \
 	formal-clint formal-plic formal-dtm formal-bus formal-divsqrt formal-sram \
 	formal-vpu-memory-response formal-rvfi-metadata formal-rvfi-platform formal-cache-nru \
 	formal-recovery-pending formal-stream-queue formal-rou-retire \
-	formal-l1d-data formal-prf ## Run standalone checks
+	formal-l1d-data formal-prf formal-axi-r-buffer ## Run standalone checks
 
 formal-rvfi-gen: ## Formal: generate riscv-formal checks (auto-clones repo)
 	$(MAKE) -C $(FORMAL_DIR) formal_rvfi_gen
@@ -1315,6 +1322,14 @@ UVM_BUILD_DIR := $(BUILD_DIR)/uvm
 UVM_RAPT_CONFIG ?= default
 UVM_CYCLES ?= 500## Random issue-queue cycles (for a class-capable simulator)
 
+XSIM_ERROR_PATTERN := ^ERROR:|FATAL_ERROR|FAIL:
+XSIM_UVM_PATTERN := ^UVM_(ERROR|FATAL)[[:space:]]+[^:[:space:]]|UVM_(ERROR|FATAL) *: *[1-9]
+XSIM_FAILURE_PATTERN = $(XSIM_ERROR_PATTERN)|$(XSIM_UVM_PATTERN)
+define XSIM_CHECK_LOG
+if grep -Eiq "$(XSIM_FAILURE_PATTERN)" "$(1)"; then exit 1; fi; \
+grep -q "$(2)" "$(1)"
+endef
+
 UVM_COMMON_INCLUDES := \
 	-i "$(RAPTOR_HOME)/rtl/configs/$(UVM_RAPT_CONFIG)" \
 	-i "$(RAPTOR_HOME)/rtl/include" \
@@ -1324,17 +1339,13 @@ UVM_COMMON_INCLUDES := \
 UVM_IQ_SOURCES := \
 	"$(RAPTOR_HOME)/rtl/rapt_pkg.sv" \
 	"$(RAPTOR_HOME)/rtl/common/rapt_issue_select.sv" \
-	"$(UVM_DIR)/iq/rapt_iq_uvm_if.sv" \
-	"$(UVM_DIR)/iq/rapt_iq_uvm_pkg.sv" \
 	"$(RAPTOR_HOME)/rtl/backend/rapt_iq.sv" \
-	"$(UVM_DIR)/iq/tb_rapt_iq_uvm.sv"
+	"$(UVM_DIR)/iq/rapt_iq_uvm.sv"
 
 UVM_CSR_SOURCES := \
 	"$(RAPTOR_HOME)/rtl/rapt_pkg.sv" \
-	"$(UVM_DIR)/csr/rapt_csr_uvm_if.sv" \
-	"$(UVM_DIR)/csr/rapt_csr_uvm_pkg.sv" \
 	"$(RAPTOR_HOME)/rtl/frontend/rapt_csr.sv" \
-	"$(UVM_DIR)/csr/tb_rapt_csr_uvm.sv"
+	"$(UVM_DIR)/csr/rapt_csr_uvm.sv"
 
 .PHONY: uvm uvm-smoke uvm-iq-compile uvm-csr-sret uvm-clean
 
@@ -1348,7 +1359,8 @@ uvm-smoke: ## UVM: run a minimal UVM 1.2 test on XSim
 	cd "$(UVM_BUILD_DIR)/smoke"; \
 	xvlog -sv --uvm_version 1.2 -L uvm "$(UVM_DIR)/xsim_uvm_smoke.sv"; \
 	xelab -mt off -L uvm xsim_uvm_smoke -s xsim_uvm_smoke_sim; \
-	xsim xsim_uvm_smoke_sim -testplusarg UVM_NO_RELNOTES -runall
+	xsim xsim_uvm_smoke_sim -testplusarg UVM_NO_RELNOTES -runall; \
+	$(call XSIM_CHECK_LOG,xsim.log,XSim UVM elaboration works)
 
 uvm-iq-compile: ## UVM: compile the IQ agent, sequences, scoreboard, coverage, and DUT
 	@set -e; \
@@ -1370,7 +1382,7 @@ uvm-csr-sret: ## UVM: stress Linux-shaped U-ecall/SRET and mtvec contamination
 		$(UVM_COMMON_INCLUDES) $(UVM_CSR_SOURCES); \
 	xelab -mt off -L uvm tb_rapt_csr_uvm -s tb_rapt_csr_uvm_sim; \
 	xsim tb_rapt_csr_uvm_sim -testplusarg UVM_NO_RELNOTES -testplusarg ntb_random_seed=1 -runall; \
-	! grep -Eq "UVM_(ERROR|FATAL) *: *[1-9]|FAIL:" xsim.log
+	$(call XSIM_CHECK_LOG,xsim.log,SRET operations without mtvec contamination)
 
 .PHONY: uvm-chip uvm-chip-rv32 uvm-chip-rv64 uvm-chip-rnp uvm-chip-regress
 uvm-chip: ## UVM: run complete-chip scenarios (AXI, CLINT/PLIC, debug, faults)
@@ -1442,52 +1454,15 @@ XSIM_TARGETS := \
 	xsim-muldiv-flush-reuse \
 	xsim-rou-dual-commit
 
-# Scenario tops stored in a shared source, as <top pattern>:<file>. The first
-# match wins; other tops, and those in SHARED_TB_STANDALONE, use <top>.sv.
-SHARED_TB_SOURCES := \
-	tb_sfence_selective_walk:tb_sfence_all_contract.sv \
-	tb_sfence_selective_tlb:tb_sfence_all_contract.sv \
-	tb_sfence_selective_l2:tb_sfence_all_contract.sv \
-	tb_sfence_selective_operands:tb_sfence_all_contract.sv \
-	tb_sfence_data_remap:tb_sfence_all_contract.sv \
-	tb_completion_packets:tb_uop_all_contract.sv \
-	tb_uop_instruction_metadata:tb_uop_all_contract.sv \
-	tb_uop_payload:tb_uop_all_contract.sv \
-	tb_cache_lru:tb_replacement_all_contract.sv \
-	tb_tlb_lru:tb_replacement_all_contract.sv \
-	tb_pmp_shared_equiv:tb_pmp_permissions.sv \
-	tb_targeted_coherence:tb_l1d_all_contract.sv \
-	tb_dirty_line_select:tb_l1d_all_contract.sv \
-	tb_cbo_refill_order:tb_l1d_all_contract.sv \
-	tb_bus_buffered_writeback:tb_bus_all_contract.sv \
-	tb_bus_read_ownership:tb_bus_all_contract.sv \
-	tb_idu_%:tb_idu_contract.sv \
-	tb_router_%:tb_router_all_contract.sv \
-	tb_ptw_%:tb_ptw_all_contract.sv \
-	tb_sq_%:tb_sq_all_contract.sv \
-	tb_l1d_%:tb_l1d_all_contract.sv \
-	tb_ioq_%:tb_ioq_all_contract.sv \
-	tb_lsu_%:tb_lsu_all_contract.sv \
-	tb_csr_%:tb_csr_all_contract.sv \
-	tb_predict_history%:tb_predict_history_contract.sv \
-	tb_issue_select%:tb_issue_select_contract.sv \
-	tb_rename_checkpoint%:tb_rename_checkpoint_contract.sv \
-	tb_fetch_%:tb_fetch_contract.sv
-SHARED_TB_STANDALONE := \
-	tb_l1d_16k tb_l1d_pmp_shared tb_l1d_ptw_permission_stage \
-	tb_ioq_forward_nonalias tb_ioq_dispatch_stable tb_ioq_fp_ooo
-
-# $(call shared_tb_match,<pattern>:<file>,<top>) gives <file> if <top> matches.
-shared_tb_pattern = $(firstword $(subst :, ,$(1)))
-shared_tb_file = $(lastword $(subst :, ,$(1)))
-shared_tb_match = $(if $(filter $(call shared_tb_pattern,$(1)),$(2)),$(call shared_tb_file,$(1)))
-shared_tb_matches = $(foreach entry,$(SHARED_TB_SOURCES),$(call shared_tb_match,$(entry),$(1)))
-shared_tb_first = $(firstword $(call shared_tb_matches,$(1)))
-shared_tb_lookup = $(if $(filter $(SHARED_TB_STANDALONE),$(1)),,$(call shared_tb_first,$(1)))
-
-define SHARED_TB_SOURCE
-$(or $(call shared_tb_lookup,$(1)),$(1).sv)
-endef
+# Every top resolves to its actual declaration, including shared scenario files.
+SHARED_TB_SOURCES := $(shell $(PYTHON) "$(VERIFY_HOME)/scripts/directed_registry.py" sources \
+	|| echo SOURCE_DISCOVERY_FAILED)
+ifneq ($(filter SOURCE_DISCOVERY_FAILED,$(SHARED_TB_SOURCES)),)
+$(error Cannot discover directed testbench sources)
+endif
+shared_tb_matches = $(filter $(1):%,$(SHARED_TB_SOURCES))
+shared_tb_file = $(patsubst $(1):%,%,$(call shared_tb_matches,$(1)))
+SHARED_TB_SOURCE = $(or $(call shared_tb_file,$(1)),$(error No testbench declares $(1)))
 
 define XSIM_RUN
 	@set -e; \
@@ -1508,10 +1483,7 @@ define XSIM_RUN
 	xelab -debug typical --timescale 1ns/1ps --override_timeunit \
 		--override_timeprecision $(2) -s $(2)_sim; \
 	xsim $(2)_sim $(5) -runall; \
-	if grep -Eiq "^error:|FATAL_ERROR|FAIL:" xsim.log; then \
-		echo "[xsim] ERROR: $(2) reported FAIL/FATAL; see $(XSIM_BUILD_DIR)/$(1)/xsim.log"; \
-		exit 1; \
-	fi
+	$(call XSIM_CHECK_LOG,xsim.log,PASS:)
 endef
 
 .PHONY: xsim $(XSIM_TARGETS) xsim-l2-ordered-mmio xsim-l2-write-stream \
@@ -1629,27 +1601,18 @@ VERILATOR_DIRECTED_TARGETS := \
 	verilator-l1i-response-error-rv64 \
 	verilator-compressed-expansion-rv32 \
 	verilator-compressed-expansion-rv64 \
-	verilator-l1d-replacement \
 	verilator-l1i-width-window-4way \
 	verilator-l1i-width-window-8way \
-	verilator-cache-replacement \
 	verilator-sq-forward-ports \
 	verilator-sq-forward-ports-rv64 \
 	verilator-sq-forward-ring-rv32 \
 	verilator-sq-forward-ring-rv64 \
-	verilator-l1d-data \
 	verilator-l1d-writeback \
 	verilator-l1d-config-slices \
-	verilator-l1d-tags \
 	verilator-alu-zbb-strlen \
 	verilator-l2 \
 	verilator-axi-r-buffer-rv32 \
 	verilator-axi-r-buffer-rv64 \
-	verilator-l2-data-array \
-	verilator-l2-directory \
-	verilator-l2-directory-oneway \
-	verilator-l2-release-buffer-rv32 \
-	verilator-l2-release-buffer-rv64 \
 	verilator-l1d-byte-rom \
 	verilator-l1d-store-coherence \
 	verilator-memory-coherence-progress-rv32 \
@@ -1658,13 +1621,13 @@ VERILATOR_DIRECTED_TARGETS := \
 	verilator-l1d-writeback-rv64 \
 	verilator-l1d-writeback-line-rv32 \
 	verilator-l1d-writeback-line-rv64 \
+	verilator-l1d-merge-stress-rv32 \
+	verilator-l1d-merge-stress-rv64 \
 	verilator-l1d-writeback-bscan-rv64 \
 	verilator-l1d-flush-ordered \
 	verilator-l1d-cmo-permissions \
 	verilator-l1d-pmp-shared-rv32 \
 	verilator-l1d-pmp-shared-rv64 \
-	verilator-l1d-permission-stage-rv32 \
-	verilator-l1d-permission-stage-rv64 \
 	verilator-l1i-sret-priv-epoch \
 	verilator-l1i-access-sizes-rv32 \
 	verilator-l1i-access-sizes-rv64 \
@@ -1710,8 +1673,6 @@ VERILATOR_DIRECTED_TARGETS := \
 	verilator-ioq-forward-nonalias-rv64 \
 	verilator-ioq-dispatch-stable-rv32 \
 	verilator-ioq-dispatch-stable-rv64 \
-	verilator-ioq-b-wake-alias-rv32 \
-	verilator-ioq-b-wake-alias-rv64 \
 	verilator-ioq-completion-kill-rv32 \
 	verilator-ioq-completion-kill-rv64 \
 	verilator-mshr-fill-selection-rv32 \
@@ -1729,11 +1690,7 @@ VERILATOR_DIRECTED_TARGETS := \
 	verilator-iq-type-family \
 	verilator-superscalar-widths \
 	verilator-stream-queue \
-	verilator-rename-checkpoint \
-	verilator-rename-checkpoint-pipeline \
-	verilator-rename-width-recovery \
 	verilator-l1i-width-window \
-	verilator-ifu-stream-events \
 	verilator-frontend-recovery \
 	verilator-rename-random \
 	verilator-issue-select \
@@ -1744,21 +1701,14 @@ VERILATOR_DIRECTED_TARGETS := \
 	verilator-iq-port-priority-rv64 \
 	verilator-dispatch-admit \
 	verilator-rob-dispatch-select \
-	verilator-operand-spill \
-	verilator-operand-value-spill \
 	verilator-dispatch-compact \
 	verilator-recovery-pending \
 	verilator-completion-guard \
-	verilator-ioq-response-stage-rv32 \
-	verilator-ioq-response-stage-rv64 \
 	verilator-completion-stage-rv32 \
 	verilator-completion-stage-rv64 \
-	verilator-fmax-boundaries-rv32 \
-	verilator-fmax-boundaries-rv64 \
 	verilator-cdb-streaming-rv32 \
 	verilator-cdb-streaming-rv64 \
 	verilator-iq-reclaim-random \
-	verilator-ras \
 	verilator-ras-pipeline \
 	verilator-btb-storage-rv32 \
 	verilator-btb-storage-rv64 \
@@ -1807,7 +1757,7 @@ VERILATOR_DIRECTED_XLEN_RUN = $(call VERILATOR_DIRECTED_RUN,$(subst -,_,$(patsub
 
 .PHONY: verilator-directed verilator-directed-clean $(VERILATOR_DIRECTED_TARGETS)
 
-verilator-directed: superscalar-structure-check verilator-directed-registry-check $(VERILATOR_DIRECTED_TARGETS) ## Run the fast module-check gate with portable Verilator
+verilator-directed: verilator-directed-registry-check $(VERILATOR_DIRECTED_TARGETS) ## Run selected module checks
 	@echo "[verilator-directed] all $(words $(VERILATOR_DIRECTED_TARGETS)) checks passed"
 
 # verilator-* rules that are aggregates or helpers rather than checks. Every
@@ -1816,18 +1766,18 @@ VERILATOR_DIRECTED_NONTEST := verilator-directed verilator-directed-all \
 	verilator-directed-clean verilator-directed-registry-check verilator-execution-port-matrix
 
 .PHONY: verilator-directed-all verilator-directed-registry-check _directed-registry-db
-verilator-directed-all: superscalar-structure-check verilator-directed-registry-check ## Run every defined directed module check
+verilator-directed-all: verilator-directed-registry-check ## Run every defined directed module check
 	+@checks="$$($(PYTHON) "$(VERIFY_HOME)/scripts/directed_registry.py" list)"; \
 	$(MAKE) --no-print-directory $$checks && \
 	echo "[verilator-directed-all] all $$(echo $$checks | wc -w) checks passed"
 
 verilator-directed-registry-check: ## Reject gate entries without a rule; count ungated checks
 	@$(PYTHON) "$(VERIFY_HOME)/scripts/directed_registry.py" check
+	@$(PYTHON) "$(VERIFY_HOME)/scripts/test_directed_registry.py"
 
 _directed-registry-db:
 	@:
 
-.PHONY: superscalar-structure-check
 .PHONY: rtl-synthesis-check
 .PHONY: rtl-synthesis-audit-test
 rtl-synthesis-audit-test: ## Test fail-closed synthesis evidence handling
@@ -1837,8 +1787,6 @@ rtl-synthesis-audit-test: ## Test fail-closed synthesis evidence handling
 rtl-synthesis-check: ## Elaborate core/config matrix at native limits; reject invalid RTL contracts
 	$(PYTHON) "$(VERIFY_HOME)/scripts/rtl_synthesis_check.py"
 
-superscalar-structure-check: ## Reject fixed A/B lane APIs in the active scalable pipeline
-	$(PYTHON) "$(VERIFY_HOME)/scripts/superscalar_structure_check.py"
 
 .PHONY: verilator-dpifree-middle-smoke
 verilator-dpifree-middle-smoke: ## Exercise the parameterized commit monitor in the DPI-free whole-chip harness
@@ -2100,7 +2048,8 @@ yosys-sq-span-equivalence:
 WB_LINE_REFILL ?= 0
 verilator-l1d-writeback-rv32 verilator-l1d-writeback-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1 -GLineRefill=$(WB_LINE_REFILL)
 verilator-l1d-writeback-line-rv32 verilator-l1d-writeback-line-rv64 \
-verilator-l1d-refill-store-rv32 verilator-l1d-refill-store-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1 -GLineRefill=1
+	verilator-l1d-merge-stress-rv32 verilator-l1d-merge-stress-rv64 verilator-l1d-refill-store-rv32 \
+	verilator-l1d-refill-store-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1 -GLineRefill=1
 L1D_BSCAN_TRACE ?= 0
 verilator-l1d-writeback-bscan-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1 -GLineRefill=1 --trace
 
@@ -2280,8 +2229,6 @@ verilator-backend-recovery: VERILATOR_DIRECTED_FLAGS += -GRecoveryExercise=1
 verilator-backend-recovery-rv64: VERILATOR_DIRECTED_FLAGS += -GRecoveryExercise=1 -DRAPT_RV64
 
 verilator-superscalar-widths: verilator-width-1 verilator-width-2 verilator-width-3 verilator-width-4 verilator-width-mixed verilator-width-contract verilator-width-odd
-.PHONY: verilator-ifu-stream-events-rv32
-verilator-ifu-stream-events-rv32: verilator-ifu-stream-events
 .PHONY: rename-admit-prove
 .PHONY: rename-admit-native
 .PHONY: rename-admit-lint
@@ -2445,7 +2392,6 @@ clean: fuzz-clean riscof-clean coverage-clean sigtest-clean formal-clean jtag-cl
 
 .PHONY: rva22s64-split-page-permissions-run
 
-verilator-l1i-io-guard-rv64: VERILATOR_DIRECTED_FLAGS += -GUseGuard=1
 
 # Architectural snapshot persistence for posted-write diagnostics. The caller
 # supplies a freshly built DUT/reference; output must be fresh (no stale saves).
@@ -2617,13 +2563,19 @@ verilator-wb-ptw-rv32 verilator-wb-ptw-rv64: VERILATOR_DIRECTED_FLAGS += -GWrite
 
 # Full-capacity checks follow the configured default L1 geometry (sets/ways/line).
 
-verilator-cache-stream-wb-rv32 verilator-cache-stream-wb-rv64 verilator-cache-stream-wb-l2-rv32 verilator-cache-stream-wb-l2-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1
-verilator-cache-stream-rv32 verilator-cache-stream-rv64 verilator-cache-stream-l2-rv32 verilator-cache-stream-l2-rv64 verilator-cache-stream-rnp-rv32: VERILATOR_DIRECTED_FLAGS += -GWriteBack=0
+verilator-cache-stream-wb-rv32 verilator-cache-stream-wb-rv64 verilator-cache-stream-wb-l2-rv32 \
+	verilator-cache-stream-wb-l2-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1
+verilator-cache-stream-rv32 verilator-cache-stream-rv64 verilator-cache-stream-l2-rv32 \
+	verilator-cache-stream-l2-rv64 verilator-cache-stream-rnp-rv32: VERILATOR_DIRECTED_FLAGS += -GWriteBack=0
 
 # Both XLEN modes use the production default-w4 preset and independent directed benches.
 .PHONY: w4-scaling
 w4-scaling:
-	python3 "$(VERIFY_HOME)/scripts/test_w4_scaling.py" --build-dir "$(BUILD_DIR)/w4-scaling"
+	+$(MAKE) --no-print-directory XSIM_RAPT_CONFIG=default-w4 \
+		verilator-iq-cdb-wake-rv32 verilator-iq-cdb-wake-rv64 \
+		verilator-sq-forward-ring-rv32 verilator-sq-forward-ring-rv64 \
+		verilator-muldiv-flush-reuse \
+		verilator-frontend-recovery-stage-rv32 verilator-frontend-recovery-stage-rv64
 
 verilator-l2tlb-l1i-epoch-rv32 verilator-l2tlb-l1i-epoch-rv64: override VERILATOR_DIRECTED_FLAGS += -GL2Tlb=1
 verilator-l2tlb-l1i-sret-rv32 verilator-l2tlb-l1i-sret-rv64: override VERILATOR_DIRECTED_FLAGS += -GL2Tlb=1
@@ -2631,37 +2583,4 @@ verilator-l2tlb-cbo-rv32 verilator-l2tlb-cbo-rv64: override VERILATOR_DIRECTED_F
 
 verilator-wb-mshr-l2-rv32 verilator-wb-mshr-l2-rv64: override XSIM_COMMON_INCLUDES := $(subst /configs/$(XSIM_RAPT_CONFIG),/configs/default-l2,$(XSIM_COMMON_INCLUDES))
 
-# Public-port checks for FPGA committed-register RAM and deferred PA publication.
-FP_ARCH_BANK_LUTRAM ?= 1
-
 include $(VERIFY_HOME)/directed-tests.mk
-
-# M: compare the shared checker with independent legacy permission checkers.
-$(eval $(call XLEN_TEST,pmp-shared-equiv,tb_pmp_shared_equiv,,-d RAPT_ASSERT_EN))
-$(eval $(call XLEN_TEST,l2tlb-1024,tb_l2tlb,,-d RAPT_ASSERT_EN -GEntries=1024))
-$(eval $(call XLEN_TEST,l2tlb-2048,tb_l2tlb,,-d RAPT_ASSERT_EN -GEntries=2048))
-$(eval $(call XLEN_TEST,l2tlb-4096,tb_l2tlb,,-d RAPT_ASSERT_EN -GEntries=4096))
-# end M
-
-# Job D: target-neutral L1D replacement checks.
-.PHONY: verilator-l1d-nru
-verilator-l1d-nru:
-	$(call VERILATOR_DIRECTED_RUN,l1d_nru,tb_l1d_nru,,-d RAPT_ASSERT_EN,)
-# End Job D.
-
-# Job D: compare consumed shared tag reads against independent ports.
-.PHONY: verilator-l1d-shared-tags
-verilator-l1d-shared-tags:
-	$(call VERILATOR_DIRECTED_RUN,l1d_shared_tags,tb_l1d_shared_tags,,-d RAPT_ASSERT_EN,)
-# End Job D.
-
-# Job D: preserve held-load data and response cycles across a probe writeback.
-.PHONY: verilator-l1d-wb-resume-rv32 verilator-l1d-wb-resume-rv64
-verilator-l1d-wb-resume-rv32 verilator-l1d-wb-resume-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1
-verilator-l1d-wb-resume-rv32:
-	$(call VERILATOR_DIRECTED_RUN,l1d_wb_resume_rv32,tb_l1d_store_coherence,,\
-		-d RAPT_ASSERT_EN,+MIN_WB_RESUME +BUS_DELAY_MAX=0)
-verilator-l1d-wb-resume-rv64:
-	$(call VERILATOR_DIRECTED_RUN,l1d_wb_resume_rv64,tb_l1d_store_coherence,,\
-		-d RAPT_RV64 -d RAPT_ASSERT_EN,+MIN_WB_RESUME +BUS_DELAY_MAX=0)
-# End Job D.

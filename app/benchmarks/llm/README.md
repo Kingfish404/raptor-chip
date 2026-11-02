@@ -165,4 +165,6 @@ make app-llm-infer RLLMBENCH_TIMEBASE_HZ=50000000
 make app-llm-infer-fpga UART_PORT=/dev/tty.usbserial-...
 ```
 
-The same `RLLMBENCH_` lines appear on the LiteX console, so copied serial logs can be parsed with `report.py` as long as they contain the benchmark output. Pass `--core-clock-mhz <MHz>` to `report.py` when generating a frequency-normalized score from copied logs.
+The same `RLLMBENCH_` lines appear on the LiteX console. Parse copied serial logs
+with `app/benchmarks/report.py --suite RLLMBench`, passing `--core-clock-mhz <MHz>`
+when generating a frequency-normalized score.

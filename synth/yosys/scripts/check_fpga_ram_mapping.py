@@ -6,14 +6,14 @@ import csv
 from pathlib import Path
 
 
-def expectations(path: Path, module: str, config: str, xlen: str) -> tuple[int, int] | None:
+def expectations(path: Path, module: str, config: str, xlen: str) -> tuple[int, int, int] | None:
     with path.open(newline="") as stream:
         rows = (line for line in stream if line.strip() and not line.startswith("#"))
         for row in csv.reader(rows, delimiter="\t"):
-            if len(row) != 5:
+            if len(row) not in (5, 6):
                 raise ValueError(f"invalid RAM expectation row: {row}")
             if row[:2] == [module, config] and row[2] in (xlen, "*"):
-                return int(row[3]), int(row[4])
+                return int(row[3]), int(row[4]), int(row[5]) if len(row) == 6 else 0
     return None
 
 
@@ -33,7 +33,8 @@ def top_resources(path: Path, top: str) -> dict[str, int]:
             cells = [part.strip() for part in candidate.strip().strip("|").split("|")]
             if len(cells) != len(header) or cells[0] != top:
                 continue
-            return {key: int(value) for key, value in zip(header, cells) if key in ("RAMB36", "LUTRAMs")}
+            resources = ("RAMB36", "RAMB18", "LUTRAMs")
+            return {key: int(value) for key, value in zip(header, cells) if key in resources}
     raise ValueError(f"top instance {top!r} missing from utilization report {path}")
 
 
@@ -52,7 +53,7 @@ def main() -> None:
     if minimum is None:
         print(f"[fpga-ram] no mapping minimum for {args.module}/{args.config}/RV{args.xlen}")
         return
-    min_bram, min_lutram = minimum
+    min_bram, min_lutram, min_bram18 = minimum
     if "-DRAPT_FPGA_LUTRAM=0" in args.defines.split():
         min_lutram = 0
     stream_disabled = "-DRAPT_FPGA_STREAM_BRAM=0" in args.defines.split() or (
@@ -63,16 +64,20 @@ def main() -> None:
         min_bram = 0
     actual = top_resources(args.report, args.top)
     bram, lutram = actual["RAMB36"], actual["LUTRAMs"]
+    bram18 = actual.get("RAMB18", 0)
     failed = []
     if bram < min_bram:
         failed.append(f"RAMB36 {bram} < {min_bram}")
     if lutram < min_lutram:
         failed.append(f"LUTRAM {lutram} < {min_lutram}")
+    if bram18 < min_bram18:
+        failed.append(f"RAMB18 {bram18} < {min_bram18}")
     if failed:
         raise SystemExit(f"[fpga-ram] FAIL {args.module}/{args.config}/RV{args.xlen}: " + ", ".join(failed))
     print(
         f"[fpga-ram] PASS {args.module}/{args.config}/RV{args.xlen}: "
-        f"RAMB36 {bram} >= {min_bram}, LUTRAM {lutram} >= {min_lutram}"
+        f"RAMB36 {bram} >= {min_bram}, LUTRAM {lutram} >= {min_lutram}, "
+        f"RAMB18 {bram18} >= {min_bram18}"
     )
 
 

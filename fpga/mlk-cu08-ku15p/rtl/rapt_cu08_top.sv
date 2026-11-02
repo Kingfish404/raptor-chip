@@ -145,6 +145,14 @@ module rapt_cu08_top (
   assign ddr.rvalid = 0;
 `endif
   logic peripheral_rd, peripheral_wr, peripheral_irq;
+`ifdef NATIVE_WITH_SAMPLING
+  axi4_if replay ();
+  rapt_replay_jtag_port replay_transport (
+      .clk,
+      .reset(reset || !ddr_ready),
+      .bus(replay)
+  );
+`endif
   logic [15:0] peripheral_raddr, peripheral_waddr;
   logic [31:0] peripheral_wdata, peripheral_rdata;
   logic [3:0] peripheral_wstrb;
@@ -195,6 +203,9 @@ module rapt_cu08_top (
       .ClockHz(ClockHz),
       .RomFile(`NATIVE_ROM_FILE)
   ) soc (
+`ifdef NATIVE_WITH_SAMPLING
+      .replay,
+`endif
       .clk,
       .reset(reset || !ddr_ready),
       .peripheral_rd,

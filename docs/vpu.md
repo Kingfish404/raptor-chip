@@ -329,7 +329,7 @@ with different widths, so register identity alone is insufficient. When an equal
 width read is reused for mixed-sign operations, each operand still receives its
 own sign/zero extension.
 
-`test_wide_top.h` checks widening add/subtract, wide-source forms, widening
+`test_integer.h` checks widening add/subtract, wide-source forms, widening
 multiply/MAC, narrowing logical/arithmetic shifts and all six integer-extension
 forms against an independent 128-bit snapshot model and Spike. It covers supported
 SEW/LMUL combinations, unsigned/signed extrema, random data, policy bits, scalar

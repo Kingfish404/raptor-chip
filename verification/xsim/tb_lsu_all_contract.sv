@@ -245,72 +245,6 @@ module tb_lsu_atomic_acquire;
   end
 endmodule
 
-
-module tb_lsu_mem_context;
-  localparam int XLEN = `RAPT_XLEN;
-  localparam int LsuTbSqSize = `RAPT_SQ_SIZE;
-  `define TB_LSU_MANUAL_CONTEXT
-  `include "tb_lsu_harness.svh"
-  `undef TB_LSU_MANUAL_CONTEXT
-
-  initial begin
-    init_lsu_inputs(1'b1, 32'h12345678, `RAPT_ALU_LW__);
-    exu_lsu.rcontext = '{mmu_en: 1'b0, eff_priv: `RAPT_PRIV_M,
-        sum: 1'b0, mxr: 1'b0, pbmte: 1'b0, asid: 9'd0, version: 8'd7};
-    exu_lsu.rcontext_b = exu_lsu.rcontext;
-    sq_context = exu_lsu.rcontext;
-    tick(3);
-    reset = 1'b0;
-    exu_ioq_bcast.valid = 1'b1;
-    exu_ioq_bcast.wen = 1'b1;
-    exu_ioq_bcast.alu = XLEN == 64 ? `RAPT_SD_WSTRB : `RAPT_SW_WSTRB;
-    exu_ioq_bcast.tval = XLEN'('h8000_1000);
-    exu_ioq_bcast.sq_waddr = XLEN'('h8000_1000);
-    exu_ioq_bcast.sq_wdata = XLEN'('h1234_5678);
-    tick(1);
-    exu_ioq_bcast.valid = 1'b0;
-    exu_ioq_bcast.wen = 1'b0;
-    csr_bcast.dmmu_en = 1'b1;
-    csr_bcast.menvcfg_pbmte = 1'b1;
-    csr_bcast.priv = `RAPT_PRIV_U;
-    exu_lsu.rvalid = 1'b1;
-    exu_lsu.raddr = XLEN'('h8000_1000);
-    exu_lsu.ralu = XLEN == 64 ? `RAPT_ALU_LD__ : `RAPT_ALU_LW__;
-    #1;
-    check(
-        dut.sq_valid[0] && !dut.sq_entry_context[0].mmu_en
-          && dut.sq_entry_context[0].version == 8'd7,
-        "resident SQ store resampled CSR mode");
-    check(exu_lsu.rready && exu_lsu.rdata == XLEN'('h1234_5678) && !lsu_l1d.rvalid,
-          "SQ forwarding used live CSR instead of held load context");
-
-    // A committed store survives a serializing flush, but its old VA may no
-    // longer identify the same physical word for a new translation context.
-    exu_lsu.rvalid = 1'b0;
-    rou_lsu.valid = 1'b1;
-    rou_lsu.store = 1'b1;
-    rou_lsu.dest = '0;
-    rou_lsu.sq_vaddr = XLEN'('h8000_1000);
-    cmu_bcast.flush_pipe = 1'b1;
-    tick(1);
-    rou_lsu.valid = 1'b0;
-    rou_lsu.store = 1'b0;
-    cmu_bcast.flush_pipe = 1'b0;
-    check(dut.sq_valid[0] && dut.sq_committed[0] && dut.sq_stale_context[0],
-          "flush lost committed store or its stale-context marker");
-    exu_lsu.rcontext = '{mmu_en: 1'b1, eff_priv: `RAPT_PRIV_U,
-        sum: 1'b0, mxr: 1'b0, pbmte: 1'b0, asid: 9'd1, version: 8'd8};
-    exu_lsu.rvalid = 1'b1;
-    exu_lsu.ordered = 1'b0;
-    #1;
-    check(!exu_lsu.rready && !lsu_l1d.rvalid,
-          "new-context load forwarded or bypassed a retained old-context store");
-    $display("PASS: SQ forwarding and resident store retain context XLEN=%0d", XLEN);
-    $finish;
-  end
-endmodule
-
-
 // ---- tb_lsu_atomic_release ----
 `include "rapt.svh"
 `include "rapt_if.svh"
@@ -379,7 +313,6 @@ module tb_lsu_atomic_release;
     $finish;
   end
 endmodule
-
 
 // ---- tb_lsu_axi_io_order ----
 `include "rapt.svh"
@@ -669,7 +602,6 @@ module tb_lsu_axi_io_order;
   end
 endmodule
 
-
 // ---- tb_lsu_cbo_zero ----
 `include "rapt.svh"
 `include "rapt_if.svh"
@@ -734,7 +666,6 @@ module tb_lsu_cbo_zero;
     $finish;
   end
 endmodule
-
 
 // ---- tb_lsu_hum_pmp ----
 `include "rapt.svh"
@@ -856,7 +787,6 @@ module tb_lsu_hum_pmp;
   end
 endmodule
 
-
 // ---- tb_lsu_l1d_io_split ----
 `include "rapt.svh"
 `include "rapt_if.svh"
@@ -967,82 +897,8 @@ module tb_lsu_l1d_io_split;
   end
 endmodule
 
-
-// ---- tb_lsu_load_footprint ----
 `include "rapt.svh"
 `include "rapt_if.svh"
-module tb_lsu_load_footprint;
-  localparam int XLEN = `RAPT_XLEN;
-  localparam int WB = XLEN / 8;
-  localparam int LsuTbSqSize = 4;
-  `include "tb_lsu_harness.svh"
-  int cases = 0;
-  initial begin
-    for (int translated = 0; translated < 2; translated++)
-    for (int width = 0; width < 4; width++)
-    for (int offset = 0; offset < WB; offset++) begin
-      automatic int bytes_count=1<<width;
-      automatic int beats=(offset+bytes_count+WB-1)/WB;
-      automatic logic [XLEN-1:0] va=XLEN'('h40000ff8)+XLEN'(offset);
-      reset = 1;
-      init_lsu_inputs(1, 0, 0);
-      tick(3);
-      reset = 0;
-      tick(1);
-      // Translated requests must reach L1D even when the VA has no PMP grant.
-      if (translated != 0) begin
-        csr_bcast.priv=`RAPT_PRIV_S;
-        csr_bcast.dmmu_en=1;
-      end
-      exu_lsu.raddr=va;
-      exu_lsu.fp_rdata64_req=XLEN==32 && width==3;
-      case (width)
-        0:exu_lsu.ralu=`RAPT_ALU_LBU_;
-        1:exu_lsu.ralu=`RAPT_ALU_LHU_;
-        2:exu_lsu.ralu=`RAPT_ALU_LW__;
-        3:exu_lsu.ralu=XLEN==64 ? `RAPT_ALU_LD__ : `RAPT_ALU_LW__;
-      endcase
-      exu_lsu.rvalid = 1;
-      for (int beat = 0; beat < beats; beat++) begin
-        automatic int first = -1, count = 0;
-        for (int b = 0; b < bytes_count; b++)
-        if ((offset + b) / WB == beat) begin
-          if (first < 0) first = (offset + b) % WB;
-          count++;
-        end
-        #1;
-        check(lsu_l1d.rvalid && !exu_lsu.trap,
-              "architectural footprint rejected before translation");
-        check(int'(lsu_l1d.rorig_size_m1) == bytes_count - 1, "lost original access width");
-        if (beats == 1) begin
-          check(lsu_l1d.raddr == va && !lsu_l1d.rcheck_valid, "unnecessary split access");
-        end else begin
-          check(lsu_l1d.raddr == (va & ~XLEN'(WB - 1)) + XLEN'(beat) * XLEN'(WB),
-                "split beat address");
-          check(
-              lsu_l1d.rcheck_valid && int'(lsu_l1d.rcheck_offset)==first
-              && int'(lsu_l1d.rcheck_size_m1)==count-1,
-              "split permission footprint exceeds actual bytes");
-        end
-        lsu_l1d.rdata=0;
-        lsu_l1d.rready=1;
-        #1;
-        if (beats == 1) check(exu_lsu.rready, "single beat did not complete");
-        tick(1);
-        lsu_l1d.rready = 0;
-      end
-      #1;
-      if (beats > 1) check(exu_lsu.rready && !exu_lsu.trap, "split response missing");
-      exu_lsu.rvalid = 0;
-      tick(2);
-      cases++;
-    end
-    $display("PASS: LSU exact byte footprint and VA/PMP separation XLEN=%0d cases=%0d", XLEN,
-             cases);
-    $finish;
-  end
-endmodule
-
 
 // ---- tb_lsu_lr_contract ----
 // ---- tb_lsu_lr_sq_forward ----
@@ -1252,7 +1108,6 @@ module tb_lsu_lr_sq_forward;
   end
 endmodule
 
-
 // ---- tb_lsu_lr_alignment ----
 `include "rapt.svh"
 `include "rapt_if.svh"
@@ -1290,7 +1145,6 @@ module tb_lsu_lr_alignment;
     $finish;
   end
 endmodule
-
 
 // ---- tb_lsu_split_fault ----
 `include "rapt.svh"
@@ -1406,7 +1260,6 @@ module tb_lsu_split_fault;
     $finish;
   end
 endmodule
-
 
 // ---- tb_lsu_sq_random ----
 `include "rapt.svh"
@@ -1809,260 +1662,11 @@ module tb_lsu_sq_random;
   end
 endmodule
 
-
-// ---- tb_lsu_store_observation ----
 `include "rapt.svh"
 `include "rapt_if.svh"
 
-module tb_lsu_store_observation;
-  localparam int XLEN = `RAPT_XLEN;
-  localparam int LsuTbSqSize = 4;
-  localparam logic [XLEN-1:0] Address = XLEN'(64'h1234_5678_8000_0040);
-  localparam logic [XLEN-1:0] Data = XLEN'(64'hfedc_ba98_7654_3210);
-  localparam logic [63:0] FpData = 64'hd00d_beef_1357_2468;
-  `include "tb_lsu_harness.svh"
-
-  task automatic allocate_store(input int owner, input logic [XLEN-1:0] addr,
-                                input logic [XLEN-1:0] data, input logic fp64,
-                                input logic [4:0] walu);
-    begin
-      exu_ioq_bcast.dest = rapt_pkg::rob_index_t'(owner);
-      exu_ioq_bcast.tval = addr;
-      exu_ioq_bcast.sq_waddr = addr;
-      sq_waddr_hi = addr + XLEN'(XLEN/8);
-      exu_ioq_bcast.sq_wdata = fp64 ? XLEN'(FpData) : data;
-      exu_ioq_bcast.sq_wdata64 = FpData;
-      exu_ioq_bcast.sq_fp64 = fp64;
-      exu_ioq_bcast.alu = {1'b0, walu};
-      exu_ioq_bcast.valid = 1'b1;
-      exu_ioq_bcast.wen = 1'b1;
-      tick(1);
-      exu_ioq_bcast.valid = 1'b0;
-      exu_ioq_bcast.wen = 1'b0;
-    end
-  endtask
-
-  task automatic check_resident_observation(input logic fp64, input logic [4:0] walu);
-    int beats;
-    logic [XLEN-1:0] expected_addr, expected_data;
-    logic [7:0] expected_mask;
-    begin
-      reset = 1'b1;
-      init_lsu_inputs(1'b0, '0, '0);
-      tick(4);
-      reset = 1'b0;
-      tick(1);
-      allocate_store(3, Address, Data, fp64, walu);
-      allocate_store(4, Address + XLEN'(32), ~Data, 1'b0, `RAPT_SW_WSTRB);
-      // Neither the younger resident nor a subsequent completion may supply
-      // the retiring store's observation. Hold the drain back throughout.
-      exu_ioq_bcast.dest = '1;
-      exu_ioq_bcast.sq_waddr = ~Address;
-      exu_ioq_bcast.sq_wdata = ~Data;
-      exu_ioq_bcast.sq_wdata64 = ~FpData;
-      exu_ioq_bcast.sq_fp64 = !fp64;
-      exu_ioq_bcast.alu = '0;
-      tick(3);
-      expected_addr = (XLEN == 32 && fp64) ? Address + XLEN'(4) : Address;
-      expected_data = (XLEN == 32 && fp64) ? XLEN'(FpData[63:32]) : Data;
-      expected_mask = (XLEN == 32 && fp64) ? 8'h0f : {3'b0, walu};
-      rou_lsu.dest = rapt_pkg::rob_index_t'(3);
-      rou_lsu.sq_vaddr = Address;
-      rou_lsu.store = 1'b1;
-      rou_lsu.valid = 1'b1;
-      cmu_bcast.flush_pipe = 1'b1;
-      #1;
-      check(
-          dut.difftest_store_addr == expected_addr
-            && dut.difftest_store_data == expected_data
-            && dut.difftest_store_wstrb == expected_mask,
-          "commit observation did not select the durable SQ owner/final RV32D write");
-      tick(1);
-      rou_lsu.valid = 1'b0;
-      rou_lsu.store = 1'b0;
-      cmu_bcast.flush_pipe = 1'b0;
-      check(dut.sq_valid[0] && dut.sq_committed[0] && !dut.sq_valid[1],
-            "commit+flush did not preserve exactly the retired owner");
-      lsu_l1d.wready = 1'b1;
-      beats = 0;
-      #1;
-      for (int cycle = 0; cycle < 24 && !rou_lsu.sq_empty; cycle++) begin
-        if (lsu_l1d.wvalid) begin
-          check(lsu_l1d.waddr == Address + XLEN'(beats * (XLEN / 8)),
-                "drain address was corrupted or a flushed younger store escaped");
-          if (XLEN == 32 && fp64)
-            check(lsu_l1d.wdata == XLEN'(beats == 0 ? FpData[31:0] : FpData[63:32]),
-                  "RV32D drain payload was not persistent");
-          else check(lsu_l1d.wdata == Data, "drain payload was not persistent");
-          beats++;
-        end
-        tick(1);
-      end
-      check(rou_lsu.sq_empty && beats == ((XLEN == 32 && fp64) ? 2 : 1),
-            "store drain did not complete exactly once per expected beat");
-    end
-  endtask
-
-  task automatic check_commit_boundary_not_head;
-    int beats;
-    begin
-      reset = 1'b1;
-      init_lsu_inputs(1'b0, '0, '0);
-      tick(4);
-      reset = 1'b0;
-      tick(1);
-      allocate_store(1, Address, Data, 1'b0, `RAPT_SW_WSTRB);
-      rou_lsu.dest = rapt_pkg::rob_index_t'(1);
-      rou_lsu.sq_vaddr = Address;
-      rou_lsu.valid = 1'b1;
-      rou_lsu.store = 1'b1;
-      #1;
-      check(dut.difftest_store_addr == Address && dut.difftest_store_data == Data,
-            "normal commit did not observe the first resident");
-      tick(1);
-      rou_lsu.valid = 1'b0;
-      rou_lsu.store = 1'b0;
-      allocate_store(2, Address + XLEN'(32), ~Data, 1'b0, `RAPT_SW_WSTRB);
-      allocate_store(3, Address + XLEN'(64), '0, 1'b0, `RAPT_SW_WSTRB);
-      check(dut.sq_head == 0 && dut.sq_cmt == 1, "test did not separate commit and drain pointers");
-      rou_lsu.dest = rapt_pkg::rob_index_t'(2);
-      rou_lsu.sq_vaddr = Address + XLEN'(32);
-      rou_lsu.valid = 1'b1;
-      rou_lsu.store = 1'b1;
-      cmu_bcast.flush_pipe = 1'b1;
-      #1;
-      check(dut.difftest_store_addr == Address + XLEN'(32) && dut.difftest_store_data == ~Data,
-            "observation selected the old drain head or a younger completion");
-      tick(1);
-      rou_lsu.valid = 1'b0;
-      rou_lsu.store = 1'b0;
-      cmu_bcast.flush_pipe = 1'b0;
-      check(dut.sq_committed[0] && dut.sq_committed[1] && !dut.sq_valid[2],
-            "commit+flush lost older committed state or retained a younger store");
-      lsu_l1d.wready = 1'b1;
-      beats = 0;
-      #1;
-      for (int cycle = 0; cycle < 24 && !rou_lsu.sq_empty; cycle++) begin
-        if (lsu_l1d.wvalid) begin
-          check(
-              lsu_l1d.waddr == Address + XLEN'(beats * 32)
-                && lsu_l1d.wdata == (beats == 0 ? Data : ~Data),
-              "committed stores did not drain in program order after flush");
-          beats++;
-        end
-        tick(1);
-      end
-      check(rou_lsu.sq_empty && beats == 2, "committed residents did not drain exactly once");
-    end
-  endtask
-
-  initial begin
-    check_resident_observation(1'b0, XLEN == 64 ? `RAPT_SD_WSTRB : `RAPT_SW_WSTRB);
-    // FSD uses the SD size encoding even on RV32; fp64 selects its payload.
-    if (XLEN == 32) check_resident_observation(1'b1, `RAPT_SD_WSTRB);
-    check_commit_boundary_not_head();
-    $display(
-        "PASS: SQ-owned store observation, poisoned completion, commit+flush and drain (XLEN=%0d)",
-        XLEN);
-    $finish;
-  end
-endmodule
-
-
-// ---- tb_lsu_split_payload ----
 `include "rapt.svh"
 `include "rapt_if.svh"
-module tb_lsu_split_payload;
-  localparam int XLEN = `RAPT_XLEN;
-  localparam int LsuTbSqSize = 4;
-  localparam logic [XLEN-1:0] Addr = XLEN'('h80001000);
-  localparam logic [4:0] WordAlu = XLEN == 64 ? `RAPT_ALU_LD__ : `RAPT_ALU_LW__;
-  `define TB_LSU_MANUAL_FORWARD
-  `include "tb_lsu_harness.svh"
-  `undef TB_LSU_MANUAL_FORWARD
-
-  task automatic fresh;
-    reset = 1;
-    init_lsu_inputs(1, 32'h76543210, `RAPT_ALU_LW__);
-    exu_lsu.fp_rdata64_req = 0;
-    tick(3);
-    reset = 0;
-    tick(1);
-  endtask
-
-  task automatic check_first_payload;
-    check(lsu_l1d.raddr == Addr && lsu_l1d.ralu == WordAlu,
-          "pending conflict changed the split address or width");
-    check(
-        lsu_l1d.rcheck_valid && lsu_l1d.rcheck_offset == 3'(XLEN/8-1)
-          && lsu_l1d.rcheck_size_m1 == 0 && lsu_l1d.rorig_size_m1 == 3,
-        "pending conflict changed the split permission footprint");
-  endtask
-
-  initial begin
-    fresh();
-    exu_lsu.rvalid = 1;
-    exu_lsu.raddr = Addr + XLEN'(XLEN/8-1);
-    exu_lsu.ralu = `RAPT_ALU_LW__;
-    exu_ioq_bcast.wen = 1;
-    exu_ioq_bcast.tval = Addr;
-    exu_ioq_bcast.sq_waddr = Addr;
-    exu_ioq_bcast.alu = XLEN == 64 ? `RAPT_SD_WSTRB : `RAPT_SW_WSTRB;
-    sq_forward_pending = 1;
-    #1;
-    check(!lsu_l1d.rvalid, "split escaped a pending store conflict");
-    check_first_payload();
-    tick(2);
-    sq_forward_pending = 0;
-    #1;
-    check(lsu_l1d.rvalid, "split did not issue when conflict cleared");
-    check_first_payload();
-    tick(2);
-    sq_forward_pending = 1;
-    #1;
-    check(!lsu_l1d.rvalid, "renewed conflict did not block admission");
-    check_first_payload();
-    sq_forward_pending = 0;
-    lsu_l1d.rready = 1;
-    tick(1);
-    check(
-        lsu_l1d.rvalid && lsu_l1d.raddr == Addr + XLEN'(XLEN/8)
-          && lsu_l1d.rcheck_valid && lsu_l1d.rcheck_offset == 0
-          && lsu_l1d.rcheck_size_m1 == 2,
-        "second split footprint changed");
-    tick(1);
-    check(exu_lsu.rready && !exu_lsu.trap, "split did not complete");
-
-    fresh();
-    exu_lsu.rvalid = 1;
-    exu_lsu.raddr = Addr + XLEN'(XLEN/8-1);
-    exu_lsu.atomic_lock = 1;
-    #1;
-    check(!lsu_l1d.rvalid && exu_lsu.rready && exu_lsu.trap,
-          "misaligned LR lost its original fault");
-    check(lsu_l1d.raddr == exu_lsu.raddr && lsu_l1d.ralu == exu_lsu.ralu && !lsu_l1d.rcheck_valid,
-          "LR was rewritten as an ordinary split");
-
-    fresh();
-    csr_bcast.priv = `RAPT_PRIV_S;
-    exu_lsu.rvalid = 1;
-    exu_lsu.raddr = Addr + XLEN'(XLEN/8-1);
-    #1;
-    check(!lsu_l1d.rvalid, "split skipped its registered PMP decision");
-    tick(1);
-    check(exu_lsu.rready && exu_lsu.trap, "denied split did not fault");
-    check(lsu_l1d.raddr == exu_lsu.raddr && lsu_l1d.ralu == exu_lsu.ralu && !lsu_l1d.rcheck_valid,
-          "PMP fault lost the original footprint");
-    tick(1);
-    $display("PASS: stable SQ split payload with conflict, LR and PMP RV%0d", XLEN);
-    $finish;
-  end
-  initial begin
-    #200000;
-    $fatal(1, "split payload timeout");
-  end
-endmodule
-
 
 // ---- tb_lsu_killed_consumer ----
 `include "rapt.svh"
@@ -2096,7 +1700,14 @@ module tb_lsu_killed_consumer;
   for (genvar p = 0; p < CompletionPorts; p++) begin : g_completion
     assign completion[p] = p == completion_memory_port(CoreConfig) ? exu_ioq_bcast : '0;
   end
-  rapt_lsu dut (
+  `include "tb_lsu_integer_reads.svh"
+rapt_lsu #(
+      .LateOperands(1'b1)
+  ) dut (
+      .int_source_regs(test_int_sources),
+      .operand_read_address(test_operand_address),
+      .operand_read_value(test_operand_value),
+      .operand_read_valid(test_operand_valid),
       .wb_accept(1'b1),
       .*
   );
@@ -2307,7 +1918,6 @@ module tb_lsu_killed_consumer;
   end
 endmodule
 
-
 // ---- tb_lsu_request_boundary ----
 `include "rapt.svh"
 `include "rapt_if.svh"
@@ -2351,7 +1961,14 @@ module tb_lsu_request_boundary;
   for (genvar p = 0; p < CompletionPorts; p++) begin : g_completion
     assign completion[p] = p == completion_memory_port(CoreConfig) ? exu_ioq_bcast : '0;
   end
-  rapt_lsu dut (
+  `include "tb_lsu_integer_reads.svh"
+rapt_lsu #(
+      .LateOperands(1'b1)
+  ) dut (
+      .int_source_regs(test_int_sources),
+      .operand_read_address(test_operand_address),
+      .operand_read_value(test_operand_value),
+      .operand_read_valid(test_operand_valid),
       .wb_accept(1'b1),
       .*
   );

@@ -38,31 +38,38 @@ struct PMUSamplerState
 
 static PMUSamplerState sampler_state = {};
 using RtlConfig = CONCAT(TOP_NAME, _rapt_pkg);
+// Verilator 5.054 emits package parameters as const values defined in a .cpp,
+// not constexpr, so tables shaped by RTL parameters are sized at run time.
+using Counts = std::vector<uint64_t>;
 struct DispatchMetrics
 {
-  std::array<uint64_t, RtlConfig::DispatchStopCount> cycles, zero_progress_cycles, unfilled_slots;
-  std::array<uint64_t, RtlConfig::ExecutionDomains> endpoint_cycles;
-  std::array<uint64_t, RtlConfig::DispatchWidth + 1> histogram;
-  uint64_t accepted;
+  Counts cycles = Counts(RtlConfig::DispatchStopCount);
+  Counts zero_progress_cycles = Counts(RtlConfig::DispatchStopCount);
+  Counts unfilled_slots = Counts(RtlConfig::DispatchStopCount);
+  Counts endpoint_cycles = Counts(RtlConfig::ExecutionDomains);
+  Counts histogram = Counts(RtlConfig::DispatchWidth + 1);
+  uint64_t accepted = 0;
 };
 static DispatchMetrics dispatch_metrics = {};
 struct RobDispatchMetrics
 {
-  std::array<uint64_t, RtlConfig::ExecutionDomains> blocked_domains;
-  std::array<uint64_t, RtlConfig::ExecutionDomains> pending_domain_sum, pending_domain_peak;
-  std::array<uint64_t, RtlConfig::ROBEntries + 1> pending_histogram;
-  uint64_t candidates, accepted, bypass, oldest_blocked_cycles, pending_sum, pending_peak;
+  Counts blocked_domains = Counts(RtlConfig::ExecutionDomains);
+  Counts pending_domain_sum = Counts(RtlConfig::ExecutionDomains);
+  Counts pending_domain_peak = Counts(RtlConfig::ExecutionDomains);
+  Counts pending_histogram = Counts(RtlConfig::ROBEntries + 1);
+  uint64_t candidates = 0, accepted = 0, bypass = 0, oldest_blocked_cycles = 0;
+  uint64_t pending_sum = 0, pending_peak = 0;
 };
 static RobDispatchMetrics rob_dispatch_metrics = {};
 // Mirrors rapt_pkg::DOMAIN_BRANCH and rapt_iq's simulation-only reason codes.
 static constexpr unsigned BranchDomain = 1;
 static constexpr unsigned MemoryDomain = 4;
 static std::array<uint64_t, 7> branch_capacity_reasons = {};
-static std::array<uint64_t, RtlConfig::IntegerIssuePorts + 1> alq_issue_histogram = {};
+static Counts alq_issue_histogram(RtlConfig::IntegerIssuePorts + 1);
 struct RobHeadStallMetrics {
   std::array<uint64_t, 4> state{};
-  std::array<uint64_t, RtlConfig::ExecutionDomains> dispatch_domain{};
-  std::array<uint64_t, RtlConfig::ExecutionDomains> execute_domain{};
+  Counts dispatch_domain = Counts(RtlConfig::ExecutionDomains);
+  Counts execute_domain = Counts(RtlConfig::ExecutionDomains);
   uint64_t empty = 0, store_wait = 0, drain_wait = 0;
 };
 static RobHeadStallMetrics rob_head_stalls = {};
@@ -169,12 +176,15 @@ static void report_axi_metrics()
       u(a.outstanding_sum), u(a.outstanding_peak), u(a.skid_busy), u(a.sq_full),
       u(a.sq_and_posted_full), u(a.sq_and_w_stall), u(a.sq_and_b_wait));
 }
-using ControlRecoveryMetrics = RecoveryMetrics<RtlConfig::ROBEntries,
-    RtlConfig::CfAllocate, RtlConfig::CfResolve, RtlConfig::CfMispredict,
-    RtlConfig::CfRetire, RtlConfig::CfTrap>;
-static ControlRecoveryMetrics recovery_metrics;
+static RecoveryMetrics new_recovery_metrics()
+{
+  return RecoveryMetrics{RtlConfig::ROBEntries,
+      {RtlConfig::CfAllocate, RtlConfig::CfResolve, RtlConfig::CfMispredict,
+       RtlConfig::CfRetire, RtlConfig::CfTrap}};
+}
+static RecoveryMetrics recovery_metrics = new_recovery_metrics();
 struct RecoveryHeadMetrics {
-  std::array<uint64_t, RtlConfig::ExecutionDomains> waiting{};
+  Counts waiting = Counts(RtlConfig::ExecutionDomains);
   uint64_t ready = 0, empty = 0;
 };
 static RecoveryHeadMetrics recovery_head;
@@ -288,11 +298,11 @@ static void sample_shadow_predictor(ShadowDirectionPredictor &predictor, word_t 
 
 // One histogram per line keeps the periodic perf dump readable:
 // [bin0 bin1 ...].
-template <std::size_t N>
-static std::string compact_histogram(const std::array<uint64_t, N> &bins, std::size_t count = N)
+template <typename Bins>
+static std::string compact_histogram(const Bins &bins)
 {
   std::string text;
-  for (std::size_t i = 0; i < count && i < N; ++i)
+  for (std::size_t i = 0; i < bins.size(); ++i)
   {
     if (i) text += ' ';
     text += std::to_string(bins[i]);
@@ -309,7 +319,7 @@ static void report_recovery_metrics()
       "killed unresolved %llu, killed correct %llu, killed wrong %llu, reset discarded %llu, live %llu",
       u(m.allocated), u(m.resolved), u(m.retired), u(m.trap_retired), u(m.killed_unresolved),
       u(m.killed_correct), u(m.wrong_killed.count), u(m.reset_discarded), u(m.live_count()));
-  const auto latency = [&](const char *name, const ControlRecoveryMetrics::Latency &v) {
+  const auto latency = [&](const char *name, const RecoveryMetrics::Latency &v) {
     Log("Control latency %s: count %llu, cycles %llu, max %llu, histogram [%s]",
         name, u(v.count), u(v.cycles), u(v.maximum), compact_histogram(v.histogram).c_str());
   };
@@ -331,21 +341,23 @@ static void report_recovery_metrics()
 
 static const char *dispatch_reason_name(unsigned reason)
 {
-  switch (reason)
-  {
-  case RtlConfig::DispatchStopWidth: return "width";
-  case RtlConfig::DispatchStopEmpty: return "empty";
-  case RtlConfig::DispatchStopFlush: return "flush";
-  case RtlConfig::DispatchStopHalt: return "halt";
-  case RtlConfig::DispatchStopSerialBusy: return "serial_busy";
-  case RtlConfig::DispatchStopSerialWait: return "serial_wait";
-  case RtlConfig::DispatchStopSerialBoundary: return "serial_boundary";
-  case RtlConfig::DispatchStopRob: return "rob";
-  case RtlConfig::DispatchStopEndpoint: return "endpoint";
-  case RtlConfig::DispatchStopReset: return "reset";
-  case RtlConfig::DispatchStopRecovery: return "recovery";
-  default: return "unknown";
-  }
+  // Package parameters are not constant expressions, so they cannot be case labels.
+  const std::pair<unsigned, const char *> names[] = {
+      {RtlConfig::DispatchStopWidth, "width"},
+      {RtlConfig::DispatchStopEmpty, "empty"},
+      {RtlConfig::DispatchStopFlush, "flush"},
+      {RtlConfig::DispatchStopHalt, "halt"},
+      {RtlConfig::DispatchStopSerialBusy, "serial_busy"},
+      {RtlConfig::DispatchStopSerialWait, "serial_wait"},
+      {RtlConfig::DispatchStopSerialBoundary, "serial_boundary"},
+      {RtlConfig::DispatchStopRob, "rob"},
+      {RtlConfig::DispatchStopEndpoint, "endpoint"},
+      {RtlConfig::DispatchStopReset, "reset"},
+      {RtlConfig::DispatchStopRecovery, "recovery"},
+  };
+  for (const auto &[code, name] : names)
+    if (reason == code) return name;
+  return "unknown";
 }
 
 void perf_reset_counters()
@@ -359,8 +371,8 @@ void perf_reset_counters()
   l1d_writeback = {};
   axi_metrics = {};
   axi_cycle_sample = {};
-  alq_issue_histogram = {};
-  recovery_metrics = {};
+  alq_issue_histogram.assign(alq_issue_histogram.size(), 0);
+  recovery_metrics = new_recovery_metrics();
   recovery_head = {};
   branch_hotspots.clear();
   reset_shadow_predictors();

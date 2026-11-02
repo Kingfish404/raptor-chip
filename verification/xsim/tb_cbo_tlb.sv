@@ -103,6 +103,12 @@ module tb_cbo_tlb #(
     l1d_bus.rready = 1;
     repeat (4) @(negedge clock);
     reset = 0;
+    if (L2Tlb) begin
+      // The shared TLB may initialize RAM validity before accepting a lookup.
+      for (int cycle = 0; cycle < `RAPT_L2TLB_ENTRIES + 2 && !(|l2_ready); cycle++)
+      @(negedge clock);
+      if (!(|l2_ready)) $fatal(1, "shared TLB initialization retained request backpressure");
+    end
     // Translation has S/U effective privilege; permit the page-table and
     // data RAM explicitly instead of combining M-mode PMP bypass with MMU.
     csr_bcast.priv = `RAPT_PRIV_S;

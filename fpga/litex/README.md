@@ -254,13 +254,17 @@ $HOME/Vivado/.xinstall/2025.2/xsetup
 
 MiLianKe MLK-CU08-KU15P (Kintex UltraScale+ `xcku15p-ffva1156-2-e`). The board has a 100 MHz single-ended clock on `P26`, UART on `AN11/AM11`, 4 GB DDR4, a 4-bit TF-card interface, and 256 Mbit QSPI configuration flash.
 
-The CU08 MIG profile uses DDR4-1600: a 1250 ps memory clock period, CL12/CWL9,
+The CU08 MIG profile uses DDR4-2666: a 750 ps memory clock period, CL19/CWL14,
 and a 100 MHz differential reference with a 10000 ps input period. The fixed
-4:1 PHY/controller ratio gives a 200 MHz UI clock. The physical interface is
+4:1 PHY/controller ratio gives a 333.333 MHz UI clock. The physical interface is
 64 bits and the MIG AXI interface is 512 bits with narrow transfers enabled;
-CPU clocks and the mapped RAM window are selected separately. CU07 retains
-its DDR4-2400 profile. Rebuild the bitstream after changing the MIG profile;
-DDR calibration and memory traffic still require validation on the board.
+CPU clocks and the mapped RAM window are selected separately. CU07 uses the
+same DDR4-2666 profile and memory model. CU08 uses the `MT40A512M16LY-075` timing
+proxy for the manual's 8 Gb x16 `H5AN8G6NCJR-VKI` devices. See the
+[native board details](../mlk-cu08-ku15p/README.md#board-interfaces-and-ddr)
+for document variants and the FPGA's voltage-dependent PHY limit. Rebuild the
+bitstream after changing the MIG profile. DDR calibration and memory traffic
+still require board validation; the board manual advertises 2400 MT/s.
 
 ```bash
 # List all FPGA targets visible through Vivado Hardware Manager:
@@ -294,6 +298,12 @@ The H13 platform uses the board-specific clock, UART, SD, and DDR pinout while r
 ## MLK-CU07-KU15P Hardware Flow (Xilinx Vivado)
 
 Milianke MLK-CU07-KU15P (Kintex UltraScale+ `xcku15p-ffva1156-2-e`). The bring-up flow supports the on-board DDR4 through the shared KU15P MIG profile.
+
+CU07 now matches CU08's DDR4-2666 configuration: a 750 ps memory clock period,
+CL19/CWL14, a 100 MHz differential reference (10000 ps), and a 333.333 MHz UI
+clock. The selected MIG timing model is `MT40A512M16LY-075`; the 64-bit DDR and
+512-bit AXI interfaces are unchanged. CU07 routed timing and board calibration
+at this rate still require validation against the fitted memory.
 
 ```bash
 # Source the Vivado settings so `vivado` is on PATH, e.g.:

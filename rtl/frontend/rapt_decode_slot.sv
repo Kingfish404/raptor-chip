@@ -14,14 +14,16 @@ module rapt_decode_slot #(
     output rapt_pkg::decoded_slot_t decoded
 );
   logic [31:0] inst;
-  logic [XLEN-1:0] pc_idu;
   logic [5:0] ifu_cause;
   logic ifu_trap;
   assign inst = fetched.inst;
-  assign pc_idu = `RAPT_PC_SEXT(XLEN, fetched.pc);
   assign ifu_trap = fetched.trap;
   assign ifu_cause = fetched.cause;
-  logic [63:0] dec_imm, dec_op1, dec_op2;
+  logic [20:0] dec_imm_low;
+  logic dec_imm_u;
+  logic [31:0] dec_imm;
+  logic [1:0] dec_op1_sel;
+  logic dec_op2_sel;
   logic [5:0] alu;
   logic ren_dec, wen_dec;
   logic        word_flag;
@@ -62,7 +64,6 @@ module rapt_decode_slot #(
   );
 
   rapt_idu_decoder idu_de (
-      .in_pc  ({{(64 - XLEN) {1'b0}}, pc_idu}),
       .in_inst(inst_idu),
 
       .out_alu (alu),
@@ -97,15 +98,19 @@ module rapt_decode_slot #(
       .out_fp_to_int(unused_fp_to_int),
       .out_fp_writes_fpr(fp_writes_fpr),
 
-      .out_imm(dec_imm),
+      .out_imm(dec_imm_low),
+      .out_imm_u(dec_imm_u),
       .out_rd (rd),
       .out_csr(csr),
 
-      .out_op1(dec_op1),
-      .out_op2(dec_op2),
+      .out_op1_sel(dec_op1_sel),
+      .out_op2_sel(dec_op2_sel),
       .out_rs1(rs1),
       .out_rs2(rs2)
   );
+
+  assign dec_imm = dec_imm_u ? {dec_imm_low[19:0], 12'b0}
+      : {{11{dec_imm_low[20]}}, dec_imm_low};
 
   assign fp_load_d = fp_load && fp_width_d;
   assign fp_store_d = fp_store && fp_width_d;
@@ -139,33 +144,16 @@ module rapt_decode_slot #(
       : (is_sfence_vma || is_sinval_vma)
           ? {30'b0, (inst_idu[24:20] == 0), (inst_idu[19:15] == 0)}
       : dec_imm[31:0];
-  // The decoder only produces op1 in {0, pc, imm, uimm} and op2 in {0, imm}.
-  // With DerivedConstants the upper bits are constant zero, so every buffer
-  // between decode and dispatch drops them.
+  // Transport the generated selectors directly. Comparing resolved XLEN values
+  // here would rebuild wide muxes and comparators on every decode lane.
   if (DerivedConstants) begin : g_derived_constants
-    logic [1:0] op1_kind;
-    always_comb begin
-      if (|csr_csw && inst_idu[14]) op1_kind = rapt_pkg::OpConstUimm;
-      else if (dec_op1[XLEN-1:0] == '0) op1_kind = rapt_pkg::OpConstZero;
-      else if (dec_op1[XLEN-1:0] == pc_idu) op1_kind = rapt_pkg::OpConstPc;
-      else if (dec_op1[XLEN-1:0] == dec_imm[XLEN-1:0]) op1_kind = rapt_pkg::OpConstImm;
-      else op1_kind = rapt_pkg::OpConstUimm;
-    end
-    assign decoded.op1 = XLEN'(op1_kind);
-    assign decoded.op2 = XLEN'(dec_op2[XLEN-1:0] != '0);
-`ifndef SYNTHESIS
-    always_comb begin
-      assert (rapt_pkg::derive_op1(
-          XLEN'(op1_kind), fetched.pc, dec_imm[31:0], inst_idu[19:15]
-      ) == dec_op1[XLEN-1:0])
-      else $error("decode op1 constant is not derivable");
-      assert (rapt_pkg::derive_op2(decoded.op2, dec_imm[31:0]) == dec_op2[XLEN-1:0])
-      else $error("decode op2 constant is not derivable");
-    end
-`endif
+    assign decoded.op1 = XLEN'(dec_op1_sel);
+    assign decoded.op2 = XLEN'(dec_op2_sel);
   end else begin : g_value_constants
-    assign decoded.op1 = dec_op1[XLEN-1:0];
-    assign decoded.op2 = dec_op2[XLEN-1:0];
+    assign decoded.op1 = rapt_pkg::derive_op1(
+        XLEN'(dec_op1_sel), fetched.pc, dec_imm, inst_idu[19:15]
+    );
+    assign decoded.op2 = rapt_pkg::derive_op2(XLEN'(dec_op2_sel), dec_imm);
   end
 
   // Per-instruction legality is independent of the decode position. Check the

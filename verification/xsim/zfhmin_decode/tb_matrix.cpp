@@ -13,7 +13,7 @@ static bool half(uint32_t i){
      || (f7==0x22 && rs2<=1);
 }
 static void check(uint32_t i){
- dut.in_inst=i;dut.in_pc=0x80000000;dut.eval();++total;
+ dut.in_inst=i;dut.eval();++total;
  const unsigned op=i&127,rm=(i>>12)&7,f7=i>>25,rs1=(i>>15)&31,rs2=(i>>20)&31,rd=(i>>7)&31;
  const bool expected=half(i),got=dut.out_fp_valid && dut.out_fp_op==63;
  bool ok=expected==got;
@@ -24,7 +24,8 @@ static void check(uint32_t i){
   if(load||store){
    const unsigned raw=load?(i>>20):(((i>>25)<<5)|rd);
    const int64_t imm=(raw&2048)?int64_t(raw)-4096:raw;
-   ok &= dut.out_imm==uint64_t(imm) && dut.out_rs1==rs1;
+   const int64_t resolved_imm=(int32_t(dut.out_imm<<11))>>11;
+   ok &= !dut.out_imm_u && resolved_imm==imm && dut.out_rs1==rs1;
    if(store)ok &= dut.out_rs2==rs2;
   }
  }

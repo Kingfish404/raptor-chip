@@ -100,7 +100,7 @@ make -C fpga/mlk-cu08-ku15p ubuntu-boot UART_PORT='/dev/serial/by-id/<KU15P-UART
 | `CLOCK_MHZ` | `50` | CPU clock target: `25`, `50` or `100` MHz |
 | `RAM_BYTES` | `131072` | BRAM main RAM size; power of two, 16 KiB–1 MiB |
 | `USE_RESET_BUTTON` | `0` | Set to `1` to enable the active-low reset button |
-| `DDR_PART` | `MT40A512M16HA-083E` | MIG memory-part selection; see board details below |
+| `DDR_PART` | `MT40A512M16LY-075` | MIG memory-part selection; see board details below |
 | `JOBS` | `4` | Tool parallelism, 1–32 |
 | `CROSS` | `riscv64-unknown-elf-` | Cross-toolchain prefix |
 | `VIVADO` | `vivado` | Vivado executable |
@@ -140,13 +140,27 @@ in reset until MIG calibration completes. Calibration status is registered in
 the UI clock domain before crossing a two-stage CPU-domain synchronizer.
 
 The CPU clock is derived by an MMCM. The DDR profile uses a separate 100 MHz
-reference, 1600 MT/s, CL=12/CWL=9 and a 200 MHz UI clock. A vendor AXI converter
-handles data-width conversion and the CPU/UI clock crossing.
+reference, DDR4-2666 (750 ps memory clock), CL=19/CWL=14 and a 333.333 MHz UI
+clock. A vendor AXI converter handles data-width conversion and the CPU/UI
+clock crossing. The CPU clock remains separately configurable.
+Native builds attempt local PHY min-skew repair, then require all routed
+setup, hold and pulse/skew checks to pass before generating a bitstream.
 
-The default `MT40A512M16HA-083E` is a reference-design proxy, not identification
-of the fitted DRAM. Confirm the installed part and geometry before board use.
-Changing `DDR_PART` changes only the MIG part selection; it does not adjust
-latencies, geometry or pins automatically.
+The vendor core-module manual identifies four `H5AN8G6NCJR-VKI` devices
+(8 Gb x16 each); its interface description specifies 2400 MT/s. The supplied
+SK hynix data sheet rates the `-VK` speed bin at 2666 MT/s, CL19. The core
+schematic also lists a `MT40A512M16LY-062E IT` variant. Vivado's
+`MT40A512M16LY-075` model provides the matching 8 Gb x16, DDR4-2666 geometry
+and timing profile for the documented hynix part. It is a timing proxy.
+Changing `DDR_PART` changes only the MIG part selection; latencies and pins
+must remain consistent with the selected part.
+
+The 2666 MT/s profile reaches the FPGA's rated single-rank component PHY limit
+for this package and speed grade at 0.85 V VCCINT (AMD DS922). The vendor
+schematic specifies 0.85 V; a low-voltage 0.72 V configuration has a lower
+2400 MT/s limit. Routed timing closure establishes FPGA timing only. Validate
+DDR calibration and sustained memory traffic on the board, especially because
+2666 MT/s exceeds the board manual's advertised interface rate.
 
 The board top is [rapt_cu08_top.sv](rtl/rapt_cu08_top.sv). Pin assignments are in
 [board.xdc](constraints/board.xdc) and [ddr4.xdc](constraints/ddr4.xdc); the DDR

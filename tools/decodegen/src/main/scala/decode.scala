@@ -7,7 +7,6 @@ import chisel3.util.experimental.decode._
 class rapt_idu_decoder extends RawModule with Instr with MicroOP {
   val in      = IO(new Bundle {
     val inst = Input(UInt(32.W))
-    val pc   = Input(UInt(64.W))
   })
   val out     = IO(new Bundle {
     val alu  = Output(UInt(6.W))
@@ -21,9 +20,11 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
     val atom = Output(UInt(1.W))
 
     val rd  = Output(UInt(5.W))
-    val imm = Output(UInt(64.W))
-    val op1 = Output(UInt(64.W))
-    val op2 = Output(UInt(64.W))
+    // U immediates carry their signed high 20 bits; all other formats fit 21 bits.
+    val imm = Output(UInt(21.W))
+    val imm_u = Output(Bool())
+    val op1_sel = Output(UInt(2.W))
+    val op2_sel = Output(Bool())
     val rs1 = Output(UInt(5.W))
     val rs2 = Output(UInt(5.W))
     val csr = Output(UInt(12.W))
@@ -65,15 +66,14 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
   val funct3 = in.inst(14, 12)
   val funct7 = in.inst(31, 25)
 
-  val imm_i = Cat(Fill(52, in.inst(31)), in.inst(31, 20))
-  val imm_s = Cat(Fill(52, in.inst(31)), in.inst(31, 25), in.inst(11, 7))
+  val imm_i = Cat(Fill(9, in.inst(31)), in.inst(31, 20))
+  val imm_s = Cat(Fill(9, in.inst(31)), in.inst(31, 25), in.inst(11, 7))
   val immbv = Cat(in.inst(31), in.inst(7), in.inst(30, 25), in.inst(11, 8))
-  val imm_b = Cat(Fill(51, in.inst(31)), immbv, 0.U)
-  val imm_u = Cat(Fill(32, in.inst(31)), in.inst(31, 12), Fill(12, 0.U))
+  val imm_b = Cat(Fill(8, in.inst(31)), immbv, 0.U(1.W))
+  val imm_u = Cat(in.inst(31), in.inst(31, 12))
   val immjv = Cat(in.inst(31), in.inst(19, 12), in.inst(20), in.inst(30, 21))
-  val imm_j = Cat(Fill(43, in.inst(31)), immjv, 0.U)
-  val csr   = in.inst(31, 20)
-  val uimm  = in.inst(19, 15)
+  val imm_j = Cat(immjv, 0.U(1.W))
+  val csr = in.inst(31, 20)
 
   val type_table   = TruthTable(
     Map(
@@ -607,217 +607,237 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
   out_fp.to_int := fp_to_int_decoded.asUInt
   out_fp.writes_fpr := (fp_valid_decoded && !fp_to_int_decoded && !fp_store_decoded).asUInt
 
+  // Keep table outputs independent of operand values and the PC. The frontend
+  // transports these selectors; dispatch expands the constants once at use.
+  val ImmZero = 0.U(4.W)
+  val ImmI = 1.U(4.W)
+  val ImmS = 2.U(4.W)
+  val ImmB = 3.U(4.W)
+  val ImmU = 4.U(4.W)
+  val ImmJ = 5.U(4.W)
+  val ImmCsr = 6.U(4.W)
+  val ImmMcause = 7.U(4.W)
+  val ImmMstatus = 8.U(4.W)
+  val ImmSstatus = 9.U(4.W)
+
   val op_table    = Array(
     // format: off
-    // inst      |  rd|    imm|   op1|   op2| rs1| rs2|
-    LUI___ -> List( rd,  imm_u, imm_u,   0.U, 0.U, 0.U), // U
-    AUIPC_ -> List( rd,  imm_u, in.pc, imm_u, 0.U, 0.U), // U
-    
-    JAL___ -> List( rd,  imm_j, in.pc,   0.U, 0.U, 0.U), // J
-    
-    JALR__ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // I
+    // Register enables, immediate format, and constant operand selectors.
+    // op1: zero/PC/immediate/CSR uimm; op2: zero/immediate.
+    LUI___ -> List(1.U, ImmU, 2.U, 0.U, 0.U, 0.U), // U
+    AUIPC_ -> List(1.U, ImmU, 1.U, 1.U, 0.U, 0.U), // U
 
-    BEQ___ -> List(0.U,  imm_b,   0.U,   0.U, rs1, rs2), // B
-    BNE___ -> List(0.U,  imm_b,   0.U,   0.U, rs1, rs2), // B
-    BLT___ -> List(0.U,  imm_b,   0.U,   0.U, rs1, rs2), // B
-    BGE___ -> List(0.U,  imm_b,   0.U,   0.U, rs1, rs2), // B
-    BLTU__ -> List(0.U,  imm_b,   0.U,   0.U, rs1, rs2), // B
-    BGEU__ -> List(0.U,  imm_b,   0.U,   0.U, rs1, rs2), // B
+    JAL___ -> List(1.U, ImmJ, 1.U, 0.U, 0.U, 0.U), // J
 
-    LB____ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // I
-    LH____ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // I
-    LW____ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // I
-    LBU___ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // I
-    LHU___ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // I
-    FLW___ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // FP I
-    FLD___ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // FP I
-    FLH___ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // Zfhmin I
-    
-    SB____ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // S
-    SH____ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // S
-    SW____ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // S
-    FSW___ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // FP S
-    FSD___ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // FP S
-    FSH___ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // Zfhmin S
+    JALR__ -> List(1.U, ImmI, 0.U, 0.U, 1.U, 0.U), // I
 
-    ADDI__ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
-    SLTI__ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
-    SLTIU_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
-    XORI__ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
-    ORI___ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
-    ANDI__ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
-    
-    SLLI__ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
-    SRLI__ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
-    SRAI__ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
-    
-    ADD___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    SUB___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    SLL___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    SLT___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    SLTU__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    XOR___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    SRL___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    SRA___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    OR____ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    AND___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    BEQ___ -> List(0.U, ImmB, 0.U, 0.U, 1.U, 1.U), // B
+    BNE___ -> List(0.U, ImmB, 0.U, 0.U, 1.U, 1.U), // B
+    BLT___ -> List(0.U, ImmB, 0.U, 0.U, 1.U, 1.U), // B
+    BGE___ -> List(0.U, ImmB, 0.U, 0.U, 1.U, 1.U), // B
+    BLTU__ -> List(0.U, ImmB, 0.U, 0.U, 1.U, 1.U), // B
+    BGEU__ -> List(0.U, ImmB, 0.U, 0.U, 1.U, 1.U), // B
 
-    ECALL_ -> List(0.U, MCAUSE,   0.U,   0.U, 0.U, 0.U), // N
-    EBREAK -> List(0.U,    0.U,   0.U,   0.U, 0.U, 0.U), // N
+    LB____ -> List(1.U, ImmI, 0.U, 0.U, 1.U, 0.U), // I
+    LH____ -> List(1.U, ImmI, 0.U, 0.U, 1.U, 0.U), // I
+    LW____ -> List(1.U, ImmI, 0.U, 0.U, 1.U, 0.U), // I
+    LBU___ -> List(1.U, ImmI, 0.U, 0.U, 1.U, 0.U), // I
+    LHU___ -> List(1.U, ImmI, 0.U, 0.U, 1.U, 0.U), // I
+    FLW___ -> List(1.U, ImmI, 0.U, 0.U, 1.U, 0.U), // FP I
+    FLD___ -> List(1.U, ImmI, 0.U, 0.U, 1.U, 0.U), // FP I
+    FLH___ -> List(1.U, ImmI, 0.U, 0.U, 1.U, 0.U), // Zfhmin I
 
-    FENCE____ -> List(0.U, 0.U,   0.U,   0.U, 0.U, 0.U), // N (also covers FENCE.TSO)
-    FENCE_I__ -> List(0.U, 0.U,   0.U,   0.U, 0.U, 0.U), // N
-    CBO_INVAL -> List(0.U, 0.U,   0.U,   0.U, rs1, 0.U), // Zicbom
-    CBO_CLEAN -> List(0.U, 0.U,   0.U,   0.U, rs1, 0.U), // Zicbom
-    CBO_FLUSH -> List(0.U, 0.U,   0.U,   0.U, rs1, 0.U), // Zicbom
-    CBO_ZERO  -> List(0.U, 0.U,   0.U,   0.U, rs1, 0.U), // Zicboz
+    SB____ -> List(0.U, ImmS, 0.U, 0.U, 1.U, 1.U), // S
+    SH____ -> List(0.U, ImmS, 0.U, 0.U, 1.U, 1.U), // S
+    SW____ -> List(0.U, ImmS, 0.U, 0.U, 1.U, 1.U), // S
+    FSW___ -> List(0.U, ImmS, 0.U, 0.U, 1.U, 1.U), // FP S
+    FSD___ -> List(0.U, ImmS, 0.U, 0.U, 1.U, 1.U), // FP S
+    FSH___ -> List(0.U, ImmS, 0.U, 0.U, 1.U, 1.U), // Zfhmin S
 
-    SFENCE_VM -> List(0.U,    0.U,   0.U,   0.U, 0.U, 0.U), // N   
-    SINVAL_VM -> List(0.U,    0.U,   0.U,   0.U, 0.U, 0.U), // N
-    SFENCE_W_INVAL -> List(0.U,    0.U,   0.U,   0.U, 0.U, 0.U), // N
-    SFENCE_INVAL_IR -> List(0.U,    0.U,   0.U,   0.U, 0.U, 0.U), // N
+    ADDI__ -> List(1.U, ImmI, 0.U, 1.U, 1.U, 0.U), // I
+    SLTI__ -> List(1.U, ImmI, 0.U, 1.U, 1.U, 0.U), // I
+    SLTIU_ -> List(1.U, ImmI, 0.U, 1.U, 1.U, 0.U), // I
+    XORI__ -> List(1.U, ImmI, 0.U, 1.U, 1.U, 0.U), // I
+    ORI___ -> List(1.U, ImmI, 0.U, 1.U, 1.U, 0.U), // I
+    ANDI__ -> List(1.U, ImmI, 0.U, 1.U, 1.U, 0.U), // I
 
-    CSRRW_ -> List( rd,    csr,   0.U,   0.U, rs1, 0.U), // CSR
-    CSRRS_ -> List( rd,    csr,   0.U,   0.U, rs1, 0.U), // CSR
-    CSRRC_ -> List( rd,    csr,   0.U,   0.U, rs1, 0.U), // CSR
-    CSRRWI -> List( rd,    csr,  uimm,   0.U, 0.U, 0.U), // CSR
-    CSRRSI -> List( rd,    csr,  uimm,   0.U, 0.U, 0.U), // CSR
-    CSRRCI -> List( rd,    csr,  uimm,   0.U, 0.U, 0.U), // CSR
+    SLLI__ -> List(1.U, ImmI, 0.U, 1.U, 1.U, 0.U), // I
+    SRLI__ -> List(1.U, ImmI, 0.U, 1.U, 1.U, 0.U), // I
+    SRAI__ -> List(1.U, ImmI, 0.U, 1.U, 1.U, 0.U), // I
 
-    MUL___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    MULH__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    MULHSU -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    MULHU_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    DIV___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    DIVU__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    REM___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    REMU__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    ADD___ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    SUB___ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    SLL___ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    SLT___ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    SLTU__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    XOR___ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    SRL___ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    SRA___ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    OR____ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    AND___ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
 
-    LR_W__ -> List( rd,    0.U,   0.U,  0.U, rs1, 0.U), // N
-    SC_W__ -> List( rd,    0.U,   0.U,  0.U, rs1, rs2), // N
+    ECALL_ -> List(0.U, ImmMcause, 0.U, 0.U, 0.U, 0.U), // N
+    EBREAK -> List(0.U, ImmZero, 0.U, 0.U, 0.U, 0.U), // N
 
- AMOSWAP_W -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
- AMOADD_W_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
- AMOXOR_W_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
- AMOAND_W_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
- AMOOR_W__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
- AMOMIN_W_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
- AMOMAX_W_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
- AMOMINU_W -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
- AMOMAXU_W -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
+    FENCE____ -> List(0.U, ImmZero, 0.U, 0.U, 0.U, 0.U), // N (also covers FENCE.TSO)
+    FENCE_I__ -> List(0.U, ImmZero, 0.U, 0.U, 0.U, 0.U), // N
+    CBO_INVAL -> List(0.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // Zicbom
+    CBO_CLEAN -> List(0.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // Zicbom
+    CBO_FLUSH -> List(0.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // Zicbom
+    CBO_ZERO  -> List(0.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // Zicboz
+
+    SFENCE_VM -> List(0.U, ImmZero, 0.U, 0.U, 0.U, 0.U), // N
+    SINVAL_VM -> List(0.U, ImmZero, 0.U, 0.U, 0.U, 0.U), // N
+    SFENCE_W_INVAL -> List(0.U, ImmZero, 0.U, 0.U, 0.U, 0.U), // N
+    SFENCE_INVAL_IR -> List(0.U, ImmZero, 0.U, 0.U, 0.U, 0.U), // N
+
+    CSRRW_ -> List(1.U, ImmCsr, 0.U, 0.U, 1.U, 0.U), // CSR
+    CSRRS_ -> List(1.U, ImmCsr, 0.U, 0.U, 1.U, 0.U), // CSR
+    CSRRC_ -> List(1.U, ImmCsr, 0.U, 0.U, 1.U, 0.U), // CSR
+    CSRRWI -> List(1.U, ImmCsr, 3.U, 0.U, 0.U, 0.U), // CSR
+    CSRRSI -> List(1.U, ImmCsr, 3.U, 0.U, 0.U, 0.U), // CSR
+    CSRRCI -> List(1.U, ImmCsr, 3.U, 0.U, 0.U, 0.U), // CSR
+
+    MUL___ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    MULH__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    MULHSU -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    MULHU_ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    DIV___ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    DIVU__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    REM___ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    REMU__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+
+    LR_W__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // N
+    SC_W__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // N
+
+ AMOSWAP_W -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // N
+ AMOADD_W_ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // N
+ AMOXOR_W_ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // N
+ AMOAND_W_ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // N
+ AMOOR_W__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // N
+ AMOMIN_W_ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // N
+ AMOMAX_W_ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // N
+ AMOMINU_W -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // N
+ AMOMAXU_W -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // N
 
     // RV64I
-    LWU___ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // I
-    LD____ -> List( rd,  imm_i,   0.U,   0.U, rs1, 0.U), // I
-    SD____ -> List(0.U,  imm_s,   0.U,   0.U, rs1, rs2), // S
-    ADDIW_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
-    SLLIW_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
-    SRLIW_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
-    SRAIW_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I
-    ADDW__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    SUBW__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    SLLW__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    SRLW__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    SRAW__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    LWU___ -> List(1.U, ImmI, 0.U, 0.U, 1.U, 0.U), // I
+    LD____ -> List(1.U, ImmI, 0.U, 0.U, 1.U, 0.U), // I
+    SD____ -> List(0.U, ImmS, 0.U, 0.U, 1.U, 1.U), // S
+    ADDIW_ -> List(1.U, ImmI, 0.U, 1.U, 1.U, 0.U), // I
+    SLLIW_ -> List(1.U, ImmI, 0.U, 1.U, 1.U, 0.U), // I
+    SRLIW_ -> List(1.U, ImmI, 0.U, 1.U, 1.U, 0.U), // I
+    SRAIW_ -> List(1.U, ImmI, 0.U, 1.U, 1.U, 0.U), // I
+    ADDW__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    SUBW__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    SLLW__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    SRLW__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    SRAW__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
 
     // RV64M
-    MULW__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    DIVW__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    DIVUW_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    REMW__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    REMUW_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    MULW__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    DIVW__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    DIVUW_ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    REMW__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    REMUW_ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
 
     // RV64A
-    LR_D__ -> List( rd,    0.U,   0.U,  0.U, rs1, 0.U), // N
-    SC_D__ -> List( rd,    0.U,   0.U,  0.U, rs1, rs2), // N
- AMOSWAP_D -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
- AMOADD_D_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
- AMOXOR_D_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
- AMOAND_D_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
- AMOOR_D__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
- AMOMIN_D_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
- AMOMAX_D_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
- AMOMINU_D -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
- AMOMAXU_D -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // N
+    LR_D__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // N
+    SC_D__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // N
+ AMOSWAP_D -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // N
+ AMOADD_D_ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // N
+ AMOXOR_D_ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // N
+ AMOAND_D_ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // N
+ AMOOR_D__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // N
+ AMOMIN_D_ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // N
+ AMOMAX_D_ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // N
+ AMOMINU_D -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // N
+ AMOMAXU_D -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // N
 
-    MRET__ -> List( rd,MSTATUS,   0.U,   0.U, 0.U, 0.U), // N
-    SRET__ -> List( rd,SSTATUS,   0.U,   0.U, 0.U, 0.U), // N
+    MRET__ -> List(1.U, ImmMstatus, 0.U, 0.U, 0.U, 0.U), // N
+    SRET__ -> List(1.U, ImmSstatus, 0.U, 0.U, 0.U, 0.U), // N
 
-    WFI___ -> List(0.U,    0.U,   0.U,   0.U, 0.U, 0.U), // N
+    WFI___ -> List(0.U, ImmZero, 0.U, 0.U, 0.U, 0.U), // N
 
     // Zimop: rd <- 0 + 0 (ALU_ADD with zero operands)
-    MOP_R_  -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // I-like
-    MOP_RR_ -> List( rd,    0.U,   0.U,   0.U, 0.U, 0.U), // R-like
+    MOP_R_  -> List(1.U, ImmZero, 0.U, 0.U, 0.U, 0.U), // I-like
+    MOP_RR_ -> List(1.U, ImmZero, 0.U, 0.U, 0.U, 0.U), // R-like
 
     // Zba (Address Generation): R-type: rd = (rs1 << N) + rs2
-    SH1ADD -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    SH2ADD -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    SH3ADD -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    SH1ADD -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    SH2ADD -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    SH3ADD -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
 
     // Zbb (Basic Bit-manipulation)
-    ANDN__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    ORN___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    XNOR__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    CLZ___ -> List( rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (unary)
-    CTZ___ -> List( rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (unary)
-    CPOP__ -> List( rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (unary)
-    MAX___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    MAXU__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    MIN___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    MINU__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    SEXTB_ -> List( rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (unary)
-    SEXTH_ -> List( rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (unary)
-    ZEXTH_ -> List( rd,    0.U,   0.U,   0.U, rs1, 0.U), // R (PACK rd,rs1,x0)
-    REV8_32 -> List(rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (unary, RV32)
-    REV8_64 -> List(rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (unary, RV64)
-    ORC_B_ -> List( rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (unary)
-    ROL___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    ROR___ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    RORI__ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I (shift imm)
+    ANDN__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    ORN___ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    XNOR__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    CLZ___ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // I (unary)
+    CTZ___ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // I (unary)
+    CPOP__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // I (unary)
+    MAX___ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    MAXU__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    MIN___ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    MINU__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    SEXTB_ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // I (unary)
+    SEXTH_ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // I (unary)
+    ZEXTH_ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // R (PACK rd,rs1,x0)
+    REV8_32 -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // I (unary, RV32)
+    REV8_64 -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // I (unary, RV64)
+    ORC_B_ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // I (unary)
+    ROL___ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    ROR___ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    RORI__ -> List(1.U, ImmI, 0.U, 1.U, 1.U, 0.U), // I (shift imm)
 
     // Zbs (Single-bit Operations)
-    BCLR__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    BCLRI_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I (shift imm)
-    BEXT__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    BEXTI_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I (shift imm)
-    BINV__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    BINVI_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I (shift imm)
-    BSET__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    BSETI_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I (shift imm)
+    BCLR__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    BCLRI_ -> List(1.U, ImmI, 0.U, 1.U, 1.U, 0.U), // I (shift imm)
+    BEXT__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    BEXTI_ -> List(1.U, ImmI, 0.U, 1.U, 1.U, 0.U), // I (shift imm)
+    BINV__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    BINVI_ -> List(1.U, ImmI, 0.U, 1.U, 1.U, 0.U), // I (shift imm)
+    BSET__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    BSETI_ -> List(1.U, ImmI, 0.U, 1.U, 1.U, 0.U), // I (shift imm)
 
     // Zbc (Carry-less Multiplication)
-    CLMUL_  -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    CLMULH_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
-    CLMULR_ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R
+    CLMUL_  -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    CLMULH_ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    CLMULR_ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
 
     // Zicond (Conditional Operations)
-    CZERO_EQZ -> List(rd,  0.U,   0.U,   0.U, rs1, rs2), // R
-    CZERO_NEZ -> List(rd,  0.U,   0.U,   0.U, rs1, rs2), // R
+    CZERO_EQZ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    CZERO_NEZ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
 
     // RV64 Zba W-variants
-    SH1ADDUW -> List(rd,   0.U,   0.U,   0.U, rs1, rs2), // R (W-variant)
-    SH2ADDUW -> List(rd,   0.U,   0.U,   0.U, rs1, rs2), // R (W-variant)
-    SH3ADDUW -> List(rd,   0.U,   0.U,   0.U, rs1, rs2), // R (W-variant)
-    ADD_UW__ -> List(rd,   0.U,   0.U,   0.U, rs1, rs2), // R (W-variant)
-    SLLI_UW_ -> List(rd, imm_i,   0.U, imm_i, rs1, 0.U), // I (W-variant)
+    SH1ADDUW -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R (W-variant)
+    SH2ADDUW -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R (W-variant)
+    SH3ADDUW -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R (W-variant)
+    ADD_UW__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R (W-variant)
+    SLLI_UW_ -> List(1.U, ImmI, 0.U, 1.U, 1.U, 0.U), // I (W-variant)
 
     // RV64 Zbb W-variants
-    CLZW__ -> List( rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (W-variant)
-    CTZW__ -> List( rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (W-variant)
-    CPOPW_ -> List( rd,    0.U,   0.U,   0.U, rs1, 0.U), // I (W-variant)
-    ROLW__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R (W-variant)
-    RORW__ -> List( rd,    0.U,   0.U,   0.U, rs1, rs2), // R (W-variant)
-    RORIW_ -> List( rd,  imm_i,   0.U, imm_i, rs1, 0.U), // I (W-variant)
-    ZEXTH64 -> List(rd,    0.U,   0.U,   0.U, rs1, 0.U)  // R (W-variant)
+    CLZW__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // I (W-variant)
+    CTZW__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // I (W-variant)
+    CPOPW_ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // I (W-variant)
+    ROLW__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R (W-variant)
+    RORW__ -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R (W-variant)
+    RORIW_ -> List(1.U, ImmI, 0.U, 1.U, 1.U, 0.U), // I (W-variant)
+    ZEXTH64 -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U)  // R (W-variant)
   )
   val var_decoder = ListLookup(in.inst,
-              List(0.U, 0.U, 0.U, 0.U, 0.U, 0.U), op_table)
+    List(0.U, ImmZero, 0.U(2.W), 0.U, 0.U, 0.U), op_table)
   // format: on
-  out.rd  := var_decoder(0)
-  out.imm := var_decoder(1)
-  out.op1 := var_decoder(2)
-  out.op2 := var_decoder(3)
-  out.rs1 := var_decoder(4)
-  out.rs2 := var_decoder(5)
+  val immediate_format = var_decoder(1)
+  val immediate_values = Seq(
+    ImmI -> imm_i, ImmS -> imm_s, ImmB -> imm_b, ImmU -> imm_u, ImmJ -> imm_j,
+    ImmCsr -> csr, ImmMcause -> MCAUSE, ImmMstatus -> MSTATUS, ImmSstatus -> SSTATUS
+  )
+  out.rd := Mux(var_decoder(0).asBool, rd, 0.U)
+  out.imm := MuxLookup(immediate_format, 0.U(21.W))(immediate_values)
+  out.imm_u := immediate_format === ImmU
+  out.op1_sel := var_decoder(2)
+  out.op2_sel := var_decoder(3).asBool
+  out.rs1 := Mux(var_decoder(4).asBool, rs1, 0.U)
+  out.rs2 := Mux(var_decoder(5).asBool, rs2, 0.U)
   out.csr := csr
 }

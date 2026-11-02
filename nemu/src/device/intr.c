@@ -199,6 +199,24 @@ bool nemu_plic_reset_state(void)
     return true;
 }
 
+bool plic_sample_state(FILE *out)
+{
+    for (unsigned word = 0; word < PLIC_NWORDS; word++)
+        if (plic_pending[word]) return false;
+    for (unsigned context = 0; context < PLIC_NCTX; context++)
+        if (plic_claimed[context]) return false;
+    // Raptor exposes sources 1..31 and one hart's two contexts.
+    if (plic_priority[32] || plic_enable[0][1] || plic_enable[1][1]) return false;
+    if (!out) return true;
+    for (unsigned source = 0; source < 32; source++)
+        fprintf(out, "plic_priority%u=0x%x\n", source, plic_priority[source]);
+    for (unsigned context = 0; context < 2; context++)
+        fprintf(out, "plic_enable%u=0x%x\nplic_threshold%u=0x%x\n",
+                context, plic_enable[context][0], context, plic_threshold[context]);
+    fprintf(out, "plic_pending=0\nplic_gateway_busy=0\nplic_ext_irq=0\n");
+    return true;
+}
+
 void plic_restore_checkpoint(const uint8_t *priority, uint32_t pending,
                              const uint32_t *enable, const uint8_t *threshold,
                              uint32_t ndev, uint32_t nctx)

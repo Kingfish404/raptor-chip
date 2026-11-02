@@ -20,7 +20,7 @@ module rapt_l1i #(
     // cache, and the log2 byte size of the lines that cache allocates.
     parameter bit L2Cache = rapt_pkg::L2LinkConfig.cache,
     parameter int L2LineOffset = rapt_pkg::L2LinkConfig.line_offset,
-    // True LRU for 2-16 ways instead of the 2-way fill toggle / tree PLRU.
+    // True LRU for 2-16 ways instead of the 2-way fill toggle / NRU.
     parameter bit CacheLru = `RAPT_CACHE_LRU != 0
 ) (
     input clock,
@@ -98,19 +98,15 @@ module rapt_l1i #(
     $error("L1I physical address width must fit its request and cache geometry");
   end
   localparam unsigned L1iWayW = L1I_N_WAYS > 1 ? $clog2(L1I_N_WAYS) : 1;
-  // Word-valid masks: per-line live flags take the bulk clears (reset,
-  // fence.i); the masks themselves have one refill writer per way and are
-  // read through replicated distributed RAM.
-  logic l1i_line_live[L1I_N_WAYS][L1iSize];
+  // Tag validity owns reset/fence.i liveness. Word masks have one refill
+  // writer per way; a matching live tag qualifies every mask use.
   logic [L1I_LINE_SIZE-1:0] valid_curr[L1I_N_WAYS], valid_next[L1I_N_WAYS];
-  logic [L1I_LINE_SIZE-1:0] valid_next4[L1I_N_WAYS], valid_fetch[L1I_N_WAYS];
-  logic l1i_valid_clear;
+  logic [L1I_LINE_SIZE-1:0] valid_next4[L1I_N_WAYS];
 
   // Per-way data SRAM bank signals.
   logic [31:0] data_bank_rdata[L1I_N_WAYS][L1I_LINE_SIZE];
-  logic [L1I_LEN-1:0] data_bank_raddr[L1I_LINE_SIZE];  // shared across ways
 
-  // Per-way tag mirrors: one copy for the current line, one for pc+4.
+  // Per-way tag reads for the current line and pc+4.
   logic [L1iTagW-1:0] tag_rdata_curr[L1I_N_WAYS];
   logic [L1iTagW-1:0] tag_rdata_next4[L1I_N_WAYS];
   logic [L1I_N_WAYS-1:0] tag_valid_curr, tag_valid_next4;
@@ -119,12 +115,12 @@ module rapt_l1i #(
 
   // Way hit logic
   logic [L1I_N_WAYS-1:0] way_hit, way_hit_next;
-  logic [L1I_N_WAYS-1:0] way_tag_match, way_tag_match_next;
+  logic [L1I_N_WAYS-1:0] way_tag_match, way_tag_match_next, way_tag_match_next4;
   /* verilator lint_off UNUSEDSIGNAL */
   logic [L1iWayW-1:0] hit_way_sel, hit_next_way_sel;
   /* verilator lint_on UNUSEDSIGNAL */
 
-  // Replacement: PLRU for >2 ways, toggle for 2-way
+  // Replacement: NRU for >2 ways, toggle for 2-way
   logic [L1iSize-1:0] replace_bit;
   logic [L1iWayW-1:0] fill_way_r;
   logic [L1iWayW-1:0] fill_way_calc, fill_way_next_calc;
@@ -133,7 +129,6 @@ module rapt_l1i #(
   logic [L1I_LEN-1:0] addr_idx;
   logic [L1I_LINE_LEN-1:0] addr_offset;
 
-  logic [L1iTagW-1:0] addr_tag_next;
   logic [L1I_LEN-1:0] addr_idx_next;
   logic [L1I_LINE_LEN-1:0] addr_offset_next;
 
@@ -175,9 +170,12 @@ module rapt_l1i #(
   logic [$clog2(IFQ_SIZE)-1:0] ifq_head;
   logic [$clog2(IFQ_SIZE)-1:0] ifq_tail;
   logic [IFQ_SIZE-1:0] ifq_valid;
-  // Refill ownership compares word addresses. Byte offsets are never used;
-  // retain the upper transport bits for exact error/owner matching.
-  logic [XLEN-1:2] ifq_raddr[IFQ_SIZE];
+  // All outstanding cache words belong to one refill; FINA/recovery drains
+  // it before another starts. Keep one full upper transport address and a
+  // word offset per slot, retaining exact error/owner matching on RV64.
+  localparam int IfqBaseLsb = RefillIdxW + 2;
+  logic [XLEN-1:IfqBaseLsb] ifq_base_addr;
+  logic [RefillIdxW-1:0] ifq_word_offset[IFQ_SIZE];
   /* verilator lint_on UNUSEDSIGNAL */
 
   // PTW instance signals
@@ -185,7 +183,7 @@ module rapt_l1i #(
   /* verilator lint_off UNUSEDSIGNAL */
   logic ptw_busy;
   /* verilator lint_on UNUSEDSIGNAL */
-  logic ptw_done, ptw_fault;
+  logic ptw_done, ptw_fault, ptw_access_fault;
   logic ptw_arvalid;
   logic [XLEN-1:0] ptw_araddr;
   logic [XLEN-1:10] ptw_result_ptag;
@@ -241,12 +239,11 @@ module rapt_l1i #(
   assign addr_idx = pc_ifu[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
   assign addr_offset = pc_ifu[L1I_LINE_LEN+2-1:2];
 
-  assign addr_tag_next = pc_ifu_next[PADDR_BITS-1:L1I_LEN+L1I_LINE_LEN+2];
   assign addr_idx_next = pc_ifu_next[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
   assign addr_offset_next = pc_ifu_next[L1I_LINE_LEN+2-1:2];
   assign addr_tag_next4 = pc_ifu_next4[PADDR_BITS-1:L1I_LEN+L1I_LINE_LEN+2];
 
-  assign fetch_addr = {ifq_raddr[ifq_tail], 2'b00};
+  assign fetch_addr = {ifq_base_addr, ifq_word_offset[ifq_tail], 2'b00};
   assign tag_fetch = install_addr_q[PADDR_BITS-1:L1I_LEN+L1I_LINE_LEN+2];
   assign offset_fetch = install_addr_q[L1I_LINE_LEN+2-1:2];
   assign idx_fetch = install_addr_q[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
@@ -279,56 +276,43 @@ module rapt_l1i #(
                         && (l1i_state == IDLE || l1i_state == RD_A || l1i_state == FINA);
   end
 
-  // Invalidation wins over both the arriving beat and a queued install.
-  assign l1i_valid_clear = reset || invalid_l1i || (wait_invalid && l1i_state == IDLE);
+  // A refill either sets its word or replaces the line's whole mask.
+  // Bit enables express that directly, without a third mask read port or
+  // a full-vector read/modify/write path. Tag validity owns bulk clears.
   for (genvar w = 0; w < L1I_N_WAYS; w++) begin : g_valid_way
-    logic fill_write;
-    logic [L1I_LINE_SIZE-1:0] fill_data;
-    logic [L1I_LINE_SIZE-1:0] raw_curr, raw_next, raw_next4, raw_fetch;
-    assign fill_write = l1i_fill_en && install_way_q == L1iWayW'(w);
-    assign fill_data = fill_tag_match[w] ? (valid_fetch[w] | fill_word_mask) : fill_word_mask;
-    if (`RAPT_FPGA_LUTRAM) begin : g_lutram
-      (* ram_style = "distributed" *) logic [L1I_LINE_SIZE-1:0] curr_words[L1iSize];
-      (* ram_style = "distributed" *) logic [L1I_LINE_SIZE-1:0] next_words[L1iSize];
-      (* ram_style = "distributed" *) logic [L1I_LINE_SIZE-1:0] next4_words[L1iSize];
-      (* ram_style = "distributed" *) logic [L1I_LINE_SIZE-1:0] fetch_words[L1iSize];
-      always_ff @(posedge clock)
-        if (fill_write) begin
-          curr_words[idx_fetch] <= fill_data;
-          next_words[idx_fetch] <= fill_data;
-          next4_words[idx_fetch] <= fill_data;
-          fetch_words[idx_fetch] <= fill_data;
-        end
-      assign raw_curr = curr_words[addr_idx];
-      assign raw_next = next_words[addr_idx_next];
-      assign raw_next4 = next4_words[addr_idx_next4];
-      assign raw_fetch = fetch_words[idx_fetch];
-    end else begin : g_shared
-      logic [L1I_LINE_SIZE-1:0] words[L1iSize];
-      always_ff @(posedge clock) if (fill_write) words[idx_fetch] <= fill_data;
-      assign raw_curr = words[addr_idx];
-      assign raw_next = words[addr_idx_next];
-      assign raw_next4 = words[addr_idx_next4];
-      assign raw_fetch = words[idx_fetch];
-    end
-    assign valid_curr[w] = l1i_line_live[w][addr_idx] ? raw_curr : '0;
-    assign valid_next[w] = l1i_line_live[w][addr_idx_next] ? raw_next : '0;
-    assign valid_next4[w] = l1i_line_live[w][addr_idx_next4] ? raw_next4 : '0;
-    assign valid_fetch[w] = l1i_line_live[w][idx_fetch] ? raw_fetch : '0;
-    for (genvar i = 0; i < L1iSize; i++) begin : g_live
+    wire fill_write = l1i_fill_en && install_way_q == L1iWayW'(w);
+    for (genvar word_idx = 0; word_idx < L1I_LINE_SIZE; word_idx++) begin : g_word
+      logic words[L1iSize];
+      wire selected_word = offset_fetch == L1I_LINE_LEN'(word_idx);
       always_ff @(posedge clock) begin
-        if (fill_write && idx_fetch == L1I_LEN'(i)) l1i_line_live[w][i] <= 1'b1;
-        if (l1i_valid_clear) l1i_line_live[w][i] <= 1'b0;
+        if (fill_write && (!fill_tag_match[w] || selected_word)) words[idx_fetch] <= selected_word;
       end
+      assign valid_curr[w][word_idx] = words[addr_idx];
+      assign valid_next4[w][word_idx] = words[addr_idx_next4];
     end
+    assign valid_next[w] = pc_ifu[1] ? valid_next4[w] : valid_curr[w];
+`ifdef RAPT_SVA_ACTIVE
+    logic [L1I_LINE_SIZE-1:0] reference_words[L1iSize];
+    logic mask_curr_matches, mask_next_matches;
+    always_ff @(posedge clock) begin
+      if (fill_write)
+        reference_words[idx_fetch] <= fill_tag_match[w]
+          ? reference_words[idx_fetch] | fill_word_mask : fill_word_mask;
+    end
+    assign mask_curr_matches = valid_curr[w] == reference_words[addr_idx];
+    assign mask_next_matches = valid_next4[w] == reference_words[addr_idx_next4];
+    `RAPT_SVA_IMPLY(clock, reset, L1I_WORD_MASK_CURRENT, tag_valid_curr[w], mask_curr_matches)
+    `RAPT_SVA_IMPLY(clock, reset, L1I_WORD_MASK_NEXT, tag_valid_next4[w], mask_next_matches)
+`endif
   end
 
   // --- L1I Tag Comparison (N-way set-associative, line-level tags) ---
   generate
     for (genvar w = 0; w < L1I_N_WAYS; w++) begin : gen_way_hit
       assign way_tag_match[w] = tag_valid_curr[w] && (tag_rdata_curr[w] == addr_tag);
-      assign way_tag_match_next[w] = (pc_ifu[1] ? tag_valid_next4[w] : tag_valid_curr[w])
-        && ((pc_ifu[1] ? tag_rdata_next4[w] : tag_rdata_curr[w]) == addr_tag_next);
+      assign way_tag_match_next4[w] = tag_valid_next4[w]
+          && tag_rdata_next4[w] == addr_tag_next4;
+      assign way_tag_match_next[w] = pc_ifu[1] ? way_tag_match_next4[w] : way_tag_match[w];
       assign way_hit[w] = way_tag_match[w] && valid_curr[w][addr_offset];
       assign way_hit_next[w] = way_tag_match_next[w] && valid_next[w][addr_offset_next];
     end
@@ -542,12 +526,12 @@ module rapt_l1i #(
   // ownership until length is known instead of dropping the one-cycle error.
   assign second_error_seen = cache_response_owned && l1i_bus.rerr
       && (!mmu_en || tlb_hit) && pc_ifu[1]
-      && ifq_raddr[ifq_tail][XLEN-1:2] == pc_ifu_next[XLEN-1:2];
+      && fetch_addr[XLEN-1:2] == pc_ifu_next[XLEN-1:2];
   assign cache_error_second = !cache_cancel && first_half_ready && !is_c
       && (second_error_seen || (second_error_pending && second_error_pc == ifu_l1i.pc));
   assign cache_error_current = (cache_response_owned && l1i_bus.rerr
       && (!mmu_en || tlb_hit)
-      && ifq_raddr[ifq_tail][XLEN-1:2] == pc_ifu[XLEN-1:2]) || cache_error_second;
+      && fetch_addr[XLEN-1:2] == pc_ifu[XLEN-1:2]) || cache_error_second;
   always_ff @(posedge clock) begin
     if (reset) begin
       second_error_pending <= 1'b0;
@@ -663,6 +647,7 @@ module rapt_l1i #(
       .bus_rdata(l1i_bus.rdata),
       .done(ptw_done),
       .fault(ptw_fault),
+      .access_fault(ptw_access_fault),
       .result_ptag(ptw_result_ptag),
       .result_vtag(ptw_result_vtag),
       .result_pte(ptw_result_pte),
@@ -740,35 +725,28 @@ module rapt_l1i #(
 `endif
   );
 
-  // --- PMP check on PTW memory (PTE) reads for instruction translation ---
-
-  // SRAM address routing (shared across all ways)
-  //
-  // Three-tier pre-read strategy for zero-bubble sequential fetch at both
-  // +2 and +4 byte strides. On an accepted bare-mode predicted target,
-  // `sram_read_pc` selects that target instead of the current sequential PC:
-  //   - Bank matching read offset      -> reads read index      (current/target)
-  //   - Bank matching read offset +2   -> reads next index (+2 lookahead,
-  //                                       needed for 32-bit insn spanning)
-  //   - All remaining banks            -> read next4 index (+4 lookahead,
-  //                                       covers 32-bit insn stride and
-  //                                       dual C-pair stride)
-  //
-  // When pc is word-aligned the +2 bank falls on the same offset as the
-  // current bank, so the second tier collapses and three banks pre-read +4.
+  // The focused word reads the current set. Every other word uses pc+4's
+  // set: the former pc+2 tier has that same index whenever it is not focused.
+`ifdef RAPT_SVA_ACTIVE
   generate
     for (genvar gi = 0; gi < L1I_LINE_SIZE; gi++) begin : gen_addr
-      assign data_bank_raddr[gi] =
+      wire [L1I_LEN-1:0] original_index;
+      wire index_matches;
+      assign original_index =
           (sram_read_offset == L1I_LINE_LEN'(gi))
           ? sram_read_idx
           : (sram_read_offset_next == L1I_LINE_LEN'(gi))
             ? sram_read_idx_next
             : sram_read_idx_next4;
+      assign index_matches = original_index == ((sram_read_offset == L1I_LINE_LEN'(gi))
+          ? sram_read_idx : sram_read_idx_next4);
+      `RAPT_SVA(clock, reset, L1I_TWO_INDEX_EQUIVALENCE, index_matches)
     end
   endgenerate
+`endif
 
-  // Per-way independent line-level tag memories. The second mirror always
-  // tracks the line containing pc+4, which also covers pc+2 when pc[1]==1.
+  // The second tag read tracks the line containing pc+4, which also
+  // covers pc+2 when pc[1]==1.
   generate
     for (genvar w = 0; w < L1I_N_WAYS; w++) begin : gen_way_tag
       rapt_l1i_tagmem #(
@@ -796,21 +774,22 @@ module rapt_l1i #(
   endgenerate
 
   if (L1I_N_WAYS > 2 || (CacheLru && L1I_N_WAYS == 2)) begin : g_replacement
-    logic [L1I_LEN-1:0] read_set[2], update_set[3];
-    logic [L1iWayW-1:0] update_way[3];
-    logic [2:0] update_valid;
+    logic [L1I_LEN-1:0] read_set[2];
     logic hit_accepted;
     assign read_set[0] = addr_idx;
     assign read_set[1] = addr_idx_next;
     assign hit_accepted = hit && (l1i_state == IDLE || l1i_state == RD_A) && rec_addr == ifu_l1i.pc;
-    assign update_valid = {l1i_fill_en, hit_accepted && !is_c && pc_ifu[1], hit_accepted};
-    assign update_set[0] = addr_idx;
-    assign update_set[1] = addr_idx_next;
-    assign update_set[2] = idx_fetch;
-    assign update_way[0] = hit_way_sel;
-    assign update_way[1] = hit_next_way_sel;
-    assign update_way[2] = install_way_q;
     if (CacheLru && L1I_N_WAYS <= 16) begin : g_lru
+      logic [L1I_LEN-1:0] update_set[3];
+      logic [L1iWayW-1:0] update_way[3];
+      logic [2:0] update_valid;
+      assign update_valid = {l1i_fill_en, hit_accepted && !is_c && pc_ifu[1], hit_accepted};
+      assign update_set[0] = addr_idx;
+      assign update_set[1] = addr_idx_next;
+      assign update_set[2] = idx_fetch;
+      assign update_way[0] = hit_way_sel;
+      assign update_way[1] = hit_next_way_sel;
+      assign update_way[2] = install_way_q;
       rapt_cache_lru #(
           .Ways(L1I_N_WAYS),
           .SetBits(L1I_LEN),
@@ -825,20 +804,26 @@ module rapt_l1i #(
           .update_set(update_set),
           .update_way(update_way)
       );
-    end else begin : g_plru
-      rapt_cache_plru #(
+    end else begin : g_nru
+      // Refills take priority over hit touches at the single indexed writer.
+      // A crossing instruction touches the second line; same-line windows
+      // need only the primary touch. Replacement history is advisory, so a
+      // simultaneous install may discard a hit touch without losing data.
+      logic touch_next;
+      assign touch_next = hit_next && !is_c && pc_ifu[1] && addr_idx_next != addr_idx;
+      rapt_cache_nru #(
           .Ways(L1I_N_WAYS),
-          .SetBits(L1I_LEN),
-          .UpdatePorts(3)
+          .SetBits(L1I_LEN)
       ) u_policy (
           .clock(clock),
           .reset(reset),
           .invalidate(invalid_l1i),
           .read_set(read_set),
           .victim(fill_victims),
-          .update_valid(update_valid),
-          .update_set(update_set),
-          .update_way(update_way)
+          .update_valid(l1i_fill_en || hit_accepted),
+          .update_set(install_valid_q ? idx_fetch : (touch_next ? addr_idx_next : addr_idx)),
+          .update_way(install_valid_q ? install_way_q
+                      : (touch_next ? hit_next_way_sel : hit_way_sel))
       );
     end
   end else begin : g_toggle
@@ -848,6 +833,22 @@ module rapt_l1i #(
 
   logic [L1I_LEN-1:0] data_bank_raddr_d1[L1I_N_WAYS][L1I_LINE_SIZE];
   logic data_bank_rvalid_d1[L1I_N_WAYS][L1I_LINE_SIZE];
+  // rec_addr already records the previous IDLE request. The hint only
+  // steers speculative SRAM reads; actual tags/permissions still gate every
+  // response. A word hole must return to the all-way window: its default
+  // way-zero read discovers instruction length before the refill can start.
+  // Requiring SRAM readiness makes an unavailable fallback clear the hint.
+  // Clearing on installs prevents a replaced way from persisting.
+  logic read_line_hint_valid, read_line_hint;
+  logic [L1iWayW-1:0] read_line_hint_way;
+  always_ff @(posedge clock) begin
+    read_line_hint_valid <= hit && sram_data_ready && l1i_state == IDLE && !cache_orphan && !cache_cancel
+        && !l1i_fill_en && !cmu_bcast.fence_time;
+    if (hit && l1i_state == IDLE) read_line_hint_way <= hit_way_sel;
+    if (reset) read_line_hint_valid <= 1'b0;
+  end
+  assign read_line_hint = read_line_hint_valid && !target_read_ahead && !(&sram_read_offset)
+      && rec_addr[PcW-1:L1I_LINE_LEN+2] == ifu_l1i.pc[PcW-1:L1I_LINE_LEN+2];
   rapt_l1i_data #(
       .SetBits(L1I_LEN),
       .WordBits(L1I_LINE_LEN),
@@ -855,8 +856,11 @@ module rapt_l1i #(
   ) u_data (
       .clock(clock),
       .reset(reset),
-      .read_addr(data_bank_raddr),
+      .read_set(sram_read_idx),
+      .read_next_set(sram_read_idx_next4),
       .read_focus_word(sram_read_offset),
+      .read_line(read_line_hint),
+      .read_way(read_line_hint_way),
       .write_valid(install_valid_q),
       .write_set(idx_fetch),
       .write_word(offset_fetch),
@@ -867,16 +871,61 @@ module rapt_l1i #(
       .read_valid(data_bank_rvalid_d1)
   );
 
+  // A circular window shares each fixed word column's 32-bit way mux among
+  // every output. Selecting [way][word] separately per output duplicates a
+  // whole line-wide way mux. Word holes still select way zero, preserving
+  // instruction-length discovery and SRAM warmup on a miss.
+  logic [31:0] fetch_window[L1I_LINE_SIZE];
+  logic [L1iWayW-1:0] window_way_sel[L1I_LINE_SIZE];
+  logic [L1I_LEN-1:0] window_read_index[L1I_LINE_SIZE];
+  logic window_read_valid[L1I_LINE_SIZE];
+  for (genvar word_idx = 0; word_idx < L1I_LINE_SIZE; word_idx++) begin : g_window
+    wire next_line = (&addr_offset) && word_idx != L1I_LINE_SIZE - 1;
+    wire [L1I_N_WAYS-1:0] column_hit;
+    for (genvar way = 0; way < L1I_N_WAYS; way++) begin : g_hit
+      assign column_hit[way] = next_line
+          ? way_tag_match_next4[way] && valid_next4[way][word_idx]
+          : way_tag_match[way] && valid_curr[way][word_idx];
+    end
+    always_comb begin
+      window_way_sel[word_idx] = '0;
+      for (int way = int'(L1I_N_WAYS) - 1; way >= 0; way--)
+      if (column_hit[way]) window_way_sel[word_idx] = L1iWayW'(way);
+    end
+    assign fetch_window[word_idx] = data_bank_rdata[window_way_sel[word_idx]][word_idx];
+    assign window_read_index[word_idx] = data_bank_raddr_d1[window_way_sel[word_idx]][word_idx];
+    assign window_read_valid[word_idx] = data_bank_rvalid_d1[window_way_sel[word_idx]][word_idx];
+  end
+
   // Word selection from SRAM banks for instruction output
   /* verilator lint_off UNUSEDSIGNAL */
   logic [31:0] l1i_word_current, l1i_word_next;
   /* verilator lint_on UNUSEDSIGNAL */
-  assign l1i_word_current = data_bank_rdata[hit_way_sel][addr_offset];
-  assign l1i_word_next = data_bank_rdata[hit_next_way_sel][addr_offset_next];
+  assign l1i_word_current = fetch_window[addr_offset];
+  assign l1i_word_next = fetch_window[addr_offset_next];
 
   assign inst_lo = pc_ifu[1] ? l1i_word_current[31:16] : l1i_word_current[15:0];
   assign inst_hi = pc_ifu[1] ? l1i_word_next[15:0] : l1i_word_current[31:16];
-  assign is_c = !(inst_lo[1:0] == 2'b11);
+  // Decode length before the late physical hit selects a way. Only one
+  // classification bit crosses that select, rather than a full data word
+  // followed by the word/halfword muxes and then the two-bit length decode.
+  logic [L1I_N_WAYS-1:0] way_is_c;
+  for (genvar way = 0; way < L1I_N_WAYS; way++) begin : g_length_way
+    logic [L1I_LINE_SIZE-1:0] word_is_c;
+    for (genvar word_idx = 0; word_idx < L1I_LINE_SIZE; word_idx++) begin : g_word
+      assign word_is_c[word_idx] = pc_ifu[1]
+          ? data_bank_rdata[way][word_idx][17:16] != 2'b11
+          : data_bank_rdata[way][word_idx][1:0] != 2'b11;
+    end
+    assign way_is_c[way] = word_is_c[addr_offset];
+  end
+  assign is_c = way_is_c[hit_way_sel];
+`ifdef RAPT_SVA_ACTIVE
+  logic length_class_matches;
+  assign length_class_matches = is_c == !(inst_lo[1:0] == 2'b11);
+  `RAPT_SVA_IMPLY(clock, reset, L1I_LENGTH_CLASS_EQUIVALENCE, first_half_ready,
+                  length_class_matches)
+`endif
 
   // SRAM data readiness: per-bank address tracking.
   //
@@ -890,13 +939,13 @@ module rapt_l1i #(
   // inst_hi comes from bank[addr_offset_next] -> check data_bank_raddr_d1[addr_offset_next] == addr_idx_next
   //   (skipped when is_c=1, since only inst_lo is needed for 16-bit instructions)
   assign first_half_ready = hit && addr_valid_r
-    && data_bank_rvalid_d1[hit_way_sel][addr_offset]
-    && data_bank_raddr_d1[hit_way_sel][addr_offset] == addr_idx;
+    && window_read_valid[addr_offset]
+    && window_read_index[addr_offset] == addr_idx;
   assign sram_data_ready = addr_valid_r
-    && data_bank_rvalid_d1[hit_way_sel][addr_offset]
-    && (data_bank_raddr_d1[hit_way_sel][addr_offset] == addr_idx)
-    && (is_c || (data_bank_rvalid_d1[hit_next_way_sel][addr_offset_next]
-                 && data_bank_raddr_d1[hit_next_way_sel][addr_offset_next] == addr_idx_next));
+    && window_read_valid[addr_offset]
+    && (window_read_index[addr_offset] == addr_idx)
+    && (is_c || (window_read_valid[addr_offset_next]
+                 && window_read_index[addr_offset_next] == addr_idx_next));
 
   assign ifu_l1i.inst_n0 = slow_active ? slow_inst : (l1i_state == TRAP)
       ? 'h00000013 : {{inst_hi}, {inst_lo}};
@@ -918,10 +967,6 @@ module rapt_l1i #(
   logic [L1I_LINE_LEN-1:0] addr_offset_n2;
   logic [L1I_N_WAYS-1:0] way_hit_n1;
   logic [L1I_N_WAYS-1:0] way_hit_n2;
-  /* verilator lint_off UNUSEDSIGNAL */
-  logic [L1iWayW-1:0] hit_n1_way_sel;
-  logic [L1iWayW-1:0] hit_n2_way_sel;
-  /* verilator lint_on UNUSEDSIGNAL */
   logic hit_n1;
   logic hit_n2;
   logic [31:0] l1i_word_n1;
@@ -951,33 +996,44 @@ module rapt_l1i #(
 
   generate
     for (genvar w = 0; w < L1I_N_WAYS; w++) begin : gen_way_hit_n1
-      assign way_hit_n1[w] = tag_valid_next4[w]
-        && (tag_rdata_next4[w] == addr_tag_next4)
+      assign way_hit_n1[w] = way_tag_match_next4[w]
         && valid_next4[w][addr_offset_n1];
-      assign way_hit_n2[w] = tag_valid_next4[w]
-        && (tag_rdata_next4[w] == addr_tag_next4)
+      assign way_hit_n2[w] = way_tag_match_next4[w]
         && valid_next4[w][addr_offset_n2];
     end
   endgenerate
 
-  always_comb begin
-    hit_n1_way_sel = '0;
-    for (int w = int'(L1I_N_WAYS) - 1; w >= 0; w--) if (way_hit_n1[w]) hit_n1_way_sel = L1iWayW'(w);
-    hit_n2_way_sel = '0;
-    for (int w = int'(L1I_N_WAYS) - 1; w >= 0; w--) if (way_hit_n2[w]) hit_n2_way_sel = L1iWayW'(w);
-  end
-
   assign hit_n1 = |way_hit_n1;
   assign hit_n2 = |way_hit_n2;
-  assign l1i_word_n1 = data_bank_rdata[hit_n1_way_sel][addr_offset_n1];
-  assign l1i_word_n2 = data_bank_rdata[hit_n2_way_sel][addr_offset_n2];
-  assign sram_n1_ready = addr_valid_r && data_bank_rvalid_d1[hit_n1_way_sel][addr_offset_n1]
-                       && (data_bank_raddr_d1[hit_n1_way_sel][addr_offset_n1] == addr_idx_next4);
-  assign sram_n2_ready = addr_valid_r && data_bank_rvalid_d1[hit_n2_way_sel][addr_offset_n2]
-                       && (data_bank_raddr_d1[hit_n2_way_sel][addr_offset_n2] == addr_idx_next4);
-  // The existing extra tag/data mirror is addressed by pc+4. At the one
+  if (L1I_LINE_SIZE <= 2) begin : g_short_lookahead
+    // A tiny line can give one column two line owners in the same window.
+    // Retain independent queries for that geometry, including warmup cycles.
+    logic [L1iWayW-1:0] way_n1, way_n2;
+    always_comb begin
+      way_n1 = '0;
+      way_n2 = '0;
+      for (int way = int'(L1I_N_WAYS) - 1; way >= 0; way--) begin
+        if (way_hit_n1[way]) way_n1 = L1iWayW'(way);
+        if (way_hit_n2[way]) way_n2 = L1iWayW'(way);
+      end
+    end
+    assign l1i_word_n1 = data_bank_rdata[way_n1][addr_offset_n1];
+    assign l1i_word_n2 = data_bank_rdata[way_n2][addr_offset_n2];
+    assign sram_n1_ready = addr_valid_r && data_bank_rvalid_d1[way_n1][addr_offset_n1]
+        && data_bank_raddr_d1[way_n1][addr_offset_n1] == addr_idx_next4;
+    assign sram_n2_ready = addr_valid_r && data_bank_rvalid_d1[way_n2][addr_offset_n2]
+        && data_bank_raddr_d1[way_n2][addr_offset_n2] == addr_idx_next4;
+  end else begin : g_window_lookahead
+    assign l1i_word_n1 = fetch_window[addr_offset_n1];
+    assign l1i_word_n2 = fetch_window[addr_offset_n2];
+    assign sram_n1_ready = addr_valid_r && window_read_valid[addr_offset_n1]
+        && window_read_index[addr_offset_n1] == addr_idx_next4;
+    assign sram_n2_ready = addr_valid_r && window_read_valid[addr_offset_n2]
+        && window_read_index[addr_offset_n2] == addr_idx_next4;
+  end
+  // The lookahead tag read addresses pc+4. At the one
   // boundary where the third aligned word enters a new line, suppress it
-  // until a future third-tag mirror can prove that line's hit and data.
+  // until another tag read can prove that line's hit and data.
   assign n2_same_line_as_next4 = pc_ifu_next4[XLEN-1:L1I_LINE_LEN+2]
                               == lookahead_n2_addr[XLEN-1:L1I_LINE_LEN+2];
 
@@ -989,8 +1045,8 @@ module rapt_l1i #(
   assign ifu_l1i.inst_n1_valid = !slow_active && !slow_select && !pmp_n1_fetch_fault
     && (!mmu_en || !lookahead_n1_page[12])
     && (pc_ifu[1]
-      ? (hit_next && data_bank_rvalid_d1[hit_next_way_sel][addr_offset_next]
-         && (data_bank_raddr_d1[hit_next_way_sel][addr_offset_next] == addr_idx_next))
+      ? (hit_next && window_read_valid[addr_offset_next]
+         && (window_read_index[addr_offset_next] == addr_idx_next))
       : (hit_n1 && sram_n1_ready));
   assign ifu_l1i.inst_n2 = l1i_word_n2;
   assign ifu_l1i.inst_n2_valid = !slow_active && !slow_select && !pmp_n2_fetch_fault
@@ -999,10 +1055,9 @@ module rapt_l1i #(
       && hit_n2 && sram_n2_ready;
 `ifdef RAPT_FETCH_WIDE
   // The extra banks are read in parallel with n1/n2. Only words in the line
-  // covered by the existing next4 tag mirror may enter the wide window.
+  // covered by the next4 tag read may enter the wide window.
   logic [L1I_LINE_LEN-1:0] addr_offset_n3, addr_offset_n4;
   logic [L1I_N_WAYS-1:0] way_hit_n3, way_hit_n4;
-  logic [L1iWayW-1:0] hit_n3_way_sel, hit_n4_way_sel;
   logic hit_n3, hit_n4, sram_n3_ready, sram_n4_ready;
   logic n3_same_line_as_next4, n4_same_line_as_next4;
   assign lookahead_n3_page = {1'b0, fetch_pc[11:2], 2'b00} + 13'd12;
@@ -1020,33 +1075,41 @@ module rapt_l1i #(
   assign addr_offset_n3 = addr_offset + L1I_LINE_LEN'(3);
   assign addr_offset_n4 = addr_offset + L1I_LINE_LEN'(4);
   for (genvar w = 0; w < L1I_N_WAYS; w++) begin : g_way_hit_wide
-    assign way_hit_n3[w] = tag_valid_next4[w]
-        && tag_rdata_next4[w] == addr_tag_next4
+    assign way_hit_n3[w] = way_tag_match_next4[w]
         && valid_next4[w][addr_offset_n3];
-    assign way_hit_n4[w] = tag_valid_next4[w]
-        && tag_rdata_next4[w] == addr_tag_next4
+    assign way_hit_n4[w] = way_tag_match_next4[w]
         && valid_next4[w][addr_offset_n4];
-  end
-  always_comb begin
-    hit_n3_way_sel = '0;
-    hit_n4_way_sel = '0;
-    for (int w = int'(L1I_N_WAYS) - 1; w >= 0; w--) begin
-      if (way_hit_n3[w]) hit_n3_way_sel = L1iWayW'(w);
-      if (way_hit_n4[w]) hit_n4_way_sel = L1iWayW'(w);
-    end
   end
   assign hit_n3 = |way_hit_n3;
   assign hit_n4 = |way_hit_n4;
-  assign sram_n3_ready = addr_valid_r && data_bank_rvalid_d1[hit_n3_way_sel][addr_offset_n3]
-      && data_bank_raddr_d1[hit_n3_way_sel][addr_offset_n3] == addr_idx_next4;
-  assign sram_n4_ready = addr_valid_r && data_bank_rvalid_d1[hit_n4_way_sel][addr_offset_n4]
-      && data_bank_raddr_d1[hit_n4_way_sel][addr_offset_n4] == addr_idx_next4;
+  if (L1I_LINE_SIZE <= 4) begin : g_short_wide_lookahead
+    logic [L1iWayW-1:0] way_n3, way_n4;
+    always_comb begin
+      way_n3 = '0;
+      way_n4 = '0;
+      for (int way = int'(L1I_N_WAYS) - 1; way >= 0; way--) begin
+        if (way_hit_n3[way]) way_n3 = L1iWayW'(way);
+        if (way_hit_n4[way]) way_n4 = L1iWayW'(way);
+      end
+    end
+    assign ifu_l1i.inst_n3 = data_bank_rdata[way_n3][addr_offset_n3];
+    assign ifu_l1i.inst_n4 = data_bank_rdata[way_n4][addr_offset_n4];
+    assign sram_n3_ready = addr_valid_r && data_bank_rvalid_d1[way_n3][addr_offset_n3]
+        && data_bank_raddr_d1[way_n3][addr_offset_n3] == addr_idx_next4;
+    assign sram_n4_ready = addr_valid_r && data_bank_rvalid_d1[way_n4][addr_offset_n4]
+        && data_bank_raddr_d1[way_n4][addr_offset_n4] == addr_idx_next4;
+  end else begin : g_window_wide_lookahead
+    assign ifu_l1i.inst_n3 = fetch_window[addr_offset_n3];
+    assign ifu_l1i.inst_n4 = fetch_window[addr_offset_n4];
+    assign sram_n3_ready = addr_valid_r && window_read_valid[addr_offset_n3]
+        && window_read_index[addr_offset_n3] == addr_idx_next4;
+    assign sram_n4_ready = addr_valid_r && window_read_valid[addr_offset_n4]
+        && window_read_index[addr_offset_n4] == addr_idx_next4;
+  end
   assign n3_same_line_as_next4 = pc_ifu_next4[XLEN-1:L1I_LINE_LEN+2]
       == lookahead_n3_addr[XLEN-1:L1I_LINE_LEN+2];
   assign n4_same_line_as_next4 = pc_ifu_next4[XLEN-1:L1I_LINE_LEN+2]
       == lookahead_n4_addr[XLEN-1:L1I_LINE_LEN+2];
-  assign ifu_l1i.inst_n3 = data_bank_rdata[hit_n3_way_sel][addr_offset_n3];
-  assign ifu_l1i.inst_n4 = data_bank_rdata[hit_n4_way_sel][addr_offset_n4];
   assign ifu_l1i.inst_n3_valid = !slow_active && !slow_select && !pmp_n3_fetch_fault
       && n3_same_line_as_next4
       && (!mmu_en || !lookahead_n3_page[12])
@@ -1160,7 +1223,7 @@ module rapt_l1i #(
         PTWAIT: begin
           if (cmu_bcast.flush_pipe) begin
             l1i_state <= IDLE;
-          end else if (l1i_bus.ptw_rerr) begin
+          end else if (l1i_bus.ptw_rerr || ptw_access_fault) begin
             cause <= `RAPT_CAUSE_INSTR_ACC_FAULT;
             rec_tval <= rec_addr;
             l1i_state <= TRAP;
@@ -1169,8 +1232,9 @@ module rapt_l1i #(
             rec_tval <= ifu_l1i.pc;
             l1i_state <= TRAP;
           end else if (ptw_done) begin
-            if (pf_fetch_ptw) begin
-              cause <= `RAPT_CAUSE_INSTR_PAGE_FAULT;
+            if (pf_fetch_ptw || !rapt_pkg::tlb_ppn_fits(ptw_result_ptag)) begin
+              cause <= pf_fetch_ptw ? `RAPT_CAUSE_INSTR_PAGE_FAULT
+                  : `RAPT_CAUSE_INSTR_ACC_FAULT;
               rec_tval <= ifu_l1i.pc;
               l1i_state <= TRAP;
             end else begin
@@ -1278,6 +1342,8 @@ module rapt_l1i #(
     end
     if (!reset && cache_return && ifq_valid[ifq_tail]) ifq_tail <= ifq_tail + 1;
 
+    if (ifq_push_en) ifq_base_addr <= cache_refill_addr[XLEN-1:IfqBaseLsb];
+
     // One static write cone per IFQ entry. A returning response consumes an
     // aliased entry before a same-cycle request can reuse it.
     for (int i = 0; i < int'(IFQ_SIZE); i++) begin
@@ -1288,7 +1354,7 @@ module rapt_l1i #(
       end
 
       if (!ifq_valid[i] && i == int'(ifq_head)) begin
-        ifq_raddr[i] <= cache_refill_addr[XLEN-1:2];
+        ifq_word_offset[i] <= cache_refill_addr[IfqBaseLsb-1:2];
       end
     end
   end
@@ -1348,6 +1414,26 @@ module rapt_l1i #(
       pmu_l1i_refill_start_next_hole <= pmu_refill_start_next && (|way_tag_match_next);
     end
   end
+
+`ifdef RAPT_SVA_ACTIVE
+  logic ifq_same_refill, ifq_owned_address_matches, window_primary_way_matches;
+  logic [XLEN-1:2] ifq_full_addr[IFQ_SIZE];
+  // Compare compressed ownership against the former full-address storage.
+  for (genvar slot = 0; slot < IFQ_SIZE; slot++) begin : g_ifq_owner_check
+    always_ff @(posedge clock) begin
+      if (!ifq_valid[slot] && ifq_head == $clog2(IFQ_SIZE)'(slot))
+        ifq_full_addr[slot] <= cache_refill_addr[XLEN-1:2];
+    end
+  end
+  assign ifq_owned_address_matches = fetch_addr[XLEN-1:2] == ifq_full_addr[ifq_tail];
+  assign ifq_same_refill = cache_refill_addr[XLEN-1:IfqBaseLsb] == ifq_base_addr;
+  assign window_primary_way_matches = window_way_sel[addr_offset] == hit_way_sel
+      && window_way_sel[addr_offset_next] == hit_next_way_sel;
+  `RAPT_SVA_IMPLY(clock, reset, L1I_IFQ_SHARED_BASE, ifq_push_en && (|ifq_valid), ifq_same_refill)
+  `RAPT_SVA_IMPLY(clock, reset, L1I_IFQ_FULL_ADDRESS, ifq_valid[ifq_tail],
+                  ifq_owned_address_matches)
+  `RAPT_SVA(clock, reset, L1I_WINDOW_PRIMARY_WAY, window_primary_way_matches)
+`endif
 
   `RAPT_SVA_IMPLY(clock, reset, L1I_REDIRECT_BLOCKS_PTW_REQUEST, flush_redirect_kills_fetch,
                   !ptw_req)

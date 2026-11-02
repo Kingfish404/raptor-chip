@@ -32,6 +32,7 @@ module rapt_cached_ptw #(
 
     output logic done,
     output logic fault,
+    output logic access_fault,
     output logic [XLEN-1:10] result_ptag,
     output logic [XLEN-1:12] result_vtag,
     // pte flags: {D,A,G,U,X,W,R} (bits 7..1 of PTE); valid when done=1
@@ -57,17 +58,22 @@ module rapt_cached_ptw #(
     state_t state;
     rapt_pkg::l2tlb_req_t request_q;
     logic store_q, cancelled;
-    logic walk_done, walk_fault, walk_busy;
+    logic walk_done, walk_fault, walk_access_fault, walk_busy;
     logic [XLEN-1:10] walk_ptag;
     logic [XLEN-1:12] walk_vtag;
     logic [6:0] walk_pte;
     logic [1:0] walk_pbmt;
     logic [1:0] walk_level;
-    logic done_q, fault_q;
+    logic done_q, fault_q, access_fault_q;
+    logic cacheable_ppn;
+    // Keep an unsupported full PPN on the completion path so the requester
+    // preserves page-permission priority, access-fault cause and virtual tval.
+    assign cacheable_ppn = rapt_pkg::tlb_ppn_fits(request_q.ptag);
 
     assign busy = state != IDLE;
     assign done = done_q && !kill;
     assign fault = fault_q && !kill;
+    assign access_fault = access_fault_q && !kill;
     assign result_vtag = request_q.vtag;
     assign result_ptag = request_q.ptag;
     assign result_pte = request_q.pte;
@@ -75,7 +81,7 @@ module rapt_cached_ptw #(
     assign result_level = request_q.level;
     always_comb begin
       l2_req_o = request_q;
-      l2_req_o.valid = (state == LOOKUP || state == FILL) && !kill && !reset;
+      l2_req_o.valid = (state == LOOKUP || (state == FILL && cacheable_ppn)) && !kill && !reset;
       l2_req_o.fill = state == FILL;
     end
 
@@ -99,6 +105,7 @@ module rapt_cached_ptw #(
         .bus_rdata(bus_rdata),
         .done(walk_done),
         .fault(walk_fault),
+        .access_fault(walk_access_fault),
         .result_ptag(walk_ptag),
         .result_vtag(walk_vtag),
         .result_pte(walk_pte),
@@ -115,9 +122,11 @@ module rapt_cached_ptw #(
         cancelled <= 1'b0;
         done_q <= 1'b0;
         fault_q <= 1'b0;
+        access_fault_q <= 1'b0;
       end else begin
         done_q <= 1'b0;
         fault_q <= 1'b0;
+        access_fault_q <= 1'b0;
         if (kill) begin
           // Keep ownership while the underlying walker drains its bus read.
           cancelled <= 1'b1;
@@ -156,6 +165,9 @@ module rapt_cached_ptw #(
             WALK: begin
               if (cancelled) begin
                 if (!walk_busy) state <= IDLE;
+              end else if (walk_access_fault) begin
+                access_fault_q <= 1'b1;
+                state <= IDLE;
               end else if (walk_fault) begin
                 fault_q <= 1'b1;
                 state <= IDLE;
@@ -169,7 +181,7 @@ module rapt_cached_ptw #(
               end
             end
             FILL:
-            if (l2_ready_i) begin
+            if (!cacheable_ppn || l2_ready_i) begin
               done_q <= 1'b1;
               state <= IDLE;
             end

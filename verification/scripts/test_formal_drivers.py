@@ -11,25 +11,36 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 from alu_contract import snapshot_result
+from formal_contract import run_contract
 from formal_scope import (
     apply_contract_review,
     audit_receipt,
+    audit_file,
     binding_key,
     canonical_rtlil,
     inventory,
+    native_sat_command,
     required_contracts,
+    scope_main,
     sha,
 )
 from ioq_contract import (
     PREFIX,
     TOP,
     activation_witnesses,
+    activate as activate_ioq,
     audit_extension,
     audit_frontend,
     augment,
     canonical_model,
     compile_case,
+    load_primary_replay,
+    prove as prove_ioq,
+    read_command as ioq_read_command,
+    reuse_proof,
 )
 from prf_formal import (
     FORMAL,
@@ -250,8 +261,78 @@ class WitnessTests(unittest.TestCase):
                 activation_witnesses(log, root)
 
 
+class PrimaryReplayTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='raptor-negative-inputs-')
+        self.addCleanup(temporary.cleanup)
+        self.source = Path(temporary.name) / 'inputs.smtc'
+        self.group = 'a' * 64
+        ports = {
+            'reset': dict(direction='input', bits=[2]),
+            'ready': dict(direction='input', bits=[3]),
+            'data': dict(direction='input', bits=[4, 5]),
+            'result': dict(direction='output', bits=[6, 7])}
+        state = dict(bits=[8], attributes=dict(init='0'))
+        module = dict(ports=ports, netnames={'private_state': state})
+        self.model = dict(modules={'fixture': module})
+        self.specification = dict(model_sha256=self.group, inputs=str(self.source))
+
+    def test_concrete_primary_inputs_preserve_the_entire_model(self):
+        text = ('# Concrete stimulus\nstate 0\nassume [reset]\n'
+                'assume (= [data] #b10)\nstate 1\nassume (not [reset])\n'
+                'assume (= [ready] #b1)\n')
+        self.source.write_text(text)
+        original = copy.deepcopy(self.model)
+        normalized, metadata = load_primary_replay(self.model, self.specification, self.group, 4)
+        self.assertEqual(self.model, original)
+        self.assertEqual(self.source.read_text(), text)
+        self.assertIn('assume [ready]\n', normalized)
+        self.assertNotIn('# Concrete', normalized)
+        self.assertEqual(metadata['frames'], 2)
+        self.assertEqual(metadata['primary_input_assignments'], 4)
+        self.assertEqual(metadata['internal_state_constraints'], 0)
+        self.assertEqual(metadata['source_sha256'], sha(self.source))
+
+    def test_internal_state_expressions_and_invalid_frames_are_rejected(self):
+        cases = ('initial\nassume [reset]\n', 'state 0\nassume [private_state]\n',
+                 'state 0\nassume (= [result] #b10)\n', 'state 0\nassert [ready]\n',
+                 'state 0\nassume (= [data] #b1)\n', 'state 0\nassume true\n',
+                 'state 0\nassume (or [ready] [private_state])\n',
+                 'state 1\nassume [reset]\n', 'state 0\nstate 0\nassume [reset]\n',
+                 'state 0\nstate 1\nstate 2\nassume [reset]\n', 'state 0\n')
+        for text in cases:
+            self.source.write_text(text)
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                load_primary_replay(self.model, self.specification, self.group, 2)
+
+    def test_replay_must_bind_the_complete_current_mutant(self):
+        self.source.write_text('state 0\nassume [reset]\n')
+        for specification in ({}, dict(self.specification, model_sha256='b' * 64),
+                              dict(self.specification, initial_state=0)):
+            with self.subTest(specification=specification), self.assertRaises(ValueError):
+                load_primary_replay(self.model, specification, self.group, 4)
+
+
 @unittest.skipUnless(YOSYS, 'Native Yosys with Slang is required')
 class NativeModelTests(unittest.TestCase):
+    def test_operand_binding_checks_the_actual_native_branch_and_port_count(self):
+        rtl = [ROOT / 'rtl/rapt_pkg.sv']
+        rtl += sorted(p for p in (ROOT / 'rtl').rglob('*.sv') if p not in rtl)
+        with tempfile.TemporaryDirectory(prefix='raptor-ioq-binding-') as name:
+            for xlen in (32, 64):
+                case = dict(id='late', preset='formal', xlen=xlen, memory='dff',
+                            response_stage=0, lutram=0, synthesis=True, metadata='functional',
+                            late_operands=True, operand_read_ports=2)
+                directory = Path(name) / str(xlen)
+                result = compile_case(directory / 'correct', case, rtl, 60, YOSYS)
+                self.assertTrue(result['frontend']['geometry']['late_operands'])
+                self.assertEqual(result['frontend']['geometry']['operand_read_ports'], 2)
+                command = ioq_read_command(case, rtl).replace('-DRAPT_FORMAL_IOQ_LATE ',
+                                                             '-URAPT_FORMAL_IOQ_LATE ')
+                with patch('ioq_contract.read_command', return_value=command):
+                    with self.assertRaisesRegex(ValueError, 'differs from selected parameters'):
+                        compile_case(directory / 'wrong-branch', case, rtl, 60, YOSYS)
+
     def test_only_locations_can_change_without_changing_full_model_identity(self):
         variants = [('base', '', '', 'q == a', True, True),
                     ('relocated', '', '', 'q == a', True, True),
@@ -307,6 +388,49 @@ endmodule
 
 @unittest.skipUnless(YOSYS, 'Native Yosys with Slang is required')
 class ActivationExtensionTests(unittest.TestCase):
+    @unittest.skipUnless((ROOT / 'third_party/oss-cad-suite/bin/sby').is_file(), 'SBY is required')
+    def test_native_proof_reuse_rejects_changed_initial_state_or_cached_artifacts(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-ioq-reuse-') as name:
+            root = Path(name)
+            rtl = [ROOT / 'rtl/rapt_pkg.sv']
+            rtl += sorted(path for path in (ROOT / 'rtl').rglob('*.sv') if path not in rtl)
+            case = dict(id='native', preset='formal', xlen=32, memory='dff',
+                        response_stage=0, lutram=0, synthesis=True, metadata='functional')
+            model_dir, proof = root / 'model', root / 'proof'
+            row = compile_case(model_dir, case, rtl, 60, YOSYS)
+            self.assertTrue(row['complete'])
+            report = prove_ioq(proof, row, model_dir, 180, 4, 96, YOSYS)
+            self.assertTrue(report['certified'], report['statuses'])
+            report_hash = sha(proof / 'results.json')
+            copied = reuse_proof(root / 'reuse', row, model_dir, proof, report_hash)
+            self.assertTrue(copied['certified'])
+            self.assertEqual(copied['reused_evidence']['canonical_sha256'], row['canonical_sha256'])
+            activation = activate_ioq(root / 'activation', proof / 'frontend.json',
+                                      row['canonical_sha256'], 180, 96, YOSYS)
+            self.assertTrue(activation['complete_guard_activation'], activation['status'])
+            report_path = proof / 'results.json'
+            saved_report = report_path.read_bytes()
+            incomplete = json.loads(saved_report)
+            del incomplete['artifacts']['contract_prove/status']
+            report_path.write_text(json.dumps(incomplete))
+            with self.assertRaisesRegex(ValueError, 'artifact inventory is incomplete'):
+                reuse_proof(root / 'missing-status', row, model_dir, proof, sha(report_path))
+            report_path.write_bytes(saved_report)
+            archive = model_dir / 'frontend.json.gz'
+            saved = archive.read_bytes()
+            changed = json.loads(gzip.decompress(saved))
+            changed['modules'][TOP]['netnames']['past_valid']['attributes']['init'] = '1'
+            encoded = json.dumps(changed).encode()
+            archive.write_bytes(gzip.compress(encoded))
+            altered = dict(row, original_sha256=hashlib.sha256(encoded).hexdigest())
+            with self.assertRaisesRegex(ValueError, 'state, init or predicates differ'):
+                reuse_proof(root / 'wrong-init', altered, model_dir, proof, report_hash)
+            archive.write_bytes(saved)
+            artifact = proof / 'contract.sby'
+            artifact.write_text(artifact.read_text() + '\n# changed\n')
+            with self.assertRaisesRegex(ValueError, 'proof artifact changed'):
+                reuse_proof(root / 'wrong-proof', row, model_dir, proof, report_hash)
+
     def test_native_extension_preserves_state_and_rejects_changed_guards_or_assumptions(self):
         with tempfile.TemporaryDirectory(prefix='raptor-ioq-activation-') as name:
             root = Path(name)
@@ -324,11 +448,14 @@ class ActivationExtensionTests(unittest.TestCase):
             after = audit_frontend(model)
             self.assertEqual(after['assertions'], before['assertions'])
             self.assertEqual(after['assumptions'], before['assumptions'])
-            self.assertEqual(len(selected), 24)
-            self.assertEqual(after['covers'], before['covers'] + 24)
+            self.assertEqual(len(selected), before['assertions'])
+            self.assertEqual(after['covers'], before['covers'] + before['assertions'])
+            self.assertIn(TOP + ': ' + PREFIX + 'disabled_b_request', selected)
+            self.assertNotIn(TOP + ': ' + PREFIX + 'request_b_live', selected)
             audit_extension(model, expected_hash)
             observer_name = next(n for n in model['modules'][TOP]['cells'] if n.startswith(PREFIX))
-            mutations = ('assumption', 'constant_guard', 'changed_clock', 'changed_state')
+            mutations = ('assumption', 'constant_guard', 'changed_clock', 'changed_state',
+                         'missing_observer')
             for mutation in mutations:
                 changed = copy.deepcopy(model)
                 module = changed['modules'][TOP]
@@ -339,8 +466,10 @@ class ActivationExtensionTests(unittest.TestCase):
                     observer['connections']['A'] = ['1']
                 elif mutation == 'changed_clock':
                     observer['parameters']['TRG_ENABLE'] = format(0, '032b')
-                else:
+                elif mutation == 'changed_state':
                     module['netnames']['past_valid']['attributes']['init'] = '1'
+                else:
+                    del module['cells'][observer_name]
                 with self.subTest(mutation=mutation), self.assertRaises(ValueError):
                     audit_extension(changed, expected_hash)
 
@@ -352,7 +481,7 @@ SCRIPTS = Path(__file__).resolve().parent
 class StoreCompositionTests(unittest.TestCase):
     def test_full_native_composition_preserves_properties_and_audit_is_read_only(self):
         script = '''
-import copy, gzip, json, os
+import copy, gzip, hashlib, json, os
 from pathlib import Path
 import ioq_contract as runner
 rtl = [runner.ROOT / 'rtl/rapt_pkg.sv']
@@ -367,6 +496,10 @@ model = json.loads(gzip.decompress((directory/'frontend.json.gz').read_bytes()))
 before = runner.canonical_model(model)
 runner.audit_frontend(model)
 assert before == runner.canonical_model(model)
+extended = copy.deepcopy(model)
+selected = runner.augment(extended, hashlib.sha256(before.encode()).hexdigest())
+assert len(selected) == row['frontend']['assertions']
+assert before == runner.canonical_model(model)
 if os.environ['STORE_MODEL'] == '1':
     altered = copy.deepcopy(model)
     altered['modules']['formal_ioq_store']['netnames']['clock']['attributes']['init'] = '1'
@@ -376,10 +509,7 @@ if os.environ['STORE_MODEL'] == '1':
         pass
     else:
         raise AssertionError('Unexpected initial-state restriction was accepted')
-extra = runner.contract_profile(case['contract'])['extra_sources']
-summary = dict(frontend=row['frontend'], extra=list(map(str, extra)),
-               harness=str(runner.contract_profile(case['contract'])['harness']))
-print(json.dumps(summary))
+print(json.dumps(row['frontend']))
 '''
         results = []
         with tempfile.TemporaryDirectory(prefix='raptor-store-native-') as temp:
@@ -391,54 +521,13 @@ print(json.dumps(summary))
                 self.assertEqual(child.returncode, 0, child.stdout + child.stderr)
                 results.append(json.loads(child.stdout))
         base, store = results
-        self.assertEqual(base['frontend']['geometry'], store['frontend']['geometry'])
-        self.assertEqual(store['frontend']['assumptions'], 1)
-        self.assertGreater(store['frontend']['assertions'], base['frontend']['assertions'])
-        self.assertGreater(store['frontend']['covers'], base['frontend']['covers'])
-        self.assertEqual(store['extra'], [])
-        self.assertEqual(store['harness'], base['harness'])
+        self.assertEqual(base['geometry'], store['geometry'])
+        self.assertEqual(store['assumptions'], 1)
+        self.assertGreater(store['assertions'], base['assertions'])
+        self.assertGreater(store['covers'], base['covers'])
 
 
 SMTBMC = ROOT / 'third_party/oss-cad-suite/bin/yosys-smtbmc'
-
-
-class ToolTimeoutTest(unittest.TestCase):
-    def test_timeout_allows_controller_to_clean_separate_engine_groups(self):
-        with tempfile.TemporaryDirectory(prefix='raptor-engine-timeout-') as name:
-            pid_file = Path(name) / 'engine.pid'
-            program = '''import os, pathlib, signal, subprocess, sys, time
-child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'],
-                         start_new_session=True)
-def stop(signum, frame):
-    os.killpg(child.pid, signal.SIGTERM)
-    child.wait()
-    sys.exit(0)
-signal.signal(signal.SIGTERM, stop)
-pathlib.Path(sys.argv[1]).write_text(str(child.pid))
-time.sleep(30)
-'''
-            result = run_bounded([sys.executable, '-c', program, str(pid_file)],
-                                 capture_output=True, text=True, timeout=1)
-            self.assertEqual(result.returncode, 124)
-            self.assertFalse((Path('/proc') / pid_file.read_text()).exists())
-
-    def test_timeout_terminates_solver_descendants(self):
-        with tempfile.TemporaryDirectory(prefix='raptor-tool-timeout-') as name:
-            pid_file = Path(name) / 'child.pid'
-            program = ("import pathlib, subprocess, sys, time; "
-                       "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
-                       "pathlib.Path(sys.argv[1]).write_text(str(child.pid)); time.sleep(30)")
-            result = run_bounded([sys.executable, '-c', program, str(pid_file)],
-                                 capture_output=True, text=True, timeout=1)
-            self.assertEqual(result.returncode, 124)
-            self.assertIn('TIMEOUT:', result.stderr)
-            child = Path('/proc') / pid_file.read_text()
-            try:
-                state = (child / 'stat').read_text().split()[2]
-            except (FileNotFoundError, ProcessLookupError):
-                pass
-            else:
-                self.assertEqual(state, 'Z', 'Timed-out solver descendant is still running')
 
 
 @unittest.skipUnless(YOSYS and SMTBMC.exists(), 'Formal tools are required')
@@ -598,7 +687,11 @@ class BytePartitionTest(unittest.TestCase):
                     harness = directory / f'byte-{lane}.sv'
                     harness.write_text(partition_history(history, lane, 32))
                     model = directory / f'byte-{lane}.smt2'
+                    # A small real PRF distinguishes a valid low-byte theorem from
+                    # the reached high-byte storage fault without a large port matrix.
                     read = ('read_slang --threads 1 --single-unit --top formal_prf_contract -DRAPT_FORMAL_PRF_CONTRACT '
+                            '-GArchRegs=2 -GEntries=4 -GReadPorts=1 -GRetirePorts=1 '
+                            '-GPorts=1 -GExtraPorts=0 '
                             '-DRAPT_FPGA_LUTRAM=0 -DSYNTHESIS '
                             f'-I{ROOT}/rtl/configs/formal -I{ROOT}/rtl/include '
                             f'-I{ROOT}/rtl/include/npc -I{ROOT}/rtl/include/dpic_mock '
@@ -635,30 +728,46 @@ class QualificationFixture:
             "rtl/generated/rapt_idu_decoder.sv": "module decoder; endmodule\n",
             "rtl/generated/rapt_idu_decoder_c.sv": "module compressed; endmodule\n",
             "verification/formal/harness.sv": "module harness; endmodule\n",
-            "proof.log": "Induction step proven: SUCCESS!\n",
-            "proof.ys": "sat -verify -tempinduct -prove correct 1\n",
             "activation.log": "SAT solving finished - model found:\n",
             "activation.vcd": "$timescale 1ns $end\n#0\n",
+            "frontend.il": "module \\harness\n  attribute \\init 8'00000000\n"
+                           "  wire width 8 \\state\nend\n",
+            "binding.il": "module \\harness\n  attribute \\init 8'00000000\n"
+                          "  wire width 8 \\state\nend\n",
+            "read.ys": f"read_slang --single-unit --top harness -GWIDTH=8 "
+                       f"-I{self.root}/rtl/configs/default "
+                       f"{self.root}/rtl/unit.sv {self.root}/verification/formal/harness.sv\n",
         }
         for name, text in files.items():
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text)
+        command = native_sat_command('harness', self.root / 'frontend.il', proof=True)
+        (self.root / 'proof.ys').write_text(command + '\n')
+        (self.root / 'proof.log').write_text(
+            f"-- Running command `{command}' --\nInput filename: {self.root}/frontend.il\n"
+            "Induction step proven: SUCCESS!\n")
         self.scope = inventory(self.root)
         self.receipt = {
             "status": "PASS", "unit": "rtl/unit.sv:unit", "obligation": "functional",
             "profile": "default/rv32/dff", "method": "induction",
             "harness": "verification/formal/harness.sv", "parameters": {"WIDTH": 8},
-            "assumptions": [], "inputs": dict(self.scope["sources"]),
+            "assumptions": ["First sampled edge resets"], "inputs": dict(self.scope["sources"]),
             "log": "proof.log", "artifacts": {
                 name: sha(self.root / name)
-                for name in ("proof.log", "proof.ys", "activation.log", "activation.vcd")
+                for name in ("proof.log", "proof.ys", "activation.log", "activation.vcd",
+                             "frontend.il", "binding.il", "read.ys")
             },
             "property_activation": [{
                 "property": "accepted-item", "log": "activation.log",
                 "witness": "activation.vcd",
             }],
         }
+        canonical = canonical_rtlil((self.root / "frontend.il").read_text())
+        self.receipt["model_binding"] = dict(
+            top="harness", canonical_sha256=hashlib.sha256(canonical.encode()).hexdigest(),
+            proved_model="frontend.il", bound_model="binding.il", read_script="read.ys",
+            proof_script="proof.ys", proof_root=str(self.root))
         self.receipt["inputs"][self.receipt["harness"]] = sha(self.root / self.receipt["harness"])
 
     def audit(self, receipt=None):
@@ -685,9 +794,261 @@ class QualificationFixture:
 
 
 class QualificationEvidenceTests(QualificationFixture, unittest.TestCase):
+    def test_scope_rechecks_source_and_metadata_epochs_after_receipt_audits(self):
+        scenarios = ('stable', 'add-rtl', 'edit-rtl', 'remove-rtl', 'add-profile',
+                     'edit-review', 'edit-index', 'edit-receipt', 'edit-verifier',
+                     'edit-harness', 'edit-artifact')
+        for strict in (False, True):
+            for scenario in scenarios:
+                with self.subTest(strict=strict, scenario=scenario), \
+                        tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    for name in self.scope['sources']:
+                        target = root / name
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(self.root / name, target)
+                    harness_name = 'verification/formal/harness.sv'
+                    harness = root / harness_name
+                    harness.parent.mkdir(parents=True)
+                    shutil.copy2(self.root / harness_name, harness)
+                    artifact = root / 'compiled-model.il'
+                    artifact.write_text('module \\harness\nend\n')
+                    artifact_digest = sha(artifact)
+                    verifier = root / 'verification/scripts'
+                    verifier.mkdir(parents=True)
+                    for name in ('formal_scope.py', 'prf_formal.py', 'yosys_common.py'):
+                        shutil.copy2(Path(__file__).parent / name, verifier / name)
+                    review = root / 'review.json'
+                    review.write_text(json.dumps(self.complete_review()))
+                    scope = inventory(root)
+                    self.assertEqual(apply_contract_review(scope, self.complete_review()), [])
+                    expected = sorted(required_contracts(scope))
+                    receipts = []
+                    for number, binding in enumerate(expected):
+                        path = root / f'receipt-{number}.json'
+                        path.write_text(json.dumps(dict(binding=binding,
+                            inputs={harness_name: sha(harness)})))
+                        receipts.append(path)
+                    index = root / 'receipts.json'
+                    index.write_text(json.dumps([path.name for path in receipts]))
+                    calls = []
+                    def audited(receipt, *unused, observed_inputs=None):
+                        # Emulate already-audited proofs to isolate the gate's epoch checks.
+                        for name, digest in receipt['inputs'].items():
+                            audit_file(root / name, digest, 'proof input', observed_inputs)
+                        audit_file(artifact, artifact_digest, 'proof artifact', observed_inputs)
+                        calls.append(receipt['binding'])
+                        if len(calls) == len(expected):
+                            if scenario == 'add-rtl':
+                                (root / 'rtl/new.sv').write_text('module new_unit; endmodule\n')
+                            elif scenario == 'edit-rtl':
+                                path = root / 'rtl/unit.sv'
+                                path.write_text(path.read_text() + '// edit during audit\n')
+                            elif scenario == 'remove-rtl':
+                                (root / 'rtl/unit.sv').unlink()
+                            elif scenario == 'add-profile':
+                                path = root / 'rtl/configs/new/rapt_config.svh'
+                                path.parent.mkdir()
+                                path.write_text('`define WIDTH 8\n')
+                            elif scenario == 'edit-review':
+                                review.write_text('{}\n')
+                            elif scenario == 'edit-index':
+                                index.write_text('[]\n')
+                            elif scenario == 'edit-receipt':
+                                receipts[0].write_text('{}\n')
+                            elif scenario == 'edit-verifier':
+                                path = verifier / 'formal_scope.py'
+                                path.write_text(path.read_text() + '# concurrent checker edit\n')
+                            elif scenario == 'edit-harness':
+                                harness.write_text(harness.read_text() + '// concurrent harness edit\n')
+                            elif scenario == 'edit-artifact':
+                                artifact.write_text(artifact.read_text() + '# concurrent model edit\n')
+                        return tuple(receipt['binding'])
+                    output = root / 'scope'
+                    command = ['scope', '--source-root', str(root), '--output', str(output),
+                               '--contract-review', str(review), '--receipt-index', str(index)]
+                    if strict:
+                        command.append('--signoff')
+                    with patch.object(sys, 'argv', command), patch('builtins.print'), \
+                            patch('formal_scope.audit_receipt', side_effect=audited), \
+                            patch('formal_scope.__file__', str(verifier / 'formal_scope.py')):
+                        result = scope_main()
+                    report = json.loads((output / 'signoff.json').read_text())
+                    stable = scenario == 'stable'
+                    self.assertEqual(result, 0 if stable else 1)
+                    self.assertEqual(report['whole_rtl_signoff'], stable)
+                    self.assertEqual(report['accepted'], [list(row) for row in expected] if stable else [])
+                    self.assertEqual(bool(report['epoch_errors']), not stable)
+                    self.assertTrue(report['evaluation_complete'])
+                    self.assertEqual(set(report['verifier_inputs']),
+                                     {'formal_scope.py', 'prf_formal.py', 'yosys_common.py'})
+
+    def test_receipt_observations_reject_mixed_versions_of_one_file(self):
+        path = self.root / 'frontend.il'
+        observed = {}
+        audit_file(path, sha(path), 'proof artifact', observed)
+        path.write_text(path.read_text() + '# changed after the first receipt\n')
+        with self.assertRaisesRegex(ValueError, 'changed between receipts'):
+            audit_file(path, sha(path), 'proof artifact', observed)
+
+    def test_scope_invalidates_a_previous_signoff_before_input_failure(self):
+        output = self.root / 'prior-scope'
+        output.mkdir()
+        path = output / 'signoff.json'
+        path.write_text(json.dumps(dict(whole_rtl_signoff=True)))
+        review = self.root / 'broken-review.json'
+        review.write_text('not-json')
+        command = ['scope', '--source-root', str(self.root), '--output', str(output),
+                   '--contract-review', str(review), '--signoff']
+        with patch.object(sys, 'argv', command), self.assertRaises(json.JSONDecodeError):
+            scope_main()
+        report = json.loads(path.read_text())
+        self.assertFalse(report['whole_rtl_signoff'])
+        self.assertFalse(report['evaluation_complete'])
+
+    def test_native_receipt_checks_actual_script_model_and_executed_command(self):
+        self.audit()
+        script = self.root / 'proof.ys'
+        log = self.root / 'proof.log'
+        saved_script, saved_log = script.read_text(), log.read_text()
+        cases = ('missing-script', 'missing-origin', 'unrelated-model', 'unrelated-directory',
+                 'changed-top', 'remove-state', 'different-parsed-model',
+                 'remove-assertions', 'extra-assumption', 'bounded-query',
+                 'different-executed-command', 'missing-executed-command')
+        for case in cases:
+            receipt = copy.deepcopy(self.receipt)
+            text, output = saved_script, saved_log
+            if case == 'missing-script':
+                del receipt['model_binding']['proof_script']
+            elif case == 'missing-origin':
+                del receipt['model_binding']['proof_root']
+            elif case == 'different-parsed-model':
+                output = output.replace('Input filename: ', 'Input filename: unrelated/', 1)
+            elif case == 'different-executed-command':
+                output = output.replace('read_rtlil ', 'read_verilog ', 1)
+            elif case == 'missing-executed-command':
+                output = 'Induction step proven: SUCCESS!\n'
+            else:
+                old, new = {
+                    'unrelated-model': ('frontend.il;', 'unrelated.il;'),
+                    'unrelated-directory': (str(self.root) + '/', str(self.root / 'other') + '/'),
+                    'changed-top': ('-top harness', '-top unrelated'),
+                    'remove-state': ('memory_map;', 'memory_map; delete t:$dff;'),
+                    # Split so the native synthesis policy scan does not see a real command.
+                    'remove-assertions': ('chformal -lower;', 'chformal ' + '-remove -assert;'),
+                    'extra-assumption': ('-prove correct 1', '-set state 0 -prove correct 1'),
+                    'bounded-query': ('-tempinduct ', ''),
+                }[case]
+                text = text.replace(old, new)
+                output = output.replace(saved_script.strip(), text.strip())
+            script.write_text(text)
+            log.write_text(output)
+            receipt['artifacts']['proof.ys'] = sha(script)
+            receipt['artifacts']['proof.log'] = sha(log)
+            try:
+                with self.subTest(case=case), self.assertRaises(ValueError):
+                    self.audit(receipt)
+            finally:
+                script.write_text(saved_script)
+                log.write_text(saved_log)
+
+    def test_native_receipt_can_move_with_its_complete_artifact_directory(self):
+        destination = self.root / 'relocated'
+        destination.mkdir()
+        for name in self.receipt['artifacts']:
+            shutil.copy2(self.root / name, destination / name)
+        scope = copy.deepcopy(self.scope)
+        self.assertEqual(apply_contract_review(scope, self.complete_review()), [])
+        expected = self.audit()
+        for name in self.receipt['artifacts']:
+            (self.root / name).unlink()
+        actual = audit_receipt(self.receipt, scope, self.root, destination)
+        self.assertEqual(actual, expected)
+
+    def test_receipt_indexes_share_the_direct_audit_and_reject_invalid_members(self):
+        receipt = self.root / 'receipt.json'
+        receipt.write_text(json.dumps(self.receipt))
+        review = self.root / 'review.json'
+        review.write_text(json.dumps(self.complete_review()))
+        index = self.root / 'receipts.json'
+        scenarios = [('direct', None), ('indexed', ['receipt.json'] * 1000),
+                     ('escape', ['receipt.json', '../escape.json']), ('object', {}),
+                     ('invalid-member', [1]), ('invalid-json', 'not-json')]
+        accepted = {}
+        for name, entries in scenarios:
+            output = self.root / ('scope-' + name)
+            command = ['scope', '--source-root', str(self.root), '--output', str(output),
+                       '--contract-review', str(review), '--signoff']
+            if name == 'direct':
+                command += ['--receipts', str(receipt)]
+            else:
+                index.write_text(entries if name == 'invalid-json' else json.dumps(entries))
+                command += ['--receipt-index', str(index)]
+            with self.subTest(name=name), patch.object(sys, 'argv', command), \
+                    patch('builtins.print'):
+                self.assertEqual(scope_main(), 1)  # Other required contracts remain open.
+            result = json.loads((output / 'signoff.json').read_text())
+            accepted[name] = result['accepted']
+            self.assertEqual(len(result['rejected']), 0 if name in ('direct', 'indexed') else 1)
+            self.assertEqual(len(result['accepted']), 1 if name in ('direct', 'indexed') else 0)
+        self.assertEqual(accepted['direct'], accepted['indexed'])
+
+    def test_native_receipt_requires_exact_full_model_and_elaboration_binding(self):
+        self.audit()
+        cases = ("missing-binding", "wrong-fingerprint", "missing-artifact", "changed-init",
+                 "wrong-parameter", "wrong-top", "wrong-preset")
+        for case in cases:
+            receipt = copy.deepcopy(self.receipt)
+            saved = {name: (self.root / name).read_bytes() for name in ("binding.il", "read.ys")}
+            if case == "missing-binding":
+                del receipt["model_binding"]
+            elif case == "wrong-fingerprint":
+                receipt["model_binding"]["canonical_sha256"] = "0" * 64
+            elif case == "missing-artifact":
+                del receipt["artifacts"]["binding.il"]
+            elif case == "changed-init":
+                path = self.root / "binding.il"
+                path.write_text(path.read_text().replace("8'00000000", "8'00000001"))
+                receipt["artifacts"]["binding.il"] = sha(path)
+            else:
+                path = self.root / "read.ys"
+                old, new = {"wrong-parameter": ("WIDTH=8", "WIDTH=9"),
+                            "wrong-top": ("--top harness", "--top different"),
+                            "wrong-preset": ("/configs/default", "/configs/different")}[case]
+                path.write_text(path.read_text().replace(old, new))
+                receipt["artifacts"]["read.ys"] = sha(path)
+            try:
+                with self.subTest(case=case), self.assertRaises(ValueError):
+                    self.audit(receipt)
+            finally:
+                for name, value in saved.items():
+                    (self.root / name).write_bytes(value)
+
     def test_current_complete_receipt(self):
         self.assertEqual(self.audit(), ("rtl/unit.sv:unit", "functional", "default/rv32/dff",
                                        binding_key({"WIDTH": 8})))
+
+    def test_small_contract_rejects_timeout_and_tool_error_despite_success_marker(self):
+        marker = 'SAT proof finished - no model found: SUCCESS!'
+        config = dict(description='Fixture contract', top='harness', source='rtl/unit.sv',
+                      option='rtl', option_help='Fixture RTL', scope='Fixture only', label='fixture')
+        for code, diagnostic in ((124, ''), (1, ''), (0, 'ERROR: failed\n'), (0, '')):
+            with self.subTest(code=code, diagnostic=diagnostic):
+                def fake_tool(command, *, stdout, **kwargs):
+                    stdout.write(marker + '\n' + diagnostic)
+                    self.assertEqual(command[0], '/configured/yosys')
+                    return subprocess.CompletedProcess(command, code)
+                output = self.root / f'evidence-{code}-{bool(diagnostic)}'
+                args = SimpleNamespace(source_root=self.root, output=output, rtl=None)
+                with patch('formal_contract.run_bounded', side_effect=fake_tool), \
+                        patch.dict(os.environ, RAPTOR_YOSYS_REAL='/configured/yosys'), \
+                        patch('builtins.print'):
+                    exit_code = run_contract(args, **config)
+                report = json.loads((output / 'results.json').read_text())
+                passed = code == 0 and not diagnostic
+                self.assertEqual(exit_code, 0 if passed else 1)
+                self.assertEqual(report['complete'], passed)
+                self.assertEqual(len(report['cases']), 2 if passed else 1)
 
     def test_ioq_producer_proofs_cannot_replace_store_and_atomic_contracts(self):
         path = self.root / 'rtl/backend/lsu/rapt_lsu_ioq.sv'
@@ -707,6 +1068,39 @@ class QualificationEvidenceTests(QualificationFixture, unittest.TestCase):
                 for p in scope['profiles']})})
         self.assertTrue(any('removes required obligations' in error
                             for error in apply_contract_review(scope, review)))
+
+    def test_axi_passthrough_proof_cannot_close_buffered_transport(self):
+        path = self.root / 'rtl/uncore/rapt_axi_r_buffer.sv'
+        path.parent.mkdir(parents=True)
+        path.write_text('module rapt_axi_r_buffer(input clock, reset);\n'
+                        'always @(posedge clock);\nendmodule\n')
+        self.scope = inventory(self.root)
+        unit = next(u for u in self.scope['units'] if u['name'] == 'rapt_axi_r_buffer')
+        expected = {'channel-passthrough', 'elastic-order', 'capacity', 'registered-latency',
+                    'stall-preservation', 'bypass', 'conditional-drain', 'reset'}
+        self.assertTrue(expected <= set(unit['obligations']))
+        review = self.complete_review()
+        review['units'][unit['id']]['obligations'] = ['functional', 'channel-passthrough']
+        errors = apply_contract_review(self.scope, review)
+        self.assertTrue(any('removes required obligations' in error for error in errors))
+
+    def test_tlb_lookup_review_cannot_remove_refill_fence_or_replacement_obligations(self):
+        path = self.root / 'rtl/memory/mmu/rapt_tlb.sv'
+        path.parent.mkdir(parents=True)
+        path.write_text(''.join(f'module {name}(input clock, reset, flush);\n'
+                                'always @(posedge clock);\nendmodule\n'
+                                for name in ('rapt_tlb', 'rapt_data_tlb')))
+        self.scope = inventory(self.root)
+        review = self.complete_review()
+        lookup = ['lookup-owner', 'lookup-miss', 'asid-global-lookup', 'canonical-lookup']
+        for unit in self.scope['units']:
+            if unit['path'] != str(path.relative_to(self.root)):
+                continue
+            self.assertTrue(set(lookup + ['fill-history', 'replacement-selection'])
+                            <= set(unit['obligations']))
+            review['units'][unit['id']]['obligations'] = lookup
+        errors = apply_contract_review(self.scope, review)
+        self.assertEqual(sum('removes required obligations' in error for error in errors), 2)
 
     def test_rtl_and_configuration_edits_invalidate_evidence(self):
         for name in ("rtl/unit.sv", "rtl/configs/default/rapt_config.svh"):

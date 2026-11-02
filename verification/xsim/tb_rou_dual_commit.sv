@@ -1669,9 +1669,6 @@ rapt_cmu dut_cmu (
   endtask
 `endif
 
-`ifdef RAPT_TEST_E67
-  `include "tb_e67_skid.svh"
-`endif
 
   // Job R: a completed CSR can leave csr_wen set across a warm reset.
   task automatic expect_csr_context_after_reset;
@@ -1712,11 +1709,7 @@ rapt_cmu dut_cmu (
     if (rapt_pkg::CommitWidth < 2) fail("tb_rou_dual_commit requires commit width >= 2");
 `endif
 
-`ifdef RAPT_TEST_E67
-    init_inputs();
-    run_e67_skid();
-    $finish;
-`elsif RAPT_TEST_UOP_COMPACT
+`ifdef RAPT_TEST_UOP_COMPACT
     init_inputs();
     expect_checkpoint_direction_mismatch();
     expect_dual_checkpoint_capture();

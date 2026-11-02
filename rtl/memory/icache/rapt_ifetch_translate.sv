@@ -53,7 +53,7 @@ module rapt_ifetch_translate #(
   logic [1:0] priv_q;
   logic pbmte_q, sbe_q;
   logic [`RAPT_CSR_SATP_PPN_W-1:0] root_q;
-  logic ptw_arvalid, ptw_busy, ptw_done, ptw_fault, ptw_kill;
+  logic ptw_arvalid, ptw_busy, ptw_done, ptw_fault, ptw_access_fault, ptw_kill;
   logic [XLEN-1:10] ptag;
   logic [6:0] pte;
   logic [1:0] pbmt;
@@ -125,6 +125,7 @@ module rapt_ifetch_translate #(
       .bus_rdata(bus_rdata),
       .done(ptw_done),
       .fault(ptw_fault),
+      .access_fault(ptw_access_fault),
       .result_ptag(ptag),
       .result_vtag(unused_result_vtag),
       .result_pte(pte),
@@ -162,7 +163,7 @@ module rapt_ifetch_translate #(
         end
         START: state <= kill ? REPLY : WALK;
         WALK: begin
-          if (kill || (ptw_busy && (pte_access_fault || (bus_rvalid && bus_rerror)))) begin
+          if (kill || ptw_access_fault || (ptw_busy && (pte_access_fault || (bus_rvalid && bus_rerror)))) begin
             response_fault <= 1;
             response_cause <= `RAPT_CAUSE_INSTR_ACC_FAULT;
             state <= DRAIN;
@@ -173,14 +174,15 @@ module rapt_ifetch_translate #(
             response_cause <= `RAPT_CAUSE_INSTR_PAGE_FAULT;
             state <= REPLY;
           end else if (ptw_done) begin
+            response_fault <= !rapt_pkg::tlb_ppn_fits(ptag);
             response_paddr <= XLEN'({ptag, va_q[11:0]});
             response_pbmt <= pbmt;
             state <= CHECK;
           end
         end
         CHECK: begin
-          response_fault <= target_access_fault;
-          response_cause <= target_access_fault ? `RAPT_CAUSE_INSTR_ACC_FAULT : XLEN'(0);
+          response_fault <= response_fault || target_access_fault;
+          response_cause <= (response_fault || target_access_fault) ? `RAPT_CAUSE_INSTR_ACC_FAULT : XLEN'(0);
           state <= REPLY;
         end
         DRAIN: if (!ptw_busy) state <= REPLY;

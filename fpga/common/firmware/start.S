@@ -1,6 +1,11 @@
 .section .text.start, "ax"
 .global _start
 _start:
+#ifdef NATIVE_SAMPLING
+    # Host holds reset until sparse RAM, SRAM restore code and state are ready.
+    li t0, 0x0f000000
+    jr t0
+#endif
     csrw mie, zero
     csrw satp, zero
     la sp, _stack_top

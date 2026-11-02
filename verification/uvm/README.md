@@ -55,15 +55,13 @@ has a separate environment and acceptance ledger.
 
 ```text
 uvm/
-├── README.md
-├── xsim_uvm_smoke.sv
-└── iq/
-    ├── rapt_iq_uvm_if.sv
-    ├── rapt_iq_uvm_pkg.sv
-    └── tb_rapt_iq_uvm.sv
+├── chip/                 # Whole-chip monitor, scoreboard and firmware
+├── iq/rapt_iq_uvm.sv     # IQ interface, package and testbench
+└── csr/rapt_csr_uvm.sv   # CSR interface, package and testbench
 ```
 
-New module environments should use the same agent/monitor/reference-model/ scoreboard split. Drivers must not inspect DUT internals, and scoreboards must derive expected behavior from observed interface transactions only.
+Drivers use DUT interfaces; scoreboards derive expected behavior from observed
+transactions. Keep each module environment together and reuse its fixture.
 
 ## Executable LSU/SQ random environment
 

@@ -25,6 +25,7 @@ module rapt_native_bus #(
     output logic [31:0] peripheral_wdata,
     output logic [3:0] peripheral_wstrb,
     input logic [31:0] peripheral_rdata,
+    output logic idle_o,
     axi4_if.slave cpu,
     axi4_if.master ddr
 );
@@ -78,6 +79,7 @@ module rapt_native_bus #(
   logic [XLEN-1:0] ar_first, ar_last, aw_first, aw_last;
   target_t ar_target, aw_target;
   logic uart_rd, uart_wr;
+  assign idle_o = rs == RIdle && ws == WIdle && write_count == 0;
 
   initial begin
     if (WriteOutstanding < 1) $fatal(1, "WriteOutstanding must be positive");
@@ -217,6 +219,9 @@ module rapt_native_bus #(
   assign uart_addr = uart_rd ? ra[2:0] : wa[2:0];
   assign uart_wdata = cpu.wdata[8*wa[ByteBits-1:0]+:8];
   rapt_native_uart #(
+`ifdef RAPT_SAMPLING
+      .QuietFifoIds(1'b1),
+`endif
       .ClockHz(ClockHz)
   ) uart (
       .clk,

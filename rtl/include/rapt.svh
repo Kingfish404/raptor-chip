@@ -45,6 +45,12 @@
 `ifndef RAPT_L1D_TARGETED_COHERENCE
 `define RAPT_L1D_TARGETED_COHERENCE `RAPT_L1D_WRITEBACK
 `endif
+// Acknowledge cacheable store misses into the L1D MSHR that refills their line.
+// Effective only for write-back L1Ds with MSHRs and no L2; zero retains the
+// bus write-through path for partial store misses.
+`ifndef RAPT_L1D_STORE_MERGE
+`define RAPT_L1D_STORE_MERGE 1
+`endif
 // Skip clean sets during global write-back maintenance.
 `ifndef RAPT_L1D_DIRTY_SKIP
 `define RAPT_L1D_DIRTY_SKIP `RAPT_L1D_WRITEBACK

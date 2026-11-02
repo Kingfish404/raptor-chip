@@ -26,6 +26,7 @@ runs:
           ~/.ivy2/cache
           ~/.sbt
           ~/.cache/pip
+          ~/.cache/raptor-chip
         key: deps-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.profile }}-${{ steps.deps.outputs.week }}-${{ hashFiles('setup-rtl.sh', '.github/scripts/setup-ci.sh', 'tools/decodegen/build.sbt', 'tools/decodegen/project/**') }}
         restore-keys: |
           deps-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.profile }}-

@@ -15,7 +15,7 @@ NATIVE_LOG_DIR   := $(NATIVE_BUILD_DIR)/logs/native
 NATIVE_REPORT_DIR := $(NATIVE_BUILD_DIR)/reports
 SRC              := $(_THIS_DIR)agent_bench.c
 PORT_HDR         := $(_THIS_DIR)ragentbench_port.h
-REPORT_SCRIPT    := $(_THIS_DIR)report.py
+REPORT_SCRIPT    := $(_THIS_DIR)../report.py
 
 .DEFAULT_GOAL := help
 

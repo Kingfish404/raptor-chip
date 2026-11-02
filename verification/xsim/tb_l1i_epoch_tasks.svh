@@ -1,5 +1,6 @@
   // Module-local L1I/L2TLB fixture and tasks. No include guard.
   localparam int XLEN = `RAPT_XLEN;
+  localparam int L2Entries = 256;
   localparam logic [XLEN-1:0] OldSupervisorPc = XLEN'(32'hc000_1000);
 `ifdef RAPT_TEST_ZERO_PC
   localparam logic [XLEN-1:0] UserTargetPc = '0;
@@ -23,7 +24,9 @@
   rapt_pkg::l2tlb_rsp_t l2_rsp [2];
   logic [1:0] l2_ready;
   assign l2_req[1] = '0;
-  rapt_l2tlb shared_tlb (
+  rapt_l2tlb #(
+      .Entries(L2Entries)
+  ) shared_tlb (
       .clock(clock),
       .reset(reset),
       .flush(cmu_bcast.fence_time),
@@ -88,14 +91,16 @@
   endtask
 
   task automatic wait_for_ptw_request(input string message);
+    // Reset/wrap initialization can hold the L2 request port for one row walk.
+    localparam int WaitCycles = 32 + (L2Tlb ? L2Entries : 0);
     bit found;
     begin
       found = 1'b0;
-      for (int cycle = 0; cycle < 32; cycle++) begin
+      for (int cycle = 0; cycle < WaitCycles; cycle++) begin
         #1;
         if (l1i_bus.arvalid && l1i_bus.ar_ptw) begin
           found = 1'b1;
-          cycle = 32;
+          cycle = WaitCycles;
         end else begin
           tick(1);
         end

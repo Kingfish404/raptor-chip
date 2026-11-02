@@ -1,5 +1,6 @@
 #include <common.h>
 #include <cpu.h>
+#include <checkpoint.h>
 #include <memory.h>
 #include <difftest-isa.h>
 #include <dlfcn.h>
@@ -92,6 +93,7 @@ void difftest_checkpoint_resync()
 {
   if (!difftest_enabled)
     return;
+  cpu_read_pmpaddr_snapshot();
 
 #ifdef RAPT_LARGE_PMEM
   difftest_sync_sparse_pmem();

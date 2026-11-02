@@ -4,14 +4,19 @@
 #include <cstddef>
 #include <cstdint>
 #include <algorithm>
+#include <vector>
 
 // Host-side observer: no counters/timestamps/checkpoints enter synthesized RTL.
-// Flag values are template parameters supplied from generated RTL constants.
-template <std::size_t Entries, unsigned Allocate, unsigned Resolve, unsigned Mispredict,
-          unsigned Retire, unsigned Trap>
+// The entry count and event flags come from generated RTL constants at run time.
 class RecoveryMetrics
 {
 public:
+  struct Flags {
+    unsigned allocate, resolve, mispredict, retire, trap;
+  };
+  RecoveryMetrics(std::size_t entry_count, Flags event_flags)
+      : flags(event_flags), entries(entry_count) {}
+
   struct Latency {
     uint64_t count = 0, cycles = 0, maximum = 0;
     // Exact 0, exact 1, 2..3, 4..7, 8..15, 16..31, 32..63, 64+.
@@ -35,7 +40,8 @@ public:
     bool live = false, resolved = false, wrong = false;
     uint64_t resolved_at = 0;
   };
-  std::array<Entry, Entries> entries{};
+  Flags flags;
+  std::vector<Entry> entries;
 
   void reset_epoch() {
     for (auto &e : entries) {
@@ -75,22 +81,22 @@ public:
     pending_wrong_cycles += pending != 0;
     pending_wrong_integral += pending;
     pending_wrong_max = std::max(pending_wrong_max, pending);
-    for (std::size_t i = 0; i < Entries; ++i) {
+    for (std::size_t i = 0; i < entries.size(); ++i) {
       auto &e = entries[i];
       const unsigned event = events[i];
-      if (event & Allocate) {
+      if (event & flags.allocate) {
         assert(!flush && !e.live);
         e = {}; e.live = true; ++allocated;
       }
-      if (event & Resolve) {
+      if (event & flags.resolve) {
         assert(!flush && e.live && !e.resolved);
-        e.resolved = true; e.wrong = event & Mispredict;
+        e.resolved = true; e.wrong = event & flags.mispredict;
         e.resolved_at = cycle; ++resolved;
       }
-      if (event & Retire) {
+      if (event & flags.retire) {
         assert(e.live);
         ++retired;
-        if (event & Trap) {
+        if (event & flags.trap) {
           ++trap_retired;
           if (e.resolved && e.wrong) wrong_trap_cycles += cycle - e.resolved_at;
         }

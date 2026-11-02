@@ -5,7 +5,7 @@
   "device": "xcku15p",
   "ddr_clock_port": "clk100_ddr_p",
   "reference_hz": 100000000,
-  "ddr_part": "MT40A512M16HA-083E",
+  "ddr_part": "MT40A512M16LY-075",
   "ddr_rtl": "rapt_cu08_ddr.sv",
   "compatible": "raptor,cu08-native",
   "model": "Raptor native MLK-CU08-KU15P",

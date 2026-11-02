@@ -20,7 +20,7 @@ from formal_scope import (
     inventory,
 )
 from prf_formal import audit_frontend, audit_model
-from yosys_common import ROOT, run_bounded
+from yosys_common import ROOT, run_bounded, sha
 
 
 TOP = 'formal_ieu_alu'
@@ -32,10 +32,6 @@ DUT = ROOT / 'rtl/backend/ieu/rapt_ieu_alu.sv'
 TOOLS = ROOT / 'third_party/oss-cad-suite/bin'
 
 CERTIFICATE = 'UNRESTRICTED COMBINATIONAL PROOF COMPLETE'
-
-
-def sha(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def snapshot_result(output):

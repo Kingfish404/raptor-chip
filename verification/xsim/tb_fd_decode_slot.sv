@@ -122,6 +122,7 @@ module tb_fd_decode_slot;
     end
     $display("FD decode RV%0d checks=%0d legal=%0d failures=%0d", X, checks, legal_count, failures);
     if (failures) $fatal(1, "FD decode failures");
+    $display("PASS: scalar FD decode");
     $finish;
   end
 endmodule

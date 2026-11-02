@@ -1,7 +1,8 @@
 `include "rapt.svh"
 `include "rapt_if.svh"
 module tb_l1i_width_window #(
-    parameter int Ways = `RAPT_L1I_N_WAYS
+    parameter int Ways = `RAPT_L1I_N_WAYS,
+    parameter int LineBits = `RAPT_L1I_LINE_LEN
 );
   localparam int XLEN = `RAPT_XLEN;
   logic clock = 0, reset = 1;
@@ -12,7 +13,8 @@ module tb_l1i_width_window #(
   ifu_l1i_if ifu_l1i ();
   l1i_bus_if l1i_bus ();
   rapt_l1i #(
-      .L1I_N_WAYS(Ways)
+      .L1I_N_WAYS(Ways),
+      .L1I_LINE_LEN(LineBits)
   ) dut (
       .l2tlb_req_o(),
       .l2tlb_ready_i(1'b0),
@@ -64,38 +66,71 @@ module tb_l1i_width_window #(
         if (ifu_l1i.valid) begin
           assert (!ifu_l1i.trap && ifu_l1i.inst_n0[15:0] == assembled[15:0])
           else $fatal(1, "primary word");
-          if (ifu_l1i.inst_n1_valid)
-            assert (ifu_l1i.inst_n1 == word_at(base + 4))
-            else $fatal(1, "n1 wrong address");
-          if (ifu_l1i.inst_n2_valid) begin
-            n2_seen++;
-            assert (ifu_l1i.inst_n2 == word_at(base + 8))
-            else
-              $fatal(
-                  1,
-                  "n2 crossed a line with stale tag/data pc=%h got=%h expected=%h",
-                  pc,
-                  ifu_l1i.inst_n2,
-                  word_at(
-                      base + 8
-                  )
-              );
-          end
-`ifdef RAPT_FETCH_WIDE
-          if (ifu_l1i.inst_n3_valid) begin
-            n3_seen++;
-            assert (ifu_l1i.inst_n3 == word_at(base + 12))
-            else $fatal(1, "n3 crossed a line with stale tag/data pc=%h", pc);
-          end
-          if (ifu_l1i.inst_n4_valid) begin
-            n4_seen++;
-            assert (ifu_l1i.inst_n4 == word_at(base + 16))
-            else $fatal(1, "n4 crossed a line with stale tag/data pc=%h", pc);
-          end
-`endif
         end
+        if (ifu_l1i.inst_n1_valid)
+          assert (ifu_l1i.inst_n1 == word_at(base + 4))
+          else $fatal(1, "n1 wrong address");
+        if (ifu_l1i.inst_n2_valid) begin
+          n2_seen++;
+          assert (ifu_l1i.inst_n2 == word_at(base + 8))
+          else
+            $fatal(
+                1,
+                "n2 crossed a line with stale tag/data pc=%h got=%h expected=%h",
+                pc,
+                ifu_l1i.inst_n2,
+                word_at(
+                    base + 8
+                )
+            );
+        end
+`ifdef RAPT_FETCH_WIDE
+        if (ifu_l1i.inst_n3_valid) begin
+          n3_seen++;
+          assert (ifu_l1i.inst_n3 == word_at(base + 12))
+          else $fatal(1, "n3 crossed a line with stale tag/data pc=%h", pc);
+        end
+        if (ifu_l1i.inst_n4_valid) begin
+          n4_seen++;
+          assert (ifu_l1i.inst_n4 == word_at(base + 16))
+          else $fatal(1, "n4 crossed a line with stale tag/data pc=%h", pc);
+        end
+`endif
       end
     end
+  endtask
+  task automatic check_column_alias;
+    int unsigned line_bytes, stride, next_line, current_pc, target_pc;
+    line_bytes = 4 << LineBits;
+    stride = (1 << `RAPT_L1I_LEN) * line_bytes;
+    next_line = 'h80000000 + line_bytes;
+    // Put the next line in way one and the current line in way zero. A
+    // target read supplies next-line data while primary SRAM ownership is
+    // still wrong, exercising valid auxiliary data before primary readiness.
+    check_pc(next_line + stride);
+    check_pc(next_line);
+    current_pc = 'h80000000 + line_bytes - 4;
+    target_pc = next_line + line_bytes - 4;
+    @(negedge clock);
+    ifu_l1i.pc = current_pc;
+    ifu_l1i.prefetch_valid = 1;
+    ifu_l1i.prefetch_pc = target_pc;
+    @(posedge clock);
+    #1;
+    assert (!ifu_l1i.valid)
+    else $fatal(1, "primary used the speculative next-line read");
+    if (LineBits == 1) begin
+      assert (ifu_l1i.inst_n2_valid && ifu_l1i.inst_n2 == word_at(target_pc))
+      else $fatal(1, "two-word line lost independent n2 way ownership");
+    end
+`ifdef RAPT_FETCH_WIDE
+    if (LineBits == 2) begin
+      assert (ifu_l1i.inst_n4_valid && ifu_l1i.inst_n4 == word_at(target_pc))
+      else $fatal(1, "four-word line lost independent n4 way ownership");
+    end
+`endif
+    @(negedge clock);
+    ifu_l1i.prefetch_valid = 0;
   endtask
   initial begin
     init_cmu_bcast_defaults();
@@ -115,6 +150,7 @@ module tb_l1i_width_window #(
     repeat (4) @(negedge clock);
     reset = 0;
     check_pc('h80000000);
+    if (LineBits <= 2 && Ways > 1) check_column_alias();
     check_pc('h80000038);
     check_pc('h8000003a);
     check_pc('h8000003c);
@@ -125,11 +161,19 @@ module tb_l1i_width_window #(
     check_pc('h80000030);
     check_pc('h80000032);
 `endif
-    assert (n2_seen > 0)
-    else $fatal(1, "no valid third-word coverage");
+    if (LineBits >= 2) begin
+      assert (n2_seen > 0)
+      else $fatal(1, "no valid third-word coverage");
+    end
 `ifdef RAPT_FETCH_WIDE
-    assert (n3_seen > 0 && n4_seen > 0)
-    else $fatal(1, "wide fetch window never became valid");
+    if (LineBits >= 2) begin
+      assert (n3_seen > 0)
+      else $fatal(1, "wide fetch third lookahead never became valid");
+    end
+    if (LineBits >= 3) begin
+      assert (n4_seen > 0)
+      else $fatal(1, "wide fetch fourth lookahead never became valid");
+    end
     @(negedge clock);
     ifu_l1i.pc = 'h80000032;
     #1;

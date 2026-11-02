@@ -2,6 +2,9 @@
 // ---- formal_ioq_owner ----
 `include "rapt.svh"
 `include "rapt_if.svh"
+`ifndef RAPT_FORMAL_IOQ_READ_PORTS
+`define RAPT_FORMAL_IOQ_READ_PORTS 1
+`endif
 
 // Full production IOQ and dispatch arbitration. Only the first edge resets;
 // dispatch payloads, wakeups, memory responses, CSR/PMP and recovery stay free.
@@ -10,6 +13,7 @@
 module formal_ioq_owner (
     input logic clock,
     input logic reset,
+    input logic [`RAPT_FORMAL_IOQ_READ_PORTS-1:0] operand_read_grant,
     input rapt_pkg::dispatch_slot_t dispatch[rapt_pkg::DispatchWidth],
     input rapt_pkg::completion_t completion[rapt_pkg::CompletionPorts],
     input rapt_pkg::completion_t local_fp_wake[rapt_pkg::CompletionPorts],
@@ -59,10 +63,35 @@ module formal_ioq_owner (
       .capacity(capacity[rapt_pkg::DOMAIN_MEMORY]),
       .grant(grant[rapt_pkg::DOMAIN_MEMORY])
   );
+`ifdef RAPT_FORMAL_IOQ_LATE
+  logic [1:0][Phys-1:0] allocated_source_registers[N];
+  logic [1:0][Phys-1:0] source_registers[E], read_source_tag[E];
+  logic [1:0][X-1:0] read_source_value[E];
+  logic [11:0] source_offset[E];
+  logic [Phys-1:0] source_read_address[`RAPT_FORMAL_IOQ_READ_PORTS];
+  logic [X-1:0] source_read_value[`RAPT_FORMAL_IOQ_READ_PORTS];
+  logic source_read_valid[`RAPT_FORMAL_IOQ_READ_PORTS];
+  for (genvar s = 0; s < N; s++) begin : g_source_registers
+    assign allocated_source_registers[s][0] = dispatch[s].pr1 != '0 ? dispatch[s].pr1
+        : dispatch[s].op1 == '0 ? '0 : Phys'(2*s+1);
+    assign allocated_source_registers[s][1] = dispatch[s].pr2 != '0 ? dispatch[s].pr2
+        : dispatch[s].op2 == '0 ? '0 : Phys'(2*s+2);
+  end
+`endif
   rapt_pkg::lsu_completion_t result;
   rapt_lsu_ioq #(
+`ifdef RAPT_FORMAL_IOQ_LATE
+      .LateOperands(1'b1),
+      .IntegerReadPorts(`RAPT_FORMAL_IOQ_READ_PORTS),
+`endif
       .ResultT(rapt_pkg::lsu_completion_t)
   ) dut (
+`ifdef RAPT_FORMAL_IOQ_LATE
+      .int_source_regs(allocated_source_registers),
+      .operand_read_address(source_read_address),
+      .operand_read_value(source_read_value),
+      .operand_read_valid(source_read_valid),
+`endif
       .clock,
       .reset,
       .dispatch,
@@ -140,6 +169,120 @@ module formal_ioq_owner (
       if (disp.accept[s]) accepted++;
     end
   end
+`ifdef RAPT_FORMAL_IOQ_LATE
+  // A read returns the accepted consumer's source version. The physical
+  // register bank and ROB source lifetime remain a separate composition
+  // obligation; this contract checks read identity, capture and use.
+  function automatic logic source_hit(input logic [Phys-1:0] tag);
+    logic hit;
+    hit = 1'b0;
+    for (int p = 0; p < rapt_pkg::CompletionPorts; p++)
+    hit |= tag != '0 && completion[p].valid && completion[p].prd == tag;
+    return hit;
+  endfunction
+  function automatic logic [X-1:0] source_value(input logic [Phys-1:0] tag,
+                                                input logic [X-1:0] previous_value);
+    logic [X-1:0] value;
+    value = '0;
+    for (int p = 0; p < rapt_pkg::CompletionPorts; p++)
+    if (tag != '0 && completion[p].valid && completion[p].prd == tag) value |= completion[p].result;
+    return source_hit(tag) ? value : previous_value;
+  endfunction
+  always_ff @(posedge clock) begin
+    for (int e = 0; e < E; e++) begin
+      for (int k = 0; k < 2; k++) begin
+        if (live[e] && source_hit(read_source_tag[e][k])) begin
+          read_source_value[e][k] <= source_value(read_source_tag[e][k], read_source_value[e][k]);
+          read_source_tag[e][k] <= '0;
+        end
+      end
+    end
+    for (int s = 0; s < N; s++) begin
+      if (disp.accept[s]) begin
+        source_registers[allocate_index[s]] <= allocated_source_registers[s];
+        source_offset[allocate_index[s]] <= dispatch[s].uop.execute.memory.atomic
+            ? 12'b0 : dispatch[s].uop.imm[11:0];
+        read_source_tag[allocate_index[s]][0] <= source_hit(dispatch[s].pr1) ? '0 : dispatch[s].pr1;
+        read_source_tag[allocate_index[s]][1] <= source_hit(dispatch[s].pr2) ? '0 : dispatch[s].pr2;
+        read_source_value[allocate_index[s]][0] <= source_value(dispatch[s].pr1, dispatch[s].op1);
+        if (allocated_source_registers[s][0] == '0) read_source_value[allocate_index[s]][0] <= '0;
+        else if (!dispatch[s].uop.execute.memory.atomic && dispatch[s].uop.imm[11:0] != '0
+            && dispatch[s].stable_op1_valid
+            && (dispatch[s].pr1 == '0 || source_hit(
+                dispatch[s].pr1
+            )))
+          read_source_value[allocate_index[s]][0] <= dispatch[s].stable_op1;
+        read_source_value[allocate_index[s]][1] <= source_value(dispatch[s].pr2, dispatch[s].op2);
+      end
+    end
+  end
+  for (genvar r = 0; r < `RAPT_FORMAL_IOQ_READ_PORTS; r++) begin : g_source_read
+    wire [I-1:0] index = dut.g_late_operands.operands.request_index[r];
+    wire address_source = dut.g_late_operands.operands.request_addr[r];
+    wire request_valid = dut.g_late_operands.operands.request_valid[r];
+    wire [Phys-1:0] source_tag = address_source
+        ? read_source_tag[index][0] : read_source_tag[index][1];
+    wire [X-1:0] previous_value = address_source
+        ? read_source_value[index][0] : read_source_value[index][1];
+    assign source_read_value[r] = source_value(source_tag, previous_value);
+    assign source_read_valid[r] = operand_read_grant[r];
+    always_ff @(posedge clock) begin
+      if (past_valid && request_valid && !reset && !cmu_bcast.flush_pipe) begin
+        read_owner_live : assert (live[index]);
+        read_source_identity :
+        assert (source_read_address[r] == source_registers[index][address_source?0 : 1]);
+      end
+      address_source_read :
+      cover (past_valid && request_valid && address_source
+          && operand_read_grant[r] && !reset && !cmu_bcast.flush_pipe);
+      store_source_read :
+      cover (past_valid && request_valid && !address_source
+          && operand_read_grant[r] && !reset && !cmu_bcast.flush_pipe);
+    end
+  end
+  for (genvar e = 0; e < E; e++) begin : g_source_owner
+    wire [X-1:0] expected_source_address = read_source_value[e][0] + X'($signed(source_offset[e]));
+    always_ff @(posedge clock) begin
+      if (past_valid && live[e]) begin
+        zero_base_source :
+        assert (source_registers[e][0] != '0
+            || (read_source_tag[e][0] == '0 && read_source_value[e][0] == '0));
+        zero_store_source :
+        assert (source_registers[e][1] != '0
+            || (read_source_tag[e][1] == '0 && read_source_value[e][1] == '0));
+        source_readiness_bits :
+        assert (dut.ioq_base_ready[e] == (read_source_tag[e][0] == '0)
+            && dut.ioq_data_ready[e] == (read_source_tag[e][1] == '0));
+        source_readiness_owner :
+        assert (dut.ioq_pr1[e] == read_source_tag[e][0] && dut.ioq_pr2[e] == read_source_tag[e][1]);
+        source_offset_owner : assert (dut.ioq_imm[e] == source_offset[e]);
+        source_register_owner :
+        assert (dut.g_late_operands.operands.base_source[e] == source_registers[e][0]
+            && dut.g_late_operands.operands.data_source[e] == source_registers[e][1]);
+        if (dut.ioq_addr_ready[e]) begin
+          source_cacheability :
+          assert (dut.ioq_cacheable[e] == rapt_pkg::addr_cacheable(dut.ioq_eff_addr[e]));
+        end
+        if (dut.ioq_addr_prepared[e]) begin
+          prepared_source_ready : assert (dut.ioq_pr1[e] == '0);
+        end
+        if (dut.ioq_addr_prepared[e] && dut.ioq_pr1[e] == '0)
+          prepared_address_value : assert (dut.ioq_eff_addr[e] == expected_source_address);
+      end
+    end
+  end
+  for (genvar c = 0; c < 2; c++) begin : g_cached_source
+    wire [I-1:0] owner_index = dut.g_late_operands.operands.cache_owner[c];
+    always_ff @(posedge clock) begin
+      if (past_valid && dut.g_late_operands.operands.cache_valid[c]) begin
+        cached_source_live : assert (live[owner_index] && dut.integer_data_required[owner_index]);
+        cached_source_ready : assert (read_source_tag[owner_index][1] == '0);
+        cached_source_value :
+        assert (dut.g_late_operands.operands.cache_data[c] == read_source_value[owner_index][1]);
+      end
+    end
+  end
+`endif
   always_ff @(posedge clock) begin
     if (!past_valid) assume (reset);
     past_valid <= 1;
@@ -231,25 +374,35 @@ module formal_ioq_owner (
           request_a_live :
           assert (live[a_owner] && !completed[a_owner]
             && is_load[a_owner] && !response_known[a_owner]);
+`ifdef RAPT_LSU_HUM
         if (exu_lsu.rvalid_b)
           request_b_live :
           assert (live[b_owner] && !completed[b_owner]
             && is_load[b_owner] && !response_known[b_owner]);
         if (exu_lsu.rvalid && exu_lsu.rvalid_b) distinct_requests : assert (a_owner != b_owner);
+`else
+        // Assert absence of traffic and held requests on the disabled B channel.
+        disabled_b_request : assert (!exu_lsu.rvalid_b && !b_held);
+`endif
+
         if (exu_lsu.rvalid && dut.ioq_atom[a_owner])
           atomic_request_checked :
           assert (a_owner == head && !dut.head_store_fault
               && (!dut.ioq_wen[a_owner] || dut.head_store_check_valid_q));
+`ifdef RAPT_LSU_HUM
         if (exu_lsu.rvalid_b)
           plain_b_request :
           assert (!dut.ioq_atom[b_owner]
               && !(X == 32 && is_fp[b_owner] && fp_op[b_owner] == `RAPT_FP_OP_FLD));
+`endif
         if (a_held) begin
           request_a_stable :
           assert (exu_lsu.rvalid && request_a == held_a && request_a_side == held_a_side);
           ordered_promotion_holds : assert (!held_a_ordered || exu_lsu.ordered);
         end
+`ifdef RAPT_LSU_HUM
         if (b_held) request_b_stable : assert (exu_lsu.rvalid_b && request_b == held_b);
+`endif
         if (exu_lsu.rvalid) begin
           request_pc : assert (exu_lsu.pc == pc[a_owner]);
           request_kind :
@@ -387,6 +540,7 @@ endmodule
 module formal_ioq_store (
     input logic clock,
     input logic reset,
+    input logic [`RAPT_FORMAL_IOQ_READ_PORTS-1:0] operand_read_grant,
     input rapt_pkg::dispatch_slot_t dispatch[rapt_pkg::DispatchWidth],
     input rapt_pkg::completion_t completion[rapt_pkg::CompletionPorts],
     input rapt_pkg::completion_t local_fp_wake[rapt_pkg::CompletionPorts],
@@ -532,8 +686,15 @@ module formal_ioq_store (
       : is_float_store ? float_value[head][X-1:0] : source_value[head];
   wire head_store_owned = base.live[head] && write_op[head] && source_tag[head] == 0
       && (!is_float_store || float_tag[head] == 0);
-  wire amo_data_owned = !atomic_op[head] || opcode[head] == `RAPT_ATO_SC__
-      || (base.response_known[head] && base.dut.ioq_complete[head]);
+  wire head_operand_ready;
+`ifdef RAPT_FORMAL_IOQ_LATE
+  assign head_operand_ready = base.dut.head_integer_ready;
+`else
+  assign head_operand_ready = 1'b1;
+`endif
+  wire amo_data_owned = !atomic_op[head] || opcode[head] ==
+  `RAPT_ATO_SC__
+  || (base.response_known[head] && base.dut.ioq_complete[head]);
 
   // Reservation validity and addresses remain arbitrary. Check the sampled
   // decision protocol here; reservation creation/invalidation and atomicity
@@ -544,7 +705,7 @@ module formal_ioq_store (
   wire sc_sample = sc_head_owned && base.dut.ioq_pr1[head] == 0
       && source_tag[head] == 0 && !base.dut.ioq_mmu_en[head]
       && base.dut.head_store_check_valid_q;
-  wire [X-1:0] sc_address = base.dut.ioq_context[head].mmu_en ? base.dut.ioq_paddr[head]
+  wire [X-1:0] sc_address = base.dut.ioq_context[head].mmu_en ? base.dut.head_paddr
       : rapt_pkg::canonical_paddr(base.dut.ioq_eff_addr[head]);
   wire [X:0] sc_last = {1'b0, sc_address} + (narrow ? (X+1)'(3) : (X+1)'(7));
   wire [X:0] reservation_last = {1'b0, exu_l1d.reservation}
@@ -567,9 +728,17 @@ module formal_ioq_store (
     always_ff @(posedge clock) begin
       if (base.past_valid && base.live[e]) begin
         integer_tag_owner : assert (base.dut.ioq_pr2[e] == source_tag[e]);
+`ifdef RAPT_FORMAL_IOQ_LATE
+        source_history_equal :
+        assert (base.read_source_tag[e][1] == source_tag[e]
+            && base.read_source_value[e][1] == source_value[e]);
+`else
         integer_data_owner : assert (base.dut.ioq_vk[e] == source_value[e]);
+`endif
         fp_tag_owner : assert (base.dut.ioq_fp_store_tag[e] == float_tag[e]);
-        fp_data_owner : assert (base.dut.ioq_fp_store_data[e] == float_value[e]);
+        // The shared FP payload belongs to a load response or a store operand.
+        if (float_op[e] && write_op[e] && fp_opcode[e] != `RAPT_FP_OP_FLD)
+          fp_data_owner : assert (base.dut.ioq_fp_store_data[e] == float_value[e]);
         normalized_store_width :
         assert (store_width[e] == (atomic_op[e]
             ? ((X == 32 || word_op[e]) ? 5'd15 : 5'd31) : opcode[e][4:0]));
@@ -604,12 +773,21 @@ module formal_ioq_store (
       sc_stage_valid : assert (base.dut.sc_decision_ready == (sc_valid && sc_head == head));
       if (sc_valid && sc_head == head)
         sc_stage_match : assert (base.dut.reservation_match == sc_match);
-      if (head_store_owned && amo_data_owned) begin
+`ifdef RAPT_FORMAL_IOQ_LATE
+      handoff_source_ready :
+      assert (!(base.result.valid && base.result.wen) || base.dut.head_integer_ready);
+`endif
+      if (head_store_owned && amo_data_owned && head_operand_ready) begin
         sq_owned_data :
         assert ((base.dut.sq_store_payload.sq_wdata & byte_mask) == (reference_store & byte_mask));
         if (!atomic_op[head]) begin
           sq_full_store_data : assert (base.dut.sq_store_payload.sq_wdata == reference_store);
-          sq_float64_data : assert (base.dut.sq_store_payload.sq_wdata64 == float_value[head]);
+          // The FP64 payload is live only for a double-precision FP store.
+          sq_float64_enable :
+          assert (base.dut.sq_store_payload.sq_fp64
+              == (float_op[head] && fp_opcode[head] == `RAPT_FP_OP_FSD));
+          if (is_float_store && fp_opcode[head] == `RAPT_FP_OP_FSD)
+            sq_float64_data : assert (base.dut.sq_store_payload.sq_wdata64 == float_value[head]);
         end
         sq_store_size : assert (base.dut.sq_handoff_alu == store_width[head]);
       end

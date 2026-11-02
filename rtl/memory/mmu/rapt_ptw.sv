@@ -31,6 +31,10 @@ module rapt_ptw #(
 
     output logic done,
     output logic fault,
+    // An implicit PTE address exceeds the implemented physical address width.
+    output logic access_fault,
+    // Preserve every architectural PPN bit until the requester has checked
+    // page permissions and PA representability before filling a narrow TLB.
     output logic [XLEN-1:10] result_ptag,
     output logic [XLEN-1:12] result_vtag,
     // pte flags: {D,A,G,U,X,W,R} (bits 7..1 of PTE); valid when done=1
@@ -46,6 +50,7 @@ module rapt_ptw #(
   // A global non-leaf marks every descendant mapping global. Keep this
   // state local to the accepted walk; IDLE resets it before any new request.
   logic global_q;
+  logic pte_address_valid;
   logic [6:0] walk_pte_flags;
   assign walk_pte_flags = {bus_rdata[7:6], bus_rdata[5] | global_q, bus_rdata[4:1]};
 
@@ -122,8 +127,9 @@ module rapt_ptw #(
   assign ptag_lvl0 = {{Rv64PtagPadW{1'b0}}, pte_data[53:10]};
 
   assign busy = (state != IDLE);
-  assign bus_arvalid = !kill && (state == LVL2_REQ || state == LVL1_REQ || state == LVL0_REQ);
+  assign bus_arvalid = !kill && pte_address_valid && (state == LVL2_REQ || state == LVL1_REQ || state == LVL0_REQ);
   assign bus_araddr = XLEN'({pte_word_addr, 3'b000});
+  assign pte_address_valid = pte_word_addr == 53'((`RAPT_PADDR_BITS - 3)'(pte_word_addr));
   assign result_vtag = (XLEN-12)'($signed(vtag_q));
 
   // SBE is WARL-zero in rapt today. Keep the port so the requester interface
@@ -138,12 +144,14 @@ module rapt_ptw #(
       state <= IDLE;
       done  <= 1'b0;
       fault <= 1'b0;
+      access_fault <= 1'b0;
       killed <= 1'b0;
       global_q <= 1'b0;
       result_level <= 2'd0;
     end else begin
       done  <= 1'b0;
       fault <= 1'b0;
+      access_fault <= 1'b0;
 
       unique case (state)
         IDLE: begin
@@ -165,7 +173,10 @@ module rapt_ptw #(
         end
         LVL2_REQ: begin
           if (kill) state <= IDLE;
-          else if (bus_arready) state <= LVL2_WAIT;
+          else if (!pte_address_valid) begin
+            access_fault <= 1'b1;
+            state <= IDLE;
+          end else if (bus_arready) state <= LVL2_WAIT;
         end
         LVL2_WAIT: begin
           if (bus_rvalid) begin
@@ -204,7 +215,10 @@ module rapt_ptw #(
         end
         LVL1_REQ: begin
           if (kill) state <= IDLE;
-          else if (bus_arready) state <= LVL1_WAIT;
+          else if (!pte_address_valid) begin
+            access_fault <= 1'b1;
+            state <= IDLE;
+          end else if (bus_arready) state <= LVL1_WAIT;
         end
         LVL1_WAIT: begin
           if (bus_rvalid) begin
@@ -243,7 +257,10 @@ module rapt_ptw #(
         end
         LVL0_REQ: begin
           if (kill) state <= IDLE;
-          else if (bus_arready) state <= LVL0_WAIT;
+          else if (!pte_address_valid) begin
+            access_fault <= 1'b1;
+            state <= IDLE;
+          end else if (bus_arready) state <= LVL0_WAIT;
         end
         LVL0_WAIT: begin
           if (bus_rvalid) begin
@@ -300,9 +317,8 @@ module rapt_ptw #(
   ptw_state_t state;
 
   logic [9:0] vpn1, vpn0;
-  // Sv32's 34-bit PTE address is word aligned. The existing XLEN-wide bus
-  // still truncates its upper two bits; this storage cleanup does not change
-  // that platform interface or pretend to add 34-bit RV32 bus support.
+  // Retain Sv32's full PTE address until its high bits have been checked.
+  // The 32-bit bus must never issue an aliased read of an unsupported frame.
   /* verilator lint_off UNUSEDSIGNAL */
   logic [33:2] pte_word_addr;
   /* verilator lint_on UNUSEDSIGNAL */
@@ -321,8 +337,9 @@ module rapt_ptw #(
   assign pte_data = pte_raw;
 
   assign busy = (state != IDLE);
-  assign bus_arvalid = !kill && (state == LVL1_REQ || state == LVL0_REQ);
+  assign bus_arvalid = !kill && pte_address_valid && (state == LVL1_REQ || state == LVL0_REQ);
   assign bus_araddr = XLEN'({pte_word_addr, 2'b00});
+  assign pte_address_valid = pte_word_addr == 32'(30'(pte_word_addr));
 
   logic pte_v;
   logic pte_r;
@@ -355,12 +372,14 @@ module rapt_ptw #(
       state <= IDLE;
       done  <= 1'b0;
       fault <= 1'b0;
+      access_fault <= 1'b0;
       killed <= 1'b0;
       global_q <= 1'b0;
       result_level <= 2'd0;
     end else begin
       done  <= 1'b0;
       fault <= 1'b0;
+      access_fault <= 1'b0;
 
       unique case (state)
         IDLE: begin
@@ -376,7 +395,10 @@ module rapt_ptw #(
         end
         LVL1_REQ: begin
           if (kill) state <= IDLE;
-          else if (bus_arready) state <= LVL1_WAIT;
+          else if (!pte_address_valid) begin
+            access_fault <= 1'b1;
+            state <= IDLE;
+          end else if (bus_arready) state <= LVL1_WAIT;
         end
         LVL1_WAIT: begin
           if (bus_rvalid) begin
@@ -415,7 +437,10 @@ module rapt_ptw #(
         end
         LVL0_REQ: begin
           if (kill) state <= IDLE;
-          else if (bus_arready) state <= LVL0_WAIT;
+          else if (!pte_address_valid) begin
+            access_fault <= 1'b1;
+            state <= IDLE;
+          end else if (bus_arready) state <= LVL0_WAIT;
         end
         LVL0_WAIT: begin
           if (bus_rvalid) begin

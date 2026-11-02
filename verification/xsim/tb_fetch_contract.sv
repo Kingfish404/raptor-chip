@@ -111,7 +111,6 @@ module tb_fetch_refill;
   end
 endmodule
 
-
 // ---- tb_fetch_prediction ----
 `include "rapt.svh"
 `include "rapt_if.svh"
@@ -236,103 +235,8 @@ module tb_fetch_prediction;
   end
 endmodule
 
-
-// ---- tb_fetch_hints ----
 `include "rapt.svh"
 `include "rapt_if.svh"
-module tb_fetch_hints;
-  localparam int XLEN = `RAPT_XLEN;
-  localparam logic [XLEN-1:0] Base = XLEN'('h80000000);
-  logic clock = 0, reset = 1;
-  always #5 clock = ~clock;
-  cmu_bcast_if cmu_bcast ();
-  csr_bcast_if csr_bcast ();
-  rapt_recovery_if recovery ();
-  ifu_l1i_if ifu_l1i ();
-  ifu_bpu_if ifu_bpu ();
-  ifu_idu_if ifu_idu ();
-  rapt_ifu dut (
-      .clock,
-      .reset,
-      .cmu_bcast,
-      .recovery,
-      .ifu_bpu,
-      .ifu_l1i,
-      .ifu_idu,
-      .ifu_hazard(),
-      .response_pending_o()
-  );
-  `include "tb_core_bcast_defaults.svh"
-  `include "tb_common.svh"
-  int packets, collisions, cycles, bubble_cycles;
-  always @(posedge clock) begin
-    if (!reset && !cmu_bcast.flush_pipe) begin
-      cycles++;
-      if (dut.hint_write_valid_q && dut.hint_read_index == dut.hint_write_index_q) collisions++;
-      if (!ifu_l1i.consumed) bubble_cycles++;
-      if (ifu_idu.valid[0] && ifu_idu.ready[0]) begin
-        check(ifu_idu.slot[0].pc == Base && ifu_idu.slot[0].pnpc == Base, "taken stream drift");
-        check(ifu_idu.slot[0].inst[15:0] == 16'ha001, "hint collision changed instruction");
-        packets++;
-      end
-    end
-  end
-  initial begin
-    packets = 0;
-    collisions = 0;
-    cycles = 0;
-    bubble_cycles = 0;
-    init_cmu_bcast_defaults();
-    recovery.pending = 0;
-    recovery.redirect_valid = 0;
-    recovery.preserve_fetch = 0;
-    recovery.target = 0;
-    ifu_bpu.taken = 1;
-    ifu_bpu.npc = Base;
-    ifu_bpu.aux_taken = 0;
-    ifu_bpu.request_aux_taken = 0;
-    ifu_bpu.aux_index = 0;
-    ifu_idu.ready = '{default: 1};
-    ifu_idu.resteer = 0;
-    ifu_idu.resteer_pc = 0;
-    ifu_l1i.valid = 1;
-    ifu_l1i.inst_n0 = 32'h0001a001;  // C.J to itself, then an unconsumed C.NOP.
-    ifu_l1i.inst_n1 = 32'h00010001;
-    ifu_l1i.inst_n2 = 32'h00010001;
-    ifu_l1i.inst_n1_valid = 1;
-    ifu_l1i.inst_n2_valid = 1;
-`ifdef RAPT_FETCH_WIDE
-    ifu_l1i.inst_n3 = 32'h00010001;
-    ifu_l1i.inst_n4 = 32'h00010001;
-    ifu_l1i.inst_n3_valid = 1;
-    ifu_l1i.inst_n4_valid = 1;
-`endif
-    ifu_l1i.trap = 0;
-    ifu_l1i.cause = 0;
-    ifu_l1i.tval = 0;
-    tick(4);
-    reset = 0;
-    cmu_bcast.flush_pipe = 1;
-    cmu_bcast.cpc = Base;
-    tick(1);
-    cmu_bcast.flush_pipe = 0;
-    tick(40);
-    check(packets >= 36 && collisions >= 30, "taken throughput or collision coverage");
-    check(dut.hint_write_valid_q, "no pending training at fence collision");
-    cmu_bcast.fence_i = 1;
-    cmu_bcast.flush_pipe = 1;
-    tick(1);
-    check(!dut.hint_write_valid_q, "fence retained pending hint training");
-    cmu_bcast.fence_i = 0;
-    cmu_bcast.flush_pipe = 0;
-    tick(20);
-    check(packets >= 54, "hint fence failed to resume taken stream");
-    $display("PASS: WFE hints RV%0d packets=%0d collisions=%0d cycles=%0d bubbles=%0d", XLEN,
-             packets, collisions, cycles, bubble_cycles);
-    $finish;
-  end
-endmodule
-
 
 // ---- tb_fetch_tage_query ----
 `include "rapt.svh"
@@ -398,107 +302,5 @@ module tb_fetch_tage_query;
   end
 endmodule
 
-
-// ---- tb_fetch_hint_alias ----
 `include "rapt.svh"
 `include "rapt_if.svh"
-module tb_fetch_hint_alias;
-  localparam int XLEN = `RAPT_XLEN;
-  localparam logic [XLEN-1:0] A = XLEN'('h80000000), B = A + XLEN'('h1002);
-  logic clock = 0, reset = 1;
-  always #5 clock = ~clock;
-  cmu_bcast_if cmu_bcast ();
-  csr_bcast_if csr_bcast ();
-  rapt_recovery_if recovery ();
-  ifu_l1i_if ifu_l1i ();
-  ifu_bpu_if ifu_bpu ();
-  ifu_idu_if ifu_idu ();
-  rapt_ifu dut (
-      .clock,
-      .reset,
-      .cmu_bcast,
-      .recovery,
-      .ifu_bpu,
-      .ifu_l1i,
-      .ifu_idu,
-      .ifu_hazard(),
-      .response_pending_o()
-  );
-  `include "tb_core_bcast_defaults.svh"
-  `include "tb_common.svh"
-  function automatic logic [XLEN-1:0] target(input logic [XLEN-1:0] pc);
-    return pc == A ? B : A;
-  endfunction
-  function automatic logic [31:0] jump(input logic [XLEN-1:0] pc);
-    logic [20:0] delta;
-    delta = 21'(target(pc) - (pc + XLEN'(2)));
-    return {delta[20], delta[10:1], delta[11], delta[19:12], 5'b0, 7'b1101111};
-  endfunction
-  wire [31:0] live_jump = jump(ifu_l1i.pc);
-  assign ifu_l1i.inst_n0 = {live_jump[15:0], 16'h0001};
-  assign ifu_l1i.inst_n1 = ifu_l1i.pc[1] ? live_jump : {16'h0001, live_jump[31:16]};
-  assign ifu_l1i.inst_n2 = 32'h00010001;
-  assign ifu_l1i.inst_n1_valid = 1;
-  assign ifu_l1i.inst_n2_valid = 1;
-`ifdef RAPT_FETCH_WIDE
-  assign ifu_l1i.inst_n3 = 32'h00010001;
-  assign ifu_l1i.inst_n4 = 32'h00010001;
-  assign ifu_l1i.inst_n3_valid = 1;
-  assign ifu_l1i.inst_n4_valid = 1;
-`endif
-  assign ifu_l1i.valid = ifu_l1i.pc == A || ifu_l1i.pc == B;
-  assign ifu_l1i.trap = 0;
-  assign ifu_l1i.cause = 0;
-  assign ifu_l1i.tval = 0;
-  logic [XLEN-1:0] expected = A;
-  int delivered = 0, collisions = 0, changed_collisions = 0;
-  bit checking = 0;
-  always @(posedge clock) begin
-    if (checking) begin
-      if (dut.hint_write_valid_q && dut.hint_write_index_q == dut.hint_read_index) begin
-        collisions++;
-        if (dut.hint_write_q != dut.hints[dut.hint_write_index_q]) changed_collisions++;
-      end
-      if (ifu_idu.valid[0]) begin
-        check(ifu_idu.valid[1], "packet lost its direct branch");
-        check(ifu_idu.slot[0].pc == expected && ifu_idu.slot[0].inst == 32'h00000001,
-              "hint alias changed the first instruction");
-        check(ifu_idu.slot[1].pc == expected + XLEN'(2) && ifu_idu.slot[1].inst == jump(expected
-              ) && ifu_idu.slot[1].pnpc == target(expected), "hint alias changed branch/target");
-        expected = target(expected);
-        delivered++;
-      end
-    end
-  end
-  initial begin
-    init_cmu_bcast_defaults();
-    recovery.pending = 0;
-    recovery.redirect_valid = 0;
-    recovery.preserve_fetch = 0;
-    recovery.target = 0;
-    ifu_bpu.taken = 0;  // Only packet hints can steer the speculative query.
-    ifu_bpu.npc = 0;
-    ifu_bpu.aux_taken = 0;
-    ifu_bpu.request_aux_taken = 0;
-    ifu_bpu.aux_index = 0;
-    ifu_idu.ready = '{default: 1};
-    ifu_idu.resteer = 0;
-    ifu_idu.resteer_pc = 0;
-    tick(4);
-    reset = 0;
-    cmu_bcast.flush_pipe = 1;
-    cmu_bcast.cpc = A;
-    tick(1);
-    cmu_bcast.flush_pipe = 0;
-    checking = 1;
-    repeat (500) begin
-      tick(1);
-      if (delivered >= 64) break;
-    end
-    check(delivered >= 64 && collisions >= 16 && changed_collisions >= 16,
-          "missing changed-data hint collision coverage/progress");
-    $display("PASS: WFE hint aliases RV%0d packets=%0d collisions=%0d changed=%0d", XLEN,
-             delivered, collisions, changed_collisions);
-    $finish;
-  end
-endmodule

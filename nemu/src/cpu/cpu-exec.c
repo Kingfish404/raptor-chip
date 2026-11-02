@@ -17,6 +17,8 @@
 #include <cpu/cpu.h>
 #include <cpu/thread.h>
 #include <cpu/decode.h>
+#include <cpu/bbv.h>
+#include <cpu/sample.h>
 #include <cpu/difftest.h>
 #include <cpu/multidiff.h>
 #include <cpu/diffjournal.h>
@@ -282,6 +284,14 @@ static void exec_once(Decode *s, vaddr_t pc)
   s->snpc = pc;
   s->epc = pc; /* preserve executing PC for lazy itrace_format (s->pc gets
                 * clobbered to dnpc by decode_exec) */
+  unsigned bbv_privilege = 0;
+  word_t bbv_satp = 0;
+  word_t bbv_thread_pointer = 0;
+  if (nemu_bbv_enabled) {
+    bbv_privilege = cpu.priv;
+    bbv_satp = cpu.sr[CSR_SATP];
+    bbv_thread_pointer = cpu.gpr[4];
+  }
   isa_exec_once(s);
   if (subsystem_inst_trace != NULL)
   {
@@ -345,6 +355,9 @@ static void exec_once(Decode *s, vaddr_t pc)
 #endif
   cpu.pc = s->pc;
   cpu.inst = s->isa.inst;
+  if (nemu_bbv_enabled || nemu_sample_enabled)
+    nemu_sample_retire(s->epc, s->isa.inst, cpu.instruction_trapped);
+  if (nemu_bbv_enabled) nemu_bbv_record(s, bbv_privilege, bbv_satp, bbv_thread_pointer);
 }
 
 #if defined(CONFIG_ISA_riscv) && defined(CONFIG_TARGET_SHARE)
@@ -366,6 +379,7 @@ static void execute(uint64_t n)
   Decode s;
   for (; n > 0; n--)
   {
+    if (nemu_sample_enabled && nemu_sample_tick()) break;
 #ifdef NEMU_HAS_SMP
     if (!nemu_threaded && (nemu_nr_harts > 1 || (nemu_hart_waiting[nemu_hartid] && multidiff_clint_active())) && !cpu_schedule())
       break;

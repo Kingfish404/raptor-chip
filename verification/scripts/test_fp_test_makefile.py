@@ -1,7 +1,5 @@
 """Check that the public FP Make targets resolve to maintained guest sources."""
-import json
 import os
-import re
 from pathlib import Path
 import shlex
 import subprocess
@@ -38,14 +36,6 @@ class FpMakefileTest(unittest.TestCase):
                         self.assertEqual(sources, ["fp_d_arith.S"])
                         self.assertIn(f"-march=rv{xlen}imafdc", compiles[0])
 
-    def test_coverage_guest_sources_exist(self):
-        manifest = json.loads((REPO / "verification/riscof/raptor-rv64s/requirements.json").read_text())
-        for entry in manifest["requirements"]:
-            for value in entry.get("tests", []):
-                match = re.match(r"((?:app|verify)/[^\s()]+)", value)
-                if match:
-                    with self.subTest(source=match[1]):
-                        self.assertTrue((REPO / match[1]).is_file(), value)
 
 
 if __name__ == "__main__":

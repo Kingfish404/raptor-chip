@@ -17,6 +17,7 @@
 #include <device/map.h>
 #include <cpu/multidiff.h>
 #include <cpu/diffjournal.h>
+#include <cpu/bbv.h>
 
 #ifndef CONFIG_TARGET_AM
 #include <stdio.h>
@@ -176,6 +177,7 @@ static uint8_t *serial_us16550_base = NULL;
 
 static void serial_putc(uint8_t ch)
 {
+  if (nemu_bbv_enabled) nemu_bbv_serial(ch);
 #ifdef CONFIG_TARGET_AM
   putch((char)ch);
 #else
@@ -319,6 +321,19 @@ bool nemu_uart_reset_state(void)
 #ifdef SERIAL_HOST_INPUT
   if (serial_rx_count() || raw_term_inited) return false;
 #endif
+  return true;
+}
+
+bool serial_sample_state(FILE *out)
+{
+#ifdef SERIAL_HOST_INPUT
+  if (serial_rx_count()) return false;
+#endif
+  if (lcr & 0x80) return false;
+  if (out)
+    fprintf(out, "uart_ier=0x%x\nuart_lcr=0x%x\nuart_mcr=0x%x\nuart_scr=0x%x\n"
+            "uart_dll=0x%x\nuart_dlm=0x%x\nuart_fcr=0x%x\nuart_tx_pending=0x%x\n",
+            ier, lcr, mcr, scr, dll, dlm, fcr, tx_irq_pending);
   return true;
 }
 

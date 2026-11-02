@@ -12,10 +12,7 @@ import shlex
 import shutil
 import subprocess
 import threading
-from yosys_common import ROOT
-
-
-ROOT = Path(__file__).resolve().parents[2]
+from yosys_common import ROOT, sha
 
 LEXICAL = re.compile(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*.*?\*/', re.S)
 
@@ -34,6 +31,14 @@ MARKERS = {
 }
 
 BLOCK_CONTRACTS = {
+    "rapt_tlb": ["lookup-owner", "lookup-miss", "asid-global-lookup", "canonical-lookup",
+                 "fill-history", "ppn-range", "selective-sfence", "replacement-selection"],
+    "rapt_data_tlb": ["lookup-owner", "lookup-miss", "asid-global-lookup", "canonical-lookup",
+                      "fill-history", "ppn-range", "shared-fill", "dual-lookup",
+                      "fence-invalidation", "replacement-selection"],
+    "rapt_axi_r_buffer": ["channel-passthrough", "elastic-order", "capacity",
+                          "registered-latency", "stall-preservation", "bypass",
+                          "conditional-drain"],
     "rapt_cache_nru": ["cold-way-priority", "epoch-rollover", "set-isolation", "invalidation"],
     "rapt_l1d_data": ["diagonal-mapping", "byte-and-line-mask", "read-latency",
                       "port-reservation", "storage-preservation", "macro-binding"],
@@ -48,10 +53,6 @@ BLOCK_CONTRACTS = {
     "rapt_lsu_ioq": ["dispatch-admission", "completion-identity", "request-response-provenance",
                      "single-completion", "store-data-owner", "atomic-semantics"],
 }
-
-
-def sha(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def binding_key(parameters):
@@ -141,7 +142,13 @@ def audit_combinational_snapshot(receipt, directory):
     original = gzip.decompress(member(directory, elaboration["model"]).read_bytes()).decode()
     if canonical_rtlil(original) != canonical_rtlil(frontend):
         raise ValueError("Parameter-binding model differs from proved model")
-    commands = member(directory, elaboration["script"]).read_text().splitlines()
+    audit_binding_parameters(receipt, directory, elaboration["script"], top)
+
+
+def audit_binding_parameters(receipt, directory, script, top):
+    if not isinstance(top, str) or not re.fullmatch(r"[A-Za-z_]\w*", top):
+        raise ValueError("Invalid parameter-binding top")
+    commands = member(directory, script).read_text().splitlines()
     reads = [shlex.split(line) for line in commands if line.startswith("read_slang ")]
     if len(reads) != 1:
         raise ValueError("Missing unique binding read command")
@@ -164,8 +171,57 @@ def audit_combinational_snapshot(receipt, directory):
     expected_undefined = {name for name, value in defines.items() if value is False}
     if supplied != expected or defined != expected_defined or undefined != expected_undefined:
         raise ValueError("Actual elaboration parameters/defines differ from the receipt")
-    if tokens.count("--top") != 1 or tokens[tokens.index("--top") + 1] != top:
-        raise ValueError("Binding top differs from unrestricted proof top")
+    if (tokens.count("--top") != 1 or tokens[-1] == "--top"
+            or tokens[tokens.index("--top") + 1] != top):
+        raise ValueError("Binding top differs from proof top")
+    presets = [Path(token[2:]).parts[-1] for token in tokens
+               if token.startswith("-I") and Path(token[2:]).parts[-3:-1] == ("rtl", "configs")]
+    if presets and presets != [receipt["profile"].split("/")[0]]:
+        raise ValueError("Actual elaboration preset differs from the receipt")
+
+
+def native_sat_command(top, model, *, proof=False):
+    """Shared complete-model preparation and the audited native induction query."""
+    command = (f"read_rtlil {model}; hierarchy -check -top {top}; "
+               f"prep -top {top} -flatten; async2sync; chformal -lower; memory_map; opt; "
+               "check -assert; select -assert-none t:$anyseq t:$anyconst t:$initstate "
+               "t:$assume A:blackbox=1; ")
+    if proof:
+        command += ("sat -verify -tempinduct -seq 2 -maxsteps 8 -set-def-inputs "
+                    "-set-at 1 reset 1 -prove-asserts -prove correct 1")
+    return command
+
+
+def audit_native_binding(receipt, directory):
+    """Bind every native proof to its complete parameter-specific frontend graph."""
+    binding = receipt.get("model_binding", {})
+    names = ("proved_model", "bound_model", "read_script", "proof_script")
+    if (not isinstance(binding, dict)
+            or any(binding.get(name) not in receipt["artifacts"] for name in names)):
+        raise ValueError("Missing fingerprinted complete native model binding")
+    proved = member(directory, binding["proved_model"]).read_text()
+    bound = member(directory, binding["bound_model"]).read_text()
+    canonical = canonical_rtlil(proved)
+    if (canonical != canonical_rtlil(bound)
+            or hashlib.sha256(canonical.encode()).hexdigest() != binding.get("canonical_sha256")):
+        raise ValueError("Complete parameter-binding model differs from proved model")
+    top = binding.get("top", "")
+    audit_binding_parameters(receipt, directory, binding["read_script"], top)
+    if not re.search(r"^module \\" + re.escape(top) + r"\s*$", proved, re.M):
+        raise ValueError("Bound proof top is missing from the complete native model")
+    origin = binding.get("proof_root")
+    if not isinstance(origin, str) or not Path(origin).is_absolute():
+        raise ValueError("Missing native proof artifact origin")
+    original_model = member(Path(origin), binding["proved_model"])
+    script = member(directory, binding["proof_script"]).read_text().strip()
+    expected = native_sat_command(top, original_model, proof=True)
+    if receipt["method"] != "induction" or script != expected:
+        raise ValueError("Native proof script does not check the complete bound model")
+    log = member(directory, receipt["log"]).read_text()
+    executed = re.findall(r"^-- Running command `(.*)' --$", log, re.M)
+    imported = re.findall(r"^Input filename: (.*)$", log, re.M)
+    if executed != [script] or imported != [str(original_model)]:
+        raise ValueError("Native proof log does not execute the fingerprinted proof script")
 
 
 def member(directory, name):
@@ -270,7 +326,17 @@ def inventory(root):
     }
 
 
-def audit_receipt(receipt, scope, root, receipt_dir):
+def audit_file(path, digest, kind, observed_inputs=None):
+    if not path.is_file() or sha(path) != digest:
+        raise ValueError(f"Stale or missing {kind}: {path}")
+    if observed_inputs is not None:
+        name = str(path)
+        if name in observed_inputs and observed_inputs[name] != digest:
+            raise ValueError("Proof file changed between receipts: " + name)
+        observed_inputs[name] = digest
+
+
+def audit_receipt(receipt, scope, root, receipt_dir, *, observed_inputs=None):
     """Validate evidence metadata and raw artifacts before matching obligations."""
     if receipt.get("status") != "PASS":
         raise ValueError("Receipt is not PASS")
@@ -292,8 +358,7 @@ def audit_receipt(receipt, scope, root, receipt_dir):
         raise ValueError("Missing complete RTL/configuration source fingerprint")
     for name, digest in inputs.items():
         path = member(root, name)
-        if not path.is_file() or sha(path) != digest:
-            raise ValueError(f"Stale or missing proof input: {name}")
+        audit_file(path, digest, "proof input", observed_inputs)
     if not isinstance(receipt.get("parameters"), dict) or not receipt["parameters"]:
         raise ValueError("Missing parameter bindings or explicit environment assumptions")
     if not isinstance(receipt.get("assumptions"), list):
@@ -308,8 +373,7 @@ def audit_receipt(receipt, scope, root, receipt_dir):
         raise ValueError("Missing raw log and executable proof artifact")
     for name, digest in artifacts.items():
         path = member(receipt_dir, name)
-        if not path.is_file() or sha(path) != digest:
-            raise ValueError(f"Stale or missing proof artifact: {name}")
+        audit_file(path, digest, "proof artifact", observed_inputs)
     log = member(receipt_dir, log_name).read_text()
     if MARKERS[method] not in log or "ERROR:" in log:
         raise ValueError("Raw log does not establish the declared proof result")
@@ -330,6 +394,8 @@ def audit_receipt(receipt, scope, root, receipt_dir):
             raise ValueError("Activation log has no reached property")
         if not member(receipt_dir, witness).stat().st_size:
             raise ValueError("Activation witness is empty")
+    if method != "combinational-smt":
+        audit_native_binding(receipt, receipt_dir)
     return receipt["unit"], receipt["obligation"], receipt["profile"], binding
 
 
@@ -384,46 +450,107 @@ def scope_main():
     parser.add_argument("--source-root", type=Path, default=ROOT)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--receipts", type=Path, nargs="*", default=[])
+    parser.add_argument("--receipt-index", type=Path, nargs="+", default=[],
+                        help="JSON lists of receipt paths relative to each index directory")
     parser.add_argument("--contract-review", type=Path)
     parser.add_argument("--signoff", action="store_true")
     args = parser.parse_args()
     root = args.source_root.resolve()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
+    report_path = output / "signoff.json"
+    def save_report(value):
+        temporary = output / "signoff.tmp"
+        temporary.write_text(json.dumps(value, indent=2) + "\n")
+        temporary.replace(report_path)
+    save_report(dict(schema_version=2, whole_rtl_signoff=False, evaluation_complete=False))
+    verifier_directory = Path(__file__).resolve().parent
+    verifier_paths = [verifier_directory / name for name in
+                      ("formal_scope.py", "prf_formal.py", "yosys_common.py")]
+    verifier_inputs = {str(path): sha(path) for path in verifier_paths}
+    metadata_inputs = {}
+    def read_metadata(path):
+        data = path.read_bytes()
+        name, digest = str(path.resolve()), hashlib.sha256(data).hexdigest()
+        if name in metadata_inputs and metadata_inputs[name] != digest:
+            raise ValueError("Metadata changed between reads: " + name)
+        metadata_inputs[name] = digest
+        return json.loads(data)
     scope = inventory(root)
     (output / "inventory.json").write_text(json.dumps(scope, indent=2) + "\n")
     review_errors = []
     if args.contract_review:
-        review = json.loads(args.contract_review.read_text())
+        review = read_metadata(args.contract_review)
         review_errors.extend(apply_contract_review(scope, review))
     else:
         review_errors.append("Candidate contracts have not undergone semantic review")
     expected = required_contracts(scope)
-    accepted, rejected = set(), []
-    for path in args.receipts:
+    accepted, rejected, proof_file_inputs = set(), [], {}
+    receipts = list(args.receipts)
+    for index in args.receipt_index:
         try:
-            receipt = json.loads(path.read_text())
-            accepted.add(audit_receipt(receipt, scope, root, path.resolve().parent))
+            entries = read_metadata(index)
+            if not isinstance(entries, list):
+                raise ValueError("Receipt index must be a JSON list")
+            receipts.extend([member(index.parent, name) for name in entries])
+        except (OSError, ValueError, TypeError) as error:
+            rejected.append({"path": str(index), "reason": str(error)})
+    for path in dict.fromkeys(path.resolve() for path in receipts):
+        try:
+            receipt = read_metadata(path)
+            accepted.add(audit_receipt(receipt, scope, root, path.resolve().parent,
+                                       observed_inputs=proof_file_inputs))
         except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
             rejected.append({"path": str(path), "reason": str(error)})
+    def unchanged(inputs):
+        try:
+            return all(sha(Path(name)) == digest for name, digest in inputs.items())
+        except OSError:
+            return False
+    try:
+        source_epoch_unchanged = rtl_sources(root) == scope["sources"]
+    except OSError:
+        source_epoch_unchanged = False
+    verifier_epoch_unchanged = unchanged(verifier_inputs)
+    metadata_epoch_unchanged = unchanged(metadata_inputs)
+    proof_epoch_unchanged = unchanged(proof_file_inputs)
+    epoch_errors = []
+    if not source_epoch_unchanged:
+        epoch_errors.append("RTL/configuration source inventory changed during evaluation")
+    if not verifier_epoch_unchanged:
+        epoch_errors.append("Formal verifier inputs changed during evaluation")
+    if not metadata_epoch_unchanged:
+        epoch_errors.append("Contract review, receipt index or receipt changed during evaluation")
+    if not proof_epoch_unchanged:
+        epoch_errors.append("Proof input or artifact changed during evaluation")
+    if epoch_errors:
+        accepted.clear()
     pending = sorted(expected - accepted)
     complete = bool(expected) and not pending and not rejected and not scope["missing_generated"]
-    complete &= not review_errors
+    complete &= not review_errors and not epoch_errors
     result = {
         "schema_version": 2, "whole_rtl_signoff": complete, "units": len(scope["units"]),
         "profiles": len(scope["profiles"]), "accepted": sorted(accepted), "pending": pending,
         "rejected": rejected, "missing_generated": scope["missing_generated"],
         "contract_review_errors": review_errors,
+        "evaluation_complete": True, "epoch_errors": epoch_errors,
+        "source_epoch_unchanged": source_epoch_unchanged,
+        "verifier_epoch_unchanged": verifier_epoch_unchanged,
+        "metadata_epoch_unchanged": metadata_epoch_unchanged,
+        "proof_epoch_unchanged": proof_epoch_unchanged,
+        "verifier_inputs": {Path(name).name: digest for name, digest in verifier_inputs.items()},
+        "metadata_inputs": metadata_inputs,
+        "proof_file_inputs": proof_file_inputs,
         "parameter_bindings": {unit["id"]: unit.get("reviewed_bindings", {})
                                for unit in scope["units"]},
         "note": "Coverage bookkeeping is necessary, not proof that a functional specification "
                 "is complete. Contracts and composition assumptions also require review.",
     }
-    (output / "signoff.json").write_text(json.dumps(result, indent=2) + "\n")
+    save_report(result)
     print(f"RTL units={len(scope['units'])}, profiles={len(scope['profiles'])}, "
           f"accepted={len(accepted)}, pending={len(pending)}, rejected={len(rejected)}")
     print("WHOLE RTL SIGNOFF: " + ("PASS" if complete else "INCOMPLETE"))
-    return 0 if complete or not args.signoff else 1
+    return 0 if not epoch_errors and (complete or not args.signoff) else 1
 
 
 HDL_SUFFIXES = {'.sv', '.svh', '.v', '.vh'}

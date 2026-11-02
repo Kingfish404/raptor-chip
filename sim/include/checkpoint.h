@@ -50,6 +50,12 @@ void checkpoint_configure_save(bool has_cycle, uint64_t cycle,
 /* Hook called on each committed instruction. Records PC-triggered save points. */
 void checkpoint_note_commit(word_t committed_pc);
 
+/* Export the same position-independent restore code used by RTL simulation. */
+void checkpoint_export_trampoline(const char *state_file, const char *output_file);
+
+/* Observe each RTL PMP address using its generated element width, not XLEN. */
+word_t *cpu_read_pmpaddr_snapshot(void);
+
 /* Normalize functional SQ storage; false means a split/complex store must drain. */
 bool cpu_read_sq_snapshot_control(uint32_t *valid, uint32_t *committed,
                                   uint8_t *capacity, uint8_t *head);
@@ -87,10 +93,12 @@ bool checkpoint_save_tick(void);
  * is configured; no-op otherwise. */
 void checkpoint_inject_after_reset(void);
 
-/* Deferred fixup invoked from the cycle loop when the FIRST committed
- * instruction reaches ckpt_pc (i.e. the trampoline + mret has retired).
- * Used to overwrite host-visible state that the trampoline itself perturbs
- * (counters, mepc) so the resumed image is exactly the saved snapshot. */
+/* Restore architectural state and seed REF at the final trampoline mret,
+ * before any guest instruction can update memory or CSRs. */
+bool checkpoint_load_reference_tick(word_t committed_pc);
+
+/* Arm relative PMU triggers when the first guest instruction retires.
+ * Architectural state has already been restored at the final mret. */
 bool checkpoint_load_post_trampoline_tick(word_t committed_pc);
 
 /* Returns 1 while the restore trampoline is running and REF has not yet been

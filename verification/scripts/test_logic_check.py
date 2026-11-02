@@ -10,8 +10,9 @@ import unittest
 from unittest.mock import patch
 
 import logic_check as checker
+import prf_formal
 import yosys_common as proof_tools
-from yosys_common import run_yosys
+from yosys_common import run_bounded, run_yosys
 
 
 class EvidenceTest(unittest.TestCase):
@@ -97,7 +98,10 @@ class SbyEvidenceTest(unittest.TestCase):
         executable = self.root / 'third_party/oss-cad-suite/bin/sby'
         executable.parent.mkdir(parents=True)
         executable.write_text(f'#!{sys.executable}\n' + r'''
-import os, pathlib, sys
+import json, os, pathlib, sys
+pathlib.Path('invocation.json').write_text(json.dumps(dict(
+    arguments=sys.argv[1:], yosys=os.environ.get('RAPTOR_YOSYS_REAL'),
+    smtbmc=os.environ.get('RAPTOR_SMTBMC_REAL'))))
 for task in ('prove', 'cover'):
     folder = pathlib.Path('contract_' + task)
     (folder / 'engine_0').mkdir(parents=True)
@@ -111,7 +115,7 @@ if os.environ.get('TEST_PROVE') == 'FAIL':
     print('Assert failed in fixture')
 if os.environ.get('TEST_ERROR'):
     print('ERROR: engine failed')
-sys.exit(1 if os.environ.get('TEST_PROVE') == 'FAIL' else 0)
+sys.exit(int(os.environ.get('TEST_EXIT', 2 if os.environ.get('TEST_PROVE') == 'FAIL' else 0)))
 ''')
         executable.chmod(0o755)
 
@@ -127,27 +131,69 @@ sys.exit(1 if os.environ.get('TEST_PROVE') == 'FAIL' else 0)
         self.assertTrue(row['passed'])
         self.assertEqual(len(traces), 1)
         for settings in (dict(TEST_TRACE=''), dict(TEST_TRACE='missing'),
-                         dict(TEST_COVER='ERROR'), dict(TEST_PROVE='missing')):
+                         dict(TEST_COVER='ERROR'), dict(TEST_PROVE='missing'),
+                         dict(TEST_PROVE=''), dict(TEST_COVER=''), dict(TEST_COVER='missing')):
             with self.subTest(settings=settings):
                 row, _ = self.check(**settings)
                 self.assertFalse(row['passed'])
 
+    def test_shared_runner_preserves_tool_overrides_and_force_option(self):
+        for force in (False, True):
+            with self.subTest(force=force):
+                directory = self.root / f'override-{force}'
+                directory.mkdir()
+                wrapper = directory / 'smtbmc-wrapper'
+                with patch.object(proof_tools, 'ROOT', self.root):
+                    result = proof_tools.run_sby_task(
+                        directory, 5, '/configured/yosys', smtbmc=wrapper, force=force)
+                self.assertEqual(result.returncode, 0)
+                invocation = json.loads((directory / 'invocation.json').read_text())
+                arguments = ['--yosys', str(self.root / 'verification/formal/yosys-rvfi-compat.sh'),
+                             '--smtbmc', str(wrapper)]
+                arguments += ['-f', 'contract.sby'] if force else ['contract.sby']
+                self.assertEqual(invocation['arguments'], arguments)
+                self.assertEqual(invocation['yosys'], '/configured/yosys')
+                self.assertEqual(invocation['smtbmc'],
+                                 str(self.root / 'third_party/oss-cad-suite/bin/yosys-smtbmc'))
+
+    def test_prf_counterexample_requires_status_failure_and_nonempty_trace(self):
+        folder = self.root / 'history_prove'
+        (folder / 'engine_0').mkdir(parents=True)
+        log = self.root / 'history.log'
+        log.write_text('Assert failed in fixture\n')
+        trace = folder / 'engine_0/trace0.vcd'
+        trace.write_text('waveform')
+        self.assertFalse(prf_formal.counterexample(folder, log))
+        for status in ('', ' \n', 'PASS', 'TIMEOUT', 'FAIL'):
+            with self.subTest(status=status):
+                (folder / 'status').write_text(status)
+                self.assertEqual(prf_formal.counterexample(folder, log), status == 'FAIL')
+        trace.write_text('')
+        self.assertFalse(prf_formal.counterexample(folder, log))
+        trace.write_text('waveform')
+        log.write_text('Assert failed in fixture\nERROR: engine failed\n')
+        self.assertFalse(prf_formal.counterexample(folder, log))
+
     def test_counterexample_is_distinct_from_tool_failure_or_empty_trace(self):
         row, _ = self.check(negative=True, TEST_PROVE='FAIL')
         self.assertTrue(row['passed'])
-        for settings in (dict(TEST_TRACE=''), dict(TEST_ERROR='1'), dict(TEST_COVER='ERROR')):
+        for settings in (dict(TEST_TRACE=''), dict(TEST_ERROR='1'), dict(TEST_EXIT='8'),
+                         dict(TEST_EXIT='16'), dict(TEST_COVER='ERROR')):
             # Negative controls have no cover task; its status is irrelevant.
             row, _ = self.check(negative=True, TEST_PROVE='FAIL', **settings)
             self.assertEqual(row['passed'], settings == dict(TEST_COVER='ERROR'))
 
 
 class ToolTimeoutTest(unittest.TestCase):
-    def test_yosys_timeout_cleans_engine_group_and_preserves_timeout_exception(self):
-        with tempfile.TemporaryDirectory(prefix='raptor-yosys-timeout-', dir='/tmp') as name:
-            root = Path(name)
-            executable = root / 'yosys'
-            pid_file = root / 'engine.pid'
-            executable.write_text(f'#!{sys.executable}\n' + r'''
+    def test_timeout_allows_controllers_to_clean_separate_engine_groups(self):
+        for driver in ('bounded', 'yosys', 'sby'):
+            with self.subTest(driver=driver), tempfile.TemporaryDirectory() as name:
+                root = Path(name)
+                executable = root / ('third_party/oss-cad-suite/bin/sby'
+                                     if driver == 'sby' else 'yosys')
+                executable.parent.mkdir(parents=True, exist_ok=True)
+                pid_file = root / 'engine.pid'
+                executable.write_text(f'#!{sys.executable}\n' + r'''
 import os, pathlib, signal, subprocess, sys, time
 child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'],
                          start_new_session=True)
@@ -159,20 +205,48 @@ signal.signal(signal.SIGTERM, stop)
 pathlib.Path(os.environ['TEST_ENGINE_PID']).write_text(str(child.pid))
 time.sleep(30)
 ''')
-            executable.chmod(0o755)
-            log = root / 'run.log'
+                executable.chmod(0o755)
+                log = root / 'run.log'
+                try:
+                    env = dict(RAPTOR_YOSYS_REAL=str(executable), TEST_ENGINE_PID=str(pid_file))
+                    with patch.dict(os.environ, env), patch.object(proof_tools, 'ROOT', root):
+                        if driver == 'bounded':
+                            result = run_bounded([str(executable)], capture_output=True,
+                                                 text=True, timeout=1)
+                            self.assertEqual(result.returncode, 124)
+                            self.assertIn('TIMEOUT:', result.stderr)
+                        else:
+                            with self.assertRaises(subprocess.TimeoutExpired):
+                                if driver == 'yosys':
+                                    run_yosys('check -assert', log, 1)
+                                else:
+                                    proof_tools.run_sby(root, 1, grace=0)
+                            self.assertIn('TIMEOUT:', log.read_text())
+                    self.assertFalse((Path('/proc') / pid_file.read_text()).exists())
+                finally:
+                    if pid_file.exists():
+                        try:
+                            os.killpg(int(pid_file.read_text()), 15)
+                        except ProcessLookupError:
+                            pass
+
+    def test_timeout_terminates_solver_descendants(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-tool-timeout-') as name:
+            pid_file = Path(name) / 'child.pid'
+            program = ("import pathlib, subprocess, sys, time; "
+                       "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+                       "pathlib.Path(sys.argv[1]).write_text(str(child.pid)); time.sleep(30)")
+            result = run_bounded([sys.executable, '-c', program, str(pid_file)],
+                                 capture_output=True, text=True, timeout=1)
+            self.assertEqual(result.returncode, 124)
+            self.assertIn('TIMEOUT:', result.stderr)
+            child = Path('/proc') / pid_file.read_text()
             try:
-                env = dict(RAPTOR_YOSYS_REAL=str(executable), TEST_ENGINE_PID=str(pid_file))
-                with patch.dict(os.environ, env), self.assertRaises(subprocess.TimeoutExpired):
-                    run_yosys('check -assert', log, 1)
-                self.assertIn('TIMEOUT:', log.read_text())
-                self.assertFalse((Path('/proc') / pid_file.read_text()).exists())
-            finally:
-                if pid_file.exists():
-                    try:
-                        os.killpg(int(pid_file.read_text()), 15)
-                    except ProcessLookupError:
-                        pass
+                state = (child / 'stat').read_text().split()[2]
+            except (FileNotFoundError, ProcessLookupError):
+                pass
+            else:
+                self.assertEqual(state, 'Z', 'Timed-out solver descendant is still running')
 
 
 if __name__ == '__main__':

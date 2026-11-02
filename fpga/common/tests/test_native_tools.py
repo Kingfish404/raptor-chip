@@ -25,10 +25,35 @@ build.configure(FPGA / "mlk-cu08-ku15p")
 
 
 class NativeToolsTests(unittest.TestCase):
+    def test_sampling_clock_has_an_exact_integer_timer_divider(self):
+        for clock, sampling, valid in ((25, True, False), (50, True, True),
+                                       (100, True, True), (25, False, True)):
+            with self.subTest(clock=clock, sampling=sampling):
+                command = [sys.executable, str(FPGA / "common/scripts/native_build.py"),
+                           "info", "--board", str(FPGA / "mlk-cu08-ku15p"),
+                           "--clock-mhz", str(clock), "--cm005-bridge", "0"]
+                if sampling:
+                    command.append("--sampling")
+                result = subprocess.run(command, text=True, capture_output=True, check=False)
+                self.assertEqual(result.returncode == 0, valid, result.stderr)
+                if valid:
+                    self.assertEqual(json.loads(result.stdout)["configuration"]["clock_mhz"], clock)
+                else:
+                    self.assertIn("integer 10 MHz timer divider", result.stderr)
+
+    def test_sampling_timebase_matches_the_captured_machine(self):
+        build.configure(FPGA / "mlk-cu08-ku15p")
+        with tempfile.TemporaryDirectory() as temp, patch.object(build, "run"):
+            args = types.SimpleNamespace(xlen=64, clock_mhz=50, sampling=True)
+            build.device_tree(args, Path(temp), 0x80000000)
+            self.assertIn("timebase-frequency = <10000000>",
+                          (Path(temp) / "native.dts").read_text())
+
     def test_cu08_cpu_nic_device_tree_keeps_forwarder_and_packet_geometry(self):
         build.configure(FPGA / "mlk-cu08-ku15p")
         with tempfile.TemporaryDirectory() as temp, patch.object(build, "run"):
-            args = types.SimpleNamespace(xlen=64, clock_mhz=50, cm005_bridge=1, cm005_ethernet=1)
+            args = types.SimpleNamespace(xlen=64, clock_mhz=50, cm005_bridge=1, cm005_ethernet=1,
+                                         sampling=False)
             build.device_tree(args, Path(temp), 0x80000000)
             tree = (Path(temp) / "native.dts").read_text()
             self.assertIn('compatible = "raptor,cm005-forwarder-v1"', tree)
@@ -40,24 +65,36 @@ class NativeToolsTests(unittest.TestCase):
             self.assertIn('litex,tx-slots = <2>', tree)
             self.assertIn('interrupts = <2>', tree)
 
-    def test_source_identity_ignores_chisel_cache_but_tracks_generated_rtl(self):
+    def test_source_identity_tracks_generated_rtl_and_phy_helper_but_not_chisel_cache(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
             rtl = repo / "rtl/generated/decoder.sv"
             cache = repo / "tools/decodegen/target/out/value/cache.json"
+            helper = repo / "fpga/litex/scripts/vivado_retry_timing.tcl"
+            overlay = repo / "fpga/common/sampling/core.patch"
             rtl.parent.mkdir(parents=True)
             cache.parent.mkdir(parents=True)
+            helper.parent.mkdir(parents=True)
             rtl.write_text("module decoder; endmodule\n")
             cache.write_text('{"cache": 1}')
+            helper.write_text("# PHY repair\n")
             with patch.object(build, "REPO", repo), \
                     patch.object(build, "COMMON", repo / "fpga/common"), \
                     patch.object(build, "BOARD", repo / "fpga/board"):
                 before = build.input_hashes()
-                self.assertEqual(list(before), ["rtl/generated/decoder.sv"])
+                self.assertEqual(set(before), {
+                    "rtl/generated/decoder.sv", "fpga/litex/scripts/vivado_retry_timing.tcl"})
                 cache.write_text('{"cache": 2}')
                 self.assertEqual(build.input_hashes(), before)
                 rtl.write_text("module decoder(input wire enable); endmodule\n")
-                self.assertNotEqual(build.input_hashes(), before)
+                generated_changed = build.input_hashes()
+                self.assertNotEqual(generated_changed, before)
+                helper.write_text("# Changed PHY repair\n")
+                self.assertNotEqual(build.input_hashes(), generated_changed)
+                previous = build.input_hashes()
+                overlay.parent.mkdir(parents=True)
+                overlay.write_text("FPGA-only source overlay\n")
+                self.assertNotEqual(build.input_hashes(), previous)
 
     def test_rk_ddr_pins_cover_top_level_ports(self):
         board = FPGA / "rk-xcku5p-f"
@@ -85,7 +122,7 @@ class NativeToolsTests(unittest.TestCase):
                 self.assertEqual(build.PROFILE["device"], device)
                 for xlen in (32, 64):
                     with tempfile.TemporaryDirectory() as temp, patch.object(build, "run"):
-                        args = types.SimpleNamespace(xlen=xlen, clock_mhz=50)
+                        args = types.SimpleNamespace(xlen=xlen, clock_mhz=50, sampling=False)
                         build.device_tree(args, Path(temp), 131072)
                         tree = (Path(temp) / "native.dts").read_text()
                         self.assertIn(build.PROFILE["compatible"], tree)

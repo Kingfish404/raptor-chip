@@ -48,8 +48,11 @@ module tb_wb_mshr;
       .rd_req_cacheable(),
       .*
   );
+  logic [7:0] context_version = 0;
   `define TB_L1D_EXTERNAL_BUS
+  `define TB_L1D_CONTEXT_VERSION context_version
   `include "tb_l1d_defaults.svh"
+  `undef TB_L1D_CONTEXT_VERSION
   `undef TB_L1D_EXTERNAL_BUS
 
   logic ptw_pending = 0, write_pending = 0;
@@ -148,6 +151,8 @@ module tb_wb_mshr;
     end
   end
 
+  int write_count;
+  logic [XLEN-1:0] merged;
   task automatic lookup(input logic [XLEN-1:0] a, input bit miss,
                         input logic [XLEN-1:0] expected = 0, input bit fault = 0);
     @(negedge clock);
@@ -194,12 +199,13 @@ module tb_wb_mshr;
     for (int w = 0; w < Words; w++) beat(id, w, w == bad_word);
     repeat (5) @(negedge clock);
   endtask
-  task automatic store(input logic [XLEN-1:0] a, input logic [XLEN-1:0] d);
+  task automatic store(input logic [XLEN-1:0] a, input logic [XLEN-1:0] d,
+                       input logic [7:0] strobe = 8'({Bytes{1'b1}}));
     @(negedge clock);
     lsu_l1d.wvalid = 1;
     lsu_l1d.waddr = a;
     lsu_l1d.wdata = d;
-    lsu_l1d.walu = 8'({Bytes{1'b1}});
+    lsu_l1d.walu = strobe;
     for (int n = 0; n < 100; n++) begin
       @(posedge clock);
       if (lsu_l1d.wready) begin
@@ -344,15 +350,18 @@ module tb_wb_mshr;
     store(XLEN'('h80008000), XLEN'('haabbccdd));
     store(XLEN'('h80008040), XLEN'('h55667788));
     hold_b = 1;
+    // The reads go first; each dirty victim leaves only when its fill installs.
     for (int i = 0; i < 4; i++) lookup(va(i), 1);
-    if (dut.writeback.count != 2 || responses != 0 || outstanding != 4'b1111)
+    if (dut.writeback.count != 0 || responses != 0 || outstanding != 4'b1111)
       $fatal(
           1,
-          "two dirty victims failed to overlap four misses count=%0d outstanding=%b",
+          "four misses waited for their victims count=%0d outstanding=%b",
           dut.writeback.count,
           outstanding
       );
     for (int i = 0; i < 4; i++) refill(i);
+    if (dut.writeback.count != 2 || responses != 0)
+      $fatal(1, "two dirty victims not queued at installation count=%0d", dut.writeback.count);
     for (int i = 0; i < 4; i++) lookup(va(i), 0, value(pa(i)));
     // Re-read an evicted dirty line while B is held. It can park, but its
     // read must not reach memory until the queued dirty value is published.
@@ -374,41 +383,29 @@ module tb_wb_mshr;
     for (int i = 0; i < 3; i++) warm_translation(i);
     for (int i = 0; i < 3; i++) store(XLEN'('h80008000 + i * 64), XLEN'('h11110000 + i));
     hold_b = 1;
-    lookup(va(0), 1);
-    lookup(va(1), 1);
-    lsu_l1d.rvalid = 1;
-    lsu_l1d.raddr = va(2);
+    for (int i = 0; i < 3; i++) lookup(va(i), 1);
+    if (requests != 3) $fatal(1, "a full writeback queue delayed a refill read");
+    for (int i = 0; i < 3; i++) refill(i);
     repeat (50) begin
       @(negedge clock);
-      if (lsu_l1d.rready || requests != 2 || dut.writeback.count != 2)
+      if (dut.writeback.count != 2 || responses != 0 || dut.g_mshr.misses.installed[2])
         $fatal(1, "full writeback queue failed to backpressure third victim");
     end
     hold_b = 0;
-    lookup(va(2), 1);
-    for (int i = 0; i < 3; i++) refill(i);
-    if (responses != 3 || dut.writeback.count != 0) $fatal(1, "full queue failed to resume");
+    repeat (50) @(negedge clock);
+    if (responses != 3 || dut.writeback.count != 0 || !dut.g_mshr.misses.installed[2])
+      $fatal(1, "full queue failed to resume");
     $display("PASS: RV%0d full writeback queue preserves third victim and resumes after B", XLEN);
 
-    // A store held behind an in-flight read wins the tag port after RLAST.
-    // Installation must then re-probe/capture its newly dirty victim.
+    // A store to another line does not wait for an in-flight read. Its
+    // installation must then re-probe/capture the newly dirty victim.
     init();
     lookup(va(0), 1);
     hold_b = 1;
-    lsu_l1d.wvalid = 1;
-    lsu_l1d.waddr = XLEN'('h80008000);
-    lsu_l1d.wdata = XLEN'('h44332211);
-    lsu_l1d.walu = 8'({Bytes{1'b1}});
-    for (int w = 0; w < Words; w++) begin
-      if (lsu_l1d.wready) $fatal(1, "store overtook an in-flight refill");
-      beat(0, w);
-    end
-    for (int n = 0; n < 100; n++) begin
-      @(posedge clock);
-      if (lsu_l1d.wready) break;
-    end
-    if (!lsu_l1d.wready) $fatal(1, "store failed to resume after RLAST");
-    @(negedge clock);
-    lsu_l1d.wvalid = 0;
+    store(XLEN'('h80008000), XLEN'('h44332211));
+    if (requests != 1 || responses != 0 || outstanding != 4'b0001)
+      $fatal(1, "store to another line waited for an in-flight refill");
+    for (int w = 0; w < Words; w++) beat(0, w);
     repeat (30) @(negedge clock);
     if (dut.writeback.count != 1 || dut.wb_data != XLEN'('h44332211))
       $fatal(1, "MSHR installation overwrote a new dirty victim");
@@ -416,7 +413,146 @@ module tb_wb_mshr;
     hold_b = 0;
     repeat (20) @(negedge clock);
     if (published[0] != XLEN'('h44332211)) $fatal(1, "installation lost dirty victim data");
-    $display("PASS: RV%0d store/refill exclusion and installation-time dirty victim capture", XLEN);
+    $display("PASS: RV%0d store under refill and installation-time dirty victim capture", XLEN);
+
+    // Partial stores to a missing line are answered at once. Their bytes join
+    // the refill, survive a flush, and become dirty words of the new line.
+    init();
+    csr_bcast.dmmu_en = 0;
+    begin
+      logic [XLEN-1:0] line = XLEN'('h80008000);
+      logic [XLEN-1:0] word1 = line + XLEN'(Bytes);
+      logic [XLEN-1:0] merged = value(word1);
+      store(word1 + 1, XLEN'('hab), 8'h01);
+      if (requests != 1 || writes != 0) $fatal(1, "byte store miss used the bus");
+      if (writeback_idle || lsu_l1d.idle) $fatal(1, "store bytes in an MSHR looked idle");
+      store(line, XLEN'('h5a5a0001));
+      store(word1 + 2, XLEN'('hcd), 8'h01);
+      if (requests != 1 || writes != 0) $fatal(1, "same-line store did not join its refill");
+      @(negedge clock);
+      cmu_bcast.flush_pipe = 1;
+      @(negedge clock);
+      cmu_bcast.flush_pipe = 0;
+      merged[15:8] = 8'hab;
+      merged[23:16] = 8'hcd;
+      beat(0, 0);
+      beat(0, 1);
+      // The third store arrives behind the second word's beat.
+      store(word1 + 3, XLEN'('hef), 8'h01);
+      merged[31:24] = 8'hef;
+      lookup(word1, 0, merged);
+      lookup(line, 0, XLEN'('h5a5a0001));
+      lookup(line + XLEN'(2 * Bytes), 1);
+      for (int w = 2; w < Words; w++) beat(0, w);
+      repeat (20) @(negedge clock);
+      lookup(line, 0, XLEN'('h5a5a0001));
+      lookup(word1, 0, merged);
+      lookup(line + XLEN'(2 * Bytes), 0, value(line + XLEN'(2 * Bytes)));
+      if (writes != 0 || !dut.dirty_any) $fatal(1, "merged line did not install dirty");
+      writeback_drain = 1;
+      for (int n = 0; n < 100 && !writeback_idle; n++) @(negedge clock);
+      writeback_drain = 0;
+      if (writes != 2 || published[0] != XLEN'('h5a5a0001))
+        $fatal(1, "dirty words of a merged line wrong writes=%0d", writes);
+    end
+    $display("PASS: RV%0d store miss joins its refill and survives a flush", XLEN);
+
+    // A load from a newer address-space epoch must find those bytes, not read
+    // a second copy of the line that lacks them.
+    init();
+    csr_bcast.dmmu_en = 0;
+    begin
+      logic [XLEN-1:0] merged = value(pa(0));
+      store(pa(0) + 1, XLEN'('h3c), 8'h01);
+      merged[15:8] = 8'h3c;
+      context_version = context_version + 8'd1;
+      lookup(pa(0), 1);
+      if (requests != 1) $fatal(1, "new epoch load read a line that holds store bytes");
+      refill(0);
+      lookup(pa(0), 0, merged);
+    end
+    $display("PASS: RV%0d new epoch load shares the refill holding store bytes", XLEN);
+
+    // A store joins a load's clean refill in the very cycle a flush kills such
+    // refills. Its entry must survive, since it now holds the only copy.
+    init();
+    csr_bcast.dmmu_en = 0;
+    lookup(pa(0), 1);
+    @(negedge clock);
+    lsu_l1d.wvalid = 1;
+    lsu_l1d.waddr = pa(0) + 1;
+    lsu_l1d.wdata = XLEN'('h96);
+    lsu_l1d.walu = 8'h01;
+    cmu_bcast.flush_pipe = 1;
+    for (int n = 0; n < 100 && !dut.store_mshr_fire; n++) begin
+      #1;
+      if (dut.store_mshr_fire) break;
+      @(negedge clock);
+    end
+    if (!dut.store_mshr_fire) $fatal(1, "store did not join the refill under a flush");
+    @(negedge clock);
+    cmu_bcast.flush_pipe = 0;
+    lsu_l1d.wvalid = 0;
+    refill(0);
+    begin
+      logic [XLEN-1:0] merged = value(pa(0));
+      merged[15:8] = 8'h96;
+      lookup(pa(0), 0, merged);
+    end
+    $display("PASS: RV%0d store joining a refill survives a same-cycle flush", XLEN);
+
+    // A store needing a new entry waits for one; only an installation frees it.
+    init();
+    csr_bcast.dmmu_en = 0;
+    for (int i = 0; i < 4; i++) lookup(pa(i), 1);
+    @(negedge clock);
+    lsu_l1d.wvalid = 1;
+    lsu_l1d.waddr = XLEN'('h80018000) + 1;
+    lsu_l1d.wdata = XLEN'('h77);
+    lsu_l1d.walu = 8'h01;
+    repeat (20) begin
+      @(negedge clock);
+      if (lsu_l1d.wready || writes != 0) $fatal(1, "store miss overflowed a full MSHR table");
+    end
+    refill(0);
+    for (int n = 0; n < 100 && !lsu_l1d.wready; n++) @(negedge clock);
+    if (!lsu_l1d.wready) $fatal(1, "store miss failed to take the freed entry");
+    @(negedge clock);
+    lsu_l1d.wvalid = 0;
+    for (int i = 1; i < 4; i++) refill(i);
+    for (int n = 0; n < 100 && requests != 5; n++) @(negedge clock);
+    if (requests != 5 || writes != 0 || !outstanding[0]) $fatal(1, "store miss lost its read");
+    refill(0);
+    begin
+      logic [XLEN-1:0] merged = value(XLEN'('h80018000));
+      merged[15:8] = 8'h77;
+      lookup(XLEN'('h80018000), 0, merged);
+    end
+    $display("PASS: RV%0d store miss waits for a free entry behind installation", XLEN);
+
+    // A walk reads memory, so store bytes still in a refill buffer come first.
+    init();
+    root_requires_publication = 1;
+    store(XLEN'('h80010000 + (XLEN == 64 ? 8 : 1024)) + 1, XLEN'('h01), 8'h01);
+    if (requests != 1 || writes != 0) $fatal(1, "PTE byte store miss used the bus");
+    hold_b = 1;
+    lsu_l1d.rvalid = 1;
+    lsu_l1d.raddr = va(0);
+    lsu_l1d.ralu = XLEN == 64 ? `RAPT_ALU_LD__ : `RAPT_ALU_LW__;
+    repeat (20) begin
+      @(negedge clock);
+      if (dut.ptw_busy || pte_reads != 0) $fatal(1, "walk overtook store bytes in an MSHR");
+    end
+    for (int w = 0; w < Words; w++) beat(0, w);
+    for (int n = 0; n < 100 && dut.writeback.count == 0; n++) @(negedge clock);
+    repeat (20) @(negedge clock);
+    if (dut.writeback.count != 1 || pte_reads != 0) $fatal(1, "PTE read escaped before B");
+    hold_b = 0;
+    lookup(va(0), 1);
+    if (responses != 1) $fatal(1, "wrong merged PTE publication");
+    for (int i = 0; i < 4; i++) if (outstanding[i]) refill(i);
+    lookup(va(0), 0, value(pa(0)));
+    $display("PASS: RV%0d real D-side walk publishes store bytes held in an MSHR", XLEN);
 
     init();
     root_requires_publication = 1;
@@ -481,6 +617,52 @@ module tb_wb_mshr;
         || dut.wb_valid || published[0] != 0 || published[1] != 0)
       $fatal(1, "writeback error lost buffered ownership");
     $display("PASS: RV%0d failed B retains both writeback buffers and blocks coherence", XLEN);
+
+    // Byte store into the failed word: nothing undefined reaches the cache or memory.
+    init();
+    csr_bcast.dmmu_en = 0;
+    write_count = writes;
+    store(XLEN'('h80008001), XLEN'('haa), 8'h01);
+    refill(0, 0);
+    repeat (10) @(negedge clock);
+    if (!writeback_error || writeback_idle || coherent_ready)
+      $fatal(1, "lost store bytes were not reported");
+    writeback_drain = 1;
+    repeat (50) @(negedge clock);
+    if (writes != write_count) $fatal(1, "failed refill word reached memory");
+    $display("PASS: RV%0d byte store into a failed refill word stops the cache", XLEN);
+
+    // Byte store into a good word: only the failed word stays out of the cache.
+    init();
+    csr_bcast.dmmu_en = 0;
+    store(XLEN'('h80008000 + Bytes + 1), XLEN'('haa), 8'h01);
+    refill(0, 0);
+    if (writeback_error) $fatal(1, "good store word reported a loss");
+    merged = value(XLEN'('h80008000 + Bytes));
+    merged[15:8] = 8'haa;
+    lookup(XLEN'('h80008000 + Bytes), 0, merged);
+    // The failed word is not resident: its load refetches, moving the dirty word out first.
+    lookup(XLEN'('h80008000), 1);
+    refill(1, 0);
+    lookup(XLEN'('h80008000), 0, 0, 1);
+    if (writeback_error || writes != 1 || written_addr != XLEN'('h80008000 + Bytes)
+        || written_data != merged)
+      $fatal(1, "good store word did not reach memory before the refetch");
+    $display("PASS: RV%0d failed refill word leaves another word's store intact", XLEN);
+
+    // Stores covering the whole word need no read data, so the failed beat loses nothing.
+    init();
+    csr_bcast.dmmu_en = 0;
+    store(XLEN'('h80008001), XLEN'('haa), 8'h01);
+    store(XLEN'('h80008000), XLEN'('h5a5a1234));
+    refill(0, 0);
+    if (writeback_error) $fatal(1, "whole-word store reported a loss");
+    lookup(XLEN'('h80008000), 0, XLEN'('h5a5a1234));
+    writeback_drain = 1;
+    for (int n = 0; n < 100 && !writeback_idle; n++) @(negedge clock);
+    if (!writeback_idle || writeback_error || published[0] != XLEN'('h5a5a1234))
+      $fatal(1, "whole-word store over a failed beat was not published");
+    $display("PASS: RV%0d whole-word store survives a failed refill beat", XLEN);
     $finish;
   end
   initial begin

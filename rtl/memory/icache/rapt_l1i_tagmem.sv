@@ -1,17 +1,7 @@
 `include "rapt.svh"
 
-// L1I tag + valid memory with dual-mirror register arrays.
-//
-// One cache line stores a single tag per way. Two mirrored copies provide
-// two independent combinational read addresses each cycle:
-//   - raddr_curr  : current fetch line
-//   - raddr_next4 : line containing pc+4
-//
-// This removes the old per-word tag duplication while preserving the
-// parallel hit checks needed by the fetch path.
-//
-// Asynchronous tag reads require distributed storage on FPGA. Valid bits
-// remain distributed flops for fast bulk invalidation.
+// One logical tag array, with current, pc+4 and refill comparison reads.
+// The tag-valid flops own bulk invalidation for both tags and word masks.
 (* keep_hierarchy *)
 module rapt_l1i_tagmem #(
     parameter int L1I_LEN  = `RAPT_L1I_LEN,
@@ -40,23 +30,21 @@ module rapt_l1i_tagmem #(
     input logic inv
 );
   // The current, next-PC and write-tag reads are all combinational.
-  (* ram_style = "distributed" *) logic [TAG_W-1:0] tags_curr[L1I_SIZE];
-  (* ram_style = "distributed" *) logic [TAG_W-1:0] tags_next4[L1I_SIZE];
+  logic [TAG_W-1:0] tags[L1I_SIZE];
   logic [L1I_SIZE-1:0] valid;
 
-  assign rtag_curr = tags_curr[raddr_curr];
+  assign rtag_curr = tags[raddr_curr];
   assign rvalid_curr = valid[raddr_curr];
-  assign rtag_next4 = tags_next4[raddr_next4];
+  assign rtag_next4 = tags[raddr_next4];
   assign rvalid_next4 = valid[raddr_next4];
-  assign wtag_match = valid[waddr_idx] && (tags_curr[waddr_idx] == wtag);
+  assign wtag_match = valid[waddr_idx] && (tags[waddr_idx] == wtag);
 
   always_ff @(posedge clock) begin
     if (reset) begin
       valid <= '0;
     end else begin
       if (wen) begin
-        tags_curr[waddr_idx] <= wtag;
-        tags_next4[waddr_idx] <= wtag;
+        tags[waddr_idx] <= wtag;
         valid[waddr_idx] <= 1'b1;
       end
       if (valid_set) begin

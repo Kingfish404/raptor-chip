@@ -20,6 +20,8 @@
 #include <cpu/thread.h>
 #include <cpu/multidiff.h>
 #include <cpu/diffjournal.h>
+#include <cpu/bbv.h>
+#include <cpu/sample.h>
 #include <memory/paddr.h>
 #include <device/mmio.h>
 #include <device/block-image.h>
@@ -27,6 +29,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+#include <errno.h>
 
 extern char *btb_file;
 extern long long int max_inst;
@@ -62,6 +65,16 @@ static void welcome()
 void sdb_set_batch_mode();
 static bool batch_requested;
 static bool hostfwd_requested;
+static const char *bbv_path;
+static uint64_t bbv_interval = 10000000;
+static word_t bbv_start, bbv_stop;
+static bool bbv_has_start, bbv_has_stop;
+static const char *sample_points, *sample_directory;
+static uint64_t sample_bbv_every;
+static word_t bbv_user_satp, bbv_user_tp;
+static bool bbv_has_user_satp, bbv_has_user_tp;
+static const char *bbv_start_marker;
+static uint64_t bbv_length;
 #ifdef CONFIG_HAS_NET
 int net_add_hostfwd(const char *spec);
 #endif
@@ -309,6 +322,17 @@ void usage(int argc, char *argv[])
   printf("      --sig=SPEC           dump RISCOF signature (SPEC=<hex_begin>-<hex_end>:<path>)\n");
   printf("  -h, --help               display this help and exit\n");
   printf("      --describe          print compiled machine capabilities as JSON and exit\n");
+  printf("      --bbv=FILE          create single-hart retired-instruction BBV JSONL\n");
+  printf("      --bbv-interval=N    instructions per interval (default 10000000)\n");
+  printf("      --bbv-start-pc=PC   begin before the first successful execution of PC\n");
+  printf("      --bbv-stop-pc=PC    stop execution at PC (exclusive profile boundary)\n");
+  printf("      --bbv-start-marker=TEXT  start after an exact UART line (maximum 255 bytes)\n");
+  printf("      --bbv-length=N      stop execution after N profiled retirements\n");
+  printf("      --sample-points=FILE  sorted absolute retired-instruction counts, one per line\n");
+  printf("      --sample-directory=DIR  create architectural snapshots; exit after the last\n");
+  printf("      --sample-bbv-every=N  capture every N interior BBV boundaries in one pass\n");
+  printf("      --bbv-user-satp=ROOT count progress only in this user address space\n");
+  printf("      --bbv-user-tp=TP     restrict user progress to one Linux TLS thread\n");
   printf("\n");
   print_nemu_memory_map(stdout);
 }
@@ -329,6 +353,17 @@ static int parse_args(int argc, char *argv[])
       {"disk-mode", required_argument, NULL, 284},
       {"describe", no_argument, NULL, 285},
       {"hostfwd", required_argument, NULL, 286},
+      {"bbv", required_argument, NULL, 287},
+      {"bbv-interval", required_argument, NULL, 288},
+      {"bbv-start-pc", required_argument, NULL, 289},
+      {"bbv-stop-pc", required_argument, NULL, 290},
+      {"sample-points", required_argument, NULL, 291},
+      {"sample-directory", required_argument, NULL, 292},
+      {"bbv-start-marker", required_argument, NULL, 293},
+      {"bbv-length", required_argument, NULL, 294},
+      {"sample-bbv-every", required_argument, NULL, 295},
+      {"bbv-user-satp", required_argument, NULL, 296},
+      {"bbv-user-tp", required_argument, NULL, 297},
       {"sdcard", required_argument, NULL, 258},
       {"smp", required_argument, NULL, 260},
       {"smp-backend", required_argument, NULL, 261},
@@ -371,6 +406,49 @@ static int parse_args(int argc, char *argv[])
   {
     switch (o)
     {
+    case 293:
+      if (!*optarg || strlen(optarg) >= 256 || strchr(optarg, '\n') || strchr(optarg, '\r')) {
+        fprintf(stderr, "Invalid BBV start marker\n");
+        exit(1);
+      }
+      bbv_start_marker = optarg;
+      break;
+    case 291:
+      sample_points = optarg;
+      break;
+    case 292:
+      sample_directory = optarg;
+      break;
+    case 287:
+      bbv_path = optarg;
+      break;
+    case 288:
+    case 289:
+    case 290:
+    case 294:
+    case 295:
+    case 296:
+    case 297: {
+      char *end;
+      errno = 0;
+      uint64_t value = strtoull(optarg, &end, 0);
+      bool is_pc = o == 289 || o == 290;
+      bool is_context = o == 296 || o == 297;
+      if (errno || !*optarg || *optarg == '-' || *end ||
+          (!is_pc && !is_context && !value) ||
+          ((is_pc || is_context) && value != (word_t)value) || (is_pc && (value & 1))) {
+        fprintf(stderr, "Invalid BBV interval or instruction PC: %s\n", optarg);
+        exit(1);
+      }
+      if (o == 288) bbv_interval = value;
+      if (o == 294) bbv_length = value;
+      if (o == 295) sample_bbv_every = value;
+      if (o == 296) { bbv_user_satp = value; bbv_has_user_satp = true; }
+      if (o == 297) { bbv_user_tp = value; bbv_has_user_tp = true; }
+      if (o == 289) { bbv_start = value; bbv_has_start = true; }
+      if (o == 290) { bbv_stop = value; bbv_has_stop = true; }
+      break;
+    }
     case 286:
 #ifdef CONFIG_HAS_NET
       if (net_add_hostfwd(optarg) == 0) {
@@ -809,6 +887,41 @@ void init_monitor(int argc, char *argv[])
 #endif
 
   /* Set random seed. */
+  if (!bbv_path && (bbv_has_start || bbv_has_stop || bbv_interval != 10000000 ||
+                    bbv_start_marker || bbv_length || sample_bbv_every ||
+                    bbv_has_user_satp || bbv_has_user_tp)) {
+    fprintf(stderr, "BBV interval/PC options require --bbv=FILE\n");
+    exit(1);
+  }
+  Assert(!bbv_has_user_tp || bbv_has_user_satp, "A BBV user thread requires --bbv-user-satp");
+  if (bbv_has_user_satp)
+    nemu_bbv_set_user_scope(bbv_user_satp, bbv_has_user_tp, bbv_user_tp);
+  // Reject here so configurations that cannot sample still compile the
+  // sampling code as reachable; -Wnonnull otherwise sees its files as NULL.
+  bool sample_capture = sample_points || sample_directory || sample_bbv_every;
+  bool workload_sampling = bbv_path || sample_capture;
+  (void)sample_capture;
+  (void)workload_sampling;
+#ifndef CONFIG_TIMER_CYCLE
+  Assert(!workload_sampling, "Workload sampling requires instruction-based guest time");
+#endif
+#ifdef CONFIG_MEM_RANDOM
+  Assert(!workload_sampling, "Workload sampling requires deterministic initial RAM");
+#endif
+#if defined(CONFIG_RVE) || !defined(CONFIG_RV_F) || !defined(CONFIG_RV_D)
+  Assert(!sample_capture, "Sample capture requires 32 GPRs and F/D");
+#endif
+#ifdef CONFIG_HAS_SDCARD
+  Assert(!sample_capture, "Sample capture does not serialize SD-card state");
+#endif
+  nemu_bbv_configure(bbv_path, bbv_interval, bbv_has_start, bbv_start,
+                     bbv_has_stop, bbv_stop, bbv_start_marker, bbv_length);
+  if (sample_bbv_every) {
+    Assert(!sample_points, "Choose explicit sample points or periodic BBV capture");
+    nemu_sample_configure_bbv(sample_directory, sample_bbv_every);
+  } else {
+    nemu_sample_configure(sample_points, sample_directory);
+  }
   init_rand();
 
   /* Open the log file. */

@@ -326,36 +326,11 @@ static uint64_t reference(unsigned op, unsigned bits, uint64_t a, uint64_t b, bo
 }
 
 #include "test_memory.h"
-#include "test_muldiv_top.h"
-#include "test_mask_top.h"
-#include "test_carry_top.h"
-#include "test_wide_top.h"
-#include "test_fixed_top.h"
-#include "test_reduce_top.h"
-#include "test_move_top.h"
-#include "test_scalar_move_top.h"
-#include "test_index_top.h"
-#include "test_scan_top.h"
-#include "test_prefix_top.h"
-#include "test_iota_top.h"
-#include "test_compress_top.h"
-#include "test_slide_top.h"
-#include "test_gather_top.h"
-#include "test_fp_top.h"
-#include "test_fp_mixed_top.h"
-#include "test_fp_divsqrt_top.h"
-#include "test_fp_misc_top.h"
-#include "test_fp_wide_top.h"
-#include "test_fp_convert_top.h"
-#include "test_int_fp_top.h"
-#include "test_estimate_top.h"
-#include "test_transfer_top.h"
-#include "test_fp_reduce_top.h"
-#include "test_encoding_top.h"
-#include "test_geometry_top.h"
-#include "test_catalog_top.h"
-#include "test_context_top.h"
-#include "test_store_completion_top.h"
+#include "test_integer.h"
+
+#include "test_float.h"
+
+#include "test_platform.h"
 
 int main(int argc, char** argv) {
     Verilated::commandArgs(argc, argv);

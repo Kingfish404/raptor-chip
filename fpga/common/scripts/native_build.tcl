@@ -39,6 +39,12 @@ if {$with_ddr} {
     source [file join $sources create_ip.tcl]
     read_xdc [file join $sources ddr4.xdc]
 }
+if {$with_sampling} {
+    create_ip -name jtag_axi -vendor xilinx.com -library ip -module_name rapt_replay_jtag
+    set_property -dict [list CONFIG.PROTOCOL {0} CONFIG.M_AXI_DATA_WIDTH {64} \
+        CONFIG.M_AXI_ADDR_WIDTH {32} CONFIG.M_AXI_ID_WIDTH {4}] [get_ips rapt_replay_jtag]
+    generate_target all [get_ips rapt_replay_jtag]
+}
 update_compile_order -fileset sources_1
 if {$action eq "ip-check"} {
     if {$with_ddr} {
@@ -90,6 +96,11 @@ if {$with_ethernet} {source [file join $sources ethernet_cdc.tcl]}
 place_design -directive Explore
 phys_opt_design
 route_design -directive Explore
+if {$with_ddr} {
+    source [file join $sources vivado_retry_timing.tcl]
+    # A smaller route-goal margin preserves setup headroom at high DDR rates.
+    raptor_fix_phy_min_skew {ddr_subsystem/mig/*} 25
+}
 write_checkpoint -force [file join $out routed.dcp]
 report_utilization -hierarchical -file [file join $out utilization.rpt]
 report_utilization -file [file join $out utilization_summary.rpt]
@@ -97,14 +108,21 @@ report_timing_summary -check_timing_verbose -report_unconstrained -file [file jo
 report_cdc -details -file [file join $out cdc.rpt]
 report_drc -file [file join $out drc.rpt]
 report_route_status -file [file join $out route_status.rpt]
-if {$with_ethernet} {
+if {$with_ethernet || $with_cm005_bridge} {
     set skew_report [report_bus_skew -return_string]
     set fh [open [file join $out bus_skew.rpt] w]
     puts $fh $skew_report
     close $fh
-    if {[string first "VIOLATED" $skew_report] >= 0} {error "Native Ethernet Gray bus skew failed"}
+    if {[string first "VIOLATED" $skew_report] >= 0} {error "Native CDC bus skew failed"}
 }
 
+# Pulse-width summaries also include PHY min/max skew checks.
+set fh [open [file join $out timing_summary.rpt] r]
+set routed_timing [read $fh]
+close $fh
+if {[string first "All user specified timing constraints are met." $routed_timing] < 0} {
+    error "Routed timing summary failed setup/hold/pulse-width or skew checks"
+}
 # Fail closed: both setup and hold need constrained paths and nonnegative slack.
 foreach kind {max min} {
     set paths [get_timing_paths -quiet -delay_type $kind -max_paths 1]

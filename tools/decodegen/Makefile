@@ -2,6 +2,8 @@ ESPRESSO_BIN_DIR ?= $(abspath ../../third_party/espresso/build)
 export PATH := $(ESPRESSO_BIN_DIR):$(PATH)
 
 BUILD_DIR = ../../rtl/generated
+VERIBLE_FORMAT ?= verible-verilog-format
+VERIBLE_FLAGS ?= $(abspath ../../.verible-format.flags)
 
 help: ## Show this help message
 	@echo "Usage: make <target> [VAR=value ...]"
@@ -27,6 +29,8 @@ test: ## Run Chisel tests
 verilog: ## Generate SystemVerilog decoders
 	mkdir -p $(BUILD_DIR)
 	sbt "runMain Elaborate --target-dir $(BUILD_DIR)"
+	$(VERIBLE_FORMAT) --flagfile="$(VERIBLE_FLAGS)" --inplace \
+		$(BUILD_DIR)/rapt_idu_decoder.sv $(BUILD_DIR)/rapt_idu_decoder_c.sv
 
 elaborate-help: ## Show Chisel elaboration help
 	sbt "runMain Elaborate --help"

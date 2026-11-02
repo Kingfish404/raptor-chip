@@ -21,22 +21,56 @@ module rapt_native_soc #(
     output logic [3:0] peripheral_wstrb,
     input logic [31:0] peripheral_rdata,
     input logic peripheral_irq,
+`ifdef RAPT_SAMPLING
+    axi4_if.slave replay,
+`endif
     axi4_if.master ddr
 );
   axi4_if #(.XLEN(XLEN)) cpu ();
   logic uart_irq;
+  logic bus_idle;
+  logic core_reset;
+  logic [31:1] core_irq;
+`ifdef RAPT_SAMPLING
+  axi4_if #(.XLEN(XLEN)) memory_bus ();
+  logic replay_reset;
+  rapt_sample_if #(.XLEN(XLEN)) sample ();
+  rapt_sample_bridge #(
+      .XLEN(XLEN),
+      .BuildId(`NATIVE_SOURCE_ID)
+  ) sampling (
+      .clk,
+      .reset,
+      .bus_idle,
+      .writeback_error,
+      .cpu_reset(replay_reset),
+      .host(replay),
+      .cpu,
+      .mem(memory_bus),
+      .sample
+  );
+  assign core_reset = reset || replay_reset;
+  // Native captures use the virt UART's PLIC source 10.
+  assign core_irq = {21'b0, uart_irq, 9'b0};
+`else
+  assign core_reset = reset;
+  assign core_irq = {29'b0, WithPeripheral && peripheral_irq, uart_irq};
+`endif
   rapt #(
       .XLEN(XLEN)
   ) core (
       .clock(clk),
-      .reset,
+      .reset(core_reset),
+`ifdef RAPT_SAMPLING
+      .sample,
+`endif
       .writeback_error_o(writeback_error),
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
       .external_write_last_i('0),
       .io_interrupt(1'b0),
-      .ext_irq_i({29'b0, WithPeripheral && peripheral_irq, uart_irq}),
+      .ext_irq_i(core_irq),
       .jtag_trst_n(1'b0),
       .jtag_tms(1'b1),
       .jtag_tdi(1'b0),
@@ -83,7 +117,11 @@ module rapt_native_soc #(
   ) bus (
       .clk,
       .reset,
+`ifdef RAPT_SAMPLING
+      .uart_rx(1'b1),
+`else
       .uart_rx,
+`endif
       .uart_tx,
       .uart_irq,
       .peripheral_rd,
@@ -93,7 +131,12 @@ module rapt_native_soc #(
       .peripheral_wdata,
       .peripheral_wstrb,
       .peripheral_rdata,
-      .cpu,
+`ifdef RAPT_SAMPLING
+      .cpu(memory_bus),
+`else
+      .cpu(cpu),
+`endif
+      .idle_o(bus_idle),
       .ddr
   );
 endmodule

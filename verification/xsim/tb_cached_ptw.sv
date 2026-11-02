@@ -3,8 +3,8 @@ module tb_cached_ptw;
   localparam int XLEN = `RAPT_XLEN;
   logic clock = 0;
   always #5 clock = ~clock;
-  logic reset = 1, flush = 0;
-  logic [1:0] request = 0, kill = 0, store_req = 0, arvalid, done, fault, busy;
+  logic reset = 1, flush = 0, sfence_valid = 0;
+  logic [1:0] request = 0, kill = 0, store_req = 0, arvalid, done, fault, access_fault, busy;
   logic [1:0] pending = 0, rvalid = 0;
   logic hold_response = 0;
   logic [XLEN-1:0] va[2], araddr[2], rdata[2];
@@ -24,6 +24,7 @@ module tb_cached_ptw;
       .clock(clock),
       .reset(reset),
       .flush(flush),
+      .sfence_valid(sfence_valid),
       .req_i(l2req),
       .ready_o(ready),
       .rsp_o(l2rsp)
@@ -35,7 +36,7 @@ module tb_cached_ptw;
         .clock(clock),
         .reset(reset),
         .req_valid(request[p]),
-        .kill(kill[p] || flush),
+        .kill(kill[p] || flush || sfence_valid),
         .vaddr(va[p]),
         .satp_ppn(root[p]),
         .asid(asid[p]),
@@ -53,6 +54,7 @@ module tb_cached_ptw;
         .bus_rdata(rdata[p]),
         .done(done[p]),
         .fault(fault[p]),
+        .access_fault(access_fault[p]),
         .result_ptag(ptag[p]),
         .result_vtag(vtag[p]),
         .result_pte(flags[p]),
@@ -96,16 +98,19 @@ module tb_cached_ptw;
     @(negedge clock);
     request[p] = 0;
   endtask
-  task automatic finish(input int p, input logic expect_fault);
+  task automatic finish(input int p, input logic expect_fault, input logic expect_access = 0);
     int cycles;
     cycles = 0;
-    while (!done[p] && !fault[p] && cycles < 100) begin
+    while (!done[p] && !fault[p] && !access_fault[p] && cycles < 100) begin
       tick();
       cycles++;
     end
     check(cycles < 100, "translation timeout");
-    check(fault[p] == expect_fault && done[p] != expect_fault, "wrong translation outcome");
-    if (!expect_fault) begin
+    check(
+        fault[p] == expect_fault && access_fault[p] == expect_access
+        && done[p] == !(expect_fault || expect_access),
+        "wrong translation outcome");
+    if (!expect_fault && !expect_access) begin
       check(vtag[p] == va[p][XLEN-1:12], "wrong accepted virtual page");
 `ifdef RAPT_RV64
       check(ptag[p] == (XLEN - 10)'('h40000 | va[p][29:12]), "wrong superpage PPN");
@@ -116,11 +121,12 @@ module tb_cached_ptw;
     tick();
   endtask
   task automatic translate(input int p, input logic [XLEN-1:0] addr, input logic store_access,
-                           input logic expect_fault, input int expected_reads);
+                           input logic expect_fault, input int expected_reads,
+                           input logic expect_access = 0);
     int before_reads;
     before_reads = reads[p];
     start(p, addr, store_access);
-    finish(p, expect_fault);
+    finish(p, expect_fault, expect_access);
     check(reads[p] - before_reads == expected_reads, "wrong number of page-table reads");
   endtask
   initial begin
@@ -133,6 +139,7 @@ module tb_cached_ptw;
     tick();
     tick();
     reset = 0;
+    while (ready == 0) tick();
     translate(0, 'h12345000, 0, 0, 1);
     translate(1, 'h12345000, 1, 0, 0);  // I-side walk warms data-side translation.
     translate(1, 'h12445000, 0, 0, 1);  // Same low VPN index evicts first page.
@@ -141,6 +148,14 @@ module tb_cached_ptw;
     translate(1, 'h12345000, 0, 0, 1);
     root[1] = 2;
     translate(1, 'h12345000, 0, 0, 1);
+    // An unsupported root faults before any bus read. A valid non-leaf
+    // pointing outside PA width faults before the second PTE read.
+    root[0] = `RAPT_CSR_SATP_PPN_W'(1) << (`RAPT_PADDR_BITS - 12);
+    translate(0, 'h12352000, 0, 0, 0, 1);
+    root[0] = 1;
+    leaf = (XLEN'(1) << (`RAPT_PADDR_BITS - 2)) | XLEN'(1);
+    translate(0, 'h12353000, 0, 0, 1, 1);
+    leaf = XLEN'((64'h40000 << 10) | 64'hcf);
     // A read may cache D=0, but a later store must fault without a walk.
     leaf = XLEN'((64'h40000 << 10) | 64'h4f);
     translate(0, 'h12346000, 0, 0, 1);
@@ -185,6 +200,25 @@ module tb_cached_ptw;
     end
     check(!busy[0], "cancelled walk did not drain");
     translate(0, 'h1234a000, 0, 0, 1);
+    // An SFENCE also cancels a walk accepted before the fence. Its delayed
+    // response must drain without filling either level or completing the L1.
+    hold_response = 1;
+    start(0, 'h12350000, 0);
+    while (!pending[0]) tick();
+    @(negedge clock);
+    sfence_valid = 1;
+    tick();
+    check(busy[0], "SFENCE abandoned an accepted read");
+    @(negedge clock);
+    sfence_valid = 0;
+    while (ready == 0) tick();
+    hold_response = 0;
+    repeat (8) begin
+      tick();
+      check(!done[0] && !fault[0], "pre-SFENCE walk completed");
+    end
+    check(!busy[0], "pre-SFENCE walk did not drain");
+    translate(0, 'h12350000, 0, 0, 1);
     // Cancel a lookup; its registered response must not complete a new owner.
     start(0, 'h1234a000, 0);
     kill[0] = 1;
@@ -202,7 +236,27 @@ module tb_cached_ptw;
     check(!done[0], "flushed pending fill completed");
     @(negedge clock);
     flush = 0;
+    while (ready == 0) tick();
     translate(0, 'h1234e000, 0, 0, 1);
+    // A SATP write serializes the pipeline and cancels an old-root walk.
+    // Delayed data must not refill the new address space after that barrier.
+    hold_response = 1;
+    start(0, 'h12351000, 0);
+    while (!pending[0]) tick();
+    @(negedge clock);
+    flush = 1;
+    root[0] = 5;
+    tick();
+    @(negedge clock);
+    flush = 0;
+    while (ready == 0) tick();
+    hold_response = 0;
+    repeat (8) begin
+      tick();
+      check(!done[0] && !fault[0], "pre-SATP walk completed");
+    end
+    translate(0, 'h12351000, 0, 0, 1);
+    root[0] = 1;
     // Live CSR inputs may change after acceptance; fill ownership must stay
     // with the captured ASID/root, even when the return is delayed.
     hold_response = 1;
@@ -234,6 +288,7 @@ module tb_cached_ptw;
     tick();
     @(negedge clock);
     flush = 0;
+    while (ready == 0) tick();
     translate(0, 'h1234d000, 0, 0, 1);
     $display(
         "PASS: cached PTWs cross-fill, permissions, collisions, faults, cancellation and concurrent requests");

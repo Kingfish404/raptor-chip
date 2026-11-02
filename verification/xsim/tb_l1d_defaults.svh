@@ -6,7 +6,12 @@
 assign lsu_l1d.rcontext = '{mmu_en: csr_bcast.dmmu_en,
     eff_priv: (csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv) ? csr_bcast.mpp : csr_bcast.priv,
     sum: csr_bcast.sum, mxr: csr_bcast.mxr, pbmte: csr_bcast.menvcfg_pbmte,
-    asid: csr_bcast.satp_asid, version: 8'd0};
+    asid: csr_bcast.satp_asid,
+`ifdef TB_L1D_CONTEXT_VERSION
+    version: `TB_L1D_CONTEXT_VERSION};
+`else
+    version: 8'd0};
+`endif
 assign lsu_l1d.rcontext_b = lsu_l1d.rcontext;
 assign exu_l1d.mem_context = lsu_l1d.rcontext;
 

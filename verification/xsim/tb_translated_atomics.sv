@@ -30,7 +30,14 @@ module tb_translated_atomics;
   end
   rapt_pkg::completion_t local_fp_wake[rapt_pkg::CompletionPorts];
   assign local_fp_wake = '{default: '0};
-  rapt_lsu dut (
+  `include "tb_lsu_integer_reads.svh"
+rapt_lsu #(
+      .LateOperands(1'b1)
+  ) dut (
+      .int_source_regs(test_int_sources),
+      .operand_read_address(test_operand_address),
+      .operand_read_value(test_operand_value),
+      .operand_read_valid(test_operand_valid),
       .wb_accept(1'b1),
       .*
   );

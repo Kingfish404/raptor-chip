@@ -57,6 +57,7 @@ module rapt_l1d_tags #(
     input logic l1d_valid_u,
     input logic line_update = 1'b0,
     input logic [L1D_LINE_SIZE-1:0] line_mask = '0,
+    input logic [L1D_LINE_SIZE-1:0] line_dirty_mask = '0,
     input logic l1d_inv_all_ways,
     input logic [L1dTagW-1:0] l1d_tag_u,
     input logic [L1D_LEN-1:0] l1d_idx,
@@ -364,7 +365,7 @@ module rapt_l1d_tags #(
       else valid_write_data[way] = word_bit;
       if (!WriteBack) dirty_write_data[way] = '0;
       else if (!l1d_valid_u) dirty_write_data[way] = dirty_base;
-      else if (line_update) dirty_write_data[way] = update_dirty ? line_mask : '0;
+      else if (line_update) dirty_write_data[way] = line_dirty_mask;
       else if (!update_tag_match[way]) dirty_write_data[way] = update_dirty ? word_bit : '0;
       else dirty_write_data[way] = dirty_base | (update_dirty ? word_bit : '0);
     end
