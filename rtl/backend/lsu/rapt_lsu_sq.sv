@@ -1026,9 +1026,13 @@ module rapt_lsu_sq #(
   // COMMIT_ORDER: if a store commit coincides with a flush (AMO/f_time), the
   // store being retired is the current commit-boundary entry and survives the
   // speculative rollback.
+`ifdef RAPT_SVA_ACTIVE
+  wire sq_commit_owner_matches = sq_valid[sq_cmt] && !sq_committed[sq_cmt]
+      && sq_dest[sq_cmt] == rou_lsu.dest;
+`endif
   `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_COMMIT_ON_FLUSH_MATCH,
                   (sq_commit_fire && (cmu_bcast.flush_pipe || cmu_bcast.fence_time)),
-                  (sq_valid[sq_cmt] && !sq_committed[sq_cmt] && sq_dest[sq_cmt] == rou_lsu.dest))
+                  sq_commit_owner_matches)
 `ifdef RAPT_RV64
   `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_FSD_DATA_ALIAS, sq_alloc_fire && exu_ioq_bcast.sq_fp64,
                   exu_ioq_bcast.sq_wdata == exu_ioq_bcast.sq_wdata64)
@@ -1038,7 +1042,7 @@ module rapt_lsu_sq #(
   // and belong to the store the ROB is retiring (stores commit in order, so
   // no CAM is needed -- this assertion proves that assumption holds).
   `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_COMMIT_ENTRY_MATCH, (sq_commit_fire),
-                  (sq_valid[sq_cmt] && !sq_committed[sq_cmt] && sq_dest[sq_cmt] == rou_lsu.dest))
+                  sq_commit_owner_matches)
 
   // COMMIT_ORDER: the alloc-time vaddr of the entry being committed must
   // describe the same word as the ROB's durable copy.  With DMMU enabled
@@ -1051,9 +1055,11 @@ module rapt_lsu_sq #(
           == rou_lsu.sq_vaddr[PageOffBits-1:WordOffBits])
       : (sq_vaddr[sq_cmt][XLEN-1:WordOffBits]
           == rou_lsu.sq_vaddr[XLEN-1:WordOffBits]);
-  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_COMMIT_ADDR_PAGE_OFFSET, (sq_commit_fire && !$isunknown
-                  (rou_lsu.sq_vaddr) && !$isunknown(sq_vaddr[sq_cmt])),
-                  sq_commit_addr_page_offset_ok)
+`ifdef RAPT_SVA_ACTIVE
+  wire sq_commit_addresses_known = ((^rou_lsu.sq_vaddr) !== 1'bx) && ((^sq_vaddr[sq_cmt]) !== 1'bx);
+`endif
+  `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_COMMIT_ADDR_PAGE_OFFSET,
+                  sq_commit_fire && sq_commit_addresses_known, sq_commit_addr_page_offset_ok)
 
   // HANDSHAKE: the SQ drain target slot must be a valid committed entry.
   `RAPT_SVA_IMPLY(clock, reset, LSU_RETRY_NOT_COMPLETION, exu_lsu.rretry,

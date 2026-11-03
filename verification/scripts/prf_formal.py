@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from formal_scope import preset_xlens
 from yosys_common import ROOT, read_status, run_bounded, run_sby_task, run_yosys, sha
 
 
@@ -788,6 +789,7 @@ def prove_main():
     if not real_yosys:
         parser.error('Yosys executable is missing')
     sources = [DUT, ROOT / 'rtl/rapt_pkg.sv', HARNESS, Path(__file__),
+               Path(__file__).with_name('formal_scope.py'),
                Path(__file__).with_name('yosys_common.py'), FORMAL / 'yosys-rvfi-compat.sh',
                FORMAL / 'abc-read-blif-compat.sh']
     sources += sorted((ROOT / 'rtl/include').rglob('*.svh'))
@@ -990,7 +992,8 @@ def prove_main():
     # Native preset reset/x0 bindings, then a parameter matrix covering dormant
     # and production late ports, odd writer counts and non-power-of-two storage.
     cases = [(p, x, l, 'zero', None, None, True, False)
-             for p in args.presets for x in (32, 64) for l in (0, 1)]
+             for p in args.presets for x in preset_xlens(
+                 ROOT / 'rtl/configs' / p / 'rapt_config.svh') for l in (0, 1)]
     shapes = [(4, 8, 2, 2, 3, 3), (4, 8, 1, 1, 1, 0),
               (32, 64, 2, 2, 6, 3), (32, 96, 3, 3, 6, 3), (32, 96, 8, 8, 6, 3)]
     cases += [('formal', x, l, 'data', s, None, True, False)
@@ -1013,7 +1016,8 @@ def prove_main():
             native = list(pool.map(lambda binding: discover(
                 binding[0], binding[1], output / 'discovery'
                 / f'{binding[0]}-rv{binding[1]}'),
-                [(p, x) for p in args.presets for x in (32, 64)]))
+                [(p, x) for p in args.presets for x in preset_xlens(
+                    ROOT / 'rtl/configs' / p / 'rapt_config.svh')]))
         result['native_bindings'] = native
         # Compile every selected preset directly: equal dimensions do not
         # silently grant reuse across different configuration macros.

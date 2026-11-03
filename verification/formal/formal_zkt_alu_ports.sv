@@ -69,6 +69,8 @@ module formal_zkt_alu_ports (
       .csr_bcast(csr),
       .exu_csr(exu0),
       .wb_alu_csr(system0)
+  ,
+      .csr_read_addr('0)
   );
   rapt_ieu_pipe_alu_csr system_right (
       .cmu_bcast(cmu),
@@ -76,5 +78,7 @@ module formal_zkt_alu_ports (
       .csr_bcast(csr),
       .exu_csr(exu1),
       .wb_alu_csr(system1)
+  ,
+      .csr_read_addr('0)
   );
 endmodule

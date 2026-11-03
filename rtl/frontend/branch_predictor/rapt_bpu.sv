@@ -40,11 +40,11 @@ module rapt_bpu #(
 
     ifu_bpu_if.in ifu_bpu,
     idu_bpu_if.in idu_bpu,
-    input logic execute_recover = 1'b0,
-    input logic preserve_fetch = 1'b0,
-    input logic [`RAPT_PC_BITS_OF(XLEN)-1:1] decode_target_q = '0,
-    input logic [GHR_LEN-1:0] execute_ghr = '0,
-    input logic [PHR_LEN-1:0] execute_phr = '0,
+    input logic execute_recover,
+    input logic preserve_fetch,
+    input logic [`RAPT_PC_BITS_OF(XLEN)-1:1] decode_target_q,
+    input logic [GHR_LEN-1:0] execute_ghr,
+    input logic [PHR_LEN-1:0] execute_phr,
     output logic [GHR_LEN-1:0] snapshot_ghr,
     output logic [PHR_LEN-1:0] snapshot_phr,
 

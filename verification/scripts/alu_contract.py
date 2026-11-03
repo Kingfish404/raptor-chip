@@ -18,6 +18,7 @@ from formal_scope import (
     binding_key,
     canonical_rtlil,
     inventory,
+    preset_xlens,
 )
 from prf_formal import audit_frontend, audit_model
 from yosys_common import ROOT, run_bounded, sha
@@ -310,9 +311,13 @@ def prove_main():
             raise SystemExit('Undetected ALU mutation')
         return
     cases = []
+    xlens = {preset: preset_xlens(ROOT / 'rtl/configs' / preset / 'rapt_config.svh')
+             for preset in presets}
     for index, values in enumerate(itertools.product(presets, (32, 64), ('dff', 'sram'),
                                                       (0, 1), (0, 1), (False, True))):
         p, x, memory, rare, lutram, synthesis = values
+        if x not in xlens[p]:
+            continue
         cases.append(dict(id=f'alu-{index:04d}', preset=p, xlen=x, memory=memory,
                           rare=rare, lutram=lutram, synthesis=synthesis))
     manifest = output / 'commands.json'

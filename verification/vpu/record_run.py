@@ -35,6 +35,7 @@ files.update((root / "rtl/backend/feu/fpu").glob("*.sv"))
 files.update((root / "rtl/include").rglob("*.svh"))
 files.add(root / "rtl/configs/default/rapt_config.svh")
 files.add(root / "rtl/sram/rapt_sram_1rw.sv")
+files.add(root / "rtl/rapt_pkg.sv")
 for path in Path(__file__).resolve().parent.iterdir():
     if path.is_file() and (path.suffix in {".cpp", ".h", ".sv", ".py", ".vlt"}
                            or path.name == "Makefile"):

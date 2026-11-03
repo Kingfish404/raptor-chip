@@ -3,10 +3,24 @@ package rapt_pkg;
   `include "rapt.svh"
   `include "rapt_types.svh"
 
+  localparam int SramCtrlWidth = 16;
+  // Legal combinations come from the macro datasheet; a wrong combination can corrupt memory.
+  typedef struct packed {
+    logic reserved;
+    logic light_sleep;
+    logic [2:0] write_pulse;
+    logic [2:0] write_assist;
+    logic [1:0] read_assist;
+    logic [3:0] margin;
+    logic margin_override;
+    logic test;
+  } sram_ctrl_t;
+  localparam sram_ctrl_t SramCtrlReset = sram_ctrl_t'(`RAPT_SRAM_CTRL_RESET & 16'h7fff);
+
   // Store opcode masks are compact size codes, not arbitrary byte enables.
   // Callers retain their own fallback for CBOs and non-store encodings.
   function automatic logic [3:0] store_bytes(input logic [4:0] alu,
-                                             input logic [3:0] default_bytes = 4'd4);
+                                             input logic [3:0] default_bytes);
     case (alu)
       `RAPT_SB_WSTRB: return 4'd1;
       `RAPT_SH_WSTRB: return 4'd2;
@@ -381,6 +395,14 @@ package rapt_pkg;
     DOMAIN_MEMORY = 4
   } execution_domain_t;
   localparam int unsigned ExecutionDomains = CoreConfig.execution_domains;
+  // RAPT_NO_FPU removes the FEU. FS then reads Off, so the decoder traps every
+  // F/D/Zfhmin instruction and FP CSR access as illegal, and those trapping uops
+  // retire through the integer system pipe instead of the FP queue.
+`ifdef RAPT_NO_FPU
+  localparam bit FpuEnable = 1'b0;
+`else
+  localparam bit FpuEnable = 1'b1;
+`endif
   localparam int unsigned DispatchWidth = CoreConfig.dispatch_width;
   localparam int unsigned SteerScanEntries = CoreConfig.steer_scan_entries;
   localparam int unsigned DecodeWidth = CoreConfig.decode_width;
@@ -538,7 +560,7 @@ package rapt_pkg;
   // FP loads/stores advertise ren/wen and remain in the IOQ. All other
   // scalar-FP operations execute through the independent FP issue queue.
   function automatic logic uop_is_fp_exec(input rapt_pkg::uop_t u);
-    return u.execute.fp.valid && !u.execute.memory.store && !u.execute.memory.load;
+    return FpuEnable && u.execute.fp.valid && !u.execute.memory.store && !u.execute.memory.load;
   endfunction
 
   // FP arithmetic has no immediate operand: reuse that storage for instruction
@@ -785,7 +807,7 @@ package rapt_pkg;
   // Constant-only interval union. Expand each selected row to its connected
   // component, including adjacent rows, then emit only its first table member.
   // Repeated expansion handles arbitrary order and transitive overlaps.
-  function automatic pma_ranges_t pma_ranges(input pma_attr_t attr, input pma_attr_t exclude = '0);
+  function automatic pma_ranges_t pma_ranges(input pma_attr_t attr, input pma_attr_t exclude);
     pma_ranges_t ranges;
     logic [63:0] lo, hi;
     logic prior, pmem;
@@ -835,17 +857,17 @@ package rapt_pkg;
     return ranges;
   endfunction
   localparam pma_ranges_t PmaAttrRanges[6] = '{
-      pma_ranges(PmaMapped),
-      pma_ranges(PmaCacheable),
-      pma_ranges(PmaWritable),
-      pma_ranges(PmaMmioSkip),
-      pma_ranges(PmaPlicWidth32),
-      pma_ranges(PmaPmem)
+      pma_ranges(PmaMapped, '0),
+      pma_ranges(PmaCacheable, '0),
+      pma_ranges(PmaWritable, '0),
+      pma_ranges(PmaMmioSkip, '0),
+      pma_ranges(PmaPlicWidth32, '0),
+      pma_ranges(PmaPmem, '0)
   };
   localparam pma_ranges_t PmaReadonlyRanges = pma_ranges(PmaMapped, PmaWritable);
 
   function automatic logic pma_in_ranges(input logic [31:0] addr, input pma_ranges_t ranges,
-                                         input logic upper_valid = 1'b1);
+                                         input logic upper_valid);
     logic hit;
     pma_in_ranges = 1'b0;
     for (int r = 0; r < PmaRegionCount; r++) begin
@@ -863,7 +885,7 @@ package rapt_pkg;
   // Upper-half policy belongs to the caller: device-width capability has
   // always inspected the canonical low address even for invalid upper bits.
   function automatic logic pma_has_attr(input logic [31:0] addr, input pma_attr_t attr,
-                                        input logic upper_valid = 1'b1);
+                                        input logic upper_valid);
     case (attr)
       PmaMapped: return pma_in_ranges(addr, PmaAttrRanges[0], upper_valid);
       PmaCacheable: return pma_in_ranges(addr, PmaAttrRanges[1], upper_valid);
@@ -906,7 +928,7 @@ package rapt_pkg;
   endfunction
 
   function automatic logic addr_in_pmem(input logic [XLENPkg-1:0] addr);
-    return addr_upper_valid(addr) && pma_has_attr(addr[31:0], PmaPmem);
+    return addr_upper_valid(addr) && pma_has_attr(addr[31:0], PmaPmem, 1'b1);
   endfunction
 
   function automatic logic addr_cacheable(input logic [XLENPkg-1:0] addr);
@@ -986,7 +1008,9 @@ package rapt_pkg;
                                                      input logic [3:0] original_size_m1);
     logic [31:0] a;
     a = 32'(canonical_addr(addr));
-    return !pma_has_attr(a[31:0], PmaPlicWidth32) || (original_size_m1 == 4'd3 && a[1:0] == 2'b00);
+    return !pma_has_attr(
+        a[31:0], PmaPlicWidth32, 1'b1
+    ) || (original_size_m1 == 4'd3 && a[1:0] == 2'b00);
   endfunction
 
   // ROM and the memory-mapped flash image are physically read-only.
@@ -1076,7 +1100,7 @@ package rapt_pkg;
 
   // MMIO regions for difftest skip (not modelled in reference ISS)
   function automatic logic addr_mmio(input logic [XLENPkg-1:0] addr);
-    return addr_upper_valid(addr) && pma_has_attr(addr[31:0], PmaMmioSkip);
+    return addr_upper_valid(addr) && pma_has_attr(addr[31:0], PmaMmioSkip, 1'b1);
   endfunction
 
   // Zero-tag operand encoding used when decode emits selectors instead of

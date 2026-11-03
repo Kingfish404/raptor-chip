@@ -1,14 +1,23 @@
 `ifndef RAPT_SVA_SVH
 `define RAPT_SVA_SVH
 
+// A procedural failure remains a proof obligation in native formal runs.
+`ifdef SYNTHESIS
+`define RAPT_SVA_FAIL(name)
+`elsif RAPT_FORMAL_NATIVE
+`define RAPT_SVA_FAIL(name) name``_a: assert (1'b0);
+`else
+`define RAPT_SVA_FAIL(name) $fatal(1);
+`endif
+
 // ============================================================================
 //  Raptor SVA (SystemVerilog Assertions) infrastructure
 //
 //  Goals:
 //   - One-line, extensible macros for concurrent assertions across modules.
 //   - Centrally toggleable: `+define+RAPT_ASSERT_EN` enables checks in
-//     non-synthesis builds; otherwise all macros expand to nothing (no
-//     synthesis impact, zero sim cost).
+//     non-synthesis builds; otherwise optional checks expand to nothing.
+//     RAPT_SVA_FAIL preserves existing always-on procedural failure checks.
 //   - Consistent failure reporting: module hierarchy + assertion name +
 //     simulation time are always printed, so cross-module invariant
 //     violations are trivially attributable.
@@ -25,7 +34,7 @@
 //   - ONE_HOT        : priority/mux selectors are one-hot when expected.
 //
 //  Usage examples:
-//    `RAPT_SVA(clock, reset, LSU_SQ_ALIGN,
+//    `RAPT_SVA_IMPLY(clock, reset, LSU_SQ_ALIGN,
 //              rou_lsu.valid && rou_lsu.store,
 //              !$isunknown(rou_lsu.sq_vaddr))
 //
@@ -54,8 +63,29 @@
   if (!(cond)) begin                                                    \
     $display("[%0t] SVA FAIL: %m.%s cond=(%s)",                         \
              $time, `"name`", `"cond`");                                \
-    $fatal(1);                                                          \
+    `RAPT_SVA_FAIL(name)                                                \
   end
+
+// Native Slang supports clocked predicates but not sequence implication.
+// Preserve sampled expressions in their clock context. The next-cycle monitor
+// is assertion-only state; asynchronous reset must cancel pending obligations.
+`ifdef RAPT_FORMAL_NATIVE
+`define RAPT_SVA(clk, rst, name, expr) \
+  name``_a: assert property (@(posedge clk) disable iff (rst) (|(expr))) else $fatal(1);
+`define RAPT_SVA_IMPLY(clk, rst, name, ante, cons) \
+  `RAPT_SVA(clk, rst, name, !(|(ante)) || |(cons))
+`define RAPT_SVA_NEXT(clk, rst, name, ante, cons) \
+  wire name``_reset = (rst); \
+  logic name``_pending = 1'b0; \
+  always_ff @(posedge clk or posedge name``_reset) begin \
+    if (name``_reset) name``_pending <= 1'b0; \
+    else name``_pending <= |(ante); \
+  end \
+  `RAPT_SVA(clk, rst, name, !name``_pending || |(cons))
+`define RAPT_COVER(clk, rst, name, expr) \
+  name``_c: cover property (@(posedge clk) disable iff (rst) (|(expr)));
+
+`else  // Standard SVA
 
 // ---- Basic concurrent assertion: `expr` must hold every posedge `clk` ----
 `define RAPT_SVA(clk, rst, name, expr)                                  \
@@ -92,6 +122,8 @@
   name``_c: cover property (                                            \
     @(posedge clk) disable iff (rst) (expr)                             \
   );
+
+`endif  // RAPT_FORMAL_NATIVE
 
 `else  // assertions disabled or synthesis build -> all expand to no-op
 

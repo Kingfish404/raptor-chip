@@ -136,6 +136,7 @@ module rng_chip #(
       .L1dWriteBack(L1dWriteBack),
       .MemoryReadCredits(1)
   ) cpu (
+      .sram_ctrl_i      (rapt_pkg::SramCtrlReset),
       .writeback_error_o(writeback_error_o),
       .clock            (clock),
       .io_interrupt     (1'h0),
@@ -185,6 +186,12 @@ module rng_chip #(
       .jtag_tdo   (jtag_tdo_unused),
 
       .reset(reset)
+  ,
+      .external_write_valid_i(1'b0),
+      .external_write_pending_i(1'b0),
+      .external_write_first_i('0),
+      .external_write_last_i('0),
+      .jtag_tck_en(1'b1)
   );
 
 endmodule

@@ -344,7 +344,8 @@ module tb_lsu_axi_io_order;
       .l1i_bus,
       .l1d_bus,
       .csr_bcast,
-      .cmu_bcast
+      .cmu_bcast,
+      .coherent_ready(1'b1)
   );
   rapt_axi_master #(
       .XLEN(XLEN),
@@ -353,7 +354,8 @@ module tb_lsu_axi_io_order;
       .clock,
       .reset,
       .mem,
-      .axi
+      .axi,
+      .rd_req_cacheable(1'b0)
   );
   int aw_count, w_count, b_count, ar_count;
   always @(posedge clock) begin
@@ -763,8 +765,7 @@ module tb_lsu_hum_pmp;
       exu_lsu.ralu_b = `RAPT_ALU_LBU_;
       expect_b(1, 0);  // The byte at exactly the same address is permitted.
     end
-    exu_lsu.raddr_b = `RAPT_PMP_GRANULARITY_LOG2 == 2 ? Addr + 3
-        : (Addr & ~XLEN'(4095)) + 4095;
+    exu_lsu.raddr_b = `RAPT_PMP_GRANULARITY_LOG2 == 2 ? Addr + 3 : (Addr & ~XLEN'(4095)) + 4095;
     exu_lsu.ralu_b=`RAPT_ALU_LHU_;
     expect_b(0, 0);  // A two-byte access cannot partly match the protected region.
     exu_lsu.raddr_b='h0f001fff;
@@ -818,7 +819,8 @@ module tb_lsu_l1d_io_split;
           case (l1d_bus.araddr[63:12])
             'h80001: response_data <= ('h80002000 >> 2) | 1;
             'h80002: response_data <= ('h80003000 >> 2) | 1;
-            'h80003: response_data <= ((l1d_bus.araddr[3] ? 64'h82000000 : 64'h81000000) >> 2)
+            'h80003:
+            response_data <= ((l1d_bus.araddr[3] ? 64'h82000000 : 64'h81000000) >> 2)
                         | 64'hcf | (64'(l1d_bus.araddr[3] ? attr1 : attr0) << 61);
             default: response_data <= 0;
           endcase
@@ -1717,6 +1719,7 @@ rapt_lsu #(
       .L1D_SIZE(4),
       .L1D_N_WAYS(1)
   ) cache (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .l2tlb_req_o(),
       .l2tlb_ready_i(1'b0),
       .l2tlb_rsp_i('0),
@@ -1738,7 +1741,17 @@ rapt_lsu #(
       .pmp_update,
       .lsu_l1d,
       .exu_l1d,
-      .l1d_bus
+      .l1d_bus,
+      .coherent_addr('0),
+
+
+
+
+
+
+      .writeback_cbo(1'b0),
+      .writeback_cbo_invalidate(1'b0),
+      .writeback_block('0)
   );
   logic consumer_alloc = 0, consumer_enable = 0;
   logic [1:0] consumer_ready;
@@ -1767,7 +1780,9 @@ rapt_lsu #(
         .issue_enable(consumer_enable),
         .issue,
         .occ_o(),
-        .pmu_iq_full()
+        .pmu_iq_full(),
+        .local_operand_wake('{default: '0}),
+        .resource_ready('1)
     );
     assign consumer_ready[q] = issue[0].valid;
     always @(posedge clock)
@@ -1950,12 +1965,19 @@ module tb_lsu_request_boundary;
   rapt_l2tlb #(
       .Entries(4)
   ) shared_tlb (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock,
       .reset,
       .flush(cmu_bcast.fence_time),
       .req_i(tlb_req),
       .ready_o(tlb_ready),
-      .rsp_o(tlb_rsp)
+      .rsp_o(tlb_rsp),
+      .cancel(1'b0),
+      .sfence_valid(1'b0),
+      .sfence_vpn('0),
+      .sfence_asid('0),
+      .sfence_all_vpn(1'b1),
+      .sfence_all_asid(1'b1)
   );
   assign local_fp_wake = '{default: '0};
   for (genvar p = 0; p < CompletionPorts; p++) begin : g_completion
@@ -1976,6 +1998,7 @@ rapt_lsu #(
       .LineRefill(0),
       .L2Tlb(1)
   ) cache (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .l2tlb_req_o(tlb_req[1]),
       .l2tlb_ready_i(tlb_ready[1]),
       .l2tlb_rsp_i(tlb_rsp[1]),
@@ -1997,7 +2020,17 @@ rapt_lsu #(
       .pmp_update,
       .lsu_l1d,
       .exu_l1d,
-      .l1d_bus
+      .l1d_bus,
+      .coherent_addr('0),
+
+
+
+
+
+
+      .writeback_cbo(1'b0),
+      .writeback_cbo_invalidate(1'b0),
+      .writeback_block('0)
   );
   `include "tb_common.svh"
   `include "tb_core_bcast_defaults.svh"
@@ -2043,8 +2076,9 @@ rapt_lsu #(
         check(!l1d_bus.ar_mshr, "scalar test unexpectedly allocated a refill");
         pending_ptw <= l1d_bus.ar_ptw;
         // A root leaf maps VA 0x40000000 to the RAM superpage 0x80000000.
-        pending_data <= l1d_bus.ar_ptw ? XLEN'('h200000cf)
-            : bytes_at(l1d_bus.araddr & ~XLEN'(Bytes - 1));
+        pending_data <= l1d_bus.ar_ptw ? XLEN'('h200000cf) : bytes_at(
+            l1d_bus.araddr & ~XLEN'(Bytes - 1)
+        );
         delay_left <= 8;
         if (l1d_bus.ar_ptw) walks <= walks + 1;
         else begin
@@ -2108,7 +2142,8 @@ rapt_lsu #(
     for (int s = 0; s < 2; s++) begin
       dispatch[s] = '0;
       dispatch[s].uop.execute.memory.load = 1;
-      dispatch[s].uop.execute.int_op.alu = (device && s == 1) ? `RAPT_ALU_LBU_
+      dispatch[s].uop.execute.int_op.alu = (device && s == 1) ?
+      `RAPT_ALU_LBU_
           : XLEN == 64 ? `RAPT_ALU_LD__ : `RAPT_ALU_LW__;
       dispatch[s].uop.rd = 5'(10+s);
       dispatch[s].op1 = s == 0 ? a : b;

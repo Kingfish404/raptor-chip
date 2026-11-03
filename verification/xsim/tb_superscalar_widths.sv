@@ -90,6 +90,10 @@ rapt_iq #(
       .issue,
       .occ_o(occupancy),
       .pmu_iq_full()
+  ,
+      .local_operand_wake('{default: '0}),
+      .combo_source('{default: '0}),
+      .resource_ready('1)
   );
 
   // Compare registered observations with real pre-edge handshakes, not with

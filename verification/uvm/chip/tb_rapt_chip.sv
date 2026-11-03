@@ -6,6 +6,7 @@ module tb_rapt_chip;
   always #5 clock = ~clock;
   rapt_chip_if bus (clock);
   rapt dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock(clock),
       .reset(bus.reset),
       .io_master_arcache(bus.arcache),
@@ -49,6 +50,8 @@ module tb_rapt_chip;
       .external_write_pending_i(bus.external_write_pending),
       .external_write_first_i(bus.external_write_first),
       .external_write_last_i(bus.external_write_last)
+  ,
+      .jtag_tck_en(1'b1)
   );
   initial begin
     uvm_config_db#(virtual rapt_chip_if)::set(null, "*", "vif", bus);

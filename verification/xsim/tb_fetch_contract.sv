@@ -11,6 +11,7 @@ module tb_fetch_refill;
   ifu_l1i_if ifu_l1i ();
   l1i_bus_if l1i_bus ();
   rapt_l1i dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock,
       .reset,
       .cmu_bcast,
@@ -139,6 +140,7 @@ module tb_fetch_prediction;
       .response_pending_o()
   );
   rapt_l1i cache_dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock,
       .reset,
       .cmu_bcast,

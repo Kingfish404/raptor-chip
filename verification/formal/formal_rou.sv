@@ -1,16 +1,29 @@
 // Select a harness explicitly so unused hierarchical monitors are not elaborated.
-`ifdef RAPT_FORMAL_ROU_RETIRE
-// ---- formal_rou_retire ----
+`ifdef RAPT_FORMAL_ROU_DEBUG
+`define RAPT_FORMAL_ROU_WRAPPER
+`elsif RAPT_FORMAL_ROU_RETIRE
+`define RAPT_FORMAL_ROU_WRAPPER
+`endif
+`ifdef RAPT_FORMAL_ROU_WRAPPER
+// Shared complete ROU wrapper for retirement and debug contracts.
 `include "rapt.svh"
 `include "rapt_if.svh"
 
-// Full production ROU with hostile external inputs. A bound observer below
-// checks immutable allocation metadata against the actual retirement banks.
+// Hostile external inputs remain free. Each selected contract supplies its own
+// observer; debug mode exposes the DM controls instead of tying them inactive.
 module formal_rou_retire #(
     parameter bit ValidateCompletionInputs = 1'b0
 ) (
     input rapt_pkg::uop_t fp_queue_read_uop,
     input logic [2:0][$clog2(rapt_pkg::CoreConfig.rob_entries):0] fp_queue_read_tag,
+`ifdef RAPT_FORMAL_ROU_DEBUG
+    input logic debug_enable,
+    input logic debug_step,
+    input logic debug_stepie,
+    input logic [2:0] debug_ebreak,
+    input logic debug_resume,
+    input logic [`RAPT_PC_BITS_OF(`RAPT_XLEN)-1:0] debug_pc,
+`endif
     input logic clock,
     reset,
     input rapt_pkg::completion_t completion[rapt_pkg::CoreConfig.completion_ports],
@@ -19,8 +32,9 @@ module formal_rou_retire #(
     csr_bcast_if.in csr_bcast,
     input logic candidate_ready[rapt_pkg::SteerScanEntries],
     input logic selected_valid[rapt_pkg::DispatchWidth],
-    input logic [rapt_pkg::index_bits(rapt_pkg::SteerScanEntries)-1:0]
-        selected_candidate[rapt_pkg::DispatchWidth],
+    input logic [rapt_pkg::index_bits(
+rapt_pkg::SteerScanEntries
+)-1:0] selected_candidate[rapt_pkg::DispatchWidth],
     input logic sq_ready,
     sq_empty,
     writeback_done,
@@ -37,6 +51,23 @@ module formal_rou_retire #(
   rou_csr_if rou_csr ();
   rou_lsu_if rou_lsu ();
   rapt_recovery_if recovery ();
+  rapt_debug_if debug ();
+`ifdef RAPT_FORMAL_ROU_DEBUG
+  assign debug.enable = debug_enable;
+  assign debug.step = debug_step;
+  assign debug.stepie = debug_stepie;
+  assign debug.ebreak = debug_ebreak;
+  assign debug.resume_valid = debug_resume;
+  assign debug.resume_pc = debug_pc;
+`else
+  assign debug.enable = 1'b0;
+  assign debug.step = 1'b0;
+  assign debug.stepie = 1'b0;
+  assign debug.ebreak = '0;
+  assign debug.resume_valid = 1'b0;
+  assign debug.resume_pc = '0;
+`endif
+
   checkpoint_release_if checkpoint_release ();
   rob_completion_owner_if completion_owner ();
   assign rou_lsu.sq_ready = sq_ready;
@@ -106,6 +137,7 @@ module formal_rou_retire #(
       .rou_csr,
       .rou_lsu,
       .dm_haltreq_i(halt_request),
+      .debug(debug),
       .writeback_drain(),
       .writeback_clean(),
       .writeback_cbo(),
@@ -120,8 +152,14 @@ module formal_rou_retire #(
       .commit_fire_o(),
       .pmu_rob_full()
   );
+`ifdef RAPT_FORMAL_ROU_DEBUG
+  `include "formal_debug_step.svh"
+`endif
 endmodule
+`undef RAPT_FORMAL_ROU_WRAPPER
+`endif
 
+`ifdef RAPT_FORMAL_ROU_RETIRE
 // The observer defines its own retirement schema and never calls the DUT's
 // compaction helper. PC/instruction histories also retain independent widths.
 module formal_rou_retire_properties #(
@@ -267,8 +305,8 @@ module formal_rou_retire_properties #(
             expected[e].rvfi_inst <= allocation[s].uop.rvfi_inst;
             expected_rvfi[e] <= allocation[s].uop.rvfi_inst;
 `endif
-            expected[e].pc <= allocation[s].uop.pc[PcBits-1:1];
-            expected_pc[e] <= {allocation[s].uop.pc[PcBits-1:1], 1'b0};
+            expected[e].pc  <= allocation[s].uop.pc[PcBits-1:1];
+            expected_pc[e]  <= {allocation[s].uop.pc[PcBits-1:1], 1'b0};
             expected_imm[e] <= allocation[s].uop.imm[11:0];
           end
         end
@@ -338,7 +376,7 @@ bind rapt_rou formal_rou_retire_properties #(
     .serialize_in_flight,
     .commit_fire,
     .retire_read_index,
-    .read_bits(commit_uop),
+    .read_bits (commit_uop),
     .entry_view(uop_pl),
     .serial_imm
 );
@@ -363,8 +401,9 @@ module formal_rou_rvfi #(
     csr_bcast_if.in csr_bcast,
     input logic candidate_ready[rapt_pkg::SteerScanEntries],
     input logic selected_valid[rapt_pkg::DispatchWidth],
-    input logic [rapt_pkg::index_bits(rapt_pkg::SteerScanEntries)-1:0]
-        selected_candidate[rapt_pkg::DispatchWidth],
+    input logic [rapt_pkg::index_bits(
+rapt_pkg::SteerScanEntries
+)-1:0] selected_candidate[rapt_pkg::DispatchWidth],
     input logic sq_ready,
     sq_empty,
     writeback_done,
@@ -385,6 +424,14 @@ module formal_rou_rvfi #(
   rou_csr_if rou_csr ();
   rou_lsu_if rou_lsu ();
   rapt_recovery_if recovery ();
+  rapt_debug_if debug ();
+  assign debug.enable = 1'b0;
+  assign debug.step = 1'b0;
+  assign debug.stepie = 1'b0;
+  assign debug.ebreak = '0;
+  assign debug.resume_valid = 1'b0;
+  assign debug.resume_pc = '0;
+
   checkpoint_release_if checkpoint_release ();
   rob_completion_owner_if completion_owner ();
   assign rou_lsu.sq_ready = sq_ready;
@@ -415,6 +462,7 @@ module formal_rou_rvfi #(
       .rou_csr,
       .rou_lsu,
       .dm_haltreq_i(halt_request),
+      .debug(debug),
       .writeback_drain(),
       .writeback_clean(),
       .writeback_cbo(),

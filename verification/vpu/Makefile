@@ -31,8 +31,13 @@ endif
 DIFF_FLAGS := -CFLAGS '-DVPU_SPIKE -I$(SPIKE_BUILD) -I$(SPIKE_BUILD)/riscv -I$(SPIKE_BUILD)/fesvr -I$(SPIKE_BUILD)/softfloat' \
   -LDFLAGS '-Wl,--start-group $(SPIKE_BUILD)/libriscv.a $(SPIKE_BUILD)/libdisasm.a $(SPIKE_BUILD)/libsoftfloat.a $(SPIKE_BUILD)/libfesvr.a $(SPIKE_BUILD)/libfdt.a -Wl,--end-group -lboost_regex -lboost_system -ldl'
 endif
-FLAGS := --binary --timing --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS)
+VPU_INCLUDES := -I$(ROOT)/rtl/include -I$(ROOT)/rtl/configs/default
+FLAGS := --binary --timing --assert -Wall -DRAPT_ASSERT_EN $(VPU_INCLUDES) -j $(JOBS)
 VPU := $(ROOT)/rtl/backend/vpu
+VPU_SCALAR_FPU := fma divsqrt convert_narrow int_to_fp integer_to_fp single_to_int_w fp_to_int
+VPU_TOP_SOURCES := $(ROOT)/rtl/rapt_pkg.sv $(ROOT)/rtl/sram/rapt_sram_1rw.sv \
+  $(addprefix $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_,$(addsuffix .sv,$(VPU_SCALAR_FPU))) \
+  $(wildcard $(VPU)/*.sv) $(CURDIR)/test_vpu.cpp
 TYPE_BUILD := $(BUILD_DIR)/vtype-$(XLEN)-$(VLEN)-$(ELEN)
 VRF_BUILD := $(BUILD_DIR)/vrf-$(VLEN)-$(BANK_BITS)-$(BANKS)
 CSR_BUILD := $(BUILD_DIR)/csr-$(XLEN)-$(VLEN)-$(ELEN)
@@ -55,7 +60,7 @@ vrf:
 	@mkdir -p $(VRF_BUILD)
 	$(VERILATOR) $(FLAGS) --top-module tb_vpu_vrf --Mdir $(VRF_BUILD) \
 	  -GVLEN=$(VLEN) -GBankBits=$(BANK_BITS) -GBanks=$(BANKS) \
-	  $(ROOT)/rtl/sram/rapt_sram_1rw.sv $(VPU)/rapt_vpu_vrf.sv \
+	  $(ROOT)/rtl/rapt_pkg.sv $(ROOT)/rtl/sram/rapt_sram_1rw.sv $(VPU)/rapt_vpu_vrf.sv \
 	  $(CURDIR)/tb_vpu_vrf.sv >$(VRF_BUILD)/build.log 2>&1 \
 	  || { cat $(VRF_BUILD)/build.log; exit 1; }
 	$(VRF_BUILD)/Vtb_vpu_vrf | tee $(VRF_BUILD)/run.log
@@ -86,13 +91,14 @@ top-build:
 ifeq ($(DIFF),1)
 	python3 $(CURDIR)/reference_manifest.py $(SPIKE_BUILD) $(TOP_BUILD)/reference.json
 endif
-	$(VERILATOR) --cc --exe --build --assert -Wall -Wno-PINCONNECTEMPTY -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
+	$(VERILATOR) --cc --exe --build --assert -Wall -Wno-PINCONNECTEMPTY -DRAPT_ASSERT_EN \
+	  $(VPU_INCLUDES) -j $(JOBS) \
 	  $(CURDIR)/fma_legacy.vlt --top-module $(if $(filter 1,$(CORE_ADAPTER)),rapt_vpu_core,rapt_vpu) --prefix Vrapt_vpu --Mdir $(TOP_BUILD) \
 	  -GXLEN=$(XLEN) -GVLEN=$(VLEN) -GELEN=$(ELEN) -GBankBits=$(BANK_BITS) -GBanks=$(BANKS) \
 	  -GOptimizeOperandReads=$(OPT_READS) \
 	  -CFLAGS '-DTEST_XLEN=$(XLEN) -DTEST_VLEN=$(VLEN) -DTEST_ELEN=$(ELEN) -DTEST_OPT_READS=$(OPT_READS) -DTEST_CORE_ADAPTER=$(CORE_ADAPTER)' \
 	  $(DIFF_FLAGS) \
-	  $(ROOT)/rtl/sram/rapt_sram_1rw.sv $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_fma.sv $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_divsqrt.sv $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_convert_narrow.sv $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_int_to_fp.sv $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_integer_to_fp.sv $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_fp_to_int.sv $(wildcard $(VPU)/*.sv) $(CURDIR)/test_vpu.cpp \
+	  $(VPU_TOP_SOURCES) \
 	  >$(TOP_BUILD)/build.log 2>&1 || { cat $(TOP_BUILD)/build.log; exit 1; }
 
 top: top-build

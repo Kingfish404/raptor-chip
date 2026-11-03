@@ -37,6 +37,8 @@ module tb_bus_buffered_writeback;
       .coherent_request(),
       .coherent_write(),
       .rd_req_cacheable()
+  ,
+      .coherent_ready(1'b1)
   );
   rapt_l1d_writeback #(
       .Xlen(XLEN),
@@ -277,7 +279,8 @@ module tb_bus_read_ownership;
       .l1d_bus,
       .csr_bcast,
       .cmu_bcast,
-      .reset
+      .reset,
+      .coherent_ready(1'b1)
   );
 
   always #5 clock = ~clock;

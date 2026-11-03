@@ -30,6 +30,7 @@ define DIRECTED_PRESET
 $(1): override XSIM_COMMON_INCLUDES := $(subst /configs/$(XSIM_RAPT_CONFIG),/configs/$(2),$(XSIM_COMMON_INCLUDES))
 endef
 
+$(eval $(call XLEN_TEST,xspi-link,tb_xspi_link,$$(RAPTOR_HOME)/fpga/common/rtl/rapt_xspi_target.sv))
 $(eval $(call XLEN_TEST,ptw-global,tb_ptw_global,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,zfhmin-decode-slot,tb_zfhmin_decode_slot))
 # optional rapt_idu_decoder_ref source enables legacy RTL comparison.
@@ -204,6 +205,9 @@ $(eval $(call DIRECTED_TEST,lsu-lr-sq-forward,lsu_lr_sq_forward,tb_lsu_lr_sq_for
 $(eval $(call DIRECTED_TEST,lsu-cbo-zero,lsu_cbo_zero,tb_lsu_cbo_zero,,-d RAPT_RV64 -d RAPT_ASSERT_EN))
 $(eval $(call DIRECTED_TEST,lsu-sq-random,lsu_sq_random,tb_lsu_sq_random,,-d RAPT_ASSERT_EN,+SEED=$$(VERILATOR_DIRECTED_SEED)))
 $(eval $(call DIRECTED_TEST,ioq,ioq,tb_ioq_pending_lock))
+$(eval $(call XLEN_TEST,ioq-request-progress,tb_ioq_pending_lock,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,ioq-request-progress-late,tb_ioq_pending_lock,,\
+    -d RAPT_ASSERT_EN -d RAPT_IOQ_LATE_TEST))
 $(eval $(call DIRECTED_TEST,split-load-fault-reset-rv32 split-load-fault-reset-rv64,$$(subst -,_,$$@),tb_split_load_fault_reset,,-d RAPT_ASSERT_EN $$(if $$(findstring rv64,$$@),-d RAPT_RV64)))
 $(eval $(call DIRECTED_TEST,clint,clint,tb_clint))
 $(eval $(call DIRECTED_TEST,plic-gateway,plic_gateway,tb_plic_gateway))

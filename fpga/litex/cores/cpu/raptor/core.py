@@ -78,6 +78,8 @@ class Raptor(CPU):
         self.reset = Signal()
         self.pmem_size = None  # Optional board-specific PMA window, in bytes.
         self.interrupt = Signal(32)
+        self.sram_ctrl = Signal(16)
+        self.specials += Instance("rapt_sram_ctrl_default", o_sram_ctrl_o=self.sram_ctrl)
 
         # AXI4 master peripheral bus (connected to main SoC bus).
         axi_if = axi.AXIInterface(data_width=self.data_width, address_width=32, id_width=4)
@@ -90,6 +92,7 @@ class Raptor(CPU):
         self.cpu_params = dict(
             # Clock / Reset.
             i_clock=ClockSignal("sys"),
+            i_sram_ctrl_i=self.sram_ctrl,
             i_reset=ResetSignal("sys") | self.reset,
             # Interrupt.
             # LiteX IRQ n maps to PLIC source n+1 (source 0 is reserved).
@@ -97,6 +100,11 @@ class Raptor(CPU):
             # Route all sources: forwarding only bit 0 loses SDCard/Ethernet.
             i_io_interrupt=0,
             i_ext_irq_i=self.interrupt[:31],
+            # Unused external-write observation inputs.
+            i_external_write_valid_i=0,
+            i_external_write_pending_i=0,
+            i_external_write_first_i=0,
+            i_external_write_last_i=0,
             # AXI4 Master — Write Address Channel.
             o_io_master_awvalid=axi_if.aw.valid,
             i_io_master_awready=axi_if.aw.ready,
@@ -137,6 +145,7 @@ class Raptor(CPU):
             # expose a JTAG header for the Raptor core today, so park the
             # DTM in TLR by tying trst_n=0/tms=1/tdi=0; tdo is left floating.
             i_jtag_trst_n=0,
+            i_jtag_tck_en=1,
             i_jtag_tms=1,
             i_jtag_tdi=0,
             o_jtag_tdo=Signal(),

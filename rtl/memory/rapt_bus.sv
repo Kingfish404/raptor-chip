@@ -28,7 +28,7 @@ module rapt_bus #(
     parameter int PostedAckDelay = `RAPT_POSTED_ACK_DELAY
 ) (
     input clock,
-    input logic coherent_ready = 1'b1,
+    input logic coherent_ready,
     output logic coherent_request,
     output logic coherent_write,
     output logic [XLEN-1:0] coherent_addr,
@@ -566,7 +566,10 @@ module rapt_bus #(
   `RAPT_SVA_IMPLY(clock, reset, BUS_POSTED_SYNC_EXCLUSIVE, write_state == WR_WAIT, posted_idle)
   `RAPT_SVA_IMPLY(clock, reset, BUS_POSTED_STORE_HELD, write_state == WR_POSTED,
                   l1d_bus.awvalid && l1d_bus.wvalid)
+`ifdef RAPT_SVA_ACTIVE
+  wire posted_read_ordered = posted_idle || !posted_line_hit(mem.rd_req_addr[XLEN-1:LineLsb]);
+`endif
   `RAPT_SVA_IMPLY(clock, reset, BUS_POSTED_NO_READ_OVERTAKE, mem.rd_req_valid && !rd_skid_valid,
-                  posted_idle || !posted_line_hit(mem.rd_req_addr[XLEN-1:LineLsb]))
+                  posted_read_ordered)
 
 endmodule

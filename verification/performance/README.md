@@ -242,6 +242,25 @@ cycles still contribute to the measured elapsed cycles.
 Restoration, warmup and shutdown are excluded from measured cycles. Interrupt or
 scheduler-dependent path differences can make a window incomparable.
 
+Models with `pmu_schema: raptor-pmu-snapshot-v1` attach cumulative `pmu` counters
+to each boundary. `run_samples.py` returns `baseline_pmu` and `candidate_pmu`
+for the same endpoints used for its cycle comparison; `run_model.py` retains
+the interval counters as `pmu` in each measurement. Old models without this
+optional schema remain usable for cycle comparisons. Unsupported schemas,
+missing or decreasing counters, mismatched active cycles, and failed dispatch
+cycle/slot accounting invalidate a measured window. Never subtract whole-run
+text reports or occupancy/peak values to estimate a window.
+
+PMU counts include all cycles and retired instructions between the endpoints.
+For a user/SATP/TLS-filtered retirement domain this includes intervening kernel
+and other-thread activity, so `instr_cnt` can exceed the selected instruction
+count. Different stall counters overlap. The IOQ head counters apply only while
+the ROB head awaits memory execution; divide by `active_cycle` for their share
+of elapsed cycles, or by `ioq_head_samples` for their conditional share.
+For a weighted region, first weight each counter per selected instruction with
+the same point weights as CPI, then divide by weighted CPI for a cycle fraction.
+Do not average point stall percentages or add overlapping stall categories.
+
 The summary weights **CPI**, then estimates each region's cycles. It does not
 average IPC or sample speedups, and it does not convert total cycle reduction
 directly into a Geekbench score. Warmup convergence, memory behavior within a BBV

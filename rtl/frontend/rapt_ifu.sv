@@ -522,6 +522,8 @@ module rapt_ifu #(
   logic [PcW-1:0] predicted_successor;
   wire [HintBits-1:0] hint_read_index = ifu_bpu.nextpc[HintBits:1]
       ^ ifu_bpu.nextpc[2*HintBits:HintBits+1];
+  wire [HintBits-1:0] hint_valid_read_index[1];
+  assign hint_valid_read_index[0] = hint_read_index;
   wire [HintBits-1:0] hint_write_index = response.pc[HintBits:1]
       ^ response.pc[2*HintBits:HintBits+1];
   wire query_match = query_valid_q && query_pc_q == pc_ifu;
@@ -534,7 +536,7 @@ module rapt_ifu #(
   ) hint_valids (
       .clock,
       .clear(reset || cmu_bcast.fence_i),
-      .read_index('{hint_read_index}),
+      .read_index(hint_valid_read_index),
       .read_bit(hint_valid_read),
       .write_valid(hint_write_valid_q),
       .write_index(hint_write_index_q),

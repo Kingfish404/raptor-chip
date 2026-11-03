@@ -231,6 +231,20 @@ else:
                 else:
                     self.assertNotIn("--depth", proof)
 
+    def test_sram_qualification_options_reach_the_native_driver(self):
+        result = self.make('-n', 'formal_sram', 'FORMAL_JOBS=3',
+                           'FORMAL_SRAM_ARGS=--qualify --presets formal',
+                           cwd=ROOT / 'verification/formal')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = result.stdout.replace('\\\n', '').splitlines()
+        commands = [shlex.split(line) for line in lines
+                    if line.startswith('python3 ') and 'unit_contracts.py' in line]
+        self.assertEqual(len(commands), 1)
+        command = commands[0]
+        self.assertIn('--qualify', command)
+        self.assertEqual(command[command.index('--jobs') + 1], '3')
+        self.assertEqual(command[command.index('--presets') + 1:], ['formal'])
+
     def test_formal_gate_forwards_indexes_in_inventory_and_signoff_modes(self):
         indexes = [str(self.work / name) for name in ('unit-a.json', 'unit-b.json')]
         for target in ('formal-scope', 'formal-signoff'):

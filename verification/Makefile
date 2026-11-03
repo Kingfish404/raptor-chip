@@ -25,6 +25,7 @@ sim-build-isolation-check: ## Check build-local Kconfig and non-destructive mode
 
 # Tool-free unit tests for helper scripts that have no dedicated check target.
 SCRIPT_UNITTESTS := test_config_macro_check test_paddr_config test_fp_test_makefile \
+	test_fpga_synth_options \
 	test_litex_sdcard_linux_override \
 	test_lrsc_trace_check test_run_act4 \
 	test_sta.SummaryStatusTest test_subsystem_build_cache \
@@ -40,6 +41,20 @@ script-unittests: config-macro-check ## Run helper-script unit tests that need n
 .PHONY: config-macro-check
 config-macro-check: ## Check preset macro uses, declarations and direction-predictor selection
 	$(PYTHON) "$(VERIFY_HOME)/scripts/config_macro_check.py"
+
+.PHONY: native-sv-equivalence
+NATIVE_SV_PRESETS ?= chip32-middle-16k chip32-small chip32-dff small default
+NATIVE_SV_RTL ?= $(RAPTOR_HOME)/rtl
+native-sv-equivalence: ## Prove whole-top native RTL against BASELINE_RTL (required)
+	@test -n "$(BASELINE_RTL)" || { echo "Set BASELINE_RTL to a pristine rtl/ directory"; exit 1; }
+	$(PYTHON) "$(VERIFY_HOME)/scripts/native_sv_equivalence.py" \
+		--baseline-rtl "$(BASELINE_RTL)" --output "$(BUILD_DIR)/native-sv-equivalence" \
+		--candidate-rtl "$(NATIVE_SV_RTL)" \
+		--presets $(NATIVE_SV_PRESETS) $(if $(NATIVE_SV_TOP),--top $(NATIVE_SV_TOP))
+
+.PHONY: native-sv-check
+native-sv-check: ## Check portable native ports, arguments, scopes and procedural writers
+	$(PYTHON) "$(VERIFY_HOME)/scripts/native_sv_check.py"
 
 .PHONY: bpu-config-check
 bpu-config-check: ## Check all BPU selections and reject missing selections in RV32/RV64
@@ -1229,6 +1244,10 @@ formal-plic: ## Formal: verify PLIC arbitration and gateway lifecycle
 formal-dtm: ## Formal: verify the single-clock JTAG TAP and DMI transport
 	$(MAKE) -C $(FORMAL_DIR) formal_dtm
 
+.PHONY: formal-debug
+formal-debug: ## Formal: debug/SBA faults, AXI drain and precise ROU admission
+	$(MAKE) -C $(FORMAL_DIR) formal_debug
+
 formal-divsqrt: ## Formal: verify FPU divide/square-root control contract
 	$(MAKE) -C $(FORMAL_DIR) formal_divsqrt
 
@@ -1237,7 +1256,7 @@ formal: formal-ieu-alu formal-ieu-muldiv formal-pmp formal-zkt formal-plru \
 	formal-clint formal-plic formal-dtm formal-bus formal-divsqrt formal-sram \
 	formal-vpu-memory-response formal-rvfi-metadata formal-rvfi-platform formal-cache-nru \
 	formal-recovery-pending formal-stream-queue formal-rou-retire \
-	formal-l1d-data formal-prf formal-axi-r-buffer ## Run standalone checks
+	formal-l1d-data formal-prf formal-axi-r-buffer formal-debug ## Run standalone checks
 
 formal-rvfi-gen: ## Formal: generate riscv-formal checks (auto-clones repo)
 	$(MAKE) -C $(FORMAL_DIR) formal_rvfi_gen

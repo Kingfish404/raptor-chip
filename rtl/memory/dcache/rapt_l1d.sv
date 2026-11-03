@@ -29,41 +29,42 @@ module rapt_l1d #(
     parameter bit L2Release = rapt_pkg::L2LinkConfig.victim_release,
     parameter int L2LineOffset = rapt_pkg::L2LinkConfig.line_offset
 ) (
+    input rapt_pkg::sram_ctrl_t sram_ctrl_i,
     input clock,
-    input logic coherent_request = 1'b0,
-    input logic coherent_write = 1'b0,
-    input logic [XLEN-1:0] coherent_addr = '0,
+    input logic coherent_request,
+    input logic coherent_write,
+    input logic [XLEN-1:0] coherent_addr,
     output logic coherent_ready,
-    input logic probe_valid_i = 1'b0,
-    input logic [XLEN-1:0] probe_addr_i = '0,
+    input logic probe_valid_i,
+    input logic [XLEN-1:0] probe_addr_i,
     output logic probe_ready_o,
     output logic probe_release_valid_o,
     output logic [XLEN-1:0] probe_release_addr_o,
     output logic [XLEN-1:0] probe_release_data_o,
-    input logic probe_release_ready_i = 1'b0,
+    input logic probe_release_ready_i,
     output logic release_valid_o,
     output logic [XLEN-1:0] release_addr_o,
     output logic [XLEN-1:0] release_data_o,
     output logic release_has_data_o,
     output logic release_mask_o,
     output logic release_last_o,
-    input logic release_ready_i = 1'b0,
-    input logic release_ack_i = 1'b0,
-    input logic probe_window_i = 1'b0,
+    input logic release_ready_i,
+    input logic release_ack_i,
+    input logic probe_window_i,
     output logic writeback_bus_pending_o,
     output logic writeback_error,
     output logic writeback_idle,
-    input logic writeback_drain = 1'b0,
-    input logic writeback_cbo = 1'b0,
-    input logic writeback_cbo_invalidate = 1'b0,
-    input logic [XLEN-1:6] writeback_block = '0,
+    input logic writeback_drain,
+    input logic writeback_cbo,
+    input logic writeback_cbo_invalidate,
+    input logic [XLEN-1:6] writeback_block,
     output logic writeback_cbo_done,
     // Device writes are reported before a later SC may complete. Pending
     // holds SC while the platform drains a finite batch of notifications.
-    input logic external_write_valid_i = 1'b0,
-    input logic external_write_pending_i = 1'b0,
-    input logic [XLEN-1:0] external_write_first_i = '0,
-    input logic [XLEN-1:0] external_write_last_i = '0,
+    input logic external_write_valid_i,
+    input logic external_write_pending_i,
+    input logic [XLEN-1:0] external_write_first_i,
+    input logic [XLEN-1:0] external_write_last_i,
 
 
     cmu_bcast_if.in cmu_bcast,
@@ -77,8 +78,8 @@ module rapt_l1d #(
 
     input reset,
     output rapt_pkg::l2tlb_req_t l2tlb_req_o,
-    input logic l2tlb_ready_i = 1'b0,
-    input rapt_pkg::l2tlb_rsp_t l2tlb_rsp_i = '0
+    input logic l2tlb_ready_i,
+    input rapt_pkg::l2tlb_rsp_t l2tlb_rsp_i
 );
   localparam unsigned L1dOffsetBits = $clog2(XLEN / 8);
   localparam unsigned L1dTagW = PADDR_BITS - L1D_LEN - L1D_LINE_LEN - L1dOffsetBits;
@@ -516,8 +517,7 @@ module rapt_l1d #(
   logic [L1D_LINE_LEN-1:0] release_word_q;
   logic wb_release_mode, release_clearing;
   assign release_clearing = wb_state == WB_RELEASE_CLEAR;
-  assign line_clearing = release_clearing || probe_clearing || local_cbo_line_clear
-      || target_clear;
+  assign line_clearing = release_clearing || probe_clearing || local_cbo_line_clear || target_clear;
   assign line_clear_set = release_clearing ? wb_set
       : local_cbo_line_clear ? cbo_addr[L1dLineOffset+:L1D_LEN]
       : (!probe_valid_i && target_request) ? target_addr[L1dLineOffset+:L1D_LEN] : probe_set;
@@ -555,7 +555,8 @@ module rapt_l1d #(
   // MSHR. A full word to an untouched line needs no read and allocates in place.
   assign store_mergeable = MergeStores && cacheable_w && !lsu_l1d.wzero && refill_ram(
       {lsu_l1d.waddr[XLEN-1:L1dLineOffset], {L1dLineOffset{1'b0}}},
-      lsu_l1d.waddr | XLEN'((1 << L1dLineOffset) - 1));
+      lsu_l1d.waddr | XLEN'((1 << L1dLineOffset) - 1)
+  );
   assign store_to_mshr = store_mergeable && !hit_w && (store_mshr_match || !store_allocate);
   // Choose store metadata before cacheability and byte-mask decode. Those
   // gate the victim request, not its lookup; other stores cannot capture it.
@@ -592,11 +593,11 @@ module rapt_l1d #(
           || ptw_arvalid || (lsu_l1d.wvalid && (!cacheable_w || lsu_l1d.wzero))
           || (l1d_state == LD_A && (!cacheable_r || l1d_atomic_lock)))));
   assign target_cbo = TargetedCoherence && writeback_cbo && !cbo_done_q;
-  assign target_store = lsu_l1d.wvalid && !cacheable_w
-      && rapt_pkg::addr_cacheable(lsu_l1d.waddr);
+  assign target_store = lsu_l1d.wvalid && !cacheable_w && rapt_pkg::addr_cacheable(lsu_l1d.waddr);
   assign target_load = l1d_state == LD_A && !load_perm_denied_q
-      && ((!cacheable_r && lsu_l1d.ordered && rapt_pkg::addr_cacheable(l1d_addr))
-          || l1d_atomic_lock);
+      && ((!cacheable_r && lsu_l1d.ordered && rapt_pkg::addr_cacheable(
+      l1d_addr
+  )) || l1d_atomic_lock);
   assign target_request = WriteBack && TargetedCoherence && !L2Inclusive
       && (target_cbo || ptw_arvalid || coherent_request || target_store || target_load);
   assign target_addr = target_cbo
@@ -846,6 +847,21 @@ module rapt_l1d #(
   end
 
 `ifndef SYNTHESIS
+`ifdef RAPT_SVA_ACTIVE
+  `RAPT_SVA_NEXT(clock, reset, L1D_WB_EMPTY_SCAN_FINISHES,
+                 WriteBack && wb_state == WB_SCAN && !dirty_any, wb_state == WB_IDLE)
+  `RAPT_SVA_IMPLY(clock, reset, L1D_WB_IDLE_CLEAN, WriteBack && writeback_idle,
+                  !dirty_any && !wb_busy && wb_state == WB_IDLE && !writeback_error)
+  `RAPT_SVA_IMPLY(clock, reset, L1D_WB_COHERENT_READY, WriteBack && coherent_ready,
+                  !wb_busy && wb_state == WB_IDLE && l1d_state == IDLE && !ptw_busy)
+  `RAPT_SVA_IMPLY(clock, reset, L1D_WB_FAILURE_HELD, WriteBack && writeback_failed,
+                  wb_busy && !wb_valid && !writeback_idle && !coherent_ready)
+  `RAPT_SVA_IMPLY(clock, reset, L1D_WB_LOCAL_STORE_OWNED, WriteBack && local_store_ready,
+                  !l1d_bus.wvalid || wb_valid)
+  `RAPT_SVA_IMPLY(clock, reset, L1D_WB_STARTS_IDLE, WriteBack && $past(wb_state == WB_IDLE)
+                  && wb_state != WB_IDLE,
+                  $past(l1d_bus.idle || (!L2Inclusive && !lsu_bus_write_pending_q)))
+`else
   assert property (@(posedge clock) disable iff (reset)
     (WriteBack && wb_state == WB_SCAN && !dirty_any) |=> wb_state == WB_IDLE);
   assert property (@(posedge clock) disable iff (reset)
@@ -864,6 +880,7 @@ module rapt_l1d #(
   ) && wb_state != WB_IDLE |-> $past(
       l1d_bus.idle || (!L2Inclusive && !lsu_bus_write_pending_q)
   ));
+`endif
 `endif
 
   // Report quiescence from registered activity.  wb_hold includes the
@@ -968,6 +985,7 @@ module rapt_l1d #(
       .Ways(L1D_N_WAYS),
       .LineWords(L1D_LINE_SIZE)
   ) u_data (
+      .sram_ctrl_i(sram_ctrl_i),
       .clock(clock),
       .reset(reset),
       .read_addr(sram_raddr),
@@ -1157,9 +1175,9 @@ module rapt_l1d #(
   assign ptw_bus_error = l1d_bus.ptw_rvalid && l1d_bus.ptw_rerr;
   // Check before the XLEN-wide PA cast, including Sv32 PPN[21:20]. Page
   // permission faults retain priority over an unsupported physical target.
-  assign ptw_read_error = ptw_bus_error || ptw_access_fault || (ptw_done
-      && !rapt_pkg::tlb_ppn_fits(ptw_result_ptag)
-      && !(stlb_mmu ? pf_store_ptw : pf_load_ptw));
+  assign ptw_read_error = ptw_bus_error || ptw_access_fault || (ptw_done && !rapt_pkg::tlb_ppn_fits(
+      ptw_result_ptag
+  ) && !(stlb_mmu ? pf_store_ptw : pf_load_ptw));
   assign load_tlb_miss = lsu_l1d.rvalid && !tlb_hit && !mis_align_load
                        && !(exu_l1d.mmu_en && exu_l1d.valid);
   assign ptw_req = (l1d_state == IDLE) && !wb_hold && !local_store_ready

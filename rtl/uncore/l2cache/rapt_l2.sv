@@ -67,26 +67,29 @@ module rapt_l2 #(
     parameter int L2_N_WAYS = `RAPT_L2_N_WAYS,
     parameter int PADDR_BITS = `RAPT_PADDR_BITS
 ) (
+    /* verilator lint_off UNUSEDSIGNAL */
+    input rapt_pkg::sram_ctrl_t sram_ctrl_i,
+    /* verilator lint_on UNUSEDSIGNAL */
     input clock,
     input reset,
-    input logic cbo_inval_i = 1'b0,
-    input logic [XLEN-1:6] cbo_block_i = '0,
+    input logic cbo_inval_i,
+    input logic [XLEN-1:6] cbo_block_i,
     output logic probe_valid_o,
     output logic [XLEN-1:0] probe_addr_o,
-    input logic probe_ready_i = 1'b1,
-    input logic probe_release_valid_i = 1'b0,
-    input logic [XLEN-1:0] probe_release_addr_i = '0,
-    input logic [XLEN-1:0] probe_release_data_i = '0,
+    input logic probe_ready_i,
+    input logic probe_release_valid_i,
+    input logic [XLEN-1:0] probe_release_addr_i,
+    input logic [XLEN-1:0] probe_release_data_i,
     output logic probe_release_ready_o,
-    input logic release_valid_i = 1'b0,
-    input logic [XLEN-1:0] release_addr_i = '0,
-    input logic [XLEN-1:0] release_data_i = '0,
-    input logic release_has_data_i = 1'b0,
-    input logic release_mask_i = 1'b0,
-    input logic release_last_i = 1'b0,
+    input logic release_valid_i,
+    input logic [XLEN-1:0] release_addr_i,
+    input logic [XLEN-1:0] release_data_i,
+    input logic release_has_data_i,
+    input logic release_mask_i,
+    input logic release_last_i,
     output logic release_ready_o,
     output logic release_ack_o,
-    input logic l1d_writeback_pending_i = 1'b0,
+    input logic l1d_writeback_pending_i,
     output logic probe_window_o,
     // CPU / rapt_bus side
     axi4_if.slave  axi_s,
@@ -406,6 +409,7 @@ module rapt_l2 #(
         .TagBits(18),
         .ClientBits(1)
     ) u_directory (
+        .sram_ctrl_i(sram_ctrl_i),
         .clock,
         .reset,
         .ready(dir_ready),
@@ -1055,9 +1059,13 @@ module rapt_l2 #(
           || ms_meta_tag[int'(ms_secondary_slot)] != ms_sched_tag[int'(ms_secondary_slot)]
           || ms_meta_state[int'(ms_secondary_slot)] == 2'b00
           || ms_meta_clients[int'(ms_secondary_slot)]
-              != d_client_read_id(ms_secondary_reload_payload[0+:ID_W]))
-      : d_client_read_id(ms_id[int'(ms_secondary_slot)])
-          != d_client_read_id(ms_secondary_reload_payload[0+:ID_W]);
+              != d_client_read_id(
+      ms_secondary_reload_payload[0+:ID_W]
+  )) : d_client_read_id(
+      ms_id[int'(ms_secondary_slot)]
+  ) != d_client_read_id(
+      ms_secondary_reload_payload[0+:ID_W]
+  );
   assign ms_secondary_capture = BoomBankedStore && ms_secondary_reload_valid
       && !ms_source_secondary_start
       && (ms_secondary_reload_needs_directory
@@ -2123,6 +2131,7 @@ module rapt_l2 #(
         assign sink_d_mask = bank_sinkd_word[0] ? 8'hf0 : 8'h0f;
       end
       rapt_l2_data_array u_data_array (
+          .sram_ctrl_i(sram_ctrl_i),
           .clock,
           .reset,
           .read_valid(bank_read),
@@ -2221,6 +2230,7 @@ module rapt_l2 #(
               .INST_ID(200 + gw * LineSize + gi),
               .USE_BWE(0)
           ) u_data_sram (
+              .sram_ctrl_i(sram_ctrl_i),
               .clock(clock),
               .en   (1'b1),
               .wen  (bank_wen),
@@ -2357,8 +2367,7 @@ module rapt_l2 #(
       && axi_m.bvalid && axi_m.bresp == 2'b00 && error_lookup_state == E_WRITE;
   // A forwarded burst has no local bank writes until its outer B. Once a
   // previous W lookup finishes, C may borrow the directory between W beats.
-  assign release_forward_active_preempt = burst_active && !burst_allocate
-      && !burst_lookup_pending;
+  assign release_forward_active_preempt = burst_active && !burst_allocate && !burst_lookup_pending;
   assign hit_probe_active = rs == R_HIT_PROBE || rs == R_HIT_PROBE_COMMIT;
   assign release_probe_preempt = rs == R_EVICT_PROBE || hit_probe_active || cbo_state == C_PROBE;
   assign release_lookup_candidate = BoomBankedStore && release_state == REL_IDLE
@@ -2514,8 +2523,8 @@ module rapt_l2 #(
       : dir_client_mark || ms_alloc_invalidate ? dir_lookup_way : bank_write_way;
   assign dir_write_tag = release_dir_write_fire ? TagBits'(rapt_pkg::canonical_addr(
       release_head_addr
-  ) >> TagLsb) :
-      hit_probe_commit ? r_tag_q : cache_install ? install_tag : ms_direct_complete ? TagBits'(rapt_pkg::canonical_addr(
+  ) >> TagLsb) : hit_probe_commit ? r_tag_q :
+      cache_install ? install_tag : ms_direct_complete ? TagBits'(rapt_pkg::canonical_addr(
       ms_line_addr[int'(ms_complete_slot)]
   ) >> TagLsb) : blocking_refill_invalidate ? victim_tag_q : dir_error_inv ? write_error_tag :
       cbo_exact_invalidate ? TagBits'(cbo_active_tag) : forward_replay_commit ?
@@ -2539,11 +2548,11 @@ module rapt_l2 #(
   // MSHR refills use IDs 8..11. Preserve ownership on local store hits.
   assign dir_write_clients = release_dir_write_fire ? 1'b0
       : hit_probe_commit ? 1'b0
-      : cache_install ? (!r_burst_fill && d_client_read_id(r_id))
-      : ms_direct_complete ? d_client_read_id(
+      : cache_install ? (!r_burst_fill && d_client_read_id(
+      r_id
+  )) : ms_direct_complete ? d_client_read_id(
       ms_id[int'(ms_complete_slot)]
-  ) :
-      dir_error_inv || cbo_exact_invalidate || ms_alloc_invalidate || blocking_refill_invalidate ||
+  ) : dir_error_inv || cbo_exact_invalidate || ms_alloc_invalidate || blocking_refill_invalidate ||
       burst_direct_commit ? 1'b0 : dir_client_mark ? 1'b1 : forward_replay_commit ? 1'b0 :
       forward_scalar_commit ? 1'b0 : w_hit_update && d_client_read_id(
       wbuf[w_wptr].id
@@ -2607,7 +2616,9 @@ module rapt_l2 #(
   assign evict_nested_release = BoomBankedStore
       && (rs == R_EVICT_PROBE || hit_probe_active) && release_dir_write_fire
       && release_head_addr[IndexMsb:IndexLsb] == r_idx_q
-      && TagBits'(rapt_pkg::canonical_addr(release_head_addr) >> TagLsb) == victim_tag_q;
+      && TagBits'(rapt_pkg::canonical_addr(
+      release_head_addr
+  ) >> TagLsb) == victim_tag_q;
   always_comb begin
     evict_capture_valid = 1'b0;
     evict_capture_way_only = 1'b0;
@@ -2617,15 +2628,24 @@ module rapt_l2 #(
       evict_capture_valid = 1'b1;
       {evict_capture_way, evict_capture_tag, evict_capture_state,
        evict_capture_dirty, evict_capture_clients} =
-          {burst_lookup_way, burst_lookup_tag, burst_lookup_state,
-           burst_lookup_dirty, burst_lookup_clients};
+          {
+        burst_lookup_way,
+        burst_lookup_tag,
+        burst_lookup_state,
+        burst_lookup_dirty,
+        burst_lookup_clients
+      };
     end else if (r_idle_store_branch) begin
       evict_capture_valid = 1'b1;
       {evict_capture_way, evict_capture_tag, evict_capture_state,
        evict_capture_dirty, evict_capture_clients} =
-          {wbuf[d_rptr].lookup_way, wbuf[d_rptr].lookup_tag,
-           wbuf[d_rptr].lookup_state, wbuf[d_rptr].lookup_dirty,
-           wbuf[d_rptr].lookup_clients};
+          {
+        wbuf[d_rptr].lookup_way,
+        wbuf[d_rptr].lookup_tag,
+        wbuf[d_rptr].lookup_state,
+        wbuf[d_rptr].lookup_dirty,
+        wbuf[d_rptr].lookup_clients
+      };
     end else if (rs == R_HIT && !(dir_client_mark && !dir_write_ready)
                  && !l2_sram_wblock && r_hit_q && BoomBankedStore
                  && dir_lookup_clients && !d_client_read_id(
@@ -2634,7 +2654,9 @@ module rapt_l2 #(
       evict_capture_valid = 1'b1;
       {evict_capture_way, evict_capture_tag, evict_capture_state,
        evict_capture_dirty, evict_capture_clients} =
-          {r_hit_way, r_tag_q, dir_lookup_state, dir_lookup_dirty, 1'b1};
+          {
+        r_hit_way, r_tag_q, dir_lookup_state, dir_lookup_dirty, 1'b1
+      };
     end else if (rs == R_HIT && !(dir_client_mark && !dir_write_ready)
                  && !l2_sram_wblock && !r_hit_q
                  && !(BoomBankedStore && release_pending
@@ -2646,20 +2668,19 @@ module rapt_l2 #(
         evict_capture_way_only = !dir_lookup_clients && !dir_lookup_dirty;
         {evict_capture_way, evict_capture_tag, evict_capture_state,
          evict_capture_dirty, evict_capture_clients} =
-            {dir_lookup_way, dir_lookup_tag, dir_lookup_state,
-             dir_lookup_dirty, dir_lookup_clients};
+            {
+          dir_lookup_way, dir_lookup_tag, dir_lookup_state, dir_lookup_dirty, dir_lookup_clients
+        };
       end else begin
         evict_capture_valid = 1'b1;
         evict_capture_way_only = 1'b1;
-        evict_capture_way = L2_N_WAYS == 1 ? '0
-            : WayBits'(victim_lfsr[9:0] >> (10 - WayBits));
+        evict_capture_way = L2_N_WAYS == 1 ? '0 : WayBits'(victim_lfsr[9:0] >> (10 - WayBits));
       end
     end
   end
   assign r_hit_blocking_miss = rs == R_HIT && !r_hit_q && evict_capture_valid
       && !(BoomBankedStore && !dir_lookup_clients && !dir_lookup_dirty);
-  assign refill_beat_fire = rs == R_MISS_R && axi_m.rvalid && axi_m.rready
-      && axi_m.rid == m_arid;
+  assign refill_beat_fire = rs == R_MISS_R && axi_m.rvalid && axi_m.rready && axi_m.rid == m_arid;
   assign refill_early_fire = refill_beat_fire && !r_store_fill && !r_burst_fill
       && !r_up_done && r_len == 8'd0 && r_fill_cnt == r_word
       && axi_m.rresp == 2'b00 && r_resp == 2'b00 && (!rs_rvalid || axi_s.rready);
@@ -2840,8 +2861,7 @@ module rapt_l2 #(
       && ((rs == R_HIT && !BoomBankedStore && r_hit_q
            && !(dir_client_mark && !dir_write_ready) && !l2_sram_wblock)
           || (rs == R_HIT_DATA && !l2_sram_wblock && r_selected_resident));
-  assign hit_error_advance = rs == R_ERROR && r_len != 8'd0
-      && (!rs_rvalid || axi_s.rready);
+  assign hit_error_advance = rs == R_ERROR && r_len != 8'd0 && (!rs_rvalid || axi_s.rready);
   typedef struct packed {
     logic [XLEN-1:0] data;
     logic [ID_W-1:0] id;
@@ -2862,8 +2882,12 @@ module rapt_l2 #(
       read_response_secondary = ms_source_primary_secondary;
     end else if (ms_early_send && (ms_early_overlap_state || rs == R_IDLE)) begin
       read_response_write = 1'b1;
-      read_response = {ms_retire_line[int'(ms_word[int'(ms_early_slot)])*XLEN+:XLEN],
-                       ms_id[int'(ms_early_slot)], ms_retire_resp, 1'b1};
+      read_response = {
+        ms_retire_line[int'(ms_word[int'(ms_early_slot)])*XLEN+:XLEN],
+        ms_id[int'(ms_early_slot)],
+        ms_retire_resp,
+        1'b1
+      };
       read_response_secondary_write = 1'b1;
       read_response_secondary = ms_primary_secondary[int'(ms_early_slot)];
     end
@@ -2874,9 +2898,12 @@ module rapt_l2 #(
                   && !(ms_retire_resp != 2'b00
                        && ms_secondary_reload_payload[SecondaryLenLsb+:8] != 8'd0)) begin
         read_response_write = 1'b1;
-        read_response = {ms_retire_line[int'(ms_secondary_reload_addr[WordOffsetMsb:
-                                                 WordOffsetLsb])*XLEN+:XLEN],
-                         ms_secondary_reload_payload[0+:ID_W], ms_retire_resp, 1'b1};
+        read_response = {
+          ms_retire_line[int'(ms_secondary_reload_addr[WordOffsetMsb:WordOffsetLsb])*XLEN+:XLEN],
+          ms_secondary_reload_payload[0+:ID_W],
+          ms_retire_resp,
+          1'b1
+        };
         read_response_secondary_write = 1'b1;
         read_response_secondary = 1'b1;
       end
@@ -3085,12 +3112,13 @@ module rapt_l2 #(
             end else if (refill_ready) rs_parent <= R_MISS_AR;
           end
         end
-        R_HIT_DATA: if (!l2_sram_wblock && r_selected_resident
-                     && (!rs_rvalid || axi_s.rready) && r_len == 8'd0) rs_parent <= R_IDLE;
-        R_EVICT_PROBE: if (!release_pending && (!victim_clients_q || probe_ready_i)) begin
+        R_HIT_DATA:
+        if (!l2_sram_wblock && r_selected_resident && (!rs_rvalid || axi_s.rready) && r_len == 8'd0)
+          rs_parent <= R_IDLE;
+        R_EVICT_PROBE:
+        if (!release_pending && (!victim_clients_q || probe_ready_i)) begin
         if (r_burst_fill && burst_lookup_hit) begin
-          if (burst_all_full)
-            rs_parent <= BoomBankedStore ? R_BURST_PUT_WRITE : R_INSTALL_WAIT;
+            if (burst_all_full) rs_parent <= BoomBankedStore ? R_BURST_PUT_WRITE : R_INSTALL_WAIT;
           else rs_parent <= R_BURST_HIT_READ;
         end else if (victim_dirty_q && victim_state_q != 2'b00) begin
           if (evict_ready) rs_parent <= R_EVICT_AW;
@@ -3099,7 +3127,8 @@ module rapt_l2 #(
           if (refill_ready) rs_parent <= R_MISS_INVALIDATE;
         end else if (refill_ready) rs_parent <= R_MISS_AR;
       end
-        R_EVICT_B: if (evict_done_valid) begin
+        R_EVICT_B:
+        if (evict_done_valid) begin
         if (axi_m.bresp != 2'b00)
           rs_parent <= r_burst_fill ? R_BURST_ERROR : r_store_fill ? R_STORE_ERROR : R_ERROR;
         else if (r_burst_fill && burst_all_full) rs_parent <= R_BURST_PUT_WRITE;
@@ -3116,11 +3145,12 @@ module rapt_l2 #(
           rs_parent <= BoomBankedStore ? R_BURST_PUT_WRITE : R_INSTALL_WAIT;
         else if (l2_sram_wblock) rs_parent <= R_BURST_HIT_READ;
       end
-        R_BURST_PUT_WRITE: if ((!burst_put_word_valid || bank_write_word_ready)
+        R_BURST_PUT_WRITE:
+        if ((!burst_put_word_valid || bank_write_word_ready)
                               && r_fill_cnt == L2_LINE_LEN'(LineSize - 1))
         rs_parent <= R_INSTALL_WAIT;
-        R_MISS_R: if (axi_m.rvalid && axi_m.rready && axi_m.rid == m_arid
-                    && axi_m.rlast) begin
+        R_MISS_R:
+        if (axi_m.rvalid && axi_m.rready && axi_m.rid == m_arid && axi_m.rlast) begin
         if (r_burst_fill)
           rs_parent <= (axi_m.rresp != 2'b00 || r_resp != 2'b00) ? R_BURST_ERROR
               : blocking_refill_streamed ? R_BURST_HIT_READ : R_INSTALL_WAIT;
@@ -3129,11 +3159,13 @@ module rapt_l2 #(
               : blocking_refill_streamed ? R_STORE_MERGE_READ : R_INSTALL_WAIT;
         else if (r_up_done || ((r_len == 8'd0) && (r_fill_cnt == r_word)
                  && (axi_m.rresp == 2'b00) && (r_resp == 2'b00)
-                 && (!rs_rvalid || axi_s.rready))) rs_parent <= R_IDLE;
+                 && (!rs_rvalid || axi_s.rready)))
+            rs_parent <= R_IDLE;
         else if (axi_m.rresp != 2'b00 || r_resp != 2'b00) rs_parent <= R_ERROR;
         else rs_parent <= R_INSTALL_WAIT;
       end
-        R_INSTALL_WAIT: if (!cache_install && !boom_bank_line_busy)
+        R_INSTALL_WAIT:
+        if (!cache_install && !boom_bank_line_busy)
         rs_parent <= r_burst_fill ? R_BURST_DONE : r_store_fill ? R_STORE_DONE : R_INSTALL_READ;
         R_MSHR_EARLY_INSTALL: if (!cache_install && !boom_bank_line_busy) rs_parent <= R_IDLE;
         R_STORE_DONE, R_STORE_ERROR, R_BURST_DONE: rs_parent <= R_IDLE;
@@ -3142,7 +3174,8 @@ module rapt_l2 #(
         R_BYPASS_R: if (bypass_done_valid) rs_parent <= R_IDLE;
         R_HIT_PROBE, R_HIT_PROBE_COMMIT, R_MISS_INVALIDATE, R_MISS_AR,
       R_EVICT_AW, R_EVICT_READ, R_EVICT_W, R_BYPASS_WAIT, R_BYPASS_AR,
-      R_INSTALL_READ: ;
+      R_INSTALL_READ:
+        ;
         default: rs_parent <= R_IDLE;
       endcase
   end
@@ -3171,7 +3204,8 @@ module rapt_l2 #(
           r_size <= ms_replay_payload[ID_W+XLEN+:3];
           r_burst <= ms_replay_payload[SecondaryBurstLsb+:2];
           r_wrap_mask <= read_wrap_mask(
-              ms_replay_payload[SecondaryLenLsb+:8], ms_replay_payload[ID_W+XLEN+:3]);
+              ms_replay_payload[SecondaryLenLsb+:8], ms_replay_payload[ID_W+XLEN+:3]
+          );
           r_cache <= ms_replay_payload[ID_W+XLEN+3+:4];
         end else if (r_idle_ar_take) begin
           {r_store_fill, r_burst_fill, r_client_marked, r_response_secondary} <= '0;

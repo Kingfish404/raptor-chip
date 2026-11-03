@@ -9,16 +9,15 @@
 //   IR=0x11 DMI     : 41-bit DMI access {addr[6:0], data[31:0], op[1:0]}
 //   IR=0x1F BYPASS  : 1-bit shift through
 //
-// IMPORTANT: this is a *simulation-only* implementation:
-//   - tck is tied to `clock` externally; no CDC. This matches dev.jtag.md
-//     Sec.5.5 RAPT_SIM_JTAG_SAMECLK.
+// Clocking: the TAP runs on `clock`. tck_en marks one TCK rising edge per pulse;
+// a chip samples its TCK pin into that enable, so there is no TCK clock tree and
+// no CDC. Simulation ties tck_en high, which makes tck equal to clock.
 //   - DTMCS.dmistat is hardwired to 0 (no busy/sticky modelling).
 //   - DMI requests are dispatched combinationally to the DM and the response
 //     is captured next cycle. Result of an op-N read is visible in op-(N+1)'s
 //     Capture-DR (the standard "delayed-read" DMI pattern).
 //
-// Future work: split tck/clk domains, add rapt_dmi_cdc.sv (4-phase
-// req/ack), add dtmcs.dmireset/dtmhardreset side-effects, model busy/sticky.
+// Future work: add dtmcs.dmireset/dtmhardreset side-effects, model busy/sticky.
 //
 // verilator lint_off UNUSEDSIGNAL
 module rapt_dtm #(
@@ -28,7 +27,8 @@ module rapt_dtm #(
     input logic reset,
     input logic trst_n, // async TAP reset (active low)
 
-    // JTAG pins (sampled on posedge clock; tck implicit = clock)
+    // JTAG pins, sampled on posedge clock when tck_en is high
+    input  logic tck_en,
     input  logic tms,
     input  logic tdi,
     output logic tdo,
@@ -170,7 +170,7 @@ module rapt_dtm #(
   assign dmi_addr_field = dr_q[40:34];
   assign dmi_fire       = (state_q == UPD_DR) && (ir_q == IrDmi) && (dmi_op_field != 2'b00);
 
-  assign dmi_req        = dmi_fire;
+  assign dmi_req        = dmi_fire && tck_en;
   assign dmi_wr         = dmi_op_field == 2'b10;
   assign dmi_addr       = dmi_addr_field;
   assign dmi_wdata      = dmi_data_field;
@@ -195,7 +195,7 @@ module rapt_dtm #(
       dmi_addr_q <= '0;
       dmi_data_q <= '0;
       dmi_op_q   <= '0;
-    end else begin
+    end else if (tck_en) begin
       // State action (taken on this rising edge while in state_q)
       unique case (state_q)
         TLR: begin

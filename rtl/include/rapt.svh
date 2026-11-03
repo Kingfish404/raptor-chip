@@ -2,6 +2,10 @@
 `define RAPT_SVH
 `include "rapt_config.svh"
 `include "rapt_sva.svh"
+// Safe memory-macro control setting for presets without an explicit override.
+`ifndef RAPT_SRAM_CTRL_RESET
+`define RAPT_SRAM_CTRL_RESET '0
+`endif
 // Keep expanded instruction words for observation only. Synthesis may opt in.
 `ifndef SYNTHESIS
 `define RAPT_UOP_HAS_INST

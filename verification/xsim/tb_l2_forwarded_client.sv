@@ -42,6 +42,7 @@ module tb_l2_forwarded_client;
       .XLEN(XLEN),
       .ID_W(IdW)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock,
       .reset,
       .probe_valid_o(probe_valid),
@@ -61,6 +62,10 @@ module tb_l2_forwarded_client;
       .release_ack_o(release_ack),
       .axi_s,
       .axi_m
+  ,
+      .cbo_inval_i(1'b0),
+      .cbo_block_i('0),
+      .l1d_writeback_pending_i(1'b0)
   );
   always #5 clock = ~clock;
   `include "tb_common.svh"

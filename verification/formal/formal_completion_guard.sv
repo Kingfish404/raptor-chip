@@ -46,6 +46,23 @@ module formal_completion_guard #(
     correct = accept == ref_accept && identity_match == ref_identity
         && payload_match == ref_payload;
   end
+
+`ifdef RAPT_FORMAL_NATIVE
+  always_comb begin
+    independent_owner_walk : assert (correct);
+    inactive_candidate : cover (!candidate_valid);
+    admitted_candidate : cover (accept);
+    if (candidate_valid && int'(candidate_index) < Entries) begin
+      dead_owner : cover (!live[candidate_index]);
+      stale_generation : cover (live[candidate_index] && !identity_match);
+      owner_not_executing : cover (identity_match && !executing[candidate_index]);
+      matching_payload : cover (identity_match && executing[candidate_index] && payload_match);
+      mismatched_payload : cover (identity_match && executing[candidate_index] && !payload_match);
+    end
+    if (IndexBits > $clog2(Entries) || (Entries & (Entries - 1)) != 0)
+      unused_index : cover (candidate_valid && int'(candidate_index) >= Entries);
+  end
+`endif
 endmodule
 
 // Production synthesis proxy. Diagnostic payload comparisons are deliberately

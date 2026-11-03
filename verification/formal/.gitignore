@@ -7,6 +7,7 @@
 !lemmas/
 !lemmas/*.smt2
 !formal_*.sv
+!formal_*.svh
 !npc_response_stability_main.cpp
 !synthesis_driver_fixture.sv
 !*_formal_if.sv

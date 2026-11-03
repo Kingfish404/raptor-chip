@@ -12,7 +12,7 @@ import shlex
 import shutil
 import subprocess
 import threading
-from yosys_common import ROOT, sha
+from yosys_common import ROOT, activation_witnesses, member, read_status, sha
 
 LEXICAL = re.compile(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*.*?\*/', re.S)
 
@@ -20,12 +20,13 @@ DECLARATION = re.compile(r"(?m)^\s*(module|interface|package)\s+([A-Za-z_]\w*)")
 
 GENERATED = ("rapt_idu_decoder.sv", "rapt_idu_decoder_c.sv")
 
-UNBOUNDED = {"induction", "equivalence", "compositional"}
+UNBOUNDED = {"induction", "smtbmc-induction", "equivalence", "compositional"}
 
 MARKERS = {
     "combinational": "SAT proof finished - no model found: SUCCESS!",
     "combinational-smt": "UNRESTRICTED COMBINATIONAL PROOF COMPLETE",
     "induction": "Induction step proven: SUCCESS!",
+    "smtbmc-induction": "successful proof by k-induction",
     "equivalence": "Equivalence successfully proven!",
     "compositional": "FORMAL COMPOSITION COMPLETE",
 }
@@ -192,6 +193,111 @@ def native_sat_command(top, model, *, proof=False):
     return command
 
 
+def native_smtbmc_config(top, model, *, depth=6, timeout=120, solver='yices', negative=False):
+    """A complete-model recipe: no data/state cuts, input stimuli, or forced initialization."""
+    if (not re.fullmatch(r'[A-Za-z_]\w*', top)
+            or any(c.isspace() or c in ';"' for c in str(model))
+            or type(depth) is not int or depth < 1 or type(timeout) is not int or timeout < 1
+            or solver not in ('yices', 'bitwuzla', 'z3')):
+        raise ValueError('Invalid native SMTBMC recipe')
+    return ('[tasks]\nprove\n' + ('' if negative else 'cover\n')
+        + '[options]\nprove: mode ' + ('bmc\n' if negative else 'prove\n')
+        + ('' if negative else 'cover: mode cover\n')
+        + f'depth {depth}\ntimeout {timeout}\n[engines]\nsmtbmc {solver}\n[script]\n'
+        + f'read_rtlil {model}\nhierarchy -check -top {top}\n'
+        + f'prep -top {top} -flatten\nasync2sync\nchformal -lower\ncheck -assert\n'
+        + 'select -assert-any t:$assert\nselect -assert-any t:$cover\n'
+        + 'select -assert-none t:$anyseq t:$anyconst A:blackbox=1\n')
+
+
+def native_smtbmc_scripts(task, body):
+    """Known SBY preparation/export passes, including its native free-state handling."""
+    header = f'# running in contract_{task}/model/\n'
+    removed = 'cover' if task == 'prove' else 'assert'
+    return {
+        'design.ys': f'# running in contract_{task}/src/\n' + body
+            + 'hierarchy -smtcheck\nrename -witness\n'
+            + 'write_jny -no-connections ../model/design.json\n'
+            + 'write_rtlil ../model/design.il\n',
+        'design_prep.ys': header + 'read_rtlil design.il\n'
+            + 'scc -select; simplemap; select -clear\nmemory_nordff\nasync2sync\n'
+            + 'chformal -assume -early\nopt_clean\n'
+            + 'formalff -setundef -clk2ff -ff2anyinit -hierarchy\n'
+            + f'chformal -live -fair -{removed} -remove\nopt_clean\ncheck\n'
+            + 'setundef -undriven -anyseq\nopt -fast\nrename -witness\nopt_clean\n'
+            + 'write_rtlil ../model/design_prep.il\n',
+        'design_smt2.ys': header + 'read_rtlil design_prep.il\nhierarchy -smtcheck\n'
+            + 'delete */t:$print\nformalff -assume\ndffunmap\nstat\n'
+            + 'write_smt2 -wires design_smt2.smt2\n',
+    }
+
+
+def audit_smtbmc_binding(receipt, directory, original_model, proved):
+    """Check actual induction, complete predicate inventories and every reached waveform."""
+    binding, artifacts = receipt['model_binding'], receipt['artifacts']
+    config = native_smtbmc_config(binding['top'], original_model,
+        depth=binding['depth'], timeout=binding['timeout'], solver=binding['solver'])
+    if member(directory, binding['proof_script']).read_text() != config:
+        raise ValueError('SMTBMC configuration changes the complete-model proof recipe')
+    predicates = {'assert': set(), 'cover': set()}
+    for name, body in re.findall(r'(?ms)^module \\(\S+)\n(.*?)^end$', proved):
+        cells = re.findall(r'^\s+cell \$(assert|assume|cover|check) \\(\S+)$', body, re.M)
+        if any(kind == 'check' for kind, _ in cells):
+            raise ValueError('Native SMTBMC bindings require lowered formal checks')
+        if name != binding['top'] and cells:
+            raise ValueError('Hierarchical formal predicates require a separate inventory audit')
+        if name == binding['top']:
+            for kind, cell in cells:
+                if kind in predicates:
+                    predicates[kind].add(cell)
+    if not all(predicates.values()):
+        raise ValueError('Missing complete top-level assertion or cover inventory')
+    body = config.split('[script]\n', 1)[1]
+    for task, flavor in (('prove', 'assert'), ('cover', 'cover')):
+        prefix = f'contract_{task}/'
+        scripts = native_smtbmc_scripts(task, body)
+        names = ['status', 'model/design_smt2.smt2']
+        for name in scripts:
+            names += ['model/' + name, 'model/' + name.removesuffix('.ys') + '.log']
+        if task == 'prove':
+            names += ['engine_0/logfile_basecase.txt', 'engine_0/logfile_induction.txt']
+        else:
+            names += ['engine_0/logfile.txt']
+        if any(prefix + name not in artifacts for name in names):
+            raise ValueError('Missing fingerprinted native SMTBMC task evidence')
+        if read_status(member(directory, prefix + 'status')) != 'PASS':
+            raise ValueError('SMTBMC task has not passed')
+        for name, expected in scripts.items():
+            script = prefix + 'model/' + name
+            log = script.removesuffix('.ys') + '.log'
+            imported = re.findall(r'^Input filename: (.*)$',
+                                  member(directory, log).read_text(), re.M)
+            source = {'design.ys': str(original_model), 'design_prep.ys': 'design.il',
+                      'design_smt2.ys': 'design_prep.il'}[name]
+            if member(directory, script).read_text() != expected or imported != [source]:
+                raise ValueError('Executed SMTBMC preparation/export changes the bound model')
+        smt = member(directory, prefix + 'model/design_smt2.smt2').read_text()
+        actual = re.findall(r'^; yosys-smt2-' + flavor + r' \d+ (.+)$', smt, re.M)
+        if len(actual) != len(set(actual)) or set(actual) != predicates[flavor]:
+            raise ValueError('SMTBMC proof omits or changes an original formal predicate')
+        for name in names:
+            if not name.endswith('.txt'):
+                continue
+            text = member(directory, prefix + name).read_text().lower()
+            statuses = re.findall(r'^.*status:\s*(\w+)\s*$', text, re.M)
+            if statuses != ['passed'] or 'error:' in text or 'assert failed' in text:
+                raise ValueError('Native base, induction or cover solver did not pass')
+    cover_log = 'contract_cover/engine_0/logfile.txt'
+    actual = activation_witnesses(member(directory, cover_log).read_text(), directory)
+    expected = {binding['top'] + ': ' + name for name in predicates['cover']}
+    rows = receipt['property_activation']
+    if len(rows) != len(expected) or {row['property'] for row in rows} != expected:
+        raise ValueError('SMTBMC activation does not cover the complete original inventory')
+    for row in rows:
+        if row['log'] != cover_log or actual.get(row['property']) != row['witness']:
+            raise ValueError('Reached SMTBMC property does not identify its claimed waveform')
+
+
 def audit_native_binding(receipt, directory):
     """Bind every native proof to its complete parameter-specific frontend graph."""
     binding = receipt.get("model_binding", {})
@@ -213,6 +319,9 @@ def audit_native_binding(receipt, directory):
     if not isinstance(origin, str) or not Path(origin).is_absolute():
         raise ValueError("Missing native proof artifact origin")
     original_model = member(Path(origin), binding["proved_model"])
+    if receipt['method'] == 'smtbmc-induction':
+        audit_smtbmc_binding(receipt, directory, original_model, proved)
+        return
     script = member(directory, binding["proof_script"]).read_text().strip()
     expected = native_sat_command(top, original_model, proof=True)
     if receipt["method"] != "induction" or script != expected:
@@ -222,15 +331,6 @@ def audit_native_binding(receipt, directory):
     imported = re.findall(r"^Input filename: (.*)$", log, re.M)
     if executed != [script] or imported != [str(original_model)]:
         raise ValueError("Native proof log does not execute the fingerprinted proof script")
-
-
-def member(directory, name):
-    if not isinstance(name, str) or not name or Path(name).is_absolute():
-        raise ValueError("Evidence paths must be nonempty relative paths")
-    path = (directory / name).resolve()
-    if not path.is_relative_to(directory.resolve()):
-        raise ValueError("Evidence path escapes its source/artifact directory")
-    return path
 
 
 def strip_noncode(text):
@@ -279,6 +379,15 @@ def obligations(path, name, kind, sequential, body):
     return sorted(set(result) | set(BLOCK_CONTRACTS.get(name, [])))
 
 
+def preset_xlens(config):
+    """Honor fixed XLEN declarations; leave unknown domains conservatively broad."""
+    definitions = re.findall(r'(?m)^\s*`define\s+RAPT_XLEN\s+(\S+)',
+                             strip_noncode(config.read_text()))
+    if definitions and all(value in ('32', '64') for value in definitions):
+        return tuple(sorted({int(value) for value in definitions}))
+    return (32, 64)
+
+
 def inventory(root):
     rtl = root / "rtl"
     sources = sorted(path for path in rtl.rglob("*")
@@ -286,7 +395,7 @@ def inventory(root):
     profiles = [
         f"{path.parent.name}/rv{xlen}/{memory}"
         for path in sorted((rtl / "configs").glob("*/rapt_config.svh"))
-        for xlen in (32, 64) for memory in ("dff", "sram")
+        for xlen in preset_xlens(path) for memory in ("dff", "sram")
     ]
     units = []
     for path in sources:

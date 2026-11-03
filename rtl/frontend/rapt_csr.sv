@@ -123,6 +123,12 @@ module rapt_csr #(
     end
   end
 
+  // MISA must advertise F and D exactly when the FEU exists.
+  if (rapt_pkg::FpuEnable != (`RAPT_MISA >> 5 & 1) || rapt_pkg::FpuEnable != (`RAPT_MISA >> 3 & 1))
+  begin : g_misa_fpu_mismatch
+    $error("RAPT_MISA F/D bits disagree with RAPT_NO_FPU");
+  end
+
   // ROU commit_special retires returns alone; FP effects only come from the
   // actual commit prefix. A return cannot share an FP update or a CSR write.
   `RAPT_SVA_IMPLY(clock, reset, CSR_RETURN_RETIRES_ALONE,
@@ -246,6 +252,8 @@ module rapt_csr #(
     // WARL fields are normalized before deriving the shared S-mode view.
     mstatus_write = (rou_csr.csr_wdata & XLEN'(`RAPT_CSR_MSTATUS_WMASK)) | `RAPT_CSR_MSTATUS_HW;
     if (mstatus_write[12:11] == 2'b10) mstatus_write[12:11] = 2'b00;
+    // Without an FPU, FS is read-only Off (WARL), which makes all FP state trap.
+    if (!rapt_pkg::FpuEnable) mstatus_write[14:13] = 2'b00;
     mstatus_write[XLEN-1] = mstatus_write[14:13] == 2'b11;
     sstatus_write = (mstatus_write & `RAPT_CSR_SSTATUS_CMASK) | `RAPT_CSR_SSTATUS_HW;
   end
@@ -778,14 +786,15 @@ module rapt_csr #(
         csr_state[MINSTRETH] <= csr[MINSTRETH] + 1;
       end
       if (rou_csr.valid) begin
-        if (rou_csr.fp_dirty) begin
+        if (rapt_pkg::FpuEnable && rou_csr.fp_dirty) begin
           csr_state[MSTATUS] <= csr[MSTATUS] | `RAPT_CSR_MSTATUS_SD | (XLEN'(3) << 13);
         end
         if (rou_csr.fp_flags_valid) begin
           csr_state[FCSR][4:0] <= csr[FCSR][4:0] | rou_csr.fp_flags;
         end
         if (rou_csr.csr_wen) begin
-          if (waddr_reg == FFLAGS || waddr_reg == FRM || waddr_reg == FCSR) begin
+          if (rapt_pkg::FpuEnable
+              && (waddr_reg == FFLAGS || waddr_reg == FRM || waddr_reg == FCSR)) begin
             csr_state[MSTATUS] <= csr[MSTATUS] | `RAPT_CSR_MSTATUS_SD | (XLEN'(3) << 13);
           end
           if (rou_csr.csr_addr == `RAPT_CSR_MBERR_STATUS) begin

@@ -40,6 +40,10 @@ module tb_iq_reclaim_random #(
       .issue,
       .occ_o(occupancy),
       .pmu_iq_full()
+  ,
+      .local_operand_wake('{default: '0}),
+      .combo_source('{default: '0}),
+      .resource_ready('1)
   );
   for (genvar s = 0; s < DispatchWidth; s++) assign disp.rs_idx[s] = disp.free_idx[s];
   int paired_issues = 0;
@@ -70,6 +74,10 @@ module tb_iq_reclaim_random #(
         .issue(shadow_issue),
         .occ_o(shadow_occupancy),
         .pmu_iq_full()
+    ,
+        .local_operand_wake('{default: '0}),
+        .combo_source('{default: '0}),
+        .resource_ready('1)
     );
     for (genvar s = 0; s < DispatchWidth; s++) begin
       assign shadow_disp.accept[s] = disp.accept[s];

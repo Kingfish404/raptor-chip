@@ -72,7 +72,24 @@ l1d_bus_if l1d_bus ();
       .l1d_bus,
       .csr_bcast,
       .pmp_update,
-      .exu_l1d
+      .exu_l1d,
+      .coherent_request(1'b0),
+      .coherent_write(1'b0),
+      .coherent_addr('0),
+      .probe_valid_i(1'b0),
+      .probe_addr_i('0),
+      .probe_release_ready_i(1'b0),
+      .release_ready_i(1'b0),
+      .release_ack_i(1'b0),
+      .probe_window_i(1'b0),
+      .writeback_drain(1'b0),
+      .writeback_cbo(1'b0),
+      .writeback_cbo_invalidate(1'b0),
+      .writeback_block('0),
+      .external_write_valid_i(1'b0),
+      .external_write_pending_i(1'b0),
+      .external_write_first_i('0),
+      .external_write_last_i('0)
   );
   task automatic init_inputs;
     begin

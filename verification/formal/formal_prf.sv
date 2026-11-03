@@ -552,6 +552,8 @@ module formal_prf_zero (
       .dbg_addr_i(5'b0),
       .dbg_wdata_i('0),
       .dbg_rdata_o(debug_value)
+  ,
+      .extra_address('{default: '0})
   );
   logic past_valid = 0;
   always_ff @(posedge clock) begin

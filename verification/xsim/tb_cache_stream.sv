@@ -111,6 +111,7 @@ module tb_cache_stream #(
   rapt_l1d #(
       .WriteBack(WriteBack)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .l2tlb_req_o(),
       .l2tlb_ready_i(1'b0),
       .l2tlb_rsp_i('0),
@@ -138,6 +139,8 @@ module tb_cache_stream #(
       .reset,
       .mem,
       .axi(cpu_axi)
+  ,
+      .rd_req_cacheable(1'b0)
   );
   if (Rnp) begin : g_rnp
     assign l2_probe_valid = 1'b0;
@@ -247,6 +250,7 @@ module tb_cache_stream #(
     );
   end else begin : g_l2
     rapt_l2 l2 (
+        .sram_ctrl_i(rapt_pkg::SramCtrlReset),
         .clock,
         .reset,
         .axi_s(cpu_axi),
@@ -1291,8 +1295,8 @@ module tb_cache_stream #(
         @(negedge clock);
         pmp_update.addr_we = 1;
         pmp_update.addr_idx = 0;
-        pmp_update.raw_addr = $bits(pmp_update.raw_addr)'((XLEN'('h80068000)
-          + XLEN'(LineBytes / 2)) >> 2);
+        pmp_update.raw_addr =
+            $bits(pmp_update.raw_addr)'((XLEN'('h80068000) + XLEN'(LineBytes / 2)) >> 2);
         pmp_update.napot_mask = 1;
         @(negedge clock);
         pmp_update.addr_we = 0;

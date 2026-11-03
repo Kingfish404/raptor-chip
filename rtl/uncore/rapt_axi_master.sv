@@ -15,7 +15,7 @@ module rapt_axi_master #(
     input logic reset,
 
     mem_link_if.slave mem,
-    input logic rd_req_cacheable = 1'b0,
+    input logic rd_req_cacheable,
     axi4_if.master axi
 );
   localparam int ReadCountW = $clog2(MAX_READ_OUTSTANDING + 1);
@@ -237,9 +237,11 @@ module rapt_axi_master #(
     end
   end
 
-  `RAPT_SVA_IMPLY(
-      clock, reset, AXI_READ_RESPONSE_OWNED, axi.rvalid,
-      (read_id_outstanding[axi.rid] != '0) || (read_request_fire && (mem.rd_req_id == axi.rid)))
+`ifdef RAPT_SVA_ACTIVE
+  wire read_response_owned = (read_id_outstanding[axi.rid] != '0)
+      || (read_request_fire && mem.rd_req_id == axi.rid);
+`endif
+  `RAPT_SVA_IMPLY(clock, reset, AXI_READ_RESPONSE_OWNED, axi.rvalid, read_response_owned)
   `RAPT_SVA_IMPLY(clock, reset, AXI_CARRIED_CACHE_ATTR,
                   USE_CARRIED_READ_CACHEABLE && mem.rd_req_valid,
                   read_cache_attr == rapt_pkg::axi_cache_attr(mem.rd_req_addr, mem.rd_req_pbmt))

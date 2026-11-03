@@ -41,6 +41,9 @@ module tb_rename_random;
       .cmu_bcast,
       .map_snapshot,
       .rat_snapshot
+  ,
+      .snapshot_ghr('0),
+      .snapshot_phr('0)
   );
   decoded_slot_t accepted[$], decoded;
   renamed_record_t output_model[$], pending_commit[$], expected, retired;

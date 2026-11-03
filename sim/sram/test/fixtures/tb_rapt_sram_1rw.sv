@@ -1,6 +1,7 @@
 `timescale 1ns / 1ps
 
 module tb_rapt_sram_1rw;
+  rapt_pkg::sram_ctrl_t sram_ctrl = rapt_pkg::SramCtrlReset;
   logic clock = 1'b0;
   logic en = 1'b0;
   logic wen = 1'b0;
@@ -16,6 +17,7 @@ module tb_rapt_sram_1rw;
       .DATA_WIDTH(32),
       .USE_BWE(1)
   ) dut (
+      .sram_ctrl_i(sram_ctrl),
       .clock,
       .en,
       .wen,
@@ -31,6 +33,11 @@ module tb_rapt_sram_1rw;
   endtask
 
   initial begin
+    sram_ctrl = 16'h4567;
+    #1;
+`ifdef RAPT_USE_SRAM_MACRO
+    if (dut.g_8x32.u_sram.ctrl !== sram_ctrl) $fatal(1, "1RW macro ctrl is disconnected");
+`endif
     en = 1'b1;
     wen = 1'b1;
     addr = 3'd2;

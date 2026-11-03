@@ -97,6 +97,7 @@ module wrap_ysyxsoc (
       .XLEN(32),
       .MemoryReadCredits(1)
   ) cpu (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock(clock),
       .writeback_error_o(unused_writeback_error),
       .reset(reset),
@@ -141,6 +142,8 @@ module wrap_ysyxsoc (
       .io_master_rdata(io_master_rdata),
       .io_master_rlast(io_master_rlast),
       .io_master_rid(io_master_rid)
+  ,
+      .jtag_tck_en(1'b1)
   );
 endmodule
 

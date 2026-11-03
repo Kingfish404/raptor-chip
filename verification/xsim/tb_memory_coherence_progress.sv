@@ -30,6 +30,7 @@ module tb_memory_coherence_progress #(
       .WriteBack(1),
       .LineRefill(1)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock,
       .reset,
       .coherent_request,
@@ -42,7 +43,22 @@ module tb_memory_coherence_progress #(
       .pmp_update,
       .lsu_l1d,
       .exu_l1d,
-      .l1d_bus
+      .l1d_bus,
+      .probe_valid_i(1'b0),
+      .probe_addr_i('0),
+      .probe_release_ready_i(1'b0),
+      .release_ready_i(1'b0),
+      .release_ack_i(1'b0),
+      .probe_window_i(1'b0),
+      .writeback_cbo(1'b0),
+      .writeback_cbo_invalidate(1'b0),
+      .writeback_block('0),
+      .external_write_valid_i(1'b0),
+      .external_write_pending_i(1'b0),
+      .external_write_first_i('0),
+      .external_write_last_i('0),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0)
   );
   rapt_bus #(
       .PostedWrites(PostedWrites)
@@ -312,8 +328,7 @@ module tb_memory_coherence_progress #(
     l1i_bus.araddr = PteAddr;
     l1i_bus.noallocate = 0;
     l1i_bus.rpbmt = 0;
-    store_addr = relation == 1 ? LoadAddr + XLEN'(Bytes)
-        : relation == 2 ? PteAddr : Base + 'h418;
+    store_addr = relation == 1 ? LoadAddr + XLEN'(Bytes) : relation == 2 ? PteAddr : Base + 'h418;
     for (int b = 0; b < 4096; b++) backing[b] = 8'(b ^ (b >> 4) ^ 'h5a);
     expected_load = memory_word('h100);
     expected_store = memory_word(int'(store_addr - Base));

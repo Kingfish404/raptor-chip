@@ -156,6 +156,7 @@ source snapshots and individual budgets.
 ## Formal, UVM and reference checks
 
 `make -C verification/formal help` lists block formal entry points.
+ALU and CLINT checks use their native matrix drivers through these Make targets.
 `formal-scope` inventories evidence; `formal-signoff` requires the configured
 receipts/reviews. Native elaboration and individual proofs do not qualify
 unrelated RTL or prove system-level progress. Keep assumptions, depth, tool
@@ -166,10 +167,68 @@ Native driver regressions (`python3 verification/scripts/test_formal_drivers.py`
 also need Slang support for `$past` and initialization. Select the compatible
 Yosys executable with `RAPTOR_YOSYS_REAL`.
 
-`formal-clint` qualifies the production bus interface, register byte lanes,
-timer/interrupt state and both sampling-restore branches. Its reviewed divider
-bindings are 1, 3 and the platform default 100. Other divider overrides need
-additional bindings. `FORMAL_CLINT_PRESETS` limits presets for focused work.
+With assertions enabled, `RAPT_FORMAL_NATIVE` lowers clocked implications for
+native Slang. Next-cycle checks cancel pending obligations on asynchronous reset;
+sampled expressions keep their clock context. Array reads may need named
+assertion-only predicates. Enabling this frontend mode is not proof that the
+embedded contracts hold; retain their counterexamples and producer obligations.
+Formal scope and native matrix drivers honor fixed-XLEN preset declarations.
+
+`formal-clint` qualifies the production bus interface, register byte lanes and
+timer/interrupt state. Its default divider bindings are 1, 3, 5, 10, 20, 25, 50 and
+100, including native FPGA clocks and documented clock/timebase examples. The
+Python driver's `clint --dividers` option selects an explicit set; other divider
+overrides need additional bindings. `FORMAL_CLINT_PRESETS` limits focused work.
+
+The native CLINT and AXI drivers accept `--reuse-evidence` for a completed matrix
+from the same Yosys build. Every requested binding is freshly elaborated. Reuse
+requires identical complete frontend graphs, audited induction commands and logs,
+and every activation query and witness. Mutation controls run again. The Make
+variables are `FORMAL_CLINT_REUSE_EVIDENCE` and `FORMAL_AXI_R_BUFFER_REUSE_EVIDENCE`.
+
+`make -C verification formal-sram FORMAL_SRAM_ARGS=--qualify` also emits SRAM
+binding reviews and receipts. It compares each requested preset and synthesis
+context with the complete proved memory graph. Add `--presets formal` inside
+`FORMAL_SRAM_ARGS` for focused binding work; other profiles remain pending.
+The `smtbmc-induction` receipt method checks the fixed native preparation recipe,
+actual base and induction passes, complete predicate inventories and every cover
+waveform. Macro cases use registered functional port models; physical macros and
+timing are outside this RTL equivalence claim.
+The SRAM observer samples its initial word without constraining DUT storage,
+then checks all bits through partial writes and reads of unwritten data.
+
+`python3 verification/scripts/formal_contract.py completion-guard --output <directory>`
+qualifies complete completion-owner guards with unconstrained inputs. The matrix
+checks live generation identity, executing state, both payload policies and unused
+index encodings against an independent owner-table walk. It includes singleton,
+odd and power-of-two table sizes, over-wide indexes, all base profiles and both
+synthesis contexts. Five mutations must produce actual counterexamples. Other
+parameter overrides and producer/ROB lifetime contracts remain separate work.
+
+`make -C verification formal-debug` runs the common debug contract driver.
+Its default `formal` preset exercises RV32/RV64, DM physical addresses of 32 bits
+and RV64 38 bits, and arbiter read/write credit pairs (1,1), (2,2), (32,1), (32,4).
+Use `FORMAL_DEBUG_ARGS="--blocks dm arbiter --presets formal"` for focused work.
+Positive cases require base and induction passes plus a waveform for every cover;
+each injected RTL fault must fail an assertion and produce a counterexample.
+`--controls skip` is exploratory and records that policy in the result.
+
+The DM checks include precise halt capture, held resume, SBA stalls, malformed
+responses, bus errors, byte strobes, busy access, autoincrement and deactivation
+while a transfer drains. Its responder needs no fairness assumption. Arbiter
+proofs assume legal stalled AXI sources, reserved SBA ID 15, bounded core credits
+and responses following accepted addresses; they check ownership, response
+routing, backpressure and idle accounting. These producer obligations still need
+composition with the actual core, SBA and router.
+
+The step check reuses the complete production ROU wrapper and checks admission
+capture, single-lane entry, token preservation, fetch blocking, interrupt masking
+and delayed resume acknowledgement. Its four-edge base case and induction prove
+unbounded safety; this does not establish instruction execution or retirement.
+The reset check composes the production arbiter with a verbatim copy of the
+inline controller from `rtl/rapt.sv`, retaining its source offsets and hash.
+Upstream core/L2 quiescence, top-level wiring, other parameter domains and system
+progress remain open. These debug results emit no whole-unit signoff receipts.
 
 The [UVM guide](uvm/README.md) covers module environments and the independent
 whole-chip scoreboard. Whole-chip runs require a class-capable Verilator and

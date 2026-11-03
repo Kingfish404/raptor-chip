@@ -68,6 +68,12 @@ module tb_l1i_access_sizes;
         .pmp_n2_fetch_fault(n2_fault[look]),
         .pmp_n3_fetch_fault(),
         .pmp_n4_fetch_fault()
+    ,
+        .shared_check_active(1'b0),
+        .shared_check_addr('0),
+        .shared_check_size_m1('0),
+        .shared_check_priv('0),
+        .shared_check_read(1'b0)
     );
   end
   for (genvar p = 0; p < 4; p++) begin : g_reference

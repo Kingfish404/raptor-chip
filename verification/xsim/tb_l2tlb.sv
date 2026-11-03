@@ -13,12 +13,20 @@ module tb_l2tlb #(
   rapt_l2tlb #(
       .Entries(Entries)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock(clock),
       .reset(reset),
       .flush(flush),
       .req_i(req),
       .ready_o(ready),
       .rsp_o(rsp)
+  ,
+      .cancel(1'b0),
+      .sfence_valid(1'b0),
+      .sfence_vpn('0),
+      .sfence_asid('0),
+      .sfence_all_vpn(1'b1),
+      .sfence_all_asid(1'b1)
   );
   task automatic tick;
     @(posedge clock);

@@ -32,6 +32,14 @@ module tb_backend_trace;
   logic sim_finish;
   logic [31:0] sim_exit_code;
 
+  rapt_debug_if debug ();
+  assign debug.enable = 1'b0;
+  assign debug.step = 1'b0;
+  assign debug.stepie = 1'b0;
+  assign debug.ebreak = '0;
+  assign debug.resume_valid = 1'b0;
+  assign debug.resume_pc = '0;
+
   rapt_backend dut (
       .clock,
       .reset,
@@ -53,6 +61,7 @@ module tb_backend_trace;
       .s_ext_irq_i(1'b0),
       .hart_id_i('0),
       .dm_haltreq_i(1'b0),
+      .debug(debug),
       .halted_o(halted),
       .halt_pc_o(halt_pc),
       .commit_fire_o(commit_fire),
@@ -67,6 +76,7 @@ module tb_backend_trace;
       .restore_phr
   );
   rapt_memory memory_env (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock,
       .reset,
       .ifu_l1i,
@@ -84,9 +94,18 @@ module tb_backend_trace;
       .writeback_done_o(writeback_done),
       .stores_empty_i(sq_empty),
       .writeback_drain_i(writeback_drain),
-      .writeback_error_o(memory_wb_error)
+      .writeback_error_o(memory_wb_error),
+      .writeback_clean_i(1'b1),
+      .writeback_cbo_i(1'b0),
+      .writeback_cbo_invalidate_i(1'b0),
+      .writeback_block_i('0),
+      .external_write_valid_i(1'b0),
+      .external_write_pending_i(1'b0),
+      .external_write_first_i('0),
+      .external_write_last_i('0)
   );
   rapt_l2_subsystem l2_subsystem (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock,
       .reset,
       .client(l2_client),
@@ -159,8 +178,8 @@ module tb_backend_trace;
     int commit_slots[rapt_pkg::CommitWidth+1];
     int head_empty, head_dispatch, head_execute, head_writeback;
     int head_store_wait, head_drain_wait, rename_stall, operand_stall;
-    int dispatch_stops[rapt_pkg::DispatchStopCount];
-    int head_wait_domain[rapt_pkg::ExecutionDomains];
+    int dispatch_stops  [rapt_pkg::DispatchStopCount];
+    int head_wait_domain[ rapt_pkg::ExecutionDomains];
     int ioq_full_cycles, head_wait_ioq_full, rob_stop_ioq_full;
     int second_empty, second_dispatch, second_execute, second_writeback;
     int store_first_second_wb, store_first_second_plain_wb;
@@ -198,8 +217,8 @@ module tb_backend_trace;
     ) && trace_count < MaxTrace && trace_count < max_insts) begin
       status = $fscanf(fd, "%h %h %h\n", pc_value, inst_value, npc_value);
       if (status == 3 && pc_value >= ImageBase && pc_value < ImageBase + XLEN'(image_size)) begin
-        trace_pc[trace_count] = pc_value;
-        trace_npc[trace_count] = npc_value;
+        trace_pc[trace_count]   = pc_value;
+        trace_npc[trace_count]  = npc_value;
         trace_inst[trace_count] = image_inst(pc_value);
         trace_count++;
       end

@@ -23,7 +23,7 @@ module rapt_backend #(
     parameter logic [rapt_pkg::CompletionPorts-1:0] RegisteredOperandWakePorts = '0
 ) (
     input logic clock,
-    input logic writeback_done = 1'b1,
+    input logic writeback_done,
     output logic writeback_drain,
     output logic writeback_clean,
     output logic writeback_cbo,
@@ -45,6 +45,7 @@ module rapt_backend #(
     input logic s_ext_irq_i,
     input logic [XLEN-1:0] hart_id_i,
     input logic dm_haltreq_i,
+    rapt_debug_if.hart debug,
     output logic halted_o,
     output logic [`RAPT_PC_BITS_OF(XLEN)-1:0] halt_pc_o,
     output logic commit_fire_o,
@@ -52,8 +53,8 @@ module rapt_backend #(
     input logic dbg_gpr_we_i,
     input logic [4:0] dbg_gpr_addr_i,
     input logic [XLEN-1:0] dbg_gpr_wdata_i,
-    input logic [63:0] snapshot_ghr = '0,
-    input logic [7:0] snapshot_phr = '0,
+    input logic [63:0] snapshot_ghr,
+    input logic [7:0] snapshot_phr,
     output logic history_restore,
     output logic [63:0] restore_ghr,
     output logic [7:0] restore_phr,
@@ -100,8 +101,9 @@ module rapt_backend #(
   rapt_pkg::execution_domain_t dispatch_candidate_domain[rapt_pkg::SteerScanEntries];
   logic dispatch_candidate_valid[rapt_pkg::SteerScanEntries];
   logic dispatch_candidate_ready[rapt_pkg::SteerScanEntries];
-  logic [rapt_pkg::index_bits(rapt_pkg::SteerScanEntries)-1:0]
-      dispatch_selected_candidate[rapt_pkg::DispatchWidth];
+  logic [rapt_pkg::index_bits(
+rapt_pkg::SteerScanEntries
+)-1:0] dispatch_selected_candidate[rapt_pkg::DispatchWidth];
   rapt_pkg::dispatch_slot_t dispatch[rapt_pkg::DispatchWidth];
   logic dispatch_valid[rapt_pkg::DispatchWidth];
   rou_lsu_if rou_lsu ();  // Commit
@@ -148,41 +150,38 @@ module rapt_backend #(
   assign completion_candidate[BranchPort] = wb_branch;
   assign completion_candidate[MemoryPort] = exu_ioq_bcast;
   assign completion_candidate[MulPort] = exu_wb_mul;
-  // Keep each physical CDB slot on its own combinational writer so a
-  // branch-queue CDB wake cannot see the branch packet it is producing.
+  // Each producer has an independent expression so a branch-queue wake
+  // cannot acquire a dependency on the branch packet it is producing.
+  function automatic rapt_pkg::completion_t accepted_completion(input rapt_pkg::completion_t packet,
+                                                                input logic accepted);
+    rapt_pkg::completion_t result;
+    result = packet;
+    result.valid = packet.valid && accepted;
+    return result;
+  endfunction
+
   for (
       genvar integer_port = 0; integer_port < IntegerIssuePorts; integer_port++
   ) begin : g_integer_accept
-    always_comb begin
-      completion_accepted[integer_port] = wb_integer_raw[integer_port];
-      completion_accepted[integer_port].valid = wb_integer_raw[integer_port].valid
-          && g_completion_guard[integer_port].accepted;
-    end
+    assign completion_accepted[integer_port] = accepted_completion(
+        wb_integer_raw[integer_port], g_completion_guard[integer_port].accepted
+    );
   end
-  always_comb begin
-    completion_accepted[BranchPort] = wb_branch;
-    completion_accepted[BranchPort].valid = wb_branch.valid
-        && g_completion_guard[BranchPort].accepted;
-  end
-  always_comb begin
-    completion_accepted[MemoryPort] = exu_ioq_bcast;
-    completion_accepted[MemoryPort].valid = exu_ioq_bcast.valid
-        && g_completion_guard[MemoryPort].accepted;
-  end
-  always_comb begin
-    completion_accepted[MulPort] = exu_wb_mul;
-    completion_accepted[MulPort].valid = exu_wb_mul.valid
-        && g_completion_guard[MulPort].accepted;
-  end
-
-  always_comb begin
-    completion_accepted[FpuPort] = wb_fpu;
-    completion_accepted[FpuPort].valid = wb_fpu.valid
-        && g_completion_guard[FpuPort].accepted;
-  end
+  assign completion_accepted[BranchPort] = accepted_completion(
+      wb_branch, g_completion_guard[BranchPort].accepted
+  );
+  assign completion_accepted[MemoryPort] = accepted_completion(
+      exu_ioq_bcast, g_completion_guard[MemoryPort].accepted
+  );
+  assign completion_accepted[MulPort] = accepted_completion(
+      exu_wb_mul, g_completion_guard[MulPort].accepted
+  );
+  assign completion_accepted[FpuPort] = accepted_completion(
+      wb_fpu, g_completion_guard[FpuPort].accepted
+  );
 
   // Dedicated external wake view: no branch producer is on this input.
-  rapt_pkg::completion_t branch_wake[rapt_pkg::CompletionPorts];
+  rapt_pkg::completion_t branch_wake [rapt_pkg::CompletionPorts];
   rapt_pkg::completion_t memory_wake;
   // Keep the memory-only wake writer independent of the other CDB slots.
   // Match the main operand bus even at the dedicated IEU wake inputs.
@@ -200,8 +199,7 @@ module rapt_backend #(
     end else begin : g_live
       always_comb begin
         branch_wake[p] = wb_integer_raw[p];
-        branch_wake[p].valid = wb_integer_raw[p].valid
-              && g_completion_guard[p].accepted;
+        branch_wake[p].valid = wb_integer_raw[p].valid && g_completion_guard[p].accepted;
       end
     end
   end
@@ -366,10 +364,10 @@ module rapt_backend #(
     P_STALL,
     P_SQUASH
   } pipe_state_e;
-  pipe_state_e pipe_decode_state[rapt_pkg::DecodeWidth];
-  pipe_state_e pipe_rename_state[rapt_pkg::RenameWidth];
+  pipe_state_e pipe_decode_state  [  rapt_pkg::DecodeWidth];
+  pipe_state_e pipe_rename_state  [  rapt_pkg::RenameWidth];
   pipe_state_e pipe_dispatch_state[rapt_pkg::DispatchWidth];
-  pipe_state_e pipe_commit_state[rapt_pkg::CommitWidth];
+  pipe_state_e pipe_commit_state  [  rapt_pkg::CommitWidth];
   logic [rapt_pkg::CompletionPorts-1:0] pipe_cdb_valid_mask, pipe_result_wb_valid_mask;
   logic [$clog2(rapt_pkg::CompletionPorts+1)-1:0] pipe_cdb_valid_count;
   logic pipe_cdb_multi_valid, pipe_result_wb_multi_valid;
@@ -392,8 +390,11 @@ module rapt_backend #(
     assign pipe_cdb_valid_mask[p] = completion[p].valid;
     assign pipe_result_wb_valid_mask[p] = completion[p].valid && completion[p].rd != 0;
   end
-  assign pipe_cdb_valid_count
-      = $clog2(rapt_pkg::CompletionPorts+1)'($countones(pipe_cdb_valid_mask));
+  assign pipe_cdb_valid_count = $clog2(
+      rapt_pkg::CompletionPorts + 1
+  )'($countones(
+      pipe_cdb_valid_mask
+  ));
   assign pipe_cdb_multi_valid = $countones(pipe_cdb_valid_mask) > 1;
   assign pipe_result_wb_multi_valid = $countones(pipe_result_wb_valid_mask) > 1;
 `endif
@@ -546,6 +547,7 @@ module rapt_backend #(
       .rou_lsu(rou_lsu),
 
       .dm_haltreq_i (dm_haltreq_i),
+      .debug        (debug),
       .halted_o     (halted_o),
       .halt_pc_o    (halt_pc_o),
       .commit_fire_o(commit_fire_o),
@@ -588,8 +590,8 @@ module rapt_backend #(
 
       .prf_rd(exu_prf),
 
-      .rou_cmu      (rou_cmu),
-      .cmu_bcast    (cmu_bcast),
+      .rou_cmu  (rou_cmu),
+      .cmu_bcast(cmu_bcast),
 
       .map_snapshot(rnu_map_snapshot),
       .rat_snapshot(rnu_rat_snapshot),
@@ -710,42 +712,54 @@ module rapt_backend #(
   );
 
   logic fp_issue_enable_unused;
-  rapt_feu #(
-      .LocalFpWake(LocalFpWake)
-  ) feu (
-      .early_completion(completion_accepted),
-      .int_source_regs,
-      .fp_dispatch_tag,
-      .fp_dispatch_generation,
-      .fp_retire_valid,
-      .fp_retire_value,
-      .fp_retire_owner,
-      .fp_retire_generation,
-      .fp_queue_read_uop(fp_queue_read_uop),
-      .fp_queue_read_tag(fp_queue_read_tag),
-      .operand_read_value(fp_queue_read_value),
-      .fp_queue_ready_tag(fp_queue_read_ready_tag),
-      .fp_queue_read_generation(fp_queue_read_generation),
-      .int_operand_address(int_operand_address[2]),
-      .int_operand_value(int_operand_value[2]),
-      .int_operand_valid(int_operand_valid[2]),
-      .local_fp_wake(local_fp_wake),
-      .cancel_valid(recovery.redirect_valid),
-      .cancel_head(recovery.head),
-      .cancel_owner(recovery.owner),
-      .completion(operand_wake),
-      .clock(clock),
-      .reset(reset),
-      .cmu_bcast(cmu_bcast),
-      .csr_bcast(csr_bcast),
-      .dispatch(dispatch),
-      .disp_fpq(disp_fpq),
+  if (rapt_pkg::FpuEnable) begin : g_feu
+    rapt_feu #(
+        .LocalFpWake(LocalFpWake)
+    ) feu (
+        .early_completion(completion_accepted),
+        .int_source_regs,
+        .fp_dispatch_tag,
+        .fp_dispatch_generation,
+        .fp_retire_valid,
+        .fp_retire_value,
+        .fp_retire_owner,
+        .fp_retire_generation,
+        .fp_queue_read_uop(fp_queue_read_uop),
+        .fp_queue_read_tag(fp_queue_read_tag),
+        .operand_read_value(fp_queue_read_value),
+        .fp_queue_ready_tag(fp_queue_read_ready_tag),
+        .fp_queue_read_generation(fp_queue_read_generation),
+        .int_operand_address(int_operand_address[2]),
+        .int_operand_value(int_operand_value[2]),
+        .int_operand_valid(int_operand_valid[2]),
+        .local_fp_wake(local_fp_wake),
+        .cancel_valid(recovery.redirect_valid),
+        .cancel_head(recovery.head),
+        .cancel_owner(recovery.owner),
+        .completion(operand_wake),
+        .clock(clock),
+        .reset(reset),
+        .cmu_bcast(cmu_bcast),
+        .csr_bcast(csr_bcast),
+        .dispatch(dispatch),
+        .disp_fpq(disp_fpq),
 
-      .wb_fpu(wb_fpu),
-      .wb_accept(g_completion_guard[FpuPort].accepted),
-      .completion_ready(1'b1),
-      .issue_enable(fp_issue_enable_unused)
-  );
+        .wb_fpu(wb_fpu),
+        .wb_accept(g_completion_guard[FpuPort].accepted),
+        .completion_ready(1'b1),
+        .issue_enable(fp_issue_enable_unused)
+    );
+  end else begin : g_no_feu
+    // FP uops trap at decode and retire through the integer system pipe, so
+    // the FP queue, its operand reads and the FPU completion port stay idle.
+    assign fp_queue_read_uop = '0;
+    assign fp_queue_read_tag = '0;
+    assign int_operand_address[2] = '0;
+    assign wb_fpu = '0;
+    assign fp_issue_enable_unused = 1'b0;
+    assign disp_fpq.free_found = '{default: 1'b0};
+    assign disp_fpq.free_idx = '{default: '0};
+  end
 
   // CMU (ComMit Unit)
   rapt_cmu cmu (
@@ -758,7 +772,7 @@ module rapt_backend #(
   );
 
   rapt_csr csrs (
-      .clock(clock),
+      .clock  (clock),
       .mtime_i(mtime_i),
 
       .hart_id_i(hart_id_i),
@@ -766,7 +780,7 @@ module rapt_backend #(
       .rou_csr(rou_csr),
       .exu_csr(exu_csr),
 
-      .csr_bcast(csr_bcast),
+      .csr_bcast (csr_bcast),
       .pmp_update(pmp_update),
 
       .s_int_pending(s_int_pending),

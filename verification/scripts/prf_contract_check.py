@@ -42,7 +42,7 @@ module prf_type_contract #(
   rou_cmu_if commits();
   cmu_bcast_if bcast();
   rapt_prf #(.CompletionT(completion_t)) dut (
-      .clock(1'b0), .reset(1'b0), .completion, .prf_rd(reads),
+      .clock(1'b0), .reset(1'b0), .completion, .extra_address('{default: '0}), .prf_rd(reads),
       .rou_cmu(commits), .cmu_bcast(bcast),
       .map_snapshot('{default:'0}), .rat_snapshot('{default:'0}),
       .rf(), .rf_map(), .dbg_we_i(1'b0), .dbg_addr_i('0), .dbg_wdata_i('0), .dbg_rdata_o()
@@ -79,8 +79,10 @@ endmodule
         source = f"{hdl / 'rapt_pkg.sv'} {hdl / 'backend/rapt_prf.sv'}"
         if top == "prf_type_contract":
             source += f" {fixture}"
+        # Verification mode retains cross-interface configuration assertions.
         command = ["yosys", "-Q", "-T", "-m", "slang", "-p",
-                   f"read_slang --threads 1 --single-unit --allow-toplevel-iface-ports -DSYNTHESIS "
+                   "read_slang --threads 1 --single-unit --allow-toplevel-iface-ports "
+                   "-USYNTHESIS "
                    f"{includes} {options} --top {top} {source}; hierarchy -check -top {top}; "
                    "select -assert-none t:$check t:$assert t:$assume t:$cover"]
         run = subprocess.run(command, capture_output=True, text=True, timeout=60)

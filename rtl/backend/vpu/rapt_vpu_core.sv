@@ -16,6 +16,7 @@ module rapt_vpu_core #(
     parameter bit OptimizeOperandReads = 1,
     parameter int AddrBits = $clog2(32*VLEN/8)
 ) (
+    input rapt_pkg::sram_ctrl_t sram_ctrl_i,
     input logic clock,
     reset,
     input logic head_safe,
@@ -172,6 +173,7 @@ module rapt_vpu_core #(
       .OptimizeOperandReads(OptimizeOperandReads),
       .AddrBits(AddrBits)
   ) u_vpu (
+      .sram_ctrl_i(sram_ctrl_i),
       .clock(clock),
       .reset(reset),
       .vector_enabled(vector_enabled),

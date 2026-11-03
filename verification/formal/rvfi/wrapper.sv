@@ -313,6 +313,7 @@ module rvfi_wrapper (
 `endif
 
   rapt uut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock(clock),
       .reset(reset),
       .external_write_valid_i(1'b0),
@@ -394,6 +395,8 @@ module rvfi_wrapper (
       .jtag_tms   (1'b1),
       .jtag_tdi   (1'b0),
       .jtag_tdo   (  /* unused */)
+  ,
+      .jtag_tck_en(1'b1)
   );
 
 endmodule

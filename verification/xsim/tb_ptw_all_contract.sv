@@ -506,6 +506,12 @@ module tb_ptw_pmp_span;
       .pmp_n2_fetch_fault(),
       .pmp_n3_fetch_fault(),
       .pmp_n4_fetch_fault()
+  ,
+      .shared_check_active(1'b0),
+      .shared_check_addr('0),
+      .shared_check_size_m1('0),
+      .shared_check_priv('0),
+      .shared_check_read(1'b0)
   );
   rapt_l1d_access #(
       .XLEN(XLEN)

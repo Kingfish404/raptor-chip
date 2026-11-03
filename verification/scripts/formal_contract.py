@@ -9,8 +9,13 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
-from formal_scope import binding_key, canonical_rtlil, inventory, native_sat_command
-from yosys_common import run_bounded, run_yosys_check, sha
+from formal_scope import (
+    audit_native_binding, binding_key, canonical_rtlil, inventory, member, native_sat_command,
+    native_smtbmc_config,
+)
+from yosys_common import (
+    activation_witnesses, copy_native_artifact, run_bounded, run_sby, run_yosys_check, sha,
+)
 
 
 CONTRACTS = {
@@ -103,15 +108,66 @@ def run_contract(args, *, description, top, source, option, option_help, scope, 
     return 0
 
 
-def native_contract(name):
+def native_contract(name, *, dividers=None):
+    if name == 'completion-guard':
+        shapes = [(1, 1, 1, 1), (7, 3, 6, 5), (8, 4, 7, 5), (32, 4, 6, 5),
+                  (32, 4, 7, 5), (64, 4, 7, 5), (96, 4, 7, 5), (127, 4, 8, 6),
+                  (128, 4, 8, 5)]
+        variants = [dict(Entries=entries, GenerationBits=generation, PhysBits=physical,
+                         ArchBits=architectural, EnforcePayload=enforce)
+                    for entries, generation, physical, architectural in shapes
+                    for enforce in (0, 1)]
+        variants += [dict(Entries=32, IndexBits=6, GenerationBits=4, PhysBits=7,
+                          ArchBits=5, EnforcePayload=enforce) for enforce in (0, 1)]
+        return dict(name=name, label='completion ownership guard',
+            top='formal_completion_guard', timeout=120, method='smtbmc-induction',
+            xlen_parameter=False, depth=6, solver='yices',
+            source='rtl/backend/rapt_completion_guard.sv',
+            harness='verification/formal/formal_completion_guard.sv',
+            unit='rtl/backend/rapt_completion_guard.sv:rapt_completion_guard',
+            variants=[(parameters, dict(RAPT_FORMAL_NATIVE=True)) for parameters in variants],
+            assumptions=[],
+            property_map={
+                'functional': 'All three outputs equal an independent one-hot owner-table walk',
+                'owner-generation': 'Identity requires a live slot and exact generation match',
+                'executing-only': 'Acceptance requires the authoritative executing bit',
+                'payload-policy': 'Both destination fields are compared; EnforcePayload selects '
+                                  'whether mismatches reject acceptance',
+                'invalid-index': 'Unused and over-wide index encodings keep all outputs inactive',
+                'candidate-valid': 'Inactive producers cannot publish any guard output',
+            },
+            rationale='Unrestricted combinational inputs, no reset, initialization or producer '
+                      'assumptions. Both payload policies, singleton/non-power-of-two/power-of-two '
+                      'tables, over-wide indexes and explicit identity widths are reviewed for '
+                      'every legal preset/XLEN/storage profile and synthesis context. Every '
+                      'cover has a waveform. Other parameter overrides and authoritative ROB '
+                      'allocation/generation lifetime remain separate review/composition work.',
+            scope='Complete candidate validity, owner identity, execution admission and immutable '
+                  'payload policy for the listed table/index/identity widths. No claim that '
+                  'producer or ROB allocation histories themselves are correct.',
+            mutations=[
+                ('generation', 'owner_generation[candidate_index] == candidate_generation',
+                 "1'b1", {}, {}, None),
+                ('executing', ' && executing[candidate_index]', '', {}, {}, None),
+                ('payload', '(!EnforcePayload || payload_match)', "1'b1",
+                 dict(EnforcePayload=1), {}, None),
+                ('live', 'live[candidate_index]', "1'b1", {}, {}, None),
+                ('valid', "candidate_valid && int'(candidate_index) < Entries",
+                 "int'(candidate_index) < Entries", {}, {}, None),
+            ])
     if name == 'clint':
+        dividers = tuple(dividers) if dividers is not None else (1, 3, 5, 10, 20, 25, 50, 100)
+        if (not dividers or any(value < 1 for value in dividers)
+                or len(set(dividers)) != len(dividers)):
+            raise ValueError('CLINT dividers must be positive and distinct')
+        divider_list = ', '.join(map(str, dividers))
         return dict(
-            name=name, label='CLINT', top='formal_clint',
+            name=name, label='CLINT', top='formal_clint', timeout=900,
             source='rtl/perip/rapt_clint.sv', harness='verification/formal/formal_clint.sv',
             unit='rtl/perip/rapt_clint.sv:rapt_clint',
             variants=[(dict(MTIME_DIV=divider),
                        dict(FORMAL=True, RAPT_FORMAL_NATIVE=True))
-                      for divider in (1, 3, 100)],
+                      for divider in dividers],
             property_map=dict(
                 functional='Independent byte-address register model, divider phase and ticks, '
                            'and interrupt levels',
@@ -120,14 +176,14 @@ def native_contract(name):
                 reset='Time, compare, software interrupt and divider reset together; '
                       'reset wins simultaneous writes'),
             scope='Complete production CLINT and production bus interface. Arbitrary addresses, '
-                  'data and strobes; divider bypass, non-power-of-two and default production '
-                  'divider. FPGA replay overlays are a separate experimental design.',
+                  f'data and strobes; explicit divider bindings {divider_list}.',
             rationale='The complete register, read-data, timer and interrupt relation '
                       'is checked against independent byte-address histories. Both XLENs, all '
                       'presets/storage/synthesis contexts are '
-                      'elaborated. Divider values 1, 3 and 100 cover the bypass, non-power-of-two '
-                      'counter and current platform default; other explicit divider overrides '
-                      'require additional bindings. The first sampled edge resets; later reset '
+                      f'elaborated. Reviewed divider values are {divider_list}; other explicit '
+                      'divider overrides require additional bindings. The default set includes '
+                      'bypass, non-power-of-two counters, native FPGA clocks and documented '
+                      'clock/timebase examples. The first sampled edge resets; later reset '
                       'and writes remain arbitrary. Interconnect routing and hart interrupt '
                       'delivery are composition obligations.',
             mutations=[
@@ -153,7 +209,7 @@ def native_contract(name):
     }
     if name != 'axi-r-buffer':
         raise ValueError('Unknown native contract: ' + name)
-    return dict(name=name, label='AXI R buffer', top='formal_axi_r_buffer',
+    return dict(name=name, label='AXI R buffer', top='formal_axi_r_buffer', timeout=120,
         source='rtl/uncore/rapt_axi_r_buffer.sv', harness='verification/formal/formal_uncore.sv',
         unit='rtl/uncore/rapt_axi_r_buffer.sv:rapt_axi_r_buffer', property_map=property_map,
         variants=[(dict(ID_W=4, Enable=enable), {}) for enable in (0, 1)],
@@ -185,8 +241,11 @@ def native_cases(contract, profiles):
         xlen = int(isa.removeprefix('rv'))
         for synthesis, (parameters, defines) in itertools.product(
                 (False, True), contract['variants']):
+            parameters = dict(parameters)
+            if contract.get('xlen_parameter', True):
+                parameters = dict(XLEN=xlen, **parameters)
             cases.append(dict(id=f'{contract["name"]}-{len(cases):04d}', preset=preset,
-                xlen=xlen, memory=memory, parameters=dict(XLEN=xlen, **parameters),
+                xlen=xlen, memory=memory, parameters=parameters,
                 defines=dict(RAPT_RV64=xlen == 64, RAPT_USE_SRAM_MACRO=memory == 'sram',
                              SYNTHESIS=synthesis, **defines)))
     return cases
@@ -207,20 +266,81 @@ def native_cover_command(base, contract, case, event, witness):
             + f'-dump_vcd {witness}')
 
 
+def native_events(contract, case):
+    if contract['name'] == 'clint':
+        return range(10)
+    return range(12 if case['parameters']['Enable'] else 6)
+
+
+def reuse_native_proof(directory, binding, *, output, previous, contract, expected_report):
+    """Reuse complete solver evidence only after binding the full current frontend graph."""
+    cached = previous / 'proofs' / binding['model_sha256']
+    data = (cached / 'results.json').read_bytes()
+    if hashlib.sha256(data).hexdigest() != expected_report:
+        raise ValueError('Cached native proof report changed')
+    report = json.loads(data)
+    if not report['certified'] or report['model_sha256'] != binding['model_sha256']:
+        raise ValueError('Cached native proof is incomplete or belongs to another model')
+    directory.mkdir(parents=True)
+    artifacts = {name: copy_native_artifact(member(cached, name), directory, name, digest)
+                 for name, digest in report['artifacts'].items()}
+    for name in ('frontend.il', 'read.ys'):
+        source = output / binding['directory'] / name
+        digest = binding['frontend_sha256' if name == 'frontend.il' else 'read_sha256']
+        target = 'current-binding/' + name
+        artifacts[target] = copy_native_artifact(source, directory, target, digest)
+    case = binding['case']
+    origin = report.get('proof_origin', str(cached))
+    proof = report['proof']
+    log = member(directory, proof['log']).read_text()
+    if proof['exit'] != 0 or 'Induction step proven: SUCCESS!' not in log or 'ERROR:' in log:
+        raise ValueError('Cached native induction did not finish successfully')
+    audit_native_binding(dict(
+        method='induction', log=proof['log'], artifacts=artifacts,
+        parameters=dict(case['parameters'], defines=case['defines']),
+        profile=f'{case["preset"]}/rv{case["xlen"]}/{case["memory"]}',
+        model_binding=dict(top=contract['top'], canonical_sha256=binding['model_sha256'],
+            proved_model='frontend.il', bound_model='current-binding/frontend.il',
+            read_script='current-binding/read.ys', proof_script=proof['script'],
+            proof_root=origin)), directory)
+    expected = {f'activated[{event}]' for event in native_events(contract, case)}
+    if (len(report['activation']) != len(expected)
+            or {row['property'] for row in report['activation']} != expected):
+        raise ValueError('Cached native activation coverage is incomplete')
+    for row in report['activation']:
+        if any(row[name] not in artifacts for name in ('script', 'log', 'witness')):
+            raise ValueError('Cached activation artifacts are not fingerprinted')
+        event = int(row['property'][10:-1])
+        witness = member(directory, row['witness'])
+        command = native_cover_command(
+            native_sat_command(contract['top'], Path(origin) / 'frontend.il'),
+            contract, case, event, Path(origin) / row['witness'])
+        text = member(directory, row['log']).read_text()
+        executed = re.findall(r"^-- Running command `(.*)' --$", text, re.M)
+        imported = re.findall(r"^Input filename: (.*)$", text, re.M)
+        if (row['exit'] != 0 or member(directory, row['script']).read_text().strip() != command
+                or executed != [command] or imported != [str(Path(origin) / 'frontend.il')]
+                or 'SAT solving finished - model found:' not in text or 'ERROR:' in text
+                or not witness.stat().st_size):
+            raise ValueError('Cached native activation query or witness is invalid')
+    report.update(proof_origin=origin, reused_from=str(cached), artifacts=artifacts)
+    return report
+
+
 def write_native_receipts(output, result, scope, contract):
     """Publish current per-binding receipts without qualifying unrelated RTL units."""
     unit_id = contract['unit']
     unit = next(u for u in scope['units'] if u['id'] == unit_id)
     property_map = contract['property_map']
-    if set(property_map) != set(unit['obligations']):
-        raise ValueError('Native property mapping differs from required obligations')
+    if not set(unit['obligations']) <= set(property_map):
+        raise ValueError('Native property mapping removes required obligations')
     parameters = {profile: [] for profile in scope['profiles']}
     for case in native_cases(contract, scope['profiles']):
         profile = f'{case["preset"]}/rv{case["xlen"]}/{case["memory"]}'
         parameters[profile].append(dict(case['parameters'], defines=case['defines']))
     review = dict(sources=scope['sources'], units={unit_id: dict(
         rationale=contract['rationale'],
-        obligations=unit['obligations'], profiles=scope['profiles'],
+        obligations=sorted(property_map), profiles=scope['profiles'],
         parameter_bindings=parameters, property_map=property_map)})
     (output / 'contract-review.json').write_text(json.dumps(review, indent=2) + '\n')
     reports = {}
@@ -240,19 +360,15 @@ def write_native_receipts(output, result, scope, contract):
         for name in ('frontend.il', 'read.ys'):
             origin = output / binding['directory'] / name
             expected = binding['frontend_sha256' if name == 'frontend.il' else 'read_sha256']
-            if sha(origin) != expected:
-                raise ValueError('Native binding artifact changed: ' + str(origin))
-            target = directory / 'bindings' / case['id'] / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(origin, target)
-            artifacts[str(target.relative_to(directory))] = sha(target)
+            target = f'bindings/{case["id"]}/{name}'
+            artifacts[target] = copy_native_artifact(origin, directory, target, expected)
         params = dict(case['parameters'], defines=case['defines'])
         profile = f'{case["preset"]}/rv{case["xlen"]}/{case["memory"]}'
         if binding_key(params) not in {binding_key(p) for p in parameters[profile]}:
             raise ValueError('Native parameter binding was not reviewed')
-        for obligation in unit['obligations']:
+        for obligation in property_map:
             receipt = dict(status='PASS', unit=unit_id, obligation=obligation, profile=profile,
-                           method='induction', parameters=params,
+                           method=contract.get('method', 'induction'), parameters=params,
                            assumptions=list(result['assumptions']), inputs=result['sources'],
                            harness=contract['harness'],
                            log=report['proof']['log'], artifacts=artifacts,
@@ -266,6 +382,9 @@ def write_native_receipts(output, result, scope, contract):
                                read_script=f'bindings/{case["id"]}/read.ys',
                                proof_script=report['proof']['script'],
                                proof_root=report.get('proof_origin', str(directory))))
+            if receipt['method'] == 'smtbmc-induction':
+                receipt['model_binding'].update(depth=contract['depth'],
+                    timeout=result['timeout'], solver=contract['solver'])
             path = directory / f'receipt-{case["id"]}-{obligation}.json'
             path.write_text(json.dumps(receipt, indent=2) + '\n')
             receipts.append(str(path.relative_to(output)))
@@ -275,7 +394,7 @@ def write_native_receipts(output, result, scope, contract):
 
 def qualify_native_contract(args):
     """Qualify complete production models with native induction and activation witnesses."""
-    contract = native_contract(args.contract)
+    contract = native_contract(args.contract, dividers=getattr(args, 'dividers', None))
     root, output = args.source_root.resolve(), args.output.resolve()
     if min(args.jobs, args.timeout) < 1:
         raise ValueError('Jobs and timeout must be positive')
@@ -305,12 +424,30 @@ def qualify_native_contract(args):
         inputs[str(path.relative_to(root))] = sha(path)
     result = dict(complete=False, whole_rtl_signoff=False, sources=inputs,
                   bindings=[], proofs=[], negative_controls=[],
-                  assumptions=['First sampled edge resets; all other safety inputs remain free'],
-                  coverage_stimuli='CLINT tick witnesses hold reset and writes inactive '
-                                   'except for the requested tick/write collision. Other cover '
-                                   'events use free primary inputs. No internal state is forced.',
+                  assumptions=contract.get('assumptions', [
+                      'First sampled edge resets; all other safety inputs remain free']),
+                  coverage_stimuli=('All primary inputs remain free.' if contract.get('method')
+                                   == 'smtbmc-induction' else
+                                   'CLINT tick witnesses hold reset and writes inactive except '
+                                   'for the requested tick/write collision. Other cover events '
+                                   'use free primary inputs. No internal state is forced.'),
                   scope=contract['scope'],
+                  timeout=args.timeout,
                   yosys=subprocess.check_output([yosys, '-V'], text=True).strip())
+    previous, cached = None, {}
+    if args.reuse_evidence:
+        if contract.get('method') == 'smtbmc-induction':
+            raise ValueError('This SMTBMC contract requires fresh solver evidence')
+        previous = args.reuse_evidence.resolve()
+        data = (previous / 'results.json').read_bytes()
+        prior = json.loads(data)
+        if not prior['complete'] or prior['yosys'] != result['yosys']:
+            raise ValueError('Reuse requires a complete native contract and the same Yosys build')
+        cached = {row['model_sha256']: row['report_sha256'] for row in prior['proofs']}
+        if len(cached) != len(prior['proofs']):
+            raise ValueError('Duplicate cached native proof class')
+        result['reuse'] = dict(directory=str(previous),
+                               matrix_sha256=hashlib.sha256(data).hexdigest())
     def save():
         (output / 'results.json').write_text(json.dumps(result, indent=2) + '\n')
     def compile_model(directory, case, source=dut):
@@ -325,7 +462,11 @@ def qualify_native_contract(args):
                 f'{root}/rtl/rapt_pkg.sv {source} {harness}')
         raw = directory / 'frontend.il'
         script = directory / 'read.ys'
-        script.write_text(read + f'\nhierarchy -check -top {top}\nwrite_rtlil {raw}\n')
+        prepare = ''
+        if contract.get('method') == 'smtbmc-induction':
+            prepare = f'prep -top {top} -flatten\nasync2sync\nchformal -lower\ncheck -assert\n'
+        script.write_text(read + f'\nhierarchy -check -top {top}\n' + prepare
+                          + f'write_rtlil {raw}\n')
         with (directory / 'compile.log').open('w') as stream:
             child = run_bounded([yosys, '-Q', '-T', '-m', 'slang', '-s', str(script)],
                                  stdout=stream, stderr=subprocess.STDOUT, timeout=args.timeout)
@@ -341,9 +482,26 @@ def qualify_native_contract(args):
         directory.mkdir(parents=True)
         original = output / binding['directory'] / 'frontend.il'
         model = directory / 'frontend.il'
-        shutil.copy2(original, model)
-        if sha(model) != binding['frontend_sha256']:
-            raise ValueError('Original frontend model changed')
+        copy_native_artifact(original, directory, model.name, binding['frontend_sha256'])
+        if contract.get('method') == 'smtbmc-induction':
+            config = native_smtbmc_config(top, model, depth=contract['depth'],
+                timeout=args.timeout, solver=contract['solver'], negative=negative)
+            (directory / 'contract.sby').write_text(config)
+            check, _ = run_sby(directory, args.timeout, yosys=yosys, negative=negative)
+            if not check['passed']:
+                raise RuntimeError('Incomplete native SMTBMC contract: ' + str(directory))
+            if negative:
+                return dict(detected=True, **check)
+            log = 'contract_cover/engine_0/logfile.txt'
+            activation = activation_witnesses((directory / log).read_text(), directory)
+            smt = (directory / 'contract_cover/model/design_smt2.smt2').read_text()
+            expected = {top + ': ' + name for name in re.findall(
+                r'^; yosys-smt2-cover \d+ (.+)$', smt, re.M)}
+            if not expected or set(activation) != expected:
+                raise ValueError('Native SMTBMC contract is missing a cover waveform')
+            return dict(certified=True, proof=dict(script='contract.sby', log='run.log', exit=0),
+                activation=[dict(property=name, log=log, witness=witness)
+                            for name, witness in activation.items()])
         base = native_sat_command(top, model)
         if negative:
             witness = directory / 'counterexample.vcd'
@@ -357,12 +515,8 @@ def qualify_native_contract(args):
                                directory, 'proof', args.timeout,
                                'Induction step proven: SUCCESS!')
         case = binding['case']
-        if args.contract == 'clint':
-            events = range(10)
-        else:
-            events = range(12 if case['parameters']['Enable'] else 6)
         covers = []
-        for event in events:
+        for event in native_events(contract, case):
             witness = directory / f'event{event}.vcd'
             row = run_yosys_check(native_cover_command(base, contract, case, event, witness),
                                   directory, f'event{event}', args.timeout,
@@ -370,8 +524,7 @@ def qualify_native_contract(args):
             covers.append(dict(property=f'activated[{event}]', **row))
         return dict(certified=True, proof=proof, activation=covers)
     save()
-    profiles = [f'{preset}/rv{xlen}/{memory}' for preset, xlen, memory in
-                itertools.product(presets, (32, 64), ('dff', 'sram'))]
+    profiles = [profile for profile in scope['profiles'] if profile.split('/')[0] in presets]
     cases = native_cases(contract, profiles)
     def compile_case(case):
         return compile_model(output / 'models' / case['id'], case)
@@ -387,13 +540,17 @@ def qualify_native_contract(args):
     def prove_group(item):
         key, rows = item
         directory = output / 'proofs' / key
-        row = check_model(directory, rows[0])
+        if key in cached:
+            row = reuse_native_proof(directory, rows[0], output=output, previous=previous,
+                                     contract=contract, expected_report=cached[key])
+        else:
+            row = check_model(directory, rows[0])
         row.update(model_sha256=key, representative=rows[0]['case']['id'],
                    artifacts={str(p.relative_to(directory)): sha(p)
                               for p in directory.rglob('*') if p.is_file()})
         (directory / 'results.json').write_text(json.dumps(row, indent=2) + '\n')
         print(f'PASS: {contract["label"]} model {key[:12]}', flush=True)
-        return dict(model_sha256=key, certified=True,
+        return dict(model_sha256=key, certified=True, reused='reused_from' in row,
                     report_sha256=sha(directory / 'results.json'))
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
         for row in pool.map(prove_group, groups.items()):
@@ -416,6 +573,8 @@ def qualify_native_contract(args):
         save()
     if inputs != {name: sha(root / name) for name in inputs}:
         raise RuntimeError('Native proof input epoch changed')
+    if previous and sha(previous / 'results.json') != result['reuse']['matrix_sha256']:
+        raise RuntimeError('Cached native matrix changed during qualification')
     qualified = (len(result['bindings']) == len(cases)
                  and len(result['proofs']) == len(groups)
                  and all(p['certified'] for p in result['proofs'])
@@ -439,15 +598,22 @@ def main(argv=None):
     for name, config in CONTRACTS.items():
         command = commands.add_parser(name, description=config['description'])
         add_options(command, config['option'], config['option_help'])
-    for name in ('axi-r-buffer', 'clint'):
-        command = commands.add_parser(name, help='Qualify the complete ' + native_contract(name)['label'],
+    native_names = ('axi-r-buffer', 'clint', 'completion-guard')
+    for name in native_names:
+        config = native_contract(name)
+        command = commands.add_parser(name, help='Qualify the complete ' + config['label'],
                                       description=qualify_native_contract.__doc__)
         add_options(command)
         command.add_argument('--presets', nargs='+')
         command.add_argument('--jobs', type=int, default=8)
-        command.add_argument('--timeout', type=int, default=120)
+        command.add_argument('--timeout', type=int, default=config['timeout'])
+        command.add_argument('--reuse-evidence', type=Path,
+                             help='Rebind complete native proofs to freshly elaborated full models')
+        if name == 'clint':
+            command.add_argument('--dividers', type=int, nargs='+',
+                                 help='Explicit positive MTIME_DIV bindings to qualify')
     args = parser.parse_args(argv)
-    if args.contract in ('axi-r-buffer', 'clint'):
+    if args.contract in native_names:
         return qualify_native_contract(args)
     config = CONTRACTS[args.contract]
     return run_contract(args, **config)

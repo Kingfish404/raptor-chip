@@ -38,11 +38,11 @@ module rapt_bpu_tage #(
     parameter int AuxPositions = 0
 ) (
     `RAPT_BPU_DIRP_PORTS,
-    input logic [`RAPT_PC_BITS_OF(XLEN)-1:0] aux_pc = '0,
-    input logic [3:0] aux_position = '0,
-    input logic [3:0] request_aux_position = '0,
-    input logic [GHR_LEN-1:0] aux_ghr = '0,
-    input logic [PHR_LEN-1:0] aux_phr = '0,
+    input logic [`RAPT_PC_BITS_OF(XLEN)-1:0] aux_pc,
+    input logic [3:0] aux_position,
+    input logic [3:0] request_aux_position,
+    input logic [GHR_LEN-1:0] aux_ghr,
+    input logic [PHR_LEN-1:0] aux_phr,
     output logic aux_taken,
     output logic request_aux_taken
 );
@@ -565,6 +565,8 @@ module rapt_bpu_tage #(
   assign clear_t1 = alloc_t1 || (no_allocation && up_provider < 2'd1);
   logic t1_valid_read[ValidReads], t1_u_read[1];
   logic [IDX_LEN-1:0] t1_read_index[ValidReads];
+  wire [IDX_LEN-1:0] t1_useful_read_index[1];
+  assign t1_useful_read_index[0] = up_t1_idx;
   assign t1_read_index[0] = rd_t1_idx;
   assign t1_read_index[ValidReads-1] = up_t1_idx;
   for (genvar k = 0; k < AuxPorts; k++) begin : g_t1_aux
@@ -589,7 +591,7 @@ module rapt_bpu_tage #(
   ) u_t1_useful (
       .clock,
       .clear(reset || init || (update_en && u_clear_pulse)),
-      .read_index('{up_t1_idx}),
+      .read_index(t1_useful_read_index),
       .read_bit(t1_u_read),
       .write_valid(update_en && (useful_t1 || clear_t1)),
       .write_index(up_t1_idx),
@@ -605,6 +607,8 @@ module rapt_bpu_tage #(
   assign clear_t2 = alloc_t2 || (no_allocation && up_provider < 2'd2);
   logic t2_valid_read[ValidReads], t2_u_read[1];
   logic [IDX_LEN-1:0] t2_read_index[ValidReads];
+  wire [IDX_LEN-1:0] t2_useful_read_index[1];
+  assign t2_useful_read_index[0] = up_t2_idx;
   assign t2_read_index[0] = rd_t2_idx;
   assign t2_read_index[ValidReads-1] = up_t2_idx;
   for (genvar k = 0; k < AuxPorts; k++) begin : g_t2_aux
@@ -629,7 +633,7 @@ module rapt_bpu_tage #(
   ) u_t2_useful (
       .clock,
       .clear(reset || init || (update_en && u_clear_pulse)),
-      .read_index('{up_t2_idx}),
+      .read_index(t2_useful_read_index),
       .read_bit(t2_u_read),
       .write_valid(update_en && (useful_t2 || clear_t2)),
       .write_index(up_t2_idx),
@@ -645,6 +649,8 @@ module rapt_bpu_tage #(
   assign clear_t3 = alloc_t3 || (no_allocation && up_provider < 2'd3);
   logic t3_valid_read[ValidReads], t3_u_read[1];
   logic [IDX_LEN-1:0] t3_read_index[ValidReads];
+  wire [IDX_LEN-1:0] t3_useful_read_index[1];
+  assign t3_useful_read_index[0] = up_t3_idx;
   assign t3_read_index[0] = rd_t3_idx;
   assign t3_read_index[ValidReads-1] = up_t3_idx;
   for (genvar k = 0; k < AuxPorts; k++) begin : g_t3_aux
@@ -669,7 +675,7 @@ module rapt_bpu_tage #(
   ) u_t3_useful (
       .clock,
       .clear(reset || init || (update_en && u_clear_pulse)),
-      .read_index('{up_t3_idx}),
+      .read_index(t3_useful_read_index),
       .read_bit(t3_u_read),
       .write_valid(update_en && (useful_t3 || clear_t3)),
       .write_index(up_t3_idx),

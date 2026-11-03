@@ -32,7 +32,13 @@
       .flush(cmu_bcast.fence_time),
       .req_i(l2_req),
       .ready_o(l2_ready),
-      .rsp_o(l2_rsp)
+      .rsp_o(l2_rsp),
+      .cancel(1'b0),
+      .sfence_valid(1'b0),
+      .sfence_vpn('0),
+      .sfence_asid('0),
+      .sfence_all_vpn(1'b1),
+      .sfence_all_asid(1'b1)
   );
   rapt_l1i #(
       .L2Tlb(L2Tlb)

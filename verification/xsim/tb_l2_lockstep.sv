@@ -40,6 +40,7 @@ module tb_l2_lockstep;
       .XLEN(XLEN),
       .ID_W(IdW)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock,
       .reset,
       .probe_ready_i(probe_ready),
@@ -51,6 +52,19 @@ module tb_l2_lockstep;
       .probe_window_o(probe_new_window),
       .axi_s(s_new),
       .axi_m(m_new)
+  ,
+      .cbo_inval_i(1'b0),
+      .cbo_block_i('0),
+      .probe_release_valid_i(1'b0),
+      .probe_release_addr_i('0),
+      .probe_release_data_i('0),
+      .release_valid_i(1'b0),
+      .release_addr_i('0),
+      .release_data_i('0),
+      .release_has_data_i(1'b0),
+      .release_mask_i(1'b0),
+      .release_last_i(1'b0),
+      .l1d_writeback_pending_i(1'b0)
   );
   rapt_l2_reference #(
       .XLEN(XLEN),

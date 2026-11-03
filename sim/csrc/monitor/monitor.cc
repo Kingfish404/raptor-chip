@@ -580,6 +580,7 @@ static int parse_args(int argc, char *argv[])
     fprintf(stderr, "Sample window options require --sample-output=FILE\n");
     exit(1);
   }
+  sample_window_set_pmu_provider(perf_snapshot);
   sample_window_configure(sample_output, sample_warmup, sample_instructions,
                           sample_has_pc, sample_start_pc, ckpt_load_dir != nullptr);
   if (ckpt_load_dir != NULL)

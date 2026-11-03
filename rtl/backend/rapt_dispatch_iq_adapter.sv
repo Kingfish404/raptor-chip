@@ -9,6 +9,7 @@ module rapt_dispatch_iq_adapter #(
     output CapacityT capacity,
     input GrantT grant
 );
+`ifndef SYNTHESIS
   if (!($bits(
           capacity.free_index[0]
       ) >= rapt_pkg::index_bits(
@@ -20,10 +21,11 @@ module rapt_dispatch_iq_adapter #(
       ))) begin : g_invalid_index
     $error("Dispatch index types cannot encode every execution-queue slot");
   end
+`endif
   for (genvar s = 0; s < Width; s++) begin : g_slot
     assign capacity.ready[s] = queue.free_found[s];
     assign capacity.free_index[s] = $bits(capacity.free_index[s])'(queue.free_idx[s]);
     assign queue.accept[s] = grant.accept[s];
-    assign queue.rs_idx[s] = (rapt_pkg::index_bits(queue.RS_SIZE))'(grant.index[s]);
+    assign queue.rs_idx[s] = grant.index[s];
   end
 endmodule

@@ -3,6 +3,7 @@
 // Bank priority is SinkC > SourceC > live SinkD > buffered line write
 // > SourceD-write > SourceD-read. A displaced buffered beat retries.
 module rapt_l2_data_array (
+    input rapt_pkg::sram_ctrl_t sram_ctrl_i,
     input logic clock,
     input logic reset,
     input logic read_valid,
@@ -176,6 +177,7 @@ module rapt_l2_data_array (
         .INST_ID(200 + bank),
         .USE_BWE(1)
     ) u_data_sram (
+        .sram_ctrl_i(sram_ctrl_i),
         .clock,
         .en((full_start || full_finish || scalar_fire && read_chunk[1:0] == 2'(bank))
             || (source_c_fire && source_c_read_chunk[1:0] == 2'(bank)) || bank_wen),

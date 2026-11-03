@@ -2,10 +2,12 @@
 
 // Reference model for the single-clock simulation DTM.  The production block
 // explicitly does not implement CDC or busy/sticky status, so this proof keeps
-// TRST inactive and verifies its synchronous TAP/DMI contract.
+// TRST inactive and verifies its synchronous TAP/DMI contract, including arbitrary
+// pauses of the chip's sampled-TCK enable (one DMI request per TAP update).
 module formal_dtm (
     input logic clock,
     input logic reset,
+    input logic tck_en,
     input logic tms,
     input logic tdi,
     input logic [31:0] dmi_rdata,
@@ -19,14 +21,14 @@ module formal_dtm (
   localparam logic [4:0] IrBypass = 5'h1f;
 
   logic tdo, dmi_req, dmi_wr;
-  logic [6:0] dmi_addr;
+  logic [ 6:0] dmi_addr;
   logic [31:0] dmi_wdata;
-  logic [3:0] dut_state;
+  logic [ 3:0] dut_state;
   logic [4:0] dut_ir_shift, dut_ir;
   logic [40:0] dut_dr;
-  logic [6:0] dut_dmi_addr_q;
+  logic [ 6:0] dut_dmi_addr_q;
   logic [31:0] dut_dmi_data_q;
-  logic [1:0] dut_dmi_op_q;
+  logic [ 1:0] dut_dmi_op_q;
 
   rapt_dtm #(
       .IDCODE(Idcode)
@@ -34,6 +36,7 @@ module formal_dtm (
       .clock,
       .reset,
       .trst_n(1'b1),
+      .tck_en,
       .tms,
       .tdi,
       .tdo,
@@ -55,9 +58,9 @@ module formal_dtm (
   logic [3:0] ref_state, ref_state_next;
   logic [4:0] ref_ir_shift, ref_ir;
   logic [40:0] ref_dr;
-  logic [6:0] ref_dmi_addr_q;
+  logic [ 6:0] ref_dmi_addr_q;
   logic [31:0] ref_dmi_data_q;
-  logic [1:0] ref_dmi_op_q;
+  logic [ 1:0] ref_dmi_op_q;
   logic [40:0] ref_capture;
 
   always_comb begin
@@ -102,7 +105,7 @@ module formal_dtm (
       ref_dmi_addr_q <= '0;
       ref_dmi_data_q <= '0;
       ref_dmi_op_q <= '0;
-    end else begin
+    end else if (tck_en) begin
       unique case (ref_state)
         4'd0: ref_ir <= IrIdcode;
         4'd3: ref_dr <= ref_capture;
@@ -116,7 +119,7 @@ module formal_dtm (
             ref_dmi_addr_q <= ref_dr[40:34];
             if (ref_dr[1:0] == 2'b01) begin
               ref_dmi_data_q <= dmi_rdata;
-              ref_dmi_op_q <= dmi_resp;
+              ref_dmi_op_q   <= dmi_resp;
             end else if (ref_dr[1:0] == 2'b10) begin
               ref_dmi_op_q <= dmi_resp;
             end
@@ -133,8 +136,7 @@ module formal_dtm (
 
   logic ref_dmi_req, ref_tdo;
   always_comb begin
-    ref_dmi_req = ref_state == 4'd8 && ref_ir == IrDmi
-                  && ref_dr[1:0] != 2'b00;
+    ref_dmi_req = tck_en && ref_state == 4'd8 && ref_ir == IrDmi && ref_dr[1:0] != 2'b00;
     ref_tdo = 1'b0;
     if (ref_state == 4'd11) ref_tdo = ref_ir_shift[0];
     else if (ref_state == 4'd4) ref_tdo = ref_dr[0];
@@ -165,6 +167,7 @@ module formal_dtm (
     if (f_past_valid && !reset) begin
       cover (dmi_req && !dmi_wr);
       cover (dmi_req && dmi_wr);
+      cover (!tck_en && ref_state == 4'd8 && ref_ir == IrDmi);
       cover (ref_state == 4'd3 && ref_ir == IrDtmcs);
     end
   end

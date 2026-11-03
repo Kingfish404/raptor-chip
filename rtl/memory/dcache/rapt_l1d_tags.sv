@@ -22,15 +22,15 @@ module rapt_l1d_tags #(
     input logic clock,
     input logic reset,
     input logic fence_time,
-    input logic probe_read = 1'b0,
-    input logic inspect_read = 1'b0,
+    input logic probe_read,
+    input logic inspect_read,
     // 0: load/probe, 1: store/inspect, 2: physical clear, 3: update.
-    input logic [1:0] inspect_source = 2'b0,
+    input logic [1:0] inspect_source,
     input logic [L1D_SIZE-1:0] clear_set,
-    input logic clear_enable = 1'b1,
-    input logic clear_line_valid = 1'b0,
-    input logic [L1D_LEN-1:0] clear_line_idx = '0,
-    input logic [L1dTagW-1:0] clear_line_tag = '0,
+    input logic clear_enable,
+    input logic clear_line_valid,
+    input logic [L1D_LEN-1:0] clear_line_idx,
+    input logic [L1dTagW-1:0] clear_line_tag,
     output logic [L1D_N_WAYS-1:0] clear_line_dirty_way,
     input logic [L1D_LEN-1:0] addr_idx,
     input logic [L1D_LINE_LEN-1:0] addr_offset,
@@ -55,20 +55,20 @@ module rapt_l1d_tags #(
     output logic load_victim_dirty,
     input logic l1d_update,
     input logic l1d_valid_u,
-    input logic line_update = 1'b0,
-    input logic [L1D_LINE_SIZE-1:0] line_mask = '0,
-    input logic [L1D_LINE_SIZE-1:0] line_dirty_mask = '0,
+    input logic line_update,
+    input logic [L1D_LINE_SIZE-1:0] line_mask,
+    input logic [L1D_LINE_SIZE-1:0] line_dirty_mask,
     input logic l1d_inv_all_ways,
     input logic [L1dTagW-1:0] l1d_tag_u,
     input logic [L1D_LEN-1:0] l1d_idx,
     input logic [L1D_LINE_LEN-1:0] l1d_off,
     input logic [L1dWayW-1:0] l1d_way,
-    input logic update_dirty = 1'b0,
-    input logic [L1D_LEN-1:0] inspect_set = '0,
-    input logic [L1dWayW-1:0] inspect_way = '0,
+    input logic update_dirty,
+    input logic [L1D_LEN-1:0] inspect_set,
+    input logic [L1dWayW-1:0] inspect_way,
     // Cleaning retires the whole line's dirty state (clean_mask must be '1).
-    input logic clean_valid = 1'b0,
-    input logic [L1D_LINE_SIZE-1:0] clean_mask = '0,
+    input logic clean_valid,
+    input logic [L1D_LINE_SIZE-1:0] clean_mask,
     output logic [L1dTagW-1:0] inspect_tag,
     output logic [L1D_LINE_SIZE-1:0] inspect_valid,
     output logic [L1D_LINE_SIZE-1:0] inspect_dirty,
@@ -395,12 +395,21 @@ module rapt_l1d_tags #(
     assign dirty_inspect[way] = line_dirty_q[way][inspect_set] ? raw_dirty_inspect : '0;
     assign dirty_update[way] = line_dirty_q[way][l1d_idx] ? raw_dirty_update : '0;
 `ifndef SYNTHESIS
+`ifdef RAPT_SVA_ACTIVE
+    wire dirty_is_valid = (dirty_update[way] & ~valid_update[way]) == '0
+        && (dirty_inspect[way] & ~valid_inspect[way]) == '0;
+    wire dirty_inspect_matches = line_dirty_q[way][inspect_set] == (|dirty_inspect[way]);
+    `RAPT_SVA(clock, reset, L1D_TAG_DIRTY_VALID, dirty_is_valid)
+    `RAPT_SVA_IMPLY(clock, reset, L1D_TAG_CLEAN_FULL_LINE, clean_valid, clean_mask == '1)
+    `RAPT_SVA(clock, reset, L1D_TAG_DIRTY_INSPECT, dirty_inspect_matches)
+`else
     assert property (@(posedge clock) disable iff (reset)
       (dirty_update[way] & ~valid_update[way]) == '0
         && (dirty_inspect[way] & ~valid_inspect[way]) == '0);
     assert property (@(posedge clock) disable iff (reset) clean_valid |-> clean_mask == '1);
     assert property (@(posedge clock) disable iff (reset)
       line_dirty_q[way][inspect_set] == (|dirty_inspect[way]));
+`endif
 `endif
 
     for (genvar set_idx = 0; set_idx < L1D_SIZE; set_idx++) begin : g_set_state

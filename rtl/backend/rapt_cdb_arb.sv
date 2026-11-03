@@ -6,10 +6,10 @@ module rapt_cdb_arb #(
 ) (
     input logic clock,
     input logic reset,
-    input logic flush = 1'b0,
-    input logic cancel_valid = 1'b0,
-    input logic [rapt_pkg::index_bits(rapt_pkg::CoreConfig.rob_entries)-1:0] cancel_head = '0,
-    input logic [rapt_pkg::index_bits(rapt_pkg::CoreConfig.rob_entries)-1:0] cancel_owner = '0,
+    input logic flush,
+    input logic cancel_valid,
+    input logic [rapt_pkg::index_bits(rapt_pkg::CoreConfig.rob_entries)-1:0] cancel_head,
+    input logic [rapt_pkg::index_bits(rapt_pkg::CoreConfig.rob_entries)-1:0] cancel_owner,
     output logic fpu_completion_ready,
 
     input logic integer_system_pipe_enable,

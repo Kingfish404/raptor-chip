@@ -23,6 +23,7 @@ module tb_memory_trace;
   logic [31:0] sim_exit_code;
 
   rapt_memory dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock,
       .reset,
       .ifu_l1i,
@@ -38,9 +39,19 @@ module tb_memory_trace;
       .data_idle_o(data_idle),
       .writeback_idle_o(wb_idle),
       .writeback_drain_i(1'b0),
-      .writeback_error_o(wb_error)
+      .writeback_error_o(wb_error),
+      .stores_empty_i(1'b1),
+      .writeback_clean_i(1'b1),
+      .writeback_cbo_i(1'b0),
+      .writeback_cbo_invalidate_i(1'b0),
+      .writeback_block_i('0),
+      .external_write_valid_i(1'b0),
+      .external_write_pending_i(1'b0),
+      .external_write_first_i('0),
+      .external_write_last_i('0)
   );
   rapt_l2_subsystem l2_subsystem (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock,
       .reset,
       .client(l2_client),
@@ -93,8 +104,8 @@ module tb_memory_trace;
     lsu_l1d.rcontext = '0;
     lsu_l1d.rcontext.eff_priv = 2'b11;
     lsu_l1d.rcontext_b = lsu_l1d.rcontext;
-    lsu_l1d.ralu = hot_bandwidth ? `RAPT_ALU_LW__
-        : d_index < mem_limit ? load_alu(mem_size[d_index]) : '0;
+    lsu_l1d.ralu = hot_bandwidth ? (`RAPT_ALU_LW__) :
+        d_index < mem_limit ? load_alu(mem_size[d_index]) : '0;
     lsu_l1d.rvalid = !reset && (hot_bandwidth || (d_index < mem_limit && d_eligible
         && mem_op[d_index] == "r"));
     lsu_l1d.rmisaligned = 0;
@@ -294,10 +305,8 @@ module tb_memory_trace;
       if (d_index < mem_limit) begin
         if (lsu_l1d.rvalid && lsu_l1d.rready) begin
           logic [63:0] mask, actual;
-          mask = mem_size[d_index] >= 8 ? ~64'b0
-              : (64'b1 << (8*mem_size[d_index])) - 1;
-          actual = (64'(lsu_l1d.rdata)
-              >> (8*(mem_addr[d_index] % XLEN'(XLEN/8)))) & mask;
+          mask   = mem_size[d_index] >= 8 ? ~64'b0 : (64'b1 << (8 * mem_size[d_index])) - 1;
+          actual = (64'(lsu_l1d.rdata) >> (8 * (mem_addr[d_index] % XLEN'(XLEN / 8)))) & mask;
           if (lsu_l1d.trap || actual != (64'(mem_data[d_index]) & mask))
             $fatal(
                 1,

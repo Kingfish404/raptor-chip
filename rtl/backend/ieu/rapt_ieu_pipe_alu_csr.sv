@@ -11,7 +11,7 @@ module rapt_ieu_pipe_alu_csr #(
 ) (
     cmu_bcast_if.in cmu_bcast,
     input IssueT iss,
-    input logic [11:0] csr_read_addr = '0,
+    input logic [11:0] csr_read_addr,
     csr_bcast_if.in csr_bcast,
     exu_csr_if.master exu_csr,
     output CompletionT wb_alu_csr

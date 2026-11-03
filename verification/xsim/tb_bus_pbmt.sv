@@ -35,6 +35,8 @@ module tb_bus_pbmt;
       .csr_bcast(csr_bcast),
       .cmu_bcast(cmu_bcast),
       .reset(reset)
+  ,
+      .coherent_ready(1'b1)
   );
 
   rapt_axi_master #(

@@ -13,6 +13,7 @@ module rapt_vpu_vrf #(
     parameter int Banks = 2,
     parameter int RowBits = $clog2(32*VLEN/BankBits/Banks)
 ) (
+    input rapt_pkg::sram_ctrl_t sram_ctrl_i,
     input  logic clock,
     input  logic reset,
     input  logic [Banks-1:0] req_valid,
@@ -43,6 +44,7 @@ module rapt_vpu_vrf #(
         .DATA_WIDTH(BankBits),
         .USE_BWE(1)
     ) u_sram (
+        .sram_ctrl_i(sram_ctrl_i),
         .clock(clock),
         .en(fire),
         .wen(req_write[b]),

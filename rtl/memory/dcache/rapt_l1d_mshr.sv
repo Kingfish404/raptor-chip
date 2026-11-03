@@ -57,12 +57,12 @@ module rapt_l1d_mshr #(
     // A store offered at store_addr kills installed copies of its line. On
     // store_fire it joins every live entry of the line, or takes a free entry
     // with store_alloc. The controller never fires with rsp_valid set.
-    input logic store_valid = 1'b0,
-    input logic store_fire = 1'b0,
-    input logic store_alloc = 1'b0,
-    input logic [Xlen-1:0] store_addr = '0,
-    input logic [Xlen-1:0] store_data = '0,
-    input logic [Xlen/8-1:0] store_strobe = '0,
+    input logic store_valid,
+    input logic store_fire,
+    input logic store_alloc,
+    input logic [Xlen-1:0] store_addr,
+    input logic [Xlen-1:0] store_data,
+    input logic [Xlen/8-1:0] store_strobe,
     output logic store_match,
     output logic store_free,
     // An uninstalled entry holds store bytes / holds them for lookup_addr.
@@ -329,8 +329,10 @@ module rapt_l1d_mshr #(
   `RAPT_SVA_IMPLY(
       clock, reset, MSHR_RESPONSE_OWNER, rsp_valid,
       int'(rsp_id) < Entries && valid[IdBits'(rsp_id)] && sent[IdBits'(rsp_id)] && !done[IdBits'(rsp_id)])
-  `RAPT_SVA_IMPLY(clock, reset, MSHR_RESPONSE_LENGTH, rsp_valid,
-                  rsp_last == (&beat[IdBits'(rsp_id)]))
+`ifdef RAPT_SVA_ACTIVE
+  wire response_length_matches = rsp_last == (&beat[IdBits'(rsp_id)]);
+`endif
+  `RAPT_SVA_IMPLY(clock, reset, MSHR_RESPONSE_LENGTH, rsp_valid, response_length_matches)
   `RAPT_SVA_IMPLY(clock, reset, MSHR_WAIT_HAS_PROGRESS, lookup_wait && !allocate,
                   busy || |(valid & done & ~installed))
   `RAPT_SVA(clock, reset, MSHR_STORE_BYTES_LIVE,

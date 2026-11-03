@@ -25,6 +25,10 @@ module tb_cdb_streaming;
       .wb_shared(shared_result),
       .integer_system_issue_enable(integer_enable),
       .fpu_completion_ready(fp_ready)
+  ,
+      .cancel_valid(1'b0),
+      .cancel_head('0),
+      .cancel_owner('0)
   );
   task automatic random_next;
     random_state ^= random_state << 13;

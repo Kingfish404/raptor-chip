@@ -28,6 +28,7 @@ module tb_sample_window;
       .cfg_rdata,
       .bus_idle,
       .writeback_error(1'b0),
+      .device_activity(1'b0),
       .cpu_reset,
       .sample
   );

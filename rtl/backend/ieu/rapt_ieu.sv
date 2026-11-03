@@ -25,9 +25,9 @@ module rapt_ieu #(
     input logic operand_read_valid[2],
     input CompletionT completion[NumCompletions],
     input CompletionT early_completion[NumCompletions],
-    input CompletionT local_integer_wake[NumCompletions] = '{default: '0},
-    input CompletionT branch_wake[NumCompletions] = '{default: '0},
-    input CompletionT memory_wake = '0,
+    input CompletionT local_integer_wake[NumCompletions],
+    input CompletionT branch_wake[NumCompletions],
+    input CompletionT memory_wake,
     input clock,
     input reset,
     input logic cancel_valid,
@@ -186,6 +186,8 @@ module rapt_ieu #(
       .issue(alq_issue),
       .occ_o        (occ_alq),
       .pmu_iq_full  (pmu_alq_full_unused)
+  ,
+      .resource_ready('1)
   );
 
   rapt_iq #(
@@ -221,6 +223,8 @@ module rapt_ieu #(
       .issue(brq_issue),
       .occ_o        (occ_brq),
       .pmu_iq_full  (pmu_brq_full_unused)
+  ,
+      .resource_ready('1)
   );
 
   for (genvar p = 0; p < NumIntegerPorts; p++) begin : g_integer_port

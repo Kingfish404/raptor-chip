@@ -6,6 +6,7 @@
 `include "rapt_idu_if.svh"
 `include "rapt_rnu_if.svh"
 `include "rapt_recovery_if.svh"
+`include "rapt_debug_if.svh"
 `include "rapt_rou_if.svh"
 `include "rapt_dpu_if.svh"
 `include "rapt_eu_if.svh"
@@ -24,7 +25,7 @@ interface lsu_l1d_if #(
   rapt_pkg::mem_context_t rcontext;
   logic [4:0] ralu;
   logic rvalid;
-  logic idle; // No L1D owner, PTW, maintenance, or incoming request.
+  logic idle;  // No L1D owner, PTW, maintenance, or incoming request.
   // Original architectural alignment, preserved across aligned split beats.
   logic rmisaligned;
   // Split read: permission/PMA footprint within the aligned data beat.
@@ -45,7 +46,7 @@ interface lsu_l1d_if #(
   // Release the held read without completion or device side effects.
   // Mutually exclusive with rready; retry this instruction with ordered=1.
   logic rretry;
-  logic replay_allowed; // Only complete, non-atomic loads may release ownership.
+  logic replay_allowed;  // Only complete, non-atomic loads may release ownership.
   logic rmiss, miss_wake;  // Miss replay, distinct from ordered MMIO retry.
 
   // Hit-under-miss B channel (Phase A2, RAPT_LSU_HUM): a second best-effort
@@ -69,11 +70,11 @@ interface lsu_l1d_if #(
   // Unshifted byte-enable mask.  Eight bits are required for arbitrary
   // RV64 misaligned-store spill sizes (for example, 5--7 bytes of SD).
   logic [7:0] walu;
-  logic wzero; // One aligned 64-byte ZERO descriptor; wready means final B.
+  logic wzero;  // One aligned 64-byte ZERO descriptor; wready means final B.
   logic wvalid;
   logic [XLEN-1:0] wdata;
   logic wready;
-  logic werr; // Failed committed write beat, qualified by wready.
+  logic werr;  // Failed committed write beat, qualified by wready.
   // Another committed store waits behind this one. A lone store keeps the
   // synchronous drain so that younger same-address loads can still forward.
   logic wmore;
@@ -137,11 +138,11 @@ interface l1d_bus_if #(
   logic [1:0] ar_mshr_id;
   logic r_mshr;
   logic [1:0] r_mshr_id;
-  logic idle; // D-side reads and all writes have completed at mem_link.
+  logic idle;  // D-side reads and all writes have completed at mem_link.
   logic [XLEN-1:0] araddr;
   logic [7:0] rstrb;
   logic [7:0] arlen;
-  logic noallocate; // Do not widen this request into a downstream line fill.
+  logic noallocate;  // Do not widen this request into a downstream line fill.
   logic [1:0] rpbmt;
   logic ar_ptw;
   logic rready;
@@ -149,7 +150,7 @@ interface l1d_bus_if #(
   logic [XLEN-1:0] rdata;
   logic rvalid;
   logic ptw_rvalid;
-  logic ptw_rerr; // Qualified PTE read error; separate from ordinary data.
+  logic ptw_rerr;  // Qualified PTE read error; separate from ordinary data.
   logic rlast;
   logic difftest_skip;
   // Bus-error indicator on the read channel (AXI rresp != OKAY).
@@ -213,19 +214,19 @@ interface pmp_update_if #(
     parameter int IDX_W = $clog2(N)
 );
   localparam int PMPAddrBits = PADDR_BITS - 2;
-  logic                  addr_we;
-  logic [IDX_W-1:0]      addr_idx;
+  logic                   addr_we;
+  logic [      IDX_W-1:0] addr_idx;
   logic [PMPAddrBits-1:0] raw_addr;
   logic [PMPAddrBits-1:0] napot_mask;
-  logic [N-1:0]          cfg_we;
-  logic [N-1:0]          cfg_r;
-  logic [N-1:0]          cfg_w;
-  logic [N-1:0]          cfg_x;
-  logic [N-1:0]          cfg_l;
-  logic [N-1:0]          mode_off;
-  logic [N-1:0]          mode_tor;
-  logic [N-1:0]          mode_na4;
-  logic [N-1:0]          mode_napot;
+  logic [          N-1:0] cfg_we;
+  logic [          N-1:0] cfg_r;
+  logic [          N-1:0] cfg_w;
+  logic [          N-1:0] cfg_x;
+  logic [          N-1:0] cfg_l;
+  logic [          N-1:0] mode_off;
+  logic [          N-1:0] mode_tor;
+  logic [          N-1:0] mode_na4;
+  logic [          N-1:0] mode_napot;
 
   modport in(
       input addr_we, addr_idx, raw_addr, napot_mask,
@@ -284,7 +285,7 @@ interface csr_bcast_if #(
   logic timer_int_en;
   logic sw_int_en;
   logic ext_int_en;
-  logic bus_error_int; // Eligible nondelegatable platform machine interrupt 16.
+  logic bus_error_int;  // Eligible nondelegatable platform machine interrupt 16.
 
   // MPRV/MPP for load/store effective privilege
   logic mprv;
@@ -308,13 +309,13 @@ interface csr_bcast_if #(
   logic [2:0] frm;
   logic [1:0] fs;
   logic [1:0] menvcfg_cbie;
-  logic       menvcfg_cbcfe;
-  logic       menvcfg_cbze;
-  logic       menvcfg_stce;
-  logic       menvcfg_pbmte;
+  logic menvcfg_cbcfe;
+  logic menvcfg_cbze;
+  logic menvcfg_stce;
+  logic menvcfg_pbmte;
   logic [1:0] senvcfg_cbie;
-  logic       senvcfg_cbcfe;
-  logic       senvcfg_cbze;
+  logic senvcfg_cbcfe;
+  logic senvcfg_cbze;
 
   modport in(
       input priv, satp_ppn, satp_asid,

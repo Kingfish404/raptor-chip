@@ -5,8 +5,11 @@
 namespace {
 struct Boundary {
   uint64_t instructions, cycle, pc, signature;
+  PmuSnapshot pmu;
 };
 FILE *output;
+PmuSnapshotProvider pmu_provider;
+PmuSnapshot before_cycle_pmu;
 uint64_t warmup_length, window_length, base_count, base_cycle, target_pc;
 uint64_t signature = UINT64_C(14695981039346656037), next_pc;
 uint64_t measurement_pc;
@@ -18,11 +21,31 @@ uint64_t user_thread_pointer;
 std::vector<Boundary> boundaries;
 constexpr uint64_t Band = 64;
 
-void observe(uint64_t cycle, uint64_t count)
+void observe(uint64_t cycle, uint64_t count, bool before_cycle = false)
 {
-  if (boundaries.empty() || boundaries.back().instructions != count)
-    boundaries.push_back({count, cycle - base_cycle, next_pc, signature});
+  if (boundaries.empty() || boundaries.back().instructions != count) {
+    PmuSnapshot counters;
+    if (pmu_provider) counters = before_cycle ? before_cycle_pmu : pmu_provider();
+    boundaries.push_back({count, cycle - base_cycle, next_pc, signature,
+                          std::move(counters)});
+  }
 }
+}
+
+void sample_window_set_pmu_provider(PmuSnapshotProvider provider)
+{
+  pmu_provider = provider;
+}
+
+bool sample_window_needs_start_snapshot(void)
+{
+  return output && activated && !armed && !warmup_length && pmu_provider;
+}
+
+void sample_window_before_cycle(uint64_t pc)
+{
+  if (sample_window_needs_start_snapshot() && (!has_target_pc || pc == target_pc))
+    before_cycle_pmu = pmu_provider();
 }
 
 void sample_window_set_user_satp(uint64_t root)
@@ -87,7 +110,7 @@ void sample_window_commit(uint64_t pc, uint32_t instruction, uint64_t cycle,
     base_count = previous_instructions;
     base_cycle = cycle - 1;
     next_pc = pc;
-    if (!warmup_length) observe(base_cycle, 0);
+    if (!warmup_length) observe(base_cycle, 0, true);
   }
   // Include the complete PC/instruction stream up to each observed boundary.
   // A/B comparison rejects equal lengths with divergent control flow.
@@ -122,16 +145,28 @@ bool sample_window_finish(bool execution_ok)
   bool separator = false;
   for (const auto &boundary : boundaries) {
     fprintf(output, "%s{\"instructions\":%" PRIu64 ",\"cycle\":%" PRIu64
-            ",\"last_pc\":\"0x%" PRIx64 "\",\"signature\":\"%016" PRIx64 "\"}",
+            ",\"last_pc\":\"0x%" PRIx64 "\",\"signature\":\"%016" PRIx64 "\"",
             separator ? "," : "", boundary.instructions, boundary.cycle,
             boundary.pc, boundary.signature);
+    if (pmu_provider) {
+      fputs(",\"pmu\":{", output);
+      bool counter_separator = false;
+      for (const auto &[name, value] : boundary.pmu) {
+        fprintf(output, "%s\"%s\":%" PRIu64, counter_separator ? "," : "", name.c_str(), value);
+        counter_separator = true;
+      }
+      fputc('}', output);
+    }
+    fputc('}', output);
     separator = true;
   }
   fprintf(output, "],\"retirement_domain\":{\"mode\":\"%s\",\"satp_root\":\"0x%" PRIx64
           "\",\"include_kernel_cycles\":true", user_only ? "user" : "all", user_satp);
   if (thread_only)
     fprintf(output, ",\"thread_pointer\":\"0x%" PRIx64 "\"", user_thread_pointer);
-  fputs("}}\n", output);
+  fputc('}', output);
+  if (pmu_provider) fputs(",\"pmu_schema\":\"raptor-pmu-snapshot-v1\"", output);
+  fputs("}\n", output);
   bool written = !ferror(output);
   if (fclose(output)) written = false;
   output = nullptr;

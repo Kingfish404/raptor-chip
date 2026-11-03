@@ -16,14 +16,14 @@ module rapt_sq_forward #(
     input logic [Entries-1:0] valid,
     input logic [Entries-1:0] stale_context,
     input logic [Xlen-1:0] store_addr[Entries],
-    input logic [Xlen-$clog2(Xlen/8)-3:0] store_next_block[Entries] = '{default: '0},
-    input logic [Xlen-$clog2(Xlen/8)-3:0] store_prev_block[Entries] = '{default: '0},
+    input logic [Xlen-$clog2(Xlen/8)-3:0] store_next_block[Entries],
+    input logic [Xlen-$clog2(Xlen/8)-3:0] store_prev_block[Entries],
     input logic [Xlen-1:0] store_data[Entries],
     input logic [4:0] store_alu[Entries],
     input logic store_fp64[Entries],
     input logic [7:0] full_store_mask,
     input logic mmu_enabled,
-    input logic [ReadPorts-1:0] narrow_allowed = '1,
+    input logic [ReadPorts-1:0] narrow_allowed,
     input logic alloc_valid,
     input logic [4:0] alloc_alu,
     input logic [Xlen-1:0] load_addr[ReadPorts],
@@ -38,7 +38,7 @@ module rapt_sq_forward #(
   function automatic logic [1:0] store_span(input logic [OffsetBits-1:0] offset,
                                             input logic [4:0] alu, input logic fp64);
     logic [3:0] size_m1;
-    size_m1 = rapt_pkg::store_bytes(alu) - 4'd1;
+    size_m1 = rapt_pkg::store_bytes(alu, 4'd4) - 4'd1;
     if (fp64) size_m1 = 7;
     return 2'((4'(offset) + size_m1) >> OffsetBits);
   endfunction

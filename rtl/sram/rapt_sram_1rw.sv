@@ -33,6 +33,7 @@ module rapt_sram_1rw #(
     parameter int INST_ID    = 0,  // Compatibility parameter; instance API is stable
     parameter bit USE_BWE = 0  // Enable byte write enables
 ) (
+    input  rapt_pkg::sram_ctrl_t                    sram_ctrl_i,
     input  logic                  clock,
     input  logic                  en,    // chip-select for the shared port
     input  logic                  wen,   // 1 = write, 0 = read
@@ -63,6 +64,7 @@ module rapt_sram_1rw #(
   generate
     if (DEPTH == 2 && DATA_WIDTH == 32) begin : g_2x32
       rapt_openram_1rw_2x32 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -73,6 +75,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 8 && DATA_WIDTH == 32) begin : g_8x32
       rapt_openram_1rw_8x32 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -83,6 +86,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 32 && DATA_WIDTH == 32) begin : g_32x32
       rapt_openram_1rw_32x32 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -93,6 +97,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 64 && DATA_WIDTH == 32) begin : g_64x32
       rapt_openram_1rw_64x32 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -103,6 +108,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 16 && DATA_WIDTH == 32) begin : g_16x32
       rapt_openram_1rw_16x32 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -113,6 +119,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 16 && DATA_WIDTH == 64) begin : g_16x64
       rapt_openram_1rw_16x64 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -123,6 +130,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 2 && DATA_WIDTH == 64) begin : g_2x64
       rapt_openram_1rw_2x64 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -133,6 +141,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 4 && DATA_WIDTH == 64) begin : g_4x64
       rapt_openram_1rw_4x64 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -143,6 +152,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 8 && DATA_WIDTH == 64) begin : g_8x64
       rapt_openram_1rw_8x64 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -153,6 +163,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 32 && DATA_WIDTH == 64) begin : g_32x64
       rapt_openram_1rw_32x64 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -163,6 +174,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 64 && DATA_WIDTH == 64) begin : g_64x64
       rapt_openram_1rw_64x64 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -173,6 +185,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 128 && DATA_WIDTH == 64) begin : g_128x64
       rapt_openram_1rw_128x64 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -183,6 +196,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 256 && DATA_WIDTH == 64) begin : g_256x64
       rapt_openram_1rw_256x64 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -193,6 +207,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 512 && DATA_WIDTH == 64) begin : g_512x64
       rapt_openram_1rw_512x64 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -203,6 +218,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 512 && DATA_WIDTH == 32) begin : g_512x32
       rapt_openram_1rw_512x32 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -222,6 +238,7 @@ module rapt_sram_1rw #(
       end else begin : g_full_word
         // The directory stores one 22-bit BOOM metadata entry per word.
         rapt_openram_1rw_1024x22 u_sram (
+            .ctrl  (sram_ctrl_i),
             .clk0(clock),
             .csb0(~en),
             .web0(~wen),
@@ -233,6 +250,7 @@ module rapt_sram_1rw #(
       end
     end else if (DEPTH == 1024 && DATA_WIDTH == 32) begin : g_1024x32
       rapt_openram_1rw_1024x32 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -243,6 +261,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 1024 && DATA_WIDTH == 64) begin : g_1024x64
       rapt_openram_1rw_1024x64 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -253,6 +272,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 2 && DATA_WIDTH == 128) begin : g_2x128
       rapt_openram_1rw_2x128 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -263,6 +283,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 8 && DATA_WIDTH == 128) begin : g_8x128
       rapt_openram_1rw_8x128 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -273,6 +294,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 16 && DATA_WIDTH == 128) begin : g_16x128
       rapt_openram_1rw_16x128 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -283,6 +305,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 32 && DATA_WIDTH == 128) begin : g_32x128
       rapt_openram_1rw_32x128 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -293,6 +316,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 64 && DATA_WIDTH == 128) begin : g_64x128
       rapt_openram_1rw_64x128 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -304,6 +328,7 @@ module rapt_sram_1rw #(
     end else if (DEPTH == 512 && DATA_WIDTH == 128) begin : g_512x128
       // Quad-banked L1I data of the large preset (512 sets).
       rapt_openram_1rw_512x128 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -315,6 +340,7 @@ module rapt_sram_1rw #(
     end else if (DEPTH == 1024 && DATA_WIDTH == 128) begin : g_1024x128
       // Quad-banked L1I data in the 128 KiB cache presets.
       rapt_openram_1rw_1024x128 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -325,6 +351,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 2048 && DATA_WIDTH == 32) begin : g_2048x32
       rapt_openram_1rw_2048x32 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -335,6 +362,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 2048 && DATA_WIDTH == 64) begin : g_2048x64
       rapt_openram_1rw_2048x64 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -345,6 +373,7 @@ module rapt_sram_1rw #(
       );
     end else if (DEPTH == 4096 && DATA_WIDTH == 64) begin : g_4096x64
       rapt_openram_1rw_4096x64 u_sram (
+          .ctrl  (sram_ctrl_i),
           .clk0(clock),
           .csb0(~en),
           .web0(~wen),
@@ -361,6 +390,7 @@ module rapt_sram_1rw #(
       end
       for (genvar segment = 0; segment < 4; segment++) begin : g_segment
         rapt_openram_1rw_4096x64 u_sram (
+            .ctrl  (sram_ctrl_i),
             .clk0(clock),
             .csb0(~(en && addr[13:12] == 2'(segment))),
             .web0(~wen),
@@ -388,6 +418,7 @@ module rapt_sram_1rw #(
   /* verilator lint_off UNUSEDPARAM */
   localparam int InstanceIdUnused = INST_ID;
   /* verilator lint_on UNUSEDPARAM */
+  wire unused_sram_ctrl = ^sram_ctrl_i;
   logic [DATA_WIDTH-1:0] mem[DEPTH];
 
   // Synchronous write with optional byte enables

@@ -33,6 +33,8 @@ module tb_bus_l1d_rlast;
       .csr_bcast(csr_bcast),
       .cmu_bcast(cmu_bcast),
       .reset(reset)
+  ,
+      .coherent_ready(1'b1)
   );
 
   rapt_axi_master #(
@@ -43,6 +45,8 @@ module tb_bus_l1d_rlast;
       .reset(reset),
       .mem(mem),
       .axi(axi)
+  ,
+      .rd_req_cacheable(1'b0)
   );
 
   always #5 clock = ~clock;

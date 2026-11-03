@@ -177,16 +177,18 @@ module rapt_rob_dispatch_window #(
     end
   end
 
-`ifndef SYNTHESIS
+`ifdef RAPT_SVA_ACTIVE
   // A registered owner must still be pending when offered; only the
   // recovery fence (eligible) may hide it.
   for (genvar r = 0; r < Resident; r++) begin : g_window_contract
-    `RAPT_SVA_IMPLY(clock, reset || flush, ROB_WINDOW_OWNER_PENDING, window_valid_q[r],
-                    pending[window_index_q[r]])
+    wire owner_valid = window_valid_q[r];
+    wire owner_pending = pending[window_index_q[r]];
+    `RAPT_SVA_IMPLY(clock, reset || flush, ROB_WINDOW_OWNER_PENDING, owner_valid, owner_pending)
   end
   for (genvar w = 0; w < Width; w++) begin : g_carry_contract
-    `RAPT_SVA_IMPLY(clock, reset || flush, ROB_WINDOW_CARRY_PENDING, carry_valid_q[w],
-                    pending[carry_index_q[w]])
+    wire owner_valid = carry_valid_q[w];
+    wire owner_pending = pending[carry_index_q[w]];
+    `RAPT_SVA_IMPLY(clock, reset || flush, ROB_WINDOW_CARRY_PENDING, owner_valid, owner_pending)
   end
 `endif
 endmodule

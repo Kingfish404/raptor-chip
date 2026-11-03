@@ -150,11 +150,11 @@ module tb_native_bus #(
     // including packet SRAM, not just by this downstream AXI decoder.
     for (int offset = 0; offset < 65536; offset += 4) begin
       if (!rapt_pkg::pma_has_attr(
-              32'h18000000 + 32'(offset), rapt_pkg::PmaMapped
+              32'h18000000 + 32'(offset), rapt_pkg::PmaMapped, 1'b1
           ) || !rapt_pkg::pma_has_attr(
-              32'h18000000 + 32'(offset), rapt_pkg::PmaWritable
+              32'h18000000 + 32'(offset), rapt_pkg::PmaWritable, 1'b1
           ) || rapt_pkg::pma_has_attr(
-              32'h18000000 + 32'(offset), rapt_pkg::PmaCacheable
+              32'h18000000 + 32'(offset), rapt_pkg::PmaCacheable, 1'b1
           ))
         $fatal(1, "native peripheral is outside CPU uncached writable PMA");
     end

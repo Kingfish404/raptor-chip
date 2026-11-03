@@ -28,6 +28,7 @@ module tb_cbo_set;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .l2tlb_req_o(),
       .l2tlb_ready_i(1'b0),
       .l2tlb_rsp_i('0),
@@ -136,8 +137,7 @@ module tb_cbo_set;
         bit invalidated;
         int before_reads;
         addr = XLEN'('h80000000 + offset);
-        invalidated = Targeted ? addr[XLEN-1:6] == block_addr[XLEN-1:6]
-            : (offset % WayBytes) < 64;
+        invalidated = Targeted ? addr[XLEN-1:6] == block_addr[XLEN-1:6] : (offset % WayBytes) < 64;
         before_reads = reads;
         load(addr, !invalidated);
         if (invalidated && reads != before_reads + 1)

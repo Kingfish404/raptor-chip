@@ -9,6 +9,7 @@
 #include <array>
 #include <cstdlib>
 #include <recovery_metrics.h>
+#include <pmu_snapshot.h>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -78,8 +79,10 @@ struct IoqHeadStallMetrics {
   uint64_t pr1_busy = 0, pr2_busy = 0, addr_unready = 0;
   uint64_t complete = 0, request_head = 0, issueable = 0, older_blocked = 0;
   uint64_t miss_wait = 0, store_check_wait = 0, completion_ready = 0;
+  uint64_t b_request_head = 0, eligible_no_request = 0;
 };
 static IoqHeadStallMetrics ioq_head_stalls = {};
+static uint64_t ioq_b_occupied_cycles;
 struct L1dWritebackMetrics {
   std::array<uint64_t, 6> state{}; // IDLE, SCAN, READ, CAPTURE, WAIT, CLEAN.
   uint64_t dirty = 0, hold = 0, global_request = 0, drain_request = 0;
@@ -368,6 +371,7 @@ void perf_reset_counters()
   branch_capacity_reasons = {};
   rob_head_stalls = {};
   ioq_head_stalls = {};
+  ioq_b_occupied_cycles = 0;
   l1d_writeback = {};
   axi_metrics = {};
   axi_cycle_sample = {};
@@ -623,11 +627,14 @@ void perf_sample_per_cycle()
   bool rou_ready = VERILOG_ROU(pmu_enqueue_ready);
   // OoO scheduler stall: any ALU-class IQ holds pending work but no IEU pipe
   // issued this cycle. The IOQ is owned by the LSU.
-  bool exu_ooo_valid = *(uint8_t *)&VERILOG_BACKEND(ieu__DOT__pmu_ooo_valid);
-  bool exu_ooo_valid_found = *(uint8_t *)&VERILOG_BACKEND(ieu__DOT__pmu_ooo_valid_found);
+  // Read the connected driver. Verilator may keep the IEU port aliases in
+  // generated headers without updating their storage after optimization.
+  bool exu_ooo_valid = VERILOG_BACKEND(pmu_ooo_valid_unused);
+  bool exu_ooo_valid_found = VERILOG_BACKEND(pmu_ooo_valid_found_unused);
   bool exu_ioq_valid = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__pmu_ioq_any_valid);
   bool exu_ioq_full = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__pmu_ioq_all_full);
   bool exu_ioq_valid_found = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_valid_found);
+  ioq_b_occupied_cycles += VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__b_req_valid_q) ? 1 : 0;
   uint8_t l1d_state = *(uint8_t *)&VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__l1d_state);
   bool lsu_l1d_hit = l1d_tag_ready(top, 0);
   bool lsu_fwd_hit = *(uint8_t *)&VERILOG_BACKEND(lsu__DOT__u_sq__DOT__fwd_hit);
@@ -756,13 +763,22 @@ void perf_sample_per_cycle()
               VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_pr1)[ioq_head] != 0;
           ioq_head_stalls.pr2_busy +=
               VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_pr2)[ioq_head] != 0;
+          // Production backend always instantiates LateOperands. Its live
+          // driver survives alias elimination; ioq_addr_ready may not.
           ioq_head_stalls.addr_unready +=
-              (VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_addr_ready) & head_mask) == 0;
+              (VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__late_addr_ready) & head_mask) == 0;
           ioq_head_stalls.complete +=
               (VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_complete) & head_mask) != 0;
           ioq_head_stalls.request_head +=
               VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__load_req_valid_q)
               && VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__load_req_idx_q) == ioq_head;
+          const bool a_pending = VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__load_req_valid_q)
+              && VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__load_req_idx_q) == ioq_head;
+          const bool b_pending = VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__b_req_valid_q)
+              && VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__b_req_idx_q) == ioq_head;
+          ioq_head_stalls.b_request_head += b_pending;
+          ioq_head_stalls.eligible_no_request += !a_pending && !b_pending
+              && (VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_load_issue_vec) & head_mask) != 0;
           ioq_head_stalls.issueable +=
               (VERILOG_BACKEND(lsu__DOT__u_ioq__DOT__ioq_load_issue_vec) & head_mask) != 0;
           ioq_head_stalls.older_blocked +=
@@ -1538,6 +1554,76 @@ void perf()
       pmu.itlb_ptw_count, pmu.itlb_ptw_cycle, percentage(pmu.itlb_ptw_cycle, pmu.active_cycle),
       pmu.stlb_ptw_count, pmu.stlb_ptw_cycle, percentage(pmu.stlb_ptw_cycle, pmu.active_cycle),
       pmu.ltlb_ptw_count, pmu.ltlb_ptw_cycle, percentage(pmu.ltlb_ptw_cycle, pmu.active_cycle));
+}
+
+PmuSnapshot perf_snapshot()
+{
+  PmuSnapshot result;
+  auto add = [&](const std::string &name, uint64_t value) {
+    result.emplace_back(name, value);
+  };
+  add("active_cycle", pmu.active_cycle);
+  add("instr_cnt", pmu.instr_cnt);
+  add("ld_inst_cnt", pmu.ld_inst_cnt);
+  add("st_inst_cnt", pmu.st_inst_cnt);
+  add("alu_inst_cnt", pmu.alu_inst_cnt);
+  add("bpu_cnt", pmu.bpu_cnt);
+  add("bpu_fail_cnt", pmu.bpu_fail_cnt);
+  add("ifu_stall_cycle", pmu.ifu_stall_cycle);
+  add("exu_ooo_stall_cycle", pmu.exu_ooo_stall_cycle);
+  add("exu_ioq_stall_cycle", pmu.exu_ioq_stall_cycle);
+  add("lsu_l1d_stall_cycle", pmu.lsu_l1d_stall_cycle);
+  add("lsu_sq_stall_cycle", pmu.lsu_sq_stall_cycle);
+  add("wbu_stall_cycle", pmu.wbu_stall_cycle);
+  add("ifu_fetch_downstream_blocked_cycle", pmu.ifu_fetch_downstream_blocked_cycle);
+  add("rename_checkpoint_full_cycle", pmu.rename_checkpoint_full_cycle);
+  add("rename_recovery_fence_cycle", pmu.rename_recovery_fence_cycle);
+  add("l1i_cache_miss_cnt", pmu.l1i_cache_miss_cnt);
+  add("l1i_cache_miss_cycle", pmu.l1i_cache_miss_cycle);
+  add("ltlb_ptw_cycle", pmu.ltlb_ptw_cycle);
+  add("stlb_ptw_cycle", pmu.stlb_ptw_cycle);
+  add("itlb_ptw_cycle", pmu.itlb_ptw_cycle);
+  add("ioq_head_samples", ioq_head_stalls.samples);
+  add("ioq_head_missing", ioq_head_stalls.missing);
+  add("ioq_head_load", ioq_head_stalls.load);
+  add("ioq_head_store", ioq_head_stalls.store);
+  add("ioq_head_addr_unready", ioq_head_stalls.addr_unready);
+  add("ioq_head_complete", ioq_head_stalls.complete);
+  add("ioq_head_request_head", ioq_head_stalls.request_head);
+  add("ioq_head_b_request_head", ioq_head_stalls.b_request_head);
+  add("ioq_head_eligible_no_request", ioq_head_stalls.eligible_no_request);
+  add("ioq_head_issueable", ioq_head_stalls.issueable);
+  add("ioq_head_older_blocked", ioq_head_stalls.older_blocked);
+  add("ioq_head_miss_wait", ioq_head_stalls.miss_wait);
+  add("ioq_head_store_check_wait", ioq_head_stalls.store_check_wait);
+  add("ioq_head_completion_ready", ioq_head_stalls.completion_ready);
+  add("ioq_b_occupied_cycles", ioq_b_occupied_cycles);
+  add("l1d_wb_hold", l1d_writeback.hold);
+  add("l1d_wb_dirty", l1d_writeback.dirty);
+  add("l1d_wb_global_request", l1d_writeback.global_request);
+  add("l1d_wb_cache_drain", l1d_writeback.cache_drain);
+  add("axi_ar", axi_metrics.ar);
+  add("axi_r", axi_metrics.r);
+  add("axi_aw", axi_metrics.aw);
+  add("axi_w", axi_metrics.w);
+  add("axi_b", axi_metrics.b);
+  add("axi_ar_stall", axi_metrics.ar_stall);
+  add("axi_r_stall", axi_metrics.r_stall);
+  add("axi_aw_stall", axi_metrics.aw_stall);
+  add("axi_w_stall", axi_metrics.w_stall);
+  add("axi_b_wait", axi_metrics.b_wait);
+  add("dispatch_accepted", dispatch_metrics.accepted);
+  add("dispatch_capacity", uint64_t(RtlConfig::DispatchWidth) * pmu.active_cycle);
+  for (unsigned i = 0; i < RtlConfig::DispatchStopCount; ++i) {
+    const std::string reason = dispatch_reason_name(i);
+    add("dispatch_cycles_" + reason, dispatch_metrics.cycles[i]);
+    add("dispatch_unfilled_" + reason, dispatch_metrics.unfilled_slots[i]);
+  }
+  for (unsigned i = 0; i < RtlConfig::ExecutionDomains; ++i) {
+    add("dispatch_endpoint_domain_" + std::to_string(i), dispatch_metrics.endpoint_cycles[i]);
+    add("rob_head_execute_domain_" + std::to_string(i), rob_head_stalls.execute_domain[i]);
+  }
+  return result;
 }
 
 void statistic()

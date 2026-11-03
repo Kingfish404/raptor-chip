@@ -244,6 +244,12 @@ Defaults are `FPGA_PART=xcku15p-ffva1156-2-e`, `FPGA_THREADS=4`,
 retain their 100 MHz default. Set `FPGA_SYNTH_DIRECTIVE=RuntimeOptimized` to match a
 whole-core build using that synthesis directive. The selected directive is
 recorded in `run_config.txt`; compare RTL alternatives with the same directive.
+`FPGA_NO_TIMING_DRIVEN=1` adds `-no_timing_driven` to synthesis while retaining
+the timing constraints and reports. It defaults to `0` and is also recorded in
+`run_config.txt`. KU15P RV64 W4 netboot profiles use `1` to avoid Vivado's synthesis
+timing-optimization blowup; match that setting for board-profile comparisons.
+Run `python3 verification/scripts/test_fpga_synth_options.py` to check option
+forwarding and constraint preservation without Vivado.
 The flow defines `RAPT_FPGA_DSP=1` and defaults `RAPT_FPGA_LUTRAM=1`
 (overridable with `EXTRA_DEFINES`) and uses behavioral memories (`SRAM_MODE=flops`
 in the shared module source selector, not forced FPGA flip-flop mapping).

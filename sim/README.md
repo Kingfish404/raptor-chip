@@ -94,6 +94,19 @@ which can exceed transactions already presented on external AW. These are whole
 PMU-interval counters, include MMIO, and overlap; use a store-only workload to
 isolate store behavior. No RTL or architectural counters are changed.
 
+Sample-window JSON also records cumulative PMU counters at each observed retirement
+boundary (`pmu_schema: raptor-pmu-snapshot-v1`). The performance runners subtract
+the exact matched endpoints, excluding restore, warmup and shutdown. They check
+active-cycle and dispatch-slot accounting and reject counter resets within a window.
+Counters include all activity between those endpoints, including kernel execution
+in a user-filtered window; `instr_cnt` need not equal the selected user count.
+Stall counters overlap and must not be added into a CPI decomposition. Occupancies,
+peaks and reset-sensitive latency summaries are excluded from boundary subtraction.
+The IOQ counters distinguish B-channel occupancy, B ownership of a stalled memory
+head, and an eligible head with no A/B request. Head counters are sampled only while
+the ROB head awaits memory execution. Bare loads can use B; translated loads use A,
+which handles translation and store-queue forwarding.
+
 The L1D activity report labels the observed quantities directly: tag-ready cycles
 in `LD_A`, bus-load starts on `LD_A -> LD_D`, and service cycles in `LD_D`. A held
 write-back lookup may contribute several tag-ready cycles, and bus-load starts

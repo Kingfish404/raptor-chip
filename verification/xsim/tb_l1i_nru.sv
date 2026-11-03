@@ -17,6 +17,7 @@ module tb_l1i_nru;
       .L1I_N_WAYS(Ways),
       .CacheLru(0)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .l2tlb_req_o(),
       .l2tlb_ready_i(1'b0),
       .l2tlb_rsp_i('0),
@@ -45,8 +46,7 @@ module tb_l1i_nru;
     l1i_bus.rvalid = 0;
     if (!reset && requests.size() != 0) begin
       response_addr = requests.pop_front();
-      l1i_bus.rdata = XLEN'(word_at(response_addr))
-          << ((XLEN == 64 && response_addr[2]) ? 32 : 0);
+      l1i_bus.rdata  = XLEN'(word_at(response_addr)) << ((XLEN == 64 && response_addr[2]) ? 32 : 0);
       l1i_bus.rvalid = 1;
     end
   end

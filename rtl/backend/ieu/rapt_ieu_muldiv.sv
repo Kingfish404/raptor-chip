@@ -286,7 +286,7 @@ module rapt_ieu_muldiv #(
           || operand_read_value[0] !== mdq_fwd1_val[read_ticket_index]
           || operand_read_value[1] !== mdq_fwd2_val[read_ticket_index]) begin
         $display("[%0t] SVA FAIL: %m.N1_MD_RR_OPERAND", $time);
-        $fatal(1);
+        `RAPT_SVA_FAIL(N1_MD_RR_OPERAND)
       end
     end
   end

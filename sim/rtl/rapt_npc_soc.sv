@@ -15,10 +15,10 @@ module raptSoC #(
     output logic writeback_error_o,
     // Device writes are reported before a later SC may complete. Pending
     // holds SC while the platform drains a finite batch of notifications.
-    input logic external_write_valid_i = 1'b0,
-    input logic external_write_pending_i = 1'b0,
-    input logic [XLEN-1:0] external_write_first_i = '0,
-    input logic [XLEN-1:0] external_write_last_i = '0,
+    input logic external_write_valid_i,
+    input logic external_write_pending_i,
+    input logic [XLEN-1:0] external_write_first_i,
+    input logic [XLEN-1:0] external_write_last_i,
 
     // JTAG ports (P0). tck implicit = clock. Always present.
     input  jtag_trst_n,
@@ -191,6 +191,7 @@ module raptSoC #(
   rapt #(
       .L1dWriteBack(L1dWriteBack)
   ) cpu (
+      .sram_ctrl_i      (rapt_pkg::SramCtrlReset),
       .writeback_error_o(writeback_error_o),
       .external_write_valid_i,
       .external_write_pending_i,
@@ -239,6 +240,8 @@ module raptSoC #(
       .jtag_tdo   (jtag_tdo),
 
       .reset(reset)
+  ,
+      .jtag_tck_en(1'b1)
   );
   rapt_npc_soc #(
       .ReadOutstanding(ReadOutstanding)
@@ -704,8 +707,9 @@ module rapt_npc_soc #(
             eligible = incoming_delay == 0 && incoming_older == '0;
           end
           if (!found && eligible) begin
-            automatic request_t selected = accept_ar && index == int'(read_free_slot)
-                ? incoming : read_q[index];
+            automatic
+            request_t
+            selected = accept_ar && index == int'(read_free_slot) ? incoming : read_q[index];
             automatic logic [XLEN-1:0] data = '0;
             if (selected.resp == AXIRespOKAY)
               `RAPT_DPI_C_PMEM_READ(selected.addr, {5'b0, selected.size}, data);
@@ -763,8 +767,7 @@ module rapt_npc_soc #(
             b_first_addr_q[b_tail_q] <= current.first_addr;
             b_last_addr_q[b_tail_q] <= current.last_addr;
             b_memory_q[b_tail_q] <= current.memory_access;
-            b_ready_cycle_q[b_tail_q] <= cycle_q + 64'(write_latency_q)
-                + 64'(random_delay()) + 1;
+            b_ready_cycle_q[b_tail_q] <= cycle_q + 64'(write_latency_q) + 64'(random_delay()) + 1;
             b_tail_q <= b_tail_q + 1'b1;
             push_b = 1'b1;
             if (!aw_busy || !accept_aw) aw_busy <= 1'b0;

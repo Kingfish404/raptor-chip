@@ -7,14 +7,15 @@ module rapt_l1i_data #(
     parameter int Words = 2 ** WordBits,
     parameter int WayBits = Ways > 1 ? $clog2(Ways) : 1
 ) (
+    input rapt_pkg::sram_ctrl_t sram_ctrl_i,
     input logic clock,
     input logic reset,
     input logic [SetBits-1:0] read_set,
     input logic [SetBits-1:0] read_next_set,
     input logic [WordBits-1:0] read_focus_word,
     /* verilator lint_off UNUSEDSIGNAL */
-    input logic read_line = 1'b0,
-    input logic [WayBits-1:0] read_way = '0,
+    input logic read_line,
+    input logic [WayBits-1:0] read_way,
     /* verilator lint_on UNUSEDSIGNAL */
     input logic write_valid,
     input logic [SetBits-1:0] write_set,
@@ -69,6 +70,7 @@ module rapt_l1i_data #(
             .DATA_WIDTH(64),
             .USE_BWE(1'b1)
         ) u_sram (
+            .sram_ctrl_i(sram_ctrl_i),
             .clock(clock),
             .en(1'b1),
             .wen(write_bank),
@@ -109,6 +111,7 @@ module rapt_l1i_data #(
             .ADDR_WIDTH(SetBits),
             .DATA_WIDTH(32)
         ) u_sram (
+            .sram_ctrl_i(sram_ctrl_i),
             .clock(clock),
             .en(1'b1),
             .wen(write_bank),

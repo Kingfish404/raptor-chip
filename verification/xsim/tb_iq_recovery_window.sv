@@ -44,6 +44,10 @@ module iq_recovery_window_case #(
       .issue,
       .occ_o(occupancy),
       .pmu_iq_full()
+  ,
+      .local_operand_wake('{default: '0}),
+      .combo_source('{default: '0}),
+      .resource_ready('1)
   );
   int paired_issues = 0;
   if (CheckOperandIndependence) begin : g_pair
@@ -71,6 +75,10 @@ module iq_recovery_window_case #(
         .issue(shadow_issue),
         .occ_o(shadow_occupancy),
         .pmu_iq_full()
+    ,
+        .local_operand_wake('{default: '0}),
+        .combo_source('{default: '0}),
+        .resource_ready('1)
     );
     for (genvar s = 0; s < DispatchWidth; s++) begin
       assign shadow_disp.accept[s] = disp.accept[s];

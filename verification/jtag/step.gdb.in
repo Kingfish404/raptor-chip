@@ -1,0 +1,32 @@
+set pagination off
+set confirm off
+set osabi none
+set architecture riscv:rv@XLEN@
+file @ELF@
+target extended-remote 127.0.0.1:@GDB_PORT@
+monitor reset halt
+monitor load_image @IMAGE@ 0x80000000 bin
+monitor reset halt
+set $pc = &alu
+set $t2 = 0
+stepi
+if $pc != &alu_next || $t2 != 1
+  error "stepi failed"
+end
+if (($dcsr >> 6) & 7) != 4
+  error "stepi did not use precise DM stepping"
+end
+set $pc = &call_test
+set $sp = 0x80010000
+break callee_body
+continue
+if $pc != &callee_body
+  error "software break/continue failed"
+end
+finish
+if $pc != &call_next
+  error "finish returned to wrong PC"
+end
+printf "PASS: GDB stepi, set pc, break, continue and finish\n"
+disconnect
+quit

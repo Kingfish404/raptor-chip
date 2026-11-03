@@ -14,6 +14,7 @@ module rapt_memory #(
     // Capabilities of the L2 subsystem behind this hart.
     parameter rapt_pkg::l2_link_config_t L2Link = rapt_pkg::L2LinkConfig
 ) (
+    input rapt_pkg::sram_ctrl_t sram_ctrl_i,
     input logic clock,
     input logic reset,
     ifu_l1i_if.slave ifu_l1i,
@@ -30,17 +31,17 @@ module rapt_memory #(
     output logic writeback_idle_o,
     // Drain completion is held for the requesting serializing ROB owner.
     output logic writeback_done_o,
-    input logic stores_empty_i = 1'b1,
-    input logic writeback_drain_i = 1'b0,
-    input logic writeback_clean_i = 1'b1,
-    input logic writeback_cbo_i = 1'b0,
-    input logic writeback_cbo_invalidate_i = 1'b0,
-    input logic [XLEN-1:6] writeback_block_i = '0,
+    input logic stores_empty_i,
+    input logic writeback_drain_i,
+    input logic writeback_clean_i,
+    input logic writeback_cbo_i,
+    input logic writeback_cbo_invalidate_i,
+    input logic [XLEN-1:6] writeback_block_i,
     output logic writeback_error_o,
-    input logic external_write_valid_i = 1'b0,
-    input logic external_write_pending_i = 1'b0,
-    input logic [XLEN-1:0] external_write_first_i = '0,
-    input logic [XLEN-1:0] external_write_last_i = '0
+    input logic external_write_valid_i,
+    input logic external_write_pending_i,
+    input logic [XLEN-1:0] external_write_first_i,
+    input logic [XLEN-1:0] external_write_last_i
 );
   localparam int PostedWrites = L2Link.posted_writes;
   pmp_state_if pmp_fetch_state ();
@@ -103,6 +104,7 @@ module rapt_memory #(
         .Entries(`RAPT_L2TLB_ENTRIES),
         .XLEN(XLEN)
     ) u_l2tlb (
+        .sram_ctrl_i(sram_ctrl_i),
         .clock(clock),
         .reset(reset),
         .flush(`RAPT_SFENCE_SELECTIVE == 0 && cmu_bcast.fence_time),
@@ -127,6 +129,7 @@ module rapt_memory #(
       .L2Cache(L2Link.cache),
       .L2LineOffset(L2Link.line_offset)
   ) l1i_cache (
+      .sram_ctrl_i(sram_ctrl_i),
       .l2tlb_req_o(l2tlb_req[0]),
       .l2tlb_ready_i(l2tlb_ready[0]),
       .l2tlb_rsp_i(l2tlb_rsp[0]),
@@ -151,6 +154,7 @@ module rapt_memory #(
       .L2Release(L2Link.victim_release),
       .L2LineOffset(L2Link.line_offset)
   ) l1d_cache (
+      .sram_ctrl_i(sram_ctrl_i),
       .l2tlb_req_o(l2tlb_req[1]),
       .l2tlb_ready_i(l2tlb_ready[1]),
       .l2tlb_rsp_i(l2tlb_rsp[1]),

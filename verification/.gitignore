@@ -15,6 +15,10 @@
 !/vpu/vendor/riscv-opcodes/rv_v
 !/riscof/sail/*.patch
 !/performance/*.tcl
+!/jtag/*.tcl
+!/jtag/*.cfg
+!/jtag/*.lds
+!/jtag/*.gdb.in
 
 __pycache__/
 build/

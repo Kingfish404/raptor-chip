@@ -10,6 +10,7 @@ module tb_ifu_l1i_stream;
   ifu_l1i_if ifu_l1i ();
   l1i_bus_if l1i_bus ();
   rapt_l1i cache_dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .l2tlb_req_o(),
       .l2tlb_ready_i(1'b0),
       .l2tlb_rsp_i('0),

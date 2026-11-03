@@ -17,12 +17,12 @@ module rapt_lsu #(
     parameter int IntegerReadPorts = 1
 ) (
     input CompletionT completion[NumCompletions],
-    input logic [1:0][PLEN-1:0] int_source_regs[NumSlots] = '{default: '0},
+    input logic [1:0][PLEN-1:0] int_source_regs[NumSlots],
     output logic [PLEN-1:0] operand_read_address[IntegerReadPorts],
-    input logic [XLEN-1:0] operand_read_value[IntegerReadPorts] = '{default: '0},
-    input logic operand_read_valid[IntegerReadPorts] = '{default: '0},
+    input logic [XLEN-1:0] operand_read_value[IntegerReadPorts],
+    input logic operand_read_valid[IntegerReadPorts],
     // Live FEU result; only resident FP store data captures it.
-    input CompletionT local_fp_wake[NumCompletions] = '{default: '0},
+    input CompletionT local_fp_wake[NumCompletions],
     input clock,
     input reset,
     cmu_bcast_if.in cmu_bcast,

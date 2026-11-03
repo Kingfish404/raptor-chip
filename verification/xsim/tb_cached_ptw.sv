@@ -21,6 +21,7 @@ module tb_cached_ptw;
   rapt_pkg::l2tlb_rsp_t l2rsp [2];
   logic [1:0] ready;
   rapt_l2tlb cache (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock(clock),
       .reset(reset),
       .flush(flush),
@@ -28,6 +29,12 @@ module tb_cached_ptw;
       .req_i(l2req),
       .ready_o(ready),
       .rsp_o(l2rsp)
+  ,
+      .cancel(1'b0),
+      .sfence_vpn('0),
+      .sfence_asid('0),
+      .sfence_all_vpn(1'b1),
+      .sfence_all_asid(1'b1)
   );
   for (genvar p = 0; p < 2; p++) begin : g_ports
     rapt_cached_ptw #(

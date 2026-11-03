@@ -1,0 +1,27 @@
+[tasks]
+prove
+cover
+
+[options]
+prove: mode prove
+prove: depth 12
+cover: mode cover
+cover: depth 20
+
+[engines]
+smtbmc z3
+
+[script]
+plugin -i slang
+read_slang --single-unit -DRAPT_ASSERT_EN formal_dm_debug.sv rapt_dm.sv
+prep -top formal_dm_debug
+select -assert-min 10 t:$check
+
+[files]
+formal_dm_debug.sv
+rapt_dm.sv ../../rtl/perip/rapt_dm.sv
+rapt_debug_if.svh ../../rtl/include/rapt_debug_if.svh
+rapt.svh ../../rtl/include/rapt.svh
+rapt_fp_ops.svh ../../rtl/include/rapt_fp_ops.svh
+rapt_config.svh ../../rtl/configs/formal/rapt_config.svh
+rapt_sva.svh formal_sva.svh

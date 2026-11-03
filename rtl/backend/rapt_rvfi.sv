@@ -73,9 +73,11 @@ module rapt_rvfi #(
       prev_valid <= 1'b1;
     end
   end
+`ifndef SYNTHESIS
   if (!(NRET == rou_cmu.Width)) begin : g_invalid_config_0
     $error("Invalid rapt_rvfi configuration");
   end
+`endif
   for (genvar c = 0; c < NRET; c++) begin : g_retirement
     logic [4:0] rs1, rs2;
     logic [XLEN-1:0] source1, source2;

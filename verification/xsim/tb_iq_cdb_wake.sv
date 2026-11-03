@@ -37,6 +37,9 @@ module tb_iq_cdb_wake #(
       .issue,
       .occ_o(occupancy),
       .pmu_iq_full()
+  ,
+      .local_operand_wake('{default: '0}),
+      .resource_ready('1)
   );
   assign disp.rs_idx[0] = disp.free_idx[0];
   assign disp.rs_idx[1] = disp.free_idx[1];

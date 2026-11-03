@@ -99,10 +99,13 @@ def main():
                 try:
                     measured = matched_window(row["window"], row["window"], point)
                     point["start"] = measured["start"]
-                    result["measurements"].append({"id": point["id"], "profile": args.name,
+                    measurement = {"id": point["id"], "profile": args.name,
                         "passed": True, "start": measured["start"],
                         "instructions": measured["instructions"], "cycles": measured["baseline_cycles"],
-                        "boundary_shift": measured["boundary_shift"]})
+                        "boundary_shift": measured["boundary_shift"]}
+                    if "baseline_pmu" in measured:
+                        measurement["pmu"] = measured["baseline_pmu"]
+                    result["measurements"].append(measurement)
                 except ValueError as error:
                     row.update(passed=False, error=str(error))
         result["estimates"] = (summarize(measured_plan, result["measurements"])

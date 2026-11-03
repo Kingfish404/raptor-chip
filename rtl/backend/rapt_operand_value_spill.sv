@@ -114,10 +114,17 @@ module rapt_operand_value_spill #(
     localparam int PayloadBits = $bits(value_payload_t);
     localparam int LaneBits = AllocateWidth > 1 ? $clog2(AllocateWidth) : 1;
     marker_t marker_allocate[AllocateWidth];
+    wire immutable_update_valid[SpillEntries];
+    wire marker_t immutable_update_payload[SpillEntries];
     value_payload_t allocate_word[AllocateWidth];
     logic write_valid[AllocateWidth];
     logic [LaneBits-1:0] lane_q[SpillEntries];
     logic [PayloadBits-1:0] bank_read[ReadPorts][AllocateWidth];
+
+    for (genvar e = 0; e < SpillEntries; e++) begin : g_no_updates
+      assign immutable_update_valid[e] = 1'b0;
+      assign immutable_update_payload[e] = '0;
+    end
 
     /* verilator lint_off PINCONNECTEMPTY */
     rapt_operand_spill #(
@@ -140,8 +147,8 @@ module rapt_operand_value_spill #(
         .read_index,
         .read_valid,
         .read_payload(),
-        .update_valid('{default: '0}),
-        .update_payload('{default: '0}),
+        .update_valid(immutable_update_valid),
+        .update_payload(immutable_update_payload),
         .entry_valid(),
         .entry_payload()
     );

@@ -20,9 +20,9 @@ module rapt_frontend #(
     output logic empty_o,
     output logic [63:0] snapshot_ghr,
     output logic [7:0] snapshot_phr,
-    input logic history_restore = 1'b0,
-    input logic [63:0] restore_ghr = '0,
-    input logic [7:0] restore_phr = '0
+    input logic history_restore,
+    input logic [63:0] restore_ghr,
+    input logic [7:0] restore_phr
 );
   ifu_idu_if ifu_fqu ();
   ifu_idu_if fqu_idu ();

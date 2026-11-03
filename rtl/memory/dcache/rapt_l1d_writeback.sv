@@ -21,7 +21,7 @@ module rapt_l1d_writeback #(
     output logic write_valid,
     output logic [Xlen-1:0] write_addr,
     output logic [Xlen-1:0] write_data,
-    input logic write_accept = 1'b0,
+    input logic write_accept,
     input logic write_ready,
     input logic write_error,
     // Physical line hazards: never read old memory behind a pending writeback.

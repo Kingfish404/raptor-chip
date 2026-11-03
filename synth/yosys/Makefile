@@ -40,8 +40,14 @@ FPGA_PART ?= xcku15p-ffva1156-2-e
 FPGA_THREADS ?= 4
 FPGA_XLEN ?= 64
 FPGA_SYNTH_DIRECTIVE ?= default
+FPGA_NO_TIMING_DRIVEN ?= 0
+ifeq ($(filter $(FPGA_NO_TIMING_DRIVEN),0 1),)
+$(error FPGA_NO_TIMING_DRIVEN must be 0 or 1)
+endif
 FPGA_BUILD_DIR ?= $(abspath ../fpga/build/$(RAPT_CONFIG)/$(FPGA_PART)/rv$(FPGA_XLEN)/$(MODULE)/$(CLK_FREQ_MHZ)MHz)
 FPGA_LUTRAM_DEFINE := $(if $(filter -DRAPT_FPGA_LUTRAM -DRAPT_FPGA_LUTRAM=%,$(EXTRA_DEFINES)),,-DRAPT_FPGA_LUTRAM=1)
+FPGA_RECORDED_DEFINES = $(EXTRA_DEFINES) $(if $(filter 64,$(FPGA_XLEN)),-DRAPT_RV64) \
+	-DRAPT_FPGA_DSP=1 $(FPGA_LUTRAM_DEFINE)
 
 NPROC := $(shell nproc 2>/dev/null || echo 1)
 MEM_AVAILABLE_MB := $(shell awk '/MemAvailable:/ { print int($$2 / 1024) }' /proc/meminfo 2>/dev/null || echo 0)
@@ -196,9 +202,12 @@ fpga-syn: ## Run module-level Vivado OOC synthesis (SRAM_MODE=flops)
 fpga-syn-locked:
 	@printf 'status incomplete\n' > '$(FPGA_BUILD_DIR)/status.txt'
 	@command -v $(VIVADO) >/dev/null
-	@printf 'module=%s\ntop=%s\nconfig=%s\nxlen=%s\npart=%s\nperiod_ns=%s\nio_delay_frac=%s\nthreads=%s\nsynth_directive=%s\ndefines=%s\n' \
-		'$(MODULE)' '$(TOP)' '$(RAPT_CONFIG)' '$(FPGA_XLEN)' '$(FPGA_PART)' '$(PERIOD_NS)' '$(IO_DELAY_FRAC)' '$(FPGA_THREADS)' \
-		'$(FPGA_SYNTH_DIRECTIVE)' '$(EXTRA_DEFINES) $(if $(filter 64,$(FPGA_XLEN)),-DRAPT_RV64) -DRAPT_FPGA_DSP=1 $(FPGA_LUTRAM_DEFINE)' > '$(FPGA_BUILD_DIR)/run_config.txt'
+	@printf '%s\n' 'module=$(MODULE)' 'top=$(TOP)' 'config=$(RAPT_CONFIG)' \
+		'xlen=$(FPGA_XLEN)' 'part=$(FPGA_PART)' 'period_ns=$(PERIOD_NS)' \
+		'io_delay_frac=$(IO_DELAY_FRAC)' 'threads=$(FPGA_THREADS)' \
+		'synth_directive=$(FPGA_SYNTH_DIRECTIVE)' \
+		'no_timing_driven=$(FPGA_NO_TIMING_DRIVEN)' \
+		'defines=$(strip $(FPGA_RECORDED_DEFINES))' > '$(FPGA_BUILD_DIR)/run_config.txt'
 	@sha256sum $(SYNTH_SV_FILES) $(HDL_HEADERS) $(SYNTH_DIR)/modules.mk $(abspath Makefile) $(abspath scripts/fpga_synth.tcl) $(abspath scripts/check_fpga_ram_mapping.py) $(abspath fpga_ram_expectations.tsv) > '$(FPGA_BUILD_DIR)/source_manifest.sha256'
 	@$(YOSYS) -V > '$(FPGA_BUILD_DIR)/tools.txt'
 	@$(VIVADO) -version >> '$(FPGA_BUILD_DIR)/tools.txt'
@@ -207,6 +216,7 @@ fpga-syn-locked:
 		> '$(FPGA_BUILD_DIR)/export.log' 2>&1 || { tail -60 '$(FPGA_BUILD_DIR)/export.log'; exit 1; }
 	@FPGA_TOP='$(TOP)' FPGA_OUT='$(abspath $(FPGA_BUILD_DIR))' FPGA_PART='$(FPGA_PART)' FPGA_THREADS='$(FPGA_THREADS)' \
 	 FPGA_CLOCK='$(CLOCK_PORT)' FPGA_PERIOD='$(PERIOD_NS)' FPGA_IO_FRAC='$(IO_DELAY_FRAC)' FPGA_SYNTH_DIRECTIVE='$(FPGA_SYNTH_DIRECTIVE)' \
+	 FPGA_NO_TIMING_DRIVEN='$(FPGA_NO_TIMING_DRIVEN)' \
 	 $(TIME) -o '$(FPGA_BUILD_DIR)/synth.profile' -f 'status=%x\nelapsed_sec=%e\nmax_rss_kb=%M' \
 		sh -c "cd '$(abspath $(FPGA_BUILD_DIR))' && exec $(VIVADO) -mode batch -nojournal -log vivado.log -source '$(abspath scripts/fpga_synth.tcl)'" \
 		> '$(FPGA_BUILD_DIR)/console.log' 2>&1 || { tail -60 '$(FPGA_BUILD_DIR)/console.log'; exit 1; }

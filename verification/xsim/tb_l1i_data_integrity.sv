@@ -26,6 +26,7 @@ module tb_l1i_data_integrity #(
       .WordBits(WordBits),
       .Ways(Ways)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .*
   );
   function automatic int unsigned random_word();
@@ -51,8 +52,7 @@ module tb_l1i_data_integrity #(
         end else begin
           line_read = 0;
           requested = 1;
-          expected_set = word_idx == int'(read_focus_word)
-              ? int'(read_set) : int'(read_next_set);
+          expected_set = word_idx == int'(read_focus_word) ? int'(read_set) : int'(read_next_set);
         end
         write_collision = write_valid && int'(write_way) == way
             && (WordBits >= 3 ? int'(write_word) / 2 == word_idx / 2

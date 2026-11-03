@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Lint L1D address slices for every preset and XLEN.
+"""Lint L1D address slices for every supported preset and XLEN.
 
 Run from any directory with ``python3 verification/scripts/check_l1d_config_slices.py``.
 The second pass forces the normally dormant inclusive write-back branch so
 short-line presets cannot hide an invalid CBO address slice by constant folding.
 The w4 and w8 presets also lint the full core for out-of-range selections.
+RV32-only presets must reject RV64 explicitly instead of entering that lint matrix.
 """
 
 from __future__ import annotations
@@ -52,6 +53,25 @@ def forced_l2_flags(config_text: str) -> list[str]:
     return flags
 
 
+def rv64_guard_include(config_text: str) -> str | None:
+    match = re.search(r'^\s*`include\s+"([^"]*RV32 only[^"]*)"', config_text, re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def check_rv64_guard(config_path: Path, expected_include: str) -> None:
+    result = subprocess.run(
+        ["verilator", "-E", "-DRAPT_RV64", str(config_path)],
+        cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+    )
+    errors = [line for line in result.stdout.splitlines()
+              if line.startswith("%Error") and "Exiting due to" not in line]
+    expected = f"Cannot find include file: '{expected_include}'"
+    if result.returncode <= 0 or len(errors) != 1 or expected not in errors[0]:
+        print(f"FAIL: expected the RV32-only guard in {config_path}\n{result.stdout}",
+              file=sys.stderr)
+        raise SystemExit(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", action="append", help="preset to check; default: all")
@@ -77,6 +97,11 @@ def main() -> None:
                 parser.error(f"unknown config: {config}")
             config_text = config_path.read_text()
             for xlen in xlens:
+                guard_include = rv64_guard_include(config_text)
+                if xlen == 64 and guard_include:
+                    check_rv64_guard(config_path, guard_include)
+                    print(f"PASS: {config} rejects RV64 (RV32-only preset)")
+                    continue
                 for forced in (False, True):
                     mode = "forced-l2-writeback" if forced else "native"
                     label = f"{config} RV{xlen} {mode}"

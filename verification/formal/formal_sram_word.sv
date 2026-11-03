@@ -1,5 +1,5 @@
-// A symbolic address stands for every row. Only written bits acquire a known
-// reference value; the hardware array and read output have no reset assumption.
+// A symbolic address stands for every row. The observer samples its arbitrary
+// initial word; no DUT memory or output value is constrained or reset.
 module formal_sram_word #(
     parameter int AddrBits = 3,
     parameter int DataBits = 32,
@@ -19,6 +19,7 @@ module formal_sram_word #(
       .DATA_WIDTH(DataBits),
       .USE_BWE(UseBwe)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .*
   );
 
@@ -38,6 +39,7 @@ module formal_sram_word #(
     if (UseBwe) assign enabled = bwe[bit_index/8];
     else assign enabled = 1'b1;
     always_ff @(posedge clock) begin
+      if (!past_valid) expected_word[bit_index] <= observed_word[bit_index];
       if (en && wen && addr == watched_address && enabled) begin
         expected_word[bit_index] <= wdata[bit_index];
         known[bit_index] <= 1'b1;
@@ -53,20 +55,22 @@ module formal_sram_word #(
     held_q <= !en || wen;
     if (en && !wen) begin
       read_owned <= addr == watched_address;
-      expected_output <= expected_word;
+      expected_output <= past_valid ? expected_word : observed_word;
       output_known <= known;
     end
     if (UseBwe && en && wen && addr == watched_address && |bwe && !(&bwe))
       partial_write_seen <= 1'b1;
 
-    tracked_storage : assert (((observed_word ^ expected_word) & known) == '0);
+    if (past_valid) tracked_storage : assert (observed_word == expected_word);
     if (read_owned) begin
-      tracked_read : assert (((rdata ^ expected_output) & output_known) == '0);
+      tracked_read : assert (rdata == expected_output);
     end
     if (past_valid && held_q) held_output : assert (rdata == previous_output);
+    unwritten_read : cover (read_owned && output_known == '0);
     full_word_read : cover (read_owned && &output_known);
     held_write : cover (read_owned && &output_known && en && wen);
     held_disabled : cover (read_owned && &output_known && !en);
     if (UseBwe) partial_write_read : cover (partial_write_seen && read_owned && &output_known);
+    if (UseBwe) partial_initial_read : cover (read_owned && |output_known && !(&output_known));
   end
 endmodule

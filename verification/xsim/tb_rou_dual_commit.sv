@@ -108,7 +108,7 @@ module tb_rou_dual_commit #(
   rou_lsu_if rou_lsu ();
   logic tb_sq_ready, tb_sq_empty;
   logic tb_writeback_idle = 1'b1;
-  wire tb_writeback_done;
+  wire  tb_writeback_done;
 `ifdef RAPT_TEST_REGISTERED_DRAIN
   logic memory_idle = 1, raw_writeback_idle = 1;
   wire drain_active, drain_done;
@@ -166,6 +166,8 @@ module tb_rou_dual_commit #(
     if (reset) foreach (n1_gpr[p]) n1_gpr[p] = '0;
   end
   // end JOB N
+  rapt_debug_if debug ();
+
   rapt_rou #(
 `ifdef RAPT_TEST_COMPACT_FP
       .CompactFpOperands(1'b1),
@@ -174,8 +176,7 @@ module tb_rou_dual_commit #(
       .RegisteredDispatchPayload(1'b1),
 `endif
       .ValidateCompletionInputs(1'b1)
-`ifdef RAPT_TEST_REGISTERED_DRAIN
-      ,
+`ifdef RAPT_TEST_REGISTERED_DRAIN,
       .RegisteredDrainCompletion(1'b1),
       .SeparateOperandWake(1'b1)
 `endif
@@ -224,6 +225,7 @@ module tb_rou_dual_commit #(
       .rou_csr(rou_csr),
       .rou_lsu(rou_lsu),
       .dm_haltreq_i(dm_haltreq),
+      .debug(debug),
       .halted_o(halted),
       .halt_pc_o(halt_pc),
       .commit_fire_o(commit_fire),
@@ -246,10 +248,15 @@ rapt_cmu dut_cmu (
   `include "tb_core_bcast_defaults.svh"
   `include "tb_rou_recovery_events.svh"
 
-  assign exu_rou.updates = '{control_flow:1'b1, system_state:1'b1, exception:1'b1, default:'0};
-  assign exu_rou_b.updates = '{control_flow:1'b1, default:'0};
-  assign exu_rou_c.updates = '{control_flow:1'b1, default:'0};
-  assign exu_ioq_bcast.updates = '{memory:1'b1, exception:1'b1, default:'0};
+  assign exu_rou.updates = '{
+          control_flow: 1'b1,
+          system_state: 1'b1,
+          exception: 1'b1,
+          default: '0
+      };
+  assign exu_rou_b.updates = '{control_flow: 1'b1, default: '0};
+  assign exu_rou_c.updates = '{control_flow: 1'b1, default: '0};
+  assign exu_ioq_bcast.updates = '{memory: 1'b1, exception: 1'b1, default: '0};
   // Job R: the MUL endpoint cannot resolve control flow.
   assign exu_wb_mul.updates = '0;
   // end Job R
@@ -274,6 +281,12 @@ rapt_cmu dut_cmu (
       s_int_pending = 1'b0;
       s_int_cause = '0;
       dm_haltreq = 1'b0;
+      debug.enable = 0;
+      debug.step = 0;
+      debug.stepie = 0;
+      debug.ebreak = '0;
+      debug.resume_valid = 0;
+      debug.resume_pc = '0;
       force_stale_generation = 1'b0;
 
       for (int s = 0; s < rapt_pkg::RenameWidth; s++) begin
@@ -896,7 +909,7 @@ rapt_cmu dut_cmu (
             "flushed ECALL remained architecturally visible");
 
       for (int iteration = 0; iteration < WrapIterations; iteration++) begin
-        pc = 32'h8001_0000 + XLEN'(iteration * 4);
+        pc   = 32'h8001_0000 + XLEN'(iteration * 4);
         dest = RobW'(iteration);
         dispatch_one(make_alu_uop(pc, 32'h0010_0093, 5'd1), PLEN'(33), PLEN'(1), dest);
         writeback_alu_one(dest, pc + XLEN'(4));
@@ -909,7 +922,7 @@ rapt_cmu dut_cmu (
         check(rou_cmu.rob_head == RobW'(iteration + 1), "ROB head mismatch across wrap/reuse");
       end
 
-      pc = 32'h8002_0000;
+      pc   = 32'h8002_0000;
       dest = RobW'(WrapIterations);
       dispatch_one(make_sret_uop(pc), '0, '0, dest);
       check(
@@ -948,20 +961,20 @@ rapt_cmu dut_cmu (
                    RobW'(1));
 
       // Out-of-order faults retain the oldest cause, not the first arrival.
-      exu_rou.dest = RobW'(1);
-      exu_rou.trap = 1'b1;
+      exu_rou.dest  = RobW'(1);
+      exu_rou.trap  = 1'b1;
       exu_rou.cause = younger_cause;
-      exu_rou.tval = younger_tval;
+      exu_rou.tval  = younger_tval;
       exu_rou.valid = 1'b1;
       tick(1);
       clear_writebacks();
       check(!commit_fire && dut_rou.oldest_exception_owner == RobW'(1),
             "younger fault was not held behind the executing head");
 
-      exu_rou.dest = RobW'(0);
-      exu_rou.trap = 1'b1;
+      exu_rou.dest  = RobW'(0);
+      exu_rou.trap  = 1'b1;
       exu_rou.cause = older_cause;
-      exu_rou.tval = older_tval;
+      exu_rou.tval  = older_tval;
       exu_rou.valid = 1'b1;
       tick(1);
       clear_writebacks();
@@ -989,17 +1002,17 @@ rapt_cmu dut_cmu (
                    RobW'(`RAPT_ROB_SIZE - 1));
       dispatch_one(make_alu_uop(XLEN'('h8002_b004), 32'h0020_0113, 5'd2), PLEN'(34), PLEN'(2),
                    RobW'(0));
-      exu_rou.dest = RobW'(0);
-      exu_rou.trap = 1'b1;
+      exu_rou.dest  = RobW'(0);
+      exu_rou.trap  = 1'b1;
       exu_rou.cause = younger_cause;
-      exu_rou.tval = younger_tval;
+      exu_rou.tval  = younger_tval;
       exu_rou.valid = 1'b1;
       tick(1);
       clear_writebacks();
-      exu_rou.dest = RobW'(`RAPT_ROB_SIZE - 1);
-      exu_rou.trap = 1'b1;
+      exu_rou.dest  = RobW'(`RAPT_ROB_SIZE - 1);
+      exu_rou.trap  = 1'b1;
       exu_rou.cause = older_cause;
-      exu_rou.tval = older_tval;
+      exu_rou.tval  = older_tval;
       exu_rou.valid = 1'b1;
       tick(1);
       clear_writebacks();
@@ -1303,9 +1316,9 @@ rapt_cmu dut_cmu (
       // A younger fault cannot retire through the pending branch. It must
       // disappear at clean owner retirement, without invalidating its target.
       if (mode == 2) begin
-        exu_rou.dest = RobW'(2);
-        exu_rou.npc = XLEN'('h8007_000c);
-        exu_rou.trap = 1;
+        exu_rou.dest  = RobW'(2);
+        exu_rou.npc   = XLEN'('h8007_000c);
+        exu_rou.trap  = 1;
         exu_rou.cause = XLEN'(`RAPT_CAUSE_LOAD_PAGE_FAULT);
         exu_rou.valid = 1;
         tick(1);
@@ -1313,9 +1326,9 @@ rapt_cmu dut_cmu (
         check(!rou_cmu.flush_pipe && !recovery.preserve_fetch,
               "younger exception escaped pending recovery");
       end
-      exu_rou.dest = RobW'(0);
-      exu_rou.npc = XLEN'('h8007_0004);
-      exu_rou.trap = mode == 0;
+      exu_rou.dest  = RobW'(0);
+      exu_rou.npc   = XLEN'('h8007_0004);
+      exu_rou.trap  = mode == 0;
       exu_rou.cause = XLEN'(`RAPT_CAUSE_LOAD_PAGE_FAULT);
       exu_rou.valid = 1;
       tick(1);
@@ -1526,12 +1539,12 @@ rapt_cmu dut_cmu (
   task automatic expect_bus_error_interrupt;
     begin
       reset_dut();
-      csr_bcast.bus_error_int=1;
-      clint_ext_trap=1;
-      clint_sw_trap=1;
-      clint_timer_trap=1;
-      s_int_pending=1;
-      s_int_cause=(XLEN'(1)<<(XLEN-1))|9;
+      csr_bcast.bus_error_int = 1;
+      clint_ext_trap = 1;
+      clint_sw_trap = 1;
+      clint_timer_trap = 1;
+      s_int_pending = 1;
+      s_int_cause = (XLEN'(1) << (XLEN - 1)) | 9;
       tick(1);
       check(
           rou_csr.valid && rou_csr.trap && rou_csr.tval==0
@@ -1565,19 +1578,21 @@ rapt_cmu dut_cmu (
   `include "tb_rou_exception_rd.svh"
 `endif
 
+  `include "tb_rou_debug.svh"
+
   task automatic expect_debug_halt_discards_queued_operands;
     reset_dut();
     dispatch_one(make_alu_uop(32'h8000_1000, 32'h0010_0093, 5'd1), 6'd33, 6'd1, RobW'(0));
-    rnu_rou.slot[0]='0;
+    rnu_rou.slot[0] = '0;
     // A serializing owner must remain in the skid behind the incomplete ALU.
-    rnu_rou.slot[0].uop=make_sret_uop(32'h8000_1004);
+    rnu_rou.slot[0].uop = make_sret_uop(32'h8000_1004);
     rnu_rou.slot[0].pnpc = rnu_rou.slot[0].uop.pc + XLEN'(rnu_rou.slot[0].uop.c ? 2 : 4);
-    rnu_rou.slot[0].prd=6'd34;
-    rnu_rou.slot[0].prs=6'd2;
-    rnu_rou.valid[0]=1;
+    rnu_rou.slot[0].prd = 6'd34;
+    rnu_rou.slot[0].prs = 6'd2;
+    rnu_rou.valid[0] = 1;
     tick(1);
-    rnu_rou.valid[0]=0;
-    dm_haltreq=1;
+    rnu_rou.valid[0] = 0;
+    dm_haltreq = 1;
     check(!halted && |dut_rou.uoq_valid, "halt drain setup did not retain queued uop");
     writeback_alu_one(RobW'(0), 32'h8000_1004);
     tick(1);
@@ -1617,13 +1632,16 @@ rapt_cmu dut_cmu (
       // Two full allocation beats fill both resident and carry populations.
       for (int group_id = 0; group_id < 2; group_id++) begin
         for (int s = 0; s < rapt_pkg::DispatchWidth; s++) begin
-          u = make_alu_uop(XLEN'(32'h8010_0000 + 4*(group_id*rapt_pkg::DispatchWidth+s)),
-                          32'h0010_0093, 5'(s+1));
-          u.imm = 32'(32'habc0_0000 + group_id*rapt_pkg::DispatchWidth+s);
+          u = make_alu_uop(
+              XLEN'(32'h8010_0000 + 4 * (group_id * rapt_pkg::DispatchWidth + s)),
+              32'h0010_0093,
+              5'(s + 1)
+          );
+          u.imm = 32'(32'habc0_0000 + group_id * rapt_pkg::DispatchWidth + s);
           rnu_rou.slot[s] = '0;
           rnu_rou.slot[s].uop = u;
           rnu_rou.slot[s].pnpc = rnu_rou.slot[s].uop.pc + XLEN'(rnu_rou.slot[s].uop.c ? 2 : 4);
-          rnu_rou.slot[s].prd = PLEN'(33+s);
+          rnu_rou.slot[s].prd = PLEN'(33 + s);
           rnu_rou.valid[s] = 1'b1;
         end
         #1;
@@ -1637,7 +1655,7 @@ rapt_cmu dut_cmu (
       check($countones(dut_rou.rob_dispatch_pending) == 2 * rapt_pkg::DispatchWidth,
             "blocked payload owners were lost");
       for (int s = 0; s < rapt_pkg::DispatchWidth; s++) dispatch_ready[s] = 1'b1;
-      fired = 0;
+      fired  = 0;
       cycles = 0;
       while (fired < 2 * rapt_pkg::DispatchWidth && cycles < 4) begin
         #1;
@@ -1758,6 +1776,8 @@ rapt_cmu dut_cmu (
 `else
     init_inputs();
     expect_debug_halt_discards_queued_operands();
+    expect_debug_halt_orders_clean();
+    expect_precise_debug();
     expect_basic_dual_commit();
     expect_slot0_store_blocks_dual();
     expect_slot1_branch_serializes_flush();

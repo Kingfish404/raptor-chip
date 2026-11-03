@@ -938,6 +938,10 @@ module tb_rapt_iq_uvm;
       .issue_enable(2'b11),
       .occ_o(tb_if.occ),
       .pmu_iq_full(tb_if.pmu_iq_full)
+  ,
+      .local_operand_wake('{default: '0}),
+      .combo_source('{default: '0}),
+      .resource_ready('1)
   );
 
   always_comb begin

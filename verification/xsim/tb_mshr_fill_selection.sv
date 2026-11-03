@@ -35,7 +35,9 @@ module tb_mshr_fill_selection #(
     .lookup_buffered(lookup_buffered[N]), .lookup_data(lookup_data[N]), \
     .busy(busy[N]), .wake(wake[N]), .req_valid(req_valid[N]), \
     .req_id(req_id[N]), .req_addr(req_addr[N]), .req_ready, \
-    .rsp_valid, .rsp_id, .rsp_data, .rsp_error, .rsp_last
+    .rsp_valid, .rsp_id, .rsp_data, .rsp_error, .rsp_last, \
+    .store_valid(1'b0), .store_fire(1'b0), .store_alloc(1'b0), \
+    .store_addr('0), .store_data('0), .store_strobe('0)
 
   rapt_l1d_mshr #(
       .Xlen(Xlen),

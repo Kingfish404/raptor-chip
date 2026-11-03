@@ -9,17 +9,18 @@ module rapt_l2tlb #(
     parameter int XLEN = `RAPT_XLEN,
     parameter int GenerationBits = 8
 ) (
+    input rapt_pkg::sram_ctrl_t sram_ctrl_i,
     input logic clock,
     input logic reset,
     input logic flush,
     // Cancellation drops transactions without invalidating stored translations.
-    input logic cancel = 1'b0,
-    input logic sfence_valid = 1'b0,
+    input logic cancel,
+    input logic sfence_valid,
     /* verilator lint_off UNUSEDSIGNAL */
-    input logic [26:0] sfence_vpn = '0,
-    input logic [8:0] sfence_asid = '0,
-    input logic sfence_all_vpn = 1'b1,
-    input logic sfence_all_asid = 1'b1,
+    input logic [26:0] sfence_vpn,
+    input logic [8:0] sfence_asid,
+    input logic sfence_all_vpn,
+    input logic sfence_all_asid,
     /* verilator lint_on UNUSEDSIGNAL */
     input rapt_pkg::l2tlb_req_t req_i [2],
     output logic [1:0] ready_o,
@@ -68,8 +69,7 @@ module rapt_l2tlb #(
   assign selected = req_i[owner];
   assign index = selected.vtag[12+:IndexBits];
   assign canonical = selected.vtag == (XLEN-12)'($signed(selected.vtag[VAddrBits-1:12]));
-  assign root_encodable = selected.root
-      == `RAPT_CSR_SATP_PPN_W'(PpnBits'(selected.root));
+  assign root_encodable = selected.root == `RAPT_CSR_SATP_PPN_W'(PpnBits'(selected.root));
   assign encodable = canonical && root_encodable && selected.ptag == (XLEN-10)'(PpnBits'(selected.ptag));
 
   // Use the common single-port SRAM contract for both inference and macro
@@ -123,6 +123,7 @@ module rapt_l2tlb #(
           .ADDR_WIDTH(BankBits),
           .DATA_WIDTH(Width)
       ) u_rows (
+          .sram_ctrl_i(sram_ctrl_i),
           .clock(clock),
           .en(bank_en),
           .wen(clearing || selected.fill),
@@ -138,6 +139,7 @@ module rapt_l2tlb #(
           .ADDR_WIDTH(BankBits),
           .DATA_WIDTH(32)
       ) u_rows (
+          .sram_ctrl_i(sram_ctrl_i),
           .clock(clock),
           .en(bank_en),
           .wen(clearing || selected.fill),

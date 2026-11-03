@@ -70,7 +70,7 @@ SHAPES = [
 BLACKBOX_V = SRAM / "wrappers" / "rapt_sram_blackbox.v"
 STUB_GEN   = SRAM / "scripts" / "gen_stub_lib.py"
 RTL_SRAM   = RAPTOR / "rtl" / "sram" / "rapt_sram_1rw.sv"
-CONFIG_DIR = SRAM / "build/sky130/configs"
+CONFIG_DIR = Path(os.environ.get("SRAM_TEST_CONFIG_DIR", SRAM / "build/sky130/configs"))
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +110,8 @@ def read(path: Path) -> str:
 # ---------------------------------------------------------------------------
 def test_configs():
     section("Generated OpenRAM configs")
-    subprocess.run(["make", "-C", str(SRAM), "configs"], check=True,
+    subprocess.run(["make", "-C", str(SRAM), "configs", f"BUILD_DIR={CONFIG_DIR.parent}"],
+                   check=True,
                    stdout=subprocess.DEVNULL)
     for name, depth, width, ws in SHAPES:
         # rapt_openram_1rw_32x32 -> rapt_sram_32x32_1rw_sky130.py
@@ -154,6 +155,7 @@ def test_blackbox():
         body = m.group(1)
         # Required port widths for the single shared read/write port.
         port_specs = [
+            ("ctrl", 16),
             ("clk0", None),
             ("csb0", None),
             ("web0", None),
@@ -167,7 +169,7 @@ def test_blackbox():
                 check(re.search(rf"\b{port}\b", body) is not None,
                       f"{name}: scalar port `{port}` present")
             else:
-                wre = re.search(rf"\[(\d+):0\]\s+{port}\b", body)
+                wre = re.search(rf"\[\s*(\d+)\s*:\s*0\s*\]\s+{port}\b", body)
                 check(wre is not None,
                       f"{name}: bus port `{port}[{expect_w-1}:0]` present")
                 if wre:
@@ -195,8 +197,9 @@ def test_rtl_macro_path():
         if not m:
             continue
         body = m.group(1)
-        for pin in ("clk0", "csb0", "web0", "wmask0", "addr0", "din0", "dout0"):
-            check(f".{pin}(" in body, f"{name}: port `.{pin}(...)` connected")
+        for pin in ("ctrl", "clk0", "csb0", "web0", "wmask0", "addr0", "din0", "dout0"):
+            check(re.search(rf"\.{pin}\s*\(", body) is not None,
+                  f"{name}: port `.{pin}(...)` connected")
         # Verify the generate-if guard matches the shape
         guard_re = re.compile(
             rf"DEPTH\s*==\s*{depth}\s*&&\s*DATA_WIDTH\s*==\s*{width}.*?{re.escape(name)}",
@@ -246,6 +249,7 @@ def test_stub_lib():
             ("pin (clk0)", "pin(clk0)"),
             ("pin (csb0)", "pin(csb0)"),
             ("pin (web0)", "pin(web0)"),
+            ("bus (ctrl)", "bus(ctrl)"),
             ("bus (wmask0)", "bus(wmask0)"),
             ("bus (addr0)", "bus(addr0)"),
             ("bus (din0)", "bus(din0)"),
@@ -265,6 +269,7 @@ def test_stub_lib():
         bytes_ = width // ws
         # bus name -> (Liberty type name, expected bit_width)
         bus_widths = {
+            "ctrl":   ("ctrl_bus_t", 16),
             "wmask0": ("wmask0_bus_t", bytes_),
             "addr0":  ("addr0_bus_t",  aw),
             "din0":   ("data0_bus_t",  width),
@@ -312,7 +317,7 @@ def test_cross_consistency():
               f"{name}: appears in blackbox V, RTL, and configs")
 
     # No orphan macro names in blackbox V (declared but never instantiated)
-    declared = set(re.findall(r"module\s+(rapt_openram_\w+)\s*\(", bb))
+    declared = set(re.findall(r"module\s+(rapt_openram_1rw_\w+)\s*\(", bb))
     expected = {n for n, *_ in SHAPES}
     check(declared == expected,
           f"blackbox V module set == expected set "

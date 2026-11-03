@@ -9,6 +9,7 @@
 // either writer to use both ports. FP serialization prevents a write from
 // coinciding with an issued FP read in the core.
 module rapt_fpr (
+    input rapt_pkg::sram_ctrl_t sram_ctrl_i,
     input clock,
     input reset,
     fpr_if.storage fpr
@@ -51,6 +52,7 @@ module rapt_fpr (
         .ADDR_WIDTH(5),
         .DATA_WIDTH(64)
     ) u_sram (
+        .sram_ctrl_i(sram_ctrl_i),
         .clock,
         .a_en(read_en[2*p] || two_writes),
         .a_wen(two_writes),

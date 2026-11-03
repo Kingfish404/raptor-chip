@@ -12,6 +12,9 @@
 #   make vsim      IMG=foo.bin            RTL sim under Siemens Questa
 #   make vcs-gls   NETLIST=... LIBS=...   gate-level sim (set SDF=... for timing)
 #   make filelist                         dump the RTL filelist (rtl.f)
+#   make verilator-chip IMG=foo.bin       pad-level chip over the octal link
+#   make verilator-chip-smoke             boot dummy over the link + JTAG IDCODE
+#   make verilator-chip-no-fpu            RAPT_NO_FPU: MISA, FS and FP traps (chip32-small)
 #   make clean
 #
 # Key variables:
@@ -188,6 +191,87 @@ _verilator-middle-smoke: $(SMOKE_MROM)
 	grep -q "GOOD TRAP" $(SMOKE_LOG)
 	grep -Eq '\[commit_trace\].*slot=[1-9][0-9]*' $(SMOKE_LOG)
 	@echo "[verilator-middle-smoke] GOOD TRAP and non-first commit slot: PASS"
+
+# -----------------------------------------------------------------------------
+# Pad-level chip behind the octal link (rtl/chip + rapt_xspi_target).
+# -----------------------------------------------------------------------------
+CHIP_TOP := rapt_tb_chip
+CHIP_TB := $(TB_DIR)/rapt_tb_mem.sv $(TB_DIR)/rapt_tb_chip.sv \
+	$(RAPTOR_HOME)/fpga/common/rtl/rapt_xspi_target.sv
+CHIP_RTL := $(PKG_SRC) $(filter-out $(SIM_RTL)/wrap_rnp_soc.sv,$(RTL_REST))
+CHIP_VL_FLAGS := $(filter-out --top-module $(TOP),$(VL_FLAGS)) --top-module $(CHIP_TOP)
+CHIP_MDIR := $(VL_BUILD_ROOT)/vl-chip-$(RAPT_CONFIG)-$(VL_BUILD_KEY)
+CHIP_SMOKE_LOG := $(CHIP_MDIR)/smoke.log
+
+.PHONY: verilator-chip-build verilator-chip verilator-chip-smoke
+verilator-chip-build: ## Compile the pad-level chip bench under Verilator
+	mkdir -p $(CHIP_MDIR)
+	+$(VERILATOR) $(CHIP_VL_FLAGS) \
+		$(addprefix +define+,$(DEFINES) RAPT_TB_EBREAK_HALT) \
+		$(addprefix -I,$(INCDIRS)) \
+		$(CHIP_RTL) $(CHIP_TB) \
+		--Mdir $(CHIP_MDIR) -o $(CHIP_TOP)
+
+verilator-chip: verilator-chip-build ## Run a program on the pad-level chip bench
+	$(abspath $(CHIP_MDIR))/$(CHIP_TOP) $(PLUSARGS)
+
+verilator-chip-smoke: $(SMOKE_MROM) verilator-chip-build ## Boot over the link and read IDCODE
+	test -f "$(SMOKE_IMG)"
+	$(abspath $(CHIP_MDIR))/$(CHIP_TOP) +IMG=$(abspath $(SMOKE_IMG)) +MROM=$(abspath $(SMOKE_MROM)) \
+		+MAX_CYCLES=2000000 +JTAG_IDCODE >$(CHIP_SMOKE_LOG)
+	grep -q "GOOD TRAP" $(CHIP_SMOKE_LOG)
+	grep -q "JTAG IDCODE" $(CHIP_SMOKE_LOG)
+	@echo "[verilator-chip-smoke] GOOD TRAP and JTAG IDCODE: PASS"
+
+# A core built with RAPT_NO_FPU must hide F/D, keep FS Off and trap FP work.
+NO_FPU_DIR := $(abspath $(VL_BUILD_ROOT)/no-fpu)
+NO_FPU_BIN := $(NO_FPU_DIR)/no_fpu.bin
+
+$(NO_FPU_BIN): $(TB_DIR)/tests/no_fpu.S
+	mkdir -p $(NO_FPU_DIR)
+	$(CROSS_COMPILE)gcc -march=rv32i_zicsr -mabi=ilp32 -nostdlib -nostartfiles \
+		-Wl,-Ttext=0x80000000 -o $(NO_FPU_DIR)/no_fpu.elf $<
+	$(CROSS_COMPILE)objcopy -O binary $(NO_FPU_DIR)/no_fpu.elf $@
+
+.PHONY: verilator-chip-no-fpu _verilator-chip-no-fpu
+verilator-chip-no-fpu: ## Check the RAPT_NO_FPU contract on chip32-small
+	+$(MAKE) --no-print-directory _verilator-chip-no-fpu RAPT_CONFIG=chip32-small
+
+_verilator-chip-no-fpu: $(SMOKE_MROM) $(NO_FPU_BIN) verilator-chip-build
+	$(abspath $(CHIP_MDIR))/$(CHIP_TOP) +IMG=$(NO_FPU_BIN) +MROM=$(abspath $(SMOKE_MROM)) \
+		+MAX_CYCLES=200000 >$(CHIP_MDIR)/no-fpu.log
+	grep -q "GOOD TRAP" $(CHIP_MDIR)/no-fpu.log
+	@echo "[verilator-chip-no-fpu] PASS"
+
+# Bind a probe to every SRAM type, independently count the elaborated instances,
+# then boot a core payload which writes/reads the local register.
+SRAM_CTRL_DIR := $(abspath $(VL_BUILD_ROOT)/sram-ctrl)
+SRAM_CTRL_BIN := $(SRAM_CTRL_DIR)/sram_ctrl.bin
+SRAM_CTRL_MDIR := $(SRAM_CTRL_DIR)/obj-$(VL_BUILD_KEY)
+SRAM_CTRL_TOP := rapt_tb_sram_ctrl
+
+$(SRAM_CTRL_BIN): $(TB_DIR)/tests/sram_ctrl.S
+	mkdir -p $(SRAM_CTRL_DIR)
+	$(CROSS_COMPILE)gcc -march=rv32i_zicsr_zifencei -mabi=ilp32 -nostdlib -nostartfiles \
+		-Wl,-Ttext=0x20000000 -o $(SRAM_CTRL_DIR)/sram_ctrl.elf $<
+	$(CROSS_COMPILE)objcopy -O binary $(SRAM_CTRL_DIR)/sram_ctrl.elf $@
+
+.PHONY: verilator-chip-sram-ctrl
+verilator-chip-sram-ctrl: $(SRAM_CTRL_BIN) ## Check register access and every chip SRAM control
+	@test '$(RAPT_CONFIG)' = chip32-middle-16k
+	+$(VERILATOR) $(filter-out --top-module $(CHIP_TOP),$(CHIP_VL_FLAGS)) \
+		--top-module $(SRAM_CTRL_TOP) \
+		$(addprefix -I,$(INCDIRS)) $(CHIP_RTL) $(CHIP_TB) $(TB_DIR)/rapt_tb_sram_ctrl.sv \
+		--Mdir $(SRAM_CTRL_MDIR) -o $(SRAM_CTRL_TOP) >$(SRAM_CTRL_DIR)/build.log 2>&1
+	$(SRAM_CTRL_MDIR)/$(SRAM_CTRL_TOP) +MROM=$(SRAM_CTRL_BIN) +MAX_CYCLES=200000 \
+		>$(SRAM_CTRL_DIR)/run.log
+	grep -q 'PASS: SRAM reset census, all 12 instances' $(SRAM_CTRL_DIR)/run.log
+	grep -q 'PASS: SRAM control write reaches all 12 instances' $(SRAM_CTRL_DIR)/run.log
+	grep -q 'PASS: SRAM control settings and restore reach all 12 instances' \
+		$(SRAM_CTRL_DIR)/run.log
+	grep -q 'FINISHER PASS' $(SRAM_CTRL_DIR)/run.log
+	grep -q 'GOOD TRAP' $(SRAM_CTRL_DIR)/run.log
+	@echo '[verilator-chip-sram-ctrl] PASS: register and all 12 SRAM instances'
 
 # -----------------------------------------------------------------------------
 # Synopsys VCS (RTL).

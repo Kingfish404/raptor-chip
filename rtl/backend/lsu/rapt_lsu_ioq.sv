@@ -32,13 +32,13 @@ module rapt_lsu_ioq #(
     parameter int                     IntegerReadPorts = 1
 ) (
     input CompletionT completion[NumCompletions],
-    input logic [1:0][PLEN-1:0] int_source_regs[NumSlots] = '{default: '0},
+    input logic [1:0][PLEN-1:0] int_source_regs[NumSlots],
     output logic [PLEN-1:0] operand_read_address[IntegerReadPorts],
-    input logic [XLEN-1:0] operand_read_value[IntegerReadPorts] = '{default: '0},
-    input logic operand_read_valid[IntegerReadPorts] = '{default: '0},
+    input logic [XLEN-1:0] operand_read_value[IntegerReadPorts],
+    input logic operand_read_valid[IntegerReadPorts],
     // Live FEU result for resident FP store data only. It never feeds load
     // selection, forwarding or issue; the registered copy covers allocation.
-    input CompletionT local_fp_wake[NumCompletions] = '{default: '0},
+    input CompletionT local_fp_wake[NumCompletions],
     input clock,
     input reset,
 
@@ -371,7 +371,7 @@ module rapt_lsu_ioq #(
       ioq_prepare_addr[e] |= prepare_sum[p]
             & {XLEN{prepare_valid[p] && prepare_idx[p] == IOQLen'(e)}};
     end
-    begin : g_registered
+    if (1'b1) begin : g_registered
       wire prepared = ioq_addr_prepared[e];
       wire [XLEN-1:0] prepared_addr = ioq_vj[e];
       // Preserve the address-preparation probes used by standalone contracts.
@@ -415,7 +415,11 @@ module rapt_lsu_ioq #(
   // A truncated key can only add conservative store dependencies. The
   // full address remains owned by the entry for translation and traps.
   logic [PaddrW-1:0] ioq_compare_addr[IOQ_SIZE];
+  wire [PaddrW-1:0] unused_col_addr[IOQ_SIZE];
+  wire [1:0] unused_col_span[IOQ_SIZE];
   for (genvar e = 0; e < IOQ_SIZE; e++) begin : g_compare_addr
+    assign unused_col_addr[e] = '0;
+    assign unused_col_span[e] = '0;
     // Projecting the comparison key cannot remove a real overlap. Full
     // virtual addresses remain available for translation and precise traps.
     assign ioq_compare_addr[e] = PaddrW'(ioq_context[e].mmu_en ? ioq_eff_addr[e]
@@ -432,13 +436,15 @@ module rapt_lsu_ioq #(
       .addr(ioq_compare_addr),
       .span(ioq_span_words),
       .page_only(ioq_context[ioq_head].mmu_en),
-      .overlap(ioq_overlap)
+      .overlap(ioq_overlap),
+      .col_addr(unused_col_addr),
+      .col_span(unused_col_span)
   );
   always_comb begin
     for (int i = 0; i < IOQ_SIZE; i++) begin
       automatic logic [3:0] size_m1;
       size_m1 = (4'd1 << ioq_alu[i][1:0]) - 4'd1;
-      if (ioq_wen[i]) size_m1 = rapt_pkg::store_bytes(ioq_alu[i][4:0]) - 4'd1;
+      if (ioq_wen[i]) size_m1 = rapt_pkg::store_bytes(ioq_alu[i][4:0], 4'd4) - 4'd1;
       if (ioq_atom[i]) size_m1 = (XLEN == 32 || ioq_word[i]) ? 4'd3 : 4'd7;
       if (ioq_fp_valid[i] && (ioq_fp_op[i] == (`RAPT_FP_OP_FSD) || ioq_fp_op[i] == `RAPT_FP_OP_FLD))
         size_m1 = 7;
@@ -481,7 +487,7 @@ module rapt_lsu_ioq #(
   // early completion. Ordinary load request issue keeps the live check to
   // preserve throughput.
   logic [IOQ_SIZE-1:0] early_bcast_memory_blk;
-  begin : g_overlap_stage
+  if (1'b1) begin : g_overlap_stage
     logic [IOQ_SIZE-1:0] blocked_q, ready_q;
     logic page_only_q;
     always_ff @(posedge clock) begin
@@ -526,9 +532,12 @@ module rapt_lsu_ioq #(
                     alloc_slot[e] >= 0, !ioq_valid[e])
   end
   assign ioq_at_rob_head = at_rob_head_q[ioq_head];
+`ifdef RAPT_SVA_ACTIVE
+  wire head_matches_rob = ioq_dest[ioq_head] == cmu_bcast.rob_head;
+`endif
   `RAPT_SVA_IMPLY(clock, reset || cmu_bcast.flush_pipe, IOQ_ORDERED_RELEASE_CURRENT,
                   ioq_at_rob_head && ioq_valid[ioq_head] && !ioq_complete[ioq_head],
-                  ioq_dest[ioq_head] == cmu_bcast.rob_head)
+                  head_matches_rob)
   always_comb begin
     for (int i = 0; i < IOQ_SIZE; i++) begin
       ioq_load_issue_vec[i] = ioq_addr_ready[i] && !ioq_miss_wait[i] && ioq_ren[i]
@@ -634,7 +643,7 @@ module rapt_lsu_ioq #(
   // directly, while per-entry preparation waits for the registered base.
   // Selection and ordering
   // checks below decide which forwarded request may enter the stage.
-  begin : g_forward_request
+  if (1'b1) begin : g_forward_request
     wire [IOQLen-1:0] age[IOQ_SIZE];
     wire [IOQ_SIZE-1:0] eligible, selected, tag_eligible;
     wire [NWB-1:0] source_match[IOQ_SIZE];
@@ -728,8 +737,10 @@ module rapt_lsu_ioq #(
     end
     assign wake_next_req_valid = (|selected) && !(|older_blocked)
         && (|(selected_source & source_cacheable));
+`ifdef RAPT_SVA_ACTIVE
     wire selected_onehot = $onehot0(selected);
     `RAPT_SVA_IMPLY(clock, reset, FORWARDED_REQUEST_ONEHOT, !cmu_bcast.flush_pipe, selected_onehot)
+`endif
   end
   logic [IOQLen-1:0] resident_req_idx;
   assign resident_req_idx = head_is_atomic_ready ? ioq_head : ioq_issue_idx;
@@ -917,7 +928,10 @@ module rapt_lsu_ioq #(
     for (int k = 0; k < IOQ_SIZE; k++) begin
       automatic logic [$clog2(IOQ_SIZE)-1:0] idx;
       idx = ioq_head + k[$clog2(IOQ_SIZE)-1:0];
+      // The cache B port has no translation. Keep translated requests in
+      // A's selection; A also handles forwarding from the store queue.
       if (!b_issue_found && ioq_load_issue_vec[idx] && ioq_addr_ready[idx]
+          && !ioq_context[idx].mmu_en
           && !(load_req_valid_q && idx == load_req_idx_q)
           && !(b_req_valid_q && idx == b_req_idx_q) && !ioq_atom[idx]
           // RV32 FLD needs A's two-beat 64-bit response. RV64 can carry the
@@ -1111,7 +1125,7 @@ module rapt_lsu_ioq #(
   logic [IOQ_SIZE-1:0] store_prechecked, store_prefault;
   logic [3:0] store_preoffset[IOQ_SIZE];
   logic store_check_selected;
-  begin : g_precheck_select
+  if (1'b1) begin : g_precheck_select
     logic [IOQ_SIZE-1:0] eligible, age_eligible, first_age;
     logic [IOQLen-1:0] next_idx, request_idx, pending_idx_q;
 `ifdef RAPT_SVA_ACTIVE
@@ -1219,7 +1233,7 @@ module rapt_lsu_ioq #(
       && sc_paddr >= exu_l1d.reservation
       && ({1'b0, sc_paddr} + (XLEN+1)'(sc_size_m1))
           <= ({1'b0, exu_l1d.reservation} + (XLEN+1)'(exu_l1d.reservation_size_m1));
-  begin : g_sc_decision_stage
+  if (1'b1) begin : g_sc_decision_stage
     logic valid_q, match_q;
     logic [IOQLen-1:0] head_q;
     wire address_ready = head_is_sc && ioq_base_ready[ioq_head]
@@ -1244,8 +1258,8 @@ module rapt_lsu_ioq #(
     assign reservation_match = match_q;
     `RAPT_SVA_IMPLY(clock, completion_kill, IOQ_SC_DECISION_CURRENT, head_is_sc && ioq_valid_found,
                     sc_decision_ready && reservation_match == reservation_match_live)
-    `RAPT_SVA_NEXT(clock, completion_kill, IOQ_SC_NOTIFICATION_RECHECK,
-                   exu_l1d.reservation_blocked, !valid_q)
+    `RAPT_SVA_NEXT(clock, completion_kill, IOQ_SC_NOTIFICATION_RECHECK, exu_l1d.reservation_blocked,
+                   !valid_q)
   end
 
   // === Head completion resolution ===
@@ -1334,7 +1348,7 @@ module rapt_lsu_ioq #(
   // A new entry cannot complete on its allocation edge; after an older entry
   // retires, a stale blocked bit only delays the younger broadcast one cycle.
   logic [IOQ_SIZE-1:0] early_order_block_comb, early_order_block_q;
-  begin : g_early_order_stage
+  if (1'b1) begin : g_early_order_stage
     always_comb begin
       logic older_ordered;
       older_ordered = 1'b0;
@@ -1492,9 +1506,12 @@ module rapt_lsu_ioq #(
       : early_pick_a ? completion_a_lane[ioq_payload_lane[active_idx]]
       : early_pick_b ? completion_b_lane[ioq_payload_lane[early_b_idx]]
       : completion_early_lane[ioq_payload_lane[early_idx_r]];
+`ifdef RAPT_SVA_ACTIVE
+  wire completion_payload_matches =
+      ioq_completion_bcast == completion_bcast_lane[ioq_payload_lane[bcast_idx]];
+`endif
   `RAPT_SVA_IMPLY(clock, reset || cmu_bcast.flush_pipe, IOQ_COMPLETION_PAYLOAD_EQUIVALENT,
-                  head_bcast_valid || early_bcast_issue,
-                  ioq_completion_bcast == completion_bcast_lane[ioq_payload_lane[bcast_idx]])
+                  head_bcast_valid || early_bcast_issue, completion_payload_matches)
   assign ioq_completion_result.pc = completion_control.pc;
   assign ioq_completion_result.npc = ioq_completion_result.trap
       ? `RAPT_PC_LEGALIZE(XLEN, PcW, csr_bcast.tvec)
@@ -1616,7 +1633,7 @@ module rapt_lsu_ioq #(
   assign head_store_fault = head_store_check_valid_q && head_store_check_fault_q;
   // Do not feed PMP/PMA decoding into atomic issue, completion arbitration,
   // other execution units and operand wakeup in the same cycle.
-  begin : g_precheck_state
+  if (1'b1) begin : g_precheck_state
     logic legacy_check_valid, legacy_check_fault;
     logic [3:0] legacy_check_cause;
     logic [XLEN-1:0] legacy_check_tval;

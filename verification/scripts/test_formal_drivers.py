@@ -14,7 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 from alu_contract import snapshot_result
-from formal_contract import run_contract
+from formal_contract import copy_native_artifact, native_contract, qualify_native_contract, run_contract
 from formal_scope import (
     apply_contract_review,
     audit_receipt,
@@ -23,9 +23,9 @@ from formal_scope import (
     canonical_rtlil,
     inventory,
     native_sat_command,
+    preset_xlens,
     required_contracts,
     scope_main,
-    sha,
 )
 from ioq_contract import (
     PREFIX,
@@ -52,7 +52,8 @@ from prf_formal import (
     run_composed,
 )
 from rou_contract import audit_abstraction, select_control_state
-from yosys_common import ROOT, run_bounded
+from yosys_common import ROOT, run_bounded, run_sby, sha
+from unit_contracts import load_sram_generator, sram_case, sram_frontend
 
 
 class SnapshotOutputTests(unittest.TestCase):
@@ -71,6 +72,31 @@ class SnapshotOutputTests(unittest.TestCase):
             with self.subTest(text=text):
                 with self.assertRaises(ValueError):
                     snapshot_result(text)
+
+
+class NativeArtifactTests(unittest.TestCase):
+    def test_copy_rejects_corruption_before_and_during_evidence_publication(self):
+        with tempfile.TemporaryDirectory(prefix='raptor-native-artifact-') as name:
+            root = Path(name)
+            source, output = root / 'model.il', root / 'evidence'
+            source.write_text('frozen model\n')
+            digest = sha(source)
+            self.assertEqual(copy_native_artifact(source, output, 'bound/model.il', digest), digest)
+            self.assertEqual((output / 'bound/model.il').read_bytes(), source.read_bytes())
+            copy_file = shutil.copy2
+
+            def corrupt_copy(origin, target):
+                origin.write_text('changed model\n')
+                return copy_file(origin, target)
+
+            for during in (False, True):
+                source.write_text('frozen model\n' if during else 'changed model\n')
+                with self.subTest(during_copy=during), \
+                        patch('formal_contract.shutil.copy2', side_effect=corrupt_copy), \
+                        self.assertRaisesRegex(ValueError, 'Native artifact changed'):
+                    copy_native_artifact(source, output, 'bound/model.il', digest)
+            with self.assertRaisesRegex(ValueError, 'escapes'):
+                copy_native_artifact(source, output, '../escape.il', digest)
 
 
 WRAPPER = Path(__file__).resolve().parents[1] / "formal/abc-read-blif-compat.sh"
@@ -237,6 +263,207 @@ class StateAbstractionAudit(unittest.TestCase):
 
 
 YOSYS = shutil.which(os.environ.get('RAPTOR_YOSYS_REAL', 'yosys'))
+
+
+@unittest.skipUnless(YOSYS, 'Native Yosys is required')
+class NativeSvaTests(unittest.TestCase):
+    def test_sampled_data_and_wide_implication_preserve_assertions_and_covers(self):
+        source = '''`include "rapt_sva.svh"
+module sva_native(input logic clock, reset, flush, input logic [2:0] value);
+  logic first = 1'b1;
+  logic [2:0] saved;
+  always_ff @(posedge clock) begin
+    first <= 1'b0;
+    if (first) assume (reset);
+    if (reset || flush) saved <= 0;
+    else saved <= value;
+  end
+  `RAPT_SVA_IMPLY(clock, reset, WIDE_TRUTH, 3'b100, 1'b1)
+  `RAPT_SVA_IMPLY(clock, reset, PAST_TRUTH, $past(value), $past(value) != 0)
+  `RAPT_SVA_NEXT(clock, reset || flush, NEXT_DATA, 1'b1, saved == $past(value))
+  `RAPT_COVER(clock, reset, NONEMPTY, saved == 3'b100 && value == 0)
+endmodule
+'''
+        variants = (
+            ('positive', source, None),
+            ('wide-false', source.replace("3'b100, 1'b1", "3'b100, 1'b0"), 'WIDE_TRUTH_a'),
+            ('wrong-data', source.replace('saved <= value;', 'saved <= ~value;'), 'NEXT_DATA_a'),
+            ('procedural-false', source.replace('if (reset || flush) saved <= 0;',
+                'if (!reset && value == 4) begin `RAPT_SVA_FAIL(PROCEDURAL) end\n'
+                '    if (reset || flush) saved <= 0;'), 'PROCEDURAL_a'),
+        )
+        with tempfile.TemporaryDirectory(prefix='raptor-native-sva-') as name:
+            for label, text, failed_property in variants:
+                with self.subTest(label=label):
+                    directory = Path(name) / label
+                    directory.mkdir()
+                    rtl = directory / 'fixture.sv'
+                    rtl.write_text(text)
+                    config = ('[tasks]\nprove\n' + ('' if failed_property else 'cover\n')
+                              + '[options]\nprove: mode '
+                              + ('bmc\n' if failed_property else 'prove\n')
+                              + 'prove: depth 6\n')
+                    if not failed_property:
+                        config += 'cover: mode cover\ncover: depth 6\n'
+                    config += ('timeout 40\n[engines]\nsmtbmc bitwuzla\n[script]\nplugin -i slang\n'
+                               'read_slang --single-unit -USYNTHESIS -DRAPT_ASSERT_EN '
+                               f'-DRAPT_FORMAL_NATIVE -I{ROOT}/rtl/include '
+                               f'--top sva_native {rtl}\n'
+                               'prep -top sva_native -flatten\nasync2sync\nchformal -lower\n'
+                               'check -assert\n')
+                    (directory / 'contract.sby').write_text(config)
+                    row, traces = run_sby(directory, 40, negative=bool(failed_property), yosys=YOSYS)
+                    self.assertTrue(row['passed'], (directory / 'run.log').read_text())
+                    self.assertTrue(traces)
+                    if failed_property:
+                        self.assertIn(failed_property, (directory / 'run.log').read_text())
+
+
+@unittest.skipUnless(YOSYS and (ROOT / 'third_party/oss-cad-suite/bin/sby').is_file(),
+                     'Native Yosys with Slang and SBY are required')
+class NativeSmtbmcReceiptTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        temporary = tempfile.TemporaryDirectory(prefix='raptor-sram-signoff-')
+        cls.addClassCleanup(temporary.cleanup)
+        output = Path(temporary.name)
+        generator = load_sram_generator()
+        case = (2, 32, 8, 1, 0)
+        proof = sram_case(case, output, 60, generator)
+        cls.directory = output / proof['case']
+        bound = cls.directory / 'bindings/fixture'
+        binding = sram_frontend(case, bound, 60, generator,
+                                 profile='default/rv64/dff', synthesis=True)
+        assert binding['canonical_sha256'] == proof['native_binding']['canonical_sha256']
+        artifacts = dict(proof['artifacts'])
+        artifacts.update({str(p.relative_to(cls.directory)): sha(p)
+                          for p in bound.iterdir() if p.is_file()})
+        cls.scope = inventory(ROOT)
+        unit_id = 'rtl/sram/rapt_sram_1rw.sv:rapt_sram_1rw'
+        unit = next(row for row in cls.scope['units'] if row['id'] == unit_id)
+        key = binding_key(binding['parameters'])
+        unit['reviewed_bindings'] = {binding['profile']: {key: binding['parameters']}}
+        harness = 'verification/formal/formal_sram_word.sv'
+        inputs = dict(cls.scope['sources'])
+        inputs[harness] = sha(ROOT / harness)
+        cls.receipt = dict(status='PASS', unit=unit_id, obligation='read-write',
+            profile=binding['profile'], method='smtbmc-induction', parameters=binding['parameters'],
+            inputs=inputs, harness=harness, assumptions=['Only the observer address is stable'],
+            log='run.log', artifacts=artifacts,
+            property_activation=[dict(property=name, log='contract_cover/engine_0/logfile.txt',
+                                      witness=witness)
+                                 for name, witness in proof['activation'].items()],
+            model_binding=dict(top='formal_sram_word',
+                canonical_sha256=binding['canonical_sha256'], proved_model='frontend.il',
+                bound_model='bindings/fixture/frontend.il', read_script='bindings/fixture/read.ys',
+                proof_script='contract.sby', proof_root=str(cls.directory),
+                depth=6, timeout=60, solver='yices'))
+
+    def audit(self, receipt):
+        return audit_receipt(receipt, self.scope, ROOT, self.directory)
+
+    def test_actual_unbounded_memory_receipt_binds_rv64_and_synthesis_context(self):
+        expected = (self.receipt['unit'], 'read-write', 'default/rv64/dff',
+                    binding_key(self.receipt['parameters']))
+        self.assertEqual(self.audit(self.receipt), expected)
+
+    def test_incorrect_unwritten_read_is_detected_without_initializing_dut_memory(self):
+        output = self.directory.parent / 'initial-read-control'
+        row = sram_case((8, 32, 8, 1, 0), output, 60, load_sram_generator(), mutant='initial-read')
+        self.assertEqual(row['proof'], 'FAIL')
+        log = (output / 'negative-initial-read/run.log').read_text()
+        self.assertIn('Assert failed', log)
+        self.assertIn('tracked_read', log)
+
+    def test_bounded_cut_incomplete_and_misattributed_evidence_cannot_qualify(self):
+        scenarios = ('bounded', 'bmc-mode', 'prep-cut', 'missing-induction',
+                     'missing-predicate', 'missing-activation', 'wrong-waveform', 'conflicting-status')
+        for case in scenarios:
+            receipt = copy.deepcopy(self.receipt)
+            changed, original = None, None
+            if case == 'bounded':
+                receipt['method'] = 'combinational'
+            elif case == 'missing-induction':
+                del receipt['artifacts']['contract_prove/engine_0/logfile_induction.txt']
+            elif case == 'missing-activation':
+                receipt['property_activation'].pop()
+            elif case == 'wrong-waveform':
+                row = receipt['property_activation'][0]
+                row['witness'] = next(item['witness'] for item in receipt['property_activation']
+                                      if item['witness'] != row['witness'])
+            else:
+                name = {'bmc-mode': 'contract.sby',
+                        'prep-cut': 'contract_prove/model/design_prep.ys',
+                        'missing-predicate': 'contract_prove/model/design_smt2.smt2',
+                        'conflicting-status': 'contract_prove/engine_0/logfile_basecase.txt'}[case]
+                changed = self.directory / name
+                original = changed.read_bytes()
+                text = original.decode()
+                if case == 'bmc-mode':
+                    text = text.replace('prove: mode prove', 'prove: mode bmc')
+                elif case == 'prep-cut':
+                    text = text.replace('opt_clean\n', 'chformal -assert -remove\nopt_clean\n', 1)
+                elif case == 'missing-predicate':
+                    text = text.replace(' held_output\n', ' foreign_predicate\n', 1)
+                else:
+                    text += '\n## 0:00:00 Status: failed\n'
+                self.assertNotEqual(text.encode(), original)
+                changed.write_text(text)
+                receipt['artifacts'][name] = sha(changed)
+            try:
+                with self.subTest(case=case), self.assertRaises(ValueError):
+                    self.audit(receipt)
+            finally:
+                if changed:
+                    changed.write_bytes(original)
+
+
+@unittest.skipUnless(YOSYS and (ROOT / 'third_party/oss-cad-suite/bin/sby').is_file(),
+                     'Native Yosys with Slang and SBY are required')
+class NativeCompletionGuardTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        temporary = tempfile.TemporaryDirectory(prefix='raptor-completion-signoff-')
+        cls.addClassCleanup(temporary.cleanup)
+        cls.output = Path(temporary.name)
+        contract = native_contract('completion-guard')
+        contract['variants'] = contract['variants'][:2]
+        args = SimpleNamespace(contract='completion-guard', source_root=ROOT, output=cls.output,
+                               presets=['formal'], jobs=4, timeout=60, reuse_evidence=None)
+        with patch('formal_contract.native_contract', return_value=contract), patch.dict(
+                os.environ, RAPTOR_YOSYS_REAL=YOSYS):
+            qualify_native_contract(args)
+        cls.result = json.loads((cls.output / 'results.json').read_text())
+        cls.scope = inventory(ROOT)
+        review = json.loads((cls.output / 'contract-review.json').read_text())
+        apply_contract_review(cls.scope, review)
+
+    def test_unrestricted_owner_table_and_both_payload_policies_publish_bound_receipts(self):
+        self.assertTrue(self.result['complete'])
+        self.assertEqual(len(self.result['proofs']), 2)
+        self.assertEqual({row['name'] for row in self.result['negative_controls']},
+                         {'generation', 'executing', 'payload', 'live', 'valid'})
+        self.assertTrue(all(row['detected'] for row in self.result['negative_controls']))
+        paths = json.loads((self.output / 'receipts.json').read_text())
+        self.assertEqual(len(paths), 96)
+        obligations, policies = set(), set()
+        for name in paths:
+            path = self.output / name
+            receipt = json.loads(path.read_text())
+            actual = audit_receipt(receipt, self.scope, ROOT, path.parent)
+            obligations.add(actual[1])
+            policies.add(receipt['parameters']['EnforcePayload'])
+            self.assertNotIn('XLEN', receipt['parameters'])
+        self.assertEqual(len(obligations), 6)
+        self.assertEqual(policies, {0, 1})
+
+    def test_a_payload_policy_cannot_be_relabeled_as_the_other_policy(self):
+        name = json.loads((self.output / 'receipts.json').read_text())[0]
+        path = self.output / name
+        receipt = json.loads(path.read_text())
+        receipt['parameters']['EnforcePayload'] ^= 1
+        with self.assertRaises(ValueError):
+            audit_receipt(receipt, self.scope, ROOT, path.parent)
 
 
 class WitnessTests(unittest.TestCase):
@@ -794,6 +1021,19 @@ class QualificationFixture:
 
 
 class QualificationEvidenceTests(QualificationFixture, unittest.TestCase):
+    def test_fixed_xlen_presets_do_not_generate_unsupported_signoff_profiles(self):
+        config = self.root / 'rtl/configs/default/rapt_config.svh'
+        config.write_text('`define RAPT_XLEN 32\n')
+        self.assertEqual(preset_xlens(config), (32,))
+        self.assertEqual(inventory(self.root)['profiles'],
+                         ['default/rv32/dff', 'default/rv32/sram'])
+        config.write_text('`ifdef RAPT_RV64\n`define RAPT_XLEN 64\n'
+                          '`else\n`define RAPT_XLEN 32\n`endif\n')
+        self.assertEqual(preset_xlens(config), (32, 64))
+        self.assertEqual(len(inventory(self.root)['profiles']), 4)
+        config.write_text('// `define RAPT_XLEN 32\n`define RAPT_XLEN `EXTERNAL_XLEN\n')
+        self.assertEqual(preset_xlens(config), (32, 64))
+
     def test_scope_rechecks_source_and_metadata_epochs_after_receipt_audits(self):
         scenarios = ('stable', 'add-rtl', 'edit-rtl', 'remove-rtl', 'add-profile',
                      'edit-review', 'edit-index', 'edit-receipt', 'edit-verifier',

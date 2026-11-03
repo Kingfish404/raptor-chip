@@ -157,6 +157,8 @@ module formal_bus #(
       .cmu_bcast(cmu_bcast),
 
       .reset(reset)
+  ,
+      .coherent_ready(1'b1)
   );
 
   rapt_axi_master #(
@@ -166,6 +168,8 @@ module formal_bus #(
       .reset(reset),
       .mem(mem),
       .axi(axi)
+  ,
+      .rd_req_cacheable(1'b0)
   );
 
 `ifdef FORMAL

@@ -14,6 +14,7 @@ module rapt_vpu #(
     parameter bit OptimizeOperandReads = 1,
     parameter int AddrBits = $clog2(32*VLEN/8)
 ) (
+    input rapt_pkg::sram_ctrl_t sram_ctrl_i,
     input logic clock,
     reset,
     input logic vector_enabled,
@@ -691,12 +692,15 @@ module rapt_vpu #(
     ) >>> (64 - (8 << size))) : shifted >> (64 - (8 << size));
   endfunction
   assign a_input = (d_mask_logic || d_iota) ? 64'(elem_rdata[{3'b0,index_q[2:0]}])
-      : resize_operand(elem_rdata,a_size_q,d_a_signed);
+      : resize_operand(
+      elem_rdata, a_size_q, d_a_signed
+  );
   assign b_size = d_gather16 ? 2'd1 : sew_q;
   assign gather_index = d_src_vector ? b_q : command_q.insn[14:12] == 3
       ? 64'(command_q.insn[19:15]) : 64'(command_q.rs1);
-  assign b_input = d_mask_logic ? 64'(elem_rdata[{3'b0,index_q[2:0]}])
-      : resize_operand(elem_rdata,b_size,d_b_signed);
+  assign b_input = d_mask_logic ? 64'(elem_rdata[{3'b0, index_q[2:0]}]) : resize_operand(
+      elem_rdata, b_size, d_b_signed
+  );
   rapt_vpu_divsqrt #(
       .ELEN(ELEN)
   ) u_fp_divsqrt (
@@ -1150,6 +1154,7 @@ module rapt_vpu #(
       .BankBits(BankBits),
       .Banks(Banks)
   ) u_vrf (
+      .sram_ctrl_i(sram_ctrl_i),
       .clock(clock),
       .reset(reset),
       .req_valid(bank_valid),
@@ -1244,11 +1249,13 @@ module rapt_vpu #(
           else state <= SCALAR_REQ;
         end
         SCALAR_REQ: if (elem_valid && elem_ready) state <= SCALAR_RSP;
-        SCALAR_RSP: if (elem_rsp_valid && elem_rsp_ready) begin
+        SCALAR_RSP:
+        if (elem_rsp_valid && elem_rsp_ready) begin
           if (!command_q.insn[14]) begin
             result_q.rd <= command_q.insn[11:7];
-            result_q.value <= command_q.insn[11:7] == 0 ? '0
-                : XLEN'(resize_operand(elem_rdata,sew_q,1'b1));
+            result_q.value <= command_q.insn[11:7] == 0 ? '0 : XLEN'(resize_operand(
+                elem_rdata, sew_q, 1'b1
+            ));
           end
           state <= FINISH;
         end
@@ -1260,7 +1267,9 @@ module rapt_vpu #(
             state <= COMPLETE;
           end else begin
             index_q <= IndexBits'(vstart);
-            sew_q <= vtype[4:3]; a_size_q <= g_a_size; d_size_q <= g_d_size;
+            sew_q <= vtype[4:3];
+            a_size_q <= g_a_size;
+            d_size_q <= g_d_size;
             a_q <= 0;
             b_q <= d_widen ? resize_operand(scalar_b,vtype[4:3],d_b_signed) : scalar_b;
             mask_q <= 1;
@@ -1277,7 +1286,8 @@ module rapt_vpu #(
           else state <= d_src_vector ? B_REQ : execute_state;
         end
         MASK_REQ: if (elem_valid && elem_ready) state <= MASK_RSP;
-        MASK_RSP: if (elem_rsp_valid) begin
+        MASK_RSP:
+        if (elem_rsp_valid) begin
           mask_q <= elem_rdata[{3'b0, index_q[2:0]}];
           if (!elem_rdata[{3'b0, index_q[2:0]}] && !d_merge && !d_carry
               && !(ft_recognized && ft_operation == 0)) begin
@@ -1286,20 +1296,30 @@ module rapt_vpu #(
           end else if (ft_recognized) state <= FT_ROUTE;
           else if (OptimizeOperandReads && d_merge && elem_rdata[{3'b0, index_q[2:0]}])
             state <= d_src_vector ? B_REQ : execute_state;
-          else state <= d_gather ? (d_src_vector ? B_REQ : GATHER_ROUTE) : d_slide
+          else
+            state <= d_gather ? (d_src_vector ? B_REQ : GATHER_ROUTE) : d_slide
               ? SLIDE_ROUTE : d_vs2 ? A_REQ : (d_src_vector ? B_REQ : execute_state);
         end
         GATHER_ROUTE: begin
           if (gather_index < 64'(element_vlmax)) state <= A_REQ;
-          else begin a_q <= 0; state <= WRITE_REQ; end
+          else begin
+            a_q   <= 0;
+            state <= WRITE_REQ;
+          end
         end
         SLIDE_ROUTE: begin
-          if (!slide_write) begin index_q <= index_q+1'b1; state <= NEXT_ELEMENT; end
-          else if (slide_read) state <= A_REQ;
-          else begin a_q <= slide_scalar ? scalar_b : 64'b0; state <= WRITE_REQ; end
+          if (!slide_write) begin
+            index_q <= index_q + 1'b1;
+            state   <= NEXT_ELEMENT;
+          end else if (slide_read) state <= A_REQ;
+          else begin
+            a_q   <= slide_scalar ? scalar_b : 64'b0;
+            state <= WRITE_REQ;
+          end
         end
         A_REQ: if (elem_valid && elem_ready) state <= A_RSP;
-        A_RSP: if (elem_rsp_valid) begin
+        A_RSP:
+        if (elem_rsp_valid) begin
           a_q <= a_input;
           if (d_gather) state <= WRITE_REQ;
           else if (OptimizeOperandReads && d_src_vector && a_size_q == sew_q
@@ -1310,59 +1330,76 @@ module rapt_vpu #(
           else state <= d_src_vector ? B_REQ : execute_state;
         end
         B_REQ: if (elem_valid && elem_ready) state <= B_RSP;
-        B_RSP: if (elem_rsp_valid) begin
+        B_RSP:
+        if (elem_rsp_valid) begin
           b_q <= b_input;
           state <= d_gather ? GATHER_ROUTE : execute_state;
         end
         OLD_REQ: if (elem_valid && elem_ready) state <= OLD_RSP;
-        OLD_RSP: if (elem_rsp_valid) begin
+        OLD_RSP:
+        if (elem_rsp_valid) begin
           old_q <= elem_rdata;
           state <= fp_recognized ? FP_START : MULDIV_START;
         end
         FT_ROUTE: begin
           fp_element_flags <= 0;
           if (ft_read_source) state <= FT_REQ;
-          else if (ft_write_vector) begin fp_result_q <= ft_result; state <= WRITE_REQ; end
-          else state <= FINISH;
+          else if (ft_write_vector) begin
+            fp_result_q <= ft_result;
+            state <= WRITE_REQ;
+          end else state <= FINISH;
         end
         FT_REQ: if (elem_valid && elem_ready) state <= FT_RSP;
-        FT_RSP: if (elem_rsp_valid && elem_rsp_ready) begin
+        FT_RSP:
+        if (elem_rsp_valid && elem_rsp_ready) begin
           if (ft_write_scalar) begin
             result_q.rd <= command_q.insn[11:7];
             result_q.fp_write <= 1;
             result_q.fp_value <= ft_result;
             state <= FINISH;
-          end else begin fp_result_q <= ft_result; state <= WRITE_REQ; end
+          end else begin
+            fp_result_q <= ft_result;
+            state <= WRITE_REQ;
         end
-        FP_START: if (fp_misc) begin
-          fp_result_q <= fp_misc_result[sew_q[0]]; fp_element_flags <= fp_misc_flags[sew_q[0]];
+        end
+        FP_START:
+        if (fp_misc) begin
+          fp_result_q <= fp_misc_result[sew_q[0]];
+          fp_element_flags <= fp_misc_flags[sew_q[0]];
           state <= fp_mask_result ? MASK_WRITE_START : WRITE_REQ;
         end else if (selected_fp_ready) state <= FP_RUN;
-        FP_RUN: if (selected_fp_valid) begin
-          fp_result_q <= selected_fp_result; fp_element_flags <= selected_fp_flags;
+        FP_RUN:
+        if (selected_fp_valid) begin
+          fp_result_q <= selected_fp_result;
+          fp_element_flags <= selected_fp_flags;
           state <= WRITE_REQ;
         end
         MULDIV_START: if (md_ready) state <= MULDIV_RUN;
-        MULDIV_RUN: if (md_valid) begin
+        MULDIV_RUN:
+        if (md_valid) begin
           if (d_fraction) fixed_product_q <= md_full_product;
           md_result_q <= d_mac ? (!d_widen && command_q.insn[27] ? md_addend-md_result
               : md_addend+md_result) : md_result;
           state <= WRITE_REQ;
         end
         MASK_WRITE_START: if (mw_ready) state <= MASK_WRITE_RUN;
-        MASK_WRITE_RUN: if (mw_done) begin
+        MASK_WRITE_RUN:
+        if (mw_done) begin
           if (fp_recognized) result_q.fflags <= result_q.fflags | fp_element_flags;
           if (d_mask_prefix) prefix_seen_q <= prefix_seen_q || a_q[0];
-          index_q <= index_q+1'b1; state <= NEXT_ELEMENT;
+          index_q <= index_q + 1'b1;
+          state   <= NEXT_ELEMENT;
         end
-        WRITE_REQ: if (elem_valid && elem_ready) begin
+        WRITE_REQ:
+        if (elem_valid && elem_ready) begin
           if (d_fixed) saturated_q <= saturated_q || fixed_saturated;
           state <= WRITE_RSP;
         end
-        WRITE_RSP: if (elem_rsp_valid) begin
+        WRITE_RSP:
+        if (elem_rsp_valid) begin
           if (fp_recognized) result_q.fflags <= result_q.fflags | fp_element_flags;
-          if (d_iota || d_compress) iota_count_q <= iota_count_q
-              +(d_compress ? IndexBits'(1) : IndexBits'(a_q[0]));
+          if (d_iota || d_compress)
+            iota_count_q <= iota_count_q + (d_compress ? IndexBits'(1) : IndexBits'(a_q[0]));
           index_q <= index_q + 1'b1;
           state <= ft_scalar ? FINISH : NEXT_ELEMENT;
         end
@@ -1372,16 +1409,19 @@ module rapt_vpu #(
           state <= COMPLETE;
         end
         SCAN_START: if (s_ready) state <= SCAN_RUN;
-        SCAN_RUN: if (s_done) begin
+        SCAN_RUN:
+        if (s_done) begin
           result_q.trap <= s_trap;
           result_q.cause <= s_trap ? XLEN'(2) : '0;
           result_q.tval <= s_trap ? XLEN'(command_q.insn) : '0;
           result_q.rd <= s_trap ? 5'b0 : command_q.insn[11:7];
           result_q.value <= s_trap || command_q.insn[11:7] == 0 ? '0 : s_value;
-          result_q.dirty <= csr_dirty; state <= COMPLETE;
+          result_q.dirty <= csr_dirty;
+          state <= COMPLETE;
         end
         MOVE_START: if (c_ready) state <= MOVE_RUN;
-        MOVE_RUN: if (c_done) begin
+        MOVE_RUN:
+        if (c_done) begin
           result_q.trap <= c_trap;
           result_q.cause <= c_trap ? XLEN'(2) : '0;
           result_q.tval <= c_trap ? XLEN'(command_q.insn) : '0;
@@ -1389,7 +1429,8 @@ module rapt_vpu #(
           state <= COMPLETE;
         end
         FR_START: if (fr_ready) state <= FR_RUN;
-        FR_RUN: if (fr_done) begin
+        FR_RUN:
+        if (fr_done) begin
           result_q.trap <= fr_trap;
           result_q.cause <= fr_trap ? XLEN'(2) : '0;
           result_q.tval <= fr_trap ? XLEN'(command_q.insn) : '0;
@@ -1399,7 +1440,8 @@ module rapt_vpu #(
           state <= COMPLETE;
         end
         REDUCE_START: if (r_ready) state <= REDUCE_RUN;
-        REDUCE_RUN: if (r_done) begin
+        REDUCE_RUN:
+        if (r_done) begin
           result_q.trap <= r_trap;
           result_q.cause <= r_trap ? XLEN'(2) : '0;
           result_q.tval <= r_trap ? XLEN'(command_q.insn) : '0;
@@ -1407,7 +1449,8 @@ module rapt_vpu #(
           state <= COMPLETE;
         end
         MEMORY_START: if (m_ready) state <= MEMORY_RUN;
-        MEMORY_RUN: if (m_done) begin
+        MEMORY_RUN:
+        if (m_done) begin
           result_q.trap <= m_trap;
           result_q.cause <= m_cause;
           result_q.tval <= m_tval;

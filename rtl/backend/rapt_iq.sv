@@ -43,7 +43,7 @@ module rapt_iq #(
     parameter unsigned                XLEN            = Cfg.xlen
 ) (
     input CompletionT completion[NumCompletions],
-    input CompletionT local_operand_wake[NumCompletions] = '{default: '0},
+    input CompletionT local_operand_wake[NumCompletions],
     input clock,
     input reset,
     // One-cycle, producer-validated recovery event. Ages use the ROB ring,
@@ -62,11 +62,11 @@ module rapt_iq #(
 
     // Same-cycle wake producers. Must not include a packet this queue
     // combinationally generates. Tied off when ComboCdbWake is 0.
-    input CompletionT combo_source[NumCompletions] = '{default: '0},
+    input CompletionT combo_source[NumCompletions],
 
     // Execution availability per attached function-unit port.
     input logic [NumIssuePorts-1:0] issue_enable,
-    input logic [NumResources-1:0] resource_ready = '1,
+    input logic [NumResources-1:0] resource_ready,
 
     // Issue ports: combinational view of the oldest registered-ready entries.
     output IssueT issue[NumIssuePorts],
@@ -132,6 +132,7 @@ module rapt_iq #(
 
   // Reject inconsistent type/value configurations rather than truncating tags
   // or execution payloads silently at a specialization boundary.
+`ifndef SYNTHESIS
   if (!(IQ_SIZE > 0 && IQ_SIZE == disp.RS_SIZE)) begin : g_invalid_capacity
     $error(
         "Invalid rapt_iq configuration: capacity must be positive and match allocation interface"
@@ -140,6 +141,7 @@ module rapt_iq #(
   if (!(NumSlots > 0 && NumSlots == disp.Width)) begin : g_invalid_config_0
     $error("IQ allocation width must match the selected frontend profile");
   end
+`endif
   if (!(NumIssuePorts > 0 && NumIssuePorts <= $bits(
           dispatch[0].uop.schedule.issue_ports
       ))) begin : g_invalid_config_1

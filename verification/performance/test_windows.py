@@ -27,11 +27,22 @@ class WindowTests(unittest.TestCase):
 #include <sample_window.h>
 #include <cstdlib>
 #include <cstring>
+static uint64_t observed_cycle, observed_retired;
+PmuSnapshot counters() {
+  const uint64_t cycles = 1000000 + observed_cycle;
+  return {{"active_cycle", cycles}, {"instr_cnt", observed_retired},
+          {"dispatch_cycles_work", cycles}, {"dispatch_capacity", 4 * cycles},
+          {"dispatch_accepted", 2 * cycles}, {"dispatch_unfilled_work", 2 * cycles}};
+}
 int main(int argc, char **argv) {
   unsigned width = std::strtoul(argv[2], nullptr, 10);
   bool early = argc > 3 && !std::strcmp(argv[3], "early");
   bool traps = argc > 3 && !std::strcmp(argv[3], "traps");
   bool threads = argc > 3 && !std::strcmp(argv[3], "threads");
+  bool delayed_start = argc > 3 && !std::strcmp(argv[3], "pmu-start");
+  bool zero_warmup = delayed_start || (argc > 3 && !std::strcmp(argv[3], "pmu-zero"));
+  bool pmu = zero_warmup || (argc > 3 && !std::strcmp(argv[3], "pmu"));
+  if (pmu) sample_window_set_pmu_provider(counters);
 #ifdef CONFIG_ISA64
   constexpr uint64_t Root = 0x800000000009452a, Alias = 0x800090000009452a;
   constexpr uint64_t OtherRoot = 0x8000900000012345;
@@ -44,12 +55,15 @@ int main(int argc, char **argv) {
     sample_window_set_user_satp(Root);
     sample_window_set_user_thread(Worker);
   }
-  sample_window_configure(argv[1], 4, 16, false, 0, true);
+  sample_window_configure(argv[1], zero_warmup ? 0 : 4, 16,
+                          delayed_start, 0x80000010, true);
   sample_window_commit(0x20000000, 0x13, 1, 0, false);
   if (!sample_window_finish(true)) return 2; // Reset is not a measured run.
   sample_window_activate();
   unsigned count = 0;
   for (unsigned cycle = 1; cycle <= (early ? 5u : 100u); cycle++) {
+    sample_window_before_cycle(0x80000000 + count * 4);
+    observed_cycle = cycle;
     bool fault = traps && cycle == 5;
     uint32_t inst = traps && cycle == 2 ? 0x73 :
                     traps && cycle == 8 ? 0x100073 : 0x13;
@@ -61,6 +75,7 @@ int main(int argc, char **argv) {
       if (!sample_window_accept(privilege, satp, tp)) continue;
       sample_window_commit(0x80000000 + count * 4, inst, cycle, count, !count);
       count++;
+      observed_retired++;
     }
     if (sample_window_cycle(cycle, count)) break;
   }
@@ -77,11 +92,14 @@ int main(int argc, char **argv) {
     def tearDownClass(cls):
         cls.temporary.cleanup()
 
-    def run_window(self, width, early=False, traps=False, threads=False):
+    def run_window(self, width, early=False, traps=False, threads=False, pmu=False,
+                   zero_warmup=False, delayed_start=False):
         output = Path(tempfile.mkdtemp(dir=self.work)) / "window.json"
         process = subprocess.run([str(self.executable), str(output), str(width)] +
                                  (["early"] if early else ["traps"] if traps else
-                                  ["threads"] if threads else []), check=False)
+                                  ["threads"] if threads else ["pmu-start"] if delayed_start else
+                                  ["pmu-zero"] if zero_warmup else
+                                  ["pmu"] if pmu else []), check=False)
         return process.returncode, json.loads(output.read_text())
 
     def test_single_and_dual_commit_measure_the_same_instruction_stream(self):
@@ -107,6 +125,48 @@ int main(int argc, char **argv) {
         self.assertFalse(window["complete"])
         with self.assertRaisesRegex(ValueError, "incomplete"):
             matched_window(window, window, dict(warmup=4, instructions=16))
+
+    def test_pmu_uses_matched_boundaries_and_excludes_the_counter_prefix(self):
+        for width in (1, 2, 4):
+            with self.subTest(width=width):
+                rc, window = self.run_window(width, pmu=True)
+                self.assertEqual(rc, 0)
+                result = matched_window(window, window, dict(start=0, warmup=4, instructions=16))
+                counters = result["baseline_pmu"]
+                self.assertEqual(counters["active_cycle"], 16 // width)
+                self.assertEqual(counters["instr_cnt"], 16)
+                self.assertEqual(counters["dispatch_capacity"], 4 * result["baseline_cycles"])
+                self.assertEqual(counters, result["candidate_pmu"])
+
+    def test_invalid_pmu_snapshots_are_rejected(self):
+        for corruption, message in (("decrease", "decreased"), ("cycles", "active cycles"),
+                                    ("slots", "slot accounting"), ("missing", "counter set")):
+            with self.subTest(corruption=corruption):
+                rc, window = self.run_window(2, pmu=True)
+                self.assertEqual(rc, 0)
+                end = next(b for b in window["boundaries"] if b["instructions"] == 20)
+                if corruption == "decrease":
+                    end["pmu"]["active_cycle"] = 0
+                elif corruption == "cycles":
+                    end["pmu"]["active_cycle"] += 1
+                elif corruption == "slots":
+                    end["pmu"]["dispatch_accepted"] += 1
+                else:
+                    del end["pmu"]["instr_cnt"]
+                with self.assertRaisesRegex(ValueError, message):
+                    matched_window(window, window, dict(start=0, warmup=4, instructions=16))
+
+    def test_zero_warmup_pmu_excludes_the_first_cycle_from_the_start_snapshot(self):
+        for width in (1, 2, 4):
+            for delayed in (False, True):
+                with self.subTest(width=width, delayed=delayed):
+                    rc, window = self.run_window(width, zero_warmup=True, delayed_start=delayed)
+                    self.assertEqual(rc, 0)
+                    point = dict(start=0, warmup=0, instructions=16)
+                    result = matched_window(window, window, point)
+                    self.assertEqual(result["baseline_cycles"], 16 // width)
+                    self.assertEqual(result["baseline_pmu"]["active_cycle"], 16 // width)
+                    self.assertEqual(result["baseline_pmu"]["instr_cnt"], 16)
 
     def test_fault_and_system_exception_cycles_cost_time_but_do_not_retire(self):
         before_rc, before = self.run_window(1)

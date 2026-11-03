@@ -2,6 +2,8 @@
 from pathlib import Path
 import hashlib
 import os
+import re
+import shutil
 import signal
 import subprocess
 
@@ -10,6 +12,27 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def member(directory, name):
+    if not isinstance(name, str) or not name or Path(name).is_absolute():
+        raise ValueError("Evidence paths must be nonempty relative paths")
+    path = (directory / name).resolve()
+    if not path.is_relative_to(directory.resolve()):
+        raise ValueError("Evidence path escapes its source/artifact directory")
+    return path
+
+
+def copy_native_artifact(source, directory, name, digest):
+    """Copy frozen evidence and reject changes before or during copying."""
+    target = member(directory, name)
+    if sha(source) != digest:
+        raise ValueError('Native artifact changed: ' + str(source))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+    if sha(target) != digest:
+        raise ValueError('Native artifact changed while copying: ' + str(source))
+    return digest
 
 
 def rtl_manifest(root):
@@ -77,9 +100,36 @@ def task_status(directory, task):
     return read_status(directory / ("contract_" + task) / "status")
 
 
-def run_sby(directory, timeout, *, negative=False, force=False, grace=120):
+def activation_witnesses(log, directory):
+    """Resolve each reached cover to the waveform exported by its SBY engine."""
+    pending, found = [], {}
+    for line in log.splitlines():
+        match = re.search(r'Reached cover statement in step \d+ at (.+)$', line)
+        if match:
+            pending.append(match[1])
+        match = re.search(r'Writing trace to VCD file: (.+)$', line)
+        if match:
+            path = Path(match[1])
+            if not path.is_absolute():
+                path = directory / 'contract_cover' / path
+            path = path.resolve()
+            if not path.is_relative_to(directory.resolve()) or not path.is_file():
+                raise ValueError('Activation witness escapes output or is missing')
+            if not path.stat().st_size:
+                raise ValueError('Activation waveform is empty')
+            for name in pending:
+                if name in found:
+                    raise ValueError('Duplicate activation property')
+                found[name] = str(path.relative_to(directory))
+            pending = []
+    if pending:
+        raise ValueError('Activation property is missing its waveform')
+    return found
+
+
+def run_sby(directory, timeout, *, negative=False, force=False, grace=120, yosys=None):
     """Run a standard prove/cover contract and require nonempty VCD evidence."""
-    process = run_sby_task(directory, timeout, force=force, grace=grace)
+    process = run_sby_task(directory, timeout, yosys, force=force, grace=grace)
     if process.returncode == 124:
         raise subprocess.TimeoutExpired(process.args, timeout + grace)
     text = (directory / "run.log").read_text()

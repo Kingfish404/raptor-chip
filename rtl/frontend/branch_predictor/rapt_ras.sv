@@ -72,16 +72,15 @@ module rapt_ras #(
   // On flush, bypass a same-edge commit push into the restored full image.
   // Payload remains unreset and is hidden by the corresponding live count.
   wire [Xlen-1:1] push_data = flush ? payload(commit_addr) : payload(spec_addr);
-  for (genvar e = 0; e < Depth; e++) begin : g_data
-    wire spec_write = spec_push && spec_write_index == IndexBits'(e);
-    wire commit_write = commit_push && commit_write_index == IndexBits'(e);
-    always_ff @(posedge clock) begin
+  always_ff @(posedge clock) begin
+    for (int e = 0; e < Depth; e++) begin
+      logic spec_write, commit_write;
+      spec_write = spec_push && spec_write_index == IndexBits'(e);
+      commit_write = commit_push && commit_write_index == IndexBits'(e);
       if (commit_write) committed.data[e] <= payload(commit_addr);
       if (flush || spec_write)
         speculative.data[e] <= flush && !commit_write ? committed.data[e] : push_data;
     end
-  end
-  always_ff @(posedge clock) begin
     committed.next_index <= next_committed.next_index;
     committed.count <= next_committed.count;
     speculative.next_index <= flush ? next_committed.next_index : next_speculative.next_index;

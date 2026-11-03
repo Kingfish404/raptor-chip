@@ -14,7 +14,8 @@ import re
 import shutil
 import subprocess
 import sys
-from yosys_common import ROOT, run_bounded, run_sby_task, sha, task_status
+from formal_scope import preset_xlens
+from yosys_common import ROOT, activation_witnesses, run_bounded, run_sby_task, sha, task_status
 
 
 TOP = 'formal_ioq_owner'
@@ -272,33 +273,6 @@ def prove(directory, compiled, model_directory, timeout, depth, cover_depth, yos
     return result
 
 
-def activation_witnesses(log, directory):
-    """Resolve SBY engine paths against their real working directory."""
-    pending, found = [], {}
-    for line in log.splitlines():
-        match = re.search(r'Reached cover statement in step \d+ at (.+)$', line)
-        if match:
-            pending.append(match[1])
-        match = re.search(r'Writing trace to VCD file: (.+)$', line)
-        if match:
-            path = Path(match[1])
-            if not path.is_absolute():
-                path = directory / 'contract_cover' / path
-            path = path.resolve()
-            if not path.is_relative_to(directory.resolve()) or not path.is_file():
-                raise ValueError('Activation witness escapes output or is missing')
-            if not path.stat().st_size:
-                raise ValueError('Activation waveform is empty')
-            for name in pending:
-                if name in found:
-                    raise ValueError('Duplicate activation property')
-                found[name] = str(path.relative_to(directory))
-            pending = []
-    if pending:
-        raise ValueError('Activation property is missing its waveform')
-    return found
-
-
 def compile_worker(arguments):
     return compile_case(*arguments)
 
@@ -512,6 +486,10 @@ def prove_main():
         parser.error('Unknown or invalid preset')
     if min(args.jobs, args.timeout, args.depth, args.cover_depth) < 1:
         parser.error('Jobs, timeout and depths must be positive')
+    xlens = {preset: preset_xlens(ROOT / 'rtl/configs' / preset / 'rapt_config.svh')
+             for preset in presets}
+    if not any(set(args.xlens) & set(values) for values in xlens.values()):
+        parser.error('No supported preset/XLEN combination selected')
     output = args.output.resolve()
     if output.exists() and any(output.iterdir()):
         parser.error('Output must be empty')
@@ -526,6 +504,7 @@ def prove_main():
     rtl += sorted(p for p in (ROOT / 'rtl').rglob('*.sv') if p not in rtl)
     sources = sorted(set(rtl + list((ROOT / 'rtl').rglob('*.svh'))
         + [HARNESS, Path(__file__), Path(__file__).with_name('yosys_common.py'),
+           Path(__file__).with_name('formal_scope.py'),
            ROOT / 'verification/formal/yosys-rvfi-compat.sh']))
     fingerprints = {str(p.relative_to(ROOT)): sha(p) for p in sources}
     result = dict(complete=False, whole_rtl_signoff=False, sources=fingerprints, bindings=[],
@@ -554,6 +533,8 @@ def prove_main():
         for index, values in enumerate(itertools.product(presets, args.xlens, args.memory,
                 args.response_stages, args.lutram, args.synthesis, args.metadata)):
             p, x, memory, stage, lutram, synthesis, metadata = values
+            if x not in xlens[p]:
+                continue
             cases.append(dict(id=f'ioq-{index:05d}', preset=p, xlen=x, memory=memory,
                 response_stage=stage, lutram=lutram, synthesis=bool(synthesis),
                 metadata=metadata, contract=args.contract, late_operands=args.late_operands,

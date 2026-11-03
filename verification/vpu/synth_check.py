@@ -93,6 +93,8 @@ def main():
                 params = dict(TagBits=10 if xlen == 64 else 3, CommandBits=32+2*xlen, ResultBits=3*xlen+7)
             else:
                 params = dict(XLEN=xlen, VLEN=vlen, ELEN=elen)
+            if leaf.startswith("top") or leaf == "vrf":
+                sources.insert(0, ROOT / "rtl/rapt_pkg.sv")
             name = top + "-" + "-".join(map(str, params.values()))
             if name in seen:
                 continue
@@ -101,7 +103,7 @@ def main():
             out.mkdir(exist_ok=True)
             netlist = out / "netlist.json"
             script = "\n".join([
-                "read_slang --top " + top + " -Irtl/include"
+                "read_slang --top " + top + " -Irtl/include -Irtl/configs/default"
                 + " " + " ".join(f"-G{k}={v}" for k, v in params.items())
                 + " " + " ".join(str(p.relative_to(ROOT)) for p in sources),
                 f"hierarchy -check -top {top}",

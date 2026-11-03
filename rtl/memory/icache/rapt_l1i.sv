@@ -23,6 +23,7 @@ module rapt_l1i #(
     // True LRU for 2-16 ways instead of the 2-way fill toggle / NRU.
     parameter bit CacheLru = `RAPT_CACHE_LRU != 0
 ) (
+    input rapt_pkg::sram_ctrl_t sram_ctrl_i,
     input clock,
 
     cmu_bcast_if.in cmu_bcast,
@@ -34,12 +35,12 @@ module rapt_l1i #(
     pmp_state_if.in pmp_state,
 
     input reset,
-    input logic io_authorized = 1'b0,
+    input logic io_authorized,
     output logic io_start,
     output logic [`RAPT_PC_BITS_OF(XLEN)-1:0] io_owner_pc,
     output rapt_pkg::l2tlb_req_t l2tlb_req_o,
-    input logic l2tlb_ready_i = 1'b0,
-    input rapt_pkg::l2tlb_rsp_t l2tlb_rsp_i = '0
+    input logic l2tlb_ready_i,
+    input rapt_pkg::l2tlb_rsp_t l2tlb_rsp_i
 );
   localparam int PcW = `RAPT_PC_BITS_OF(XLEN);
   // Fetch PCs arrive narrowed; physical and translation paths use the architectural value.
@@ -310,8 +311,7 @@ module rapt_l1i #(
   generate
     for (genvar w = 0; w < L1I_N_WAYS; w++) begin : gen_way_hit
       assign way_tag_match[w] = tag_valid_curr[w] && (tag_rdata_curr[w] == addr_tag);
-      assign way_tag_match_next4[w] = tag_valid_next4[w]
-          && tag_rdata_next4[w] == addr_tag_next4;
+      assign way_tag_match_next4[w] = tag_valid_next4[w] && tag_rdata_next4[w] == addr_tag_next4;
       assign way_tag_match_next[w] = pc_ifu[1] ? way_tag_match_next4[w] : way_tag_match[w];
       assign way_hit[w] = way_tag_match[w] && valid_curr[w][addr_offset];
       assign way_hit_next[w] = way_tag_match_next[w] && valid_next[w][addr_offset_next];
@@ -854,6 +854,7 @@ module rapt_l1i #(
       .WordBits(L1I_LINE_LEN),
       .Ways(L1I_N_WAYS)
   ) u_data (
+      .sram_ctrl_i(sram_ctrl_i),
       .clock(clock),
       .reset(reset),
       .read_set(sram_read_idx),
@@ -979,27 +980,29 @@ module rapt_l1i #(
   // Bare fetch shares the next-page increment across the lookahead slots.
   assign lookahead_bare_next_page = fetch_pc[XLEN-1:12] + (XLEN-12)'(1);
   assign lookahead_n1_page = {1'b0, fetch_pc[11:2], 2'b00} + 13'd4;
-  assign lookahead_n1_addr = rapt_pkg::canonical_paddr({
+  assign lookahead_n1_addr = rapt_pkg::canonical_paddr(
+      {
     mmu_en ? pc_ifu[XLEN-1:12]
       : (lookahead_n1_page[12] ? lookahead_bare_next_page : fetch_pc[XLEN-1:12]),
     lookahead_n1_page[11:0]
-  });
+      }
+  );
   assign lookahead_n2_page = {1'b0, fetch_pc[11:2], 2'b00} + 13'd8;
-  assign lookahead_n2_addr = rapt_pkg::canonical_paddr({
+  assign lookahead_n2_addr = rapt_pkg::canonical_paddr(
+      {
     mmu_en ? pc_ifu[XLEN-1:12]
       : (lookahead_n2_page[12] ? lookahead_bare_next_page : fetch_pc[XLEN-1:12]),
     lookahead_n2_page[11:0]
-  });
+      }
+  );
 
   assign addr_offset_n1 = addr_offset + L1I_LINE_LEN'(1);
   assign addr_offset_n2 = addr_offset + L1I_LINE_LEN'(2);
 
   generate
     for (genvar w = 0; w < L1I_N_WAYS; w++) begin : gen_way_hit_n1
-      assign way_hit_n1[w] = way_tag_match_next4[w]
-        && valid_next4[w][addr_offset_n1];
-      assign way_hit_n2[w] = way_tag_match_next4[w]
-        && valid_next4[w][addr_offset_n2];
+      assign way_hit_n1[w] = way_tag_match_next4[w] && valid_next4[w][addr_offset_n1];
+      assign way_hit_n2[w] = way_tag_match_next4[w] && valid_next4[w][addr_offset_n2];
     end
   endgenerate
 
@@ -1061,24 +1064,26 @@ module rapt_l1i #(
   logic hit_n3, hit_n4, sram_n3_ready, sram_n4_ready;
   logic n3_same_line_as_next4, n4_same_line_as_next4;
   assign lookahead_n3_page = {1'b0, fetch_pc[11:2], 2'b00} + 13'd12;
-  assign lookahead_n3_addr = rapt_pkg::canonical_paddr({
+  assign lookahead_n3_addr = rapt_pkg::canonical_paddr(
+      {
     mmu_en ? pc_ifu[XLEN-1:12]
       : (lookahead_n3_page[12] ? lookahead_bare_next_page : fetch_pc[XLEN-1:12]),
     lookahead_n3_page[11:0]
-  });
+      }
+  );
   assign lookahead_n4_page = {1'b0, fetch_pc[11:2], 2'b00} + 13'd16;
-  assign lookahead_n4_addr = rapt_pkg::canonical_paddr({
+  assign lookahead_n4_addr = rapt_pkg::canonical_paddr(
+      {
     mmu_en ? pc_ifu[XLEN-1:12]
       : (lookahead_n4_page[12] ? lookahead_bare_next_page : fetch_pc[XLEN-1:12]),
     lookahead_n4_page[11:0]
-  });
+      }
+  );
   assign addr_offset_n3 = addr_offset + L1I_LINE_LEN'(3);
   assign addr_offset_n4 = addr_offset + L1I_LINE_LEN'(4);
   for (genvar w = 0; w < L1I_N_WAYS; w++) begin : g_way_hit_wide
-    assign way_hit_n3[w] = way_tag_match_next4[w]
-        && valid_next4[w][addr_offset_n3];
-    assign way_hit_n4[w] = way_tag_match_next4[w]
-        && valid_next4[w][addr_offset_n4];
+    assign way_hit_n3[w] = way_tag_match_next4[w] && valid_next4[w][addr_offset_n3];
+    assign way_hit_n4[w] = way_tag_match_next4[w] && valid_next4[w][addr_offset_n4];
   end
   assign hit_n3 = |way_hit_n3;
   assign hit_n4 = |way_hit_n4;
@@ -1233,8 +1238,7 @@ module rapt_l1i #(
             l1i_state <= TRAP;
           end else if (ptw_done) begin
             if (pf_fetch_ptw || !rapt_pkg::tlb_ppn_fits(ptw_result_ptag)) begin
-              cause <= pf_fetch_ptw ? `RAPT_CAUSE_INSTR_PAGE_FAULT
-                  : `RAPT_CAUSE_INSTR_ACC_FAULT;
+              cause <= pf_fetch_ptw ? `RAPT_CAUSE_INSTR_PAGE_FAULT : `RAPT_CAUSE_INSTR_ACC_FAULT;
               rec_tval <= ifu_l1i.pc;
               l1i_state <= TRAP;
             end else begin

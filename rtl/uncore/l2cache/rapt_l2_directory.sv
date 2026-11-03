@@ -9,6 +9,7 @@ module rapt_l2_directory #(
     parameter int WayBits = (Ways <= 1) ? 1 : $clog2(Ways),
     parameter int EntryBits = TagBits + ClientBits + 3
 ) (
+    input rapt_pkg::sram_ctrl_t sram_ctrl_i,
     input logic clock,
     input logic reset,
     output logic ready,
@@ -85,8 +86,7 @@ module rapt_l2_directory #(
   assign write_fire = write_valid && write_ready;
   assign write_drain = ready && write_queued && !read_fire && !scan_fire;
   assign next_victim_lfsr = {
-    victim_lfsr[14:0],
-    victim_lfsr[15] ^ victim_lfsr[13] ^ victim_lfsr[12] ^ victim_lfsr[10]
+    victim_lfsr[14:0], victim_lfsr[15] ^ victim_lfsr[13] ^ victim_lfsr[12] ^ victim_lfsr[10]
   };
 
   for (genvar way = 0; way < Ways; way++) begin : g_way
@@ -98,6 +98,7 @@ module rapt_l2_directory #(
         .INST_ID(400 + way),
         .USE_BWE(0)
     ) u_directory (
+        .sram_ctrl_i(sram_ctrl_i),
         .clock,
         .en(!ready || clear_fire || read_fire || scan_fire || write_this_way),
         .wen(!ready || clear_fire || write_this_way),

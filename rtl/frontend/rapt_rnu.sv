@@ -28,8 +28,8 @@ module rapt_rnu #(
     rnu_rou_if.master rnu_rou,
     rapt_recovery_if.sink recovery,
     checkpoint_release_if.sink checkpoint_release,
-    input logic [63:0] snapshot_ghr = '0,
-    input logic [7:0] snapshot_phr = '0,
+    input logic [63:0] snapshot_ghr,
+    input logic [7:0] snapshot_phr,
     output logic history_restore,
     output logic [63:0] restore_ghr,
     output logic [7:0] restore_phr,
@@ -143,15 +143,18 @@ module rapt_rnu #(
     // Jumps do not append a conditional-history bit.
     if (checkpoint_restore_conditional) restore_ghr[0] = recovery.taken;
   end
+`ifndef SYNTHESIS
   if (!(idu_rnu.Width == DecodeWidth && rnu_rou.Width == RenameWidth)) begin : g_invalid_config_0
     $error("Invalid rapt_rnu configuration");
   end
   if (!(rou_cmu.Width == CommitWidth)) begin : g_invalid_config_1
     $error("Invalid rapt_rnu configuration");
   end
+`endif
   if (!(PNUM > RNUM && RenameWidth > 0 && CheckpointEntries > 0)) begin : g_invalid_config_2
     $error("Invalid rapt_rnu configuration");
   end
+`ifndef SYNTHESIS
   if (!(checkpoint_release.Ports == ResolvePorts)) begin : g_invalid_config_3
     $error("Invalid rapt_rnu configuration");
   end
@@ -161,6 +164,7 @@ module rapt_rnu #(
   if (!(recovery.CheckpointBits == CheckpointBits)) begin : g_invalid_config_5
     $error("Invalid rapt_rnu configuration");
   end
+`endif
   // A queued item has fewer than RIQ_SIZE younger conditional edges. Keep
   // only shifted-out bits; snapshot_* already supplies the live post-decode
   // watermark. Include this cycle's accepted edge in both window and position.
@@ -376,7 +380,10 @@ module rapt_rnu #(
   for (genvar r = 0; r < RNUM; r++) begin : g_snapshot
     assign map_snapshot[r] = map_q[r];
     assign rat_snapshot[r] = rat_q[r];
-    `RAPT_SVA(clock, reset, RENAME_MAP_ALLOCATED, !free_q[map_q[r]])
+`ifdef RAPT_SVA_ACTIVE
+    wire mapped_register_allocated = !free_q[map_q[r]];
+`endif
+    `RAPT_SVA(clock, reset, RENAME_MAP_ALLOCATED, mapped_register_allocated)
   end
 `ifdef RAPT_SVA_ACTIVE
   logic [PNUM-1:0] arch_allocated_from_rat;

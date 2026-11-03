@@ -60,7 +60,7 @@ def check():
          number(regions["sram"]["size"]), "SRAM size")
     contains("rtl/rapt_pkg.sv", r"PmemEnd\s*=\s*64'h80000000\s*\+\s*64'\(PmemBytes\)",
              "PMEM end must be widened before addition")
-    contains("rtl/rapt_pkg.sv", r"pma_has_attr\(addr\[31:0\], PmaPmem\)",
+    contains("rtl/rapt_pkg.sv", r"pma_has_attr\(addr\[31:0\], PmaPmem, 1'b1\)",
              "PMEM PMA table lookup")
     contains("rtl/rapt_pkg.sv", r"'\{\s*64'h80000000,\s*PmemEnd,\s*"
              r"PmaMapped \| PmaCacheable \| PmaWritable \| PmaPmem,\s*1'b1\s*\}",

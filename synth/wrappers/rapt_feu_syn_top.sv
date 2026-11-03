@@ -45,6 +45,10 @@ module rapt_feu_syn_top #(
     input logic wb_accept,
     output logic issue_enable
 );
+  rapt_pkg::completion_t local_fp_wake[NumCompletions];
+  for (genvar p = 0; p < NumCompletions; p++) begin : g_local_fp_wake
+    assign local_fp_wake[p] = '0;
+  end
   dpu_iq_if #(
       .RS_SIZE(FPQ_SIZE),
       .Width(NumSlots)
@@ -88,6 +92,8 @@ module rapt_feu_syn_top #(
       .disp_fpq,
       .wb_fpu,
       .wb_accept,
-      .issue_enable
+      .issue_enable,
+      .local_fp_wake(local_fp_wake),
+      .completion_ready(1'b1)
   );
 endmodule

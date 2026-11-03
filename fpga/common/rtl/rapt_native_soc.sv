@@ -59,6 +59,7 @@ module rapt_native_soc #(
   rapt #(
       .XLEN(XLEN)
   ) core (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock(clk),
       .reset(core_reset),
 `ifdef RAPT_SAMPLING
@@ -106,6 +107,8 @@ module rapt_native_soc #(
       .io_master_bresp(cpu.bresp),
       .io_master_bvalid(cpu.bvalid),
       .io_master_bready(cpu.bready)
+  ,
+      .jtag_tck_en(1'b1)
   );
   rapt_native_bus #(
       .XLEN(XLEN),

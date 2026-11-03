@@ -17,21 +17,20 @@ import math
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import threading
 
-from yosys_common import ROOT, run_sby, run_yosys
+from formal_scope import binding_key, canonical_rtlil, inventory, native_smtbmc_config, preset_xlens
+from yosys_common import ROOT, activation_witnesses, run_bounded, run_sby, run_yosys, sha
 
 FORMAL = ROOT / "verification/formal"
 SVA = ROOT / "rtl/include/rapt_sva.svh"
 SRAM_DIR = ROOT / "sim/sram"
 SRAM_RTL = ROOT / "rtl/sram/rapt_sram_1rw.sv"
 SRAM_GENERATOR = SRAM_DIR / "scripts/gen_stub_lib.py"
-DRIVERS = [Path(__file__), Path(__file__).with_name("yosys_common.py")]
-
-
-def sha(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+DRIVERS = [Path(__file__), Path(__file__).with_name("yosys_common.py"),
+           Path(__file__).with_name("formal_scope.py")]
 
 
 def fingerprint(paths):
@@ -377,6 +376,13 @@ SRAM_MUTATIONS = {
     "byte-mask": ("if (bwe[b])", "if (bwe[0])"),
     "output-hold": ("if (en && !wen) rdata <= mem[addr];", "if (en) rdata <= mem[addr];"),
     "macro-polarity": (".web0(~wen)", ".web0(wen)"),
+    "initial-read": (
+        "  always_ff @(posedge clock) begin\n"
+        "    if (en && !wen) rdata <= mem[addr];\n  end",
+        "  logic mutation_write_seen = 1'b0;\n"
+        "  always_ff @(posedge clock) begin\n"
+        "    if (en && wen) mutation_write_seen <= 1'b1;\n"
+        "    if (en && !wen) rdata <= mutation_write_seen ? mem[addr] : '0;\n  end"),
 }
 
 
@@ -407,13 +413,10 @@ def sram_observation(depth, width, macro):
     return "wire [DataBits-1:0] observed_word =\n    " + expression + ";\n"
 
 
-def sram_case(case, output, timeout, model_generator, mutant=None):
+def sram_frontend(case, directory, timeout, model_generator, *, mutant=None, profile=None,
+                  synthesis=False):
     depth, width, write_size, bwe, macro = case
-    name = f"{depth}x{width}-bwe{bwe}-" + ("macro" if macro else "behavioral")
-    if mutant:
-        name = "negative-" + mutant
-    directory = output / name
-    directory.mkdir()
+    directory.mkdir(parents=True)
     (directory / "formal_sram_word.sv").write_text(SRAM_HARNESS.read_text())
     text = SRAM_RTL.read_text()
     if mutant:
@@ -424,61 +427,204 @@ def sram_case(case, output, timeout, model_generator, mutant=None):
         text = text.replace(old, new)
     (directory / "rapt_sram_1rw.sv").write_text(text)
     (directory / "formal_sram_observe.svh").write_text(sram_observation(depth, width, macro))
-    files = ["formal_sram_word.sv", "rapt_sram_1rw.sv", "formal_sram_observe.svh"]
+    files = [str(ROOT / "rtl/rapt_pkg.sv"), "formal_sram_word.sv", "rapt_sram_1rw.sv",
+             "formal_sram_observe.svh"]
     if macro:
         macro_depth = 4096 if depth == 16384 else depth
         model = model_generator.emit_v(
             f"rapt_openram_1rw_{macro_depth}x{width}", macro_depth, width, write_size)
         (directory / "macro.v").write_text(model)
         files.append("macro.v")
-    define = "-DRAPT_USE_SRAM_MACRO " if macro else ""
-    # Lower checks before auditing: no internal assumptions, free-state cells or
-    # blackboxes may hide behind a frontend's representation of formal syntax.
+    profile = profile or ('formal/rv32/sram' if macro else 'formal/rv32/dff')
+    preset, isa, memory = profile.split('/')
+    if (memory == 'sram') != bool(macro):
+        raise ValueError('SRAM implementation differs from its profile')
+    defines = dict(RAPT_RV64=isa == 'rv64', RAPT_USE_SRAM_MACRO=bool(macro), SYNTHESIS=synthesis)
+    flags = ' '.join(('-D' if value else '-U') + name for name, value in defines.items())
+    parameters = dict(AddrBits=int(math.log2(depth)), DataBits=width, UseBwe=bwe)
+    params = ' '.join(f'-G{name}={value}' for name, value in parameters.items())
     memories = 4 if macro and depth == 16384 else 1
-    config = (
-        "[tasks]\nprove\n" + ("" if mutant else "cover\n")
-        + "[options]\nprove: mode prove\n"
-        + ("" if mutant else "cover: mode cover\n")
-        + f"depth 6\ntimeout {timeout}\n[engines]\nsmtbmc yices\n[script]\n"
-        + "plugin -i slang\nread_slang --threads 1 --single-unit --top formal_sram_word "
-        + f"-GAddrBits={int(math.log2(depth))} -GDataBits={width} -GUseBwe={bwe} "
-        + define + " ".join(f for f in files if not f.endswith("svh")) + "\n"
-        + "prep -top formal_sram_word -flatten\nasync2sync\ncheck -assert\n"
+    script = ('plugin -i slang\nread_slang --threads 1 --single-unit '
+        + f'{flags} -I{ROOT}/rtl/configs/{preset} -I{ROOT}/rtl/include '
+        + f'--top formal_sram_word {params} '
+        + ' '.join(f for f in files if not f.endswith('svh')) + '\n'
+        + 'prep -top formal_sram_word -flatten\nasync2sync\nchformal -lower\ncheck -assert\n'
         + "select -assert-count 1 t:$assume\n"
         + f"select -assert-count {memories} t:$mem_v2\n"
         + "select -assert-none t:$anyseq t:$anyconst A:blackbox=1\n"
-        + "[files]\n" + "\n".join(files) + "\n"
-    )
+        + 'write_rtlil frontend.il\n')
+    (directory / 'read.ys').write_text(script)
+    yosys = shutil.which(os.environ.get('RAPTOR_YOSYS_REAL', 'yosys'))
+    if not yosys:
+        raise ValueError('Native Yosys is missing')
+    with (directory / 'compile.log').open('w') as log:
+        child = run_bounded([yosys, '-Q', '-T', '-s', 'read.ys'], cwd=directory,
+                            stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
+    child.check_returncode()
+    model = directory / 'frontend.il'
+    return dict(parameters=dict(parameters, defines=defines), profile=profile, yosys=yosys,
+        canonical_sha256=hashlib.sha256(canonical_rtlil(model.read_text()).encode()).hexdigest(),
+        frontend_sha256=sha(model), read_sha256=sha(directory / 'read.ys'))
+
+
+def sram_label(case):
+    depth, width, _, bwe, macro = case
+    return f'{depth}x{width}-bwe{bwe}-' + ('macro' if macro else 'behavioral')
+
+
+def sram_case(case, output, timeout, model_generator, mutant=None, solver='yices'):
+    name = 'negative-' + mutant if mutant else sram_label(case)
+    directory = output / name
+    binding = sram_frontend(case, directory, timeout, model_generator, mutant=mutant)
+    config = native_smtbmc_config('formal_sram_word', directory / 'frontend.il',
+                                 timeout=timeout, solver=solver, negative=bool(mutant))
     (directory / "contract.sby").write_text(config)
-    check, _ = run_sby(directory, timeout, negative=bool(mutant), force=True, grace=45)
+    check, _ = run_sby(directory, timeout, negative=bool(mutant), force=True, grace=45,
+                       yosys=binding['yosys'])
     if not check["passed"]:
         raise RuntimeError("Incomplete SRAM contract or missing witness: " + name)
     log = (directory / "run.log").read_text()
     if not mutant and ("successful proof by k-induction" not in log or "reached cover" not in log):
         raise RuntimeError("Missing inductive/non-vacuous evidence: " + name)
+    activation = {}
+    if not mutant:
+        log_path = directory / 'contract_cover/engine_0/logfile.txt'
+        activation = activation_witnesses(log_path.read_text(), directory)
+        text = (directory / 'contract_cover/model/design_smt2.smt2').read_text()
+        expected = {'formal_sram_word: ' + name for name in re.findall(
+            r'^; yosys-smt2-cover \d+ (.+)$', text, re.M)}
+        if set(activation) != expected or not expected:
+            raise ValueError('SRAM proof lacks a witness for every original cover')
+    depth, width, _, bwe, macro = case
     return {"case": name, "depth": depth, "width": width, "use_bwe": bwe,
             "macro": bool(macro), "proof": check["proof"], "log": str(directory / "run.log"),
+            "native_binding": binding, "activation": activation,
             "artifacts": {str(p.relative_to(directory)): sha(p)
                           for p in directory.rglob("*") if p.is_file()}}
+
+
+def sram_receipts(args, output, result, scope, model_generator, save):
+    """Bind complete proved memories to every requested preset and synthesis context."""
+    unit_id = 'rtl/sram/rapt_sram_1rw.sv:rapt_sram_1rw'
+    unit = next(row for row in scope['units'] if row['id'] == unit_id)
+    property_map = {
+        'read-write': 'Every symbolic row follows its arbitrary initial word and write history',
+        'read-hold': 'Owned synchronous reads return their sampled word; disabled outputs hold',
+        'port-collision': 'A write owns the sole port and preserves the previous read output',
+        'macro-equivalence': 'Behavioral and registered functional macro models satisfy the '
+                             'same masked/full-word reference and output-hold contract',
+    }
+    if set(property_map) != set(unit['obligations']):
+        raise ValueError('SRAM property mapping differs from its required obligations')
+    profiles = scope['profiles']
+    presets = args.presets or sorted({profile.split('/')[0] for profile in profiles})
+    if len(set(presets)) != len(presets) or not set(presets) <= {
+            profile.split('/')[0] for profile in profiles}:
+        raise ValueError('Unknown or duplicate SRAM binding preset')
+    parameters, cases = {profile: [] for profile in profiles}, []
+    for profile in profiles:
+        _, isa, memory = profile.split('/')
+        for depth, width, write_size in sram_shapes():
+            for bwe in ((0,) if width == 22 else (0, 1)):
+                for synthesis in (False, True):
+                    params = dict(AddrBits=int(math.log2(depth)), DataBits=width, UseBwe=bwe,
+                        defines=dict(RAPT_RV64=isa == 'rv64', RAPT_USE_SRAM_MACRO=memory == 'sram',
+                                     SYNTHESIS=synthesis))
+                    parameters[profile].append(params)
+                    if profile.split('/')[0] in presets:
+                        cases.append(dict(id=f'sram-{len(cases):05d}', profile=profile,
+                            shape=(depth, width, write_size, bwe, int(memory == 'sram')),
+                            synthesis=synthesis, parameters=params))
+    review = dict(sources=scope['sources'], units={unit_id: dict(
+        rationale='Registered library geometries, full-word and supported byte enables, '
+                  'every legal preset/XLEN/storage profile, and both synthesis contexts. '
+                  'The symbolic observer address is stable; DUT inputs and initial memory '
+                  'remain free. Macro cases include complete functional memory models '
+                  'without blackboxes. Their documented port semantics are the external '
+                  'macro contract; physical timing and silicon are outside RTL equivalence. '
+                  'INST_ID is an unused compatibility parameter.',
+        obligations=unit['obligations'], profiles=profiles,
+        parameter_bindings=parameters, property_map=property_map)})
+    (output / 'contract-review.json').write_text(json.dumps(review, indent=2) + '\n')
+    proofs = {row['case']: row for row in result['proofs']}
+    result.update(bindings=[], receipts=0, complete_model_binding=False,
+                  required_bindings=sum(len(rows) for rows in parameters.values()))
+
+    def bind(case):
+        label = sram_label(case['shape'])
+        directory = output / label / 'bindings' / case['id']
+        binding = sram_frontend(case['shape'], directory, args.timeout, model_generator,
+                                profile=case['profile'], synthesis=case['synthesis'])
+        if (binding['parameters'] != case['parameters']
+                or binding['canonical_sha256'] != proofs[label]['native_binding']['canonical_sha256']):
+            raise ValueError('Complete SRAM profile graph differs from its proved model')
+        return dict(case=case, proof=label, **binding,
+                    artifacts={str(p.relative_to(output / label)): sha(p)
+                               for p in directory.iterdir() if p.is_file()})
+
+    with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+        for row in pool.map(bind, cases):
+            result['bindings'].append(row)
+            if len(result['bindings']) % 16 == 0:
+                save()
+    receipts = []
+    for binding in result['bindings']:
+        case, label = binding['case'], binding['proof']
+        directory, proof = output / label, proofs[label]
+        artifacts = dict(proof['artifacts'], **binding['artifacts'])
+        profile = case['profile']
+        if binding_key(binding['parameters']) not in {
+                binding_key(params) for params in parameters[profile]}:
+            raise ValueError('SRAM parameter binding was not reviewed')
+        for obligation in unit['obligations']:
+            receipt = dict(status='PASS', unit=unit_id, obligation=obligation, profile=profile,
+                method='smtbmc-induction', parameters=binding['parameters'], inputs=result['sources'],
+                assumptions=[result['assumption'], 'Macro port semantics follow the registered '
+                             'functional model; no physical macro or timing claim'],
+                harness='verification/formal/formal_sram_word.sv', log='run.log', artifacts=artifacts,
+                property_activation=[dict(property=name, log='contract_cover/engine_0/logfile.txt',
+                                          witness=witness)
+                                     for name, witness in proof['activation'].items()],
+                model_binding=dict(top='formal_sram_word',
+                    canonical_sha256=binding['canonical_sha256'], proved_model='frontend.il',
+                    bound_model=f'bindings/{case["id"]}/frontend.il',
+                    read_script=f'bindings/{case["id"]}/read.ys', proof_script='contract.sby',
+                    proof_root=str(directory), depth=6, timeout=args.timeout, solver=args.solver))
+            path = directory / f'receipt-{case["id"]}-{obligation}.json'
+            path.write_text(json.dumps(receipt, indent=2) + '\n')
+            receipts.append(str(path.relative_to(output)))
+    (output / 'receipts.json').write_text(json.dumps(receipts, indent=2) + '\n')
+    result.update(receipts=len(receipts), complete_selected_binding=len(cases) == len(result['bindings']),
+                  complete_model_binding=len(cases) == result['required_bindings'])
+    save()
 
 
 def sram(parser, args):
     output = prepare_output(parser, args)
     output.mkdir(parents=True, exist_ok=True)
     generator = load_sram_generator()
-    paths = [SRAM_RTL, SRAM_HARNESS, SRAM_DIR / "Makefile", SRAM_GENERATOR,
+    paths = [ROOT / "rtl/rapt_pkg.sv", SRAM_RTL, SRAM_HARNESS,
+             SRAM_DIR / "Makefile", SRAM_GENERATOR,
              FORMAL / "yosys-rvfi-compat.sh", *DRIVERS]
+    paths += sorted((ROOT / "rtl/include").rglob("*.svh"))
+    paths += sorted((ROOT / "rtl/configs/formal").rglob("*.svh"))
+    scope = inventory(ROOT) if args.qualify else None
+    if args.presets and not args.qualify:
+        parser.error('SRAM presets require --qualify')
+    if scope:
+        paths += [ROOT / name for name in scope['sources']]
     fingerprints = fingerprint(paths)
     result = {"complete": False, "sources": fingerprints, "proofs": [], "negative_controls": [],
               "assumption": "Only the symbolic observer address is stable after the first edge",
               "scope": "1RW masked/full writes, every symbolic row, synchronous read and "
                        "output hold; macro cases use ideal functional stubs, not physical macros"}
+    result.update(whole_rtl_signoff=False, solver=args.solver)
     save = evidence_writer(output, result)
     save()
     cases = [(d, w, s, bwe, macro) for d, w, s in sram_shapes()
              for bwe in ((0,) if w == 22 else (0, 1)) for macro in (0, 1)]
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        futures = [pool.submit(sram_case, case, output, args.timeout, generator)
+        futures = [pool.submit(sram_case, case, output, args.timeout, generator, solver=args.solver)
                    for case in cases]
         try:
             for future in as_completed(futures):
@@ -492,8 +638,11 @@ def sram(parser, args):
             raise
     for name in SRAM_MUTATIONS:
         case = (8, 32, 8, 1, int(name == "macro-polarity"))
-        result["negative_controls"].append(sram_case(case, output, args.timeout, generator, name))
+        result["negative_controls"].append(sram_case(
+            case, output, args.timeout, generator, name, solver=args.solver))
         save()
+    if args.qualify:
+        sram_receipts(args, output, result, scope, generator, save)
     if fingerprints != fingerprint(paths):
         raise RuntimeError("SRAM proof source changed during the run")
     result["complete"] = True
@@ -575,7 +724,8 @@ def l1d_data(parser, args):
     if conditional != {"RAPT_USE_SRAM_MACRO"} or macro_calls - plain_macros:
         raise ValueError("Primitive configuration dependencies changed; audit profile reuse")
     output.mkdir(parents=True, exist_ok=True)
-    sources = [L1D_DATA_RTL, SRAM_RTL, L1D_DATA_HARNESS, *DRIVERS, SRAM_GENERATOR,
+    sources = [ROOT / "rtl/rapt_pkg.sv", L1D_DATA_RTL, SRAM_RTL, L1D_DATA_HARNESS,
+               *DRIVERS, SRAM_GENERATOR,
                SRAM_DIR / "Makefile", FORMAL / "yosys-rvfi-compat.sh"]
     sources += sorted((ROOT / "rtl/include").rglob("*.svh"))
     for preset in presets:
@@ -610,7 +760,7 @@ def l1d_data(parser, args):
     discovery.mkdir()
     geometries = set()
     for preset in presets:
-        for xlen in (32, 64):
+        for xlen in preset_xlens(ROOT / "rtl/configs" / preset / "rapt_config.svh"):
             variants = [()]
             if preset == "default":
                 variants += [(f"RAPT_L1D_N_WAYS={ways}", f"RAPT_L1D_NRU={nru}")
@@ -653,7 +803,7 @@ def l1d_data(parser, args):
         observe.write_text("for (genvar b = 0; b < Banks; b++) begin : g_observe\n"
             f"  wire [63:0] word_value = dut.g_bank[b].u_sram.{branch}mem[observed_row];\n"
             "  assign physical_byte[b] = word_value[observed_byte_lane*8+:8];\nend\n")
-        files = [source, SRAM_RTL, L1D_DATA_HARNESS]
+        files = [ROOT / "rtl/rapt_pkg.sv", source, SRAM_RTL, L1D_DATA_HARNESS]
         defines = "-DRAPT_RV64 " if xlen == 64 else ""
         if macro:
             if (rows, 64) not in shapes:
@@ -750,6 +900,11 @@ def main():
         commands[name] = (command, function)
     commands["stream-queue"][0].add_argument("--solver", choices=("bitwuzla", "yices", "z3"),
                                              default="bitwuzla")
+    commands['sram'][0].add_argument('--solver', choices=('yices', 'bitwuzla', 'z3'), default='yices')
+    commands['sram'][0].add_argument('--qualify', action='store_true',
+        help='Elaborate profile bindings and emit reviewed native signoff receipts')
+    commands['sram'][0].add_argument('--presets', nargs='+',
+        help='Limit bindings under --qualify; unselected profiles remain pending')
     commands["l1d-data"][0].add_argument("--presets", nargs="+")
     commands["l1d-data"][0].add_argument("--production-only", action="store_true")
     args = parser.parse_args()

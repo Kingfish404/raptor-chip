@@ -53,7 +53,9 @@ rapt_feu fp_irq_feu (
     .disp_fpq(fp_irq_queue),
     .wb_fpu(fp_irq_wb),
     .wb_accept(fp_irq_accept),
-    .issue_enable(fp_irq_issue_enable)
+    .issue_enable(fp_irq_issue_enable),
+    .local_fp_wake('{default: '0}),
+    .completion_ready(1'b1)
 );
 rapt_completion_guard #(
     .Entries(`RAPT_ROB_SIZE),

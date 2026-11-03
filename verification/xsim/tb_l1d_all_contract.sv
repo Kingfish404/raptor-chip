@@ -23,6 +23,7 @@ module tb_l1d_byte_rom;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .l2tlb_req_o(),
       .l2tlb_ready_i(1'b0),
       .l2tlb_rsp_i('0),
@@ -33,7 +34,24 @@ module tb_l1d_byte_rom;
       .csr_bcast(csr_bcast),
       .pmp_update(pmp_update),
       .exu_l1d(exu_l1d),
-      .reset(reset)
+      .reset(reset),
+      .coherent_request(1'b0),
+      .coherent_write(1'b0),
+      .coherent_addr('0),
+      .probe_valid_i(1'b0),
+      .probe_addr_i('0),
+      .probe_release_ready_i(1'b0),
+      .release_ready_i(1'b0),
+      .release_ack_i(1'b0),
+      .probe_window_i(1'b0),
+      .writeback_drain(1'b0),
+      .writeback_cbo(1'b0),
+      .writeback_cbo_invalidate(1'b0),
+      .writeback_block('0),
+      .external_write_valid_i(1'b0),
+      .external_write_pending_i(1'b0),
+      .external_write_first_i('0),
+      .external_write_last_i('0)
   );
 
   always #5 clock = ~clock;
@@ -167,6 +185,7 @@ module tb_l1d_cmo_permissions;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .l2tlb_req_o(),
       .l2tlb_ready_i(1'b0),
       .l2tlb_rsp_i('0),
@@ -360,6 +379,7 @@ module tb_l1d_flush_ordered;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .l2tlb_req_o(),
       .l2tlb_ready_i(1'b0),
       .l2tlb_rsp_i('0),
@@ -370,7 +390,24 @@ module tb_l1d_flush_ordered;
       .csr_bcast(csr_bcast),
       .pmp_update(pmp_update),
       .exu_l1d(exu_l1d),
-      .reset(reset)
+      .reset(reset),
+      .coherent_request(1'b0),
+      .coherent_write(1'b0),
+      .coherent_addr('0),
+      .probe_valid_i(1'b0),
+      .probe_addr_i('0),
+      .probe_release_ready_i(1'b0),
+      .release_ready_i(1'b0),
+      .release_ack_i(1'b0),
+      .probe_window_i(1'b0),
+      .writeback_drain(1'b0),
+      .writeback_cbo(1'b0),
+      .writeback_cbo_invalidate(1'b0),
+      .writeback_block('0),
+      .external_write_valid_i(1'b0),
+      .external_write_pending_i(1'b0),
+      .external_write_first_i('0),
+      .external_write_last_i('0)
   );
 
   always #5 clock = ~clock;
@@ -656,6 +693,7 @@ module tb_l1d_load_pbmt;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .l2tlb_req_o(),
       .l2tlb_ready_i(1'b0),
       .l2tlb_rsp_i('0),
@@ -715,8 +753,7 @@ module tb_l1d_load_pbmt;
       l1d_bus.ptw_rvalid <= 0;
       if (l1d_bus.arvalid && l1d_bus.rready) begin
         pending_ptw <= l1d_bus.ar_ptw;
-        response_data <= l1d_bus.ar_ptw
-            ? ((PA >> 2) | 64'hcf | (64'(pte_pbmt) << 61)) : data_value;
+        response_data <= l1d_bus.ar_ptw ? ((PA >> 2) | 64'hcf | (64'(pte_pbmt) << 61)) : data_value;
         if (l1d_bus.ar_ptw) ptw_reads <= ptw_reads + 1;
         else data_reads <= data_reads + 1;
         delay_count <= 4;
@@ -1083,11 +1120,21 @@ module tb_l1d_ptw_axi_error;
   rou_cmu_if rou_cmu ();
   // This manual AXI harness carries the same captured-request context as
   // the common L1D harness; the architectural CSR source is not the request.
-  assign lsu_l1d.rcontext = '{mmu_en: csr_bcast.dmmu_en,
-      eff_priv: (csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv)
-          ? csr_bcast.mpp : csr_bcast.priv,
-      sum: csr_bcast.sum, mxr: csr_bcast.mxr, pbmte: csr_bcast.menvcfg_pbmte,
-      asid: csr_bcast.satp_asid, version: 8'd0};
+  assign lsu_l1d.rcontext = '{
+          mmu_en: csr_bcast.dmmu_en,
+          eff_priv:
+          (
+          csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv
+          ) ?
+          csr_bcast.mpp
+          :
+          csr_bcast.priv,
+          sum: csr_bcast.sum,
+          mxr: csr_bcast.mxr,
+          pbmte: csr_bcast.menvcfg_pbmte,
+          asid: csr_bcast.satp_asid,
+          version: 8'd0
+      };
   assign lsu_l1d.rcontext_b = lsu_l1d.rcontext;
   assign exu_l1d.mem_context = lsu_l1d.rcontext;
   mem_link_if #(
@@ -1101,6 +1148,7 @@ module tb_l1d_ptw_axi_error;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .l2tlb_req_o(),
       .l2tlb_ready_i(1'b0),
       .l2tlb_rsp_i('0),
@@ -1131,7 +1179,8 @@ module tb_l1d_ptw_axi_error;
       .csr_bcast,
       .l1d_bus,
       .l1i_bus,
-      .mem
+      .mem,
+      .coherent_ready(1'b1)
   );
   rapt_axi_master #(
       .XLEN(XLEN),
@@ -1140,7 +1189,8 @@ module tb_l1d_ptw_axi_error;
       .clock,
       .reset,
       .mem,
-      .axi
+      .axi,
+      .rd_req_cacheable(1'b0)
   );
   `include "tb_common.svh"
   `include "tb_core_bcast_defaults.svh"
@@ -1585,6 +1635,7 @@ module tb_l1d_reservation_external;
   rapt_l1d #(
       .LineRefill(0)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .l2tlb_req_o(),
       .l2tlb_ready_i(1'b0),
       .l2tlb_rsp_i('0),
@@ -1907,6 +1958,7 @@ module tb_l1d_store_coherence #(
       .TargetedCoherence(TargetedCoherence),
       .LineRefill(LineRefill)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .l2tlb_req_o(),
       .l2tlb_ready_i(1'b0),
       .l2tlb_rsp_i('0),
@@ -1932,7 +1984,14 @@ module tb_l1d_store_coherence #(
       .csr_bcast(csr_bcast),
       .pmp_update(pmp_update),
       .exu_l1d(exu_l1d),
-      .reset(reset)
+      .reset(reset),
+      .release_ready_i(1'b0),
+      .release_ack_i(1'b0),
+      .probe_window_i(1'b0),
+      .external_write_valid_i(1'b0),
+      .external_write_pending_i(1'b0),
+      .external_write_first_i('0),
+      .external_write_last_i('0)
   );
 
   always #5 clock = ~clock;
@@ -3365,6 +3424,7 @@ module tb_l1d_write_error;
       .WriteBack(1'b0),
       .LineRefill(0)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .l2tlb_req_o(),
       .l2tlb_ready_i(1'b0),
       .l2tlb_rsp_i('0),
@@ -3514,6 +3574,7 @@ module tb_cbo_refill_order;
   rapt_memory #(
       .L1dWriteBack(1)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .ifetch_io_authorized_i(1'b0),
       .ifetch_io_start_o(),
       .ifetch_io_owner_pc_o(),
@@ -3529,6 +3590,7 @@ module tb_cbo_refill_order;
       .*
   );
   rapt_l2_subsystem l2_subsystem (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock,
       .reset,
       .client(l2_client),
@@ -3726,12 +3788,19 @@ module tb_l1d_mmio_retry_wb;
         .Entries(`RAPT_L2TLB_ENTRIES),
         .XLEN(XLEN)
     ) u_l2tlb (
+        .sram_ctrl_i(rapt_pkg::SramCtrlReset),
         .clock(clock),
         .reset(reset),
         .flush(cmu_bcast.fence_time),
         .req_i(l2tlb_req),
         .ready_o(l2tlb_ready),
-        .rsp_o(l2tlb_rsp)
+        .rsp_o(l2tlb_rsp),
+        .cancel(1'b0),
+        .sfence_valid(1'b0),
+        .sfence_vpn('0),
+        .sfence_asid('0),
+        .sfence_all_vpn(1'b1),
+        .sfence_all_asid(1'b1)
     );
   end else begin : g_no_l2tlb
     assign l2tlb_ready = '0;
@@ -3744,6 +3813,7 @@ module tb_l1d_mmio_retry_wb;
       .DirtySkip(1'b0),
       .L2Tlb(`RAPT_L2TLB_ENTRIES > 0)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .l2tlb_req_o(l2tlb_req[1]),
       .l2tlb_ready_i(l2tlb_ready[1]),
       .l2tlb_rsp_i(l2tlb_rsp[1]),

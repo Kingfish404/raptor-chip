@@ -25,10 +25,25 @@ module tb_l2_response_error;
       .L2_LEN(TestL2Len),
       .L2_LINE_LEN($clog2(LineBeats))
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock(clock),
       .reset(reset),
       .axi_s(axi_s),
       .axi_m(axi_m)
+  ,
+      .cbo_inval_i(1'b0),
+      .cbo_block_i('0),
+      .probe_ready_i(1'b1),
+      .probe_release_valid_i(1'b0),
+      .probe_release_addr_i('0),
+      .probe_release_data_i('0),
+      .release_valid_i(1'b0),
+      .release_addr_i('0),
+      .release_data_i('0),
+      .release_has_data_i(1'b0),
+      .release_mask_i(1'b0),
+      .release_last_i(1'b0),
+      .l1d_writeback_pending_i(1'b0)
   );
 `ifdef RAPT_TEST_BOOM_L2
   int b_lookups = 0;

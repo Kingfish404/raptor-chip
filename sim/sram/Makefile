@@ -123,7 +123,7 @@ all: $(STAMPS) ## Compile all SRAM macros for $(PLATFORM) via OpenRAM
 # ---------------------------------------------------------------------------
 STUB_SCRIPT := $(SRAM_DIR)/scripts/gen_stub_lib.py
 
-# (name, depth, width, write_size) -- all single-port (1RW).
+# (name, depth, width, write_size); the FPR uses a full-word dual-port contract.
 STUB_SHAPES := \
 	rapt_openram_1rw_2x32,2,32,8 \
 	rapt_openram_1rw_8x32,8,32,8 \
@@ -152,7 +152,8 @@ STUB_SHAPES := \
 	rapt_openram_1rw_1024x128,1024,128,8 \
 	rapt_openram_1rw_2048x32,2048,32,8 \
 	rapt_openram_1rw_2048x64,2048,64,8 \
-	rapt_openram_1rw_4096x64,4096,64,8
+	rapt_openram_1rw_4096x64,4096,64,8 \
+	rapt_openram_2rw_32x64,32,64,64
 
 stubs: ## Generate behavioural Liberty/Verilog stubs (no OpenRAM/PDK needed)
 	@mkdir -p $(MACRO_DIR)
@@ -254,8 +255,9 @@ test-sta: ## Opt-in: yosys+OpenSTA smoke against the stub macros (needs slang)
 # ---------------------------------------------------------------------------
 # Aggregate liberty / verilog lists for the STA flow to ingest.
 # ---------------------------------------------------------------------------
-LIB_FILES := $(foreach m,$(MACRO_NAMES),$(MACRO_DIR)/$(m)/$(m).lib)
-V_FILES   := $(foreach m,$(MACRO_NAMES),$(MACRO_DIR)/$(m)/$(m).v)
+STUB_ONLY_MACROS := rapt_openram_2rw_32x64
+LIB_FILES := $(foreach m,$(MACRO_NAMES) $(STUB_ONLY_MACROS),$(MACRO_DIR)/$(m)/$(m).lib)
+V_FILES   := $(foreach m,$(MACRO_NAMES) $(STUB_ONLY_MACROS),$(MACRO_DIR)/$(m)/$(m).v)
 
 print-libs: ## Print space-separated list of Liberty files (for sta MEMORY=sram)
 	@echo "$(LIB_FILES)"

@@ -70,6 +70,11 @@ module formal_zkt_cdb (
       .wb_shared(out0),
       .integer_system_issue_enable(enable0),
       .fpu_completion_ready(fp_ready0)
+  ,
+      .flush(1'b0),
+      .cancel_valid(1'b0),
+      .cancel_head('0),
+      .cancel_owner('0)
   );
   rapt_cdb_arb right_dut (
       .clock,
@@ -83,5 +88,10 @@ module formal_zkt_cdb (
       .wb_shared(out1),
       .integer_system_issue_enable(enable1),
       .fpu_completion_ready(fp_ready1)
+  ,
+      .flush(1'b0),
+      .cancel_valid(1'b0),
+      .cancel_head('0),
+      .cancel_owner('0)
   );
 endmodule

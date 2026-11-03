@@ -28,7 +28,7 @@ module rapt_prf #(
     parameter unsigned XLEN = Cfg.xlen
 ) (
     input CompletionT completion[NumCompletions],
-    input logic [PLEN-1:0] extra_address[ExtraReadSlots] = '{default: '0},
+    input logic [PLEN-1:0] extra_address[ExtraReadSlots],
     output logic [XLEN-1:0] extra_value[ExtraReadSlots],
     output logic extra_valid[ExtraReadSlots],
     input clock,
@@ -70,11 +70,13 @@ module rapt_prf #(
       )) begin : g_invalid_shape
     $error("Invalid rapt_prf configuration: storage/port shape");
   end
+`ifndef SYNTHESIS
   if (prf_rd.Width != ReadWidth || prf_rd.PLEN != PLEN || prf_rd.XLEN != XLEN
       || rou_cmu.Width != CommitWidth || rou_cmu.PLEN != PLEN
       || rou_cmu.XLEN != XLEN) begin : g_invalid_interfaces
     $error("Invalid rapt_prf configuration: interface dimensions");
   end
+`endif
   if ($bits(
           completion[0].prd
       ) != PLEN || $bits(

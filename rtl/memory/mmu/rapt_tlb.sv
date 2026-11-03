@@ -16,16 +16,16 @@ module rapt_tlb #(
     input reset,
     input flush,
     // Flush remains unconditional (for example PMP changes); SFENCE is selective.
-    input logic sfence_valid = 1'b0,
-    input logic [26:0] sfence_vpn = '0,
-    input logic [8:0] sfence_asid = '0,
-    input logic sfence_all_vpn = 1'b1,
-    input logic sfence_all_asid = 1'b1,
+    input logic sfence_valid,
+    input logic [26:0] sfence_vpn,
+    input logic [8:0] sfence_asid,
+    input logic sfence_all_vpn,
+    input logic sfence_all_asid,
 
     // Lookup (combinational). Only a consumed translation updates replacement state.
     // Unused when access-based replacement is disabled.
     /* verilator lint_off UNUSEDSIGNAL */
-    input logic lookup_valid = 1'b0,
+    input logic lookup_valid,
     /* verilator lint_on UNUSEDSIGNAL */
     input  logic [XLEN-1:12] lookup_vtag,
     input  logic [      8:0] lookup_asid,
@@ -41,7 +41,7 @@ module rapt_tlb #(
     input logic [      8:0] fill_asid,
     input logic [      6:0] fill_pte,
     input logic [      1:0] fill_pbmt,
-    input logic [      1:0] fill_level = 2'd0
+    input logic [      1:0] fill_level
 );
 
   // Cache only the implemented PA bits. The full walk result is checked
@@ -202,16 +202,16 @@ module rapt_data_tlb #(
     input clock,
     input reset,
     input flush,
-    input logic sfence_valid = 1'b0,
+    input logic sfence_valid,
     // Over-invalidation avoids a broadcast read of RAM tags for SFENCE.
     /* verilator lint_off UNUSEDSIGNAL */
-    input logic [26:0] sfence_vpn = '0,
-    input logic [8:0] sfence_asid = '0,
-    input logic sfence_all_vpn = 1'b1,
-    input logic sfence_all_asid = 1'b1,
+    input logic [26:0] sfence_vpn,
+    input logic [8:0] sfence_asid,
+    input logic sfence_all_vpn,
+    input logic sfence_all_asid,
     /* verilator lint_on UNUSEDSIGNAL */
 
-    input logic lookup_valid = 1'b0,
+    input logic lookup_valid,
     input logic [XLEN-1:12] lookup_vtag,
     input logic [8:0] lookup_asid,
     output logic hit,
@@ -237,7 +237,7 @@ module rapt_data_tlb #(
     input logic [9:0] fill_verdict,
     input logic [1:0] fill_pbmt,
     /* verilator lint_off UNUSEDSIGNAL */
-    input logic [1:0] fill_level = 2'd0
+    input logic [1:0] fill_level
     /* verilator lint_on UNUSEDSIGNAL */
 );
   localparam int VAddrBits  = XLEN == 64 ? 39 : 32;

@@ -356,7 +356,13 @@ namespace
     uint32_t datacount = a & 0xF;          // [3:0]
     uint32_t progbufsz = (a >> 24) & 0x1F; // [28:24]
     bool busy = (a >> 12) & 1;
-    CHECK(datacount == 1, "abstractcs.datacount=1 (got %u)", datacount);
+#ifdef CONFIG_ISA64
+    constexpr unsigned kDatacount = 2;
+#else
+    constexpr unsigned kDatacount = 1;
+#endif
+    CHECK(datacount == kDatacount, "abstractcs.datacount=%u (got %u)",
+          kDatacount, datacount);
     CHECK(progbufsz == 0, "abstractcs.progbufsize=0 (got %u)", progbufsz);
     CHECK(!busy, "abstractcs.busy=0");
   }
@@ -520,8 +526,11 @@ namespace
     CHECK(((dmi_read(kAddrAbstractcs) >> 8) & 7) == 0,
           "addressed GPR sweep completes without cmderr");
 
-    // 4) dcsr round-trip.
-    dmi_write(kAddrData0, 0x40000003); // xdebugver=4, ebreakm=1, prv=11
+    // 4) Only implemented controls are writable; halt status stays read-only.
+    constexpr uint32_t kDcsrWritable = 0x0000b804;
+    dmi_write(kAddrCommand, mk_acc_reg(0x07B0, /*write=*/false));
+    uint32_t dcsr_before = dmi_read(kAddrData0);
+    dmi_write(kAddrData0, 0xffffffff);
     dmi_write(kAddrCommand, mk_acc_reg(0x07B0, /*write=*/true));
     uint32_t cs_dcsr = dmi_read(kAddrAbstractcs);
     CHECK(((cs_dcsr >> 8) & 0x7) == 0,
@@ -529,7 +538,12 @@ namespace
     dmi_write(kAddrData0, 0x00000000);
     dmi_write(kAddrCommand, mk_acc_reg(0x07B0, /*write=*/false));
     uint32_t dcsr = dmi_read(kAddrData0);
-    CHECK(dcsr == 0x40000003, "dcsr round-trips (got 0x%08x)", dcsr);
+    uint32_t dcsr_expected = (dcsr_before & ~kDcsrWritable) | kDcsrWritable;
+    CHECK(dcsr == dcsr_expected,
+          "dcsr controls round-trip, status read-only (got 0x%08x expected 0x%08x)",
+          dcsr, dcsr_expected);
+    dmi_write(kAddrData0, dcsr_before);
+    dmi_write(kAddrCommand, mk_acc_reg(0x07B0, /*write=*/true));
 
     // 5) dpc + dscratch0/1 round-trip.
     dmi_write(kAddrData0, 0x80001000);
@@ -631,13 +645,9 @@ namespace
 
   void test_single_step()
   {
-    // Phase 6: dcsr.step single-step. Halt, write dcsr.step=1 via abstract
-    // command, issue resume; the DM must auto re-halt the core after one
-    // commit pulse. Verifies (a) step_pending_q latches dcsr.step on resume,
-    // (b) commit_fire_i re-arms the sticky halt, (c) dcsr.cause becomes 4.
-    // Independent of any loaded program: our trap-on-illegal-fetch path
-    // commits the trap as one retire, which is sufficient to drive
-    // commit_fire.
+    // Halt, arm step and resume. The hart must return cause 4 after one
+    // architectural instruction or trap. The production-chip step matrix
+    // independently counts admission, ROB exits and architectural retirement.
     dmi_write(kAddrDmcontrol, 0x00000001); // dmactive only
     run_cycles(64);
 

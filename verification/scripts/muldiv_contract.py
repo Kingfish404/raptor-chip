@@ -2,12 +2,11 @@
 """Compose multiply, divide and mixed-stream arithmetic and transport proofs."""
 from pathlib import Path
 import argparse
-import hashlib
 import json
 import os
 import shutil
 import subprocess
-from yosys_common import ROOT, run_bounded, run_yosys as execute_yosys, run_yosys_check
+from yosys_common import ROOT, run_bounded, run_yosys as execute_yosys, run_yosys_check, sha
 
 
 SAT_PASS = "SAT proof finished - no model found: SUCCESS!"
@@ -87,8 +86,7 @@ def multiply_main():
     files += sorted((ROOT / "rtl/configs/default").rglob("*.svh"))
 
     def hashes():
-        return {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
-                for p in files}
+        return {str(p.relative_to(ROOT)): sha(p) for p in files}
 
     result = {
         "complete": False, "sources": hashes(), "arithmetic": [], "transport": [],
@@ -178,10 +176,6 @@ HARNESS = FORMAL / "formal_div_refinement.sv"
 INDUCTION = "Induction step proven: SUCCESS!"
 
 MODEL = "SAT solving finished - model found:"
-
-
-def sha(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def divide_read(source, xlen, tag=2, dsp=0, wrapper=None):

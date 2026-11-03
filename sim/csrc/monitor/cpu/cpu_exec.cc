@@ -395,9 +395,14 @@ void cpu_exec(uint64_t n)
     // another simulator-side stop.  The old special case counted only one CSR
     // instruction and dropped both the final cycle and slot A when ebreak was
     // in any position of a multi-instruction commit.
-    perf_sample_per_cycle();
     uint8_t cmu_valid = *(uint8_t *)&VERILOG_BACKEND(cmu__DOT__valid);
     uint32_t cmu_retire_count = VERILOG_BACKEND(cmu__DOT__retire_count);
+    if (cmu_valid && sample_window_needs_start_snapshot() &&
+        sample_window_accept(sampled_privilege, sampled_satp, sampled_thread_pointer)) {
+      for (uint32_t slot = 0; slot < cmu_retire_count; ++slot)
+        sample_window_before_cycle(VERILOG_BACKEND(cmu__DOT__rpc_slots)[slot]);
+    }
+    perf_sample_per_cycle();
     if (cmu_valid)
     {
       for (uint32_t slot = 0; slot < cmu_retire_count; ++slot)

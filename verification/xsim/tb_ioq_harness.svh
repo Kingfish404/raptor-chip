@@ -51,6 +51,10 @@ rapt_lsu_ioq #(
     .operand_read_address(test_operand_address),
     .operand_read_value(test_operand_value),
     .operand_read_valid(test_operand_valid),
+`else
+    .int_source_regs('{default: '0}),
+    .operand_read_value('{default: '0}),
+    .operand_read_valid('{default: '0}),
 `endif
     .completion(completion),
     .clock(clock),
@@ -78,7 +82,8 @@ rapt_lsu_ioq #(
     .sq_wpbmt,
     .sq_acquire,
     .sq_context,
-    .pmu_ioq_full(pmu_ioq_full)
+    .pmu_ioq_full(pmu_ioq_full),
+    .local_fp_wake('{default: '0})
 );
 
 `ifdef RAPT_IOQ_LATE_TEST

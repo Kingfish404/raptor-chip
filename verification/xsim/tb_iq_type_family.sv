@@ -99,6 +99,10 @@ module tb_iq_type_family;
       .issue,
       .occ_o(occupancy),
       .pmu_iq_full()
+  ,
+      .local_operand_wake('{default: '0}),
+      .combo_source('{default: '0}),
+      .resource_ready('1)
   );
   always @(posedge clock)
     if (!reset) begin

@@ -1,6 +1,13 @@
   // Shared rename/ROB/commit/PRF/router wiring for the custom execution domain.
   // The caller supplies Cfg, extended uop/slot types, interfaces and its IQ.
   // Optional completion validation is consumed here; no include guard.
+  rapt_debug_if debug ();
+  assign debug.enable = 1'b0;
+  assign debug.step = 1'b0;
+  assign debug.stepie = 1'b0;
+  assign debug.ebreak = '0;
+  assign debug.resume_valid = 1'b0;
+  assign debug.resume_pc = '0;
   rapt_rnu #(
       .Cfg(Cfg),
       .UopT(extended_uop_t)
@@ -14,7 +21,9 @@
       .rou_cmu,
       .cmu_bcast,
       .map_snapshot,
-      .rat_snapshot
+      .rat_snapshot,
+      .snapshot_ghr('0),
+      .snapshot_phr('0)
   );
   rapt_rou #(
       .Cfg(Cfg),
@@ -53,10 +62,13 @@
       .rou_csr,
       .rou_lsu,
       .dm_haltreq_i(1'b0),
+      .debug(debug),
       .halted_o(),
       .halt_pc_o(),
       .commit_fire_o(),
-      .pmu_rob_full()
+      .pmu_rob_full(),
+      .operand_wake('{default: '0}),
+      .writeback_done(1'b1)
   );
   rapt_cmu commit_unit (
       .clock,
@@ -80,7 +92,8 @@
       .dbg_we_i(1'b0),
       .dbg_addr_i('0),
       .dbg_wdata_i('0),
-      .dbg_rdata_o()
+      .dbg_rdata_o(),
+      .extra_address('{default: '0})
   );
   rapt_dpu #(
       .Cfg(Cfg),

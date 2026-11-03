@@ -20,7 +20,9 @@ module formal_ioq_overlap #(
       .Entries(Entries),
       .WordOffBits(WordOffBits)
   ) dut (
-      .*
+      .*,
+      .col_addr('{default: '0}),
+      .col_span('{default: '0})
   );
   always_comb begin
     mismatch = 0;

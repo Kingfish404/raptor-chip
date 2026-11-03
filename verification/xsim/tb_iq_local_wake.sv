@@ -53,6 +53,8 @@ module tb_iq_local_wake;
       .issue,
       .occ_o(occupancy),
       .pmu_iq_full()
+  ,
+      .resource_ready('1)
   );
   task automatic tick;
     @(negedge clock);

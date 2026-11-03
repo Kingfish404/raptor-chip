@@ -3,8 +3,10 @@
 RAPT_RV64 # Absent selects RV32; supplied by the build's XLEN flag.
 RAPT_RVFI # Formal instrumentation, enabled only by the formal build.
 RAPT_ASSERT_EN # Simulation assertions, supplied by simulation/verification builds.
+RAPT_FORMAL_NATIVE # Opt-in native formal lowering of clocked assertion macros.
 RAPT_AXI_OBSERVE # Optional simulation AXI observation ports.
 RAPT_USE_SRAM_MACRO # Physical SRAM flow; absent selects behavioral storage.
+RAPT_SRAM_CTRL_RESET # Preset macro control reset; absent selects the safe zero default.
 RAPT_YSYXSOC # Alternate SoC integration selected by its build.
 RAPT_PMEM_BYTES # Platform override; rapt_pkg supplies the default PmemBytes value.
 RAPT_FETCH_LOOKAHEAD # Preset-selected fetch lookahead; absent disables it.
@@ -14,3 +16,4 @@ RAPT_L2_EN # Preset-selected L2; absent bypasses it.
 RAPT_L2_STORE_WRITEBACK # L2 store policy; absent selects write-through.
 RAPT_KEEP_UOP_INST # Synthesis opt-in that keeps expanded instruction words in uops; absent drops them.
 RAPT_PC_FULL_WIDTH # Keep XLEN-wide PCs; absent stores RV64 PCs in 40 bits when PA <= 39 bits.
+RAPT_NO_FPU # Preset-selected; absent keeps the FEU and F/D in MISA.

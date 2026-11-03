@@ -18,7 +18,10 @@
 
 (* blackbox *)
 module rapt_openram_1rw_2x32 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [3:0] wmask0,
     input wire [0:0] addr0,
     input wire [31:0] din0,
@@ -28,7 +31,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_8x32 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [3:0] wmask0,
     input wire [2:0] addr0,
     input wire [31:0] din0,
@@ -38,6 +44,7 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_32x32 (
+    input  wire [15:0] ctrl,
     input  wire        clk0,
     input  wire        csb0,
     input  wire        web0,
@@ -50,7 +57,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_64x32 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [3:0] wmask0,
     input wire [5:0] addr0,
     input wire [31:0] din0,
@@ -60,6 +70,7 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_16x32 (
+    input  wire [15:0] ctrl,
     input  wire        clk0,
     input  wire        csb0,
     input  wire        web0,
@@ -72,6 +83,7 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_16x64 (
+    input  wire [15:0] ctrl,
     input  wire        clk0,
     input  wire        csb0,
     input  wire        web0,
@@ -84,7 +96,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_512x32 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [3:0] wmask0,
     input wire [8:0] addr0,
     input wire [31:0] din0,
@@ -94,7 +109,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_1024x22 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [0:0] wmask0,
     input wire [9:0] addr0,
     input wire [21:0] din0,
@@ -104,7 +122,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_1024x32 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [3:0] wmask0,
     input wire [9:0] addr0,
     input wire [31:0] din0,
@@ -114,7 +135,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_1024x64 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [7:0] wmask0,
     input wire [9:0] addr0,
     input wire [63:0] din0,
@@ -124,7 +148,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_2x128 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [15:0] wmask0,
     input wire [0:0] addr0,
     input wire [127:0] din0,
@@ -134,7 +161,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_8x128 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [15:0] wmask0,
     input wire [2:0] addr0,
     input wire [127:0] din0,
@@ -144,7 +174,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_16x128 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [15:0] wmask0,
     input wire [3:0] addr0,
     input wire [127:0] din0,
@@ -154,7 +187,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_32x128 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [15:0] wmask0,
     input wire [4:0] addr0,
     input wire [127:0] din0,
@@ -164,7 +200,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_64x128 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [15:0] wmask0,
     input wire [5:0] addr0,
     input wire [127:0] din0,
@@ -174,7 +213,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_512x128 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [15:0] wmask0,
     input wire [8:0] addr0,
     input wire [127:0] din0,
@@ -184,7 +226,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_1024x128 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [15:0] wmask0,
     input wire [9:0] addr0,
     input wire [127:0] din0,
@@ -194,7 +239,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_2048x32 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [3:0] wmask0,
     input wire [10:0] addr0,
     input wire [31:0] din0,
@@ -204,7 +252,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_2048x64 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [7:0] wmask0,
     input wire [10:0] addr0,
     input wire [63:0] din0,
@@ -214,7 +265,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_4096x64 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [7:0] wmask0,
     input wire [11:0] addr0,
     input wire [63:0] din0,
@@ -227,7 +281,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_2x64 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [7:0] wmask0,
     input wire [0:0] addr0,
     input wire [63:0] din0,
@@ -237,7 +294,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_4x64 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [7:0] wmask0,
     input wire [1:0] addr0,
     input wire [63:0] din0,
@@ -247,7 +307,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_8x64 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [7:0] wmask0,
     input wire [2:0] addr0,
     input wire [63:0] din0,
@@ -257,7 +320,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_32x64 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [7:0] wmask0,
     input wire [4:0] addr0,
     input wire [63:0] din0,
@@ -267,7 +333,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_64x64 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [7:0] wmask0,
     input wire [5:0] addr0,
     input wire [63:0] din0,
@@ -277,7 +346,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_128x64 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [7:0] wmask0,
     input wire [6:0] addr0,
     input wire [63:0] din0,
@@ -287,7 +359,10 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_256x64 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [7:0] wmask0,
     input wire [7:0] addr0,
     input wire [63:0] din0,
@@ -297,10 +372,31 @@ endmodule
 
 (* blackbox *)
 module rapt_openram_1rw_512x64 (
-    input wire clk0, csb0, web0,
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
     input wire [7:0] wmask0,
     input wire [8:0] addr0,
     input wire [63:0] din0,
     output wire [63:0] dout0
+);
+endmodule
+
+(* blackbox *)
+module rapt_openram_2rw_32x64 (
+    input wire [15:0] ctrl,
+    input wire clk0,
+    csb0,
+    web0,
+    input wire [4:0] addr0,
+    input wire [63:0] din0,
+    output wire [63:0] dout0,
+    input wire clk1,
+    csb1,
+    web1,
+    input wire [4:0] addr1,
+    input wire [63:0] din1,
+    output wire [63:0] dout1
 );
 endmodule

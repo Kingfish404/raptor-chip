@@ -39,7 +39,7 @@ module rapt_feu #(
     input logic int_operand_valid,
     input CompletionT completion[NumCompletions],
     input CompletionT early_completion[NumCompletions],
-    input CompletionT local_fp_wake[NumCompletions] = '{default: '0},
+    input CompletionT local_fp_wake[NumCompletions],
     input clock,
     input reset,
     input logic cancel_valid,
@@ -52,7 +52,7 @@ module rapt_feu #(
 
     output CompletionT wb_fpu,
     input logic wb_accept,
-    input logic completion_ready = 1'b1,
+    input logic completion_ready,
     output logic issue_enable
 );
   localparam int RobBits = $clog2(ROB_SIZE);
@@ -409,21 +409,21 @@ module rapt_feu #(
   always_ff @(posedge clock) begin
     if (fpq_selected[0].valid && !fpq_selected_owner_matches) begin
       $display("[%0t] SVA FAIL: %m.N1_FP_SOURCE_OWNER", $time);
-      $fatal(1);
+      `RAPT_SVA_FAIL(N1_FP_SOURCE_OWNER)
     end
     if (read_ticket.valid && !reset && !cmu_bcast.flush_pipe && !cancelled_now(
             read_ticket.dest
         )) begin
       if (!read_ticket_ready) begin
         $display("[%0t] SVA FAIL: %m.N1_FP_RR_READY", $time);
-        $fatal(1);
+        `RAPT_SVA_FAIL(N1_FP_RR_READY)
       end
       if (read_ticket_fire && ((fp_from_int && fp_issue[0].op1 !== read_ticket.op1)
           || (fp_sources_used[0] && fp_issue[0].op1 !== read_ticket.op1)
           || (fp_sources_used[1] && fp_issue[0].op2 !== read_ticket.op2)
           || (fp_sources_used[2] && fp_issue[0].op3 !== read_ticket.op3))) begin
         $display("[%0t] SVA FAIL: %m.N1_FP_RR_OPERAND", $time);
-        $fatal(1);
+        `RAPT_SVA_FAIL(N1_FP_RR_OPERAND)
       end
     end
   end

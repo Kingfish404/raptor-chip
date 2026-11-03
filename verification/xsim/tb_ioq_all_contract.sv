@@ -663,9 +663,16 @@ endmodule
 `include "rapt_if.svh"
 
 module tb_ioq_pending_lock;
-  localparam int XLEN = 32;
+  localparam int XLEN = `RAPT_XLEN;
 
   `include "tb_ioq_harness.svh"
+  string trace_path;
+  initial begin
+    if ($value$plusargs("trace=%s", trace_path)) begin
+      $dumpfile(trace_path);
+      $dumpvars(0, tb_ioq_pending_lock);
+    end
+  end
 
   bit sampled_load_bcast;
   logic [31:0] sampled_load_result;
@@ -761,7 +768,18 @@ module tb_ioq_pending_lock;
 
   task automatic expect_pending_addr(input logic [31:0] addr);
     begin
-      check(exu_lsu.rvalid, "exu_lsu.rvalid dropped while pending");
+      if (!exu_lsu.rvalid)
+        $display(
+            "IOQ missing A: head=%0d valid=%b complete=%b ready=%b issue=%b older=%b pbmte=%b",
+            dut.ioq_head,
+            dut.ioq_valid,
+            dut.ioq_complete,
+            dut.ioq_addr_ready,
+            dut.ioq_load_issue_vec,
+            dut.ioq_older_memory_blk,
+            dut.ioq_context[dut.ioq_head].pbmte
+        );
+      check(exu_lsu.rvalid, $sformatf("exu_lsu.rvalid dropped while pending at %h", addr));
       check(exu_lsu.raddr == addr, "exu_lsu.raddr changed while pending");
       check(exu_lsu.ralu == `RAPT_ALU_LW__, "exu_lsu.ralu changed while pending");
     end
@@ -963,30 +981,33 @@ module tb_ioq_pending_lock;
     tick(2);
     csr_bcast.dmmu_en = 1'b1;
 
-    drive_load(32'hc000_1000, 5'd0, 6'd1);
-    wait_for_addr(32'hc000_1000);
+    // B can serve Bare cache hits. Exercise simultaneous responses using
+    // cacheable physical addresses, as the production B cache port requires.
+    csr_bcast.dmmu_en = 1'b0;
+    drive_load(32'h8000_1000, 5'd0, 6'd1);
+    wait_for_addr(32'h8000_1000);
     tick(1);
-    expect_pending_addr(32'hc000_1000);
+    expect_pending_addr(32'h8000_1000);
 
     // Nonzero offsets require the registered adder stage. Zero-offset loads
     // deliberately use the already-registered operand directly.
-    drive_load(32'hc000_2000, 5'd1, 6'd2, 32'd4);
+    drive_load(32'h8000_2000, 5'd1, 6'd2, 32'd4);
 `ifdef RAPT_LSU_HUM
     #1;
-    check(dut.ioq_valid[1], "second MMU load was not resident in IOQ entry 1");
+    check(dut.ioq_valid[1], "second Bare load was not resident in IOQ entry 1");
     check(!exu_lsu.rvalid_b, "HUM B request bypassed its request register");
     tick(1);
-    check(dut.ioq_addr_ready[1], "second MMU load address was not prepared");
+    check(dut.ioq_addr_ready[1], "second Bare load address was not prepared");
     check(exu_lsu.rvalid_b, "registered HUM B request missing after capture");
 `endif
     for (int i = 0; i < 8; i++) begin
-      expect_pending_addr(32'hc000_1000);
+      expect_pending_addr(32'h8000_1000);
       tick(1);
     end
 
 `ifdef RAPT_LSU_HUM
     check(exu_lsu.rvalid_b, "HUM B request missing while A load is pending");
-    check(exu_lsu.raddr_b == 32'hc000_2000, "HUM B request address mismatch");
+    check(exu_lsu.raddr_b == 32'h8000_2000, "HUM B request address mismatch");
     exu_lsu.rdata = 32'h1111_2222;
     exu_lsu.rdata_b = 32'haaaa_5555;
     exu_lsu.rready = 1'b1;
@@ -1011,9 +1032,38 @@ module tb_ioq_pending_lock;
     tick(1);
     check(!exu_ioq_bcast.valid, "IOQ did not retire both completed loads");
 `else
-    wait_for_addr(32'hc000_2000);
-    expect_pending_addr(32'hc000_2000);
+    wait_for_addr(32'h8000_2000);
+    expect_pending_addr(32'h8000_2000);
 `endif
+
+    // A translating load must not lose its next request slot to a B probe
+    // that cannot translate. Hold the first response while the second load
+    // becomes ready, then require immediate A-stage replacement and exactly
+    // the two corresponding completions.
+    reset = 1'b1;
+    init_ioq_inputs(1'b1);
+    sampled_load_bcast = 1'b0;
+    tick(2);
+    reset = 1'b0;
+    tick(2);
+    csr_bcast.dmmu_en = 1'b1;
+    drive_load(32'hc000_1000, 5'd0, 6'd1);
+    wait_for_addr(32'hc000_1000);
+    check(exu_lsu.rcontext.mmu_en, "translated progress test requires an MMU request");
+    drive_load(32'hc000_2000, 5'd1, 6'd2, 32'd4);
+    repeat (8) begin
+      expect_pending_addr(32'hc000_1000);
+      check(!exu_lsu.rvalid_b, "translated load reserved the untranslated B channel");
+      tick(1);
+    end
+    complete_lsu_load(32'h1122_3344);
+    expect_load_broadcast(32'h1122_3344, "first translated load");
+    #1;
+    expect_pending_addr(32'hc000_2000);
+    complete_lsu_load(32'h5566_7788);
+    expect_load_broadcast(32'h5566_7788, "second translated load");
+    tick(2);
+    check(!exu_ioq_bcast.valid, "translated loads completed more than once");
 
     expect_flush_drops_late_response();
 

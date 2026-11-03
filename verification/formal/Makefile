@@ -142,7 +142,7 @@ all: formal_ieu_alu formal_ieu_muldiv formal_pmp formal_plru formal_clint formal
 	formal_dtm formal_bus formal_divsqrt formal_memory_progress formal_sram \
 	formal_rvfi_metadata formal_rvfi_platform formal_rou_rvfi formal_cache_nru \
 	formal_recovery_pending formal_stream_queue formal_rou_retire formal_l1d_data formal_prf \
-	formal_ioq_owner formal_ioq_store formal_axi_r_buffer
+	formal_ioq_owner formal_ioq_store formal_axi_r_buffer formal_debug
 
 .PHONY: formal_memory_progress
 formal_memory_progress: ## Check reduced L1D/bus bounded progress and cover collision recovery
@@ -193,9 +193,10 @@ formal_ieu_mul_monolithic: check-tools ## Run the optional monolithic multiply B
 	$(SBY_RUN) -f ieu_mul.sby
 
 .PHONY: formal_sram
+FORMAL_SRAM_ARGS ?=
 formal_sram: check-tools ## Prove all registered 1RW SRAM shapes against functional contracts
 	python3 "$(RAPTOR_HOME)/verification/scripts/unit_contracts.py" sram \
-	  --output "$(FORMAL_RESULTS_DIR)/sram" --jobs "$(FORMAL_JOBS)"
+	  --output "$(FORMAL_RESULTS_DIR)/sram" --jobs "$(FORMAL_JOBS)" $(FORMAL_SRAM_ARGS)
 
 .PHONY: formal_cache_nru
 formal_cache_nru: check-tools ## Prove NRU priority, epoch renewal and invalidation for every set
@@ -313,13 +314,14 @@ formal_ioq_store: check-tools ## Prove IOQ store operands, AMO payload bytes and
 FORMAL_AXI_R_BUFFER_PRESETS ?=
 FORMAL_AXI_R_BUFFER_TIMEOUT ?= 120
 FORMAL_CLINT_PRESETS ?=
-FORMAL_CLINT_TIMEOUT ?= 600
+FORMAL_CLINT_TIMEOUT ?= 900
 
 define run-native-contract
 	python3 "$(RAPTOR_HOME)/verification/scripts/formal_contract.py" $(1) \
 	  --output "$(FORMAL_RESULTS_DIR)/$(1)" --jobs "$(FORMAL_JOBS)" \
 	  --timeout "$($(2)_TIMEOUT)" \
-	  $(if $(strip $($(2)_PRESETS)),--presets $($(2)_PRESETS))
+	  $(if $(strip $($(2)_PRESETS)),--presets $($(2)_PRESETS)) \
+	  $(if $($(2)_REUSE_EVIDENCE),--reuse-evidence "$($(2)_REUSE_EVIDENCE)")
 endef
 
 .PHONY: formal_axi_r_buffer
@@ -355,6 +357,16 @@ formal_plic: check-tools ## Prove RV32/RV64 PLIC arbitration, contexts and gatew
 
 formal_dtm: check-tools ## Prove single-clock JTAG TAP and DMI transport behavior
 	$(SBY_RUN) -f dtm.sby
+
+FORMAL_DEBUG_ARGS ?=
+.PHONY: formal_debug formal_dm_debug
+formal_debug: check-tools ## Prove debug/SBA, AXI drain and ROU step admission contracts
+	python3 "$(RAPTOR_HOME)/verification/scripts/debug_contract.py" \
+	  --output "$(FORMAL_RESULTS_DIR)/debug" --jobs "$(FORMAL_JOBS)" $(FORMAL_DEBUG_ARGS)
+
+formal_dm_debug: check-tools ## Prove DM halt/resume and SBA with isolated fault controls
+	python3 "$(RAPTOR_HOME)/verification/scripts/debug_contract.py" --blocks dm \
+	  --output "$(FORMAL_RESULTS_DIR)/debug-dm" --jobs "$(FORMAL_JOBS)" $(FORMAL_DEBUG_ARGS)
 
 DIVSQRT_PACK := build/divsqrt_pack.sv
 $(DIVSQRT_PACK): \

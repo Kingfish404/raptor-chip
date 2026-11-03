@@ -15,7 +15,7 @@ module rapt_sample_window #(
     output logic [63:0] cfg_rdata,
     input logic bus_idle,
     input logic writeback_error,
-    input logic device_activity = 1'b0,
+    input logic device_activity,
     output logic cpu_reset,
     rapt_sample_if sample
 );

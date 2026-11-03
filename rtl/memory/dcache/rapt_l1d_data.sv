@@ -14,6 +14,7 @@ module rapt_l1d_data #(
     parameter int Chunks = LineWords * Xlen / 64,
     parameter int Banks = ((Ways + Chunks - 1) / Chunks) * Chunks
 ) (
+    input rapt_pkg::sram_ctrl_t sram_ctrl_i,
     input logic clock,
     input logic reset,
     input logic [SetBits-1:0] read_addr,
@@ -21,15 +22,15 @@ module rapt_l1d_data #(
     input logic read_line,
     input logic [WayBits-1:0] read_way,
     input logic write_valid,
-    input logic write_blocked = 1'b0,
+    input logic write_blocked,
     input logic [SetBits-1:0] write_addr,
     input logic [WordBits-1:0] write_word,
     input logic [WayBits-1:0] write_way,
     input logic [Xlen-1:0] write_data,
-    input logic [Xlen/8-1:0] write_strobe = '1,
-    input logic write_line = 1'b0,
-    input logic [LineWords-1:0] write_mask = '0,
-    input logic [LineWords*Xlen-1:0] write_line_data = '0,
+    input logic [Xlen/8-1:0] write_strobe,
+    input logic write_line,
+    input logic [LineWords-1:0] write_mask,
+    input logic [LineWords*Xlen-1:0] write_line_data,
     output logic [SetBits-1:0] read_index,
     output logic [WordBits-1:0] read_word_index,
     output wire [Banks-1:0] read_bank_valid,
@@ -100,6 +101,7 @@ module rapt_l1d_data #(
         .DATA_WIDTH(64),
         .USE_BWE(1)
     ) u_sram (
+        .sram_ctrl_i(sram_ctrl_i),
         .clock(clock),
         .en(!bank_write || !write_blocked),
         .wen(bank_write && !write_blocked),

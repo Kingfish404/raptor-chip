@@ -338,6 +338,7 @@ int main(int argc, char** argv) {
 #ifdef VPU_SPIKE
         spike = std::make_unique<SpikeReference>(TEST_XLEN, TEST_VLEN, TEST_ELEN);
 #endif
+        dut.sram_ctrl_i = 0;  // Safe reset value of the standalone default preset.
         dut.reset = 1; tick(); tick(); dut.reset = 0; dut.vector_enabled = 1; eval();
         if (argc == 3 && std::string(argv[1]) == "--nemu-diff") {
             test_nemu_diff_vectors(argv[2]);

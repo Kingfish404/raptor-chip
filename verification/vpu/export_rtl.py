@@ -11,11 +11,13 @@ ROOT=Path(__file__).resolve().parents[2]
 def export(destination):
     # Refuse existing directories so repeated exports cannot overwrite edits.
     destination.mkdir(parents=True,exist_ok=False)
-    rtl=[ROOT/'rtl/sram/rapt_sram_1rw.sv']+[
+    rtl=[ROOT/'rtl/rapt_pkg.sv', ROOT/'rtl/sram/rapt_sram_1rw.sv']+[
         ROOT/f'rtl/backend/feu/fpu/rapt_fpu_{name}.sv'
         for name in ('fma','divsqrt','convert_narrow','int_to_fp','single_to_int_w')]
     rtl+=sorted((ROOT/'rtl/backend/vpu').glob('*.sv'))
-    files=rtl+[ROOT/'rtl/include/rapt_sva.svh',ROOT/'rtl/include/rapt_fp_ops.svh',
+    headers = sorted((ROOT/'rtl/include').glob('*.svh'))
+    headers += [ROOT/'rtl/configs/default/rapt_config.svh']
+    files=rtl+headers+[
                ROOT/'verification/vpu/fma_legacy.vlt',ROOT/'LICENSE']
     sources={}
     for source in files:
@@ -23,7 +25,7 @@ def export(destination):
         target=destination/relative;target.parent.mkdir(parents=True,exist_ok=True)
         target.write_bytes(data)
         sources[str(relative)]=hashlib.sha256(data).hexdigest()
-    (destination/'sources.f').write_text('+incdir+rtl/include\n'+
+    (destination/'sources.f').write_text('+incdir+rtl/include\n+incdir+rtl/configs/default\n'+
         '\n'.join(str(p.relative_to(ROOT)) for p in rtl)+'\n')
     (destination/'README.md').write_text('''# Standalone VPU RTL bundle
 
@@ -40,8 +42,9 @@ verilator --lint-only --assert -Wall -DRAPT_ASSERT_EN \\
 
 The narrow existing scalar FMA warning waivers are retained. This bundle uses
 the behavioral SRAM implementation; technology-specific SRAM macros and their
-libraries are not included. No scalar core, presets, LSU/MMU, Spike, firmware,
-or board files are needed for the default elaboration.
+libraries are not included. The shared scalar package and default preset define
+the SRAM control type; no scalar core modules, LSU/MMU, Spike, firmware, or board
+files are needed for the default elaboration.
 
 The core must resolve scalar operands and retain command identity/metadata.
 Effects require matching irrevocable ROB-head authorization, including older

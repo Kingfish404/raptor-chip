@@ -17,8 +17,8 @@ module rapt_ioq_overlap #(
     input logic [1:0] span[Entries],
     input logic page_only,
     output logic [ColEntries-1:0] overlap[Entries],
-    input logic [Xlen-1:0] col_addr[ColEntries] = '{default: '0},
-    input logic [1:0] col_span[ColEntries] = '{default: '0}
+    input logic [Xlen-1:0] col_addr[ColEntries],
+    input logic [1:0] col_span[ColEntries]
 );
   localparam int WordBits = Xlen - WordOffBits;
   localparam int PageWordBits = PageOffBits - WordOffBits;

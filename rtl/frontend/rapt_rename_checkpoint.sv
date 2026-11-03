@@ -22,9 +22,9 @@ module rapt_rename_checkpoint #(
     output logic [Entries-1:0] available,
     input logic allocate_valid[RenameWidth],
     input logic [CheckpointBits-1:0] allocate_id[RenameWidth],
-    input logic [GhrBits-1:0] allocate_ghr[RenameWidth] = '{default: '0},
-    input logic [PhrBits-1:0] allocate_phr[RenameWidth] = '{default: '0},
-    input logic allocate_conditional[RenameWidth] = '{default: 1'b0},
+    input logic [GhrBits-1:0] allocate_ghr[RenameWidth],
+    input logic [PhrBits-1:0] allocate_phr[RenameWidth],
+    input logic allocate_conditional[RenameWidth],
 
     input logic release_valid[ResolvePorts],
     input logic [CheckpointBits-1:0] release_id[ResolvePorts],

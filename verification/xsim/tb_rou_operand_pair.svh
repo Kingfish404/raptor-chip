@@ -39,6 +39,13 @@ if (CheckOperandIndependence) begin : g_operand_pair
     shadow_completion[p] = completion[p];
     shadow_completion[p].result = ~completion[p].result;
   end
+  rapt_debug_if pair_debug ();
+  assign pair_debug.enable = debug.enable;
+  assign pair_debug.step = debug.step;
+  assign pair_debug.stepie = debug.stepie;
+  assign pair_debug.ebreak = debug.ebreak;
+  assign pair_debug.resume_valid = debug.resume_valid;
+  assign pair_debug.resume_pc = debug.resume_pc;
   rapt_rou #(
       .ValidateCompletionInputs(1'b1)
   ) shadow (
@@ -72,11 +79,13 @@ if (CheckOperandIndependence) begin : g_operand_pair
       .rou_csr(shadow_rou_csr),
       .rou_lsu(shadow_rou_lsu),
       .dm_haltreq_i(dm_haltreq),
+      .debug(pair_debug),
       .halted_o(shadow_halted),
       .halt_pc_o(shadow_halt_pc),
       .commit_fire_o(shadow_commit_fire),
       .pmu_rob_full(shadow_pmu_rob_full),
-      .reset(reset)
+      .reset(reset),
+      .operand_wake('{default: '0})
   );
 
   always @(posedge clock) if (!reset) begin

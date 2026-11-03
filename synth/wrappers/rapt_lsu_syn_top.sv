@@ -30,6 +30,10 @@ module rapt_lsu_syn_top #(
     input logic wb_accept,
     output logic pmu_sq_full
 );
+  rapt_pkg::completion_t local_fp_wake[NumCompletions];
+  for (genvar p = 0; p < NumCompletions; p++) begin : g_local_fp_wake
+    assign local_fp_wake[p] = '0;
+  end
   dpu_ioq_if #(
       .IOQ_SIZE(IOQ_SIZE),
       .Width(NumSlots)
@@ -62,6 +66,7 @@ module rapt_lsu_syn_top #(
       .pmp_update,
       .exu_ioq_bcast,
       .wb_accept,
-      .pmu_sq_full
+      .pmu_sq_full,
+      .local_fp_wake(local_fp_wake)
   );
 endmodule

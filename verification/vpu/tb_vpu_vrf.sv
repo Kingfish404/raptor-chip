@@ -22,6 +22,7 @@ module tb_vpu_vrf #(
       .Banks(Banks),
       .RowBits(RowBits)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .*
   );
 

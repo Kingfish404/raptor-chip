@@ -23,7 +23,8 @@ module tb_axi_write_lanes;
       .clock,
       .reset,
       .mem,
-      .axi
+      .axi,
+      .rd_req_cacheable(1'b0)
   );
   int cases = 0;
 

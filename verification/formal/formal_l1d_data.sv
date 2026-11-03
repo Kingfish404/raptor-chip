@@ -48,6 +48,7 @@ module formal_l1d_data #(
       .WordBits(WordBits),
       .Ways(Ways)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .*
   );
 
@@ -63,10 +64,10 @@ module formal_l1d_data #(
   wire [7:0] physical_byte[Banks];
   // Per-run include selects behavioral storage or the ideal macro stub.
   `include "formal_l1d_data_observe.svh"
-  wire [7:0] actual_byte = physical_byte[bank_of(
-      int'(watched_way), int'(watched_word) / ChunkWords)];
+  wire [7:0] actual_byte = physical_byte[bank_of(int'(watched_way), int'(watched_word)/ChunkWords)];
   wire [7:0] output_byte = read_data[bank_of(
-      int'(watched_way), int'(watched_word) / ChunkWords)][observed_byte_lane*8+:8];
+      int'(watched_way), int'(watched_word)/ChunkWords
+  )][observed_byte_lane*8+:8];
 
   logic [Banks-1:0] intended_write;
   always_comb begin
@@ -86,8 +87,7 @@ module formal_l1d_data #(
   wire [7:0] incoming_byte = write_line
       ? write_line_data[int'(watched_word)*Xlen+int'(watched_byte)*8+:8]
       : write_data[int'(watched_byte)*8+:8];
-  wire bank_reserved = intended_write[bank_of(
-      int'(watched_way), int'(watched_word) / ChunkWords)];
+  wire bank_reserved = intended_write[bank_of(int'(watched_way), int'(watched_word)/ChunkWords)];
   wire reading_owner = read_addr == watched_set && (read_line
       ? read_way == watched_way
       : int'(read_word) / ChunkWords == int'(watched_word) / ChunkWords);

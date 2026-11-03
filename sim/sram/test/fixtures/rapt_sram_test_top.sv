@@ -26,6 +26,7 @@ module rapt_sram_test_top #(
       .ADDR_WIDTH(ADDR_WIDTH),
       .DATA_WIDTH(DATA_WIDTH)
   ) u_sram (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock(clock),
       .en   (en),
       .wen  (wen),

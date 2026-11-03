@@ -809,13 +809,18 @@ $(FPGA_TARGETS): fpga-%:
 # Utilities
 # ============================================================================
 VERIBLE_FLAGS := $(RAPTOR_HOME)/.verible-format.flags
+# Explicit lists also support source archives without version-control metadata.
+ifeq ($(origin HDL_FORMAT_SOURCES),undefined)
 HDL_FORMAT_SOURCES := $(addprefix $(RAPTOR_HOME)/,$(shell git -C $(RAPTOR_HOME) ls-files \
 	'rtl/*.v' 'rtl/*.vh' 'rtl/*.sv' 'rtl/*.svh' \
 	'rtl/**/*.v' 'rtl/**/*.vh' 'rtl/**/*.sv' 'rtl/**/*.svh'))
+endif
 # Extend the HDL scope with every tracked SystemVerilog compilation unit.  Keep
 # non-HDL .svh include fragments out: many are not parseable as standalone files.
+ifeq ($(origin ALL_SV_FORMAT_SOURCES),undefined)
 ALL_SV_FORMAT_SOURCES := $(sort $(HDL_FORMAT_SOURCES) \
 	$(addprefix $(RAPTOR_HOME)/,$(shell git -C $(RAPTOR_HOME) ls-files '*.sv')))
+endif
 
 FORMAT_SCOPE ?= all## Formatting scope: rtl or all (includes testbenches)
 FORMAT_SCOPE := $(strip $(FORMAT_SCOPE))

@@ -21,6 +21,7 @@ module tb_cbo_tlb #(
   rapt_pkg::l2tlb_rsp_t l2_rsp [2];
   logic [1:0] l2_ready;
   rapt_l2tlb shared_tlb (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock(clock),
       .reset(reset),
       .flush((`RAPT_SFENCE_SELECTIVE == 0) && cmu_bcast.fence_time),
@@ -39,6 +40,7 @@ module tb_cbo_tlb #(
       .L2Tlb(L2Tlb),
       .LineRefill(0)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .l2tlb_req_o(l2_req[0]),
       .l2tlb_ready_i(l2_ready[0]),
       .l2tlb_rsp_i(l2_rsp[0]),

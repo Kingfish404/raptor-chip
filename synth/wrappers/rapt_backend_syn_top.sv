@@ -13,10 +13,15 @@ module rapt_backend_syn_top #(
     // Match rapt_core: integer, load, MUL/DIV and FP broadcasts are registered.
     parameter logic [rapt_pkg::CompletionPorts-1:0] RegisteredOperandWakePorts =
         ((rapt_pkg::CompletionPorts'(1) << rapt_pkg::IntegerIssuePorts) - 1'b1)
-        | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_branch_port(rapt_pkg::CoreConfig))
-        | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_memory_port(rapt_pkg::CoreConfig))
-        | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_mul_port(rapt_pkg::CoreConfig))
-        | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_fpu_port(rapt_pkg::CoreConfig))
+        | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_branch_port(
+        rapt_pkg::CoreConfig
+    )) | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_memory_port(
+        rapt_pkg::CoreConfig
+    )) | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_mul_port(
+        rapt_pkg::CoreConfig
+    )) | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_fpu_port(
+        rapt_pkg::CoreConfig
+    ))
 ) (
     input logic clock,
     input logic reset,
@@ -65,12 +70,28 @@ module rapt_backend_syn_top #(
       cmu_bcast.fence_i, cmu_bcast.cbo_inval, cmu_bcast.cbo_block,
       cmu_bcast.flush_pipe, cmu_bcast.flush_redirect, cmu_bcast.fetch_context_stable,
       cmu_bcast.time_trap, cmu_bcast.redirect_pc, cmu_bcast.rob_head} =
-     {cmu_internal.rpc, cmu_internal.cpc, cmu_internal.ben, cmu_internal.jen,
-      cmu_internal.jren, cmu_internal.btaken, cmu_internal.atomic_retired,
-      cmu_internal.call, cmu_internal.ret, cmu_internal.rvc, cmu_internal.fence_time,
-      cmu_internal.fence_i, cmu_internal.cbo_inval, cmu_internal.cbo_block,
-      cmu_internal.flush_pipe, cmu_internal.flush_redirect, cmu_internal.fetch_context_stable,
-      cmu_internal.time_trap, cmu_internal.redirect_pc, cmu_internal.rob_head};
+     {
+    cmu_internal.rpc,
+    cmu_internal.cpc,
+    cmu_internal.ben,
+    cmu_internal.jen,
+    cmu_internal.jren,
+    cmu_internal.btaken,
+    cmu_internal.atomic_retired,
+    cmu_internal.call,
+    cmu_internal.ret,
+    cmu_internal.rvc,
+    cmu_internal.fence_time,
+    cmu_internal.fence_i,
+    cmu_internal.cbo_inval,
+    cmu_internal.cbo_block,
+    cmu_internal.flush_pipe,
+    cmu_internal.flush_redirect,
+    cmu_internal.fetch_context_stable,
+    cmu_internal.time_trap,
+    cmu_internal.redirect_pc,
+    cmu_internal.rob_head
+  };
   assign {csr_bcast.priv, csr_bcast.satp_ppn, csr_bcast.satp_asid, csr_bcast.immu_en,
       csr_bcast.dmmu_en, csr_bcast.mtvec, csr_bcast.tvec, csr_bcast.timer_int_en,
       csr_bcast.sw_int_en, csr_bcast.ext_int_en, csr_bcast.bus_error_int,
@@ -80,29 +101,80 @@ module rapt_backend_syn_top #(
       csr_bcast.menvcfg_cbcfe, csr_bcast.menvcfg_cbze, csr_bcast.menvcfg_stce,
       csr_bcast.menvcfg_pbmte, csr_bcast.senvcfg_cbie, csr_bcast.senvcfg_cbcfe,
       csr_bcast.senvcfg_cbze} =
-     {csr_internal.priv, csr_internal.satp_ppn, csr_internal.satp_asid, csr_internal.immu_en,
-      csr_internal.dmmu_en, csr_internal.mtvec, csr_internal.tvec, csr_internal.timer_int_en,
-      csr_internal.sw_int_en, csr_internal.ext_int_en, csr_internal.bus_error_int,
-      csr_internal.mprv, csr_internal.mpp, csr_internal.tsr, csr_internal.tvm, csr_internal.tw,
-      csr_internal.mcounteren, csr_internal.scounteren, csr_internal.sum, csr_internal.mxr,
-      csr_internal.sbe, csr_internal.frm, csr_internal.fs, csr_internal.menvcfg_cbie,
-      csr_internal.menvcfg_cbcfe, csr_internal.menvcfg_cbze, csr_internal.menvcfg_stce,
-      csr_internal.menvcfg_pbmte, csr_internal.senvcfg_cbie, csr_internal.senvcfg_cbcfe,
-      csr_internal.senvcfg_cbze};
+     {
+    csr_internal.priv,
+    csr_internal.satp_ppn,
+    csr_internal.satp_asid,
+    csr_internal.immu_en,
+    csr_internal.dmmu_en,
+    csr_internal.mtvec,
+    csr_internal.tvec,
+    csr_internal.timer_int_en,
+    csr_internal.sw_int_en,
+    csr_internal.ext_int_en,
+    csr_internal.bus_error_int,
+    csr_internal.mprv,
+    csr_internal.mpp,
+    csr_internal.tsr,
+    csr_internal.tvm,
+    csr_internal.tw,
+    csr_internal.mcounteren,
+    csr_internal.scounteren,
+    csr_internal.sum,
+    csr_internal.mxr,
+    csr_internal.sbe,
+    csr_internal.frm,
+    csr_internal.fs,
+    csr_internal.menvcfg_cbie,
+    csr_internal.menvcfg_cbcfe,
+    csr_internal.menvcfg_cbze,
+    csr_internal.menvcfg_stce,
+    csr_internal.menvcfg_pbmte,
+    csr_internal.senvcfg_cbie,
+    csr_internal.senvcfg_cbcfe,
+    csr_internal.senvcfg_cbze
+  };
   assign {recovery.pending, recovery.redirect_valid, recovery.preserve_fetch, recovery.taken,
       recovery.owner, recovery.head,
       recovery.generation, recovery.target, recovery.checkpoint_valid, recovery.checkpoint} =
-     {recovery_internal.pending, recovery_internal.redirect_valid,
-      recovery_internal.preserve_fetch, recovery_internal.taken, recovery_internal.owner,
-      recovery_internal.head, recovery_internal.generation, recovery_internal.target,
-      recovery_internal.checkpoint_valid, recovery_internal.checkpoint};
+     {
+    recovery_internal.pending,
+    recovery_internal.redirect_valid,
+    recovery_internal.preserve_fetch,
+    recovery_internal.taken,
+    recovery_internal.owner,
+    recovery_internal.head,
+    recovery_internal.generation,
+    recovery_internal.target,
+    recovery_internal.checkpoint_valid,
+    recovery_internal.checkpoint
+  };
   assign {pmp_update.addr_we, pmp_update.addr_idx, pmp_update.raw_addr, pmp_update.napot_mask,
       pmp_update.cfg_we, pmp_update.cfg_r, pmp_update.cfg_w, pmp_update.cfg_x, pmp_update.cfg_l,
       pmp_update.mode_off, pmp_update.mode_tor, pmp_update.mode_na4, pmp_update.mode_napot} =
-     {pmp_internal.addr_we, pmp_internal.addr_idx, pmp_internal.raw_addr, pmp_internal.napot_mask,
-      pmp_internal.cfg_we, pmp_internal.cfg_r, pmp_internal.cfg_w, pmp_internal.cfg_x,
-      pmp_internal.cfg_l, pmp_internal.mode_off, pmp_internal.mode_tor,
-      pmp_internal.mode_na4, pmp_internal.mode_napot};
+     {
+    pmp_internal.addr_we,
+    pmp_internal.addr_idx,
+    pmp_internal.raw_addr,
+    pmp_internal.napot_mask,
+    pmp_internal.cfg_we,
+    pmp_internal.cfg_r,
+    pmp_internal.cfg_w,
+    pmp_internal.cfg_x,
+    pmp_internal.cfg_l,
+    pmp_internal.mode_off,
+    pmp_internal.mode_tor,
+    pmp_internal.mode_na4,
+    pmp_internal.mode_napot
+  };
+  rapt_debug_if debug ();
+  assign debug.enable = 1'b0;
+  assign debug.step = 1'b0;
+  assign debug.stepie = 1'b0;
+  assign debug.ebreak = '0;
+  assign debug.resume_valid = 1'b0;
+  assign debug.resume_pc = '0;
+
   rapt_backend #(
       .XLEN(XLEN),
       .RegisteredDrainCompletion(RegisteredDrainCompletion),
@@ -114,6 +186,7 @@ module rapt_backend_syn_top #(
       .LocalFpWake(LocalFpWake),
       .RegisteredOperandWakePorts(RegisteredOperandWakePorts)
   ) dut (
+      .debug(debug),
       .cmu_bcast(cmu_internal),
       .csr_bcast(csr_internal),
       .recovery(recovery_internal),

@@ -3,12 +3,12 @@
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import argparse
-import hashlib
 import json
 import os
 import subprocess
 import threading
-from yosys_common import ROOT, run_yosys
+from formal_scope import preset_xlens
+from yosys_common import ROOT, run_yosys, sha
 
 
 FORMAL = ROOT / 'verification/formal'
@@ -27,10 +27,6 @@ MUTATIONS = {
     'serial-immediate': ('serial_imm <= allocation[s].uop.imm[11:0];',
                          "serial_imm <= allocation[s].uop.imm[11:0] ^ 12'h001;"),
 }
-
-
-def sha(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def retire_main():
@@ -68,6 +64,7 @@ def retire_main():
     rtl = [ROOT / 'rtl/rapt_pkg.sv']
     rtl += sorted(p for p in (ROOT / 'rtl').rglob('*.sv') if p not in rtl)
     sources = rtl + [HARNESS, Path(__file__), Path(__file__).with_name('yosys_common.py'),
+                     Path(__file__).with_name('formal_scope.py'),
                      FORMAL / 'yosys-rvfi-compat.sh']
     sources += sorted((ROOT / 'rtl/include').rglob('*.svh'))
     for preset in set(args.presets) | {'formal'}:
@@ -171,7 +168,10 @@ def retire_main():
 
     save()
     cases = [(p, x, m, v, None) for p in args.presets for x in args.xlens
+             if x in preset_xlens(ROOT / 'rtl/configs' / p / 'rapt_config.svh')
              for m in args.metadata for v in args.validation_modes]
+    if not cases:
+        parser.error('No supported preset/XLEN combination selected')
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
         passed = list(pool.map(run, cases))
         if args.negative_controls == 'run':
@@ -320,6 +320,7 @@ def composed_main():
     rtl = [ROOT / "rtl/rapt_pkg.sv"]
     rtl += sorted(p for p in (ROOT / "rtl").rglob("*.sv") if p not in rtl)
     sources = rtl + [HARNESS, Path(__file__), Path(__file__).with_name("yosys_common.py"),
+                     Path(__file__).with_name("formal_scope.py"),
                      FORMAL / "yosys-rvfi-compat.sh"]
     sources += sorted((ROOT / "rtl/include").rglob("*.svh"))
     for preset in set(args.presets) | {"formal"}:
@@ -458,7 +459,8 @@ def composed_main():
 
     save()
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        cases = [(p, x, v, None) for p in args.presets for x in (32, 64) for v in (0, 1)]
+        cases = [(p, x, v, None) for p in args.presets for x in preset_xlens(
+            ROOT / "rtl/configs" / p / "rapt_config.svh") for v in (0, 1)]
         passed = list(pool.map(run, cases))
         controls = [("formal", 32, v, m) for v in (0, 1) for m in COMPOSED_MUTATIONS]
         passed += list(pool.map(run, controls))
@@ -496,6 +498,7 @@ def rvfi_main():
     rtl = [ROOT / "rtl/rapt_pkg.sv"]
     rtl += sorted(p for p in (ROOT / "rtl").rglob("*.sv") if p not in rtl)
     sources = rtl + [HARNESS, Path(__file__), Path(__file__).with_name("yosys_common.py"),
+                     Path(__file__).with_name("formal_scope.py"),
                      FORMAL / "yosys-rvfi-compat.sh"]
     sources += sorted((ROOT / "rtl/include").rglob("*.svh"))
     # Negative controls always use the formal preset, including when only
@@ -595,7 +598,9 @@ def rvfi_main():
 
     save()
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        passed = list(pool.map(run, [(p, x, None) for p in args.presets for x in (32, 64)]))
+        cases = [(p, x, None) for p in args.presets for x in preset_xlens(
+            ROOT / "rtl/configs" / p / "rapt_config.svh")]
+        passed = list(pool.map(run, cases))
         passed += list(pool.map(run, [("formal", 32, m) for m in mutations]))
     if fingerprints != {str(p.relative_to(ROOT)): sha(p) for p in sources}:
         raise RuntimeError("ROU/RVFI proof sources changed during execution")

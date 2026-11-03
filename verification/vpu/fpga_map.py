@@ -31,15 +31,16 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     summary = out/'summary.json'
     summary.unlink(missing_ok=True)
-    sources = [ROOT/'rtl/sram/rapt_sram_1rw.sv']
+    sources = [ROOT/'rtl/rapt_pkg.sv', ROOT/'rtl/sram/rapt_sram_1rw.sv']
     sources += [ROOT/f'rtl/backend/feu/fpu/rapt_fpu_{name}.sv' for name in (
         'fma','divsqrt','convert_narrow','int_to_fp','single_to_int_w')]
     sources += sorted((ROOT/'rtl/backend/vpu').glob('*.sv'))
-    inputs = sources+[ROOT/'rtl/include/rapt_sva.svh',ROOT/'rtl/include/rapt_fp_ops.svh',Path(__file__)]
+    inputs = sources + sorted((ROOT / 'rtl/include').rglob('*.svh'))
+    inputs += [ROOT / 'rtl/configs/default/rapt_config.svh', Path(__file__)]
     hashes = {str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs}
     (out/'sources.json').write_text(json.dumps(hashes,indent=2)+'\n')
     script = '\n'.join([
-        'read_slang --top rapt_vpu_core -Irtl/include '
+        'read_slang --top rapt_vpu_core -Irtl/include -Irtl/configs/default '
         +' '.join(f'-G{k}={v}' for k,v in params.items())+' '
         +' '.join(str(p.relative_to(ROOT)) for p in sources),
         'hierarchy -check -top rapt_vpu_core',

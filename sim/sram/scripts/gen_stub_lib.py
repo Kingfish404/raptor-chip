@@ -120,6 +120,14 @@ def emit_lib(name: str, depth: int, width: int, write_size: int) -> str:
         index_2    ("0.005, 0.05");
       }}
 
+      type (ctrl_bus_t) {{
+        base_type : array;
+        data_type : bit;
+        bit_width : 16;
+        bit_from : 15;
+        bit_to : 0;
+        downto : true;
+      }}
       type (wmask0_bus_t) {{
         base_type : array;
         data_type : bit;
@@ -152,6 +160,13 @@ def emit_lib(name: str, depth: int, width: int, write_size: int) -> str:
         is_macro_cell : true;
         interface_timing : true;
 
+        bus (ctrl) {{
+          bus_type : ctrl_bus_t;
+          direction : input;
+          pin (ctrl[15:0]) {{
+            capacitance : {cap_in};
+          }}
+        }}
         /* ---------- Port 0: read/write ---------- */
         pin (clk0) {{
           direction : input;
@@ -253,10 +268,36 @@ def emit_lib(name: str, depth: int, width: int, write_size: int) -> str:
 
     }}
     """)
+    if "_2rw_" in name:
+        # Reuse identical generic timing arcs for the second independent port.
+        def remove_block(text, marker):
+            start = text.index(marker)
+            brace = text.index("{", start)
+            end, level = brace + 1, 1
+            while level:
+                level += (text[end] == "{") - (text[end] == "}")
+                end += 1
+            return text[:start] + text[end:]
+
+        header = remove_block(header, "type (wmask0_bus_t)")
+        header = remove_block(header, "bus (wmask0)")
+        types_start = header.index("type (addr0_bus_t)")
+        types_end = header.index("cell (")
+        extra_types = header[types_start:types_end].replace("addr0", "addr1")
+        extra_types = extra_types.replace("data0", "data1")
+        header = header[:types_end] + extra_types + header[types_end:]
+        port_start = header.index("pin (clk0)")
+        cell_end = header.rfind("}", 0, header.rfind("}"))
+        second_port = header[port_start:cell_end]
+        for pin in ("clk", "csb", "web", "addr", "din", "dout", "data"):
+            second_port = second_port.replace(pin + "0", pin + "1")
+        header = header[:cell_end] + second_port + header[cell_end:]
     return header
 
 
 def emit_v(name: str, depth: int, width: int, write_size: int) -> str:
+    if "_2rw_" in name:
+        return emit_2rw_v(name, depth, width)
     aw = addr_width(depth)
     bytes_ = width // write_size
     # Single shared read/write port: web0 low = write, high = read.
@@ -267,6 +308,7 @@ def emit_v(name: str, depth: int, width: int, write_size: int) -> str:
     // satisfy module resolution when the blackbox attribute is dropped.
 
     module {name} (
+        input  wire [15:0]           ctrl,
         input  wire                  clk0,
         input  wire                  csb0,
         input  wire                  web0,
@@ -275,6 +317,7 @@ def emit_v(name: str, depth: int, width: int, write_size: int) -> str:
         input  wire [{width - 1}:0]  din0,
         output reg  [{width - 1}:0]  dout0
     );
+        wire unused_ctrl = ^ctrl;
         reg [{width - 1}:0] mem [0:{depth - 1}];
         integer b;
         always @(posedge clk0) begin
@@ -290,6 +333,29 @@ def emit_v(name: str, depth: int, width: int, write_size: int) -> str:
         end
     endmodule
     """)
+
+
+
+def emit_2rw_v(name: str, depth: int, width: int) -> str:
+    aw = addr_width(depth)
+    ports = ["input wire [15:0] ctrl"]
+    for port in range(2):
+        ports += [f"input wire clk{port}, csb{port}, web{port}",
+                  f"input wire [{aw - 1}:0] addr{port}",
+                  f"input wire [{width - 1}:0] din{port}",
+                  f"output reg [{width - 1}:0] dout{port}"]
+    text = f"module {name} (\n  " + ",\n  ".join(ports) + "\n);\n"
+    text += f"  reg [{width - 1}:0] mem[0:{depth - 1}];\n"
+    text += "  wire unused_ctrl = ^ctrl;\n"
+    for port in range(2):
+        text += f"""  always @(posedge clk{port}) begin
+    if (!csb{port}) begin
+      if (!web{port}) mem[addr{port}] <= din{port};
+      else dout{port} <= mem[addr{port}];
+    end
+  end
+"""
+    return text + "endmodule\n"
 
 
 def main(argv: list[str]) -> int:

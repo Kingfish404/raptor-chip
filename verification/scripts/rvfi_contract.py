@@ -2,20 +2,16 @@
 """Check RVFI effects, HINT metadata or the independent Bare PMA reference."""
 import argparse
 from dataclasses import dataclass
-import hashlib
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 
-from yosys_common import ROOT, run_yosys_check
+from yosys_common import ROOT, run_yosys_check, sha
 
 DUT = ROOT / "rtl/backend/rapt_rvfi.sv"
-REFERENCE = ROOT / "verification/formal/formal_rvfi_metadata.sv"
-EFFECTS_HARNESS = ROOT / "verification/formal/formal_rvfi_metadata.sv"
-HINTS_HARNESS = ROOT / "verification/formal/formal_rvfi_metadata.sv"
-PLATFORM_HARNESS = ROOT / "verification/formal/formal_rvfi_metadata.sv"
+HARNESS = ROOT / "verification/formal/formal_rvfi_metadata.sv"
 PASS = "SAT proof finished - no model found: SUCCESS!"
 FAIL = "SAT proof finished - model found: FAIL!"
 INDUCTION = "Induction step proven: SUCCESS!"
@@ -32,17 +28,13 @@ class Check:
     witness: Path = None
 
 
-def sha(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def read_effects(source, xlen, width):
     define = "-DRAPT_RV64" if xlen == 64 else ""
     return (
         "read_slang --threads 1 --single-unit -DFORMAL -DRAPT_RVFI "
         f"{define} -I{ROOT}/rtl/configs/default -I{ROOT}/rtl/include "
         f"--top formal_rvfi_effects -DRAPT_FORMAL_RVFI_EFFECTS -GXLEN={xlen} -GWidth={width} "
-        f"{ROOT}/rtl/rapt_pkg.sv {source} {EFFECTS_HARNESS}; "
+        f"{ROOT}/rtl/rapt_pkg.sv {source} {HARNESS}; "
         "chformal -assume -lower; prep -top formal_rvfi_effects -flatten; "
         "memory_map; opt; check -assert; "
         "select -assert-none t:$anyseq t:$anyconst t:$dlatch; "
@@ -55,7 +47,7 @@ def read_hints(dut, xlen, width, channel, mode, reduce_logic=True, *, abc=None):
         f"read_slang --threads 1 --single-unit -DFORMAL -DRAPT_RVFI {rv64} "
         f"-I{ROOT}/rtl/configs/default -I{ROOT}/rtl/include --top formal_rvfi_hints -DRAPT_FORMAL_RVFI_HINTS "
         f"-GXLEN={xlen} -GWidth={width} -GChannel={channel} -GPassThrough={mode} "
-        f"{ROOT}/rtl/rapt_pkg.sv {dut} {HINTS_HARNESS}; chformal -assume -lower; "
+        f"{ROOT}/rtl/rapt_pkg.sv {dut} {HARNESS}; chformal -assume -lower; "
         "prep -top formal_rvfi_hints -flatten; memory_map; opt; check -assert; "
         "select -assert-none t:*ff* t:*latch* t:$anyseq t:$anyconst; "
     )
@@ -173,7 +165,7 @@ def platform_checks(output, abc=None):
     for preset in ("default", "formal"):
         for xlen in (32, 64):
             name = f"{preset}-rv{xlen}"
-            base = read_platform(REFERENCE, xlen, preset)
+            base = read_platform(HARNESS, xlen, preset)
             parameters = dict(preset=preset, xlen=xlen)
             yield Check("proofs", name, base + "sat -verify -set-def-inputs -prove correct 1",
                         PASS, parameters)
@@ -191,7 +183,7 @@ def platform_checks(output, abc=None):
         ("plic-width", "!plic || log2len == 2", "1'b1"),
         ("upper-alias", "address[63:32] == 32'b0 || &address[63:32]", "1'b1"),
     ):
-        source = mutant(REFERENCE, output, name, old, new)
+        source = mutant(HARNESS, output, name, old, new)
         witness = output / ("negative-" + name + ".vcd")
         command = (read_platform(source, 64, "formal")
                    + "sat -set-def-inputs -prove correct 1 -show-inputs -show-outputs "
@@ -202,7 +194,7 @@ def platform_checks(output, abc=None):
 
 PROFILES = {
     "effects": dict(
-        source=DUT, harness=EFFECTS_HARNESS,
+        source=DUT, harness=HARNESS,
         checks=effects_checks, timeout=120,
         scope=(
             'RV32/RV64 RVFI adapter with 1/2/3/4/8 retirement lanes: faulting instructions '
@@ -217,7 +209,7 @@ PROFILES = {
         ],
     ),
     "hints": dict(
-        source=DUT, harness=HINTS_HARNESS,
+        source=DUT, harness=HARNESS,
         checks=hints_checks, timeout=180,
         scope=(
             'C.ADD/C.MV with x0 destination and C.ADDI identity HINT metadata; RV32/RV64, every '
@@ -232,7 +224,7 @@ PROFILES = {
         ],
     ),
     "platform": dict(
-        source=REFERENCE, harness=PLATFORM_HARNESS,
+        source=HARNESS, harness=HARNESS,
         checks=platform_checks, timeout=120,
         scope=(
             'Default/formal platform physical R/W/X permissions, bytewise scalar spans, '

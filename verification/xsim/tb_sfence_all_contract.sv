@@ -51,6 +51,7 @@ module sfence_walk_case #(
       .XLEN(XLEN),
       .Entries(16)
   ) l2 (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock(clock),
       .reset(reset),
       .flush(flush),
@@ -89,6 +90,8 @@ module sfence_walk_case #(
       .fill_pte(result_pte),
       .fill_pbmt(result_pbmt),
       .fill_level(result_level)
+  ,
+      .lookup_valid(1'b0)
   );
 
   always @(posedge clock) begin
@@ -382,6 +385,7 @@ module tb_sfence_selective_l2;
       .XLEN(XLEN),
       .GenerationBits(2)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock(clock),
       .reset(reset),
       .flush(flush),

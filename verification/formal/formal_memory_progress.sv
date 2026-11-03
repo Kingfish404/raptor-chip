@@ -50,6 +50,7 @@ module formal_memory_progress #(
       .L1D_N_WAYS(1),
       .L1D_LINE_LEN(1)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock,
       .reset,
       .coherent_request,
@@ -61,7 +62,23 @@ module formal_memory_progress #(
       .pmp_update,
       .lsu_l1d,
       .exu_l1d,
-      .l1d_bus
+      .l1d_bus,
+      .probe_valid_i(1'b0),
+      .probe_addr_i('0),
+      .probe_release_ready_i(1'b0),
+      .release_ready_i(1'b0),
+      .release_ack_i(1'b0),
+      .probe_window_i(1'b0),
+      .writeback_drain(1'b0),
+      .writeback_cbo(1'b0),
+      .writeback_cbo_invalidate(1'b0),
+      .writeback_block('0),
+      .external_write_valid_i(1'b0),
+      .external_write_pending_i(1'b0),
+      .external_write_first_i('0),
+      .external_write_last_i('0),
+      .l2tlb_ready_i(1'b0),
+      .l2tlb_rsp_i('0)
   );
   rapt_bus #(
       .TargetedCoherence(TargetedCoherence)

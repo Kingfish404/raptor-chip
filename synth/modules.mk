@@ -46,3 +46,10 @@ TOP_fp_registers := rapt_fp_registers_syn_top
 TOP_l2tlb := rapt_l2tlb
 CLOCK_fp_registers := clock
 CLOCK_l2tlb := clock
+
+# Cluster debug leaves (outside MODULE=core).
+MODULES += dm debug_arbiter
+TOP_dm := rapt_dm
+TOP_debug_arbiter := rapt_debug_arbiter
+CLOCK_dm := clock
+CLOCK_debug_arbiter := clock

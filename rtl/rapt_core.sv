@@ -17,14 +17,15 @@ module rapt_core #(
     // Capabilities of the L2 subsystem behind this hart.
     parameter rapt_pkg::l2_link_config_t L2Link = rapt_pkg::L2LinkConfig
 ) (
+    input rapt_pkg::sram_ctrl_t sram_ctrl_i,
     input clock,
     output logic writeback_error_o,
     // Device writes are reported before a later SC may complete. Pending
     // holds SC while the platform drains a finite batch of notifications.
-    input logic external_write_valid_i = 1'b0,
-    input logic external_write_pending_i = 1'b0,
-    input logic [XLEN-1:0] external_write_first_i = '0,
-    input logic [XLEN-1:0] external_write_last_i = '0,
+    input logic external_write_valid_i,
+    input logic external_write_pending_i,
+    input logic [XLEN-1:0] external_write_first_i,
+    input logic [XLEN-1:0] external_write_last_i,
 
     // Client port to the cluster's L2 subsystem.
     l2_client_if.client l2_client,
@@ -77,14 +78,14 @@ module rapt_core #(
     // RISC-V Debug: external halt request from the cluster Debug Module
     // (level). The core stops dispatching new uops while asserted and
     // reports `halted_o` once the ROB has drained.
-    input  logic            dm_haltreq_i,
-    output logic            halted_o,
+    input  logic                                           dm_haltreq_i,
+    rapt_debug_if.hart                              debug,
+    output logic                                           halted_o,
     // Resume PC reported to the DM (= npc of the youngest committed
     // instruction). Sampled by rapt_dm into dpc on halt entry.
-    output logic [`RAPT_PC_BITS_OF(XLEN)-1:0] halt_pc_o,
-    // Single-cycle pulse: at least one instruction retired this cycle.
-    // Sampled by rapt_dm to implement dcsr.step.
-    output logic            commit_fire_o,
+    output logic              [`RAPT_PC_BITS_OF(XLEN)-1:0] halt_pc_o,
+    // Single-cycle progress pulse, including synchronous trap delivery.
+    output logic                                           commit_fire_o,
 
     // RISC-V Debug: abstract `access_register` GPR view (committed). Indexed
     // by 5-bit architectural reg number; valid only while `halted_o` is
@@ -164,10 +165,15 @@ module rapt_core #(
       // integer, branch-link and MUL latency; FPQ keeps FP-to-FP latency.
       .RegisteredOperandWakePorts(
           ((rapt_pkg::CompletionPorts'(1) << rapt_pkg::IntegerIssuePorts) - 1'b1)
-          | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_branch_port(rapt_pkg::CoreConfig))
-          | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_memory_port(rapt_pkg::CoreConfig))
-          | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_mul_port(rapt_pkg::CoreConfig))
-          | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_fpu_port(rapt_pkg::CoreConfig)))
+          | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_branch_port(
+          rapt_pkg::CoreConfig
+      )) | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_memory_port(
+          rapt_pkg::CoreConfig
+      )) | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_mul_port(
+          rapt_pkg::CoreConfig
+      )) | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_fpu_port(
+          rapt_pkg::CoreConfig
+      )))
   ) backend (
       .writeback_done(cache_writeback_done),
       .writeback_drain(cache_writeback_drain),
@@ -198,6 +204,7 @@ module rapt_core #(
       .s_ext_irq_i(s_ext_irq_i),
       .hart_id_i(hart_id_i),
       .dm_haltreq_i(dm_haltreq_i),
+      .debug(debug),
       .halted_o(halted_o),
       .halt_pc_o(halt_pc_o),
       .commit_fire_o(commit_fire_o),
@@ -205,8 +212,7 @@ module rapt_core #(
       .dbg_gpr_we_i(dbg_gpr_we_i),
       .dbg_gpr_addr_i(dbg_gpr_addr_i),
       .dbg_gpr_wdata_i(dbg_gpr_wdata_i)
-`ifdef RAPT_RVFI
-      ,
+`ifdef RAPT_RVFI,
       .rvfi_valid(rvfi_valid)
       , .rvfi_order(rvfi_order)
       , .rvfi_insn(rvfi_insn)
@@ -243,7 +249,7 @@ module rapt_core #(
       // This is exactly the ROU event that updates commit_npc_q, including
       // asynchronous traps taken without an ordinary instruction retirement.
       .frontier_advance(commit_fire_o || cmu_bcast.time_trap),
-      .blocked(ifu_l1i.cancel || cmu_bcast.fence_time || dm_haltreq_i),
+      .blocked(ifu_l1i.cancel || cmu_bcast.fence_time || dm_haltreq_i || debug.fetch_block),
       .pipeline_empty(frontend_empty && backend_empty),
       .memory_idle(sq_empty && memory_data_idle),
       .io_start(ifetch_io_start),
@@ -254,6 +260,7 @@ module rapt_core #(
       .L1dWriteBack(L1dWriteBack),
       .L2Link(L2Link)
   ) memory_subsystem (
+      .sram_ctrl_i(sram_ctrl_i),
       .clock(clock),
       .reset(reset),
       .ifu_l1i(ifu_l1i),

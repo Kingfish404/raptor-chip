@@ -42,7 +42,8 @@
       .cmu_bcast,
       .csr_bcast,
       .exu_csr,
-      .wb_alu_csr(wb)
+      .wb_alu_csr(wb),
+      .csr_read_addr('0)
   );
   `undef TB_CSR_HART_ID
   `undef TB_CSR_TIME

@@ -18,8 +18,19 @@ set synth_directive default
 if {[info exists ::env(FPGA_SYNTH_DIRECTIVE)]} {
     set synth_directive $::env(FPGA_SYNTH_DIRECTIVE)
 }
-synth_design -top $::env(FPGA_TOP) -part $::env(FPGA_PART) -mode out_of_context \
-    -directive $synth_directive -resource_sharing off -no_lc -fanout_limit 24
+set no_timing_driven 0
+if {[info exists ::env(FPGA_NO_TIMING_DRIVEN)]} {
+    set no_timing_driven $::env(FPGA_NO_TIMING_DRIVEN)
+}
+if {$no_timing_driven ne "0" && $no_timing_driven ne "1"} {
+    error "FPGA_NO_TIMING_DRIVEN must be 0 or 1"
+}
+set synth_options [list -top $::env(FPGA_TOP) -part $::env(FPGA_PART) -mode out_of_context \
+    -directive $synth_directive -resource_sharing off -no_lc -fanout_limit 24]
+if {$no_timing_driven eq "1"} {
+    lappend synth_options -no_timing_driven
+}
+synth_design {*}$synth_options
 if {[llength [get_cells -quiet -hier -filter {IS_BLACKBOX == 1}]]} {
     error "Unresolved black boxes after synthesis"
 }

@@ -1,6 +1,9 @@
 // Functional stand-in for the 8x32 OpenRAM macro used by the wrapper test.
 // Synthesis and STA continue to use the separate blackbox and Liberty model.
 module rapt_openram_1rw_8x32 (
+    /* verilator lint_off UNUSEDSIGNAL */
+    input logic [15:0] ctrl,
+    /* verilator lint_on UNUSEDSIGNAL */
     input logic clk0,
     input logic csb0,
     input logic web0,

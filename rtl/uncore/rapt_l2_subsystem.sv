@@ -20,6 +20,7 @@ module rapt_l2_subsystem #(
     // Reads the AXI master may have in flight.
     parameter int MemoryReadCredits = 8
 ) (
+    input rapt_pkg::sram_ctrl_t sram_ctrl_i,
     input logic clock,
     input logic reset,
     l2_client_if.manager client,
@@ -86,6 +87,7 @@ module rapt_l2_subsystem #(
   );
 
   rapt_l2 l2 (
+      .sram_ctrl_i(sram_ctrl_i),
       .clock(clock),
       .reset(reset),
       .cbo_inval_i(client.cbo_inval),

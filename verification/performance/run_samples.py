@@ -58,6 +58,36 @@ def load_capture(plan_path, capture_path):
     return plan, points, checkpoints
 
 
+def pmu_delta(window, start, end, cycles):
+    """Subtract cumulative counters at the exact, matched retirement boundaries."""
+    if "pmu_schema" not in window:
+        return None
+    if window["pmu_schema"] != "raptor-pmu-snapshot-v1":
+        raise ValueError("unsupported window PMU schema")
+    before, after = start.get("pmu"), end.get("pmu")
+    if not isinstance(before, dict) or not before or not isinstance(after, dict):
+        raise ValueError("missing PMU boundary counters")
+    if before.keys() != after.keys():
+        raise ValueError("PMU counter set changed within the window")
+    for value in (*before.values(), *after.values()):
+        if type(value) is not int or not 0 <= value < 1 << 64:
+            raise ValueError("invalid PMU cumulative counter")
+    delta = {name: after[name] - value for name, value in before.items()}
+    if any(value < 0 for value in delta.values()):
+        raise ValueError("PMU counters decreased within the window")
+    if delta.get("active_cycle") != cycles:
+        raise ValueError("PMU active cycles differ from matched window cycles")
+    dispatch = [value for name, value in delta.items() if name.startswith("dispatch_cycles_")]
+    if dispatch and sum(dispatch) != cycles:
+        raise ValueError("PMU dispatch cycle accounting failed")
+    if "dispatch_capacity" in delta:
+        unfilled = sum(value for name, value in delta.items()
+                       if name.startswith("dispatch_unfilled_"))
+        if unfilled + delta.get("dispatch_accepted", -1) != delta["dispatch_capacity"]:
+            raise ValueError("PMU dispatch slot accounting failed")
+    return delta
+
+
 def matched_window(before, after, point):
     for window in (before, after):
         if (window.get("schema") != "raptor-window-v1" or window.get("complete") is not True or
@@ -88,10 +118,16 @@ def matched_window(before, after, point):
         new_cycles = new[end]["cycle"] - new[start]["cycle"]
         if min(old_cycles, new_cycles) <= 0:
             raise ValueError("nonpositive measured cycle count")
-        return {"start": point["start"] + start - point["warmup"],
+        result = {"start": point["start"] + start - point["warmup"],
                 "instructions": end - start, "baseline_cycles": old_cycles,
                 "candidate_cycles": new_cycles, "boundary_shift": start - point["warmup"],
                 "speedup": old_cycles / new_cycles}
+        for name, window, bounds, cycles in (
+                ("baseline", before, old, old_cycles), ("candidate", after, new, new_cycles)):
+            counters = pmu_delta(window, bounds[start], bounds[end], cycles)
+            if counters is not None:
+                result[name + "_pmu"] = counters
+        return result
     raise ValueError("no identical retirement boundaries with the requested window length")
 
 

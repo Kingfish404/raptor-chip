@@ -51,11 +51,11 @@ module rapt_fp_registers #(
     input logic [IndexBits-1:0] commit_index[CommitWidth],
     // Optional physical source slots shared with the ROU operand spill bank.
     // ROB result ownership and the architectural register bank stay ROB-indexed.
-    input logic [OperandBits-1:0] operand_allocate_index[AllocateWidth] = '{default: '0},
-    input logic operand_release_valid[ReadPorts] = '{default: '0},
-    input logic [OperandBits-1:0] operand_release_index[ReadPorts] = '{default: '0},
-    input logic operand_read_valid[ReadPorts] = '{default: '0},
-    input logic [OperandBits-1:0] operand_read_index[ReadPorts] = '{default: '0}
+    input logic [OperandBits-1:0] operand_allocate_index[AllocateWidth],
+    input logic operand_release_valid[ReadPorts],
+    input logic [OperandBits-1:0] operand_release_index[ReadPorts],
+    input logic operand_read_valid[ReadPorts],
+    input logic [OperandBits-1:0] operand_read_index[ReadPorts]
 );
   logic [63:0] architectural[32];
   logic [2:0][63:0] architectural_read[ReadPorts];
