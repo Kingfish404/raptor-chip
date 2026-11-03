@@ -427,7 +427,7 @@ def main():
         f'{case["start"]:x} {case["base"]:x} '
         f'{case.get("stride", 0) & reference.mask:x} {case["seed"]:x} '
         f'{case.get("index_pattern", 0):x}\n' for case in cases))
-    rtl = ROOT / 'rtl/backend/vpu/rapt_vpu_memory.sv'
+    rtl = ROOT / 'rtl/core/backend/vpu/rapt_vpu_memory.sv'
     testbench = ROOT / 'verification/nemu/tb_vector_memory_rtl.sv'
     build = args.output / 'obj_dir'
     command = ['verilator', '--binary', '--timing', '-Wall', '--top-module',

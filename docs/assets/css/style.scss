@@ -1,6 +1,33 @@
 ---
 ---
 
+// Keep discovery text in the document without adding it to the visual navigation.
+.agent-links {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.agent-links:focus-within {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0;
+  overflow: visible;
+  clip: auto;
+  clip-path: none;
+  white-space: normal;
+}
+
+.arch-guide { margin: 2rem auto; }
+
 /* Raptor portal + manual.
    Light is the readable default. Dark is opt-in or follows the OS in Auto. */
 

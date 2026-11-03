@@ -21,9 +21,9 @@ class SamplingOverlayTests(unittest.TestCase):
                 self.assertNotIn("RAPT_SAMPLING", (ROOT / name).read_text())
                 self.assertIn("RAPT_SAMPLING", (shadow / name).read_text())
             self.assertIn("if (sample.restore_fire)",
-                          (shadow / "rtl/frontend/rapt_csr.sv").read_text())
+                          (shadow / "rtl/core/backend/commit/rapt_csr.sv").read_text())
             self.assertIn("mtime <= restore_time_i;",
-                          (shadow / "rtl/perip/rapt_clint.sv").read_text())
+                          (shadow / "rtl/uncore/irq/rapt_clint.sv").read_text())
             self.assertTrue((shadow / "rtl/include/rapt_sample_if.svh").is_file())
             for path in (ROOT / "rtl").rglob("*"):
                 relative = str(path.relative_to(ROOT))

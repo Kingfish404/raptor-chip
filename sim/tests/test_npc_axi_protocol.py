@@ -25,7 +25,7 @@ def main():
                         ('rtl/configs/default', 'rtl/include', 'rtl/include/npc',
                          'rtl/include/dpic')]
             command += [str(root / p) for p in
-                        ('rtl/perip/rapt_dpi_c.sv', 'sim/rtl/rapt_npc_soc.sv',
+                        ('sim/rtl/rapt_dpi_c.sv', 'sim/rtl/rapt_npc_soc.sv',
                          'sim/tests/npc_axi_protocol.cc')]
             with (out / f'{name}-build.log').open('w') as log:
                 subprocess.run(command, check=True, stdout=log, stderr=subprocess.STDOUT)

@@ -1,4 +1,4 @@
-// Medium BOOM data geometry: four 16384 x 64 single-port SRAM banks.
+// L2 data array: four 16384 x 64 single-port SRAM banks.
 // bank=chunk[1:0], row={way[2:0],set[9:0],chunk[2]}.
 // Bank priority is SinkC > SourceC > live SinkD > buffered line write
 // > SourceD-write > SourceD-read. A displaced buffered beat retries.

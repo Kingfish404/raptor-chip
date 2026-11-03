@@ -1,0 +1,6 @@
+---
+layout: markdown
+permalink: /linux_kernel.md
+markdown_source: linux_kernel.md
+markdown_alias: true
+---

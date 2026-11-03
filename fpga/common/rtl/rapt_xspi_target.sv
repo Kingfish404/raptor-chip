@@ -1,4 +1,5 @@
-// rapt_xspi_target: board-side end of the octal link in rtl/perip/rapt_axi_xspi.sv.
+// rapt_xspi_target: board-side end of the pin-limited chip's octal link.
+// The master is in synth/configs/pin-limited/rtl/rapt_axi_xspi.sv.
 //
 // clock oversamples SCLK and must be at least 4x faster than it. Read data is
 // launched three clocks after SCLK falls, plus pad and board delay, and the chip

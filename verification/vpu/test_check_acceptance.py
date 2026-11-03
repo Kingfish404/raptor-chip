@@ -35,7 +35,7 @@ def main():
             else:
                 path=candidate/('reference.json' if mutation=='wrong_reference' else 'sources.json')
                 data=json.loads(path.read_text())
-                if mutation=='stale_source':data['sources']['rtl/backend/vpu/rapt_vpu.sv']='0'*64
+                if mutation=='stale_source':data['sources']['rtl/core/backend/vpu/rapt_vpu.sv']='0'*64
                 elif mutation=='wrong_reference':data['revision']='0'*40
                 elif mutation=='wrong_vlen':data['configuration']['VLEN']=256
                 else:data['configuration']['BankBits']=128

@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
-VPU = ROOT / "rtl/backend/vpu"
+VPU = ROOT / "rtl/core/backend/vpu"
 LEAVES = ("core_adapter", "vtype", "csr", "vrf", "owner", "divsqrt", "fp_misc", "fp_estimate", "fp_transfer", "fp_reduce", "fp_reduce_control", "fp_reduce_decode", "fp_reduce_engine", "fp_reduce_engine_baseline", "fp_widen", "fp_wide_arith", "fp_convert", "int_fp16", "int_fp32", "int_fp64", "int_fp_decode", "fp_decode", "fp_arith", "fma", "slide", "mask_scan", "move", "reduce", "fixed", "geometry", "mask_write", "muldiv", "muldiv_baseline", "top", "top_baseline", "top_core")
 
 
@@ -34,31 +34,31 @@ def main():
                 top = "rapt_vpu_int_fp"
             sources = [VPU / f"{top}.sv"]
             if leaf in ("int_fp16", "int_fp32", "int_fp64"):
-                sources = [ROOT / "rtl/backend/feu/fpu/rapt_fpu_int_to_fp.sv", ROOT / "rtl/backend/feu/fpu/rapt_fpu_integer_to_fp.sv", ROOT / "rtl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv", ROOT / "rtl/backend/feu/fpu/rapt_fpu_fp_to_int.sv"] + sources
+                sources = [ROOT / "rtl/core/backend/fpu/rapt_fpu_int_to_fp.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_integer_to_fp.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_single_to_int_w.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_fp_to_int.sv"] + sources
             if leaf in ("fp_reduce_engine", "fp_reduce_engine_baseline"):
                 sources = [VPU / f"rapt_vpu_{name}.sv" for name in ("vtype", "fp_widen", "fp_reduce_decode", "fp_reduce_control")] + sources
             if leaf == "fp_reduce":
-                sources = [VPU / "rapt_vpu_fp_reduce_control.sv", ROOT / "rtl/backend/feu/fpu/rapt_fpu_fma.sv", VPU / "rapt_vpu_fma.sv", VPU / "rapt_vpu_fp_arith.sv", VPU / "rapt_vpu_fp_misc.sv", VPU / "rapt_vpu_fp_widen.sv"] + sources
+                sources = [VPU / "rapt_vpu_fp_reduce_control.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_fma.sv", VPU / "rapt_vpu_fma.sv", VPU / "rapt_vpu_fp_arith.sv", VPU / "rapt_vpu_fp_misc.sv", VPU / "rapt_vpu_fp_widen.sv"] + sources
             if leaf == "fp_reduce_control":
                 sources.insert(0, VPU / "rapt_vpu_fp_widen.sv")
             if leaf == "fp_transfer":
                 sources.insert(0, VPU / "rapt_vpu_slide.sv")
             if leaf == "fp_wide_arith":
-                sources = [ROOT / "rtl/backend/feu/fpu/rapt_fpu_fma.sv", VPU / "rapt_vpu_fma.sv", VPU / "rapt_vpu_fp_arith.sv", VPU / "rapt_vpu_fp_widen.sv"] + sources
+                sources = [ROOT / "rtl/core/backend/fpu/rapt_fpu_fma.sv", VPU / "rapt_vpu_fma.sv", VPU / "rapt_vpu_fp_arith.sv", VPU / "rapt_vpu_fp_widen.sv"] + sources
             if leaf == "fp_convert":
-                sources = [ROOT / "rtl/backend/feu/fpu/rapt_fpu_convert_narrow.sv", VPU / "rapt_vpu_fp_widen.sv"] + sources
+                sources = [ROOT / "rtl/core/backend/fpu/rapt_fpu_convert_narrow.sv", VPU / "rapt_vpu_fp_widen.sv"] + sources
             if leaf == "divsqrt":
-                sources.insert(0, ROOT / "rtl/backend/feu/fpu/rapt_fpu_divsqrt.sv")
+                sources.insert(0, ROOT / "rtl/core/backend/fpu/rapt_fpu_divsqrt.sv")
             if leaf == "fp_arith":
-                sources = [ROOT / "rtl/backend/feu/fpu/rapt_fpu_fma.sv", VPU / "rapt_vpu_fma.sv"] + sources
+                sources = [ROOT / "rtl/core/backend/fpu/rapt_fpu_fma.sv", VPU / "rapt_vpu_fma.sv"] + sources
             if leaf == "fma":
-                sources.insert(0, ROOT / "rtl/backend/feu/fpu/rapt_fpu_fma.sv")
+                sources.insert(0, ROOT / "rtl/core/backend/fpu/rapt_fpu_fma.sv")
             if leaf == "reduce":
                 sources.insert(0, VPU / "rapt_vpu_alu.sv")
             if leaf == "csr":
                 sources.insert(0, VPU / "rapt_vpu_vtype.sv")
             if leaf.startswith("top"):
-                sources = [ROOT / "rtl/sram/rapt_sram_1rw.sv", ROOT / "rtl/backend/feu/fpu/rapt_fpu_fma.sv", ROOT / "rtl/backend/feu/fpu/rapt_fpu_divsqrt.sv", ROOT / "rtl/backend/feu/fpu/rapt_fpu_convert_narrow.sv", ROOT / "rtl/backend/feu/fpu/rapt_fpu_int_to_fp.sv", ROOT / "rtl/backend/feu/fpu/rapt_fpu_integer_to_fp.sv", ROOT / "rtl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv", ROOT / "rtl/backend/feu/fpu/rapt_fpu_fp_to_int.sv"] + sorted(VPU.glob("*.sv"))
+                sources = [ROOT / "rtl/sram/rapt_sram_1rw.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_fma.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_divsqrt.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_convert_narrow.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_int_to_fp.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_integer_to_fp.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_single_to_int_w.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_fp_to_int.sv"] + sorted(VPU.glob("*.sv"))
                 params = dict(XLEN=xlen, VLEN=vlen, ELEN=elen, BankBits=max(64, bank_bits), Banks=banks,
                               OptimizeOperandReads=int(leaf in ("top", "top_core")))
             elif leaf in ("fp_reduce_engine", "fp_reduce_engine_baseline"):

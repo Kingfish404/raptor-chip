@@ -16,7 +16,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     root = args.source_root.resolve()
-    dut = (args.dut or root / 'rtl/backend/feu/fpu/rapt_fpu_divsqrt.sv').resolve()
+    dut = (args.dut or root / 'rtl/core/backend/fpu/rapt_fpu_divsqrt.sv').resolve()
     reference = root / 'verification/formal/formal_fpu_normalize_ref.sv'
     output = args.output.resolve()
     for path in (dut, reference, output):

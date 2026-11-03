@@ -35,7 +35,7 @@ def main():
     repo = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rtl", type=Path,
-                        default=repo / "rtl/backend/lsu/rapt_sq_forward.sv")
+                        default=repo / "rtl/core/backend/lsu/rapt_sq_forward.sv")
     parser.add_argument("--build-dir", type=Path,
                         default=repo / "verification/build/sq-span-equivalence")
     parser.add_argument("--yosys", default="yosys")

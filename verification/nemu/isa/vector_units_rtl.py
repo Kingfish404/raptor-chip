@@ -759,7 +759,7 @@ def main(unit=None):
     rtl_names = ('decode', 'geometry') if decode_only else (unit,)
     if unit == 'reduce':
         rtl_names += ('alu',)
-    rtl_files = [ROOT / f'rtl/backend/vpu/rapt_vpu_{name}.sv' for name in rtl_names]
+    rtl_files = [ROOT / f'rtl/core/backend/vpu/rapt_vpu_{name}.sv' for name in rtl_names]
     top = 'tb_vector_' + unit + '_rtl'
     testbench = ROOT / 'verification/nemu/tb_vector_units.sv'
     build = args.output / 'obj_dir'

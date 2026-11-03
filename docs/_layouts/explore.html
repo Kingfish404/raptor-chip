@@ -4,6 +4,7 @@
   {% include head.html %}
 </head>
 <body class="is-explore" data-portal="{{ '/assets/generated/portal-data.json' | relative_url }}">
+  {% include agent-links.html %}
   {% include nav.html %}
   <main class="arch-page" id="content">
     <header class="arch-header">
@@ -15,6 +16,9 @@
       <a href="{{ '/uarch.html' | relative_url }}">Architecture manual ↗</a>
     </header>
     {% include architecture-explorer.html %}
+    <section class="article arch-guide" aria-label="Explorer guide">
+      {{ content }}
+    </section>
   </main>
   {% include terminal.html %}
   {% include scripts.html %}

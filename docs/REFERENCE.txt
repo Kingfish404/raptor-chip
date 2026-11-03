@@ -1,0 +1,8 @@
+---
+layout: markdown
+permalink: /REFERENCE.html.md
+markdown_source: REFERENCE.md
+title: References
+description: AXI protocol references, transaction diagrams, and public PPA resources.
+nav_order: 12
+---

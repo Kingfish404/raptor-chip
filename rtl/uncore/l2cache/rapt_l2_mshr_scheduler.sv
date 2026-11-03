@@ -1,4 +1,4 @@
-// BOOM inclusive-cache MSHR allocation and round-robin schedule selection.
+// Inclusive L2 MSHR allocation and round-robin schedule selection.
 // Five ordinary A slots and the dedicated BC/C slots share one set-conflict
 // table. The secondary request payloads reside in rapt_l2_secondary_buffer.
 module rapt_l2_mshr_scheduler #(

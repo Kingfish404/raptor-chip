@@ -2,7 +2,7 @@
 # Usage:  make -C verification/xsim/fpu/int_to_fp run [N=200000]
 
 UNITS := int_to_fp
-EXTRA_SOURCES = $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_integer_to_fp.sv
+EXTRA_SOURCES = $(ROOT)/rtl/core/backend/fpu/rapt_fpu_integer_to_fp.sv
 HOST_FLAGS := -CFLAGS -frounding-math
 include ../host-diff.mk
 

@@ -1,4 +1,4 @@
-// BOOM SinkA's non-flowing put ListBuffer: forty lists share forty beats.
+// Non-flowing L2 put buffer: forty lists share forty beats.
 // A list may hold multiple beats; the caller owns list allocation and retires
 // a list after its last beat has been popped. A full pool does not accept a
 // push merely because another list pops on the same edge.

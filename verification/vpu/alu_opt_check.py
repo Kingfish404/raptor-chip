@@ -8,7 +8,7 @@ import subprocess
 
 ROOT=Path(__file__).resolve().parents[2]
 OUT=ROOT/'verification/build/vpu/alu-optimization'
-SOURCES=[ROOT/p for p in ('rtl/backend/vpu/rapt_vpu_alu.sv',
+SOURCES=[ROOT/p for p in ('rtl/core/backend/vpu/rapt_vpu_alu.sv',
     'verification/vpu/rapt_vpu_alu_baseline.sv','verification/vpu/formal_alu_equivalence.sv')]+[Path(__file__)]
 
 

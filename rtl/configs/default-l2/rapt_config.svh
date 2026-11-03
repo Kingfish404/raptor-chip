@@ -1,8 +1,8 @@
 `ifndef RAPT_CONFIG_SVH
 `define RAPT_CONFIG_SVH
-// Medium BOOM L2 comparison preset. Core widths/queues and L1 geometry match `default`;
+// 512 KiB inclusive-L2 preset. Core widths/queues and L1 geometry match `default`;
 // predictor differs: RAS 4 vs 16, TAGE base/tagged index bits 8/7 vs 10/10;
-// the L1D uses write-back and the unified L2 uses BOOM's 512 KiB layout.
+// the L1D uses write-back and the unified L2 uses an eight-way, four-bank layout.
 /**
  * Architecture (arch) Parameters
  * @param RAPT_XLEN: Width of an integer register in bits

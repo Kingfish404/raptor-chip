@@ -1,9 +1,11 @@
 # Chip top and off-chip link
 
-`rtl/chip/` is the logical and pad-level top of a pin-limited Raptor chip. All
-memory and peripherals sit on a board-side FPGA behind one octal link, so the
-chip needs only 17 signal pins and has one clock domain. Everything here is
-technology-neutral.
+The pin-limited configuration in `synth/configs/pin-limited/rtl/` is one tape-out
+integration of the Raptor cluster, also used for Arty validation. The reusable
+processor top is `rapt` in `rtl/rapt.sv`.
+All memory and peripherals sit on a board-side FPGA behind one octal link, so
+this integration needs only 17 signal pins and has one clock domain. Everything
+here is technology-neutral.
 
 ```text
 rapt_chip_pads   rapt_pad_in / rapt_pad_out / rapt_pad_bidi around every signal pin
@@ -163,7 +165,8 @@ preserving the previous execution state is unnecessary. Software breakpoints in
 ordinary RAM code work on the chip's no-L2 presets. SBA writes to data still
 resident in L1D, and SBA access with an enabled L2, require firmware cache
 maintenance; resume's L1I invalidation does not make SBA coherent. See
-[the JTAG verification guide](../verification/jtag/README.md) for limits and tests.
+[the JTAG verification guide](https://github.com/Kingfish404/raptor-chip/blob/master/verification/jtag/README.md)
+for limits and tests.
 
 ## Simulation
 
@@ -181,7 +184,7 @@ netlist of `rapt_chip_pads` with `+define+RAPT_TB_GLS`.
 An implementation flow keeps these module names and supplies its own bodies from
 a private tree, so no target-specific RTL lands here:
 
-- `rapt_pad_in`, `rapt_pad_out`, `rapt_pad_bidi` in `rtl/chip/rapt_pad.sv`
+- `rapt_pad_in`, `rapt_pad_out`, `rapt_pad_bidi` in `synth/configs/pin-limited/rtl/rapt_pad.sv`
 - `rapt_openram_1rw_<depth>x<width>`, selected by `RAPT_USE_SRAM_MACRO`
 
 See "Foundry and Implementation Confidentiality" in `AGENTS.md` for what stays

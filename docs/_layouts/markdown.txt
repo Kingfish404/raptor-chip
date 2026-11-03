@@ -1,0 +1,30 @@
+{%- comment -%}
+Use a .txt source with a .md permalink so Jekyll does not run its Markdown
+converter. Read the original file at build time, including on GitHub Pages
+where custom plugins are disabled. Keep horizontal rules after front matter.
+{%- endcomment -%}
+{%- capture body -%}{%- include_relative {{ page.markdown_source }} -%}{%- endcapture -%}
+{%- assign opening = body | slice: 0, 3 -%}
+{%- if opening == '---' -%}
+  {%- assign parts = body | split: '---' -%}
+  {%- assign count = parts.size | minus: 2 -%}
+  {%- assign body = parts | slice: 2, count | join: '---' -%}
+{%- endif -%}
+{%- comment -%}
+Resolve documentation links before assets. Exports use absolute URLs so their
+links still work when an agent copies a page without retaining its source URL.
+The .html.md suffix preserves the HTML route when a client removes .md.
+{%- endcomment -%}
+{%- assign exports = site.pages | where_exp: 'doc', 'doc.nav_order' -%}
+{%- for doc in exports -%}
+  {%- assign target = doc.url | absolute_url | prepend: '](' -%}
+  {%- assign relative = doc.markdown_source | prepend: '](./' -%}
+  {%- assign bare = doc.markdown_source | prepend: '](' -%}
+  {%- assign body = body | replace: relative, target | replace: bare, target -%}
+{%- endfor -%}
+{%- assign root = '/' | absolute_url | prepend: '](' -%}
+{%- assign self = page.url | absolute_url | prepend: '](' | append: '#' -%}
+{%- assign body = body | replace: '](./', root | replace: '](#', self -%}
+> For the complete documentation index, see [llms.txt]({{ '/llms.txt' | absolute_url }}).
+
+{{ body | strip }}

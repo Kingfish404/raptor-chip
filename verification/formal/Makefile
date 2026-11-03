@@ -150,7 +150,7 @@ formal_memory_progress: ## Check reduced L1D/bus bounded progress and cover coll
 
 FORMAL_BUS_SRCS := \
 		$(RAPTOR_HOME)/rtl/rapt_pkg.sv \
-		$(RAPTOR_HOME)/rtl/memory/rapt_bus.sv \
+		$(RAPTOR_HOME)/rtl/core/memory/rapt_bus.sv \
 		$(RAPTOR_HOME)/rtl/uncore/rapt_axi_master.sv
 # Preprocessing consumes these headers too. Keep them as dependencies, not
 # standalone Verilator inputs, so header/config edits invalidate cached packs.
@@ -277,7 +277,7 @@ formal_ieu_alu: check-tools ## Prove unrestricted ALU values, opcode activation 
 	python3 "$(RAPTOR_HOME)/verification/scripts/alu_contract.py" receipts \
 	  --evidence "$(FORMAL_RESULTS_DIR)/alu"
 
-# Keep in step with the rapt_lsu parameters in rtl/backend/rapt_backend.sv.
+# Keep in step with the rapt_lsu parameters in rtl/core/backend/rapt_backend.sv.
 FORMAL_IOQ_PRODUCTION_ARGS = --late-operands --operand-read-ports 1
 FORMAL_IOQ_OWNER_PRESETS ?=
 FORMAL_IOQ_OWNER_REUSE_EVIDENCE ?=
@@ -370,7 +370,7 @@ formal_dm_debug: check-tools ## Prove DM halt/resume and SBA with isolated fault
 
 DIVSQRT_PACK := build/divsqrt_pack.sv
 $(DIVSQRT_PACK): \
-		$(RAPTOR_HOME)/rtl/backend/feu/fpu/rapt_fpu_divsqrt.sv \
+		$(RAPTOR_HOME)/rtl/core/backend/fpu/rapt_fpu_divsqrt.sv \
 		$(FORMAL_COMMON_HEADERS) \
 		$(wildcard $(RAPTOR_HOME)/rtl/configs/small/*.svh)
 	@mkdir -p $(@D)

@@ -21,7 +21,7 @@ from yosys_common import (
 CONTRACTS = {
     'ioq-overlap': dict(
         description='Prove shared IOQ short-range overlap against circular subtraction.',
-        top='formal_ioq_overlap', source='rtl/backend/lsu/rapt_ioq_overlap.sv', option='rtl',
+        top='formal_ioq_overlap', source='rtl/core/backend/lsu/rapt_ioq_overlap.sv', option='rtl',
         option_help='Optional isolated overlap module under test',
         scope='Combinational pair matrix; all RV32/RV64 addresses, spans 0..3, full/page wrap',
         label='IOQ circular overlap equivalence'),
@@ -39,7 +39,7 @@ CONTRACTS = {
         label='bytewise PMA span equivalence'),
     'ifetch-word-atomic': dict(
         description='Prove aligned instruction-word assembly integrity under arbitrary backpressure.',
-        top='formal_ifetch_word_atomic', source='rtl/memory/icache/rapt_ifetch_word.sv', option='rtl',
+        top='formal_ifetch_word_atomic', source='rtl/core/memory/icache/rapt_ifetch_word.sv', option='rtl',
         option_help='Optional isolated instruction-word module under test',
         scope='Aligned word assembly safety; reset state and explicit responder protocol; '
               'no bus/cache/fairness claim',
@@ -122,9 +122,9 @@ def native_contract(name, *, dividers=None):
         return dict(name=name, label='completion ownership guard',
             top='formal_completion_guard', timeout=120, method='smtbmc-induction',
             xlen_parameter=False, depth=6, solver='yices',
-            source='rtl/backend/rapt_completion_guard.sv',
+            source='rtl/core/backend/commit/rapt_completion_guard.sv',
             harness='verification/formal/formal_completion_guard.sv',
-            unit='rtl/backend/rapt_completion_guard.sv:rapt_completion_guard',
+            unit='rtl/core/backend/commit/rapt_completion_guard.sv:rapt_completion_guard',
             variants=[(parameters, dict(RAPT_FORMAL_NATIVE=True)) for parameters in variants],
             assumptions=[],
             property_map={
@@ -163,8 +163,8 @@ def native_contract(name, *, dividers=None):
         divider_list = ', '.join(map(str, dividers))
         return dict(
             name=name, label='CLINT', top='formal_clint', timeout=900,
-            source='rtl/perip/rapt_clint.sv', harness='verification/formal/formal_clint.sv',
-            unit='rtl/perip/rapt_clint.sv:rapt_clint',
+            source='rtl/uncore/irq/rapt_clint.sv', harness='verification/formal/formal_clint.sv',
+            unit='rtl/uncore/irq/rapt_clint.sv:rapt_clint',
             variants=[(dict(MTIME_DIV=divider),
                        dict(FORMAL=True, RAPT_FORMAL_NATIVE=True))
                       for divider in dividers],

@@ -1,4 +1,4 @@
-// Two in-flight L1D release lists share BOOM's lowest-free beat pool.
+// Two in-flight L1D release lists share a lowest-free beat pool.
 // RV64 has 16 shared beats and RV32 has 32. Keep beats until ReleaseAck so
 // a failed nested refill can replay the same ReleaseData without a new C.
 module rapt_l2_release_buffer #(

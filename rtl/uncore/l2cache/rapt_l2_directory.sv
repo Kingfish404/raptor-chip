@@ -1,4 +1,4 @@
-// BOOM inclusive-cache directory geometry and one-port access contract.
+// Inclusive L2 directory geometry and one-port access contract.
 // Data is stored as one synchronous SRAM per way; a reset wipe clears one
 // set in all ways per cycle before requests become ready.
 module rapt_l2_directory #(

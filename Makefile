@@ -1263,7 +1263,7 @@ app-clean: ## [app] Clean app build artifacts
 # Copy Makefile.local.example -> Makefile.local and fill in site-specific values.
 -include Makefile.local
 
-# Upstream ysyxSoC integration through rtl/perip/wrap_ysyxsoc.sv.
+# Upstream ysyxSoC integration through sim/rtl/wrap_ysyxsoc.sv.
 YSYXSOC_ARCH ?= riscv32-ysyxsoc
 YSYXSOC_HOME ?= $(RAPTOR_HOME)/third_party/OSCPU/ysyxSoC
 build-rv32-ysyxsoc:

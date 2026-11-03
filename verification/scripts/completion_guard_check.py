@@ -12,7 +12,7 @@ import re
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
-DUT = ROOT / "rtl/backend/rapt_completion_guard.sv"
+DUT = ROOT / "rtl/core/backend/commit/rapt_completion_guard.sv"
 REFERENCE = ROOT / "verification/formal/formal_completion_guard.sv"
 
 

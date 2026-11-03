@@ -1,0 +1,6 @@
+---
+layout: markdown
+permalink: /explore.md
+markdown_source: explore.md
+markdown_alias: true
+---

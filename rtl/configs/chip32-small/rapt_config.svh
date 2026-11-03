@@ -1,7 +1,7 @@
 `ifndef RAPT_CONFIG_SVH
 `define RAPT_CONFIG_SVH
 `define RAPT_SRAM_CTRL_RESET 16'h0608
-// Pin-limited 32-bit chip (rtl/chip) on the small core without an FPU: the
+// Pin-limited 32-bit chip (synth/configs/pin-limited/) on the small core without an FPU: the
 // smallest build of the chip top, sized for low-end FPGA protocol checks of the
 // link and JTAG. RV32 only; the missing include below stops an RV64 build.
 //

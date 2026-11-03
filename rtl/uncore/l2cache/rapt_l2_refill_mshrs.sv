@@ -1,4 +1,4 @@
-// Independent outer-memory refill contexts for BOOM's seven L2 MSHRs.
+// Independent outer-memory refill contexts for the L2 MSHRs.
 // The outer AXI ID is the context index; the original inner ID is retained
 // for response routing. Different fills may return interleaved beats.
 module rapt_l2_refill_mshrs #(

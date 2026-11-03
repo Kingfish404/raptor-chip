@@ -76,7 +76,7 @@ endmodule
     includes = " ".join(f"-I{hdl / p}" for p in
                         ("configs/default", "include", "include/npc", "include/dpic_mock"))
     for name, top, options, reason in cases:
-        source = f"{hdl / 'rapt_pkg.sv'} {hdl / 'backend/rapt_prf.sv'}"
+        source = f"{hdl / 'rapt_pkg.sv'} {hdl / 'core/backend/regfile/rapt_prf.sv'}"
         if top == "prf_type_contract":
             source += f" {fixture}"
         # Verification mode retains cross-interface configuration assertions.

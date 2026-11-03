@@ -90,7 +90,7 @@ def main():
     build = args.output / 'obj_dir'
     command = ['verilator', '--binary', '--timing', '-Wall', '--top-module', 'tb_vector_rtl',
                '--Mdir', str(build), f'-GXLEN={args.xlen}',
-               str(ROOT / 'rtl/backend/vpu/rapt_vpu_vtype.sv'),
+               str(ROOT / 'rtl/core/backend/vpu/rapt_vpu_vtype.sv'),
                str(ROOT / 'verification/nemu/tb_vector_rtl.sv')]
     with (args.output / 'build.log').open('w') as log:
         subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True)
@@ -111,7 +111,7 @@ def main():
                                  rtl_vlmax=int(rtl_vlmax, 16), rtl_vill=int(rtl_vill)))
     report = dict(xlen=args.xlen, cases=len(cases), failures=failures,
                   reference_sha256=hashlib.sha256(args.reference.read_bytes()).hexdigest(),
-                  rtl_sha256=hashlib.sha256((ROOT / 'rtl/backend/vpu/rapt_vpu_vtype.sv').read_bytes()).hexdigest(),
+                  rtl_sha256=hashlib.sha256((ROOT / 'rtl/core/backend/vpu/rapt_vpu_vtype.sv').read_bytes()).hexdigest(),
                   testbench_sha256=hashlib.sha256(
                       (ROOT / 'verification/nemu/tb_vector_rtl.sv').read_bytes()).hexdigest(),
                   checker_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())

@@ -168,7 +168,7 @@ sys.exit(int(os.environ.get('ABC_EXIT', '0')))
 
 
 def fixture():
-    def register(bit, source="rtl/backend/rapt_rou.sv:1.1-1.2"):
+    def register(bit, source="rtl/core/backend/rob/rapt_rou.sv:1.1-1.2"):
         return {"type": "$dff", "attributes": {"src": source},
                 "parameters": {"WIDTH": "1"},
                 "port_directions": {"CLK": "input", "D": "input", "Q": "output"},
@@ -902,7 +902,7 @@ class BytePartitionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='raptor-byte-mutant-') as name:
             directory = Path(name)
             dut = directory / 'mutant.sv'
-            original = (ROOT / 'rtl/backend/rapt_prf.sv').read_text()
+            original = (ROOT / 'rtl/core/backend/regfile/rapt_prf.sv').read_text()
             anchor = 'prf_arr[i] <= wr_mux_data[i];'
             self.assertEqual(original.count(anchor), 1)
             dut.write_text(original.replace(anchor,
@@ -1291,7 +1291,7 @@ class QualificationEvidenceTests(QualificationFixture, unittest.TestCase):
                 self.assertEqual(len(report['cases']), 2 if passed else 1)
 
     def test_ioq_producer_proofs_cannot_replace_store_and_atomic_contracts(self):
-        path = self.root / 'rtl/backend/lsu/rapt_lsu_ioq.sv'
+        path = self.root / 'rtl/core/backend/lsu/rapt_lsu_ioq.sv'
         path.parent.mkdir(parents=True)
         path.write_text('module rapt_lsu_ioq(input clock, reset);\n'
                         'always @(posedge clock);\nendmodule\n')
@@ -1325,7 +1325,7 @@ class QualificationEvidenceTests(QualificationFixture, unittest.TestCase):
         self.assertTrue(any('removes required obligations' in error for error in errors))
 
     def test_tlb_lookup_review_cannot_remove_refill_fence_or_replacement_obligations(self):
-        path = self.root / 'rtl/memory/mmu/rapt_tlb.sv'
+        path = self.root / 'rtl/core/memory/mmu/rapt_tlb.sv'
         path.parent.mkdir(parents=True)
         path.write_text(''.join(f'module {name}(input clock, reset, flush);\n'
                                 'always @(posedge clock);\nendmodule\n'

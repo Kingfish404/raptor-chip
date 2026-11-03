@@ -1,0 +1,8 @@
+---
+layout: markdown
+permalink: /chip.html.md
+markdown_source: chip.md
+title: Chip top and off-chip link
+description: Technology-neutral chip hierarchy, octal link protocol, registers, and bring-up.
+nav_order: 8
+---

@@ -258,16 +258,20 @@ LATENCY_NOTES = (
 )
 
 DOMAIN_FROM_PATH = (
-    ("rtl/frontend/branch_predictor", "bpu"),
-    ("rtl/frontend", "frontend"),
-    ("rtl/backend/ieu", "ieu"),
-    ("rtl/backend/feu", "feu"),
-    ("rtl/backend/lsu", "lsu"),
-    ("rtl/backend/vpu", "vpu"),
-    ("rtl/backend", "backend"),
-    ("rtl/memory", "memory"),
+    ("rtl/core/frontend/branch_predictor", "bpu"),
+    ("rtl/core/frontend", "frontend"),
+    ("rtl/core/backend/ieu", "ieu"),
+    ("rtl/core/backend/feu", "feu"),
+    ("rtl/core/backend/lsu", "lsu"),
+    ("rtl/core/backend/vpu", "vpu"),
+    ("rtl/core/backend/fpu", "feu"),
+    ("rtl/core/backend", "backend"),
+    ("rtl/core/memory", "memory"),
+    ("rtl/core/pmp", "memory"),
+    ("rtl/core", "cluster"),
+    ("rtl/uncore/irq", "cluster"),
+    ("rtl/uncore/debug", "cluster"),
     ("rtl/uncore", "memory"),
-    ("rtl/perip", "cluster"),
     ("rtl/common", "common"),
     ("rtl/generated", "frontend"),
 )
@@ -613,11 +617,11 @@ def collect_config(repo: Path) -> dict[str, Any]:
                 "parameter": "BranchQueueEntries (rapt_ieu.BRQ_SIZE)",
             },
             "mdq_entries": {
-                "file": "rtl/backend/ieu/rapt_ieu.sv",
+                "file": "rtl/core/backend/ieu/rapt_ieu.sv",
                 "parameter": "MDQ_SIZE",
             },
             "fpq_entries": {
-                "file": "rtl/backend/feu/rapt_feu.sv",
+                "file": "rtl/core/backend/feu/rapt_feu.sv",
                 "parameter": "FPQ_SIZE",
             },
         },
@@ -979,7 +983,7 @@ def layout_nodes(modules: list[dict[str, Any]], values: dict[str, Any], extra: d
             {
                 "id": "rapt_operand_stage",
                 "short": "OPS",
-                "file": "rtl/backend/rapt_rou.sv",
+                "file": "rtl/core/backend/rob/rapt_rou.sv",
                 "domain": "backend",
                 "stage": 3,
                 "summary": "Operand stage: registers one renamed group before the ROU UOQ reads PRF operands.",

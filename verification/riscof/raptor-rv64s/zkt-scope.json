@@ -91,14 +91,14 @@
     "I_C_B": [
       "tools/decodegen/src/main/scala/decode.scala",
       "tools/decodegen/src/main/scala/decode_c.scala",
-      "rtl/frontend/rapt_decode_slot.sv",
-      "rtl/backend/ieu/rapt_ieu_pipe_alu.sv",
-      "rtl/backend/ieu/rapt_ieu_pipe_alu_csr.sv",
-      "rtl/backend/ieu/rapt_ieu_alu.sv"
+      "rtl/core/frontend/rapt_decode_slot.sv",
+      "rtl/core/backend/ieu/rapt_ieu_pipe_alu.sv",
+      "rtl/core/backend/ieu/rapt_ieu_pipe_alu_csr.sv",
+      "rtl/core/backend/ieu/rapt_ieu_alu.sv"
     ],
     "M": [
-      "rtl/backend/ieu/rapt_ieu_mul.sv",
-      "rtl/backend/ieu/rapt_ieu_muldiv.sv"
+      "rtl/core/backend/ieu/rapt_ieu_mul.sv",
+      "rtl/core/backend/ieu/rapt_ieu_muldiv.sv"
     ]
   },
   "evidence": [

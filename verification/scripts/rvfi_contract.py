@@ -10,7 +10,7 @@ import subprocess
 
 from yosys_common import ROOT, run_yosys_check, sha
 
-DUT = ROOT / "rtl/backend/rapt_rvfi.sv"
+DUT = ROOT / "rtl/core/backend/commit/rapt_rvfi.sv"
 HARNESS = ROOT / "verification/formal/formal_rvfi_metadata.sv"
 PASS = "SAT proof finished - no model found: SUCCESS!"
 FAIL = "SAT proof finished - model found: FAIL!"

@@ -1,0 +1,6 @@
+---
+layout: markdown
+permalink: /PROFILE.md
+markdown_source: PROFILE.md
+markdown_alias: true
+---

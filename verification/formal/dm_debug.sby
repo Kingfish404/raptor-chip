@@ -19,7 +19,7 @@ select -assert-min 10 t:$check
 
 [files]
 formal_dm_debug.sv
-rapt_dm.sv ../../rtl/perip/rapt_dm.sv
+rapt_dm.sv ../../rtl/uncore/debug/rapt_dm.sv
 rapt_debug_if.svh ../../rtl/include/rapt_debug_if.svh
 rapt.svh ../../rtl/include/rapt.svh
 rapt_fp_ops.svh ../../rtl/include/rapt_fp_ops.svh

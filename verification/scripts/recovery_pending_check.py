@@ -14,7 +14,7 @@ import subprocess
 from yosys_common import run_yosys
 
 ROOT = Path(__file__).resolve().parents[2]
-DUT = ROOT / "rtl/backend/rapt_recovery_pending.sv"
+DUT = ROOT / "rtl/core/backend/rob/rapt_recovery_pending.sv"
 REFERENCE = ROOT / "verification/formal/formal_recovery_pending.sv"
 
 

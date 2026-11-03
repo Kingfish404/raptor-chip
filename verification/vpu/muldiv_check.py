@@ -12,7 +12,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--build-dir', type=Path, required=True)
 args = parser.parse_args()
 build = args.build_dir.resolve()
-files = ['rtl/backend/vpu/rapt_vpu_muldiv.sv', 'rtl/include/rapt_sva.svh',
+files = ['rtl/core/backend/vpu/rapt_vpu_muldiv.sv', 'rtl/include/rapt_sva.svh',
          'verification/vpu/test_muldiv.cpp', 'verification/vpu/muldiv_reference.h',
          'verification/vpu/Makefile', 'verification/vpu/muldiv_check.py', 'verification/vpu/record_run.py']
 def fingerprints():

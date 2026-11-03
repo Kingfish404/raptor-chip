@@ -23,4 +23,4 @@ formal_zkt_cdb.sv
 include ../../rtl/include
 config ../../rtl/configs/default
 rapt_pkg.sv ../../rtl/rapt_pkg.sv
-rapt_cdb_arb.sv ../../rtl/backend/rapt_cdb_arb.sv
+rapt_cdb_arb.sv ../../rtl/core/backend/commit/rapt_cdb_arb.sv

@@ -1,7 +1,7 @@
 `ifndef RAPT_CONFIG_SVH
 `define RAPT_CONFIG_SVH
 `define RAPT_SRAM_CTRL_RESET 16'h0608
-// Pin-limited 32-bit chip (rtl/chip): middle core with 16 KiB L1s, because every
+// Pin-limited 32-bit chip (synth/configs/pin-limited/): middle core with 16 KiB L1s, because every
 // miss crosses the octal link. RV32 only; the missing include below stops an RV64
 // build at compile time.
 //

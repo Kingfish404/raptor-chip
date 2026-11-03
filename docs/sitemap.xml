@@ -1,0 +1,12 @@
+---
+layout: null
+permalink: /sitemap.xml
+---
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+{% assign exports = site.pages | where_exp: 'doc', 'doc.nav_order' | sort: 'nav_order' %}
+{% for doc in exports %}
+  {% assign html_page = site.pages | where: 'path', doc.markdown_source | first %}
+  <url><loc>{{ html_page.url | absolute_url | xml_escape }}</loc></url>
+{% endfor %}
+</urlset>

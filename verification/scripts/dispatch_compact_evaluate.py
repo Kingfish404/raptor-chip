@@ -16,7 +16,7 @@ from yosys_common import run_yosys
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE = ROOT / "rtl/rapt_pkg.sv"
-DPU = ROOT / "rtl/backend/rapt_dpu.sv"
+DPU = ROOT / "rtl/core/backend/dispatch/rapt_dpu.sv"
 RANK_SELECT = ROOT / "rtl/common/rapt_rank_select.sv"
 REFERENCE = ROOT / "verification/formal/formal_dispatch_compact.sv"
 

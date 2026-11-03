@@ -139,7 +139,7 @@ sba-unit-rv32 sba-unit-rv64 sba-unit-pa36: ## Check DM SBA size/lane/error/busy/
 	$(VERILATOR) $(UNIT_FLAGS) $(if $(filter %-rv64 sba-unit-pa36,$@),-DRAPT_RV64) \
 		$(if $(filter sba-unit-pa36,$@),-DRAPT_PADDR_BITS=36) \
 		--top-module tb_dm_sba $(RAPTOR_HOME)/rtl/rapt_pkg.sv \
-		$(RAPTOR_HOME)/rtl/perip/rapt_dm.sv tb_dm_sba.sv \
+		$(RAPTOR_HOME)/rtl/uncore/debug/rapt_dm.sv tb_dm_sba.sv \
 		--Mdir $(UNIT_MODEL) -o test > $(BUILD_DIR)/$@/build.log 2>&1
 	$(UNIT_MODEL)/test
 
@@ -148,7 +148,7 @@ arbiter-unit-rv32 arbiter-unit-rv64: ## Check fair AXI arbitration, IDs, bursts 
 	@mkdir -p $(UNIT_MODEL)
 	$(VERILATOR) $(UNIT_FLAGS) $(if $(filter %-rv64,$@),-DRAPT_RV64) \
 		--top-module tb_debug_arbiter $(RAPTOR_HOME)/rtl/rapt_pkg.sv \
-		$(RAPTOR_HOME)/rtl/uncore/rapt_debug_arbiter.sv tb_debug_arbiter.sv \
+		$(RAPTOR_HOME)/rtl/uncore/debug/rapt_debug_arbiter.sv tb_debug_arbiter.sv \
 		--Mdir $(UNIT_MODEL) -o test > $(BUILD_DIR)/$@/build.log 2>&1
 	$(UNIT_MODEL)/test
 

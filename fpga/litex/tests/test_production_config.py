@@ -20,7 +20,7 @@ from ku15p_soc import configure_ku15p_timing
 
 class ProductionConfigTest(unittest.TestCase):
     def test_mshr_lookup_signals_precede_generate(self):
-        source = (REPO / "rtl/memory/dcache/rapt_l1d.sv").read_text()
+        source = (REPO / "rtl/core/memory/dcache/rapt_l1d.sv").read_text()
         instance = source.index("begin : g_mshr")
         for signal in ("l1d_addr", "tag_hit", "load_way_hit"):
             with self.subTest(signal=signal):
@@ -78,7 +78,7 @@ class ProductionConfigTest(unittest.TestCase):
     def test_simulator_views_are_excluded_from_synthesis(self):
         for bits in (32, 64):
             for source, probe in (("rapt_backend.sv", "pipe_decode_state"),
-                                  ("rapt_iq.sv", "g_iq_pc_probe")):
+                                  ("issue/rapt_iq.sv", "g_iq_pc_probe")):
                 for synthesis in (False, True):
                     with self.subTest(bits=bits, source=source, synthesis=synthesis):
                         command = ["verilator", "-E", "-P",
@@ -90,7 +90,7 @@ class ProductionConfigTest(unittest.TestCase):
                             command.append("-DRAPT_RV64")
                         if synthesis:
                             command.append("-DSYNTHESIS")
-                        command.append(str(REPO / "rtl/backend" / source))
+                        command.append(str(REPO / "rtl/core/backend" / source))
                         result = subprocess.run(command, capture_output=True, text=True)
                         self.assertEqual(result.returncode, 0, result.stderr)
                         self.assertEqual(probe in result.stdout, not synthesis)

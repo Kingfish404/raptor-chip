@@ -1,7 +1,7 @@
 `ifndef RAPT_CONFIG_SVH
 `define RAPT_CONFIG_SVH
 //
-// Pin-limited 32-bit chip (rtl/chip), flop-only backup: small core, no SRAM
+// Pin-limited 32-bit chip (synth/configs/pin-limited/), flop-only backup: small core, no SRAM
 // macros, 4 KiB L1I and 2 KiB write-back L1D.
 // RV32 only; the missing include below stops an RV64 build.
 //

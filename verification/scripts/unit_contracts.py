@@ -74,7 +74,7 @@ def load_sram_generator():
 
 # --- NRU replacement: priority, epoch rollover and invalidation for every set ---
 
-NRU_RTL = ROOT / "rtl/memory/replacement/rapt_cache_nru.sv"
+NRU_RTL = ROOT / "rtl/core/memory/replacement/rapt_cache_nru.sv"
 NRU_HARNESS = FORMAL / "formal_cache_nru.sv"
 NRU_MUTATIONS = {
     "epoch": ("assign next_recent = (&touched) ? (Ways'(1) << update_way) : touched;",
@@ -163,7 +163,7 @@ def nru(parser, args):
 
 # --- Recovery selection: masks, held ties, cancellation and target transport ---
 
-RECOVERY_RTL = ROOT / "rtl/backend/rapt_recovery_pending.sv"
+RECOVERY_RTL = ROOT / "rtl/core/backend/rob/rapt_recovery_pending.sv"
 RECOVERY_HARNESS = FORMAL / "formal_recovery_pending.sv"
 RECOVERY_MUTATIONS = {
     "port-mask": ("localparam int Port = active_port(leaf - 1);",
@@ -652,7 +652,7 @@ def sram(parser, args):
 
 # --- L1D data: diagonal banks for every production geometry and memory binding ---
 
-L1D_DATA_RTL = ROOT / "rtl/memory/dcache/rapt_l1d_data.sv"
+L1D_DATA_RTL = ROOT / "rtl/core/memory/dcache/rapt_l1d_data.sv"
 L1D_DATA_HARNESS = FORMAL / "formal_l1d_data.sv"
 L1D_DATA_MUTATIONS = {
     "byte-mask": [(" : write_strobe);", " : {WordBytes{write_strobe[0]}});")],

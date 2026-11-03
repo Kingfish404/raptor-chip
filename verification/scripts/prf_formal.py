@@ -18,7 +18,7 @@ FORMAL = ROOT / 'verification/formal'
 
 HARNESS = FORMAL / 'formal_prf.sv'
 
-DUT = ROOT / 'rtl/backend/rapt_prf.sv'
+DUT = ROOT / 'rtl/core/backend/regfile/rapt_prf.sv'
 
 SMTIO = ROOT / 'third_party/oss-cad-suite/share/yosys/python3/smtio.py'
 

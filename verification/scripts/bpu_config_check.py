@@ -22,7 +22,7 @@ def main():
     if len(re.findall(selection, preset, re.M)) != 1:
         raise ValueError("default preset must select exactly one predictor")
     sources = [ROOT / "rtl/rapt_pkg.sv",
-               *sorted((ROOT / "rtl/frontend/branch_predictor").glob("*.sv")),
+               *sorted((ROOT / "rtl/core/frontend/branch_predictor").glob("*.sv")),
                *sorted((ROOT / "rtl/common").glob("*.sv"))]
     results = {"complete": False, "cases": []}
     summary = output / "results.json"
@@ -36,7 +36,7 @@ def main():
             flags = ["-DSYNTHESIS"] + (["-DRAPT_RV64"] if xlen == 64 else [])
             flags += ["-I" + str(path) for path in
                       (case, ROOT / "rtl", ROOT / "rtl/include", ROOT / "rtl/include/npc",
-                       ROOT / "rtl/frontend/branch_predictor")]
+                       ROOT / "rtl/core/frontend/branch_predictor")]
             inputs = flags + [str(path) for path in sources]
             commands = {
                 "verilator": ["verilator", "--lint-only", "--top-module", "rapt_bpu",

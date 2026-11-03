@@ -1,6 +1,6 @@
 # Differential unit test for rapt_fpu_divsqrt vs. host IEEE-754 FPU.
 #
-# The DUT (rtl/backend/feu/fpu/rapt_fpu_divsqrt.sv) is exercised with random
+# The DUT (rtl/core/backend/fpu/rapt_fpu_divsqrt.sv) is exercised with random
 # operands across both precisions, both operations, and all four rounding
 # modes supported by the host fenv (RNE/RTZ/RDN/RUP), plus subnormals,
 # infinities, zeros and NaNs. Numeric results must match the host bit-exactly;

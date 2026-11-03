@@ -80,6 +80,38 @@ cache storage only when enabled by a preset. `rapt_pkg::L2LinkConfig` adapts
 the L2 macros into typed capabilities passed to the core, L1s, bus and router.
 The current cluster has one core/client; a multi-client arbiter is future work.
 
+`rtl/` holds only the processor. Its directories follow the instance hierarchy
+under the cluster top `rapt`:
+
+```text
+rapt (cluster)                 rtl/rapt.sv
+├─ rapt_core (per hart)        rtl/core/
+│  ├─ rapt_frontend            core/frontend/       BPU (branch_predictor/), IFU, FQU, IDU
+│  ├─ rapt_backend             core/backend/        rename/, rob/, dispatch/, issue/,
+│  │                                                regfile/, commit/ (CMU, CSR),
+│  │                                                ieu/, feu/, fpu/, lsu/
+│  └─ rapt_memory              core/memory/         icache/, dcache/, mmu/, replacement/,
+│                                                   bus unit; PMP in core/pmp/
+├─ rapt_l2_subsystem           rtl/uncore/          AXI master, budgets, l2cache/ if enabled
+├─ rapt_router                 rtl/uncore/
+├─ CLINT, PLIC                 rtl/uncore/irq/
+└─ DM, DTM, debug arbiter      rtl/uncore/debug/
+```
+
+`rtl/common/` and `rtl/sram/` hold shared leaves such as queues, selectors and
+SRAM wrappers. Interfaces, macros and types are in `rtl/include/`, presets in
+`rtl/configs/`, and generated decoders in `rtl/generated/`. The standalone VPU
+is in `core/backend/vpu/` but is not yet instantiated. `make -C verification
+rtl-structure-check` keeps the core and uncore from instantiating each other and
+keeps L2 macros out of the core.
+
+Integrations that wrap the cluster live with their consumers: `sim/rtl/` holds
+the simulation SoC tops, adapters and DPI module; `fpga/` holds the board tops;
+`synth/configs/pin-limited/rtl/` holds one tape-out integration with its
+pin-limited top, pads and octal link master, also used for Arty validation
+([chip top](./chip.md)). Future tape-out integrations belong beside this
+configuration in `synth/configs/`.
+
 Registers inside the blocks define the stage boundaries. Default decode,
 rename, dispatch and commit widths are each two; instruction queues hold
 individual instructions rather than fixed pairs. The `core` and `memory`
@@ -130,7 +162,12 @@ The predictor query PC is `ifu_bpu.nextpc`. IFU and IDU report accepted branch-h
 - **Optional L2:** `default-l2` enables a 512 KiB, eight-way L2 with 1024 sets and 64-byte lines. Eight 1024x22 directory SRAMs hold tag/state/dirty/client metadata. Four logical 16384x64 data banks support Vivado RAM inference and optional segmented SRAM macros. This banked geometry stores 18 tag bits and bypasses addresses above its 34-bit cache-address aperture instead of truncating them into an alias.
 - **L2 reads and coherence:** Independent clean misses use three ordinary refill contexts in RV32 or five in RV64, interleave outer responses by ID, and return the critical scalar word early. The shared secondary buffer has 15 queues/35 entries in RV32 and 21 queues/33 entries in RV64. Same-tag requests reuse current metadata; different tags re-read the directory. A foreign Get probes a Trunk L1D owner before reading its latest data. C Release can pre-empt a waiting victim/CBO Probe and forward its updated dirty/client metadata. The main L1D replies by invalidating its copy; retained Branch copies and permission upgrades are not enabled.
 - **L2 writes:** A 40-list/40-beat Put pool and 40 ordered B slots retain incoming writes. Bufferable scalar stores and supported narrow, masked, FIXED, INCR and WRAP bursts allocate each touched cacheable line. Partial misses merge a refill; complete full-line writes skip the outer read. Non-bufferable writes forward, preserve resident dirty data on an outer error, and commit their resident-byte journal only after successful B. Dirty/client-owned victim misses and allocated Put execution remain serialized.
-- **L2 limits:** The reserved scheduler and connected C Release paths do not implement general nested BC/C transitions or independently executing allocated Put lists. SourceD staging still differs from BOOM. Only the L1D is a probe-capable client. CBO write-back failures retain dirty data and stall maintenance; there is no software-visible CBO error report, and a later eviction error cannot be attributed to an already completed store. These limits and FPGA timing acceptance are tracked separately from the passing functional regressions.
+- **L2 limits:** The reserved scheduler and connected C Release paths do not implement general
+  nested BC/C transitions or independently executing allocated Put lists. Only the L1D is a
+  probe-capable client. CBO write-back failures retain dirty data and stall maintenance; there
+  is no software-visible CBO error report, and a later eviction error cannot be attributed to
+  an already completed store. These limits and FPGA timing acceptance are tracked separately
+  from the passing functional regressions.
 
 Load scheduling conservatively waits behind older stores with unresolved addresses. There is no learned memory-dependence predictor or speculative RAW-violation rollback, and there is no independent data hardware prefetcher. MSHR miss replay, branch-target SRAM read-ahead, and Zicbop hints serve different purposes.
 

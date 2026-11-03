@@ -56,6 +56,11 @@ native-sv-equivalence: ## Prove whole-top native RTL against BASELINE_RTL (requi
 native-sv-check: ## Check portable native ports, arguments, scopes and procedural writers
 	$(PYTHON) "$(VERIFY_HOME)/scripts/native_sv_check.py"
 
+.PHONY: rtl-structure-check
+rtl-structure-check: ## Check processor RTL zone dependencies and L2 macro use
+	$(PYTHON) "$(VERIFY_HOME)/scripts/rtl_structure_check.py"
+	$(PYTHON) -m unittest -q "$(VERIFY_HOME)/scripts/test_rtl_structure_check.py"
+
 .PHONY: bpu-config-check
 bpu-config-check: ## Check all BPU selections and reject missing selections in RV32/RV64
 	$(PYTHON) "$(VERIFY_HOME)/scripts/bpu_config_check.py" --output "$(BUILD_DIR)/bpu-config-check"
@@ -1359,12 +1364,12 @@ UVM_COMMON_INCLUDES := \
 UVM_IQ_SOURCES := \
 	"$(RAPTOR_HOME)/rtl/rapt_pkg.sv" \
 	"$(RAPTOR_HOME)/rtl/common/rapt_issue_select.sv" \
-	"$(RAPTOR_HOME)/rtl/backend/rapt_iq.sv" \
+	"$(RAPTOR_HOME)/rtl/core/backend/issue/rapt_iq.sv" \
 	"$(UVM_DIR)/iq/rapt_iq_uvm.sv"
 
 UVM_CSR_SOURCES := \
 	"$(RAPTOR_HOME)/rtl/rapt_pkg.sv" \
-	"$(RAPTOR_HOME)/rtl/frontend/rapt_csr.sv" \
+	"$(RAPTOR_HOME)/rtl/core/backend/commit/rapt_csr.sv" \
 	"$(UVM_DIR)/csr/rapt_csr_uvm.sv"
 
 .PHONY: uvm uvm-smoke uvm-iq-compile uvm-csr-sret uvm-clean
@@ -1437,8 +1442,9 @@ VIVADO_SETTINGS ?= /opt/Xilinx/2025.2/Vivado/settings64.sh
 # reaches. Testbench stubs take precedence over library modules. Rules list
 # only non-RTL helpers (testbench models, sim/ wrappers).
 XSIM_RTL_PKG := $(RAPTOR_HOME)/rtl/rapt_pkg.sv
+# The pin-limited integration joins the library for link and chip tests.
 XSIM_RTL_FILES := $(sort $(filter-out $(XSIM_RTL_PKG),$(shell find "$(RAPTOR_HOME)/rtl" \
-	-path "$(RAPTOR_HOME)/tools/decodegen" -prune -o -name '*.sv' -print)))
+	"$(RAPTOR_HOME)/synth/configs/pin-limited/rtl" -name '*.sv' -print)))
 XSIM_RTL_LIBRARY := "$(XSIM_RTL_PKG)" $(addprefix -v ,$(XSIM_RTL_FILES)) -Wno-MODDUP
 # xvlog has no library search: compile all RTL; xelab keeps the top's hierarchy.
 XSIM_RTL_ALL := "$(XSIM_RTL_PKG)" $(XSIM_RTL_FILES)
@@ -1854,7 +1860,7 @@ verilator-l1i-width-window-4way: VERILATOR_DIRECTED_FLAGS += -GWays=4
 verilator-l1i-width-window-8way: VERILATOR_DIRECTED_FLAGS += -GWays=8
 .PHONY: yosys-sq-span-equivalence
 yosys-sq-span-equivalence:
-	python3 "$(VERIFY_HOME)/scripts/check_sq_span_equivalence.py" --rtl "$(RAPTOR_HOME)/rtl/backend/lsu/rapt_sq_forward.sv" --build-dir "$(BUILD_DIR)/sq-span-equivalence"
+	python3 "$(VERIFY_HOME)/scripts/check_sq_span_equivalence.py" --rtl "$(RAPTOR_HOME)/rtl/core/backend/lsu/rapt_sq_forward.sv" --build-dir "$(BUILD_DIR)/sq-span-equivalence"
 
 WB_LINE_REFILL ?= 0
 verilator-l1d-writeback-rv32 verilator-l1d-writeback-rv64: VERILATOR_DIRECTED_FLAGS += -GWriteBack=1 -GLineRefill=$(WB_LINE_REFILL)
@@ -2046,21 +2052,21 @@ verilator-superscalar-widths: verilator-width-1 verilator-width-2 verilator-widt
 rename-admit-lint:
 	@mkdir -p "$(BUILD_DIR)/rename-admit"
 	@set -e; for width in 1 3 16 128; do \
-		verilator --lint-only --top-module rapt_rename_admit -GWidth=$$width "$(RAPTOR_HOME)/rtl/frontend/rapt_rename_admit.sv" > "$(BUILD_DIR)/rename-admit/lint-$$width.log" 2>&1; \
+		verilator --lint-only --top-module rapt_rename_admit -GWidth=$$width "$(RAPTOR_HOME)/rtl/core/backend/rename/rapt_rename_admit.sv" > "$(BUILD_DIR)/rename-admit/lint-$$width.log" 2>&1; \
 	done
 
 rename-admit-native:
 	@mkdir -p "$(BUILD_DIR)/rename-admit"
 	@set -e; for width in 1 3 16 64 128; do \
-		timeout 60s yosys -Q -T -m slang -p "read_slang --single-unit -DSYNTHESIS --top rapt_rename_admit -GWidth=$$width $(RAPTOR_HOME)/rtl/frontend/rapt_rename_admit.sv; select -assert-none t:\$$check t:\$$assert t:\$$assume t:\$$cover; prep -top rapt_rename_admit -flatten; check -assert; select -assert-none t:\$$*latch* t:\$$*ff*" > "$(BUILD_DIR)/rename-admit/native-$$width.log" 2>&1; \
+		timeout 60s yosys -Q -T -m slang -p "read_slang --single-unit -DSYNTHESIS --top rapt_rename_admit -GWidth=$$width $(RAPTOR_HOME)/rtl/core/backend/rename/rapt_rename_admit.sv; select -assert-none t:\$$check t:\$$assert t:\$$assume t:\$$cover; prep -top rapt_rename_admit -flatten; check -assert; select -assert-none t:\$$*latch* t:\$$*ff*" > "$(BUILD_DIR)/rename-admit/native-$$width.log" 2>&1; \
 	done
-	@if yosys -Q -T -m slang -p 'read_slang --single-unit --top rapt_rename_admit -GWidth=0 $(RAPTOR_HOME)/rtl/frontend/rapt_rename_admit.sv' > "$(BUILD_DIR)/rename-admit/native-invalid.log" 2>&1; then exit 1; fi
+	@if yosys -Q -T -m slang -p 'read_slang --single-unit --top rapt_rename_admit -GWidth=0 $(RAPTOR_HOME)/rtl/core/backend/rename/rapt_rename_admit.sv' > "$(BUILD_DIR)/rename-admit/native-invalid.log" 2>&1; then exit 1; fi
 	@rg -qi 'error: \$$error encountered: Invalid rapt_rename_admit configuration' "$(BUILD_DIR)/rename-admit/native-invalid.log"
 
 rename-admit-prove:
 	@mkdir -p "$(BUILD_DIR)/rename-admit"
 	@set -e; for width in 1 3 4 8 16; do \
-		timeout 60s yosys -Q -T -m slang -p "read_slang --single-unit --top formal_rename_admit -GWidth=$$width $(RAPTOR_HOME)/rtl/frontend/rapt_rename_admit.sv $(RAPTOR_HOME)/verification/formal/formal_rename_admit.sv; select -assert-none t:\$$check t:\$$assert t:\$$assume t:\$$cover; prep -top formal_rename_admit -flatten; opt; sat -verify -prove correct 1 -set-def-inputs" > "$(BUILD_DIR)/rename-admit/prove-$$width.log" 2>&1; \
+		timeout 60s yosys -Q -T -m slang -p "read_slang --single-unit --top formal_rename_admit -GWidth=$$width $(RAPTOR_HOME)/rtl/core/backend/rename/rapt_rename_admit.sv $(RAPTOR_HOME)/verification/formal/formal_rename_admit.sv; select -assert-none t:\$$check t:\$$assert t:\$$assume t:\$$cover; prep -top formal_rename_admit -flatten; opt; sat -verify -prove correct 1 -set-def-inputs" > "$(BUILD_DIR)/rename-admit/prove-$$width.log" 2>&1; \
 	done
 .PHONY: rank-select-prove rank-select-evaluate
 rank-select-prove:
@@ -2152,14 +2158,14 @@ sta-entrypoints-test: ## Check offline STA preflight and dependency failure diag
 
 
 verilator-ras-pipeline:
-	$(call VERILATOR_DIRECTED_RUN,ras_pipeline,tb_ras_pipeline, $(wildcard $(RAPTOR_HOME)/rtl/frontend/branch_predictor/*.sv),-d RAPT_ASSERT_EN,)
-	$(call VERILATOR_DIRECTED_RUN,ras_pipeline4,tb_ras_pipeline, $(wildcard $(RAPTOR_HOME)/rtl/frontend/branch_predictor/*.sv),-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=4 -d RAPT_COMMIT_WIDTH=4,)
+	$(call VERILATOR_DIRECTED_RUN,ras_pipeline,tb_ras_pipeline, $(wildcard $(RAPTOR_HOME)/rtl/core/frontend/branch_predictor/*.sv),-d RAPT_ASSERT_EN,)
+	$(call VERILATOR_DIRECTED_RUN,ras_pipeline4,tb_ras_pipeline, $(wildcard $(RAPTOR_HOME)/rtl/core/frontend/branch_predictor/*.sv),-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=4 -d RAPT_COMMIT_WIDTH=4,)
 .PHONY: ras-check
 ras-check:
 	python3 "$(RAPTOR_HOME)/verification/scripts/logic_check.py" ras
 verilator-predict-history-pipeline:
-	$(call VERILATOR_DIRECTED_RUN,predict_history_pipeline,tb_predict_history_pipeline, $(wildcard $(RAPTOR_HOME)/rtl/frontend/branch_predictor/*.sv),-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=4 -d RAPT_COMMIT_WIDTH=4,)
-	$(call VERILATOR_DIRECTED_RUN,predict_history_pipeline_rv64,tb_predict_history_pipeline, $(wildcard $(RAPTOR_HOME)/rtl/frontend/branch_predictor/*.sv),-d RAPT_ASSERT_EN -d RAPT_RV64 -d RAPT_DECODE_WIDTH=4 -d RAPT_COMMIT_WIDTH=2,)
+	$(call VERILATOR_DIRECTED_RUN,predict_history_pipeline,tb_predict_history_pipeline, $(wildcard $(RAPTOR_HOME)/rtl/core/frontend/branch_predictor/*.sv),-d RAPT_ASSERT_EN -d RAPT_DECODE_WIDTH=4 -d RAPT_COMMIT_WIDTH=4,)
+	$(call VERILATOR_DIRECTED_RUN,predict_history_pipeline_rv64,tb_predict_history_pipeline, $(wildcard $(RAPTOR_HOME)/rtl/core/frontend/branch_predictor/*.sv),-d RAPT_ASSERT_EN -d RAPT_RV64 -d RAPT_DECODE_WIDTH=4 -d RAPT_COMMIT_WIDTH=2,)
 .PHONY: predict-history-prove
 predict-history-prove:
 	python3 "$(RAPTOR_HOME)/verification/scripts/logic_check.py" predict-history

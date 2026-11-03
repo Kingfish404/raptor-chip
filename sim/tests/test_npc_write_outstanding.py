@@ -21,7 +21,7 @@ def main():
         command += [f'-I{root / name}' for name in
                     ('rtl/configs/default', 'rtl/include', 'rtl/include/npc', 'rtl/include/dpic')]
         command += [str(root / name) for name in
-                    ('rtl/rapt_pkg.sv', 'rtl/perip/rapt_dpi_c.sv', 'sim/rtl/rapt_npc_soc.sv',
+                    ('rtl/rapt_pkg.sv', 'sim/rtl/rapt_dpi_c.sv', 'sim/rtl/rapt_npc_soc.sv',
                      'sim/tests/npc_write_outstanding.cc')]
         with (out / f'build{xlen}.log').open('w') as log:
             subprocess.run(command, check=True, stdout=log, stderr=subprocess.STDOUT)

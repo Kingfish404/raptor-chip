@@ -9,6 +9,23 @@
 #   make build         # build static site into _site/
 #   make clean         # remove _site/ and caches
 #   make doctor        # show which Ruby/Bundler is being used
+#   make agent-test    # check the built agent-facing site (after make install)
+#
+# Agent-facing documentation uses only built-in Liquid and the Pages plugins:
+#   - <name>.txt selects a Markdown source, .html.md permalink, title, description,
+#     and nav_order; llms.txt and sitemap.xml use these routes as their catalog.
+#   - <name>.md.txt provides the conventional .md alias from that same source.
+#   - _layouts/markdown.txt includes the source at build time, removes front
+#     matter, adds the index directive, and makes documentation links absolute.
+#   - index.md is the homepage's text equivalent; explore.md is its explorer guide.
+# Add both route files when adding a manual page, then run agent-test. The check
+# builds into a temporary directory and covers project, root, and nested baseurls.
+#
+# Check a published site with: npx afdocs check <site-url> --format scorecard
+# For a preview, add --canonical-origin <published-site-url> to rewrite links.
+# GitHub Pages cannot negotiate Accept: text/markdown; clients should use the
+# advertised Markdown URLs. That check needs a server/proxy supporting Accept
+# and Vary headers to pass. No client-side redirect can implement it for agents.
 #
 # Requirements (Ruby >= 3.0 is needed by recent Jekyll & Bundler):
 #   macOS:  brew install ruby
@@ -47,7 +64,7 @@ endif
 
 BUNDLE_PATH_DIR := vendor/bundle
 
-.PHONY: help doctor check-ruby install serve build clean portal-data portal-test
+.PHONY: help doctor check-ruby install serve build clean portal-data portal-test agent-test
 
 help:
 	@echo "Raptor docs — product portal + manual (native Ruby + Bundler)"
@@ -59,6 +76,7 @@ help:
 	@echo "  make doctor   Print the Ruby/Bundler actually used"
 	@echo "  make portal-data  Extract RTL/Makefile JSON for the homepage explorer"
 	@echo "  make portal-test  Run portal data and diagram checks (Python + Node.js)"
+	@echo "  make agent-test   Build and check llms.txt, Markdown, links, and sitemap"
 	@echo ""
 	@echo "Variables: PORT=$(PORT) HOST=$(HOST) RUBY_BIN_DIR=$(RUBY_BIN_DIR)"
 
@@ -106,6 +124,9 @@ portal-test:
 	$(PYTHON) scripts/test_extract_portal_data.py
 	$(PYTHON) scripts/test_uarch_view_2d.py
 	$(NODE) scripts/test_architecture_model.mjs
+
+agent-test: check-ruby
+	BUNDLE="$(BUNDLE)" $(PYTHON) scripts/test_agent_docs.py
 
 build: install portal-data
 	$(BUNDLE) exec jekyll build

@@ -1,7 +1,14 @@
-# Standalone module synthesis and physical design
+# Synthesis and implementation configurations
 
 This directory provides independent synthesis and static timing analysis for core
 composition blocks, their submodules, and the cluster-level L2 subsystem.
+
+`configs/` holds downstream chip integration configurations. The
+[pin-limited configuration](configs/pin-limited/README.md) wraps the cluster with
+pads and an octal link for tape-out and Arty validation. The reusable processor
+top remains `rapt` in `rtl/rapt.sv`; core presets remain in `rtl/configs/`.
+Module evaluation uses `yosys/`, `wrappers/`, and `modules.mk` independently of
+these chip integrations.
 
 The flow uses Yosys with the slang SystemVerilog frontend and OpenSTA. It reuses the open PDK data and mapping configuration under `third_party/yosys-opensta` for ASAP7, NanGate45, and SKY130 HD.
 

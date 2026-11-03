@@ -1,0 +1,33 @@
+name: Documentation checks
+
+on:
+  push:
+    branches: ["master", "main"]
+    paths: &docs-paths
+      - "docs/**"
+      - ".github/workflows/docs.yaml"
+  pull_request:
+    branches: ["master", "main"]
+    paths: *docs-paths
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  agent-docs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+          working-directory: docs
+      - name: Check Markdown exports and discovery on project and root URLs
+        run: make -C docs agent-test

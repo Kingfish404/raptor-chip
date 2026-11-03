@@ -12,9 +12,9 @@ def export(destination):
     # Refuse existing directories so repeated exports cannot overwrite edits.
     destination.mkdir(parents=True,exist_ok=False)
     rtl=[ROOT/'rtl/rapt_pkg.sv', ROOT/'rtl/sram/rapt_sram_1rw.sv']+[
-        ROOT/f'rtl/backend/feu/fpu/rapt_fpu_{name}.sv'
+        ROOT/f'rtl/core/backend/fpu/rapt_fpu_{name}.sv'
         for name in ('fma','divsqrt','convert_narrow','int_to_fp','single_to_int_w')]
-    rtl+=sorted((ROOT/'rtl/backend/vpu').glob('*.sv'))
+    rtl+=sorted((ROOT/'rtl/core/backend/vpu').glob('*.sv'))
     headers = sorted((ROOT/'rtl/include').glob('*.svh'))
     headers += [ROOT/'rtl/configs/default/rapt_config.svh']
     files=rtl+headers+[

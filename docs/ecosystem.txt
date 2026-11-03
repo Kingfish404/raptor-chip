@@ -1,0 +1,8 @@
+---
+layout: markdown
+permalink: /ecosystem.html.md
+markdown_source: ecosystem.md
+title: Platform integration
+description: FPGA and open implementation flows, memory map, and software stack.
+nav_order: 7
+---

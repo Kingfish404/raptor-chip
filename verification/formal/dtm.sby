@@ -18,7 +18,7 @@ prep -top formal_dtm
 
 [files]
 formal_dtm.sv
-rapt_dtm.sv ../../rtl/perip/rapt_dtm.sv
+rapt_dtm.sv ../../rtl/uncore/debug/rapt_dtm.sv
 rapt.svh ../../rtl/include/rapt.svh
 rapt_fp_ops.svh ../../rtl/include/rapt_fp_ops.svh
 rapt_config.svh ../../rtl/configs/formal/rapt_config.svh

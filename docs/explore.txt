@@ -1,0 +1,8 @@
+---
+layout: markdown
+permalink: /explore.html.md
+markdown_source: explore.md
+title: Architecture explorer
+description: How to inspect the core and memory views and interpret the illustrative model.
+nav_order: 5
+---

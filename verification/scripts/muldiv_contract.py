@@ -15,7 +15,7 @@ SAT_FAIL = "SAT proof finished - model found: FAIL!"
 
 INDUCT_PASS = "Induction step proven: SUCCESS!"
 
-DUT = ROOT / "rtl/backend/ieu/rapt_ieu_mul.sv"
+DUT = ROOT / "rtl/core/backend/ieu/rapt_ieu_mul.sv"
 
 FORMAL = ROOT / "verification/formal"
 

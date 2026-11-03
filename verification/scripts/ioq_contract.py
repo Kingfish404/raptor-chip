@@ -22,7 +22,7 @@ TOP = 'formal_ioq_owner'
 
 HARNESS = ROOT / 'verification/formal/formal_ioq.sv'
 
-DUT = ROOT / 'rtl/backend/lsu/rapt_lsu_ioq.sv'
+DUT = ROOT / 'rtl/core/backend/lsu/rapt_lsu_ioq.sv'
 
 SCOPE = ('Full production IOQ + actual DPU and capacity adapter; independent dispatch '
          'and response histories prove admission, queue ownership, request hold, A/B '

@@ -10,7 +10,7 @@ from pathlib import Path
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
-DUT = ROOT / 'rtl/backend/vpu/rapt_vpu_core_adapter.sv'
+DUT = ROOT / 'rtl/core/backend/vpu/rapt_vpu_core_adapter.sv'
 HARNESS = ROOT / 'verification/vpu/formal_core_adapter.sv'
 EVENTS = ['retirement','capture_cancel','grant_cancel_race','late_kill_blocked',
           'response_stall','early_response','wrong_response','unsafe_head',

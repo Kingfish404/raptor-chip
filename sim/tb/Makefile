@@ -46,6 +46,7 @@
 RAPTOR_HOME ?= $(abspath $(CURDIR)/../..)
 HDL_DIR     := $(RAPTOR_HOME)/rtl
 SIM_RTL     := $(RAPTOR_HOME)/sim/rtl
+CHIP_RTL_DIR := $(RAPTOR_HOME)/synth/configs/pin-limited/rtl
 TB_DIR      := $(CURDIR)
 # Maintained no-L2 RNP preset (see validation scope above).
 RAPT_CONFIG ?= small
@@ -64,7 +65,7 @@ INCDIRS := \
 # rtl/ plus the rng_chip wrapper (sim/rtl/wrap_rnp_soc.sv).
 PKG_SRC  := $(HDL_DIR)/rapt_pkg.sv
 RTL_REST := $(shell find -L $(HDL_DIR) -name '*.sv' ! -name 'rapt_pkg.sv') \
-			$(SIM_RTL)/wrap_rnp_soc.sv
+			$(SIM_RTL)/rapt_dpi_c.sv $(SIM_RTL)/wrap_rnp_soc.sv
 TB_SRC   := $(TB_DIR)/rapt_tb_mem.sv $(TB_DIR)/rapt_tb_top.sv
 
 VSRCS := $(PKG_SRC) $(RTL_REST) $(TB_SRC)
@@ -193,12 +194,13 @@ _verilator-middle-smoke: $(SMOKE_MROM)
 	@echo "[verilator-middle-smoke] GOOD TRAP and non-first commit slot: PASS"
 
 # -----------------------------------------------------------------------------
-# Pad-level chip behind the octal link (rtl/chip + rapt_xspi_target).
+# Pad-level chip behind the octal link (synth/configs/pin-limited/rtl + rapt_xspi_target).
 # -----------------------------------------------------------------------------
 CHIP_TOP := rapt_tb_chip
 CHIP_TB := $(TB_DIR)/rapt_tb_mem.sv $(TB_DIR)/rapt_tb_chip.sv \
 	$(RAPTOR_HOME)/fpga/common/rtl/rapt_xspi_target.sv
-CHIP_RTL := $(PKG_SRC) $(filter-out $(SIM_RTL)/wrap_rnp_soc.sv,$(RTL_REST))
+CHIP_RTL := $(PKG_SRC) $(filter-out $(SIM_RTL)/wrap_rnp_soc.sv,$(RTL_REST)) \
+	$(sort $(wildcard $(CHIP_RTL_DIR)/*.sv))
 CHIP_VL_FLAGS := $(filter-out --top-module $(TOP),$(VL_FLAGS)) --top-module $(CHIP_TOP)
 CHIP_MDIR := $(VL_BUILD_ROOT)/vl-chip-$(RAPT_CONFIG)-$(VL_BUILD_KEY)
 CHIP_SMOKE_LOG := $(CHIP_MDIR)/smoke.log
@@ -294,7 +296,7 @@ vcs-gls: ## gate-level sim under VCS (set NETLIST=, LIBS=, SDF=)
 	$(VCS) $(VCS_FLAGS) +define+RAPT_TB_GLS +define+RAPT_TB_SDF +neg_tchk -negdelay \
 		$(addprefix -v ,$(LIBS)) \
 		$(NETLIST) \
-		$(HDL_DIR)/perip/wrap_rnp.sv \
+		$(SIM_RTL)/wrap_rnp.sv \
 		$(TB_SRC) -o build/simv_gls
 	./build/simv_gls $(PLUSARGS) +sdfverbose -l build/vcs_gls_run.log
 
@@ -316,7 +318,7 @@ xrun-gls: ## gate-level sim under Xcelium (set NETLIST=, LIBS=, SDF=)
 	$(XRUN) -64bit -sv -timescale 1ns/1ps -l build/xrun_gls.log -top $(TOP) \
 		-define RAPT_TB_GLS -define RAPT_TB_SDF -negdelay \
 		$(addprefix -v ,$(LIBS)) \
-		$(NETLIST) $(HDL_DIR)/perip/wrap_rnp.sv $(TB_SRC) $(PLUSARGS)
+		$(NETLIST) $(SIM_RTL)/wrap_rnp.sv $(TB_SRC) $(PLUSARGS)
 
 # -----------------------------------------------------------------------------
 # Siemens Questa / ModelSim.
@@ -372,7 +374,7 @@ xsim-gls: ## Gate-level sim under Vivado XSIM (set NETLIST=, LIBS=, SDF=)
 		--log xvlog.log \
 		$(foreach l,$(LIBS),$(abspath $(l))) \
 		$(abspath $(NETLIST)) \
-		$(abspath $(HDL_DIR)/perip/wrap_rnp.sv) \
+		$(abspath $(SIM_RTL)/wrap_rnp.sv) \
 		$(abspath $(TB_SRC))
 	cd build/xsim-gls && $(XELAB) work.$(TOP) \
 		-s $(TOP)_gls_snap \

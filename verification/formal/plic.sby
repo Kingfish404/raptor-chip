@@ -37,7 +37,7 @@ prep -top formal_plic
 perip_formal_if.sv
 rapt_soc_if.svh
 formal_plic.sv
-rapt_plic.sv ../../rtl/perip/rapt_plic.sv
+rapt_plic.sv ../../rtl/uncore/irq/rapt_plic.sv
 rapt.svh ../../rtl/include/rapt.svh
 rapt_config.svh ../../rtl/configs/formal/rapt_config.svh
 rapt_sva.svh ../../rtl/include/rapt_sva.svh

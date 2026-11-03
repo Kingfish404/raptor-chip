@@ -3,7 +3,7 @@
 ROOT := ../../../..
 HDL_INC := $(ROOT)/rtl/include
 CONFIG := $(ROOT)/rtl/configs/small
-DUTS := $(addprefix $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_,$(addsuffix .sv,$(UNITS)))
+DUTS := $(addprefix $(ROOT)/rtl/core/backend/fpu/rapt_fpu_,$(addsuffix .sv,$(UNITS)))
 TOP := rapt_fpu_$(notdir $(CURDIR))_tb
 N ?= 200000
 VERILATOR ?= verilator

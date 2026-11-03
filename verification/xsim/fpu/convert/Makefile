@@ -9,5 +9,5 @@ include ../host-diff.mk
 run-widen-box:
 	+$(VERILATOR) --cc --exe --build -j 2 --assert -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC \
 		--top-module rapt_fpu_convert_widen -I$(ROOT)/rtl/include -I$(ROOT)/rtl/configs/default \
-		$(ROOT)/rtl/backend/feu/fpu/rapt_fpu_convert_widen.sv tb_widen_box.cpp --Mdir obj_widen_box -o tb
+		$(ROOT)/rtl/core/backend/fpu/rapt_fpu_convert_widen.sv tb_widen_box.cpp --Mdir obj_widen_box -o tb
 	./obj_widen_box/tb

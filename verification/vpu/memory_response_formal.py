@@ -11,7 +11,7 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[2]
 YOSYS = os.environ.get("RAPTOR_YOSYS_REAL", "yosys")
 SAT_SUCCESS = "SAT proof finished - no model found: SUCCESS!"
-DUT = ROOT / "rtl/backend/vpu/rapt_vpu_memory.sv"
+DUT = ROOT / "rtl/core/backend/vpu/rapt_vpu_memory.sv"
 HARNESS = ROOT / "verification/vpu/formal_memory_response.sv"
 
 

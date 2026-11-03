@@ -131,10 +131,10 @@ def main():
         ("stream-zero-output", "rapt_stream_queue", "rtl/common/rapt_stream_queue.sv", "OutWidth=0"),
         ("stream-input-too-wide", "rapt_stream_queue", "rtl/common/rapt_stream_queue.sv", "InWidth=9"),
         ("stream-output-too-wide", "rapt_stream_queue", "rtl/common/rapt_stream_queue.sv", "OutWidth=9"),
-        ("checkpoint-no-entries", "rapt_rename_checkpoint", "rtl/frontend/rapt_rename_checkpoint.sv", "Entries=0"),
-        ("checkpoint-no-rename", "rapt_rename_checkpoint", "rtl/frontend/rapt_rename_checkpoint.sv", "RenameWidth=0"),
-        ("checkpoint-no-resolve", "rapt_rename_checkpoint", "rtl/frontend/rapt_rename_checkpoint.sv", "ResolvePorts=0"),
-        ("checkpoint-short-id", "rapt_rename_checkpoint", "rtl/frontend/rapt_rename_checkpoint.sv", "Entries=8 -GCheckpointBits=2"),
+        ("checkpoint-no-entries", "rapt_rename_checkpoint", "rtl/core/backend/rename/rapt_rename_checkpoint.sv", "Entries=0"),
+        ("checkpoint-no-rename", "rapt_rename_checkpoint", "rtl/core/backend/rename/rapt_rename_checkpoint.sv", "RenameWidth=0"),
+        ("checkpoint-no-resolve", "rapt_rename_checkpoint", "rtl/core/backend/rename/rapt_rename_checkpoint.sv", "ResolvePorts=0"),
+        ("checkpoint-short-id", "rapt_rename_checkpoint", "rtl/core/backend/rename/rapt_rename_checkpoint.sv", "Entries=8 -GCheckpointBits=2"),
     ]:
         if args.only and top not in {"stream": ("rapt_stream_queue",), "checkpoint": ("rapt_rename_checkpoint",), "issue": ("rapt_issue_select",), "execution": (), "lsu": (), "integration": ()}[args.only]:
             continue

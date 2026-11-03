@@ -53,7 +53,7 @@ _RTL_DIRP_TO_BP: dict[str, str] = {
     "RAPT_BPU_DIRP_STATIC": "local",
 }
 
-# Canonical gem5 TAGE geometry mirroring rtl/frontend/branch_predictor/
+# Canonical gem5 TAGE geometry mirroring rtl/core/frontend/branch_predictor/
 # rapt_bpu_tage.sv: 256-entry bimodal base + 3 tagged tables of 128 entries
 # (tag widths 7/7/8, history lengths 8/16/64, 3-bit signed counters, 1-bit
 # useful bits).  Applied automatically whenever the selected preset's

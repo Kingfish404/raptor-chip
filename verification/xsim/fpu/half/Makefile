@@ -3,8 +3,8 @@ VERILATOR ?= verilator
 BUILD_DIR ?= $(CURDIR)/obj_dir
 XLEN ?= 64
 SOFTFLOAT_DIR ?=
-DUTS := $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_half_to_fp.sv \
-	$(ROOT)/rtl/backend/feu/fpu/rapt_fpu_fp_to_half.sv
+DUTS := $(ROOT)/rtl/core/backend/fpu/rapt_fpu_half_to_fp.sv \
+	$(ROOT)/rtl/core/backend/fpu/rapt_fpu_fp_to_half.sv
 VFLAGS := --cc --exe --build --timing -Wall -Wno-fatal \
 	-I$(ROOT)/rtl/include -I$(ROOT)/rtl/configs/default \
 	$(if $(filter 64,$(XLEN)),-DRAPT_RV64) \

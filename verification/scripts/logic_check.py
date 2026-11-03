@@ -16,12 +16,12 @@ SAT_SUCCESS = "SAT proof finished - no model found: SUCCESS!"
 INDUCT_SUCCESS = "Induction step proven: SUCCESS!"
 CONFIGS = {
     'rank-select': ('rtl/common/rapt_rank_select.sv', 'formal_rank_select'),
-    'rob-age-mask': ('rtl/backend/rapt_rob_age_mask.sv', 'formal_rob_age_mask'),
-    'rob-dispatch-select': ('rtl/backend/rapt_rob_dispatch_select.sv', 'formal_rob_dispatch_select'),
+    'rob-age-mask': ('rtl/core/backend/rob/rapt_rob_age_mask.sv', 'formal_rob_age_mask'),
+    'rob-dispatch-select': ('rtl/core/backend/dispatch/rapt_rob_dispatch_select.sv', 'formal_rob_dispatch_select'),
     'issue-select': ('rtl/common/rapt_issue_select.sv', 'formal_issue_select'),
-    'ras': ('rtl/frontend/branch_predictor/rapt_ras.sv', 'formal_ras'),
-    'predict-history': ('rtl/frontend/branch_predictor/rapt_predict_history.sv', 'formal_predict_history'),
-    'dispatch-admit': ('rtl/backend/rapt_dispatch_admit.sv', 'formal_dispatch_admit'),
+    'ras': ('rtl/core/frontend/branch_predictor/rapt_ras.sv', 'formal_ras'),
+    'predict-history': ('rtl/core/frontend/branch_predictor/rapt_predict_history.sv', 'formal_predict_history'),
+    'dispatch-admit': ('rtl/core/backend/dispatch/rapt_dispatch_admit.sv', 'formal_dispatch_admit'),
 }
 
 

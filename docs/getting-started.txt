@@ -1,0 +1,8 @@
+---
+layout: markdown
+permalink: /getting-started.html.md
+markdown_source: getting-started.md
+title: Getting started
+description: Dependencies, RV32/RV64 simulation, benchmarks, and verification commands.
+nav_order: 3
+---

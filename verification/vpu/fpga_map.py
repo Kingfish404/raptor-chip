@@ -32,9 +32,9 @@ def main():
     summary = out/'summary.json'
     summary.unlink(missing_ok=True)
     sources = [ROOT/'rtl/rapt_pkg.sv', ROOT/'rtl/sram/rapt_sram_1rw.sv']
-    sources += [ROOT/f'rtl/backend/feu/fpu/rapt_fpu_{name}.sv' for name in (
+    sources += [ROOT/f'rtl/core/backend/fpu/rapt_fpu_{name}.sv' for name in (
         'fma','divsqrt','convert_narrow','int_to_fp','single_to_int_w')]
-    sources += sorted((ROOT/'rtl/backend/vpu').glob('*.sv'))
+    sources += sorted((ROOT/'rtl/core/backend/vpu').glob('*.sv'))
     inputs = sources + sorted((ROOT / 'rtl/include').rglob('*.svh'))
     inputs += [ROOT / 'rtl/configs/default/rapt_config.svh', Path(__file__)]
     hashes = {str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs}

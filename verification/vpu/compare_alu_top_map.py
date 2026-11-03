@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[2]
-ALU='rtl/backend/vpu/rapt_vpu_alu.sv'
+ALU='rtl/core/backend/vpu/rapt_vpu_alu.sv'
 
 
 def digest(path):

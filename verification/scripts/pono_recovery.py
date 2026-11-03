@@ -12,7 +12,7 @@ import time
 
 from yosys_common import ROOT
 
-DUT = ROOT / 'rtl/backend/rapt_recovery_pending.sv'
+DUT = ROOT / 'rtl/core/backend/rob/rapt_recovery_pending.sv'
 REFERENCE = ROOT / 'verification/formal/formal_recovery_pending.sv'
 OSS = ROOT / 'third_party/oss-cad-suite'
 MUTATIONS = {

@@ -82,8 +82,8 @@
  
  
    rapt_dtm dtm_inst (
---- a/rtl/rapt_core.sv
-+++ b/rtl/rapt_core.sv
+--- a/rtl/core/rapt_core.sv
++++ b/rtl/core/rapt_core.sv
 @@ -18,6 +18,9 @@
      parameter rapt_pkg::l2_link_config_t L2Link = rapt_pkg::L2LinkConfig
  ) (
@@ -150,8 +150,8 @@
        .writeback_block_i(cache_writeback_block),
        .writeback_error_o(writeback_error_o),
        .external_write_valid_i(external_write_valid_i),
---- a/rtl/backend/rapt_backend.sv
-+++ b/rtl/backend/rapt_backend.sv
+--- a/rtl/core/backend/rapt_backend.sv
++++ b/rtl/core/backend/rapt_backend.sv
 @@ -23,6 +23,9 @@
      parameter logic [rapt_pkg::CompletionPorts-1:0] RegisteredOperandWakePorts = '0
  ) (
@@ -194,8 +194,8 @@
        .mtime_i(mtime_i),
  
        .hart_id_i(hart_id_i),
---- a/rtl/frontend/rapt_csr.sv
-+++ b/rtl/frontend/rapt_csr.sv
+--- a/rtl/core/backend/commit/rapt_csr.sv
++++ b/rtl/core/backend/commit/rapt_csr.sv
 @@ -10,6 +10,9 @@
      parameter bit [XLEN-1:0] RESET_VAL = 0
  ) (
@@ -242,8 +242,8 @@
      end
    end
  
---- a/rtl/perip/rapt_clint.sv
-+++ b/rtl/perip/rapt_clint.sv
+--- a/rtl/uncore/irq/rapt_clint.sv
++++ b/rtl/uncore/irq/rapt_clint.sv
 @@ -20,6 +20,12 @@
      parameter int MTIME_DIV = `RAPT_MTIME_DIV
  ) (

@@ -11,8 +11,8 @@ COMMON = Path(__file__).resolve().parents[1]
 OVERLAY = COMMON / "sampling/core.patch"
 INTERFACE = COMMON / "rtl/rapt_sample_if.svh"
 TREES = ("rtl", "sim/include", "sim/rtl")
-HOOKS = ("rtl/rapt.sv", "rtl/rapt_core.sv", "rtl/backend/rapt_backend.sv",
-         "rtl/frontend/rapt_csr.sv", "rtl/perip/rapt_clint.sv", "rtl/include/rapt_if.svh")
+HOOKS = ("rtl/rapt.sv", "rtl/core/rapt_core.sv", "rtl/core/backend/rapt_backend.sv",
+         "rtl/core/backend/commit/rapt_csr.sv", "rtl/uncore/irq/rapt_clint.sv", "rtl/include/rapt_if.svh")
 
 
 def digest(path):

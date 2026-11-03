@@ -15,7 +15,7 @@ FORMAL = ROOT / 'verification/formal'
 
 HARNESS = FORMAL / 'formal_rou.sv'
 
-DUT = ROOT / 'rtl/backend/rapt_rou.sv'
+DUT = ROOT / 'rtl/core/backend/rob/rapt_rou.sv'
 
 MUTATIONS = {
     'bank-row': ("write_row = RowBits'(int'(rob_alloc[s]) / RetireBanks);",
@@ -374,7 +374,7 @@ def composed_main():
         directory.mkdir()
         files = list(rtl)
         if mutation:
-            original = ROOT / "rtl/backend/rapt_rou.sv"
+            original = ROOT / "rtl/core/backend/rob/rapt_rou.sv"
             old, new = COMPOSED_MUTATIONS[mutation]
             text = original.read_text()
             if text.count(old) != 1:
@@ -540,7 +540,7 @@ def rvfi_main():
         directory.mkdir()
         files = list(rtl)
         if mutant:
-            original = ROOT / "rtl/backend/rapt_rou.sv"
+            original = ROOT / "rtl/core/backend/rob/rapt_rou.sv"
             text = original.read_text()
             old, new = mutations[mutant]
             if text.count(old) != 1:

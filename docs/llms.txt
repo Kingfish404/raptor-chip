@@ -1,0 +1,17 @@
+---
+layout: null
+permalink: /llms.txt
+---
+# Raptor
+
+> Raptor is a configurable RV32/RV64 superscalar, out-of-order RISC-V processor.
+> These docs cover the core, simulation, Linux boot, platform integration, and verification scope.
+
+Each link below serves the complete page as Markdown. For an HTML documentation
+URL ending in .html, append .md; the homepage's Markdown URL is index.md.
+GitHub Pages serves static files and does not negotiate Markdown using the Accept header.
+
+## Documentation
+{% assign exports = site.pages | where_exp: 'doc', 'doc.nav_order' | sort: 'nav_order' %}
+{% for doc in exports %}- [{{ doc.title }}]({{ doc.url | absolute_url }}): {{ doc.description }}
+{% endfor %}

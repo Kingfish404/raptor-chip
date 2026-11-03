@@ -21,6 +21,7 @@ model.mkdir(exist_ok=True)
 rtl = root / 'rtl'
 sources = [rtl / 'rapt_pkg.sv'] + sorted(p for p in rtl.rglob('*.sv')
                                          if p.name != 'rapt_pkg.sv')
+sources += sorted((root / 'synth/configs/pin-limited/rtl').glob('*.sv'))
 sources += [root / 'fpga/common/rtl/rapt_xspi_target.sv',
             root / 'sim/tb/rapt_tb_mem.sv', root / 'verification/jtag/sba_top.sv',
             root / 'verification/jtag/sba_server.cc']

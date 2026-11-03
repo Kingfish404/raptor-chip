@@ -1,6 +1,6 @@
 # sim/sram — OpenRAM integration
 
-Build infrastructure that compiles real SRAM macros via [OpenRAM](https://github.com/VLSIDA/OpenRAM) for the cache data arrays under [rtl/memory/](../../rtl/memory/) and [rtl/uncore/l2cache/](../../rtl/uncore/l2cache/), and wires the resulting Verilog blackboxes + Liberty timing into the Yosys / OpenSTA flow used by [sim/Makefile](../Makefile) `sta`.
+Build infrastructure that compiles real SRAM macros via [OpenRAM](https://github.com/VLSIDA/OpenRAM) for the cache data arrays under [rtl/core/memory/](../../rtl/core/memory/) and [rtl/uncore/l2cache/](../../rtl/uncore/l2cache/), and wires the resulting Verilog blackboxes + Liberty timing into the Yosys / OpenSTA flow used by [sim/Makefile](../Makefile) `sta`.
 
 ## Why
 

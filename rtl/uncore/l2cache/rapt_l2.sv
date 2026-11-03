@@ -12,13 +12,12 @@
  *
  * --- Design summary (RAPT_L2_EN) ---
  *
- *   * Set-associative; a 16-bit LFSR selects a victim on a miss, as in
- *     SiFive's inclusive-cache directory used by Medium BOOM.
+ *   * Set-associative; a 16-bit LFSR selects a victim on a miss.
  *   * Line size  = `RAPT_CACHE_LINE_BYTES bytes, expressed internally as
  *     1 << L2_LINE_LEN XLEN-wide words.
  *   * Sets       = 1 << L2_LEN. The default-l2 preset selects 1024 sets,
  *     eight ways and 64-byte lines for 512 KiB in either XLEN mode.
- *   * The 512 KiB preset uses BOOM's 8-way SRAM directory and four-bank data
+ *   * The 512 KiB preset uses an 8-way SRAM directory and four-bank data
  *     layout. Cacheable reads and writes use the one-port directory lookup;
  *     in-flight requests track invalidation without a flop tag mirror.
  *     Smaller presets retain the original flop tags and word banks.
@@ -29,7 +28,7 @@
  *     forwarded to the requester as it streams in (early-restart);
  *     remaining beats are returned from the line buffer once the fill
  *     completes.
- *   * BOOM-layout bufferable single-beat stores update hits locally. On a
+ *   * Banked-layout bufferable single-beat stores update hits locally. On a
  *     miss, a dirty victim is written back, the line is refilled, the store
  *     mask is merged, and the new line is installed dirty. Non-bufferable
  *     stores forward to memory. Bufferable cacheable INCR, FIXED, and valid
@@ -37,10 +36,10 @@
  *     transfers. Each line segment commits before the next directory lookup.
  *     A complete all-byte line skips the outer read, while shorter or masked
  *     writes merge with the resident or fetched line. Other shapes forward.
- *   * BOOM's 40-cycle sizing gives five ordinary RV64 or three RV32 clean
- *     read misses that may refill concurrently. Dirty or
+ *   * Five ordinary RV64 or three RV32 clean read misses may refill
+ *     concurrently. Dirty or
  *     client-owned victims still use the blocking write-back/probe path.
- *     Same-line scalar reads join each live MSHR through BOOM's shared
+ *     Same-line scalar reads join each live MSHR through a shared
  *     21-list/33-entry RV64 or 15-list/35-entry RV32 secondary buffer.
  *     The independent outer AXI IDs
  *     preserve the original upstream IDs.

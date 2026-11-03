@@ -15,7 +15,7 @@ from pathlib import Path
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
-DUT = ROOT/"rtl/backend/vpu/rapt_vpu_memory.sv"
+DUT = ROOT/"rtl/core/backend/vpu/rapt_vpu_memory.sv"
 HARNESS = ROOT/"verification/vpu/formal_memory_response.sv"
 LEDGER = ROOT/"verification/vpu/memory_response_formal.py"
 

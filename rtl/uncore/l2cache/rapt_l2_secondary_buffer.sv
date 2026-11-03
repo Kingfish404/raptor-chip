@@ -1,4 +1,4 @@
-// BOOM inclusive-cache Scheduler uses one shared 33-entry ListBuffer with
+// The L2 scheduler uses one shared 33-entry secondary buffer with
 // three virtual request lists for each of its seven MSHRs (A, B and C).
 // The queue is non-flowing: a push into an empty list becomes visible after
 // the clock edge, and a full buffer cannot reuse a simultaneously popped slot.

@@ -14,7 +14,7 @@ import subprocess
 from yosys_common import run_yosys
 
 ROOT = Path(__file__).resolve().parents[2]
-DUT = ROOT / "rtl/frontend/rapt_rename_checkpoint.sv"
+DUT = ROOT / "rtl/core/backend/rename/rapt_rename_checkpoint.sv"
 REFERENCE = ROOT / "verification/formal/formal_rename_checkpoint.sv"
 PACKAGE = ROOT / "rtl/rapt_pkg.sv"
 

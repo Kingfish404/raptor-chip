@@ -14,9 +14,9 @@ from yosys_common import ROOT, activation_witnesses, read_status, run_sby_task, 
 
 FORMAL = ROOT / 'verification/formal'
 TARGETS = {
-    'dm': ('formal_dm_debug', 'rtl/perip/rapt_dm.sv'),
-    'arbiter': ('formal_debug_arbiter', 'rtl/uncore/rapt_debug_arbiter.sv'),
-    'step': ('formal_rou_retire', 'rtl/backend/rapt_rou.sv'),
+    'dm': ('formal_dm_debug', 'rtl/uncore/debug/rapt_dm.sv'),
+    'arbiter': ('formal_debug_arbiter', 'rtl/uncore/debug/rapt_debug_arbiter.sv'),
+    'step': ('formal_rou_retire', 'rtl/core/backend/rob/rapt_rou.sv'),
     'reset': ('formal_debug_reset', 'rtl/rapt.sv'),
 }
 MUTATIONS = {
@@ -158,7 +158,7 @@ def main():
                               selected_source_sha256=sha(dut), first_byte=first,
                               last_byte=last, fragment=fragment)
             (directory / 'source-fragment.json').write_text(json.dumps(provenance, indent=2) + '\n')
-            rtl = [ROOT / 'rtl/uncore/rapt_debug_arbiter.sv', cone,
+            rtl = [ROOT / 'rtl/uncore/debug/rapt_debug_arbiter.sv', cone,
                    FORMAL / 'formal_debug_arbiter.sv']
         else:
             rtl = [dut]

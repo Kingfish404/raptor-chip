@@ -33,10 +33,10 @@ DIFF_FLAGS := -CFLAGS '-DVPU_SPIKE -I$(SPIKE_BUILD) -I$(SPIKE_BUILD)/riscv -I$(S
 endif
 VPU_INCLUDES := -I$(ROOT)/rtl/include -I$(ROOT)/rtl/configs/default
 FLAGS := --binary --timing --assert -Wall -DRAPT_ASSERT_EN $(VPU_INCLUDES) -j $(JOBS)
-VPU := $(ROOT)/rtl/backend/vpu
+VPU := $(ROOT)/rtl/core/backend/vpu
 VPU_SCALAR_FPU := fma divsqrt convert_narrow int_to_fp integer_to_fp single_to_int_w fp_to_int
 VPU_TOP_SOURCES := $(ROOT)/rtl/rapt_pkg.sv $(ROOT)/rtl/sram/rapt_sram_1rw.sv \
-  $(addprefix $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_,$(addsuffix .sv,$(VPU_SCALAR_FPU))) \
+  $(addprefix $(ROOT)/rtl/core/backend/fpu/rapt_fpu_,$(addsuffix .sv,$(VPU_SCALAR_FPU))) \
   $(wildcard $(VPU)/*.sv) $(CURDIR)/test_vpu.cpp
 TYPE_BUILD := $(BUILD_DIR)/vtype-$(XLEN)-$(VLEN)-$(ELEN)
 VRF_BUILD := $(BUILD_DIR)/vrf-$(VLEN)-$(BANK_BITS)-$(BANKS)
@@ -217,7 +217,7 @@ fma:
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  $(CURDIR)/fma_legacy.vlt --top-module rapt_vpu_fma -GDouble=$(FMA_DOUBLE) --Mdir $(FMA_BUILD) \
 	  -CFLAGS '-DTEST_DOUBLE=$(FMA_DOUBLE) -I$(SPIKE_BUILD)/softfloat' -LDFLAGS '$(SPIKE_BUILD)/libsoftfloat.a' \
-	  $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_fma.sv $(VPU)/rapt_vpu_fma.sv $(CURDIR)/test_fma.cpp \
+	  $(ROOT)/rtl/core/backend/fpu/rapt_fpu_fma.sv $(VPU)/rapt_vpu_fma.sv $(CURDIR)/test_fma.cpp \
 	  >$(FMA_BUILD)/build.log 2>&1 || { cat $(FMA_BUILD)/build.log; exit 1; }
 	$(FMA_BUILD)/Vrapt_vpu_fma | tee $(FMA_BUILD)/run.log
 
@@ -232,7 +232,7 @@ fp-arith:
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  $(CURDIR)/fma_legacy.vlt --top-module rapt_vpu_fp_arith -GDouble=$(FMA_DOUBLE) --Mdir $(FP_ARITH_BUILD) \
 	  -CFLAGS '-DTEST_DOUBLE=$(FMA_DOUBLE) -I$(SPIKE_BUILD)/softfloat' -LDFLAGS '$(SPIKE_BUILD)/libsoftfloat.a' \
-	  $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_fma.sv $(VPU)/rapt_vpu_fma.sv $(VPU)/rapt_vpu_fp_arith.sv $(CURDIR)/test_fp_arith.cpp \
+	  $(ROOT)/rtl/core/backend/fpu/rapt_fpu_fma.sv $(VPU)/rapt_vpu_fma.sv $(VPU)/rapt_vpu_fp_arith.sv $(CURDIR)/test_fp_arith.cpp \
 	  >$(FP_ARITH_BUILD)/build.log 2>&1 || { cat $(FP_ARITH_BUILD)/build.log; exit 1; }
 	$(FP_ARITH_BUILD)/Vrapt_vpu_fp_arith | tee $(FP_ARITH_BUILD)/run.log
 
@@ -257,7 +257,7 @@ divsqrt:
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  --top-module rapt_vpu_divsqrt -GELEN=$(ELEN) --Mdir $(BUILD_DIR)/divsqrt-$(ELEN) \
 	  -CFLAGS '-DTEST_ELEN=$(ELEN) -I$(SPIKE_BUILD)/softfloat' -LDFLAGS '$(SPIKE_BUILD)/libsoftfloat.a' \
-	  $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_divsqrt.sv $(VPU)/rapt_vpu_divsqrt.sv $(CURDIR)/test_divsqrt.cpp \
+	  $(ROOT)/rtl/core/backend/fpu/rapt_fpu_divsqrt.sv $(VPU)/rapt_vpu_divsqrt.sv $(CURDIR)/test_divsqrt.cpp \
 	  >$(BUILD_DIR)/divsqrt-$(ELEN)/build.log 2>&1 || { cat $(BUILD_DIR)/divsqrt-$(ELEN)/build.log; exit 1; }
 	$(BUILD_DIR)/divsqrt-$(ELEN)/Vrapt_vpu_divsqrt | tee $(BUILD_DIR)/divsqrt-$(ELEN)/run.log
 
@@ -298,7 +298,7 @@ fp-wide-arith:
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  $(CURDIR)/fma_legacy.vlt --top-module rapt_vpu_fp_wide_arith --Mdir $(BUILD_DIR)/fp-wide-arith \
 	  -CFLAGS '-I$(SPIKE_BUILD)/softfloat' -LDFLAGS '$(SPIKE_BUILD)/libsoftfloat.a' \
-	  $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_fma.sv $(VPU)/rapt_vpu_fma.sv $(VPU)/rapt_vpu_fp_arith.sv $(VPU)/rapt_vpu_fp_widen.sv \
+	  $(ROOT)/rtl/core/backend/fpu/rapt_fpu_fma.sv $(VPU)/rapt_vpu_fma.sv $(VPU)/rapt_vpu_fp_arith.sv $(VPU)/rapt_vpu_fp_widen.sv \
 	  $(VPU)/rapt_vpu_fp_wide_arith.sv $(CURDIR)/test_fp_wide_arith.cpp \
 	  >$(BUILD_DIR)/fp-wide-arith/build.log 2>&1 || { cat $(BUILD_DIR)/fp-wide-arith/build.log; exit 1; }
 	$(BUILD_DIR)/fp-wide-arith/Vrapt_vpu_fp_wide_arith | tee $(BUILD_DIR)/fp-wide-arith/run.log
@@ -312,7 +312,7 @@ fp-convert:
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  --top-module rapt_vpu_fp_convert --Mdir $(BUILD_DIR)/fp-convert \
 	  -CFLAGS '-I$(SPIKE_BUILD)/softfloat' -LDFLAGS '$(SPIKE_BUILD)/libsoftfloat.a' \
-	  $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_convert_narrow.sv $(VPU)/rapt_vpu_fp_widen.sv \
+	  $(ROOT)/rtl/core/backend/fpu/rapt_fpu_convert_narrow.sv $(VPU)/rapt_vpu_fp_widen.sv \
 	  $(VPU)/rapt_vpu_fp_convert.sv $(CURDIR)/test_fp_convert.cpp \
 	  >$(BUILD_DIR)/fp-convert/build.log 2>&1 || { cat $(BUILD_DIR)/fp-convert/build.log; exit 1; }
 	$(BUILD_DIR)/fp-convert/Vrapt_vpu_fp_convert | tee $(BUILD_DIR)/fp-convert/run.log
@@ -329,7 +329,7 @@ int-fp:
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  --top-module rapt_vpu_int_fp -GFloatDouble=$(FMA_DOUBLE) -GIntBits=$(INT_BITS) --Mdir $(INT_FP_BUILD) \
 	  -CFLAGS '-DTEST_DOUBLE=$(FMA_DOUBLE) -DTEST_INT_BITS=$(INT_BITS) -I$(SPIKE_BUILD)/softfloat' -LDFLAGS '$(SPIKE_BUILD)/libsoftfloat.a' \
-	  $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_int_to_fp.sv $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_integer_to_fp.sv $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_single_to_int_w.sv $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_fp_to_int.sv \
+	  $(ROOT)/rtl/core/backend/fpu/rapt_fpu_int_to_fp.sv $(ROOT)/rtl/core/backend/fpu/rapt_fpu_integer_to_fp.sv $(ROOT)/rtl/core/backend/fpu/rapt_fpu_single_to_int_w.sv $(ROOT)/rtl/core/backend/fpu/rapt_fpu_fp_to_int.sv \
 	  $(VPU)/rapt_vpu_int_fp.sv $(CURDIR)/test_int_fp.cpp \
 	  >$(INT_FP_BUILD)/build.log 2>&1 || { cat $(INT_FP_BUILD)/build.log; exit 1; }
 	$(INT_FP_BUILD)/Vrapt_vpu_int_fp | tee $(INT_FP_BUILD)/run.log
@@ -380,7 +380,7 @@ fp-reduce:
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
 	  $(CURDIR)/fma_legacy.vlt --top-module rapt_vpu_fp_reduce --Mdir $(BUILD_DIR)/fp-reduce-$(ELEN) \
 	  -GELEN=$(ELEN) -CFLAGS '-DTEST_ELEN=$(ELEN) -I$(SPIKE_BUILD)/softfloat' -LDFLAGS '$(SPIKE_BUILD)/libsoftfloat.a' \
-	  $(ROOT)/rtl/backend/feu/fpu/rapt_fpu_fma.sv $(VPU)/rapt_vpu_fma.sv $(VPU)/rapt_vpu_fp_arith.sv $(VPU)/rapt_vpu_fp_misc.sv $(VPU)/rapt_vpu_fp_widen.sv \
+	  $(ROOT)/rtl/core/backend/fpu/rapt_fpu_fma.sv $(VPU)/rapt_vpu_fma.sv $(VPU)/rapt_vpu_fp_arith.sv $(VPU)/rapt_vpu_fp_misc.sv $(VPU)/rapt_vpu_fp_widen.sv \
 	  $(VPU)/rapt_vpu_fp_reduce_control.sv $(VPU)/rapt_vpu_fp_reduce.sv $(CURDIR)/test_fp_reduce.cpp \
 	  >$(BUILD_DIR)/fp-reduce-$(ELEN)/build.log 2>&1 || { cat $(BUILD_DIR)/fp-reduce-$(ELEN)/build.log; exit 1; }
 	$(BUILD_DIR)/fp-reduce-$(ELEN)/Vrapt_vpu_fp_reduce | tee $(BUILD_DIR)/fp-reduce-$(ELEN)/run.log

@@ -23,6 +23,6 @@ formal_zkt_alu_ports.sv
 include ../../rtl/include
 config ../../rtl/configs/default
 rapt_pkg.sv ../../rtl/rapt_pkg.sv
-rapt_ieu_alu.sv ../../rtl/backend/ieu/rapt_ieu_alu.sv
-rapt_ieu_pipe_alu.sv ../../rtl/backend/ieu/rapt_ieu_pipe_alu.sv
-rapt_ieu_pipe_alu_csr.sv ../../rtl/backend/ieu/rapt_ieu_pipe_alu_csr.sv
+rapt_ieu_alu.sv ../../rtl/core/backend/ieu/rapt_ieu_alu.sv
+rapt_ieu_pipe_alu.sv ../../rtl/core/backend/ieu/rapt_ieu_pipe_alu.sv
+rapt_ieu_pipe_alu_csr.sv ../../rtl/core/backend/ieu/rapt_ieu_pipe_alu_csr.sv

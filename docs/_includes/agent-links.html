@@ -1,0 +1,8 @@
+{% assign exports = site.pages | where_exp: 'doc', 'doc.nav_order' %}
+{% assign markdown_page = exports | where: 'markdown_source', page.path | first %}
+{% if markdown_page %}
+<div class="agent-links">
+  For AI agents: <a href="{{ '/llms.txt' | relative_url }}">llms.txt index</a> ·
+  <a href="{{ markdown_page.url | relative_url }}">Markdown version</a>.
+</div>
+{% endif %}

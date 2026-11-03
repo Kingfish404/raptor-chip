@@ -1,0 +1,8 @@
+---
+layout: markdown
+permalink: /uarch.html.md
+markdown_source: uarch.md
+title: Microarchitecture
+description: Pipeline contracts, execution, memory, recovery, and configuration presets.
+nav_order: 4
+---

@@ -11,7 +11,7 @@ extern NPCState npc;
 // to fire IRQ N sets bit N. The TB wrapper (sim/rtl/) calls
 // `npc_consume_ext_irq_vector()` once per `posedge clock`, atomically reading
 // and clearing the bitmap, then drives `ext_irq_i[]` for one cycle. The PLIC
-// edge-detect FSM (rtl/perip/rapt_plic.sv) latches the rising edge as
+// edge-detect FSM (rtl/uncore/irq/rapt_plic.sv) latches the rising edge as
 // pending, exactly as a real device line would.
 //
 // This replaces the legacy backdoor `*npc.plic_pending |= ...` write into

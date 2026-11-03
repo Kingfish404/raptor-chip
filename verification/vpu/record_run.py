@@ -17,7 +17,7 @@ if mode == "top":
     result = dict(configuration=dict(zip(names, map(int, values[:-1]))), suite=values[-1])
 elif mode == "leaf":
     top, *parameters = values
-    if not (root / "rtl/backend/vpu" / (top + ".sv")).is_file():
+    if not (root / "rtl/core/backend/vpu" / (top + ".sv")).is_file():
         raise SystemExit("Unknown VPU top: " + top)
     result = dict(top=top, parameters={k: int(v) for k, v in
                                      (item.split("=", 1) for item in parameters)})
@@ -30,8 +30,8 @@ else:
 
 # Include the complete local source family. This conservatively invalidates old
 # evidence when any shared helper changes, without coupling it to file splits.
-files = set((root / "rtl/backend/vpu").glob("*.sv"))
-files.update((root / "rtl/backend/feu/fpu").glob("*.sv"))
+files = set((root / "rtl/core/backend/vpu").glob("*.sv"))
+files.update((root / "rtl/core/backend/fpu").glob("*.sv"))
 files.update((root / "rtl/include").rglob("*.svh"))
 files.add(root / "rtl/configs/default/rapt_config.svh")
 files.add(root / "rtl/sram/rapt_sram_1rw.sv")

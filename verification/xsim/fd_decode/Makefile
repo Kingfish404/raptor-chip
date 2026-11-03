@@ -13,7 +13,7 @@ run:
 	+verilator --binary --timing --assert -j 2 -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-ASCRANGE -Wno-UNSIGNED \
 		--top-module tb_fd_decode_slot $(if $(filter 64,$(XLEN)),-DRAPT_RV64,) \
 		-I$(ROOT)/rtl/include -I$(ROOT)/rtl/configs/default \
-		$(ROOT)/rtl/rapt_pkg.sv $(ROOT)/rtl/frontend/rapt_decode_slot.sv \
+		$(ROOT)/rtl/rapt_pkg.sv $(ROOT)/rtl/core/frontend/rapt_decode_slot.sv \
 		$(ROOT)/rtl/generated/rapt_idu_decoder.sv $(ROOT)/rtl/generated/rapt_idu_decoder_c.sv \
 		../tb_fd_decode_slot.sv --Mdir "$(DECODE_OBJ_DIR)" -o tb
 	"$(DECODE_OBJ_DIR)/tb"
@@ -28,7 +28,7 @@ compressed:
 	+verilator --binary --timing --assert -j 2 -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-ASCRANGE -Wno-UNSIGNED \
 		--top-module tb_fp_compressed_slot $(if $(filter 64,$(XLEN)),-DRAPT_RV64,) \
 		-I$(ROOT)/rtl/include -I$(ROOT)/rtl/configs/default \
-		$(ROOT)/rtl/rapt_pkg.sv $(ROOT)/rtl/frontend/rapt_decode_slot.sv \
+		$(ROOT)/rtl/rapt_pkg.sv $(ROOT)/rtl/core/frontend/rapt_decode_slot.sv \
 		$(ROOT)/rtl/generated/rapt_idu_decoder.sv $(ROOT)/rtl/generated/rapt_idu_decoder_c.sv \
 		../tb_fp_compressed_slot.sv --Mdir "$(COMPRESSED_OBJ_DIR)" -o tb
 	"$(COMPRESSED_OBJ_DIR)/tb"

@@ -1,0 +1,8 @@
+---
+layout: markdown
+permalink: /PROFILE.html.md
+markdown_source: PROFILE.md
+title: Legacy performance archive
+description: Early NPC and SoC measurements; these do not describe current defaults.
+nav_order: 11
+---

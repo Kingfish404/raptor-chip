@@ -1,0 +1,9 @@
+# Board sources: firmware, payloads, RTL, constraints, Vivado/OpenOCD scripts and
+# host tools. Build outputs go to fpga/build/arty-a7-t100 (see Makefile OUT).
+!*.py
+!*.tcl
+!*.cfg
+!*.xdc
+!*.ld
+!/scripts/build.tcl
+__pycache__/

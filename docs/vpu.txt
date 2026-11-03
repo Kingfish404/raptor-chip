@@ -1,0 +1,8 @@
+---
+layout: markdown
+permalink: /vpu.html.md
+markdown_source: vpu.md
+title: Standalone VPU
+description: RVV component architecture, integration contracts, verification, and limitations.
+nav_order: 9
+---

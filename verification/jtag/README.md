@@ -1,7 +1,7 @@
 # JTAG / RISC-V Debug Verification
 
-Tests cover [rapt_dtm](../../rtl/perip/rapt_dtm.sv),
-[rapt_dm](../../rtl/perip/rapt_dm.sv), the cluster AXI debug arbiter and the
+Tests cover [rapt_dtm](../../rtl/uncore/debug/rapt_dtm.sv),
+[rapt_dm](../../rtl/uncore/debug/rapt_dm.sv), the cluster AXI debug arbiter and the
 production chip's sampled JTAG / octal memory link.
 
 ## Implemented debug access

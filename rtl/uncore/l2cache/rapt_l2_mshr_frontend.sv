@@ -1,4 +1,4 @@
-// BOOM-sized miss admission and secondary replay fabric. The seven MSHR
+// L2 miss admission and secondary replay fabric. The seven MSHR
 // state machines supply their status and schedule requests; this module
 // arbitrates them and keeps their 21 secondary queues in 33 shared entries.
 // A secondary entry omits the set because its target MSHR already owns it.

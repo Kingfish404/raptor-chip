@@ -28,7 +28,7 @@ TOP = 'formal_ieu_alu'
 
 HARNESS = ROOT / 'verification/formal/formal_ieu_alu.sv'
 
-DUT = ROOT / 'rtl/backend/ieu/rapt_ieu_alu.sv'
+DUT = ROOT / 'rtl/core/backend/ieu/rapt_ieu_alu.sv'
 
 TOOLS = ROOT / 'third_party/oss-cad-suite/bin'
 
