@@ -69,14 +69,14 @@ is 1536 bytes excluding FCS, including the Ethernet header and any VLAN tags.
 The MAC checks incoming FCS and regenerates outgoing FCS. Standard minimum
 frames are checked and padded by LiteEth.
 
-Port A uses the existing 625 MHz DDR oversampling receiver and its calibrated
-lane/control offsets. Port B uses G9, a global-clock-capable input, and native
-RGMII capture, including both RX control edges. The native receive data/control
+Port A uses the 625 MHz DDR oversampling receiver and its calibrated
+lane/control offsets. Port B uses G9, a global-clock-capable input, and direct
+RGMII capture, including both RX control edges. Its receive data/control
 delay is 650 ps; routed setup and hold checks cover both DDR edges. The MAC and
 PHY TX clocks use separate phase-aligned dividers from each port's 250 MHz source,
 keeping MAC loads off the PHY launch clocks. Each port has its own PHY clock
 pair and MMCM near its I/O region (A: X2Y8; B: X2Y2). B's MAC uses the same
-local source as its PHY; the existing asynchronous FIFOs cross to the system
+local source as its PHY; asynchronous FIFOs cross to the system
 domain. Both PHYs advertise 1000 Mb/s
 full duplex only. A/B share the physical E8 reset gate; either reset request
 restarts both PHYs and clears the MAC crossings and frame queues.
@@ -156,7 +156,7 @@ functional and timing checks.
 
 ## KU5P endpoint PHY setup
 
-The native RGMII receive timing contract requires the RTL8211F's internal RX
+The RGMII receive timing contract requires the RTL8211F's internal RX
 clock delay to be disabled while retaining the TX delay. Linux configures this
 through `phy-mode = "rgmii-txid"`. For BIOS builds without automatic PHY setup,
 read/save MDIO page register 31, select page `0xd08`, clear only bit 3 of RXCR

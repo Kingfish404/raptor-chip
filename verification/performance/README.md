@@ -432,12 +432,12 @@ python3 fpga/common/scripts/native_build.py \
 
 Run the focused window/bridge tests and controller synthesis before the board
 build. Keep each preset's output isolated. Load only a build whose routed setup,
-hold, DRC and clock checks passed, using the native loader's source/artifact
+hold, DRC and clock checks passed, using the board loader's source/artifact
 fingerprint gate and an exact idle-board JTAG target. Retain the original board
 image and its validated source environment for restoration after evaluation.
 
 For an RV64 core regression, build the independent AXI DDR oracle from the prepared
-native sources, then compare eight stopping boundaries against NEMU:
+board sources, then compare eight stopping boundaries against NEMU:
 
 ```sh
 native_sources=/path/to/prepared-native-build/sources

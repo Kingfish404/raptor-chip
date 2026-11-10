@@ -30,7 +30,20 @@ define DIRECTED_PRESET
 $(1): override XSIM_COMMON_INCLUDES := $(subst /configs/$(XSIM_RAPT_CONFIG),/configs/$(2),$(XSIM_COMMON_INCLUDES))
 endef
 
+IO25_SOURCES := $(wildcard $(RAPTOR_HOME)/synth/configs/io25/rtl/*.sv) \
+  $(RAPTOR_HOME)/fpga/common/rtl/rapt_native_uart.sv
+$(eval $(call XLEN_TEST,chip-boot-offer,tb_chip_boot_offer))
+$(eval $(call XLEN_TEST,chip-io25-bus,tb_chip_io25_bus,$$(IO25_SOURCES)))
+$(eval $(call XLEN_TEST,spi-flash-max-time,tb_spi_flash,\
+  $$(VERIFY_HOME)/models/rapt_w25q64jw_model.sv,-GMaxTimings=1))
+$(eval $(call XLEN_TEST,spi-flash-delayed,tb_spi_flash,\
+  $$(VERIFY_HOME)/models/rapt_w25q64jw_model.sv,-GReturnDelayNs=10))
+$(eval $(call XLEN_TEST,spi-flash-identity,tb_spi_flash,\
+  $$(VERIFY_HOME)/models/rapt_w25q64jw_model.sv,-GBadIdentity=1))
+$(eval $(call XLEN_TEST,spi-flash,tb_spi_flash,$$(VERIFY_HOME)/models/rapt_w25q64jw_model.sv))
 $(eval $(call XLEN_TEST,xspi-link,tb_xspi_link,$$(RAPTOR_HOME)/fpga/common/rtl/rapt_xspi_target.sv))
+$(eval $(call XLEN_TEST,xspi-target-release,tb_xspi_target_release,\
+  $$(RAPTOR_HOME)/fpga/common/rtl/rapt_xspi_target.sv))
 $(eval $(call XLEN_TEST,ptw-global,tb_ptw_global,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,zfhmin-decode-slot,tb_zfhmin_decode_slot))
 # optional rapt_idu_decoder_ref source enables legacy RTL comparison.
@@ -111,6 +124,7 @@ $(eval $(call XLEN_TEST,lsu-atomic-acquire,tb_lsu_atomic_acquire,,-d RAPT_ASSERT
 $(eval $(call XLEN_TEST,fence-replay,tb_rou_dual_commit, ,-d RAPT_ASSERT_EN -d RAPT_TEST_ATOMIC_REPLAY -d RAPT_TEST_FENCE_REPLAY -d RAPT_TEST_REGISTERED_DRAIN -d RAPT_TEST_COMPACT_FP -d RAPT_TEST_REGISTERED_PAYLOAD))
 $(eval $(call XLEN_TEST,lsu-axi-io-order,tb_lsu_axi_io_order,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,l1i-invalidate-pending,tb_l1i_invalidate_pending,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,l1i-reset-dominance,tb_l1i_reset_dominance,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,l1i-response-error,tb_l1i_response_error,,-d RAPT_ASSERT_EN,$$(L1I_ERROR_PLUSARGS)))
 $(eval $(call XLEN_TEST,l1i-mapping-epoch,tb_l1i_mapping_epoch,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,idu-hints,tb_idu_hints))
@@ -274,6 +288,7 @@ $(eval $(call DIRECTED_TEST,iq-reclaim-six-rv64,iq_reclaim_six_rv64,tb_iq_reclai
 $(eval $(call DIRECTED_TEST,iq-ordered-head iq-ordered-head-rv64,$$(subst -,_,$$@),tb_iq_reclaim_random,,-d RAPT_ASSERT_EN -GInOrder=1 -GPorts=1 -GEntries=7 $$(if $$(findstring rv64,$$@),-d RAPT_RV64),+SEED=$$(VERILATOR_DIRECTED_SEED)))
 $(eval $(call DIRECTED_TEST,iq-repair-three,iq_repair_three,tb_iq_reclaim_random,,-d RAPT_ASSERT_EN -d RAPT_INTEGER_ISSUE_PORTS=3 -d RAPT_DISPATCH_WIDTH=4 -GEntries=7 -GRebalance=1,+SEED=$$(VERILATOR_DIRECTED_SEED)))
 $(eval $(call DIRECTED_TEST,iq-repair-six-rv64,iq_repair_six_rv64,tb_iq_reclaim_random,,-d RAPT_ASSERT_EN -d RAPT_RV64 -d RAPT_INTEGER_ISSUE_PORTS=6 -d RAPT_DISPATCH_WIDTH=4 -GEntries=11 -GRebalance=1,+SEED=$$(VERILATOR_DIRECTED_SEED)))
+$(eval $(call XLEN_TEST,btb-lookup-reset,tb_btb_lookup_reset))
 $(eval $(call DIRECTED_TEST,btb-storage-rv32 btb-storage-rv64,$$(subst -,_,$$@),tb_btb_storage,,$$(if $$(findstring rv64,$$@),-d RAPT_RV64)))
 $(eval $(call DIRECTED_TEST,predict-history,predict_history,tb_predict_history, "$$(RAPTOR_HOME)/verification/formal/formal_predict_history.sv",,+SEED=$$(VERILATOR_DIRECTED_SEED)))
 $(eval $(call DIRECTED_TEST,l1d-load-pbmt,l1d_load_pbmt,tb_l1d_load_pbmt,,-d RAPT_RV64 -d RAPT_ASSERT_EN))
@@ -321,7 +336,9 @@ $(eval $(call DIRECTED_TEST,l2-response-error-boom-rv32,l2_response_error_boom_r
 $(eval $(call DIRECTED_TEST,l2-response-error-boom-rv64,l2_response_error_boom_rv64,tb_l2_response_error,,-d RAPT_L2_EN -d RAPT_ASSERT_EN -d RAPT_RV64 -d RAPT_TEST_BOOM_L2))
 $(eval $(call DIRECTED_TEST,router-early-write-rv32,router_early_write_rv32,tb_chip_router_early_write,,-d RAPT_ASSERT_EN))
 $(eval $(call DIRECTED_TEST,router-early-write-rv64,router_early_write_rv64,tb_chip_router_early_write,,-d RAPT_ASSERT_EN -d RAPT_RV64))
-$(eval $(call DIRECTED_TEST,rnp-handshake-rv32,rnp_handshake_rv32,tb_rnp_handshake,,-d RAPT_ASSERT_EN))
+RNP_TEST_SOURCE := $(RAPTOR_HOME)/sim/rtl/wrap_rnp.sv
+$(eval $(call DIRECTED_TEST,rnp-handshake-rv32,rnp_handshake_rv32,tb_rnp_handshake,\
+  $$(RNP_TEST_SOURCE),-d RAPT_ASSERT_EN))
 $(eval $(call DIRECTED_TEST,cache-default-rv32 \
   cache-default-rv64,$$(subst -,_,$$@),tb_cache_stream,,-d RAPT_ASSERT_EN \
   -d RAPT_L1D_STORE_MERGE=0 $$(if $$(findstring rv64,$$@),-d RAPT_RV64)))
@@ -333,7 +350,11 @@ $(eval $(call DIRECTED_TEST,cache-stream-wb-rv32 cache-stream-wb-rv64 cache-stre
   cache-stream-wb-l2-rv64,$$(subst -,_,$$@),tb_cache_stream,,-d RAPT_ASSERT_EN \
   -d RAPT_L1D_STORE_MERGE=0 $$(if $$(findstring rv64,$$@),-d RAPT_RV64) \
   $$(if $$(findstring -l2-,$$@),-d RAPT_L2_EN)))
-$(eval $(call DIRECTED_TEST,cache-stream-rv32 cache-stream-rv64 cache-stream-l2-rv32 cache-stream-l2-rv64 cache-stream-rnp-rv32,$$(subst -,_,$$@),tb_cache_stream,,-d RAPT_ASSERT_EN $$(if $$(findstring -rnp-,$$@),-d RAPT_TEST_RNP) $$(if $$(findstring rv64,$$@),-d RAPT_RV64) $$(if $$(findstring -l2-,$$@),-d RAPT_L2_EN)))
+$(eval $(call DIRECTED_TEST,cache-stream-rv32 cache-stream-rv64 cache-stream-l2-rv32 \
+  cache-stream-l2-rv64 cache-stream-rnp-rv32,$$(subst -,_,$$@),tb_cache_stream,\
+  $$(if $$(findstring -rnp-,$$@),$$(RNP_TEST_SOURCE)),-d RAPT_ASSERT_EN \
+  $$(if $$(findstring -rnp-,$$@),-d RAPT_TEST_RNP) \
+  $$(if $$(findstring rv64,$$@),-d RAPT_RV64) $$(if $$(findstring -l2-,$$@),-d RAPT_L2_EN)))
 $(eval $(call DIRECTED_TEST,ioq-forward-nonalias-rv32 ioq-forward-nonalias-rv64,$$(subst -,_,$$@),tb_ioq_forward_nonalias,,-d RAPT_ASSERT_EN $$(if $$(findstring rv64,$$@),-d RAPT_RV64)))
 $(eval $(call DIRECTED_TEST,port-priority,port_priority,tb_port_priority))
 $(eval $(call DIRECTED_TEST,dispatch-iq-index-rv32 dispatch-iq-index-rv64,$$(subst -,_,$$@),tb_dispatch_iq_index,,-d RAPT_ASSERT_EN $$(if $$(findstring rv64,$$@),-d RAPT_RV64)))

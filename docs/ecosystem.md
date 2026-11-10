@@ -12,7 +12,7 @@ Simulators, FPGA boards, ASIC flow, software stack, and memory maps.
 | ----------- | --------------------------------- | ------------------------------------------------------------- |
 | NEMU        | Software ISS (difftest reference) | `nemu/README.md`                                              |
 | NPC         | Verilator simulator               | `sim/`                                                        |
-| FPGA        | Native CU08/RK boards and LiteX SoCs | [FPGA support](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/README.md) |
+| FPGA        | Board builds and LiteX SoCs | [FPGA support](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/README.md) |
 | ASIC (open) | Yosys + OpenSTA flow              | [yosys-opensta](https://github.com/Kingfish404/yosys-opensta) |
 
 ## Simulators
@@ -29,8 +29,8 @@ NPC is the primary development simulator. With `DIFFTEST=1` (the default), NEMU 
 
 | Board / Flow                   | Status                                                                  | Entry                                        |
 | ------------------------------ | ----------------------------------------------------------------------- | -------------------------------------------- |
-| **MLK-CU08-KU15P / Native** | RV32/RV64, UART boot, BRAM or DDR4 MIG | `fpga/mlk-cu08-ku15p/` |
-| **RK-XCKU5P-F V1.2 / Native** | RV32/RV64, UART boot, BRAM or 32-bit DDR4 | `fpga/rk-xcku5p-f/` |
+| **MLK-CU08-KU15P** | RV32/RV64, UART boot, BRAM or DDR4 MIG | `fpga/mlk-cu08-ku15p/` |
+| **RK-XCKU5P-F V1.2** | RV32/RV64, UART boot, BRAM or 32-bit DDR4 | `fpga/rk-xcku5p-f/` |
 | **MLK-CU08-KU15P / LiteX**     | Primary: Vivado, MIG DDR4, SD, CM005 Ethernet, RV32/RV64 Linux/netboot  | `fpga/litex/`                                |
 | **MLK-CU07-KU15P / LiteX**     | Vivado, BIOS, MIG DDR4, SDCard, RV32 Linux boot                         | `fpga/litex/`                                |
 | **Alinx AXAU15 / LiteX**       | Vivado AU15P, auto-detected when that part is on the cable              | `fpga/litex/`                                |
@@ -38,8 +38,8 @@ NPC is the primary development simulator. With `DIFFTEST=1` (the default), NEMU 
 | **Tang Mega 138K Pro / LiteX** | Gowin LiteX FPGA flow                                                   | `fpga/litex/`                                |
 | **OOC partitions**             | Frontend/backend/cache checkpoints, not a board flow                    | `fpga/ooc/README.md`                         |
 
-Root `make fpga-synth` and `make fpga-build` select native CU08-KU15P by default;
-use `FPGA_BOARD=rk-xcku5p-f` for RK. See [native FPGA support](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/README.md)
+Root `make fpga-synth` and `make fpga-build` select CU08-KU15P by default;
+use `FPGA_BOARD=rk-xcku5p-f` for RK. See [FPGA support](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/README.md)
 for board build options and [LiteX](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/litex/README.md) for BIOS and Linux.
 
 ## ASIC Flow
@@ -80,7 +80,7 @@ capacity of each board or simulator profile. The window starts at `0x80000000`.
 KU15P CU07/CU08 with MIG map 2 GiB through `0xffffffff`; RV32 and RV64 use
 the same hardware map. RV32 Linux advertises only the lower 1 GiB in its device
 tree until high-memory support is validated. KU15P LiteDRAM and AXAU15 MIG
-remain at 1 GiB. Other board capacities are listed in the JSON file.
+map 1 GiB. Other board capacities are listed in the JSON file.
 
 `make memory-map-check` cross-checks the contract against RTL, LiteX, firmware,
 NPC and NEMU constants, and that the generated [`app/lib/raptor_platform.h`](https://github.com/Kingfish404/raptor-chip/blob/master/app/lib/raptor_platform.h) is current.
@@ -95,8 +95,8 @@ regressions.
 
 The optional `SIM_MEM_PROFILE=large` NPC profile and matching NEMU
 `riscv32_ref_2g_defconfig` / `riscv64_ref_2g_defconfig` map 2 GiB of sparse
-RAM. Their default profiles retain the smaller legacy RAM capacity. In the
-large profile, `0xa0000000` is RAM, not the separate legacy SDRAM or software
+RAM. Their default profiles use smaller RAM windows. In the
+large profile, `0xa0000000` is RAM, not a separate SDRAM or software
 MMIO region. LiteX UART is at `0x11001800`; high addresses within the large-profile RAM window access memory.
 
 The RV32/RV64 boundary test in `app/tests/baremetal/pmem_2g_boundaries.S`

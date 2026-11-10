@@ -16,6 +16,7 @@ module rapt_xspi_target #(
     input logic [7:0] dq_i,
     output logic [7:0] dq_o,
     output logic dq_oe_o,
+    output logic status_poll_o,
     axi4_if.master axi
 );
   localparam int Bytes = XLEN / 8;
@@ -50,6 +51,7 @@ module rapt_xspi_target #(
   logic [7:0] status_byte, last_tx_q;
 
   assign frame = !cs_n_q[1];
+  assign status_poll_o = frame && sclk_rise && state_q == TX_STATUS;
   assign sclk_rise = sclk_q[1] && !sclk_q[2];
   assign sclk_fall = !sclk_q[1] && sclk_q[2];
   assign status_byte = axi_done_q ? {1'b1, 5'b0, resp_q} : '0;
@@ -187,6 +189,7 @@ module rapt_xspi_target #(
           if (index_q == DataLast) begin
             index_q <= '0;
             beat_q <= beat_q + 8'd1;
+            if (beat_q == len_q) state_q <= FRAME_END;
           end else index_q <= index_q + 4'd1;
         end else if (state_q == FRAME_END) begin
           dq_oe_o <= 1'b0;

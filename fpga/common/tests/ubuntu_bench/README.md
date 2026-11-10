@@ -1,7 +1,7 @@
-# Native Ubuntu benchmark profiling
+# Ubuntu benchmark profiling
 
 These programs run CoreMark and the 19 benchmarks in the local Embench checkout
-as native RV64 Linux/glibc applications. They do not use the bare-metal runtime
+as RV64 Linux/glibc applications. They do not use the bare-metal runtime
 or proxy kernel. The benchmark algorithm sources remain unchanged.
 
 `profile.c` measures only the benchmark region with `CLOCK_MONOTONIC`,

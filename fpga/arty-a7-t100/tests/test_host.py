@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 BOARD = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BOARD / "scripts"))
@@ -12,6 +13,7 @@ sys.path.insert(0, str(BOARD / "scripts/hw"))
 from flash import END, FIRST, SECTOR, Flash, Session, checked_range
 from flash_image import inspect_image, pack_image
 from common import tcl_string
+import sources
 
 
 class FakeFlash:
@@ -47,6 +49,27 @@ class FakeFlash:
 
 
 class HostChecks(unittest.TestCase):
+    def test_fingerprint_ignores_generated_board_outputs(self):
+        with tempfile.TemporaryDirectory() as path:
+            root = Path(path)
+            board = root / "fpga/arty-a7-t100"
+            inputs = (root / "rtl/rapt_pkg.sv",
+                      root / "fpga/common/rtl/rapt_native_uart.sv",
+                      root / "fpga/common/rtl/rapt_xspi_target.sv", board / "octal.mk")
+            for source in inputs:
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_text("source\n")
+            with patch.object(sources, "ROOT", root), patch.object(sources, "BOARD", board):
+                baseline = sources.fingerprint(sources.input_files())
+                for generated in ("build/soc/design.bit", "tests/__pycache__/test.pyc",
+                                  "scripts/.Xil/cache.bin"):
+                    output = board / generated
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    output.write_bytes(b"generated output")
+                self.assertEqual(sources.fingerprint(sources.input_files()), baseline)
+                (board / "octal.mk").write_text("changed configuration\n")
+                self.assertNotEqual(sources.fingerprint(sources.input_files()), baseline)
+
     def test_image_crc_and_entry(self):
         data = pack_image(b"abcd1234")
         self.assertEqual(inspect_image(data)["length"], 8)
@@ -117,11 +140,30 @@ class HostChecks(unittest.TestCase):
         flash = FakeFlash()
         with tempfile.TemporaryDirectory() as path:
             session = Session(flash, path, [FIRST])
-            manifest = (Path(path) / "manifest.json").read_bytes()
+            manifest = json.loads((Path(path) / "manifest.json").read_text())
             flash.corrupt = True
             with self.assertRaises(ValueError):
                 session.program(FIRST, b"test")
-            self.assertEqual((Path(path) / "manifest.json").read_bytes(), manifest)
+            failed = json.loads((Path(path) / "manifest.json").read_text())
+            self.assertEqual(failed["current"], manifest["current"])
+            self.assertEqual(failed["inflight"]["operation"], "program")
+            with self.assertRaisesRegex(ValueError, "uncertain"):
+                Session(flash, path, [FIRST])
+
+    def test_interrupted_blank_erase_cannot_be_retried(self):
+        flash = FakeFlash()
+        with tempfile.TemporaryDirectory() as path:
+            session = Session(flash, path, [FIRST])
+            with patch.object(flash, "erase", side_effect=TimeoutError("lost reply")):
+                with self.assertRaises(TimeoutError):
+                    session.erase(FIRST)
+            # Matching old contents cannot prove a submitted erase is no longer busy.
+            self.assertEqual(flash.read(FIRST, SECTOR), b"\xff" * SECTOR)
+            with self.assertRaisesRegex(ValueError, "uncertain"):
+                Session(flash, path, [FIRST])
+            with self.assertRaisesRegex(ValueError, "uncertain"):
+                session.erase(FIRST)
+            self.assertEqual(flash.mutations, [])
 
     def test_nor_and_ownership_preflight(self):
         flash = FakeFlash()
@@ -139,6 +181,45 @@ class HostChecks(unittest.TestCase):
         script = "set value " + tcl_string(value) + "\nputs -nonewline $value\n"
         result = subprocess.run(["tclsh"], input=script, text=True, capture_output=True, check=True)
         self.assertEqual(result.stdout, value)
+
+    def test_programmer_never_opens_a_different_or_ambiguous_target(self):
+        authorized = "localhost/xilinx_tcf/Digilent/TESTSERIALA"
+        unrelated = "localhost/xilinx_tcf/Digilent/OTHERSERIALA"
+        for inventory, success in (([unrelated, authorized], True), ([unrelated], False),
+                                   ([authorized, authorized], False)):
+            setup = "set argv {dummy.bit 1234 TESTSERIAL}\n"
+            setup += "set inventory {" + " ".join(inventory) + "}\n"
+            setup += """
+proc set_param args {}
+proc open_hw_manager args {}
+proc connect_hw_server args {}
+proc get_hw_targets args {global inventory; return $inventory}
+proc get_property {key object} {
+    if {$key eq "NAME"} {return $object}
+    if {$key eq "PART"} {return xc7a100tcsg324-1}
+    error "unexpected property"
+}
+proc current_hw_target {target} {global selected; set selected $target}
+proc open_hw_target {} {global selected; puts "OPEN:$selected"}
+proc get_hw_devices args {return fpga}
+proc refresh_hw_device args {}
+proc set_property args {}
+proc program_hw_devices args {puts PROGRAM_VOLATILE}
+proc close_hw_target args {}
+proc disconnect_hw_server args {}
+proc close_hw_manager args {}
+"""
+            setup += "source " + tcl_string(BOARD / "scripts/hw/program.tcl") + "\n"
+            result = subprocess.run(["tclsh"], input=setup, capture_output=True, text=True)
+            with self.subTest(inventory=inventory):
+                self.assertEqual(result.returncode == 0, success)
+                if success:
+                    self.assertIn("OPEN:" + authorized, result.stdout)
+                    self.assertIn("PROGRAM_VOLATILE", result.stdout)
+                else:
+                    self.assertNotIn("OPEN:", result.stdout)
+                    self.assertNotIn("PROGRAM_VOLATILE", result.stdout)
+                self.assertNotIn("OPEN:" + unrelated, result.stdout)
 
 
 if __name__ == "__main__":

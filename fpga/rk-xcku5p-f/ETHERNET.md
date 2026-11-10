@@ -1,7 +1,7 @@
-# Native Ethernet ABI v1
+# Ethernet controller ABI v1
 
-The native RK controller occupies `0x18000000..0x1800ffff`, inside the CPU's
-existing uncached peripheral PMA. This address is a platform choice; the device
+The RK Ethernet controller occupies `0x18000000..0x1800ffff`, inside the CPU's
+uncached peripheral PMA. This address is a platform choice; the device
 tree identifies the interface as `raptor,native-ethernet-v1`. The bus accepts
 aligned, single-beat 32-bit accesses and preserves the appropriate RV64 byte
 lanes. Registers require all four write strobes; packet RAM supports byte
@@ -57,7 +57,7 @@ PHY initialization uses upstream Linux MDIO bitbang and RTL8211F support with
 `phy-mode = "rgmii-txid"`. Only 1000BASE-T full duplex is advertised. RGMII RX
 uses an inverted MMCM capture clock, fixed 100 ps input delays, and explicit
 alignment of adjacent IDDRE1 low/high samples. TX125 and IDELAY-ref300 share the
-board's main MMCM; a separate RX MMCM follows the PHY. Including MIG, the native
+board's main MMCM; a separate RX MMCM follows the PHY. Including MIG, the
 DDR design uses three MMCM sites. The MIG debug hub uses the core clock directly
 so it does not occupy another MMCM beside the RGMII RX pins.
 

@@ -6,6 +6,11 @@ module tb_rapt_arty_flash;
 `else
   localparam bit BramModel = 0;
 `endif
+`ifdef ARTY_UNKNOWN_FLASH
+  localparam bit UnknownFlash = 1;
+`else
+  localparam bit UnknownFlash = 0;
+`endif
   logic clock = 0, flash_clock = 0, reset = 1;
   always #5 clock = !clock;
   always #50 flash_clock = !flash_clock;
@@ -17,7 +22,10 @@ module tb_rapt_arty_flash;
   wire [7:0] dq_out, dq_oe, dq_in;
   logic fault_wel = 0, fault_program = 0;
   rapt_arty_flash #(
-      .UseBramModel(BramModel)
+      .UseBramModel(BramModel),
+      .PowerupCycles(1000),
+      .ResetCycles(10),
+      .RecoveryCycles(1000)
   ) u_dut (
       .clock(clock),
       .flash_clock(flash_clock),
@@ -42,19 +50,24 @@ module tb_rapt_arty_flash;
       .dq_i(dq_in),
       .dqs_i(dqs)
   );
-  rapt_arty_mt35x_model #(
-      .ProgramTime(20us),
-      .EraseTime  (100us)
+  rapt_xspi_profile1_model #(
+      .MemoryBytes(16 * 1024 * 1024),
+      .JedecId(UnknownFlash ? 24'hffffff : 24'h2c5b19)
   ) u_model (
-      .flash_clk_i(ck),
-      .flash_csn_i(cs_n),
-      .flash_reset_n_i(reset_n),
-      .flash_dq_o_i(dq_out),
-      .flash_dq_oe_i(|dq_oe),
-      .flash_dq_i_o(dq_in),
-      .flash_dqs_o(dqs),
-      .fault_wel_i(fault_wel),
-      .fault_program_i(fault_program)
+      .reset_n_i(reset_n),
+      .sclk_i(ck),
+      .cs_n_i(cs_n),
+      .dq_i(dq_out),
+      .host_oe_i(dq_oe),
+      .missing_ds_i(1'b0),
+      .drop_after_i(4'd0),
+      .pause_i(1'b0),
+      .deny_wren_i(fault_wel),
+      .fail_mutation_i(fault_program),
+      .flags_i(8'd0),
+      .dq_o(dq_in),
+      .dq_oe_o(),
+      .ds_o(dqs)
   );
   task automatic write_reg(input logic [8:0] address, input logic [31:0] value);
     @(negedge clock);
@@ -68,6 +81,11 @@ module tb_rapt_arty_flash;
     ra = 9'h004;
     #1;
     while (rd[0]) begin
+      #1;
+      u_model.mem[0] = 8'h12;
+      u_model.mem[1] = 8'h34;
+      u_model.mem['h10000] = 8'h56;
+      u_model.mem['h10001] = 8'h78;
       repeat (20) @(negedge clock);
     end
     if (rd[1] != expect_error) $fatal(1, "flash status %h error=%b", rd, expect_error);
@@ -108,12 +126,17 @@ module tb_rapt_arty_flash;
   end
   initial begin : run_test
     int before_programs, before_erases;
+    #1;
+    u_model.mem[0] = 8'h12;
+    u_model.mem[1] = 8'h34;
+    u_model.mem['h10000] = 8'h56;
+    u_model.mem['h10001] = 8'h78;
     repeat (20) @(negedge clock);
     reset = 0;
     idle();
     ra = 9'h008;
     #1;
-    if ($test$plusargs("UNKNOWN_FLASH")) begin
+    if (UnknownFlash) begin
       if (rd != 32'h00ff_ffff) $fatal(1, "unknown ID %h", rd);
       operation(32'h5241_0001, 32'h0080_0000, 0, 1);
       ack();
@@ -152,7 +175,10 @@ module tb_rapt_arty_flash;
       check_window(32'h3000_0000 + offset - 32'h0080_0000, pattern);
     end
     operation(32'h5241_0002, 32'h0080_0000, 0);
-    operation(32'h5241_0002, 32'h0080_0000, '1);
+    operation(32'h5241_0002, 32'h0080_0000, '1, 1);
+    ack();
+    write_reg(9'h014, 32'h5241_0006);
+    idle();
     check_word(32'h0080_0000, 0);
     before_programs = u_model.programs;
     before_erases   = u_model.erases;

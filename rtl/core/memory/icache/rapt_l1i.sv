@@ -1148,6 +1148,14 @@ module rapt_l1i #(
   assign pmp_fetch_fault = pmp_fetch_pmp_fault || fetch_unmapped_fault;
 
 
+  // Keep the return pointer's reset above its advance enable. Folding the
+  // reset into that enable can leave a reset cone that still depends on the
+  // old pointer value after the metadata read port is lowered.
+  always_ff @(posedge clock) begin
+    if (reset) ifq_tail <= '0;
+    else if (cache_return && ifq_valid[ifq_tail]) ifq_tail <= ifq_tail + 1'b1;
+  end
+
   always_ff @(posedge clock) begin
     if (reset) begin
       l1i_state <= IDLE;
@@ -1156,7 +1164,6 @@ module rapt_l1i #(
       replace_bit <= 0;
       fill_way_r <= 0;
       l1i_fill_issue_idx <= '0;
-      ifq_tail <= 0;
       wait_invalid <= 1'b0;
     end else begin
 
@@ -1320,7 +1327,8 @@ module rapt_l1i #(
       endcase
     end
 
-    if (invalid_l1i || wait_invalid) begin
+    // Reset must dominate an invalidation left pending by the previous fetch.
+    if (!reset && (invalid_l1i || wait_invalid)) begin
       if (l1i_state == IDLE) begin
         wait_invalid <= 0;
       end else begin
@@ -1344,8 +1352,6 @@ module rapt_l1i #(
         replace_bit[idx_fetch] <= ~replace_bit[idx_fetch];
       end
     end
-    if (!reset && cache_return && ifq_valid[ifq_tail]) ifq_tail <= ifq_tail + 1;
-
     if (ifq_push_en) ifq_base_addr <= cache_refill_addr[XLEN-1:IfqBaseLsb];
 
     // One static write cone per IFQ entry. A returning response consumes an

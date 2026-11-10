@@ -2383,3 +2383,5 @@ verilator-l2tlb-cbo-rv32 verilator-l2tlb-cbo-rv64: override VERILATOR_DIRECTED_F
 verilator-wb-mshr-l2-rv32 verilator-wb-mshr-l2-rv64: override XSIM_COMMON_INCLUDES := $(subst /configs/$(XSIM_RAPT_CONFIG),/configs/default-l2,$(XSIM_COMMON_INCLUDES))
 
 include $(VERIFY_HOME)/directed-tests.mk
+include $(VERIFY_HOME)/spi-flash.mk
+include $(VERIFY_HOME)/io25.mk

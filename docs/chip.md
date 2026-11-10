@@ -1,17 +1,26 @@
 # Chip top and off-chip link
 
+The chip powers up in a small on-chip ROM and jumps to [Flash XIP](chip-flash.md)
+through its JESD251 Profile 1 backend. JTAG can select the private octal-link
+backend and reset target using a retained local register. No boot-selection pin
+is required; IRQ is an ordinary interrupt input.
+
 The pin-limited configuration in `synth/configs/pin-limited/rtl/` is one tape-out
-integration of the Raptor cluster, also used for Arty validation. The reusable
+integration of the Raptor cluster, also used for the optional
+[Arty octal-link fixture](../fpga/arty-a7-t100/OCTAL-LINK.md) (`PLATFORM=octal`). The reusable
 processor top is `rapt` in `rtl/rapt.sv`.
 All memory and peripherals sit on a board-side FPGA behind one octal link, so
-this integration needs only 17 signal pins and has one clock domain. Everything
+this integration needs 18 signal pins and has one clock domain. Everything
 here is technology-neutral.
 
 ```text
 rapt_chip_pads   rapt_pad_in / rapt_pad_out / rapt_pad_bidi around every signal pin
 └─ rapt_chip     reset, interrupt and JTAG synchronizers, DIAG divider
    ├─ rapt            cluster: core, L1s, CLINT, PLIC, Debug Module, DTM
-   └─ rapt_axi_xspi   AXI4 to octal link, local link and SRAM control registers
+   ├─ rapt_chip_boot      retained boot control and reset ROM
+   └─ rapt_chip_backend   exclusive AXI/pin ownership
+      ├─ rapt_axi_xspi    octal bridge, local link and SRAM control registers
+      └─ rapt_axi_flash   NOR SPI / 8D backend, local RAM and Flash control registers
 ```
 
 The `chip32-middle-16k` preset (`rtl/configs/chip32-middle-16k`) is RV32 only and
@@ -36,18 +45,104 @@ low-end FPGAs. `RAPT_NO_FPU` removes the FEU, clears F and D in MISA, keeps
 | --- | --- | --- | --- |
 | `pad_clk` | in | none | Core clock |
 | `pad_reset_n` | in | up | Asynchronous assert, synchronized release |
-| `pad_irq` | in | down | External interrupt, PLIC source 1, synchronized |
+| `pad_irq` | in | down | PLIC source 1 in both backends |
 | `pad_xspi_sclk` | out | | Link clock |
 | `pad_xspi_cs_n` | out | | Link frame, active low |
 | `pad_xspi_dq[7:0]` | bidirectional | down | Link data |
 | `pad_jtag_tck` | in | down | Oversampled; keep below 1/8 of the core clock |
 | `pad_jtag_tms`, `pad_jtag_tdi` | in | up | JTAG, synchronized |
 | `pad_jtag_tdo` | out | | JTAG, registered |
-| `pad_diag` | out | | Core clock / 1024 after reset release |
+| `pad_diag` | inout | down | Bridge clock / 1024; Flash DS input |
 
 There is no TRST pin: the TAP resets with the chip or through TMS. The DTM runs
 on the core clock with a TCK-rising-edge enable, so a running clock is required
-for debug. `pad_diag` proves clock, reset and output pads without the link.
+for debug. In the locked bridge mode, `pad_diag` outputs the clock / 1024 heartbeat.
+Flash mode releases its output enable and receives the target DS signal on this contact.
+Chip reset and the two switch clocks release its output enable. See the
+[JESD251D interface contract](chip-xspi.md) for DS and shared Flash reset,
+and the [25-signal integration](../synth/configs/io25/README.md) for UART/GPIO.
+
+## Boot control
+
+Chip reset always selects Flash and the on-chip ROM. At reset PC `0x20000000`,
+`lui t0, 0x30000; jalr x0, 0(t0)` jumps to XIP at `0x30000000`. Other words in
+that 64 KiB ROM window are NOP. Writes return SLVERR. The ROM needs neither
+Flash initialization nor JTAG to execute; the subsequent XIP fetch waits for
+Flash qualification. Images are raw code linked at `0x30000000`. The ROM does
+not authenticate images or change Flash contents.
+
+The local 32-bit boot-control register at **`0x00100808`** is accessible through
+DM System Bus Access in either backend, including while the core is in reset.
+Ordinary physical CPU MMIO can also reach it; there is no debug privilege filter.
+Use uncached accesses. Aligned, single-beat, 32-bit FIXED/INCR accesses are accepted.
+Writes require all four byte strobes, zero reserved bits and WLAST. Other
+accesses return SLVERR without changing the setting. On RV64 this word uses
+byte lanes 0..3. Reads have no side effects and remain stable under backpressure.
+
+| Bits | Access | Meaning |
+| --- | --- | --- |
+| 0 | RW | Requested backend: 1 Flash, 0 private octal bridge |
+| 1 | RW | Requested boot target: 1 ROM jump to XIP, 0 backend reset window |
+| 15:2 | RAZ | Reserved; write zero |
+| 16 | RO | Active backend |
+| 17 | RO | Active ROM selection |
+| 31:18 | RAZ | Reserved; write zero |
+
+Reset readback is `0x00030003`. Write values are `3` for Flash ROM-XIP, `0`
+for bridge boot at `0x20000000`, `2` for ROM-XIP through the bridge, or `1`
+for the low-64-KiB Flash alias at `0x20000000`. This is a fixed target selector;
+use the existing DPC abstract register to resume at another arbitrary address.
+Requested and active fields survive halt/resume, TAP/DM reset, `ndmreset` and
+core reset. Only chip/power-on reset clears them to `3`.
+
+A write changes only the requested fields. At the rising edge of the cluster's
+**drained core reset**, the controller snapshots them. An already offered AXI
+address stays valid through backpressure and competing requests. That transaction
+completes before switching; a parked Flash controller must also be idle.
+Initialization or an in-flight Flash operation can delay this boundary.
+No new AXI request is accepted during that wait. CS then stays high, SCLK low,
+and DQ and DIAG output enables stay zero for **two complete core clocks**.
+The active fields change between those clocks and the new backend is enabled
+on the following clock. Status reads wait until switching completes. An unchanged
+setting causes no switch. Writes while core reset is asserted return SLVERR.
+
+Use JTAG `halt`, write `0x00100808`, assert `dmcontrol.ndmreset` with haltreq,
+read back the active fields, deassert ndmreset retaining haltreq, wait for halted,
+then verify the active fields again before `resume`. Keep ndmreset asserted until
+active readback matches. This resets caches and removes stale instruction/data
+state. Keep the chip clock running while an accepted Flash request completes or
+returns an error. Never retry an uncertain external mutation automatically.
+
+Flash failure recovery uses the controller's bounded operations, without
+abandoning an AXI transfer. Power-up and reset recovery waits are finite;
+initialization bounds its status polling and SFDP descriptor scan. WIP polling
+counts core clocks, including frames and CS gaps, and expires after
+`FlashPollCycles`. A missing DS edge during an octal read expires after
+`max(CoreClockHz / 1000 + 1, 4 * FlashHalfPeriod + 16)` core clocks per byte.
+At 100 MHz the production waits are 100000001 power-up clocks, 10001 reset
+clocks, 100000001 Profile 1 recovery clocks and a 50000000-clock WIP budget;
+the missing-DS budget is 100001 clocks. These are clock budgets, not host
+wall-time budgets; underclocking lengthens their elapsed time.
+
+An absent, unqualified or stalled Flash returns SLVERR and zero read data.
+After the first failed beat the remaining beats of that AXI burst also return
+the error. The response ID, burst length, RLAST and backpressure rules remain
+intact. No new core requests are offered after halt acknowledgement. Once the
+older responses drain, the queued boot-control access completes, and the JTAG
+sequence above can select and boot a responding bridge. If an earlier SBA
+access itself failed, poll `sbbusy` until clear and clear sticky SBA errors
+before the control write. The Flash fault stays latched/unqualified; returning
+to Flash requires successful explicit recovery or chip reset, plus a valid
+image. A blank but responding Flash instead fetches invalid instructions;
+JTAG can still halt, select the bridge and reset-halt normally.
+
+The initialized Flash controller and local RAM are retained while parked, so a
+return to Flash preserves the target's established octal protocol. The bridge
+is reset while inactive. Chip reset also resets the external Flash through the
+shared reset connection. External fixture logic must provide the selected
+protocol and release its return drivers in the other mode. IRQ is a synchronized
+PLIC source 1 in **both** modes; it never selects boot or owns the DIAG contact.
+DIAG drives core-clock/1024 in bridge mode and receives DS in Flash mode.
 
 ## Octal link
 
@@ -126,9 +221,13 @@ no flash-specific registers. SBA supports 8/16/32-bit accesses on this RV32 chip
 `dmcontrol.ndmreset` resets the core, caches, L2 and interrupt peripherals while
 keeping the DTM, DM, arbiter/router and octal bridge alive. Accepted core bus
 transfers drain before reset; no AXI response ownership is lost. OpenOCD can use
-`reset halt`, and SBA remains available while the core is held in reset. A running
-chip clock and a responsive board/link are still required. A permanently hung
-bus can prevent drain and requires external chip/board reset.
+`reset halt`, and SBA remains available while the core is held in reset and after
+reset release while halted. The arbiter blocks new core requests after halt is
+acknowledged, including speculative instruction refills. Local boot-control SBA
+access therefore needs no external bridge responder in this state. A running
+chip clock is required; external accesses still need a responsive board/link.
+A permanently hung accepted transfer can prevent drain and requires external
+chip/board reset.
 
 For a fresh program, use `reset halt`, load and verify RAM through SBA, then
 `reset halt` again, `reg pc <entry>` and `resume`. Board RAM/ROM survive

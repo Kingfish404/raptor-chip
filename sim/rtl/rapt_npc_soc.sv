@@ -192,6 +192,7 @@ module raptSoC #(
       .L1dWriteBack(L1dWriteBack)
   ) cpu (
       .sram_ctrl_i      (rapt_pkg::SramCtrlReset),
+      .core_reset_o(),
       .writeback_error_o(writeback_error_o),
       .external_write_valid_i,
       .external_write_pending_i,

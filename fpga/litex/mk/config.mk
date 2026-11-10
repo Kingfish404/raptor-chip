@@ -8,6 +8,29 @@ ifeq ($(LITEX_CONFIG_PHASE),profile)
 # main Makefile; these values only drive derived configuration.
 # RV64 uses a common 30 MHz bring-up target; RV32 retains each board's existing
 # Linux clock.
+BOARD_arty_a7_t100_VENDOR              := vivado
+BOARD_arty_a7_t100_PY                  := arty_a7_t100.py
+BOARD_arty_a7_t100_BITNAME             := arty_a7_t100.bit
+BOARD_arty_a7_t100_TIMINGRPT           := arty_a7_t100_timing.rpt
+BOARD_arty_a7_t100_DEVICE              := xc7a100t
+BOARD_arty_a7_t100_PART                := xc7a100tcsg324-1
+BOARD_arty_a7_t100_DEFAULT_SYS_CLK     := 20000000
+BOARD_arty_a7_t100_LINUX32_SYS_CLK     := 20000000
+BOARD_arty_a7_t100_LINUX64_SYS_CLK     := 20000000
+BOARD_arty_a7_t100_DEFAULT_RAPT_CONFIG := small
+BOARD_arty_a7_t100_HAS_LITEDRAM        := 1
+BOARD_arty_a7_t100_LINUX_WITH_LITEDRAM := 1
+BOARD_arty_a7_t100_LITEDRAM_SIZE       := 0x10000000
+BOARD_arty_a7_t100_HAS_MIG             := 0
+BOARD_arty_a7_t100_LINUX_WITH_MIG      := 0
+BOARD_arty_a7_t100_HAS_SDCARD          := 0
+BOARD_arty_a7_t100_DEFAULT_WITH_SDCARD := 0
+BOARD_arty_a7_t100_LINUX_WITH_SDCARD   := 0
+BOARD_arty_a7_t100_LINUX_MAIN_RAM_SIZE := 0
+BOARD_arty_a7_t100_DEFAULT_WITH_ETHERNET := 1
+BOARD_arty_a7_t100_ETH_SPEED           := 100
+BOARD_arty_a7_t100_VIVADO_FLASH        := 0
+
 BOARD_tang_mega_138k_pro_VENDOR              := gowin
 BOARD_tang_mega_138k_pro_PY                  := tang_mega_138k_pro.py
 BOARD_tang_mega_138k_pro_BITNAME             := sipeed_tang_mega_138k_pro.fs
@@ -302,18 +325,26 @@ WITH_CM005_BRIDGE_FLAG = $(if $(_CM005_BOARD),$(if $(_CM005_ENABLED),,--without-
 WITH_ETHERNET ?= $(or $(BOARD_$(FPGA_BOARD)_DEFAULT_WITH_ETHERNET),0)
 FMC_SLOT ?= $(if $(filter mlk_cu08_ku15p,$(FPGA_BOARD)),c,a)
 ETH_PORT ?= a
-ETH_SPEED ?= 1000
+ETH_SPEED ?= $(or $(BOARD_$(FPGA_BOARD)_ETH_SPEED),1000)
 ifneq (,$(filter 1 yes true on,$(WITH_ETHERNET)))
 ifeq (,$(filter 100 1000,$(ETH_SPEED)))
 $(error ETH_SPEED must be 100 or 1000 Mb/s)
 endif
-ifeq (,$(filter mlk_cu07_ku15p mlk_cu08_ku15p rk_xcku5p_f,$(FPGA_BOARD)))
-$(error Ethernet requires an MLK KU15P or RK-XCKU5P-F target)
+ifeq (,$(filter arty_a7_t100 mlk_cu07_ku15p mlk_cu08_ku15p rk_xcku5p_f,$(FPGA_BOARD)))
+$(error Ethernet requires an Arty, MLK KU15P or RK-XCKU5P-F target)
+endif
+ifeq ($(FPGA_BOARD),arty_a7_t100)
+ifneq ($(ETH_SPEED),100)
+$(error Arty Ethernet requires ETH_SPEED=100)
+endif
 endif
 endif
 # The PHY ports are in use when either the CPU NIC or CM005 forwarding is enabled.
 _ETHERNET_PORTS_USED = $(filter 1 yes true on,$(WITH_ETHERNET) $(WITH_CM005_BRIDGE))
 _ETHERNET_PORT_ARGS = --fmc-slot=$(FMC_SLOT) --eth-port=$(ETH_PORT) --eth-speed=$(ETH_SPEED)
+ifeq ($(FPGA_BOARD),arty_a7_t100)
+_ETHERNET_PORT_ARGS = --eth-speed=$(ETH_SPEED)
+endif
 WITH_ETHERNET_FLAG = $(if $(filter 1 yes true on,$(WITH_ETHERNET)),--with-ethernet,) \
 	$(if $(_ETHERNET_PORTS_USED),$(_ETHERNET_PORT_ARGS),)
 
@@ -330,7 +361,8 @@ FPGA_FLAVOR := $(FPGA_FLAVOR)-sdcard
 endif
 FPGA_FLAVOR := $(FPGA_FLAVOR)-$(RAPT_CONFIG)
 ifneq (,$(filter 1 yes true on,$(WITH_ETHERNET)))
-FPGA_FLAVOR := $(FPGA_FLAVOR)-$(if $(filter rk_xcku5p_f,$(FPGA_BOARD)),onboard-eth,cm005-$(FMC_SLOT)-$(ETH_PORT))
+_ONBOARD_ETH_BOARD := $(filter arty_a7_t100 rk_xcku5p_f,$(FPGA_BOARD))
+FPGA_FLAVOR := $(FPGA_FLAVOR)-$(if $(_ONBOARD_ETH_BOARD),onboard-eth,cm005-$(FMC_SLOT)-$(ETH_PORT))
 ifeq ($(ETH_SPEED),100)
 FPGA_FLAVOR := $(FPGA_FLAVOR)-100m
 endif
@@ -432,6 +464,7 @@ _FPGA_HASH_COMMON_INPUTS = $(PACK_SV) $(RTL_SOURCES) $(FPGA_PY) $(LITEX_DIR)/Mak
 	$(LITEX_DIR)/mk/config.mk $(LITEX_DIR)/mk/recipes.mk \
 	$(LITEX_DIR)/cores/cpu/raptor/core.py \
 	$(wildcard $(LITEX_DIR)/cores/cpu/raptor/*.h $(LITEX_DIR)/cores/cpu/raptor/*.S) \
+	$(if $(filter arty_a7_t100,$(FPGA_BOARD)),$(LITEX_DIR)/scripts/arty_timing.tcl,) \
 	$(if $(filter mlk_cu07_ku15p mlk_cu08_ku15p rk_xcku5p_f,$(FPGA_BOARD)),$(LITEX_DIR)/ku15p_soc.py $(LITEX_DIR)/scripts/vivado_retry_timing.tcl,) \
 	$(if $(filter mlk_cu07_ku15p mlk_cu08_ku15p rk_xcku5p_f,$(FPGA_BOARD)),$(LITEX_DIR)/scripts/vivado_setup_margin.tcl,) \
 	$(if $(filter rk_xcku5p_f,$(FPGA_BOARD)),$(LITEX_DIR)/rk_xcku5p_f_platform.py $(RAPTOR_HOME)/fpga/rk-xcku5p-f/constraints/ddr4.xdc,) \

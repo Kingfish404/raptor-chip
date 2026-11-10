@@ -15,6 +15,7 @@ proc program_arty {} {
     }
     if {[llength $matches] != 1} {error "authorized Digilent target not uniquely found"}
     current_hw_target [lindex $matches 0]
+    puts "RAPT_ARTY_TARGET name=[get_property NAME [lindex $matches 0]] serial=$serial"
     open_hw_target
     set target_open 1
     set devices [get_hw_devices -quiet]

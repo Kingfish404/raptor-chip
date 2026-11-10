@@ -10,6 +10,7 @@ import subprocess
 import sys
 
 from migen import *
+from migen.genlib.cdc import MultiReg
 from litex.gen import *
 from litex.soc.interconnect import axi
 from litex.soc.cores.cpu import CPU, CPU_GCC_TRIPLE_RISCV32, CPU_GCC_TRIPLE_RISCV64
@@ -141,15 +142,32 @@ class Raptor(CPU):
             i_io_master_rdata=axi_if.r.data,
             i_io_master_rresp=axi_if.r.resp,
             i_io_master_rlast=axi_if.r.last,
-            # JTAG (always-on at the cluster boundary). LiteX targets do not
-            # expose a JTAG header for the Raptor core today, so park the
-            # DTM in TLR by tying trst_n=0/tms=1/tdi=0; tdo is left floating.
+            # Park JTAG until a board connects its sampled TAP. Arty replaces
+            # these parameters with its external CPU JTAG signals.
             i_jtag_trst_n=0,
             i_jtag_tck_en=1,
             i_jtag_tms=1,
             i_jtag_tdi=0,
             o_jtag_tdo=Signal(),
         )
+        platform_config = {} if platform is None else vars(platform)
+        cpu_domain = platform_config.get("raptor_cpu_clock_domain", "sys")
+        if cpu_domain != "sys":
+            cpu_axi = self.periph_buses[0]
+            sys_axi = axi.AXIInterface(data_width=self.data_width, address_width=32, id_width=4)
+            self.axi_cdc = axi.AXIClockDomainCrossing(
+                cpu_axi, sys_axi, cd_from=cpu_domain, cd_to="sys")
+            self.periph_buses = [sys_axi]
+            irq, reset = Signal(32), Signal()
+            self.specials += [
+                MultiReg(self.interrupt, irq, cpu_domain),
+                MultiReg(self.reset, reset, cpu_domain),
+            ]
+            self.cpu_params.update(
+                i_clock=ClockSignal(cpu_domain),
+                i_reset=ResetSignal(cpu_domain) | reset,
+                i_ext_irq_i=irq[:31],
+            )
 
     def set_reset_address(self, reset_address):
         self.reset_address = reset_address

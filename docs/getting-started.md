@@ -119,12 +119,12 @@ Details: **[Linux Kernel Boot](./linux_kernel.md)**.
 
 ## 7. FPGA
 
-The root FPGA targets select native **MLK-CU08-KU15P** by default:
+The root FPGA targets select **MLK-CU08-KU15P** by default:
 
 ```shell
 make fpga-synth
 make fpga-build
-# Select another native board explicitly
+# Select another board
 make fpga-build FPGA_BOARD=rk-xcku5p-f
 # Board-local targets and variables
 make -C fpga/rk-xcku5p-f help
@@ -137,7 +137,7 @@ make -C fpga/litex help
 make -C fpga/litex fpga-detect
 ```
 
-See [native FPGA support](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/README.md) and
+See [FPGA support](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/README.md) and
 [LiteX board setup](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/litex/README.md) for toolchains and constraints.
 Synthesis does not establish routed timing closure or a working board image.
 
@@ -165,7 +165,7 @@ make clean    # clean NEMU, selected sim profile, generated RTL, verify and app 
 | `DIFFTEST=0` / `1` | Disable / enable the NEMU differential reference |
 | `BENCH_OPT=baseline` / `optimized` | Benchmark compiler preset |
 | `SIM_RANDOM_DELAY`, `SIM_RANDOM_SEED` | Reproducible memory wait states |
-| `FPGA_BOARD` | Native FPGA board selection |
+| `FPGA_BOARD` | FPGA board selection |
 | `MEMORY=sram` / `dff`, `XLEN=32` / `64` | STA memory model and word width |
 
 For direct shell workflows, run `source env.sh`. See the

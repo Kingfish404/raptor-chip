@@ -1,0 +1,142 @@
+{
+  "schema": 1,
+  "scope": "initial native Arty fixture, both DS edges",
+  "external_io_signoff": false,
+  "core_hz": 10000000,
+  "core_period_ns": 100,
+  "half_period_core_cycles": 8,
+  "ck_half_ns": 800,
+  "ck_full_ns": 1600,
+  "rx_supported_signed_ns": [
+    -25,
+    25
+  ],
+  "rx_allocations": [
+    {
+      "item": "target DQ relative to DS",
+      "signed_ns": [
+        -5,
+        5
+      ],
+      "status": "allocation"
+    },
+    {
+      "item": "connector and carrier lane spread",
+      "signed_ns": [
+        -5,
+        5
+      ],
+      "status": "unmeasured"
+    },
+    {
+      "item": "level translation lane spread",
+      "signed_ns": [
+        -5,
+        5
+      ],
+      "status": "unmeasured"
+    },
+    {
+      "item": "FPGA input buffers and routes",
+      "signed_ns": [
+        -5,
+        5
+      ],
+      "status": "routed check pending"
+    },
+    {
+      "item": "sampling uncertainty and setup/hold reserve",
+      "signed_ns": [
+        -5,
+        5
+      ],
+      "status": "reserve"
+    }
+  ],
+  "rx_total_signed_ns": [
+    -25,
+    25
+  ],
+  "rx_residual_ns": 0,
+  "rx_input_path_bounds_ns": [
+    0,
+    5
+  ],
+  "tx_nominal_centered_setup_hold_ns": 400,
+  "tx_fpga_output_path_bounds_ns": [
+    0,
+    10
+  ],
+  "tx_external_spread_allocation_ns": 10,
+  "tx_uncertainty_reserve_ns": 5,
+  "target_ddr_setup_hold_required_ns": 0.4,
+  "tx_setup_hold_residual_ns": 374.6,
+  "target_output_disable_max_ns": 6,
+  "target_cs_setup_required_ns": 2.25,
+  "target_cs_hold_required_ns": 2,
+  "target_cs_high_read_required_ns": 10,
+  "target_cs_high_other_required_ns": 30,
+  "target_reset_low_required_ns": 50,
+  "target_startup_wait_cycles": 10000001,
+  "target_recovery_wait_cycles": 10000001,
+  "digital_positive_tuples_ns": [
+    {
+      "forward": 0,
+      "ds_return": 91,
+      "dq_minus_ds_per_lane": [
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25
+      ]
+    },
+    {
+      "forward": 0,
+      "ds_return": 91,
+      "dq_minus_ds_per_lane": [
+        -25,
+        -24,
+        -23,
+        -22,
+        -21,
+        -20,
+        -19,
+        -18
+      ]
+    }
+  ],
+  "historical_out_of_envelope_ns": [
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32
+  ],
+  "notes": [
+    "Lane spread is already included in the complete DQ-to-DS envelope.",
+    "Digital extreme tests represent the complete effective receive envelope; do not add route or uncertainty again.",
+    "External allocations are requirements to measure, not measured board claims.",
+    "Target AC requirements are cross-checked against MT35XU256ABA Rev. G, Table 47; fitted target and carrier require board qualification."
+  ],
+  "applies_to_lanes": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "applies_to_ds_edges": [
+    "rising",
+    "falling"
+  ]
+}

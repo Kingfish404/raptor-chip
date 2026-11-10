@@ -5,5 +5,8 @@
 !*.cfg
 !*.xdc
 !*.ld
+!*.mk
+!*.md
 !/scripts/build.tcl
 __pycache__/
+build/

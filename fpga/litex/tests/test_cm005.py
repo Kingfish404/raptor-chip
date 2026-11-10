@@ -8,6 +8,7 @@ import inspect
 import os
 import pathlib
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -45,10 +46,14 @@ class CM005Test(unittest.TestCase):
                                (CM005PHY, "speed"), (CM005MDIO, "speed"),
                                (CM005MDIOInit, "speed")):
             self.assertEqual(inspect.signature(cls.__init__).parameters[parameter].default, 1000)
-        for name in ("Makefile", "mk/config.mk"):
-            defaults = re.findall(r"^ETH_SPEED\s*\?=\s*(\d+)\s*$",
-                                  (root / name).read_text(), re.M)
-            self.assertEqual(defaults, ["1000"], name)
+        probe = "eth-default:\n\t@printf '%s\\n' '$(ETH_SPEED)'\n"
+        for board, expected in (("mlk_cu07_ku15p", "1000"), ("mlk_cu08_ku15p", "1000"),
+                                ("rk_xcku5p_f", "1000"), ("arty_a7_t100", "100")):
+            result = subprocess.run(
+                ["make", "--no-print-directory", "-s", "-f", "Makefile", "-f", "-",
+                 "eth-default", f"FPGA_BOARD={board}", "FPGA_AUTO_DETECT=0"],
+                cwd=root, input=probe, capture_output=True, text=True, check=True)
+            self.assertEqual(result.stdout.strip(), expected, board)
         # Inspect the actual CLI declaration without running the build entry
         # point or Makefile parsing (which can have unrelated side effects).
         calls = [node for node in ast.walk(ast.parse((root / "ku15p_soc.py").read_text()))

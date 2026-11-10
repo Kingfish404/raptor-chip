@@ -236,7 +236,7 @@ make llm-native-test LLM_OP_ITERS=8192 LLM_GEN_TOKENS=16 LLM_TRAIN_STEPS=4096
 
 The port layer is the single header `benchmarks/llm/rllmbench_port.h`. New bare-metal RISC-V ports normally only set `RLLMBENCH_TIMEBASE_HZ` to the real `time` CSR rate; unusual platforms can override `RLLMBENCH_READ_TIME_US()` to return monotonic physical microseconds. For NPC comparisons, `make llm-bench-report-rv32` defaults to `RLLMBENCH_TIMEBASE_HZ=10000000` and `RLLMBENCH_CORE_CLOCK_MHZ=1000`, matching the current RTL timer/core-clock model. Override `RLLMBENCH_CORE_CLOCK_MHZ` for FPGA or ASIC reports when the core frequency differs.
 
-The same source can also be linked as a LiteX-native flat binary:
+The same source can also be linked as a flat binary for LiteX:
 
 ```bash
 make llm-litex-build
@@ -290,7 +290,7 @@ sudo apt install gcc-riscv64-linux-gnu    # glibc
 4. Programs should use only standard C library functions (`stdio.h`, `stdlib.h`, `string.h`, `stdint.h`)
 5. Tests should print pass/fail summary and return `EXIT_FAILURE` on any failure
 
-## LiteX-Native App Payloads
+## App Payloads for LiteX
 
 For FPGA-facing app code, keep the algorithm in ordinary C and link it with
 `app/lib/litex/start.S`, `app/lib/litex/link.ld`, and `app/lib/litex/runtime.c`.

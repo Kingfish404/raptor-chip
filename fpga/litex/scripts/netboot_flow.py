@@ -24,6 +24,7 @@ import netboot
 
 LITEX = Path(__file__).resolve().parents[1]
 BOARD_ARTIFACTS = {
+    'arty_a7_t100': ('arty_a7_t100.bit', 'arty_a7_t100_timing.rpt', 'xc7a100t'),
     'mlk_cu08_ku15p': ('mlk_cu08_ku15p.bit', 'mlk_cu08_ku15p_timing.rpt', 'xcku15p'),
     'rk_xcku5p_f': ('rk_xcku5p_f.bit', 'rk_xcku5p_f_timing.rpt', 'xcku5p'),
 }

@@ -70,6 +70,7 @@ module btb_storage_case #(
     write_hit = lookup(int'(waddr), wd_tag);
     selected = write_hit >= 0 ? write_hit : victim[waddr];
     if (reset || init) begin
+      if (reset) sampled = 0;
       for (int idx = 0; idx < Sets; idx++) begin
         victim[idx] = 0;
         for (int way = 0; way < 2; way++) model_valid[idx][way] = 0;

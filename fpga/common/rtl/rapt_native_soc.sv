@@ -65,6 +65,7 @@ module rapt_native_soc #(
 `ifdef RAPT_SAMPLING
       .sample,
 `endif
+      .core_reset_o(),
       .writeback_error_o(writeback_error),
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),

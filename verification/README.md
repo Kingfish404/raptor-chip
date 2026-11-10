@@ -5,6 +5,11 @@ entry points and variables. Software payloads live in `app/tests/`; runners,
 references and RTL testbenches live here. Keep results outside the source tree
 when comparing revisions or configurations.
 
+The [25-signal chip integration](../synth/configs/io25/README.md) has paired
+`verilator-chip-io25-bus-rv32/rv64` peripheral checks and
+`verilator-chip-io25-rv32/rv64` CPU/pad boot checks. Select an RV64-capable preset
+for RV64, such as `XSIM_RAPT_CONFIG=small`; `chip32-small` is RV32-only.
+
 ## Quick start
 
 ```sh
@@ -52,6 +57,8 @@ make -C verification verilator-ioq-store-stage-rv32 verilator-ioq-store-stage-rv
 make -C verification verilator-fetch-prediction-rv32 verilator-fetch-prediction-rv64
 make -C verification verilator-l1d-writeback-rv32 verilator-l1d-writeback-rv64
 make -C verification verilator-l2-forwarded-client-rv32 verilator-l2-forwarded-client-rv64
+make -C verification XSIM_RAPT_CONFIG=formal \
+  verilator-l1i-reset-dominance-rv32 verilator-l1i-reset-dominance-rv64
 make -C verification w4-scaling
 python3 verification/scripts/directed_registry.py list
 ```
@@ -63,6 +70,8 @@ while target suffixes select RV32/RV64. Some tests explicitly select a preset or
 parameter matrix; inspect their row in `directed-tests.mk` before overriding it.
 `VERILATOR_DIRECTED_DELAY` and `VERILATOR_DIRECTED_SEED` control tests that expose
 random bus timing. Shared flags are in `VERILATOR_DIRECTED_FLAGS`.
+The L1I reset check reaches a stalled refill through ordinary requests, then checks
+cold and warm reset, pending invalidation, pipeline recovery and request reissue.
 The supported `xsim-*` aliases select the same rows in `directed-tests.mk`;
 there is no separate XSim source/define table. They forward shared delay/seed
 settings and translate plusargs for XSim. `LSU_SQ_RANDOM_SEED` still supplies the
@@ -176,7 +185,7 @@ Formal scope and native matrix drivers honor fixed-XLEN preset declarations.
 
 `formal-clint` qualifies the production bus interface, register byte lanes and
 timer/interrupt state. Its default divider bindings are 1, 3, 5, 10, 20, 25, 50 and
-100, including native FPGA clocks and documented clock/timebase examples. The
+100, including FPGA clocks and documented clock/timebase examples. The
 Python driver's `clint --dividers` option selects an explicit set; other divider
 overrides need additional bindings. `FORMAL_CLINT_PRESETS` limits focused work.
 
@@ -275,3 +284,20 @@ Their `--help` output lists input/reference and output options;
 compared images and memory settings identical. Fixed port/scan-width experiment
 targets and PRF/RNU snapshot proofs have been retired; current contract checks,
 formal entry points and generic synthesis flows remain available.
+
+## Direct chip Flash
+
+The [direct Flash integration](../docs/chip-flash.md) has paired RV32/RV64
+`verilator-spi-flash-*`, `verilator-spi-flash-delayed-*`,
+`verilator-spi-flash-identity-*`, `verilator-spi-flash-max-time-*` and
+`verilator-spi-flash-boot-*` checks. The
+CPU checks build raw firmware using `CROSS_COMPILE` and execute reset-vector XIP,
+RAM initialization/execution and Flash erase/program/readback without the custom
+FPGA bridge. Set `BUILD_DIR` outside the checkout for images, binaries and logs.
+
+`verilator-chip-xspi-boot-rv32` / `-rv64` execute default ROM-XIP, JTAG/SBA
+selection of the bridge, repeated ndmreset, return to Flash with retained octal
+protocol, and chip-reset default restoration. They check IRQ in both modes and
+released pad ownership during switching. `verilator-chip-io25-rv32` / `-rv64`
+exercise two pad-level ROM-XIP boots, reset, JTAG IDCODE, both UARTs, GPIO and a
+verified EBREAK good trap. Outputs belong in an external `BUILD_DIR`.

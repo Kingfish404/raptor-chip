@@ -271,7 +271,7 @@ The forwarding tests have four entry points:
 | `test_cm005_bridge.py` | Frame admission, ordering, errors/overflow/reset; three-port arbitration and blocked outputs; dual physical MAC/CDC paths; complete wire frames, FCS and IFG at 10/30 MHz |
 | `test_cm005_cpu_mac.py` | Actual Wishbone packet bytes, CSR/IRQ acknowledgements, reset state and preamble/CRC capability readback |
 | `test_cm005_integration.py` | Standalone clock/pin constraints, RV32/RV64 CPU NIC/DTS/BIOS ABI, explicit disable, KU5P compatibility, Make identity/timing gates and read-only MDIO diagnostics |
-| `test_cm005_native.py` | Native MMIO, deterministic export, dependency isolation and sampling-constraint coverage |
+| `test_cm005_native.py` | Board MMIO, deterministic export and dependency checks; sampling constraints |
 
 For a quick queue/arbitration iteration, select the classes directly:
 

@@ -6,7 +6,7 @@ from pathlib import Path
 import shutil
 import tempfile
 
-from netboot_distro import ADDRESSES, require, sha
+from netboot_distro import ADDRESSES, require, require_ram_root, sha
 from netboot_names import valid_namespace
 
 
@@ -28,6 +28,9 @@ def verify(bundle):
     for name, expected in record['files'].items():
         require(not (bundle / name).is_symlink() and sha(bundle / name) == expected,
                 f'bundle hash mismatch: {name}')
+    if 'rootfs_unpacked_size' in record:
+        require_ram_root(record['ram_size'], (bundle / rootfs_name).stat().st_size,
+                         record['rootfs_unpacked_size'])
     require(sha(bundle / 'kernel.config') == record['kernel_config_sha256'], 'kernel config mismatch')
     boot = {str(Path(relative) / name): hex(address) for name, address in addresses.items()}
     boot['addr'] = hex(ADDRESSES['stage0.bin'])

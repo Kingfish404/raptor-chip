@@ -8,7 +8,7 @@
 #define REQUEST_MAGIC 0x5241464cu
 
 static inline void console(const char *text) {
-  volatile uint8_t *uart = (volatile uint8_t *)0x10000000u;
+  volatile uint8_t *uart = (volatile uint8_t *)0x10003000u;
   while (*text) {
     while (!(uart[5] & 0x20)) {}
     uart[0] = (uint8_t)*text++;

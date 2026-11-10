@@ -5,12 +5,14 @@ module rapt_arty_board #(
     parameter int ClockHz = 100_000_000,
     parameter int Baud = 115200,
     parameter bit InternalJoin = 1'b0,
+    parameter int unsigned FlashPowerupCycles = 10_000_001,
+    parameter int unsigned FlashResetCycles = 1001,
+    parameter int unsigned FlashRecoveryCycles = 10_000_001,
     parameter string RomFile = "mrom.hex"
 ) (
     input logic clock,
     input logic flash_clock,
     input logic reset,
-    input logic boot_switch_i,
     output logic [2:0] link_delay_o,
     input logic cpu_reset_i,
     input logic sclk_i,
@@ -71,11 +73,15 @@ module rapt_arty_board #(
       .dq_i(dq_i),
       .dq_o(dq_o),
       .dq_oe_o(dq_oe_o),
+      .status_poll_o(),
       .axi(board)
   );
 
   rapt_arty_mem #(
       .RamBytes(RamBytes),
+      .FlashPowerupCycles(FlashPowerupCycles),
+      .FlashResetCycles(FlashResetCycles),
+      .FlashRecoveryCycles(FlashRecoveryCycles),
       .RomFile (RomFile)
   ) u_mem (
       .clock(clock),
@@ -134,7 +140,6 @@ module rapt_arty_board #(
   ) u_host (
       .clock(clock),
       .reset(reset),
-      .boot_switch_i(boot_switch_i),
       .boot_flash_o(boot_flash),
       .link_delay_o(link_delay_o),
       .rx_data_i(rx_data),

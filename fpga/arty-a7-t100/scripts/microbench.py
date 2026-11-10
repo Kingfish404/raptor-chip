@@ -28,7 +28,7 @@ def main():
              "-O2", "-g", "-fno-pic", "-ffreestanding", "-fno-builtin",
              "-fno-stack-protector", "-fno-asynchronous-unwind-tables",
              "-ffunction-sections", "-fdata-sections", "-Wno-main",
-             '-DARCH_H="arch/riscv.h"', '-DMAINARGS="test"']
+             '-DARCH_H="arch/riscv.h"', '-DMAINARGS="test"', '-DSERIAL_PORT=0x10003000']
     flags += ["-I" + str(p) for p in (bench / "include", am / "am/include",
                                     am / "klib/include", am / "am/src/riscv/npc/include",
                                     am / "am/src")]

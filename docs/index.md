@@ -12,7 +12,7 @@ A configurable, superscalar out-of-order processor with TAGE prediction,
 scalar floating point, and Sv32/Sv39 virtual memory. The default RV64
 configuration supports [RVA22S64](./README.md#rva22s64-support).
 
-SystemVerilog RTL · Verilator + NEMU difftest · Native FPGA and LiteX flows
+SystemVerilog RTL · Verilator + NEMU difftest · FPGA and LiteX support
 
 [Read the architecture](./uarch.md).
 

@@ -52,6 +52,9 @@ module rapt #(
     input rapt_pkg::sram_ctrl_t sram_ctrl_i,
     input clock,
     output logic writeback_error_o,
+    // Asserted only after core AXI traffic drains; retained integrations may
+    // use this boundary to apply a boot setting without resetting the DM.
+    output logic core_reset_o,
     // Device writes are reported before a later SC may complete. Pending
     // holds SC while the platform drains a finite batch of notifications.
     input logic external_write_valid_i,
@@ -190,6 +193,7 @@ module rapt #(
   // The router, arbiter and external bridge retain response ownership throughout.
   assign core_block = dm_ndmreset || ndmreset_pending_q || ndmreset_active_q;
   assign core_reset = reset || ndmreset_active_q;
+  assign core_reset_o = core_reset;
   always_ff @(posedge clock) begin
     if (reset) begin
       ndmreset_pending_q <= 1'b0;
@@ -285,7 +289,11 @@ module rapt #(
   ) debug_arbiter (
       .clock(clock),
       .reset(reset),
-      .core_block_i(core_block),
+      // Halt stops retirement before the instruction cache stops requesting.
+      // Keep speculative refills off an unconnected external backend so SBA
+      // remains usable after releasing ndmreset with haltreq still asserted.
+      // Existing offers drain; debug cache cleaning completes before halted.
+      .core_block_i(core_block || dm_halted),
       .core_idle_o(core_bus_idle),
       .core_axi(core_axi),
       .sb_axi(sb_axi),

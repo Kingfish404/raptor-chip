@@ -1,4 +1,4 @@
-# Shared native RV64 DDR/NFS Ubuntu targets. Include after board.mk; the board
+# Shared RV64 DDR/NFS Ubuntu targets. Include after board.mk; the board
 # Makefile selects the NIC by overriding its options on UBUNTU_BITSTREAM_TARGETS.
 # Values left empty here fall back to the board's board.json.
 
@@ -9,7 +9,7 @@ UBUNTU_CLIENT ?= 192.168.50.0/24 ## NFS client subnet or a single IPv4/32
 UBUNTU_SSH_KEY ?= ## SSH public key installed for root (empty: no key)
 UBUNTU_CROSS ?= riscv64-linux-gnu- ## Linux toolchain prefix for the kernel
 UBUNTU_KERNEL_DIR ?= ## Reuse a verified kernel artifact directory
-UBUNTU_NATIVE_BUILD ?= ## Native build directory to boot (empty: the matching configuration)
+UBUNTU_NATIVE_BUILD ?= ## Board build directory to boot (empty: the matching configuration)
 UBUNTU_TRANSPORT ?= ## Boot transport, tftp or uart (empty: board.json)
 UBUNTU_BOOT_IP ?= ## Loader IPv4 address on the server LAN (empty: board.json)
 UBUNTU_TFTP_PORT ?= 6969 ## Host TFTP port
@@ -37,13 +37,13 @@ UBUNTU_BITSTREAM_TARGETS := ubuntu-info ubuntu-bitstream ubuntu-load
 UBUNTU_TARGETS := ubuntu-kernel ubuntu-rootfs ubuntu-bundle ubuntu-check ubuntu-serve \
 	ubuntu-boot ubuntu-unserve
 
-# Ubuntu runs on the RV64 DDR native SoC; RAPT_CONFIG may still be overridden.
+# Ubuntu runs on the RV64 DDR SoC; RAPT_CONFIG may be overridden.
 $(UBUNTU_BITSTREAM_TARGETS) $(UBUNTU_TARGETS): RAPT_CONFIG = middle-cache
 $(UBUNTU_BITSTREAM_TARGETS): override XLEN := 64
 $(UBUNTU_BITSTREAM_TARGETS): override MEMORY := ddr
 
 # ============================================================================
-# Native Ubuntu 24.04 (RV64, DDR, Ethernet, root filesystem over NFS)
+# Ubuntu 24.04 (RV64, DDR, Ethernet, root filesystem over NFS)
 # ============================================================================
 
 ubuntu-info: ## Print the Ubuntu bitstream configuration and output directory
@@ -76,7 +76,7 @@ ubuntu-boot: ## Send the bundle over TFTP or UART, boot and attach the console
 ubuntu-unserve: ## Remove the NFS export
 	$(UBUNTU) unserve
 
-ubuntu-test: ## Run the shared native and Ubuntu host unit tests
+ubuntu-test: ## Run the shared board and Ubuntu host unit tests
 	$(PYTHON) -m unittest discover -s $(COMMON_DIR)/tests -p 'test_*.py' -v
 
 .PHONY: $(UBUNTU_BITSTREAM_TARGETS) $(UBUNTU_TARGETS) ubuntu-test

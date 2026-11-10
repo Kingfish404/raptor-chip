@@ -1,14 +1,12 @@
-# Native MLK-CU08-KU15P
+# MLK-CU08-KU15P
 
 Raptor support for `xcku15p-ffva1156-2-e`, using SystemVerilog, XDC and batch
-Vivado. The native SoC supports RV32/RV64 with BRAM or DDR4 main memory, a boot
-ROM, scratch SRAM, an 8250-compatible UART, CLINT and PLIC. The default native
+Vivado. The SoC supports RV32/RV64 with BRAM or DDR4 main memory, a boot
+ROM, scratch SRAM, an 8250-compatible UART, CLINT and PLIC. The default
 build includes DDR4 and the CM005 A↔B Ethernet forwarder. Its two-port forwarding
-path runs independently of CPU execution and DDR calibration; the native UART
-remains the CPU console. `CM005_ETHERNET=1` adds a CPU NIC through the existing
-three-port switch. The native `ubuntu-*` targets select that NIC and NFS root
-boot. This directory is a standalone build; the LiteX SoC for the same board
-is a separate flow in `fpga/litex`.
+path runs independently of CPU execution and DDR calibration; the UART
+provides the CPU console. `CM005_ETHERNET=1` adds a CPU NIC through the
+three-port switch. The `ubuntu-*` targets select that NIC and NFS root boot.
 
 All commands below run from the **repository root**.
 
@@ -23,7 +21,8 @@ All commands below run from the **repository root**.
   to its UART device. Install the cable drivers required by the JTAG adapter.
 
 Generate the instruction decoders from the repository's Scala sources with
-`make verilog` if they are missing. With `CM005_BRIDGE=0`, the native Python tools use the standard library.
+`make verilog` if they are missing. With `CM005_BRIDGE=0`, the Python tools
+use the standard library.
 The default CM005 generator additionally uses the repository Migen, LiteX,
 LiteEth and LiteDRAM sources under `third_party/enjoy-digital/` and the Python
 environment at `fpga/litex/.venv/bin/python`. The generator fingerprints and
@@ -57,17 +56,15 @@ selects one. Programming is volatile; it does not write configuration flash or
 automatically rebuild stale outputs.
 
 Add `XLEN=32` for RV32. `make -C fpga/mlk-cu08-ku15p help` lists every target
-and variable. Native builds default to DDR and A↔B forwarding; their CM005 block
-preserves the external KU5P network path while KU15P runs its native
-CPU/DDR/console. Add `CM005_ETHERNET=1` for the native CPU NIC, or use
-`ubuntu-*` below.
+and variable. The CM005 block forwards traffic between the shared network and
+KU5P while the KU15P CPU uses DDR and UART. Add `CM005_ETHERNET=1` for the CPU
+NIC, or use `ubuntu-*` below.
 
-The LiteX SoC, including the fixed DDR4 plus CM005 Ethernet netboot profile, is
-a separate flow in `fpga/litex`; this directory does not build it. For example,
+For the LiteX BIOS and DDR4/CM005 Ethernet netboot profile, run
 `make -C fpga/litex FPGA_BOARD=mlk_cu08_ku15p fpga-netboot-rv64-build`. See the
 [netboot workflow](../litex/NETBOOT.md#fixed-cu08-and-rk-end-to-end-targets).
 
-## Native Ubuntu 24.04 NFS root
+## Ubuntu 24.04 NFS root
 
 Follow the [shared Ubuntu workflow](../common/UBUNTU.md). `ubuntu-bitstream`
 defaults to RV64 `middle-cache`, DDR4, 50 MHz, `CM005_BRIDGE=1` and
@@ -96,7 +93,7 @@ make -C fpga/mlk-cu08-ku15p ubuntu-boot UART_PORT='/dev/serial/by-id/<KU15P-UART
 | `RAPT_CONFIG` | `small` | CPU preset from `rtl/configs/` |
 | `MEMORY` | `ddr` | `bram` or `ddr` main RAM |
 | `CM005_BRIDGE` | `1` | CM005 A↔B forwarding; requires `CLOCK_MHZ=50` |
-| `CM005_ETHERNET` | `0` | Add the native CPU NIC; enabled by `ubuntu-bitstream` |
+| `CM005_ETHERNET` | `0` | Add the CPU NIC; enabled by `ubuntu-bitstream` |
 | `CLOCK_MHZ` | `50` | CPU clock target: `25`, `50` or `100` MHz |
 | `RAM_BYTES` | `131072` | BRAM main RAM size; power of two, 16 KiB–1 MiB |
 | `USE_RESET_BUTTON` | `0` | Set to `1` to enable the active-low reset button |
@@ -143,7 +140,7 @@ The CPU clock is derived by an MMCM. The DDR profile uses a separate 100 MHz
 reference, DDR4-2666 (750 ps memory clock), CL=19/CWL=14 and a 333.333 MHz UI
 clock. A vendor AXI converter handles data-width conversion and the CPU/UI
 clock crossing. The CPU clock remains separately configurable.
-Native builds attempt local PHY min-skew repair, then require all routed
+Builds attempt local PHY min-skew repair, then require all routed
 setup, hold and pulse/skew checks to pass before generating a bitstream.
 
 The vendor core-module manual identifies four `H5AN8G6NCJR-VKI` devices
@@ -194,8 +191,8 @@ sets `fifo-size = <1>`, `tx-threshold = <0>` and `no-loopback-test` for the Linu
 
 ## Serial loading
 
-After JTAG programming, the ROM prints `Raptor native CU08 RV64`
-(or `RV32`), followed by `RAPT ready`. Close other programs using the serial
+After JTAG programming, the ROM prints `RAPT ready` when it can receive an
+upload. Close other programs using the serial
 port. Set `out` to the `output` path printed by `make info` for the configuration
 you loaded, and replace `/dev/ttyUSB1` with the board's actual UART device:
 
@@ -216,14 +213,14 @@ writes outside main RAM and never jumps automatically after reset or a failed
 upload. A failed upload may have modified its destination; upload it again
 before requesting execution.
 
-## Native CM005 forwarding
+## CM005 forwarding
 
 Connect the server/shared-network interface to CM005 A and KU5P to CM005 B.
 The datapath, PHY pinout, queues and receive/transmit timing contract are shared
 with the [standalone bridge](../litex/CM005-BRIDGE.md). The generated child keeps
 both PHY clock trees, the shared E8 reset and all six independent TX clock
-buffers. Native board constraints own the 100 MHz reference, UART and DDR pins;
-CM005 timing queries are scoped to the child after synthesis. A full native
+buffers. Board constraints cover the 100 MHz reference, UART and DDR pins;
+CM005 timing queries are scoped to the child after synthesis. A full
 build gates the bitstream on routed setup/hold, clock/I/O coverage, DRC, clock
 methodology and the A-port sampling aperture. The six asynchronous A-port
 sampler inputs retain their 2 ns datapath-only bound and 0.025–0.775 ns routed
@@ -234,7 +231,7 @@ synchronizers, and only MDIO/MDC/shared-reset management pins receive explicit
 asynchronous I/O exceptions. See [AMD UG903 on datapath-only hold behavior](https://docs.amd.com/r/en-US/ug903-vivado-using-constraints/Consequences-of-Setting-Maximum-Delay-or-Minimum-Delay-Constraints-on-a-Path).
 
 The CPU remains held in reset until DDR calibration completes, while the
-forwarder uses the native 50 MHz clock and board reset. Re-entering the ROM or
+forwarder uses the board's 50 MHz clock and reset. Re-entering the ROM or
 running CPU software leaves forwarding active. FPGA reprogramming or board
 reset briefly interrupts the KU5P link. Keep a verified previous bridge bitstream
 available when testing a new integrated image.
@@ -242,10 +239,10 @@ available when testing a new integrated image.
 `cm005-generated/cm005_registers.json` and `.h` in the selected build describe
 registers accessed with aligned 32-bit loads/stores: identity `0x434d3035`, version, PHY reset/MDIO controls, MAC
 preamble/CRC counts, and per-direction received/forwarded/dropped/error/queued
-counts. Independent read/write addresses and byte strobes match the native
+counts. Independent read/write addresses and byte strobes match the
 peripheral bus. The block has no CPU packet interface or interrupt source.
 
-With the native ROM waiting at `RAPT ready`, capture a diagnostic snapshot:
+With the ROM waiting at `RAPT ready`, capture a diagnostic snapshot:
 
 ```sh
 python3 fpga/mlk-cu08-ku15p/scripts/cm005_native_probe.py \
@@ -292,7 +289,7 @@ not certify any preset, clock target or physical board in advance.
 | Target | Scope |
 |---|---|
 | `prepare` | Generate firmware, DTB and an immutable RTL/configuration snapshot |
-| `lint` | Verilator checks of the native SoC |
+| `lint` | Verilator checks of the SoC |
 | `test` | Host tools, pin/map consistency, UART and AXI regressions |
 | `sim` | CPU/ROM serial upload, CRC/range rejection, RAM test and payload execution |
 | `ip-check` | Elaborate the board top with generated MIG and AXI IP |
@@ -317,7 +314,7 @@ Review `timing_summary.rpt`, `check_timing.rpt`, `cdc.rpt`, `drc.rpt` and
 `utilization.rpt` for the exact source/configuration in `manifest.json`.
 The output directory also contains `index.html` for browsing all Vivado
 reports and `README.md` with synthesis and implementation resource tables.
-The native `synth` and `build` actions regenerate both summaries, including
+The `synth` and `build` actions regenerate both summaries, including
 partial reports after a failed Vivado run.
 Peripheral synthesis excludes the CPU and board clock/DDR infrastructure.
 A passing build gate does not establish CDC sign-off, DDR calibration or

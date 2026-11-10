@@ -5,7 +5,7 @@ import argparse
 from pathlib import Path
 import subprocess
 
-from sources import BOARD, tool_environment
+from sources import ROOT, BOARD, tool_environment
 
 
 def main():
@@ -16,16 +16,24 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     binary = out / "obj/tb_flash"
     sources = [BOARD / p for p in (
-        "rtl/rapt_arty_mt35x.sv", "rtl/rapt_arty_flash.sv",
-        "tests/rapt_arty_mt35x_model.sv", "tests/rapt_arty_flash_bram.sv",
+        "rtl/rapt_arty_xspi_engine.sv", "rtl/rapt_arty_flash.sv",
+        "tests/rapt_arty_flash_bram.sv",
         "tests/tb_rapt_arty_flash.sv")]
+    sources += [ROOT / "synth/configs/pin-limited/rtl/rapt_spi_nor.sv",
+                ROOT / "synth/configs/pin-limited/rtl/rapt_xspi_frame.sv",
+                ROOT / "verification/models/rapt_xspi_profile1_model.sv"]
     command = ["verilator", "--binary", "--timing", "--trace", "-j", "4", "-Wno-fatal",
                "--top-module", "tb_rapt_arty_flash", "--Mdir", str(out / "obj"),
                "-o", "tb_flash", *map(str, sources)]
     with (out / "compile.log").open("w") as log:
         subprocess.run(command, cwd=out, env=tool_environment(), stdout=log,
                        stderr=subprocess.STDOUT, check=True)
-    for name, extra in (("nor", []), ("unknown", ["+UNKNOWN_FLASH"])):
+    for name, extra in (("nor", []), ("unknown", [])):
+        if name == "unknown":
+            unknown_command = [*command, "-DARTY_UNKNOWN_FLASH"]
+            with (out / "unknown-compile.log").open("w") as log:
+                subprocess.run(unknown_command, cwd=out, env=tool_environment(), stdout=log,
+                               stderr=subprocess.STDOUT, check=True)
         log_path = out / f"{name}.log"
         with log_path.open("w") as log:
             result = subprocess.run([str(binary), *extra], cwd=out, stdout=log,

@@ -47,7 +47,8 @@ def main():
     (destination / "tmp").mkdir()
     env["TMPDIR"] = str(destination / "tmp")
     build = destination / "build"
-    command = ["make", "-C", str(destination / "fpga/arty-a7-t100"), "test", "payloads",
+    command = ["make", "-C", str(destination / "fpga/arty-a7-t100"),
+               "PLATFORM=octal", "test", "payloads",
                f"OUT={build}", "JOIN=internal", "CROSS_COMPILE=riscv64-elf-"]
     commands.append(command)
     subprocess.run(command, env=env, check=True)

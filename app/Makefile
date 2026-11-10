@@ -474,7 +474,7 @@ llm-native-build llm-native-test: LLM_TRAIN_STEPS := $(LLM_NATIVE_TRAIN_STEPS)
 llm-bench-build: ## Build LLM operator/infer/train benchmark ELFs
 	@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/llm build $(LLM_VARS)
 
-llm-litex-build: ## Build LLM benchmarks as LiteX-native flat binaries
+llm-litex-build: ## Build LLM benchmarks as flat binaries for LiteX
 	@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/llm litex-build $(LLM_VARS)
 
 llm-native-build: ## Build LLM benchmarks as host-native executables
@@ -567,7 +567,7 @@ agent-native-build agent-native-test: AGENT_FLOW_TURNS := $(AGENT_NATIVE_FLOW_TU
 agent-bench-build: ## Build RAgentBench tools/rag/workflow benchmark ELFs
 	@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/agent build $(AGENT_VARS)
 
-agent-litex-build: ## Build RAgentBench benchmarks as LiteX-native flat binaries
+agent-litex-build: ## Build RAgentBench benchmarks as flat binaries for LiteX
 	@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/agent litex-build $(AGENT_VARS)
 
 agent-native-build: ## Build RAgentBench benchmarks as host-native executables

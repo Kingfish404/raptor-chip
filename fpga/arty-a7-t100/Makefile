@@ -1,97 +1,85 @@
+# Ordinary Raptor SoC by default; retain the pin-limited test fixture explicitly.
+PLATFORM ?= soc
+PLATFORM := $(strip $(PLATFORM))
+ifeq ($(PLATFORM),octal)
+include octal.mk
+else ifeq ($(PLATFORM),jesd)
+include native.mk
+else ifeq ($(PLATFORM),soc)
 SHELL := /bin/bash
-.SHELLFLAGS := -eu -o pipefail -c
+.DEFAULT_GOAL := help
 ROOT := $(abspath ../..)
-BOARD := $(CURDIR)
-OUT ?= $(ROOT)/fpga/build/arty-a7-t100
-JOIN ?= internal
+LITEX := $(ROOT)/fpga/litex
+XLEN ?= 32
+RAPT_CONFIG ?= small
+MEMORY ?= ddr
+CLOCK_MHZ ?= 20
+RAM_BYTES ?= 131072
+BUILD_ROOT ?= $(CURDIR)/build
+PYTHON ?= $(LITEX)/.venv/bin/python3
 VIVADO ?= vivado
-CROSS_COMPILE ?= riscv64-elf-
-PYTHON ?= python3
-SIM_FAST ?= 0
-SIM_FAST_FLAG := $(if $(filter 1,$(SIM_FAST)),--fast,)
-BUILD := $(abspath $(OUT))/$(JOIN)
-HW_OUT ?= $(ROOT)/fpga/build/arty-a7-t100/hw-logs
-JOIN_FLAG := $(if $(filter internal,$(JOIN)),--internal,)
-
-ifeq ($(filter $(JOIN),pins internal),)
-$(error JOIN must be pins or internal)
+JOBS ?= 4
+UART_PORT ?=
+HW_TARGET ?=
+RAPT_PROBE_SERIAL ?=
+OPENOCD ?= openocd
+$(foreach v,XLEN RAPT_CONFIG MEMORY CLOCK_MHZ RAM_BYTES BUILD_ROOT PYTHON VIVADO JOBS \
+	UART_PORT HW_TARGET RAPT_PROBE_SERIAL OPENOCD,$(eval $(v) := $(strip $($(v)))))
+ifeq ($(filter $(XLEN),32 64),)
+$(error XLEN must be 32 or 64)
 endif
+ifeq ($(filter $(MEMORY),ddr bram),)
+$(error MEMORY must be ddr or bram)
+endif
+_quote = '$(subst ','"'"',$(1))'
+_ddr := $(if $(filter ddr,$(MEMORY)),1,0)
+_main_ram := $(if $(filter ddr,$(MEMORY)),0,$(RAM_BYTES))
+_args = FPGA_BOARD=arty_a7_t100 FPGA_AUTO_DETECT=0 VARIANT=linux$(XLEN) \
+	RAPT_CONFIG=$(RAPT_CONFIG) SYS_CLK=$(CLOCK_MHZ)000000 \
+	WITH_LITEDRAM=$(_ddr) WITH_MIG=0 WITH_SDCARD=0 \
+	LINUX_FPGA_PROFILE=$(_ddr) BOOT_MODE=bios \
+	INTEGRATED_MAIN_RAM_SIZE=$(_main_ram) WITH_ETHERNET=1 ETH_SPEED=100 \
+	$(call _quote,BUILD_DIR=$(abspath $(BUILD_ROOT))) \
+	$(call _quote,VIVADO=$(VIVADO)) VIVADO_JOBS=$(JOBS) \
+	$(if $(UART_PORT),$(call _quote,UART_PORT=$(UART_PORT))) \
+	$(if $(HW_TARGET),$(call _quote,FPGA_HW_TARGET=$(HW_TARGET)))
+_targets := info prepare synth build load console linux-image linux-upload reports
+_litex_info := info
+_litex_prepare := fpga-gen
+_litex_synth := fpga-synth
+_litex_build := fpga-build
+_litex_load := fpga-load
+_litex_console := fpga-console
+_litex_linux-image := fpga-img-rv$(XLEN)
+_litex_linux-upload := fpga-upload
+_litex_reports := fpga-reports-index
+.PHONY: help $(_targets) debug test
+help:
+	@echo 'Arty Raptor SoC: info prepare synth build load console linux-image linux-upload'
+	@echo '  netboot-{build,load,info,reports,check,bundle,serve,test,console}, debug, test'
+	@echo '  XLEN=32|64 RAPT_CONFIG=small MEMORY=ddr|bram CLOCK_MHZ=20|25|50|100'
+	@echo '  BUILD_ROOT=path UART_PORT=device HW_TARGET=glob JOBS=4 VIVADO=vivado'
+	@echo '  debug: RAPT_PROBE_SERIAL=<CMSIS-DAP serial> (ChipKIT ck13/12/11/10)'
+	@echo '  Octal-link fixture: make PLATFORM=octal <original-target> JOIN=internal|pins'
+$(_targets):
+	+$(MAKE) -C $(LITEX) $(_litex_$@) $(_args)
 
-.PHONY: all export synth build program test clean-help
-all: build
+_netboot := build load info reports check bundle serve test console
+.PHONY: $(addprefix netboot-,$(_netboot))
+$(addprefix netboot-,$(_netboot)): netboot-%:
+	+$(MAKE) -C $(LITEX) fpga-netboot-rv$(XLEN)-$* FPGA_BOARD=arty_a7_t100 \
+		RAPT_CONFIG=$(RAPT_CONFIG) $(call _quote,VIVADO=$(VIVADO)) VIVADO_JOBS=$(JOBS) \
+		$(call _quote,NETBOOT_BUILD_ROOT=$(abspath $(BUILD_ROOT))/netboot) \
+		$(if $(UART_PORT),$(call _quote,NETBOOT_UART=$(UART_PORT)))
 
-$(BUILD)/boot.bin: firmware/boot.S firmware/boot.c firmware/boot.ld
-	mkdir -p $(BUILD)
-	$(CROSS_COMPILE)gcc -march=rv32im_zicsr_zifencei -mabi=ilp32 -nostdlib \
-		-Os -ffreestanding -fno-pic -fno-builtin -fno-stack-protector -msmall-data-limit=0 \
-		-Wl,-T,firmware/boot.ld -Wl,--no-relax -o $(BUILD)/boot.elf firmware/boot.S firmware/boot.c
-	$(CROSS_COMPILE)objcopy -O binary $(BUILD)/boot.elf $@
+debug:
+	@test -n $(call _quote,$(RAPT_PROBE_SERIAL)) || { \
+		echo 'Set RAPT_PROBE_SERIAL to the CMSIS-DAP CPU JTAG probe serial.'; exit 1; }
+	$(OPENOCD) -s scripts -c $(call _quote,set RAPT_PROBE_SERIAL $(RAPT_PROBE_SERIAL)) \
+		-f gdb.cfg
 
-$(BUILD)/mrom.hex: $(BUILD)/boot.bin scripts/hex.py
-	$(PYTHON) scripts/hex.py $< $@
-
-$(BUILD)/finish.bin: firmware/finish.S
-	mkdir -p $(BUILD)
-	$(CROSS_COMPILE)gcc -march=rv32im -mabi=ilp32 -nostdlib \
-		-Wl,-Ttext=0 -Wl,--no-relax -o $(BUILD)/finish.elf $<
-	$(CROSS_COMPILE)objcopy -O binary $(BUILD)/finish.elf $@
-
-export: $(BUILD)/mrom.hex $(BUILD)/finish.bin
-	$(PYTHON) scripts/export.py --out $(BUILD) $(JOIN_FLAG)
-
-synth build: export
-	$(PYTHON) scripts/vivado.py --vivado $(VIVADO) --out $(BUILD) \
-		--script scripts/build.tcl $(JOIN) $@
-
-.PHONY: retime
-retime:
-	$(PYTHON) scripts/refresh_constraints.py --out $(BUILD)
-	$(PYTHON) scripts/vivado.py --vivado $(VIVADO) --out $(BUILD) \
-		--script scripts/build.tcl $(JOIN) retime
-
-program:
-	$(PYTHON) scripts/hw/program.py --vivado $(VIVADO) --build $(BUILD) \
-		--output $(HW_OUT)/program-$(JOIN)
-
-.PHONY: test-flash test-loader
-test-loader:
-	$(PYTHON) scripts/test_loader.py --out $(abspath $(OUT))/loader
-
-test-flash:
-	$(PYTHON) scripts/test_flash.py --out $(abspath $(OUT))/flash
-
-.PHONY: format-check check-host
-format-check:
-	$(PYTHON) scripts/checks.py
-
-check-host:
-	$(PYTHON) -m unittest discover -s tests -p 'test_*.py' -v
-
-.PHONY: payloads
-payloads: $(BUILD)/flasher.bin $(BUILD)/ram_march.bin $(BUILD)/jtag_fixture.bin \
-	$(BUILD)/flash_xip.bin $(BUILD)/xip_probe.bin $(BUILD)/boot_check.bin
-
-$(BUILD)/jtag_fixture.bin: firmware/payloads/jtag_fixture.S firmware/payloads/ram.ld
-	mkdir -p $(BUILD)
-	$(CROSS_COMPILE)gcc -march=rv32im -mabi=ilp32 -nostdlib \
-		-Wl,-T,firmware/payloads/ram.ld -Wl,--no-relax -o $(BUILD)/jtag_fixture.elf $<
-	$(CROSS_COMPILE)objcopy -O binary $(BUILD)/jtag_fixture.elf $@
-
-$(BUILD)/flash_xip.bin: firmware/payloads/flash_xip.S firmware/payloads/ram.ld
-	mkdir -p $(BUILD)
-	$(CROSS_COMPILE)gcc -march=rv32im -mabi=ilp32 -nostdlib \
-		-Wl,-T,firmware/payloads/ram.ld -Wl,--no-relax -o $(BUILD)/flash_xip.elf $<
-	$(CROSS_COMPILE)objcopy -O binary $(BUILD)/flash_xip.elf $@
-
-$(BUILD)/%.bin: firmware/payloads/%.c firmware/payloads/start.S firmware/payloads/board.h firmware/payloads/ram.ld
-	mkdir -p $(BUILD)
-	$(CROSS_COMPILE)gcc -march=rv32im_zicsr_zifencei -mabi=ilp32 -nostdlib \
-		-Os -ffreestanding -fno-pic -fno-builtin -fno-stack-protector -msmall-data-limit=0 \
-		-Wl,-T,firmware/payloads/ram.ld -Wl,--no-relax -o $(BUILD)/$*.elf firmware/payloads/start.S $<
-	$(CROSS_COMPILE)objcopy -O binary $(BUILD)/$*.elf $@
-
-test: $(BUILD)/mrom.hex $(BUILD)/finish.bin
-	$(PYTHON) scripts/simulate.py --out $(BUILD) $(SIM_FAST_FLAG)
-
-clean-help:
-	@echo 'Remove a chosen OUT directory manually; no broad cleanup target is provided.'
+test:
+	$(PYTHON) -m unittest discover -s $(LITEX)/tests -p test_arty_soc.py -v
+else
+$(error PLATFORM must be soc, octal or jesd)
+endif

@@ -7,7 +7,7 @@
 #define MAX_IMAGE 0x3e000u
 
 static void puts_uart(const char *text) {
-  volatile uint8_t *uart = (volatile uint8_t *)0x10000000u;
+  volatile uint8_t *uart = (volatile uint8_t *)0x10003000u;
   while (*text) {
     while (!(uart[5] & 0x20)) {}
     uart[0] = (uint8_t)*text++;

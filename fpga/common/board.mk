@@ -1,4 +1,4 @@
-# Shared targets for a native board directory (fpga/<board>/Makefile).
+# Shared targets for a board directory (fpga/<board>/Makefile).
 #
 # The board Makefile sets its own variables and BOARD_OPTIONS, then includes
 # this file. Every target runs fpga/common/scripts/native_build.py with
@@ -9,7 +9,7 @@ COMMON_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 BOARD_DIR := $(CURDIR)
 BOARD_MAKEFILE := $(abspath $(firstword $(MAKEFILE_LIST)))
 
-PYTHON ?= python3 ## Python interpreter for the native tools
+PYTHON ?= python3 ## Python interpreter for the board tools
 XLEN ?= 64 ## Core XLEN (32|64)
 RAPT_CONFIG ?= small ## Microarchitecture preset from rtl/configs/
 MEMORY ?= ddr ## Main memory (ddr|bram)
@@ -41,7 +41,7 @@ help: ## Show targets and variables
 		$(COMMON_DIR)/board.mk $(COMMON_DIR)/ubuntu.mk $(BOARD_MAKEFILE)
 
 # ============================================================================
-# Native SoC (build steps regenerate their sources first)
+# SoC (build steps regenerate their sources first)
 # ============================================================================
 
 info: ## Print the configuration and its output directory as JSON

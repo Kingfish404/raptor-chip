@@ -68,6 +68,7 @@ module rapt_bpu_btb #(
   logic [    WAYS-1:0] way_hit;
   logic                hit_way;
   logic [ADDR_LEN-1:0] held_raddr;
+  logic lookup_valid_q;
 
   assign hit_way      = way_hit[1];
   assign rd_tag_match = |way_hit;
@@ -92,10 +93,12 @@ module rapt_bpu_btb #(
     logic [TAG_LEN-1:0] tag[DEPTH];
     logic [1:0] itype[DEPTH];
     assign target_write = wen_entry && (w_sel == 1'(w)) && !reset && !init;
-    assign target_write_observed = target_write && (waddr == (ren ? raddr : held_raddr));
+    assign target_write_observed = target_write && (ren || lookup_valid_q)
+        && (waddr == (ren ? raddr : held_raddr));
     assign way_target[w] = target_forward_valid_q ? target_forward_q : target_q;
     assign way_type[w] = itype[r_raddr_itype[w]];
-    assign way_hit[w] = valid[w][r_raddr_valid[w]] && (r_rtag_cmp[w] == tag[r_raddr_tag[w]]);
+    assign way_hit[w] = lookup_valid_q && valid[w][r_raddr_valid[w]]
+        && (r_rtag_cmp[w] == tag[r_raddr_tag[w]]);
     assign w_way_match[w] = valid[w][waddr] && (wd_tag == tag[waddr]);
     always_ff @(posedge clock) begin
       // Forward collisions after the edge; keep the address comparison off
@@ -109,7 +112,8 @@ module rapt_bpu_btb #(
     // already being forwarded. That comparison uses the registered address,
     // keeping the current lookup address off the wide data write enable.
     always_ff @(posedge clock) begin
-      if (target_write && (ren || waddr == held_raddr)) target_forward_q <= wd_target;
+      if (target_write && (ren || (lookup_valid_q && waddr == held_raddr)))
+        target_forward_q <= wd_target;
     end
     always_ff @(posedge clock) begin
       if (reset || init) target_forward_valid_q <= 1'b0;
@@ -134,14 +138,17 @@ module rapt_bpu_btb #(
     if (reset || init) begin
       for (int w = 0; w < WAYS; w++) valid[w] <= '0;
       lru <= '0;
-      // itype/tag/target payload and the replicated r_raddr_* address
-      // registers are intentionally NOT reset: way_hit ANDs every payload
-      // read with valid[w][r_raddr_valid[w]], and the valid array is
-      // cleared here, so no stale entry can raise rd_tag_match (the only
-      // gate through which rd_target/rd_type are consumed in rapt_bpu).
-      // target was already unreset; itype now follows the same rule.
+      // Payload RAMs and tag/type lookup metadata remain unreset. Reset the
+      // small valid-read selectors so an empty table has a known read gate
+      // before the first lookup, including after native gate mapping.
+      // Bulk init keeps an already captured lookup for held-address writes.
+      if (reset) begin
+        lookup_valid_q <= 1'b0;
+        for (int w = 0; w < WAYS; w++) r_raddr_valid[w] <= '0;
+      end
     end else begin
       if (ren) begin
+        lookup_valid_q <= 1'b1;
         for (int w = 0; w < WAYS; w++) begin
           r_raddr_tag[w]   <= raddr;
           r_raddr_itype[w] <= raddr;

@@ -39,7 +39,14 @@ module rapt_tb_chip;
   logic target_oe;
   assign dq = target_oe ? target_dq : 8'hzz;
 
-  rapt_chip_pads u_dut (
+  // This fixture attaches a bridge. Shorten unused Flash startup timers, then
+  // select the bridge through the actual pad JTAG path before running its ROM.
+  rapt_chip_pads #(
+      .FlashPowerupCycles(1),
+      .FlashResetCycles(1),
+      .FlashRecoveryCycles(1),
+      .FlashPollCycles(1000)
+  ) u_dut (
       .pad_clk(clock),
       .pad_reset_n(reset_n),
       .pad_irq(1'b0),
@@ -65,6 +72,7 @@ module rapt_tb_chip;
       .dq_i(dq),
       .dq_o(target_dq),
       .dq_oe_o(target_oe),
+      .status_poll_o(),
       .axi(board)
   );
 
@@ -184,10 +192,56 @@ module rapt_tb_chip;
     jtag_cycle(1'b0, 1'b1, tdo);
   endtask
 
+  bit boot_ready = 0;
+  task automatic boot_scan(input bit instruction, input logic [40:0] value, input int width,
+                           output logic [40:0] result);
+    logic discarded;
+    jtag_cycle(1, 0, discarded);
+    if (instruction) jtag_cycle(1, 0, discarded);
+    jtag_cycle(0, 0, discarded);
+    jtag_cycle(0, 0, discarded);
+    result = 0;
+    for (int i = 0; i < width; i++) jtag_cycle(i == width - 1, value[i], result[i]);
+    jtag_cycle(1, 0, discarded);
+    jtag_cycle(0, 0, discarded);
+  endtask
+
+  task automatic boot_dmi(input logic [6:0] address, input logic [31:0] value,
+                          input logic [1:0] operation, output logic [31:0] result);
+    logic [40:0] shifted;
+    boot_scan(1, 41'h11, 5, shifted);
+    boot_scan(0, {address, value, operation}, 41, shifted);
+    boot_scan(0, 0, 41, shifted);
+    if (shifted[1:0] != 0) $fatal(1, "Boot DMI failed");
+    result = shifted[33:2];
+  endtask
+
+  initial begin
+    logic [31:0] value;
+    @(posedge reset_n);
+    #(TCK_PERIOD * 4);
+    jtag_read_idcode(value);
+    if (value != ExpectedIdcode) $fatal(1, "Boot IDCODE failed");
+    boot_dmi(7'h10, 1, 2, value);
+    boot_dmi(7'h10, 32'h80000001, 2, value);
+    do boot_dmi(7'h11, 0, 1, value); while ((value & 32'h300) != 32'h300);
+    boot_dmi(7'h38, 32'h40000, 2, value);
+    boot_dmi(7'h39, 32'h00100808, 2, value);
+    boot_dmi(7'h3c, 0, 2, value);
+    do boot_dmi(7'h38, 0, 1, value); while (value[21]);
+    if (value[14:12] != 0) $fatal(1, "Boot SBA failed");
+    boot_dmi(7'h10, 32'h80000003, 2, value);
+    do boot_dmi(7'h11, 0, 1, value); while ((value & 32'h3300) != 32'h3000);
+    boot_dmi(7'h10, 32'h80000001, 2, value);
+    do boot_dmi(7'h11, 0, 1, value); while ((value & 32'h3300) != 32'h300);
+    boot_dmi(7'h10, 32'h40000001, 2, value);
+    boot_ready = 1;
+  end
+
   initial
     if ($test$plusargs("JTAG_IDCODE")) begin
       logic [31:0] idcode;
-      @(posedge reset_n);
+      wait (boot_ready);
       #(TCK_PERIOD * 4);
       jtag_read_idcode(idcode);
       if (idcode !== ExpectedIdcode) $fatal(1, "JTAG IDCODE %h, want %h", idcode, ExpectedIdcode);

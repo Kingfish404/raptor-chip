@@ -195,6 +195,7 @@ def main():
                                     'server.log')
         ready(server, server_log, 'waiting for OpenOCD', 30)
         ocd, ocd_log = launch([args.openocd, '-c', f'set RAPT_JTAG_PORT {args.port}',
+                               '-c', 'set RAPT_BOOT_BRIDGE 1',
                                '-c', 'set RAPT_GDB_PORT disabled',
                                '-f', str(here / 'openocd.cfg'), '-f', str(script)], 'openocd.log')
         code = ocd.wait(timeout=args.timeout)
@@ -247,9 +248,10 @@ def run_gdb(args, out, elf, image, here):
         server, server_log = launch([args.npc, f'--jtag-port={args.port}'], 'gdb-server.log')
         ready(server, server_log, 'waiting for OpenOCD', 30)
         ocd, ocd_log = launch([args.openocd, '-c', f'set RAPT_JTAG_PORT {args.port}',
+                               '-c', 'set RAPT_BOOT_BRIDGE 1',
                                '-c', f'set RAPT_GDB_PORT {args.gdb_port}',
                                '-f', str(here / 'openocd.cfg')], 'gdb-openocd.log')
-        ready(ocd, ocd_log, f'Listening on port {args.gdb_port}', 30)
+        ready(ocd, ocd_log, 'PASS: bridge boot selected over JTAG', 30)
         gdb, log = launch([args.gdb, '--batch', '-x', str(path)], 'gdb.log')
         code = gdb.wait(timeout=args.timeout)
         print(log.read_text(errors='replace'), end='')

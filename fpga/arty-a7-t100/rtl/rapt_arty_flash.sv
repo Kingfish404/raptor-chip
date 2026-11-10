@@ -2,7 +2,10 @@
 // Payloads remain stable until the synchronized response toggle returns.
 // CPU reset and UART stop do not reset an accepted physical flash operation.
 module rapt_arty_flash #(
-    parameter bit UseBramModel = 1'b0
+    parameter bit UseBramModel = 1'b0,
+    parameter int unsigned PowerupCycles = 10_000_001,
+    parameter int unsigned ResetCycles = 1001,
+    parameter int unsigned RecoveryCycles = 10_000_001
 ) (
     input logic clock,
     input logic flash_clock,
@@ -297,7 +300,15 @@ module rapt_arty_flash #(
         .maint_error_code_o(engine_error)
     );
   end else begin : g_serial
-    rapt_arty_mt35x u_engine (
+    wire device_reset_n;
+    // Board reset may stop the clock source. It asserts RESET# directly;
+    // software recovery reaches the pin only through the engine's reset FF.
+    assign reset_n_o = !reset && device_reset_n;
+    rapt_arty_xspi_engine #(
+        .PowerupCycles(PowerupCycles),
+        .ResetCycles(ResetCycles),
+        .RecoveryCycles(RecoveryCycles)
+    ) u_engine (
         .clk_i(flash_clock),
         .rst_ni(engine_reset_n),
         .read_req_i(engine_state_q == E_READ),
@@ -324,7 +335,7 @@ module rapt_arty_flash #(
         .flash_id_o(id),
         .xspi_ck_o(sclk_o),
         .xspi_csn_o(cs_n_o),
-        .xspi_reset_no(reset_n_o),
+        .xspi_reset_no(device_reset_n),
         .xspi_io_o(dq_o),
         .xspi_io_oe_o(dq_oe_o),
         .xspi_io_i(dq_i),

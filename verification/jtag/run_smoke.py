@@ -83,6 +83,7 @@ def main():
         server, server_log = launch(server_cmd, 'server.log')
         ready(server, server_log, 'waiting for OpenOCD', args.timeout)
         ocd = [args.openocd, '-c', f'set RAPT_JTAG_PORT {args.port}',
+               '-c', f'set RAPT_BOOT_BRIDGE {int(args.mode in ("sba", "reset"))}',
                '-c', f'set RAPT_GDB_PORT {args.gdb_port if args.mode == "gdb" else "disabled"}',
                '-f', str(args.openocd_config)]
         if args.mode == 'gdb':

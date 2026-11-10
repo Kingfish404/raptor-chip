@@ -15,6 +15,10 @@ make sim
 make coremark
 ```
 
+The [Arty A7-100T board entry](../arty-a7-t100/README.md) supports normal presets,
+DDR3, onboard 100 Mb/s Ethernet, CPU JTAG and Linux/netboot. Select it here with
+`FPGA_BOARD=arty_a7_t100`; its board-directory Makefile provides shorter commands.
+
 `SIM_JOBS` limits concurrent C++ compilations (default: up to 4); use `make sim-build ROM=bios SIM_JOBS=2` on memory-limited CI runners. `SIM_THREADS` controls runtime simulation threads independently. Always pass a positive build limit: LiteX's omitted job count otherwise produces unlimited `make -j`. `SIM_TIMEOUT` applies to simulation execution, not compilation.
 
 FPGA packs enable integer-multiply DSP inference with `RAPT_FPGA_DSP=1`. To compare fabric mapping, pass `RAPT_PACK_VFLAGS=-DRAPT_FPGA_DSP=0`; the override is included in the build identity. The arithmetic and valid/tag pipeline have the same latency in both modes. Generic simulator/ASIC builds default to fabric inference unless the define is supplied.
@@ -218,7 +222,15 @@ The default AXAU15 Linux profile uses the `small` Raptor configuration, the on-b
 make fpga-build FPGA_BOARD=alinx_axau15 VARIANT=linux32
 ```
 
-This design maps the full 1 GiB device at `0x80000000`. It passes Vivado DRC, timing, pulse-width, and MIG bus-skew checks. The installed memory is `MT40A512M16LY-062EIT`; the reference project uses Vivado's compatible `MT40A512M16HA-083E` timing model at 2400 MT/s, CL16/CWL12, with a 128-bit AXI reference interface. The LiteX integration uses a native 32-bit AXI interface to match the SoC bus without narrow transfers. On the current AXAU15, all MIG calibration stages pass with no error, the LiteX BIOS 2 MiB write/read memtest passes, and sequential throughput is approximately 20.0 MiB/s write and 14.6 MiB/s read. Full Linux boot from SD remains to be validated.
+This design maps the full 1 GiB device at `0x80000000`. It passes Vivado DRC,
+timing, pulse-width, and MIG bus-skew checks. The installed memory is
+`MT40A512M16LY-062EIT`; the reference project uses Vivado's compatible
+`MT40A512M16HA-083E` timing model at 2400 MT/s, CL16/CWL12, with a 128-bit AXI
+reference interface. The LiteX integration uses a 32-bit AXI interface to match
+the SoC bus without narrow transfers. On AXAU15, all MIG calibration stages
+pass with no error, the LiteX BIOS 2 MiB write/read memtest passes, and sequential
+throughput is approximately 20.0 MiB/s write and 14.6 MiB/s read. Full Linux boot
+from SD remains to be validated.
 
 Configuration flash is not implemented for AXAU15, so `make fpga-flash FPGA_BOARD=alinx_axau15` is deliberately refused.
 
@@ -261,7 +273,7 @@ and a 100 MHz differential reference with a 10000 ps input period. The fixed
 CPU clocks and the mapped RAM window are selected separately. CU07 uses the
 same DDR4-2666 profile and memory model. CU08 uses the `MT40A512M16LY-075` timing
 proxy for the manual's 8 Gb x16 `H5AN8G6NCJR-VKI` devices. See the
-[native board details](../mlk-cu08-ku15p/README.md#board-interfaces-and-ddr)
+[board details](../mlk-cu08-ku15p/README.md#board-interfaces-and-ddr)
 for document variants and the FPGA's voltage-dependent PHY limit. Rebuild the
 bitstream after changing the MIG profile. DDR calibration and memory traffic
 still require board validation; the board manual advertises 2400 MT/s.
@@ -515,7 +527,7 @@ fpga/litex/
 +-- alinx_axau15.py                # ALINX AXAU15 MIG/SDCard target
 +-- README.md           # This file
 +-- firmware/           # Sim, integrated-ROM FPGA, and Linux-FPGA stage0 firmware
-+-- benchmarks/         # LiteX-native CoreMark/Embench payloads
++-- benchmarks/         # CoreMark/Embench payloads for LiteX
 +-- tests/              # Small standalone LiteX C payloads
 +-- scripts/            # LiteX/Vivado patching, reports, load/flash helpers
 +-- glsim/              # Gate-level simulation helpers
@@ -579,7 +591,10 @@ If `litex_term` reports a serialboot timeout, press the board reset button with 
 
 ## app/ Payloads
 
-The `app/` tree can produce LiteX-native flat binaries when a program links against `app/lib/litex/start.S`, `app/lib/litex/link.ld`, and `app/lib/litex/runtime.c`. This is the preferred route for running app tests on FPGA: build or load a BIOS bitstream once, then use BIOS serialboot instead of re-running place-and-route for every payload.
+The `app/` tree can produce flat binaries for LiteX when a program links against
+`app/lib/litex/start.S`, `app/lib/litex/link.ld`, and `app/lib/litex/runtime.c`.
+To run app tests on FPGA, build or load a BIOS bitstream once, then use BIOS
+serialboot to upload each payload.
 
 Current first-class app payloads are the RLLMBench fixed-point LLM workloads. They print `RLLMBENCH_RESULT` and `RLLMBENCH_SCORE` lines on the UART, matching the pk/NPC report format used by `make -C app llm-bench-report-sim`.
 

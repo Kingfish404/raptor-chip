@@ -268,7 +268,7 @@ make verify-fuzz
 make verify-fuzz-inf      # continuous until Ctrl-C / failure
 # Signature-based ISA corner-case tests
 make verify-sigtest
-# RISCOF classic compliance tests (legacy, no difftest)
+# RISCOF classic compliance tests (without difftest)
 make verify-riscof-classic
 make verify-riscof-classic-nemu
 # Official RISCOF compliance (riscv-arch-test, sail reference)
@@ -282,13 +282,16 @@ make verify-light
 
 ### 7. FPGA
 
-For a native CU08-KU15P flow without the LiteX SoC, see [native board support](fpga/mlk-cu08-ku15p/README.md).
-It provides a SystemVerilog SoC, UART boot ROM, BRAM/DDR4 configurations and batch Vivado builds.
-For example: `make -C fpga/mlk-cu08-ku15p sim XLEN=64 MEMORY=bram`.
+See [MLK-CU08-KU15P](fpga/mlk-cu08-ku15p/README.md) for the SystemVerilog SoC,
+UART boot ROM, BRAM/DDR4 configurations and Vivado build commands. For example:
+`make -C fpga/mlk-cu08-ku15p sim XLEN=64 MEMORY=bram`.
 
 For **MLK-CU08 RV32/RV64 Linux with Ethernet and BIOS `netboot`**, follow the [paired build/load quick start](fpga/litex/README.md#cu08-rv32rv64-netboot-build-and-load) and then [TFTP bundle preparation](fpga/litex/NETBOOT.md). Ethernet is **disabled by default** (`WITH_ETHERNET=0`), including Linux CPU variants. A plain build therefore does not provide BIOS `netboot`. Build and load must use the same Ethernet settings and output directory; `fpga-load` loads an existing bitstream and does not rebuild it.
 
-For the fixed current CU08 netboot configuration, run from `fpga/litex`: `make fpga-netboot-rv32-build`, then `make fpga-netboot-rv32-load`. Replace `rv32` with `rv64` for RV64. These paired targets preserve the same Ethernet/CPU settings and use isolated output directories; see the linked guide for prerequisites, payload paths and TFTP setup.
+For the CU08 netboot profile, run from `fpga/litex`: `make fpga-netboot-rv32-build`,
+then `make fpga-netboot-rv32-load`. Replace `rv32` with `rv64` for RV64. These paired
+targets use the same Ethernet/CPU settings and isolated output directories; see
+the linked guide for prerequisites, payload paths and TFTP setup.
 
 ```shell
 # --- LiteX SoC ---

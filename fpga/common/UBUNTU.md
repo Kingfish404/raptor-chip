@@ -1,14 +1,14 @@
-# Native Ubuntu 24.04 NFS root
+# Ubuntu 24.04 NFS root
 
-The `ubuntu-*` targets use each board's native SystemVerilog platform. Shared
+The `ubuntu-*` targets use each board's SystemVerilog SoC. Shared
 code, Linux sources and benchmark tools live under `fpga/common/`; board
 profiles select the physical NIC, MAC address, loader IP and hostname. The boot chain is
-native ROM → small RAM TFTP loader → OpenSBI/Linux → native Ethernet → Ubuntu
+boot ROM → small RAM TFTP loader → OpenSBI/Linux → Ethernet → Ubuntu
 `/sbin/init` (systemd) on an NFS root. The default is RV64 `middle-cache`, 50 MHz, 2 GiB
 DDR4, a 1 MHz CLINT timebase and a 115200-baud Linux console.
 
-On RK-XCKU5P-F, the native controller uses eight 2 KiB receive slots and one 2 KiB transmit
-buffer at `0x18000000`, PLIC interrupt 2, and a local MAC address
+On RK-XCKU5P-F, the Ethernet controller uses eight 2 KiB receive slots and one
+2 KiB transmit buffer at `0x18000000`, PLIC interrupt 2, and a local MAC address
 `02:52:41:50:05:01`. CPU accesses are aligned 32-bit PIO into uncached packet
 SRAM. It does not DMA into cached DDR. Linux uses the included
 [`raptor_native_eth.c`](linux/raptor_native_eth.c) driver, NAPI, and the upstream
@@ -46,7 +46,7 @@ make -C fpga/rk-xcku5p-f ubuntu-rootfs
 make -C fpga/rk-xcku5p-f ubuntu-bundle ubuntu-check
 make -C fpga/rk-xcku5p-f ubuntu-serve
 
-# Program a matching timing-validated native build on the selected JTAG target.
+# Program a matching timing-validated bitstream on the selected JTAG target.
 make -C fpga/rk-xcku5p-f ubuntu-load HW_TARGET='*/<KU5P-JTAG-ID>'
 make -C fpga/rk-xcku5p-f ubuntu-boot \
   UART_PORT='/dev/serial/by-id/<KU5P-UART>'
@@ -65,9 +65,8 @@ It is installed as root's `authorized_keys` with mode 0600 inside a 0700
 `.ssh` directory. Only the public key is included; the private key stays on
 the development host. Override `UBUNTU_SSH_KEY=/path/to/another.pub` to provision
 a different key, or use `UBUNTU_SSH_KEY=` to omit authorized-key provisioning.
-The accepted persistent rootfs already contains this same default key, and its
-manifest records the key's SHA-256. Different rootfs inputs require a new rootfs
-directory, preserving the existing persistent installation.
+The rootfs manifest records the key's SHA-256. Different rootfs inputs require
+a new rootfs directory, preserving the existing persistent installation.
 The key enables root SSH; password SSH is disabled when a key is provisioned.
 Provisioning generates unique SSH host keys for this rootfs on the
 host, avoiding slow first-boot RSA generation on the board. They remain in the
@@ -87,13 +86,13 @@ APT's optional Pro news/cache, PackageKit, AppStream, command-suggestion and
 MOTD hooks are disabled. Package indexes, repository signature checks, debconf,
 needrestart and package-maintainer scripts retain their normal behavior.
 
-The native rootfs profile retains the fstab and serial-getty generators and
+The Ubuntu rootfs profile retains the fstab and serial-getty generators and
 masks the other cloud-image generators. Their combined startup work exceeds
 systemd 255's fixed 90-second generator-batch deadline on this core. SSH runs
 as `ssh.service`, without socket activation. Service startup waits are ten
 minutes; device waits are thirty minutes to allow serial-device coldplug on the
 50 MHz core. Coldplug prioritizes tty/net, with two workers and a ten-minute
-event timeout; all other devices are still processed. The native kernel omits
+event timeout; all other devices are still processed. The kernel omits
 virtual terminals and loop block devices;
 the UART console and Unix98 PTYs remain available. Cloud provisioning, snap/LXD
 services, disk-management
@@ -109,7 +108,7 @@ hardware or service dependencies.
 DNS uses the configured server directly through `/etc/resolv.conf` and the
 distribution's `files dns` NSS configuration; `systemd-resolved` is masked.
 
-The native platform has no battery-backed RTC. Before using apt or TLS after
+The boards have no battery-backed RTC. Before using apt or TLS after
 a reset, confirm that network time synchronization has completed. If necessary,
 set the board's clock from a host with correct time, for example:
 
@@ -125,7 +124,7 @@ systemctl --failed
 apt-get --error-on=any update
 apt-get install -y --no-install-recommends hello
 hello
-printf 'Raptor native Ubuntu\n' > /root/persistence-check.txt
+printf 'Raptor Ubuntu\n' > /root/persistence-check.txt
 sync
 ```
 
@@ -141,11 +140,11 @@ provide DHCP, DNS or NAT. Use `UBUNTU_SERVER`, `UBUNTU_CLIENT`, `UBUNTU_ROOTFS` 
 across board resets; an existing rootfs with different provisioning inputs is
 rejected rather than overwritten.
 
-The boot bundle contains a kernel with the native driver and NFS client built
-in, an empty embedded initramfs, OpenSBI `fw_payload.bin`, and a native DTB with
+The boot bundle contains a kernel with the board's Ethernet driver and NFS client
+built in, an empty embedded initramfs, OpenSBI `fw_payload.bin`, and a board DTB with
 `root=/dev/nfs ... init=/sbin/init`. Each boot injects fresh host entropy into a
-temporary DTB. By default the ROM receives only a small native TFTP loader at
-`0x8f000000`; firmware and DTB travel over the native MAC with 1024-byte TFTP
+temporary DTB. By default the ROM receives only a small TFTP loader at
+`0x8f000000`; firmware and DTB travel over Ethernet with 1024-byte TFTP
 blocks, retries and whole-file size/CRC checks. The host serves only those two
 files on `UBUNTU_SERVER:UBUNTU_TFTP_PORT` (default UDP 6969), using ephemeral
 transfer ports. Reserve `UBUNTU_BOOT_IP` (default `192.168.50.88`) for this MAC on
@@ -159,9 +158,9 @@ The console stays at 115200 baud with TFTP. The DTB resides at `0x8fff0000`;
 payload size checks prevent overlap with the loaders and DTB.
 
 Validation separates software artifacts from FPGA acceptance. `ubuntu-check`
-verifies hashes, the native DTB, PHY mode and NFS/systemd boot arguments. Board
+verifies hashes, the board DTB, PHY mode and NFS/systemd boot arguments. Board
 acceptance additionally requires a routed timing pass, DDR initialization,
-native Ethernet/DHCP, an NFS root mount and an Ubuntu systemd login. Record the
+Ethernet/DHCP, an NFS root mount and an Ubuntu systemd login. Record the
 bitstream, firmware and rootfs manifests with that result. A small-module timing
 pass or a QEMU userspace boot is not whole-board validation.
 
@@ -187,7 +186,7 @@ Host raptor-ku5p
 The Ubuntu profile disables SSH DNS lookup and GSSAPI authentication while
 retaining PAM account/session handling. CPU, session setup and NFS costs should
 be measured separately; a new SSH connection is not a cold-boot measurement.
-Use the [native benchmark tools](tests/ubuntu_bench/README.md) for repeatable
+Use the [benchmark tools](tests/ubuntu_bench/README.md) for repeatable
 CoreMark/Embench measurements. Keep per-run results, traces, build identities
 and acceptance logs outside the source tree.
 
@@ -206,7 +205,7 @@ the KU15P flow has no default authorized key. Its loader address defaults to
 DHCP for its distinct MAC. Keep each board's `UBUNTU_OUTPUT`, rootfs, JTAG ID,
 UART and runtime NFS export separate.
 
-`UBUNTU_NATIVE_BUILD=/path/to/native-build` selects a copied implementation
+`UBUNTU_NATIVE_BUILD=/path/to/board-build` selects a copied implementation
 manifest and DTB. Their board, preset, clock, networking configuration and DTB
 hash must match the request. `UBUNTU_KERNEL_DIR=/path/to/kernel-artifacts`
 reuses a manifest-verified kernel; KU15P additionally requires built-in LiteEth

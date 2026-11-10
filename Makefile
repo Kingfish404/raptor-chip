@@ -788,20 +788,20 @@ linux-boot-rv32-ckpt-load: build-nemu32-ref build-rv32-linux ## Resume Linux boo
 # ============================================================================
 # FPGA Targets
 # ============================================================================
-# fpga-<target> runs <target> in fpga/$(FPGA_BOARD), a standalone native board
+# fpga-<target> runs <target> in fpga/$(FPGA_BOARD), a standalone board
 # build; `make -C fpga/<board> help` lists its targets and variables. The board
 # keeps its own preset default unless RAPT_CONFIG is set by the user.
-FPGA_BOARD ?= mlk-cu08-ku15p ## Native board directory under fpga/ (mlk-cu08-ku15p|rk-xcku5p-f)
+FPGA_BOARD ?= mlk-cu08-ku15p ## Board directory under fpga/ (also rk-xcku5p-f, arty-a7-t100)
 FPGA_BOARD := $(strip $(FPGA_BOARD))
 FPGA_TARGETS := fpga-info fpga-prepare fpga-lint fpga-test fpga-sim fpga-ip-check \
 	fpga-peripheral-synth fpga-synth fpga-build fpga-load fpga-refresh-software
 FPGA_ENV := $(if $(RAPT_CONFIG_FROM_USER),,env -u RAPT_CONFIG)
 .PHONY: $(FPGA_TARGETS)
 
-fpga-info: ## Print the native board configuration and output directory
-fpga-synth: ## Synthesize the native board SoC (XLEN, MEMORY, ... as in the board Makefile)
-fpga-build: ## Build and timing-check the native board bitstream
-fpga-load: ## Program the native board from a matching timing-clean build
+fpga-info: ## Print the board configuration and output directory
+fpga-synth: ## Synthesize the board SoC (XLEN, MEMORY, ... as in the board Makefile)
+fpga-build: ## Build and timing-check the board bitstream
+fpga-load: ## Program the board from a matching timing-clean build
 $(FPGA_TARGETS): fpga-%:
 	$(FPGA_ENV) $(MAKE) -C $(RAPTOR_HOME)/fpga/$(FPGA_BOARD) $*
 
