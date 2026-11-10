@@ -99,6 +99,7 @@ module wrap_ysyxsoc (
   ) cpu (
       .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock(clock),
+      .core_reset_o(),
       .writeback_error_o(unused_writeback_error),
       .reset(reset),
       .io_interrupt(io_interrupt),

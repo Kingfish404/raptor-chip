@@ -4,12 +4,10 @@
 // S = status; R = RAM word; L = completed link frames; E = rejected command.
 module rapt_arty_host #(
     parameter int RamBytes = 262144,
-    parameter int BootDelayCycles = 1_000_000,
     parameter bit InternalJoin = 1'b0
 ) (
     input logic clock,
     input logic reset,
-    input logic boot_switch_i,
     output logic boot_flash_o,
     output logic [2:0] link_delay_o,
     input logic [7:0] rx_data_i,
@@ -69,11 +67,10 @@ module rapt_arty_host #(
   logic [FifoBits:0] console_count_q;
   logic console_push, console_pop, stopped;
   logic valid_write;
-  logic boot_override_q, boot_value_q, auto_boot_q;
-  logic [$clog2(BootDelayCycles+1)-1:0] boot_count_q;
+  logic boot_value_q;
   logic [1:0] word_index_q;
 
-  assign boot_flash_o = boot_override_q ? boot_value_q : boot_switch_i;
+  assign boot_flash_o = boot_value_q;
 
   assign stopped = !run_o;
   assign valid_write = stopped && length_q != 0 && address_q >= 32'h8000_0000
@@ -101,10 +98,7 @@ module rapt_arty_host #(
       address_q <= '0;
       length_q <= '0;
       run_o <= 1'b0;
-      boot_override_q <= 1'b0;
       boot_value_q <= 1'b0;
-      auto_boot_q <= 1'b1;
-      boot_count_q <= $clog2(BootDelayCycles + 1)'(BootDelayCycles);
       link_delay_o <= '0;
       host_write_o <= 1'b0;
       host_addr_o <= '0;
@@ -127,13 +121,6 @@ module rapt_arty_host #(
       console_tail_q <= '0;
       console_count_q <= '0;
     end else begin
-      if (auto_boot_q) begin
-        if (boot_count_q != 0) boot_count_q <= boot_count_q - 1'b1;
-        else begin
-          auto_boot_q <= 1'b0;
-          if (boot_switch_i) run_o <= 1'b1;
-        end
-      end
       if (rx_error_i) begin
         error_q <= 1'b1;
         state_q <= MAGIC;
@@ -207,7 +194,6 @@ module rapt_arty_host #(
           reply_data_q <= {24'b0, command_q};
           case (command_q)
             "A": begin
-              auto_boot_q <= 1'b0;
               run_o <= 1'b0;
               finished_q <= 1'b0;
               finish_pending_q <= 1'b0;
@@ -241,7 +227,6 @@ module rapt_arty_host #(
             end
             "B":
             if (stopped && address_q < 3) begin
-              boot_override_q <= address_q != 2;
               boot_value_q <= address_q[0];
             end else reply_type_q <= "E";
             "D":

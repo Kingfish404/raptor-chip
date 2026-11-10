@@ -19815,22 +19815,22 @@
       },
       {
         "name": "fpga-info",
-        "description": "Print the native board configuration and output directory",
+        "description": "Print the board configuration and output directory",
         "section": "FPGA Targets"
       },
       {
         "name": "fpga-synth",
-        "description": "Synthesize the native board SoC (XLEN, MEMORY, ... as in the board Makefile)",
+        "description": "Synthesize the board SoC (XLEN, MEMORY, ... as in the board Makefile)",
         "section": "FPGA Targets"
       },
       {
         "name": "fpga-build",
-        "description": "Build and timing-check the native board bitstream",
+        "description": "Build and timing-check the board bitstream",
         "section": "FPGA Targets"
       },
       {
         "name": "fpga-load",
-        "description": "Program the native board from a matching timing-clean build",
+        "description": "Program the board from a matching timing-clean build",
         "section": "FPGA Targets"
       },
       {

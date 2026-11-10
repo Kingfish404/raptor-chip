@@ -4,6 +4,9 @@
 // The loader owns the write port only while the SoC is held in reset.
 module rapt_arty_mem #(
     parameter int RamBytes = 262144,
+    parameter int unsigned FlashPowerupCycles = 10_000_001,
+    parameter int unsigned FlashResetCycles = 1001,
+    parameter int unsigned FlashRecoveryCycles = 10_000_001,
     parameter string RomFile = "mrom.hex"
 ) (
     input logic clock,
@@ -92,7 +95,10 @@ module rapt_arty_mem #(
   assign read_rom = read_addr_q[31:12] == 20'h20000;
   assign read_flash = in_flash(read_addr_q);
   assign write_ram = in_ram(write_addr_q);
-  assign write_uart = write_addr_q[31:3] == 29'h02000000;
+  // The 25-signal chip owns 0x10000000..0x100002ff locally. Keep the old
+  // board alias for direct host access and place its packet console at 0x10003000.
+  assign write_uart = write_addr_q[31:3] == 29'h02000000
+      || write_addr_q[31:3] == 29'h02000600;
   assign write_finisher = write_addr_q == 32'h0010_0000;
   assign write_ctrl = in_ctrl(write_addr_q);
   assign uart_write_addr = write_addr_q[2:0];
@@ -122,7 +128,11 @@ module rapt_arty_mem #(
   )) || (read_active_q && !read_wait_q && !axi.rvalid && read_flash));
   assign flash_addr = host_busy_q ? host_addr_q : {read_addr_q[31:2], 2'b0};
 
-  rapt_arty_flash u_flash (
+  rapt_arty_flash #(
+      .PowerupCycles(FlashPowerupCycles),
+      .ResetCycles(FlashResetCycles),
+      .RecoveryCycles(FlashRecoveryCycles)
+  ) u_flash (
       .clock(clock),
       .flash_clock(flash_clock),
       .reset(reset),
@@ -321,7 +331,7 @@ module rapt_arty_mem #(
             axi.rresp <= flash_error ? 2'b10 : 2'b00;
           end else if (in_ctrl(read_addr_q))
             axi.rdata <= ctrl_read_addr == 9'h020 ? {31'b0, boot_flash_i} : ctrl_rdata;
-          else if (read_addr_q[31:3] == 29'h02000000)
+          else if (read_addr_q[31:3] == 29'h02000000 || read_addr_q[31:3] == 29'h02000600)
             axi.rdata <= {24'b0, uart_read_data} << (8 * int'(read_addr_q[1:0]));
           else begin
             axi.rdata <= '0;

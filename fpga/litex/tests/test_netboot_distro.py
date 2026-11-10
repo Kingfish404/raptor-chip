@@ -9,13 +9,39 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from netboot_distro import background_services, export_rootfs, persistence_bootargs
+from netboot_distro import (background_services, export_rootfs, persistence_bootargs,
+                           require_linux_ram, require_ram_root)
 from netboot_distro_publish import publish
 
 
 class DistroTest(unittest.TestCase):
+    def test_arty_ram_and_existing_rv32_rv64_limits(self):
+        for bits, size in ((32, 0x10000000), (64, 0x10000000),
+                           (32, 0x40000000), (64, 0x80000000)):
+            with self.subTest(bits=bits, size=size), patch(
+                    'netboot_distro.run', return_value=f'80000000 {size:x}'.encode()):
+                self.assertEqual(require_linux_ram(Path('soc.dtb'), bits), size)
+        for bits, value in ((32, b'80000000 80000000'), (64, b'80000000 100000000'),
+                            (32, b'80000000 8000000'), (64, b'81000000 10000000')):
+            with self.subTest(bits=bits, value=value), patch(
+                    'netboot_distro.run', return_value=value), self.assertRaises(ValueError):
+                require_linux_ram(Path('soc.dtb'), bits)
+
+    def test_small_ram_root_checks_both_download_and_expansion(self):
+        mib = 1024 * 1024
+        require_ram_root(256 * mib, 32 * mib, 32 * mib)
+        require_ram_root(256 * mib, 30 * mib, 112 * mib)
+        with self.assertRaisesRegex(ValueError, 'exceeds FPGA RAM'):
+            require_ram_root(256 * mib, 129 * mib, 1 * mib)
+        with self.assertRaisesRegex(ValueError, 'headroom'):
+            require_ram_root(256 * mib, 100 * mib, 100 * mib)
+        require_ram_root(1024 * mib, 349 * mib, 349 * mib)
+        with self.assertRaisesRegex(ValueError, 'headroom'):
+            require_ram_root(1024 * mib, 350 * mib, 350 * mib)
+
     def test_console_does_not_wait_for_network_or_host_keys(self):
         source = '''# Retry in background if no DHCP server is currently available; retain leases.
 /bin/busybox udhcpc -b -i eth0 -s /etc/raptor-udhcpc.script

@@ -14,17 +14,26 @@ module sba_top (
     output logic bad_trap
 );
   localparam int Xlen = `RAPT_XLEN;
-  logic sclk, cs_n, chip_oe, board_oe, diag;
-  logic [7:0] chip_dq, board_dq, dq;
+  logic sclk, cs_n, board_oe, diag;
+  logic [7:0] chip_dq, board_dq, dq, chip_oe;
   axi4_if #(.XLEN(Xlen)) board ();
-  assign dq = chip_oe ? chip_dq : board_oe ? board_dq : 8'hff;
+  assign dq = (&chip_oe) ? chip_dq : board_oe ? board_dq : 8'hff;
 
-  rapt_chip dut (
+  // No NOR is attached. Keep the same finite failure path as silicon, with
+  // explicit accelerated startup/poll waits so cold recovery fits simulation.
+  rapt_chip #(
+      .FlashPowerupCycles(2000),
+      .FlashResetCycles(32),
+      .FlashRecoveryCycles(4000),
+      .FlashPollCycles(4096)
+  ) dut (
       .clk_i(clock),
       .rst_ni(!reset),
       .irq_i(1'b0),
       .xspi_sclk_o(sclk),
       .xspi_cs_no(cs_n),
+      .xspi_ds_i(1'b0),
+      .diag_oe_o(),
       .xspi_dq_i(dq),
       .xspi_dq_o(chip_dq),
       .xspi_dq_oe_o(chip_oe),
@@ -38,12 +47,13 @@ module sba_top (
       .XLEN(Xlen)
   ) target (
       .clock,
-      .reset,
+      .reset(reset || dut.boot_flash),
       .sclk_i(sclk),
-      .cs_n_i(cs_n),
+      .cs_n_i(cs_n || dut.boot_flash),
       .dq_i(dq),
       .dq_o(board_dq),
       .dq_oe_o(board_oe),
+      .status_poll_o(),
       .axi(board)
   );
   // The shared memory model logs invalid reads but returns OKAY. Inject the

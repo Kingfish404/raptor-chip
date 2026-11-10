@@ -27,6 +27,9 @@ def main():
     source = args.source.resolve(strict=True)
     destination = args.destination.absolute()
     destination.parent.mkdir(parents=True, exist_ok=True)
+    # Relative link targets are interpreted from the physical parent directory.
+    # Keep the filename unresolved so an existing publication remains replaceable.
+    destination = destination.parent.resolve() / destination.name
     if destination.is_symlink() and destination.resolve() == source:
         return
     # Atomic publication does not overwrite an executable inode in use by an

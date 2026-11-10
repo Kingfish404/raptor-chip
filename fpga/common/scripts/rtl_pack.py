@@ -37,25 +37,44 @@ def immutable_copy(output):
     return snapshot / "rapt_pack.sv"
 
 
+def rtl_sources(repo, *, pin_limited=False, io25=False):
+    """Canonical sources, optionally including an 18- or 25-signal chip integration."""
+    rtl = repo / "rtl"
+    sources = sorted(p for p in rtl.rglob("*.sv")
+                     if "generated" not in p.relative_to(rtl).parts)
+    sources += sorted((repo / "sim/rtl").rglob("*.sv"))
+    sources += [rtl / "generated" / name for name in (
+        "rapt_idu_decoder.sv", "rapt_idu_decoder_c.sv"
+    )]
+    sources = [rtl / "rapt_pkg.sv"] + [p for p in sources if p.name != "rapt_pkg.sv"]
+    if pin_limited or io25:
+        sources += sorted((repo / "synth/configs/pin-limited/rtl").glob("*.sv"))
+    if io25:
+        sources += sorted((repo / "synth/configs/io25/rtl").glob("*.sv"))
+        sources += [repo / "fpga/common/rtl/rapt_native_uart.sv"]
+    for source in sources:
+        if not source.is_file():
+            raise ValueError(f"Missing {source}; generate decoders with make verilog "
+                             "before building")
+    return sources
+
+
+def include_dirs(repo, config_dir):
+    return [config_dir, repo / "sim/include", repo / "rtl/include",
+            repo / "rtl/include/npc", repo / "rtl/include/dpic_mock"]
+
+
 def pack_inputs(repo, config_dir, flags):
     if (any(flag.split("=", 1)[0] == "-DRAPT_SAMPLING" for flag in shlex.split(flags)) and
             not (repo / "rtl/include/rapt_sample_if.svh").is_file()):
         raise ValueError("RAPT_SAMPLING requires the FPGA --sampling source overlay")
-    # Same package-first source set as sim/Makefile: no upstream SoC models,
-    # and only the two supported generated instruction decoders.
-    sources = sorted(p for p in (repo / "rtl").rglob("*.sv") if "generated" not in p.relative_to(repo / "rtl").parts)
-    sources += sorted((repo / "sim/rtl").rglob("*.sv"))
-    sources += [repo / "rtl/generated" / name for name in ("rapt_idu_decoder.sv", "rapt_idu_decoder_c.sv")]
-    sources = [repo / "rtl/rapt_pkg.sv"] + [p for p in sources if p.name != "rapt_pkg.sv"]
-    for source in sources:
-        if not source.is_file():
-            raise ValueError(f"Missing {source}; generate decoders with make verilog before building")
-    includes = [config_dir, repo / "sim/include", repo / "rtl/include",
-                repo / "rtl/include/npc", repo / "rtl/include/dpic_mock"]
+    sources = rtl_sources(repo)
+    includes = include_dirs(repo, config_dir)
     command = ["verilator", "-E", "-P", "-DSYNTHESIS", *shlex.split(flags),
                *(f"-I{p}" for p in includes), *map(str, sources)]
     digest = hashlib.sha256(json.dumps(command).encode())
-    headers = sorted((repo / "rtl").rglob("*.svh")) + sorted((repo / "sim").glob("include/**/*.svh"))
+    headers = (sorted((repo / "rtl").rglob("*.svh"))
+               + sorted((repo / "sim").glob("include/**/*.svh")))
     for source in sources + headers:
         digest.update(str(source).encode())
         digest.update(source.read_bytes())
@@ -115,8 +134,8 @@ if __name__ == "__main__":
     except subprocess.CalledProcessError as exc:
         # Verilator already printed the actual diagnostic on stderr. Avoid a
         # many-page Python argv traceback that hides its first error.
-        print(f"RTL preprocessing failed (exit {exc.returncode}); see the Verilator diagnostics above.",
-              file=sys.stderr)
+        print(f"RTL preprocessing failed (exit {exc.returncode}); "
+              "see the Verilator diagnostics above.", file=sys.stderr)
         sys.exit(exc.returncode or 1)
     except (RuntimeError, ValueError) as exc:
         print(f"RTL export failed: {exc}", file=sys.stderr)

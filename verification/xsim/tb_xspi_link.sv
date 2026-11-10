@@ -129,6 +129,7 @@ module tb_xspi_link;
       .dq_i(dq),
       .dq_o(target_dq),
       .dq_oe_o(target_oe),
+      .status_poll_o(),
       .axi(board)
   );
   tb_xspi_link_mem #(

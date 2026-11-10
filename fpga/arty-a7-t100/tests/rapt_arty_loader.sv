@@ -31,7 +31,6 @@ module rapt_arty_loader (
   ) u_host (
       .clock(clock),
       .reset(reset),
-      .boot_switch_i(1'b0),
       .boot_flash_o(),
       .link_delay_o(),
       .rx_data_i(rx_data),

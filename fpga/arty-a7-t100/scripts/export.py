@@ -49,6 +49,19 @@ def main():
     script += "opt\nbwmuxmap\ntechmap t:$shiftx\nopt\nselect -assert-none t:$shiftx\n"
     script += "check -assert\n"
     if args.map_xilinx:
+        # Match the native fixture's local-RAM mapping. Fold only its three
+        # byte-lane address adders before combining ports and absorbing the
+        # read address FF. Keep the memory's reset and transparency semantics.
+        branch = "g_internal" if args.internal else "g_pins"
+        memory = f"rapt_arty_top/c:{branch}.u_chip.u_chip.u_backend.u_flash.ram"
+        addresses = memory + " %ci2 t:$add %i"
+        script += "write_rtlil unmapped.il\nwrite_json unmapped.json\n"
+        script += f"select -assert-count 1 {memory}\n"
+        script += f"select -assert-count 3 {addresses}\n"
+        script += f"opt_expr -fine {addresses}\nopt_clean\n"
+        for command in ("memory_share -nosat", "opt_mem_widen", "memory_dff"):
+            script += f"{command} {memory}\n"
+        script += "check -assert\nwrite_rtlil normalized.il\nwrite_json normalized.json\n"
         script += "synth_xilinx -family xc7 -top rapt_arty_top -noiopad -noclkbuf\n"
         # Cascaded TDP RAMs need legal widths on the otherwise unused ports.
         # Their enables stay zero and their outputs stay unused.

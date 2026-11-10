@@ -58,97 +58,129 @@ The F/D/Zfhmin implementation covers scalar floating-point load/store, arithmeti
 
 See [documentation](./docs/README.md) for more details.
 
+## Performance
+
+Current repository results. FPGA runs use a 50 MHz core.
+
+| Environment | Preset / XLEN | CM/MHz | Embench-IoT | Geekbench 5 SC / MC |
+| --- | --- | ---: | --- | ---: |
+| Bare-metal sim | default / RV32 | 5.2173 | 1.6840x | — |
+| Bare-metal sim | default / RV64 | 4.7743 | 1.7149x | — |
+| Bare-metal sim | default-w4 / RV64 | 5.5781 | 2.0261x | — |
+| FPGA Linux, KU5P | middle-cache / RV64 | 2.6422 | 1.0000x | — |
+| FPGA Linux, KU15P, DDR UI 200 MHz | default-w4 / RV64 | 2.9395 | 0.9258x | 1 / 1 |
+| FPGA Linux, KU15P, DDR UI 333 MHz | default-w4 / RV64 | 3.0947 | 1.0005x | 2 / 2 |
+
+Sim uses measured ROI cycles, with Embench scaled to 50 MHz. Embench is the geometric mean
+of speed across 19 passing workloads, relative to KU5P. Geekbench is 5.4.1 Preview, with one
+hart in both single-core and multi-core modes.
+
 ## Microarchitecture
 
-Sizes shown are for the `default` preset (`rtl/configs/default/rapt_config.svh`); other presets differ. See [Microarchitecture](./docs/uarch.md) for the pipeline stages and the per-block contracts.
+Sizes are for the `default` preset. See [Microarchitecture](./docs/uarch.md) for detailed
+pipeline stages and block contracts. Boundary arrows name the connected blocks and signals.
 
 ```mermaid
-flowchart TD
-  subgraph FE["rapt_frontend (decode width 2)"]
-    subgraph BPU["BPU (rapt_bpu)"]
+%%{init: {"flowchart": {"nodeSpacing": 18, "rankSpacing": 30, "padding": 10}}}%%
+flowchart TB
+  subgraph CORE["rapt_core"]
+    direction TB
+    subgraph PIPE["Instruction pipeline"]
+      direction TB
+      subgraph FE["rapt_frontend · decode 2"]
+        direction LR
+        subgraph BPU["BPU"]
+          direction TB
+          TAGE["TAGE DIRP<br/>1024 bimodal + 3 x 1024 tagged<br/>history 8 / 16 / 64<br/>2nd branch side query"]
+          BTB["BTB 128<br/>2-way"]
+          RAS["RAS 16"]
+          HIST["GHR / PHR"]
+          TAGE ~~~ BTB & RAS & HIST
+        end
+        IFU["IFU<br/>6-halfword lookahead<br/>held suffix"]
+        FQU["FQU 4<br/>stream queue"]
+        IDU["IDU 2<br/>early resteer"]
+        BPU <-->|predict / update| IFU
+        IFU --> FQU --> IDU
+        IDU -. resteer .-> IFU
+      end
+      subgraph BE["rapt_backend · rename / dispatch / commit 2 / 2 / 2"]
+        direction TB
+        subgraph ORD["Rename and dispatch"]
+          direction LR
+          RNU["RNU · RNQ 8 · rename_pipe 4<br/>MAP / RAT / free bitmap<br/>16 branch checkpoints"]
+          OPS["Operand stage 2"]
+          ROU["ROU · UOQ 8 · ROB 32<br/>operand spill 16<br/>dispatch window 12 lanes"]
+          DPU{{"DPU 2<br/>capacity-aware router"}}
+          RNU --> OPS --> ROU --> DPU
+        end
+        ALQ["ALQ 8<br/>ALU0 + CSR / system<br/>ALU1"]
+        BRQ["BRQ 8<br/>branch unit"]
+        MDQ["MDQ 4<br/>pipelined MUL<br/>iterative DIV"]
+        FPQ["FPQ 8 · FEU<br/>F / D / Zfhmin"]
+        LSU["LSU · IOQ 8<br/>unified SQ 16"]
+        CPL["Completion x6 · N+4<br/>completion register"]
+        PRF["Integer PRF 64<br/>4R / 6W"]
+        FPR["FP result file<br/>committed FPR 32 x 64"]
+        CMU["CMU<br/>in-order commit 2"]
+        CSR["CSR · M / S / U<br/>traps · Sv32 / Sv39 · PMP"]
+        ORD --> ALQ & BRQ & MDQ & FPQ & LSU
+        ALQ & BRQ & MDQ & FPQ & LSU --> CPL
+        CPL -->|wakeup + writeback| ORD
+        CPL -->|writeback| PRF & FPR
+        ORD <-->|operand read| PRF & FPR
+        ORD <-->|"ROU → ROB head<br/>CMU → RNU retire / free mappings"| CMU
+        ORD -. ROU: store commit .-> LSU
+        CPL ~~~ CMU
+        ALQ --- CSR
+      end
+      FE <-->|"IDU → RNU<br/>BRQ recovery<br/>CMU flush / redirect / BPU training"| BE
+    end
+    subgraph MEM["rapt_memory"]
       direction LR
-      TAGE["TAGE DIRP: 1024 bimodal + 3 x 1024 tagged<br/>(history 8/16/64, side query for a 2nd branch)"]
-      BTB["BTB (128 entries, 2-way)"]
-      RAS["RAS (16 entries)"]
-      HIST["GHR / PHR history"]
+      subgraph IMEM["I-side"]
+        L1I["L1I 16 KiB · 4-way · 64 B<br/>banked SRAM<br/>sequential pre-read"]
+        ITLB["ITLB 16<br/>fully associative"]
+        IPTW["IPTW<br/>Sv32 / Sv39"]
+      end
+      subgraph DMEM["D-side"]
+        L1D["L1D 16 KiB · 4-way · 64 B<br/>VIPT · write-back<br/>4 MSHRs · 2 writeback buffers"]
+        DTLB["DTLB 64 · 2-way<br/>load / store replicas"]
+        DPTW["DPTW<br/>Sv32 / Sv39 · Svade"]
+      end
+      L2TLB["Shared L2 TLB 256<br/>direct-mapped"]
+      PMPC["PMP x8 · TOR / NAPOT · 4 KiB<br/>fetch / load-store / PTW checks"]
+      BUS["rapt_bus · request IDs<br/>D / PTW > MSHR > L1I"]
+      L1I --- ITLB
+      L1D --- DTLB
+      ITLB & DTLB -. miss .-> L2TLB
+      L2TLB -. I miss .-> IPTW
+      L2TLB -. D miss .-> DPTW
+      PMPC -.-> L1I & L1D & IPTW & DPTW
+      L1I & L1D & IPTW & DPTW --> BUS
     end
-    IFU["IFU (6-halfword L1I lookahead, held suffix)"]
-    FQU["FQU (4-entry stream queue)"]
-    IDU["IDU (DecodeWidth slots, early resteer)"]
+    PIPE <-->|"IFU ↔ L1I · LSU ↔ L1D<br/>CSR → PMP / satp"| MEM
   end
-  subgraph BE["rapt_backend (rename / dispatch / commit 2 / 2 / 2)"]
-    RNU["RNU: RNQ 8, MAP/RAT/free bitmap,<br/>16 branch checkpoints, rename_pipe 4"]
-    OPS["operand stage (RenameWidth slots)"]
-    ROU["ROU: UOQ 8, ROB 32, operand spill 16,<br/>dispatch window 12 lanes"]
-    DPU{{"DPU (capacity-aware router, DispatchWidth)"}}
-    ALQ["ALQ 8: ALU0 (+CSR/system), ALU1"]
-    BRQ["BRQ 8: branch unit"]
-    MDQ["MDQ 4: pipelined MUL, iterative DIV"]
-    FPQ["FPQ 8: FEU (F/D/Zfhmin)"]
-    LSU["LSU: IOQ 8 + unified SQ 16"]
-    CPL(("completion x6 (N+4)<br/>+ completion stage"))
-    PRF["integer PRF 64 (4R / 6W)"]
-    FPR["FP result file + committed FPR (32 x 64-bit)"]
-    CMU["CMU (in-order commit)"]
-    CSR["CSR (M/S/U, traps, Sv32/Sv39, PMP)"]
-  end
-  subgraph MEM["rapt_memory"]
-    subgraph IMEM["I-side"]
-      L1I["L1I 16 KiB, 4-way, 64 B lines<br/>(banked SRAM, sequential pre-read)"]
-      ITLB["ITLB (16, fully associative)"]
-      IPTW["IPTW (Sv32 / Sv39)"]
+  subgraph CLU["rapt · cluster interconnect"]
+    direction LR
+    subgraph L2S["rapt_l2_subsystem · always present"]
+      direction LR
+      AXIM["AXI4 master<br/>up to 8 reads"]
+      L2["L2 · default: management only<br/>default-l2: 512 KiB · 8-way"]
+      RBUF["AXI R buffer<br/>default-l2 only"]
+      AXIM --> L2 --> RBUF
     end
-    subgraph DMEM["D-side"]
-      L1D["L1D 16 KiB, 4-way, VIPT, write-back<br/>(4 MSHRs, 2 writeback buffers)"]
-      DTLB["DTLB (64, 2-way, load/store replicas)"]
-      DPTW["DPTW (Sv32 / Sv39, Svade)"]
-    end
-    L2TLB["shared L2 TLB (256, direct-mapped)"]
-    PMPC["PMP x8 (TOR/NAPOT, 4 KiB):<br/>fetch, load/store and PTW checks"]
-    BUS["rapt_bus (D/PTW > MSHR > L1I, request IDs)"]
+    ARB["Debug arbiter"]
+    RTR["AXI router<br/>1 master / 3 targets"]
+    CLINT["CLINT<br/>mtime / mtimecmp / msip"]
+    PLIC["PLIC 31<br/>M / S contexts"]
+    DBG["JTAG DTM<br/>Debug Module"]
+    EXT["Off-chip AXI<br/>memory / LiteX SoC"]
+    L2S --> ARB --> RTR
+    DBG -->|SBA| ARB
+    RTR --> CLINT & PLIC & EXT
   end
-  subgraph CLU["rapt (cluster top)"]
-    subgraph L2S["rapt_l2_subsystem (always present)"]
-      AXIM["AXI4 master (up to 8 reads)"]
-      L2["L2 cache (default: none, management only;<br/>default-l2: 512 KiB, 8-way)"]
-      RBUF["AXI R buffer (default-l2 only)"]
-    end
-    RTR["AXI router (1 master / 3 targets)"]
-    CLINT["CLINT (mtime / mtimecmp / msip)"]
-    PLIC["PLIC (31 sources, M/S contexts)"]
-    DBG["JTAG DTM + Debug Module"]
-    EXT["off-chip AXI (memory / LiteX SoC)"]
-  end
-  BPU <-->|"predict / update"| IFU
-  IFU --> FQU --> IDU --> RNU
-  IDU -. "resteer" .-> IFU
-  RNU --> OPS --> ROU --> DPU
-  PRF -. "operand read" .- ROU
-  ROU --- FPR
-  DPU --> ALQ & BRQ & MDQ & FPQ & LSU
-  ALQ & BRQ & MDQ & FPQ & LSU --> CPL
-  CPL -->|"wakeup + writeback"| ROU & PRF & FPR
-  ALQ --- CSR
-  ROU --> CMU
-  ROU -. "store commit" .-> LSU
-  BRQ -. "mispredict recovery" .-> FE
-  CMU -. "flush / redirect / BPU training" .-> FE
-  CMU -. "retire / free mappings" .-> RNU
-  IFU --> L1I
-  L1I --- ITLB
-  LSU --> L1D
-  L1D --- DTLB
-  ITLB & DTLB -. "miss" .-> L2TLB
-  L2TLB -. "I miss" .-> IPTW
-  L2TLB -. "D miss" .-> DPTW
-  CSR -. "PMP / satp state" .-> PMPC
-  PMPC -.-> L1I & L1D & IPTW & DPTW
-  L1I & L1D & IPTW & DPTW --> BUS
-  BUS -->|"l2_client_if"| AXIM
-  AXIM --> L2 --> RBUF --> RTR
-  RTR --> CLINT & PLIC & EXT
-  CLINT & PLIC -. "interrupts" .-> CSR
-  DBG -. "halt / GPR access" .-> BE
+  CORE <-->|"rapt_bus ↔ l2_client_if<br/>CLINT / PLIC → CSR interrupts<br/>DM ↔ halt / GPR access"| CLU
 ```
 
 ## Setup & Quick Start
@@ -268,7 +300,7 @@ make verify-fuzz
 make verify-fuzz-inf      # continuous until Ctrl-C / failure
 # Signature-based ISA corner-case tests
 make verify-sigtest
-# RISCOF classic compliance tests (legacy, no difftest)
+# RISCOF classic compliance tests (without difftest)
 make verify-riscof-classic
 make verify-riscof-classic-nemu
 # Official RISCOF compliance (riscv-arch-test, sail reference)
@@ -282,13 +314,16 @@ make verify-light
 
 ### 7. FPGA
 
-For a native CU08-KU15P flow without the LiteX SoC, see [native board support](fpga/mlk-cu08-ku15p/README.md).
-It provides a SystemVerilog SoC, UART boot ROM, BRAM/DDR4 configurations and batch Vivado builds.
-For example: `make -C fpga/mlk-cu08-ku15p sim XLEN=64 MEMORY=bram`.
+See [MLK-CU08-KU15P](fpga/mlk-cu08-ku15p/README.md) for the SystemVerilog SoC,
+UART boot ROM, BRAM/DDR4 configurations and Vivado build commands. For example:
+`make -C fpga/mlk-cu08-ku15p sim XLEN=64 MEMORY=bram`.
 
 For **MLK-CU08 RV32/RV64 Linux with Ethernet and BIOS `netboot`**, follow the [paired build/load quick start](fpga/litex/README.md#cu08-rv32rv64-netboot-build-and-load) and then [TFTP bundle preparation](fpga/litex/NETBOOT.md). Ethernet is **disabled by default** (`WITH_ETHERNET=0`), including Linux CPU variants. A plain build therefore does not provide BIOS `netboot`. Build and load must use the same Ethernet settings and output directory; `fpga-load` loads an existing bitstream and does not rebuild it.
 
-For the fixed current CU08 netboot configuration, run from `fpga/litex`: `make fpga-netboot-rv32-build`, then `make fpga-netboot-rv32-load`. Replace `rv32` with `rv64` for RV64. These paired targets preserve the same Ethernet/CPU settings and use isolated output directories; see the linked guide for prerequisites, payload paths and TFTP setup.
+For the CU08 netboot profile, run from `fpga/litex`: `make fpga-netboot-rv32-build`,
+then `make fpga-netboot-rv32-load`. Replace `rv32` with `rv64` for RV64. These paired
+targets use the same Ethernet/CPU settings and isolated output directories; see
+the linked guide for prerequisites, payload paths and TFTP setup.
 
 ```shell
 # --- LiteX SoC ---

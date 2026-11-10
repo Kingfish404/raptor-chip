@@ -73,6 +73,61 @@ install_tools "$2"
         self.assertNotIn("sudo", result.stdout)
         self.assertNotIn("brew install", result.stdout)
 
+    def test_cudd_source_build_and_installed_reuse(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fixture = root / "source"
+            fixture.mkdir()
+            (fixture / "cudd.h").write_text("int cudd_fixture(void);\n")
+            (fixture / "cudd.c").write_text("int cudd_fixture(void) { return 42; }\n")
+            for name in ("aclocal.m4", "config.h.in", "Makefile.in", "Makefile.am"):
+                (fixture / name).touch()
+            os.utime(fixture / "Makefile.in", (1, 1))
+            configure = fixture / "configure"
+            configure.write_text(r'''#!/bin/sh
+set -eu
+test -z "${MAKEFLAGS:-}${MFLAGS:-}${MAKEOVERRIDES:-}"
+prefix="${1#--prefix=}"
+cat > Makefile <<EOF
+.DEFAULT_GOAL := all
+Makefile.in: Makefile.am
+	@echo unexpected Automake regeneration; exit 1
+all: Makefile.in
+	\$(CC) -c cudd.c -o cudd.o
+	\$(AR) rcs libcudd.a cudd.o
+install: all
+	mkdir -p "$prefix/lib" "$prefix/include"
+	cp libcudd.a "$prefix/lib/"
+	cp cudd.h "$prefix/include/"
+EOF
+''')
+            configure.chmod(0o755)
+            flow = root / "flow with spaces"
+            # No mirror archive is present. Use real make and a C compiler;
+            # only replace the network clone with this local source fixture.
+            result = self.shell('''
+source "$1"
+fixture="$3"
+git() {
+  printf 'git %s\\n' "$*"
+  cp -R "$fixture" "${@: -1}"
+}
+host_nproc() { echo 2; }
+export MAKEFLAGS=PARENT_SETTING=must-not-leak MFLAGS=-s MAKEOVERRIDES=PARENT_SETTING
+clone_build_cudd "$2"
+git() { echo unexpected-fetch; return 1; }
+clone_build_cudd "$2"
+''', ROOT / "setup-rtl.sh", flow, fixture)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("git clone --depth 1 https://github.com/cuddorg/cudd.git", result.stdout)
+            self.assertNotIn("unexpected-fetch", result.stdout)
+            prefix = flow / "third_party/cudd"
+            self.assertTrue((prefix / "include/cudd.h").is_file())
+            library = prefix / "lib/libcudd.a"
+            result = subprocess.run(["ar", "t", str(library)], text=True,
+                                    capture_output=True, check=True)
+            self.assertIn("cudd.o", result.stdout)
+
     def test_espresso_build_disables_docs_in_fresh_and_existing_caches(self):
         # Use real CMake and a C compiler instead of mocking the helper: the
         # old mock-only cache-miss test hid Espresso's documentation dependency.

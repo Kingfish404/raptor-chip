@@ -14,10 +14,14 @@ module tb_rapt_arty_startup;
   rapt_arty_top u_dut (
       .clk100(clk100),
       .btn(btn),
-      .boot_switch(1'b0),
       .led(led),
       .uart_rx(1'b1),
       .uart_tx(),
+      .uart0_rx(1'b1),
+      .uart0_tx(),
+      .uart1_rx(1'b1),
+      .uart1_tx(),
+      .gpio(),
       .chip_sclk(),
       .chip_cs_n(),
       .chip_dq(chip_dq),
@@ -35,20 +39,20 @@ module tb_rapt_arty_startup;
       .flash_dq(flash_dq)
   );
   assign flash_dq = 8'hff;
-  always @(negedge u_dut.\g_internal.u_chip.u_chip.u_offchip.u_byte.cs_n_o ) begin
+  always @(negedge u_dut.\g_internal.u_chip.u_chip.u_backend.u_bridge.u_byte.cs_n_o ) begin
     frames++;
     byte_index = 0;
     $display("STARTUP_FRAME time=%0t count=%0d", $time, frames);
     $fflush();
   end
-  always @(posedge u_dut.\g_internal.u_chip.u_chip.u_offchip.u_byte.sclk_o ) begin
+  always @(posedge u_dut.\g_internal.u_chip.u_chip.u_backend.u_bridge.u_byte.sclk_o ) begin
     if ($test$plusargs("LINK_TRACE"))
       $display(
           "STARTUP_BYTE frame=%0d byte=%0d oe=%b tx=%h rx=%h",
           frames,
           byte_index,
-          u_dut.\g_internal.u_chip.u_chip.u_offchip.u_byte.dq_oe_o ,
-          u_dut.\g_internal.u_chip.u_chip.u_offchip.u_byte.dq_o ,
+          u_dut.\g_internal.u_chip.u_chip.u_backend.u_bridge.u_byte.dq_oe_o ,
+          u_dut.\g_internal.u_chip.u_chip.u_backend.u_bridge.u_byte.dq_o ,
           u_dut.\u_board.u_target.dq_o
       );
     byte_index++;

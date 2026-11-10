@@ -1,12 +1,11 @@
-# Native RK-XCKU5P-F V1.2
+# RK-XCKU5P-F V1.2
 
 Raptor support for `xcku5p-ffvb676-2-i`, using SystemVerilog, XDC and batch
 Vivado. Supports RV32/RV64 with DDR4 or BRAM main memory, a boot ROM, scratch
 SRAM, an 8250-compatible UART, CLINT and PLIC. The board has a 2 GiB DDR4
-interface and an RTL8211F Ethernet PHY. The native SoC supports an optional
-packet SRAM Ethernet controller and Ubuntu NFS root boot. Native Ubuntu uses
-TFTP firmware loading with a UART fallback. This directory is a standalone
-build; the LiteX SoC for the same board is a separate flow in `fpga/litex`.
+interface and an RTL8211F Ethernet PHY. The SoC supports an optional
+packet SRAM Ethernet controller and Ubuntu NFS root boot. Ubuntu uses
+TFTP firmware loading with a UART fallback.
 
 All commands below run from the **repository root**.
 
@@ -21,7 +20,7 @@ All commands below run from the **repository root**.
   to its UART device. Install the cable drivers required by the JTAG adapter.
 
 Generate the instruction decoders from the repository's Scala sources with
-`make verilog` if they are missing. The native Python tools use the standard
+`make verilog` if they are missing. The Python tools use the standard
 library and need no additional Python packages.
 
 ## Build and program
@@ -51,13 +50,13 @@ build, then requires exactly one matching FPGA on JTAG unless `HW_TARGET`
 selects one. Programming is volatile; it does not write configuration flash or
 automatically rebuild stale outputs.
 
-## Native Ubuntu 24.04 NFS root
+## Ubuntu 24.04 NFS root
 
-The shared [native Ubuntu workflow](../common/UBUNTU.md) provides kernel/rootfs
+The shared [Ubuntu workflow](../common/UBUNTU.md) provides kernel/rootfs
 preparation, TFTP or UART loading, NFS boot and CoreMark/Embench tools. Board
-`ubuntu-*` targets default to RV64 `middle-cache`, 50 MHz, DDR4 and native
+`ubuntu-*` targets default to RV64 `middle-cache`, 50 MHz, DDR4 and onboard
 Ethernet. The controller's [register ABI](ETHERNET.md) and physical interface
-remain board-specific; the Linux driver is under
+are board-specific; the Linux driver is under
 [`fpga/common/linux`](../common/linux/).
 
 For physical Ethernet checks, use `scripts/ethernet_synth.tcl` and
@@ -67,9 +66,9 @@ receive primitive test at −1, 0 and +1 ns input skew. Full board builds additi
 check Gray-bus skew, routed setup/hold, missing timing constraints and DRC before
 creating a loadable result.
 
-## LiteX SoC (separate flow)
+## LiteX BIOS and netboot
 
-The LiteX SoC is built by `fpga/litex`, not by this directory. Its board profile uses the RK onboard RGMII PHY and 2 GiB DDR4 MIG at
+The `fpga/litex` board profile uses the onboard RGMII PHY and 2 GiB DDR4 MIG at
 50 MHz. Its fixed netboot build selects `RAPT_CONFIG=small` by default, builds a
 BIOS with Ethernet, and packages matching RV32 or RV64 Linux boot files. Run
 from the repository root:
@@ -92,26 +91,21 @@ Use `rv32` in place of `rv64` for RV32. The network host needs a dedicated
 Ethernet interface and an accessible board UART/JTAG connection. Set
 `NETBOOT_INTERFACE` and `NETBOOT_UART` if discovery is ambiguous. `serve` and
 `console` occupy their terminals; exit the console before `test`. See the
-[netboot workflow](../litex/NETBOOT.md) for host setup and result gates. The
-RV64 `small` profile passed Vivado 2025.2 routing at 50 MHz (WNS +0.118 ns,
-WHS +0.005 ns, zero failing setup/hold endpoints) and loaded on the detected
-XCKU5P-F. MIG calibration and a 16 MiB BIOS DDR4 memory test passed. Physical
-netboot is still pending: the RTL8211F reported link down and BIOS ARP failed
-before TFTP, so Linux network operation has not been verified.
+[netboot workflow](../litex/NETBOOT.md) for host setup and result gates.
 
-Linux 6.18.51 also booted through the UART `serialboot` path on the RV64
-`small` LiteX bitstream. The BIOS reached its interactive `litex>` prompt,
-passed a 16 MiB DDR4 memory test, and accepted the serial image. OpenSBI and
-Linux reached the initramfs `tinysh#` prompt; `uname -a`, `free` and `uptime`
-worked. This check did not use Ethernet. For the same 50 MHz DDR4 plus Ethernet
-SoC, `middle` placed and routed with 171,927/216,960 LUTs and 26,160/27,120
-CLB sites (96.46%). Final WNS was +0.024 ns and WHS was +0.005 ns, so the
-implementation has very little margin. The `middle` bitstream loaded on the
-XCKU5P-F, its interactive BIOS passed a 16 MiB DDR4 test, and a UART serialboot
-of Linux 6.18.51 reached the initramfs `tinysh#` prompt. `uname -a`, `free`
-and `uptime` worked there too. The historical native `default` RV64 DDR4 synthesis alone
-used 230,862 LUTs, exceeding this part's LUT capacity; `default-w3` and
-`default-w4` are larger still.
+Board validation covers the RV64 `small` and `middle` LiteX profiles at 50 MHz
+with DDR4 and Ethernet. Both pass a 16 MiB BIOS DDR4 memory test and boot
+OpenSBI/Linux 6.18.51 through UART `serialboot` to the initramfs `tinysh#`
+prompt, with working `uname -a`, `free` and `uptime` commands.
+
+For `small`, Vivado 2025.2 routed timing is WNS +0.118 ns and WHS +0.005 ns,
+with zero failing setup/hold endpoints. The `middle` implementation uses
+171,927/216,960 LUTs and 26,160/27,120 CLB sites (96.46%); routed timing is
+WNS +0.024 ns and WHS +0.005 ns. Check resource use and routed timing for each
+preset before loading it.
+
+Physical netboot and Linux network operation remain unverified. The PHY link
+and BIOS ARP exchange must succeed before TFTP can start.
 
 ## Configuration and outputs
 
@@ -212,8 +206,8 @@ sets `fifo-size = <1>`, `tx-threshold = <0>` and `no-loopback-test` for the Linu
 
 ## Serial loading
 
-After JTAG programming, the ROM prints `Raptor native RK-XCKU5P-F RV64`
-(or `RV32`), followed by `RAPT ready`. Close other programs using the serial
+After JTAG programming, the ROM prints `RAPT ready` when it can receive an
+upload. Close other programs using the serial
 port. Set `out` to the `output` path printed by `make info` for the configuration
 you loaded, and replace `/dev/ttyUSB1` with the board's actual UART device:
 
@@ -265,7 +259,7 @@ not certify any preset, clock target or physical board in advance.
 | Target | Scope |
 |---|---|
 | `prepare` | Generate firmware, DTB and an immutable RTL/configuration snapshot |
-| `lint` | Verilator checks of the native SoC |
+| `lint` | Verilator checks of the SoC |
 | `test` | Host tools, pin/map consistency, UART and AXI regressions |
 | `sim` | CPU/ROM serial upload, CRC/range rejection, RAM test and payload execution |
 | `ip-check` | Elaborate the board top with generated MIG and AXI IP |
@@ -290,7 +284,7 @@ Review `timing_summary.rpt`, `check_timing.rpt`, `cdc.rpt`, `drc.rpt` and
 `utilization.rpt` for the exact source/configuration in `manifest.json`.
 The output directory also contains `index.html` for browsing all Vivado
 reports and `README.md` with synthesis and implementation resource tables.
-The native `synth` and `build` actions regenerate both summaries, including
+The `synth` and `build` actions regenerate both summaries, including
 partial reports after a failed Vivado run.
 Peripheral synthesis excludes the CPU and board clock/DDR infrastructure.
 A passing build gate does not establish CDC sign-off, DDR calibration or

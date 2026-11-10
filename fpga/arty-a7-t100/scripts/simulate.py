@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import subprocess
 
-from sources import BOARD, board_sources, fingerprint, includes, rtl_sources, tool_environment
+from sources import ROOT, BOARD, board_sources, fingerprint, includes, rtl_sources, tool_environment
 
 
 def main():
@@ -19,7 +19,8 @@ def main():
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     sources = rtl_sources() + [p for p in board_sources() if p.name != "rapt_arty_top.sv"]
-    sources += [BOARD / "tests/rapt_arty_mt35x_model.sv", BOARD / "tests/tb_rapt_arty.sv"]
+    sources += [ROOT / "verification/models/rapt_xspi_profile1_model.sv",
+                BOARD / "tests/tb_rapt_arty.sv"]
     files = sources + [p for inc in includes() for p in inc.glob("*.svh")]
     current = {"sources": fingerprint(files), "fast": args.fast, "synthesis": args.synthesis,
                "lutram": args.lutram, "verilator": subprocess.check_output(

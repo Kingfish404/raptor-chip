@@ -127,6 +127,8 @@ class Session:
             self.save()
         if self.manifest.get("refused"):
             raise ValueError("target sector was not blank on first use; original backups saved")
+        if self.manifest.get("inflight"):
+            raise ValueError("flash mutation outcome is uncertain; preserve backups and review")
         self.compare()
 
     def save(self):
@@ -146,14 +148,31 @@ class Session:
         print("FLASH_BACKUP_COMPARE_PASS", flush=True)
 
     def record(self, sectors, expected=None):
+        # Check every target and protected/neighbour sector before publishing
+        # new ownership or clearing the persistent in-flight marker.
+        current = dict(self.manifest["current"])
         for offset in sectors:
             data = self.flash.read(offset, SECTOR)
             if expected is not None and data != expected[offset]:
                 raise ValueError("complete target sector differs; keep original ownership state")
-            self.manifest["current"][f"{offset:08x}"] = sha(data)
+            current[f"{offset:08x}"] = sha(data)
             (self.directory / f"current-{offset:08x}.bin").write_bytes(data)
+        for key, wanted in current.items():
+            original = self.directory / f"original-{key}.bin"
+            if sha(original.read_bytes()) != self.manifest["original"][key]:
+                raise ValueError("original backup changed during mutation")
+            if sha(self.flash.read(int(key, 16), SECTOR)) != wanted:
+                raise ValueError("target or neighbour changed during mutation")
+        self.manifest["current"] = current
+        self.manifest["inflight"] = None
         self.save()
         self.compare()
+
+    def begin(self, operation, offset, length):
+        if self.manifest.get("inflight"):
+            raise ValueError("previous mutation outcome is uncertain; do not retry")
+        self.manifest["inflight"] = {"operation": operation, "offset": offset, "length": length}
+        self.save()
 
     def require_owned(self, offset, length):
         checked_range(offset, length)
@@ -170,8 +189,9 @@ class Session:
         before = self.flash.read(offset, SECTOR)
         stamp = time.time_ns()
         (self.directory / f"pre-erase-{offset:08x}-{stamp}.bin").write_bytes(before)
+        self.begin("erase", offset, SECTOR)
         self.flash.erase(offset)
-        self.record([offset])
+        self.record([offset], {offset: b"\xff" * SECTOR})
 
     def program(self, offset, data):
         sectors = self.require_owned(offset, len(data))
@@ -183,5 +203,6 @@ class Session:
         for index, value in enumerate(data):
             address = offset + index
             expected[address // SECTOR * SECTOR][address % SECTOR] = value
+        self.begin("program", offset, len(data))
         self.flash.program(offset, data)
         self.record(sectors, expected)

@@ -6,16 +6,23 @@ _NETBOOT_ROOT := $(abspath $(_NETBOOT_LITEX)/../..)
 include $(_NETBOOT_ROOT)/linux/vars.mk
 _nb_requested_board := $(or $(strip $(FPGA_BOARD)),$(strip $(BOARD)),mlk_cu08_ku15p)
 _nb_board := $(subst -,_,$(_nb_requested_board))
-ifeq ($(filter $(_nb_board),mlk_cu08_ku15p rk_xcku5p_f),)
-$(error Netboot supports FPGA_BOARD=mlk_cu08_ku15p or rk_xcku5p_f (got '$(_nb_requested_board)'))
+_nb_hardware_goals := $(filter-out fpga-netboot-host-setup fpga-netboot-host-restore,$(MAKECMDGOALS))
+_nb_boards := arty_a7_t100 mlk_cu08_ku15p rk_xcku5p_f
+ifeq ($(_nb_hardware_goals),)
+# Host restore must remain usable after a board/preset has been removed.
+_nb_board := mlk_cu08_ku15p
+else
+ifeq ($(filter $(_nb_board),$(_nb_boards)),)
+$(error FPGA_BOARD='$(_nb_requested_board)' conflicts with netboot; use $(_nb_boards))
 endif
 ifneq ($(strip $(BOARD)),)
 ifneq ($(subst -,_,$(strip $(BOARD))),$(_nb_board))
 $(error BOARD='$(BOARD)' conflicts with FPGA_BOARD='$(FPGA_BOARD)')
 endif
 endif
+endif
 override FPGA_BOARD := $(_nb_board)
-RAPT_CONFIG ?= $(if $(filter rk_xcku5p_f,$(_nb_board)),small,default)
+RAPT_CONFIG ?= $(if $(filter arty_a7_t100 rk_xcku5p_f,$(_nb_board)),small,default)
 override RAPT_CONFIG := $(strip $(RAPT_CONFIG))
 _nb_configs := $(notdir $(patsubst %/rapt_config.svh,%,$(wildcard $(_NETBOOT_ROOT)/rtl/configs/*/rapt_config.svh)))
 ifneq ($(filter-out fpga-netboot-host-setup fpga-netboot-host-restore,$(MAKECMDGOALS)),)
@@ -25,10 +32,17 @@ endif
 ifeq ($(filter $(_nb_configs),$(RAPT_CONFIG)),)
 $(error Invalid RAPT_CONFIG='$(RAPT_CONFIG)'. Known presets: $(_nb_configs))
 endif
+_nb_no_fpu := $(shell awk '/^`define RAPT_NO_FPU([ \t]|$$)/ { print 1; exit }' \
+	$(_NETBOOT_ROOT)/rtl/configs/$(RAPT_CONFIG)/rapt_config.svh)
+ifneq ($(_nb_no_fpu),)
+$(error The GC netboot payload requires F/D; use ordinary targets with a matching soft-float payload)
+endif
 endif
 # Custom roots are containers too: presets must never share SoC/receipt paths.
 ifeq ($(origin NETBOOT_BUILD_ROOT),undefined)
-NETBOOT_BUILD_ROOT = $(_NETBOOT_LITEX)/build/netboot-$(if $(filter rk_xcku5p_f,$(_nb_board)),rk-,)$(RAPT_CONFIG)
+_nb_board_prefix := $(if $(filter arty_a7_t100,$(_nb_board)),arty-,)
+_nb_board_prefix := $(if $(filter rk_xcku5p_f,$(_nb_board)),rk-,$(_nb_board_prefix))
+NETBOOT_BUILD_ROOT = $(_NETBOOT_LITEX)/build/netboot-$(_nb_board_prefix)$(RAPT_CONFIG)
 _nb_root = $(NETBOOT_BUILD_ROOT)
 else
 _nb_root = $(NETBOOT_BUILD_ROOT)/$(RAPT_CONFIG)
@@ -76,9 +90,17 @@ _nb_payload = $(NETBOOT_PAYLOAD_RV$(_nb_xlen))
 _nb_rv64_pack_flags = -DRAPT_FETCH_RESPONSE_STAGE=0
 _nb_setup_margin = $(if $(and $(filter 64,$(_nb_xlen)),$(filter $(_nb_w4_configs),$(RAPT_CONFIG))),1.0,0)
 _nb_final_wns = $(if $(and $(filter 64,$(_nb_xlen)),$(filter $(_nb_w4_configs),$(RAPT_CONFIG))),0.3,)
+_nb_is_arty := $(filter arty_a7_t100,$(_nb_board))
+_nb_has_sd := $(if $(filter mlk_cu08_ku15p,$(_nb_board)),1,0)
+_nb_cpu_clock := $(if $(_nb_is_arty),20000000,50000000)
 _nb_args = $(call _nb_fixed,FPGA_BOARD,$(_nb_board)) $(call _nb_fixed,FPGA_AUTO_DETECT,0) $(call _nb_fixed,VARIANT,linux$(_nb_xlen)) \
- $(call _nb_quote,RAPT_CONFIG=$(RAPT_CONFIG)) $(call _nb_fixed,SYS_CLK,50000000) $(call _nb_fixed,WITH_MIG,1) $(call _nb_fixed,WITH_LITEDRAM,0) \
- $(call _nb_fixed,WITH_SDCARD,$(if $(filter rk_xcku5p_f,$(_nb_board)),0,1)) $(call _nb_fixed,WITH_ETHERNET,1) $(call _nb_fixed,ETH_SPEED,1000) $(call _nb_fixed,FMC_SLOT,$(if $(filter rk_xcku5p_f,$(_nb_board)),a,c)) $(call _nb_fixed,ETH_PORT,a) \
+ $(call _nb_quote,RAPT_CONFIG=$(RAPT_CONFIG)) $(call _nb_fixed,SYS_CLK,$(_nb_cpu_clock)) \
+ $(call _nb_fixed,WITH_MIG,$(if $(_nb_is_arty),0,1)) \
+ $(call _nb_fixed,WITH_LITEDRAM,$(if $(_nb_is_arty),1,0)) \
+ $(call _nb_fixed,WITH_SDCARD,$(_nb_has_sd)) $(call _nb_fixed,WITH_ETHERNET,1) \
+ $(call _nb_fixed,ETH_SPEED,$(if $(_nb_is_arty),100,1000)) \
+ $(call _nb_fixed,FMC_SLOT,$(if $(filter rk_xcku5p_f,$(_nb_board)),a,c)) \
+ $(call _nb_fixed,ETH_PORT,a) \
  $(call _nb_fixed,BOOT_MODE,bios) $(call _nb_fixed,EXTRA_FLAGS,) $(call _nb_fixed,LINUX_FPGA_INIT,full) \
  $(call _nb_quote,CROSS=$(CROSS)) \
  $(call _nb_quote,$(call _nb_fixed,RAPT_PACK_VFLAGS,$(if $(filter 64,$(_nb_xlen)),$(_nb_rv64_pack_flags),))) \

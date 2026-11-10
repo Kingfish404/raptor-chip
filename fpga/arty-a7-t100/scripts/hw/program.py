@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import socket
 import subprocess
@@ -25,8 +26,8 @@ def main():
     parser.add_argument("--serial", default=os.environ.get("RAPT_ARTY_SERIAL", ""),
                         help="Digilent serial of the one Arty to program (or RAPT_ARTY_SERIAL)")
     args = parser.parse_args()
-    if not args.serial:
-        parser.error("give --serial or set RAPT_ARTY_SERIAL; no other target is opened")
+    if not re.fullmatch(r"[A-Za-z0-9]{1,64}", args.serial):
+        parser.error("give one alphanumeric Digilent serial; no other target is opened")
     if Path("/proc/1/comm").read_text().strip() not in {"systemd", "init"}:
         parser.error("run hardware scripts outside the sandbox")
     if active_vivado() or available_memory() <= 25 * 1024 ** 3:
@@ -47,7 +48,11 @@ def main():
     import shutil
     vivado = Path(shutil.which(args.vivado) or args.vivado).resolve()
     server_binary = args.hw_server or vivado.parent / "hw_server"
-    command = [str(server_binary), "-s", f"tcp:127.0.0.1:{port}"]
+    # UG908: filter before discovery and disable automatic scan-chain opening.
+    # Tcl still requires one exact serial match before explicitly opening it.
+    command = [str(server_binary), "-s", f"tcp:127.0.0.1:{port}",
+               "-e", "set auto-open-ports 0", "-e", f"set jtag-port-filter {args.serial}"]
+    (args.output / "hw-server-command.json").write_text(json.dumps(command, indent=2) + "\n")
     server_log = (args.output / "hw-server.log").open("w")
     server = subprocess.Popen(command, stdout=server_log, stderr=subprocess.STDOUT,
                               start_new_session=True)

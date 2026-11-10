@@ -114,6 +114,33 @@ clone_build_espresso() {
   cmake --build "$ROOT_DIR/third_party/espresso/build" -j"$(host_nproc)"
 }
 
+clone_build_cudd() (
+  local flow_root="${1:?yosys-opensta checkout required}"
+  mkdir -p "$flow_root/third_party"
+  local dependency_dir
+  dependency_dir="$(cd "$flow_root/third_party" && pwd)"
+  local prefix="$dependency_dir/cudd"
+  local source_dir="$dependency_dir/cudd-source"
+  if [[ -s "$prefix/lib/libcudd.a" && -s "$prefix/include/cudd.h" ]]; then
+    echo "CUDD already installed at $prefix"
+    return
+  fi
+
+  # The old davidkebo mirror now contains sources, not cudd_versions/*.tar.gz.
+  # Build the official default branch; upstream incompatibilities must fail here.
+  [[ -d "$source_dir" ]] ||
+    git clone --depth 1 https://github.com/cuddorg/cudd.git "$source_dir"
+  cd "$source_dir"
+  # Git checkout timestamps can otherwise trigger regeneration with Automake 1.14.
+  touch aclocal.m4 configure config.h.in Makefile.in
+  unset MAKEFLAGS MFLAGS MAKEOVERRIDES
+  ./configure --prefix="$prefix" --enable-static --disable-shared
+  make -j"$(host_nproc)"
+  make install
+  test -s "$prefix/lib/libcudd.a"
+  test -s "$prefix/include/cudd.h"
+)
+
 prepare_rtl_sources() {
   local step=0
   echo "Setting up RTL build environment..."
@@ -141,5 +168,9 @@ run_setup_rtl() {
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
-  run_setup_rtl "$@"
+  if [ "${1:-}" = cudd ]; then
+    clone_build_cudd "${2:?yosys-opensta checkout required}"
+  else
+    run_setup_rtl "$@"
+  fi
 fi

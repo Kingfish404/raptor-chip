@@ -5,7 +5,6 @@ module tb_rapt_arty;
   localparam int RamBytes = 262144;
   localparam realtime BitPeriod = 1000.0;
   logic core_clock = 1'b0, board_clock = 1'b0, flash_clock = 1'b0;
-  logic boot_switch = 0;
   logic reset = 1'b1;
   logic uart_rx = 1'b1;
   wire uart_tx, run, activity, finished, chip_sclk, chip_cs_n, sclk, cs_n, diag;
@@ -38,7 +37,16 @@ module tb_rapt_arty;
       .chip_oe_o(delayed_oe)
   );
 
-  rapt_chip_pads u_chip (
+  rapt_chip_pads25 #(
+      .CoreClockHz(20_000_000),
+      .FlashPowerupCycles(1),
+      .FlashResetCycles(1),
+      .FlashRecoveryCycles(1),
+      .FlashPollCycles(1000),
+      .FlashStorageOffset(24'h800000),
+      .FlashWriteStart(32'h00800000),
+      .FlashWriteEnd(32'h01000000)
+  ) u_chip (
       .pad_clk(core_clock),
       .pad_reset_n(run && !reset),
       .pad_irq(1'b0),
@@ -49,17 +57,26 @@ module tb_rapt_arty;
       .pad_jtag_tms(tms),
       .pad_jtag_tdi(tdi),
       .pad_jtag_tdo(tdo),
-      .pad_diag(diag)
+      .pad_diag(diag),
+      .pad_uart0_rx(1'b1),
+      .pad_uart0_tx(),
+      .pad_uart1_rx(1'b1),
+      .pad_uart1_tx(),
+      .pad_gpio0(),
+      .pad_gpio1(),
+      .pad_gpio2()
   );
   rapt_arty_board #(
       .RamBytes(RamBytes),
-      .Baud(1_000_000)
+      .Baud(1_000_000),
+      .FlashPowerupCycles(1000),
+      .FlashResetCycles(10),
+      .FlashRecoveryCycles(1000)
   ) u_board (
       .clock(board_clock),
       .flash_clock(flash_clock),
       .reset(reset),
       .cpu_reset_i(1'b0),
-      .boot_switch_i(boot_switch),
       .link_delay_o(link_delay),
       .sclk_i(sclk),
       .cs_n_i(cs_n),
@@ -79,18 +96,41 @@ module tb_rapt_arty;
       .flash_dq_i(flash_dq_in),
       .flash_dqs_i(flash_dqs)
   );
-  rapt_arty_mt35x_model #(
-      .ProgramTime(20us),
-      .EraseTime  (100us)
+  rapt_xspi_profile1_model #(
+      .MemoryBytes(16 * 1024 * 1024),
+      .JedecId(24'h2c5b19)
   ) u_flash_model (
-      .flash_clk_i(flash_ck),
-      .flash_csn_i(flash_cs_n),
-      .flash_reset_n_i(flash_reset_n),
-      .flash_dq_o_i(flash_dq_out),
-      .flash_dq_oe_i(|flash_dq_oe),
-      .flash_dq_i_o(flash_dq_in),
-      .flash_dqs_o(flash_dqs)
+      .reset_n_i(flash_reset_n),
+      .sclk_i(flash_ck),
+      .cs_n_i(flash_cs_n),
+      .dq_i(flash_dq_out),
+      .host_oe_i(flash_dq_oe),
+      .missing_ds_i(1'b0),
+      .drop_after_i(4'd0),
+      .pause_i(1'b0),
+      .deny_wren_i(1'b0),
+      .fail_mutation_i(1'b0),
+      .flags_i(8'd0),
+      .dq_o(flash_dq_in),
+      .dq_oe_o(),
+      .ds_o(flash_dqs)
   );
+  initial begin : flash_contents
+    string image;
+    integer handle, count;
+    #1;
+    u_flash_model.mem[0] = 8'h12;
+    u_flash_model.mem[1] = 8'h34;
+    u_flash_model.mem['h10000] = 8'h56;
+    u_flash_model.mem['h10001] = 8'h78;
+    if ($value$plusargs("FLASH_INIT=%s", image)) begin
+      handle = $fopen(image, "rb");
+      if (handle == 0) $fatal(1, "Cannot open flash image %s", image);
+      count = $fread(u_flash_model.mem, handle, 'h800000);
+      $fclose(handle);
+      if (count == 0 || count > 'h800000) $fatal(1, "Invalid flash image size %0d", count);
+    end
+  end
 
   task automatic send_byte(input logic [7:0] value);
     uart_rx = 1'b0;
@@ -309,8 +349,8 @@ module tb_rapt_arty;
     logic [31:0] value, address, pattern;
     logic [7:0] protected_boot, protected_test;
     int programs, erases;
-    protected_boot = u_flash_model.memory[0];
-    protected_test = u_flash_model.memory['h10000];
+    protected_boot = u_flash_model.mem[0];
+    protected_test = u_flash_model.mem['h10000];
     programs = u_flash_model.programs;
     erases = u_flash_model.erases;
     sba_write(32'h1000_2010, 4);
@@ -341,8 +381,7 @@ module tb_rapt_arty;
     if (!value[1] || u_flash_model.programs != programs + 4)
       $fatal(1, "SBA protected write reached flash");
     sba_write(32'h1000_2014, 32'h5241_0004);
-    if (u_flash_model.memory[0] != protected_boot
-        || u_flash_model.memory['h10000] != protected_test)
+    if (u_flash_model.mem[0] != protected_boot || u_flash_model.mem['h10000] != protected_test)
       $fatal(1, "SBA changed protected flash");
     $display("[arty] SBA flash PROGRAM32/ERASE4K/page and sector boundaries/refusal PASS");
   endtask
@@ -495,7 +534,7 @@ module tb_rapt_arty;
     command("D", 32'(delay_cycles));
     if ($test$plusargs("FLASH_UART")) flash_uart_check();
     handle = $fopen(image, "rb");
-    if (!handle) $fatal(1, "cannot open %s", image);
+    if (handle == 0) $fatal(1, "cannot open %s", image);
     count = 0;
     while (!$feof(
         handle
@@ -529,28 +568,32 @@ module tb_rapt_arty;
       write_word(32'h8001_f010, 32'h8002_0000);
       for (int i = 0; i < 4; i++) write_word(32'h8002_0000 + 32'(i * 4), 32'h1020_3040 ^ 32'(i));
       if ($test$plusargs("FLASHER_ERASE")) begin
-        for (int i = 0; i < 4096; i++) u_flash_model.memory['h802000+i] = 8'(i);
+        for (int i = 0; i < 4096; i++) u_flash_model.mem['h802000+i] = 8'(i);
         write_word(32'h8001_f004, 1);
         write_word(32'h8001_f00c, 4096);
       end
       if ($test$plusargs("FLASHER_BAD_ADDR")) write_word(32'h8001_f008, 32'h10000);
     end
     command("G");
+    begin
+      logic [31:0] status;
+      logic sampled;
+      repeat (6) jtag_cycle(1, 1, sampled);
+      jtag_cycle(0, 1, sampled);
+      shift_ir(5'h11);
+      dmi_write(7'h10, 1);
+      dmi_write(7'h10, 32'h80000001);
+      do dmi_read(7'h11, status); while ((status & 32'h300) != 32'h300);
+      sba_write(32'h00100808, 0);
+      dmi_write(7'h10, 32'h80000003);
+      do dmi_read(7'h11, status); while ((status & 32'h3300) != 32'h3000);
+      dmi_write(7'h10, 32'h80000001);
+      do dmi_read(7'h11, status); while ((status & 32'h3300) != 32'h300);
+      dmi_write(7'h10, 32'h40000001);
+    end
     wait (finish_seen);
     if (exit_value != expected_code) $fatal(1, "finisher failure %h", exit_value);
     if ($test$plusargs("DEBUG")) debug_check();
-    if ($test$plusargs("FLASH_RECONFIG")) begin
-      command("A");
-      command("Z");
-      finish_seen = 0;
-      boot_switch = 1;
-      reset = 1;
-      repeat (20) @(posedge board_clock);
-      #1 reset = 0;
-      wait (finish_seen);
-      if (exit_value != 32'h0000_5555) $fatal(1, "flash reconfigure boot %h", exit_value);
-      $display("[arty] flash persists and boots after board reconfiguration reset PASS");
-    end
     command("L");
     if (reply_data == 0) $fatal(1, "no completed link frames");
     $display("[arty] completed link frames %0d", reply_data);
@@ -562,7 +605,7 @@ module tb_rapt_arty;
         $display("[arty] firmware flasher rejects protected address PASS");
       end else if ($test$plusargs("FLASHER_ERASE")) begin
         for (int i = 0; i < 4096; i++)
-        if (u_flash_model.memory['h802000+i] != 8'hff) $fatal(1, "incomplete firmware erase");
+        if (u_flash_model.mem['h802000+i] != 8'hff) $fatal(1, "incomplete firmware erase");
         command("Q", 32'h3000_2000);
         if (reply_data != '1 || u_flash_model.erases != 1) $fatal(1, "firmware erase readback");
         $display("[arty] firmware flasher erase through link PASS");

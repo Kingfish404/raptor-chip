@@ -3,10 +3,14 @@
 module rapt_arty_top (
     input wire clk100,
     input wire [1:0] btn,
-    input wire boot_switch,
     output wire [3:0] led,
     input wire uart_rx,
     output wire uart_tx,
+    input wire uart0_rx,
+    output wire uart0_tx,
+    input wire uart1_rx,
+    output wire uart1_tx,
+    inout wire [2:0] gpio,
     output wire chip_sclk,
     output wire chip_cs_n,
     inout wire [7:0] chip_dq,
@@ -33,7 +37,6 @@ module rapt_arty_top (
   logic [1:0] core_release_q = '0;
   (* ASYNC_REG = "TRUE" *) logic [1:0] diag_sync_q;
   (* ASYNC_REG = "TRUE" *) logic [1:0] cpu_button_q;
-  (* ASYNC_REG = "TRUE" *) logic [1:0] boot_switch_q;
   logic [13:0] diag_div_q;
   wire reset = !board_release_q[3];
   wire run, link_active, finished, diag;
@@ -66,7 +69,6 @@ module rapt_arty_top (
   end
   always_ff @(posedge board_clock) begin
     cpu_button_q  <= {cpu_button_q[0], btn[1]};
-    boot_switch_q <= {boot_switch_q[0], boot_switch};
     diag_sync_q   <= {diag_sync_q[0], diag};
     if (reset || !run) diag_div_q <= '0;
     else if (diag_sync_q == 2'b01) diag_div_q <= diag_div_q + 1'b1;
@@ -100,7 +102,12 @@ module rapt_arty_top (
         .chip_dq_o(delayed_dq),
         .chip_oe_o(delayed_oe)
     );
-    rapt_chip_pads u_chip (
+    rapt_chip_pads25 #(
+        .CoreClockHz(20_000_000),
+        .FlashStorageOffset(24'h800000),
+        .FlashWriteStart(32'h00800000),
+        .FlashWriteEnd(32'h01000000)
+    ) u_chip (
         .pad_clk(core_clock),
         .pad_reset_n(chip_reset_n),
         .pad_irq(1'b0),
@@ -111,14 +118,26 @@ module rapt_arty_top (
         .pad_jtag_tms(jtag_tms),
         .pad_jtag_tdi(jtag_tdi),
         .pad_jtag_tdo(jtag_tdo),
-        .pad_diag(diag)
+        .pad_diag(diag),
+        .pad_uart0_rx(uart0_rx),
+        .pad_uart0_tx(uart0_tx),
+        .pad_uart1_rx(uart1_rx),
+        .pad_uart1_tx(uart1_tx),
+        .pad_gpio0(gpio[0]),
+        .pad_gpio1(gpio[1]),
+        .pad_gpio2(gpio[2])
     );
   end else begin : g_pins
     assign sclk = board_sclk;
     assign cs_n = board_cs_n;
     assign target_dq_in = board_dq;
     assign board_dq = target_oe ? target_dq_out : 8'hzz;
-    rapt_chip_pads u_chip (
+    rapt_chip_pads25 #(
+        .CoreClockHz(20_000_000),
+        .FlashStorageOffset(24'h800000),
+        .FlashWriteStart(32'h00800000),
+        .FlashWriteEnd(32'h01000000)
+    ) u_chip (
         .pad_clk(core_clock),
         .pad_reset_n(chip_reset_n),
         .pad_irq(1'b0),
@@ -129,7 +148,14 @@ module rapt_arty_top (
         .pad_jtag_tms(jtag_tms),
         .pad_jtag_tdi(jtag_tdi),
         .pad_jtag_tdo(jtag_tdo),
-        .pad_diag(diag)
+        .pad_diag(diag),
+        .pad_uart0_rx(uart0_rx),
+        .pad_uart0_tx(uart0_tx),
+        .pad_uart1_rx(uart1_rx),
+        .pad_uart1_tx(uart1_tx),
+        .pad_gpio0(gpio[0]),
+        .pad_gpio1(gpio[1]),
+        .pad_gpio2(gpio[2])
     );
   end
 
@@ -139,7 +165,6 @@ module rapt_arty_top (
       .clock(board_clock),
       .flash_clock(flash_clock),
       .reset(reset),
-      .boot_switch_i(boot_switch_q[1]),
       .link_delay_o(link_delay),
       .cpu_reset_i(cpu_button_q[1]),
       .sclk_i(sclk),

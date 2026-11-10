@@ -121,6 +121,7 @@ module rng_chip #(
   // ---------------------------------------------------------------
   logic [31:0] ext_irq_pulse_q;
   logic jtag_tdo_unused;
+  logic core_reset_unused;
   always_ff @(posedge clock) begin
     if (reset) begin
       ext_irq_pulse_q <= '0;
@@ -137,6 +138,7 @@ module rng_chip #(
       .MemoryReadCredits(1)
   ) cpu (
       .sram_ctrl_i      (rapt_pkg::SramCtrlReset),
+      .core_reset_o(core_reset_unused),
       .writeback_error_o(writeback_error_o),
       .clock            (clock),
       .io_interrupt     (1'h0),

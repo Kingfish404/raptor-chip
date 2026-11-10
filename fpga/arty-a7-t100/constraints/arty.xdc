@@ -3,13 +3,21 @@
 set_property -dict {PACKAGE_PIN E3 IOSTANDARD LVCMOS33} [get_ports clk100]
 set_property -dict {PACKAGE_PIN D9 IOSTANDARD LVCMOS33} [get_ports {btn[0]}]
 set_property -dict {PACKAGE_PIN C9 IOSTANDARD LVCMOS33} [get_ports {btn[1]}]
-set_property -dict {PACKAGE_PIN A8 IOSTANDARD LVCMOS33} [get_ports boot_switch]
 set_property -dict {PACKAGE_PIN H5 IOSTANDARD LVCMOS33} [get_ports {led[0]}]
 set_property -dict {PACKAGE_PIN J5 IOSTANDARD LVCMOS33} [get_ports {led[1]}]
 set_property -dict {PACKAGE_PIN T9 IOSTANDARD LVCMOS33} [get_ports {led[2]}]
 set_property -dict {PACKAGE_PIN T10 IOSTANDARD LVCMOS33} [get_ports {led[3]}]
 set_property -dict {PACKAGE_PIN N15 IOSTANDARD LVCMOS33} [get_ports uart_rx]
 set_property -dict {PACKAGE_PIN T16 IOSTANDARD LVCMOS33} [get_ports uart_tx]
+# Local chip UARTs are separate from the packet monitor above.
+set_property -dict {PACKAGE_PIN R12 IOSTANDARD LVCMOS33} [get_ports uart0_rx]
+set_property -dict {PACKAGE_PIN T11 IOSTANDARD LVCMOS33} [get_ports uart0_tx]
+set_property -dict {PACKAGE_PIN A9 IOSTANDARD LVCMOS33} [get_ports uart1_rx]
+set_property -dict {PACKAGE_PIN D10 IOSTANDARD LVCMOS33} [get_ports uart1_tx]
+set_property -dict {PACKAGE_PIN V15 IOSTANDARD LVCMOS33} [get_ports {gpio[0]}]
+set_property -dict {PACKAGE_PIN U16 IOSTANDARD LVCMOS33} [get_ports {gpio[1]}]
+set_property -dict {PACKAGE_PIN P14 IOSTANDARD LVCMOS33} [get_ports {gpio[2]}]
+set_property PULLUP true [get_ports {uart0_rx uart1_rx}]
 
 # SoC JA/JB -> board JC/JD. Numbers in the README are physical header pins.
 set_property -dict {PACKAGE_PIN G13 IOSTANDARD LVCMOS33} [get_ports chip_sclk]

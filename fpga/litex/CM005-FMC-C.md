@@ -36,7 +36,7 @@ DDR (1.25 GS/s), processing eight samples per 156.25 MHz cycle. RX_CLK has
 the control edges recover RX_DV and RX_ER. L19 is not routed as a fabric clock,
 and the implementation does not use `CLOCK_DEDICATED_ROUTE FALSE`.
 
-Gigabit transmit uses related 250/125 MHz clocks, native 125 MHz DDR data and
+Gigabit transmit uses related 250/125 MHz clocks, 125 MHz DDR data and
 a forwarded clock aligned between data transitions. PHY initialization
 advertises only the configured full-duplex speed and restarts negotiation
 after reset. The peer must support that negotiation.

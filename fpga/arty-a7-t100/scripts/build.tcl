@@ -75,7 +75,7 @@ if {![regexp $finite $wns] || ![regexp $finite $whs]} {
     error "Non-finite global setup/hold timing"
 }
 set metrics [open metrics.txt w]
-puts $metrics "JOIN=$join\nCORE_MHZ=20\nBOARD_MHZ=100\nFLASH_MHZ=10\nCK_MHZ=5"
+puts $metrics "JOIN=$join\nCORE_MHZ=20\nBOARD_MHZ=100\nFLASH_MHZ=10\nCK_MHZ=0.625"
 puts $metrics "WNS=$wns\nWHS=$whs"
 close $metrics
 if {$wns < 0 || $whs < 0} { error "Timing failed: WNS=$wns WHS=$whs" }

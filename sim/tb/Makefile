@@ -65,7 +65,7 @@ INCDIRS := \
 # rtl/ plus the rng_chip wrapper (sim/rtl/wrap_rnp_soc.sv).
 PKG_SRC  := $(HDL_DIR)/rapt_pkg.sv
 RTL_REST := $(shell find -L $(HDL_DIR) -name '*.sv' ! -name 'rapt_pkg.sv') \
-			$(SIM_RTL)/rapt_dpi_c.sv $(SIM_RTL)/wrap_rnp_soc.sv
+			$(SIM_RTL)/rapt_dpi_c.sv $(SIM_RTL)/wrap_rnp.sv $(SIM_RTL)/wrap_rnp_soc.sv
 TB_SRC   := $(TB_DIR)/rapt_tb_mem.sv $(TB_DIR)/rapt_tb_top.sv
 
 VSRCS := $(PKG_SRC) $(RTL_REST) $(TB_SRC)

@@ -62,7 +62,7 @@ def main():
     if args.startup:
         content = bench.read_text()
         aliases = {
-            "g_internal.u_chip.u_chip.u_offchip.u_byte.dq_o": "g_internal.u_chip.dq_out",
+            "g_internal.u_chip.u_chip.u_backend.u_bridge.u_byte.dq_o": "g_internal.u_chip.dq_out",
             "u_board.u_target.dq_o": "g_internal.u_delay.board_dq_i",
         }
         netlist = design.read_text()

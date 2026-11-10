@@ -14,7 +14,7 @@ from raptor_linux import HOME, identity, require, run, sha
 LITEX = HOME.parent / 'fpga/litex'
 sys.path.insert(0, str(LITEX / 'scripts'))
 from add_linux_sdcard_dts import ensure_sdcard_dtb
-from netboot_distro import ADDRESSES, persistence_bootargs, require_linux_ram
+from netboot_distro import ADDRESSES, persistence_bootargs, require_linux_ram, require_ram_root
 from netboot_distro_publish import verify as verify_bundle
 from netboot_names import name_bundle
 
@@ -28,7 +28,7 @@ def pack(artifacts, soc, csr, output, cross='riscv64-linux-gnu-', selector='LABE
     require(not output.exists(), 'netboot output must be a new directory')
     bits = source['bits']
     require(run('fdtget', '-t', 's', soc, '/cpus/cpu@0', 'riscv,isa-base').strip() == f'rv{bits}i'.encode(), 'DTB XLEN mismatch')
-    require_linux_ram(soc, bits)
+    ram_size = require_linux_ram(soc, bits)
     config = (artifacts / 'kernel.config').read_text()
     for option in ('MMC_LITEX', 'MMC_BLOCK', 'EXT4_FS', 'REGULATOR_FIXED_VOLTAGE', 'SERIAL_LITEUART_CONSOLE', 'LITEX_LITEETH', 'BLK_DEV_INITRD',
                    'RISCV_ISA_ZICBOM', 'RISCV_DMA_NONCOHERENT'):
@@ -51,7 +51,8 @@ def pack(artifacts, soc, csr, output, cross='riscv64-linux-gnu-', selector='LABE
     require((artifacts / 'Image').stat().st_size < limit and
             (artifacts / 'fw_dynamic.bin').stat().st_size < addresses['Image'] - 0x80000000, 'download ranges overlap')
     size = (artifacts / rootfs).stat().st_size
-    require(size + (artifacts / 'rootfs.cpio').stat().st_size < 700 * 1024 * 1024, 'insufficient RAM for rootfs')
+    unpacked_size = (artifacts / 'rootfs.cpio').stat().st_size
+    require_ram_root(ram_size, size, unpacked_size)
     bootargs = ('console=liteuart0,115200 earlycon=sbi rdinit=/sbin/raptor-init '
                 'pty.legacy_count=0 random.trust_bootloader=on') + persistence_bootargs(selector, persist_logs)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -77,6 +78,7 @@ def pack(artifacts, soc, csr, output, cross='riscv64-linux-gnu-', selector='LABE
         run(cross + 'objcopy', '-O', 'binary', work / 'stage0.elf', work / 'stage0.bin')
         require((work / 'stage0.bin').stat().st_size < 4096, 'stage0 is too large')
         record = {'schema': 'raptor-distro-netboot-v1', 'xlen': bits, 'distro': source['distro'],
+                  'ram_size': ram_size, 'rootfs_unpacked_size': unpacked_size,
                   'startup_cmo_policy': 'menvcfg-cbie3-cbcfe1', 'board_validated': False,
                   'kernel_version': source['kernel_version'], 'rootfs_persistent': False,
                   'source_manifest_sha256': sha(artifacts / 'manifest.json'),

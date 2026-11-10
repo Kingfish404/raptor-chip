@@ -4,16 +4,17 @@
 # Clock startpoints preserve register setup/hold timing. Register Q startpoints
 # would segment those paths and invalidate internal timing analysis.
 set all_clocks [get_clocks -include_generated_clocks *]
-set async_inputs [get_ports {btn[*] boot_switch uart_rx jtag_tck jtag_tms jtag_tdi}]
+set async_inputs [get_ports {btn[*] uart_rx uart0_rx uart1_rx gpio[*]
+    jtag_tck jtag_tms jtag_tdi}]
 set_max_delay -datapath_only 10.0 -from $async_inputs
 set_false_path -hold -from $async_inputs
 set_max_delay -datapath_only 10.0 -from [get_ports {flash_dq[*] flash_dqs}]
 set_false_path -hold -from [get_ports {flash_dq[*] flash_dqs}]
-set_false_path -hold -to [get_ports {led[*] uart_tx jtag_tdo}]
+set_false_path -hold -to [get_ports {led[*] uart_tx uart0_tx uart1_tx gpio[*] jtag_tdo}]
 set_false_path -hold -to [get_ports {flash_ck flash_cs_n flash_reset_n flash_dq[*]}]
 # Human indicators, 115200-baud UART and 500 kHz TDO have a 20 ns route budget.
 set_max_delay -datapath_only 20.0 -from $all_clocks \
-    -to [get_ports {led[*] uart_tx jtag_tdo}]
+    -to [get_ports {led[*] uart_tx uart0_tx uart1_tx gpio[*] jtag_tdo}]
 set_max_delay -datapath_only 10.0 -from $all_clocks \
     -to [get_ports {flash_ck flash_cs_n flash_reset_n flash_dq[*]}]
 if {$join eq "pins"} {

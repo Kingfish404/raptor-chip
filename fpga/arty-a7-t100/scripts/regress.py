@@ -91,7 +91,6 @@ def main():
                     console_marker = "flash: bad CRC; RAM fallback"
                 else:
                     console_marker = "flash: CRC OK; boot RAM"
-                    extra += ["+FLASH_RECONFIG"]
                 flash_path = result_dir / f"{name}.flash.bin"
                 flash_path.write_bytes(flash)
                 extra += [f"+FLASH_INIT={flash_path}"]

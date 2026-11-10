@@ -28,7 +28,9 @@ def tool_environment():
 def rtl_sources():
     package = ROOT / "rtl/rapt_pkg.sv"
     rtl = sorted(p for p in (ROOT / "rtl").rglob("*.sv") if p != package)
-    return [package] + rtl + sorted((ROOT / "synth/configs/pin-limited/rtl").glob("*.sv"))
+    chip = sorted((ROOT / "synth/configs/pin-limited/rtl").glob("*.sv"))
+    chip += sorted((ROOT / "synth/configs/io25/rtl").glob("*.sv"))
+    return [package] + rtl + chip + [ROOT / "fpga/common/rtl/rapt_native_uart.sv"]
 
 
 def board_sources():
@@ -51,5 +53,10 @@ def fingerprint(paths):
 def input_files():
     paths = rtl_sources() + board_sources()
     paths += list((ROOT / "rtl").rglob("*.svh"))
-    paths += [p for p in BOARD.rglob("*") if p.is_file() and "__pycache__" not in p.parts]
+    # The ordinary SoC's default build tree is inside BOARD. Keep generated
+    # outputs out of the legacy fixture's source fingerprint.
+    for directory, names, files in os.walk(BOARD):
+        names[:] = [name for name in names if name not in {"build", "__pycache__", ".Xil"}]
+        paths += [pathlib.Path(directory) / name for name in files
+                  if (pathlib.Path(directory) / name).is_file()]
     return paths

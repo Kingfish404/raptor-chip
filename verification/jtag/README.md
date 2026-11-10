@@ -66,8 +66,22 @@ reg pc 0x80000000
 resume
 ```
 
-The reset ROM is external and survives `ndmreset`. Keep the chip clock running
-during all JTAG operations.
+The chip powers up in its on-chip ROM and jumps to Flash XIP. The sampled-chip
+fixture has a bridge peer and no NOR. Its explicit accelerated Flash startup /
+reset / recovery / poll budgets are 2000 / 32 / 4000 / 4096 chip clocks;
+production defaults are unchanged. After normal `init; halt`, `bridge_boot.tcl`
+selects boot control 0 at 0x00100808, applies ndmreset with haltreq, verifies
+active readback and synchronizes OpenOCD with another reset-halt. The bridge's
+external trampoline then reaches the JTAG-loaded RAM program. No strap, forced
+RTL state or PC redirection selects that backend. Keep the chip clock running
+while older Flash work finishes or times out, and throughout JTAG access.
+
+The six sampled SBA/reset/step targets perform this selection automatically;
+the direct cluster TAP tests do not. The bridge model is disabled in Flash mode.
+Paired `chip-flash-absent`, `chip-flash-blank` and `chip-flash-stalled` directed
+tests exercise accepted XIP failure followed by JTAG bridge selection and actual
+bridge execution. The stalled case removes DS after two array bytes and retains
+the normal 100 MHz receive-timeout budget; it does not reset or force the DUT.
 
 The first reset discards old cache contents, including dirty data. Halt drains
 pending stores/responses and cleans L1D before reporting halted; with no L2 this
@@ -83,8 +97,11 @@ controller/window; this DM introduces no board-specific flash registers.
 
 A slave must eventually return AXI responses. No timeout cancels an accepted
 transaction: abandoning it could misroute a late response or duplicate a write.
-A permanently unresponsive board/link can prevent reset drain; recover with the
-external chip/board reset. An SBA bus fault can be cleared and retried normally.
+The Flash slave supplies bounded error responses for absent or stalled NOR;
+see [chip recovery](../../docs/chip.md#boot-control). A permanently unresponsive
+external bridge can prevent reset drain; recover with external chip/board reset.
+Clear a sticky SBA error after busy clears. Do not retry a program/erase whose
+physical outcome is uncertain.
 
 ## Tests
 

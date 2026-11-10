@@ -40,7 +40,8 @@ else
 	TIMEOUT_FOREGROUND := --foreground
 endif
 
-BOARDS := tang_mega_138k_pro mlk_cu08_ku15p mlk_cu07_ku15p rk_xcku5p_f alinx_axau15 xilinx_vcu118
+BOARDS := arty_a7_t100 tang_mega_138k_pro mlk_cu08_ku15p mlk_cu07_ku15p \
+	rk_xcku5p_f alinx_axau15 xilinx_vcu118
 BOARD_ALIASES := $(subst _,-,$(BOARDS))
 
 # Gowin IDE bundle (macOS). Empty on Linux / when GowinIDE is not installed; it
@@ -101,7 +102,9 @@ ifeq ($(filter $(VARIANT),linux32 linux64),)
 $(error Invalid VARIANT='$(VARIANT)'. Use VARIANT=linux32 or VARIANT=linux64)
 endif
 $(call _linux_profile_notice)
-LINUX_FPGA_PROFILE := $(if $(or $(call _linux_fpga_profile,$(VARIANT)),$(filter mlk_cu08_ku15p,$(FPGA_BOARD))),1,)
+_ALWAYS_LINUX_BOARDS := arty_a7_t100 mlk_cu08_ku15p
+LINUX_FPGA_PROFILE := $(if $(or $(call _linux_fpga_profile,$(VARIANT)),\
+	$(filter $(_ALWAYS_LINUX_BOARDS),$(FPGA_BOARD))),1,)
 FPGA_BOARD ?= $(call _default_fpga_board) ## Target FPGA board (auto-detected for FPGA goals, otherwise profile default)
 FPGA_BOARD := $(strip $(FPGA_BOARD))
 ifeq ($(filter $(FPGA_BOARD),$(BOARDS)),)
@@ -382,7 +385,10 @@ LINUX_VARIANT   := $(if $(filter 64,$(LINUX_XLEN)),linux64,linux32)
 LINUX_MABI      := $(if $(filter 64,$(LINUX_XLEN)),lp64,ilp32)
 LINUX_MMU       := $(if $(filter 64,$(LINUX_XLEN)),sv39,sv32)
 LINUX_ISA_BASE  := rv$(LINUX_XLEN)i
-LINUX_ISA       := $(if $(filter 64,$(LINUX_XLEN)),$(RAPTOR_RV64_ISA),$(RAPTOR_RV32_ISA))
+_LINUX_DEFAULT_ISA := $(if $(filter 64,$(LINUX_XLEN)),$(RAPTOR_RV64_ISA),$(RAPTOR_RV32_ISA))
+_PRESET_NO_FPU := $(shell awk '/^`define RAPT_NO_FPU([ \t]|$$)/ { print 1; exit }' \
+	$(RTL_DIR)/configs/$(RAPT_CONFIG)/rapt_config.svh)
+LINUX_ISA := $(if $(_PRESET_NO_FPU),$(subst imafdc,imac,$(_LINUX_DEFAULT_ISA)),$(_LINUX_DEFAULT_ISA))
 LINUX_DT_ISA_EXTENSIONS := $(shell printf '%s\n' '$(LINUX_ISA)' | awk '{ sub(/^rv(32|64)/, ""); count = split($$0, parts, "_"); for (i = 1; i <= length(parts[1]); i++) extensions[++n] = substr(parts[1], i, 1); for (i = 2; i <= count; i++) extensions[++n] = parts[i]; for (i = 1; i <= n; i++) printf "%s\"%s\"", (i == 1 ? "" : ", "), extensions[i] }')
 LINUX_DOWNLOAD_TARGET := download-rv$(LINUX_XLEN)
 OPENSBI_BUILD_TARGET  := opensbi-rv$(LINUX_XLEN)
@@ -402,7 +408,7 @@ WITH_CM005_BRIDGE ?= $(if $(filter mlk_cu08_ku15p,$(FPGA_BOARD)),1,0) ## CU08 FM
 WITH_ETHERNET ?= $(or $(BOARD_$(FPGA_BOARD)_DEFAULT_WITH_ETHERNET),0)
 FMC_SLOT ?= $(if $(filter mlk_cu08_ku15p,$(FPGA_BOARD)),c,a)
 ETH_PORT ?= a
-ETH_SPEED ?= 1000
+ETH_SPEED ?= $(or $(BOARD_$(FPGA_BOARD)_ETH_SPEED),1000)
 ETH_SPEED := $(strip $(ETH_SPEED))
 LINUX_FPGA_ETH_CSR ?= $(if $(filter 1 yes true on,$(WITH_ETHERNET)),$(FPGA_DIR)/ethernet-csr.json,)## Matching CSR export; automatically generated with WITH_ETHERNET=1
 LINUX_FPGA_PAYLOAD ?= $(LINUX_IMG) ## Legacy stage0-bundled payload for fpga-img
@@ -623,7 +629,7 @@ APP_LLM_VARS    := LLM_OP_ITERS=$(LLM_OP_ITERS) \
 				   RLLMBENCH_TIMEBASE_HZ=$(RLLMBENCH_TIMEBASE_HZ) \
 				   RLLMBENCH_CORE_CLOCK_MHZ=$(RLLMBENCH_CORE_CLOCK_MHZ)
 
-app-llm-build: ## Build all app/ LLM benchmarks as LiteX-native payloads
+app-llm-build: ## Build all app/ LLM benchmarks as LiteX payloads
 
 $(APP_LLM_BUILDS): app-llm-build-%:
 
@@ -635,8 +641,8 @@ $(APP_LLM_FPGAS): app-llm-%-fpga: app-llm-build-% ## Upload app/ LLM benchmark t
 
 app-llm-fpga: ## Upload one app/ LLM benchmark to FPGA (BENCH=ops|infer|train) {BENCH,UART_PORT}
 
-APP_FPGA_BIN ?= ## Custom app-built LiteX-native binary for app-fpga-upload
-app-fpga-upload: ## Upload a prebuilt app LiteX-native bin via BIOS serialboot {APP_FPGA_BIN,UART_PORT}
+APP_FPGA_BIN ?= ## Custom app-built LiteX binary for app-fpga-upload
+app-fpga-upload: ## Upload a prebuilt app LiteX binary via BIOS serialboot {APP_FPGA_BIN,UART_PORT}
 
 microbench-build: ## Build MicroBench binary
 
@@ -798,6 +804,11 @@ ram-profile-check:
 fpga-gen: memory-map-check ram-profile-check $(PACK_SV) $(_FPGA_FW_DEP) ## Generate FPGA SoC sources only (no PnR) {BOOT_MODE,FPGA_BOARD,RAPT_CONFIG,INTEGRATED_MAIN_RAM_SIZE}
 
 fpga-build: memory-map-check ram-profile-check $(PACK_SV) $(_FPGA_FW_DEP) ## Build FPGA bitstream (synth + P&R) {BOOT_MODE,FPGA_BOARD,RAPT_CONFIG,INTEGRATED_MAIN_RAM_SIZE,WITH_LED_CHASER}
+
+ifeq ($(FPGA_BOARD),arty_a7_t100)
+fpga-synth: memory-map-check ram-profile-check $(PACK_SV) $(_FPGA_FW_DEP) ## Synthesize Arty SoC without implementation
+	$(call _run_litex_target,$(_FPGA_FLAGS) --synth-only)
+endif
 
 fpga-reports-index: ## Generate/install aggregated FPGA report HTML dashboard
 

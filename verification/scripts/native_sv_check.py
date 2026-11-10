@@ -305,7 +305,7 @@ def main():
     parser.add_argument("--syntax", default=os.environ.get("VERIBLE_SYNTAX",
                                                          "verible-verilog-syntax"))
     args = parser.parse_args()
-    paths = args.paths or [ROOT / "rtl", ROOT / "synth/configs/pin-limited/rtl",
+    paths = args.paths or [ROOT / "rtl", ROOT / "synth/configs",
                           ROOT / "sim/sram/wrappers"]
     if not args.paths:
         # Simulation observation headers are module fragments, not synthesis

@@ -430,6 +430,7 @@ YOSYS_SLANG = $(YOSYS_OPENSTA)/yosys-slang
 
 YOSYS_OPENSTA:
 	git clone https://github.com/Kingfish404/yosys-opensta $(YOSYS_OPENSTA)
+	bash "$(RAPTOR_HOME)/setup-rtl.sh" cudd "$(YOSYS_OPENSTA)"
 	make -C $(YOSYS_OPENSTA) setup-opensta setup-sv-elab setup-nangate45 setup-sky130hd
 
 # Normal STA consumes installed tools. Network updates and installation belong
@@ -464,8 +465,10 @@ sta-setup: ## Install/update the STA toolchain and fetch selected PDK data (netw
 	  echo ">>> [sta] cloning yosys-opensta ..."; \
 	  git clone https://github.com/Kingfish404/yosys-opensta $(YOSYS_OPENSTA); \
 	fi
-	@if [ ! -x $(YOSYS_OPENSTA)/third_party/OpenSTA/build/sta ]; then \
+	@set -e; \
+	if [ ! -x $(YOSYS_OPENSTA)/third_party/OpenSTA/build/sta ]; then \
 	  echo ">>> [sta] building OpenSTA (CUDD) ..."; \
+	  bash "$(RAPTOR_HOME)/setup-rtl.sh" cudd "$(YOSYS_OPENSTA)"; \
 	  $(MAKE) -C $(YOSYS_OPENSTA) setup-opensta; \
 	fi
 	@set -e; \
