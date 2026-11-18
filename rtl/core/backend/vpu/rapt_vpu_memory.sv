@@ -148,7 +148,6 @@ module rapt_vpu_memory #(
           && (dest_begin & (fields-1)) == 0 && dest_begin + fields <= 32
           && (load || width_size == 0);
       effective_vl = IndexBits'((fields * VLEN) / (8 << width_size));
-      legal &= IndexBits'(cmd_vstart) < effective_vl;
       data_group = 1;
       fields = 1;
     end else begin
@@ -167,7 +166,6 @@ module rapt_vpu_memory #(
         if (indexed) begin
           legal &= (8 << width_size) <= XLEN && index_emul >= -3 && index_emul <= 3
               && (source_begin & (index_group-1)) == 0 && source_end <= 32;
-          if (!load && data_size != width_size && overlap) legal = 0;
           if (load && overlap) begin
             // Indexed segments prohibit any index/destination overlap.
             // Single-field loads follow the general EEW overlap constraints.
@@ -369,6 +367,18 @@ module rapt_vpu_memory #(
   `RAPT_SVA_NEXT(
       clock, reset, VPU_MEMORY_REQUEST_HOLD, mem_valid && !mem_ready, mem_valid && $stable
       ({mem_write, mem_probe, mem_addr, mem_size, mem_wdata, mem_tag, mem_index, mem_field}))
+`ifdef RAPT_SVA_ACTIVE
+  wire [$bits(
+{mem_write, mem_probe, mem_addr, mem_size, mem_wdata, mem_tag,
+               mem_index, mem_field}
+)-1:0] sva_memory_descriptor = {
+    mem_write, mem_probe, mem_addr, mem_size, mem_wdata, mem_tag, mem_index, mem_field
+  };
+`endif
+  // A single accepted memory descriptor is owned through its response.
+  `RAPT_SVA_NEXT(clock, reset, VPU_MEMORY_DESCRIPTOR_OWNED,
+                 ((state == REQUEST && mem_ready) || state == RESPONSE) && !accepted_response,
+                 $stable(sva_memory_descriptor))
   `RAPT_SVA_NEXT(clock, reset, VPU_MEMORY_DONE_HOLD, done_valid && !done_ready,
                  done_valid && $stable
                  ({done_trap, done_update, done_fof, done_cause, done_tval, done_vl, done_vstart}))

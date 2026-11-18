@@ -585,7 +585,7 @@ static void test_vector_fixed() {
                             const unsigned vd = scenario == 1   ? 16
                                                 : scenario == 2 ? 24
                                                                 : 8,
-                                           src = scenario == 3 ? 16 : 24;
+                                           src = scenario == 3 && !clip ? 16 : 24;
                             const unsigned imm = (scenario * 7 + rm) % 32;
                             uint64_t scalar = scenario == 0   ? UINT64_MAX
                                               : scenario == 1 ? uint64_t(1) << (bits - 1)
@@ -715,11 +715,14 @@ static void test_vector_reduce() {
                                         : scenario == 7 ? 16
                                         : scenario == 8 ? 31
                                                         : 8;
-                    const unsigned seed = scenario == 6   ? 18
-                                          : scenario == 7 ? 16
-                                          : scenario == 8 ? 31
-                                          : scenario == 9 ? vd
-                                                          : 24;
+                    unsigned seed = scenario == 6   ? 18
+                                    : scenario == 7 ? 16
+                                    : scenario == 8 ? 31
+                                    : scenario == 9 ? vd
+                                                    : 24;
+                    const unsigned source_group = lm > 0 ? 1u << lm : 1;
+                    if (wide && seed >= 16 && seed < 16 + source_group)
+                        seed = 24;
                     for (unsigned b = 0; b < rb; ++b) {
                         const uint8_t mask = scenario == 4 ? 0 : scenario == 5 ? 0xff : 0x55;
                         host(true, b, 0, mask);
@@ -981,6 +984,26 @@ static void test_vector_scalar_move() {
             compare_memory("illegal/cancelled scalar move");
             ++invalids;
         }
+    // An XLEN-wide scalar is sign-extended before e64 vector arithmetic.
+    if (TEST_ELEN == 64) {
+        for (uint64_t scalar : {uint64_t(0), uint64_t(0x7fffffff),
+                                uint64_t(0x80000000), uint64_t(0xffffffff)}) {
+            initialize();
+            require(configure(0x18, 2) == 2, "e64 scalar arithmetic VL");
+            const uint64_t source[] = {0x12345678abcdef01ULL, 0xfedcba9876543210ULL};
+            const uint64_t extended = TEST_XLEN == 32
+                                          ? uint64_t(int64_t(int32_t(scalar))) : scalar;
+            for (unsigned i = 0; i < 2; ++i) {
+                host(true, 16 * rb + i * 8, 3, source[i]);
+                put(16 * rb + i * 8, 8, source[i]);
+                put(8 * rb + i * 8, 8, source[i] + extended);
+            }
+            const auto r = command(integer(0, 4, 8, 16, 1, true), scalar);
+            require(!r.trap && r.dirty, "e64 scalar arithmetic rejected");
+            compare_memory("e64 scalar sign extension");
+            ++cases;
+        }
+    }
     std::printf("PASS vector_scalar_move cases=%llu negative=%llu\n", (unsigned long long)cases,
                 (unsigned long long)invalids);
 }
@@ -1348,9 +1371,7 @@ static void test_vector_compress() {
                                               : scenario == 2 ? 9
                                                               : TEST_VLEN);
                 const unsigned vd = scenario == 3 ? 0 : 8, src = 16,
-                               mask = scenario == 4   ? src
-                                      : scenario == 5 ? 0
-                                                      : 31;
+                               mask = scenario == 5 ? 0 : 31;
                 for (unsigned b = 0; b < rb; ++b) {
                     const uint8_t m = scenario == 6   ? 0
                                       : scenario == 7 ? 0xff

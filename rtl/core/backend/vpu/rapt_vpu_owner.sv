@@ -6,6 +6,8 @@
 // instruction is irrevocable: the host must preserve its retirement/trap owner.
 // Engine completion means all external work has drained; tag reuse before
 // that condition cannot be made safe by a finite generation field alone.
+// Engine tag/payload stay registered and stable for the entire busy lifetime,
+// including after engine issue, so the engine may reuse this command storage.
 module rapt_vpu_owner #(
     parameter int TagBits = 10,
     parameter int CommandBits = 160,
@@ -105,6 +107,9 @@ module rapt_vpu_owner #(
       end
     end
   end
+  `RAPT_SVA_NEXT(clock, reset, VPU_OWNER_COMMAND_HOLD,
+                 busy && !cancelled && !(rsp_valid && rsp_ready), $stable({engine_tag,
+                                                                           engine_payload}))
   `RAPT_SVA_NEXT(clock, reset, VPU_OWNER_ISSUE_HOLD, engine_valid && !engine_ready,
                  engine_valid && $stable({engine_tag, engine_payload}))
   `RAPT_SVA_NEXT(clock, reset, VPU_OWNER_RESPONSE_HOLD, rsp_valid && !rsp_ready,

@@ -172,7 +172,7 @@ static void test_vector_encoding() {
 #pragma once
 // Public-interface differential admission and byte effects. The oracle is
 // Spike instruction execution, not a second copy of the RTL geometry formula.
-static void test_vector_geometry() {
+static void test_vector_geometry(bool overlapping_sources_only = false) {
 #ifndef VPU_SPIKE
     throw std::runtime_error("geometry audit requires DIFF=1");
 #else
@@ -184,7 +184,7 @@ static void test_vector_geometry() {
                              {0x34, 2, 0, 0}, {0x2c, 0, 0, 0}, {0x0e, 0, 0, 0},
                              {0x0e, 4, 0, 0}, {0x17, 2, 0, 1}, {0x12, 2, 1, 0}};
     const unsigned regs[] = {0, 1, 2, 3, 4, 7, 8, 15, 16, 23, 24, 28, 30, 31};
-    uint64_t cases = 0, accepted = 0, rejected = 0;
+    uint64_t cases = 0, accepted = 0, rejected = 0, excluded_sources = 0;
     for (unsigned sew = 0; (8u << sew) <= TEST_ELEN; ++sew)
         for (int lm = -3; lm <= 3; ++lm) {
             if (lm < 0 && (8u << sew) > (TEST_ELEN >> -lm))
@@ -196,8 +196,6 @@ static void test_vector_geometry() {
                     for (unsigned vd : regs)
                         for (unsigned src : regs)
                             for (unsigned vm = 0; vm < 2; ++vm) {
-                                initialize();
-                                configure((sew << 3) | (lm & 7), 2);
                                 // Vary each source against vd independently, including v0 and every
                                 // relevant power-of-two group edge. Other source remains aligned at
                                 // v16.
@@ -206,6 +204,30 @@ static void test_vector_geometry() {
                                                      : op.form == 4 ? 3
                                                      : axis         ? src
                                                                     : 16;
+                                const unsigned group = lm > 0 ? 1u << lm : 1u;
+                                const unsigned wide_group = lm + 1 > 0 ? 1u << (lm + 1) : 1u;
+                                const int index_exp = lm + 1 - int(sew);
+                                const unsigned index_group = index_exp > 0 ? 1u << index_exp : 1u;
+                                const bool mixed_width = op.fn == 0x34 || op.fn == 0x2c;
+                                const bool mixed_sources = mixed_width && vs2 < vs1 + group &&
+                                                           vs1 < vs2 + wide_group;
+                                const bool gather_sources = op.fn == 0x0e && op.form == 0 &&
+                                                            sew != 1 && vs2 < vs1 + index_group &&
+                                                            vs1 < vs2 + group;
+                                const bool compress_sources = op.compress && vs1 >= vs2 &&
+                                                              vs1 < vs2 + group;
+                                // Exercise different-EEW source aliases separately so each
+                                // sweep retains a stable and independently auditable scope.
+                                const bool source_overlap = mixed_sources || gather_sources ||
+                                                            compress_sources;
+                                if (!overlapping_sources_only && source_overlap) {
+                                    ++excluded_sources;
+                                    continue;
+                                }
+                                if (overlapping_sources_only && !source_overlap)
+                                    continue;
+                                initialize();
+                                configure((sew << 3) | (lm & 7), 2);
                                 const unsigned start = op.compress ? 0 : cases % 2;
                                 write_csr(8, start);
                                 const uint32_t insn = integer(op.fn, op.form, vd, vs2, vs1, vm);
@@ -230,9 +252,9 @@ static void test_vector_geometry() {
                 }
         }
     require(accepted && rejected, "empty geometry coverage");
-    std::printf("PASS vector_geometry cases=%llu accepted=%llu rejected=%llu\n",
+    std::printf("PASS vector_geometry cases=%llu accepted=%llu rejected=%llu excluded_sources=%llu\n",
                 (unsigned long long)cases, (unsigned long long)accepted,
-                (unsigned long long)rejected);
+                (unsigned long long)rejected, (unsigned long long)excluded_sources);
 #endif
 }
 
@@ -290,19 +312,170 @@ static void test_vector_catalog() {
             std::printf("CATALOG name=%s nf=%u accepted=%u illegal=%u\n", entry.name, nf, positive,
                         negative);
             ++variants;
+            const std::string name(entry.name);
+            const bool rv32_index64 = TEST_XLEN == 32 && TEST_ELEN == 64 &&
+                (name == "vluxei64.v" || name == "vsuxei64.v" ||
+                 name == "vloxei64.v" || name == "vsoxei64.v");
+            if (TEST_ELEN == 64)
+                require((positive == 0) == rv32_index64,
+                        "V catalog execution coverage: " + name + " nf=" + std::to_string(nf));
             if (!positive)
                 ++missing;
         }
     }
-    // The RV64/ELEN64 baseline must execute every catalog variant somewhere
-    // in the supported SEW sweep. Narrower configurations report projections.
-    require(TEST_XLEN != 64 || TEST_ELEN != 64 || missing == 0,
-            "baseline catalog has unexecuted variants");
+    // Full V requires every variant except 64-bit indices on RV32.
+    require(TEST_ELEN != 64 || missing == (TEST_XLEN == 32 ? 32u : 0u),
+            "V catalog has unexpected unexecuted variants");
     std::printf("PASS vector_catalog entries=375 variants=%llu cases=%llu accepted=%llu "
                 "illegal=%llu unexecuted=%llu\n",
                 (unsigned long long)variants, (unsigned long long)cases,
                 (unsigned long long)accepted, (unsigned long long)rejected,
                 (unsigned long long)missing);
+#endif
+}
+
+// Exercise every vendored V encoding over LMUL, SEW, mask, VL and restart
+// boundaries. Results and CSR state are checked against an independent Spike.
+static void test_vector_catalog_matrix() {
+#ifndef VPU_SPIKE
+    throw std::runtime_error("instruction catalog matrix requires DIFF=1");
+#else
+    const char* shard_arg = std::getenv("VPU_MATRIX_SHARD");
+    const char* shards_arg = std::getenv("VPU_MATRIX_SHARDS");
+    const char* seed_arg = std::getenv("VPU_MATRIX_SEED");
+    const char* policy_arg = std::getenv("VPU_MATRIX_POLICY");
+    const unsigned shard = shard_arg ? unsigned(std::strtoul(shard_arg, nullptr, 10)) : 0;
+    const unsigned shards = shards_arg ? unsigned(std::strtoul(shards_arg, nullptr, 10)) : 1;
+    const uint64_t seed = seed_arg ? std::strtoull(seed_arg, nullptr, 0)
+                                   : 0x243f6a8885a308d3ULL;
+    const unsigned policy = policy_arg ? unsigned(std::strtoul(policy_arg, nullptr, 10)) : 0;
+    require(shards != 0 && shard < shards, "invalid catalog matrix shard");
+    require(policy < 4, "invalid catalog matrix policy");
+    random_state = seed;
+    uint64_t cases = 0, accepted = 0, illegal = 0;
+    unsigned entry_index = 0, entries = 0;
+    for (const auto& entry : vector_catalog) {
+        if (entry_index++ % shards != shard) continue;
+        ++entries;
+        for (unsigned nf = 0; nf < (entry.segment ? 8u : 1u); ++nf) {
+            const uint64_t cases_before = cases, accepted_before = accepted;
+            for (unsigned sew = 0; (8u << sew) <= TEST_ELEN; ++sew)
+            for (unsigned lm : {0u, 1u, 2u, 3u, 5u, 6u, 7u})
+            for (unsigned mask = 0; mask < (entry.mask ? 2u : 1u); ++mask)
+            for (unsigned scenario = 0; scenario < 5; ++scenario) {
+                const auto context = std::string(entry.name) + " nf=" + std::to_string(nf)
+                    + " sew=" + std::to_string(sew) + " lm=" + std::to_string(lm)
+                    + " mask=" + std::to_string(mask) + " scenario=" + std::to_string(scenario);
+                try {
+                    memory_fixture();
+                    const unsigned avl = scenario == 0 ? 0 : scenario == 1 ? 1 : TEST_VLEN;
+                    const unsigned vl = configure((policy << 6) | (sew << 3) | lm, avl);
+                    const unsigned start = scenario == 2 ? (vl ? vl - 1 : 0)
+                        : scenario == 4 ? std::min(vl, unsigned(TEST_VLEN - 1)) : 0;
+                    write_csr(0x008, start);
+                    uint32_t insn = entry.insn | (nf << 29);
+                    if (mask) insn &= ~(1u << 25);
+                    const bool mem = (insn & 0x7f) == 7 || (insn & 0x7f) == 0x27;
+                    if (mem && ((insn >> 26) & 1)) {
+                        for (unsigned addr = 16 * (TEST_VLEN / 8); addr < 24 * (TEST_VLEN / 8);
+                             addr += 8) {
+                            host(true, addr, 3, 0);
+                            put(addr, 8, 0);
+                        }
+                    }
+                    const auto result = command(insn, mem ? data_base : 2, mem ? 16 : 0, false,
+                        sew == 3 ? 0x3ff0000000000000ULL : 0xffffffff3f800000ULL, 0);
+                    if (result.trap) {
+                        require(result.cause == 2 && !result.dirty, "unexpected catalog trap");
+                        ++illegal;
+                    } else {
+                        ++accepted;
+                    }
+                    require(data_ram == spike->data_memory, "catalog RAM mismatch");
+                    for (unsigned addr = 0; addr < memory.size(); addr += 8)
+                        require(host(false, addr, 3, 0) == spike->host_read(addr),
+                                "catalog VRF mismatch at byte=" + std::to_string(addr));
+                    for (unsigned csr : {8u, 15u, 0xc20u, 0xc21u}) read_csr(csr);
+                    ++cases;
+                } catch (const std::exception& error) {
+                    throw std::runtime_error(context + ": " + error.what());
+                }
+            }
+            const uint64_t tested = cases - cases_before, supported = accepted - accepted_before;
+            const unsigned expected = (TEST_ELEN == 64 ? 4 : 3) * 7 * (entry.mask ? 2 : 1) * 5;
+            require(tested == expected, "incomplete catalog matrix variant");
+            const std::string name(entry.name);
+            const bool rv32_index64 = TEST_XLEN == 32 && TEST_ELEN == 64 &&
+                (name == "vluxei64.v" || name == "vsuxei64.v" ||
+                 name == "vloxei64.v" || name == "vsoxei64.v");
+            if (TEST_ELEN == 64)
+                require((supported == 0) == rv32_index64, "catalog matrix lacks legal witness");
+            std::printf("MATRIX name=%s nf=%u cases=%llu accepted=%llu illegal=%llu\n", entry.name,
+                        nf, (unsigned long long)tested, (unsigned long long)supported,
+                        (unsigned long long)(tested - supported));
+        }
+    }
+    std::printf("PASS catalog_matrix XLEN=%d VLEN=%d ELEN=%d shard=%u shards=%u "
+                "entries=%u cases=%llu accepted=%llu illegal=%llu commands=%llu "
+                "spike_steps=%llu workload_hash=%016llx seed=%016llx policy=%u\n",
+                TEST_XLEN, TEST_VLEN, TEST_ELEN,
+                shard, shards, entries, (unsigned long long)cases, (unsigned long long)accepted,
+                (unsigned long long)illegal, (unsigned long long)commands,
+                (unsigned long long)spike_steps, (unsigned long long)workload_hash,
+                (unsigned long long)seed, policy);
+#endif
+}
+
+// Exhaustive register geometry for indexed memory at VL=0.  A zero VL isolates
+// decode legality from operand-dependent data faults and memory side effects.
+static void test_vector_indexed_geometry() {
+#ifndef VPU_SPIKE
+    throw std::runtime_error("indexed geometry requires DIFF=1");
+#else
+    const char* shard_arg = std::getenv("VPU_GEOMETRY_SHARD");
+    const char* shards_arg = std::getenv("VPU_GEOMETRY_SHARDS");
+    const unsigned shard = shard_arg ? unsigned(std::strtoul(shard_arg, nullptr, 10)) : 0;
+    const unsigned shards = shards_arg ? unsigned(std::strtoul(shards_arg, nullptr, 10)) : 1;
+    require(shards != 0 && shards <= 32 && shard < shards, "invalid indexed geometry shard");
+    memory_fixture();
+    const auto initial_requests = bus_requests;
+    uint64_t cases = 0, accepted = 0, illegal = 0;
+    for (unsigned sew = 0; (8u << sew) <= TEST_ELEN; ++sew)
+    for (unsigned lm : {0u, 1u, 2u, 3u, 5u, 6u, 7u}) {
+        require(configure((sew << 3) | lm, 0) == 0, "indexed geometry VL");
+        for (unsigned width = 0; width < 4; ++width)
+        for (unsigned fields = 1; fields <= 8; ++fields)
+        for (unsigned mop : {1u, 3u})
+        for (bool store : {false, true})
+        for (bool vm : {false, true})
+        for (unsigned vd = shard; vd < 32; vd += shards)
+        for (unsigned vs2 = 0; vs2 < 32; ++vs2) {
+            const auto insn = mem_insn(store, width, fields, mop, vs2, vm, vd);
+            try {
+                const auto result = command(insn, data_base);
+                if (result.trap) {
+                    require(result.cause == 2 && !result.dirty, "indexed geometry trap");
+                    ++illegal;
+                } else {
+                    ++accepted;
+                }
+                require(bus_log.empty(), "zero-VL indexed access issued memory request");
+                ++cases;
+            } catch (const std::exception& error) {
+                throw std::runtime_error("indexed geometry insn=" + std::to_string(insn)
+                    + " sew=" + std::to_string(sew) + " lm=" + std::to_string(lm)
+                    + ": " + error.what());
+            }
+        }
+    }
+    require(bus_requests == initial_requests, "indexed geometry changed memory traffic");
+    compare_data("indexed geometry preserves zero-VL state");
+    std::printf("PASS indexed_geometry XLEN=%d VLEN=%d ELEN=%d shard=%u shards=%u cases=%llu "
+                "accepted=%llu illegal=%llu commands=%llu spike_steps=%llu "
+                "workload_hash=%016llx\n", TEST_XLEN, TEST_VLEN, TEST_ELEN, shard, shards,
+                (unsigned long long)cases, (unsigned long long)accepted,
+                (unsigned long long)illegal, (unsigned long long)commands,
+                (unsigned long long)spike_steps, (unsigned long long)workload_hash);
 #endif
 }
 

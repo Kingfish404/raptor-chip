@@ -459,7 +459,6 @@ bool riscv_vector_execute(uint32_t instruction)
     unsigned move_group = source1 + 1;
     if (!unmasked || !maximum ||
         (move_group != 1 && move_group != 2 && move_group != 4 && move_group != 8) ||
-        cpu.sr[CSR_VSTART] >= move_group * 16 / bytes ||
         !vector_group_valid(destination, move_group) ||
         !vector_group_valid(source2, move_group)) return false;
     for (unsigned offset = cpu.sr[CSR_VSTART] * bytes; offset < move_group * 16;
@@ -1511,7 +1510,6 @@ word_t riscv_vector_memory(uint32_t instruction, bool store)
     if (!unmasked || (group != 1 && group != 2 && group != 4 && group != 8) ||
         (store && width != 0)) return MCA_ILLEGAL_INS;
     limit = group * 16 / bytes;
-    if (cpu.sr[CSR_VSTART] >= limit) return MCA_ILLEGAL_INS;
     fields = 1;
   }
   else

@@ -550,7 +550,7 @@ def move_cases(reference, vector_api, xlen):
                     cases.append(dict(name=f'move{registers}-e{8 << sew}-start{start}',
                                       instruction=group_move_instruction(registers, 8, 24),
                                       vtype=vtype, start=start, seed=seed,
-                                      expected_trap=int(start >= effective_length)))
+                                      expected_trap=0))
         cases.append(dict(name=f'self-move-e{8 << sew}',
                           instruction=group_move_instruction(1, 8, 8),
                           vtype=vtype, start=1, seed=sew, expected_trap=0))

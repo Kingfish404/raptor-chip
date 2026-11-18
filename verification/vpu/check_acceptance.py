@@ -38,7 +38,8 @@ def main():
         folder=build/f'core-top-{xlen}-{vlen}-{elen}-{bank_bits}-{banks}-opt1-spike{suffix}'
         data=fresh(folder/'sources.json')
         expected=dict(XLEN=xlen,VLEN=vlen,ELEN=elen,BankBits=bank_bits,Banks=banks,
-                      OptimizeOperandReads=1,Spike=1,CoreAdapter=1)
+                      OptimizeOperandReads=1,CachePredicate=1,ShareIntFpConverters=1,
+                      Spike=1,CoreAdapter=1)
         if data['configuration']!=expected or data['suite']!=suite:
             raise ValueError('Wrong top configuration/suite')
         reference=json.loads((folder/'reference.json').read_text())
@@ -64,16 +65,20 @@ def main():
             evidence['catalog_checker_sha256']=catalog['checker_sha256']
         return evidence
 
-    for x,e,b in ((32,32,1),(64,64,2)):
-        for suite,steps in (('full',219437 if x==32 else 344935),('context',1112),
-                            ('store-completion',1330),('geometry',341110 if x==32 else 493389),
-                            ('catalog',21402 if x==32 else 28536),
-                            ('encoding',344064 if x==32 else 458752),
+    configs=(('32',32,32,1,219773),('32-elen64',32,64,2,344712),
+             ('64',64,64,2,345316))
+    for label,x,e,b,full_steps in configs:
+        for suite,steps in (('full',full_steps),('context',1112),
+                            ('store-completion',1330),('geometry',312279 if e==32 else 453835),
+                            ('geometry-overlap',28831 if e==32 else 39554),
+                            ('catalog',21402 if e==32 else 28536),
+                            ('encoding',344064 if e==32 else 458752),
                             ('config-encoding',172464 if x==32 else 172848),
                             ('memory-encoding',163840)):
-            gate(f'{x}-{suite}',lambda x=x,e=e,b=b,suite=suite,steps=steps:top(x,e,b,suite,steps))
+            gate(f'{label}-{suite}',
+                 lambda x=x,e=e,b=b,suite=suite,steps=steps:top(x,e,b,suite,steps))
 
-    for x,v,bb,full_steps in ((32,256,64,345739),(64,512,128,349159)):
+    for x,v,bb,full_steps in ((32,256,64,346120),(64,512,128,349540)):
         for suite,steps in (('full',full_steps),('catalog',28536),
                             ('context',1112),('store-completion',1330)):
             gate(f'{x}-vlen{v}-{suite}',
@@ -86,15 +91,19 @@ def main():
             raise ValueError('Incomplete inductive proof/witness matrix')
         if len(data['mutations_detected'])!=mutations:raise ValueError('Missing mutation checks')
         return dict(summary=str(path),sha256=sha(path))
-    gate('owner-induction',lambda:induction('formal-owner',4))
+    gate('owner-induction',lambda:induction('formal-owner',5))
     gate('core-adapter-induction',lambda:induction('formal-core-adapter',6))
 
     def isolation():
         paths=[build/'formal-memory-isolation'/p for p in ('summary.json','ledger/summary.json')]
         a,b=map(fresh,paths)
-        if len(a['configurations'])!=2 or len(a['detected_mutations'])!=2:
+        configurations={(32,32,2),(32,64,2),(64,64,10)}
+        def shapes(data):
+            return {(c['XLEN'],c['ELEN'],c['TagBits']) for c in data['configurations']}
+        if shapes(a)!=configurations or len(a['detected_mutations'])!=2:
             raise ValueError('Incomplete memory isolation proof')
-        if len(b['configurations'])!=2 or not all(c['inductive_safety'] for c in b['configurations']) or len(b['detected_mutations'])!=4:
+        inductive=all(c['inductive_safety'] for c in b['configurations'])
+        if shapes(b)!=configurations or not inductive or len(b['detected_mutations'])!=4:
             raise ValueError('Incomplete request ledger proof')
         return {str(p):sha(p) for p in paths}
     gate('memory-payload-isolation',isolation)
@@ -109,8 +118,11 @@ def main():
     gate('alu-equivalence-optimization',alu)
 
     def mapping(x,e,b):
-        folder=build/f'fpga-map-alu-opt/{x}-128-{e}-{b}-64-1-xcup'
+        folder=build/f'fpga-map-alu-opt/{x}-128-{e}-{b}-64-1-1-1-xcup'
         data=fresh(folder/'summary.json');netlist=folder/'mapped.json'
+        expected=dict(XLEN=x,VLEN=128,ELEN=e,Banks=b,BankBits=64,
+                      OptimizeOperandReads=1,CachePredicate=1,ShareIntFpConverters=1)
+        if data['parameters']!=expected:raise ValueError('Wrong FPGA map configuration')
         if sha(netlist)!=data['netlist_sha256']:raise ValueError('Changed mapped netlist')
         design=json.loads(netlist.read_text())
         counts=Counter(c['type'] for c in design['modules']['rapt_vpu_core']['cells'].values())
@@ -124,6 +136,7 @@ def main():
             raise ValueError('Changed primitive libraries')
         return dict(summary=str(folder/'summary.json'),sha256=sha(folder/'summary.json'))
     gate('rv32-fpga-map',lambda:mapping(32,32,1))
+    gate('rv32-elen64-fpga-map',lambda:mapping(32,64,2))
     gate('rv64-fpga-map',lambda:mapping(64,64,2))
     passed=all(r['status']=='PASS' for r in results)
     output=dict(scope='Selected source-current evidence only; not full-V compliance, full-VPU formal, scalar LSU integration or STA',

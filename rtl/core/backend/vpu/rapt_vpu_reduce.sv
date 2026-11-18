@@ -72,8 +72,6 @@ module rapt_vpu_reduce #(
         && lm >= -$clog2(ELEN/8) && lm <= 3 && (8 << type_q[5:3]) <= ELEN
         && (lm >= 0 || (8 << type_q[5:3]) <= (ELEN >> (-lm)))
         && (int'(insn_q[24:20]) & (group_size-1)) == 0 && vl_q <= XLEN'(VLEN)
-        && (!wide || int'(insn_q[19:15]) < int'(insn_q[24:20])
-        || int'(insn_q[19:15]) >= int'(insn_q[24:20]) + group_size)
         && ((insn_q[14:12] == 2 && insn_q[31:29] == 0)
           || (wide && insn_q[31:27] == 5'b11000 && (16 << type_q[5:3]) <= ELEN));
     alu_op = 0;

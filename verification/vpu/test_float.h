@@ -849,7 +849,7 @@ static void test_vector_fp_convert() {
 // portable oracle without relying on the host floating-point rounding mode.
 static void test_vector_int_fp() {
     const unsigned rb = TEST_VLEN / 8;
-    uint64_t cases = 0, negative = 0;
+    uint64_t cases = 0, negative = 0, latency = 0;
     const unsigned selectors[] = {0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 14, 15, 16, 17, 18, 19, 22, 23};
     for (unsigned op : selectors)
         for (unsigned sew = 1; sew <= 3; ++sew) {
@@ -961,6 +961,7 @@ static void test_vector_int_fp() {
                         }
                         auto r = command(integer(0x12, 1, vd, src, op, !masked), 0, 0, false,
                                          0x0123456789abcdefULL, rm);
+                        latency += r.latency;
                         require(!r.trap && r.fp_dirty && r.dirty && r.fflags == expected,
                                 "integer/FP completion op=" + std::to_string(op) + " sew=" +
                                     std::to_string(sew) + " scenario=" + std::to_string(scenario));
@@ -1021,12 +1022,14 @@ static void test_vector_int_fp() {
                 put(16 * rb, 4, a[k]);
                 put(8 * rb, 2, uint64_t(value));
                 auto r = command(integer(0x12, 1, 8, 16, op, true), 0, 0, false, 0, rm);
+                latency += r.latency;
                 require(!r.trap && r.fflags == flags, "integer/FP I16 finite boundary");
                 compare_memory("integer/FP I16 finite boundary");
                 ++cases;
             }
-    std::printf("PASS vector_int_fp cases=%llu negative=%llu\n", (unsigned long long)cases,
-                (unsigned long long)negative);
+    std::printf("PASS vector_int_fp cases=%llu negative=%llu latency=%llu\n",
+                (unsigned long long)cases, (unsigned long long)negative,
+                (unsigned long long)latency);
 }
 
 #pragma once

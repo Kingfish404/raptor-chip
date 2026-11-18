@@ -615,9 +615,11 @@ module rapt_dm #(
   end
 
   logic [31:0] dmcontrol_rd;
+  // haltreq is WARZ and resumereq is W1 (Debug Spec 1.0 Sec.3.14.2): both read
+  // as zero, so a debugger read-modify-write cannot re-assert a stale request.
   assign dmcontrol_rd = {
-    haltreq_q,  // [31] R: shows last-written haltreq
-    resumereq_q,  // [30] R: ditto
+    1'b0,  // [31] haltreq: WARZ
+    1'b0,  // [30] resumereq: W1
     28'b0,  // [29:2] omitted (hartreset, hasel, hartsel, etc. = 0)
     ndmreset_q,  // [1]
     dmactive_q  // [0]

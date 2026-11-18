@@ -717,15 +717,17 @@ module rapt_fpu_fma_pipeline #(
             : {32'hffff_ffff, result_sign, 8'hff, 23'b0};
       end else if (exponent_value < round_min_exp_c
           || (exponent_value == round_min_exp_c && !(round_double_q ? retained[FracBits] : retained[23]))) begin
+        // FracBits is 23 for an FP32-only pipeline; the FP64 branch is
+        // unreachable there, but both branches must elaborate in range.
         packed_result_c = round_double_q
-          ? {result_sign, 11'b0, retained[51:0]}
+          ? {result_sign, 11'b0, 52'(retained)}
           : {32'hffff_ffff, result_sign, 8'b0, retained[22:0]};
         packed_flags_c[1] = inexact && tiny_after_rounding;
         packed_flags_c[0] = inexact;
       end else begin
         result_exponent = 11'(exponent_value + round_bias_c);
         packed_result_c = round_double_q
-          ? {result_sign, result_exponent, retained[51:0]}
+          ? {result_sign, result_exponent, 52'(retained)}
           : {32'hffff_ffff, result_sign, result_exponent[7:0], retained[22:0]};
         packed_flags_c[1] = inexact && tiny_after_rounding;
         packed_flags_c[0] = inexact;

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
 #ifdef VPU_SPIKE
@@ -325,6 +326,121 @@ static uint64_t reference(unsigned op, unsigned bits, uint64_t a, uint64_t b, bo
     return result & mask;
 }
 
+static void test_predicate_cache() {
+    const unsigned reg_bytes = TEST_VLEN / 8;
+    uint64_t latency = 0, cases = 0, elements = 0;
+    for (unsigned op : {0u, 23u}) {
+        for (unsigned pattern = 0; pattern < 4; ++pattern) {
+            for (unsigned boundary = 0; boundary < 7; ++boundary) {
+                initialize();
+                const unsigned vl = configure(2, TEST_VLEN); // e8,m4
+                const unsigned starts[] = {0, 1, 7, 8, 15, vl / 2, vl};
+                const unsigned start = std::min(starts[boundary], vl);
+                write_csr(8, start);
+                for (unsigned byte = 0; byte < (vl + 7) / 8; ++byte) {
+                    const uint8_t masks[] = {0x00, 0xff, 0xa5, 0x5a};
+                    const uint8_t value = masks[(pattern + byte) % 4];
+                    host(true, byte, 0, value);
+                    put(byte, 1, value);
+                }
+                const auto before = memory;
+                for (unsigned i = start; i < vl; ++i) {
+                    const bool active = (before[i / 8] >> (i % 8)) & 1;
+                    if (op == 0 && !active) continue;
+                    const unsigned a = before[16 * reg_bytes + i];
+                    const unsigned b = before[24 * reg_bytes + i];
+                    put(8 * reg_bytes + i, 1, reference(op, 8, a, b, active));
+                    ++elements;
+                }
+                const auto result = command(integer(op, 0, 8, 16, 24, false));
+                require(!result.trap && result.dirty, "predicate cache instruction rejected");
+                require(read_csr(8) == 0, "predicate cache restart not cleared");
+                compare_memory("predicate cache");
+                latency += result.latency;
+                ++cases;
+            }
+        }
+    }
+    std::printf("PASS predicate_cache cases=%llu elements=%llu latency=%llu "
+                "commands=%llu spike_steps=%llu workload_hash=%016llx\n", (unsigned long long)cases,
+                (unsigned long long)elements, (unsigned long long)latency,
+                (unsigned long long)commands, (unsigned long long)spike_steps,
+                (unsigned long long)workload_hash);
+}
+
+static void test_packed_logic() {
+    const unsigned reg_bytes = TEST_VLEN / 8;
+    const unsigned maximum = std::min(reg_bytes, 16u);
+    uint64_t cases = 0, measured_latency = 0, measured_cases = 0;
+    const auto check_case = [&](unsigned op, unsigned masked, unsigned vd, unsigned vs1,
+                                unsigned lm, unsigned vl, unsigned start) {
+        require(configure(lm, vl) == vl, "packed logic VL");
+        write_csr(8, start);
+        const unsigned actual_start = start & (TEST_VLEN - 1);
+        const auto before = memory;
+        for (unsigned i = actual_start; i < vl; ++i) {
+            if (masked && !((before[i / 8] >> (i % 8)) & 1)) continue;
+            const unsigned a = before[16 * reg_bytes + i];
+            const unsigned b = before[vs1 * reg_bytes + i];
+            put(vd * reg_bytes + i, 1, reference(op, 8, a, b, true));
+        }
+        const auto result = command(integer(op, 0, vd, 16, vs1, !masked));
+        require(!result.trap && result.dirty, "packed logic instruction");
+        require(read_csr(8) == 0, "packed logic vstart");
+        compare_memory("packed logic");
+        if (!masked && lm == 0 && start == 0 && vl == maximum) {
+            measured_latency += result.latency;
+            ++measured_cases;
+        }
+        ++cases;
+    };
+    for (unsigned op : {9u, 10u, 11u}) {
+        for (unsigned masked = 0; masked < 2; ++masked) {
+            for (unsigned reuse = 0; reuse < 2; ++reuse) {
+                for (unsigned vd : {0u, 8u, 16u, 24u}) {
+                    if (masked && vd == 0) continue;
+                    initialize();
+                    const unsigned vs1 = reuse ? 16 : 24;
+                    for (unsigned vl = 0; vl <= maximum; ++vl) {
+                        for (unsigned start = 0; start <= vl + 1; ++start) {
+                            check_case(op, masked, vd, vs1, 0, vl, start);
+                        }
+                    }
+                    for (unsigned lm = 1; lm <= 3; ++lm) {
+                        const unsigned limit = reg_bytes << lm;
+                        const unsigned lengths[] = {0, 1, 7, 8, 9, 15, 16, 17, 23, 24,
+                                                    31, 32, 63, 64, limit - 1, limit};
+                        for (unsigned vl : lengths) {
+                            if (vl > limit) continue;
+                            const unsigned starts[] = {0, 1, 7, 8, 9, 15, 16, 17,
+                                                       vl / 2, vl ? vl - 1 : 0, vl, vl + 1};
+                            for (unsigned start : starts)
+                                check_case(op, masked, vd, vs1, lm, vl, start);
+                        }
+                    }
+                    for (unsigned shift = 1; shift <= 3; ++shift) {
+                        if ((8u << shift) > TEST_ELEN) continue;
+                        const unsigned lm = 8 - shift;
+                        const unsigned limit = reg_bytes >> shift;
+                        const unsigned lengths[] = {0, 1, 7, 8, 9, limit - 1, limit};
+                        for (unsigned vl : lengths) {
+                            if (vl > limit) continue;
+                            const unsigned starts[] = {0, 1, 7, 8, vl ? vl - 1 : 0, vl, vl + 1};
+                            for (unsigned start : starts)
+                                check_case(op, masked, vd, vs1, lm, vl, start);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    std::printf("PASS packed_logic cases=%llu measured_cases=%llu latency=%llu "
+                "commands=%llu spike_steps=%llu workload_hash=%016llx\n",
+                (unsigned long long)cases, (unsigned long long)measured_cases,
+                (unsigned long long)measured_latency, (unsigned long long)commands,
+                (unsigned long long)spike_steps, (unsigned long long)workload_hash);
+}
+
 #include "test_memory.h"
 #include "test_integer.h"
 
@@ -347,6 +463,66 @@ int main(int argc, char** argv) {
         }
         if (argc == 3 && std::string(argv[1]) == "--nemu-diff-fp") {
             test_nemu_diff_vectors(argv[2], true);
+            dut.final();
+            return 0;
+        }
+        if (argc == 2 && std::string(argv[1]) == "--catalog-matrix") {
+            test_vector_catalog_matrix();
+            dut.final();
+            return 0;
+        }
+        if (argc == 2 && std::string(argv[1]) == "--indexed-geometry") {
+            test_vector_indexed_geometry();
+            dut.final();
+            return 0;
+        }
+        if (argc == 2 && std::string(argv[1]) == "--predicate-cache") {
+            test_predicate_cache();
+            dut.final();
+            return 0;
+        }
+        if (argc == 2 && std::string(argv[1]) == "--packed-logic") {
+            test_packed_logic();
+            dut.final();
+            return 0;
+        }
+        if (argc == 2 && std::string(argv[1]) == "--predicate-semantics") {
+            test_vector_mask();
+            test_vector_carry();
+            test_vector_prefix();
+            test_vector_iota();
+            test_vector_compress();
+            std::printf("PASS predicate_semantics XLEN=%d VLEN=%d ELEN=%d "
+                        "commands=%llu spike_steps=%llu\n", TEST_XLEN, TEST_VLEN, TEST_ELEN,
+                        (unsigned long long)commands, (unsigned long long)spike_steps);
+            dut.final();
+            return 0;
+        }
+        if (argc == 2 && std::string(argv[1]) == "--memory") {
+            test_vector_memory();
+#ifndef VPU_SPIKE
+            test_vector_probe_failures();
+#endif
+            std::printf("PASS memory_top XLEN=%d VLEN=%d ELEN=%d commands=%llu "
+                        "spike_steps=%llu\n", TEST_XLEN, TEST_VLEN, TEST_ELEN,
+                        (unsigned long long)commands, (unsigned long long)spike_steps);
+            dut.final();
+            return 0;
+        }
+        if (argc == 2 && std::string(argv[1]) == "--move") {
+            test_vector_move();
+            std::printf("PASS move_top XLEN=%d VLEN=%d ELEN=%d commands=%llu "
+                        "spike_steps=%llu\n", TEST_XLEN, TEST_VLEN, TEST_ELEN,
+                        (unsigned long long)commands, (unsigned long long)spike_steps);
+            dut.final();
+            return 0;
+        }
+        if (argc == 2 && std::string(argv[1]) == "--geometry-overlap") {
+            test_vector_geometry(true);
+            std::printf("PASS geometry_overlap_top XLEN=%d VLEN=%d ELEN=%d "
+                        "commands=%llu spike_steps=%llu workload_hash=%016llx\n",
+                        TEST_XLEN, TEST_VLEN, TEST_ELEN, (unsigned long long)commands,
+                        (unsigned long long)spike_steps, (unsigned long long)workload_hash);
             dut.final();
             return 0;
         }
@@ -484,6 +660,7 @@ int main(int argc, char** argv) {
             compare_memory("illegal instruction");
         }
         test_vector_muldiv();
+        test_predicate_cache();
         test_vector_mask();
         test_vector_carry();
         test_vector_wide();
@@ -509,6 +686,9 @@ int main(int argc, char** argv) {
         test_vector_fp();
         test_vector_fp_mixed();
         test_vector_memory();
+#ifndef VPU_SPIKE
+        test_vector_probe_failures();
+#endif
         std::printf("PASS top XLEN=%d VLEN=%d ELEN=%d opt_reads=%d commands=%llu arithmetic=%llu active_elements=%llu command_latency_cycles=%llu total_cycles=%llu spike_steps=%llu workload_hash=%016llx seed=243f6a8885a308d3\n",
                     TEST_XLEN, TEST_VLEN, TEST_ELEN, TEST_OPT_READS, (unsigned long long)commands,
                     (unsigned long long)arithmetic, (unsigned long long)active_elements,

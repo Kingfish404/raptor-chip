@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Verify exported RTL elaborates after relocation, with dependency failures fatal."""
+import argparse
 import hashlib
 import json
 from pathlib import Path
@@ -12,7 +13,10 @@ def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def main():
-    output=ROOT/'verification/build/vpu/export-rtl';output.mkdir(parents=True,exist_ok=True)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--build-dir', type=Path, default=ROOT/'verification/build/vpu/export-rtl')
+    output = parser.parse_args().build_dir.resolve()
+    output.mkdir(parents=True,exist_ok=True)
     scripts={name:digest(ROOT/name) for name in
              ('verification/vpu/export_rtl.py','verification/vpu/test_export_rtl.py')}
     results=[]
@@ -29,7 +33,7 @@ def main():
         command=['verilator','--lint-only','--assert','-Wall','-DRAPT_ASSERT_EN',
                  'verification/vpu/fma_legacy.vlt','-f','sources.f']
         for top in ('rapt_vpu','rapt_vpu_core'):
-            for x,v,e,bb,b in ((32,128,32,64,1),(64,128,64,64,2),
+            for x,v,e,bb,b in ((32,128,32,64,1),(32,128,64,64,2),(64,128,64,64,2),
                                (32,256,64,64,4),(64,512,64,128,4)):
                 config=dict(XLEN=x,VLEN=v,ELEN=e,BankBits=bb,Banks=b)
                 argv=command+['--top-module',top]+[f'-G{k}={value}' for k,value in config.items()]

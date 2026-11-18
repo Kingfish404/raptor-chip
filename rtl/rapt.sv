@@ -38,16 +38,13 @@ module rapt #(
     parameter int XLEN = `RAPT_XLEN,
     parameter int MemoryReadCredits = 8,
     parameter bit L1dWriteBack = `RAPT_L1D_WRITEBACK,
-    // Number of hart contexts in this cluster. Currently fixed at 1; the
-    // value is threaded through CSR `mhartid`, the CLINT msip/mtimecmp
-    // arrays, and PLIC NCTX so that scaling to N>1 only requires (a) a
-    // generate block around `rapt_core`, (b) per-hart CLINT register
-    // banks (already parameterised inside rapt_clint), and (c) a client
-    // arbiter in rapt_l2_subsystem that extends request IDs with the hart
-    // index. Do NOT raise this without those follow-ups.
-    /* verilator lint_off UNUSEDPARAM */
+    // Number of hart contexts in this cluster. Currently fixed at 1 and
+    // rejected at elaboration otherwise. Scaling to N>1 requires (a) a
+    // generate block around `rapt_core` with a per-hart `mhartid`, (b)
+    // per-hart msip/mtimecmp banks in rapt_clint (scalar today), (c) PLIC
+    // NCTX = 2*N, (d) DM hartsel support, and (e) a client arbiter in
+    // rapt_l2_subsystem that extends request IDs with the hart index.
     parameter int NHARTS = 1
-    /* verilator lint_on UNUSEDPARAM */
 ) (
     input rapt_pkg::sram_ctrl_t sram_ctrl_i,
     input clock,
@@ -144,6 +141,10 @@ module rapt #(
 
     input reset
 );
+
+  if (NHARTS != 1) begin : g_invalid_nharts
+    $error("rapt supports exactly one hart (NHARTS=%0d)", NHARTS);
+  end
 
   // ------------------------------------------------------------------
   // Core -> L2 subsystem client port, and the L2 subsystem's AXI master.

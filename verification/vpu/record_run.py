@@ -11,9 +11,10 @@ mode, output, *values = sys.argv[1:]
 output = Path(output)
 if mode == "top":
     names = ("XLEN", "VLEN", "ELEN", "BankBits", "Banks", "OptimizeOperandReads",
-             "Spike", "CoreAdapter")
+             "CachePredicate", "ShareIntFpConverters", "Spike", "CoreAdapter")
     if len(values) != len(names) + 1:
-        raise SystemExit("top requires XLEN VLEN ELEN BankBits Banks OptimizeReads Spike Adapter Suite")
+        raise SystemExit("top requires XLEN VLEN ELEN BankBits Banks OptimizeReads "
+                         "CachePredicate ShareIntFpConverters Spike Adapter Suite")
     result = dict(configuration=dict(zip(names, map(int, values[:-1]))), suite=values[-1])
 elif mode == "leaf":
     top, *parameters = values
@@ -37,8 +38,8 @@ files.add(root / "rtl/configs/default/rapt_config.svh")
 files.add(root / "rtl/sram/rapt_sram_1rw.sv")
 files.add(root / "rtl/rapt_pkg.sv")
 for path in Path(__file__).resolve().parent.iterdir():
-    if path.is_file() and (path.suffix in {".cpp", ".h", ".sv", ".py", ".vlt"}
-                           or path.name == "Makefile"):
+    if path.is_file() and path.name != "fma_legacy.vlt" and (
+            path.suffix in {".cpp", ".h", ".sv", ".py", ".vlt"} or path.name == "Makefile"):
         files.add(path)
 files.add(root / "verification/vpu/vendor/riscv-opcodes/rv_v")
 result.update(

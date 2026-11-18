@@ -15,12 +15,23 @@ BANKS ?= 2
 TAG_BITS ?= 4
 CORE_ADAPTER ?= 0
 OPT_READS ?= 1
+CACHE_PREDICATE ?= 1
+SHARE_INT_FP ?= 1
 REDUCE_MASK_CACHE ?= 1
 MULDIV_EARLY_OUT ?= 1
 SPIKE_BUILD ?=
 DIFF ?= 0
 TOP_SUITE ?= full
-ifeq ($(filter $(TOP_SUITE),full fp-mixed fp-divsqrt fp-misc fp-wide fp-convert int-fp estimate transfer fp-reduce encoding config-encoding memory-encoding geometry catalog context store-completion),)
+MATRIX_SHARDS ?= 16
+MATRIX_SEED ?= 0x243f6a8885a308d3
+MATRIX_POLICY ?= 0
+GEOMETRY_SHARDS ?= 32
+TOP_SUITES := full fp-mixed fp-divsqrt fp-misc fp-wide fp-convert int-fp estimate transfer \
+  fp-reduce encoding config-encoding memory-encoding geometry geometry-overlap catalog \
+  catalog-matrix indexed-geometry context \
+  store-completion \
+  predicate-cache predicate-semantics packed-logic memory move
+ifeq ($(filter $(TOP_SUITE),$(TOP_SUITES)),)
 $(error unsupported TOP_SUITE=$(TOP_SUITE))
 endif
 DIFF_FLAGS :=
@@ -34,6 +45,10 @@ endif
 VPU_INCLUDES := -I$(ROOT)/rtl/include -I$(ROOT)/rtl/configs/default
 FLAGS := --binary --timing --assert -Wall -DRAPT_ASSERT_EN $(VPU_INCLUDES) -j $(JOBS)
 VPU := $(ROOT)/rtl/core/backend/vpu
+# Generate this narrow warning policy from tracked code in each build folder.
+define write_fma_waiver
+python3 $(CURDIR)/export_rtl.py --write-fma-waiver $(1)/fma_legacy.vlt
+endef
 VPU_SCALAR_FPU := fma divsqrt convert_narrow int_to_fp integer_to_fp single_to_int_w fp_to_int
 VPU_TOP_SOURCES := $(ROOT)/rtl/rapt_pkg.sv $(ROOT)/rtl/sram/rapt_sram_1rw.sv \
   $(addprefix $(ROOT)/rtl/core/backend/fpu/rapt_fpu_,$(addsuffix .sv,$(VPU_SCALAR_FPU))) \
@@ -41,8 +56,23 @@ VPU_TOP_SOURCES := $(ROOT)/rtl/rapt_pkg.sv $(ROOT)/rtl/sram/rapt_sram_1rw.sv \
 TYPE_BUILD := $(BUILD_DIR)/vtype-$(XLEN)-$(VLEN)-$(ELEN)
 VRF_BUILD := $(BUILD_DIR)/vrf-$(VLEN)-$(BANK_BITS)-$(BANKS)
 CSR_BUILD := $(BUILD_DIR)/csr-$(XLEN)-$(VLEN)-$(ELEN)
-TOP_BUILD := $(BUILD_DIR)/$(if $(filter 1,$(CORE_ADAPTER)),core-top,top)-$(XLEN)-$(VLEN)-$(ELEN)-$(BANK_BITS)-$(BANKS)-opt$(OPT_READS)$(if $(filter 1,$(DIFF)),-spike,)$(if $(filter-out full,$(TOP_SUITE)),-$(TOP_SUITE),)
+TOP_PREFIX := $(BUILD_DIR)/$(if $(filter 1,$(CORE_ADAPTER)),core-top,top)
+TOP_MODULE := $(if $(filter 1,$(CORE_ADAPTER)),rapt_vpu_core,rapt_vpu)
+TOP_CONFIG := $(XLEN)-$(VLEN)-$(ELEN)-$(BANK_BITS)-$(BANKS)-opt$(OPT_READS)
+TOP_BUILD := $(TOP_PREFIX)-$(TOP_CONFIG)$(if $(filter 0,$(CACHE_PREDICATE)),-pred0,)
+TOP_BUILD := $(TOP_BUILD)$(if $(filter 0,$(SHARE_INT_FP)),-unshared,)
+TOP_BUILD := $(TOP_BUILD)$(if $(filter 1,$(DIFF)),-spike,)
+TOP_BUILD := $(TOP_BUILD)$(if $(filter-out full,$(TOP_SUITE)),-$(TOP_SUITE),)
 OWNER_BUILD := $(BUILD_DIR)/owner-$(TAG_BITS)
+PREDICATE_PREFIX := $(TOP_PREFIX)-$(TOP_CONFIG)
+PREDICATE_SUFFIX := $(if $(filter 0,$(SHARE_INT_FP)),-unshared,)
+PREDICATE_SUFFIX := $(PREDICATE_SUFFIX)$(if $(filter 1,$(DIFF)),-spike,)-predicate-cache
+CONVERT_PREFIX := $(PREDICATE_PREFIX)$(if $(filter 0,$(CACHE_PREDICATE)),-pred0,)
+CONVERT_SUFFIX := $(if $(filter 1,$(DIFF)),-spike,)-int-fp
+OPT_PREFIX := $(TOP_PREFIX)-$(XLEN)-$(VLEN)-$(ELEN)-$(BANK_BITS)-$(BANKS)
+OPT_SUFFIX := $(if $(filter 0,$(CACHE_PREDICATE)),-pred0,)
+OPT_SUFFIX := $(OPT_SUFFIX)$(if $(filter 0,$(SHARE_INT_FP)),-unshared,)
+OPT_SUFFIX := $(OPT_SUFFIX)$(if $(filter 1,$(DIFF)),-spike,)
 
 .PHONY: test leaves vtype vrf csr top top-build owner matrix top-matrix opt-check synth
 test: leaves core-adapter owner muldiv mask-write fixed move mask-scan slide fp-decode int-fp-decode fp-reduce-control fp-reduce-decode fp-reduce-engine top
@@ -76,6 +106,7 @@ csr:
 
 matrix:
 	$(MAKE) leaves XLEN=64 VLEN=128 ELEN=64 BANK_BITS=64 BANKS=2
+	$(MAKE) leaves XLEN=32 VLEN=128 ELEN=64 BANK_BITS=64 BANKS=2
 	$(MAKE) leaves XLEN=32 VLEN=256 ELEN=64 BANK_BITS=32 BANKS=4
 	$(MAKE) leaves XLEN=32 VLEN=128 ELEN=32 BANK_BITS=64 BANKS=1
 	$(MAKE) leaves XLEN=64 VLEN=512 ELEN=64 BANK_BITS=128 BANKS=4
@@ -86,16 +117,21 @@ synth:
 
 top-build:
 	@mkdir -p $(TOP_BUILD)
+	$(call write_fma_waiver,$(TOP_BUILD))
 	python3 $(CURDIR)/record_run.py top $(TOP_BUILD)/sources.json $(XLEN) $(VLEN) $(ELEN) \
-		$(BANK_BITS) $(BANKS) $(OPT_READS) $(DIFF) $(CORE_ADAPTER) $(TOP_SUITE)
+		$(BANK_BITS) $(BANKS) $(OPT_READS) $(CACHE_PREDICATE) $(SHARE_INT_FP) \
+		$(DIFF) $(CORE_ADAPTER) $(TOP_SUITE)
 ifeq ($(DIFF),1)
 	python3 $(CURDIR)/reference_manifest.py $(SPIKE_BUILD) $(TOP_BUILD)/reference.json
 endif
 	$(VERILATOR) --cc --exe --build --assert -Wall -Wno-PINCONNECTEMPTY -DRAPT_ASSERT_EN \
 	  $(VPU_INCLUDES) -j $(JOBS) \
-	  $(CURDIR)/fma_legacy.vlt --top-module $(if $(filter 1,$(CORE_ADAPTER)),rapt_vpu_core,rapt_vpu) --prefix Vrapt_vpu --Mdir $(TOP_BUILD) \
+	  $(TOP_BUILD)/fma_legacy.vlt --top-module $(TOP_MODULE) \
+	  --prefix Vrapt_vpu --Mdir $(TOP_BUILD) \
 	  -GXLEN=$(XLEN) -GVLEN=$(VLEN) -GELEN=$(ELEN) -GBankBits=$(BANK_BITS) -GBanks=$(BANKS) \
 	  -GOptimizeOperandReads=$(OPT_READS) \
+	  -GCachePredicate=$(CACHE_PREDICATE) \
+	  -GShareIntFpConverters=$(SHARE_INT_FP) \
 	  -CFLAGS '-DTEST_XLEN=$(XLEN) -DTEST_VLEN=$(VLEN) -DTEST_ELEN=$(ELEN) -DTEST_OPT_READS=$(OPT_READS) -DTEST_CORE_ADAPTER=$(CORE_ADAPTER)' \
 	  $(DIFF_FLAGS) \
 	  $(VPU_TOP_SOURCES) \
@@ -103,6 +139,38 @@ endif
 
 top: top-build
 	$(TOP_BUILD)/Vrapt_vpu $(if $(filter-out full,$(TOP_SUITE)),--$(TOP_SUITE),) | tee $(TOP_BUILD)/run.log
+
+.PHONY: catalog-matrix
+catalog-matrix: top-build
+	@test "$(TOP_SUITE)" = catalog-matrix && test "$(DIFF)" = 1 \
+	  && test "$(CORE_ADAPTER)" = 1 && test "$(MATRIX_SHARDS)" -gt 0 \
+	  || { echo 'catalog-matrix requires TOP_SUITE=catalog-matrix DIFF=1 CORE_ADAPTER=1'; exit 1; }
+	@set -e; for ((shard=0; shard<$(MATRIX_SHARDS); shard++)); do \
+	  printf -v shard_id '%02d' "$$shard"; \
+	  log="$(TOP_BUILD)/matrix-shard-$$shard_id.log"; \
+	  VPU_MATRIX_SHARDS=$(MATRIX_SHARDS) VPU_MATRIX_SHARD=$$shard \
+	    VPU_MATRIX_SEED=$(MATRIX_SEED) VPU_MATRIX_POLICY=$(MATRIX_POLICY) \
+	    "$(TOP_BUILD)/Vrapt_vpu" --catalog-matrix >"$$log" 2>&1 \
+	    || { cat "$$log"; exit 1; }; \
+	  tail -n 1 "$$log"; \
+	done
+	python3 $(CURDIR)/check_catalog.py --matrix $(TOP_BUILD)
+
+.PHONY: indexed-geometry
+indexed-geometry: top-build
+	@test "$(TOP_SUITE)" = indexed-geometry && test "$(DIFF)" = 1 \
+	  && test "$(CORE_ADAPTER)" = 1 && test "$(GEOMETRY_SHARDS)" -ge 1 \
+	  && test "$(GEOMETRY_SHARDS)" -le 32 \
+	  || { echo 'indexed-geometry requires DIFF=1 CORE_ADAPTER=1 and 1-32 shards'; exit 1; }
+	@set -e; for ((shard=0; shard<$(GEOMETRY_SHARDS); shard++)); do \
+	  printf -v shard_id '%02d' "$$shard"; \
+	  log="$(TOP_BUILD)/indexed-geometry-shard-$$shard_id.log"; \
+	  VPU_GEOMETRY_SHARDS=$(GEOMETRY_SHARDS) VPU_GEOMETRY_SHARD=$$shard \
+	    "$(TOP_BUILD)/Vrapt_vpu" --indexed-geometry >"$$log" 2>&1 \
+	    || { cat "$$log"; exit 1; }; \
+	  tail -n 1 "$$log"; \
+	done
+	python3 $(CURDIR)/check_catalog.py --indexed-geometry $(TOP_BUILD)
 
 owner:
 	@mkdir -p $(OWNER_BUILD)
@@ -115,6 +183,7 @@ top-matrix:
 	$(MAKE) owner TAG_BITS=1
 	$(MAKE) owner TAG_BITS=10
 	$(MAKE) top XLEN=64 VLEN=128 ELEN=64 BANK_BITS=64 BANKS=2
+	$(MAKE) top XLEN=32 VLEN=128 ELEN=64 BANK_BITS=64 BANKS=2
 	$(MAKE) top XLEN=32 VLEN=256 ELEN=64 BANK_BITS=64 BANKS=4
 	$(MAKE) top XLEN=32 VLEN=128 ELEN=32 BANK_BITS=64 BANKS=1
 	$(MAKE) top XLEN=64 VLEN=512 ELEN=64 BANK_BITS=128 BANKS=4
@@ -124,9 +193,24 @@ opt-check:
 	$(MAKE) top OPT_READS=0
 	$(MAKE) top OPT_READS=1
 	python3 $(CURDIR)/compare_optimization.py \
-	  $(BUILD_DIR)/top-$(XLEN)-$(VLEN)-$(ELEN)-$(BANK_BITS)-$(BANKS)-opt0$(if $(filter 1,$(DIFF)),-spike,) \
-	  $(BUILD_DIR)/top-$(XLEN)-$(VLEN)-$(ELEN)-$(BANK_BITS)-$(BANKS)-opt1$(if $(filter 1,$(DIFF)),-spike,) \
+	  $(OPT_PREFIX)-opt0$(OPT_SUFFIX) $(OPT_PREFIX)-opt1$(OPT_SUFFIX) \
 	  $(BUILD_DIR)/optimization-$(XLEN)-$(VLEN)-$(ELEN)-$(BANK_BITS)-$(BANKS)$(if $(filter 1,$(DIFF)),-spike,).json
+
+.PHONY: predicate-cache-check
+predicate-cache-check:
+	$(MAKE) top TOP_SUITE=predicate-cache CACHE_PREDICATE=0
+	$(MAKE) top TOP_SUITE=predicate-cache CACHE_PREDICATE=1
+	python3 $(CURDIR)/compare_optimization.py --kind predicate-cache \
+	  $(PREDICATE_PREFIX)-pred0$(PREDICATE_SUFFIX) $(PREDICATE_PREFIX)$(PREDICATE_SUFFIX) \
+	  $(BUILD_DIR)/predicate-cache-$(XLEN)-$(VLEN)-$(ELEN)-$(BANK_BITS)-$(BANKS).json
+
+.PHONY: int-fp-share-check
+int-fp-share-check:
+	$(MAKE) top TOP_SUITE=int-fp SHARE_INT_FP=0
+	$(MAKE) top TOP_SUITE=int-fp SHARE_INT_FP=1
+	python3 $(CURDIR)/compare_optimization.py --kind int-fp-sharing \
+	  $(CONVERT_PREFIX)-unshared$(CONVERT_SUFFIX) $(CONVERT_PREFIX)$(CONVERT_SUFFIX) \
+	  $(BUILD_DIR)/int-fp-sharing-$(XLEN)-$(VLEN)-$(ELEN)-$(BANK_BITS)-$(BANKS).json
 
 .PHONY: muldiv
 muldiv:
@@ -141,7 +225,23 @@ muldiv:
 
 .PHONY: muldiv-opt-check
 muldiv-opt-check:
-	python3 $(CURDIR)/muldiv_check.py --build-dir $(BUILD_DIR)
+	$(MAKE) muldiv MULDIV_EARLY_OUT=0
+	$(MAKE) muldiv MULDIV_EARLY_OUT=1
+	python3 $(CURDIR)/compare_optimization.py --kind muldiv \
+	  $(BUILD_DIR)/muldiv-0 $(BUILD_DIR)/muldiv-1 $(BUILD_DIR)/muldiv-optimization.json
+
+.PHONY: fp-reduce-cache-check
+fp-reduce-cache-check:
+	@for config in '64 128 64' '32 128 32' '32 256 64' '64 512 64'; do \
+	  read -r test_xlen test_vlen test_elen <<< "$$config"; \
+	  for cache in 0 1; do \
+	    $(MAKE) fp-reduce-engine XLEN=$$test_xlen VLEN=$$test_vlen ELEN=$$test_elen \
+	      REDUCE_MASK_CACHE=$$cache; \
+	  done; \
+	done
+	python3 $(CURDIR)/compare_optimization.py --kind fp-reduce-cache-matrix \
+	  --build-dir $(BUILD_DIR) >$(BUILD_DIR)/fp-reduce-cache-matrix.json
+	@echo 'PASS fp-reduce-cache matrix: $(BUILD_DIR)/fp-reduce-cache-matrix.json'
 
 .PHONY: mask-write
 mask-write:
@@ -212,10 +312,11 @@ FMA_BUILD := $(BUILD_DIR)/fma-$(FMA_DOUBLE)
 fma:
 	@test -n "$(SPIKE_BUILD)" || { echo 'fma requires SPIKE_BUILD for independent SoftFloat'; exit 1; }
 	@mkdir -p $(FMA_BUILD)
+	$(call write_fma_waiver,$(FMA_BUILD))
 	python3 $(CURDIR)/record_run.py leaf $(FMA_BUILD)/sources.json rapt_vpu_fma Double=$(FMA_DOUBLE)
 	python3 $(CURDIR)/reference_manifest.py $(SPIKE_BUILD) $(FMA_BUILD)/reference.json
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
-	  $(CURDIR)/fma_legacy.vlt --top-module rapt_vpu_fma -GDouble=$(FMA_DOUBLE) --Mdir $(FMA_BUILD) \
+	  $(FMA_BUILD)/fma_legacy.vlt --top-module rapt_vpu_fma -GDouble=$(FMA_DOUBLE) --Mdir $(FMA_BUILD) \
 	  -CFLAGS '-DTEST_DOUBLE=$(FMA_DOUBLE) -I$(SPIKE_BUILD)/softfloat' -LDFLAGS '$(SPIKE_BUILD)/libsoftfloat.a' \
 	  $(ROOT)/rtl/core/backend/fpu/rapt_fpu_fma.sv $(VPU)/rapt_vpu_fma.sv $(CURDIR)/test_fma.cpp \
 	  >$(FMA_BUILD)/build.log 2>&1 || { cat $(FMA_BUILD)/build.log; exit 1; }
@@ -226,11 +327,12 @@ FP_ARITH_BUILD := $(BUILD_DIR)/fp-arith-$(FMA_DOUBLE)
 fp-arith:
 	@test -n "$(SPIKE_BUILD)" || { echo 'fp-arith requires SPIKE_BUILD for independent SoftFloat'; exit 1; }
 	@mkdir -p $(FP_ARITH_BUILD)
+	$(call write_fma_waiver,$(FP_ARITH_BUILD))
 	python3 $(CURDIR)/record_run.py leaf $(FP_ARITH_BUILD)/sources.json rapt_vpu_fp_arith \
 		Double=$(FMA_DOUBLE)
 	python3 $(CURDIR)/reference_manifest.py $(SPIKE_BUILD) $(FP_ARITH_BUILD)/reference.json
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
-	  $(CURDIR)/fma_legacy.vlt --top-module rapt_vpu_fp_arith -GDouble=$(FMA_DOUBLE) --Mdir $(FP_ARITH_BUILD) \
+	  $(FP_ARITH_BUILD)/fma_legacy.vlt --top-module rapt_vpu_fp_arith -GDouble=$(FMA_DOUBLE) --Mdir $(FP_ARITH_BUILD) \
 	  -CFLAGS '-DTEST_DOUBLE=$(FMA_DOUBLE) -I$(SPIKE_BUILD)/softfloat' -LDFLAGS '$(SPIKE_BUILD)/libsoftfloat.a' \
 	  $(ROOT)/rtl/core/backend/fpu/rapt_fpu_fma.sv $(VPU)/rapt_vpu_fma.sv $(VPU)/rapt_vpu_fp_arith.sv $(CURDIR)/test_fp_arith.cpp \
 	  >$(FP_ARITH_BUILD)/build.log 2>&1 || { cat $(FP_ARITH_BUILD)/build.log; exit 1; }
@@ -293,10 +395,11 @@ fp-widen:
 fp-wide-arith:
 	@test -n "$(SPIKE_BUILD)" || { echo 'fp-wide-arith requires SPIKE_BUILD for independent SoftFloat'; exit 1; }
 	@mkdir -p $(BUILD_DIR)/fp-wide-arith
+	$(call write_fma_waiver,$(BUILD_DIR)/fp-wide-arith)
 	python3 $(CURDIR)/record_run.py leaf $(BUILD_DIR)/fp-wide-arith/sources.json rapt_vpu_fp_wide_arith
 	python3 $(CURDIR)/reference_manifest.py $(SPIKE_BUILD) $(BUILD_DIR)/fp-wide-arith/reference.json
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
-	  $(CURDIR)/fma_legacy.vlt --top-module rapt_vpu_fp_wide_arith --Mdir $(BUILD_DIR)/fp-wide-arith \
+	  $(BUILD_DIR)/fp-wide-arith/fma_legacy.vlt --top-module rapt_vpu_fp_wide_arith --Mdir $(BUILD_DIR)/fp-wide-arith \
 	  -CFLAGS '-I$(SPIKE_BUILD)/softfloat' -LDFLAGS '$(SPIKE_BUILD)/libsoftfloat.a' \
 	  $(ROOT)/rtl/core/backend/fpu/rapt_fpu_fma.sv $(VPU)/rapt_vpu_fma.sv $(VPU)/rapt_vpu_fp_arith.sv $(VPU)/rapt_vpu_fp_widen.sv \
 	  $(VPU)/rapt_vpu_fp_wide_arith.sv $(CURDIR)/test_fp_wide_arith.cpp \
@@ -318,21 +421,30 @@ fp-convert:
 	$(BUILD_DIR)/fp-convert/Vrapt_vpu_fp_convert | tee $(BUILD_DIR)/fp-convert/run.log
 
 INT_BITS ?= 32
-INT_FP_BUILD := $(BUILD_DIR)/int-fp-$(FMA_DOUBLE)-$(INT_BITS)
+INT_FP_SHARED ?= 0
+INT_FP_MODULE := rapt_vpu_int_fp$(if $(filter 1,$(INT_FP_SHARED)),_shared,)
+INT_FP_BUILD := $(BUILD_DIR)/int-fp$(if $(filter 1,$(INT_FP_SHARED)),-shared,)-$(FMA_DOUBLE)-$(INT_BITS)
+INT_FP_WIDTH_PARAM := $(if $(filter 1,$(INT_FP_SHARED)),TestIntBits,IntBits)
+INT_FP_WIDTH_FLAG := $(if $(filter 1,$(INT_FP_SHARED)),,-GIntBits=$(INT_BITS))
+INT_FP_TEST_FLAG := $(if $(filter 1,$(INT_FP_SHARED)),-DTEST_SHARED,)
+INT_FP_SCALAR_FPU := int_to_fp integer_to_fp single_to_int_w fp_to_int
 .PHONY: int-fp
 int-fp:
 	@test -n "$(SPIKE_BUILD)" || { echo 'int-fp requires SPIKE_BUILD for independent SoftFloat'; exit 1; }
+	@case "$(INT_FP_SHARED)" in 0|1) ;; *) echo 'INT_FP_SHARED must be 0 or 1'; exit 1 ;; esac
 	@mkdir -p $(INT_FP_BUILD)
-	python3 $(CURDIR)/record_run.py leaf $(INT_FP_BUILD)/sources.json rapt_vpu_int_fp \
-		FloatDouble=$(FMA_DOUBLE) IntBits=$(INT_BITS)
+	python3 $(CURDIR)/record_run.py leaf $(INT_FP_BUILD)/sources.json $(INT_FP_MODULE) \
+		FloatDouble=$(FMA_DOUBLE) $(INT_FP_WIDTH_PARAM)=$(INT_BITS)
 	python3 $(CURDIR)/reference_manifest.py $(SPIKE_BUILD) $(INT_FP_BUILD)/reference.json
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
-	  --top-module rapt_vpu_int_fp -GFloatDouble=$(FMA_DOUBLE) -GIntBits=$(INT_BITS) --Mdir $(INT_FP_BUILD) \
-	  -CFLAGS '-DTEST_DOUBLE=$(FMA_DOUBLE) -DTEST_INT_BITS=$(INT_BITS) -I$(SPIKE_BUILD)/softfloat' -LDFLAGS '$(SPIKE_BUILD)/libsoftfloat.a' \
-	  $(ROOT)/rtl/core/backend/fpu/rapt_fpu_int_to_fp.sv $(ROOT)/rtl/core/backend/fpu/rapt_fpu_integer_to_fp.sv $(ROOT)/rtl/core/backend/fpu/rapt_fpu_single_to_int_w.sv $(ROOT)/rtl/core/backend/fpu/rapt_fpu_fp_to_int.sv \
-	  $(VPU)/rapt_vpu_int_fp.sv $(CURDIR)/test_int_fp.cpp \
+	  --top-module $(INT_FP_MODULE) -GFloatDouble=$(FMA_DOUBLE) $(INT_FP_WIDTH_FLAG) \
+	  --Mdir $(INT_FP_BUILD) \
+	  -CFLAGS '$(INT_FP_TEST_FLAG) -DTEST_DOUBLE=$(FMA_DOUBLE) -DTEST_INT_BITS=$(INT_BITS) -I$(SPIKE_BUILD)/softfloat' \
+	  -LDFLAGS '$(SPIKE_BUILD)/libsoftfloat.a' \
+	  $(addprefix $(ROOT)/rtl/core/backend/fpu/rapt_fpu_,$(addsuffix .sv,$(INT_FP_SCALAR_FPU))) \
+	  $(VPU)/$(INT_FP_MODULE).sv $(CURDIR)/test_int_fp.cpp \
 	  >$(INT_FP_BUILD)/build.log 2>&1 || { cat $(INT_FP_BUILD)/build.log; exit 1; }
-	$(INT_FP_BUILD)/Vrapt_vpu_int_fp | tee $(INT_FP_BUILD)/run.log
+	$(INT_FP_BUILD)/V$(INT_FP_MODULE) | tee $(INT_FP_BUILD)/run.log
 
 .PHONY: int-fp-decode
 int-fp-decode:
@@ -374,11 +486,12 @@ fp-transfer:
 fp-reduce:
 	@test -n "$(SPIKE_BUILD)" || { echo 'fp-reduce requires SPIKE_BUILD for independent SoftFloat'; exit 1; }
 	@mkdir -p $(BUILD_DIR)/fp-reduce-$(ELEN)
+	$(call write_fma_waiver,$(BUILD_DIR)/fp-reduce-$(ELEN))
 	python3 $(CURDIR)/record_run.py leaf $(BUILD_DIR)/fp-reduce-$(ELEN)/sources.json \
 		rapt_vpu_fp_reduce ELEN=$(ELEN) CountBits=10
 	python3 $(CURDIR)/reference_manifest.py $(SPIKE_BUILD) $(BUILD_DIR)/fp-reduce-$(ELEN)/reference.json
 	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
-	  $(CURDIR)/fma_legacy.vlt --top-module rapt_vpu_fp_reduce --Mdir $(BUILD_DIR)/fp-reduce-$(ELEN) \
+	  $(BUILD_DIR)/fp-reduce-$(ELEN)/fma_legacy.vlt --top-module rapt_vpu_fp_reduce --Mdir $(BUILD_DIR)/fp-reduce-$(ELEN) \
 	  -GELEN=$(ELEN) -CFLAGS '-DTEST_ELEN=$(ELEN) -I$(SPIKE_BUILD)/softfloat' -LDFLAGS '$(SPIKE_BUILD)/libsoftfloat.a' \
 	  $(ROOT)/rtl/core/backend/fpu/rapt_fpu_fma.sv $(VPU)/rapt_vpu_fma.sv $(VPU)/rapt_vpu_fp_arith.sv $(VPU)/rapt_vpu_fp_misc.sv $(VPU)/rapt_vpu_fp_widen.sv \
 	  $(VPU)/rapt_vpu_fp_reduce_control.sv $(VPU)/rapt_vpu_fp_reduce.sv $(CURDIR)/test_fp_reduce.cpp \

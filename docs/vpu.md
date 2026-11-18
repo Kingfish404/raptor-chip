@@ -14,6 +14,10 @@ V in the scalar core's ISA advertisement.
 The test defaults are XLEN=64, VLEN=128, ELEN=64, BankBits=64 and Banks=2.
 XLEN, vector width and storage geometry are independent parameters. Optional
 vector extensions such as Zvfh are outside this component's baseline.
+The minimum V configuration uses VLEN=128 and ELEN=64 with either XLEN; on
+RV32, 64-bit index elements are excluded as specified by V 1.0. Advertising V
+also requires the surrounding core to provide the F/D extensions and precise
+traps, so these parameters alone do not establish system compliance.
 
 ## Available modules
 
@@ -24,6 +28,7 @@ vector extensions such as Zvfh are outside this component's baseline.
 | `rtl/core/backend/vpu/rapt_vpu_csr.sv` | Seven vector CSRs, configuration updates, restart/FOF/completion updates, VS gating and dirty events | CSR address sweep, permissions, aliases, WARL, faults, FOF and sticky saturation |
 | `rtl/core/backend/vpu/rapt_vpu_owner.sv` | Capture, tag-matched authorization, cancellation before authorization, irrevocable issue, completion holding and stale-result drain | Tag reuse, cancellation races, issue/response stalls, zero-cycle and duplicate results; inductive public-interface proof with reachability and mutation checks |
 | `rtl/core/backend/vpu/rapt_vpu_element.sv` | Natural-aligned 8/16/32/64-bit element accesses across VRF banks | Integrated full-array byte comparisons, all supported SEWs and multiple bank shapes |
+| `rtl/core/backend/vpu/rapt_vpu_predicate_cache.sv` | Indexed predicate cache | Cached/uncached model and Spike tests |
 | `rtl/core/backend/vpu/rapt_vpu_decode.sv` | Raw encoding admission for the implemented subset | Real instruction tests and illegal encoding tests, including Spike comparison |
 | `rtl/core/backend/vpu/rapt_vpu_memory.sv` | Sequential unit/strided/indexed/segment/whole/mask/FOF accesses with precise restart metadata | Independent byte model, Spike, transaction scoreboard, injected access/page faults, backpressure and ownership mismatch tests |
 | `rtl/core/backend/vpu/rapt_vpu_muldiv.sv` | Independent ready/valid SEW=8/16/32/64 iterative multiply/divide element engine, optional early completion | Exhaustive e8, wider edge/random cases, reset/backpressure, baseline/optimized comparison; integrated Spike including destructive multiply-add |
@@ -41,6 +46,7 @@ vector extensions such as Zvfh are outside this component's baseline.
 | `rtl/core/backend/vpu/rapt_vpu_fma.sv` | Independent FP32/FP64 fused element wrapper with backpressured result/flags and raw vector inputs; integrated with top | SoftFloat result/flags tests, request capture, stalled responses, invalid rounding and reset boundaries |
 | `rtl/core/backend/vpu/rapt_vpu_int_fp_decode.sv` | Eighteen unary integer/FP conversion selectors, operand EEWs, signedness and resolved RTZ/FRM; integrated with top | Exhaustive encoding/SEW/FRM/enable sweeps for ELEN32/64 and encoded top differential tests |
 | `rtl/core/backend/vpu/rapt_vpu_int_fp.sv` | Bidirectional integer16/32/64 and FP32/64 element conversion; five legal ISA width pairs integrated with top | Independent SoftFloat leaves plus encoded top results, flags, masking, restart and finite clipping |
+| `rtl/core/backend/vpu/rapt_vpu_int_fp_shared.sv` | Shared integer/FP converter | SoftFloat and top-level tests |
 | `rtl/core/backend/vpu/rapt_vpu_fp_estimate.sv` | Combinational raw FP32/FP64 reciprocal and reciprocal-square-root seven-bit estimates; integrated with top | Spike SoftFloat estimates, all exponent/table interval endpoints, normalized subnormal boundaries, signed special values and normative examples |
 | `rtl/core/backend/vpu/rapt_vpu_fp_transfer.sv` | Stateless admission/routing for FP merge, broadcast, scalar extraction/insertion and slide1; integrated with top | Independent encoding masks, scalar boxing/raw payloads, VL/vstart/mask boundaries and parameter sweeps |
 | `rtl/core/backend/vpu/rapt_vpu_fp_reduce.sv` | Independent numerical sum/min/max and FP32-to-FP64 widening-sum wrapper; the integrated top shares its stream control and existing arithmetic services | SoftFloat sequences, masked seed preservation, count boundaries, metadata capture, source/response stalls and reset-age sweeps |
@@ -48,8 +54,8 @@ vector extensions such as Zvfh are outside this component's baseline.
 | `rtl/core/backend/vpu/rapt_vpu_core.sv` | Actual numerical VPU composed with core-side metadata bridge; explicit command/result packing | RV32/RV64 full Spike suites, FP64-on-RV32 and context tests, structural synthesis |
 | `rtl/core/backend/vpu/rapt_vpu.sv` | Composition, sequential element scheduling, mask/vstart/group legality, idle host register port | Standalone encoded programs, authorization races, full VRF comparison and reference differential tests |
 
-These modules do not import `rapt_pkg` or scalar preset macros. VLEN, ELEN,
-bank geometry, XLEN and eventual owner-tag widths must remain independent.
+The VPU tops use `rapt_pkg::sram_ctrl_t` for SRAM control. VLEN, ELEN,
+bank geometry, XLEN and eventual owner-tag widths remain configurable.
 
 ## Relocatable RTL source export
 
@@ -58,8 +64,9 @@ containing the required source/license files, a relative-path `sources.f`, a sho
 integration README and a SHA-256 manifest. Existing destinations are refused.
 The export includes both `rapt_vpu` and `rapt_vpu_core`, shared scalar numerical
 primitives, the behavioral `rapt_sram_1rw`, and required headers. It does not
-depend on scalar presets, `rapt_pkg`, generated scalar decode or `sim/.config`.
-Technology-specific SRAM macro libraries are not included.
+depend on generated scalar decode or `sim/.config`. The bundle contains the
+minimal shared package and default preset. Technology-specific SRAM macro
+libraries are not included.
 
 From the exported directory:
 
@@ -69,10 +76,10 @@ verilator --lint-only --assert -Wall -DRAPT_ASSERT_EN \
 ```
 
 `python3 verification/vpu/test_export_rtl.py` relocates a fresh export outside the
-repository into a directory containing a space, then checks both tops in the
-four acceptance configurations: RV32/128/32/64/1, RV64/128/64/64/2,
+repository into a directory containing a space, then checks both tops in five
+configurations: RV32/128/32/64/1, RV32/128/64/64/2, RV64/128/64/64/2,
 RV32/256/64/64/4 and RV64/512/64/128/4 (XLEN/VLEN/ELEN/BankBits/Banks).
-The eight lint/elaboration checks retain the existing narrow FMA waivers;
+The ten lint/elaboration checks retain the existing narrow FMA waivers;
 they are not functional simulations or physical implementation checks.
 The test also requires a missing shared header to fail and an existing export
 destination to remain untouched. Logs and source-current evidence are recorded
@@ -86,9 +93,13 @@ From the repository root:
 make -C verification/vpu test
 make -C verification/vpu matrix
 make -C verification/vpu top-matrix
+make -C verification/vpu top TOP_SUITE=packed-logic
 make -C verification/vpu synth
 make -C verification/vpu opt-check
+make -C verification/vpu predicate-cache-check
+make -C verification/vpu int-fp-share-check
 make -C verification/vpu muldiv-opt-check
+make -C verification/vpu fp-reduce-cache-check
 make -C verification/vpu mask-write
 make -C verification/vpu fixed
 make -C verification/vpu move
@@ -113,7 +124,7 @@ propagated through `tee`. The VRF random test uses seed `0x6a09e667`.
 fixed-point, whole-register move, mask-scan, slide, FP-decode, integer/FP-decode,
 FP-reduction control/decode/engine and top tests. `matrix` checks the
 configuration/CSR/VRF leaves; `top-matrix` additionally checks two tag widths and
-four integrated top configurations. The integrated element adapter requires
+five integrated top configurations. The integrated element adapter requires
 BankBits >= 64; the storage-only VRF also supports narrower banks.
 
 The synthesis target additionally requires Yosys with its slang plugin. It checks
@@ -186,6 +197,15 @@ overwriting a valid completion. A finite tag cannot distinguish a delayed result
 from a later reuse of the identical tag: future memory completion must guarantee
 all accepted work has drained before releasing ownership.
 
+The engine generally processes active elements sequentially and issues vector
+memory accesses per element. With `PackLogic=1` (the default), unmasked e8
+vector-vector AND, OR and XOR process each complete aligned group of eight bytes
+as one operation; leading, trailing and masked elements use the ordinary path.
+Byte-oriented vector loops can still have lower throughput than tuned scalar code.
+Memory coalescing would need to preserve masking, `vstart`, fault-only-first
+behavior and device-memory access semantics; measure it with real workloads as
+well as block-level tests before enabling it.
+
 `vector_enabled` supplies architectural VS availability when the engine accepts
 the authorized command. Scalar operands are supplied by the host after resolving
 scalar dependencies. Vector configuration is read in execution order from the
@@ -243,9 +263,10 @@ Currently executable instruction families:
 
 Supported integer instructions honor the legal SEW/LMUL combinations, register
 group alignment, masking and VSTART. Tail and inactive elements are preserved,
-including in agnostic modes. Reserved encodings, unsupported
-parameter/width combinations, and optional extensions outside this baseline
-raise illegal instruction.
+including in agnostic modes. Unsupported parameter/width combinations and
+optional extensions outside this baseline raise illegal instruction. Some
+reserved encodings also trap; others execute as a compatibility behavior and
+must not be relied on by portable software.
 
 ### Fixed-point arithmetic and saturation ownership
 
@@ -290,7 +311,7 @@ rounding stage; the separate multiply/divide test covers product generation.
 
 Integrated tests execute actual instructions in Spike and compare the full VRF,
 VSTART, VXRM, VXSAT and VCSR. They cover all rounding modes, scalar/immediate forms,
-legal SEW/LMUL, narrowing overlap, equal source identities with different EEWs,
+legal SEW/LMUL, narrowing overlap,
 all-zero and alternating masks, nonzero VSTART, zero VL, sticky saturation initially
 clear/set, and invalid or cancelled instructions. Whole-register move encodings sharing funct6=0x27 with fractional multiply
 are decoded as their own instruction family.
@@ -324,17 +345,19 @@ writeback. Unsupported widths, source EMUL and overlaps trap before any access
 that changes architectural state.
 
 The redundant operand-read optimization requires equal read EEWs as well
-as equal source-register numbers. A `.wv` operation can name the same register
-with different widths, so register identity alone is insufficient. When an equal
-width read is reused for mixed-sign operations, each operand still receives its
-own sign/zero extension.
+as equal source-register numbers. Overlapping sources with different EEWs use
+independent reads for compatibility with the pinned Spike build. The [ratified
+V specification](https://docs.riscv.org/reference/isa/unpriv/v-st-ext)
+reserves such encodings; these cases are not evidence of standard ISA coverage.
+When an equal-width read is reused for mixed-sign
+operations, each operand still receives its own sign/zero extension.
 
 `test_integer.h` checks widening add/subtract, wide-source forms, widening
 multiply/MAC, narrowing logical/arithmetic shifts and all six integer-extension
 forms against an independent 128-bit snapshot model and Spike. It covers supported
 SEW/LMUL combinations, unsigned/signed extrema, random data, policy bits, scalar
 and immediate inputs, zero VL, restart boundaries, legal high/low overlaps,
-same-register sources with equal/different EEWs, and reserved/invalid encodings.
+same-register sources with equal EEWs, and reserved/invalid encodings.
 The geometry leaf is exercised through these integrated commands; no separate
 formal proof or exhaustive register-tuple proof is claimed.
 
@@ -428,6 +451,9 @@ response may coincide with request acceptance. Mismatches are consumed without
 advancing progress. This is a dedicated response channel, not permission to drain
 other LSU clients' responses. A successful store response means that access can
 no longer fault; a failed request must not have performed a non-idempotent effect.
+After a request is accepted, its write, probe, address, size, data and identity
+fields remain stable until the matching response. An assertion and an independent
+request ledger check this ownership contract, including zero-cycle responses.
 
 For multi-field segments, each field first receives a side-effect-free PMA/MMU
 probe. Any non-idempotent field causes an access fault before actual field
@@ -459,11 +485,17 @@ entire VRF and data memory. The encoded workloads cover:
   with access or synthetic page exceptions, followed by restart. These segment
   faults are injected during actual access after successful probes, so the
   compared partial segment follows the same field order in DUT and Spike.
+- In the non-Spike `memory` suite, access faults, page faults and non-idempotent
+  attributes at each field of two/three/eight-field probes, including successful
+  earlier probes and completed earlier segments. An independent transaction and
+  byte model checks the probe order, side-effect-free faulting segment and restart.
+  Spike permits a different partial faulting segment, so this check is separate
+  from the strict whole-register differential comparison.
 - FOF faults at every field of those segments, masked element zero, PMA segment
   rejection, reserved encodings, group bounds and indexed-overlap restrictions.
 
-This is not exhaustive memory verification. Probe failure after a successful
-probe prefix, all legal group/overlap combinations, real cross-page translation,
+This is not exhaustive memory verification. All legal group/overlap combinations,
+real cross-page translation,
 physical non-idempotent devices and late errors from the Raptor SQ remain open
 integration/coverage work. The adapter's synthetic PMA policy rejects non-idempotent
 segments in Spike as well; it does not claim to validate a platform PMA map.
@@ -630,6 +662,11 @@ is a conditional grant re-evaluated until the VPU accepts it; matching kill
 wins before that handshake. Afterwards kill is blocked and the metadata remains
 owned until the matching response is accepted by the core.
 
+The numerical scheduler keeps a local instruction register for decoder fanout
+and reuses the owner's held operands, control and tag during execution. The
+owner contract and its formal check require the held values to remain stable
+until cancellation or response acceptance.
+
 The adapter preserves the entire result payload without interpreting it. The
 core composition must pack every result field (including trap, dirty, FP flags
 and FPR results), map those fields into the actual completion types, and retain
@@ -696,33 +733,89 @@ The model's contract remains that a failed request has no effect.
 
 ## Verification and integration scope
 
-Focused instruction suites are selected with `TOP_SUITE`: `full`, `catalog`,
-`geometry`, `encoding`, `config-encoding`, `memory-encoding`, `context`,
+Focused instruction suites are selected with `TOP_SUITE`: `full`, `catalog`, `catalog-matrix`,
+`indexed-geometry`,
+`geometry`, `geometry-overlap`, `encoding`, `config-encoding`, `memory-encoding`, `context`,
 `store-completion`, `fp-mixed`, `fp-divsqrt`, `fp-misc`, `fp-wide`, `fp-convert`,
 `int-fp`, `estimate`, `transfer` and `fp-reduce`. Use `CORE_ADAPTER=1` to exercise
 the numerical VPU through the ownership bridge, and `DIFF=1` with the pinned
 Spike build for architectural comparisons.
 
 The independent owner and core-adapter proofs check control and ownership.
-Memory proofs check response payload isolation and request ownership. These
+Memory proofs check response payload isolation and request ownership for
+RV32/ELEN=32, RV32/ELEN=64 and RV64/ELEN=64. These
 module and compositional checks do not establish full-vector ISA correctness,
 external-memory drain, real MMU behavior or whole-system liveness.
 
 ```sh
-python3 verification/vpu/check_acceptance.py
-python3 verification/vpu/test_check_acceptance.py
+python3 verification/vpu/check_acceptance.py --build-dir "$VPU_RESULTS"
+python3 verification/vpu/test_check_acceptance.py --build-dir "$VPU_RESULTS"
 ```
 
-The acceptance checker audits completed artifacts in `verification/build/vpu/`,
-including source fingerprints, configuration, completion markers and reference
-identity. It writes `acceptance.json`; it does not rerun simulations or proofs.
-A result applies only to the source and configuration recorded in its manifest.
+Set `VPU_RESULTS` to the directory containing the completed artifacts. The
+acceptance checker audits their source fingerprints, configuration, completion
+markers and reference identity. It writes `acceptance.json`; it does not rerun
+simulations or proofs. A result applies only to the source and configuration
+recorded in its manifest. For ELEN=64, the catalog requires an accepted example
+for every instruction variant except RV32's unsupported 64-bit indexed memory
+encodings. The geometry differential separates mixed-EEW source overlaps into
+`TOP_SUITE=geometry-overlap` for comparison with Spike.
 
-`OPT_READS`, `MULDIV_EARLY_OUT` and `REDUCE_MASK_CACHE` select operand-read reuse,
-iterative arithmetic early completion and reduction predicate-byte caching.
+The expanded catalog matrix covers each listed encoding and segment count across
+SEW, all seven LMUL encodings, mask forms, and five VL/vstart boundary scenarios.
+It compares vector registers, memory, CSR state, results and traps with Spike.
+The matrix remains a finite operand sample, not a complete semantic proof. Run
+and audit its shards with:
+
+```sh
+make -C verification/vpu catalog-matrix TOP_SUITE=catalog-matrix CORE_ADAPTER=1 \
+  DIFF=1 SPIKE_BUILD=/path/to/pinned/spike XLEN=64 VLEN=128 ELEN=64 BANKS=2
+```
+
+`MATRIX_SHARDS` controls the number of reproducible shards; `MATRIX_SEED` selects
+the operand seed, and `MATRIX_POLICY` selects the two VTYPE tail/mask policy bits.
+The catalog checker
+rejects missing variants, shards and completion records and records source hashes.
+
+The `indexed-geometry` suite independently sweeps every destination and index
+register pair, segment count, SEW, LMUL, index width, mask form and indexed
+load/store ordering against Spike. It uses VL=0 to isolate legality; it does not
+by itself check active-element data transfers. Run it with:
+
+```sh
+make -C verification/vpu indexed-geometry TOP_SUITE=indexed-geometry CORE_ADAPTER=1 \
+  DIFF=1 SPIKE_BUILD=/path/to/pinned/spike XLEN=64 VLEN=128 ELEN=64 BANKS=2
+```
+
+`OPT_READS`, `CACHE_PREDICATE`, `SHARE_INT_FP`, `MULDIV_EARLY_OUT` and
+`REDUCE_MASK_CACHE` select operand-read reuse, predicate caching, shared
+integer/FP conversion, iterative early completion and reduction predicate caching.
 Compare identical workloads and parameters when measuring their effect.
 Structural synthesis and FPGA primitive mapping describe their measured module
 scope; they do not establish routed timing or scalar-core performance.
+
+The main element scheduler also caches one predicate byte per instruction when
+`CachePredicate` is enabled. Each byte is tagged by element index, so a nonzero
+vstart and a transition to the next byte require no special alignment assumption.
+The cache is cleared on every newly accepted engine command. Masked operations
+whose destination is v0 bypass it; compression may use it because geometry
+checks forbid overlap between its selection register and destination. Reduction
+and memory engines retain their own scheduling and are not accelerated by this
+cache. `make -C verification/vpu predicate-cache-check` builds both settings,
+checks the complete register file against an independent byte model, and compares
+the same e8/m4 masked add/merge workload. Use `CORE_ADAPTER=1 DIFF=1` with the
+pinned `SPIKE_BUILD` to compare the same commands through the ownership bridge.
+
+Integer/FP conversions share one pair of numeric services per supported FP
+precision across the five legal integer/FP width combinations. The shared unit
+captures integer width and signedness with the request and holds the result and
+flags under backpressure. `SHARE_INT_FP=0` selects the original dedicated pairs
+for comparison. `int-fp-share-check` compares identical encoded workloads and
+requires equal summed command latency. `int-fp INT_FP_SHARED=1` exercises each
+width and precision against SoftFloat; supply `FMA_DOUBLE`, `INT_BITS` and
+`SPIKE_BUILD` to that target. `fp-reduce-cache-check` runs the existing reduction
+engine workload with both cache settings across four configurations and compares
+their results.
 
 Scalar integration must resolve dependencies before accepting a command,
 authorize irreversible effects at the correct ROB owner, retain precise trap

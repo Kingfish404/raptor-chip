@@ -40,8 +40,24 @@ module rapt_vpu_fixed (
     bits = 7'(8 << sew);
     clip = op == 10 || op == 11;
     source_bits = clip ? bits << 1 : bits;
-    mask = 64'hffffffffffffffff >> (64-bits);
-    source_mask = 64'hffffffffffffffff >> (64-source_bits);
+    case (sew)
+      0: begin
+        mask = 64'h0000_0000_0000_00ff;
+        source_mask = clip ? 64'h0000_0000_0000_ffff : mask;
+      end
+      1: begin
+        mask = 64'h0000_0000_0000_ffff;
+        source_mask = clip ? 64'h0000_0000_ffff_ffff : mask;
+      end
+      2: begin
+        mask = 64'h0000_0000_ffff_ffff;
+        source_mask = clip ? 64'hffff_ffff_ffff_ffff : mask;
+      end
+      default: begin
+        mask = 64'hffff_ffff_ffff_ffff;
+        source_mask = clip ? 64'b0 : mask;
+      end
+    endcase
     au = a & source_mask;
     bu = b & mask;
     sa = $signed(au << (64-source_bits)) >>> (64-source_bits);

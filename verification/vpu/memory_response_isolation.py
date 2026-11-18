@@ -96,7 +96,7 @@ def main():
         target=out/f"{name}-step.json"
         stats=project(model,target,source)
         return model,target,stats
-    for xlen,elen,tag in ((32,32,2),(64,64,10)):
+    for xlen,elen,tag in ((32,32,2),(32,64,2),(64,64,10)):
         name=f"isolation-{xlen}-{elen}-{tag}"
         model,target,stats=build(name,DUT,xlen,elen,tag)
         run(name+"-base",f"read_json {model}; sat -verify -seq 2 -set-at 1 reset 1 -set-at 2 reset 0 -prove correct 1")

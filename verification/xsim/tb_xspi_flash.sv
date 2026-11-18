@@ -1,7 +1,8 @@
 `include "rapt_soc_if.svh"
 `timescale 1ns / 1ps
 module tb_xspi_flash #(
-    parameter bit BadSfdp = 0,
+    // Select the independent SFDP fault listed by rapt_xspi_profile1_model.
+    parameter int unsigned BadSfdp = 0,
     parameter bit BoardMapping = 0,
     parameter int CoreClockHz = 100_000_000,
     parameter int HalfPeriod = 10,
@@ -270,6 +271,7 @@ module tb_xspi_flash #(
   initial begin
     logic [XLEN-1:0] rd[$];
     logic [31:0] value;
+    if (BadSfdp > 4) $fatal(1, "BadSfdp must be in the range 0..4");
     bus.arvalid = 0;
     bus.awvalid = 0;
     bus.wvalid = 0;
@@ -288,7 +290,7 @@ module tb_xspi_flash #(
         if (value != (i == 2 ? 32'h00800000 : 0))
           $fatal(1, "Mapping unavailable after initialization failure");
       end
-      $display("PASS: invalid SFDP rejected XLEN=%0d checks=%0d", XLEN, checks);
+      $display("PASS: invalid SFDP rejected XLEN=%0d checks=%0d mode=%0d", XLEN, checks, BadSfdp);
       $finish;
     end
     reg_read(Base + 16, value);

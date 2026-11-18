@@ -14,6 +14,8 @@ module rapt_vpu_core #(
     parameter int BankBits = 64,
     parameter int Banks = 2,
     parameter bit OptimizeOperandReads = 1,
+    parameter bit CachePredicate = 1,
+    parameter bit ShareIntFpConverters = 1,
     parameter int AddrBits = $clog2(32*VLEN/8)
 ) (
     input rapt_pkg::sram_ctrl_t sram_ctrl_i,
@@ -171,6 +173,8 @@ module rapt_vpu_core #(
       .BankBits(BankBits),
       .Banks(Banks),
       .OptimizeOperandReads(OptimizeOperandReads),
+      .CachePredicate(CachePredicate),
+      .ShareIntFpConverters(ShareIntFpConverters),
       .AddrBits(AddrBits)
   ) u_vpu (
       .sram_ctrl_i(sram_ctrl_i),

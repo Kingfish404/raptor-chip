@@ -25,8 +25,10 @@ static void check(unsigned kind,unsigned sew,int lm,unsigned count,unsigned star
  bool wide=kind>=4,dbl=sew==3||wide;unsigned bytes=1u<<(sew+0),outbytes=wide?bytes*2:bytes;
  unsigned group=lm>0?1u<<lm:1;
  unsigned max=TEST_VLEN/(8*bytes);max=lm>=0?max<<lm:max>>(-lm);
- bool legal=enabled&&!vill&&rm<5&&start==0&&(sew==2||(sew==3&&TEST_ELEN==64))&&(!wide||(sew==2&&TEST_ELEN==64))
-  &&lm>=-(TEST_ELEN==64?3:2)&&lm<=3&&(lm>=0||(8*bytes<=unsigned(TEST_ELEN)>>(-lm)))&&count<=max&&src%group==0&&src+group<=32;
+ bool legal=enabled&&!vill&&rm<5&&start==0&&(sew==2||(sew==3&&TEST_ELEN==64))
+  &&(!wide||(sew==2&&TEST_ELEN==64))&&lm>=-(TEST_ELEN==64?3:2)&&lm<=3
+  &&(lm>=0||(8*bytes<=unsigned(TEST_ELEN)>>(-lm)))&&count<=max&&src%group==0
+  &&src+group<=32;
  Memory memory;for(auto&b:memory)b=random64();
  // Finite FP32 operands permit exact host widening independent of RTL bit logic.
  for(unsigned i=0;i<count&&src*(TEST_VLEN/8)+(i+1)*bytes<=memory.size();++i)
@@ -86,6 +88,13 @@ static void check(unsigned kind,unsigned sew,int lm,unsigned count,unsigned star
   if(vret)vp=false;if(nret)np=false;
   if(vf){vp=true;vd=random64()%5;}if(nf){np=true;nd=random64()%5;}
  }
+ if(vp||np||ri!=reads.size()||ni!=operands.size()){
+  std::fprintf(stderr,"kind=%u sew=%u lm=%d count=%u start=%u dest=%u src=%u seedreg=%u "
+   "masked=%u pattern=%u rm=%u enabled=%u vill=%u service_error=%u legal=%u "
+   "trap=%u reads=%u/%zu operands=%u/%zu pending=%u/%u\n",
+   kind,sew,lm,count,start,dest,src,seedreg,masked,pattern,rm,enabled,vill,service_error,legal,
+   unsigned(d.done_trap),ri,reads.size(),ni,operands.size(),vp,np);
+ }
  need(!vp&&!np&&ri==reads.size()&&ni==operands.size(),"drained");
  need(bool(d.done_trap)==fault&&d.done_flags==(legal?flags:0),"completion flags/trap");
  need(memory==expected,"full VRF comparison");
@@ -111,6 +120,9 @@ int main(int argc,char**argv){
   check(k,2,0,0,0,31,8,3,true,pattern,0,true,false,false);
  }
  for(unsigned age=0;age<64;++age)check(0,2,3,16,0,0,8,3,false,1,0,true,false,false,int(age));
+ // Widening reductions may read the seed and vector from the same register.
+ for(unsigned k=4;k<6;++k)for(unsigned mask=0;mask<2;++mask)
+  check(k,2,0,4,0,3,8,8,mask,1,0,true,false,false);
  // Early numeric errors with unread elements remaining.
  for(unsigned k=0;k<6;++k)check(k,2,0,2,0,0,8,3,false,1,0,true,false,true);
  std::printf("PASS fp_reduce_engine XLEN=%d VLEN=%d ELEN=%d cases=%llu reset_boundaries=%llu cache=%d cycles=%llu reads=%llu fingerprint=%016llx seed=8a396cef237401bd\n",TEST_XLEN,TEST_VLEN,TEST_ELEN,(unsigned long long)cases,(unsigned long long)resets,TEST_CACHE_MASK,(unsigned long long)measured_cycles,(unsigned long long)measured_reads,(unsigned long long)fingerprint);

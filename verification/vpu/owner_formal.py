@@ -67,6 +67,7 @@ def main():
         'grant_kill': ('authorize_tag == tag_q && !kill_match;', 'authorize_tag == tag_q;'),
         'unstable_response': ('DONE: if (rsp_ready) state <= EMPTY;',
                               'DONE: begin if (result_valid) result_q <= result_payload; if (rsp_ready) state <= EMPTY; end'),
+        'unstable_command': ('RUN: ;', 'RUN: if (cmd_valid) command_q <= cmd_payload;'),
     }
     for name,(old,new) in mutations.items():
         original = DUT.read_text()

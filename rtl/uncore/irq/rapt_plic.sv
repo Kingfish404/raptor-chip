@@ -52,6 +52,12 @@ module rapt_plic #(
   // CamelCase to satisfy verible parameter-name-style.
   localparam int IdW = (NDEV <= 1) ? 1 : $clog2(NDEV + 1);
 
+  // Pending and enable bitmaps are a single 32-bit word per context, and
+  // source 0 is reserved, so at most 31 sources fit (and XLEN-(NDEV+1) >= 0).
+  if (NDEV < 1 || NDEV > 31) begin : g_invalid_ndev
+    $error("rapt_plic supports 1..31 sources (NDEV=%0d)", NDEV);
+  end
+
   // ---------------------------------------------------------------------
   // Address-map constants (24-bit offset within the 16 MB PLIC window;
   // widened to 32 bits for arithmetic to keep Verilator's width checker

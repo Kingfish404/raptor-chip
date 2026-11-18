@@ -1,9 +1,8 @@
 `include "rapt_sva.svh"
 
-// Standalone, head-authorized vector engine. Integer execution currently uses
-// one natural-aligned element at a time; other RVV classes remain illegal until
-// implemented. Host register access is an idle-only debug/context interface,
-// not an ISA bypass available during execution. No scalar core package needed.
+// Standalone, head-authorized vector engine. Elementwise execution uses one
+// natural-aligned element at a time. Host register access is an idle-only
+// debug/context interface, not an ISA bypass available during execution.
 module rapt_vpu #(
     parameter int XLEN = 64,
     parameter int VLEN = 128,
@@ -12,6 +11,9 @@ module rapt_vpu #(
     parameter int BankBits = 64,
     parameter int Banks = 2,
     parameter bit OptimizeOperandReads = 1,
+    parameter bit CachePredicate = 1,
+    parameter bit ShareIntFpConverters = 1,
+    parameter bit PackLogic = 1,
     parameter int AddrBits = $clog2(32*VLEN/8)
 ) (
     input rapt_pkg::sram_ctrl_t sram_ctrl_i,
@@ -146,6 +148,7 @@ module rapt_vpu #(
   } state_t;
   state_t state;
   command_t command_in, engine_command, command_q;
+  logic [31:0] instruction_q;
   result_t result_q, response;
   logic owner_ready, owner_busy, engine_valid, engine_ready, result_ready;
   logic [TagBits-1:0] engine_tag, tag_q;
@@ -213,7 +216,9 @@ module rapt_vpu #(
   logic [127:0] md_full_product, fixed_product_q;
   logic [63:0] a_input, b_input;
   logic [63:0] a_q, b_q, alu_result, scalar_b;
+  logic packed_logic;
   logic mask_q, enabled_q;
+  logic mask_cache_hit, mask_cache_bit, mask_event, mask_value;
   logic
       d_config,
       d_csr,
@@ -283,6 +288,11 @@ module rapt_vpu #(
   logic [Banks-1:0][BankBits/8-1:0] bank_be;
 
   assign command_in = {cmd_insn, cmd_rs1, cmd_rs2, cmd_frs1, cmd_frm, cmd_fp_enabled};
+  // Keep a local instruction register for decoder fanout; operands and tag
+  // stay in the owner's command storage until response acceptance.
+  assign command_q = {instruction_q, engine_command.rs1, engine_command.rs2, engine_command.frs1,
+                      engine_command.frm, engine_command.fp_enabled};
+  assign tag_q = engine_tag;
   assign cmd_ready = owner_ready && !host_pending && !host_valid;
   assign busy = owner_busy || host_pending;
   assign engine_ready = state == IDLE;
@@ -520,34 +530,76 @@ module rapt_vpu #(
   // Five ISA width pairs: FP32/I16, FP32/I32, FP32/I64, FP64/I32, FP64/I64.
   assign if_select = if_double ? (if_integer_size == 3 ? 3'd4 : 3'd3)
       : if_integer_size == 3 ? 3'd2 : if_integer_size == 2 ? 3'd1 : 3'd0;
-  for (genvar pair_index = 0; pair_index < 5; pair_index++) begin : gen_int_fp
-    if (pair_index < 2 || ELEN >= 64) begin : gen_supported
-      localparam int IntegerBits = pair_index == 0 ? 16
-          : (pair_index == 1 || pair_index == 3) ? 32 : 64;
-      rapt_vpu_int_fp #(
-          .FloatDouble(pair_index >= 3),
-          .IntBits(IntegerBits)
-      ) u_convert (
-          .clock(clock),
-          .reset(reset),
-          .req_valid(state == FP_START && if_recognized && if_select == 3'(pair_index)),
-          .req_ready(if_ready[pair_index]),
-          .to_float(if_to_float),
-          .unsigned_integer(if_unsigned),
-          .operand(a_q),
-          .rm(if_rm),
-          .rsp_valid(if_valid[pair_index]),
-          .rsp_ready(state == FP_RUN && if_recognized && if_select == 3'(pair_index)),
-          .result(if_result[pair_index]),
-          .flags(if_flags[pair_index]),
-          .illegal(if_illegal[pair_index])
-      );
-    end else begin : gen_absent
-      assign if_ready[pair_index] = 0;
-      assign if_valid[pair_index] = 0;
-      assign if_result[pair_index] = 0;
-      assign if_flags[pair_index] = 0;
-      assign if_illegal[pair_index] = 0;
+  if (ShareIntFpConverters) begin : gen_shared_int_fp
+    logic [1:0] ready, valid, illegal;
+    logic [1:0][63:0] value;
+    logic [1:0][4:0] flags;
+    for (genvar precision = 0; precision < 2; precision++) begin : gen_precision
+      if (precision == 0 || ELEN >= 64) begin : gen_supported
+        rapt_vpu_int_fp_shared #(
+            .FloatDouble(precision == 1)
+        ) u_convert (
+            .clock(clock),
+            .reset(reset),
+            .req_valid(state == FP_START && if_recognized && if_double == 1'(precision)),
+            .req_ready(ready[precision]),
+            .to_float(if_to_float),
+            .unsigned_integer(if_unsigned),
+            .integer_size(if_integer_size),
+            .operand(a_q),
+            .rm(if_rm),
+            .rsp_valid(valid[precision]),
+            .rsp_ready(state == FP_RUN && if_recognized && if_double == 1'(precision)),
+            .result(value[precision]),
+            .flags(flags[precision]),
+            .illegal(illegal[precision])
+        );
+      end else begin : gen_absent
+        assign ready[precision] = 0;
+        assign valid[precision] = 0;
+        assign value[precision] = 0;
+        assign flags[precision] = 0;
+        assign illegal[precision] = 0;
+      end
+    end
+    for (genvar pair_index = 0; pair_index < 5; pair_index++) begin : gen_pair
+      localparam int Precision = pair_index >= 3 ? 1 : 0;
+      assign if_ready[pair_index] = ready[Precision];
+      assign if_valid[pair_index] = valid[Precision];
+      assign if_result[pair_index] = value[Precision];
+      assign if_flags[pair_index] = flags[Precision];
+      assign if_illegal[pair_index] = illegal[Precision];
+    end
+  end else begin : gen_fixed_int_fp
+    for (genvar pair_index = 0; pair_index < 5; pair_index++) begin : gen_pair
+      if (pair_index < 2 || ELEN >= 64) begin : gen_supported
+        localparam int IntegerBits = pair_index == 0 ? 16
+            : (pair_index == 1 || pair_index == 3) ? 32 : 64;
+        rapt_vpu_int_fp #(
+            .FloatDouble(pair_index >= 3),
+            .IntBits(IntegerBits)
+        ) u_convert (
+            .clock(clock),
+            .reset(reset),
+            .req_valid(state == FP_START && if_recognized && if_select == 3'(pair_index)),
+            .req_ready(if_ready[pair_index]),
+            .to_float(if_to_float),
+            .unsigned_integer(if_unsigned),
+            .operand(a_q),
+            .rm(if_rm),
+            .rsp_valid(if_valid[pair_index]),
+            .rsp_ready(state == FP_RUN && if_recognized && if_select == 3'(pair_index)),
+            .result(if_result[pair_index]),
+            .flags(if_flags[pair_index]),
+            .illegal(if_illegal[pair_index])
+        );
+      end else begin : gen_absent
+        assign if_ready[pair_index] = 0;
+        assign if_valid[pair_index] = 0;
+        assign if_result[pair_index] = 0;
+        assign if_flags[pair_index] = 0;
+        assign if_illegal[pair_index] = 0;
+      end
     end
   end
   for (genvar precision = 0; precision < 2; precision++) begin : gen_fp
@@ -649,7 +701,7 @@ module rapt_vpu #(
   );
   rapt_vpu_alu u_alu (
       .funct6(d_alu_op),
-      .sew(d_narrow ? a_size_q : d_size_q),
+      .sew(packed_logic ? 2'd3 : d_narrow ? a_size_q : d_size_q),
       .a(a_q),
       .b(b_q),
       .mask_bit(d_carry && command_q.insn[25] ? 1'b0 : mask_q),
@@ -691,14 +743,23 @@ module rapt_vpu #(
         shifted
     ) >>> (64 - (8 << size))) : shifted >> (64 - (8 << size));
   endfunction
-  assign a_input = (d_mask_logic || d_iota) ? 64'(elem_rdata[{3'b0,index_q[2:0]}])
+  // Logical e8 vector-vector operations have no cross-byte carries. Process
+  // full aligned groups only; the ordinary element path handles all edges.
+  assign packed_logic = PackLogic && command_q.insn[6:0] == 7'h57
+      && command_q.insn[14:12] == 3'b000 && command_q.insn[25]
+      && (d_alu_op == 6'h09 || d_alu_op == 6'h0a || d_alu_op == 6'h0b)
+      && sew_q == 0 && index_q[2:0] == 0
+      && index_q + IndexBits'(8) <= IndexBits'(vl);
+  assign a_input = packed_logic ? elem_rdata
+      : (d_mask_logic || d_iota) ? 64'(elem_rdata[{3'b0,index_q[2:0]}])
       : resize_operand(
       elem_rdata, a_size_q, d_a_signed
   );
   assign b_size = d_gather16 ? 2'd1 : sew_q;
   assign gather_index = d_src_vector ? b_q : command_q.insn[14:12] == 3
       ? 64'(command_q.insn[19:15]) : 64'(command_q.rs1);
-  assign b_input = d_mask_logic ? 64'(elem_rdata[{3'b0, index_q[2:0]}]) : resize_operand(
+  assign b_input = packed_logic ? elem_rdata
+      : d_mask_logic ? 64'(elem_rdata[{3'b0, index_q[2:0]}]) : resize_operand(
       elem_rdata, b_size, d_b_signed
   );
   rapt_vpu_divsqrt #(
@@ -1003,6 +1064,26 @@ module rapt_vpu #(
   assign host_ready = !owner_busy && !host_pending && elem_ready;
   assign host_rsp_valid = host_pending && elem_rsp_valid;
   assign host_rdata = elem_rdata;
+  // Mask-result instructions may write v0. Bypass caching for vd=v0 so the
+  // current instruction always observes the architectural predicate there.
+  // Compression's selection register cannot overlap vd after geometry checks.
+  rapt_vpu_predicate_cache #(
+      .IndexBits(IndexBits),
+      .Enable(CachePredicate)
+  ) u_predicate_cache (
+      .clock(clock),
+      .reset(reset),
+      .clear(state == IDLE && engine_valid && engine_ready),
+      .index(index_q),
+      .fill(state == MASK_RSP && elem_rsp_valid && command_q.insn[11:7] != 0),
+      .fill_data(elem_rdata[7:0]),
+      .hit(mask_cache_hit),
+      .bit_value(mask_cache_bit)
+  );
+  assign mask_event = (state == MASK_RSP && elem_rsp_valid)
+      || (state == NEXT_ELEMENT && XLEN'(index_q) < vl
+      && (d_compress || !command_q.insn[25]) && command_q.insn[11:7] != 0 && mask_cache_hit);
+  assign mask_value = state == MASK_RSP ? elem_rdata[{3'b0, index_q[2:0]}] : mask_cache_bit;
   always_ff @(posedge clock) begin
     if (reset) host_pending <= 0;
     else begin
@@ -1049,16 +1130,17 @@ module rapt_vpu #(
             + ((d_mask_logic || d_iota) ? (int'(index_q) >> 3)
                 : ((d_gather ? int'(gather_index) : d_slide ? int'(slide_index)
                     : int'(index_q)) << a_size_q)));
-        elem_size = (d_mask_logic || d_iota) ? 0 : a_size_q;
+        elem_size = packed_logic ? 2'd3 : (d_mask_logic || d_iota) ? 0 : a_size_q;
       end
       B_REQ: begin
         elem_valid = 1;
         elem_addr = AddrBits'(int'(command_q.insn[19:15])*(VLEN/8)
             + (d_mask_logic ? (int'(index_q) >> 3) : (int'(index_q) << b_size)));
-        elem_size = d_mask_logic ? 0 : b_size;
+        elem_size = packed_logic ? 2'd3 : d_mask_logic ? 0 : b_size;
       end
       OLD_REQ, WRITE_REQ: begin
         elem_valid = 1;
+        if (state == WRITE_REQ && packed_logic) elem_size = 2'd3;
         elem_addr = AddrBits'(int'(command_q.insn[11:7])*(VLEN/8)
             + ((ft_recognized ? int'(ft_destination_index) : d_compress
                 ? int'(iota_count_q) : int'(index_q)) << d_size_q));
@@ -1171,8 +1253,7 @@ module rapt_vpu #(
   always_ff @(posedge clock) begin
     if (reset) begin
       state <= IDLE;
-      command_q <= '0;
-      tag_q <= '0;
+      instruction_q <= '0;
       result_q <= '0;
       index_q <= '0;
       sew_q <= '0;
@@ -1194,8 +1275,7 @@ module rapt_vpu #(
       case (state)
         IDLE:
         if (engine_valid && engine_ready) begin
-          command_q <= engine_command;
-          tag_q <= engine_tag;
+          instruction_q <= engine_command.insn;
           enabled_q <= vector_enabled;
           result_q <= '0;
           saturated_q <= 0;
@@ -1278,7 +1358,9 @@ module rapt_vpu #(
         end
         NEXT_ELEMENT: begin
           if (XLEN'(index_q) >= vl) state <= FINISH;
-          else if (d_compress || !command_q.insn[25]) state <= MASK_REQ;
+          else if (d_compress || !command_q.insn[25]) begin
+            if (!mask_cache_hit || command_q.insn[11:7] == 0) state <= MASK_REQ;
+          end
           else if (ft_recognized) state <= FT_ROUTE;
           else if (d_gather) state <= d_src_vector ? B_REQ : GATHER_ROUTE;
           else if (d_slide) state <= SLIDE_ROUTE;
@@ -1286,20 +1368,7 @@ module rapt_vpu #(
           else state <= d_src_vector ? B_REQ : execute_state;
         end
         MASK_REQ: if (elem_valid && elem_ready) state <= MASK_RSP;
-        MASK_RSP:
-        if (elem_rsp_valid) begin
-          mask_q <= elem_rdata[{3'b0, index_q[2:0]}];
-          if (!elem_rdata[{3'b0, index_q[2:0]}] && !d_merge && !d_carry
-              && !(ft_recognized && ft_operation == 0)) begin
-            index_q <= index_q + 1'b1;
-            state <= NEXT_ELEMENT;
-          end else if (ft_recognized) state <= FT_ROUTE;
-          else if (OptimizeOperandReads && d_merge && elem_rdata[{3'b0, index_q[2:0]}])
-            state <= d_src_vector ? B_REQ : execute_state;
-          else
-            state <= d_gather ? (d_src_vector ? B_REQ : GATHER_ROUTE) : d_slide
-              ? SLIDE_ROUTE : d_vs2 ? A_REQ : (d_src_vector ? B_REQ : execute_state);
-        end
+        MASK_RSP: ;
         GATHER_ROUTE: begin
           if (gather_index < 64'(element_vlmax)) state <= A_REQ;
           else begin
@@ -1400,7 +1469,7 @@ module rapt_vpu #(
           if (fp_recognized) result_q.fflags <= result_q.fflags | fp_element_flags;
           if (d_iota || d_compress)
             iota_count_q <= iota_count_q + (d_compress ? IndexBits'(1) : IndexBits'(a_q[0]));
-          index_q <= index_q + 1'b1;
+          index_q <= index_q + (packed_logic ? IndexBits'(8) : IndexBits'(1));
           state <= ft_scalar ? FINISH : NEXT_ELEMENT;
         end
         FINISH: begin
@@ -1460,12 +1529,28 @@ module rapt_vpu #(
         COMPLETE: if (result_ready) state <= IDLE;
         default: state <= IDLE;
       endcase
+      // A freshly returned byte and a cached byte use exactly the same
+      // predicate routing, including carry/merge and inactive elements.
+      if (mask_event) begin
+        mask_q <= mask_value;
+        if (!mask_value && !d_merge && !d_carry && !(ft_recognized && ft_operation == 0)) begin
+          index_q <= index_q + 1'b1;
+          state <= NEXT_ELEMENT;
+        end else if (ft_recognized) state <= FT_ROUTE;
+        else if (OptimizeOperandReads && d_merge && mask_value)
+          state <= d_src_vector ? B_REQ : execute_state;
+        else
+          state <= d_gather ? (d_src_vector ? B_REQ : GATHER_ROUTE) : d_slide
+            ? SLIDE_ROUTE : d_vs2 ? A_REQ : (d_src_vector ? B_REQ : execute_state);
+      end
     end
   end
   `RAPT_SVA_IMPLY(clock, reset, VPU_FP_LEGAL_RESULT,
                   (state == FP_RUN && selected_fp_valid) || (state == FP_START && fp_misc),
                   fp_misc ? !fp_misc_illegal[sew_q[0]] : !selected_fp_illegal)
   `RAPT_SVA(clock, reset, VPU_NO_DROPPED_INTERNAL_RESULT, !dropped)
+  `RAPT_SVA_NEXT(clock, reset, VPU_COMMAND_HELD_WHILE_EXECUTING, state != IDLE, $stable({command_q,
+                                                                                         tag_q}))
   `RAPT_SVA_IMPLY(clock, reset, VPU_EXCLUDES_HOST, owner_busy, !host_ready && !host_rsp_valid)
   // Consequent extracted so the SVA macro argument stays short and the
   // formatter cannot rejoin it past the column limit.

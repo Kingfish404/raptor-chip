@@ -311,12 +311,17 @@ module tb_dm_sba;
     ack_allow = 0;
     write_dmi(7'h10, 32'h4000_0001);
     if (debug.resume_pc != 'h8000_0104) $fatal(1, "resume lost captured DPC");
+    // resumereq is W1: it reads zero even while the resume is still held.
+    check_reg(7'h10, 32'h0000_0001, 32'hc000_0003);
     ack_allow = 1;
     repeat (2) @(negedge clock);
     halted = 0;
     repeat (2) @(negedge clock);
     write_dmi(7'h10, 32'h8000_0001);
     if (!haltreq || debug.step) $fatal(1, "haltreq failed to cancel pending step");
+    // haltreq is WARZ: it reads zero while the request remains asserted.
+    check_reg(7'h10, 32'h0000_0001, 32'hc000_0003);
+    if (!haltreq) $fatal(1, "dmcontrol read cleared the halt request");
     halt_pc = Xlen'(32'h8000_0200);
     halt_cause = 3;
     halted = 1;

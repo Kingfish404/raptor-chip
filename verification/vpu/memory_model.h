@@ -19,6 +19,7 @@ static uint64_t store_wait_cycles;
 static uint64_t bus_requests, bus_effects, bus_probes, bus_stale, bus_zero;
 static std::array<uint64_t,4> bus_stale_kind{};
 static uint64_t fault_address = UINT64_MAX;
+static uint64_t non_idempotent_address = UINT64_MAX;
 static bool fault_actual_only, non_idempotent, fault_page;
 static bool bus_failed(const BusRequest& r) {
     return r.addr < data_base || r.addr-data_base+ (1u<<r.size) > data_ram.size()
@@ -49,7 +50,8 @@ static void memory_before_tick() {
     const auto& r = pending_bus;
     dut.mem_rsp_tag = r.tag; dut.mem_rsp_index = r.index;
     dut.mem_rsp_field = r.field; dut.mem_rsp_probe = r.probe;
-    dut.mem_fault = bus_failed(r); dut.mem_non_idempotent = non_idempotent;
+    dut.mem_fault = bus_failed(r);
+    dut.mem_non_idempotent = non_idempotent || r.addr == non_idempotent_address;
     dut.mem_cause = fault_page ? (r.write ? 15 : 13) : (r.write ? 7 : 5); dut.mem_tval = r.addr;
     dut.mem_rdata = 0;
     if (!dut.mem_fault && !r.probe && !r.write)

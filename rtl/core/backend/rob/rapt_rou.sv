@@ -91,12 +91,13 @@ module rapt_rou #(
 
     // interrupt
     csr_bcast_if.in csr_bcast,
-    // Async trap inputs: timer, software, external, and S-mode delegated
+    // Async trap inputs: timer, software, external, and S-level sources
     input clint_timer_trap,
     input clint_sw_trap,
     input clint_ext_trap,
 
-    // S-mode delegated interrupt (level): cause is supplied by csr.
+    // S-level (SEI/SSI/STI) interrupt (level), already routed to its M or S
+    // target and prioritized by csr; ranked below bus-error/MEI/MSI/MTI here.
     input                  s_int_pending,
     input [`RAPT_XLEN-1:0] s_int_cause,
 

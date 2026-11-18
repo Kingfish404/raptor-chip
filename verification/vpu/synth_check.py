@@ -8,7 +8,14 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 VPU = ROOT / "rtl/core/backend/vpu"
-LEAVES = ("core_adapter", "vtype", "csr", "vrf", "owner", "divsqrt", "fp_misc", "fp_estimate", "fp_transfer", "fp_reduce", "fp_reduce_control", "fp_reduce_decode", "fp_reduce_engine", "fp_reduce_engine_baseline", "fp_widen", "fp_wide_arith", "fp_convert", "int_fp16", "int_fp32", "int_fp64", "int_fp_decode", "fp_decode", "fp_arith", "fma", "slide", "mask_scan", "move", "reduce", "fixed", "geometry", "mask_write", "muldiv", "muldiv_baseline", "top", "top_baseline", "top_core")
+LEAVES = (
+    "core_adapter", "vtype", "csr", "vrf", "owner", "divsqrt", "fp_misc", "fp_estimate",
+    "fp_transfer", "fp_reduce", "fp_reduce_control", "fp_reduce_decode", "fp_reduce_engine",
+    "fp_reduce_engine_baseline", "fp_widen", "fp_wide_arith", "fp_convert", "int_fp16",
+    "int_fp32", "int_fp64", "int_fp_shared", "int_fp_decode", "fp_decode", "fp_arith",
+    "fma", "slide", "mask_scan", "move", "reduce", "fixed", "geometry", "mask_write",
+    "muldiv", "muldiv_baseline", "top", "top_baseline", "top_core",
+)
 
 
 def main():
@@ -16,12 +23,16 @@ def main():
     parser.add_argument("--yosys", default="yosys")
     parser.add_argument("--build-dir", type=Path, default=ROOT / "verification/build/vpu/synth")
     parser.add_argument("--leaf", action="append", choices=LEAVES, help="Limit to named leaves; repeat to select multiple")
+    parser.add_argument("--cache-predicate", type=int, choices=(0, 1), default=1,
+                        help="Select the top-level predicate cache")
+    parser.add_argument("--share-int-fp", type=int, choices=(0, 1), default=1,
+                        help="Select shared integer/FP conversion units")
     args = parser.parse_args()
     args.build_dir = args.build_dir.resolve()
     args.build_dir.mkdir(parents=True, exist_ok=True)
     reports = []
     seen = set()
-    configs = [(64, 128, 64, 64, 2), (32, 256, 64, 32, 4),
+    configs = [(64, 128, 64, 64, 2), (32, 128, 64, 64, 2), (32, 256, 64, 32, 4),
                (32, 128, 32, 64, 1), (64, 512, 64, 128, 4)]
     for xlen, vlen, elen, bank_bits, banks in configs:
         for leaf in LEAVES:
@@ -33,8 +44,11 @@ def main():
             if leaf in ("int_fp16", "int_fp32", "int_fp64"):
                 top = "rapt_vpu_int_fp"
             sources = [VPU / f"{top}.sv"]
-            if leaf in ("int_fp16", "int_fp32", "int_fp64"):
-                sources = [ROOT / "rtl/core/backend/fpu/rapt_fpu_int_to_fp.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_integer_to_fp.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_single_to_int_w.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_fp_to_int.sv"] + sources
+            if leaf in ("int_fp16", "int_fp32", "int_fp64", "int_fp_shared"):
+                fpu = ROOT / "rtl/core/backend/fpu"
+                sources = [fpu / f"rapt_fpu_{name}.sv" for name in (
+                    "int_to_fp", "integer_to_fp", "single_to_int_w", "fp_to_int")
+                ] + sources
             if leaf in ("fp_reduce_engine", "fp_reduce_engine_baseline"):
                 sources = [VPU / f"rapt_vpu_{name}.sv" for name in ("vtype", "fp_widen", "fp_reduce_decode", "fp_reduce_control")] + sources
             if leaf == "fp_reduce":
@@ -60,11 +74,15 @@ def main():
             if leaf.startswith("top"):
                 sources = [ROOT / "rtl/sram/rapt_sram_1rw.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_fma.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_divsqrt.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_convert_narrow.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_int_to_fp.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_integer_to_fp.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_single_to_int_w.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_fp_to_int.sv"] + sorted(VPU.glob("*.sv"))
                 params = dict(XLEN=xlen, VLEN=vlen, ELEN=elen, BankBits=max(64, bank_bits), Banks=banks,
-                              OptimizeOperandReads=int(leaf in ("top", "top_core")))
+                              OptimizeOperandReads=int(leaf in ("top", "top_core")),
+                              CachePredicate=args.cache_predicate,
+                              ShareIntFpConverters=args.share_int_fp)
             elif leaf in ("fp_reduce_engine", "fp_reduce_engine_baseline"):
                 params = dict(XLEN=xlen, VLEN=vlen, ELEN=elen, CacheMask=int(leaf == "fp_reduce_engine"))
             elif leaf in ("int_fp16", "int_fp32", "int_fp64"):
                 params = dict(FloatDouble=int(xlen == 64), IntBits=int(leaf[6:]))
+            elif leaf == "int_fp_shared":
+                params = dict(FloatDouble=int(xlen == 64))
             elif leaf in ("fma", "fp_arith", "fp_misc", "fp_estimate"):
                 params = dict(Double=int(xlen == 64))
             elif leaf in ("fp_reduce", "fp_reduce_control"):

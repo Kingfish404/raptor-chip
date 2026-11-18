@@ -197,7 +197,7 @@ def main():
         str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
         for path in files
     }
-    for xlen, elen, tag in ((32,32,2),(64,64,10)):
+    for xlen, elen, tag in ((32,32,2),(32,64,2),(64,64,10)):
         name = f"response-{xlen}-{elen}-{tag}"
         base = ("read_slang --top formal_vpu_memory_response -Irtl/include "
                 f"-GOwnershipOnly={int(args.ownership_only)} -GXLEN={xlen} -GVLEN=128 -GELEN={elen} -GTagBits={tag} "

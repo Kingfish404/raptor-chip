@@ -77,7 +77,10 @@ module formal_vpu_memory_response #(
   logic [TagBits-1:0] pending_tag;
   logic [IndexBits-1:0] pending_index;
   logic [2:0] pending_field;
-  logic pending_probe, issue, matching, stale;
+  logic pending_probe, pending_write, issue, matching, stale;
+  logic [XLEN-1:0] pending_addr;
+  logic [1:0] pending_size;
+  logic [63:0] pending_wdata;
   assign issue = mem_valid && mem_ready;
   assign matching = (pending && mem_rsp_tag == pending_tag
       && mem_rsp_index == pending_index && mem_rsp_field == pending_field
@@ -93,6 +96,10 @@ module formal_vpu_memory_response #(
       pending_index <= 0;
       pending_field <= 0;
       pending_probe <= 0;
+      pending_write <= 0;
+      pending_addr <= 0;
+      pending_size <= 0;
+      pending_wdata <= 0;
       witnessed_stale <= 0;
     end else begin
       if (issue) begin
@@ -101,6 +108,10 @@ module formal_vpu_memory_response #(
         pending_index <= mem_index;
         pending_field <= mem_field;
         pending_probe <= mem_probe;
+        pending_write <= mem_write;
+        pending_addr <= mem_addr;
+        pending_size <= mem_size;
+        pending_wdata <= mem_wdata;
       end
       if (mem_rsp_valid && mem_rsp_ready && matching) pending <= 0;
       if (pending && stale) witnessed_stale <= 1;
@@ -224,9 +235,12 @@ module formal_vpu_memory_response #(
   );
   always_comb begin
     ledger_correct = pending == (dut.state == 5'd11);
-    if (pending)
+    if (pending) begin
       ledger_correct &= {pending_tag,pending_index,pending_field,pending_probe}
         == {dut.tag_q,dut.index_q,dut.field_q,dut.probe_q};
+      ledger_correct &= {pending_write,pending_addr,pending_size,pending_wdata}
+        == {mem_write,mem_addr,mem_size,mem_wdata};
+    end
     observable_equal = 1;
     if (!OwnershipOnly) begin
       observable_equal &= cmd_ready == other_cmd_ready && done_valid == other_done_valid;
@@ -251,10 +265,7 @@ module formal_vpu_memory_response #(
     correct = 1;
     if (seen_reset && !reset) begin
       if (OwnershipOnly) begin
-        correct &= pending == (dut.state == 5'd11);
-        if (pending)
-          correct &= {pending_tag,pending_index,pending_field,pending_probe}
-            == {dut.tag_q,dut.index_q,dut.field_q,dut.probe_q};
+        correct &= ledger_correct;
         correct &= dut.accepted_response == (mem_rsp_valid && matching);
       end else begin
         // Induction strengthening: these are proved conjuncts, not assumptions
@@ -262,10 +273,7 @@ module formal_vpu_memory_response #(
         correct &= {dut.state,dut.insn_q,dut.tag_q,dut.base_q,dut.stride_q,dut.vl_q,dut.segment_base,dut.type_q,dut.index_q,dut.limit_q,dut.field_q,dut.fields_q,dut.group_q,dut.data_size_q,dut.index_size_q,dut.probe_q,dut.data_q} == {other.state,other.insn_q,other.tag_q,other.base_q,other.stride_q,other.vl_q,other.segment_base,other.type_q,other.index_q,other.limit_q,other.field_q,other.fields_q,other.group_q,other.data_size_q,other.index_size_q,other.probe_q,other.data_q};
         correct &= {done_trap,done_update,done_fof,done_cause,done_tval,done_vl,done_vstart}
           == {other_done_trap,other_done_update,other_done_fof,other_done_cause,other_done_tval,other_done_vl,other_done_vstart};
-        correct &= pending == (dut.state == 5'd11);
-        if (pending)
-          correct &= {pending_tag,pending_index,pending_field,pending_probe}
-          == {dut.tag_q,dut.index_q,dut.field_q,dut.probe_q};
+        correct &= ledger_correct;
         correct &= observable_equal;
       end
     end

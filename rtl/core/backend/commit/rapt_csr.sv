@@ -23,11 +23,12 @@ module rapt_csr #(
     csr_bcast_if.out csr_bcast,
     pmp_update_if.out pmp_update,
 
-    // S-mode delegated interrupt pending signal to rou (level).
-    // Asserts when (mip & mie & mideleg) has any bit set AND the interrupt is
-    // globally enabled for S-mode (priv<S, or priv==S && sstatus.SIE).
-    // s_int_cause carries the interrupt cause code (with MSB set), priority
-    // SEI(9) > SSI(1) > STI(5) per RISC-V Priv Sec.3.1.9.
+    // S-level (SEI/SSI/STI) interrupt pending signal to rou (level).
+    // Asserts when an enabled S-level source is takeable at its target mode:
+    // non-delegated sources trap to M under the M-mode global enable, and
+    // delegated sources trap to S under the S-mode global enable (priv<S, or
+    // priv==S && sstatus.SIE). s_int_cause carries the cause code (MSB set):
+    // M-mode targets first, then SEI(9) > SSI(1) > STI(5) per Priv Sec.3.1.9.
     output logic            s_int_pending,
     output logic [XLEN-1:0] s_int_cause,
 
@@ -206,6 +207,12 @@ module rapt_csr #(
   localparam int PMPCheckAddrW = `RAPT_PADDR_BITS - 2;
   localparam logic [11:0] PMPAddrBase = `RAPT_CSR_PMPADDR0;
   localparam logic [11:0] PMPAddrLast = `RAPT_CSR_PMPADDR15;
+  // Only pmpcfg0-3 / pmpaddr0-15 are decoded (4-bit slot index), so more
+  // usable entries would alias onto the decoded slots.
+  if (`RAPT_PMP_NUM < 1 || `RAPT_PMP_NUM > 16 || `RAPT_PMP_NUM > `RAPT_PMP_CSR_NUM)
+  begin : g_invalid_pmp_num
+    $error("rapt_csr decodes at most 16 PMP entries (RAPT_PMP_NUM=%0d)", `RAPT_PMP_NUM);
+  end
   // Legalize reserved W=1/R=0 to no permissions, preserving mode and lock.
   // Storage and distributed permission replicas must receive the same byte.
   function automatic logic [7:0] legalize_pmpcfg(input logic [7:0] raw);
@@ -584,26 +591,56 @@ module rapt_csr #(
                  | ({{(XLEN-1){1'b0}}, s_ext_irq_i} << `RAPT_CSR_MIE_SEIE)
                  | (XLEN'(bus_error_pending) << `RAPT_BUS_ERROR_IRQ);
 
-  // ----- S-mode delegated interrupt evaluation (Priv Sec.3.1.9) --------------
-  // An S-mode interrupt i fires iff: mip[i] && mie[i] && mideleg[i] && enable,
-  // where enable = (priv<S) || (priv==S && sstatus.SIE).
-  // M-mode is never preempted by S-mode (handled by mask: priv==M -> disabled).
+  // ----- S-level interrupt source evaluation (Priv Sec.3.1.9) ---------------
+  // SEI/SSI/STI trap to the mode selected by mideleg:
+  //   * mideleg[i]=1: S-mode target. Taken iff mip[i] && mie[i] && enable_s,
+  //     where enable_s = (priv<S) || (priv==S && sstatus.SIE). M-mode is never
+  //     preempted by an S-mode target.
+  //   * mideleg[i]=0: M-mode target, gated exactly like MEI/MSI/MTI by
+  //     m_int_mask = (priv<M) || mstatus.MIE.
+  // Interrupts destined for M-mode take precedence over those destined for
+  // S-mode; within each target the order is SEI > SSI > STI. ROU ranks the
+  // bus-error, MEI, MSI and MTI sources above this cause, which completes the
+  // MEI > MSI > MTI > SEI > SSI > STI order for M-mode targets. The trap
+  // router (smode_handle) consults mideleg[cause] to pick the handler.
   // Note: with sstc absent, OpenSBI manually sets mip.STIP from M-mode to
   // signal pending S-timer. mip is software-writable here (full-width else
   // branch in the always_ff), so OpenSBI's csrs/csrc on mip.STIP/SSIP work.
+  localparam logic [XLEN-1:0] SLevelIrqMask = (XLEN'(1) << `RAPT_CSR_MIE_SEIE)
+                                            | (XLEN'(1) << `RAPT_CSR_MIE_SSIE)
+                                            | (XLEN'(1) << `RAPT_CSR_MIE_STIE);
   logic            s_int_global_en;
+  logic [XLEN-1:0] s_int_enabled;
+  logic [XLEN-1:0] s_int_to_m;
+  logic [XLEN-1:0] s_int_to_s;
   logic [XLEN-1:0] s_int_active;
   assign s_int_global_en = (priv_mode == `RAPT_PRIV_U)
       || ((priv_mode == `RAPT_PRIV_S) && csr[MSTATUS][`RAPT_CSR_MSTATUS_SIE_]);
-  assign s_int_active = mip_eff & csr[MIE____] & csr[MIDELEG]
-                      & {XLEN{s_int_global_en}};
+  assign s_int_enabled = mip_eff & csr[MIE____] & SLevelIrqMask;
+  assign s_int_to_m = s_int_enabled & ~csr[MIDELEG] & {XLEN{m_int_mask}};
+  assign s_int_to_s = s_int_enabled & csr[MIDELEG] & {XLEN{s_int_global_en}};
+  assign s_int_active = (|s_int_to_m) ? s_int_to_m : s_int_to_s;
   assign s_int_pending = |s_int_active;
-  // Priority SEI > SSI > STI (matches Priv Sec.3.1.9 order for S-level sources).
-  assign s_int_cause   = (XLEN'(1) << (XLEN-1)) | (
-      s_int_active[9] ? XLEN'(9)
-    : s_int_active[1] ? XLEN'(1)
-    :                   XLEN'(5)
+  assign s_int_cause = (XLEN'(1) << (XLEN-1)) | (
+      s_int_active[`RAPT_CSR_MIE_SEIE] ? XLEN'(`RAPT_CAUSE_SEI)
+    : s_int_active[`RAPT_CSR_MIE_SSIE] ? XLEN'(`RAPT_CAUSE_SSI)
+    :                                    XLEN'(`RAPT_CAUSE_STI)
   );
+`ifdef RAPT_SVA_ACTIVE
+  // The selected cause must be one of the active sources, and its mideleg bit
+  // must agree with the chosen target: an M-mode target always wins, and an
+  // S-mode target is never taken while running in M-mode.
+  logic [$clog2(XLEN)-1:0] s_int_cause_bit;
+  logic s_int_cause_active, s_int_cause_deleg;
+  assign s_int_cause_bit = s_int_cause[$clog2(XLEN)-1:0];
+  assign s_int_cause_active = s_int_active[s_int_cause_bit];
+  assign s_int_cause_deleg = csr[MIDELEG][s_int_cause_bit];
+`endif
+  `RAPT_SVA_IMPLY(clock, reset, CSR_S_INT_CAUSE_ACTIVE, s_int_pending, s_int_cause_active)
+  `RAPT_SVA_IMPLY(clock, reset, CSR_S_INT_M_TARGET_FIRST,
+                  |s_int_to_m, !s_int_cause_deleg)
+  `RAPT_SVA_IMPLY(clock, reset, CSR_S_INT_S_TARGET_BELOW_M,
+                  s_int_pending && s_int_cause_deleg, priv_mode != `RAPT_PRIV_M)
 
   // MPRV / MPP broadcast (consumed by L1D effective-privilege logic)
   assign csr_bcast.mprv = csr[MSTATUS][`RAPT_CSR_MSTATUS_MPRV];

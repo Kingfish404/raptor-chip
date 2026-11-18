@@ -1,4 +1,8 @@
+#ifdef TEST_SHARED
+#include "Vrapt_vpu_int_fp_shared.h"
+#else
 #include "Vrapt_vpu_int_fp.h"
+#endif
 #include "verilated.h"
 extern "C" {
 #include "softfloat.h"
@@ -7,7 +11,11 @@ extern "C" {
 #include <cstdio>
 #include <cstdlib>
 #include <initializer_list>
+#ifdef TEST_SHARED
+static Vrapt_vpu_int_fp_shared d;
+#else
 static Vrapt_vpu_int_fp d;
+#endif
 static uint64_t count,seed=0x9216d5d98979fb1bULL;
 static constexpr uint64_t imask=UINT64_MAX>>(64-TEST_INT_BITS);
 static uint64_t random64(){seed^=seed<<13;seed^=seed>>7;seed^=seed<<17;return seed;}
@@ -34,8 +42,15 @@ static void check(uint64_t value,bool tofp,bool uns,unsigned rm){
   }
   flags=softfloat_exceptionFlags;
  }
- d.req_valid=1;d.rsp_ready=0;d.operand=value;d.to_float=tofp;d.unsigned_integer=uns;d.rm=rm;d.eval();need(d.req_ready,"request ready");tick();
+ d.req_valid=1;d.rsp_ready=0;d.operand=value;d.to_float=tofp;d.unsigned_integer=uns;d.rm=rm;
+#ifdef TEST_SHARED
+ d.integer_size=TEST_INT_BITS==16?1:TEST_INT_BITS==32?2:3;
+#endif
+ d.eval();need(d.req_ready,"request ready");tick();
  d.operand=~value;d.to_float=!tofp;d.unsigned_integer=!uns;d.rm=rm^7;unsigned age=0;
+#ifdef TEST_SHARED
+ d.integer_size^=3;
+#endif
  while(!d.rsp_valid){need(!d.req_ready,"busy accepts");tick();need(++age<12,"timeout");}
  if(d.result!=expected||d.flags!=flags||d.illegal!=(rm>4)){std::fprintf(stderr,"double=%u intbits=%u value=%016llx tofp=%u unsigned=%u rm=%u got=%016llx/%u expected=%016llx/%u\n",TEST_DOUBLE,TEST_INT_BITS,(unsigned long long)value,tofp,uns,rm,(unsigned long long)d.result,d.flags,(unsigned long long)expected,flags);need(false,"result");}
  for(unsigned i=0;i<3;++i){tick();need(d.rsp_valid&&!d.req_ready&&d.result==expected&&d.flags==flags&&d.illegal==(rm>4),"held response");}
@@ -53,6 +68,37 @@ int main(int argc,char**argv){
  for(unsigned bit=0;bit<64;++bit)for(int delta=-2;delta<=2;++delta)for(unsigned neg=0;neg<2;++neg)
   for(unsigned uns=0;uns<2;++uns)for(unsigned rm=0;rm<8;++rm){uint64_t v=(1ULL<<bit)+delta;check(neg?-v:v,true,uns,rm);}
  for(unsigned i=0;i<60000;++i)check(random64(),i&1,(i/2)&1,(i/4)%8);
- for(unsigned dir=0;dir<2;++dir)for(unsigned age=0;age<10;++age){reset();d.req_valid=1;d.to_float=dir;d.unsigned_integer=0;d.operand=0x43dfffffffffffffULL;d.rm=0;tick();d.req_valid=0;for(unsigned j=0;j<age;++j)tick();reset();for(unsigned j=0;j<15;++j){tick();need(!d.rsp_valid,"late result after reset");}}
+#ifdef TEST_SHARED
+ // Size zero is not an ISA conversion width. Check both directions, including
+ // response backpressure, without issuing a numerical subrequest.
+ for(unsigned dir=0;dir<2;++dir){
+  reset();d.req_valid=1;d.to_float=dir;d.integer_size=0;d.rm=0;d.eval();
+  need(d.req_ready,"bad width request ready");tick();d.req_valid=0;d.eval();
+  need(d.rsp_valid&&d.illegal&&d.result==0&&d.flags==0,"bad width response");
+  for(unsigned i=0;i<3;++i){tick();need(d.rsp_valid&&d.illegal,"bad width hold");}
+  d.rsp_ready=1;tick();d.rsp_ready=0;tick();need(d.req_ready,"bad width drain");
+ }
+#endif
+ for (unsigned dir = 0; dir < 2; ++dir) {
+  for (unsigned age = 0; age < 10; ++age) {
+   reset();
+   d.req_valid = 1;
+   d.to_float = dir;
+   d.unsigned_integer = 0;
+   d.operand = 0x43dfffffffffffffULL;
+   d.rm = 0;
+#ifdef TEST_SHARED
+   d.integer_size = TEST_INT_BITS == 16 ? 1 : TEST_INT_BITS == 32 ? 2 : 3;
+#endif
+   tick();
+   d.req_valid = 0;
+   for (unsigned j = 0; j < age; ++j) tick();
+   reset();
+   for (unsigned j = 0; j < 15; ++j) {
+    tick();
+    need(!d.rsp_valid, "late result after reset");
+   }
+  }
+ }
  std::printf("PASS int_fp Double=%u IntBits=%u cases=%llu reset_boundaries=20 seed=9216d5d98979fb1b\n",TEST_DOUBLE,TEST_INT_BITS,(unsigned long long)count);
 }

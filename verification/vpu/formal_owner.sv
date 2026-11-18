@@ -39,7 +39,8 @@ module formal_owner #(
   logic seen_reset = 0;
   logic live, authorized, issued, completed;
   logic [TagBits-1:0] ticket, retired_ticket;
-  logic [CommandBits-1:0] request_data;
+  logic [CommandBits-1:0] request_data, issued_data;
+  logic [TagBits-1:0] issued_ticket;
   logic [ResultBits-1:0] response_data;
   logic retired;
   logic accept, revoke, grant, issue, receive, retire;
@@ -67,6 +68,8 @@ module formal_owner #(
       completed <= 0;
       ticket <= 0;
       request_data <= 0;
+      issued_data <= 0;
+      issued_ticket <= 0;
       response_data <= 0;
       retired <= 0;
       retired_ticket <= 0;
@@ -87,7 +90,11 @@ module formal_owner #(
         completed <= 0;
       end
       if (grant) authorized <= 1;
-      if (issue) issued <= 1;
+      if (issue) begin
+        issued <= 1;
+        issued_data <= engine_payload;
+        issued_ticket <= engine_tag;
+      end
       if (receive) begin
         completed <= 1;
         response_data <= result_payload;
@@ -108,7 +115,10 @@ module formal_owner #(
       correct &= kill_blocked == (live && authorized && kill_valid && kill_tag == ticket);
       correct &= engine_valid == expected_issue && rsp_valid == expected_response;
       correct &= result_ready && result_dropped == (result_valid && !receive);
-      if (engine_valid) correct &= engine_tag == ticket && engine_payload == request_data;
+      if (live) correct &= engine_tag == ticket && engine_payload == request_data;
+      // A separate issue-edge snapshot must remain equal to the owner's
+      // storage throughout execution and held completion.
+      if (issued) correct &= engine_tag == issued_ticket && engine_payload == issued_data;
       if (rsp_valid) correct &= rsp_tag == ticket && rsp_payload == response_data;
     end
     if (reset)

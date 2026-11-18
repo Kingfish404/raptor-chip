@@ -13,7 +13,8 @@ static void memory_fixture() {
     for (unsigned i = 0; i < data_ram.size(); ++i) data_ram[i] = uint8_t((i*73) ^ (i>>3) ^ (i>>8));
     data_expected = data_ram;
     hash_word(0x4d454d465854); // Fixed data pattern and initialization version.
-    fault_address = UINT64_MAX; fault_actual_only = false; non_idempotent = false; fault_page = false;
+    fault_address = UINT64_MAX; non_idempotent_address = UINT64_MAX;
+    fault_actual_only = false; non_idempotent = false; fault_page = false;
 #ifdef VPU_SPIKE
     spike->data_memory = data_ram; spike->data_fault = UINT64_MAX; spike->data_non_idempotent = false; spike->data_page_fault = false;
 #endif
@@ -47,6 +48,74 @@ static void check_success(uint32_t insn, uint64_t base, uint64_t stride = 0) {
     compare_data("memory insn="+std::to_string(insn));
     ++memory_cases;
 }
+
+#ifndef VPU_SPIKE
+// A segment may legally expose a different partial faulting segment in Spike.
+// Check this implementation's stronger side-effect-free probe contract against
+// an independent transaction and architectural byte model instead.
+static void test_vector_probe_failures() {
+    const unsigned rb = TEST_VLEN / 8;
+    unsigned cases = 0;
+    for (bool store : {false, true})
+    for (unsigned kind : {0u, 1u, 2u})
+    for (unsigned fields : {2u, 3u, 8u})
+    for (unsigned start : {0u, 1u})
+    for (unsigned fail = start; fail < 4; ++fail)
+    for (unsigned field = 0; field < fields; ++field) {
+        memory_fixture();
+        require(configure(0, 4) == 4, "probe test VL");
+        write_csr(0x008, start);
+        const uint64_t bad = data_base + fail * fields + field;
+        if (kind == 2) {
+            non_idempotent_address = bad;
+            hash_word(bad);
+        } else {
+            set_memory_fault(bad, false, false, kind == 1);
+        }
+        for (unsigned i = start; i < fail; ++i)
+            for (unsigned f = 0; f < fields; ++f)
+                transfer_expected(store, (8 + f) * rb + i, data_base + i * fields + f, 1);
+
+        const auto effects = bus_effects;
+        const auto insn = mem_insn(store, 0, fields);
+        const auto result = command(insn, data_base);
+        require(result.trap && result.cause == (kind == 1 ? (store ? 15u : 13u)
+                                                           : (store ? 7u : 5u))
+                    && result.tval == bad,
+                "probe fault metadata");
+        require(bus_effects - effects == (fail - start) * fields, "probe changed faulting segment");
+        unsigned cursor = 0;
+        auto check_request = [&](unsigned index, unsigned f, bool probe) {
+            require(cursor < bus_log.size(), "missing segment probe/access");
+            const auto& request = bus_log[cursor++];
+            require(request.index == index && request.field == f && request.probe == probe
+                        && request.write == store
+                        && request.addr == data_base + index * fields + f,
+                    "segment probe/access order");
+        };
+        for (unsigned i = start; i < fail; ++i)
+            for (bool probe : {true, false})
+                for (unsigned f = 0; f < fields; ++f) check_request(i, f, probe);
+        for (unsigned f = 0; f <= field; ++f) check_request(fail, f, true);
+        require(cursor == bus_log.size(), "unexpected request after failed segment probe");
+        require(read_csr(0x008) == fail, "probe fault vstart");
+        compare_data("probe fault prefix");
+
+        set_memory_fault(UINT64_MAX);
+        non_idempotent_address = UINT64_MAX;
+        for (unsigned i = fail; i < 4; ++i)
+            for (unsigned f = 0; f < fields; ++f)
+                transfer_expected(store, (8 + f) * rb + i, data_base + i * fields + f, 1);
+        const auto resumed = bus_effects;
+        check_success(insn, data_base);
+        require(bus_effects - resumed == (4 - fail) * fields,
+                "probe restart repeated a completed segment");
+        ++cases;
+    }
+    std::printf("PASS segment_probe_failures cases=%u\n", cases);
+}
+#endif
+
 static void test_vector_memory() {
     const unsigned rb = TEST_VLEN/8;
     // Memory EEW and SEW are deliberately independent; indexed EEW is the
@@ -119,6 +188,24 @@ static void test_vector_memory() {
         write_csr(0x008,start);
         for (unsigned i=start; i<limit; ++i) transfer_expected(store,8*rb+(i<<size),data_base+(i<<size),1u<<size);
         check_success(mem_insn(store,size,regs,0,8),data_base);
+    }
+    // A restart at or beyond EVL completes without touching the vector file or
+    // the bus, even when the base would fault or be misaligned if accessed.
+    for (unsigned regs : {1u, 2u, 4u, 8u})
+    for (unsigned size = 0; (8u << size) <= TEST_ELEN; ++size)
+    for (bool store : {false, true}) {
+        if (store && size) continue;
+        const unsigned limit = regs * rb / (1u << size);
+        for (unsigned start : {limit, limit + 1}) {
+            if (start >= TEST_VLEN) continue; // VSTART is VLEN-bit-index WARL.
+            memory_fixture();
+            configure(0xff, 0);
+            write_csr(0x008, start);
+            set_memory_fault(data_base + 1);
+            const auto requests = bus_requests;
+            check_success(mem_insn(store, size, regs, 0, 8), data_base + 1);
+            require(bus_requests == requests && bus_log.empty(), "whole no-op touched memory");
+        }
     }
     // Mask load/store count is ceil(VL/8), with vstart in bytes.
     for (bool store : {false,true}) for (unsigned start : {0u,1u,3u}) {
@@ -224,6 +311,17 @@ static void test_vector_memory() {
         auto wide=command(mem_insn(false,3,1,1,24),data_base);
         require(wide.trap && wide.cause==2 && bus_log.empty(),"RV32 unsupported 64-bit index");
         require(read_csr(0x008)==1,"index width error reset restart"); compare_data("index width");
+    }
+    if (TEST_ELEN == 64) {
+        // Exercise full 64-bit elements even when scalar XLEN is 32.
+        memory_fixture();
+        require(configure(24, 2) == 2, "e64 memory VL");
+        for (unsigned i = 0; i < 2; ++i)
+            transfer_expected(false, 8 * rb + i * 8, data_base + i * 8, 8);
+        check_success(mem_insn(false, 3), data_base);
+        for (unsigned i = 0; i < 2; ++i)
+            transfer_expected(true, 8 * rb + i * 8, data_base + 64 + i * 8, 8);
+        check_success(mem_insn(true, 3), data_base + 64);
     }
     memory_fixture(); configure(0,0);
     auto before=bus_requests;

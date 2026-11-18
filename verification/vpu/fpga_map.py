@@ -21,19 +21,23 @@ def main():
     ap.add_argument('--elen', type=int, choices=(32, 64), default=64)
     ap.add_argument('--banks', type=int, default=2)
     ap.add_argument('--bank-bits', type=int, default=64)
+    ap.add_argument('--cache-predicate', type=int, choices=(0, 1), default=1)
+    ap.add_argument('--share-int-fp', type=int, choices=(0, 1), default=1)
     ap.add_argument('--family', choices=('xcup', 'xc7'), default='xcup')
     ap.add_argument('--build-dir', type=Path, default=ROOT/'verification/build/vpu/fpga-map')
     ap.add_argument('--timeout', type=int, default=900)
     args = ap.parse_args()
     params = dict(XLEN=args.xlen, VLEN=args.vlen, ELEN=args.elen,
-                  Banks=args.banks, BankBits=args.bank_bits, OptimizeOperandReads=1)
+                  Banks=args.banks, BankBits=args.bank_bits, OptimizeOperandReads=1,
+                  CachePredicate=args.cache_predicate, ShareIntFpConverters=args.share_int_fp)
     out = args.build_dir.resolve()/('-'.join(map(str,params.values()))+'-'+args.family)
     out.mkdir(parents=True, exist_ok=True)
     summary = out/'summary.json'
     summary.unlink(missing_ok=True)
     sources = [ROOT/'rtl/rapt_pkg.sv', ROOT/'rtl/sram/rapt_sram_1rw.sv']
     sources += [ROOT/f'rtl/core/backend/fpu/rapt_fpu_{name}.sv' for name in (
-        'fma','divsqrt','convert_narrow','int_to_fp','single_to_int_w')]
+        'fma','divsqrt','convert_narrow','int_to_fp','integer_to_fp',
+        'single_to_int_w','fp_to_int')]
     sources += sorted((ROOT/'rtl/core/backend/vpu').glob('*.sv'))
     inputs = sources + sorted((ROOT / 'rtl/include').rglob('*.svh'))
     inputs += [ROOT / 'rtl/configs/default/rapt_config.svh', Path(__file__)]

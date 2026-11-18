@@ -31,6 +31,46 @@ def indexed_offset(index, seed, pattern):
     return index * (4 if pattern == 2 else 3)
 
 
+def misaligned_rtl_expectation(case):
+    """Independent prefix model for cases where NEMU permits misaligned RAM access."""
+    insn = case['instruction']
+    store = (insn & 0x7f) == 0x27
+    mop = (insn >> 26) & 3
+    width = (insn >> 12) & 7
+    index_bytes = 1 << (width - 4 if width else 0)
+    data_bytes = 1 << ((case['rtl_vtype'] >> 3) & 7) if mop & 1 else index_bytes
+    vd, vs2 = (insn >> 7) & 31, (insn >> 20) & 31
+    fof = not store and mop == 0 and vs2 == 16
+    if not (insn & (1 << 25)) or (insn >> 29) or data_bytes != 2:
+        raise ValueError(f"Unexpected misalignment fixture: {case['name']}")
+    vector = bytearray.fromhex(case['initial_vector'])
+    memory = bytearray.fromhex(case['initial_memory'])
+    accesses = 0
+    for index in range(case['start'], case['rtl_vl']):
+        if mop & 1:
+            start = vs2 * 16 + index * index_bytes
+            offset = int.from_bytes(vector[start:start + index_bytes], 'little')
+        else:
+            offset = index * (case['stride'] if mop == 2 else data_bytes)
+        address = case['base'] + offset
+        if address % data_bytes:
+            trimmed = fof and index != 0
+            return dict(trap=int(not trimmed), update=1, fof=int(trimmed),
+                        cause=0 if trimmed else (6 if store else 4),
+                        tval=0 if trimmed else address, vl=index if trimmed else 0,
+                        vstart=0 if trimmed else index, vector=vector.hex(),
+                        memory=memory.hex(), memory_requests=accesses)
+        if address < 0 or address + data_bytes > len(memory):
+            raise ValueError(f"Unexpected memory range: {case['name']}")
+        reg_addr = vd * 16 + index * data_bytes
+        if store:
+            memory[address:address + data_bytes] = vector[reg_addr:reg_addr + data_bytes]
+        else:
+            vector[reg_addr:reg_addr + data_bytes] = memory[address:address + data_bytes]
+        accesses += 1
+    raise ValueError(f"Misalignment fixture did not encounter a misaligned element: {case['name']}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--reference', type=Path, required=True)
@@ -92,8 +132,8 @@ def main():
                                       instruction=whole_instruction(store, width, registers, 1, reg),
                                       vtype=0xff, avl=0, start=start, base=32,
                                       seed=registers * 13 + width + int(store),
-                                      expected_trap=int(start >= effective_length),
-                                      reserved_whole_start=start >= effective_length))
+                                      expected_trap=0,
+                                      expect_no_requests=start >= effective_length))
     for stride_reg in (0, 8, 11, 16):
         cases.append(dict(name=f'strided-rs2-{stride_reg}',
                           instruction=strided_instruction(False, 0, 1, 1, stride_reg, 24),
@@ -383,9 +423,11 @@ def main():
                         vector.reg[position // 16][position % 16] = (offset >> (byte * 8)) & 255
         if vector_api.set_state(0, ctypes.byref(vector)):
             raise RuntimeError('cannot seed vector registers')
+        case['initial_vector'] = bytes(byte for reg in vector.reg for byte in reg).hex()
         window_base = MEMORY_EDGE if case.get('edge') else MEMORY_BASE
-        reference.write(window_base,
-                        bytes(seeded_byte(index, case['seed'], False) for index in range(512)))
+        initial_memory = bytes(seeded_byte(index, case['seed'], False) for index in range(512))
+        case['initial_memory'] = initial_memory.hex()
+        reference.write(window_base, initial_memory)
         state.gpr[4] = case['start']
         reference.run([(0x008 << 20) | (4 << 15) | (1 << 12) | 0x73])
         state.gpr[1] = window_base + case['base']
@@ -412,10 +454,6 @@ def main():
         if case.get('expect_no_requests') and (
                 case['nemu_trap'] or case['nemu_vstart'] != 0):
             raise RuntimeError(f'No-op vector memory instruction trapped: {case["name"]}')
-        if case.get('reserved_whole_start') and (
-                case['nemu_trap'] != 1 or case['nemu_cause'] != 2 or
-                case['nemu_vstart'] != case['start']):
-            raise RuntimeError(f'Invalid whole-register start accepted: {case["name"]}')
         if vector_api.get_state(0, ctypes.byref(vector)):
             raise RuntimeError('cannot read vector registers')
         case['nemu_vector'] = bytes(byte for reg in vector.reg for byte in reg).hex()
@@ -466,6 +504,22 @@ def main():
                   (int(vector_requests) == 0 and int(memory_requests) == 0)) and
                  (not case.get('expect_requests') or
                   (int(vector_requests) > 0 and int(memory_requests) > 0)))
+        if case['name'] in {
+            'indexed-misaligned-load', 'indexed-misaligned-store',
+            'unit-misaligned-load', 'unit-misaligned-store',
+            'unit-misaligned-restart-load', 'unit-misaligned-restart-store',
+            'strided-misaligned-later-load', 'strided-misaligned-later-store',
+            'fof-misaligned-first', 'fof-misaligned-restart',
+        }:
+            # NEMU permits misaligned RAM elements; this RTL chooses the other
+            # ISA-permitted policy and traps before touching the element.
+            expected = misaligned_rtl_expectation(case)
+            match = (int(trap) == expected['trap'] and int(update) == expected['update'] and
+                     int(fof) == expected['fof'] and int(cause, 16) == expected['cause'] and
+                     int(tval, 16) == expected['tval'] and int(vl, 16) == expected['vl'] and
+                     int(vstart, 16) == expected['vstart'] and rtl_vector == expected['vector'] and
+                     rtl_memory == expected['memory'] and
+                     int(memory_requests) == expected['memory_requests'])
         if not match:
             first_vector = next((index for index, (actual, expected) in enumerate(zip(
                 bytes.fromhex(case['nemu_vector']), bytes.fromhex(rtl_vector)))
