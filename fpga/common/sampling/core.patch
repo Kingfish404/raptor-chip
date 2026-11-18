@@ -1,16 +1,16 @@
 --- a/rtl/rapt.sv
 +++ b/rtl/rapt.sv
-@@ -50,6 +50,9 @@
-     /* verilator lint_on UNUSEDPARAM */
+@@ -48,6 +48,9 @@
  ) (
+     input rapt_pkg::sram_ctrl_t sram_ctrl_i,
      input clock,
 +`ifdef RAPT_SAMPLING
 +    rapt_sample_if sample,
 +`endif
      output logic writeback_error_o,
-     // Device writes are reported before a later SC may complete. Pending
-     // holds SC while the platform drains a finite batch of notifications.
-@@ -177,6 +180,21 @@
+     // Asserted only after core AXI traffic drains; retained integrations may
+     // use this boundary to apply a boot setting without resetting the DM.
+@@ -188,6 +191,21 @@
    logic            dm_dbg_gpr_we;
    logic [     4:0] dm_dbg_gpr_addr;
    logic [XLEN-1:0] dm_dbg_gpr_wdata;
@@ -30,9 +30,9 @@
 +  assign core_dbg_gpr_addr = dm_dbg_gpr_addr;
 +`endif
  
-   assign io_master_arburst = offchip_axi.arburst;
-   assign io_master_arcache = offchip_axi.arcache;
-@@ -221,6 +239,12 @@
+   // Latch even a short ndmreset request. Keep the old core/L2 alive until
+   // every offered/accepted AXI transfer drains, then reset for at least a cycle.
+@@ -254,6 +272,12 @@
  
    rapt_clint clint_inst (
        .clock(clock),
@@ -45,25 +45,26 @@
  
        .clint_bus(clint_bus),
  
-@@ -287,6 +311,9 @@
+@@ -338,6 +362,9 @@
        .XLEN(XLEN),
        .L1dWriteBack(L1dWriteBack)
    ) core (
 +`ifdef RAPT_SAMPLING
 +      .sample(sample),
 +`endif
+       .sram_ctrl_i(sram_ctrl_i),
        .writeback_error_o(writeback_error_o),
        .external_write_valid_i(external_write_valid_i),
-       .external_write_pending_i(external_write_pending_i),
-@@ -337,14 +364,14 @@
+@@ -389,7 +416,7 @@
        // Hart 0; multi-core build will replace with a generate index.
        .hart_id_i({XLEN{1'b0}}),
  
 -      .dm_haltreq_i (dm_haltreq),
 +      .dm_haltreq_i (core_haltreq),
+       .debug        (debug),
        .halted_o     (dm_halted),
        .halt_pc_o    (dm_halt_pc),
-       .commit_fire_o(dm_commit_fire),
+@@ -397,11 +424,15 @@
  
        .dbg_gpr_rdata_o(dm_dbg_gpr_rdata),
        .dbg_gpr_we_i   (dm_dbg_gpr_we),
@@ -71,22 +72,20 @@
 +      .dbg_gpr_addr_i (core_dbg_gpr_addr),
        .dbg_gpr_wdata_i(dm_dbg_gpr_wdata),
  
-       .reset(reset)
-@@ -352,6 +379,9 @@
- 
-   assign dm_resumereq_unused = dm_resumereq;
-   assign dm_ndmreset_unused  = dm_ndmreset;
+       .reset(core_reset)
+   );
++
 +`ifdef RAPT_SAMPLING
 +  assign sample.gpr_data = dm_dbg_gpr_rdata;
 +`endif
  
+   assign dm_resumereq_unused = dm_resumereq;
  
-   rapt_dtm dtm_inst (
 --- a/rtl/core/rapt_core.sv
 +++ b/rtl/core/rapt_core.sv
-@@ -18,6 +18,9 @@
-     parameter rapt_pkg::l2_link_config_t L2Link = rapt_pkg::L2LinkConfig
+@@ -19,6 +19,9 @@
  ) (
+     input rapt_pkg::sram_ctrl_t sram_ctrl_i,
      input clock,
 +`ifdef RAPT_SAMPLING
 +    rapt_sample_if sample,
@@ -94,7 +93,7 @@
      output logic writeback_error_o,
      // Device writes are reported before a later SC may complete. Pending
      // holds SC while the platform drains a finite batch of notifications.
-@@ -122,6 +125,12 @@
+@@ -123,6 +126,12 @@
    logic memory_data_idle;
    logic unused_writeback_idle;
    logic frontend_empty, backend_empty, sq_empty;
@@ -107,7 +106,7 @@
    logic history_restore;
    logic [63:0] snapshot_ghr, restore_ghr;
    logic [7:0] snapshot_phr, restore_phr;
-@@ -149,8 +158,17 @@
+@@ -150,8 +159,17 @@
  
    logic cache_writeback_done;
    logic cache_writeback_drain;
@@ -125,9 +124,9 @@
    rapt_backend #(
        .XLEN(XLEN),
        .RegisteredDrainCompletion(1'b1),
-@@ -169,6 +187,9 @@
-           | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_mul_port(rapt_pkg::CoreConfig))
-           | (rapt_pkg::CompletionPorts'(1) << rapt_pkg::completion_fpu_port(rapt_pkg::CoreConfig)))
+@@ -175,6 +193,9 @@
+           rapt_pkg::CoreConfig
+       )))
    ) backend (
 +`ifdef RAPT_SAMPLING
 +      .sample(sample),
@@ -135,7 +134,7 @@
        .writeback_done(cache_writeback_done),
        .writeback_drain(cache_writeback_drain),
        .writeback_clean(cache_writeback_clean),
-@@ -270,10 +291,10 @@
+@@ -278,10 +299,10 @@
        .writeback_idle_o(unused_writeback_idle),
        .writeback_done_o(cache_writeback_done),
        .stores_empty_i(sq_empty),
@@ -159,10 +158,10 @@
 +`ifdef RAPT_SAMPLING
 +    rapt_sample_if sample,
 +`endif
-     input logic writeback_done = 1'b1,
+     input rapt_pkg::sram_ctrl_t sram_ctrl_i,
+     input logic writeback_done,
      output logic writeback_drain,
-     output logic writeback_clean,
-@@ -108,6 +111,21 @@
+@@ -111,6 +114,21 @@
    rou_cmu_if rou_cmu ();  // Commit
  
    rou_csr_if rou_csr ();
@@ -184,10 +183,10 @@
  
    dpu_iq_if disp_alq ();
    dpu_iq_if #(.RS_SIZE(rapt_pkg::BranchQueueEntries)) disp_brq ();
-@@ -759,6 +777,9 @@
+@@ -1304,6 +1322,9 @@
  
    rapt_csr csrs (
-       .clock(clock),
+       .clock  (clock),
 +`ifdef RAPT_SAMPLING
 +      .sample(sample),
 +`endif
@@ -206,7 +205,7 @@
  
      // Hart identifier injected by the cluster top. Returned verbatim by
      // CSR reads of `mhartid` (RV Priv Sec.3.1.5). Tied to '0 today since the
-@@ -115,6 +118,12 @@
+@@ -128,6 +131,12 @@
    // Preserve the simulator's legacy observation array while storing shared
    // status bits only once. RESET_VAL reaches SSTATUS through MSTATUS as well.
    wire [XLEN-1:0] csr[64] /* verilator public_flat_rd */;
@@ -217,9 +216,9 @@
 +  always_ff @(posedge clock) sample.satp_root <= csr[SATP___] & SampleRootMask;
 +`endif
    for (genvar i = 0; i < 64; i++) begin : g_csr_view
-     if (i == int'(SSTATUS)) begin : g_sstatus
-       assign csr[i] = (csr_state[MSTATUS] & `RAPT_CSR_SSTATUS_CMASK) | `RAPT_CSR_SSTATUS_HW;
-@@ -962,7 +971,21 @@
+     if (i == int'(MISA___)) begin : g_misa
+       assign csr[i] = XLEN'(rapt_pkg::Misa);
+@@ -1044,7 +1053,21 @@
            csr_state[MSTATUS] <= sret_mstatus_next;
          end
        end
@@ -274,7 +273,7 @@
  endmodule
 --- a/rtl/include/rapt_if.svh
 +++ b/rtl/include/rapt_if.svh
-@@ -10,6 +10,9 @@
+@@ -11,6 +11,9 @@
  `include "rapt_dpu_if.svh"
  `include "rapt_eu_if.svh"
  `include "rapt_lsu_if.svh"

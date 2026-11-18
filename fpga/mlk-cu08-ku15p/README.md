@@ -40,6 +40,13 @@ make -C fpga/mlk-cu08-ku15p info XLEN=64 MEMORY=bram CM005_BRIDGE=0
 make -C fpga/mlk-cu08-ku15p load XLEN=64 MEMORY=bram CM005_BRIDGE=0
 ```
 
+`VECTOR=auto` follows the preset: `default`, `default-*` and `large` enable
+V 1.0 with VLEN=128 and ELEN=64. `VECTOR=0` disables V; `VECTOR=1` enables it
+on an F/D-capable preset. Firmware, packed RTL and device-tree ISA use the same
+resolved setting. The boot payload includes a vector smoke test when V is on.
+`VECTOR_DEVICE_TEST=1` explicitly adds the synthetic MMIO fault peripheral for
+verification; normal builds omit it. Keep the same options for every command.
+
 For DDR, generate and elaborate the vendor IP before the full build:
 
 ```sh
@@ -59,6 +66,10 @@ Add `XLEN=32` for RV32. `make -C fpga/mlk-cu08-ku15p help` lists every target
 and variable. The CM005 block forwards traffic between the shared network and
 KU5P while the KU15P CPU uses DDR and UART. Add `CM005_ETHERNET=1` for the CPU
 NIC, or use `ubuntu-*` below.
+
+The native TFTP helper supports RV32 and RV64. Pass the board's `xlen` to
+`netboot.upload` when running a native FPGA test. It prepares a small RAM
+loader and transfers the Linux image and device tree over the CPU NIC.
 
 For the LiteX BIOS and DDR4/CM005 Ethernet netboot profile, run
 `make -C fpga/litex FPGA_BOARD=mlk_cu08_ku15p fpga-netboot-rv64-build`. See the

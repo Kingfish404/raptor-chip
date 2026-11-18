@@ -3,10 +3,31 @@ from pathlib import Path
 import socket
 import struct
 import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import netboot
+
+
+class LoaderTest(unittest.TestCase):
+    def test_loader_matches_board_xlen(self):
+        def compile_loader(command, *, check):
+            self.assertTrue(check)
+            if command[0].endswith("objcopy"):
+                Path(command[-1]).write_bytes(b"\x13\0\0\0")
+
+        with tempfile.TemporaryDirectory() as directory:
+            for xlen, abi in ((32, "ilp32"), (64, "lp64")):
+                with self.subTest(xlen=xlen), patch.object(netboot.subprocess, "run",
+                                                          side_effect=compile_loader) as run:
+                    loader = netboot.build(Path(directory) / str(xlen), b"fw", bytes(40),
+                                           "127.0.0.1", "127.0.0.2", 6969, xlen=xlen)
+                    self.assertTrue(loader.is_file())
+                    compile_args = run.call_args_list[0].args[0]
+                    self.assertIn(f"-march=rv{xlen}imac_zicsr_zifencei", compile_args)
+                    self.assertIn(f"-mabi={abi}", compile_args)
 
 
 class TftpTest(unittest.TestCase):

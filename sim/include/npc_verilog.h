@@ -131,6 +131,15 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
 
   npc->fpr = (uint64_t *)&VERILOG_ROU(fp_registers__DOT__architectural);
   npc->fcsr = (uint32_t *)(csr + FCSR);
+#if RAPT_VECTOR_ENABLED
+  npc->vreg = (uint8_t *)&VERILOG_BACKEND(vector_byte_view);
+  npc->vector_csrs = (word_t *)&VERILOG_BACKEND(vector_csr_view);
+  npc->vector_vlenb = RAPT_VECTOR_VLEN / 8;
+#else
+  npc->vreg = nullptr;
+  npc->vector_csrs = nullptr;
+  npc->vector_vlenb = 0;
+#endif
 
   npc->clint_mtime = (uint64_t *)&VERILOG_CLINT(mtime);
   npc->clint_mtimecmp = (uint64_t *)&VERILOG_CLINT(mtimecmp);

@@ -8,6 +8,15 @@ from pathlib import Path
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
+FIXTURE = """\
+module sta_clock_good(input clock, input reset, input data, output result);
+  DFF_X1 state (.CK(clock), .D(reset), .Q(result));
+endmodule
+
+module sta_clock_missing(input clock, input reset, input data, output result);
+  DFF_X1 state (.CK(data), .D(reset), .Q(result));
+endmodule
+"""
 
 
 def main():
@@ -21,11 +30,17 @@ def main():
     report.write_text(json.dumps(result)+'\n')
     sta = ROOT/'third_party/yosys-opensta/third_party/OpenSTA/build/sta'
     lib = ROOT/'third_party/yosys-opensta/third_party/lib/nangate45/lib/merged.lib'
-    fixture = ROOT/'verification/formal/sta_clock_fixture.v'
+    fixture = out/'sta_clock_fixture.v'
+    fixture.write_text(FIXTURE)
     script = ROOT/'synth/yosys/scripts/run_sta.tcl'
-    paths = [sta,lib,fixture,script,script.with_name('sta.tcl'),Path(__file__).resolve()]
+    paths = [sta, lib, script, script.with_name('sta.tcl'), Path(__file__).resolve()]
+
     def manifest():
-        return {str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
+        hashes = {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
+                  for p in paths}
+        hashes['generated/sta_clock_fixture.v'] = hashlib.sha256(fixture.read_bytes()).hexdigest()
+        return hashes
+
     result['source_sha256'] = manifest()
     report.write_text(json.dumps(result,indent=2)+'\n')
     for label in ('good','missing'):
@@ -43,6 +58,8 @@ def main():
         if label=='good':
             if run.returncode or 'status ok' not in summary.read_text():
                 raise RuntimeError('valid clock fixture failed')
+            if 'Startpoint: reset ' not in run.stdout:
+                raise RuntimeError('synchronous reset path was not timed')
             text = summary.read_text()
             if 'timing_schema 2' not in text or 'fmax_mhz' in text or 'period_min_ns' in text:
                 raise RuntimeError('STA timing schema still reports global-slack Fmax')

@@ -136,6 +136,21 @@ module tb_native_bus #(
     cpu.rready = 0;
   endtask
 
+`ifdef NATIVE_VECTOR_DEVICE_TEST
+  task automatic vector_device_write(input logic [31:0] addr, input logic [31:0] data,
+                                     input logic [1:0] response);
+    aw(X'(addr), 0, 2);
+    w(X'(data) << (8 * (addr % Bytes)), 1, Bytes'(15) << (addr % Bytes));
+    b(response);
+  endtask
+
+  task automatic vector_device_read(input logic [31:0] addr, input logic [31:0] expected,
+                                    input logic [1:0] response);
+    ar(X'(addr), 0, 2);
+    r(X'(expected) << (8 * (addr % Bytes)), 1, response);
+  endtask
+`endif
+
   initial begin
     cpu.awvalid = 0;
     cpu.wvalid = 0;
@@ -146,6 +161,40 @@ module tb_native_bus #(
     cpu.arcache = 0;
     repeat (5) @(negedge clk);
     reset = 0;
+`ifdef NATIVE_VECTOR_DEVICE_TEST
+    // The failed operation must have no side effect, and stalled R/B replies
+    // must not repeat a successful operation. Control reads are side-effect-free.
+    vector_device_write(32'h10000080, 32'h302, 0);
+    vector_device_read(32'h10000040, 32'h41410000, 0);
+    vector_device_read(32'h10000048, 32'h41410002, 2);
+    vector_device_read(32'h10000048, 32'h41410002, 0);
+    vector_device_write(32'h10000048, 32'h41410002, 2);
+    vector_device_write(32'h10000048, 32'h41410002, 0);
+    vector_device_read(32'h10000084, 32'h00040005, 0);
+    vector_device_read(32'h10000088, 32'h02010201, 0);
+    vector_device_read(32'h1000008c, 32'h41410002, 0);
+    vector_device_read(32'h10000090, 32'h00010002, 0);
+    vector_device_read(32'h10000094, 32'h00020003, 0);
+    ar(X'(32'h10000040), 0, 0);
+    r(0, 1, 3);
+    vector_device_write(32'h10000080, 32'h320, 0);
+    vector_device_read(32'h10000040, 32'h41410000, 0);
+    vector_device_read(32'h10000040, 32'h41410100, 0);
+    vector_device_read(32'h10000040, 32'h41410200, 2);
+    vector_device_read(32'h10000040, 32'h41410200, 0);
+    vector_device_read(32'h10000040, 32'h41410300, 0);
+    vector_device_write(32'h10000040, 32'h41410000, 0);
+    vector_device_write(32'h10000040, 32'h41410100, 0);
+    vector_device_write(32'h10000040, 32'h41410200, 2);
+    vector_device_write(32'h10000040, 32'h41410200, 0);
+    vector_device_write(32'h10000040, 32'h41410300, 0);
+    vector_device_read(32'h10000084, 32'h00010001, 0);
+    vector_device_read(32'h10000088, 32'h05040504, 0);
+    vector_device_read(32'h1000008c, 32'h41410300, 0);
+    vector_device_read(32'h10000090, 32'h00040004, 0);
+    vector_device_read(32'h10000094, 32'h00050005, 0);
+    $display("PASS native vector side-effect device");
+`endif
     // The board's whole MMIO window must be mapped and uncached by the CPU,
     // including packet SRAM, not just by this downstream AXI decoder.
     for (int offset = 0; offset < 65536; offset += 4) begin

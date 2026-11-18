@@ -338,6 +338,55 @@ module rapt_tb_top;
 `ifndef RAPT_TB_GLS
 `ifdef RAPT_TB_EBREAK_HALT
   logic ebreak_commit;
+`ifdef RAPT_V_EXTENSION
+  int vector_issued_count, vector_completed_count, vector_wait_store_cycles;
+  int vector_branch_recoveries, vector_poison_issues;
+  logic vector_hold_test_done = 1'b0;
+  initial begin
+    if ($test$plusargs("VECTOR_HOLD")) begin
+      do
+      @(posedge clock);
+      while (reset || !u_dut.cpu.core.backend.vector_issue.valid ||
+             !u_dut.cpu.core.backend.vector_command_ready);
+      @(negedge clock);
+      // Block the core's conditional grant without changing the SQ model.
+      force u_dut.cpu.core.backend.vector_head_safe = 1'b0;
+      repeat (12) begin
+        @(posedge clock);
+        if (u_dut.cpu.core.backend.vector_authorized
+            || u_dut.cpu.core.backend.vector_response_valid
+            || u_dut.cpu.core.backend.vector_mem_valid)
+          $fatal(1, "vector work escaped while the head grant was blocked");
+      end
+      @(negedge clock);
+      release u_dut.cpu.core.backend.vector_head_safe;
+      vector_hold_test_done = 1'b1;
+    end
+  end
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      vector_issued_count <= 0;
+      vector_completed_count <= 0;
+      vector_wait_store_cycles <= 0;
+      vector_branch_recoveries <= 0;
+      vector_poison_issues <= 0;
+    end else begin
+      if (u_dut.cpu.core.backend.recovery.redirect_valid
+          && u_dut.cpu.core.backend.recovery.target == 32'h8000002c)
+        vector_branch_recoveries <= vector_branch_recoveries + 1;
+      if (u_dut.cpu.core.backend.vector_issue.valid
+          && u_dut.cpu.core.backend.vector_issue.uop.imm == 32'h0280b457)
+        vector_poison_issues <= vector_poison_issues + 1;
+      if (u_dut.cpu.core.backend.vector_issue.valid && u_dut.cpu.core.backend.vector_command_ready)
+        vector_issued_count <= vector_issued_count + 1;
+      if (u_dut.cpu.core.backend.vector_response_valid
+          && u_dut.cpu.core.backend.g_completion_guard[rapt_pkg::IntegerSystemPort].accepted)
+        vector_completed_count <= vector_completed_count + 1;
+      if (u_dut.cpu.core.backend.vector_busy && !u_dut.cpu.core.backend.rou_lsu.sq_empty)
+        vector_wait_store_cycles <= vector_wait_store_cycles + 1;
+    end
+  end
+`endif
   always_comb begin
     ebreak_commit = 1'b0;
     for (int s = 0; s < rapt_pkg::CommitWidth; s++)
@@ -345,6 +394,65 @@ module rapt_tb_top;
   end
   always_ff @(posedge clock) begin
     if (!reset && ebreak_commit) begin
+`ifdef RAPT_V_EXTENSION
+      if ($test$plusargs("VECTOR_TRAP")) begin
+        if (u_dut.cpu.core.backend.rf[10] != 10 || u_dut.cpu.core.backend.rf[20] != 3
+            || vector_issued_count != 4 || vector_completed_count != 4)
+          $fatal(
+              1,
+              "RVV trap program result=%h traps=%h issued=%0d completed=%0d",
+              u_dut.cpu.core.backend.rf[10],
+              u_dut.cpu.core.backend.rf[20],
+              vector_issued_count,
+              vector_completed_count
+          );
+        $display("PASS vector VS/CSR traps=3 and mret");
+      end
+      if ($test$plusargs("VECTOR_PROGRAM")) begin
+        if (u_dut.cpu.core.backend.rf[10] != 10 || vector_issued_count < 9
+            || vector_issued_count != vector_completed_count)
+          $fatal(
+              1,
+              "RVV program result=%h issued=%0d completed=%0d",
+              u_dut.cpu.core.backend.rf[10],
+              vector_issued_count,
+              vector_completed_count
+          );
+        $display("PASS compiled RVV program result=10 issued=%0d completed=%0d",
+                 vector_issued_count, vector_completed_count);
+      end
+      if ($test$plusargs("VECTOR_SMOKE")) begin
+        if (u_dut.cpu.core.backend.rf[5] != 3 || u_dut.cpu.core.backend.rf[10] != 12
+            || u_dut.cpu.core.backend.rf[11] != 13)
+          $fatal(
+              1,
+              "vector core smoke x5=%h x10=%h x11=%h",
+              u_dut.cpu.core.backend.rf[5],
+              u_dut.cpu.core.backend.rf[10],
+              u_dut.cpu.core.backend.rf[11]
+          );
+        if (vector_issued_count != 4 || vector_completed_count != 4)
+          $fatal(
+              1,
+              "vector core lifetime issued=%0d completed=%0d",
+              vector_issued_count,
+              vector_completed_count
+          );
+        if ($test$plusargs("VECTOR_HOLD") && !vector_hold_test_done)
+          $fatal(1, "vector conditional-grant hold was not exercised");
+        if (vector_poison_issues != 0 || vector_branch_recoveries == 0)
+          $fatal(
+              1,
+              "wrong-path vector issue=%0d branch recovery=%0d",
+              vector_poison_issues,
+              vector_branch_recoveries
+          );
+        $display(
+            "PASS vector core x5=3 x10=12 x11=13 issued=%0d completed=%0d store_wait=%0d recovery=%0d",
+            vector_issued_count, vector_completed_count, vector_wait_store_cycles,
+            vector_branch_recoveries);
+      end
+`endif
       $display("[rapt_tb_top] HIT GOOD TRAP (ebreak) after %0d cycles", cyc);
       $finish;
     end
@@ -481,4 +589,263 @@ module rapt_tb_top;
     end
   end
 
+endmodule
+
+`include "rapt.svh"
+`include "rapt_soc_if.svh"
+// Direct AXI composition for RV64; the RNP board adapter is fixed to RV32.
+module tb_vector_axi;
+  localparam int XLEN = `RAPT_XLEN;
+  logic clock = 0, reset = 1;
+  logic core_reset_unused, writeback_error, jtag_tdo_unused;
+  logic sim_finish;
+  logic [31:0] sim_exit_code;
+  axi4_if #(.XLEN(XLEN)) axi ();
+  int unsigned cycles, max_cycles, issued, completed, device_reads, device_writes;
+  logic [15:0] device_read_mask, device_write_mask, device_read_error_mask;
+  logic [15:0] device_write_error_mask;
+  int unsigned device_repeat;
+  always #5 clock = ~clock;
+
+  rapt dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
+      .clock(clock),
+      .reset(reset),
+      .writeback_error_o(writeback_error),
+      .core_reset_o(core_reset_unused),
+      .external_write_valid_i(1'b0),
+      .external_write_pending_i(1'b0),
+      .external_write_first_i('0),
+      .external_write_last_i('0),
+      .io_master_arcache(axi.arcache),
+      .io_master_arburst(axi.arburst),
+      .io_master_arsize(axi.arsize),
+      .io_master_arlen(axi.arlen),
+      .io_master_arid(axi.arid),
+      .io_master_araddr(axi.araddr),
+      .io_master_arvalid(axi.arvalid),
+      .io_master_arready(axi.arready),
+      .io_master_rid(axi.rid),
+      .io_master_rlast(axi.rlast),
+      .io_master_rdata(axi.rdata),
+      .io_master_rresp(axi.rresp),
+      .io_master_rvalid(axi.rvalid),
+      .io_master_rready(axi.rready),
+      .io_master_awcache(axi.awcache),
+      .io_master_awburst(axi.awburst),
+      .io_master_awsize(axi.awsize),
+      .io_master_awlen(axi.awlen),
+      .io_master_awid(axi.awid),
+      .io_master_awaddr(axi.awaddr),
+      .io_master_awvalid(axi.awvalid),
+      .io_master_awready(axi.awready),
+      .io_master_wlast(axi.wlast),
+      .io_master_wdata(axi.wdata),
+      .io_master_wstrb(axi.wstrb),
+      .io_master_wvalid(axi.wvalid),
+      .io_master_wready(axi.wready),
+      .io_master_bid(axi.bid),
+      .io_master_bresp(axi.bresp),
+      .io_master_bvalid(axi.bvalid),
+      .io_master_bready(axi.bready),
+      .io_interrupt(vector_irq),
+      .ext_irq_i('0),
+      .jtag_trst_n(1'b0),
+      .jtag_tck_en(1'b0),
+      .jtag_tms(1'b1),
+      .jtag_tdi(1'b0),
+      .jtag_tdo(jtag_tdo_unused)
+  );
+
+  rapt_tb_mem #(
+      .XLEN(XLEN)
+  ) memory_model (
+      .clock(clock),
+      .reset(reset),
+      .awid(axi.awid),
+      .awaddr(axi.awaddr),
+      .awlen(axi.awlen),
+      .awsize(axi.awsize),
+      .awburst(axi.awburst),
+      .awvalid(axi.awvalid),
+      .awready(axi.awready),
+      .wdata(axi.wdata),
+      .wstrb(axi.wstrb),
+      .wlast(axi.wlast),
+      .wvalid(axi.wvalid),
+      .wready(axi.wready),
+      .bid(axi.bid),
+      .bresp(axi.bresp),
+      .bvalid(axi.bvalid),
+      .bready(axi.bready),
+      .arid(axi.arid),
+      .araddr(axi.araddr),
+      .arlen(axi.arlen),
+      .arsize(axi.arsize),
+      .arburst(axi.arburst),
+      .arvalid(axi.arvalid),
+      .arready(axi.arready),
+      .rid(axi.rid),
+      .rdata(axi.rdata),
+      .rresp(axi.rresp),
+      .rlast(axi.rlast),
+      .rvalid(axi.rvalid),
+      .rready(axi.rready),
+      .sim_finish(sim_finish),
+      .sim_exit_code(sim_exit_code)
+  );
+
+  logic vector_irq, vector_irq_injected;
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      vector_irq <= 1'b0;
+      vector_irq_injected <= 1'b0;
+    end else begin
+`ifdef RAPT_V_EXTENSION
+      if ($test$plusargs("VECTOR_INTERRUPT")) begin
+        if (!vector_irq_injected && dut.core.backend.vector_authorized
+          && dut.core.backend.vector_busy && dut.core.backend.csrs.mstatus_mie) begin
+          vector_irq <= 1'b1;
+          vector_irq_injected <= 1'b1;
+        end else if (dut.core.backend.csrs.trap_enter && dut.core.backend.rou_csr.valid
+                   && dut.core.backend.csrs.trap_cause[XLEN-1]) begin
+          vector_irq <= 1'b0;
+        end
+      end
+`endif
+    end
+  end
+
+  initial begin
+    string image_path, boot_path;
+    int loaded;
+    if (!$value$plusargs("IMG=%s", image_path)) $fatal(1, "+IMG required");
+    if (!$value$plusargs("MROM=%s", boot_path)) $fatal(1, "+MROM required");
+    if (!$value$plusargs("MAX_CYCLES=%d", max_cycles)) max_cycles = 100000;
+    if (!$value$plusargs("VD_READ_MASK=%h", device_read_mask)) device_read_mask = 0;
+    if (!$value$plusargs("VD_WRITE_MASK=%h", device_write_mask)) device_write_mask = 0;
+    if (!$value$plusargs("VD_READ_ERROR_MASK=%h", device_read_error_mask))
+      device_read_error_mask = 0;
+    if (!$value$plusargs("VD_WRITE_ERROR_MASK=%h", device_write_error_mask))
+      device_write_error_mask = 0;
+    if (!$value$plusargs("VD_REPEAT=%d", device_repeat)) device_repeat = 1;
+    if (device_repeat == 0) $fatal(1, "VD_REPEAT must be nonzero");
+    loaded = memory_model.load_bin(image_path, 32'h80000000);
+    if (loaded <= 0) $fatal(1, "cannot load program");
+    loaded = memory_model.load_bin(boot_path, 32'h20000000);
+    if (loaded <= 0) $fatal(1, "cannot load boot ROM");
+    repeat (5) @(negedge clock);
+    reset = 0;
+  end
+
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      cycles <= 0;
+      issued <= 0;
+      completed <= 0;
+      device_reads <= 0;
+      device_writes <= 0;
+    end else begin
+      cycles <= cycles + 1;
+      if (axi.arvalid && axi.arready && axi.araddr[31:4] == 28'h1000000)
+        device_reads <= device_reads + 1;
+      if (axi.awvalid && axi.awready && axi.awaddr[31:4] == 28'h1000000)
+        device_writes <= device_writes + 1;
+`ifdef RAPT_V_EXTENSION
+      if (dut.core.backend.vector_issue.valid && dut.core.backend.vector_command_ready)
+        issued <= issued + 1;
+      if (dut.core.backend.vector_response_valid
+          && dut.core.backend.g_completion_guard[rapt_pkg::IntegerSystemPort].accepted)
+        completed <= completed + 1;
+`endif
+      if (cycles >= max_cycles) $fatal(1, "RVV AXI core timeout after %0d cycles", cycles);
+      if ($test$plusargs("VECTOR_ACT4") && cycles[15:0] == 0) begin
+        $display("ACT4 progress cycles=%0d issued=%0d completed=%0d pc=%h", cycles, issued,
+                 completed, dut.core.backend.rou_cmu.next_pc);
+        $fflush();
+      end
+      if (sim_finish) begin
+        if (!$test$plusargs("VECTOR_ACT4") || sim_exit_code != 0 || issued != completed)
+          $fatal(
+              1,
+              "test finisher status=%h issued=%0d completed=%0d",
+              sim_exit_code,
+              issued,
+              completed
+          );
+        $display("PASS RV%0d ACT4 vector test issued=%0d completed=%0d cycles=%0d", XLEN, issued,
+                 completed, cycles);
+        $finish;
+      end
+      for (int s = 0; s < rapt_pkg::CommitWidth; s++) begin
+        if (dut.core.backend.rou_cmu.slot[s].ebreak && !$test$plusargs("VECTOR_ACT4")) begin
+          if (dut.core.backend.rf[10] != XLEN'(10) || issued != completed)
+            $fatal(
+                1,
+                "RVV AXI result=%h issued=%0d completed=%0d",
+                dut.core.backend.rf[10],
+                issued,
+                completed
+            );
+          if ($test$plusargs("VECTOR_TRAP") && (dut.core.backend.rf[20] != XLEN'(3) || issued != 4))
+            $fatal(1, "RVV AXI trap count=%h issued=%0d", dut.core.backend.rf[20], issued);
+          if ($test$plusargs(
+                  "VECTOR_DISABLED"
+              ) && (rapt_pkg::VectorEnable || issued != 0 || dut.core.backend.rf[20] != XLEN'(4)))
+            $fatal(1, "disabled V did not trap all four vector instruction classes");
+          if ($test$plusargs("VECTOR_PROGRAM") && issued < 20)
+            $fatal(1, "RVV AXI program issued only %0d vector commands", issued);
+          if ($test$plusargs("VECTOR_RESTART") && dut.core.backend.rf[20] != XLEN'(1))
+            $fatal(1, "RVV AXI restart trap count=%h", dut.core.backend.rf[20]);
+          if ($test$plusargs(
+                  "VECTOR_INTERRUPT"
+              ) && (!vector_irq_injected || dut.core.backend.rf[20] != XLEN'(1)))
+            $fatal(1, "vector interrupt was not delivered exactly once");
+          if ($test$plusargs("VECTOR_PROBE") && (device_reads != 0 || device_writes != 0))
+            $fatal(
+                1,
+                "vector probe performed %0d device reads, %0d writes",
+                device_reads,
+                device_writes
+            );
+`ifdef RAPT_V_EXTENSION
+          if ($test$plusargs("VECTOR_DEVICE_TEST")) begin
+            for (int i = 0; i < 16; i++) begin
+              if (memory_model.vector_device_read_effects[i]
+                      != int'(device_read_mask[i]) * device_repeat
+                  || memory_model.vector_device_read_attempts[i]
+                      != int'(device_read_mask[i]) * device_repeat + int'(device_read_error_mask[i])
+                  || memory_model.vector_device_write_effects[i]
+                      != int'(device_write_mask[i]) * device_repeat
+                  || memory_model.vector_device_write_attempts[i]
+                      != int'(device_write_mask[i]) * device_repeat
+                          + int'(device_write_error_mask[i]))
+                $fatal(
+                    1,
+                    "device word %0d read effects/attempts=%0d/%0d write=%0d/%0d",
+                    i,
+                    memory_model.vector_device_read_effects[i],
+                    memory_model.vector_device_read_attempts[i],
+                    memory_model.vector_device_write_effects[i],
+                    memory_model.vector_device_write_attempts[i]
+                );
+              if (device_write_mask[i]
+                  && memory_model.vector_device_write_data[i]
+                      != 32'h4141_0000 + 32'(i) + ((device_repeat - 1) << 8))
+                $fatal(
+                    1, "device word %0d write data=%h", i, memory_model.vector_device_write_data[i]
+                );
+            end
+            $display("PASS side-effect device read=%h write=%h read_errors=%h write_errors=%h",
+                     device_read_mask, device_write_mask, device_read_error_mask,
+                     device_write_error_mask);
+          end
+`endif
+          $display("PASS RV%0d AXI RVV program issued=%0d completed=%0d cycles=%0d", XLEN, issued,
+                   completed, cycles);
+          $finish;
+        end
+      end
+    end
+  end
 endmodule

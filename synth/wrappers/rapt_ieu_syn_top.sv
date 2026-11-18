@@ -114,6 +114,10 @@ module rapt_ieu_syn_top #(
       .cmu_bcast,
       .csr_bcast,
       .exu_csr,
+`ifdef RAPT_V_EXTENSION
+      .vector_issue_ready(1'b1),
+      .vector_issue(),
+`endif
       .integer_system_issue_enable,
       .disp_alq,
       .disp_brq,

@@ -25,6 +25,15 @@ typedef word_t vaddr_t;
 #define GPR_SIZE 32
 #define FPR_SIZE 32
 #define DIFFTEST_STATE_VERSION 2
+
+// Non-Verilator helper builds retain scalar defaults. The simulator derives
+// these values from the selected RTL preset and preprocessor flags.
+#ifndef RAPT_VECTOR_ENABLED
+#define RAPT_VECTOR_ENABLED 0
+#endif
+#ifndef RAPT_VECTOR_VLEN
+#define RAPT_VECTOR_VLEN 128
+#endif
 #define NPC_PMP_NUM 16
 #define NPC_PLIC_NDEV 31
 #define NPC_PLIC_NCTX 2
@@ -256,6 +265,10 @@ typedef struct
   // EPC storage pointers are local to NPC. Keep them after the NEMU ABI prefix.
   word_t *sepc_half_q;
   word_t *mepc_half_q;
+  // Local observation sidecars; outside the legacy NEMU scalar-copy prefix.
+  uint8_t *vreg;
+  word_t *vector_csrs;
+  uint32_t vector_vlenb;
 } NPCState;
 
 typedef struct

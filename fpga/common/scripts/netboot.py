@@ -20,7 +20,11 @@ from upload import Serial, ack, load, packet
 STAGE_ADDRESS = 0x8f000000
 
 
-def build(directory, firmware, dtb, server, client, port, cross="riscv64-unknown-elf-", *, network=None):
+def build(directory, firmware, dtb, server, client, port, cross="riscv64-unknown-elf-", *,
+          network=None, xlen=64):
+    if xlen not in (32, 64):
+        raise ValueError("the native TFTP loader requires XLEN 32 or 64")
+    abi = "ilp32" if xlen == 32 else "lp64"
     server, client = ipaddress.IPv4Address(server), ipaddress.IPv4Address(client)
     if server == client or not 1 <= port <= 65535:
         raise ValueError("distinct server/client addresses and a valid TFTP port are required")
@@ -63,7 +67,7 @@ SECTIONS {
   /DISCARD/ : { *(.comment*) *(.eh_frame*) }
 }
 ''')
-    subprocess.run([cross + "gcc", "-march=rv64imac_zicsr_zifencei", "-mabi=lp64", "-mcmodel=medany",
+    subprocess.run([cross + "gcc", f"-march=rv{xlen}imac_zicsr_zifencei", f"-mabi={abi}", "-mcmodel=medany",
                     "-O2", "-ffreestanding", "-fno-builtin", "-fno-stack-protector", "-msmall-data-limit=0",
                     "-nostdlib", "-Wall", "-Wextra", "-Werror", "-Wl,--build-id=none", "-Wl,--no-relax",
                     "-I", str(directory), "-T", str(directory / "loader.ld"),
@@ -159,11 +163,11 @@ class Server:
 
 
 def upload(port, firmware, dtb, directory, server, client, tftp_port=6969, *, console=False,
-           wait_ready=False, network=None):
+           wait_ready=False, network=None, xlen=64):
     files = {"fw_payload.bin": firmware.read_bytes(), "runtime.dtb": dtb.read_bytes()}
     # A runtime directory is used because the DTB contains fresh boot entropy.
     stage = build(directory, files["fw_payload.bin"], files["runtime.dtb"], server, client, tftp_port,
-                  network=network)
+                  network=network, xlen=xlen)
     with Server(server, tftp_port, client, files) as service:
         serial = Serial(port)
         try:

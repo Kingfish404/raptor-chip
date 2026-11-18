@@ -57,6 +57,7 @@ task automatic init_csr_bcast_defaults(
     csr_bcast.scounteren = '0;
     csr_bcast.frm = '0;
     csr_bcast.fs = '0;
+    csr_bcast.vs = '0;
     csr_bcast.menvcfg_cbie = '0;
     csr_bcast.menvcfg_cbcfe = 1'b0;
     csr_bcast.menvcfg_cbze = 1'b0;

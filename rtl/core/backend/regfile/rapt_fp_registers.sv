@@ -134,14 +134,16 @@ module rapt_fp_registers #(
             allocate_uop[s].execute.memory.store,
             allocate_uop[s].imm)
     );
-    assign allocate_writer[s] = rapt_pkg::fp_writes_register(
+    assign allocate_writer[s] = (rapt_pkg::fp_writes_register(
         allocate_uop[s].execute.fp.valid,
         allocate_uop[s].execute.fp.op,
         rapt_pkg::fp_instruction(
             allocate_uop[s].execute.memory.load,
             allocate_uop[s].execute.memory.store,
             allocate_uop[s].imm)
-    ) && !allocate_uop[s].trap;
+    ) || rapt_pkg::vector_writes_fpr(
+        allocate_uop[s]
+    )) && !allocate_uop[s].trap;
     for (genvar operand = 0; operand < 3; operand++) begin : g_source
       logic [4:0] reg_index;
       logic [TagBits-1:0] tag;

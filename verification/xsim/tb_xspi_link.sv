@@ -25,6 +25,9 @@ module tb_xspi_link_mem #(
   logic [3:0] rid, wid;
   logic rbusy, wbusy, bpend;
   logic [3:0] stall_q = 4'b1001;
+  logic vector_fault_fired, vector_write_error_q, vector_write_fault;
+  int vector_attempts[4], vector_effects[4];
+  int vector_write_attempts[4], vector_write_effects[4];
 
   function automatic logic [31:0] aligned(input logic [31:0] addr);
     return addr & ~32'(Bytes - 1);
@@ -35,9 +38,17 @@ module tb_xspi_link_mem #(
   assign axi.wready = wbusy && stall_q[1:0] != 2'b00;
   assign axi.bvalid = bpend;
   assign axi.bid = wid;
-  assign axi.bresp = waddr[31:28] == 4'hf ? 2'b10 : 2'b00;
+  assign vector_write_fault = $test$plusargs("XSPI_VECTOR_FAULT") &&
+      $test$plusargs("XSPI_VECTOR_WRITE") && !$test$plusargs("XSPI_DROP_DECERR") &&
+      waddr == 32'h10000448 && !vector_fault_fired;
+  assign axi.bresp = vector_write_error_q ? ($test$plusargs("XSPI_SLVERR") ? 2'b10 : 2'b11)
+      : waddr[31:28] == 4'hf ? 2'b10 : waddr[31:28] == 4'he ? 2'b11 : 2'b00;
   assign axi.rid = rid;
-  assign axi.rresp = raddr[31:28] == 4'hf ? 2'b10 : 2'b00;
+  assign axi.rresp = $test$plusargs("XSPI_VECTOR_FAULT") &&
+      !$test$plusargs("XSPI_VECTOR_WRITE") && !$test$plusargs("XSPI_DROP_DECERR") &&
+      raddr == 32'h10000448 && !vector_fault_fired
+      ? ($test$plusargs("XSPI_SLVERR") ? 2'b10 : 2'b11) : raddr[31:28] == 4'hf ? 2'b10
+      : raddr[31:28] == 4'he && !$test$plusargs("XSPI_DROP_DECERR") ? 2'b11 : 2'b00;
   assign axi.rlast = rleft == 0;
   assign axi.rvalid = rbusy;
   always_comb begin
@@ -55,6 +66,14 @@ module tb_xspi_link_mem #(
       rbusy <= 1'b0;
       wbusy <= 1'b0;
       bpend <= 1'b0;
+      vector_fault_fired <= 1'b0;
+      vector_write_error_q <= 1'b0;
+      for (int i = 0; i < 4; i++) begin
+        vector_attempts[i] <= 0;
+        vector_effects[i] <= 0;
+        vector_write_attempts[i] <= 0;
+        vector_write_effects[i] <= 0;
+      end
     end else begin
       if (axi.arvalid && axi.arready) begin
         raddr <= axi.araddr;
@@ -62,6 +81,14 @@ module tb_xspi_link_mem #(
         rid <= axi.arid;
         rbusy <= 1'b1;
       end else if (rbusy && axi.rready) begin
+        if ($test$plusargs(
+                "XSPI_VECTOR_FAULT"
+            ) && raddr >= 32'h10000440 && raddr < 32'h10000450) begin
+          vector_attempts[(raddr-32'h10000440)>>2] <= vector_attempts[(raddr-32'h10000440)>>2] + 1;
+          if (axi.rresp == 0)
+            vector_effects[(raddr-32'h10000440)>>2] <= vector_effects[(raddr-32'h10000440)>>2] + 1;
+          else vector_fault_fired <= 1'b1;
+        end
         if (rleft == 0) rbusy <= 1'b0;
         else begin
           raddr <= raddr + 32'(Bytes);
@@ -73,14 +100,32 @@ module tb_xspi_link_mem #(
         wid <= axi.awid;
         wbusy <= 1'b1;
       end else if (wbusy && axi.wvalid && axi.wready) begin
-        for (int i = 0; i < Bytes; i++)
-        if (axi.wstrb[i]) mem[aligned(waddr)+32'(i)] = axi.wdata[8*i+:8];
+        if ($test$plusargs(
+                "XSPI_VECTOR_FAULT"
+            ) && $test$plusargs(
+                "XSPI_VECTOR_WRITE"
+            ) && waddr >= 32'h10000440 && waddr < 32'h10000450) begin
+          vector_write_attempts[(waddr-32'h10000440)>>2] <=
+              vector_write_attempts[(waddr-32'h10000440)>>2] + 1;
+          if (vector_write_fault) begin
+            vector_fault_fired <= 1'b1;
+            vector_write_error_q <= 1'b1;
+          end else
+            vector_write_effects[(waddr-32'h10000440)>>2] <=
+                vector_write_effects[(waddr-32'h10000440)>>2] + 1;
+        end
+        if (!vector_write_fault)
+          for (int i = 0; i < Bytes; i++)
+          if (axi.wstrb[i]) mem[aligned(waddr)+32'(i)] = axi.wdata[8*i+:8];
         waddr <= waddr + 32'(Bytes);
         if (axi.wlast) begin
           wbusy <= 1'b0;
           bpend <= 1'b1;
         end
-      end else if (bpend && axi.bready) bpend <= 1'b0;
+      end else if (bpend && axi.bready) begin
+        bpend <= 1'b0;
+        vector_write_error_q <= 1'b0;
+      end
     end
   end
 endmodule
@@ -356,6 +401,10 @@ module tb_xspi_link;
     st.push_back('1);
     axi_write(32'hf000_0000, 0, wr, st, resp);
     if (resp != 2'b10) $fatal(1, "write error resp %b", resp);
+    axi_read(32'he000_0000, 1, rd, resp);
+    if (resp != 2'b11) $fatal(1, "read decode error resp %b", resp);
+    axi_write(32'he000_0000, 0, wr, st, resp);
+    if (resp != 2'b11) $fatal(1, "write decode error resp %b", resp);
 
     $display("PASS: xspi link XLEN=%0d, %0d bytes checked", XLEN, checks);
     $finish;

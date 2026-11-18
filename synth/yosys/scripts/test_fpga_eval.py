@@ -162,6 +162,22 @@ class EvaluationTests(unittest.TestCase):
         report.write_text("No timing paths\n")
         self.assertTrue(all(value is None for value in flow.timing(report).values()))
 
+    def test_seven_series_report_has_no_uram_column(self):
+        report = self.root / "utilization.rpt"
+        rows = ("| Instance | Module | Total LUTs | FFs | RAMB36 | RAMB18 | DSP Blocks |\n"
+                "| top | (top) | 1,200 | 50 | 2 | 1 | 4 |\n")
+        report.write_text("| Device : xc7a100tcsg324-1\n" + rows)
+        self.assertEqual(flow.resources(report, "top")["URAM"], 0)
+        report.write_text("| Device : xcku15p-ffva1156-2-e\n" + rows)
+        with self.assertRaisesRegex(ValueError, "Missing resource columns"):
+            flow.resources(report, "top")
+        report.write_text(rows)
+        with self.assertRaisesRegex(ValueError, "Missing resource columns"):
+            flow.resources(report, "top")
+        report.write_text("| Device : xc7a100tcsg324-1\n" + rows.replace(" FFs |", " FFX |"))
+        with self.assertRaisesRegex(ValueError, "Missing resource columns"):
+            flow.resources(report, "top")
+
     def test_hierarchy_resources_use_top_not_child(self):
         report = self.root / "utilization.rpt"
         report.write_text("| Instance | Module | Total LUTs | FFs | RAMB36 | RAMB18 | URAM | DSP Blocks |\n"

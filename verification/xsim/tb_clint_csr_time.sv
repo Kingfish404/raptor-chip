@@ -31,6 +31,10 @@ module tb_clint_csr_time;
       .sw_irq_i(clint_bus.sw_int),
       .m_ext_irq_i(1'b0),
       .s_ext_irq_i(1'b0),
+`ifdef RAPT_V_EXTENSION
+      .vector_dirty_i(1'b0),
+      .vector_fp_dirty_i(1'b0),
+`endif
       .store_error_i(1'b0),
       .store_error_addr_i('0),
       .store_error_strb_i('0),

@@ -1,23 +1,68 @@
 ---
-title: Standalone VPU
+title: Vector extension
 ---
 
-# Standalone Raptor VPU
+# Raptor vector extension
 
-The VPU is a standalone RVV 1.0 component in `rtl/core/backend/vpu/`. It implements
+The VPU in `rtl/core/backend/vpu/` implements baseline RVV 1.0
 integer, fixed-point, permutation, configuration/CSR, vector memory and
 FP32/FP64 instruction families. `rapt_vpu_core` composes the numerical VPU with
-an ownership and metadata adapter; it is not instantiated in the scalar Raptor
-core. Scalar ROB, CSR, LSU/MMU and trap integration are required before enabling
-V in the scalar core's ISA advertisement.
+an ownership and metadata adapter and is instantiated in `rapt_backend` when
+`RAPT_V_EXTENSION` is defined. The integrated path resolves scalar operands,
+authorizes commands at the ROB head, retires scalar/FPR results and flags, and
+uses the core MMU, PMP/PMA, L1D and cluster memory path.
 
 The test defaults are XLEN=64, VLEN=128, ELEN=64, BankBits=64 and Banks=2.
 XLEN, vector width and storage geometry are independent parameters. Optional
 vector extensions such as Zvfh are outside this component's baseline.
 The minimum V configuration uses VLEN=128 and ELEN=64 with either XLEN; on
-RV32, 64-bit index elements are excluded as specified by V 1.0. Advertising V
-also requires the surrounding core to provide the F/D extensions and precise
-traps, so these parameters alone do not establish system compliance.
+RV32, indexed accesses use index elements up to 32 bits as specified by V 1.0.
+Advertising V also requires the surrounding core to provide the F/D extensions
+and precise traps. [Ratified V 1.0 specification](https://docs.riscv.org/reference/isa/unpriv/v-st-ext).
+
+## Core configuration and architectural state
+
+`default`, every `default-*` preset and `large` enable V by default in both
+XLEN modes. `RAPT_NO_VPU` disables it for scalar comparisons. Other presets
+can enable it with `RAPT_V_EXTENSION` when they support F/D.
+The integrated minimum is VLEN=128 and ELEN=64. `RAPT_VLEN`,
+`RAPT_VRF_BANK_BITS` and `RAPT_VRF_BANKS` configure the storage geometry.
+Changing geometry also requires a matching differential reference; the current
+NPC/NEMU vector sidecar supports VLEN=128.
+
+MISA.V, the device tree and simulator reference features follow the effective
+configuration. VS gates vector instructions and CSRs. Vector and FP completion
+updates dirty state and accrued flags. Vector commands retain their tagged
+ROB owner through the final memory response. Permission probes have no data
+side effects or cache-miss allocation. RV32 splits 64-bit ordinary-memory
+elements into two bus beats and rejects an unsupported 64-bit device access
+before issuing it. Segment probes precede data accesses and reject non-idempotent
+segments before side effects. Precise stores bypass the scalar SQ's
+post-retirement error path and wait for the L1D response. Errors beyond a
+write-back cache's acknowledgement remain platform errors at that boundary.
+
+NPC compares all 32 vector registers and seven vector CSRs at retirement through
+versioned NEMU sidecars. Checkpoints include that state and restore it through
+real vector instructions before resuming the guest. The restore path checks the
+complete vector state before resynchronizing the reference.
+
+```sh
+make -C verification/subsystem vector-system-smoke \
+  CONFIG=default XLEN=32 BUILD_DIR=/tmp/vector-rv32
+make -C verification/subsystem vector-system-smoke \
+  CONFIG=default XLEN=64 BUILD_DIR=/tmp/vector-rv64
+make -C verification/subsystem vector-disabled-smoke CONFIG=default XLEN=64 \
+  VECTOR_DEFINES=RAPT_NO_VPU BUILD_DIR=/tmp/vector-disabled
+```
+
+The shared payload generator is `verification/subsystem/vector_programs.py`.
+Its `catalog` mode expands the 375 baseline opcode entries across SEW, mask,
+segment count and restart settings and emits a case manifest beside the assembly.
+Use `--success-code 0` for NPC and the default ten for the directed RTL harness.
+`make -C verification/subsystem vector-catalog-diff XLEN=64` uses an existing
+NPC/NEMU build. `VECTOR_NPC` and `VECTOR_REFERENCE` select isolated binaries.
+Whole-core device/fault checks, independent numerical comparison, ASIC STA,
+routed FPGA timing and physical board execution are distinct validation layers.
 
 ## Available modules
 
@@ -494,10 +539,10 @@ entire VRF and data memory. The encoded workloads cover:
 - FOF faults at every field of those segments, masked element zero, PMA segment
   rejection, reserved encodings, group bounds and indexed-overlap restrictions.
 
-This is not exhaustive memory verification. All legal group/overlap combinations,
-real cross-page translation,
-physical non-idempotent devices and late errors from the Raptor SQ remain open
-integration/coverage work. The adapter's synthetic PMA policy rejects non-idempotent
+This standalone suite does not exhaust all legal group/overlap combinations or
+validate the platform PMA map. The whole-core suites above additionally exercise
+real translation, device side effects and external AXI errors. The standalone
+adapter's synthetic PMA policy rejects non-idempotent
 segments in Spike as well; it does not claim to validate a platform PMA map.
 
 ### Configuration
@@ -614,8 +659,8 @@ live cached predicate. `CacheMask=0` retains the uncached baseline.
 
 ## Architectural context save, restore and restart
 
-`TOP_SUITE=context` tests the state-transfer sequence needed by a future core
-or OS adapter, through encoded instructions and public interfaces:
+`TOP_SUITE=context` exercises the architectural state-transfer sequence through
+encoded instructions and public interfaces.
 
 1. Read VTYPE, VL, VSTART and VCSR, then clear VSTART.
 2. Save all 32 vector registers using four `vs8r.v` instructions.
@@ -642,14 +687,14 @@ saved CSR values, trap metadata and Spike results are checked.
 make -C verification/vpu top TOP_SUITE=context DIFF=1 SPIKE_BUILD=/path/to/pinned/spike XLEN=64 VLEN=128 ELEN=64 BANK_BITS=64 BANKS=2
 ```
 
-This tests the standalone architectural sequence. The scalar adapter still
-must own VS/FS gating, scalar FCSR, privileged trap entry and context scheduling;
-this test does not run an OS or change the scalar core's ISA advertisement.
+The integrated backend supplies VS/FS gating, scalar FCSR and privileged trap
+entry. The whole-core `vector-system-smoke` target also executes the context
+sequence through production decode, MMU and memory paths.
 
 ## Core-side ownership and metadata adapter
 
-`rapt_vpu_core_adapter.sv` is an independently testable control bridge for a
-future Raptor composition. A command handshake forwards the complete command
+`rapt_vpu_core_adapter.sv` is the independently testable control bridge used
+by `rapt_vpu_core`. A command handshake forwards the complete command
 payload to the VPU and captures immutable core metadata (for example PC and
 physical destination) alongside `{generation, ROB slot}`. It accepts only one
 command at a time. The core resolves scalar/FPR/CSR dependencies before
@@ -709,20 +754,16 @@ make -C verification/vpu top CORE_ADAPTER=1 TOP_SUITE=context DIFF=1 SPIKE_BUILD
 python3 verification/vpu/synth_check.py --leaf top_core --build-dir verification/build/vpu/synth-core-top
 ```
 
-The wrapper supplies a concrete core-facing numerical module; it does not
-connect the real Raptor ROB, CSR, MMU or SQ. In particular, `head_safe` is an
-input contract, not a proof of older-store drain or memory ordering.
+`rapt_backend` instantiates the wrapper and connects it to the ROB, CSR, MMU
+and L1D. It grants `head_safe` after checking the older store queue and, for
+memory commands, completing the memory drain.
 
 ## Store acceptance, final response and restart boundary
 
-The actual scalar SQ is not yet a valid drop-in final-response adapter:
-`rapt_lsu_sq.sv` handles `wvalid && wready && werr` after the scalar store has
-retired, releases that owner and stops remaining split/zero beats. Its source
-explicitly separates the imprecise platform error from architectural load traps.
-The VPU instead retains the trapping instruction and needs a precise element
-or segment restart position. A future integration must preserve that owner
-through the actual write response; an SQ allocation or translation/probe
-acknowledgement cannot stand in for it.
+`rapt_lsu_sq.sv` handles `wvalid && wready && werr` after a scalar store retires
+and releases the owner. The vector path preserves the instruction's ROB owner
+through the final L1D write response. A fault reports the element or segment
+restart position before the instruction retires.
 
 `TOP_SUITE=store-completion` exercises this distinction through `rapt_vpu_core`.
 The memory model independently accepts each request and delays actual write
@@ -817,9 +858,9 @@ width and precision against SoftFloat; supply `FMA_DOUBLE`, `INT_BITS` and
 engine workload with both cache settings across four configurations and compares
 their results.
 
-Scalar integration must resolve dependencies before accepting a command,
-authorize irreversible effects at the correct ROB owner, retain precise trap
-and restart state, map scalar/FPR results and flags into retirement, and drain
+The scalar integration resolves dependencies before accepting a command,
+authorizes irreversible effects at the correct ROB owner, retains precise trap
+and restart state, maps scalar/FPR results and flags into retirement, and drains
 accepted memory requests before owner identity reuse. The scalar SQ's
 post-retirement error path does not satisfy the VPU's precise final-response
 contract by itself.

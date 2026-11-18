@@ -1,3 +1,65 @@
+#ifdef XSPI_VECTOR_BRIDGE
+.option norvc
+.section .text
+.global _start
+.global vector_pass
+.global vector_fail
+_start:
+    la t0, trap_handler
+    csrw mtvec, t0
+    li t0, 0x200
+    csrs mstatus, t0
+    li s0, 0
+    li a1, 0x10000440
+    vsetivli zero, 4, e32, m1, tu, mu
+#ifdef XSPI_VECTOR_STORE
+    vmv.v.i v8, 7
+#endif
+faulting_access:
+#ifdef XSPI_VECTOR_STORE
+    vse32.v v8, (a1)
+#else
+    vle32.v v8, (a1)
+#endif
+    li t0, 1
+    bne s0, t0, vector_fail
+    csrr t0, vstart
+    bnez t0, vector_fail
+#ifndef XSPI_VECTOR_STORE
+    vmv.x.s t0, v8
+    li t1, 0x43424140
+    bne t0, t1, vector_fail
+    vslidedown.vi v9, v8, 2
+    vmv.x.s t0, v9
+    li t1, 0x4b4a4948
+    bne t0, t1, vector_fail
+#endif
+    j vector_pass
+trap_handler:
+    csrr t0, mcause
+#ifdef XSPI_VECTOR_STORE
+    li t1, 7
+#else
+    li t1, 5
+#endif
+    bne t0, t1, vector_fail
+    csrr t0, mtval
+    li t1, 0x10000448
+    bne t0, t1, vector_fail
+    csrr t0, vstart
+    li t1, 2
+    bne t0, t1, vector_fail
+    csrr t0, mepc
+    la t1, faulting_access
+    bne t0, t1, vector_fail
+    addi s0, s0, 1
+    mret
+vector_pass:
+    ebreak
+vector_fail:
+    ebreak
+    j vector_fail
+#else
 /* ROM-XIP, aperture guards, and a claimed/completed pad IRQ in both XLENs. */
 .option norvc
 .option norelax
@@ -72,3 +134,4 @@ fail:
   fence iorw, iorw
   ebreak
   j fail
+#endif

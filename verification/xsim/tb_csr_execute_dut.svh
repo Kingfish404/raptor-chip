@@ -33,6 +33,10 @@
       .store_error_addr_i('0),
       .store_error_strb_i('0),
 `endif
+`ifdef RAPT_V_EXTENSION
+      .vector_dirty_i(1'b0),
+      .vector_fp_dirty_i(1'b0),
+`endif
       .s_ext_irq_i(external_s),
       .s_int_pending(),
       .s_int_cause()

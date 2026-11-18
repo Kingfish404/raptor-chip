@@ -1688,7 +1688,7 @@ module rapt_rou #(
                 allocation[allocate_lane].uop.execute.memory.load,
                 allocation[allocate_lane].uop.execute.memory.store,
                 allocation[allocate_lane].uop.imm)
-        );
+        ) || rapt_pkg::vector_writes_fpr(allocation[allocate_lane].uop);
         rob_entry[entry].rd <= allocation[allocate_lane].uop.rd;
         rob_entry[entry].mispredict <= 1'b0;
         rob_entry[entry].btaken <= 1'b0;

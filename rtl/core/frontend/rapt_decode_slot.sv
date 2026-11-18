@@ -30,6 +30,13 @@ module rapt_decode_slot #(
   logic [11:0] csr;
   logic [ 2:0] csr_csw;
   logic [4:0] rd, rs1, rs2;
+  logic sys_valid_dec, vector_valid, vector_rs1, vector_rs2, vector_rd;
+  logic is_c;
+  logic [31:0] inst_idu;
+  logic vector_dec;
+  // V scalar dependencies come from the generated decoder. FP scalar
+  // operands use the architectural FP read port after ROB serialization.
+  assign vector_valid = rapt_pkg::VectorEnable && !is_c && vector_dec;
 
   logic fp_valid;
   logic [5:0] fp_op;
@@ -43,9 +50,7 @@ module rapt_decode_slot #(
   logic [4:0] fp_rs1, fp_rs2, fp_rs3, fp_rd;
 
   // Compressed instruction expansion
-  logic        is_c;
   logic [31:0] inst_de;
-  logic [31:0] inst_idu;
   logic [31:0] illegal_tval;
   logic illegal_inst, illegal_csr, fp_disabled, is_illegal;
   logic is_wfi, is_sfence_vma, is_sinval_vma, is_inval_fence;
@@ -75,7 +80,12 @@ module rapt_decode_slot #(
       .out_ren (ren_dec),
       .out_atom(decoded.uop.execute.memory.atomic),
 
-      .out_sys_system (decoded.uop.execute.sys.valid),
+      .out_vector_valid(vector_dec),
+      .out_vector_rs1(vector_rs1),
+      .out_vector_rs2(vector_rs2),
+      .out_vector_rd(vector_rd),
+
+      .out_sys_system (sys_valid_dec),
       .out_sys_ebreak (decoded.uop.execute.sys.ebreak),
       .out_sys_ecall  (decoded.uop.execute.sys.ecall),
       .out_sys_mret   (decoded.uop.execute.sys.mret),
@@ -109,6 +119,10 @@ module rapt_decode_slot #(
       .out_rs2(rs2)
   );
 
+  assign decoded.uop.execute.sys.valid = sys_valid_dec || vector_valid;
+`ifdef RAPT_V_EXTENSION
+  assign decoded.uop.execute.vector = vector_valid;
+`endif
   assign dec_imm = dec_imm_u ? {dec_imm_low[19:0], 12'b0}
       : {{11{dec_imm_low[20]}}, dec_imm_low};
 
@@ -138,7 +152,8 @@ module rapt_decode_slot #(
 
   // All scalar immediates fit signed 32 bits. Non-immediate operations reuse
   // the payload for raw illegal/FP encodings or compact CSR/fence metadata.
-  assign decoded.uop.imm = is_illegal && !ifu_trap ? illegal_tval[31:0]
+  assign decoded.uop.imm = vector_valid ? inst_idu
+      : is_illegal && !ifu_trap ? illegal_tval[31:0]
       : fp_valid && !(fp_load || fp_store || fp_load_d || fp_store_d) ? inst_idu
       : |csr_csw ? {15'b0, inst_idu[19:15], dec_imm[11:0]}
       : (is_sfence_vma || is_sinval_vma)
@@ -147,26 +162,28 @@ module rapt_decode_slot #(
   // Transport the generated selectors directly. Comparing resolved XLEN values
   // here would rebuild wide muxes and comparators on every decode lane.
   if (DerivedConstants) begin : g_derived_constants
-    assign decoded.op1 = XLEN'(dec_op1_sel);
-    assign decoded.op2 = XLEN'(dec_op2_sel);
+    assign decoded.op1 = vector_valid ? '0 : XLEN'(dec_op1_sel);
+    assign decoded.op2 = vector_valid ? '0 : XLEN'(dec_op2_sel);
   end else begin : g_value_constants
-    assign decoded.op1 = rapt_pkg::derive_op1(
+    assign decoded.op1 = vector_valid ? '0 : rapt_pkg::derive_op1(
         XLEN'(dec_op1_sel), fetched.pc, dec_imm, inst_idu[19:15]
     );
-    assign decoded.op2 = rapt_pkg::derive_op2(XLEN'(dec_op2_sel), dec_imm);
+    assign decoded.op2 = vector_valid ? '0
+        : rapt_pkg::derive_op2(XLEN'(dec_op2_sel), dec_imm);
   end
 
   // Per-instruction legality is independent of the decode position. Check the
   // ALU encoding, CSR access, privilege gates and extension availability here;
   // ordered group policy belongs to rapt_idu.
-  assign illegal_inst = (alu == `RAPT_ALU_ILL_);
+  assign illegal_inst = (alu == `RAPT_ALU_ILL_) && !vector_valid;
   assign fp_disabled = fp_valid && (csr_bcast.fs == 2'b00);
   // CSR write attempt: CSRRW/CSRRWI always write; CSRRS/C/SI/CI write if rs1/uimm != 0
   logic csr_write;
   // The decoded GPR rs1 is zero for immediate CSR operations. The raw
   // instruction field carries either rs1 or uimm and determines write intent.
   assign csr_write = (csr_csw[1:0] == 2'b01) || (inst_idu[19:15] != 5'b0);
-  assign illegal_csr = (csr_csw != `RAPT_CSR_CSW_NONE) && (!csr_addr_valid(
+  assign illegal_csr = !vector_valid && (csr_csw != `RAPT_CSR_CSW_NONE)
+      && (!csr_addr_valid(
       csr
   )  // unknown CSR address
   || (csr[9:8] > csr_bcast.priv)  // insufficient privilege
@@ -346,13 +363,15 @@ module rapt_decode_slot #(
   assign decoded.uop.execute.fp.rs1 = fp_rs1;
   assign decoded.uop.execute.fp.rs2 = fp_rs2;
   assign decoded.uop.execute.fp.rs3 = fp_rs3;
-  assign decoded.uop.execute.fp.rd = fp_rd;
-  assign decoded.uop.execute.memory.load = ren_dec || fp_load || fp_load_d;
-  assign decoded.uop.execute.memory.store = wen_dec || fp_store || fp_store_d;
-  assign decoded.uop.rd[RLEN-1:0] = (is_illegal || fp_writes_fpr
+  assign decoded.uop.execute.fp.rd = vector_valid ? inst_idu[11:7] : fp_rd;
+  assign decoded.uop.execute.memory.load = !vector_valid && (ren_dec || fp_load || fp_load_d);
+  assign decoded.uop.execute.memory.store = !vector_valid && (wen_dec || fp_store || fp_store_d);
+  assign decoded.uop.rd[RLEN-1:0] = vector_valid && !is_illegal
+      ? (vector_rd ? inst_idu[11:7] : '0)
+      : (is_illegal || fp_writes_fpr
       || fp_store || fp_store_d) ? '0
       : (fp_valid ? fp_rd[RLEN-1:0] : rd[RLEN-1:0]);
-  assign decoded.uop.execute.sys.csr_csw = csr_csw;
+  assign decoded.uop.execute.sys.csr_csw = vector_valid ? '0 : csr_csw;
   assign decoded.uop.execute.branch.ras = rapt_pkg::ras_action(inst_idu);
   assign decoded.uop.execute.memory.aq = inst_idu[26];
   assign decoded.uop.execute.memory.rl = inst_idu[25];
@@ -382,12 +401,16 @@ module rapt_decode_slot #(
 
   // Translation fences need real GPR dependencies for their commit descriptor.
   // Keep the generated decoder's serialization flags and constant operands.
-  assign decoded.rs1[RLEN-1:0] = (`RAPT_SFENCE_SELECTIVE != 0
+  assign decoded.rs1[RLEN-1:0] = vector_valid
+      ? (vector_rs1 ? inst_idu[19:15] : '0)
+      : (`RAPT_SFENCE_SELECTIVE != 0
       && (is_sfence_vma || is_sinval_vma)) ? inst_idu[19:15] : (fp_valid &&
         (fp_op == `RAPT_FP_OP_FMV_W_X || fp_op == (`RAPT_FP_OP_FMV_D_X)
          || fp_i2f || fp_load || fp_store || fp_load_d || fp_store_d))
         ? fp_rs1[RLEN-1:0] : rs1[RLEN-1:0];
-  assign decoded.rs2[RLEN-1:0] = (`RAPT_SFENCE_SELECTIVE != 0
+  assign decoded.rs2[RLEN-1:0] = vector_valid
+      ? (vector_rs2 ? inst_idu[24:20] : '0)
+      : (`RAPT_SFENCE_SELECTIVE != 0
       && (is_sfence_vma || is_sinval_vma)) ? inst_idu[24:20]
       : fp_valid ? fp_rs2[RLEN-1:0] : rs2[RLEN-1:0];
 

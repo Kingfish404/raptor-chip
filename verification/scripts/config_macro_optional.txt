@@ -17,3 +17,5 @@ RAPT_L2_STORE_WRITEBACK # L2 store policy; absent selects write-through.
 RAPT_KEEP_UOP_INST # Synthesis opt-in that keeps expanded instruction words in uops; absent drops them.
 RAPT_PC_FULL_WIDTH # Keep XLEN-wide PCs; absent stores RV64 PCs in 40 bits when PA <= 39 bits.
 RAPT_NO_FPU # Preset-selected; absent keeps the FEU and F/D in MISA.
+RAPT_V_EXTENSION # Preset-selected V; absent removes the integrated VPU.
+RAPT_NO_VPU # Explicit scalar override for application presets.

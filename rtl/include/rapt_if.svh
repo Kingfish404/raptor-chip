@@ -25,6 +25,9 @@ interface lsu_l1d_if #(
   rapt_pkg::mem_context_t rcontext;
   logic [4:0] ralu;
   logic rvalid;
+  // Probe checks permissions without reading the target; precise stores wait
+  // for the final write response instead of an early posted acknowledgement.
+  logic rprobe, rnonidempotent, wprecise;
   logic idle;  // No L1D owner, PTW, maintenance, or incoming request.
   // Original architectural alignment, preserved across aligned split beats.
   logic rmisaligned;
@@ -80,16 +83,20 @@ interface lsu_l1d_if #(
   logic wmore;
 
   modport master(
-      output raddr, rcontext, ralu, rvalid, rmisaligned, rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1, atomic_lock, ordered, replay_allowed,
-      input idle, rdata, trap, cause, difftest_skip, rready, rretry, rmiss, miss_wake,
+      output raddr, rcontext, ralu, rvalid, rprobe, wprecise, rmisaligned,
+      output rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1,
+      output atomic_lock, ordered, replay_allowed,
+      input idle, rdata, trap, cause, difftest_skip, rready, rretry, rmiss, miss_wake, rnonidempotent,
       output raddr_b, rcontext_b, ralu_b, rvalid_b,
       input rdata_b, rready_b, rretry_b,
       output waddr, wpbmt, walu, wzero, wvalid, wdata, wmore,
       input wready, werr
   );
   modport slave(
-      input raddr, rcontext, ralu, rvalid, rmisaligned, rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1, atomic_lock, ordered, replay_allowed,
-      output idle, rdata, trap, cause, difftest_skip, rready, rretry, rmiss, miss_wake,
+      input raddr, rcontext, ralu, rvalid, rprobe, wprecise, rmisaligned,
+      input rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1,
+      input atomic_lock, ordered, replay_allowed,
+      output idle, rdata, trap, cause, difftest_skip, rready, rretry, rmiss, miss_wake, rnonidempotent,
       input raddr_b, rcontext_b, ralu_b, rvalid_b,
       output rdata_b, rready_b, rretry_b,
       input waddr, wpbmt, walu, wzero, wvalid, wdata, wmore,
@@ -307,7 +314,7 @@ interface csr_bcast_if #(
   logic [2:0] mcounteren;
   logic [2:0] scounteren;
   logic [2:0] frm;
-  logic [1:0] fs;
+  logic [1:0] fs, vs;
   logic [1:0] menvcfg_cbie;
   logic menvcfg_cbcfe;
   logic menvcfg_cbze;
@@ -322,7 +329,7 @@ interface csr_bcast_if #(
       input immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en, ext_int_en, bus_error_int,
       input mprv, mpp,
       input tsr, tvm, tw, mcounteren, scounteren,
-      input sum, mxr, sbe, frm, fs,
+      input sum, mxr, sbe, frm, fs, vs,
       input menvcfg_cbie, menvcfg_cbcfe, menvcfg_cbze, menvcfg_stce, menvcfg_pbmte,
       input senvcfg_cbie, senvcfg_cbcfe, senvcfg_cbze
   );
@@ -331,7 +338,7 @@ interface csr_bcast_if #(
       output immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en, ext_int_en, bus_error_int,
       output mprv, mpp,
       output tsr, tvm, tw, mcounteren, scounteren,
-      output sum, mxr, sbe, frm, fs,
+      output sum, mxr, sbe, frm, fs, vs,
       output menvcfg_cbie, menvcfg_cbcfe, menvcfg_cbze, menvcfg_stce, menvcfg_pbmte,
       output senvcfg_cbie, senvcfg_cbcfe, senvcfg_cbze
   );

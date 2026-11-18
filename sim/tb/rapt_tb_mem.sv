@@ -25,8 +25,9 @@
 // Runtime plusargs:
 //   +TEXT_TRACE      print writes/reads around egos app text windows
 //
-// Storage uses sparse associative byte arrays so the 128 MB PMEM / 256 MB FLASH
-// windows do not pre-allocate. Images are loaded with a $fread-style binary
+// Storage uses sparse associative byte arrays by default, so the PMEM / FLASH
+// windows do not pre-allocate. RAPT_TB_DENSE_PMEM enables faster PMEM access.
+// Images are loaded with a $fread-style binary
 // loader (matches sim, which loads raw .bin) — no $readmemh size limits.
 // =============================================================================
 
@@ -89,6 +90,28 @@ module rapt_tb_mem #(
   localparam logic [31:0] SramSize = 32'h0000_2000;
   localparam logic [31:0] SerialBase = 32'h1000_0000;  // NS16550 (QEMU / non-KU15P)
   localparam logic [31:0] SerialSize = 32'h0000_0100;
+`ifdef RAPT_V_EXTENSION
+  // A test-only side-effecting device inside the already mapped UART region.
+  localparam logic [31:0] VectorDeviceBase = 32'h1000_0040;
+  localparam int VectorDeviceWords = 16;
+  bit vector_device_test;
+  bit vector_device_fault_effect;
+  int unsigned vector_device_read_attempts[VectorDeviceWords];
+  int unsigned vector_device_read_effects[VectorDeviceWords];
+  int unsigned vector_device_write_attempts[VectorDeviceWords];
+  int unsigned vector_device_write_effects[VectorDeviceWords];
+  logic [31:0] vector_device_write_data[VectorDeviceWords];
+
+  initial begin
+    vector_device_test = $test$plusargs("VECTOR_DEVICE_TEST");
+    vector_device_fault_effect = $test$plusargs("VECTOR_DEVICE_FAULT_EFFECT");
+  end
+
+  function automatic logic is_vector_device(input logic [31:0] addr);
+    return vector_device_test && addr >= VectorDeviceBase
+        && addr < VectorDeviceBase + 4 * VectorDeviceWords;
+  endfunction
+`endif
   localparam logic [31:0] LiteXUartBase = 32'h1100_1800;  // LiteX UART (KU15P / HARDWARE)
   localparam logic [31:0] LiteXUartSize = 32'h0000_0020;
   localparam logic [31:0] MromBase = 32'h2000_0000;
@@ -123,6 +146,12 @@ module rapt_tb_mem #(
   // 32 bits of the (canonicalised) physical address.
   // ---------------------------------------------------------------------------
   byte unsigned store[longint unsigned];
+`ifdef RAPT_TB_DENSE_PMEM
+  // Two-state dynamic storage starts at zero, like an unwritten sparse byte.
+  // Keep larger optional memory ranges sparse to bound simulator allocation.
+  localparam logic [31:0] DensePmemSize = 32'h0800_0000;
+  bit [7:0] dense_pmem[];
+`endif
 
   // NS16550 minimal register state (TX console + polling).
   byte unsigned uart_lcr;
@@ -193,10 +222,29 @@ module rapt_tb_mem #(
     return is_mem(a) || is_serial(a) || is_litex_uart(a) || is_finisher(a);
   endfunction
 
-  // Sparse byte read (unwritten => 0).
+  // Backing-store byte read (unwritten => 0).
   function automatic byte unsigned rd_byte(input logic [31:0] a);
+`ifdef RAPT_TB_DENSE_PMEM
+    if (in_region(a, PmemBase, DensePmemSize)) begin
+      if (dense_pmem.size() == 0) dense_pmem = new[DensePmemSize];
+      return dense_pmem[a-PmemBase];
+    end
+`endif
     if (store.exists(a)) return store[a];
     else return 8'h00;
+  endfunction
+
+  function automatic void wr_byte(input logic [31:0] a, input byte unsigned data);
+`ifdef RAPT_TB_DENSE_PMEM
+    if (in_region(a, PmemBase, DensePmemSize)) begin
+      if (dense_pmem.size() == 0) dense_pmem = new[DensePmemSize];
+      dense_pmem[a-PmemBase] = data;
+    end else begin
+      store[a] = data;
+    end
+`else
+    store[a] = data;
+`endif
   endfunction
 
   // Assemble an XLEN-wide word from the backing store at byte address `a`.
@@ -229,7 +277,7 @@ module rapt_tb_mem #(
     n = 0;
     c = $fgetc(fd);
     while (c != -1) begin
-      store[base+n] = byte'(c);
+      wr_byte(base + n, byte'(c));
       n++;
       c = $fgetc(fd);
     end
@@ -246,6 +294,7 @@ module rapt_tb_mem #(
     int lane;
     logic [7:0] val;
     logic [7:0] regoff;
+    // Vector device side effects are recorded on the accepted W beat below.
     if (is_finisher(a)) begin
       // Lowest active byte lane carries the command code.
       for (lane = 0; lane < XLEN / 8; lane++) begin
@@ -305,12 +354,21 @@ module rapt_tb_mem #(
     end
   endtask
 
-  // MMIO read value, placed in the byte lane selected by a[1:0].
+  // MMIO read value, placed in the byte lane selected by the AXI data width.
   function automatic logic [XLEN-1:0] mmio_read(input logic [31:0] a);
     logic [XLEN-1:0] d;
     logic [7:0] regoff;
     logic [7:0] b;
     d = '0;
+`ifdef RAPT_V_EXTENSION
+    if (is_vector_device(a)) begin
+      int unsigned index;
+      index = (a - VectorDeviceBase) >> 2;
+      d[(a%(XLEN/8))*8+:32] = 32'h4141_0000 + index
+          + (vector_device_read_effects[index] << 8);
+      return d;
+    end
+`endif
     if (is_serial(a)) begin
       regoff = a[7:0] & 8'h7;
       case (regoff)
@@ -319,7 +377,7 @@ module rapt_tb_mem #(
         8'h5: b = 8'h60;  // LSR: THRE | TEMT (always ready to transmit)
         default: b = 8'h00;
       endcase
-      d[a[1:0]*8+:8] = b;
+      d[(a%(XLEN/8))*8+:8] = b;
     end else if (is_litex_uart(a)) begin
       // LiteX UART (0x11001800).  Raptor reports mvendorid=666, so egos runs
       // the HARDWARE path: TXFULL at +0x04 must read 0 (TX ready), and RXEMPTY
@@ -353,7 +411,7 @@ module rapt_tb_mem #(
     logic [31:0] aa;
     aa = a & ~32'(XLEN / 8 - 1);
     for (int i = 0; i < XLEN / 8; i++) begin
-      if (strb[i]) store[aa+i[31:0]] = wd[i*8+:8];
+      if (strb[i]) wr_byte(aa + i[31:0], wd[i*8+:8]);
     end
     if (text_trace && is_text_trace_addr(a) && text_trace_events < 256) begin
       text_trace_events++;
@@ -381,11 +439,19 @@ module rapt_tb_mem #(
   logic [    31:0] r_next_addr;
   logic [     2:0] r_size_q;
   logic [     1:0] r_burst_q;
+`ifdef RAPT_V_EXTENSION
+  int unsigned vector_r_delay, vector_r_wait;
+  logic [1:0] vector_fault_response;
+`endif
 
-  logic            r_slot_free;
-  assign r_slot_free = !r_busy || (rready && r_last_q);
+  logic r_slot_free;
+  assign r_slot_free = !r_busy || (rvalid && rready && r_last_q);
   assign arready     = r_slot_free;
-  assign rvalid      = r_busy;
+`ifdef RAPT_V_EXTENSION
+  assign rvalid = r_busy && vector_r_wait == 0;
+`else
+  assign rvalid = r_busy;
+`endif
   assign rdata       = r_data_q;
   assign rid         = r_id_q;
   assign rresp       = r_resp_q;
@@ -412,7 +478,50 @@ module rapt_tb_mem #(
 
   assign awready = !aw_busy;
   assign wready  = aw_busy && !b_busy;
-  assign bvalid  = b_busy;
+`ifdef RAPT_V_EXTENSION
+  int unsigned vector_b_delay, vector_b_wait;
+  logic [31:0] vector_fault_addr;
+  bit vector_fault_enable, vector_fault_once;
+  logic vector_fault_consumed;
+  logic [31:0] vector_r_fault_addr;
+  bit vector_r_fault_enable, vector_r_fault_once;
+  logic vector_r_fault_consumed;
+  int unsigned vector_b_fault_after, vector_b_fault_matches;
+  int unsigned vector_r_fault_after, vector_r_fault_matches;
+  int unsigned vector_r_fault_limit, vector_r_fault_errors;
+
+  function automatic logic vector_read_error(input logic [31:0] addr);
+    return vector_r_fault_enable && addr == vector_r_fault_addr
+        && vector_r_fault_matches >= vector_r_fault_after
+        && (vector_r_fault_limit == 0 || vector_r_fault_errors < vector_r_fault_limit)
+        && (!vector_r_fault_once || !vector_r_fault_consumed);
+  endfunction
+
+  function automatic logic vector_write_error(input logic [31:0] addr);
+    return vector_fault_enable && addr == vector_fault_addr
+        && vector_b_fault_matches >= vector_b_fault_after
+        && (!vector_fault_once || !vector_fault_consumed);
+  endfunction
+
+  initial begin
+    if (!$value$plusargs("VECTOR_B_DELAY=%d", vector_b_delay)) vector_b_delay = 0;
+    if (!$value$plusargs("VECTOR_R_DELAY=%d", vector_r_delay)) vector_r_delay = 0;
+    if (!$value$plusargs("VECTOR_FAULT_RESP=%d", vector_fault_response))
+      vector_fault_response = 2'b10;
+    if (vector_fault_response != 2'b10 && vector_fault_response != 2'b11)
+      $fatal(1, "VECTOR_FAULT_RESP must be 2 (SLVERR) or 3 (DECERR)");
+    vector_fault_enable = $value$plusargs("VECTOR_B_FAULT=%h", vector_fault_addr);
+    vector_fault_once = $test$plusargs("VECTOR_B_FAULT_ONCE");
+    vector_r_fault_enable = $value$plusargs("VECTOR_R_FAULT=%h", vector_r_fault_addr);
+    vector_r_fault_once = $test$plusargs("VECTOR_R_FAULT_ONCE");
+    if (!$value$plusargs("VECTOR_B_FAULT_AFTER=%d", vector_b_fault_after)) vector_b_fault_after = 0;
+    if (!$value$plusargs("VECTOR_R_FAULT_AFTER=%d", vector_r_fault_after)) vector_r_fault_after = 0;
+    if (!$value$plusargs("VECTOR_R_FAULT_COUNT=%d", vector_r_fault_limit)) vector_r_fault_limit = 0;
+  end
+  assign bvalid = b_busy && vector_b_wait == 0;
+`else
+  assign bvalid = b_busy;
+`endif
   assign bid     = b_id_q;
   assign bresp   = b_resp_q;
 
@@ -438,6 +547,22 @@ module rapt_tb_mem #(
       b_busy        <= 1'b0;
       b_id_q        <= '0;
       b_resp_q      <= RespOkay;
+`ifdef RAPT_V_EXTENSION
+      vector_b_wait <= 0;
+      vector_r_wait <= 0;
+      vector_fault_consumed <= 1'b0;
+      vector_r_fault_consumed <= 1'b0;
+      vector_b_fault_matches <= 0;
+      vector_r_fault_matches <= 0;
+      vector_r_fault_errors <= 0;
+      for (int i = 0; i < VectorDeviceWords; i++) begin
+        vector_device_read_attempts[i] <= 0;
+        vector_device_read_effects[i] <= 0;
+        vector_device_write_attempts[i] <= 0;
+        vector_device_write_effects[i] <= 0;
+        vector_device_write_data[i] <= 0;
+      end
+`endif
 
       sim_finish    <= 1'b0;
       sim_exit_code <= '0;
@@ -446,16 +571,33 @@ module rapt_tb_mem #(
       uart_ansi <= 1'b0;
     end else begin
       sim_finish <= 1'b0;  // single-cycle pulse default
+`ifdef RAPT_V_EXTENSION
+      if (b_busy && vector_b_wait != 0) vector_b_wait <= vector_b_wait - 1;
+      if (r_busy && vector_r_wait != 0) vector_r_wait <= vector_r_wait - 1;
+`endif
 
       // -------------------- READ CHANNEL --------------------
       // (1) Consume current beat on handshake.
-      if (r_busy && rready) begin
+      if (rvalid && rready) begin
         if (r_last_q) begin
           r_busy <= 1'b0;
         end else begin
           automatic logic [31:0] na = r_next_addr;
-          r_data_q     <= read_any(na);
-          r_resp_q     <= RespOkay;
+          r_data_q <= read_any(na);
+`ifdef RAPT_V_EXTENSION
+          r_resp_q <= vector_read_error(na) ? vector_fault_response : RespOkay;
+          if ($test$plusargs("VECTOR_BUS_TRACE") && na >= 32'h8000_1000 && na < 32'h8000_1100)
+            $display("VECTOR read beat addr=%h error=%0d", na, vector_read_error(na));
+          if (vector_r_fault_enable && na == vector_r_fault_addr)
+            vector_r_fault_matches <= vector_r_fault_matches + 1;
+          if (vector_read_error(na)) begin
+            vector_r_fault_consumed <= 1'b1;
+            vector_r_fault_errors <= vector_r_fault_errors + 1;
+          end
+          vector_r_wait <= vector_r_delay;
+`else
+          r_resp_q <= RespOkay;
+`endif
           r_next_addr  <= next_addr(na, r_size_q, r_burst_q);
           r_beats_left <= r_beats_left - 8'd1;
           r_last_q     <= (r_beats_left == 8'd1);
@@ -464,6 +606,19 @@ module rapt_tb_mem #(
       // (2) Accept new AR if slot free (may overwrite r_busy same cycle).
       if (accept_ar) begin
         automatic logic [XLEN-1:0] rd = read_any(lo32(araddr));
+`ifdef RAPT_V_EXTENSION
+        if (is_vector_device(lo32(araddr))) begin
+          automatic int unsigned index = (lo32(araddr) - VectorDeviceBase) >> 2;
+          automatic bit error_response = vector_read_error(lo32(araddr));
+          if (arlen != 0 || arsize != 2 || araddr[1:0] != 0)
+            $fatal(
+                1, "invalid side-effect device read addr=%h len=%h size=%h", araddr, arlen, arsize
+            );
+          vector_device_read_attempts[index] <= vector_device_read_attempts[index] + 1;
+          if (!error_response || vector_device_fault_effect)
+            vector_device_read_effects[index] <= vector_device_read_effects[index] + 1;
+        end
+`endif
         if (!is_valid(lo32(araddr)))
           $display("[rapt_tb_mem] ERROR: read from invalid addr 0x%08h", lo32(araddr));
         if (text_trace && is_text_trace_addr(lo32(araddr)) && text_trace_events < 256) begin
@@ -474,7 +629,34 @@ module rapt_tb_mem #(
         r_busy       <= 1'b1;
         r_id_q       <= arid;
         r_data_q     <= rd;
-        r_resp_q     <= RespOkay;  // map decode errors to zero+OKAY (prefetch tolerance)
+`ifdef RAPT_V_EXTENSION
+        r_resp_q <= vector_read_error(lo32(araddr)) ? vector_fault_response : RespOkay;
+        if ($test$plusargs(
+                "VECTOR_BUS_TRACE"
+            ) && lo32(
+                araddr
+            ) >= 32'h8000_1000 && lo32(
+                araddr
+            ) < 32'h8000_1100)
+          $display(
+              "VECTOR read addr=%h len=%0d size=%0d error=%0d",
+              araddr,
+              arlen,
+              arsize,
+              vector_read_error(
+                  lo32(araddr)
+              )
+          );
+        if (vector_r_fault_enable && lo32(araddr) == vector_r_fault_addr)
+          vector_r_fault_matches <= vector_r_fault_matches + 1;
+        if (vector_read_error(lo32(araddr))) begin
+          vector_r_fault_consumed <= 1'b1;
+          vector_r_fault_errors <= vector_r_fault_errors + 1;
+        end
+        vector_r_wait <= vector_r_delay;
+`else
+        r_resp_q <= RespOkay;  // map decode errors to zero+OKAY (prefetch tolerance)
+`endif
         r_size_q     <= arsize;
         r_burst_q    <= arburst;
         r_beats_left <= arlen;
@@ -490,12 +672,58 @@ module rapt_tb_mem #(
         aw_addr_q   <= lo32(awaddr);
         aw_size_q   <= awsize;
         aw_burst_q  <= awburst;
+`ifdef RAPT_V_EXTENSION
+        aw_resp_acc <= vector_write_error(
+            lo32(awaddr)
+        ) ? vector_fault_response : is_valid(
+            lo32(awaddr)
+        ) ? RespOkay : RespDecerr;
+        if ($test$plusargs(
+                "VECTOR_BUS_TRACE"
+            ) && lo32(
+                awaddr
+            ) >= 32'h8000_1000 && lo32(
+                awaddr
+            ) < 32'h8000_1100)
+          $display(
+              "VECTOR write addr=%h len=%0d size=%0d error=%0d",
+              awaddr,
+              awlen,
+              awsize,
+              vector_write_error(
+                  lo32(awaddr)
+              )
+          );
+        if (vector_fault_enable && lo32(awaddr) == vector_fault_addr)
+          vector_b_fault_matches <= vector_b_fault_matches + 1;
+        if (vector_write_error(lo32(awaddr))) vector_fault_consumed <= 1'b1;
+`else
         aw_resp_acc <= is_valid(lo32(awaddr)) ? RespOkay : RespDecerr;
+`endif
         if (!is_valid(lo32(awaddr)))
           $display("[rapt_tb_mem] ERROR: write to invalid addr 0x%08h", lo32(awaddr));
       end
       // (2) Consume W beat on handshake.
       if (wvalid && wready) begin
+`ifdef RAPT_V_EXTENSION
+        if (is_vector_device(aw_addr_q)) begin
+          automatic int unsigned index = (aw_addr_q - VectorDeviceBase) >> 2;
+          if (aw_size_q != 2 || aw_addr_q[1:0] != 0 || !wlast
+              || wstrb != (XLEN/8)'(4'hf << (aw_addr_q % (XLEN/8))))
+            $fatal(
+                1,
+                "invalid side-effect device write addr=%h size=%h strb=%h",
+                aw_addr_q,
+                aw_size_q,
+                wstrb
+            );
+          vector_device_write_attempts[index] <= vector_device_write_attempts[index] + 1;
+          if (aw_resp_acc == RespOkay || vector_device_fault_effect) begin
+            vector_device_write_effects[index] <= vector_device_write_effects[index] + 1;
+            vector_device_write_data[index] <= 32'(wdata >> (8 * (aw_addr_q % (XLEN/8))));
+          end
+        end
+`endif
         if (aw_resp_acc == RespOkay) begin
           if (is_mem(aw_addr_q)) begin
             store_write_word(aw_addr_q, wdata, wstrb);
@@ -507,13 +735,16 @@ module rapt_tb_mem #(
           b_busy   <= 1'b1;
           b_id_q   <= aw_id_q;
           b_resp_q <= aw_resp_acc;
-          aw_busy  <= 1'b0;
+`ifdef RAPT_V_EXTENSION
+          vector_b_wait <= vector_b_delay;
+`endif
+          aw_busy <= 1'b0;
         end else begin
           aw_addr_q <= next_addr(aw_addr_q, aw_size_q, aw_burst_q);
         end
       end
       // (3) Drain B on handshake.
-      if (b_busy && bready) b_busy <= 1'b0;
+      if (bvalid && bready) b_busy <= 1'b0;
     end
   end
 endmodule

@@ -41,6 +41,7 @@ module tb_backend_trace;
   assign debug.resume_pc = '0;
 
   rapt_backend dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock,
       .reset,
       .writeback_done,
@@ -127,6 +128,10 @@ module tb_backend_trace;
   rapt_pkg::fetch_slot_t fetched[rapt_pkg::DecodeWidth];
   rapt_pkg::decoded_slot_t decoded[rapt_pkg::DecodeWidth];
   int trace_count, image_size, feed_index, commit_index, feed_width, cycles;
+`ifdef RAPT_V_EXTENSION
+  int vector_issued, vector_completed, vector_authorized_cycles, vector_write_wait;
+  bit vector_fault_seen;
+`endif
 
   for (genvar s = 0; s < rapt_pkg::DecodeWidth; s++) begin : g_decode
     rapt_decode_slot decoder (
@@ -228,6 +233,13 @@ module tb_backend_trace;
     feed_index = 0;
     commit_index = 0;
     cycles = 0;
+`ifdef RAPT_V_EXTENSION
+    vector_issued = 0;
+    vector_completed = 0;
+    vector_authorized_cycles = 0;
+    vector_write_wait = 0;
+    vector_fault_seen = 0;
+`endif
     accepted = 0;
     committed = 0;
     front_stall = 0;
@@ -290,6 +302,38 @@ module tb_backend_trace;
     reset = 0;
     while (commit_index < trace_count && cycles < max_cycles) begin
       @(posedge clock);
+`ifdef RAPT_V_EXTENSION
+      if (dut.vector_issue.valid && dut.vector_command_ready) vector_issued++;
+      if (dut.vector_response_valid
+          && dut.g_completion_guard[rapt_pkg::IntegerSystemPort].accepted) begin
+        if (dut.vector_trap && $test$plusargs("VECTOR_STORE_FAULT")) begin
+          if (dut.vector_cause != XLEN'(7) || dut.vector_tval != XLEN'('h80001008)
+              || dut.vpu.u_vpu.vstart != 2 || vector_write_wait < 12)
+            $fatal(
+                1,
+                "vector store fault cause=%h tval=%h vstart=%0d wait=%0d",
+                dut.vector_cause,
+                dut.vector_tval,
+                dut.vpu.u_vpu.vstart,
+                vector_write_wait
+            );
+          if (external_memory.memory_model.read_any(
+                  32'h80001000
+              ) != XLEN'(5) || external_memory.memory_model.read_any(
+                  32'h80001004
+              ) != XLEN'(5) || external_memory.memory_model.read_any(
+                  32'h80001008
+              ) != '0)
+            $fatal(1, "vector store fault modified the wrong elements");
+          vector_fault_seen = 1;
+          $display("PASS vector store fault vstart=2 tval=80001008 wait=%0d", vector_write_wait);
+          $finish;
+        end else if (dut.vector_trap) $fatal(1, "unexpected vector trap: %h", dut.vector_cause);
+        vector_completed++;
+      end
+      if (dut.vector_authorized) vector_authorized_cycles++;
+      if (dut.vm_state == dut.VM_STORE && dut.vm_index == 2 && !lsu_l1d.wready) vector_write_wait++;
+`endif
       // Retire is the source of truth for a trace after any precise flush.
       committed_this_cycle = 0;
       for (int s = 0; s < rapt_pkg::CommitWidth; s++) begin
@@ -462,8 +506,41 @@ module tb_backend_trace;
       @(negedge clock);
       feed_index = next_feed_index;
     end
+`ifdef RAPT_V_EXTENSION
+    if (commit_index < trace_count && !vector_fault_seen)
+      $fatal(1, "BE timeout commit=%0d/%0d", commit_index, trace_count);
+    if ($test$plusargs("VECTOR_STORE_FAULT") && !vector_fault_seen)
+      $fatal(1, "expected vector store fault was not observed");
+    if ($test$plusargs("VECTOR_MEMORY_SMOKE")) begin
+      if (dut.rf[5] != XLEN'(XLEN == 64 ? 2 : 4) || dut.rf[10] != XLEN'(15)
+          || dut.rf[11] != XLEN'(XLEN == 64 ? 16 : 18)
+          || vector_issued != 4 || vector_completed != 4)
+        $fatal(
+            1,
+            "vector memory result x5=%h x10=%h x11=%h issued=%0d completed=%0d",
+            dut.rf[5],
+            dut.rf[10],
+            dut.rf[11],
+            vector_issued,
+            vector_completed
+        );
+      $display("PASS vector memory backend XLEN=%0d x10=15 x11=%0d", XLEN, dut.rf[11]);
+    end
+`else
     if (commit_index < trace_count)
       $fatal(1, "BE timeout commit=%0d/%0d", commit_index, trace_count);
+`endif
+`ifdef RAPT_V_EXTENSION
+    if ($test$plusargs("VECTOR_SMOKE")) begin
+      if (dut.rf[5] != XLEN'(3) || dut.rf[10] != XLEN'(12) || dut.rf[11] != XLEN'(13))
+        $fatal(1, "vector smoke result x5=%h x10=%h x11=%h", dut.rf[5], dut.rf[10], dut.rf[11]);
+      if (vector_issued != 4 || vector_completed != 4)
+        $fatal(1, "vector smoke lifetime issued=%0d complete=%0d", vector_issued, vector_completed);
+      $display("PASS vector backend x5=%0d x10=%0d x11=%0d issued=%0d completed=%0d active=%0d",
+               dut.rf[5], dut.rf[10], dut.rf[11], vector_issued, vector_completed,
+               vector_authorized_cycles);
+    end
+`endif
     $display(
         "PASS: BE instructions=%0d cycles=%0d commit_ipc=%0f width_loss=%0f accepted=%0d front_stall=%0d commit_empty=%0d flushes=%0d loads=%0d stores=%0d axi_reads=%0d axi_writes=%0d",
         committed, cycles, real'(committed) / cycles,

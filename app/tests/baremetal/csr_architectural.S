@@ -59,16 +59,31 @@ delegation:
   csrw mie, zero
   csrw mip, zero
   csrw mideleg, zero
+  csrr s2, misa
+  srli s2, s2, 21
+  andi s2, s2, 1
+  neg s2, s2
+  andi s2, s2, 0x600  /* VS is writable only when MISA.V is present. */
   li s0, 0
 status_fields:
-  slli s1, s0, 13
-  li t0, 0x18640         /* XS=3, VS=3, UBE=1: all read-only zero */
+  andi s1, s0, 3
+  slli s1, s1, 13
+  srli s3, s0, 2
+  slli s3, s3, 9
+  li t0, 0x18040        /* XS=3 and UBE=1 remain read-only zero. */
   or t0, t0, s1
+  or t0, t0, s3
   li t1, SD
   or t0, t0, t1
   csrw mstatus, t0
-  li t2, 3
-  bne s0, t2, clean
+  and s3, s3, s2
+  or s1, s1, s3
+  andi t2, s0, 3
+  li t3, 3
+  beq t2, t3, dirty
+  li t3, 0x600
+  bne s3, t3, clean
+dirty:
   or s1, s1, t1
 clean:
   li t1, MSTATUS_HW
@@ -87,7 +102,7 @@ clean:
   li t1, SSTATUS_HW
   bne t1, t2, fail
   addi s0, s0, 1
-  li t0, 4
+  li t0, 16
   blt s0, t0, status_fields
   li t0, 0x1000        /* unsupported MPP=2 must not read back */
   csrw mstatus, t0

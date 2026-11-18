@@ -23,6 +23,7 @@ module rapt_backend #(
     parameter logic [rapt_pkg::CompletionPorts-1:0] RegisteredOperandWakePorts = '0
 ) (
     input logic clock,
+    input rapt_pkg::sram_ctrl_t sram_ctrl_i,
     input logic writeback_done,
     output logic writeback_drain,
     output logic writeback_clean,
@@ -128,6 +129,487 @@ rapt_pkg::SteerScanEntries
   localparam int FpuPort = rapt_pkg::completion_fpu_port(rapt_pkg::CoreConfig);
   localparam int IntegerSystemPort = rapt_pkg::CoreConfig.integer_system_port;
   rapt_pkg::completion_t wb_integer_raw[IntegerIssuePorts];
+`ifdef RAPT_V_EXTENSION
+  // Serialized RVV execution with ROB ownership and precise memory faults.
+  localparam int VectorRobBits = rapt_pkg::ROBIndexBits;
+  localparam int VectorGenerationBits = rapt_pkg::CoreConfig.rob_generation_bits;
+  localparam int VectorTagBits = VectorRobBits + VectorGenerationBits;
+  typedef struct packed {
+    rapt_pkg::pc_t pc;
+    rapt_pkg::phys_reg_t prd;
+    rapt_pkg::arch_reg_t rd;
+  } vector_metadata_t;
+  rapt_pkg::issue_packet_t vector_issue;
+  rapt_pkg::completion_t wb_integer_ieu[IntegerIssuePorts], vector_completion;
+  vector_metadata_t vector_command_metadata, vector_response_metadata;
+  logic vector_command_ready, vector_response_valid, vector_authorized;
+  logic vector_cancelled, vector_kill_blocked, vector_busy, vector_response_dropped;
+  logic vector_trap, vector_dirty, vector_fp_dirty, vector_fp_write, vector_mem_valid;
+  logic [4:0] vector_rd, vector_fflags;
+  logic [XLEN-1:0] vector_cause, vector_tval, vector_result;
+  logic [63:0] vector_fp_result, vector_fp_scalar;
+  logic [VectorTagBits-1:0] vector_response_tag, vector_owner_tag;
+  logic vector_head_valid, vector_head_safe;
+
+  localparam int VectorIndexBits = $clog2(rapt_pkg::VectorLength) + 1;
+  logic vector_mem_ready, vector_mem_write, vector_mem_probe;
+  logic [XLEN-1:0] vector_mem_addr;
+  logic [1:0] vector_mem_size;
+  logic [63:0] vector_mem_wdata, vector_mem_rdata;
+  logic [VectorTagBits-1:0] vector_mem_tag, vector_mem_rsp_tag;
+  logic [VectorIndexBits-1:0] vector_mem_index, vector_mem_rsp_index;
+  logic [2:0] vector_mem_field, vector_mem_rsp_field;
+  logic vector_mem_rsp_valid, vector_mem_rsp_ready, vector_mem_rsp_probe;
+  logic vector_mem_fault, vector_mem_nonidempotent, vector_mem_response_dropped;
+  logic [XLEN-1:0] vector_mem_cause, vector_mem_tval;
+  logic vector_memory_q, vector_drain_request, rou_writeback_drain;
+  lsu_l1d_if #(.XLEN(XLEN)) scalar_l1d ();
+  lsu_l1d_mmu_if #(.XLEN(XLEN)) scalar_mmu ();
+
+  // Vector memory reaches the irrevocable owner only after the complete
+  // memory drain, including older posted responses and outstanding fills.
+  assign vector_drain_request = vector_busy && vector_memory_q && vector_head_valid
+      && vector_owner_tag == {completion_owner.generation[rou_cmu.rob_head], rou_cmu.rob_head}
+      && !vector_authorized && !cmu_bcast.flush_pipe;
+  assign vector_head_safe = rou_lsu.sq_empty && !cmu_bcast.flush_pipe
+      && (!vector_memory_q || (vector_drain_request && writeback_done));
+  assign writeback_drain = rou_writeback_drain || vector_drain_request;
+  for (genvar p = 0; p < IntegerIssuePorts; p++) begin : g_vector_completion_mux
+    if (p == IntegerSystemPort) begin : g_system
+      assign wb_integer_raw[p] = vector_response_valid ? vector_completion : wb_integer_ieu[p];
+    end else begin : g_other
+      assign wb_integer_raw[p] = wb_integer_ieu[p];
+    end
+  end
+  assign vector_command_metadata = {vector_issue.uop.pc, vector_issue.prd, vector_issue.uop.rd};
+  assign vector_head_valid = completion_owner.live[rou_cmu.rob_head]
+      && completion_owner.executing[rou_cmu.rob_head];
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      vector_owner_tag <= '0;
+      vector_memory_q <= 1'b0;
+    end else if (vector_issue.valid && vector_command_ready) begin
+      vector_owner_tag <= {vector_issue.generation, vector_issue.dest};
+      vector_memory_q <= vector_issue.uop.imm[6:0] == 7'h07
+          || vector_issue.uop.imm[6:0] == 7'h27;
+    end
+  end
+  always_comb begin
+    vector_completion = '0;
+    vector_completion.valid = vector_response_valid;
+    vector_completion.dest = vector_response_tag[VectorRobBits-1:0];
+    vector_completion.generation = vector_response_tag[VectorTagBits-1:VectorRobBits];
+    vector_completion.pc = vector_response_metadata.pc;
+    vector_completion.npc = vector_response_metadata.pc + rapt_pkg::pc_t'(4);
+    vector_completion.prd = vector_response_metadata.prd;
+    vector_completion.rd = vector_response_metadata.rd;
+    vector_completion.result = vector_result;
+    vector_completion.fp_flags_valid = vector_fp_dirty && !vector_trap;
+    vector_completion.fp_flags = vector_fflags;
+    vector_completion.fp_wen = vector_fp_write && !vector_trap;
+    vector_completion.fp_result = vector_fp_result;
+    vector_completion.trap = vector_trap;
+    vector_completion.cause = 6'(vector_cause);
+    vector_completion.tval = vector_tval;
+    vector_completion.updates.control_flow = 1'b1;
+    vector_completion.updates.system_state = 1'b1;
+    vector_completion.updates.exception = 1'b1;
+  end
+  rapt_vpu_core #(
+      .RobBits(VectorRobBits),
+      .GenerationBits(VectorGenerationBits),
+      .MetadataBits($bits(vector_metadata_t)),
+      .XLEN(XLEN),
+      .VLEN(rapt_pkg::VectorLength),
+      .ELEN(rapt_pkg::VectorElen),
+      .BankBits(rapt_pkg::VectorBankBits),
+      .Banks(rapt_pkg::VectorBanks)
+  ) vpu (
+      .sram_ctrl_i(sram_ctrl_i),
+      .clock(clock),
+      .reset(reset),
+      .head_safe(vector_head_safe),
+      .cmd_metadata(vector_command_metadata),
+      .rsp_metadata(vector_response_metadata),
+      .authorized(vector_authorized),
+      .response_dropped(vector_response_dropped),
+      .vector_enabled(csr_bcast.vs != 2'b00),
+      .cmd_valid(vector_issue.valid),
+      .cmd_ready(vector_command_ready),
+      .cmd_tag({vector_issue.generation, vector_issue.dest}),
+      .cmd_insn(vector_issue.uop.imm),
+      .cmd_rs1(vector_issue.op1),
+      .cmd_rs2(vector_issue.op2),
+      .cmd_frs1(vector_fp_scalar),
+      .cmd_frm(csr_bcast.frm),
+      .cmd_fp_enabled(rapt_pkg::FpuEnable && csr_bcast.fs != 2'b00),
+      .authorize_valid(vector_head_valid),
+      .authorize_ready(),
+      .authorize_tag({completion_owner.generation[rou_cmu.rob_head], rou_cmu.rob_head}),
+      .kill_valid(cmu_bcast.flush_pipe),
+      .kill_tag(vector_owner_tag),
+      .cancelled(vector_cancelled),
+      .kill_blocked(vector_kill_blocked),
+      .busy(vector_busy),
+      .rsp_valid(vector_response_valid),
+      .rsp_ready(g_completion_guard[IntegerSystemPort].accepted),
+      .rsp_tag(vector_response_tag),
+      .rsp_trap(vector_trap),
+      .rsp_cause(vector_cause),
+      .rsp_tval(vector_tval),
+      .rsp_rd(vector_rd),
+      .rsp_result(vector_result),
+      .rsp_dirty(vector_dirty),
+      .rsp_fflags(vector_fflags),
+      .rsp_fp_dirty(vector_fp_dirty),
+      .rsp_fp_write(vector_fp_write),
+      .rsp_fp_result(vector_fp_result),
+      .mem_valid(vector_mem_valid),
+      .mem_ready(vector_mem_ready),
+      .mem_write(vector_mem_write),
+      .mem_probe(vector_mem_probe),
+      .mem_addr(vector_mem_addr),
+      .mem_size(vector_mem_size),
+      .mem_wdata(vector_mem_wdata),
+      .mem_tag(vector_mem_tag),
+      .mem_index(vector_mem_index),
+      .mem_field(vector_mem_field),
+      .mem_rsp_valid(vector_mem_rsp_valid),
+      .mem_rsp_ready(vector_mem_rsp_ready),
+      .mem_rsp_tag(vector_mem_rsp_tag),
+      .mem_rsp_index(vector_mem_rsp_index),
+      .mem_rsp_field(vector_mem_rsp_field),
+      .mem_rsp_probe(vector_mem_rsp_probe),
+      .mem_rdata(vector_mem_rdata),
+      .mem_fault(vector_mem_fault),
+      .mem_non_idempotent(vector_mem_nonidempotent),
+      .mem_cause(vector_mem_cause),
+      .mem_tval(vector_mem_tval),
+      .mem_response_dropped(vector_mem_response_dropped),
+      .host_valid(1'b0),
+      .host_ready(),
+      .host_write(1'b0),
+      .host_addr('0),
+      .host_size('0),
+      .host_wdata('0),
+      .host_rsp_valid(),
+      .host_rsp_ready(1'b0),
+      .host_rdata()
+  );
+
+`ifndef SYNTHESIS
+`ifndef RAPT_USE_SRAM_MACRO
+`ifdef USE_DPI_C
+  // Observe functional VRF SRAMs, rather than reconstructing their contents
+  // from completed instructions. These views add no synthesis hardware.
+  logic [7:0] vector_byte_view[32*rapt_pkg::VectorLength/8] /* verilator public_flat_rd */;
+  logic [XLEN-1:0] vector_csr_view[7] /* verilator public_flat_rd */;
+  for (
+      genvar byte_index = 0; byte_index < 32 * rapt_pkg::VectorLength / 8; byte_index++
+  ) begin : g_vector_observe
+    localparam int WordIndex = byte_index / (rapt_pkg::VectorBankBits / 8);
+    localparam int BankIndex = WordIndex % rapt_pkg::VectorBanks;
+    localparam int RowIndex  = WordIndex / rapt_pkg::VectorBanks;
+    localparam int BitOffset = (byte_index % (rapt_pkg::VectorBankBits / 8)) * 8;
+    assign vector_byte_view[byte_index] =
+        vpu.u_vpu.u_vrf.g_bank[BankIndex].u_sram.mem[RowIndex][BitOffset+:8];
+  end
+  assign vector_csr_view[0] = XLEN'(vpu.u_vpu.vstart);
+  assign vector_csr_view[1] = XLEN'(vpu.u_vpu.vxsat);
+  assign vector_csr_view[2] = XLEN'(vpu.u_vpu.vxrm);
+  assign vector_csr_view[3] = XLEN'({vpu.u_vpu.vxrm, vpu.u_vpu.vxsat});
+  assign vector_csr_view[4] = vpu.u_vpu.vl;
+  assign vector_csr_view[5] = vpu.u_vpu.vtype;
+  assign vector_csr_view[6] = XLEN'(rapt_pkg::VectorLength/8);
+`endif
+`endif
+`endif
+
+  // One vector element owns the existing L1D/MMU ports until its final
+  // response. Serialized admission and the preceding drain exclude scalar
+  // requests; the response retains the VPU's element/field identity.
+  typedef enum logic [2:0] {
+    VM_IDLE,
+    VM_CHECK,
+    VM_TRANSLATE,
+    VM_LOAD_CHECK,
+    VM_LOAD,
+    VM_STORE,
+    VM_RESPONSE
+  } vector_mem_state_t;
+  vector_mem_state_t vm_state;
+  logic vm_write, vm_probe, vm_fault, vm_nonidempotent;
+  logic [XLEN-1:0] vm_addr, vm_paddr, vm_cause, vm_tval;
+  logic [1:0] vm_size, vm_pbmt;
+  logic [63:0] vm_wdata, vm_rdata;
+  logic [VectorTagBits-1:0] vm_tag;
+  logic [VectorIndexBits-1:0] vm_index;
+  logic [2:0] vm_field;
+  logic [7:0] vm_context_version;
+  logic [3:0] vm_size_m1, vm_bare_fault_offset;
+  logic [4:0] vm_store_alu, vm_load_alu;
+  logic [7:0] vm_strobe;
+  logic vm_bare_fault, vm_active, vm_wide_split, vm_high_word;
+  logic [XLEN-1:0] vm_beat_addr;
+  assign vm_wide_split = XLEN == 32 && vm_size == 3;
+  assign vm_beat_addr = vm_addr + XLEN'(vm_wide_split && vm_high_word ? 4 : 0);
+  rapt_pkg::mem_context_t vm_context;
+  pmp_state_if #(.XLEN(XLEN)) vector_pmp ();
+
+  rapt_pmp_state vector_pmp_state (
+      .clock(clock),
+      .reset(reset),
+      .update(pmp_update),
+      .state(vector_pmp)
+  );
+  rapt_ioq_store_check #(
+      .XLEN(XLEN)
+  ) vector_store_check (
+      .store_context(vm_context),
+      .pmp_state(vector_pmp),
+      .store_addr(vm_addr),
+      .store_size_m1(vm_size_m1),
+      .store_valid(vm_state == VM_CHECK && vm_write),
+      .store_mmu(1'b0),
+      .cmo_mgmt(1'b0),
+      .store_bare_fault_offset(vm_bare_fault_offset),
+      .store_bare_pmp_trap(vm_bare_fault)
+  );
+
+  assign vm_size_m1 = (4'(1) << vm_size) - 1'b1;
+  always_comb begin
+    case (vm_size)
+      0: begin
+        vm_store_alu = `RAPT_SB_WSTRB;
+        vm_load_alu = `RAPT_ALU_LBU_;
+        vm_strobe = 8'h01;
+      end
+      1: begin
+        vm_store_alu = `RAPT_SH_WSTRB;
+        vm_load_alu = `RAPT_ALU_LHU_;
+        vm_strobe = 8'h03;
+      end
+      2: begin
+        vm_store_alu = `RAPT_SW_WSTRB;
+        vm_load_alu = XLEN == 64 ? `RAPT_ALU_LWU_ : `RAPT_ALU_LW__;
+        vm_strobe = 8'h0f;
+      end
+      default: begin
+        vm_store_alu = `RAPT_SD_WSTRB;
+        vm_load_alu = `RAPT_ALU_LD__;
+        vm_strobe = 8'hff;
+      end
+    endcase
+  end
+  // The VPU owns this descriptor until the matching response. Reuse it
+  // instead of registering a second copy in the integration bridge.
+  assign vm_write = vector_mem_write;
+  assign vm_probe = vector_mem_probe;
+  assign vm_addr = vector_mem_addr;
+  assign vm_size = vector_mem_size;
+  assign vm_wdata = vector_mem_wdata;
+  assign vm_tag = vector_mem_tag;
+  assign vm_index = vector_mem_index;
+  assign vm_field = vector_mem_field;
+  assign vector_mem_ready = vm_state == VM_IDLE;
+  assign vm_active = vm_state != VM_IDLE && vm_state != VM_RESPONSE;
+  assign vector_mem_rsp_valid = vm_state == VM_RESPONSE;
+  assign vector_mem_rsp_tag = vm_tag;
+  assign vector_mem_rsp_index = vm_index;
+  assign vector_mem_rsp_field = vm_field;
+  assign vector_mem_rsp_probe = vm_probe;
+  assign vector_mem_rdata = vm_rdata;
+  assign vector_mem_fault = vm_fault;
+  assign vector_mem_nonidempotent = vm_nonidempotent;
+  assign vector_mem_cause = vm_cause;
+  assign vector_mem_tval = vm_tval;
+
+  always_ff @(posedge clock) begin
+    if (reset) vm_context_version <= '0;
+    else if (cmu_bcast.mem_context_invalidate) vm_context_version <= vm_context_version + 1'b1;
+  end
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      vm_state <= VM_IDLE;
+      vm_context <= '0;
+      vm_fault <= 1'b0;
+      vm_nonidempotent <= 1'b0;
+      vm_cause <= '0;
+      vm_tval <= '0;
+      vm_rdata <= '0;
+      vm_paddr <= '0;
+      vm_pbmt <= '0;
+      vm_high_word <= 1'b0;
+    end else begin
+      case (vm_state)
+        VM_IDLE:
+        if (vector_mem_valid && vector_mem_ready) begin
+          vm_context <= {
+            csr_bcast.dmmu_en,
+            (csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv) ? csr_bcast.mpp : csr_bcast.priv,
+            csr_bcast.sum, csr_bcast.mxr, csr_bcast.menvcfg_pbmte,
+            csr_bcast.satp_asid, vm_context_version
+          };
+          vm_fault <= 1'b0;
+          vm_high_word <= 1'b0;
+          vm_cause <= vector_mem_write ? XLEN'(`RAPT_CAUSE_STORE_ACC_FAULT)
+              : XLEN'(`RAPT_CAUSE_LOAD_ACC_FAULT);
+          vm_tval <= vector_mem_addr;
+          vm_nonidempotent <= 1'b0;
+          vm_rdata <= '0;
+          vm_state <= VM_CHECK;
+        end
+        VM_CHECK: begin
+          if (!vm_write) vm_state <= vm_wide_split ? VM_LOAD_CHECK : VM_LOAD;
+          else if (vm_context.mmu_en) vm_state <= VM_TRANSLATE;
+          else if (vm_bare_fault) begin
+            vm_fault <= 1'b1;
+            vm_tval <= vm_addr + XLEN'(vm_bare_fault_offset);
+            vm_state <= VM_RESPONSE;
+          end else begin
+            vm_paddr <= rapt_pkg::canonical_paddr(vm_addr);
+            vm_pbmt <= '0;
+            vm_nonidempotent <= rapt_pkg::addr_device(vm_addr);
+            if (vm_wide_split && rapt_pkg::addr_device(vm_addr) && !vm_probe) begin
+              vm_fault <= 1'b1;
+              vm_state <= VM_RESPONSE;
+            end else vm_state <= vm_probe ? VM_RESPONSE : VM_STORE;
+          end
+        end
+        VM_TRANSLATE:
+        if (exu_l1d.ready) begin
+          vm_paddr <= exu_l1d.paddr;
+          vm_pbmt <= exu_l1d.pbmt;
+          vm_nonidempotent <= rapt_pkg::addr_device(exu_l1d.paddr) || exu_l1d.pbmt == 2'b10;
+          if (exu_l1d.trap || !rapt_pkg::addr_data_span_capable(
+                  exu_l1d.paddr, vm_size_m1, 1'b1
+              ) || !rapt_pkg::addr_device_width_capable(
+                  exu_l1d.paddr, vm_size_m1
+              )) begin
+            vm_fault <= 1'b1;
+            vm_cause <= exu_l1d.trap ? exu_l1d.cause : XLEN'(`RAPT_CAUSE_STORE_ACC_FAULT);
+            vm_state <= VM_RESPONSE;
+          end else if (vm_wide_split && !vm_probe && (rapt_pkg::addr_device(
+                  exu_l1d.paddr
+              ) || exu_l1d.pbmt == 2'b10)) begin
+            vm_fault <= 1'b1;
+            vm_state <= VM_RESPONSE;
+          end else vm_state <= vm_probe ? VM_RESPONSE : VM_STORE;
+        end
+        VM_LOAD_CHECK:
+        if (lsu_l1d.rready) begin
+          vm_nonidempotent <= lsu_l1d.rnonidempotent;
+          if (lsu_l1d.trap || (lsu_l1d.rnonidempotent && !vm_probe)) begin
+            vm_fault <= 1'b1;
+            vm_cause <= lsu_l1d.trap ? lsu_l1d.cause : XLEN'(`RAPT_CAUSE_LOAD_ACC_FAULT);
+            vm_state <= VM_RESPONSE;
+          end else vm_state <= vm_probe ? VM_RESPONSE : VM_LOAD;
+        end
+        VM_LOAD:
+        if (lsu_l1d.rready) begin
+          vm_fault <= lsu_l1d.trap;
+          vm_cause <= lsu_l1d.cause;
+          vm_nonidempotent <= lsu_l1d.rnonidempotent;
+          if (lsu_l1d.trap) begin
+            vm_tval <= vm_beat_addr;
+            vm_state <= VM_RESPONSE;
+          end else if (vm_wide_split && !vm_high_word) begin
+            vm_rdata[31:0] <= 32'(lsu_l1d.rdata);
+            vm_high_word <= 1'b1;
+          end else begin
+            if (vm_wide_split) vm_rdata[63:32] <= 32'(lsu_l1d.rdata);
+            else vm_rdata <= 64'(lsu_l1d.rdata >> (8 * vm_addr[$clog2(XLEN/8)-1:0]));
+            vm_state <= VM_RESPONSE;
+          end
+        end
+        VM_STORE:
+        if (lsu_l1d.wready) begin
+          vm_fault <= lsu_l1d.werr;
+          vm_cause <= XLEN'(`RAPT_CAUSE_STORE_ACC_FAULT);
+          if (!lsu_l1d.werr && vm_wide_split && !vm_high_word) vm_high_word <= 1'b1;
+          else begin
+            if (lsu_l1d.werr) vm_tval <= vm_beat_addr;
+            vm_state <= VM_RESPONSE;
+          end
+        end
+        VM_RESPONSE: if (vector_mem_rsp_ready) vm_state <= VM_IDLE;
+        default: vm_state <= VM_IDLE;
+      endcase
+    end
+  end
+
+  assign lsu_l1d.raddr = vm_active ? vm_beat_addr : scalar_l1d.raddr;
+  assign lsu_l1d.rcontext = vm_active ? vm_context : scalar_l1d.rcontext;
+  assign lsu_l1d.ralu = vm_active ? (vm_wide_split ? `RAPT_ALU_LW__ : vm_load_alu) : scalar_l1d.ralu;
+  assign lsu_l1d.rvalid = vm_active ? (vm_state == VM_LOAD_CHECK || vm_state == VM_LOAD) : scalar_l1d.rvalid;
+  assign lsu_l1d.rprobe = vm_active ? (vm_probe || vm_state == VM_LOAD_CHECK) : scalar_l1d.rprobe;
+  assign lsu_l1d.rmisaligned = vm_active ? 1'b0 : scalar_l1d.rmisaligned;
+  assign lsu_l1d.rcheck_valid = vm_active ? vm_wide_split : scalar_l1d.rcheck_valid;
+  assign lsu_l1d.rcheck_offset = vm_active ? '0 : scalar_l1d.rcheck_offset;
+  assign lsu_l1d.rcheck_size_m1 = vm_active
+      ? (vm_state == VM_LOAD_CHECK ? 4'd7 : 4'd3) : scalar_l1d.rcheck_size_m1;
+  assign lsu_l1d.rorig_size_m1 = vm_active ? vm_size_m1 : scalar_l1d.rorig_size_m1;
+  assign lsu_l1d.atomic_lock = vm_active ? 1'b0 : scalar_l1d.atomic_lock;
+  assign lsu_l1d.ordered = vm_active ? 1'b1 : scalar_l1d.ordered;
+  assign lsu_l1d.replay_allowed = vm_active ? 1'b0 : scalar_l1d.replay_allowed;
+  assign lsu_l1d.raddr_b = scalar_l1d.raddr_b;
+  assign lsu_l1d.rcontext_b = scalar_l1d.rcontext_b;
+  assign lsu_l1d.ralu_b = scalar_l1d.ralu_b;
+  assign lsu_l1d.rvalid_b = !vm_active && scalar_l1d.rvalid_b;
+  assign lsu_l1d.waddr = vm_active ? vm_paddr + XLEN'(vm_wide_split && vm_high_word ? 4 : 0) : scalar_l1d.waddr;
+  assign lsu_l1d.wpbmt = vm_active ? vm_pbmt : scalar_l1d.wpbmt;
+  assign lsu_l1d.walu = vm_active ? (vm_wide_split ? 8'h0f : vm_strobe) : scalar_l1d.walu;
+  assign lsu_l1d.wzero = vm_active ? 1'b0 : scalar_l1d.wzero;
+  assign lsu_l1d.wvalid = vm_active ? vm_state == VM_STORE : scalar_l1d.wvalid;
+  assign lsu_l1d.wdata = vm_active ? XLEN'(vm_wdata >> (vm_wide_split && vm_high_word ? 32 : 0)) : scalar_l1d.wdata;
+  assign lsu_l1d.wmore = vm_active ? 1'b0 : scalar_l1d.wmore;
+  assign lsu_l1d.wprecise = vm_active ? 1'b1 : scalar_l1d.wprecise;
+
+  assign scalar_l1d.idle = !vm_active && lsu_l1d.idle;
+  assign scalar_l1d.rdata = lsu_l1d.rdata;
+  assign scalar_l1d.trap = !vm_active && lsu_l1d.trap;
+  assign scalar_l1d.cause = lsu_l1d.cause;
+  assign scalar_l1d.difftest_skip = lsu_l1d.difftest_skip;
+  assign scalar_l1d.rready = !vm_active && lsu_l1d.rready;
+  assign scalar_l1d.rretry = !vm_active && lsu_l1d.rretry;
+  assign scalar_l1d.rmiss = !vm_active && lsu_l1d.rmiss;
+  assign scalar_l1d.miss_wake = lsu_l1d.miss_wake;
+  assign scalar_l1d.rdata_b = lsu_l1d.rdata_b;
+  assign scalar_l1d.rready_b = !vm_active && lsu_l1d.rready_b;
+  assign scalar_l1d.rretry_b = !vm_active && lsu_l1d.rretry_b;
+  assign scalar_l1d.wready = !vm_active && lsu_l1d.wready;
+  assign scalar_l1d.werr = !vm_active && lsu_l1d.werr;
+  assign scalar_l1d.rnonidempotent = lsu_l1d.rnonidempotent;
+
+  assign exu_l1d.mmu_en = vm_active ? vm_state == VM_TRANSLATE : scalar_mmu.mmu_en;
+  assign exu_l1d.mem_context = vm_active ? vm_context : scalar_mmu.mem_context;
+  assign exu_l1d.vaddr = vm_active ? vm_addr : scalar_mmu.vaddr;
+  assign exu_l1d.walu = vm_active ? vm_store_alu : scalar_mmu.walu;
+  assign exu_l1d.cmo_mgmt = vm_active ? 1'b0 : scalar_mmu.cmo_mgmt;
+  assign exu_l1d.valid = vm_active ? vm_state == VM_TRANSLATE : scalar_mmu.valid;
+  assign exu_l1d.misaligned = vm_active ? 1'b0 : scalar_mmu.misaligned;
+  assign exu_l1d.reservation_clear = !vm_active && scalar_mmu.reservation_clear;
+  assign scalar_mmu.paddr = exu_l1d.paddr;
+  assign scalar_mmu.pbmt = exu_l1d.pbmt;
+  assign scalar_mmu.trap = !vm_active && exu_l1d.trap;
+  assign scalar_mmu.cause = exu_l1d.cause;
+  assign scalar_mmu.reservation = exu_l1d.reservation;
+  assign scalar_mmu.reservation_valid = exu_l1d.reservation_valid;
+  assign scalar_mmu.reservation_size_m1 = exu_l1d.reservation_size_m1;
+  assign scalar_mmu.reservation_blocked = exu_l1d.reservation_blocked;
+  assign scalar_mmu.ready = !vm_active && exu_l1d.ready;
+
+  `RAPT_SVA_IMPLY(
+      clock, reset, VECTOR_MEMORY_EXCLUSIVE, vm_active,
+      !scalar_l1d.rvalid && !scalar_l1d.rvalid_b && !scalar_l1d.wvalid && !scalar_mmu.valid)
+  `RAPT_SVA_IMPLY(clock, reset, VECTOR_MEMORY_RESPONSE_MATCH, vector_mem_rsp_valid,
+                  !vector_mem_response_dropped)
+
+  `RAPT_SVA_IMPLY(clock, reset, VECTOR_SCALAR_DEST,
+                  vector_response_valid && !vector_trap && !vector_fp_write,
+                  vector_rd == vector_response_metadata.rd)
+  `RAPT_SVA_IMPLY(clock, reset, VECTOR_NO_AUTHORIZED_KILL, 1'b1, !vector_kill_blocked)
+`endif
   rapt_pkg::completion_t wb_fpu;
   rapt_pkg::completion_t wb_branch;
   rapt_pkg::completion_t exu_ioq_bcast;
@@ -266,6 +748,17 @@ rapt_pkg::SteerScanEntries
           .completion(registered)
       );
     end else if (p == IntegerSystemPort) begin : g_system
+`ifdef RAPT_V_EXTENSION
+      rapt_completion_stage #(
+          .CompletionT(rapt_pkg::completion_t)
+      ) stage (
+          .clock(clock),
+          .reset(reset),
+          .flush(cmu_bcast.flush_pipe),
+          .accepted(completion_accepted[p]),
+          .completion(completion[p])
+      );
+`else
       rapt_pkg::system_completion_t accepted, registered;
       assign accepted = rapt_pkg::pack_system_completion(completion_accepted[p]);
       assign completion[p] = rapt_pkg::expand_system_completion(registered);
@@ -278,6 +771,7 @@ rapt_pkg::SteerScanEntries
           .accepted(accepted),
           .completion(registered)
       );
+`endif
     end else begin : g_alu
       rapt_pkg::alu_completion_t accepted, registered;
       assign accepted = rapt_pkg::pack_alu_completion(completion_accepted[p]);
@@ -480,6 +974,22 @@ rapt_pkg::SteerScanEntries
   rapt_pkg::uop_t fp_queue_read_uop;
   logic [2:0][OperandOwnerBits:0] fp_queue_read_tag, fp_queue_read_ready_tag;
   logic [2:0][63:0] fp_queue_read_value;
+`ifdef RAPT_V_EXTENSION
+  logic vector_fp_read;
+  rapt_pkg::uop_t vector_fp_read_uop, rou_fp_queue_read_uop;
+  logic [2:0][OperandOwnerBits:0] rou_fp_queue_read_tag;
+  assign vector_fp_read = vector_issue.valid && vector_issue.uop.imm[6:0] == 7'h57
+      && vector_issue.uop.imm[14:12] == 3'b101;
+  always_comb begin
+    vector_fp_read_uop = '0;
+    vector_fp_read_uop.execute.fp.valid = 1'b1;
+    vector_fp_read_uop.execute.fp.op = `RAPT_FP_OP_FADD_S;
+    vector_fp_read_uop.execute.fp.rs1 = vector_issue.uop.imm[19:15];
+  end
+  assign rou_fp_queue_read_uop = vector_fp_read ? vector_fp_read_uop : fp_queue_read_uop;
+  assign rou_fp_queue_read_tag = vector_fp_read ? '0 : fp_queue_read_tag;
+  assign vector_fp_scalar = fp_queue_read_value[0];
+`endif
   logic [2:0][OperandGenerationBits-1:0] fp_queue_read_generation;
   logic [2:0][OperandOwnerBits:0] fp_dispatch_tag[rapt_pkg::DispatchWidth];
   logic [2:0][OperandGenerationBits-1:0] fp_dispatch_generation[rapt_pkg::DispatchWidth];
@@ -491,16 +1001,26 @@ rapt_pkg::SteerScanEntries
     assign int_source_regs[s] = {exu_prf.pr2[s], exu_prf.pr1[s]};
   end
   rapt_rou #(
-      // Only memory (FP loads) and FEU completions write an FPR.
+      // Vector scalar moves use the system completion port in this experiment.
+`ifdef RAPT_V_EXTENSION
+      .FpWritePorts((32'(1) << MemoryPort) | (32'(1) << FpuPort)
+                    | (32'(1) << IntegerSystemPort)),
+`else
       .FpWritePorts((32'(1) << MemoryPort) | (32'(1) << FpuPort)),
+`endif
       .SeparateOperandWake(1'b1),
       .RegisteredDrainCompletion(1'b1),
       .CompactFpOperands(CompactFpOperands),
       .RegisteredDispatchPayload(RegisteredDispatchPayload),
       .DerivedConstants(DerivedConstants)
   ) rou (
+`ifdef RAPT_V_EXTENSION
+      .fp_queue_read_uop(rou_fp_queue_read_uop),
+      .fp_queue_read_tag(rou_fp_queue_read_tag),
+`else
       .fp_queue_read_uop(fp_queue_read_uop),
       .fp_queue_read_tag(fp_queue_read_tag),
+`endif
       .operand_read_value(fp_queue_read_value),
       .fp_queue_ready_tag(fp_queue_read_ready_tag),
       .fp_queue_read_generation(fp_queue_read_generation),
@@ -512,7 +1032,11 @@ rapt_pkg::SteerScanEntries
       .fp_retire_generation,
       .operand_wake(operand_wake),
       .writeback_done(drain_completion),
+`ifdef RAPT_V_EXTENSION
+      .writeback_drain(rou_writeback_drain),
+`else
       .writeback_drain(writeback_drain),
+`endif
       .writeback_clean(writeback_clean),
       .writeback_cbo(writeback_cbo),
       .writeback_cbo_invalidate(writeback_cbo_invalidate),
@@ -702,8 +1226,15 @@ rapt_pkg::SteerScanEntries
       .disp_mdq(disp_mdq),
 
       .integer_system_issue_enable(1'b1),
+`ifdef RAPT_V_EXTENSION
+      .vector_issue_ready(vector_command_ready),
+      .vector_issue(vector_issue),
+      .exu_csr(exu_csr),
+      .wb_integer_raw(wb_integer_ieu),
+`else
       .exu_csr(exu_csr),
       .wb_integer_raw(wb_integer_raw),
+`endif
       .wb_branch(wb_branch),
       .exu_wb_mul(exu_wb_mul),
       .pmu_ooo_valid(pmu_ooo_valid_unused),
@@ -790,9 +1321,19 @@ rapt_pkg::SteerScanEntries
       .sw_irq_i   (clint_sw_int_i),
       .m_ext_irq_i(io_interrupt),
       .s_ext_irq_i(s_ext_irq_i),
+`ifdef RAPT_V_EXTENSION
+      .store_error_i(!vm_active && lsu_l1d.wvalid && lsu_l1d.werr),
+`else
       .store_error_i(lsu_l1d.wvalid && lsu_l1d.werr),
+`endif
       .store_error_addr_i(lsu_l1d.waddr),
       .store_error_strb_i(lsu_l1d.walu),
+`ifdef RAPT_V_EXTENSION
+      .vector_dirty_i(vector_response_valid && vector_dirty
+                      && g_completion_guard[IntegerSystemPort].accepted),
+      .vector_fp_dirty_i(vector_response_valid && vector_fp_dirty && !vector_trap
+                         && g_completion_guard[IntegerSystemPort].accepted),
+`endif
 
       .reset(reset)
   );
@@ -811,8 +1352,13 @@ rapt_pkg::SteerScanEntries
       .clock(clock),
       .reset(reset),
       .cmu_bcast(cmu_bcast),
+`ifdef RAPT_V_EXTENSION
+      .lsu_l1d(scalar_l1d),
+      .exu_l1d(scalar_mmu),
+`else
       .lsu_l1d(lsu_l1d),
       .exu_l1d(exu_l1d),
+`endif
       .dispatch(dispatch),
       .disp_ioq(disp_ioq),
 

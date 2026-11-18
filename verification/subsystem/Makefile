@@ -112,3 +112,446 @@ structure:
 	  $(MAKE) -C $(RAPTOR_HOME)/synth/yosys structure-check MODULE=$$module \
 	    RAPT_CONFIG=$(CONFIG) EXTRA_DEFINES="$(if $(filter 64,$(XLEN)),-DRAPT_RV64) $(EXTRA_DEFINES)"; \
 	done
+
+# Small, deterministic CPU/VPU integration experiment. The payload lives only
+# in BUILD_DIR; no generated program or separate test source enters the tree.
+
+.PHONY: vector-smoke-data vector-backend-smoke vector-core-smoke
+vector-smoke-data:
+	python3 vector_programs.py smoke --output "$(BUILD_DIR)/vector-smoke" --xlen $(XLEN)
+
+vector-backend-smoke: vector-smoke-data
+	$(MAKE) be BUILD_DIR="$(BUILD_DIR)" XLEN="$(XLEN)" \
+	  EXTRA_DEFINES="$(strip $(EXTRA_DEFINES) -DRAPT_V_EXTENSION -DRAPT_ASSERT_EN)" \
+	  IMG="$(BUILD_DIR)/vector-smoke/trace.bin" TRACE_PREFIX="$(BUILD_DIR)/vector-smoke/trace" \
+	  BE_ARGS="+VECTOR_SMOKE"
+
+.PHONY: vector-backend-memory
+vector-backend-memory: vector-smoke-data
+	$(MAKE) be BUILD_DIR="$(BUILD_DIR)" XLEN="$(XLEN)" \
+	  EXTRA_DEFINES="$(strip $(EXTRA_DEFINES) -DRAPT_V_EXTENSION -DRAPT_ASSERT_EN)" \
+	  IMG="$(BUILD_DIR)/vector-smoke/memory.bin" TRACE_PREFIX="$(BUILD_DIR)/vector-smoke/memory" \
+	  BE_ARGS="+VECTOR_MEMORY_SMOKE"
+
+.PHONY: vector-store-fault
+vector-store-fault: vector-smoke-data
+	$(MAKE) be BUILD_DIR="$(BUILD_DIR)" XLEN="$(XLEN)" \
+	  EXTRA_DEFINES="$(strip $(EXTRA_DEFINES) -DRAPT_V_EXTENSION -DRAPT_ASSERT_EN)" \
+	  IMG="$(BUILD_DIR)/vector-smoke/fault.bin" TRACE_PREFIX="$(BUILD_DIR)/vector-smoke/fault" \
+	  BE_ARGS="+VECTOR_STORE_FAULT +VECTOR_B_DELAY=12 +VECTOR_B_FAULT=80001008"
+
+vector-core-smoke: vector-smoke-data
+	@test "$(XLEN)" = 32 || { echo 'RNP core smoke supports RV32 only'; exit 1; }
+	$(MAKE) -C "$(RAPTOR_HOME)/sim/tb" verilator-build RAPT_CONFIG=$(VECTOR_RAPT_CONFIG) \
+	  DEFINES="$(VECTOR_DEFINES) RAPT_ASSERT_EN" VL_MDIR="$(BUILD_DIR)/vector-core/vl"
+	"$(BUILD_DIR)/vector-core/vl/rapt_tb_top" +IMG="$(BUILD_DIR)/vector-smoke/core.bin" \
+	  +MROM="$(BUILD_DIR)/vector-smoke/boot.bin" +MAX_CYCLES=100000 \
+	  +VECTOR_SMOKE +VECTOR_HOLD
+
+# Compile a real RVV intrinsic program into the existing full-core harness.
+
+VECTOR_RAPT_CONFIG ?= $(CONFIG)
+VECTOR_DEFINES ?=
+
+.PHONY: vector-axi-build
+vector-axi-build:
+	$(MAKE) -C "$(RAPTOR_HOME)/sim/tb" verilator-build RAPT_CONFIG=$(VECTOR_RAPT_CONFIG) \
+	  TOP=tb_vector_axi \
+	  DEFINES="$(VECTOR_DEFINES) RAPT_ASSERT_EN $(if $(filter 64,$(XLEN)),RAPT_RV64,)" \
+	  VL_MDIR="$(BUILD_DIR)/vector-axi$(XLEN)/vl" VERILATOR_JOBS=$(VERILATOR_JOBS)
+
+RISCV_CC ?= riscv64-unknown-elf-gcc
+RISCV_OBJCOPY ?= riscv64-unknown-elf-objcopy
+VECTOR_ABI := $(if $(filter 64,$(XLEN)),lp64d,ilp32d)
+VECTOR_NPC ?= $(RAPTOR_HOME)/sim/build/$(CONFIG)/riscv$(XLEN)-npc-sim
+VECTOR_REFERENCE ?= $(NEMU_HOME)/build/ref/riscv$(XLEN)_ref_defconfig/riscv$(XLEN)-nemu-interpreter-so
+
+.PHONY: vector-catalog-diff
+vector-catalog-diff: vector-smoke-data
+	python3 vector_programs.py catalog --output "$(BUILD_DIR)/vector-smoke/catalog.S" \
+	  --success-code 0
+	$(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles \
+	  -Wl,-Ttext=0x80000000 -Wl,-e,_start "$(BUILD_DIR)/vector-smoke/catalog.S" \
+	  -o "$(BUILD_DIR)/vector-smoke/catalog.elf"
+	$(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/catalog.elf" \
+	  "$(BUILD_DIR)/vector-smoke/catalog.bin"
+	@test -x "$(VECTOR_NPC)" && test -f "$(VECTOR_REFERENCE)" || \
+	  { echo 'Build NPC/NEMU first or set VECTOR_NPC and VECTOR_REFERENCE'; exit 1; }
+	@set -e -o pipefail; "$(VECTOR_NPC)" -b -n --no-lightsss -t 600 \
+	  -d "$(abspath $(VECTOR_REFERENCE))" -r "$(BUILD_DIR)/vector-smoke/boot.bin" \
+	  "$(BUILD_DIR)/vector-smoke/catalog.bin" | tee "$(BUILD_DIR)/vector-smoke/catalog.log"; \
+	  grep -q 'HIT GOOD TRAP' "$(BUILD_DIR)/vector-smoke/catalog.log"
+
+.PHONY: vector-disabled-data vector-disabled-smoke
+vector-disabled-data: vector-smoke-data
+	python3 vector_programs.py disabled --output "$(BUILD_DIR)/vector-smoke/disabled.S"
+	$(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles \
+	  -Wl,-Ttext=0x80000000,-e,_start "$(BUILD_DIR)/vector-smoke/disabled.S" \
+	  -o "$(BUILD_DIR)/vector-smoke/disabled.elf"
+	$(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/disabled.elf" \
+	  "$(BUILD_DIR)/vector-smoke/disabled.bin"
+
+vector-disabled-smoke: vector-disabled-data vector-axi-build
+	"$(BUILD_DIR)/vector-axi$(XLEN)/vl/tb_vector_axi" \
+	  +IMG="$(BUILD_DIR)/vector-smoke/disabled.bin" \
+	  +MROM="$(BUILD_DIR)/vector-smoke/boot.bin" +MAX_CYCLES=100000 +VECTOR_DISABLED
+
+.PHONY: vector-program-data vector-program-smoke
+vector-program-data: vector-smoke-data
+	python3 vector_programs.py program --output "$(BUILD_DIR)/vector-smoke/program.c"
+	$(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -O2 -fno-strict-aliasing -nostdlib -ffreestanding \
+	  -nostartfiles -Wl,-Ttext=0x80000000 -Wl,-e,_start \
+	  "$(BUILD_DIR)/vector-smoke/program.c" -o "$(BUILD_DIR)/vector-smoke/program.elf"
+	$(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/program.elf" \
+	  "$(BUILD_DIR)/vector-smoke/program.bin"
+
+vector-program-smoke: vector-program-data vector-axi-build
+	"$(BUILD_DIR)/vector-axi$(XLEN)/vl/tb_vector_axi" \
+	  +IMG="$(BUILD_DIR)/vector-smoke/program.bin" \
+	  +MROM="$(BUILD_DIR)/vector-smoke/boot.bin" +MAX_CYCLES=100000 +VECTOR_PROGRAM
+
+# Exercise VS=Off traps, read-only vector CSRs, and trap return.
+
+.PHONY: vector-trap-data vector-trap-smoke
+vector-trap-data: vector-smoke-data
+	python3 vector_programs.py trap --output "$(BUILD_DIR)/vector-smoke/trap.S"
+	$(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles \
+	  -Wl,-Ttext=0x80000000 -Wl,-e,_start "$(BUILD_DIR)/vector-smoke/trap.S" \
+	  -o "$(BUILD_DIR)/vector-smoke/trap.elf"
+	$(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/trap.elf" \
+	  "$(BUILD_DIR)/vector-smoke/trap.bin"
+
+vector-trap-smoke: vector-trap-data vector-axi-build
+	"$(BUILD_DIR)/vector-axi$(XLEN)/vl/tb_vector_axi" \
+	  +IMG="$(BUILD_DIR)/vector-smoke/trap.bin" \
+	  +MROM="$(BUILD_DIR)/vector-smoke/boot.bin" +MAX_CYCLES=100000 +VECTOR_TRAP
+
+# A one-shot AXI error must preserve the completed prefix, trap at the failed
+# vector element, and resume the same instruction after mret.
+
+.PHONY: vector-restart-data vector-restart-smoke
+vector-restart-data: vector-smoke-data
+	python3 vector_programs.py restart --output "$(BUILD_DIR)/vector-smoke/restart.S"
+	$(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles \
+	  -Wl,-Ttext=0x80000000 -Wl,-e,_start "$(BUILD_DIR)/vector-smoke/restart.S" \
+	  -o "$(BUILD_DIR)/vector-smoke/restart.elf"
+	$(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/restart.elf" \
+	  "$(BUILD_DIR)/vector-smoke/restart.bin"
+
+vector-restart-smoke: vector-restart-data vector-axi-build
+	"$(BUILD_DIR)/vector-axi$(XLEN)/vl/tb_vector_axi" \
+	  +IMG="$(BUILD_DIR)/vector-smoke/restart.bin" +MROM="$(BUILD_DIR)/vector-smoke/boot.bin" \
+	  +MAX_CYCLES=100000 +VECTOR_RESTART +VECTOR_B_DELAY=12 +VECTOR_B_FAULT=0f001008 \
+	  +VECTOR_B_FAULT_ONCE
+
+# Fault the third strided element on a separate cache line, then restart it.
+
+.PHONY: vector-read-restart-data vector-read-restart-smoke
+vector-read-restart-data: vector-smoke-data
+	python3 vector_programs.py read-restart --output "$(BUILD_DIR)/vector-smoke/read-restart.S"
+	$(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles \
+	  -Wl,-Ttext=0x80000000 -Wl,-e,_start "$(BUILD_DIR)/vector-smoke/read-restart.S" \
+	  -o "$(BUILD_DIR)/vector-smoke/read-restart.elf"
+	$(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/read-restart.elf" \
+	  "$(BUILD_DIR)/vector-smoke/read-restart.bin"
+
+vector-read-restart-smoke: vector-read-restart-data vector-axi-build
+	"$(BUILD_DIR)/vector-axi$(XLEN)/vl/tb_vector_axi" \
+	  +IMG="$(BUILD_DIR)/vector-smoke/read-restart.bin" +MROM="$(BUILD_DIR)/vector-smoke/boot.bin" \
+	  +MAX_CYCLES=100000 +VECTOR_RESTART +VECTOR_R_FAULT=80001080 +VECTOR_R_FAULT_ONCE
+
+# The same data spans a cache-line boundary in both small configurations.
+
+.PHONY: vector-read-fof-data vector-read-fof-smoke
+vector-read-fof-data: vector-smoke-data
+	python3 vector_programs.py read-fof --output "$(BUILD_DIR)/vector-smoke/read-fof.S"
+	$(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles \
+	  -Wl,-Ttext=0x80000000 -Wl,-e,_start "$(BUILD_DIR)/vector-smoke/read-fof.S" \
+	  -o "$(BUILD_DIR)/vector-smoke/read-fof.elf"
+	$(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles -DFIRST_FAULT \
+	  -Wl,-Ttext=0x80000000 -Wl,-e,_start "$(BUILD_DIR)/vector-smoke/read-fof.S" \
+	  -o "$(BUILD_DIR)/vector-smoke/read-fof-first.elf"
+	$(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/read-fof.elf" \
+	  "$(BUILD_DIR)/vector-smoke/read-fof.bin"
+	$(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/read-fof-first.elf" \
+	  "$(BUILD_DIR)/vector-smoke/read-fof-first.bin"
+
+vector-read-fof-smoke: vector-read-fof-data vector-axi-build
+	"$(BUILD_DIR)/vector-axi$(XLEN)/vl/tb_vector_axi" \
+	  +IMG="$(BUILD_DIR)/vector-smoke/read-fof.bin" +MROM="$(BUILD_DIR)/vector-smoke/boot.bin" \
+	  +MAX_CYCLES=100000 +VECTOR_R_FAULT=80001040 +VECTOR_R_FAULT_ONCE
+	"$(BUILD_DIR)/vector-axi$(XLEN)/vl/tb_vector_axi" \
+	  +IMG="$(BUILD_DIR)/vector-smoke/read-fof-first.bin" \
+	  +MROM="$(BUILD_DIR)/vector-smoke/boot.bin" +MAX_CYCLES=100000 \
+	  +VECTOR_R_FAULT=80001038 +VECTOR_R_FAULT_ONCE
+
+# Exercise an RV32 64-bit element when the second word's write response fails.
+
+.PHONY: vector-wide-restart-data
+vector-wide-restart-data: vector-smoke-data
+	python3 vector_programs.py wide-restart --output "$(BUILD_DIR)/vector-smoke/wide-restart.S"
+	$(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles \
+	  -Wl,-Ttext=0x80000000 -Wl,-e,_start "$(BUILD_DIR)/vector-smoke/wide-restart.S" \
+	  -o "$(BUILD_DIR)/vector-smoke/wide-restart.elf"
+	$(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/wide-restart.elf" \
+	  "$(BUILD_DIR)/vector-smoke/wide-restart.bin"
+
+# Segment probes must reject MMIO without issuing a side-effecting read.
+
+.PHONY: vector-probe-data vector-probe-smoke
+vector-probe-data: vector-smoke-data
+	python3 vector_programs.py probe --output "$(BUILD_DIR)/vector-smoke/probe.S"
+	$(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles \
+	  -Wl,-Ttext=0x80000000 -Wl,-e,_start "$(BUILD_DIR)/vector-smoke/probe.S" \
+	  -o "$(BUILD_DIR)/vector-smoke/probe.elf"
+	$(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/probe.elf" \
+	  "$(BUILD_DIR)/vector-smoke/probe.bin"
+
+# Reuse one program for precise device faults, FOF, masking and segment probes.
+
+.PHONY: vector-device-data vector-device-smoke
+vector-device-data: vector-smoke-data
+	python3 vector_programs.py device --output "$(BUILD_DIR)/vector-smoke/device.S"
+	@set -e; for mode in 0 1; do for index in 0 1 2 3; do \
+	  name="device-$$mode-$$index"; \
+	  $(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles \
+	    -DDEVICE_CASE=$$mode -DFAULT_INDEX=$$index -Wl,-Ttext=0x80000000 -Wl,-e,_start \
+	    "$(BUILD_DIR)/vector-smoke/device.S" -o "$(BUILD_DIR)/vector-smoke/$$name.elf"; \
+	  $(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/$$name.elf" \
+	    "$(BUILD_DIR)/vector-smoke/$$name.bin"; \
+	done; done
+	@set -e; for mode in 2 3 4; do \
+	  name="device-$$mode-0"; \
+	  index=0; if [ $$mode -eq 4 ]; then index=2; fi; \
+	  $(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles \
+	    -DDEVICE_CASE=$$mode -DFAULT_INDEX=$$index -Wl,-Ttext=0x80000000 -Wl,-e,_start \
+	    "$(BUILD_DIR)/vector-smoke/device.S" -o "$(BUILD_DIR)/vector-smoke/$$name.elf"; \
+	  $(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/$$name.elf" \
+	    "$(BUILD_DIR)/vector-smoke/$$name.bin"; \
+	done
+
+.PHONY: vector-device-board-data
+vector-device-board-data: vector-device-data
+	@set -e; for mode in 0 1 2 3 4; do \
+	  index=0; if [ $$mode -eq 0 ] || [ $$mode -eq 1 ] || [ $$mode -eq 4 ]; then index=2; fi; \
+	  name="device-board-$$mode"; \
+	  $(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles \
+	    -DDEVICE_CASE=$$mode -DFAULT_INDEX=$$index -DNATIVE_DEVICE_BOARD \
+	    -Wl,-Ttext=0x80000000 -Wl,-e,_start "$(BUILD_DIR)/vector-smoke/device.S" \
+	    -o "$(BUILD_DIR)/vector-smoke/$$name.elf"; \
+	  $(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/$$name.elf" \
+	    "$(BUILD_DIR)/vector-smoke/$$name.bin"; \
+	done
+	$(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles \
+	  -DDEVICE_CASE=0 -DFAULT_INDEX=2 -DNATIVE_DEVICE_BOARD -DNATIVE_DEVICE_NEGATIVE \
+	  -Wl,-Ttext=0x80000000 -Wl,-e,_start "$(BUILD_DIR)/vector-smoke/device.S" \
+	  -o "$(BUILD_DIR)/vector-smoke/device-board-negative.elf"
+	$(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/device-board-negative.elf" \
+	  "$(BUILD_DIR)/vector-smoke/device-board-negative.bin"
+
+vector-device-smoke: vector-device-data vector-axi-build
+	@set -e; ulimit -c 0; \
+	  simulator="$(BUILD_DIR)/vector-axi$(XLEN)/vl/tb_vector_axi"; \
+	  boot="$(BUILD_DIR)/vector-smoke/boot.bin"; \
+	  for response in 2 3; do for mode in 0 1; do for index in 0 1 2 3; do \
+	    addr=$$(printf '%08x' $$((0x10000040 + 4 * index))); \
+	    err=$$(printf '%04x' $$((1 << index))); \
+	    readmask=000f; writemask=000f; writeerr=$$err; \
+	    if [ $$mode -eq 1 ]; then \
+	      writemask=0000; writeerr=0000; \
+	      if [ $$index -ne 0 ]; then readmask=$$(printf '%04x' $$(((1 << index) - 1))); fi; \
+	    fi; \
+	    echo "RV$(XLEN) device mode=$$mode fault_index=$$index response=$$response"; \
+	    "$$simulator" +IMG="$(BUILD_DIR)/vector-smoke/device-$$mode-$$index.bin" \
+	      +MROM="$$boot" +MAX_CYCLES=100000 +VECTOR_DEVICE_TEST +VECTOR_B_DELAY=12 \
+	      +VECTOR_R_DELAY=7 +VECTOR_FAULT_RESP=$$response \
+	      +VECTOR_R_FAULT=$$addr +VECTOR_R_FAULT_ONCE +VECTOR_B_FAULT=$$addr \
+	      +VECTOR_B_FAULT_ONCE +VD_READ_MASK=$$readmask +VD_WRITE_MASK=$$writemask \
+	      +VD_READ_ERROR_MASK=$$err +VD_WRITE_ERROR_MASK=$$writeerr; \
+	  done; done; done; \
+	  "$$simulator" +IMG="$(BUILD_DIR)/vector-smoke/device-2-0.bin" +MROM="$$boot" \
+	    +MAX_CYCLES=100000 +VECTOR_DEVICE_TEST +VECTOR_R_FAULT=10000044 \
+	    +VECTOR_R_FAULT_ONCE +VECTOR_B_FAULT=10000044 +VECTOR_B_FAULT_ONCE \
+	    +VD_READ_MASK=0004 +VD_WRITE_MASK=0004; \
+	  "$$simulator" +IMG="$(BUILD_DIR)/vector-smoke/device-3-0.bin" +MROM="$$boot" \
+	    +MAX_CYCLES=100000 +VECTOR_DEVICE_TEST; \
+	  "$$simulator" +IMG="$(BUILD_DIR)/vector-smoke/device-4-0.bin" +MROM="$$boot" \
+	    +MAX_CYCLES=100000 +VECTOR_DEVICE_TEST +VECTOR_R_DELAY=7 +VECTOR_B_DELAY=12 \
+	    +VECTOR_R_FAULT=10000040 +VECTOR_R_FAULT_AFTER=2 +VECTOR_R_FAULT_ONCE \
+	    +VECTOR_B_FAULT=10000040 +VECTOR_B_FAULT_AFTER=2 +VECTOR_B_FAULT_ONCE \
+	    +VD_REPEAT=4 +VD_READ_MASK=0001 +VD_WRITE_MASK=0001 \
+	    +VD_READ_ERROR_MASK=0001 +VD_WRITE_ERROR_MASK=0001; \
+	  if "$$simulator" +IMG="$(BUILD_DIR)/vector-smoke/device-0-2.bin" +MROM="$$boot" \
+	    +MAX_CYCLES=100000 +VECTOR_DEVICE_TEST +VECTOR_DEVICE_FAULT_EFFECT \
+	    +VECTOR_R_FAULT=10000048 +VECTOR_R_FAULT_ONCE +VECTOR_B_FAULT=10000048 \
+	    +VECTOR_B_FAULT_ONCE +VD_READ_MASK=000f +VD_WRITE_MASK=000f \
+	    +VD_READ_ERROR_MASK=0004 +VD_WRITE_ERROR_MASK=0004 \
+	    >"$(BUILD_DIR)/vector-smoke/device-negative.log" 2>&1; then \
+	    echo 'device side-effect negative control unexpectedly passed'; exit 1; \
+	  fi; \
+	  grep -Eq 'RVV AXI result=|device word .* effects/attempts' \
+	    "$(BUILD_DIR)/vector-smoke/device-negative.log"; \
+	  echo 'PASS device side-effect negative control'
+
+# RV32 ELEN=64 uses two 32-bit beats per element. Use SRAM so the external
+# response describes the individual beat, even when the core has L2.
+VECTOR_WIDE_FAULT_BASE := 0x0f001000
+
+.PHONY: vector-wide-fault-data vector-wide-fault-smoke
+vector-wide-fault-data: vector-smoke-data
+	@test "$(XLEN)" = 32 || { echo 'wide fault test requires RV32'; exit 1; }
+	python3 vector_programs.py wide-fault --output "$(BUILD_DIR)/vector-smoke/wide-fault.S"
+	@set -e; for write in 0 1; do for index in 0 1; do for half in 0 1; do \
+	  name="wide-fault-$$write-$$index-$$half"; \
+	  $(RISCV_CC) -march=rv32gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles \
+	    -DFAULT_WRITE=$$write -DFAULT_INDEX=$$index -DFAULT_HALF=$$half \
+	    -DFAULT_BASE=$(VECTOR_WIDE_FAULT_BASE) \
+	    -Wl,-Ttext=0x80000000 -Wl,-e,_start "$(BUILD_DIR)/vector-smoke/wide-fault.S" \
+	    -o "$(BUILD_DIR)/vector-smoke/$$name.elf"; \
+	  $(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/$$name.elf" \
+	    "$(BUILD_DIR)/vector-smoke/$$name.bin"; \
+	done; done; done
+
+vector-wide-fault-smoke: vector-wide-fault-data vector-axi-build
+	@set -e; ulimit -c 0; \
+	  simulator="$(BUILD_DIR)/vector-axi32/vl/tb_vector_axi"; \
+	  boot="$(BUILD_DIR)/vector-smoke/boot.bin"; \
+	  for response in 2 3; do for write in 0 1; do for index in 0 1; do for half in 0 1; do \
+	    addr=$$(printf '%08x' $$(($(VECTOR_WIDE_FAULT_BASE) + 64 * index + 4 * half))); \
+	    name="wide-fault-$$write-$$index-$$half"; \
+	    echo "RV32 wide fault write=$$write index=$$index half=$$half response=$$response"; \
+	    if [ $$write -eq 1 ]; then \
+	      fault="+VECTOR_B_FAULT=$$addr +VECTOR_B_FAULT_ONCE"; \
+	    else \
+	      fault="+VECTOR_R_FAULT=$$addr +VECTOR_R_FAULT_ONCE"; \
+	    fi; \
+	    "$$simulator" +IMG="$(BUILD_DIR)/vector-smoke/$$name.bin" +MROM="$$boot" \
+	      +MAX_CYCLES=100000 +VECTOR_RESTART +VECTOR_B_DELAY=12 +VECTOR_R_DELAY=7 \
+	      +VECTOR_FAULT_RESP=$$response $$fault; \
+	  done; done; done; done; \
+	  if "$$simulator" +IMG="$(BUILD_DIR)/vector-smoke/wide-fault-0-1-1.bin" \
+	    +MROM="$$boot" +MAX_CYCLES=100000 +VECTOR_RESTART \
+	    >"$(BUILD_DIR)/vector-smoke/wide-fault-negative.log" 2>&1; then \
+	    echo 'wide fault negative control unexpectedly passed'; exit 1; \
+	  fi; \
+	  grep -Eq 'RVV AXI result=|restart trap count=' \
+	    "$(BUILD_DIR)/vector-smoke/wide-fault-negative.log"; \
+	  echo 'PASS wide fault negative control'
+
+# Distinct 4 KiB mappings on either side of a real Sv32/Sv39 page fault.
+
+.PHONY: vector-page-data vector-page-smoke
+vector-page-data: vector-smoke-data
+	python3 vector_programs.py page --output "$(BUILD_DIR)/vector-smoke/page.S"
+	@set -e; for mode in 0 1 2 3; do \
+	  name="page-$$mode"; \
+	  $(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles \
+	    -DPAGE_CASE=$$mode -Wl,-Ttext=0x80000000 -Wl,-e,_start \
+	    "$(BUILD_DIR)/vector-smoke/page.S" -o "$(BUILD_DIR)/vector-smoke/$$name.elf"; \
+	  $(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/$$name.elf" \
+	    "$(BUILD_DIR)/vector-smoke/$$name.bin"; \
+	  $(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles \
+	    -DPAGE_CASE=$$mode -DMAP_SECOND_EARLY -Wl,-Ttext=0x80000000 -Wl,-e,_start \
+	    "$(BUILD_DIR)/vector-smoke/page.S" -o "$(BUILD_DIR)/vector-smoke/$$name-negative.elf"; \
+	  $(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/$$name-negative.elf" \
+	    "$(BUILD_DIR)/vector-smoke/$$name-negative.bin"; \
+	done
+
+vector-page-smoke: vector-page-data vector-axi-build
+	@set -e; ulimit -c 0; for mode in 0 1 2 3; do \
+	  echo "RV$(XLEN) cross-page vector mode=$$mode"; \
+	  "$(BUILD_DIR)/vector-axi$(XLEN)/vl/tb_vector_axi" \
+	    +IMG="$(BUILD_DIR)/vector-smoke/page-$$mode.bin" \
+	    +MROM="$(BUILD_DIR)/vector-smoke/boot.bin" +MAX_CYCLES=100000; \
+	  if "$(BUILD_DIR)/vector-axi$(XLEN)/vl/tb_vector_axi" \
+	    +IMG="$(BUILD_DIR)/vector-smoke/page-$$mode-negative.bin" \
+	    +MROM="$(BUILD_DIR)/vector-smoke/boot.bin" +MAX_CYCLES=100000 \
+	    >"$(BUILD_DIR)/vector-smoke/page-$$mode-negative.log" 2>&1; then \
+	    echo "page mode=$$mode negative control unexpectedly passed"; exit 1; \
+	  fi; \
+	  grep -q 'RVV AXI result=' "$(BUILD_DIR)/vector-smoke/page-$$mode-negative.log"; \
+	  echo "PASS page mode=$$mode negative control"; \
+	done
+
+vector-probe-smoke: vector-probe-data vector-axi-build
+	"$(BUILD_DIR)/vector-axi$(XLEN)/vl/tb_vector_axi" \
+	  +IMG="$(BUILD_DIR)/vector-smoke/probe.bin" +MROM="$(BUILD_DIR)/vector-smoke/boot.bin" \
+	  +MAX_CYCLES=100000 +VECTOR_PROBE
+
+# Supervisor-mode vector memory accesses through Sv32/Sv39 superpages.
+
+.PHONY: vector-mmu-data vector-mmu-smoke
+vector-mmu-data: vector-smoke-data
+	python3 vector_programs.py mmu --output "$(BUILD_DIR)/vector-smoke/mmu.S"
+	$(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles \
+	  -Wl,-Ttext=0x80000000 -Wl,-e,_start "$(BUILD_DIR)/vector-smoke/mmu.S" \
+	  -o "$(BUILD_DIR)/vector-smoke/mmu.elf"
+	$(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/mmu.elf" \
+	  "$(BUILD_DIR)/vector-smoke/mmu.bin"
+
+vector-mmu-smoke: vector-mmu-data vector-axi-build
+	"$(BUILD_DIR)/vector-axi$(XLEN)/vl/tb_vector_axi" \
+	  +IMG="$(BUILD_DIR)/vector-smoke/mmu.bin" +MROM="$(BUILD_DIR)/vector-smoke/boot.bin" \
+	  +MAX_CYCLES=100000 +VECTOR_MMU
+
+# Indexed and strided accesses, masked loads and undisturbed vector tails.
+
+.PHONY: vector-indexed-data vector-indexed-smoke
+vector-indexed-data: vector-smoke-data
+	python3 vector_programs.py indexed --output "$(BUILD_DIR)/vector-smoke/indexed.S"
+	$(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles \
+	  -Wl,-Ttext=0x80000000 -Wl,-e,_start "$(BUILD_DIR)/vector-smoke/indexed.S" \
+	  -o "$(BUILD_DIR)/vector-smoke/indexed.elf"
+	$(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/indexed.elf" \
+	  "$(BUILD_DIR)/vector-smoke/indexed.bin"
+
+vector-indexed-smoke: vector-indexed-data vector-axi-build
+	"$(BUILD_DIR)/vector-axi$(XLEN)/vl/tb_vector_axi" \
+	  +IMG="$(BUILD_DIR)/vector-smoke/indexed.bin" +MROM="$(BUILD_DIR)/vector-smoke/boot.bin" \
+	  +MAX_CYCLES=100000
+
+# Simulate an OS saving and restoring all vector registers and control state.
+
+.PHONY: vector-context-data
+vector-context-data: vector-smoke-data
+	python3 vector_programs.py context --output "$(BUILD_DIR)/vector-smoke/context.S"
+	$(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles \
+	  -Wl,-Ttext=0x80000000 -Wl,-e,_start "$(BUILD_DIR)/vector-smoke/context.S" \
+	  -o "$(BUILD_DIR)/vector-smoke/context.elf"
+	$(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/context.elf" \
+	  "$(BUILD_DIR)/vector-smoke/context.bin"
+
+# Deliver an external interrupt while an irrevocable vector instruction runs.
+
+.PHONY: vector-interrupt-data
+vector-interrupt-data: vector-smoke-data
+	python3 vector_programs.py interrupt --output "$(BUILD_DIR)/vector-smoke/interrupt.S"
+	$(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles \
+	  -Wl,-Ttext=0x80000000 -Wl,-e,_start "$(BUILD_DIR)/vector-smoke/interrupt.S" \
+	  -o "$(BUILD_DIR)/vector-smoke/interrupt.elf"
+	$(RISCV_OBJCOPY) -O binary -j .text "$(BUILD_DIR)/vector-smoke/interrupt.elf" \
+	  "$(BUILD_DIR)/vector-smoke/interrupt.bin"
+
+# One build runs the directed core-integration programs and fault suites.
+.PHONY: vector-system-smoke
+vector-system-smoke: vector-integration-smoke vector-device-smoke vector-page-smoke \
+    vector-read-restart-smoke vector-read-fof-smoke \
+    $(if $(filter 32,$(XLEN)),vector-wide-fault-smoke)
+
+.PHONY: vector-integration-smoke
+vector-integration-smoke: vector-program-smoke vector-trap-smoke vector-mmu-smoke \
+    vector-indexed-smoke vector-probe-smoke vector-restart-smoke \
+    vector-context-data vector-interrupt-data \
+    $(if $(filter 32,$(XLEN)),vector-wide-restart-data)
+	"$(BUILD_DIR)/vector-axi$(XLEN)/vl/tb_vector_axi" \
+	  +IMG="$(BUILD_DIR)/vector-smoke/context.bin" \
+	  +MROM="$(BUILD_DIR)/vector-smoke/boot.bin" +MAX_CYCLES=100000
+	"$(BUILD_DIR)/vector-axi$(XLEN)/vl/tb_vector_axi" \
+	  +IMG="$(BUILD_DIR)/vector-smoke/interrupt.bin" \
+	  +MROM="$(BUILD_DIR)/vector-smoke/boot.bin" +MAX_CYCLES=100000 +VECTOR_INTERRUPT
+ifeq ($(XLEN),32)
+	"$(BUILD_DIR)/vector-axi$(XLEN)/vl/tb_vector_axi" \
+	  +IMG="$(BUILD_DIR)/vector-smoke/wide-restart.bin" \
+	  +MROM="$(BUILD_DIR)/vector-smoke/boot.bin" +MAX_CYCLES=100000 \
+	  +VECTOR_RESTART +VECTOR_B_DELAY=12 +VECTOR_B_FAULT=0f00100c +VECTOR_B_FAULT_ONCE
+endif

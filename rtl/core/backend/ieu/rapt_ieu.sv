@@ -40,6 +40,10 @@ module rapt_ieu #(
     dpu_iq_if.rs disp_brq,
     dpu_iq_if.rs disp_mdq,
 
+`ifdef RAPT_V_EXTENSION
+    input logic vector_issue_ready,
+    output IssueT vector_issue,
+`endif
     input logic integer_system_issue_enable,
     exu_csr_if.master exu_csr,
     output CompletionT wb_integer_raw[NumIntegerPorts],
@@ -91,7 +95,11 @@ module rapt_ieu #(
   // meaning and the system capability can be relocated at elaboration.
   always_comb begin
     integer_issue_enable = '1;
+`ifdef RAPT_V_EXTENSION
+    integer_issue_enable[IntegerSystemPort] = integer_system_issue_enable && vector_issue_ready;
+`else
     integer_issue_enable[IntegerSystemPort] = integer_system_issue_enable;
+`endif
     pmu_alq_extra_port_count_next = '0;
     for (int p = 2; p < NumIntegerPorts; p++)
     pmu_alq_extra_port_count_next += IssueCountBits'(alq_issue[p].valid);
@@ -99,6 +107,13 @@ module rapt_ieu #(
   // Match rapt_iq's registered selector observations so the simulator samples
   // every issue event on the same architectural edge.
   always_ff @(posedge clock) pmu_alq_extra_port_count <= pmu_alq_extra_port_count_next;
+
+`ifdef RAPT_V_EXTENSION
+  always_comb begin
+    vector_issue = alq_execute[IntegerSystemPort];
+    vector_issue.valid &= vector_issue.uop.execute.vector;
+  end
+`endif
 
   // ROU admits one serializing system instruction at a time. Capture its
   // CSR address on ALQ admission, before wake/issue arbitration. The CSR value
@@ -230,6 +245,13 @@ module rapt_ieu #(
   for (genvar p = 0; p < NumIntegerPorts; p++) begin : g_integer_port
     if (p == IntegerSystemPort) begin : g_system
       system_result_t result;
+`ifdef RAPT_V_EXTENSION
+      IssueT scalar_issue;
+      always_comb begin
+        scalar_issue = alq_execute[p];
+        scalar_issue.valid &= !scalar_issue.uop.execute.vector;
+      end
+`endif
       always_comb begin
         wb_integer_raw[p] = '0;
         `RAPT_SYSTEM_COMPLETION_COPY(wb_integer_raw[p], result)
@@ -240,7 +262,11 @@ module rapt_ieu #(
           .XLEN    (XLEN)
       ) u_pipe_alu_csr (
           .cmu_bcast (cmu_bcast),
+`ifdef RAPT_V_EXTENSION
+          .iss       (scalar_issue),
+`else
           .iss       (alq_execute[p]),
+`endif
           .csr_read_addr(csr_read_addr_q),
           .csr_bcast (csr_bcast),
           .exu_csr   (exu_csr),

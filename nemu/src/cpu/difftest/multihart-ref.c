@@ -162,4 +162,49 @@ __EXPORT const NemuDiffVectorAPI *nemu_difftest_vector_query(uint32_t version, u
   };
   return version == api.version && size == api.size ? &api : NULL;
 }
+
+static const unsigned vector_csr_addresses[NEMU_DIFF_VECTOR_CSR_COUNT] = {
+  CSR_VSTART, CSR_VXSAT, CSR_VXRM, CSR_VCSR, CSR_VL, CSR_VTYPE, CSR_VLENB
+};
+
+static int set_vector_csrs(uint32_t hart, const NemuDiffVectorCSRs *state)
+{
+  if (!state || next_sequence || (hart_count ? hart >= hart_count : hart != 0)) return -1;
+#ifndef CONFIG_RV64
+  for (unsigned index = 0; index < NEMU_DIFF_VECTOR_CSR_COUNT; index++) {
+    if (state->value[index] > UINT32_MAX) return -1;
+  }
+#endif
+  if (state->value[6] != NEMU_DIFF_VECTOR_VLENB || state->value[0] >= NEMU_DIFF_VECTOR_VLENB * 8 ||
+      state->value[1] > 1 || state->value[2] > 3 ||
+      state->value[3] != (state->value[1] | (state->value[2] << 1))) return -1;
+  for (unsigned index = 0; index < NEMU_DIFF_VECTOR_CSR_COUNT; index++) {
+    unsigned address = vector_csr_addresses[index];
+    if (hart_count) states[hart].csr[address] = state->value[index];
+    else cpu.sr[address] = state->value[index];
+  }
+  return 0;
+}
+
+static int get_vector_csrs(uint32_t hart, NemuDiffVectorCSRs *state)
+{
+  if (!state || (hart_count ? hart >= hart_count : hart != 0)) return -1;
+  for (unsigned index = 0; index < NEMU_DIFF_VECTOR_CSR_COUNT; index++) {
+    unsigned address = vector_csr_addresses[index];
+    state->value[index] = hart_count ? states[hart].csr[address] : cpu.sr[address];
+  }
+  state->value[3] = state->value[1] | (state->value[2] << 1);
+  state->value[6] = NEMU_DIFF_VECTOR_VLENB;
+  return 0;
+}
+
+__EXPORT const NemuDiffVectorCSRAPI *nemu_difftest_vector_csr_query(uint32_t version,
+                                                                uint32_t size)
+{
+  static const NemuDiffVectorCSRAPI api = {
+    .version = NEMU_DIFF_VECTOR_CSR_VERSION, .size = sizeof(NemuDiffVectorCSRAPI),
+    .xlen = XLEN, .set_state = set_vector_csrs, .get_state = get_vector_csrs,
+  };
+  return version == api.version && size == api.size ? &api : NULL;
+}
 #endif

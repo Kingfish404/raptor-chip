@@ -23,6 +23,7 @@ Values below describe `rtl/configs/default/rapt_config.svh` and the integrated
 | In-flight state | 32-entry ROB, 64 integer physical registers, 16 branch checkpoints |
 | Execution queues | ALQ 8, BRQ 8, MDQ 4, FPQ 8, IOQ 8; unified store queue 16 |
 | Floating point | ROB-backed speculative results; 32 × 64-bit committed FPR bank |
+| Vector | V 1.0, VLEN=128, ELEN=64; serialized execution with precise ROB ownership |
 | Completion | 6 endpoints, all registered before ROB writeback |
 | Prediction | TAGE: 1024 bimodal + 3 × 1024 tagged; 128-entry two-way BTB; RAS 16 |
 | L1 caches | 16 KiB each, four-way, 64-byte lines; L1D write-back, 4 MSHRs, 2 writeback buffers |
@@ -40,7 +41,8 @@ cache policy, and preset differences.
 ## ISA scope
 
 Both XLEN modes implement **IMAFDC**, scalar **Zfhmin**, bit manipulation
-**Zba/Zbb/Zbc/Zbs**, and the following extensions:
+**Zba/Zbb/Zbc/Zbs**, and the extensions below. The `default`, `default-*` and
+`large` presets also enable **V 1.0** by default.
 
 - **System and hints:** Zicsr, Zifencei, Zicntr, Zihpm, Zicond, Zihintntl, Zihintpause, Zimop.
 - **Cache management:** Zicbom, Zicbop, Zicboz.
@@ -49,8 +51,9 @@ Both XLEN modes implement **IMAFDC**, scalar **Zfhmin**, bit manipulation
 
 Page-table A/D bits use software management (Svade). Committed Svinval and
 SFENCE.VMA select translations by address and ASID by default, preserving unrelated
-entries; `RAPT_SFENCE_SELECTIVE=0` restores full invalidation. The [standalone RVV component](./vpu.md) is
-**not integrated into the scalar core**; V is not part of this core's ISA.
+entries; `RAPT_SFENCE_SELECTIVE=0` restores full invalidation. The
+[vector extension](./vpu.md) uses the core's ROB, CSR, MMU and cache contracts.
+`RAPT_NO_VPU` selects a scalar build without MISA.V.
 Decoder sources live in [`tools/decodegen/`](https://github.com/Kingfish404/raptor-chip/tree/master/tools/decodegen).
 
 ## RVA22S64 support
@@ -67,8 +70,14 @@ This scope includes its mandatory user-mode features and supervisor requirements
 | Supervisor | S/U execution, Sv39 and Bare, software-managed A/D bits (Svade), Svpbmt, and Svinval |
 
 The profile statement applies to the default **RV64** configuration. RV32 and
-modified presets have their own ISA scope. Vector and hypervisor extensions are
-optional in RVA22S64; the integrated scalar core does not include V or H.
+modified presets have their own ISA scope. RVA22S64 treats V and H as optional
+extensions. The default core supports V.
+
+Full **RVA23S64** is a subsequent goal. The audit follows both mandatory
+extension lists, including Zvfhmin, Zvbb, Zvkt, Zcmop, Zcb, Zfa, Zawrs, Supm,
+Ss1p13, Svnapot, Sstc, Sscofpmf, Ssnpm, Ssu64xl and Sha. It also checks existing
+scalar features against the profile's required versions and behavior.
+[Ratified RVA23 profile](https://docs.riscv.org/reference/rva23/v1.0/rva23-profiles.html).
 
 The [RV64 supervisor verification guide](https://github.com/Kingfish404/raptor-chip/blob/master/verification/riscof/raptor-rv64s/README.md)
 and the current verification commands

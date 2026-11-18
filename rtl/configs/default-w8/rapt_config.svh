@@ -1,6 +1,14 @@
 `ifndef RAPT_CONFIG_SVH
 `define RAPT_CONFIG_SVH
 
+// Application presets include V 1.0 (VLEN=128, ELEN=64).
+// Define RAPT_NO_VPU to build the scalar configuration explicitly.
+`ifndef RAPT_NO_VPU
+`ifndef RAPT_V_EXTENSION
+`define RAPT_V_EXTENSION
+`endif
+`endif
+
 /**
  * default-w8 evaluation preset: eight decode, rename, dispatch, commit and
  * integer issue lanes. Cache geometry matches default-w4; branch-predictor
@@ -32,10 +40,18 @@
 // Default is RV32 when RAPT_RV64 is not defined
 `ifdef RAPT_RV64
 `define RAPT_XLEN 64
+`ifdef RAPT_V_EXTENSION
+`define RAPT_MISA 'h800000000034112f
+`else
 `define RAPT_MISA 'h800000000014112f
+`endif
 `else
 `define RAPT_XLEN 32
+`ifdef RAPT_V_EXTENSION
+`define RAPT_MISA 'h4034112f
+`else
 `define RAPT_MISA 'h4014112f
+`endif
 `endif
 `define RAPT_M_EXTENSION 'h1
 

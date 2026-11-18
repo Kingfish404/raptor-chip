@@ -3,6 +3,7 @@
 #include <checkpoint.h>
 #include <memory.h>
 #include <difftest-isa.h>
+#include <difftest-vector.h>
 #include <dlfcn.h>
 #ifdef RAPT_LARGE_PMEM
 #include <sys/mman.h>
@@ -56,6 +57,24 @@ static void (*ref_difftest_checkpoint_sync)(void *dut, uint32_t plic_ndev,
                                             uint32_t plic_nctx) = NULL;
 static void (*ref_difftest_clear_reservation)(void) = NULL;
 static void (*ref_difftest_restore_sstc)(uint64_t, uint64_t) = NULL;
+static const NemuDiffVectorAPI *vector_reference = nullptr;
+static const NemuDiffVectorCSRAPI *vector_csr_reference = nullptr;
+
+static void sync_vector_reference()
+{
+  if (npc.vreg == nullptr) return;
+  Assert(vector_reference != nullptr && vector_csr_reference != nullptr,
+         "Vector reference APIs are unavailable");
+  NemuDiffVectorState registers;
+  NemuDiffVectorCSRs csrs;
+  memcpy(registers.reg, npc.vreg, sizeof(registers.reg));
+  for (unsigned index = 0; index < NEMU_DIFF_VECTOR_CSR_COUNT; index++)
+    csrs.value[index] = npc.vector_csrs[index];
+  Assert(vector_reference->set_state(0, &registers) == 0,
+         "Vector reference rejected the register state");
+  Assert(vector_csr_reference->set_state(0, &csrs) == 0,
+         "Vector reference rejected the CSR state");
+}
 
 static bool is_skip_ref = false;
 static bool should_diff_mem = false;
@@ -113,6 +132,7 @@ void difftest_checkpoint_resync()
     ref_difftest_checkpoint_sync(&npc, NPC_PLIC_NDEV, NPC_PLIC_NCTX);
   else
     ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
+  sync_vector_reference();
 
   uint64_t error_status = (*npc.bus_error_pending & 1u) |
       ((*npc.bus_error_overflow & 1u) << 1) | ((uint64_t)*npc.bus_error_strb << 8);
@@ -198,6 +218,8 @@ void init_difftest(char *ref_so_file, long img_size, int port, uint64_t isa_exte
     return;
   }
   difftest_enabled = true;
+  if (npc.vreg != nullptr)
+    isa_extensions |= NEMU_ISA_EXT_V128_PREVIEW;
 
   void *handle;
   handle = dlopen(ref_so_file, RTLD_LAZY);
@@ -279,10 +301,33 @@ void init_difftest(char *ref_so_file, long img_size, int port, uint64_t isa_exte
   assert(ref_difftest_init);
 
   ref_difftest_init(port);
+  if (npc.vreg != nullptr)
+  {
+    NemuDiffVectorQuery query =
+        (NemuDiffVectorQuery)dlsym(handle, "nemu_difftest_vector_query");
+    NemuDiffVectorCSRQuery csr_query =
+        (NemuDiffVectorCSRQuery)dlsym(handle, "nemu_difftest_vector_csr_query");
+    vector_reference = query == nullptr ? nullptr :
+        query(NEMU_DIFF_VECTOR_VERSION, sizeof(NemuDiffVectorAPI));
+    vector_csr_reference = csr_query == nullptr ? nullptr :
+        csr_query(NEMU_DIFF_VECTOR_CSR_VERSION, sizeof(NemuDiffVectorCSRAPI));
+    if (npc.vector_vlenb != NEMU_DIFF_VECTOR_VLENB || vector_reference == nullptr ||
+        vector_csr_reference == nullptr ||
+        vector_reference->xlen != sizeof(word_t) * 8 ||
+        vector_csr_reference->xlen != sizeof(word_t) * 8 ||
+        vector_reference->get_state == nullptr || vector_reference->set_state == nullptr ||
+        vector_csr_reference->get_state == nullptr || vector_csr_reference->set_state == nullptr)
+    {
+      fprintf(stderr, "[difftest] V requires matching VLEN=128 register and CSR reference APIs\n");
+      abort();
+    }
+    printf("[difftest] V enabled: compare all 32 vector registers and seven vector CSRs\n");
+  }
   ref_difftest_memcpy(MBASE, guest_to_host(MBASE), img_size, DIFFTEST_TO_REF);
   ref_difftest_memcpy(MROM_BASE, guest_to_host(MROM_BASE), MROM_SIZE, DIFFTEST_TO_REF);
   ref_difftest_memcpy(FLASH_BASE, guest_to_host(FLASH_BASE), FLASH_SIZE, DIFFTEST_TO_REF);
   ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
+  sync_vector_reference();
 #endif
 }
 
@@ -383,6 +428,36 @@ static void checkregs(NPCState *ref, vaddr_t pc)
   CHECK_NPC_CSR_M(cause_);
   CHECK_NPC_CSR_M(tval__);
   CHECK_NPC_CSR_M(ip____);
+
+  if (npc.vreg != nullptr)
+  {
+    NemuDiffVectorState registers;
+    NemuDiffVectorCSRs csrs;
+    Assert(vector_reference->get_state(0, &registers) == 0,
+           "Cannot read reference vector registers");
+    Assert(vector_csr_reference->get_state(0, &csrs) == 0,
+           "Cannot read reference vector CSRs");
+    if (memcmp(registers.reg, npc.vreg, sizeof(registers.reg)) != 0)
+    {
+      is_same = false;
+      for (unsigned reg = 0; reg < 32; reg++)
+        for (unsigned byte = 0; byte < npc.vector_vlenb; byte++)
+        {
+          const uint8_t dut_byte = npc.vreg[reg * npc.vector_vlenb + byte];
+          if (registers.reg[reg][byte] != dut_byte)
+            printf(FMT_RED("[ERROR] v%u byte %u differs: ref=%02x dut=%02x\n"), reg, byte,
+                   registers.reg[reg][byte], dut_byte);
+        }
+    }
+    static const char *names[] = {"vstart", "vxsat", "vxrm", "vcsr", "vl", "vtype", "vlenb"};
+    for (unsigned index = 0; index < NEMU_DIFF_VECTOR_CSR_COUNT; index++)
+      if (csrs.value[index] != npc.vector_csrs[index])
+      {
+        printf(FMT_RED("[ERROR] %s differs: ref=%016" PRIx64 " dut=" FMT_WORD_NO_PREFIX "\n"),
+               names[index], csrs.value[index], npc.vector_csrs[index]);
+        is_same = false;
+      }
+  }
 
   if (!is_same)
   {
@@ -513,6 +588,7 @@ void difftest_step(vaddr_t pc, uint32_t retire_count)
   if (is_skip_ref)
   {
     ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
+    sync_vector_reference();
     is_skip_ref = false;
     should_diff_mem = false;
     return;
@@ -534,6 +610,7 @@ void difftest_step(vaddr_t pc, uint32_t retire_count)
     {
       /* Compatibility with an older reference shared object. */
       ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
+      sync_vector_reference();
       should_diff_mem = false;
       return;
     }
@@ -551,6 +628,7 @@ void difftest_step(vaddr_t pc, uint32_t retire_count)
   if (ref_r.skip)
   {
     ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
+    sync_vector_reference();
     should_diff_mem = false;
   }
   else

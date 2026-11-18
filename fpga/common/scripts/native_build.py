@@ -14,8 +14,21 @@ COMMON = Path(__file__).resolve().parents[1]
 REPO = COMMON.parents[1]
 from rtl_pack import pack
 from sampling_overlay import sampling_sources
+sys.path.insert(0, str(REPO / "sim/gsim"))
+from raptor_dse import parse_rapt_config
 
 BOARD = PROFILE = None
+
+
+def resolve_vector(args):
+    """Resolve hardware, firmware and DT ISA from the same preset/override."""
+    preset = parse_rapt_config(REPO / "rtl/configs" / args.preset / "rapt_config.svh",
+                              args.xlen == 64)
+    requested = getattr(args, "vector", "auto")
+    enabled = bool(preset.get("RAPT_V_EXTENSION")) if requested == "auto" else bool(int(requested))
+    if enabled and preset.get("RAPT_NO_FPU"):
+        raise ValueError("V requires a preset with the scalar F and D extensions")
+    args.vector = int(enabled)
 
 
 def configure(board):
@@ -72,6 +85,9 @@ def configuration(args):
     result = {key: getattr(args, key) for key in (
         "xlen", "preset", "memory", "clock_mhz", "ram_bytes", "reset_button", "ddr_part", "cross", "ethernet"
     )}
+    result["vector"] = getattr(args, "vector", 0)
+    if getattr(args, "vector_device_test", False):
+        result["vector_device_test"] = True
     if PROFILE.get("cm005_bridge"):
         result["cm005_bridge"] = args.cm005_bridge
         result["cm005_ethernet"] = args.cm005_ethernet
@@ -184,7 +200,8 @@ def firmware(args, out, values):
     (out / "boot.hex").write_text("".join(
         f"{int.from_bytes(data[i:i + width], 'little'):0{width * 2}x}\n" for i in range(0, len(data), width)
     ))
-    run([args.cross + "gcc", *flags, "-Wl,-Ttext=0x80000000", "-Wl,-e,_start",
+    payload_flags = [f"-march=rv{args.xlen}gcv", "-DNATIVE_VECTOR_TEST"] if args.vector else []
+    run([args.cross + "gcc", *flags, *payload_flags, "-Wl,-Ttext=0x80000000", "-Wl,-e,_start",
          COMMON / "firmware/payload.S", "-o", out / "payload.elf"])
     run([args.cross + "objcopy", "-O", "binary", out / "payload.elf", out / "payload.bin"])
     (out / "payload.hex").write_text("".join(f"{b:02x}\n" for b in (out / "payload.bin").read_bytes()))
@@ -236,7 +253,12 @@ def device_tree(args, out, ram_bytes):
 '''
     def cells(name):
         return f"0 0x{reg[name]['base']:x} 0 0x{reg[name]['size']:x}"
-    isa = f"rv{args.xlen}imafdc_zicsr_zifencei_zicntr"
+    vector = bool(getattr(args, "vector", 0))
+    isa = f"rv{args.xlen}imafdc{'v' if vector else ''}_zicsr_zifencei_zicntr"
+    extensions = '"i", "m", "a", "f", "d", "c"'
+    if vector:
+        extensions += ', "v"'
+    extensions += ', "zicsr", "zifencei", "zicntr"'
     text = f"""/dts-v1/;
 / {{
     #address-cells = <2>;
@@ -254,7 +276,7 @@ def device_tree(args, out, ram_bytes):
             device_type = "cpu"; reg = <0>; status = "okay"; compatible = "riscv";
             riscv,isa = "{isa}";
             riscv,isa-base = "rv{args.xlen}i";
-            riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicsr", "zifencei", "zicntr";
+            riscv,isa-extensions = {extensions};
             mmu-type = "riscv,sv{'32' if args.xlen == 32 else '39'}";
             clock-frequency = <{args.clock_mhz * 1_000_000}>;
             cpu_intc: interrupt-controller {{
@@ -343,6 +365,10 @@ def prepare(args, out):
     )
     if args.sampling:
         flags += " -DRAPT_SAMPLING"
+    if args.vector:
+        flags += " -DRAPT_V_EXTENSION"
+    else:
+        flags += " -DRAPT_NO_VPU"
     cache = args.build_root / "rtl-cache"
     if args.sampling:
         with sampling_sources(REPO) as (shadow, receipt):
@@ -387,6 +413,8 @@ def prepare(args, out):
 """
     if args.memory == "ddr":
         config += "`define NATIVE_WITH_DDR\n"
+    if getattr(args, "vector_device_test", False):
+        config += "`define NATIVE_VECTOR_DEVICE_TEST\n"
     if args.ethernet:
         config += "`define NATIVE_WITH_ETHERNET\n"
     if args.cm005_bridge:
@@ -520,6 +548,10 @@ def main():
                         help="enable native gigabit Ethernet on supported boards")
     parser.add_argument("--sampling", action="store_true",
                         help="enable JTAG checkpoint replay and hardware sample windows (RV64 CU08)")
+    parser.add_argument("--vector", choices=("auto", "0", "1"), default="auto",
+                        help="V extension: follow preset (auto), disable (0), or enable (1)")
+    parser.add_argument("--vector-device-test", action="store_true",
+                        help="include the isolated MMIO fault-test peripheral")
     parser.add_argument("--cm005-bridge", type=int, choices=(0, 1), default=PROFILE.get("cm005_bridge", 0),
                         help="retain independent CM005 A/B forwarding on CU08 (50 MHz)")
     parser.add_argument("--cm005-ethernet", type=int, choices=(0, 1), default=0,
@@ -534,6 +566,12 @@ def main():
     parser.add_argument("--trace", action="store_true", help="capture the focused boot AXI waveform")
     parser.add_argument("--build-root", type=Path, default=BOARD / "build")
     args = parser.parse_args()
+    try:
+        resolve_vector(args)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+    if args.vector_device_test and not args.vector:
+        parser.error("--vector-device-test requires V")
     if args.sampling and (args.xlen != 64 or BOARD.name != "mlk-cu08-ku15p"):
         parser.error("sampling transport currently supports RV64 on mlk-cu08-ku15p")
     if args.sampling and args.clock_mhz % 10:

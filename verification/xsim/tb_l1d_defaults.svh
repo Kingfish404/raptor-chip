@@ -25,6 +25,8 @@ task automatic init_l1d_inputs;
     lsu_l1d.rcheck_size_m1 = 0;
     lsu_l1d.rorig_size_m1 = 0;
     lsu_l1d.rvalid = 1'b0;
+    lsu_l1d.rprobe = 1'b0;
+    lsu_l1d.wprecise = 1'b0;
     lsu_l1d.replay_allowed = 1'b0;
     lsu_l1d.atomic_lock = 1'b0;
     lsu_l1d.ordered = 1'b1;

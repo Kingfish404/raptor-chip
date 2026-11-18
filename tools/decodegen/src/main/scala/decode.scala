@@ -43,6 +43,15 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
     val time = Output(UInt(1.W))
   })
 
+  // Admit the V opcode space and report only scalar register dependencies.
+  // The VPU performs instruction/geometry legality checks at serialization.
+  val out_vector = IO(new Bundle {
+    val valid = Output(Bool())
+    val rs1 = Output(Bool())
+    val rs2 = Output(Bool())
+    val rd = Output(Bool())
+  })
+
   val out_fp = IO(new Bundle {
     val valid     = Output(UInt(1.W))
     val op        = Output(UInt(6.W))
@@ -65,6 +74,26 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
   val opcode = in.inst(6, 0)
   val funct3 = in.inst(14, 12)
   val funct7 = in.inst(31, 25)
+
+  val vectorInteger = opcode === "h57".U && funct3 =/= 1.U && funct3 =/= 5.U
+  val vectorFloat = opcode === "h57".U && (funct3 === 1.U || funct3 === 5.U)
+  val vectorMemory = (opcode === "h07".U || opcode === "h27".U) &&
+    (funct3 === 0.U || funct3 === 5.U || funct3 === 6.U || funct3 === 7.U)
+  val vectorCsrs = Seq(0x008, 0x009, 0x00a, 0x00f, 0xc20, 0xc21, 0xc22)
+  val vectorCsrAddress = vectorCsrs.map(address => in.inst(31, 20) === address.U).reduce(_ || _)
+  val vectorCsr = opcode === "h73".U && funct3 =/= 0.U && vectorCsrAddress
+  val vectorMoveToX = in.inst(31, 26) === "h10".U && funct3 === 2.U &&
+    in.inst(25) && rs1 === 0.U
+  val vectorMaskScan = in.inst(31, 26) === "h10".U && funct3 === 2.U &&
+    in.inst(19, 16) === "b1000".U
+  out_vector.valid := vectorInteger || vectorFloat || vectorMemory || vectorCsr
+  out_vector.rs1 := vectorMemory || (vectorCsr && !in.inst(14)) ||
+    (vectorInteger && (funct3 === 4.U || funct3 === 6.U ||
+      (funct3 === 7.U && in.inst(31, 30) =/= 3.U)))
+  out_vector.rs2 := (vectorInteger && funct3 === 7.U && funct7 === "b1000000".U) ||
+    (vectorMemory && in.inst(27, 26) === 2.U)
+  out_vector.rd := vectorCsr || (vectorInteger &&
+    (funct3 === 7.U || vectorMoveToX || vectorMaskScan))
 
   val imm_i = Cat(Fill(9, in.inst(31)), in.inst(31, 20))
   val imm_s = Cat(Fill(9, in.inst(31)), in.inst(31, 25), in.inst(11, 7))

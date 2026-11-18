@@ -17,6 +17,8 @@ module tb_chip_xspi_boot;
   axi4_if #(.XLEN(XLEN)) board ();
   int bridge_boots = 0, flash_boots = 0, drain_cycles = 0;
   int rom_commits = 0, switch_clocks = 0;
+  bit vector_test = 0;
+  logic [31:0] vector_pass_pc = 0;
   always_comb fixture_flash = chip.u_chip.boot_flash;
   int cycles = 0;
 
@@ -203,8 +205,24 @@ module tb_chip_xspi_boot;
                 );
               flash_boots++;
             end else begin
-              if (chip.u_chip.u_cluster.core.backend.rou_cmu.slot[slot].pc != XLEN'(32'h20000028)
-                  || memory.mem[32'h10001000] != 8'h23)
+              if (vector_test) begin
+                if (chip.u_chip.u_cluster.core.backend.rou_cmu.slot[slot].pc != XLEN'(vector_pass_pc))
+                  $fatal(1, "Vector bridge payload reported failure");
+                for (int i = 0; i < 4; i++) begin
+                  if ($test$plusargs("XSPI_VECTOR_WRITE")) begin
+                    if (memory.vector_write_attempts[i] != (i == 2 ? 2 : 1)
+                        || memory.vector_write_effects[i] != 1)
+                      $fatal(1, "Vector device write attempt/effect mismatch at %0d", i);
+                    for (int lane = 0; lane < 4; lane++)
+                    if (memory.mem[32'h10000440+32'(4*i+lane)] != (lane == 0 ? 8'd7 : 8'd0))
+                      $fatal(1, "Vector device write data mismatch at %0d:%0d", i, lane);
+                  end else if (memory.vector_attempts[i] != (i == 2 ? 2 : 1)
+                               || memory.vector_effects[i] != 1)
+                    $fatal(1, "Vector device read attempt/effect mismatch at %0d", i);
+                end
+                if (!memory.vector_fault_fired) $fatal(1, "Missing vector error response");
+              end else if (chip.u_chip.u_cluster.core.backend.rou_cmu.slot[slot].pc !=
+                               XLEN'(32'h20000028) || memory.mem[32'h10001000] != 8'h23)
                 $fatal(1, "Bridge boot/store/load failed");
               bridge_boots++;
             end
@@ -219,9 +237,32 @@ module tb_chip_xspi_boot;
     int fd, byte_value, count, before_boot;
     logic [31:0] word;
     #1;
-    for (int i = 0; i < 20; i++) begin
-      word = bridge_word(i);
-      for (int lane = 0; lane < 4; lane++) memory.mem[32'h20000000+32'(4*i+lane)] = word[8*lane+:8];
+    vector_test = $test$plusargs("XSPI_VECTOR_FAULT");
+    if (vector_test) begin
+      if (!$value$plusargs(
+              "VECTOR_IMAGE=%s", path
+          ) || !$value$plusargs(
+              "VECTOR_PASS_PC=%h", vector_pass_pc
+          ))
+        $fatal(1, "Vector bridge payload and pass address are required");
+      fd = $fopen(path, "rb");
+      if (fd == 0) $fatal(1, "Cannot open vector bridge payload");
+      count = 0;
+      byte_value = $fgetc(fd);
+      while (byte_value >= 0) begin
+        if (count >= 65536) $fatal(1, "Vector bridge payload exceeds ROM alias");
+        memory.mem[32'h20000000+32'(count)] = 8'(byte_value);
+        count++;
+        byte_value = $fgetc(fd);
+      end
+      $fclose(fd);
+      for (int i = 0; i < 16; i++) memory.mem[32'h10000440+32'(i)] = 8'(i + 64);
+    end else begin
+      for (int i = 0; i < 20; i++) begin
+        word = bridge_word(i);
+        for (int lane = 0; lane < 4; lane++)
+        memory.mem[32'h20000000+32'(4*i+lane)] = word[8*lane+:8];
+      end
     end
     if (!$value$plusargs("FLASH_IMAGE=%s", path)) $fatal(1, "FLASH_IMAGE required");
     fd = $fopen(path, "rb");
@@ -255,6 +296,11 @@ module tb_chip_xspi_boot;
     if (word != 32'h00030000) $fatal(1, "DM reset lost boot control");
     debug_reset(0, 1);
     while (bridge_boots == 0) tick();
+    if (vector_test) begin
+      $display("PASS: vector device error/restart through xSPI XLEN=%0d write=%0d slverr=%0d",
+               XLEN, $test$plusargs("XSPI_VECTOR_WRITE"), $test$plusargs("XSPI_SLVERR"));
+      $finish;
+    end
     check_irq(0);
     halt_core();
     // Repeating a core reset keeps both the setting and active mode.

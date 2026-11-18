@@ -256,11 +256,15 @@ module tb_csr_architectural;
     write_csr(`RAPT_CSR_MIP____, 0);
     for (int alias_index = 0; alias_index < 2; alias_index++)
     for (int fs = 0; fs < 4; fs++)
+    for (int vs = 0; vs < 4; vs++)
     for (int xs = 0; xs < 4; xs++) begin
       logic [XLEN-1:0] bits, expected;
-      bits = (XLEN'(fs) << 13) | (XLEN'(xs) << 15) | (XLEN'(3) << 9)
+      bits = (XLEN'(fs) << 13) | (XLEN'(xs) << 15) | (XLEN'(vs) << 9)
            | (XLEN'(1) << 6) | `RAPT_CSR_MSTATUS_SD;
-      expected = (XLEN'(fs) << 13) | ((fs == 3) ? `RAPT_CSR_MSTATUS_SD : XLEN'(0));
+      expected = (XLEN'(fs) << 13)
+          | (rapt_pkg::VectorEnable ? (XLEN'(vs) << 9) : XLEN'(0))
+          | ((fs == 3 || (rapt_pkg::VectorEnable && vs == 3))
+              ? `RAPT_CSR_MSTATUS_SD : XLEN'(0));
       write_csr(alias_index == 0 ? `RAPT_CSR_MSTATUS : `RAPT_CSR_SSTATUS, bits);
       expect_csr(`RAPT_CSR_MSTATUS, expected | `RAPT_CSR_MSTATUS_HW);
       expect_csr(`RAPT_CSR_SSTATUS, expected | `RAPT_CSR_SSTATUS_HW);
@@ -463,7 +467,7 @@ module tb_csr_contract;
         init_cmu_bcast_defaults();
         repeat (2) @(negedge clock);
         reset=0;
-        expected_misa=XLEN==64 ? XLEN'(64'h800000000014112f) : XLEN'(32'h4014112f);
+        expected_misa = XLEN'(rapt_pkg::Misa);
         for (int sample = 0; sample < XLEN + 2; sample ++) begin
           value = sample == 0 ? '0 : sample == 1 ? '1 : XLEN'(1) << (sample - 2);
           write_csr(12'h301, value);
@@ -863,6 +867,10 @@ module tb_csr_counter_priority;
       .timer_irq_i(1'b0),
       .sw_irq_i(1'b0),
       .m_ext_irq_i(1'b0),
+`ifdef RAPT_V_EXTENSION
+      .vector_dirty_i(1'b0),
+      .vector_fp_dirty_i(1'b0),
+`endif
       .store_error_i(1'b0),
       .store_error_addr_i('0),
       .store_error_strb_i('0),
@@ -1497,6 +1505,10 @@ module tb_csr_sret_roundtrip;
       .timer_irq_i(1'b0),
       .sw_irq_i(1'b0),
       .m_ext_irq_i(1'b0),
+`ifdef RAPT_V_EXTENSION
+      .vector_dirty_i(1'b0),
+      .vector_fp_dirty_i(1'b0),
+`endif
       .store_error_i(1'b0),
       .store_error_addr_i('0),
       .store_error_strb_i('0),
@@ -1751,6 +1763,10 @@ module tb_csr_trap_payload;
       .timer_irq_i(1'b0),
       .sw_irq_i(1'b0),
       .m_ext_irq_i(1'b0),
+`ifdef RAPT_V_EXTENSION
+      .vector_dirty_i(1'b0),
+      .vector_fp_dirty_i(1'b0),
+`endif
       .store_error_i(1'b0),
       .store_error_addr_i('0),
       .store_error_strb_i('0),
@@ -2041,6 +2057,10 @@ module tb_csr_interrupt_route;
       .timer_irq_i(1'b0),
       .sw_irq_i(1'b0),
       .m_ext_irq_i(1'b0),
+`ifdef RAPT_V_EXTENSION
+      .vector_dirty_i(1'b0),
+      .vector_fp_dirty_i(1'b0),
+`endif
       .store_error_i(1'b0),
       .store_error_addr_i('0),
       .store_error_strb_i('0),
@@ -2102,8 +2122,7 @@ module tb_csr_interrupt_route;
       // SSIP/STIP are software-writable; SEIP arrives from the PLIC S context.
       write_csr(`RAPT_CSR_MIP____, pend & ~(XLEN'(1) << Sei));
       s_ext = pend[Sei];
-      write_csr(`RAPT_CSR_MSTATUS, (mie_g != 0 ? MstatusMie : '0)
-                                   | (sie_g != 0 ? MstatusSie : '0));
+      write_csr(`RAPT_CSR_MSTATUS, (mie_g != 0 ? MstatusMie : '0) | (sie_g != 0 ? MstatusSie : '0));
       check(csr_bcast.priv == privilege, "mstatus write changed privilege");
       #1;
 
@@ -2121,11 +2140,27 @@ module tb_csr_interrupt_route;
       if (s_int_pending !== want_pending)
         fail($sformatf(
              "pending priv=%0d MIE=%0d SIE=%0d deleg=%h mie=%h pend=%h got=%b want=%b",
-             privilege, mie_g, sie_g, deleg, enable, pend, s_int_pending, want_pending));
+             privilege,
+             mie_g,
+             sie_g,
+             deleg,
+             enable,
+             pend,
+             s_int_pending,
+             want_pending
+             ));
       if (want_pending && s_int_cause !== ((XLEN'(1) << (XLEN - 1)) | XLEN'(want_cause)))
         fail($sformatf(
              "cause priv=%0d MIE=%0d SIE=%0d deleg=%h mie=%h pend=%h got=%h want=%0d",
-             privilege, mie_g, sie_g, deleg, enable, pend, s_int_cause, want_cause));
+             privilege,
+             mie_g,
+             sie_g,
+             deleg,
+             enable,
+             pend,
+             s_int_cause,
+             want_cause
+             ));
 
       // Take the reported interrupt and check the destination mode.
       if (want_pending) begin
@@ -2137,8 +2172,8 @@ module tb_csr_interrupt_route;
         @(posedge clock);
         @(negedge clock);
         clear_request();
-        check(csr_bcast.priv == (want_to_s ? `RAPT_PRIV_S : `RAPT_PRIV_M),
-              $sformatf("interrupt cause %0d trapped to the wrong mode", want_cause));
+        check(csr_bcast.priv == (want_to_s ? `RAPT_PRIV_S : `RAPT_PRIV_M), $sformatf(
+              "interrupt cause %0d trapped to the wrong mode", want_cause));
         if (!want_to_s) to_m_cases++;
         if (!want_to_s && |to_s) preempt_cases++;
       end
@@ -2149,8 +2184,8 @@ module tb_csr_interrupt_route;
 
     check(to_m_cases != 0, "no non-delegated S-level interrupt reached M-mode");
     check(preempt_cases != 0, "no M-target interrupt preempted a ready S-target one");
-    $display("PASS: RV%0d S-level interrupt routing, %0d cases (%0d to M, %0d preempting S)",
-             XLEN, checked, to_m_cases, preempt_cases);
+    $display("PASS: RV%0d S-level interrupt routing, %0d cases (%0d to M, %0d preempting S)", XLEN,
+             checked, to_m_cases, preempt_cases);
     $finish;
   end
 endmodule

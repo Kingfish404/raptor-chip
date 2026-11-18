@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,83 @@ SCRIPT = ROOT / "sim/scripts/paddr_config.py"
 
 
 class PaddrConfigTest(unittest.TestCase):
+    @unittest.skipUnless(all(shutil.which(tool) for tool in
+                             ("make", "dtc", "fdtget", "fdtput", "xxd")),
+                         "device-tree tools required")
+    def test_vector_mrom_isa_and_extensions_invalidate_together(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            for xlen in (32, 64):
+                baseline = None
+                for enabled in (0, 1, 0):
+                    with self.subTest(xlen=xlen, vector=enabled):
+                        output = Path(temporary) / f"rv{xlen}"
+                        command = ["make", "-s", "-C", str(ROOT / "sim/csrc/mem/mrom-data"),
+                                   str(output / "dtb.c"), f"BUILD_DIR={output}",
+                                   f"ISA64={int(xlen == 64)}", f"VECTOR={enabled}",
+                                   f"DT_SOURCE=spike-rv{xlen}gc.dts"]
+                        subprocess.run(command, capture_output=True, text=True, check=True)
+                        def property_value(name):
+                            return subprocess.check_output(
+                                ["fdtget", "-t", "s", str(output / "raptor.dtb"),
+                                 "/cpus/cpu@0", name], text=True).strip()
+                        isa = property_value("riscv,isa")
+                        extensions = property_value("riscv,isa-extensions").split()
+                        # The 'v' in the rv32/rv64 prefix is not an extension.
+                        letters = isa.split("_", 1)[0][4:]
+                        self.assertEqual("v" in letters, bool(enabled))
+                        self.assertEqual(extensions.count("v"), enabled)
+                        other = (letters.replace("v", ""),
+                                 set(extensions) - {"v"})
+                        if baseline is None:
+                            baseline = other
+                        self.assertEqual(other, baseline)
+
+    @unittest.skipUnless(all(shutil.which(tool) for tool in
+                             ("make", "dtc", "fdtget", "fdtput", "xxd")),
+                         "device-tree tools required")
+    def test_vector_mrom_accepts_either_isa_binding(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            default = (ROOT / "linux/dts/spike-rv64gc.dts").read_text()
+            for property_name, expected in (("riscv,isa", "rv64imafdcv_zicsr_zifencei_zicntr"),
+                                            ("riscv,isa-extensions", "i m a f d c zicsr zifencei zicntr v")):
+                with self.subTest(property_name=property_name):
+                    removed = ("riscv,isa-extensions" if property_name == "riscv,isa"
+                               else "riscv,isa")
+                    dts = root / f"{property_name.replace(',', '-')}.dts"
+                    dts.write_text("\n".join(line for line in default.splitlines()
+                                             if not line.strip().startswith(f"{removed} =")))
+                    output = root / "rom"
+                    command = ["make", "-s", "-C", str(ROOT / "sim/csrc/mem/mrom-data"),
+                               str(output / "dtb.c"), f"BUILD_DIR={output}",
+                               "ISA64=1", "VECTOR=1", f"DT_SOURCE={dts}"]
+                    subprocess.run(command, capture_output=True, text=True, check=True)
+                    args = ["fdtget", "-d", "", "-t", "s", str(output / "raptor.dtb"),
+                            "/cpus/cpu@0"]
+                    value = subprocess.check_output(args + [property_name], text=True).strip()
+                    self.assertEqual(value, expected)
+                    self.assertEqual(subprocess.check_output(args + [removed], text=True).strip(), "")
+
+    def test_vector_defaults_and_effective_overrides(self):
+        presets = sorted((ROOT / "rtl/configs").glob("*/rapt_config.svh"))
+        for preset in presets:
+            for xlen in (32, 64):
+                if xlen == 64 and preset.parent.name.startswith("chip32-"):
+                    continue
+                command = [sys.executable, str(SCRIPT), "--features", "--config",
+                           str(preset.parent), "--hdl", str(ROOT / "rtl"), "--"]
+                if xlen == 64:
+                    command.append("-DRAPT_RV64")
+                with self.subTest(preset=preset.parent.name, xlen=xlen):
+                    result = subprocess.run(command, capture_output=True, text=True, check=True)
+                    fields = list(map(int, result.stdout.split()))
+                    expected = preset.parent.name.startswith("default") or preset.parent.name == "large"
+                    self.assertEqual(fields[2:], [int(expected), 128, 64, 2])
+                    if expected:
+                        disabled = subprocess.run(command + ["-DRAPT_NO_VPU"],
+                                                  capture_output=True, text=True, check=True)
+                        self.assertEqual(disabled.stdout.split()[2], "0")
+
     def widths(self, *flags, config="small-cache"):
         return subprocess.run([sys.executable, str(SCRIPT), "--config",
                                str(ROOT / "rtl/configs" / config), "--hdl",

@@ -23,17 +23,20 @@ JOBS ?= 4 ## Vivado and Verilator jobs (1-32)
 BUILD_ROOT ?= $(BOARD_DIR)/build ## Output root; each configuration gets its own subdirectory
 HW_TARGET ?= ## JTAG target glob for load, e.g. */0ABC01A (empty: the only target)
 TRACE ?= 0 ## Set to 1 to dump the focused boot AXI waveform in sim
+VECTOR ?= auto ## V extension (auto follows the preset; 0 disables; 1 enables)
+VECTOR_DEVICE_TEST ?= 0 ## Include the MMIO fault-test peripheral (requires V)
 # A trailing `## doc` leaves a space in the value; strip it before quoting.
 $(foreach v,PYTHON XLEN RAPT_CONFIG MEMORY CLOCK_MHZ RAM_BYTES USE_RESET_BUTTON DDR_PART \
-	CROSS VIVADO JOBS BUILD_ROOT HW_TARGET TRACE $(BOARD_VARIABLES),\
+	CROSS VIVADO JOBS BUILD_ROOT HW_TARGET TRACE VECTOR VECTOR_DEVICE_TEST $(BOARD_VARIABLES),\
 	$(eval $(v) := $(strip $($(v)))))
 
 NATIVE_BUILD = $(PYTHON) $(COMMON_DIR)/scripts/native_build.py --board '$(BOARD_DIR)' \
 	--xlen $(XLEN) --preset $(RAPT_CONFIG) --memory $(MEMORY) --clock-mhz $(CLOCK_MHZ) \
-	--ram-bytes $(RAM_BYTES) --reset-button $(USE_RESET_BUTTON) \
+	--ram-bytes $(RAM_BYTES) --reset-button $(USE_RESET_BUTTON) --vector $(VECTOR) \
 	--cross '$(CROSS)' --vivado '$(VIVADO)' --jobs $(JOBS) --build-root '$(BUILD_ROOT)' \
 	$(if $(DDR_PART),--ddr-part '$(DDR_PART)') \
 	$(if $(HW_TARGET),--hw-target '$(HW_TARGET)') \
+	$(if $(filter 1,$(VECTOR_DEVICE_TEST)),--vector-device-test) \
 	$(if $(filter 1,$(TRACE)),--trace) $(BOARD_OPTIONS)
 
 help: ## Show targets and variables

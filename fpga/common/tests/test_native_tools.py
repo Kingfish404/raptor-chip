@@ -25,6 +25,19 @@ build.configure(FPGA / "mlk-cu08-ku15p")
 
 
 class NativeToolsTests(unittest.TestCase):
+    def test_vector_preset_and_explicit_override_match_hardware(self):
+        for xlen in (32, 64):
+            for preset in ("small", "default", "default-w8", "large"):
+                for selected in ("auto", "0", "1"):
+                    with self.subTest(xlen=xlen, preset=preset, selected=selected):
+                        args = types.SimpleNamespace(xlen=xlen, preset=preset, vector=selected)
+                        build.resolve_vector(args)
+                        expected = preset != "small" if selected == "auto" else selected == "1"
+                        self.assertEqual(args.vector, int(expected))
+        args = types.SimpleNamespace(xlen=32, preset="chip32-small", vector="1")
+        with self.assertRaisesRegex(ValueError, "requires.*F and D"):
+            build.resolve_vector(args)
+
     def test_sampling_clock_has_an_exact_integer_timer_divider(self):
         for clock, sampling, valid in ((25, True, False), (50, True, True),
                                        (100, True, True), (25, False, True)):
@@ -64,6 +77,20 @@ class NativeToolsTests(unittest.TestCase):
             self.assertIn('litex,rx-slots = <8>', tree)
             self.assertIn('litex,tx-slots = <2>', tree)
             self.assertIn('interrupts = <2>', tree)
+
+    def test_vector_configuration_and_device_tree_agree(self):
+        build.configure(FPGA / "mlk-cu08-ku15p")
+        for xlen in (32, 64):
+            for enabled in (0, 1):
+                with self.subTest(xlen=xlen, vector=enabled), tempfile.TemporaryDirectory() as temp:
+                    args = types.SimpleNamespace(xlen=xlen, clock_mhz=50, vector=enabled)
+                    with patch.object(build, "run"):
+                        build.device_tree(args, Path(temp), 131072)
+                    tree = (Path(temp) / "native.dts").read_text()
+                    isa = f'riscv,isa = "rv{xlen}imafdc'
+                    self.assertIn(isa + ('v' if enabled else '') + '_', tree)
+                    extensions = tree.split('riscv,isa-extensions = ', 1)[1].split(';', 1)[0]
+                    self.assertEqual('"v"' in extensions, bool(enabled))
 
     def test_source_identity_tracks_generated_rtl_and_phy_helper_but_not_chisel_cache(self):
         with tempfile.TemporaryDirectory() as temp:

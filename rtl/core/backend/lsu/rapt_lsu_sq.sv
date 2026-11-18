@@ -875,6 +875,8 @@ module rapt_lsu_sq #(
     else state_store <= state_store_next;
   end
 
+  assign lsu_l1d.rprobe = 1'b0;
+  assign lsu_l1d.wprecise = 1'b0;
   assign lsu_l1d.raddr = ma_req_addr;
   assign lsu_l1d.rcontext = exu_lsu.rcontext;
   assign lsu_l1d.rcontext_b = exu_lsu.rcontext_b;

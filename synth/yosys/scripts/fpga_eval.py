@@ -130,8 +130,10 @@ def execute(command, directory, env, timeout, time_tool):
 
 
 def resources(report, top):
+    contents = report.read_text()
+    device = re.search(r"(?m)^\|\s*Device\s*:\s*(\S+)", contents)
     header = None
-    for line in report.read_text().splitlines():
+    for line in contents.splitlines():
         if not line.startswith("|"):
             continue
         row = [cell.strip() for cell in line.strip("|").split("|")]
@@ -139,6 +141,12 @@ def resources(report, top):
             header = row
         elif header and row[0] == top and len(row) == len(header):
             values = dict(zip(header, row))
+            # Seven-series devices have no UltraRAM column in Vivado reports.
+            if "URAM" not in values and device and device.group(1).lower().startswith("xc7"):
+                values["URAM"] = "0"
+            missing = [key for key in RESOURCE_COLUMNS if key not in values]
+            if missing:
+                raise ValueError(f"Missing resource columns {missing}: {report}")
             return {key: int(values[key].replace(",", "")) for key in RESOURCE_COLUMNS}
     raise ValueError(f"Missing resource row for {top}: {report}")
 

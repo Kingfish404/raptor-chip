@@ -186,6 +186,7 @@ module rapt_backend_syn_top #(
       .LocalFpWake(LocalFpWake),
       .RegisteredOperandWakePorts(RegisteredOperandWakePorts)
   ) dut (
+      .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .debug(debug),
       .cmu_bcast(cmu_internal),
       .csr_bcast(csr_internal),

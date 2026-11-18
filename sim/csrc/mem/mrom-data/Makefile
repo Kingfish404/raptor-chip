@@ -34,7 +34,8 @@ SOURCE = rom.c $(BUILD_DIR)/dtb.c
 # DT_SOURCE forces a clean rebuild (and recompiled dtb.c) when the ISA string
 # baked into the embedded DTB changes.
 ISA64 ?= 0
-DT_STAMP_KEY := $(ISA64):$(DT_SOURCE)
+VECTOR ?= 0
+DT_STAMP_KEY := $(ISA64):$(DT_SOURCE):v$(VECTOR)
 ISA_STAMP := $(BUILD_DIR)/.isa_stamp
 ISA_PREV  := $(shell cat $(ISA_STAMP) 2>/dev/null)
 ifneq ($(DT_STAMP_KEY),$(ISA_PREV))
@@ -49,7 +50,7 @@ LDFLAGS = -no-pie -Wl,-Ttext=0 -Wl,-e,_start
 
 all: $(IMAGE).elf $(IMAGE).bin ## Build MROM data (elf + bin)
 
-$(BUILD_DIR)/dtb.c: $(DT_SOURCE_PATH) ## Generate DTB C source
+$(BUILD_DIR)/dtb.c: $(DT_SOURCE_PATH) Makefile ## Generate DTB C source
 	# brew install dtc
 	mkdir -p $(BUILD_DIR)
 	@set -eu; \
@@ -57,6 +58,22 @@ $(BUILD_DIR)/dtb.c: $(DT_SOURCE_PATH) ## Generate DTB C source
 	  c_tmp="$@.$$$$"; \
 	  trap 'rm -f "$$dtb_tmp" "$$c_tmp"' EXIT HUP INT TERM; \
 	  dtc $(DT_SOURCE_PATH) -o "$$dtb_tmp"; \
+	  if [ "$(VECTOR)" = 1 ]; then \
+	    isa=$$(fdtget -d '' -t s "$$dtb_tmp" /cpus/cpu@0 riscv,isa); \
+	    if [ -n "$$isa" ]; then \
+	      base=$${isa%%_*}; \
+	      letters=$${base#rv??}; \
+	      case "$$letters" in *v*) ;; \
+	        *) fdtput -t s "$$dtb_tmp" /cpus/cpu@0 riscv,isa "$${base}v$${isa#$$base}" ;; \
+	      esac; \
+	    fi; \
+	    extensions=$$(fdtget -d '' -t s "$$dtb_tmp" /cpus/cpu@0 riscv,isa-extensions); \
+	    if [ -n "$$extensions" ]; then \
+	      case " $$extensions " in *' v '*) ;; \
+	        *) fdtput -t s "$$dtb_tmp" /cpus/cpu@0 riscv,isa-extensions $$extensions v ;; \
+	      esac; \
+	    fi; \
+	  fi; \
 	  xxd -i -n raptor_dtb "$$dtb_tmp" > "$$c_tmp"; \
 	  mv "$$dtb_tmp" $(BUILD_DIR)/raptor.dtb; \
 	  mv "$$c_tmp" $@; \

@@ -182,6 +182,7 @@ module rapt_core #(
       .writeback_cbo_invalidate(cache_writeback_cbo_invalidate),
       .writeback_block(cache_writeback_block),
       .clock(clock),
+      .sram_ctrl_i(sram_ctrl_i),
       .reset(reset),
       .idu_rnu(idu_rnu),
       .cmu_bcast(cmu_bcast),

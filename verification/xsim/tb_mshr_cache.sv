@@ -72,6 +72,33 @@ module tb_mshr_cache;
   function automatic logic [XLEN-1:0] value(input logic [XLEN-1:0] a);
     return a ^ XLEN'('h12345678);
   endfunction
+  task automatic permission_probe(input logic [XLEN-1:0] address, input bit denied);
+    int before_requests;
+    bit finished;
+    before_requests = requests;
+    finished = 0;
+    @(negedge clock);
+    lsu_l1d.rvalid = 1;
+    lsu_l1d.rprobe = 1;
+    lsu_l1d.raddr = address;
+    lsu_l1d.ralu = `RAPT_ALU_LW__;
+    for (int cycle = 0; cycle < 100 && !finished; cycle++) begin
+      @(posedge clock);
+      if (l1d_bus.arvalid || lsu_l1d.rmiss || dut.mshr_busy)
+        $fatal(1, "permission probe issued data traffic or allocated an MSHR");
+      if (lsu_l1d.rready) begin
+        if (lsu_l1d.trap != denied) $fatal(1, "permission probe returned incorrect permissions");
+        if (!denied && lsu_l1d.rnonidempotent != rapt_pkg::addr_device(address))
+          $fatal(1, "permission probe lost the device attribute");
+        finished = 1;
+      end
+    end
+    if (!finished || requests != before_requests) $fatal(1, "permission probe did not complete");
+    @(negedge clock);
+    lsu_l1d.rvalid = 0;
+    lsu_l1d.rprobe = 0;
+    repeat (3) @(negedge clock);
+  endtask
   task automatic lookup(input logic [XLEN-1:0] a, input bit miss, input bit fault = 0);
     @(negedge clock);
     lsu_l1d.rvalid = 1;
@@ -175,6 +202,13 @@ module tb_mshr_cache;
     reset = 0;
     lsu_l1d.replay_allowed = 1;
     l1d_bus.rready = 1;
+    if (rapt_pkg::VectorEnable) begin
+      permission_probe(XLEN'('h80002000), 0);
+      permission_probe(XLEN'('h10000040), 0);
+      csr_bcast.priv = `RAPT_PRIV_U;
+      permission_probe(XLEN'('h80002000), 1);
+      csr_bcast.priv = `RAPT_PRIV_M;
+    end
     lookup(XLEN'('h80000000), 1);
     lookup(XLEN'('h80000100), 1);
     lookup(XLEN'('h80000008), 1);  // secondary miss, same line

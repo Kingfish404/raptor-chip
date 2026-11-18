@@ -1,6 +1,19 @@
 `ifndef RAPT_SVH
 `define RAPT_SVH
 `include "rapt_config.svh"
+
+// Vector register geometry is independent of the scalar register width.
+// Full V requires ELEN=64 and VLEN>=128; reduced Zve configurations are not
+// advertised by the integrated core.
+`ifndef RAPT_VLEN
+`define RAPT_VLEN 128
+`endif
+`ifndef RAPT_VRF_BANK_BITS
+`define RAPT_VRF_BANK_BITS 64
+`endif
+`ifndef RAPT_VRF_BANKS
+`define RAPT_VRF_BANKS 2
+`endif
 `include "rapt_sva.svh"
 // Safe memory-macro control setting for presets without an explicit override.
 `ifndef RAPT_SRAM_CTRL_RESET

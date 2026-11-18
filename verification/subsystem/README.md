@@ -6,6 +6,48 @@ private L1 memory to the cluster L2 subsystem through `l2_client_if`; that
 subsystem supplies their external AXI port even when its cache is disabled.
 These simulation environments are separate from production RTL and module synthesis tops.
 
+## Integrated vector programs
+
+`vector-system-smoke` runs the integration, device, page, read-restart and FOF
+suites, plus the split-beat fault suite on RV32. They share a whole-core AXI
+harness and `vector_programs.py`. The programs cover compiled
+integer/FP32/FP64 code, VS/CSR traps, context save/restore, MMU/PMP faults,
+interrupts, indexed/segment memory, restart/FOF and non-idempotent device effects.
+Device and page suites include negative controls that must fail when the
+expected fault or side-effect accounting is removed. RV32 additionally exercises
+split 64-bit elements and second-beat faults.
+
+```sh
+make -C verification/subsystem vector-system-smoke \
+  CONFIG=default XLEN=64 BUILD_DIR=/tmp/vector-system
+make -C verification/subsystem vector-disabled-smoke CONFIG=default XLEN=32 \
+  VECTOR_DEFINES=RAPT_NO_VPU BUILD_DIR=/tmp/vector-scalar
+python3 verification/subsystem/vector_programs.py catalog \
+  --output /tmp/vector-catalog.S --success-code 0
+make -C verification/subsystem vector-catalog-diff CONFIG=default XLEN=64 \
+  BUILD_DIR=/tmp/vector-catalog
+```
+
+Repeat with both XLEN modes and each selected preset. The normal targets use
+the preset's default V setting. `VECTOR_DEFINES=RAPT_V_EXTENSION` explicitly
+enables a smaller F/D-capable preset. `vector-disabled-smoke` checks the MISA
+advertisement and illegal-instruction behavior of a scalar build. The `catalog`
+generator emits the baseline opcode/SEW/mask/segment/restart matrix and a JSON
+manifest. `vector-catalog-diff` compiles and runs it with an existing NPC/NEMU
+build to compare all vector registers and CSRs. Override `VECTOR_NPC` and
+`VECTOR_REFERENCE` for isolated builds. The VPU/Spike suites cover additional
+operand geometry and numerical cases.
+
+`verilator-chip-xspi-vector-rv32` and `verilator-chip-xspi-vector-rv64` in
+`verification/Makefile` check error propagation and restart through the chip's
+serial link. Use `XSIM_RAPT_CONFIG=default`, `XSPI_VECTOR_ACCESS=load|store`,
+and `XSPI_VECTOR_EXTRA=+XSPI_SLVERR` to select the operation and error response.
+Omitting `XSPI_VECTOR_EXTRA` injects DECERR.
+
+External write errors must be injected before the memory hierarchy acknowledges
+the write. The restart payloads inject write errors on the SRAM path, which
+bypasses write-back L2. Any subsequent DRAM B error is a platform error.
+
 ## Trace source
 
 NEMU records `PC expanded_instruction actual_next_PC` in `.inst` and

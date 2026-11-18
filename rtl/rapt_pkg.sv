@@ -403,6 +403,18 @@ package rapt_pkg;
 `else
   localparam bit FpuEnable = 1'b1;
 `endif
+`ifdef RAPT_V_EXTENSION
+  localparam bit VectorEnable = 1'b1;
+`else
+  localparam bit VectorEnable = 1'b0;
+`endif
+  localparam int unsigned VectorLength = `RAPT_VLEN;
+  localparam int unsigned VectorElen = 64;
+  localparam int unsigned VectorBankBits = `RAPT_VRF_BANK_BITS;
+  localparam int unsigned VectorBanks = `RAPT_VRF_BANKS;
+  localparam logic [`RAPT_XLEN-1:0] Misa =
+  `RAPT_MISA
+  | (VectorEnable ? (`RAPT_XLEN'(1) << 21) : '0);
   localparam int unsigned DispatchWidth = CoreConfig.dispatch_width;
   localparam int unsigned SteerScanEntries = CoreConfig.steer_scan_entries;
   localparam int unsigned DecodeWidth = CoreConfig.decode_width;
@@ -517,6 +529,9 @@ package rapt_pkg;
     memory_uop_t memory;
     fp_uop_t fp;
     sys_uop_t sys;
+`ifdef RAPT_V_EXTENSION
+    logic vector;
+`endif
   } execution_payload_t;
 
   `RAPT_UOP_TYPE_PC(uop_t, xlen_t, pc_t, arch_reg_t, scheduling_t, execution_payload_t)
@@ -592,6 +607,16 @@ package rapt_pkg;
         !(op >= `RAPT_FP_OP_FCVT_W_D && op <= `RAPT_FP_OP_FCVT_LU_D) && !(op ==
     `RAPT_FP_OP_ZFHMIN
     && (inst[6:0] == 7'b0100111 || inst[31:25] == 7'b1110010));
+  endfunction
+
+  // The vector-to-FPR move allocates the normal FP owner.
+  function automatic logic vector_writes_fpr(input uop_t u);
+`ifdef RAPT_V_EXTENSION
+    return u.execute.vector && u.imm[6:0] == 7'h57 && u.imm[14:12] == 1
+        && u.imm[31:26] == 6'h10 && u.imm[25] && u.imm[19:15] == 0;
+`else
+    return 1'b0;
+`endif
   endfunction
 
   function automatic logic [2:0] fp_sources(input logic valid, input logic [5:0] op,

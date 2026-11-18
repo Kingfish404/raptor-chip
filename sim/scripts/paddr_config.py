@@ -27,6 +27,8 @@ def main():
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--hdl", type=Path, required=True)
     parser.add_argument("--pmp-only", action="store_true")
+    parser.add_argument("--features", action="store_true",
+                        help="append effective V enable, VLEN, bank width and bank count")
     parser.add_argument("flags", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     flags = args.flags[1:] if args.flags[:1] == ["--"] else args.flags
@@ -43,7 +45,13 @@ def main():
                          "PMA is 32-bit with a Bare alias and PC40 requires PA <= 39")
     if xlen == 64 and pmp != pa - 2:
         raise ValueError("RAPT_PMPADDR_BITS must equal RAPT_PADDR_BITS - 2")
-    print(pmp if args.pmp_only else f"{pa} {pmp}")
+    if args.features:
+        enabled = bool(re.search(r"^`define RAPT_V_EXTENSION(?:\s|$)", result.stdout, re.M))
+        geometry = [constant(defines[name], defines)
+                    for name in ("RAPT_VLEN", "RAPT_VRF_BANK_BITS", "RAPT_VRF_BANKS")]
+        print(pa, pmp, int(enabled), *geometry)
+    else:
+        print(pmp if args.pmp_only else f"{pa} {pmp}")
 
 
 if __name__ == "__main__":

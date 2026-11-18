@@ -33,6 +33,7 @@ RTL development dependencies.
 | XSim | `xsim`, `xsim-lsu-sq-random` | Alternative simulator for the shared directed benches |
 | FPU arithmetic | `unit-fpu` | Host/SoftFloat references, rounding, streams and cancellation |
 | VPU | `make -C verification/vpu test` | Integer/FP, memory, context and optional Spike comparison |
+| Integrated V | `make -C verification/subsystem vector-system-smoke` | MMU, interrupts, restart and device faults |
 | Core programs | `rva22s64-directed`, `sigtest` | CSR, privilege, MMU, PMP/PMA, atomics, FP and exceptions |
 | Core differential fuzzing | `fuzz`, `riscv-dv`, `cascade-fuzz` | Generated programs with independent references |
 | Architecture compliance | `riscof`, `riscof-classic` | ACT4/Sail self-checking ELFs and classic RISCOF signatures |

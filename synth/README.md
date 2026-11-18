@@ -154,6 +154,9 @@ STA runs a fatal `check_setup -verbose` constraint audit before timing reports. 
 make -C verification sta-constraint-check
 ```
 
+Module-level STA applies the same input delay to synchronous reset and the other
+clocked inputs. This includes endpoints that sample only reset and constants.
+
 Constraint coverage is not timing closure: negative slack remains a reported timing result, not an unconstrained-path error.
 
 Timing schema 2 reports global WNS/TNS and, when a register-to-register path exists, `reg_setup_budget_ns` (target period minus register-only setup slack). Global slack includes IO delays and is not a direct estimate of full-design Fmax. The summary table shows register setup budget rather than Fmax; legacy reports without a register-only metric show N/A. The metric still depends on the clocks, exceptions, library and interconnect model and is not a full-design frequency guarantee.

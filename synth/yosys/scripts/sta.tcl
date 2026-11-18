@@ -23,11 +23,7 @@ if {[llength $clock] == 0} {
 }
 create_clock -name core_clk -period $period $clock
 
-set reset_ports [get_ports -quiet -regexp {(^|.*_)(reset|rst)(_n)?$}]
-if {[llength $reset_ports] > 0} {
-    set_false_path -from $reset_ports
-}
-
+# The module flow times synchronous reset with the other clocked inputs.
 set data_inputs {}
 foreach port [get_ports -quiet *] {
     if {[get_property $port direction] eq "input" &&

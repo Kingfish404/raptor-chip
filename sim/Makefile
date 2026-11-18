@@ -228,6 +228,16 @@ SIM_VFLAGS := $(strip $(VFLAGS) $(PLATFORM_VFLAGS) $(SIM_ASSERT_VFLAGS))
 # Expanding assertion macros is not enough: Verilator also needs --assert to
 # execute concurrent properties. Keep both controls in the build signature.
 SIM_ASSERT_FLAGS := $(if $(findstring DRAPT_ASSERT_EN,$(SIM_VFLAGS)),--assert,)
+
+RTL_PA_WIDTHS := $(shell python3 "$(NSIM_HOME)/scripts/paddr_config.py" \
+  --features --verilator "$(VERILATOR)" --config "$(CONFIG_DIR)" \
+  --hdl "$(VSRC_PATH)" -- $(SIM_VFLAGS))
+ifneq ($(filter ERROR,$(RTL_PA_WIDTHS)),)
+$(error Invalid RTL physical-address configuration; see PA configuration error above)
+endif
+RTL_PMPADDR_BITS := $(word 2,$(RTL_PA_WIDTHS))
+CXXFLAGS += -DRAPT_VECTOR_ENABLED=$(word 3,$(RTL_PA_WIDTHS))
+CXXFLAGS += -DRAPT_VECTOR_VLEN=$(word 4,$(RTL_PA_WIDTHS))
 # BUILD_PROFILE may intentionally differ from RAPT_CONFIG.  Include the actual
 # RTL preset in the signature so reusing a profile with another preset cannot
 # silently reuse an incompatible Verilated model.
@@ -272,8 +282,11 @@ CSRCS = $(shell find $(abspath ./csrc) -name "*.c")
 CCSRCS = $(shell find $(abspath ./csrc) -name "*.cc" -or -name "*.cpp")
 CHSRCS = $(filter-out $(abspath ./include/generated/autoconf.h),$(shell find $(abspath ./csrc) $(abspath ./include) -name "*.h" -or -name "*.hpp")) $(SIM_AUTOHEADER)
 
-MROM_DT_SOURCE := $(if $(DT_SOURCE),$(DT_SOURCE),$(if $(filter 1,$(ISA64)),spike-rv64ima.dts,spike-rv32ima.dts))
+MROM_DEFAULT_ISA := $(if $(filter 1,$(word 3,$(RTL_PA_WIDTHS))),gc,ima)
+MROM_DEFAULT_DT := spike-rv$(if $(filter 1,$(ISA64)),64,32)$(MROM_DEFAULT_ISA).dts
+MROM_DT_SOURCE := $(or $(strip $(DT_SOURCE)),$(MROM_DEFAULT_DT))
 MROM_BUILD_TAG := rv$(if $(filter 1,$(ISA64)),64,32)-$(basename $(notdir $(MROM_DT_SOURCE)))
+MROM_BUILD_TAG := $(MROM_BUILD_TAG)-v$(word 3,$(RTL_PA_WIDTHS))
 MROM_BUILD_DIR := $(abspath $(BUILD_DIR)/mrom/$(MROM_BUILD_TAG))
 MROM_IMG ?= $(MROM_BUILD_DIR)/mrom-data.bin
 MROM_DT_PATH := $(if $(filter /%,$(MROM_DT_SOURCE)),$(MROM_DT_SOURCE),$(RAPTOR_HOME)/linux/dts/$(MROM_DT_SOURCE))
@@ -284,7 +297,7 @@ MROM_INPUTS := $(NSIM_HOME)/csrc/mem/mrom-data/Makefile \
 # same MROM concurrently.  The input list still propagates source/DT changes.
 $(MROM_IMG): $(MROM_INPUTS)
 	+$(MAKE) -C $(NSIM_HOME)/csrc/mem/mrom-data BUILD_DIR=$(MROM_BUILD_DIR) \
-		ISA64=$(ISA64) DT_SOURCE=$(MROM_DT_SOURCE)
+		ISA64=$(ISA64) DT_SOURCE=$(MROM_DT_SOURCE) VECTOR=$(word 3,$(RTL_PA_WIDTHS))
 
 ifeq ($(SIM_PLATFORM),ysyxsoc)
 $(SOC_VSRC):
@@ -336,12 +349,6 @@ sim-publish-force:
 $(BIN): $(MODEL_BIN) sim-publish-force
 	@python3 "$(NSIM_HOME)/scripts/build_cache.py" publish "$(MODEL_BIN)" "$@"
 
-RTL_PA_WIDTHS := $(shell python3 "$(NSIM_HOME)/scripts/paddr_config.py" \
-  --verilator "$(VERILATOR)" --config "$(CONFIG_DIR)" --hdl "$(VSRC_PATH)" -- $(SIM_VFLAGS))
-ifneq ($(filter ERROR,$(RTL_PA_WIDTHS)),)
-$(error Invalid RTL physical-address configuration; see PA configuration error above)
-endif
-RTL_PMPADDR_BITS := $(word 2,$(RTL_PA_WIDTHS))
 NEMU_REF_PMPADDR_BITS ?= $(RTL_PMPADDR_BITS)
 ifeq ($(ISA64),1)
 ifneq ($(NEMU_REF_PMPADDR_BITS),$(RTL_PMPADDR_BITS))

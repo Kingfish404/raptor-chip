@@ -471,6 +471,10 @@ module tb_rapt_csr_uvm;
       .timer_irq_i(tb_if.timer_irq),
       .sw_irq_i(tb_if.sw_irq),
       .m_ext_irq_i(tb_if.m_ext_irq),
+`ifdef RAPT_V_EXTENSION
+      .vector_dirty_i(1'b0),
+      .vector_fp_dirty_i(1'b0),
+`endif
       .store_error_i(1'b0),
       .store_error_addr_i('0),
       .store_error_strb_i('0),

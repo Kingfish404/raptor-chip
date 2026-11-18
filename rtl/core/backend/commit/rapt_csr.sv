@@ -43,6 +43,11 @@ module rapt_csr #(
     input store_error_i,
     input [XLEN-1:0] store_error_addr_i,
     input [7:0] store_error_strb_i,
+`ifdef RAPT_V_EXTENSION
+    // An authorized vector result can contain committed partial state on trap.
+    input logic vector_dirty_i,
+    input logic vector_fp_dirty_i,
+`endif
 
     input reset
 );
@@ -112,13 +117,22 @@ module rapt_csr #(
   } csr_t;
 
   logic [1:0] priv_mode;
+`ifdef RAPT_V_EXTENSION
+  localparam logic [XLEN-1:0] VectorStatusMask = XLEN'(3) << 9;
+`else
+  localparam logic [XLEN-1:0] VectorStatusMask = '0;
+`endif
+  localparam logic [XLEN-1:0] SupervisorStatusMask =
+      XLEN'(`RAPT_CSR_SSTATUS_CMASK) | VectorStatusMask;
   logic [XLEN-1:0] csr_state[64];
   // Preserve the simulator's legacy observation array while storing shared
   // status bits only once. RESET_VAL reaches SSTATUS through MSTATUS as well.
   wire [XLEN-1:0] csr[64] /* verilator public_flat_rd */;
   for (genvar i = 0; i < 64; i++) begin : g_csr_view
-    if (i == int'(SSTATUS)) begin : g_sstatus
-      assign csr[i] = (csr_state[MSTATUS] & `RAPT_CSR_SSTATUS_CMASK) | `RAPT_CSR_SSTATUS_HW;
+    if (i == int'(MISA___)) begin : g_misa
+      assign csr[i] = XLEN'(rapt_pkg::Misa);
+    end else if (i == int'(SSTATUS)) begin : g_sstatus
+      assign csr[i] = (csr_state[MSTATUS] & SupervisorStatusMask) | `RAPT_CSR_SSTATUS_HW;
     end else begin : g_storage
       assign csr[i] = csr_state[i];
     end
@@ -129,6 +143,15 @@ module rapt_csr #(
   begin : g_misa_fpu_mismatch
     $error("RAPT_MISA F/D bits disagree with RAPT_NO_FPU");
   end
+
+`ifdef RAPT_V_EXTENSION
+  if (!rapt_pkg::FpuEnable) begin : g_vector_requires_fpu
+    $error("V extension requires the scalar F and D extensions");
+  end
+  if (rapt_pkg::VectorLength < 128) begin : g_vector_requires_vlen128
+    $error("V extension requires VLEN >= 128");
+  end
+`endif
 
   // ROU commit_special retires returns alone; FP effects only come from the
   // actual commit prefix. A return cannot share an FP update or a CSR write.
@@ -257,12 +280,14 @@ module rapt_csr #(
   logic [XLEN-1:0] mstatus_write, sstatus_write;
   always_comb begin
     // WARL fields are normalized before deriving the shared S-mode view.
-    mstatus_write = (rou_csr.csr_wdata & XLEN'(`RAPT_CSR_MSTATUS_WMASK)) | `RAPT_CSR_MSTATUS_HW;
+    mstatus_write = (rou_csr.csr_wdata
+        & (XLEN'(`RAPT_CSR_MSTATUS_WMASK) | VectorStatusMask)) | `RAPT_CSR_MSTATUS_HW;
     if (mstatus_write[12:11] == 2'b10) mstatus_write[12:11] = 2'b00;
     // Without an FPU, FS is read-only Off (WARL), which makes all FP state trap.
     if (!rapt_pkg::FpuEnable) mstatus_write[14:13] = 2'b00;
-    mstatus_write[XLEN-1] = mstatus_write[14:13] == 2'b11;
-    sstatus_write = (mstatus_write & `RAPT_CSR_SSTATUS_CMASK) | `RAPT_CSR_SSTATUS_HW;
+    mstatus_write[XLEN-1] = mstatus_write[14:13] == 2'b11
+        || ((|VectorStatusMask) && mstatus_write[10:9] == 2'b11);
+    sstatus_write = (mstatus_write & SupervisorStatusMask) | `RAPT_CSR_SSTATUS_HW;
   end
   always_comb begin
     exu_csr.rmw_data = exu_csr.rdata;
@@ -386,7 +411,7 @@ module rapt_csr #(
       STIMECMPH: exu_csr.rdata = (XLEN == 32) ? XLEN'(stimecmp[63:32]) : '0;
       SATP___:   exu_csr.rdata = csr[SATP___];
       MSTATUS:   exu_csr.rdata = csr[MSTATUS];
-      MISA___:   exu_csr.rdata = `RAPT_MISA;
+      MISA___:   exu_csr.rdata = XLEN'(rapt_pkg::Misa);
       MEDELEG:   exu_csr.rdata = csr[MEDELEG];
       MIDELEG:   exu_csr.rdata = csr[MIDELEG];
       MIE____:   exu_csr.rdata = csr[MIE____];
@@ -637,10 +662,9 @@ module rapt_csr #(
   assign s_int_cause_deleg = csr[MIDELEG][s_int_cause_bit];
 `endif
   `RAPT_SVA_IMPLY(clock, reset, CSR_S_INT_CAUSE_ACTIVE, s_int_pending, s_int_cause_active)
-  `RAPT_SVA_IMPLY(clock, reset, CSR_S_INT_M_TARGET_FIRST,
-                  |s_int_to_m, !s_int_cause_deleg)
-  `RAPT_SVA_IMPLY(clock, reset, CSR_S_INT_S_TARGET_BELOW_M,
-                  s_int_pending && s_int_cause_deleg, priv_mode != `RAPT_PRIV_M)
+  `RAPT_SVA_IMPLY(clock, reset, CSR_S_INT_M_TARGET_FIRST, |s_int_to_m, !s_int_cause_deleg)
+  `RAPT_SVA_IMPLY(clock, reset, CSR_S_INT_S_TARGET_BELOW_M, s_int_pending && s_int_cause_deleg,
+                  priv_mode != `RAPT_PRIV_M)
 
   // MPRV / MPP broadcast (consumed by L1D effective-privilege logic)
   assign csr_bcast.mprv = csr[MSTATUS][`RAPT_CSR_MSTATUS_MPRV];
@@ -670,6 +694,11 @@ module rapt_csr #(
   assign csr_bcast.sbe        = csr[MSTATUSH][`RAPT_CSR_MSTATUSH_SBE];
   assign csr_bcast.frm        = csr[FCSR][7:5];
   assign csr_bcast.fs         = csr[MSTATUS][14:13];
+`ifdef RAPT_V_EXTENSION
+  assign csr_bcast.vs = csr[MSTATUS][10:9];
+`else
+  assign csr_bcast.vs = 2'b00;
+`endif
 
   // Incremental PMP update command. Consumers keep local decoded state; only
   // accepted writes toggle this core-wide bus.
@@ -813,6 +842,13 @@ module rapt_csr #(
         pmpaddr_r[i] <= '0;
       end
     end else begin
+`ifdef RAPT_V_EXTENSION
+      if (vector_dirty_i || vector_fp_dirty_i)
+        csr_state[MSTATUS] <= csr[MSTATUS] |
+        `RAPT_CSR_MSTATUS_SD
+        | (vector_dirty_i ? VectorStatusMask : XLEN'(0)) |
+            (vector_fp_dirty_i ? (XLEN'(3) << 13) : XLEN'(0));
+`endif
       csr_state[MCYCLE_] <= csr[MCYCLE_] + 1;
       if (csr[MCYCLE_] == '1 && !(rou_csr.valid && rou_csr.csr_wen && waddr_reg == MCYCLE_)) begin
         csr_state[MCYCLEH] <= csr[MCYCLEH] + 1;
@@ -915,7 +951,7 @@ module rapt_csr #(
           end else if (waddr_reg == MSTATUS) begin
             csr_state[MSTATUS] <= mstatus_write;
           end else if (waddr_reg == SSTATUS) begin
-            csr_state[MSTATUS] <= (csr[MSTATUS] & ~`RAPT_CSR_SSTATUS_CMASK) | sstatus_write;
+            csr_state[MSTATUS] <= (csr[MSTATUS] & ~SupervisorStatusMask) | sstatus_write;
           end else if (waddr_reg == SIE____) begin
             // sie is a restricted view of mie; write only the SIE-visible bits.
             csr_state[MIE____] <= (csr[MIE____] & ~(csr[MIDELEG] & XLEN'(`RAPT_CSR_SIE_WMASK)))

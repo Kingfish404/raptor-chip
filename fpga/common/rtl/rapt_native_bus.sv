@@ -42,7 +42,8 @@ module rapt_native_bus #(
     Ram,
     Uart,
     Ddr,
-    Peripheral
+    Peripheral,
+    VectorDevice
   } target_t;
   typedef enum logic [1:0] {
     RIdle,
@@ -79,6 +80,21 @@ module rapt_native_bus #(
   logic [XLEN-1:0] ar_first, ar_last, aw_first, aw_last;
   target_t ar_target, aw_target;
   logic uart_rd, uart_wr;
+`ifdef NATIVE_VECTOR_DEVICE_TEST
+  // Experiment-only MMIO target: each completed data read or write has a
+  // counted side effect. Control registers configure one-shot AXI errors.
+  logic [3:0] vector_index, vector_after;
+  logic vector_read_enable, vector_write_enable, vector_read_failed, vector_write_failed;
+  logic [3:0] vector_read_attempts[16], vector_read_effects[16];
+  logic [3:0] vector_write_attempts[16], vector_write_effects[16];
+  logic [31:0] vector_last_write, vector_read_word;
+  logic [15:0] vector_read_mask, vector_write_mask;
+  logic [7:0] vector_read_total, vector_write_total;
+  logic [7:0] vector_read_attempt_total, vector_write_attempt_total;
+  logic vector_read_fault, vector_write_fault;
+  logic [31:0] vector_write_word;
+  logic [XLEN-1:0] vector_q;
+`endif
   assign idle_o = rs == RIdle && ws == WIdle && write_count == 0;
 
   initial begin
@@ -110,6 +126,9 @@ module rapt_native_bus #(
     if (64'(addr) >= RomBase && 64'(addr) < RomBase + RomBytes) return Rom;
     if (64'(addr) >= SramBase && 64'(addr) < SramBase + SramBytes) return Sram;
     if (64'(addr) >= UartBase && 64'(addr) < UartBase + 8) return Uart;
+`ifdef NATIVE_VECTOR_DEVICE_TEST
+    if (64'(addr) >= UartBase + 64'h40 && 64'(addr) < UartBase + 64'ha0) return VectorDevice;
+`endif
     if (WithPeripheral && 64'(addr) >= 64'(PeripheralBase) &&
         64'(addr) < 64'(PeripheralBase) + 64'h10000)
       return Peripheral;
@@ -136,6 +155,9 @@ module rapt_native_bus #(
       return Bad;
     if (dest == Uart && (len != 0 || size != 0)) return Bad;
     if (dest == Peripheral && (len != 0 || size != 2 || addr[1:0] != 0)) return Bad;
+`ifdef NATIVE_VECTOR_DEVICE_TEST
+    if (dest == VectorDevice && (len != 0 || size != 2 || addr[1:0] != 0)) return Bad;
+`endif
     return dest;
   endfunction
 
@@ -248,9 +270,107 @@ module rapt_native_bus #(
       Ram: rdata = ram_q;
       Uart: rdata = uart_q;
       Peripheral: rdata = XLEN'(peripheral_rdata) << (8 * ra[ByteBits-1:0]);
+`ifdef NATIVE_VECTOR_DEVICE_TEST
+      VectorDevice: rdata = vector_q;
+`endif
       default: rdata = '0;
     endcase
   end
+
+`ifdef NATIVE_VECTOR_DEVICE_TEST
+  assign vector_read_fault = vector_read_enable && !vector_read_failed
+      && ra[7:6] == 2'b01 && ra[5:2] == vector_index
+      && vector_read_attempts[ra[5:2]] >= vector_after;
+  assign vector_write_fault = vector_write_enable && !vector_write_failed
+      && wa[7:6] == 2'b01 && wa[5:2] == vector_index
+      && vector_write_attempts[wa[5:2]] >= vector_after;
+  assign vector_write_word = 32'(cpu.wdata >> (8 * wa[ByteBits-1:0]));
+  always_comb begin
+    vector_read_mask = 0;
+    vector_write_mask = 0;
+    vector_read_total = 0;
+    vector_write_total = 0;
+    vector_read_attempt_total = 0;
+    vector_write_attempt_total = 0;
+    for (int i = 0; i < 16; i++) begin
+      vector_read_mask[i] = vector_read_effects[i] != 0;
+      vector_write_mask[i] = vector_write_effects[i] != 0;
+      vector_read_total += 8'(vector_read_effects[i]);
+      vector_write_total += 8'(vector_write_effects[i]);
+      vector_read_attempt_total += 8'(vector_read_attempts[i]);
+      vector_write_attempt_total += 8'(vector_write_attempts[i]);
+    end
+    vector_read_word = 0;
+    if (ra[7:6] == 2'b01) begin
+      vector_read_word = 32'h4141_0000 + 32'(ra[5:2]) + (32'(vector_read_effects[ra[5:2]]) << 8);
+    end else begin
+      case (ra[7:0])
+        8'h84: vector_read_word = {vector_write_mask, vector_read_mask};
+        8'h88: vector_read_word = {4'b0, vector_write_attempts[vector_index],
+                                  4'b0, vector_write_effects[vector_index],
+                                  4'b0, vector_read_attempts[vector_index],
+                                  4'b0, vector_read_effects[vector_index]};
+        8'h8c: vector_read_word = vector_last_write;
+        8'h90: vector_read_word = {8'b0, vector_write_total, 8'b0, vector_read_total};
+        8'h94: vector_read_word = {8'b0, vector_write_attempt_total,
+                                   8'b0, vector_read_attempt_total};
+        default: vector_read_word = 0;
+      endcase
+    end
+  end
+
+  always_ff @(posedge clk) begin
+    if (reset) begin
+      vector_index <= 0;
+      vector_after <= 0;
+      vector_read_enable <= 0;
+      vector_write_enable <= 0;
+      vector_read_failed <= 0;
+      vector_write_failed <= 0;
+      vector_q <= 0;
+      vector_last_write <= 0;
+      for (int i = 0; i < 16; i++) begin
+        vector_read_attempts[i] <= 0;
+        vector_read_effects[i] <= 0;
+        vector_write_attempts[i] <= 0;
+        vector_write_effects[i] <= 0;
+      end
+    end else begin
+      if (rs == RIssue && rt == VectorDevice) begin
+        vector_q <= XLEN'(vector_read_word) << (8 * ra[ByteBits-1:0]);
+        if (ra[7:6] == 2'b01) begin
+          vector_read_attempts[ra[5:2]] <= vector_read_attempts[ra[5:2]] + 1'b1;
+          if (vector_read_fault) vector_read_failed <= 1'b1;
+          else vector_read_effects[ra[5:2]] <= vector_read_effects[ra[5:2]] + 1'b1;
+        end
+      end
+      if (ws == WData && wt == VectorDevice && cpu.wvalid && cpu.wready) begin
+        if (wa[7:6] == 2'b01) begin
+          vector_write_attempts[wa[5:2]] <= vector_write_attempts[wa[5:2]] + 1'b1;
+          if (vector_write_fault) vector_write_failed <= 1'b1;
+          else begin
+            vector_write_effects[wa[5:2]] <= vector_write_effects[wa[5:2]] + 1'b1;
+            if (wa[5:2] == vector_index) vector_last_write <= vector_write_word;
+          end
+        end else if (wa[7:0] == 8'h80) begin
+          vector_index <= vector_write_word[3:0];
+          vector_after <= vector_write_word[7:4];
+          vector_read_enable <= vector_write_word[8];
+          vector_write_enable <= vector_write_word[9];
+          vector_read_failed <= 0;
+          vector_write_failed <= 0;
+          vector_last_write <= 0;
+          for (int i = 0; i < 16; i++) begin
+            vector_read_attempts[i] <= 0;
+            vector_read_effects[i] <= 0;
+            vector_write_attempts[i] <= 0;
+            vector_write_effects[i] <= 0;
+          end
+        end
+      end
+    end
+  end
+`endif
   always_ff @(posedge clk) begin
     if (rs == RIssue && rt == Rom) rom_q <= rom[ra[$clog2(RomBytes)-1:ByteBits]];
     if (rs == RIssue && rt == Uart) uart_q <= XLEN'(uart_rdata) << (8 * ra[ByteBits-1:0]);
@@ -352,6 +472,9 @@ module rapt_native_bus #(
           if (ddr.arready) rs <= RDdr;
         end else begin
           rresp <= rt == Bad ? 2'b11 : 2'b00;
+`ifdef NATIVE_VECTOR_DEVICE_TEST
+          if (rt == VectorDevice && vector_read_fault) rresp <= 2'b10;
+`endif
           rs <= RReply;
         end
         RReply:
@@ -384,6 +507,9 @@ module rapt_native_bus #(
         WData: if (cpu.wvalid && cpu.wready) begin
           if (wt == Bad) bresp <= 2'b11;
           else if (wt == Rom || cpu.wlast != (wleft == 0)) bresp <= 2'b10;
+`ifdef NATIVE_VECTOR_DEVICE_TEST
+          if (wt == VectorDevice && vector_write_fault) bresp <= 2'b10;
+`endif
           if (wleft == 0) ws <= wt == Ddr ? WIdle : WReply;
           else begin
             wleft <= wleft - 1'b1;

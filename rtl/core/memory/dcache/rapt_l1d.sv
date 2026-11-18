@@ -104,6 +104,13 @@ module rapt_l1d #(
   } l1d_state_t;
 
   l1d_state_t l1d_state;
+`ifdef RAPT_V_EXTENSION
+  wire vector_probe = lsu_l1d.rprobe;
+  wire vector_write_precise = lsu_l1d.wprecise;
+`else
+  wire vector_probe = 1'b0;
+  wire vector_write_precise = 1'b0;
+`endif
   // Permission is registered before LD_A consumes the speculative SRAM read,
   // keeping PMP decode off rready/fast-wakeup.
   logic load_perm_denied_q;
@@ -155,7 +162,7 @@ module rapt_l1d #(
   assign mshr_invalidate_line = (!MergeStores && lsu_l1d.wvalid && !mshr_busy) || mshr_evict_valid;
   // Only requests which can replay as a whole may release LSU ownership.
   // Permission has already been registered before LD_A looks up tags.
-  assign mshr_eligible = (`RAPT_L1D_MSHRS > 0) && LineRefill && refill_safe
+  assign mshr_eligible = (`RAPT_L1D_MSHRS > 0) && LineRefill && refill_safe && !vector_probe
       && !load_perm_denied_q && lsu_l1d.replay_allowed && !l1d_atomic_lock
       && !l1d_orig_misaligned;
   // Miss allocation needs the tag result, not SRAM read data. A valid cache
@@ -553,7 +560,8 @@ module rapt_l1d #(
       && lsu_l1d.walu == FullStoreWstrb && lsu_l1d.waddr[L1dOffsetBits-1:0] == '0;
   // RAM lines refill as a burst, so any cacheable store there can miss into an
   // MSHR. A full word to an untouched line needs no read and allocates in place.
-  assign store_mergeable = MergeStores && cacheable_w && !lsu_l1d.wzero && refill_ram(
+  assign store_mergeable = MergeStores && !vector_write_precise && cacheable_w
+      && !lsu_l1d.wzero && refill_ram(
       {lsu_l1d.waddr[XLEN-1:L1dLineOffset], {L1dLineOffset{1'b0}}},
       lsu_l1d.waddr | XLEN'((1 << L1dLineOffset) - 1)
   );
@@ -594,7 +602,7 @@ module rapt_l1d #(
           || (l1d_state == LD_A && (!cacheable_r || l1d_atomic_lock)))));
   assign target_cbo = TargetedCoherence && writeback_cbo && !cbo_done_q;
   assign target_store = lsu_l1d.wvalid && !cacheable_w && rapt_pkg::addr_cacheable(lsu_l1d.waddr);
-  assign target_load = l1d_state == LD_A && !load_perm_denied_q
+  assign target_load = l1d_state == LD_A && !load_perm_denied_q && !vector_probe
       && ((!cacheable_r && lsu_l1d.ordered && rapt_pkg::addr_cacheable(
       l1d_addr
   )) || l1d_atomic_lock);
@@ -631,12 +639,12 @@ module rapt_l1d #(
   // memory before that read. A read into the array needs its way free first.
   logic load_victim_same_line;
   assign load_victim_same_line = load_victim_tag == addr_tag;
-  assign wb_victim_request = l1d_state == LD_A && !load_perm_denied_q
+  assign wb_victim_request = l1d_state == LD_A && !load_perm_denied_q && !vector_probe
       && cacheable_r && !(|load_way_hit) && !store_fill_window
       && (L2Release ? |wb_valid_words : wb_dirty_any)
       && ((MergeStores && mshr_eligible) ? wb_tag == addr_tag
           : (line_read_request || wb_tag != addr_tag));
-  assign load_victim_request = l1d_state == LD_A && !load_perm_denied_q
+  assign load_victim_request = l1d_state == LD_A && !load_perm_denied_q && !vector_probe
       && cacheable_r && !(|load_way_hit) && !store_fill_window
       && (L2Release ? load_victim_valid : load_victim_dirty)
       && ((MergeStores && mshr_eligible) ? load_victim_same_line
@@ -722,7 +730,8 @@ module rapt_l1d #(
       && l1d_bus.wready && wb_state == WB_IDLE && !wb_busy;
   // A mergeable store never reaches the bus, whatever its lookup says while
   // a refill owns the shared probe: stores there complete in this cache.
-  assign local_store = WriteBack && !lsu_bus_write_pending_q && cacheable_w && !lsu_l1d.wzero
+  assign local_store = WriteBack && !vector_write_precise && !lsu_bus_write_pending_q
+      && cacheable_w && !lsu_l1d.wzero
       && (store_mergeable || hit_w || (!L2Inclusive && store_allocate && !wb_store_victim));
   // Refills and queued writebacks only constrain a store of their own line:
   // it joins the refill, and a read of the line already waits for the queue.
@@ -1657,7 +1666,7 @@ module rapt_l1d #(
   // writes keep lsu_bus_write_allowed set until B, preserving their order.
   assign legacy_arvalid = !wb_hold && !(WriteBack && wb_read_match) && (ptw_arvalid
     ? (ptw_permission_valid_q && !ptw_permission_fault_q)
-    : (l1d_state == LD_A) && !load_perm_denied_q
+    : (l1d_state == LD_A) && !load_perm_denied_q && !vector_probe
       && (!cacheable_r || !(|load_way_hit)) && !mshr_eligible && !mshr_busy
       && !l1d_update
       && (cacheable_r || lsu_l1d.ordered)
@@ -1700,7 +1709,11 @@ module rapt_l1d #(
       && lsu_l1d.rvalid
       && (rec_addr == lsu_l1d.raddr) && !cacheable_r && !lsu_l1d.ordered
       && !load_killed && !cmu_bcast.flush_pipe;
-  assign lsu_l1d.rready = !load_killed && !cmu_bcast.flush_pipe && (((l1d_state == LD_MSHR_RSP) && lsu_l1d.rvalid && rec_addr == lsu_l1d.raddr)
+  assign lsu_l1d.rnonidempotent = rapt_pkg::addr_device(l1d_addr) || l1d_pbmt == 2'b10;
+  assign lsu_l1d.rready = !load_killed && !cmu_bcast.flush_pipe
+      && (((l1d_state == LD_A) && vector_probe && !load_perm_denied_q
+          && lsu_l1d.rvalid && rec_addr == lsu_l1d.raddr)
+      || ((l1d_state == LD_MSHR_RSP) && lsu_l1d.rvalid && rec_addr == lsu_l1d.raddr)
       || (lsu_l1d.rvalid && lsu_l1d.trap)
       || (data_hit
         && lsu_l1d.rvalid
@@ -1779,7 +1792,8 @@ module rapt_l1d #(
   // it and leave the stale refill resident.
   assign l1d_bus.wmore = lsu_l1d.wmore;
   assign l1d_bus.wbuffered = WriteBack && wb_valid && !wb_probe_mode;
-  assign l1d_bus.wpost = l1d_bus.wbuffered || (!WriteBack && cacheable_w && !lsu_l1d.wzero && !wb_hold
+  assign l1d_bus.wpost = l1d_bus.wbuffered || (!vector_write_precise
+      && !WriteBack && cacheable_w && !lsu_l1d.wzero && !wb_hold
       && !local_store && !mshr_busy
       && !l1d_update && !line_update
       && !fence_clear_busy && !(l1d_state == LD_D && refill_line));
@@ -2056,6 +2070,9 @@ module rapt_l1d #(
           end else if (cmu_bcast.flush_pipe) begin
             l1d_addr  <= '0;
             l1d_state <= IDLE;
+          end else if (vector_probe && lsu_l1d.rvalid && rec_addr == lsu_l1d.raddr) begin
+            l1d_addr <= '0;
+            l1d_state <= IDLE;
           end else if (!cacheable_r && !lsu_l1d.ordered) begin
             // Retry releases the LSU owner on this edge, even while dirty
             // writeback is pending. Do not retain a request whose ordered
@@ -2187,7 +2204,7 @@ module rapt_l1d #(
       end else if (zero_complete) begin
         // The ZERO descriptor updates memory as a burst. Its complete block
         // is invalidated through maintenance_set, including on a failed B.
-      end else if (lsu_l1d.wvalid && store_accept && store_error) begin
+      end else if (lsu_l1d.wvalid && store_accept && store_error && !vector_write_precise) begin
         // An errored posted write may have modified some external bytes.
         // Do not install the intended value or retain a potentially stale
         // physical alias, including a hot PMA copy of an NC/IO write target.
@@ -2198,8 +2215,11 @@ module rapt_l1d #(
         l1d_idx <= waddr_idx;
         l1d_off <= waddr_offset;
         l1d_way <= store_hit_way;
-      end else if (lsu_l1d.wvalid && store_accept && cacheable_w && !lsu_l1d.wzero) begin
-        update_dirty <= local_store_ready && !store_to_mshr;
+      end else if (lsu_l1d.wvalid && store_accept && !store_error
+          && cacheable_w && !lsu_l1d.wzero) begin
+        // A precise write-through hit must retain a previously dirty word.
+        update_dirty <= (local_store_ready && !store_to_mshr)
+            || (vector_write_precise && WriteBack && hit_w);
         // Only full aligned stores allocate. Hits use the SRAM byte enables;
         // split stores already carry aligned addresses and lane-shifted data.
         if (hit_w || (store_allocate && !store_to_mshr)) begin

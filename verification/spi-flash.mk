@@ -41,11 +41,41 @@ boot-control-images:
 			"$(SPI_FLASH_BOOT_DIR)/control-rv$$xlen.bin"; \
 	done
 
+.PHONY: xspi-vector-images
+xspi-vector-images:
+	mkdir -p "$(SPI_FLASH_BOOT_DIR)"
+	@set -e; for xlen in 32 64; do \
+		abi=ilp32d; if [ "$$xlen" = 64 ]; then abi=lp64d; fi; \
+		for access in load store; do \
+			name=vector-rv$$xlen; flags=; \
+			if [ "$$access" = store ]; then name=vector-store-rv$$xlen; \
+				flags=-DXSPI_VECTOR_STORE; fi; \
+			$(CC) -march=rv$${xlen}gcv -mabi=$$abi -DXSPI_VECTOR_BRIDGE $$flags \
+				-nostdlib -nostartfiles -Wl,-Ttext=0x20000000,-e,_start,--build-id=none \
+				-o "$(SPI_FLASH_BOOT_DIR)/$$name.elf" "$(XSIM_DIR)/boot_control.S"; \
+			$(OBJCOPY) -O binary -j .text "$(SPI_FLASH_BOOT_DIR)/$$name.elf" \
+				"$(SPI_FLASH_BOOT_DIR)/$$name.bin"; \
+		done; \
+	done
+
 verilator-chip-xspi-boot-rv32 verilator-chip-xspi-boot-rv64: boot-control-images
 $(eval $(call XLEN_TEST,chip-xspi-boot,tb_chip_xspi_boot,\
   $$(VERIFY_HOME)/models/rapt_xspi_profile1_model.sv $$(IO25_SOURCES) \
   $$(RAPTOR_HOME)/fpga/common/rtl/rapt_xspi_target.sv $$(XSIM_DIR)/tb_xspi_link.sv,,\
-  +FLASH_IMAGE=$$(BOOT_CONTROL_BIN)))
+  +FLASH_IMAGE=$$(BOOT_CONTROL_BIN) $$(XSPI_BOOT_PLUSARGS)))
+
+XSPI_VECTOR_ACCESS ?= load
+XSPI_VECTOR_SUFFIX = $(if $(filter store,$(XSPI_VECTOR_ACCESS)),-store,)
+XSPI_VECTOR_IMAGE = $(SPI_FLASH_BOOT_DIR)/vector$(XSPI_VECTOR_SUFFIX)-rv$(SPI_FLASH_XLEN).bin
+XSPI_VECTOR_PASS_PC = $(if $(filter store,$(XSPI_VECTOR_ACCESS)),20000080,200000a0)
+XSPI_VECTOR_WRITE_ARG = $(if $(filter store,$(XSPI_VECTOR_ACCESS)),+XSPI_VECTOR_WRITE,)
+verilator-chip-xspi-vector-rv32 verilator-chip-xspi-vector-rv64: boot-control-images xspi-vector-images
+$(eval $(call XLEN_TEST,chip-xspi-vector,tb_chip_xspi_boot,\
+  $$(VERIFY_HOME)/models/rapt_xspi_profile1_model.sv $$(IO25_SOURCES) \
+  $$(RAPTOR_HOME)/fpga/common/rtl/rapt_xspi_target.sv $$(XSIM_DIR)/tb_xspi_link.sv,\
+  ,+FLASH_IMAGE=$$(BOOT_CONTROL_BIN) +XSPI_VECTOR_FAULT \
+  +VECTOR_IMAGE=$$(XSPI_VECTOR_IMAGE) +VECTOR_PASS_PC=$$(XSPI_VECTOR_PASS_PC) \
+  $$(XSPI_VECTOR_WRITE_ARG) $$(XSPI_VECTOR_EXTRA)))
 
 $(eval $(call XLEN_TEST,chip-flash-absent,tb_chip_flash_recovery,\
   $$(VERIFY_HOME)/models/rapt_xspi_profile1_model.sv $$(IO25_SOURCES) \

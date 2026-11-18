@@ -546,11 +546,9 @@ def build_o3_cpu(
     rtl_execution_resources: bool = False,
     fetch_queue_size: int | None = None,
 ) -> RiscvO3CPU:
-    """Build a RiscvO3CPU configured to match raptor-chip microarchitecture.
+    """Model the Raptor scalar out-of-order pipeline with gem5.
 
-    RTL default MISA and model scope:
-      RV32: MISA = 0x4014112f; RV64: MISA = 0x800000000014112f.
-      RTL implements IMAFDC with M/S/U.
+    Use NPC and the VPU tests for the RVV execution behavior of the RTL presets.
     """
     cpu = RiscvO3CPU(
         cpu_id=cpu_id,

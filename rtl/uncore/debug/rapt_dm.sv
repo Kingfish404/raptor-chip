@@ -249,7 +249,7 @@ module rapt_dm #(
   always_comb begin
     reg_rdata = '0;
     if (cmd_is_gpr) reg_rdata = dbg_gpr_rdata_i;
-    else if (cmd_is_misa) reg_rdata = `RAPT_MISA;
+    else if (cmd_is_misa) reg_rdata = XLEN'(rapt_pkg::Misa);
     else if (cmd_is_dcsr) reg_rdata = XLEN'(dcsr_q);
     else if (cmd_is_dpc) reg_rdata = dpc_value;
     else if (cmd_is_dscr0) reg_rdata = dscratch0_q;

@@ -67,6 +67,9 @@ typedef struct
   word_t gpr[GPR_SIZE];
   uint64_t fpr[32]; /* FLEN=64 even when XLEN=32 */
   uint32_t fcsr;
+  unsigned vector_vlenb;
+  word_t vector_csrs[7];
+  uint8_t vreg[32 * RAPT_VECTOR_VLEN / 8];
   /* CSRs -- keep in same logical groups as the live npc struct. */
   word_t sstatus, sie_, stvec, sscratch, sepc, scause, stval, sip, satp;
   word_t mstatus, medeleg, mideleg, mie_, mtvec;
@@ -289,6 +292,14 @@ static void write_state_txt(const char *path)
   for (int i = 0; i < 32; i++)
     fprintf(fp, "fpr%d=0x%016llx\n", i, (unsigned long long)npc.fpr[i]);
   fprintf(fp, "csr_fcsr=0x%02x\n", (unsigned int)*npc.fcsr);
+  if (npc.vreg != nullptr)
+  {
+    fprintf(fp, "vector_vlenb=0x%x\n", npc.vector_vlenb);
+    for (unsigned index = 0; index < 7; index++)
+      fprintf(fp, "vector_csr%u=" FMT_WORD "\n", index, npc.vector_csrs[index]);
+    for (unsigned index = 0; index < 32 * npc.vector_vlenb; index++)
+      fprintf(fp, "vector_byte%u=0x%02x\n", index, npc.vreg[index]);
+  }
   fprintf(fp, "csr_sstatus=" FMT_WORD "\n", *npc.sstatus);
   fprintf(fp, "csr_sie=" FMT_WORD "\n", *npc.sie____);
   fprintf(fp, "csr_stvec=" FMT_WORD "\n", *npc.stvec__);
@@ -793,6 +804,10 @@ static int read_state_txt(const char *path, arch_snapshot_t *s)
   }
   uint32_t fp_seen = 0;
   bool fcsr_seen = false;
+  bool vector_size_seen = false;
+  unsigned vector_csr_seen = 0;
+  unsigned vector_bytes_seen = 0;
+  uint8_t vector_byte_seen[sizeof(s->vreg)] = {};
   char line[256];
   while (fgets(line, sizeof(line), fp))
   {
@@ -802,6 +817,42 @@ static int read_state_txt(const char *path, arch_snapshot_t *s)
     if (sscanf(line, "%63[^=]=%127s", key, val) != 2)
       continue;
     word_t w = 0;
+    if (strncmp(key, "vector_", 7) == 0)
+    {
+      unsigned index;
+      char trailing;
+      bool valid = parse_word(val, &w) == 0;
+      if (strcmp(key, "vector_vlenb") == 0)
+      {
+        valid = valid && !vector_size_seen && w == RAPT_VECTOR_VLEN / 8;
+        s->vector_vlenb = unsigned(w);
+        vector_size_seen = true;
+      }
+      else if (sscanf(key, "vector_csr%u%c", &index, &trailing) == 1)
+      {
+        valid = valid && index < 7 && !(vector_csr_seen & (1u << index));
+        if (valid) { s->vector_csrs[index] = w; vector_csr_seen |= 1u << index; }
+      }
+      else if (sscanf(key, "vector_byte%u%c", &index, &trailing) == 1)
+      {
+        valid = valid && index < sizeof(s->vreg) && w <= 255;
+        if (valid)
+        {
+          valid = !vector_byte_seen[index];
+          vector_byte_seen[index] = 1;
+          s->vreg[index] = uint8_t(w);
+          vector_bytes_seen++;
+        }
+      }
+      else valid = false;
+      if (!valid)
+      {
+        fclose(fp);
+        Error("checkpoint: invalid, duplicate or incompatible vector field %s", key);
+        return -1;
+      }
+      continue;
+    }
     if (strncmp(key, "uart_", 5) == 0) {
       static const char *names[] = {"uart_ier", "uart_lcr", "uart_mcr", "uart_scr",
                                     "uart_dll", "uart_dlm", "uart_fcr", "uart_tx_pending"};
@@ -1027,6 +1078,25 @@ static int read_state_txt(const char *path, arch_snapshot_t *s)
   if (fp_seen != UINT32_MAX || !fcsr_seen)
   {
     Error("checkpoint: missing FPR/FCSR state; regenerate this legacy or incomplete snapshot");
+    return -1;
+  }
+  if (vector_size_seen)
+  {
+    bool valid = vector_csr_seen == 0x7f && s->vector_csrs[6] == s->vector_vlenb
+        && s->vector_csrs[0] < s->vector_vlenb * 8 && s->vector_csrs[1] < 2
+        && s->vector_csrs[2] < 4
+        && s->vector_csrs[3] == (s->vector_csrs[1] | (s->vector_csrs[2] << 1));
+    for (unsigned index = 0; index < sizeof(s->vreg); index++)
+      valid &= vector_byte_seen[index] != 0;
+    if (!valid)
+    {
+      Error("checkpoint: incomplete or inconsistent vector state");
+      return -1;
+    }
+  }
+  else if (vector_csr_seen || vector_bytes_seen || ((s->mstatus >> 9) & 3))
+  {
+    Error("checkpoint: active vector context has no register/CSR snapshot");
     return -1;
   }
   return 0;
@@ -1292,6 +1362,7 @@ static void build_trampoline(uint8_t *mrom, const arch_snapshot_t *s)
   const int pmp_banks = 16 / XLEN_BYTES;
   const int n_pmp = 2 * (16 + pmp_banks);
   const int n_fp = 36; /* enable FS, 32 FLD, restore FCSR */
+  const int n_vector = s->vector_vlenb ? 20 : 0;
   const int n_setup = 2;
   const int n_csr = 2 * (int)NR_CSR_RESTORE;
   const int n_sfence = 1;
@@ -1300,7 +1371,7 @@ static void build_trampoline(uint8_t *mrom, const arch_snapshot_t *s)
   const int n_final = 2;
   const int n_fencei = 1;
   const int n_mret = 1;
-  const int n_total = n_setup + n_fp + n_pmp + n_csr + n_sfence + n_gpr + n_mstatus +
+  const int n_total = n_setup + n_fp + n_vector + n_pmp + n_csr + n_sfence + n_gpr + n_mstatus +
                       n_final + n_fencei + n_mret;
   const int code_bytes = n_total * 4;
   trampoline_mret_pc = MROM_BASE + (n_total - 1) * 4;
@@ -1308,6 +1379,11 @@ static void build_trampoline(uint8_t *mrom, const arch_snapshot_t *s)
   const int fcsr_off = (SLOT_OTHER_CSR0 + NR_CSR_RESTORE) * XLEN_BYTES;
   const int fpr_off = (fcsr_off + XLEN_BYTES + 7) & ~7;
   const int pmp_off = fpr_off + 32 * 8;
+  const int vector_csr_off = pmp_off + (16 + pmp_banks) * XLEN_BYTES;
+  const int vreg_off = vector_csr_off + (s->vector_vlenb ? 7 * XLEN_BYTES : 0);
+  Assert(data_off < 2048 && vreg_off < 2048 && s->vector_vlenb * 8 < 2048 &&
+         data_off + vreg_off + 32 * s->vector_vlenb <= 4096,
+         "checkpoint: vector state exceeds the 4 KiB restore trampoline capacity");
 
   uint32_t *code = (uint32_t *)mrom;
   int i = 0;
@@ -1326,6 +1402,31 @@ static void build_trampoline(uint8_t *mrom, const arch_snapshot_t *s)
                 (3u << 12) | ((uint32_t)r << 7) | 0x07u; /* fld */
   code[i++] = ENC_LXLEN(X_T1, X_T0, fcsr_off);
   code[i++] = ENC_CSRRW_X0(0x003, X_T1);
+
+  if (s->vector_vlenb)
+  {
+    // Whole-register loads ignore vtype, so restore all data with vstart=0
+    // before installing the saved configuration and restart position.
+    code[i++] = ENC_ADDI(X_T1, 0, 0x600);
+    code[i++] = (CSR_MSTATUS << 20) | (X_T1 << 15) | (2u << 12) | 0x73u;
+    code[i++] = ENC_CSRRW_X0(0x008, 0);
+    code[i++] = ENC_ADDI(X_T1, X_T0, vreg_off);
+    for (unsigned group = 0; group < 4; group++)
+    {
+      if (group) code[i++] = ENC_ADDI(X_T1, X_T1, 8 * s->vector_vlenb);
+      code[i++] = (7u << 29) | (1u << 25) | (8u << 20) | (X_T1 << 15)
+          | ((group * 8) << 7) | 0x07u; // vl8re8.v
+    }
+    code[i++] = ENC_LXLEN(X_T1, X_T0, vector_csr_off + 4 * XLEN_BYTES);
+    code[i++] = ENC_LXLEN(7, X_T0, vector_csr_off + 5 * XLEN_BYTES);
+    code[i++] = 0x80007057u | (7u << 20) | (X_T1 << 15); // vsetvl zero,t1,t2
+    const unsigned restore_order[] = {2, 1, 0};
+    for (unsigned index : restore_order)
+    {
+      code[i++] = ENC_LXLEN(X_T1, X_T0, vector_csr_off + index * XLEN_BYTES);
+      code[i++] = ENC_CSRRW_X0(0x008 + index, X_T1);
+    }
+  }
 
   /* PMP CSR writes also update the distributed permission replicas.
    * Restore addresses before configurations, so lock bits cannot suppress
@@ -1414,6 +1515,12 @@ static void build_trampoline(uint8_t *mrom, const arch_snapshot_t *s)
 
   /* Write data table. */
   uint8_t *data = mrom + data_off;
+  if (s->vector_vlenb)
+  {
+    for (unsigned index = 0; index < 7; index++)
+      put_word(data, vector_csr_off / XLEN_BYTES + index, s->vector_csrs[index]);
+    memcpy(data + vreg_off, s->vreg, 32 * s->vector_vlenb);
+  }
   put_word(data, fcsr_off / XLEN_BYTES, s->fcsr);
   for (int r = 0; r < 32; r++)
     for (int b = 0; b < 8; b++)
@@ -1454,8 +1561,8 @@ void checkpoint_export_trampoline(const char *state_file, const char *output_fil
   arch_snapshot_t snapshot = {};
   snapshot.stimecmp = ~(word_t)0;
   snapshot.stimecmph = ~(word_t)0;
-  if (read_state_txt(state_file, &snapshot) != 0)
-    Error("checkpoint: cannot read export state %s", state_file);
+  Assert(read_state_txt(state_file, &snapshot) == 0,
+         "checkpoint: cannot read export state %s", state_file);
   uint8_t image[4096] = {};
   build_trampoline(image, &snapshot);
   FILE *output = fopen(output_file, "wbx");
@@ -1489,6 +1596,8 @@ void checkpoint_configure_load(const char *dir)
     Error("checkpoint: failed to read state from %s", path);
     exit(1);
   }
+  Assert(!loaded_snap.vector_vlenb || RAPT_VECTOR_ENABLED,
+         "checkpoint: vector snapshot requires a simulator with V enabled");
   Log("checkpoint: loaded arch state from %s (saved at cycle %llu, pc=" FMT_WORD_NO_PREFIX ")", path,
       (unsigned long long)loaded_snap.cycle, loaded_snap.pc);
 
@@ -1642,6 +1751,17 @@ bool checkpoint_load_reference_tick(word_t committed_pc)
 {
   if (!load_enabled || reference_ready || committed_pc != trampoline_mret_pc)
     return false;
+  if (loaded_snap.vector_vlenb)
+  {
+    Assert(npc.vreg != nullptr && npc.vector_vlenb == loaded_snap.vector_vlenb,
+           "checkpoint: restored vector geometry mismatch");
+    Assert(memcmp(npc.vreg, loaded_snap.vreg, sizeof(loaded_snap.vreg)) == 0,
+           "checkpoint: vector register restoration mismatch before reference resync");
+    for (unsigned index = 0; index < 7; index++)
+      Assert(npc.vector_csrs[index] == loaded_snap.vector_csrs[index],
+             "checkpoint: vector CSR %u restoration mismatch", index);
+    Log("checkpoint: verified all 32 vector registers and seven CSRs before reference resync");
+  }
   // Seed REF before the first guest instruction. Synchronizing after it would
   // skip a first store still in the SQ/cache, losing its memory effect in REF.
   cpu_checkpoint_restore_arch(loaded_snap.mstatus, loaded_snap.mstatush,
