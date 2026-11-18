@@ -1983,3 +1983,215 @@ module tb_csr_difftest_policy;
     $finish;
   end
 endmodule
+
+
+// ---- tb_csr_interrupt_route ----
+`include "rapt.svh"
+`include "rapt_if.svh"
+`include "rapt_rou_if.svh"
+
+// Exhaustive S-level interrupt routing (Priv Sec.3.1.9). For every origin
+// privilege, mstatus.MIE/SIE, mideleg, mie and SEIP/SSIP/STIP pending subset,
+// the CSR must report the spec-selected interrupt and route its trap to the
+// mode chosen by mideleg. Non-delegated S-level sources trap to M-mode and
+// take precedence over delegated ones.
+module tb_csr_interrupt_route;
+`ifdef RAPT_RV64
+  localparam int XLEN = 64;
+`else
+  localparam int XLEN = 32;
+`endif
+  localparam int Sei = `RAPT_CSR_MIE_SEIE;
+  localparam int Ssi = `RAPT_CSR_MIE_SSIE;
+  localparam int Sti = `RAPT_CSR_MIE_STIE;
+  localparam logic [XLEN-1:0] MstatusMie = XLEN'(1) << 3;
+  localparam logic [XLEN-1:0] MstatusSie = XLEN'(1) << 1;
+
+  logic clock = 1'b0;
+  logic reset = 1'b1;
+  logic s_ext = 1'b0;
+  logic s_int_pending;
+  logic [XLEN-1:0] s_int_cause;
+
+  rou_csr_if #(.XLEN(XLEN)) rou_csr ();
+  exu_csr_if #(.XLEN(XLEN)) exu_csr ();
+  csr_bcast_if #(.XLEN(XLEN)) csr_bcast ();
+  pmp_update_if #(.XLEN(XLEN)) pmp_update ();
+  pmp_state_if #(.XLEN(XLEN)) pmp_state ();
+
+  rapt_pmp_state pmp_state_regs (
+      .clock,
+      .reset,
+      .update(pmp_update),
+      .state(pmp_state)
+  );
+
+  rapt_csr #(
+      .XLEN(XLEN)
+  ) dut (
+      .clock,
+      .hart_id_i('0),
+      .mtime_i(64'd0),
+      .rou_csr,
+      .exu_csr,
+      .csr_bcast,
+      .pmp_update,
+      .s_int_pending,
+      .s_int_cause,
+      .timer_irq_i(1'b0),
+      .sw_irq_i(1'b0),
+      .m_ext_irq_i(1'b0),
+      .store_error_i(1'b0),
+      .store_error_addr_i('0),
+      .store_error_strb_i('0),
+      .s_ext_irq_i(s_ext),
+      .reset
+  );
+
+  always #5 clock = ~clock;
+
+  `include "tb_common.svh"
+
+  `include "tb_csr_control_tasks.svh"
+
+  // Expand a 3-bit {SEI, STI, SSI} selector onto the mip/mie bit positions.
+  function automatic logic [XLEN-1:0] s_bits(input logic [2:0] sel);
+    return (XLEN'(sel[2]) << Sei) | (XLEN'(sel[1]) << Sti) | (XLEN'(sel[0]) << Ssi);
+  endfunction
+
+  int checked = 0;
+  int to_m_cases = 0;
+  int preempt_cases = 0;
+  initial begin
+    logic [1:0] privilege;
+    logic [XLEN-1:0] deleg, enable, pend;
+    logic want_pending, want_to_s, s_ready, target_enabled;
+    logic [1:0] target_mode;
+    int want_cause, candidate;
+
+    clear_request();
+    rou_csr.fp_flags_valid = 1'b0;
+    rou_csr.fp_flags = '0;
+    rou_csr.fp_dirty = 1'b0;
+    exu_csr.raddr = '0;
+    tick(4);
+    reset = 1'b0;
+    tick(1);
+
+    write_csr(`RAPT_CSR_MTVEC__, XLEN'('h1001));
+    write_csr(`RAPT_CSR_STVEC__, XLEN'('h2001));
+
+    for (int p = 0; p < 3; p++)
+    for (int mie_g = 0; mie_g < 2; mie_g++)
+    for (int sie_g = 0; sie_g < 2; sie_g++)
+    for (int d = 0; d < 8; d++)
+    for (int e = 0; e < 8; e++)
+    for (int s = 0; s < 8; s++) begin
+      privilege = p == 0 ? `RAPT_PRIV_U : p == 1 ? `RAPT_PRIV_S : `RAPT_PRIV_M;
+      deleg = s_bits(3'(d));
+      enable = s_bits(3'(e));
+      pend = s_bits(3'(s));
+
+      // Enter the origin privilege through MRET, then program the state.
+      // The direct CSR commit port does not apply privilege checks.
+      write_csr(`RAPT_CSR_MSTATUS, XLEN'(privilege) << 11);
+      pulse_control(1'b0, 1'b1, 1'b0, XLEN'('h4000));
+      check(csr_bcast.priv == privilege, "MRET did not reach origin privilege");
+      write_csr(`RAPT_CSR_MIDELEG, deleg);
+      write_csr(`RAPT_CSR_MIE____, enable);
+      // SSIP/STIP are software-writable; SEIP arrives from the PLIC S context.
+      write_csr(`RAPT_CSR_MIP____, pend & ~(XLEN'(1) << Sei));
+      s_ext = pend[Sei];
+      write_csr(`RAPT_CSR_MSTATUS, (mie_g != 0 ? MstatusMie : '0) | (sie_g != 0 ? MstatusSie : '0));
+      check(csr_bcast.priv == privilege, "mstatus write changed privilege");
+      #1;
+
+      // Apply the spec as an ordered list of individual candidates, rather
+      // than duplicating the DUT's vector masks and target-selection mux.
+      // Slots 0..2 target M; slots 3..5 target S. Each group is SEI/SSI/STI.
+      want_pending = 1'b0;
+      want_to_s = 1'b0;
+      want_cause = 0;
+      s_ready = 1'b0;
+      for (int slot = 0; slot < 6; slot++) begin
+        target_mode = slot < 3 ? `RAPT_PRIV_M : `RAPT_PRIV_S;
+        case (slot % 3)
+          0: candidate = Sei;
+          1: candidate = Ssi;
+          default: candidate = Sti;
+        endcase
+        target_enabled = privilege < target_mode
+            || (privilege == target_mode && (slot < 3 ? mie_g != 0 : sie_g != 0));
+        if (pend[candidate] && enable[candidate] && target_enabled
+            && deleg[candidate] == (target_mode == `RAPT_PRIV_S)) begin
+          if (target_mode == `RAPT_PRIV_S) s_ready = 1'b1;
+          if (!want_pending) begin
+            want_pending = 1'b1;
+            want_to_s = target_mode == `RAPT_PRIV_S;
+            want_cause = candidate;
+          end
+        end
+      end
+
+      if (s_int_pending !== want_pending)
+        fail($sformatf(
+             "pending priv=%0d MIE=%0d SIE=%0d deleg=%h mie=%h pend=%h got=%b want=%b",
+             privilege,
+             mie_g,
+             sie_g,
+             deleg,
+             enable,
+             pend,
+             s_int_pending,
+             want_pending
+             ));
+      if (want_pending && s_int_cause !== ((XLEN'(1) << (XLEN - 1)) | XLEN'(want_cause)))
+        fail($sformatf(
+             "cause priv=%0d MIE=%0d SIE=%0d deleg=%h mie=%h pend=%h got=%h want=%0d",
+             privilege,
+             mie_g,
+             sie_g,
+             deleg,
+             enable,
+             pend,
+             s_int_cause,
+             want_cause
+             ));
+
+      // Take the reported interrupt and check the destination mode.
+      if (want_pending) begin
+        @(negedge clock);
+        rou_csr.valid = 1'b1;
+        rou_csr.trap = 1'b1;
+        rou_csr.pc = 'h8000;
+        rou_csr.cause = s_int_cause;
+        #1;
+        check(csr_bcast.tvec == (want_to_s ? XLEN'('h2000) : XLEN'('h1000)) + XLEN'(4 * want_cause),
+              "interrupt selected the wrong vectored handler");
+        @(posedge clock);
+        @(negedge clock);
+        clear_request();
+        check(csr_bcast.priv == (want_to_s ? `RAPT_PRIV_S : `RAPT_PRIV_M), $sformatf(
+              "interrupt cause %0d trapped to the wrong mode", want_cause));
+        exu_csr.raddr = want_to_s ? `RAPT_CSR_SCAUSE_ : `RAPT_CSR_MCAUSE_;
+        #1;
+        check(exu_csr.rdata == ((XLEN'(1) << (XLEN - 1)) | XLEN'(want_cause)),
+              "interrupt cause was not stored in the target CSR");
+        exu_csr.raddr = want_to_s ? `RAPT_CSR_SEPC___ : `RAPT_CSR_MEPC___;
+        #1;
+        check(exu_csr.rdata == XLEN'('h8000), "interrupt EPC was not stored in the target CSR");
+        if (!want_to_s) to_m_cases++;
+        if (!want_to_s && s_ready) preempt_cases++;
+      end
+      s_ext = 1'b0;
+      write_csr(`RAPT_CSR_MIP____, '0);
+      checked++;
+    end
+
+    check(to_m_cases != 0, "no non-delegated S-level interrupt reached M-mode");
+    check(preempt_cases != 0, "no M-target interrupt preempted a ready S-target one");
+    $display("PASS: RV%0d S-level interrupt routing, %0d cases (%0d to M, %0d preempting S)", XLEN,
+             checked, to_m_cases, preempt_cases);
+    $finish;
+  end
+endmodule

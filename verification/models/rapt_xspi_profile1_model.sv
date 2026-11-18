@@ -4,7 +4,8 @@
 module rapt_xspi_profile1_model #(
     parameter int MemoryBytes = 131072,
     parameter logic [31:0] ProtectedPrefix = 0,
-    parameter bit BadSfdp = 0,
+    // 0 valid, 1 bad signature, 2 bad BFPT ID, 3 short BFPT, 4 wrong density.
+    parameter int unsigned BadSfdp = 0,
     parameter logic [23:0] JedecId = 24'h2c5b19
 ) (
     input logic reset_n_i,
@@ -61,7 +62,7 @@ module rapt_xspi_profile1_model #(
       8'h85: return vcr[address[2:0]];
       8'h03, 8'hfd: return mem[(int'(address)+index) % MemoryBytes];
       8'h5a: case (int'(address)+index)
-        0: return BadSfdp ? 0 : 8'h53;
+        0: return BadSfdp == 1 ? 0 : 8'h53;
         1: return 8'h46;
         2: return 8'h44;
         3: return 8'h50;
@@ -69,15 +70,15 @@ module rapt_xspi_profile1_model #(
         5: return 1;
         6: return 0;
         7: return 8'hff;
-        8: return 0;
+        8: return BadSfdp == 2 ? 1 : 0;
         9: return 6;
         10: return 1;
-        11: return 16;
+        11: return BadSfdp == 3 ? 15 : 16;
         12: return 8'h30;
         13, 14: return 0;
         15: return 8'hff;
         52, 53, 54: return 8'hff;
-        55: return 8'h0f;
+        55: return BadSfdp == 4 ? 8'h1f : 8'h0f;
         default: return 0;
       endcase
       default: return 8'hff;

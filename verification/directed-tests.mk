@@ -104,6 +104,7 @@ $(eval $(call XLEN_TEST,l1d-ptw-axi-error,tb_l1d_ptw_axi_error,,-d RAPT_ASSERT_E
 $(eval $(call XLEN_TEST,l1d-write-error,tb_l1d_write_error,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,sq-write-error,tb_sq_write_error,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,csr-bus-error,tb_csr_bus_error,,-d RAPT_ASSERT_EN))
+$(eval $(call XLEN_TEST,csr-interrupt-route,tb_csr_interrupt_route,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,lsu-hum-pmp,tb_lsu_hum_pmp,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,fp-registers,tb_fp_registers,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,ioq-fp-ooo,tb_ioq_fp_ooo,,-d RAPT_ASSERT_EN))
