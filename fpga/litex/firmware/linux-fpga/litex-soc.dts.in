@@ -31,6 +31,8 @@
             riscv,isa-base = "@RISCV_ISA_BASE@";
             riscv,isa-extensions = @RISCV_ISA_EXTENSIONS@;
             riscv,cbom-block-size = <@CBOM_BLOCK_SIZE@>;
+            riscv,cbop-block-size = <@CBOM_BLOCK_SIZE@>;
+            riscv,cboz-block-size = <@CBOM_BLOCK_SIZE@>;
             mmu-type = "riscv,@RISCV_MMU@";
             reg = <0>;
 

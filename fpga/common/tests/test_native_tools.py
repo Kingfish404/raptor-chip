@@ -34,6 +34,7 @@ class NativeToolsTests(unittest.TestCase):
                         build.resolve_vector(args)
                         expected = preset != "small" if selected == "auto" else selected == "1"
                         self.assertEqual(args.vector, int(expected))
+                        self.assertEqual(args.rva23u64, expected and xlen == 64)
         args = types.SimpleNamespace(xlen=32, preset="chip32-small", vector="1")
         with self.assertRaisesRegex(ValueError, "requires.*F and D"):
             build.resolve_vector(args)
@@ -88,9 +89,13 @@ class NativeToolsTests(unittest.TestCase):
                         build.device_tree(args, Path(temp), 131072)
                     tree = (Path(temp) / "native.dts").read_text()
                     isa = f'riscv,isa = "rv{xlen}imafdc'
-                    self.assertIn(isa + ('v' if enabled else '') + '_', tree)
+                    profile = xlen == 64 and enabled
+                    letters = 'bv' if profile else 'v' if enabled else ''
+                    self.assertIn(isa + letters + '_', tree)
                     extensions = tree.split('riscv,isa-extensions = ', 1)[1].split(';', 1)[0]
                     self.assertEqual('"v"' in extensions, bool(enabled))
+                    self.assertEqual('"ssnpm"' in extensions, bool(profile))
+                    self.assertEqual('riscv,cboz-block-size = <64>' in tree, bool(profile))
 
     def test_source_identity_tracks_generated_rtl_and_phy_helper_but_not_chisel_cache(self):
         with tempfile.TemporaryDirectory() as temp:

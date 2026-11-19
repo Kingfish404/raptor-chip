@@ -260,6 +260,99 @@ static void test_vector_geometry(bool overlapping_sources_only = false) {
 
 #pragma once
 #include "catalog_entries.h"
+
+static void test_zvkt() {
+    constexpr unsigned bytes_per_reg = TEST_VLEN / 8;
+    constexpr std::array<uint64_t, 5> patterns = {
+        0, UINT64_MAX, 0x5555aaaaaaaa5555ULL, 0x0123456789abcdefULL, 0x8000000000000001ULL,
+    };
+    unsigned instructions = 0, comparisons = 0;
+    auto check = [&](const CatalogEntry& entry) {
+        const std::string name = entry.name;
+        const auto dot = name.find('.');
+        const auto stem = name.substr(0, dot);
+        const auto form = name.substr(dot + 1);
+        const bool gather = stem == "vrgather" || stem == "vrgatherei16";
+        const bool vector_index = gather && form == "vv";
+        const bool scalar_control = (gather || stem == "vslideup" || stem == "vslidedown") &&
+                                    form == "vx";
+        const unsigned index_reg = (entry.insn >> 15) & 31;
+        unsigned accepted = 0;
+
+        for (unsigned sew = 0; (8u << sew) <= TEST_ELEN; ++sew) {
+            const unsigned vl = bytes_per_reg >> sew;
+            for (unsigned masked = 0; masked <= unsigned(entry.mask); ++masked) {
+                const uint32_t insn = entry.insn & ~(masked << 25);
+                configure(sew << 3, vl);
+                Result baseline{};
+                for (unsigned sample = 0; sample < patterns.size(); ++sample) {
+                    const auto data = patterns[sample];
+                    for (unsigned addr = 0; addr < 32 * bytes_per_reg; addr += 8) {
+                        const unsigned reg = addr / bytes_per_reg;
+                        uint64_t value = data;
+                        if (vector_index && (reg == index_reg || reg == index_reg + 1)) value = 0;
+                        if (masked && reg == 0) value = UINT64_C(0x5555555555555555);
+                        host(true, addr, 3, value);
+                    }
+                    const uint64_t fp_scalar = sew == 2 ? 0xffffffff00000000ULL | uint32_t(data)
+                                                         : data;
+                    auto result = command(insn, scalar_control ? 1 : data, 0, false, fp_scalar);
+                    if (sample == 0) {
+                        baseline = result;
+                        require(!result.trap || result.cause == 2, "unexpected Zvkt trap: " + name);
+                        accepted += !result.trap;
+                    } else {
+                        const std::string context = name + " sew=" + std::to_string(8u << sew) +
+                            " masked=" + std::to_string(masked) + " sample=" + std::to_string(sample);
+                        require(result.trap == baseline.trap, "Zvkt admission changed: " + context);
+                        if (!result.trap) {
+                            require(result.latency == baseline.latency,
+                                    "operand-dependent latency: " + context + " cycles=" +
+                                        std::to_string(baseline.latency) + "/" +
+                                        std::to_string(result.latency));
+                            ++comparisons;
+                        }
+                    }
+                }
+            }
+        }
+        require(accepted > 0, "no legal Zvkt witness for " + name);
+        ++instructions;
+    };
+    // The ratified Zvkt list, matched by mnemonic stem against baseline V.
+    const std::string covered =
+        " vadd vsub vrsub vwadd vwaddu vwsub vwsubu vadc vmadc vmsbc vsbc"
+        " vmseq vmsgt vmsgtu vmsle vmsleu vmslt vmsltu vmsne"
+        " vmv vmv1r vmv2r vmv4r vmv8r vsext vzext"
+        " vand vmnor vmor vmand vmandn vmnand vmorn vmxor vmxnor vor vxor"
+        " vmul vmulh vmulhu vmulhsu vwmul vwmulhu vwmulsu"
+        " vmacc vmadd vnmsac vnmsub vwmacc vwmaccu vwmaccsu vwmaccus"
+        " vmerge vrgather vrgatherei16 vnsrl vnsra vsll vsrl vsra"
+        " vslide1up vslide1down vfslide1up vfslide1down vslideup vslidedown ";
+    for (const auto& entry : vector_catalog) {
+        const std::string name = entry.name;
+        if (covered.find(" " + name.substr(0, name.find('.')) + " ") != std::string::npos)
+            check(entry);
+    }
+
+    const struct {
+        const char* name;
+        unsigned funct6, form, src;
+    } zvbb[] = {
+        {"vandn.vv", 0x01, 0, 16}, {"vandn.vx", 0x01, 4, 2},
+        {"vbrev8.v", 0x12, 2, 8}, {"vrev8.v", 0x12, 2, 9}, {"vbrev.v", 0x12, 2, 10},
+        {"vclz.v", 0x12, 2, 12}, {"vctz.v", 0x12, 2, 13}, {"vcpop.v", 0x12, 2, 14},
+        {"vror.vv", 0x14, 0, 16}, {"vror.vx", 0x14, 4, 2},
+        {"vror.vi", 0x14, 3, 31}, {"vror.vi-high", 0x15, 3, 5},
+        {"vrol.vv", 0x15, 0, 16}, {"vrol.vx", 0x15, 4, 2},
+        {"vwsll.vv", 0x35, 0, 16}, {"vwsll.vx", 0x35, 4, 2}, {"vwsll.vi", 0x35, 3, 31},
+    };
+    for (const auto& op : zvbb)
+        check({op.name, integer(op.funct6, op.form, 8, 24, op.src, true), false, true});
+    std::printf("PASS zvkt XLEN=%d VLEN=%d ELEN=%d instructions=%u comparisons=%u\n",
+                TEST_XLEN, TEST_VLEN, TEST_ELEN, instructions, comparisons);
+}
+
 static void test_vector_catalog() {
 #ifndef VPU_SPIKE
     throw std::runtime_error("instruction catalog requires DIFF=1");

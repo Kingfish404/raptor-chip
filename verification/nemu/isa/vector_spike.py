@@ -85,7 +85,7 @@ def main():
     query.restype = ctypes.POINTER(ISAAPI)
     api = query(1, ctypes.sizeof(ISAAPI)).contents
     extensions = api.supported if args.profile == 'rva23' else (1 << 6) | (1 << 7) | (1 << 8)
-    if args.profile == 'rva23' and api.supported & 0x7ff != 0x7ff:
+    if args.profile == 'rva23' and api.supported & 0xfff != 0xfff:
         raise RuntimeError('reference lacks the RVA23 bundle')
     if api.configure(extensions):
         raise RuntimeError('reference lacks V128/Zvbb/Zvfhmin preview')

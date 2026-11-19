@@ -223,7 +223,11 @@ rapt_pkg::SteerScanEntries
       .VLEN(rapt_pkg::VectorLength),
       .ELEN(rapt_pkg::VectorElen),
       .BankBits(rapt_pkg::VectorBankBits),
-      .Banks(rapt_pkg::VectorBanks)
+      .Banks(rapt_pkg::VectorBanks),
+      .Zvbb(rapt_pkg::VectorBitManip),
+      .Zvfhmin(rapt_pkg::VectorHalfConvert),
+      .Zvkt(rapt_pkg::VectorDataIndependent),
+      .MisalignedMemory(rapt_pkg::VectorMisaligned)
   ) vpu (
       .sram_ctrl_i(sram_ctrl_i),
       .clock(clock),
@@ -346,13 +350,23 @@ rapt_pkg::SteerScanEntries
   logic [VectorIndexBits-1:0] vm_index;
   logic [2:0] vm_field;
   logic [7:0] vm_context_version;
-  logic [3:0] vm_size_m1, vm_bare_fault_offset;
+  logic [3:0] vm_size_m1, vm_access_size_m1, vm_bare_fault_offset;
   logic [4:0] vm_store_alu, vm_load_alu;
   logic [7:0] vm_strobe;
   logic vm_bare_fault, vm_active, vm_wide_split, vm_high_word;
-  logic [XLEN-1:0] vm_beat_addr;
-  assign vm_wide_split = XLEN == 32 && vm_size == 3;
-  assign vm_beat_addr = vm_addr + XLEN'(vm_wide_split && vm_high_word ? 4 : 0);
+  logic vm_unaligned, vm_preflight, vm_last_byte;
+  logic [2:0] vm_byte;
+  logic [XLEN-1:0] vm_access_addr, vm_beat_addr;
+  logic [63:0] vm_load_data, vm_store_data;
+  assign vm_unaligned = rapt_pkg::VectorMisaligned && (vm_addr[2:0] & vm_size_m1[2:0]) != 0;
+  assign vm_wide_split = !vm_unaligned && XLEN == 32 && vm_size == 3;
+  assign vm_last_byte = vm_byte == vm_size_m1[2:0];
+  assign vm_access_size_m1 = vm_unaligned ? 4'd0 : vm_size_m1;
+  assign vm_access_addr = vm_addr + XLEN'(vm_unaligned ? vm_byte : 3'd0);
+  assign vm_beat_addr = vm_access_addr + XLEN'(vm_wide_split && vm_high_word ? 4 : 0);
+  assign vm_load_data = 64'(lsu_l1d.rdata >> (8 * vm_beat_addr[$clog2(XLEN/8)-1:0]));
+  assign vm_store_data = vm_wdata >> (vm_unaligned ? (8 * vm_byte)
+      : (vm_wide_split && vm_high_word ? 32 : 0));
   rapt_pkg::mem_context_t vm_context;
   pmp_state_if #(.XLEN(XLEN)) vector_pmp ();
 
@@ -367,8 +381,8 @@ rapt_pkg::SteerScanEntries
   ) vector_store_check (
       .store_context(vm_context),
       .pmp_state(vector_pmp),
-      .store_addr(vm_addr),
-      .store_size_m1(vm_size_m1),
+      .store_addr(vm_access_addr),
+      .store_size_m1(vm_access_size_m1),
       .store_valid(vm_state == VM_CHECK && vm_write),
       .store_mmu(1'b0),
       .cmo_mgmt(1'b0),
@@ -378,7 +392,7 @@ rapt_pkg::SteerScanEntries
 
   assign vm_size_m1 = (4'(1) << vm_size) - 1'b1;
   always_comb begin
-    case (vm_size)
+    case (vm_unaligned ? 2'd0 : vm_size)
       0: begin
         vm_store_alu = `RAPT_SB_WSTRB;
         vm_load_alu = `RAPT_ALU_LBU_;
@@ -405,7 +419,20 @@ rapt_pkg::SteerScanEntries
   // instead of registering a second copy in the integration bridge.
   assign vm_write = vector_mem_write;
   assign vm_probe = vector_mem_probe;
+`ifdef RAPT_SSNPM
+  logic [1:0] vm_pmm;
+  always_ff @(posedge clock) begin
+    if (reset) vm_pmm <= '0;
+    else if (vector_mem_valid && vector_mem_ready) vm_pmm <= csr_bcast.data_pmm;
+  end
+  assign vm_addr = XLEN'(rapt_pkg::mask_pointer(
+      64'(vector_mem_addr),
+      vm_state == VM_IDLE ? csr_bcast.data_pmm : vm_pmm,
+      vm_state == VM_IDLE ? csr_bcast.dmmu_en : vm_context.mmu_en
+  ));
+`else
   assign vm_addr = vector_mem_addr;
+`endif
   assign vm_size = vector_mem_size;
   assign vm_wdata = vector_mem_wdata;
   assign vm_tag = vector_mem_tag;
@@ -424,6 +451,23 @@ rapt_pkg::SteerScanEntries
   assign vector_mem_cause = vm_cause;
   assign vector_mem_tval = vm_tval;
 
+  logic vm_store_checked, vm_store_failed, vm_store_device, vm_store_split_device;
+  logic [XLEN-1:0] vm_checked_pa, vm_store_cause;
+  logic [1:0] vm_checked_pbmt;
+  assign vm_store_checked = (vm_state == VM_CHECK && vm_write && !vm_context.mmu_en)
+      || (vm_state == VM_TRANSLATE && exu_l1d.ready);
+  assign vm_checked_pa = vm_context.mmu_en ? exu_l1d.paddr
+      : rapt_pkg::canonical_paddr(vm_access_addr);
+  assign vm_checked_pbmt = vm_context.mmu_en ? exu_l1d.pbmt : '0;
+  assign vm_store_device = rapt_pkg::addr_device(vm_checked_pa) || vm_checked_pbmt == 2'b10;
+  assign vm_store_split_device = vm_store_device && (vm_unaligned || (vm_wide_split && !vm_probe));
+  assign vm_store_failed = vm_context.mmu_en ? exu_l1d.trap
+      || !rapt_pkg::addr_data_span_capable(vm_checked_pa, vm_access_size_m1, 1'b1)
+      || !rapt_pkg::addr_device_width_capable(vm_checked_pa, vm_access_size_m1)
+      : vm_bare_fault;
+  assign vm_store_cause = vm_context.mmu_en && exu_l1d.trap ? XLEN'(exu_l1d.cause)
+      : XLEN'(`RAPT_CAUSE_STORE_ACC_FAULT);
+
   always_ff @(posedge clock) begin
     if (reset) vm_context_version <= '0;
     else if (cmu_bcast.mem_context_invalidate) vm_context_version <= vm_context_version + 1'b1;
@@ -440,6 +484,8 @@ rapt_pkg::SteerScanEntries
       vm_paddr <= '0;
       vm_pbmt <= '0;
       vm_high_word <= 1'b0;
+      vm_byte <= '0;
+      vm_preflight <= 1'b0;
     end else begin
       case (vm_state)
         VM_IDLE:
@@ -452,58 +498,33 @@ rapt_pkg::SteerScanEntries
           };
           vm_fault <= 1'b0;
           vm_high_word <= 1'b0;
+          vm_byte <= '0;
+          vm_preflight <= vm_unaligned;
           vm_cause <= vector_mem_write ? XLEN'(`RAPT_CAUSE_STORE_ACC_FAULT)
               : XLEN'(`RAPT_CAUSE_LOAD_ACC_FAULT);
-          vm_tval <= vector_mem_addr;
+          vm_tval <= vm_addr;
           vm_nonidempotent <= 1'b0;
           vm_rdata <= '0;
           vm_state <= VM_CHECK;
         end
         VM_CHECK: begin
-          if (!vm_write) vm_state <= vm_wide_split ? VM_LOAD_CHECK : VM_LOAD;
+          if (!vm_write) vm_state <= vm_wide_split || vm_unaligned ? VM_LOAD_CHECK : VM_LOAD;
           else if (vm_context.mmu_en) vm_state <= VM_TRANSLATE;
-          else if (vm_bare_fault) begin
-            vm_fault <= 1'b1;
-            vm_tval <= vm_addr + XLEN'(vm_bare_fault_offset);
-            vm_state <= VM_RESPONSE;
-          end else begin
-            vm_paddr <= rapt_pkg::canonical_paddr(vm_addr);
-            vm_pbmt <= '0;
-            vm_nonidempotent <= rapt_pkg::addr_device(vm_addr);
-            if (vm_wide_split && rapt_pkg::addr_device(vm_addr) && !vm_probe) begin
-              vm_fault <= 1'b1;
-              vm_state <= VM_RESPONSE;
-            end else vm_state <= vm_probe ? VM_RESPONSE : VM_STORE;
-          end
         end
-        VM_TRANSLATE:
-        if (exu_l1d.ready) begin
-          vm_paddr <= exu_l1d.paddr;
-          vm_pbmt <= exu_l1d.pbmt;
-          vm_nonidempotent <= rapt_pkg::addr_device(exu_l1d.paddr) || exu_l1d.pbmt == 2'b10;
-          if (exu_l1d.trap || !rapt_pkg::addr_data_span_capable(
-                  exu_l1d.paddr, vm_size_m1, 1'b1
-              ) || !rapt_pkg::addr_device_width_capable(
-                  exu_l1d.paddr, vm_size_m1
-              )) begin
-            vm_fault <= 1'b1;
-            vm_cause <= exu_l1d.trap ? exu_l1d.cause : XLEN'(`RAPT_CAUSE_STORE_ACC_FAULT);
-            vm_state <= VM_RESPONSE;
-          end else if (vm_wide_split && !vm_probe && (rapt_pkg::addr_device(
-                  exu_l1d.paddr
-              ) || exu_l1d.pbmt == 2'b10)) begin
-            vm_fault <= 1'b1;
-            vm_state <= VM_RESPONSE;
-          end else vm_state <= vm_probe ? VM_RESPONSE : VM_STORE;
-        end
+        VM_TRANSLATE: ;  // The bare and translated store checks share the completion path below.
         VM_LOAD_CHECK:
         if (lsu_l1d.rready) begin
           vm_nonidempotent <= lsu_l1d.rnonidempotent;
-          if (lsu_l1d.trap || (lsu_l1d.rnonidempotent && !vm_probe)) begin
+          if (lsu_l1d.trap || (lsu_l1d.rnonidempotent && (vm_unaligned || !vm_probe))) begin
             vm_fault <= 1'b1;
             vm_cause <= lsu_l1d.trap ? lsu_l1d.cause : XLEN'(`RAPT_CAUSE_LOAD_ACC_FAULT);
+            vm_tval <= vm_access_addr;
             vm_state <= VM_RESPONSE;
-          end else vm_state <= vm_probe ? VM_RESPONSE : VM_LOAD;
+          end else if (vm_unaligned && !vm_last_byte) vm_byte <= vm_byte + 1'b1;
+          else begin
+            vm_byte <= '0;
+            vm_state <= vm_probe ? VM_RESPONSE : VM_LOAD;
+          end
         end
         VM_LOAD:
         if (lsu_l1d.rready) begin
@@ -513,12 +534,16 @@ rapt_pkg::SteerScanEntries
           if (lsu_l1d.trap) begin
             vm_tval <= vm_beat_addr;
             vm_state <= VM_RESPONSE;
+          end else if (vm_unaligned) begin
+            vm_rdata[8*vm_byte+:8] <= vm_load_data[7:0];
+            if (vm_last_byte) vm_state <= VM_RESPONSE;
+            else vm_byte <= vm_byte + 1'b1;
           end else if (vm_wide_split && !vm_high_word) begin
             vm_rdata[31:0] <= 32'(lsu_l1d.rdata);
             vm_high_word <= 1'b1;
           end else begin
             if (vm_wide_split) vm_rdata[63:32] <= 32'(lsu_l1d.rdata);
-            else vm_rdata <= 64'(lsu_l1d.rdata >> (8 * vm_addr[$clog2(XLEN/8)-1:0]));
+            else vm_rdata <= vm_load_data;
             vm_state <= VM_RESPONSE;
           end
         end
@@ -527,6 +552,10 @@ rapt_pkg::SteerScanEntries
           vm_fault <= lsu_l1d.werr;
           vm_cause <= XLEN'(`RAPT_CAUSE_STORE_ACC_FAULT);
           if (!lsu_l1d.werr && vm_wide_split && !vm_high_word) vm_high_word <= 1'b1;
+          else if (!lsu_l1d.werr && vm_unaligned && !vm_last_byte) begin
+            vm_byte <= vm_byte + 1'b1;
+            vm_state <= VM_CHECK;
+          end
           else begin
             if (lsu_l1d.werr) vm_tval <= vm_beat_addr;
             vm_state <= VM_RESPONSE;
@@ -535,6 +564,24 @@ rapt_pkg::SteerScanEntries
         VM_RESPONSE: if (vector_mem_rsp_ready) vm_state <= VM_IDLE;
         default: vm_state <= VM_IDLE;
       endcase
+      if (vm_store_checked) begin
+        vm_paddr <= vm_checked_pa;
+        vm_pbmt <= vm_checked_pbmt;
+        vm_nonidempotent <= vm_store_device;
+        if (vm_store_failed || vm_store_split_device) begin
+          vm_fault <= 1'b1;
+          vm_cause <= vm_store_cause;
+          vm_tval <= vm_access_addr + XLEN'(vm_context.mmu_en || !vm_bare_fault
+              ? 4'd0 : vm_bare_fault_offset);
+          vm_state <= VM_RESPONSE;
+        end else if (vm_preflight) begin
+          // Check each byte's translation and protection before the first
+          // write. Resolve pieces again through the normal TLB when writing.
+          vm_byte <= vm_last_byte ? '0 : vm_byte + 1'b1;
+          vm_preflight <= !vm_last_byte;
+          vm_state <= vm_last_byte && vm_probe ? VM_RESPONSE : VM_CHECK;
+        end else vm_state <= vm_probe ? VM_RESPONSE : VM_STORE;
+      end
     end
   end
 
@@ -543,7 +590,7 @@ rapt_pkg::SteerScanEntries
   assign lsu_l1d.ralu = vm_active ? (vm_wide_split ? `RAPT_ALU_LW__ : vm_load_alu) : scalar_l1d.ralu;
   assign lsu_l1d.rvalid = vm_active ? (vm_state == VM_LOAD_CHECK || vm_state == VM_LOAD) : scalar_l1d.rvalid;
   assign lsu_l1d.rprobe = vm_active ? (vm_probe || vm_state == VM_LOAD_CHECK) : scalar_l1d.rprobe;
-  assign lsu_l1d.rmisaligned = vm_active ? 1'b0 : scalar_l1d.rmisaligned;
+  assign lsu_l1d.rmisaligned = vm_active ? vm_unaligned : scalar_l1d.rmisaligned;
   assign lsu_l1d.rcheck_valid = vm_active ? vm_wide_split : scalar_l1d.rcheck_valid;
   assign lsu_l1d.rcheck_offset = vm_active ? '0 : scalar_l1d.rcheck_offset;
   assign lsu_l1d.rcheck_size_m1 = vm_active
@@ -561,7 +608,7 @@ rapt_pkg::SteerScanEntries
   assign lsu_l1d.walu = vm_active ? (vm_wide_split ? 8'h0f : vm_strobe) : scalar_l1d.walu;
   assign lsu_l1d.wzero = vm_active ? 1'b0 : scalar_l1d.wzero;
   assign lsu_l1d.wvalid = vm_active ? vm_state == VM_STORE : scalar_l1d.wvalid;
-  assign lsu_l1d.wdata = vm_active ? XLEN'(vm_wdata >> (vm_wide_split && vm_high_word ? 32 : 0)) : scalar_l1d.wdata;
+  assign lsu_l1d.wdata = vm_active ? XLEN'(vm_store_data) : scalar_l1d.wdata;
   assign lsu_l1d.wmore = vm_active ? 1'b0 : scalar_l1d.wmore;
   assign lsu_l1d.wprecise = vm_active ? 1'b1 : scalar_l1d.wprecise;
 
@@ -583,11 +630,11 @@ rapt_pkg::SteerScanEntries
 
   assign exu_l1d.mmu_en = vm_active ? vm_state == VM_TRANSLATE : scalar_mmu.mmu_en;
   assign exu_l1d.mem_context = vm_active ? vm_context : scalar_mmu.mem_context;
-  assign exu_l1d.vaddr = vm_active ? vm_addr : scalar_mmu.vaddr;
+  assign exu_l1d.vaddr = vm_active ? vm_access_addr : scalar_mmu.vaddr;
   assign exu_l1d.walu = vm_active ? vm_store_alu : scalar_mmu.walu;
   assign exu_l1d.cmo_mgmt = vm_active ? 1'b0 : scalar_mmu.cmo_mgmt;
   assign exu_l1d.valid = vm_active ? vm_state == VM_TRANSLATE : scalar_mmu.valid;
-  assign exu_l1d.misaligned = vm_active ? 1'b0 : scalar_mmu.misaligned;
+  assign exu_l1d.misaligned = vm_active ? vm_unaligned : scalar_mmu.misaligned;
   assign exu_l1d.reservation_clear = !vm_active && scalar_mmu.reservation_clear;
   assign scalar_mmu.paddr = exu_l1d.paddr;
   assign scalar_mmu.pbmt = exu_l1d.pbmt;
@@ -1226,6 +1273,10 @@ rapt_pkg::SteerScanEntries
       .disp_mdq(disp_mdq),
 
       .integer_system_issue_enable(1'b1),
+`ifdef RAPT_ZAWRS
+      .reservation_valid(exu_l1d.reservation_valid),
+      .wrs_debug_wakeup(dm_haltreq_i || debug.step),
+`endif
 `ifdef RAPT_V_EXTENSION
       .vector_issue_ready(vector_command_ready),
       .vector_issue(vector_issue),

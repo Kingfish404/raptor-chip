@@ -313,8 +313,10 @@ Zcb, Zicbop and Svinval.
 The vector implementation includes integer, fixed-point, FP32/FP64 arithmetic,
 reductions, conversions, permutations, masks and vector memory operations;
 unsupported extension encodings trap. Ordinary vector loads and stores support misaligned main-memory
-accesses, including split-page elements; whole-register transfers retain their
-encoded alignment requirement. Memory-type and protection checks still apply.
+accesses, including split-page elements; whole-register transfers allow
+misaligned main-memory accesses in `rva23` mode (`Zicclsm`) and retain their
+encoded alignment requirement in baseline V. Memory-type and protection checks
+still apply.
 Zvfhmin currently covers half/single widening and narrowing
 conversions, not full Zvfh. Zfa does not provide Zfh/Q formats without those
 extensions. H includes Sv39/Sv39x4 guest translation, HLV/HLVX/HSV,

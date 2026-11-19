@@ -102,12 +102,24 @@ Use waveforms and a minimal payload when a behavioral failure needs diagnosis.
 ## Architectural programs and fuzzing
 
 ```sh
+make -C verification/subsystem rva23u64-smoke CONFIG=default
+make -C verification/subsystem rva23u64-linux-probe
+make -C verification/subsystem vector-profile-smoke XLEN=32 CONFIG=default
+make -C verification/vpu top TOP_SUITE=zvkt XLEN=64
 make -C verification rva22s64-directed RVA22S64_XLEN=32
 make -C verification rva22s64-directed RVA22S64_XLEN=64
 make verify-sigtest
 make verify-fuzz
 make verify-coverage
 ```
+
+The RVA23U64 smoke target uses the default hardware profile and runs Zvbb,
+Zvfhmin, Zfa, Zawrs, and pointer masking through the AXI core. The memory
+cases cover misaligned vector elements, noncontiguous page mappings, restart,
+fault-only-first behavior and side-effect device isolation. The Zvkt target
+compares latency across different data operands with the execution controls held fixed.
+The Linux target builds `rva23-check` in `BUILD_DIR`. Place it in the netboot
+initramfs and pass `rdinit=/rva23-check` to exercise the profile from U-mode.
 
 The RVA22S64 case table is in `verification/Makefile`; RV64-only cases are skipped
 in RV32. Each guest has a separate output directory. Override `RVA22S64_NPC` and
@@ -259,18 +271,23 @@ limits. These reference-only features are distinct from current RTL support.
 
 ```sh
 make regression-plan
-make regression REGRESSION_XLENS="32 64" REGRESSION_JOBS=3
+make regression REGRESSION_XLENS="32 64"
 make regression-test
 make -C verification make-targets-test sta-flow-check sta-entrypoints-test
 make format FORMAT_SCOPE=all
 make format-check FORMAT_SCOPE=all
 ```
 
-The whole-project runner formats first, then schedules CoreMark, STA and FPGA
-lanes. Use `REGRESSION_SUITES`, `REGRESSION_BOARD`, `REGRESSION_TOOL_JOBS`,
-`REGRESSION_TIMEOUT`, `REGRESSION_ITERATIONS` and `REGRESSION_OUTPUT` to select a
-run. Shared NEMU/AM configuration must not be changed by another build during
-that regression. Inspect `regression-plan` before launching expensive tools.
+The runner formats first and prepares shared decoders, CoreMark dependencies
+and SRAM libraries once. Each NEMU and NPC CoreMark check uses its own build
+configuration. RV32 and RV64 STA can overlap one another and the FPGA build.
+The FPGA timing check starts after the bitstream build succeeds.
+
+`REGRESSION_JOBS` caps concurrent checks. By default the runner divides the
+available CPU count by `REGRESSION_TOOL_JOBS`, with a minimum of one check.
+The tool budget controls the parallelism inside each build. The plan lists
+each command and its prerequisites. Use `REGRESSION_SUITES`, `REGRESSION_BOARD`,
+`REGRESSION_TIMEOUT`, `REGRESSION_ITERATIONS` and `REGRESSION_OUTPUT` to select a run.
 
 Application benchmarks and their comparison limits are documented in
 [app/README.md](../app/README.md). Physical timing/area checks belong in `synth/`

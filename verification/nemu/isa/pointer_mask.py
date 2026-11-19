@@ -47,8 +47,11 @@ def main():
     for csr, extension in ((0x10a, 8), (0x30a, 16)):
         for pmm in (0, 2, 1, 3, 1, 0):
             reference.reset()
+            if csr == 0x10a and pmm == 1:
+                write_csr(csr, (2 << 32) | 0xf0)
             write_csr(csr, (pmm << 32) | 0xf0)
-            expected = pmm if extensions & extension and pmm != 1 else 0
+            expected = (2 if csr == 0x10a and pmm == 1 else 0 if pmm == 1 else pmm)
+            expected = expected if extensions & extension else 0
             check(f'csr-{csr:x}-{pmm}', read_csr(csr), (expected << 32) | 0xf0)
             if args.xlen == 64 and csr == 0x30a:
                 write_csr(csr, (pmm << 32) | 0xc0000000000000f0)

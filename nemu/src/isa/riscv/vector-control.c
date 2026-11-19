@@ -1593,8 +1593,9 @@ word_t riscv_vector_memory(uint32_t instruction, bool store)
     {
       for (unsigned field = 0; field < fields; field++)
       {
-        word_t address = segment_base + field * data_bytes;
-        if (whole && (address & (data_bytes - 1)))
+        word_t address = riscv_pointer_mask(segment_base + field * data_bytes);
+        if (whole && (address & (data_bytes - 1)) &&
+            !(riscv_isa_extensions & NEMU_ISA_EXT_ZICCLSM_VECTOR))
         {
           g_vaddr = address;
           exec_jmp_override = previous_target;

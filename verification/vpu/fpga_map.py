@@ -36,8 +36,8 @@ def main():
     summary.unlink(missing_ok=True)
     sources = [ROOT/'rtl/rapt_pkg.sv', ROOT/'rtl/sram/rapt_sram_1rw.sv']
     sources += [ROOT/f'rtl/core/backend/fpu/rapt_fpu_{name}.sv' for name in (
-        'fma','divsqrt','convert_narrow','int_to_fp','integer_to_fp',
-        'single_to_int_w','fp_to_int')]
+        'fma', 'divsqrt', 'convert_narrow', 'half_to_fp', 'fp_to_half',
+        'int_to_fp', 'integer_to_fp', 'single_to_int_w', 'fp_to_int')]
     sources += sorted((ROOT/'rtl/core/backend/vpu').glob('*.sv'))
     inputs = sources + sorted((ROOT / 'rtl/include').rglob('*.svh'))
     inputs += [ROOT / 'rtl/configs/default/rapt_config.svh', Path(__file__)]

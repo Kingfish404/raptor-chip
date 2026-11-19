@@ -278,8 +278,8 @@ NSIM_RTL_DIR := $(RAPTOR_HOME)/sim/rtl
 CHISEL_DIR := $(RAPTOR_HOME)/tools/decodegen
 CHISEL_GENERATED_SRCS := $(RTL_DIR)/generated/rapt_idu_decoder.sv \
 	$(RTL_DIR)/generated/rapt_idu_decoder_c.sv
-CHISEL_INPUTS := $(shell find $(CHISEL_DIR)/src $(CHISEL_DIR)/project -type f 2>/dev/null) \
-	$(CHISEL_DIR)/build.sbt $(CHISEL_DIR)/Makefile
+CHISEL_INPUTS := $(shell find $(CHISEL_DIR)/src -type f 2>/dev/null) \
+	$(CHISEL_DIR)/build.sbt $(CHISEL_DIR)/Makefile $(CHISEL_DIR)/project/build.properties
 RTL_SOURCES := $(sort $(shell find $(RTL_DIR) $(NSIM_RTL_DIR) -type f \( -name '*.sv' -o -name '*.svh' -o -name '*.v' -o -name '*.vh' \) 2>/dev/null) $(CHISEL_GENERATED_SRCS))
 
 # No parse-time config stamps: the packer keys on preset + defines and checks
@@ -385,10 +385,14 @@ LINUX_VARIANT   := $(if $(filter 64,$(LINUX_XLEN)),linux64,linux32)
 LINUX_MABI      := $(if $(filter 64,$(LINUX_XLEN)),lp64,ilp32)
 LINUX_MMU       := $(if $(filter 64,$(LINUX_XLEN)),sv39,sv32)
 LINUX_ISA_BASE  := rv$(LINUX_XLEN)i
-_LINUX_DEFAULT_ISA := $(if $(filter 64,$(LINUX_XLEN)),$(RAPTOR_RV64_ISA),$(RAPTOR_RV32_ISA))
+LINUX_ISA_BASELINE ?= $(if $(filter 64,$(LINUX_XLEN)),$(RAPTOR_RV64_ISA),$(RAPTOR_RV32_ISA))
 _PRESET_NO_FPU := $(shell awk '/^`define RAPT_NO_FPU([ \t]|$$)/ { print 1; exit }' \
 	$(RTL_DIR)/configs/$(RAPT_CONFIG)/rapt_config.svh)
-LINUX_ISA := $(if $(_PRESET_NO_FPU),$(subst imafdc,imac,$(_LINUX_DEFAULT_ISA)),$(_LINUX_DEFAULT_ISA))
+_LINUX_DEFAULT_ISA := $(if $(_PRESET_NO_FPU),$(subst imafdc,imac,$(LINUX_ISA_BASELINE)), \
+	$(LINUX_ISA_BASELINE))
+LINUX_ISA := $(shell python3 "$(RAPTOR_HOME)/sim/scripts/paddr_config.py" \
+	--isa "$(strip $(_LINUX_DEFAULT_ISA))" --config "$(RTL_DIR)/configs/$(RAPT_CONFIG)" \
+	--hdl "$(RTL_DIR)" -- $(RAPT_PACK_VFLAGS))
 LINUX_DT_ISA_EXTENSIONS := $(shell printf '%s\n' '$(LINUX_ISA)' | awk '{ sub(/^rv(32|64)/, ""); count = split($$0, parts, "_"); for (i = 1; i <= length(parts[1]); i++) extensions[++n] = substr(parts[1], i, 1); for (i = 2; i <= count; i++) extensions[++n] = parts[i]; for (i = 1; i <= n; i++) printf "%s\"%s\"", (i == 1 ? "" : ", "), extensions[i] }')
 LINUX_DOWNLOAD_TARGET := download-rv$(LINUX_XLEN)
 OPENSBI_BUILD_TARGET  := opensbi-rv$(LINUX_XLEN)

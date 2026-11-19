@@ -19,3 +19,12 @@ RAPT_PC_FULL_WIDTH # Keep XLEN-wide PCs; absent stores RV64 PCs in 40 bits when 
 RAPT_NO_FPU # Preset-selected; absent keeps the FEU and F/D in MISA.
 RAPT_V_EXTENSION # Preset-selected V; absent removes the integrated VPU.
 RAPT_NO_VPU # Explicit scalar override for application presets.
+RAPT_ZVBB # Optional Zvbb decoder and execution paths when V is enabled.
+RAPT_ZVFHMIN # Optional vector binary16 format conversions when V is enabled.
+RAPT_ZVKT # Data-independent timing for the covered vector instructions.
+RAPT_ZAWRS # Optional wait-on-reservation-set execution.
+RAPT_SSNPM # RV64 U-mode pointer masking through senvcfg.PMM.
+RAPT_ZFA # Optional RV64 additional floating-point instructions.
+RAPT_ZICCLSM_VECTOR # Split misaligned vector elements in main memory.
+RAPT_RVA23U64 # Effective RV64 user profile, derived from the FP and vector configuration.
+RAPT_NO_RVA23U64 # Select baseline V and scalar ISA on an RV64 application preset.

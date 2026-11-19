@@ -43,6 +43,17 @@ package rapt_pkg;
     logic [7:0] version;
   } mem_context_t;
 
+  // Ignore only the configured tag bits. The resulting address still passes
+  // the ordinary canonicality, translation, and protection checks.
+  function automatic logic [63:0] mask_pointer(input logic [63:0] address, input logic [1:0] pmm,
+                                               input logic translated);
+    case (pmm)
+      2'b10: return {{7{translated && address[56]}}, address[56:0]};
+      2'b11: return {{16{translated && address[47]}}, address[47:0]};
+      default: return address;
+    endcase
+  endfunction
+
   // One arbitrated L2 translation-cache port per walker. Requests remain
   // stable until ready; only lookups receive a registered response.
   typedef struct packed {
@@ -403,6 +414,11 @@ package rapt_pkg;
 `else
   localparam bit FpuEnable = 1'b1;
 `endif
+`ifdef RAPT_ZFA
+  localparam bit ZfaEnable = FpuEnable && `RAPT_XLEN == 64;
+`else
+  localparam bit ZfaEnable = 1'b0;
+`endif
 `ifdef RAPT_V_EXTENSION
   localparam bit VectorEnable = 1'b1;
 `else
@@ -412,6 +428,26 @@ package rapt_pkg;
   localparam int unsigned VectorElen = 64;
   localparam int unsigned VectorBankBits = `RAPT_VRF_BANK_BITS;
   localparam int unsigned VectorBanks = `RAPT_VRF_BANKS;
+`ifdef RAPT_ZVBB
+  localparam bit VectorBitManip = VectorEnable;
+`else
+  localparam bit VectorBitManip = 1'b0;
+`endif
+`ifdef RAPT_ZVFHMIN
+  localparam bit VectorHalfConvert = VectorEnable;
+`else
+  localparam bit VectorHalfConvert = 1'b0;
+`endif
+`ifdef RAPT_ZVKT
+  localparam bit VectorDataIndependent = VectorEnable;
+`else
+  localparam bit VectorDataIndependent = 1'b0;
+`endif
+`ifdef RAPT_ZICCLSM_VECTOR
+  localparam bit VectorMisaligned = VectorEnable;
+`else
+  localparam bit VectorMisaligned = 1'b0;
+`endif
   localparam logic [`RAPT_XLEN-1:0] Misa =
   `RAPT_MISA
   | (VectorEnable ? (`RAPT_XLEN'(1) << 21) : '0);
@@ -506,7 +542,8 @@ package rapt_pkg;
     SYS_TRANSLATION,
     SYS_CBO_CLEAN,
     SYS_CBO_INVAL,
-    SYS_CBO_ZERO
+    SYS_CBO_ZERO,
+    SYS_WRS
   } system_kind_t;
 
   typedef struct packed {
@@ -630,7 +667,8 @@ package rapt_pkg;
         sources[1] = 1'b1;
       else if (!(op == `RAPT_FP_OP_FLW || op ==
           `RAPT_FP_OP_FLD
-          || (op == `RAPT_FP_OP_ZFHMIN && inst[6:0] == 7'b0000111) || fp_from_integer(
+          || (ZfaEnable && op == `RAPT_FP_OP_ZFA_SIMPLE && inst[31]) ||
+              (op == `RAPT_FP_OP_ZFHMIN && inst[6:0] == 7'b0000111) || fp_from_integer(
               op, inst
           ))) begin
         sources[0] = 1'b1;

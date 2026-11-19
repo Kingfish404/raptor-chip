@@ -278,6 +278,26 @@ module rapt_csr #(
   // interrupts if needed.
   logic [XLEN-1:0] mip_eff;
   logic [XLEN-1:0] mstatus_write, sstatus_write;
+  logic [XLEN-1:0] senvcfg_write;
+`ifdef RAPT_SSNPM
+  if (XLEN == 64) begin : g_ssnpm
+    logic [1:0] pmm, pmm_write;
+    logic user_access;
+    assign pmm = csr[SENVCFG][33:32];
+    assign pmm_write = rou_csr.csr_wdata[33:32] == 2'b01 ? pmm : rou_csr.csr_wdata[33:32];
+    assign senvcfg_write = envcfg_warl(rou_csr.csr_wdata, XLEN'(`RAPT_CSR_SENVCFG_WMASK))
+        | {30'b0, pmm_write, 32'b0};
+    assign user_access = csr_bcast.priv == `RAPT_PRIV_M && csr_bcast.mprv
+        ? csr_bcast.mpp == `RAPT_PRIV_U : csr_bcast.priv == `RAPT_PRIV_U;
+    assign csr_bcast.data_pmm = user_access && !csr_bcast.mxr ? pmm : 2'b00;
+  end else begin : g_no_ssnpm
+    assign senvcfg_write = envcfg_warl(rou_csr.csr_wdata, XLEN'(`RAPT_CSR_SENVCFG_WMASK));
+    assign csr_bcast.data_pmm = 2'b00;
+  end
+`else
+  assign senvcfg_write = envcfg_warl(rou_csr.csr_wdata, XLEN'(`RAPT_CSR_SENVCFG_WMASK));
+  assign csr_bcast.data_pmm = 2'b00;
+`endif
   always_comb begin
     // WARL fields are normalized before deriving the shared S-mode view.
     mstatus_write = (rou_csr.csr_wdata
@@ -615,6 +635,12 @@ module rapt_csr #(
                  | ({{(XLEN-1){1'b0}}, m_ext_irq_i} << `RAPT_CSR_MIE_MEIE)
                  | ({{(XLEN-1){1'b0}}, s_ext_irq_i} << `RAPT_CSR_MIE_SEIE)
                  | (XLEN'(bus_error_pending) << `RAPT_BUS_ERROR_IRQ);
+`ifdef RAPT_ZAWRS
+  // WRS can resume on a pending interrupt irrespective of trap eligibility.
+  assign csr_bcast.wrs_irq_pending = |mip_eff;
+`else
+  assign csr_bcast.wrs_irq_pending = 1'b0;
+`endif
 
   // ----- S-level interrupt source evaluation (Priv Sec.3.1.9) ---------------
   // SEI/SSI/STI trap to the mode selected by mideleg:
@@ -930,7 +956,7 @@ module rapt_csr #(
               csr_state[MCOUNTE] <= rou_csr.csr_wdata & XLEN'(`RAPT_CSR_COUNTEREN_WMASK);
             else csr_state[SCOUNTE] <= rou_csr.csr_wdata & XLEN'(`RAPT_CSR_COUNTEREN_WMASK);
           end else if (waddr_reg == SENVCFG) begin
-            csr_state[SENVCFG] <= envcfg_warl(rou_csr.csr_wdata, XLEN'(`RAPT_CSR_SENVCFG_WMASK));
+            csr_state[SENVCFG] <= senvcfg_write;
           end else if (waddr_reg == MENVCFG) begin
             csr_state[MENVCFG] <= envcfg_warl(rou_csr.csr_wdata, XLEN'(`RAPT_CSR_MENVCFG_WMASK));
           end else if (waddr_reg == MENVCFGH) begin

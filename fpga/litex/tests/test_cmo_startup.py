@@ -35,6 +35,7 @@ faulting_flush:
     .word 0x0025200f /* exact faulting instruction: cbo.flush (a0) */
     .word 0x0015200f /* cbo.clean (a0) */
     .word 0x0005200f /* cbo.inval (a0) */
+    .word 0x0045200f /* cbo.zero (a0) */
 #ifdef ENABLE_CMO
     j pass
 #else
@@ -89,7 +90,7 @@ class CmoStartupTest(unittest.TestCase):
                             command.append('-DENABLE_CMO')
                         subprocess.run(command, check=True, capture_output=True)
                         result = subprocess.run([f'qemu-system-riscv{bits}', '-M', 'virt',
-                            '-cpu', f'rv{bits},zicbom=true', '-m', '128M', '-bios', 'none',
+                            '-cpu', f'rv{bits},zicbom=true,zicboz=true', '-m', '128M', '-bios', 'none',
                             '-nographic', '-monitor', 'none', '-device', f'loader,file={elf},cpu-num=0'],
                             capture_output=True, timeout=15)
                         self.assertEqual(result.returncode, 0, result.stderr.decode())

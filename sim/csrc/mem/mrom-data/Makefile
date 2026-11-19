@@ -35,7 +35,13 @@ SOURCE = rom.c $(BUILD_DIR)/dtb.c
 # baked into the embedded DTB changes.
 ISA64 ?= 0
 VECTOR ?= 0
-DT_STAMP_KEY := $(ISA64):$(DT_SOURCE):v$(VECTOR)
+ISA_EXTENSIONS ?=
+DT_ISA_EXTENSIONS := $(strip $(if $(filter 1,$(VECTOR)),v) $(ISA_EXTENSIONS))
+ROM_CBO_MANAGEMENT := $(if $(filter zicbom,$(DT_ISA_EXTENSIONS)),0x70,0)
+ROM_CBO_ZERO := $(if $(filter zicboz,$(DT_ISA_EXTENSIONS)),0x80,0)
+COMMON_CFLAGS += '-DRAPT_ROM_CMO_BITS=$(ROM_CBO_MANAGEMENT)|$(ROM_CBO_ZERO)'
+ISA_DTB_TOOL := $(RAPTOR_HOME)/sim/scripts/paddr_config.py
+DT_STAMP_KEY := $(ISA64):$(DT_SOURCE):$(DT_ISA_EXTENSIONS)
 ISA_STAMP := $(BUILD_DIR)/.isa_stamp
 ISA_PREV  := $(shell cat $(ISA_STAMP) 2>/dev/null)
 ifneq ($(DT_STAMP_KEY),$(ISA_PREV))
@@ -50,7 +56,7 @@ LDFLAGS = -no-pie -Wl,-Ttext=0 -Wl,-e,_start
 
 all: $(IMAGE).elf $(IMAGE).bin ## Build MROM data (elf + bin)
 
-$(BUILD_DIR)/dtb.c: $(DT_SOURCE_PATH) Makefile ## Generate DTB C source
+$(BUILD_DIR)/dtb.c: $(DT_SOURCE_PATH) $(ISA_DTB_TOOL) Makefile ## Generate DTB C source
 	# brew install dtc
 	mkdir -p $(BUILD_DIR)
 	@set -eu; \
@@ -58,21 +64,8 @@ $(BUILD_DIR)/dtb.c: $(DT_SOURCE_PATH) Makefile ## Generate DTB C source
 	  c_tmp="$@.$$$$"; \
 	  trap 'rm -f "$$dtb_tmp" "$$c_tmp"' EXIT HUP INT TERM; \
 	  dtc $(DT_SOURCE_PATH) -o "$$dtb_tmp"; \
-	  if [ "$(VECTOR)" = 1 ]; then \
-	    isa=$$(fdtget -d '' -t s "$$dtb_tmp" /cpus/cpu@0 riscv,isa); \
-	    if [ -n "$$isa" ]; then \
-	      base=$${isa%%_*}; \
-	      letters=$${base#rv??}; \
-	      case "$$letters" in *v*) ;; \
-	        *) fdtput -t s "$$dtb_tmp" /cpus/cpu@0 riscv,isa "$${base}v$${isa#$$base}" ;; \
-	      esac; \
-	    fi; \
-	    extensions=$$(fdtget -d '' -t s "$$dtb_tmp" /cpus/cpu@0 riscv,isa-extensions); \
-	    if [ -n "$$extensions" ]; then \
-	      case " $$extensions " in *' v '*) ;; \
-	        *) fdtput -t s "$$dtb_tmp" /cpus/cpu@0 riscv,isa-extensions $$extensions v ;; \
-	      esac; \
-	    fi; \
+	  if [ -n "$(DT_ISA_EXTENSIONS)" ]; then \
+	    python3 "$(ISA_DTB_TOOL)" --update-dtb "$$dtb_tmp" -- $(DT_ISA_EXTENSIONS); \
 	  fi; \
 	  xxd -i -n raptor_dtb "$$dtb_tmp" > "$$c_tmp"; \
 	  mv "$$dtb_tmp" $(BUILD_DIR)/raptor.dtb; \

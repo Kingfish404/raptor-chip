@@ -107,7 +107,7 @@ def main():
             check.save(name + '-journal', all(count > 0 for count in memory['instructions'])
                        and len(memory['instructions']) == harts
                        and bool(fields[1] & VECTOR_FLAG) and fields[2:4] == (64, harts)
-                       and profile_mask == 0x7ff and fields[7] == 0,
+                       and profile_mask == 0xfff and fields[7] == 0,
                        memory=memory, profile_mask=profile_mask)
             if case in CLOCK_CASES:
                 check.save(name + '-interrupts', all(count > 0 for count in memory['interrupts'])

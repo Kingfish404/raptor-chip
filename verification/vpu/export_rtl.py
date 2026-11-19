@@ -25,8 +25,8 @@ def export(destination):
     destination.mkdir(parents=True,exist_ok=False)
     rtl=[ROOT/'rtl/rapt_pkg.sv', ROOT/'rtl/sram/rapt_sram_1rw.sv']+[
         ROOT/f'rtl/core/backend/fpu/rapt_fpu_{name}.sv'
-        for name in ('fma','divsqrt','convert_narrow','int_to_fp','integer_to_fp',
-                     'single_to_int_w','fp_to_int')]
+        for name in ('fma', 'divsqrt', 'convert_narrow', 'half_to_fp', 'fp_to_half',
+                     'int_to_fp', 'integer_to_fp', 'single_to_int_w', 'fp_to_int')]
     rtl+=sorted((ROOT/'rtl/core/backend/vpu').glob('*.sv'))
     headers = sorted((ROOT/'rtl/include').glob('*.svh'))
     headers += [ROOT/'rtl/configs/default/rapt_config.svh']

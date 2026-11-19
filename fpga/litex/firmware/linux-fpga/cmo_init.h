@@ -11,9 +11,10 @@
     csrr t4, mtvec
     lla t0, .Lcmo_failure\@
     csrw mtvec, t0
-    li t1, 0x70 /* CBIE=invalidate, CBCFE=clean/flush; leave other bits alone */
+    li t1, 0xf0 /* Enable invalidate, clean/flush, and zero where implemented. */
     csrs 0x30a, t1
     csrr t2, 0x30a
+    andi t1, t1, 0x70 /* Legacy Zicbom-only targets can hardwire CBZE to zero. */
     and t2, t2, t1
     bne t2, t1, .Lcmo_failure\@
     csrw mtvec, t4

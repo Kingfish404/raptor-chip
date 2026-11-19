@@ -243,6 +243,8 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
       SRET__ -> BitPat("b" + "00" + ALU_ADD_), // N
 
       WFI___ -> BitPat("b" + "00" + ALU_ADD_), // N
+      WRSNTO -> BitPat("b" + "00" + ALU_ADD_),
+      WRSSTO -> BitPat("b" + "00" + ALU_ADD_),
 
       // Zimop: MOP.r.n / MOP.rr.n — architecturally rd <- 0
       MOP_R_  -> BitPat("b" + "00" + ALU_ADD_), // I-like
@@ -433,7 +435,9 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
       CSRRSI -> BitPat("b" + "010 0  0  0  0  1"), // CSR
       CSRRCI -> BitPat("b" + "100 0  0  0  0  1"), // CSR
 
-      WFI___ -> BitPat("b" + "000 0  0  0  0  1") // N
+      WFI___ -> BitPat("b" + "000 0  0  0  0  1"), // N
+      WRSNTO -> BitPat("b" + "000 0  0  0  0  1"),
+      WRSSTO -> BitPat("b" + "000 0  0  0  0  1")
     ),
     BitPat("b" + "000 0 0 0 0 0")
   )
@@ -511,6 +515,10 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
       FMAX_S   -> BitPat("b" + FP_FMAX_S),
       FMIN_D   -> BitPat("b" + FP_FMIN_D),
       FMAX_D   -> BitPat("b" + FP_FMAX_D),
+      FMINM_S  -> BitPat("b" + FP_FMIN_S),
+      FMAXM_S  -> BitPat("b" + FP_FMAX_S),
+      FMINM_D  -> BitPat("b" + FP_FMIN_D),
+      FMAXM_D  -> BitPat("b" + FP_FMAX_D),
       FLE_S    -> BitPat("b" + FP_FLE_S),
       FLT_S    -> BitPat("b" + FP_FLT_S),
       FEQ_S    -> BitPat("b" + FP_FEQ_S),
@@ -518,6 +526,10 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
       FLE_D    -> BitPat("b" + FP_FLE_D),
       FLT_D    -> BitPat("b" + FP_FLT_D),
       FEQ_D    -> BitPat("b" + FP_FEQ_D),
+      FLEQ_S   -> BitPat("b" + FP_FLE_S),
+      FLTQ_S   -> BitPat("b" + FP_FLT_S),
+      FLEQ_D   -> BitPat("b" + FP_FLE_D),
+      FLTQ_D   -> BitPat("b" + FP_FLT_D),
       FCLASS_D -> BitPat("b" + FP_FCLASS_D),
       FCVT_W_S -> BitPat("b" + FP_FCVT_W_S),
       FCVT_WU_S -> BitPat("b" + FP_FCVT_WU_S),
@@ -528,6 +540,7 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
       FCVT_S_L -> BitPat("b" + FP_FCVT_S_L),
       FCVT_S_LU -> BitPat("b" + FP_FCVT_S_LU),
       FCVT_W_D -> BitPat("b" + FP_FCVT_W_D),
+      FCVTMOD_W_D -> BitPat("b" + FP_FCVT_W_D),
       FCVT_WU_D -> BitPat("b" + FP_FCVT_WU_D),
       FCVT_L_D -> BitPat("b" + FP_FCVT_L_D),
       FCVT_LU_D -> BitPat("b" + FP_FCVT_LU_D),
@@ -541,6 +554,10 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
     BitPat("b" + FP_NONE)
   )
   val fp_op_decoded = decoder(in.inst, fp_op_table)
+  // A valid opcode with the otherwise unused FP_NONE tag carries FLI or FROUND.
+  val fp_zfa_simple = decoder(in.inst, TruthTable(
+    Map(FLI_SD -> BitPat("b1"), FROUND_SD -> BitPat("b1")), BitPat("b0")
+  )) === 1.U
   val fp_fmv_x_w = ("b" + FP_FMV_X_W).U(6.W)
   val fp_fmv_x_d = ("b" + FP_FMV_X_D).U(6.W)
   val fp_flw = ("b" + FP_FLW).U(6.W)
@@ -592,7 +609,7 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
   val fp_fcvt_d_lu = ("b" + FP_FCVT_D_LU).U(6.W)
   val fp_fcvt_s_d = ("b" + FP_FCVT_S_D).U(6.W)
   val fp_fcvt_d_s = ("b" + FP_FCVT_D_S).U(6.W)
-  val fp_valid_decoded = fp_op_decoded =/= 0.U
+  val fp_valid_decoded = fp_op_decoded =/= 0.U || fp_zfa_simple
   val fp_to_int_decoded = (
     (fp_op_decoded === fp_fmv_x_w) || (fp_op_decoded === fp_fmv_x_d) ||
     (fp_op_decoded === fp_fle_s) || (fp_op_decoded === fp_flt_s) ||
@@ -616,6 +633,7 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
   out_fp.load := ((fp_op_decoded === fp_flw) || (fp_op_decoded === fp_fld) || fp_half_load).asUInt
   out_fp.store := fp_store_decoded.asUInt
   out_fp.width_d := (
+    (fp_zfa_simple && funct7(0)) ||
     (fp_op_decoded === fp_fmv_d_x) || (fp_op_decoded === fp_fmv_x_d) ||
     (fp_op_decoded === fp_fsgnj_d) || (fp_op_decoded === fp_fsgnjn_d) ||
     (fp_op_decoded === fp_fsgnjx_d) || (fp_op_decoded === fp_fld) ||
@@ -787,6 +805,8 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
     SRET__ -> List(1.U, ImmSstatus, 0.U, 0.U, 0.U, 0.U), // N
 
     WFI___ -> List(0.U, ImmZero, 0.U, 0.U, 0.U, 0.U), // N
+    WRSNTO -> List(0.U, ImmZero, 0.U, 0.U, 0.U, 0.U),
+    WRSSTO -> List(0.U, ImmZero, 0.U, 0.U, 0.U, 0.U),
 
     // Zimop: rd <- 0 + 0 (ALU_ADD with zero operands)
     MOP_R_  -> List(1.U, ImmZero, 0.U, 0.U, 0.U, 0.U), // I-like

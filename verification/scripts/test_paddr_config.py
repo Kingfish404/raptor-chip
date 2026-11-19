@@ -83,13 +83,22 @@ class PaddrConfigTest(unittest.TestCase):
                     command.append("-DRAPT_RV64")
                 with self.subTest(preset=preset.parent.name, xlen=xlen):
                     result = subprocess.run(command, capture_output=True, text=True, check=True)
-                    fields = list(map(int, result.stdout.split()))
+                    fields = result.stdout.split()
                     expected = preset.parent.name.startswith("default") or preset.parent.name == "large"
-                    self.assertEqual(fields[2:], [int(expected), 128, 64, 2])
+                    self.assertEqual(list(map(int, fields[2:6])), [int(expected), 128, 64, 2])
+                    required = {"b", "zawrs", "zfa", "ssnpm", "zvbb", "zvfhmin", "zvkt", "zicclsm"}
+                    advertised = set(fields[6].split(","))
+                    if xlen == 64 and expected:
+                        self.assertTrue(required <= advertised)
+                        legacy = subprocess.check_output(command + ["-DRAPT_NO_RVA23U64"], text=True)
+                        self.assertEqual(legacy.split()[2:], ["1", "128", "64", "2", "-"])
+                    else:
+                        self.assertEqual(advertised, {"-"})
                     if expected:
                         disabled = subprocess.run(command + ["-DRAPT_NO_VPU"],
                                                   capture_output=True, text=True, check=True)
                         self.assertEqual(disabled.stdout.split()[2], "0")
+                        self.assertEqual(disabled.stdout.split()[6], "-")
 
     def widths(self, *flags, config="small-cache"):
         return subprocess.run([sys.executable, str(SCRIPT), "--config",

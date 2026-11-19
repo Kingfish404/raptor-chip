@@ -104,7 +104,7 @@ _nb_args = $(call _nb_fixed,FPGA_BOARD,$(_nb_board)) $(call _nb_fixed,FPGA_AUTO_
  $(call _nb_fixed,BOOT_MODE,bios) $(call _nb_fixed,EXTRA_FLAGS,) $(call _nb_fixed,LINUX_FPGA_INIT,full) \
  $(call _nb_quote,CROSS=$(CROSS)) \
  $(call _nb_quote,$(call _nb_fixed,RAPT_PACK_VFLAGS,$(if $(filter 64,$(_nb_xlen)),$(_nb_rv64_pack_flags),))) \
- $(call _nb_fixed,LINUX_ISA,rv$(_nb_xlen)imafdc_zicbom_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs) \
+ $(call _nb_fixed,LINUX_ISA_BASELINE,rv$(_nb_xlen)imafdc_zicbom_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs) \
  $(call _nb_quote,LINUX_IMG=$(_nb_payload)) $(call _nb_quote,LINUX_FPGA_PAYLOAD=$(_nb_payload)) \
  $(call _nb_fixed,LINUX_FPGA_DTB_OFFSET,0x4000000) $(call _nb_fixed,LINUX_FPGA_DTB_ADDR,0x83f00000) \
  $(call _nb_quote,BUILD_DIR=$(_nb_dir)/build) $(call _nb_quote,FPGA_DIR=$(_nb_dir)/soc) \

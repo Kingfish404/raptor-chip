@@ -64,6 +64,13 @@ NPC/NEMU build. `VECTOR_NPC` and `VECTOR_REFERENCE` select isolated binaries.
 Whole-core device/fault checks, independent numerical comparison, ASIC STA,
 routed FPGA timing and physical board execution are distinct validation layers.
 
+The RV64 user profile enables Zvbb, Zvfhmin and Zvkt. Zvkt uses fixed
+multiplication latency and reads both vector sources of a merge independently of
+the selector bits. Zicclsm support splits misaligned elements through the existing
+MMU and L1D owner and checks every byte before a split store. Run
+`make -C verification/subsystem rva23u64-smoke` for these paths through the
+integrated core, including user-mode vector memory.
+
 ## Available modules
 
 | Module | Implemented behavior | Verification |

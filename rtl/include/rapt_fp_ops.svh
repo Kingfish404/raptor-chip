@@ -2,6 +2,8 @@
 `define RAPT_FP_OPS_SVH
 
 // Serializing scalar-FP bring-up operation identifiers.
+// Tag zero with valid set carries Zfa's FLI and FROUND family.
+`define RAPT_FP_OP_ZFA_SIMPLE 6'd0
 `define RAPT_FP_OP_FMV_W_X 6'd1
 `define RAPT_FP_OP_FMV_X_W 6'd2
 `define RAPT_FP_OP_FSGNJ_S 6'd3

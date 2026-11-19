@@ -357,7 +357,11 @@ static inline word_t csrw_warl(uint16_t c, word_t v)
   }
   if (c == CSR_SENVCFG)
   {
-    word_t result = (v & (word_t)0xf0) | (word_t)riscv_envcfg_pmm(v, NEMU_ISA_EXT_SSNPM);
+    word_t pmm_source = v;
+#ifdef CONFIG_RV64
+    if (((v >> 32) & 3) == 1) pmm_source = CSR(CSR_SENVCFG);
+#endif
+    word_t result = (v & (word_t)0xf0) | (word_t)riscv_envcfg_pmm(pmm_source, NEMU_ISA_EXT_SSNPM);
     return (result & (word_t)0x30) == (word_t)0x20
         ? result | (word_t)0x10 : result;
   }
@@ -1567,8 +1571,9 @@ static int decode_exec(Decode *s)
   });
   INSTPAT("0000000 01101 00000 000 00000 11100 11", wrs.nto, N, {
     csr_t reg = {.val = CSR(CSR_MSTATUS)};
+    bool waiting = cpu.reservation_bytes && !riscv_mip_value();
     if (!(riscv_isa_extensions & NEMU_ISA_EXT_ZAWRS) ||
-        (cpu.priv != PRV_M && reg.mstatus.tw))
+        (cpu.priv != PRV_M && reg.mstatus.tw && (waiting || cpu.virt)))
       s->dnpc = isa_raise_intr(MCA_ILLEGAL_INS, s->pc);
     else if (cpu.virt && riscv_h_gstage_preview_enabled() &&
              (CSR(CSR_HSTATUS) & CSR_HSTATUS_VTW))

@@ -63,7 +63,7 @@ def main():
     query.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
     query.restype = ctypes.POINTER(ISAAPI)
     api = query(1, ctypes.sizeof(ISAAPI)).contents
-    if api.supported & 0x7ff != 0x7ff or api.configure(api.supported):
+    if api.supported & 0xfff != 0xfff or api.configure(api.supported):
         raise RuntimeError('cannot enable RVA23')
     reference = Reference(args.reference, 64)
     reference.reset()

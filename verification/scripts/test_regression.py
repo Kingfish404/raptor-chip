@@ -21,6 +21,18 @@ HIT GOOD TRAP
 
 
 class RegressionTest(unittest.TestCase):
+    def setUp(self):
+        checkout = tempfile.TemporaryDirectory(prefix='rapt-regression-test-')
+        self.addCleanup(checkout.cleanup)
+        root = Path(checkout.name)
+        subprocess.run(['git', 'init', '-q', root], check=True)
+        subprocess.run(['git', '-C', root, '-c', 'user.name=Regression Test',
+                        '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false',
+                        'commit', '-q', '--allow-empty', '-m', 'Fixture'], check=True)
+        patcher = patch.object(r, 'ROOT', root)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_validation(self):
         self.assertEqual(r.validate('coremark', GOOD), '')
         short = GOOD.replace('Correct operation validated',
@@ -44,20 +56,30 @@ class RegressionTest(unittest.TestCase):
             self.assertFalse(output.exists())
             plan = json.loads(stream.getvalue())
             self.assertEqual([s['name'] for s in plan['format_barrier']], ['format'])
-            self.assertEqual(len(plan['parallel_lanes']['coremark']), 4)
-            sta = plan['parallel_lanes']['sta']
-            self.assertNotEqual(sta[0]['command'], sta[1]['command'])
-            self.assertIn('RAPT_CONFIG=small', sta[0]['command'])
-            self.assertIn('STA_REPORT_ONLY=1', sta[0]['command'])
-            self.assertIn(f'STA_WORK_DIR={output}/sta-rv64', sta[1]['command'])
+            steps = {s['name']: s for s in plan['steps']}
+            for xlen in (32, 64):
+                sta = steps[f'sta-rv{xlen}']
+                self.assertIn('RAPT_CONFIG=small', sta['command'])
+                self.assertIn('STA_REPORT_ONLY=1', sta['command'])
+                self.assertIn(f'STA_WORK_DIR={output}/sta-rv{xlen}', sta['command'])
+                self.assertEqual(sta['requires'], ['rtl-decoders', 'sta-prepare'])
+                native = steps[f'coremark-nemu{xlen}']
+                self.assertIn(f'O={output}/nemu/rv{xlen}', native['command'])
+                self.assertEqual(native['requires'], ['coremark-prepare'])
+            self.assertEqual(steps['fpga-timing-ok']['requires'], ['fpga-build'])
 
-    def test_lane_failure_dependencies(self):
+    def test_failed_prerequisite_skips_only_dependents(self):
         def runner(step, *_):
-            return {'status': 'FAIL', 'name': step.name}
-        steps = [r.Step('fpga-build', []), r.Step('fpga-timing-ok', [])]
-        self.assertEqual(r.run_lane(steps, None, 1, runner)[1]['status'], 'SKIP')
-        steps = [r.Step('sta-rv32', []), r.Step('sta-rv64', [])]
-        self.assertEqual(len(r.run_lane(steps, None, 1, runner)), 2)
+            status = 'FAIL' if step.name in ('fpga-build', 'sta-prepare') else 'PASS'
+            return {'name': step.name, 'status': status}
+
+        steps = [r.Step('fpga-build', []), r.Step('fpga-timing-ok', [], requires=('fpga-build',)),
+                 r.Step('sta-prepare', []), r.Step('sta-rv32', [], requires=('sta-prepare',)),
+                 r.Step('sta-rv64', [], requires=('sta-prepare',)), r.Step('coremark-rv32', [])]
+        results = r.run_steps(steps, None, 1, 3, runner)
+        self.assertEqual([s['status'] for s in results], ['FAIL', 'SKIP', 'FAIL', 'SKIP', 'SKIP', 'PASS'])
+        self.assertIn('fpga-build', results[1]['reason'])
+        self.assertIn('sta-prepare', results[4]['reason'])
 
     def test_subprocess_failure_and_timeout(self):
         with tempfile.TemporaryDirectory(dir='/tmp') as tmp:
@@ -90,37 +112,50 @@ class RegressionTest(unittest.TestCase):
             fake.chmod(0o755)
             self.assertEqual(r.main(['--make', str(fake), '--output', str(work)]), 0)
             summary = json.loads((work / 'summary.json').read_text())
-            self.assertEqual(len(summary['results']), 9)
+            self.assertEqual(len(summary['results']), 12)
             self.assertTrue(all(x['status'] == 'PASS' for x in summary['results']))
 
-    def test_lanes_overlap_only_after_format(self):
-        barrier = threading.Barrier(2, timeout=3)
-        finished = []
-        first = {'coremark-nemu32', 'fpga-build'}
+    def test_ready_checks_overlap_after_their_prerequisites(self):
+        simultaneous = {'fpga-build', 'sta-rv32', 'sta-rv64', 'coremark-nemu32',
+                        'coremark-nemu64', 'coremark-rv32', 'coremark-rv64'}
+        barrier = threading.Barrier(len(simultaneous), timeout=5)
+        finished = set()
         state_lock = threading.Lock()
-        active_eda = [None]
 
         def runner(step, *_):
-            if step.name in first:
-                self.assertEqual(finished[:1], ['format'])
-                barrier.wait()  # CoreMark overlaps one EDA lane.
-            lane = ('fpga' if step.name.startswith('fpga-')
-                    else 'sta' if step.check == 'sta' else None)
-            if lane:
-                with state_lock:
-                    self.assertIn(active_eda[0], (None, lane))
-                    active_eda[0] = lane
-            finished.append(step.name)
-            if step.name in ('sta-rv64', 'fpga-timing-ok'):
-                with state_lock:
-                    active_eda[0] = None
+            with state_lock:
+                if step.name != 'format':
+                    self.assertIn('format', finished)
+                self.assertLessEqual(set(step.requires), finished)
+            if step.name in simultaneous:
+                barrier.wait()
+            with state_lock:
+                finished.add(step.name)
             return dict(r.asdict(step), status='PASS', exit_code=0, seconds=0,
                         reason='', log=None)
 
         with tempfile.TemporaryDirectory(dir='/tmp') as tmp, patch.object(r, 'run_step', runner):
-            self.assertEqual(r.main(['--output', str(Path(tmp) / 'run')]), 0)
-        self.assertLess(finished.index('coremark-rv32'), finished.index('coremark-nemu64'))
-        self.assertLess(finished.index('fpga-build'), finished.index('fpga-timing-ok'))
+            self.assertEqual(r.main(['--jobs', str(len(simultaneous)),
+                                     '--output', str(Path(tmp) / 'run')]), 0)
+        self.assertLessEqual(simultaneous | {'fpga-timing-ok'}, finished)
+
+    def test_job_limit(self):
+        barrier = threading.Barrier(2, timeout=3)
+        lock = threading.Lock()
+        active = set()
+
+        def runner(step, *_):
+            with lock:
+                active.add(step.name)
+                self.assertLessEqual(len(active), 2)
+            if step.name != 'third':
+                barrier.wait()
+            with lock:
+                active.remove(step.name)
+            return {'name': step.name, 'status': 'PASS'}
+
+        steps = [r.Step(name, []) for name in ('first', 'second', 'third')]
+        self.assertEqual([x['status'] for x in r.run_steps(steps, None, 1, 2, runner)], ['PASS'] * 3)
 
 
 

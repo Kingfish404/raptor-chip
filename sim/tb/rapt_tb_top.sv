@@ -605,6 +605,8 @@ module tb_vector_axi;
   logic [15:0] device_read_mask, device_write_mask, device_read_error_mask;
   logic [15:0] device_write_error_mask;
   int unsigned device_repeat;
+  logic external_write_valid;
+  logic [XLEN-1:0] external_write_addr;
   always #5 clock = ~clock;
 
   rapt dut (
@@ -613,10 +615,10 @@ module tb_vector_axi;
       .reset(reset),
       .writeback_error_o(writeback_error),
       .core_reset_o(core_reset_unused),
-      .external_write_valid_i(1'b0),
+      .external_write_valid_i(external_write_valid),
       .external_write_pending_i(1'b0),
-      .external_write_first_i('0),
-      .external_write_last_i('0),
+      .external_write_first_i(external_write_addr),
+      .external_write_last_i(external_write_addr),
       .io_master_arcache(axi.arcache),
       .io_master_arburst(axi.arburst),
       .io_master_arsize(axi.arsize),
@@ -696,6 +698,27 @@ module tb_vector_axi;
   );
 
   logic vector_irq, vector_irq_injected;
+`ifdef RAPT_ZAWRS
+  int unsigned wrs_elapsed;
+  always_ff @(posedge clock) begin
+    external_write_valid <= 1'b0;
+    if (reset) begin
+      wrs_elapsed <= 0;
+      external_write_addr <= '0;
+    end else if ($test$plusargs(
+            "RVA23_WRS"
+        ) && dut.core.backend.ieu.wrs_active && wrs_elapsed < 384) begin
+      wrs_elapsed <= wrs_elapsed + 1;
+      if (wrs_elapsed == 63 || wrs_elapsed == 383) begin
+        external_write_valid <= 1'b1;
+        external_write_addr <= XLEN'(wrs_elapsed == 63 ? 32'h81000020 : 32'h81000004);
+      end
+    end
+  end
+`else
+  assign external_write_valid = 1'b0;
+  assign external_write_addr = '0;
+`endif
   always_ff @(posedge clock) begin
     if (reset) begin
       vector_irq <= 1'b0;
@@ -839,6 +862,12 @@ module tb_vector_axi;
             $display("PASS side-effect device read=%h write=%h read_errors=%h write_errors=%h",
                      device_read_mask, device_write_mask, device_read_error_mask,
                      device_write_error_mask);
+          end
+`endif
+`ifdef RAPT_ZAWRS
+          if ($test$plusargs("RVA23_WRS")) begin
+            if (wrs_elapsed != 384) $fatal(1, "WRS external write did not exercise the wait");
+            $display("PASS WRS reservation invalidation after %0d cycles", wrs_elapsed);
           end
 `endif
           $display("PASS RV%0d AXI RVV program issued=%0d completed=%0d cycles=%0d", XLEN, issued,

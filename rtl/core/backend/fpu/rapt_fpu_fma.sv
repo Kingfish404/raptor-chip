@@ -319,6 +319,12 @@ module rapt_fpu_fma_pipeline #(
   logic [63:0] stage4_result_c;
   logic [4:0] stage4_flags_c;
 
+  typedef struct packed {
+    logic [MantBits-1:0] mantissa;
+    logic signed [13:0]  exponent;
+  } subnormal_norm_t;
+  subnormal_norm_t subnormal_a_c, subnormal_b_c, subnormal_c_c;
+
   /* Normalize a subnormal fraction to an internal (mantissa, exponent) pair
    * with the leading one at bit MantBits-1.  Internal convention:
    *     value = mantissa * 2^(exponent - FracBits)
@@ -328,9 +334,8 @@ module rapt_fpu_fma_pipeline #(
    * The previous code returned E = index - (FracBits-1), dropping the MinExp
    * base and corrupting every subnormal operand (e.g. double min-subnormal
    * 2^-1074 was interpreted as ~2^-51). */
-  function automatic logic [MantBits-1:0] normalize_subnormal(
-      input logic [FracBits-1:0] fraction, input logic signed [13:0] min_exponent,
-      output logic signed [13:0] exponent_adjust);
+  function automatic subnormal_norm_t normalize_subnormal(
+      input logic [FracBits-1:0] fraction, input logic signed [13:0] min_exponent);
     logic [MantBits-1:0] normalized;
     logic [$clog2(MantBits)-1:0] shift_count;
     begin
@@ -342,8 +347,9 @@ module rapt_fpu_fma_pipeline #(
           shift_count[stage] = 1'b1;
         end
       end
-      exponent_adjust = fraction == '0 ? min_exponent : min_exponent - $signed(14'(shift_count));
-      normalize_subnormal = normalized;
+      normalize_subnormal.mantissa = normalized;
+      normalize_subnormal.exponent = fraction == '0
+          ? min_exponent : min_exponent - $signed(14'(shift_count));
     end
   endfunction
 
@@ -388,19 +394,19 @@ module rapt_fpu_fma_pipeline #(
     a_zero_c = exp_a_c == '0 && frac_a_c == '0;
     b_zero_c = exp_b_c == '0 && frac_b_c == '0;
     c_zero_c = exp_c_c == '0 && frac_c_c == '0;
-    exponent_a_c = exp_a_c == 0 ? input_min_exp_c : $signed({3'b0, exp_a_c}) - input_bias_c;
-    exponent_b_c = exp_b_c == 0 ? input_min_exp_c : $signed({3'b0, exp_b_c}) - input_bias_c;
-    exponent_c_c = exp_c_c == 0 ? input_min_exp_c : $signed({3'b0, exp_c_c}) - input_bias_c;
+    subnormal_a_c = normalize_subnormal(frac_a_c, input_min_exp_c);
+    subnormal_b_c = normalize_subnormal(frac_b_c, input_min_exp_c);
+    subnormal_c_c = normalize_subnormal(frac_c_c, input_min_exp_c);
+    exponent_a_c = exp_a_c == '0
+        ? subnormal_a_c.exponent : $signed({3'b0, exp_a_c}) - input_bias_c;
+    exponent_b_c = exp_b_c == '0
+        ? subnormal_b_c.exponent : $signed({3'b0, exp_b_c}) - input_bias_c;
+    exponent_c_c = exp_c_c == '0
+        ? subnormal_c_c.exponent : $signed({3'b0, exp_c_c}) - input_bias_c;
 
-    mant_a_c = exp_a_c == 0 ? normalize_subnormal(frac_a_c, input_min_exp_c, exponent_a_c)
-                             : {1'b1, frac_a_c};
-    mant_b_c = exp_b_c == 0 ? normalize_subnormal(frac_b_c, input_min_exp_c, exponent_b_c)
-                             : {1'b1, frac_b_c};
-    mant_c_c = exp_c_c == 0 ? normalize_subnormal(frac_c_c, input_min_exp_c, exponent_c_c)
-                             : {1'b1, frac_c_c};
-    if (a_zero_c) mant_a_c = '0;
-    if (b_zero_c) mant_b_c = '0;
-    if (c_zero_c) mant_c_c = '0;
+    mant_a_c = a_zero_c ? '0 : exp_a_c == '0 ? subnormal_a_c.mantissa : {1'b1, frac_a_c};
+    mant_b_c = b_zero_c ? '0 : exp_b_c == '0 ? subnormal_b_c.mantissa : {1'b1, frac_b_c};
+    mant_c_c = c_zero_c ? '0 : exp_c_c == '0 ? subnormal_c_c.mantissa : {1'b1, frac_c_c};
     special_result_c = format_double_c ? 64'h7ff8_0000_0000_0000
       : {32'hffff_ffff, 32'h7fc0_0000};
     special_flags_c = {a_snan_c || b_snan_c || c_snan_c, 4'b0};

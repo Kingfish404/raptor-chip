@@ -26,6 +26,7 @@ module tb (
   end
   rapt_fpu_compare c (
       .op(cop),
+      .zfa_semantics(1'b0),
       .operand_a(a),
       .operand_b(b),
       .result(cmp),

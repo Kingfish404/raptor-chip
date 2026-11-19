@@ -45,6 +45,10 @@ module rapt_ieu #(
     output IssueT vector_issue,
 `endif
     input logic integer_system_issue_enable,
+`ifdef RAPT_ZAWRS
+    input logic reservation_valid,
+    input logic wrs_debug_wakeup,
+`endif
     exu_csr_if.master exu_csr,
     output CompletionT wb_integer_raw[NumIntegerPorts],
     output CompletionT wb_branch,
@@ -84,6 +88,9 @@ module rapt_ieu #(
   end
   IssueT brq_issue[1];
   logic [NumIntegerPorts-1:0] integer_issue_enable;
+`ifdef RAPT_ZAWRS
+  logic wrs_active;
+`endif
   localparam int unsigned IssueCountBits = $clog2(NumIntegerPorts + 1);
   logic [IssueCountBits-1:0] pmu_alq_extra_port_count /* verilator public_flat_rd */;
   logic [IssueCountBits-1:0] pmu_alq_extra_port_count_next;
@@ -99,6 +106,9 @@ module rapt_ieu #(
     integer_issue_enable[IntegerSystemPort] = integer_system_issue_enable && vector_issue_ready;
 `else
     integer_issue_enable[IntegerSystemPort] = integer_system_issue_enable;
+`endif
+`ifdef RAPT_ZAWRS
+    integer_issue_enable[IntegerSystemPort] &= !wrs_active;
 `endif
     pmu_alq_extra_port_count_next = '0;
     for (int p = 2; p < NumIntegerPorts; p++)
@@ -245,13 +255,51 @@ module rapt_ieu #(
   for (genvar p = 0; p < NumIntegerPorts; p++) begin : g_integer_port
     if (p == IntegerSystemPort) begin : g_system
       system_result_t result;
-`ifdef RAPT_V_EXTENSION
       IssueT scalar_issue;
-      always_comb begin
-        scalar_issue = alq_execute[p];
-        scalar_issue.valid &= !scalar_issue.uop.execute.vector;
+`ifdef RAPT_ZAWRS
+      // A WRS reaches here with the ROB serialized. Keep the completion owner
+      // live while the cache and interrupt logic continue to service wakeups.
+      localparam int WrsWaitCycles = 1024;
+      IssueT wrs_issue_q;
+      logic wrs_start, wrs_wakeup, wrs_timeout, wrs_stop, wrs_cancel;
+      logic wrs_short_q, wrs_tw_q;
+      logic [$clog2(WrsWaitCycles)-1:0] wrs_count;
+      assign wrs_wakeup = !reservation_valid || csr_bcast.wrs_irq_pending || wrs_debug_wakeup;
+      assign wrs_start = alq_execute[p].valid && !alq_execute[p].uop.trap
+          && alq_execute[p].uop.execute.sys.kind == rapt_pkg::SYS_WRS && !wrs_wakeup;
+      assign wrs_timeout = (wrs_short_q || wrs_tw_q) && (&wrs_count);
+      assign wrs_stop = wrs_wakeup || wrs_timeout;
+      assign wrs_cancel = cmu_bcast.flush_pipe
+          || (cancel_valid && `RAPT_ROB_YOUNGER(wrs_issue_q.dest, cancel_owner, cancel_head));
+      always_ff @(posedge clock) begin
+        if (reset || wrs_cancel) wrs_active <= 1'b0;
+        else if (wrs_active && wrs_stop) wrs_active <= 1'b0;
+        else if (wrs_start) wrs_active <= 1'b1;
+        if (wrs_start) begin
+          wrs_issue_q <= alq_execute[p];
+          wrs_short_q <= alq_execute[p].uop.imm[24];
+          wrs_tw_q <= !alq_execute[p].uop.imm[24]
+              && csr_bcast.priv != `RAPT_PRIV_M && csr_bcast.tw;
+          wrs_count <= '0;
+        end else if (wrs_active && !wrs_stop && (wrs_short_q || wrs_tw_q)) begin
+          wrs_count <= wrs_count + 1'b1;
+        end
       end
 `endif
+      always_comb begin
+        scalar_issue = alq_execute[p];
+`ifdef RAPT_ZAWRS
+        if (wrs_active) begin
+          scalar_issue = wrs_issue_q;
+          scalar_issue.valid = wrs_stop && !wrs_cancel && !reset;
+          scalar_issue.uop.trap = wrs_timeout && wrs_tw_q && !wrs_wakeup;
+          scalar_issue.uop.cause = scalar_issue.uop.trap ? `RAPT_CAUSE_ILLEGAL_INST : '0;
+        end else if (wrs_start) scalar_issue.valid = 1'b0;
+`endif
+`ifdef RAPT_V_EXTENSION
+        scalar_issue.valid &= !scalar_issue.uop.execute.vector;
+`endif
+      end
       always_comb begin
         wb_integer_raw[p] = '0;
         `RAPT_SYSTEM_COMPLETION_COPY(wb_integer_raw[p], result)
@@ -262,11 +310,7 @@ module rapt_ieu #(
           .XLEN    (XLEN)
       ) u_pipe_alu_csr (
           .cmu_bcast (cmu_bcast),
-`ifdef RAPT_V_EXTENSION
           .iss       (scalar_issue),
-`else
-          .iss       (alq_execute[p]),
-`endif
           .csr_read_addr(csr_read_addr_q),
           .csr_bcast (csr_bcast),
           .exu_csr   (exu_csr),

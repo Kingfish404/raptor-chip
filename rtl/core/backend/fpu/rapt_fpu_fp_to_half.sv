@@ -123,7 +123,7 @@ module rapt_fpu_fp_to_half (
       3'b100: round_up = guard_bit;                               // RMM
       default: round_up = 1'b0;
     endcase
-    rounded = {1'b0, retained} + round_up;
+    rounded = {1'b0, retained} + 12'(round_up);
     rounded_exp = unbiased + $signed({11'b0, rounded[11]});
     overflow_to_inf = rounding_mode == 3'b000 || rounding_mode == 3'b100
         || (rounding_mode == 3'b010 && sign)

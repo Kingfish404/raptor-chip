@@ -49,10 +49,12 @@ static void require(int passed, const char *name)
   for (;;) {}
 }
 
+#ifndef RVA23_USER_ONLY
 static long control(long descriptor, unsigned long operation, unsigned long argument)
 {
   return system_call(__NR_ioctl, descriptor, operation, argument, 0, 0, 0);
 }
+#endif
 
 static void vector_probe(void)
 {
@@ -70,24 +72,61 @@ static void vector_probe(void)
     unsigned expected = index >= 1 && index <= 13 && index % 4 == 1 ? index / 4 + 6 : 0;
     require(output[index] == expected, "unaligned-vector-result");
   }
+  unsigned long count, widened;
+  __asm__ volatile("vsetivli zero, 1, e16, m1, tu, mu\n"
+                   "vmv.v.i v16, -1\n"
+                   ".word 0x4b072457\n"  // vcpop.v v8, v16
+                   "vmv.x.s %0, v8\n"
+                   "vmv.v.x v8, %2\n"
+                   ".word 0x4a861c57\n"  // vfwcvt.f.f.v v24, v8
+                   "vsetivli zero, 1, e32, m1, tu, mu\n"
+                   "vmv.x.s %1, v24"
+                   : "=&r"(count), "=r"(widened) : "r"(0x3c00UL) : "v8", "v16", "v24", "v25");
+  require(count == 16 && widened == 0x3f800000, "vector-profile-instructions");
   message("RVA23_VECTOR_PASS\n");
 }
 
 static void pointer_probe(void)
 {
-  unsigned long setting = PR_TAGGED_ADDR_ENABLE | (7UL << PR_PMLEN_SHIFT);
-  require(system_call(__NR_prctl, PR_SET_TAGGED_ADDR_CTRL, setting, 0, 0, 0, 0) == 0,
-          "pointer-mask-enable");
-  require(system_call(__NR_prctl, PR_GET_TAGGED_ADDR_CTRL, 0, 0, 0, 0, 0) == (long)setting,
-          "pointer-mask-query");
-  volatile unsigned long value = 0x12345678;
-  volatile unsigned long *tagged = (void *)((unsigned long)&value | (0x5aUL << 57));
-  require(*tagged == value, "tagged-load");
-  *tagged = 0x87654321;
-  require(value == 0x87654321, "tagged-store");
+  for (unsigned mask_bits = 7; mask_bits <= 16; mask_bits += 9)
+  {
+    unsigned long setting = PR_TAGGED_ADDR_ENABLE | ((unsigned long)mask_bits << PR_PMLEN_SHIFT);
+    require(system_call(__NR_prctl, PR_SET_TAGGED_ADDR_CTRL, setting, 0, 0, 0, 0) == 0,
+            "pointer-mask-enable");
+    require(system_call(__NR_prctl, PR_GET_TAGGED_ADDR_CTRL, 0, 0, 0, 0, 0) == (long)setting,
+            "pointer-mask-query");
+    volatile unsigned long value = 0x12345678;
+    unsigned long tag = mask_bits == 7 ? (0x5aUL << 57) : (0x1234UL << 48);
+    volatile unsigned long *tagged = (void *)((unsigned long)&value | tag);
+    require(*tagged == value, "tagged-load");
+    *tagged = 0x87654321;
+    require(value == 0x87654321, "tagged-store");
+    unsigned long loaded;
+    __asm__ volatile("vsetivli zero, 1, e64, m1, ta, ma\n"
+                     "vle64.v v8, (%1)\n"
+                     "vmv.x.s %0, v8"
+                     : "=r"(loaded) : "r"(tagged) : "v8", "memory");
+    require(loaded == value, "tagged-vector-load");
+  }
   require(system_call(__NR_prctl, PR_SET_TAGGED_ADDR_CTRL, 0, 0, 0, 0, 0) == 0,
           "pointer-mask-disable");
+  require(system_call(__NR_prctl, PR_GET_TAGGED_ADDR_CTRL, 0, 0, 0, 0, 0) == 0,
+          "pointer-mask-disabled");
   message("RVA23_POINTER_MASK_PASS\n");
+}
+
+static void scalar_probe(void)
+{
+  unsigned long rounded, loaded;
+  const unsigned long value = 0x1020304050607080UL;
+  __asm__ volatile(".word 0xf0190053\n"  // fli.s ft0, 1.5
+                   ".word 0x40400053\n"  // fround.s ft0, ft0, rne
+                   "fmv.x.w %0, ft0\n"
+                   "lr.d %1, (%2)\n"
+                   ".word 0x01d00073"   // wrs.sto
+                   : "=&r"(rounded), "=r"(loaded) : "r"(&value) : "ft0", "memory");
+  require(rounded == 0x40000000 && loaded == value, "scalar-profile-instructions");
+  message("RVA23_SCALAR_PASS\n");
 }
 
 static void cache_probe(void)
@@ -103,6 +142,7 @@ static void cache_probe(void)
   message("RVA23_CACHE_BLOCK_PASS\n");
 }
 
+#ifndef RVA23_USER_ONLY
 static void kvm_probe(void)
 {
   long device = system_call(__NR_openat, AT_FDCWD, (unsigned long)"/dev/kvm", O_RDWR, 0, 0, 0);
@@ -147,6 +187,7 @@ static void kvm_probe(void)
           run->mmio.data[2] == 0 && run->mmio.data[3] == 0, "kvm-mmio-data");
   message("RVA23_KVM_PASS\n");
 }
+#endif
 
 #if RVA23_TEST_HARTS > 1
 static void context_probe(unsigned worker, unsigned *ready)
@@ -230,9 +271,11 @@ static void smp_probe(void)
 int main(void)
 {
   long process_id = system_call(__NR_getpid, 0, 0, 0, 0, 0, 0);
+#ifndef RVA23_USER_ONLY
   if (process_id == 1)
     require(system_call(__NR_mount, (unsigned long)"devtmpfs", (unsigned long)"/dev",
                         (unsigned long)"devtmpfs", 0, 0, 0) == 0, "mount-devtmpfs");
+#endif
   struct riscv_hwprobe extension = {.key = RISCV_HWPROBE_KEY_IMA_EXT_0};
   require(system_call(__NR_riscv_hwprobe, (unsigned long)&extension, 1, 0, 0, 0, 0) == 0,
           "hwprobe");
@@ -243,9 +286,12 @@ int main(void)
       (UINT64_C(1) << 31);
   require((extension.value & required) == required, "hwprobe-extensions");
   vector_probe();
+  scalar_probe();
   cache_probe();
   pointer_probe();
+#ifndef RVA23_USER_ONLY
   kvm_probe();
+#endif
 #if RVA23_TEST_HARTS > 1
   smp_probe();
 #endif

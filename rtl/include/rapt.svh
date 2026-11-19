@@ -2,6 +2,43 @@
 `define RAPT_SVH
 `include "rapt_config.svh"
 
+// RV64 application presets with V and F/D implement the RVA23 user profile.
+// The scalar and baseline V builds remain selectable for existing platforms.
+`ifdef RAPT_RV64
+`ifdef RAPT_V_EXTENSION
+`ifndef RAPT_NO_VPU
+`ifndef RAPT_NO_FPU
+`ifndef RAPT_NO_RVA23U64
+`define RAPT_RVA23U64
+`endif
+`endif
+`endif
+`endif
+`endif
+`ifdef RAPT_RVA23U64
+`ifndef RAPT_ZFA
+`define RAPT_ZFA
+`endif
+`ifndef RAPT_ZAWRS
+`define RAPT_ZAWRS
+`endif
+`ifndef RAPT_SSNPM
+`define RAPT_SSNPM
+`endif
+`ifndef RAPT_ZVBB
+`define RAPT_ZVBB
+`endif
+`ifndef RAPT_ZVFHMIN
+`define RAPT_ZVFHMIN
+`endif
+`ifndef RAPT_ZVKT
+`define RAPT_ZVKT
+`endif
+`ifndef RAPT_ZICCLSM_VECTOR
+`define RAPT_ZICCLSM_VECTOR
+`endif
+`endif
+
 // Vector register geometry is independent of the scalar register width.
 // Full V requires ELEN=64 and VLEN>=128; reduced Zve configurations are not
 // advertised by the integrated core.

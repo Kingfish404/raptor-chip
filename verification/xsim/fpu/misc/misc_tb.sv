@@ -11,6 +11,7 @@ module misc_tb;
 
   rapt_fpu_compare compare_i (
       .*,
+      .zfa_semantics(1'b0),
       .result(compare_result),
       .flags(compare_flags)
   );

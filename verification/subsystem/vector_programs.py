@@ -5,6 +5,7 @@ import argparse
 import json
 from pathlib import Path
 import re
+import sys
 
 
 SOURCES = {
@@ -1617,9 +1618,661 @@ def catalog(output):
     return "\n".join(lines) + "\n"
 
 
+def vector_profile(output, xlen):
+    """Check the RVA23 vector additions through architectural retirement."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "nemu"))
+    from isa.zvbb import OPERATIONS, expected_value, instruction
+
+    source_a = bytes(8) + bytes((37 * i + 0x81) & 255 for i in range(24))
+    source_b = bytes((29 * i + 0x35) & 255 for i in range(32))
+    seed = bytes((11 * i + 0xa5) & 255 for i in range(64))
+    predicate = bytes([0x55, 0x05] + [0] * 14)
+    scalar = 0x88776655f102030b & ((1 << xlen) - 1)
+    signed_scalar = scalar - (1 << xlen) if scalar >> (xlen - 1) else scalar
+    lines = [".option norvc", ".section .text", ".global _start", "_start:",
+             "    la t0, trap_handler", "    csrw mtvec, t0", "    li t0, 0x2200",
+             "    csrs mstatus, t0", "    li s2, 1", "    li s3, 0",
+             "    la s0, destination_seed", "    la s1, observed",
+             "    la t1, source_a", "    vl2re8.v v8, (t1)",
+             "    la t1, source_b", "    vl2re8.v v16, (t1)",
+             "    la t1, predicate", "    vl1re8.v v0, (t1)"]
+    tables = {"source_a": source_a, "source_b": source_b,
+              "destination_seed": seed, "predicate": predicate}
+    cases = []
+    for sew in range(4):
+        width = 1 << sew
+        for lmul in (-1, 0, 1):
+            vl = min(11, (16 << max(lmul, 0)) >> max(-lmul, 0) >> sew)
+            if sew == 3 and lmul < 0:
+                continue
+            vtype = (sew << 3) | (lmul & 7)  # tu, mu
+            for name, funct6, form, src1 in OPERATIONS:
+                widening = name.startswith("vwsll")
+                if widening and sew == 3:
+                    continue
+                groups = 1 << max(0, lmul + int(widening))
+                length = 16 * groups
+                result_width = width * (2 if widening else 1)
+                for masked, start in ((False, 0), (True, 0), (False, 1)):
+                    index = len(cases)
+                    label = f"expected_{index}"
+                    expected = bytearray(seed[:length])
+                    for element in range(start, vl):
+                        if masked and not predicate[element // 8] >> (element % 8) & 1:
+                            continue
+                        offset = element * width
+                        value = int.from_bytes(source_a[offset:offset + width], "little")
+                        operand = signed_scalar
+                        if form == 0:
+                            operand = int.from_bytes(source_b[offset:offset + width], "little")
+                        if form == 3:
+                            operand = src1 | (32 if name == "vror.vi-high" else 0)
+                        bits = expected_value(name, value, operand, 8 * width)
+                        dest = element * result_width
+                        expected[dest:dest + result_width] = bits.to_bytes(result_width, "little")
+                    tables[label] = expected
+                    encoded = instruction(funct6, int(not masked), 8, src1, form, 24)
+                    cases.append(dict(name=name, sew=8 * width, lmul=lmul, vl=vl,
+                                      masked=masked, vstart=start, insn=f"{encoded:08x}"))
+                    lines += [f"    li s2, {index + 1}", f"    vl{groups}re8.v v24, (s0)",
+                              f"    li t0, {vl}", f"    li t1, {vtype}", "    vsetvl t0, t0, t1",
+                              f"    li t1, {vl}", "    bne t0, t1, fail",
+                              f"    csrwi vstart, {start}", f"    li t0, {scalar:#x}",
+                              f"    .word {encoded:#010x}", "    csrr t0, vstart",
+                              "    bnez t0, fail", f"    vs{groups}r.v v24, (s1)",
+                              f"    la a1, {label}", f"    li a2, {length}", "    jal check_bytes"]
+
+    wide = instruction(0x12, 1, 8, 12, 1, 24)
+    narrow = instruction(0x12, 1, 8, 20, 1, 24)
+    tables["half_source"] = b"".join(value.to_bytes(2, "little") for value in
+                                    (0, 0x8000, 1, 0x03ff, 0x7bff, 0x7c00, 0x7e55, 0x7c01))
+    tables["single_source"] = b"".join(value.to_bytes(4, "little") for value in
+                                      (0x3f801000, 0xbf801000, 0x33000000, 0x33800000,
+                                       0x47800000, 0xc7800000, 0x7fc12345, 0xff812345))
+    widened = (0, 0x80000000, 0x33800000, 0x387fc000, 0x477fe000,
+               0x7f800000, 0x7fc00000, 0x7fc00000)
+    narrow_results = (
+        (0x3c00, 0xbc00, 0, 1, 0x7c00, 0xfc00, 0x7e00, 0x7e00),  # RNE
+        (0x3c00, 0xbc00, 0, 1, 0x7bff, 0xfbff, 0x7e00, 0x7e00),  # RTZ
+        (0x3c00, 0xbc01, 0, 1, 0x7bff, 0xfc00, 0x7e00, 0x7e00),  # RDN
+        (0x3c01, 0xbc00, 1, 1, 0x7c00, 0xfbff, 0x7e00, 0x7e00),  # RUP
+        (0x3c01, 0xbc01, 1, 1, 0x7c00, 0xfc00, 0x7e00, 0x7e00),  # RMM
+    )
+    paths = [(wide, "half_source", 4, rm, widened, (0, 0, 0, 0, 0, 0, 0, 16))
+             for rm in range(5)]
+    paths += [(narrow, "single_source", 2, rm, result, (1, 1, 3, 0, 5, 5, 0, 16))
+              for rm, result in enumerate(narrow_results)]
+    for encoded, source, width, rm, values, flags in paths:
+        for masked, start, vl in ((False, 0, 8), (True, 0, 8), (False, 3, 7),
+                                  (False, 8, 8), (False, 0, 0)):
+            index = len(cases)
+            label = f"expected_{index}"
+            groups = width // 2
+            length = 16 * groups
+            expected = bytearray(seed[:length])
+            masked_insn = encoded & ~(1 << 25) if masked else encoded
+            fflags = 8  # Check that accrued flags from earlier instructions are preserved.
+            for element in range(start, vl):
+                if masked and not predicate[0] >> element & 1:
+                    continue
+                offset = element * width
+                expected[offset:offset + width] = values[element].to_bytes(width, "little")
+                fflags |= flags[element]
+            tables[label] = expected
+            cases.append(dict(name="vfwcvt.f.f.v" if width == 4 else "vfncvt.f.f.w", sew=16, lmul=0,
+                              vl=vl, masked=masked, vstart=start, frm=rm, fflags=fflags,
+                              insn=f"{masked_insn:08x}"))
+            lines += [f"    li s2, {index + 1}", f"    vl{groups}re8.v v24, (s0)",
+                      f"    la t1, {source}", f"    vl{3 - groups}re8.v v8, (t1)",
+                      f"    vsetivli t0, {vl}, e16, m1, tu, mu", f"    li t1, {vl}",
+                      "    bne t0, t1, fail", f"    csrwi frm, {rm}", "    csrwi fflags, 8",
+                      f"    csrwi vstart, {start}", f"    .word {masked_insn:#010x}",
+                      "    csrr t0, fflags", f"    li t1, {fflags}", "    bne t0, t1, fail",
+                      "    csrr t0, vstart", "    bnez t0, fail", f"    vs{groups}r.v v24, (s1)",
+                      f"    la a1, {label}", f"    li a2, {length}", "    jal check_bytes"]
+
+    illegal = ((0x00, instruction(0x01, 1, 8, 3, 3, 24)),  # vandn.vi
+               (0x00, instruction(0x12, 1, 8, 11, 2, 24)),  # reserved unary
+               (0x18, instruction(0x35, 1, 8, 3, 3, 24)),  # widened EEW > ELEN
+               (0x00, instruction(0x35, 1, 8, 3, 3, 8)),  # low overlap
+               (0x00, instruction(0x12, 0, 8, 8, 2, 0)),  # masked write to v0
+               (0x01, instruction(0x01, 1, 9, 16, 0, 24)),  # unaligned source
+               (0x08, instruction(0x12, 1, 8, 21, 1, 24)),  # half vfncvt.rod
+               (0x08, instruction(0x00, 1, 8, 16, 1, 24)),  # half vfadd
+               (0x08, instruction(0x12, 1, 8, 12, 1, 25)),  # unaligned widened destination
+               (0x00, wide), (0x18, narrow))
+    for index, (vtype, encoded) in enumerate(illegal):
+        label = f"illegal_{index}"
+        lines += [f"    li s2, {len(cases) + index + 1}", "    li t0, 2",
+                  f"    li t1, {vtype}", "    vsetvl zero, t0, t1", f"    la s3, {label}",
+                  label + ":", f"    .word {encoded:#010x}", "    bnez s3, fail"]
+    disabled = (("li t0, 0x6000", "csrc mstatus, t0", "csrs mstatus, t0"),
+                ("li t0, 0x0600", "csrc mstatus, t0", "csrs mstatus, t0"),
+                ("csrwi frm, 5", "nop", "csrwi frm, 0"))
+    for index, (prepare, before, restore) in enumerate(disabled, len(illegal)):
+        label = f"illegal_{index}"
+        lines += [f"    li s2, {len(cases) + index + 1}", "    vsetivli zero, 8, e16, m1, tu, mu",
+                  "    csrwi frm, 0", "    " + prepare, "    " + before, f"    la s3, {label}",
+                  label + ":", f"    .word {wide:#010x}", "    bnez s3, fail", "    " + restore]
+    lines += ["    li a0, VECTOR_SUCCESS_CODE", "    ebreak", "1: j 1b",
+              "check_bytes:", "    mv a3, s1", "2: lbu t0, (a3)", "    lbu t1, (a1)",
+              "    bne t0, t1, fail", "    addi a3, a3, 1", "    addi a1, a1, 1",
+              "    addi a2, a2, -1", "    bnez a2, 2b", "    ret",
+              "trap_handler:", "    beqz s3, fail", "    csrr t0, mcause", "    li t1, 2",
+              "    bne t0, t1, fail", "    csrr t0, mepc", "    bne t0, s3, fail",
+              f"    {'lwu' if xlen == 64 else 'lw'} t1, (t0)", "    csrr t2, mtval",
+              "    bne t1, t2, fail", "    addi t0, t0, 4", "    csrw mepc, t0",
+              "    li s3, 0", "    mret", "fail:", "    addi a0, s2, 16", "    ebreak", "    j fail"]
+    for name, data in tables.items():
+        lines += [".balign 16", name + ":"]
+        for offset in range(0, len(data), 16):
+            lines.append("    .byte " + ",".join(str(value) for value in data[offset:offset + 16]))
+    lines += [".balign 64", "observed:", "    .space 64"]
+    output.with_suffix(".json").write_text(json.dumps(cases, indent=2) + "\n")
+    return "\n".join(lines) + "\n"
+
+
+def zfa_profile(output):
+    """Use the reference test's independent expected values on the full core."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "nemu"))
+    from isa.zfa import generate_cases
+
+    cases = []
+    sentinel = 0x1122334455667788
+
+    def add(name, code, width=64, lhs=0, rhs=0, result=0, flags=0, integer=False,
+            illegal=False, fs=1, frm=0, missing=0, raw=False, registers=None,
+            requires_extension=True):
+        if missing:
+            # Raptor's implemented MISA extensions are read-only.
+            return
+        if width == 32 and not raw:
+            lhs |= 0xffffffff00000000
+            rhs |= 0xffffffff00000000
+        expected_fp = sentinel if integer or illegal else result
+        if width == 32 and not (integer or illegal):
+            expected_fp |= 0xffffffff00000000
+        expected_int = result if integer and not illegal else 0x76543210
+        expected_fs = 3 if not illegal and (not integer or flags) else fs
+        fcsr = (frm << 5) | 8
+        expected_fcsr = fcsr | (0 if illegal else flags)
+        control = (fcsr, fs << 13, expected_fcsr, expected_fs, int(illegal))
+        cases.append(dict(name=name, code=code, values=(lhs, rhs, expected_fp, expected_int),
+                          control=control))
+
+    generate_cases(64, True, add)
+    body = """
+    .option norvc
+    .option norelax
+    .section .text
+    .globl _start
+_start:
+    la t0, trap
+    csrw mtvec, t0
+    li s6, 0x6000
+    csrs mstatus, s6
+    la s0, zfa_data
+    la s4, zfa_code
+    li s1, CASE_COUNT
+    li s2, 16
+    li s5, 0x1122334455667788
+zfa_next:
+    fld f1, 0(s0)
+    fld f2, 8(s0)
+    fmv.d.x f3, s5
+    li gp, 0x76543210
+    lw t0, 32(s0)
+    csrw fcsr, t0
+    lw t0, 36(s0)
+    csrc mstatus, s6
+    csrs mstatus, t0
+    lw s3, 48(s0)
+    jr s4
+zfa_check:
+    bnez s3, fail
+    csrr t0, mstatus
+    srli t0, t0, 13
+    andi t0, t0, 3
+    lw t1, 44(s0)
+    bne t0, t1, fail
+    csrs mstatus, s6
+    csrr t0, fcsr
+    lw t1, 40(s0)
+    bne t0, t1, fail
+    fmv.x.d t0, f3
+    ld t1, 16(s0)
+    bne t0, t1, fail
+    ld t1, 24(s0)
+    bne gp, t1, fail
+    addi s0, s0, 56
+    addi s4, s4, 8
+    addi s2, s2, 1
+    addi s1, s1, -1
+    bnez s1, zfa_next
+    li a0, VECTOR_SUCCESS_CODE
+    ebreak
+    j fail
+trap:
+    beqz s3, fail
+    csrr t0, mcause
+    li t1, 2
+    bne t0, t1, fail
+    csrr t0, mepc
+    bne t0, s4, fail
+    lwu t1, 0(s4)
+    csrr t2, mtval
+    bne t1, t2, fail
+    addi t0, t0, 4
+    csrw mepc, t0
+    li s3, 0
+    mret
+fail:
+    mv a0, s2
+    ebreak
+    j fail
+zfa_code:
+"""
+    code = [f"    .word {case['code']:#010x}\n    j zfa_check" for case in cases]
+    data = [".balign 8", "zfa_data:"]
+    for case in cases:
+        dwords = [f"{value & ((1 << 64) - 1):#x}" for value in case["values"]]
+        words = [str(item) for item in (*case["control"], 0)]
+        data.append("    .dword " + ", ".join(dwords))
+        data.append("    .word " + ", ".join(words))
+    output.with_suffix(".json").write_text(json.dumps(cases, indent=2) + "\n")
+    return "\n".join([body.replace("CASE_COUNT", str(len(cases))), *code, *data, ""])
+
+
+PROFILE_SYSTEM = r"""
+    .option norvc
+    .option norelax
+    .section .text
+    .globl _start
+    .macro expect cause, pc
+        li s3, \cause
+        la s1, \pc
+    .endm
+_start:
+    la t0, trap
+    csrw mtvec, t0
+    csrw mie, zero
+    csrw mip, zero
+    li t0, -1
+    csrw pmpaddr0, t0
+    li t0, 0xf
+    csrw pmpcfg0, t0
+    li t0, 7
+    csrw mcounteren, t0
+    csrw scounteren, t0
+    li s3, 0
+    li s4, 0
+    li s5, 0x81000000
+    sd zero, 0(s5)
+
+    # Both waits complete without a live reservation.
+    li s0, 16
+    rdcycle t2
+    .word 0x00d00073
+    .word 0x01d00073
+    rdcycle t3
+    sub t3, t3, t2
+    li t4, 512
+    bgeu t3, t4, fail
+
+    # The harness sends a write outside the reservation, then inside it.
+    li s0, 17
+    rdcycle t2
+    lr.d t1, (s5)
+    .word 0x00d00073
+    rdcycle t3
+    sub t3, t3, t2
+    li t4, 256
+    bltu t3, t4, fail
+    li t4, 1024
+    bgeu t3, t4, fail
+    sc.d t1, zero, (s5)
+    beqz t1, fail
+
+    # A short timeout keeps the reservation available for the following SC.
+    li s0, 18
+    lr.d t0, (s5)
+    rdcycle t2
+    .word 0x01d00073
+    rdcycle t3
+    sub t3, t3, t2
+    li t4, 1024
+    bltu t3, t4, fail
+    li t4, 2304
+    bgeu t3, t4, fail
+    sc.d t0, zero, (s5)
+    bnez t0, fail
+
+    # A timer arriving during WRS.NTO wakes the hart with interrupts disabled.
+    li s0, 19
+    li s6, 0x02004000
+    rdtime t0
+    addi t0, t0, 16
+    sd t0, 0(s6)
+    fence iorw, iorw
+    lr.d t0, (s5)
+    rdcycle t2
+    .word 0x00d00073
+    rdcycle t3
+    sub t3, t3, t2
+    li t4, 512
+    bltu t3, t4, fail
+    csrr t0, mip
+    andi t0, t0, 128
+    beqz t0, fail
+    li t0, -1
+    sd t0, 0(s6)
+    fence iorw, iorw
+    sc.d t0, zero, (s5)
+    bnez t0, fail
+
+    # Real U-mode with TW set. NTO traps on timeout with a reservation;
+    # STO completes in the same privilege state.
+    li s0, 20
+    la t0, user_wait
+    csrw mepc, t0
+    li t0, 0x206600
+    csrw mstatus, t0
+    mret
+user_wait:
+    .word 0x00d00073
+    lr.d t0, (s5)
+    .word 0x01d00073
+    expect 2, user_wrs_nto
+    li s2, 0x00d00073
+    rdcycle t6
+user_wrs_nto:
+    .word 0x00d00073
+    bnez s3, fail
+    rdcycle t0
+    sub t0, t0, t6
+    li t1, 1024
+    bltu t0, t1, fail
+    li s0, 21
+    expect 8, user_wait_done
+    la s4, supervisor_setup
+    li s2, 0
+user_wait_done:
+    ecall
+
+supervisor_setup:
+    li s0, 22
+    li t0, 0xf0
+    csrw menvcfg, t0
+    li s7, 0x1020304050607080
+    sd s7, 0(s5)
+    sd s7, 64(s5)
+    sd s7, 120(s5)
+    la t0, supervisor_entry
+    csrw mepc, t0
+    li t0, 0x6e00
+    csrw mstatus, t0
+    mret
+supervisor_entry:
+    li s6, 0x2000000f0
+    csrw senvcfg, s6
+    li t0, 0x1000000f0
+    csrw senvcfg, t0
+    csrr t0, senvcfg
+    bne t0, s6, fail
+    la t0, user_bare
+    csrw sepc, t0
+    sret
+user_bare:
+    li a5, 0xaa00000000000000
+    or a5, a5, s5
+    .option push
+    .option rvc
+    c.ld a4, 0(a5)
+    c.sd a4, 8(a5)
+    .option pop
+    bne a4, s7, fail
+    ld t0, 8(s5)
+    bne t0, s7, fail
+    lwu t0, 1(a5)
+    li t1, 0x40506070
+    bne t0, t1, fail
+    fld f0, 0(a5)
+    fsd f0, 16(a5)
+    ld t0, 16(s5)
+    bne t0, s7, fail
+    vsetivli zero, 1, e64, m1, ta, ma
+    vle64.v v8, (a5)
+    addi t0, a5, 24
+    vse64.v v8, (t0)
+    ld t0, 24(s5)
+    bne t0, s7, fail
+    lr.d t0, (a5)
+    li t1, 0x5400000000000000
+    or t1, t1, s5
+    sc.d t0, s7, (t1)
+    bnez t0, fail
+    addi t0, a5, 72
+    .insn i 0x0f, 2, x0, t0, 4
+    ld t0, 64(s5)
+    bnez t0, fail
+    ld t0, 120(s5)
+    bnez t0, fail
+
+    # Unaligned vector memory accesses use the same tags as scalar accesses.
+    addi t0, a5, 1
+    vle64.v v8, (t0)
+    vmv.x.s t1, v8
+    ld t2, 1(s5)
+    bne t1, t2, fail
+    addi t0, a5, 191
+    vse64.v v8, (t0)
+    ld t0, 191(s5)
+    bne t0, t2, fail
+    lbu t0, 190(s5)
+    bnez t0, fail
+    lbu t0, 199(s5)
+    bnez t0, fail
+    addi t0, a5, 1
+    vl1re64.v v16, (t0)
+    vmv.x.s t1, v16
+    bne t1, t2, fail
+    vsetivli zero, 1, e32, m1, ta, ma
+    vle32.v v16, (t0)
+    vmv.x.s t1, v16
+    li t2, 0x40506070
+    bne t1, t2, fail
+    vsetivli zero, 1, e16, m1, ta, ma
+    vle16.v v16, (t0)
+    vmv.x.s t1, v16
+    li t2, 0x6070
+    bne t1, t2, fail
+
+    li s0, 23
+    expect 5, bare_fault
+    li s2, 0x0004000081000000
+    li t0, 0xaa04000081000000
+bare_fault:
+    ld t1, 0(t0)
+    bnez s3, fail
+    expect 8, bare_done
+    la s4, sv39_setup
+    li s2, 0
+bare_done:
+    ecall
+
+sv39_setup:
+    # An identity mapping and its negative canonical alias share a 1 GiB leaf.
+    li s0, 24
+    la t0, page_table
+    li t1, 0x200000df
+    sd t1, 16(t0)
+    li t2, 4080
+    add t2, t0, t2
+    sd t1, 0(t2)
+    la t3, page_middle
+    slli t1, t3, 32
+    srli t1, t1, 34
+    ori t1, t1, 1
+    sd t1, 8(t0)
+    la t4, page_leaves
+    slli t1, t4, 32
+    srli t1, t1, 34
+    ori t1, t1, 1
+    sd t1, 0(t3)
+    li t1, 0x204008d7  # U/R/W/A/D mappings to noncontiguous physical pages.
+    sd t1, 0(t4)
+    li t1, 0x204010d7
+    sd t1, 8(t4)
+    li t1, 0x204018d7
+    sd t1, 16(t4)
+    # The reset trampoline enters DRAM through its sign-extended Bare alias.
+    slli t0, t0, 32
+    srli t0, t0, 44
+    li t1, 0x8000000000000000
+    or t0, t0, t1
+    csrw satp, t0
+    sfence.vma
+    li t0, 0x20000
+    csrw mstatus, t0
+    ld t0, 0(a5)
+    bne t0, s7, fail
+
+    # MXR disables masking, including accesses made with MPRV.
+    li s0, 25
+    li t0, 0xa0000
+    csrw mstatus, t0
+    expect 13, mxr_fault
+    mv s2, a5
+mxr_fault:
+    ld t0, 0(a5)
+    bnez s3, fail
+
+    li s0, 26
+    li t0, 0x3000000f0
+    csrw senvcfg, t0
+    csrr t1, senvcfg
+    bne t0, t1, fail
+    la t0, user_sv39
+    csrw mepc, t0
+    li t0, 0x6600
+    csrw mstatus, t0
+    mret
+user_sv39:
+    li s8, 0x1234ffff81000000
+    ld t0, 0(s8)
+    bne t0, s7, fail
+    vsetivli zero, 1, e64, m1, ta, ma
+    vle64.v v8, (s8)
+    vmv.x.s t0, v8
+    bne t0, s7, fail
+    expect 13, sv39_fault
+    li s2, 0x0000008081000000
+    li t0, 0x1234008081000000
+sv39_fault:
+    ld t1, 0(t0)
+    bnez s3, fail
+    li s0, 28
+    li t0, 0x1234000040000ffd
+    vle64.v v8, (s8)
+    vse64.v v8, (t0)
+    li t1, 0x40000ffd
+    ld t2, 0(t1)
+    bne t2, s7, fail
+    vle64.v v16, (t0)
+    vmv.x.s t2, v16
+    bne t2, s7, fail
+
+    # A store crossing into an unmapped page leaves its first page intact.
+    li s0, 29
+    expect 15, split_store_fault
+    li s2, 0x40003000
+    li t0, 0x1234000040002ffd
+split_store_fault:
+    vse64.v v8, (t0)
+    bnez s3, fail
+    li t0, 0x40002ff8
+    ld t1, 0(t0)
+    bnez t1, fail
+    vsetivli zero, 2, e64, m1, ta, ma
+    li t0, 0x1234000040002ff5
+    vle64ff.v v8, (t0)
+    csrr t0, vl
+    li t1, 1
+    bne t0, t1, fail
+    csrr t0, vstart
+    bnez t0, fail
+
+    expect 8, sv39_done
+    la s4, finish
+    li s2, 0
+sv39_done:
+    ecall
+
+finish:
+    li s0, 27
+    csrw senvcfg, zero
+    sfence.vma
+    li t0, 0x20000
+    csrw mstatus, t0
+    expect 13, disabled_fault
+    mv s2, s8
+disabled_fault:
+    ld t0, 0(s8)
+    bnez s3, fail
+    csrw mstatus, zero
+    csrw satp, zero
+    li s0, 30
+    li t0, 0x6600
+    csrs mstatus, t0
+    vsetivli zero, 1, e32, m1, ta, ma
+    li s2, 0x10000001
+    expect 5, split_device_load
+split_device_load:
+    vle32.v v8, (s2)
+    bnez s3, fail
+    expect 7, split_device_store
+split_device_store:
+    vse32.v v8, (s2)
+    bnez s3, fail
+    li a0, VECTOR_SUCCESS_CODE
+    ebreak
+    j fail
+
+trap:
+    beqz s3, fail
+    csrr t2, mcause
+    bne t2, s3, fail
+    csrr t2, mepc
+    bne t2, s1, fail
+    csrr t3, mtval
+    bne t3, s2, fail
+    addi t2, t2, 4
+    beqz s4, trap_resume
+    mv t2, s4
+    li s4, 0
+    li t3, 0x1800
+    csrs mstatus, t3
+trap_resume:
+    csrw mepc, t2
+    li s3, 0
+    mret
+fail:
+    mv a0, s0
+    ebreak
+    j fail
+    .balign 4096
+page_table:
+    .space 4096
+page_middle:
+    .space 4096
+page_leaves:
+    .space 4096
+"""
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("source", choices=("smoke", "catalog", *SOURCES))
+    parser.add_argument("source", choices=("smoke", "catalog", "profile", "zfa", "profile-system", *SOURCES))
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--xlen", type=int, choices=(32, 64), default=32)
     parser.add_argument("--success-code", type=int, choices=(0, 10), default=10,
@@ -1629,7 +2282,20 @@ def main():
         smoke(args.output, args.xlen)
     else:
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        source = catalog(args.output) if args.source == "catalog" else SOURCES[args.source]
+        if args.source == "catalog":
+            source = catalog(args.output)
+        elif args.source == "profile":
+            source = vector_profile(args.output, args.xlen)
+        elif args.source == "zfa":
+            if args.xlen != 64:
+                parser.error("zfa requires RV64")
+            source = zfa_profile(args.output)
+        elif args.source == "profile-system":
+            if args.xlen != 64:
+                parser.error("profile-system requires RV64")
+            source = PROFILE_SYSTEM
+        else:
+            source = SOURCES[args.source]
         source = source.replace("li a0, 10", "li a0, VECTOR_SUCCESS_CODE")
         source = source.replace("? 10 : -1", "? VECTOR_SUCCESS_CODE : -1")
         args.output.write_text(f"#define VECTOR_SUCCESS_CODE {args.success_code}\n" + source)

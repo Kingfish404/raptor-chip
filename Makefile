@@ -507,6 +507,11 @@ linux-ticket-spinlock-repro-rv32: build-rv32 repro-tests-build ## Run Linux tick
 
 COREMARK_MAKE = $(MAKE) -C $(AM_KERNELS)/benchmarks/coremark_eembc -f Makefile -f $(RAPTOR_HOME)/verification/benchmark-build.mk
 
+.PHONY: coremark-prepare
+coremark-prepare: $(AM_KERNELS)
+	+$(MAKE) -C $(NEMU_HOME)/tools/spike-diff repo/build/libsoftfloat.a $(SUBMAKE_JOBS)
+	+$(MAKE) -C $(NEMU_HOME)/tools/capstone $(SUBMAKE_JOBS)
+
 coremark-rv32: $(AM_KERNELS) build-rv32 ## Run CoreMark on NPC
 	+@set -o pipefail; $(COREMARK_MAKE) ARCH=$(NPC_ARCH) run ARGS="$(ARGS)" mainargs=$(MAINARGS) $(call tee_npc,coremark-rv32)
 	$(call coremark_mhz_report,$(NPC_LOG_DIR)/coremark-rv32.log)
@@ -978,7 +983,7 @@ verify-light: ## Run lightweight fuzz and signature tests
 	@set -o pipefail; $(MAKE) -C $(VERIFY_HOME) light $(call tee_verify,light)
 
 # Regression owns its subprocess parallelism; parent make -j is not the budget.
-REGRESSION_JOBS ?= 3
+REGRESSION_JOBS ?=
 REGRESSION_TOOL_JOBS ?= 4
 REGRESSION_TIMEOUT ?= 14400
 REGRESSION_STA_PRESET ?= small
@@ -990,12 +995,13 @@ REGRESSION_OUTPUT ?=
 REGRESSION_OPTIONS = --preset "$(RAPT_CONFIG)" --board "$(REGRESSION_BOARD)" \
 	--sta-preset "$(REGRESSION_STA_PRESET)" \
 	--platform "$(strip $(STA_PLATFORM))" --clock-mhz "$(strip $(CLK_FREQ_MHZ))" \
-	--jobs "$(REGRESSION_JOBS)" --tool-jobs "$(REGRESSION_TOOL_JOBS)" \
+	$(if $(strip $(REGRESSION_JOBS)),--jobs "$(REGRESSION_JOBS)",) \
+	--tool-jobs "$(REGRESSION_TOOL_JOBS)" \
 	--timeout "$(REGRESSION_TIMEOUT)" --iterations "$(REGRESSION_ITERATIONS)" \
 	--xlens $(REGRESSION_XLENS) --suites $(REGRESSION_SUITES) \
 	$(if $(REGRESSION_OUTPUT),--output "$(REGRESSION_OUTPUT)",)
 
-regression: ## Format, then run CoreMark and serialized FPGA/STA lanes with logs and a JSON summary
+regression: ## Format, then run independent CoreMark, STA and FPGA checks in parallel
 	python3 $(VERIFY_HOME)/scripts/regression.py $(REGRESSION_OPTIONS)
 
 regression-plan: ## Print regression commands and concurrency without running any submake

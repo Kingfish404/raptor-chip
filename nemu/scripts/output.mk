@@ -12,8 +12,8 @@ endif
 $(filter-out output-build,$(MAKECMDGOALS)): output-build
 
 output-build:
-	@mkdir -p "$(OUTPUT_DIR)"
-	@for name in src configs; do \
+	@mkdir -p "$(OUTPUT_DIR)/tools"
+	@for name in src configs tools/capstone; do \
 		link="$(OUTPUT_DIR)/$$name"; source="$(NEMU_HOME)/$$name"; \
 		if [ -e "$$link" ] || [ -L "$$link" ]; then \
 			[ "$$(readlink -f "$$link")" = "$$(readlink -f "$$source")" ] || \

@@ -182,6 +182,37 @@ vector-catalog-diff: vector-smoke-data
 	  "$(BUILD_DIR)/vector-smoke/catalog.bin" | tee "$(BUILD_DIR)/vector-smoke/catalog.log"; \
 	  grep -q 'HIT GOOD TRAP' "$(BUILD_DIR)/vector-smoke/catalog.log"
 
+PROFILE_VECTOR_DEFINES := RAPT_ZVBB RAPT_ZVFHMIN RAPT_ZVKT
+PROFILE_PROGRAMS ?= profile
+.PHONY: vector-profile-smoke rva23u64-smoke
+vector-profile-smoke: VECTOR_DEFINES += $(PROFILE_VECTOR_DEFINES)
+vector-profile-smoke: vector-smoke-data vector-axi-build
+	@set -e; for payload in $(PROFILE_PROGRAMS); do \
+	  base="$(BUILD_DIR)/vector-smoke/$$payload"; \
+	  python3 vector_programs.py "$$payload" --output "$$base.S" --xlen $(XLEN); \
+	  $(RISCV_CC) -march=rv$(XLEN)gcv -mabi=$(VECTOR_ABI) -nostdlib -nostartfiles \
+	    -Wl,-Ttext=0x80000000,-e,_start "$$base.S" -o "$$base.elf"; \
+	  $(RISCV_OBJCOPY) -O binary -j .text "$$base.elf" "$$base.bin"; \
+	  args=(); if [[ $$payload == profile-system ]]; then args+=(+RVA23_WRS +VECTOR_PROBE); fi; \
+	  "$(BUILD_DIR)/vector-axi$(XLEN)/vl/tb_vector_axi" +IMG="$$base.bin" \
+	    +MROM="$(BUILD_DIR)/vector-smoke/boot.bin" +MAX_CYCLES=2500000 "$${args[@]}"; \
+	done
+
+rva23u64-smoke:
+	+$(MAKE) vector-profile-smoke XLEN=64 PROFILE_PROGRAMS='profile zfa profile-system' \
+	  VECTOR_DEFINES='$(VECTOR_DEFINES)'
+
+RISCV_LINUX_CC ?= riscv64-linux-gnu-gcc
+RVA23_PROBE_SOURCES := $(addprefix $(RAPTOR_HOME)/app/tests/linux/,nemu_rva23.c nemu_rva23_start.S)
+.PHONY: rva23u64-linux-probe
+rva23u64-linux-probe: $(BUILD_DIR)/rva23-check
+
+$(BUILD_DIR)/rva23-check: $(RVA23_PROBE_SOURCES) Makefile
+	@mkdir -p "$(dir $@)"
+	$(RISCV_LINUX_CC) -nostdlib -static -fno-pie -no-pie -fno-builtin -fno-stack-protector \
+	  -fno-tree-vectorize -mno-relax -march=rv64gcv -mabi=lp64d -O2 -Wall -Wextra -Werror \
+	  -DRVA23_USER_ONLY $(RVA23_PROBE_SOURCES) -o "$@"
+
 .PHONY: vector-disabled-data vector-disabled-smoke
 vector-disabled-data: vector-smoke-data
 	python3 vector_programs.py disabled --output "$(BUILD_DIR)/vector-smoke/disabled.S"

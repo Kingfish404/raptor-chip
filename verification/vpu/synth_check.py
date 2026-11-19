@@ -8,13 +8,16 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[2]
 VPU = ROOT / "rtl/core/backend/vpu"
+FPU = ROOT / "rtl/core/backend/fpu"
+FORMAT_CONVERTERS = [FPU / f"rapt_fpu_{name}.sv" for name in
+                     ("convert_narrow", "half_to_fp", "fp_to_half")]
 LEAVES = (
-    "core_adapter", "vtype", "csr", "vrf", "owner", "divsqrt", "fp_misc", "fp_estimate",
-    "fp_transfer", "fp_reduce", "fp_reduce_control", "fp_reduce_decode", "fp_reduce_engine",
-    "fp_reduce_engine_baseline", "fp_widen", "fp_wide_arith", "fp_convert", "int_fp16",
-    "int_fp32", "int_fp64", "int_fp_shared", "int_fp_decode", "fp_decode", "fp_arith",
-    "fma", "slide", "mask_scan", "move", "reduce", "fixed", "geometry", "mask_write",
-    "muldiv", "muldiv_baseline", "top", "top_baseline", "top_core",
+    "core_adapter", "vtype", "csr", "vrf", "owner", "alu", "decode", "divsqrt", "fp_misc",
+    "fp_estimate", "fp_transfer", "fp_reduce", "fp_reduce_control", "fp_reduce_decode",
+    "fp_reduce_engine", "fp_reduce_engine_baseline", "fp_widen", "fp_wide_arith", "fp_convert",
+    "int_fp16", "int_fp32", "int_fp64", "int_fp_shared", "int_fp_decode", "fp_decode",
+    "fp_arith", "fma", "slide", "mask_scan", "move", "reduce", "fixed", "geometry",
+    "mask_write", "muldiv", "muldiv_baseline", "top", "top_baseline", "top_core", "top_rva23",
 )
 
 
@@ -38,7 +41,12 @@ def main():
         for leaf in LEAVES:
             if args.leaf and leaf not in args.leaf:
                 continue
-            top = "rapt_vpu_core" if leaf == "top_core" else "rapt_vpu" if leaf.startswith("top") else "rapt_vpu_muldiv" if leaf.startswith("muldiv") else f"rapt_vpu_{leaf}"
+            top = (
+                "rapt_vpu_core" if leaf in ("top_core", "top_rva23")
+                else "rapt_vpu" if leaf.startswith("top")
+                else "rapt_vpu_muldiv" if leaf.startswith("muldiv")
+                else f"rapt_vpu_{leaf}"
+            )
             if leaf == "fp_reduce_engine_baseline":
                 top = "rapt_vpu_fp_reduce_engine"
             if leaf in ("int_fp16", "int_fp32", "int_fp64"):
@@ -60,7 +68,7 @@ def main():
             if leaf == "fp_wide_arith":
                 sources = [ROOT / "rtl/core/backend/fpu/rapt_fpu_fma.sv", VPU / "rapt_vpu_fma.sv", VPU / "rapt_vpu_fp_arith.sv", VPU / "rapt_vpu_fp_widen.sv"] + sources
             if leaf == "fp_convert":
-                sources = [ROOT / "rtl/core/backend/fpu/rapt_fpu_convert_narrow.sv", VPU / "rapt_vpu_fp_widen.sv"] + sources
+                sources = FORMAT_CONVERTERS + [VPU / "rapt_vpu_fp_widen.sv"] + sources
             if leaf == "divsqrt":
                 sources.insert(0, ROOT / "rtl/core/backend/fpu/rapt_fpu_divsqrt.sv")
             if leaf == "fp_arith":
@@ -72,11 +80,23 @@ def main():
             if leaf == "csr":
                 sources.insert(0, VPU / "rapt_vpu_vtype.sv")
             if leaf.startswith("top"):
-                sources = [ROOT / "rtl/sram/rapt_sram_1rw.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_fma.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_divsqrt.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_convert_narrow.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_int_to_fp.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_integer_to_fp.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_single_to_int_w.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_fp_to_int.sv"] + sorted(VPU.glob("*.sv"))
+                scalar_fpu = [FPU / f"rapt_fpu_{name}.sv" for name in
+                              ("fma", "divsqrt", "int_to_fp", "integer_to_fp",
+                               "single_to_int_w", "fp_to_int")]
+                sources = [ROOT / "rtl/sram/rapt_sram_1rw.sv"] + scalar_fpu
+                sources += FORMAT_CONVERTERS + sorted(VPU.glob("*.sv"))
                 params = dict(XLEN=xlen, VLEN=vlen, ELEN=elen, BankBits=max(64, bank_bits), Banks=banks,
-                              OptimizeOperandReads=int(leaf in ("top", "top_core")),
+                              OptimizeOperandReads=int(leaf != "top_baseline"),
                               CachePredicate=args.cache_predicate,
                               ShareIntFpConverters=args.share_int_fp)
+                if leaf == "top_rva23":
+                    params.update(Zvbb=1, Zvfhmin=1, Zvkt=1, MisalignedMemory=1)
+            elif leaf in ("alu", "decode"):
+                params = dict(Zvbb=1)
+            elif leaf == "fp_convert":
+                params = dict(Zvfhmin=1)
+            elif leaf == "fp_decode":
+                params = dict(ELEN=elen, Zvfhmin=1)
             elif leaf in ("fp_reduce_engine", "fp_reduce_engine_baseline"):
                 params = dict(XLEN=xlen, VLEN=vlen, ELEN=elen, CacheMask=int(leaf == "fp_reduce_engine"))
             elif leaf in ("int_fp16", "int_fp32", "int_fp64"):
@@ -98,9 +118,9 @@ def main():
                 params = dict(VLEN=vlen, BankBits=bank_bits, Banks=banks)
             elif leaf.startswith("muldiv"):
                 params = dict(EarlyOut=int(leaf=="muldiv"))
-            elif leaf in ("fixed", "fp_widen", "fp_wide_arith", "fp_convert"):
+            elif leaf in ("fixed", "fp_widen", "fp_wide_arith"):
                 params = {}
-            elif leaf in ("geometry", "fp_decode", "divsqrt", "int_fp_decode", "fp_reduce_decode"):
+            elif leaf in ("geometry", "divsqrt", "int_fp_decode", "fp_reduce_decode"):
                 params = dict(ELEN=elen)
             elif leaf == "mask_write":
                 params = dict(AddrBits=(32*vlen//8-1).bit_length())
@@ -176,7 +196,8 @@ def main():
                            m["RD_CLK_ENABLE"] == 1 for m in srams), srams
             elif leaf.startswith("muldiv"):
                 assert not any(k in counts for k in ("$mul", "$div", "$mod", "$divfloor", "$modfloor")), counts
-            elif leaf in ("geometry", "fixed", "fp_misc", "fp_widen", "int_fp_decode", "fp_estimate", "fp_transfer", "fp_reduce_decode"):
+            elif leaf in ("alu", "decode", "fp_decode", "geometry", "fixed", "fp_misc", "fp_widen",
+                          "int_fp_decode", "fp_estimate", "fp_transfer", "fp_reduce_decode"):
                 assert not any("dff" in k or "latch" in k for k in counts), counts
             elif leaf == "vtype":
                 assert not any("dff" in k or "latch" in k for k in counts), counts

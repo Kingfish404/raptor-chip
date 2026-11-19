@@ -91,9 +91,10 @@ module rapt_feu #(
   (* keep = "true" *) logic [31:0] issued_encoding;
   (* keep = "true" *) logic [$bits(iss.uop.execute.fp)-1:0] issued_fp;
   fp_wake_t fp_wake[NumCompletions], fp_local_wake[NumCompletions];
+  localparam bit Zfa = rapt_pkg::ZfaEnable && XLEN == 64;
   localparam int Simple = 0, AddSub = 1, Product = 2, DivSqrt = 3,
       Widen = 4, Narrow = 5, IntToFp = 6, FpToInt = 7,
-      HalfToFp = 8, FpToHalf = 9, Units = 10;
+      HalfToFp = 8, FpToHalf = 9, Round = 10, Units = 10 + int'(Zfa);
   // Empty-queue bypass depends on registered residents and ticket state.
   // Completion arbitration and the age selector do not control allocation.
   logic [$clog2(FPQ_SIZE):0] fpq_occupancy;
@@ -154,6 +155,7 @@ module rapt_feu #(
           unit_id = HalfToFp;
         else if (uop.imm[31:25] == 7'b0100010) unit_id = FpToHalf;
       end
+      `RAPT_FP_OP_ZFA_SIMPLE: if (Zfa && !uop.imm[31]) unit_id = Round;
       default: ;
     endcase
     rm = uop.execute.fp.rm == 3'b111 ? csr_bcast.frm : uop.execute.fp.rm;
@@ -509,6 +511,8 @@ module rapt_feu #(
   logic fp_int_to_double_w, fp_int_to_double_l, fp_int_to_single_w, fp_int_to_single_l;
   logic fp_single_to_int_w, fp_single_to_int_l, fp_double_to_int_w, fp_double_to_int_l;
   logic fp_double, fp_rm_invalid, fp_trap;
+  logic fp_zfa_round, fp_zfa_li;
+  logic [63:0] fp_li_result;
   logic [2:0] fp_rounding_mode;
 
   logic fp_long_op, fp_launch;
@@ -587,13 +591,15 @@ module rapt_feu #(
   assign fp_fp_to_half = fp_fcvt_h_s || fp_fcvt_h_d;
   assign fp_double = iss.uop.execute.fp.op == `RAPT_FP_OP_FDIV_D
       || iss.uop.execute.fp.op == `RAPT_FP_OP_FSQRT_D;
+  assign fp_zfa_round = Zfa && iss.uop.execute.fp.op == `RAPT_FP_OP_ZFA_SIMPLE && !iss.uop.imm[31];
+  assign fp_zfa_li = Zfa && iss.uop.execute.fp.op == `RAPT_FP_OP_ZFA_SIMPLE && iss.uop.imm[31];
   assign fp_rounding_mode = iss.uop.execute.fp.rm == 3'b111 ? csr_bcast.frm : iss.uop.execute.fp.rm;
   assign fp_rm_invalid = (fp_fma_s || fp_fma_d || fp_divsqrt || fp_convert_widen
     || fp_convert_narrow || fp_int_to_double_w || fp_int_to_single_w
     || fp_int_to_double_l || fp_int_to_single_l || fp_single_to_int_w
     || fp_single_to_int_l || fp_double_to_int_w || fp_double_to_int_l
     || fp_addsub_s || fp_addsub_d || fp_mul_s || fp_mul_d
-    || fp_half_to_fp || fp_fp_to_half) && fp_rounding_mode > 3'b100;
+    || fp_half_to_fp || fp_fp_to_half || fp_zfa_round) && fp_rounding_mode > 3'b100;
   assign fp_trap = iss.uop.trap || fp_rm_invalid;
   assign fp_long_op = fp_divsqrt || fp_fma_s || fp_fma_d
           || fp_addsub_s || fp_addsub_d || fp_mul_s || fp_mul_d
@@ -602,7 +608,7 @@ module rapt_feu #(
           || fp_int_to_single_w || fp_int_to_single_l
           || fp_single_to_int_w || fp_single_to_int_l
           || fp_double_to_int_w || fp_double_to_int_l
-          || fp_half_to_fp || fp_fp_to_half;
+          || fp_half_to_fp || fp_fp_to_half || fp_zfa_round;
   assign fp_launch = iss.valid && fp_long_op && !fp_trap;
   assign fp_divsqrt_launch = fp_launch && fp_divsqrt;
   assign fp_fma_launch = fp_launch && (fp_fma_s || fp_fma_d);
@@ -648,6 +654,7 @@ module rapt_feu #(
   );
   rapt_fpu_compare u_fpu_compare (
       .op(iss.uop.execute.fp.op),
+      .zfa_semantics(Zfa && (fp_minmax ? iss.uop.execute.fp.rm[1] : iss.uop.execute.fp.rm[2])),
       .operand_a(fp_operand_a),
       .operand_b(fp_operand_b),
       .result(fp_compare_result),
@@ -757,7 +764,8 @@ module rapt_feu #(
       .result_valid(fp_product_valid)
   );
   rapt_fpu_fp_to_int #(
-      .MULTI_FORMAT(1'b1)
+      .MULTI_FORMAT(1'b1),
+      .MODULO_WORD(Zfa)
   ) u_fpu_to_int (
       .clock(clock),
       .reset(reset),
@@ -771,6 +779,7 @@ module rapt_feu #(
           || iss.uop.execute.fp.op == `RAPT_FP_OP_FCVT_WU_D
           || iss.uop.execute.fp.op == `RAPT_FP_OP_FCVT_LU_D),
       .int64_target(fp_single_to_int_l || fp_double_to_int_l),
+      .modulo_word(fp_double_to_int_w && iss.uop.imm[23]),
       .rounding_mode(fp_rounding_mode),
       .result(fp_to_int_result),
       .flags(fp_to_int_flags),
@@ -801,7 +810,8 @@ module rapt_feu #(
   logic [4:0] simple_flags;
   always_comb begin
     simple_result = fp_sgnj_result;
-    if (fp_minmax || fp_compare) simple_result = fp_compare_result;
+    if (fp_zfa_li) simple_result = fp_li_result;
+    else if (fp_minmax || fp_compare) simple_result = fp_compare_result;
     else if (fp_classify) simple_result = {54'b0, fp_classify_result};
     else if (fp_fmv_h_x) simple_result = {48'hffff_ffff_ffff, iss.op1[15:0]};
     else if (fp_fmv_x_h) simple_result = {{48{fp_operand_a[15]}}, fp_operand_a[15:0]};
@@ -859,6 +869,139 @@ module rapt_feu #(
   assign raw_valid[FpToHalf] = fp_fp_to_half_valid;
   assign raw_result[FpToHalf] = fp_fp_to_half_result;
   assign raw_flags[FpToHalf] = fp_fp_to_half_flags;
+
+  if (Zfa) begin : g_zfa
+    function automatic logic [63:0] load_immediate(input logic [4:0] index,
+                                                   input logic double_format);
+      logic [15:0] upper;
+      logic [7:0] single_exp;
+      // Only the high 16 bits vary among the 32 binary64 constants.
+      case (index)
+        0: upper = 16'hbff0;
+        1: upper = 16'h0010;
+        2: upper = 16'h3ef0;
+        3: upper = 16'h3f00;
+        4: upper = 16'h3f70;
+        5: upper = 16'h3f80;
+        6: upper = 16'h3fb0;
+        7: upper = 16'h3fc0;
+        8: upper = 16'h3fd0;
+        9: upper = 16'h3fd4;
+        10: upper = 16'h3fd8;
+        11: upper = 16'h3fdc;
+        12: upper = 16'h3fe0;
+        13: upper = 16'h3fe4;
+        14: upper = 16'h3fe8;
+        15: upper = 16'h3fec;
+        16: upper = 16'h3ff0;
+        17: upper = 16'h3ff4;
+        18: upper = 16'h3ff8;
+        19: upper = 16'h3ffc;
+        20: upper = 16'h4000;
+        21: upper = 16'h4004;
+        22: upper = 16'h4008;
+        23: upper = 16'h4010;
+        24: upper = 16'h4020;
+        25: upper = 16'h4030;
+        26: upper = 16'h4060;
+        27: upper = 16'h4070;
+        28: upper = 16'h40e0;
+        29: upper = 16'h40f0;
+        30: upper = 16'h7ff0;
+        default: upper = 16'h7ff8;
+      endcase
+      single_exp = index == 1 ? 8'd1 : index >= 30 ? 8'hff : 8'(upper[14:4] - 11'd896);
+      return double_format ? {upper, 48'b0}
+          : {32'hffff_ffff, upper[15], single_exp, upper[3:0], 19'b0};
+    endfunction
+    assign fp_li_result = load_immediate(iss.uop.imm[19:15], iss.uop.imm[25]);
+
+    logic double_format, unboxed, sign, nan, zero, special_exp;
+    logic [10:0] exponent, bias, max_exp;
+    logic signed [12:0] unbiased;
+    logic [51:0] fraction;
+    logic [52:0] fraction_unit, half_unit, discarded;
+    logic [62:0] magnitude, base, increment, base_q, increment_q, rounded;
+    logic guard_bit, sticky, odd, round_up;
+    logic round_valid_q, sign_q, double_q, result_valid_q;
+    logic [4:0] flags, flags_q, result_flags_q;
+    logic [63:0] result_q;
+
+    assign double_format = iss.uop.imm[25];
+    assign unboxed = !double_format && fp_operand_a[63:32] != '1;
+    assign sign = double_format ? fp_operand_a[63] : fp_operand_a[31];
+    assign bias = double_format ? 11'd1023 : 11'd127;
+    assign max_exp = double_format ? 11'h7ff : 11'h0ff;
+    assign exponent = double_format ? fp_operand_a[62:52] : {3'b0, fp_operand_a[30:23]};
+    assign fraction = double_format ? fp_operand_a[51:0] : {fp_operand_a[22:0], 29'b0};
+    assign unbiased = $signed({2'b0, exponent}) - $signed({2'b0, bias});
+    assign magnitude = {exponent, fraction};
+    assign special_exp = exponent == max_exp;
+    assign nan = unboxed || (special_exp && fraction != '0);
+    assign zero = magnitude == '0;
+    assign fraction_unit = 53'd1 << 6'(13'sd52 - unbiased);
+    assign half_unit = fraction_unit >> 1;
+    assign discarded = {1'b0, fraction} & (fraction_unit - 1'b1);
+
+    always_comb begin
+      base = magnitude;
+      increment = '0;
+      guard_bit = 1'b0;
+      sticky = 1'b0;
+      odd = 1'b0;
+      if (nan) base = {max_exp, 52'h8000_0000_0000_0};
+      else if (!special_exp && !zero && unbiased < 0) begin
+        base = '0;
+        increment = {bias, 52'b0};  // One in the source format.
+        guard_bit = unbiased == -13'sd1;
+        sticky = !guard_bit || fraction != '0;
+      end else if (!special_exp && !zero && unbiased < 52) begin
+        base = magnitude & ~63'(fraction_unit - 1'b1);
+        increment = 63'(fraction_unit);
+        guard_bit = (discarded & half_unit) != '0;
+        sticky = (discarded & (half_unit - 1'b1)) != '0;
+        odd = unbiased == 0 || (magnitude & 63'(fraction_unit)) != '0;
+      end
+      case (fp_rounding_mode)
+        0: round_up = guard_bit && (sticky || odd);
+        2: round_up = sign && (guard_bit || sticky);
+        3: round_up = !sign && (guard_bit || sticky);
+        4: round_up = guard_bit;
+        default: round_up = 1'b0;
+      endcase
+      flags = '0;
+      flags[4] = nan && !unboxed && !fraction[51];
+      flags[0] = iss.uop.imm[20] && (guard_bit || sticky);
+    end
+    assign rounded = base_q + increment_q;
+    always_ff @(posedge clock) begin
+      if (reset || cmu_bcast.flush_pipe) begin
+        round_valid_q <= 1'b0;
+        result_valid_q <= 1'b0;
+      end else begin
+        round_valid_q <= fp_launch && fp_zfa_round;
+        result_valid_q <= round_valid_q;
+        if (fp_launch && fp_zfa_round) begin
+          base_q <= base;
+          increment_q <= round_up ? increment : '0;
+          sign_q <= !nan && sign;
+          double_q <= double_format;
+          flags_q <= flags;
+        end
+        if (round_valid_q) begin
+          result_q <= double_q ? {sign_q, rounded}
+              : {32'hffff_ffff, sign_q, rounded[59:52], rounded[51:29]};
+          result_flags_q <= flags_q;
+        end
+      end
+    end
+    assign arithmetic_ready[Round] = !reset && !cmu_bcast.flush_pipe;
+    assign raw_valid[Round] = result_valid_q;
+    assign raw_result[Round] = result_q;
+    assign raw_flags[Round] = result_flags_q;
+  end else begin : g_no_zfa
+    assign fp_li_result = '0;
+  end
 
   for (genvar unit_id = 0; unit_id < Units; unit_id++) begin : g_unit
     // The eight-stage product pipe can launch every cycle. A three-stage

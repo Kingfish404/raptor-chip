@@ -1,6 +1,8 @@
-// One integer element. funct6 is the RVV OPIV encoding; decode/legality is
-// separate. Truncation and signed comparisons use SEW, never scalar XLEN.
-module rapt_vpu_alu (
+// One integer element. Decode maps unary Zvbb operations to spare ALU controls.
+// Truncation and signed comparisons use the element width.
+module rapt_vpu_alu #(
+    parameter bit Zvbb = 0
+) (
     input logic [5:0] funct6,
     input logic [1:0] sew,
     input logic [63:0] a,
@@ -13,6 +15,57 @@ module rapt_vpu_alu (
   logic signed [63:0] sa, sb;
   logic [5:0] shift;
   logic [64:0] carry_sum, borrow_difference;
+  logic [63:0] bit_result;
+
+  if (Zvbb) begin : g_bitmanip
+    logic [63:0] reverse_bits, reverse_byte_bits, reverse_bytes, rotate;
+    logic [6:0] width, reverse_offset, rotate_complement, leading_zeros;
+    logic [5:0] rotate_shift, rotate_mask;
+    wire nonzero[127:1];
+    wire [5:0] first_set[127:1], last_set[127:1];
+    wire [6:0] ones[127:1];
+
+    assign width = 7'd8 << sew;
+    assign reverse_offset = 7'd64 - width;
+    assign rotate_mask = width[5:0] - 6'd1;
+    assign rotate_shift = funct6 == 6'h15 ? (-shift & rotate_mask) : shift;
+    assign rotate_complement = width - 7'(rotate_shift);
+    assign rotate = (au >> rotate_shift) | (au << rotate_complement);
+    assign leading_zeros = nonzero[1] ? width - 7'(last_set[1]) - 7'd1 : width;
+    for (genvar bit_idx = 0; bit_idx < 64; bit_idx++) begin : g_bit
+      localparam int ByteIndex = bit_idx / 8;
+      localparam int ByteBit   = bit_idx % 8;
+      assign reverse_bits[bit_idx] = au[63-bit_idx];
+      assign reverse_byte_bits[bit_idx] = au[8*ByteIndex+7-ByteBit];
+      assign reverse_bytes[bit_idx] = au[8*(7-ByteIndex)+ByteBit];
+      assign nonzero[64+bit_idx] = au[bit_idx];
+      assign first_set[64+bit_idx] = 6'(bit_idx);
+      assign last_set[64+bit_idx] = 6'(bit_idx);
+      assign ones[64+bit_idx] = 7'(au[bit_idx]);
+    end
+    for (genvar node = 1; node < 64; node++) begin : g_count_zeros
+      assign nonzero[node] = nonzero[2*node] || nonzero[2*node+1];
+      assign first_set[node] = nonzero[2*node] ? first_set[2*node] : first_set[2*node+1];
+      assign last_set[node] = nonzero[2*node+1] ? last_set[2*node+1] : last_set[2*node];
+      assign ones[node] = ones[2*node] + ones[2*node+1];
+    end
+    always_comb begin
+      case (funct6)
+        6'h01: bit_result = au & ~bu;
+        6'h14, 6'h15: bit_result = rotate;
+        6'h30: bit_result = reverse_byte_bits;
+        6'h31: bit_result = reverse_bytes >> reverse_offset;
+        6'h32: bit_result = reverse_bits >> reverse_offset;
+        6'h34: bit_result = 64'(leading_zeros);
+        6'h35: bit_result = nonzero[1] ? 64'(first_set[1]) : 64'(width);
+        6'h36: bit_result = 64'(ones[1]);
+        default: bit_result = '0;
+      endcase
+    end
+  end else begin : g_no_bitmanip
+    assign bit_result = '0;
+  end
+
   always_comb begin
     // SEW has only four encodings. Explicit wiring avoids constructing
     // variable left/right shifters merely to sign-extend an operand.
@@ -42,10 +95,12 @@ module rapt_vpu_alu (
         shift = b[5:0];
       end
     endcase
-    au = a & mask;
-    bu = b & mask;
-    carry_sum = {1'b0,au} + {1'b0,bu} + 65'(mask_bit);
-    borrow_difference = {1'b0,au} - {1'b0,bu} - 65'(mask_bit);
+  end
+  assign au = a & mask;
+  assign bu = b & mask;
+  assign carry_sum = {1'b0,au} + {1'b0,bu} + 65'(mask_bit);
+  assign borrow_difference = {1'b0,au} - {1'b0,bu} - 65'(mask_bit);
+  always_comb begin
     result = '0;
     case (funct6)
       6'h00: result = au + bu;
@@ -74,7 +129,7 @@ module rapt_vpu_alu (
       6'h25: result = au << shift;
       6'h28: result = au >> shift;
       6'h29: result = 64'(sa >>> shift);
-      default: result = '0;
+      default: result = bit_result;
     endcase
     if (mask_logic) begin
       case (funct6[2:0])

@@ -119,6 +119,10 @@ module rapt_ieu_syn_top #(
       .vector_issue(),
 `endif
       .integer_system_issue_enable,
+`ifdef RAPT_ZAWRS
+      .reservation_valid(1'b0),
+      .wrs_debug_wakeup(1'b0),
+`endif
       .disp_alq,
       .disp_brq,
       .disp_mdq,

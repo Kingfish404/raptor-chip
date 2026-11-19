@@ -29,7 +29,7 @@ def main():
 
     api = query(1, ctypes.sizeof(ISAAPI)).contents
     check('initial-mode', api.enabled, 0)
-    check('implemented-bundle', api.supported & 0x7ff, 0x7ff)
+    check('implemented-bundle', api.supported & 0xfff, 0xfff)
     check('enable-profile', api.configure(api.supported), 0)
     check('profile-mask', query(1, ctypes.sizeof(ISAAPI)).contents.enabled, api.supported)
     check('reject-unsupported-mask', api.configure(api.supported | (1 << 63)), -1)

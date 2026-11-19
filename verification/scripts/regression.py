@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Run format, CoreMark, STA and FPGA gates with bounded, independent lanes."""
+"""Run format, CoreMark, STA and FPGA checks with bounded parallelism."""
 import argparse
-from concurrent.futures import ThreadPoolExecutor
+from collections import deque
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass
 import fcntl
+from graphlib import TopologicalSorter
 import hashlib
 import json
 import os
@@ -21,7 +23,6 @@ ROOT = Path(__file__).resolve().parents[2]
 CANCELLED = threading.Event()
 PROCESSES = set()
 PROCESS_LOCK = threading.RLock()
-EDA_LANE_LOCK = threading.Lock()
 
 
 def cancel(signum, _frame):
@@ -39,6 +40,7 @@ class Step:
     name: str
     command: list[str]
     check: str = "exit"
+    requires: tuple[str, ...] = ()
 
 
 def positive(value):
@@ -56,38 +58,43 @@ def plan(args, work):
                 *settings]
 
     formats = [Step('format', make('', 'format', 'FORMAT_SCOPE=all'))] if 'format' in args.suites else []
-    lanes = {}
+    steps = []
+    if set(args.suites) & {'coremark', 'fpga', 'sta'}:
+        steps.append(Step('rtl-decoders', make('sim', 'rtl-decoders')))
     if 'coremark' in args.suites:
-        core = []
-        for xlen in args.xlens:
-            for target in (f'coremark-nemu{xlen}', f'coremark-rv{xlen}'):
-                core.append(Step(target, make('', target,
-                    f'BUILD_ROOT={work}/sim', f'BUILD_PROFILE=regression-rv{xlen}',
-                    f'VFLAGS={"-DRAPT_RV64" if xlen == 64 else ""}',
-                    f'ITERATIONS={args.iterations}', 'ARGS=-b', 'DIFFTEST=1',
-                    f'NPC_LOG_DIR={work}/logs/npc', f'NEMU_LOG_DIR={work}/logs/nemu'), 'coremark'))
-        lanes['coremark'] = core
+        steps.append(Step('coremark-prepare', make('', 'coremark-prepare')))
     if 'sta' in args.suites:
-        lanes['sta'] = [Step(f'sta-rv{x}', make('', 'sta',
+        steps.append(Step('sta-prepare', make('sim', 'sta-deps', 'sram-ensure-libs',
+            f'STA_PLATFORM={args.platform}', jobs=1, preset=args.sta_preset)))
+    if 'fpga' in args.suites:
+        settings = [f'BOARD={args.board}', 'FPGA_AUTO_DETECT=0',
+                    f'BUILD_DIR={work}/fpga', f'VIVADO_JOBS={args.tool_jobs}']
+        steps.append(Step('fpga-build', make('fpga/litex', 'fpga-build', *settings),
+                          requires=('rtl-decoders',)))
+        steps.append(Step('fpga-timing-ok', make('fpga/litex', 'fpga-timing-ok', *settings),
+                          'fpga-timing', ('fpga-build',)))
+    if 'sta' in args.suites:
+        steps.extend(Step(f'sta-rv{x}', make('', 'sta',
             f'BUILD_ROOT={work}/sta-rv{x}/pack',
             f'STA_WORK_DIR={work}/sta-rv{x}', 'MEMORY=sram', f'XLEN={x}',
             f'VFLAGS={"-DRAPT_RV64" if x == 64 else ""}',
             f'STA_PLATFORM={args.platform}', f'CLK_FREQ_MHZ={args.clock_mhz}',
             'STA_REPORT_ONLY=1', jobs=1,
-            preset=args.sta_preset), 'sta')
-            for x in args.xlens]
-    if 'fpga' in args.suites:
-        settings = [f'BOARD={args.board}', 'FPGA_AUTO_DETECT=0',
-                    f'BUILD_DIR={work}/fpga', f'VIVADO_JOBS={args.tool_jobs}']
-        lanes['fpga'] = [Step(t, make('fpga/litex', t, *settings),
-                             'fpga-timing' if t == 'fpga-timing-ok' else 'exit')
-                         for t in ('fpga-build', 'fpga-timing-ok')]
-    if 'fpga' in lanes and 'sta' in lanes:
-        fpga = lanes.pop('fpga')
-        sta = lanes.pop('sta')
-        lanes['fpga'] = fpga
-        lanes['sta'] = sta
-    return formats, lanes
+            preset=args.sta_preset), 'sta', ('rtl-decoders', 'sta-prepare'))
+            for x in args.xlens)
+    if 'coremark' in args.suites:
+        for xlen in args.xlens:
+            settings = [f'BUILD_ROOT={work}/sim', f'BUILD_PROFILE=regression-rv{xlen}',
+                        f'VFLAGS={"-DRAPT_RV64" if xlen == 64 else ""}',
+                        f'ITERATIONS={args.iterations}', 'ARGS=-b', 'DIFFTEST=1',
+                        f'NPC_LOG_DIR={work}/logs/npc', f'NEMU_LOG_DIR={work}/logs/nemu']
+            npc = f'coremark-rv{xlen}'
+            native = f'coremark-nemu{xlen}'
+            steps.append(Step(npc, make('', npc, *settings), 'coremark',
+                              ('rtl-decoders', 'coremark-prepare')))
+            steps.append(Step(native, make('', native, *settings, f'O={work}/nemu/rv{xlen}'),
+                              'coremark', ('coremark-prepare',)))
+    return formats, steps
 
 
 def validate(check, output):
@@ -120,10 +127,13 @@ def validate(check, output):
     return ''
 
 
+def skip_step(step, reason):
+    return dict(asdict(step), status='SKIP', exit_code=None, seconds=0, reason=reason, log=None)
+
+
 def run_step(step, work, timeout):
     if CANCELLED.is_set():
-        return dict(asdict(step), status='SKIP', exit_code=None, seconds=0,
-                    reason='regression interrupted', log=None)
+        return skip_step(step, 'regression interrupted')
     started = time.monotonic()
     log = work / 'logs' / (step.name + '.log')
     env = os.environ.copy()
@@ -167,31 +177,37 @@ def run_step(step, work, timeout):
     return result
 
 
-def run_lane(steps, work, timeout, runner=None):
+def run_steps(steps, work, timeout, jobs, runner=None):
     runner = runner or run_step
-    def run_steps():
-        results = []
-        for step in steps:
-            # Only timing depends on a successful bitstream build.
-            if step.name == 'fpga-timing-ok' and results[-1]['status'] != 'PASS':
-                results.append(dict(asdict(step), status='SKIP', exit_code=None, seconds=0,
-                                    reason='fpga-build failed', log=None))
-            else:
-                results.append(runner(step, work, timeout))
-        return results
+    by_name = {step.name: step for step in steps}
+    graph = TopologicalSorter({step.name: step.requires for step in steps})
+    graph.prepare()
+    ready = deque(graph.get_ready())
+    active = {}
+    results = {}
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        while ready or active:
+            while ready and len(active) < jobs:
+                name = ready.popleft()
+                step = by_name[name]
+                failed = next((dep for dep in step.requires if results[dep]['status'] != 'PASS'), None)
+                if failed:
+                    results[name] = skip_step(step, f'{failed} did not pass')
+                    graph.done(name)
+                    ready.extend(graph.get_ready())
+                else:
+                    active[pool.submit(runner, step, work, timeout)] = name
+            if active:
+                finished, _ = wait(active, return_when=FIRST_COMPLETED)
+                for future in finished:
+                    name = active.pop(future)
+                    results[name] = future.result()
+                    graph.done(name)
+                ready.extend(graph.get_ready())
 
-    is_eda = any(step.check == 'sta' or step.name.startswith('fpga-') for step in steps)
-    if is_eda:
-        # Full-chip ABC and Vivado builds are both memory and disk intensive.
-        with EDA_LANE_LOCK:
-            results = run_steps()
-    else:
-        results = run_steps()
-
-    if (steps and steps[0].name == 'fpga-build'
-            and all(result['status'] == 'PASS' for result in results)):
+    if results.get('fpga-timing-ok', {}).get('status') == 'PASS':
         shutil.rmtree(work / 'fpga', ignore_errors=True)
-    return results
+    return [results[step.name] for step in steps]
 
 
 def main(argv=None):
@@ -204,22 +220,25 @@ def main(argv=None):
     parser.add_argument('--board', default='mlk_cu08_ku15p')
     parser.add_argument('--platform', default='nangate45')
     parser.add_argument('--clock-mhz', type=positive, default=50)
-    parser.add_argument('--jobs', type=positive, default=3)
+    parser.add_argument('--jobs', type=positive,
+                        help='maximum concurrent checks (default: CPUs divided by tool jobs)')
     parser.add_argument('--tool-jobs', type=positive, default=4)
     parser.add_argument('--timeout', type=positive, default=14400)
     parser.add_argument('--iterations', type=positive, default=2)
     parser.add_argument('--xlens', nargs='+', type=int, choices=(32, 64), default=[32, 64])
     parser.add_argument('--suites', nargs='+', choices=('format', 'coremark', 'sta', 'fpga'),
                         default=['format', 'coremark', 'sta', 'fpga'])
-    parser.add_argument('--output', type=Path, help='new output directory; default: unique /tmp directory')
+    parser.add_argument('--output', type=Path, help='new output directory in the system temp directory by default')
     args = parser.parse_args(argv)
     args.xlens = list(dict.fromkeys(args.xlens))
+    if args.jobs is None:
+        cpus = len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else os.cpu_count()
+        args.jobs = max(1, (cpus or 1) // args.tool_jobs)
     if args.plan:
         work = args.output or Path('/tmp/raptor-chip-regression-PLAN')
-        formats, lanes = plan(args, work)
+        formats, steps = plan(args, work)
         print(json.dumps({'format_barrier': [asdict(s) for s in formats],
-                          'parallel_lanes': {k: [asdict(s) for s in v] for k, v in lanes.items()},
-                          'max_lanes': args.jobs}, indent=2))
+                          'steps': [asdict(s) for s in steps], 'max_jobs': args.jobs}, indent=2))
         return 0
     lock_name = hashlib.sha256(str(ROOT).encode()).hexdigest()[:16]
     with open(f'/tmp/raptor-chip-regression-{lock_name}.lock', 'w') as lock:
@@ -231,11 +250,11 @@ def main(argv=None):
             work = args.output.resolve()
             work.mkdir(parents=True, exist_ok=False)
         else:
-            work = Path(tempfile.mkdtemp(prefix='raptor-chip-regression-', dir='/tmp'))
+            work = Path(tempfile.mkdtemp(prefix='raptor-chip-regression-'))
         (work / 'logs').mkdir()
         print(f'[regression] output={work}', flush=True)
-        formats, lanes = plan(args, work)
-        results = run_lane(formats, work, args.timeout)
+        formats, steps = plan(args, work)
+        results = [run_step(step, work, args.timeout) for step in formats]
         # Record the actual post-format worktree, including staged changes.
         def git(*command):
             return subprocess.check_output(['git', '-C', str(ROOT), *command])
@@ -253,14 +272,9 @@ def main(argv=None):
                         untracked_sha256=untracked,
                         options={k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()})
         if all(r['status'] == 'PASS' for r in results):
-            with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-                futures = [pool.submit(run_lane, steps, work, args.timeout) for steps in lanes.values()]
-                for future in futures:
-                    results.extend(future.result())
+            results.extend(run_steps(steps, work, args.timeout, args.jobs))
         else:
-            for steps in lanes.values():
-                results.extend(dict(asdict(s), status='SKIP', exit_code=None, seconds=0,
-                                    reason='format barrier failed', log=None) for s in steps)
+            results.extend(skip_step(step, 'format barrier failed') for step in steps)
         passed = not CANCELLED.is_set() and all(r['status'] == 'PASS' for r in results)
         summary = dict(metadata, status='PASS' if passed else 'FAIL', results=results)
         (work / 'summary.json').write_text(json.dumps(summary, indent=2) + '\n')

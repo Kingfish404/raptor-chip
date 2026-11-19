@@ -134,10 +134,10 @@ module rapt_fpu_convert_narrow (
         3'b100: round_up_c = s2_guard_q;
         default: round_up_c = 1'b0;
       endcase
-      rounded_c = {1'b0, s2_retained_q} + round_up_c;
+      rounded_c = {1'b0, s2_retained_q} + 25'(round_up_c);
 
       if (s2_normal_q) begin
-        rounded_exponent_c = s2_exponent_q + rounded_c[24];
+        rounded_exponent_c = s2_exponent_q + $signed({12'b0, rounded_c[24]});
         if (rounded_exponent_c > 127) begin
           stage3_flags_c[2] = 1'b1;
           stage3_flags_c[0] = 1'b1;

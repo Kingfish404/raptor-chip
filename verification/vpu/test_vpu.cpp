@@ -476,6 +476,11 @@ int main(int argc, char** argv) {
             dut.final();
             return 0;
         }
+        if (argc == 2 && std::string(argv[1]) == "--zvkt") {
+            test_zvkt();
+            dut.final();
+            return 0;
+        }
         if (argc == 2 && std::string(argv[1]) == "--predicate-cache") {
             test_predicate_cache();
             dut.final();

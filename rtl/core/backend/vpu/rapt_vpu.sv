@@ -14,6 +14,10 @@ module rapt_vpu #(
     parameter bit CachePredicate = 1,
     parameter bit ShareIntFpConverters = 1,
     parameter bit PackLogic = 1,
+    parameter bit Zvbb = 0,
+    parameter bit Zvfhmin = 0,
+    parameter bit Zvkt = 0,
+    parameter bit MisalignedMemory = 0,
     parameter int AddrBits = $clog2(32*VLEN/8)
 ) (
     input rapt_pkg::sram_ctrl_t sram_ctrl_i,
@@ -217,7 +221,7 @@ module rapt_vpu #(
   logic [63:0] a_input, b_input;
   logic [63:0] a_q, b_q, alu_result, scalar_b;
   logic packed_logic;
-  logic mask_q, enabled_q;
+  logic mask_q, enabled_q, merge_skip_reads;
   logic mask_cache_hit, mask_cache_bit, mask_event, mask_value;
   logic
       d_config,
@@ -233,6 +237,8 @@ module rapt_vpu #(
       d_mask_result,
       d_mask_logic,
       d_carry;
+  // vmerge uses v0 as data, so neither source read may depend on it under Zvkt.
+  assign merge_skip_reads = OptimizeOperandReads && !Zvkt && d_merge;
   logic mw_ready, mw_done, mw_vr_valid, mw_vr_write, mw_vr_rsp_ready;
   logic [AddrBits-1:0] mw_vr_addr;
   logic [7:0] mw_vr_wdata;
@@ -331,7 +337,9 @@ module rapt_vpu #(
       .rsp_tag(rsp_tag),
       .rsp_payload(response)
   );
-  rapt_vpu_decode u_decode (
+  rapt_vpu_decode #(
+      .Zvbb(Zvbb)
+  ) u_decode (
       .insn(command_q.insn),
       .is_config(d_config),
       .is_csr(d_csr),
@@ -447,7 +455,8 @@ module rapt_vpu #(
   assign d_mask_result = fp_recognized ? fp_mask_result : raw_mask_result;
   assign d_src_vector = fp_recognized ? (fp_uses_vs1 && !fp_scalar) : raw_src_vector;
   rapt_vpu_fp_decode #(
-      .ELEN(ELEN)
+      .ELEN(ELEN),
+      .Zvfhmin(Zvfhmin)
   ) u_fp_decode (
       .insn(command_q.insn),
       .sew(vtype[5:3]),
@@ -699,7 +708,9 @@ module rapt_vpu #(
       .result(fixed_result),
       .saturated(fixed_saturated)
   );
-  rapt_vpu_alu u_alu (
+  rapt_vpu_alu #(
+      .Zvbb(Zvbb)
+  ) u_alu (
       .funct6(d_alu_op),
       .sew(packed_logic ? 2'd3 : d_narrow ? a_size_q : d_size_q),
       .a(a_q),
@@ -780,13 +791,16 @@ module rapt_vpu #(
       .flags(div_flags),
       .illegal(div_illegal)
   );
-  if (ELEN >= 64) begin : gen_fp_convert
-    rapt_vpu_fp_convert u_convert (
+  if (ELEN >= 64 || Zvfhmin) begin : gen_fp_convert
+    rapt_vpu_fp_convert #(
+        .Zvfhmin(Zvfhmin)
+    ) u_convert (
         .clock(clock),
         .reset(reset),
         .req_valid(state == FP_START && fp_convert),
         .req_ready(convert_ready),
         .req_widen(fp_widen),
+        .req_half(sew_q == 2'd1),
         .operand(fp_a),
         .rm(fp_odd ? 3'd6 : command_q.frm),
         .rsp_valid(convert_valid),
@@ -840,7 +854,9 @@ module rapt_vpu #(
   );
   assign md_a = d_mac && !d_widen && !command_q.insn[28] ? old_q : a_q;
   assign md_addend = (d_widen || command_q.insn[28]) ? old_q : a_q;
-  rapt_vpu_muldiv u_muldiv (
+  rapt_vpu_muldiv #(
+      .MultiplyEarlyOut(!Zvkt)
+  ) u_muldiv (
       .clock(clock),
       .reset(reset),
       .req_valid(state == MULDIV_START),
@@ -860,7 +876,8 @@ module rapt_vpu #(
     scalar_b = 64'($signed(command_q.rs1));
     if (command_q.insn[14:12] == 3'b011) begin
       scalar_b = 64'($signed(command_q.insn[19:15]));
-      if (command_q.insn[31:26] == 6'h25 || command_q.insn[31:26] == 6'h28
+      if (Zvbb && d_alu_op == 6'h14) scalar_b = 64'({command_q.insn[26], command_q.insn[19:15]});
+      else if (d_alu_op == 6'h25 || command_q.insn[31:26] == 6'h28
           || command_q.insn[31:26] == 6'h29 || d_narrow || (d_fixed && d_fixed_op >= 8))
         scalar_b = 64'(command_q.insn[19:15]);
     end
@@ -1003,6 +1020,7 @@ module rapt_vpu #(
   rapt_vpu_memory #(
       .XLEN(XLEN),
       .VLEN(VLEN),
+      .MisalignedMemory(MisalignedMemory),
       .ELEN(ELEN),
       .TagBits(TagBits)
   ) u_memory (
@@ -1395,7 +1413,7 @@ module rapt_vpu #(
               && command_q.insn[24:20] == command_q.insn[19:15]) begin
             b_q <= b_input;
             state <= execute_state;
-          end else if (OptimizeOperandReads && d_merge && !mask_q) state <= execute_state;
+          end else if (merge_skip_reads && !mask_q) state <= execute_state;
           else state <= d_src_vector ? B_REQ : execute_state;
         end
         B_REQ: if (elem_valid && elem_ready) state <= B_RSP;
@@ -1537,8 +1555,7 @@ module rapt_vpu #(
           index_q <= index_q + 1'b1;
           state <= NEXT_ELEMENT;
         end else if (ft_recognized) state <= FT_ROUTE;
-        else if (OptimizeOperandReads && d_merge && mask_value)
-          state <= d_src_vector ? B_REQ : execute_state;
+        else if (merge_skip_reads && mask_value) state <= d_src_vector ? B_REQ : execute_state;
         else
           state <= d_gather ? (d_src_vector ? B_REQ : GATHER_ROUTE) : d_slide
             ? SLIDE_ROUTE : d_vs2 ? A_REQ : (d_src_vector ? B_REQ : execute_state);

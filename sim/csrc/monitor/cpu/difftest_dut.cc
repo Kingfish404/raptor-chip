@@ -220,6 +220,24 @@ void init_difftest(char *ref_so_file, long img_size, int port, uint64_t isa_exte
   difftest_enabled = true;
   if (npc.vreg != nullptr)
     isa_extensions |= NEMU_ISA_EXT_V128_PREVIEW;
+#ifdef RAPT_DUT_ZAWRS
+  isa_extensions |= NEMU_ISA_EXT_ZAWRS;
+#endif
+#ifdef RAPT_DUT_ZFA
+  isa_extensions |= NEMU_ISA_EXT_ZFA;
+#endif
+#ifdef RAPT_DUT_SSNPM
+  isa_extensions |= NEMU_ISA_EXT_SSNPM;
+#endif
+#ifdef RAPT_DUT_ZVBB
+  isa_extensions |= NEMU_ISA_EXT_ZVBB;
+#endif
+#ifdef RAPT_DUT_ZVFHMIN
+  isa_extensions |= NEMU_ISA_EXT_ZVFHMIN;
+#endif
+#ifdef RAPT_DUT_ZICCLSM_VECTOR
+  isa_extensions |= NEMU_ISA_EXT_ZICCLSM_VECTOR;
+#endif
 
   void *handle;
   handle = dlopen(ref_so_file, RTLD_LAZY);

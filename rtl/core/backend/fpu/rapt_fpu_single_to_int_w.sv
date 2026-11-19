@@ -28,6 +28,7 @@ module rapt_fpu_single_to_int_w #(
       .source_double(SOURCE_DOUBLE),
       .unsigned_result(unsigned_result),
       .int64_target(int64_target),
+      .modulo_word(1'b0),
       .rounding_mode(rounding_mode),
       .result(result),
       .flags(flags),

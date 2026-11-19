@@ -20,6 +20,15 @@ from upload import Serial, ack, load, packet
 STAGE_ADDRESS = 0x8f000000
 
 
+def menvcfg_cmo_bits(dtb):
+    cpu = "/cpus/cpu@0"
+    listed, legacy = subprocess.check_output([
+        "fdtget", "-d", "", "-t", "s", "/dev/stdin", cpu, "riscv,isa-extensions", cpu, "riscv,isa",
+    ], input=dtb).decode().splitlines()
+    extensions = listed.split() or legacy.split("_")[1:]
+    return (0x70 if "zicbom" in extensions else 0) | (0x80 if "zicboz" in extensions else 0)
+
+
 def build(directory, firmware, dtb, server, client, port, cross="riscv64-unknown-elf-", *,
           network=None, xlen=64):
     if xlen not in (32, 64):
@@ -34,7 +43,8 @@ def build(directory, firmware, dtb, server, client, port, cross="riscv64-unknown
     config = (f"#define SERVER_IP {int(server)}u\n#define CLIENT_IP {int(client)}u\n"
               f"#define SERVER_PORT {port}u\n#define FIRMWARE_SIZE {len(firmware)}u\n"
               f"#define FIRMWARE_CRC {zlib.crc32(firmware)}u\n#define DTB_SIZE {len(dtb)}u\n"
-              f"#define DTB_CRC {zlib.crc32(dtb)}u\n")
+              f"#define DTB_CRC {zlib.crc32(dtb)}u\n"
+              f"#define NETBOOT_MENVCFG_CMO {menvcfg_cmo_bits(dtb)}u\n")
     network = network or {"driver": "native", "mac": "02:52:41:50:05:01"}
     if network["driver"] not in ("native", "liteeth"):
         raise ValueError("unsupported TFTP Ethernet backend")

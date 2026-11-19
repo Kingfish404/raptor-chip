@@ -1,6 +1,7 @@
 module rapt_fpu_fp_to_int #(
     parameter bit SOURCE_DOUBLE = 1'b0,
-    parameter bit MULTI_FORMAT = 1'b0
+    parameter bit MULTI_FORMAT = 1'b0,
+    parameter bit MODULO_WORD = 1'b0
 ) (
     input  logic        clock,
     input  logic        reset,
@@ -11,6 +12,7 @@ module rapt_fpu_fp_to_int #(
     input  logic        source_double,
     input  logic        unsigned_result,
     input  logic        int64_target,
+    input  logic        modulo_word,
     input  logic [2:0]  rounding_mode,
     output logic [63:0] result,
     output logic [4:0]  flags,
@@ -23,6 +25,7 @@ module rapt_fpu_fp_to_int #(
   logic s1_sign_q, s1_nan_q, s1_inf_q, s1_zero_q;
   logic [5:0] s1_frac_bits_q;
   logic s1_unsigned_q, s1_int64_q;
+  logic s1_modulo_q, s2_modulo_q;
   logic signed [13:0] s1_exponent_q;
   logic [52:0] s1_significand_q;
   logic [2:0] s1_rounding_mode_q;
@@ -85,7 +88,9 @@ module rapt_fpu_fp_to_int #(
     if (!s1_zero_q && !s1_nan_q && !s1_inf_q) begin
       if (s1_exponent_q >= $signed({8'b0, s1_frac_bits_q})) begin
         shift_count_c = int'(s1_exponent_q) - int'(s1_frac_bits_q);
-        if (s1_exponent_q <= 63) magnitude_c = {11'b0, s1_significand_q} << shift_count_c;
+        // Below 2**84, an invalid signed word can still have nonzero low bits.
+        if (s1_exponent_q <= (s1_modulo_q ? 83 : 63))
+          magnitude_c = {11'b0, s1_significand_q} << shift_count_c;
       end else begin
         shift_count_c = int'(s1_frac_bits_q) - int'(s1_exponent_q);
         if (shift_count_c < 64) magnitude_c = {11'b0, s1_significand_q} >> shift_count_c;
@@ -112,7 +117,7 @@ module rapt_fpu_fp_to_int #(
       3'b100: round_up_c = s2_guard_q;
       default: round_up_c = 1'b0;
     endcase
-    rounded_magnitude_c = s2_magnitude_q + round_up_c;
+    rounded_magnitude_c = s2_magnitude_q + 64'(round_up_c);
     range_invalid_c = s2_invalid_q;
     if (!s2_nan_q && !s2_inf_q && !s2_invalid_q) begin
       if (s2_unsigned_q)
@@ -130,7 +135,7 @@ module rapt_fpu_fp_to_int #(
 
     int_result_c = s2_sign_q && !s2_unsigned_q
         ? (~rounded_magnitude_c + 64'd1) : rounded_magnitude_c;
-    if (range_invalid_c) begin
+    if (range_invalid_c && !s2_modulo_q) begin
       if (s2_int64_q) begin
         if (s2_unsigned_q) int_result_c = s2_sign_q && !s2_nan_q ? 64'b0 : {64{1'b1}};
         else
@@ -170,6 +175,7 @@ module rapt_fpu_fp_to_int #(
       s1_zero_q <= zero_c;
       s1_unsigned_q <= unsigned_result;
       s1_int64_q <= int64_target;
+      s1_modulo_q <= MODULO_WORD && modulo_word;
       s1_exponent_q <= unbiased_exponent_c;
       s1_significand_q <= significand_c;
       s1_rounding_mode_q <= rounding_mode;
@@ -181,6 +187,7 @@ module rapt_fpu_fp_to_int #(
       s2_invalid_q <= invalid_c;
       s2_unsigned_q <= s1_unsigned_q;
       s2_int64_q <= s1_int64_q;
+      s2_modulo_q <= s1_modulo_q;
       s2_magnitude_q <= magnitude_c;
       s2_guard_q <= guard_c;
       s2_sticky_q <= sticky_c;

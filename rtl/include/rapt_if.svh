@@ -293,6 +293,7 @@ interface csr_bcast_if #(
   logic sw_int_en;
   logic ext_int_en;
   logic bus_error_int;  // Eligible nondelegatable platform machine interrupt 16.
+  logic wrs_irq_pending;
 
   // MPRV/MPP for load/store effective privilege
   logic mprv;
@@ -308,7 +309,7 @@ interface csr_bcast_if #(
   // mstatus privileged-mode guard bits (TSR/TVM/TW) for illegal-inst checks.
   logic tsr;  // trap sret in S-mode when set
   logic tvm;  // trap satp / sfence.vma in S-mode when set
-  logic tw;  // trap wfi in U/S when set
+  logic tw;  // timeout wait in U/S mode
 
   // mcounteren / scounteren low 3 bits (CY/TM/IR) for U/S counter reads.
   logic [2:0] mcounteren;
@@ -323,24 +324,27 @@ interface csr_bcast_if #(
   logic [1:0] senvcfg_cbie;
   logic senvcfg_cbcfe;
   logic senvcfg_cbze;
+  logic [1:0] data_pmm;  // Effective pointer masking mode for explicit data accesses.
 
   modport in(
       input priv, satp_ppn, satp_asid,
       input immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en, ext_int_en, bus_error_int,
+      input wrs_irq_pending,
       input mprv, mpp,
       input tsr, tvm, tw, mcounteren, scounteren,
       input sum, mxr, sbe, frm, fs, vs,
       input menvcfg_cbie, menvcfg_cbcfe, menvcfg_cbze, menvcfg_stce, menvcfg_pbmte,
-      input senvcfg_cbie, senvcfg_cbcfe, senvcfg_cbze
+      input senvcfg_cbie, senvcfg_cbcfe, senvcfg_cbze, data_pmm
   );
   modport out(
       output priv, satp_ppn, satp_asid,
       output immu_en, dmmu_en, mtvec, tvec, timer_int_en, sw_int_en, ext_int_en, bus_error_int,
+      output wrs_irq_pending,
       output mprv, mpp,
       output tsr, tvm, tw, mcounteren, scounteren,
       output sum, mxr, sbe, frm, fs, vs,
       output menvcfg_cbie, menvcfg_cbcfe, menvcfg_cbze, menvcfg_stce, menvcfg_pbmte,
-      output senvcfg_cbie, senvcfg_cbcfe, senvcfg_cbze
+      output senvcfg_cbie, senvcfg_cbcfe, senvcfg_cbze, data_pmm
   );
 endinterface
 

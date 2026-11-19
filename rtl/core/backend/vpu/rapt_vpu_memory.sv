@@ -1,7 +1,7 @@
 `include "rapt_sva.svh"
 
 // Sequential vector memory sequencer. The command is already irrevocably
-// authorized. Requests use virtual byte addresses and natural-aligned elements;
+// authorized. Requests use virtual byte addresses and the original element size;
 // the integration adapter owns translation, PMP/PMA, ordering and final errors.
 // A successful store response must mean the store is no longer faultable. A
 // fault response must not have performed that request's non-idempotent effect.
@@ -11,6 +11,7 @@ module rapt_vpu_memory #(
     parameter int XLEN = 64,
     parameter int VLEN = 128,
     parameter int ELEN = 64,
+    parameter bit MisalignedMemory = 0,
     parameter int TagBits = 10,
     parameter int AddrBits = $clog2(32*VLEN/8),
     parameter int IndexBits = $clog2(VLEN)+1
@@ -220,7 +221,8 @@ module rapt_vpu_memory #(
   logic fault_event, trim_fault;
   logic [XLEN-1:0] fault_cause, fault_address;
   always_comb begin
-    fault_event = state == PREPARE && (mem_addr & ((XLEN'(1) << data_size_q)-1)) != 0;
+    fault_event = !MisalignedMemory && state == PREPARE
+        && (mem_addr & ((XLEN'(1) << data_size_q) - 1)) != 0;
     fault_cause = load ? XLEN'(4) : XLEN'(6);
     fault_address = mem_addr;
     if (accepted_response && mem_fault) begin

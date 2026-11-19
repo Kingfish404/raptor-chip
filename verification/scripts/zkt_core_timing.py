@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compare full-core commit timing for identical code with different seed data.
 
-Requires an NPC binary built with RAPT_SPEC_OBSERVE and a differential reference.
+Requires an NPC binary built with RAPT_AXI_OBSERVE and RAPT_SPEC_OBSERVE and a differential reference.
 This is a finite regression, not a proof of complete Zkt compliance.
 """
 import argparse
@@ -19,6 +19,8 @@ def digest(p):
 def commits(text, start, end):
     rows = [(int(c), int(pc, 16), int(npc, 16)) for c, pc, npc in
             re.findall(r'^SPEC_OBS (\d+) COMMIT ([0-9a-fA-F]+) ([0-9a-fA-F]+)$', text, re.M)]
+    if not rows:
+        raise ValueError('no commit trace; build NPC with RAPT_AXI_OBSERVE and RAPT_SPEC_OBSERVE')
     selected = [row for row in rows if start <= row[1] < end]
     if not selected or selected[0][1] != start:
         raise ValueError('missing measured commit sequence')
@@ -40,10 +42,13 @@ def main():
     ap.add_argument('--xlen', type=int, choices=[32, 64], required=True)
     ap.add_argument('--npc', type=Path, required=True)
     ap.add_argument('--reference', type=Path, required=True)
+    ap.add_argument('--mrom', type=Path,
+                    help='boot ROM matching the simulator XLEN')
     ap.add_argument('--output', type=Path, required=True)
     ap.add_argument('--delays', type=int, nargs='+', default=[0, 7, 63])
     args = ap.parse_args()
     root = Path(__file__).resolve().parents[2]
+    mrom = args.mrom or root / 'sim/csrc/mem/mrom-data/build/mrom-data.bin'
     out = args.output.resolve(); out.mkdir(parents=True, exist_ok=True)
     subprocess.run(['python3', str(root/'verification/scripts/zkt_decode_vectors.py'), '--xlen', str(args.xlen), '--output', str(out/'vectors')], check=True)
     vectors = json.loads((out/'vectors/manifest.json').read_text())['rows']
@@ -78,7 +83,9 @@ def main():
             image = out/f'data-{i}.bin'; data=bytearray(base); data[offset:offset+8]=value.to_bytes(8,'little'); image.write_bytes(data)
             assert image.read_bytes()[:offset]==base[:offset] and image.read_bytes()[offset+8:]==base[offset+8:]
             log = out/f'delay-{delay}-data-{i}.log'
-            cmd = [str(args.npc.resolve()),'-b','-n','--no-lightsss','-t','180',f'--mem-random-delay={delay}','--mem-random-seed=42','-d',str(args.reference.resolve()),'-r',str(root/'sim/csrc/mem/mrom-data/build/mrom-data.bin'),str(image)]
+            cmd = [str(args.npc.resolve()), '-b', '-n', '--no-lightsss', '-t', '180',
+                   f'--mem-random-delay={delay}', '--mem-random-seed=42',
+                   '-d', str(args.reference.resolve()), '-r', str(mrom.resolve()), str(image)]
             with log.open('w') as f:
                 rc=subprocess.run(cmd,cwd=root/'sim',stdout=f,stderr=subprocess.STDOUT,timeout=210).returncode
             text=log.read_text()

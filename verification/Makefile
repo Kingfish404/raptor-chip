@@ -1883,7 +1883,7 @@ verilator-idu-zkt-rv32 verilator-idu-zkt-rv64:
 rva22s64-zkt-core-timing-run: $(RVA22S64_MROM)
 	$(PYTHON) "$(VERIFY_HOME)/scripts/zkt_core_timing.py" --xlen $(RVA22S64_XLEN) \
 		--npc "$(RVA22S64_NPC)" --reference "$(NEMU_SO_$(RVA22S64_XLEN))" \
-		--output "$(BUILD_DIR)/zkt-core-timing"
+		--mrom "$(RVA22S64_MROM)" --output "$(BUILD_DIR)/zkt-core-timing"
 
 # End-to-end supervisor test: caller supplies freshly built RV64 DUT/reference.
 # Separate build/run targets keep shared simulator configuration mutations

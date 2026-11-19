@@ -56,6 +56,8 @@ class SimulatorBuildFlagsTest(unittest.TestCase):
                 "    case \" $* \" in *\" -DRAPT_RV64 \"*) xlen=64; pmp=30;; esac\n"
                 "    printf '`define RAPT_XLEN %s\\n`define RAPT_PADDR_BITS 32\\n' \"$xlen\"\n"
                 "    printf '`define RAPT_PMPADDR_BITS %s\\n' \"$pmp\"\n"
+                "    printf '`define RAPT_VLEN 128\\n`define RAPT_VRF_BANK_BITS 64\\n'\n"
+                "    printf '`define RAPT_VRF_BANKS 2\\n'\n"
                 "    exit 0;;\n"
                 "esac\n"
                 "printf 'verilator'\n"

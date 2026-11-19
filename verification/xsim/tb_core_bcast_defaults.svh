@@ -45,6 +45,7 @@ task automatic init_csr_bcast_defaults(
     csr_bcast.sw_int_en = 1'b0;
     csr_bcast.ext_int_en = 1'b0;
     csr_bcast.bus_error_int = 1'b0;
+    csr_bcast.wrs_irq_pending = 1'b0;
     csr_bcast.mprv = 1'b0;
     csr_bcast.mpp = priv_value;
     csr_bcast.sum = 1'b0;
@@ -66,6 +67,7 @@ task automatic init_csr_bcast_defaults(
     csr_bcast.senvcfg_cbie = '0;
     csr_bcast.senvcfg_cbcfe = 1'b0;
     csr_bcast.senvcfg_cbze = 1'b0;
+    csr_bcast.data_pmm = '0;
   end
 endtask
 

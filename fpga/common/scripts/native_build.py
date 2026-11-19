@@ -16,6 +16,8 @@ from rtl_pack import pack
 from sampling_overlay import sampling_sources
 sys.path.insert(0, str(REPO / "sim/gsim"))
 from raptor_dse import parse_rapt_config
+sys.path.insert(0, str(REPO / "sim/scripts"))
+from paddr_config import extend_isa, rva23_extensions
 
 BOARD = PROFILE = None
 
@@ -29,6 +31,7 @@ def resolve_vector(args):
     if enabled and preset.get("RAPT_NO_FPU"):
         raise ValueError("V requires a preset with the scalar F and D extensions")
     args.vector = int(enabled)
+    args.rva23u64 = args.xlen == 64 and enabled and not preset.get("RAPT_NO_RVA23U64")
 
 
 def configure(board):
@@ -110,6 +113,9 @@ def input_hashes(cm005_bridge=False):
             files += [parent / name for name in names
                       if Path(name).suffix in extensions and (parent / name).is_file()]
     files.append(REPO / "fpga/litex/scripts/vivado_retry_timing.tcl")
+    for path in (REPO / "sim/scripts/paddr_config.py", REPO / "sim/gsim/raptor_dse.py"):
+        if path.is_file():
+            files.append(path)
     if cm005_bridge:
         bridge_sources = (
             "cm005_native.py", "cm005_bridge.py", "cm005_bridge_queue.py", "cm005_switch.py", "cm005.py",
@@ -254,11 +260,15 @@ def device_tree(args, out, ram_bytes):
     def cells(name):
         return f"0 0x{reg[name]['base']:x} 0 0x{reg[name]['size']:x}"
     vector = bool(getattr(args, "vector", 0))
-    isa = f"rv{args.xlen}imafdc{'v' if vector else ''}_zicsr_zifencei_zicntr"
-    extensions = '"i", "m", "a", "f", "d", "c"'
+    profile = getattr(args, "rva23u64", args.xlen == 64 and vector)
+    extra_extensions = rva23_extensions() if profile else []
     if vector:
-        extensions += ', "v"'
-    extensions += ', "zicsr", "zifencei", "zicntr"'
+        extra_extensions.append("v")
+    isa = extend_isa(f"rv{args.xlen}imafdc_zicsr_zifencei_zicntr", extra_extensions)
+    base, *suffixes = isa.split("_")
+    extensions = ", ".join(f'"{extension}"' for extension in (*base[4:], *suffixes))
+    cache_block_sizes = "".join(f"            riscv,{name}-block-size = <64>;\n"
+                                for name in ("cbom", "cbop", "cboz")) if profile else ""
     text = f"""/dts-v1/;
 / {{
     #address-cells = <2>;
@@ -277,7 +287,7 @@ def device_tree(args, out, ram_bytes):
             riscv,isa = "{isa}";
             riscv,isa-base = "rv{args.xlen}i";
             riscv,isa-extensions = {extensions};
-            mmu-type = "riscv,sv{'32' if args.xlen == 32 else '39'}";
+{cache_block_sizes}            mmu-type = "riscv,sv{'32' if args.xlen == 32 else '39'}";
             clock-frequency = <{args.clock_mhz * 1_000_000}>;
             cpu_intc: interrupt-controller {{
                 #address-cells = <0>; #interrupt-cells = <1>;

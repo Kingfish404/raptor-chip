@@ -2,6 +2,7 @@
 
 module rapt_fpu_compare (
     input  logic [5:0]  op,
+    input  logic        zfa_semantics,
     input  logic [63:0] operand_a,
     input  logic [63:0] operand_b,
     output logic [63:0] result,
@@ -83,7 +84,7 @@ module rapt_fpu_compare (
     flags = '0;
     if (is_minmax) begin
       flags[4] = a_snan || b_snan;
-      if (a_nan && b_nan) result = canonical_nan;
+      if ((a_nan && b_nan) || (zfa_semantics && (a_nan || b_nan))) result = canonical_nan;
       else if (a_nan) result = b_value;
       else if (b_nan) result = a_value;
       else if (is_equal && a_zero && b_zero)
@@ -91,7 +92,7 @@ module rapt_fpu_compare (
       else result = (is_less == is_maximum) ? b_value : a_value;
     end else begin
       flags[4] = a_snan || b_snan
-        || ((op != `RAPT_FP_OP_FEQ_S) && (op != `RAPT_FP_OP_FEQ_D)
+        || (!zfa_semantics && (op != `RAPT_FP_OP_FEQ_S) && (op != `RAPT_FP_OP_FEQ_D)
           && (a_nan || b_nan));
       result[0] = (op == `RAPT_FP_OP_FEQ_S)
         || (op == `RAPT_FP_OP_FEQ_D) ? is_equal

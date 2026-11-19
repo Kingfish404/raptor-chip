@@ -367,6 +367,14 @@ void boot_main(void)
         if ((uint32_t)(ticks() - start) > 2000000) fail("TX drain timeout");
 #endif
     ethernet_stop();
+#if NETBOOT_MENVCFG_CMO
+    // Generic OpenSBI may skip MENVCFG setup when MCOUNTINHIBIT is absent.
+    uintptr_t menvcfg;
+    __asm__ volatile("csrs 0x30a, %1\ncsrr %0, 0x30a"
+                     : "=r"(menvcfg) : "r"((uintptr_t)NETBOOT_MENVCFG_CMO));
+    if ((menvcfg & NETBOOT_MENVCFG_CMO) != NETBOOT_MENVCFG_CMO)
+        fail("MENVCFG does not enable the advertised supervisor cache operations");
+#endif
     say("Starting OpenSBI/Linux\r\n");
     while (!(UART[5] & 0x40)) {}
     boot_jump(0x80000000u, 0x8fff0000u);

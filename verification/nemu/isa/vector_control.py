@@ -25,7 +25,7 @@ def main():
     def check(name, actual, expected):
         rows.append(dict(name=name, actual=actual, expected=expected, passed=actual == expected))
 
-    check('supported', api.supported, 2047 if args.xlen == 64 else 998)
+    check('supported', api.supported, 4095 if args.xlen == 64 else 3046)
     check('configure', api.configure(64 if args.enable else 0), 0)
     reference = Reference(args.reference, args.xlen)
     state = reference.state

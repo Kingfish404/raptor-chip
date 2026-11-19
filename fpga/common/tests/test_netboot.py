@@ -1,7 +1,9 @@
 """TFTP host regression: loss, duplicate ACKs, exact block boundary and allowlist."""
 from pathlib import Path
+import shutil
 import socket
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -12,22 +14,34 @@ import netboot
 
 
 class LoaderTest(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("dtc") and shutil.which("fdtget"), "requires dtc tools")
     def test_loader_matches_board_xlen(self):
-        def compile_loader(command, *, check):
+        def compile_loader(command, *, check, **kwargs):
             self.assertTrue(check)
+            if command[0] == "fdtget":
+                return run_system(command, check=check, **kwargs)
             if command[0].endswith("objcopy"):
                 Path(command[-1]).write_bytes(b"\x13\0\0\0")
 
+        run_system = subprocess.run
+        cases = ((32, "ilp32", 'riscv,isa = "rv32imac_zicbom";', 0x70),
+                 (64, "lp64", 'riscv,isa-extensions = "zicbom", "zicboz";', 0xf0))
         with tempfile.TemporaryDirectory() as directory:
-            for xlen, abi in ((32, "ilp32"), (64, "lp64")):
+            for xlen, abi, prop, cmo_bits in cases:
+                dts = f"/dts-v1/; / {{ cpus {{ cpu@0 {{ {prop} }}; }}; }};"
+                dtb = subprocess.check_output(["dtc", "-I", "dts", "-O", "dtb", "-q"],
+                                              input=dts.encode())
                 with self.subTest(xlen=xlen), patch.object(netboot.subprocess, "run",
                                                           side_effect=compile_loader) as run:
-                    loader = netboot.build(Path(directory) / str(xlen), b"fw", bytes(40),
+                    loader = netboot.build(Path(directory) / str(xlen), b"fw", dtb,
                                            "127.0.0.1", "127.0.0.2", 6969, xlen=xlen)
                     self.assertTrue(loader.is_file())
-                    compile_args = run.call_args_list[0].args[0]
+                    compile_args = next(call.args[0] for call in run.call_args_list
+                                        if call.args[0][0].endswith("gcc"))
                     self.assertIn(f"-march=rv{xlen}imac_zicsr_zifencei", compile_args)
                     self.assertIn(f"-mabi={abi}", compile_args)
+                    config = (loader.parent / "netboot_config.h").read_text()
+                    self.assertIn(f"#define NETBOOT_MENVCFG_CMO {cmo_bits}u\n", config)
 
 
 class TftpTest(unittest.TestCase):

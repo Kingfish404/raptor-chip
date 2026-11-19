@@ -5,7 +5,8 @@
 // division avoid technology-dependent combinational multipliers/dividers.
 // Requests are already authorized; reset is not an architectural cancellation.
 module rapt_vpu_muldiv #(
-    parameter bit EarlyOut = 1
+    parameter bit EarlyOut = 1,
+    parameter bit MultiplyEarlyOut = EarlyOut
 ) (
     input logic clock,
     reset,
@@ -88,7 +89,7 @@ module rapt_vpu_muldiv #(
           product_q <= 0;
           negative_q <= aneg ^ bneg;
           remainder_negative_q <= aneg;
-          if (EarlyOut && op[2] && (amag == 0 || bmag == 0)) begin
+          if (MultiplyEarlyOut && op[2] && (amag == 0 || bmag == 0)) begin
             result <= 0;
             state <= DONE;
           end else if (op[2]) begin
@@ -118,7 +119,7 @@ module rapt_vpu_muldiv #(
           multiplicand_q <= multiplicand_q << 1;
           multiplier_q <= multiplier_q >> 1;
           count_q <= count_q-1'b1;
-          if (count_q == 1 || (EarlyOut && multiplier_q[63:1] == 0)) begin
+          if (count_q == 1 || (MultiplyEarlyOut && multiplier_q[63:1] == 0)) begin
             result <= (op_q == 5 ? product_signed[63:0] : 64'(product_signed >> bits_q)) & mask_q;
             state <= DONE;
           end

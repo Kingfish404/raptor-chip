@@ -1,7 +1,8 @@
 // Standalone raw instruction decoder. Only implemented operations are admitted;
 // unsupported/reserved encodings trap instead of falling through to an ALU op.
-// Scalar-core Chisel decode is untouched until the integration adapter exists.
-module rapt_vpu_decode (
+module rapt_vpu_decode #(
+    parameter bit Zvbb = 0
+) (
     // Register identities are validated by the geometry-aware scheduler.
     /* verilator lint_off UNUSEDSIGNAL */
     input logic [31:0] insn,
@@ -155,6 +156,16 @@ module rapt_vpu_decode (
         src_vector = 0;
         extend_shift = 2'(4-int'(insn[17:16]));
         a_signed = insn[15];
+      end else if (Zvbb && insn[14:12] == 3'b010 && insn[31:26] == 6'h12) begin
+        case (insn[19:15])
+          5'd8, 5'd9, 5'd10, 5'd12, 5'd13, 5'd14: begin
+            is_integer = 1;
+            src_vector = 0;
+            // Map the unary selectors to unused element ALU controls 0x30..0x36.
+            alu_op = {3'b110, insn[17:15]};
+          end
+          default: ;
+        endcase
       end else if (insn[14:12] == 3'b010 && insn[31:29] == 3'b011) begin
         is_integer = insn[25];
         mask_result = 1;
@@ -168,6 +179,17 @@ module rapt_vpu_decode (
       end else if (opiv) begin
         case (insn[31:26])
           6'h00, 6'h09, 6'h0a, 6'h0b, 6'h25, 6'h28, 6'h29: is_integer = 1;
+          6'h01: is_integer = Zvbb && insn[14:12] != 3'b011;
+          6'h14, 6'h15: begin
+            is_integer = Zvbb;
+            // In OPIVI, bit 26 is the high bit of the rotate-right immediate.
+            if (insn[14:12] == 3'b011) alu_op = 6'h14;
+          end
+          6'h35: begin
+            is_integer = Zvbb;
+            widen = 1;
+            alu_op = 6'h25;
+          end
           6'h02, 6'h04, 6'h05, 6'h06, 6'h07: is_integer = insn[14:12] != 3'b011;
           6'h10, 6'h11, 6'h12, 6'h13: begin
             carry = 1; mask_result = insn[26];

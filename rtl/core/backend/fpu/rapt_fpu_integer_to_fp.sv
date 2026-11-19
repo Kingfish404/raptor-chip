@@ -123,8 +123,8 @@ module rapt_fpu_integer_to_fp #(
         3'b100: round_up_c = guard_precision_c;
         default: round_up_c = 1'b0;
       endcase
-      rounded_c = {1'b0, s2_retained_q} + round_up_c;
-      rounded_single_c = {1'b0, retained_wide_c[52:29]} + round_up_c;
+      rounded_c = {1'b0, s2_retained_q} + {{Precision{1'b0}}, round_up_c};
+      rounded_single_c = {1'b0, retained_wide_c[52:29]} + 25'(round_up_c);
       if (MULTI_FORMAT ? s2_double_q : TARGET_DOUBLE) begin
         exponent_c = 11'd1022 + {4'b0, s2_leading_one_q} + 11'(rounded_c[Precision]);
         stage3_result_c = {s2_sign_q, exponent_c[10:0], 52'(rounded_c)};

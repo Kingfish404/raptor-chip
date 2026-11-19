@@ -29,7 +29,7 @@ def main():
     def check(name, actual, expected):
         rows.append(dict(name=name, actual=actual, expected=expected, passed=actual == expected))
 
-    check('supported', query(1, size).contents.supported, 2047 if args.xlen == 64 else 998)
+    check('supported', query(1, size).contents.supported, 4095 if args.xlen == 64 else 3046)
     extensions = (2 | (1024 if args.hypervisor else 0)) if args.enable else 0
     check('enable', query(1, size).contents.configure(extensions), 0)
     reference = Reference(args.reference, args.xlen)
@@ -44,13 +44,15 @@ def main():
         reference.write(data, (0x1234).to_bytes(4, 'little'))
         if reserved:
             reference.run([0x1000a1af])
+        state.gpr[4] = int(pending) << 1
+        reference.run([0x34421073])  # Write the real mip.SSIP backing bit.
         before = list(state.gpr[:32])
         retired = state.minstret[0]
         state.priv[0] = bytes([privilege])
         state.mstatus[0] |= tw << 21
-        state.mip[0] = int(pending) << 1
         pc = reference.run([instruction])
-        trapped = not args.enable or (instruction == 0x00d00073 and privilege != 3 and tw)
+        trapped = not args.enable or (instruction == 0x00d00073 and privilege != 3 and tw
+                                      and reserved and not pending)
         name = f'{instruction:08x}-priv{privilege}-tw{tw}-lr{reserved}-pending{pending}'
         check(name, [state.pc[0], state.mcause[0], state.mtval[0], state.minstret[0]],
               [0x80ff0000, 2, instruction, retired] if trapped else [pc + 4, 0, 0, retired + 1])

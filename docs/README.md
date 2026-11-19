@@ -47,7 +47,8 @@ Both XLEN modes implement **IMAFDC**, scalar **Zfhmin**, bit manipulation
 - **System and hints:** Zicsr, Zifencei, Zicntr, Zihpm, Zicond, Zihintntl, Zihintpause, Zimop.
 - **Cache management:** Zicbom, Zicbop, Zicboz.
 - **Compressed:** Zca, Zcb, Zcmop, alongside C's F/D memory forms.
-- **Supervisor:** Svinval in both modes; Svpbmt and Zkt in the default RV64 configuration.
+- **Execution timing:** Zkt on the default RV64 configuration.
+- **Supervisor:** Svinval in both modes and Svpbmt in the default RV64 configuration.
 
 Page-table A/D bits use software management (Svade). Committed Svinval and
 SFENCE.VMA select translations by address and ASID by default, preserving unrelated
@@ -55,6 +56,24 @@ entries; `RAPT_SFENCE_SELECTIVE=0` restores full invalidation. The
 [vector extension](./vpu.md) uses the core's ROB, CSR, MMU and cache contracts.
 `RAPT_NO_VPU` selects a scalar build without MISA.V.
 Decoder sources live in [`tools/decodegen/`](https://github.com/Kingfish404/raptor-chip/tree/master/tools/decodegen).
+
+## RVA23U64 support
+
+The RV64 `default`, `default-*` and `large` presets enable the mandatory
+[RVA23U64 user profile](https://docs.riscv.org/reference/rva23/v1.0/rva23-profiles.html).
+The additions include Zvbb, Zvfhmin, Zvkt, Zfa, Zawrs, and Ssnpm for the
+Supm execution environment. `RAPT_NO_RVA23U64` selects the baseline V configuration.
+
+The VPU accepts misaligned vector elements in main memory, including
+cross-page accesses. It checks protection and device attributes before split stores.
+Zawrs uses the cache's LR reservation and can wake on an external write or a
+pending interrupt. The bounded wait lasts up to 1,024 core cycles.
+
+Ssnpm provides U-mode PMLEN values of 0, 7 and 16 via `senvcfg.PMM`.
+The simulator and FPGA device trees advertise `ssnpm` so a Linux kernel with
+`CONFIG_RISCV_ISA_SUPM` can expose the tagged-address `prctl` interface.
+The Linux boot loaders enable supervisor cache maintenance, including `cbo.zero`.
+See the [verification commands](../verification/README.md#architectural-programs-and-fuzzing).
 
 ## RVA22S64 support
 
@@ -72,12 +91,6 @@ This scope includes its mandatory user-mode features and supervisor requirements
 The profile statement applies to the default **RV64** configuration. RV32 and
 modified presets have their own ISA scope. RVA22S64 treats V and H as optional
 extensions. The default core supports V.
-
-Full **RVA23S64** is a subsequent goal. The audit follows both mandatory
-extension lists, including Zvfhmin, Zvbb, Zvkt, Zcmop, Zcb, Zfa, Zawrs, Supm,
-Ss1p13, Svnapot, Sstc, Sscofpmf, Ssnpm, Ssu64xl and Sha. It also checks existing
-scalar features against the profile's required versions and behavior.
-[Ratified RVA23 profile](https://docs.riscv.org/reference/rva23/v1.0/rva23-profiles.html).
 
 The [RV64 supervisor verification guide](https://github.com/Kingfish404/raptor-chip/blob/master/verification/riscof/raptor-rv64s/README.md)
 and the current verification commands

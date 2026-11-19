@@ -91,7 +91,7 @@ class RVA23ClockTest(unittest.TestCase):
                 self.assertEqual(select(b'none'), 0)
                 self.assertEqual(select(b'rva23'), 0 if timer == 'CYCLE' else -1)
                 mask = ctypes.c_uint64.in_dll(library, 'riscv_isa_extensions')
-                self.assertEqual(mask.value, 0x7ff if timer == 'CYCLE' else 0)
+                self.assertEqual(mask.value, 0xfff if timer == 'CYCLE' else 0)
                 self.assertEqual(select(b'none'), 0)
                 self.assertEqual(mask.value, 0)
 

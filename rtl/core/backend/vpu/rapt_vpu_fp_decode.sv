@@ -3,7 +3,8 @@
 // register geometry, and captures all outputs at execution request acceptance.
 // This module does not authorize architectural effects or process mask bits.
 module rapt_vpu_fp_decode #(
-    parameter int ELEN = 64
+    parameter int ELEN = 64,
+    parameter bit Zvfhmin = 0
 ) (
     // Register indices and vm belong to the caller.
     /* verilator lint_off UNUSEDSIGNAL */
@@ -184,9 +185,10 @@ module rapt_vpu_fp_decode #(
         default: ;
       endcase
     end
-    legal = recognized && enabled && !vill && frm <= 4
-        && (sew == 2 || (sew == 3 && ELEN >= 64)) && ELEN >= 32
-        && (!(widening || conversion) || (sew == 2 && ELEN >= 64));
+    legal = recognized && enabled && !vill && frm <= 4 && ELEN >= 32;
+    if (conversion) legal &= (sew == 2 && ELEN >= 64) || (Zvfhmin && sew == 1 && !odd);
+    else if (widening) legal &= sew == 2 && ELEN >= 64;
+    else legal &= sew == 2 || (sew == 3 && ELEN >= 64);
     widen = 0;
     wide_source_a = 0;
     format_convert = 0;

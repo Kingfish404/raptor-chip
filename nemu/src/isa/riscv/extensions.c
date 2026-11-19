@@ -12,6 +12,7 @@ uint64_t riscv_isa_supported(void)
   supported |= NEMU_ISA_EXT_SSCOFPMF;
   supported |= NEMU_ISA_EXT_V128_PREVIEW;
   supported |= NEMU_ISA_EXT_ZVBB;
+  supported |= NEMU_ISA_EXT_ZICCLSM_VECTOR;
   supported |= NEMU_ISA_EXT_SMSTATEEN_PREVIEW;
 #ifdef CONFIG_RV_F
   supported |= NEMU_ISA_EXT_ZVFHMIN;
@@ -30,7 +31,7 @@ uint64_t riscv_isa_supported(void)
 int riscv_isa_configure(uint64_t extensions)
 {
   if (riscv_isa_locked || (extensions & ~riscv_isa_supported()) ||
-      ((extensions & (NEMU_ISA_EXT_ZVBB | NEMU_ISA_EXT_ZVFHMIN)) &&
+      ((extensions & (NEMU_ISA_EXT_ZVBB | NEMU_ISA_EXT_ZVFHMIN | NEMU_ISA_EXT_ZICCLSM_VECTOR)) &&
        !(extensions & NEMU_ISA_EXT_V128_PREVIEW)))
     return -1;
   riscv_isa_extensions = extensions;

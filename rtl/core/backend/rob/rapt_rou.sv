@@ -524,7 +524,8 @@ module rapt_rou #(
     // until the complete zero block has drained. Fences/CBOM own no SQ entry.
     return !u.execute.memory.store && (u.execute.sys.fence || u.execute.sys.fence_i
         || (u.execute.sys.valid && u.execute.sys.kind != rapt_pkg::SYS_NORMAL
-            && u.execute.sys.kind != rapt_pkg::SYS_TRANSLATION));
+            && u.execute.sys.kind != rapt_pkg::SYS_TRANSLATION
+            && u.execute.sys.kind != rapt_pkg::SYS_WRS));
   endfunction
   function automatic logic control_flow(input UopT u);
     return u.execute.branch.conditional || u.execute.branch.jump || u.execute.branch.indirect;

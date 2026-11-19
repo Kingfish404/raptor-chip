@@ -236,8 +236,19 @@ ifneq ($(filter ERROR,$(RTL_PA_WIDTHS)),)
 $(error Invalid RTL physical-address configuration; see PA configuration error above)
 endif
 RTL_PMPADDR_BITS := $(word 2,$(RTL_PA_WIDTHS))
-CXXFLAGS += -DRAPT_VECTOR_ENABLED=$(word 3,$(RTL_PA_WIDTHS))
+RTL_VECTOR_EN := $(word 3,$(RTL_PA_WIDTHS))
+RTL_RAW_EXTENSIONS := $(filter-out -,$(word 7,$(RTL_PA_WIDTHS)))
+rtl_isa_comma := ,
+RTL_ISA_EXTENSIONS := $(subst $(rtl_isa_comma), ,$(RTL_RAW_EXTENSIONS))
+RTL_VECTOR_ZICCLSM := $(and $(filter zicclsm,$(RTL_ISA_EXTENSIONS)),$(filter 1,$(RTL_VECTOR_EN)))
+CXXFLAGS += -DRAPT_VECTOR_ENABLED=$(RTL_VECTOR_EN)
 CXXFLAGS += -DRAPT_VECTOR_VLEN=$(word 4,$(RTL_PA_WIDTHS))
+CXXFLAGS += $(if $(filter zawrs,$(RTL_ISA_EXTENSIONS)),-DRAPT_DUT_ZAWRS)
+CXXFLAGS += $(if $(filter zfa,$(RTL_ISA_EXTENSIONS)),-DRAPT_DUT_ZFA)
+CXXFLAGS += $(if $(filter ssnpm,$(RTL_ISA_EXTENSIONS)),-DRAPT_DUT_SSNPM)
+CXXFLAGS += $(if $(filter zvbb,$(RTL_ISA_EXTENSIONS)),-DRAPT_DUT_ZVBB)
+CXXFLAGS += $(if $(filter zvfhmin,$(RTL_ISA_EXTENSIONS)),-DRAPT_DUT_ZVFHMIN)
+CXXFLAGS += $(if $(RTL_VECTOR_ZICCLSM),-DRAPT_DUT_ZICCLSM_VECTOR)
 # BUILD_PROFILE may intentionally differ from RAPT_CONFIG.  Include the actual
 # RTL preset in the signature so reusing a profile with another preset cannot
 # silently reuse an incompatible Verilated model.
@@ -272,6 +283,9 @@ CHISEL_DECODER_SRCS := $(shell find $(RAPTOR_HOME)/tools/decodegen/src -type f) 
 $(GENERATED_DECODERS) &: $(CHISEL_DECODER_SRCS)
 	$(MAKE) -C $(RAPTOR_HOME)/tools/decodegen verilog BUILD_DIR="$(GENERATED_RTL_PATH)"
 
+.PHONY: rtl-decoders
+rtl-decoders: $(GENERATED_DECODERS)
+
 VSRCS_RAW = $(shell find $(VSRC_PATH) $(NSIM_RTL_PATH) -path $(GENERATED_RTL_PATH) -prune -o -name "*.sv" -print) \
 	$(GENERATED_DECODERS)
 # Ensure rapt_pkg.sv comes first (DC requires package before import)
@@ -287,17 +301,22 @@ MROM_DEFAULT_DT := spike-rv$(if $(filter 1,$(ISA64)),64,32)$(MROM_DEFAULT_ISA).d
 MROM_DT_SOURCE := $(or $(strip $(DT_SOURCE)),$(MROM_DEFAULT_DT))
 MROM_BUILD_TAG := rv$(if $(filter 1,$(ISA64)),64,32)-$(basename $(notdir $(MROM_DT_SOURCE)))
 MROM_BUILD_TAG := $(MROM_BUILD_TAG)-v$(word 3,$(RTL_PA_WIDTHS))
+ifneq ($(strip $(RTL_ISA_EXTENSIONS)),)
+MROM_ISA_HASH := $(shell printf '%s' '$(RTL_ISA_EXTENSIONS)' | sha256sum | cut -c1-12)
+MROM_BUILD_TAG := $(MROM_BUILD_TAG)-$(MROM_ISA_HASH)
+endif
 MROM_BUILD_DIR := $(abspath $(BUILD_DIR)/mrom/$(MROM_BUILD_TAG))
 MROM_IMG ?= $(MROM_BUILD_DIR)/mrom-data.bin
 MROM_DT_PATH := $(if $(filter /%,$(MROM_DT_SOURCE)),$(MROM_DT_SOURCE),$(RAPTOR_HOME)/linux/dts/$(MROM_DT_SOURCE))
 MROM_INPUTS := $(NSIM_HOME)/csrc/mem/mrom-data/Makefile \
-	$(NSIM_HOME)/csrc/mem/mrom-data/rom.c $(MROM_DT_PATH)
+	$(NSIM_HOME)/csrc/mem/mrom-data/rom.c $(NSIM_HOME)/scripts/paddr_config.py $(MROM_DT_PATH)
 
 # Keep this as a real file target so independent test runners do not rebuild the
 # same MROM concurrently.  The input list still propagates source/DT changes.
 $(MROM_IMG): $(MROM_INPUTS)
 	+$(MAKE) -C $(NSIM_HOME)/csrc/mem/mrom-data BUILD_DIR=$(MROM_BUILD_DIR) \
-		ISA64=$(ISA64) DT_SOURCE=$(MROM_DT_SOURCE) VECTOR=$(word 3,$(RTL_PA_WIDTHS))
+		ISA64=$(ISA64) DT_SOURCE=$(MROM_DT_SOURCE) VECTOR=$(word 3,$(RTL_PA_WIDTHS)) \
+		ISA_EXTENSIONS="$(RTL_ISA_EXTENSIONS)"
 
 ifeq ($(SIM_PLATFORM),ysyxsoc)
 $(SOC_VSRC):

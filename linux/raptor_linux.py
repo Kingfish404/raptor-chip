@@ -12,11 +12,12 @@ import tarfile
 import tempfile
 
 HOME = Path(__file__).resolve().parent
-NEMU_RVA23_OPTIONS = ('64BIT', 'MMU', 'RISCV_ALTERNATIVE', 'RISCV_ISA_V',
-                     'RISCV_ISA_V_DEFAULT_ENABLE', 'RISCV_ISA_SUPM', 'RISCV_ISA_SVNAPOT',
-                     'RISCV_ISA_SVPBMT', 'RISCV_ISA_ZAWRS', 'RISCV_ISA_ZBA', 'RISCV_ISA_ZBB',
-                     'RISCV_ISA_ZICBOM', 'RISCV_ISA_ZICBOP', 'RISCV_ISA_ZICBOZ', 'KVM',
-                     'MFD_SYSCON', 'POWER_RESET', 'POWER_RESET_SYSCON_POWEROFF')
+RVA23_USER_OPTIONS = ('RISCV_ALTERNATIVE', 'RISCV_ISA_V', 'RISCV_ISA_V_DEFAULT_ENABLE',
+                      'RISCV_ISA_SUPM', 'RISCV_ISA_ZAWRS', 'RISCV_ISA_ZBA', 'RISCV_ISA_ZBB',
+                      'RISCV_ISA_ZICBOM', 'RISCV_ISA_ZICBOP', 'RISCV_ISA_ZICBOZ')
+NEMU_RVA23_OPTIONS = (*RVA23_USER_OPTIONS, '64BIT', 'MMU', 'RISCV_ISA_SVNAPOT',
+                     'RISCV_ISA_SVPBMT', 'KVM', 'MFD_SYSCON', 'POWER_RESET',
+                     'POWER_RESET_SYSCON_POWEROFF')
 
 
 def sha(path):
@@ -71,6 +72,9 @@ def kernel(package, cache, cross, profile='fpga', rootfs=None, init='/sbin/rapto
                     'FTRACE', 'ENABLE_DEFAULT_TRACERS']
     if profile == 'nemu-rva23':
         options += NEMU_RVA23_OPTIONS
+    elif manifest.get('bits') == 64:
+        # Runtime alternatives consult the CPU's advertised ISA.
+        options += RVA23_USER_OPTIONS
     # FPGA network acceptance traces skb drop reasons. Keep event tracing
     # available without instrumenting every function; simulators omit both.
     disabled = ['LEGACY_PTYS', 'BLK_DEV_IO_TRACE', 'BPF_EVENTS',

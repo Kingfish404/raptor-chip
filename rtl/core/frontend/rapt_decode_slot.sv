@@ -42,7 +42,7 @@ module rapt_decode_slot #(
   logic [5:0] fp_op;
   logic unused_fp_to_int;
   logic fp_writes_fpr;
-  logic fp_i2f, fp_rv64_only;
+  logic fp_i2f, fp_rv64_only, fp_zfa;
   logic fp_load, fp_store;
   logic fp_load_d, fp_store_d, fp_load_h, fp_store_h;
   logic fp_width_d;
@@ -53,7 +53,7 @@ module rapt_decode_slot #(
   logic [31:0] inst_de;
   logic [31:0] illegal_tval;
   logic illegal_inst, illegal_csr, fp_disabled, is_illegal;
-  logic is_wfi, is_sfence_vma, is_sinval_vma, is_inval_fence;
+  logic is_wfi, is_wrs, wrs_illegal, is_sfence_vma, is_sinval_vma, is_inval_fence;
 
   assign is_c     = (inst[1:0] != 2'b11);
   assign inst_idu = is_c ? inst_de : inst;
@@ -152,7 +152,7 @@ module rapt_decode_slot #(
 
   // All scalar immediates fit signed 32 bits. Non-immediate operations reuse
   // the payload for raw illegal/FP encodings or compact CSR/fence metadata.
-  assign decoded.uop.imm = vector_valid ? inst_idu
+  assign decoded.uop.imm = (vector_valid || is_wrs) ? inst_idu
       : is_illegal && !ifu_trap ? illegal_tval[31:0]
       : fp_valid && !(fp_load || fp_store || fp_load_d || fp_store_d) ? inst_idu
       : |csr_csw ? {15'b0, inst_idu[19:15], dec_imm[11:0]}
@@ -176,7 +176,14 @@ module rapt_decode_slot #(
   // ALU encoding, CSR access, privilege gates and extension availability here;
   // ordered group policy belongs to rapt_idu.
   assign illegal_inst = (alu == `RAPT_ALU_ILL_) && !vector_valid;
-  assign fp_disabled = fp_valid && (csr_bcast.fs == 2'b00);
+  // Zfa shares the legacy compare/convert operation tags; the reserved
+  // funct3/rs2 bits identify the added forms after the generated decode.
+  assign fp_zfa = inst_idu[6:0] == 7'h53 && (fp_op == `RAPT_FP_OP_ZFA_SIMPLE
+      || (inst_idu[31:26] == 6'b001010 && fp_rm[1])
+      || (inst_idu[31:26] == 6'b101000 && fp_rm[2])
+      || (fp_op == `RAPT_FP_OP_FCVT_W_D && inst_idu[23]));
+  assign fp_disabled = fp_valid && (csr_bcast.fs == 2'b00
+      || (fp_zfa && !(rapt_pkg::ZfaEnable && XLEN == 64)));
   // CSR write attempt: CSRRW/CSRRWI always write; CSRRS/C/SI/CI write if rs1/uimm != 0
   logic csr_write;
   // The decoded GPR rs1 is zero for immediate CSR operations. The raw
@@ -208,6 +215,13 @@ module rapt_decode_slot #(
   logic cbo_illegal;
   logic [2:0] counter_sel;
   assign is_wfi = (inst_idu == `RAPT_INST_WFI);
+`ifdef RAPT_ZAWRS
+  assign is_wrs = (inst_idu & 32'hfeff_ffff) == 32'h00d0_0073;
+  assign wrs_illegal = 1'b0;
+`else
+  assign is_wrs = 1'b0;
+  assign wrs_illegal = (inst_idu & 32'hfeff_ffff) == 32'h00d0_0073;
+`endif
   assign is_sfence_vma = (inst_idu[31:25] == `RAPT_F7_SFENCE_VMA)
                         && (inst_idu[14:12] == `RAPT_F3_SYS___)
                         && (inst_idu[11:7]  == 5'b0)
@@ -292,7 +306,7 @@ module rapt_decode_slot #(
   assign is_illegal = (illegal_inst && !fp_valid) || illegal_csr
       || shift_imm_xlen_illegal || rev8_xlen_illegal || zexth_xlen_illegal
       || (XLEN == 32 && integer_rv64_only)
-      || wfi_illegal || mret_illegal || sret_illegal || sfence_vma_illegal
+      || wfi_illegal || wrs_illegal || mret_illegal || sret_illegal || sfence_vma_illegal
       || satp_illegal || counter_illegal || stimecmp_illegal || fp_disabled
       || cbo_illegal || (is_inval_fence && csr_bcast.priv == `RAPT_PRIV_U)
       || (fp_rv64_only && XLEN != 64);
@@ -375,9 +389,10 @@ module rapt_decode_slot #(
   assign decoded.uop.execute.branch.ras = rapt_pkg::ras_action(inst_idu);
   assign decoded.uop.execute.memory.aq = inst_idu[26];
   assign decoded.uop.execute.memory.rl = inst_idu[25];
-  assign decoded.uop.execute.sys.kind = (is_sfence_vma || is_sinval_vma)
-      ? rapt_pkg::SYS_TRANSLATION : (is_cbo_inval || is_cbo_flush)
-      ? rapt_pkg::SYS_CBO_INVAL : is_cbo_clean ? rapt_pkg::SYS_CBO_CLEAN
+  assign decoded.uop.execute.sys.kind = is_wrs ? rapt_pkg::SYS_WRS
+      : (is_sfence_vma || is_sinval_vma) ? rapt_pkg::SYS_TRANSLATION
+      : (is_cbo_inval || is_cbo_flush) ? rapt_pkg::SYS_CBO_INVAL
+      : is_cbo_clean ? rapt_pkg::SYS_CBO_CLEAN
       : is_cbo_zero ? rapt_pkg::SYS_CBO_ZERO : inst_idu[6:0] == `RAPT_OP_FENCE_
       ? (inst_idu[14:12] == 3'b001 ? rapt_pkg::SYS_FENCE_I : rapt_pkg::SYS_FENCE)
       : rapt_pkg::SYS_NORMAL;

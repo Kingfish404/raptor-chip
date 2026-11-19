@@ -16,6 +16,10 @@ module rapt_vpu_core #(
     parameter bit OptimizeOperandReads = 1,
     parameter bit CachePredicate = 1,
     parameter bit ShareIntFpConverters = 1,
+    parameter bit Zvbb = 0,
+    parameter bit Zvfhmin = 0,
+    parameter bit Zvkt = 0,
+    parameter bit MisalignedMemory = 0,
     parameter int AddrBits = $clog2(32*VLEN/8)
 ) (
     input rapt_pkg::sram_ctrl_t sram_ctrl_i,
@@ -175,6 +179,10 @@ module rapt_vpu_core #(
       .OptimizeOperandReads(OptimizeOperandReads),
       .CachePredicate(CachePredicate),
       .ShareIntFpConverters(ShareIntFpConverters),
+      .Zvbb(Zvbb),
+      .Zvfhmin(Zvfhmin),
+      .Zvkt(Zvkt),
+      .MisalignedMemory(MisalignedMemory),
       .AddrBits(AddrBits)
   ) u_vpu (
       .sram_ctrl_i(sram_ctrl_i),

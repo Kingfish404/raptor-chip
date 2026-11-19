@@ -18,8 +18,8 @@ from distro_boot import build_dtb
 from raptor_linux import kernel
 
 
-PASS_MARKERS = (b'RVA23_VECTOR_PASS', b'RVA23_CACHE_BLOCK_PASS', b'RVA23_POINTER_MASK_PASS', b'RVA23_KVM_PASS',
-                b'RVA23_LINUX_PASS', b'Finisher: poweroff')
+PASS_MARKERS = (b'RVA23_VECTOR_PASS', b'RVA23_SCALAR_PASS', b'RVA23_CACHE_BLOCK_PASS',
+                b'RVA23_POINTER_MASK_PASS', b'RVA23_KVM_PASS', b'RVA23_LINUX_PASS', b'Finisher: poweroff')
 FAIL_MARKERS = (b'RVA23_LINUX_FAIL', b'Kernel panic', b'Oops:', b'BUG:')
 
 

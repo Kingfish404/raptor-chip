@@ -175,6 +175,22 @@ module rapt_lsu_ioq #(
           asid: csr_bcast.satp_asid,
           version: mem_context_version_q
       };
+
+`ifdef RAPT_SSNPM
+  localparam bit PointerMasking = XLEN == 64;
+`else
+  localparam bit PointerMasking = 1'b0;
+`endif
+  function automatic logic [XLEN-1:0] data_address(input logic [XLEN-1:0] raw,
+                                                   input logic translated);
+`ifdef RAPT_SSNPM
+    // A privilege or senvcfg change serializes the pipeline. Resident
+    // addresses keep this setting until they are used or flushed.
+    return XLEN'(rapt_pkg::mask_pointer(64'(raw), csr_bcast.data_pmm, translated));
+`else
+    return raw;
+`endif
+  endfunction
   logic [IOQ_SIZE-1:0] ioq_trap;
   logic [IOQ_SIZE-1:0] ioq_mmu_fault;
   // Only the head translates a store. Keep its two physical page numbers
@@ -365,6 +381,8 @@ module rapt_lsu_ioq #(
     ));
   end
   for (genvar e = 0; e < IOQ_SIZE; e++) begin : g_address
+    logic [XLEN-1:0] raw_address;
+    assign ioq_eff_addr[e] = data_address(raw_address, ioq_context[e].mmu_en);
     always_comb begin
       ioq_prepare_addr[e] = '0;
       for (int p = 0; p < AddressPorts; p++)
@@ -379,12 +397,12 @@ module rapt_lsu_ioq #(
       if (LateOperands) begin : g_late
         assign ioq_vj[e] = late_addr_storage[e];
         assign ioq_addr_prepared[e] = late_prepared[e];
-        assign ioq_eff_addr[e] = late_addr[e];
+        assign raw_address = late_addr[e];
         assign ioq_addr_ready[e] = late_addr_ready[e];
       end else if (RegisterAddresses) begin : g_legacy
         // The preparation bypass still feeds A/B requests, overlap and the
         // store descriptor on the same edge that folds the sum into its base.
-        assign ioq_eff_addr[e] = prepared || ioq_imm[e] == '0 ? ioq_vj[e] : ioq_prepare_addr[e];
+        assign raw_address = prepared || ioq_imm[e] == '0 ? ioq_vj[e] : ioq_prepare_addr[e];
         assign ioq_addr_ready[e] = ioq_valid[e] && ioq_base_ready[e]
           && (prepared || ioq_imm[e] == '0 || ioq_prepare_sel[e]);
         always_ff @(posedge clock) begin
@@ -395,12 +413,12 @@ module rapt_lsu_ioq #(
             ioq_addr_prepared[e] <= 1'b0;
         end
       end else begin : g_combinational
-        assign ioq_eff_addr[e] = ioq_vj[e] + XLEN'($signed(ioq_imm[e]));
+        assign raw_address = ioq_vj[e] + XLEN'($signed(ioq_imm[e]));
         assign ioq_addr_ready[e] = ioq_valid[e] && ioq_base_ready[e];
         assign ioq_addr_prepared[e] = 1'b0;
       end
     end
-    if (LateOperands) begin : g_late_cacheable
+    if (LateOperands && !PointerMasking) begin : g_late_cacheable
       assign ioq_cacheable[e] = late_cacheable[e];
     end else begin : g_legacy_cacheable
       assign ioq_cacheable[e] = rapt_pkg::addr_cacheable(ioq_eff_addr[e]);
@@ -684,7 +702,8 @@ module rapt_lsu_ioq #(
       end
       assign selected_source[p] = |chosen;
       assign excluded_source[p] = |excluded;
-      assign source_cacheable[p] = rapt_pkg::addr_pmem_offset_safe(wb_result[p]);
+      assign source_cacheable[p] = rapt_pkg::addr_pmem_offset_safe(
+          data_address(wb_result[p], 1'b0));
     end
     // The fast request intentionally snoops only timing-qualified ports.
     // With arbitrary duplicate tags, normal wake may see additional values.
@@ -703,7 +722,7 @@ module rapt_lsu_ioq #(
       end
     end
     assign wake_next_idx = (|eligible) ? request_idx : ioq_head;
-    assign wake_next_addr = request_base + XLEN'($signed(request_imm));
+    assign wake_next_addr = data_address(request_base + XLEN'($signed(request_imm)), 1'b0);
     wire [XLEN-1:0] forward_addr[1];
     wire [1:0] forward_span[1];
     wire [IOQ_SIZE-1:0] forward_overlap[1];
@@ -1890,7 +1909,8 @@ module rapt_lsu_ioq #(
     // The empty-dispatch path still requires a previously stable operand.
     // Every ready allocation can retain its sum on the same edge, so its
     // first resident request no longer needs a wide per-entry bypass.
-    assign dispatch_stable_addr[s] = offset == '0 ? dispatch[s].stable_op1 : address_sum;
+    assign dispatch_stable_addr[s] = data_address(
+        offset == '0 ? dispatch[s].stable_op1 : address_sum, dispatch_context.mmu_en);
     assign alloc_addr_valid[s] = alloc_pr1[s] == '0;
     assign alloc_addr_value[s] = offset == '0 ? alloc_vj[s]
         : int_source_regs[s][0] == '0 ? XLEN'($signed(offset)) : address_sum;

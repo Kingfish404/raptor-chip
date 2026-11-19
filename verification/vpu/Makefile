@@ -30,7 +30,7 @@ TOP_SUITES := full fp-mixed fp-divsqrt fp-misc fp-wide fp-convert int-fp estimat
   fp-reduce encoding config-encoding memory-encoding geometry geometry-overlap catalog \
   catalog-matrix indexed-geometry context \
   store-completion \
-  predicate-cache predicate-semantics packed-logic memory move
+  predicate-cache predicate-semantics packed-logic memory move zvkt
 ifeq ($(filter $(TOP_SUITE),$(TOP_SUITES)),)
 $(error unsupported TOP_SUITE=$(TOP_SUITE))
 endif
@@ -43,13 +43,15 @@ DIFF_FLAGS := -CFLAGS '-DVPU_SPIKE -I$(SPIKE_BUILD) -I$(SPIKE_BUILD)/riscv -I$(S
   -LDFLAGS '-Wl,--start-group $(SPIKE_BUILD)/libriscv.a $(SPIKE_BUILD)/libdisasm.a $(SPIKE_BUILD)/libsoftfloat.a $(SPIKE_BUILD)/libfesvr.a $(SPIKE_BUILD)/libfdt.a -Wl,--end-group -lboost_regex -lboost_system -ldl'
 endif
 VPU_INCLUDES := -I$(ROOT)/rtl/include -I$(ROOT)/rtl/configs/default
+TOP_EXTENSION_FLAGS := $(if $(filter zvkt,$(TOP_SUITE)),-GZvkt=1 -GZvbb=1,)
 FLAGS := --binary --timing --assert -Wall -DRAPT_ASSERT_EN $(VPU_INCLUDES) -j $(JOBS)
 VPU := $(ROOT)/rtl/core/backend/vpu
 # Generate this narrow warning policy from tracked code in each build folder.
 define write_fma_waiver
 python3 $(CURDIR)/export_rtl.py --write-fma-waiver $(1)/fma_legacy.vlt
 endef
-VPU_SCALAR_FPU := fma divsqrt convert_narrow int_to_fp integer_to_fp single_to_int_w fp_to_int
+VPU_FORMAT_CONVERTERS := convert_narrow half_to_fp fp_to_half
+VPU_SCALAR_FPU := fma divsqrt $(VPU_FORMAT_CONVERTERS) int_to_fp integer_to_fp single_to_int_w fp_to_int
 VPU_TOP_SOURCES := $(ROOT)/rtl/rapt_pkg.sv $(ROOT)/rtl/sram/rapt_sram_1rw.sv \
   $(addprefix $(ROOT)/rtl/core/backend/fpu/rapt_fpu_,$(addsuffix .sv,$(VPU_SCALAR_FPU))) \
   $(wildcard $(VPU)/*.sv) $(CURDIR)/test_vpu.cpp
@@ -132,6 +134,7 @@ endif
 	  -GOptimizeOperandReads=$(OPT_READS) \
 	  -GCachePredicate=$(CACHE_PREDICATE) \
 	  -GShareIntFpConverters=$(SHARE_INT_FP) \
+	  $(TOP_EXTENSION_FLAGS) \
 	  -CFLAGS '-DTEST_XLEN=$(XLEN) -DTEST_VLEN=$(VLEN) -DTEST_ELEN=$(ELEN) -DTEST_OPT_READS=$(OPT_READS) -DTEST_CORE_ADAPTER=$(CORE_ADAPTER)' \
 	  $(DIFF_FLAGS) \
 	  $(VPU_TOP_SOURCES) \
@@ -410,12 +413,13 @@ fp-wide-arith:
 fp-convert:
 	@test -n "$(SPIKE_BUILD)" || { echo 'fp-convert requires SPIKE_BUILD for independent SoftFloat'; exit 1; }
 	@mkdir -p $(BUILD_DIR)/fp-convert
-	python3 $(CURDIR)/record_run.py leaf $(BUILD_DIR)/fp-convert/sources.json rapt_vpu_fp_convert
+	python3 $(CURDIR)/record_run.py leaf $(BUILD_DIR)/fp-convert/sources.json rapt_vpu_fp_convert Zvfhmin=1
 	python3 $(CURDIR)/reference_manifest.py $(SPIKE_BUILD) $(BUILD_DIR)/fp-convert/reference.json
-	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN -I$(ROOT)/rtl/include -j $(JOBS) \
-	  --top-module rapt_vpu_fp_convert --Mdir $(BUILD_DIR)/fp-convert \
+	$(VERILATOR) --cc --exe --build --assert -Wall -DRAPT_ASSERT_EN $(VPU_INCLUDES) -j $(JOBS) \
+	  --top-module rapt_vpu_fp_convert -GZvfhmin=1 --Mdir $(BUILD_DIR)/fp-convert \
 	  -CFLAGS '-I$(SPIKE_BUILD)/softfloat' -LDFLAGS '$(SPIKE_BUILD)/libsoftfloat.a' \
-	  $(ROOT)/rtl/core/backend/fpu/rapt_fpu_convert_narrow.sv $(VPU)/rapt_vpu_fp_widen.sv \
+	  $(addprefix $(ROOT)/rtl/core/backend/fpu/rapt_fpu_,$(addsuffix .sv,$(VPU_FORMAT_CONVERTERS))) \
+	  $(VPU)/rapt_vpu_fp_widen.sv \
 	  $(VPU)/rapt_vpu_fp_convert.sv $(CURDIR)/test_fp_convert.cpp \
 	  >$(BUILD_DIR)/fp-convert/build.log 2>&1 || { cat $(BUILD_DIR)/fp-convert/build.log; exit 1; }
 	$(BUILD_DIR)/fp-convert/Vrapt_vpu_fp_convert | tee $(BUILD_DIR)/fp-convert/run.log

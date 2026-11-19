@@ -32,7 +32,7 @@ def main():
     check('bad-size', bool(query(1, size - 1)), False)
     api = query(1, size).contents
     check('initial-capabilities', [api.version, api.size, api.xlen, api.locked, api.supported, api.enabled],
-          [1, size, args.xlen, 0, 2047 if args.xlen == 64 else 998, 0])
+          [1, size, args.xlen, 0, 4095 if args.xlen == 64 else 3046, 0])
     check('reject-unknown-extension', api.configure(1 << 63), -1)
     if args.xlen == 32:
         check('reject-svnapot-rv32', api.configure(1), -1)
