@@ -1,7 +1,7 @@
 <div class="architecture-explorer">
-    <div class="arch-config" id="arch-config">Default preset · RV32 / RV64 · scalar out-of-order core</div>
-    <p class="arch-profile">RV64 default:
-      <a href="{{ '/overview.html#rva22s64-support' | relative_url }}">RVA22S64 support</a></p>
+    <div class="arch-config" id="arch-config">Default preset · RV32 / RV64 · V 1.0</div>
+    <p class="arch-profile">
+      <a href="{{ '/overview.html#rva23u64-support' | relative_url }}">RVA23U64 on RV64</a></p>
     <div class="arch-layout">
       <section class="arch-sheet" aria-label="Architecture views">
         <div class="arch-toolbar">
@@ -31,8 +31,8 @@
           <output id="cycle-readout" aria-live="off" for="cycle-slider">Model unavailable</output>
           <input type="range" id="cycle-slider" min="0" max="0" value="0" aria-label="Model cycle" disabled>
         </div>
-        <p class="arch-model-note">Illustrative CoreMark queue model, not an RTL trace or
-          performance measurement. Bars show modeled occupancy; dots represent instructions.</p>
+        <p class="arch-model-note">Illustrative scalar CoreMark queue model.
+          Bars show modeled occupancy and dots represent instructions.</p>
         <p class="arch-scroll-hint">Scroll diagram ↔ · select a block for details</p>
         <div id="uarch-diagram" class="arch-canvas" tabindex="0" role="region"
              aria-label="Scrollable architecture diagram">

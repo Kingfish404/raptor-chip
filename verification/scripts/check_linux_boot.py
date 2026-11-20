@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import re
 
 
 LINUX_ENTRY_MILESTONE = "Linux version"
+LINUX_ENTRY_LINE = re.compile(r"^[ \t]*(?:\[ *\d+\.\d+\] +)?Linux version\b", re.MULTILINE)
 DEFAULT_SUCCESS_MILESTONE = "Run /init as init process"
 
 FATAL_MARKERS = (
@@ -24,7 +26,7 @@ def check_log(
     from_checkpoint: bool = False,
     success_marker: str = DEFAULT_SUCCESS_MILESTONE,
 ) -> bool:
-    text = log_path.read_bytes().decode("utf-8", errors="replace")
+    text = log_path.read_text(encoding="utf-8", errors="replace")
 
     required = tuple(
         dict.fromkeys(
@@ -33,7 +35,15 @@ def check_log(
             else (LINUX_ENTRY_MILESTONE, success_marker)
         )
     )
-    missing = [marker for marker in required if marker not in text]
+    missing = []
+    for marker in required:
+        if marker == LINUX_ENTRY_MILESTONE:
+            # Make can echo the same string as an argument to --serial-exit-on.
+            present = LINUX_ENTRY_LINE.search(text)
+        else:
+            present = marker in text
+        if not present:
+            missing.append(marker)
     fatal = [marker for marker in FATAL_MARKERS if marker in text]
     if missing or fatal:
         if missing:

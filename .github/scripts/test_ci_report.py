@@ -37,13 +37,7 @@ CoreMark/MHz  : 2.6778
 
 
 class SummaryTests(unittest.TestCase):
-    def test_benchmark_default_shell_preserves_command_status(self):
-        workflow = (SCRIPT.resolve().parents[1] / 'workflows/benchmark.yaml').read_text()
-        defaults = workflow.split('defaults:\n', 1)[1].split('\nenv:', 1)[0]
-        shell = next(line.strip().removeprefix('shell: ') for line in defaults.splitlines()
-                     if line.strip().startswith('shell: '))
-        command = shlex.split(shell)
-        self.assertEqual(command.pop(), '{0}')
+    def test_workflow_default_shells_preserve_command_status(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / '.bash_logout').write_text('false\n')
@@ -54,11 +48,19 @@ class SummaryTests(unittest.TestCase):
                                           env=environment, capture_output=True,
                                           text=True, timeout=15)
             self.assertEqual(login_result.returncode, 1)
-            for expected in (0, 1):
-                script.write_text(f'exit {expected}\n')
-                result = subprocess.run([*command, str(script)], env=environment,
-                                        capture_output=True, text=True, timeout=15)
-                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+            for name in ('app', 'benchmark'):
+                workflow = (SCRIPT.resolve().parents[1] / f'workflows/{name}.yaml').read_text()
+                defaults = workflow.split('defaults:\n', 1)[1].split('\nenv:', 1)[0]
+                shell = next(line.strip().removeprefix('shell: ') for line in defaults.splitlines()
+                             if line.strip().startswith('shell: '))
+                command = shlex.split(shell)
+                self.assertEqual(command.pop(), '{0}')
+                for expected in (0, 1):
+                    with self.subTest(workflow=name, status=expected):
+                        script.write_text(f'exit {expected}\n')
+                        result = subprocess.run([*command, str(script)], env=environment,
+                                                capture_output=True, text=True, timeout=15)
+                        self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
 
     def check(self, log=SMOKE, allow_short=True, iterations=1):
         return summary.evaluate_pk(log, iterations, allow_short)
@@ -170,6 +172,53 @@ class SummaryTests(unittest.TestCase):
             self.assertIn('NOT VALID (less than 10 seconds)', run.stdout)
             self.assertIn('FAIL', run.stdout)
 
+    def test_litex_summary_requires_a_completed_crc_checked_run(self):
+        log = ('CoreMark: Raptor LiteX SoC (rv32)\n'
+               + SMOKE.partition('CoreMark: done.')[0]
+               .replace('Iterations: 1', 'Iterations: 2')
+               .replace('Iterations       : 1', 'Iterations       : 2')
+               .replace('[0]crcfinal      : 0xe714', '[0]crcfinal      : 0x72be')
+               .replace('(secs): 0', '(secs): 0.074000'))
+        complete = "CoreMark: done.\n"
+        wrapper = "[INFO] Sim reached completion marker ('CoreMark: done.').\n"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'coremark.log'
+            command = ['python3', str(SCRIPT), 'litex-coremark', str(path), '--xlen', '64']
+            rv32_log = log
+            log = log.replace('(rv32)', '(rv64)')
+            for name, content, expected in (
+                ('smoke', log + complete + wrapper, 0),
+                ('wrong XLEN', rv32_log + complete + wrapper, 1),
+                ('truncated', log + wrapper, 1),
+                ('bad CRC', log.replace('0x1fd7', '0x0000') + complete, 1),
+                ('bad final CRC', log.replace('0x72be', '0xe714') + complete, 1),
+                ('stale workload', log.replace('Iterations       : 2',
+                                              'Iterations       : 1') + complete, 1),
+                ('additional error', log + 'ERROR! invalid data type\n' + complete, 1),
+                ('compiler not found', 'riscv64-linux-gnu-gcc: command not found\n', 1),
+            ):
+                with self.subTest(name=name):
+                    path.write_text(content)
+                    result = subprocess.run(command, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+                    self.assertIn('SMOKE PASS' if expected == 0 else 'FAIL', result.stdout)
+
+    def test_linux_kernel_entry_requires_the_guest_banner(self):
+        checker = SCRIPT.resolve().parents[2] / 'verification/scripts/check_linux_boot.py'
+        launch = "npc --serial-exit-on='Linux version'\n"
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / 'linux.log'
+            command = ['python3', str(checker), '--success-marker', 'Linux version', str(log)]
+            for output, expected in (
+                (launch, 1),
+                (launch + '[    0.000000] Linux version 6.18.51\r\n', 0),
+                (launch + '[    0.000000] Linux version\x1b[1;34mserial exit milestone reached\n', 0),
+            ):
+                with self.subTest(output=output):
+                    log.write_text(output)
+                    result = subprocess.run(command, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
+
     def test_coremark_workflow_step_preserves_report_status(self):
         workflow = (SCRIPT.resolve().parents[1] / 'workflows/benchmark.yaml').read_text()
         step = workflow.split('      - name: CoreMark validation and summary\n', 1)[1]
@@ -183,11 +232,12 @@ class SummaryTests(unittest.TestCase):
                            if line.startswith('          ')) + '\n'
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            hello, coremark, report = (root / name for name in ('hello', 'coremark', 'summary'))
+            hello = root / 'app-hello.log'
+            coremark = root / 'app-coremark.log'
+            report = root / 'summary'
             hello.write_text('HIT GOOD TRAP\n')
-            script = script.replace('/tmp/app-hello.log', str(hello))
-            script = script.replace('/tmp/app-coremark.log', str(coremark))
-            environment = dict(os.environ, REPORT=f'python3 {SCRIPT}', GITHUB_STEP_SUMMARY=str(report))
+            environment = dict(os.environ, REPORT=f'python3 {SCRIPT}', GITHUB_STEP_SUMMARY=str(report),
+                               RUNNER_TEMP=str(root), XLEN='64')
             for log, expected in ((SMOKE, 0), (SMOKE.replace('0xe9f5', '0x0000'), 1)):
                 coremark.write_text(log)
                 report.write_text('')

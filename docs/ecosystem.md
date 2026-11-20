@@ -23,7 +23,10 @@ Simulators, FPGA boards, ASIC flow, software stack, and memory maps.
 | **NPC**     | Verilator, cycle-accurate, waveform      | `make run-rv32`, `sim/`    |
 | **raptSoC** | SystemVerilog NPC top + AXI memory model | `sim/rtl/rapt_npc_soc.sv`  |
 
-NPC is the primary development simulator. With `DIFFTEST=1` (the default), NEMU checks retired architectural state; intentional MMIO/interrupt skip paths are handled by the differential-test protocol.
+NPC is the primary RTL simulator. With `DIFFTEST=1` (the default), NEMU checks
+retired architectural state, including all 32 vector registers and seven vector
+CSRs on vector-enabled builds. The differential-test protocol handles the MMIO
+and interrupt skip paths. The RVV reference matches the default VLEN of 128 bits.
 
 ## FPGA Targets
 
@@ -39,8 +42,11 @@ NPC is the primary development simulator. With `DIFFTEST=1` (the default), NEMU 
 | **OOC partitions**             | Frontend/backend/cache checkpoints, not a board flow                    | `fpga/ooc/README.md`                         |
 
 Root `make fpga-synth` and `make fpga-build` select CU08-KU15P by default;
-use `FPGA_BOARD=rk-xcku5p-f` for RK. See [FPGA support](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/README.md)
-for board build options and [LiteX](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/litex/README.md) for BIOS and Linux.
+use `FPGA_BOARD=rk-xcku5p-f` for RK. For Linux over Ethernet on either board,
+follow the [netboot instructions](./linux_kernel.md#fpga-netboot).
+For RVV, select `default`, `default-*` or `large`. Use the routed timing report
+for the chosen preset and board. The board build options are in the
+[FPGA guide](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/README.md).
 
 ## ASIC Flow
 

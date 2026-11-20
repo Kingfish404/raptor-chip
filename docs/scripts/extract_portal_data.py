@@ -76,6 +76,7 @@ STAGE_OF = {
     "rapt_dispatch_ioq_adapter": 3,
     "rapt_ieu": 4,
     "rapt_feu": 4,
+    "rapt_vpu_core": 4,
     "rapt_lsu": 4,
     "rapt_iq": 4,
     "rapt_execute_stage": 4,
@@ -128,6 +129,7 @@ ARCH_SHORT = {
     "rapt_ieu": "IEU",
     "rapt_ieu_muldiv": "MDU",
     "rapt_feu": "FEU",
+    "rapt_vpu_core": "VPU",
     "rapt_lsu": "LSU",
     "rapt_lsu_sq": "SQ",
     "rapt_completion_stage": "CPL",
@@ -282,8 +284,10 @@ MODULE_RE = re.compile(
     r"\bmodule\s+(\w+)\s*(?:#\s*\((.*?)\))?\s*\((.*?)\)\s*;(.*?)endmodule",
     re.S,
 )
+# A parameter assignment can include a function call, e.g. .Width($bits(T)).
+PARAM_ACTUAL = r"\((?:[^()]|\([^()]*\))*\)"
 INST_RE = re.compile(
-    r"\b(rapt_[A-Za-z0-9_]+)\s*(?:#\s*\((?:[^()]|\([^()]*\))*\))?\s+"
+    rf"\b(rapt_[A-Za-z0-9_]+)\s*(?:#\s*\((?:[^()]|{PARAM_ACTUAL})*\))?\s+"
     r"([A-Za-z_][A-Za-z0-9_]*)\s*\((.*?)\)\s*;",
     re.S,
 )
@@ -572,6 +576,7 @@ def collect_config(repo: Path) -> dict[str, Any]:
             "rob_entries": ival("RAPT_ROB_SIZE", default=32),
             "alq_entries": ival("RAPT_RS_SIZE", default=8),
             "fpq_entries": ival("RAPT_RS_SIZE", default=8),
+            "vector_vlen": ival("RAPT_VLEN"),
             "ioq_entries": ival("RAPT_IOQ_SIZE", default=8),
             "sq_entries": ival("RAPT_SQ_SIZE", default=16),
             "phys_regs": ival("RAPT_PHY_SIZE", default=64),
@@ -1340,6 +1345,9 @@ def documented_flow() -> list[dict[str, str]]:
         {"from": "rapt_dpu", "to": "rapt_ieu", "label": "integer"},
         {"from": "rapt_dpu", "to": "rapt_feu", "label": "fp"},
         {"from": "rapt_dpu", "to": "rapt_lsu", "label": "memory"},
+        {"from": "rapt_ieu", "to": "rapt_vpu_core", "label": "vector issue"},
+        {"from": "rapt_vpu_core", "to": "rapt_completion_stage", "label": "system completion"},
+        {"from": "rapt_vpu_core", "to": "rapt_l1d", "label": "translated vector data"},
         {"from": "rapt_ieu", "to": "rapt_completion_stage", "label": "guarded integer / branch / MUL-DIV"},
         {"from": "rapt_feu", "to": "rapt_completion_stage", "label": "guarded FP completion"},
         {"from": "rapt_lsu", "to": "rapt_completion_stage", "label": "guarded memory completion"},
@@ -1370,6 +1378,7 @@ def build(repo: Path) -> dict[str, Any]:
     package = strip_sv_comments((repo / "rtl/rapt_pkg.sv").read_text())
     constants = {f"rapt_pkg::{name}": value for name, value in re.findall(
         r"localparam\s+(?:int\s+)?unsigned\s+(\w+)\s*=\s*(\d+)\s*;", package)}
+    config["values"]["vector_elen"] = int(constants["rapt_pkg::VectorElen"])
     constants["Cfg.iq_entries"] = str(config["values"]["alq_entries"])
     extra = parse_module_param_defaults(modules, constants)
     config["values"].update(extra)
@@ -1410,7 +1419,7 @@ def build(repo: Path) -> dict[str, Any]:
         "payload": payload,
         "docs": docs,
         "github": "https://github.com/Kingfish404/raptor-chip",
-        "isa": "RV32 / RV64 IMAFDC + Z extensions (see overview)",
+        "isa": "RV32 / RV64 IMAFDC and V 1.0; RVA23U64 and RVA22S64 on RV64 (default preset)",
     }
 
 

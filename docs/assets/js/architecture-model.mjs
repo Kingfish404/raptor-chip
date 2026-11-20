@@ -26,21 +26,22 @@ export function buildArchitecture(data) {
     `${value('l1i_kib')} KiB L1I · ${value('l1d_kib')} KiB L1D · ` +
     `${value('cache_line_bytes')} B lines`;
   const core = {
-    id: 'core', title: 'Core pipeline', width: 1440, height: 876,
+    id: 'core', title: 'Core pipeline', width: 1440, height: 968,
     description:
-      'Follow the frontend on the left, rename and dispatch in the center, then five parallel ' +
-      'execution domains on the right. Completion returns to the ROB before in-order retirement.',
+      'Follow the frontend on the left, rename and dispatch in the center, and execution on ' +
+      'the right. Vector operations issue through the integer system port. ' +
+      'Completion returns to the ROB before in-order retirement.',
     groups: [
       group('01  FRONTEND', `${value('decode_width')}-wide decode`, 24, 52, 300, 540, 'frontend'),
       group(
         '02  RENAME & DISPATCH', `${value('rob_entries')} in-flight ROB owners`, 348, 52, 350, 540,
         'backend'),
       group(
-        '03  SCHEDULE & EXECUTE', 'Five scheduler classes · independent execution paths',
-        722, 52, 694, 540, 'execute'),
-      group('REGISTER STATE', 'Integer physical · FP architectural', 24, 620, 300, 228, 'backend'),
-      group('04  COMPLETE & RETIRE', 'Precise architectural state', 348, 620, 714, 228, 'backend'),
-      group('DATA MEMORY', 'See Memory & platform', 1086, 620, 330, 228, 'memory'),
+        '03  SCHEDULE & EXECUTE', 'Five issue classes · scalar and vector execution',
+        722, 52, 694, 632, 'execute'),
+      group('REGISTER STATE', 'Integer physical · FP architectural', 24, 712, 300, 228, 'backend'),
+      group('04  COMPLETE & RETIRE', 'Precise architectural state', 348, 712, 714, 228, 'backend'),
+      group('DATA MEMORY', 'See Memory & platform', 1086, 712, 330, 228, 'memory'),
     ],
     nodes: [
       block(
@@ -76,7 +77,8 @@ export function buildArchitecture(data) {
         'decode', 'Instruction decode',
         `${value('decode_width')} instructions / cycle · RV32 or RV64`, 48, 468, 252, 64,
         'frontend', ['rapt_idu', 'rapt_decode_slot'],
-        'Each decode slot uses the generated scalar decoder. Decode can correct ' +
+        'Each slot combines the generated scalar decoder with vector-opcode recognition. ' +
+        'Decode can correct ' +
         'direct jumps, return predictions, and stale branch targets before rename.'),
       block(
         'rename', 'Rename & packet buffers',
@@ -91,14 +93,14 @@ export function buildArchitecture(data) {
           ['Operand stage', `${value('rename_width')} renamed slots`]]),
       block(
         'prf', 'Integer register file', `${value('phys_regs')} physical registers`,
-        48, 680, 252, 64, 'backend', ['rapt_prf'],
+        48, 772, 252, 64, 'backend', ['rapt_prf'],
         'Integer operands are read at dispatch. Retirement updates the ' +
         'architectural mapping and releases stale physical registers.',
         [
           ['Physical registers', value('phys_regs')], ['Architectural mappings', value('arch_regs')]
         ]),
       block(
-        'fpr', 'Floating-point state', 'ROB-backed results · 32 × 64-bit FPRs', 48, 772, 252, 64,
+        'fpr', 'Floating-point state', 'ROB-backed results · 32 × 64-bit FPRs', 48, 864, 252, 64,
         'fp', ['rapt_fp_registers'],
         'FP renaming uses ROB-backed speculative result versions. The 32-entry architectural ' +
         'FPR bank changes only at retirement; it is not an integer-style physical register file.'),
@@ -125,7 +127,7 @@ export function buildArchitecture(data) {
         `ALQ ${value('alq_entries')} · ${value('integer_issue_ports')} issue ports`,
         746, 116, 240, 64, 'execute', ['rapt_ieu', 'rapt_iq'],
         'One shared ALQ selects ready integer instructions for the physical ' +
-        'integer ports. CSR/system operations use the designated system port.'),
+        'integer ports. CSR/system operations and vector issue use the designated system port.'),
       block(
         'brq', 'Branch queue', `BRQ ${value('brq_entries')} entries`, 746, 208, 240, 64, 'execute',
         ['rapt_ieu', 'rapt_iq'],
@@ -162,43 +164,56 @@ export function buildArchitecture(data) {
         'data-dependent normalization. Execution latency is distinct from retirement latency.'),
       block('fp', 'Scalar floating point', 'F / D / Zfhmin', 1112, 392, 280, 64, 'fp', ['rapt_feu'],
         'Independent arithmetic units overlap, with shared multiply/FMA product pipelines and a ' +
-        'separate divide/square-root unit. The standalone VPU is not part of this scalar core.'),
+        'separate divide/square-root unit. The RV64 application presets also enable Zfa.'),
       block(
         'lsu', 'Load / store execution', 'Address · ordering · replay', 1112, 484, 280, 64,
         'memory', ['rapt_lsu', 'rapt_lsu_ioq'],
         'Loads, stores, and atomics share one memory completion endpoint. ' +
         'Hit-under-miss and MSHR replay do not add a second memory completion port.'),
       block(
+        'vpu', 'Vector execution',
+        `V 1.0 · VLEN ${value('vector_vlen')} · ELEN ${value('vector_elen')}`,
+        1110, 576, 282, 64, 'execute',
+        ['rapt_vpu_core', 'rapt_vpu', 'rapt_vpu_vrf', 'rapt_vpu_memory'],
+        'Executes one command at a time after ROB-head authorization. Vector accesses drain ' +
+        'older memory traffic and use the shared data MMU and L1D. Scalar and FP results, ' +
+        'flags and traps complete through the integer system port.',
+        [
+          ['Registers', `32 × ${value('vector_vlen')}-bit vector registers`],
+          ['Restart', 'vstart after a precise fault'],
+          ['RV64 profile', 'Zvbb, Zvfhmin and Zvkt']]),
+      block(
         'completion', `Guarded completion ×${value('completion_ports')}`,
-        'Registered before ROB writeback & recovery', 372, 680, 666, 64, 'backend',
+        'Registered before ROB writeback & recovery', 372, 772, 666, 64, 'backend',
         ['rapt_completion_guard', 'rapt_completion_stage', 'rapt_backend'],
         'Every accepted completion is registered before it updates the ROB. Operand wakeup ' +
         'has separate local and global paths; those bypasses are omitted from the overview.',
         [
           ['Endpoints', `${value('integer_issue_ports')} integer + branch + memory + MUL/DIV + FP`],
+          ['Vector completion', 'Shares the integer system port'],
           ['Owner identity', 'ROB slot + allocation generation']]),
       block(
         'commit', `In-order retirement ×${value('commit_width')}`,
-        'Ready ROB head prefix · precise exceptions', 372, 772, 400, 64, 'backend',
+        'Ready ROB head prefix · precise exceptions', 372, 864, 400, 64, 'backend',
         ['rapt_rou', 'rapt_cmu'],
         'ROU retires a ready prefix in order; CMU broadcasts architectural effects. ' +
-        'Stores become committed here and drain separately through the store queue.'),
+        'Scalar stores become committed here and drain separately through the store queue.'),
       block(
-        'csr', 'CSR & traps', 'M / S / U · interrupts', 798, 772, 240, 64, 'backend', ['rapt_csr'],
+        'csr', 'CSR & traps', 'M / S / U · interrupts', 798, 864, 240, 64, 'backend', ['rapt_csr'],
         'Holds privilege, trap, translation, interrupt, and PMP configuration. ' +
         'CSR/system instructions serialize architectural updates.'),
       block(
         'dcache', 'L1 data cache',
-        `${value('l1d_kib')} KiB · ${value('l1d_ways')}-way · write-back`, 1110, 680, 282, 64,
+        `${value('l1d_kib')} KiB · ${value('l1d_ways')}-way · write-back`, 1110, 772, 282, 64,
         'memory', ['rapt_l1d'],
-        'L1D serves translated loads and committed stores. Its shared data ' +
+        'L1D serves translated scalar and vector accesses. Its shared data ' +
         'read port and single memory completion endpoint limit bandwidth.',
         [
           ['MSHRs', value('l1d_mshrs')], ['Writeback buffers', '2'],
           ['Translation', 'See Memory & platform']]),
       block(
         'sq', 'Unified store queue', `${value('sq_entries')} entries · drain after commit`,
-        1110, 772, 282, 64, 'memory', ['rapt_lsu_sq'],
+        1110, 864, 282, 64, 'memory', ['rapt_lsu_sq'],
         'An entry holds a store from speculative execution through committed ' +
         'drain. Flush discards speculative entries but preserves committed stores.'),
     ],
@@ -208,26 +223,28 @@ export function buildArchitecture(data) {
       edge('fetch', 'decode'),
       edge('decode', 'rename', 'flow', 'right', 'top', [[340, 500], [340, 96], [523, 96]]),
       edge('rename', 'dispatch'),
-      edge('prf', 'dispatch', 'operand', 'right', 'left', [[336, 712], [336, 304]]),
-      edge('fpr', 'dispatch', 'operand', 'right', 'left', [[330, 804], [330, 304]]),
+      edge('prf', 'dispatch', 'operand', 'right', 'left', [[336, 804], [336, 304]]),
+      edge('fpr', 'dispatch', 'operand', 'right', 'left', [[330, 896], [330, 304]]),
       edge('rename', 'checkpoints', 'control', 'left', 'left', [[360, 148], [360, 444]]),
       ...['alq', 'brq', 'mdq', 'fpq', 'ioq'].map(
         (id, i) => edge('dispatch', id, 'flow', 'right', 'left', [[710, 304], [710, 148 + i * 92]])
       ),
       ...[['alq', 'alu'], ['brq', 'branch'], ['mdq', 'muldiv'], ['fpq', 'fp'], ['ioq', 'lsu']].map(
         ([a, b]) => edge(a, b, 'flow', 'right', 'left')),
-      ...['alu', 'branch', 'muldiv', 'fp', 'lsu'].map(
+      edge('alq', 'vpu', 'flow', 'right', 'left', [[1018, 148], [1018, 608]], 'Integer system issue'),
+      ...['alu', 'branch', 'muldiv', 'fp', 'lsu', 'vpu'].map(
         (id, i) => edge(
           id, 'completion', 'result', 'right', 'top',
-          [[1428, 148 + i * 92], [1428, 608], [705, 608]])),
-      edge('completion', 'commit', 'result', 'bottom', 'top', [[705, 758], [572, 758]]),
-      edge('lsu', 'dcache', 'memory', 'right', 'right', [[1422, 516], [1422, 712]]),
-      edge('lsu', 'sq', 'memory', 'right', 'right', [[1434, 516], [1434, 804]]),
+          [[1428, 148 + i * 92], [1428, 700], [705, 700]])),
+      edge('completion', 'commit', 'result', 'bottom', 'top', [[705, 850], [572, 850]]),
+      edge('lsu', 'dcache', 'memory', 'right', 'right', [[1422, 516], [1422, 804]]),
+      edge('lsu', 'sq', 'memory', 'right', 'right', [[1434, 516], [1434, 896]]),
+      edge('vpu', 'dcache', 'memory', 'bottom', 'top', [], 'Translated vector data access'),
       edge('sq', 'dcache', 'memory', 'top', 'bottom'),
-      edge('commit', 'sq', 'control', 'bottom', 'bottom', [[572, 860], [1251, 860]]),
+      edge('commit', 'sq', 'control', 'bottom', 'bottom', [[572, 952], [1251, 952]]),
       edge('commit', 'csr', 'control', 'right', 'left'),
       edge(
-        'commit', 'predict', 'control', 'bottom', 'left', [[572, 854], [12, 854], [12, 148]],
+        'commit', 'predict', 'control', 'bottom', 'left', [[572, 946], [12, 946], [12, 148]],
         'Flush / predictor training'),
     ],
   };
@@ -385,7 +402,7 @@ export function buildArchitecture(data) {
   };
   // Each tab covers the same system. Collapse the other tab's detail into a
   // navigable block, keeping the architectural boundary connections visible.
-  core.height = 1104;
+  core.height = 1196;
   core.description +=
     ' The memory and platform overview below completes the system; ' +
     'open it for translation, interconnect, devices, and debug details.';
@@ -393,12 +410,12 @@ export function buildArchitecture(data) {
     group(
       'SYSTEM CONTEXT',
       'L1 caches are expanded above; the remaining memory and platform functions are grouped here',
-      24, 896, 1392, 184, 'memory'));
+      24, 988, 1392, 184, 'memory'));
   core.nodes.push({
     ...block(
       'memory-system', 'Memory & platform',
       'TLBs & page walkers · memory bus · optional L2 · CLINT / PLIC · debug · external RAM / MMIO',
-      48, 950, 1344, 104, 'memory',
+      48, 1042, 1344, 104, 'memory',
       ['rapt_memory', 'rapt_l2_subsystem', 'rapt_router', 'rapt_clint',
         'rapt_plic', 'rapt_dm', 'rapt_dtm', 'rapt'],
       'Translation and protection serve instruction and data accesses. Cache ' +
@@ -409,16 +426,16 @@ export function buildArchitecture(data) {
   });
   core.edges.push(
     edge(
-      'icache', 'memory-system', 'memory', 'left', 'left', [[6, 240], [6, 1002]],
+      'icache', 'memory-system', 'memory', 'left', 'left', [[6, 240], [6, 1094]],
       'Instruction translation / refill path'),
     edge(
-      'dcache', 'memory-system', 'memory', 'right', 'right', [[1438, 712], [1438, 1002]],
+      'dcache', 'memory-system', 'memory', 'right', 'right', [[1438, 804], [1438, 1094]],
       'Data translation / external request path'),
     edge(
-      'memory-system', 'csr', 'control', 'top', 'bottom', [[720, 880], [918, 880]],
+      'memory-system', 'csr', 'control', 'top', 'bottom', [[720, 972], [918, 972]],
       'Timer / software / external interrupts'),
     edge(
-      'memory-system', 'dispatch', 'control', 'left', 'left', [[18, 1002], [18, 304]],
+      'memory-system', 'dispatch', 'control', 'left', 'left', [[18, 1094], [18, 304]],
       'Hart debug / halt control (simplified)'),
   );
 
@@ -437,12 +454,12 @@ export function buildArchitecture(data) {
   memory.nodes.unshift({
     ...block(
       'core-system', 'Core pipeline',
-      `${widths} · ROB ${value('rob_entries')} · integer / FP / load-store execution`,
+      `${widths} · ROB ${value('rob_entries')} · integer / FP / vector execution`,
       60, 108, 1040, 104, 'backend',
-      ['rapt_frontend', 'rapt_backend', 'rapt_csr', 'rapt_lsu_sq'],
+      ['rapt_frontend', 'rapt_backend', 'rapt_csr', 'rapt_lsu_sq', 'rapt_vpu_core'],
       'Prediction, fetch, decode, rename, scheduling, execution, completion, and ' +
       'in-order retirement form the core pipeline. Fetch uses the instruction ' +
-      'memory path; LSU and committed stores use the data path. Privilege state ' +
+      'memory path; the LSU and VPU share the data path. Privilege state ' +
       'receives interrupts, and the debug module controls hart access.'),
     targetView: 'core',
   });

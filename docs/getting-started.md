@@ -65,6 +65,25 @@ make lint-rv64
 make run-rv32 VFLAGS="-DRAPT_RV64" ARGS="-b -n"
 ```
 
+### Run vector code
+
+The `default`, `default-*` and `large` presets enable V 1.0 on RV32 and RV64.
+Compile a bare-metal vector program for `rv32gcv` / `ilp32d` or
+`rv64gcv` / `lp64d` and use the matching NPC target. The whole-core smoke
+target builds its own program and memory-fault cases.
+
+```sh
+make -C verification/subsystem vector-system-smoke CONFIG=default XLEN=32 \
+  BUILD_DIR=/tmp/raptor-vector-rv32
+make -C verification/subsystem vector-system-smoke CONFIG=default XLEN=64 \
+  BUILD_DIR=/tmp/raptor-vector-rv64
+make -C verification/subsystem rva23u64-smoke CONFIG=default
+```
+
+On RV64, pass `VFLAGS=-DRAPT_NO_RVA23U64` to `make run-rv64` for baseline
+V. Pass `VFLAGS=-DRAPT_NO_VPU` to either NPC target for a scalar build.
+See [ISA scope](./README.md#isa-scope) for the preset matrix.
+
 ## 4. Benchmarks
 
 ```shell
@@ -115,7 +134,8 @@ make linux-boot-nemu32              # NEMU
 make linux-boot-rv32               # NPC + difftest vs NEMU (default)
 ```
 
-Details: **[Linux Kernel Boot](./linux_kernel.md)**.
+See [Linux boot](./linux_kernel.md) for simulator payloads and the FPGA
+netboot workflow.
 
 ## 7. FPGA
 
@@ -130,16 +150,15 @@ make fpga-build FPGA_BOARD=rk-xcku5p-f
 make -C fpga/rk-xcku5p-f help
 ```
 
-For LiteX BIOS/Linux flows:
+For Linux on KU15P or KU5P, use the Ethernet netboot targets.
 
 ```shell
-make -C fpga/litex help
-make -C fpga/litex fpga-detect
+make -C fpga/litex fpga-netboot-rv64-check RAPT_CONFIG=default
 ```
 
-See [FPGA support](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/README.md) and
-[LiteX board setup](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/litex/README.md) for toolchains and constraints.
-Synthesis does not establish routed timing closure or a working board image.
+Follow the [FPGA netboot instructions](./linux_kernel.md#fpga-netboot) for
+the build, timing gate, TFTP bundle and board boot. Board and toolchain
+options are in the [FPGA guide](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/README.md).
 
 ## 8. Utilities
 
@@ -150,7 +169,8 @@ make sta MEMORY=sram XLEN=32  # full synthesis + STA; can take hours
 make sta-check MEMORY=dff XLEN=64 # RTL elaboration only
 make format FORMAT_SCOPE=all  # includes tracked HDL and SV testbenches
 make format-check FORMAT_SCOPE=all # no file changes
-make regression-plan         # preview CoreMark/STA/FPGA regression commands
+make regression-plan         # inspect dependency and concurrency settings
+make regression              # format, then run independent checks in parallel
 make clean    # clean NEMU, selected sim profile, generated RTL, verify and app outputs
 ```
 

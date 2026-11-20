@@ -25,9 +25,6 @@ make linux-download
 make linux-boot-nemu32 ARGS="-b -n"
 make linux-boot-rv32 ARGS="-b -n"
 
-# RV32 Linux on the KU15P FPGA through LiteX BIOS + MIG DDR4
-make -C fpga/litex linux-fpga-rv32-e2e UART_PORT=/dev/ttyUSB0
-
 # RV64 prebuilt payload and NPC paths
 make linux-download-rv64
 make linux-boot-rv64 ARGS="-b -n"
@@ -52,26 +49,63 @@ All NPC Linux boot targets use the matching RV32/RV64 NEMU difftest reference
 by default, including the hard-float `rv32gc` and `rv64gc` targets. For focused
 simulator diagnosis, pass `DIFF_REF_SO=` explicitly to disable comparison.
 
-The default RV64 core supports [RVA22S64](./README.md#rva22s64-support), including
-Sv39, Svade, Svpbmt, and Svinval. Linux runs in S-mode with OpenSBI providing the
-M-mode execution environment; payload and board compatibility still depend on
-the selected platform configuration.
+Linux uses [RVA22S64 supervisor facilities](./README.md#rva22s64-support),
+including Sv39, Svade, Svpbmt and Svinval on RV64. OpenSBI provides the M-mode
+execution environment. The RV64 application presets with V and F/D also expose
+[RVA23U64](./README.md#rva23u64-support) to userspace.
 
 ## Supported Modes
 
 | Mode                | RTL path                              | Status                                                |
 | ------------------- | ------------------------------------- | ----------------------------------------------------- |
 | RV32 Linux          | Sv32 PTW/TLB + PMP + CLINT/PLIC       | Primary NPC/NEMU flow                                 |
-| RV32 KU15P FPGA     | LiteX BIOS + MIG DDR4 + OpenSBI/Linux | Hardware flow; serialboot or FAT32 SD-card `boot.bin` |
 | RV64 Linux          | Sv39 PTW/TLB + NPC/NEMU helpers       | Build and boot targets are wired; current boot result should be checked per commit |
 | RV32/RV64 hard-float | `*gc` DTB + Buildroot F/D payload    | NPC targets are wired; payloads are built separately  |
+| RV32/RV64 FPGA | LiteX BIOS + MIG DDR4 + OpenSBI/Linux | Ethernet/TFTP netboot targets for KU15P and KU5P |
 | RV64 xv6 smoke path | Sv39 PTW/TLB + Svade (software-managed A/D) | Available via `app/tinyos` helpers               |
 
-The presence of an RV64 or hard-float target documents integration and build
-wiring, not a reproduced full boot result for every checkout. Use a dated boot
-log or the corresponding verification target when recording validated status.
-
 See [linux/README.md](https://github.com/Kingfish404/raptor-chip/blob/master/linux/README.md) and [app/tinyos/README.md](https://github.com/Kingfish404/raptor-chip/blob/master/app/tinyos/README.md) for the lower-level payload and xv6/egos helpers.
+
+## FPGA netboot
+
+The LiteX BIOS fetches the boot bundle over Ethernet/TFTP. The UART console
+is used for the BIOS command and boot logs.
+
+```sh
+make -C fpga/litex fpga-netboot-rv64-check RAPT_CONFIG=default
+make -C fpga/litex fpga-netboot-rv64-build RAPT_CONFIG=default
+```
+
+Follow the netboot guide for host setup, serving the bundle, loading the
+bitstream and entering the printed `netboot` command at the BIOS prompt.
+Replace `rv64` with `rv32` for RV32. For KU5P use `FPGA_BOARD=rk_xcku5p_f`
+throughout. KU15P CU08 defaults to `default`; KU5P RK defaults to `small`, so
+select a vector-enabled preset explicitly for RVV on KU5P.
+[LiteX netboot workflow](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/litex/NETBOOT.md)
+
+## RVA23U64 on Linux
+
+Use an RV64 vector-enabled build with a matching DTB. Enable
+`CONFIG_RISCV_ISA_V` for vector context management and
+`CONFIG_RISCV_ISA_SUPM` for the tagged-address ABI. The board and simulator
+device trees advertise `v`, the applicable vector extensions and `ssnpm`
+from the selected hardware configuration.
+
+```sh
+make -C verification/subsystem rva23u64-smoke CONFIG=default
+make -C verification/subsystem rva23u64-linux-probe BUILD_DIR=/tmp/raptor-rva23
+```
+
+The first command runs RTL tests. The second builds the static `rva23-check`
+program. Include it as `/rva23-check` in the netboot initramfs and add
+`rdinit=/rva23-check` to the kernel command line. The probe checks vector and
+scalar instructions, cache-block operations and pointer masking in U-mode.
+Successful completion prints `RVA23_LINUX_PASS`.
+
+The November 19, 2026 integration run passed this probe on the native
+MLK-CU08-KU15P target with RV64, `default`, DDR4 and a 50 MHz core. BIOS
+loaded Linux over TFTP. For a new board run, record the bitstream and DTB
+identities with the boot log.
 
 ## Payload Paths
 
@@ -106,8 +140,10 @@ payload and simulator ROM flow. The RTL-visible platform devices are:
 `timebase-frequency`, because CSR `time` and CLINT `mtime` are paced together.
 
 The KU15P Linux DT advertises `zicbom` and `riscv,cbom-block-size` using the
-selected RTL preset's `RAPT_CACHE_LINE_BYTES`. LiteSDCard DMA is non-coherent;
-the BIOS calls a legacy no-range CPU cache-maintenance hook after DMA.
+selected RTL preset's `RAPT_CACHE_LINE_BYTES`. The boot firmware enables
+supervisor cache maintenance, including `cbo.zero` for the profile. LiteSDCard
+DMA is non-coherent; the BIOS calls a legacy no-range CPU cache-maintenance hook
+after DMA.
 
 The NEMU RV32GC/RV64GC configurations inject a fresh 256-bit host-random seed
 into the external DTB `/chosen/rng-seed` property before each boot. This matches

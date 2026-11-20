@@ -27,12 +27,16 @@ OBJCOPY := $(CROSS_COMPILE)objcopy
 SIZE    := $(CROSS_COMPILE)size
 
 # ---- Architecture ----
-ARCH   := rv32imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs
-ABI    := ilp32
+XLEN   ?= 32
+ARCH   := rv$(XLEN)imac_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs
+ABI    := $(if $(filter 64,$(XLEN)),lp64,ilp32)
+# RV64 medlow soft-float libraries cannot address tables in RAM at 0x80000000.
+# CoreMark's integer timing path retains the full tick count for validation.
+HAS_FLOAT := $(if $(filter 64,$(XLEN)),0,1)
 
 # ---- Directories ----
 COREMARK_DIR := $(_THIS_DIR)coremark
-BUILD_DIR    := $(_THIS_DIR)build
+BUILD_DIR    := $(_THIS_DIR)build/rv$(XLEN)
 PORTME_DIR   := $(_THIS_DIR)portme
 
 # ---- CoreMark config ----
@@ -62,7 +66,7 @@ CFLAGS := -march=$(ARCH) -mabi=$(ABI) -mcmodel=medany \
           -isystem $(shell $(CC) -print-file-name=include) \
           -I$(PORTME_DIR) -I$(COREMARK_DIR) \
           -DITERATIONS=$(ITERATIONS) -DPERFORMANCE_RUN=1 \
-          -DHAS_STDIO=0 -DHAS_PRINTF=0 -DHAS_FLOAT=1 \
+          -DHAS_STDIO=0 -DHAS_PRINTF=0 -DHAS_FLOAT=$(HAS_FLOAT) \
           -DEE_TICKS_PER_SEC=$(SYS_CLK_HZ)ULL \
           -DCOMPILER_FLAGS=\""$(ARCH)"\"
 
@@ -139,7 +143,7 @@ endif # coremark source exists
 
 clone: $(COREMARK_DIR)/core_main.c ## Clone CoreMark repository
 
-build: ## Build coremark ELF + BIN (override ITERATIONS=N, SYS_CLK_HZ=Hz)
+build: ## Build coremark ELF + BIN (override XLEN=32|64, ITERATIONS=N, SYS_CLK_HZ=Hz)
 	@$(MAKE) --no-print-directory $(COREMARK_DIR)/core_main.c
 	@$(MAKE) --no-print-directory _build ITERATIONS=$(ITERATIONS) SYS_CLK_HZ=$(SYS_CLK_HZ)
 

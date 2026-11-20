@@ -1,6 +1,6 @@
 name: App (Verified, Linux boot, LiteX)
 
-# Unified workflow RISCOF compatibility + coverage, Linux boot RV32/NEMU, and LiteX BIOS / CoreMark / Embench
+# Classic RISCOF and RV32/RV64 coverage, Linux boot, LiteX BIOS and CoreMark.
 #
 # Jobs:
 #   - riscof-classic: cross-validates the Raptor core against the upstream
@@ -8,10 +8,10 @@ name: App (Verified, Linux boot, LiteX)
 #     (sail-riscv reference).
 #   - fuzztest-sigtest-and-coverage: builds with coverage instrumentation
 #     and runs the verify suite to produce a unified Verilator coverage report.
-#   - linux-rv32-test: checks RV32 Linux kernel entry on the Verilator model.
+#   - linux-test: checks RV32/RV64 Linux kernel entry on the Verilator model.
 #   - release-rtl: packs every RTL preset; pushes publish the rtl-nightly release.
-#   - nemu-linux-test: boots OpenSBI + Linux 32/64-bit on NEMU.
-#   - litex-test: LiteX BIOS + CoreMark in the Verilator LiteX SoC.
+#   - nemu-linux-test: boots OpenSBI and Linux in RV32/RV64 NEMU.
+#   - litex-test: RV32/RV64 LiteX BIOS and CoreMark on the Verilator LiteX SoC.
 # CI script self-tests live in ci-checks.yaml; summaries use ci_report.py.
 
 on:
@@ -29,6 +29,7 @@ on:
       - "fpga/litex/**"
       - ".github/scripts/**"
       - ".github/actions/**"
+      - "Makefile"
       - "setup.sh"
       - "setup-rtl.sh"
       - ".github/workflows/app.yaml"
@@ -43,8 +44,7 @@ concurrency:
 
 defaults:
   run:
-    # Login shell for the tool paths, keeping GitHub's errexit/pipefail.
-    shell: bash -leo pipefail {0}
+    shell: bash --noprofile --norc -eo pipefail {0}
 
 env:
   RAPT_CONFIG: default
@@ -226,18 +226,25 @@ jobs:
   fuzztest-sigtest-and-coverage:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        xlen: [32, 64]
+    name: coverage-rv${{ matrix.xlen }}
+    env:
+      ISA: rv${{ matrix.xlen }}
     steps:
       - uses: actions/checkout@v6
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
           profile: sim
-          build-cache: default-coverage-rv32
+          build-cache: default-coverage-rv${{ matrix.xlen }}
       - name: Check parallel Kconfig builds
         run: python3 verification/scripts/test_kconfig_parallel.py
       - name: Build NEMU-Ref
         # All workloads below use the isolated coverage simulator.
-        run: make build-nemu32-ref
+        run: make build-nemu${{ matrix.xlen }}-ref
       - name: Build with coverage instrumentation
         timeout-minutes: 90
         run: |
@@ -248,7 +255,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-build-log
+          name: coverage-build-log-rv${{ matrix.xlen }}
           path: coverage-build.log
           if-no-files-found: ignore
           retention-days: 7
@@ -266,37 +273,57 @@ jobs:
       - name: Generate coverage report
         run: make -C verification coverage-report COV_LINE_MIN=50.0
 
-  linux-rv32-test:
+  linux-test:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { xlen: 32, guest: rv32, max_cycles: 10000000 }
+          - { xlen: 64, guest: rv64gc, max_cycles: 15000000 }
+    name: linux-rv${{ matrix.xlen }}-test
+    env:
+      XLEN: ${{ matrix.xlen }}
+      LINUX_GUEST: ${{ matrix.guest }}
+      LINUX_MAX_CYCLES: ${{ matrix.max_cycles }}
     steps:
       - uses: actions/checkout@v6
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
           profile: sim
-          build-cache: default-linux-rv32
+          build-cache: default-linux-rv${{ matrix.xlen }}
       - name: Download pre-built Linux kernel
-        run: make linux-download-rv32
-      - name: Check RV32 Linux kernel entry with default difftest
+        run: make "linux-download-$LINUX_GUEST"
+      - name: Check Linux kernel entry with default difftest
         # NPC's legacy -m/MAX_INST budget counts cycles. Stop at the checked
         # entry marker instead of spending the remaining budget after success.
         run: |
-          make linux-boot-rv32 ARGS="-b -n --serial-exit-on='Linux version'" MAX_INST=10000000 \
-            2>&1 | tee /tmp/linux-boot.log || true
+          if [ "$LINUX_GUEST" = rv64gc ]; then
+            # Use the fast Buildroot release with its bundled OpenSBI.
+            LINUX_RV64GC_PAYLOAD=$(make --no-print-directory -s -C linux print-rv64gc-release-payload)
+            export LINUX_RV64GC_PAYLOAD
+          fi
+          make "linux-boot-$LINUX_GUEST" ARGS="-b -n --no-lightsss --serial-exit-on='Linux version'" \
+            MAX_INST="$LINUX_MAX_CYCLES" 2>&1 | tee "$RUNNER_TEMP/linux-boot.log"
       - name: Linux kernel-entry summary
+        if: always()
         run: |
+          log="$RUNNER_TEMP/linux-boot.log"
+          status=0
+          python3 verification/scripts/check_linux_boot.py --success-marker "Linux version" "$log" || status=$?
           {
-            $REPORT boot "Linux Kernel Entry Test (RV32)" /tmp/linux-boot.log \
-              "Kernel entry (Linux version)=Linux version" || true
-            $REPORT pmu "Linux Boot RV32" /tmp/linux-boot.log
+            echo "## Linux Kernel Entry Test (RV$XLEN)"
+            echo
+            if [ "$status" -eq 0 ]; then echo "Kernel entry PASS"; else echo "Kernel entry FAIL"; fi
+            $REPORT pmu "Linux Boot RV$XLEN" "$log"
           } >> "$GITHUB_STEP_SUMMARY"
-          python3 verification/scripts/check_linux_boot.py \
-            --success-marker "Linux version" /tmp/linux-boot.log
+          exit "$status"
 
   release-rtl:
     # Gate release on the default Linux kernel-entry check.
-    needs: linux-rv32-test
+    needs: linux-test
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -365,6 +392,13 @@ jobs:
   nemu-linux-test:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        xlen: [32, 64]
+    name: nemu-linux-rv${{ matrix.xlen }}-test
+    env:
+      XLEN: ${{ matrix.xlen }}
     steps:
       - uses: actions/checkout@v6
       - name: Setup environment
@@ -373,68 +407,69 @@ jobs:
           profile: nemu
       - name: Build OpenSBI
         run: |
-          make -C third_party/riscv-software-src/opensbi PLATFORM=generic PLATFORM_RISCV_XLEN=32 \
-            PLATFORM_RISCV_ISA=rv32imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs \
+          make -C third_party/riscv-software-src/opensbi PLATFORM=generic PLATFORM_RISCV_XLEN="$XLEN" \
+            "PLATFORM_RISCV_ISA=rv${XLEN}imac_zicntr_zicond_zicsr_zifencei_zba_zbb_zbs" \
             CROSS_COMPILE=riscv64-linux-gnu- -j"$(nproc)"
       - name: Build NEMU (Linux config)
-        run: make build-nemu32-linux
+        run: make "build-nemu$XLEN-linux"
       - name: Test OpenSBI on NEMU
         run: |
           make -C nemu run IMG=../third_party/riscv-software-src/opensbi/build/platform/generic/firmware/fw_payload.bin \
-            ARGS="-b -m 10000000 --log=./build/nemu-log.txt" 2>&1 | tee /tmp/nemu-opensbi.log
+            ARGS="-b -m 10000000 --log=./build/nemu-log.txt" 2>&1 | tee "$RUNNER_TEMP/nemu-opensbi.log"
+          $REPORT boot "OpenSBI (NEMU RV$XLEN)" "$RUNNER_TEMP/nemu-opensbi.log" \
+            "Test payload=Test payload running" >> "$GITHUB_STEP_SUMMARY"
       - name: Download pre-built Linux kernel
-        run: make linux-download-rv32 linux-download-rv64
-      - name: Boot Linux 32-bit on NEMU
-        run: make linux-boot-nemu32 ARGS="-b" MAX_INST=1400000000
-      - name: Boot Linux 64-bit on NEMU
-        run: make linux-boot-nemu64 ARGS="-b" MAX_INST=1400000000
+        run: make "linux-download-rv$XLEN"
+      - name: Boot Linux on NEMU
+        run: make "linux-boot-nemu$XLEN" ARGS="-b" MAX_INST=1400000000
       # NEMU prints the guest console to stderr, which the Makefile tees into
       # nemu/build/logs/. The --log file only holds NEMU's internal trace.
       # Informational: the boot steps above already fail on a NEMU error.
       - name: NEMU Linux boot summary
         if: always()
         run: |
-          for xlen in 32 64; do
-            $REPORT boot "Linux Boot Test (NEMU RV$xlen)" "nemu/build/logs/linux-boot-nemu$xlen.log" \
-              "Kernel boot=Linux version" "Reaches init=Run /init as init process" || true
-          done >> "$GITHUB_STEP_SUMMARY"
+          $REPORT boot "Linux Boot Test (NEMU RV$XLEN)" "nemu/build/logs/linux-boot-nemu$XLEN.log" \
+            "Kernel boot=Linux version" "Reaches init=Run /init as init process" >> "$GITHUB_STEP_SUMMARY" || true
 
   litex-test:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        xlen: [32, 64]
+    name: litex-test-rv${{ matrix.xlen }}
     env:
       SIM_JOBS: "2"
+      XLEN: ${{ matrix.xlen }}
+      # BIOS tests the smaller of the RAM size and its 2 MiB test window.
+      LITEX_BIOS_SIM_FLAGS: --integrated-main-ram-size=0x10000
     steps:
       - uses: actions/checkout@v6
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
           profile: litex
-          build-cache: default-litex
+          build-cache: default-litex-rv${{ matrix.xlen }}
       - name: Prepare LiteX
         run: cd fpga/litex && make setup
       - name: Build LiteX BIOS simulation
-        run: cd fpga/litex && make sim-build ROM=bios
+        run: make -C fpga/litex sim-build "VARIANT=linux$XLEN" ROM=bios EXTRA_FLAGS="$LITEX_BIOS_SIM_FLAGS"
       - name: Run LiteX BIOS
-        # The BIOS waits for console input. Limit runtime, not the cold build.
-        run: cd fpga/litex && make sim-run ROM=bios SIM_TIMEOUT=240
+        # LiteX inserts a console color reset between "litex" and ">".
+        run: |
+          prompt=$(printf 'litex\033[0m>')
+          make -C fpga/litex sim-run "VARIANT=linux$XLEN" ROM=bios EXTRA_FLAGS="$LITEX_BIOS_SIM_FLAGS" \
+            SIM_TIMEOUT=240 SIM_STOP_MARKER="$prompt" 2>&1 | tee "$RUNNER_TEMP/litex-bios.log"
+          $REPORT boot "LiteX BIOS (RV$XLEN)" "$RUNNER_TEMP/litex-bios.log" \
+            "CPU variant=Raptor (linux$XLEN)" "Memory self-test=Memtest OK" \
+            "Console prompt=litex>" >> "$GITHUB_STEP_SUMMARY"
       - name: CoreMark on LiteX
         run: |
-          cd fpga/litex
           # Two iterations make this a functional smoke test, not a score-valid run.
           # The inner timeout applies after the separate CoreMark Vsim cold build.
-          COREMARK_RC=0
-          make coremark COREMARK_ITERATIONS=2 SIM_TIMEOUT=300 \
-            2>&1 | tee /tmp/litex-coremark.log || COREMARK_RC=$?
-          if [ "$COREMARK_RC" -ne 0 ]; then
-            echo "::warning::LiteX CoreMark build or simulation exited with $COREMARK_RC; retaining the log and continuing"
-            tail -n 100 /tmp/litex-coremark.log || true
-          elif ! grep -q 'CoreMark: done\.' /tmp/litex-coremark.log; then
-            echo "::warning::LiteX CoreMark did not reach its completion marker before its timeout; retaining the log and continuing"
-            tail -n 100 /tmp/litex-coremark.log || true
-          elif ! grep -q 'Correct operation validated' /tmp/litex-coremark.log; then
-            echo "::notice::LiteX CoreMark completed its two-iteration smoke test; score validation is intentionally skipped"
-          fi
+          make -C fpga/litex coremark "VARIANT=linux$XLEN" COREMARK_ITERATIONS=2 SIM_TIMEOUT=300 \
+            2>&1 | tee "$RUNNER_TEMP/litex-coremark.log"
       - name: LiteX summary
         if: always()
-        run: $REPORT litex-coremark /tmp/litex-coremark.log >> "$GITHUB_STEP_SUMMARY"
+        run: $REPORT litex-coremark "$RUNNER_TEMP/litex-coremark.log" --xlen "$XLEN" >> "$GITHUB_STEP_SUMMARY"

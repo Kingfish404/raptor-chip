@@ -584,6 +584,10 @@ archtest-rv32: build-rv32 $(RISCV_ARCH_TEST) ## Run RISC-V Architecture Test on 
 archtest-rv32e: build-rv32 $(RISCV_ARCH_TEST) ## Run RISC-V Architecture Test on NPC (riscv32e)
 	@set -o pipefail; $(MAKE) -C $(RISCV_ARCH_TEST) ARCH=riscv32e-npc run ARGS="$(ARGS)" $(call tee_npc,archtest-rv32e)
 
+archtest-rv64: build-rv64 $(RISCV_ARCH_TEST) ## Run RISC-V Architecture Test on NPC (riscv64)
+	@set -o pipefail; $(MAKE) -C $(RISCV_ARCH_TEST) ARCH=riscv64-npc \
+		TEST_ISA="$(or $(TEST_ISA),I M A)" VFLAGS="$(RV64_VFLAGS)" run ARGS="$(ARGS)" $(call tee_npc,archtest-rv64)
+
 # ============================================================================
 # Nanos-lite OS
 # ============================================================================
@@ -1165,6 +1169,10 @@ app-bbl-linux: build-rv32 ## [app] Boot Linux via BBL on NPC
 
 app-hello-rv32: build-rv32 ## [app] Hello world test via pk (rv32)
 	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) hello-sim ARGS="$(ARGS)" $(call tee_app,hello-rv32)
+
+app-hello-rv64: build-rv64 ## [app] Hello world test via pk (rv64)
+	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) hello-sim \
+		ISA64=1 ARGS="$(ARGS)" $(call tee_app,hello-rv64)
 
 app-coremark-rv64: build-rv64 ## [app] CoreMark via pk (rv64)
 	@set -o pipefail; $(MAKE) --no-print-directory -C $(APP_HOME) coremark-sim ISA64=1 ARGS="$(ARGS)" $(call tee_app,coremark-rv64)

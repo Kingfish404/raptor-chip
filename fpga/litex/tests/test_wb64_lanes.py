@@ -89,6 +89,41 @@ def _axi_read(test, cpu, addr, size):
 
 
 class WB64LaneTest(unittest.TestCase):
+    def test_rv32_line_read_completes_after_address_handshake(self):
+        dut = FullBridge()
+        cpu = dut.cpu
+
+        def exercise():
+            yield cpu.ar.addr.eq(0x80004000)
+            yield cpu.ar.id.eq(9)
+            yield cpu.ar.len.eq(15)
+            yield cpu.ar.size.eq(2)
+            yield cpu.ar.burst.eq(1)
+            yield cpu.ar.valid.eq(1)
+            yield cpu.r.ready.eq(1)
+            yield
+            address_accepted = False
+            received = []
+            for _ in range(160):
+                if (yield cpu.r.valid):
+                    self.assertTrue(address_accepted, "RVALID preceded the AR handshake")
+                    self.assertEqual((yield cpu.r.id), 9)
+                    self.assertEqual((yield cpu.r.last), len(received) == 15)
+                    received.append((yield cpu.r.data))
+                    if len(received) == 16:
+                        break
+                if not address_accepted and (yield cpu.ar.ready):
+                    address_accepted = True
+                    yield cpu.ar.valid.eq(0)
+                    yield cpu.ar.addr.eq(0x11001800)
+                    yield cpu.ar.id.eq(0)
+                    yield cpu.ar.len.eq(0)
+                    yield cpu.ar.size.eq(0)
+                yield
+            self.assertEqual(received, [0x11223344, 0xaabbccdd] * 8)
+
+        run_simulation(_fix_memories(dut), [exercise()])
+
     def test_rv64_doubleword_read_selects_both_lanes(self):
         # Linux memcpy_fromio uses 64-bit loads on device SRAM (LiteEth RX).
         dut = FullBridge64()

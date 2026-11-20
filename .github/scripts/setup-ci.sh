@@ -21,7 +21,9 @@ install_tools() {
         device-tree-compiler xxd libsdl2-dev)
       brew_packages+=(verilator sbt riscv64-elf-binutils riscv64-elf-gcc)
       if [[ "$profile" == litex ]]; then
-        apt_packages+=(python3-venv python3-dev libevent-dev libjson-c-dev libslirp-dev)
+        # LiteX's simulation ROM uses the Linux CROSS prefix on Ubuntu.
+        apt_packages+=(gcc-riscv64-linux-gnu python3-venv python3-dev
+          libevent-dev libjson-c-dev libslirp-dev)
       fi
       ;;
     riscof)

@@ -49,8 +49,7 @@ CORE_TICKS get_time(void)
 
 secs_ret time_in_secs(CORE_TICKS ticks)
 {
-    secs_ret retval = ((secs_ret)ticks) / (secs_ret)EE_TICKS_PER_SEC;
-    return retval;
+    return ticks / (secs_ret)EE_TICKS_PER_SEC;
 }
 
 /* ---- Portable init/fini ---- */

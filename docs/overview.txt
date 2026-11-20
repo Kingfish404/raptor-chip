@@ -3,6 +3,6 @@ layout: markdown
 permalink: /overview.html.md
 markdown_source: README.md
 title: Core overview
-description: Default configuration, ISA scope, RVA22S64 support, and source map.
+description: RTL presets, RVV 1.0, RVA23U64 user and RVA22S64 supervisor support.
 nav_order: 2
 ---

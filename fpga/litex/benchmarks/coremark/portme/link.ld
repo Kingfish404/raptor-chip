@@ -4,7 +4,6 @@
  * Binary is loaded to main_ram at 0x80000000 by boot firmware.
  * ============================================================================ */
 
-OUTPUT_FORMAT("elf32-littleriscv")
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
 

@@ -27,6 +27,9 @@ if '--dump-defines' in args:
     print(f'`define RAPT_XLEN {xlen}')
     print('`define RAPT_PADDR_BITS 32')
     print(f'`define RAPT_PMPADDR_BITS {30 if xlen == 64 else 32}')
+    print('`define RAPT_VLEN 128')
+    print('`define RAPT_VRF_BANK_BITS 64')
+    print('`define RAPT_VRF_BANKS 2')
     sys.exit(0)
 if '--version' in args:
     print('Verilator build-isolation fixture')

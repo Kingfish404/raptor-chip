@@ -7,9 +7,9 @@ function fillSpecs(values) {
   if (!grid || !values) return;
   const keys = [
     ["decode_width", "Decode width"],
-    ["commit_width", "Commit width"],
     ["rob_entries", "ROB entries"],
-    ["phys_regs", "Integer registers"],
+    ["vector_vlen", "VLEN · bits"],
+    ["vector_elen", "ELEN · bits"],
     ["l1i_kib", "L1I · KiB"],
     ["l1d_kib", "L1D · KiB"],
   ];

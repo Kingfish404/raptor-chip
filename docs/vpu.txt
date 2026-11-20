@@ -2,7 +2,7 @@
 layout: markdown
 permalink: /vpu.html.md
 markdown_source: vpu.md
-title: Standalone VPU
-description: RVV component architecture, integration contracts, verification, and limitations.
+title: Vector extension
+description: Integrated V 1.0 on RV32 and RV64, memory and retirement contracts, and verification.
 nav_order: 9
 ---

@@ -13,7 +13,7 @@ workflow step is `python3 ci_report.py ... >> "$GITHUB_STEP_SUMMARY"`.
   boot TITLE LOG CHECK=MARKER...   boot-marker checks; fails if any marker is absent
   coremark-pk HELLO LOG ...        CRC-checked pk CoreMark (published CRC lines)
   coremark-am LOG                  CRC-checked AM CoreMark (CoreMark's own profile check)
-  litex-coremark LOG               LiteX CoreMark smoke summary (never fails)
+  litex-coremark LOG [--xlen N]    CRC-checked two-iteration LiteX CoreMark smoke summary
 """
 import argparse
 from pathlib import Path
@@ -168,6 +168,15 @@ def good_trap(log):
     return re.findall(r"HIT (?:GOOD|BAD) TRAP", log) == ["HIT GOOD TRAP"]
 
 
+def coremark_crc_errors(log):
+    errors = []
+    for name, expected in EXPECTED_CRC.items():
+        label = name if name == "seedcrc" else "[0]" + name
+        if field(log, label, r"0x[0-9a-fA-F]+", 16) != expected:
+            errors.append(f"{name} missing or mismatched")
+    return errors
+
+
 def evaluate_pk(log, expected_iterations, allow_short, timebase_hz=10_000_000):
     """Validate the 2K profile from the pk port's published CRC/timing lines."""
     errors = []
@@ -175,10 +184,7 @@ def evaluate_pk(log, expected_iterations, allow_short, timebase_hz=10_000_000):
     measurement = log.partition("CoreMark: done.")[0]
     if not good_trap(log):
         errors.append("missing, duplicate, or bad final trap")
-    for name, expected in EXPECTED_CRC.items():
-        label = name if name == "seedcrc" else "[0]" + name
-        if field(measurement, label, r"0x[0-9a-fA-F]+", 16) != expected:
-            errors.append(f"{name} missing or mismatched")
+    errors.extend(coremark_crc_errors(measurement))
     final_crc = field(measurement, "[0]crcfinal", r"0x[0-9a-fA-F]+", 16)
     if final_crc is None:
         errors.append("missing final CRC")
@@ -274,22 +280,46 @@ def cmd_coremark_am(args):
 
 def cmd_litex_coremark(args):
     log = read(args.log)
-    iterations = first(r"Iterations\s*:\s*(\d+)", log)
-    if "Correct operation validated" in log:
-        validation = "PASS"
-    elif iterations == "2":
-        validation = "SMOKE (score validation skipped)"
-    else:
-        validation = "FAIL"
+    errors = coremark_crc_errors(log)
+    target = first(r"^CoreMark: (Raptor LiteX SoC \(rv(?:32|64)\))$", log)
+    if args.xlen and target != f"Raptor LiteX SoC (rv{args.xlen})":
+        errors.append(f"expected RV{args.xlen} payload")
+    # Two iterations of the 2K performance profile produce this final CRC.
+    if field(log, "[0]crcfinal", r"0x[0-9a-fA-F]+", 16) != 0x72BE:
+        errors.append("crcfinal missing or mismatched")
+    # The port prints an unpadded Iterations banner before the workload.
+    iterations = field(log, "Iterations", spaced=True)
+    if iterations != 2:
+        errors.append("expected two measured iterations")
+    if field(log, "CoreMark Size") != 666:
+        errors.append("unexpected CoreMark size")
+    ticks = field(log, "Total ticks")
+    if not ticks:
+        errors.append("missing or zero timer ticks")
+    lines = log.splitlines()
+    if lines.count("CoreMark: done.") != 1:
+        errors.append("missing or duplicate completion marker")
+    seconds = first(r"^Total time \(secs\):\s*([0-9]+(?:\.[0-9]+)?)$", log, default=None)
+    diagnostics = [line for line in lines if re.search(r"ERROR|Errors detected|Cannot validate", line)]
+    validated = log.count("Correct operation validated.")
+    short = (seconds is not None and float(seconds) < 10 and not validated
+             and diagnostics == [SHORT_RUN, "Errors detected"])
+    standard = seconds is not None and float(seconds) >= 10 and validated == 1 and not diagnostics
+    if not (short or standard):
+        errors.append("CoreMark validation missing or failed")
+    validation = "FAIL" if errors else ("SMOKE PASS" if short else "PASS")
     print("\n## LiteX CoreMark Results\n")
     print(table(["Metric", "Value"], [
-        ["CPU", first(r"CPU:\s*(.+)", log)],
-        ["CoreMark Score (Iter/s)", first(r"Iterations/Sec\s*:\s*([0-9.]+)", log)],
-        ["Iterations", iterations],
-        ["Total Ticks", first(r"Total ticks\s*:\s*(\d+)", log)],
-        ["Total Time (s)", first(r"Total time \(secs\):\s*([0-9.]+)", log)],
+        ["Target", target],
+        ["CoreMark Score (Iter/s)", first(r"Iterations/Sec\s*:\s*([0-9.]+)", log)
+         if standard and not errors else NA],
+        ["Iterations", iterations if iterations is not None else NA],
+        ["Total Ticks", ticks if ticks is not None else NA],
+        ["Total Time (s)", seconds if seconds is not None else NA],
         ["Validation", validation]]))
-    return 0
+    if errors:
+        print("\n" + "".join(f"- {error}\n" for error in errors))
+    return int(bool(errors))
 
 
 def main(argv=None):
@@ -327,6 +357,7 @@ def main(argv=None):
     p.add_argument("--iterations", type=int, default=1)
     p = sub.add_parser("litex-coremark")
     p.add_argument("log")
+    p.add_argument("--xlen", type=int, choices=(32, 64))
     args = parser.parse_args(argv)
     if args.command == "metrics":
         for key, value in metrics(args.kind, read(args.log)).items():

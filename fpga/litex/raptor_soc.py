@@ -36,6 +36,8 @@ from litex.gen import LiteXModule
 # Register Raptor CPU in LiteX.
 CPUS["raptor"] = Raptor
 
+SIM_BUS_DATA_WIDTH = 64
+
 # Sim IOs (minimal for Verilator) ------------------------------------------------------------------
 
 _sim_io = [
@@ -81,7 +83,7 @@ class RaptorSoC(SoCCore):
         # OpenSBI generic platform relocates FDT to _fw_start + 0x2200000 (~34 MB),
         # so we need at least 36 MB.  64 MB leaves headroom for kernel payloads.
         kwargs.setdefault("integrated_main_ram_size", 0x400_0000)
-        kwargs["bus_data_width"] = 64
+        kwargs["bus_data_width"] = SIM_BUS_DATA_WIDTH
 
         # Set defaults (don't override if already provided by CLI).
         kwargs.setdefault("ident", "Raptor LiteX SoC")
@@ -191,7 +193,7 @@ def main():
 
         soc_kwargs["integrated_main_ram_init"] = get_mem_data(
             args.ram_init,
-            data_width=32,
+            data_width=SIM_BUS_DATA_WIDTH,
             endianness="little",
             offset=0x8000_0000,
         )

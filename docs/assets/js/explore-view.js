@@ -536,7 +536,7 @@ export function createExplorer(root, data) {
     paintActivity();
   }
   host.querySelector('#arch-config').textContent =
-    `Default preset · RV32 / RV64 · ${model.widths} · ` +
+    `Default preset · RV32 / RV64 · V 1.0 · ${model.widths} · ` +
     `${data.config.values.rob_entries} ROB entries`;
   host
     .querySelectorAll('[data-arch-view], #arch-picker, #arch-control, #arch-zoom, #arch-export')

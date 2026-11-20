@@ -9,8 +9,8 @@ description: Super-scalar, out-of-order RISC-V processor core
 Open hardware · RV32 / RV64
 
 A configurable, superscalar out-of-order processor with TAGE prediction,
-scalar floating point, and Sv32/Sv39 virtual memory. The default RV64
-configuration supports [RVA22S64](./README.md#rva22s64-support).
+scalar floating point, [V 1.0](./vpu.md) and Sv32/Sv39 virtual memory.
+The default RV64 preset enables the [RVA23U64 user profile](./README.md#rva23u64-support).
 
 SystemVerilog RTL · Verilator + NEMU difftest · FPGA and LiteX support
 
@@ -38,14 +38,14 @@ The [default configuration](./uarch.md#default-configuration) documents the RTL 
 - [Microarchitecture](./uarch.md): Follow fetch, rename, execution, and precise retirement.
 - [Linux boot](./linux_kernel.md): OpenSBI, payloads, and simulator or FPGA boot paths.
 - [Platform integration ↗](./ecosystem.md): FPGA boards, memory maps, and the software stack.
-- [Standalone VPU](./vpu.md): Vector components and contracts for future core integration.
+- [Vector extension](./vpu.md): Integrated V 1.0 execution, precise memory faults and verification.
 - [Chip top and off-chip link](./chip.md): Chip hierarchy and board-side octal link.
 - [Performance history](./perf-iterations.md): Measurements tied to their source revisions.
 - [References](./REFERENCE.md): AXI protocol diagrams and public PPA resources.
 
 ## Follow the instruction.
 
-Default preset · RV32 / RV64 · scalar out-of-order core
+Default preset · RV32 / RV64 · V 1.0
 
 The homepage and explorer share an interactive diagram.
 [Open full explorer →](./explore.md)
@@ -67,9 +67,8 @@ Scroll diagram ↔ · select a block for details
 Illustrative CoreMark queue model, not an RTL trace or
 performance measurement. Bars show modeled occupancy; dots represent instructions.
 Playback controls step backward or forward, play, and restart the model.
-Branches do not redirect; translation,
-cache contents, replay, register allocation, and store draining are not simulated.
-Their blocks remain available for inspection. Dots preview up to five instructions
+Playback follows the scalar CoreMark instruction listing in order. Inspect the
+VPU, caches and translation paths in the diagram. Dots preview up to five instructions
 per block; counts include all instructions. One instruction can occupy the ROB and
 an execution unit at the same time, so structure counts should not be added together.
 

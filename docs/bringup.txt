@@ -1,0 +1,8 @@
+---
+layout: markdown
+permalink: /bringup.html.md
+markdown_source: bringup.md
+title: Chip bring-up
+description: Board connections, silicon diagnostics, and staged bring-up checks.
+nav_order: 15
+---

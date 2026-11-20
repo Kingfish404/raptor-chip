@@ -299,11 +299,13 @@ endif
 FW_BASE   := $(LITEX_DIR)/firmware
 
 FW_SIM_SRC := $(FW_BASE)/sim
-FW_SIM_DIR := $(BUILD_DIR)/firmware/sim
+FW_SIM_DIR := $(BUILD_DIR)/firmware/sim/$(VARIANT)
 FW_SIM_BIN := $(FW_SIM_DIR)/boot.bin
 FW_SIM_ELF := $(FW_SIM_DIR)/boot.elf
 FW_SIM_DTB := $(FW_SIM_DIR)/litex-soc.dtb
-FW_SIM_DTS := $(FW_SIM_SRC)/litex-soc.dts
+FW_SIM_DTS := $(FW_SIM_SRC)/litex-soc.dts.in
+FW_SIM_MARCH = $(LINUX_ARCH)imac
+FW_SIM_ISA = $(FW_SIM_MARCH)_zicsr_zifencei_zcb_zba_zbb_zbc_zbs
 
 FW_FPGA_TARGET ?= main ## firmware/fpga/main_<TARGET>.c (or main.c when =main)
 FW_FPGA_LOAD   ?= rom  ## Link target: rom (integrated ROM) or main_ram (uploadable via serialboot)
@@ -342,7 +344,7 @@ firmware-clean:
 # ==============================================================================
 
 COREMARK_BENCH  := $(LITEX_DIR)/benchmarks/coremark
-COREMARK_BIN    := $(COREMARK_BENCH)/build/coremark.bin
+COREMARK_BIN    = $(COREMARK_BENCH)/build/rv$(LINUX_XLEN)/coremark.bin
 
 EMBENCH_BENCH   := $(LITEX_DIR)/benchmarks/embench
 EMBENCH_BENCHES := aha-mont64 crc32 depthconv edn huffbench matmult-int \
@@ -572,9 +574,9 @@ sim-run: ## Run already-built sim (no rebuild) {ROM,SOC,PAYLOAD,VARIANT,SIM_TIME
 
 COREMARK_ITERATIONS ?= 64 ## CoreMark loop iterations (FPGA: 1000+ recommended; sim: 64)
 
-coremark-build: ## Build CoreMark binary (clone + compile) {COREMARK_ITERATIONS,SYS_CLK}
+coremark-build: ## Build CoreMark binary (clone + compile) {VARIANT,COREMARK_ITERATIONS,SYS_CLK}
 
-coremark: ## Alias: make sim PAYLOAD=coremark — tees output to $(LITEX_LOG_DIR)/coremark.log
+coremark: ## Run CoreMark and log to $(LITEX_LOG_DIR)/coremark-rv<XLEN>.log {VARIANT,COREMARK_ITERATIONS}
 
 # CoreMark needs >=10 s of run time for a valid score; on the ~10 MHz FPGA the
 # core does ~30 iters/s, so the sim default of 64 is far too low (it prints

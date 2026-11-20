@@ -173,9 +173,10 @@ if [ "$SKIP_INSTALL" -eq 0 ]; then
     ok "LiteX software data packages installed."
 fi
 
-# The 64-bit SoC bus must preserve the byte address through AXI-Lite
-# widening and select the addressed 32-bit CSR half on Wishbone reads.
-for patch_name in litex-axi-lite-read-sel.patch litex-picolibc-layout.patch; do
+# Preserve byte addresses and read lanes across the 64-bit SoC bus, and
+# accept each AXI read address before issuing the beats of a widened burst.
+for patch_name in litex-axi-lite-read-sel.patch litex-axi-upconverter-ar.patch \
+    litex-picolibc-layout.patch; do
     litex_patch="$SCRIPT_DIR/patches/$patch_name"
     if git -C "$LITEX_DIR" apply --reverse --check "$litex_patch" 2>/dev/null; then
         info "LiteX patch $patch_name already applied."

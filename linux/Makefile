@@ -13,7 +13,7 @@ include $(PWD_DIR)/vars.mk
 .PHONY: download-rv32gc-fpga download-gc download download-all all build_linux make_initramfs
 .PHONY: build_init install_initramfs check-opensbi-llvm-deps opensbi opensbi-rv32 opensbi-rv64 opensbi-gnu opensbi-gnu-rv32 opensbi-gnu-rv64
 .PHONY: opensbi-with-kernel opensbi-clean opensbi-rv32gc-payload opensbi-rv64gc-payload print-rv32-payload print-rv64-payload
-.PHONY: print-opensbi-payload clean force-opensbi-config-check
+.PHONY: print-opensbi-payload print-rv64gc-release-payload clean force-opensbi-config-check
 
 # Command-line ISA/image/FDT changes are tracked by .raptor-build-config, but
 # make cannot see those values in ordinary prerequisite timestamps.  Always
@@ -104,6 +104,9 @@ print-rv32-payload: ## Print RV32 fw_payload.bin path
 	@echo $(LINUX_RV32_PAYLOAD)
 print-rv64-payload: ## Print RV64 fw_payload.bin path
 	@echo $(LINUX_RV64_PAYLOAD)
+
+print-rv64gc-release-payload: ## Print the shipped RV64GC Buildroot fw_payload.bin path
+	@echo $(LINUX_RV64GC_DIST_DIR)/fw_payload.bin
 
 # ==============================================================================
 # Build from source

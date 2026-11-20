@@ -1,0 +1,8 @@
+---
+layout: markdown
+permalink: /chip-xspi.html.md
+markdown_source: chip-xspi.md
+title: Chip xSPI interface
+description: JESD251D signals, transactions, and timing contracts for the chip link.
+nav_order: 14
+---

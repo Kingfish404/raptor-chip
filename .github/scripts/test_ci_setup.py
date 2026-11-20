@@ -65,6 +65,7 @@ install_tools "$2"
                     self.assertNotIn("riscv64", result.stdout)
                     self.assertIn("libgmp-dev", result.stdout)
                 if profile == "litex":
+                    self.assertIn("gcc-riscv64-linux-gnu", result.stdout)
                     self.assertIn("libslirp-dev", result.stdout)
 
     def test_invalid_profile_fails_before_installing(self):

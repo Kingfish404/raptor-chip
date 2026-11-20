@@ -84,7 +84,7 @@ typedef uintptr_t ee_ptr_int;
 typedef size_t    ee_size_t;
 
 /* Align to 4-byte boundary */
-#define align_mem(x) (void *)(4 + ((((uintptr_t)(x) - 1) >> 2) << 2))
+#define align_mem(x) (void *)(((uintptr_t)(x) + sizeof(uintptr_t) - 1) & ~(sizeof(uintptr_t) - 1))
 
 /* Configuration: SEED_METHOD */
 #define SEED_METHOD SEED_VOLATILE

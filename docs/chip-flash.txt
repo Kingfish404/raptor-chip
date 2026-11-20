@@ -1,0 +1,8 @@
+---
+layout: markdown
+permalink: /chip-flash.html.md
+markdown_source: chip-flash.md
+title: Chip Flash boot
+description: Reset ROM, Flash XIP, and the chip's SPI and xSPI boot paths.
+nav_order: 13
+---

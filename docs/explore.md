@@ -9,16 +9,16 @@ description: Interactive Raptor core, memory, and platform architecture with RTL
 
 Follow an instruction. Inspect the hardware behind each step.
 
-Default preset · RV32 / RV64 · scalar out-of-order core
+Default preset · RV32 / RV64 · V 1.0
 
-The default RV64 configuration supports [RVA22S64](./README.md#rva22s64-support).
+The default RV64 configuration enables [RVA23U64](./README.md#rva23u64-support).
 For pipeline contracts and configuration tables, read the
 [architecture manual](./uarch.md).
 
 ## Architecture views
 
 **Core pipeline** expands fetch, decode,
-rename, dispatch, execution, and retirement. **Memory & platform** expands
+rename, dispatch, scalar and vector execution, and retirement. **Memory & platform** expands
 translation, caches, interconnect, and devices. Each view groups the other part
 of the system into a linked overview block. Open that block to switch detail
 views without changing the model cycle.
@@ -52,8 +52,8 @@ Illustrative CoreMark queue model, not an RTL trace or
 performance measurement. Bars show modeled occupancy; dots represent instructions.
 Play, step backward or forward, and Restart control the model.
 
-- Branches do not redirect. Translation, cache contents, replay, register allocation,
-  and store draining are not simulated. Their blocks remain available for inspection.
+- The animation follows the scalar CoreMark instruction listing in order.
+  Inspect the VPU, caches and translation paths in the diagram.
 - Dots preview up to five instructions per block; counts include all instructions.
   Select a block for its current instruction listing.
 - One instruction can occupy the ROB and an execution unit at the same time.

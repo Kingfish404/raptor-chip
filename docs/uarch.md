@@ -7,9 +7,9 @@ title: Microarchitecture
 The default core is two-wide with a 32-entry ROB. Start with the
 [configuration table](#default-configuration), then follow the pipeline and block
 contracts below. Capacities refer to the current RTL; cycle sequences describe
-ideal paths and are not benchmark results. The default RV64 configuration supports
-[RVA22S64](./README.md#rva22s64-support); the linked overview defines the ISA and
-supervisor scope and points to requirement-level verification evidence.
+scalar instruction paths. The default RV32/RV64 pipeline includes
+[V 1.0](./vpu.md). See the [ISA and profile matrix](./README.md#isa-scope) for
+the selected extensions and RV64 user/supervisor profiles.
 
 ## Pipeline stages
 
@@ -89,7 +89,7 @@ rapt (cluster)                 rtl/rapt.sv
 │  ├─ rapt_frontend            core/frontend/       BPU (branch_predictor/), IFU, FQU, IDU
 │  ├─ rapt_backend             core/backend/        rename/, rob/, dispatch/, issue/,
 │  │                                                regfile/, commit/ (CMU, CSR),
-│  │                                                ieu/, feu/, fpu/, lsu/
+│  │                                                ieu/, feu/, fpu/, vpu/, lsu/
 │  └─ rapt_memory              core/memory/         icache/, dcache/, mmu/, replacement/,
 │                                                   bus unit; PMP in core/pmp/
 ├─ rapt_l2_subsystem           rtl/uncore/          AXI master, budgets, l2cache/ if enabled
@@ -100,10 +100,10 @@ rapt (cluster)                 rtl/rapt.sv
 
 `rtl/common/` and `rtl/sram/` hold shared leaves such as queues, selectors and
 SRAM wrappers. Interfaces, macros and types are in `rtl/include/`, presets in
-`rtl/configs/`, and generated decoders in `rtl/generated/`. The standalone VPU
-is in `core/backend/vpu/` but is not yet instantiated. `make -C verification
-rtl-structure-check` keeps the core and uncore from instantiating each other and
-keeps L2 macros out of the core.
+`rtl/configs/`, and generated decoders in `rtl/generated/`.
+With `RAPT_V_EXTENSION`, `rapt_backend` instantiates `rapt_vpu_core` from
+`core/backend/vpu/`. `make -C verification rtl-structure-check` enforces the
+core/uncore dependency boundary.
 
 Integrations that wrap the cluster live with their consumers: `sim/rtl/` holds
 the simulation SoC tops, adapters and DPI module; `fpga/` holds the board tops;
@@ -138,6 +138,20 @@ The predictor query PC is `ifu_bpu.nextpc`. IFU and IDU report accepted branch-h
 - **Registered wakeup:** every other operand holder, including the ROU dispatch bypass, IOQ, MDQ and FEU integer sources, wakes from the registered copy, one cycle later.
 - **Writeback and recovery:** ROU writes back the registered copy on the next edge, and retirement is possible on the edge after that. Recovery also consumes the registered copy. A ROB slot plus a 4-bit allocation generation identifies each live producer before it can affect ROB, register results or wakeup state.
 - **Floating point and commit:** F/D and Zfhmin use the same value-capturing issue queue, age selection, accepted wakeup and recovery contracts as integers. The FP instance adds a third source for FMA and selects the oldest ready instruction whose arithmetic unit has capacity. Independent units overlap; a busy DIV/SQRT does not block ready ADD, conversion or integer work. Fixed arithmetic pipelines accept one operation per cycle; MUL and FMA share one product pipeline per precision with eight-cycle result latency. Each unit reserves result-queue capacity before launch and preserves owner/data/flags through completion backpressure. ROB-backed FP renaming provides one 64-bit speculative result per live instruction, a map for all 32 FPRs including f0, and captured source versions for RAW/WAR/WAW dependencies. The architectural 32x64-bit bank changes only at commit. LSU captures renamed FP store data and publishes nonfaulting FP loads through the common completion fabric, including younger loads before IOQ-head removal. RV32 FLD uses the A lane's two-beat payload; RV64 FLD can use A or B. ROU commits a ready prefix in order and ORs floating-point exception flags across the actual retiring prefix. CSR/system operations still serialize, keeping FRM/FS changes ordered; ordinary FP operations do not. An ordinary commit group admits at most one store and one control-flow instruction, and may retire younger ordinary instructions after that store. CMU broadcasts retirement, redirect, fence and trap effects; CSR holds privilege, translation, interrupt and PMP state.
+
+### Vector execution
+
+Decode marks vector operations as serializing system instructions. The integer
+system port issues the raw encoding and resolved scalar operands to the VPU.
+Its adapter retains the ROB slot and allocation generation, and execution starts
+only with authorization from the matching head. Scalar/FPR results, accrued FP
+flags and exceptions use the guarded integer system completion port.
+
+Vector memory drains older writes and fills, then takes ownership of the shared
+data MMU and L1D interfaces. Translation and PMP/PMA checks apply to each request.
+The VPU holds its owner through the final load/store response. Traps retain
+`vstart`, so completed elements remain visible and the faulting instruction can
+resume. See the [VPU manual](./vpu.md).
 
 ## Memory: LSU, L1D, translation, and bus
 
@@ -215,7 +229,8 @@ depend on the board and build constraints.
 | Ordered buffers | FQU 4, RNQ 8, `rename_pipe` 4, operand stage 2, UOQ 8 |
 | Window | ROB 32 (4-bit generation), integer PRF 64, operand spill 16, dispatch window 12 lanes, branch checkpoints 16 |
 | Execution queues | ALQ 8, BRQ 8, MDQ 4, FPQ 8, IOQ 8, unified SQ 16 |
-| Floating point | Renamed F/D/Zfhmin; ROB-backed speculative results; 32x64-bit committed FPRs |
+| Floating point | Renamed F/D/Zfhmin and RV64 Zfa; ROB-backed results; 32 × 64-bit committed FPRs |
+| Vector | V 1.0, VLEN=128, ELEN=64 in both XLENs; single ROB-head owner |
 | Branch prediction | TAGE (1024 bimodal + 3 x 1024 tagged), side conditional query of the same TAGE, 128-entry two-way BTB, 16-entry RAS |
 | L1I | 16 KiB, four-way, 64 sets, 64-byte lines, 32-byte refill sector |
 | L1D | 16 KiB, four-way, 64 sets, 64-byte lines, write-back, 4 MSHRs, 2 writeback buffers, Sv32/Sv39 miss replay |

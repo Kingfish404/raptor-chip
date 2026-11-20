@@ -73,6 +73,7 @@ static void print_int(long val, int width, char pad)
     print_uint((unsigned long)val, 10, 0, width, pad);
 }
 
+#if HAS_FLOAT
 /* Simple fixed-point %f: 6 decimal places */
 static void print_float(double val)
 {
@@ -92,6 +93,7 @@ static void print_float(double val)
         frac -= d;
     }
 }
+#endif
 
 int ee_printf(const char *fmt, ...)
 {
@@ -170,11 +172,13 @@ int ee_printf(const char *fmt, ...)
             uart_putc(c);
             break;
         }
+#if HAS_FLOAT
         case 'f': {
             double val = va_arg(ap, double);
             print_float(val);
             break;
         }
+#endif
         case '%':
             uart_putc('%');
             break;

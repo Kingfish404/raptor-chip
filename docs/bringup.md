@@ -90,7 +90,8 @@ requested automated checks; `complete` remains false when measurements or wire
 tests are missing. Supply optional `--bench-json` with externally measured,
 approved rail/current/clock observations. Voltage/frequency shmoo points use
 separate externally controlled conditions and separate runs. See the
-[diagnostic firmware notes](../app/tests/silicon/README.md) for the JSON schema,
+[diagnostic firmware notes](https://github.com/Kingfish404/raptor-chip/blob/master/app/tests/silicon/README.md)
+for the JSON schema,
 simulation replay, test coverage and the small checked benchmark. Add
 `--sim-openocd` to a native `--sim` run to exercise the actual OpenOCD Tcl block
 path through the simulated JTAG pins. It uses a local remote-bitbang server and
@@ -116,8 +117,9 @@ build or simulation commands in this directory.
 CU08 provides a documented FMC_C connector mapping with 1.8 V signaling and an
 onboard USB UART. It has enough BRAM to test the chip independently of external
 memory calibration. The mapping reuses contacts documented in
-[`CM005-FMC-C.md`](../fpga/litex/CM005-FMC-C.md) and
-[`CM005-BRIDGE.md`](../fpga/litex/CM005-BRIDGE.md); remove the Ethernet module.
+[`CM005-FMC-C.md`](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/litex/CM005-FMC-C.md)
+and [`CM005-BRIDGE.md`](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/litex/CM005-BRIDGE.md);
+remove the Ethernet module.
 Verify FMC_C's adjustable supply is **1.8 V** before connecting the carrier.
 Do not infer its present voltage from FPGA I/O constraints.
 

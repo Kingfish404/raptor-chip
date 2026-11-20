@@ -131,7 +131,7 @@ register accesses, partial parameter/command writes, malformed transfer shapes,
 and writes to read-only registers return SLVERR. SRAM control supports its existing
 byte enables and keeps bit 15 zero. The half-period register is read-only in this
 mode. C/assembly constants are in
-[`rapt_flash.h`](../synth/configs/pin-limited/sw/rapt_flash.h).
+[`rapt_flash.h`](https://github.com/Kingfish404/raptor-chip/blob/master/synth/configs/pin-limited/sw/rapt_flash.h).
 
 | Offset | Register | Access | Value / meaning |
 | --- | --- | --- | --- |

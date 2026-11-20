@@ -11,14 +11,19 @@ const hasEdge = (view, from, to) => view.edges.some((e) => e.from === from && e.
 test('default capacity labels follow extracted configuration', () => {
   assert.match(model.widths, /^2 decode · 2 rename · 2 dispatch · 2 commit$/);
   assert.match(model.core.nodes.find((n) => n.id === 'dispatch').subtitle, /ROB 32/);
+  assert.equal(
+    model.core.nodes.find((n) => n.id === 'vpu').subtitle, 'V 1.0 · VLEN 128 · ELEN 64',
+  );
   assert.equal(model.memory.nodes.find((n) => n.id === 'dtlb').subtitle, '64 entries · 2-way');
   assert.equal(model.memory.nodes.find((n) => n.id === 'l2').subtitle, 'Default: no cache');
   const alternate = structuredClone(data);
   alternate.config.values.dtlb_entries = 128;
   alternate.config.values.l2_enabled = true;
+  alternate.config.values.vector_vlen = 256;
   const changed = buildArchitecture(alternate);
   assert.match(changed.memory.nodes.find((n) => n.id === 'dtlb').subtitle, /^128 entries/);
   assert.equal(changed.memory.nodes.find((n) => n.id === 'l2').subtitle, 'Enabled in this preset');
+  assert.match(changed.core.nodes.find((n) => n.id === 'vpu').subtitle, /VLEN 256/);
   delete alternate.config.values.rob_entries;
   assert.throws(() => buildArchitecture(alternate), /Missing architecture parameter/);
 });
@@ -47,7 +52,11 @@ test('diagram preserves integrated execution and memory topology', () => {
       (e) => (e.from === 'debug' || e.to === 'debug') && e.kind !== 'control',
     ),
   );
-  assert.ok(!model.core.nodes.some((n) => n.sources.some((s) => s.id === 'rapt_vpu')));
+  const vpu = model.core.nodes.find((n) => n.id === 'vpu');
+  assert.ok(vpu.sources.some((s) => s.id === 'rapt_vpu_core'));
+  assert.ok(hasEdge(model.core, 'alq', 'vpu'));
+  assert.ok(hasEdge(model.core, 'vpu', 'completion'));
+  assert.ok(hasEdge(model.core, 'vpu', 'dcache'));
 });
 
 test('both views cover the system with reciprocal overview navigation and boundary paths', () => {
@@ -153,6 +162,7 @@ test('activity distinguishes waiting queues, execution and unmodeled state', () 
     assert.equal(memory.get('core-system').count, pipelineIds.length);
     assert.equal(core.has('prf'), false);
     assert.equal(core.has('sq'), false);
+    assert.equal(core.has('vpu'), false);
     assert.equal(memory.has('dtlb'), false);
   }
   assert.equal(sampleArchitecture(model.core, data, null).size, 0);

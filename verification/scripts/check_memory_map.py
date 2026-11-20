@@ -103,10 +103,14 @@ def check():
              "RV32 Linux 1 GiB cap")
     same("fpga/litex/Makefile", r"LINUX_FPGA_UART_BASE\s*:=\s*(0x[\da-fA-F_]+)",
          number(regions["litex_uart"]["base"]), "Linux UART base")
-    for board in ("ku15p_soc.py", "alinx_axau15.py", "xilinx_vcu118.py",
-                  "tang_mega_138k_pro.py", "raptor_soc.py"):
+    for board in ("ku15p_soc.py", "alinx_axau15.py", "xilinx_vcu118.py", "tang_mega_138k_pro.py"):
         contains(f"fpga/litex/{board}", r'kwargs\["bus_data_width"\]\s*=\s*64',
                  "64-bit Wishbone setting must override LiteX's CLI default")
+    sim_soc = "fpga/litex/raptor_soc.py"
+    contains(sim_soc, r"^SIM_BUS_DATA_WIDTH\s*=\s*64$", "64-bit simulation Wishbone bus")
+    contains(sim_soc, r'kwargs\["bus_data_width"\]\s*=\s*SIM_BUS_DATA_WIDTH\b',
+             "simulation Wishbone setting must override LiteX's CLI default")
+    contains(sim_soc, r"data_width=SIM_BUS_DATA_WIDTH\b", "RAM image uses the simulation bus width")
 
     same("sim/include/common.h", r"#define MBASE\s+(0x[\da-fA-F_]+)",
          number(regions["main_ram"]["base"]), "NPC RAM base")

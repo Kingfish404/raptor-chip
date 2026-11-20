@@ -114,25 +114,31 @@ define _run_vsim
 		fi; \
 	else \
 		: > sim_run.log; \
-		obj_dir/Vsim > sim_run.log 2>&1 & vpid=$$!; \
-		tail -n +1 -f sim_run.log 2>/dev/null & tpid=$$!; \
-		limit=$(SIM_TIMEOUT); [ "$$limit" = "0" ] && limit=100000; i=0; stopped=0; \
-		while kill -0 $$vpid 2>/dev/null; do \
-			if grep -qF "$(SIM_STOP_MARKER)" sim_run.log; then \
-				echo "[INFO] Sim reached completion marker ('$(SIM_STOP_MARKER)')."; break; fi; \
-			i=$$((i+1)); \
-			if [ $$i -ge $$limit ]; then echo ""; echo "[INFO] Simulation timed out after $(SIM_TIMEOUT)s."; break; fi; \
-			sleep 1; \
-		done; \
-		kill $$vpid 2>/dev/null && stopped=1; sleep 0.3; \
-		for _ in 1 2 3 4 5; do kill -0 $$vpid 2>/dev/null || break; sleep 0.2; done; \
-		kill -9 $$vpid 2>/dev/null || true; rc=0; wait $$vpid 2>/dev/null || rc=$$?; \
-		kill $$tpid 2>/dev/null || true; wait $$tpid 2>/dev/null || true; \
-		grep -qF "$(SIM_STOP_MARKER)" sim_run.log || { \
-			echo "[ERR] Simulation did not reach completion marker."; exit 1; }; \
-		if [ $$rc -ne 0 ] && ! { [ $$stopped -eq 1 ] && { [ $$rc -eq 143 ] || [ $$rc -eq 137 ]; }; }; then \
-			echo "[ERR] Simulator exited abnormally ($$rc)."; exit $$rc; \
+		set -o pipefail; \
+		{ \
+			obj_dir/Vsim 2>&1 & vpid=$$!; \
+			limit=$(SIM_TIMEOUT); [ "$$limit" = "0" ] && limit=100000; i=0; stopped=0; \
+			while kill -0 $$vpid 2>/dev/null; do \
+				if grep -qF -- "$(SIM_STOP_MARKER)" sim_run.log; then break; fi; \
+				i=$$((i+1)); \
+				if [ $$i -ge $$limit ]; then \
+					echo "[INFO] Simulation timed out after $(SIM_TIMEOUT)s."; break; \
+				fi; \
+				sleep 1; \
+			done; \
+			kill $$vpid 2>/dev/null && stopped=1; \
+			for _ in 1 2 3 4 5; do kill -0 $$vpid 2>/dev/null || break; sleep 0.2; done; \
+			kill -9 $$vpid 2>/dev/null || true; rc=0; wait $$vpid 2>/dev/null || rc=$$?; \
+			if [ $$stopped -eq 1 ] && { [ $$rc -eq 143 ] || [ $$rc -eq 137 ]; }; then rc=0; fi; \
+			exit $$rc; \
+		} | tee sim_run.log; \
+		rc=$$?; \
+		if [ $$rc -ne 0 ]; then \
+			echo "[ERR] Simulator or logging process exited abnormally ($$rc)."; exit $$rc; \
 		fi; \
+		grep -qF -- "$(SIM_STOP_MARKER)" sim_run.log || { \
+			echo "[ERR] Simulation did not reach completion marker."; exit 1; }; \
+		echo "[INFO] Sim reached completion marker ('$(SIM_STOP_MARKER)')."; \
 	fi
 	@if [ -n "$(TRACE_MSG)" ] && [ -f $(1)/sim.$(TRACE) ]; then \
 		sz=$$(wc -c < $(1)/sim.$(TRACE)); \
@@ -167,11 +173,12 @@ $(PACK_SV): $(RTL_SOURCES) _pack_check
 $(FW_SIM_DIR):
 	@mkdir -p $@
 
-$(FW_SIM_DTB): $(FW_SIM_DTS) | $(FW_SIM_DIR)
-	dtc -I dts -O dtb -o $@ $<
+$(FW_SIM_DTB): $(FW_SIM_DTS) $(LITEX_DIR)/Makefile $(LITEX_DIR)/mk/recipes.mk | $(FW_SIM_DIR)
+	set -o pipefail; sed -e 's/@RISCV_ISA@/$(FW_SIM_ISA)/g' -e 's/@RISCV_MMU@/$(LINUX_MMU)/g' $< \
+		| dtc -I dts -O dtb -o $@
 
 $(FW_SIM_ELF): $(FW_SIM_SRC)/boot.S $(FW_SIM_SRC)/link.ld $(FW_SIM_DTB) | $(FW_SIM_DIR)
-	$(CROSS)gcc -march=rv32imac -mabi=ilp32 -nostdlib -nostartfiles -fno-pic -no-pie \
+	$(CROSS)gcc -march=$(FW_SIM_MARCH) -mabi=$(LINUX_MABI) -nostdlib -nostartfiles -fno-pic -no-pie \
 		-T $(FW_SIM_SRC)/link.ld -I$(FW_SIM_DIR) -o $@ $(FW_SIM_SRC)/boot.S
 
 $(FW_SIM_BIN): $(FW_SIM_ELF)
@@ -312,7 +319,8 @@ sim-run:
 	$(call _run_vsim,$(SIM_BUILD_DIR))
 
 coremark-build:
-	$(MAKE) -C $(COREMARK_BENCH) build ITERATIONS=$(COREMARK_ITERATIONS) SYS_CLK_HZ=$(SYS_CLK)
+	$(MAKE) -C $(COREMARK_BENCH) build XLEN=$(LINUX_XLEN) \
+		ITERATIONS=$(COREMARK_ITERATIONS) SYS_CLK_HZ=$(SYS_CLK)
 
 coremark:
 	@mkdir -p $(LITEX_LOG_DIR)
@@ -320,14 +328,14 @@ coremark:
 		SIM_STOP_MARKER='CoreMark: done.' \
 		SIM_TIMEOUT=$(if $(filter command line environment,$(origin SIM_TIMEOUT)),$(SIM_TIMEOUT),600) \
 		COREMARK_ITERATIONS=$(COREMARK_ITERATIONS) \
-		2>&1 | tee $(LITEX_LOG_DIR)/coremark.log
+		2>&1 | tee $(LITEX_LOG_DIR)/coremark-rv$(LINUX_XLEN).log
 
 coremark-fpga: coremark-build
 	@echo "[INFO] CoreMark built for SYS_CLK=$(SYS_CLK) Hz (VARIANT=$(VARIANT)) — the LOADED bitstream must run at this clock, else 'Total time'/'Iterations/Sec' are off by the clock ratio (rdtime timebase == sys_clk)."
 	@$(call _make,fpga-upload BIN=$(COREMARK_BIN))
 
 coremark-clean:
-	$(MAKE) -C $(COREMARK_BENCH) clean
+	$(MAKE) -C $(COREMARK_BENCH) clean XLEN=$(LINUX_XLEN)
 
 main-fpga-build:
 	$(MAKE) -C $(LITEX_DIR) firmware-fpga FW_FPGA_TARGET=main FW_FPGA_LOAD=main_ram

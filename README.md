@@ -2,28 +2,37 @@
 
 [![Benchmark](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml) [![App](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml) [![STA](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml)
 
-[![ISA](https://img.shields.io/badge/ISA-RV32%2F64IMAFDC__Zb*-192f60?longCache=true&style=flat&logo=riscv&logoColor=white&colorA=192f60&colorB=660874)](./docs/uarch.md) [![marchID](https://img.shields.io/badge/marchID-0x32-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](https://github.com/riscv/riscv-isa-manual) [![Privilege](https://img.shields.io/badge/Priv-M%2FS%2FU%20%2B%20Sv32%2FSv39%20%2B%20PMP-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](./docs/uarch.md) [![FPGA](https://img.shields.io/badge/FPGA-LiteX-192f60?longCache=true&style=flat&colorA=192f60&colorB=660874)](./fpga/) [![License](https://img.shields.io/github/license/Kingfish404/raptor-chip?label=License&longCache=true&style=flat&logo=apache&logoColor=white&colorA=192f60&colorB=660874)](./LICENSE)
+[![ISA](https://img.shields.io/badge/ISA-RV32%2FRV64%20%2B%20V%201.0-192f60?style=flat&logo=riscv&logoColor=white)](./docs/README.md#isa-scope) [![RVA23U64](https://img.shields.io/badge/RV64-RVA23U64-660874?style=flat)](./docs/README.md#rva23u64-support) [![marchID](https://img.shields.io/badge/marchID-0x32-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](https://github.com/riscv/riscv-isa-manual) [![Privilege](https://img.shields.io/badge/Priv-M%2FS%2FU%20%2B%20Sv32%2FSv39%20%2B%20PMP-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](./docs/uarch.md) [![FPGA](https://img.shields.io/badge/FPGA-LiteX-192f60?longCache=true&style=flat&colorA=192f60&colorB=660874)](./fpga/) [![License](https://img.shields.io/github/license/Kingfish404/raptor-chip?label=License&longCache=true&style=flat&logo=apache&logoColor=white&colorA=192f60&colorB=660874)](./LICENSE)
 
 > It is possible to invent a single machine which can be used to compute any computable sequence. — Alan Turing, 1936
 
-Welcome to the Raptor Project! Here is an all-in-one repository for exploring, developing, optimizing, and verifying a RISC-V core. Aiming at high quality, full Linux support, FPGA implementation, and ASIC readiness.
+Raptor is a configurable **RV32/RV64 superscalar, out-of-order RISC-V core** with
+register renaming, precise in-order retirement, TAGE prediction, scalar floating
+point and an integrated vector unit. The SystemVerilog RTL uses a Chisel decoder
+generator. The repository includes Verilator/NEMU simulation, OpenSBI/Linux
+boot, FPGA integration and open-PDK synthesis and timing flows.
 
-Core description: **Super-scalar, out-of-order RISC-V core** with register renaming, a 32-entry ROB, six execution paths fed by five scheduler classes over six unified writeback CDB ports, TAGE branch prediction, and a unified speculative/committed store queue. F/D operations use an out-of-order FPQ, ROB-backed register renaming, overlapping arithmetic pipelines and a dedicated completion endpoint. The 32 x 64-bit architectural FPR bank updates only at retirement. The RTL is described by `SystemVerilog` with `Chisel` (`Scala`) used only for decoder generation. Features Sv32 (RV32) / Sv39 (RV64) virtual memory (MMU/TLB/PTW), 8 usable PMP entries (TOR/NAPOT, 4 KiB granularity; 16 CSR slots, upper eight read-only zero), LR/SC + AMO atomics, compressed instructions (RVC), CLINT/PLIC interrupts, a RISC-V Debug Module / JTAG DTM bring-up path, and Linux v6.18.x flows via OpenSBI. Supports configurable **RV32** and **RV64** modes via compile-time switch.
+## ISA and profiles
+
+| XLEN with the `default` preset | ISA | Application profiles | Virtual memory |
+| --- | --- | --- | --- |
+| RV32 | RV32IMAFDC + V 1.0 | RVI20U32 | Sv32 / Bare |
+| RV64 (`-DRAPT_RV64`) | RV64IMAFDC + V 1.0 | [RVA23U64] user mode, [RVA22S64] supervisor mode | Sv39 / Bare |
+
+[RVA23U64]: ./docs/README.md#rva23u64-support
+[RVA22S64]: ./docs/README.md#rva22s64-support
+
+The RV64 user profile adds Zvbb, Zvfhmin, Zvkt, Zfa, Zawrs and Ssnpm for Supm.
+Both XLENs support Svade and Svinval. RV64 also supports Svpbmt.
+
+`default`, `default-*` and `large` enable V 1.0 in both XLEN modes with
+**VLEN=128 and ELEN=64**. The other presets leave V off by default.
+`RAPT_NO_RVA23U64` selects baseline V on RV64. `RAPT_NO_VPU` selects
+scalar execution. See the [ISA scope](./docs/README.md#isa-scope) for scalar
+extensions, platform requirements and validation.
 
 ```
-RV64 (default config, -DRAPT_RV64)
-ISA summary: rv64imafdc_zba_zbb_zbc_zbs_zfhmin_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_zkt_zca_zcb_zcmop_svinval_svpbmt
-Profile:     RVA22S64 (fully supported by the default RV64 configuration)
-Modes:       Machine, Supervisor, User
-MMU:         Sv39 / Bare; Svade; Svpbmt page attributes
-
-RV32 (default config, without -DRAPT_RV64)
-ISA summary: rv32imafdc_zba_zbb_zbc_zbs_zfhmin_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_zca_zcb_zcmop_svinval
-Profile:     RVI20U32; additional ISA and supervisor features listed above
-Modes:       Machine, Supervisor, User
-MMU:         Sv32 / Bare; Svade
-
-Core name:  raptor-falcon (Linux-capable)
+Core:       raptor-falcon (M/S/U, Linux-capable)
 PMP:        8 usable entries, TOR / NAPOT, 4 KiB granularity, L-bit lockable
 Interrupts: CLINT (mtime, mtimecmp, msip) + PLIC (31 sources, M/S contexts)
 
@@ -43,24 +52,18 @@ Caches: L1I/L1D = 16 KiB each, 4-way, 64 B lines; L1D write-back, 4 MSHRs,
         2 writeback buffers. ITLB=16; DTLB=64 (2-way, load/store replicas);
         shared L2 TLB=256. No L2 cache in default; default-l2 enables 512 KiB / 8 ways.
 
-Verifying:  RISCOF (riscv-arch-test), full-core F/D directed/differential tests, RVFI, SVA
+Verification: RISCOF / ACT4, directed and differential scalar/vector tests, RVFI and SVA.
 ```
 
-The default RV64 configuration supports [RVA22S64](./docs/README.md#rva22s64-support). Its ISA summary
-lists the implemented extensions. Zkt provides data-independent execution latency for the instructions
-covered by its specification. Svinval shares committed SFENCE.VMA ordering and selective address/ASID
-invalidation in both XLEN modes. Svpbmt carries page-based memory types through the RV64 Sv39
-translation, cache, and bus paths. The
-[RV64 supervisor verification configuration](verification/riscof/raptor-rv64s/raptor-rv64s.yaml) declares these
-extensions.
-
-The F/D/Zfhmin implementation covers scalar floating-point load/store, arithmetic, FMA, divide/square-root, conversion, comparison/classification, rounding modes, accrued exception flags, and binary16 load/store, transfer, and conversion. The compressed subset includes the C-extension floating-point memory forms required with F/D (C.FLW/C.FSW on RV32 and C.FLD/C.FSD plus their stack-pointer forms on RV32/RV64).
-
-See [documentation](./docs/README.md) for more details.
+Scalar F/D/Zfhmin operations use an out-of-order FPQ and ROB-backed FP renaming.
+The 32 × 64-bit architectural FPR bank updates at retirement. Vector instructions
+issue through the integer system path and execute under ROB-head ownership.
+The VPU shares translation, protection and L1D with the scalar pipeline and
+reports precise traps with `vstart` for restart. See the [VPU manual](./docs/vpu.md).
 
 ## Performance
 
-Current repository results. FPGA runs use a 50 MHz core.
+Selected benchmark results for the configurations below. FPGA runs use a 50 MHz core.
 
 | Environment | Preset / XLEN | CM/MHz | Embench-IoT | Geekbench 5 SC / MC |
 | --- | --- | ---: | --- | ---: |
@@ -118,6 +121,7 @@ flowchart TB
         BRQ["BRQ 8<br/>branch unit"]
         MDQ["MDQ 4<br/>pipelined MUL<br/>iterative DIV"]
         FPQ["FPQ 8 · FEU<br/>F / D / Zfhmin"]
+        VPU["VPU · V 1.0<br/>VLEN 128 · ELEN 64<br/>ROB-head authorization"]
         LSU["LSU · IOQ 8<br/>unified SQ 16"]
         CPL["Completion x6 · N+4<br/>completion register"]
         PRF["Integer PRF 64<br/>4R / 6W"]
@@ -125,7 +129,9 @@ flowchart TB
         CMU["CMU<br/>in-order commit 2"]
         CSR["CSR · M / S / U<br/>traps · Sv32 / Sv39 · PMP"]
         ORD --> ALQ & BRQ & MDQ & FPQ & LSU
+        ALQ -->|vector issue| VPU
         ALQ & BRQ & MDQ & FPQ & LSU --> CPL
+        VPU -->|system completion port| CPL
         CPL -->|wakeup + writeback| ORD
         CPL -->|writeback| PRF & FPR
         ORD <-->|operand read| PRF & FPR
@@ -160,6 +166,7 @@ flowchart TB
       L1I & L1D & IPTW & DPTW --> BUS
     end
     PIPE <-->|"IFU ↔ L1I · LSU ↔ L1D<br/>CSR → PMP / satp"| MEM
+    VPU <-->|"translated data access"| L1D
   end
   subgraph CLU["rapt · cluster interconnect"]
     direction LR
@@ -309,8 +316,15 @@ make verify-riscof
 make verify-coverage
 # Run the lightweight fuzz + signature suites
 make verify-light
+# Inspect and run the parallel CoreMark, STA and FPGA regression
+make regression-plan
+make regression
 # See verification/README.md for SVA, formal (RVFI), and ACT4 details
 ```
+
+For integrated RVV and RVA23U64 checks, see the
+[vector test commands](./docs/vpu.md#core-configuration-and-architectural-state)
+and the [verification guide](./verification/README.md#architectural-programs-and-fuzzing).
 
 ### 7. FPGA
 
@@ -341,12 +355,10 @@ make fpga-load BOARD=tang_mega_138k_pro  # load to SRAM (volatile)
 make fpga-flash BOARD=tang_mega_138k_pro # write to external SPI flash
 make fpga-console                   # open UART console
 
-# MLK-CU07-KU15P OpenSBI/Linux over MIG DDR and BIOS serialboot
-make opensbi-fpga-rv32-e2e UART_PORT=/dev/ttyUSB0  # build/load, then standalone OpenSBI
-make linux-fpga-rv32-e2e UART_PORT=/dev/ttyUSB0    # build/load, then OpenSBI + Linux
-make linux-fpga-rv32-run UART_PORT=/dev/ttyUSB0    # reuse an existing bitstream
-# Replace rv32 with rv64 for the RV64 profile.
-# See fpga/litex/README.md for full target/variant matrix
+# MLK-CU08-KU15P Linux over Ethernet
+make fpga-netboot-rv64-check RAPT_CONFIG=default
+make fpga-netboot-rv64-build RAPT_CONFIG=default
+# Follow the netboot guide to serve, load and boot the image.
 ```
 
 ## Build and Run (Manual)

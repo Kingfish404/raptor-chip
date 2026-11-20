@@ -7,7 +7,8 @@ is required; IRQ is an ordinary interrupt input.
 
 The pin-limited configuration in `synth/configs/pin-limited/rtl/` is one tape-out
 integration of the Raptor cluster, also used for the optional
-[Arty octal-link fixture](../fpga/arty-a7-t100/OCTAL-LINK.md) (`PLATFORM=octal`). The reusable
+[Arty octal-link fixture](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/arty-a7-t100/OCTAL-LINK.md)
+(`PLATFORM=octal`). The reusable
 processor top is `rapt` in `rtl/rapt.sv`.
 All memory and peripherals sit on a board-side FPGA behind one octal link, so
 this integration needs 18 signal pins and has one clock domain. Everything
@@ -39,6 +40,10 @@ low-end FPGAs. `RAPT_NO_FPU` removes the FEU, clears F and D in MISA, keeps
 `mstatus.FS` Off, and traps every FP instruction and FP CSR access as illegal;
 `make -C sim/tb verilator-chip-no-fpu` checks that contract.
 
+The three `chip32-*` presets are scalar RV32 builds. For vector memory faults
+through this link in simulation, select the `default` preset in the
+[xSPI vector tests](https://github.com/Kingfish404/raptor-chip/blob/master/verification/subsystem/README.md#integrated-vector-programs).
+
 ## Pins
 
 | Pin | Direction | Pull | Function |
@@ -60,7 +65,8 @@ for debug. In the locked bridge mode, `pad_diag` outputs the clock / 1024 heartb
 Flash mode releases its output enable and receives the target DS signal on this contact.
 Chip reset and the two switch clocks release its output enable. See the
 [JESD251D interface contract](chip-xspi.md) for DS and shared Flash reset,
-and the [25-signal integration](../synth/configs/io25/README.md) for UART/GPIO.
+and the [25-signal integration](https://github.com/Kingfish404/raptor-chip/blob/master/synth/configs/io25/README.md)
+for UART/GPIO.
 
 ## Boot control
 

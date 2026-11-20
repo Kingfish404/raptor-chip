@@ -4,31 +4,24 @@ title: Vector extension
 
 # Raptor vector extension
 
-The VPU in `rtl/core/backend/vpu/` implements baseline RVV 1.0
-integer, fixed-point, permutation, configuration/CSR, vector memory and
-FP32/FP64 instruction families. `rapt_vpu_core` composes the numerical VPU with
-an ownership and metadata adapter and is instantiated in `rapt_backend` when
-`RAPT_V_EXTENSION` is defined. The integrated path resolves scalar operands,
-authorizes commands at the ROB head, retires scalar/FPR results and flags, and
-uses the core MMU, PMP/PMA, L1D and cluster memory path.
+Raptor implements V 1.0 on RV32 and RV64, including integer, fixed-point,
+permutation, vector memory and FP32/FP64 instruction families.
+`rapt_backend` instantiates `rapt_vpu_core` when `RAPT_V_EXTENSION` is defined.
+The VPU executes under ROB-head ownership and uses the core's existing data
+MMU, PMP/PMA, L1D and cluster memory path.
 
-The test defaults are XLEN=64, VLEN=128, ELEN=64, BankBits=64 and Banks=2.
-XLEN, vector width and storage geometry are independent parameters. Optional
-vector extensions such as Zvfh are outside this component's baseline.
-The minimum V configuration uses VLEN=128 and ELEN=64 with either XLEN; on
-RV32, indexed accesses use index elements up to 32 bits as specified by V 1.0.
-Advertising V also requires the surrounding core to provide the F/D extensions
-and precise traps. [Ratified V 1.0 specification](https://docs.riscv.org/reference/isa/unpriv/v-st-ext).
+The default full-V geometry is VLEN=128, ELEN=64 and two 64-bit VRF banks
+in either XLEN mode. RV32 supports 64-bit vector data but limits indexed memory
+index EEW to 32 bits. Full V requires scalar F/D and precise traps.
+[Ratified V 1.0 specification](https://docs.riscv.org/reference/isa/v20260120/unpriv/v-st-ext.html)
 
 ## Core configuration and architectural state
 
-`default`, every `default-*` preset and `large` enable V by default in both
-XLEN modes. `RAPT_NO_VPU` disables it for scalar comparisons. Other presets
-can enable it with `RAPT_V_EXTENSION` when they support F/D.
-The integrated minimum is VLEN=128 and ELEN=64. `RAPT_VLEN`,
-`RAPT_VRF_BANK_BITS` and `RAPT_VRF_BANKS` configure the storage geometry.
-Changing geometry also requires a matching differential reference; the current
-NPC/NEMU vector sidecar supports VLEN=128.
+The [ISA matrix](./README.md#isa-scope) lists the default presets and opt-outs.
+Other F/D-capable presets can enable V with `RAPT_V_EXTENSION`.
+`RAPT_VLEN`, `RAPT_VRF_BANK_BITS` and `RAPT_VRF_BANKS` configure storage
+geometry. Integrated ELEN is 64; the current NPC/NEMU vector sidecar uses
+VLEN=128. Standalone tests exercise other widths and bank geometries.
 
 MISA.V, the device tree and simulator reference features follow the effective
 configuration. VS gates vector instructions and CSRs. Vector and FP completion
@@ -61,53 +54,56 @@ segment count and restart settings and emits a case manifest beside the assembly
 Use `--success-code 0` for NPC and the default ten for the directed RTL harness.
 `make -C verification/subsystem vector-catalog-diff XLEN=64` uses an existing
 NPC/NEMU build. `VECTOR_NPC` and `VECTOR_REFERENCE` select isolated binaries.
-Whole-core device/fault checks, independent numerical comparison, ASIC STA,
-routed FPGA timing and physical board execution are distinct validation layers.
+The whole-core smoke covers VS and CSR traps, context restart, non-idempotent
+MMIO and precision of page/access faults, including the second beat of RV32
+64-bit elements. The chip-link tests inject AXI/xSPI decode and slave errors.
+The November 19, 2026 integration run passed 17 ACT4 vector-memory cases on
+each XLEN.
+[Integrated test commands](https://github.com/Kingfish404/raptor-chip/blob/master/verification/subsystem/README.md#integrated-vector-programs)
 
-The RV64 user profile enables Zvbb, Zvfhmin and Zvkt. Zvkt uses fixed
-multiplication latency and reads both vector sources of a merge independently of
-the selector bits. Zicclsm support splits misaligned elements through the existing
-MMU and L1D owner and checks every byte before a split store. Run
-`make -C verification/subsystem rva23u64-smoke` for these paths through the
-integrated core, including user-mode vector memory.
+The [RV64 user profile](./README.md#rva23u64-support) enables Zvbb, Zvfhmin
+and Zvkt. Zvfhmin provides binary16 conversions. Zvkt uses fixed multiply
+latency and reads both vector merge sources independently of the selector bits.
+The profile also enables misaligned elements in ordinary memory and checks
+every byte before a split store. Run `make -C verification/subsystem
+rva23u64-smoke` to exercise these paths, including U-mode vector memory.
 
 ## Available modules
 
-| Module | Implemented behavior | Verification |
-| --- | --- | --- |
-| `rtl/core/backend/vpu/rapt_vpu_vtype.sv` | Stateless VTYPE legality, VLMAX, deterministic `min(AVL,VLMAX)`, maximum and keep-VL modes | Exhaustive low-byte type pairs, unsupported upper bits, AVL boundaries |
-| `rtl/core/backend/vpu/rapt_vpu_vrf.sv` | 32 architectural registers, configurable 1RW SRAM banks, byte writes, independently backpressured read responses | Byte-level reference memory, random requests/stalls, full final sweep, reset with pending reads |
-| `rtl/core/backend/vpu/rapt_vpu_csr.sv` | Seven vector CSRs, configuration updates, restart/FOF/completion updates, VS gating and dirty events | CSR address sweep, permissions, aliases, WARL, faults, FOF and sticky saturation |
-| `rtl/core/backend/vpu/rapt_vpu_owner.sv` | Capture, tag-matched authorization, cancellation before authorization, irrevocable issue, completion holding and stale-result drain | Tag reuse, cancellation races, issue/response stalls, zero-cycle and duplicate results; inductive public-interface proof with reachability and mutation checks |
-| `rtl/core/backend/vpu/rapt_vpu_element.sv` | Natural-aligned 8/16/32/64-bit element accesses across VRF banks | Integrated full-array byte comparisons, all supported SEWs and multiple bank shapes |
-| `rtl/core/backend/vpu/rapt_vpu_predicate_cache.sv` | Indexed predicate cache | Cached/uncached model and Spike tests |
-| `rtl/core/backend/vpu/rapt_vpu_decode.sv` | Raw encoding admission for the implemented subset | Real instruction tests and illegal encoding tests, including Spike comparison |
-| `rtl/core/backend/vpu/rapt_vpu_memory.sv` | Sequential unit/strided/indexed/segment/whole/mask/FOF accesses with precise restart metadata | Independent byte model, Spike, transaction scoreboard, injected access/page faults, backpressure and ownership mismatch tests |
-| `rtl/core/backend/vpu/rapt_vpu_muldiv.sv` | Independent ready/valid SEW=8/16/32/64 iterative multiply/divide element engine, optional early completion | Exhaustive e8, wider edge/random cases, reset/backpressure, baseline/optimized comparison; integrated Spike including destructive multiply-add |
-| `rtl/core/backend/vpu/rapt_vpu_mask_write.sv` | Exclusive byte read-modify-write for one mask result bit | All 4,096 byte/bit/value combinations, request stalls, response delays, completion backpressure and reset boundaries; integrated mask results against Spike |
-| `rtl/core/backend/vpu/rapt_vpu_geometry.sv` | Stateless per-operand EEW/EMUL, alignment, extent and legal overlap checks for arithmetic | Integrated raw-encoding tests against Spike including mixed widths, fractional groups, mask results and illegal geometry; ELEN32/64 synthesis |
-| `rtl/core/backend/vpu/rapt_vpu_fixed.sv` | Stateless fixed-point rounding/saturation, consuming the full signed product for vsmul | Independent numerical quotient/remainder rounding, exhaustive small inputs, wider edge/random cases; integrated VXRM/VXSAT and Spike checks |
-| `rtl/core/backend/vpu/rapt_vpu_mask_scan.sv` | Independent byte-based vcpop/vfirst scan, predicate reuse for v0 and first-bit early completion | Exhaustive source/predicate byte and partial-byte lengths, multi-byte scans, exact request counts, backpressure and top-level Spike |
-| `rtl/core/backend/vpu/rapt_vpu_move.sv` | Independent whole-register move sequencer with command capture, aligned groups, SEW-based restart and no-op elision | Standalone byte model with backpressure and delayed acknowledgements; integrated encoded-instruction comparison |
-| `rtl/core/backend/vpu/rapt_vpu_reduce.sv` | Independent sequential integer sum/logical/min/max and widening-sum reduction engine; scalar seed/destination, delayed destination write | Integrated independent numeric model and Spike: masks, zero VL, arbitrary destination overlap, fractional/integer LMUL and illegal vstart/geometry |
-| `rtl/core/backend/vpu/rapt_vpu_alu.sv` | Single-element arithmetic, logical, shift, min/max, merge, compare and carry/borrow | Independent wide-integer reference and Spike through the top |
-| `rtl/core/backend/vpu/rapt_vpu_slide.sv` | Stateless slide/slide1 element routing, full-XLEN offsets, scalar insertion and out-of-range zero selection; integrated integer slide/slide1 scheduling | Independent signed-128-bit coordinate model, RV32/RV64 and VLEN128/512; encoded top tests and leaf synthesis |
-| `rtl/core/backend/vpu/rapt_vpu_divsqrt.sv` | Independent runtime-precision FP32/FP64 divide/sqrt wrapper with held result/flags; integrated with top | SoftFloat result/flags comparison, precision/op capture, reset-age sweep and strict lint |
-| `rtl/core/backend/vpu/rapt_vpu_fp_decode.sv` | FP arithmetic, widening, format conversion, divide/sqrt and miscellaneous admission/operand mapping; integrated with top | Opcode/form sweep, FRM/SEW/enable/VILL matrix and operand-bit/NaN-boxing tests |
-| `rtl/core/backend/vpu/rapt_vpu_fp_arith.sv` | Raw FP32/FP64 add/subtract/multiply/FMA through one shared fused datapath; integrated with top | Independent SoftFloat operation references, all rounding modes, result/flags and protocol checks |
-| `rtl/core/backend/vpu/rapt_vpu_fma.sv` | Independent FP32/FP64 fused element wrapper with backpressured result/flags and raw vector inputs; integrated with top | SoftFloat result/flags tests, request capture, stalled responses, invalid rounding and reset boundaries |
-| `rtl/core/backend/vpu/rapt_vpu_int_fp_decode.sv` | Eighteen unary integer/FP conversion selectors, operand EEWs, signedness and resolved RTZ/FRM; integrated with top | Exhaustive encoding/SEW/FRM/enable sweeps for ELEN32/64 and encoded top differential tests |
-| `rtl/core/backend/vpu/rapt_vpu_int_fp.sv` | Bidirectional integer16/32/64 and FP32/64 element conversion; five legal ISA width pairs integrated with top | Independent SoftFloat leaves plus encoded top results, flags, masking, restart and finite clipping |
-| `rtl/core/backend/vpu/rapt_vpu_int_fp_shared.sv` | Shared integer/FP converter | SoftFloat and top-level tests |
-| `rtl/core/backend/vpu/rapt_vpu_fp_estimate.sv` | Combinational raw FP32/FP64 reciprocal and reciprocal-square-root seven-bit estimates; integrated with top | Spike SoftFloat estimates, all exponent/table interval endpoints, normalized subnormal boundaries, signed special values and normative examples |
-| `rtl/core/backend/vpu/rapt_vpu_fp_transfer.sv` | Stateless admission/routing for FP merge, broadcast, scalar extraction/insertion and slide1; integrated with top | Independent encoding masks, scalar boxing/raw payloads, VL/vstart/mask boundaries and parameter sweeps |
-| `rtl/core/backend/vpu/rapt_vpu_fp_reduce.sv` | Independent numerical sum/min/max and FP32-to-FP64 widening-sum wrapper; the integrated top shares its stream control and existing arithmetic services | SoftFloat sequences, masked seed preservation, count boundaries, metadata capture, source/response stalls and reset-age sweeps |
-| `rtl/core/backend/vpu/rapt_vpu_core_adapter.sv` | Core-side ROB head authorization and immutable retirement metadata | Owner composition tests, inductive control proof, reachable witnesses and mutation detection |
-| `rtl/core/backend/vpu/rapt_vpu_core.sv` | Actual numerical VPU composed with core-side metadata bridge; explicit command/result packing | RV32/RV64 full Spike suites, FP64-on-RV32 and context tests, structural synthesis |
-| `rtl/core/backend/vpu/rapt_vpu.sv` | Composition, sequential element scheduling, mask/vstart/group legality, idle host register port | Standalone encoded programs, authorization races, full VRF comparison and reference differential tests |
+These modules live in `rtl/core/backend/vpu/`. Their default SRAM control type
+is `rapt_pkg::sram_ctrl_t`.
 
-The VPU tops use `rapt_pkg::sram_ctrl_t` for SRAM control. VLEN, ELEN,
-bank geometry, XLEN and eventual owner-tag widths remain configurable.
+| Module | Contract |
+| --- | --- |
+| `rapt_vpu_vtype` | Calculate type legality, VLMAX and `min(AVL, VLMAX)` or keep-VL. |
+| `rapt_vpu_vrf` | Store 32 architectural registers in banked 1RW SRAM with byte writes and held reads. |
+| `rapt_vpu_csr` | Own seven vector CSRs, VS checks, restart, FOF and saturation updates. |
+| `rapt_vpu_owner` | Capture, authorize, cancel, complete and drain operations by owner tag. |
+| `rapt_vpu_element` | Route naturally aligned 8/16/32/64-bit accesses across VRF banks. |
+| `rapt_vpu_predicate_cache` | Cache the predicate byte for an element index. |
+| `rapt_vpu_decode` | Admit raw encodings and classify the supported operations. |
+| `rapt_vpu_memory` | Sequence unit/strided/indexed/segment/whole/mask/FOF memory with restart. |
+| `rapt_vpu_muldiv` | Iteratively multiply/divide 8–64-bit elements, with optional early completion. |
+| `rapt_vpu_mask_write` | Update one mask bit with an exclusive byte read-modify-write. |
+| `rapt_vpu_geometry` | Check EEW, EMUL, group extents, alignment and overlap for each operand. |
+| `rapt_vpu_fixed` | Round and saturate fixed-point arithmetic, including the full product for `vsmul`. |
+| `rapt_vpu_mask_scan` | Find the first set bit or count bits with predicate reuse. |
+| `rapt_vpu_move` | Sequence aligned whole-register moves with SEW-based restart. |
+| `rapt_vpu_reduce` | Reduce integer sums, min/max, logical results and widening sums. |
+| `rapt_vpu_alu` | Evaluate integer arithmetic, logic, shifts, compares and merge/carry/borrow. |
+| `rapt_vpu_slide` | Route slide and slide1 elements using full-XLEN offsets. |
+| `rapt_vpu_divsqrt` | Divide or take a square root with FP32/FP64 selection and held result/flags. |
+| `rapt_vpu_fp_decode` | Decode scalar sources, element widths and FP arithmetic/conversion. |
+| `rapt_vpu_fp_arith`, `rapt_vpu_fma` | Evaluate FP32/FP64 add, subtract, multiply and FMA. |
+| `rapt_vpu_int_fp_decode` | Decode eighteen integer/FP conversion selectors with EEW and rounding. |
+| `rapt_vpu_int_fp`, `rapt_vpu_int_fp_shared` | Convert integer16/32/64 and FP32/64 under legal width pairings. |
+| `rapt_vpu_fp_convert` | Convert FP widths, including the Zvfhmin half-precision paths. |
+| `rapt_vpu_fp_estimate` | Produce seven-bit FP32/FP64 reciprocal and reciprocal square-root estimates. |
+| `rapt_vpu_fp_transfer` | Route merge, broadcast, scalar transfer and slide1 for vector FP. |
+| `rapt_vpu_fp_reduce` | Reduce FP sums, min/max and FP32-to-FP64 widening sums. |
+| `rapt_vpu_core_adapter` | Match ROB-head authorization and preserve immutable retirement metadata. |
+| `rapt_vpu_core` | Connect the numerical VPU to its core-side adapter. |
+| `rapt_vpu` | Compose the VRF and execution engines, with serialized commands and an idle host port. |
 
 ## Relocatable RTL source export
 
@@ -145,46 +141,26 @@ From the repository root:
 make -C verification/vpu test
 make -C verification/vpu matrix
 make -C verification/vpu top-matrix
-make -C verification/vpu top TOP_SUITE=packed-logic
-make -C verification/vpu synth
-make -C verification/vpu opt-check
-make -C verification/vpu predicate-cache-check
-make -C verification/vpu int-fp-share-check
-make -C verification/vpu muldiv-opt-check
-make -C verification/vpu fp-reduce-cache-check
-make -C verification/vpu mask-write
-make -C verification/vpu fixed
-make -C verification/vpu move
-make -C verification/vpu move VLEN=512
-make -C verification/vpu mask-scan
-make -C verification/vpu slide
-make -C verification/vpu slide XLEN=32 VLEN=512
 make -C verification/vpu owner-formal
-make -C verification/vpu mask-scan XLEN=32 VLEN=512
-make -C verification/vpu csr XLEN=32 VLEN=256 ELEN=64
+make -C verification/vpu synth
 make -C verification/vpu vrf VLEN=512 BANK_BITS=128 BANKS=4
 ```
 
-The Makefile requires Verilator and a host C++ toolchain. It does not load the
-root or simulation Makefile, rewrite `sim/.config`, generate scalar decode, or
-install dependencies. Build and run logs are under `verification/build/vpu/`, separated
-by module and configuration. Assertions are enabled; warnings remain fatal,
-apart from narrowly annotated unused architectural bits and the scoped shared scalar FMA waivers. Pipeline failures are
-propagated through `tee`. The VRF random test uses seed `0x6a09e667`.
+The standalone Verilator tests use a host C++ toolchain. They enable assertions
+and fatal warnings with scoped waivers for unused bits and shared scalar FMA.
+Builds, logs and source fingerprints live under `verification/build/vpu/`.
+The VRF test uses seed `0x6a09e667`.
 
-`test` runs the default leaves, core adapter, owner, multiply/divide, mask-write,
-fixed-point, whole-register move, mask-scan, slide, FP-decode, integer/FP-decode,
-FP-reduction control/decode/engine and top tests. `matrix` checks the
-configuration/CSR/VRF leaves; `top-matrix` additionally checks two tag widths and
-five integrated top configurations. The integrated element adapter requires
-BankBits >= 64; the storage-only VRF also supports narrower banks.
+`test` runs the default leaves, ownership and top suites. `matrix` covers
+configuration, CSRs and VRF. `top-matrix` covers five configurations and two
+tag widths. The integrated element adapter requires `BankBits >= 64`; VRF
+storage tests also cover narrower banks.
 
-The synthesis target additionally requires Yosys with its slang plugin. It checks
-the leaves, owner and top in several parameter configurations, rejects latches and
-unexpected blackboxes/assertion cells, and checks VRF capacity, one write port
-per bank and registered read ports. Source SHA256
-fingerprints and cell/memory summaries are in
-`verification/build/vpu/synth/summary.json`.
+`synth` requires Yosys with slang. It checks latches, unexpected blackboxes
+or assertion cells, VRF capacity, and one write port and registered reads per
+bank. See `verification/build/vpu/synth/summary.json`. For individual leaf
+and optimization targets, see the
+[VPU Makefile](https://github.com/Kingfish404/raptor-chip/blob/master/verification/vpu/Makefile).
 
 ### Independent Spike differential tests
 
@@ -700,70 +676,32 @@ sequence through production decode, MMU and memory paths.
 
 ## Core-side ownership and metadata adapter
 
-`rapt_vpu_core_adapter.sv` is the independently testable control bridge used
-by `rapt_vpu_core`. A command handshake forwards the complete command
-payload to the VPU and captures immutable core metadata (for example PC and
-physical destination) alongside `{generation, ROB slot}`. It accepts only one
-command at a time. The core resolves scalar/FPR/CSR dependencies before
-acceptance and supplies the architectural snapshots in the command payload.
-
-Authorization requires `head_valid`, matching slot and generation, and
-`head_safe`. The latter is a core-owned guarantee that the instruction can
-execute irrevocably, including required older-memory ordering. Authorization
-is a conditional grant re-evaluated until the VPU accepts it; matching kill
-wins before that handshake. Afterwards kill is blocked and the metadata remains
-owned until the matching response is accepted by the core.
-
-The numerical scheduler keeps a local instruction register for decoder fanout
-and reuses the owner's held operands, control and tag during execution. The
-owner contract and its formal check require the held values to remain stable
-until cancellation or response acceptance.
-
-The adapter preserves the entire result payload without interpreting it. The
-core composition must pack every result field (including trap, dirty, FP flags
-and FPR results), map those fields into the actual completion types, and retain
-the ROB owner throughout execution. The result producer must hold valid/tag/
-payload during response backpressure. Early or wrong-tag responses are drained
-without releasing the live metadata; matching results become eligible in cycles
-after authorization, as provided by `rapt_vpu_owner`. Reset and external drain
-must be coordinated with the VPU. Identity width alone cannot protect against
-late responses after exact full-tag reuse.
+`rapt_vpu_core_adapter` captures immutable metadata such as PC and physical
+destination alongside `{generation, ROB slot}`. It grants authorization
+while the matching ROB head is valid and `head_safe` holds. The grant is
+re-evaluated until accepted. A matching kill wins before acceptance.
+Early or wrong-tag responses drain while the current owner remains live.
+The adapter and owner proofs check stable operands, tags and metadata
+through cancellation or response acceptance.
 
 ## Core-facing numerical VPU composition
 
-`rapt_vpu_core.sv` instantiates the ownership/metadata bridge and actual
-`rapt_vpu`. Its command and result connections explicitly pack every current
-field: instruction, scalar and FPR operands, FRM/FS availability, scalar/FPR
-results, trap metadata, dirty events and FP flags. The memory and idle host
-interfaces pass through unchanged. `cmd_metadata`/`rsp_metadata` preserve a
-core-defined immutable packet; `MetadataBits` must fit the caller's chosen PC,
-physical destination and other required retirement fields.
+`rapt_vpu_core` packs architectural command and result fields between the
+adapter and `rapt_vpu`. The memory and host interfaces pass through unchanged.
+`GenerationBits`, `RobBits` and `MetadataBits` define tag and payload widths.
+`busy` includes outstanding idle-host transactions. The backend asserts
+`head_safe` after checking the store queue and, for memory commands, completing
+the memory drain.
 
-Tags pack generation above ROB slot, parameterized by `GenerationBits` and
-`RobBits`. `authorize_valid`/`authorize_tag` identify the available ROB head,
-and `head_safe` supplies the core's irrevocable-execution guarantee.
-`authorize_ready` reports that the conditional authorization can be accepted.
-`busy` retains the numerical VPU's public meaning, including an outstanding
-host-port transaction; the bridge's internal instruction occupancy is separate.
-Cancellation/blocking consistency and unexpected completion drops are asserted.
-
-Select this composition with `CORE_ADAPTER=1` in the existing top test target;
-`CORE_ADAPTER=0` selects the standalone VPU. Build directories use
-`core-top-...` versus `top-...`, and the source manifest records `CoreAdapter`.
-The common instruction driver supplies nonuniform metadata, changes it after
-command acceptance, checks an unsafe matching ROB head is not authorized, and
-checks captured metadata throughout completion backpressure. Existing numerical,
-CSR, memory, cancellation and Spike comparisons run through the wrapper.
+Use `CORE_ADAPTER=1` to test captured metadata, unsafe head gating,
+backpressure and numerical behavior through the wrapper. Builds use the
+`core-top-...` prefix and record `CoreAdapter` in the source manifest.
 
 ```sh
-make -C verification/vpu top CORE_ADAPTER=1 DIFF=1 SPIKE_BUILD=/path/to/pinned/spike XLEN=64 VLEN=128 ELEN=64 BANK_BITS=64 BANKS=2
-make -C verification/vpu top CORE_ADAPTER=1 TOP_SUITE=context DIFF=1 SPIKE_BUILD=/path/to/pinned/spike
+make -C verification/vpu top CORE_ADAPTER=1 TOP_SUITE=context \
+  DIFF=1 SPIKE_BUILD=/path/to/pinned/spike
 python3 verification/vpu/synth_check.py --leaf top_core --build-dir verification/build/vpu/synth-core-top
 ```
-
-`rapt_backend` instantiates the wrapper and connects it to the ROB, CSR, MMU
-and L1D. It grants `head_safe` after checking the older store queue and, for
-memory commands, completing the memory drain.
 
 ## Store acceptance, final response and restart boundary
 
@@ -865,17 +803,11 @@ width and precision against SoftFloat; supply `FMA_DOUBLE`, `INT_BITS` and
 engine workload with both cache settings across four configurations and compares
 their results.
 
-The scalar integration resolves dependencies before accepting a command,
-authorizes irreversible effects at the correct ROB owner, retains precise trap
-and restart state, maps scalar/FPR results and flags into retirement, and drains
-accepted memory requests before owner identity reuse. The scalar SQ's
-post-retirement error path does not satisfy the VPU's precise final-response
-contract by itself.
+For Linux userspace and board validation, see the
+[RVA23U64 Linux probe](./linux_kernel.md#rva23u64-on-linux).
 
 ## Specification references
 
-- [RISC-V V 1.0 specification, ISA library v20260120](https://docs.riscv.org/reference/isa/v20260120/unpriv/v-st-ext.html)
+- [RISC-V V 1.0 specification](https://docs.riscv.org/reference/isa/v20260120/unpriv/v-st-ext.html)
 - [Frozen V 1.0 source, configuration and CSR sections](https://github.com/riscvarchive/riscv-v-spec/blob/v1.0/v-spec.adoc)
 - [Spike reference implementation](https://github.com/riscv-software-src/riscv-isa-sim)
-
-Reference tool availability is not a claim that differential tests have run.

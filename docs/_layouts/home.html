@@ -12,9 +12,9 @@
         <p class="eyebrow">Open hardware · RV32 / RV64</p>
         <h1>A RISC-V core.<br>Room to explore.</h1>
         <p class="lede">A configurable, superscalar out-of-order processor with
-          TAGE prediction, scalar floating point, and Sv32/Sv39 virtual memory.
-          The default RV64 configuration supports
-          <a href="{{ '/overview.html#rva22s64-support' | relative_url }}">RVA22S64</a>.</p>
+          TAGE prediction, scalar floating point, <a href="{{ '/vpu.html' | relative_url }}">V 1.0</a>
+          and Sv32/Sv39 virtual memory. The default RV64 preset enables
+          <a href="{{ '/overview.html#rva23u64-support' | relative_url }}">RVA23U64</a> in user mode.</p>
         <div class="hero-actions">
           <a class="btn btn-primary" href="{{ '/getting-started.html' | relative_url }}">
             Get started <span aria-hidden="true">↗</span></a>
@@ -73,8 +73,8 @@ make run-rv32 ARGS="-b -n"</code></pre>
           <p>FPGA boards, memory maps, and the software stack.</p>
         </a>
         <a class="doc-card" href="{{ '/vpu.html' | relative_url }}">
-          <h3>Standalone VPU <span aria-hidden="true">↗</span></h3>
-          <p>Vector components and contracts for future core integration.</p>
+          <h3>Vector extension <span aria-hidden="true">↗</span></h3>
+          <p>Integrated RVV execution, precise memory faults and verification.</p>
         </a>
       </div>
     </section>

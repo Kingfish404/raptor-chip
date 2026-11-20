@@ -1,0 +1,38 @@
+diff --git a/litex/soc/interconnect/axi/axi_full.py b/litex/soc/interconnect/axi/axi_full.py
+index 44db71e..82081c8 100644
+--- a/litex/soc/interconnect/axi/axi_full.py
++++ b/litex/soc/interconnect/axi/axi_full.py
+@@ -387,2 +387,8 @@ class AXIUpConverter(LiteXModule):
+
++        # Accept the upstream AR before issuing any beats. AXIBurst2Beat
++        # only acknowledges its source after the last beat.
++        ar_buffer = stream.Buffer(axi_from.ar.description)
++        self.submodules += ar_buffer
++        self.comb += axi_from.ar.connect(ar_buffer.sink)
++        ar_burst = ar_buffer.source
+         ar = AXIStreamInterface(
+@@ -390,3 +396,3 @@ class AXIUpConverter(LiteXModule):
+             id_width = axi_from.id_width)
+-        self.submodules.ar_burst2beat = AXIBurst2Beat(axi_from.ar, ar)
++        self.submodules.ar_burst2beat = AXIBurst2Beat(ar_burst, ar)
+
+@@ -420,11 +426,11 @@ class AXIUpConverter(LiteXModule):
+             ar_cmd.sink.addr.eq(ar.addr),
+-            ar_cmd.sink.size.eq(axi_from.ar.size),
+-            ar_cmd.sink.lock.eq(axi_from.ar.lock),
+-            ar_cmd.sink.prot.eq(axi_from.ar.prot),
+-            ar_cmd.sink.cache.eq(axi_from.ar.cache),
+-            ar_cmd.sink.qos.eq(axi_from.ar.qos),
+-            ar_cmd.sink.region.eq(axi_from.ar.region),
++            ar_cmd.sink.size.eq(ar_burst.size),
++            ar_cmd.sink.lock.eq(ar_burst.lock),
++            ar_cmd.sink.prot.eq(ar_burst.prot),
++            ar_cmd.sink.cache.eq(ar_burst.cache),
++            ar_cmd.sink.qos.eq(ar_burst.qos),
++            ar_cmd.sink.region.eq(ar_burst.region),
+             ar_cmd.sink.id.eq(ar.id),
+-            ar_cmd.sink.dest.eq(axi_from.ar.dest),
+-            ar_cmd.sink.user.eq(axi_from.ar.user),
++            ar_cmd.sink.dest.eq(ar_burst.dest),
++            ar_cmd.sink.user.eq(ar_burst.user),
+             ar_cmd.sink.lane.eq(ar.addr[lane_lsb:lane_lsb + lane_bits]),

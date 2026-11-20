@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-03T12:48:38Z",
+  "generated_at": "2026-11-19T18:34:21Z",
   "sources": {
     "rtl": "rtl/",
     "config": "rtl/configs/default/rapt_config.svh",
@@ -276,7 +276,7 @@
       "RAPT_L2_LEN": "8",
       "RAPT_L2_N_WAYS": "1",
       "RAPT_LSU_HUM": "1",
-      "RAPT_MISA": "'h4014112f",
+      "RAPT_MISA": "'h4034112f",
       "RAPT_M_EXTENSION": "'h1",
       "RAPT_M_FAST": "'h1",
       "RAPT_OPERAND_SPILL_ENTRIES": "16",
@@ -343,6 +343,10 @@
       "RAPT_TVEC_MODE_DIRECT": "2'b00",
       "RAPT_TVEC_MODE_VECTORED": "2'b01",
       "RAPT_UOP_HAS_INST": "1",
+      "RAPT_VLEN": "128",
+      "RAPT_VRF_BANKS": "2",
+      "RAPT_VRF_BANK_BITS": "64",
+      "RAPT_V_EXTENSION": "1",
       "RAPT_XLEN": "32"
     },
     "values": {
@@ -355,6 +359,7 @@
       "rob_entries": 32,
       "alq_entries": 8,
       "fpq_entries": 8,
+      "vector_vlen": 128,
       "ioq_entries": 8,
       "sq_entries": 16,
       "phys_regs": 64,
@@ -393,6 +398,7 @@
       "iq_reclaim_on_issue": 0,
       "l1d_mshrs": 4,
       "m_fast": 1,
+      "vector_elen": 64,
       "brq_entries": 8,
       "mdq_entries": 4
     },
@@ -739,6 +745,7 @@
           "name": "u_fpu_compare",
           "ports": [
             "op",
+            "zfa_semantics",
             "operand_a",
             "operand_b",
             "result",
@@ -881,6 +888,7 @@
             "source_double",
             "unsigned_result",
             "int64_target",
+            "modulo_word",
             "rounding_mode",
             "result",
             "flags",
@@ -1159,7 +1167,8 @@
       "summary": "",
       "params": {
         "SOURCE_DOUBLE": "1'b0",
-        "MULTI_FORMAT": "1'b0"
+        "MULTI_FORMAT": "1'b0",
+        "MODULO_WORD": "1'b0"
       },
       "instances": []
     },
@@ -1353,6 +1362,7 @@
             "source_double",
             "unsigned_result",
             "int64_target",
+            "modulo_word",
             "rounding_mode",
             "result",
             "flags",
@@ -1385,6 +1395,28 @@
         "XLEN": "Cfg.xlen"
       },
       "instances": [
+        {
+          "type": "rapt_iq",
+          "name": "u_alq",
+          "ports": [
+            "local_operand_wake",
+            "combo_source",
+            "cancel_valid",
+            "cancel_head",
+            "cancel_owner",
+            "completion",
+            "clock",
+            "reset",
+            "cmu_bcast",
+            "dispatch",
+            "disp",
+            "issue_enable",
+            "issue",
+            "occ_o",
+            "pmu_iq_full",
+            "resource_ready"
+          ]
+        },
         {
           "type": "rapt_ieu_pipe_alu_csr",
           "name": "u_pipe_alu_csr",
@@ -2025,6 +2057,72 @@
       },
       "instances": [
         {
+          "type": "rapt_vpu_core",
+          "name": "vpu",
+          "ports": [
+            "sram_ctrl_i",
+            "clock",
+            "reset",
+            "head_safe",
+            "cmd_metadata",
+            "rsp_metadata",
+            "authorized",
+            "response_dropped",
+            "vector_enabled",
+            "cmd_valid",
+            "cmd_ready",
+            "cmd_tag",
+            "cmd_insn",
+            "cmd_rs1",
+            "cmd_rs2",
+            "cmd_frs1",
+            "cmd_frm",
+            "cmd_fp_enabled",
+            "authorize_valid",
+            "authorize_ready",
+            "authorize_tag",
+            "kill_valid",
+            "kill_tag",
+            "cancelled"
+          ]
+        },
+        {
+          "type": "rapt_pmp_state",
+          "name": "vector_pmp_state",
+          "ports": [
+            "clock",
+            "reset",
+            "update",
+            "state"
+          ]
+        },
+        {
+          "type": "rapt_ioq_store_check",
+          "name": "vector_store_check",
+          "ports": [
+            "store_context",
+            "pmp_state",
+            "store_addr",
+            "store_size_m1",
+            "store_valid",
+            "store_mmu",
+            "cmo_mgmt",
+            "store_bare_fault_offset",
+            "store_bare_pmp_trap"
+          ]
+        },
+        {
+          "type": "rapt_completion_stage",
+          "name": "stage",
+          "ports": [
+            "clock",
+            "reset",
+            "flush",
+            "accepted",
+            "completion"
+          ]
+        },
+        {
           "type": "rapt_completion_stage",
           "name": "stage",
           "ports": [
@@ -2238,10 +2336,10 @@
             "disp_brq",
             "disp_mdq",
             "integer_system_issue_enable",
-            "exu_csr",
-            "wb_integer_raw",
-            "wb_branch",
-            "exu_wb_mul"
+            "reservation_valid",
+            "wrs_debug_wakeup",
+            "vector_issue_ready",
+            "vector_issue"
           ]
         },
         {
@@ -2302,8 +2400,11 @@
             "m_ext_irq_i",
             "s_ext_irq_i",
             "store_error_i",
+            "store_error_i",
             "store_error_addr_i",
             "store_error_strb_i",
+            "vector_dirty_i",
+            "vector_fp_dirty_i",
             "reset"
           ]
         },
@@ -2319,6 +2420,8 @@
             "clock",
             "reset",
             "cmu_bcast",
+            "lsu_l1d",
+            "exu_l1d",
             "lsu_l1d",
             "exu_l1d",
             "dispatch",
@@ -2888,7 +2991,7 @@
       "file": "rtl/core/backend/vpu/rapt_vpu.sv",
       "domain": "vpu",
       "stage": null,
-      "summary": "Standalone, head-authorized vector engine. Integer execution currently uses one natural-aligned element at a time; other RVV classes remain illegal until implemented. Host register access is an idle-only debug/context interface, not an ISA bypass available during execution. No sc",
+      "summary": "Standalone, head-authorized vector engine. Elementwise execution uses one natural-aligned element at a time. Host register access is an idle-only debug/context interface, not an ISA bypass available during execution.",
       "params": {
         "XLEN": "64",
         "VLEN": "128",
@@ -2897,9 +3000,46 @@
         "BankBits": "64",
         "Banks": "2",
         "OptimizeOperandReads": "1",
+        "CachePredicate": "1",
+        "ShareIntFpConverters": "1",
+        "PackLogic": "1",
+        "Zvbb": "0",
+        "Zvfhmin": "0",
+        "Zvkt": "0",
+        "MisalignedMemory": "0",
         "AddrBits": "$clog2(32*VLEN/8"
       },
       "instances": [
+        {
+          "type": "rapt_vpu_owner",
+          "name": "u_owner",
+          "ports": [
+            "clock",
+            "reset",
+            "cmd_valid",
+            "cmd_ready",
+            "cmd_tag",
+            "cmd_payload",
+            "authorize_valid",
+            "authorize_ready",
+            "authorize_tag",
+            "kill_valid",
+            "kill_tag",
+            "cancelled",
+            "kill_blocked",
+            "busy",
+            "engine_valid",
+            "engine_ready",
+            "engine_tag",
+            "engine_payload",
+            "result_valid",
+            "result_ready",
+            "result_tag",
+            "result_payload",
+            "result_dropped",
+            "rsp_valid"
+          ]
+        },
         {
           "type": "rapt_vpu_decode",
           "name": "u_decode",
@@ -3071,6 +3211,26 @@
           ]
         },
         {
+          "type": "rapt_vpu_int_fp_shared",
+          "name": "u_convert",
+          "ports": [
+            "clock",
+            "reset",
+            "req_valid",
+            "req_ready",
+            "to_float",
+            "unsigned_integer",
+            "integer_size",
+            "operand",
+            "rm",
+            "rsp_valid",
+            "rsp_ready",
+            "result",
+            "flags",
+            "illegal"
+          ]
+        },
+        {
           "type": "rapt_vpu_int_fp",
           "name": "u_convert",
           "ports": [
@@ -3237,6 +3397,7 @@
             "req_valid",
             "req_ready",
             "req_widen",
+            "req_half",
             "operand",
             "rm",
             "rsp_valid",
@@ -3426,6 +3587,20 @@
           ]
         },
         {
+          "type": "rapt_vpu_predicate_cache",
+          "name": "u_predicate_cache",
+          "ports": [
+            "clock",
+            "reset",
+            "clear",
+            "index",
+            "fill",
+            "fill_data",
+            "hit",
+            "bit_value"
+          ]
+        },
+        {
           "type": "rapt_vpu_element",
           "name": "u_element",
           "ports": [
@@ -3476,15 +3651,17 @@
       "file": "rtl/core/backend/vpu/rapt_vpu_alu.sv",
       "domain": "vpu",
       "stage": null,
-      "summary": "One integer element. funct6 is the RVV OPIV encoding; decode/legality is separate. Truncation and signed comparisons use SEW, never scalar XLEN.",
-      "params": {},
+      "summary": "One integer element. Decode maps unary Zvbb operations to spare ALU controls. Truncation and signed comparisons use the element width.",
+      "params": {
+        "Zvbb": "0"
+      },
       "instances": []
     },
     {
       "id": "rapt_vpu_core",
       "file": "rtl/core/backend/vpu/rapt_vpu_core.sv",
       "domain": "vpu",
-      "stage": null,
+      "stage": 4,
       "summary": "Core-facing composition with immutable retirement metadata. authorize_tag names the current ROB head; head_safe supplies its irrevocability/ordering guarantee. Tags pack generation above slot. Neither memory ordering nor the scalar ROB/CSR update implementation is hidden inside t",
       "params": {
         "RobBits": "6",
@@ -3497,9 +3674,45 @@
         "BankBits": "64",
         "Banks": "2",
         "OptimizeOperandReads": "1",
+        "CachePredicate": "1",
+        "ShareIntFpConverters": "1",
+        "Zvbb": "0",
+        "Zvfhmin": "0",
+        "Zvkt": "0",
+        "MisalignedMemory": "0",
         "AddrBits": "$clog2(32*VLEN/8"
       },
       "instances": [
+        {
+          "type": "rapt_vpu_core_adapter",
+          "name": "u_adapter",
+          "ports": [
+            "clock",
+            "reset",
+            "cmd_valid",
+            "cmd_ready",
+            "cmd_slot",
+            "cmd_generation",
+            "cmd_payload",
+            "cmd_metadata",
+            "head_valid",
+            "head_safe",
+            "head_slot",
+            "head_generation",
+            "kill_valid",
+            "kill_slot",
+            "kill_generation",
+            "busy",
+            "authorized",
+            "cancelled",
+            "kill_blocked",
+            "rsp_valid",
+            "rsp_ready",
+            "rsp_slot",
+            "rsp_generation",
+            "rsp_metadata"
+          ]
+        },
         {
           "type": "rapt_vpu",
           "name": "u_vpu",
@@ -3583,8 +3796,10 @@
       "file": "rtl/core/backend/vpu/rapt_vpu_decode.sv",
       "domain": "vpu",
       "stage": null,
-      "summary": "Standalone raw instruction decoder. Only implemented operations are admitted; unsupported/reserved encodings trap instead of falling through to an ALU op. Scalar-core Chisel decode is untouched until the integration adapter exists.",
-      "params": {},
+      "summary": "Standalone raw instruction decoder. Only implemented operations are admitted; unsupported/reserved encodings trap instead of falling through to an ALU op.",
+      "params": {
+        "Zvbb": "0"
+      },
       "instances": []
     },
     {
@@ -3713,8 +3928,10 @@
       "file": "rtl/core/backend/vpu/rapt_vpu_fp_convert.sv",
       "domain": "vpu",
       "stage": null,
-      "summary": "Raw FP32/FP64 format conversions. rm=0..4 are IEEE rounding modes; rm=6 means round-to-odd for narrowing only, not an architectural FRM value. Scalar NaN boxing and instruction/FRM legality belong to the caller.",
-      "params": {},
+      "summary": "Raw adjacent-width format conversions. rm=0..4 are IEEE rounding modes. rm=6 selects round-to-odd for FP64-to-FP32 narrowing. Scalar NaN boxing and instruction/FRM legality belong to the caller.",
+      "params": {
+        "Zvfhmin": "0"
+      },
       "instances": [
         {
           "type": "rapt_vpu_fp_widen",
@@ -3739,6 +3956,35 @@
             "flags",
             "result_valid"
           ]
+        },
+        {
+          "type": "rapt_fpu_half_to_fp",
+          "name": "u_widen",
+          "ports": [
+            "flush",
+            "valid",
+            "ready",
+            "operand",
+            "target_double",
+            "result",
+            "flags",
+            "result_valid"
+          ]
+        },
+        {
+          "type": "rapt_fpu_fp_to_half",
+          "name": "u_narrow",
+          "ports": [
+            "flush",
+            "valid",
+            "ready",
+            "operand",
+            "source_double",
+            "rounding_mode",
+            "result",
+            "flags",
+            "result_valid"
+          ]
         }
       ]
     },
@@ -3749,7 +3995,8 @@
       "stage": null,
       "summary": "Same-width and widening floating-point arithmetic admission and raw element operand map. Caller supplies resolved FRM and enabled=(VS!=Off && FS!=Off), validates register geometry, and captures all outputs at execution request acceptance. This module does not authorize architectu",
       "params": {
-        "ELEN": "64"
+        "ELEN": "64",
+        "Zvfhmin": "0"
       },
       "instances": []
     },
@@ -4124,6 +4371,53 @@
       "instances": []
     },
     {
+      "id": "rapt_vpu_int_fp_shared",
+      "file": "rtl/core/backend/vpu/rapt_vpu_int_fp_shared.sv",
+      "domain": "vpu",
+      "stage": null,
+      "summary": "One FP precision shares its converters across 16/32/64-bit integer widths. Inputs and width are sampled on request; the result is held until consumed.",
+      "params": {
+        "FloatDouble": "1"
+      },
+      "instances": [
+        {
+          "type": "rapt_fpu_int_to_fp",
+          "name": "u_to_fp",
+          "ports": [
+            "clock",
+            "reset",
+            "flush",
+            "valid",
+            "ready",
+            "operand",
+            "unsigned_input",
+            "rounding_mode",
+            "result",
+            "flags",
+            "result_valid"
+          ]
+        },
+        {
+          "type": "rapt_fpu_single_to_int_w",
+          "name": "u_to_int",
+          "ports": [
+            "clock",
+            "reset",
+            "flush",
+            "valid",
+            "ready",
+            "operand",
+            "unsigned_result",
+            "int64_target",
+            "rounding_mode",
+            "result",
+            "flags",
+            "result_valid"
+          ]
+        }
+      ]
+    },
+    {
       "id": "rapt_vpu_mask_scan",
       "file": "rtl/core/backend/vpu/rapt_vpu_mask_scan.sv",
       "domain": "vpu",
@@ -4153,11 +4447,12 @@
       "file": "rtl/core/backend/vpu/rapt_vpu_memory.sv",
       "domain": "vpu",
       "stage": null,
-      "summary": "Sequential vector memory sequencer. The command is already irrevocably authorized. Requests use virtual byte addresses and natural-aligned elements; the integration adapter owns translation, PMP/PMA, ordering and final errors. A successful store response must mean the store is no",
+      "summary": "Sequential vector memory sequencer. The command is already irrevocably authorized. Requests use virtual byte addresses and the original element size; the integration adapter owns translation, PMP/PMA, ordering and final errors. A successful store response must mean the store is n",
       "params": {
         "XLEN": "64",
         "VLEN": "128",
         "ELEN": "64",
+        "MisalignedMemory": "0",
         "TagBits": "10",
         "AddrBits": "$clog2(32*VLEN/8",
         "IndexBits": "$clog2(VLEN"
@@ -4184,7 +4479,8 @@
       "stage": null,
       "summary": "Independent, single-element RVV integer multiply/divide engine. op is the low three funct6 bits for OPMVV/OPMVX 100xxx. Radix-2 shift/add and restoring division avoid technology-dependent combinational multipliers/dividers. Requests are already authorized; reset is not an archite",
       "params": {
-        "EarlyOut": "1"
+        "EarlyOut": "1",
+        "MultiplyEarlyOut": "EarlyOut"
       },
       "instances": []
     },
@@ -4198,6 +4494,18 @@
         "TagBits": "10",
         "CommandBits": "160",
         "ResultBits": "128"
+      },
+      "instances": []
+    },
+    {
+      "id": "rapt_vpu_predicate_cache",
+      "file": "rtl/core/backend/vpu/rapt_vpu_predicate_cache.sv",
+      "domain": "vpu",
+      "stage": null,
+      "summary": "One predicate byte, tagged by element index. The owner must clear the cache on each new instruction and must not fill it if its source can be modified before all bits in that byte are consumed.",
+      "params": {
+        "IndexBits": "8",
+        "Enable": "1"
       },
       "instances": []
     },
@@ -4584,6 +4892,10 @@
             "out_wen",
             "out_ren",
             "out_atom",
+            "out_vector_valid",
+            "out_vector_rs1",
+            "out_vector_rs2",
+            "out_vector_rd",
             "out_sys_system",
             "out_sys_ebreak",
             "out_sys_ecall",
@@ -4594,11 +4906,7 @@
             "out_fence_time",
             "out_fp_valid",
             "out_fp_op",
-            "out_fp_rm",
-            "out_fp_rs1",
-            "out_fp_rs2",
-            "out_fp_rs3",
-            "out_fp_rd"
+            "out_fp_rm"
           ]
         }
       ]
@@ -4816,6 +5124,36 @@
         "L2LineOffset": "rapt_pkg::L2LinkConfig.line_offset"
       },
       "instances": [
+        {
+          "type": "rapt_l1d_mshr",
+          "name": "misses",
+          "ports": [
+            "invalidate",
+            "invalidate_line",
+            "invalidate_addr",
+            "fill_valid",
+            "fill_ready",
+            "fill_addr",
+            "fill_mask",
+            "fill_data",
+            "fill_dirty",
+            "fill_store_lost",
+            "fill_owned",
+            "lookup_valid",
+            "cache_hit",
+            "lookup_addr",
+            "lookup_version",
+            "lookup_ready",
+            "lookup_error",
+            "lookup_buffered",
+            "lookup_wait",
+            "lookup_data",
+            "busy",
+            "wake",
+            "req_valid",
+            "req_id"
+          ]
+        },
         {
           "type": "rapt_pmp_state",
           "name": "pmp_state_regs",
@@ -5752,7 +6090,19 @@
         "TlbLruB": "TlbLru",
         "TlbPlruB": "TlbPlru"
       },
-      "instances": []
+      "instances": [
+        {
+          "type": "rapt_tlb_lru",
+          "name": "u_lru",
+          "ports": [
+            "flush",
+            "match_vec",
+            "lookup_valid",
+            "fill_valid",
+            "victim"
+          ]
+        }
+      ]
     },
     {
       "id": "rapt_tlb_lru",
@@ -7937,7 +8287,7 @@
         "y": 0.0,
         "z": 2.2,
         "h": 8,
-        "child_count": 4,
+        "child_count": 5,
         "sx": 6.8,
         "sz": 4.4,
         "sy": 0.508,
@@ -8220,7 +8570,7 @@
         "y": 0.0,
         "z": 0.0,
         "h": 22,
-        "child_count": 21
+        "child_count": 25
       },
       {
         "id": "rapt_fp_registers",
@@ -8442,15 +8792,15 @@
         "short": "vpu",
         "file": "rtl/core/backend/vpu/rapt_vpu.sv",
         "domain": "vpu",
-        "stage": 8,
-        "summary": "Standalone, head-authorized vector engine. Integer execution currently uses one natural-aligned element at a time; other RVV classes remain illegal until implemented. Host register access is an idle-only debug/context interface, not an ISA bypass available during execution. No sc",
+        "stage": 4,
+        "summary": "Standalone, head-authorized vector engine. Elementwise execution uses one natural-aligned element at a time. Host register access is an idle-only debug/context interface, not an ISA bypass available during execution.",
         "parent": "rapt_vpu_core",
         "display": false,
-        "x": 8.0,
+        "x": 4.0,
         "y": 0.0,
         "z": 1.2,
         "h": 6,
-        "child_count": 27
+        "child_count": 30
       },
       {
         "id": "rapt_vpu_alu",
@@ -8458,7 +8808,7 @@
         "file": "rtl/core/backend/vpu/rapt_vpu_alu.sv",
         "domain": "vpu",
         "stage": 8,
-        "summary": "One integer element. funct6 is the RVV OPIV encoding; decode/legality is separate. Truncation and signed comparisons use SEW, never scalar XLEN.",
+        "summary": "One integer element. Decode maps unary Zvbb operations to spare ALU controls. Truncation and signed comparisons use the element width.",
         "parent": "rapt_vpu",
         "display": false,
         "x": 8.0,
@@ -8469,29 +8819,29 @@
       },
       {
         "id": "rapt_vpu_core",
-        "short": "vpu_core",
+        "short": "VPU",
         "file": "rtl/core/backend/vpu/rapt_vpu_core.sv",
         "domain": "vpu",
-        "stage": 8,
+        "stage": 4,
         "summary": "Core-facing composition with immutable retirement metadata. authorize_tag names the current ROB head; head_safe supplies its irrevocability/ordering guarantee. Tags pack generation above slot. Neither memory ordering nor the scalar ROB/CSR update implementation is hidden inside t",
-        "parent": null,
+        "parent": "rapt_backend",
         "display": false,
-        "x": 8.0,
+        "x": 4.0,
         "y": 0.0,
         "z": 1.64,
         "h": 6,
-        "child_count": 1
+        "child_count": 2
       },
       {
         "id": "rapt_vpu_core_adapter",
         "short": "vpu_core_adapter",
         "file": "rtl/core/backend/vpu/rapt_vpu_core_adapter.sv",
         "domain": "vpu",
-        "stage": 8,
+        "stage": 4,
         "summary": "Single-entry core-side control bridge. The core resolves scalar dependencies before cmd acceptance. head_safe means the matching ROB head may execute irrevocably (including required older-memory ordering). After authorization the core must retain that owner until completion; kill",
-        "parent": null,
+        "parent": "rapt_vpu_core",
         "display": false,
-        "x": 8.0,
+        "x": 4.0,
         "y": 0.0,
         "z": 1.86,
         "h": 6,
@@ -8518,7 +8868,7 @@
         "file": "rtl/core/backend/vpu/rapt_vpu_decode.sv",
         "domain": "vpu",
         "stage": 8,
-        "summary": "Standalone raw instruction decoder. Only implemented operations are admitted; unsupported/reserved encodings trap instead of falling through to an ALU op. Scalar-core Chisel decode is untouched until the integration adapter exists.",
+        "summary": "Standalone raw instruction decoder. Only implemented operations are admitted; unsupported/reserved encodings trap instead of falling through to an ALU op.",
         "parent": "rapt_vpu",
         "display": false,
         "x": 8.0,
@@ -8608,14 +8958,14 @@
         "file": "rtl/core/backend/vpu/rapt_vpu_fp_convert.sv",
         "domain": "vpu",
         "stage": 8,
-        "summary": "Raw FP32/FP64 format conversions. rm=0..4 are IEEE rounding modes; rm=6 means round-to-odd for narrowing only, not an architectural FRM value. Scalar NaN boxing and instruction/FRM legality belong to the caller.",
+        "summary": "Raw adjacent-width format conversions. rm=0..4 are IEEE rounding modes. rm=6 selects round-to-odd for FP64-to-FP32 narrowing. Scalar NaN boxing and instruction/FRM legality belong to the caller.",
         "parent": "rapt_vpu",
         "display": false,
         "x": 8.0,
         "y": 0.0,
         "z": 1.42,
         "h": 6,
-        "child_count": 2
+        "child_count": 4
       },
       {
         "id": "rapt_vpu_fp_decode",
@@ -8813,6 +9163,21 @@
         "child_count": 0
       },
       {
+        "id": "rapt_vpu_int_fp_shared",
+        "short": "vpu_int_fp_shared",
+        "file": "rtl/core/backend/vpu/rapt_vpu_int_fp_shared.sv",
+        "domain": "vpu",
+        "stage": 8,
+        "summary": "One FP precision shares its converters across 16/32/64-bit integer widths. Inputs and width are sampled on request; the result is held until consumed.",
+        "parent": "rapt_vpu",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 1.2,
+        "h": 6,
+        "child_count": 2
+      },
+      {
         "id": "rapt_vpu_mask_scan",
         "short": "vpu_mask_scan",
         "file": "rtl/core/backend/vpu/rapt_vpu_mask_scan.sv",
@@ -8823,7 +9188,7 @@
         "display": false,
         "x": 8.0,
         "y": 0.0,
-        "z": 1.2,
+        "z": 1.42,
         "h": 6,
         "child_count": 0
       },
@@ -8838,7 +9203,7 @@
         "display": false,
         "x": 8.0,
         "y": 0.0,
-        "z": 1.42,
+        "z": 1.64,
         "h": 6,
         "child_count": 0
       },
@@ -8848,12 +9213,12 @@
         "file": "rtl/core/backend/vpu/rapt_vpu_memory.sv",
         "domain": "vpu",
         "stage": 8,
-        "summary": "Sequential vector memory sequencer. The command is already irrevocably authorized. Requests use virtual byte addresses and natural-aligned elements; the integration adapter owns translation, PMP/PMA, ordering and final errors. A successful store response must mean the store is no",
+        "summary": "Sequential vector memory sequencer. The command is already irrevocably authorized. Requests use virtual byte addresses and the original element size; the integration adapter owns translation, PMP/PMA, ordering and final errors. A successful store response must mean the store is n",
         "parent": "rapt_vpu",
         "display": false,
         "x": 8.0,
         "y": 0.0,
-        "z": 1.64,
+        "z": 1.86,
         "h": 6,
         "child_count": 0
       },
@@ -8868,7 +9233,7 @@
         "display": false,
         "x": 8.0,
         "y": 0.0,
-        "z": 1.86,
+        "z": 2.08,
         "h": 6,
         "child_count": 0
       },
@@ -8883,7 +9248,7 @@
         "display": false,
         "x": 8.0,
         "y": 0.0,
-        "z": 2.08,
+        "z": 1.2,
         "h": 6,
         "child_count": 0
       },
@@ -8894,11 +9259,26 @@
         "domain": "vpu",
         "stage": 8,
         "summary": "One command's lifetime, independent of execution kind and core ROB layout. Tag must include allocation generation, not just a reusable ROB slot. Cancellation wins over authorization before issue. After authorization the instruction is irrevocable: the host must preserve its retir",
-        "parent": null,
+        "parent": "rapt_vpu",
         "display": false,
         "x": 8.0,
         "y": 0.0,
-        "z": 1.2,
+        "z": 1.42,
+        "h": 6,
+        "child_count": 0
+      },
+      {
+        "id": "rapt_vpu_predicate_cache",
+        "short": "vpu_predicate_cache",
+        "file": "rtl/core/backend/vpu/rapt_vpu_predicate_cache.sv",
+        "domain": "vpu",
+        "stage": 8,
+        "summary": "One predicate byte, tagged by element index. The owner must clear the cache on each new instruction and must not fill it if its source can be modified before all bits in that byte are consumed.",
+        "parent": "rapt_vpu",
+        "display": false,
+        "x": 8.0,
+        "y": 0.0,
+        "z": 1.64,
         "h": 6,
         "child_count": 0
       },
@@ -8913,7 +9293,7 @@
         "display": false,
         "x": 8.0,
         "y": 0.0,
-        "z": 1.42,
+        "z": 1.86,
         "h": 6,
         "child_count": 1
       },
@@ -8928,7 +9308,7 @@
         "display": false,
         "x": 8.0,
         "y": 0.0,
-        "z": 1.64,
+        "z": 2.08,
         "h": 6,
         "child_count": 0
       },
@@ -8943,7 +9323,7 @@
         "display": false,
         "x": 8.0,
         "y": 0.0,
-        "z": 1.86,
+        "z": 1.2,
         "h": 6,
         "child_count": 0
       },
@@ -8958,7 +9338,7 @@
         "display": false,
         "x": 8.0,
         "y": 0.0,
-        "z": 2.08,
+        "z": 1.42,
         "h": 6,
         "child_count": 0
       },
@@ -9213,7 +9593,7 @@
         "y": 0.0,
         "z": 23.2,
         "h": 16,
-        "child_count": 10,
+        "child_count": 11,
         "sx": 6.8,
         "sz": 4.4,
         "sy": 0.508,
@@ -9257,9 +9637,9 @@
         "short": "MSHR",
         "file": "rtl/core/memory/dcache/rapt_l1d_mshr.sv",
         "domain": "memory",
-        "stage": 8,
+        "stage": 7,
         "summary": "Physical-line miss table and refill buffers. Requests replay through L1D (including translation/PMP) before consuming data; no speculative ROB tags are retained here. Completed lines stay until replaced or invalidated. With StoreMerge a committed store to a missing line is acknow",
-        "parent": null,
+        "parent": "rapt_l1d",
         "display": true,
         "x": 63.4,
         "y": 0.0,
@@ -9495,7 +9875,7 @@
         "y": 0.0,
         "z": 1.4,
         "h": 6,
-        "child_count": 0
+        "child_count": 1
       },
       {
         "id": "rapt_tlb_lru",
@@ -10345,6 +10725,7 @@
         "kind": "instance",
         "ports": [
           "op",
+          "zfa_semantics",
           "operand_a",
           "operand_b",
           "result",
@@ -10498,9 +10879,9 @@
           "source_double",
           "unsigned_result",
           "int64_target",
+          "modulo_word",
           "rounding_mode",
-          "result",
-          "flags"
+          "result"
         ]
       },
       {
@@ -10717,9 +11098,29 @@
           "source_double",
           "unsigned_result",
           "int64_target",
+          "modulo_word",
           "rounding_mode",
-          "result",
-          "flags"
+          "result"
+        ]
+      },
+      {
+        "from": "rapt_ieu",
+        "to": "rapt_iq",
+        "instance": "u_alq",
+        "kind": "instance",
+        "ports": [
+          "local_operand_wake",
+          "combo_source",
+          "cancel_valid",
+          "cancel_head",
+          "cancel_owner",
+          "completion",
+          "clock",
+          "reset",
+          "cmu_bcast",
+          "dispatch",
+          "disp",
+          "issue_enable"
         ]
       },
       {
@@ -11057,6 +11458,55 @@
       },
       {
         "from": "rapt_backend",
+        "to": "rapt_vpu_core",
+        "instance": "vpu",
+        "kind": "instance",
+        "ports": [
+          "sram_ctrl_i",
+          "clock",
+          "reset",
+          "head_safe",
+          "cmd_metadata",
+          "rsp_metadata",
+          "authorized",
+          "response_dropped",
+          "vector_enabled",
+          "cmd_valid",
+          "cmd_ready",
+          "cmd_tag"
+        ]
+      },
+      {
+        "from": "rapt_backend",
+        "to": "rapt_pmp_state",
+        "instance": "vector_pmp_state",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "update",
+          "state"
+        ]
+      },
+      {
+        "from": "rapt_backend",
+        "to": "rapt_ioq_store_check",
+        "instance": "vector_store_check",
+        "kind": "instance",
+        "ports": [
+          "store_context",
+          "pmp_state",
+          "store_addr",
+          "store_size_m1",
+          "store_valid",
+          "store_mmu",
+          "cmo_mgmt",
+          "store_bare_fault_offset",
+          "store_bare_pmp_trap"
+        ]
+      },
+      {
+        "from": "rapt_backend",
         "to": "rapt_completion_stage",
         "instance": "stage",
         "kind": "instance",
@@ -11288,8 +11738,8 @@
           "cmu_bcast",
           "lsu_l1d",
           "exu_l1d",
-          "dispatch",
-          "disp_ioq"
+          "lsu_l1d",
+          "exu_l1d"
         ]
       },
       {
@@ -11599,6 +12049,26 @@
       },
       {
         "from": "rapt_vpu",
+        "to": "rapt_vpu_owner",
+        "instance": "u_owner",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "cmd_valid",
+          "cmd_ready",
+          "cmd_tag",
+          "cmd_payload",
+          "authorize_valid",
+          "authorize_ready",
+          "authorize_tag",
+          "kill_valid",
+          "kill_tag",
+          "cancelled"
+        ]
+      },
+      {
+        "from": "rapt_vpu",
         "to": "rapt_vpu_decode",
         "instance": "u_decode",
         "kind": "instance",
@@ -11734,6 +12204,26 @@
           "widen",
           "narrow",
           "float_double"
+        ]
+      },
+      {
+        "from": "rapt_vpu",
+        "to": "rapt_vpu_int_fp_shared",
+        "instance": "u_convert",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "req_valid",
+          "req_ready",
+          "to_float",
+          "unsigned_integer",
+          "integer_size",
+          "operand",
+          "rm",
+          "rsp_valid",
+          "rsp_ready",
+          "result"
         ]
       },
       {
@@ -11906,13 +12396,13 @@
           "req_valid",
           "req_ready",
           "req_widen",
+          "req_half",
           "operand",
           "rm",
           "rsp_valid",
           "rsp_ready",
           "result",
-          "flags",
-          "illegal"
+          "flags"
         ]
       },
       {
@@ -12057,6 +12547,22 @@
       },
       {
         "from": "rapt_vpu",
+        "to": "rapt_vpu_predicate_cache",
+        "instance": "u_predicate_cache",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "clear",
+          "index",
+          "fill",
+          "fill_data",
+          "hit",
+          "bit_value"
+        ]
+      },
+      {
+        "from": "rapt_vpu",
         "to": "rapt_vpu_element",
         "instance": "u_element",
         "kind": "instance",
@@ -12093,6 +12599,26 @@
           "rsp_valid",
           "rsp_ready",
           "rsp_rdata"
+        ]
+      },
+      {
+        "from": "rapt_vpu_core",
+        "to": "rapt_vpu_core_adapter",
+        "instance": "u_adapter",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "cmd_valid",
+          "cmd_ready",
+          "cmd_slot",
+          "cmd_generation",
+          "cmd_payload",
+          "cmd_metadata",
+          "head_valid",
+          "head_safe",
+          "head_slot",
+          "head_generation"
         ]
       },
       {
@@ -12215,6 +12741,39 @@
           "valid",
           "ready",
           "operand",
+          "rounding_mode",
+          "result",
+          "flags",
+          "result_valid"
+        ]
+      },
+      {
+        "from": "rapt_vpu_fp_convert",
+        "to": "rapt_fpu_half_to_fp",
+        "instance": "u_widen",
+        "kind": "instance",
+        "ports": [
+          "flush",
+          "valid",
+          "ready",
+          "operand",
+          "target_double",
+          "result",
+          "flags",
+          "result_valid"
+        ]
+      },
+      {
+        "from": "rapt_vpu_fp_convert",
+        "to": "rapt_fpu_fp_to_half",
+        "instance": "u_narrow",
+        "kind": "instance",
+        "ports": [
+          "flush",
+          "valid",
+          "ready",
+          "operand",
+          "source_double",
           "rounding_mode",
           "result",
           "flags",
@@ -12442,6 +13001,45 @@
         ]
       },
       {
+        "from": "rapt_vpu_int_fp_shared",
+        "to": "rapt_fpu_int_to_fp",
+        "instance": "u_to_fp",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "flush",
+          "valid",
+          "ready",
+          "operand",
+          "unsigned_input",
+          "rounding_mode",
+          "result",
+          "flags",
+          "result_valid"
+        ]
+      },
+      {
+        "from": "rapt_vpu_int_fp_shared",
+        "to": "rapt_fpu_single_to_int_w",
+        "instance": "u_to_int",
+        "kind": "instance",
+        "ports": [
+          "clock",
+          "reset",
+          "flush",
+          "valid",
+          "ready",
+          "operand",
+          "unsigned_result",
+          "int64_target",
+          "rounding_mode",
+          "result",
+          "flags",
+          "result_valid"
+        ]
+      },
+      {
         "from": "rapt_vpu_reduce",
         "to": "rapt_vpu_alu",
         "instance": "u_accumulate",
@@ -12640,9 +13238,9 @@
           "out_wen",
           "out_ren",
           "out_atom",
-          "out_sys_system",
-          "out_sys_ebreak",
-          "out_sys_ecall"
+          "out_vector_valid",
+          "out_vector_rs1",
+          "out_vector_rs2"
         ]
       },
       {
@@ -12779,6 +13377,26 @@
           "write_valid",
           "write_index",
           "write_bit"
+        ]
+      },
+      {
+        "from": "rapt_l1d",
+        "to": "rapt_l1d_mshr",
+        "instance": "misses",
+        "kind": "instance",
+        "ports": [
+          "invalidate",
+          "invalidate_line",
+          "invalidate_addr",
+          "fill_valid",
+          "fill_ready",
+          "fill_addr",
+          "fill_mask",
+          "fill_data",
+          "fill_dirty",
+          "fill_store_lost",
+          "fill_owned",
+          "lookup_valid"
         ]
       },
       {
@@ -13337,6 +13955,19 @@
         "instance": "u_lru",
         "kind": "instance",
         "ports": [
+          "lookup_valid",
+          "fill_valid",
+          "victim"
+        ]
+      },
+      {
+        "from": "rapt_data_tlb",
+        "to": "rapt_tlb_lru",
+        "instance": "u_lru",
+        "kind": "instance",
+        "ports": [
+          "flush",
+          "match_vec",
           "lookup_valid",
           "fill_valid",
           "victim"
@@ -14014,6 +14645,21 @@
         "from": "rapt_dpu",
         "to": "rapt_lsu",
         "label": "memory"
+      },
+      {
+        "from": "rapt_ieu",
+        "to": "rapt_vpu_core",
+        "label": "vector issue"
+      },
+      {
+        "from": "rapt_vpu_core",
+        "to": "rapt_completion_stage",
+        "label": "system completion"
+      },
+      {
+        "from": "rapt_vpu_core",
+        "to": "rapt_l1d",
+        "label": "translated vector data"
       },
       {
         "from": "rapt_ieu",
@@ -20045,7 +20691,7 @@
       },
       {
         "name": "regression",
-        "description": "Format, then run CoreMark and serialized FPGA/STA lanes with logs and a JSON summary",
+        "description": "Format, then run independent CoreMark, STA and FPGA checks in parallel",
         "section": "Verification Suite (verification/)"
       },
       {
@@ -20255,147 +20901,159 @@
     "nodes": [
       {
         "id": "TAGE",
-        "label": "\"TAGE DIRP: 1024 bimodal + 3 x 1024 tagged<br/>(history 8/16/64, side query for a 2nd branch)"
+        "label": "\"TAGE DIRP<br/>1024 bimodal + 3 x 1024 tagged<br/>history 8 / 16 / 64<br/>2nd branch side query"
       },
       {
         "id": "BTB",
-        "label": "\"BTB (128 entries, 2-way)"
+        "label": "\"BTB 128<br/>2-way"
       },
       {
         "id": "RAS",
-        "label": "\"RAS (16 entries)"
+        "label": "\"RAS 16"
       },
       {
         "id": "HIST",
-        "label": "\"GHR / PHR history"
+        "label": "\"GHR / PHR"
       },
       {
         "id": "IFU",
-        "label": "\"IFU (6-halfword L1I lookahead, held suffix)"
+        "label": "\"IFU<br/>6-halfword lookahead<br/>held suffix"
       },
       {
         "id": "FQU",
-        "label": "\"FQU (4-entry stream queue)"
+        "label": "\"FQU 4<br/>stream queue"
       },
       {
         "id": "IDU",
-        "label": "\"IDU (DecodeWidth slots, early resteer)"
+        "label": "\"IDU 2<br/>early resteer"
       },
       {
         "id": "RNU",
-        "label": "\"RNU: RNQ 8, MAP/RAT/free bitmap,<br/>16 branch checkpoints, rename_pipe 4"
+        "label": "\"RNU \u00b7 RNQ 8 \u00b7 rename_pipe 4<br/>MAP / RAT / free bitmap<br/>16 branch checkpoints"
       },
       {
         "id": "OPS",
-        "label": "\"operand stage (RenameWidth slots)"
+        "label": "\"Operand stage 2"
       },
       {
         "id": "ROU",
-        "label": "\"ROU: UOQ 8, ROB 32, operand spill 16,<br/>dispatch window 12 lanes"
+        "label": "\"ROU \u00b7 UOQ 8 \u00b7 ROB 32<br/>operand spill 16<br/>dispatch window 12 lanes"
       },
       {
         "id": "ALQ",
-        "label": "\"ALQ 8: ALU0 (+CSR/system), ALU1"
+        "label": "\"ALQ 8<br/>ALU0 + CSR / system<br/>ALU1"
       },
       {
         "id": "BRQ",
-        "label": "\"BRQ 8: branch unit"
+        "label": "\"BRQ 8<br/>branch unit"
       },
       {
         "id": "MDQ",
-        "label": "\"MDQ 4: pipelined MUL, iterative DIV"
+        "label": "\"MDQ 4<br/>pipelined MUL<br/>iterative DIV"
       },
       {
         "id": "FPQ",
-        "label": "\"FPQ 8: FEU (F/D/Zfhmin)"
+        "label": "\"FPQ 8 \u00b7 FEU<br/>F / D / Zfhmin"
+      },
+      {
+        "id": "VPU",
+        "label": "\"VPU \u00b7 V 1.0<br/>VLEN 128 \u00b7 ELEN 64<br/>ROB-head authorization"
       },
       {
         "id": "LSU",
-        "label": "\"LSU: IOQ 8 + unified SQ 16"
+        "label": "\"LSU \u00b7 IOQ 8<br/>unified SQ 16"
+      },
+      {
+        "id": "CPL",
+        "label": "\"Completion x6 \u00b7 N+4<br/>completion register"
       },
       {
         "id": "PRF",
-        "label": "\"integer PRF 64 (4R / 6W)"
+        "label": "\"Integer PRF 64<br/>4R / 6W"
       },
       {
         "id": "FPR",
-        "label": "\"FP result file + committed FPR (32 x 64-bit)"
+        "label": "\"FP result file<br/>committed FPR 32 x 64"
       },
       {
         "id": "CMU",
-        "label": "\"CMU (in-order commit)"
+        "label": "\"CMU<br/>in-order commit 2"
       },
       {
         "id": "CSR",
-        "label": "\"CSR (M/S/U, traps, Sv32/Sv39, PMP)"
+        "label": "\"CSR \u00b7 M / S / U<br/>traps \u00b7 Sv32 / Sv39 \u00b7 PMP"
       },
       {
         "id": "L1I",
-        "label": "\"L1I 16 KiB, 4-way, 64 B lines<br/>(banked SRAM, sequential pre-read)"
+        "label": "\"L1I 16 KiB \u00b7 4-way \u00b7 64 B<br/>banked SRAM<br/>sequential pre-read"
       },
       {
         "id": "ITLB",
-        "label": "\"ITLB (16, fully associative)"
+        "label": "\"ITLB 16<br/>fully associative"
       },
       {
         "id": "IPTW",
-        "label": "\"IPTW (Sv32 / Sv39)"
+        "label": "\"IPTW<br/>Sv32 / Sv39"
       },
       {
         "id": "L1D",
-        "label": "\"L1D 16 KiB, 4-way, VIPT, write-back<br/>(4 MSHRs, 2 writeback buffers)"
+        "label": "\"L1D 16 KiB \u00b7 4-way \u00b7 64 B<br/>VIPT \u00b7 write-back<br/>4 MSHRs \u00b7 2 writeback buffers"
       },
       {
         "id": "DTLB",
-        "label": "\"DTLB (64, 2-way, load/store replicas)"
+        "label": "\"DTLB 64 \u00b7 2-way<br/>load / store replicas"
       },
       {
         "id": "DPTW",
-        "label": "\"DPTW (Sv32 / Sv39, Svade)"
+        "label": "\"DPTW<br/>Sv32 / Sv39 \u00b7 Svade"
       },
       {
         "id": "L2TLB",
-        "label": "\"shared L2 TLB (256, direct-mapped)"
+        "label": "\"Shared L2 TLB 256<br/>direct-mapped"
       },
       {
         "id": "PMPC",
-        "label": "\"PMP x8 (TOR/NAPOT, 4 KiB):<br/>fetch, load/store and PTW checks"
+        "label": "\"PMP x8 \u00b7 TOR / NAPOT \u00b7 4 KiB<br/>fetch / load-store / PTW checks"
       },
       {
         "id": "BUS",
-        "label": "\"rapt_bus (D/PTW > MSHR > L1I, request IDs)"
+        "label": "\"rapt_bus \u00b7 request IDs<br/>D / PTW > MSHR > L1I"
       },
       {
         "id": "AXIM",
-        "label": "\"AXI4 master (up to 8 reads)"
+        "label": "\"AXI4 master<br/>up to 8 reads"
       },
       {
         "id": "L2",
-        "label": "\"L2 cache (default: none, management only;<br/>default-l2: 512 KiB, 8-way)"
+        "label": "\"L2 \u00b7 default: management only<br/>default-l2: 512 KiB \u00b7 8-way"
       },
       {
         "id": "RBUF",
-        "label": "\"AXI R buffer (default-l2 only)"
+        "label": "\"AXI R buffer<br/>default-l2 only"
+      },
+      {
+        "id": "ARB",
+        "label": "\"Debug arbiter"
       },
       {
         "id": "RTR",
-        "label": "\"AXI router (1 master / 3 targets)"
+        "label": "\"AXI router<br/>1 master / 3 targets"
       },
       {
         "id": "CLINT",
-        "label": "\"CLINT (mtime / mtimecmp / msip)"
+        "label": "\"CLINT<br/>mtime / mtimecmp / msip"
       },
       {
         "id": "PLIC",
-        "label": "\"PLIC (31 sources, M/S contexts)"
+        "label": "\"PLIC 31<br/>M / S contexts"
       },
       {
         "id": "DBG",
-        "label": "\"JTAG DTM + Debug Module"
+        "label": "\"JTAG DTM<br/>Debug Module"
       },
       {
         "id": "EXT",
-        "label": "\"off-chip AXI (memory / LiteX SoC)"
+        "label": "\"Off-chip AXI<br/>memory / LiteX SoC"
       }
     ],
     "edges": [
@@ -20403,7 +21061,7 @@
         "from": "BPU",
         "to": "IFU",
         "kind": "data",
-        "label": "\"predict / update\""
+        "label": "predict / update"
       },
       {
         "from": "IFU",
@@ -20414,12 +21072,6 @@
       {
         "from": "FQU",
         "to": "IDU",
-        "kind": "data",
-        "label": ""
-      },
-      {
-        "from": "IDU",
-        "to": "RNU",
         "kind": "data",
         "label": ""
       },
@@ -20448,40 +21100,40 @@
         "label": ""
       },
       {
-        "from": "ROU",
-        "to": "FPR",
-        "kind": "undirected",
-        "label": ""
-      },
-      {
-        "from": "DPU",
+        "from": "ORD",
         "to": "ALQ",
         "kind": "data",
         "label": ""
       },
       {
-        "from": "DPU",
+        "from": "ORD",
         "to": "BRQ",
         "kind": "data",
         "label": ""
       },
       {
-        "from": "DPU",
+        "from": "ORD",
         "to": "MDQ",
         "kind": "data",
         "label": ""
       },
       {
-        "from": "DPU",
+        "from": "ORD",
         "to": "FPQ",
         "kind": "data",
         "label": ""
       },
       {
-        "from": "DPU",
+        "from": "ORD",
         "to": "LSU",
         "kind": "data",
         "label": ""
+      },
+      {
+        "from": "ALQ",
+        "to": "VPU",
+        "kind": "data",
+        "label": "vector issue"
       },
       {
         "from": "ALQ",
@@ -20514,22 +21166,52 @@
         "label": ""
       },
       {
-        "from": "CPL",
-        "to": "ROU",
+        "from": "VPU",
+        "to": "CPL",
         "kind": "data",
-        "label": "\"wakeup + writeback\""
+        "label": "system completion port"
+      },
+      {
+        "from": "CPL",
+        "to": "ORD",
+        "kind": "data",
+        "label": "wakeup + writeback"
       },
       {
         "from": "CPL",
         "to": "PRF",
         "kind": "data",
-        "label": "\"wakeup + writeback\""
+        "label": "writeback"
       },
       {
         "from": "CPL",
         "to": "FPR",
         "kind": "data",
-        "label": "\"wakeup + writeback\""
+        "label": "writeback"
+      },
+      {
+        "from": "ORD",
+        "to": "PRF",
+        "kind": "data",
+        "label": "operand read"
+      },
+      {
+        "from": "ORD",
+        "to": "FPR",
+        "kind": "data",
+        "label": "operand read"
+      },
+      {
+        "from": "ORD",
+        "to": "CMU",
+        "kind": "data",
+        "label": "\"ROU \u2192 ROB head<br/>CMU \u2192 RNU retire / free mappings\""
+      },
+      {
+        "from": "ORD",
+        "to": "LSU",
+        "kind": "control",
+        "label": ""
       },
       {
         "from": "ALQ",
@@ -20538,51 +21220,15 @@
         "label": ""
       },
       {
-        "from": "ROU",
-        "to": "CMU",
+        "from": "FE",
+        "to": "BE",
         "kind": "data",
-        "label": ""
-      },
-      {
-        "from": "ROU",
-        "to": "LSU",
-        "kind": "control",
-        "label": ""
-      },
-      {
-        "from": "BRQ",
-        "to": "FE",
-        "kind": "control",
-        "label": ""
-      },
-      {
-        "from": "CMU",
-        "to": "FE",
-        "kind": "control",
-        "label": ""
-      },
-      {
-        "from": "CMU",
-        "to": "RNU",
-        "kind": "control",
-        "label": ""
-      },
-      {
-        "from": "IFU",
-        "to": "L1I",
-        "kind": "data",
-        "label": ""
+        "label": "\"IDU \u2192 RNU<br/>BRQ recovery<br/>CMU flush / redirect / BPU training\""
       },
       {
         "from": "L1I",
         "to": "ITLB",
         "kind": "undirected",
-        "label": ""
-      },
-      {
-        "from": "LSU",
-        "to": "L1D",
-        "kind": "data",
         "label": ""
       },
       {
@@ -20612,12 +21258,6 @@
       {
         "from": "L2TLB",
         "to": "DPTW",
-        "kind": "control",
-        "label": ""
-      },
-      {
-        "from": "CSR",
-        "to": "PMPC",
         "kind": "control",
         "label": ""
       },
@@ -20670,10 +21310,16 @@
         "label": ""
       },
       {
-        "from": "BUS",
-        "to": "AXIM",
+        "from": "PIPE",
+        "to": "MEM",
         "kind": "data",
-        "label": "\"l2_client_if\""
+        "label": "\"IFU \u2194 L1I \u00b7 LSU \u2194 L1D<br/>CSR \u2192 PMP / satp\""
+      },
+      {
+        "from": "VPU",
+        "to": "L1D",
+        "kind": "data",
+        "label": "\"translated data access\""
       },
       {
         "from": "AXIM",
@@ -20688,10 +21334,22 @@
         "label": ""
       },
       {
-        "from": "RBUF",
+        "from": "L2S",
+        "to": "ARB",
+        "kind": "data",
+        "label": ""
+      },
+      {
+        "from": "ARB",
         "to": "RTR",
         "kind": "data",
         "label": ""
+      },
+      {
+        "from": "DBG",
+        "to": "ARB",
+        "kind": "data",
+        "label": "SBA"
       },
       {
         "from": "RTR",
@@ -20712,22 +21370,10 @@
         "label": ""
       },
       {
-        "from": "CLINT",
-        "to": "CSR",
-        "kind": "control",
-        "label": ""
-      },
-      {
-        "from": "PLIC",
-        "to": "CSR",
-        "kind": "control",
-        "label": ""
-      },
-      {
-        "from": "DBG",
-        "to": "BE",
-        "kind": "control",
-        "label": ""
+        "from": "CORE",
+        "to": "CLU",
+        "kind": "data",
+        "label": "\"rapt_bus \u2194 l2_client_if<br/>CLINT / PLIC \u2192 CSR interrupts<br/>DM \u2194 halt / GPR access\""
       }
     ]
   },
@@ -22139,7 +22785,7 @@
       "name": "README.md",
       "title": "Raptor at a glance",
       "url": "overview.html",
-      "summary": "Raptor is a configurable RV32/RV64 superscalar, out-of-order RISC-V processor. It combines register renaming, precise in-order retirement, scalar floating point, and virtual memory with simulation, Linux boot, and FPGA i"
+      "summary": "Raptor is a configurable RV32/RV64 superscalar, out-of-order RISC-V processor. It combines register renaming, precise in-order retirement, scalar floating point, V 1.0 and virtual memory. The default RV64 configuration s"
     },
     {
       "file": "docs/REFERENCE.md",
@@ -22149,11 +22795,32 @@
       "summary": "Use these protocol references and diagrams when working on Raptor's AXI bus interface. The public PPA benchmark link provides context for the open synthesis and timing flows."
     },
     {
+      "file": "docs/bringup.md",
+      "name": "bringup.md",
+      "title": "Raptor returned-chip bring-up",
+      "url": "bringup.html",
+      "summary": "`tools.bringup.silicon` uses a selected CMSIS-DAP probe and the existing native DMI/SBA/Flash library. It never configures an FPGA. Supply, clock, reset and interface electrical limits come from the reviewed board docume"
+    },
+    {
+      "file": "docs/chip-flash.md",
+      "name": "chip-flash.md",
+      "title": "Direct NOR Flash on the pin-limited chip",
+      "url": "chip-flash.html",
+      "summary": "The pin-limited chip defaults to its on-chip reset ROM, which jumps to raw Flash XIP at `0x30000000` without JTAG. The backend supports standard SPI and a fixed JESD251D Profile 1 octal DDR descriptor; see the [xSPI cont"
+    },
+    {
+      "file": "docs/chip-xspi.md",
+      "name": "chip-xspi.md",
+      "title": "JESD251D Profile 1 host interface",
+      "url": "chip-xspi.html",
+      "summary": "The direct Flash backend contains a low-speed JESD251D Profile 1 host for the fixed MT35XU256ABA descriptor, alongside the legacy W25Q64JW-IQ SPI profile. The JTAG-selected FPGA bridge uses its own octal SDR AXI transpor"
+    },
+    {
       "file": "docs/chip.md",
       "name": "chip.md",
       "title": "Chip top and off-chip link",
       "url": "chip.html",
-      "summary": "The pin-limited configuration in `synth/configs/pin-limited/rtl/` is one tape-out integration of the Raptor cluster, also used for Arty validation. The reusable processor top is `rapt` in `rtl/rapt.sv`. All memory and pe"
+      "summary": "The chip powers up in a small on-chip ROM and jumps to [Flash XIP](chip-flash.md) through its JESD251 Profile 1 backend. JTAG can select the private octal-link backend and reset target using a retained local register. No"
     },
     {
       "file": "docs/ecosystem.md",
@@ -22193,11 +22860,11 @@
     {
       "file": "docs/vpu.md",
       "name": "vpu.md",
-      "title": "Standalone Raptor VPU",
+      "title": "Raptor vector extension",
       "url": "vpu.html",
-      "summary": "The VPU is a standalone RVV 1.0 component in `rtl/core/backend/vpu/`. It implements integer, fixed-point, permutation, configuration/CSR, vector memory and FP32/FP64 instruction families. `rapt_vpu_core` composes the num"
+      "summary": "Raptor implements V 1.0 on RV32 and RV64, including integer, fixed-point, permutation, vector memory and FP32/FP64 instruction families. `rapt_backend` instantiates `rapt_vpu_core` when `RAPT_V_EXTENSION` is defined. The"
     }
   ],
   "github": "https://github.com/Kingfish404/raptor-chip",
-  "isa": "RV32 / RV64 IMAFDC + Z extensions (see overview)"
+  "isa": "RV32 / RV64 IMAFDC and V 1.0; RVA23U64 and RVA22S64 on RV64 (default preset)"
 }
