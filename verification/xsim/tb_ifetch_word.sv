@@ -19,7 +19,15 @@ module tb_ifetch_word;
     if (reset || (request_valid && request_ready)) io_starts <= 0;
     else if (io_start) io_starts <= io_starts + 1;
   end
-  rapt_ifetch_word dut (.*);
+  rapt_ifetch_word dut (
+`ifdef RAPT_H_EXTENSION
+      .translation_gpa('0),
+      .translation_gptw(1'b0),
+      .result_gpa(),
+      .result_gptw(),
+`endif
+      .*
+  );
   `include "tb_common.svh"
   task automatic start(input logic [XLEN-1:0] pc);
     check(request_ready, "controller did not drain previous owner");

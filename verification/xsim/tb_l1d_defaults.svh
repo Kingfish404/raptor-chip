@@ -76,6 +76,11 @@ task automatic init_l1d_inputs;
     exu_l1d.cmo_mgmt = 1'b0;
     exu_l1d.valid = 1'b0;
     exu_l1d.reservation_clear = 1'b0;
+`ifdef RAPT_H_EXTENSION
+    lsu_l1d.rguest = 1'b0;
+    lsu_l1d.rexec = 1'b0;
+    exu_l1d.guest = 1'b0;
+`endif
 
     init_cmu_bcast_defaults();
 

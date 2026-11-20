@@ -29,6 +29,9 @@ module rapt_tlb #(
     /* verilator lint_on UNUSEDSIGNAL */
     input  logic [XLEN-1:12] lookup_vtag,
     input  logic [      8:0] lookup_asid,
+`ifdef RAPT_H_EXTENSION
+    input  logic [      1:0] lookup_mode,
+`endif
     output logic             hit,
     output logic [XLEN-1:10] ptag,
     output logic [      6:0] pte_flags,  // {D,A,G,U,X,W,R}
@@ -39,6 +42,9 @@ module rapt_tlb #(
     input logic [XLEN-1:10] fill_ptag,
     input logic [XLEN-1:12] fill_vtag,
     input logic [      8:0] fill_asid,
+`ifdef RAPT_H_EXTENSION
+    input logic [      1:0] fill_mode,
+`endif
     input logic [      6:0] fill_pte,
     input logic [      1:0] fill_pbmt,
     input logic [      1:0] fill_level
@@ -48,14 +54,20 @@ module rapt_tlb #(
   // before installation, so an unsupported PPN cannot alias low memory.
   localparam int VAddrBits  = XLEN == 64 ? 39 : 32;
   localparam int PtePpnBits = `RAPT_PADDR_BITS - 12;
-  logic [        ENTRIES-1:0] valid;
+  logic [   ENTRIES-1:0] valid;
   logic [   ENTRIES-1:0] sfence_matches;
   logic [           1:0] levels         [ENTRIES];
-  logic [     VAddrBits-1:12] vtags     [ENTRIES];
-  logic [      PtePpnBits-1:0] ptags    [ENTRIES];
-  logic [                8:0] asids     [ENTRIES];
-  logic [                6:0] ptes      [ENTRIES];
-  logic [                1:0] pbmts     [ENTRIES];
+  logic [VAddrBits-1:12] vtags          [ENTRIES];
+  logic [PtePpnBits-1:0] ptags          [ENTRIES];
+  logic [           8:0] asids          [ENTRIES];
+  logic [           6:0] ptes           [ENTRIES];
+  logic [           1:0] pbmts          [ENTRIES];
+`ifdef RAPT_H_EXTENSION
+  logic [           1:0] modes          [ENTRIES];
+  logic [           1:0] gpa_hi         [ENTRIES];
+  logic [           1:0] lookup_gpa_hi;
+  logic [           1:0] fill_gpa_hi;
+`endif
 
   localparam int unsigned EntryIdxW = (ENTRIES <= 1) ? 1 : $clog2(ENTRIES);
 
@@ -64,22 +76,50 @@ module rapt_tlb #(
   logic [EntryIdxW-1:0] rr_ptr;
 
   // Combinational fully-associative lookup
-  logic [        ENTRIES-1:0] match_vec;
-  logic [        ENTRIES-1:0] fill_match_vec;
-  logic                         fill_hit;
-  logic [        EntryIdxW-1:0] fill_match_idx;
-  logic [        EntryIdxW-1:0] first_invalid_idx;
-  logic [        EntryIdxW-1:0] fill_idx;
-  logic                         has_invalid;
+  logic [ENTRIES-1:0] match_vec;
+  logic [ENTRIES-1:0] fill_match_vec;
+  logic fill_hit;
+  logic [EntryIdxW-1:0] fill_match_idx;
+  logic [EntryIdxW-1:0] first_invalid_idx;
+  logic [EntryIdxW-1:0] fill_idx;
+  logic has_invalid;
   logic lookup_canonical, fill_canonical, fill_encodable;
+
   // A non-canonical lookup must miss so the PTW reports the original VA's
   // page fault. Comparing only the compact VPN would otherwise create aliases.
+`ifdef RAPT_H_EXTENSION
+  if (XLEN == 64) begin : g_canon_h64
+    wire lookup_sv39_ok = lookup_vtag == (XLEN - 12)'($signed(lookup_vtag[VAddrBits-1:12]));
+    wire fill_sv39_ok = fill_vtag == (XLEN - 12)'($signed(fill_vtag[VAddrBits-1:12]));
+    assign lookup_gpa_hi = lookup_vtag[40:39];
+    assign fill_gpa_hi = fill_vtag[40:39];
+    assign lookup_canonical = (lookup_mode == 2'b10) ? (lookup_vtag[XLEN-1:41] == '0)
+        : lookup_sv39_ok;
+    assign fill_canonical = (fill_mode == 2'b10) ? (fill_vtag[XLEN-1:41] == '0)
+        : fill_sv39_ok;
+  end else begin : g_canon_h32
+    assign lookup_gpa_hi = 2'b00;
+    assign fill_gpa_hi = 2'b00;
+    assign lookup_canonical = lookup_vtag == (XLEN - 12)'($signed(lookup_vtag[VAddrBits-1:12]));
+    assign fill_canonical = fill_vtag == (XLEN - 12)'($signed(fill_vtag[VAddrBits-1:12]));
+  end
+`else
   assign lookup_canonical = lookup_vtag == (XLEN - 12)'($signed(lookup_vtag[VAddrBits-1:12]));
   assign fill_canonical   = fill_vtag == (XLEN - 12)'($signed(fill_vtag[VAddrBits-1:12]));
-  assign fill_encodable   = fill_canonical && fill_ptag == (XLEN - 10)'(PtePpnBits'(fill_ptag));
+`endif
+  assign fill_encodable = fill_canonical && fill_ptag == (XLEN - 10)'(PtePpnBits'(fill_ptag));
 
   generate
     for (genvar i = 0; i < ENTRIES; i++) begin : gen_tlb_match
+`ifdef RAPT_H_EXTENSION
+      wire mode_match = modes[i] == lookup_mode
+          && (lookup_mode != 2'b10 || gpa_hi[i] == lookup_gpa_hi);
+      wire fill_mode_match = modes[i] == fill_mode
+          && (fill_mode != 2'b10 || gpa_hi[i] == fill_gpa_hi);
+`else
+      wire mode_match = 1'b1;
+      wire fill_mode_match = 1'b1;
+`endif
       assign sfence_matches[i] = rapt_pkg::tlb_sfence_match(
           27'(vtags[i]),
           levels[i],
@@ -93,12 +133,12 @@ module rapt_tlb #(
       );
       // A global mapping is shared by every ASID. Local mappings retain the
       // normal ASID tag comparison.
-      assign match_vec[i] = valid[i] && lookup_canonical
+      assign match_vec[i] = valid[i] && lookup_canonical && mode_match
                           && (vtags[i] == lookup_vtag[VAddrBits-1:12])
                           && (ptes[i][4] || (asids[i] == lookup_asid));
       // Fill duplicate detection must use the fill address, not the unrelated
       // live lookup port. This matters when replicated DTLBs cross-fill.
-      assign fill_match_vec[i] = valid[i] && fill_encodable
+      assign fill_match_vec[i] = valid[i] && fill_encodable && fill_mode_match
                                && (vtags[i] == fill_vtag[VAddrBits-1:12])
                                && ((ptes[i][4] && fill_pte[4])
                                    || (!ptes[i][4] && !fill_pte[4]
@@ -143,10 +183,10 @@ module rapt_tlb #(
   assign fill_idx = fill_hit ? fill_match_idx : has_invalid ? first_invalid_idx : victim_idx;
 
   always_comb begin
-    fill_hit         = |fill_match_vec;
-    fill_match_idx   = '0;
+    fill_hit          = |fill_match_vec;
+    fill_match_idx    = '0;
     first_invalid_idx = '0;
-    has_invalid      = 1'b0;
+    has_invalid       = 1'b0;
     for (int i = 0; i < ENTRIES; i++) begin
       if (fill_match_vec[i]) fill_match_idx = EntryIdxW'(i);
       if (!valid[i] && !has_invalid) begin
@@ -166,22 +206,29 @@ module rapt_tlb #(
     end else if (fill_valid && fill_encodable) begin
       // A match refreshes its payload; otherwise fill the first invalid
       // entry before selecting a round-robin victim.
-      valid[fill_idx] <= 1'b1;
-      vtags[fill_idx] <= fill_vtag[VAddrBits-1:12];
-      ptags[fill_idx] <= PtePpnBits'(fill_ptag);
-      asids[fill_idx] <= fill_asid;
-      ptes[fill_idx]  <= fill_pte;
-      pbmts[fill_idx] <= fill_pbmt;
+      valid[fill_idx]  <= 1'b1;
+      vtags[fill_idx]  <= fill_vtag[VAddrBits-1:12];
+      ptags[fill_idx]  <= PtePpnBits'(fill_ptag);
+      asids[fill_idx]  <= fill_asid;
+      ptes[fill_idx]   <= fill_pte;
+      pbmts[fill_idx]  <= fill_pbmt;
       levels[fill_idx] <= fill_level;
+`ifdef RAPT_H_EXTENSION
+      modes[fill_idx]  <= fill_mode;
+      gpa_hi[fill_idx] <= fill_gpa_hi;
+`endif
       if (!fill_hit && !has_invalid) begin
         rr_ptr <= (rr_ptr == EntryIdxW'(ENTRIES - 1)) ? '0 : rr_ptr + 1'b1;
       end
     end
   end
 
+`ifdef RAPT_SVA_ACTIVE
+  wire sfence_only = sfence_valid && !flush;
+`endif
   `RAPT_SVA_NEXT(clock, reset, TLB_FLUSH_CLEARS_ENTRIES, flush, valid == '0)
-  `RAPT_SVA_NEXT(clock, reset, TLB_SFENCE_MATCHED_ENTRIES, sfence_valid && !flush, valid == ($past
-                 (valid) & ~$past(sfence_matches)))
+  `RAPT_SVA_NEXT(clock, reset, TLB_SFENCE_MATCHED_ENTRIES, sfence_only, valid == ($past(valid)
+                 & ~$past(sfence_matches)))
 
 endmodule
 
@@ -214,6 +261,10 @@ module rapt_data_tlb #(
     input logic lookup_valid,
     input logic [XLEN-1:12] lookup_vtag,
     input logic [8:0] lookup_asid,
+`ifdef RAPT_H_EXTENSION
+    input logic [1:0] lookup_mode,
+    output logic [2:0] g_perm,
+`endif
     output logic hit,
     output logic [XLEN-1:10] ptag,
     output logic [6:0] pte_flags,
@@ -223,6 +274,10 @@ module rapt_data_tlb #(
     input logic lookup_b_valid,
     input logic [XLEN-1:12] lookup_b_vtag,
     input logic [8:0] lookup_b_asid,
+`ifdef RAPT_H_EXTENSION
+    input logic [1:0] lookup_b_mode,
+    output logic [2:0] g_perm_b,
+`endif
     output logic hit_b,
     output logic [XLEN-1:10] ptag_b,
     output logic [6:0] pte_flags_b,
@@ -233,6 +288,10 @@ module rapt_data_tlb #(
     input logic [XLEN-1:10] fill_ptag,
     input logic [XLEN-1:12] fill_vtag,
     input logic [8:0] fill_asid,
+`ifdef RAPT_H_EXTENSION
+    input logic [1:0] fill_mode,
+    input logic [2:0] fill_g_perm,
+`endif
     input logic [6:0] fill_pte,
     input logic [9:0] fill_verdict,
     input logic [1:0] fill_pbmt,
@@ -250,6 +309,15 @@ module rapt_data_tlb #(
   logic [6:0] ptes[ENTRIES];
   logic [1:0] pbmts[ENTRIES];
   logic [9:0] verdicts[ENTRIES];
+`ifdef RAPT_H_EXTENSION
+  logic [1:0] modes[ENTRIES];
+  logic [1:0] gpa_hi[ENTRIES];
+  logic [2:0] g_perms[ENTRIES];
+  logic [1:0] lookup_modes[2];
+  logic [1:0] lookup_gpa_hi[2];
+  logic [1:0] fill_gpa_hi;
+  logic [2:0] port_g_perm[2];
+`endif
   logic [EntryIdxW-1:0] rr_ptr, fill_idx;
   logic fill_hit, has_invalid, fill_canonical, fill_encodable;
   logic [1:0] lookup_canonical;
@@ -275,15 +343,45 @@ module rapt_data_tlb #(
   assign pte_flags_b = port_pte[1];
   assign pbmt_b = port_pbmt[1];
   assign verdict_b = port_verdict[1];
+`ifdef RAPT_H_EXTENSION
+  assign lookup_modes[0] = lookup_mode;
+  assign lookup_modes[1] = lookup_b_mode;
+  assign g_perm = port_g_perm[0];
+  assign g_perm_b = port_g_perm[1];
+`endif
   assign touch_valid[0] = lookup_valid && (TlbLru || TlbPlru);
   assign touch_valid[1] = SecondPort && lookup_b_valid && (TlbLruB || TlbPlruB);
+`ifdef RAPT_H_EXTENSION
+  if (XLEN == 64) begin : g_data_canon_h64
+    wire fill_sv39_ok = fill_vtag == (XLEN - 12)'($signed(fill_vtag[VAddrBits-1:12]));
+    for (genvar p = 0; p < 2; p++) begin : g_canonical
+      wire lookup_sv39_ok = lookup_tags[p] == (XLEN - 12)'($signed(lookup_tags[p][VAddrBits-1:12]));
+      assign lookup_gpa_hi[p] = lookup_tags[p][40:39];
+      assign lookup_canonical[p] = (lookup_modes[p] == 2'b10)
+          ? (lookup_tags[p][XLEN-1:41] == '0) : lookup_sv39_ok;
+    end
+    assign fill_gpa_hi = fill_vtag[40:39];
+    assign fill_canonical = (fill_mode == 2'b10) ? (fill_vtag[XLEN-1:41] == '0)
+        : fill_sv39_ok;
+  end else begin : g_data_canon_h32
+    for (genvar p = 0; p < 2; p++) begin : g_canonical
+      assign lookup_gpa_hi[p] = 2'b00;
+      assign lookup_canonical[p] = lookup_tags[p] == (XLEN - 12)'($signed(
+          lookup_tags[p][VAddrBits-1:12]
+      ));
+    end
+    assign fill_gpa_hi = 2'b00;
+    assign fill_canonical = fill_vtag == (XLEN-12)'($signed(fill_vtag[VAddrBits-1:12]));
+  end
+`else
   for (genvar p = 0; p < 2; p++) begin : g_canonical
     assign lookup_canonical[p] = lookup_tags[p] == (XLEN - 12)'($signed(
         lookup_tags[p][VAddrBits-1:12]
     ));
   end
-  assign fill_canonical = fill_vtag == (XLEN-12)'($signed(fill_vtag[VAddrBits-1:12]));
-  assign fill_encodable = fill_canonical && fill_ptag == (XLEN-10)'(PtePpnBits'(fill_ptag));
+  assign fill_canonical = fill_vtag == (XLEN - 12)'($signed(fill_vtag[VAddrBits-1:12]));
+`endif
+  assign fill_encodable = fill_canonical && fill_ptag == (XLEN - 10)'(PtePpnBits'(fill_ptag));
 
   if (WAYS == 0) begin : g_cam
     logic [ENTRIES-1:0] match_vec[2], fill_match_vec;
@@ -291,7 +389,14 @@ module rapt_data_tlb #(
     logic [EntryIdxW-1:0] fill_match_idx, first_invalid_idx, victim_idx;
     for (genvar p = 0; p < 2; p++) begin : g_port
       for (genvar i = 0; i < ENTRIES; i++) begin : g_match
+`ifdef RAPT_H_EXTENSION
+        wire cam_mode_match = modes[i] == lookup_modes[p]
+            && (lookup_modes[p] != 2'b10 || gpa_hi[i] == lookup_gpa_hi[p]);
+`else
+        wire cam_mode_match = 1'b1;
+`endif
         assign match_vec[p][i] = (p == 0 || SecondPort) && valid[i] && lookup_canonical[p]
+            && cam_mode_match
             && vtags[i] == lookup_tags[p][VAddrBits-1:12]
             && (ptes[i][4] || asids[i] == lookup_asids[p]);
       end
@@ -301,18 +406,30 @@ module rapt_data_tlb #(
         port_pte[p] = '0;
         port_pbmt[p] = '0;
         port_verdict[p] = '0;
+`ifdef RAPT_H_EXTENSION
+        port_g_perm[p] = '0;
+`endif
         for (int i = 0; i < ENTRIES; i++) begin
           if (match_vec[p][i]) begin
             port_ptag[p] = (XLEN - 10)'(ptags[i]);
             port_pte[p] = ptes[i];
             port_pbmt[p] = pbmts[i];
             port_verdict[p] = verdicts[i];
+`ifdef RAPT_H_EXTENSION
+            port_g_perm[p] = g_perms[i];
+`endif
           end
         end
       end
     end
     for (genvar i = 0; i < ENTRIES; i++) begin : g_fill_match
-      assign fill_match_vec[i] = valid[i]
+`ifdef RAPT_H_EXTENSION
+      wire cam_fill_mode_match = modes[i] == fill_mode
+          && (fill_mode != 2'b10 || gpa_hi[i] == fill_gpa_hi);
+`else
+      wire cam_fill_mode_match = 1'b1;
+`endif
+      assign fill_match_vec[i] = valid[i] && cam_fill_mode_match
           && vtags[i] == fill_vtag[VAddrBits-1:12]
           && ((ptes[i][4] && fill_pte[4])
               || (!ptes[i][4] && !fill_pte[4] && asids[i] == fill_asid));
@@ -371,19 +488,32 @@ module rapt_data_tlb #(
         port_pte[p] = '0;
         port_pbmt[p] = '0;
         port_verdict[p] = '0;
+`ifdef RAPT_H_EXTENSION
+        port_g_perm[p] = '0;
+`endif
         lookup_matches[p] = '0;
         for (int w = 0; w < WAYS; w++) begin
+          automatic logic [EntryIdxW-1:0] idx = EntryIdxW'(int'(lookup_set[p]) + w * Sets);
+          automatic logic tbl_mode_match;
+`ifdef RAPT_H_EXTENSION
+          tbl_mode_match = modes[idx] == lookup_modes[p]
+              && (lookup_modes[p] != 2'b10 || gpa_hi[idx] == lookup_gpa_hi[p]);
+`else
+          tbl_mode_match = 1'b1;
+`endif
           lookup_matches[p][w] = (p == 0 || SecondPort)
-              && valid[int'(lookup_set[p]) + w * Sets] && lookup_canonical[p]
-              && vtags[int'(lookup_set[p]) + w * Sets] == lookup_tags[p][VAddrBits-1:12]
-              && (ptes[int'(lookup_set[p]) + w * Sets][4]
-                  || asids[int'(lookup_set[p]) + w * Sets] == lookup_asids[p]);
+              && valid[idx] && lookup_canonical[p] && tbl_mode_match
+              && vtags[idx] == lookup_tags[p][VAddrBits-1:12]
+              && (ptes[idx][4] || asids[idx] == lookup_asids[p]);
           if (lookup_matches[p][w]) begin
             port_hit[p] = 1;
-            port_ptag[p] = (XLEN-10)'(ptags[int'(lookup_set[p]) + w * Sets]);
-            port_pte[p] = ptes[int'(lookup_set[p]) + w * Sets];
-            port_pbmt[p] = pbmts[int'(lookup_set[p]) + w * Sets];
-            port_verdict[p] = verdicts[int'(lookup_set[p]) + w * Sets];
+            port_ptag[p] = (XLEN-10)'(ptags[idx]);
+            port_pte[p] = ptes[idx];
+            port_pbmt[p] = pbmts[idx];
+            port_verdict[p] = verdicts[idx];
+`ifdef RAPT_H_EXTENSION
+            port_g_perm[p] = g_perms[idx];
+`endif
           end
         end
       end
@@ -393,11 +523,18 @@ module rapt_data_tlb #(
       write_idx = EntryIdxW'(fill_set);
       if (WAYS == 2 && victim[fill_set]) write_idx += EntryIdxW'(Sets);
       for (int w = 0; w < WAYS; w++) begin
-        fill_matches[w] = valid[int'(fill_set) + w * Sets]
-            && vtags[int'(fill_set) + w * Sets] == fill_vtag[VAddrBits-1:12]
-            && ((ptes[int'(fill_set) + w * Sets][4] && fill_pte[4])
-                || (!ptes[int'(fill_set) + w * Sets][4] && !fill_pte[4]
-                    && asids[int'(fill_set) + w * Sets] == fill_asid));
+        automatic logic [EntryIdxW-1:0] fidx = EntryIdxW'(int'(fill_set) + w * Sets);
+        automatic logic tbl_fill_mode_match;
+`ifdef RAPT_H_EXTENSION
+        tbl_fill_mode_match = modes[fidx] == fill_mode
+            && (fill_mode != 2'b10 || gpa_hi[fidx] == fill_gpa_hi);
+`else
+        tbl_fill_mode_match = 1'b1;
+`endif
+        fill_matches[w] = valid[fidx] && tbl_fill_mode_match
+            && vtags[fidx] == fill_vtag[VAddrBits-1:12]
+            && ((ptes[fidx][4] && fill_pte[4])
+                || (!ptes[fidx][4] && !fill_pte[4] && asids[fidx] == fill_asid));
       end
       for (int w = WAYS - 1; w >= 0; w--) begin
         if (!valid[int'(fill_set)+w*Sets]) write_idx = EntryIdxW'(int'(fill_set) + w * Sets);
@@ -447,6 +584,11 @@ module rapt_data_tlb #(
       ptes[fill_idx] <= fill_pte;
       pbmts[fill_idx] <= fill_pbmt;
       verdicts[fill_idx] <= fill_verdict;
+`ifdef RAPT_H_EXTENSION
+      modes[fill_idx] <= fill_mode;
+      gpa_hi[fill_idx] <= fill_gpa_hi;
+      g_perms[fill_idx] <= fill_g_perm;
+`endif
     end
   end
   `RAPT_SVA_NEXT(clock, reset, TLB_FLUSH_CLEARS_ENTRIES, flush, valid == '0)

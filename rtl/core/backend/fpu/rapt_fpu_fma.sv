@@ -334,8 +334,8 @@ module rapt_fpu_fma_pipeline #(
    * The previous code returned E = index - (FracBits-1), dropping the MinExp
    * base and corrupting every subnormal operand (e.g. double min-subnormal
    * 2^-1074 was interpreted as ~2^-51). */
-  function automatic subnormal_norm_t normalize_subnormal(
-      input logic [FracBits-1:0] fraction, input logic signed [13:0] min_exponent);
+  function automatic subnormal_norm_t normalize_subnormal(input logic [FracBits-1:0] fraction,
+                                                          input logic signed [13:0] min_exponent);
     logic [MantBits-1:0] normalized;
     logic [$clog2(MantBits)-1:0] shift_count;
     begin

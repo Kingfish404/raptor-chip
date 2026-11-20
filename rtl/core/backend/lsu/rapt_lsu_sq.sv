@@ -483,6 +483,10 @@ module rapt_lsu_sq #(
   logic ma_skip;
   logic [XLEN-1:0] ma_fault_cause;
   logic [XLEN-1:0] ma_fault_tval;
+`ifdef RAPT_H_EXTENSION
+  logic [XLEN-1:2] ma_fault_gpaddr;
+  logic ma_fault_gptw;
+`endif
 
   // Detect an access that must be split into multiple aligned beats.
   logic ma_span;
@@ -541,13 +545,10 @@ module rapt_lsu_sq #(
   // Only engage the split for requests that actually reach the cache
   // (no SQ forward/conflict).  Forwarded loads keep the single-shot path;
   // the full load footprint has already been checked against the SQ.
-  logic lr_alignment_fault;
-  // LR is indivisible: validate its original address before ordinary-load
-  // splitting can align it down or replace its access width.
-  assign lr_alignment_fault = raddr_valid && exu_lsu.atomic_lock
-      && |(raddr & XLEN'(lsu_load_size_m1));
+  // LR is indivisible: keep its original address and width un-split so L1D
+  // checks translation first and physical alignment/capability afterwards.
   logic ma_load_req;
-  assign ma_load_req = !lr_alignment_fault && raddr_valid && ma_span && !fwd_hit
+  assign ma_load_req = !exu_lsu.atomic_lock && raddr_valid && ma_span && !fwd_hit
       && !load_in_sq && pmp_load_decided && !pmp_load_fault_lsu;
 
   // ==========================================================================
@@ -821,20 +822,25 @@ module rapt_lsu_sq #(
   // Raise the pre-split PMP trap on the cycle the request is seen, so the
   // IOQ retires the load as a trap without touching the cache.
   logic lsu_pmp_trap;
-  assign lsu_pmp_trap = raddr_valid && ma_span && pmp_load_decided && pmp_load_fault_lsu
+  assign lsu_pmp_trap = !exu_lsu.atomic_lock && raddr_valid && ma_span
+                     && pmp_load_decided && pmp_load_fault_lsu
                      && !fwd_hit && !load_in_sq
                      && (ma_state == MA_IDLE);
-  assign exu_lsu.trap = (lr_alignment_fault || lsu_pmp_trap) ? 1'b1
+  assign exu_lsu.trap = lsu_pmp_trap ? 1'b1
                       : (raddr_valid && fwd_hit) ? 1'b0
                       : (ma_state == MA_DONE) ? ma_fault
                       : ma_active             ? 1'b0
                       :                         lsu_l1d.trap;
-  assign exu_lsu.cause = (lr_alignment_fault || lsu_pmp_trap) ? `RAPT_CAUSE_LOAD_ACC_FAULT
+  assign exu_lsu.cause = lsu_pmp_trap ? `RAPT_CAUSE_LOAD_ACC_FAULT
                          : ((ma_state == MA_DONE) && ma_fault) ? ma_fault_cause
                                        : lsu_l1d.cause;
   // The first split beat may align below the architectural address. Later
   // faulting beats identify the actually accessed portion (e.g. next page).
   assign exu_lsu.tval = (ma_state == MA_DONE && ma_fault) ? ma_fault_tval : raddr;
+`ifdef RAPT_H_EXTENSION
+  assign exu_lsu.gpaddr = (ma_state == MA_DONE && ma_fault) ? ma_fault_gpaddr : lsu_l1d.gpaddr;
+  assign exu_lsu.gptw = (ma_state == MA_DONE && ma_fault) ? ma_fault_gptw : lsu_l1d.gptw;
+`endif
   assign exu_lsu.difftest_skip = (raddr_valid && fwd_hit) ? 1'b0
                               : (ma_state == MA_DONE) ? (ma_skip && !ma_fault)
                               : ma_active             ? 1'b1
@@ -844,7 +850,7 @@ module rapt_lsu_sq #(
   //  - MA split:              hold rready low during LO/HI/X beats; raise it
   //                           once merged data is parked in MA_DONE.
   //  - pre-split PMP trap:    pulse rready immediately so IOQ retires.
-  assign exu_lsu.rready = lr_alignment_fault || lsu_pmp_trap
+  assign exu_lsu.rready = lsu_pmp_trap
                        || (raddr_valid && fwd_hit)
                        || (ma_state == MA_DONE)
                        || (lsu_l1d.rvalid && lsu_l1d.rready
@@ -878,16 +884,20 @@ module rapt_lsu_sq #(
   assign lsu_l1d.rprobe = 1'b0;
   assign lsu_l1d.wprecise = 1'b0;
   assign lsu_l1d.raddr = ma_req_addr;
+`ifdef RAPT_H_EXTENSION
+  assign lsu_l1d.rguest = csr_bcast.eff_data_guest;
+  assign lsu_l1d.rexec = 1'b0;
+`endif
   assign lsu_l1d.rcontext = exu_lsu.rcontext;
   assign lsu_l1d.rcontext_b = exu_lsu.rcontext_b;
   assign lsu_l1d.ralu = ma_req_alu;
   assign lsu_l1d.rmisaligned = |(raddr & XLEN'(lsu_load_size_m1));
-  assign lsu_l1d.rvalid = !lr_alignment_fault && ((ma_state == MA_HI) || (ma_state == MA_X)
+  assign lsu_l1d.rvalid = (ma_state == MA_HI) || (ma_state == MA_X)
                        || (raddr_valid && !load_in_sq
                                        && !mmio_load_blocked
                                        // A split's first beat waits for its PMP decision.
-                                       && (!ma_span || pmp_load_decided)
-                                       && (ma_state == MA_IDLE)));
+                                       && (!ma_span || exu_lsu.atomic_lock || pmp_load_decided)
+                                       && (ma_state == MA_IDLE));
   assign lsu_l1d.atomic_lock = exu_lsu.atomic_lock;
   assign lsu_l1d.ordered = exu_lsu.ordered && sq_all_empty;
 
@@ -903,6 +913,10 @@ module rapt_lsu_sq #(
           ma_fault <= lsu_l1d.trap;
           ma_fault_cause <= lsu_l1d.cause;
           ma_fault_tval <= raddr;
+`ifdef RAPT_H_EXTENSION
+          ma_fault_gpaddr <= lsu_l1d.gpaddr;
+          ma_fault_gptw <= lsu_l1d.gptw;
+`endif
           if (lsu_l1d.trap) begin
             ma_state <= MA_DONE;
           end else begin
@@ -917,6 +931,10 @@ module rapt_lsu_sq #(
           ma_fault <= lsu_l1d.trap;
           ma_fault_cause <= lsu_l1d.cause;
           ma_fault_tval <= ma_req_addr;
+`ifdef RAPT_H_EXTENSION
+          ma_fault_gpaddr <= lsu_l1d.gpaddr;
+          ma_fault_gptw <= lsu_l1d.gptw;
+`endif
           if (!lsu_l1d.trap) ma_hi_data <= lsu_l1d.rdata;
           ma_state <= (!lsu_l1d.trap && ma_load_third) ? MA_X : MA_DONE;
         end
@@ -927,6 +945,10 @@ module rapt_lsu_sq #(
           ma_fault <= lsu_l1d.trap;
           ma_fault_cause <= lsu_l1d.cause;
           ma_fault_tval <= ma_req_addr;
+`ifdef RAPT_H_EXTENSION
+          ma_fault_gpaddr <= lsu_l1d.gpaddr;
+          ma_fault_gptw <= lsu_l1d.gptw;
+`endif
           if (!lsu_l1d.trap) ma_x_data <= lsu_l1d.rdata;
           ma_state <= MA_DONE;
         end

@@ -1,10 +1,12 @@
-/* rvmodel_macros.h: Raptor Chip DUT-specific macros for ACT4 */
+/* rvmodel_macros.h: Raptor Chip RV32GC DUT macros for ACT4 + Sail 0.16 */
 /* SPDX-License-Identifier: Apache-2.0 */
 
 #ifndef _COMPLIANCE_MODEL_H
 #define _COMPLIANCE_MODEL_H
 
 #define RVMODEL_DATA_SECTION
+
+#define STANDARD_SM_SUPPORTED
 
 /* ===== STARTUP ===== */
 
@@ -14,21 +16,15 @@
 
 /* ===== TERMINATION ===== */
 
-/* Raptor simulator intercepts ebreak via DPI-C.
-   a0 (x10) holds the return code: 0 = pass, non-zero = fail.
-   The simulator checks a0 to determine GOOD_TRAP vs BAD_TRAP. */
-
+/* Breakpoints inside tests are architectural traps. Run NPC with
+   --trap-on-ebreak; only the SiFive test finisher terminates a test. */
 #define RVMODEL_HALT_PASS \
-  li a0, 0              ;\
-  ebreak                ;\
-  self_loop_pass:       ;\
-    j self_loop_pass    ;\
+  li a0, 0; li t0, 0x00100000; li t1, 0x5555; sw t1, 0(t0); \
+  fence iorw, iorw; self_loop_pass: j self_loop_pass;
 
 #define RVMODEL_HALT_FAIL \
-  li a0, 1              ;\
-  ebreak                ;\
-  self_loop_fail:       ;\
-    j self_loop_fail    ;\
+  li a0, 1; li t0, 0x00100000; li t1, 0x3333; sw t1, 0(t0); \
+  fence iorw, iorw; self_loop_fail: j self_loop_fail;
 
 /* ===== IO ===== */
 
@@ -55,21 +51,40 @@
   j 1b                         ;/* Loop */                           \
 3:
 
-/* ===== Machine Timer ===== */
+/* ===== Machine Timer & Software Interrupts (CLINT @ 0x02000000) ===== */
 
-/* Raptor CLINT mtime is at 0x02000048 (non-standard offset) */
-#define RVMODEL_MTIME_ADDRESS    /* unimplemented in sim */
-#define RVMODEL_MTIMECMP_ADDRESS /* unimplemented in sim */
+#define RVMODEL_MSIP_ADDRESS     0x02000000
+#define RVMODEL_MTIMECMP_ADDRESS 0x02004000
+#define RVMODEL_MTIME_ADDRESS    0x0200bff8
 
-#define RVMODEL_INTERRUPT_LATENCY 10
-#define RVMODEL_TIMER_INT_SOON_DELAY 100
+#define RVMODEL_INTERRUPT_LATENCY    20
+#define RVMODEL_TIMER_INT_SOON_DELAY 500
 
-/* ===== Machine Interrupts ===== */
+/* ===== Machine External Interrupts (PLIC @ 0x0c000000, source 2 -> ctx0) ===== */
 
-#define RVMODEL_SET_MEXT_INT(_R1, _R2)
-#define RVMODEL_CLR_MEXT_INT(_R1, _R2)
-#define RVMODEL_SET_MSW_INT(_R1, _R2)
-#define RVMODEL_CLR_MSW_INT(_R1, _R2)
+#define RAPT_PLIC_PRIO2_ADDR   0x0c000008
+#define RAPT_PLIC_PEND_ADDR    0x0c001000
+#define RAPT_PLIC_MENABLE_ADDR 0x0c002000
+#define RAPT_PLIC_MTHRESH_ADDR 0x0c200000
+#define RAPT_PLIC_MCLAIM_ADDR  0x0c200004
+
+#define RVMODEL_SET_MEXT_INT(_R1, _R2) \
+  li _R2, RAPT_PLIC_PRIO2_ADDR;   li _R1, 1; sw _R1, 0(_R2); \
+  li _R2, RAPT_PLIC_MENABLE_ADDR; li _R1, 4; sw _R1, 0(_R2); \
+  li _R2, RAPT_PLIC_MTHRESH_ADDR;            sw zero, 0(_R2); \
+  li _R2, RAPT_PLIC_PEND_ADDR;    li _R1, 4; sw _R1, 0(_R2);
+
+#define RVMODEL_CLR_MEXT_INT(_R1, _R2) \
+  li _R2, RAPT_PLIC_MCLAIM_ADDR; lw _R1, 0(_R2); \
+  li _R1, 2; sw _R1, 0(_R2); \
+  li _R2, 0x800; \
+1: csrr _R1, mip; and _R1, _R1, _R2; bnez _R1, 1b;
+
+#define RVMODEL_SET_MSW_INT(_R1, _R2) \
+  li _R2, RVMODEL_MSIP_ADDRESS; li _R1, 1; sw _R1, 0(_R2);
+
+#define RVMODEL_CLR_MSW_INT(_R1, _R2) \
+  li _R2, RVMODEL_MSIP_ADDRESS; sw zero, 0(_R2);
 
 /* ===== Supervisor Interrupts ===== */
 

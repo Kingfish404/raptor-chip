@@ -140,6 +140,13 @@ static inline void verilog_connect(TOP_NAME *top, NPCState *npc)
   npc->vector_csrs = nullptr;
   npc->vector_vlenb = 0;
 #endif
+#ifdef CONFIG_ISA64
+  npc->virt = (uint8_t *)&VERILOG_BACKEND(csrs__DOT__virt_q);
+  npc->hypervisor_csrs = (uint64_t *)&VERILOG_BACKEND(csrs__DOT__hypervisor_csr_view);
+#else
+  npc->virt = nullptr;
+  npc->hypervisor_csrs = nullptr;
+#endif
 
   npc->clint_mtime = (uint64_t *)&VERILOG_CLINT(mtime);
   npc->clint_mtimecmp = (uint64_t *)&VERILOG_CLINT(mtimecmp);

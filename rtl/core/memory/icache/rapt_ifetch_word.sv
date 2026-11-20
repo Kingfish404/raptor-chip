@@ -25,6 +25,10 @@ module rapt_ifetch_word #(
     input logic [1:0] translation_pbmt,
     input logic translation_fault,
     input logic [XLEN-1:0] translation_cause,
+`ifdef RAPT_H_EXTENSION
+    input logic [XLEN-1:2] translation_gpa,
+    input logic translation_gptw,
+`endif
     output logic read_valid,
     input logic read_ready,
     output logic [XLEN-1:0] read_paddr,
@@ -37,6 +41,10 @@ module rapt_ifetch_word #(
     output logic [31:0] result_inst,
     output logic result_fault,
     output logic [XLEN-1:0] result_cause,
+`ifdef RAPT_H_EXTENSION
+    output logic [XLEN-1:2] result_gpa,
+    output logic result_gptw,
+`endif
     output logic [XLEN-1:0] result_tval
 );
   typedef enum logic [2:0] {
@@ -78,6 +86,10 @@ module rapt_ifetch_word #(
       result_cause <= 0;
       result_tval <= 0;
       low_half <= 0;
+`ifdef RAPT_H_EXTENSION
+      result_gpa <= '0;
+      result_gptw <= 0;
+`endif
     end else begin
       if (kill && (state == XLATE_WAIT || state == DATA_WAIT)) cancelled <= 1;
       case (state)
@@ -91,6 +103,10 @@ module rapt_ifetch_word #(
           result_fault <= 0;
           result_cause <= 0;
           result_tval <= 0;
+`ifdef RAPT_H_EXTENSION
+          result_gpa <= '0;
+          result_gptw <= 0;
+`endif
           state <= XLATE_REQ;
         end
         XLATE_REQ: begin
@@ -105,6 +121,10 @@ module rapt_ifetch_word #(
             result_inst <= 32'h13;
             result_cause <= translation_fault ? translation_cause : `RAPT_CAUSE_INSTR_PAGE_FAULT;
             result_tval <= second ? word_va : `RAPT_PC_SEXT(XLEN, owner_pc);
+`ifdef RAPT_H_EXTENSION
+            result_gpa <= translation_fault ? translation_gpa : '0;
+            result_gptw <= translation_fault && translation_gptw;
+`endif
             state <= DONE;
           end else begin
             read_paddr <= translation_paddr;

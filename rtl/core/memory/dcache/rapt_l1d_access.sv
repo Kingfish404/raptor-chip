@@ -21,6 +21,10 @@ module rapt_l1d_access #(
     input logic [3:0] load_size_m1,
     input logic [7:0] store_walu,
     input logic cmo_mgmt,
+`ifdef RAPT_H_EXTENSION
+    input logic load_exec,
+    input logic ptw_exec,
+`endif
     input logic tlb_hit,
     input logic stlb_hit,
     input logic [6:0] dtlb_pte,
@@ -74,13 +78,21 @@ module rapt_l1d_access #(
   assign store_unmapped_fault_mmu = cmo_mgmt
       ? !rapt_pkg::addr_mapped(store_addr) : !rapt_pkg::addr_writable(store_addr);
 
+`ifdef RAPT_H_EXTENSION
+  wire h_load_exec = load_exec;
+  wire h_ptw_exec = ptw_exec;
+`else
+  wire h_load_exec = 1'b0;
+  wire h_ptw_exec = 1'b0;
+`endif
+
   // --- Sv32/Sv39 PTE permission check (data access: load/store, not fetch) ---
   // pte bits (rapt_tlb layout): [0]=R [1]=W [2]=X [3]=U [4]=G [5]=A [6]=D.
   // Bit [4]=G (global) does not affect data fault and is not consumed below.
   /* verilator lint_off UNUSEDSIGNAL */
-  function automatic logic pte_fault_data(input logic [6:0] pte, input logic is_store,
-                                          input logic is_cmo, input logic [1:0] priv_eff,
-                                          input logic sum_i, input logic mxr_i);
+  function automatic logic pte_fault_data(
+      input logic [6:0] pte, input logic is_store, input logic is_cmo, input logic is_exec,
+      input logic [1:0] priv_eff, input logic sum_i, input logic mxr_i);
     logic r, w, x, u, a, d;
     logic can_read;
     logic fault;
@@ -92,7 +104,7 @@ module rapt_l1d_access #(
     d = pte[6];
     can_read = r || (mxr_i && x);
     fault = 1'b0;
-    // U-bit rules: U-mode requires U=1; S-mode denies U=1 unless SUM.
+    // U-bit rules: U-mode requires U=1; S-mode denies U=1 unless SUM (including HLVX).
     if (priv_eff == `RAPT_PRIV_U) begin
       if (!u) fault = 1'b1;
     end else if (priv_eff == `RAPT_PRIV_S) begin
@@ -106,6 +118,8 @@ module rapt_l1d_access #(
     end else if (is_store) begin
       if (!w) fault = 1'b1;
       if (!a || !d) fault = 1'b1;
+    end else if (is_exec) begin
+      if (!x || !a) fault = 1'b1;
     end else begin
       if (!can_read) fault = 1'b1;
       if (!a) fault = 1'b1;
@@ -115,17 +129,17 @@ module rapt_l1d_access #(
   /* verilator lint_on UNUSEDSIGNAL */
 
   // Perm-fault signals evaluated against currently-visible PTEs.
-  assign pf_load_tlb  = tlb_hit  && pte_fault_data(dtlb_pte,  1'b0, 1'b0,
+  assign pf_load_tlb  = tlb_hit  && pte_fault_data(dtlb_pte,  1'b0, 1'b0, h_load_exec,
                                                     load_context.eff_priv,
                                                     load_context.sum, load_context.mxr);
-  assign pf_store_tlb = stlb_hit && pte_fault_data(dstlb_pte, 1'b1,
-                                                    cmo_mgmt, store_context.eff_priv,
+  assign pf_store_tlb = stlb_hit && pte_fault_data(dstlb_pte, 1'b1, cmo_mgmt, 1'b0,
+                                                    store_context.eff_priv,
                                                     store_context.sum, store_context.mxr);
-  assign pf_load_ptw  = pte_fault_data(ptw_result_pte, 1'b0, 1'b0,
+  assign pf_load_ptw  = pte_fault_data(ptw_result_pte, 1'b0, 1'b0, h_ptw_exec,
                                         ptw_context.eff_priv,
                                         ptw_context.sum, ptw_context.mxr);
-  assign pf_store_ptw = pte_fault_data(ptw_result_pte, 1'b1,
-                                        cmo_mgmt, ptw_context.eff_priv,
+  assign pf_store_ptw = pte_fault_data(ptw_result_pte, 1'b1, cmo_mgmt, 1'b0,
+                                        ptw_context.eff_priv,
                                         ptw_context.sum, ptw_context.mxr);
 
   // Sv32 reads four-byte PTEs; Sv39 reads eight-byte PTEs. PMP must cover
@@ -168,7 +182,7 @@ module rapt_l1d_access #(
         .priv(check_priv[port_idx]),
         .op_r(port_idx != StoreCheck),
         .op_w(port_idx == StoreCheck),
-        .op_x(1'b0),
+        .op_x(port_idx == LoadCheck && !(ShareLoadWalk && ptw_check_active) && h_load_exec),
         .pmp_raw_addr(pmp_state.pmp_raw_addr),
         .pmp_napot_mask(pmp_state.pmp_napot_mask),
         .pmp_cfg_r(pmp_state.pmp_cfg_r),

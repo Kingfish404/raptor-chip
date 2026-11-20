@@ -26,13 +26,23 @@ implemented_extensions:
   - { name: Zba, version: "= 1.0.0" }
   - { name: Zbb, version: "= 1.0.0" }
   - { name: Zbc, version: "= 1.0.0" }
+  - { name: Zbkc, version: "= 1.0.0" }
   - { name: Zbs, version: "= 1.0.0" }
   - { name: Sm, version: "= 1.12.0" }
 
 params:
+  NON_STANDARD_EXTENSION_IMPLEMENTED: false
+
   # XLEN
   MXLEN: 32
   PHYS_ADDR_WIDTH: 32
+
+  # Sm interrupts and WFI
+  MEI_INTR_IMPL: true
+  MSI_INTR_IMPL: true
+  MTI_INTR_IMPL: true
+  WFI_FINITE: true
+  WFI_U_MODE: false
 
   # MISA
   MUTABLE_MISA_M: false
@@ -72,14 +82,16 @@ params:
   MTVAL_WIDTH: 32
 
   # Misaligned access
-  MISALIGNED_LDST: false
+  MISALIGNED_LDST: true
   MISALIGNED_AMO: false
   MISALIGNED_LDST_EXCEPTION_PRIORITY: low
+  MISALIGNED_MAX_ATOMICITY_GRANULE_SIZE: 0
+  MISALIGNED_SPLIT_STRATEGY: custom
 
   # A extension
   LRSC_RESERVATION_STRATEGY: "reserve exactly enough to cover the access"
   LRSC_FAIL_ON_VA_SYNONYM: false
-  LRSC_MISALIGNED_BEHAVIOR: "always raise misaligned exception"
+  LRSC_MISALIGNED_BEHAVIOR: "always raise access fault"
   LRSC_FAIL_ON_NON_EXACT_LRSC: false
 
   # Zicntr

@@ -16,6 +16,9 @@
 `endif
 `endif
 `ifdef RAPT_RVA23U64
+`ifndef RAPT_NO_RVA23S64
+`define RAPT_RVA23S64
+`endif
 `ifndef RAPT_ZFA
 `define RAPT_ZFA
 `endif
@@ -36,6 +39,25 @@
 `endif
 `ifndef RAPT_ZICCLSM_VECTOR
 `define RAPT_ZICCLSM_VECTOR
+`endif
+`endif
+`ifdef RAPT_RVA23S64
+`ifndef RAPT_SVNAPOT
+`define RAPT_SVNAPOT
+`endif
+`ifndef RAPT_SSCOFPMF
+`define RAPT_SSCOFPMF
+`endif
+`ifndef RAPT_SMSTATEEN
+`define RAPT_SMSTATEEN
+`endif
+`ifndef RAPT_SMNPM
+`define RAPT_SMNPM
+`endif
+`ifndef RAPT_NO_H_EXTENSION
+`ifndef RAPT_H_EXTENSION
+`define RAPT_H_EXTENSION
+`endif
 `endif
 `endif
 
@@ -299,10 +321,14 @@
 // address (PADDR_BITS <= 39) and the all-ones upper-half aliases. Any other
 // address is invalid in every translation mode and may be replaced by another
 // invalid address before it reaches xepc/xtval (privileged spec WARL rule).
-// Define RAPT_PC_FULL_WIDTH to keep XLEN-wide PCs.
+// Define RAPT_PC_FULL_WIDTH to keep XLEN-wide PCs. The H extension also keeps
+// XLEN-wide PCs: guest physical addresses (Sv39x4, 41 bits, zero-extended) are
+// not sign-extended 40-bit values.
 `define RAPT_PC_BITS_OF(xlen) \
   (((xlen) == 64 && `RAPT_PADDR_BITS <= 39 && !`RAPT_PC_FULL_WIDTH_ON) ? 40 : (xlen))
 `ifdef RAPT_PC_FULL_WIDTH
+`define RAPT_PC_FULL_WIDTH_ON 1
+`elsif RAPT_H_EXTENSION
 `define RAPT_PC_FULL_WIDTH_ON 1
 `else
 `define RAPT_PC_FULL_WIDTH_ON 0
@@ -391,10 +417,11 @@
 // Page-table entry bits (Sv32 / Sv39 share the low-bit layout).
 
 `define RAPT_CSR_CSW_NONE 3'b000
-`define RAPT_CTR_SEL_NONE 3'b000
-`define RAPT_CTR_SEL_CY__ 3'b001
-`define RAPT_CTR_SEL_TM__ 3'b010
-`define RAPT_CTR_SEL_IR__ 3'b100
+`define RAPT_CTR_SEL_NONE 4'b0000
+`define RAPT_CTR_SEL_CY__ 4'b0001
+`define RAPT_CTR_SEL_TM__ 4'b0010
+`define RAPT_CTR_SEL_IR__ 4'b0100
+`define RAPT_CTR_SEL_HPM3 4'b1000
 
 `define RAPT_OP_R_TYPE_ 7'b0110011
 `define RAPT_OP_I_TYPE_ 7'b0010011
@@ -527,6 +554,8 @@
 
 `define RAPT_CSR_SCOUNTE 'h106
 `define RAPT_CSR_SENVCFG 'h10a
+`define RAPT_CSR_SSTATEEN0 'h10c
+`define RAPT_CSR_SSTATEEN3 'h10f
 
 `define RAPT_CSR_SSCRATC 'h140
 `define RAPT_CSR_SEPC___ 'h141
@@ -536,6 +565,38 @@
 `define RAPT_CSR_STIMECMP 'h14d
 `define RAPT_CSR_STIMECMPH 'h15d
 `define RAPT_CSR_SATP___ 'h180
+`define RAPT_CSR_SCOUNTOVF 'hda0
+
+// Virtual Supervisor & Hypervisor CSRs (H extension)
+`define RAPT_CSR_VSSTATUS 'h200
+`define RAPT_CSR_VSIE_____ 'h204
+`define RAPT_CSR_VSTVEC___ 'h205
+`define RAPT_CSR_VSSCRATCH 'h240
+`define RAPT_CSR_VSEPC____ 'h241
+`define RAPT_CSR_VSCAUSE__ 'h242
+`define RAPT_CSR_VSTVAL___ 'h243
+`define RAPT_CSR_VSIP_____ 'h244
+`define RAPT_CSR_VSTIMECMP 'h24d
+`define RAPT_CSR_VSATP____ 'h280
+
+`define RAPT_CSR_HSTATUS 'h600
+`define RAPT_CSR_HEDELEG 'h602
+`define RAPT_CSR_HIDELEG 'h603
+`define RAPT_CSR_HIE____ 'h604
+`define RAPT_CSR_HTIMEDELTA 'h605
+`define RAPT_CSR_HCOUNTEREN 'h606
+`define RAPT_CSR_HGEIE 'h607
+`define RAPT_CSR_HENVCFG 'h60a
+`define RAPT_CSR_HSTATEEN0 'h60c
+`define RAPT_CSR_HSTATEEN1 'h60d
+`define RAPT_CSR_HSTATEEN2 'h60e
+`define RAPT_CSR_HSTATEEN3 'h60f
+`define RAPT_CSR_HTVAL 'h643
+`define RAPT_CSR_HIP____ 'h644
+`define RAPT_CSR_HVIP___ 'h645
+`define RAPT_CSR_HTINST 'h64a
+`define RAPT_CSR_HGATP 'h680
+`define RAPT_CSR_HGEIP 'he12
 
 // SATP mode bit position: RV32 bit 31, RV64 bit 63
 `ifdef RAPT_RV64
@@ -558,9 +619,13 @@
 `define RAPT_CSR_MTVEC__ 'h305
 `define RAPT_CSR_MCOUNTE 'h306
 `define RAPT_CSR_MENVCFG 'h30a
+`define RAPT_CSR_MSTATEEN0 'h30c
+`define RAPT_CSR_MSTATEEN3 'h30f
 
 `define RAPT_CSR_MSTATUSH 'h310
 `define RAPT_CSR_MENVCFGH 'h31a
+`define RAPT_CSR_MSTATEEN0H 'h31c
+`define RAPT_CSR_MSTATEEN3H 'h31f
 
 // Machine Trap Handling
 `define RAPT_CSR_MSCRATCH 'h340
@@ -568,6 +633,8 @@
 `define RAPT_CSR_MCAUSE_ 'h342
 `define RAPT_CSR_MTVAL__ 'h343
 `define RAPT_CSR_MIP____ 'h344
+`define RAPT_CSR_MTINST 'h34a
+`define RAPT_CSR_MTVAL2 'h34b
 
 `define RAPT_CSR_MCYCLE_ 'hb00
 `define RAPT_CSR_MINSTRET 'hb02
@@ -582,6 +649,8 @@
 `define RAPT_CSR_MHPMCOUNTER31H 'hb9f
 `define RAPT_CSR_MHPMEVENT3 'h323
 `define RAPT_CSR_MHPMEVENT31 'h33f
+`define RAPT_CSR_MHPMEVENT3H 'h723
+`define RAPT_CSR_MHPMEVENT31H 'h73f
 
 `define RAPT_CSR_CYCLE__ 'hc00
 `define RAPT_CSR_TIME___ 'hc01
@@ -600,6 +669,7 @@
 `define RAPT_CSR_MARCHID__ 'hf12
 `define RAPT_CSR_IMPID____ 'hf13
 `define RAPT_CSR_MHARTID__ 'hf14
+`define RAPT_CSR_MCONFIGPTR 'hf15
 
 // CSR_MSTATUS FLAGS
 `define RAPT_CSR_MSTATUS_MPP_ 12:11
@@ -639,13 +709,13 @@
 `define RAPT_CSR_SIP_WMASK 32'h00000002
 `define RAPT_CSR_MIP_WMASK 32'h00000222
 
-// RVA22 CMO environment controls: CBIE[5:4], CBCFE[6], and CBZE[7].
-`define RAPT_CSR_SENVCFG_WMASK 32'h000000f0
+// RVA22/Priv-1.12+ environment controls: FIOM[0], CBIE[5:4], CBCFE[6], and CBZE[7].
+`define RAPT_CSR_SENVCFG_WMASK 32'h000000f1
 `ifdef RAPT_RV64
 `define RAPT_CSR_MENVCFG_STCE 63
-`define RAPT_CSR_MENVCFG_WMASK 64'hc000_0000_0000_00f0
+`define RAPT_CSR_MENVCFG_WMASK 64'hc000_0000_0000_00f1
 `else
-`define RAPT_CSR_MENVCFG_WMASK 32'h0000_00f0
+`define RAPT_CSR_MENVCFG_WMASK 32'h0000_00f1
 `endif
 
 // Internal LSU operation tags used only between decode/IOQ/SQ.  They do not
@@ -659,11 +729,15 @@
 
 // CSR_MIE FLAGS
 `define RAPT_CSR_MIE_SSIE 1
+`define RAPT_CSR_MIE_VSSIE 2
 `define RAPT_CSR_MIE_MSIE 3
 `define RAPT_CSR_MIE_STIE 5
+`define RAPT_CSR_MIE_VSTIE 6
 `define RAPT_CSR_MIE_MTIE 7
 `define RAPT_CSR_MIE_SEIE 9
+`define RAPT_CSR_MIE_VSEIE 10
 `define RAPT_CSR_MIE_MEIE 11
+`define RAPT_CSR_MIE_LCOFIE 13
 
 // PMP CSR address ranges
 `define RAPT_CSR_PMPCFG0 'h3a0
@@ -704,18 +778,27 @@
 `define RAPT_CAUSE_STORE_ACC_FAULT 'h7
 `define RAPT_CAUSE_ECALL_U 'h8
 `define RAPT_CAUSE_ECALL_S 'h9
+`define RAPT_CAUSE_ECALL_VS 'ha
 `define RAPT_CAUSE_ECALL_M 'hb
 `define RAPT_CAUSE_INSTR_PAGE_FAULT 'hc
 `define RAPT_CAUSE_LOAD_PAGE_FAULT 'hd
 `define RAPT_CAUSE_STORE_PAGE_FAULT 'hf
+`define RAPT_CAUSE_INSTR_GUEST_PAGE_FAULT 'h14
+`define RAPT_CAUSE_LOAD_GUEST_PAGE_FAULT 'h15
+`define RAPT_CAUSE_VIRT_INST 'h16
+`define RAPT_CAUSE_STORE_GUEST_PAGE_FAULT 'h17
 
 // Interrupt Cause Codes (bit index, without MSB interrupt flag)
 `define RAPT_CAUSE_SSI 'h1
+`define RAPT_CAUSE_VSSI 'h2
 `define RAPT_CAUSE_MSI 'h3
 `define RAPT_CAUSE_STI 'h5
+`define RAPT_CAUSE_VSTI 'h6
 `define RAPT_CAUSE_MTI 'h7
 `define RAPT_CAUSE_SEI 'h9
+`define RAPT_CAUSE_VSEI 'ha
 `define RAPT_CAUSE_MEI 'hb
+`define RAPT_CAUSE_LCOFI 'hd
 
 // CSR Write Masks
 // UBE is WARL-zero: every supported privilege mode is little-endian.

@@ -18,7 +18,9 @@
 #include <isa-extensions.h>
 #include <cpu/cpu.h>
 #include <difftest-def.h>
+#include <difftest-hypervisor.h>
 #include <memory/paddr.h>
+#include <memory/tlb.h>
 #ifdef CONFIG_RAPTOR_PMEM_2G
 #include <sys/mman.h>
 #endif
@@ -318,6 +320,126 @@ __EXPORT const NemuISAAPI *nemu_difftest_isa_query(uint32_t version, uint32_t si
   api.enabled = riscv_isa_extensions;
   api.locked = riscv_isa_locked;
   return &api;
+}
+
+#ifdef CONFIG_RV64
+static int difftest_hypervisor_set_state(uint32_t hart,
+                                         const NemuDiffHypervisorState *state)
+{
+  if (hart != 0 || state == NULL || state->virt > 1 || state->priv > 3 ||
+      state->priv == 2 || (state->priv == 3 && state->virt != 0))
+    return -1;
+  cpu.virt = state->virt != 0;
+  cpu.priv = state->priv;
+  cpu.sr[CSR_MENVCFG] = state->csr[NEMU_DIFF_HCSR_MENVCFG];
+  cpu.sr[CSR_SENVCFG] = state->csr[NEMU_DIFF_HCSR_SENVCFG];
+  for (unsigned i = 0; i < 4; i++)
+    cpu.sr[CSR_MSTATEEN0 + i] = state->csr[NEMU_DIFF_HCSR_MSTATEEN0 + i];
+  if (riscv_h_gstage_preview_enabled())
+  {
+    cpu.sr[CSR_HSTATUS] = state->csr[NEMU_DIFF_HCSR_HSTATUS];
+    cpu.sr[CSR_HEDELEG] = state->csr[NEMU_DIFF_HCSR_HEDELEG];
+    cpu.sr[CSR_HIDELEG] = state->csr[NEMU_DIFF_HCSR_HIDELEG];
+    cpu.sr[CSR_HTIMEDELTA] = state->csr[NEMU_DIFF_HCSR_HTIMEDELTA];
+    cpu.sr[CSR_HCOUNTEREN] = state->csr[NEMU_DIFF_HCSR_HCOUNTEREN];
+    cpu.sr[CSR_HENVCFG] = state->csr[NEMU_DIFF_HCSR_HENVCFG];
+    for (unsigned i = 0; i < 4; i++)
+      cpu.sr[CSR_HSTATEEN0 + i] = state->csr[NEMU_DIFF_HCSR_HSTATEEN0 + i];
+    cpu.sr[CSR_HTVAL] = state->csr[NEMU_DIFF_HCSR_HTVAL];
+    cpu.sr[CSR_HVIP] = state->csr[NEMU_DIFF_HCSR_HVIP] & (word_t)riscv_virtual_irq_mask();
+    cpu.sr[CSR_HTINST] = state->csr[NEMU_DIFF_HCSR_HTINST];
+    cpu.sr[CSR_HGATP] = state->csr[NEMU_DIFF_HCSR_HGATP];
+    cpu.sr[CSR_VSSTATUS] = state->csr[NEMU_DIFF_HCSR_VSSTATUS];
+    cpu.sr[CSR_VSTVEC] = state->csr[NEMU_DIFF_HCSR_VSTVEC];
+    cpu.sr[CSR_VSSCRATCH] = state->csr[NEMU_DIFF_HCSR_VSSCRATCH];
+    cpu.sr[CSR_VSEPC] = state->csr[NEMU_DIFF_HCSR_VSEPC];
+    cpu.sr[CSR_VSCAUSE] = state->csr[NEMU_DIFF_HCSR_VSCAUSE];
+    cpu.sr[CSR_VSTVAL] = state->csr[NEMU_DIFF_HCSR_VSTVAL];
+    cpu.sr[CSR_VSTIMECMP] = state->csr[NEMU_DIFF_HCSR_VSTIMECMP];
+    cpu.sr[CSR_VSATP] = state->csr[NEMU_DIFF_HCSR_VSATP];
+    cpu.sr[CSR_MTINST] = state->csr[NEMU_DIFF_HCSR_MTINST];
+    cpu.sr[CSR_MTVAL2] = state->csr[NEMU_DIFF_HCSR_MTVAL2];
+  }
+  soft_tlb_flush();
+  return 0;
+}
+
+static int difftest_hypervisor_get_state(uint32_t hart,
+                                         NemuDiffHypervisorState *state)
+{
+  if (hart != 0 || state == NULL) return -1;
+  memset(state, 0, sizeof(*state));
+  state->virt = cpu.virt ? 1u : 0u;
+  state->priv = (uint8_t)cpu.priv;
+  state->csr[NEMU_DIFF_HCSR_MENVCFG] = cpu.sr[CSR_MENVCFG];
+  state->csr[NEMU_DIFF_HCSR_SENVCFG] = cpu.sr[CSR_SENVCFG];
+  for (unsigned i = 0; i < 4; i++)
+    state->csr[NEMU_DIFF_HCSR_MSTATEEN0 + i] = cpu.sr[CSR_MSTATEEN0 + i];
+  if (riscv_h_gstage_preview_enabled())
+  {
+    word_t mip_eff = riscv_mip_value();
+    word_t virt_mask = (word_t)riscv_virtual_irq_mask();
+    word_t vsstatus = (cpu.sr[CSR_VSSTATUS] & ~((word_t)1 << 63)) | ((word_t)2 << 32);
+    if (((vsstatus >> 13) & 3) == 3 || ((vsstatus >> 9) & 3) == 3)
+      vsstatus |= (word_t)1 << 63;
+    state->csr[NEMU_DIFF_HCSR_HSTATUS] = cpu.sr[CSR_HSTATUS] | ((word_t)2 << 32);
+    state->csr[NEMU_DIFF_HCSR_HEDELEG] = cpu.sr[CSR_HEDELEG];
+    state->csr[NEMU_DIFF_HCSR_HIDELEG] = cpu.sr[CSR_HIDELEG];
+    state->csr[NEMU_DIFF_HCSR_HIE] = cpu.sr[CSR_MIE] & virt_mask;
+    state->csr[NEMU_DIFF_HCSR_HTIMEDELTA] = cpu.sr[CSR_HTIMEDELTA];
+    state->csr[NEMU_DIFF_HCSR_HCOUNTEREN] = cpu.sr[CSR_HCOUNTEREN];
+    state->csr[NEMU_DIFF_HCSR_HENVCFG] =
+        cpu.sr[CSR_HENVCFG] & (cpu.sr[CSR_MENVCFG] | ~((word_t)3 << 62));
+    for (unsigned i = 0; i < 4; i++)
+      state->csr[NEMU_DIFF_HCSR_HSTATEEN0 + i] =
+          riscv_smstateen_preview_enabled()
+              ? (cpu.sr[CSR_HSTATEEN0 + i] & cpu.sr[CSR_MSTATEEN0 + i])
+              : 0;
+    state->csr[NEMU_DIFF_HCSR_HTVAL] = cpu.sr[CSR_HTVAL];
+    state->csr[NEMU_DIFF_HCSR_HIP] = mip_eff & virt_mask;
+    state->csr[NEMU_DIFF_HCSR_HVIP] = cpu.sr[CSR_HVIP] & virt_mask;
+    state->csr[NEMU_DIFF_HCSR_HTINST] = cpu.sr[CSR_HTINST];
+    state->csr[NEMU_DIFF_HCSR_HGATP] = cpu.sr[CSR_HGATP];
+    state->csr[NEMU_DIFF_HCSR_VSSTATUS] = vsstatus;
+    state->csr[NEMU_DIFF_HCSR_VSIE] = (cpu.sr[CSR_MIE] & cpu.sr[CSR_HIDELEG] & virt_mask) >> 1;
+    state->csr[NEMU_DIFF_HCSR_VSTVEC] = cpu.sr[CSR_VSTVEC];
+    state->csr[NEMU_DIFF_HCSR_VSSCRATCH] = cpu.sr[CSR_VSSCRATCH];
+    state->csr[NEMU_DIFF_HCSR_VSEPC] = cpu.sr[CSR_VSEPC];
+    state->csr[NEMU_DIFF_HCSR_VSCAUSE] = cpu.sr[CSR_VSCAUSE];
+    state->csr[NEMU_DIFF_HCSR_VSTVAL] = cpu.sr[CSR_VSTVAL];
+    state->csr[NEMU_DIFF_HCSR_VSIP] = (mip_eff & cpu.sr[CSR_HIDELEG] & virt_mask) >> 1;
+    state->csr[NEMU_DIFF_HCSR_VSTIMECMP] = cpu.sr[CSR_VSTIMECMP];
+    state->csr[NEMU_DIFF_HCSR_VSATP] = cpu.sr[CSR_VSATP];
+    state->csr[NEMU_DIFF_HCSR_MTINST] = cpu.sr[CSR_MTINST];
+    state->csr[NEMU_DIFF_HCSR_MTVAL2] = cpu.sr[CSR_MTVAL2];
+  }
+  return 0;
+}
+
+static void difftest_hypervisor_set_mtime(uint64_t mtime)
+{
+  cpu.sr[CSR_TIME] = (word_t)mtime;
+}
+#endif
+
+__EXPORT const NemuDiffHypervisorAPI *nemu_difftest_hypervisor_query(uint32_t version,
+                                                                     uint32_t size)
+{
+#ifdef CONFIG_RV64
+  static const NemuDiffHypervisorAPI api = {
+    .version = NEMU_DIFF_HYPERVISOR_VERSION,
+    .size = sizeof(NemuDiffHypervisorAPI),
+    .xlen = XLEN,
+    .set_state = difftest_hypervisor_set_state,
+    .get_state = difftest_hypervisor_get_state,
+    .set_mtime = difftest_hypervisor_set_mtime,
+  };
+  return version == api.version && size == api.size ? &api : NULL;
+#else
+  (void)version;
+  (void)size;
+  return NULL;
+#endif
 }
 
 __EXPORT void difftest_checkpoint_sync(void *dut, uint32_t plic_ndev,

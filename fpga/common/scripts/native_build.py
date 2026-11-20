@@ -96,6 +96,10 @@ def configuration(args):
         result["cm005_ethernet"] = args.cm005_ethernet
     if getattr(args, "sampling", False):
         result["sampling"] = True
+    if getattr(args, "virtio_net", 0):
+        result["virtio_net"] = 1
+    if getattr(args, "qemu_bridge", 0):
+        result["qemu_bridge"] = 1
     return result
 
 
@@ -191,7 +195,8 @@ def firmware(args, out, values):
     isa = f"rv{args.xlen}imac_zicsr_zifencei"
     abi = "ilp32" if args.xlen == 32 else "lp64"
     flags = [f"-march={isa}", f"-mabi={abi}", "-mcmodel=medany", "-Os", "-g", "-ffreestanding",
-             "-fno-builtin", "-fno-stack-protector", "-msmall-data-limit=0", "-nostdlib", "-Werror", "-Wall",
+             "-fno-builtin", "-fno-stack-protector", "-fno-pie", "-no-pie",
+             "-msmall-data-limit=0", "-nostdlib", "-Werror", "-Wall",
              "-Wextra", "-Wl,--build-id=none", "-Wl,--no-relax"]
     if getattr(args, "sampling", False):
         flags.append("-DNATIVE_SAMPLING")
@@ -215,8 +220,10 @@ def firmware(args, out, values):
 
 def device_tree(args, out, ram_bytes):
     reg = region_map()
+    io_soc = bool(getattr(args, "virtio_net", 0) or getattr(args, "qemu_bridge", 0))
     ethernet = ""
-    if getattr(args, "ethernet", 0):
+    # With the I/O SoC, the stream bridge owns the native MAC; Linux must not bind it.
+    if getattr(args, "ethernet", 0) and not io_soc:
         ethernet = '''
         ethernet@18000000 {
             compatible = "raptor,native-ethernet-v1";
@@ -257,6 +264,65 @@ def device_tree(args, out, ram_bytes):
             litex,slot-size = <{layout['slot_size']}>;
         }};
 '''
+    soc_dma_prop = " dma-noncoherent;" if io_soc else ""
+    io_dts = ""
+    if io_soc:
+        io_dts += """
+        virtio_mmio@10002000 {
+            compatible = "virtio,mmio";
+            reg = <0 0x10002000 0 0x1000>;
+            interrupt-parent = <&plic>;
+            interrupts = <2>;
+            dma-noncoherent;
+        };
+"""
+    if getattr(args, "qemu_bridge", 0):
+        root_clocks = """    clocks {
+        sdhci_clk: sdhci-clock {
+            compatible = "fixed-clock";
+            #clock-cells = <0>;
+            clock-frequency = <50000000>;
+        };
+    };
+"""
+        io_dts += """
+        virtio_mmio@10001000 {
+            compatible = "virtio,mmio";
+            reg = <0 0x10001000 0 0x1000>;
+            interrupt-parent = <&plic>;
+            interrupts = <3>;
+            dma-noncoherent;
+        };
+        sdhci@42000000 {
+            compatible = "arasan,sdhci-8.9a", "generic-sdhci";
+            reg = <0 0x42000000 0 0x1000>;
+            interrupt-parent = <&plic>;
+            interrupts = <4>;
+            clocks = <&sdhci_clk>, <&sdhci_clk>;
+            clock-names = "clk_xin", "clk_ahb";
+            clock-frequency = <50000000>;
+            dma-noncoherent;
+        };
+        pci@41000000 {
+            compatible = "pci-host-ecam-generic";
+            device_type = "pci";
+            #address-cells = <3>;
+            #size-cells = <2>;
+            #interrupt-cells = <1>;
+            bus-range = <0x00 0x0f>;
+            reg = <0 0x41000000 0 0x01000000>;
+            ranges = <0x02000000 0x0 0x50000000 0x0 0x50000000 0x0 0x10000000>;
+            dma-noncoherent;
+            interrupt-map-mask = <0x0 0x0 0x0 0x7>;
+            interrupt-map =
+                <0x0 0x0 0x0 0x1 &plic 11>,
+                <0x0 0x0 0x0 0x2 &plic 12>,
+                <0x0 0x0 0x0 0x3 &plic 13>,
+                <0x0 0x0 0x0 0x4 &plic 14>;
+        };
+"""
+    else:
+        root_clocks = ""
     def cells(name):
         return f"0 0x{reg[name]['base']:x} 0 0x{reg[name]['size']:x}"
     vector = bool(getattr(args, "vector", 0))
@@ -297,8 +363,8 @@ def device_tree(args, out, ram_bytes):
     }};
     memory@{reg['main_ram']['base']:x} {{ device_type = "memory";
         reg = <0 0x{reg['main_ram']['base']:x} 0 0x{ram_bytes:x}>; }};
-    soc {{
-        #address-cells = <2>; #size-cells = <2>; compatible = "simple-bus"; ranges;
+{root_clocks}    soc {{
+        #address-cells = <2>; #size-cells = <2>; compatible = "simple-bus"; ranges;{soc_dma_prop}
         clint@{reg['clint']['base']:x} {{ compatible = "riscv,clint0";
             reg = <{cells('clint')}>; interrupts-extended = <&cpu_intc 3 &cpu_intc 7>; }};
         plic: interrupt-controller@{reg['plic']['base']:x} {{
@@ -312,7 +378,7 @@ def device_tree(args, out, ram_bytes):
             interrupt-parent = <&plic>; interrupts = <1>;
             fifo-size = <1>; tx-threshold = <0>; no-loopback-test;
         }};
-{ethernet}
+{ethernet}{io_dts}
     }};
 }};
 """
@@ -431,11 +497,21 @@ def prepare(args, out):
         config += "`define NATIVE_WITH_CM005_BRIDGE\n"
     if args.sampling:
         config += "`define RAPT_SAMPLING\n`define NATIVE_WITH_SAMPLING\n"
+    if getattr(args, "virtio_net", 0) or getattr(args, "qemu_bridge", 0):
+        config += (
+            "`define NATIVE_WITH_IO_SOC\n"
+            f"`define NATIVE_LOCAL_VIRTIO_NET {int(getattr(args, 'virtio_net', 0))}\n"
+            f"`define NATIVE_QEMU_BRIDGE {int(getattr(args, 'qemu_bridge', 0))}\n"
+        )
     (sources / "native_config.svh").write_text(config)
     names = ["native_config.svh", "rapt_pack.sv", "native_map.sv",
              "rapt_native_uart.sv", "rapt_native_bus.sv"]
     if args.sampling:
         names += ["rapt_sample_window.sv", "rapt_sample_bridge.sv"]
+    else:
+        names += ["rapt_axi4_dma_arb.sv", "rapt_eth_rqio_mux.sv",
+                  "rapt_virtio_mmio_net.sv", "rapt_qemu_io_bridge.sv",
+                  "rapt_native_io_bus.sv", "rapt_native_io_soc.sv"]
     names.append("rapt_native_soc.sv")
     (sources / "soc_sources.sv").write_text("".join(f'`include "{name}"\n' for name in names))
     eth_names = ["rgmii_lfsr.sv", "axis_gmii_rx.sv", "axis_gmii_tx.sv", "eth_mac_1g.sv",
@@ -468,7 +544,8 @@ def prepare(args, out):
 
 
 def verilator(args, out, top, testbench=None, binary=False):
-    command = ["verilator", "--binary" if binary else "--lint-only", "--timing", "--assert", "-Wno-fatal",
+    command = ["verilator", "--binary" if binary else "--lint-only", "--timing",
+               "-fno-dfg-break-cycles", "--output-split-cfuncs", "0", "--assert", "-Wno-fatal",
                "--top-module", top, "-I" + str(out / "sources"), "-I" + str(REPO / "rtl/include"),
                "-I" + str(REPO / "rtl/include/npc"), "-I" + str(COMMON / "tests"), out / "sources/soc_sources.sv"]
     if testbench:
@@ -556,6 +633,10 @@ def main():
     parser.add_argument("--reset-button", type=int, choices=(0, 1), default=0)
     parser.add_argument("--ethernet", type=int, choices=(0, 1), default=0,
                         help="enable native gigabit Ethernet on supported boards")
+    parser.add_argument("--virtio-net", type=int, choices=(0, 1), default=0,
+                        help="expose hardware Split-Virtqueue AXI4-DMA virtio-mmio NIC")
+    parser.add_argument("--qemu-bridge", type=int, choices=(0, 1), default=0,
+                        help="enable FPGA-to-QEMU RQIO MMIO/IRQ/AXI4-DMA tunnel bridge")
     parser.add_argument("--sampling", action="store_true",
                         help="enable JTAG checkpoint replay and hardware sample windows (RV64 CU08)")
     parser.add_argument("--vector", choices=("auto", "0", "1"), default="auto",
@@ -594,6 +675,10 @@ def main():
         parser.error("CM005 CPU Ethernet requires this board's CM005 forwarder")
     if args.cm005_bridge and args.clock_mhz != 50:
         parser.error("CM005 forwarding currently requires CLOCK_MHZ=50; disable it explicitly for other clocks")
+    if (args.virtio_net or args.qemu_bridge) and (args.sampling or args.cm005_bridge or
+                                                  not args.ethernet):
+        parser.error("--virtio-net/--qemu-bridge share the native MAC: they require --ethernet 1 "
+                     "without sampling or CM005 forwarding")
     if args.jobs <= 0 or args.jobs > 32:
         parser.error("jobs must be between 1 and 32")
     if args.ram_bytes < 16384 or args.ram_bytes > 1048576 or args.ram_bytes & (args.ram_bytes - 1):
@@ -622,9 +707,12 @@ def main():
         manifest = prepare(args, out)
         if args.action == "lint":
             verilator(args, out, "rapt_native_soc")
+            if not args.sampling:
+                verilator(args, out, "rapt_native_io_soc")
         elif args.action == "test":
             run([sys.executable, "-m", "unittest", "discover", "-s", COMMON / "tests", "-p", "test_*.py", "-v"])
-            for top in ("tb_native_bus", "tb_native_uart"):
+            for top in ("tb_native_bus", "tb_native_uart",
+                        "tb_virtio_mmio_net", "tb_qemu_io_bridge"):
                 verilator(args, out, top, COMMON / "tests" / (top + ".sv"), binary=True)
         elif args.action == "sim":
             verilator(args, out, "tb_native_boot", COMMON / "tests/tb_native_boot.sv", binary=True)

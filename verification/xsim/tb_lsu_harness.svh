@@ -126,6 +126,11 @@ task automatic init_lsu_inputs(
     lsu_l1d.trap = 1'b0;
     lsu_l1d.cause = '0;
     lsu_l1d.difftest_skip = 1'b0;
+`ifdef RAPT_H_EXTENSION
+    lsu_l1d.rpbmt = '0;
+    lsu_l1d.gpaddr = '0;
+    lsu_l1d.gptw = 1'b0;
+`endif
     lsu_l1d.rready = 1'b0;
     lsu_l1d.rretry = 1'b0;
     lsu_l1d.rmiss = 1'b0;

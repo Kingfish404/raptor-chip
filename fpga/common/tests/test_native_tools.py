@@ -90,11 +90,13 @@ class NativeToolsTests(unittest.TestCase):
                     tree = (Path(temp) / "native.dts").read_text()
                     isa = f'riscv,isa = "rv{xlen}imafdc'
                     profile = xlen == 64 and enabled
-                    letters = 'bv' if profile else 'v' if enabled else ''
+                    letters = 'bvh' if profile else 'v' if enabled else ''
                     self.assertIn(isa + letters + '_', tree)
                     extensions = tree.split('riscv,isa-extensions = ', 1)[1].split(';', 1)[0]
                     self.assertEqual('"v"' in extensions, bool(enabled))
                     self.assertEqual('"ssnpm"' in extensions, bool(profile))
+                    self.assertEqual('"h"' in extensions, bool(profile))
+                    self.assertEqual('"svnapot"' in extensions, bool(profile))
                     self.assertEqual('riscv,cboz-block-size = <64>' in tree, bool(profile))
 
     def test_source_identity_tracks_generated_rtl_and_phy_helper_but_not_chisel_cache(self):

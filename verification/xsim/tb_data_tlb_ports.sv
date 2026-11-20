@@ -25,6 +25,14 @@ module data_tlb_ports_case #(
       .sfence_asid('0),
       .sfence_all_vpn(1'b1),
       .sfence_all_asid(1'b1),
+`ifdef RAPT_H_EXTENSION
+      .lookup_mode(2'b00),
+      .g_perm(),
+      .lookup_b_mode(2'b00),
+      .g_perm_b(),
+      .fill_mode(2'b00),
+      .fill_g_perm(3'b111),
+`endif
       .fill_level(2'd0),
       .*
   );

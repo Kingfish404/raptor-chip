@@ -1,0 +1,19 @@
+/include/ "spike-rva23-nemu.dts"
+
+/ {
+    model = "Raptor NEMU RVA23 distribution boot";
+    chosen {
+        bootargs = "console=ttyS0,115200 earlycon=sbi root=/dev/vda rw rootwait init=/sbin/init unaligned_scalar_speed=fast unaligned_vector_speed=fast random.trust_bootloader=on systemd.show_status=yes";
+    };
+    memory@80000000 {
+        reg = <0 0x80000000 0 0x40000000>;
+    };
+    soc {
+        virtio_blk@10001000 {
+            compatible = "virtio,mmio";
+            reg = <0 0x10001000 0 0x1000>;
+            interrupt-parent = <&plic0>;
+            interrupts = <1>;
+        };
+    };
+};

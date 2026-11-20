@@ -388,7 +388,7 @@ enum {
 int riscv_gstage_translate(paddr_t guest_address, bool store, bool execute_access,
                            bool cmo, bool implicit, paddr_t *physical_address, uint8_t *pbmt);
 int riscv_vstage_translate(vaddr_t guest_address, bool store, bool execute_access,
-                           bool virtual_supervisor, bool cmo,
+                           bool hlvx_sum_ok, bool virtual_supervisor, bool cmo,
                            paddr_t *physical_address, paddr_t *fault_address,
                            bool *page_table_write, uint8_t *pbmt);
 #endif

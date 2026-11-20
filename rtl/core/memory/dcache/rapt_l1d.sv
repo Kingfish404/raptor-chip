@@ -283,6 +283,28 @@ module rapt_l1d #(
   // The load and store-translation ports can wait concurrently, even at the
   // same VA. A shared TRAP state must complete only the captured owner.
   logic rec_store;
+`ifdef RAPT_H_EXTENSION
+  logic l1d_exec;
+  logic ptw_exec_q, ptw_vs_bare_q;
+  logic [1:0] ptw_mode_q;
+  logic ptw_guest_fault, ptw_fault_ptw, rec_gptw;
+  logic [XLEN-1:2] ptw_fault_gpa, rec_gpa;
+  logic [2:0] dtlb_g_perm, dstlb_g_perm, ptw_result_g_perm;
+  wire load_guest = lsu_l1d.rguest;
+  wire load_vs_bare = load_guest && !csr_bcast.vsatp_en;
+  wire [1:0] load_tlb_mode = !load_guest ? 2'b00 : (csr_bcast.vsatp_en ? 2'b01 : 2'b10);
+  wire store_guest = exu_l1d.guest;
+  wire store_vs_bare = store_guest && !csr_bcast.vsatp_en;
+  wire [1:0] store_tlb_mode = !store_guest ? 2'b00 : (csr_bcast.vsatp_en ? 2'b01 : 2'b10);
+  wire hgatp_dtlb_flush = csr_bcast.hgatp_flush;
+  wire load_req_exec = lsu_l1d.rexec;
+`else
+  wire load_vs_bare = 1'b0;
+  wire store_vs_bare = 1'b0;
+  wire ptw_vs_bare_q = 1'b0;
+  wire hgatp_dtlb_flush = 1'b0;
+  wire load_req_exec = 1'b0;
+`endif
 
   // Tag and valid arrays (kept as registers for multi-port read and fast bulk invalidation)
   // Per-line tag + per-word valid: one tag per (way, set); each word in a
@@ -599,7 +621,8 @@ module rapt_l1d #(
       || (!TargetedCoherence && !L2Inclusive && cmu_bcast.cbo_inval)
       || ((L2Inclusive || !TargetedCoherence) && (writeback_cbo || coherent_request || coherent_write
           || ptw_arvalid || (lsu_l1d.wvalid && (!cacheable_w || lsu_l1d.wzero))
-          || (l1d_state == LD_A && (!cacheable_r || l1d_atomic_lock)))));
+          || (l1d_state == LD_A && !load_perm_denied_q
+              && (!cacheable_r || l1d_atomic_lock)))));
   assign target_cbo = TargetedCoherence && writeback_cbo && !cbo_done_q;
   assign target_store = lsu_l1d.wvalid && !cacheable_w && rapt_pkg::addr_cacheable(lsu_l1d.waddr);
   assign target_load = l1d_state == LD_A && !load_perm_denied_q && !vector_probe
@@ -1108,7 +1131,7 @@ module rapt_l1d #(
   assign cached_first = {1'b0, lsu_l1d.raddr[11:0]}
       + (lsu_l1d.rcheck_valid ? 13'(lsu_l1d.rcheck_offset) : 13'd0);
   assign cached_last = cached_first + 13'(cached_size);
-  assign cached_load_check = dtlb_verdict[VUniform]
+  assign cached_load_check = dtlb_verdict[VUniform] && !load_req_exec
       && cached_last < 13'd4096 && cached_size <= 7 && !pmp_flush;
   assign cached_load_denied = !dtlb_verdict[VRead] || !dtlb_verdict[VMapped]
       || (dtlb_verdict[VWidth32] && (cached_orig_size != 3 || cached_first[1:0] != 0))
@@ -1118,6 +1141,24 @@ module rapt_l1d #(
               : lsu_l1d.raddr[1:0] != 0)));
   logic dtlb_fill;
   assign dtlb_fill = (l1d_state == PTWAIT) && ptw_done;
+
+  logic raw_tlb_hit, raw_stlb_hit;
+  logic raw_pf_load_tlb, raw_pf_store_tlb, raw_pf_load_ptw, raw_pf_store_ptw;
+  logic pf_load_tlb, pf_store_tlb;
+`ifdef RAPT_H_EXTENSION
+  wire dtlb_g_read_ok = dtlb_g_perm[0] || (csr_bcast.mxr && dtlb_g_perm[1]);
+  wire dtlb_g_ok = !load_guest || !csr_bcast.hgatp_en
+      || (lsu_l1d.rexec ? dtlb_g_perm[1] : dtlb_g_read_ok);
+  wire dstlb_g_ok = !store_guest || !csr_bcast.hgatp_en
+      || (exu_l1d.cmo_mgmt
+          ? (dstlb_g_perm[0] || dstlb_g_perm[2] || (csr_bcast.mxr && dstlb_g_perm[1]))
+          : dstlb_g_perm[2]);
+`else
+  wire dtlb_g_ok = 1'b1;
+  wire dstlb_g_ok = 1'b1;
+`endif
+  assign tlb_hit = raw_tlb_hit && (pf_load_tlb || dtlb_g_ok);
+  assign stlb_hit = raw_stlb_hit && (pf_store_tlb || dstlb_g_ok);
 
   if (`RAPT_DTLB_POLICY < 0 || `RAPT_DTLB_POLICY > 2
       || `RAPT_DSTLB_POLICY < 0 || `RAPT_DSTLB_POLICY > 2) begin : g_invalid_dtlb_policy
@@ -1135,7 +1176,8 @@ module rapt_l1d #(
   ) u_dtlb (
       .clock(clock),
       .reset(reset),
-      .flush((`RAPT_SFENCE_SELECTIVE == 0 && cmu_bcast.fence_time) || pmp_flush),
+      .flush((`RAPT_SFENCE_SELECTIVE == 0 && cmu_bcast.fence_time)
+          || pmp_flush || hgatp_dtlb_flush),
       .sfence_valid(cmu_bcast.sfence_valid),
       .sfence_vpn(cmu_bcast.sfence_vpn),
       .sfence_asid(cmu_bcast.sfence_asid),
@@ -1148,7 +1190,11 @@ module rapt_l1d #(
           && !(WriteBack && coherent_write)
           && (!lsu_l1d.atomic_lock || !exu_l1d.reservation_blocked)),
       .lookup_asid(lsu_l1d.rcontext.asid),
-      .hit(tlb_hit),
+`ifdef RAPT_H_EXTENSION
+      .lookup_mode(load_tlb_mode),
+      .g_perm(dtlb_g_perm),
+`endif
+      .hit(raw_tlb_hit),
       .ptag(dtlb_ptag),
       .pte_flags(dtlb_pte),
       .pbmt(dtlb_pbmt),
@@ -1156,7 +1202,11 @@ module rapt_l1d #(
       .lookup_b_vtag(exu_l1d.vaddr[XLEN-1:12]),
       .lookup_b_valid(store_check_capture && !cmu_bcast.flush_pipe),
       .lookup_b_asid(exu_l1d.mem_context.asid),
-      .hit_b(stlb_hit),
+`ifdef RAPT_H_EXTENSION
+      .lookup_b_mode(store_tlb_mode),
+      .g_perm_b(dstlb_g_perm),
+`endif
+      .hit_b(raw_stlb_hit),
       .ptag_b(dstlb_ptag),
       .pte_flags_b(dstlb_pte),
       .pbmt_b(dstlb_pbmt),
@@ -1166,6 +1216,10 @@ module rapt_l1d #(
       .fill_ptag(ptw_result_ptag),
       .fill_vtag(ptw_result_vtag),
       .fill_asid(ptw_context_q.asid),
+`ifdef RAPT_H_EXTENSION
+      .fill_mode(ptw_mode_q),
+      .fill_g_perm(ptw_result_g_perm),
+`endif
       .fill_pbmt(ptw_result_pbmt),
       .fill_level(ptw_result_level),
       .fill_pte(ptw_result_pte)
@@ -1176,7 +1230,18 @@ module rapt_l1d #(
   // invalidation removes its TLB entry before the requester consumes ready.
   assign store_tlb_miss = exu_l1d.mmu_en && exu_l1d.valid && !store_check_valid
       && !stlb_hit && !mis_align_store;
-  assign ptw_vaddr = store_tlb_miss ? exu_l1d.vaddr : lsu_l1d.raddr;
+  wire [XLEN-1:0] load_ptw_vaddr = {
+    lsu_l1d.raddr[XLEN-1:3], lsu_l1d.rcheck_valid ? lsu_l1d.rcheck_offset : lsu_l1d.raddr[2:0]
+  };
+  assign ptw_vaddr = store_tlb_miss ? exu_l1d.vaddr : load_ptw_vaddr;
+`ifdef RAPT_H_EXTENSION
+  wire ptw_req_guest = store_tlb_miss ? store_guest : load_guest;
+  wire ptw_req_exec = !store_tlb_miss && lsu_l1d.rexec;
+  wire [1:0] ptw_req_mode = store_tlb_miss ? store_tlb_mode : load_tlb_mode;
+  wire ptw_req_pbmte = ptw_req_guest ? csr_bcast.menvcfg_pbmte : ptw_request_context.pbmte;
+`else
+  wire ptw_req_pbmte = ptw_request_context.pbmte;
+`endif
 
   logic ptw_read_error, ptw_bus_error, ptw_access_fault;
   logic pf_load_ptw, pf_store_ptw;
@@ -1216,11 +1281,24 @@ module rapt_l1d #(
       .vaddr(ptw_vaddr),
       .satp_ppn(csr_bcast.satp_ppn),
       .mmu_en(ptw_request_context.mmu_en),
-      .pbmte(ptw_request_context.pbmte),
+      .pbmte(ptw_req_pbmte),
       .sbe(csr_bcast.sbe),
       // CBO management checks A but not D; make the Svade walker treat it as
       // a non-store while the requester applies the CMO R-or-W permission.
       .req_store(store_tlb_miss && !exu_l1d.cmo_mgmt),
+`ifdef RAPT_H_EXTENSION
+      .guest_en(ptw_req_guest),
+      .vs_en(csr_bcast.vsatp_en),
+      .vsatp_ppn(csr_bcast.vsatp_ppn),
+      .g_en(csr_bcast.hgatp_en),
+      .hgatp_ppn(csr_bcast.hgatp_ppn),
+      .vs_priv_s(ptw_request_context.eff_priv == `RAPT_PRIV_S),
+      .vs_sum(ptw_request_context.sum),
+      .vs_mxr(ptw_request_context.mxr),
+      .vs_pbmte(csr_bcast.henvcfg_pbmte),
+      .g_mxr(csr_bcast.mxr),
+      .req_exec(ptw_req_exec),
+`endif
       .bus_arvalid(ptw_arvalid),
       .bus_araddr(ptw_araddr),
       .bus_arready(ptw_read_accepted),
@@ -1229,6 +1307,12 @@ module rapt_l1d #(
       .done(ptw_done),
       .fault(ptw_fault),
       .access_fault(ptw_access_fault),
+`ifdef RAPT_H_EXTENSION
+      .guest_fault(ptw_guest_fault),
+      .fault_gpa(ptw_fault_gpa),
+      .fault_ptw(ptw_fault_ptw),
+      .result_g_perm(ptw_result_g_perm),
+`endif
       .result_ptag(ptw_result_ptag),
       .result_vtag(ptw_result_vtag),
       .result_pte(ptw_result_pte),
@@ -1574,13 +1658,21 @@ module rapt_l1d #(
   ));
   logic capture_load_denied;
   logic capture_refill_safe;
+`ifdef RAPT_H_EXTENSION
+  wire perm_exec = idle_load_perm ? lsu_l1d.rexec : l1d_exec;
+  wire access_load_exec = (l1d_state == IDLE) ? lsu_l1d.rexec : l1d_exec;
+`else
+  wire perm_exec = 1'b0;
+`endif
   // LR never forwards from SQ. Check its translated physical address before
   // either a cache-hit response or an external read can establish reservation.
-  assign load_unmapped_fault = load_region_unmapped_fault || !rapt_pkg::addr_device_width_capable(
-      perm_load_addr, perm_check_valid ? perm_orig_size_m1 : perm_load_size_m1
-  ) || (perm_atomic && !rapt_pkg::addr_atomic_capable(
-      perm_base_addr, perm_ralu_size == 2'b11 ? 4'd7 : 4'd3
-  ));
+  assign load_unmapped_fault = load_region_unmapped_fault
+      || (perm_exec && rapt_pkg::addr_device(perm_base_addr))
+      || !rapt_pkg::addr_device_width_capable(
+          perm_load_addr, perm_check_valid ? perm_orig_size_m1 : perm_load_size_m1
+      ) || (perm_atomic && !rapt_pkg::addr_atomic_capable(
+          perm_base_addr, perm_ralu_size == 2'b11 ? 4'd7 : 4'd3
+      ));
   assign capture_load_denied = pmp_load_fault || load_unmapped_fault || capture_io_size_fault;
   assign capture_refill_safe = rapt_pkg::addr_cacheable(
       perm_base_addr
@@ -1590,7 +1682,10 @@ module rapt_l1d #(
               | XLEN'((1 << L1dLineOffset) - 1)
   );
   logic pmp_store_fault_mmu, store_unmapped_fault_mmu, pmp_ptw_fault;
-  logic pf_load_tlb, pf_store_tlb;
+  assign pf_load_tlb = !load_vs_bare && raw_pf_load_tlb;
+  assign pf_store_tlb = !store_vs_bare && raw_pf_store_tlb;
+  assign pf_load_ptw = !ptw_vs_bare_q && raw_pf_load_ptw;
+  assign pf_store_ptw = !ptw_vs_bare_q && raw_pf_store_ptw;
   rapt_l1d_access #(
       .XLEN(XLEN),
       .ShareLoadWalk(1'b1)
@@ -1606,8 +1701,12 @@ module rapt_l1d #(
       .load_size_m1(perm_load_size_m1),
       .store_walu(8'(exu_l1d.walu)),
       .cmo_mgmt(exu_l1d.cmo_mgmt),
-      .tlb_hit(tlb_hit),
-      .stlb_hit(stlb_hit),
+`ifdef RAPT_H_EXTENSION
+      .load_exec(access_load_exec),
+      .ptw_exec(ptw_exec_q),
+`endif
+      .tlb_hit(raw_tlb_hit),
+      .stlb_hit(raw_stlb_hit),
       .dtlb_pte(dtlb_pte),
       .dstlb_pte(dstlb_pte),
       .ptw_result_pte(ptw_result_pte),
@@ -1616,10 +1715,10 @@ module rapt_l1d #(
       .pmp_store_fault_mmu(pmp_store_fault_mmu),
       .store_unmapped_fault_mmu(store_unmapped_fault_mmu),
       .pmp_ptw_fault(pmp_ptw_fault),
-      .pf_load_tlb(pf_load_tlb),
-      .pf_store_tlb(pf_store_tlb),
-      .pf_load_ptw(pf_load_ptw),
-      .pf_store_ptw(pf_store_ptw)
+      .pf_load_tlb(raw_pf_load_tlb),
+      .pf_store_tlb(raw_pf_store_tlb),
+      .pf_load_ptw(raw_pf_load_ptw),
+      .pf_store_ptw(raw_pf_store_ptw)
   );
 
   // The shared read checker selects the walker's registered PTE address
@@ -1700,6 +1799,13 @@ module rapt_l1d #(
   assign lsu_l1d.trap = (l1d_state == TRAP) && !rec_store && (rec_addr == lsu_l1d.raddr)
       && !load_killed && !cmu_bcast.flush_pipe;
   assign lsu_l1d.cause = cause;
+`ifdef RAPT_H_EXTENSION
+  assign lsu_l1d.rpbmt = l1d_pbmt;
+  assign lsu_l1d.gpaddr = rec_gpa;
+  assign lsu_l1d.gptw = rec_gptw;
+  assign exu_l1d.gpaddr = rec_gpa;
+  assign exu_l1d.gptw = rec_gptw;
+`endif
   // LD_A consumes the permission result registered with the SRAM speculation.
   // Live PMP decode stays off the ready/fast-wakeup path.
   // A translated device load may be younger than a not-yet-ready RAM load.
@@ -1889,9 +1995,24 @@ module rapt_l1d #(
       refill_line <= 0;
       refill_word <= '0;
       demand_done <= 0;
+`ifdef RAPT_H_EXTENSION
+      l1d_exec <= 1'b0;
+      ptw_exec_q <= 1'b0;
+      ptw_vs_bare_q <= 1'b0;
+      ptw_mode_q <= 2'b00;
+      rec_gpa <= '0;
+      rec_gptw <= 1'b0;
+`endif
 
     end else begin
-      if (ptw_req) ptw_context_q <= ptw_request_context;
+      if (ptw_req) begin
+        ptw_context_q <= ptw_request_context;
+`ifdef RAPT_H_EXTENSION
+        ptw_exec_q <= ptw_req_exec;
+        ptw_vs_bare_q <= ptw_req_guest && !csr_bcast.vsatp_en;
+        ptw_mode_q <= ptw_req_mode;
+`endif
+      end
       fence_clear_set <= WriteBack && wb_hold ? fence_clear_set | maintenance_set : maintenance_set;
       if (probe_valid_i && l1d_state == LD_D && addr_idx == probe_set && addr_tag == probe_tag)
         load_killed <= 1'b1;
@@ -1943,6 +2064,9 @@ module rapt_l1d #(
                   l1d_check_size_m1 <= lsu_l1d.rcheck_size_m1;
                   l1d_orig_size_m1 <= lsu_l1d.rorig_size_m1;
                   l1d_atomic_lock <= lsu_l1d.atomic_lock;
+`ifdef RAPT_H_EXTENSION
+                  l1d_exec <= lsu_l1d.rexec;
+`endif
                   if (cached_load_check) begin
                     load_perm_denied_q <= cached_load_denied;
                     refill_safe <= dtlb_verdict[VCacheable] && dtlb_pbmt == 2'b00
@@ -1964,6 +2088,9 @@ module rapt_l1d #(
                   l1d_check_size_m1 <= lsu_l1d.rcheck_size_m1;
                   l1d_orig_size_m1 <= lsu_l1d.rorig_size_m1;
                   l1d_atomic_lock <= lsu_l1d.atomic_lock;
+`ifdef RAPT_H_EXTENSION
+                  l1d_exec <= lsu_l1d.rexec;
+`endif
                   stlb_mmu <= 'b0;
                   l1d_state <= PTWAIT;
                 end
@@ -1982,6 +2109,9 @@ module rapt_l1d #(
                 l1d_check_size_m1 <= lsu_l1d.rcheck_size_m1;
                 l1d_orig_size_m1 <= lsu_l1d.rorig_size_m1;
                 l1d_atomic_lock <= lsu_l1d.atomic_lock;
+`ifdef RAPT_H_EXTENSION
+                l1d_exec <= lsu_l1d.rexec;
+`endif
                 if (ptw_arvalid) l1d_state <= LD_CHECK;
                 else begin
                   load_perm_denied_q <= capture_load_denied;
@@ -2025,12 +2155,25 @@ module rapt_l1d #(
               l1d_state <= LD_CHECK;
             end
           end else if (ptw_fault) begin
+`ifdef RAPT_H_EXTENSION
+            if (stlb_mmu) begin
+              cause <= ptw_guest_fault
+                  ? `RAPT_CAUSE_STORE_GUEST_PAGE_FAULT : `RAPT_CAUSE_STORE_PAGE_FAULT;
+              stlb_mmu <= 'b0;
+            end else begin
+              cause <= ptw_guest_fault
+                  ? `RAPT_CAUSE_LOAD_GUEST_PAGE_FAULT : `RAPT_CAUSE_LOAD_PAGE_FAULT;
+            end
+            rec_gpa <= ptw_fault_gpa;
+            rec_gptw <= ptw_fault_ptw;
+`else
             if (stlb_mmu) begin
               cause <= 'hf;  // store page fault
               stlb_mmu <= 'b0;
             end else begin
               cause <= 'hd;  // load page fault
             end
+`endif
             l1d_state <= TRAP;
           end
         end

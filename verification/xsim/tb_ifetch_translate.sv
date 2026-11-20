@@ -29,6 +29,17 @@ module tb_ifetch_translate;
       .pmp_read_o(),
       .pmp_fault_i(1'b0),
       .pmp_read_fault_i(1'b0),
+`ifdef RAPT_H_EXTENSION
+      .guest_en(1'b0),
+      .vs_en(1'b0),
+      .vsatp_ppn('0),
+      .g_en(1'b0),
+      .hgatp_ppn('0),
+      .vs_pbmte(1'b0),
+      .g_mxr(1'b0),
+      .response_gpa(),
+      .response_gptw(),
+`endif
       .*
   );
   `include "tb_common.svh"

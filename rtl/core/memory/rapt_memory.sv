@@ -99,6 +99,11 @@ module rapt_memory #(
   rapt_pkg::l2tlb_req_t l2tlb_req [2];
   rapt_pkg::l2tlb_rsp_t l2tlb_rsp [2];
   logic [1:0] l2tlb_ready;
+`ifdef RAPT_H_EXTENSION
+  wire hgatp_tlb_flush = csr_bcast.hgatp_flush;
+`else
+  wire hgatp_tlb_flush = 1'b0;
+`endif
   if (`RAPT_L2TLB_ENTRIES > 0) begin : g_l2tlb
     rapt_l2tlb #(
         .Entries(`RAPT_L2TLB_ENTRIES),
@@ -107,7 +112,7 @@ module rapt_memory #(
         .sram_ctrl_i(sram_ctrl_i),
         .clock(clock),
         .reset(reset),
-        .flush(`RAPT_SFENCE_SELECTIVE == 0 && cmu_bcast.fence_time),
+        .flush((`RAPT_SFENCE_SELECTIVE == 0 && cmu_bcast.fence_time) || hgatp_tlb_flush),
         .cancel(cmu_bcast.fence_time),
         .sfence_valid(cmu_bcast.sfence_valid),
         .sfence_vpn(cmu_bcast.sfence_vpn),

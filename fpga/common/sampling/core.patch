@@ -64,7 +64,7 @@
        .debug        (debug),
        .halted_o     (dm_halted),
        .halt_pc_o    (dm_halt_pc),
-@@ -397,11 +424,15 @@
+@@ -397,12 +424,16 @@
  
        .dbg_gpr_rdata_o(dm_dbg_gpr_rdata),
        .dbg_gpr_we_i   (dm_dbg_gpr_we),
@@ -74,12 +74,13 @@
  
        .reset(core_reset)
    );
-+
+ 
 +`ifdef RAPT_SAMPLING
 +  assign sample.gpr_data = dm_dbg_gpr_rdata;
 +`endif
- 
++
    assign dm_resumereq_unused = dm_resumereq;
+ 
  
 --- a/rtl/core/rapt_core.sv
 +++ b/rtl/core/rapt_core.sv
@@ -121,10 +122,10 @@
 +`else
 +  assign sample_writeback_drain = 1'b0;
 +`endif
-   rapt_backend #(
-       .XLEN(XLEN),
-       .RegisteredDrainCompletion(1'b1),
-@@ -175,6 +193,9 @@
+ `ifdef RAPT_H_EXTENSION
+   logic [XLEN-1:2] ifetch_gpf_gpa_q;
+   logic ifetch_gpf_ptw_q;
+@@ -188,6 +206,9 @@
            rapt_pkg::CoreConfig
        )))
    ) backend (
@@ -134,7 +135,7 @@
        .writeback_done(cache_writeback_done),
        .writeback_drain(cache_writeback_drain),
        .writeback_clean(cache_writeback_clean),
-@@ -278,10 +299,10 @@
+@@ -296,10 +317,10 @@
        .writeback_idle_o(unused_writeback_idle),
        .writeback_done_o(cache_writeback_done),
        .stores_empty_i(sq_empty),
@@ -151,7 +152,7 @@
        .external_write_valid_i(external_write_valid_i),
 --- a/rtl/core/backend/rapt_backend.sv
 +++ b/rtl/core/backend/rapt_backend.sv
-@@ -23,6 +23,9 @@
+@@ -30,6 +30,9 @@
      parameter logic [rapt_pkg::CompletionPorts-1:0] RegisteredOperandWakePorts = '0
  ) (
      input logic clock,
@@ -161,7 +162,7 @@
      input rapt_pkg::sram_ctrl_t sram_ctrl_i,
      input logic writeback_done,
      output logic writeback_drain,
-@@ -111,6 +114,21 @@
+@@ -122,6 +125,21 @@
    rou_cmu_if rou_cmu ();  // Commit
  
    rou_csr_if rou_csr ();
@@ -183,7 +184,7 @@
  
    dpu_iq_if disp_alq ();
    dpu_iq_if #(.RS_SIZE(rapt_pkg::BranchQueueEntries)) disp_brq ();
-@@ -1304,6 +1322,9 @@
+@@ -1650,6 +1668,9 @@
  
    rapt_csr csrs (
        .clock  (clock),
@@ -218,8 +219,8 @@
    for (genvar i = 0; i < 64; i++) begin : g_csr_view
      if (i == int'(MISA___)) begin : g_misa
        assign csr[i] = XLEN'(rapt_pkg::Misa);
-@@ -1044,7 +1053,21 @@
-           csr_state[MSTATUS] <= sret_mstatus_next;
+@@ -1360,7 +1369,21 @@
+           end
          end
        end
 -

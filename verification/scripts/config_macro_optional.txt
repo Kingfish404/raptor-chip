@@ -28,3 +28,11 @@ RAPT_ZFA # Optional RV64 additional floating-point instructions.
 RAPT_ZICCLSM_VECTOR # Split misaligned vector elements in main memory.
 RAPT_RVA23U64 # Effective RV64 user profile, derived from the FP and vector configuration.
 RAPT_NO_RVA23U64 # Select baseline V and scalar ISA on an RV64 application preset.
+RAPT_RVA23S64 # Effective RV64 supervisor profile, derived from RAPT_RVA23U64 unless disabled.
+RAPT_NO_RVA23S64 # Keep RVA23U64 without enabling the RVA23S64 supervisor extensions.
+RAPT_SVNAPOT # Optional Sv39 / Sv39x4 64 KiB NAPOT leaf page-table entries.
+RAPT_SSCOFPMF # Optional scountovf, RV32 mhpmeventh and LCOFI counter-overflow interrupt.
+RAPT_SMSTATEEN # Optional Smstateen/Ssstateen state-enable CSRs and access gating.
+RAPT_H_EXTENSION # Optional RV64 Hypervisor extension (Sha, Sstc vstimecmp, Svinval H-fences).
+RAPT_NO_H_EXTENSION # Keep RVA23S64 sub-extensions without enabling the Hypervisor extension.
+RAPT_SMNPM # Optional RV64 HS-mode pointer masking through menvcfg.PMM.

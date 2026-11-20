@@ -168,5 +168,11 @@ task automatic init_ioq_inputs(input logic dmmu_en);
     exu_l1d.reservation_size_m1 = 4'd3;
     exu_l1d.reservation_blocked = 1'b0;
     exu_l1d.ready = 1'b0;
+`ifdef RAPT_H_EXTENSION
+    exu_lsu.gpaddr = '0;
+    exu_lsu.gptw = 1'b0;
+    exu_l1d.gpaddr = '0;
+    exu_l1d.gptw = 1'b0;
+`endif
   end
 endtask

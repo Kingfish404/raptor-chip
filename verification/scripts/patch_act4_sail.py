@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 REQUIRED_SAIL_VERSION = 'REQUIRED_SAIL_VERSION = "0.10"'
+UPSTREAM_SAIL_016 = 'REQUIRED_SAIL_VERSION = "0.16"'
 PATCHED_SAIL_VERSION = 'REQUIRED_SAIL_VERSION = "0.13.1"'
 ORIGINAL_CONFIG_ARGS = 'sail_cmd.extend(["--config", str(sail_config_path)])'
 PATCHED_CONFIG_ARGS = (
@@ -38,8 +39,11 @@ def main() -> None:
     args = parser.parse_args()
 
     source_dir = args.repo / "framework/src/act"
+    config_py = source_dir / "config.py"
+    if UPSTREAM_SAIL_016 in config_py.read_text(encoding="utf-8"):
+        return
     replace_once(
-        source_dir / "config.py",
+        config_py,
         REQUIRED_SAIL_VERSION,
         PATCHED_SAIL_VERSION,
     )

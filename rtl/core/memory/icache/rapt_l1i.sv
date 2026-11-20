@@ -353,6 +353,21 @@ module rapt_l1i #(
   logic slow_xvalid, slow_xready, slow_xresponse, slow_xfault;
   logic [XLEN-1:0] slow_va, slow_pa, slow_xcause;
   logic [1:0] slow_pbmt;
+`ifdef RAPT_H_EXTENSION
+  logic [XLEN-1:2] slow_xgpa, slow_gpa, ptw_fault_gpa, rec_gpa;
+  logic slow_xgptw, slow_gptw, ptw_guest_fault, ptw_fault_ptw, rec_gptw;
+  wire [2:0] unused_iptw_g_perm;
+  wire vs_bare_fetch = csr_bcast.virt && !csr_bcast.vsatp_en;
+  wire [1:0] itlb_mode = !csr_bcast.virt ? 2'b00 : (csr_bcast.vsatp_en ? 2'b01 : 2'b10);
+  wire [8:0] itlb_asid = csr_bcast.virt
+      ? (csr_bcast.vsatp_en ? csr_bcast.vsatp_asid : 9'd0)
+      : csr_bcast.satp_asid;
+  wire hgatp_itlb_flush = csr_bcast.hgatp_flush;
+`else
+  wire vs_bare_fetch = 1'b0;
+  wire [8:0] itlb_asid = csr_bcast.satp_asid;
+  wire hgatp_itlb_flush = 1'b0;
+`endif
   logic slow_read, slow_ptw;
   logic [XLEN-1:0] slow_read_addr, slow_ptw_addr;
   logic [1:0] slow_read_pbmt;
@@ -427,6 +442,10 @@ module rapt_l1i #(
       .translation_pbmt(slow_pbmt),
       .translation_fault(slow_xfault),
       .translation_cause(slow_xcause),
+`ifdef RAPT_H_EXTENSION
+      .translation_gpa(slow_xgpa),
+      .translation_gptw(slow_xgptw),
+`endif
       .read_valid(slow_read),
       .read_ready(slow_active && !slow_ptw && l1i_bus.rready),
       .read_paddr(slow_read_addr),
@@ -439,6 +458,10 @@ module rapt_l1i #(
       .result_inst(slow_inst),
       .result_fault(slow_fault),
       .result_cause(slow_cause),
+`ifdef RAPT_H_EXTENSION
+      .result_gpa(slow_gpa),
+      .result_gptw(slow_gptw),
+`endif
       .result_tval(slow_tval)
   );
   rapt_ifetch_translate #(
@@ -456,6 +479,15 @@ module rapt_l1i #(
       .sbe(csr_bcast.sbe),
       .priv(csr_bcast.priv),
       .satp_ppn(csr_bcast.satp_ppn),
+`ifdef RAPT_H_EXTENSION
+      .guest_en(csr_bcast.virt),
+      .vs_en(csr_bcast.vsatp_en),
+      .vsatp_ppn(csr_bcast.vsatp_ppn),
+      .g_en(csr_bcast.hgatp_en),
+      .hgatp_ppn(csr_bcast.hgatp_ppn),
+      .vs_pbmte(csr_bcast.henvcfg_pbmte),
+      .g_mxr(1'b0),
+`endif
       .pmp_state(pmp_state),
       .pmp_addr_o(slow_pmp_addr),
       .pmp_size_m1_o(slow_pmp_size_m1),
@@ -468,6 +500,10 @@ module rapt_l1i #(
       .response_pbmt(slow_pbmt),
       .response_fault(slow_xfault),
       .response_cause(slow_xcause),
+`ifdef RAPT_H_EXTENSION
+      .response_gpa(slow_xgpa),
+      .response_gptw(slow_xgptw),
+`endif
       .bus_arvalid(slow_ptw),
       .bus_araddr(slow_ptw_addr),
       .bus_arready(slow_active && slow_ptw && l1i_bus.rready),
@@ -599,7 +635,7 @@ module rapt_l1i #(
   ) u_itlb (
       .clock(clock),
       .reset(reset),
-      .flush(`RAPT_SFENCE_SELECTIVE == 0 && cmu_bcast.fence_time),
+      .flush((`RAPT_SFENCE_SELECTIVE == 0 && cmu_bcast.fence_time) || hgatp_itlb_flush),
       .sfence_valid(cmu_bcast.sfence_valid),
       .sfence_vpn(cmu_bcast.sfence_vpn),
       .sfence_asid(cmu_bcast.sfence_asid),
@@ -607,7 +643,10 @@ module rapt_l1i #(
       .sfence_all_asid(cmu_bcast.sfence_all_asid),
       .lookup_vtag(fetch_pc[XLEN-1:12]),
       .lookup_valid(mmu_en && ifu_l1i.consumed && !ifu_l1i.cancel && !cache_cancel),
-      .lookup_asid(csr_bcast.satp_asid),
+      .lookup_asid(itlb_asid),
+`ifdef RAPT_H_EXTENSION
+      .lookup_mode(itlb_mode),
+`endif
       .hit(tlb_hit),
       .ptag(itlb_ptag),
       .pte_flags(itlb_pte),
@@ -615,7 +654,10 @@ module rapt_l1i #(
       .fill_valid((l1i_state == PTWAIT) && ptw_done),
       .fill_ptag(ptw_result_ptag),
       .fill_vtag(ptw_result_vtag),
-      .fill_asid(csr_bcast.satp_asid),
+      .fill_asid(itlb_asid),
+`ifdef RAPT_H_EXTENSION
+      .fill_mode(itlb_mode),
+`endif
       .fill_pbmt(ptw_result_pbmt),
       .fill_level(ptw_result_level),
       .fill_pte(ptw_result_pte)
@@ -626,7 +668,7 @@ module rapt_l1i #(
       .XLEN(XLEN),
       .Enable(L2Tlb)
   ) u_iptw (
-      .asid(csr_bcast.satp_asid),
+      .asid(itlb_asid),
       .l2_req_o(l2tlb_req_o),
       .l2_ready_i(l2tlb_ready_i),
       .l2_rsp_i(l2tlb_rsp_i),
@@ -640,6 +682,19 @@ module rapt_l1i #(
       .pbmte(csr_bcast.menvcfg_pbmte),
       .sbe(csr_bcast.sbe),
       .req_store(1'b0),
+`ifdef RAPT_H_EXTENSION
+      .guest_en(csr_bcast.virt),
+      .vs_en(csr_bcast.vsatp_en),
+      .vsatp_ppn(csr_bcast.vsatp_ppn),
+      .g_en(csr_bcast.hgatp_en),
+      .hgatp_ppn(csr_bcast.hgatp_ppn),
+      .vs_priv_s(csr_bcast.priv == `RAPT_PRIV_S),
+      .vs_sum(1'b0),
+      .vs_mxr(1'b0),
+      .vs_pbmte(csr_bcast.henvcfg_pbmte),
+      .g_mxr(1'b0),
+      .req_exec(1'b1),
+`endif
       .bus_arvalid(ptw_arvalid),
       .bus_araddr(ptw_araddr),
       .bus_arready(!slow_active && l1i_bus.rready),
@@ -648,6 +703,12 @@ module rapt_l1i #(
       .done(ptw_done),
       .fault(ptw_fault),
       .access_fault(ptw_access_fault),
+`ifdef RAPT_H_EXTENSION
+      .guest_fault(ptw_guest_fault),
+      .fault_gpa(ptw_fault_gpa),
+      .fault_ptw(ptw_fault_ptw),
+      .result_g_perm(unused_iptw_g_perm),
+`endif
       .result_ptag(ptw_result_ptag),
       .result_vtag(ptw_result_vtag),
       .result_pte(ptw_result_pte),
@@ -953,12 +1014,17 @@ module rapt_l1i #(
   assign ifu_l1i.trap = slow_active ? slow_fault : (l1i_state == TRAP && rec_addr == ifu_l1i.pc);
   assign ifu_l1i.cause = slow_active ? slow_cause : cause;
   assign ifu_l1i.tval = slow_active ? slow_tval : `RAPT_PC_SEXT(XLEN, rec_tval);
-  // PMP must gate cache-hit delivery as well: without this, a hit in IDLE
-  // streams the instruction to IFU the same cycle the FSM transitions to
-  // TRAP, letting the forbidden fetch execute.
+`ifdef RAPT_H_EXTENSION
+  assign ifu_l1i.gpf_gpa = slow_active ? slow_gpa : rec_gpa;
+  assign ifu_l1i.gpf_ptw = slow_active ? slow_gptw : rec_gptw;
+`endif
+  // PMP and TLB page permissions must gate cache-hit delivery as well: without
+  // this, a hit in IDLE streams the instruction to IFU the same cycle the FSM
+  // transitions to TRAP, letting the forbidden fetch execute.
   assign ifu_l1i.valid = slow_active ? slow_result_valid : slow_select ? 1'b0
       : l1i_state == TRAP ? rec_addr == ifu_l1i.pc
-      : (!pmp_fetch_fault && hit && sram_data_ready && (hit_next || is_c) && !wait_invalid);
+      : (!pmp_fetch_fault && !(mmu_en && !vs_bare_fetch && pf_fetch_tlb)
+          && hit && sram_data_ready && (hit_next || is_c) && !wait_invalid);
 
 `ifdef RAPT_FETCH_LOOKAHEAD
   // --- Word lookahead, independent of frontend instruction-slot count ---
@@ -1173,7 +1239,7 @@ module rapt_l1i #(
               && !cmu_bcast.flush_pipe && !flush_redirect_kills_fetch) begin
             if (mmu_en) begin
               if (tlb_hit) begin
-                if (pf_fetch_tlb) begin
+                if (!vs_bare_fetch && pf_fetch_tlb) begin
                   rec_addr <= ifu_l1i.pc;
                   rec_tval <= ifu_l1i.pc;
                   cause <= `RAPT_CAUSE_INSTR_PAGE_FAULT;
@@ -1244,8 +1310,9 @@ module rapt_l1i #(
             rec_tval <= ifu_l1i.pc;
             l1i_state <= TRAP;
           end else if (ptw_done) begin
-            if (pf_fetch_ptw || !rapt_pkg::tlb_ppn_fits(ptw_result_ptag)) begin
-              cause <= pf_fetch_ptw ? `RAPT_CAUSE_INSTR_PAGE_FAULT : `RAPT_CAUSE_INSTR_ACC_FAULT;
+            if ((!vs_bare_fetch && pf_fetch_ptw) || !rapt_pkg::tlb_ppn_fits(ptw_result_ptag)) begin
+              cause <= (!vs_bare_fetch && pf_fetch_ptw)
+                  ? `RAPT_CAUSE_INSTR_PAGE_FAULT : `RAPT_CAUSE_INSTR_ACC_FAULT;
               rec_tval <= ifu_l1i.pc;
               l1i_state <= TRAP;
             end else begin
@@ -1254,7 +1321,14 @@ module rapt_l1i #(
               l1i_state <= RD_A;
             end
           end else if (ptw_fault) begin
+`ifdef RAPT_H_EXTENSION
+            cause <= ptw_guest_fault
+                ? `RAPT_CAUSE_INSTR_GUEST_PAGE_FAULT : `RAPT_CAUSE_INSTR_PAGE_FAULT;
+            rec_gpa <= ptw_fault_gpa;
+            rec_gptw <= ptw_fault_ptw;
+`else
             cause <= `RAPT_CAUSE_INSTR_PAGE_FAULT;
+`endif
             rec_tval <= ifu_l1i.pc;
             l1i_state <= TRAP;
           end

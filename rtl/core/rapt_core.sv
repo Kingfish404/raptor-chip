@@ -152,6 +152,19 @@ module rapt_core #(
   logic cache_writeback_drain;
   logic cache_writeback_clean, cache_writeback_cbo, cache_writeback_cbo_invalidate;
   logic [XLEN-1:6] cache_writeback_block;
+`ifdef RAPT_H_EXTENSION
+  logic [XLEN-1:2] ifetch_gpf_gpa_q;
+  logic ifetch_gpf_ptw_q;
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      ifetch_gpf_gpa_q <= '0;
+      ifetch_gpf_ptw_q <= 1'b0;
+    end else if (ifu_l1i.valid && ifu_l1i.trap && ifu_l1i.consumed && !ifu_l1i.cancel) begin
+      ifetch_gpf_gpa_q <= ifu_l1i.gpf_gpa;
+      ifetch_gpf_ptw_q <= ifu_l1i.gpf_ptw;
+    end
+  end
+`endif
   rapt_backend #(
       .XLEN(XLEN),
       .RegisteredDrainCompletion(1'b1),
@@ -212,6 +225,10 @@ module rapt_core #(
       .dbg_gpr_rdata_o(dbg_gpr_rdata_o),
       .dbg_gpr_we_i(dbg_gpr_we_i),
       .dbg_gpr_addr_i(dbg_gpr_addr_i),
+`ifdef RAPT_H_EXTENSION
+      .ifetch_gpf_gpa_i(ifetch_gpf_gpa_q),
+      .ifetch_gpf_ptw_i(ifetch_gpf_ptw_q),
+`endif
       .dbg_gpr_wdata_i(dbg_gpr_wdata_i)
 `ifdef RAPT_RVFI,
       .rvfi_valid(rvfi_valid)

@@ -1,0 +1,103 @@
+/dts-v1/;
+
+/include/ "spike-rv64gc.dts"
+
+/ {
+	model = "Raptor RVA23S64 SoC (VirtIO-Blk, VirtIO-Net, SDHCI, PCIe NVMe)";
+
+	poweroff {
+		compatible = "syscon-poweroff";
+		regmap = <&raptor_finisher>;
+		offset = <0>;
+		value = <0x5555>;
+	};
+
+	clocks {
+		sdhci_clk: sdhci-clock {
+			compatible = "fixed-clock";
+			#clock-cells = <0>;
+			clock-frequency = <50000000>;
+		};
+	};
+
+	cpus {
+		cpu@0 {
+			riscv,isa = "rv64imafdcvh_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_za64rs_zawrs_zfa_zfbfmin_zca_zcb_zcd_zcmop_zba_zbb_zbc_zbs_zvbb_zvfbfmin_zvfbfwma_zvfhmin_zvkt_svinval_svnapot_svpbmt_sstc_sscofpmf_supm";
+			riscv,isa-base = "rv64i";
+			riscv,isa-extensions =
+				"i", "m", "a", "f", "d", "c", "v", "h",
+				"zicbom", "zicbop", "zicboz", "zicntr", "zicond",
+				"zicsr", "zifencei", "zihintntl", "zihintpause",
+				"zihpm", "zimop", "za64rs", "zaamo", "zalrsc",
+				"zawrs", "zfa", "zfbfmin", "zca", "zcb", "zcd",
+				"zcmop", "zba", "zbb", "zbc", "zbs", "zvbb",
+				"zvfbfmin", "zvfbfwma", "zvfhmin", "zvkt",
+				"svinval", "svnapot", "svpbmt", "sstc",
+				"sscofpmf", "supm", "ssnpm", "smnpm", "smstateen";
+			riscv,cbom-block-size = <64>;
+			riscv,cbop-block-size = <64>;
+			riscv,cboz-block-size = <64>;
+		};
+	};
+
+	memory@80000000 {
+		reg = <0x00 0x80000000 0x00 0x10000000>;
+	};
+
+	soc {
+		dma-noncoherent;
+
+		plic0: plic@c000000 {
+			#address-cells = <0x00>;
+		};
+
+		raptor_finisher: test@100000 {
+			compatible = "sifive,test1", "sifive,test0", "syscon";
+		};
+
+		virtio_blk@10001000 {
+			compatible = "virtio,mmio";
+			reg = <0x00 0x10001000 0x00 0x1000>;
+			interrupt-parent = <&plic0>;
+			interrupts = <0x01>;
+			dma-noncoherent;
+		};
+
+		virtio_net@10002000 {
+			compatible = "virtio,mmio";
+			reg = <0x00 0x10002000 0x00 0x1000>;
+			interrupt-parent = <&plic0>;
+			interrupts = <0x02>;
+			dma-noncoherent;
+		};
+
+		sdhci@42000000 {
+			compatible = "arasan,sdhci-8.9a", "generic-sdhci";
+			reg = <0x00 0x42000000 0x00 0x1000>;
+			interrupt-parent = <&plic0>;
+			interrupts = <0x04>;
+			clocks = <&sdhci_clk>, <&sdhci_clk>;
+			clock-names = "clk_xin", "clk_ahb";
+			clock-frequency = <50000000>;
+			dma-noncoherent;
+		};
+
+		pci@41000000 {
+			compatible = "pci-host-ecam-generic";
+			device_type = "pci";
+			#address-cells = <3>;
+			#size-cells = <2>;
+			#interrupt-cells = <1>;
+			bus-range = <0x00 0x0f>;
+			reg = <0x00 0x41000000 0x00 0x01000000>;
+			ranges = <0x02000000 0x00 0x50000000 0x00 0x50000000 0x00 0x10000000>;
+			dma-noncoherent;
+			interrupt-map-mask = <0x00 0x00 0x00 0x07>;
+			interrupt-map =
+				<0x00 0x00 0x00 0x01 &plic0 0x0b>,
+				<0x00 0x00 0x00 0x02 &plic0 0x0c>,
+				<0x00 0x00 0x00 0x03 &plic0 0x0d>,
+				<0x00 0x00 0x00 0x04 &plic0 0x0e>;
+		};
+	};
+};

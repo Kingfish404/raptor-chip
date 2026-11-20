@@ -2,6 +2,7 @@
 task automatic clear_commit;
   rou_csr.valid = 0;
   rou_csr.retire_count = 0;
+  rou_csr.fence_retired = 0;
   rou_csr.csr_wen = 0;
   rou_csr.csr_wdata = 0;
   rou_csr.csr_addr = 0;
@@ -12,6 +13,9 @@ task automatic clear_commit;
   rou_csr.sret = 0;
   rou_csr.trap = 0;
   rou_csr.tval = 0;
+  rou_csr.tval2 = 0;
+  rou_csr.htinst = 0;
+  rou_csr.explicit_guest_trap = 0;
   rou_csr.cause = 0;
   rou_csr.fp_flags_valid = 0;
   rou_csr.fp_flags = 0;

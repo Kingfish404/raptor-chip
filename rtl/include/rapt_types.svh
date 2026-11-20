@@ -264,7 +264,8 @@
 // Architectural fault addresses use the consuming XLEN, independent of PC storage.
 // Illegal instruction payloads are unsigned; fetch PCs wrap at their stored width.
 `define RAPT_UOP_TVAL(XW, U) \
-  (U.trap ? (U.cause == 6'(`RAPT_CAUSE_ILLEGAL_INST) ? (XW)'(U.imm) \
+  (U.trap ? ((U.cause == 6'(`RAPT_CAUSE_ILLEGAL_INST) \
+      || U.cause == 6'(`RAPT_CAUSE_VIRT_INST)) ? (XW)'(U.imm) \
       : `RAPT_PC_SEXT(XW, $bits(U.pc)'(U.pc \
           + (U.fetch_tval_plus2 ? $bits(U.pc)'(2) : $bits(U.pc)'(0))))) : (XW)'(0))
 
@@ -319,6 +320,18 @@
   RobT dest; \
   GenerationT generation; \
   PhysT prd; \
+  } Name;
+
+`define RAPT_RENAME_SLOT_TYPE(Name, UopT, PcT, WordT, PhysT) \
+  typedef struct packed { \
+  UopT uop; \
+  PcT pnpc; \
+  WordT op1; \
+  WordT op2; \
+  PhysT pr1; \
+  PhysT pr2; \
+  PhysT prd; \
+  PhysT prs; \
   } Name;
 
 `endif  // RAPT_TYPES_SVH

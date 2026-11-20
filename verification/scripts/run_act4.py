@@ -94,7 +94,7 @@ def run_one(
         return True
 
     # Build simulator command
-    cmd = [npc_bin, "-b", "-n"]
+    cmd = [npc_bin, "-b", "-n", "--no-lightsss"]
     if trap_on_ebreak:
         cmd.append("--trap-on-ebreak")
     cmd += [
@@ -204,6 +204,18 @@ def main() -> int:
         default=1,
         help="reproducible randomized AXI timing seed",
     )
+    p.add_argument(
+        "--shard-index",
+        type=int,
+        default=0,
+        help="zero-based shard index when partitioning ELFs across workers",
+    )
+    p.add_argument(
+        "--shard-count",
+        type=int,
+        default=1,
+        help="total number of shards when partitioning ELFs across workers",
+    )
     args = p.parse_args()
     args.npc_bin = str(Path(args.npc_bin).resolve())
     if args.mrom_img:
@@ -214,6 +226,10 @@ def main() -> int:
         p.error("--jobs must be at least 1")
     if args.timeout < 1:
         p.error("--timeout must be at least 1")
+    if args.shard_count < 1:
+        p.error("--shard-count must be at least 1")
+    if args.shard_index < 0 or args.shard_index >= args.shard_count:
+        p.error("--shard-index must satisfy 0 <= shard-index < shard-count")
     if not Path(args.npc_bin).is_file() or not os.access(args.npc_bin, os.X_OK):
         p.error(f"NPC binary is missing or not executable: {args.npc_bin}")
 
@@ -221,12 +237,25 @@ def main() -> int:
     log_dir = (args.log_dir or elf_dir.parent / "logs").resolve()
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    elfs = sorted(elf_dir.rglob("*.elf"))
-    if not elfs:
+    all_elfs = sorted(elf_dir.rglob("*.elf"))
+    if not all_elfs:
         print(f"No ELF files found in {elf_dir}")
         return 1
+    elfs = all_elfs[args.shard_index :: args.shard_count]
+    if not elfs:
+        print(
+            f"Shard {args.shard_index}/{args.shard_count} has 0 tests "
+            f"(out of {len(all_elfs)} total ELFs)."
+        )
+        return 0
 
-    print(f"\n{bold('Running')} {len(elfs)} ACT4 tests")
+    if args.shard_count > 1:
+        print(
+            f"\n{bold('Running')} {len(elfs)} of {len(all_elfs)} ACT4 tests "
+            f"(shard {args.shard_index}/{args.shard_count})"
+        )
+    else:
+        print(f"\n{bold('Running')} {len(elfs)} ACT4 tests")
     print(f"  ELFs:   {elf_dir}")
     print(f"  NPC:    {args.npc_bin}")
     print(f"  Logs:   {log_dir}")

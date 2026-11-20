@@ -81,7 +81,7 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
     (funct3 === 0.U || funct3 === 5.U || funct3 === 6.U || funct3 === 7.U)
   val vectorCsrs = Seq(0x008, 0x009, 0x00a, 0x00f, 0xc20, 0xc21, 0xc22)
   val vectorCsrAddress = vectorCsrs.map(address => in.inst(31, 20) === address.U).reduce(_ || _)
-  val vectorCsr = opcode === "h73".U && funct3 =/= 0.U && vectorCsrAddress
+  val vectorCsr = opcode === "h73".U && in.inst(13, 12) =/= 0.U && vectorCsrAddress
   val vectorMoveToX = in.inst(31, 26) === "h10".U && funct3 === 2.U &&
     in.inst(25) && rs1 === 0.U
   val vectorMaskScan = in.inst(31, 26) === "h10".U && funct3 === 2.U &&
@@ -171,6 +171,23 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
    SINVAL_VM -> BitPat("b" + "00" + ALU_ADD_), // N
    SFENCE_W_INVAL -> BitPat("b" + "00" + ALU_ADD_), // N
    SFENCE_INVAL_IR -> BitPat("b" + "00" + ALU_ADD_), // N
+   HFENCE_VVMA -> BitPat("b" + "00" + ALU_ADD_), // N
+   HINVAL_VVMA -> BitPat("b" + "00" + ALU_ADD_), // N
+   HFENCE_GVMA -> BitPat("b" + "00" + ALU_ADD_), // N
+   HINVAL_GVMA -> BitPat("b" + "00" + ALU_ADD_), // N
+   HLV_B___    -> BitPat("b" + "00" + ALU_ADD_), // R
+   HLV_BU__    -> BitPat("b" + "00" + ALU_ADD_), // R
+   HLV_H___    -> BitPat("b" + "00" + ALU_ADD_), // R
+   HLV_HU__    -> BitPat("b" + "00" + ALU_ADD_), // R
+   HLV_W___    -> BitPat("b" + "00" + ALU_ADD_), // R
+   HLV_WU__    -> BitPat("b" + "00" + ALU_ADD_), // R
+   HLV_D___    -> BitPat("b" + "00" + ALU_ADD_), // R
+   HLVX_HU_    -> BitPat("b" + "00" + ALU_ADD_), // R
+   HLVX_WU_    -> BitPat("b" + "00" + ALU_ADD_), // R
+   HSV_B___    -> BitPat("b" + "00" + ALU_ADD_), // R
+   HSV_H___    -> BitPat("b" + "00" + ALU_ADD_), // R
+   HSV_W___    -> BitPat("b" + "00" + ALU_ADD_), // R
+   HSV_D___    -> BitPat("b" + "00" + ALU_ADD_), // R
     // format: on
 
       CSRRW_ -> BitPat("b" + "00" + ALU_ADD_), // CSR
@@ -423,6 +440,23 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
 
    SFENCE_VM -> BitPat("b" + "000 0  0  0  0  1"), // N
    SINVAL_VM -> BitPat("b" + "000 0  0  0  0  1"), // N
+   HFENCE_VVMA -> BitPat("b" + "000 0  0  0  0  1"), // N
+   HINVAL_VVMA -> BitPat("b" + "000 0  0  0  0  1"), // N
+   HFENCE_GVMA -> BitPat("b" + "000 0  0  0  0  1"), // N
+   HINVAL_GVMA -> BitPat("b" + "000 0  0  0  0  1"), // N
+   HLV_B___    -> BitPat("b" + "000 0  0  0  0  1"), // R
+   HLV_BU__    -> BitPat("b" + "000 0  0  0  0  1"), // R
+   HLV_H___    -> BitPat("b" + "000 0  0  0  0  1"), // R
+   HLV_HU__    -> BitPat("b" + "000 0  0  0  0  1"), // R
+   HLV_W___    -> BitPat("b" + "000 0  0  0  0  1"), // R
+   HLV_WU__    -> BitPat("b" + "000 0  0  0  0  1"), // R
+   HLV_D___    -> BitPat("b" + "000 0  0  0  0  1"), // R
+   HLVX_HU_    -> BitPat("b" + "000 0  0  0  0  1"), // R
+   HLVX_WU_    -> BitPat("b" + "000 0  0  0  0  1"), // R
+   HSV_B___    -> BitPat("b" + "000 0  0  0  0  1"), // R
+   HSV_H___    -> BitPat("b" + "000 0  0  0  0  1"), // R
+   HSV_W___    -> BitPat("b" + "000 0  0  0  0  1"), // R
+   HSV_D___    -> BitPat("b" + "000 0  0  0  0  1"), // R
     // format: on
 
       MRET__ -> BitPat("b" + "000 0  1  0  0  1"), // N
@@ -461,7 +495,11 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
       CBO_FLUSH -> BitPat("b" + "1" + "0"), // Zicbom: conservative whole-L1 maintenance
       CBO_ZERO -> BitPat("b" + "1" + "0"), // Zicboz: serialize block stores
       SFENCE_VM -> BitPat("b" + "1" + "1"), // N: flush TLBs + I-cache
-      SINVAL_VM -> BitPat("b" + "1" + "1") // full SFENCE.VMA implementation
+      SINVAL_VM -> BitPat("b" + "1" + "1"), // full SFENCE.VMA implementation
+      HFENCE_VVMA -> BitPat("b" + "1" + "1"),
+      HINVAL_VVMA -> BitPat("b" + "1" + "1"),
+      HFENCE_GVMA -> BitPat("b" + "1" + "1"),
+      HINVAL_GVMA -> BitPat("b" + "1" + "1")
     ),
     BitPat("b" + "0" + "0")
   )
@@ -737,6 +775,23 @@ class rapt_idu_decoder extends RawModule with Instr with MicroOP {
     SINVAL_VM -> List(0.U, ImmZero, 0.U, 0.U, 0.U, 0.U), // N
     SFENCE_W_INVAL -> List(0.U, ImmZero, 0.U, 0.U, 0.U, 0.U), // N
     SFENCE_INVAL_IR -> List(0.U, ImmZero, 0.U, 0.U, 0.U, 0.U), // N
+    HFENCE_VVMA -> List(0.U, ImmZero, 0.U, 0.U, 0.U, 0.U), // N
+    HINVAL_VVMA -> List(0.U, ImmZero, 0.U, 0.U, 0.U, 0.U), // N
+    HFENCE_GVMA -> List(0.U, ImmZero, 0.U, 0.U, 0.U, 0.U), // N
+    HINVAL_GVMA -> List(0.U, ImmZero, 0.U, 0.U, 0.U, 0.U), // N
+    HLV_B___    -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // R
+    HLV_BU__    -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // R
+    HLV_H___    -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // R
+    HLV_HU__    -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // R
+    HLV_W___    -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // R
+    HLV_WU__    -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // R
+    HLV_D___    -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // R
+    HLVX_HU_    -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // R
+    HLVX_WU_    -> List(1.U, ImmZero, 0.U, 0.U, 1.U, 0.U), // R
+    HSV_B___    -> List(0.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    HSV_H___    -> List(0.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    HSV_W___    -> List(0.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
+    HSV_D___    -> List(0.U, ImmZero, 0.U, 0.U, 1.U, 1.U), // R
 
     CSRRW_ -> List(1.U, ImmCsr, 0.U, 0.U, 1.U, 0.U), // CSR
     CSRRS_ -> List(1.U, ImmCsr, 0.U, 0.U, 1.U, 0.U), // CSR

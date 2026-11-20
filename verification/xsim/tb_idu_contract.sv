@@ -226,12 +226,35 @@ module tb_idu_csr_addresses;
   rapt_pkg::decoded_slot_t decoded;
   csr_bcast_if #(.XLEN(X)) csr_bcast ();
   rapt_decode_slot #(.XLEN(X)) dut (.*);
+  function automatic bit is_vector_csr(input int a);
+    return rapt_pkg::VectorEnable
+        && (a == 'h008 || a == 'h009 || a == 'h00a || a == 'h00f || (a >= 'hc20 && a <= 'hc22));
+  endfunction
   function automatic bit implemented(input int a);
+    if (rapt_pkg::SscofpmfEnable) begin
+      if (a == 'hda0) return 1;
+      if (X == 32 && a >= 'h723 && a <= 'h73f) return 1;
+    end
+    if (rapt_pkg::SmstateenEnable) begin
+      if ((a >= 'h10c && a <= 'h10f) || (a >= 'h30c && a <= 'h30f)) return 1;
+      if (X == 32 && a >= 'h31c && a <= 'h31f) return 1;
+      if (rapt_pkg::HypervisorEnable && X == 64 && a >= 'h60c && a <= 'h60f) return 1;
+    end
+    if (rapt_pkg::HypervisorEnable && X == 64) begin
+      case (a)
+        'h200, 'h204, 'h205, 'h240, 'h241, 'h242, 'h243, 'h244, 'h24d, 'h280,
+        'h34a, 'h34b,
+        'h600, 'h602, 'h603, 'h604, 'h605, 'h606, 'h607, 'h60a,
+        'h643, 'h644, 'h645, 'h64a, 'h680, 'he12:
+          return 1;
+        default: ;
+      endcase
+    end
     case (a)
       'h001,'h002,'h003,
       'h100,'h104,'h105,'h106,'h10a,'h140,'h141,'h142,'h143,'h144,'h14d,'h180,
       'h300,'h301,'h302,'h303,'h304,'h305,'h306,'h30a,'h340,'h341,'h342,'h343,'h344,
-      'hb00,'hb02,'hc00,'hc01,'hc02,'hf11,'hf12,'hf13,'hf14,'h7c0,'hfc0: return 1;
+      'hb00,'hb02,'hc00,'hc01,'hc02,'hf11,'hf12,'hf13,'hf14,'hf15,'h7c0,'hfc0: return 1;
       'h310,'h31a,'h15d,'hb80,'hb82,'hc80,'hc81,'hc82: return X==32;
       default: begin
         if (a >= 'h3a0 && a <= 'h3a3) return X == 32 || a == 'h3a0 || a == 'h3a2;
@@ -246,10 +269,12 @@ module tb_idu_csr_addresses;
   int count = 0, legal_count = 0;
   initial begin
     static int functs[6] = '{1, 2, 3, 5, 6, 7};
-    bit legal, write_attempt, hpm;
+    int csr_level, hpm_lo, hpmh_lo;
+    bit vec_csr, priv_ok, ro_violation, legal, write_attempt, hpm;
     fetched='0;
     fetched.pc=X'('h80000000);
     fetched.pnpc=fetched.pc+4;
+    csr_bcast.virt=0;
     csr_bcast.fs=3;
     csr_bcast.tvm=0;
     csr_bcast.tw=0;
@@ -257,6 +282,10 @@ module tb_idu_csr_addresses;
     csr_bcast.mcounteren='1;
     csr_bcast.scounteren='1;
     csr_bcast.menvcfg_stce=1;
+    csr_bcast.mstateen_se0='1;
+    csr_bcast.mstateen0_envcfg=1;
+    hpm_lo = rapt_pkg::SscofpmfEnable ? 'hc04 : 'hc03;
+    hpmh_lo = rapt_pkg::SscofpmfEnable ? 'hc84 : 'hc83;
     for (int priv = 0; priv < 4; priv++)
     if (priv != 2) begin
       csr_bcast.priv = 2'(priv);
@@ -264,10 +293,15 @@ module tb_idu_csr_addresses;
       for (int op = 0; op < 6; op++)
       for (int src = 0; src < 2; src++)
       for (int rd = 0; rd < 2; rd++) begin
-        write_attempt=(functs[op]==1 || functs[op]==5 || src!=0);
-        hpm=(addr>='hc03 && addr<='hc1f)||(X==32 && addr>='hc83 && addr<='hc9f);
-        legal=implemented(addr) && ((addr>>8)&3)<=priv
-              && !(((addr>>10)&3)==3 && write_attempt) && !(hpm && priv!=3);
+        vec_csr = is_vector_csr(addr);
+        write_attempt = (functs[op] == 1 || functs[op] == 5 || src != 0);
+        csr_level = (addr >> 8) & 3;
+        priv_ok = (csr_level <= priv)
+            || (rapt_pkg::HypervisorEnable && X == 64 && csr_level == 2 && priv == 1);
+        ro_violation = (((addr >> 10) & 3) == 3) && write_attempt;
+        hpm = (addr >= hpm_lo && addr <= 'hc1f) || (X == 32 && addr >= hpmh_lo && addr <= 'hc9f);
+        // Vector CSRs dispatch to VPU, which enforces VS!=0 and read-only vl/vtype/vlenb.
+        legal = vec_csr || (implemented(addr) && priv_ok && !ro_violation && !(hpm && priv != 3));
         fetched.inst=32'(addr<<20 | src<<15 | functs[op]<<12 | rd<<7 | 'h73);
         #1;
         if (decoded.uop.trap !== !legal)
@@ -1043,6 +1077,16 @@ module tb_idu_zkt;
     end
     $fclose(fd);
     if (count == 0) $fatal(1, "empty vector set");
+    // Zimop mop.rr.4 with rs2 in {x0..x2} places 12'hc20..12'hc22 (vl/vtype/vlenb)
+    // in bits [31:20] while funct3 == 3'b100; ensure it never enters VPU CSR decode.
+    fetched.inst = 32'hc228_4573;
+    fetched.pnpc = fetched.pc + 4;
+    csr_bcast.priv = 2'd1;
+    #1;
+    if (decoded.uop.trap || decoded.uop.execute.sys != '0
+        || decoded.uop.schedule.domain != rapt_pkg::DOMAIN_INTEGER
+        || decoded.uop.rd != 5'd10)
+      $fatal(1, "mop.rr.4 with 12'hc22 upper bits misdecoded as non-integer/trap");
     $display("PASS: RV%0d Zkt %0d encodings in M/S/U (%0d cases)", X, count, count * 3);
     $finish;
   end

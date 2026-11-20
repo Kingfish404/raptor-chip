@@ -360,6 +360,7 @@ module rapt_npc_soc #(
     || (a >= 32'h20000000 && a < 32'h20010000)  // MROM
     || (a >= 32'h30000000 && a < 32'h40000000)  // FLASH / SDHCI PCI ECAM
     || (a >= 32'h40000000 && a < 32'h40000100)  // QEMU SDHCI BAR
+    || (a >= 32'h41000000 && a < 32'h60000000)  // PCIe ECAM / SDHCI / NVMe MMIO
     || (a >= 32'h80000000 && (LargePmem || a < 32'h90000000))  // PMEM
     || (!LargePmem && a >= 32'ha0000000 && a < 32'ha2000000)  // legacy SDRAM
     || (a >= 32'h11000000 && a < 32'h12000000)  // LiteX CSR banks

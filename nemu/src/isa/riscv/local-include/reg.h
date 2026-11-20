@@ -85,9 +85,21 @@ static inline bool is_stateen_csr(uint16_t csr)
 /* Raptor implements the optional Zihpm CSR banks as WARL-zero.  Keep the
  * reference model's CSR existence and read/write behaviour aligned with the
  * RTL: reads return zero and writes to the machine banks are ignored. */
+static inline bool is_sscofpmf_hpm3_csr(uint16_t csr)
+{
+  csr &= 0xfff;
+  if (!riscv_sscofpmf_enabled()) return false;
+  if (csr == 0xb03 || csr == 0x323 || csr == 0xc03) return true;
+#ifndef CONFIG_RV64
+  if (csr == 0xb83 || csr == 0x723 || csr == 0xc83) return true;
+#endif
+  return false;
+}
+
 static inline bool is_hpm_zero_csr(uint16_t csr)
 {
   csr &= 0xfff;
+  if (is_sscofpmf_hpm3_csr(csr)) return false;
   if ((csr >= 0xb03 && csr <= 0xb1f) ||  /* mhpmcounter3..31 */
       (csr >= 0x323 && csr <= 0x33f) ||  /* mhpmevent3..31 */
       (csr >= 0xc03 && csr <= 0xc1f))    /* hpmcounter3..31 */
@@ -96,7 +108,7 @@ static inline bool is_hpm_zero_csr(uint16_t csr)
   if ((csr >= 0xb83 && csr <= 0xb9f) ||  /* mhpmcounter3h..31h */
       (csr >= 0xc83 && csr <= 0xc9f))    /* hpmcounter3h..31h */
     return true;
-  if (riscv_sscofpmf_enabled() && csr >= 0x723 && csr <= 0x73f)
+  if (riscv_sscofpmf_enabled() && csr >= 0x724 && csr <= 0x73f)
     return true;
 #endif
   return false;
@@ -108,6 +120,7 @@ static inline unsigned counteren_bit(uint16_t csr)
   if (csr == CSR_CYCLE_ || csr == CSR_CYCLEH) return 1u << 0;
   if (csr == CSR_TIME || csr == CSR_TIMEH) return 1u << 1;
   if (csr == CSR_INSTRET || csr == CSR_INSTRETH) return 1u << 2;
+  if (riscv_sscofpmf_enabled() && (csr == 0xc03 || csr == 0xc83)) return 1u << 3;
   return 0;
 }
 
@@ -211,11 +224,13 @@ static inline CSR_status check_csr_exist(uint16_t csr)
           csr == CSR_MARCHID ||
           csr == CSR_IMPID ||
           csr == CSR_MHARTID ||
+          csr == 0xf15 ||  // mconfigptr
 
           csr == 0x14d ||  // stimecmp
           csr == 0x15d ||  // stimecmph (RV32 only; checked above)
           csr == CSR_MCOUNTEREN ||
           csr == 0x30a ||  // menvcfg
+          is_sscofpmf_hpm3_csr(csr) ||
           is_hpm_zero_csr(csr) ||
           (csr >= 0x3a0 && csr <= 0x3a3) ||  // pmpcfg0-3
           (csr >= 0x3b0 && csr <= 0x3bf)))    // pmpaddr0-15

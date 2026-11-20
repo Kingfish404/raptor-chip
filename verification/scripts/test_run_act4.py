@@ -21,7 +21,7 @@ class Act4RunnerTest(unittest.TestCase):
         env = dict(os.environ)
         for key in ("TIMEOUT", "ACT4_TIMEOUT", "MAKEFLAGS", "MFLAGS", "MAKEOVERRIDES"):
             env.pop(key, None)
-        for args, expected in (([], "60"), (["TIMEOUT=90"], "90"),
+        for args, expected in (([], "1800"), (["TIMEOUT=90"], "90"),
                                (["ACT4_TIMEOUT=120"], "120"),
                                (["TIMEOUT=90", "ACT4_TIMEOUT=120"], "120")):
             with self.subTest(args=args):
@@ -104,6 +104,61 @@ class Act4RunnerTest(unittest.TestCase):
                 self.assertTrue(failed)
                 self.assertIn("objcopy", log)
                 self.assertNotIn("stale success", log)
+
+    def test_sharding_partitions_all_elfs_and_validates_bounds(self):
+        runner = Path(__file__).with_name("run_act4.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            npc = root / "fake-npc"
+            npc.write_text("#!/bin/sh\nprintf 'RVCP-SUMMARY: TEST PASSED\\n'\n")
+            npc.chmod(0o755)
+            objcopy = root / "fake-objcopy"
+            objcopy.write_text("#!/bin/sh\n: > \"$4\"\n")
+            objcopy.chmod(0o755)
+            elf_dir = root / "elfs"
+            names = [f"suite{i % 3}/t{i:02d}.elf" for i in range(10)]
+            for rel in names:
+                p = elf_dir / rel
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_bytes(b"\x7fELF")
+
+            seen = []
+            for idx in range(4):
+                log_dir = root / f"logs-{idx}"
+                res = subprocess.run(
+                    [
+                        sys.executable, str(runner),
+                        "--npc-bin", str(npc),
+                        "--objcopy", str(objcopy),
+                        "--log-dir", str(log_dir),
+                        "--jobs", "2",
+                        "--shard-index", str(idx),
+                        "--shard-count", "4",
+                        str(elf_dir),
+                    ],
+                    capture_output=True, text=True, check=True,
+                )
+                self.assertIn(f"shard {idx}/4", res.stdout)
+                shard_logs = sorted(
+                    str(p.relative_to(log_dir).with_suffix(".elf"))
+                    for p in log_dir.rglob("*.log")
+                )
+                seen.extend(shard_logs)
+
+            self.assertEqual(sorted(seen), sorted(names))
+            self.assertEqual(len(set(seen)), len(names))
+
+            bad = subprocess.run(
+                [
+                    sys.executable, str(runner),
+                    "--npc-bin", str(npc),
+                    "--shard-index", "4",
+                    "--shard-count", "4",
+                    str(elf_dir),
+                ],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(bad.returncode, 2)
 
 
 if __name__ == "__main__":

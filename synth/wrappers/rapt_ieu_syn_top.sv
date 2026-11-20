@@ -118,6 +118,10 @@ module rapt_ieu_syn_top #(
       .vector_issue_ready(1'b1),
       .vector_issue(),
 `endif
+`ifdef RAPT_H_EXTENSION
+      .hmem_issue_ready(1'b1),
+      .hmem_issue(),
+`endif
       .integer_system_issue_enable,
 `ifdef RAPT_ZAWRS
       .reservation_valid(1'b0),

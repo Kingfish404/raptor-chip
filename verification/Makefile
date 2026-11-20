@@ -505,39 +505,63 @@ fuzz-clean: ## Clean fuzz artifacts
 # ============================================================================
 ACT4_DIR       := $(VERIFY_HOME)/riscof
 ACT4_REPO      := $(ACT4_DIR)/riscv-arch-test
+ACT4_BRANCH    ?= act4
 ACT4_WORKDIR   := $(BUILD_DIR)/riscof
-ACT4_CONFIG    := $(ACT4_DIR)/raptor-rv32gc/test_config.yaml
-ACT4_SAIL_FLAGS := --rv32
-ACT4_VFLAGS :=
+ACT4_DEFAULT_SUITE := raptor-rv32gc
+ACT4_VFLAGS    :=
+ACT4_NPC_ARCH  := riscv32
 ifeq ($(ISA),rv64)
-  ACT4_CONFIG  := $(ACT4_DIR)/raptor-rv64gc/test_config.yaml
-  ACT4_SAIL_FLAGS :=
-  ACT4_VFLAGS := -DRAPT_RV64
+  ACT4_DEFAULT_SUITE := raptor-rva23s64
+  ACT4_VFLAGS    := -DRAPT_RV64
+  ACT4_NPC_ARCH  := riscv64
 endif
-ACT4_ELF_DIR    = $(ACT4_WORKDIR)/raptor-rv32gc/elfs
-ifeq ($(ISA),rv64)
-  ACT4_ELF_DIR  = $(ACT4_WORKDIR)/raptor-rv64gc/elfs
-endif
-# Only generate tests for implemented extensions (positive filter).
-# Using EXTENSIONS instead of EXCLUDE_EXTENSIONS avoids generating tests for
-# unsupported extensions such as Zfh/V, which bloat tests/ and waste Sail time.
-ifeq ($(ISA),rv64)
+ACT4_SUITE     ?= $(ACT4_DEFAULT_SUITE)
+ACT4_CONFIG    := $(ACT4_DIR)/$(ACT4_SUITE)/test_config.yaml
+ACT4_ELF_DIR    = $(ACT4_WORKDIR)/$(ACT4_SUITE)/elfs
+# For raptor-rva23s64, leave ACT4_EXTENSIONS empty so UDB + Sail 0.16 generate
+# all 94 ratified RVA23S64 suites (including V, Zvbb, Zvfhmin, Zfa, H, Svnapot,
+# Smstateen, Sscofpmf, Zicbom/Zicboz, Zawrs, Supm/Ssnpm/Smnpm, Zfbfmin, etc.).
+ifeq ($(ACT4_SUITE),raptor-rva23s64)
+  ACT4_EXTENSIONS ?=
+  ACT4_VECTOR_TESTS ?= 1
+else ifeq ($(ISA),rv64)
   ACT4_EXTENSIONS ?= I,M,F,D,Zca,Zcd,Zicsr,Zicntr,Zifencei,Zaamo,Zalrsc,Zba,Zbb,Zbc,Zbs
+  ACT4_VECTOR_TESTS ?= 0
 else
   ACT4_EXTENSIONS ?= I,M,F,D,Zca,Zcf,Zcd,Zicsr,Zicntr,Zifencei,Zaamo,Zalrsc,Zba,Zbb,Zbc,Zbs
+  ACT4_VECTOR_TESTS ?= 0
 endif
-ACT4_BUILD_PROFILE ?= $(RAPT_CONFIG)-act4-$(ISA)
-# ACT4 FP self-checking ELFs exceed the generic 10-second unit-test budget.
-# Preserve explicit legacy TIMEOUT overrides; otherwise match run_act4.py.
-ACT4_TIMEOUT ?= $(if $(filter command line environment override,$(origin TIMEOUT)),$(TIMEOUT),60)
-ACT4_NPC_BIN ?= $(NSIM_HOME)/build/$(ACT4_BUILD_PROFILE)/riscv$(if $(filter rv64,$(ISA)),64,32)-npc-sim
-SAIL_VERSION    ?= 0.13.1
-ACT4_SAIL_DIR   ?= $(HOME)/.local/opt/sail-riscv-$(SAIL_VERSION)/bin
-ACT4_RUBY_DIR   ?= $(shell if command -v brew >/dev/null 2>&1; then dir="$$(brew --prefix ruby@3.2 2>/dev/null)/bin"; test -x "$$dir/ruby" && printf '%s' "$$dir"; fi)
-ACT4_GEM_BIN    ?= $(shell if [ -n "$(ACT4_RUBY_DIR)" ]; then PATH="$(ACT4_RUBY_DIR):$(PATH)" ruby -e 'print Gem.bindir' 2>/dev/null; fi)
-ACT4_PATH       := $(if $(ACT4_RUBY_DIR),$(ACT4_RUBY_DIR):)$(if $(ACT4_GEM_BIN),$(ACT4_GEM_BIN):)$(ACT4_SAIL_DIR):$(PATH)
+ACT4_CLEAN_INTERMEDIATES ?=
+ACT4_TRAP_ON_EBREAK ?= 1
+ACT4_SHARD_INDEX ?= 0
+ACT4_SHARD_COUNT ?= 1
+# raptor-rva23s64 requires the full RVA23S64 profile when RAPT_CONFIG is unset.
+ACT4_DEFAULT_CONFIG := $(if $(filter raptor-rva23s64,$(ACT4_SUITE)),default,$(RAPT_CONFIG))
+ACT4_RAPT_CONFIG ?= $(if $(filter file,$(origin RAPT_CONFIG)),$(ACT4_DEFAULT_CONFIG),$(RAPT_CONFIG))
+ACT4_BUILD_PROFILE ?= $(ACT4_RAPT_CONFIG)-act4-$(ISA)
+# ACT4 FP/Vector/Hypervisor self-checking ELFs exceed the 10s unit-test budget.
+ACT4_TIMEOUT ?= $(if $(filter command line environment override,$(origin TIMEOUT)),$(TIMEOUT),1800)
+ACT4_NPC_BIN   ?= $(NSIM_HOME)/build/$(ACT4_BUILD_PROFILE)/$(ACT4_NPC_ARCH)-npc-sim
+SAIL_VERSION   ?= 0.16
+ACT4_SAIL_DIR  ?= $(HOME)/.local/opt/sail-riscv-$(SAIL_VERSION)/bin
+ACT4_SHIM_BIN  := $(BUILD_DIR)/act4-bin
+ACT4_RUBY_DIR  ?= $(shell if command -v brew >/dev/null 2>&1; then \
+	dir="$$(brew --prefix ruby@3.2 2>/dev/null)/bin"; \
+	test -x "$$dir/ruby" && printf '%s' "$$dir"; fi)
+ACT4_GEM_BIN   ?= $(shell if [ -n "$(ACT4_RUBY_DIR)" ]; then \
+	PATH="$(ACT4_RUBY_DIR):$(PATH)" ruby -e 'print Gem.bindir' 2>/dev/null; fi)
+ACT4_PATH_PREFIX := $(ACT4_SHIM_BIN):
+ifneq ($(ACT4_RUBY_DIR),)
+  ACT4_PATH_PREFIX := $(ACT4_PATH_PREFIX)$(ACT4_RUBY_DIR):
+endif
+ifneq ($(ACT4_GEM_BIN),)
+  ACT4_PATH_PREFIX := $(ACT4_PATH_PREFIX)$(ACT4_GEM_BIN):
+endif
+ACT4_PATH      := $(ACT4_PATH_PREFIX)$(ACT4_SAIL_DIR):$(BUILD_DIR)/sail-riscv/bin:$(PATH)
+ACT4_GEMFILE   := $(ACT4_REPO)/framework/src/act/data/Gemfile
 ACT4_UV_CACHE_DIR ?= $(BUILD_DIR)/uv-cache
 ACT4_XDG_DATA_HOME ?= $(BUILD_DIR)/xdg-data
+ACT4_EBREAK_FLAG := $(if $(filter 1,$(ACT4_TRAP_ON_EBREAK)),--trap-on-ebreak,)
 
 .PHONY: riscof riscof-setup riscof-gen riscof-run riscof-build-npc riscof-clean
 
@@ -547,30 +571,38 @@ riscof: riscof-setup ## Run ACT4 compliance tests
 
 riscof-setup: ## Clone ACT4 repo and check prerequisites
 	@if [ ! -d "$(ACT4_REPO)" ]; then \
-		echo "[act4] Cloning riscv-arch-test (act4 branch)..."; \
+		echo "[act4] Cloning riscv-arch-test ($(ACT4_BRANCH) branch)..."; \
 		mkdir -p "$(ACT4_DIR)"; \
-		git clone --depth 1 -b act4 https://github.com/riscv-non-isa/riscv-arch-test.git "$(ACT4_REPO)"; \
+		git clone --depth 1 -b "$(ACT4_BRANCH)" \
+			https://github.com/riscv-non-isa/riscv-arch-test.git "$(ACT4_REPO)"; \
 	else echo "[act4] Repo already present at $(ACT4_REPO)"; fi
 	@python3 $(VERIFY_HOME)/scripts/patch_act4_sail.py --repo "$(ACT4_REPO)"
 	@echo "[act4] Checking prerequisites..."
 	@command -v uv >/dev/null 2>&1 \
 		&& echo "[act4] uv: $$(uv --version)" \
-		|| { echo "[act4] ERROR: 'uv' not found. Install: curl -LsSf https://astral.sh/uv/install.sh | sh"; exit 1; }
+		|| { echo "[act4] ERROR: 'uv' not found."; exit 1; }
 	@ACT4_RUBY_VERSION=$$(PATH="$(ACT4_PATH)" ruby -e 'print RUBY_VERSION[/^[0-9]+\.[0-9]+/]') \
 		&& [ "$$ACT4_RUBY_VERSION" = "3.2" ] \
 		&& echo "[act4] ruby: $$(PATH="$(ACT4_PATH)" ruby --version)" \
 		&& echo "[act4] bundle: $$(PATH="$(ACT4_PATH)" command -v bundle)" \
 		|| { echo "[act4] ERROR: Ruby 3.2 is required by the ACT4 UDB Gemfile."; \
 		echo "  Install ruby@3.2 or set ACT4_RUBY_DIR."; exit 1; }
-	@PATH="$(ACT4_PATH)" command -v udb >/dev/null 2>&1 \
-		&& echo "[act4] udb: $$(PATH="$(ACT4_PATH)" command -v udb)" \
-		|| { echo "[act4] ERROR: UDB command not found in the Ruby 3.2 gem bindir."; exit 1; }
+	@mkdir -p "$(ACT4_SHIM_BIN)" && \
+		ln -sf "$$(PATH="$(ACT4_PATH)" command -v ruby)" "$(ACT4_SHIM_BIN)/ruby3.2"
+	@if [ -f "$(ACT4_GEMFILE)" ]; then \
+		BUNDLE_GEMFILE="$(ACT4_GEMFILE)" PATH="$(ACT4_PATH)" bundle check >/dev/null 2>&1 \
+		|| BUNDLE_GEMFILE="$(ACT4_GEMFILE)" PATH="$(ACT4_PATH)" bundle install --jobs 4; \
+		BUNDLE_GEMFILE="$(ACT4_GEMFILE)" PATH="$(ACT4_PATH)" bundle exec udb --help >/dev/null; \
+	else \
+		PATH="$(ACT4_PATH)" command -v udb >/dev/null 2>&1 \
+		|| { echo "[act4] ERROR: UDB command not found."; exit 1; }; \
+	fi
 	@ACT4_SAIL_VERSION=$$(PATH="$(ACT4_PATH)" sail_riscv_sim --version 2>/dev/null) \
 		&& [ "$$ACT4_SAIL_VERSION" = "$(SAIL_VERSION)" ] \
 		&& echo "[act4] sail: $$ACT4_SAIL_VERSION ($$(PATH="$(ACT4_PATH)" command -v sail_riscv_sim))" \
 		|| { echo "[act4] ERROR: Sail $(SAIL_VERSION) is required for ACT4."; \
 		echo "  Install under $(ACT4_SAIL_DIR) or set ACT4_SAIL_DIR."; exit 1; }
-	@PATH="$(ACT4_PATH)" sail_riscv_sim $(ACT4_SAIL_FLAGS) --config-override \
+	@PATH="$(ACT4_PATH)" sail_riscv_sim --config \
 		"$(dir $(ACT4_CONFIG))sail.json" --validate-config >/dev/null
 	@echo "[act4] Setup complete.  Config: $(ACT4_CONFIG)"
 
@@ -578,28 +610,40 @@ riscof-gen: ## Generate self-checking ELFs via ACT4 framework
 	@test -d "$(ACT4_REPO)" || { echo "[act4] ERROR: repo not found. Run 'make riscof-setup' first."; exit 1; }
 	@test -f "$(ACT4_CONFIG)" || { echo "[act4] ERROR: config not found: $(ACT4_CONFIG)"; exit 1; }
 	@python3 $(VERIFY_HOME)/scripts/patch_act4_sail.py --repo "$(ACT4_REPO)"
+	@mkdir -p "$(ACT4_SHIM_BIN)" && \
+		if PATH="$(ACT4_PATH)" command -v ruby >/dev/null 2>&1; then \
+			ln -sf "$$(PATH="$(ACT4_PATH)" command -v ruby)" "$(ACT4_SHIM_BIN)/ruby3.2"; \
+		fi
 	@echo "[act4] Generating self-checking ELFs..."
 	@echo "  Config:  $(ACT4_CONFIG)"
 	@echo "  Workdir: $(ACT4_WORKDIR)"
 	@mkdir -p "$(ACT4_WORKDIR)" "$(ACT4_UV_CACHE_DIR)" "$(ACT4_XDG_DATA_HOME)"
+	@if [ "$(ACT4_VECTOR_TESTS)" = "1" ]; then \
+		cd "$(ACT4_REPO)" && \
+		PATH="$(ACT4_PATH)" BUNDLE_GEMFILE="$(ACT4_GEMFILE)" \
+		UV_CACHE_DIR="$(ACT4_UV_CACHE_DIR)" XDG_DATA_HOME="$(ACT4_XDG_DATA_HOME)" \
+		$(MAKE) vector-tests WORKDIR="$(ACT4_WORKDIR)" JOBS="$(JOBS)"; \
+	fi
 	cd "$(ACT4_REPO)" && \
-		PATH="$(ACT4_PATH)" UV_CACHE_DIR="$(ACT4_UV_CACHE_DIR)" \
-		XDG_DATA_HOME="$(ACT4_XDG_DATA_HOME)" \
+		PATH="$(ACT4_PATH)" BUNDLE_GEMFILE="$(ACT4_GEMFILE)" \
+		UV_CACHE_DIR="$(ACT4_UV_CACHE_DIR)" XDG_DATA_HOME="$(ACT4_XDG_DATA_HOME)" \
 		$(MAKE) elfs \
 		CONFIG_FILES="$(ACT4_CONFIG)" \
 		WORKDIR="$(ACT4_WORKDIR)" \
 		EXTENSIONS="$(ACT4_EXTENSIONS)" \
-		FAST=1 \
-		--jobs $(NPROC)
+		CLEAN_INTERMEDIATES="$(ACT4_CLEAN_INTERMEDIATES)" \
+		JOBS="$(JOBS)"
 	@echo "[act4] ELFs generated in $(ACT4_ELF_DIR)"
 
-riscof-build-npc: ## Build the selected XLEN NPC for ACT4 self-checking ELFs
-	@# ACT4 binaries report their own result and run without a NEMU -d argument.
-	@# The simulator supports this even when CONFIG_DIFFTEST is enabled.
-	@$(MAKE) -C $(NSIM_HOME) o2_defconfig RAPT_CONFIG=$(RAPT_CONFIG) \
-		BUILD_PROFILE=$(ACT4_BUILD_PROFILE) VFLAGS="$(ACT4_VFLAGS)"
-	@$(MAKE) -C $(NSIM_HOME) $(SUBMAKE_JOBS) RAPT_CONFIG=$(RAPT_CONFIG) \
-		BUILD_PROFILE=$(ACT4_BUILD_PROFILE) VFLAGS="$(ACT4_VFLAGS)"
+riscof-build-npc: ## Build single-threaded -O3 NPC for parallel ACT4 self-checking ELFs
+	@# Single-threaded Verilator (-O3, VERILATOR_THREADS=1) avoids VlThreadPool
+	@# spin-barrier preemption when running many ACT4 ELFs in parallel.
+	@$(MAKE) -C $(NSIM_HOME) o2_defconfig RAPT_CONFIG=$(ACT4_RAPT_CONFIG) \
+		BUILD_PROFILE=$(ACT4_BUILD_PROFILE) VFLAGS="$(ACT4_VFLAGS)" \
+		VERILATOR_THREADS=1 SIM_OPT=-O3 SIM_TRACE=0
+	@$(MAKE) -C $(NSIM_HOME) $(SUBMAKE_JOBS) RAPT_CONFIG=$(ACT4_RAPT_CONFIG) \
+		BUILD_PROFILE=$(ACT4_BUILD_PROFILE) VFLAGS="$(ACT4_VFLAGS)" \
+		VERILATOR_THREADS=1 SIM_OPT=-O3 SIM_TRACE=0
 	@test -f $(ACT4_NPC_BIN) || { echo "[act4] ERROR: NPC build failed: $(ACT4_NPC_BIN)"; exit 1; }
 
 riscof-run: riscof-build-npc $(MROM_IMG) ## Run ACT4 ELFs on Raptor NPC
@@ -609,6 +653,7 @@ riscof-run: riscof-build-npc $(MROM_IMG) ## Run ACT4 ELFs on Raptor NPC
 	@echo "[act4] Running ACT4 tests on Raptor NPC"
 	@echo "  NPC:    $(ACT4_NPC_BIN)"
 	@echo "  ELFs:   $(ACT4_ELF_DIR)"
+	@echo "  Shard:  $(ACT4_SHARD_INDEX)/$(ACT4_SHARD_COUNT)"
 	@echo "  Logs:   $(ACT4_WORKDIR)/logs"
 	@echo "================================================================"
 	python3 $(VERIFY_HOME)/scripts/run_act4.py \
@@ -618,8 +663,11 @@ riscof-run: riscof-build-npc $(MROM_IMG) ## Run ACT4 ELFs on Raptor NPC
 		--mem-random-delay $(MEM_RANDOM_DELAY) \
 		--mem-random-seed $(MEM_RANDOM_SEED) \
 		--jobs $(JOBS) \
+		--shard-index $(ACT4_SHARD_INDEX) \
+		--shard-count $(ACT4_SHARD_COUNT) \
 		--log-dir "$(ACT4_WORKDIR)/logs" \
 		--timeout $(ACT4_TIMEOUT) \
+		$(ACT4_EBREAK_FLAG) \
 		"$(ACT4_ELF_DIR)"
 
 riscof-clean: ## Clean ACT4 artifacts
@@ -2013,6 +2061,49 @@ $(RVA22S64_CASE_TARGETS): $(RVA22S64_MROM)
 		--timeout "$(or $(RVA22S64_RUN_TIMEOUT),60)" \
 		--npc "$(RVA22S64_NPC)" --reference "$(NEMU_SO_$(RVA22S64_XLEN))" --mrom "$(MROM_IMG)" \
 		--image "$(BUILD_DIR)/$(patsubst rva22s64-%-run,%,$@)/test.bin" --output "$(BUILD_DIR)/$(patsubst rva22s64-%-run,%,$@)/runs"
+
+# Directed RV64 RVA23S64 guest suite: Svnapot, Sscofpmf, Smstateen/Ssstateen,
+# Smnpm/Ssnpm, and full Sha/H two-stage translation + HLV/HLVX/HSV + Sstc + V.
+RVA23S64_NPC ?= $(NSIM_HOME)/build/default/riscv64-npc-sim
+RVA23S64_MROM := $(BUILD_DIR)/mrom-rv64/mrom-data.bin
+RVA23S64_MARCH ?= rv64gcv_zba_zbb_zbc_zbs_zicsr_zifencei
+RVA23S64_CASES := \
+	rva23s64-profile rva23-hypervisor rva23-sstc \
+	h-gstage-irq h-gstage-irq-clock h-gstage-irq-delta \
+	svnapot sscofpmf-irq pointer-mask
+RVA23S64_CASE_TARGETS := $(RVA23S64_CASES:%=rva23s64-%-run)
+.PHONY: $(RVA23S64_CASE_TARGETS) rva23s64-directed
+rva23s64-directed: ## Run every directed RVA23S64 case on RV64 default with NEMU difftest
+	@$(MAKE) --no-print-directory -k $(RVA23S64_CASE_TARGETS)
+rva23s64-rva23s64-profile-run: RVA23S64_TEST_SOURCE = rva23s64_profile
+rva23s64-rva23-hypervisor-run: RVA23S64_TEST_SOURCE = nemu_rva23_hypervisor
+rva23s64-rva23-sstc-run: RVA23S64_TEST_SOURCE = nemu_rva23_sstc
+rva23s64-h-gstage-irq-run: RVA23S64_TEST_SOURCE = nemu_h_gstage_irq
+rva23s64-h-gstage-irq-run: RVA23S64_CASE_CPPFLAGS = -DHARTS=1
+rva23s64-h-gstage-irq-clock-run: RVA23S64_TEST_SOURCE = nemu_h_gstage_irq
+rva23s64-h-gstage-irq-clock-run: RVA23S64_CASE_CPPFLAGS = -DHARTS=1 -DNEMU_H_IRQ_CLOCK
+rva23s64-h-gstage-irq-delta-run: RVA23S64_TEST_SOURCE = nemu_h_gstage_irq
+rva23s64-h-gstage-irq-delta-run: RVA23S64_CASE_CPPFLAGS = \
+	-DHARTS=1 -DNEMU_H_IRQ_CLOCK -DNEMU_H_IRQ_DELTA
+rva23s64-svnapot-run: RVA23S64_TEST_SOURCE = nemu_svnapot
+rva23s64-svnapot-run: RVA23S64_CASE_CPPFLAGS = -DHARTS=1
+rva23s64-sscofpmf-irq-run: RVA23S64_TEST_SOURCE = nemu_sscofpmf_irq
+rva23s64-pointer-mask-run: RVA23S64_TEST_SOURCE = nemu_pointer_mask
+rva23s64-pointer-mask-run: RVA23S64_CASE_CPPFLAGS = -DHARTS=1
+$(RVA23S64_CASE_TARGETS): $(RVA23S64_MROM)
+	@mkdir -p "$(BUILD_DIR)/$(patsubst %-run,%,$@)"
+	$(CC) $(GUEST_CPPFLAGS) $(RVA23S64_CASE_CPPFLAGS) -march=$(RVA23S64_MARCH) -mabi=lp64 \
+		-fno-pic -fno-pie -no-pie -nostdlib -nostartfiles -static \
+		-Wl,--no-relax -Wl,--build-id=none \
+		-T "$(FUZZ_LINKER)" "$(RVA22S64_TEST_DIR)/$(RVA23S64_TEST_SOURCE).S" \
+		-o "$(BUILD_DIR)/$(patsubst %-run,%,$@)/test.elf"
+	$(OBJCOPY) -O binary "$(BUILD_DIR)/$(patsubst %-run,%,$@)/test.elf" \
+		"$(BUILD_DIR)/$(patsubst %-run,%,$@)/test.bin"
+	$(PYTHON) "$(VERIFY_HOME)/scripts/rva22s64_privileged.py" \
+		--name "$(patsubst rva23s64-%-run,%,$@)" \
+		--npc "$(RVA23S64_NPC)" --reference "$(NEMU_SO_64)" --mrom "$(RVA23S64_MROM)" \
+		--image "$(BUILD_DIR)/$(patsubst %-run,%,$@)/test.bin" \
+		--output "$(BUILD_DIR)/$(patsubst %-run,%,$@)/runs"
 
 define VERILATOR_PLIC_CONTRACT_RUN
 	$(call VERILATOR_DIRECTED_RUN,router_plic_contract_rv$(1),tb_router_plic_contract,,$(if $(filter 64,$(1)),-d RAPT_RV64,),,for case_id in 1 2 3 4 5 6; do \

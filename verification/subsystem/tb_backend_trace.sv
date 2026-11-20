@@ -75,6 +75,11 @@ module tb_backend_trace;
       .history_restore,
       .restore_ghr,
       .restore_phr
+`ifdef RAPT_H_EXTENSION
+      ,
+      .ifetch_gpf_gpa_i('0),
+      .ifetch_gpf_ptw_i(1'b0)
+`endif
   );
   rapt_memory memory_env (
       .sram_ctrl_i(rapt_pkg::SramCtrlReset),

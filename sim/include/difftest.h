@@ -14,7 +14,7 @@ bool difftest_is_enabled();
 
 void difftest_checkpoint_resync();
 
-void difftest_step(vaddr_t pc, uint32_t retire_count = 1);
+void difftest_step(vaddr_t pc, uint32_t retire_count = 1, bool commit_trap = false);
 
 void init_difftest(char *ref_so_file, long img_size, int port, uint64_t isa_extensions);
 

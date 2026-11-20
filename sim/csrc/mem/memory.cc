@@ -31,10 +31,20 @@ extern VerilatedContext *contextp;
 #define NS16550_SIZE 0x100u
 #define VIRTIO_BLK_BASE 0x10001000u
 #define VIRTIO_BLK_SIZE 0x1000u
+#define VIRTIO_NET_BASE 0x10002000u
+#define VIRTIO_NET_SIZE 0x1000u
+#define VIRTIO_EXTRA_BASE 0x10003000u
+#define VIRTIO_EXTRA_SIZE 0x6000u
 #define QEMU_SDHCI_PCI_ECAM_BASE 0x30008000u
 #define QEMU_SDHCI_PCI_ECAM_SIZE 0x1000u
 #define QEMU_SDHCI_BASE 0x40000000u
 #define QEMU_SDHCI_SIZE 0x100u
+#define PCIE_ECAM_BASE 0x41000000u
+#define PCIE_ECAM_SIZE 0x01000000u
+#define SDHCI_PLTFM_BASE 0x42000000u
+#define SDHCI_PLTFM_SIZE 0x1000u
+#define PCIE_MMIO_BASE 0x50000000u
+#define PCIE_MMIO_SIZE 0x10000000u
 
 static struct
 {
@@ -163,9 +173,15 @@ static void serial_handle(paddr_t addr, word_t wdata, char wmask, bool is_write,
       mmio_serial_handle(addr - NS16550_BASE + i, (wdata >> (8*i)) & 0xff, true, nullptr);
 }
 
+bool qemu_io_bridge_active();
+void mmio_qemu_bridge_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data);
+
 static void virtio_blk_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data)
 {
-  (void)wmask;
+  if (qemu_io_bridge_active()) {
+    mmio_qemu_bridge_handle(addr, wdata, wmask, is_write, data);
+    return;
+  }
   void mmio_virtio_blk_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data);
   if (!is_write) {
     mmio_virtio_blk_handle(addr - VIRTIO_BLK_BASE, wdata, 0, false, data);
@@ -181,10 +197,57 @@ static void virtio_blk_handle(paddr_t addr, word_t wdata, char wmask, bool is_wr
   }
 }
 
+static void virtio_net_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data)
+{
+  if (qemu_io_bridge_active()) {
+    mmio_qemu_bridge_handle(addr, wdata, wmask, is_write, data);
+    return;
+  }
+  void mmio_virtio_net_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data);
+  if (!is_write) {
+    mmio_virtio_net_handle(addr - VIRTIO_NET_BASE, wdata, 0, false, data);
+    return;
+  }
+  for (unsigned i = 0; i < sizeof(word_t);) {
+    unsigned count = 4u - ((addr + i) & 3u);
+    uint8_t mask = ((uint8_t)wmask >> i) & ((1u << count) - 1u);
+    if (mask) mmio_virtio_net_handle(addr - VIRTIO_NET_BASE + i,
+                                    wdata >> (8*i), (char)mask, true, nullptr);
+    i += count;
+  }
+}
+
+static void virtio_extra_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data)
+{
+  if (qemu_io_bridge_active()) {
+    mmio_qemu_bridge_handle(addr, wdata, wmask, is_write, data);
+    return;
+  }
+  if (!is_write && data != NULL) {
+    uint32_t off = (uint32_t)addr & 0xffcu;
+    uint32_t r32 = (off == 0x000u) ? 0x74726976u : (off == 0x004u ? 2u : 0u);
+    *data = ((addr & 4u) && sizeof(word_t) == 8) ? (word_t)((uint64_t)r32 << 32) : (word_t)r32;
+  }
+}
+
 static void sdhci_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data)
 {
+  if (qemu_io_bridge_active() && addr >= SDHCI_PLTFM_BASE) {
+    mmio_qemu_bridge_handle(addr, wdata, wmask, is_write, data);
+    return;
+  }
   void mmio_sdhci_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data);
   mmio_sdhci_handle(addr, wdata, wmask, is_write, data);
+}
+
+static void pcie_nvme_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data)
+{
+  if (qemu_io_bridge_active()) {
+    mmio_qemu_bridge_handle(addr, wdata, wmask, is_write, data);
+    return;
+  }
+  void mmio_pcie_nvme_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data);
+  mmio_pcie_nvme_handle(addr, wdata, wmask, is_write, data);
 }
 
 // egos-2000 HARDWARE platform peripherals (LiteX-style).
@@ -219,8 +282,14 @@ static mmio_map_t mmio_maps[] = {
     {"plic", PLIC_BASE, PLIC_SIZE, "QEMU virt PLIC sink", false, NULL},
     {"serial_ns16550", NS16550_BASE, NS16550_SIZE, "QEMU virt NS16550 UART", false, serial_handle},
     {"virtio-blk", VIRTIO_BLK_BASE, VIRTIO_BLK_SIZE, "QEMU virtio-mmio block device", true, virtio_blk_handle},
+    {"virtio-net", VIRTIO_NET_BASE, VIRTIO_NET_SIZE, "QEMU virtio-mmio network device", true, virtio_net_handle},
+    {"virtio-extra", VIRTIO_EXTRA_BASE, VIRTIO_EXTRA_SIZE, "QEMU virtio-mmio extra slots",
+     true, virtio_extra_handle},
     {"sdhci-pci-ecam", QEMU_SDHCI_PCI_ECAM_BASE, QEMU_SDHCI_PCI_ECAM_SIZE, "QEMU SDHCI PCI ECAM stub", true, sdhci_handle},
     {"sdhci", QEMU_SDHCI_BASE, QEMU_SDHCI_SIZE, "QEMU SDHCI SD-card controller", true, sdhci_handle},
+    {"pcie-ecam", PCIE_ECAM_BASE, PCIE_ECAM_SIZE, "PCIe generic ECAM host bridge", true, pcie_nvme_handle},
+    {"sdhci-pltfm", SDHCI_PLTFM_BASE, SDHCI_PLTFM_SIZE, "Platform SDHCI v3.00 controller", true, sdhci_handle},
+    {"pcie-mmio", PCIE_MMIO_BASE, PCIE_MMIO_SIZE, "PCIe 32-bit MMIO BAR aperture (NVMe)", true, pcie_nvme_handle},
     // egos-2000 HARDWARE platform: LiteX SPI master driving an SD card. NEMU
     // does not model the device, so loads/stores must be skipped on REF.
     {"litex-spi", LITEX_SPI_HW_BASE, LITEX_SPI_HW_SIZE,
@@ -592,8 +661,14 @@ void init_mem()
   init_serial();
   void init_virtio_blk();
   init_virtio_blk();
+  void init_virtio_net();
+  init_virtio_net();
   void init_sdhci();
   init_sdhci();
+  void init_pcie_nvme();
+  init_pcie_nvme();
+  void init_qemu_io_bridge();
+  init_qemu_io_bridge();
   void init_litex_spi();
   init_litex_spi();
   void init_litex_uart();

@@ -922,6 +922,10 @@ module tb_l1d_page_permissions;
       .load_size_m1(4'd1),
       .store_walu(8'(`RAPT_SH_WSTRB)),
       .cmo_mgmt(1'b0),
+`ifdef RAPT_H_EXTENSION
+      .load_exec(1'b0),
+      .ptw_exec(1'b0),
+`endif
       .tlb_hit(tlb_hit),
       .stlb_hit(stlb_hit),
       .dtlb_pte(dtlb_pte),

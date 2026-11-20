@@ -3,6 +3,7 @@
 #include <checkpoint.h>
 #include <memory.h>
 #include <difftest-isa.h>
+#include <difftest-hypervisor.h>
 #include <difftest-vector.h>
 #include <dlfcn.h>
 #ifdef RAPT_LARGE_PMEM
@@ -59,6 +60,21 @@ static void (*ref_difftest_clear_reservation)(void) = NULL;
 static void (*ref_difftest_restore_sstc)(uint64_t, uint64_t) = NULL;
 static const NemuDiffVectorAPI *vector_reference = nullptr;
 static const NemuDiffVectorCSRAPI *vector_csr_reference = nullptr;
+const NemuDiffHypervisorAPI *hypervisor_reference = nullptr;
+
+static void sync_hypervisor_reference()
+{
+  if (npc.hypervisor_csrs == nullptr || hypervisor_reference == nullptr) return;
+  NemuDiffHypervisorState state = {};
+  state.virt = npc.virt != nullptr ? (*npc.virt & 1u) : 0u;
+  state.priv = npc.priv != nullptr ? ((uint8_t)*npc.priv & 3u) : 3u;
+  for (unsigned index = 0; index < NEMU_DIFF_HYPERVISOR_CSR_COUNT; index++)
+    state.csr[index] = npc.hypervisor_csrs[index];
+  if (npc.clint_mtime != nullptr && hypervisor_reference->set_mtime != nullptr)
+    hypervisor_reference->set_mtime(*npc.clint_mtime);
+  Assert(hypervisor_reference->set_state(0, &state) == 0,
+         "Hypervisor reference rejected the CSR state");
+}
 
 static void sync_vector_reference()
 {
@@ -133,6 +149,7 @@ void difftest_checkpoint_resync()
   else
     ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
   sync_vector_reference();
+  sync_hypervisor_reference();
 
   uint64_t error_status = (*npc.bus_error_pending & 1u) |
       ((*npc.bus_error_overflow & 1u) << 1) | ((uint64_t)*npc.bus_error_strb << 8);
@@ -228,6 +245,21 @@ void init_difftest(char *ref_so_file, long img_size, int port, uint64_t isa_exte
 #endif
 #ifdef RAPT_DUT_SSNPM
   isa_extensions |= NEMU_ISA_EXT_SSNPM;
+#endif
+#ifdef RAPT_DUT_SMNPM
+  isa_extensions |= NEMU_ISA_EXT_SMNPM;
+#endif
+#ifdef RAPT_DUT_SVNAPOT
+  isa_extensions |= NEMU_ISA_EXT_SVNAPOT;
+#endif
+#ifdef RAPT_DUT_SSCOFPMF
+  isa_extensions |= NEMU_ISA_EXT_SSCOFPMF;
+#endif
+#ifdef RAPT_DUT_SMSTATEEN
+  isa_extensions |= NEMU_ISA_EXT_SMSTATEEN_PREVIEW;
+#endif
+#ifdef RAPT_DUT_H_EXTENSION
+  isa_extensions |= NEMU_ISA_EXT_H_GSTAGE_PREVIEW;
 #endif
 #ifdef RAPT_DUT_ZVBB
   isa_extensions |= NEMU_ISA_EXT_ZVBB;
@@ -341,11 +373,27 @@ void init_difftest(char *ref_so_file, long img_size, int port, uint64_t isa_exte
     }
     printf("[difftest] V enabled: compare all 32 vector registers and seven vector CSRs\n");
   }
+  if (npc.hypervisor_csrs != nullptr)
+  {
+    NemuDiffHypervisorQuery hyp_query =
+        (NemuDiffHypervisorQuery)dlsym(handle, "nemu_difftest_hypervisor_query");
+    hypervisor_reference = hyp_query == nullptr ? nullptr :
+        hyp_query(NEMU_DIFF_HYPERVISOR_VERSION, sizeof(NemuDiffHypervisorAPI));
+    if (hypervisor_reference != nullptr &&
+        (hypervisor_reference->xlen != sizeof(word_t) * 8 ||
+         hypervisor_reference->get_state == nullptr ||
+         hypervisor_reference->set_state == nullptr))
+    {
+      fprintf(stderr, "[difftest] invalid hypervisor CSR reference API\n");
+      abort();
+    }
+  }
   ref_difftest_memcpy(MBASE, guest_to_host(MBASE), img_size, DIFFTEST_TO_REF);
   ref_difftest_memcpy(MROM_BASE, guest_to_host(MROM_BASE), MROM_SIZE, DIFFTEST_TO_REF);
   ref_difftest_memcpy(FLASH_BASE, guest_to_host(FLASH_BASE), FLASH_SIZE, DIFFTEST_TO_REF);
   ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
   sync_vector_reference();
+  sync_hypervisor_reference();
 #endif
 }
 
@@ -477,6 +525,34 @@ static void checkregs(NPCState *ref, vaddr_t pc)
       }
   }
 
+  if (npc.hypervisor_csrs != nullptr && hypervisor_reference != nullptr)
+  {
+    NemuDiffHypervisorState hstate = {};
+    Assert(hypervisor_reference->get_state(0, &hstate) == 0,
+           "Cannot read reference hypervisor CSRs");
+    const uint8_t dut_virt = npc.virt != nullptr ? (*npc.virt & 1u) : 0u;
+    if (hstate.virt != dut_virt)
+    {
+      printf(FMT_RED("[ERROR] virt differs: ref=%u dut=%u\n"), hstate.virt, dut_virt);
+      is_same = false;
+    }
+    static const char *hnames[NEMU_DIFF_HYPERVISOR_CSR_COUNT] = {
+      "menvcfg", "senvcfg", "mstateen0", "mstateen1", "mstateen2", "mstateen3",
+      "hstatus", "hedeleg", "hideleg", "hie", "htimedelta", "hcounteren",
+      "henvcfg", "hstateen0", "hstateen1", "hstateen2", "hstateen3", "htval",
+      "hip", "hvip", "htinst", "hgatp", "vsstatus", "vsie", "vstvec",
+      "vsscratch", "vsepc", "vscause", "vstval", "vsip", "vstimecmp", "vsatp",
+      "mtinst", "mtval2"
+    };
+    for (unsigned index = 0; index < NEMU_DIFF_HYPERVISOR_CSR_COUNT; index++)
+      if (hstate.csr[index] != npc.hypervisor_csrs[index])
+      {
+        printf(FMT_RED("[ERROR] %s differs: ref=%016" PRIx64 " dut=%016" PRIx64 "\n"),
+               hnames[index], hstate.csr[index], npc.hypervisor_csrs[index]);
+        is_same = false;
+      }
+  }
+
   if (!is_same)
   {
     // Enhanced error reporting: show load/store context if available
@@ -563,7 +639,98 @@ static void checkregs(NPCState *ref, vaddr_t pc)
   }
 }
 
-void difftest_step(vaddr_t pc, uint32_t retire_count)
+static bool sync_pre_exec_ip_read(uint32_t retire_count, bool commit_trap)
+{
+  if (commit_trap || retire_count != 1 || npc.mip____ == nullptr) return false;
+  const uint32_t inst = *npc.inst;
+  const uint32_t funct3 = (inst >> 12) & 0x7u;
+  const uint32_t rd = (inst >> 7) & 0x1fu;
+  if ((inst & 0x7fu) != 0x73u || funct3 == 0u || funct3 == 4u || rd == 0u)
+    return false;
+  const uint16_t csr = (inst >> 20) & 0xfffu;
+  if (csr != 0x344u && csr != 0x144u && csr != 0x644u && csr != 0x244u)
+    return false;
+  const word_t rd_val = npc.gpr[rd];
+  const word_t post_mip = *npc.mip____;
+  const uint8_t dut_virt = npc.virt != nullptr ? (*npc.virt & 1u) : 0u;
+#ifdef CONFIG_ISA64
+  const bool stce = npc.menvcfg != nullptr && (((uint64_t)*npc.menvcfg >> 63) & 1u);
+#else
+  const bool stce = npc.menvcfgh != nullptr && ((*npc.menvcfgh >> 31) & 1u);
+#endif
+  const bool has_hyp = npc.hypervisor_csrs != nullptr && hypervisor_reference != nullptr;
+  const uint64_t hideleg = has_hyp ? npc.hypervisor_csrs[NEMU_DIFF_HCSR_HIDELEG] : 0ull;
+  const uint64_t henvcfg = has_hyp ? npc.hypervisor_csrs[NEMU_DIFF_HCSR_HENVCFG] : 0ull;
+  const bool vstce = stce && ((henvcfg >> 63) & 1u);
+  bool resync = false;
+
+  if (csr == 0x344u && !dut_virt && ref_difftest_set_mtip != nullptr)
+  {
+    const uint8_t pre_mtip = (rd_val >> 7) & 1u;
+    if (pre_mtip != ((post_mip >> 7) & 1u))
+    {
+      ref_difftest_set_mtip(pre_mtip);
+      resync = true;
+    }
+  }
+  const bool stip_delegated = npc.mideleg != nullptr && ((*npc.mideleg >> 5) & 1u) != 0;
+  if (stce && ref_difftest_set_stip != nullptr && !dut_virt &&
+      (csr == 0x344u || (csr == 0x144u && stip_delegated)))
+  {
+    const uint8_t pre_stip = (rd_val >> 5) & 1u;
+    if (pre_stip != ((post_mip >> 5) & 1u))
+    {
+      ref_difftest_set_stip(pre_stip);
+      resync = true;
+    }
+  }
+  if (vstce && has_hyp && hypervisor_reference->set_mtime != nullptr &&
+      npc.clint_mtime != nullptr)
+  {
+    int vstip_bit = -1;
+    if (!dut_virt && (csr == 0x344u || csr == 0x644u)) vstip_bit = 6;
+    else if ((csr == 0x244u && !dut_virt && ((hideleg >> 6) & 1u)) ||
+             (csr == 0x144u && dut_virt && ((hideleg >> 6) & 1u)))
+      vstip_bit = 5;
+    if (vstip_bit >= 0)
+    {
+      const uint8_t pre_vstip = (rd_val >> vstip_bit) & 1u;
+      if (pre_vstip != ((post_mip >> 6) & 1u))
+      {
+        const uint64_t delta = npc.hypervisor_csrs[NEMU_DIFF_HCSR_HTIMEDELTA];
+        const uint64_t cmp = npc.hypervisor_csrs[NEMU_DIFF_HCSR_VSTIMECMP];
+        const uint64_t target_vtime = pre_vstip ? cmp : (cmp - 1ull);
+        hypervisor_reference->set_mtime(target_vtime - delta);
+        resync = true;
+      }
+    }
+  }
+  return resync;
+}
+
+static void restore_post_exec_ip()
+{
+  if (npc.mip____ != nullptr)
+  {
+    const word_t post_mip = *npc.mip____;
+    if (ref_difftest_set_mtip != nullptr)
+      ref_difftest_set_mtip((post_mip >> 7) & 1u);
+#ifdef CONFIG_ISA64
+    const bool stce = npc.menvcfg != nullptr && (((uint64_t)*npc.menvcfg >> 63) & 1u);
+#else
+    const bool stce = npc.menvcfgh != nullptr && ((*npc.menvcfgh >> 31) & 1u);
+#endif
+    if (stce && ref_difftest_set_stip != nullptr)
+      ref_difftest_set_stip((post_mip >> 5) & 1u);
+  }
+  if (hypervisor_reference != nullptr && hypervisor_reference->set_mtime != nullptr &&
+      npc.clint_mtime != nullptr)
+  {
+    hypervisor_reference->set_mtime(*npc.clint_mtime);
+  }
+}
+
+void difftest_step(vaddr_t pc, uint32_t retire_count, bool commit_trap)
 {
   if (!difftest_enabled)
     return;
@@ -607,6 +774,7 @@ void difftest_step(vaddr_t pc, uint32_t retire_count)
   {
     ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
     sync_vector_reference();
+    sync_hypervisor_reference();
     is_skip_ref = false;
     should_diff_mem = false;
     return;
@@ -629,6 +797,7 @@ void difftest_step(vaddr_t pc, uint32_t retire_count)
       /* Compatibility with an older reference shared object. */
       ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
       sync_vector_reference();
+      sync_hypervisor_reference();
       should_diff_mem = false;
       return;
     }
@@ -636,7 +805,10 @@ void difftest_step(vaddr_t pc, uint32_t retire_count)
 
   // Group stepping belongs after reset/checkpoint/MMIO skip handling. No
   // intermediate retirement may execute REF before its state is synchronized.
+  const bool ip_resync = sync_pre_exec_ip_read(retire_count, commit_trap);
   ref_difftest_exec(retire_count);
+  if (ip_resync)
+    restore_post_exec_ip();
   // DUT flops already include this edge's external write response. Apply it
   // after retired CSR semantics (hardware wins W1C), before comparing MIP.
   // The cycle-level call remains necessary for no-commit/skip paths.
@@ -647,6 +819,7 @@ void difftest_step(vaddr_t pc, uint32_t retire_count)
   {
     ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
     sync_vector_reference();
+    sync_hypervisor_reference();
     should_diff_mem = false;
   }
   else

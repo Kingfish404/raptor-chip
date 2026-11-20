@@ -6,6 +6,7 @@
 !/linux/Kconfig
 !/linux/Makefile
 !/linux/*.config
+!/linux/*.json
 !/linux/*.patch
 # Versioned FPGA-only RTL instrumentation, not generated run artifacts.
 !/sampling/*.patch

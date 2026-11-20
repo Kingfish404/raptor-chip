@@ -16,8 +16,11 @@ on:
       - "nemu/src/isa/filelist.mk"
       - "verification/scripts/test_spike_bootstrap.py"
       - "verification/scripts/test_riscof_*.py"
+      - "verification/scripts/test_run_act4.py"
+      - "verification/scripts/run_act4.py"
       - "verification/scripts/riscof*"
       - "verification/riscof/**"
+      - "tools/qemu_io_bridge/**"
       - "app/benchmarks/coremark/portme/**"
       - "app/benchmarks/embench/report.py"
       - "app/benchmarks/embench/test_report.py"
@@ -59,3 +62,6 @@ jobs:
         run: |
           python3 verification/scripts/test_riscof_classic_runner.py
           python3 verification/scripts/test_riscof_classic_sail.py
+          python3 verification/scripts/test_run_act4.py
+      - name: QEMU I/O and DMA bridge tests
+        run: python3 -m unittest discover -s tools/qemu_io_bridge -p "test_*.py"

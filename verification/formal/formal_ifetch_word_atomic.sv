@@ -56,6 +56,12 @@ module formal_ifetch_word_atomic (
       .translation_pbmt,
       .translation_fault,
       .translation_cause(X'(12)),
+`ifdef RAPT_H_EXTENSION
+      .translation_gpa('0),
+      .translation_gptw(1'b0),
+      .result_gpa(),
+      .result_gptw(),
+`endif
       .read_valid,
       .read_ready,
       .read_paddr,

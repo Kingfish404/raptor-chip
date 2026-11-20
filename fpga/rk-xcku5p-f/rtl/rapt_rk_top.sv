@@ -183,6 +183,83 @@ module rapt_rk_top (
   assign peripheral_irq = 0;
   assign peripheral_rdata = 0;
 `endif
+`ifdef NATIVE_WITH_IO_SOC
+  wire soc_periph_rd, soc_periph_wr;
+  wire [15:0] soc_periph_raddr, soc_periph_waddr;
+  wire [31:0] soc_periph_wdata, soc_periph_rdata;
+  wire [3:0] soc_periph_wstrb;
+  wire [7:0] eth_stream_rx_data, eth_stream_tx_data;
+  wire eth_stream_rx_valid, eth_stream_rx_last, eth_stream_rx_ready;
+  wire eth_stream_tx_valid, eth_stream_tx_last, eth_stream_tx_ready;
+
+  rapt_native_eth_stream_bridge eth_stream (
+      .clk(clk),
+      .reset(reset || !ddr_ready),
+      .host_rd_i(soc_periph_rd),
+      .host_wr_i(soc_periph_wr),
+      .host_raddr_i(soc_periph_raddr),
+      .host_waddr_i(soc_periph_waddr),
+      .host_wdata_i(soc_periph_wdata),
+      .host_wstrb_i(soc_periph_wstrb),
+      .host_rdata_o(soc_periph_rdata),
+      .eth_rd_o(peripheral_rd),
+      .eth_wr_o(peripheral_wr),
+      .eth_raddr_o(peripheral_raddr),
+      .eth_waddr_o(peripheral_waddr),
+      .eth_wdata_o(peripheral_wdata),
+      .eth_wstrb_o(peripheral_wstrb),
+      .eth_rdata_i(peripheral_rdata),
+      .rx_data_o(eth_stream_rx_data),
+      .rx_valid_o(eth_stream_rx_valid),
+      .rx_last_o(eth_stream_rx_last),
+      .rx_ready_i(eth_stream_rx_ready),
+      .tx_data_i(eth_stream_tx_data),
+      .tx_valid_i(eth_stream_tx_valid),
+      .tx_last_i(eth_stream_tx_last),
+      .tx_ready_o(eth_stream_tx_ready)
+  );
+
+  rapt_native_io_soc #(
+      .WithDdr(`NATIVE_DDR),
+      .WithPeripheral(`NATIVE_ETHERNET),
+      .WithLocalVirtioNet(`NATIVE_LOCAL_VIRTIO_NET),
+      .WithQemuBridge(`NATIVE_QEMU_BRIDGE),
+      .RamBytes(`NATIVE_RAM_BYTES),
+      .ClockHz(ClockHz),
+      .RomFile(`NATIVE_ROM_FILE)
+  ) soc (
+      .clk(clk),
+      .reset(reset || !ddr_ready),
+      .uart_rx(serial_rx),
+      .uart_tx(serial_tx),
+      .writeback_error(writeback_error),
+      .peripheral_rd(soc_periph_rd),
+      .peripheral_wr(soc_periph_wr),
+      .peripheral_raddr(soc_periph_raddr),
+      .peripheral_waddr(soc_periph_waddr),
+      .peripheral_wdata(soc_periph_wdata),
+      .peripheral_wstrb(soc_periph_wstrb),
+      .peripheral_rdata(soc_periph_rdata),
+      .peripheral_irq(peripheral_irq),
+      .eth_link_up_i(locked),
+      .eth_rx_data_i(eth_stream_rx_data),
+      .eth_rx_valid_i(eth_stream_rx_valid),
+      .eth_rx_last_i(eth_stream_rx_last),
+      .eth_rx_ready_o(eth_stream_rx_ready),
+      .eth_tx_data_o(eth_stream_tx_data),
+      .eth_tx_valid_o(eth_stream_tx_valid),
+      .eth_tx_last_o(eth_stream_tx_last),
+      .eth_tx_ready_i(eth_stream_tx_ready),
+      .bridge_use_slip_i(1'b0),
+      .slip_rx_data_i(8'h00),
+      .slip_rx_valid_i(1'b0),
+      .slip_rx_ready_o(),
+      .slip_tx_data_o(),
+      .slip_tx_valid_o(),
+      .slip_tx_ready_i(1'b1),
+      .ddr(ddr)
+  );
+`else
   rapt_native_soc #(
       .WithDdr(`NATIVE_DDR),
       .WithPeripheral(`NATIVE_ETHERNET),
@@ -205,6 +282,7 @@ module rapt_rk_top (
       .peripheral_irq,
       .ddr
   );
+`endif
   logic [25:0] heartbeat = 0;
   always_ff @(posedge clk) begin
     if (reset) heartbeat <= 0;

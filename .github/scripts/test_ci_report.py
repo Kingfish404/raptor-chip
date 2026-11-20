@@ -213,6 +213,7 @@ class SummaryTests(unittest.TestCase):
                 (launch, 1),
                 (launch + '[    0.000000] Linux version 6.18.51\r\n', 0),
                 (launch + '[    0.000000] Linux version\x1b[1;34mserial exit milestone reached\n', 0),
+                (launch + '[    0.000000] Linux versionmmio-serial.cc:293 serial exit milestone reached\n', 0),
             ):
                 with self.subTest(output=output):
                     log.write_text(output)

@@ -151,6 +151,32 @@ class DistroBootTest(unittest.TestCase):
             self.assertIn('--smp-backend=threaded', command)
             self.assertIn('--smp-clock-div=32', command)
 
+    def test_rva23_distro_dtb_and_nemu_flags(self):
+        self.assertEqual(SOURCES['ubuntu']['release'], '26.10')
+        self.assertEqual(SOURCES['ubuntu']['isa_profile'], 'rva23')
+        self.assertEqual(SOURCES['ubuntu-lts']['release'], '26.04')
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / 'ubuntu'
+            directory.mkdir()
+            build_dtb(directory, 2, source_name='nemu-distro-rva23.dts')
+            dtb = directory / 'nemu.dtb'
+            extensions = subprocess.check_output(
+                ['fdtget', '-t', 's', dtb, '/cpus/cpu@1', 'riscv,isa-extensions'],
+                text=True).split()
+            for required in ('v', 'h', 'zvbb', 'zvfhmin', 'zvkt', 'zfa', 'zawrs',
+                             'ssnpm', 'svnapot', 'svpbmt', 'sscofpmf', 'smstateen'):
+                self.assertIn(required, extensions)
+            (directory / 'manifest.json').write_text(json.dumps({
+                'source': SOURCES['ubuntu'], 'files': {}, 'nemu': '/prepared/nemu',
+                'nemu_sha256': 'digest', 'harts': 1, 'nemu_backend': 'rr'}))
+            args = SimpleNamespace(work=Path(temporary), distro='ubuntu', action='check',
+                                   engine='nemu', nemu_backend='rr', nemu_clock_div=16)
+            with patch('distro_boot.sha', return_value='digest'), \
+                    patch('distro_boot.subprocess.Popen', side_effect=FileNotFoundError) as launch:
+                with self.assertRaises(FileNotFoundError):
+                    check(args)
+            self.assertIn('--isa-extensions=rva23', launch.call_args.args[0])
+
     def test_sanitizer_build_keeps_flags_private(self):
         with tempfile.TemporaryDirectory() as temporary, patch('distro_boot.run') as run:
             build_nemu(Path(temporary), sanitize='thread')

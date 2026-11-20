@@ -334,11 +334,14 @@ void init_mem()
 
 static bool ref_paddr_is_io(paddr_t addr)
 {
-  return (addr >= 0x02000000 && addr < 0x020c0000) ||
+  return (addr >= 0x00100000 && addr < 0x00101000) ||
+      (addr >= 0x02000000 && addr < 0x020c0000) ||
       (addr >= 0x0c000000 && addr < 0x0d000000) ||
       (addr >= 0x10000000 && addr < 0x10000100) ||
+      (addr >= 0x10001000 && addr < 0x10009000) ||  // VirtIO-MMIO slots
       (addr >= 0x11001800 && addr < 0x11001900) ||  // LiteX UART
       (addr >= 0x11008000 && addr < 0x11008100) ||  // LiteX SPI SD
+      (addr >= 0x41000000 && addr < 0x60000000) ||  // PCIe ECAM + SDHCI + NVMe BAR
       (0);
 }
 

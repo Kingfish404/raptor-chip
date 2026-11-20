@@ -81,6 +81,7 @@ package rapt_pkg;
 
   // A superpage may occupy several resolved 4 KiB cache entries. A fence
   // naming any address in that leaf must invalidate every such fragment.
+  // RV64 level 3 encodes a 64 KiB Svnapot leaf (VPN[3:0] ignored).
   function automatic logic tlb_sfence_match(
       input logic [26:0] entry_vpn, input logic [1:0] entry_level, input logic [8:0] entry_asid,
       input logic entry_global, input logic [26:0] fence_vpn, input logic [8:0] fence_asid,
@@ -88,6 +89,7 @@ package rapt_pkg;
     logic vpn_match;
     if (rv64) begin
       case (entry_level)
+        2'd3: vpn_match = entry_vpn[26:4] == fence_vpn[26:4];
         2'd2: vpn_match = entry_vpn[26:18] == fence_vpn[26:18];
         2'd1: vpn_match = entry_vpn[26:9] == fence_vpn[26:9];
         default: vpn_match = entry_vpn == fence_vpn;
@@ -99,6 +101,21 @@ package rapt_pkg;
     end
     return (all_vpn || vpn_match) && (all_asid || (!entry_global && entry_asid == fence_asid));
   endfunction
+
+  // Recognize RV64 Hypervisor virtual-machine memory instructions (HLV/HLVX/HSV).
+  /* verilator lint_off UNUSEDSIGNAL */
+  function automatic logic is_hmem_inst(input logic [31:0] inst);
+    if (inst[6:0] != `RAPT_OP_SYSTEM || inst[14:12] != 3'b100 || inst[31:28] != 4'b0110)
+      return 1'b0;
+    if (inst[25]) return inst[11:7] == 5'd0;
+    case (inst[27:26])
+      2'b00: return inst[24:20] == 5'd0 || inst[24:20] == 5'd1;
+      2'b01, 2'b10:
+        return inst[24:20] == 5'd0 || inst[24:20] == 5'd1 || inst[24:20] == 5'd3;
+      default: return inst[24:20] == 5'd0;
+    endcase
+  endfunction
+  /* verilator lint_on UNUSEDSIGNAL */
 
   // RISC-V implicit return-stack hints, applied to expanded instructions.
   // Different link registers on JALR denote pop-then-push (coroutine switch).
@@ -448,9 +465,34 @@ package rapt_pkg;
 `else
   localparam bit VectorMisaligned = 1'b0;
 `endif
+`ifdef RAPT_SVNAPOT
+  localparam bit SvnapotEnable = `RAPT_XLEN == 64;
+`else
+  localparam bit SvnapotEnable = 1'b0;
+`endif
+`ifdef RAPT_SSCOFPMF
+  localparam bit SscofpmfEnable = 1'b1;
+`else
+  localparam bit SscofpmfEnable = 1'b0;
+`endif
+`ifdef RAPT_SMSTATEEN
+  localparam bit SmstateenEnable = 1'b1;
+`else
+  localparam bit SmstateenEnable = 1'b0;
+`endif
+`ifdef RAPT_SMNPM
+  localparam bit SmnpmEnable = `RAPT_XLEN == 64;
+`else
+  localparam bit SmnpmEnable = 1'b0;
+`endif
+`ifdef RAPT_H_EXTENSION
+  localparam bit HypervisorEnable = `RAPT_XLEN == 64;
+`else
+  localparam bit HypervisorEnable = 1'b0;
+`endif
   localparam logic [`RAPT_XLEN-1:0] Misa =
   `RAPT_MISA
-  | (VectorEnable ? (`RAPT_XLEN'(1) << 21) : '0);
+  | (HypervisorEnable ? (`RAPT_XLEN'(1) << 7) : '0) | (VectorEnable ? (`RAPT_XLEN'(1) << 21) : '0);
   localparam int unsigned DispatchWidth = CoreConfig.dispatch_width;
   localparam int unsigned SteerScanEntries = CoreConfig.steer_scan_entries;
   localparam int unsigned DecodeWidth = CoreConfig.decode_width;
@@ -803,7 +845,7 @@ package rapt_pkg;
   localparam pma_attr_t PmaMapped = 6'b100000, PmaCacheable = 6'b010000,
       PmaWritable = 6'b001000, PmaMmioSkip = 6'b000100, PmaPlicWidth32 = 6'b000010,
       PmaPmem = 6'b000001;
-  localparam int PmaRegionCount = 13;
+  localparam int PmaRegionCount = 14;
   // Preserve the established mapped/cacheable reduction order. The constant
   // interval union below accepts unsorted rows; MMIO uses ascending bounds.
   localparam bit LegacySdramEnabled = PmemBytes < 32'h80000000;
@@ -824,6 +866,8 @@ package rapt_pkg;
       '{64'h20000000, 64'h20010000, PmaMapped | PmaCacheable, 1'b1},  // MROM
       '{64'h21000000, 64'h21200000, PmaMapped | PmaWritable | PmaMmioSkip, 1'b1},  // VGA
       '{64'h30000000, 64'h40000000, PmaMapped | PmaCacheable, 1'b1},  // flash
+      // PCIe ECAM, SDHCI and PCIe MMIO BAR aperture (NVMe / VirtIO-PCI)
+      '{64'h41000000, 64'h60000000, PmaMapped | PmaWritable | PmaMmioSkip, 1'b1},
       // LiteX CSR banks
       '{64'h11000000, 64'h12000000, PmaMapped | PmaWritable | PmaMmioSkip, 1'b1},
       // LiteEth packet SRAM

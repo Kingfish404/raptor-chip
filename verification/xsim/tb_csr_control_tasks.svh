@@ -11,9 +11,13 @@ task automatic clear_request;
     rou_csr.sret = 1'b0;
     rou_csr.trap = 1'b0;
     rou_csr.tval = '0;
+    rou_csr.tval2 = '0;
+    rou_csr.htinst = '0;
+    rou_csr.explicit_guest_trap = 1'b0;
     rou_csr.cause = '0;
     rou_csr.valid = 1'b0;
     rou_csr.retire_count = 1'b0;
+    rou_csr.fence_retired = 1'b0;
   end
 endtask
 

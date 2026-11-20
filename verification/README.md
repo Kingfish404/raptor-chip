@@ -34,7 +34,7 @@ RTL development dependencies.
 | FPU arithmetic | `unit-fpu` | Host/SoftFloat references, rounding, streams and cancellation |
 | VPU | `make -C verification/vpu test` | Integer/FP, memory, context and optional Spike comparison |
 | Integrated V | `make -C verification/subsystem vector-system-smoke` | MMU, interrupts, restart and device faults |
-| Core programs | `rva22s64-directed`, `sigtest` | CSR, privilege, MMU, PMP/PMA, atomics, FP and exceptions |
+| Core programs | `rva2{2,3}s64-directed`, `sigtest` | CSR, H/MMU, PMP/PMA, atomics and FP |
 | Core differential fuzzing | `fuzz`, `riscv-dv`, `cascade-fuzz` | Generated programs with independent references |
 | Architecture compliance | `riscof`, `riscof-classic` | ACT4/Sail self-checking ELFs and classic RISCOF signatures |
 | Formal | `formal`, `formal-scope`, `formal-signoff` | Safety properties and scoped proof evidence |
@@ -104,10 +104,12 @@ Use waveforms and a minimal payload when a behavioral failure needs diagnosis.
 ```sh
 make -C verification/subsystem rva23u64-smoke CONFIG=default
 make -C verification/subsystem rva23u64-linux-probe
+make -C verification/subsystem rva23s64-linux-probe
 make -C verification/subsystem vector-profile-smoke XLEN=32 CONFIG=default
 make -C verification/vpu top TOP_SUITE=zvkt XLEN=64
 make -C verification rva22s64-directed RVA22S64_XLEN=32
 make -C verification rva22s64-directed RVA22S64_XLEN=64
+make -C verification rva23s64-directed
 make verify-sigtest
 make verify-fuzz
 make verify-coverage
@@ -118,8 +120,12 @@ Zvfhmin, Zfa, Zawrs, and pointer masking through the AXI core. The memory
 cases cover misaligned vector elements, noncontiguous page mappings, restart,
 fault-only-first behavior and side-effect device isolation. The Zvkt target
 compares latency across different data operands with the execution controls held fixed.
-The Linux target builds `rva23-check` in `BUILD_DIR`. Place it in the netboot
-initramfs and pass `rdinit=/rva23-check` to exercise the profile from U-mode.
+The Linux probe targets build `rva23-check` (user-only) and `rva23s64-check`
+(including KVM hypervisor probe) in `BUILD_DIR`. Place either in the netboot
+initramfs and pass `rdinit=/rva23-check` or `rdinit=/rva23s64-check`.
+`rva23s64-directed` runs Svnapot, Sscofpmf, Smstateen/Ssstateen, Smnpm/Ssnpm,
+two-stage Sv39 x Sv39x4 translation, HLV/HLVX/HSV, Sstc, and guest V regressions
+against the NEMU reference across delayed AXI beats.
 
 The RVA22S64 case table is in `verification/Makefile`; RV64-only cases are skipped
 in RV32. Each guest has a separate output directory. Override `RVA22S64_NPC` and

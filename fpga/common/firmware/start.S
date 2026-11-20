@@ -42,5 +42,11 @@ boot_jump:
     fence.i
     csrw mie, zero
     csrw satp, zero
+#if __riscv_xlen == 64
+    li t1, 0xc0000000000000f0
+#else
+    li t1, 0xf0
+#endif
+    csrw 0x30a, t1
     li a0, 0
     jr t0

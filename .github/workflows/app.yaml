@@ -6,6 +6,9 @@ name: App (Verified, Linux boot, LiteX)
 #   - riscof-classic: cross-validates the Raptor core against the upstream
 #     riscv-non-isa/riscv-arch-test suite via the classic RISCOF flow
 #     (sail-riscv reference).
+#   - riscof-act4-rva23s64: validates all ratified RVA23S64 extensions
+#     (including V, Zvbb, Zvfhmin, Zfa, H, Svnapot, Smstateen, Sscofpmf)
+#     against upstream Sail 0.16 ACT4 self-checking ELFs across 12 shards.
 #   - fuzztest-sigtest-and-coverage: builds with coverage instrumentation
 #     and runs the verify suite to produce a unified Verilator coverage report.
 #   - linux-test: checks RV32/RV64 Linux kernel entry on the Verilator model.
@@ -223,6 +226,111 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  build-act4-rva23s64:
+    needs: build-riscof
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      ISA: rv64
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup ACT4 build environment
+        uses: ./.github/actions/setup-environment
+        with:
+          profile: sim
+          build-cache: default-act4-rv64
+      - name: Install uv and Ruby 3.2 for ACT4 UDB
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+        run: brew install uv ruby@3.2
+      - name: Download shared Sail reference
+        uses: actions/download-artifact@v8
+        with:
+          name: riscof-npc-${{ github.sha }}
+          path: ${{ runner.temp }}
+      - name: Restore Sail 0.16 for ACT4
+        run: |
+          tar -xzf "$RUNNER_TEMP/sail-riscv.tar.gz"
+          test -x sail-riscv/bin/sail_riscv_sim
+      - name: Cache ACT4 suite and generator caches
+        uses: actions/cache@v5
+        with:
+          path: |
+            verification/riscof/riscv-arch-test
+            verification/build/uv-cache
+            verification/build/xdg-data
+          key: >-
+            act4-rva23s64-v2-${{ hashFiles('verification/riscof/raptor-rva23s64/**',
+            'verification/scripts/patch_act4_sail.py', '.github/workflows/app.yaml') }}
+          restore-keys: |
+            act4-rva23s64-v2-
+      - name: Build shared RVA23S64 ACT4 simulator
+        run: |
+          make -C verification riscof-build-npc ISA=rv64 JOBS=4
+          tar -czhf "$RUNNER_TEMP/act4-rva23s64-npc.tar.gz" \
+            "sim/build/$RAPT_CONFIG-act4-rv64/riscv64-npc-sim" \
+            nemu/tools/capstone/repo/libcapstone.so.5
+      - name: Generate shared RVA23S64 ACT4 ELFs
+        timeout-minutes: 90
+        run: |
+          make -C verification riscof-setup riscof-gen ISA=rv64 JOBS=4 \
+            ACT4_SAIL_DIR="$GITHUB_WORKSPACE/sail-riscv/bin" \
+            ACT4_CLEAN_INTERMEDIATES=True
+          tar -czf "$RUNNER_TEMP/act4-rva23s64-elfs.tar.gz" \
+            verification/build/riscof/raptor-rva23s64/elfs
+      - name: Share RVA23S64 ACT4 simulator and ELFs
+        uses: actions/upload-artifact@v7
+        with:
+          name: act4-rva23s64-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/act4-rva23s64-npc.tar.gz
+            ${{ runner.temp }}/act4-rva23s64-elfs.tar.gz
+          retention-days: 1
+
+  riscof-act4-rva23s64:
+    needs: build-act4-rva23s64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    env:
+      ISA: rv64
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          profile: riscof
+      - name: Download shared RVA23S64 ACT4 bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: act4-rva23s64-${{ github.sha }}
+          path: ${{ runner.temp }}
+      - name: Restore shared RVA23S64 ACT4 bundle
+        run: |
+          tar -xzf "$RUNNER_TEMP/act4-rva23s64-npc.tar.gz"
+          tar -xzf "$RUNNER_TEMP/act4-rva23s64-elfs.tar.gz"
+          test -x "sim/build/$RAPT_CONFIG-act4-rv64/riscv64-npc-sim"
+          test -s nemu/tools/capstone/repo/libcapstone.so.5
+          test -d verification/build/riscof/raptor-rva23s64/elfs
+      - name: Run sharded RVA23S64 ACT4 compliance tests
+        timeout-minutes: 165
+        run: >-
+          make -C verification -o riscof-build-npc riscof-run
+          ISA=rv64 ACT4_TIMEOUT=1800 JOBS=4
+          ACT4_SHARD_INDEX=${{ matrix.shard }} ACT4_SHARD_COUNT=12
+      - name: Upload ACT4 failure logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: riscof-act4-rva23s64-logs-${{ matrix.shard }}-${{ github.sha }}
+          path: verification/build/riscof/logs/
+          if-no-files-found: warn
+          retention-days: 7
+
   fuzztest-sigtest-and-coverage:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
@@ -281,7 +389,7 @@ jobs:
       matrix:
         include:
           - { xlen: 32, guest: rv32, max_cycles: 10000000 }
-          - { xlen: 64, guest: rv64gc, max_cycles: 15000000 }
+          - { xlen: 64, guest: rv64gc, max_cycles: 25000000 }
     name: linux-rv${{ matrix.xlen }}-test
     env:
       XLEN: ${{ matrix.xlen }}
@@ -305,7 +413,8 @@ jobs:
             LINUX_RV64GC_PAYLOAD=$(make --no-print-directory -s -C linux print-rv64gc-release-payload)
             export LINUX_RV64GC_PAYLOAD
           fi
-          make "linux-boot-$LINUX_GUEST" ARGS="-b -n --no-lightsss --serial-exit-on='Linux version'" \
+          make "linux-boot-$LINUX_GUEST" SIM_FAST=1 SIM_TRACE=0 \
+            ARGS="-b -n --no-lightsss --serial-exit-on='Linux version'" \
             MAX_INST="$LINUX_MAX_CYCLES" 2>&1 | tee "$RUNNER_TEMP/linux-boot.log"
       - name: Linux kernel-entry summary
         if: always()

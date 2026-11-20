@@ -16,9 +16,26 @@
 #define SD 0x80000000
 #endif
 _start:
-  la t0, fail
+  la t0, probe_trap
   csrw mtvec, t0
   csrw mstatus, zero
+  csrw 0x30a, zero
+  li s4, 0x10aaa
+  csrr t0, misa
+  srli t0, t0, 7
+  andi t0, t0, 1
+  beqz t0, 1f
+  li t0, 0x444
+  or s4, s4, t0
+1:
+  li s5, 1
+  .word 0xda0022f3      /* csrr t0, scountovf */
+  beqz s5, 2f
+  li t0, 0x2000
+  or s4, s4, t0
+2:
+  la t0, fail
+  csrw mtvec, t0
   li s0, 0
 delegation:
   andi t0, s0, 1
@@ -33,8 +50,7 @@ delegation:
   li t1, -1
   csrw mie, t1
   csrr t2, mie
-  li t3, 0x10aaa
-  bne t2, t3, fail
+  bne t2, s4, fail
   li t1, 0x222
   csrw mip, t1
   csrr t2, sie
@@ -44,8 +60,7 @@ delegation:
   csrw sie, zero
   csrr t2, mie
   xori t3, t0, -1
-  li t4, 0x10aaa
-  and t3, t3, t4
+  and t3, t3, s4
   bne t2, t3, fail
   csrw sip, zero
   csrr t2, mip
@@ -128,6 +143,13 @@ clean:
   csrw pmpcfg0, zero
   li a0, 0
   ebreak
+.balign 4
+probe_trap:
+  li s5, 0
+  csrr t0, mepc
+  addi t0, t0, 4
+  csrw mepc, t0
+  mret
 fail:
   li a0, 1
   ebreak

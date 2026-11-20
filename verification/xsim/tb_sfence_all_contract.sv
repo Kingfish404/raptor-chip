@@ -45,6 +45,23 @@ module sfence_walk_case #(
       .Enable(Enable)
   ) walker (
       .access_fault(),
+`ifdef RAPT_H_EXTENSION
+      .guest_en(1'b0),
+      .vs_en(1'b0),
+      .vsatp_ppn('0),
+      .g_en(1'b0),
+      .hgatp_ppn('0),
+      .vs_priv_s(1'b0),
+      .vs_sum(1'b0),
+      .vs_mxr(1'b0),
+      .vs_pbmte(1'b0),
+      .g_mxr(1'b0),
+      .req_exec(1'b0),
+      .guest_fault(),
+      .fault_gpa(),
+      .fault_ptw(),
+      .result_g_perm(),
+`endif
       .*
   );
   rapt_l2tlb #(
@@ -79,6 +96,9 @@ module sfence_walk_case #(
       .sfence_all_asid(sfence_all_asid),
       .lookup_vtag(vaddr[XLEN-1:12]),
       .lookup_asid(asid),
+`ifdef RAPT_H_EXTENSION
+      .lookup_mode(2'b00),
+`endif
       .hit(hit),
       .ptag(ptag),
       .pte_flags(pte_flags),
@@ -87,6 +107,9 @@ module sfence_walk_case #(
       .fill_vtag(result_vtag),
       .fill_ptag(result_ptag),
       .fill_asid(asid),
+`ifdef RAPT_H_EXTENSION
+      .fill_mode(2'b00),
+`endif
       .fill_pte(result_pte),
       .fill_pbmt(result_pbmt),
       .fill_level(result_level)
@@ -247,6 +270,14 @@ module sfence_tlb_case #(
         .lookup_b_valid(1'b0),
         .lookup_b_vtag('0),
         .lookup_b_asid('0),
+`ifdef RAPT_H_EXTENSION
+        .lookup_mode(2'b00),
+        .g_perm(),
+        .lookup_b_mode(2'b00),
+        .g_perm_b(),
+        .fill_mode(2'b00),
+        .fill_g_perm(3'b111),
+`endif
         .*
     );
   end else begin : g_instruction
@@ -254,6 +285,10 @@ module sfence_tlb_case #(
         .XLEN(XLEN),
         .ENTRIES(16)
     ) dut (
+`ifdef RAPT_H_EXTENSION
+        .lookup_mode(2'b00),
+        .fill_mode(2'b00),
+`endif
         .*
     );
     assign verdict = fill_verdict;

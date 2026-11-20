@@ -9,7 +9,7 @@ import re
 
 
 LINUX_ENTRY_MILESTONE = "Linux version"
-LINUX_ENTRY_LINE = re.compile(r"^[ \t]*(?:\[ *\d+\.\d+\] +)?Linux version\b", re.MULTILINE)
+LINUX_ENTRY_LINE = re.compile(r"^[ \t]*(?:\[ *\d+\.\d+\] +)?Linux version", re.MULTILINE)
 DEFAULT_SUCCESS_MILESTONE = "Run /init as init process"
 
 FATAL_MARKERS = (

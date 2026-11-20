@@ -2,13 +2,16 @@
 #include <checkpoint.h>
 #include <sample_window.h>
 #include <difftest.h>
+#include <difftest-hypervisor.h>
 #include <flow_check.h>
 #include <lightsss.h>
 #include <readline/readline.h>
 #include <readline/history.h>
 #include <npc_verilog.h>
 #include <npc_eval.h>
+#if VM_TRACE
 #include "verilated_fst_c.h"
+#endif
 
 #define MAX_INST_TO_PRINT 10
 #define MAX_IRING_SIZE 16
@@ -19,7 +22,9 @@ extern word_t g_timer;
 
 extern VerilatedContext *contextp;
 extern TOP_NAME *top;
+#if VM_TRACE
 extern VerilatedFstC *tfp;
+#endif
 word_t *cpu_read_pmpaddr_snapshot(void)
 {
   static word_t addresses[NPC_PMP_NUM];
@@ -35,18 +40,29 @@ void serial_sample_milestones(uint64_t cycles, uint64_t insts, bool force);
 
 extern long long int max_timeout;
 
-// The shared-TLB adapter adds a generate scope around the original walker.
-// Keep diagnostic observation compatible with both layouts and bypass mode.
+// The shared-TLB adapter adds a generate scope around the original walker,
+// and Verilator may emit larger walkers as a child module pointer.
+template <int N> struct ptw_obs_rank : ptw_obs_rank<N - 1> {};
+template <> struct ptw_obs_rank<0> {};
 #define PTW_STATE_OBSERVER(name, path) \
-  template <typename Top> auto name(Top *top, int) \
+  template <typename Top> auto name(Top *top, ptw_obs_rank<5>) \
       -> decltype(VERILOG_CPU(CONCAT(path, __DOT__state))) \
   { return VERILOG_CPU(CONCAT(path, __DOT__state)); } \
-  template <typename Top> auto name(Top *top, long) \
+  template <typename Top> auto name(Top *top, ptw_obs_rank<4>) \
       -> decltype(VERILOG_CPU(CONCAT(path, __DOT__g_cached__DOT__state))) \
   { return VERILOG_CPU(CONCAT(path, __DOT__g_cached__DOT__state)); } \
-  template <typename Top> auto name(Top *top, ...) \
+  template <typename Top> auto name(Top *top, ptw_obs_rank<3>) \
       -> decltype(VERILOG_CPU(CONCAT(path, __DOT__g_bypass__DOT__walker__DOT__state))) \
-  { return VERILOG_CPU(CONCAT(path, __DOT__g_bypass__DOT__walker__DOT__state)); }
+  { return VERILOG_CPU(CONCAT(path, __DOT__g_bypass__DOT__walker__DOT__state)); } \
+  template <typename Top> auto name(Top *top, ptw_obs_rank<2>) \
+      -> decltype(VERILOG_CPU(CONCAT(__PVT__, path))->state) \
+  { return VERILOG_CPU(CONCAT(__PVT__, path))->state; } \
+  template <typename Top> auto name(Top *top, ptw_obs_rank<1>) \
+      -> decltype(VERILOG_CPU(CONCAT(__PVT__, path))->g_cached__DOT__state) \
+  { return VERILOG_CPU(CONCAT(__PVT__, path))->g_cached__DOT__state; } \
+  template <typename Top> auto name(Top *top, ptw_obs_rank<0>) \
+      -> decltype(VERILOG_CPU(CONCAT(__PVT__, path))->g_bypass__DOT__walker__DOT__state) \
+  { return VERILOG_CPU(CONCAT(__PVT__, path))->g_bypass__DOT__walker__DOT__state; }
 PTW_STATE_OBSERVER(instruction_ptw_state, memory_subsystem__DOT__l1i_cache__DOT__u_iptw)
 PTW_STATE_OBSERVER(data_ptw_state, memory_subsystem__DOT__l1d_cache__DOT__u_dptw)
 #undef PTW_STATE_OBSERVER
@@ -137,9 +153,9 @@ static void dump_pipeline_stall_state()
       "mmio=%u skid=%u source=%u",
       (unsigned)VERILOG_FRONTEND(ifu__DOT__held_count),
       (unsigned)VERILOG_CPU(memory_subsystem__DOT__l1i_cache__DOT__l1i_state),
-      (unsigned)instruction_ptw_state(top, 0),
+      (unsigned)instruction_ptw_state(top, ptw_obs_rank<5>{}),
       (unsigned)VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__l1d_state),
-      (unsigned)data_ptw_state(top, 0),
+      (unsigned)data_ptw_state(top, ptw_obs_rank<5>{}),
       (unsigned)VERILOG_AXI_MASTER(read_outstanding),
       (unsigned)VERILOG_AXI_MASTER(read_request_fire),
       (unsigned)VERILOG_AXI_MASTER(read_response_fire),
@@ -259,19 +275,23 @@ static void cpu_exec_one_cycle()
   // Once either threshold is reached, dumping continues for the rest of the
   // run.  An unset threshold is sentinel'd to UINT64_MAX so it never fires on
   // its own; the surviving threshold drives the start trigger.
+#if VM_TRACE
   if ((tfp) && ((pmu.active_cycle >= tfp_cycle) | (pmu.instr_cnt >= tfp_inst)))
   {
     tfp->dump(contextp->time());
   }
+#endif
   contextp->timeInc(1);
 
   if (!top->clock) capture_before_edge();
   top->clock = (top->clock == 0) ? 1 : 0;
   npc_eval(top);
+#if VM_TRACE
   if ((tfp) && ((pmu.active_cycle >= tfp_cycle) | (pmu.instr_cnt >= tfp_inst)))
   {
     tfp->dump(contextp->time());
   }
+#endif
   contextp->timeInc(1);
 }
 
@@ -282,7 +302,9 @@ static void cpu_exec_one_cycle()
 void cpu_exec_lightsss_snapshot(const char *dir)
 {
   /* Never dump waveform from the child: it would corrupt the parent's FST. */
+#if VM_TRACE
   tfp = NULL;
+#endif
   /* Drain until ROB/SQ/STQ are empty (bounded so we never hang). Difftest is
    * intentionally not stepped during the drain -- we only advance the RTL. */
   for (int i = 0; i < 200000; i++)
@@ -587,6 +609,13 @@ void cpu_exec(uint64_t n)
             uint8_t dut_stip = (*npc.mip____ >> 5) & 1u;
             ref_difftest_set_stip(dut_stip);
           }
+          extern const NemuDiffHypervisorAPI *hypervisor_reference;
+          if (hypervisor_reference != nullptr &&
+              hypervisor_reference->set_mtime != nullptr &&
+              npc.clint_mtime != nullptr)
+          {
+            hypervisor_reference->set_mtime(*npc.clint_mtime);
+          }
         }
         // Mirror rising edges of the cluster-level external IRQ line into
         // NEMU's PLIC source 1 so both PLICs see identical source events.
@@ -605,13 +634,14 @@ void cpu_exec(uint64_t n)
       }
       // Intermediate retirements advance REF; compare the final group state.
       // Skip/CSR/trap instructions retire alone by the ROB's explicit policy.
-      if (((*(npc.inst) & 0xfff0707f) == 0xc0102073))
+      if (!sampled_commit_trap)
       {
-        // rdtime instruction skipped in difftest
-        npc_difftest_skip_ref();
-      }
-      // Skip difftest for Zicntr counter CSR accesses (instret, cycle, etc.)
-      {
+        if (((*(npc.inst) & 0xfff0707f) == 0xc0102073))
+        {
+          // rdtime instruction skipped in difftest
+          npc_difftest_skip_ref();
+        }
+        // Skip difftest for Zicntr counter CSR accesses (instret, cycle, etc.)
         uint32_t inst = *(uint32_t *)(npc.inst);
         if ((inst & 0x7f) == 0x73 && ((inst >> 12) & 0x7) != 0)
         {
@@ -629,7 +659,7 @@ void cpu_exec(uint64_t n)
       // REF must first step for that instruction, then take the interrupt so
       // that sepc correctly points at the following PC (= stvec target on next
       // commit). Order: difftest_step() -> difftest_raise_intr().
-      difftest_step(*npc.rpc, cmu_retire_count);
+      difftest_step(*npc.rpc, cmu_retire_count, sampled_commit_trap);
       {
         uint8_t cur_recieved_trap = *(uint8_t *)&VERILOG_ROU(recieved_trap);
         if (cur_recieved_trap)

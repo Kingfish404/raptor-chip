@@ -54,6 +54,10 @@ module tb_l1d_pmp_shared;
         .load_size_m1,
         .store_walu,
         .cmo_mgmt,
+`ifdef RAPT_H_EXTENSION
+        .load_exec(1'b0),
+        .ptw_exec(1'b0),
+`endif
         .tlb_hit,
         .stlb_hit,
         .dtlb_pte,

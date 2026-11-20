@@ -204,14 +204,21 @@ rva23u64-smoke:
 
 RISCV_LINUX_CC ?= riscv64-linux-gnu-gcc
 RVA23_PROBE_SOURCES := $(addprefix $(RAPTOR_HOME)/app/tests/linux/,nemu_rva23.c nemu_rva23_start.S)
-.PHONY: rva23u64-linux-probe
+.PHONY: rva23u64-linux-probe rva23s64-linux-probe
 rva23u64-linux-probe: $(BUILD_DIR)/rva23-check
+rva23s64-linux-probe: $(BUILD_DIR)/rva23s64-check
 
 $(BUILD_DIR)/rva23-check: $(RVA23_PROBE_SOURCES) Makefile
 	@mkdir -p "$(dir $@)"
 	$(RISCV_LINUX_CC) -nostdlib -static -fno-pie -no-pie -fno-builtin -fno-stack-protector \
 	  -fno-tree-vectorize -mno-relax -march=rv64gcv -mabi=lp64d -O2 -Wall -Wextra -Werror \
 	  -DRVA23_USER_ONLY $(RVA23_PROBE_SOURCES) -o "$@"
+
+$(BUILD_DIR)/rva23s64-check: $(RVA23_PROBE_SOURCES) Makefile
+	@mkdir -p "$(dir $@)"
+	$(RISCV_LINUX_CC) -nostdlib -static -fno-pie -no-pie -fno-builtin -fno-stack-protector \
+	  -fno-tree-vectorize -mno-relax -march=rv64gcv -mabi=lp64d -O2 -Wall -Wextra -Werror \
+	  $(RVA23_PROBE_SOURCES) -o "$@"
 
 .PHONY: vector-disabled-data vector-disabled-smoke
 vector-disabled-data: vector-smoke-data

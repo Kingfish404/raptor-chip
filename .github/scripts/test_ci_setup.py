@@ -282,6 +282,31 @@ riscof-classic-run:
             self.assertIn("RUN_SUITE", result.stdout)
             self.assertNotIn("UNEXPECTED_REBUILD", result.stdout)
 
+    def test_act4_rva23s64_worker_skips_rebuild_and_passes_sharding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            override = root / "act4_worker.mk"
+            override.write_text("""
+riscof-build-npc:
+\t@echo UNEXPECTED_ACT4_REBUILD; exit 1
+riscof-run:
+\t@echo ACT4_RUN_$(ACT4_SUITE)_$(ACT4_SHARD_INDEX)_OF_$(ACT4_SHARD_COUNT)
+""")
+            mrom = root / "mrom.bin"
+            mrom.touch()
+            command = workflow_run("Run sharded RVA23S64 ACT4 compliance tests")
+            command = command.replace("${{ matrix.shard }}", "7")
+            args = shlex.split(command)
+            args += ["-f", "Makefile", "-f", str(override), f"MROM_IMG={mrom}"]
+            env = os.environ.copy()
+            for name in ("MAKEFLAGS", "MAKEOVERRIDES", "MFLAGS"):
+                env.pop(name, None)
+            result = subprocess.run(args, cwd=ROOT, env=env, text=True,
+                                    capture_output=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("ACT4_RUN_raptor-rva23s64_7_OF_12", result.stdout)
+            self.assertNotIn("UNEXPECTED_ACT4_REBUILD", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -120,11 +120,20 @@ class LinuxTest(unittest.TestCase):
                 self.assertEqual(key.call_args.args[0][6], 'nemu-rva23')
                 kernel(root, root / 'cache', 'test-', 'fpga')
                 options = key.call_args.args[0][3]
-                for option in ('RISCV_ISA_V', 'RISCV_ISA_SUPM', 'RISCV_ISA_ZICBOZ', 'KVM'):
-                    self.assertNotIn(option, options)
+                for option in ('RISCV_ISA_V', 'RISCV_ISA_SUPM', 'RISCV_ISA_SVNAPOT',
+                               'RISCV_ISA_ZICBOZ', 'KVM'):
+                    self.assertIn(option, options)
+                self.assertNotIn('POWER_RESET_SYSCON_POWEROFF', options)
             self.assertEqual((root / 'kernel.config').read_text(), original)
             manifest['bits'] = 32
             (root / 'manifest.json').write_text(json.dumps(manifest))
+            with patch('raptor_linux.run', return_value=b'compiler'), \
+                 patch('raptor_linux.identity', return_value='key') as key:
+                kernel(root, root / 'cache', 'test-', 'fpga')
+                options = key.call_args.args[0][3]
+                for option in ('RISCV_ISA_V', 'RISCV_ISA_SUPM', 'RISCV_ISA_SVNAPOT',
+                               'RISCV_ISA_ZICBOZ', 'KVM'):
+                    self.assertNotIn(option, options)
             with self.assertRaisesRegex(ValueError, 'requires RV64'):
                 kernel(root, root / 'cache', 'test-', 'nemu-rva23')
 

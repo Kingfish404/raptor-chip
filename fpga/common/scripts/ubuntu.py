@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ubuntu 24.04 preparation and boot for native FPGA board profiles."""
+"""Ubuntu RVA23 preparation and boot for native FPGA board profiles."""
 import argparse
 import contextlib
 import fcntl
@@ -96,7 +96,7 @@ def verify(directory):
 
 def kernel_inputs(args):
     return {
-        "kernel": json.loads((REPO / "linux/kernel-source.json").read_text()),
+        "kernel": json.loads((COMMON / "linux/kernel-source.json").read_text()),
         "driver": {p.name: sha(p) for p in sorted((COMMON / "linux").iterdir()) if p.is_file()},
         "compiler": subprocess.check_output([args.cross + "gcc", "--version"], text=True),
         "opensbi": opensbi_fingerprint(),
@@ -129,11 +129,18 @@ def configure_kernel(tree, obj, args):
     run(command)
     run(make + ["olddefconfig"])
     config = (obj / ".config").read_text()
-    for name in ("64BIT", "FPU", "RISCV_SBI", "RAPTOR_NATIVE_ETH", "LITEX_LITEETH",
-                 "REALTEK_PHY", "MDIO_BITBANG",
+    for name in ("64BIT", "FPU", "RISCV_SBI", "RISCV_ISA_V", "RISCV_ISA_V_DEFAULT_ENABLE",
+                 "RISCV_ISA_SUPM", "RISCV_ISA_SVNAPOT", "RISCV_ISA_SVPBMT", "RISCV_ISA_ZAWRS",
+                 "RISCV_ISA_ZICBOM", "RISCV_ISA_ZICBOP", "RISCV_ISA_ZICBOZ", "KVM",
+                 "RAPTOR_NATIVE_ETH", "LITEX_LITEETH", "REALTEK_PHY", "MDIO_BITBANG",
+                 "VIRTIO_MMIO", "VIRTIO_BLK", "VIRTIO_NET", "EXT4_FS",
+                 "PCI", "PCI_HOST_GENERIC", "NVME_CORE", "BLK_DEV_NVME",
+                 "MMC", "MMC_BLOCK", "MMC_SDHCI", "MMC_SDHCI_PLTFM",
+                 "MMC_SDHCI_OF_ARASAN", "MMC_SDHCI_PCI",
                  "NFS_FS", "NFS_V3", "ROOT_NFS", "IP_PNP", "IP_PNP_DHCP", "SERIAL_8250",
                  "SERIAL_8250_CONSOLE", "SERIAL_OF_PLATFORM", "DEVTMPFS", "CGROUPS", "FUTEX",
-                 "TMPFS", "BINFMT_ELF", "BINFMT_SCRIPT", "TTY", "UNIX98_PTYS"):
+                 "TMPFS", "BINFMT_ELF", "BINFMT_SCRIPT", "TTY", "UNIX98_PTYS",
+                 "BLK_DEV_INITRD", "POWER_RESET_SYSCON_POWEROFF"):
         require(f"CONFIG_{name}=y\n" in config, "resolved kernel lacks built-in " + name)
     for name in ("VT", "BLK_DEV_LOOP"):
         require(f"CONFIG_{name}=y\n" not in config,
@@ -223,10 +230,16 @@ def native_directory(args):
                    "--xlen", "64", "--memory", "ddr",
                    "--preset", args.preset, "--clock-mhz", str(args.clock_mhz),
                    "--build-root", args.native_build_root]
-        if PROFILE["ubuntu"]["network_driver"] == "liteeth":
+        io_soc = getattr(args, "virtio_net", 0) or getattr(args, "qemu_bridge", 0)
+        if PROFILE["ubuntu"]["network_driver"] == "liteeth" and not io_soc:
             command += ["--cm005-bridge", "1", "--cm005-ethernet", "1"]
         else:
+            # The virtio-mmio NIC and the QEMU bridge share the native MAC.
             command += ["--ethernet", "1"]
+            if getattr(args, "virtio_net", 0):
+                command += ["--virtio-net", "1"]
+            if getattr(args, "qemu_bridge", 0):
+                command += ["--qemu-bridge", "1"]
         info = json.loads(subprocess.check_output(list(map(str, command + ["info"])), text=True))
         directory = Path(info["output"])
         if not (directory / "manifest.json").exists():
@@ -234,9 +247,12 @@ def native_directory(args):
     manifest = json.loads((directory / "manifest.json").read_text())
     config = manifest["configuration"]
     require((config["xlen"], config["memory"]) == (64, "ddr"), "Ubuntu requires native RV64 DDR")
+    require(config.get("vector") == 1,
+            "Ubuntu RVA23 requires an RVA23/V-enabled preset (for example default)")
     require((config["preset"], config["clock_mhz"]) == (args.preset, args.clock_mhz),
             "native build preset/clock differs from the Ubuntu request")
-    if PROFILE["ubuntu"]["network_driver"] == "liteeth":
+    io_soc = config.get("virtio_net") or config.get("qemu_bridge")
+    if PROFILE["ubuntu"]["network_driver"] == "liteeth" and not io_soc:
         require(config.get("cm005_bridge") == 1 and config.get("cm005_ethernet") == 1,
                 "Ubuntu requires the CM005 CPU NIC and A/B forwarding")
     else:
@@ -249,13 +265,24 @@ def native_directory(args):
     return directory, manifest
 
 
+ALLOWED_BLOCK_ROOTS = ("/dev/vda", "/dev/vda1", "/dev/nvme0n1", "/dev/nvme0n1p1",
+                       "/dev/mmcblk0", "/dev/mmcblk0p1")
+
+
 def bootargs(args):
+    root_dev = getattr(args, "root_device", "nfs") or "nfs"
+    if root_dev != "nfs":
+        require(root_dev in ALLOWED_BLOCK_ROOTS, "unsupported block root device: " + str(root_dev))
+        return (f"console=ttyS0,115200 earlycon=sbi root={root_dev} rootfstype=ext4 rw rootwait "
+                "init=/sbin/init net.ifnames=0 random.trust_bootloader=on "
+                "unaligned_scalar_speed=fast unaligned_vector_speed=fast")
     server = str(ipaddress.IPv4Address(args.server))
     root = args.rootfs.resolve()
     require(root.is_absolute() and not re.search(r"[\s,:]", str(root)), "invalid NFS root path")
     return (f"console=ttyS0,115200 earlycon=sbi root=/dev/nfs "
             f"nfsroot={server}:{root},vers=3,tcp,rsize=4096,wsize=4096 rw ip=dhcp "
-            "init=/sbin/init net.ifnames=0 random.trust_bootloader=on")
+            "init=/sbin/init net.ifnames=0 random.trust_bootloader=on "
+            "unaligned_scalar_speed=fast unaligned_vector_speed=fast")
 
 
 def bundle(args):
@@ -354,8 +381,8 @@ def native_services(tree):
                  "[Manager]\nDefaultTimeoutStartSec=10min\n"
                  "DefaultEnvironment=SYSTEMD_BUS_TIMEOUT=600\n")
     environment = tree / "etc/environment"
-    values = [line for line in environment.read_text().splitlines()
-              if not line.startswith("SYSTEMD_BUS_TIMEOUT=")]
+    lines = environment.read_text().splitlines() if environment.is_file() else []
+    values = [line for line in lines if not line.startswith("SYSTEMD_BUS_TIMEOUT=")]
     overlay_file(tree, "etc/environment", "\n".join(values + ["SYSTEMD_BUS_TIMEOUT=600"]) + "\n")
     # This profile uses OpenSSH directly and has no desktop or snap session.
     for unit in ("gpg-agent-ssh.socket", "snapd.session-agent.socket",
@@ -456,7 +483,8 @@ def rootfs(args):
         run(["tar", "--extract", "--file", archive, "--directory", stage, "--numeric-owner",
              "--same-owner", "--xattrs", "--xattrs-include=*", "--acls", "--delay-directory-restore"])
         release = (stage / "usr/lib/os-release").read_text()
-        require('ID=ubuntu\n' in release and 'VERSION_ID="24.04"\n' in release,
+        expected = f'VERSION_ID="{SOURCES["ubuntu"]["release"]}"\n'
+        require('ID=ubuntu\n' in release and expected in release,
                 "unexpected Ubuntu root filesystem release")
         require((stage / "usr/lib/systemd/systemd").is_file(), "Ubuntu systemd is missing")
         overlay_file(stage, "etc/fstab", "# The kernel mounts the native NFS root.\n"
@@ -475,8 +503,8 @@ def rootfs(args):
         overlay_link(stage, "etc/systemd/system/default.target",
                      "/usr/lib/systemd/system/multi-user.target")
         overlay_file(stage, "etc/systemd/system/serial-getty@ttyS0.service.d/native.conf",
-                     "[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root --noclear "
-                     "--keep-baud 115200,38400,9600 - $TERM\n")
+                     "[Service]\nExecStart=\nExecStart=-/usr/sbin/agetty --autologin root "
+                     "--noclear --keep-baud 115200,38400,9600 - $TERM\n")
         overlay_file(stage, "etc/systemd/journald.conf.d/native.conf",
                      "[Journal]\nStorage=volatile\nRuntimeMaxUse=16M\n")
         native_services(stage)
@@ -530,16 +558,26 @@ def check(args):
         ["fdtget", "-t", "s", str(directory / "ubuntu.dtb"), node, prop], text=True).strip()
     require(get("/", "compatible") == PROFILE["compatible"], "bundle belongs to another board")
     require(record["network"] == network_profile(), "bundle Ethernet profile changed")
-    node = PROFILE["ubuntu"]["ethernet_node"]
-    compatible = ("litex,liteeth" if network_profile()["driver"] == "liteeth"
-                  else "raptor,native-ethernet-v1")
-    require(get(node, "compatible") == compatible, "bundle Ethernet driver mismatch")
-    if network_profile()["driver"] == "native":
-        require(get(node, "phy-mode") == "rgmii-txid", "wrong PHY delay mode")
+    native_cfg = record.get("native_configuration", {})
+    if native_cfg.get("virtio_net") or native_cfg.get("qemu_bridge"):
+        require(get("/soc/virtio_mmio@10002000", "compatible") == "virtio,mmio",
+                "bundle lacks virtio-mmio NIC node")
+    else:
+        node = PROFILE["ubuntu"]["ethernet_node"]
+        compatible = ("litex,liteeth" if network_profile()["driver"] == "liteeth"
+                      else "raptor,native-ethernet-v1")
+        require(get(node, "compatible") == compatible, "bundle Ethernet driver mismatch")
+        if network_profile()["driver"] == "native":
+            require(get(node, "phy-mode") == "rgmii-txid", "wrong PHY delay mode")
     require(get("/chosen", "bootargs") == record["bootargs"], "bundle bootargs mismatch")
-    require("init=/sbin/init" in record["bootargs"] and "root=/dev/nfs" in record["bootargs"],
-            "bundle does not boot Ubuntu systemd from NFS")
-    require((args.rootfs / ".raptor-native-rootfs.json").is_file(), "rootfs is not prepared")
+    root_dev = getattr(args, "root_device", "nfs") or "nfs"
+    require(root_dev == "nfs" or native_cfg.get("qemu_bridge"),
+            "block root devices are served through --qemu-bridge 1")
+    expected_root = "root=/dev/nfs" if root_dev == "nfs" else f"root={root_dev}"
+    require("init=/sbin/init" in record["bootargs"] and expected_root in record["bootargs"],
+            "bundle does not boot Ubuntu systemd from " + expected_root)
+    if root_dev == "nfs":
+        require((args.rootfs / ".raptor-native-rootfs.json").is_file(), "rootfs is not prepared")
     print("PASS native Ubuntu artifact checks (hardware boot is a separate acceptance step)")
 
 
@@ -557,6 +595,10 @@ def boot(args):
         save(args.output / "last-boot.json", {"runtime_dtb_sha256": sha(dtb),
              "bundle_manifest_sha256": sha(directory / "manifest.json"), "port": args.port})
         if args.transport == "tftp":
+            config = verify(directory)["native_configuration"]
+            # The I/O SoC's stream bridge owns the MAC that the TFTP loader drives.
+            require(not (config.get("virtio_net") or config.get("qemu_bridge")),
+                    "the virtio-net/QEMU bridge SoC boots with --transport uart")
             import netboot
             netboot.upload(args.port, directory / "fw_payload.bin", dtb, Path(temporary),
                            args.server, args.boot_ip, args.tftp_port,
@@ -594,8 +636,15 @@ def main():
     parser.add_argument("--jobs", type=int, default=8)
     parser.add_argument("--native-build", type=Path, help="native build containing its verified DTB and manifest")
     parser.add_argument("--native-build-root", type=Path, default=BOARD / "build")
-    parser.add_argument("--preset", default="middle-cache")
+    parser.add_argument("--preset", default="default")
     parser.add_argument("--clock-mhz", type=int, choices=(25, 50, 100), default=50)
+    parser.add_argument("--root-device", default="nfs",
+                        choices=("nfs", *ALLOWED_BLOCK_ROOTS),
+                        help="root filesystem source (nfs or local VirtIO/NVMe/SDHCI block device)")
+    parser.add_argument("--virtio-net", type=int, choices=(0, 1), default=0,
+                        help="select standard OASIS VirtIO 1.2 virtio-mmio DMA NIC")
+    parser.add_argument("--qemu-bridge", type=int, choices=(0, 1), default=0,
+                        help="enable FPGA-to-QEMU RQIO direct MMIO + AXI4-DMA bridge")
     parser.add_argument("--server", default="192.168.50.1")
     parser.add_argument("--client", default="192.168.50.0/24", help="NFS client subnet or single IPv4/32")
     parser.add_argument("--ssh-key", type=Path, help="optional SSH public key for root (no password SSH)")

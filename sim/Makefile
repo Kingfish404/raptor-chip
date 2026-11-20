@@ -81,6 +81,12 @@ SIM_FAST := $(strip $(SIM_FAST))
 ifeq ($(filter $(SIM_FAST),0 1),)
 $(error SIM_FAST must be 0 or 1)
 endif
+SIM_TRACE ?= 1## Compile Verilator FST waveform tracing support (1=on, 0=off)
+SIM_TRACE := $(strip $(SIM_TRACE))
+ifeq ($(filter $(SIM_TRACE),0 1),)
+$(error SIM_TRACE must be 0 or 1)
+endif
+SIM_TRACE_FLAGS := $(if $(filter 1,$(SIM_TRACE)),--trace-fst,)
 NPC_DEFCONFIG ?= $(if $(filter 1,$(DIFFTEST)),o2_difftest_defconfig,o2_defconfig)
 DATA_DIR ?= $(abspath $(BUILD_DIR)/run-$(ISA_NAME)/data)
 RUN_DIR ?= $(abspath $(BUILD_DIR)/run-$(ISA_NAME))
@@ -166,7 +172,12 @@ endif
 # first; older releases reject that warning name.
 VERILATOR_PUBLIC_WAIVER := $(shell $(VERILATOR) -Wno-UNOPTPUBLIC --version >/dev/null 2>&1 \
 	&& echo -Wno-UNOPTPUBLIC)
-VERILATOR_FLAG = $(VERILATOR_PROFILE_FLAGS) $(VERILATOR_PUBLIC_WAIVER) --public \
+VERILATOR_VERSION := $(shell $(VERILATOR) --version 2>/dev/null)
+# Verilator 5.040 hits V3DfgBreakCycles and false array-slice UNOPTFLAT diagnostics.
+VERILATOR_DFG_WORKAROUND := $(if $(findstring Verilator 5.040,$(VERILATOR_VERSION)),\
+	-fno-dfg-break-cycles -Wno-UNOPTFLAT,)
+VERILATOR_FLAG = $(VERILATOR_PROFILE_FLAGS) $(VERILATOR_PUBLIC_WAIVER) \
+	$(VERILATOR_DFG_WORKAROUND) --public \
 	--autoflush --timescale "1ns/1ns" --no-timing \
 	-Wno-WIDTHEXPAND -Wno-WIDTHTRUNC # -Wall -Wno-DECLFILENAME -Wno-UNUSED
 VERILATOR_FLAG += -Wno-ASCRANGE -Wno-UNSIGNED
@@ -174,7 +185,11 @@ VERILATOR_FLAG += --verilate-jobs $(VERILATOR_CODEGEN_JOBS)
 VERILATOR_EXTRA ?= ## Extra Verilator CLI flags (e.g. --coverage-line --coverage-toggle)
 VERILATOR_EXTRA_EFFECTIVE := --output-groups $(VERILATOR_OUTPUT_GROUPS) $(strip $(VERILATOR_EXTRA))
 ifeq ($(origin CXX),default)
-CXX := c++
+VERILATOR_ROOT_DIR := $(shell $(VERILATOR) --getenv VERILATOR_ROOT 2>/dev/null)
+VERILATOR_MK := $(VERILATOR_ROOT_DIR)/include/verilated.mk
+VERILATOR_CFG_CXX := $(if $(wildcard $(VERILATOR_MK)),$(shell \
+	sed -n 's/^CXX[[:space:]]*=[[:space:]]*//p' "$(VERILATOR_MK)" | head -n 1),)
+CXX := $(if $(VERILATOR_CFG_CXX),$(VERILATOR_CFG_CXX),c++)
 endif
 # Probe the compiler used by Verilator's nested make, including CXX overrides.
 SIM_CXX_MACROS := $(shell $(CXX) -dM -E -x c++ /dev/null 2>/dev/null)
@@ -246,6 +261,11 @@ CXXFLAGS += -DRAPT_VECTOR_VLEN=$(word 4,$(RTL_PA_WIDTHS))
 CXXFLAGS += $(if $(filter zawrs,$(RTL_ISA_EXTENSIONS)),-DRAPT_DUT_ZAWRS)
 CXXFLAGS += $(if $(filter zfa,$(RTL_ISA_EXTENSIONS)),-DRAPT_DUT_ZFA)
 CXXFLAGS += $(if $(filter ssnpm,$(RTL_ISA_EXTENSIONS)),-DRAPT_DUT_SSNPM)
+CXXFLAGS += $(if $(filter smnpm,$(RTL_ISA_EXTENSIONS)),-DRAPT_DUT_SMNPM)
+CXXFLAGS += $(if $(filter svnapot,$(RTL_ISA_EXTENSIONS)),-DRAPT_DUT_SVNAPOT)
+CXXFLAGS += $(if $(filter sscofpmf,$(RTL_ISA_EXTENSIONS)),-DRAPT_DUT_SSCOFPMF)
+CXXFLAGS += $(if $(filter smstateen,$(RTL_ISA_EXTENSIONS)),-DRAPT_DUT_SMSTATEEN)
+CXXFLAGS += $(if $(filter h,$(RTL_ISA_EXTENSIONS)),-DRAPT_DUT_H_EXTENSION)
 CXXFLAGS += $(if $(filter zvbb,$(RTL_ISA_EXTENSIONS)),-DRAPT_DUT_ZVBB)
 CXXFLAGS += $(if $(filter zvfhmin,$(RTL_ISA_EXTENSIONS)),-DRAPT_DUT_ZVFHMIN)
 CXXFLAGS += $(if $(RTL_VECTOR_ZICCLSM),-DRAPT_DUT_ZICCLSM_VECTOR)
@@ -345,13 +365,13 @@ SIM_BUILD_KEY := $(shell python3 $(NSIM_HOME)/scripts/build_cache.py fingerprint
     --config $(call _sim_quote,$(SIM_CONFIG_FILE)) \
     -- \
     $(call _sim_quote,$(SIM_BUILD_SIGNATURE)) \
-    $(call _sim_quote,$(VERILATOR_FLAG) $(SIM_ASSERT_FLAGS) $(VERILATOR_EXTRA_EFFECTIVE)) \
+    $(call _sim_quote,$(SIM_TRACE_FLAGS) $(VERILATOR_FLAG) $(SIM_ASSERT_FLAGS) $(VERILATOR_EXTRA_EFFECTIVE)) \
     $(call _sim_quote,$(CXXFLAGS) $(LDFLAGS)) $(call _sim_quote,$(SIM_MAKEFLAGS)) \
     $(call _sim_quote,$(VERILATOR_THREADS)))
 
 $(MODEL_BIN): $(VSRCS) $(VHSRCS) $(CCSRCS) $(CHSRCS)
 	@mkdir -p "$(OBJ_DIR)"
-	+$(VERILATOR) --trace-fst -cc --exe --build -j $(VERILATOR_JOBS) \
+	+$(VERILATOR) $(SIM_TRACE_FLAGS) -cc --exe --build -j $(VERILATOR_JOBS) \
 		$(VERILATOR_FLAG) $(SIM_ASSERT_FLAGS) $(VERILATOR_EXTRA_EFFECTIVE) \
 		$(filter-out $(CHSRCS) $(VHSRCS),$^) \
 		--threads $(VERILATOR_THREADS) \
@@ -616,7 +636,8 @@ pack-sram-synth-check: synth-frontend-check pack-sram ## Check packed RTL agains
 		'read_slang --top rapt $(abspath $(BUILD_DIR)/rapt_pack_sram.sv) $(RAPT_SRAM_BB_V); hierarchy -check -top rapt; select -assert-none t:$$check t:$$assert t:$$assume t:$$cover'
 
 lint: memory-map-check ## Lint RTL with Verilator
-	$(VERILATOR) --lint-only -Wall $(LINT_EXTRA) $(SIM_ASSERT_FLAGS) $(VSRCS) $(INCFLAGS) $(SIM_VFLAGS) --top-module $(VTARGET)
+	$(VERILATOR) --lint-only -Wall $(VERILATOR_DFG_WORKAROUND) $(LINT_EXTRA) \
+		$(SIM_ASSERT_FLAGS) $(VSRCS) $(INCFLAGS) $(SIM_VFLAGS) --top-module $(VTARGET)
 
 VSRCS_LINT = $(filter-out $(abspath $(VSRC_PATH)/generated/%), $(VSRCS))
 

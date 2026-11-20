@@ -21,6 +21,23 @@ module tb_ptw_global;
       .XLEN(XLEN)
   ) dut (
       .access_fault(),
+`ifdef RAPT_H_EXTENSION
+      .guest_en(1'b0),
+      .vs_en(1'b0),
+      .vsatp_ppn('0),
+      .g_en(1'b0),
+      .hgatp_ppn('0),
+      .vs_priv_s(1'b0),
+      .vs_sum(1'b0),
+      .vs_mxr(1'b0),
+      .vs_pbmte(1'b0),
+      .g_mxr(1'b0),
+      .req_exec(1'b0),
+      .guest_fault(),
+      .fault_gpa(),
+      .fault_ptw(),
+      .result_g_perm(),
+`endif
       .*
   );
   always #5 clock = ~clock;
@@ -144,6 +161,23 @@ module tb_ptw_kill_drain;
       .XLEN(XLEN)
   ) dut (
       .access_fault(),
+`ifdef RAPT_H_EXTENSION
+      .guest_en(1'b0),
+      .vs_en(1'b0),
+      .vsatp_ppn('0),
+      .g_en(1'b0),
+      .hgatp_ppn('0),
+      .vs_priv_s(1'b0),
+      .vs_sum(1'b0),
+      .vs_mxr(1'b0),
+      .vs_pbmte(1'b0),
+      .g_mxr(1'b0),
+      .req_exec(1'b0),
+      .guest_fault(),
+      .fault_gpa(),
+      .fault_ptw(),
+      .result_g_perm(),
+`endif
       .*
   );
 
@@ -339,6 +373,23 @@ module tb_ptw_pbmt;
       .XLEN(XLEN)
   ) dut (
       .access_fault(),
+`ifdef RAPT_H_EXTENSION
+      .guest_en(1'b0),
+      .vs_en(1'b0),
+      .vsatp_ppn('0),
+      .g_en(1'b0),
+      .hgatp_ppn('0),
+      .vs_priv_s(1'b0),
+      .vs_sum(1'b0),
+      .vs_mxr(1'b0),
+      .vs_pbmte(1'b0),
+      .g_mxr(1'b0),
+      .req_exec(1'b0),
+      .guest_fault(),
+      .fault_gpa(),
+      .fault_ptw(),
+      .result_g_perm(),
+`endif
       .*
   );
   always #5 clock = ~clock;
@@ -527,6 +578,10 @@ module tb_ptw_pmp_span;
       .load_size_m1(4'd3),
       .store_walu(8'h0f),
       .cmo_mgmt(1'b0),
+`ifdef RAPT_H_EXTENSION
+      .load_exec(1'b0),
+      .ptw_exec(1'b0),
+`endif
       .tlb_hit(1'b0),
       .stlb_hit(1'b0),
       .dtlb_pte('0),
@@ -651,6 +706,23 @@ module tb_ptw_profile_negative;
       .XLEN(XLEN)
   ) dut (
       .access_fault(),
+`ifdef RAPT_H_EXTENSION
+      .guest_en(1'b0),
+      .vs_en(1'b0),
+      .vsatp_ppn('0),
+      .g_en(1'b0),
+      .hgatp_ppn('0),
+      .vs_priv_s(1'b0),
+      .vs_sum(1'b0),
+      .vs_mxr(1'b0),
+      .vs_pbmte(1'b0),
+      .g_mxr(1'b0),
+      .req_exec(1'b0),
+      .guest_fault(),
+      .fault_gpa(),
+      .fault_ptw(),
+      .result_g_perm(),
+`endif
       .*
   );
 

@@ -290,6 +290,12 @@ static void serial_write_host_byte(uint8_t ch)
         serial_tx_window.erase(0, serial_tx_window.size() - serial_exit_pattern.size());
     if (serial_tx_window == serial_exit_pattern)
     {
+        if (serial_console_line_pending)
+        {
+            putchar('\n');
+            fflush(stdout);
+            serial_console_line_pending = false;
+        }
         Log("serial exit milestone reached: %s", serial_exit_pattern.c_str());
         contextp->gotFinish(true);
         npc.host_exit_ok = 1;

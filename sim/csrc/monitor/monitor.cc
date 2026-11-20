@@ -95,6 +95,10 @@ static char *img_file = NULL;
 static char *mrom_img_file = NULL;
 static char *disk_img_file = NULL;
 static char *sdcard_img_file = NULL;
+static char *sdhci_img_file = NULL;
+static char *nvme_img_file = NULL;
+static char *qemu_io_socket_path = NULL;
+static bool virtio_net_enabled = false;
 static int difftest_port = 1234;
 static uint32_t mem_random_delay_max = 0;
 static uint32_t mem_random_state = 1;
@@ -220,6 +224,10 @@ static void usage(const char *prog)
   printf("      --no-lightsss        disable the LightSSS auto-snapshot (even with difftest on)\n");
   printf("      --disk=FILE          load FILE as virtio-mmio block disk image\n");
   printf("      --sdcard=FILE        load FILE as LiteX SPI SD-card image\n");
+  printf("      --sdhci=FILE         load FILE as SDHCI SD/MMC DMA card image\n");
+  printf("      --nvme=FILE          load FILE as PCIe NVMe 1.4 namespace image\n");
+  printf("      --virtio-net         enable standard virtio-mmio v2 DMA network card\n");
+  printf("      --qemu-io-socket=SOCK connect MMIO/IRQ/DMA to raptor_qemu_bridge.py\n");
   printf("      --serial-lf-to-cr    translate host LF input to CR for CR-terminated monitors\n");
   printf("      --serial-exit-on=TEXT exit successfully after TEXT appears on serial TX\n");
   printf("      --serial-milestone=TEXT report first TX occurrence with cycle/inst counts (repeatable)\n");
@@ -279,6 +287,10 @@ static int parse_args(int argc, char *argv[])
       {"ckpt-export", required_argument, NULL, 283},
       {"sample-user-satp", required_argument, NULL, 284},
       {"sample-user-tp", required_argument, NULL, 285},
+      {"sdhci", required_argument, NULL, 286},
+      {"nvme", required_argument, NULL, 287},
+      {"virtio-net", no_argument, NULL, 288},
+      {"qemu-io-socket", required_argument, NULL, 289},
       {0, 0, NULL, 0},
   };
   int o;
@@ -439,6 +451,18 @@ static int parse_args(int argc, char *argv[])
       break;
     case 265:
       sdcard_img_file = optarg;
+      break;
+    case 286:
+      sdhci_img_file = optarg;
+      break;
+    case 287:
+      nvme_img_file = optarg;
+      break;
+    case 288:
+      virtio_net_enabled = true;
+      break;
+    case 289:
+      qemu_io_socket_path = optarg;
       break;
     case 266:
       serial_set_lf_to_cr(true);
@@ -606,8 +630,16 @@ void init_monitor(int argc, char *argv[])
 
   void virtio_blk_set_disk_image(const char *path);
   virtio_blk_set_disk_image(disk_img_file);
+  void virtio_net_set_enabled(bool en);
+  virtio_net_set_enabled(virtio_net_enabled);
   void litex_spi_set_image(const char *path);
   litex_spi_set_image(sdcard_img_file);
+  void sdhci_set_image(const char *path);
+  sdhci_set_image(sdhci_img_file);
+  void nvme_set_image(const char *path);
+  nvme_set_image(nvme_img_file);
+  void qemu_io_bridge_set_socket(const char *path);
+  qemu_io_bridge_set_socket(qemu_io_socket_path);
 
   /* Apply checkpoint memory load AFTER load_img() so the captured snapshot
    * overrides any image just loaded. The MROM trampoline written here will

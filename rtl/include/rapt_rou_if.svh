@@ -45,27 +45,31 @@ interface rou_csr_if #(
 
   logic trap;
   logic [XLEN-1:0] tval;
+  logic [XLEN-1:0] tval2;
+  logic [XLEN-1:0] htinst;
+  logic explicit_guest_trap;
   logic [XLEN-1:0] cause;
 
   logic valid;
 
   logic [rapt_pkg::index_bits(rapt_pkg::CommitWidth+1)-1:0] retire_count;
+  logic fence_retired;
 
   modport in(
       input pc,
       input csr_wen, csr_wdata, csr_addr, fp_flags_valid, fp_flags, fp_dirty,
       input ecall, ebreak, mret, sret,
-      input trap, tval, cause,
+      input trap, tval, tval2, htinst, explicit_guest_trap, cause,
       input valid,
-      input retire_count
+      input retire_count, fence_retired
   );
   modport out(
       output pc,
       output csr_wen, csr_wdata, csr_addr, fp_flags_valid, fp_flags, fp_dirty,
       output ecall, ebreak, mret, sret,
-      output trap, tval, cause,
+      output trap, tval, tval2, htinst, explicit_guest_trap, cause,
       output valid,
-      output retire_count
+      output retire_count, fence_retired
   );
 endinterface
 

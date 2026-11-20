@@ -4,7 +4,9 @@
 #include <readline/history.h>
 #include <npc_verilog.h>
 #include <verilated.h>
+#if VM_TRACE
 #include "verilated_fst_c.h"
+#endif
 #include <string>
 #include <unistd.h>
 
@@ -19,7 +21,9 @@ void difftest_should_diff_mem();
 
 VerilatedContext *contextp = NULL;
 TOP_NAME *top = NULL;
+#if VM_TRACE
 VerilatedFstC *tfp = NULL;
+#endif
 
 static bool is_batch_mode = false;
 static bool enable_vcd = true;
@@ -344,6 +348,7 @@ void sdb_sim_init(int argc, char **argv)
   contextp = new VerilatedContext;
   contextp->commandArgs(argc, argv);
   top = new TOP_NAME{contextp};
+#if VM_TRACE
   Verilated::traceEverOn(true);
 #ifdef CONFIG_WTRACE
   if (enable_vcd)
@@ -352,6 +357,7 @@ void sdb_sim_init(int argc, char **argv)
     top->trace(tfp, 99);
     tfp->open("npc.fst");
   }
+#endif
 #endif
   verilog_connect(top, &npc);
 
@@ -373,6 +379,7 @@ void engine_start()
 
 void engine_free()
 {
+#if VM_TRACE
   if (tfp)
   {
     tfp->dump(contextp->time());
@@ -380,6 +387,7 @@ void engine_free()
     tfp->close();
     delete tfp;
   }
+#endif
 
 #if VM_COVERAGE
   // Persist line/toggle coverage collected during simulation.

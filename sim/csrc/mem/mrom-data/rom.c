@@ -9,8 +9,8 @@ extern unsigned int raptor_dtb_len;
 void _start()
 {
 #if RAPT_ROM_CMO_BITS
-    /* Allow S-mode cache operations advertised by the device tree. */
-    asm volatile("csrs 0x30a, %0" : : "r"(RAPT_ROM_CMO_BITS));
+    /* Allow S-mode extensions advertised by the device tree. */
+    asm volatile("csrs 0x30a, %0" : : "r"((unsigned long)(RAPT_ROM_CMO_BITS)));
 #endif
     asm volatile(
         "la a1, raptor_dtb\n"

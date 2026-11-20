@@ -234,19 +234,22 @@ module tb_csr_architectural;
     write_csr(`RAPT_CSR_MENVCFG, 0);
     if (csr_bcast.menvcfg_pbmte) $fatal(1, "PBMTE did not clear");
     for (int mask_index = 0; mask_index < 8; mask_index++) begin
-      logic [XLEN-1:0] mask;
+      logic [XLEN-1:0] mask, mie_mask;
+      mie_mask = XLEN'('h10aaa)
+          | ((rapt_pkg::HypervisorEnable && XLEN == 64) ? XLEN'('h444) : '0)
+          | (rapt_pkg::SscofpmfEnable ? XLEN'('h2000) : '0);
       mask = (XLEN'(mask_index[0]) << 1) | (XLEN'(mask_index[1]) << 5)
                   | (XLEN'(mask_index[2]) << 9);
       write_csr(`RAPT_CSR_MIDELEG, mask);
       write_csr(`RAPT_CSR_MIE____, '1);
-      expect_csr(`RAPT_CSR_MIE____, 'h10aaa);
+      expect_csr(`RAPT_CSR_MIE____, mie_mask);
       write_csr(`RAPT_CSR_MIP____, 'h222);
       expect_csr(`RAPT_CSR_SIE____, mask);
       expect_csr(`RAPT_CSR_SIP____, mask);
       write_csr(`RAPT_CSR_SIE____, 0);
-      expect_csr(`RAPT_CSR_MIE____, XLEN'('h10aaa) & ~mask);
+      expect_csr(`RAPT_CSR_MIE____, mie_mask & ~mask);
       write_csr(`RAPT_CSR_SIE____, '1);
-      expect_csr(`RAPT_CSR_MIE____, 'h10aaa);
+      expect_csr(`RAPT_CSR_MIE____, mie_mask);
       write_csr(`RAPT_CSR_SIP____, 0);
       expect_csr(`RAPT_CSR_MIP____, XLEN'('h222) & ~(mask & XLEN'(2)));
       write_csr(`RAPT_CSR_SIP____, '1);
@@ -477,6 +480,7 @@ module tb_csr_contract;
           expect_csr(12'hf12, 50);
           expect_csr(12'hf13, 0);
           expect_csr(12'hf14, value);
+          expect_csr(12'hf15, 0);
           count++;
         end
         for (int sample = 0; sample < 66; sample ++) begin
@@ -513,9 +517,12 @@ module tb_csr_contract;
         end
         for (int a = 0; a < BANKS; a++)
         for (int sample = 0; sample < XLEN + 2; sample ++) begin
-          value=sample==0 ? '0 : sample==1 ? '1 : XLEN'(1)<<(sample-2);
-          expected[a]=(a==2 || a==3) ? value & ~XLEN'(1)
-          : a==6 ? value & XLEN'(32'h0008b3fe) : value;
+          logic [XLEN-1:0] medeleg_mask;
+          medeleg_mask = (rapt_pkg::HypervisorEnable && XLEN == 64)
+              ? XLEN'(32'h00f8b7fe) : XLEN'(32'h0008b3fe);
+          value = sample == 0 ? '0 : sample == 1 ? '1 : XLEN'(1) << (sample - 2);
+          expected[a] = (a == 2 || a == 3) ? value & ~XLEN'(1)
+              : a == 6 ? value & medeleg_mask : value;
           write_csr(addresses[a], value);
           // Writing one bank must preserve every other software-visible bank.
           for (int other = 0; other < BANKS; other++) expect_csr(addresses[other], expected[other]);
@@ -661,12 +668,14 @@ module tb_csr_contract;
       result = '0;
       for (int bitno = 0; bitno < XLEN; bitno++) begin
         case (bitno)
-          1,3,5,7,8,11,12,13,14,17,18,19,20,21,22:result[bitno]=v[bitno];
-          default:;
+          1,3,5,7,8,11,12,13,14,17,18,19,20,21,22: result[bitno] = v[bitno];
+          9,10: if (rapt_pkg::VectorEnable) result[bitno] = v[bitno];
+          38,39: if (rapt_pkg::HypervisorEnable && XLEN == 64) result[bitno] = v[bitno];
+          default: ;
         endcase
       end
       if (v[12:11] == 2) result[12:11] = 0;
-      result[XLEN-1] = (v[14:13] == 3);
+      result[XLEN-1] = (result[14:13] == 3) || (rapt_pkg::VectorEnable && result[10:9] == 3);
       if (XLEN == 64) result |= XLEN'(64'h0000000a00000000);
       return result;
     endfunction
@@ -675,8 +684,9 @@ module tb_csr_contract;
       result = '0;
       for (int bitno = 0; bitno < XLEN; bitno++) begin
         case (bitno)
-          1,5,8,13,14,18,19:result[bitno]=v[bitno];
-          default:;
+          1,5,8,13,14,18,19: result[bitno] = v[bitno];
+          9,10: if (rapt_pkg::VectorEnable) result[bitno] = v[bitno];
+          default: ;
         endcase
       end
       result[XLEN-1] = v[XLEN-1];
@@ -692,7 +702,8 @@ module tb_csr_contract;
         init_cmu_bcast_defaults();
         repeat (2) @(negedge clock);
         reset=0;
-        smask=XLEN'('hc6122)|(XLEN'(1)<<(XLEN-1));
+        smask = XLEN'('hc6122) | (rapt_pkg::VectorEnable ? XLEN'('h600) : '0)
+            | (XLEN'(1) << (XLEN - 1));
         for (int alias_index = 0; alias_index < 2; alias_index++)
         for (int old = 0; old < 2; old++)
         for (int sample = 0; sample < XLEN + 2; sample ++) begin
@@ -799,9 +810,11 @@ module tb_csr_contract;
               for (int interrupt_kind = 0; interrupt_kind < 2; interrupt_kind++)
               for (int cause = 0; cause < 20; cause++) begin
                 @(negedge clock);
-                rou_csr.cause=(XLEN'(interrupt_kind)<<(XLEN-1))|XLEN'(cause);
-                mask=interrupt_kind ? (deleg[1] ? XLEN'('h222):0)
-                                : (deleg[0] ? XLEN'('h8b3fe):0);
+                rou_csr.cause = (XLEN'(interrupt_kind) << (XLEN - 1)) | XLEN'(cause);
+                mask = interrupt_kind
+                    ? ((deleg[1] ? XLEN'('h222) : '0)
+                        | ((rapt_pkg::HypervisorEnable && XLEN == 64) ? XLEN'('h444) : '0))
+                    : (deleg[0] ? XLEN'('h8b3fe) : '0);
                 to_s=(priv!=3)&&mask[cause];
                 expected=to_s ? XLEN'('h80000200):XLEN'('h80000100);
                 if (interrupt_kind && (to_s ? smode == 1 : mmode == 1))
@@ -989,34 +1002,44 @@ module tb_csr_envcfg_warl;
   // Independent table of the implementation's legal CBIE normalization.
   function automatic logic [7:0] low_expected(input logic [7:0] value);
     case (value[5:4])
-      0: low_expected = {value[7:6], 2'b00, 4'b0};
-      1: low_expected = {value[7:6], 2'b01, 4'b0};
-      default: low_expected = {value[7:6], 2'b11, 4'b0};
+      0: low_expected = {value[7:6], 2'b00, 3'b0, value[0]};
+      1: low_expected = {value[7:6], 2'b01, 3'b0, value[0]};
+      default: low_expected = {value[7:6], 2'b11, 3'b0, value[0]};
     endcase
   endfunction
-  task automatic check_state(input logic [7:0] m, s, input logic [1:0] high_bits);
-    logic [XLEN-1:0] expected_m;
+`ifdef RAPT_SSNPM
+  localparam bit SsnpmEn = XLEN == 64;
+`else
+  localparam bit SsnpmEn = 1'b0;
+`endif
+  task automatic check_state(input logic [7:0] m, s, input logic [1:0] high_bits, pmm_m, pmm_s);
+    logic [XLEN-1:0] expected_m, expected_s;
     expected_m = XLEN'(m);
-    if (XLEN == 64) expected_m |= XLEN'(high_bits) << 62;
+    expected_s = XLEN'(s);
+    if (XLEN == 64) begin
+      expected_m |= (XLEN'(high_bits) << 62) | (XLEN'(pmm_m) << 32);
+      expected_s |= XLEN'(pmm_s) << 32;
+    end
     expect_csr(`RAPT_CSR_MENVCFG, expected_m);
-    expect_csr(`RAPT_CSR_SENVCFG, XLEN'(s));
+    expect_csr(`RAPT_CSR_SENVCFG, expected_s);
     if (XLEN == 32) expect_csr(`RAPT_CSR_MENVCFGH, XLEN'(high_bits[1]) << 31);
     if ({csr_bcast.menvcfg_cbze,csr_bcast.menvcfg_cbcfe,csr_bcast.menvcfg_cbie} !== m[7:4]
         || {csr_bcast.senvcfg_cbze,csr_bcast.senvcfg_cbcfe,csr_bcast.senvcfg_cbie} !== s[7:4]
         || csr_bcast.menvcfg_stce !== high_bits[1]
-        || csr_bcast.menvcfg_pbmte !== (XLEN == 64 && high_bits[0]))
+        || csr_bcast.menvcfg_pbmte !== (XLEN == 64 && high_bits[0])
+        || csr_bcast.senvcfg_pmm !== pmm_s)
       $fatal(1, "ENVCFG broadcast mismatch");
   endtask
   int count = 0;
   initial begin
     logic [XLEN-1:0] m, s;
-    logic [1:0] high_bits;
+    logic [1:0] high_bits, pmm_m, pmm_s;
     iss = '0;
     clear_commit();
     init_cmu_bcast_defaults();
     repeat (2) @(negedge clock);
     reset = 0;
-    check_state(0, 0, 0);
+    check_state(0, 0, 0, 0, 0);
     // Every CMO control pair, both orders, all high control combinations.
     for (int order = 0; order < 2; order++)
     for (int hi = 0; hi < 4; hi++)
@@ -1034,17 +1057,23 @@ module tb_csr_envcfg_warl;
         write_csr(`RAPT_CSR_SENVCFG, s);
         write_csr(`RAPT_CSR_MENVCFG, m);
       end
-      check_state(low_expected(8'(mi << 4)), low_expected(8'(si << 4)), high_bits);
+      check_state(low_expected(8'(mi << 4)), low_expected(8'(si << 4)), high_bits, 0, 0);
       count++;
     end
-    // Probe each reserved bit and all-ones writes, including FIOM hardwired zero.
+    // Probe each bit and all-ones writes, including FIOM and PMM retain-on-01.
+    pmm_m = 0;
+    pmm_s = 0;
     for (int bitno = 0; bitno <= XLEN; bitno++) begin
-      m=bitno==XLEN ? '1 : XLEN'(1)<<bitno;
-      high_bits=XLEN==64 ? 2'(m>>62) : 2'(m>>30);
+      logic [1:0] pmm_req;
+      m = bitno == XLEN ? '1 : XLEN'(1) << bitno;
+      high_bits = XLEN == 64 ? 2'(m >> 62) : 2'(m >> 30);
+      pmm_req = 2'(64'(m) >> 32);
+      if (XLEN == 64 && rapt_pkg::SmnpmEnable && pmm_req != 2'b01) pmm_m = pmm_req;
+      if (SsnpmEn && pmm_req != 2'b01) pmm_s = pmm_req;
       write_csr(`RAPT_CSR_MENVCFG, m);
       write_csr(`RAPT_CSR_SENVCFG, m);
       if (XLEN == 32) write_csr(`RAPT_CSR_MENVCFGH, m);
-      check_state(low_expected(8'(m)), low_expected(8'(m)), high_bits);
+      check_state(low_expected(8'(m)), low_expected(8'(m)), high_bits, pmm_m, pmm_s);
       count++;
     end
     if (count != 2048 + XLEN + 1) $fatal(1, "ENVCFG matrix incomplete");
@@ -1598,7 +1627,12 @@ module tb_csr_sret_roundtrip;
     write_csr(`RAPT_CSR_SENVCFG, '1);
     exu_csr.raddr = `RAPT_CSR_SENVCFG;
     #1;
-    check(exu_csr.rdata == XLEN'('hf0), "senvcfg did not apply the Zicbom/Zicboz WARL mask");
+`ifdef RAPT_SSNPM
+    check(exu_csr.rdata == (XLEN'('hf1) | (XLEN == 64 ? XLEN'(64'h3_0000_0000) : '0)),
+          "senvcfg did not apply the Zicbom/Zicboz/FIOM/PMM WARL mask");
+`else
+    check(exu_csr.rdata == XLEN'('hf1), "senvcfg did not apply the Zicbom/Zicboz/FIOM WARL mask");
+`endif
     write_csr(`RAPT_CSR_SENVCFG, XLEN'('h40));
     exu_csr.raddr = `RAPT_CSR_SENVCFG;
     #1;
@@ -1609,16 +1643,33 @@ module tb_csr_sret_roundtrip;
     check(exu_csr.rdata == XLEN'('h30),
           "senvcfg accepted reserved CBIE=2 instead of WARL-mapping it");
 
-    // Zihpm permits counters/event selectors to be hardwired zero, but their
-    // standard CSR addresses remain legal and writes cannot create state.
+    // Zihpm permits unimplemented counters/event selectors (4..31, and 3 when
+    // Sscofpmf is disabled) to be hardwired zero, while Sscofpmf enables HPM3.
     check_csr_zero(`RAPT_CSR_HPMCOUNTER3, "hpmcounter3");
     check_csr_zero(`RAPT_CSR_HPMCOUNTER31, "hpmcounter31");
     check_csr_zero(`RAPT_CSR_MHPMCOUNTER3, "mhpmcounter3");
     check_csr_zero(`RAPT_CSR_MHPMEVENT3, "mhpmevent3");
-    write_csr(`RAPT_CSR_MHPMCOUNTER3, '1);
-    check_csr_zero(`RAPT_CSR_MHPMCOUNTER3, "mhpmcounter3 after write");
-    write_csr(`RAPT_CSR_MHPMEVENT3, '1);
-    check_csr_zero(`RAPT_CSR_MHPMEVENT3, "mhpmevent3 after write");
+    write_csr(`RAPT_CSR_MHPMCOUNTER31, '1);
+    check_csr_zero(`RAPT_CSR_MHPMCOUNTER31, "mhpmcounter31 after write");
+    write_csr(`RAPT_CSR_MHPMEVENT31, '1);
+    check_csr_zero(`RAPT_CSR_MHPMEVENT31, "mhpmevent31 after write");
+    if (rapt_pkg::SscofpmfEnable) begin
+      write_csr(`RAPT_CSR_MHPMCOUNTER3, XLEN'(64'h55aa_1234));
+      exu_csr.raddr = `RAPT_CSR_MHPMCOUNTER3;
+      #1;
+      check(exu_csr.rdata == XLEN'(64'h55aa_1234), "mhpmcounter3 write did not take effect");
+      write_csr(`RAPT_CSR_MHPMEVENT3, XLEN'(64'h1));
+      exu_csr.raddr = `RAPT_CSR_MHPMEVENT3;
+      #1;
+      check(exu_csr.rdata == XLEN'(64'h1), "mhpmevent3 write did not take effect");
+      write_csr(`RAPT_CSR_MHPMCOUNTER3, '0);
+      write_csr(`RAPT_CSR_MHPMEVENT3, '0);
+    end else begin
+      write_csr(`RAPT_CSR_MHPMCOUNTER3, '1);
+      check_csr_zero(`RAPT_CSR_MHPMCOUNTER3, "mhpmcounter3 after write");
+      write_csr(`RAPT_CSR_MHPMEVENT3, '1);
+      check_csr_zero(`RAPT_CSR_MHPMEVENT3, "mhpmevent3 after write");
+    end
 
     // mcycle/minstret are writable architectural counters.  Their high-half
     // aliases exist only on RV32; the same encodings read as zero here on RV64

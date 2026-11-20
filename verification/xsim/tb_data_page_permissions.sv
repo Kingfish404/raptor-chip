@@ -39,6 +39,10 @@ module tb_data_page_permissions;
       .load_size_m1(4'd3),
       .store_walu(8'h0f),
       .cmo_mgmt(1'b0),
+`ifdef RAPT_H_EXTENSION
+      .load_exec(1'b0),
+      .ptw_exec(1'b0),
+`endif
       .tlb_hit,
       .stlb_hit,
       .dtlb_pte,

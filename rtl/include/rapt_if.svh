@@ -39,6 +39,13 @@ interface lsu_l1d_if #(
   logic [3:0] rorig_size_m1;
   logic atomic_lock;
   logic ordered;
+`ifdef RAPT_H_EXTENSION
+  logic rguest;
+  logic rexec;
+  logic [1:0] rpbmt;
+  logic [XLEN-1:2] gpaddr;
+  logic gptw;
+`endif
 
   logic [XLEN-1:0] rdata;
   logic trap;
@@ -82,6 +89,30 @@ interface lsu_l1d_if #(
   // synchronous drain so that younger same-address loads can still forward.
   logic wmore;
 
+`ifdef RAPT_H_EXTENSION
+  modport master(
+      output raddr, rcontext, ralu, rvalid, rprobe, wprecise, rmisaligned,
+      output rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1,
+      output atomic_lock, ordered, replay_allowed, rguest, rexec,
+      input rpbmt, gpaddr, gptw,
+      input idle, rdata, trap, cause, difftest_skip, rready, rretry, rmiss, miss_wake, rnonidempotent,
+      output raddr_b, rcontext_b, ralu_b, rvalid_b,
+      input rdata_b, rready_b, rretry_b,
+      output waddr, wpbmt, walu, wzero, wvalid, wdata, wmore,
+      input wready, werr
+  );
+  modport slave(
+      input raddr, rcontext, ralu, rvalid, rprobe, wprecise, rmisaligned,
+      input rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1,
+      input atomic_lock, ordered, replay_allowed, rguest, rexec,
+      output rpbmt, gpaddr, gptw,
+      output idle, rdata, trap, cause, difftest_skip, rready, rretry, rmiss, miss_wake, rnonidempotent,
+      input raddr_b, rcontext_b, ralu_b, rvalid_b,
+      output rdata_b, rready_b, rretry_b,
+      input waddr, wpbmt, walu, wzero, wvalid, wdata, wmore,
+      output wready, werr
+  );
+`else
   modport master(
       output raddr, rcontext, ralu, rvalid, rprobe, wprecise, rmisaligned,
       output rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1,
@@ -102,6 +133,7 @@ interface lsu_l1d_if #(
       input waddr, wpbmt, walu, wzero, wvalid, wdata, wmore,
       output wready, werr
   );
+`endif
 endinterface
 
 // Read-only instruction cache and page-table interface.
@@ -311,9 +343,9 @@ interface csr_bcast_if #(
   logic tvm;  // trap satp / sfence.vma in S-mode when set
   logic tw;  // timeout wait in U/S mode
 
-  // mcounteren / scounteren low 3 bits (CY/TM/IR) for U/S counter reads.
-  logic [2:0] mcounteren;
-  logic [2:0] scounteren;
+  // mcounteren / scounteren low 4 bits (CY/TM/IR/HPM3) for U/S counter reads.
+  logic [3:0] mcounteren;
+  logic [3:0] scounteren;
   logic [2:0] frm;
   logic [1:0] fs, vs;
   logic [1:0] menvcfg_cbie;
@@ -324,7 +356,39 @@ interface csr_bcast_if #(
   logic [1:0] senvcfg_cbie;
   logic senvcfg_cbcfe;
   logic senvcfg_cbze;
+  logic [3:0] mstateen_se0;
+  logic mstateen0_envcfg;
   logic [1:0] data_pmm;  // Effective pointer masking mode for explicit data accesses.
+  logic data_pmm_sext;   // First-stage translation active for pointer-mask sign extension.
+
+  // Hypervisor (H extension) broadcast state
+  logic virt;
+  logic mpv;
+  logic hstatus_vtvm;
+  logic hstatus_vtw;
+  logic hstatus_vtsr;
+  logic hstatus_hu;
+  logic hstatus_spvp;
+  logic [1:0] hstatus_hupmm;
+  logic vs_sum;
+  logic vs_mxr;
+  logic henvcfg_stce;
+  logic henvcfg_pbmte;
+  logic [1:0] henvcfg_cbie;
+  logic henvcfg_cbcfe;
+  logic henvcfg_cbze;
+  logic [1:0] henvcfg_pmm;
+  logic [3:0] hcounteren;
+  logic [3:0] hstateen_se0;
+  logic hstateen0_envcfg;
+  logic [`RAPT_CSR_SATP_PPN_W-1:0] vsatp_ppn;
+  logic [8:0] vsatp_asid;
+  logic vsatp_en;
+  logic [`RAPT_CSR_SATP_PPN_W-1:0] hgatp_ppn;
+  logic hgatp_en;
+  logic [1:0] senvcfg_pmm;
+  logic eff_data_guest;
+  logic hgatp_flush;
 
   modport in(
       input priv, satp_ppn, satp_asid,
@@ -334,7 +398,14 @@ interface csr_bcast_if #(
       input tsr, tvm, tw, mcounteren, scounteren,
       input sum, mxr, sbe, frm, fs, vs,
       input menvcfg_cbie, menvcfg_cbcfe, menvcfg_cbze, menvcfg_stce, menvcfg_pbmte,
-      input senvcfg_cbie, senvcfg_cbcfe, senvcfg_cbze, data_pmm
+      input senvcfg_cbie, senvcfg_cbcfe, senvcfg_cbze,
+      input mstateen_se0, mstateen0_envcfg, data_pmm, data_pmm_sext,
+      input virt, mpv, hstatus_vtvm, hstatus_vtw, hstatus_vtsr, hstatus_hu, hstatus_spvp,
+      input hstatus_hupmm, vs_sum, vs_mxr, henvcfg_stce, henvcfg_pbmte,
+      input henvcfg_cbie, henvcfg_cbcfe, henvcfg_cbze, henvcfg_pmm,
+      input hcounteren, hstateen_se0, hstateen0_envcfg,
+      input vsatp_ppn, vsatp_asid, vsatp_en, hgatp_ppn, hgatp_en,
+      input senvcfg_pmm, eff_data_guest, hgatp_flush
   );
   modport out(
       output priv, satp_ppn, satp_asid,
@@ -344,7 +415,14 @@ interface csr_bcast_if #(
       output tsr, tvm, tw, mcounteren, scounteren,
       output sum, mxr, sbe, frm, fs, vs,
       output menvcfg_cbie, menvcfg_cbcfe, menvcfg_cbze, menvcfg_stce, menvcfg_pbmte,
-      output senvcfg_cbie, senvcfg_cbcfe, senvcfg_cbze, data_pmm
+      output senvcfg_cbie, senvcfg_cbcfe, senvcfg_cbze,
+      output mstateen_se0, mstateen0_envcfg, data_pmm, data_pmm_sext,
+      output virt, mpv, hstatus_vtvm, hstatus_vtw, hstatus_vtsr, hstatus_hu, hstatus_spvp,
+      output hstatus_hupmm, vs_sum, vs_mxr, henvcfg_stce, henvcfg_pbmte,
+      output henvcfg_cbie, henvcfg_cbcfe, henvcfg_cbze, henvcfg_pmm,
+      output hcounteren, hstateen_se0, hstateen0_envcfg,
+      output vsatp_ppn, vsatp_asid, vsatp_en, hgatp_ppn, hgatp_en,
+      output senvcfg_pmm, eff_data_guest, hgatp_flush
   );
 endinterface
 

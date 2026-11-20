@@ -26,10 +26,20 @@ SOURCES = {
         'digest': '00dc9a49ee349881841ced3c8a3d07353866e19ffb70fb93cd07f02089d5829ee4ccb608b4a2edf5302ff2c380708185d2e9c59ce4ac376d252b35df52a7d479',
     },
     'ubuntu': {
-        'release': '24.04', 'build': '20260926', 'format': 'tar',
-        'url': 'https://cloud-images.ubuntu.com/noble/20260926/noble-server-cloudimg-riscv64-root.tar.xz',
+        'os_id': 'ubuntu', 'release': '26.10', 'build': '20261105',
+        'format': 'tar', 'isa_profile': 'rva23',
+        'url': ('https://cloud-images.ubuntu.com/releases/stonking/release-20261105/'
+                'ubuntu-26.10-server-cloudimg-riscv64-root.tar.xz'),
         'algorithm': 'sha256',
-        'digest': '2790aa289412517d1aedb81417bc03a3da3d21eb7778d4dbf701295e10cc4b15',
+        'digest': '522ed2f958fa0edb70fcda2b0600ac54bab3cdd6ad53f4fd4ddf2b7dd419a80c',
+    },
+    'ubuntu-lts': {
+        'os_id': 'ubuntu', 'release': '26.04', 'build': '20261108',
+        'format': 'tar', 'isa_profile': 'rva23',
+        'url': ('https://cloud-images.ubuntu.com/releases/26.04/release-20261108/'
+                'ubuntu-26.04-server-cloudimg-riscv64-root.tar.xz'),
+        'algorithm': 'sha256',
+        'digest': '1ddcbc7b740ea4da8db9e4d79590e24d92850f1c10344afa8a7c7dfbdca58909',
     },
 }
 FAULTS = (rb'Kernel panic|Oops[: \[]|Unable to handle kernel|unhandled signal|segfault at|SIGSEGV|'
@@ -45,9 +55,11 @@ def save(path, value):
 
 
 def verdict(output, returncode, distro, harts=1):
+    os_id = SOURCES[distro].get('os_id', distro)
+    expected_id = f'RAPTOR_DISTRO_ID={os_id} VERSION_ID={SOURCES[distro]["release"]}'.encode()
     return (returncode == 0 and b'RAPTOR_DISTRO_CHECK_PASS' in output
             and b'RAPTOR_FP_PASS' in output
-            and ('RAPTOR_DISTRO_ID=' + distro + ' VERSION_ID=' + SOURCES[distro]['release']).encode() in output
+            and expected_id in output
             and (harts == 1 or f'RAPTOR_SMP_PASS harts={harts} '.encode() in output)
             and b'reboot: Power down' in output and not re.search(FAULTS, output))
 
@@ -129,7 +141,8 @@ def customize(disk, directory, harts=1):
         '/etc/vconsole.conf': 'KEYMAP=us\n',
         '/etc/systemd/network/10-raptor.network': '[Match]\nName=eth* en*\n\n[Network]\nDHCP=yes\n',
         '/etc/systemd/system/serial-getty@ttyS0.service.d/raptor.conf':
-            '[Service]\nExecStart=\nExecStart=-/sbin/agetty --autologin root --noclear --keep-baud 115200,38400,9600 - $TERM\n',
+            ('[Service]\nExecStart=\nExecStart=-/usr/sbin/agetty --autologin root '
+             '--noclear --keep-baud 115200,38400,9600 - $TERM\n'),
         '/etc/cloud/cloud-init.disabled': '',
         '/etc/systemd/system/raptor-distro-check.service': (ASSETS / 'check.service').read_text(),
         '/etc/systemd/system/raptor-distro-check.timer': (ASSETS / 'check.timer').read_text(),
@@ -165,9 +178,11 @@ def customize(disk, directory, harts=1):
                          'symlink /etc/systemd/system/' + unit + ' /dev/null'])
     command_file = directory / 'debugfs.commands'
     command_file.write_text('\n'.join(commands) + '\n')
+    debugfs_bin = shutil.which('debugfs') or '/usr/sbin/debugfs'
+    e2fsck_bin = shutil.which('e2fsck') or '/usr/sbin/e2fsck'
     with (directory / 'customize.log').open('w') as log:
-        run(['debugfs', '-w', '-f', command_file, disk], stdout=log, stderr=subprocess.STDOUT)
-    run(['e2fsck', '-fn', disk], stdout=subprocess.DEVNULL)
+        run([debugfs_bin, '-w', '-f', command_file, disk], stdout=log, stderr=subprocess.STDOUT)
+    run([e2fsck_bin, '-fn', disk], stdout=subprocess.DEVNULL)
 
 
 def nemu_build_flags(sanitize=None):
@@ -247,11 +262,18 @@ def prepare(args):
     require((args.kernel_artifacts / 'manifest.json').is_file(),
             'build an RV64 FPGA-profile kernel first; select it with --kernel-artifacts')
     kernel_record = verify(args.kernel_artifacts)
-    require(kernel_record['bits'] == 64 and kernel_record['profile'] == 'fpga',
+    native_ubuntu_kernel = kernel_record.get('schema') == 'raptor-native-ubuntu-kernel-v1'
+    require((kernel_record.get('bits') == 64 and kernel_record.get('profile') == 'fpga')
+            or native_ubuntu_kernel,
             'requires an RV64 external-rootfs kernel artifact directory')
+    rva23 = SOURCES[args.distro].get('isa_profile') == 'rva23'
     config = (args.kernel_artifacts / 'kernel.config').read_text()
-    for option in ('VIRTIO_BLK', 'EXT4_FS', 'DEVTMPFS_MOUNT', 'CGROUPS', 'FHANDLE',
-                   'SERIAL_8250_CONSOLE', 'FPU'):
+    required = ['VIRTIO_BLK', 'EXT4_FS', 'DEVTMPFS_MOUNT', 'CGROUPS', 'FHANDLE',
+                'SERIAL_8250_CONSOLE', 'FPU']
+    if rva23:
+        required += ['RISCV_ISA_V', 'RISCV_ISA_SUPM', 'RISCV_ISA_SVNAPOT',
+                     'RISCV_ISA_SVPBMT', 'RISCV_ISA_ZICBOZ', 'KVM']
+    for option in required:
         require(f'CONFIG_{option}=y\n' in config, 'kernel lacks ' + option)
     require('CONFIG_INITRAMFS_SOURCE=""\n' in config and 'CONFIG_CMDLINE_FORCE=y' not in config,
             'kernel must accept the platform command line and external disk root')
@@ -276,7 +298,8 @@ def prepare(args):
     with (directory / 'opensbi.log').open('w') as log:
         run(['python3', Path(__file__).resolve(), 'firmware', '--work', directory],
             stdout=log, stderr=subprocess.STDOUT)
-    build_dtb(directory, args.harts)
+    dtb_source = 'nemu-distro-rva23.dts' if rva23 else 'nemu-distro-rv64.dts'
+    build_dtb(directory, args.harts, source_name=dtb_source)
     binary = build_nemu(directory / 'nemu')
     record = {'distro': args.distro, 'source': SOURCES[args.distro],
               'builder_sha256': sha(Path(__file__)),
@@ -311,18 +334,23 @@ def check(args):
                        capture_output=True).stdout.decode().strip()
         run(['fdtput', '-t', 's', dtb, '/chosen', 'bootargs',
              bootargs + ' systemd.mask=raptor-distro-check.timer'])
+    rva23 = record.get('source', {}).get('isa_profile') == 'rva23'
     if args.engine == 'nemu':
         command = [str(binary), '-b', '-n', '-t', str(dtb),
                    '--disk=' + str(directory / 'rootfs.ext4'),
-                   '--log=' + str(directory / ('interactive-monitor.log' if interactive else 'nemu-monitor.log')),
+                   '--log=' + str(directory / ('interactive-monitor.log' if interactive
+                                               else 'nemu-monitor.log')),
                    str(directory / 'fw_payload.bin')]
+        if rva23:
+            command.insert(1, '--isa-extensions=rva23')
         if harts > 1:
             command.insert(1, '--smp=' + str(harts))
         if backend == 'threaded':
             command.insert(1, '--smp-backend=threaded')
             command.insert(1, '--smp-clock-div=' + str(clock_div))
     else:
-        command = ['qemu-system-riscv64', '-M', 'virt', '-cpu', 'rv64,h=false,sstc=false,svadu=false',
+        qemu_cpu = 'rva23s64' if rva23 else 'rv64,h=false,sstc=false,svadu=false'
+        command = ['qemu-system-riscv64', '-M', 'virt', '-cpu', qemu_cpu,
                    '-m', '1024M', '-smp', str(harts), '-nographic', '-no-reboot', '-snapshot',
                    '-bios', str(directory / 'fw_payload.bin'),
                    '-drive', f'file={directory / "rootfs.ext4"},format=raw,if=none,id=root',

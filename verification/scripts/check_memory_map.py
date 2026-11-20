@@ -79,7 +79,7 @@ def check():
         fixed[int(start, 16)] = (int(end, 16), mask)
     for start, end in ((0x11000000, 0x12000000), (0x18000000, 0x19000000),
                        (0x00100000, 0x00101000), (0x21000000, 0x21200000),
-                       (0x10000000, 0x10011000)):
+                       (0x10000000, 0x10011000), (0x41000000, 0x60000000)):
         require(fixed.get(start) == (end, 0b101100),
                 f"RTL mapped/writable/MMIO device window {start:08x}")
     require(fixed.get(0x10011000) == (0x10012000, 0b101000),

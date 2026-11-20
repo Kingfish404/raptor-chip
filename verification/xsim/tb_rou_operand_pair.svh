@@ -84,6 +84,10 @@ if (CheckOperandIndependence) begin : g_operand_pair
       .halt_pc_o(shadow_halt_pc),
       .commit_fire_o(shadow_commit_fire),
       .pmu_rob_full(shadow_pmu_rob_full),
+`ifdef RAPT_H_EXTENSION
+      .ifetch_gpf_gpa_i('0),
+      .ifetch_gpf_ptw_i(1'b0),
+`endif
       .reset(reset),
       .operand_wake('{default: '0})
   );
@@ -156,7 +160,18 @@ if (CheckOperandIndependence) begin : g_operand_pair
         paired_commits++;
       end
     end
-    assert ({rou_csr.pc, rou_csr.csr_wen, rou_csr.csr_wdata, rou_csr.csr_addr, rou_csr.fp_flags_valid, rou_csr.fp_flags, rou_csr.fp_dirty, rou_csr.ecall, rou_csr.ebreak, rou_csr.mret, rou_csr.sret, rou_csr.trap, rou_csr.tval, rou_csr.cause, rou_csr.valid, rou_csr.retire_count} == {shadow_rou_csr.pc, shadow_rou_csr.csr_wen, shadow_rou_csr.csr_wdata, shadow_rou_csr.csr_addr, shadow_rou_csr.fp_flags_valid, shadow_rou_csr.fp_flags, shadow_rou_csr.fp_dirty, shadow_rou_csr.ecall, shadow_rou_csr.ebreak, shadow_rou_csr.mret, shadow_rou_csr.sret, shadow_rou_csr.trap, shadow_rou_csr.tval, shadow_rou_csr.cause, shadow_rou_csr.valid, shadow_rou_csr.retire_count})
+    assert ({rou_csr.pc, rou_csr.csr_wen, rou_csr.csr_wdata, rou_csr.csr_addr,
+      rou_csr.fp_flags_valid, rou_csr.fp_flags, rou_csr.fp_dirty, rou_csr.ecall,
+      rou_csr.ebreak, rou_csr.mret, rou_csr.sret, rou_csr.trap, rou_csr.tval,
+      rou_csr.tval2, rou_csr.htinst, rou_csr.explicit_guest_trap,
+      rou_csr.cause, rou_csr.valid, rou_csr.retire_count, rou_csr.fence_retired}
+      == {shadow_rou_csr.pc, shadow_rou_csr.csr_wen, shadow_rou_csr.csr_wdata,
+      shadow_rou_csr.csr_addr, shadow_rou_csr.fp_flags_valid, shadow_rou_csr.fp_flags,
+      shadow_rou_csr.fp_dirty, shadow_rou_csr.ecall, shadow_rou_csr.ebreak,
+      shadow_rou_csr.mret, shadow_rou_csr.sret, shadow_rou_csr.trap,
+      shadow_rou_csr.tval, shadow_rou_csr.tval2, shadow_rou_csr.htinst,
+      shadow_rou_csr.explicit_guest_trap, shadow_rou_csr.cause, shadow_rou_csr.valid,
+      shadow_rou_csr.retire_count, shadow_rou_csr.fence_retired})
       else $fatal(1, "operand-dependent ROU rou_csr");
     assert ({rou_lsu.store, rou_lsu.dest, rou_lsu.sq_vaddr, rou_lsu.pc, rou_lsu.valid} == {shadow_rou_lsu.store, shadow_rou_lsu.dest, shadow_rou_lsu.sq_vaddr, shadow_rou_lsu.pc, shadow_rou_lsu.valid})
       else $fatal(1, "operand-dependent ROU rou_lsu");

@@ -61,6 +61,9 @@ task automatic replay_case(input bit aq);
     replay_pipe.raddr_b=0;replay_pipe.ralu_b=0;replay_pipe.fp_rdata64_req=0;
     replay_l1d.rdata=0;replay_l1d.rready=1;replay_l1d.rretry=0;replay_l1d.rmiss=0;replay_l1d.miss_wake=0;replay_l1d.trap=0;
     replay_l1d.cause=0;replay_l1d.difftest_skip=0;
+`ifdef RAPT_H_EXTENSION
+    replay_l1d.rpbmt=0;replay_l1d.gpaddr=0;replay_l1d.gptw=0;
+`endif
     replay_l1d.rdata_b=0;replay_l1d.rready_b=0;replay_l1d.wready=0;replay_l1d.werr=0;
     replay_acquire=0;replay_watch_pc=XLEN'('h80000004);
     replay_flag=0;replay_data=0;replay_young_retired=0;replay_retired_value='1;

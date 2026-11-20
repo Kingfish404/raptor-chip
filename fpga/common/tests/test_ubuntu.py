@@ -27,7 +27,25 @@ class UbuntuTests(unittest.TestCase):
             with patch.object(sys, "argv", ["ubuntu.py", "kernel"]), \
                     patch.object(ubuntu, "kernel") as kernel:
                 ubuntu.main()
-                self.assertEqual(kernel.call_args.args[0].preset, "middle-cache")
+                self.assertEqual(kernel.call_args.args[0].preset, "default")
+
+    def test_kernel_config_enables_rva23_and_kvm_without_conflict(self):
+        source = ubuntu.json.loads((ubuntu.COMMON / "linux/kernel-source.json").read_text())
+        self.assertRegex(source["version"], r"^\d+\.\d+\.\d+$")
+        self.assertGreaterEqual(int(source["version"].split(".")[0]), 7)
+        lines = (ubuntu.COMMON / "linux/ubuntu.config").read_text().splitlines()
+        for option in ("CONFIG_RISCV_ISA_V=y", "CONFIG_RISCV_ISA_SUPM=y",
+                       "CONFIG_RISCV_ISA_SVNAPOT=y", "CONFIG_RISCV_ISA_SVPBMT=y",
+                       "CONFIG_VIRTUALIZATION=y", "CONFIG_KVM=y",
+                       "CONFIG_VIRTIO_MMIO=y", "CONFIG_VIRTIO_BLK=y", "CONFIG_VIRTIO_NET=y",
+                       "CONFIG_PCI=y", "CONFIG_PCI_HOST_GENERIC=y", "CONFIG_BLK_DEV_NVME=y",
+                       "CONFIG_MMC=y", "CONFIG_MMC_SDHCI=y",
+                       "CONFIG_MMC_SDHCI_OF_ARASAN=y", "CONFIG_MMC_SDHCI_PCI=y"):
+            self.assertIn(option, lines)
+        self.assertNotIn("# CONFIG_VIRTUALIZATION is not set", lines)
+        self.assertNotIn("# CONFIG_KVM is not set", lines)
+        self.assertNotIn("# CONFIG_PCI is not set", lines)
+        self.assertNotIn("# CONFIG_MMC is not set", lines)
 
     def test_kernel_reuse_checks_driver_and_word_pio_provenance(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -86,6 +104,11 @@ class UbuntuTests(unittest.TestCase):
         for name in ("/tmp/root rw init=/bin/sh", "/tmp/root,vers=4", "/tmp/root:other"):
             with self.subTest(name=name), self.assertRaisesRegex(RuntimeError, "invalid NFS"):
                 ubuntu.bootargs(SimpleNamespace(rootfs=Path(name), server="192.168.50.1"))
+        for dev in ("/dev/vda", "/dev/nvme0n1", "/dev/mmcblk0"):
+            cmd = ubuntu.bootargs(SimpleNamespace(root_device=dev))
+            self.assertIn(f"root={dev}", cmd)
+        with self.assertRaisesRegex(RuntimeError, "unsupported block root"):
+            ubuntu.bootargs(SimpleNamespace(root_device="/dev/sda1 rw init=/bin/sh"))
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux termios2")
     def test_exact_upload_baud_and_console_restore(self):

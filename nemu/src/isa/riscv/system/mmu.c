@@ -181,7 +181,7 @@ int riscv_gstage_translate(paddr_t guest_address, bool store, bool execute_acces
 }
 
 int riscv_vstage_translate(vaddr_t guest_address, bool store, bool execute_access,
-                           bool virtual_supervisor, bool cmo,
+                           bool hlvx_sum_ok, bool virtual_supervisor, bool cmo,
                            paddr_t *guest_physical_address, paddr_t *fault_address,
                            bool *page_table_write, uint8_t *pbmt_out)
 {
@@ -245,7 +245,8 @@ int riscv_vstage_translate(vaddr_t guest_address, bool store, bool execute_acces
     bool mxr = ((cpu.sr[CSR_VSSTATUS] | cpu.sr[CSR_MSTATUS]) >> 19) & 1;
     bool permitted = cmo ? (write || read || (execute && mxr)) :
         store ? write : (execute_access ? execute : (read || (execute && mxr)));
-    if (!permitted || (virtual_supervisor ? (user && (!sum || execute_access)) : !user))
+    bool disallow_u_in_vs = !sum || (execute_access && !hlvx_sum_ok);
+    if (!permitted || (virtual_supervisor ? (user && disallow_u_in_vs) : !user))
       return RISCV_VSTAGE_PAGE_FAULT;
     if (napot) ppn = (ppn & ~UINT64_C(15)) | (vpn[0] & 15);
     uint64_t low_mask = (UINT64_C(1) << (9 * level)) - 1;
@@ -507,7 +508,7 @@ static paddr_t mmu_translate_unlocked(vaddr_t vaddr, int len, int type, uint8_t 
     riscv_h_fault_gpa = 0;
     riscv_h_fault_ptw = false;
     riscv_h_fault_write = false;
-    int status = riscv_vstage_translate(vaddr, store, execute_access,
+    int status = riscv_vstage_translate(vaddr, store, execute_access, false,
                                         pmp_effective_priv_ls() == PRV_S, cmo,
                                         &guest_address, &riscv_h_fault_gpa,
                                         &riscv_h_fault_write, &vs_pbmt);

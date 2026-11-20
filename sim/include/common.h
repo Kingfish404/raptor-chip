@@ -269,6 +269,8 @@ typedef struct
   uint8_t *vreg;
   word_t *vector_csrs;
   uint32_t vector_vlenb;
+  uint8_t *virt;
+  uint64_t *hypervisor_csrs;
 } NPCState;
 
 typedef struct

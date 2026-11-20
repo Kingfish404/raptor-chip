@@ -150,6 +150,10 @@ rapt_pkg::SteerScanEntries
       .halted_o(),
       .halt_pc_o(),
       .commit_fire_o(),
+`ifdef RAPT_H_EXTENSION
+      .ifetch_gpf_gpa_i('0),
+      .ifetch_gpf_ptw_i(1'b0),
+`endif
       .pmu_rob_full()
   );
 `ifdef RAPT_FORMAL_ROU_DEBUG
@@ -475,6 +479,10 @@ rapt_pkg::SteerScanEntries
       .halted_o(),
       .halt_pc_o(),
       .commit_fire_o(),
+`ifdef RAPT_H_EXTENSION
+      .ifetch_gpf_gpa_i('0),
+      .ifetch_gpf_ptw_i(1'b0),
+`endif
       .pmu_rob_full()
   );
   logic [X-1:0] rf[32], physical_result[N];

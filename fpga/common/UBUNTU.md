@@ -1,11 +1,13 @@
-# Ubuntu 24.04 NFS root
+# Ubuntu 26.10 (RVA23) NFS root
 
 The `ubuntu-*` targets use each board's SystemVerilog SoC. Shared
 code, Linux sources and benchmark tools live under `fpga/common/`; board
 profiles select the physical NIC, MAC address, loader IP and hostname. The boot chain is
 boot ROM → small RAM TFTP loader → OpenSBI/Linux → Ethernet → Ubuntu
-`/sbin/init` (systemd) on an NFS root. The default is RV64 `middle-cache`, 50 MHz, 2 GiB
-DDR4, a 1 MHz CLINT timebase and a 115200-baud Linux console.
+`/sbin/init` (systemd) on an NFS root. The default is RV64 `default` (RVA23U64/RVA23S64),
+50 MHz, 2 GiB DDR4, a 1 MHz CLINT timebase and a 115200-baud Linux console.
+The kernel builds directly from upstream mainline Linux `7.3.5` (`defconfig` plus
+[`ubuntu.config`](linux/ubuntu.config) and the board Ethernet driver).
 
 On RK-XCKU5P-F, the Ethernet controller uses eight 2 KiB receive slots and one
 2 KiB transmit buffer at `0x18000000`, PLIC interrupt 2, and a local MAC address
@@ -220,3 +222,29 @@ LiteX Python environment:
 fpga/litex/.venv/bin/python -m unittest discover \
   -s fpga/litex/tests -p 'test_cm005_*.py'
 ```
+
+## Standard DMA Block Devices, `virtio-mmio` NIC, and QEMU I/O Bridge
+
+[`ubuntu.config`](linux/ubuntu.config) also builds in upstream mainline drivers for:
+
+- **VirtIO-MMIO v2** (`CONFIG_VIRTIO_MMIO=y`, `CONFIG_VIRTIO_BLK=y`, `CONFIG_VIRTIO_NET=y`)
+- **SDHCI / MMC** (`CONFIG_MMC=y`, `CONFIG_MMC_SDHCI_OF_ARASAN=y`, `CONFIG_MMC_SDHCI_PCI=y`)
+- **PCIe Generic ECAM + NVMe 1.4** (`CONFIG_PCI_HOST_GENERIC=y`, `CONFIG_BLK_DEV_NVME=y`)
+
+When `native_build.py` or `ubuntu.py` is invoked with `--virtio-net 1` and/or
+`--qemu-bridge 1`, [`rapt_native_io_soc.sv`](rtl/rapt_native_io_soc.sv) instantiates:
+
+1. [`rapt_virtio_mmio_net.sv`](rtl/rapt_virtio_mmio_net.sv) at `0x10002000` (PLIC IRQ 2),
+   an OASIS VirtIO 1.2 Modern (`VERSION=2`) NIC with a hardware Split-Virtqueue
+   RX/TX AXI4-DMA engine advertising `VIRTIO_F_ACCESS_PLATFORM` (bit 33).
+2. [`rapt_qemu_io_bridge.sv`](rtl/rapt_qemu_io_bridge.sv), forwarding `VirtIO-Blk`
+   (`0x10001000`), `SDHCI` (`0x42000000`), and `PCIe ECAM + NVMe` (`0x41000000` /
+   `0x50000000`) MMIO, PLIC IRQs, and non-coherent AXI4-DMA over L2 Ethernet
+   (EtherType `0x88B5`, shared with `virtio-net` via [`rapt_eth_rqio_mux.sv`](rtl/rapt_eth_rqio_mux.sv))
+   or SLIP+CRC16 serial fallback to [`raptor_qemu_bridge.py`](../../tools/qemu_io_bridge/raptor_qemu_bridge.py).
+
+Non-coherent DMA uses standard upstream Linux `dma-noncoherent;` DT properties
+with RVA23 `Zicbom` + `Svpbmt` cache maintenance and drives `external_write_*`
+into `rapt` for LR/SC reservation invalidation, requiring zero kernel patches.
+Pass `--root-device /dev/vda`, `/dev/nvme0n1`, or `/dev/mmcblk0` to `ubuntu.py`
+to boot Ubuntu 26.10 directly from a local ext4 block device instead of NFS.

@@ -67,6 +67,10 @@
       .halt_pc_o(),
       .commit_fire_o(),
       .pmu_rob_full(),
+`ifdef RAPT_H_EXTENSION
+      .ifetch_gpf_gpa_i('0),
+      .ifetch_gpf_ptw_i(1'b0),
+`endif
       .operand_wake('{default: '0}),
       .writeback_done(1'b1)
   );

@@ -230,6 +230,10 @@ module tb_rou_dual_commit #(
       .halt_pc_o(halt_pc),
       .commit_fire_o(commit_fire),
       .pmu_rob_full(pmu_rob_full),
+`ifdef RAPT_H_EXTENSION
+      .ifetch_gpf_gpa_i('0),
+      .ifetch_gpf_ptw_i(1'b0),
+`endif
       .reset(reset)
   );
 

@@ -15,7 +15,28 @@ RVA23_BASE_EXTENSIONS = (
     "ziccrse", "zicntr", "zicond", "zicsr", "zifencei", "zihintntl", "zihintpause",
     "zihpm", "zimop", "zkt",
 )
-RVA23_SCALAR_MACROS = {"zawrs": "RAPT_ZAWRS", "zfa": "RAPT_ZFA", "ssnpm": "RAPT_SSNPM"}
+RVA23_SUPERVISOR_EXTENSIONS = (
+    "ss1p13", "ssccptr", "sscounterenw", "sstc", "sstvala", "sstvecd",
+    "ssu64xl", "svade", "svinval", "svpbmt", "svvptc",
+)
+RVA23_SCALAR_MACROS = {
+    "zawrs": "RAPT_ZAWRS",
+    "zfa": "RAPT_ZFA",
+    "ssnpm": "RAPT_SSNPM",
+    "smnpm": "RAPT_SMNPM",
+    "svnapot": "RAPT_SVNAPOT",
+    "sscofpmf": "RAPT_SSCOFPMF",
+    "smstateen": "RAPT_SMSTATEEN",
+    "ssstateen": "RAPT_SMSTATEEN",
+    "h": "RAPT_H_EXTENSION",
+    "shcounterenw": "RAPT_H_EXTENSION",
+    "shvstvala": "RAPT_H_EXTENSION",
+    "shtvala": "RAPT_H_EXTENSION",
+    "shvstvecd": "RAPT_H_EXTENSION",
+    "shvsatpa": "RAPT_H_EXTENSION",
+    "shgatpa": "RAPT_H_EXTENSION",
+}
+RVA23_XLEN_ANY_MACROS = {"zawrs", "sscofpmf", "smstateen", "ssstateen"}
 RVA23_VECTOR_MACROS = {"zvbb": "RAPT_ZVBB", "zvfhmin": "RAPT_ZVFHMIN", "zvkt": "RAPT_ZVKT",
                       "zicclsm": "RAPT_ZICCLSM_VECTOR"}
 
@@ -36,7 +57,8 @@ def extend_isa(isa, extensions):
 
 
 def rva23_extensions():
-    return sorted(set(RVA23_BASE_EXTENSIONS) | RVA23_SCALAR_MACROS.keys() | RVA23_VECTOR_MACROS.keys())
+    return sorted(set(RVA23_BASE_EXTENSIONS) | set(RVA23_SUPERVISOR_EXTENSIONS)
+                  | RVA23_SCALAR_MACROS.keys() | RVA23_VECTOR_MACROS.keys())
 
 
 def update_dtb(dtb, extensions):
@@ -109,11 +131,13 @@ def main():
         geometry = [constant(defines[name], defines)
                     for name in ("RAPT_VLEN", "RAPT_VRF_BANK_BITS", "RAPT_VRF_BANKS")]
         extensions = set(RVA23_BASE_EXTENSIONS) if "RAPT_RVA23U64" in names else set()
+        if "RAPT_RVA23S64" in names:
+            extensions.update(RVA23_SUPERVISOR_EXTENSIONS)
         if enabled:
             extensions.update(extension for extension, macro in RVA23_VECTOR_MACROS.items()
                               if macro in names)
         extensions.update(extension for extension, macro in RVA23_SCALAR_MACROS.items()
-                          if macro in names and (xlen == 64 or extension == "zawrs"))
+                          if macro in names and (xlen == 64 or extension in RVA23_XLEN_ANY_MACROS))
         if args.isa:
             if enabled:
                 extensions.add("v")

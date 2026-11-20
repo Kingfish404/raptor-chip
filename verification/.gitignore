@@ -1,5 +1,8 @@
 !/riscof/raptor-rv32gc/
+!/riscof/raptor-rv64gc/
 !/riscof/raptor-rv64imac/
+!/riscof/raptor-rv64s/
+!/riscof/raptor-rva23s64/
 !/scripts/*
 !*.yaml
 !*.json
@@ -37,3 +40,4 @@ obj_*
 # Keep maintained guides; archive task reviews and run reports outside Git.
 *.md
 !README.md
+!/riscof/raptor-*/README.md

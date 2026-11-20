@@ -20,6 +20,10 @@ sync
 test "$(cat /var/tmp/raptor-root-check)" = raptor-distro-root-write
 findmnt -n -o SOURCE,FSTYPE /
 ip -brief address
+if grep -Eq '^isa[[:space:]]*:[[:space:]]*(rv(32|64)[a-z]*h([^a-z0-9]|$)|.*_h(_|$))' /proc/cpuinfo; then
+    test -c /dev/kvm
+    echo RAPTOR_KVM_DEV_PASS
+fi
 /usr/local/lib/raptor-smp-check "$(cat /etc/raptor-harts)"
 echo RAPTOR_DISTRO_CHECK_PASS
 trap - EXIT

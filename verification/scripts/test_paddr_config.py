@@ -86,10 +86,20 @@ class PaddrConfigTest(unittest.TestCase):
                     fields = result.stdout.split()
                     expected = preset.parent.name.startswith("default") or preset.parent.name == "large"
                     self.assertEqual(list(map(int, fields[2:6])), [int(expected), 128, 64, 2])
-                    required = {"b", "zawrs", "zfa", "ssnpm", "zvbb", "zvfhmin", "zvkt", "zicclsm"}
+                    required = {"b", "h", "zawrs", "zfa", "ssnpm", "smnpm", "svnapot",
+                                "sscofpmf", "smstateen", "ssstateen", "shgatpa", "svvptc",
+                                "zvbb", "zvfhmin", "zvkt", "zicclsm"}
                     advertised = set(fields[6].split(","))
                     if xlen == 64 and expected:
                         self.assertTrue(required <= advertised)
+                        no_h = set(subprocess.check_output(
+                            command + ["-DRAPT_NO_H_EXTENSION"], text=True).split()[6].split(","))
+                        self.assertFalse(no_h & {"h", "shgatpa", "shvsatpa"})
+                        self.assertTrue({"svnapot", "sscofpmf", "smstateen", "smnpm"} <= no_h)
+                        user_only = set(subprocess.check_output(
+                            command + ["-DRAPT_NO_RVA23S64"], text=True).split()[6].split(","))
+                        self.assertFalse(user_only & {"h", "svnapot", "sscofpmf", "smstateen"})
+                        self.assertTrue({"b", "zawrs", "zfa", "ssnpm", "zvbb"} <= user_only)
                         legacy = subprocess.check_output(command + ["-DRAPT_NO_RVA23U64"], text=True)
                         self.assertEqual(legacy.split()[2:], ["1", "128", "64", "2", "-"])
                     else:

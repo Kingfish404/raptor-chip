@@ -47,10 +47,12 @@ extern void (*ref_difftest_memcpy)(paddr_t addr, void *buf, size_t n, bool direc
 #define VIRTIO_MMIO_CONFIG_SEG_MAX 0x10cu
 
 /* Advertised block features.  VIRTIO_F_VERSION_1 (bit 32) lives in feature
- * selector 1, bit 0.  NetBSD's virtio driver only drives a modern (MMIO v2)
- * device when that bit is set, so advertising an MMIO version of 2 with an
- * empty feature set makes the root disk fail to attach. */
+ * selector 1, bit 0; VIRTIO_F_ACCESS_PLATFORM (bit 33) lives in selector 1,
+ * bit 1 so unmodified mainline Linux applies Zicbom DMA cache maintenance
+ * when DT declares dma-noncoherent. */
 #define VIRTIO_F_VERSION_1 1u
+#define VIRTIO_F_ACCESS_PLATFORM (1u << 1)
+#define VIRTIO_BLK_FEATURES_HIGH (VIRTIO_F_VERSION_1 | VIRTIO_F_ACCESS_PLATFORM)
 #define VIRTIO_BLK_F_SIZE_MAX (1u << 1)
 #define VIRTIO_BLK_F_SEG_MAX (1u << 2)
 #define VIRTIO_BLK_FEATURES_LOW (VIRTIO_BLK_F_SIZE_MAX | VIRTIO_BLK_F_SEG_MAX)
@@ -177,6 +179,16 @@ static bool guest_mem_write(uint64_t addr, const void *buf, size_t len)
             ref_difftest_memcpy((paddr_t)addr, host, len, DIFFTEST_TO_REF);
     }
     return true;
+}
+
+bool dma_guest_read(uint64_t addr, void *buf, size_t len)
+{
+    return guest_mem_read(addr, buf, len);
+}
+
+bool dma_guest_write(uint64_t addr, const void *buf, size_t len)
+{
+    return guest_mem_write(addr, buf, len);
 }
 
 static bool read_desc(uint16_t idx, struct virtq_desc_host *desc)
@@ -419,8 +431,8 @@ static uint32_t read_reg32(paddr_t offset)
     case VIRTIO_MMIO_VENDOR_ID:
         return 0x554d4551u;
     case VIRTIO_MMIO_DEVICE_FEATURES:
-        return blk.device_features_sel == 1 ? VIRTIO_F_VERSION_1
-                                            : VIRTIO_BLK_FEATURES_LOW;
+        return blk.device_features_sel == 0 ? VIRTIO_BLK_FEATURES_LOW
+             : (blk.device_features_sel == 1 ? VIRTIO_BLK_FEATURES_HIGH : 0u);
     case VIRTIO_MMIO_QUEUE_NUM_MAX:
         return blk.queue_sel == 0 ? VIRTIO_QUEUE_NUM_MAX : 0u;
     case VIRTIO_MMIO_QUEUE_READY:

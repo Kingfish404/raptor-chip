@@ -235,7 +235,8 @@ module rapt_vpu_memory #(
     end
     // Debug/interrupt events must never disappear as a VL trim.
     trim_fault = fof && index_q != 0
-        && (fault_cause == XLEN'(4) || fault_cause == XLEN'(5) || fault_cause == XLEN'(13));
+        && (fault_cause == XLEN'(4) || fault_cause == XLEN'(5)
+            || fault_cause == XLEN'(13) || fault_cause == XLEN'(21));
   end
 
   always_ff @(posedge clock) begin

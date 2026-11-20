@@ -124,6 +124,10 @@ module rapt_rou #(
     /* verilator lint_off UNUSEDSIGNAL */
     output logic pmu_rob_full,
     /* verilator lint_on UNUSEDSIGNAL */
+`ifdef RAPT_H_EXTENSION
+    input logic [XLEN-1:2] ifetch_gpf_gpa_i,
+    input logic ifetch_gpf_ptw_i,
+`endif
 
     input reset
 );
@@ -271,7 +275,10 @@ module rapt_rou #(
   wire [QBits-1:0] uoq_tail = QBits'(skid_start);
   /* verilator lint_on UNUSEDSIGNAL */
 `endif
-  typedef rnu_rou.slot_t RenameSlotT;
+  typedef logic [PcW-1:0] rename_pc_t;
+  typedef logic [XLEN-1:0] rename_word_t;
+  typedef logic [PLEN-1:0] rename_phys_t;
+  `RAPT_RENAME_SLOT_TYPE(RenameSlotT, UopT, rename_pc_t, rename_word_t, rename_phys_t)
   RenameSlotT skid_slot[RenameWidth];
   logic skid_checkpoint_valid[RenameWidth];
   logic [CheckpointBits-1:0] skid_checkpoint[RenameWidth];
@@ -325,6 +332,18 @@ module rapt_rou #(
   logic [RBits-1:0] oldest_exception_owner, exception_next_owner;
   logic [5:0] oldest_exception_cause, exception_next_cause;
   logic [XLEN-1:0] oldest_exception_tval, exception_next_tval;
+`ifdef RAPT_H_EXTENSION
+  logic [XLEN-1:2] oldest_exception_gpaddr, exception_next_gpaddr;
+  logic oldest_exception_gptw, exception_next_gptw;
+  logic oldest_exception_explicit_guest, exception_next_explicit_guest;
+  function automatic logic is_hmem_trap_cause(input logic [5:0] c);
+    return c == 6'(`RAPT_CAUSE_LOAD_MISALIGNED) || c == 6'(`RAPT_CAUSE_LOAD_ACC_FAULT)
+        || c == 6'(`RAPT_CAUSE_STORE_MISALIGNED) || c == 6'(`RAPT_CAUSE_STORE_ACC_FAULT)
+        || c == 6'(`RAPT_CAUSE_LOAD_PAGE_FAULT) || c == 6'(`RAPT_CAUSE_STORE_PAGE_FAULT)
+        || c == 6'(`RAPT_CAUSE_LOAD_GUEST_PAGE_FAULT)
+        || c == 6'(`RAPT_CAUSE_STORE_GUEST_PAGE_FAULT);
+  endfunction
+`endif
   // CBO is serializing and has one live owner. Retain its translated physical
   // block address for the inclusive L2 directory.
   logic [XLEN-1:6] cbo_block_q;
@@ -531,7 +550,16 @@ module rapt_rou #(
     return u.execute.branch.conditional || u.execute.branch.jump || u.execute.branch.indirect;
   endfunction
   function automatic logic fetch_csr_changes(input logic [11:0] addr);
-    return addr == `RAPT_CSR_SATP___ || addr == `RAPT_CSR_PMPCFG0 || addr ==
+    return addr == `RAPT_CSR_SATP___ || addr ==
+    `RAPT_CSR_MENVCFG
+    || addr == `RAPT_CSR_VSATP____ || addr ==
+    `RAPT_CSR_HGATP
+    || addr ==
+    `RAPT_CSR_HENVCFG
+    || addr == `RAPT_CSR_HSTATUS || addr ==
+    `RAPT_CSR_VSSTATUS
+    || (addr >= `RAPT_CSR_HSTATEEN0 && addr <= `RAPT_CSR_HSTATEEN3) || addr == `RAPT_CSR_PMPCFG0 ||
+        addr ==
     `RAPT_CSR_PMPCFG1
     || addr == `RAPT_CSR_PMPCFG2 || addr ==
     `RAPT_CSR_PMPCFG3
@@ -1356,6 +1384,11 @@ module rapt_rou #(
     exception_next_owner = oldest_exception_owner;
     exception_next_cause = oldest_exception_cause;
     exception_next_tval  = oldest_exception_tval;
+`ifdef RAPT_H_EXTENSION
+    exception_next_gpaddr = oldest_exception_gpaddr;
+    exception_next_gptw = oldest_exception_gptw;
+    exception_next_explicit_guest = oldest_exception_explicit_guest;
+`endif
     for (int s = 0; s < NumSlots; s++) begin
       if (deq_fire[s] && allocation[s].uop.trap && (!exception_next_valid || older_rob_owner(
               rob_alloc[s], exception_next_owner
@@ -1364,6 +1397,15 @@ module rapt_rou #(
         exception_next_owner = rob_alloc[s];
         exception_next_cause = allocation[s].uop.cause;
         exception_next_tval  = `RAPT_UOP_TVAL(XLEN, allocation[s].uop);
+`ifdef RAPT_H_EXTENSION
+        exception_next_gpaddr =
+            (allocation[s].uop.cause == 6'(`RAPT_CAUSE_INSTR_GUEST_PAGE_FAULT))
+            ? ifetch_gpf_gpa_i : '0;
+        exception_next_gptw =
+            (allocation[s].uop.cause == 6'(`RAPT_CAUSE_INSTR_GUEST_PAGE_FAULT))
+            && ifetch_gpf_ptw_i;
+        exception_next_explicit_guest = 1'b0;
+`endif
       end
     end
     for (int p = 0; p < NumCompletions; p++) begin
@@ -1376,6 +1418,18 @@ module rapt_rou #(
         exception_next_owner = completion[p].dest;
         exception_next_cause = completion[p].cause;
         exception_next_tval  = completion[p].tval;
+`ifdef RAPT_H_EXTENSION
+        if (completion[p].cause == 6'(`RAPT_CAUSE_INSTR_GUEST_PAGE_FAULT)) begin
+          exception_next_gpaddr = ifetch_gpf_gpa_i;
+          exception_next_gptw = ifetch_gpf_ptw_i;
+          exception_next_explicit_guest = 1'b0;
+        end else begin
+          exception_next_gpaddr = completion[p].result[XLEN-3:0];
+          exception_next_gptw = completion[p].result[XLEN-2];
+          exception_next_explicit_guest = (p == int'(Cfg.integer_system_port))
+              && is_hmem_trap_cause(completion[p].cause) && completion[p].result[XLEN-1];
+        end
+`endif
       end
     end
   end
@@ -1385,6 +1439,11 @@ module rapt_rou #(
     oldest_exception_owner <= exception_next_owner;
     oldest_exception_cause <= exception_next_cause;
     oldest_exception_tval  <= exception_next_tval;
+`ifdef RAPT_H_EXTENSION
+    oldest_exception_gpaddr <= exception_next_gpaddr;
+    oldest_exception_gptw <= exception_next_gptw;
+    oldest_exception_explicit_guest <= exception_next_explicit_guest;
+`endif
     if (reset || flush_pipe) oldest_exception_valid <= 1'b0;
   end
   always_ff @(posedge clock) begin
@@ -1936,7 +1995,24 @@ module rapt_rou #(
   assign rou_csr.mret = !recieved_trap && !commit_trap && commit_uop[0].execute.sys.mret;
   assign rou_csr.sret = !recieved_trap && !commit_trap && commit_uop[0].execute.sys.sret;
   assign rou_csr.trap = recieved_trap || commit_trap;
-  assign rou_csr.tval = recieved_trap ? '0 : commit_trap && oldest_exception_valid ? oldest_exception_tval : '0;
+  assign rou_csr.tval = recieved_trap ? '0
+      : commit_trap && oldest_exception_valid ? oldest_exception_tval : '0;
+`ifdef RAPT_H_EXTENSION
+  wire oldest_is_guest_pf = !recieved_trap && commit_trap && oldest_exception_valid
+      && (oldest_exception_cause == 6'(`RAPT_CAUSE_INSTR_GUEST_PAGE_FAULT)
+          || oldest_exception_cause == 6'(`RAPT_CAUSE_LOAD_GUEST_PAGE_FAULT)
+          || oldest_exception_cause == 6'(`RAPT_CAUSE_STORE_GUEST_PAGE_FAULT));
+  assign rou_csr.tval2 = oldest_is_guest_pf ? {2'b00, oldest_exception_gpaddr} : '0;
+  // Implicit VS-stage PTE read (64-bit load pseudoinstruction 0x3000).
+  assign rou_csr.htinst = (oldest_is_guest_pf && oldest_exception_gptw
+      && (|oldest_exception_gpaddr)) ? XLEN'(32'h3000) : '0;
+  assign rou_csr.explicit_guest_trap = !recieved_trap && commit_trap && oldest_exception_valid
+      && oldest_exception_explicit_guest;
+`else
+  assign rou_csr.tval2 = '0;
+  assign rou_csr.htinst = '0;
+  assign rou_csr.explicit_guest_trap = 1'b0;
+`endif
   assign rou_csr.cause = recieved_trap ? trap_cause
       : oldest_exception_valid ? {oldest_exception_cause[5], {(XLEN-6){1'b0}}, oldest_exception_cause[4:0]} : '0;
   assign rou_csr.valid = recieved_trap || (commit_fire[0] && !debug_ebreak
@@ -1948,6 +2024,8 @@ module rapt_rou #(
   assign rou_csr.retire_count = (commit_fire[0] && (commit_trap
       || commit_uop[0].execute.sys.ecall || commit_uop[0].execute.sys.ebreak))
       ? '0 : RetireBits'(commit_count);
+  assign rou_csr.fence_retired = commit_fire[0] && !recieved_trap && !commit_trap && !debug_ebreak
+      && commit_uop[0].execute.sys.kind == rapt_pkg::SYS_FENCE && !serial_imm[0];
   assign rou_lsu.store = store_commit_valid && !rob_entry[store_commit].trap;
   assign rou_lsu.dest = store_commit;
 `ifndef SYNTHESIS
@@ -2141,7 +2219,11 @@ endmodule
 // Partial consumption compacts the remaining suffix; refill is accepted only
 // when the old batch is fully consumed, preserving an ordered prefix.
 module rapt_operand_stage #(
-    parameter int Width = rapt_pkg::RenameWidth
+    parameter int Width = rapt_pkg::RenameWidth,
+    parameter type UopT = rapt_pkg::uop_t,
+    parameter int XLEN = `RAPT_XLEN,
+    parameter int PLEN = `RAPT_PHY_LEN,
+    parameter int CheckpointBits = rapt_pkg::BranchCheckpointBits
 ) (
     input logic clock,
     reset,
@@ -2151,11 +2233,19 @@ module rapt_operand_stage #(
 );
   localparam int CountBits = $clog2(Width + 1);
   logic [CountBits-1:0] count;
-  // Use the interface's type/parameter, not a hierarchical signal in $bits.
-  typedef upstream.slot_t SlotT;
+  typedef logic [`RAPT_PC_BITS_OF(XLEN)-1:0] slot_pc_t;
+  typedef logic [XLEN-1:0] slot_word_t;
+  typedef logic [PLEN-1:0] slot_phys_t;
+  `RAPT_RENAME_SLOT_TYPE(SlotT, UopT, slot_pc_t, slot_word_t, slot_phys_t)
   SlotT slot_q[Width];
   logic checkpoint_valid_q[Width];
-  logic [upstream.CheckpointBits-1:0] checkpoint_q[Width];
+  logic [CheckpointBits-1:0] checkpoint_q[Width];
+`ifndef SYNTHESIS
+  if (!(upstream.CheckpointBits == CheckpointBits
+      && downstream.CheckpointBits == CheckpointBits)) begin : g_invalid_checkpoint_bits
+    $error("Invalid rapt_operand_stage checkpoint width");
+  end
+`endif
   int consumed, accepted;
   assign downstream.empty = upstream.empty && count == 0;
   for (genvar s = 0; s < Width; s++) begin : g_output

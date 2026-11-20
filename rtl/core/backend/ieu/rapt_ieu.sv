@@ -44,6 +44,10 @@ module rapt_ieu #(
     input logic vector_issue_ready,
     output IssueT vector_issue,
 `endif
+`ifdef RAPT_H_EXTENSION
+    input logic hmem_issue_ready,
+    output IssueT hmem_issue,
+`endif
     input logic integer_system_issue_enable,
 `ifdef RAPT_ZAWRS
     input logic reservation_valid,
@@ -107,6 +111,9 @@ module rapt_ieu #(
 `else
     integer_issue_enable[IntegerSystemPort] = integer_system_issue_enable;
 `endif
+`ifdef RAPT_H_EXTENSION
+    integer_issue_enable[IntegerSystemPort] &= hmem_issue_ready;
+`endif
 `ifdef RAPT_ZAWRS
     integer_issue_enable[IntegerSystemPort] &= !wrs_active;
 `endif
@@ -122,6 +129,15 @@ module rapt_ieu #(
   always_comb begin
     vector_issue = alq_execute[IntegerSystemPort];
     vector_issue.valid &= vector_issue.uop.execute.vector;
+  end
+`endif
+`ifdef RAPT_H_EXTENSION
+  always_comb begin
+    hmem_issue = alq_execute[IntegerSystemPort];
+    hmem_issue.valid &= !hmem_issue.uop.trap && hmem_issue.uop.execute.sys.valid
+        && rapt_pkg::is_hmem_inst(
+        hmem_issue.uop.imm
+    );
   end
 `endif
 
@@ -262,12 +278,12 @@ module rapt_ieu #(
       localparam int WrsWaitCycles = 1024;
       IssueT wrs_issue_q;
       logic wrs_start, wrs_wakeup, wrs_timeout, wrs_stop, wrs_cancel;
-      logic wrs_short_q, wrs_tw_q;
+      logic wrs_short_q, wrs_tw_q, wrs_vtw_q;
       logic [$clog2(WrsWaitCycles)-1:0] wrs_count;
       assign wrs_wakeup = !reservation_valid || csr_bcast.wrs_irq_pending || wrs_debug_wakeup;
       assign wrs_start = alq_execute[p].valid && !alq_execute[p].uop.trap
           && alq_execute[p].uop.execute.sys.kind == rapt_pkg::SYS_WRS && !wrs_wakeup;
-      assign wrs_timeout = (wrs_short_q || wrs_tw_q) && (&wrs_count);
+      assign wrs_timeout = (wrs_short_q || wrs_tw_q || wrs_vtw_q) && (&wrs_count);
       assign wrs_stop = wrs_wakeup || wrs_timeout;
       assign wrs_cancel = cmu_bcast.flush_pipe
           || (cancel_valid && `RAPT_ROB_YOUNGER(wrs_issue_q.dest, cancel_owner, cancel_head));
@@ -280,8 +296,10 @@ module rapt_ieu #(
           wrs_short_q <= alq_execute[p].uop.imm[24];
           wrs_tw_q <= !alq_execute[p].uop.imm[24]
               && csr_bcast.priv != `RAPT_PRIV_M && csr_bcast.tw;
+          wrs_vtw_q <= !alq_execute[p].uop.imm[24]
+              && csr_bcast.virt && !csr_bcast.tw && csr_bcast.hstatus_vtw;
           wrs_count <= '0;
-        end else if (wrs_active && !wrs_stop && (wrs_short_q || wrs_tw_q)) begin
+        end else if (wrs_active && !wrs_stop && (wrs_short_q || wrs_tw_q || wrs_vtw_q)) begin
           wrs_count <= wrs_count + 1'b1;
         end
       end
@@ -292,17 +310,26 @@ module rapt_ieu #(
         if (wrs_active) begin
           scalar_issue = wrs_issue_q;
           scalar_issue.valid = wrs_stop && !wrs_cancel && !reset;
-          scalar_issue.uop.trap = wrs_timeout && wrs_tw_q && !wrs_wakeup;
-          scalar_issue.uop.cause = scalar_issue.uop.trap ? `RAPT_CAUSE_ILLEGAL_INST : '0;
+          scalar_issue.uop.trap = wrs_timeout && (wrs_tw_q || wrs_vtw_q) && !wrs_wakeup;
+          scalar_issue.uop.cause = !scalar_issue.uop.trap ? '0
+              : (wrs_tw_q ? `RAPT_CAUSE_ILLEGAL_INST : `RAPT_CAUSE_VIRT_INST);
         end else if (wrs_start) scalar_issue.valid = 1'b0;
 `endif
 `ifdef RAPT_V_EXTENSION
         scalar_issue.valid &= !scalar_issue.uop.execute.vector;
 `endif
+`ifdef RAPT_H_EXTENSION
+        scalar_issue.valid &= !(!scalar_issue.uop.trap && scalar_issue.uop.execute.sys.valid
+            && rapt_pkg::is_hmem_inst(scalar_issue.uop.imm));
+`endif
       end
       always_comb begin
         wb_integer_raw[p] = '0;
         `RAPT_SYSTEM_COMPLETION_COPY(wb_integer_raw[p], result)
+`ifdef RAPT_H_EXTENSION
+        // A trapping result field carries guest-fault metadata to the ROU.
+        if (wb_integer_raw[p].trap) wb_integer_raw[p].result = '0;
+`endif
       end
       rapt_ieu_pipe_alu_csr #(
           .CompletionT(system_result_t),
@@ -321,6 +348,9 @@ module rapt_ieu #(
       always_comb begin
         wb_integer_raw[p] = '0;
         `RAPT_ALU_COMPLETION_COPY(wb_integer_raw[p], result)
+`ifdef RAPT_H_EXTENSION
+        if (wb_integer_raw[p].trap) wb_integer_raw[p].result = '0;
+`endif
       end
       rapt_ieu_pipe_alu #(
           .CompletionT(alu_result_t),
@@ -337,6 +367,9 @@ module rapt_ieu #(
   always_comb begin
     wb_branch = '0;
     `RAPT_BRANCH_COMPLETION_COPY(wb_branch, branch_result)
+`ifdef RAPT_H_EXTENSION
+    if (wb_branch.trap) wb_branch.result = '0;
+`endif
   end
   always_comb begin
     exu_wb_mul = '0;

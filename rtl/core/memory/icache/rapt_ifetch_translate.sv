@@ -20,6 +20,15 @@ module rapt_ifetch_translate #(
     sbe,
     input logic [1:0] priv,
     input logic [`RAPT_CSR_SATP_PPN_W-1:0] satp_ppn,
+`ifdef RAPT_H_EXTENSION
+    input logic guest_en,
+    input logic vs_en,
+    input logic [`RAPT_CSR_SATP_PPN_W-1:0] vsatp_ppn,
+    input logic g_en,
+    input logic [`RAPT_CSR_SATP_PPN_W-1:0] hgatp_ppn,
+    input logic vs_pbmte,
+    input logic g_mxr,
+`endif
     pmp_state_if.in pmp_state,
     // The cache may lend its idle checker to this slow-path adapter.
     output logic [XLEN-1:0] pmp_addr_o,
@@ -33,6 +42,10 @@ module rapt_ifetch_translate #(
     output logic [1:0] response_pbmt,
     output logic response_fault,
     output logic [XLEN-1:0] response_cause,
+`ifdef RAPT_H_EXTENSION
+    output logic [XLEN-1:2] response_gpa,
+    output logic response_gptw,
+`endif
     output logic bus_arvalid,
     output logic [XLEN-1:0] bus_araddr,
     input logic bus_arready,
@@ -57,6 +70,16 @@ module rapt_ifetch_translate #(
   logic [XLEN-1:10] ptag;
   logic [6:0] pte;
   logic [1:0] pbmt;
+`ifdef RAPT_H_EXTENSION
+  logic guest_en_q, vs_en_q, g_en_q, vs_pbmte_q, g_mxr_q;
+  logic [`RAPT_CSR_SATP_PPN_W-1:0] vsatp_ppn_q, hgatp_ppn_q;
+  logic ptw_guest_fault, ptw_fault_ptw;
+  logic [XLEN-1:2] ptw_fault_gpa;
+  wire [2:0] unused_result_g_perm;
+  wire vs_bare_q = guest_en_q && !vs_en_q;
+`else
+  wire vs_bare_q = 1'b0;
+`endif
   wire pmp_fault, pmp_read_fault;
   wire [XLEN-1:12] unused_result_vtag;
   wire [1:0] unused_result_level;
@@ -118,6 +141,19 @@ module rapt_ifetch_translate #(
       .pbmte(pbmte_q),
       .sbe(sbe_q),
       .req_store(1'b0),
+`ifdef RAPT_H_EXTENSION
+      .guest_en(guest_en_q),
+      .vs_en(vs_en_q),
+      .vsatp_ppn(vsatp_ppn_q),
+      .g_en(g_en_q),
+      .hgatp_ppn(hgatp_ppn_q),
+      .vs_priv_s(priv_q == `RAPT_PRIV_S),
+      .vs_sum(1'b0),
+      .vs_mxr(1'b0),
+      .vs_pbmte(vs_pbmte_q),
+      .g_mxr(g_mxr_q),
+      .req_exec(1'b1),
+`endif
       .bus_arvalid(ptw_arvalid),
       .bus_araddr(bus_araddr),
       .bus_arready(bus_arready && bus_arvalid),
@@ -126,6 +162,12 @@ module rapt_ifetch_translate #(
       .done(ptw_done),
       .fault(ptw_fault),
       .access_fault(ptw_access_fault),
+`ifdef RAPT_H_EXTENSION
+      .guest_fault(ptw_guest_fault),
+      .fault_gpa(ptw_fault_gpa),
+      .fault_ptw(ptw_fault_ptw),
+      .result_g_perm(unused_result_g_perm),
+`endif
       .result_ptag(ptag),
       .result_vtag(unused_result_vtag),
       .result_pte(pte),
@@ -133,6 +175,11 @@ module rapt_ifetch_translate #(
       .result_level(unused_result_level),
       .busy(ptw_busy)
   );
+
+  wire walk_bus_fault = ptw_busy && (pte_access_fault || (bus_rvalid && bus_rerror));
+  wire fetch_priv_denied = (priv_q == `RAPT_PRIV_U && !pte[3])
+      || (priv_q == `RAPT_PRIV_S && pte[3]);
+  wire walk_leaf_denied = ptw_done && !vs_bare_q && (!pte[2] || !pte[5] || fetch_priv_denied);
 
   always_ff @(posedge clock) begin
     if (reset) begin
@@ -146,6 +193,17 @@ module rapt_ifetch_translate #(
       response_pbmt <= 0;
       response_fault <= 0;
       response_cause <= 0;
+`ifdef RAPT_H_EXTENSION
+      guest_en_q <= 0;
+      vs_en_q <= 0;
+      g_en_q <= 0;
+      vs_pbmte_q <= 0;
+      g_mxr_q <= 0;
+      vsatp_ppn_q <= '0;
+      hgatp_ppn_q <= '0;
+      response_gpa <= '0;
+      response_gptw <= 0;
+`endif
     end else begin
       case (state)
         IDLE:
@@ -155,6 +213,17 @@ module rapt_ifetch_translate #(
           root_q <= satp_ppn;
           pbmte_q <= pbmte;
           sbe_q <= sbe;
+`ifdef RAPT_H_EXTENSION
+          guest_en_q <= guest_en;
+          vs_en_q <= vs_en;
+          vsatp_ppn_q <= vsatp_ppn;
+          g_en_q <= g_en;
+          hgatp_ppn_q <= hgatp_ppn;
+          vs_pbmte_q <= vs_pbmte;
+          g_mxr_q <= g_mxr;
+          response_gpa <= '0;
+          response_gptw <= 0;
+`endif
           response_paddr <= rapt_pkg::canonical_paddr(request_vaddr);
           response_pbmt <= 0;
           response_fault <= 0;
@@ -163,15 +232,23 @@ module rapt_ifetch_translate #(
         end
         START: state <= kill ? REPLY : WALK;
         WALK: begin
-          if (kill || ptw_access_fault || (ptw_busy && (pte_access_fault || (bus_rvalid && bus_rerror)))) begin
+          if (kill || ptw_access_fault || walk_bus_fault) begin
             response_fault <= 1;
             response_cause <= `RAPT_CAUSE_INSTR_ACC_FAULT;
             state <= DRAIN;
-          end else if (ptw_fault || (ptw_done && (!pte[2] || !pte[5]
-              || (priv_q == `RAPT_PRIV_U && !pte[3])
-              || (priv_q == `RAPT_PRIV_S && pte[3])))) begin
+          end else if (ptw_fault || walk_leaf_denied) begin
             response_fault <= 1;
+`ifdef RAPT_H_EXTENSION
+            if (ptw_fault && ptw_guest_fault) begin
+              response_cause <= `RAPT_CAUSE_INSTR_GUEST_PAGE_FAULT;
+              response_gpa <= ptw_fault_gpa;
+              response_gptw <= ptw_fault_ptw;
+            end else begin
+              response_cause <= `RAPT_CAUSE_INSTR_PAGE_FAULT;
+            end
+`else
             response_cause <= `RAPT_CAUSE_INSTR_PAGE_FAULT;
+`endif
             state <= REPLY;
           end else if (ptw_done) begin
             response_fault <= !rapt_pkg::tlb_ppn_fits(ptag);
@@ -182,7 +259,8 @@ module rapt_ifetch_translate #(
         end
         CHECK: begin
           response_fault <= response_fault || target_access_fault;
-          response_cause <= (response_fault || target_access_fault) ? `RAPT_CAUSE_INSTR_ACC_FAULT : XLEN'(0);
+          response_cause <= (response_fault || target_access_fault)
+              ? `RAPT_CAUSE_INSTR_ACC_FAULT : XLEN'(0);
           state <= REPLY;
         end
         DRAIN: if (!ptw_busy) state <= REPLY;

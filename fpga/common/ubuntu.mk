@@ -37,13 +37,13 @@ UBUNTU_BITSTREAM_TARGETS := ubuntu-info ubuntu-bitstream ubuntu-load
 UBUNTU_TARGETS := ubuntu-kernel ubuntu-rootfs ubuntu-bundle ubuntu-check ubuntu-serve \
 	ubuntu-boot ubuntu-unserve
 
-# Ubuntu runs on the RV64 DDR SoC; RAPT_CONFIG may be overridden.
-$(UBUNTU_BITSTREAM_TARGETS) $(UBUNTU_TARGETS): RAPT_CONFIG = middle-cache
+# Ubuntu 26.10 requires RVA23 on the RV64 DDR SoC; RAPT_CONFIG may be overridden.
+$(UBUNTU_BITSTREAM_TARGETS) $(UBUNTU_TARGETS): RAPT_CONFIG = default
 $(UBUNTU_BITSTREAM_TARGETS): override XLEN := 64
 $(UBUNTU_BITSTREAM_TARGETS): override MEMORY := ddr
 
 # ============================================================================
-# Ubuntu 24.04 (RV64, DDR, Ethernet, root filesystem over NFS)
+# Ubuntu RVA23 (RV64, DDR, Ethernet, root filesystem over NFS)
 # ============================================================================
 
 ubuntu-info: ## Print the Ubuntu bitstream configuration and output directory
