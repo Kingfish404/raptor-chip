@@ -105,7 +105,10 @@ module rapt_l1d #(
 
   l1d_state_t l1d_state;
 `ifdef RAPT_V_EXTENSION
-  wire vector_probe = lsu_l1d.rprobe;
+  // Capture rprobe on IDLE load admission alongside l1d_addr/l1d_ralu: every
+  // consumer of vector_probe runs in LD_A after admission.
+  logic l1d_rprobe_q;
+  wire vector_probe = l1d_rprobe_q;
   wire vector_write_precise = lsu_l1d.wprecise;
 `else
   wire vector_probe = 1'b0;
@@ -505,9 +508,12 @@ module rapt_l1d #(
   // data in a non-`store_hit_way` slot.
   logic                    l1d_inv_all_ways;
   logic [     L1dTagW-1:0] l1d_tag_u;
+  // Dedicated tag vs data set/word registers partition placement fanout cleanly
+  // between u_tags and u_data without synthesis fanout pragmas.
   logic [     L1D_LEN-1:0] l1d_idx;
-  // Bound the word-selector fanout into the independently placed data banks.
-  (* max_fanout = 16 *) logic [L1D_LINE_LEN-1:0] l1d_off;
+  logic [L1D_LINE_LEN-1:0] l1d_off;
+  logic [     L1D_LEN-1:0] l1d_data_idx;
+  logic [L1D_LINE_LEN-1:0] l1d_data_off;
   logic [     L1dWayW-1:0] l1d_way;  // which way for pending l1d_update
   logic [     L1dWayW-1:0] ld_fill_way_r;  // registered fill way for load miss
   logic [    L1D_SIZE-1:0] d_replace_bit;  // random replacement toggle per set (2-way only)
@@ -536,7 +542,7 @@ module rapt_l1d #(
   logic [L1D_LEN-1:0] tag_store_idx;
   logic [L1dTagW-1:0] tag_store_tag;
   logic [L1dTagW-1:0] wb_tag;
-  logic [L1D_LEN-1:0] tag_inspect_set, tag_load_read_set;
+  logic [L1D_LEN-1:0] tag_inspect_set;
   logic [1:0] tag_inspect_source;
   logic [L1D_LINE_SIZE-1:0] wb_dirty, wb_valid_words;
   logic [L1D_LINE_SIZE*XLEN-1:0] wb_line_data;
@@ -575,7 +581,7 @@ module rapt_l1d #(
   logic tag_probe_fill;
   logic wb_probe_mode;
   logic wb_start;
-  logic store_allocate, wb_store_lookup, wb_store_probe, wb_store_victim;
+  logic store_allocate, wb_store_lookup, wb_store_probe, wb_store_victim, wb_load_lookup;
   logic [L1D_LEN-1:0] wb_probe_set;
   logic [L1dWayW-1:0] wb_probe_way;
   assign store_allocate = cacheable_w && !lsu_l1d.wzero
@@ -596,13 +602,15 @@ module rapt_l1d #(
   // before they install; it keeps the load-side lookup, so only the fill runs.
   assign store_fill_window = MergeStores && l1d_state == LD_A && !mshr_eligible
       && load_mshr_store_match;
+  assign wb_load_lookup = l1d_state == LD_A && !store_fill_window;
   assign wb_fill_probe = tag_probe_fill && mshr_fill_valid
       && (l1d_state == IDLE || l1d_state == LD_CHECK || store_fill_window);
+  // Store and refill victims share tag_store_idx/store_fill_way from registered
+  // ownership (tag_probe_fill), keeping mshr_fill_valid off wb_probe_*.
   assign wb_probe_set = (probe_dirty_request || target_dirty_request) ? line_clear_set
-      : wb_store_lookup ? waddr_idx
-      : wb_fill_probe ? mshr_fill_idx : addr_idx;
+      : wb_load_lookup ? addr_idx : tag_store_idx;
   assign wb_probe_way = (probe_dirty_request || target_dirty_request) ? probe_dirty_selected_way
-      : (wb_store_lookup || wb_fill_probe) ? store_fill_way : ld_fill_way;
+      : wb_load_lookup ? ld_fill_way : store_fill_way;
   // Completed refills choose their victim at installation, not allocation.
   // The writeback queue must own every dirty byte before the array is reused.
   assign wb_fill_victim = wb_fill_probe && (L2Release
@@ -616,13 +624,14 @@ module rapt_l1d #(
   // The L1D is this hart's point of coherence. Only instruction publication
   // needs a global clean; walkers and mismatched attributes select one line.
   // Keep the inclusive L2's established probe/release protocol unchanged.
+  wire wb_global_compat_store = lsu_l1d.wvalid && (!cacheable_w || lsu_l1d.wzero);
+  wire wb_global_compat_load = l1d_state == LD_A && !load_perm_denied_q
+      && (!cacheable_r || l1d_atomic_lock);
   assign wb_global_request = !probe_valid_i && (writeback_drain || |fence_clear_set
       || (lsu_l1d.wvalid && lsu_l1d.wzero)
       || (!TargetedCoherence && !L2Inclusive && cmu_bcast.cbo_inval)
       || ((L2Inclusive || !TargetedCoherence) && (writeback_cbo || coherent_request || coherent_write
-          || ptw_arvalid || (lsu_l1d.wvalid && (!cacheable_w || lsu_l1d.wzero))
-          || (l1d_state == LD_A && !load_perm_denied_q
-              && (!cacheable_r || l1d_atomic_lock)))));
+          || ptw_arvalid || wb_global_compat_store || wb_global_compat_load)));
   assign target_cbo = TargetedCoherence && writeback_cbo && !cbo_done_q;
   assign target_store = lsu_l1d.wvalid && !cacheable_w && rapt_pkg::addr_cacheable(lsu_l1d.waddr);
   assign target_load = l1d_state == LD_A && !load_perm_denied_q && !vector_probe
@@ -662,16 +671,12 @@ module rapt_l1d #(
   // memory before that read. A read into the array needs its way free first.
   logic load_victim_same_line;
   assign load_victim_same_line = load_victim_tag == addr_tag;
-  assign wb_victim_request = l1d_state == LD_A && !load_perm_denied_q && !vector_probe
-      && cacheable_r && !(|load_way_hit) && !store_fill_window
-      && (L2Release ? |wb_valid_words : wb_dirty_any)
-      && ((MergeStores && mshr_eligible) ? wb_tag == addr_tag
-          : (line_read_request || wb_tag != addr_tag));
   assign load_victim_request = l1d_state == LD_A && !load_perm_denied_q && !vector_probe
       && cacheable_r && !(|load_way_hit) && !store_fill_window
       && (L2Release ? load_victim_valid : load_victim_dirty)
       && ((MergeStores && mshr_eligible) ? load_victim_same_line
           : (line_read_request || !load_victim_same_line));
+  assign wb_victim_request = load_victim_request;
   assign wb_drain_request = probe_valid_i ? probe_dirty_request
       : wb_global_request || target_dirty_request || wb_victim_request || wb_store_victim
           || store_resident_dirty || wb_fill_victim;
@@ -708,16 +713,17 @@ module rapt_l1d #(
       || (update_dirty && l1d_update));
   assign wb_hold = probe_wb_hold
       || (WriteBack && L2Release && (wb_victim_request || wb_store_victim || wb_fill_victim));
-  // Only the load victim can be requested in LD_A. Express that state
-  // contract before the shared tag probe so store/refill selection cannot
-  // reach a load's retry/miss response.
+  // Only the load victim (or a store-fill victim during store_fill_window)
+  // can be requested in LD_A. Express that state contract before the shared
+  // tag probe so store selection cannot reach a load's retry/miss response.
   assign load_miss_wb_hold = WriteBack
       && ((dirty_any && (probe_valid_i ? probe_dirty_request
-          : (wb_global_request || load_victim_request)))
+          : (wb_global_request || load_victim_request || wb_fill_victim)))
           || (wb_busy && (L2Inclusive || probe_valid_i || wb_global_request || !mshr_eligible))
           || target_dirty_request || (target_request && wb_busy)
       || wb_state != WB_IDLE || writeback_error
-          || (update_dirty && l1d_update) || (L2Release && load_victim_request));
+          || (update_dirty && l1d_update)
+          || (L2Release && (load_victim_request || wb_fill_victim)));
   `RAPT_SVA_IMPLY(clock, reset, L1D_LOAD_HOLD_EQUIVALENT, l1d_state == LD_A,
                   load_miss_wb_hold == wb_hold)
   // Idle/ready must depend only on registered writeback state and dirty data.
@@ -826,7 +832,7 @@ module rapt_l1d #(
         WB_IDLE:
         if (wb_start) begin
           wb_probe_mode <= probe_dirty_request;
-          wb_release_mode <= L2Release && !probe_dirty_request
+          wb_release_mode <= L2Release && !probe_dirty_request && !target_dirty_request
               && !wb_global_dirty && (wb_victim_request || wb_store_victim || wb_fill_victim);
           wb_targeted <= probe_dirty_request || !wb_global_dirty;
           wb_set <= wb_global_dirty ? '0 : wb_probe_set;
@@ -1026,8 +1032,8 @@ module rapt_l1d #(
       .read_way(wb_way),
       .write_valid(l1d_update && l1d_valid_u),
       .write_blocked(wb_blocked),
-      .write_addr(l1d_idx),
-      .write_word(l1d_off),
+      .write_addr(l1d_data_idx),
+      .write_word(l1d_data_off),
       .write_way(l1d_way),
       .write_data(l1d_data_u),
       .write_strobe(l1d_strobe_u),
@@ -1244,9 +1250,12 @@ module rapt_l1d #(
 `endif
 
   logic ptw_read_error, ptw_bus_error, ptw_access_fault;
+  logic ptw_permission_valid_q, ptw_permission_fault_q;
+  logic ptw_pmp_abort;
   logic pf_load_ptw, pf_store_ptw;
   logic ptw_read_accepted;
   assign ptw_bus_error = l1d_bus.ptw_rvalid && l1d_bus.ptw_rerr;
+  assign ptw_pmp_abort = (l1d_state == PTWAIT) && ptw_permission_valid_q && ptw_permission_fault_q;
   // Check before the XLEN-wide PA cast, including Sv32 PPN[21:20]. Page
   // permission faults retain priority over an unsupported physical target.
   assign ptw_read_error = ptw_bus_error || ptw_access_fault || (ptw_done && !rapt_pkg::tlb_ppn_fits(
@@ -1275,9 +1284,9 @@ module rapt_l1d #(
       .clock(clock),
       .reset(reset),
       .req_valid(ptw_req),
-      // Discard errored PTE payload through the same drain path as cancellation.
+      // Discard errored or PMP-denied PTE walks through the same cancellation path.
       // The requester below reports an access fault only for a live walk.
-      .kill(cmu_bcast.fence_time || cmu_bcast.flush_pipe || ptw_bus_error),
+      .kill(cmu_bcast.fence_time || cmu_bcast.flush_pipe || ptw_bus_error || ptw_pmp_abort),
       .vaddr(ptw_vaddr),
       .satp_ppn(csr_bcast.satp_ppn),
       .mmu_en(ptw_request_context.mmu_en),
@@ -1342,20 +1351,17 @@ module rapt_l1d #(
   assign addr_offset = l1d_addr[L1D_LINE_LEN+L1dOffsetBits-1:L1dOffsetBits];
 
   // The B response follows a completed A hit, an idle cycle, or a miss
-  // wait. It never overlaps LD_A. Writeback inspection borrows the store
-  // lookup while its registered state holds off stores/refills.
-  assign tag_inspect_source = wb_state != WB_IDLE ? 2'd1
-      : (probe_dirty_request || target_dirty_request) ? 2'd2
-      : (wb_store_lookup || wb_fill_probe) ? 2'd1 : 2'd0;
+  // wait. It never overlaps LD_A. Load victims use load_victim_* from the
+  // load port, and probe/target dirty writebacks capture line_clear_set into
+  // wb_set before WB_CAPTURE reads wb_tag/wb_dirty. Only store/refill probes
+  // inspect in WB_IDLE, both already addressed by tag_store_idx/store_fill_way,
+  // severing the clear_line_idx -> probe_dirty_way / mshr_fill_valid -> inspect
+  // double-tag-RAM cascade.
 `ifdef RAPT_LSU_HUM
   `RAPT_SVA_IMPLY(clock, reset, L1D_SHARED_TAG_PHASES, b_armed, l1d_state != LD_A)
-  assign tag_load_read_set = b_armed ? b_idx : addr_idx;
-`else
-  assign tag_load_read_set = addr_idx;
 `endif
-  assign tag_inspect_set = wb_state != WB_IDLE ? wb_set
-      : (probe_dirty_request || target_dirty_request) ? line_clear_set
-      : (wb_store_lookup || wb_fill_probe) ? tag_store_idx : tag_load_read_set;
+  assign tag_inspect_source = 2'd1;
+  assign tag_inspect_set = wb_state != WB_IDLE ? wb_set : tag_store_idx;
 
   rapt_l1d_tags #(
       .L1D_LEN(L1D_LEN),
@@ -1372,7 +1378,7 @@ module rapt_l1d #(
       .inspect_set(tag_inspect_set),
       .inspect_read(wb_state != WB_IDLE),
       .inspect_source(tag_inspect_source),
-      .inspect_way(wb_state == WB_IDLE ? wb_probe_way : wb_way),
+      .inspect_way(wb_state == WB_IDLE ? store_fill_way : wb_way),
       .clean_valid(WriteBack && wb_state == WB_CLEAN),
       .clean_mask('1),
       .inspect_tag(wb_tag),
@@ -1726,7 +1732,7 @@ module rapt_l1d #(
   // bus admission so the live load-address comparator cannot feed AR and
   // return through bus idle into cache control. Ordinary load checks keep
   // their existing capture path; only a new implicit PTE read waits here.
-  logic ptw_permission_valid_q, ptw_permission_fault_q;
+  // Capture that owned permission result before bus admission.
   assign ptw_read_accepted = ptw_arvalid && legacy_arvalid && legacy_rready;
   always_ff @(posedge clock) begin
     if (reset) begin
@@ -1995,6 +2001,9 @@ module rapt_l1d #(
       refill_line <= 0;
       refill_word <= '0;
       demand_done <= 0;
+`ifdef RAPT_V_EXTENSION
+      l1d_rprobe_q <= 1'b0;
+`endif
 `ifdef RAPT_H_EXTENSION
       l1d_exec <= 1'b0;
       ptw_exec_q <= 1'b0;
@@ -2025,6 +2034,9 @@ module rapt_l1d #(
           load_perm_denied_q <= 1'b0;
           load_page_fault_q <= 1'b0;
           l1d_atomic_lock <= 1'b0;
+`ifdef RAPT_V_EXTENSION
+          l1d_rprobe_q <= 1'b0;
+`endif
           if (!cmu_bcast.flush_pipe && !fence_clear_busy && !wb_hold && !local_store_ready
               && !(WriteBack && coherent_write)
               && (!lsu_l1d.atomic_lock || !exu_l1d.reservation_blocked)) begin
@@ -2064,6 +2076,9 @@ module rapt_l1d #(
                   l1d_check_size_m1 <= lsu_l1d.rcheck_size_m1;
                   l1d_orig_size_m1 <= lsu_l1d.rorig_size_m1;
                   l1d_atomic_lock <= lsu_l1d.atomic_lock;
+`ifdef RAPT_V_EXTENSION
+                  l1d_rprobe_q <= lsu_l1d.rprobe;
+`endif
 `ifdef RAPT_H_EXTENSION
                   l1d_exec <= lsu_l1d.rexec;
 `endif
@@ -2088,6 +2103,9 @@ module rapt_l1d #(
                   l1d_check_size_m1 <= lsu_l1d.rcheck_size_m1;
                   l1d_orig_size_m1 <= lsu_l1d.rorig_size_m1;
                   l1d_atomic_lock <= lsu_l1d.atomic_lock;
+`ifdef RAPT_V_EXTENSION
+                  l1d_rprobe_q <= lsu_l1d.rprobe;
+`endif
 `ifdef RAPT_H_EXTENSION
                   l1d_exec <= lsu_l1d.rexec;
 `endif
@@ -2109,6 +2127,9 @@ module rapt_l1d #(
                 l1d_check_size_m1 <= lsu_l1d.rcheck_size_m1;
                 l1d_orig_size_m1 <= lsu_l1d.rorig_size_m1;
                 l1d_atomic_lock <= lsu_l1d.atomic_lock;
+`ifdef RAPT_V_EXTENSION
+                l1d_rprobe_q <= lsu_l1d.rprobe;
+`endif
 `ifdef RAPT_H_EXTENSION
                 l1d_exec <= lsu_l1d.rexec;
 `endif
@@ -2132,7 +2153,7 @@ module rapt_l1d #(
             cause <= stlb_mmu ? `RAPT_CAUSE_STORE_ACC_FAULT : `RAPT_CAUSE_LOAD_ACC_FAULT;
             stlb_mmu <= 1'b0;
             l1d_state <= TRAP;
-          end else if (ptw_arvalid && ptw_permission_valid_q && ptw_permission_fault_q) begin
+          end else if (ptw_pmp_abort) begin
             // PMP denies PTE fetch on the PTW's bus address.
             if (stlb_mmu) begin
               cause <= `RAPT_CAUSE_STORE_ACC_FAULT;
@@ -2357,6 +2378,8 @@ module rapt_l1d #(
         l1d_tag_u <= waddr_tag;
         l1d_idx <= waddr_idx;
         l1d_off <= waddr_offset;
+        l1d_data_idx <= waddr_idx;
+        l1d_data_off <= waddr_offset;
         l1d_way <= store_hit_way;
       end else if (lsu_l1d.wvalid && store_accept && !store_error
           && cacheable_w && !lsu_l1d.wzero) begin
@@ -2373,6 +2396,8 @@ module rapt_l1d #(
           l1d_tag_u <= waddr_tag;
           l1d_idx <= waddr_idx;
           l1d_off <= waddr_offset;
+          l1d_data_idx <= waddr_idx;
+          l1d_data_off <= waddr_offset;
           l1d_way <= hit_w ? store_hit_way : store_fill_way;
           if (!hit_w && L1D_N_WAYS == 2) d_replace_bit[waddr_idx] <= ~d_replace_bit[waddr_idx];
         end
@@ -2384,6 +2409,8 @@ module rapt_l1d #(
         l1d_tag_u <= mshr_fill_tag;
         l1d_idx <= mshr_fill_idx;
         l1d_off <= '0;
+        l1d_data_idx <= mshr_fill_idx;
+        l1d_data_off <= '0;
         l1d_way <= store_fill_way;
         if (L1D_N_WAYS == 2) d_replace_bit[mshr_fill_idx] <= ~d_replace_bit[mshr_fill_idx];
       end else if (l1d_state == LD_D) begin
@@ -2400,6 +2427,8 @@ module rapt_l1d #(
             l1d_tag_u <= addr_tag;
             l1d_idx <= addr_idx;
             l1d_off <= refill_line ? refill_word : addr_offset;
+            l1d_data_idx <= addr_idx;
+            l1d_data_off <= refill_line ? refill_word : addr_offset;
             l1d_way <= ld_fill_way_r;
             if (L1D_N_WAYS == 2) d_replace_bit[addr_idx] <= ~d_replace_bit[addr_idx];
           end
@@ -2470,5 +2499,25 @@ module rapt_l1d #(
       && (load_killed || cmu_bcast.flush_pipe);
   `RAPT_SVA_NEXT(clock, reset, L1D_KILLED_LR_RESPONSE_NO_NEW_RESERVATION,
                  l1d_killed_lr_response_no_new_reservation, !reservation_valid)
+`ifdef RAPT_SVA_ACTIVE
+`ifdef RAPT_V_EXTENSION
+  logic sva_rprobe_active;
+  assign sva_rprobe_active = l1d_state == LD_A && !load_perm_denied_q
+      && !cmu_bcast.flush_pipe && lsu_l1d.rvalid && rec_addr == lsu_l1d.raddr;
+  `RAPT_SVA_IMPLY(clock, reset, L1D_RPROBE_CAPTURED_MATCHES, sva_rprobe_active,
+                  vector_probe == lsu_l1d.rprobe)
+`endif
+  logic sva_inspect_exclusive, sva_wb_victim_capture, sva_wb_victim_matches;
+  assign sva_inspect_exclusive = !(wb_store_lookup && wb_fill_probe)
+      && !(wb_load_lookup && (wb_store_lookup || wb_fill_probe));
+  assign sva_wb_victim_capture = WriteBack && wb_state == WB_IDLE && wb_start
+      && !wb_global_dirty && !probe_dirty_request && !target_dirty_request;
+  assign sva_wb_victim_matches = wb_probe_set == (wb_store_lookup ? waddr_idx
+          : wb_fill_probe ? mshr_fill_idx : addr_idx)
+      && wb_probe_way == ((wb_store_lookup || wb_fill_probe) ? store_fill_way : ld_fill_way);
+  `RAPT_SVA(clock, reset, L1D_INSPECT_OWNER_EXCLUSIVE, sva_inspect_exclusive)
+  `RAPT_SVA_IMPLY(clock, reset, L1D_WB_PROBE_EQUIVALENT, sva_wb_victim_capture,
+                  sva_wb_victim_matches)
+`endif
 endmodule
 /* verilator lint_on PINCONNECTEMPTY */

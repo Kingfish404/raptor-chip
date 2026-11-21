@@ -57,7 +57,15 @@ if {$action eq "ip-check"} {
     close_project
     exit 0
 }
+set synth_more_opts [list -fanout_limit 24]
+if {[info exists no_timing_driven] && $no_timing_driven} {
+    lappend synth_more_opts -no_timing_driven
+}
 set_property STEPS.SYNTH_DESIGN.ARGS.FLATTEN_HIERARCHY rebuilt [get_runs synth_1]
+set_property STEPS.SYNTH_DESIGN.ARGS.RESOURCE_SHARING off [get_runs synth_1]
+set_property STEPS.SYNTH_DESIGN.ARGS.NO_LC true [get_runs synth_1]
+set_property -name {STEPS.SYNTH_DESIGN.ARGS.MORE OPTIONS} \
+    -value [join $synth_more_opts " "] -objects [get_runs synth_1]
 launch_runs synth_1 -jobs $jobs
 wait_on_run synth_1
 if {[get_property PROGRESS [get_runs synth_1]] ne "100%"} {error "Board synthesis failed"}
@@ -91,15 +99,39 @@ report_timing_summary -file [file join $out synth_timing.rpt]
 if {$action eq "synth"} {close_project; exit 0}
 if {$action ne "build"} {error "Unknown action: $action"}
 file delete -force [file join $out timing.pass]
+set sys_clk [get_clocks -quiet -of_objects [get_nets -quiet clk]]
+set use_sys_margin [expr {
+    [info exists sys_setup_margin_ns] && $sys_setup_margin_ns > 0 && [llength $sys_clk] == 1
+}]
+if {$use_sys_margin} {
+    set_clock_uncertainty -setup -from $sys_clk -to $sys_clk $sys_setup_margin_ns
+}
 opt_design
 if {$with_ethernet} {source [file join $sources ethernet_cdc.tcl]}
-place_design -directive Explore
-phys_opt_design
+place_design -directive ExtraPostPlacementOpt
+phys_opt_design -directive AggressiveExplore
+if {$use_sys_margin} {
+    set route_margin [expr {$sys_setup_margin_ns < 0.2 ? $sys_setup_margin_ns : 0.2}]
+    set_clock_uncertainty -setup -from $sys_clk -to $sys_clk $route_margin
+}
 route_design -directive Explore
+if {$use_sys_margin} {
+    # Restore original zero user setup uncertainty before post-route cleanup
+    # and final signoff (AMD UG949 Overconstraining the Design).
+    set_clock_uncertainty -setup -from $sys_clk -to $sys_clk 0.0
+}
+phys_opt_design -directive Explore
 if {$with_ddr} {
     source [file join $sources vivado_retry_timing.tcl]
     # A smaller route-goal margin preserves setup headroom at high DDR rates.
     raptor_fix_phy_min_skew {ddr_subsystem/mig/*} 25
+}
+if {[llength [get_timing_paths -quiet -delay_type max -max_paths 1 -slack_lesser_than 0]]} {
+    phys_opt_design -directive AggressiveExplore
+    route_design -tns_cleanup
+    if {$with_ddr} {
+        raptor_fix_phy_min_skew {ddr_subsystem/mig/*} 25
+    }
 }
 write_checkpoint -force [file join $out routed.dcp]
 report_utilization -hierarchical -file [file join $out utilization.rpt]
@@ -134,7 +166,11 @@ set timing_check [check_timing -verbose -return_string]
 set fh [open [file join $out check_timing.rpt] w]
 puts $fh $timing_check
 close $fh
-foreach category {no_clock constant_clock multiple_clock unconstrained_internal_endpoints generated_clocks loops partial_input_delay partial_output_delay latch_loops} {
+set timing_categories {
+    no_clock constant_clock multiple_clock unconstrained_internal_endpoints
+    generated_clocks loops partial_input_delay partial_output_delay latch_loops
+}
+foreach category $timing_categories {
     if {![regexp [format {checking %s \(([0-9]+)\)} $category] $timing_check -> count]} {
         error "Unable to establish check_timing category $category"
     }

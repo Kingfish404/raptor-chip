@@ -99,18 +99,26 @@ module rapt_iq #(
   logic [BankBits-1:0] issue_payload[NumIssuePorts];
   /* verilator lint_on UNUSEDSIGNAL */
   if (BankUop) begin : g_banked_uop
+`ifdef SYNTHESIS
+    localparam int PhysIqSize = IQ_SIZE < 32 ? 32 : IQ_SIZE;
+`else
+    localparam int PhysIqSize = IQ_SIZE;
+`endif
+    localparam int PhysIqLen = $clog2(PhysIqSize);
     logic [LaneBits-1:0] lane_q[IQ_SIZE];
     logic [BankBits-1:0] bank_read[NumIssuePorts][NumSlots];
     for (genvar e = 0; e < IQ_SIZE; e++) begin : g_lane
       always_ff @(posedge clock) if (alloc_hit[e]) lane_q[e] <= alloc_lane[e];
     end
     for (genvar a = 0; a < NumSlots; a++) begin : g_write_lane
+      wire [PhysIqLen-1:0] phys_rs_idx = PhysIqLen'(disp.rs_idx[a]);
       for (genvar p = 0; p < NumIssuePorts; p++) begin : g_read_copy
-        (* ram_style = "distributed" *) logic [BankBits-1:0] words[IQ_SIZE];
+        logic [BankBits-1:0] words[PhysIqSize];
+        wire [PhysIqLen-1:0] phys_issue_idx = PhysIqLen'(issue_data_index[p]);
         always_ff @(posedge clock)
           if (disp.accept[a])
-            words[disp.rs_idx[a]] <= {dispatch[a].uop, dispatch[a].generation, dispatch[a].prd};
-        assign bank_read[p][a] = words[issue_data_index[p]];
+            words[phys_rs_idx] <= {dispatch[a].uop, dispatch[a].generation, dispatch[a].prd};
+        assign bank_read[p][a] = words[phys_issue_idx];
       end
     end
     for (genvar p = 0; p < NumIssuePorts; p++) begin : g_select
@@ -215,34 +223,45 @@ module rapt_iq #(
     assign wb_result[p] = completion[p].result;
   end
 
-  function automatic logic wb_hit(input logic [PLEN-1:0] pr);
-    wb_hit = 1'b0;
-    for (int p = 0; p < NWB; p++) begin
-      wb_hit |= (pr != '0) && wb_valid[p] && (wb_prd[p] == pr);
-      if (LocalOperandWake)
-        wb_hit |= (pr != '0) && local_operand_wake[p].valid && local_operand_wake[p].prd == pr;
+  // Global and local wake views form one source list with pre-decoded nonzero
+  // validity so each operand shares a single tag-match vector across hit and
+  // value capture without redundant (pr != 0) or default-value muxing.
+  localparam int WakeSources = LocalOperandWake ? 2 * NWB : NWB;
+  logic wake_nz_valid[WakeSources];
+  logic [PLEN-1:0] wake_source_prd[WakeSources];
+  logic [XLEN-1:0] wake_source_result[WakeSources];
+  logic combo_nz_valid[NWB];
+  for (genvar p = 0; p < NWB; p++) begin : g_wake_source
+    assign wake_source_prd[p] = wb_prd[p];
+    assign wake_source_result[p] = wb_result[p];
+    assign wake_nz_valid[p] = wb_valid[p] && (wb_prd[p] != '0);
+    assign combo_nz_valid[p] =
+        ComboWakePorts[p] && combo_source[p].valid && (combo_source[p].prd != '0);
+    if (LocalOperandWake) begin : g_local
+      assign wake_source_prd[NWB+p] = local_operand_wake[p].prd;
+      assign wake_source_result[NWB+p] = local_operand_wake[p].result;
+      assign wake_nz_valid[NWB+p] =
+          local_operand_wake[p].valid && (local_operand_wake[p].prd != '0);
     end
+  end
+
+  function automatic logic [WakeSources-1:0] wake_match(input logic [PLEN-1:0] pr);
+    for (int s = 0; s < WakeSources; s++)
+    wake_match[s] = wake_nz_valid[s] && (wake_source_prd[s] == pr);
   endfunction
 
-  function automatic logic combo_wb_hit(input logic [PLEN-1:0] pr);
-    combo_wb_hit = 1'b0;
-    for (int p = 0; p < NWB; p++) begin
-      combo_wb_hit |= ComboWakePorts[p] && (pr != '0) && combo_source[p].valid
-          && (combo_source[p].prd == pr);
-    end
+  function automatic logic [XLEN-1:0] wake_or_val(input logic [WakeSources-1:0] match);
+    wake_or_val = '0;
+    for (int s = 0; s < WakeSources; s++) if (match[s]) wake_or_val |= wake_source_result[s];
   endfunction
 
-  function automatic logic [XLEN-1:0] combo_wb_val(input logic [PLEN-1:0] pr,
-                                                   input logic [XLEN-1:0] dflt);
-    logic hit;
-    hit = 1'b0;
-    combo_wb_val = '0;
-    for (int p = 0; p < NWB; p++)
-    if (ComboWakePorts[p] && (pr != '0) && combo_source[p].valid && (combo_source[p].prd == pr)) begin
-      hit = 1'b1;
-      combo_wb_val |= combo_source[p].result;
-    end
-    if (!hit) combo_wb_val = dflt;
+  function automatic logic [NWB-1:0] combo_match(input logic [PLEN-1:0] pr);
+    for (int p = 0; p < NWB; p++) combo_match[p] = combo_nz_valid[p] && (combo_source[p].prd == pr);
+  endfunction
+
+  function automatic logic [XLEN-1:0] combo_or_val(input logic [NWB-1:0] match);
+    combo_or_val = '0;
+    for (int p = 0; p < NWB; p++) if (match[p]) combo_or_val |= combo_source[p].result;
   endfunction
 
   function automatic logic completion_hit(input logic [ROBLen-1:0] dep,
@@ -250,34 +269,18 @@ module rapt_iq #(
     completion_hit = 1'b0;
     for (int p = 0; p < NumCompletions; p++)
     completion_hit |= completion[p].valid && completion[p].dest == dep
-        && completion[p].generation == generation;
+          && completion[p].generation == generation;
   endfunction
 
-  function automatic logic [XLEN-1:0] wb_val(input logic [PLEN-1:0] pr,
-                                             input logic [XLEN-1:0] dflt);
-    logic hit;
-    hit = 1'b0;
-    wb_val = '0;
-    for (int p = 0; p < NWB; p++) begin
-      if ((pr != '0) && wb_valid[p] && (wb_prd[p] == pr)) begin
-        hit = 1'b1;
-        wb_val |= wb_result[p];
-      end
-      if (LocalOperandWake && (pr != '0) && local_operand_wake[p].valid
-          && local_operand_wake[p].prd == pr) begin
-        hit = 1'b1;
-        wb_val |= local_operand_wake[p].result;
-      end
-    end
-    if (!hit) wb_val = dflt;
-  endfunction
   // Allocation checks depend on the dispatch lane, before entry selection.
   if (ThirdOperand) begin : g_lane_third
     logic lane_pr3_busy[NumSlots];
     logic [XLEN-1:0] lane_vl[NumSlots];
     for (genvar s = 0; s < NumSlots; s++) begin : g_lane
-      assign lane_pr3_busy[s] = dispatch[s].pr3 != '0 && !wb_hit(dispatch[s].pr3);
-      assign lane_vl[s] = wb_val(dispatch[s].pr3, dispatch[s].op3);
+      wire [WakeSources-1:0] pr3_match = wake_match(dispatch[s].pr3);
+      wire pr3_hit = |pr3_match;
+      assign lane_pr3_busy[s] = dispatch[s].pr3 != '0 && !pr3_hit;
+      assign lane_vl[s] = pr3_hit ? wake_or_val(pr3_match) : dispatch[s].op3;
     end
   end
   logic lane_dep_busy[NumDependencies][NumSlots];
@@ -291,25 +294,15 @@ module rapt_iq #(
     end
   end
 
-  // Global and local wake views together form one source list for wb_val.
-  localparam int WakeSources = LocalOperandWake ? 2 * NWB : NWB;
-  logic wake_source_valid[WakeSources];
-  logic [PLEN-1:0] wake_source_prd[WakeSources];
-  for (genvar p = 0; p < NWB; p++) begin : g_wake_source
-    assign wake_source_valid[p] = wb_valid[p];
-    assign wake_source_prd[p] = wb_prd[p];
-    if (LocalOperandWake) begin : g_local
-      assign wake_source_valid[NWB+p] = local_operand_wake[p].valid;
-      assign wake_source_prd[NWB+p] = local_operand_wake[p].prd;
-    end
-  end
-
   // Rename keeps one live producer per tag, so at most one completion source
   // carries a given nonzero tag; the value selects below rely on it.
   for (genvar a = 0; a < WakeSources; a++) begin : g_tag_unique
     for (genvar b = a + 1; b < WakeSources; b++) begin : g_pair
-      `RAPT_SVA(clock, reset, IQ_WAKE_TAG_UNIQUE,
-                !(wake_source_valid[a] && wake_source_valid[b] && wake_source_prd[a] != '0 && wake_source_prd[a] == wake_source_prd[b]))
+`ifdef RAPT_SVA_ACTIVE
+      wire wake_tag_unique =
+          !(wake_nz_valid[a] && wake_nz_valid[b] && wake_source_prd[a] == wake_source_prd[b]);
+`endif
+      `RAPT_SVA(clock, reset, IQ_WAKE_TAG_UNIQUE, wake_tag_unique)
     end
   end
 
@@ -333,14 +326,25 @@ module rapt_iq #(
   logic [IQ_SIZE-1:0] iq_ready_vec;
 
   for (genvar i = 0; i < IQ_SIZE; i++) begin : g_wake_view
-    assign pr1_slow_hit[i] = iq_pr1_busy[i] && wb_hit(iq_pr1[i]);
-    assign pr2_slow_hit[i] = iq_pr2_busy[i] && wb_hit(iq_pr2[i]);
-    assign pr1_combo_hit[i] = iq_pr1_busy[i] && combo_wb_hit(iq_pr1[i]);
-    assign pr2_combo_hit[i] = iq_pr2_busy[i] && combo_wb_hit(iq_pr2[i]);
-    assign pr1_slow_val[i] = wb_val(iq_pr1[i], iq_vj[i]);
-    assign pr2_slow_val[i] = wb_val(iq_pr2[i], iq_vk[i]);
-    assign pr1_combo_val[i] = combo_wb_val(iq_pr1[i], iq_vj[i]);
-    assign pr2_combo_val[i] = combo_wb_val(iq_pr2[i], iq_vk[i]);
+    wire [WakeSources-1:0] pr1_match = wake_match(iq_pr1[i]);
+    wire [WakeSources-1:0] pr2_match = wake_match(iq_pr2[i]);
+    assign pr1_slow_hit[i] = iq_pr1_busy[i] && (|pr1_match);
+    assign pr2_slow_hit[i] = iq_pr2_busy[i] && (|pr2_match);
+    assign pr1_slow_val[i] = wake_or_val(pr1_match);
+    assign pr2_slow_val[i] = wake_or_val(pr2_match);
+    if (ComboCdbWake) begin : g_combo_wake_view
+      wire [NWB-1:0] c1_match = combo_match(iq_pr1[i]);
+      wire [NWB-1:0] c2_match = combo_match(iq_pr2[i]);
+      assign pr1_combo_hit[i] = iq_pr1_busy[i] && (|c1_match);
+      assign pr2_combo_hit[i] = iq_pr2_busy[i] && (|c2_match);
+      assign pr1_combo_val[i] = combo_or_val(c1_match);
+      assign pr2_combo_val[i] = combo_or_val(c2_match);
+    end else begin : g_no_combo_wake_view
+      assign pr1_combo_hit[i] = 1'b0;
+      assign pr2_combo_hit[i] = 1'b0;
+      assign pr1_combo_val[i] = '0;
+      assign pr2_combo_val[i] = '0;
+    end
   end
   // Keep selector eligibility separate from CDB value capture. A simulator
   // schedules all outputs of an always_comb together; mixing readiness with
@@ -366,21 +370,23 @@ module rapt_iq #(
     if (ThirdOperand) begin : g_third
       logic [PLEN-1:0] tag;
       logic busy;
-      assign pr3_ready[e] = !busy || (ComboThirdWake && combo_wb_hit(tag));
-      assign third_issue_value[e] = ComboThirdWake && busy
-          ? combo_wb_val(tag, iq_vl[e]) : iq_vl[e];
+      wire [WakeSources-1:0] pr3_slow_match = wake_match(tag);
+      wire pr3_slow_hit = |pr3_slow_match;
+      wire [NWB-1:0] pr3_combo_match = combo_match(tag);
+      wire pr3_combo_hit = ComboThirdWake && (|pr3_combo_match);
+      assign pr3_ready[e] = !busy || pr3_combo_hit;
+      assign third_issue_value[e] = (busy && pr3_combo_hit)
+          ? combo_or_val(pr3_combo_match) : iq_vl[e];
       always_ff @(posedge clock) begin
         if (reset || cmu_bcast.flush_pipe) busy <= 1'b0;
         else if (alloc_hit[e]) begin
           tag <= dispatch[alloc_lane[e]].pr3;
           busy <= g_lane_third.lane_pr3_busy[alloc_lane[e]];
-        end else if (iq_valid[e] && wb_hit(tag)) busy <= 1'b0;
+        end else if (iq_valid[e] && pr3_slow_hit) busy <= 1'b0;
       end
       always_ff @(posedge clock) begin
-        begin
-          if (alloc_hit[e]) iq_vl[e] <= g_lane_third.lane_vl[alloc_lane[e]];
-          else if (iq_valid[e] && busy && wb_hit(tag)) iq_vl[e] <= wb_val(tag, iq_vl[e]);
-        end
+        if (alloc_hit[e]) iq_vl[e] <= g_lane_third.lane_vl[alloc_lane[e]];
+        else if (iq_valid[e] && busy && pr3_slow_hit) iq_vl[e] <= wake_or_val(pr3_slow_match);
       end
     end else begin : g_two
       assign pr3_ready[e] = 1'b1;
@@ -398,7 +404,7 @@ module rapt_iq #(
     end
   end
 
-  logic [IQ_SIZE-1:0] claimed, baseline_claimed, select_valid, select_valid_nc;
+  logic [IQ_SIZE-1:0] claimed;
   // Allocation ranks every free entry before any reclaimed (issuing) one,
   // each in index order, so old identities are reused only when needed. The
   // old payload is read before the edge; allocation beats issue-clear there.
@@ -425,8 +431,11 @@ module rapt_iq #(
     assign disp.free_idx[s] = alloc_index[s][IQLen-1:0];
   end
   for (genvar s = 0; s < NumSlots; s++) begin : g_alloc_contract
+`ifdef RAPT_SVA_ACTIVE
+    wire alloc_slot_free = !iq_valid[disp.rs_idx[s]] || (ReclaimOnIssue && claimed[disp.rs_idx[s]]);
+`endif
     `RAPT_SVA_IMPLY(clock, reset || cmu_bcast.flush_pipe, QUEUE_ALLOC_FREE, disp.accept[s],
-                    !iq_valid[disp.rs_idx[s]] || (ReclaimOnIssue && claimed[disp.rs_idx[s]]))
+                    alloc_slot_free)
     for (genvar t = s + 1; t < NumSlots; t++) begin : g_unique
       `RAPT_SVA_IMPLY(clock, reset || cmu_bcast.flush_pipe, QUEUE_ALLOC_UNIQUE,
                       disp.accept[s] && disp.accept[t], disp.rs_idx[s] != disp.rs_idx[t])
@@ -460,7 +469,10 @@ module rapt_iq #(
   // remain local to IQ, so arbitration policy can evolve independently.
   logic [IQ_SIZE-1:0] selected[NumIssuePorts];
   logic [IQ_SIZE-1:0] selected_data[NumIssuePorts];
-  logic [IQ_SIZE-1:0] claimed_data, baseline_claimed_data;
+  logic [IQ_SIZE-1:0] claimed_data;
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [IQ_SIZE-1:0] baseline_claimed_data;
+  /* verilator lint_on UNUSEDSIGNAL */
   logic [NumIssuePorts-1:0] port_mask[IQ_SIZE];
   for (genvar e = 0; e < IQ_SIZE; e++) begin : g_port_mask
     if (BankUop) begin : g_banked
@@ -476,10 +488,7 @@ module rapt_iq #(
   // and cleared at the edge instead of steering the payload. select_valid
   // keeps the cancel-aware view used by the PMU/capacity observations.
   wire [IQ_SIZE-1:0] transfer_enable = {IQ_SIZE{!reset && !cmu_bcast.flush_pipe}};
-  assign select_valid_nc = iq_valid & transfer_enable;
-  assign select_valid = select_valid_nc & ~cancelled;
   assign claimed = claimed_data & transfer_enable;
-  assign baseline_claimed = baseline_claimed_data & transfer_enable;
   for (genvar port_index = 0; port_index < NumIssuePorts; port_index++) begin : g_transfer_gate
     assign selected[port_index] = selected_data[port_index] & transfer_enable;
   end
@@ -500,21 +509,32 @@ module rapt_iq #(
       .claimed(claimed_data),
       .baseline_claimed(baseline_claimed_data)
   );
-  if (UniformSimplePorts && NumIssuePorts > 1 && !IN_ORDER_ISSUE && !RebalancePorts) begin : g_uniform_ports
+  localparam bit CheckUniformPorts =
+      UniformSimplePorts && NumIssuePorts > 1 && !IN_ORDER_ISSUE && !RebalancePorts;
+  if (CheckUniformPorts) begin : g_uniform_ports
     localparam int FirstSimplePort = LastIssuePort == 0 ? 1 : 0;
     for (genvar e = 0; e < IQ_SIZE; e++) begin : g_entry
-      wire uniform_mask = ((port_mask[e] ^ {NumIssuePorts{port_mask[e][FirstSimplePort]}})
-          & ~(NumIssuePorts'(1) << LastIssuePort)) == '0;
+      wire [NumIssuePorts-1:0] first_port_rep = {NumIssuePorts{port_mask[e][FirstSimplePort]}};
+      wire uniform_mask =
+          ((port_mask[e] ^ first_port_rep) & ~(NumIssuePorts'(1) << LastIssuePort)) == '0;
       `RAPT_SVA_IMPLY(clock, reset, UNIFORM_SIMPLE_PORTS, iq_valid[e], uniform_mask)
     end
   end
   // Registered observations share the issue edge, never the next-cycle view.
 `ifndef SYNTHESIS
+  logic [IQ_SIZE-1:0] baseline_claimed, select_valid, select_valid_nc;
+  assign select_valid_nc = iq_valid & transfer_enable;
+  assign select_valid = select_valid_nc & ~cancelled;
+  assign baseline_claimed = baseline_claimed_data & transfer_enable;
   // Mutually exclusive observation of the FIRST allocation token only.
   // 0 available; 1 reset/flush; 2 all residents cancelled; 3 no ready survivor;
   // 4 no ready survivor on an enabled compatible port; 5 selection policy;
   // 6 issued but same-cycle reclaim disabled. These are not lost-IPC estimates.
-  logic [2:0] pmu_capacity_reason, capacity_reason;
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [2:0] pmu_capacity_reason;
+  logic [31:0] pmu_select_ready, pmu_select_issued, pmu_select_gain, pmu_reclaim_allocations;
+  /* verilator lint_on UNUSEDSIGNAL */
+  logic [2:0] capacity_reason;
   logic capacity_ready_compatible;
   always_comb begin
     capacity_ready_compatible = 1'b0;
@@ -531,8 +551,6 @@ module rapt_iq #(
     end
   end
   always_ff @(posedge clock) pmu_capacity_reason <= capacity_reason;
-`endif
-  logic [31:0] pmu_select_ready, pmu_select_issued, pmu_select_gain, pmu_reclaim_allocations;
   int unsigned reclaim_allocations;
   always_comb begin
     reclaim_allocations = 0;
@@ -548,6 +566,7 @@ module rapt_iq #(
         baseline_claimed & ~cancelled));
     pmu_reclaim_allocations <= reset || cmu_bcast.flush_pipe ? 0 : reclaim_allocations;
   end
+`endif
   localparam int StoredPayloadBits = (BankUop ? 0 : BankBits) + 2 * XLEN + ROBLen;
   logic [StoredPayloadBits-1:0] stored_payload[IQ_SIZE];
   logic [XLEN-1:0] entry_op1[IQ_SIZE], entry_op2[IQ_SIZE];

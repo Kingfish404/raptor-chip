@@ -23,7 +23,7 @@ module rapt_fetch_successor #(
     logic [PcW-1:1] tag;
     logic [PcW-1:1] target;
   } entry_t;
-  (* ram_style = "distributed" *) entry_t entries[Entries];
+  entry_t entries[Entries];
   logic [Entries-1:0] valid_q;
   wire [IndexBits-1:0] read_index = query_pc[IndexBits:1]
       ^ query_pc[2*IndexBits:IndexBits+1];

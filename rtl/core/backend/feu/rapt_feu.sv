@@ -87,9 +87,8 @@ module rapt_feu #(
   /* verilator lint_off UNUSEDSIGNAL */
   fp_issue_t iss;
   /* verilator lint_on UNUSEDSIGNAL */
-  // Preserve FP decode boundaries while other issue payload muxes may fold.
-  (* keep = "true" *) logic [31:0] issued_encoding;
-  (* keep = "true" *) logic [$bits(iss.uop.execute.fp)-1:0] issued_fp;
+  logic [31:0] issued_encoding;
+  logic [$bits(iss.uop.execute.fp)-1:0] issued_fp;
   fp_wake_t fp_wake[NumCompletions], fp_local_wake[NumCompletions];
   localparam bit Zfa = rapt_pkg::ZfaEnable && XLEN == 64;
   localparam int Simple = 0, AddSub = 1, Product = 2, DivSqrt = 3,

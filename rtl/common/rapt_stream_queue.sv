@@ -102,7 +102,7 @@ module rapt_stream_queue #(
     // the block RAM's read-during-write result is vendor dependent.
     assign next_head = (reset || flush) ? '0 : head + PtrBits'(pop_count);
     for (genvar b = 0; b < BlockBanks; b++) begin : g_bank
-      (* ram_style = "block" *) logic [ItemBits-1:0] words[Rows];
+      logic [ItemBits-1:0] words[Rows];
       logic [BankBits-1:0] read_slot, write_slot;
       logic [PtrBits-1:0] read_index, write_index;
       logic [RowBits-1:0] read_row, write_row;

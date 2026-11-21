@@ -18,7 +18,6 @@
 // Folded history: combinationally XOR the GHR into IDX_LEN / TAG_LEN bits.
 // For a 64-bit GHR this collapses to <=6 levels of XOR, which fits in the
 // existing single-cycle prediction window.
-(* keep_hierarchy *)
 module rapt_bpu_tage #(
     parameter int XLEN    = `RAPT_XLEN,
     parameter int GHR_LEN = 64,
@@ -86,7 +85,7 @@ module rapt_bpu_tage #(
 
   // ---------------- Storage ----------------
   // Bimodal base (2-bit saturating counter; MSB = taken)
-  (* ram_style = "distributed" *) logic [1:0] bim_data[BimSize];
+  logic [1:0] bim_data[BimSize];
   // Valid and useful bits need a bulk clear (reset, fence, u aging). They
   // live in grouped LUTRAM words with one flop per group instead of one flop
   // per entry; each consumer below has its own read port.
@@ -101,16 +100,16 @@ module rapt_bpu_tage #(
   logic [IDX_LEN-1:0] aux_t1_index[AuxPorts], aux_t2_index[AuxPorts], aux_t3_index[AuxPorts];
 
   // Tagged table 1
-  (* ram_style = "distributed" *) logic [TagLen1-1:0] t1_tag  [TabSize];
-  (* ram_style = "distributed" *) logic signed [CtrBits-1:0] t1_ctr  [TabSize];
+  logic [TagLen1-1:0] t1_tag  [TabSize];
+  logic signed [CtrBits-1:0] t1_ctr  [TabSize];
 
   // Tagged table 2
-  (* ram_style = "distributed" *) logic [TagLen2-1:0] t2_tag  [TabSize];
-  (* ram_style = "distributed" *) logic signed [CtrBits-1:0] t2_ctr  [TabSize];
+  logic [TagLen2-1:0] t2_tag  [TabSize];
+  logic signed [CtrBits-1:0] t2_ctr  [TabSize];
 
   // Tagged table 3
-  (* ram_style = "distributed" *) logic [TagLen3-1:0] t3_tag  [TabSize];
-  (* ram_style = "distributed" *) logic signed [CtrBits-1:0] t3_ctr  [TabSize];
+  logic [TagLen3-1:0] t3_tag  [TabSize];
+  logic signed [CtrBits-1:0] t3_ctr  [TabSize];
 
   // ---------------- Folded-history helpers ----------------
   // Combinationally fold the low `HIST` bits of `ghr` into `W` bits via XOR.

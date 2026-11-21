@@ -41,6 +41,7 @@ module rapt_fpu_fp_to_half (
     is_inf = 1'b0;
     is_nan = 1'b0;
     is_snan = 1'b0;
+    scan = 0;
     unbiased = 0;
     significand = '0;
 

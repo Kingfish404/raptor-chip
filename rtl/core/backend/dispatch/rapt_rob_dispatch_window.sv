@@ -34,7 +34,9 @@ module rapt_rob_dispatch_window #(
     input logic incoming_valid[Width],
     input logic [IndexBits-1:0] incoming_index[Width],
     input logic [PayloadBits-1:0] incoming_payload[Width],
+    /* verilator lint_off UNUSEDSIGNAL */
     input logic endpoint_ready[ScanEntries],
+    /* verilator lint_on UNUSEDSIGNAL */
     output logic candidate_valid[ScanEntries],
     output logic [IndexBits-1:0] candidate_index[ScanEntries],
     output logic [PayloadBits-1:0] candidate_payload[ScanEntries],
@@ -52,6 +54,7 @@ module rapt_rob_dispatch_window #(
   localparam int unsigned Resident = ScanEntries - 2 * Width;
   localparam int unsigned CarryBase = Resident;
   localparam int unsigned IncomingBase = Resident + Width;
+  localparam int unsigned ActiveScanEntries = AllocationBypass ? ScanEntries : IncomingBase;
   localparam int unsigned SourceSlotBits = rapt_pkg::index_bits(Width);
   // One extra rank detects owners beyond the window.
   localparam int unsigned NumRank = Resident + 1;
@@ -87,19 +90,20 @@ module rapt_rob_dispatch_window #(
     assign candidate_incoming[CarryBase+w] = 1'b0;
     assign candidate_source_slot[CarryBase+w] = '0;
     assign candidate_valid[IncomingBase+w] = AllocationBypass && complete_q && incoming_valid[w];
-    assign candidate_index[IncomingBase+w] = incoming_index[w];
-    assign candidate_payload[IncomingBase+w] = incoming_payload[w];
-    assign candidate_incoming[IncomingBase+w] = 1'b1;
-    assign candidate_source_slot[IncomingBase+w] = SourceSlotBits'(w);
+    assign candidate_index[IncomingBase+w] = AllocationBypass ? incoming_index[w] : '0;
+    assign candidate_payload[IncomingBase+w] = AllocationBypass ? incoming_payload[w] : '0;
+    assign candidate_incoming[IncomingBase+w] = AllocationBypass;
+    assign candidate_source_slot[IncomingBase+w] = AllocationBypass ? SourceSlotBits'(w) : '0;
   end
 
   always_comb begin
     automatic logic blocked_older;
+    for (int s = 0; s < ScanEntries; s++) accepted[s] = 1'b0;
     candidate_count = 0;
     accepted_count = 0;
     bypass_count = 0;
     blocked_older = 1'b0;
-    for (int s = 0; s < ScanEntries; s++) begin
+    for (int s = 0; s < ActiveScanEntries; s++) begin
       accepted[s] = candidate_valid[s] && endpoint_ready[s];
       candidate_count += int'(candidate_valid[s]);
       if (accepted[s]) begin
@@ -170,7 +174,7 @@ module rapt_rob_dispatch_window #(
       end
       // Allocations become ROB_DP on this edge unless an endpoint took them.
       for (int w = 0; w < Width; w++) begin
-        carry_valid_q[w] <= incoming_valid[w] && !accepted[IncomingBase+w];
+        carry_valid_q[w] <= incoming_valid[w] && !(AllocationBypass && accepted[IncomingBase+w]);
         carry_index_q[w] <= incoming_index[w];
         carry_payload_q[w] <= incoming_payload[w];
       end

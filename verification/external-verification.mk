@@ -109,3 +109,40 @@ extended-campaign: ## Run snapshotted formal/fuzz lanes for at least three activ
 		--spike "$(CASCADE_SPIKE)" --nemu32 "$(NEMU_SO_32)" --nemu64 "$(NEMU_SO_64)" \
 		--objcopy "$(CROSS_COMPILE)objcopy" --cross "$(CROSS_COMPILE)" \
 		--pono "$(PONO)" --btorsim "$(BTORSIM)"
+
+# P1 verification suite entry points: RVWMO litmus, RTLCheck LSU, AST mutation, RVV/H fuzz.
+LITMUS_OUT ?= $(BUILD_DIR)/rvwmo-litmus
+RTLCHECK_OUT ?= $(BUILD_DIR)/rtlcheck-lsu
+RVV_HYP_OUT ?= $(BUILD_DIR)/rvv-hyp-fuzz
+RVV_HYP_MODE ?= rvv
+RVV_HYP_NUM ?= 50
+RVV_HYP_BLOCKS ?= 10
+FORCE_RISCV_ROOT ?= $(BUILD_DIR)/force-riscv
+
+.PHONY: rvwmo-litmus-gen formal-rtlcheck-lsu rvv-hyp-fuzz-gen p1-unittests force-riscv-check
+
+rvwmo-litmus-gen: ## Generate RVWMO litmus .S suite and herd7 .litmus exports
+	$(PYTHON) "$(VERIFY_HOME)/litmus/rvwmo_litmus.py" generate \
+		--xlen $(ISA_XLEN) --outdir "$(LITMUS_OUT)/rv$(ISA_XLEN)"
+	$(PYTHON) "$(VERIFY_HOME)/litmus/rvwmo_litmus.py" export-herd7 \
+		--outdir "$(LITMUS_OUT)/herd7"
+
+formal-rtlcheck-lsu: ## Prove LSU/SQ RVWMO ordering axioms and AST mutation controls
+	PYTHONPATH="$(VERIFY_HOME)/scripts" $(PYTHON) "$(VERIFY_HOME)/scripts/rtlcheck_formal.py" \
+		--output "$(RTLCHECK_OUT)"
+
+rvv-hyp-fuzz-gen: ## Generate constrained-random RVV 1.0 or Hypervisor stress suite
+	$(PYTHON) "$(VERIFY_HOME)/scripts/rvv_hyp_fuzz.py" --mode "$(RVV_HYP_MODE)" \
+		--seed $(SEED) --num $(RVV_HYP_NUM) --blocks $(RVV_HYP_BLOCKS) \
+		--outdir "$(RVV_HYP_OUT)/$(RVV_HYP_MODE)"
+
+p1-unittests: ## Run unit tests for AST mutator, RVWMO litmus, and RVV/H fuzzer
+	PYTHONPATH="$(VERIFY_HOME)/scripts" $(PYTHON) -m unittest -v \
+		test_ast_mutator test_rvwmo_litmus test_rvv_hyp_fuzz
+
+force-riscv-check: ## Check external FORCE-RISCV checkout availability for RVV/H fuzzing
+	@test -d "$(FORCE_RISCV_ROOT)" || { \
+		echo "FORCE-RISCV not found at $(FORCE_RISCV_ROOT)."; \
+		echo "Clone https://github.com/openhwgroup/force-riscv and set FORCE_RISCV_ROOT=<path>."; \
+		exit 1; }
+	@echo "[force-riscv] Found checkout at $(FORCE_RISCV_ROOT)"

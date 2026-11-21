@@ -53,7 +53,14 @@ module rapt_vpu_element #(
   assign byte_offset = ByteBits'(req_addr);
   assign req_ready = !reset && state == IDLE && bank_ready[selected_bank];
   assign rsp_valid = !reset && (state == WRITE_ACK || (state == READ && bank_rsp_valid[bank_q]));
-  assign read_mask = 64'hffffffffffffffff >> (64 - (8 << size_q));
+  always_comb begin
+    case (size_q)
+      2'd0: read_mask = 64'h0000_0000_0000_00ff;
+      2'd1: read_mask = 64'h0000_0000_0000_ffff;
+      2'd2: read_mask = 64'h0000_0000_ffff_ffff;
+      default: read_mask = 64'hffff_ffff_ffff_ffff;
+    endcase
+  end
   assign rsp_rdata = state == READ ? 64'(bank_rdata[bank_q] >> (int'(offset_q)*8)) & read_mask : 0;
 
   always_comb begin

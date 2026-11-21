@@ -95,63 +95,118 @@ module rapt_ioq_operands #(
     end
   end
 
+  localparam bit PowerOfTwoEntries = (Entries & (Entries - 1)) == 0;
+  localparam logic [IndexBits:0] EntriesWide = (IndexBits + 1)'(Entries);
+  localparam logic [IndexBits-1:0] EntriesMod = IndexBits'(Entries);
+
+  function automatic logic [IndexBits-1:0] age_index(input logic [IndexBits-1:0] offset);
+    logic [IndexBits:0] sum;
+    logic [IndexBits-1:0] mod_idx;
+    sum = {1'b0, head} + {1'b0, offset};
+    mod_idx = sum >= EntriesWide ? (sum[IndexBits-1:0] - EntriesMod) : sum[IndexBits-1:0];
+    return PowerOfTwoEntries ? (head + offset) : mod_idx;
+  endfunction
+
+  function automatic logic [IndexBits-1:0] entry_age(input logic [IndexBits-1:0] index);
+    logic [IndexBits-1:0] mod_age;
+    mod_age = index >= head ? (index - head) : (index + EntriesMod - head);
+    return PowerOfTwoEntries ? (index - head) : mod_age;
+  endfunction
+
+  function automatic logic [Entries-1:0] age_rotate(input logic [Entries-1:0] mask);
+    return Entries'({mask, mask} >> head);
+  endfunction
+
+  logic [Entries-1:0] phys_need_addr, phys_need_data;
+  for (genvar e = 0; e < Entries; e++) begin : g_phys_need
+    logic base_avail, data_avail;
+    assign base_avail = base_ready[e] || base_wake[e];
+    assign data_avail = data_source[e] != '0 && (data_ready[e] || data_wake[e]);
+    assign phys_need_addr[e] = entry_valid[e] && !prepared[e] && base_avail;
+    assign phys_need_data[e] = entry_valid[e] && needs_data[e] && !cached[e] && data_avail;
+  end
+
+  wire [Entries-1:0] age_need_addr = age_rotate(phys_need_addr);
+  wire [Entries-1:0] age_need_data = age_rotate(phys_need_data);
+
   // Reserve cache destinations before allocating newly dispatched data.
   // An older ready store may replace a younger cached operand: otherwise
   // two younger values could prevent the head from ever obtaining a slot.
   always_comb begin
-    logic [Entries-1:0] taken_addr, taken_data;
+    logic [Entries-1:0] age_addr_avail, age_data_rem;
     logic [StoreValues-1:0] reserved_cache;
-    taken_addr = '0;
-    taken_data = '0;
+    logic [IndexBits-1:0] cache_age[StoreValues];
+    age_addr_avail = age_need_addr;
+    age_data_rem = age_need_data;
     reserved_cache = '0;
     request_valid = '0;
     request_addr = '0;
+    for (int c = 0; c < StoreValues; c++) begin
+      cache_age[c] = entry_age(cache_owner[c]);
+    end
     for (int p = 0; p < ReadPorts; p++) begin
-      request_index[p] = head;
-      request_cache[p] = '0;
-      read_address[p] = '0;
+      automatic logic free_space;
+      automatic logic [CacheBits-1:0] free_slot;
+      automatic logic [IndexBits-1:0] max_evict_age;
+      automatic logic [CacheBits-1:0] evict_slot;
+      automatic logic [CacheBits-1:0] port_cache_slot;
+      automatic logic port_found;
+      automatic logic port_is_addr;
+      automatic logic [IndexBits-1:0] win_age;
+      automatic logic [IndexBits-1:0] win_idx;
+      free_space = 1'b0;
+      free_slot = '0;
+      for (int c = 0; c < StoreValues; c++) begin
+        if (!reserved_cache[c] && !cache_valid[c]) begin
+          free_space = 1'b1;
+          free_slot = CacheBits'(c);
+        end
+      end
+      max_evict_age = '0;
+      evict_slot = '0;
+      for (int c = 0; c < StoreValues; c++) begin
+        if (!reserved_cache[c] && cache_valid[c] && cache_age[c] > max_evict_age) begin
+          max_evict_age = cache_age[c];
+          evict_slot = CacheBits'(c);
+        end
+      end
+      port_cache_slot = free_space ? free_slot : evict_slot;
+      port_found = 1'b0;
+      port_is_addr = 1'b0;
+      win_age = '0;
       for (int age = 0; age < Entries; age++) begin
-        automatic logic [IndexBits-1:0] idx;
-        automatic logic cache_space;
-        automatic logic [CacheBits-1:0] cache_slot;
-        automatic logic [IndexBits-1:0] replace_age;
-        idx = head + IndexBits'(age);
-        cache_space = 1'b0;
-        cache_slot = '0;
-        replace_age = IndexBits'(age);
-        for (int c = 0; c < StoreValues; c++) begin
-          if (!reserved_cache[c] && !cache_valid[c]) begin
-            cache_space = 1'b1;
-            cache_slot = CacheBits'(c);
+        automatic logic data_cache_ok;
+        data_cache_ok = free_space || IndexBits'(age) < max_evict_age;
+        if (!port_found) begin
+          if (age_addr_avail[age]) begin
+            port_found = 1'b1;
+            port_is_addr = 1'b1;
+            win_age = IndexBits'(age);
+            age_addr_avail[age] = 1'b0;
+          end else if (age_data_rem[age] && data_cache_ok) begin
+            port_found = 1'b1;
+            port_is_addr = 1'b0;
+            win_age = IndexBits'(age);
+            age_data_rem[age] = 1'b0;
           end
         end
-        if (!cache_space) begin
-          for (int c = 0; c < StoreValues; c++) begin
-            if (!reserved_cache[c] && cache_valid[c] && (cache_owner[c] - head) > replace_age) begin
-              cache_space = 1'b1;
-              cache_slot = CacheBits'(c);
-              replace_age = cache_owner[c] - head;
-            end
-          end
+      end
+      for (int c = 0; c < StoreValues; c++) begin
+        if (port_found && !port_is_addr && port_cache_slot == CacheBits'(c)) begin
+          reserved_cache[c] = 1'b1;
         end
-        if (!request_valid[p] && entry_valid[idx]) begin
-          if (!taken_addr[idx] && !prepared[idx] && (base_ready[idx] || base_wake[idx])) begin
-            request_valid[p] = 1'b1;
-            request_addr[p] = 1'b1;
-            request_index[p] = idx;
-            read_address[p] = base_source[idx];
-            taken_addr[idx] = 1'b1;
-          end else if (!taken_data[idx] && needs_data[idx] && !cached[idx]
-              && data_source[idx] != '0 && (data_ready[idx] || data_wake[idx])
-              && cache_space) begin
-            request_valid[p] = 1'b1;
-            request_index[p] = idx;
-            request_cache[p] = cache_slot;
-            read_address[p] = data_source[idx];
-            taken_data[idx] = 1'b1;
-            reserved_cache[cache_slot] = 1'b1;
-          end
-        end
+      end
+      win_idx = port_found ? age_index(win_age) : head;
+      request_valid[p] = port_found;
+      request_addr[p] = port_found && port_is_addr;
+      request_index[p] = win_idx;
+      request_cache[p] = port_found && !port_is_addr ? port_cache_slot : '0;
+      if (!port_found) begin
+        read_address[p] = '0;
+      end else if (port_is_addr) begin
+        read_address[p] = base_source[win_idx];
+      end else begin
+        read_address[p] = data_source[win_idx];
       end
     end
   end

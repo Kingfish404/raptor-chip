@@ -85,6 +85,7 @@ module rapt_fpu_fp_to_int #(
     sticky_c = 1'b0;
     invalid_c = s1_nan_q || s1_inf_q || s1_exponent_q > 63;
     shift_count_c = 0;
+    sticky_index_c = 0;
     if (!s1_zero_q && !s1_nan_q && !s1_inf_q) begin
       if (s1_exponent_q >= $signed({8'b0, s1_frac_bits_q})) begin
         shift_count_c = int'(s1_exponent_q) - int'(s1_frac_bits_q);

@@ -84,8 +84,13 @@ module rapt_l1d_tags #(
   localparam int EntryBits = L1dTagW + L1D_LINE_SIZE;
   logic line_live[L1D_N_WAYS][L1D_SIZE];
   logic line_dirty_q[L1D_N_WAYS][L1D_SIZE];
+  logic [L1D_N_WAYS-1:0] live_by_set[L1D_SIZE];
+  logic [L1D_N_WAYS-1:0] dirty_by_set[L1D_SIZE];
   logic [L1D_N_WAYS-1:0] dirty_next[L1D_SIZE];
   logic [L1D_SIZE-1:0] dirty_set_q, dirty_set_next;
+  logic [L1D_N_WAYS-1:0] live_at_load, live_at_store, live_at_probe;
+  logic [L1D_N_WAYS-1:0] live_at_inspect, live_at_update;
+  logic [L1D_N_WAYS-1:0] dirty_at_addr, dirty_at_inspect, dirty_at_update, dirty_at_clear;
   logic [L1D_LINE_SIZE-1:0] valid_addr[L1D_N_WAYS], valid_waddr[L1D_N_WAYS];
   logic [L1D_LINE_SIZE-1:0] valid_probe[L1D_N_WAYS], valid_inspect[L1D_N_WAYS];
   logic [L1D_LINE_SIZE-1:0] valid_update[L1D_N_WAYS];
@@ -99,6 +104,25 @@ module rapt_l1d_tags #(
   logic [L1D_LEN-1:0] load_read_idx, store_read_idx;
   assign load_read_idx = SharedReadPorts && probe_read ? probe_idx : addr_idx;
   assign store_read_idx = SharedReadPorts && inspect_read ? inspect_set : waddr_idx;
+
+  for (genvar set_idx = 0; set_idx < L1D_SIZE; set_idx++) begin : g_set_vec
+    for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_way_bit
+      assign live_by_set[set_idx][way] = line_live[way][set_idx];
+      assign dirty_by_set[set_idx][way] = line_dirty_q[way][set_idx];
+    end
+  end
+
+  assign live_at_load = live_by_set[load_read_idx];
+  assign live_at_store = live_by_set[store_read_idx];
+  assign live_at_probe = live_by_set[probe_idx];
+  assign live_at_inspect = live_by_set[inspect_set];
+  assign live_at_update = live_by_set[l1d_idx];
+
+  assign dirty_at_addr = dirty_by_set[addr_idx];
+  assign dirty_at_inspect = dirty_by_set[inspect_set];
+  assign dirty_at_update = dirty_by_set[l1d_idx];
+  assign dirty_at_clear = dirty_by_set[clear_line_idx];
+
   logic [L1dTagW-1:0] tag_addr_data[L1D_N_WAYS];
   logic [L1dTagW-1:0] tag_waddr_data[L1D_N_WAYS];
   logic [L1dTagW-1:0] tag_probe_data[L1D_N_WAYS];
@@ -148,13 +172,13 @@ module rapt_l1d_tags #(
   // The accepted load owns this read independently of store/refill probes.
   assign load_victim_tag = tag_addr_data[ld_fill_way];
   assign load_victim_valid = |valid_addr[ld_fill_way];
-  assign load_victim_dirty = line_dirty_q[ld_fill_way][addr_idx];
+  assign load_victim_dirty = dirty_at_addr[ld_fill_way];
   assign inspect_tag = tag_inspect_data[inspect_way];
   assign inspect_valid = valid_inspect[inspect_way];
   assign inspect_dirty = dirty_inspect[inspect_way];
   // The line summary is maintained with the word mask. Arbitration needs
   // only this bit; keep the full mask selection off its combinational path.
-  assign inspect_dirty_any = line_dirty_q[inspect_way][inspect_set];
+  assign inspect_dirty_any = dirty_at_inspect[inspect_way];
   assign update_allowed = !update_blocked;
   // Reduce the registered clear-set/dirty state before the common enable.
   // Writeback arbitration may arrive late; it must not traverse every line's
@@ -173,13 +197,15 @@ module rapt_l1d_tags #(
   assign clear_blocked = |(clear_set & dirty_set_q);
 
   if (WriteBack && DirtySkip) begin : g_dirty_select
+    logic [L1D_N_WAYS-1:0] first_dirty_ways;
     always_comb begin
       first_dirty_set = '0;
       for (int set_idx = L1D_SIZE - 1; set_idx >= 0; set_idx--)
       if (dirty_set_q[set_idx]) first_dirty_set = L1D_LEN'(set_idx);
+      first_dirty_ways = dirty_by_set[first_dirty_set];
       first_dirty_way = '0;
       for (int way = L1D_N_WAYS - 1; way >= 0; way--)
-      if (line_dirty_q[way][first_dirty_set]) first_dirty_way = L1dWayW'(way);
+      if (first_dirty_ways[way]) first_dirty_way = L1dWayW'(way);
     end
   end else begin : g_no_dirty_select
     assign first_dirty_set = '0;
@@ -189,11 +215,11 @@ module rapt_l1d_tags #(
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_dirty_conflict
     always_comb begin
       dirty_conflict[way] = 1'b0;
-      if (l1d_update && line_dirty_q[way][l1d_idx]) begin
+      if (l1d_update && dirty_at_update[way]) begin
         if (l1d_valid_u) begin
           if (l1d_way == L1dWayW'(way))
             dirty_conflict[way] = !update_tag_match[way]
-              || line_update
+                || line_update
                 || (!line_update && !update_dirty && dirty_update[way][l1d_off]);
           else dirty_conflict[way] = update_tag_match[way];
         end else
@@ -282,29 +308,37 @@ module rapt_l1d_tags #(
           .update_way(update_way)
       );
     end else begin : g_plru
+      // A cache hit and an array update are mutually exclusive in rapt_l1d,
+      // allowing single-port indexed PLRU updates in distributed RAM.
+      logic [L1D_LEN-1:0] plru_set[1];
+      logic [L1dWayW-1:0] plru_way[1];
+      assign plru_set[0] = l1d_update ? update_set[1] : update_set[0];
+      assign plru_way[0] = l1d_update ? update_way[1] : update_way[0];
       rapt_cache_plru #(
           .Ways(L1D_N_WAYS),
-          .SetBits(L1D_LEN)
+          .SetBits(L1D_LEN),
+          .UpdatePorts(1)
       ) u_policy (
           .clock(clock),
           .reset(reset),
           .invalidate(`RAPT_SFENCE_KEEP_STATE < 1 && fence_time),
           .read_set(read_set),
           .victim(victims),
-          .update_valid(update_valid),
-          .update_set(update_set),
-          .update_way(update_way)
+          .update_valid(|update_valid),
+          .update_set(plru_set),
+          .update_way(plru_way)
       );
+      `RAPT_SVA(clock, reset, L1D_PLRU_EXCLUSIVE_UPDATES, !(&update_valid))
+      `RAPT_SVA_IMPLY(clock, reset, L1D_PLRU_REGISTERED_ADDRESS, load_hit, !l1d_update)
     end
   end else begin : g_toggle
     assign victims[0] = L1dWayW'(L1D_N_WAYS == 2 && load_replace);
     assign victims[1] = L1dWayW'(L1D_N_WAYS == 2 && store_replace);
   end
 
-
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_probe
     assign probe_way_hit[way] = (tag_probe_data[way] == probe_tag) & valid_probe[way][probe_offset];
-    assign clear_line_dirty_way[way] = clear_tag_match[way] && line_dirty_q[way][clear_line_idx];
+    assign clear_line_dirty_way[way] = clear_tag_match[way] && dirty_at_clear[way];
   end
 
   // Parallel write-side tag comparison (per-line tag)
@@ -336,7 +370,6 @@ module rapt_l1d_tags #(
       .victim(victims[1]),
       .selected(store_fill_way)
   );
-
 
   // Only one set can be updated per cycle. Select its tags before comparing,
   // rather than broadcasting the incoming tag into one comparator per set.
@@ -371,6 +404,24 @@ module rapt_l1d_tags #(
     end
   end
 
+  // Pre-decode 1D set and way strobes once so 2,048 (way, set) cells under
+  // -resource_sharing off do not replicate 6-bit and 5-bit address decoders.
+  logic [L1D_SIZE-1:0] clear_set_base, clear_line_set_hit, update_set_hit, clean_set_hit;
+  logic [L1D_N_WAYS-1:0] live_write_way, live_scrub_way, dirty_write_any, clean_way_hit;
+  for (genvar set_idx = 0; set_idx < L1D_SIZE; set_idx++) begin : g_set_dec
+    assign clear_set_base[set_idx] = clear_enable && clear_set[set_idx] && update_allowed;
+    assign clear_line_set_hit[set_idx] = clear_line_valid && (clear_line_idx == L1D_LEN'(set_idx));
+    assign update_set_hit[set_idx] = (l1d_idx == L1D_LEN'(set_idx));
+    assign clean_set_hit[set_idx] = clean_valid && (inspect_set == L1D_LEN'(set_idx));
+  end
+  for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_way_dec
+    assign live_write_way[way] = update_enable && l1d_valid_u && (l1d_way == L1dWayW'(way));
+    assign live_scrub_way[way] = update_enable && l1d_valid_u && (l1d_way != L1dWayW'(way))
+        && update_tag_match[way];
+    assign dirty_write_any[way] = |dirty_write_data[way];
+    assign clean_way_hit[way] = (inspect_way == L1dWayW'(way));
+  end
+
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_word_state
     logic [L1D_LINE_SIZE-1:0] raw_dirty_update, raw_dirty_inspect;
     if (WriteBack) begin : g_dirty_words
@@ -382,23 +433,18 @@ module rapt_l1d_tags #(
       assign raw_dirty_update = '0;
       assign raw_dirty_inspect = '0;
     end
-    assign valid_addr[way] = line_live[way][load_read_idx]
-        ? entry_addr[way][L1D_LINE_SIZE-1:0] : '0;
-    assign valid_waddr[way] = line_live[way][store_read_idx]
-        ? entry_waddr[way][L1D_LINE_SIZE-1:0] : '0;
-    assign valid_probe[way] = line_live[way][probe_idx]
-        ? entry_probe[way][L1D_LINE_SIZE-1:0] : '0;
-    assign valid_inspect[way] = line_live[way][inspect_set]
-        ? entry_inspect[way][L1D_LINE_SIZE-1:0] : '0;
-    assign valid_update[way] = line_live[way][l1d_idx]
-        ? entry_update[way][L1D_LINE_SIZE-1:0] : '0;
-    assign dirty_inspect[way] = line_dirty_q[way][inspect_set] ? raw_dirty_inspect : '0;
-    assign dirty_update[way] = line_dirty_q[way][l1d_idx] ? raw_dirty_update : '0;
+    assign valid_addr[way] = live_at_load[way] ? entry_addr[way][L1D_LINE_SIZE-1:0] : '0;
+    assign valid_waddr[way] = live_at_store[way] ? entry_waddr[way][L1D_LINE_SIZE-1:0] : '0;
+    assign valid_probe[way] = live_at_probe[way] ? entry_probe[way][L1D_LINE_SIZE-1:0] : '0;
+    assign valid_inspect[way] = live_at_inspect[way] ? entry_inspect[way][L1D_LINE_SIZE-1:0] : '0;
+    assign valid_update[way] = live_at_update[way] ? entry_update[way][L1D_LINE_SIZE-1:0] : '0;
+    assign dirty_inspect[way] = dirty_at_inspect[way] ? raw_dirty_inspect : '0;
+    assign dirty_update[way] = dirty_at_update[way] ? raw_dirty_update : '0;
 `ifndef SYNTHESIS
 `ifdef RAPT_SVA_ACTIVE
     wire dirty_is_valid = (dirty_update[way] & ~valid_update[way]) == '0
         && (dirty_inspect[way] & ~valid_inspect[way]) == '0;
-    wire dirty_inspect_matches = line_dirty_q[way][inspect_set] == (|dirty_inspect[way]);
+    wire dirty_inspect_matches = dirty_at_inspect[way] == (|dirty_inspect[way]);
     `RAPT_SVA(clock, reset, L1D_TAG_DIRTY_VALID, dirty_is_valid)
     `RAPT_SVA_IMPLY(clock, reset, L1D_TAG_CLEAN_FULL_LINE, clean_valid, clean_mask == '1)
     `RAPT_SVA(clock, reset, L1D_TAG_DIRTY_INSPECT, dirty_inspect_matches)
@@ -408,31 +454,27 @@ module rapt_l1d_tags #(
         && (dirty_inspect[way] & ~valid_inspect[way]) == '0);
     assert property (@(posedge clock) disable iff (reset) clean_valid |-> clean_mask == '1);
     assert property (@(posedge clock) disable iff (reset)
-      line_dirty_q[way][inspect_set] == (|dirty_inspect[way]));
+      dirty_at_inspect[way] == (|dirty_inspect[way]));
 `endif
 `endif
 
     for (genvar set_idx = 0; set_idx < L1D_SIZE; set_idx++) begin : g_set_state
       logic line_clear;
-      assign line_clear = (clear_enable && clear_set[set_idx] && update_allowed)
-          || (clear_line_valid && clear_line_idx == L1D_LEN'(set_idx) && clear_tag_match[way]
+      assign line_clear = clear_set_base[set_idx]
+          || (clear_line_set_hit[set_idx] && clear_tag_match[way]
               && (!WriteBack || !line_dirty_q[way][set_idx]));
       always_ff @(posedge clock) begin
         if (reset || line_clear) line_live[way][set_idx] <= 1'b0;
-        else if (update_enable && l1d_valid_u && l1d_idx == L1D_LEN'(set_idx)) begin
-          if (l1d_way == L1dWayW'(way)) line_live[way][set_idx] <= 1'b1;
-          // Scrub the entire duplicate line, including other offsets.
-          else if (update_tag_match[way]) line_live[way][set_idx] <= 1'b0;
-        end
+        else if (update_set_hit[set_idx] && (live_write_way[way] || live_scrub_way[way]))
+          line_live[way][set_idx] <= live_write_way[way];
       end
       if (WriteBack) begin : g_dirty_state
         always_comb begin
           dirty_next[set_idx][way] = line_dirty_q[way][set_idx];
           if (reset || line_clear) dirty_next[set_idx][way] = 1'b0;
-          else if (word_write[way] && l1d_idx == L1D_LEN'(set_idx))
-            dirty_next[set_idx][way] = |dirty_write_data[way];
-          else if (clean_valid && inspect_set == L1D_LEN'(set_idx) && inspect_way == L1dWayW'(way))
-            dirty_next[set_idx][way] = 1'b0;
+          else if (word_write[way] && update_set_hit[set_idx])
+            dirty_next[set_idx][way] = dirty_write_any[way];
+          else if (clean_set_hit[set_idx] && clean_way_hit[way]) dirty_next[set_idx][way] = 1'b0;
         end
         always_ff @(posedge clock) line_dirty_q[way][set_idx] <= dirty_next[set_idx][way];
       end else begin : g_no_dirty

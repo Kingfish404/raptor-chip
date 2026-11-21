@@ -160,6 +160,8 @@ def main():
             (directory / 'source-fragment.json').write_text(json.dumps(provenance, indent=2) + '\n')
             rtl = [ROOT / 'rtl/uncore/debug/rapt_debug_arbiter.sv', cone,
                    FORMAL / 'formal_debug_arbiter.sv']
+        elif block == 'dm':
+            rtl = [ROOT / 'rtl/rapt_pkg.sv', dut]
         else:
             rtl = [dut]
         read = ('plugin -i slang\nread_slang --threads 1 --single-unit '

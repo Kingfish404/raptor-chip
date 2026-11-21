@@ -37,7 +37,9 @@ module rapt_vpu_csr #(
     input logic exec_fault,
     input logic exec_fof,
     input logic [$clog2(VLEN)-1:0] exec_vstart,
+    /* verilator lint_off UNUSEDSIGNAL */
     input logic [XLEN-1:0] exec_vl,
+    /* verilator lint_on UNUSEDSIGNAL */
     input logic exec_saturated,
 
     output logic [XLEN-1:0] vtype,
@@ -49,14 +51,21 @@ module rapt_vpu_csr #(
     output logic dirty
 );
   localparam int StartBits = $clog2(VLEN);
-  logic [XLEN-1:0] next_vtype;
-  // Geometry and vill are encoded in next_vtype; this owner only commits it.
+  localparam int VlBits = $clog2(VLEN) + 1;
+  // Geometry and vill are encoded in next_vtype; upper WARL bits stay zero.
   /* verilator lint_off UNUSEDSIGNAL */
+  logic [XLEN-1:0] next_vtype;
   logic [XLEN-1:0] next_max;
   logic next_vill;
   /* verilator lint_on UNUSEDSIGNAL */
+  logic vill_q;
+  logic [7:0] vtype_low_q;
+  logic [VlBits-1:0] vl_q;
   logic cfg_fire, csr_fire, exec_fire;
   logic csr_exists, csr_readonly;
+
+  assign vtype = {vill_q, {(XLEN - 9){1'b0}}, vtype_low_q};
+  assign vl = XLEN'(vl_q);
 
   rapt_vpu_vtype #(
       .XLEN(XLEN),
@@ -99,15 +108,17 @@ module rapt_vpu_csr #(
 
   always_ff @(posedge clock) begin
     if (reset) begin
-      vtype <= {1'b1, {(XLEN-1){1'b0}}};
-      vl <= '0;
+      vill_q <= 1'b1;
+      vtype_low_q <= 8'b0;
+      vl_q <= '0;
       vstart <= '0;
       vxrm <= '0;
       vxsat <= 1'b0;
     end else begin
       if (cfg_fire) begin
-        vtype <= next_vtype;
-        vl <= cfg_result;
+        vill_q <= next_vtype[XLEN-1];
+        vtype_low_q <= next_vtype[7:0];
+        vl_q <= cfg_result[VlBits-1:0];
         vstart <= '0;
       end
       if (csr_fire) begin
@@ -121,7 +132,7 @@ module rapt_vpu_csr #(
       end
       if (exec_fire) begin
         vstart <= exec_fault ? exec_vstart : '0;
-        if (exec_fof && !exec_fault) vl <= exec_vl;
+        if (exec_fof && !exec_fault) vl_q <= exec_vl[VlBits-1:0];
         vxsat <= vxsat || exec_saturated;
       end
     end

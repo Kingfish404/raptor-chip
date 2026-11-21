@@ -384,7 +384,8 @@ module rvfi_platform_pma #(
           || (byte_address >= 33'h010000000 && byte_address < 33'h010012000)
           || (byte_address >= 33'h011000000 && byte_address < 33'h012000000)
           || (byte_address >= 33'h018000000 && byte_address < 33'h019000000)
-          || (byte_address >= 33'h021000000 && byte_address < 33'h021200000))
+          || (byte_address >= 33'h021000000 && byte_address < 33'h021200000)
+          || (byte_address >= 33'h041000000 && byte_address < 33'h060000000))
         attributes = 3'b110;
     end
   endfunction

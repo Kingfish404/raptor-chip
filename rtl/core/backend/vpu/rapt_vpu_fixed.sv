@@ -12,80 +12,143 @@ module rapt_vpu_fixed (
     output logic [63:0] result,
     output logic saturated
 );
-  logic [6:0] bits, source_bits, shift;
-  logic [63:0] mask, source_mask, au, bu;
-  logic signed [63:0] sa, sb;
-  logic signed [127:0] value, rounded, minimum, maximum;
   logic clip, signed_op, saturating;
-  function automatic logic signed [127:0] roundoff(input logic signed [127:0] v,
-                                                   input logic [6:0] amount, input logic [1:0] rm);
-    logic [127:0] low_mask;
-    logic discarded, half, lower, increment;
-    logic signed [127:0] q;
-    low_mask = (128'd1 << amount)-1'b1;
-    q = v >>> amount;
-    discarded = |(v & low_mask);
-    half = amount != 0 && v[amount-1'b1];
-    lower = |(v & (low_mask >> 1));
-    case (rm)
-      0: increment = half;
-      1: increment = half && (lower || q[0]);
-      2: increment = 0;
-      3: increment = discarded && !q[0];
-      default: increment = 0;
-    endcase
-    return q + 128'(increment);
-  endfunction
+  logic [5:0] shift_mask, shift_amount;
+  logic [63:0] mask, au, bu, low_mask;
+  logic signed [63:0] sa, sb;
+  logic signed [64:0] shift_in, shift_q;
+  logic signed [65:0] add_a, add_b, add_sum, mul_raw_q, mul_q;
+  logic signed [65:0] q, rounded, minimum, maximum;
+  logic shift_half, shift_lower, mul_pos_ovf, mul_neg_ovf, mul_half, mul_lower;
+  logic half, lower, discarded, increment, underflow, overflow;
+
   always_comb begin
-    bits = 7'(8 << sew);
-    clip = op == 10 || op == 11;
-    source_bits = clip ? bits << 1 : bits;
+    clip = op == 4'd10 || op == 4'd11;
+    signed_op = op[0] || op == 4'd12;
+    saturating = op <= 4'd3 || clip || op == 4'd12;
     case (sew)
-      0: begin
+      2'd0: begin
         mask = 64'h0000_0000_0000_00ff;
-        source_mask = clip ? 64'h0000_0000_0000_ffff : mask;
+        bu = {56'b0, b[7:0]};
+        sb = {{56{b[7]}}, b[7:0]};
+        au = clip ? {48'b0, a[15:0]} : {56'b0, a[7:0]};
+        sa = clip ? {{48{a[15]}}, a[15:0]} : {{56{a[7]}}, a[7:0]};
+        shift_mask = clip ? 6'h0f : 6'h07;
+        minimum = signed_op ? -66'sd128 : 66'sd0;
+        maximum = signed_op ? 66'sd127 : 66'sd255;
       end
-      1: begin
+      2'd1: begin
         mask = 64'h0000_0000_0000_ffff;
-        source_mask = clip ? 64'h0000_0000_ffff_ffff : mask;
+        bu = {48'b0, b[15:0]};
+        sb = {{48{b[15]}}, b[15:0]};
+        au = clip ? {32'b0, a[31:0]} : {48'b0, a[15:0]};
+        sa = clip ? {{32{a[31]}}, a[31:0]} : {{48{a[15]}}, a[15:0]};
+        shift_mask = clip ? 6'h1f : 6'h0f;
+        minimum = signed_op ? -66'sd32768 : 66'sd0;
+        maximum = signed_op ? 66'sd32767 : 66'sd65535;
       end
-      2: begin
+      2'd2: begin
         mask = 64'h0000_0000_ffff_ffff;
-        source_mask = clip ? 64'hffff_ffff_ffff_ffff : mask;
+        bu = {32'b0, b[31:0]};
+        sb = {{32{b[31]}}, b[31:0]};
+        au = clip ? a : {32'b0, a[31:0]};
+        sa = clip ? $signed(a) : {{32{a[31]}}, a[31:0]};
+        shift_mask = clip ? 6'h3f : 6'h1f;
+        minimum = signed_op ? -66'sd2147483648 : 66'sd0;
+        maximum = signed_op ? 66'sd2147483647 : 66'sh0_0000_0000_ffff_ffff;
       end
       default: begin
         mask = 64'hffff_ffff_ffff_ffff;
-        source_mask = clip ? 64'b0 : mask;
+        bu = b;
+        sb = $signed(b);
+        au = clip ? 64'b0 : a;
+        sa = clip ? 64'sd0 : $signed(a);
+        shift_mask = 6'h3f;
+        minimum = signed_op ? 66'sh3_8000_0000_0000_0000 : 66'sd0;
+        maximum = signed_op ? 66'sh0_7fff_ffff_ffff_ffff : 66'sh0_ffff_ffff_ffff_ffff;
       end
     endcase
-    au = a & source_mask;
-    bu = b & mask;
-    sa = $signed(au << (64-source_bits)) >>> (64-source_bits);
-    sb = $signed(bu << (64-bits)) >>> (64-bits);
-    signed_op = op[0] || op == 12;
-    saturating = op <= 3 || clip || op == 12;
-    minimum = signed_op ? -(128'sd1 << (bits-1'b1)) : 128'sd0;
-    maximum = signed_op ? (128'sd1 << (bits-1'b1))-1'b1 : $signed({64'b0,mask});
-    value = 0;
-    shift = 0;
+
+    add_a = op[0] ? {{2{sa[63]}}, sa} : {2'b00, au};
+    add_b = op[0] ? {{2{sb[63]}}, sb} : {2'b00, bu};
+    add_sum = op[1] ? (add_a - add_b) : (add_a + add_b);
+
+    shift_amount = b[5:0] & shift_mask;
+    shift_in = $signed({op[0] && sa[63], op[0] ? sa : au});
+    shift_q = shift_in >>> shift_amount;
+    low_mask = (64'd1 << shift_amount) - 64'd1;
+    shift_half = shift_amount != 6'd0 && au[shift_amount - 6'd1];
+    shift_lower = |(au & (low_mask >> 1));
+
+    case (sew)
+      2'd0: begin
+        mul_pos_ovf = !product[127] && (|product[126:71]);
+        mul_neg_ovf = product[127] && !(&product[126:71]);
+        mul_raw_q = $signed({product[127], product[71:7]});
+        mul_half = product[6];
+        mul_lower = |product[5:0];
+      end
+      2'd1: begin
+        mul_pos_ovf = !product[127] && (|product[126:79]);
+        mul_neg_ovf = product[127] && !(&product[126:79]);
+        mul_raw_q = $signed({product[127], product[79:15]});
+        mul_half = product[14];
+        mul_lower = |product[13:0];
+      end
+      2'd2: begin
+        mul_pos_ovf = !product[127] && (|product[126:95]);
+        mul_neg_ovf = product[127] && !(&product[126:95]);
+        mul_raw_q = $signed({product[127], product[95:31]});
+        mul_half = product[30];
+        mul_lower = |product[29:0];
+      end
+      default: begin
+        mul_pos_ovf = 1'b0;
+        mul_neg_ovf = 1'b0;
+        mul_raw_q = $signed({product[127], product[127:63]});
+        mul_half = product[62];
+        mul_lower = |product[61:0];
+      end
+    endcase
+    if (mul_pos_ovf) mul_q = $signed({2'b01, 63'b0, mul_raw_q[0]});
+    else if (mul_neg_ovf) mul_q = $signed({2'b10, 63'b0, mul_raw_q[0]});
+    else mul_q = mul_raw_q;
+
+    q = 66'sd0;
+    half = 1'b0;
+    lower = 1'b0;
     case (op)
-      0: value = $signed({64'b0,au}) + $signed({64'b0,bu});
-      1: value = 128'(sa) + 128'(sb);
-      2: value = $signed({64'b0,au}) - $signed({64'b0,bu});
-      3: value = 128'(sa) - 128'(sb);
-      4: begin value = $signed({64'b0,au}) + $signed({64'b0,bu}); shift = 1; end
-      5: begin value = 128'(sa) + 128'(sb); shift = 1; end
-      6: begin value = $signed({64'b0,au}) - $signed({64'b0,bu}); shift = 1; end
-      7: begin value = 128'(sa) - 128'(sb); shift = 1; end
-      8, 10: begin value = $signed({64'b0,au}); shift = {1'b0,b[5:0]} & (source_bits-1'b1); end
-      9, 11: begin value = 128'(sa); shift = {1'b0,b[5:0]} & (source_bits-1'b1); end
-      12: begin value = $signed(product); shift = bits-1'b1; end
+      4'd0, 4'd1, 4'd2, 4'd3: q = add_sum;
+      4'd4, 4'd5, 4'd6, 4'd7: begin
+        q = add_sum >>> 1;
+        half = add_sum[0];
+      end
+      4'd8, 4'd9, 4'd10, 4'd11: begin
+        q = $signed({shift_q[64], shift_q});
+        half = shift_half;
+        lower = shift_lower;
+      end
+      4'd12: begin
+        q = mul_q;
+        half = mul_half;
+        lower = mul_lower;
+      end
       default: ;
     endcase
-    rounded = roundoff(value,shift,vxrm);
-    saturated = saturating && (rounded < minimum || rounded > maximum);
-    if (saturating && rounded < minimum) result = minimum[63:0] & mask;
-    else if (saturating && rounded > maximum) result = maximum[63:0] & mask;
+
+    discarded = half || lower;
+    case (vxrm)
+      2'd0: increment = half;
+      2'd1: increment = half && (lower || q[0]);
+      2'd2: increment = 1'b0;
+      default: increment = discarded && !q[0];
+    endcase
+    rounded = q + $signed({65'b0, increment});
+    underflow = saturating && (rounded < minimum);
+    overflow = saturating && (rounded > maximum);
+    saturated = underflow || overflow;
+    if (underflow) result = minimum[63:0] & mask;
+    else if (overflow) result = maximum[63:0] & mask;
     else result = rounded[63:0] & mask;
   end
 endmodule

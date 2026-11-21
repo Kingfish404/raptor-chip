@@ -296,7 +296,7 @@ module rapt_l2 #(
     C_ERROR
   } cbo_state_t;
   cbo_state_t cbo_state;
-  (* max_fanout = -1 *) logic [IndexBits-1:0] cbo_active_set;
+  logic [IndexBits-1:0] cbo_active_set;
   logic [WayBits-1:0] cbo_way;
   logic [L2_LINE_LEN-1:0] cbo_word;
   logic [L2_N_WAYS*22-1:0] cbo_entries_q, dir_scan_entries;
@@ -1712,7 +1712,7 @@ module rapt_l2 #(
   } wbuf_ent_t;
   wbuf_ent_t wbuf[WbufDepth];
   logic [WbufPtrW-1:0] aw_wptr;  // next AW capture slot
-  (* max_fanout = -1 *) logic [WbufPtrW-1:0] w_wptr;  // next W capture slot
+  logic [WbufPtrW-1:0] w_wptr;   // next W capture slot
   logic [WbufPtrW-1:0] d_rptr;  // drain head slot
   logic put_push_ready, put_pop_valid, burst_put_pop_valid, burst_forward_pop_valid;
   logic put_claim_fire;

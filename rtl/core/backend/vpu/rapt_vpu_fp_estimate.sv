@@ -1,30 +1,16 @@
 // RVV 1.0 vfrec7/vfrsqrt7 raw element estimates. Lookup constants are the
 // normative vfrec7.adoc and vfrsqrt7.adoc tables in riscvarchive/riscv-v-spec.
 // Combinational leaf: caller owns instruction admission, masking and flags.
-module rapt_vpu_fp_estimate #(
-    parameter bit Double = 1
-) (
-    /* verilator lint_off UNUSEDSIGNAL */
+/* verilator lint_off DECLFILENAME */
+module rapt_vpu_fp_estimate_multi (
+    input logic double_precision,
     input logic [63:0] operand,
-    /* verilator lint_on UNUSEDSIGNAL */
     input logic reciprocal_sqrt,
     input logic [2:0] rm,
     output logic [63:0] result,
     output logic [4:0] flags,
     output logic illegal
 );
-  localparam int F = Double ? 52 : 23;
-  localparam int E = Double ? 11 : 8;
-  localparam int Bias = (1 << (E - 1)) - 1;
-  localparam int MaxExp = (1 << E) - 1;
-  logic sign_bit;
-  logic [E-1:0] exponent;
-  logic [F-1:0] fraction;
-  logic [6:0] normalized_fraction;
-  logic [6:0] index_value, estimate;
-  logic [F:0] significand;
-  logic [F+E:0] encoded;
-  int normalized_exponent, output_exponent, leading;
   function automatic logic [6:0] reciprocal_table(input logic [6:0] index_bits);
     case (index_bits)
       7'd0: reciprocal_table = 7'd127;
@@ -155,9 +141,10 @@ module rapt_vpu_fp_estimate #(
       7'd125: reciprocal_table = 7'd1;
       7'd126: reciprocal_table = 7'd1;
       7'd127: reciprocal_table = 7'd0;
-      default: reciprocal_table = 0;
+      default: reciprocal_table = 7'd0;
     endcase
   endfunction
+
   function automatic logic [6:0] rsqrt_table(input logic [6:0] index_bits);
     case (index_bits)
       7'd0: rsqrt_table = 7'd52;
@@ -288,53 +275,105 @@ module rapt_vpu_fp_estimate #(
       7'd125: rsqrt_table = 7'd55;
       7'd126: rsqrt_table = 7'd54;
       7'd127: rsqrt_table = 7'd53;
-      default: rsqrt_table = 0;
+      default: rsqrt_table = 7'd0;
     endcase
   endfunction
+
+  logic sign_bit, exp_zero, exp_max, frac_zero;
+  logic [10:0] exp11, max_exp, out_exp_bits;
+  /* verilator lint_off UNUSEDSIGNAL */
+  logic [51:0] frac52, shifted_frac;
+  /* verilator lint_on UNUSEDSIGNAL */
+  logic [5:0] lzc;
+  logic [6:0] norm_frac, index_value, estimate;
+  logic signed [13:0] norm_exp, rsqrt_num, rec_exp, out_exp;
+  logic [8:0] frac_top9;
+  logic [63:0] encoded;
+
   always_comb begin
-    sign_bit = operand[F+E];
-    exponent = operand[F +: E];
-    fraction = operand[F-1:0];
-    normalized_exponent = int'({1'b0,exponent});
-    normalized_fraction = fraction[F-1 -: 7];
-    leading = 0;
-    for (int b = 0; b < F; b++) if (fraction[b]) leading = b;
-    if (exponent == 0 && fraction != 0) begin
-      normalized_exponent = leading-F+1;
-      normalized_fraction = 7'((fraction << (F-leading)) >> (F-7));
+    sign_bit = double_precision ? operand[63] : operand[31];
+    exp11 = double_precision ? operand[62:52] : {3'b0, operand[30:23]};
+    max_exp = double_precision ? 11'd2047 : 11'd255;
+    frac52 = double_precision ? operand[51:0] : {operand[22:0], 29'b0};
+    exp_zero = exp11 == 11'd0;
+    exp_max = exp11 == max_exp;
+    frac_zero = frac52 == 52'd0;
+
+    lzc = 6'd0;
+    for (int b = 0; b < 52; b++) begin
+      if (frac52[b]) lzc = 6'(51 - b);
     end
-    index_value = reciprocal_sqrt ? {normalized_exponent[0],normalized_fraction[6:1]}
-        : normalized_fraction;
+    shifted_frac = frac52 << lzc;
+    norm_exp = (exp_zero && !frac_zero) ? -14'($signed({1'b0, lzc})) : 14'($signed({1'b0, exp11}));
+    norm_frac = (exp_zero && !frac_zero) ? shifted_frac[50:44] : frac52[51:45];
+
+    index_value = reciprocal_sqrt ? {norm_exp[0], norm_frac[6:1]} : norm_frac;
     estimate = reciprocal_sqrt ? rsqrt_table(index_value) : reciprocal_table(index_value);
-    output_exponent = reciprocal_sqrt ? (3*Bias-1-normalized_exponent) >>> 1
-        : 2*Bias-1-normalized_exponent;
-    significand = {1'b1,estimate,{(F-7){1'b0}}};
-    if (!reciprocal_sqrt && output_exponent <= 0) begin
-      significand = significand >> (1-output_exponent);
-      output_exponent = 0;
+
+    rsqrt_num = (double_precision ? 14'sd3068 : 14'sd380) - norm_exp;
+    rec_exp = (double_precision ? 14'sd2045 : 14'sd253) - norm_exp;
+    out_exp = reciprocal_sqrt ? (rsqrt_num >>> 1) : rec_exp;
+
+    if (!reciprocal_sqrt && out_exp <= 14'sd0) begin
+      out_exp_bits = 11'd0;
+      frac_top9 = (out_exp == 14'sd0) ? {1'b1, estimate, 1'b0} : {2'b01, estimate};
+    end else begin
+      out_exp_bits = out_exp[10:0];
+      frac_top9 = {estimate, 2'b00};
     end
-    encoded = {sign_bit,E'(output_exponent),significand[F-1:0]};
-    flags = 0;
+
+    encoded = double_precision
+        ? {sign_bit, out_exp_bits, frac_top9, 43'b0}
+        : {32'b0, sign_bit, out_exp_bits[7:0], frac_top9, 14'b0};
+    flags = 5'd0;
     // Special values precede finite overflow handling. Signed zero is retained.
-    if (exponent == E'(MaxExp) && fraction != 0) begin
-      encoded = {1'b0,{E{1'b1}},1'b1,{(F-1){1'b0}}};
-      flags = fraction[F-1] ? 5'd0 : 5'd16;
-    end else if (exponent == 0 && fraction == 0) begin
-      encoded = {sign_bit,{E{1'b1}},{F{1'b0}}};
+    if (exp_max && !frac_zero) begin
+      encoded = double_precision ? 64'h7ff8_0000_0000_0000 : 64'h0000_0000_7fc0_0000;
+      flags = frac52[51] ? 5'd0 : 5'd16;
+    end else if (exp_zero && frac_zero) begin
+      encoded = double_precision
+          ? {sign_bit, 11'h7ff, 52'b0}
+          : {32'b0, sign_bit, 8'hff, 23'b0};
       flags = 5'd8;
     end else if (reciprocal_sqrt && sign_bit) begin
-      encoded = {1'b0,{E{1'b1}},1'b1,{(F-1){1'b0}}};
+      encoded = double_precision ? 64'h7ff8_0000_0000_0000 : 64'h0000_0000_7fc0_0000;
       flags = 5'd16;
-    end else if (exponent == E'(MaxExp)) begin
-      encoded = {sign_bit, {(F + E) {1'b0}}};
-    end else if (!reciprocal_sqrt && output_exponent >= MaxExp) begin
+    end else if (exp_max) begin
+      encoded = double_precision ? {sign_bit, 63'b0} : {32'b0, sign_bit, 31'b0};
+    end else if (!reciprocal_sqrt && out_exp >= $signed({3'b0, max_exp})) begin
       flags = 5'd5;
-      if (rm == 1 || (rm == 2 && !sign_bit) || (rm == 3 && sign_bit))
-        encoded = {sign_bit, E'(MaxExp - 1), {F{1'b1}}};
-      else encoded = {sign_bit, {E{1'b1}}, {F{1'b0}}};
+      if (rm == 3'd1 || (rm == 3'd2 && !sign_bit) || (rm == 3'd3 && sign_bit)) begin
+        encoded = double_precision
+            ? {sign_bit, 11'h7fe, {52{1'b1}}}
+            : {32'b0, sign_bit, 8'hfe, {23{1'b1}}};
+      end else begin
+        encoded = double_precision ? {sign_bit, 11'h7ff, 52'b0} : {32'b0, sign_bit, 8'hff, 23'b0};
+      end
     end
-    illegal = rm > 4;
-    result = illegal ? 64'd0 : 64'(encoded);
-    if (illegal) flags = 0;
+    illegal = rm > 3'd4;
+    result = illegal ? 64'd0 : encoded;
+    if (illegal) flags = 5'd0;
   end
+endmodule
+/* verilator lint_on DECLFILENAME */
+
+module rapt_vpu_fp_estimate #(
+    parameter bit Double = 1
+) (
+    input logic [63:0] operand,
+    input logic reciprocal_sqrt,
+    input logic [2:0] rm,
+    output logic [63:0] result,
+    output logic [4:0] flags,
+    output logic illegal
+);
+  rapt_vpu_fp_estimate_multi u_estimate (
+      .double_precision(Double),
+      .operand(operand),
+      .reciprocal_sqrt(reciprocal_sqrt),
+      .rm(rm),
+      .result(result),
+      .flags(flags),
+      .illegal(illegal)
+  );
 endmodule

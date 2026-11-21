@@ -22,6 +22,7 @@
 #define SDHCI_ARGUMENT 0x08u
 #define SDHCI_TRANSFER_MODE 0x0cu
 #define SDHCI_RESPONSE0 0x10u
+#define SDHCI_BUFFER 0x20u
 #define SDHCI_PRESENT_STATE 0x24u
 #define SDHCI_HOST_CONTROL 0x28u
 #define SDHCI_CLOCK_CONTROL 0x2cu
@@ -33,7 +34,10 @@
 #define SDHCI_ADMA_ADDRESS 0x58u
 #define SDHCI_HOST_VERSION 0xfcu
 
+#define SDHCI_SPACE_AVAILABLE 0x00000400u
+#define SDHCI_DATA_AVAILABLE 0x00000800u
 #define SDHCI_SECTOR_BYTES 512u
+#define SDHCI_PIO_MAX_BYTES (65536u * 4u)
 
 void nsim_plic_raise(uint32_t irq);
 
@@ -44,6 +48,12 @@ static struct
     size_t image_size;
     uint8_t regs[0x100];
     uint8_t pci_ecam[QEMU_SDHCI_PCI_ECAM_SIZE];
+    uint8_t pio_buf[SDHCI_PIO_MAX_BYTES];
+    size_t pio_len;
+    size_t pio_pos;
+    uint64_t pio_disk_off;
+    bool pio_read_active;
+    bool pio_write_active;
     bool app_cmd;
     bool warned_no_image;
     bool legacy_byte_addr;
@@ -88,10 +98,14 @@ static void reset_controller(uint8_t mask)
         memset(sdhci.regs, 0, sizeof(sdhci.regs));
         // Card inserted + card state stable + write-protect switch off (writable)
         store32(SDHCI_PRESENT_STATE, 0x01ff0000u);
-        // ADMA2 + High-Speed + SDMA + suspend/resume + 3.3V/1.8V, 52 MHz base clock
-        store32(SDHCI_CAPABILITIES, 0x05e834b4u);
+        // 64-bit + ADMA2 + High-Speed + SDMA + suspend/resume + 3.3V/1.8V, 52 MHz base clock
+        store32(SDHCI_CAPABILITIES, 0x15e834b4u);
         // SD Host Specification Version 3.00
         store16(SDHCI_HOST_VERSION + 2, 0x0002u);
+        sdhci.pio_len = 0;
+        sdhci.pio_pos = 0;
+        sdhci.pio_read_active = false;
+        sdhci.pio_write_active = false;
         sdhci.app_cmd = false;
         sdhci.legacy_byte_addr = true;
     }
@@ -100,7 +114,15 @@ static void reset_controller(uint8_t mask)
         if (mask & 0x02u)
             store32(SDHCI_INT_STAT, load32(SDHCI_INT_STAT) & ~0x00ff0001u);
         if (mask & 0x04u)
-            store32(SDHCI_INT_STAT, load32(SDHCI_INT_STAT) & ~0xff000002u);
+        {
+            sdhci.pio_len = 0;
+            sdhci.pio_pos = 0;
+            sdhci.pio_read_active = false;
+            sdhci.pio_write_active = false;
+            store32(SDHCI_PRESENT_STATE,
+                    load32(SDHCI_PRESENT_STATE) & ~(SDHCI_SPACE_AVAILABLE | SDHCI_DATA_AVAILABLE));
+            store32(SDHCI_INT_STAT, load32(SDHCI_INT_STAT) & ~0xff000032u);
+        }
     }
     sdhci.regs[SDHCI_SOFTWARE_RESET] = 0;
 }
@@ -148,7 +170,8 @@ static bool card_write_bytes(uint64_t disk_off, const uint8_t *src, size_t len)
     return true;
 }
 
-static bool execute_dma_transfer(bool to_card, uint64_t disk_off, size_t total_bytes)
+static bool execute_dma_buffer(bool to_card, const uint8_t *mem_src, uint64_t disk_off,
+                               size_t total_bytes)
 {
     uint8_t dma_sel = (sdhci.regs[SDHCI_HOST_CONTROL] >> 3) & 0x3u;
     uint8_t bounce[4096];
@@ -156,9 +179,10 @@ static bool execute_dma_transfer(bool to_card, uint64_t disk_off, size_t total_b
     if (dma_sel >= 2u)
     {
         // ADMA2 scatter-gather descriptor table (32-bit or 64-bit)
-        uint64_t desc_pa = load64(SDHCI_ADMA_ADDRESS);
+        uint64_t desc_pa = (dma_sel == 3u) ? load64(SDHCI_ADMA_ADDRESS)
+                                           : (uint64_t)load32(SDHCI_ADMA_ADDRESS);
         size_t rem = total_bytes;
-        uint64_t cur_disk = disk_off;
+        size_t cur_off = 0;
         for (unsigned guard = 0; guard < 4096 && rem > 0; guard++)
         {
             uint8_t entry[12];
@@ -189,18 +213,23 @@ static bool execute_dma_transfer(bool to_card, uint64_t disk_off, size_t total_b
                     if (to_card)
                     {
                         if (!dma_guest_read(buf_pa + pos, bounce, chunk) ||
-                            !card_write_bytes(cur_disk + pos, bounce, chunk))
+                            !card_write_bytes(disk_off + cur_off + pos, bounce, chunk))
+                            return false;
+                    }
+                    else if (mem_src != NULL)
+                    {
+                        if (!dma_guest_write(buf_pa + pos, mem_src + cur_off + pos, chunk))
                             return false;
                     }
                     else
                     {
-                        card_read_bytes(cur_disk + pos, bounce, chunk);
+                        card_read_bytes(disk_off + cur_off + pos, bounce, chunk);
                         if (!dma_guest_write(buf_pa + pos, bounce, chunk))
                             return false;
                     }
                     pos += chunk;
                 }
-                cur_disk += take;
+                cur_off += take;
                 rem -= take;
             }
             else if (act == 3u)
@@ -227,6 +256,11 @@ static bool execute_dma_transfer(bool to_card, uint64_t disk_off, size_t total_b
                 !card_write_bytes(disk_off + pos, bounce, chunk))
                 return false;
         }
+        else if (mem_src != NULL)
+        {
+            if (!dma_guest_write(dma_pa + pos, mem_src + pos, chunk))
+                return false;
+        }
         else
         {
             card_read_bytes(disk_off + pos, bounce, chunk);
@@ -239,22 +273,44 @@ static bool execute_dma_transfer(bool to_card, uint64_t disk_off, size_t total_b
     return true;
 }
 
-// Deliver a short read-data block (SCR, SD status, switch status) to the
-// first ADMA2 descriptor buffer or to the SDMA address.
-static void dma_write_small(uint32_t xfer_cmd, const uint8_t *buf, size_t len)
+static uint32_t start_pio_read(const uint8_t *mem_src, uint64_t disk_off, size_t len)
+{
+    if (len == 0 || len > sizeof(sdhci.pio_buf))
+        return 0x00208000u;
+    if (mem_src != NULL)
+        memcpy(sdhci.pio_buf, mem_src, len);
+    else
+        card_read_bytes(disk_off, sdhci.pio_buf, len);
+    sdhci.pio_len = len;
+    sdhci.pio_pos = 0;
+    sdhci.pio_read_active = true;
+    sdhci.pio_write_active = false;
+    uint32_t present = load32(SDHCI_PRESENT_STATE) & ~SDHCI_SPACE_AVAILABLE;
+    store32(SDHCI_PRESENT_STATE, present | SDHCI_DATA_AVAILABLE);
+    return 0x00000020u;  // Buffer Read Ready
+}
+
+static uint32_t start_pio_write(uint64_t disk_off, size_t len)
+{
+    if (len == 0 || len > sizeof(sdhci.pio_buf))
+        return 0x00208000u;
+    sdhci.pio_disk_off = disk_off;
+    sdhci.pio_len = len;
+    sdhci.pio_pos = 0;
+    sdhci.pio_read_active = false;
+    sdhci.pio_write_active = true;
+    uint32_t present = load32(SDHCI_PRESENT_STATE) & ~SDHCI_DATA_AVAILABLE;
+    store32(SDHCI_PRESENT_STATE, present | SDHCI_SPACE_AVAILABLE);
+    return 0x00000010u;  // Buffer Write Ready
+}
+
+// Deliver a read-data block via ADMA2/SDMA when DMA is enabled, or via the
+// standard SDHCI Buffer Data Port (PIO) when SDHCI_TRNS_DMA is clear.
+static uint32_t deliver_read_block(uint32_t xfer_cmd, const uint8_t *buf, size_t len)
 {
     if (!(xfer_cmd & 0x1u))
-        return;
-    uint64_t pa = load32(SDHCI_DMA_ADDRESS);
-    if (((sdhci.regs[SDHCI_HOST_CONTROL] >> 3) & 0x3u) >= 2u)
-    {
-        uint8_t desc[8];
-        if (!dma_guest_read(load64(SDHCI_ADMA_ADDRESS), desc, sizeof(desc)))
-            return;
-        pa = (uint32_t)desc[4] | ((uint32_t)desc[5] << 8) |
-             ((uint32_t)desc[6] << 16) | ((uint32_t)desc[7] << 24);
-    }
-    dma_guest_write(pa, buf, len);
+        return start_pio_read(buf, 0, len);
+    return execute_dma_buffer(false, buf, 0, len) ? 0x00000002u : 0x00208000u;
 }
 
 static void process_command()
@@ -284,8 +340,7 @@ static void process_command()
         {
             static const uint8_t scr[8] = {0x02, 0x35, 0x80, 0x03, 0x00, 0x00, 0x00, 0x00};
             store32(SDHCI_RESPONSE0, 0x00000920u);
-            dma_write_small(xfer_cmd, scr, sizeof(scr));
-            irq_bits |= 0x00000002u;
+            irq_bits |= deliver_read_block(xfer_cmd, scr, sizeof(scr));
             break;
         }
         case 13:  // ACMD13: SD_STATUS (64 bytes)
@@ -293,8 +348,7 @@ static void process_command()
             uint8_t sd_stat[64];
             memset(sd_stat, 0, sizeof(sd_stat));
             store32(SDHCI_RESPONSE0, 0x00000920u);
-            dma_write_small(xfer_cmd, sd_stat, sizeof(sd_stat));
-            irq_bits |= 0x00000002u;
+            irq_bits |= deliver_read_block(xfer_cmd, sd_stat, sizeof(sd_stat));
             break;
         }
         default:
@@ -325,8 +379,7 @@ static void process_command()
         memset(sw_buf, 0, sizeof(sw_buf));
         sw_buf[13] = 0x02;  // High-Speed supported
         store32(SDHCI_RESPONSE0, 0x00000900u);
-        dma_write_small(xfer_cmd, sw_buf, sizeof(sw_buf));
-        irq_bits |= 0x00000002u;
+        irq_bits |= deliver_read_block(xfer_cmd, sw_buf, sizeof(sw_buf));
         break;
     }
     case 7:   // SELECT_CARD
@@ -368,7 +421,10 @@ static void process_command()
         uint64_t disk_off = sdhci.legacy_byte_addr ? (uint64_t)arg
                                                    : (uint64_t)arg * SDHCI_SECTOR_BYTES;
         size_t nblocks = (cmd_idx == 17) ? 1u : (size_t)blk_cnt;
-        if (!execute_dma_transfer(false, disk_off, nblocks * blk_sz))
+        size_t total = nblocks * blk_sz;
+        if (!(xfer_cmd & 0x1u))
+            irq_bits |= start_pio_read(NULL, disk_off, total);
+        else if (!execute_dma_buffer(false, NULL, disk_off, total))
             irq_bits |= 0x00208000u;
         else
             irq_bits |= 0x00000002u;
@@ -381,7 +437,10 @@ static void process_command()
         uint64_t disk_off = sdhci.legacy_byte_addr ? (uint64_t)arg
                                                    : (uint64_t)arg * SDHCI_SECTOR_BYTES;
         size_t nblocks = (cmd_idx == 24) ? 1u : (size_t)blk_cnt;
-        if (!execute_dma_transfer(true, disk_off, nblocks * blk_sz))
+        size_t total = nblocks * blk_sz;
+        if (!(xfer_cmd & 0x1u))
+            irq_bits |= start_pio_write(disk_off, total);
+        else if (!execute_dma_buffer(true, NULL, disk_off, total))
             irq_bits |= 0x00208000u;
         else
             irq_bits |= 0x00000002u;
@@ -400,6 +459,8 @@ static void process_command()
 static void write_sdhci(paddr_t offset, word_t wdata, char wmask)
 {
     bool command_written = false;
+    bool pio_completed = false;
+    bool pio_failed = false;
     uint32_t int_clear = 0;
     uint8_t sw_rst = 0;
 
@@ -412,6 +473,24 @@ static void write_sdhci(paddr_t offset, word_t wdata, char wmask)
             continue;
 
         uint8_t byte = (uint8_t)(wdata >> (i * 8));
+        if (reg >= SDHCI_BUFFER && reg < SDHCI_BUFFER + 4)
+        {
+            if (sdhci.pio_write_active && sdhci.pio_pos < sdhci.pio_len)
+            {
+                sdhci.pio_buf[sdhci.pio_pos++] = byte;
+                if (sdhci.pio_pos >= sdhci.pio_len)
+                {
+                    sdhci.pio_write_active = false;
+                    store32(SDHCI_PRESENT_STATE,
+                            load32(SDHCI_PRESENT_STATE) & ~SDHCI_SPACE_AVAILABLE);
+                    if (card_write_bytes(sdhci.pio_disk_off, sdhci.pio_buf, sdhci.pio_len))
+                        pio_completed = true;
+                    else
+                        pio_failed = true;
+                }
+            }
+            continue;
+        }
         if (reg >= SDHCI_INT_STAT && reg < SDHCI_INT_STAT + 4)
         {
             int_clear |= (uint32_t)byte << ((reg - SDHCI_INT_STAT) * 8);
@@ -448,20 +527,44 @@ static void write_sdhci(paddr_t offset, word_t wdata, char wmask)
         store32(SDHCI_INT_STAT, stat);
     }
 
+    if (pio_completed)
+        raise_sdhci_irq(0x00000002u);
+    else if (pio_failed)
+        raise_sdhci_irq(0x00208000u);
+
     if (command_written)
         process_command();
 }
 
-static word_t read_sdhci(paddr_t offset)
+static word_t read_sdhci(paddr_t offset, uint8_t rmask)
 {
     uint32_t word_offset = (uint32_t)offset & (sizeof(word_t) - 1u);
     word_t value = 0;
+    bool pio_done = false;
     for (uint32_t i = 0; i + word_offset < sizeof(word_t); i++)
     {
         uint32_t reg = (uint32_t)offset + i;
         if (reg >= sizeof(sdhci.regs))
             break;
-        value |= (word_t)sdhci.regs[reg] << ((word_offset + i) * 8);
+        uint8_t byte = sdhci.regs[reg];
+        if (reg >= SDHCI_BUFFER && reg < SDHCI_BUFFER + 4)
+        {
+            byte = 0;
+            if ((rmask & (1u << i)) != 0 && sdhci.pio_read_active &&
+                sdhci.pio_pos < sdhci.pio_len)
+            {
+                byte = sdhci.pio_buf[sdhci.pio_pos++];
+                if (sdhci.pio_pos >= sdhci.pio_len)
+                    pio_done = true;
+            }
+        }
+        value |= (word_t)byte << ((word_offset + i) * 8);
+    }
+    if (pio_done)
+    {
+        sdhci.pio_read_active = false;
+        store32(SDHCI_PRESENT_STATE, load32(SDHCI_PRESENT_STATE) & ~SDHCI_DATA_AVAILABLE);
+        raise_sdhci_irq(0x00000002u);
     }
     return value;
 }
@@ -562,5 +665,5 @@ void mmio_sdhci_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, wo
     if (is_write)
         write_sdhci(offset, wdata, wmask);
     else if (data != NULL)
-        *data = read_sdhci(offset);
+        *data = read_sdhci(offset, (uint8_t)wmask);
 }

@@ -2,7 +2,6 @@
 
 // One logical tag array, with current, pc+4 and refill comparison reads.
 // The tag-valid flops own bulk invalidation for both tags and word masks.
-(* keep_hierarchy *)
 module rapt_l1i_tagmem #(
     parameter int L1I_LEN  = `RAPT_L1I_LEN,
     parameter int TAG_W    = 22,

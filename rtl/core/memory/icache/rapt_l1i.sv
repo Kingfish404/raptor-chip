@@ -200,6 +200,8 @@ module rapt_l1i #(
   logic cache_detached_q, install_stale_q;
   logic install_valid_q, install_replace_q;
   logic [PADDR_BITS-1:2] install_addr_q;
+  logic [L1I_LEN-1:0] install_valid_idx_q;
+  logic [L1I_LINE_LEN-1:0] install_valid_off_q;
   logic [XLEN-1:0] cache_refill_addr;
   logic [L1iWayW-1:0] install_way_q;
   logic [31:0] install_data_q;
@@ -284,9 +286,10 @@ module rapt_l1i #(
     wire fill_write = l1i_fill_en && install_way_q == L1iWayW'(w);
     for (genvar word_idx = 0; word_idx < L1I_LINE_SIZE; word_idx++) begin : g_word
       logic words[L1iSize];
-      wire selected_word = offset_fetch == L1I_LINE_LEN'(word_idx);
+      wire selected_word = install_valid_off_q == L1I_LINE_LEN'(word_idx);
       always_ff @(posedge clock) begin
-        if (fill_write && (!fill_tag_match[w] || selected_word)) words[idx_fetch] <= selected_word;
+        if (fill_write && (!fill_tag_match[w] || selected_word))
+          words[install_valid_idx_q] <= selected_word;
       end
       assign valid_curr[w][word_idx] = words[addr_idx];
       assign valid_next4[w][word_idx] = words[addr_idx_next4];
@@ -598,6 +601,8 @@ module rapt_l1i #(
   // a current invalidate clears tag/word validity, not the RAM address.
   always_ff @(posedge clock) begin
     install_addr_q <= fetch_addr[PADDR_BITS-1:2];
+    install_valid_idx_q <= fetch_addr[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
+    install_valid_off_q <= fetch_addr[L1I_LINE_LEN+2-1:2];
     install_way_q <= fill_way_r;
     install_data_q <= l1i_fill_data;
     install_replace_q <= ifq_valid[0] == 0;

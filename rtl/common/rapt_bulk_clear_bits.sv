@@ -46,18 +46,27 @@ module rapt_bulk_clear_bits #(
     end
   end
   // One copy for the read-modify-write and one per external read.
+`ifdef SYNTHESIS
+  localparam int PhysGroups = (`RAPT_FPGA_LUTRAM && Groups < 32) ? 32 : Groups;
+`else
+  localparam int PhysGroups = Groups;
+`endif
+  localparam int PhysGroupBits = PhysGroups > 1 ? $clog2(PhysGroups) : 1;
+  wire [PhysGroupBits-1:0] phys_write_group = PhysGroupBits'(write_group);
   for (genvar r = 0; r <= ReadPorts; r++) begin : g_copy
-    (* ram_style = "distributed" *) logic [GroupSize-1:0] words[Groups];
+    logic [GroupSize-1:0] words[PhysGroups];
     logic [IndexBits-1:0] index;
-    always_ff @(posedge clock) if (!clear && write_valid) words[write_group] <= write_word;
+    wire [GroupIndexBits-1:0] read_group = group_of(index);
+    wire [PhysGroupBits-1:0] phys_read_group = PhysGroupBits'(read_group);
+    always_ff @(posedge clock) if (!clear && write_valid) words[phys_write_group] <= write_word;
     if (r == ReadPorts) begin : g_write_read
       assign index = write_index;
-      assign write_old = group_live[group_of(index)] ? words[group_of(index)] : '0;
+      assign write_old = group_live[read_group] ? words[phys_read_group] : '0;
     end else begin : g_external
       logic [GroupSize-1:0] word;
       assign index = read_index[r];
-      assign word = words[group_of(index)];
-      assign read_bit[r] = group_live[group_of(index)] && word[index[GroupBits-1:0]];
+      assign word = words[phys_read_group];
+      assign read_bit[r] = group_live[read_group] && word[index[GroupBits-1:0]];
     end
   end
 endmodule

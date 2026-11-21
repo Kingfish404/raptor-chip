@@ -93,8 +93,12 @@ module rapt_lsu_sq #(
   // ==========================================================================
   logic [SQLen-1:0] sq_head;  // oldest committed (drain point)
   logic [SQLen-1:0] sq_cmt;   // commit boundary: [head,cmt) committed
-  // Allocation point: bound pointer replication across the payload write ports.
-  (* max_fanout = (`RAPT_DISPATCH_WIDTH >= 4 ? -1 : 96) *) logic [SQLen-1:0] sq_tail;
+  logic [SQLen-1:0] sq_tail;  // allocation point
+  // Partitioned registered one-hot write-enable selectors bound payload CE
+  // fanout directly in RTL without synthesis fanout pragmas.
+  logic [SQ_SIZE-1:0] sq_tail_va_oh;
+  logic [SQ_SIZE-1:0] sq_tail_pa_oh;
+  logic [SQ_SIZE-1:0] sq_tail_wd_oh;
   logic [SQ_SIZE-1:0] sq_valid;
   logic [SQ_SIZE-1:0] sq_committed;
   logic sq_alloc_fire;
@@ -280,27 +284,35 @@ module rapt_lsu_sq #(
 
   // A vacant tail may pre-sample payload. Only the allocation valid bit
   // publishes it; flush can discard speculation without enabling these words.
-  always_ff @(posedge clock) begin
-    if (!sq_valid[sq_tail]) begin
-      sq_alu[sq_tail]   <= exu_ioq_bcast.alu[4:0];
-      sq_acquire_q[sq_tail] <= sq_acquire;
+  // Partitioning the write enables across three local one-hot vectors keeps
+  // every enable cone local to its entry and eliminates sq_tail decode muxes.
+  for (genvar i = 0; i < SQ_SIZE; i++) begin : g_sq_payload_write
+    always_ff @(posedge clock) begin
+      if (sq_tail_va_oh[i] && !sq_valid[i]) begin
+        sq_vaddr[i]        <= exu_ioq_bcast.tval;
+        sq_compare_addr[i] <= alloc_compare_addr;
+        sq_next_block[i]   <= alloc_compare_addr[XLEN-1:SqBlockLsb] + 1'b1;
+        sq_prev_block[i]   <= alloc_compare_addr[XLEN-1:SqBlockLsb] - 1'b1;
+      end
+      if (sq_tail_pa_oh[i] && !sq_valid[i]) begin
+        sq_alu[i]           <= exu_ioq_bcast.alu[4:0];
+        sq_acquire_q[i]     <= sq_acquire;
 `ifndef SYNTHESIS
-      sq_dest[sq_tail] <= exu_ioq_bcast.dest;
+        sq_dest[i] <= exu_ioq_bcast.dest;
 `endif
-      sq_vaddr[sq_tail] <= exu_ioq_bcast.tval;      // virtual (forwarding)
-      sq_compare_addr[sq_tail] <= alloc_compare_addr;
-      sq_next_block[sq_tail] <= alloc_compare_addr[XLEN-1:SqBlockLsb] + 1'b1;
-      sq_prev_block[sq_tail] <= alloc_compare_addr[XLEN-1:SqBlockLsb] - 1'b1;
-      sq_paddr[sq_tail] <= exu_ioq_bcast.sq_waddr;  // physical (drain)
-      sq_paddr_hi[sq_tail] <= sq_waddr_hi[XLEN-1:WordOffBits];
-      sq_paddr_third[sq_tail] <= sq_waddr_third[XLEN-1:WordOffBits];
-      sq_pbmt[sq_tail] <= sq_wpbmt;
-      sq_entry_context[sq_tail] <= sq_context;
-      sq_wdata[sq_tail] <= exu_ioq_bcast.sq_wdata;
+        sq_paddr[i]         <= exu_ioq_bcast.sq_waddr;
+        sq_paddr_hi[i]      <= sq_waddr_hi[XLEN-1:WordOffBits];
+        sq_paddr_third[i]   <= sq_waddr_third[XLEN-1:WordOffBits];
+        sq_pbmt[i]          <= sq_wpbmt;
+        sq_entry_context[i] <= sq_context;
+      end
+      if (sq_tail_wd_oh[i] && !sq_valid[i]) begin
+        sq_wdata[i] <= exu_ioq_bcast.sq_wdata;
 `ifndef RAPT_RV64
-      sq_wdata64[sq_tail] <= exu_ioq_bcast.sq_wdata64;
+        sq_wdata64[i] <= exu_ioq_bcast.sq_wdata64;
 `endif
-      sq_fp64[sq_tail] <= exu_ioq_bcast.sq_fp64;
+        sq_fp64[i] <= exu_ioq_bcast.sq_fp64;
+      end
     end
   end
 
@@ -313,15 +325,20 @@ module rapt_lsu_sq #(
     if (reset) sq_valid_next = '0;
   end
 
+  wire [SQLen-1:0] sq_rollback_tail = sq_cmt + SQLen'(sq_commit_fire);
+  wire [SQ_SIZE-1:0] sq_rollback_oh = SQ_SIZE'(1) << sq_rollback_tail;
   always_ff @(posedge clock) begin
     sq_valid <= sq_valid_next;
     if (reset) begin
-      sq_head      <= '0;
-      sq_cmt       <= '0;
-      sq_tail      <= '0;
-      sq_committed <= '0;
-      pmu_sq_full  <= 1'b0;
-      sq_full_r    <= 1'b0;
+      sq_head       <= '0;
+      sq_cmt        <= '0;
+      sq_tail       <= '0;
+      sq_tail_va_oh <= SQ_SIZE'(1);
+      sq_tail_pa_oh <= SQ_SIZE'(1);
+      sq_tail_wd_oh <= SQ_SIZE'(1);
+      sq_committed  <= '0;
+      pmu_sq_full   <= 1'b0;
+      sq_full_r     <= 1'b0;
       // SQ payload arrays (alu/dest/vaddr/paddr/wdata) are intentionally NOT
       // reset: the store FSM only reads sq_*[sq_head] for valid entries, and
       // the forwarding CAM ANDs every address comparison with sq_valid[idx],
@@ -339,7 +356,10 @@ module rapt_lsu_sq #(
         // are architectural state and keep draining.  AMOs are stores that
         // also serialize the pipeline, so their ROB commit can coincide with
         // the flush; preserve that commit mark while discarding younger work.
-        sq_tail <= sq_cmt + SQLen'(sq_commit_fire);
+        sq_tail       <= sq_rollback_tail;
+        sq_tail_va_oh <= sq_rollback_oh;
+        sq_tail_pa_oh <= sq_rollback_oh;
+        sq_tail_wd_oh <= sq_rollback_oh;
         if (sq_commit_fire) begin
           sq_cmt <= sq_cmt + 1'b1;
           report_store_diff(difftest_store_addr, difftest_store_data, difftest_store_wstrb,
@@ -347,7 +367,10 @@ module rapt_lsu_sq #(
         end
       end else begin
         if (sq_alloc_fire) begin
-          sq_tail <= sq_tail + 1'b1;
+          sq_tail       <= sq_tail + 1'b1;
+          sq_tail_va_oh <= {sq_tail_va_oh[SQ_SIZE-2:0], sq_tail_va_oh[SQ_SIZE-1]};
+          sq_tail_pa_oh <= {sq_tail_pa_oh[SQ_SIZE-2:0], sq_tail_pa_oh[SQ_SIZE-1]};
+          sq_tail_wd_oh <= {sq_tail_wd_oh[SQ_SIZE-2:0], sq_tail_wd_oh[SQ_SIZE-1]};
         end
         if (sq_commit_fire) begin
           sq_cmt <= sq_cmt + 1'b1;

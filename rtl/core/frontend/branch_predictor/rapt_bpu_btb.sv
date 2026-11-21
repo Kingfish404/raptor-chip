@@ -1,12 +1,8 @@
 `include "rapt.svh"
 
 // 2-way set-associative BTB (Branch Target Buffer). Each target way has one
-// clocked read and one write port, suitable for a fixed FPGA RAM bank.
-// Uses (* keep_hierarchy *) to prevent Yosys from flattening this module,
-// keeping the internal registered read address separate from pc_ifu and
-// avoiding massive fan-out on the MUX tree address inputs.
+// clocked read and one write port, suitable for a synchronous RAM bank.
 // DEPTH = number of sets; total entries = DEPTH * WAYS.
-(* keep_hierarchy *)
 module rapt_bpu_btb #(
     parameter int DEPTH    = `RAPT_BTB_SIZE / 2,
     parameter int WAYS     = 2,
@@ -27,6 +23,7 @@ module rapt_bpu_btb #(
 
     // Write entry (target + tag + valid)
     input logic                wen_entry,
+    input logic                inv_entry,
     input logic [ADDR_LEN-1:0] waddr,
     input logic [    `RAPT_PC_BITS_OF(XLEN)-1:1] wd_target,
     input logic [ TAG_LEN-1:0] wd_tag,
@@ -53,22 +50,13 @@ module rapt_bpu_btb #(
   logic [   DEPTH-1:0] lru;
 
   // Registered read address and tag.
-  //
-  // Keep local copies for the metadata lookup and replacement path.
-  //
   // The target payload is read at the same edge as these registers, so its
-  // output no longer has an address mux on the prediction path.
-  (* keep = "true" *)logic [ADDR_LEN-1:0] r_raddr_tag  [WAYS];
-  (* keep = "true" *)logic [ADDR_LEN-1:0] r_raddr_itype[WAYS];
-  (* keep = "true" *)logic [ADDR_LEN-1:0] r_raddr_valid[WAYS];
-  (* keep = "true" *)logic [ADDR_LEN-1:0] r_raddr_lru;
-  (* keep = "true" *)logic [ TAG_LEN-1:0] r_rtag_cmp   [WAYS];
-
-  // --- Read path: per-way tag match (each way uses its private raddr/rtag copy) ---
+  // output has no address mux on the prediction path.
   logic [    WAYS-1:0] way_hit;
   logic                hit_way;
   logic [ADDR_LEN-1:0] held_raddr;
-  logic lookup_valid_q;
+  logic [ TAG_LEN-1:0] rtag_q;
+  logic                lookup_valid_q;
 
   assign hit_way      = way_hit[1];
   assign rd_tag_match = |way_hit;
@@ -84,7 +72,7 @@ module rapt_bpu_btb #(
   // explicit forwarding register makes that behavior independent of the RAM's
   // read-during-write mode and keeps its read port on a simple clocked template.
   for (genvar w = 0; w < WAYS; w++) begin : g_way_storage
-    (* ram_style = "block" *) logic [PcW-1:1] target[DEPTH];
+    logic [PcW-1:1] target[DEPTH];
     logic [PcW-1:1] target_q;
     logic [PcW-1:1] target_forward_q;
     logic target_forward_valid_q;
@@ -96,9 +84,9 @@ module rapt_bpu_btb #(
     assign target_write_observed = target_write && (ren || lookup_valid_q)
         && (waddr == (ren ? raddr : held_raddr));
     assign way_target[w] = target_forward_valid_q ? target_forward_q : target_q;
-    assign way_type[w] = itype[r_raddr_itype[w]];
-    assign way_hit[w] = lookup_valid_q && valid[w][r_raddr_valid[w]]
-        && (r_rtag_cmp[w] == tag[r_raddr_tag[w]]);
+    assign way_type[w] = itype[held_raddr];
+    assign way_hit[w] = lookup_valid_q && valid[w][held_raddr]
+        && (rtag_q == tag[held_raddr]);
     assign w_way_match[w] = valid[w][waddr] && (wd_tag == tag[waddr]);
     always_ff @(posedge clock) begin
       // Forward collisions after the edge; keep the address comparison off
@@ -139,32 +127,31 @@ module rapt_bpu_btb #(
       for (int w = 0; w < WAYS; w++) valid[w] <= '0;
       lru <= '0;
       // Payload RAMs and tag/type lookup metadata remain unreset. Reset the
-      // small valid-read selectors so an empty table has a known read gate
-      // before the first lookup, including after native gate mapping.
-      // Bulk init keeps an already captured lookup for held-address writes.
+      // held selector so an empty table has a known read gate before the first
+      // lookup, while bulk init preserves an already captured lookup.
       if (reset) begin
         lookup_valid_q <= 1'b0;
-        for (int w = 0; w < WAYS; w++) r_raddr_valid[w] <= '0;
+        held_raddr     <= '0;
+        rtag_q         <= '0;
       end
     end else begin
       if (ren) begin
         lookup_valid_q <= 1'b1;
-        for (int w = 0; w < WAYS; w++) begin
-          r_raddr_tag[w]   <= raddr;
-          r_raddr_itype[w] <= raddr;
-          r_raddr_valid[w] <= raddr;
-          r_rtag_cmp[w]    <= rtag;
-        end
-        r_raddr_lru <= raddr;
-        held_raddr  <= raddr;
+        held_raddr     <= raddr;
+        rtag_q         <= rtag;
       end
       // Update LRU on read hit: mark other way as next victim.
       // Write-entry LRU takes priority when both fire (same-set R/W).
       if (wen_entry) begin
         valid[w_sel][waddr] <= 1'b1;
         lru[waddr] <= ~w_sel;
+      end else if (inv_entry) begin
+        if (|w_way_match) begin
+          valid[w_way_match[1]][waddr] <= 1'b0;
+          lru[waddr] <= w_way_match[1];
+        end
       end else if (rd_tag_match) begin
-        lru[r_raddr_lru] <= ~hit_way;
+        lru[held_raddr] <= ~hit_way;
       end
     end
   end

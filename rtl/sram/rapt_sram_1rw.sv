@@ -23,10 +23,6 @@
  *   DATA_WIDTH - Data width in bits
  */
 /* verilator lint_off WIDTHEXPAND */
-// (* keep_hierarchy *) prevents yosys from flattening every SRAM instance and
-// CSE-merging their internal raddr registers into one shared DFF (see the
-// legacy 1R1W wrapper header for the full story).
-(* keep_hierarchy *)
 module rapt_sram_1rw #(
     parameter int ADDR_WIDTH = 7,
     parameter int DATA_WIDTH = 32,
