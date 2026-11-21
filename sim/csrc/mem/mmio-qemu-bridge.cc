@@ -3,6 +3,7 @@
 #include <memory.h>
 
 #include <errno.h>
+#include <poll.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -222,5 +223,69 @@ void mmio_qemu_bridge_handle(paddr_t addr, word_t wdata, char wmask, bool is_wri
             }
             break;
         }
+    }
+}
+
+void qemu_io_bridge_poll()
+{
+    if (qbridge.fd < 0)
+        return;
+
+    struct pollfd pfd;
+    pfd.fd = qbridge.fd;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+
+    std::vector<uint8_t> pkt;
+    while (poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN) != 0)
+    {
+        if (!recv_rqio_pkt(pkt))
+            break;
+        if (pkt.size() < 8 || pkt[0] != 'R' || pkt[1] != 'Q' || pkt[2] != 1)
+            continue;
+        uint8_t mtype = pkt[3];
+        uint16_t rseq = (uint16_t)pkt[4] | ((uint16_t)pkt[5] << 8);
+        if (mtype == 0x03 && pkt.size() >= 16)
+        {
+            uint16_t dlen = 0;
+            uint64_t daddr = 0;
+            memcpy(&dlen, pkt.data() + 6, 2);
+            memcpy(&daddr, pkt.data() + 8, 8);
+            std::vector<uint8_t> resp(12 + dlen, 0);
+            resp[0] = 'R';
+            resp[1] = 'Q';
+            resp[2] = 1;
+            resp[3] = 0x04;
+            memcpy(resp.data() + 4, &rseq, 2);
+            memcpy(resp.data() + 6, &dlen, 2);
+            resp[8] = dma_guest_read(daddr, resp.data() + 12, dlen) ? 0 : 1;
+            send_rqio_pkt(resp.data(), (uint16_t)resp.size());
+        }
+        else if (mtype == 0x06 && pkt.size() >= 16)
+        {
+            uint16_t dlen = 0;
+            uint64_t daddr = 0;
+            memcpy(&dlen, pkt.data() + 6, 2);
+            memcpy(&daddr, pkt.data() + 8, 8);
+            bool ok = (pkt.size() >= (size_t)(16 + dlen)) &&
+                      dma_guest_write(daddr, pkt.data() + 16, dlen);
+            uint8_t resp[12];
+            memset(resp, 0, sizeof(resp));
+            resp[0] = 'R';
+            resp[1] = 'Q';
+            resp[2] = 1;
+            resp[3] = 0x05;
+            memcpy(resp + 4, &rseq, 2);
+            memcpy(resp + 6, &dlen, 2);
+            resp[8] = ok ? 0 : 1;
+            send_rqio_pkt(resp, sizeof(resp));
+        }
+        else if (mtype == 0x07 && pkt.size() >= 12)
+        {
+            uint32_t irq_m = 0;
+            memcpy(&irq_m, pkt.data() + 8, 4);
+            update_irqs(irq_m);
+        }
+        pfd.revents = 0;
     }
 }

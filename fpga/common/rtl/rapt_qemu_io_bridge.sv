@@ -96,8 +96,8 @@ module rapt_qemu_io_bridge #(
   endfunction
 
   // Packet buffers (one inbound RX message, one outbound TX message)
-  (* ram_style = "distributed" *) logic [7:0] rx_buf [0:319];
-  (* ram_style = "distributed" *) logic [7:0] tx_buf [0:319];
+  logic [7:0] rx_buf [0:319];
+  logic [7:0] tx_buf [0:319];
 
   // RX collector (handles either Ethernet payload stream or SLIP+CRC16 stream)
   logic rx_msg_valid_q, rx_msg_ack;

@@ -26,8 +26,8 @@ module rapt_fp_registers #(
     parameter logic [31:0] WritePorts = '1
 ) (
     input logic clock,
-    reset,
-    flush,
+    input logic reset,
+    input logic flush,
     input logic allocate_valid[AllocateWidth],
     input UopT allocate_uop[AllocateWidth],
     input logic [IndexBits-1:0] allocate_index[AllocateWidth],
@@ -57,9 +57,24 @@ module rapt_fp_registers #(
     input logic operand_read_valid[ReadPorts],
     input logic [OperandBits-1:0] operand_read_index[ReadPorts]
 );
+  function automatic int count_writers(input logic [31:0] mask);
+    int n;
+    n = 0;
+    for (int p = 0; p < CompletionPorts; p++) if (mask[p]) n++;
+    return n > 0 ? n : 1;
+  endfunction
+
+  function automatic int writer_slot(input logic [31:0] mask, input int port);
+    int slot;
+    slot = 0;
+    for (int p = 0; p < port; p++) if (mask[p]) slot++;
+    return slot;
+  endfunction
+
   logic [63:0] architectural[32];
   logic [2:0][63:0] architectural_read[ReadPorts];
-  logic [TagBits-1:0] map_q[32], map_next[32];
+  logic [TagBits-1:0] map_q[32];
+  logic [TagBits-1:0] map_next[32];
   logic [63:0] result_q[Entries];
   // Result-file reads: one per resolved source and one per retiring lane.
   logic [63:0] result_resolve[ReadPorts][3];
@@ -68,6 +83,8 @@ module rapt_fp_registers #(
   logic [4:0] destination[Entries];
   logic [GenerationBits-1:0] owner_generation[Entries];
   logic [CompletionPorts-1:0] wake_valid;
+  logic commit_fp_valid[CommitWidth];
+  logic [4:0] commit_fp_rd[CommitWidth];
 
   for (genvar p = 0; p < CompletionPorts; p++) begin : g_wake
     wire [IndexBits-1:0] owner = completion[p].dest;
@@ -76,21 +93,31 @@ module rapt_fp_registers #(
         && destination_valid[owner] && owner_generation[owner] == completion[p].generation;
   end
 
+  for (genvar c = 0; c < CommitWidth; c++) begin : g_commit_meta
+    assign commit_fp_valid[c] = commit_valid[c] && destination_valid[commit_index[c]];
+    assign commit_fp_rd[c] = destination[commit_index[c]];
+  end
+
   function automatic logic hit(input logic [TagBits-1:0] tag);
     logic found;
     found = 1'b0;
-    for (int p = 0; p < CompletionPorts; p++)
-    found |= wake_valid[p] && tag == TagBits'(completion[p].dest) + TagBits'(1);
+    for (int p = 0; p < CompletionPorts; p++) begin
+      if (WritePorts[p])
+        found |= wake_valid[p] && tag == TagBits'(completion[p].dest) + TagBits'(1);
+    end
     return tag != '0 && found;
   endfunction
+
   function automatic logic [63:0] value(input logic [TagBits-1:0] tag, input logic [63:0] fallback);
     logic [63:0] result;
     result = fallback;
-    for (int p = 0; p < CompletionPorts; p++)
-    if (wake_valid[p] && tag == TagBits'(completion[p].dest) + TagBits'(1))
-      result = completion[p].fp_result;
+    for (int p = 0; p < CompletionPorts; p++) begin
+      if (WritePorts[p] && wake_valid[p] && tag == TagBits'(completion[p].dest) + TagBits'(1))
+        result = completion[p].fp_result;
+    end
     return result;
   endfunction
+
   // A retiring producer's consumers read the architectural bank afterwards:
   // no older-than-consumer writer of that register can retire before them.
   function automatic logic retiring(input logic [TagBits-1:0] tag);
@@ -100,6 +127,7 @@ module rapt_fp_registers #(
     found |= commit_valid[c] && TagBits'(commit_index[c]) + TagBits'(1) == tag;
     return tag != '0 && found;
   endfunction
+
   logic allocate_writer[AllocateWidth];
   // Stored source tags. The architectural bank is written on the retiring
   // edge, so only the stored copy (read next cycle or later) is retagged.
@@ -111,6 +139,7 @@ module rapt_fp_registers #(
       ) ? '0 : allocate_tag[s][operand];
     end
   end
+
   function automatic logic allocating(input logic [IndexBits-1:0] owner);
     logic found;
     found = 1'b0;
@@ -118,6 +147,7 @@ module rapt_fp_registers #(
     found |= allocate_valid[a] && allocate_writer[a] && allocate_index[a] == owner;
     return found;
   endfunction
+
   function automatic logic [4:0] source_register(input UopT uop, input int operand);
     case (operand)
       0: return uop.execute.fp.rs1;
@@ -125,6 +155,7 @@ module rapt_fp_registers #(
       default: return uop.execute.fp.rs3;
     endcase
   endfunction
+
   for (genvar s = 0; s < AllocateWidth; s++) begin : g_allocate_operands
     wire [2:0] sources = rapt_pkg::fp_sources(
         allocate_uop[s].execute.fp.valid,
@@ -168,22 +199,22 @@ module rapt_fp_registers #(
   always_comb begin
     for (int r = 0; r < 32; r++) begin
       map_next[r] = map_q[r];
-      for (int c = 0; c < CommitWidth; c++)
-      if (commit_valid[c] && destination_valid[commit_index[c]]
-            && destination[commit_index[c]] == 5'(r)
+      for (int c = 0; c < CommitWidth; c++) begin
+        if (commit_fp_valid[c] && commit_fp_rd[c] == 5'(r)
             && map_q[r] == TagBits'(commit_index[c]) + TagBits'(1))
-        map_next[r] = '0;
-      for (int s = 0; s < AllocateWidth; s++)
-      if (allocate_valid[s] && allocate_writer[s] && allocate_uop[s].execute.fp.rd == 5'(r))
-        map_next[r] = TagBits'(allocate_index[s]) + TagBits'(1);
-      if (flush) map_next[r] = '0;
+          map_next[r] = '0;
+      end
+      for (int s = 0; s < AllocateWidth; s++) begin
+        if (allocate_valid[s] && allocate_writer[s] && allocate_uop[s].execute.fp.rd == 5'(r))
+          map_next[r] = TagBits'(allocate_index[s]) + TagBits'(1);
+      end
     end
   end
 
   // The speculative map is independent of the committed data bank.
   for (genvar r = 0; r < 32; r++) begin : g_map
     always_ff @(posedge clock) begin
-      if (reset) map_q[r] <= '0;
+      if (reset || flush) map_q[r] <= '0;
       else map_q[r] <= map_next[r];
     end
   end
@@ -204,12 +235,12 @@ module rapt_fp_registers #(
     logic [63:0] debug_word[32][CommitWidth];
 `endif
     for (genvar c = 0; c < CommitWidth; c++) begin : g_write_lane
-      assign write_valid[c] = commit_valid[c] && destination_valid[commit_index[c]];
-      assign write_index[c] = destination[commit_index[c]];
+      assign write_valid[c] = commit_fp_valid[c];
+      assign write_index[c] = commit_fp_rd[c];
       assign write_value[c] = result_commit[c];
       for (genvar s = 0; s < ReadPorts; s++) begin : g_read_copy
         for (genvar operand = 0; operand < 3; operand++) begin : g_operand
-          (* ram_style = "distributed" *) logic [63:0] words[32];
+          logic [63:0] words[32];
           always_ff @(posedge clock) if (write_valid[c]) words[write_index[c]] <= write_value[c];
           assign bank_read[s][operand][c] = words[source_register(resolve_uop[s], operand)];
           // Preserve the existing internal verification view. It has no
@@ -228,10 +259,11 @@ module rapt_fp_registers #(
       always_ff @(posedge clock) begin
         if (reset) valid_q[r] <= 1'b0;
         else begin
-          for (int c = 0; c < CommitWidth; c++)
-          if (write_valid[c] && write_index[c] == 5'(r)) begin
-            valid_q[r] <= 1'b1;
-            lane_q[r] <= LaneBits'(c);
+          for (int c = 0; c < CommitWidth; c++) begin
+            if (write_valid[c] && write_index[c] == 5'(r)) begin
+              valid_q[r] <= 1'b1;
+              lane_q[r] <= LaneBits'(c);
+            end
           end
         end
       end
@@ -253,11 +285,11 @@ module rapt_fp_registers #(
       logic [63:0] data_q;
       assign architectural[r] = written_q ? data_q : '0;
       always_ff @(posedge clock) begin
-        for (int c = 0; c < CommitWidth; c++)
-        if (commit_valid[c] && destination_valid[commit_index[c]]
-              && destination[commit_index[c]] == 5'(r)) begin
-          data_q <= result_commit[c];
-          written_q <= 1'b1;
+        for (int c = 0; c < CommitWidth; c++) begin
+          if (commit_fp_valid[c] && commit_fp_rd[c] == 5'(r)) begin
+            data_q <= result_commit[c];
+            written_q <= 1'b1;
+          end
         end
         if (reset) written_q <= 1'b0;
       end
@@ -270,6 +302,7 @@ module rapt_fp_registers #(
       end
     end
   end
+
   for (genvar e = 0; e < Entries; e++) begin : g_owner
     always_ff @(posedge clock) begin
       if (reset || flush) begin
@@ -281,60 +314,79 @@ module rapt_fp_registers #(
         if (commit_valid[c] && commit_index[c] == IndexBits'(e)) owner_live[e] <= 1'b0;
         for (int p = 0; p < CompletionPorts; p++)
         if (wake_valid[p] && completion[p].dest == IndexBits'(e)) result_ready[e] <= 1'b1;
-        for (int s = 0; s < AllocateWidth; s++)
-        if (allocate_valid[s] && allocate_index[s] == IndexBits'(e)) begin
-          owner_live[e] <= 1'b1;
-          owner_generation[e] <= allocate_generation[s];
-          destination_valid[e] <= allocate_writer[s];
-          destination[e] <= allocate_uop[s].execute.fp.rd;
-          result_ready[e] <= 1'b0;
+        for (int s = 0; s < AllocateWidth; s++) begin
+          if (allocate_valid[s] && allocate_index[s] == IndexBits'(e)) begin
+            owner_live[e] <= 1'b1;
+            owner_generation[e] <= allocate_generation[s];
+            destination_valid[e] <= allocate_writer[s];
+            destination[e] <= allocate_uop[s].execute.fp.rd;
+            result_ready[e] <= 1'b0;
+          end
         end
       end
     end
   end
+
   if (`RAPT_FPGA_LUTRAM) begin : g_result_lutram
-    // One distributed-RAM bank per FP writer port and one copy per read; a
-    // live-value table names the bank holding each owner's result.
-    localparam int PortBits = CompletionPorts > 1 ? $clog2(CompletionPorts) : 1;
+    // Compact active FP writer ports so LVT width and bank-mux fan-in match
+    // actual writers rather than total CompletionPorts.
+    localparam int NumWriters = count_writers(WritePorts);
+    localparam int WriterBits = NumWriters > 1 ? $clog2(NumWriters) : 1;
+    localparam int BankSlots = 1 << WriterBits;
     localparam int Reads = ReadPorts * 3 + CommitWidth;
-    logic [PortBits-1:0] lvt[Entries];
+`ifdef SYNTHESIS
+    localparam int PhysEntries = Entries < 32 ? 32 : Entries;
+`else
+    localparam int PhysEntries = Entries;
+`endif
+    localparam int PhysIndexBits = $clog2(PhysEntries);
+    logic [WriterBits-1:0] lvt[Entries];
     logic [IndexBits-1:0] read_addr[Reads];
-    logic [63:0] bank_read[Reads][CompletionPorts];
+    logic [63:0] bank_read[Reads][BankSlots];
     logic [63:0] read_data[Reads];
     for (genvar p = 0; p < CompletionPorts; p++) begin : g_port
       if (WritePorts[p]) begin : g_bank
+        localparam int Slot = writer_slot(WritePorts, p);
+        wire [PhysIndexBits-1:0] phys_dest = PhysIndexBits'(completion[p].dest);
         for (genvar r = 0; r < Reads; r++) begin : g_copy
-          (* ram_style = "distributed" *) logic [63:0] words[Entries];
-          always_ff @(posedge clock)
-            if (wake_valid[p])
-              words[completion[p].dest] <= completion[p].fp_result;
-          assign bank_read[r][p] = words[read_addr[r]];
+          logic [63:0] words[PhysEntries];
+          wire [PhysIndexBits-1:0] phys_read_addr = PhysIndexBits'(read_addr[r]);
+          always_ff @(posedge clock) if (wake_valid[p]) words[phys_dest] <= completion[p].fp_result;
+          assign bank_read[r][Slot] = words[phys_read_addr];
         end
-      end else begin : g_no_bank
-        for (genvar r = 0; r < Reads; r++) begin : g_zero
-          assign bank_read[r][p] = '0;
-        end
+      end
+    end
+    for (genvar slot = NumWriters; slot < BankSlots; slot++) begin : g_pad
+      for (genvar r = 0; r < Reads; r++) begin : g_zero
+        assign bank_read[r][slot] = '0;
+      end
+    end
+    if ((WritePorts & ((32'(1) << CompletionPorts) - 32'(1))) == 32'd0) begin : g_empty_writers
+      for (genvar r = 0; r < Reads; r++) begin : g_zero0
+        assign bank_read[r][0] = '0;
       end
     end
     // The highest writer wins, matching the flop file's port order.
     for (genvar e = 0; e < Entries; e++) begin : g_lvt
       always_ff @(posedge clock) begin
-        begin
-          for (int p = 0; p < CompletionPorts; p++)
-          if (WritePorts[p] && wake_valid[p] && completion[p].dest == IndexBits'(e))
-            lvt[e] <= PortBits'(p);
+        if (reset) lvt[e] <= '0;
+        else begin
+          for (int p = 0; p < CompletionPorts; p++) begin
+            if (WritePorts[p] && wake_valid[p] && completion[p].dest == IndexBits'(e))
+              lvt[e] <= WriterBits'(writer_slot(WritePorts, p));
+          end
         end
       end
     end
     for (genvar s = 0; s < ReadPorts; s++) begin : g_resolve_addr
       for (genvar operand = 0; operand < 3; operand++) begin : g_operand
-        assign read_addr[s*3+operand] = IndexBits'(resolve_tag[s][operand] - TagBits'(1));
-        assign result_resolve[s][operand] = read_data[s*3+operand];
+        assign read_addr[s * 3 + operand] = IndexBits'(resolve_tag[s][operand] - TagBits'(1));
+        assign result_resolve[s][operand] = read_data[s * 3 + operand];
       end
     end
     for (genvar c = 0; c < CommitWidth; c++) begin : g_commit_addr
-      assign read_addr[ReadPorts*3+c] = commit_index[c];
-      assign result_commit[c] = read_data[ReadPorts*3+c];
+      assign read_addr[ReadPorts * 3 + c] = commit_index[c];
+      assign result_commit[c] = read_data[ReadPorts * 3 + c];
     end
     for (genvar r = 0; r < Reads; r++) begin : g_read
       assign read_data[r] = bank_read[r][lvt[read_addr[r]]];
@@ -342,15 +394,20 @@ module rapt_fp_registers #(
 `ifndef SYNTHESIS
     // Owner-indexed view for module checks.
     for (genvar e = 0; e < Entries; e++) begin : g_view
-      logic [63:0] port_word[CompletionPorts];
+      logic [63:0] slot_word[BankSlots];
       for (genvar p = 0; p < CompletionPorts; p++) begin : g_port_word
         if (WritePorts[p]) begin : g_bank_word
-          assign port_word[p] = g_port[p].g_bank.g_copy[0].words[e];
-        end else begin : g_zero_word
-          assign port_word[p] = '0;
+          localparam int Slot = writer_slot(WritePorts, p);
+          assign slot_word[Slot] = g_port[p].g_bank.g_copy[0].words[e];
         end
       end
-      assign result_q[e] = port_word[lvt[e]];
+      for (genvar slot = NumWriters; slot < BankSlots; slot++) begin : g_pad_word
+        assign slot_word[slot] = '0;
+      end
+      if ((WritePorts & ((32'(1) << CompletionPorts) - 32'(1))) == 32'd0) begin : g_empty_word
+        assign slot_word[0] = '0;
+      end
+      assign result_q[e] = slot_word[lvt[e]];
     end
 `endif
   end else begin : g_result_flops
@@ -365,18 +422,22 @@ module rapt_fp_registers #(
     end
     for (genvar s = 0; s < ReadPorts; s++) begin : g_resolve_read
       for (genvar operand = 0; operand < 3; operand++) begin : g_operand
-        assign result_resolve[s][operand] = result_q[IndexBits'(resolve_tag[s][operand] - TagBits'(1))];
+        assign result_resolve[s][operand] = result_q[IndexBits'(
+            resolve_tag[s][operand] - TagBits'(1)
+        )];
       end
     end
     for (genvar c = 0; c < CommitWidth; c++) begin : g_commit_read
       assign result_commit[c] = result_q[commit_index[c]];
     end
   end
+
   for (genvar c = 0; c < CommitWidth; c++) begin : g_operand_retire
-    assign retire_fp[c] = commit_valid[c] && destination_valid[commit_index[c]];
+    assign retire_fp[c] = commit_fp_valid[c];
     assign retire_value[c] = result_commit[c];
     assign retire_generation[c] = owner_generation[commit_index[c]];
   end
+
   for (genvar r = 0; r < ReadPorts; r++) begin : g_operand_generation
     for (genvar k = 0; k < 3; k++) begin : g_source
       always_comb begin
@@ -389,76 +450,127 @@ module rapt_fp_registers #(
       end
     end
   end
+
   // Each source slot holds only its producer tag. Retirement and completion
   // never move data into it; only the retiring producer clears the tag.
   if (CompactSourceOperands) begin : g_compact_sources
-    // A source tag is only read while its consumer waits in ROB_DP. Give it
-    // the same physical lifetime as integer operands and immutable fields.
-    typedef logic [2:0][TagBits-1:0] source_payload_t;
-    source_payload_t allocate_payload[AllocateWidth], read_payload[ReadPorts];
-    source_payload_t update_payload[OperandEntries], entry_payload[OperandEntries];
-    logic allocate_ready[AllocateWidth];
-    logic [OperandBits-1:0] source_allocate_index[AllocateWidth];
-    logic read_valid[ReadPorts];
-    logic update_valid[OperandEntries], entry_valid[OperandEntries];
-    for (genvar a = 0; a < AllocateWidth; a++) begin : g_allocate
-      assign allocate_payload[a] = stored_tag[a];
-      `RAPT_SVA_IMPLY(clock, reset || flush, FP_SOURCE_SPILL_ALLOCATION_MATCH, allocate_valid[a],
-                      allocate_ready[a] && source_allocate_index[a] == operand_allocate_index[a])
-    end
-    for (genvar e = 0; e < OperandEntries; e++) begin : g_entry
+    // ROU already owns spill slot allocation and supplies operand_allocate_index.
+    // Store source tags directly in those slots without duplicating rank-select.
+    localparam int AllocLaneBits = AllocateWidth > 1 ? $clog2(AllocateWidth) : 1;
+    logic [2:0][TagBits-1:0] source_tag_q[OperandEntries];
+    /* verilator lint_off UNUSEDSIGNAL */
+    wire unused_compact_rob_read = ^read_index[0];
+    /* verilator lint_on UNUSEDSIGNAL */
+    for (genvar e = 0; e < OperandEntries; e++) begin : g_slot
+      logic alloc_hit;
+      logic [AllocLaneBits-1:0] alloc_lane;
       always_comb begin
-        update_payload[e] = entry_payload[e];
-        update_valid[e] = 1'b0;
-        for (int operand = 0; operand < 3; operand++) begin
-          if (entry_valid[e] && retiring(entry_payload[e][operand])) begin
-            update_valid[e] = 1'b1;
-            update_payload[e][operand] = '0;
+        alloc_hit = 1'b0;
+        alloc_lane = '0;
+        for (int a = 0; a < AllocateWidth; a++) begin
+          if (allocate_valid[a] && operand_allocate_index[a] == OperandBits'(e)) begin
+            alloc_hit = 1'b1;
+            alloc_lane = AllocLaneBits'(a);
+          end
+        end
+      end
+      always_ff @(posedge clock) begin
+        if (reset || flush) begin
+          source_tag_q[e] <= '0;
+        end else if (alloc_hit) begin
+          source_tag_q[e] <= stored_tag[alloc_lane];
+        end else begin
+          for (int operand = 0; operand < 3; operand++) begin
+            if (retiring(source_tag_q[e][operand])) source_tag_q[e][operand] <= '0;
           end
         end
       end
     end
+    for (genvar p = 0; p < ReadPorts; p++) begin : g_read
+      assign read_tag[p] = int'(operand_read_index[p]) < OperandEntries
+          ? source_tag_q[operand_read_index[p]] : '0;
+    end
+`ifdef RAPT_SVA_ACTIVE
+    logic sva_alloc_payload[AllocateWidth];
+    logic sva_alloc_ready[AllocateWidth], sva_read_valid[ReadPorts];
+    logic [OperandBits-1:0] sva_alloc_index[AllocateWidth];
+    logic sva_update_valid[OperandEntries], sva_update_payload[OperandEntries];
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic sva_read_payload[ReadPorts];
+    logic sva_entry_valid[OperandEntries], sva_entry_payload[OperandEntries];
+    /* verilator lint_on UNUSEDSIGNAL */
+    for (genvar a = 0; a < AllocateWidth; a++) begin : g_sva_alloc
+      assign sva_alloc_payload[a] = 1'b0;
+      `RAPT_SVA_IMPLY(clock, reset || flush, FP_SOURCE_SPILL_ALLOCATION_MATCH, allocate_valid[a],
+                      sva_alloc_ready[a] && sva_alloc_index[a] == operand_allocate_index[a])
+    end
+    for (genvar e = 0; e < OperandEntries; e++) begin : g_sva_upd
+      assign sva_update_valid[e] = 1'b0;
+      assign sva_update_payload[e] = 1'b0;
+    end
     rapt_operand_spill #(
-        .PayloadT(source_payload_t),
+        .PayloadT(logic),
         .Entries(OperandEntries),
         .AllocateWidth(AllocateWidth),
         .ReleaseWidth(ReadPorts),
         .ReadPorts(ReadPorts),
         .IndexBits(OperandBits)
-    ) storage (
-        .clock,
-        .reset,
-        .flush,
-        .allocate_valid,
-        .allocate_payload,
-        .allocate_ready,
-        .allocate_index(source_allocate_index),
+    ) sva_storage (
+        .clock(clock),
+        .reset(reset),
+        .flush(flush),
+        .allocate_valid(allocate_valid),
+        .allocate_payload(sva_alloc_payload),
+        .allocate_ready(sva_alloc_ready),
+        .allocate_index(sva_alloc_index),
         .release_valid(operand_release_valid),
         .release_index(operand_release_index),
         .read_index(operand_read_index),
-        .read_valid,
-        .read_payload,
-        .update_valid,
-        .update_payload,
-        .entry_valid,
-        .entry_payload
+        .read_valid(sva_read_valid),
+        .read_payload(sva_read_payload),
+        .update_valid(sva_update_valid),
+        .update_payload(sva_update_payload),
+        .entry_valid(sva_entry_valid),
+        .entry_payload(sva_entry_payload)
     );
-    for (genvar p = 0; p < ReadPorts; p++) begin : g_read
-      // A producer retiring on this edge still owns its result slot now.
-      assign read_tag[p] = read_payload[p];
+    for (genvar p = 0; p < ReadPorts; p++) begin : g_sva_read
       `RAPT_SVA_IMPLY(clock, reset || flush, FP_SOURCE_SPILL_READ_LIVE, operand_read_valid[p],
-                      read_valid[p])
+                      sva_read_valid[p])
     end
+`else
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic unused_spill_ctrl;
+    always_comb begin
+      unused_spill_ctrl = 1'b0;
+      for (int p = 0; p < ReadPorts; p++) begin
+        unused_spill_ctrl ^= operand_release_valid[p] ^ (^operand_release_index[p])
+            ^ operand_read_valid[p];
+      end
+    end
+    /* verilator lint_on UNUSEDSIGNAL */
+`endif
   end else begin : g_rob_sources
+    /* verilator lint_off UNUSEDSIGNAL */
+    logic unused_operand_ports;
+    always_comb begin
+      unused_operand_ports = 1'b0;
+      for (int a = 0; a < AllocateWidth; a++) unused_operand_ports ^= ^operand_allocate_index[a];
+      for (int p = 0; p < ReadPorts; p++) begin
+        unused_operand_ports ^= operand_release_valid[p] ^ (^operand_release_index[p])
+            ^ operand_read_valid[p] ^ (^operand_read_index[p]);
+      end
+    end
+    /* verilator lint_on UNUSEDSIGNAL */
     logic [2:0][TagBits-1:0] source_tag[Entries];
     for (genvar e = 0; e < Entries; e++) begin : g_owner
       always_ff @(posedge clock) begin
         begin
           for (int operand = 0; operand < 3; operand++)
           if (owner_live[e] && retiring(source_tag[e][operand])) source_tag[e][operand] <= '0;
-          for (int s = 0; s < AllocateWidth; s++)
-          if (allocate_valid[s] && allocate_index[s] == IndexBits'(e))
-            source_tag[e] <= stored_tag[s];
+          for (int s = 0; s < AllocateWidth; s++) begin
+            if (allocate_valid[s] && allocate_index[s] == IndexBits'(e))
+              source_tag[e] <= stored_tag[s];
+          end
         end
       end
     end
@@ -466,6 +578,7 @@ module rapt_fp_registers #(
       assign read_tag[p] = source_tag[read_index[p]];
     end
   end
+
   // Dispatch-lane resolution: architectural bank for a zero tag, else this
   // cycle's accepted completion or the producer's completed result slot.
   for (genvar p = 0; p < ReadPorts; p++) begin : g_resolve
@@ -480,6 +593,7 @@ module rapt_fp_registers #(
     for (genvar operand = 0; operand < 3; operand++) begin : g_operand
       wire [TagBits-1:0] tag = resolve_tag[p][operand];
       wire [IndexBits-1:0] producer = IndexBits'(tag - TagBits'(1));
+      wire producer_ready = owner_live[producer] && (result_ready[producer] || hit(tag));
       always_comb begin
         resolve_value[p][operand] = '0;
         resolve_ready_tag[p][operand] = '0;
@@ -489,14 +603,14 @@ module rapt_fp_registers #(
           // A same-group producer allocated on this edge is never ready; its
           // slot may still carry the retired previous owner's result.
           resolve_value[p][operand] = value(tag, result_resolve[p][operand]);
-          if (!(owner_live[producer] && (result_ready[producer] || hit(tag))))
-            resolve_ready_tag[p][operand] = tag;
+          if (!producer_ready) resolve_ready_tag[p][operand] = tag;
         end
       end
       `RAPT_SVA_IMPLY(clock, reset || flush, FP_RESOLVE_PRODUCER_LIVE, tag != '0,
                       owner_live[producer] && destination_valid[producer] || allocating(producer))
     end
   end
+
   for (genvar c = 0; c < CommitWidth; c++) begin : g_commit_contract
     `RAPT_SVA_IMPLY(clock, reset, FP_COMMIT_HAS_RESULT,
                     commit_valid[c] && destination_valid[commit_index[c]],

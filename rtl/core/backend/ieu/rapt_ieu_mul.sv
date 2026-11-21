@@ -174,11 +174,11 @@ module rapt_ieu_mul #(
   assign mul_ext_a = $signed({m1_sext_a & m1_s1[XLEN-1], m1_s1});
   assign mul_ext_b = $signed({m1_sext_b & m1_s2[XLEN-1], m1_s2});
   if (UseDsp) begin : g_dsp
-    (* use_dsp = "yes" *) wire signed [2*XLEN+1:0] product;
+    wire signed [2*XLEN+1:0] product;
     assign product = mul_ext_a * mul_ext_b;
     assign mul_full = product;
   end else begin : g_fabric
-    (* use_dsp = "no" *) wire signed [2*XLEN+1:0] product;
+    wire signed [2*XLEN+1:0] product;
     assign product = mul_ext_a * mul_ext_b;
     assign mul_full = product;
   end

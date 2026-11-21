@@ -82,6 +82,7 @@ module rapt_fpu_integer_to_fp #(
     retained_c = '0;
     guard_c = 1'b0;
     sticky_c = 1'b0;
+    sticky_index_c = 0;
     if (s1_leading_one_q != 0) begin
       retained_c = Precision'(shift_count_c == 0
           ? s1_magnitude_q << (Precision - integer'(s1_leading_one_q))

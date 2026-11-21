@@ -53,13 +53,30 @@ module rapt_operand_spill #(
   endfunction
 
   // Only releases captured on the preceding edge can create allocation
-  // capacity. Invalid or duplicated releases are forbidden by the contract
-  // below, so the mask is also the complete set of same-edge overwrites.
+  // capacity. Pre-decode 8-entry groups and offsets so release_index_q drives
+  // at most 8 local gates regardless of Entries.
+  localparam int RelGroups = (Entries + 7) / 8;
+  localparam int RelHiBits = RelGroups > 1 ? $clog2(RelGroups) : 1;
+  logic [7:0] release_lo_oh[ReleaseWidth];
+  logic [RelGroups-1:0] release_hi_oh[ReleaseWidth];
+  for (genvar r = 0; r < ReleaseWidth; r++) begin : g_release_decode
+    wire [2:0] rel_lo = 3'(release_index_q[r]);
+    wire [RelHiBits-1:0] rel_hi = RelHiBits'(int'(release_index_q[r]) >> 3);
+    always_comb begin
+      release_lo_oh[r] = '0;
+      release_hi_oh[r] = '0;
+      if (release_valid_q[r] && int'(release_index_q[r]) < Entries) begin
+        release_lo_oh[r][rel_lo] = 1'b1;
+        release_hi_oh[r][rel_hi] = 1'b1;
+      end
+    end
+  end
   always_comb begin
     reclaim_mask = '0;
-    for (int r = 0; r < ReleaseWidth; r++) begin
-      if (release_valid_q[r] && int'(release_index_q[r]) < Entries)
-        reclaim_mask[release_index_q[r]] = 1'b1;
+    for (int e = 0; e < Entries; e++) begin
+      for (int r = 0; r < ReleaseWidth; r++) begin
+        reclaim_mask[e] |= release_hi_oh[r][e>>3] && release_lo_oh[r][e&7];
+      end
     end
   end
   assign available = ~valid_q | reclaim_mask;
@@ -99,8 +116,10 @@ module rapt_operand_spill #(
       valid_q <= '0;
       for (int r = 0; r < ReleaseWidth; r++) release_valid_q[r] <= 1'b0;
     end else begin
+      for (int e = 0; e < Entries; e++) begin
+        if (reclaim_mask[e]) valid_q[e] <= 1'b0;
+      end
       for (int r = 0; r < ReleaseWidth; r++) begin
-        if (release_valid_q[r]) valid_q[release_index_q[r]] <= 1'b0;
         release_valid_q[r] <= release_valid[r];
         release_index_q[r] <= release_index[r];
       end

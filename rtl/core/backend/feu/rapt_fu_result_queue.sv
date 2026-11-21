@@ -33,8 +33,14 @@ module rapt_fu_result_queue #(
   logic [PtrBits-1:0] head, tail, result_head;
   logic [CountBits-1:0] count, completed;
   CompletionT owner_input;
-  (* ram_style = "distributed" *) CompletionT owners[Depth];
-  (* ram_style = "distributed" *) logic [68:0] results[Depth];
+`ifdef SYNTHESIS
+  localparam int PhysDepth = (`RAPT_FPGA_LUTRAM && Depth < 32) ? 32 : Depth;
+`else
+  localparam int PhysDepth = Depth;
+`endif
+  localparam int PhysPtrBits = PhysDepth > 1 ? $clog2(PhysDepth) : 1;
+  CompletionT owners[PhysDepth];
+  logic [68:0] results[PhysDepth];
   logic [OwnerBits-1:0] destinations[Depth];
   logic [Depth-1:0] killed;
   logic push, capture, pop;
@@ -63,6 +69,9 @@ module rapt_fu_result_queue #(
   assign push = launch.valid && ready;
   assign capture = !reset && !flush && result_valid && count > completed;
   assign pop = !reset && !flush && completed != '0 && (completion_ready || !completion.valid);
+  wire [PhysPtrBits-1:0] phys_head = PhysPtrBits'(head);
+  wire [PhysPtrBits-1:0] phys_tail = PhysPtrBits'(tail);
+  wire [PhysPtrBits-1:0] phys_result_head = PhysPtrBits'(result_head);
   always_comb begin
     owner_input = launch;
     // These fields are supplied by the arithmetic pulse, not stored twice.
@@ -70,11 +79,11 @@ module rapt_fu_result_queue #(
     owner_input.result = '0;
     owner_input.fp_result = '0;
     owner_input.fp_flags = '0;
-    completion = owners[head];
+    completion = owners[phys_head];
     completion.dest = destinations[head];
-    completion.result = WordBits'(results[head][68:5]);
-    completion.fp_result = results[head][68:5];
-    completion.fp_flags = results[head][4:0];
+    completion.result = WordBits'(results[phys_head][68:5]);
+    completion.fp_result = results[phys_head][68:5];
+    completion.fp_flags = results[phys_head][4:0];
     // Same-cycle cancellation remains the consumer's responsibility.
     completion.valid = !reset && !flush && completed != '0 && !killed[head];
   end
@@ -97,10 +106,10 @@ module rapt_fu_result_queue #(
       completed <= completed + CountBits'(capture) - CountBits'(pop);
     end
     if (launch.valid && credit_available) begin
-      owners[tail] <= owner_input;
+      owners[phys_tail] <= owner_input;
       destinations[tail] <= launch.dest;
     end
-    if (result_valid && count > completed) results[result_head] <= {result, flags};
+    if (result_valid && count > completed) results[phys_result_head] <= {result, flags};
   end
   // Owner numbers need parallel recovery reads. Keep them separate so the
   // remaining metadata retains one read port and can map to FPGA LUTRAM.

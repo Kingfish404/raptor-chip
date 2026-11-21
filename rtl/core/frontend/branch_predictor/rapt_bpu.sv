@@ -95,16 +95,25 @@ module rapt_bpu #(
 
   /* verilator lint_on UNUSEDSIGNAL */
 
-  // --- PHT and BTB with (* keep_hierarchy *) ---
-  // Read addresses computed from nextpc; registered inside sub-modules on
-  // pc_update. The keep_hierarchy attribute prevents Yosys from flattening
-  // the sub-modules, so the internal read-address registers stay separate
-  // from pc_ifu: eliminating the ~2800-fanout critical path.
+  // --- Direction predictor and BTB ---
+  // Read addresses are XOR-folded from nextpc and registered inside each
+  // sub-module on ren, keeping predictor read indices independent of pc_ifu.
+
+  function automatic logic [BTB_TAG_LEN-1:0] btb_tag_of(input logic [PcW-1:0] pc);
+    automatic logic [BTB_TAG_LEN-1:0] folded;
+    folded = '0;
+    for (int base = BTB_LEN + 1; base < PcW; base += BTB_TAG_LEN) begin
+      for (int bit_i = 0; bit_i < BTB_TAG_LEN; bit_i++) begin
+        if (base + bit_i < PcW) folded[bit_i] ^= pc[base+bit_i];
+      end
+    end
+    return folded;
+  endfunction
 
   logic [BTB_LEN-1:0] fbtb_raddr;
   logic [BTB_TAG_LEN-1:0] fbtb_rtag;
   assign fbtb_raddr = ifu_bpu.nextpc[BTB_LEN-1+1:1] ^ ifu_bpu.nextpc[2*BTB_LEN-1+1:BTB_LEN+1];
-  assign fbtb_rtag  = ifu_bpu.nextpc[BTB_LEN+1+BTB_TAG_LEN-1:BTB_LEN+1];
+  assign fbtb_rtag  = btb_tag_of(ifu_bpu.nextpc);
 
   // ---------------- Direction predictor (pluggable) ----------------
   // The conditional-direction predictor is selected at elaboration time via
@@ -225,20 +234,24 @@ module rapt_bpu #(
   assign cmu_waddr     = rbtb_idx;
   assign cmu_wd_tag    = rbtb_tag;
 
-  // IDU training pulse: derive matching index/tag from train_pc.
+  // IDU training/invalidation pulse: derive matching index/tag from train_pc.
   logic                   idu_wen;
+  logic                   idu_inv;
   logic [    BTB_LEN-1:0] idu_waddr;
   logic [BTB_TAG_LEN-1:0] idu_wd_tag;
   logic idu_wen_q;
+  logic idu_inv_q;
   logic [PcW-1:1] idu_target_q;
   logic [1:0] idu_type_q;
   // Decode training follows its registered redirect. Store only the BTB key,
   // not another full PC, and let an older recovery cancel the pending write.
   assign idu_wen = idu_wen_q && !cmu_bcast.flush_pipe && !execute_recover;
+  assign idu_inv = idu_inv_q && !cmu_bcast.flush_pipe && !execute_recover;
   always_ff @(posedge clock) begin
     idu_wen_q <= idu_bpu.train_en && !reset;
+    idu_inv_q <= idu_bpu.invalidate_en && !reset;
     idu_waddr <= idu_bpu.train_pc[BTB_LEN:1] ^ idu_bpu.train_pc[2*BTB_LEN:BTB_LEN+1];
-    idu_wd_tag <= idu_bpu.train_pc[BTB_LEN+BTB_TAG_LEN:BTB_LEN+1];
+    idu_wd_tag <= btb_tag_of(idu_bpu.train_pc);
     idu_type_q <= idu_bpu.train_type;
   end
 
@@ -259,19 +272,22 @@ module rapt_bpu #(
   //     the correct type, so dropping a refresh is a no-op.
   //   - IDU train carries fresh target/tag/type for a new (or aliased) entry;
   //     it should preempt the type-only refresh.
-  logic wen_entry_mux, wen_type_mux;
+  logic wen_entry_mux, inv_entry_mux, wen_type_mux;
   logic [    BTB_LEN-1:0] waddr_mux;
   logic [       PcW-1:1] wd_target_mux;
   logic [BTB_TAG_LEN-1:0] wd_tag_mux;
   logic [            1:0] wd_type_mux;
   logic                   idu_grant;
+  logic                   idu_inv_grant;
   assign idu_grant     = idu_wen && !cmu_wen_entry;
+  assign idu_inv_grant = idu_inv && !cmu_wen_entry;
   assign wen_entry_mux = cmu_wen_entry || idu_grant;
-  assign wen_type_mux  = cmu_wen_type || idu_grant;
-  // idu_grant already excludes a commit entry write.
-  assign waddr_mux     = idu_grant ? idu_waddr : cmu_waddr;
+  assign inv_entry_mux = idu_inv_grant;
+  assign wen_type_mux  = (cmu_wen_type && !idu_inv_grant) || idu_grant;
+  // idu_grant / idu_inv_grant already exclude a commit entry write.
+  assign waddr_mux     = (idu_grant || idu_inv_grant) ? idu_waddr : cmu_waddr;
   assign wd_target_mux = cmu_wen_entry ? cmu_wd_full : idu_target_q;
-  assign wd_tag_mux    = idu_grant ? idu_wd_tag : cmu_wd_tag;
+  assign wd_tag_mux    = (idu_grant || idu_inv_grant) ? idu_wd_tag : cmu_wd_tag;
   assign wd_type_mux   = idu_grant ? idu_type_q : cmu_wd_type;
 
   rapt_bpu_btb #(
@@ -291,6 +307,7 @@ module rapt_bpu #(
       // JALR entry creation: write target+tag+valid on JALR flush (bug fix: baseline
       // only wrote entries for JAL and taken-branches, leaving JALR without BTB entries)
       .wen_entry(wen_entry_mux),
+      .inv_entry(inv_entry_mux),
       .waddr(waddr_mux),
       .wd_target(wd_target_mux),
       .wd_tag(wd_tag_mux),
@@ -313,7 +330,7 @@ module rapt_bpu #(
 
   // Commit-path index computation
   assign rbtb_idx = rpc[BTB_LEN-1+1:1] ^ rpc[2*BTB_LEN-1+1:BTB_LEN+1];
-  assign rbtb_tag = rpc[BTB_LEN+1+BTB_TAG_LEN-1:BTB_LEN+1];
+  assign rbtb_tag = btb_tag_of(rpc);
 
   assign ifu_bpu.taken = taken;
   assign ifu_bpu.npc = npc;

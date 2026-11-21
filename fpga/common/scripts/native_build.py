@@ -528,11 +528,18 @@ def prepare(args, out):
     names.append(PROFILE["top"] + ".sv")
     (sources / "board_sources.sv").write_text("".join(f'`include "{name}"\n' for name in names))
     peripheral_wrapper(args, out)
+    wide_rv64 = int(args.xlen == 64 and args.preset in (
+        "default-w3", "default-w4", "default-w4-cache", "default-w8", "large"
+    ))
+    sys_setup_margin = 0.6 if wide_rv64 else (0.3 if args.xlen == 64 else 0.0)
     cfg = {"out": out, "xlen": args.xlen, "with_ddr": int(args.memory == "ddr"),
            "with_ethernet": args.ethernet, "with_cm005_bridge": args.cm005_bridge,
            "with_sampling": int(args.sampling),
+           "no_timing_driven": wide_rv64, "sys_setup_margin_ns": sys_setup_margin,
            "ddr_part": args.ddr_part, "jobs": args.jobs, "clock_mhz": args.clock_mhz,
-           **{key: PROFILE[key] for key in ("part", "top", "bitstream", "ddr_clock_port", "reference_hz")}}
+           **{key: PROFILE[key] for key in (
+               "part", "top", "bitstream", "ddr_clock_port", "reference_hz"
+           )}}
     (out / "config.tcl").write_text("".join(f"set {key} {tcl(value)}\n" for key, value in cfg.items()))
     if identity(args)["sha256"] != before["sha256"]:
         raise RuntimeError("Source files changed during prepare; retry to obtain a coherent build")
@@ -623,8 +630,13 @@ def refresh_software(args, out):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, parents=[board_parser()])
-    parser.add_argument("action", choices=("prepare", "refresh-software", "lint", "test", "sim", "ip-check", "peripheral-synth",
-                                          "synth", "build", "load", "info"))
+    parser.add_argument(
+        "action",
+        choices=(
+            "prepare", "refresh-software", "lint", "test", "sim", "ip-check",
+            "peripheral-synth", "synth", "build", "load", "info",
+        ),
+    )
     parser.add_argument("--xlen", type=int, choices=(32, 64), default=64)
     parser.add_argument("--preset", default="small")
     parser.add_argument("--memory", choices=("bram", "ddr"), default=PROFILE.get("default_memory", "bram"))

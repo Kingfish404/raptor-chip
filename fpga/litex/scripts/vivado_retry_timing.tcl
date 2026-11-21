@@ -27,11 +27,22 @@ proc raptor_fix_phy_min_skew {{phy_pattern {raptor_ddr4_0/*}} {margin_ps 100}} {
             }
             # Delay objects and interactive route budgets use picoseconds.
             # Increase the route's minimum delay; allow the corresponding
-            # slow-corner maximum to grow as well. These are routing goals,
-            # not changes to setup/hold/pulse-width timing constraints.
+            # slow-corner maximum to grow within remaining setup slack. These
+            # are routing goals, not changes to setup/hold/pulse-width timing
+            # constraints.
             set extra [expr {int(ceil(-1000.0 * $slack)) + $margin_ps}]
             set minimum [expr {[get_property FAST_MIN $delays] + $extra}]
-            set maximum [expr {[get_property SLOW_MAX $delays] + 3 * $extra}]
+            set max_grow [expr {3 * $extra}]
+            set setup_paths [get_timing_paths -quiet -to $pin -delay_type max -max_paths 1]
+            if {[llength $setup_paths] == 1} {
+                set setup_slack [get_property SLACK [lindex $setup_paths 0]]
+                if {[string is double -strict $setup_slack] && $setup_slack > 0} {
+                    set headroom [expr {int(floor(1000.0 * $setup_slack)) - 20}]
+                    if {$headroom < $extra} {set headroom $extra}
+                    if {$headroom < $max_grow} {set max_grow $headroom}
+                }
+            }
+            set maximum [expr {[get_property SLOW_MAX $delays] + $max_grow}]
             puts "INFO: repairing PHY min skew on $name; route goal $minimum..$maximum ps"
             route_design -unroute -pins $pin
             route_design -pins $pin -min_delay $minimum -max_delay $maximum

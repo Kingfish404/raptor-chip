@@ -278,7 +278,7 @@ module rapt_vpu #(
   logic cfg_max, cfg_keep, cfg_illegal;
   logic csr_write, csr_illegal, csr_dirty;
   logic [XLEN-1:0] csr_rdata, csr_wdata, csr_operand;
-  logic [XLEN-1:0] vtype, vl;
+  logic [XLEN-1:0] vtype, sub_vtype, vl;
   logic [$clog2(VLEN)-1:0] vstart;
   logic [1:0] vxrm;
   /* verilator lint_off UNUSEDSIGNAL */
@@ -414,7 +414,7 @@ module rapt_vpu #(
       .cmd_valid(state == FR_START),
       .cmd_ready(fr_ready),
       .cmd_insn(command_q.insn),
-      .cmd_vtype(vtype),
+      .cmd_vtype(sub_vtype),
       .cmd_vl(vl),
       .cmd_vstart(vstart),
       .cmd_frm(command_q.frm),
@@ -543,33 +543,56 @@ module rapt_vpu #(
     logic [1:0] ready, valid, illegal;
     logic [1:0][63:0] value;
     logic [1:0][4:0] flags;
-    for (genvar precision = 0; precision < 2; precision++) begin : gen_precision
-      if (precision == 0 || ELEN >= 64) begin : gen_supported
-        rapt_vpu_int_fp_shared #(
-            .FloatDouble(precision == 1)
-        ) u_convert (
-            .clock(clock),
-            .reset(reset),
-            .req_valid(state == FP_START && if_recognized && if_double == 1'(precision)),
-            .req_ready(ready[precision]),
-            .to_float(if_to_float),
-            .unsigned_integer(if_unsigned),
-            .integer_size(if_integer_size),
-            .operand(a_q),
-            .rm(if_rm),
-            .rsp_valid(valid[precision]),
-            .rsp_ready(state == FP_RUN && if_recognized && if_double == 1'(precision)),
-            .result(value[precision]),
-            .flags(flags[precision]),
-            .illegal(illegal[precision])
-        );
-      end else begin : gen_absent
-        assign ready[precision] = 0;
-        assign valid[precision] = 0;
-        assign value[precision] = 0;
-        assign flags[precision] = 0;
-        assign illegal[precision] = 0;
-      end
+    if (ELEN >= 64) begin : gen_multi
+      logic conv_ready, conv_valid, conv_illegal;
+      logic [63:0] conv_value;
+      logic [4:0] conv_flags;
+      rapt_vpu_int_fp_multi u_convert (
+          .clock(clock),
+          .reset(reset),
+          .req_valid(state == FP_START && if_recognized),
+          .req_ready(conv_ready),
+          .float_double(if_double),
+          .to_float(if_to_float),
+          .unsigned_integer(if_unsigned),
+          .integer_size(if_integer_size),
+          .operand(a_q),
+          .rm(if_rm),
+          .rsp_valid(conv_valid),
+          .rsp_ready(state == FP_RUN && if_recognized),
+          .result(conv_value),
+          .flags(conv_flags),
+          .illegal(conv_illegal)
+      );
+      assign ready = {2{conv_ready}};
+      assign valid = {conv_valid && if_double, conv_valid && !if_double};
+      assign value = {2{conv_value}};
+      assign flags = {2{conv_flags}};
+      assign illegal = {2{conv_illegal}};
+    end else begin : gen_single
+      rapt_vpu_int_fp_shared #(
+          .FloatDouble(1'b0)
+      ) u_convert (
+          .clock(clock),
+          .reset(reset),
+          .req_valid(state == FP_START && if_recognized && !if_double),
+          .req_ready(ready[0]),
+          .to_float(if_to_float),
+          .unsigned_integer(if_unsigned),
+          .integer_size(if_integer_size),
+          .operand(a_q),
+          .rm(if_rm),
+          .rsp_valid(valid[0]),
+          .rsp_ready(state == FP_RUN && if_recognized && !if_double),
+          .result(value[0]),
+          .flags(flags[0]),
+          .illegal(illegal[0])
+      );
+      assign ready[1] = 1'b0;
+      assign valid[1] = 1'b0;
+      assign value[1] = 64'd0;
+      assign flags[1] = 5'd0;
+      assign illegal[1] = 1'b0;
     end
     for (genvar pair_index = 0; pair_index < 5; pair_index++) begin : gen_pair
       localparam int Precision = pair_index >= 3 ? 1 : 0;
@@ -611,69 +634,124 @@ module rapt_vpu #(
       end
     end
   end
-  for (genvar precision = 0; precision < 2; precision++) begin : gen_fp
-    if (precision == 0 || ELEN >= 64) begin : gen_supported
-      logic [63:0] misc_result, estimate_result;
-      logic [4:0] misc_flags, estimate_flags;
-      logic misc_illegal, estimate_illegal, estimate_selected;
-      assign estimate_selected = !fr_active && (fp_misc_operation == 12 || fp_misc_operation == 13);
-      rapt_vpu_fp_misc #(
-          .Double(precision == 1)
-      ) u_misc (
-          .a(fr_active ? fr_a : fp_a),
-          .b(fr_active ? fr_b : fp_b),
-          .operation(fr_active ? (fr_op == 2 ? 4'd1 : 4'd0) : fp_misc_operation),
-          .result(misc_result),
-          .flags(misc_flags),
-          .illegal(misc_illegal)
-      );
-      rapt_vpu_fp_estimate #(
-          .Double(precision == 1)
-      ) u_estimate (
-          .operand(fp_a),
-          .reciprocal_sqrt(fp_misc_operation == 13),
-          .rm(command_q.frm),
-          .result(estimate_result),
-          .flags(estimate_flags),
-          .illegal(estimate_illegal)
-      );
-      assign fp_misc_result[precision] = estimate_selected ? estimate_result : misc_result;
-      assign fp_misc_flags[precision] = estimate_selected ? estimate_flags : misc_flags;
-      assign fp_misc_illegal[precision] = estimate_selected ? estimate_illegal : misc_illegal;
-      rapt_vpu_fp_arith #(
-          .Double(precision == 1)
-      ) u_arith (
-          .clock(clock),
-          .reset(reset),
-          .req_valid((fr_active && fr_req_valid && fr_op == 0 && fr_double == 1'(precision))
-              || (state == FP_START && !if_recognized && !fp_divsqrt && !fp_misc
-                  && !fp_convert && d_size_q == 2'(precision+2))),
-          .req_ready(fp_ready[precision]),
-          .operation(fr_active ? 2'd1 : fp_operation),
-          .a(fr_active ? fr_a : fp_exec_a),
-          .b(fr_active ? fr_b : fp_exec_b),
-          .c(fr_active ? 64'd0 : fp_c),
-          .negate_product(!fr_active && fp_neg_product),
-          .negate_addend(!fr_active && fp_neg_addend),
-          .rm(fr_active ? fr_rm : command_q.frm),
-          .rsp_valid(fp_valid[precision]),
-          .rsp_ready((fr_active && fr_rsp_ready && fr_op == 0 && fr_double == 1'(precision))
-              || (state == FP_RUN && !if_recognized && !fp_divsqrt && !fp_misc
-                  && !fp_convert && d_size_q == 2'(precision+2))),
-          .result(fp_result[precision]),
-          .flags(fp_flags[precision]),
-          .illegal(fp_illegal[precision])
-      );
-    end else begin : gen_absent
-      assign fp_misc_result[precision] = 0;
-      assign fp_misc_flags[precision] = 0;
-      assign fp_misc_illegal[precision] = 0;
-      assign fp_ready[precision] = 0;
-      assign fp_valid[precision] = 0;
-      assign fp_result[precision] = 0;
-      assign fp_flags[precision] = 0;
-      assign fp_illegal[precision] = 0;
-    end
+  if (ELEN >= 64) begin : gen_fp_multi
+    logic [63:0] misc_result, estimate_result, arith_result;
+    logic [4:0] misc_flags, estimate_flags, arith_flags;
+    logic misc_illegal, estimate_illegal, estimate_selected;
+    logic misc_double, arith_double, arith_elem, arith_ready, arith_valid, arith_illegal;
+    assign misc_double = fr_active ? fr_double : sew_q[0];
+    assign estimate_selected = !fr_active
+        && (fp_misc_operation == 4'd12 || fp_misc_operation == 4'd13);
+    rapt_vpu_fp_misc_multi u_misc (
+        .double_precision(misc_double),
+        .a(fr_active ? fr_a : fp_a),
+        .b(fr_active ? fr_b : fp_b),
+        .operation(fr_active ? (fr_op == 2'd2 ? 4'd1 : 4'd0) : fp_misc_operation),
+        .result(misc_result),
+        .flags(misc_flags),
+        .illegal(misc_illegal)
+    );
+    rapt_vpu_fp_estimate_multi u_estimate (
+        .double_precision(sew_q[0]),
+        .operand(fp_a),
+        .reciprocal_sqrt(fp_misc_operation == 4'd13),
+        .rm(command_q.frm),
+        .result(estimate_result),
+        .flags(estimate_flags),
+        .illegal(estimate_illegal)
+    );
+    assign fp_misc_result = {2{estimate_selected ? estimate_result : misc_result}};
+    assign fp_misc_flags = {2{estimate_selected ? estimate_flags : misc_flags}};
+    assign fp_misc_illegal = {2{estimate_selected ? estimate_illegal : misc_illegal}};
+    assign arith_double = fr_active ? fr_double : d_size_q[0];
+    assign arith_elem = !if_recognized && !fp_divsqrt && !fp_misc && !fp_convert && d_size_q[1];
+    rapt_vpu_fp_arith_multi u_arith (
+        .clock(clock),
+        .reset(reset),
+        .req_valid((fr_active && fr_req_valid && fr_op == 2'd0)
+            || (state == FP_START && arith_elem)),
+        .req_ready(arith_ready),
+        .req_double(arith_double),
+        .operation(fr_active ? 2'd1 : fp_operation),
+        .a(fr_active ? fr_a : fp_exec_a),
+        .b(fr_active ? fr_b : fp_exec_b),
+        .c(fr_active ? 64'd0 : fp_c),
+        .negate_product(!fr_active && fp_neg_product),
+        .negate_addend(!fr_active && fp_neg_addend),
+        .rm(fr_active ? fr_rm : command_q.frm),
+        .rsp_valid(arith_valid),
+        .rsp_ready((fr_active && fr_rsp_ready && fr_op == 2'd0)
+            || (state == FP_RUN && arith_elem)),
+        .result(arith_result),
+        .flags(arith_flags),
+        .illegal(arith_illegal)
+    );
+    assign fp_ready = {2{arith_ready}};
+    assign fp_valid = {arith_valid && arith_double, arith_valid && !arith_double};
+    assign fp_result = {2{arith_result}};
+    assign fp_flags = {2{arith_flags}};
+    assign fp_illegal = {2{arith_illegal}};
+  end else begin : gen_fp_single
+    logic [63:0] misc_result, estimate_result;
+    logic [4:0] misc_flags, estimate_flags;
+    logic misc_illegal, estimate_illegal, estimate_selected;
+    assign estimate_selected = !fr_active
+        && (fp_misc_operation == 4'd12 || fp_misc_operation == 4'd13);
+    rapt_vpu_fp_misc #(
+        .Double(1'b0)
+    ) u_misc (
+        .a(fr_active ? fr_a : fp_a),
+        .b(fr_active ? fr_b : fp_b),
+        .operation(fr_active ? (fr_op == 2'd2 ? 4'd1 : 4'd0) : fp_misc_operation),
+        .result(misc_result),
+        .flags(misc_flags),
+        .illegal(misc_illegal)
+    );
+    rapt_vpu_fp_estimate #(
+        .Double(1'b0)
+    ) u_estimate (
+        .operand(fp_a),
+        .reciprocal_sqrt(fp_misc_operation == 4'd13),
+        .rm(command_q.frm),
+        .result(estimate_result),
+        .flags(estimate_flags),
+        .illegal(estimate_illegal)
+    );
+    assign fp_misc_result[0] = estimate_selected ? estimate_result : misc_result;
+    assign fp_misc_flags[0] = estimate_selected ? estimate_flags : misc_flags;
+    assign fp_misc_illegal[0] = estimate_selected ? estimate_illegal : misc_illegal;
+    assign fp_misc_result[1] = 64'd0;
+    assign fp_misc_flags[1] = 5'd0;
+    assign fp_misc_illegal[1] = 1'b0;
+    rapt_vpu_fp_arith #(
+        .Double(1'b0)
+    ) u_arith (
+        .clock(clock),
+        .reset(reset),
+        .req_valid((fr_active && fr_req_valid && fr_op == 2'd0 && !fr_double)
+            || (state == FP_START && !if_recognized && !fp_divsqrt && !fp_misc
+                && !fp_convert && d_size_q == 2'd2)),
+        .req_ready(fp_ready[0]),
+        .operation(fr_active ? 2'd1 : fp_operation),
+        .a(fr_active ? fr_a : fp_exec_a),
+        .b(fr_active ? fr_b : fp_exec_b),
+        .c(fr_active ? 64'd0 : fp_c),
+        .negate_product(!fr_active && fp_neg_product),
+        .negate_addend(!fr_active && fp_neg_addend),
+        .rm(fr_active ? fr_rm : command_q.frm),
+        .rsp_valid(fp_valid[0]),
+        .rsp_ready((fr_active && fr_rsp_ready && fr_op == 2'd0 && !fr_double)
+            || (state == FP_RUN && !if_recognized && !fp_divsqrt && !fp_misc
+                && !fp_convert && d_size_q == 2'd2)),
+        .result(fp_result[0]),
+        .flags(fp_flags[0]),
+        .illegal(fp_illegal[0])
+    );
+    assign fp_ready[1] = 1'b0;
+    assign fp_valid[1] = 1'b0;
+    assign fp_result[1] = 64'd0;
+    assign fp_flags[1] = 5'd0;
+    assign fp_illegal[1] = 1'b0;
   end
   always_comb begin
     element_lm = int'($signed(vtype[2:0]));
@@ -748,11 +826,12 @@ module rapt_vpu #(
   );
   function automatic logic [63:0] resize_operand(input logic [63:0] value, input logic [1:0] size,
                                                  input logic sign_extend);
-    logic [63:0] shifted;
-    shifted = value << (64 - (8 << size));
-    return sign_extend ? 64'($signed(
-        shifted
-    ) >>> (64 - (8 << size))) : shifted >> (64 - (8 << size));
+    case (size)
+      2'd0: return {{56{sign_extend && value[7]}}, value[7:0]};
+      2'd1: return {{48{sign_extend && value[15]}}, value[15:0]};
+      2'd2: return {{32{sign_extend && value[31]}}, value[31:0]};
+      default: return value;
+    endcase
   endfunction
   // Logical e8 vector-vector operations have no cross-byte carries. Process
   // full aligned groups only; the ordinary element path handles all edges.
@@ -761,18 +840,16 @@ module rapt_vpu #(
       && (d_alu_op == 6'h09 || d_alu_op == 6'h0a || d_alu_op == 6'h0b)
       && sew_q == 0 && index_q[2:0] == 0
       && index_q + IndexBits'(8) <= IndexBits'(vl);
+  logic elem_bit;
+  assign elem_bit = elem_rdata[{3'b0, index_q[2:0]}];
   assign a_input = packed_logic ? elem_rdata
-      : (d_mask_logic || d_iota) ? 64'(elem_rdata[{3'b0,index_q[2:0]}])
-      : resize_operand(
-      elem_rdata, a_size_q, d_a_signed
-  );
+      : (d_mask_logic || d_iota) ? {63'b0, elem_bit}
+      : resize_operand(elem_rdata, a_size_q, d_a_signed);
   assign b_size = d_gather16 ? 2'd1 : sew_q;
   assign gather_index = d_src_vector ? b_q : command_q.insn[14:12] == 3
       ? 64'(command_q.insn[19:15]) : 64'(command_q.rs1);
   assign b_input = packed_logic ? elem_rdata
-      : d_mask_logic ? 64'(elem_rdata[{3'b0, index_q[2:0]}]) : resize_operand(
-      elem_rdata, b_size, d_b_signed
-  );
+      : d_mask_logic ? {63'b0, elem_bit} : resize_operand(elem_rdata, b_size, d_b_signed);
   rapt_vpu_divsqrt #(
       .ELEN(ELEN)
   ) u_fp_divsqrt (
@@ -942,6 +1019,7 @@ module rapt_vpu #(
       .vxsat(vxsat),
       .dirty(csr_dirty)
   );
+  assign sub_vtype = {{(XLEN - 8) {vtype[XLEN-1]}}, vtype[7:0]} | vtype;
   rapt_vpu_mask_scan #(
       .XLEN(XLEN),
       .VLEN(VLEN)
@@ -1001,7 +1079,7 @@ module rapt_vpu #(
       .cmd_valid(state == REDUCE_START),
       .cmd_ready(r_ready),
       .cmd_insn(command_q.insn),
-      .cmd_vtype(vtype),
+      .cmd_vtype(sub_vtype),
       .cmd_vl(vl),
       .cmd_vstart(vstart),
       .done_valid(r_done),
@@ -1032,7 +1110,7 @@ module rapt_vpu #(
       .cmd_tag(tag_q),
       .cmd_base(command_q.rs1),
       .cmd_stride(command_q.rs2),
-      .cmd_vtype(vtype),
+      .cmd_vtype(sub_vtype),
       .cmd_vl(vl),
       .cmd_vstart(vstart),
       .done_valid(m_done),

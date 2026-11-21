@@ -217,6 +217,12 @@ module rapt_prf #(
     logic [PLEN-1:0] read_addr[Reads];
     logic [XLEN-1:0] bank_read[Reads][NWB];
     logic [XLEN-1:0] read_data[Reads];
+`ifdef SYNTHESIS
+    localparam int PhysPnum = PNUM < 32 ? 32 : PNUM;
+`else
+    localparam int PhysPnum = PNUM;
+`endif
+    localparam int PhysPlen = $clog2(PhysPnum);
     for (genvar p = 0; p < NWB; p++) begin : g_bank
       if (p == 0) begin : g_debug_share
         assign bank_we[p] = (wr_en[p] && !cmu_bcast.flush_pipe) || dbg_write;
@@ -227,10 +233,12 @@ module rapt_prf #(
         assign bank_addr[p] = wr_addr[p];
         assign bank_data[p] = wr_data[p];
       end
+      wire [PhysPlen-1:0] phys_bank_addr = PhysPlen'(bank_addr[p]);
       for (genvar r = 0; r < Reads; r++) begin : g_copy
-        (* ram_style = "distributed" *) logic [XLEN-1:0] words[PNUM];
-        always_ff @(posedge clock) if (bank_we[p]) words[bank_addr[p]] <= bank_data[p];
-        assign bank_read[r][p] = words[read_addr[r]];
+        logic [XLEN-1:0] words[PhysPnum];
+        wire [PhysPlen-1:0] phys_read_addr = PhysPlen'(read_addr[r]);
+        always_ff @(posedge clock) if (bank_we[p]) words[phys_bank_addr] <= bank_data[p];
+        assign bank_read[r][p] = words[phys_read_addr];
       end
     end
     // Writers are unique per entry (PRF_WRITE_TAG_UNIQUE); the lowest bank

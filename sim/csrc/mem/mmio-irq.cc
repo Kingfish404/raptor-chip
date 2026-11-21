@@ -29,8 +29,14 @@ void nsim_plic_raise(uint32_t irq)
     g_ext_irq_pending.fetch_or(1u << irq, std::memory_order_relaxed);
 }
 
+bool qemu_io_bridge_active();
+void qemu_io_bridge_poll();
+
 extern "C" void npc_consume_ext_irq_vector(int *rdata)
 {
+    static uint32_t poll_div = 0;
+    if (qemu_io_bridge_active() && ((++poll_div & 0xffu) == 0))
+        qemu_io_bridge_poll();
     if (rdata == nullptr)
         return;
     *rdata = (int)g_ext_irq_pending.exchange(0, std::memory_order_relaxed);

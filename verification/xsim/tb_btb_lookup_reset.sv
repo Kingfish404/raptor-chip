@@ -11,7 +11,7 @@ module tb_btb_lookup_reset;
   logic [6:0] rtag = 0, wd_tag = 0;
   logic [PcW-1:1] rd_target, wd_target = 0;
   logic [1:0] rd_type, wd_type = 0;
-  logic rd_tag_match, wen_entry = 0, wen_type = 0;
+  logic rd_tag_match, wen_entry = 0, inv_entry = 0, wen_type = 0;
   int checks = 0;
 
   rapt_bpu_btb #(
@@ -157,6 +157,17 @@ module tb_btb_lookup_reset;
     ren = 1;
     step();
     hit(TargetA, 2);
+
+    // Invalidating a matching entry clears its valid bit and prevents further
+    // false hits; invalidating a non-matching tag is a no-op.
+    inv_entry = 1;
+    wd_tag = 7'd3;
+    step();
+    hit(TargetA, 2);
+    wd_tag = 0;
+    step();
+    inv_entry = 0;
+    miss("invalidated false-hit entry");
     $display(
         "PASS: BTB XLEN=%0d reset/first lookup, early training, held forwarding, RW/init (%0d checks)",
         `RAPT_XLEN, checks);

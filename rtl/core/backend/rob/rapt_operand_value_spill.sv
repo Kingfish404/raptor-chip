@@ -154,7 +154,14 @@ module rapt_operand_value_spill #(
     );
     /* verilator lint_on PINCONNECTEMPTY */
 
+`ifdef SYNTHESIS
+    localparam int PhysSpill = SpillEntries < 32 ? 32 : SpillEntries;
+`else
+    localparam int PhysSpill = SpillEntries;
+`endif
+    localparam int PhysSpillBits = $clog2(PhysSpill);
     for (genvar a = 0; a < AllocateWidth; a++) begin : g_write_lane
+      wire [PhysSpillBits-1:0] phys_alloc_idx = PhysSpillBits'(allocate_index[a]);
       assign marker_allocate[a] = '0;
       assign allocate_word[a] = '{
               uop: allocate_uop[a],
@@ -165,11 +172,12 @@ module rapt_operand_value_spill #(
           };
       assign write_valid[a] = allocate_valid[a] && allocate_ready[a];
       for (genvar p = 0; p < ReadPorts; p++) begin : g_read_copy
-        (* ram_style = "distributed" *) logic [PayloadBits-1:0] words[SpillEntries];
+        logic [PayloadBits-1:0] words[PhysSpill];
+        wire [PhysSpillBits-1:0] phys_read_idx = PhysSpillBits'(read_index[p]);
         always_ff @(posedge clock)
           if (write_valid[a])
-            words[allocate_index[a]] <= PayloadBits'(allocate_word[a]);
-        assign bank_read[p][a] = words[read_index[p]];
+            words[phys_alloc_idx] <= PayloadBits'(allocate_word[a]);
+        assign bank_read[p][a] = words[phys_read_idx];
       end
     end
     for (genvar e = 0; e < SpillEntries; e++) begin : g_lane
@@ -239,14 +247,22 @@ module rapt_operand_value_spill #(
     logic [LaneBits-1:0] uop_lane_q[SpillEntries];
     logic uop_write[AllocateWidth];
     logic [UopBits-1:0] bank_read[ReadPorts][AllocateWidth];
+`ifdef SYNTHESIS
+    localparam int PhysSpill = SpillEntries < 32 ? 32 : SpillEntries;
+`else
+    localparam int PhysSpill = SpillEntries;
+`endif
+    localparam int PhysSpillBits = $clog2(PhysSpill);
     for (genvar a = 0; a < AllocateWidth; a++) begin : g_write_lane
+      wire [PhysSpillBits-1:0] phys_alloc_idx = PhysSpillBits'(allocate_index[a]);
       assign uop_write[a] = allocate_valid[a] && allocate_ready[a];
       for (genvar p = 0; p < ReadPorts; p++) begin : g_read_copy
-        (* ram_style = "distributed" *) logic [UopBits-1:0] words[SpillEntries];
+        logic [UopBits-1:0] words[PhysSpill];
+        wire [PhysSpillBits-1:0] phys_read_idx = PhysSpillBits'(read_index[p]);
         always_ff @(posedge clock)
           if (uop_write[a])
-            words[allocate_index[a]] <= UopBits'(allocate_uop[a]);
-        assign bank_read[p][a] = words[read_index[p]];
+            words[phys_alloc_idx] <= UopBits'(allocate_uop[a]);
+        assign bank_read[p][a] = words[phys_read_idx];
       end
     end
     for (genvar e = 0; e < SpillEntries; e++) begin : g_lane

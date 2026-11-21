@@ -298,6 +298,13 @@ module formal_rou_retire_properties #(
             // CSR address groups from the privileged ISA encoding, independently
             // expressed as a masked group decode rather than the DUT helper.
             expected[e].fetch_csr_change <= allocation[s].uop.imm[11:0] == 12'h180
+                || allocation[s].uop.imm[11:0] == 12'h30a
+                || allocation[s].uop.imm[11:0] == 12'h280
+                || allocation[s].uop.imm[11:0] == 12'h680
+                || allocation[s].uop.imm[11:0] == 12'h60a
+                || allocation[s].uop.imm[11:0] == 12'h600
+                || allocation[s].uop.imm[11:0] == 12'h200
+                || allocation[s].uop.imm[11:2] == 10'h183
                 || allocation[s].uop.imm[11:2] == 10'h0e8
                 || allocation[s].uop.imm[11:4] == 8'h3b;
             expected[e].c <= allocation[s].uop.c;

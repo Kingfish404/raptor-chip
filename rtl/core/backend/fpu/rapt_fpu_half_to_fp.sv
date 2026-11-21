@@ -41,6 +41,7 @@ module rapt_fpu_half_to_fp (
     flags_c = '0;
     found = 1'b0;
     leading = 0;
+    scan = 0;
     unbiased = 0;
     normalized_fraction = '0;
 

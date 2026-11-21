@@ -229,10 +229,16 @@ module rapt_lsu_ioq #(
   logic [    XLEN-1:0] ioq_rdata            [IOQ_SIZE];
   wire  [        63:0] ioq_fp_rdata64       [IOQ_SIZE];
   logic [         5:0] ioq_load_cause       [IOQ_SIZE];
+`ifdef SYNTHESIS
+  localparam int PhysIoqSize = (`RAPT_FPGA_LUTRAM && IOQ_SIZE < 32) ? 32 : IOQ_SIZE;
+`else
+  localparam int PhysIoqSize = IOQ_SIZE;
+`endif
+  localparam int PhysIoqLen = $clog2(PhysIoqSize);
   // An A response writes one slot, and only the head reads its saved tval.
-  (* ram_style = "distributed" *) logic [XLEN-1:0] ioq_load_tval[IOQ_SIZE];
+  logic [XLEN-1:0] ioq_load_tval[PhysIoqSize];
 `ifdef RAPT_H_EXTENSION
-  (* ram_style = "distributed" *) logic [XLEN-1:2] ioq_load_gpaddr[IOQ_SIZE];
+  logic [XLEN-1:2] ioq_load_gpaddr[PhysIoqSize];
   logic [IOQ_SIZE-1:0] ioq_load_gptw;
 `endif
 
@@ -271,12 +277,14 @@ module rapt_lsu_ioq #(
 
   logic                                ioq_valid_found;
   logic                                reservation_match;
+  wire [PhysIoqLen-1:0] phys_active_idx = PhysIoqLen'(active_idx);
+  wire [PhysIoqLen-1:0] phys_ioq_head = PhysIoqLen'(ioq_head);
 
   always_ff @(posedge clock) begin
     if (exu_lsu.rvalid && exu_lsu.rready && (active_idx != ioq_head || !ioq_valid_found)) begin
-      ioq_load_tval[active_idx] <= exu_lsu.tval;
+      ioq_load_tval[phys_active_idx] <= exu_lsu.tval;
 `ifdef RAPT_H_EXTENSION
-      ioq_load_gpaddr[active_idx] <= exu_lsu.gpaddr;
+      ioq_load_gpaddr[phys_active_idx] <= exu_lsu.gpaddr;
       ioq_load_gptw[active_idx] <= exu_lsu.gptw;
 `endif
     end
@@ -316,10 +324,13 @@ module rapt_lsu_ioq #(
     end
   end
   for (genvar s = 0; s < NumSlots; s++) begin : g_payload_bank
-    (* ram_style = "distributed" *) ioq_completion_payload_t completion_info[IOQ_SIZE];
+    ioq_completion_payload_t completion_info[PhysIoqSize];
+    wire [PhysIoqLen-1:0] phys_payload_widx = PhysIoqLen'(payload_write_idx[s]);
+    wire [PhysIoqLen-1:0] phys_early_b_idx = PhysIoqLen'(early_b_idx);
+    wire [PhysIoqLen-1:0] phys_early_idx_r = PhysIoqLen'(early_idx_r);
     always_ff @(posedge clock) begin
       if (disp.accept[s]) begin
-        completion_info[payload_write_idx[s]] <= '{
+        completion_info[phys_payload_widx] <= '{
             generation: dispatch[s].generation,
             prd: dispatch[s].prd,
             rd: dispatch[s].uop.rd
@@ -327,12 +338,13 @@ module rapt_lsu_ioq #(
       end
     end
     // Read every candidate before the response chooses the winning slot.
-    assign completion_head_lane[s] = completion_info[ioq_head];
-    assign completion_a_lane[s] = completion_info[active_idx];
-    assign completion_b_lane[s] = completion_info[early_b_idx];
-    assign completion_early_lane[s] = completion_info[early_idx_r];
+    assign completion_head_lane[s] = completion_info[phys_ioq_head];
+    assign completion_a_lane[s] = completion_info[phys_active_idx];
+    assign completion_b_lane[s] = completion_info[phys_early_b_idx];
+    assign completion_early_lane[s] = completion_info[phys_early_idx_r];
 `ifdef RAPT_SVA_ACTIVE
-    assign completion_bcast_lane[s] = completion_info[bcast_idx];
+    wire [PhysIoqLen-1:0] phys_bcast_idx = PhysIoqLen'(bcast_idx);
+    assign completion_bcast_lane[s] = completion_info[phys_bcast_idx];
 `endif
   end
   // Admission credit is updated at the same edge as queue ownership.  In
@@ -1344,14 +1356,14 @@ module rapt_lsu_ioq #(
   assign head_cause_lsu = head_load_live ? 6'(exu_lsu.cause)
       : head_load_live_b ? '0 : 6'(ioq_load_cause[ioq_head]);
   assign head_tval_lsu = head_load_live ? exu_lsu.tval
-      : head_load_live_b ? '0 : ioq_load_tval[ioq_head];
+      : head_load_live_b ? '0 : ioq_load_tval[phys_ioq_head];
   assign head_skip_lsu = head_load_live ? exu_lsu.difftest_skip
       : head_load_live_b ? 1'b0 : ioq_load_skip[ioq_head];
 `ifdef RAPT_H_EXTENSION
   logic [XLEN-1:2] head_gpaddr_lsu;
   logic head_gptw_lsu;
   assign head_gpaddr_lsu = head_load_live ? exu_lsu.gpaddr
-      : head_load_live_b ? '0 : ioq_load_gpaddr[ioq_head];
+      : head_load_live_b ? '0 : ioq_load_gpaddr[phys_ioq_head];
   assign head_gptw_lsu = head_load_live ? exu_lsu.gptw
       : head_load_live_b ? 1'b0 : ioq_load_gptw[ioq_head];
 `endif

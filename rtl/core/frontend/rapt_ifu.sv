@@ -509,7 +509,7 @@ module rapt_ifu #(
     logic [3:0] position;
     logic conditional, direct;
   } hint_t;
-  (* ram_style = "block" *) hint_t hints[HintEntries];
+  hint_t hints[HintEntries];
   hint_t hint_q, hint_train, hint_write_q;
   logic hint_write_valid_q;
   logic [HintBits-1:0] hint_write_index_q;

@@ -67,8 +67,8 @@ module rapt_virtio_mmio_net #(
   assign irq_o        = |int_status_q;
 
   // Internal 2 KiB RX & TX frame buffers
-  (* ram_style = "distributed" *) logic [7:0] rx_pkt_buf [0:2047];
-  (* ram_style = "distributed" *) logic [7:0] tx_pkt_buf [0:2047];
+  logic [7:0] rx_pkt_buf [0:2047];
+  logic [7:0] tx_pkt_buf [0:2047];
 
   logic rx_pkt_ready_q;
   logic [11:0] rx_cap_len_q, rx_pkt_len_q;

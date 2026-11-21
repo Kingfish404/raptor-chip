@@ -5,7 +5,6 @@
 //
 // Smallest possible direction predictor (zero state). Used as a control
 // reference and to estimate BTB-only performance.
-(* keep_hierarchy *)
 module rapt_bpu_static #(
     parameter int XLEN    = `RAPT_XLEN,
     parameter int GHR_LEN = 64,

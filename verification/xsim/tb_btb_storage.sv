@@ -30,7 +30,7 @@ module btb_storage_case #(
   logic [6:0] rtag = 0, wd_tag = 0;
   logic [PcW-1:1] rd_target, wd_target = 0;
   logic [1:0] rd_type, wd_type = 0;
-  logic rd_tag_match, wen_entry = 0, wen_type = 0;
+  logic rd_tag_match, wen_entry = 0, inv_entry = 0, wen_type = 0;
   rapt_bpu_btb #(
       .DEPTH(Sets),
       .XLEN(Xlen)

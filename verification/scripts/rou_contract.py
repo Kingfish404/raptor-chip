@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import threading
+from ast_mutator import replace_token_sequence
 from formal_scope import preset_xlens
 from yosys_common import ROOT, run_yosys, sha
 
@@ -104,10 +105,12 @@ def retire_main():
         if mutation:
             text = DUT.read_text()
             old, new = MUTATIONS[mutation]
-            if text.count(old) != 1:
-                raise ValueError('Missing ROU mutation anchor: ' + mutation)
+            try:
+                mutated = replace_token_sequence(text, old, new)
+            except ValueError as exc:
+                raise ValueError('Missing ROU mutation anchor: ' + mutation) from exc
             source = directory / 'mutant.sv'
-            source.write_text(text.replace(old, new))
+            source.write_text(mutated)
             files[files.index(DUT)] = source
         defines = ('-DRAPT_RV64 ' if xlen == 64 else '')
         if metadata == 'rvfi':
@@ -543,10 +546,12 @@ def rvfi_main():
             original = ROOT / "rtl/core/backend/rob/rapt_rou.sv"
             text = original.read_text()
             old, new = mutations[mutant]
-            if text.count(old) != 1:
-                raise ValueError("Missing ROU mutation anchor: " + mutant)
+            try:
+                mutated = replace_token_sequence(text, old, new)
+            except ValueError as exc:
+                raise ValueError("Missing ROU mutation anchor: " + mutant) from exc
             source = directory / "mutant.sv"
-            source.write_text(text.replace(old, new))
+            source.write_text(mutated)
             files[files.index(original)] = source
         define = "-DRAPT_RV64 " if xlen == 64 else ""
         read = ("plugin -i slang\nread_slang --threads 1 --single-unit "

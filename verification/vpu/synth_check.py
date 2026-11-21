@@ -25,7 +25,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--yosys", default="yosys")
     parser.add_argument("--build-dir", type=Path, default=ROOT / "verification/build/vpu/synth")
-    parser.add_argument("--leaf", action="append", choices=LEAVES, help="Limit to named leaves; repeat to select multiple")
+    parser.add_argument(
+        "--leaf", action="append", choices=LEAVES,
+        help="Limit to named leaves; repeat to select multiple",
+    )
     parser.add_argument("--cache-predicate", type=int, choices=(0, 1), default=1,
                         help="Select the top-level predicate cache")
     parser.add_argument("--share-int-fp", type=int, choices=(0, 1), default=1,
@@ -58,15 +61,28 @@ def main():
                     "int_to_fp", "integer_to_fp", "single_to_int_w", "fp_to_int")
                 ] + sources
             if leaf in ("fp_reduce_engine", "fp_reduce_engine_baseline"):
-                sources = [VPU / f"rapt_vpu_{name}.sv" for name in ("vtype", "fp_widen", "fp_reduce_decode", "fp_reduce_control")] + sources
+                eng_names = ("vtype", "fp_widen", "fp_reduce_decode", "fp_reduce_control")
+                sources = [VPU / f"rapt_vpu_{name}.sv" for name in eng_names] + sources
             if leaf == "fp_reduce":
-                sources = [VPU / "rapt_vpu_fp_reduce_control.sv", ROOT / "rtl/core/backend/fpu/rapt_fpu_fma.sv", VPU / "rapt_vpu_fma.sv", VPU / "rapt_vpu_fp_arith.sv", VPU / "rapt_vpu_fp_misc.sv", VPU / "rapt_vpu_fp_widen.sv"] + sources
+                sources = [
+                    VPU / "rapt_vpu_fp_reduce_control.sv",
+                    ROOT / "rtl/core/backend/fpu/rapt_fpu_fma.sv",
+                    VPU / "rapt_vpu_fma.sv",
+                    VPU / "rapt_vpu_fp_arith.sv",
+                    VPU / "rapt_vpu_fp_misc.sv",
+                    VPU / "rapt_vpu_fp_widen.sv",
+                ] + sources
             if leaf == "fp_reduce_control":
                 sources.insert(0, VPU / "rapt_vpu_fp_widen.sv")
             if leaf == "fp_transfer":
                 sources.insert(0, VPU / "rapt_vpu_slide.sv")
             if leaf == "fp_wide_arith":
-                sources = [ROOT / "rtl/core/backend/fpu/rapt_fpu_fma.sv", VPU / "rapt_vpu_fma.sv", VPU / "rapt_vpu_fp_arith.sv", VPU / "rapt_vpu_fp_widen.sv"] + sources
+                sources = [
+                    ROOT / "rtl/core/backend/fpu/rapt_fpu_fma.sv",
+                    VPU / "rapt_vpu_fma.sv",
+                    VPU / "rapt_vpu_fp_arith.sv",
+                    VPU / "rapt_vpu_fp_widen.sv",
+                ] + sources
             if leaf == "fp_convert":
                 sources = FORMAT_CONVERTERS + [VPU / "rapt_vpu_fp_widen.sv"] + sources
             if leaf == "divsqrt":
@@ -184,7 +200,7 @@ def main():
             roms = [m for m in memories if m["WR_PORTS"] == 0]
             srams = [m for m in memories if m["WR_PORTS"] != 0]
             if leaf == "fp_estimate" or leaf.startswith("top"):
-                expected_rom_reads = 4 if leaf.startswith("top") and elen >= 64 else 2
+                expected_rom_reads = 2
                 assert sum(m["RD_PORTS"] for m in roms) == expected_rom_reads, roms
                 assert all(m["WIDTH"] == 7 and m["SIZE"] == 128 and
                            m["RD_CLK_ENABLE"] == 0 for m in roms), roms
@@ -202,14 +218,26 @@ def main():
             elif leaf == "vtype":
                 assert not any("dff" in k or "latch" in k for k in counts), counts
                 assert not any(k in counts for k in ("$mul", "$div", "$mod")), counts
-            hash_sources = sources + [ROOT / "rtl/include/rapt_sva.svh", ROOT / "rtl/include/rapt_fp_ops.svh", Path(__file__)]
-            reports.append(dict(top=top, parameters=params, cells=counts, memories=memories,
-                                sources={str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
-                                         for p in hash_sources}))
+            hash_sources = sources + [
+                ROOT / "rtl/include/rapt_sva.svh",
+                ROOT / "rtl/include/rapt_fp_ops.svh",
+                Path(__file__),
+            ]
+            reports.append(dict(
+                top=top, parameters=params, cells=counts, memories=memories,
+                sources={
+                    str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
+                    for p in hash_sources
+                },
+            ))
             print(f"PASS synth {name} cells={sum(counts.values())} memories={len(memories)}")
-    result = dict(selected_leaves=args.leaf or list(LEAVES), yosys=subprocess.check_output([args.yosys, "-V"], text=True).strip(),
-                  scope="word-level synthesis and synchronous SRAM inference; no technology mapping or STA",
-                  configurations=reports)
+    yosys_ver = subprocess.check_output([args.yosys, "-V"], text=True).strip()
+    result = dict(
+        selected_leaves=args.leaf or list(LEAVES),
+        yosys=yosys_ver,
+        scope="word-level synthesis and synchronous SRAM inference; no technology mapping or STA",
+        configurations=reports,
+    )
     (args.build_dir / "summary.json").write_text(json.dumps(result, indent=2) + "\n")
 
 

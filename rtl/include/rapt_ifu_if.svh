@@ -77,13 +77,14 @@ endinterface
 //
 // The non-control-alias case (BPU-taken on a regular ALU/LD/ST instruction)
 // is intentionally NOT trained here: the BTB has no invalidate port today,
-// so we let the alias persist and pay the IDU resteer cost on each hit
-// (rare in practice -- empirically ~1 event over a CoreMark run).
+// On a non-control decode redirect (BTB tag alias), invalidate_en clears the
+// matching false-hit entry so the alias cannot repeatedly poison a hot loop.
 interface idu_bpu_if #(
     parameter int XLEN = `RAPT_XLEN
 );
   localparam int PcBits = `RAPT_PC_BITS_OF(XLEN);
-  logic            train_en;     // Accepted decode correction; registered inside BPU
+  logic            train_en;      // Accepted decode correction; registered inside BPU
+  logic            invalidate_en; // Clear a false-hit BTB entry on non-control redirect
   logic [PcBits-1:0] train_pc;     // PC of the offending instruction
   logic [PcBits-1:0] train_target; // Correct target PC
   logic [1:0]      train_type;   // 00=COND, 01=DIRE, 11=RETU (matches BPU enum)
@@ -96,12 +97,14 @@ interface idu_bpu_if #(
   logic history_valid, history_taken, history_pc_bit, history_recover;
 
   modport out(
-      output train_en, train_pc, train_target, train_type, push_en, pop_en, push_addr,
+      output train_en, invalidate_en, train_pc, train_target, train_type,
+      output push_en, pop_en, push_addr,
       output history_valid, history_taken, history_pc_bit, history_recover,
       input ras_valid, ras_addr
   );
   modport in(
-      input train_en, train_pc, train_target, train_type, push_en, pop_en, push_addr,
+      input train_en, invalidate_en, train_pc, train_target, train_type,
+      input push_en, pop_en, push_addr,
       input history_valid, history_taken, history_pc_bit, history_recover,
       output ras_valid, ras_addr
   );

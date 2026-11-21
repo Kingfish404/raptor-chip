@@ -50,17 +50,49 @@ module rapt_sram_2rw #(
   end
 `else
   wire unused_sram_ctrl = ^sram_ctrl_i;
-  (* ram_style = "block" *) logic [DATA_WIDTH-1:0] mem[Depth];
+  // Live-value table (LVT) decomposition: each bank has a single write port
+  // and a single clocked read port so synthesizers infer clean 1R1W RAMs
+  // without synthesis pragmas or multi-write-process FF dissolution.
+  logic [DATA_WIDTH-1:0] bank_a_ra[Depth];
+  logic [DATA_WIDTH-1:0] bank_a_rb[Depth];
+  logic [DATA_WIDTH-1:0] bank_b_ra[Depth];
+  logic [DATA_WIDTH-1:0] bank_b_rb[Depth];
+  logic [DATA_WIDTH-1:0] a_rdata_a;
+  logic [DATA_WIDTH-1:0] a_rdata_b;
+  logic [DATA_WIDTH-1:0] b_rdata_a;
+  logic [DATA_WIDTH-1:0] b_rdata_b;
+  logic [Depth-1:0] owner_b;
+  logic a_sel_b_q;
+  logic b_sel_b_q;
 
   always_ff @(posedge clock) begin
-    if (a_en) begin
-      if (a_wen) mem[a_addr] <= a_wdata;
-      else a_rdata <= mem[a_addr];
-    end
-    if (b_en) begin
-      if (b_wen) mem[b_addr] <= b_wdata;
-      else b_rdata <= mem[b_addr];
-    end
+    if (a_en && a_wen) bank_a_ra[a_addr] <= a_wdata;
+    if (a_en && !a_wen) a_rdata_a <= bank_a_ra[a_addr];
   end
+
+  always_ff @(posedge clock) begin
+    if (a_en && a_wen) bank_a_rb[a_addr] <= a_wdata;
+    if (b_en && !b_wen) b_rdata_a <= bank_a_rb[b_addr];
+  end
+
+  always_ff @(posedge clock) begin
+    if (b_en && b_wen) bank_b_ra[b_addr] <= b_wdata;
+    if (a_en && !a_wen) a_rdata_b <= bank_b_ra[a_addr];
+  end
+
+  always_ff @(posedge clock) begin
+    if (b_en && b_wen) bank_b_rb[b_addr] <= b_wdata;
+    if (b_en && !b_wen) b_rdata_b <= bank_b_rb[b_addr];
+  end
+
+  always_ff @(posedge clock) begin
+    if (a_en && a_wen) owner_b[a_addr] <= 1'b0;
+    if (b_en && b_wen) owner_b[b_addr] <= 1'b1;
+    if (a_en && !a_wen) a_sel_b_q <= owner_b[a_addr];
+    if (b_en && !b_wen) b_sel_b_q <= owner_b[b_addr];
+  end
+
+  assign a_rdata = a_sel_b_q ? a_rdata_b : a_rdata_a;
+  assign b_rdata = b_sel_b_q ? b_rdata_b : b_rdata_a;
 `endif
 endmodule

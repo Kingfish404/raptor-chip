@@ -135,6 +135,10 @@ module rapt_idu #(
       || (decoded[redirect_slot].uop.execute.branch.jump
           && !decoded[redirect_slot].uop.execute.branch.indirect)
       || (ras_actions[redirect_slot].pop && idu_bpu.ras_valid));
+  assign idu_bpu.invalidate_en = redirect
+      && !(decoded[redirect_slot].uop.execute.branch.conditional
+          || decoded[redirect_slot].uop.execute.branch.jump
+          || decoded[redirect_slot].uop.execute.branch.indirect);
   assign idu_bpu.train_pc = slots[redirect_slot].pc;
   assign idu_bpu.train_target = redirect_pc;
   assign idu_bpu.train_type = ras_actions[redirect_slot].pop ? 2'b11
@@ -160,5 +164,5 @@ module rapt_idu #(
   `RAPT_SVA(clock, reset, IDU_COUNT_BOUNDS, consumed <= 32'(count) && next_count <= Width)
   `RAPT_SVA_IMPLY(
       clock, reset, IDU_RECOVERY_NO_ACCEPT_OR_OUTPUT, recovery.pending,
-      !ifu_idu.ready[0] && !idu_rnu.valid[0] && !idu_bpu.history_valid && !idu_bpu.train_en)
+      !ifu_idu.ready[0] && !idu_rnu.valid[0] && !idu_bpu.history_valid && !idu_bpu.train_en && !idu_bpu.invalidate_en)
 endmodule
