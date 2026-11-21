@@ -3,6 +3,6 @@ layout: markdown
 permalink: /linux_kernel.html.md
 markdown_source: linux_kernel.md
 title: Linux boot
-description: OpenSBI, kernel payloads, simulator commands, and FPGA boot paths.
+description: OpenSBI, simulator boot, FPGA TFTP and NFS, and the RV64 KVM probe.
 nav_order: 6
 ---

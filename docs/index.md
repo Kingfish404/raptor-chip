@@ -1,7 +1,7 @@
 ---
 layout: home
 title: Raptor
-description: Super-scalar, out-of-order RISC-V processor core
+description: Superscalar RV32/RV64 RISC-V core with V 1.0 and the RV64 supervisor profile
 ---
 
 # A RISC-V core. Room to explore.
@@ -10,7 +10,9 @@ Open hardware · RV32 / RV64
 
 A configurable, superscalar out-of-order processor with TAGE prediction,
 scalar floating point, [V 1.0](./vpu.md) and Sv32/Sv39 virtual memory.
-The default RV64 preset enables the [RVA23U64 user profile](./README.md#rva23u64-support).
+The default RV64 preset enables the
+[RVA23U64 user profile](./README.md#rva23u64-support) and
+[RVA23S64 supervisor profile](./README.md#rva23s64-support).
 
 SystemVerilog RTL · Verilator + NEMU difftest · FPGA and LiteX support
 
@@ -36,7 +38,7 @@ The [default configuration](./uarch.md#default-configuration) documents the RTL 
 - [Core overview](./README.md): Capabilities, default configuration, and verification scope.
 - [Quick start](./getting-started.md): Build RV32 or RV64 and run your first program.
 - [Microarchitecture](./uarch.md): Follow fetch, rename, execution, and precise retirement.
-- [Linux boot](./linux_kernel.md): OpenSBI, payloads, and simulator or FPGA boot paths.
+- [Linux boot](./linux_kernel.md): OpenSBI, FPGA netboot, and the RV64 KVM probe.
 - [Platform integration ↗](./ecosystem.md): FPGA boards, memory maps, and the software stack.
 - [Vector extension](./vpu.md): Integrated V 1.0 execution, precise memory faults and verification.
 - [Chip top and off-chip link](./chip.md): Chip hierarchy and board-side octal link.

@@ -80,9 +80,29 @@ make -C verification/subsystem vector-system-smoke CONFIG=default XLEN=64 \
 make -C verification/subsystem rva23u64-smoke CONFIG=default
 ```
 
-On RV64, pass `VFLAGS=-DRAPT_NO_RVA23U64` to `make run-rv64` for baseline
-V. Pass `VFLAGS=-DRAPT_NO_VPU` to either NPC target for a scalar build.
+To select baseline V on RV64, pass `VFLAGS=-DRAPT_NO_RVA23U64` to
+`make run-rv64`. Use `VFLAGS=-DRAPT_NO_VPU` for scalar execution on either XLEN.
 See [ISA scope](./README.md#isa-scope) for the preset matrix.
+
+### Verify the RV64 supervisor profile
+
+Build the `default` RV64 NPC and the matching NEMU reference before running
+the directed profile suite.
+
+```sh
+make build-rv64 RAPT_CONFIG=default
+make build-nemu64-ref RAPT_CONFIG=default
+make -C verification rva23s64-directed RAPT_CONFIG=default
+```
+
+The nine directed cases cover guest execution, translation and interrupts,
+Svnapot, Sstc, counter overflow and pointer masking. Each case runs with AXI
+delay settings 0, 7 and 63 and seeds 1 and 42.
+
+For architectural compliance tests, `make -C verification riscof ISA=rv64`
+selects the `raptor-rva23s64` ACT4 suite by default. It uses Sail 0.16 and the
+upstream ACT4 dependencies.
+[RVA23S64 ACT4 setup](https://github.com/Kingfish404/raptor-chip/blob/master/verification/riscof/raptor-rva23s64/README.md)
 
 ## 4. Benchmarks
 
@@ -91,9 +111,11 @@ See [ISA scope](./README.md#isa-scope) for the preset matrix.
 make coremark-rv32 DIFFTEST=0 ARGS="-b -n"
 make microbench-rv32 DIFFTEST=0 ARGS="-b -n"
 
-# NPC with difftest (default; vs NEMU reference model)
-make coremark-rv32 DIFFTEST=1     ARGS="-b -n"
-make microbench-rv32 DIFFTEST=1   ARGS="-b -n"
+# NPC with NEMU difftest (default)
+make coremark-rv32   ARGS="-b -n"
+make microbench-rv32 ARGS="-b -n"
+make coremark-rv64   ARGS="-b -n"
+make microbench-rv64 ARGS="-b -n"
 
 # Optional compiler preset (baseline is the default)
 make coremark-rv64 BENCH_OPT=optimized
@@ -110,6 +132,8 @@ make microbench-ysyxsoc    ARGS="-b -n"
 # NEMU
 make coremark-nemu32       ARGS="-b -n"
 make microbench-nemu32     ARGS="-b -n"
+make coremark-nemu64       ARGS="-b -n"
+make microbench-nemu64     ARGS="-b -n"
 ```
 
 For reproducible comparisons, record the source revision, HDL preset, XLEN,
@@ -123,6 +147,8 @@ least 10 seconds.
 make app-hello-rv32                        # hello world
 make app-coremark-rv32    ARGS="-b -n"     # CoreMark on pk
 make app-embench-rv32     ARGS="-b -n"     # Embench-IoT
+make app-hello-rv64                        # RV64 hello world
+make app-coremark-rv64    ARGS="-b -n"     # RV64 CoreMark on pk
 make app-pk-build                           # build riscv-pk
 make app-clean
 ```
@@ -132,6 +158,8 @@ make app-clean
 ```shell
 make linux-boot-nemu32              # NEMU
 make linux-boot-rv32               # NPC + difftest vs NEMU (default)
+make linux-boot-nemu64gc            # RV64GC Buildroot on NEMU
+make linux-boot-rv64gc              # RV64GC Buildroot on NPC
 ```
 
 See [Linux boot](./linux_kernel.md) for simulator payloads and the FPGA

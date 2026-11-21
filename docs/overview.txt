@@ -3,6 +3,6 @@ layout: markdown
 permalink: /overview.html.md
 markdown_source: README.md
 title: Core overview
-description: RTL presets, RVV 1.0, RVA23U64 user and RVA22S64 supervisor support.
+description: RTL presets, RVV 1.0, and the RVA23U64 and RVA23S64 profiles.
 nav_order: 2
 ---

@@ -11,7 +11,9 @@ Follow an instruction. Inspect the hardware behind each step.
 
 Default preset · RV32 / RV64 · V 1.0
 
-The default RV64 configuration enables [RVA23U64](./README.md#rva23u64-support).
+The default RV64 configuration enables [RVA23S64](./README.md#rva23s64-support).
+In Memory & platform, follow RV64 guest misses directly from the L1 TLBs
+to the page-table walkers. Host misses probe the shared L2 TLB first.
 For pipeline contracts and configuration tables, read the
 [architecture manual](./uarch.md).
 

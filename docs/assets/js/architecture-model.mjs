@@ -181,6 +181,7 @@ export function buildArchitecture(data) {
         [
           ['Registers', `32 × ${value('vector_vlen')}-bit vector registers`],
           ['Restart', 'vstart after a precise fault'],
+          ['Guest memory', 'Shares the data MMU for VS-stage and G-stage translation'],
           ['RV64 profile', 'Zvbb, Zvfhmin and Zvkt']]),
       block(
         'completion', `Guarded completion ×${value('completion_ports')}`,
@@ -199,9 +200,13 @@ export function buildArchitecture(data) {
         'ROU retires a ready prefix in order; CMU broadcasts architectural effects. ' +
         'Scalar stores become committed here and drain separately through the store queue.'),
       block(
-        'csr', 'CSR & traps', 'M / S / U · interrupts', 798, 864, 240, 64, 'backend', ['rapt_csr'],
+        'csr', 'CSR & traps', 'M / S / U · RV64 H', 798, 864, 240, 64, 'backend', ['rapt_csr'],
         'Holds privilege, trap, translation, interrupt, and PMP configuration. ' +
-        'CSR/system instructions serialize architectural updates.'),
+        'CSR/system instructions serialize architectural updates. The RV64 hypervisor ' +
+        'configuration adds HS/VS/VU state, guest trap delegation, and virtual timer compare.',
+        [
+          ['Supervisor timer', 'Sstc · stimecmp'],
+          ['Guest timer', 'vstimecmp and htimedelta']]),
       block(
         'dcache', 'L1 data cache',
         `${value('l1d_kib')} KiB · ${value('l1d_ways')}-way · write-back`, 1110, 772, 282, 64,
@@ -251,13 +256,13 @@ export function buildArchitecture(data) {
   const memory = {
     id: 'memory', title: 'Memory & platform', width: 1160, height: 1110,
     description:
-      'Translation and cache traffic are separate paths. Follow TLB misses to the shared L2 ' +
-      'TLB, then page-table walkers; follow memory requests through AXI to the cluster router.',
+      'Host TLB misses probe the shared L2 TLB. RV64 guest misses go directly to the ' +
+      'page-table walkers. Cache and walker requests travel through AXI to the cluster router.',
     groups: [
       group('L1 MEMORY SYSTEMS', caches, 32, 48, 1096, 210, 'memory'),
       group('PROTECTION', 'Applied to fetch, data & PTE access', 32, 282, 244, 252, 'backend'),
       group(
-        'SHARED TRANSLATION', 'L2 TLB is independent of the L2 data cache', 300, 282, 560, 252,
+        'ADDRESS TRANSLATION', 'Host L2 TLB and page-table walkers', 300, 282, 560, 252,
         'memory'),
       group('DATA MISS HANDLING', 'Inside L1D', 880, 282, 248, 252, 'memory'),
       group(
@@ -276,13 +281,13 @@ export function buildArchitecture(data) {
       block(
         'itlb', 'Instruction TLB', `${value('itlb_entries')} · fully associative`,
         340, 108, 204, 88, 'memory', ['rapt_tlb', 'rapt_l1i'],
-        'ITLB misses probe the shared L2 TLB before the instruction page-table walker. ' +
+        'Host misses probe the shared L2 TLB. RV64 guest misses go directly to the walker. ' +
         'The dedicated MMIO instruction-fetch translation path uses a separate walker.'),
       block(
         'dtlb', 'Data TLB', `${value('dtlb_entries')} entries · ${value('dtlb_ways')}-way`,
         616, 108, 204, 88, 'memory', ['rapt_tlb', 'rapt_l1d'],
-        'Replicated load and store lookup tables receive shared fills. Each replica ' +
-        'has the displayed capacity; replication is not extra distinct translations.',
+        'Load and store lookup replicas receive shared fills. RV64 guest entries retain ' +
+        'G-stage permissions and guest misses go directly to the data walker.',
         [
           ['Load replica', `${value('dtlb_entries')} entries`],
           ['Store replica', `${value('dtlb_entries')} entries`]]),
@@ -308,18 +313,21 @@ export function buildArchitecture(data) {
       block(
         'l2tlb', 'Shared L2 TLB', `${value('l2tlb_entries')} entries · direct-mapped`,
         384, 328, 392, 70, 'memory', ['rapt_l2tlb', 'rapt_cached_ptw'],
-        'Instruction and data translation misses share a second-level translation ' +
-        'cache. A hit refills the requesting L1 TLB; only a miss proceeds to its walker.'),
+        'Host instruction and data TLB misses probe this shared translation cache. ' +
+        'A hit refills the requesting L1 TLB, and a miss proceeds to its walker. ' +
+        'The L2 TLB is independent of the L2 cache.'),
       block(
         'iptw', 'Instruction walker', 'Sv32 / Sv39', 328, 436, 220, 70, 'memory',
         ['rapt_cached_ptw', 'rapt_ptw', 'rapt_l1i'],
         'The instruction-side walker obtains PTEs through the memory bus. A ' +
-        'cancelled accepted read is drained without refilling translation caches.'),
+        'cancelled accepted read is drained without refilling translation caches.',
+        [['RV64 guest', 'VS-stage Sv39 → G-stage Sv39x4']]),
       block(
         'dptw', 'Data walker', 'Shared by load & store', 596, 436, 220, 70, 'memory',
         ['rapt_cached_ptw', 'rapt_ptw', 'rapt_l1d'],
         'Load/store translation shares a data walker. A/D bits use software ' +
-        'management (Svade); PTE access can require publication of dirty cache data.'),
+        'management (Svade); PTE access can require publication of dirty cache data.',
+        [['RV64 guest', 'VS-stage Sv39 → G-stage Sv39x4']]),
       block(
         'mshr', 'Miss tracking', `${value('l1d_mshrs')} MSHRs · IOQ replay`, 908, 328, 192, 70,
         'memory', ['rapt_l1d_mshr'],
@@ -382,8 +390,14 @@ export function buildArchitecture(data) {
     edges: [
       edge('l1i', 'itlb', 'translation', 'right', 'left'),
       edge('l1d', 'dtlb', 'translation', 'left', 'right'),
-      edge('itlb', 'l2tlb', 'translation', 'bottom', 'top', [[442, 246], [580, 246]]),
-      edge('dtlb', 'l2tlb', 'translation', 'bottom', 'top', [[718, 246], [580, 246]]),
+      edge('itlb', 'l2tlb', 'translation', 'bottom', 'top', [[442, 246], [580, 246]], 'Host miss'),
+      edge('dtlb', 'l2tlb', 'translation', 'bottom', 'top', [[718, 246], [580, 246]], 'Host miss'),
+      edge(
+        'itlb', 'iptw', 'translation', 'bottom', 'left',
+        [[442, 224], [318, 224], [318, 471]], 'RV64 guest miss'),
+      edge(
+        'dtlb', 'dptw', 'translation', 'bottom', 'right',
+        [[718, 224], [842, 224], [842, 471]], 'RV64 guest miss'),
       edge('l2tlb', 'iptw', 'translation', 'bottom', 'top', [[580, 418], [438, 418]]),
       edge('l2tlb', 'dptw', 'translation', 'bottom', 'top', [[580, 418], [706, 418]]),
       edge('l1d', 'mshr', 'memory', 'bottom', 'top', [[980, 246], [1004, 246]]),

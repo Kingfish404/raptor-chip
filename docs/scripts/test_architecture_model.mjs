@@ -41,6 +41,13 @@ test('diagram preserves integrated execution and memory topology', () => {
     assert.ok(hasEdge(model.core, unit, 'completion'));
   }
   assert.ok(hasEdge(model.core, 'completion', 'commit'));
+  for (const [tlb, walker] of [['itlb', 'iptw'], ['dtlb', 'dptw']]) {
+    assert.ok(hasEdge(model.memory, tlb, 'l2tlb'));
+    assert.ok(hasEdge(model.memory, 'l2tlb', walker));
+    assert.ok(hasEdge(model.memory, tlb, walker));
+    const node = model.memory.nodes.find((n) => n.id === walker);
+    assert.ok(node.facts.some(([label, value]) => label === 'RV64 guest' && /Sv39x4/.test(value)));
+  }
   const chain = ['bus', 'axi', 'l2', 'l2-port', 'router'];
   chain.slice(1).forEach((id, i) => assert.ok(hasEdge(model.memory, chain[i], id)));
   const port = model.memory.nodes.find((n) => n.id === 'l2-port');

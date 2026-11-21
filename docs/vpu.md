@@ -68,6 +68,12 @@ The profile also enables misaligned elements in ordinary memory and checks
 every byte before a split store. Run `make -C verification/subsystem
 rva23u64-smoke` to exercise these paths, including U-mode vector memory.
 
+In the [RV64 supervisor profile](./README.md#rva23s64-support), guest execution
+also checks `vsstatus.VS` and `vsstatus.FS` for the applicable vector operations.
+Guest vector memory uses the shared VS-stage and G-stage translation path.
+The [directed supervisor suite](./getting-started.md#verify-the-rv64-supervisor-profile)
+includes guest vector execution alongside the translation and timer cases.
+
 ## Available modules
 
 These modules live in `rtl/core/backend/vpu/`. Their default SRAM control type
@@ -803,8 +809,9 @@ width and precision against SoftFloat; supply `FMA_DOUBLE`, `INT_BITS` and
 engine workload with both cache settings across four configurations and compares
 their results.
 
-For Linux userspace and board validation, see the
-[RVA23U64 Linux probe](./linux_kernel.md#rva23u64-on-linux).
+For Linux userspace and guest validation, see the
+[RVA23U64 userspace probe](./linux_kernel.md#rva23u64-on-linux) and the
+[RVA23S64 KVM probe](./linux_kernel.md#rva23s64-on-linux).
 
 ## Specification references
 

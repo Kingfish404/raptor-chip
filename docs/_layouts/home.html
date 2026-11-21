@@ -14,7 +14,9 @@
         <p class="lede">A configurable, superscalar out-of-order processor with
           TAGE prediction, scalar floating point, <a href="{{ '/vpu.html' | relative_url }}">V 1.0</a>
           and Sv32/Sv39 virtual memory. The default RV64 preset enables
-          <a href="{{ '/overview.html#rva23u64-support' | relative_url }}">RVA23U64</a> in user mode.</p>
+          <a href="{{ '/overview.html#rva23u64-support' | relative_url }}">RVA23U64</a> and
+          <a href="{{ '/overview.html#rva23s64-support' | relative_url }}">RVA23S64</a>,
+          including hardware guest translation.</p>
         <div class="hero-actions">
           <a class="btn btn-primary" href="{{ '/getting-started.html' | relative_url }}">
             Get started <span aria-hidden="true">↗</span></a>
@@ -66,7 +68,7 @@ make run-rv32 ARGS="-b -n"</code></pre>
         </a>
         <a class="doc-card" href="{{ '/linux_kernel.html' | relative_url }}">
           <h3>Linux boot <span aria-hidden="true">↗</span></h3>
-          <p>OpenSBI, payloads, and simulator or FPGA boot paths.</p>
+          <p>OpenSBI, FPGA netboot, and the RV64 KVM probe.</p>
         </a>
         <a class="doc-card" href="{{ '/ecosystem.html' | relative_url }}">
           <h3>Platform integration <span aria-hidden="true">↗</span></h3>

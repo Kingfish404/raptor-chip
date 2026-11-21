@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-11-19T18:34:21Z",
+  "generated_at": "2026-11-20T15:50:53Z",
   "sources": {
     "rtl": "rtl/",
     "config": "rtl/configs/default/rapt_config.svh",
@@ -98,10 +98,14 @@
       "RAPT_CAUSE_ECALL_M": "'hb",
       "RAPT_CAUSE_ECALL_S": "'h9",
       "RAPT_CAUSE_ECALL_U": "'h8",
+      "RAPT_CAUSE_ECALL_VS": "'ha",
       "RAPT_CAUSE_ILLEGAL_INST": "'h2",
       "RAPT_CAUSE_INSTR_ACC_FAULT": "'h1",
+      "RAPT_CAUSE_INSTR_GUEST_PAGE_FAULT": "'h14",
       "RAPT_CAUSE_INSTR_PAGE_FAULT": "'hc",
+      "RAPT_CAUSE_LCOFI": "'hd",
       "RAPT_CAUSE_LOAD_ACC_FAULT": "'h5",
+      "RAPT_CAUSE_LOAD_GUEST_PAGE_FAULT": "'h15",
       "RAPT_CAUSE_LOAD_MISALIGNED": "'h4",
       "RAPT_CAUSE_LOAD_PAGE_FAULT": "'hd",
       "RAPT_CAUSE_MEI": "'hb",
@@ -111,8 +115,13 @@
       "RAPT_CAUSE_SSI": "'h1",
       "RAPT_CAUSE_STI": "'h5",
       "RAPT_CAUSE_STORE_ACC_FAULT": "'h7",
+      "RAPT_CAUSE_STORE_GUEST_PAGE_FAULT": "'h17",
       "RAPT_CAUSE_STORE_MISALIGNED": "'h6",
       "RAPT_CAUSE_STORE_PAGE_FAULT": "'hf",
+      "RAPT_CAUSE_VIRT_INST": "'h16",
+      "RAPT_CAUSE_VSEI": "'ha",
+      "RAPT_CAUSE_VSSI": "'h2",
+      "RAPT_CAUSE_VSTI": "'h6",
       "RAPT_CBO_MGMT_WALU": "5'b10001",
       "RAPT_CBO_ZERO_WALU": "5'b10000",
       "RAPT_COMMIT_WIDTH": "2",
@@ -127,10 +136,28 @@
       "RAPT_CSR_FCSR": "'h003",
       "RAPT_CSR_FFLAGS": "'h001",
       "RAPT_CSR_FRM": "'h002",
+      "RAPT_CSR_HCOUNTEREN": "'h606",
+      "RAPT_CSR_HEDELEG": "'h602",
+      "RAPT_CSR_HENVCFG": "'h60a",
+      "RAPT_CSR_HGATP": "'h680",
+      "RAPT_CSR_HGEIE": "'h607",
+      "RAPT_CSR_HGEIP": "'he12",
+      "RAPT_CSR_HIDELEG": "'h603",
+      "RAPT_CSR_HIE____": "'h604",
+      "RAPT_CSR_HIP____": "'h644",
       "RAPT_CSR_HPMCOUNTER3": "'hc03",
       "RAPT_CSR_HPMCOUNTER31": "'hc1f",
       "RAPT_CSR_HPMCOUNTER31H": "'hc9f",
       "RAPT_CSR_HPMCOUNTER3H": "'hc83",
+      "RAPT_CSR_HSTATEEN0": "'h60c",
+      "RAPT_CSR_HSTATEEN1": "'h60d",
+      "RAPT_CSR_HSTATEEN2": "'h60e",
+      "RAPT_CSR_HSTATEEN3": "'h60f",
+      "RAPT_CSR_HSTATUS": "'h600",
+      "RAPT_CSR_HTIMEDELTA": "'h605",
+      "RAPT_CSR_HTINST": "'h64a",
+      "RAPT_CSR_HTVAL": "'h643",
+      "RAPT_CSR_HVIP___": "'h645",
       "RAPT_CSR_IMPID____": "'hf13",
       "RAPT_CSR_INSTRETH": "'hc82",
       "RAPT_CSR_INSTRET_": "'hc02",
@@ -138,6 +165,7 @@
       "RAPT_CSR_MBERR_ADDR": "12'hfc0",
       "RAPT_CSR_MBERR_STATUS": "12'h7c0",
       "RAPT_CSR_MCAUSE_": "'h342",
+      "RAPT_CSR_MCONFIGPTR": "'hf15",
       "RAPT_CSR_MCOUNTE": "'h306",
       "RAPT_CSR_MCYCLEH": "'hb80",
       "RAPT_CSR_MCYCLE_": "'hb00",
@@ -145,7 +173,7 @@
       "RAPT_CSR_MEDELEG_WMASK": "'h8b3fe",
       "RAPT_CSR_MENVCFG": "'h30a",
       "RAPT_CSR_MENVCFGH": "'h31a",
-      "RAPT_CSR_MENVCFG_WMASK": "32'h0000_00f0",
+      "RAPT_CSR_MENVCFG_WMASK": "32'h0000_00f1",
       "RAPT_CSR_MEPC___": "'h341",
       "RAPT_CSR_MHARTID__": "'hf14",
       "RAPT_CSR_MHPMCOUNTER3": "'hb03",
@@ -154,14 +182,20 @@
       "RAPT_CSR_MHPMCOUNTER3H": "'hb83",
       "RAPT_CSR_MHPMEVENT3": "'h323",
       "RAPT_CSR_MHPMEVENT31": "'h33f",
+      "RAPT_CSR_MHPMEVENT31H": "'h73f",
+      "RAPT_CSR_MHPMEVENT3H": "'h723",
       "RAPT_CSR_MIDELEG": "'h303",
       "RAPT_CSR_MIDELEG_WMASK": "32'h00000222",
+      "RAPT_CSR_MIE_LCOFIE": "13",
       "RAPT_CSR_MIE_MEIE": "11",
       "RAPT_CSR_MIE_MSIE": "3",
       "RAPT_CSR_MIE_MTIE": "7",
       "RAPT_CSR_MIE_SEIE": "9",
       "RAPT_CSR_MIE_SSIE": "1",
       "RAPT_CSR_MIE_STIE": "5",
+      "RAPT_CSR_MIE_VSEIE": "10",
+      "RAPT_CSR_MIE_VSSIE": "2",
+      "RAPT_CSR_MIE_VSTIE": "6",
       "RAPT_CSR_MIE_WMASK": "32'h00010AAA",
       "RAPT_CSR_MIE____": "'h304",
       "RAPT_CSR_MINSTRET": "'hb02",
@@ -170,6 +204,10 @@
       "RAPT_CSR_MIP____": "'h344",
       "RAPT_CSR_MISA___": "'h301",
       "RAPT_CSR_MSCRATCH": "'h340",
+      "RAPT_CSR_MSTATEEN0": "'h30c",
+      "RAPT_CSR_MSTATEEN0H": "'h31c",
+      "RAPT_CSR_MSTATEEN3": "'h30f",
+      "RAPT_CSR_MSTATEEN3H": "'h31f",
       "RAPT_CSR_MSTATUS": "'h300",
       "RAPT_CSR_MSTATUSH": "'h310",
       "RAPT_CSR_MSTATUSH_MBE": "5",
@@ -190,6 +228,8 @@
       "RAPT_CSR_MSTATUS_TW__": "21",
       "RAPT_CSR_MSTATUS_UBE_": "6",
       "RAPT_CSR_MSTATUS_WMASK": "32'h007E79AA",
+      "RAPT_CSR_MTINST": "'h34a",
+      "RAPT_CSR_MTVAL2": "'h34b",
       "RAPT_CSR_MTVAL__": "'h343",
       "RAPT_CSR_MTVEC__": "'h305",
       "RAPT_CSR_MVENDORID": "'hf11",
@@ -205,8 +245,9 @@
       "RAPT_CSR_SATP___": "'h180",
       "RAPT_CSR_SCAUSE_": "'h142",
       "RAPT_CSR_SCOUNTE": "'h106",
+      "RAPT_CSR_SCOUNTOVF": "'hda0",
       "RAPT_CSR_SENVCFG": "'h10a",
-      "RAPT_CSR_SENVCFG_WMASK": "32'h000000f0",
+      "RAPT_CSR_SENVCFG_WMASK": "32'h000000f1",
       "RAPT_CSR_SEPC___": "'h141",
       "RAPT_CSR_SIE_RMASK": "32'h00000222",
       "RAPT_CSR_SIE_WMASK": "32'h00000222",
@@ -215,6 +256,8 @@
       "RAPT_CSR_SIP_WMASK": "32'h00000002",
       "RAPT_CSR_SIP____": "'h144",
       "RAPT_CSR_SSCRATC": "'h140",
+      "RAPT_CSR_SSTATEEN0": "'h10c",
+      "RAPT_CSR_SSTATEEN3": "'h10f",
       "RAPT_CSR_SSTATUS": "'h100",
       "RAPT_CSR_SSTATUS_CMASK": "32'h800C6122",
       "RAPT_CSR_SSTATUS_HW": "32'h0",
@@ -225,10 +268,21 @@
       "RAPT_CSR_STVEC__": "'h105",
       "RAPT_CSR_TIMEH__": "'hc81",
       "RAPT_CSR_TIME___": "'hc01",
-      "RAPT_CTR_SEL_CY__": "3'b001",
-      "RAPT_CTR_SEL_IR__": "3'b100",
-      "RAPT_CTR_SEL_NONE": "3'b000",
-      "RAPT_CTR_SEL_TM__": "3'b010",
+      "RAPT_CSR_VSATP____": "'h280",
+      "RAPT_CSR_VSCAUSE__": "'h242",
+      "RAPT_CSR_VSEPC____": "'h241",
+      "RAPT_CSR_VSIE_____": "'h204",
+      "RAPT_CSR_VSIP_____": "'h244",
+      "RAPT_CSR_VSSCRATCH": "'h240",
+      "RAPT_CSR_VSSTATUS": "'h200",
+      "RAPT_CSR_VSTIMECMP": "'h24d",
+      "RAPT_CSR_VSTVAL___": "'h243",
+      "RAPT_CSR_VSTVEC___": "'h205",
+      "RAPT_CTR_SEL_CY__": "4'b0001",
+      "RAPT_CTR_SEL_HPM3": "4'b1000",
+      "RAPT_CTR_SEL_IR__": "4'b0100",
+      "RAPT_CTR_SEL_NONE": "4'b0000",
+      "RAPT_CTR_SEL_TM__": "4'b0010",
       "RAPT_DECODE_WIDTH": "2",
       "RAPT_DISPATCH_WIDTH": "2",
       "RAPT_DSTLB_POLICY": "(`RAPT_TLB_PLRU ? 2 : (`RAPT_TLB_LRU ? 1 : 0))",
@@ -2982,7 +3036,11 @@
       "stage": null,
       "summary": "Re-Order Unit (ROU) - dispatch queue + reorder buffer + commit. Sub-sections: 1. Rename skid            - holds a registered group for ROB allocation 2. ROB Dispatch Buffer    - independently steers allocated owners to domains 3. Reorder Buffer (ROB)   - tracks in-flight instruct",
       "params": {
-        "Width": "rapt_pkg::RenameWidth"
+        "Width": "rapt_pkg::RenameWidth",
+        "UopT": "rapt_pkg::uop_t",
+        "XLEN": "`RAPT_XLEN",
+        "PLEN": "`RAPT_PHY_LEN",
+        "CheckpointBits": "rapt_pkg::BranchCheckpointBits"
       },
       "instances": []
     },
@@ -5278,6 +5336,8 @@
             "lookup_vtag",
             "lookup_valid",
             "lookup_asid",
+            "lookup_mode",
+            "g_perm",
             "hit",
             "ptag",
             "pte_flags",
@@ -5286,11 +5346,9 @@
             "lookup_b_vtag",
             "lookup_b_valid",
             "lookup_b_asid",
-            "hit_b",
-            "ptag_b",
-            "pte_flags_b",
-            "pbmt_b",
-            "verdict_b"
+            "lookup_b_mode",
+            "g_perm_b",
+            "hit_b"
           ]
         },
         {
@@ -5311,16 +5369,16 @@
             "pbmte",
             "sbe",
             "req_store",
-            "bus_arvalid",
-            "bus_araddr",
-            "bus_arready",
-            "bus_rvalid",
-            "bus_rdata",
-            "done",
-            "fault",
-            "access_fault",
-            "result_ptag",
-            "result_vtag"
+            "guest_en",
+            "vs_en",
+            "vsatp_ppn",
+            "g_en",
+            "hgatp_ppn",
+            "vs_priv_s",
+            "vs_sum",
+            "vs_mxr",
+            "vs_pbmte",
+            "g_mxr"
           ]
         },
         {
@@ -5368,6 +5426,8 @@
             "load_size_m1",
             "store_walu",
             "cmo_mgmt",
+            "load_exec",
+            "ptw_exec",
             "tlb_hit",
             "stlb_hit",
             "dtlb_pte",
@@ -5378,9 +5438,7 @@
             "pmp_store_fault_mmu",
             "store_unmapped_fault_mmu",
             "pmp_ptw_fault",
-            "pf_load_tlb",
-            "pf_store_tlb",
-            "pf_load_ptw"
+            "pf_load_tlb"
           ]
         }
       ]
@@ -5603,20 +5661,20 @@
             "pbmte",
             "sbe",
             "req_store",
+            "guest_en",
+            "vs_en",
+            "vsatp_ppn",
+            "g_en",
+            "hgatp_ppn",
+            "vs_priv_s",
+            "vs_sum",
+            "vs_mxr",
+            "vs_pbmte",
+            "g_mxr",
+            "req_exec",
             "bus_arvalid",
             "bus_araddr",
-            "bus_arready",
-            "bus_rvalid",
-            "bus_rdata",
-            "done",
-            "fault",
-            "access_fault",
-            "result_ptag",
-            "result_vtag",
-            "result_pte",
-            "result_pbmt",
-            "result_level",
-            "busy"
+            "bus_arready"
           ]
         }
       ]
@@ -5694,12 +5752,12 @@
             "translation_pbmt",
             "translation_fault",
             "translation_cause",
+            "translation_gpa",
+            "translation_gptw",
             "read_valid",
             "read_ready",
             "read_paddr",
-            "read_pbmt",
-            "response_valid",
-            "response_word"
+            "read_pbmt"
           ]
         },
         {
@@ -5717,19 +5775,19 @@
             "sbe",
             "priv",
             "satp_ppn",
+            "guest_en",
+            "vs_en",
+            "vsatp_ppn",
+            "g_en",
+            "hgatp_ppn",
+            "vs_pbmte",
+            "g_mxr",
             "pmp_state",
             "pmp_addr_o",
             "pmp_size_m1_o",
             "pmp_priv_o",
             "pmp_read_o",
-            "pmp_fault_i",
-            "pmp_read_fault_i",
-            "response_valid",
-            "response_paddr",
-            "response_pbmt",
-            "response_fault",
-            "response_cause",
-            "bus_arvalid"
+            "pmp_fault_i"
           ]
         },
         {
@@ -5756,6 +5814,7 @@
             "lookup_vtag",
             "lookup_valid",
             "lookup_asid",
+            "lookup_mode",
             "hit",
             "ptag",
             "pte_flags",
@@ -5764,6 +5823,7 @@
             "fill_ptag",
             "fill_vtag",
             "fill_asid",
+            "fill_mode",
             "fill_pbmt",
             "fill_level",
             "fill_pte"
@@ -5787,16 +5847,16 @@
             "pbmte",
             "sbe",
             "req_store",
-            "bus_arvalid",
-            "bus_araddr",
-            "bus_arready",
-            "bus_rvalid",
-            "bus_rdata",
-            "done",
-            "fault",
-            "access_fault",
-            "result_ptag",
-            "result_vtag"
+            "guest_en",
+            "vs_en",
+            "vsatp_ppn",
+            "g_en",
+            "hgatp_ppn",
+            "vs_priv_s",
+            "vs_sum",
+            "vs_mxr",
+            "vs_pbmte",
+            "g_mxr"
           ]
         },
         {
@@ -6008,20 +6068,20 @@
             "pbmte",
             "sbe",
             "req_store",
+            "guest_en",
+            "vs_en",
+            "vsatp_ppn",
+            "g_en",
+            "hgatp_ppn",
+            "vs_priv_s",
+            "vs_sum",
+            "vs_mxr",
+            "vs_pbmte",
+            "g_mxr",
+            "req_exec",
             "bus_arvalid",
             "bus_araddr",
-            "bus_arready",
-            "bus_rvalid",
-            "bus_rdata",
-            "done",
-            "fault",
-            "access_fault",
-            "result_ptag",
-            "result_vtag",
-            "result_pte",
-            "result_pbmt",
-            "result_level",
-            "busy"
+            "bus_arready"
           ]
         }
       ]
@@ -6044,7 +6104,7 @@
       "file": "rtl/core/memory/mmu/rapt_ptw.sv",
       "domain": "memory",
       "stage": 7,
-      "summary": "Read-only page-table walker. RV32 uses Sv32 two-level page tables. RV64 uses the Sv39 three-level format expected by upstream xv6-riscv. Permission checks against the access type and current privilege are performed by the requesters (L1I/L1D) using the returned PTE flags.  RVA20S",
+      "summary": "Read-only page-table walker. RV32 uses Sv32 two-level page tables. RV64 uses Sv39 (and optional two-stage Sv39 x Sv39x4 under RAPT_H_EXTENSION). RVA20S64/RVA23S64 mandate Svade: a leaf with A=0, or a store leaf with D=0, raises a page fault without writing page tables.",
       "params": {
         "XLEN": "`RAPT_XLEN"
       },
@@ -9824,7 +9884,7 @@
         "file": "rtl/core/memory/mmu/rapt_ptw.sv",
         "domain": "memory",
         "stage": 7,
-        "summary": "Read-only page-table walker. RV32 uses Sv32 two-level page tables. RV64 uses the Sv39 three-level format expected by upstream xv6-riscv. Permission checks against the access type and current privilege are performed by the requesters (L1I/L1D) using the returned PTE flags.  RVA20S",
+        "summary": "Read-only page-table walker. RV32 uses Sv32 two-level page tables. RV64 uses Sv39 (and optional two-stage Sv39 x Sv39x4 under RAPT_H_EXTENSION). RVA20S64/RVA23S64 mandate Svade: a leaf with A=0, or a store leaf with D=0, raises a page fault without writing page tables.",
         "parent": "rapt_ifetch_translate",
         "display": true,
         "x": 55.9,
@@ -13510,7 +13570,7 @@
           "lookup_vtag",
           "lookup_valid",
           "lookup_asid",
-          "hit"
+          "lookup_mode"
         ]
       },
       {
@@ -13570,7 +13630,7 @@
           "load_size_m1",
           "store_walu",
           "cmo_mgmt",
-          "tlb_hit"
+          "load_exec"
         ]
       },
       {
@@ -13700,8 +13760,8 @@
           "pbmte",
           "sbe",
           "req_store",
-          "bus_arvalid",
-          "bus_araddr"
+          "guest_en",
+          "vs_en"
         ]
       },
       {
@@ -13765,7 +13825,7 @@
           "sbe",
           "priv",
           "satp_ppn",
-          "pmp_state"
+          "guest_en"
         ]
       },
       {
@@ -13796,7 +13856,7 @@
           "lookup_vtag",
           "lookup_valid",
           "lookup_asid",
-          "hit"
+          "lookup_mode"
         ]
       },
       {
@@ -20340,6 +20400,11 @@
         "section": "RISC-V Architecture Tests"
       },
       {
+        "name": "archtest-rv64",
+        "description": "Run RISC-V Architecture Test on NPC (riscv64)",
+        "section": "RISC-V Architecture Tests"
+      },
+      {
         "name": "nanos-nemu32",
         "description": "Build and run nanos-lite on NEMU",
         "section": "Nanos-lite OS"
@@ -20737,6 +20802,11 @@
       {
         "name": "app-hello-rv32",
         "description": "[app] Hello world test via pk (rv32)",
+        "section": "Standard Toolchain (app/, riscv-pk)"
+      },
+      {
+        "name": "app-hello-rv64",
+        "description": "[app] Hello world test via pk (rv64)",
         "section": "Standard Toolchain (app/, riscv-pk)"
       },
       {
@@ -22785,7 +22855,7 @@
       "name": "README.md",
       "title": "Raptor at a glance",
       "url": "overview.html",
-      "summary": "Raptor is a configurable RV32/RV64 superscalar, out-of-order RISC-V processor. It combines register renaming, precise in-order retirement, scalar floating point, V 1.0 and virtual memory. The default RV64 configuration s"
+      "summary": "Raptor is a configurable RV32/RV64 superscalar, out-of-order RISC-V processor. It combines register renaming, precise in-order retirement, scalar floating point, V 1.0 and virtual memory. The default RV64 configuration e"
     },
     {
       "file": "docs/REFERENCE.md",
@@ -22866,5 +22936,5 @@
     }
   ],
   "github": "https://github.com/Kingfish404/raptor-chip",
-  "isa": "RV32 / RV64 IMAFDC and V 1.0; RVA23U64 and RVA22S64 on RV64 (default preset)"
+  "isa": "RV32 / RV64 IMAFDC and V 1.0, with RVA23U64 and RVA23S64 on default RV64"
 }

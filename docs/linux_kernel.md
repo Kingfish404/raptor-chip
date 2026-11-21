@@ -49,19 +49,22 @@ All NPC Linux boot targets use the matching RV32/RV64 NEMU difftest reference
 by default, including the hard-float `rv32gc` and `rv64gc` targets. For focused
 simulator diagnosis, pass `DIFF_REF_SO=` explicitly to disable comparison.
 
-Linux uses [RVA22S64 supervisor facilities](./README.md#rva22s64-support),
-including Sv39, Svade, Svpbmt and Svinval on RV64. OpenSBI provides the M-mode
-execution environment. The RV64 application presets with V and F/D also expose
-[RVA23U64](./README.md#rva23u64-support) to userspace.
+OpenSBI provides the M-mode execution environment. On the default RV64
+configuration Linux can use [RVA23S64](./README.md#rva23s64-support),
+including Sv39, Sstc and the H extension. The host kernel runs in HS-mode
+when H is enabled and can run guests with VS-stage Sv39 and G-stage Sv39x4.
+It exposes [RVA23U64](./README.md#rva23u64-support) features to userspace through
+the matching kernel configuration and device tree.
 
 ## Supported Modes
 
 | Mode                | RTL path                              | Status                                                |
 | ------------------- | ------------------------------------- | ----------------------------------------------------- |
 | RV32 Linux          | Sv32 PTW/TLB + PMP + CLINT/PLIC       | Primary NPC/NEMU flow                                 |
-| RV64 Linux          | Sv39 PTW/TLB + NPC/NEMU helpers       | Build and boot targets are wired; current boot result should be checked per commit |
+| RV64 Linux          | Sv39 host translation; H and Sv39x4 for guests | NPC kernel-entry check, NEMU Linux boot and KVM probe |
 | RV32/RV64 hard-float | `*gc` DTB + Buildroot F/D payload    | NPC targets are wired; payloads are built separately  |
 | RV32/RV64 FPGA | LiteX BIOS + MIG DDR4 + OpenSBI/Linux | Ethernet/TFTP netboot targets for KU15P and KU5P |
+| Native FPGA Ubuntu | RV64 native KU5P and CU08-KU15P SoCs | `ubuntu-*` targets with TFTP and an NFS root |
 | RV64 xv6 smoke path | Sv39 PTW/TLB + Svade (software-managed A/D) | Available via `app/tinyos` helpers               |
 
 See [linux/README.md](https://github.com/Kingfish404/raptor-chip/blob/master/linux/README.md) and [app/tinyos/README.md](https://github.com/Kingfish404/raptor-chip/blob/master/app/tinyos/README.md) for the lower-level payload and xv6/egos helpers.
@@ -83,13 +86,27 @@ throughout. KU15P CU08 defaults to `default`; KU5P RK defaults to `small`, so
 select a vector-enabled preset explicitly for RVV on KU5P.
 [LiteX netboot workflow](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/litex/NETBOOT.md)
 
+### Ubuntu on native FPGA SoCs
+
+The native KU5P and CU08-KU15P `ubuntu-*` targets build a board kernel,
+OpenSBI payload and device tree for the RV64 `default` preset. The on-board
+loader fetches the firmware and DTB over TFTP. Linux mounts its Ubuntu root
+over NFS. Use the native guide to prepare the kernel and root filesystem,
+serve the bundle and load the matching bitstream.
+[Native Ubuntu workflow](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/common/UBUNTU.md)
+
+The native I/O options provide a VirtIO-MMIO NIC with non-coherent DMA
+and a bridge to host-backed VirtIO block, SDHCI and PCIe/NVMe devices.
+Use the Ethernet transport on the board. NPC can connect to the same host
+bridge through a local Unix socket.
+[QEMU I/O bridge](https://github.com/Kingfish404/raptor-chip/blob/master/tools/qemu_io_bridge/README.md)
+
 ## RVA23U64 on Linux
 
 Use an RV64 vector-enabled build with a matching DTB. Enable
 `CONFIG_RISCV_ISA_V` for vector context management and
-`CONFIG_RISCV_ISA_SUPM` for the tagged-address ABI. The board and simulator
-device trees advertise `v`, the applicable vector extensions and `ssnpm`
-from the selected hardware configuration.
+`CONFIG_RISCV_ISA_SUPM` for the tagged-address ABI. Check the generated DTB
+for `v`, the applicable vector extensions and `ssnpm`.
 
 ```sh
 make -C verification/subsystem rva23u64-smoke CONFIG=default
@@ -106,6 +123,23 @@ The November 19, 2026 integration run passed this probe on the native
 MLK-CU08-KU15P target with RV64, `default`, DDR4 and a 50 MHz core. BIOS
 loaded Linux over TFTP. For a new board run, record the bitstream and DTB
 identities with the boot log.
+
+## RVA23S64 on Linux
+
+Build an RV64 `default` system with H and a device tree that advertises it.
+Enable `CONFIG_VIRTUALIZATION`, `CONFIG_KVM`, and the userspace options
+described above. A probe running as PID 1 in an initramfs also needs
+`CONFIG_DEVTMPFS` so it can mount `/dev`.
+
+```sh
+make -C verification/subsystem rva23s64-linux-probe BUILD_DIR=/tmp/raptor-rva23s64
+```
+
+Run the resulting `rva23s64-check` with access to `/dev/kvm`, or install it
+as `/rva23s64-check` in the netboot initramfs and set
+`rdinit=/rva23s64-check`. It runs the userspace checks, creates a KVM VM
+and a vCPU, and runs a guest program that exits on an MMIO write. The guest
+check prints `RVA23_KVM_PASS` before the final `RVA23_LINUX_PASS` marker.
 
 ## Payload Paths
 

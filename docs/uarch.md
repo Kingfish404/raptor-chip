@@ -151,7 +151,8 @@ Vector memory drains older writes and fills, then takes ownership of the shared
 data MMU and L1D interfaces. Translation and PMP/PMA checks apply to each request.
 The VPU holds its owner through the final load/store response. Traps retain
 `vstart`, so completed elements remain visible and the faulting instruction can
-resume. See the [VPU manual](./vpu.md).
+resume. In an RV64 guest, the same data path applies both translation stages
+and returns guest page-fault metadata. See the [VPU manual](./vpu.md).
 
 ## Memory: LSU, L1D, translation, and bus
 
@@ -159,8 +160,37 @@ resume. See the [VPU manual](./vpu.md).
 - **Memory completion contract:** Load, store, and atomic results use one typed IOQ completion packet and one owner check before ROB writeback. A store-side permission fault takes priority over an atomic read fault; a non-faulting completion reports zero exception cause. A same-cycle reset or pipeline flush suppresses the completion and speculative SQ handoff, while already committed SQ entries retain their independent drain lifetime. An early younger-load broadcast is restricted to a clean result and keeps its IOQ entry until ordered removal. The store permission check remains registered; an ordinary L1D hit can use the direct response path when `RAPT_IOQ_LOAD_RESPONSE_STAGE=0`. Setting that macro to `1` captures the response before completion and disables live response wakeup across that boundary. In every preset, the SC reservation decision is registered, and the SQ load path registers PMP decisions when they cannot bypass. The memory endpoint checks the ROB owner contract with a verification assertion rather than a combinational owner lookup. The shared completion register described above is after accepted operand wakeup; there is no separate preset-controlled memory completion register before CDB fanout.
 - **Wider configurations:** This contract is lane independent, but the current IOQ still presents one memory completion packet per cycle and the L1D A/B load paths share one data SRAM read port. Raising dispatch and integer issue widths to four, eight, or sixteen does not add memory completion or hot-hit read bandwidth. If a fraction `f` of committed instructions needs this memory completion port, its steady-state IPC ceiling is `min(issue width, 1/f)`, even with perfect frontend and cache hits. A future multi-lane LSU must apply the same owner, exception, flush, and SQ handoff rules to each accepted packet; then it needs explicit completion arbitration, enough cache banks/read ports, and SQ admission bandwidth. With sixteen integer lanes, the current `N+4` completion fabric already has twenty broadcast endpoints, so banked/distributed wakeup and physically local completion paths also need measurement before adopting that width. Widening dispatch alone does not provide those resources.
 - **L1D:** The default 16 KiB, four-way L1D has 64-byte lines, banked synchronous SRAM, four physical-line MSHRs, separate load/store DTLB lookup replicas, and a shared data PTW. Cacheable replayable loads translate and pass permission checks before allocating a miss. IOQ parks these requests and retries them after a wake; a held miss also yields to a late local store so the store can reach the idle cache port; independent Sv32/Sv39 misses can overlap, including later page walks while earlier refills remain outstanding. Same-line misses share a refill, and demanded words can return before RLAST. Replays recheck translation and permissions. MMIO, atomics, and nonreplayable split accesses retain the ordered path. The best-effort B hit-under-miss channel (`RAPT_LSU_HUM`) remains bare-mode only; translated concurrency uses the A-channel MSHR/replay path. Larger capacities are available as [optional presets](#optional-l1d-capacities).
-- **Store policy:** All `default*` presets, `small-cache`, and `middle-cache` set `RAPT_L1D_WRITEBACK=1` and `RAPT_L1D_MSHRS=4`; both macros remain overridable. L1D has two full-line writeback buffers with per-word dirty masks. Without inclusive L2, a captured dirty victim releases its array slot before B, while unrelated replayable loads continue. A read of a buffered physical line waits for its writeback; full queues backpressure victim capture, and failed B responses retain queued data until reset. With L1D MSHRs and no L2 (`RAPT_L1D_STORE_MERGE`, on by default), a cacheable store miss is acknowledged when its word and byte enables enter the MSHR for that line, and the refill merges around those bytes. A flush does not cancel a line that holds store bytes. A replayable load issues its read first, and its victim moves to the writeback queue when the refill installs. Dirty words of the same physical line are captured before the read, so the read cannot overtake them. Device and other nonallocating writes wait for queued writebacks and for store bytes in MSHRs. Without MSHRs or with L2, stores drain active refills, local stores wait for queued writebacks, and a store to a line whose install is still queued waits for the install, so it completes as a local hit rather than a write-through whose response cannot update the resident copy. Inclusive L2 victim Release/ReleaseAck and Probe operations retain their serialized ownership protocol. MSHR refills acquire the L2 D-client mark, and a Release also invalidates any retained refill copy. Fences and coherence wait for dirty resident data and queued writebacks. A D-side L1 TLB miss first probes L2 TLB; only an actual PTE bus request triggers dirty publication. I-side PTW reads similarly require publication when they reach the bus. Earlier bus stores retain their response ownership, and new stores wait while a walk is active. DMA coherence remains a platform/software responsibility.
-- **Translation and protection:** The fully associative ITLB has 16 entries by default; load/store DTLB replicas each have 64 entries with two-way set associativity. Their miss paths share a 256-entry direct-mapped L2 TLB before the separate Sv32/Sv39 instruction and data PTWs. PMP checks fetch, data, and PTW accesses. Split loads carry both their architectural width and each physical fragment's permission footprint, so a narrower fragment cannot bypass a device-width restriction.
+- **Store policy:** All `default*` presets, `small-cache`, and `middle-cache` set
+  `RAPT_L1D_WRITEBACK=1` and `RAPT_L1D_MSHRS=4`. Both macros remain overridable.
+  L1D has two full-line writeback buffers with per-word dirty masks. Without
+  inclusive L2, a captured dirty victim releases its array slot before B, while
+  unrelated replayable loads continue. A read of a buffered physical line waits
+  for its writeback. Full queues backpressure victim capture, and failed B
+  responses retain queued data until reset. With L1D MSHRs and no L2
+  (`RAPT_L1D_STORE_MERGE`, on by default), a cacheable store miss is acknowledged
+  when its word and byte enables enter the MSHR for that line, and the refill
+  merges around those bytes. A line that holds store bytes survives a flush.
+  A replayable load issues its read first, and its victim moves to the writeback
+  queue when the refill installs. The cache captures dirty words of the same
+  physical line before issuing the read. Device and other nonallocating writes
+  wait for queued writebacks and for store bytes in MSHRs. Without MSHRs or with
+  L2, stores drain active refills and local stores wait for queued writebacks.
+  A store to a line whose install is still queued waits for the install, so it
+  completes as a local hit and updates the resident copy. Inclusive L2 victim
+  Release/ReleaseAck and Probe operations retain their serialized ownership
+  protocol. MSHR refills acquire the L2 D-client mark, and a Release also
+  invalidates any retained refill copy. Fences and coherence wait for dirty
+  resident data and queued writebacks. Instruction and data walkers trigger dirty
+  publication when their PTE reads reach the bus. Earlier bus stores retain
+  their response ownership, and new stores wait while a walk is active. DMA
+  coherence remains a platform/software responsibility.
+- **Translation and protection:** The fully associative ITLB has 16 entries by
+  default. Load and store DTLB replicas each have 64 entries with two-way set
+  associativity. Host misses share a 256-entry direct-mapped L2 TLB before the
+  separate instruction and data page-table walkers. RV64 guest misses go
+  directly to those walkers. PMP checks fetch, data, and PTW accesses. Split
+  loads carry their architectural width and each physical fragment's permission
+  footprint, which preserves device-width checks for narrower fragments.
 - **Cache-block operations:** `cbo.inval`, `cbo.clean`, and `cbo.flush` check the translated address before retirement, then wait for the SQ to drain; invalidation/flush remove matching L1D blocks. `cbo.zero` commits an aligned 64-byte zero descriptor through SQ and waits for its final write response. Zicbop prefetch encodings are nonfaulting hints.
 - **Bus and cluster link:** `rapt_bus` arbitrates L1I, L1D, and PTW requests inside
   `rapt_memory` and exports `l2_client_if`. The always-present cluster-level
@@ -185,6 +215,26 @@ resume. See the [VPU manual](./vpu.md).
 
 Load scheduling conservatively waits behind older stores with unresolved addresses. There is no learned memory-dependence predictor or speculative RAW-violation rollback, and there is no independent data hardware prefetcher. MSHR miss replay, branch-target SRAM read-ahead, and Zicbop hints serve different purposes.
 
+### RV64 guest translation and traps
+
+With H enabled, the core runs a hypervisor in HS-mode and a guest in VS/VU-mode.
+For guest fetches and data accesses, `vsatp` selects Sv39 or Bare for the
+VS-stage translation. `hgatp` selects Sv39x4 or Bare for the G-stage. When both
+stages are active, the walker also translates each VS-stage PTE access through
+the G-stage. Svnapot permits 64 KiB leaf mappings.
+
+Guest misses bypass the shared L2 TLB. The instruction and data L1 TLBs
+distinguish native, two-stage, and G-stage-only translations and retain
+G-stage permissions for hits. The `hgatp` VMID field reads as zero. A write to
+`hgatp` flushes the L1 translation caches. HFENCE and HINVAL invalidate cached
+guest translations.
+
+HLV, HLVX and HSV access guest memory from the hypervisor. Guest page faults
+carry the faulting address and indicate whether the fault occurred while
+reading a VS-stage PTE. The CSR block reports guest-physical fault
+information through `htval` or `mtval2` for traps delivered to HS or M.
+Delegation controls which traps and interrupts reach VS.
+
 ## Recovery and platform control
 
 A nonfaulting branch misprediction produces a registered oldest-owner recovery transaction containing its ROB slot, allocation generation, target, and checkpoint identity. The announcement does three things at once:
@@ -194,7 +244,11 @@ A nonfaulting branch misprediction produces a registered oldest-owner recovery t
 
 Fetch then continues down the target path into FQU. While `recovery.pending` is set, IDU, RNQ, `rename_pipe` and the operand stage stay empty, so no new ROB allocation occurs; older ROB work continues until the mispredicted instruction reaches the head. Retirement then performs the precise whole-pipe flush and rebuilds rename state from committed state. When the announced owner retires cleanly, IFU and FQU keep the target stream they already fetched (`recovery.preserve_fetch`). An older exception, interrupt, serializing operation or superseding recovery discards that stream. The announcement selectively cancels younger integer/branch issue entries, issue packets, and MUL/DIV owners. Younger MUL pipeline and iterative DIV owners are cancelled before their MDQ slots can be reused; older operations and the recovery owner survive. ROB/IOQ/SQ and rename still use the retirement-time precise flush, so correct-path execution cannot restart at the announcement. Correct branch resolutions release checkpoints independently, and completion ownership guards reject stale generations. The 4-bit generation guard is used together with producer cancellation and flush ownership; its finite width alone does not establish safety for arbitrarily late completions.
 
-The CSR file supports M/S/U privilege, traps, delegation, Sv32/Sv39 controls, and cycle/time state.
+The CSR file holds privilege, trap delegation, translation, and counter state.
+On RV64 with H it also holds the guest status, trap and translation CSRs.
+Sstc compares `stimecmp` with CLINT time and `vstimecmp` with guest time
+(`time + htimedelta`). The Sscofpmf path raises a local overflow interrupt
+for `mhpmcounter3` and filters that counter by execution mode.
 Eight PMP entries implement TOR and NAPOT at the default 4 KiB granularity across 16
 architectural CSR slots; slots 8–15 read as zero and ignore writes. NA4 is available only
 with an explicit four-byte-grain configuration. The cluster routes CLINT timer/software
@@ -231,6 +285,7 @@ depend on the board and build constraints.
 | Execution queues | ALQ 8, BRQ 8, MDQ 4, FPQ 8, IOQ 8, unified SQ 16 |
 | Floating point | Renamed F/D/Zfhmin and RV64 Zfa; ROB-backed results; 32 × 64-bit committed FPRs |
 | Vector | V 1.0, VLEN=128, ELEN=64 in both XLENs; single ROB-head owner |
+| RV64 supervisor profile | RVA23S64 with Sha/H, Sv39 and Sv39x4 guest translation |
 | Branch prediction | TAGE (1024 bimodal + 3 x 1024 tagged), side conditional query of the same TAGE, 128-entry two-way BTB, 16-entry RAS |
 | L1I | 16 KiB, four-way, 64 sets, 64-byte lines, 32-byte refill sector |
 | L1D | 16 KiB, four-way, 64 sets, 64-byte lines, write-back, 4 MSHRs, 2 writeback buffers, Sv32/Sv39 miss replay |
@@ -254,9 +309,9 @@ data-cache enable.
 
 The low eight VPN bits index the table. A single synchronous payload port
 arbitrates instruction/data lookups and fills in round-robin order. An L1
-translation miss first probes this table; a hit refills the requesting L1 TLB,
-and a miss starts its existing page-table walker. Superpage results are cached
-as resolved 4 KiB subpages. Tags include ASID (ignored for global mappings),
+host translation miss first probes this table. A hit refills the requesting L1
+TLB, and a miss starts its page-table walker. Superpage results are cached as
+resolved 4 KiB subpages. Tags include ASID (ignored for global mappings),
 page-table root, PBMTE and SBE. Keeping the root in global tags conservatively
 prevents reuse across different roots. Cached PTE flags and the full
 architectural PPN preserve permission, Svade A/D, PBMT and physical-address

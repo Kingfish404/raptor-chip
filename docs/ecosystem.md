@@ -25,8 +25,10 @@ Simulators, FPGA boards, ASIC flow, software stack, and memory maps.
 
 NPC is the primary RTL simulator. With `DIFFTEST=1` (the default), NEMU checks
 retired architectural state, including all 32 vector registers and seven vector
-CSRs on vector-enabled builds. The differential-test protocol handles the MMIO
-and interrupt skip paths. The RVV reference matches the default VLEN of 128 bits.
+CSRs on vector-enabled builds. The default RV64 configuration also compares
+hypervisor and virtual-supervisor CSR state. The differential-test protocol
+handles MMIO and interrupt skip paths. The RVV reference matches the default
+VLEN of 128 bits.
 
 ## FPGA Targets
 
@@ -47,6 +49,10 @@ follow the [netboot instructions](./linux_kernel.md#fpga-netboot).
 For RVV, select `default`, `default-*` or `large`. Use the routed timing report
 for the chosen preset and board. The board build options are in the
 [FPGA guide](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/README.md).
+
+The native KU5P and CU08-KU15P SoCs provide an RV64 Ubuntu flow over TFTP
+and NFS. Optional native I/O adds a VirtIO-MMIO NIC and host-backed block
+devices. See [Ubuntu on native FPGA SoCs](./linux_kernel.md#ubuntu-on-native-fpga-socs).
 
 ## ASIC Flow
 

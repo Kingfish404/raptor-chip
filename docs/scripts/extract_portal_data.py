@@ -1419,7 +1419,7 @@ def build(repo: Path) -> dict[str, Any]:
         "payload": payload,
         "docs": docs,
         "github": "https://github.com/Kingfish404/raptor-chip",
-        "isa": "RV32 / RV64 IMAFDC and V 1.0; RVA23U64 and RVA22S64 on RV64 (default preset)",
+        "isa": "RV32 / RV64 IMAFDC and V 1.0, with RVA23U64 and RVA23S64 on default RV64",
     }
 
 

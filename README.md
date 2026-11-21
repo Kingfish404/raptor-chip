@@ -2,7 +2,7 @@
 
 [![Benchmark](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/benchmark.yaml) [![App](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/app.yaml) [![STA](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml/badge.svg)](https://github.com/Kingfish404/raptor-chip/actions/workflows/sta.yaml)
 
-[![ISA](https://img.shields.io/badge/ISA-RV32%2FRV64%20%2B%20V%201.0-192f60?style=flat&logo=riscv&logoColor=white)](./docs/README.md#isa-scope) [![RVA23U64](https://img.shields.io/badge/RV64-RVA23U64-660874?style=flat)](./docs/README.md#rva23u64-support) [![marchID](https://img.shields.io/badge/marchID-0x32-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](https://github.com/riscv/riscv-isa-manual) [![Privilege](https://img.shields.io/badge/Priv-M%2FS%2FU%20%2B%20Sv32%2FSv39%20%2B%20PMP-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](./docs/uarch.md) [![FPGA](https://img.shields.io/badge/FPGA-LiteX-192f60?longCache=true&style=flat&colorA=192f60&colorB=660874)](./fpga/) [![License](https://img.shields.io/github/license/Kingfish404/raptor-chip?label=License&longCache=true&style=flat&logo=apache&logoColor=white&colorA=192f60&colorB=660874)](./LICENSE)
+[![ISA](https://img.shields.io/badge/ISA-RV32%2FRV64%20%2B%20V%201.0-192f60?style=flat&logo=riscv&logoColor=white)](./docs/README.md#isa-scope) [![RVA23S64](https://img.shields.io/badge/RV64-RVA23S64-660874?style=flat)](./docs/README.md#rva23s64-support) [![marchID](https://img.shields.io/badge/marchID-0x32-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](https://github.com/riscv/riscv-isa-manual) [![Privilege](https://img.shields.io/badge/Priv-M%2FS%2FU%20%2B%20Sv32%2FSv39%20%2B%20PMP-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](./docs/uarch.md) [![FPGA](https://img.shields.io/badge/FPGA-LiteX-192f60?longCache=true&style=flat&colorA=192f60&colorB=660874)](./fpga/) [![License](https://img.shields.io/github/license/Kingfish404/raptor-chip?label=License&longCache=true&style=flat&logo=apache&logoColor=white&colorA=192f60&colorB=660874)](./LICENSE)
 
 > It is possible to invent a single machine which can be used to compute any computable sequence. — Alan Turing, 1936
 
@@ -17,22 +17,24 @@ boot, FPGA integration and open-PDK synthesis and timing flows.
 | XLEN with the `default` preset | ISA | Application profiles | Virtual memory |
 | --- | --- | --- | --- |
 | RV32 | RV32IMAFDC + V 1.0 | RVI20U32 | Sv32 / Bare |
-| RV64 (`-DRAPT_RV64`) | RV64IMAFDC + V 1.0 | [RVA23U64] user mode, [RVA22S64] supervisor mode | Sv39 / Bare |
+| RV64 (`-DRAPT_RV64`) | RV64IMAFDC + V 1.0 + H | [RVA23U64] user mode, [RVA23S64] supervisor mode | Sv39 / Bare, with Sv39x4 guest-physical translation |
 
 [RVA23U64]: ./docs/README.md#rva23u64-support
-[RVA22S64]: ./docs/README.md#rva22s64-support
+[RVA23S64]: ./docs/README.md#rva23s64-support
 
 The RV64 user profile adds Zvbb, Zvfhmin, Zvkt, Zfa, Zawrs and Ssnpm for Supm.
-Both XLENs support Svade and Svinval. RV64 also supports Svpbmt.
+The RV64 supervisor profile adds Sha/H guest execution, Svnapot mappings,
+supervisor and virtual-supervisor timers (Sstc), and counter overflow and
+privilege filtering (Sscofpmf). Both XLENs support Svade and Svinval.
 
 `default`, `default-*` and `large` enable V 1.0 in both XLEN modes with
 **VLEN=128 and ELEN=64**. The other presets leave V off by default.
-`RAPT_NO_RVA23U64` selects baseline V on RV64. `RAPT_NO_VPU` selects
-scalar execution. See the [ISA scope](./docs/README.md#isa-scope) for scalar
-extensions, platform requirements and validation.
+`RAPT_NO_RVA23S64` selects the RV64 user profile with the baseline supervisor
+configuration. `RAPT_NO_RVA23U64` selects baseline V, and `RAPT_NO_VPU`
+selects scalar execution. See the [ISA scope](./docs/README.md#isa-scope).
 
 ```
-Core:       raptor-falcon (M/S/U, Linux-capable)
+Core:       raptor-falcon (M/S/U, with HS/VS/VU in the RV64 hypervisor configuration)
 PMP:        8 usable entries, TOR / NAPOT, 4 KiB granularity, L-bit lockable
 Interrupts: CLINT (mtime, mtimecmp, msip) + PLIC (31 sources, M/S contexts)
 
@@ -52,7 +54,7 @@ Caches: L1I/L1D = 16 KiB each, 4-way, 64 B lines; L1D write-back, 4 MSHRs,
         2 writeback buffers. ITLB=16; DTLB=64 (2-way, load/store replicas);
         shared L2 TLB=256. No L2 cache in default; default-l2 enables 512 KiB / 8 ways.
 
-Verification: RISCOF / ACT4, directed and differential scalar/vector tests, RVFI and SVA.
+Verification: RISCOF / ACT4, scalar, vector and guest-mode difftest, RVFI and SVA.
 ```
 
 Scalar F/D/Zfhmin operations use an out-of-order FPQ and ROB-backed FP renaming.
@@ -260,15 +262,20 @@ make run-rv32 VFLAGS="-DRAPT_RV64" ARGS="-b -n"
 # Run riscv32
 make coremark-rv32 ARGS="-b -n"
 make microbench-rv32 ARGS="-b -n"
+# Run riscv64
+make coremark-rv64 ARGS="-b -n"
+make microbench-rv64 ARGS="-b -n"
 # Run sim with reproducible random AXI memory delays (also supports -rv64)
 make coremark-rv32 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=1
 make microbench-rv32 SIM_RANDOM_DELAY=31 SIM_RANDOM_SEED=42
 # Run on ysyxSoC
 make coremark-ysyxsoc ARGS="-b -n"
 make microbench-ysyxsoc ARGS="-b -n"
-# Run on NEMU (riscv32-nemu)
+# Run on NEMU in both XLEN modes
 make coremark-nemu32 ARGS="-b -n"
 make microbench-nemu32 ARGS="-b -n"
+make coremark-nemu64 ARGS="-b -n"
+make microbench-nemu64 ARGS="-b -n"
 ```
 
 ### 4. Applications running on riscv-pk
@@ -278,6 +285,9 @@ make microbench-nemu32 ARGS="-b -n"
 make app-hello-rv32
 # Build and run CoreMark on NPC
 make app-coremark-rv32 ARGS="-b -n"
+# Use the RV64 pk and simulator
+make app-hello-rv64
+make app-coremark-rv64 ARGS="-b -n"
 # Build and run Embench-IoT on NPC
 make app-embench-rv32 ARGS="-b -n"
 # Build riscv-pk (separate from the OpenSBI/Linux flow)
@@ -295,6 +305,7 @@ make linux-boot-nemu32gc
 make linux-boot-nemu64gc
 # Boot Linux on NPC (NEMU difftest is enabled by default)
 make linux-boot-rv32
+make linux-boot-rv64gc
 # See detailed instructions
 # docs/linux_kernel.md, linux/README.md
 ```
@@ -322,9 +333,9 @@ make regression
 # See verification/README.md for SVA, formal (RVFI), and ACT4 details
 ```
 
-For integrated RVV and RVA23U64 checks, see the
+For integrated RVV and RVA23 checks, see the
 [vector test commands](./docs/vpu.md#core-configuration-and-architectural-state)
-and the [verification guide](./verification/README.md#architectural-programs-and-fuzzing).
+and the [RV64 supervisor checks](./docs/getting-started.md#verify-the-rv64-supervisor-profile).
 
 ### 7. FPGA
 
@@ -338,6 +349,9 @@ For the CU08 netboot profile, run from `fpga/litex`: `make fpga-netboot-rv32-bui
 then `make fpga-netboot-rv32-load`. Replace `rv32` with `rv64` for RV64. These paired
 targets use the same Ethernet/CPU settings and isolated output directories; see
 the linked guide for prerequisites, payload paths and TFTP setup.
+
+The native KU5P and CU08-KU15P SoCs also provide an RV64 Ubuntu workflow with
+TFTP boot and an NFS root. See the [Ubuntu netboot guide](./docs/linux_kernel.md#ubuntu-on-native-fpga-socs).
 
 ```shell
 # --- LiteX SoC ---
