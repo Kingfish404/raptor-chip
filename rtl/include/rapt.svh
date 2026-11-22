@@ -113,6 +113,12 @@
 `ifndef RAPT_L1D_MSHRS
 `define RAPT_L1D_MSHRS 0
 `endif
+`ifndef RAPT_L1D_PREFETCH
+`define RAPT_L1D_PREFETCH 1
+`endif
+`ifndef RAPT_L1I_PREFETCH
+`define RAPT_L1I_PREFETCH 1
+`endif
 `ifndef RAPT_L1D_WRITEBACK
 `define RAPT_L1D_WRITEBACK 0
 `endif
@@ -143,7 +149,7 @@
 `endif
 // Lower-cost tree PLRU for associative TLBs; takes precedence over true LRU.
 `ifndef RAPT_TLB_PLRU
-`define RAPT_TLB_PLRU 0
+`define RAPT_TLB_PLRU 1
 `endif
 // Per-instance policies: 0 = existing fill order, 1 = true LRU, 2 = tree PLRU.
 // Explicit instance selectors override the compatibility-wide policy switches.
@@ -265,6 +271,9 @@
 `ifndef RAPT_BRANCH_CHECKPOINTS
 `define RAPT_BRANCH_CHECKPOINTS 16
 `endif
+`ifndef RAPT_BRQ_SIZE
+`define RAPT_BRQ_SIZE 8
+`endif
 
 // Conventional cache data-SRAM subarray width in bits. The diagonal L1D
 // uses fixed 64-bit chunks; other arrays retain this width limit.
@@ -376,6 +385,9 @@
 // Zero bypasses the shared second-level translation cache.
 `ifndef RAPT_L2TLB_ENTRIES
 `define RAPT_L2TLB_ENTRIES 0
+`endif
+`ifndef RAPT_L2TLB_WAYS
+`define RAPT_L2TLB_WAYS 1
 `endif
 
 // Instruction Set Opcodes

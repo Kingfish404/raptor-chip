@@ -874,6 +874,7 @@ module rapt_backend #(
   assign lsu_l1d.rorig_size_m1 = vm_active ? vm_size_m1 : scalar_l1d.rorig_size_m1;
   assign lsu_l1d.atomic_lock = vm_active ? 1'b0 : scalar_l1d.atomic_lock;
   assign lsu_l1d.ordered = vm_active ? 1'b1 : scalar_l1d.ordered;
+  assign lsu_l1d.rpc_hash = vm_active ? 12'd0 : scalar_l1d.rpc_hash;
   assign lsu_l1d.replay_allowed = vm_active ? 1'b0 : scalar_l1d.replay_allowed;
 `ifdef RAPT_H_EXTENSION
   assign lsu_l1d.rguest = vm_active ? vm_guest_q : scalar_l1d.rguest;
@@ -1306,31 +1307,36 @@ module rapt_backend #(
 
   localparam int OperandOwnerBits = rapt_pkg::index_bits(rapt_pkg::CoreConfig.rob_entries);
   localparam int OperandGenerationBits = rapt_pkg::CoreConfig.rob_generation_bits;
-  localparam int IOQIntegerReadPorts = 1;
+  localparam bit TagOnlyBackend = DerivedConstants;
+  localparam int IeuReadPorts = TagOnlyBackend ? (2 + 2 * (IntegerIssuePorts + 1)) : 2;
+  localparam int BaseIntReadPorts = IeuReadPorts + 1;
+  localparam int IOQIntegerReadPorts = (rapt_pkg::DispatchWidth >= 2) ? 2 : 1;
   logic [rapt_pkg::PLENPkg-1:0] ioq_operand_address[IOQIntegerReadPorts];
   logic [XLEN-1:0] ioq_operand_value[IOQIntegerReadPorts];
   logic ioq_operand_valid[IOQIntegerReadPorts];
-  logic [rapt_pkg::PLENPkg-1:0] extra_operand_address[3+IOQIntegerReadPorts];
-  logic [XLEN-1:0] extra_operand_value[3+IOQIntegerReadPorts];
-  logic extra_operand_valid[3+IOQIntegerReadPorts];
-  logic [rapt_pkg::PLENPkg-1:0] int_operand_address[3];
-  logic [XLEN-1:0] int_operand_value[3];
-  logic int_operand_valid[3];
+  logic [rapt_pkg::PLENPkg-1:0] extra_operand_address[BaseIntReadPorts+IOQIntegerReadPorts];
+  logic [XLEN-1:0] extra_operand_value[BaseIntReadPorts+IOQIntegerReadPorts];
+  logic extra_operand_valid[BaseIntReadPorts+IOQIntegerReadPorts];
+  logic [rapt_pkg::PLENPkg-1:0] int_operand_address[BaseIntReadPorts];
+  logic [XLEN-1:0] int_operand_value[BaseIntReadPorts];
+  logic int_operand_valid[BaseIntReadPorts];
   logic [1:0][rapt_pkg::PLENPkg-1:0] int_source_regs[rapt_pkg::DispatchWidth];
   rapt_pkg::uop_t fp_queue_read_uop;
   logic [2:0][OperandOwnerBits:0] fp_queue_read_tag, fp_queue_read_ready_tag;
   logic [2:0][63:0] fp_queue_read_value;
 `ifdef RAPT_V_EXTENSION
+  logic vector_issue_valid;
+  logic [19:0] vector_issue_imm;
   logic vector_fp_read;
   rapt_pkg::uop_t vector_fp_read_uop, rou_fp_queue_read_uop;
   logic [2:0][OperandOwnerBits:0] rou_fp_queue_read_tag;
-  assign vector_fp_read = vector_issue.valid && vector_issue.uop.imm[6:0] == 7'h57
-      && vector_issue.uop.imm[14:12] == 3'b101;
+  assign vector_fp_read = vector_issue_valid && vector_issue_imm[6:0] == 7'h57
+      && vector_issue_imm[14:12] == 3'b101;
   always_comb begin
     vector_fp_read_uop = '0;
     vector_fp_read_uop.execute.fp.valid = 1'b1;
     vector_fp_read_uop.execute.fp.op = `RAPT_FP_OP_FADD_S;
-    vector_fp_read_uop.execute.fp.rs1 = vector_issue.uop.imm[19:15];
+    vector_fp_read_uop.execute.fp.rs1 = vector_issue_imm[19:15];
   end
   assign rou_fp_queue_read_uop = vector_fp_read ? vector_fp_read_uop : fp_queue_read_uop;
   assign rou_fp_queue_read_tag = vector_fp_read ? '0 : fp_queue_read_tag;
@@ -1358,7 +1364,9 @@ module rapt_backend #(
       .RegisteredDrainCompletion(1'b1),
       .CompactFpOperands(CompactFpOperands),
       .RegisteredDispatchPayload(RegisteredDispatchPayload),
+      .DirectRenameInput(rapt_pkg::RenameWidth == rapt_pkg::DispatchWidth),
       .DerivedConstants(DerivedConstants),
+      .TagOnlyDispatch(TagOnlyBackend),
       .SteerCandidates(SteerCandidates)
   ) rou (
 `ifdef RAPT_V_EXTENSION
@@ -1443,18 +1451,19 @@ module rapt_backend #(
   logic [XLEN-1:0] rvfi_rd_data[rapt_pkg::CommitWidth];
 `endif
 
-  for (genvar r = 0; r < 3; r++) begin : g_existing_integer_read
+  for (genvar r = 0; r < BaseIntReadPorts; r++) begin : g_existing_integer_read
     assign extra_operand_address[r] = int_operand_address[r];
     assign int_operand_value[r] = extra_operand_value[r];
     assign int_operand_valid[r] = extra_operand_valid[r];
   end
   for (genvar r = 0; r < IOQIntegerReadPorts; r++) begin : g_ioq_integer_read
-    assign extra_operand_address[3+r] = ioq_operand_address[r];
-    assign ioq_operand_value[r] = extra_operand_value[3+r];
-    assign ioq_operand_valid[r] = extra_operand_valid[3+r];
+    assign extra_operand_address[BaseIntReadPorts+r] = ioq_operand_address[r];
+    assign ioq_operand_value[r] = extra_operand_value[BaseIntReadPorts+r];
+    assign ioq_operand_valid[r] = extra_operand_valid[BaseIntReadPorts+r];
   end
   rapt_prf #(
-      .ExtraReadPorts(3 + IOQIntegerReadPorts)
+      .ExtraReadPorts(BaseIntReadPorts + IOQIntegerReadPorts),
+      .TagOnlyDispatch(TagOnlyBackend)
   ) prf (
       .extra_address(extra_operand_address),
       .extra_value(extra_operand_value),
@@ -1553,13 +1562,14 @@ module rapt_backend #(
     end
   end
   rapt_ieu #(
-      .LocalIntegerWake(LocalIntegerWake)
+      .LocalIntegerWake(LocalIntegerWake),
+      .TagOnly(TagOnlyBackend)
   ) ieu (
       .early_completion(completion_accepted),
       .int_source_regs,
-      .operand_read_address(int_operand_address[0:1]),
-      .operand_read_value(int_operand_value[0:1]),
-      .operand_read_valid(int_operand_valid[0:1]),
+      .operand_read_address(int_operand_address[0:IeuReadPorts-1]),
+      .operand_read_value(int_operand_value[0:IeuReadPorts-1]),
+      .operand_read_valid(int_operand_valid[0:IeuReadPorts-1]),
       .local_integer_wake(local_integer_wake),
       .branch_wake(branch_wake),
       .memory_wake(memory_wake),
@@ -1584,6 +1594,8 @@ module rapt_backend #(
 `ifdef RAPT_V_EXTENSION
       .vector_issue_ready(vector_command_ready),
       .vector_issue(vector_issue),
+      .vector_issue_valid(vector_issue_valid),
+      .vector_issue_imm(vector_issue_imm),
 `endif
 `ifdef RAPT_H_EXTENSION
       .hmem_issue_ready(hmem_issue_ready),
@@ -1605,7 +1617,8 @@ module rapt_backend #(
   logic fp_issue_enable_unused;
   if (rapt_pkg::FpuEnable) begin : g_feu
     rapt_feu #(
-        .LocalFpWake(LocalFpWake)
+        .LocalFpWake(LocalFpWake),
+        .TagOnly(TagOnlyBackend)
     ) feu (
         .early_completion(completion_accepted),
         .int_source_regs,
@@ -1620,9 +1633,9 @@ module rapt_backend #(
         .operand_read_value(fp_queue_read_value),
         .fp_queue_ready_tag(fp_queue_read_ready_tag),
         .fp_queue_read_generation(fp_queue_read_generation),
-        .int_operand_address(int_operand_address[2]),
-        .int_operand_value(int_operand_value[2]),
-        .int_operand_valid(int_operand_valid[2]),
+        .int_operand_address(int_operand_address[IeuReadPorts]),
+        .int_operand_value(int_operand_value[IeuReadPorts]),
+        .int_operand_valid(int_operand_valid[IeuReadPorts]),
         .local_fp_wake(local_fp_wake),
         .cancel_valid(recovery.redirect_valid),
         .cancel_head(recovery.head),
@@ -1645,7 +1658,7 @@ module rapt_backend #(
     // the FP queue, its operand reads and the FPU completion port stay idle.
     assign fp_queue_read_uop = '0;
     assign fp_queue_read_tag = '0;
-    assign int_operand_address[2] = '0;
+    assign int_operand_address[IeuReadPorts] = '0;
     assign wb_fpu = '0;
     assign fp_issue_enable_unused = 1'b0;
     assign disp_fpq.free_found = '{default: 1'b0};

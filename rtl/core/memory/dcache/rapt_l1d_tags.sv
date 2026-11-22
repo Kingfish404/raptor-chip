@@ -46,6 +46,7 @@ module rapt_l1d_tags #(
     input logic store_replace,
     output logic [L1D_N_WAYS-1:0] load_way_hit,
     output logic [L1D_N_WAYS-1:0] probe_way_hit,
+    output logic [L1D_N_WAYS-1:0] probe_line_hit,
     output logic hit_w,
     output logic [L1dWayW-1:0] store_hit_way,
     output logic [L1dWayW-1:0] store_fill_way,
@@ -338,6 +339,7 @@ module rapt_l1d_tags #(
 
   for (genvar way = 0; way < L1D_N_WAYS; way++) begin : g_probe
     assign probe_way_hit[way] = (tag_probe_data[way] == probe_tag) & valid_probe[way][probe_offset];
+    assign probe_line_hit[way] = (tag_probe_data[way] == probe_tag) & (|valid_probe[way]);
     assign clear_line_dirty_way[way] = clear_tag_match[way] && dirty_at_clear[way];
   end
 

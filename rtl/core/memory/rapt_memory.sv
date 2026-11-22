@@ -107,6 +107,7 @@ module rapt_memory #(
   if (`RAPT_L2TLB_ENTRIES > 0) begin : g_l2tlb
     rapt_l2tlb #(
         .Entries(`RAPT_L2TLB_ENTRIES),
+        .Ways(`RAPT_L2TLB_WAYS),
         .XLEN(XLEN)
     ) u_l2tlb (
         .sram_ctrl_i(sram_ctrl_i),

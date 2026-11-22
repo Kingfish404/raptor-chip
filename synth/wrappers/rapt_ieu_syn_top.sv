@@ -117,6 +117,8 @@ module rapt_ieu_syn_top #(
 `ifdef RAPT_V_EXTENSION
       .vector_issue_ready(1'b1),
       .vector_issue(),
+      .vector_issue_valid(),
+      .vector_issue_imm(),
 `endif
 `ifdef RAPT_H_EXTENSION
       .hmem_issue_ready(1'b1),

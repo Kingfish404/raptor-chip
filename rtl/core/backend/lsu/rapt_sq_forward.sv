@@ -98,10 +98,27 @@ module rapt_sq_forward #(
   function automatic logic [3:0] store_size_m1(input logic [4:0] alu);
     return rapt_pkg::store_bytes(alu, 4'd1) - 4'd1;
   endfunction
+  localparam int WordBytes = Xlen / 8;
+  function automatic logic [WordBytes-1:0] byte_span_mask(input logic [OffsetBits-1:0] offset,
+                                                          input logic [3:0] size_m1);
+    logic [WordBytes-1:0] mask;
+    mask = '0;
+    for (int b = 0; b < WordBytes; b++) begin
+      if (5'(b) >= 5'(offset) && 5'(b) <= (5'(offset) + 5'(size_m1))) mask[b] = 1'b1;
+    end
+    return mask;
+  endfunction
   logic [1:0] store_words[Entries];
+  logic [WordBytes-1:0] store_byte_mask[Entries];
   for (genvar entry_idx = 0; entry_idx < Entries; entry_idx++) begin : g_span
+    wire [3:0] entry_sz_m1 = store_fp64[entry_idx] ? 4'd7 : (rapt_pkg::store_bytes(
+        store_alu[entry_idx], 4'd4
+    ) - 4'd1);
     assign store_words[entry_idx] = store_span(
         store_addr[entry_idx][OffsetBits-1:0], store_alu[entry_idx], store_fp64[entry_idx]
+    );
+    assign store_byte_mask[entry_idx] = byte_span_mask(
+        store_addr[entry_idx][OffsetBits-1:0], entry_sz_m1
     );
   end
   logic zero_pending;
@@ -117,19 +134,23 @@ module rapt_sq_forward #(
   end
   for (genvar port_idx = 0; port_idx < ReadPorts; port_idx++) begin : g_read
     logic [1:0] load_words;
-    logic [Entries-1:0] slot_match, before_head, candidates, winner, eligible;
+    logic [WordBytes-1:0] load_byte_mask;
+    logic [Entries-1:0] word_match, slot_match, before_head, candidates, winner, eligible;
     logic alloc_match;
     logic [Xlen-1:0] winner_data;
     logic [OffsetBits-1:0] winner_offset;
     assign load_words = 2'((4'(load_addr[port_idx][OffsetBits-1:0])
                             + load_size_m1[port_idx]) >> OffsetBits);
+    assign load_byte_mask = byte_span_mask(
+        load_addr[port_idx][OffsetBits-1:0], load_size_m1[port_idx]
+    );
     // Compare physical slots before selecting by age. Rotating wide address
     // and data arrays by head would replicate a mux in front of every CAM lane.
     for (genvar entry_idx = 0; entry_idx < Entries; entry_idx++) begin : g_match
       // A retained store can belong to a previous translation context, even
       // when the current load is Bare. Stale VA equality cannot forward data.
       if (PrecomputedBlocks) begin : g_pre
-        assign slot_match[entry_idx] = valid[entry_idx] && word_in_store_pre(
+        assign word_match[entry_idx] = valid[entry_idx] && word_in_store_pre(
             store_addr[entry_idx],
             store_next_block[entry_idx],
             store_prev_block[entry_idx],
@@ -139,7 +160,7 @@ module rapt_sq_forward #(
             mmu_enabled || stale_context[entry_idx]
         );
       end else begin : g_live
-        assign slot_match[entry_idx] = valid[entry_idx] && word_in_store(
+        assign word_match[entry_idx] = valid[entry_idx] && word_in_store(
             store_addr[entry_idx],
             load_addr[port_idx],
             store_words[entry_idx],
@@ -147,6 +168,12 @@ module rapt_sq_forward #(
             mmu_enabled || stale_context[entry_idx]
         );
       end
+      // Byte offsets within a word are page-invariant. When NarrowForward is
+      // enabled, disjoint byte ranges in the same single-word access do not
+      // conflict and never block older covering stores or L1D reads.
+      assign slot_match[entry_idx] = word_match[entry_idx]
+          && (!NarrowForward || store_words[entry_idx] != 2'd0 || load_words != 2'd0
+              || (|(store_byte_mask[entry_idx] & load_byte_mask)));
       assign eligible[entry_idx] = !stale_context[entry_idx]
           && load_words == 0
           && store_addr[entry_idx][Xlen-1:OffsetBits] == load_addr[port_idx][Xlen-1:OffsetBits]

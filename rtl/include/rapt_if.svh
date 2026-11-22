@@ -39,6 +39,7 @@ interface lsu_l1d_if #(
   logic [3:0] rorig_size_m1;
   logic atomic_lock;
   logic ordered;
+  logic [11:0] rpc_hash;
 `ifdef RAPT_H_EXTENSION
   logic rguest;
   logic rexec;
@@ -93,7 +94,7 @@ interface lsu_l1d_if #(
   modport master(
       output raddr, rcontext, ralu, rvalid, rprobe, wprecise, rmisaligned,
       output rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1,
-      output atomic_lock, ordered, replay_allowed, rguest, rexec,
+      output atomic_lock, ordered, rpc_hash, replay_allowed, rguest, rexec,
       input rpbmt, gpaddr, gptw,
       input idle, rdata, trap, cause, difftest_skip, rready, rretry, rmiss, miss_wake, rnonidempotent,
       output raddr_b, rcontext_b, ralu_b, rvalid_b,
@@ -104,7 +105,7 @@ interface lsu_l1d_if #(
   modport slave(
       input raddr, rcontext, ralu, rvalid, rprobe, wprecise, rmisaligned,
       input rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1,
-      input atomic_lock, ordered, replay_allowed, rguest, rexec,
+      input atomic_lock, ordered, rpc_hash, replay_allowed, rguest, rexec,
       output rpbmt, gpaddr, gptw,
       output idle, rdata, trap, cause, difftest_skip, rready, rretry, rmiss, miss_wake, rnonidempotent,
       input raddr_b, rcontext_b, ralu_b, rvalid_b,
@@ -116,7 +117,7 @@ interface lsu_l1d_if #(
   modport master(
       output raddr, rcontext, ralu, rvalid, rprobe, wprecise, rmisaligned,
       output rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1,
-      output atomic_lock, ordered, replay_allowed,
+      output atomic_lock, ordered, rpc_hash, replay_allowed,
       input idle, rdata, trap, cause, difftest_skip, rready, rretry, rmiss, miss_wake, rnonidempotent,
       output raddr_b, rcontext_b, ralu_b, rvalid_b,
       input rdata_b, rready_b, rretry_b,
@@ -126,7 +127,7 @@ interface lsu_l1d_if #(
   modport slave(
       input raddr, rcontext, ralu, rvalid, rprobe, wprecise, rmisaligned,
       input rcheck_valid, rcheck_offset, rcheck_size_m1, rorig_size_m1,
-      input atomic_lock, ordered, replay_allowed,
+      input atomic_lock, ordered, rpc_hash, replay_allowed,
       output idle, rdata, trap, cause, difftest_skip, rready, rretry, rmiss, miss_wake, rnonidempotent,
       input raddr_b, rcontext_b, ralu_b, rvalid_b,
       output rdata_b, rready_b, rretry_b,

@@ -37,7 +37,9 @@ module tb_mshr_fill_selection #(
     .req_id(req_id[N]), .req_addr(req_addr[N]), .req_ready, \
     .rsp_valid, .rsp_id, .rsp_data, .rsp_error, .rsp_last, \
     .store_valid(1'b0), .store_fire(1'b0), .store_alloc(1'b0), \
-    .store_addr('0), .store_data('0), .store_strobe('0)
+    .store_addr('0), .store_data('0), .store_strobe('0), \
+    .prefetch_valid(1'b0), .prefetch_addr('0), .prefetch_version('0), \
+    .prefetch_accept()
 
   rapt_l1d_mshr #(
       .Xlen(Xlen),

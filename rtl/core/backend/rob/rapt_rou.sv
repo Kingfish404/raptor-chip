@@ -53,7 +53,13 @@ module rapt_rou #(
     // FEU ports so the FP result file and resolve bypass ignore the others.
     parameter logic [31:0] FpWritePorts = '1,
     // Zero-tag operands arrive as rapt_pkg::derive_op* selectors.
-    parameter bit DerivedConstants = 1'b0
+    parameter bit DerivedConstants = 1'b0,
+    // Omit 64-bit operand spill storage and dispatch-lane PRF value muxes
+    // when all execution units read the physical register file post-issue.
+    parameter bit TagOnlyDispatch = 1'b0,
+    // Bypass the local rename skid buffer when upstream rename_pipe already
+    // supplies a registered, prefix-packed stream of equal width.
+    parameter bit DirectRenameInput = 1'b0
 ) (
     input UopT fp_queue_read_uop,
     input logic [2:0][$clog2(ROB_SIZE):0] fp_queue_read_tag,
@@ -280,7 +286,7 @@ module rapt_rou #(
   logic [SkidCountBits-1:0] skid_count_next;
   // Registered prefix validity keeps count decoding off the allocation edge.
   logic [RenameWidth-1:0] skid_valid;
-  wire skid_empty = !skid_valid[0];
+  wire skid_empty = DirectRenameInput ? !rnu_rou.valid[0] : !skid_valid[0];
   assign rename_buffer_empty_o = skid_empty;
 `ifndef SYNTHESIS
   // Preserve the simulator's stall-dump names without retaining ring storage.
@@ -425,12 +431,14 @@ module rapt_rou #(
   logic [RBits-1:0] youngest_commit, store_commit, branch_commit;
   logic store_commit_valid, branch_commit_valid;
   localparam int NWB = NumCompletions;
+  localparam int SpillXlen = TagOnlyDispatch ? 2 : XLEN;
   logic wb_valid_v[NWB];
   wire spill_completion_valid[NWB];
   logic [PLEN-1:0] wb_prd_v[NWB];
   logic [XLEN-1:0] wb_res_v[NWB];
+  logic [SpillXlen-1:0] spill_wb_res[NWB];
   logic spill_allocate_valid[NumSlots], spill_allocate_ready[NumSlots];
-  logic [XLEN-1:0] spill_allocate_op1[NumSlots], spill_allocate_op2[NumSlots];
+  logic [SpillXlen-1:0] spill_allocate_op1[NumSlots], spill_allocate_op2[NumSlots];
   logic [PLEN-1:0] spill_allocate_pr1[NumSlots], spill_allocate_pr2[NumSlots];
   localparam int WindowResident = ScanEntries - 2 * NumSlots;
   localparam int ValueReadPorts = NumSlots + (RegisteredDispatchPayload ? WindowResident : 0);
@@ -440,10 +448,11 @@ module rapt_rou #(
   logic [SpillBits-1:0] spill_release_index[NumSlots];
   logic [SpillBits-1:0] spill_read_index[ValueReadPorts];
   logic spill_read_valid[ValueReadPorts];
-  logic [XLEN-1:0] spill_read_op1[ValueReadPorts], spill_read_op2[ValueReadPorts];
+  logic [SpillXlen-1:0] spill_read_op1[ValueReadPorts], spill_read_op2[ValueReadPorts];
   logic [PLEN-1:0] spill_read_pr1[ValueReadPorts], spill_read_pr2[ValueReadPorts];
   for (genvar p = 0; p < NWB; p++) begin : g_wb_capture
     assign spill_completion_valid[p] = 1'b0;
+    assign spill_wb_res[p] = SpillXlen'(wb_res_v[p]);
     if (SeparateOperandWake) begin : g_operand
       // Every operand holder observes the same accepted event, including
       // values bypassed into execution queues on their allocation edge.
@@ -457,7 +466,7 @@ module rapt_rou #(
     end
   end
   rapt_operand_value_spill #(
-      .Xlen(XLEN),
+      .Xlen(SpillXlen),
       .UopT(UopT),
       .PhysBits(PLEN),
       .SpillEntries(OperandSpillEntries),
@@ -491,7 +500,7 @@ module rapt_rou #(
       // Spilled operands are immutable; register sources resolve at dispatch.
       .completion_valid(spill_completion_valid),
       .completion_prd(wb_prd_v),
-      .completion_result(wb_res_v)
+      .completion_result(spill_wb_res)
   );
   assign h0 = rob_head;
   assign rob_empty = !(|rob_entry_busy);
@@ -640,8 +649,11 @@ module rapt_rou #(
           < (int'(rhs) + ROB_SIZE - int'(rob_head)) % ROB_SIZE;
   endfunction
   function automatic logic commit_special(input int e);
-    return rob_serializing[e] || rob_entry[e].trap || rob_entry[e].mispredict ||
-        rob_atomic[e] || rob_entry[e].difftest_skip;
+`ifdef SYNTHESIS
+    return rob_serializing[e] || rob_entry[e].trap || rob_atomic[e];
+`else
+    return rob_serializing[e] || rob_entry[e].trap || rob_atomic[e] || rob_entry[e].difftest_skip;
+`endif
   endfunction
   function automatic logic fetch_uop_changes(input logic [RBits-1:0] idx);
     /* verilator lint_off UNUSEDSIGNAL */
@@ -842,11 +854,12 @@ module rapt_rou #(
   // Only the already-announced, nontrapping recovery owner can preserve the
   // target stream across precise cleanup. An older exception, interrupt,
   // serializing operation or a newly superseding recovery still flushes it.
-  assign recovery.preserve_fetch = flush_pipe && commit_fire[0]
+  assign recovery.preserve_fetch = flush_pipe && branch_commit_valid
+      && rob_entry[branch_commit].mispredict
       && !recieved_trap && !debug_halt_flush && !debug.step && !debug_ebreak && !rob_entry[h0].trap
-      && !rob_serializing[h0] && !rob_atomic[h0] && rob_control_flow[h0]
+      && !rob_serializing[h0] && !rob_atomic[h0]
       && recovery_pending && recovery_owner_current && recovery_announced
-      && !recovery.redirect_valid && h0 == recovery_owner;
+      && !recovery.redirect_valid && branch_commit == recovery_owner;
   assign recovery.taken = rob_entry[recovery_owner].btaken;
   assign recovery.owner = recovery_owner;
   assign recovery.head = rob_head;
@@ -1298,8 +1311,8 @@ module rapt_rou #(
       if (selected_active[s]) begin
         dispatch_raw[s].uop = RegisteredDispatchPayload ? candidate_uop[active_slot[s]]
             : spill_read_uop[s];
-        dispatch_raw[s].op1 = spill_read_op1[s];
-        dispatch_raw[s].op2 = spill_read_op2[s];
+        dispatch_raw[s].op1 = XLEN'(spill_read_op1[s]);
+        dispatch_raw[s].op2 = XLEN'(spill_read_op2[s]);
         dispatch_raw[s].pr1 = spill_read_pr1[s];
         dispatch_raw[s].pr2 = spill_read_pr2[s];
         dispatch_raw[s].prd = active_meta[active_slot[s]].prd;
@@ -1330,26 +1343,39 @@ module rapt_rou #(
       pr1 = dispatch_raw[s].pr1;
       pr2 = dispatch_raw[s].pr2;
       dispatch[s] = dispatch_raw[s];
-      if (DerivedConstants) begin
-        dispatch[s].op1 = rapt_pkg::derive_op1(
-          dispatch_raw[s].op1,
-          dispatch_raw[s].uop.pc,
-          dispatch_raw[s].uop.imm,
-          dispatch_raw[s].uop.imm[16:12]
-        );
-        dispatch[s].op2 = rapt_pkg::derive_op2(dispatch_raw[s].op2, dispatch_raw[s].uop.imm);
-      end
-      dispatch[s].fp_value = fp_resolve_value[s];
-      dispatch[s].fp_tag = fp_resolve_ready_tag[s];
-      dispatch[s].stable_op1 = pr1 == '0 ? dispatch[s].op1 : exu_prf.pv1[s];
-      dispatch[s].stable_op1_valid = pr1 == '0 || exu_prf.pv1_valid[s];
-      if (pr1 != '0) begin
-        dispatch[s].op1 = wb_val(pr1, exu_prf.pv1[s]);
-        if (wb_hit(pr1) || exu_prf.pv1_valid[s]) dispatch[s].pr1 = '0;
-      end
-      if (pr2 != '0) begin
-        dispatch[s].op2 = wb_val(pr2, exu_prf.pv2[s]);
-        if (wb_hit(pr2) || exu_prf.pv2_valid[s]) dispatch[s].pr2 = '0;
+      if (TagOnlyDispatch) begin
+        // Tag-only dispatch: execution units read PRF post-issue and derive
+        // constant operands from the 2-bit/1-bit selector carried in op1/op2.
+        dispatch[s].op1 = XLEN'(dispatch_raw[s].op1[1:0]);
+        dispatch[s].op2 = XLEN'(dispatch_raw[s].op2[0]);
+        dispatch[s].fp_value = fp_resolve_value[s];
+        dispatch[s].fp_tag = fp_resolve_ready_tag[s];
+        dispatch[s].stable_op1 = '0;
+        dispatch[s].stable_op1_valid = 1'b0;
+        if (pr1 != '0 && (wb_hit(pr1) || exu_prf.pv1_valid[s])) dispatch[s].pr1 = '0;
+        if (pr2 != '0 && (wb_hit(pr2) || exu_prf.pv2_valid[s])) dispatch[s].pr2 = '0;
+      end else begin
+        if (DerivedConstants) begin
+          dispatch[s].op1 = rapt_pkg::derive_op1(
+            dispatch_raw[s].op1,
+            dispatch_raw[s].uop.pc,
+            dispatch_raw[s].uop.imm,
+            dispatch_raw[s].uop.imm[16:12]
+          );
+          dispatch[s].op2 = rapt_pkg::derive_op2(dispatch_raw[s].op2, dispatch_raw[s].uop.imm);
+        end
+        dispatch[s].fp_value = fp_resolve_value[s];
+        dispatch[s].fp_tag = fp_resolve_ready_tag[s];
+        dispatch[s].stable_op1 = pr1 == '0 ? dispatch[s].op1 : exu_prf.pv1[s];
+        dispatch[s].stable_op1_valid = pr1 == '0 || exu_prf.pv1_valid[s];
+        if (pr1 != '0) begin
+          dispatch[s].op1 = wb_val(pr1, exu_prf.pv1[s]);
+          if (wb_hit(pr1) || exu_prf.pv1_valid[s]) dispatch[s].pr1 = '0;
+        end
+        if (pr2 != '0) begin
+          dispatch[s].op2 = wb_val(pr2, exu_prf.pv2[s]);
+          if (wb_hit(pr2) || exu_prf.pv2_valid[s]) dispatch[s].pr2 = '0;
+        end
       end
     end
 `ifdef RAPT_SVA_ACTIVE
@@ -1375,21 +1401,28 @@ module rapt_rou #(
       spill_allocate_uop[s] = allocation[s].uop;
       spill_allocate_uop[s].execute.branch.predicted_taken = 1'b0;
     end
-    assign spill_allocate_op1[s] = allocation[s].op1;
-    assign spill_allocate_op2[s] = allocation[s].op2;
+    assign spill_allocate_op1[s] = SpillXlen'(allocation[s].op1);
+    assign spill_allocate_op2[s] = SpillXlen'(allocation[s].op2);
     assign spill_allocate_pr1[s] = allocation[s].pr1;
     assign spill_allocate_pr2[s] = allocation[s].pr2;
     assign allocation_endpoint_ready[s] = spill_allocate_ready[s];
   end
-  for (genvar s = 0; s < RenameWidth; s++) begin : g_enqueue
-    // Allocation reads only registered payload; complete drain permits refill.
-    if (s == 0) begin : g_first
-      assign rnu_rou.ready[s] = skid_replace && !reset && !flush_pipe
-          && !debug_halt && !recovery_pending && !debug_step_issued_q;
-    end else begin : g_prefix
-      assign rnu_rou.ready[s] = enq_fire[s-1] && !debug.step;
+  if (DirectRenameInput && RenameWidth == NumSlots) begin : g_direct_enqueue
+    for (genvar s = 0; s < RenameWidth; s++) begin : g_lane
+      assign rnu_rou.ready[s] = deq_fire[s];
+      assign enq_fire[s] = deq_fire[s];
     end
-    assign enq_fire[s] = rnu_rou.valid[s] && rnu_rou.ready[s];
+  end else begin : g_skid_enqueue
+    for (genvar s = 0; s < RenameWidth; s++) begin : g_enqueue
+      // Allocation reads only registered payload; complete drain permits refill.
+      if (s == 0) begin : g_first
+        assign rnu_rou.ready[s] = skid_replace && !reset && !flush_pipe
+            && !debug_halt && !recovery_pending && !debug_step_issued_q;
+      end else begin : g_prefix
+        assign rnu_rou.ready[s] = enq_fire[s-1] && !debug.step;
+      end
+      assign enq_fire[s] = rnu_rou.valid[s] && rnu_rou.ready[s];
+    end
   end
   always_comb begin
     enqueue_count = 0;
@@ -1434,7 +1467,8 @@ module rapt_rou #(
 
 
 
-  assign skid_count_next = SkidCountBits'(int'(skid_count) - dispatch_count + enqueue_count);
+  assign skid_count_next = DirectRenameInput
+      ? '0 : SkidCountBits'(int'(skid_count) - dispatch_count + enqueue_count);
   always_ff @(posedge clock) begin
     if (reset || flush_pipe) begin
       skid_count <= '0;
@@ -1442,12 +1476,14 @@ module rapt_rou #(
       skid_valid <= '0;
       serialize_in_flight <= 1'b0;
     end else begin
-      skid_count <= skid_count_next;
-      for (int s = 0; s < RenameWidth; s++) skid_valid[s] <= int'(skid_count_next) > s;
-      if (skid_replace) begin
-        skid_start <= '0;
-      end else begin
-        skid_start <= SkidCountBits'(int'(skid_start) + dispatch_count);
+      if (!DirectRenameInput) begin
+        skid_count <= skid_count_next;
+        for (int s = 0; s < RenameWidth; s++) skid_valid[s] <= int'(skid_count_next) > s;
+        if (skid_replace) begin
+          skid_start <= '0;
+        end else begin
+          skid_start <= SkidCountBits'(int'(skid_start) + dispatch_count);
+        end
       end
       if (serialize_in_flight && rob_empty) serialize_in_flight <= 1'b0;
       for (int s = 0; s < NumSlots; s++)
@@ -1547,46 +1583,80 @@ module rapt_rou #(
         cbo_block_q <= completion[p].sq_waddr[XLEN-1:6];
     end
   end
-  // Capture a group when empty or after complete allocation. Partial
-  // allocation advances only the narrow start/count; held payload never moves.
-  for (genvar s = 0; s < RenameWidth; s++) begin : g_skid_storage
-    always_ff @(posedge clock) begin
-      if (skid_replace) begin
-        skid_slot[s] <= rnu_rou.slot[s];
-        skid_slot[s].uop <= without_prediction(rnu_rou.slot[s].uop);
-        skid_slot[s].pnpc <= '0;
-        skid_checkpoint_valid[s] <= rnu_rou.checkpoint_valid[s];
-        skid_checkpoint[s] <= rnu_rou.checkpoint[s];
+  // Capture a group when empty or after complete allocation unless
+  // DirectRenameInput feeds the registered rename_pipe directly.
+  if (DirectRenameInput && RenameWidth == NumSlots) begin : g_direct_input
+    for (genvar s = 0; s < RenameWidth; s++) begin : g_unused_skid
+      assign skid_slot[s] = '0;
+      assign skid_checkpoint_valid[s] = 1'b0;
+      assign skid_checkpoint[s] = '0;
+    end
+    for (genvar s = 0; s < IIQ_SIZE; s++) begin : g_allocation_input
+      if (s < RenameWidth) begin : g_lane
+        assign uoq_valid[s] = rnu_rou.valid[s] && !debug_step_issued_q
+            && (s == 0 || !debug.step);
+        assign uoq_uops[s] = without_prediction(rnu_rou.slot[s].uop);
+        assign uoq_pr1[s] = rnu_rou.slot[s].pr1;
+        assign uoq_pr2[s] = rnu_rou.slot[s].pr2;
+        assign uoq_prd[s] = rnu_rou.slot[s].prd;
+        assign uoq_prs[s] = rnu_rou.slot[s].prs;
+        assign uoq_op1[s] = rnu_rou.slot[s].op1;
+        assign uoq_op2[s] = rnu_rou.slot[s].op2;
+        assign uoq_checkpoint_valid[s] = rnu_rou.checkpoint_valid[s];
+        assign uoq_checkpoint[s] = rnu_rou.checkpoint[s];
+      end else begin : g_unused
+        assign uoq_valid[s] = 1'b0;
+        assign uoq_uops[s] = '0;
+        assign uoq_pr1[s] = '0;
+        assign uoq_pr2[s] = '0;
+        assign uoq_prd[s] = '0;
+        assign uoq_prs[s] = '0;
+        assign uoq_op1[s] = '0;
+        assign uoq_op2[s] = '0;
+        assign uoq_checkpoint_valid[s] = 1'b0;
+        assign uoq_checkpoint[s] = '0;
       end
     end
-  end
-  // These views retain the allocation interface; they contain no UOQ storage.
-  for (genvar s = 0; s < IIQ_SIZE; s++) begin : g_allocation_input
-    if (s < RenameWidth) begin : g_lane
-      wire [SkidIndexBits-1:0] held_index = SkidIndexBits'(int'(skid_start) + s);
-      assign uoq_valid[s] = skid_valid[s];
-      `RAPT_SVA(clock, reset || flush_pipe, ROU_SKID_VALID_COUNT,
-                skid_valid[s] == (int'(skid_count) > s))
-      assign uoq_uops[s] = without_prediction(skid_slot[held_index].uop);
-      assign uoq_pr1[s] = skid_slot[held_index].pr1;
-      assign uoq_pr2[s] = skid_slot[held_index].pr2;
-      assign uoq_prd[s] = skid_slot[held_index].prd;
-      assign uoq_prs[s] = skid_slot[held_index].prs;
-      assign uoq_op1[s] = skid_slot[held_index].op1;
-      assign uoq_op2[s] = skid_slot[held_index].op2;
-      assign uoq_checkpoint_valid[s] = skid_checkpoint_valid[held_index];
-      assign uoq_checkpoint[s] = skid_checkpoint[held_index];
-    end else begin : g_unused
-      assign uoq_valid[s] = 1'b0;
-      assign uoq_uops[s] = '0;
-      assign uoq_pr1[s] = '0;
-      assign uoq_pr2[s] = '0;
-      assign uoq_prd[s] = '0;
-      assign uoq_prs[s] = '0;
-      assign uoq_op1[s] = '0;
-      assign uoq_op2[s] = '0;
-      assign uoq_checkpoint_valid[s] = 1'b0;
-      assign uoq_checkpoint[s] = '0;
+  end else begin : g_skid_input
+    for (genvar s = 0; s < RenameWidth; s++) begin : g_skid_storage
+      always_ff @(posedge clock) begin
+        if (skid_replace) begin
+          skid_slot[s] <= rnu_rou.slot[s];
+          skid_slot[s].uop <= without_prediction(rnu_rou.slot[s].uop);
+          skid_slot[s].pnpc <= '0;
+          skid_checkpoint_valid[s] <= rnu_rou.checkpoint_valid[s];
+          skid_checkpoint[s] <= rnu_rou.checkpoint[s];
+        end
+      end
+    end
+    // These views retain the allocation interface; they contain no UOQ storage.
+    for (genvar s = 0; s < IIQ_SIZE; s++) begin : g_allocation_input
+      if (s < RenameWidth) begin : g_lane
+        wire [SkidIndexBits-1:0] held_index = SkidIndexBits'(int'(skid_start) + s);
+        assign uoq_valid[s] = skid_valid[s];
+        `RAPT_SVA(clock, reset || flush_pipe, ROU_SKID_VALID_COUNT,
+                  skid_valid[s] == (int'(skid_count) > s))
+        assign uoq_uops[s] = without_prediction(skid_slot[held_index].uop);
+        assign uoq_pr1[s] = skid_slot[held_index].pr1;
+        assign uoq_pr2[s] = skid_slot[held_index].pr2;
+        assign uoq_prd[s] = skid_slot[held_index].prd;
+        assign uoq_prs[s] = skid_slot[held_index].prs;
+        assign uoq_op1[s] = skid_slot[held_index].op1;
+        assign uoq_op2[s] = skid_slot[held_index].op2;
+        assign uoq_checkpoint_valid[s] = skid_checkpoint_valid[held_index];
+        assign uoq_checkpoint[s] = skid_checkpoint[held_index];
+      end else begin : g_unused
+        assign uoq_valid[s] = 1'b0;
+        assign uoq_uops[s] = '0;
+        assign uoq_pr1[s] = '0;
+        assign uoq_pr2[s] = '0;
+        assign uoq_prd[s] = '0;
+        assign uoq_prs[s] = '0;
+        assign uoq_op1[s] = '0;
+        assign uoq_op2[s] = '0;
+        assign uoq_checkpoint_valid[s] = 1'b0;
+        assign uoq_checkpoint[s] = '0;
+      end
     end
   end
 `ifdef RAPT_SVA_ACTIVE
@@ -1686,14 +1756,18 @@ module rapt_rou #(
         end
       end
       // The scalar store-commit endpoint accepts one store per group; later
-      // plain instructions may still retire behind it.
-      prefix = prefix && commit_fire[c] && !commit_special(int'(commit_index[c]));
+      // plain instructions may still retire behind it, but wrong-path slots
+      // younger than a mispredicted control-flow instruction must not retire.
+      prefix = prefix && commit_fire[c] && !commit_special(int'(commit_index[c])) &&
+          !rob_entry[commit_index[c]].mispredict;
     end
   end
+  wire commit_branch_mispredict = branch_commit_valid && rob_entry[branch_commit].mispredict
+      && rob_control_flow[branch_commit];
   assign head0_valid = recieved_trap || commit_fire[0];
-  assign head0_flush = recieved_trap || (commit_fire[0] && (
+  assign head0_flush = recieved_trap || commit_branch_mispredict || (commit_fire[0] && (
       rob_serializing[h0]
-      || rob_entry[h0].trap || rob_entry[h0].mispredict || rob_atomic[h0]));
+      || rob_entry[h0].trap || rob_atomic[h0]));
   assign flush_pipe = head0_flush || debug_halt_flush || debug_resume_flush;
   // Mispredicts, atomics, and CSR ops that do not change fetch translation may
   // consume the prefetch started on this flush. Privilege, page-table, PMP,
@@ -1752,9 +1826,13 @@ module rapt_rou #(
     for (int s = 0; s < NumSlots; s++) begin
       if (deq_fire[s]) begin
         // The checkpoint target was captured when this registered group was accepted.
-        if (uoq_checkpoint_valid[deq_index[s]] && control_flow(allocation[s].uop))
-          youngest_npc <= {predicted_npc[uoq_checkpoint[deq_index[s]]], 1'b0};
-        else youngest_npc <= allocation[s].uop.pc + (allocation[s].uop.c ? PcW'(2) : PcW'(4));
+        if (uoq_checkpoint_valid[deq_index[s]] && control_flow(allocation[s].uop)) begin
+          if (DirectRenameInput && RenameWidth == NumSlots)
+            youngest_npc <= {rnu_rou.slot[s].pnpc[PcW-1:1], 1'b0};
+          else youngest_npc <= {predicted_npc[uoq_checkpoint[deq_index[s]]], 1'b0};
+        end else begin
+          youngest_npc <= allocation[s].uop.pc + (allocation[s].uop.c ? PcW'(2) : PcW'(4));
+        end
       end
     end
     if (recovery_pending && recovery_owner_current) youngest_npc <= recovery_target;
@@ -2235,7 +2313,7 @@ module rapt_rou #(
     for (int e = 0; e < ROB_SIZE; e++) pmu_cf_events[e] <= cf_events(e);
   end
 `endif
-  assign pmu_branch_flush = head0_valid && rob_entry[h0].mispredict && rob_control_flow[h0];
+  assign pmu_branch_flush = commit_branch_mispredict;
   assign pmu_nonbranch_flush = flush_pipe && !pmu_branch_flush;
   assign pmu_sq_stall = rob_entry_busy[h0] && rob_entry[h0].state == rapt_pkg::ROB_WB
       && rob_entry[h0].wen && !rou_lsu.sq_ready;

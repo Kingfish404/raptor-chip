@@ -114,6 +114,8 @@ module rapt_lsu_ioq #(
   logic [XLEN-1:0] late_addr[IOQ_SIZE], late_addr_storage[IOQ_SIZE];
   logic [IOQ_SIZE-1:0] late_addr_ready, late_prepared;
   logic alloc_addr_valid[NumSlots];
+  logic alloc_base_ready[NumSlots];
+  logic [11:0] alloc_immediate[NumSlots];
   wire [PLEN-1:0] late_base_source[IOQ_SIZE], late_data_source[IOQ_SIZE];
   logic [XLEN-1:0] alloc_addr_value[NumSlots];
   wire [XLEN-1:0] dispatch_stable_addr[NumSlots];
@@ -596,8 +598,6 @@ module rapt_lsu_ioq #(
           && !ioq_atom[i]
           && !ioq_older_memory_blk[i]
           && (!ioq_needs_ordered[i] || (i == int'(ioq_head) && ioq_at_rob_head))
-          && (!(ioq_context[i].pbmte && ioq_context[i].mmu_en)
-              || (i == int'(ioq_head) && ioq_at_rob_head))
           && (ioq_context[i].mmu_en
               || (ioq_valid[i] && ioq_cacheable[i]) ||
           (i[$clog2(IOQ_SIZE)-1:0] == ioq_head && ioq_at_rob_head));
@@ -675,8 +675,8 @@ module rapt_lsu_ioq #(
           && !dispatch[s].uop.execute.memory.atomic
           && dispatch[s].stable_op1_valid
           && dispatch[s].pr1 == '0 && dispatch[s].pr2 == '0
-          && !dispatch[s].uop.trap && !dispatch_context.mmu_en) begin
-        dispatch_load_found = rapt_pkg::addr_cacheable(candidate_addr);
+          && !dispatch[s].uop.trap) begin
+        dispatch_load_found = dispatch_context.mmu_en || rapt_pkg::addr_cacheable(candidate_addr);
         dispatch_load_addr = candidate_addr;
         dispatch_load_pc = dispatch[s].uop.pc;
         dispatch_load_alu = (dispatch[s].uop.execute.fp.valid
@@ -717,7 +717,7 @@ module rapt_lsu_ioq #(
       end
       assign tag_eligible[e] = ioq_valid[e] && ioq_ren[e] && !ioq_wen[e] && !ioq_atom[e] && !ioq_fp_valid[e]
           && !ioq_complete[e] && !ioq_trap[e] && !ioq_miss_wait[e]
-          && !ioq_needs_ordered[e] && !ioq_context[e].mmu_en
+          && !ioq_needs_ordered[e]
           && (|source_match[e]) && ioq_data_ready[e]
           && !(load_req_valid_q && load_req_idx_q == IOQLen'(e))
           && !(b_req_valid_q && b_req_idx_q == IOQLen'(e));
@@ -784,13 +784,13 @@ module rapt_lsu_ioq #(
     for (genvar o = 0; o < IOQ_SIZE; o++) begin : g_blocker
       assign older_blocked[o] = ioq_valid[o] && age[o] < (request_idx - ioq_head)
           && (ioq_atom[o] || (ioq_wen[o]
-              && (!ioq_addr_ready[o] || ioq_context[o].mmu_en
+              && (!ioq_addr_ready[o]
                   || ioq_alu[o][4:0] == `RAPT_CBO_ZERO_WALU || forward_overlap[0][o]
           // Forwarding must preserve ordering against older stores.
           )));
     end
     assign wake_next_req_valid = (|selected) && !(|older_blocked)
-        && (|(selected_source & source_cacheable));
+        && (ioq_context[request_idx].mmu_en || (|(selected_source & source_cacheable)));
 `ifdef RAPT_SVA_ACTIVE
     wire selected_onehot = $onehot0(selected);
     `RAPT_SVA_IMPLY(clock, reset, FORWARDED_REQUEST_ONEHOT, !cmu_bcast.flush_pipe, selected_onehot)
@@ -811,8 +811,6 @@ module rapt_lsu_ioq #(
   assign load_req_sel_valid = wake_next_req_valid || ((head_is_atomic_ready || ioq_issue_found)
       && !(load_req_valid_q && resident_req_idx == load_req_idx_q)
       && (!ioq_needs_ordered[resident_req_idx]
-          || (resident_req_idx == ioq_head && ioq_at_rob_head))
-      && (!(ioq_context[resident_req_idx].pbmte && ioq_context[resident_req_idx].mmu_en)
           || (resident_req_idx == ioq_head && ioq_at_rob_head))
       && !ioq_miss_wait[resident_req_idx]
       && ioq_addr_ready[resident_req_idx]
@@ -1075,7 +1073,7 @@ module rapt_lsu_ioq #(
   assign head_store_addr_valid_q = !reset && !cmu_bcast.flush_pipe
       && ioq_valid[ioq_head] && ioq_addr_ready[ioq_head]
       && (ioq_wen[ioq_head] || ioq_atom[ioq_head])
-      && ioq_base_ready[ioq_head] && ioq_data_ready[ioq_head];
+      && ioq_base_ready[ioq_head];
   assign head_store_vaddr = ioq_eff_addr[ioq_head];
   assign head_store_walu = head_store_walu_sel;
   assign head_store_size = head_store_size_sel;
@@ -1155,7 +1153,7 @@ module rapt_lsu_ioq #(
   assign exu_l1d.mmu_en = (ioq_wen[ioq_head]
       && head_store_addr_valid_q
       && ioq_mmu_en[ioq_head]
-      && ioq_base_ready[ioq_head] && ioq_data_ready[ioq_head]);
+      && ioq_base_ready[ioq_head]);
   assign exu_l1d.mem_context = ioq_context[ioq_head];
   // The first-page response already separates the two translation requests.
   // Save its second-page address on that edge; the valid bit owns this payload.
@@ -1650,8 +1648,12 @@ module rapt_lsu_ioq #(
   // The SQ preloads its vacant tail before completion is accepted. Supply
   // only the registered head store's payload here: a live load response may
   // select the ROB completion but must not select the SQ's wide data inputs.
+  wire sq_store_valid = sq_handoff_valid && !(ioq_ren[ioq_head] && ioq_load_trap[ioq_head]);
   always_comb begin
-    sq_store_payload = ioq_completion_result;
+    sq_store_payload = '0;
+    sq_store_payload.valid = sq_store_valid;
+    sq_store_payload.wen = sq_store_valid;
+    sq_store_payload.dest = ioq_dest[ioq_head];
     sq_store_payload.alu = {1'b0, sq_handoff_alu};
     sq_store_payload.tval = head_store_vaddr;
     sq_store_payload.sq_waddr = XLEN'(head_store_paddr);
@@ -1986,9 +1988,14 @@ module rapt_lsu_ioq #(
     // first resident request no longer needs a wide per-entry bypass.
     assign dispatch_stable_addr[s] = data_address(
         offset == '0 ? dispatch[s].stable_op1 : address_sum);
-    assign alloc_addr_valid[s] = alloc_pr1[s] == '0;
-    assign alloc_addr_value[s] = offset == '0 ? alloc_vj[s]
-        : int_source_regs[s][0] == '0 ? XLEN'($signed(offset)) : address_sum;
+    assign alloc_addr_valid[s] = !LateOperands ? (alloc_pr1[s] == '0)
+        : (int_source_regs[s][0] == '0 || dispatch[s].stable_op1_valid
+           || wb_hit(dispatch[s].pr1));
+    assign alloc_base_ready[s] = LateOperands && disp.accept[s]
+        && (alloc_pr1[s] == '0) && !alloc_addr_valid[s] && (int_source_regs[s][0] != '0);
+    assign alloc_immediate[s] = offset;
+    assign alloc_addr_value[s] = int_source_regs[s][0] == '0
+        ? XLEN'($signed(offset)) : (offset == '0 ? alloc_vj[s] : address_sum);
   end
   for (genvar e = 0; e < IOQ_SIZE; e++) begin : g_integer_data
     assign integer_data_required[e] = ioq_wen[e] && (ioq_atom[e] || !(ioq_fp_valid[e]
@@ -2083,6 +2090,8 @@ module rapt_lsu_ioq #(
         .alloc_sources(late_alloc_sources),
         .alloc_addr_valid,
         .alloc_addr(alloc_addr_value),
+        .alloc_base_ready,
+        .alloc_immediate,
         .immediate(ioq_imm),
         .base_ready,
         .data_ready,

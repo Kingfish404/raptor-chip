@@ -8,6 +8,10 @@
 
 #define STANDARD_SM_SUPPORTED
 
+/* Binutils >= 2.38 requires +zifencei for 'fence.i', which ACT4 base
+   -march=rv64i_zicsr priv tests omit. Emit the exact fence.i encoding. */
+#define RVMODEL_FENCEI .word 0x0000100f
+
 /* ===== STARTUP ===== */
 
 #define RVMODEL_BOOT

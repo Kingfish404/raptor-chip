@@ -67,7 +67,13 @@ module rapt_l1d_mshr #(
     output logic store_free,
     // An uninstalled entry holds store bytes / holds them for lookup_addr.
     output logic store_pending,
-    output logic lookup_store_match
+    output logic lookup_store_match,
+    // Low-priority physical-line prefetch: allocates only when >= 2 slots are
+    // free/reusable and neither a demand lookup nor a store allocation fires.
+    input logic prefetch_valid,
+    input logic [Xlen-1:0] prefetch_addr,
+    input logic [7:0] prefetch_version,
+    output logic prefetch_accept
 );
   if (!(Entries >= 1 && Entries <= 4 && Words >= 2 && (Words & (Words - 1)) == 0)) begin : g_invalid_geometry
     initial $fatal(1, "Invalid L1D MSHR geometry");
@@ -91,7 +97,8 @@ module rapt_l1d_mshr #(
   logic match_found, free_found, send_found;
   logic [1:0] match_id, free_id;
   logic [1:0] replace_q;
-  logic allocate;
+  logic allocate, pf_allocate, pf_match;
+  logic [2:0] free_slot_count;
   // Hold the installation owner before exposing its line to the tag and
   // victim probes. Installed/killed arbitration may change this register,
   // but cannot select a different refill address in the consumer's cycle.
@@ -181,6 +188,15 @@ module rapt_l1d_mshr #(
     // Once installed, the cache owns every successful word. Replays may
     // have completed on a cache/B hit without consuming this buffer, so
     // waiting for consumed here can permanently exhaust an idle table.
+    free_slot_count = 3'd0;
+    pf_match = 1'b0;
+    for (int i = 0; i < Entries; i++) begin
+      if (!valid[i] || (done[i] && installed[i])) free_slot_count = free_slot_count + 3'd1;
+      if (valid[i] && !killed[i] && !kill_line[i]
+          && tag[i] == prefetch_addr[Xlen-1:OffsetBits]
+          && (version[i] == prefetch_version || store_dirty[i]))
+        pf_match = 1'b1;
+    end
     if (!free_found) begin
       for (int n = Entries - 1; n >= 0; n--) begin
         if (done[(int'(replace_q)+n)%Entries] && installed[(int'(replace_q)+n)%Entries]) begin
@@ -201,6 +217,10 @@ module rapt_l1d_mshr #(
     lookup_error = lookup_ready && errors[IdBits'(match_id)][lookup_addr[OffsetBits-1:$clog2(Xlen/8)]];
     lookup_data = data[IdBits'(match_id)][lookup_addr[OffsetBits-1:$clog2(Xlen/8)]];
     allocate = lookup_valid && !cache_hit && !match_found && free_found && !invalidate && !invalidate_line;
+    pf_allocate = prefetch_valid && !lookup_valid && !(store_fire && store_alloc)
+        && !invalidate && !invalidate_line && !pf_match && free_found && (free_slot_count >= 3'd2);
+    prefetch_accept = prefetch_valid && !lookup_valid && !(store_fire && store_alloc)
+        && !invalidate && !invalidate_line && (pf_match || (free_found && free_slot_count >= 3'd2));
     // A full table also releases the requester; a completion will wake it.
     lookup_wait = lookup_valid && !cache_hit && !lookup_ready && !invalidate && !invalidate_line;
     req_valid = send_found && !invalidate && !invalidate_line;
@@ -252,7 +272,7 @@ module rapt_l1d_mshr #(
           store_dirty[IdBits'(free_id)] <= 1'b1;
           for (int w = 0; w < Words; w++) store_mask[IdBits'(free_id)][w] <= '0;
           store_mask[IdBits'(free_id)][store_word] <= store_strobe;
-        end else if (allocate) begin
+        end else if (allocate || pf_allocate) begin
           store_dirty[IdBits'(free_id)] <= 1'b0;
           for (int w = 0; w < Words; w++) store_mask[IdBits'(free_id)][w] <= '0;
         end
@@ -307,15 +327,16 @@ module rapt_l1d_mshr #(
         end
       end
       // Last: a store may take over an installed copy that it kills above.
-      if (allocate || (store_fire && store_alloc)) begin
+      if (allocate || pf_allocate || (store_fire && store_alloc)) begin
         valid[IdBits'(free_id)] <= 1;
         sent[IdBits'(free_id)] <= 0;
         done[IdBits'(free_id)] <= 0;
         consumed[IdBits'(free_id)] <= 0;
         killed[IdBits'(free_id)] <= 0;
         tag[IdBits'(free_id)] <= allocate ? lookup_addr[Xlen-1:OffsetBits]
+            : pf_allocate ? prefetch_addr[Xlen-1:OffsetBits]
             : store_addr[Xlen-1:OffsetBits];
-        version[IdBits'(free_id)] <= lookup_version;
+        version[IdBits'(free_id)] <= pf_allocate ? prefetch_version : lookup_version;
         beat[IdBits'(free_id)] <= '0;
         errors[IdBits'(free_id)] <= '0;
         received[IdBits'(free_id)] <= '0;

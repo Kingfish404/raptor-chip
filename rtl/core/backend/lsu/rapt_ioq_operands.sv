@@ -8,7 +8,7 @@ module rapt_ioq_operands #(
     parameter int Xlen = 64,
     parameter int PhysBits = 6,
     parameter int IndexBits = $clog2(Entries),
-    parameter int StoreValues = 2
+    parameter int StoreValues = 4
 ) (
     input logic clock,
     input logic reset,
@@ -21,6 +21,8 @@ module rapt_ioq_operands #(
     input logic [1:0][PhysBits-1:0] alloc_sources[Slots],
     input logic alloc_addr_valid[Slots],
     input logic [Xlen-1:0] alloc_addr[Slots],
+    input logic alloc_base_ready[Slots],
+    input logic [11:0] alloc_immediate[Slots],
     input logic [11:0] immediate[Entries],
     input logic [Entries-1:0] base_ready,
     input logic [Entries-1:0] data_ready,
@@ -48,8 +50,9 @@ module rapt_ioq_operands #(
   logic [IndexBits-1:0] cache_owner[StoreValues];
   logic [Xlen-1:0] cache_data[StoreValues];
   logic [Entries-1:0] cached, cacheable_storage;
-  logic [ReadPorts-1:0] request_valid, request_addr;
+  logic [ReadPorts-1:0] request_valid, request_addr, request_alloc;
   logic [IndexBits-1:0] request_index[ReadPorts];
+  logic [11:0] request_imm[ReadPorts];
   logic [CacheBits-1:0] request_cache[ReadPorts];
   wire [Xlen-1:0] request_sum[ReadPorts];
   logic [StoreValues-1:0] cache_write;
@@ -134,13 +137,18 @@ module rapt_ioq_operands #(
   // two younger values could prevent the head from ever obtaining a slot.
   always_comb begin
     logic [Entries-1:0] age_addr_avail, age_data_rem;
+    logic [Slots-1:0] alloc_addr_rem;
     logic [StoreValues-1:0] reserved_cache;
+    logic [AllocationBanks-1:0] reserved_addr_bank;
     logic [IndexBits-1:0] cache_age[StoreValues];
     age_addr_avail = age_need_addr;
     age_data_rem = age_need_data;
+    for (int s = 0; s < Slots; s++) alloc_addr_rem[s] = alloc_base_ready[s];
     reserved_cache = '0;
+    reserved_addr_bank = '0;
     request_valid = '0;
     request_addr = '0;
+    request_alloc = '0;
     for (int c = 0; c < StoreValues; c++) begin
       cache_age[c] = entry_age(cache_owner[c]);
     end
@@ -152,8 +160,11 @@ module rapt_ioq_operands #(
       automatic logic [CacheBits-1:0] port_cache_slot;
       automatic logic port_found;
       automatic logic port_is_addr;
+      automatic logic port_is_alloc;
       automatic logic [IndexBits-1:0] win_age;
       automatic logic [IndexBits-1:0] win_idx;
+      automatic logic [11:0] win_imm;
+      automatic logic [PhysBits-1:0] win_alloc_src;
       free_space = 1'b0;
       free_slot = '0;
       for (int c = 0; c < StoreValues; c++) begin
@@ -173,36 +184,73 @@ module rapt_ioq_operands #(
       port_cache_slot = free_space ? free_slot : evict_slot;
       port_found = 1'b0;
       port_is_addr = 1'b0;
+      port_is_alloc = 1'b0;
       win_age = '0;
+      win_idx = head;
+      win_imm = '0;
+      win_alloc_src = '0;
+      // Head store data has top priority only when it unblocks retirement;
+      // younger store data must never starve younger load/store base reads.
+      if (age_data_rem[0] && (free_space || IndexBits'(0) < max_evict_age)) begin
+        port_found = 1'b1;
+        port_is_addr = 1'b0;
+        win_age = '0;
+        age_data_rem[0] = 1'b0;
+      end
       for (int age = 0; age < Entries; age++) begin
+        automatic logic [IndexBits-1:0] cand_idx;
+        cand_idx = age_index(IndexBits'(age));
+        if (!port_found && age_addr_avail[age]
+            && !reserved_addr_bank[int'(cand_idx) % AllocationBanks]) begin
+          port_found = 1'b1;
+          port_is_addr = 1'b1;
+          win_age = IndexBits'(age);
+          age_addr_avail[age] = 1'b0;
+        end
+      end
+      for (int age = 1; age < Entries; age++) begin
         automatic logic data_cache_ok;
         data_cache_ok = free_space || IndexBits'(age) < max_evict_age;
-        if (!port_found) begin
-          if (age_addr_avail[age]) begin
-            port_found = 1'b1;
-            port_is_addr = 1'b1;
-            win_age = IndexBits'(age);
-            age_addr_avail[age] = 1'b0;
-          end else if (age_data_rem[age] && data_cache_ok) begin
-            port_found = 1'b1;
-            port_is_addr = 1'b0;
-            win_age = IndexBits'(age);
-            age_data_rem[age] = 1'b0;
-          end
+        if (!port_found && age_data_rem[age] && data_cache_ok) begin
+          port_found = 1'b1;
+          port_is_addr = 1'b0;
+          win_age = IndexBits'(age);
+          age_data_rem[age] = 1'b0;
         end
+      end
+      // Idle read ports steal allocation-edge base reads for newly dispatched
+      // ready-base memory ops, keeping 0-cycle AGU without extra PRF ports.
+      for (int s = 0; s < Slots; s++) begin
+        if (!port_found && alloc_addr_rem[s]
+            && !reserved_addr_bank[int'(alloc_index[s]) % AllocationBanks]) begin
+          port_found = 1'b1;
+          port_is_addr = 1'b1;
+          port_is_alloc = 1'b1;
+          win_idx = alloc_index[s];
+          win_imm = alloc_immediate[s];
+          win_alloc_src = alloc_sources[s][0];
+          alloc_addr_rem[s] = 1'b0;
+        end
+      end
+      if (!port_is_alloc) win_idx = port_found ? age_index(win_age) : head;
+      if (port_found && port_is_addr) begin
+        reserved_addr_bank[int'(win_idx)%AllocationBanks] = 1'b1;
       end
       for (int c = 0; c < StoreValues; c++) begin
         if (port_found && !port_is_addr && port_cache_slot == CacheBits'(c)) begin
           reserved_cache[c] = 1'b1;
         end
       end
-      win_idx = port_found ? age_index(win_age) : head;
       request_valid[p] = port_found;
       request_addr[p] = port_found && port_is_addr;
+      request_alloc[p] = port_found && port_is_alloc;
       request_index[p] = win_idx;
+      request_imm[p] = win_imm;
       request_cache[p] = port_found && !port_is_addr ? port_cache_slot : '0;
       if (!port_found) begin
         read_address[p] = '0;
+      end else if (port_is_alloc) begin
+        read_address[p] = win_alloc_src;
       end else if (port_is_addr) begin
         read_address[p] = base_source[win_idx];
       end else begin
@@ -233,8 +281,9 @@ module rapt_ioq_operands #(
   end
 
   for (genvar p = 0; p < ReadPorts; p++) begin : g_sum
+    wire [11:0] sum_imm = request_alloc[p] ? request_imm[p] : immediate[request_index[p]];
     assign request_sum[p] = (read_address[p] == '0 ? Xlen'(0) : read_value[p]) + Xlen'($signed(
-        immediate[request_index[p]]
+        sum_imm
     ));
   end
   localparam int BankEntries = Entries / AllocationBanks;

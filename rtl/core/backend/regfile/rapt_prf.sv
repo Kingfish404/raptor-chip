@@ -19,6 +19,8 @@ module rapt_prf #(
     parameter int ReadWidth = Cfg.dispatch_width,
     parameter int ExtraReadPorts = 0,
     parameter int ExtraReadSlots = ExtraReadPorts > 0 ? ExtraReadPorts : 1,
+    // Omit dispatch-lane data read ports when all execution units read post-issue.
+    parameter bit TagOnlyDispatch = 1'b0,
     parameter int CommitWidth = Cfg.commit_width,
     parameter int unsigned NumCompletions = Cfg.completion_ports,
     parameter type CompletionT = rapt_pkg::completion_t,
@@ -209,7 +211,8 @@ module rapt_prf #(
     // table names the bank holding each register's latest value. Halt-time
     // debug writes (no completions in flight) share writer zero's bank.
     localparam int BankBits = NWB > 1 ? $clog2(NWB) : 1;
-    localparam int Reads = 2 * ReadWidth + 1 + ExtraReadPorts;
+    localparam int DispatchReads = TagOnlyDispatch ? 0 : 2 * ReadWidth;
+    localparam int Reads = DispatchReads + 1 + ExtraReadPorts;
     logic [BankBits-1:0] lvt[PNUM];
     logic bank_we[NWB];
     logic [PLEN-1:0] bank_addr[NWB];
@@ -250,20 +253,25 @@ module rapt_prf #(
       end
     end
     for (genvar s = 0; s < ReadWidth; s++) begin : g_read_addr
-      assign read_addr[2*s] = prf_rd.pr1[s];
-      assign read_addr[2*s+1] = prf_rd.pr2[s];
-      assign prf_rd.pv1[s] = read_data[2*s];
-      assign prf_rd.pv2[s] = read_data[2*s+1];
+      if (TagOnlyDispatch) begin : g_tag_only
+        assign prf_rd.pv1[s] = '0;
+        assign prf_rd.pv2[s] = '0;
+      end else begin : g_dispatch_read
+        assign read_addr[2*s] = prf_rd.pr1[s];
+        assign read_addr[2*s+1] = prf_rd.pr2[s];
+        assign prf_rd.pv1[s] = read_data[2*s];
+        assign prf_rd.pv2[s] = read_data[2*s+1];
+      end
     end
-    assign read_addr[2*ReadWidth] = dbg_read_index;
+    assign read_addr[DispatchReads] = dbg_read_index;
     for (genvar r = 0; r < ExtraReadPorts; r++) begin : g_extra
-      assign read_addr[2*ReadWidth+1+r] = extra_address[r];
-      assign extra_stored[r] = extra_address[r] == '0 ? '0 : read_data[2*ReadWidth+1+r];
+      assign read_addr[DispatchReads+1+r] = extra_address[r];
+      assign extra_stored[r] = extra_address[r] == '0 ? '0 : read_data[DispatchReads+1+r];
     end
     for (genvar r = 0; r < Reads; r++) begin : g_read
       assign read_data[r] = bank_read[r][lvt[read_addr[r]]];
     end
-    assign dbg_rdata_o = dbg_addr_i != 0 && int'(dbg_addr_i) < RNUM ? read_data[2*ReadWidth] : '0;
+    assign dbg_rdata_o = dbg_addr_i != 0 && int'(dbg_addr_i) < RNUM ? read_data[DispatchReads] : '0;
 `ifndef SYNTHESIS
     // Full-file view for difftest, RVFI and module checks.
     for (genvar i = 0; i < PNUM; i++) begin : g_view
@@ -306,8 +314,8 @@ module rapt_prf #(
       end
     end
     for (genvar s = 0; s < ReadWidth; s++) begin : g_read
-      assign prf_rd.pv1[s] = prf_arr[prf_rd.pr1[s]];
-      assign prf_rd.pv2[s] = prf_arr[prf_rd.pr2[s]];
+      assign prf_rd.pv1[s] = TagOnlyDispatch ? '0 : prf_arr[prf_rd.pr1[s]];
+      assign prf_rd.pv2[s] = TagOnlyDispatch ? '0 : prf_arr[prf_rd.pr2[s]];
     end
     assign dbg_rdata_o = dbg_addr_i != 0 && int'(dbg_addr_i) < RNUM ? prf_arr[dbg_read_index] : '0;
   end

@@ -515,9 +515,13 @@ package rapt_pkg;
   localparam int unsigned DispatchStopRecovery = 10;
   localparam int unsigned DispatchStopCount = 11;
   typedef logic [index_bits(DispatchStopCount)-1:0] dispatch_stop_t;
-  // The fixed branch queue participates in the same dispatch index fabric.
-  // Small ALQ/IOQ presets must still encode all eight BRQ slots.
+  // The branch queue participates in the same dispatch index fabric.
+  // Small ALQ/IOQ presets must still encode all BRQ slots.
+`ifndef RAPT_BRQ_SIZE
   localparam int unsigned BranchQueueEntries = 8;
+`else
+  localparam int unsigned BranchQueueEntries = `RAPT_BRQ_SIZE;
+`endif
   localparam int unsigned QueueIndexBits = index_bits(
       (CoreConfig.iq_entries > CoreConfig.ioq_entries ? CoreConfig.iq_entries
           : CoreConfig.ioq_entries) > BranchQueueEntries

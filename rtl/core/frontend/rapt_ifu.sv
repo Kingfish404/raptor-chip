@@ -467,8 +467,9 @@ module rapt_ifu #(
   assign redirect_event = (cmu_bcast.flush_pipe && !recovery.preserve_fetch)
       || (cmu_bcast.flush_redirect && !cmu_bcast.fetch_context_stable)
       || recovery.redirect_valid || ifu_idu.resteer;
-  assign redirect_pc = cmu_bcast.flush_redirect ? cmu_bcast.redirect_pc
-      : cmu_bcast.flush_pipe ? cmu_bcast.cpc
+  assign redirect_pc = (cmu_bcast.flush_redirect && !cmu_bcast.fetch_context_stable)
+      ? cmu_bcast.redirect_pc
+      : (cmu_bcast.flush_pipe && !recovery.preserve_fetch) ? cmu_bcast.cpc
       : recovery.redirect_valid ? recovery.target : ifu_idu.resteer_pc;
   always_comb begin
     consumed = 0;
@@ -623,12 +624,13 @@ module rapt_ifu #(
   assign ifu_l1i.cancel = redirect_event || response_kill_younger;
   assign ifu_l1i.pc = pc_ifu;
   assign ifu_l1i.invalid = cmu_bcast.fence_i;
-  // Ordinary reads use pc_ifu's registered address. L1I already reads the
-  // current and following words in parallel; feeding the just-decoded nextpc
-  // back to its SRAM ports adds a cache-data -> decode -> address path.
-  // Keep immediate read-ahead for recovery/redirect targets.
-  assign ifu_l1i.prefetch_valid = redirect_event;
-  assign ifu_l1i.prefetch_pc = redirect_pc;
+  // Safe speculative L1I read-ahead from registered BPU/hint and FQU-ready
+  // state (no cache-data or decode path). L1I accepts speculative read-ahead
+  // only when the current PC's SRAM banks are already warmed in IDLE.
+  wire ifu_can_advance_reg = !ResponseStage && !saved_valid_q && query_match && !blocked
+      && (held_count == 0 || ifu_idu.ready[CountBits'(held_count - 1'b1)]);
+  assign ifu_l1i.prefetch_valid = redirect_event || ifu_can_advance_reg;
+  assign ifu_l1i.prefetch_pc = redirect_event ? redirect_pc : predicted_successor;
 `ifndef SYNTHESIS
   logic pmu_fetch_fire, pmu_ifu_stall, pmu_ifu_icache_stall, pmu_ifu_empty_stall;
   logic pmu_fetch_response_consume, pmu_fetch_bpu_taken, pmu_fetch_target_steer;

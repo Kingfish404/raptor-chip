@@ -48,11 +48,11 @@ module rapt_idu #(
   // blocks output without adding correction feedback to the decode prefix.
   // Resolve only accepted instructions. The redirect is generated from this
   // registered stage, so flushing FQU cannot form a valid->redirect loop.
+  wire idu_flush = (cmu_bcast.flush_pipe && !recovery.preserve_fetch) || recovery.redirect_valid;
   always_comb begin
     automatic logic control_seen;
     control_seen = 1'b0;
-    prefix = !reset && !cmu_bcast.flush_pipe
-        && !recovery.pending;
+    prefix = !reset && !idu_flush;
     consumed = 0;
     redirect = 1'b0;
     redirect_pc = '0;
@@ -64,11 +64,15 @@ module rapt_idu #(
     for (int s = 0; s < Width; s++) begin
       automatic logic is_control;
       automatic logic direct_jump;
+      automatic logic ras_hold;
       automatic logic [PcW-1:0] sequential, corrected;
       is_control = decoded[s].uop.execute.branch.conditional
           || decoded[s].uop.execute.branch.jump || decoded[s].uop.execute.branch.indirect;
       direct_jump = decoded[s].uop.execute.branch.jump && !decoded[s].uop.execute.branch.indirect;
       ras_actions[s] = decoded[s].uop.execute.branch.ras;
+      // Hold RAS mutating/consuming ops until the commit flush restores u_ras.
+      ras_hold = recovery.pending && !decoded[s].uop.trap
+          && (ras_actions[s].push || ras_actions[s].pop);
       sequential = slots[s].pc + (decoded[s].uop.c ? PcW'(2) : PcW'(4));
       corrected = direct_jump ? slots[s].pc + PcW'($signed(decoded[s].uop.imm)) : slots[s].pnpc;
       if (decoded[s].uop.execute.branch.conditional && slots[s].pnpc != sequential)
@@ -78,7 +82,7 @@ module rapt_idu #(
         corrected = (idu_bpu.ras_addr + PcW'($signed(decoded[s].uop.imm))) & ~PcW'(1);
       idu_rnu.slot[s] = decoded[s];
       idu_rnu.slot[s].pnpc = corrected;
-      idu_rnu.valid[s] = prefix && s < 32'(count) && !(is_control && control_seen);
+      idu_rnu.valid[s] = prefix && s < 32'(count) && !(is_control && control_seen) && !ras_hold;
       accept[s] = idu_rnu.valid[s] && idu_rnu.ready[s];
       if (accept[s]) begin
         consumed++;
@@ -94,17 +98,14 @@ module rapt_idu #(
           redirect_slot = SlotBits'(s);
         end
       end
-      prefix = prefix && accept[s] && !redirect && !decoded[s].uop.trap
-          && (!is_control || (decoded[s].uop.execute.branch.conditional
-              && !decoded[s].uop.execute.branch.predicted_taken));
+      prefix = prefix && accept[s] && !redirect && !decoded[s].uop.trap;
       if (accept[s] && is_control) control_seen = 1'b1;
     end
   end
   always_comb begin
     incoming = 0;
     for (int s = 0; s < Width; s++) begin
-      ifu_idu.ready[s] = !reset && !cmu_bcast.flush_pipe
-          && !recovery.pending
+      ifu_idu.ready[s] = !reset && !idu_flush
           && !redirect && !redirect_q && s < Width - 32'(count) + consumed;
       if (s == incoming && ifu_idu.valid[s] && ifu_idu.ready[s]) incoming++;
     end
@@ -129,7 +130,7 @@ module rapt_idu #(
   always_ff @(posedge clock) begin
     redirect_q <= redirect;
     if (redirect) redirect_pc_q <= redirect_pc;
-    if (reset || cmu_bcast.flush_pipe || recovery.pending) redirect_q <= 1'b0;
+    if (reset || idu_flush) redirect_q <= 1'b0;
   end
   assign idu_bpu.train_en = redirect && (decoded[redirect_slot].uop.execute.branch.conditional
       || (decoded[redirect_slot].uop.execute.branch.jump
@@ -148,7 +149,7 @@ module rapt_idu #(
   assign idu_bpu.push_addr = ras_slot < 0 ? '0 : slots[ras_slot].pc
       + (decoded[ras_slot].uop.c ? PcW'(2) : PcW'(4));
   always_ff @(posedge clock) begin
-    if (reset || cmu_bcast.flush_pipe || recovery.pending) begin
+    if (reset || idu_flush) begin
       count <= 0;
       pmu_early_resteer <= 1'b0;
     end else begin
@@ -163,6 +164,6 @@ module rapt_idu #(
   `RAPT_SVA_IMPLY(clock, reset, IDU_CORRECTION_EMPTY, redirect_q, count == 0)
   `RAPT_SVA(clock, reset, IDU_COUNT_BOUNDS, consumed <= 32'(count) && next_count <= Width)
   `RAPT_SVA_IMPLY(
-      clock, reset, IDU_RECOVERY_NO_ACCEPT_OR_OUTPUT, recovery.pending,
+      clock, reset, IDU_RECOVERY_NO_ACCEPT_OR_OUTPUT, recovery.redirect_valid,
       !ifu_idu.ready[0] && !idu_rnu.valid[0] && !idu_bpu.history_valid && !idu_bpu.train_en && !idu_bpu.invalidate_en)
 endmodule

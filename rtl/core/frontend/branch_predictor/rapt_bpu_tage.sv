@@ -59,8 +59,8 @@ module rapt_bpu_tage #(
   localparam int TagLen1 = 7;
   localparam int TagLen2 = 7;
   localparam int TagLen3 = 8;
-  localparam int Hist1 = 8;
-  localparam int Hist2 = 16;
+  localparam int Hist1 = 4;
+  localparam int Hist2 = 18;
   localparam int Hist3 = 64;
 
   // Signed 3-bit direction counter: range [-4, 3], taken iff ctr >= 0.
@@ -70,10 +70,9 @@ module rapt_bpu_tage #(
   localparam logic signed [CtrBits-1:0] CtrInitT = 3'sd0;  // weakly taken
   localparam logic signed [CtrBits-1:0] CtrInitN = -3'sd1;  // weakly not-taken
 
-  // u-bit graceful aging period. Aligned with gem5's log_u_reset_period=12
-  // (clear u every 2^12=4096 update events). With 1-bit u, "alternating MSB/
-  // LSB reset" degenerates to a periodic full-clear.
-  localparam int UResetLog = 12;
+  // u-bit graceful aging period: clear u every 2^15=32768 update events so
+  // useful long-history entries survive across recurrent outer loops.
+  localparam int UResetLog = 15;
 
   // use_alt_on_na: when the longest matching tagged-table provider has a
   // weakly-correct counter (|ctr| <= WEAK_THR), fall back to the alt-pred
@@ -112,19 +111,28 @@ module rapt_bpu_tage #(
   logic signed [CtrBits-1:0] t3_ctr  [TabSize];
 
   // ---------------- Folded-history helpers ----------------
-  // Combinationally fold the low `HIST` bits of `ghr` into `W` bits via XOR.
-  // Yosys/Verilator unroll cleanly for fixed parameters.
+  // Combinationally fold the low `HIST` bits of `ghr` into `W` bits via XOR,
+  // with Seznec dual-CSR tag folding (W and W-1) to avoid periodic loop
+  // self-cancellation and simultaneous index/tag collisions.
   function automatic logic [IDX_LEN-1:0] fold_h1_idx(input logic [GHR_LEN-1:0] g);
     logic [IDX_LEN-1:0] r;
     r = '0;
-    for (int i = 0; i < Hist1; i++) r[i%IDX_LEN] = r[i%IDX_LEN] ^ g[i];
+    for (int i = 0; i < Hist1; i++) begin
+      r[i%IDX_LEN] = r[i%IDX_LEN] ^ g[i];
+      r[(i+4)%IDX_LEN] = r[(i+4)%IDX_LEN] ^ g[i];
+    end
     return r;
   endfunction
   function automatic logic [TagLen1-1:0] fold_h1_tag(input logic [GHR_LEN-1:0] g);
-    logic [TagLen1-1:0] r;
-    r = '0;
-    for (int i = 0; i < Hist1; i++) r[i%TagLen1] = r[i%TagLen1] ^ g[i];
-    return r;
+    logic [TagLen1-1:0] csr1;
+    logic [TagLen1-2:0] csr2;
+    csr1 = '0;
+    csr2 = '0;
+    for (int i = 0; i < Hist1; i++) begin
+      csr1[i%TagLen1] = csr1[i%TagLen1] ^ g[i];
+      csr2[i%(TagLen1-1)] = csr2[i%(TagLen1-1)] ^ g[i];
+    end
+    return csr1 ^ {csr2, 1'b0};
   endfunction
   function automatic logic [IDX_LEN-1:0] fold_h2_idx(input logic [GHR_LEN-1:0] g);
     logic [IDX_LEN-1:0] r;
@@ -133,10 +141,15 @@ module rapt_bpu_tage #(
     return r;
   endfunction
   function automatic logic [TagLen2-1:0] fold_h2_tag(input logic [GHR_LEN-1:0] g);
-    logic [TagLen2-1:0] r;
-    r = '0;
-    for (int i = 0; i < Hist2; i++) r[i%TagLen2] = r[i%TagLen2] ^ g[i];
-    return r;
+    logic [TagLen2-1:0] csr1;
+    logic [TagLen2-2:0] csr2;
+    csr1 = '0;
+    csr2 = '0;
+    for (int i = 0; i < Hist2; i++) begin
+      csr1[i%TagLen2] = csr1[i%TagLen2] ^ g[i];
+      csr2[i%(TagLen2-1)] = csr2[i%(TagLen2-1)] ^ g[i];
+    end
+    return csr1 ^ {csr2, 1'b0};
   endfunction
   function automatic logic [IDX_LEN-1:0] fold_h3_idx(input logic [GHR_LEN-1:0] g);
     logic [IDX_LEN-1:0] r;
@@ -145,10 +158,15 @@ module rapt_bpu_tage #(
     return r;
   endfunction
   function automatic logic [TagLen3-1:0] fold_h3_tag(input logic [GHR_LEN-1:0] g);
-    logic [TagLen3-1:0] r;
-    r = '0;
-    for (int i = 0; i < Hist3; i++) r[i%TagLen3] = r[i%TagLen3] ^ g[i];
-    return r;
+    logic [TagLen3-1:0] csr1;
+    logic [TagLen3-2:0] csr2;
+    csr1 = '0;
+    csr2 = '0;
+    for (int i = 0; i < Hist3; i++) begin
+      csr1[i%TagLen3] = csr1[i%TagLen3] ^ g[i];
+      csr2[i%(TagLen3-1)] = csr2[i%(TagLen3-1)] ^ g[i];
+    end
+    return csr1 ^ {csr2, 1'b0};
   endfunction
 
   // Path-history fold: XOR the PHR bits into a width-W vector. Cheap (<= 8
@@ -156,7 +174,10 @@ module rapt_bpu_tage #(
   function automatic logic [IDX_LEN-1:0] fold_phr_idx(input logic [PHR_LEN-1:0] p);
     logic [IDX_LEN-1:0] r;
     r = '0;
-    for (int i = 0; i < PHR_LEN; i++) r[i%IDX_LEN] = r[i%IDX_LEN] ^ p[i];
+    for (int i = 0; i < PHR_LEN; i++) begin
+      r[i%IDX_LEN] = r[i%IDX_LEN] ^ p[i];
+      r[(i+5)%IDX_LEN] = r[(i+5)%IDX_LEN] ^ p[i];
+    end
     return r;
   endfunction
   function automatic logic [TagLen1-1:0] fold_phr_t1_tag(input logic [PHR_LEN-1:0] p);
@@ -505,10 +526,13 @@ module rapt_bpu_tage #(
 
   // Keep each table payload on one unreset write port. Valid bits supply
   // reset semantics; allocation initializes a tag/counter before it is read.
+  // Skip the shortest candidate 1-in-4 times when a longer table is also free.
   logic alloc_t1, alloc_t2, alloc_t3;
-  assign alloc_t1 = do_alloc && alloc_t1_ok;
-  assign alloc_t2 = do_alloc && !alloc_t1_ok && alloc_t2_ok;
-  assign alloc_t3 = do_alloc && !alloc_t1_ok && !alloc_t2_ok && alloc_t3_ok;
+  wire alloc_skip_first = u_age_cnt[1:0] == 2'b11;
+  assign alloc_t1 = do_alloc && alloc_t1_ok && !(alloc_skip_first && (alloc_t2_ok || alloc_t3_ok));
+  assign alloc_t2 = do_alloc && alloc_t2_ok && !alloc_t1
+      && !(!alloc_t1_ok && alloc_skip_first && alloc_t3_ok);
+  assign alloc_t3 = do_alloc && alloc_t3_ok && !alloc_t1 && !alloc_t2;
   always_ff @(posedge clock) begin
     if (!(reset || init) && update_en) begin
       bim_data[up_bim_idx] <= bim_update(bim_valid_up ? bim_data[up_bim_idx] : 2'b01, update_taken);
@@ -686,7 +710,7 @@ module rapt_bpu_tage #(
   always_ff @(posedge clock) begin
     if (reset || init) begin
       u_age_cnt <= '0;
-      use_alt_ctr <= '0;
+      use_alt_ctr <= -4'sd1;
     end else if (update_en) begin
       u_age_cnt <= u_clear_pulse ? '0 : u_age_cnt + 1'b1;
       if ((up_hit1 || up_hit2 || up_hit3) && up_provider_weak

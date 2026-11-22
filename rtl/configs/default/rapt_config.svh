@@ -62,8 +62,8 @@
 
 // Branch predictor
 `define RAPT_PHT_SIZE 256
-`define RAPT_BTB_SIZE 128
-`define RAPT_BTB_WAYS 2
+`define RAPT_BTB_SIZE 512
+`define RAPT_BTB_WAYS 4
 `define RAPT_RSB_SIZE 16
 
 // Direction-predictor (DIRP). The default is TAGE for the best IPC;
@@ -86,12 +86,12 @@
 `define RAPT_RIQ_SIZE 8
 `define RAPT_IIQ_SIZE 8
 `ifndef RAPT_ROB_SIZE
-`define RAPT_ROB_SIZE 32
+`define RAPT_ROB_SIZE 64
 `endif
 `define RAPT_OPERAND_SPILL_ENTRIES 16
 
 // Scheduler: RS / IOQ to feed both ALU pipes plus pipelined MUL.
-`define RAPT_RS_SIZE 8
+`define RAPT_RS_SIZE 12
 `define RAPT_IOQ_SIZE 8
 
 // Unified SQ (Phase A): one queue holds a store from execute to drain
@@ -137,7 +137,7 @@
 // Shared simulation/FPGA default. Explicit overrides remain available for
 // parameterized verification. 64 total entries leave 32 rename destinations
 // beyond the architectural mappings; allocation stalls safely when exhausted.
-`define RAPT_PHY_SIZE 64 // total physical registers, including architectural mappings
+`define RAPT_PHY_SIZE 96 // total physical registers, including architectural mappings
 `define RAPT_PHY_LEN $clog2(`RAPT_PHY_SIZE)
 
 // Cache line size is a byte-level configuration. Keep it invariant across
@@ -175,7 +175,8 @@
 `define RAPT_DTLB_ENTRIES 64
 `define RAPT_DTLB_WAYS 2
 // Shared instruction/data second-level translation cache; zero bypasses it.
-`define RAPT_L2TLB_ENTRIES 256
+`define RAPT_L2TLB_ENTRIES 512
+`define RAPT_L2TLB_WAYS 4
 
 // L2 unified cache (between rapt_bus and io_master).
 // `define RAPT_L2_EN  // disabled to isolate STA bottleneck

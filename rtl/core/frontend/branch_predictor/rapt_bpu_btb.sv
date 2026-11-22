@@ -1,7 +1,7 @@
 `include "rapt.svh"
 
-// 2-way set-associative BTB (Branch Target Buffer). Each target way has one
-// clocked read and one write port, suitable for a synchronous RAM bank.
+// 2- or 4-way set-associative BTB (Branch Target Buffer). Each target way has
+// one clocked read and one write port, suitable for a synchronous RAM bank.
 // DEPTH = number of sets; total entries = DEPTH * WAYS.
 module rapt_bpu_btb #(
     parameter int DEPTH    = `RAPT_BTB_SIZE / 2,
@@ -36,36 +36,83 @@ module rapt_bpu_btb #(
     input logic init
 );
   localparam int PcW = `RAPT_PC_BITS_OF(XLEN);
-  // Replacement is a single LRU bit per set, which is only correct for two
-  // ways. Reject other associativities instead of silently never replacing
-  // ways beyond the first two.
-  if (WAYS != 2) begin : g_invalid_ways
-    $error("rapt_bpu_btb replacement policy supports exactly 2 ways");
+  localparam int WayBits = $clog2(WAYS);
+  localparam int PlruBits = WAYS - 1;
+  if (WAYS != 2 && WAYS != 4) begin : g_invalid_ways
+    $error("rapt_bpu_btb replacement policy supports 2 or 4 ways");
   end
   logic [   DEPTH-1:0] valid        [WAYS];
   logic [    PcW-1:1] way_target   [WAYS];
   logic [         1:0] way_type     [WAYS];
 
-  // LRU tracking: lru[set] = next victim way for replacement
+  // Tree-PLRU tracking (1 bit per set for 2-way, 3 bits per set for 4-way).
+  // Expose packed lru[DEPTH-1:0] (root PLRU bit) for 2-way testbench visibility.
+  logic [PlruBits-1:0] plru         [DEPTH];
   logic [   DEPTH-1:0] lru;
+  for (genvar s = 0; s < DEPTH; s++) begin : g_lru_view
+    assign lru[s] = plru[s][0];
+  end
+
+  function automatic logic [WayBits-1:0] plru_victim(input logic [2:0] bits);
+    if (WAYS == 2) return WayBits'(bits[0]);
+    else return WayBits'({bits[0], bits[0] ? bits[2] : bits[1]});
+  endfunction
+
+  function automatic logic [PlruBits-1:0] plru_update(input logic [2:0] bits,
+                                                      input logic [1:0] accessed_way);
+    logic [2:0] next_bits;
+    next_bits = bits;
+    if (WAYS == 2) begin
+      next_bits[0] = ~accessed_way[0];
+    end else begin
+      next_bits[0] = ~accessed_way[1];
+      if (accessed_way[1]) next_bits[2] = ~accessed_way[0];
+      else next_bits[1] = ~accessed_way[0];
+    end
+    return PlruBits'(next_bits);
+  endfunction
 
   // Registered read address and tag.
   // The target payload is read at the same edge as these registers, so its
   // output has no address mux on the prediction path.
   logic [    WAYS-1:0] way_hit;
-  logic                hit_way;
+  logic [ WayBits-1:0] hit_way;
   logic [ADDR_LEN-1:0] held_raddr;
   logic [ TAG_LEN-1:0] rtag_q;
   logic                lookup_valid_q;
 
-  assign hit_way      = way_hit[1];
+  always_comb begin
+    hit_way = '0;
+    for (int w = WAYS - 1; w >= 0; w--) begin
+      if (way_hit[w]) hit_way = WayBits'(w);
+    end
+  end
   assign rd_tag_match = |way_hit;
-  assign rd_target    = hit_way ? way_target[1] : way_target[0];
-  assign rd_type      = hit_way ? way_type[1] : way_type[0];
+  assign rd_target    = way_target[hit_way];
+  assign rd_type      = way_type[hit_way];
 
-  // --- Write path: update matching way, or replace LRU victim ---
-  logic [WAYS-1:0] w_way_match;
-  logic w_sel;
+  // --- Write path: update matching way, fill invalid way, or replace PLRU victim ---
+  logic [   WAYS-1:0] w_way_match;
+  logic [WayBits-1:0] w_match_way;
+  logic [WayBits-1:0] w_invalid_way;
+  logic               w_has_invalid;
+  logic [WayBits-1:0] w_sel;
+
+  always_comb begin
+    w_match_way = '0;
+    w_invalid_way = '0;
+    w_has_invalid = 1'b0;
+    for (int w = WAYS - 1; w >= 0; w--) begin
+      if (w_way_match[w]) w_match_way = WayBits'(w);
+      if (!valid[w][waddr]) begin
+        w_has_invalid = 1'b1;
+        w_invalid_way = WayBits'(w);
+      end
+    end
+    if (|w_way_match) w_sel = w_match_way;
+    else if (w_has_invalid) w_sel = w_invalid_way;
+    else w_sel = plru_victim(3'(plru[waddr]));
+  end
 
   // A fixed way owns each target bank. A write to the currently observed set
   // must appear at the output after the edge, including when ren is low. The
@@ -80,7 +127,7 @@ module rapt_bpu_btb #(
     logic target_write_observed;
     logic [TAG_LEN-1:0] tag[DEPTH];
     logic [1:0] itype[DEPTH];
-    assign target_write = wen_entry && (w_sel == 1'(w)) && !reset && !init;
+    assign target_write = wen_entry && (w_sel == WayBits'(w)) && !reset && !init;
     assign target_write_observed = target_write && (ren || lookup_valid_q)
         && (waddr == (ren ? raddr : held_raddr));
     assign way_target[w] = target_forward_valid_q ? target_forward_q : target_q;
@@ -112,20 +159,19 @@ module rapt_bpu_btb #(
     end
     always_ff @(posedge clock) begin
       if (!reset && !init) begin
-        if (wen_entry && w_sel == 1'(w)) begin
+        if (wen_entry && w_sel == WayBits'(w)) begin
           tag[waddr] <= wd_tag;
         end
-        if (wen_type && (wen_entry || |w_way_match) && w_sel == 1'(w)) itype[waddr] <= wd_type;
+        if (wen_type && (wen_entry || |w_way_match) && w_sel == WayBits'(w))
+          itype[waddr] <= wd_type;
       end
     end
   end
 
-  assign w_sel = |w_way_match ? w_way_match[1] : lru[waddr];
-
   always_ff @(posedge clock) begin
     if (reset || init) begin
       for (int w = 0; w < WAYS; w++) valid[w] <= '0;
-      lru <= '0;
+      for (int s = 0; s < DEPTH; s++) plru[s] <= '0;
       // Payload RAMs and tag/type lookup metadata remain unreset. Reset the
       // held selector so an empty table has a known read gate before the first
       // lookup, while bulk init preserves an already captured lookup.
@@ -140,18 +186,17 @@ module rapt_bpu_btb #(
         held_raddr     <= raddr;
         rtag_q         <= rtag;
       end
-      // Update LRU on read hit: mark other way as next victim.
-      // Write-entry LRU takes priority when both fire (same-set R/W).
+      // Update PLRU on write or read hit (write takes priority on same set).
       if (wen_entry) begin
         valid[w_sel][waddr] <= 1'b1;
-        lru[waddr] <= ~w_sel;
+        plru[waddr] <= plru_update(3'(plru[waddr]), 2'(w_sel));
       end else if (inv_entry) begin
         if (|w_way_match) begin
-          valid[w_way_match[1]][waddr] <= 1'b0;
-          lru[waddr] <= w_way_match[1];
+          valid[w_match_way][waddr] <= 1'b0;
+          if (WAYS == 2) plru[waddr] <= PlruBits'(w_match_way);
         end
       end else if (rd_tag_match) begin
-        lru[held_raddr] <= ~hit_way;
+        plru[held_raddr] <= plru_update(3'(plru[held_raddr]), 2'(hit_way));
       end
     end
   end

@@ -38,6 +38,15 @@ def main() -> None:
     parser.add_argument("--repo", required=True, type=Path)
     args = parser.parse_args()
 
+    utils_h = args.repo / "tests/env/utils.h"
+    if utils_h.exists():
+        text = utils_h.read_text(encoding="utf-8")
+        old_fencei = "#define RVTEST_FENCEI fence.i"
+        new_fencei = "#define RVTEST_FENCEI .word 0x0000100f"
+        if old_fencei in text:
+            utils_h.write_text(text.replace(old_fencei, new_fencei, 1), encoding="utf-8")
+            print(f"[act4-sail] patched {utils_h}")
+
     source_dir = args.repo / "framework/src/act"
     config_py = source_dir / "config.py"
     if UPSTREAM_SAIL_016 in config_py.read_text(encoding="utf-8"):

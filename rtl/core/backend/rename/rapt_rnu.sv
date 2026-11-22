@@ -185,8 +185,9 @@ module rapt_rnu #(
       overflow_ghr[RIQ_SIZE:1], snapshot_ghr};
   assign queued_phr = {enqueue_conditional ? overflow_phr[RIQ_SIZE-1:0] :
       overflow_phr[RIQ_SIZE:1], snapshot_phr};
+  wire rnq_flush = (cmu_bcast.flush_pipe && !recovery.preserve_fetch) || recovery.redirect_valid;
   always_ff @(posedge clock) begin
-    if (reset || cmu_bcast.flush_pipe || recovery.pending) begin
+    if (reset || rnq_flush) begin
       history_position <= '0;
     end else if (idu_rnu.valid[0] && idu_rnu.ready[0]) begin
       history_position <= enqueue_position;
@@ -212,7 +213,7 @@ module rapt_rnu #(
   ) rnq (
       .clock(clock),
       .reset(reset),
-      .flush(cmu_bcast.flush_pipe || recovery.pending),
+      .flush(rnq_flush),
       .in_data(decoded),
       .in_valid(idu_rnu.valid),
       .in_ready(idu_rnu.ready),

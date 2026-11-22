@@ -401,14 +401,17 @@ module rapt_lsu_sq #(
   // ==========================================================================
   logic load_in_sq  /* verilator public_flat_rd */;
   logic sq_fwd_ok;
-  // A typed store cannot satisfy an untranslated load by VA forwarding:
-  // the load may be an IO access whose external read has a side effect.
-  // Conservatively disable forwarding while any typed store is resident.
+  // A typed or uncacheable store cannot satisfy an untranslated load by VA
+  // forwarding: the load may be an IO access whose external read has a side
+  // effect. Disable forwarding while any noncacheable/typed store is resident.
   logic sq_has_typed_store;
   always_comb begin
-    sq_has_typed_store = (exu_lsu.rcontext.pbmte && exu_lsu.rcontext.mmu_en)
-                      || (sq_forward_pending && (|sq_wpbmt));
-    for (int i = 0; i < SQ_SIZE; i++) sq_has_typed_store |= sq_valid[i] && (|sq_pbmt[i]);
+    sq_has_typed_store = sq_forward_pending &&
+        ((|sq_wpbmt) || !rapt_pkg::addr_cacheable(exu_ioq_bcast.sq_waddr));
+    for (int i = 0; i < SQ_SIZE; i++) begin
+      sq_has_typed_store |= sq_valid[i] &&
+          ((|sq_pbmt[i]) || !rapt_pkg::addr_cacheable(sq_paddr[i]));
+    end
   end
   logic [XLEN-1:0] sq_fwd_data;
 `ifdef RAPT_LSU_HUM
@@ -434,6 +437,27 @@ module rapt_lsu_sq #(
       assign narrow_allowed[p] = !exu_lsu.rcontext_b.mmu_en;
     end
   end
+  // Only block same-cycle loads when the impending SQ handoff could touch one
+  // of the active load query page-offset spans (or CBO.ZERO / multi-word).
+  logic sq_alloc_alias_pending;
+  always_comb begin
+    automatic logic [3:0] handoff_sz_m1;
+    automatic logic [1:0] handoff_span;
+    handoff_sz_m1 = exu_ioq_bcast.sq_fp64
+        ? 4'd7 : (rapt_pkg::store_bytes(sq_handoff_alu, 4'd4) - 4'd1);
+    handoff_span = 2'((4'(alloc_compare_addr[WordOffBits-1:0]) + handoff_sz_m1) >> WordOffBits);
+    if (sq_handoff_alu == `RAPT_CBO_ZERO_WALU || handoff_span != 2'd0) begin
+      sq_alloc_alias_pending = sq_forward_pending;
+    end else begin
+      sq_alloc_alias_pending = 1'b0;
+      for (int p = 0; p < ForwardPorts; p++) begin
+        automatic logic [1:0] p_span;
+        p_span = 2'((4'(forward_addr[p][WordOffBits-1:0]) + forward_size_m1[p]) >> WordOffBits);
+        if (p_span != 2'd0 || alloc_compare_addr[11:WordOffBits] == forward_addr[p][11:WordOffBits])
+          sq_alloc_alias_pending = sq_forward_pending;
+      end
+    end
+  end
   rapt_sq_forward #(
       .Xlen(XLEN),
       .Entries(SQ_SIZE),
@@ -452,7 +476,7 @@ module rapt_lsu_sq #(
       .store_fp64(sq_fp64),
       .mmu_enabled(exu_lsu.rcontext.mmu_en),
       .narrow_allowed(narrow_allowed),
-      .alloc_valid(sq_forward_pending),
+      .alloc_valid(sq_alloc_alias_pending),
       .alloc_alu(sq_handoff_alu),
       .load_addr(forward_addr),
       .conflict(forward_conflict),
@@ -533,9 +557,7 @@ module rapt_lsu_sq #(
   logic mmio_ordered;
   assign mmio_ordered = !exu_lsu.rcontext.mmu_en && !rapt_pkg::addr_cacheable(raddr);
   logic mmio_load_blocked;
-  assign mmio_load_blocked = (mmio_ordered || (exu_lsu.rcontext.pbmte
-      && exu_lsu.rcontext.mmu_en))
-                          && !((sq_valid == '0) && (state_store == LS_S_V));
+  assign mmio_load_blocked = mmio_ordered && !((sq_valid == '0) && (state_store == LS_S_V));
   // LR must reach L1D to establish a physical-address reservation. If an
   // older same-address store is still in the SQ, wait for it to drain rather
   // than completing LR through the ordinary load-forwarding path.
@@ -923,6 +945,7 @@ module rapt_lsu_sq #(
                                        && (ma_state == MA_IDLE));
   assign lsu_l1d.atomic_lock = exu_lsu.atomic_lock;
   assign lsu_l1d.ordered = exu_lsu.ordered && sq_all_empty;
+  assign lsu_l1d.rpc_hash = exu_lsu.pc[12:1];
 
   // Misalign-split FSM.
   // Beat data is read only in MA_DONE (merged result), so its flops are

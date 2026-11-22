@@ -80,8 +80,8 @@
 
 // Branch predictor
 `define RAPT_PHT_SIZE 1024
-`define RAPT_BTB_SIZE 256
-`define RAPT_BTB_WAYS 2
+`define RAPT_BTB_SIZE 512
+`define RAPT_BTB_WAYS 4
 `define RAPT_RSB_SIZE 16
 
 // Direction-predictor (DIRP). The default is TAGE for the best IPC;
@@ -103,22 +103,28 @@
 `define RAPT_IIQ_SIZE 8
 `endif
 `ifndef RAPT_ROB_SIZE
-`define RAPT_ROB_SIZE 32
+`define RAPT_ROB_SIZE 64
 `endif
 `ifndef RAPT_STEER_SCAN_ENTRIES
-`define RAPT_STEER_SCAN_ENTRIES 12
+`define RAPT_STEER_SCAN_ENTRIES 16
 `endif
 
 `ifndef RAPT_OPERAND_SPILL_ENTRIES
-`define RAPT_OPERAND_SPILL_ENTRIES 8
+`define RAPT_OPERAND_SPILL_ENTRIES 16
 `endif
 
 // ALQ is shared by all three integer issue ports; IOQ feeds the scalar LSU.
 `ifndef RAPT_RS_SIZE
-`define RAPT_RS_SIZE 8
+`define RAPT_RS_SIZE 16
+`endif
+`ifndef RAPT_BRQ_SIZE
+`define RAPT_BRQ_SIZE 12
 `endif
 `ifndef RAPT_IOQ_SIZE
-`define RAPT_IOQ_SIZE 8
+`define RAPT_IOQ_SIZE 16
+`endif
+`ifndef RAPT_BRANCH_CHECKPOINTS
+`define RAPT_BRANCH_CHECKPOINTS 24
 `endif
 
 // Unified SQ (Phase A): one queue holds a store from execute to drain
@@ -183,7 +189,7 @@
 // Shared simulation/FPGA default. Explicit overrides remain available for
 // parameterized verification; PHY must still cover the configured ROB.
 `ifndef RAPT_PHY_SIZE
-`define RAPT_PHY_SIZE 64 // total physical registers, including architectural mappings
+`define RAPT_PHY_SIZE 96 // total physical registers, including architectural mappings
 `endif
 `define RAPT_PHY_LEN $clog2(`RAPT_PHY_SIZE)
 
@@ -221,7 +227,8 @@
 `define RAPT_DTLB_ENTRIES 64
 `define RAPT_DTLB_WAYS 2
 // Shared instruction/data second-level translation cache; zero bypasses it.
-`define RAPT_L2TLB_ENTRIES 256
+`define RAPT_L2TLB_ENTRIES 1024
+`define RAPT_L2TLB_WAYS 4
 
 // L2 unified cache (between rapt_bus and io_master).
 // `define RAPT_L2_EN  // disabled to isolate STA bottleneck

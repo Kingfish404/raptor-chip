@@ -23,7 +23,7 @@ module rapt_bpu #(
     parameter int BTB_SIZE = `RAPT_BTB_SIZE,
     parameter int BTB_WAYS = `RAPT_BTB_WAYS,
     parameter int BTB_LEN = $clog2(BTB_SIZE / BTB_WAYS),
-    parameter int BTB_TAG_LEN = 7,
+    parameter int BTB_TAG_LEN = (BTB_SIZE >= 512) ? 9 : 7,
     // GHR_LEN widened to feed TAGE's longest geometric history (64 bits).
     parameter int GHR_LEN = 64,
     // PHR_LEN: path history register (Seznec's TAGE uses an 8-bit PHR
@@ -103,9 +103,7 @@ module rapt_bpu #(
     automatic logic [BTB_TAG_LEN-1:0] folded;
     folded = '0;
     for (int base = BTB_LEN + 1; base < PcW; base += BTB_TAG_LEN) begin
-      for (int bit_i = 0; bit_i < BTB_TAG_LEN; bit_i++) begin
-        if (base + bit_i < PcW) folded[bit_i] ^= pc[base+bit_i];
-      end
+      folded ^= BTB_TAG_LEN'(pc >> base);
     end
     return folded;
   endfunction

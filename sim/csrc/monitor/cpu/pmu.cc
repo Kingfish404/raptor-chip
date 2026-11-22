@@ -703,11 +703,20 @@ void perf_sample_per_cycle()
   // the time the C++ sampler runs after the clock edge.  Use CMU's registered
   // flush and per-slot commit snapshots, which are aligned with `wb_valid`.
   bool flush_pipe_r = *(uint8_t *)&VERILOG_BACKEND(cmu__DOT__flush_pipe_r);
-  bool branch_flush = flush_pipe_r && wb_valid
-      && VERILOG_BACKEND(cmu__DOT__mispredict_slots)[0]
-      && (VERILOG_BACKEND(cmu__DOT__ben_slots)[0]
-          || VERILOG_BACKEND(cmu__DOT__jen_slots)[0]
-          || VERILOG_BACKEND(cmu__DOT__jren_slots)[0]);
+  bool branch_flush = false;
+  if (flush_pipe_r && wb_valid)
+  {
+    for (uint32_t slot = 0; slot < retire_count && slot < RtlConfig::CommitWidth; ++slot)
+    {
+      if (VERILOG_BACKEND(cmu__DOT__mispredict_slots)[slot]
+          && (VERILOG_BACKEND(cmu__DOT__ben_slots)[slot]
+              || VERILOG_BACKEND(cmu__DOT__jen_slots)[slot]
+              || VERILOG_BACKEND(cmu__DOT__jren_slots)[slot]))
+      {
+        branch_flush = true;
+      }
+    }
+  }
   bool nonbranch_flush = flush_pipe_r && !branch_flush;
   if (branch_flush)
   {

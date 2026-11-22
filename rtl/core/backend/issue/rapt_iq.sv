@@ -36,6 +36,9 @@ module rapt_iq #(
     // A local producer may capture resident operands before its global packet
     // reaches the registered broadcast. Allocation still uses the global view.
     parameter bit                     LocalOperandWake = 1'b0,
+    // Tag-only issue queue: omit operand-value storage and CDB data muxes;
+    // consumers read the physical register file after issue selection.
+    parameter bit                     TagOnly          = 1'b0,
     parameter logic [31:0]            ComboWakePorts  = 32'hFFFF_FFFF,
     parameter unsigned                ROB_SIZE        = Cfg.rob_entries,
     parameter unsigned                PLEN            = rapt_pkg::index_bits(Cfg.phys_regs),
@@ -273,6 +276,61 @@ module rapt_iq #(
   endfunction
 
   // Allocation checks depend on the dispatch lane, before entry selection.
+  // Exclude the cross-block memory port from allocation-edge local wakeup so
+  // L1D tag-hit never chains through dispatch lane muxing.
+  localparam int MemoryWakePort = rapt_pkg::completion_memory_port(Cfg);
+  logic lane_pr1_busy[NumSlots], lane_pr2_busy[NumSlots];
+  logic [XLEN-1:0] lane_vj[NumSlots], lane_vk[NumSlots];
+  for (genvar s = 0; s < NumSlots; s++) begin : g_lane_operands
+    if (LocalOperandWake && !ReadAfterSelect) begin : g_local_alloc
+      logic [NWB-1:0] pr1_loc_match, pr2_loc_match;
+      if (TagOnly) begin : g_tag_only
+        always_comb begin
+          pr1_loc_match = '0;
+          pr2_loc_match = '0;
+          for (int p = 0; p < NWB; p++) begin
+            if (p != MemoryWakePort && wake_nz_valid[NWB+p]) begin
+              if (wake_source_prd[NWB+p] == dispatch[s].pr1) pr1_loc_match[p] = 1'b1;
+              if (wake_source_prd[NWB+p] == dispatch[s].pr2) pr2_loc_match[p] = 1'b1;
+            end
+          end
+        end
+        assign lane_pr1_busy[s] = (dispatch[s].pr1 != '0) && !(|pr1_loc_match);
+        assign lane_pr2_busy[s] = (dispatch[s].pr2 != '0) && !(|pr2_loc_match);
+        assign lane_vj[s] = '0;
+        assign lane_vk[s] = '0;
+      end else begin : g_capture
+        logic [XLEN-1:0] pr1_loc_val, pr2_loc_val;
+        always_comb begin
+          pr1_loc_match = '0;
+          pr2_loc_match = '0;
+          pr1_loc_val = '0;
+          pr2_loc_val = '0;
+          for (int p = 0; p < NWB; p++) begin
+            if (p != MemoryWakePort && wake_nz_valid[NWB+p]) begin
+              if (wake_source_prd[NWB+p] == dispatch[s].pr1) begin
+                pr1_loc_match[p] = 1'b1;
+                pr1_loc_val |= wake_source_result[NWB+p];
+              end
+              if (wake_source_prd[NWB+p] == dispatch[s].pr2) begin
+                pr2_loc_match[p] = 1'b1;
+                pr2_loc_val |= wake_source_result[NWB+p];
+              end
+            end
+          end
+        end
+        assign lane_pr1_busy[s] = (dispatch[s].pr1 != '0) && !(|pr1_loc_match);
+        assign lane_pr2_busy[s] = (dispatch[s].pr2 != '0) && !(|pr2_loc_match);
+        assign lane_vj[s] = (|pr1_loc_match) ? pr1_loc_val : dispatch[s].op1;
+        assign lane_vk[s] = (|pr2_loc_match) ? pr2_loc_val : dispatch[s].op2;
+      end
+    end else begin : g_std_alloc
+      assign lane_pr1_busy[s] = |dispatch[s].pr1;
+      assign lane_pr2_busy[s] = |dispatch[s].pr2;
+      assign lane_vj[s] = TagOnly ? '0 : dispatch[s].op1;
+      assign lane_vk[s] = TagOnly ? '0 : dispatch[s].op2;
+    end
+  end
   if (ThirdOperand) begin : g_lane_third
     logic lane_pr3_busy[NumSlots];
     logic [XLEN-1:0] lane_vl[NumSlots];
@@ -280,7 +338,7 @@ module rapt_iq #(
       wire [WakeSources-1:0] pr3_match = wake_match(dispatch[s].pr3);
       wire pr3_hit = |pr3_match;
       assign lane_pr3_busy[s] = dispatch[s].pr3 != '0 && !pr3_hit;
-      assign lane_vl[s] = pr3_hit ? wake_or_val(pr3_match) : dispatch[s].op3;
+      assign lane_vl[s] = TagOnly ? '0 : (pr3_hit ? wake_or_val(pr3_match) : dispatch[s].op3);
     end
   end
   logic lane_dep_busy[NumDependencies][NumSlots];
@@ -306,7 +364,7 @@ module rapt_iq #(
     end
   end
 
-  if (LocalOperandWake && ComboCdbWake && !ReadAfterSelect) begin : g_invalid_local_wake
+  if (LocalOperandWake && ComboCdbWake && !ReadAfterSelect && !TagOnly) begin : g_invalid_local_wake
     $error("Local operand wake requires registered-only issue readiness");
   end
 
@@ -330,15 +388,15 @@ module rapt_iq #(
     wire [WakeSources-1:0] pr2_match = wake_match(iq_pr2[i]);
     assign pr1_slow_hit[i] = iq_pr1_busy[i] && (|pr1_match);
     assign pr2_slow_hit[i] = iq_pr2_busy[i] && (|pr2_match);
-    assign pr1_slow_val[i] = wake_or_val(pr1_match);
-    assign pr2_slow_val[i] = wake_or_val(pr2_match);
+    assign pr1_slow_val[i] = TagOnly ? '0 : wake_or_val(pr1_match);
+    assign pr2_slow_val[i] = TagOnly ? '0 : wake_or_val(pr2_match);
     if (ComboCdbWake) begin : g_combo_wake_view
       wire [NWB-1:0] c1_match = combo_match(iq_pr1[i]);
       wire [NWB-1:0] c2_match = combo_match(iq_pr2[i]);
       assign pr1_combo_hit[i] = iq_pr1_busy[i] && (|c1_match);
       assign pr2_combo_hit[i] = iq_pr2_busy[i] && (|c2_match);
-      assign pr1_combo_val[i] = combo_or_val(c1_match);
-      assign pr2_combo_val[i] = combo_or_val(c2_match);
+      assign pr1_combo_val[i] = TagOnly ? '0 : combo_or_val(c1_match);
+      assign pr2_combo_val[i] = TagOnly ? '0 : combo_or_val(c2_match);
     end else begin : g_no_combo_wake_view
       assign pr1_combo_hit[i] = 1'b0;
       assign pr2_combo_hit[i] = 1'b0;
@@ -375,8 +433,8 @@ module rapt_iq #(
       wire [NWB-1:0] pr3_combo_match = combo_match(tag);
       wire pr3_combo_hit = ComboThirdWake && (|pr3_combo_match);
       assign pr3_ready[e] = !busy || pr3_combo_hit;
-      assign third_issue_value[e] = (busy && pr3_combo_hit)
-          ? combo_or_val(pr3_combo_match) : iq_vl[e];
+      assign third_issue_value[e] = TagOnly ? '0 : ((busy && pr3_combo_hit)
+          ? combo_or_val(pr3_combo_match) : iq_vl[e]);
       always_ff @(posedge clock) begin
         if (reset || cmu_bcast.flush_pipe) busy <= 1'b0;
         else if (alloc_hit[e]) begin
@@ -384,9 +442,13 @@ module rapt_iq #(
           busy <= g_lane_third.lane_pr3_busy[alloc_lane[e]];
         end else if (iq_valid[e] && pr3_slow_hit) busy <= 1'b0;
       end
-      always_ff @(posedge clock) begin
-        if (alloc_hit[e]) iq_vl[e] <= g_lane_third.lane_vl[alloc_lane[e]];
-        else if (iq_valid[e] && busy && pr3_slow_hit) iq_vl[e] <= wake_or_val(pr3_slow_match);
+      if (TagOnly) begin : g_third_no_value
+        assign iq_vl[e] = '0;
+      end else begin : g_third_value
+        always_ff @(posedge clock) begin
+          if (alloc_hit[e]) iq_vl[e] <= g_lane_third.lane_vl[alloc_lane[e]];
+          else if (iq_valid[e] && busy && pr3_slow_hit) iq_vl[e] <= wake_or_val(pr3_slow_match);
+        end
       end
     end else begin : g_two
       assign pr3_ready[e] = 1'b1;
@@ -567,15 +629,25 @@ module rapt_iq #(
     pmu_reclaim_allocations <= reset || cmu_bcast.flush_pipe ? 0 : reclaim_allocations;
   end
 `endif
-  localparam int StoredPayloadBits = (BankUop ? 0 : BankBits) + 2 * XLEN + ROBLen;
+  localparam int StoredPayloadBits = (BankUop ? 0 : BankBits) + (TagOnly ? 0 : 2 * XLEN) + ROBLen;
   logic [StoredPayloadBits-1:0] stored_payload[IQ_SIZE];
+  /* verilator lint_off UNUSEDSIGNAL */
   logic [XLEN-1:0] entry_op1[IQ_SIZE], entry_op2[IQ_SIZE];
+  /* verilator lint_on UNUSEDSIGNAL */
   for (genvar e = 0; e < IQ_SIZE; e++) begin : g_entry_operand
-    assign entry_op1[e] = (ComboCdbWake && pr1_combo_hit[e]) ? pr1_combo_val[e] : iq_vj[e];
-    assign entry_op2[e] = (ComboCdbWake && pr2_combo_hit[e]) ? pr2_combo_val[e] : iq_vk[e];
+    assign entry_op1[e] = TagOnly ? '0 :
+        ((ComboCdbWake && pr1_combo_hit[e]) ? pr1_combo_val[e] : iq_vj[e]);
+    assign entry_op2[e] = TagOnly ? '0 :
+        ((ComboCdbWake && pr2_combo_hit[e]) ? pr2_combo_val[e] : iq_vk[e]);
   end
   for (genvar e = 0; e < IQ_SIZE; e++) begin : g_stored_payload
-    if (BankUop) begin : g_banked
+    if (TagOnly) begin : g_tag_only
+      if (BankUop) begin : g_banked
+        assign stored_payload[e] = iq_dest[e];
+      end else begin : g_flops
+        assign stored_payload[e] = {iq_uop[e], iq_dest[e], iq_generation[e], iq_prd[e]};
+      end
+    end else if (BankUop) begin : g_banked
       assign stored_payload[e] = {iq_vj[e], iq_vk[e], iq_dest[e]};
     end else begin : g_flops
       assign stored_payload[e] = {
@@ -624,7 +696,16 @@ module rapt_iq #(
     end
     // Share the encoded selector across the wide payload bus.
     assign payload = stored_payload[index];
-    if (BankUop) begin : g_banked_payload
+    if (TagOnly) begin : g_tag_only_payload
+      assign stored_op1 = '0;
+      assign stored_op2 = '0;
+      if (BankUop) begin : g_banked
+        assign issue[p].dest = payload;
+        assign {issue[p].uop, issue[p].generation, issue[p].prd} = issue_payload[p];
+      end else begin : g_flops
+        assign {issue[p].uop, issue[p].dest, issue[p].generation, issue[p].prd} = payload;
+      end
+    end else if (BankUop) begin : g_banked_payload
       assign {stored_op1, stored_op2, issue[p].dest} = payload;
       assign {issue[p].uop, issue[p].generation, issue[p].prd} = issue_payload[p];
     end else begin : g_flop_payload
@@ -634,12 +715,15 @@ module rapt_iq #(
     // Cancellation gates only this valid bit; the selected identity and
     // payload above do not depend on the recovery transaction.
     assign issue[p].valid = |selected[p] && !cancelled[index];
-    assign issue[p].op3 = third_issue_value[index];
+    assign issue[p].op3 = TagOnly ? '0 : third_issue_value[index];
     // Resolve every entry's operand (same-cycle wake or
     // stored value) in parallel, then reduce with the one-hot selection. The
     // late select drives only the final AND-OR instead of an encoded index
     // that steers further per-entry muxes.
-    if (ComboCdbWake) begin : g_wake_operands
+    if (TagOnly) begin : g_no_operands
+      assign issue[p].op1 = '0;
+      assign issue[p].op2 = '0;
+    end else if (ComboCdbWake) begin : g_wake_operands
       always_comb begin
         issue[p].op1 = '0;
         issue[p].op2 = '0;
@@ -671,12 +755,17 @@ module rapt_iq #(
   // particular, issue-clear does not change operand data;
   // folding those state-only events into this block makes FPGA synthesis put
   // the LSU arbitration path on every iq_vj/iq_vk clock-enable pin.
-  for (genvar i = 0; i < IQ_SIZE; i++) begin : g_operand_state
-    always_ff @(posedge clock) begin
-      begin
+  if (TagOnly) begin : g_no_operand_state
+    for (genvar i = 0; i < IQ_SIZE; i++) begin : g_zero
+      assign iq_vj[i] = '0;
+      assign iq_vk[i] = '0;
+    end
+  end else begin : g_operand_storage
+    for (genvar i = 0; i < IQ_SIZE; i++) begin : g_operand_state
+      always_ff @(posedge clock) begin
         if (alloc_hit[i]) begin
-          iq_vj[i] <= dispatch[alloc_lane[i]].op1;
-          iq_vk[i] <= dispatch[alloc_lane[i]].op2;
+          iq_vj[i] <= lane_vj[alloc_lane[i]];
+          iq_vk[i] <= lane_vk[alloc_lane[i]];
         end else if (iq_valid[i]) begin
           if (pr1_slow_hit[i]) iq_vj[i] <= pr1_slow_val[i];
           if (pr2_slow_hit[i]) iq_vk[i] <= pr2_slow_val[i];
@@ -722,8 +811,8 @@ module rapt_iq #(
           iq_pr1[i] <= dispatch[alloc_lane[i]].pr1;
           iq_pr2[i] <= dispatch[alloc_lane[i]].pr2;
           if (!ReadAfterSelect) begin
-            iq_pr1_busy[i] <= |dispatch[alloc_lane[i]].pr1;
-            iq_pr2_busy[i] <= |dispatch[alloc_lane[i]].pr2;
+            iq_pr1_busy[i] <= lane_pr1_busy[alloc_lane[i]];
+            iq_pr2_busy[i] <= lane_pr2_busy[alloc_lane[i]];
           end
 
           for (int d = 0; d < NumDependencies; d++) begin

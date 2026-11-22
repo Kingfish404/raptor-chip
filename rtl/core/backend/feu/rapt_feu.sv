@@ -18,7 +18,8 @@ module rapt_feu #(
     parameter unsigned RLEN     = rapt_pkg::index_bits(Cfg.arch_regs),
     parameter unsigned XLEN     = Cfg.xlen,
     // FPQ residents also capture this live view; allocation uses `completion`.
-    parameter bit LocalFpWake = 1'b0
+    parameter bit LocalFpWake = 1'b0,
+    parameter bit TagOnly = 1'b0
 ) (
     input logic [1:0][PLEN-1:0] int_source_regs[NumSlots],
     input logic [2:0][$clog2(ROB_SIZE):0] fp_dispatch_tag[NumSlots],
@@ -419,7 +420,7 @@ module rapt_feu #(
         $display("[%0t] SVA FAIL: %m.N1_FP_RR_READY", $time);
         `RAPT_SVA_FAIL(N1_FP_RR_READY)
       end
-      if (read_ticket_fire && ((fp_from_int && fp_issue[0].op1 !== read_ticket.op1)
+      if (!TagOnly && read_ticket_fire && ((fp_from_int && fp_issue[0].op1 !== read_ticket.op1)
           || (fp_sources_used[0] && fp_issue[0].op1 !== read_ticket.op1)
           || (fp_sources_used[1] && fp_issue[0].op2 !== read_ticket.op2)
           || (fp_sources_used[2] && fp_issue[0].op3 !== read_ticket.op3))) begin
@@ -450,6 +451,7 @@ module rapt_feu #(
       .ExposeEntryIndex(1'b1),
       .FilterResources(1'b1),
       .LocalOperandWake(LocalFpWake),
+      .TagOnly(TagOnly),
       .NumResources(Units)
   ) u_fpq (
       .local_operand_wake(fp_local_wake),

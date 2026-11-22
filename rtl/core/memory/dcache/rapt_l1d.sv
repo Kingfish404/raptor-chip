@@ -158,6 +158,14 @@ module rapt_l1d #(
   logic store_fill_window;
   logic [L1D_LINE_SIZE*XLEN-1:0] mshr_fill_data, line_update_data;
   logic line_update;
+  logic [11:0] load_pc_hash_q;
+  logic pf_valid, pf_accept, pf_drop, pf_probe_en, pf_tag_hit, mshr_pf_valid, mshr_pf_accept;
+  logic pf_page_pmp_uniform;
+  logic [XLEN-1:0] pf_addr;
+  logic [7:0] pf_version;
+  logic [L1D_N_WAYS-1:0] tag_probe_way_hit, tag_probe_line_hit;
+  localparam bit L1dPrefetchEnable = (`RAPT_L1D_PREFETCH != 0) && (`RAPT_L1D_MSHRS >= 2)
+      && (L1dLineOffset <= 12);
   assign legacy_rvalid = l1d_bus.rvalid && !l1d_bus.r_mshr;
   assign legacy_rready = l1d_bus.rready && !l1d_bus.ar_mshr;
   assign mshr_invalidate = cmu_bcast.flush_pipe || fence_clear_busy || external_write_valid_i;
@@ -233,9 +241,14 @@ module rapt_l1d #(
         .store_match(store_mshr_match),
         .store_free(store_mshr_free),
         .store_pending(store_mshr_pending),
-        .lookup_store_match(load_mshr_store_match)
+        .lookup_store_match(load_mshr_store_match),
+        .prefetch_valid(mshr_pf_valid),
+        .prefetch_addr(pf_addr),
+        .prefetch_version(pf_version),
+        .prefetch_accept(mshr_pf_accept)
     );
   end else begin : g_no_mshr
+    assign mshr_pf_accept = 1'b0;
     assign mshr_fill_dirty = '0;
     assign mshr_fill_store_lost = 0;
     assign mshr_fill_owned = 0;
@@ -1363,6 +1376,58 @@ module rapt_l1d #(
   assign tag_inspect_source = 2'd1;
   assign tag_inspect_set = wb_state != WB_IDLE ? wb_set : tag_store_idx;
 
+  if (!L1dPrefetchEnable || `RAPT_PMP_GRANULARITY_LOG2 >= 12) begin : g_pf_pmp_page
+    assign pf_page_pmp_uniform = 1'b1;
+  end else begin : g_pf_pmp_fine
+    rapt_pmp_line_uniform #(
+        .XLEN(XLEN),
+        .LineOffset(12)
+    ) u_pf_pmp_page (
+        .addr(l1d_addr),
+        .state(pmp_state),
+        .uniform_o(pf_page_pmp_uniform)
+    );
+  end
+
+  wire pf_train_valid = L1dPrefetchEnable && (l1d_state == LD_A) && !load_perm_denied_q
+      && !cmu_bcast.flush_pipe && !vector_probe && !l1d_atomic_lock && !l1d_orig_misaligned
+      && refill_safe && pf_page_pmp_uniform && (tag_hit || mshr_complete || mshr_release);
+
+  rapt_l1d_stride_pf #(
+      .XLEN(XLEN),
+      .LineOffset(L1dLineOffset),
+      .Entries(16),
+      .Enable(L1dPrefetchEnable)
+  ) u_stride_pf (
+      .clock(clock),
+      .reset(reset),
+      .flush(mshr_invalidate),
+      .train_valid(pf_train_valid),
+      .train_pc_hash(load_pc_hash_q),
+      .train_paddr(l1d_addr),
+      .train_version(load_context_q.version),
+      .pf_valid(pf_valid),
+      .pf_addr(pf_addr),
+      .pf_version(pf_version),
+      .pf_accept(pf_accept),
+      .pf_drop(pf_drop)
+  );
+
+`ifdef RAPT_LSU_HUM
+  assign pf_probe_en = L1dPrefetchEnable && pf_valid && !b_armed && (l1d_state == IDLE)
+      && !lsu_l1d.wvalid && !mshr_invalidate && !fence_clear_busy && !external_write_valid_i
+      && !l1d_update && !mshr_fill_valid && !wb_busy;
+  assign b_way_hit = tag_probe_way_hit;
+`else
+  assign pf_probe_en = L1dPrefetchEnable && pf_valid && (l1d_state == IDLE)
+      && !lsu_l1d.wvalid && !mshr_invalidate && !fence_clear_busy && !external_write_valid_i
+      && !l1d_update && !mshr_fill_valid && !wb_busy;
+`endif
+  assign pf_tag_hit = |tag_probe_line_hit;
+  assign pf_drop = pf_probe_en && pf_tag_hit;
+  assign mshr_pf_valid = pf_probe_en && !pf_tag_hit;
+  assign pf_accept = mshr_pf_valid && mshr_pf_accept;
+
   rapt_l1d_tags #(
       .L1D_LEN(L1D_LEN),
       .L1D_LINE_LEN(L1D_LINE_LEN),
@@ -1405,17 +1470,19 @@ module rapt_l1d #(
       .waddr_offset(waddr_offset),
       .waddr_tag(tag_store_tag),
 `ifdef RAPT_LSU_HUM
-      .probe_read(b_armed),
-      .probe_idx(b_idx),
-      .probe_offset(b_off),
-      .probe_tag(b_tag),
-      .probe_way_hit(b_way_hit),
+      .probe_read(b_armed || pf_probe_en),
+      .probe_idx(b_armed ? b_idx : pf_addr[L1dLineOffset+:L1D_LEN]),
+      .probe_offset(b_armed ? b_off : '0),
+      .probe_tag(b_armed ? b_tag : pf_addr[L1dLineOffset+L1D_LEN+:L1dTagW]),
+      .probe_way_hit(tag_probe_way_hit),
+      .probe_line_hit(tag_probe_line_hit),
 `else
-      .probe_read(1'b0),
-      .probe_idx('0),
+      .probe_read(pf_probe_en),
+      .probe_idx(pf_addr[L1dLineOffset+:L1D_LEN]),
       .probe_offset('0),
-      .probe_tag('0),
-      .probe_way_hit(),
+      .probe_tag(pf_addr[L1dLineOffset+L1D_LEN+:L1dTagW]),
+      .probe_way_hit(tag_probe_way_hit),
+      .probe_line_hit(tag_probe_line_hit),
 `endif
       .load_hit(tag_hit),
       .load_replace(d_replace_bit[addr_idx]),
@@ -2058,6 +2125,7 @@ module rapt_l1d #(
               end else if (load_admit) begin
                 rec_store <= 1'b0;
                 load_context_q <= lsu_l1d.rcontext;
+                load_pc_hash_q <= lsu_l1d.rpc_hash;
                 // Load TLB lookup
                 if (mis_align_load) begin
                   cause <= 'h4;  // load address mis-aligned
@@ -2117,6 +2185,7 @@ module rapt_l1d #(
               if (load_admit) begin
                 rec_store <= 1'b0;
                 load_context_q <= lsu_l1d.rcontext;
+                load_pc_hash_q <= lsu_l1d.rpc_hash;
                 l1d_addr <= rapt_pkg::canonical_paddr(lsu_l1d.raddr);
                 l1d_pbmt <= 2'b00;
                 rec_addr <= lsu_l1d.raddr;

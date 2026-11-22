@@ -31,6 +31,12 @@ module tb_ioq_operand_reads #(
   logic [Entries-1:0] addr_ready, prepared, addr_cacheable;
   logic head_data_ready;
   logic [Xlen-1:0] head_data;
+  logic alloc_base_ready[Slots];
+  logic [11:0] alloc_immediate[Slots];
+  for (genvar s = 0; s < Slots; s++) begin : g_no_alloc_steal
+    assign alloc_base_ready[s] = 1'b0;
+    assign alloc_immediate[s] = '0;
+  end
 
   rapt_ioq_operands #(
       .Entries(Entries),

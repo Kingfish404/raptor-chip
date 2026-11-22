@@ -32,7 +32,8 @@ module rapt_ieu_muldiv #(
     parameter unsigned ROB_SIZE = Cfg.rob_entries,
     parameter unsigned PLEN     = rapt_pkg::index_bits(Cfg.phys_regs),
     parameter unsigned RLEN     = rapt_pkg::index_bits(Cfg.arch_regs),
-    parameter unsigned XLEN     = Cfg.xlen
+    parameter unsigned XLEN     = Cfg.xlen,
+    parameter bit TagOnly       = 1'b0
 ) (
     input logic [1:0][PLEN-1:0] int_source_regs[NumSlots],
     output logic [PLEN-1:0] operand_read_address[2],
@@ -150,8 +151,8 @@ module rapt_ieu_muldiv #(
     for (int i = 0; i < MDQ_SIZE; i++) begin
       mdq_fwd1_hit[i] = mdq_pr1_busy[i] && wb_hit(mdq_pr1[i]);
       mdq_fwd2_hit[i] = mdq_pr2_busy[i] && wb_hit(mdq_pr2[i]);
-      mdq_fwd1_val[i] = wb_val(mdq_pr1[i], mdq_vj[i]);
-      mdq_fwd2_val[i] = wb_val(mdq_pr2[i], mdq_vk[i]);
+      mdq_fwd1_val[i] = TagOnly ? '0 : wb_val(mdq_pr1[i], mdq_vj[i]);
+      mdq_fwd2_val[i] = TagOnly ? '0 : wb_val(mdq_pr2[i], mdq_vk[i]);
     end
   end
 
@@ -283,8 +284,8 @@ module rapt_ieu_muldiv #(
   always_ff @(posedge clock) begin
     if (read_ticket_fire) begin
       if (!(operand_read_valid[0] && operand_read_valid[1])
-          || operand_read_value[0] !== mdq_fwd1_val[read_ticket_index]
-          || operand_read_value[1] !== mdq_fwd2_val[read_ticket_index]) begin
+          || (!TagOnly && (operand_read_value[0] !== mdq_fwd1_val[read_ticket_index]
+                           || operand_read_value[1] !== mdq_fwd2_val[read_ticket_index]))) begin
         $display("[%0t] SVA FAIL: %m.N1_MD_RR_OPERAND", $time);
         `RAPT_SVA_FAIL(N1_MD_RR_OPERAND)
       end
@@ -342,14 +343,31 @@ module rapt_ieu_muldiv #(
     exu_wb_mul.updates = '{control_flow: 1'b0, default: '0};
   end
 
+  if (TagOnly) begin : g_no_mdq_values
+    for (genvar e = 0; e < MDQ_SIZE; e++) begin : g_zero
+      assign mdq_vj[e] = '0;
+      assign mdq_vk[e] = '0;
+    end
+  end else begin : g_mdq_values
+    always_ff @(posedge clock) begin
+      for (int e = 0; e < MDQ_SIZE; e++) begin
+        if (alloc_slot[e] >= 0) begin
+          mdq_vj[e] <= wake_val(dispatch[alloc_slot[e]].pr1, dispatch[alloc_slot[e]].op1);
+          mdq_vk[e] <= wake_val(dispatch[alloc_slot[e]].pr2, dispatch[alloc_slot[e]].op2);
+        end else if (mdq_valid[e]) begin
+          if (mdq_fwd1_hit[e]) mdq_vj[e] <= mdq_fwd1_val[e];
+          if (mdq_fwd2_hit[e]) mdq_vk[e] <= mdq_fwd2_val[e];
+        end
+      end
+    end
+  end
+
   // === Sequential: alloc / wakeup / issue / completion ===
   always_ff @(posedge clock) begin
     for (int e = 0; e < MDQ_SIZE; e++)
     if (alloc_slot[e] >= 0) begin
       mdq_valid[e]    <= !cancelled(dispatch[alloc_slot[e]].dest);
       mdq_issued[e]   <= 1'b0;
-      mdq_vj[e]       <= wake_val(dispatch[alloc_slot[e]].pr1, dispatch[alloc_slot[e]].op1);
-      mdq_vk[e]       <= wake_val(dispatch[alloc_slot[e]].pr2, dispatch[alloc_slot[e]].op2);
       mdq_pr1[e]      <= wake_pr(dispatch[alloc_slot[e]].pr1);
       mdq_pr2[e]      <= wake_pr(dispatch[alloc_slot[e]].pr2);
       mdq_pr1_busy[e] <= |wake_pr(dispatch[alloc_slot[e]].pr1);
@@ -367,12 +385,10 @@ module rapt_ieu_muldiv #(
     for (int i = 0; i < MDQ_SIZE; i++) begin
       if (mdq_valid[i]) begin
         if (mdq_fwd1_hit[i]) begin
-          mdq_vj[i]       <= mdq_fwd1_val[i];
           mdq_pr1[i]      <= '0;
           mdq_pr1_busy[i] <= 1'b0;
         end
         if (mdq_fwd2_hit[i]) begin
-          mdq_vk[i]       <= mdq_fwd2_val[i];
           mdq_pr2[i]      <= '0;
           mdq_pr2_busy[i] <= 1'b0;
         end
