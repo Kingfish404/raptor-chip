@@ -314,8 +314,46 @@ module rapt_bpu #(
       .init((`RAPT_SFENCE_KEEP_STATE < 3 && cmu_bcast.fence_time))
   );
 
+  // --- Lightweight 32-entry Indirect Target Table (ITT) ---
+  // Context-indexed by PC ^ GHR so multi-target switch/vtable JALRs predict
+  // accurately without bloating BTB. Synchronous read matches BTB timing.
+  localparam int IttEntries = 32;
+  localparam int IttIdxBits = $clog2(IttEntries);
+  localparam int IttTagBits = 9;
+  logic [IttEntries-1:0] itt_valid;
+  logic [IttTagBits-1:0] itt_tag[IttEntries];
+  logic [PcW-1:1] itt_target[IttEntries];
+  logic itt_rd_hit_q;
+  logic [PcW-1:1] itt_rd_target_q;
+  wire [IttIdxBits-1:0] itt_ridx = ifu_bpu.nextpc[IttIdxBits:1] ^ dirp_read_ghr[IttIdxBits-1:0];
+  wire [IttTagBits-1:0] itt_rtag = ifu_bpu.nextpc[IttIdxBits+IttTagBits:IttIdxBits+1]
+      ^ dirp_read_ghr[IttIdxBits+IttTagBits-1:IttIdxBits];
+  wire [IttIdxBits-1:0] itt_widx = rpc[IttIdxBits:1] ^ rgshare[IttIdxBits-1:0];
+  wire [IttTagBits-1:0] itt_wtag = rpc[IttIdxBits+IttTagBits:IttIdxBits+1]
+      ^ rgshare[IttIdxBits+IttTagBits-1:IttIdxBits];
+  wire bpu_clear = (`RAPT_SFENCE_KEEP_STATE < 3 && cmu_bcast.fence_time);
+  always_ff @(posedge clock) begin
+    if (reset || bpu_clear) begin
+      itt_valid <= '0;
+      itt_rd_hit_q <= 1'b0;
+      itt_rd_target_q <= '0;
+    end else begin
+      if (ifu_bpu.pc_update) begin
+        itt_rd_hit_q <= itt_valid[itt_ridx] && (itt_tag[itt_ridx] == itt_rtag);
+        itt_rd_target_q <= itt_target[itt_ridx];
+      end
+      if (cmu_bcast.jren && !cmu_bcast.ret) begin
+        itt_valid[itt_widx] <= 1'b1;
+        itt_tag[itt_widx] <= itt_wtag;
+        itt_target[itt_widx] <= cpc[PcW-1:1];
+      end
+    end
+  end
+
   // Prediction logic: all inputs are registered sub-module outputs,
   // NO combinational dependency on pc_ifu/fpc.
+  // Keep 32-entry ITT for multi-target indirect jumps; defer Loop Predictor
+  // until checkpointed per-entry spec_iter rollback is added (needed for 64-ROB).
   assign btb_tag_match = btb_rd_tag_match;
   assign taken = btb_tag_match && ((btb_rd_type != COND) || dirp_taken);
 
@@ -324,7 +362,8 @@ module rapt_bpu #(
   // may already have popped it, or a call may not yet have reached decode.
   // Fetch uses its request-aligned BTB result; IDU repairs/trains return targets
   // with its own ordered RAS. A future fetch RAS needs checkpoints + rollback.
-  assign npc = {btb_rd_target, 1'b0};
+  assign npc = (btb_rd_type == INDR && itt_rd_hit_q)
+      ? {itt_rd_target_q, 1'b0} : {btb_rd_target, 1'b0};
 
   // Commit-path index computation
   assign rbtb_idx = rpc[BTB_LEN-1+1:1] ^ rpc[2*BTB_LEN-1+1:BTB_LEN+1];

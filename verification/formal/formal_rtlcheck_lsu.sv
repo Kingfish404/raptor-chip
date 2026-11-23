@@ -164,12 +164,17 @@ module formal_rtlcheck_lsu #(
         logic [IndexBits-1:0] slot;
         logic [3:0] s_sm1;
         logic [1:0] s_span;
-        logic ov;
+        logic ov, byte_ov;
         logic full_match, narrow_match;
         slot = head + IndexBits'(age);
         s_sm1 = ref_store_size_m1(store_alu[slot], store_fp64[slot]);
         s_span = 2'((4'(store_addr[slot][OffsetBits-1:0]) + s_sm1) >> OffsetBits);
-        ov = valid[slot] && ref_words_overlap(
+        byte_ov = !NarrowForward || (s_span != 2'd0) || (ref_lspan != 2'd0)
+            || ((5'(store_addr[slot][OffsetBits-1:0])
+                 <= 5'(load_addr[p][OffsetBits-1:0]) + 5'(load_size_m1[p]))
+                && (5'(load_addr[p][OffsetBits-1:0])
+                    <= 5'(store_addr[slot][OffsetBits-1:0]) + 5'(s_sm1)));
+        ov = valid[slot] && byte_ov && ref_words_overlap(
             store_addr[slot], s_span, load_addr[p], ref_lspan, mmu_enabled || stale_context[slot]
         );
         if (ov) begin

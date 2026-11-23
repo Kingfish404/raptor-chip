@@ -178,24 +178,48 @@ module rapt_plic #(
 
   // ---------------------------------------------------------------------
   // Highest-priority pending+enabled source per context (combinational).
+  // Use a parallel 7-bucket priority encoder (3-bit priority 1..7) with a
+  // 2-level group reduction so synthesis builds a shallow O(log NDEV) tree
+  // rather than an NDEV-deep serial magnitude comparator chain.
   // ---------------------------------------------------------------------
   logic [IdW-1:0] best_id  [NCTX];
-  logic [    2:0] best_prio[NCTX];
   logic           ctx_irq_level[NCTX];
 
   always_comb begin
     for (int c = 0; c < NCTX; c++) begin
-      best_id[c]        = '0;
-      // Threshold masks notifications, not polling via claim reads.
-      best_prio[c]      = '0;
-      ctx_irq_level[c]  = 1'b0;
-      for (int s = 1; s <= NDEV; s++) begin
-        if (pending_q[s] && enable_q[c][s] && (priority_q[s] > threshold_q[c])) begin
-          ctx_irq_level[c] = 1'b1;
+      logic [7:1] prio_any;
+      logic [IdW-1:0] prio_first_id[7:1];
+      prio_any = '0;
+      for (int p = 1; p <= 7; p++) begin
+        logic [7:0] grp_any;
+        logic [IdW-1:0] grp_id[8];
+        grp_any = '0;
+        for (int g = 0; g < 8; g++) begin
+          grp_id[g] = '0;
+          for (int k = 3; k >= 0; k--) begin
+            automatic int s = g * 4 + k;
+            if (s >= 1 && s <= NDEV && pending_q[s] && enable_q[c][s]
+                && (priority_q[s] == 3'(p))) begin
+              grp_any[g] = 1'b1;
+              grp_id[g]  = IdW'(s);
+            end
+          end
         end
-        if (pending_q[s] && enable_q[c][s] && (priority_q[s] > best_prio[c])) begin
-          best_prio[c] = priority_q[s];
-          best_id[c]   = IdW'(s);
+        prio_first_id[p] = '0;
+        for (int g = 7; g >= 0; g--) begin
+          if (grp_any[g]) begin
+            prio_any[p]      = 1'b1;
+            prio_first_id[p] = grp_id[g];
+          end
+        end
+      end
+      best_id[c]       = '0;
+      // Threshold masks notifications, not polling via claim reads.
+      ctx_irq_level[c] = 1'b0;
+      for (int p = 1; p <= 7; p++) begin
+        if (prio_any[p]) begin
+          best_id[c] = prio_first_id[p];
+          if (3'(p) > threshold_q[c]) ctx_irq_level[c] = 1'b1;
         end
       end
     end

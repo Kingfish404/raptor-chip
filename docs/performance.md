@@ -198,6 +198,16 @@ Sv32/Sv39 MMU and TLBs active (`sim/gsim/linux_sim_bench.py`, `sim/gsim/spec_sim
 | `default` / RV64 | **1.53–2.30** | **3.4082** | **1.6952x** *(19/19)* | **0.54 / 0.44** *(9/10, 11/13)* | **0.25 / 0.26** *(12/14, 7/12; 22/26 IPC 0.913)* |
 | `default-w4` / RV64 | **1.64–2.41** | **3.7935** | **1.8387x** *(19/19)* | **0.58 / 0.50** *(9/10, 13/13)* | **0.29 / 0.26** *(12/14, 6/12; 21/26 IPC 1.033)* |
 
+### 4.5 Live FPGA Hardware Linux (50 MHz Core, 333 MHz DDR4 UI)
+
+Measured directly on KU5P and KU15P boards running Linux over NFS (binaries staged in RAM `/tmp`,
+200k-iteration Dhrystone strict/standard, 2000-iteration official CoreMark, 19/19 Embench-IoT):
+
+| Board | Preset / XLEN | DMIPS/MHz | CoreMark/MHz | Embench-IoT (vs KU5P) |
+|---|---|---:|---:|---:|
+| KU5P | `default` / RV64 | **1.34–1.93** | **3.3514** | **1.0477x** *(19/19)* |
+| KU15P | `default-w4` / RV64 | **1.46–2.16** | **3.9803** | **1.2319x** *(19/19)* |
+
 ---
 
 ## 5. `riscv100.top` Leaderboard Scorecard & Commercial Positioning

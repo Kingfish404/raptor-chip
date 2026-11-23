@@ -26,9 +26,9 @@ Values below describe `rtl/configs/default/rapt_config.svh` and the integrated
 | Floating point | F/D/Zfhmin and RV64 Zfa; ROB-backed speculative results; 32 × 64-bit committed FPRs |
 | Vector | V 1.0, 32 registers, VLEN=128, ELEN=64; ROB-head authorization and precise restart |
 | Completion | 6 registered endpoints; the VPU shares the integer system port |
-| Prediction | TAGE: 1024 bimodal + 3 × 1024 tagged; 128-entry two-way BTB; RAS 16 |
-| L1 caches | 16 KiB each, four-way, 64-byte lines; L1D write-back, 4 MSHRs, 2 writeback buffers |
-| Translation | ITLB 16, fully associative; DTLB 64, two-way, replicated for load/store; shared L2 TLB 256 |
+| Prediction | TAGE: 1024 bimodal + 3 × 1024 tagged; 512-entry four-way BTB; RAS 16 |
+| L1 caches | 16 KiB each, four-way, 64-byte lines; L1I next-line prefetcher; L1D write-back, 4 MSHRs, 2 writeback buffers, 16-entry IP-stride prefetcher |
+| Translation | ITLB 16, fully associative; DTLB 64, two-way, replicated for load/store; shared L2 TLB 512 (four-way) |
 | Core boundary | `l2_client_if` to the always-present cluster-level `rapt_l2_subsystem` |
 | L2 cache | Disabled; `default-l2` enables 512 KiB, eight-way inclusive write-back |
 | Addresses | Physical: 32 bits by default; RV64 allows 32–38. RV64 stored PC: 40 bits |

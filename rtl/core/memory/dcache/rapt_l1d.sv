@@ -159,7 +159,15 @@ module rapt_l1d #(
   logic [L1D_LINE_SIZE*XLEN-1:0] mshr_fill_data, line_update_data;
   logic line_update;
   logic [11:0] load_pc_hash_q;
-  logic pf_valid, pf_accept, pf_drop, pf_probe_en, pf_tag_hit, mshr_pf_valid, mshr_pf_accept;
+  logic
+      pf_valid,
+      pf_accept,
+      pf_drop,
+      pf_probe_addr_en,
+      pf_probe_en,
+      pf_tag_hit,
+      mshr_pf_valid,
+      mshr_pf_accept;
   logic pf_page_pmp_uniform;
   logic [XLEN-1:0] pf_addr;
   logic [7:0] pf_version;
@@ -1414,14 +1422,18 @@ module rapt_l1d #(
   );
 
 `ifdef RAPT_LSU_HUM
-  assign pf_probe_en = L1dPrefetchEnable && pf_valid && !b_armed && (l1d_state == IDLE)
-      && !lsu_l1d.wvalid && !mshr_invalidate && !fence_clear_busy && !external_write_valid_i
-      && !l1d_update && !mshr_fill_valid && !wb_busy;
+  // Keep u_tags probe address selection independent of u_tags/MSHR/flush outputs
+  // to avoid chaining two tag RAM reads in one cycle.
+  assign pf_probe_addr_en = L1dPrefetchEnable && pf_valid && !b_armed && (l1d_state == IDLE)
+      && !lsu_l1d.wvalid;
+  assign pf_probe_en = pf_probe_addr_en && !mshr_invalidate && !fence_clear_busy
+      && !external_write_valid_i && !l1d_update && !mshr_fill_valid && !wb_busy;
   assign b_way_hit = tag_probe_way_hit;
 `else
-  assign pf_probe_en = L1dPrefetchEnable && pf_valid && (l1d_state == IDLE)
-      && !lsu_l1d.wvalid && !mshr_invalidate && !fence_clear_busy && !external_write_valid_i
-      && !l1d_update && !mshr_fill_valid && !wb_busy;
+  assign pf_probe_addr_en = L1dPrefetchEnable && pf_valid && (l1d_state == IDLE)
+      && !lsu_l1d.wvalid;
+  assign pf_probe_en = pf_probe_addr_en && !mshr_invalidate && !fence_clear_busy
+      && !external_write_valid_i && !l1d_update && !mshr_fill_valid && !wb_busy;
 `endif
   assign pf_tag_hit = |tag_probe_line_hit;
   assign pf_drop = pf_probe_en && pf_tag_hit;
@@ -1470,14 +1482,14 @@ module rapt_l1d #(
       .waddr_offset(waddr_offset),
       .waddr_tag(tag_store_tag),
 `ifdef RAPT_LSU_HUM
-      .probe_read(b_armed || pf_probe_en),
+      .probe_read(b_armed || pf_probe_addr_en),
       .probe_idx(b_armed ? b_idx : pf_addr[L1dLineOffset+:L1D_LEN]),
       .probe_offset(b_armed ? b_off : '0),
       .probe_tag(b_armed ? b_tag : pf_addr[L1dLineOffset+L1D_LEN+:L1dTagW]),
       .probe_way_hit(tag_probe_way_hit),
       .probe_line_hit(tag_probe_line_hit),
 `else
-      .probe_read(pf_probe_en),
+      .probe_read(pf_probe_addr_en),
       .probe_idx(pf_addr[L1dLineOffset+:L1D_LEN]),
       .probe_offset('0),
       .probe_tag(pf_addr[L1dLineOffset+L1D_LEN+:L1dTagW]),

@@ -110,7 +110,7 @@
 `endif
 
 `ifndef RAPT_OPERAND_SPILL_ENTRIES
-`define RAPT_OPERAND_SPILL_ENTRIES 16
+`define RAPT_OPERAND_SPILL_ENTRIES 32
 `endif
 
 // ALQ is shared by all three integer issue ports; IOQ feeds the scalar LSU.
@@ -158,7 +158,7 @@
 
 // Ordered stage widths are authoritative and independently overrideable.
 `ifndef RAPT_INTEGER_ISSUE_PORTS
-`define RAPT_INTEGER_ISSUE_PORTS 2
+`define RAPT_INTEGER_ISSUE_PORTS 3
 `endif
 `ifndef RAPT_INTEGER_SYSTEM_PORT
 `define RAPT_INTEGER_SYSTEM_PORT 0

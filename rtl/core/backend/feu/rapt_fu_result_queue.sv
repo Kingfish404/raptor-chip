@@ -84,8 +84,8 @@ module rapt_fu_result_queue #(
     completion.result = WordBits'(results[phys_head][68:5]);
     completion.fp_result = results[phys_head][68:5];
     completion.fp_flags = results[phys_head][4:0];
-    // Same-cycle cancellation remains the consumer's responsibility.
-    completion.valid = !reset && !flush && completed != '0 && !killed[head];
+    // Same-cycle flush/cancellation remains the consumer's responsibility.
+    completion.valid = !reset && completed != '0 && !killed[head];
   end
 
   // Completed entries form a prefix of the owner FIFO. Result arrival writes

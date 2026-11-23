@@ -66,8 +66,8 @@ module rapt_cu08_top (
       .BANDWIDTH("OPTIMIZED"),
       .CLKIN1_PERIOD(10.0),
       .DIVCLK_DIVIDE(1),
-      .CLKFBOUT_MULT_F(10.0),
-      .CLKOUT0_DIVIDE_F(1000.0 / (ClockHz / 1.0e6)),
+      .CLKFBOUT_MULT_F(12.0),
+      .CLKOUT0_DIVIDE_F(1200.0 / (ClockHz / 1.0e6)),
       .STARTUP_WAIT("FALSE")
   ) pll (
       .CLKIN1(clk_ref),

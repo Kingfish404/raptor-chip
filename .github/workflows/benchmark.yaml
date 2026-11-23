@@ -148,7 +148,7 @@ jobs:
           java-version: "17"
       - name: Generate pinned upstream ysyxSoC
         run: |
-          curl -fL --retry 3 https://github.com/com-lihaoyi/mill/releases/download/0.12.4/0.12.4 \
+          curl -fL --retry 3 https://github.com/com-lihaoyi/mill/releases/download/0.12.4/0.12.4-assembly \
             -o "$RUNNER_TEMP/mill-0.12.4"
           make ysyxsoc-setup YSYXSOC_MILL="$RUNNER_TEMP/mill-0.12.4" YSYXSOC_JAVA_HOME="$JAVA_HOME"
       - name: Build simulator (ysyxSoC config) and NEMU-Ref

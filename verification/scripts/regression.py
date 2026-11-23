@@ -86,7 +86,7 @@ def plan(args, work):
         for xlen in args.xlens:
             settings = [f'BUILD_ROOT={work}/sim', f'BUILD_PROFILE=regression-rv{xlen}',
                         f'VFLAGS={"-DRAPT_RV64" if xlen == 64 else ""}',
-                        f'ITERATIONS={args.iterations}', 'ARGS=-b', 'DIFFTEST=1',
+                        f'ITERATIONS={args.iterations}', 'ARGS=-b -n', 'DIFFTEST=1',
                         f'NPC_LOG_DIR={work}/logs/npc', f'NEMU_LOG_DIR={work}/logs/nemu']
             npc = f'coremark-rv{xlen}'
             native = f'coremark-nemu{xlen}'

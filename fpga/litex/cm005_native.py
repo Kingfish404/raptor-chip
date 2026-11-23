@@ -133,7 +133,7 @@ class NativeCPUFrameMAC(LiteXModule):
 
 
 class NativeCM005Bridge(LiteXModule):
-    def __init__(self, platform, cpu_ethernet=False):
+    def __init__(self, platform, cpu_ethernet=False, sys_clk_freq=50_000_000):
         platform.add_extension([('native', 0,
             Subsignal('clk', Pins(1)), Subsignal('reset', Pins(1)),
             Subsignal('rd', Pins(1)), Subsignal('wr', Pins(1)),
@@ -141,7 +141,7 @@ class NativeCM005Bridge(LiteXModule):
             Subsignal('wdata', Pins(32)), Subsignal('wstrb', Pins(4)),
             Subsignal('rdata', Pins(32)), Subsignal('irq', Pins(1)))])
         bus = platform.request('native')
-        self.crg = _CRG(platform, 50_000_000, with_ethernet=True,
+        self.crg = _CRG(platform, sys_clk_freq, with_ethernet=True,
                         cm005_oversample=True, cm005_tx_split=True, cm005_tx_dual=True,
                         external_sys=(bus.clk, bus.reset))
         cpu_mac = None
@@ -241,10 +241,10 @@ def check_dependency_origins():
             raise RuntimeError(f'Unfingerprinted dependency {name}: {filename}')
 
 
-def generate(output, cpu_ethernet=False):
+def generate(output, cpu_ethernet=False, sys_clk_freq=50_000_000):
     output.mkdir(parents=True, exist_ok=True)
     platform = BOARD.platform()
-    dut = NativeCM005Bridge(platform, cpu_ethernet)
+    dut = NativeCM005Bridge(platform, cpu_ethernet, sys_clk_freq=sys_clk_freq)
     # This standalone module has no SoC context. Suppress the hierarchy comment:
     # it can retain a prior SoC and its blackbox order depends on object IDs.
     previous_top = LiteXContext.top
@@ -317,5 +317,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--with-cpu-ethernet', action='store_true')
+    parser.add_argument('--sys-clk-freq', type=int, default=50_000_000)
     args = parser.parse_args()
-    generate(args.output.resolve(), args.with_cpu_ethernet)
+    generate(args.output.resolve(), args.with_cpu_ethernet, sys_clk_freq=args.sys_clk_freq)

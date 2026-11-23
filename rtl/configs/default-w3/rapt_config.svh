@@ -112,7 +112,7 @@
 `endif
 
 `ifndef RAPT_OPERAND_SPILL_ENTRIES
-`define RAPT_OPERAND_SPILL_ENTRIES 16
+`define RAPT_OPERAND_SPILL_ENTRIES 32
 `endif
 
 // ALQ is shared by both integer issue ports; IOQ feeds the scalar LSU.

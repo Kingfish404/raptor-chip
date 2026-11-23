@@ -248,10 +248,11 @@ module rapt_l2tlb #(
     always_ff @(posedge clock) begin
       if (reset) begin
         for (int s = 0; s < Sets; s++) plru[s] <= '0;
-      end else if (!clearing && !flush && !cancel && !sfence_valid) begin
+      end else if (!clearing && !cancel && !sfence_valid) begin
         if (response_q && any_hit)
           plru[lookup_index_q] <= plru_update(3'(plru[lookup_index_q]), 2'(hit_way));
-        if (port_en && selected.fill) plru[index] <= plru_update(3'(plru[index]), 2'(fill_way));
+        if (selected.valid && selected.fill)
+          plru[index] <= plru_update(3'(plru[index]), 2'(fill_way));
       end
     end
   end else begin : g_no_plru

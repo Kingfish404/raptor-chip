@@ -39,7 +39,7 @@ module rapt_rk_top (
   localparam int  ClockHz   = `NATIVE_CLOCK_HZ;
   // Share the main MMCM for TX125/ref300. MIG and RX each use one more;
   // the debug hub reuses the core clock without an additional MMCM divider.
-  localparam real PllVcoMHz = `NATIVE_ETHERNET ? 1500.0 : 1000.0;
+  localparam real PllVcoMHz = `NATIVE_ETHERNET ? 1500.0 : 1200.0;
   wire eth_tx_raw, eth_delay_raw;
   wire clk_in, clk_ref, clk_fb, clk_fb_buf, clk_raw, clk, locked;
   IBUFDS input_buf (

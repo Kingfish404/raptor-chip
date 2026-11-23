@@ -124,7 +124,7 @@ The [pipeline explorer](./explore.md) is an illustrative cycle model. It does no
 
 - **IFU and L1I:** The IFU walks complete 16/32-bit instructions in a six-halfword (three-word) L1I lookahead window, keeps any unconsumed suffix in a register, and ends a fetch group at a taken control, serializing, or faulting instruction, or before a second control instruction. A non-first `jalr` starts a new group so the BTB can be queried at its PC. `default-w4` and `default-w8` widen the window to eight halfwords (`RAPT_FETCH_WIDE`); all presets allow a group to continue past a predicted-not-taken conditional branch until the next control instruction, within the available fetch width. L1I is a 16 KiB, four-way cache with 64-byte lines, stored as four independently addressed 128-bit synchronous SRAM banks per way; pre-reads can hide the SRAM cycle for sequential fetch and for line crossings. A miss refills a 32-byte sector (`RAPT_L1I_REFILL_WORDS=8`) with individual AXI reads. The optional IFU response register is disabled in both the generic default preset and the fixed RV64 netboot profile. Miss refills, translation faults, and accepted-request ownership remain in L1I.
 - **FQU and IDU:** FQU is a four-entry registered stream queue without empty-queue fall-through; it can regroup instructions across fetch packets. IDU registers its input, decodes each slot combinationally, and corrects accepted direct jumps, return predictions, or stale targets before rename. Flush and recovery invalidate resident frontend instructions.
-- **BPU:** The default direction predictor is TAGE (a 1024-entry bimodal base plus three 1024-entry tagged tables with 8/16/64-bit histories in `default`, `default-w3` and `default-w4`; the shared fallback used by `default-l2` and `default-w8` is 256 + 3 x 128), with selectable gshare, bimodal, or static alternatives. Each preset must define exactly one `RAPT_BPU_DIRP_*` selector; if build flags introduce multiple selectors, RTL precedence is TAGE > GSHARE > BIMODAL > STATIC. Defining none causes a preprocessing error; static prediction requires an explicit selector. With lookahead, a packet's first non-first conditional branch uses TAGE's auxiliary read port whenever TAGE is selected; non-TAGE predictors supply not-taken for that query. This is shared behavior, not a separate preset switch. A 128-entry, two-way BTB (256 entries in `default-w3`/`default-w4`) supplies targets for the packet's first PC; IDU resteers and commit-time mispredictions train it. Prediction queries alone do not advance history: accepted conditional instructions update it speculatively at fetch and decode. A misprediction announcement restores GHR/PHR from its rename checkpoint, and a full flush restores the committed history. The RAS (16 entries in `default`; four in `default-l2` and `default-w8`) is updated at decode and restored from a committed copy on flush. TAGE trains at retirement.
+- **BPU:** The default direction predictor is TAGE (a 1024-entry bimodal base plus three 1024-entry tagged tables with 8/16/64-bit histories in `default`, `default-w3` and `default-w4`; the shared fallback used by `default-l2` and `default-w8` is 256 + 3 x 128), with selectable gshare, bimodal, or static alternatives. Each preset must define exactly one `RAPT_BPU_DIRP_*` selector; if build flags introduce multiple selectors, RTL precedence is TAGE > GSHARE > BIMODAL > STATIC. Defining none causes a preprocessing error; static prediction requires an explicit selector. With lookahead, a packet's first non-first conditional branch uses TAGE's auxiliary read port whenever TAGE is selected; non-TAGE predictors supply not-taken for that query. This is shared behavior, not a separate preset switch. A 512-entry, four-way BTB (`default`, `default-w3`, and `default-w4`) supplies targets for the packet's first PC; IDU resteers and commit-time mispredictions train it. Prediction queries alone do not advance history: accepted conditional instructions update it speculatively at fetch and decode. A misprediction announcement restores GHR/PHR from its rename checkpoint, and a full flush restores the committed history. The RAS (16 entries in `default`; four in `default-l2` and `default-w8`) is updated at decode and restored from a committed copy on flush. TAGE trains at retirement.
 
 The predictor query PC is `ifu_bpu.nextpc`. IFU and IDU report accepted branch-history events through `history_valid`, `history_taken`, and `history_pc_bit`; IDU also supplies `history_recover` for decode corrections.
 
@@ -186,7 +186,8 @@ and returns guest page-fault metadata. See the [VPU manual](./vpu.md).
   coherence remains a platform/software responsibility.
 - **Translation and protection:** The fully associative ITLB has 16 entries by
   default. Load and store DTLB replicas each have 64 entries with two-way set
-  associativity. Host misses share a 256-entry direct-mapped L2 TLB before the
+  associativity. Host misses share a 512-entry four-way L2 TLB (1024 entries in
+  `default-w3`/`default-w4`) before the
   separate instruction and data page-table walkers. RV64 guest misses go
   directly to those walkers. PMP checks fetch, data, and PTW accesses. Split
   loads carry their architectural width and each physical fragment's permission
@@ -286,10 +287,10 @@ depend on the board and build constraints.
 | Floating point | Renamed F/D/Zfhmin and RV64 Zfa; ROB-backed results; 32 × 64-bit committed FPRs |
 | Vector | V 1.0, VLEN=128, ELEN=64 in both XLENs; single ROB-head owner |
 | RV64 supervisor profile | RVA23S64 with Sha/H, Sv39 and Sv39x4 guest translation |
-| Branch prediction | TAGE (1024 bimodal + 3 x 1024 tagged), side conditional query of the same TAGE, 128-entry two-way BTB, 16-entry RAS |
-| L1I | 16 KiB, four-way, 64 sets, 64-byte lines, 32-byte refill sector |
-| L1D | 16 KiB, four-way, 64 sets, 64-byte lines, write-back, 4 MSHRs, 2 writeback buffers, Sv32/Sv39 miss replay |
-| TLB | ITLB 16 (fully associative), DTLB 64 (two-way, replicated load/store lookup); shared direct-mapped L2 TLB 256 |
+| Branch prediction | TAGE (1024 bimodal + 3 x 1024 tagged), side conditional query of the same TAGE, 512-entry four-way BTB, 16-entry RAS |
+| L1I | 16 KiB, four-way, 64 sets, 64-byte lines, 32-byte refill sector, same-4KB-page next-line prefetcher |
+| L1D | 16 KiB, four-way, 64 sets, 64-byte lines, write-back, 4 MSHRs, 2 writeback buffers, 16-entry IP-stride prefetcher, Sv32/Sv39 miss replay |
+| TLB | ITLB 16 (fully associative), DTLB 64 (two-way, replicated load/store lookup); shared four-way L2 TLB 512 (`1024` in `default-w3`/`default-w4`) |
 | L2 | No cache: the L2 subsystem only bridges to AXI (`default-l2` adds the cache) |
 | AXI master | In `rapt_l2_subsystem`: 4-bit ID, XLEN-bit data, up to 8 reads; up to 4 eligible cacheable writes without L2; buffered writebacks complete on B |
 | PMP / PLIC | 8 PMP entries in 16 CSR slots; 31 PLIC sources, M/S contexts |
@@ -300,14 +301,16 @@ two-way DTLB replicas. `large` uses ITLB 32 and DTLB 64/two-way.
 both levels of L1 translation. `small-cache` uses 16 entries. All of these
 presets use fully associative DTLBs (`WAYS=0`).
 
-The instruction and data miss paths share one **256-entry, direct-mapped L2
-TLB**, implemented by `rapt_l2tlb` and the `rapt_cached_ptw` adapters. It is
-enabled in all `default*` presets, `large`, and `formal`; `small-cache` uses
-a 64-entry instance. `small`, `middle`, and `middle-cache` set
-`RAPT_L2TLB_ENTRIES=0` and bypass it. This setting is independent of the L2
-data-cache enable.
+The instruction and data miss paths share one **512-entry, four-way L2 TLB**
+(`1024` entries in `default-w3`/`default-w4`; `256`-entry direct-mapped in
+`default-l2`/`default-cache`), implemented by `rapt_l2tlb` and the
+`rapt_cached_ptw` adapters. It is enabled in all `default*` presets, `large`,
+and `formal`; `small-cache` uses a 64-entry instance. `small`, `middle`, and
+`middle-cache` set `RAPT_L2TLB_ENTRIES=0` and bypass it. This setting is
+independent of the L2 data-cache enable.
 
-The low eight VPN bits index the table. A single synchronous payload port
+The low VPN bits index the set table (7 bits for 512-entry/4-way; 8 bits for
+1024-entry/4-way or 256-entry direct-mapped). A single synchronous payload port
 arbitrates instruction/data lookups and fills in round-robin order. An L1
 host translation miss first probes this table. A hit refills the requesting L1
 TLB, and a miss starts its page-table walker. Superpage results are cached as

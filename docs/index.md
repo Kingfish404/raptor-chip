@@ -42,7 +42,8 @@ The [default configuration](./uarch.md#default-configuration) documents the RTL 
 - [Platform integration ↗](./ecosystem.md): FPGA boards, memory maps, and the software stack.
 - [Vector extension](./vpu.md): Integrated V 1.0 execution, precise memory faults and verification.
 - [Chip top and off-chip link](./chip.md): Chip hierarchy and board-side octal link.
-- [Performance history](./perf-iterations.md): Measurements tied to their source revisions.
+- [Performance evaluation](./performance.md): Current RTL bare-metal, Linux sim, FPGA, and SPEC 2017/2026 results.
+- [Performance history](./perf-iterations.md): Earlier measurements tied to their source revisions.
 - [References](./REFERENCE.md): AXI protocol diagrams and public PPA resources.
 
 ## Follow the instruction.

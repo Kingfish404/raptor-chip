@@ -280,8 +280,8 @@ def bootargs(args):
     root = args.rootfs.resolve()
     require(root.is_absolute() and not re.search(r"[\s,:]", str(root)), "invalid NFS root path")
     return (f"console=ttyS0,115200 earlycon=sbi root=/dev/nfs "
-            f"nfsroot={server}:{root},vers=3,tcp,rsize=4096,wsize=4096 rw ip=dhcp "
-            "init=/sbin/init net.ifnames=0 random.trust_bootloader=on "
+            f"nfsroot={server}:{root},vers=3,tcp,rsize=32768,wsize=32768 "
+            "rw ip=dhcp init=/sbin/init net.ifnames=0 random.trust_bootloader=on "
             "unaligned_scalar_speed=fast unaligned_vector_speed=fast")
 
 
@@ -369,9 +369,14 @@ def native_services(tree):
     overlay_link(tree, "etc/systemd/system/ssh.socket", "/dev/null")
     overlay_link(tree, "etc/systemd/system/multi-user.target.wants/ssh.service",
                  "/usr/lib/systemd/system/ssh.service")
-    # Cold executable/PAM loads and key exchange can exceed the default 120s.
+    # Keep SSH handshakes fast on 50-100 MHz FPGA cores: avoid post-quantum KEX,
+    # reverse DNS lookups, and GSSAPI while preserving PAM / Ubuntu MOTD.
     overlay_file(tree, "etc/ssh/sshd_config.d/01-raptor-native-timeout.conf",
-                 "LoginGraceTime 600\n")
+                 "LoginGraceTime 600\n"
+                 "UseDNS no\n"
+                 "GSSAPIAuthentication no\n"
+                 "KexAlgorithms curve25519-sha256\n"
+                 "Ciphers chacha20-poly1305@openssh.com,aes128-gcm@openssh.com\n")
     overlay_file(tree, "etc/systemd/system.conf.d/50-raptor-native.conf",
                  "[Manager]\nDefaultTimeoutStartSec=10min\nDefaultDeviceTimeoutSec=30min\n"
                  "DefaultEnvironment=SYSTEMD_BUS_TIMEOUT=600\n")
@@ -537,7 +542,7 @@ def serve(args, remove=False):
     require((root / ".raptor-native-rootfs.json").is_file(), "prepare the native Ubuntu rootfs first")
     bootargs(args)  # Also validates the export path.
     client = str(ipaddress.IPv4Network(args.client, strict=False))
-    options = "rw,sync,no_subtree_check,no_root_squash"
+    options = "rw,async,no_subtree_check,no_root_squash"
     args.output.mkdir(parents=True, exist_ok=True)
     (args.output / "nfs-export.exports").write_text(f"{root} {client}({options})\n")
     exportfs = shutil.which("exportfs") or "/usr/sbin/exportfs"
@@ -637,7 +642,7 @@ def main():
     parser.add_argument("--native-build", type=Path, help="native build containing its verified DTB and manifest")
     parser.add_argument("--native-build-root", type=Path, default=BOARD / "build")
     parser.add_argument("--preset", default="default")
-    parser.add_argument("--clock-mhz", type=int, choices=(25, 50, 100), default=50)
+    parser.add_argument("--clock-mhz", type=int, choices=(25, 50, 75, 100), default=50)
     parser.add_argument("--root-device", default="nfs",
                         choices=("nfs", *ALLOWED_BLOCK_ROOTS),
                         help="root filesystem source (nfs or local VirtIO/NVMe/SDHCI block device)")

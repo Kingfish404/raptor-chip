@@ -215,7 +215,7 @@ module rapt_ieu #(
       `RAPT_ROB_YOUNGER(alq_rr_q[IntegerSystemPort].dest, cancel_owner, cancel_head)
       ;
       assign alq_sys_valid_pre_rr = alq_rr_q[IntegerSystemPort].valid
-          && !reset && !cmu_bcast.flush_pipe && !(cancel_valid && sys_rr_younger);
+          && !reset && !(cancel_valid && sys_rr_younger);
       assign alq_sys_uop_pre_rr = alq_rr_q[IntegerSystemPort].uop;
 `endif
 
@@ -296,7 +296,7 @@ module rapt_ieu #(
       `RAPT_ROB_YOUNGER(alq_issue[IntegerSystemPort].dest, cancel_owner, cancel_head)
       ;
       assign alq_sys_valid_pre_rr = alq_issue[IntegerSystemPort].valid
-          && !reset && !cmu_bcast.flush_pipe && !(cancel_valid && sys_combo_younger);
+          && !reset && !(cancel_valid && sys_combo_younger);
       assign alq_sys_uop_pre_rr = alq_issue[IntegerSystemPort].uop;
 `endif
 
@@ -503,7 +503,7 @@ module rapt_ieu #(
       // select from PRF read + ALU, so same-cycle tag-only load wakeup keeps
       // 1-cycle load-to-use without chaining L1D response into ALU execution.
       .ComboCdbWake(TagOnly && RegisteredIssueRead),
-      .ReclaimOnIssue(1'b1),
+      .ReclaimOnIssue(1'b0),
       .ExposeEntryIndex(TagOnly),
       .LocalOperandWake(LocalIntegerWake || (TagOnly && RegisteredIssueRead)),
       .TagOnly(TagOnly),
@@ -550,7 +550,7 @@ module rapt_ieu #(
       // TagOnly+RegisteredIssueRead mode, so same-cycle tag-only load wakeup
       // keeps 1-cycle load-to-branch latency.
       .ComboCdbWake(TagOnly && RegisteredIssueRead),
-      .ReclaimOnIssue(1'b1),
+      .ReclaimOnIssue(1'b0),
       .ExposeEntryIndex(TagOnly),
       .LocalOperandWake(LocalIntegerWake || (TagOnly && RegisteredIssueRead)),
       .TagOnly(TagOnly),

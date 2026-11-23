@@ -36,6 +36,9 @@ module rapt_l1d_stride_pf #(
     logic pf_valid_q;
     logic [XLEN-1:0] pf_addr_q;
     logic [7:0] pf_version_q;
+    logic pf2_valid_q;
+    logic [XLEN-1:0] pf2_addr_q;
+    logic [7:0] pf2_version_q;
 
     wire [IdxBits-1:0] idx = train_pc_hash[IdxBits-1:0];
     wire [TagBits-1:0] tag = train_pc_hash[11:IdxBits];
@@ -47,9 +50,10 @@ module rapt_l1d_stride_pf #(
     logic stride_match;
     logic [12:0] next_off_13;
     logic [LineBits:0] step_line_ext;
-    logic cand_valid;
-    logic [LineBits-1:0] cand_line;
-    logic [XLEN-1:0] cand_addr;
+    logic [LineBits:0] step2_line_ext;
+    logic cand_valid, cand2_valid;
+    logic [LineBits-1:0] cand_line, cand2_line;
+    logic [XLEN-1:0] cand_addr, cand2_addr;
 
     always_comb begin
       hit = tbl_valid[idx] && (tbl_tag[idx] == tag);
@@ -73,6 +77,15 @@ module rapt_l1d_stride_pf #(
       cand_addr = {train_paddr[XLEN-1:12], cand_line, {LineOffset{1'b0}}};
       if (!rapt_pkg::addr_cacheable(cand_addr) || rapt_pkg::addr_device(cand_addr))
         cand_valid = 1'b0;
+
+      // Degree-2 lookahead within the same 4KB page when confidence saturates (conf == 3).
+      step2_line_ext = {1'b0, cand_line} + ({1'b0, cand_line} - {1'b0, cur_line});
+      cand2_valid = cand_valid && (tbl_conf[idx] == 2'd3) && !step2_line_ext[LineBits]
+          && (step2_line_ext[LineBits-1:0] != cand_line);
+      cand2_line = step2_line_ext[LineBits-1:0];
+      cand2_addr = {train_paddr[XLEN-1:12], cand2_line, {LineOffset{1'b0}}};
+      if (!rapt_pkg::addr_cacheable(cand2_addr) || rapt_pkg::addr_device(cand2_addr))
+        cand2_valid = 1'b0;
     end
 
     always_ff @(posedge clock) begin
@@ -81,6 +94,9 @@ module rapt_l1d_stride_pf #(
         pf_valid_q <= 1'b0;
         pf_addr_q <= '0;
         pf_version_q <= '0;
+        pf2_valid_q <= 1'b0;
+        pf2_addr_q <= '0;
+        pf2_version_q <= '0;
       end else begin
         if (train_valid) begin
           if (!hit) begin
@@ -102,12 +118,23 @@ module rapt_l1d_stride_pf #(
 
         if (flush) begin
           pf_valid_q <= 1'b0;
+          pf2_valid_q <= 1'b0;
         end else if (train_valid && cand_valid) begin
           pf_valid_q <= 1'b1;
           pf_addr_q <= cand_addr;
           pf_version_q <= train_version;
+          pf2_valid_q <= cand2_valid;
+          pf2_addr_q <= cand2_addr;
+          pf2_version_q <= train_version;
         end else if (pf_accept || pf_drop) begin
-          pf_valid_q <= 1'b0;
+          if (pf2_valid_q) begin
+            pf_valid_q <= 1'b1;
+            pf_addr_q <= pf2_addr_q;
+            pf_version_q <= pf2_version_q;
+            pf2_valid_q <= 1'b0;
+          end else begin
+            pf_valid_q <= 1'b0;
+          end
         end
       end
     end

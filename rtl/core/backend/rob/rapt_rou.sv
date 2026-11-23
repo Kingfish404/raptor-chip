@@ -1235,13 +1235,23 @@ module rapt_rou #(
     end
   end
   if (BankRetireData) begin : g_retire_banks
-    retire_data_t read_data[CommitWidth+1][RetireBanks];
+    // CommitWidth+1 contiguous ROB indices span at most two rows per bank
+    // (head_row and head_row+1). Using 2 read ports per bank instead of
+    // CommitWidth+1 cuts retire_data LUTRAM copies by ~60%.
+    localparam int Rows = ROB_SIZE / RetireBanks;
+    localparam int RowBits = rapt_pkg::index_bits(Rows);
+    wire [RowBits-1:0] head_row = RowBits'(int'(rob_head) / RetireBanks);
+    wire [RowBits-1:0] next_row = RowBits'((int'(head_row) + 1) % Rows);
+    retire_data_t bank_row_lo[RetireBanks];
+    retire_data_t bank_row_hi[RetireBanks];
     for (genvar c = 0; c <= CommitWidth; c++) begin : g_select_bank
-      assign retire_read_data[c] = read_data[c][int'(retire_read_index[c])%RetireBanks];
+      wire [RowBits-1:0] idx_row = RowBits'(int'(retire_read_index[c]) / RetireBanks);
+      wire use_next_row = (idx_row != head_row);
+      assign retire_read_data[c] = use_next_row
+          ? bank_row_hi[int'(retire_read_index[c])%RetireBanks]
+          : bank_row_lo[int'(retire_read_index[c])%RetireBanks];
     end
     for (genvar b = 0; b < RetireBanks; b++) begin : g_bank
-      localparam int Rows = ROB_SIZE / RetireBanks;
-      localparam int RowBits = rapt_pkg::index_bits(Rows);
       retire_data_t data[Rows];
       logic write_valid;
       logic [RowBits-1:0] write_row;
@@ -1268,9 +1278,8 @@ module rapt_rou #(
         end
       end
       always_ff @(posedge clock) if (write_valid) data[write_row] <= write_data;
-      for (genvar c = 0; c <= CommitWidth; c++) begin : g_read
-        assign read_data[c][b] = data[RowBits'(int'(retire_read_index[c])/RetireBanks)];
-      end
+      assign bank_row_lo[b] = data[head_row];
+      assign bank_row_hi[b] = data[next_row];
     end
   end
 `ifdef SYNTHESIS
@@ -1509,8 +1518,70 @@ module rapt_rou #(
       end
     end
   end
+  // Parallel oldest-exception selection:
+  // Any existing or completing ROB owner is strictly older than newly
+  // allocated slots (at rob_tail), and deq_fire[0..NumSlots-1] are already
+  // in program order. This collapses the 10-deep serial age chain to 1 level.
+  logic [NumCompletions:0] exc_cand_valid;
+  logic [RBits-1:0] exc_cand_owner[NumCompletions+1];
+  logic [5:0] exc_cand_cause[NumCompletions+1];
+  logic [XLEN-1:0] exc_cand_tval[NumCompletions+1];
+`ifdef RAPT_H_EXTENSION
+  logic [XLEN-1:2] exc_cand_gpaddr[NumCompletions+1];
+  logic exc_cand_gptw[NumCompletions+1];
+  logic exc_cand_explicit_guest[NumCompletions+1];
+`endif
+  logic [NumCompletions:0] exc_cand_win;
   always_comb begin
-    exception_next_valid = oldest_exception_valid;
+    exc_cand_valid[0] = oldest_exception_valid;
+    exc_cand_owner[0] = oldest_exception_owner;
+    exc_cand_cause[0] = oldest_exception_cause;
+    exc_cand_tval[0]  = oldest_exception_tval;
+`ifdef RAPT_H_EXTENSION
+    exc_cand_gpaddr[0] = oldest_exception_gpaddr;
+    exc_cand_gptw[0] = oldest_exception_gptw;
+    exc_cand_explicit_guest[0] = oldest_exception_explicit_guest;
+`endif
+    for (int p = 0; p < NumCompletions; p++) begin
+      exc_cand_valid[p+1] = completion_valid[p] && completion[p].updates.exception
+          && completion[p].trap;
+      exc_cand_owner[p+1] = completion[p].dest;
+      exc_cand_cause[p+1] = completion[p].cause;
+      exc_cand_tval[p+1]  = completion[p].tval;
+`ifdef RAPT_H_EXTENSION
+      if (completion[p].cause == 6'(`RAPT_CAUSE_INSTR_GUEST_PAGE_FAULT)) begin
+        exc_cand_gpaddr[p+1] = ifetch_gpf_gpa_i;
+        exc_cand_gptw[p+1] = ifetch_gpf_ptw_i;
+        exc_cand_explicit_guest[p+1] = 1'b0;
+      end else begin
+        exc_cand_gpaddr[p+1] = completion[p].result[XLEN-3:0];
+        exc_cand_gptw[p+1] = completion[p].result[XLEN-2];
+        exc_cand_explicit_guest[p+1] = (p == int'(Cfg.integer_system_port))
+            && is_hmem_trap_cause(completion[p].cause) && completion[p].result[XLEN-1];
+      end
+`endif
+    end
+    // Parallel pairwise oldest-win (higher index breaks same-owner tie, matching
+    // completion-updates-existing priority).
+    for (int i = 0; i <= NumCompletions; i++) begin
+      automatic logic beaten;
+      beaten = 1'b0;
+      for (int j = 0; j <= NumCompletions; j++) begin
+        if (i != j && exc_cand_valid[j]) begin
+          if (older_rob_owner(
+                  exc_cand_owner[j], exc_cand_owner[i]
+              ) || (exc_cand_owner[j] == exc_cand_owner[i] && j > i)) begin
+            beaten = 1'b1;
+          end
+        end
+      end
+      exc_cand_win[i] = exc_cand_valid[i] && !beaten;
+    end
+  end
+
+  always_comb begin
+    automatic logic alloc_trap_found;
+    exception_next_valid = |exc_cand_valid;
     exception_next_owner = oldest_exception_owner;
     exception_next_cause = oldest_exception_cause;
     exception_next_tval  = oldest_exception_tval;
@@ -1519,47 +1590,46 @@ module rapt_rou #(
     exception_next_gptw = oldest_exception_gptw;
     exception_next_explicit_guest = oldest_exception_explicit_guest;
 `endif
-    for (int s = 0; s < NumSlots; s++) begin
-      if (deq_fire[s] && allocation[s].uop.trap && (!exception_next_valid || older_rob_owner(
-              rob_alloc[s], exception_next_owner
-          ))) begin
-        exception_next_valid = 1'b1;
-        exception_next_owner = rob_alloc[s];
-        exception_next_cause = allocation[s].uop.cause;
-        exception_next_tval  = `RAPT_UOP_TVAL(XLEN, allocation[s].uop);
+    if (|exc_cand_valid) begin
+      exception_next_owner = '0;
+      exception_next_cause = '0;
+      exception_next_tval  = '0;
 `ifdef RAPT_H_EXTENSION
-        exception_next_gpaddr =
-            (allocation[s].uop.cause == 6'(`RAPT_CAUSE_INSTR_GUEST_PAGE_FAULT))
-            ? ifetch_gpf_gpa_i : '0;
-        exception_next_gptw =
-            (allocation[s].uop.cause == 6'(`RAPT_CAUSE_INSTR_GUEST_PAGE_FAULT))
-            && ifetch_gpf_ptw_i;
-        exception_next_explicit_guest = 1'b0;
+      exception_next_gpaddr = '0;
+      exception_next_gptw = 1'b0;
+      exception_next_explicit_guest = 1'b0;
 `endif
-      end
-    end
-    for (int p = 0; p < NumCompletions; p++) begin
-      if (completion_valid[p] && completion[p].updates.exception && completion[p].trap
-          && (!exception_next_valid || completion[p].dest == exception_next_owner
-              || older_rob_owner(
-              completion[p].dest, exception_next_owner
-          ))) begin
-        exception_next_valid = 1'b1;
-        exception_next_owner = completion[p].dest;
-        exception_next_cause = completion[p].cause;
-        exception_next_tval  = completion[p].tval;
+      for (int i = 0; i <= NumCompletions; i++) begin
+        if (exc_cand_win[i]) begin
+          exception_next_owner = exc_cand_owner[i];
+          exception_next_cause = exc_cand_cause[i];
+          exception_next_tval  = exc_cand_tval[i];
 `ifdef RAPT_H_EXTENSION
-        if (completion[p].cause == 6'(`RAPT_CAUSE_INSTR_GUEST_PAGE_FAULT)) begin
-          exception_next_gpaddr = ifetch_gpf_gpa_i;
-          exception_next_gptw = ifetch_gpf_ptw_i;
-          exception_next_explicit_guest = 1'b0;
-        end else begin
-          exception_next_gpaddr = completion[p].result[XLEN-3:0];
-          exception_next_gptw = completion[p].result[XLEN-2];
-          exception_next_explicit_guest = (p == int'(Cfg.integer_system_port))
-              && is_hmem_trap_cause(completion[p].cause) && completion[p].result[XLEN-1];
+          exception_next_gpaddr = exc_cand_gpaddr[i];
+          exception_next_gptw = exc_cand_gptw[i];
+          exception_next_explicit_guest = exc_cand_explicit_guest[i];
+`endif
         end
+      end
+    end else begin
+      alloc_trap_found = 1'b0;
+      for (int s = 0; s < NumSlots; s++) begin
+        if (!alloc_trap_found && deq_fire[s] && allocation[s].uop.trap) begin
+          alloc_trap_found = 1'b1;
+          exception_next_valid = 1'b1;
+          exception_next_owner = rob_alloc[s];
+          exception_next_cause = allocation[s].uop.cause;
+          exception_next_tval  = `RAPT_UOP_TVAL(XLEN, allocation[s].uop);
+`ifdef RAPT_H_EXTENSION
+          exception_next_gpaddr =
+              (allocation[s].uop.cause == 6'(`RAPT_CAUSE_INSTR_GUEST_PAGE_FAULT))
+              ? ifetch_gpf_gpa_i : '0;
+          exception_next_gptw =
+              (allocation[s].uop.cause == 6'(`RAPT_CAUSE_INSTR_GUEST_PAGE_FAULT))
+              && ifetch_gpf_ptw_i;
+          exception_next_explicit_guest = 1'b0;
 `endif
+        end
       end
     end
   end

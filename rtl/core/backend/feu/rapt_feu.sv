@@ -447,6 +447,7 @@ module rapt_feu #(
       .ThirdOperand(1'b1),
       .ComboCdbWake(1'b1),
       .ComboThirdWake(1'b1),
+      .ComboWakePorts(32'(1) << rapt_pkg::completion_fpu_port(Cfg)),
       .ReadAfterSelect(1'b1),
       .ExposeEntryIndex(1'b1),
       .FilterResources(1'b1),

@@ -467,7 +467,11 @@ def prepare(args, out):
                 shutil.copyfile(path, sources / path.name)
     if args.cm005_bridge:
         generated = out / "cm005-generated"
-        command = [args.bridge_python, REPO / "fpga/litex/cm005_native.py", "--output", generated]
+        command = [
+            args.bridge_python, REPO / "fpga/litex/cm005_native.py",
+            "--output", generated,
+            "--sys-clk-freq", str(args.clock_mhz * 1_000_000),
+        ]
         if args.cm005_ethernet:
             command += ["--with-cpu-ethernet"]
         run(command,
@@ -640,7 +644,7 @@ def main():
     parser.add_argument("--xlen", type=int, choices=(32, 64), default=64)
     parser.add_argument("--preset", default="small")
     parser.add_argument("--memory", choices=("bram", "ddr"), default=PROFILE.get("default_memory", "bram"))
-    parser.add_argument("--clock-mhz", type=int, choices=(25, 50, 100), default=50)
+    parser.add_argument("--clock-mhz", type=int, choices=(25, 50, 75, 100), default=50)
     parser.add_argument("--ram-bytes", type=int, default=131072)
     parser.add_argument("--reset-button", type=int, choices=(0, 1), default=0)
     parser.add_argument("--ethernet", type=int, choices=(0, 1), default=0,
@@ -685,8 +689,8 @@ def main():
         parser.error("CM005 forwarding is not supported by this board")
     if args.cm005_ethernet and not (args.cm005_bridge and PROFILE.get("cm005_cpu_ethernet")):
         parser.error("CM005 CPU Ethernet requires this board's CM005 forwarder")
-    if args.cm005_bridge and args.clock_mhz != 50:
-        parser.error("CM005 forwarding currently requires CLOCK_MHZ=50; disable it explicitly for other clocks")
+    if args.cm005_bridge and args.clock_mhz not in (50, 75):
+        parser.error("CM005 forwarding currently requires CLOCK_MHZ in {50, 75}; disable it explicitly for other clocks")
     if (args.virtio_net or args.qemu_bridge) and (args.sampling or args.cm005_bridge or
                                                   not args.ethernet):
         parser.error("--virtio-net/--qemu-bridge share the native MAC: they require --ethernet 1 "

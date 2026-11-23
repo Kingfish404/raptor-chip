@@ -1991,8 +1991,9 @@ module rapt_lsu_ioq #(
     assign alloc_addr_valid[s] = !LateOperands ? (alloc_pr1[s] == '0)
         : (int_source_regs[s][0] == '0 || dispatch[s].stable_op1_valid
            || wb_hit(dispatch[s].pr1));
-    assign alloc_base_ready[s] = LateOperands && disp.accept[s]
-        && (alloc_pr1[s] == '0) && !alloc_addr_valid[s] && (int_source_regs[s][0] != '0);
+    // Disable allocation-edge PRF port stealing to break the 22ns
+    // rob_head -> disp.accept -> PRF -> 64b adder -> address_bank path.
+    assign alloc_base_ready[s] = 1'b0;
     assign alloc_immediate[s] = offset;
     assign alloc_addr_value[s] = int_source_regs[s][0] == '0
         ? XLEN'($signed(offset)) : (offset == '0 ? alloc_vj[s] : address_sum);
