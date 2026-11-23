@@ -65,20 +65,25 @@ reports precise traps with `vstart` for restart. See the [VPU manual](./docs/vpu
 
 ## Performance
 
-Selected benchmark results for the configurations below. FPGA runs use a 50 MHz core.
+Selected benchmark results for the configurations below. FPGA runs use a 50 MHz core and 333 MHz DDR4 UI.
 
-| Environment | Preset / XLEN | CM/MHz | Embench-IoT | Geekbench 5 SC / MC |
-| --- | --- | ---: | --- | ---: |
-| Bare-metal sim | default / RV32 | 5.2173 | 1.6840x | — |
-| Bare-metal sim | default / RV64 | 4.7743 | 1.7149x | — |
-| Bare-metal sim | default-w4 / RV64 | 5.5781 | 2.0261x | — |
-| FPGA Linux, KU5P | middle-cache / RV64 | 2.6422 | 1.0000x | — |
-| FPGA Linux, KU15P, DDR UI 200 MHz | default-w4 / RV64 | 2.9395 | 0.9258x | 1 / 1 |
-| FPGA Linux, KU15P, DDR UI 333 MHz | default-w4 / RV64 | 3.0947 | 1.0005x | 2 / 2 |
+| Environment | Preset / XLEN | DMIPS/MHz | CM/MHz | Embench-IoT | SPECrate2017 (INT/FP / GHz) | SPECrate2026 (INT/FP / GHz) |
+| --- | --- | ---: | ---: | --- | ---: | ---: |
+| Bare-metal sim | default / RV32 | 1.96–2.42 | 5.9034 | 2.0746x | — | — |
+| Bare-metal sim | default / RV64 | 2.11–2.68 | 5.6709 | 2.1351x | — | — |
+| Bare-metal sim | default-w4 / RV64 | 2.47–3.56 | 7.0576 | 2.6607x | — | — |
+| Linux sim | default / RV32 | 1.30–1.65 | 4.3829 | 1.4902x | — | — |
+| Linux sim | default / RV64 | 1.53–2.30 | 3.4082 | 1.6952x | 0.54 / 0.44 | 0.25 / 0.26 |
+| Linux sim | default-w4 / RV64 | 1.64–2.41 | 3.7935 | 1.8387x | 0.58 / 0.50 | 0.29 / 0.26 |
+| FPGA Linux, KU5P | default / RV64 | 1.34–1.93 | 3.3514 | 1.0477x | — | — |
+| FPGA Linux, KU15P | default-w4 / RV64 | 1.46–2.16 | 3.9803 | 1.2319x | — | — |
 
-Sim uses measured ROI cycles, with Embench scaled to 50 MHz. Embench is the geometric mean
-of speed across 19 passing workloads, relative to KU5P. Geekbench is 5.4.1 Preview, with one
-hart in both single-core and multi-core modes.
+All figures are measured directly on RTL (Verilator or FPGA; no architectural models).
+DMIPS/MHz reports strict (`-O3 -fno-inline`) to standard (`-O3 -fno-inline-functions`) with
+`-mno-strict-align`; Embench-IoT is the 19-workload geomean vs KU5P (50 MHz scaling); KU15P
+(`default-w4 / RV64`) scores 2 / 2 (SC/MC, 1 hart) in Geekbench 5.4.1 Preview. SPEC CPU
+2017/2026 scores use RTL Linux SimPoint (`-O2 -march=rv64gc`; not official SPEC submissions) —
+see [Performance Evaluation](./docs/performance.md) for details.
 
 ## Microarchitecture
 

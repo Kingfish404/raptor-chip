@@ -2,13 +2,16 @@
 
 RAPTOR_HOME ?= $(abspath $(CURDIR)/../..)
 GEM5_ROOT   ?= $(RAPTOR_HOME)/third_party/gem5
-GEM5        ?= $(GEM5_ROOT)/build/RISCV/gem5.opt
+_GEM5_FAST  := $(GEM5_ROOT)/build/RISCV/gem5.fast
+_GEM5_OPT   := $(GEM5_ROOT)/build/RISCV/gem5.opt
+GEM5        ?= $(if $(wildcard $(_GEM5_FAST)),$(_GEM5_FAST),$(_GEM5_OPT))
 PYTHON      ?= python3
 SHELL       := /bin/bash
 
-CPU_ORIGIN   := $(origin CPU)
-BP_ORIGIN    := $(origin BP)
-MSHRS_ORIGIN := $(origin MSHRS)
+CPU_ORIGIN     := $(origin CPU)
+BP_ORIGIN      := $(origin BP)
+MSHRS_ORIGIN   := $(origin MSHRS)
+WITH_L2_ORIGIN := $(origin WITH_L2)
 
 PRESET  ?= default ## Raptor uarch preset (small|default|large|...)
 RV64    ?= 0 ## Set to 1 for RV64 ISA and payload selection
@@ -25,10 +28,11 @@ ARGS    ?= ## Extra args forwarded verbatim to raptor_se.py
 # and one load/store request port. Set RTL_EXEC=0 to fall back to gem5's
 # broader default FUPool (useful to isolate execution-resource effects).
 BP          ?= local ## Branch predictor flavor (local|bimodal|bimode|gshare|tage|ltage|...)
-MSHRS       ?= 1 ## L1 MSHRs per cache (model: 1; RTL L1D: 4)
+MSHRS       ?= 1 ## Override L1 MSHRs for both L1I/L1D (default: L1I=1, L1D=RAPT_L1D_MSHRS)
 MEM_LATENCY ?= ## Override raptor_se.py default --mem-latency (e.g. 30ns)
-WITH_L2     ?= 0 ## Set to 1 to re-enable gem5's optional 64KiB L2
-RTL_EXEC    ?= 1 ## 1 = RTL execution resources (RAPT_INTEGER_ISSUE_PORTS ALUs, 1 MULDIV, 1 LSU port)
+WITH_L2     ?= 0 ## Explicitly force L2 on (1) or off (0); default follows RAPT_L2_EN
+RTL_EXEC    ?= 1 ## 1 = RTL execution resources (ALUs, 2-cyc MUL, 1 FPU, 1 LSU port)
+SPLIT_IQ    ?= 0 ## 1 = domain-split IQUnits (ALQ+BRQ, MDQ, IOQ, FPQ)
 GRID_BENCHES ?= coremark,embench-subset ## Workloads for `make grid`
 GRID_JOBS   ?= 16 ## Parallel gem5 processes for `make grid`
 GRID_ARGS   ?= ## Extra grid_search.py args (e.g. --resume --phase rob --max-insts N)
@@ -56,6 +60,7 @@ MSHRS       := $(strip $(MSHRS))
 MEM_LATENCY := $(strip $(MEM_LATENCY))
 WITH_L2     := $(strip $(WITH_L2))
 RTL_EXEC    := $(strip $(RTL_EXEC))
+SPLIT_IQ    := $(strip $(SPLIT_IQ))
 GRID_BENCHES := $(strip $(GRID_BENCHES))
 GRID_JOBS   := $(strip $(GRID_JOBS))
 GRID_ARGS   := $(strip $(GRID_ARGS))
@@ -65,13 +70,16 @@ DSE_DIR     := $(strip $(DSE_DIR))
 
 # Translate explicit legacy knobs into raptor_se.py args. Defaults live in the
 # script / JSON layer so ChampSim-style configs are not masked by Make defaults.
-_BP_FROM_USER    := $(filter command line environment override,$(BP_ORIGIN))
-_MSHRS_FROM_USER := $(filter command line environment override,$(MSHRS_ORIGIN))
+_BP_FROM_USER      := $(filter command line environment override,$(BP_ORIGIN))
+_MSHRS_FROM_USER   := $(filter command line environment override,$(MSHRS_ORIGIN))
+_WITH_L2_FROM_USER := $(filter command line environment override,$(WITH_L2_ORIGIN))
+_L2_FLAG           := $(if $(_WITH_L2_FROM_USER),$(if $(filter 1 y yes true,$(WITH_L2)),--with-l2,--no-l2),)
 FIDELITY_ARGS := \
 	$(if $(_BP_FROM_USER),--bp $(BP),) \
 	$(if $(_MSHRS_FROM_USER),--mshrs $(MSHRS),) \
-	$(if $(filter 1 y yes true,$(WITH_L2)),--with-l2,) \
+	$(_L2_FLAG) \
 	$(if $(filter 1 y yes true,$(RTL_EXEC)),--rtl-execution-resources,) \
+	$(if $(filter 1 y yes true,$(SPLIT_IQ)),--rtl-split-iq,) \
 	$(if $(MEM_LATENCY),--mem-latency $(MEM_LATENCY),)
 
 # JSON / --set forwarding
@@ -158,7 +166,8 @@ GRID_PY      ?= $(CURDIR)/grid_search.py ## Grid-search driver script
 
 .PHONY: help test check-gem5 build-coremark build-microbench build-embench \
 	coremark microbench embench-% timing run summary sweep aggregate \
-		bp-study dse-sweep dse-aggregate grid print-config clean
+	bp-study dse-sweep dse-aggregate grid print-config \
+	embench-sweep spec-eval spec-simpoint perf-report clean
 
 
 # ============================================================================
@@ -377,6 +386,57 @@ print-config: check-gem5 ## Resolve + dump effective config without running simu
 	    $(_JSON_FLAG) $(_SET_FLAGS) \
 	    $(FIDELITY_ARGS) \
 	    $(ARGS) --print-config-only
+
+# ============================================================================
+# Full-suite evaluation & reporting (Embench, SPEC 2017/2026, RTL SimPoint)
+# ============================================================================
+EVAL_PRESETS ?= default,default-w3,default-w4,default-cache,default-l2 ## Presets for sweeps/reports
+EVAL_PRESETS := $(strip $(EVAL_PRESETS))
+EVAL_WORKERS ?= 8 ## Parallel workers for embench-sweep / spec-eval
+EVAL_WORKERS := $(strip $(EVAL_WORKERS))
+SPEC_MAX_INSTS ?= 50000000 ## Instruction cap per SPEC benchmark in gem5 SE
+SPEC_MAX_INSTS := $(strip $(SPEC_MAX_INSTS))
+SPEC_TAG ?= 50m ## Directory tag suffix for perf-report (gem5-<suite>-<tag>-<preset>)
+SPEC_TAG := $(strip $(SPEC_TAG))
+
+embench-sweep: check-gem5 ## Run CoreMark + all 19 Embench-IoT across $(EVAL_PRESETS)
+	@if [ -z "$(EVAL_OUTDIR)" ]; then echo "Set EVAL_OUTDIR=<path outside repo>"; exit 2; fi
+	$(PYTHON) $(CURDIR)/perf_report.py embench \
+	    --outdir $(EVAL_OUTDIR) \
+	    --presets "$(EVAL_PRESETS)" \
+	    --workers $(EVAL_WORKERS) \
+	    --gem5 $(GEM5)
+
+spec-eval: check-gem5 ## Run SPEC CPU 2017/2026 in gem5 SE (set SPEC_ROOT, EVAL_OUTDIR)
+	@if [ -z "$(SPEC_ROOT)" ] || [ -z "$(EVAL_OUTDIR)" ]; then \
+	    echo "Set SPEC_ROOT=<spec-install> EVAL_OUTDIR=<path outside repo>"; exit 2; \
+	fi
+	$(PYTHON) $(CURDIR)/spec_eval.py \
+	    --spec-root $(SPEC_ROOT) \
+	    --outdir $(EVAL_OUTDIR) \
+	    --preset $(PRESET) \
+	    --max-insts $(SPEC_MAX_INSTS) \
+	    --workers $(EVAL_WORKERS) \
+	    --gem5 $(GEM5) $(SPEC_ARGS)
+
+spec-simpoint: ## Run NEMU SimPoint + RTL replay on SPEC (set SPEC_ROOT, EVAL_OUTDIR, NEMU_BIN, FW_PAYLOAD, INITRAMFS, RTL_MODEL)
+	@if [ -z "$(SPEC_ROOT)" ] || [ -z "$(EVAL_OUTDIR)" ]; then \
+	    echo "Set SPEC_ROOT, EVAL_OUTDIR, NEMU_BIN, FW_PAYLOAD, INITRAMFS, RTL_MODEL"; exit 2; \
+	fi
+	$(PYTHON) $(CURDIR)/spec_simpoint.py \
+	    --spec-root $(SPEC_ROOT) \
+	    --outdir $(EVAL_OUTDIR) \
+	    --nemu $(NEMU_BIN) \
+	    --firmware $(FW_PAYLOAD) \
+	    --base-initramfs $(INITRAMFS) \
+	    --rtl-model $(RTL_MODEL) $(SIMPOINT_ARGS)
+
+perf-report: ## Aggregate SPEC/SimPoint results under $(EVAL_ROOT) into Markdown + TMA
+	@if [ -z "$(EVAL_ROOT)" ]; then echo "Set EVAL_ROOT=<eval output root>"; exit 2; fi
+	$(PYTHON) $(CURDIR)/perf_report.py report \
+	    --eval-root $(EVAL_ROOT) \
+	    --presets "$(EVAL_PRESETS)" \
+	    --tag "$(SPEC_TAG)" $(REPORT_ARGS)
 
 # ============================================================================
 # Cleanup

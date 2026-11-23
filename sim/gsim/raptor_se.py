@@ -79,6 +79,7 @@ Sweep example:
 from __future__ import annotations
 
 import argparse
+import copy
 import os
 import sys
 from pathlib import Path
@@ -112,6 +113,8 @@ from m5.objects import (
     Process,
     RdWrPort,
     ReadPort,
+    StridePrefetcher,
+    TaggedPrefetcher,
     ReturnAddrStack,
     RiscvO3CPU,
     RiscvAtomicSimpleCPU,
@@ -145,6 +148,7 @@ from raptor_dse import (
     SUPPORTED_BP_KINDS,
     _die,
     apply_overrides,
+    build_rtl_tage_params,
     canonical_bp_name,
     derive_uarch,
     detect_rtl_dirp,
@@ -537,6 +541,36 @@ def build_branch_pred(u: dict, sim: dict) -> BranchPredictor:
     return bp
 
 
+def _make_riscv_isa(u: dict, rv64: bool) -> RiscvISA:
+    return RiscvISA(
+        riscv_type=("RV64" if rv64 else "RV32"),
+        enable_rvv=bool(u.get("has_vpu", False)),
+        vlen=int(u.get("vlen", 128)),
+    )
+
+
+def _rtl_fp_units() -> list:
+    # Mirror rtl/core/backend/feu/rapt_feu.sv: single issue port, 3-stage
+    # AddSub/Cmp/Cvt, 8-stage pipelined FMUL/FMA, iterative unpipelined DivSqrt.
+    fp_alu_ops = [
+        OpDesc(opClass="FloatAdd", opLat=3),
+        OpDesc(opClass="FloatCmp", opLat=3),
+        OpDesc(opClass="FloatCvt", opLat=3),
+        OpDesc(opClass="Bf16Cvt", opLat=3),
+    ]
+    fp_mdiv_ops = [
+        OpDesc(opClass="FloatMult", opLat=8),
+        OpDesc(opClass="FloatMultAcc", opLat=8),
+        OpDesc(opClass="FloatMisc", opLat=3),
+        OpDesc(opClass="FloatDiv", opLat=12, pipelined=False),
+        OpDesc(opClass="FloatSqrt", opLat=24, pipelined=False),
+    ]
+    return [
+        FP_ALU(opList=fp_alu_ops, count=1),
+        FP_MultDiv(opList=fp_mdiv_ops, count=1),
+    ]
+
+
 def build_o3_cpu(
     u: dict,
     rv64: bool,
@@ -545,6 +579,7 @@ def build_o3_cpu(
     storeset: bool = False,
     rtl_execution_resources: bool = False,
     fetch_queue_size: int | None = None,
+    split_iq: bool = False,
 ) -> RiscvO3CPU:
     """Model the Raptor scalar out-of-order pipeline with gem5.
 
@@ -552,23 +587,18 @@ def build_o3_cpu(
     """
     cpu = RiscvO3CPU(
         cpu_id=cpu_id,
-        isa=[RiscvISA(riscv_type=("RV64" if rv64 else "RV32"))],
+        isa=[_make_riscv_isa(u, rv64)],
     )
     # C5: ISA extension alignment.
     # gem5's RiscvISA sets base ISA (I/M/A/F/D + C compressed) via riscv_type;
-    # The selected XLEN does not establish RTL/gem5 extension parity.
+    # enable_rvv and vlen mirror RAPT_V_EXTENSION / RAPT_VLEN (128b).
     # Check workload instructions against the installed gem5 build; MISA
     # does not enumerate Z-extensions.
 
     # Microarchitecture parameters from raptor-chip config
-    # C1: IQ configuration (unified instruction queue model).
-    #   RTL has RS (8-entry OoO) + IOQ (8-entry in-order), but since gem5's IQ
-    #   is unified and scheduling is implicitly hybrid (ready on operands),
-    #   we model both as a single 16-entry queue. Performance-neutral for
-    #   most workloads; validated against coremark baseline.
+    # C1: IQ configuration (unified by default; --rtl-split-iq models the
+    #   domain-partitioned ALQ+BRQ / MDQ / IOQ / FPQ queues in rapt_backend.sv).
     cpu.fetchBufferSize = u.get("fetch_buffer_size", u["line_bytes"])
-    if fetch_queue_size is not None:
-        cpu.fetchQueueSize = fetch_queue_size
     cpu.fetchWidth = u["fetch_w"]
     cpu.decodeWidth = u["decode_w"]
     cpu.renameWidth = u["rename_w"]
@@ -589,36 +619,74 @@ def build_o3_cpu(
     cpu.LQEntries = u["lq"]
     cpu.SQEntries = u["sq"]
     cpu.instQueues = [IQUnit(numEntries=u["iq"])]
-    if rtl_execution_resources:
-        # Preserve the default pool's non-integer capabilities, while matching
-        # Raptor's RAPT_INTEGER_ISSUE_PORTS ALU pipes, one MULDIV pipe, and one
-        # L1D request path. IntMult opLat=1 approximates the two-stage RTL MUL;
-        # division retains gem5's fixed unpipelined 20-cycle latency, unlike
-        # the RTL divider's operand-dependent normalization and iteration.
+    if rtl_execution_resources or split_iq:
+        # Match Raptor's RAPT_INTEGER_ISSUE_PORTS ALU pipes, one MULDIV pipe
+        # (2-stage pipelined MUL when RAPT_M_FAST=1, iterative unpipelined DIV),
+        # one FPU pipe (rapt_feu.sv), and one L1D request path.
         mdiv_ops = [
-            OpDesc(opClass="IntMult", opLat=1 if u.get("m_fast") else 3),
+            OpDesc(opClass="IntMult", opLat=2 if u.get("m_fast") else 3),
             OpDesc(opClass="IntDiv", opLat=20, pipelined=False),
         ]
-        cpu.instQueues = [
-            IQUnit(
-                numEntries=u["iq"],
-                fuPool=FUPool(
-                    FUList=[
-                        IntALU(count=u["integer_issue_ports"]),
-                        IntMultDiv(opList=mdiv_ops, count=1),
-                        FP_ALU(),
-                        FP_MultDiv(),
-                        ReadPort(),
-                        SIMD_Unit(),
-                        Matrix_Unit(),
-                        System_Unit(),
-                        PredALU(),
-                        WritePort(),
-                        RdWrPort(count=1),
-                    ]
+        fp_units = _rtl_fp_units()
+        if split_iq:
+            # Domain-partitioned issue queues mirroring rapt_backend.sv:
+            #   ALQ + BRQ (IntAlu + System), MDQ (IntMultDiv),
+            #   IOQ (LSU RdWrPort), FPQ (FP + SIMD/Vector).
+            int_br_entries = int(u.get("alq_size", 8)) + int(u.get("brq_size", 8))
+            cpu.instQueues = [
+                IQUnit(
+                    numEntries=int_br_entries,
+                    fuPool=FUPool(
+                        FUList=[
+                            IntALU(count=u["integer_issue_ports"]),
+                            System_Unit(count=1),
+                        ]
+                    ),
                 ),
-            )
-        ]
+                IQUnit(
+                    numEntries=int(u.get("mdq_size", 4)),
+                    fuPool=FUPool(
+                        FUList=[IntMultDiv(opList=mdiv_ops, count=1)]
+                    ),
+                ),
+                IQUnit(
+                    numEntries=int(u.get("ioq_size", 8)),
+                    fuPool=FUPool(
+                        FUList=[ReadPort(), WritePort(), RdWrPort(count=1)]
+                    ),
+                ),
+                IQUnit(
+                    numEntries=int(u.get("fpq_size", 8)),
+                    fuPool=FUPool(
+                        FUList=[
+                            *fp_units,
+                            SIMD_Unit(count=1),
+                            Matrix_Unit(count=1),
+                            PredALU(count=1),
+                        ]
+                    ),
+                ),
+            ]
+        else:
+            cpu.instQueues = [
+                IQUnit(
+                    numEntries=u["iq"],
+                    fuPool=FUPool(
+                        FUList=[
+                            IntALU(count=u["integer_issue_ports"]),
+                            IntMultDiv(opList=mdiv_ops, count=1),
+                            *fp_units,
+                            ReadPort(),
+                            SIMD_Unit(count=1),
+                            Matrix_Unit(count=1),
+                            System_Unit(count=1),
+                            PredALU(count=1),
+                            WritePort(),
+                            RdWrPort(count=1),
+                        ]
+                    ),
+                )
+            ]
         cpu.cacheLoadPorts = 1
         cpu.cacheStorePorts = 1
     cpu.branchPred = build_branch_pred(u, sim or DEFAULT_SIM_CFG)
@@ -634,34 +702,64 @@ def build_o3_cpu(
     return cpu
 
 
-def build_l1(size: str, assoc: int, is_data: bool, mshrs: int = 1) -> Cache:
-    # This model defaults to one MSHR. The current default RTL has four L1D
-    # MSHRs and IOQ replay; --mshrs explores concurrency without modeling
-    # that protocol.
-    return Cache(
+def build_l1(
+    size: str,
+    assoc: int,
+    is_data: bool,
+    mshrs: int = 1,
+    prefetch: bool = False,
+) -> Cache:
+    # L1I defaults to 1 MSHR (2 with non-blocking hit-under-prefetch);
+    # L1D defaults to RAPT_L1D_MSHRS (4 on default/large, 1 on small/middle).
+    eff_mshrs = max(2, mshrs) if (prefetch and not is_data) else max(1, mshrs)
+    cache = Cache(
         size=size,
         assoc=assoc,
         tag_latency=1,
         data_latency=1,
         response_latency=1,
-        mshrs=max(1, mshrs),
+        mshrs=eff_mshrs,
         tgts_per_mshr=8,
         writeback_clean=False,
         is_read_only=not is_data,
     )
+    if prefetch:
+        if is_data:
+            # Mirrors rtl/core/memory/dcache/rapt_l1d_stride_pf.sv (16-entry
+            # direct-mapped PC-indexed same-page IP-stride prefetcher, degree=1).
+            cache.prefetcher = StridePrefetcher(
+                table_entries="16",
+                table_assoc=1,
+                degree=1,
+                prefetch_on_access=True,
+                queue_size=4,
+            )
+        else:
+            # Mirrors rtl/core/memory/icache/rapt_l1i.sv same-page next-line PF.
+            cache.prefetcher = TaggedPrefetcher(
+                degree=1,
+                prefetch_on_access=True,
+                queue_size=2,
+            )
+    return cache
 
 
-def build_l2() -> Cache:
-    # Optional shared "next-level" cache so loads have a sane refill latency
-    # rather than going straight to DRAM. Sized to a small SRAM-like buffer
-    # since raptor-chip's RTL today has no L2 — we model it as a refill stage.
+def build_l2(
+    size: str = "64KiB",
+    assoc: int = 8,
+    mshrs: int = 5,
+    latency: int = 8,
+) -> Cache:
+    # Unified L2 cache mirroring rtl/uncore/l2cache/rapt_l2.sv when RAPT_L2_EN
+    # is defined (e.g. default-l2 = 512 KiB 8-way, large = 128 KiB 1-way).
+    lat = max(1, int(latency))
     return Cache(
-        size="64KiB",
-        assoc=8,
-        tag_latency=8,
-        data_latency=8,
-        response_latency=8,
-        mshrs=16,
+        size=size,
+        assoc=assoc,
+        tag_latency=lat,
+        data_latency=lat,
+        response_latency=lat,
+        mshrs=max(1, int(mshrs)),
         tgts_per_mshr=8,
     )
 
@@ -688,6 +786,7 @@ def resolve_benchmark(name: str, rv64: bool) -> tuple[Path, list[str]]:
 
     catalog = {
         "coremark": (base / "coremark" / "coremark.elf", []),
+        "microbench": (base / "microbench" / "microbench.elf", []),
         "embench-aha-mont64": (emb("aha-mont64"), []),
         "embench-crc32": (emb("crc32"), []),
         "embench-matmult-int": (emb("matmult-int"), []),
@@ -786,9 +885,18 @@ def main(argv: list[str] | None = None) -> int:
         "--rtl-execution-resources",
         action="store_true",
         help=(
-            "use RAPT_INTEGER_ISSUE_PORTS integer ALUs, one MULDIV (RAPT_M_FAST"
-            " timing when enabled), and one load/store request port instead of"
-            " gem5's broader default FUPool"
+            "use RAPT_INTEGER_ISSUE_PORTS integer ALUs, one MULDIV (2-cycle"
+            " pipelined MUL when RAPT_M_FAST=1), one FPU pipe, and one"
+            " load/store request port instead of gem5's broader default FUPool"
+        ),
+    )
+    ap.add_argument(
+        "--rtl-split-iq",
+        action="store_true",
+        help=(
+            "partition gem5's issue queue into domain-specific IQUnits"
+            " mirroring rapt_backend.sv (ALQ+BRQ, MDQ, IOQ, FPQ); implies"
+            " RTL execution resources"
         ),
     )
     ap.add_argument(
@@ -796,20 +904,28 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=None,
         help=(
-            "override gem5's per-thread fetch queue depth (default: 32); "
+            "override gem5's per-thread fetch queue depth (default: RAPT_RIQ_SIZE); "
             "use a small value to measure frontend-buffer decoupling"
         ),
     )
     ap.add_argument(
         "--mshrs",
         type=int,
-        default=1,
-        help="L1 MSHR count per cache (default: 1, matching RTL single-outstanding FSM)",
+        default=None,
+        help=(
+            "override L1 MSHR count for both L1I and L1D (default: L1I=1,"
+            " L1D=max(1, RAPT_L1D_MSHRS))"
+        ),
     )
     ap.add_argument(
         "--options",
         default="",
         help='argv for the benchmark, semicolon-separated (e.g. "0x0;0x0;0x66;10")',
+    )
+    ap.add_argument(
+        "--input",
+        default=None,
+        help="optional stdin file path for the SE workload",
     )
     ap.add_argument("--cwd", default=os.getcwd())
     ap.add_argument(
@@ -868,16 +984,18 @@ def main(argv: list[str] | None = None) -> int:
     # Pre-seed rv64 from CLI; JSON/--set may flip it via simulation.rv64 below.
     cfg = parse_rapt_config(svh, rv64=args.rv64)
     u = derive_uarch(cfg)
-    sim = DEFAULT_SIM_CFG.copy()
+    sim = copy.deepcopy(DEFAULT_SIM_CFG)
     sim["rv64"] = args.rv64
+    sim["with_l2"] = bool(u["l2_en"])
 
     # ---- 1a. Direction-predictor default from the preset --------------------
     # The RTL selects its direction predictor via RAPT_BPU_DIRP_*; the
     # simulator must follow it so an unqualified run models the same BPU as
-    # the HDL (default preset: TAGE). JSON/SET/--bp layers below still win.
+    # the HDL (default preset: TAGE with RAPT_TAGE_BIM_BITS/INDEX_BITS).
+    # JSON/SET/--bp layers below still win.
     sim["bp"] = detect_rtl_dirp(cfg)
     if sim["bp"] == "tage":
-        sim["bp_params"]["tage"] = dict(RTL_TAGE_PARAMS)
+        sim["bp_params"]["tage"] = build_rtl_tage_params(u)
     if cfg.get("RAPT_BPU_DIRP_STATIC") and sim["bp"] == "local":
         print(
             "[raptor_se] note: RAPT_BPU_DIRP_STATIC has no gem5 O3 analogue; "
@@ -902,12 +1020,16 @@ def main(argv: list[str] | None = None) -> int:
         sim["cpu"] = args.cpu
     if has_flag("--bp"):
         sim["bp"] = canonical_bp_name(args.bp)
+        if sim["bp"] == "tage" and "tage" not in sim.get("bp_params", {}):
+            sim.setdefault("bp_params", {})["tage"] = build_rtl_tage_params(u)
     if has_flag("--no-ras"):
         sim["use_ras"] = False
     if has_flag("--indirect"):
         sim["use_indirect"] = True
     if has_flag("--storeset"):
         sim["storeset"] = True
+    if has_flag("--rtl-split-iq"):
+        sim["split_iq"] = True
     if has_flag("--with-l2"):
         sim["with_l2"] = True
     if has_flag("--no-l2"):
@@ -927,11 +1049,12 @@ def main(argv: list[str] | None = None) -> int:
     args.bp       = sim["bp"]
     args.storeset = bool(sim["storeset"])
     args.no_l2    = not bool(sim["with_l2"])
-    args.mshrs    = int(sim["mshrs"])
+    l1i_mshrs     = int(sim["mshrs"]) if sim["mshrs"] is not None else int(u["l1i_mshrs"])
+    l1d_mshrs     = int(sim["mshrs"]) if sim["mshrs"] is not None else int(u["l1d_mshrs"])
     args.clk_freq    = sim["clk_freq"]
     args.mem_size    = sim["mem_size"]
     args.mem_latency = sim["mem_latency"]
-    sim["rtl_execution_resources"] = args.rtl_execution_resources
+    sim["rtl_execution_resources"] = args.rtl_execution_resources or bool(sim["split_iq"])
     sim["fetch_queue_size"] = args.fetch_queue_size
 
     print(f"[raptor_se] preset={args.preset} svh={svh}")
@@ -988,28 +1111,37 @@ def main(argv: list[str] | None = None) -> int:
             rv64=args.rv64,
             sim=sim,
             storeset=args.storeset,
-            rtl_execution_resources=args.rtl_execution_resources,
+            rtl_execution_resources=bool(sim["rtl_execution_resources"]),
             fetch_queue_size=args.fetch_queue_size,
+            split_iq=bool(sim["split_iq"]),
         )
     elif args.cpu == "atomic":
         system.cpu = RiscvAtomicSimpleCPU(
             cpu_id=0,
-            isa=[RiscvISA(riscv_type=("RV64" if args.rv64 else "RV32"))],
+            isa=[_make_riscv_isa(u, args.rv64)],
         )
     else:
         system.cpu = RiscvTimingSimpleCPU(
             cpu_id=0,
-            isa=[RiscvISA(riscv_type=("RV64" if args.rv64 else "RV32"))],
+            isa=[_make_riscv_isa(u, args.rv64)],
         )
 
     system.cpu.createInterruptController()
 
     # Caches
     system.cpu.icache = build_l1(
-        u["l1i_size"], u["l1i_assoc"], is_data=False, mshrs=args.mshrs
+        u["l1i_size"],
+        u["l1i_assoc"],
+        is_data=False,
+        mshrs=l1i_mshrs,
+        prefetch=bool(u.get("l1i_prefetch", False)),
     )
     system.cpu.dcache = build_l1(
-        u["l1d_size"], u["l1d_assoc"], is_data=True, mshrs=args.mshrs
+        u["l1d_size"],
+        u["l1d_assoc"],
+        is_data=True,
+        mshrs=l1d_mshrs,
+        prefetch=bool(u.get("l1d_prefetch", False)),
     )
     system.cpu.icache.cpu_side = system.cpu.icache_port
     system.cpu.dcache.cpu_side = system.cpu.dcache_port
@@ -1023,7 +1155,12 @@ def main(argv: list[str] | None = None) -> int:
         system.cpu.dcache.mem_side = system.membus.cpu_side_ports
     else:
         system.l2bus = L2XBar()
-        system.l2 = build_l2()
+        system.l2 = build_l2(
+            size=u["l2_size"],
+            assoc=u["l2_assoc"],
+            mshrs=u["l2_mshrs"],
+            latency=u["l2_latency"],
+        )
         system.cpu.icache.mem_side = system.l2bus.cpu_side_ports
         system.cpu.dcache.mem_side = system.l2bus.cpu_side_ports
         system.l2.cpu_side = system.l2bus.mem_side_ports
@@ -1053,17 +1190,21 @@ def main(argv: list[str] | None = None) -> int:
     process.executable = str(elf)
     process.cwd = args.cwd
     process.cmd = bench_argv
+    if args.input:
+        process.input = args.input
     system.workload = SEWorkload.init_compatible(str(elf))
     system.cpu.workload = process
     system.cpu.createThreads()
 
     # ---- 5. Instantiate + run ------------------------------------------------
+    # max_insts_any_thread must be set before m5.instantiate() so BaseCPU
+    # schedules the instruction-limit event during C++ init().
+    if args.max_insts > 0:
+        system.cpu.max_insts_any_thread = args.max_insts
     root = Root(full_system=False, system=system)
     m5.instantiate()
 
     print(f"[raptor_se] starting simulation @ {args.clk_freq}")
-    if args.max_insts > 0:
-        system.cpu.max_insts_any_thread = args.max_insts
     if args.max_ticks > 0:
         exit_event = m5.simulate(args.max_ticks)
     else:

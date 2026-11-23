@@ -33,12 +33,17 @@ from pathlib import Path
 RAPTOR_HOME = Path(os.environ.get("RAPTOR_HOME", Path(__file__).resolve().parents[2]))
 GSIM_DIR = RAPTOR_HOME / "sim" / "gsim"
 SCRIPT = GSIM_DIR / "raptor_se.py"
-GEM5 = Path(
-    os.environ.get(
-        "GEM5",
-        RAPTOR_HOME / "third_party" / "gem5" / "build" / "RISCV" / "gem5.opt",
-    )
-)
+def _default_gem5() -> Path:
+    if "GEM5" in os.environ:
+        return Path(os.environ["GEM5"])
+    for variant in ("gem5.fast", "gem5.opt"):
+        cand = RAPTOR_HOME / "third_party" / "gem5" / "build" / "RISCV" / variant
+        if cand.exists():
+            return cand
+    return RAPTOR_HOME / "third_party" / "gem5" / "build" / "RISCV" / "gem5.opt"
+
+
+GEM5 = _default_gem5()
 RESULTS = RAPTOR_HOME / "sim" / "build" / "gsim" / "results"
 GRID_ROOT = RAPTOR_HOME / "sim" / "build" / "gsim" / "grid"
 
@@ -94,14 +99,14 @@ def build_points() -> dict[str, Point]:
         assert p.label not in pts, p.label
         pts[p.label] = p
 
-    # ---- Phase A: ROB sweep (PHY stays at the preset's 128 unless the ROB
+    # ---- Phase A: ROB sweep (PHY stays at the preset's 64 unless the ROB
     # needs more register-file cover: pow2 >= 32 + ROB) ----
     for rob in (16, 32, 48, 64, 96, 128):
         add(Point(
             f"rob{rob}",
             "rob",
-            set_flags(rob=rob, phys_int=max(128, next_pow2(32 + rob)),
-                      phys_fp=max(128, next_pow2(32 + rob))),
+            set_flags(rob=rob, phys_int=max(64, next_pow2(32 + rob)),
+                      phys_fp=max(64, next_pow2(32 + rob))),
             rtl_legal=rob in (16, 32, 64, 128),
             note="RTL ROB depth needs power-of-2 pointer wrap",
         ))
@@ -188,7 +193,8 @@ def bench_argv(bench: str) -> list[str]:
 
 
 def run_one(bench: str, point: Point, outdir: Path, max_insts: int,
-            extra: list[str]) -> tuple[str, str, dict]:
+            extra: list[str], preset: str = PRESET,
+            rv64: bool = RV64, split_iq: bool = False) -> tuple[str, str, dict]:
     """Run one gem5 simulation; returns (bench, label, stats dict)."""
     outdir.mkdir(parents=True, exist_ok=True)
     log = outdir / "run.log"
@@ -196,8 +202,10 @@ def run_one(bench: str, point: Point, outdir: Path, max_insts: int,
         str(GEM5),
         f"--outdir={outdir}",
         str(SCRIPT),
-        "--preset", PRESET,
+        "--preset", preset,
         "--rtl-execution-resources",
+        *(["--rv64"] if rv64 else []),
+        *(["--rtl-split-iq"] if split_iq else []),
         *bench_argv(bench),
         *point.flags,
         *extra,
@@ -228,6 +236,10 @@ def parse_stats(path: Path) -> dict:
         "system.cpu.dcache.demandMisses::total": "l1d_misses",
         "system.cpu.dcache.demandAccesses::total": "l1d_accesses",
         "system.cpu.iew.iqFullEvents": "iq_full",
+        "system.cpu.rename.ROBFullEvents": "rob_full",
+        "system.cpu.iew.lsqFullEvents": "lsq_full",
+        "system.cpu.rob.reads": "rob_reads",
+        "system.cpu.rob.writes": "rob_writes",
         "system.cpu.rob.rob_reads": "rob_reads",
         "system.cpu.rob.rob_writes": "rob_writes",
         "system.cpu.commitStats0.numInsts": "commit_insts",
@@ -241,7 +253,7 @@ def parse_stats(path: Path) -> dict:
         for line in f:
             m = line_re.match(line)
             if m and m.group(1) in want:
-                out[want[m.group(1)]] = m.group(2)
+                out.setdefault(want[m.group(1)], m.group(2))
     return out
 
 
@@ -260,6 +272,11 @@ def point_knobs(point: Point) -> dict:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--preset", default=PRESET,
+                    help=f"RTL preset under rtl/configs/ (default: {PRESET})")
+    ap.add_argument("--rv64", action="store_true", help="run RV64 workloads")
+    ap.add_argument("--rtl-split-iq", action="store_true",
+                    help="use domain-split IQUnits mirroring rapt_backend.sv")
     ap.add_argument("--phase", default=None,
                     help="only run points of this phase (rob|iq|sq|cache|width|bpu)")
     ap.add_argument("--benches", default="coremark",
@@ -311,20 +328,24 @@ def main() -> int:
 
     if args.aggregate_only:
         print(f"[grid] aggregate-only: rebuilding CSVs from existing stats")
-        return aggregrate(benches, all_points, preloaded, [])
+        return aggregrate(benches, all_points, preloaded, [], rv64=args.rv64)
 
     if not GEM5.exists():
         print(f"[grid] gem5 binary not found: {GEM5}", file=sys.stderr)
         return 2
 
     print(f"[grid] {len(jobs)} runs, {args.workers} workers, "
+          f"preset={args.preset} rv{64 if args.rv64 else 32} "
           f"max-insts={args.max_insts or 'unbounded'}")
 
     rows: dict[str, dict[str, dict]] = {b: dict(preloaded[b]) for b in benches}
     errors: list[str] = []
     with cf.ThreadPoolExecutor(max_workers=args.workers) as ex:
         futs = {
-            ex.submit(run_one, bench, point, outdir, args.max_insts, []):
+            ex.submit(
+                run_one, bench, point, outdir, args.max_insts, [],
+                args.preset, args.rv64, args.rtl_split_iq,
+            ):
             (bench, point.label)
             for bench, point, outdir in jobs
         }
@@ -340,11 +361,12 @@ def main() -> int:
                   f"ipc={stats.get('ipc', '?')}", flush=True)
 
     # ---- Aggregate ----
-    return aggregrate(benches, all_points, rows, errors)
+    return aggregrate(benches, all_points, rows, errors, rv64=args.rv64)
 
 
 def aggregrate(benches: list[str], points: dict[str, Point],
-               rows: dict[str, dict[str, dict]], errors: list[str]) -> int:
+               rows: dict[str, dict[str, dict]], errors: list[str],
+               rv64: bool = RV64) -> int:
     """Write per-workload CSVs from collected/preloaded stats rows."""
     RESULTS.mkdir(parents=True, exist_ok=True)
 
@@ -364,7 +386,7 @@ def aggregrate(benches: list[str], points: dict[str, Point],
                 **stats,
             }
             per_bench.append(row)
-        csv_path = RESULTS / f"grid-{bench}-rv{32 if not RV64 else 64}.csv"
+        csv_path = RESULTS / f"grid-{bench}-rv{64 if rv64 else 32}.csv"
         with csv_path.open("w", newline="") as f:
             cols = sorted({k for r in per_bench for k in r})
             w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")

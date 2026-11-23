@@ -79,6 +79,15 @@ RTL_TAGE_PARAMS: dict = {
 }
 
 
+def build_rtl_tage_params(u: dict) -> dict:
+    """Return RTL-aligned gem5 TAGE params sized from the preset's TAGE bits."""
+    params = dict(RTL_TAGE_PARAMS)
+    bim_bits = int(u.get("tage_bim_bits", 8))
+    idx_bits = int(u.get("tage_index_bits", 7))
+    params["log_table_sizes"] = [bim_bits, idx_bits, idx_bits, idx_bits]
+    return params
+
+
 def detect_rtl_dirp(cfg: dict) -> str:
     """Map the preset's RAPT_BPU_DIRP_* define onto a gem5 BP kind.
 
@@ -209,6 +218,10 @@ def parse_rapt_config(svh_path: Path, rv64: bool) -> dict:
                 continue
             if not cond_active():
                 continue
+            if op == "`include" and "RV32 only" in stripped:
+                raise ValueError(
+                    f"preset {svh_path.parent.name!r} is RV32-only (do not pass --rv64)"
+                )
 
             m = define_re.match(stripped)
             if not m:
@@ -284,6 +297,44 @@ def derive_uarch(cfg: dict) -> dict:
     phys_int = int(cfg["RAPT_PHY_SIZE"])
     phys_fp = max(phys_int, 64)
 
+    # Per-cache MSHRs and L1 prefetchers (defaults mirror rtl/include/rapt.svh).
+    l1i_mshrs = 1
+    l1d_mshrs = max(1, int(cfg.get("RAPT_L1D_MSHRS", 0)))
+    l1i_prefetch = bool(int(cfg.get("RAPT_L1I_PREFETCH", 1)))
+    l1d_prefetch = bool(int(cfg.get("RAPT_L1D_PREFETCH", 1)))
+    l2tlb_entries = int(cfg.get("RAPT_L2TLB_ENTRIES", 0))
+    l2tlb_ways = int(cfg.get("RAPT_L2TLB_WAYS", 1))
+
+    # L2 cache geometry and enablement (defaults mirror rtl/include/rapt.svh).
+    xlen = int(cfg.get("RAPT_XLEN", 32))
+    l2_en = bool(cfg.get("RAPT_L2_EN", False))
+    l2_line, l2_assoc, l2_size = cache_geom(
+        cfg.get("RAPT_L2_LINE_LEN", cfg["RAPT_L1D_LINE_LEN"]),
+        cfg.get("RAPT_L2_LEN", 7),
+        cfg.get("RAPT_L2_N_WAYS", 1),
+        xlen // 8,
+    )
+    # rapt_l2.sv allows 5 (RV64) or 3 (RV32) concurrent clean read misses.
+    l2_mshrs = 5 if xlen == 64 else 3
+
+    # TAGE table index widths (defaults mirror rtl/include/rapt.svh: 8/7).
+    tage_bim_bits = int(cfg.get("RAPT_TAGE_BIM_BITS", 8))
+    tage_index_bits = int(cfg.get("RAPT_TAGE_INDEX_BITS", 7))
+
+    # Split execution-domain queue sizes (rapt_backend.sv / rapt_pkg.sv).
+    alq_size = int(cfg["RAPT_RS_SIZE"])
+    brq_size = int(cfg.get("RAPT_BRQ_SIZE", 8))
+    mdq_size = 4
+    ioq_size = int(cfg["RAPT_IOQ_SIZE"])
+    fpq_size = int(cfg["RAPT_RS_SIZE"])
+
+    # ISA extensions: FPU / VPU presence and VLEN (rapt.svh default: 128).
+    has_fpu = not bool(cfg.get("RAPT_NO_FPU", False))
+    has_vpu = bool(cfg.get("RAPT_V_EXTENSION", False)) and not bool(
+        cfg.get("RAPT_NO_VPU", False)
+    )
+    vlen = int(cfg.get("RAPT_VLEN", 128))
+
     # RIQ (rename-input queue) is the RTL's fetch→rename decoupling buffer;
     # gem5's fetch→decode queue (fetchQueueSize, default 32) is its closest
     # analogue.  IIQ (dispatch-input queue) has no gem5 O3 counterpart
@@ -293,13 +344,29 @@ def derive_uarch(cfg: dict) -> dict:
     return dict(
         l1i_size=f"{l1i_size}B",
         l1i_assoc=l1i_assoc,
+        l1i_mshrs=l1i_mshrs,
+        l1i_prefetch=l1i_prefetch,
         l1d_size=f"{l1d_size}B",
         l1d_assoc=l1d_assoc,
+        l1d_mshrs=l1d_mshrs,
+        l1d_prefetch=l1d_prefetch,
+        l2tlb_entries=l2tlb_entries,
+        l2tlb_ways=l2tlb_ways,
+        l2_en=l2_en,
+        l2_size=f"{l2_size}B",
+        l2_assoc=l2_assoc,
+        l2_mshrs=l2_mshrs,
+        l2_latency=8,
         line_bytes=line_bytes,
         fetch_buffer_size=line_bytes,
         fetch_q=fetch_q,
         rob=int(cfg["RAPT_ROB_SIZE"]),
         iq=iq_entries,
+        alq_size=alq_size,
+        brq_size=brq_size,
+        mdq_size=mdq_size,
+        ioq_size=ioq_size,
+        fpq_size=fpq_size,
         sq=int(cfg["RAPT_SQ_SIZE"]),
         lq=int(cfg["RAPT_SQ_SIZE"]),
         phys_int=phys_int,
@@ -319,8 +386,13 @@ def derive_uarch(cfg: dict) -> dict:
         btb_tag_bits=7,
         pht_size=int(cfg["RAPT_PHT_SIZE"]),
         pht_ctr_bits=2,
+        tage_bim_bits=tage_bim_bits,
+        tage_index_bits=tage_index_bits,
         rsb_size=int(cfg["RAPT_RSB_SIZE"]),
         m_fast=bool(cfg.get("RAPT_M_FAST", 0)),
+        has_fpu=has_fpu,
+        has_vpu=has_vpu,
+        vlen=vlen,
     )
 
 
@@ -328,7 +400,7 @@ DEFAULT_SIM_CFG: dict = {
     "clk_freq": "1GHz",
     "mem_size": "512MiB",
     "mem_latency": "30ns",
-    "mshrs": 1,
+    "mshrs": None,
     "bp": "local",
     "bp_params": {},
     "use_ras": True,
@@ -341,6 +413,7 @@ DEFAULT_SIM_CFG: dict = {
     "indirect_hash_ghr": True,
     "indirect_hash_targets": True,
     "storeset": False,
+    "split_iq": False,
     "with_l2": False,
     "cpu": "o3",
     "rv64": False,
@@ -355,14 +428,33 @@ def _bool(v) -> bool:
     return bool(v) if isinstance(v, bool) else str(v).lower() in ("1", "true", "yes", "on")
 
 
+def _opt_int(v) -> int | None:
+    return None if v is None else int(v)
+
+
 _UARCH_TYPES: dict = {
     "l1i_assoc": int,
+    "l1i_mshrs": int,
+    "l1i_prefetch": _bool,
     "l1d_assoc": int,
+    "l1d_mshrs": int,
+    "l1d_prefetch": _bool,
+    "l2tlb_entries": int,
+    "l2tlb_ways": int,
+    "l2_en": _bool,
+    "l2_assoc": int,
+    "l2_mshrs": int,
+    "l2_latency": int,
     "line_bytes": int,
     "fetch_buffer_size": int,
     "fetch_q": int,
     "rob": int,
     "iq": int,
+    "alq_size": int,
+    "brq_size": int,
+    "mdq_size": int,
+    "ioq_size": int,
+    "fpq_size": int,
     "sq": int,
     "lq": int,
     "phys_int": int,
@@ -381,12 +473,17 @@ _UARCH_TYPES: dict = {
     "btb_tag_bits": int,
     "pht_size": int,
     "pht_ctr_bits": int,
+    "tage_bim_bits": int,
+    "tage_index_bits": int,
     "rsb_size": int,
     "m_fast": _bool,
+    "has_fpu": _bool,
+    "has_vpu": _bool,
+    "vlen": int,
 }
 
 _SIM_TYPES: dict = {
-    "mshrs": int,
+    "mshrs": _opt_int,
     "use_ras": _bool,
     "use_indirect": _bool,
     "indirect_sets": int,
@@ -397,6 +494,7 @@ _SIM_TYPES: dict = {
     "indirect_hash_ghr": _bool,
     "indirect_hash_targets": _bool,
     "storeset": _bool,
+    "split_iq": _bool,
     "with_l2": _bool,
     "rv64": _bool,
     "bp_params": dict,
@@ -627,9 +725,9 @@ def normalize_dse_config(data: dict) -> dict:
         if "branch_predictor" in cpu:
             out["sim"]["bp"] = canonical_bp_name(cpu["branch_predictor"])
 
-    for section_name, size_key, assoc_key in (
-        ("L1I", "l1i_size", "l1i_assoc"),
-        ("L1D", "l1d_size", "l1d_assoc"),
+    for section_name, size_key, assoc_key, mshr_key in (
+        ("L1I", "l1i_size", "l1i_assoc", "l1i_mshrs"),
+        ("L1D", "l1d_size", "l1d_assoc", "l1d_mshrs"),
     ):
         section = data.get(section_name)
         if isinstance(section, dict):
@@ -638,14 +736,23 @@ def normalize_dse_config(data: dict) -> dict:
                 out["uarch"][size_key] = size
             if "ways" in section:
                 out["uarch"][assoc_key] = section["ways"]
+            if "mshr_size" in section:
+                out["uarch"][mshr_key] = int(section["mshr_size"])
 
-    l1_mshrs = [
-        int(data[name]["mshr_size"])
-        for name in ("L1I", "L1D")
-        if isinstance(data.get(name), dict) and "mshr_size" in data[name]
-    ]
-    if l1_mshrs:
-        out["sim"]["mshrs"] = max(l1_mshrs)
+    l2c = data.get("L2C")
+    if isinstance(l2c, dict):
+        if "enabled" in l2c:
+            out["sim"]["with_l2"] = l2c["enabled"]
+            out["uarch"]["l2_en"] = l2c["enabled"]
+        size = _cache_size(l2c, line_bytes)
+        if size is not None:
+            out["uarch"]["l2_size"] = size
+        if "ways" in l2c:
+            out["uarch"]["l2_assoc"] = l2c["ways"]
+        if "mshr_size" in l2c:
+            out["uarch"]["l2_mshrs"] = int(l2c["mshr_size"])
+        if "latency" in l2c:
+            out["uarch"]["l2_latency"] = int(l2c["latency"])
 
     btb = data.get("BTB")
     if isinstance(btb, dict):
@@ -899,13 +1006,13 @@ def equalize_bp_budget(u: dict, sim: dict, *, verbose: bool = True) -> None:
         tage = bp_params.get("tage")
         if isinstance(tage, dict) and isinstance(tage.get("log_table_sizes"), list):
             log_sizes = tage["log_table_sizes"]
-            tag_widths = tage.get("tag_table_tag_widths", [7] * len(log_sizes))
+            tag_widths = tage.get("tag_table_tag_widths", [0] + [7] * max(0, len(log_sizes) - 1))
             ctr_bits = int(tage.get("counter_bits", 3))
             u_bits = int(tage.get("u_bits", 1))
-            bimodal_bits = max(2, int(u.get("pht_size", 256))) * ctr
+            bimodal_bits = (1 << int(log_sizes[0])) * ctr if log_sizes else 0
             tagged_bits = sum(
                 (1 << int(log_sizes[i])) * (int(tag_widths[i]) + ctr_bits + u_bits)
-                for i in range(min(len(log_sizes), len(tag_widths)))
+                for i in range(1, min(len(log_sizes), len(tag_widths)))
             )
             _note(
                 f"tage directional storage ~= {bimodal_bits + tagged_bits} bits "

@@ -162,7 +162,9 @@ See the [verification guide](https://github.com/Kingfish404/raptor-chip/blob/mas
 for commands and prerequisites. Record the revision and preset independently for
 simulation, open-PDK STA, FPGA timing and physical board runs.
 
-[Performance history](./perf-iterations.md) preserves earlier measurements.
+[Current performance evaluation](./performance.md) tracks the active RTL and
+aligned gem5 O3 model using Top-Down Microarchitecture Analysis; [Performance
+history](./perf-iterations.md) preserves earlier measurements.
 Compare results only with matching revision, preset, XLEN, workload, memory
 model, and constraints. The homepage and Explorer share one interactive architecture diagram and
 illustrative queue-occupancy model. Animation cycles are not RTL measurements.
