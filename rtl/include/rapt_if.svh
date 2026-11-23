@@ -175,9 +175,9 @@ interface l1d_bus_if #(
   // load
   logic arvalid;
   logic ar_mshr;
-  logic [1:0] ar_mshr_id;
+  logic [2:0] ar_mshr_id;
   logic r_mshr;
-  logic [1:0] r_mshr_id;
+  logic [2:0] r_mshr_id;
   logic idle;  // D-side reads and all writes have completed at mem_link.
   logic [XLEN-1:0] araddr;
   logic [7:0] rstrb;

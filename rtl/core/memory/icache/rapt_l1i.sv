@@ -238,12 +238,42 @@ module rapt_l1i #(
   end else begin : g_quad_end_narrow
     assign quad_end = &addr_offset;
   end
+  localparam bit L1iPrefetchEnable = (`RAPT_L1I_PREFETCH != 0) && (L1I_LINE_LEN >= 3);
+  // --- Lightweight 8-entry pure-DFF FDIP Target Prefetch Queue ---
+  // Captures predicted cross-line branch/jump targets from IFU and probes L1I
+  // tags via the idle next4 port when !quad_end, launching background refills
+  // with hit-under-prefetch enabled.
+  localparam int FdipDepth = 8;
+  localparam int FdipBits = $clog2(FdipDepth);
+  localparam int LineOffBits = L1I_LINE_LEN + 2;
+  logic [PcW-1:LineOffBits] fdip_q_line[FdipDepth];
+  logic [FdipBits-1:0] fdip_head, fdip_tail;
+  logic [FdipBits:0] fdip_count;
+  logic [PcW-1:LineOffBits] fdip_last_line_q;
+  logic fdip_last_valid_q;
+
+  wire [PcW-1:LineOffBits] fdip_in_line = ifu_l1i.prefetch_pc[PcW-1:LineOffBits];
+  wire [PcW-1:LineOffBits] curr_v_line = ifu_l1i.pc[PcW-1:LineOffBits];
+  wire fdip_enq = L1iPrefetchEnable && ifu_l1i.prefetch_valid
+      && (fdip_in_line != curr_v_line)
+      && (!fdip_last_valid_q || fdip_in_line != fdip_last_line_q)
+      && (fdip_count < (FdipBits + 1)'(FdipDepth));
+  wire fdip_head_valid = (fdip_count != '0);
+  wire [XLEN-1:0] fdip_head_va = `RAPT_PC_SEXT(XLEN, {fdip_q_line[fdip_head], {LineOffBits{1'b0}}});
+  wire fdip_same_page = (fdip_head_va[XLEN-1:12] == fetch_pc[XLEN-1:12]);
+  wire [XLEN-1:0] fdip_head_pa = mmu_en
+      ? {pc_ifu[XLEN-1:12], fdip_head_va[11:0]}
+      : fdip_head_va;
+  wire fdip_probe_active = L1iPrefetchEnable && !quad_end && fdip_head_valid
+      && (!mmu_en || (tlb_hit && fdip_same_page));
+  wire [XLEN-1:0] pf_probe_pa = fdip_probe_active ? fdip_head_pa : pc_ifu_next4;
+
   wire next_crosses_line = pc_ifu[1] && (&addr_offset);
   assign pc_ifu_next4 = (L1I_LINE_LEN >= 3 && quad_end)
       ? {pc_ifu[XLEN-1:L1I_LINE_LEN+2] + (XLEN - L1I_LINE_LEN - 2)'(1), {(L1I_LINE_LEN+2){1'b0}}}
       : (pc_ifu + 4);
   assign pc_ifu_next6 = pc_ifu + 6;
-  assign addr_idx_next4 = pc_ifu_next4[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
+  assign addr_idx_next4 = pf_probe_pa[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
 
   assign tlb_offset = fetch_pc[11:0];
 
@@ -253,7 +283,7 @@ module rapt_l1i #(
 
   assign addr_idx_next = pc_ifu_next[L1I_LEN+L1I_LINE_LEN+2-1:L1I_LINE_LEN+2];
   assign addr_offset_next = pc_ifu_next[L1I_LINE_LEN+2-1:2];
-  assign addr_tag_next4 = pc_ifu_next4[PADDR_BITS-1:L1I_LEN+L1I_LINE_LEN+2];
+  assign addr_tag_next4 = pf_probe_pa[PADDR_BITS-1:L1I_LEN+L1I_LINE_LEN+2];
 
   assign fetch_addr = {ifq_base_addr, ifq_word_offset[ifq_tail], 2'b00};
   assign tag_fetch = install_addr_q[PADDR_BITS-1:L1I_LEN+L1I_LINE_LEN+2];
@@ -431,7 +461,7 @@ module rapt_l1i #(
 
   assign hit = !slow_active && !slow_select && (!invalid_l1i && !wait_invalid)
     && (mmu_en ? tlb_hit : 1'b1)
-    && (l1i_state == IDLE || rec_addr == ifu_l1i.pc)
+    && (l1i_state == IDLE || l1i_prefetch_active || rec_addr == ifu_l1i.pc)
     && |way_hit;
   assign hit_next = (!invalid_l1i && !wait_invalid) && (mmu_en ? tlb_hit : 1'b1) && |way_hit_next;
 
@@ -1283,7 +1313,6 @@ module rapt_l1i #(
     else if (cache_return && ifq_valid[ifq_tail]) ifq_tail <= ifq_tail + 1'b1;
   end
 
-  localparam bit L1iPrefetchEnable = (`RAPT_L1I_PREFETCH != 0) && (L1I_LINE_LEN >= 3);
   if (!L1iPrefetchEnable || `RAPT_PMP_GRANULARITY_LOG2 >= 12) begin : g_l1i_pf_pmp_page
     assign l1i_pf_page_pmp_uniform = 1'b1;
   end else begin : g_l1i_pf_pmp_fine
@@ -1303,6 +1332,38 @@ module rapt_l1i #(
       && rapt_pkg::addr_executable(pc_ifu_next4, 4'd3)
       && (!mmu_en || (tlb_hit && itlb_pbmt == 2'b00 && !(!vs_bare_fetch && pf_fetch_tlb)))
       && !pmp_fetch_fault && !ifu_l1i.cancel && !cmu_bcast.flush_pipe;
+  wire l1i_fdip_trigger = fdip_probe_active && !(|way_tag_match_next4)
+      && l1i_pf_page_pmp_uniform
+      && rapt_pkg::addr_cacheable(fdip_head_pa)
+      && rapt_pkg::addr_executable(fdip_head_pa, 4'd3)
+      && (!mmu_en || (tlb_hit && itlb_pbmt == 2'b00 && !(!vs_bare_fetch && pf_fetch_tlb)))
+      && !pmp_fetch_fault && !ifu_l1i.cancel && !cmu_bcast.flush_pipe;
+  wire fdip_pop = fdip_head_valid && (
+      (fdip_q_line[fdip_head] == curr_v_line)
+      || (fdip_probe_active && (|way_tag_match_next4))
+      || (mmu_en && tlb_hit && !fdip_same_page)
+      || (l1i_state == IDLE && sram_data_ready && hit && hit_next
+          && !l1i_pf_trigger && l1i_fdip_trigger)
+  );
+  always_ff @(posedge clock) begin
+    if (reset || cmu_bcast.flush_pipe || invalid_l1i || wait_invalid) begin
+      fdip_head <= '0;
+      fdip_tail <= '0;
+      fdip_count <= '0;
+      fdip_last_valid_q <= 1'b0;
+    end else begin
+      if (fdip_enq) begin
+        fdip_q_line[fdip_tail] <= fdip_in_line;
+        fdip_tail <= fdip_tail + FdipBits'(1);
+        fdip_last_line_q <= fdip_in_line;
+        fdip_last_valid_q <= 1'b1;
+      end
+      if (fdip_pop) begin
+        fdip_head <= fdip_head + FdipBits'(1);
+      end
+      fdip_count <= fdip_count + (FdipBits + 1)'(fdip_enq) - (FdipBits + 1)'(fdip_pop);
+    end
+  end
 
   always_ff @(posedge clock) begin
     if (reset) begin
@@ -1344,8 +1405,8 @@ module rapt_l1i #(
                       l1i_fill_issue_idx <= '0;
                       l1i_state  <= RD_0;
                       fill_way_r <= fill_way_next_calc;
-                    end else if (l1i_pf_trigger) begin
-                      l1i_addr   <= pc_ifu_next4;
+                    end else if (l1i_pf_trigger || l1i_fdip_trigger) begin
+                      l1i_addr   <= l1i_pf_trigger ? pc_ifu_next4 : fdip_head_pa;
                       l1i_fill_issue_idx <= '0;
                       l1i_state  <= RD_0;
                       fill_way_r <= fill_way_pf_calc;
@@ -1381,8 +1442,8 @@ module rapt_l1i #(
                     l1i_fill_issue_idx <= '0;
                     l1i_state  <= RD_0;
                     fill_way_r <= fill_way_next_calc;
-                  end else if (l1i_pf_trigger) begin
-                    l1i_addr   <= pc_ifu_next4;
+                  end else if (l1i_pf_trigger || l1i_fdip_trigger) begin
+                    l1i_addr   <= l1i_pf_trigger ? pc_ifu_next4 : fdip_head_pa;
                     l1i_fill_issue_idx <= '0;
                     l1i_state  <= RD_0;
                     fill_way_r <= fill_way_pf_calc;

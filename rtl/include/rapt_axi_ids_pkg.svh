@@ -9,7 +9,7 @@ package rapt_axi_ids_pkg;
   localparam logic [3:0] TLBI = 4'd3;
   localparam logic [3:0] TLBD = 4'd4;
   localparam logic [3:0] MshrBase = 4'd8;
-  localparam logic [3:0] MshrMask = 4'hc;
+  localparam logic [3:0] MshrMask = 4'h8;
 endpackage
 
 `endif

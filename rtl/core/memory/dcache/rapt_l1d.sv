@@ -138,7 +138,7 @@ module rapt_l1d #(
   logic mshr_lookup, mshr_eligible, mshr_complete, mshr_release, mshr_buffered;
   logic mshr_store_yield;
   logic mshr_req_valid, mshr_req_ready, mshr_select, legacy_arvalid;
-  logic [1:0] mshr_req_id;
+  logic [2:0] mshr_req_id;
   logic [XLEN-1:0] mshr_req_addr, mshr_data;
   logic [XLEN-1:0] mshr_rsp_data_q;
   logic legacy_rvalid, legacy_rready;

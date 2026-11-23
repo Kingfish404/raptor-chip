@@ -46,11 +46,11 @@ module rapt_l1d_mshr #(
     output logic busy,
     wake,
     output logic req_valid,
-    output logic [1:0] req_id,
+    output logic [2:0] req_id,
     output logic [Xlen-1:0] req_addr,
     input logic req_ready,
     input logic rsp_valid,
-    input logic [1:0] rsp_id,
+    input logic [2:0] rsp_id,
     input logic [Xlen-1:0] rsp_data,
     input logic rsp_error,
     rsp_last,
@@ -75,7 +75,7 @@ module rapt_l1d_mshr #(
     input logic [7:0] prefetch_version,
     output logic prefetch_accept
 );
-  if (!(Entries >= 1 && Entries <= 4 && Words >= 2 && (Words & (Words - 1)) == 0)) begin : g_invalid_geometry
+  if (!(Entries >= 1 && Entries <= 8 && Words >= 2 && (Words & (Words - 1)) == 0)) begin : g_invalid_geometry
     initial $fatal(1, "Invalid L1D MSHR geometry");
   end
   localparam int IdBits = Entries > 1 ? $clog2(Entries) : 1;
@@ -95,10 +95,10 @@ module rapt_l1d_mshr #(
   logic [IdBits-1:0] fill_id;
   logic [WordBits-1:0] beat[Entries];
   logic match_found, free_found, send_found;
-  logic [1:0] match_id, free_id;
-  logic [1:0] replace_q;
+  logic [2:0] match_id, free_id;
+  logic [2:0] replace_q;
   logic allocate, pf_allocate, pf_match;
-  logic [2:0] free_slot_count;
+  logic [3:0] free_slot_count;
   // Hold the installation owner before exposing its line to the tag and
   // victim probes. Installed/killed arbitration may change this register,
   // but cannot select a different refill address in the consumer's cycle.
@@ -124,7 +124,7 @@ module rapt_l1d_mshr #(
       // on the same edge as done/data, so quiescence never sees an empty
       // cycle between the bus drain and a pending installation.
       fill_candidate[i] = valid[i] && !killed[i] && !installed[i]
-          && (done[i] || (rsp_valid && rsp_last && sent[i] && rsp_id == 2'(i)))
+          && (done[i] || (rsp_valid && rsp_last && sent[i] && rsp_id == 3'(i)))
           && !kill_now[i] && !(fill_valid && fill_ready && fill_id == IdBits'(i));
     end
     fill_addr = {tag[fill_id], {OffsetBits{1'b0}}};
@@ -174,24 +174,24 @@ module rapt_l1d_mshr #(
           && tag[i] == lookup_addr[Xlen-1:OffsetBits]
           && (version[i] == lookup_version || store_dirty[i])) begin
         match_found = 1;
-        match_id = 2'(i);
+        match_id = 3'(i);
       end
       if (!valid[i]) begin
         free_found = 1;
-        free_id = 2'(i);
+        free_id = 3'(i);
       end
       if (valid[i] && !sent[i] && !killed[i]) begin
         send_found = 1;
-        req_id = 2'(i);
+        req_id = 3'(i);
       end
     end
     // Once installed, the cache owns every successful word. Replays may
     // have completed on a cache/B hit without consuming this buffer, so
     // waiting for consumed here can permanently exhaust an idle table.
-    free_slot_count = 3'd0;
+    free_slot_count = 4'd0;
     pf_match = 1'b0;
     for (int i = 0; i < Entries; i++) begin
-      if (!valid[i] || (done[i] && installed[i])) free_slot_count = free_slot_count + 3'd1;
+      if (!valid[i] || (done[i] && installed[i])) free_slot_count = free_slot_count + 4'd1;
       if (valid[i] && !killed[i] && !kill_line[i]
           && tag[i] == prefetch_addr[Xlen-1:OffsetBits]
           && (version[i] == prefetch_version || store_dirty[i]))
@@ -201,7 +201,7 @@ module rapt_l1d_mshr #(
       for (int n = Entries - 1; n >= 0; n--) begin
         if (done[(int'(replace_q)+n)%Entries] && installed[(int'(replace_q)+n)%Entries]) begin
           free_found = 1;
-          free_id = 2'((int'(replace_q)+n)%Entries);
+          free_id = 3'((int'(replace_q)+n)%Entries);
         end
       end
     end
@@ -218,9 +218,9 @@ module rapt_l1d_mshr #(
     lookup_data = data[IdBits'(match_id)][lookup_addr[OffsetBits-1:$clog2(Xlen/8)]];
     allocate = lookup_valid && !cache_hit && !match_found && free_found && !invalidate && !invalidate_line;
     pf_allocate = prefetch_valid && !lookup_valid && !(store_fire && store_alloc)
-        && !invalidate && !invalidate_line && !pf_match && free_found && (free_slot_count >= 3'd2);
+        && !invalidate && !invalidate_line && !pf_match && free_found && (free_slot_count >= 4'd2);
     prefetch_accept = prefetch_valid && !lookup_valid && !(store_fire && store_alloc)
-        && !invalidate && !invalidate_line && (pf_match || (free_found && free_slot_count >= 3'd2));
+        && !invalidate && !invalidate_line && (pf_match || (free_found && free_slot_count >= 4'd2));
     // A full table also releases the requester; a completion will wake it.
     lookup_wait = lookup_valid && !cache_hit && !lookup_ready && !invalidate && !invalidate_line;
     req_valid = send_found && !invalidate && !invalidate_line;
@@ -242,7 +242,7 @@ module rapt_l1d_mshr #(
         if (rsp_valid && int'(rsp_id) == i && valid[i] && sent[i] && beat[i] == WordBits'(w))
           data_write[i][w] = ~store_mask[i][w];
         if (store_fire && store_word == WordBits'(w)
-            && (store_hit[i] || (store_alloc && free_id == 2'(i))))
+            && (store_hit[i] || (store_alloc && free_id == 3'(i))))
           data_write[i][w] = store_strobe;
       end
     end
@@ -323,7 +323,7 @@ module rapt_l1d_mshr #(
         if (kill_now[i]) begin
           killed[i] <= 1;
           done[i] <= 0;
-          if (!sent[i] || done[i] || (rsp_valid && rsp_last && rsp_id == 2'(i))) valid[i] <= 0;
+          if (!sent[i] || done[i] || (rsp_valid && rsp_last && rsp_id == 3'(i))) valid[i] <= 0;
         end
       end
       // Last: a store may take over an installed copy that it kills above.
@@ -343,7 +343,7 @@ module rapt_l1d_mshr #(
         waiting[IdBits'(free_id)] <= allocate
             ? Words'(1) << lookup_addr[OffsetBits-1:$clog2(Xlen/8)] : '0;
         installed[IdBits'(free_id)] <= 0;
-        replace_q <= int'(free_id) == Entries-1 ? 2'd0 : free_id + 2'd1;
+        replace_q <= int'(free_id) == Entries-1 ? 3'd0 : free_id + 3'd1;
       end
     end
   end

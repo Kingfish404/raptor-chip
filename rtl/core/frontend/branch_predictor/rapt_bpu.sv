@@ -87,7 +87,9 @@ module rapt_bpu #(
   // Its target remains a static branch immediate in IFU.
   assign ifu_bpu.aux_index = '0;
   assign ifu_bpu.request_aux_taken = dirp_request_aux_taken;
-  assign ifu_bpu.aux_taken = ifu_bpu.aux_query && dirp_aux_taken;
+  logic lp_aux_override, lp_aux_pred_taken;
+  assign ifu_bpu.aux_taken = ifu_bpu.aux_query
+      && (lp_aux_override ? lp_aux_pred_taken : dirp_aux_taken);
 `endif
 
   logic [PcW-1:0] rpc;
@@ -350,12 +352,335 @@ module rapt_bpu #(
     end
   end
 
+  // --- Checkpointed 32-entry Loop Predictor (4 active speculative slots) ---
+  // Tracks backward conditional loop trip counts at commit, with synchronous
+  // fetch lookup and exact 3-tier speculative rollback across decode_recover,
+  // execute_recover (matched by snapshot_ghr ^ 1), and non-preserved flush.
+  localparam int LoopEntries = 32;
+  localparam int LoopIdxBits = $clog2(LoopEntries);
+  localparam int LoopTagBits = 10;
+  localparam int LoopCntBits = 10;
+  localparam int ActiveLoops = 4;
+  localparam int ActBits     = $clog2(ActiveLoops);
+  localparam int F2dDepth    = 16;
+  localparam int F2dBits     = $clog2(F2dDepth);
+  localparam int CkptDepth   = 16;
+  localparam int CkptBits    = $clog2(CkptDepth);
+
+  logic [LoopEntries-1:0] lp_valid;
+  logic [LoopTagBits-1:0] lp_tag[LoopEntries];
+  logic [LoopCntBits-1:0] lp_trip[LoopEntries];
+  logic [1:0] lp_conf[LoopEntries];
+  logic [LoopCntBits-1:0] lp_arch_iter[LoopEntries];
+
+  logic [LoopIdxBits-1:0] lp_rd_idx_q;
+  logic lp_rd_match_q;
+  logic [1:0] lp_rd_conf_q;
+  logic [LoopCntBits-1:0] lp_rd_trip_q;
+  logic [LoopCntBits-1:0] lp_rd_arch_q;
+
+  logic [ActiveLoops-1:0] act_valid;
+  logic [LoopIdxBits-1:0] act_idx[ActiveLoops];
+  logic [ActBits-1:0] act_rr_ptr;
+  logic [LoopCntBits-1:0] fetch_iter[ActiveLoops];
+  logic [LoopCntBits-1:0] decode_iter[ActiveLoops];
+
+  logic [F2dDepth-1:0] f2d_has_loop;
+  logic [ActBits-1:0] f2d_slot[F2dDepth];
+  logic [F2dBits-1:0] f2d_head, f2d_tail;
+  logic [F2dBits:0] f2d_count;
+
+  logic [CkptDepth-1:0] ckpt_valid;
+  logic [15:0] ckpt_ghr[CkptDepth];
+  logic [LoopCntBits-1:0] ckpt_iter[CkptDepth][ActiveLoops];
+  logic [CkptDepth-1:0] ckpt_has_loop;
+  logic [ActBits-1:0] ckpt_slot[CkptDepth];
+  logic [LoopCntBits-1:0] ckpt_iter_before[CkptDepth];
+  logic [CkptBits-1:0] ckpt_wptr;
+
+  wire [LoopIdxBits-1:0] lp_ridx = ifu_bpu.nextpc[LoopIdxBits:1]
+      ^ ifu_bpu.nextpc[2*LoopIdxBits:LoopIdxBits+1];
+  wire [LoopTagBits-1:0] lp_rtag = ifu_bpu.nextpc[LoopIdxBits+LoopTagBits:LoopIdxBits+1];
+  wire [LoopIdxBits-1:0] lp_widx = rpc[LoopIdxBits:1] ^ rpc[2*LoopIdxBits:LoopIdxBits+1];
+  wire [LoopTagBits-1:0] lp_wtag = rpc[LoopIdxBits+LoopTagBits:LoopIdxBits+1];
+  wire lp_c_hit = lp_valid[lp_widx] && (lp_tag[lp_widx] == lp_wtag);
+  wire lp_is_backward = cpc < rpc;
+  wire lp_fetch_hit_primary = btb_rd_tag_match && (btb_rd_type == COND) && lp_rd_match_q;
+
+  // Combinational lookup of the exact branch consumed by IFU (primary OR aux)
+  wire [LoopIdxBits-1:0] lp_upd_idx = ifu_bpu.history_pc[LoopIdxBits:1];
+  wire [LoopTagBits-1:0] lp_upd_tag =
+      ifu_bpu.history_pc[LoopTagBits+LoopIdxBits:LoopIdxBits+1];
+  wire lp_upd_hit = lp_valid[lp_upd_idx] && (lp_tag[lp_upd_idx] == lp_upd_tag);
+
+  logic lp_upd_act_hit;
+  logic [ActBits-1:0] lp_upd_act_slot;
+  always_comb begin
+    lp_upd_act_hit = 1'b0;
+    lp_upd_act_slot = '0;
+    for (int a = 0; a < ActiveLoops; a++) begin
+      if (act_valid[a] && (act_idx[a] == lp_upd_idx)) begin
+        lp_upd_act_hit = 1'b1;
+        lp_upd_act_slot = ActBits'(a);
+      end
+    end
+  end
+
+  logic lp_act_hit;
+  logic [ActBits-1:0] lp_act_slot;
+  logic [LoopCntBits-1:0] lp_cur_iter;
+  always_comb begin
+    lp_act_hit = 1'b0;
+    lp_act_slot = '0;
+    for (int a = 0; a < ActiveLoops; a++) begin
+      if (act_valid[a] && (act_idx[a] == lp_rd_idx_q)) begin
+        lp_act_hit = 1'b1;
+        lp_act_slot = ActBits'(a);
+      end
+    end
+    lp_cur_iter = lp_act_hit ? fetch_iter[lp_act_slot] : lp_rd_arch_q;
+  end
+
+  // 64-bit GHR TAGE already tracks short loops (<32) accurately; override only
+  // long loops (>=32) where GHR saturates.
+  wire lp_override = lp_rd_match_q && (lp_rd_conf_q == 2'd3) && (lp_rd_trip_q >= 10'd32);
+  wire lp_pred_taken = (lp_cur_iter != lp_rd_trip_q);
+  wire cond_taken = lp_override ? lp_pred_taken : dirp_taken;
+
+`ifdef RAPT_FETCH_LOOKAHEAD
+  wire [LoopIdxBits-1:0] lp_aux_idx = ifu_bpu.aux_pc[LoopIdxBits:1];
+  wire [LoopTagBits-1:0] lp_aux_tag =
+      ifu_bpu.aux_pc[LoopTagBits+LoopIdxBits:LoopIdxBits+1];
+  wire lp_aux_match = lp_valid[lp_aux_idx] && (lp_tag[lp_aux_idx] == lp_aux_tag);
+  logic lp_aux_act_hit;
+  logic [ActBits-1:0] lp_aux_act_slot;
+  logic [LoopCntBits-1:0] lp_aux_cur_iter;
+  always_comb begin
+    lp_aux_act_hit = 1'b0;
+    lp_aux_act_slot = '0;
+    for (int a = 0; a < ActiveLoops; a++) begin
+      if (act_valid[a] && (act_idx[a] == lp_aux_idx)) begin
+        lp_aux_act_hit = 1'b1;
+        lp_aux_act_slot = ActBits'(a);
+      end
+    end
+    lp_aux_cur_iter = lp_aux_act_hit ? fetch_iter[lp_aux_act_slot] : lp_arch_iter[lp_aux_idx];
+  end
+  assign lp_aux_override = lp_aux_match
+      && (lp_conf[lp_aux_idx] == 2'd3) && (lp_trip[lp_aux_idx] >= 10'd32);
+  assign lp_aux_pred_taken = (lp_aux_cur_iter != lp_trip[lp_aux_idx]);
+`endif
+
+  // Next committed arch_iter value for lp_widx (used on flush restore)
+  logic [LoopCntBits-1:0] lp_arch_iter_next_c;
+  always_comb begin
+    lp_arch_iter_next_c = lp_arch_iter[lp_widx];
+    if (cmu_bcast.ben) begin
+      if (lp_c_hit) begin
+        if (rbtaken) begin
+          lp_arch_iter_next_c = (lp_arch_iter[lp_widx] == '1)
+              ? lp_arch_iter[lp_widx] : (lp_arch_iter[lp_widx] + LoopCntBits'(1));
+        end else begin
+          lp_arch_iter_next_c = '0;
+        end
+      end else if (rbtaken && lp_is_backward) begin
+        lp_arch_iter_next_c = LoopCntBits'(1);
+      end
+    end
+  end
+
+  // Combinational next decode_iter (used for checkpoint write and decode_recover)
+  logic [LoopCntBits-1:0] decode_iter_next[ActiveLoops];
+  wire f2d_pop_valid = idu_bpu.history_valid && (f2d_count != '0);
+  wire f2d_pop_has_loop = f2d_pop_valid && f2d_has_loop[f2d_head];
+  wire [ActBits-1:0] f2d_pop_slot = f2d_slot[f2d_head];
+  always_comb begin
+    for (int a = 0; a < ActiveLoops; a++) decode_iter_next[a] = decode_iter[a];
+    if (f2d_pop_has_loop) begin
+      decode_iter_next[f2d_pop_slot] = idu_bpu.history_taken
+          ? ((decode_iter[f2d_pop_slot] == '1)
+              ? decode_iter[f2d_pop_slot] : (decode_iter[f2d_pop_slot] + LoopCntBits'(1)))
+          : '0;
+    end
+  end
+
+  // Match execute_recover against checkpoint table (newest match wins)
+  wire [15:0] exec_match_ghr = {execute_ghr[15:1], !execute_ghr[0]};
+  logic exec_ckpt_hit;
+  logic [CkptBits-1:0] exec_ckpt_idx;
+  always_comb begin
+    exec_ckpt_hit = 1'b0;
+    exec_ckpt_idx = '0;
+    for (int k = 0; k < CkptDepth; k++) begin
+      automatic logic [CkptBits-1:0] idx = ckpt_wptr - CkptBits'(1) - CkptBits'(k);
+      if (!exec_ckpt_hit && ckpt_valid[idx] && (ckpt_ghr[idx] == exec_match_ghr)) begin
+        exec_ckpt_hit = 1'b1;
+        exec_ckpt_idx = idx;
+      end
+    end
+  end
+
+  wire lp_full_flush = cmu_bcast.flush_pipe && !preserve_fetch;
+  always_ff @(posedge clock) begin
+    if (reset || bpu_clear) begin
+      lp_valid <= '0;
+      lp_rd_idx_q <= '0;
+      lp_rd_match_q <= 1'b0;
+      lp_rd_conf_q <= '0;
+      lp_rd_trip_q <= '0;
+      lp_rd_arch_q <= '0;
+      act_valid <= '0;
+      act_rr_ptr <= '0;
+      f2d_head <= '0;
+      f2d_tail <= '0;
+      f2d_count <= '0;
+      ckpt_valid <= '0;
+      ckpt_wptr <= '0;
+      for (int a = 0; a < ActiveLoops; a++) begin
+        act_idx[a] <= '0;
+        fetch_iter[a] <= '0;
+        decode_iter[a] <= '0;
+      end
+    end else begin
+      // Synchronous fetch lookup
+      if (ifu_bpu.pc_update) begin
+        lp_rd_idx_q <= lp_ridx;
+        lp_rd_match_q <= lp_valid[lp_ridx] && (lp_tag[lp_ridx] == lp_rtag);
+        lp_rd_conf_q <= lp_conf[lp_ridx];
+        lp_rd_trip_q <= lp_trip[lp_ridx];
+        lp_rd_arch_q <= lp_arch_iter[lp_ridx];
+      end
+
+      // Commit training (authoritative architectural loop state)
+      if (cmu_bcast.ben) begin
+        if (lp_c_hit) begin
+          lp_arch_iter[lp_widx] <= lp_arch_iter_next_c;
+          if (!rbtaken) begin
+            if (lp_arch_iter[lp_widx] >= LoopCntBits'(2)) begin
+              if (lp_trip[lp_widx] == lp_arch_iter[lp_widx]) begin
+                lp_conf[lp_widx] <= (lp_conf[lp_widx] == 2'd3) ? 2'd3 : (lp_conf[lp_widx] + 2'd1);
+              end else begin
+                lp_trip[lp_widx] <= lp_arch_iter[lp_widx];
+                lp_conf[lp_widx] <= 2'd1;
+              end
+            end else begin
+              lp_conf[lp_widx] <= 2'd0;
+            end
+          end
+        end else if (rbtaken && lp_is_backward) begin
+          lp_valid[lp_widx] <= 1'b1;
+          lp_tag[lp_widx] <= lp_wtag;
+          lp_trip[lp_widx] <= '0;
+          lp_conf[lp_widx] <= 2'd0;
+          lp_arch_iter[lp_widx] <= LoopCntBits'(1);
+        end
+      end
+
+      // Speculative state & checkpoint rollback
+      if (lp_full_flush) begin
+        f2d_head <= '0;
+        f2d_tail <= '0;
+        f2d_count <= '0;
+        ckpt_valid <= '0;
+        for (int a = 0; a < ActiveLoops; a++) begin
+          automatic
+          logic [LoopCntBits-1:0]
+          arch_v =
+              (cmu_bcast.ben && act_idx[a] == lp_widx)
+              ? lp_arch_iter_next_c : lp_arch_iter[act_idx[a]];
+          fetch_iter[a] <= arch_v;
+          decode_iter[a] <= arch_v;
+        end
+      end else if (execute_recover) begin
+        f2d_head <= '0;
+        f2d_tail <= '0;
+        f2d_count <= '0;
+        if (exec_ckpt_hit) begin
+          for (int a = 0; a < ActiveLoops; a++) begin
+            automatic logic [LoopCntBits-1:0] rval = ckpt_iter[exec_ckpt_idx][a];
+            if (ckpt_has_loop[exec_ckpt_idx] && (ActBits'(a) == ckpt_slot[exec_ckpt_idx])) begin
+              rval = execute_ghr[0]
+                  ? ((ckpt_iter_before[exec_ckpt_idx] == '1)
+                      ? ckpt_iter_before[exec_ckpt_idx]
+                      : (ckpt_iter_before[exec_ckpt_idx] + LoopCntBits'(1)))
+                  : '0;
+            end
+            fetch_iter[a] <= rval;
+            decode_iter[a] <= rval;
+          end
+        end else begin
+          for (int a = 0; a < ActiveLoops; a++) begin
+            automatic
+            logic [LoopCntBits-1:0]
+            arch_v =
+                (cmu_bcast.ben && act_idx[a] == lp_widx)
+                ? lp_arch_iter_next_c : lp_arch_iter[act_idx[a]];
+            fetch_iter[a] <= arch_v;
+            decode_iter[a] <= arch_v;
+          end
+        end
+      end else if (idu_bpu.history_recover) begin
+        f2d_head <= '0;
+        f2d_tail <= '0;
+        f2d_count <= '0;
+        for (int a = 0; a < ActiveLoops; a++) begin
+          decode_iter[a] <= decode_iter_next[a];
+          fetch_iter[a] <= decode_iter_next[a];
+        end
+        if (idu_bpu.history_valid) begin
+          ckpt_valid[ckpt_wptr] <= 1'b1;
+          ckpt_ghr[ckpt_wptr] <= snapshot_ghr[15:0];
+          for (int a = 0; a < ActiveLoops; a++) ckpt_iter[ckpt_wptr][a] <= decode_iter_next[a];
+          ckpt_has_loop[ckpt_wptr] <= f2d_pop_has_loop;
+          ckpt_slot[ckpt_wptr] <= f2d_pop_slot;
+          ckpt_iter_before[ckpt_wptr] <= decode_iter[f2d_pop_slot];
+          ckpt_wptr <= ckpt_wptr + CkptBits'(1);
+        end
+      end else begin
+        automatic logic push_en = ifu_bpu.history_valid && (f2d_count < (F2dBits + 1)'(F2dDepth));
+        automatic logic pop_en  = f2d_pop_valid;
+        if (pop_en) begin
+          f2d_head <= f2d_head + F2dBits'(1);
+          for (int a = 0; a < ActiveLoops; a++) decode_iter[a] <= decode_iter_next[a];
+        end
+        if (push_en) begin
+          automatic logic [ActBits-1:0] use_slot = lp_upd_act_hit ? lp_upd_act_slot : act_rr_ptr;
+          f2d_has_loop[f2d_tail] <= lp_upd_hit;
+          f2d_slot[f2d_tail] <= use_slot;
+          f2d_tail <= f2d_tail + F2dBits'(1);
+          if (lp_upd_hit) begin
+            automatic
+            logic [LoopCntBits-1:0]
+            base_i = lp_upd_act_hit ? fetch_iter[lp_upd_act_slot] : lp_arch_iter[lp_upd_idx];
+            if (!lp_upd_act_hit) begin
+              act_valid[use_slot] <= 1'b1;
+              act_idx[use_slot] <= lp_upd_idx;
+              decode_iter[use_slot] <= lp_arch_iter[lp_upd_idx];
+              act_rr_ptr <= act_rr_ptr + ActBits'(1);
+            end
+            fetch_iter[use_slot] <= ifu_bpu.history_taken
+                ? ((base_i == '1) ? base_i : (base_i + LoopCntBits'(1)))
+                : '0;
+          end
+        end
+        if (idu_bpu.history_valid) begin
+          ckpt_valid[ckpt_wptr] <= 1'b1;
+          ckpt_ghr[ckpt_wptr] <= snapshot_ghr[15:0];
+          for (int a = 0; a < ActiveLoops; a++) ckpt_iter[ckpt_wptr][a] <= decode_iter_next[a];
+          ckpt_has_loop[ckpt_wptr] <= f2d_pop_has_loop;
+          ckpt_slot[ckpt_wptr] <= f2d_pop_slot;
+          ckpt_iter_before[ckpt_wptr] <= decode_iter[f2d_pop_slot];
+          ckpt_wptr <= ckpt_wptr + CkptBits'(1);
+        end
+        f2d_count <= f2d_count + (F2dBits + 1)'(push_en) - (F2dBits + 1)'(pop_en);
+      end
+    end
+  end
+
   // Prediction logic: all inputs are registered sub-module outputs,
   // NO combinational dependency on pc_ifu/fpc.
-  // Keep 32-entry ITT for multi-target indirect jumps; defer Loop Predictor
-  // until checkpointed per-entry spec_iter rollback is added (needed for 64-ROB).
   assign btb_tag_match = btb_rd_tag_match;
-  assign taken = btb_tag_match && ((btb_rd_type != COND) || dirp_taken);
+  assign taken = btb_tag_match && ((btb_rd_type != COND) || cond_taken);
 
   // Fetch and decode represent different instruction-stream positions. Never
   // override a fetch target with the decode RAS's live top: a preceding return

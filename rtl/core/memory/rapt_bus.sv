@@ -99,30 +99,31 @@ module rapt_bus #(
   logic rd_output_fire;
   logic [2:0] l1d_arsize_enc;
 
-  // Dedicated MSHR IDs 8..11, independent of legacy D/PTW IDs 2/4.
+  // Dedicated MSHR IDs 8..15, independent of legacy D/PTW IDs 2/4.
   // Ownership lasts through RLAST even across pipeline cancellation.
-  logic [3:0] miss_busy, miss_held, miss_issued;
-  logic [XLEN-1:0] miss_addr[4];
-  logic [7:0] miss_len[4];
-  logic [2:0] miss_size[4];
-  logic [3:0] miss_noallocate;
+  localparam int MshrSlots = (`RAPT_L1D_MSHRS > 0) ? `RAPT_L1D_MSHRS : 1;
+  logic [7:0] miss_busy, miss_held, miss_issued;
+  logic [XLEN-1:0] miss_addr[8];
+  logic [7:0] miss_len[8];
+  logic [2:0] miss_size[8];
+  logic [7:0] miss_noallocate;
   logic miss_push, miss_available, source_miss, take_miss, miss_response;
-  logic [1:0] miss_select;
+  logic [2:0] miss_select;
   always_comb begin
     miss_available = 0;
     miss_select = 0;
-    for (int i = 3; i >= 0; i--)
+    for (int i = MshrSlots - 1; i >= 0; i--)
     if (miss_busy[i] && !miss_held[i]) begin
       miss_available = 1;
-      miss_select = 2'(i);
+      miss_select = 3'(i);
     end
   end
   assign miss_push = (`RAPT_L1D_MSHRS > 0) && l1d_bus.arvalid && l1d_bus.ar_mshr
       && !miss_busy[l1d_bus.ar_mshr_id];
   assign miss_response = mem.rd_rsp_valid && (mem.rd_rsp_id & MshrMask) == MshrBase
-      && miss_issued[mem.rd_rsp_id[1:0]];
+      && miss_issued[mem.rd_rsp_id[2:0]];
   assign l1d_bus.r_mshr = miss_response;
-  assign l1d_bus.r_mshr_id = mem.rd_rsp_id[1:0];
+  assign l1d_bus.r_mshr_id = mem.rd_rsp_id[2:0];
   always_ff @(posedge clock) begin
     if (reset) begin
       miss_busy <= '0;
@@ -140,11 +141,11 @@ module rapt_bus #(
       end
       if (take_miss) miss_held[miss_select] <= 1;
       if (rd_output_fire && (mem.rd_req_id & MshrMask) == MshrBase)
-        miss_issued[mem.rd_req_id[1:0]] <= 1;
+        miss_issued[mem.rd_req_id[2:0]] <= 1;
       if (miss_response && mem.rd_rsp_last) begin
-        miss_busy[mem.rd_rsp_id[1:0]] <= 0;
-        miss_held[mem.rd_rsp_id[1:0]] <= 0;
-        miss_issued[mem.rd_rsp_id[1:0]] <= 0;
+        miss_busy[mem.rd_rsp_id[2:0]] <= 0;
+        miss_held[mem.rd_rsp_id[2:0]] <= 0;
+        miss_issued[mem.rd_rsp_id[2:0]] <= 0;
       end
     end
   end
@@ -284,7 +285,7 @@ module rapt_bus #(
   assign l1d_bus.ptw_rerr = l1d_bus.ptw_rvalid && mem.rd_rsp_error;
 
   assign source_id = source_l1d ? (l1d_slot_ptw ? TLBD : L1D)
-                                : source_miss ? (MshrBase | {2'b00, miss_select})
+                                : source_miss ? (MshrBase | {1'b0, miss_select})
                                 : (l1i_q_ptw[l1i_q_rdptr] ? TLBI : L1I);
   assign source_pbmt = source_l1d ? l1d_slot_pbmt : source_miss ? 2'b00 : l1i_q_pbmt[l1i_q_rdptr];
   assign source_addr = source_l1d ? l1d_slot_addr : source_miss ? miss_addr[miss_select] : l1i_q_head_addr;

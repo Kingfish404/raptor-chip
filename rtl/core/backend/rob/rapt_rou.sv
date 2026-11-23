@@ -59,7 +59,10 @@ module rapt_rou #(
     parameter bit TagOnlyDispatch = 1'b0,
     // Bypass the local rename skid buffer when upstream rename_pipe already
     // supplies a registered, prefix-packed stream of equal width.
-    parameter bit DirectRenameInput = 1'b0
+    parameter bit DirectRenameInput = 1'b0,
+    // Eliminate the intermediate ROB_DP dispatch window and operand spill
+    // table: admit rename lanes directly into ROB_EX and execution queues.
+    parameter bit DirectDispatch = 1'b0
 ) (
     input UopT fp_queue_read_uop,
     input logic [2:0][$clog2(ROB_SIZE):0] fp_queue_read_tag,
@@ -465,43 +468,58 @@ module rapt_rou #(
       assign wb_res_v[p]   = completion[p].result;
     end
   end
-  rapt_operand_value_spill #(
-      .Xlen(SpillXlen),
-      .UopT(UopT),
-      .PhysBits(PLEN),
-      .SpillEntries(OperandSpillEntries),
-      .AllocateWidth(NumSlots),
-      .ReleaseWidth(NumSlots),
-      .ReadPorts(ValueReadPorts),
-      .CompletionPorts(NWB),
-      .SpillBits(SpillBits),
-      .ResolveAtDispatch(1'b1)
-  ) operand_values (
-      .clock,
-      .reset,
-      .flush(flush_pipe),
-      .allocate_valid(spill_allocate_valid),
-      .allocate_uop(spill_allocate_uop),
-      .allocate_op1(spill_allocate_op1),
-      .allocate_op2(spill_allocate_op2),
-      .allocate_pr1(spill_allocate_pr1),
-      .allocate_pr2(spill_allocate_pr2),
-      .allocate_ready(spill_allocate_ready),
-      .allocate_index(spill_allocate_index),
-      .release_valid(spill_release_valid),
-      .release_index(spill_release_index),
-      .read_index(spill_read_index),
-      .read_valid(spill_read_valid),
-      .read_uop(spill_read_uop),
-      .read_op1(spill_read_op1),
-      .read_op2(spill_read_op2),
-      .read_pr1(spill_read_pr1),
-      .read_pr2(spill_read_pr2),
-      // Spilled operands are immutable; register sources resolve at dispatch.
-      .completion_valid(spill_completion_valid),
-      .completion_prd(wb_prd_v),
-      .completion_result(spill_wb_res)
-  );
+  if (!DirectDispatch) begin : g_operand_spill
+    rapt_operand_value_spill #(
+        .Xlen(SpillXlen),
+        .UopT(UopT),
+        .PhysBits(PLEN),
+        .SpillEntries(OperandSpillEntries),
+        .AllocateWidth(NumSlots),
+        .ReleaseWidth(NumSlots),
+        .ReadPorts(ValueReadPorts),
+        .CompletionPorts(NWB),
+        .SpillBits(SpillBits),
+        .ResolveAtDispatch(1'b1)
+    ) operand_values (
+        .clock,
+        .reset,
+        .flush(flush_pipe),
+        .allocate_valid(spill_allocate_valid),
+        .allocate_uop(spill_allocate_uop),
+        .allocate_op1(spill_allocate_op1),
+        .allocate_op2(spill_allocate_op2),
+        .allocate_pr1(spill_allocate_pr1),
+        .allocate_pr2(spill_allocate_pr2),
+        .allocate_ready(spill_allocate_ready),
+        .allocate_index(spill_allocate_index),
+        .release_valid(spill_release_valid),
+        .release_index(spill_release_index),
+        .read_index(spill_read_index),
+        .read_valid(spill_read_valid),
+        .read_uop(spill_read_uop),
+        .read_op1(spill_read_op1),
+        .read_op2(spill_read_op2),
+        .read_pr1(spill_read_pr1),
+        .read_pr2(spill_read_pr2),
+        // Spilled operands are immutable; register sources resolve at dispatch.
+        .completion_valid(spill_completion_valid),
+        .completion_prd(wb_prd_v),
+        .completion_result(spill_wb_res)
+    );
+  end else begin : g_no_operand_spill
+    for (genvar s = 0; s < NumSlots; s++) begin : g_alloc_tie
+      assign spill_allocate_ready[s] = 1'b1;
+      assign spill_allocate_index[s] = '0;
+    end
+    for (genvar r = 0; r < ValueReadPorts; r++) begin : g_read_tie
+      assign spill_read_valid[r] = 1'b0;
+      assign spill_read_uop[r] = '0;
+      assign spill_read_op1[r] = '0;
+      assign spill_read_op2[r] = '0;
+      assign spill_read_pr1[r] = '0;
+      assign spill_read_pr2[r] = '0;
+    end
+  end
   assign h0 = rob_head;
   assign rob_empty = !(|rob_entry_busy);
   // UOQ entries can already contain PRF operand snapshots when admission
@@ -674,7 +692,8 @@ module rapt_rou #(
       && ROB_SIZE >= CommitWidth)) begin : g_invalid_config_1
     $error("Invalid rapt_rou configuration");
   end
-  if (!(SteerCandidates == ScanEntries
+  if (!((DirectDispatch && SteerCandidates == NumSlots)
+      || SteerCandidates == ScanEntries
       || SteerCandidates == ScanEntries - NumSlots)) begin : g_invalid_steer_candidates
     $error("Invalid rapt_rou steer candidate configuration");
   end
@@ -933,7 +952,7 @@ module rapt_rou #(
   logic selected_in_range[NumSlots];
   logic selected_active[NumSlots];
   logic [ActiveCandidateBits-1:0] active_slot[NumSlots];
-  if (1'b1) begin : g_window_dispatch
+  if (!DirectDispatch) begin : g_window_dispatch
     logic [SteerPayloadBits-1:0] entry_payload[ROB_SIZE];
     logic [SteerPayloadBits-1:0] incoming_payload[NumSlots];
     for (genvar e = 0; e < ROB_SIZE; e++) begin : g_entry_payload
@@ -986,6 +1005,55 @@ module rapt_rou #(
         .prefetch_valid(window_prefetch_valid),
         .prefetch_payload(window_prefetch_payload)
     );
+  end else begin : g_direct_dispatch
+    logic pre_elig[NumSlots];
+    for (genvar s = 0; s < NumSlots; s++) begin : g_pre_elig
+      wire base_ok = admission_present[s] && admission_rob_available[s]
+          && !reset && !flush_pipe && !debug_halt && !recovery_pending
+          && !serialize_in_flight && (!admission_serial[s] || (s == 0 && rob_empty));
+      if (s == 0) begin : g_first
+        assign pre_elig[0] = base_ok;
+      end else begin : g_next
+        assign pre_elig[s] = pre_elig[s-1] && !admission_serial[s-1] && base_ok;
+      end
+    end
+    for (genvar c = 0; c < ScanEntries; c++) begin : g_direct_scan
+      if (c < NumSlots) begin : g_lane
+        assign window_candidate_valid[c] = pre_elig[c];
+        assign dispatch_index[c] = rob_alloc[c];
+        assign candidate_payload[c] = {
+          rob_next_generation[rob_alloc[c]],
+          uoq_prs[deq_index[c]],
+          uoq_prd[deq_index[c]],
+          uoq_uops[deq_index[c]].schedule.domain,
+          {SpillBits{1'b0}}
+        };
+        assign dispatch_from_allocation[c] = 1'b1;
+        assign dispatch_source_slot[c] = SlotBits'(c);
+        assign endpoint_fire[c] = pre_elig[c] && window_candidate_ready[c];
+      end else begin : g_unused
+        assign window_candidate_valid[c] = 1'b0;
+        assign dispatch_index[c] = '0;
+        assign candidate_payload[c] = '0;
+        assign dispatch_from_allocation[c] = 1'b0;
+        assign dispatch_source_slot[c] = '0;
+        assign endpoint_fire[c] = 1'b0;
+      end
+    end
+    for (genvar r = 0; r < WindowResident; r++) begin : g_no_prefetch
+      assign window_prefetch_valid[r] = 1'b0;
+      assign window_prefetch_payload[r] = '0;
+    end
+    always_comb begin
+      steer_candidate_count = 0;
+      endpoint_count = 0;
+      for (int s = 0; s < NumSlots; s++) begin
+        steer_candidate_count += int'(pre_elig[s]);
+        endpoint_count += int'(endpoint_fire[s]);
+      end
+      steer_bypass_count = endpoint_count;
+      steer_oldest_blocked = pre_elig[0] && !endpoint_fire[0];
+    end
   end
   for (genvar c = 0; c < ScanEntries; c++) begin : g_window_bridge
     if (c < SteerCandidates) begin : g_exposed
@@ -1007,16 +1075,18 @@ module rapt_rou #(
     assign active_dispatch_index[c] = dispatch_index[c];
     assign active_meta[c] = steer_payload_t'(candidate_payload[c]);
     assign active_endpoint_fire[c] = endpoint_fire[c];
+    if (!DirectDispatch) begin : g_meta_sva
 `ifdef RAPT_SVA_ACTIVE
-    wire sva_rst = reset || flush_pipe;
-    wire meta_valid = window_candidate_valid[c];
-    wire meta_match = active_meta[c].generation == rob_entry[dispatch_index[c]].generation
-        && active_meta[c].prs == rob_entry[dispatch_index[c]].prs
-        && active_meta[c].prd == rob_entry[dispatch_index[c]].prd
-        && active_meta[c].domain == uop_pl[dispatch_index[c]].schedule.domain
-        && active_meta[c].spill == rob_dp_spill[dispatch_index[c]];
+      wire sva_rst = reset || flush_pipe;
+      wire meta_valid = window_candidate_valid[c];
+      wire meta_match = active_meta[c].generation == rob_entry[dispatch_index[c]].generation
+          && active_meta[c].prs == rob_entry[dispatch_index[c]].prs
+          && active_meta[c].prd == rob_entry[dispatch_index[c]].prd
+          && active_meta[c].domain == uop_pl[dispatch_index[c]].schedule.domain
+          && active_meta[c].spill == rob_dp_spill[dispatch_index[c]];
 `endif
-    `RAPT_SVA_IMPLY(clock, sva_rst, ROB_STEER_META_MATCH, meta_valid, meta_match)
+      `RAPT_SVA_IMPLY(clock, sva_rst, ROB_STEER_META_MATCH, meta_valid, meta_match)
+    end
   end
   for (genvar s = 0; s < NumSlots; s++) begin : g_active_select
     wire [ActiveCandidateBits-1:0] raw_slot = ActiveCandidateBits'(selected_candidate[s]);
@@ -1130,7 +1200,7 @@ module rapt_rou #(
     assign fp_allocate_generation[s] = rob_next_generation[rob_alloc[s]];
     assign fp_read_index[s] = active_dispatch_index[active_slot[s]];
     assign fp_operand_read_index[s] = spill_read_index[s];
-    assign fp_operand_read_valid[s] = selected_active[s];
+    assign fp_operand_read_valid[s] = !DirectDispatch && selected_active[s];
   end
   for (genvar c = 0; c < CommitWidth; c++) begin : g_fp_commit_ports
     assign fp_commit_valid[c] = commit_fire[c] && !rob_entry[commit_index[c]].trap;
@@ -1179,7 +1249,7 @@ module rapt_rou #(
       .CommitWidth(CommitWidth),
       .CompletionPorts(NumCompletions),
       .GenerationBits(GenerationBits),
-      .CompactSourceOperands(CompactFpOperands),
+      .CompactSourceOperands(CompactFpOperands && !DirectDispatch),
       .OperandEntries(OperandSpillEntries),
       .OperandBits(SpillBits),
       .WritePorts(FpWritePorts)
@@ -1304,7 +1374,7 @@ module rapt_rou #(
       spill_read_index[s] = '0;
       spill_release_valid[s] = 1'b0;
       spill_release_index[s] = '0;
-      if (selected_active[s]) begin
+      if (!DirectDispatch && selected_active[s]) begin
         spill_read_index[s] = active_meta[active_slot[s]].spill;
         if (active_endpoint_fire[active_slot[s]]) begin
           spill_release_valid[s] = 1'b1;
@@ -1317,7 +1387,9 @@ module rapt_rou #(
   for (genvar s = 0; s < NumSlots; s++) begin : g_dispatch
     always_comb begin
       dispatch_raw[s] = '0;
-      if (selected_active[s]) begin
+      if (DirectDispatch) begin
+        if (selected_valid[s]) dispatch_raw[s] = allocation[s];
+      end else if (selected_active[s]) begin
         dispatch_raw[s].uop = RegisteredDispatchPayload ? candidate_uop[active_slot[s]]
             : spill_read_uop[s];
         dispatch_raw[s].op1 = XLEN'(spill_read_op1[s]);
@@ -1387,17 +1459,20 @@ module rapt_rou #(
         end
       end
     end
+    if (!DirectDispatch) begin : g_window_select_sva
 `ifdef RAPT_SVA_ACTIVE
-    localparam int ScanBits = rapt_pkg::index_bits(ScanEntries);
-    wire sva_rst = reset || flush_pipe;
-    wire valid_select = selected_in_range[s]
-        && !dispatch_from_allocation[ScanBits'(selected_candidate[s])];
-    wire prefetch_check = RegisteredDispatchPayload && selected_valid[s];
-    wire prefetch_ok = valid_select && candidate_uop[active_slot[s]] == spill_read_uop[s];
+      localparam int ScanBits = rapt_pkg::index_bits(ScanEntries);
+      wire sva_rst = reset || flush_pipe;
+      wire valid_select = selected_in_range[s]
+          && !dispatch_from_allocation[ScanBits'(selected_candidate[s])];
+      wire prefetch_check = RegisteredDispatchPayload && selected_valid[s];
+      wire prefetch_ok = valid_select && candidate_uop[active_slot[s]] == spill_read_uop[s];
 `endif
-    `RAPT_SVA_IMPLY(clock, sva_rst, ROB_SELECT_ACTIVE, selected_valid[s], valid_select)
-    `RAPT_SVA_IMPLY(clock, sva_rst, ROB_PREFETCH_PAYLOAD_IDENTITY, prefetch_check, prefetch_ok)
-    `RAPT_SVA_IMPLY(clock, sva_rst, ROB_RESIDENT_HAS_SPILL, selected_active[s], spill_read_valid[s])
+      `RAPT_SVA_IMPLY(clock, sva_rst, ROB_SELECT_ACTIVE, selected_valid[s], valid_select)
+      `RAPT_SVA_IMPLY(clock, sva_rst, ROB_PREFETCH_PAYLOAD_IDENTITY, prefetch_check, prefetch_ok)
+      `RAPT_SVA_IMPLY(clock, sva_rst, ROB_RESIDENT_HAS_SPILL, selected_active[s],
+                      spill_read_valid[s])
+    end
   end
   for (genvar s = 0; s < NumSlots; s++) begin : g_allocate
     assign deq_index[s] = QBits'(s);
@@ -1405,7 +1480,8 @@ module rapt_rou #(
     assign admission_present[s] = uoq_valid[deq_index[s]];
     assign admission_rob_available[s] = !rob_entry_busy[rob_alloc[s]];
     assign admission_serial[s] = serializing(uoq_uops[deq_index[s]]);
-    assign spill_allocate_valid[s] = admission_eligible[s] && spill_allocate_ready[s];
+    assign spill_allocate_valid[s] = !DirectDispatch && admission_eligible[s]
+        && spill_allocate_ready[s];
     always_comb begin
       spill_allocate_uop[s] = allocation[s].uop;
       spill_allocate_uop[s].execute.branch.predicted_taken = 1'b0;
@@ -1414,7 +1490,8 @@ module rapt_rou #(
     assign spill_allocate_op2[s] = SpillXlen'(allocation[s].op2);
     assign spill_allocate_pr1[s] = allocation[s].pr1;
     assign spill_allocate_pr2[s] = allocation[s].pr2;
-    assign allocation_endpoint_ready[s] = spill_allocate_ready[s];
+    assign allocation_endpoint_ready[s] = DirectDispatch
+        ? candidate_ready[s] : spill_allocate_ready[s];
   end
   if (DirectRenameInput && RenameWidth == NumSlots) begin : g_direct_enqueue
     for (genvar s = 0; s < RenameWidth; s++) begin : g_lane
@@ -1980,16 +2057,18 @@ module rapt_rou #(
       rob_cbo_inval_next[entry] = rob_cbo_inval[entry];
       rob_fence_i_kind_next[entry] = rob_fence_i_kind[entry];
       if (allocate_hit) begin
-        rob_state_next[entry] = rapt_pkg::ROB_DP;
+        rob_state_next[entry] = DirectDispatch ? rapt_pkg::ROB_EX : rapt_pkg::ROB_DP;
         rob_drains_sq_next[entry] = drains_sq_before_commit(allocation[allocate_lane].uop);
         rob_fence_time_next[entry] = alloc_is_fence_time;
         rob_cbo_next[entry] = alloc_is_cbo;
         rob_cbo_inval_next[entry] = alloc_is_cbo_inval;
         rob_fence_i_kind_next[entry] = alloc_is_fence_i_kind;
       end
-      for (int s = 0; s < ActiveSteerCandidates; s++)
-      if (active_endpoint_fire[s] && int'(active_dispatch_index[s]) == entry)
-        rob_state_next[entry] = rapt_pkg::ROB_EX;
+      if (!DirectDispatch) begin
+        for (int s = 0; s < ActiveSteerCandidates; s++)
+        if (active_endpoint_fire[s] && int'(active_dispatch_index[s]) == entry)
+          rob_state_next[entry] = rapt_pkg::ROB_EX;
+      end
       if (complete_hit) rob_state_next[entry] = rapt_pkg::ROB_WB;
       for (int c = 0; c < CommitWidth; c++)
       if (commit_fire[c] && int'(commit_index[c]) == entry)

@@ -2073,6 +2073,10 @@ module rapt_lsu_ioq #(
     end
     assign head_integer_ready = !integer_data_required[ioq_head] || cached_head_ready;
     assign head_store_data = cached_head_data;
+    logic alloc_is_store[NumSlots];
+    for (genvar s = 0; s < NumSlots; s++) begin : g_alloc_store_flag
+      assign alloc_is_store[s] = dispatch[s].uop.execute.memory.store;
+    end
     rapt_ioq_operands #(
         .Entries(IOQ_SIZE),
         .Slots(NumSlots),
@@ -2084,9 +2088,11 @@ module rapt_lsu_ioq #(
         .reset,
         .flush(cmu_bcast.flush_pipe),
         .entry_valid(ioq_valid),
+        .is_store(ioq_wen),
         .head(ioq_head),
         .retire(ioq_valid_found),
         .alloc_valid(disp.accept),
+        .alloc_is_store,
         .alloc_index(payload_write_idx),
         .alloc_sources(late_alloc_sources),
         .alloc_addr_valid,

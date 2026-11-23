@@ -20,7 +20,7 @@ module rapt_debug_arbiter #(
     axi4_if.slave sb_axi,
     axi4_if.master merged_axi
 );
-  localparam logic [3:0] SbaId = 4'hf;
+  localparam logic [3:0] SbaId = 4'd7;
   localparam int ReadCountBits = $clog2(CoreReadOutstanding + 1);
   localparam int WriteCountBits = $clog2(CoreWriteOutstanding + 1);
   logic [ ReadCountBits-1:0] core_reads_q;

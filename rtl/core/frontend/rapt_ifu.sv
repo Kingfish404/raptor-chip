@@ -487,12 +487,14 @@ module rapt_ifu #(
     ifu_bpu.history_valid = 0;
     ifu_bpu.history_taken = 0;
     ifu_bpu.history_pc_bit = 0;
+    ifu_bpu.history_pc = '0;
     for (int s = 0; s < Width; s++)
     if (recv_ready && s < fetched_count && is_cond[s] && !fetched[s].trap
         && !(expanded[s][14:12] inside {3'b010, 3'b011})) begin
       ifu_bpu.history_valid = 1;
       ifu_bpu.history_taken = fetched[s].predicted_taken;
       ifu_bpu.history_pc_bit = fetched[s].pc[1];
+      ifu_bpu.history_pc = fetched[s].pc[15:1];
     end
   end
   assign ifu_hazard = blocked;

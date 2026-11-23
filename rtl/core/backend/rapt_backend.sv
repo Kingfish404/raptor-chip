@@ -110,7 +110,9 @@ module rapt_backend #(
   checkpoint_release_if checkpoint_release ();  // accepted correct resolutions
 
   // ROU stage
-  localparam int unsigned SteerCandidates = rapt_pkg::SteerScanEntries - rapt_pkg::DispatchWidth;
+  localparam bit DirectDispatch = (rapt_pkg::RenameWidth == rapt_pkg::DispatchWidth);
+  localparam int unsigned SteerCandidates = DirectDispatch
+      ? rapt_pkg::DispatchWidth : (rapt_pkg::SteerScanEntries - rapt_pkg::DispatchWidth);
   rapt_pkg::execution_domain_t dispatch_candidate_domain[SteerCandidates];
   logic dispatch_candidate_valid[SteerCandidates];
   logic dispatch_candidate_ready[SteerCandidates];
@@ -1363,8 +1365,9 @@ module rapt_backend #(
       .SeparateOperandWake(1'b1),
       .RegisteredDrainCompletion(1'b1),
       .CompactFpOperands(CompactFpOperands),
-      .RegisteredDispatchPayload(RegisteredDispatchPayload),
+      .RegisteredDispatchPayload(RegisteredDispatchPayload && !DirectDispatch),
       .DirectRenameInput(rapt_pkg::RenameWidth == rapt_pkg::DispatchWidth),
+      .DirectDispatch(DirectDispatch),
       .DerivedConstants(DerivedConstants),
       .TagOnlyDispatch(TagOnlyBackend),
       .SteerCandidates(SteerCandidates)
@@ -1496,7 +1499,8 @@ module rapt_backend #(
   rapt_pkg::dispatch_capacity_t dispatch_capacity[rapt_pkg::ExecutionDomains];
   rapt_pkg::dispatch_grant_t dispatch_grant[rapt_pkg::ExecutionDomains];
   rapt_dpu #(
-      .NumCandidates(SteerCandidates)
+      .NumCandidates(SteerCandidates),
+      .InOrderPrefix(DirectDispatch)
   ) dpu (
       .clock(clock),
       .reset(reset),

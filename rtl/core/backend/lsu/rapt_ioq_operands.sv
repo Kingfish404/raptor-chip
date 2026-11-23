@@ -8,15 +8,17 @@ module rapt_ioq_operands #(
     parameter int Xlen = 64,
     parameter int PhysBits = 6,
     parameter int IndexBits = $clog2(Entries),
-    parameter int StoreValues = 4
+    parameter int StoreValues = 8
 ) (
     input logic clock,
     input logic reset,
     input logic flush,
     input logic [Entries-1:0] entry_valid,
+    input logic [Entries-1:0] is_store,
     input logic [IndexBits-1:0] head,
     input logic retire,
     input logic alloc_valid[Slots],
+    input logic alloc_is_store[Slots],
     input logic [IndexBits-1:0] alloc_index[Slots],
     input logic [1:0][PhysBits-1:0] alloc_sources[Slots],
     input logic alloc_addr_valid[Slots],
@@ -131,21 +133,23 @@ module rapt_ioq_operands #(
 
   wire [Entries-1:0] age_need_addr = age_rotate(phys_need_addr);
   wire [Entries-1:0] age_need_data = age_rotate(phys_need_data);
+  wire [Entries-1:0] age_is_store = age_rotate(is_store);
 
-  // Reserve cache destinations before allocating newly dispatched data.
-  // An older ready store may replace a younger cached operand: otherwise
-  // two younger values could prevent the head from ever obtaining a slot.
+  // Decoupled Load/Store AGU arbitration (no bank contention):
+  //   Port 0 (Load AGU): prioritizes oldest ready Load addr, then Store addr,
+  //     then alloc-edge Load/Store addr, then store data.
+  //   Port 1 (Store-Addr/Data AGU): prioritizes head store data (retirement
+  //     unblock), then oldest ready Store addr, then Load addr, then younger
+  //     store data, then alloc-edge Store/Load addr.
   always_comb begin
     logic [Entries-1:0] age_addr_avail, age_data_rem;
     logic [Slots-1:0] alloc_addr_rem;
     logic [StoreValues-1:0] reserved_cache;
-    logic [AllocationBanks-1:0] reserved_addr_bank;
     logic [IndexBits-1:0] cache_age[StoreValues];
     age_addr_avail = age_need_addr;
     age_data_rem = age_need_data;
     for (int s = 0; s < Slots; s++) alloc_addr_rem[s] = alloc_base_ready[s];
     reserved_cache = '0;
-    reserved_addr_bank = '0;
     request_valid = '0;
     request_addr = '0;
     request_alloc = '0;
@@ -161,10 +165,12 @@ module rapt_ioq_operands #(
       automatic logic port_found;
       automatic logic port_is_addr;
       automatic logic port_is_alloc;
+      automatic logic prefer_store;
       automatic logic [IndexBits-1:0] win_age;
       automatic logic [IndexBits-1:0] win_idx;
       automatic logic [11:0] win_imm;
       automatic logic [PhysBits-1:0] win_alloc_src;
+      prefer_store = (ReadPorts >= 2) && (p == 1);
       free_space = 1'b0;
       free_slot = '0;
       for (int c = 0; c < StoreValues; c++) begin
@@ -189,24 +195,38 @@ module rapt_ioq_operands #(
       win_idx = head;
       win_imm = '0;
       win_alloc_src = '0;
-      // Head store data has top priority only when it unblocks retirement;
-      // younger store data must never starve younger load/store base reads.
-      if (age_data_rem[0] && (free_space || IndexBits'(0) < max_evict_age)) begin
+      // Head store data has top priority on Store-AGU (or single-port) to unblock retire.
+      if ((prefer_store || ReadPorts == 1)
+          && age_data_rem[0] && (free_space || IndexBits'(0) < max_evict_age)) begin
         port_found = 1'b1;
         port_is_addr = 1'b0;
         win_age = '0;
         age_data_rem[0] = 1'b0;
       end
+      // Primary class address pass: Load on Port 0, Store on Port 1.
       for (int age = 0; age < Entries; age++) begin
-        automatic logic [IndexBits-1:0] cand_idx;
-        cand_idx = age_index(IndexBits'(age));
-        if (!port_found && age_addr_avail[age]
-            && !reserved_addr_bank[int'(cand_idx) % AllocationBanks]) begin
+        if (!port_found && age_addr_avail[age] && (age_is_store[age] == prefer_store)) begin
           port_found = 1'b1;
           port_is_addr = 1'b1;
           win_age = IndexBits'(age);
           age_addr_avail[age] = 1'b0;
         end
+      end
+      // Secondary class address fallback: keep both AGUs utilized.
+      for (int age = 0; age < Entries; age++) begin
+        if (!port_found && age_addr_avail[age]) begin
+          port_found = 1'b1;
+          port_is_addr = 1'b1;
+          win_age = IndexBits'(age);
+          age_addr_avail[age] = 1'b0;
+        end
+      end
+      // Head store data fallback on Port 0 if Port 1 didn't take it.
+      if (!port_found && age_data_rem[0] && (free_space || IndexBits'(0) < max_evict_age)) begin
+        port_found = 1'b1;
+        port_is_addr = 1'b0;
+        win_age = '0;
+        age_data_rem[0] = 1'b0;
       end
       for (int age = 1; age < Entries; age++) begin
         automatic logic data_cache_ok;
@@ -218,11 +238,20 @@ module rapt_ioq_operands #(
           age_data_rem[age] = 1'b0;
         end
       end
-      // Idle read ports steal allocation-edge base reads for newly dispatched
-      // ready-base memory ops, keeping 0-cycle AGU without extra PRF ports.
+      // Idle read ports steal allocation-edge base reads (matching class first).
       for (int s = 0; s < Slots; s++) begin
-        if (!port_found && alloc_addr_rem[s]
-            && !reserved_addr_bank[int'(alloc_index[s]) % AllocationBanks]) begin
+        if (!port_found && alloc_addr_rem[s] && (alloc_is_store[s] == prefer_store)) begin
+          port_found = 1'b1;
+          port_is_addr = 1'b1;
+          port_is_alloc = 1'b1;
+          win_idx = alloc_index[s];
+          win_imm = alloc_immediate[s];
+          win_alloc_src = alloc_sources[s][0];
+          alloc_addr_rem[s] = 1'b0;
+        end
+      end
+      for (int s = 0; s < Slots; s++) begin
+        if (!port_found && alloc_addr_rem[s]) begin
           port_found = 1'b1;
           port_is_addr = 1'b1;
           port_is_alloc = 1'b1;
@@ -233,9 +262,6 @@ module rapt_ioq_operands #(
         end
       end
       if (!port_is_alloc) win_idx = port_found ? age_index(win_age) : head;
-      if (port_found && port_is_addr) begin
-        reserved_addr_bank[int'(win_idx)%AllocationBanks] = 1'b1;
-      end
       for (int c = 0; c < StoreValues; c++) begin
         if (port_found && !port_is_addr && port_cache_slot == CacheBits'(c)) begin
           reserved_cache[c] = 1'b1;
@@ -286,51 +312,37 @@ module rapt_ioq_operands #(
         sum_imm
     ));
   end
-  localparam int BankEntries = Entries / AllocationBanks;
-  wire [AllocationBanks-1:0] address_write;
-  logic [IndexBits-1:0] address_index[AllocationBanks];
-  logic [Xlen-1:0] address_value[AllocationBanks];
-  for (genvar b = 0; b < AllocationBanks; b++) begin : g_address_bank
-    logic write_valid;
-    logic [Xlen-1:0] words[BankEntries];
-    logic cacheable[BankEntries];
-    // One indexed write per bank shares the wide source mux across its
-    // entries. Relay and granted older reads take priority; a displaced
-    // allocation retains its source identity and prepares through the PRF.
+  // Direct per-entry address storage: allows both Load AGU (Port 0) and
+  // Store AGU (Port 1) to commit prepared addresses in the same cycle without
+  // bank conflicts.
+  logic [Xlen-1:0] entry_addr_q[Entries];
+  logic [Entries-1:0] entry_cacheable_q;
+  for (genvar e = 0; e < Entries; e++) begin : g_address
+    logic entry_write;
+    logic [Xlen-1:0] entry_write_val;
     always_comb begin
-      write_valid = bank_alloc_valid[b] && bank_addr_valid[b];
-      address_index[b] = bank_alloc_index[b];
-      address_value[b] = bank_addr[b];
+      entry_write = 1'b0;
+      entry_write_val = '0;
+      if (bank_alloc_valid[e % AllocationBanks]
+          && bank_alloc_index[e % AllocationBanks] == IndexBits'(e)
+          && bank_addr_valid[e % AllocationBanks]) begin
+        entry_write = 1'b1;
+        entry_write_val = bank_addr[e % AllocationBanks];
+      end
       for (int p = 0; p < ReadPorts; p++) begin
         if (request_valid[p] && request_addr[p] && read_valid[p]
-            && int'(request_index[p]) % AllocationBanks == b) begin
-          write_valid = 1'b1;
-          address_index[b] = request_index[p];
-          address_value[b] = request_sum[p];
+            && request_index[p] == IndexBits'(e)) begin
+          entry_write = 1'b1;
+          entry_write_val = request_sum[p];
         end
       end
-      if (relay_valid && int'(relay_index) % AllocationBanks == b) begin
-        write_valid = 1'b1;
-        address_index[b] = relay_index;
-        address_value[b] = relay_addr;
+      if (relay_valid && relay_index == IndexBits'(e)) begin
+        entry_write = 1'b1;
+        entry_write_val = relay_addr;
       end
     end
-    assign address_write[b] = write_valid;
-    always_ff @(posedge clock) begin
-      if (write_valid) begin
-        words[int'(address_index[b]) / AllocationBanks] <= address_value[b];
-        cacheable[int'(address_index[b]) / AllocationBanks]
-            <= rapt_pkg::addr_cacheable(address_value[b]);
-      end
-    end
-    for (genvar k = 0; k < BankEntries; k++) begin : g_read
-      assign addr_storage[k*AllocationBanks+b] = words[k];
-      assign cacheable_storage[k*AllocationBanks+b] = cacheable[k];
-    end
-  end
-  for (genvar e = 0; e < Entries; e++) begin : g_address
-    // Every issue path consumes a captured sum. Arbitration can delay a
-    // bank's second preparation; it never changes the relay request edge.
+    assign addr_storage[e] = entry_addr_q[e];
+    assign cacheable_storage[e] = entry_cacheable_q[e];
     assign addr[e] = addr_storage[e];
     assign addr_cacheable[e] = cacheable_storage[e];
     assign addr_ready[e] = entry_valid[e] && base_ready[e] && prepared[e];
@@ -341,8 +353,11 @@ module rapt_ioq_operands #(
         data_source[e] <= bank_sources[e % AllocationBanks][1];
         prepared[e] <= 1'b0;
       end
-      if (address_write[e%AllocationBanks] && address_index[e%AllocationBanks] == IndexBits'(e))
+      if (entry_write) begin
+        entry_addr_q[e] <= entry_write_val;
+        entry_cacheable_q[e] <= rapt_pkg::addr_cacheable(entry_write_val);
         prepared[e] <= 1'b1;
+      end
       if (reset || flush || (retire && head == IndexBits'(e))) prepared[e] <= 1'b0;
     end
   end

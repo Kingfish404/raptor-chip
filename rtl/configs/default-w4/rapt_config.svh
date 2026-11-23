@@ -218,7 +218,7 @@
 `endif
 // Four physical-line refills may overlap after translation; IOQ replays on wake.
 `ifndef RAPT_L1D_MSHRS
-`define RAPT_L1D_MSHRS 4
+`define RAPT_L1D_MSHRS 8
 `endif
 
 // ITLB remains fully associative. Data WAYS=0 keeps CAM; WAYS=1/2 indexes

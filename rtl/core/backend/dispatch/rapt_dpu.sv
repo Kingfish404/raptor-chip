@@ -12,7 +12,8 @@ module rapt_dpu #(
     parameter int unsigned NumSlots = Cfg.dispatch_width,
     parameter int unsigned NumCandidates = NumSlots,
     parameter type CapacityT = rapt_pkg::dispatch_capacity_t,
-    parameter type GrantT = rapt_pkg::dispatch_grant_t
+    parameter type GrantT = rapt_pkg::dispatch_grant_t,
+    parameter bit InOrderPrefix = 1'b0
 ) (
     input logic clock,
     input logic reset,
@@ -62,32 +63,59 @@ module rapt_dpu #(
                     int'(candidate_domain[c]) < NumDomains)
   end
 
-  rapt_rank_select #(
-      .Entries(NumCandidates),
-      .NumSelect(NumSlots),
-      .IndexBits(CandidateBits)
-  ) select_oldest_admissible (
-      .available(admissible),
-      .found(selected_valid),
-      .index(selected_candidate)
-  );
-
-  always_comb begin
-    for (int d = 0; d < NumDomains; d++) begin
-      grant[d] = '0;
+  if (InOrderPrefix) begin : g_inorder_prefix
+    logic [NumSlots-1:0] prefix_ok;
+    always_comb begin
+      automatic logic running_ok;
+      running_ok = 1'b1;
+      prefix_ok = '0;
       for (int s = 0; s < NumSlots; s++) begin
-        automatic logic [CandidateBits-1:0] c;
-        c = selected_candidate[s];
-        if (selected_valid[s] && target[c] == d) begin
-          grant[d].accept[s] = 1'b1;
-          grant[d].index[s] = capacity[d].free_index[SlotBits'(domain_rank[c])];
+        running_ok &= admissible[s];
+        prefix_ok[s] = running_ok;
+        selected_valid[s] = running_ok;
+        selected_candidate[s] = CandidateBits'(s);
+      end
+      for (int c = 0; c < NumCandidates; c++) begin
+        candidate_ready[c] = (c < NumSlots) ? prefix_ok[c] : 1'b0;
+      end
+      for (int d = 0; d < NumDomains; d++) begin
+        grant[d] = '0;
+        for (int s = 0; s < NumSlots; s++) begin
+          if (prefix_ok[s] && target[s] == d) begin
+            grant[d].accept[s] = 1'b1;
+            grant[d].index[s] = capacity[d].free_index[SlotBits'(domain_rank[s])];
+          end
         end
       end
     end
-    for (int c = 0; c < NumCandidates; c++) begin
-      candidate_ready[c] = 1'b0;
-      for (int s = 0; s < NumSlots; s++)
-      candidate_ready[c] |= selected_valid[s] && selected_candidate[s] == CandidateBits'(c);
+  end else begin : g_ooo_compact
+    rapt_rank_select #(
+        .Entries(NumCandidates),
+        .NumSelect(NumSlots),
+        .IndexBits(CandidateBits)
+    ) select_oldest_admissible (
+        .available(admissible),
+        .found(selected_valid),
+        .index(selected_candidate)
+    );
+
+    always_comb begin
+      for (int d = 0; d < NumDomains; d++) begin
+        grant[d] = '0;
+        for (int s = 0; s < NumSlots; s++) begin
+          automatic logic [CandidateBits-1:0] c;
+          c = selected_candidate[s];
+          if (selected_valid[s] && target[c] == d) begin
+            grant[d].accept[s] = 1'b1;
+            grant[d].index[s] = capacity[d].free_index[SlotBits'(domain_rank[c])];
+          end
+        end
+      end
+      for (int c = 0; c < NumCandidates; c++) begin
+        candidate_ready[c] = 1'b0;
+        for (int s = 0; s < NumSlots; s++)
+        candidate_ready[c] |= selected_valid[s] && selected_candidate[s] == CandidateBits'(c);
+      end
     end
   end
   for (genvar d = 0; d < NumDomains; d++) begin : g_capacity_prefix

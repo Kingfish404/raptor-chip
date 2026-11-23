@@ -20,6 +20,7 @@ interface ifu_bpu_if #(
   logic taken;
   // Accepted conditional (primary or auxiliary), never a raw predictor query.
   logic history_valid, history_taken, history_pc_bit;
+  logic [15:1] history_pc;
 `ifdef RAPT_FETCH_LOOKAHEAD
   // Auxiliary conditional prediction uses a small independent combinational
   // direction table. Its target is derived statically by IFU.
@@ -38,25 +39,25 @@ interface ifu_bpu_if #(
 `ifdef RAPT_FETCH_LOOKAHEAD
   modport out(
       output nextpc, pc_update,
-      output history_valid, history_taken, history_pc_bit,
+      output history_valid, history_taken, history_pc_bit, history_pc,
       output aux_query, aux_pc, aux_position, request_aux_position,
       input aux_taken, aux_index, request_aux_taken,
       input npc, taken
   );
   modport in(
       input nextpc, pc_update,
-      input history_valid, history_taken, history_pc_bit,
+      input history_valid, history_taken, history_pc_bit, history_pc,
       input aux_query, aux_pc, aux_position, request_aux_position,
       output aux_taken, aux_index, request_aux_taken,
       output npc, taken
   );
 `else
   modport out(
-      output nextpc, pc_update, history_valid, history_taken, history_pc_bit,
+      output nextpc, pc_update, history_valid, history_taken, history_pc_bit, history_pc,
       input npc, taken
   );
   modport in(
-      input nextpc, pc_update, history_valid, history_taken, history_pc_bit,
+      input nextpc, pc_update, history_valid, history_taken, history_pc_bit, history_pc,
       output npc, taken
   );
 `endif
