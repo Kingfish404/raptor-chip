@@ -67,8 +67,8 @@ and variable. The CM005 block forwards traffic between the shared network and
 KU5P while the KU15P CPU uses DDR and UART. Add `CM005_ETHERNET=1` for the CPU
 NIC, or use `ubuntu-*` below.
 
-The native TFTP helper supports RV32 and RV64. Pass the board's `xlen` to
-`netboot.upload` when running a native FPGA test. It prepares a small RAM
+The TFTP helper supports RV32 and RV64. Pass the board's `xlen` to
+`netboot.upload` when running an FPGA test. It prepares a small RAM
 loader and transfers the Linux image and device tree over the CPU NIC.
 
 For the LiteX BIOS and DDR4/CM005 Ethernet netboot profile, run

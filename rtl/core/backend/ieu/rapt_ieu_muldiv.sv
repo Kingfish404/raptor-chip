@@ -78,7 +78,7 @@ module rapt_ieu_muldiv #(
   logic [`RAPT_PC_BITS_OF(XLEN)-1:0] mdq_pc[MDQ_SIZE];
   logic [MDQ_SIZE-1:0] mdq_c;
   logic [MDQ_SIZE-1:0] mdq_word;
-  logic [         4:0] mdq_alu     [MDQ_SIZE];
+  logic [         5:0] mdq_alu     [MDQ_SIZE];
 
   // FU tags name MDQ slots. The FU removes every matching pipeline/divider
   // owner on the cancellation edge, before a freed slot can be allocated again.
@@ -379,7 +379,7 @@ module rapt_ieu_muldiv #(
       mdq_pc[e]       <= dispatch[alloc_slot[e]].uop.pc;
       mdq_c[e]        <= dispatch[alloc_slot[e]].uop.c;
       mdq_word[e]     <= dispatch[alloc_slot[e]].uop.execute.int_op.word;
-      mdq_alu[e]      <= dispatch[alloc_slot[e]].uop.execute.int_op.alu[4:0];
+      mdq_alu[e]      <= dispatch[alloc_slot[e]].uop.execute.int_op.alu;
     end
     // ---- Resident operand wakeup (skip slots being allocated) ----
     for (int i = 0; i < MDQ_SIZE; i++) begin

@@ -85,7 +85,10 @@ module rapt_l2_evict_ctrl #(
             phase_q <= READ;
           end
         end
-        B: if (done_valid_o && done_ready_i) phase_q <= AW;
+        B: if (done_valid_o && done_ready_i) begin
+          phase_q <= AW;
+          word_q <= '0;
+        end
         default: phase_q <= AW;
       endcase
     end

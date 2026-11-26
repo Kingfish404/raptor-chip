@@ -50,9 +50,9 @@ For RVV, select `default`, `default-*` or `large`. Use the routed timing report
 for the chosen preset and board. The board build options are in the
 [FPGA guide](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/README.md).
 
-The native KU5P and CU08-KU15P SoCs provide an RV64 Ubuntu flow over TFTP
-and NFS. Optional native I/O adds a VirtIO-MMIO NIC and host-backed block
-devices. See [Ubuntu on native FPGA SoCs](./linux_kernel.md#ubuntu-on-native-fpga-socs).
+The KU5P and CU08-KU15P SoCs provide an RV64 Ubuntu flow over TFTP
+and NFS. Optional I/O adds a VirtIO-MMIO NIC and host-backed block
+devices. See [Ubuntu on FPGA SoCs](./linux_kernel.md#ubuntu-on-fpga-socs).
 
 ## ASIC Flow
 

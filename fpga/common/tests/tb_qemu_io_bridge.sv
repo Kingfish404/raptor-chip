@@ -162,6 +162,7 @@ module tb_qemu_io_bridge;
       .uart_rx(1'b1),
       .uart_tx(),
       .uart_irq(),
+      .rtc_irq(),
       .peripheral_rd(),
       .peripheral_wr(),
       .peripheral_raddr(),

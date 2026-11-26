@@ -1,4 +1,4 @@
-// Native FPGA SoC integrating Raptor cluster + AXI4-DMA interconnect +
+// Raptor FPGA SoC integrating Raptor cluster + AXI4-DMA interconnect +
 // standard OASIS VirtIO 1.2 virtio-mmio NIC + FPGA-to-QEMU Direct I/O & DMA
 // Bridge (exposing upstream VirtIO-Blk, VirtIO-Net, SDHCI, and PCIe + NVMe).
 module rapt_native_io_soc #(
@@ -51,7 +51,7 @@ module rapt_native_io_soc #(
   axi4_if #(.XLEN(XLEN)) dma_bridge ();
   axi4_if #(.XLEN(XLEN)) dma_bus ();
 
-  logic uart_irq, vnet_irq;
+  logic uart_irq, rtc_irq, vnet_irq;
   logic [31:0] bridge_irq_mask;
   logic [31:1] core_irq;
   logic ext_wr_valid, ext_wr_pending;
@@ -78,12 +78,18 @@ module rapt_native_io_soc #(
   // PLIC interrupt assignment:
   //   IRQ 1: UART
   //   IRQ 2: VirtIO-Net (local RTL DMA NIC or remote QEMU NIC) / board peripheral
-  //   IRQ 3..31: Remote QEMU devices (VirtIO-Blk=3, SDHCI=4, PCIe/NVMe INTx=11..14)
+  //   IRQ 3: VirtIO-Blk (remote QEMU bridge)
+  //   IRQ 4: SDHCI (remote QEMU bridge)
+  //   IRQ 5: VirtIO-RNG (remote QEMU bridge)
+  //   IRQ 6: Goldfish RTC (local RTL RTC or remote QEMU bridge)
+  //   IRQ 7..31: Remote QEMU devices (PCIe/NVMe INTx=11..14)
   assign core_irq[1] = uart_irq | (WithQemuBridge ? bridge_irq_mask[1] : 1'b0);
   assign core_irq[2] = (WithLocalVirtioNet ? vnet_irq : 1'b0)
                      | (WithQemuBridge ? bridge_irq_mask[2] : 1'b0)
                      | (WithPeripheral ? peripheral_irq : 1'b0);
-  assign core_irq[31:3] = WithQemuBridge ? bridge_irq_mask[31:3] : 29'b0;
+  assign core_irq[5:3] = WithQemuBridge ? bridge_irq_mask[5:3] : 3'b0;
+  assign core_irq[6] = rtc_irq | (WithQemuBridge ? bridge_irq_mask[6] : 1'b0);
+  assign core_irq[31:7] = WithQemuBridge ? bridge_irq_mask[31:7] : 25'b0;
 
   rapt #(
       .XLEN(XLEN)
@@ -316,6 +322,7 @@ module rapt_native_io_soc #(
       .uart_rx(uart_rx),
       .uart_tx(uart_tx),
       .uart_irq(uart_irq),
+      .rtc_irq(rtc_irq),
       .peripheral_rd(peripheral_rd),
       .peripheral_wr(peripheral_wr),
       .peripheral_raddr(peripheral_raddr),

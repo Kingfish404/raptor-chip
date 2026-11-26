@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RAM-resident native UART loader; console/ROM remain at 115200 baud."""
+"""RAM-resident UART loader; console/ROM remain at 115200 baud."""
 import array
 import fcntl
 import hashlib
@@ -22,7 +22,7 @@ STAGE_ADDRESS = 0x8f000000
 def baudrate(serial, baud):
     """Linux termios2 supports exact rates such as 312500 (50 MHz / 16 / 10)."""
     if not sys.platform.startswith("linux"):
-        raise RuntimeError("fast native upload requires Linux termios2")
+        raise RuntimeError("fast UART upload requires Linux termios2")
     value = array.array("I", [0] * 11)
     fcntl.ioctl(serial.fd, 0x802c542a, value, True)  # TCGETS2, 44-byte termios2
     value[2] = (value[2] & ~0x100f) | 0x1000       # CBAUD / BOTHER
@@ -32,7 +32,7 @@ def baudrate(serial, baud):
 
 def build(directory, clock_hz, baud, cross="riscv64-unknown-elf-"):
     if baud <= 0 or clock_hz % (16 * baud) or not 1 <= clock_hz // (16 * baud) <= 65535:
-        raise ValueError("upload baud must divide the native UART clock exactly")
+        raise ValueError("upload baud must divide the UART clock exactly")
     inputs = {"clock_hz": clock_hz, "baud": baud,
               "compiler": subprocess.check_output([cross + "gcc", "--version"], text=True),
               "sources": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in
@@ -47,7 +47,7 @@ def build(directory, clock_hz, baud, cross="riscv64-unknown-elf-"):
             return binary
         raise RuntimeError("RAM loader artifact changed")
     (out / "native_map.h").write_text(
-        '#define NATIVE_BOARD_STRING "Raptor native RAM loader"\n'
+        '#define NATIVE_BOARD_STRING "RAM loader"\n'
         '#define NATIVE_XLEN_STRING "64"\n#define UART_BASE 0x10000000u\n'
         '#define RAM_BASE 0x80000000u\n#define RAM_BYTES 0x80000000u\n'
         f"#define UART_DIVISOR {clock_hz // (16 * baud)}u\n")

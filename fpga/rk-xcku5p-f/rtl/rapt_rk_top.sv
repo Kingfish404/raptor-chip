@@ -148,6 +148,19 @@ module rapt_rk_top (
   wire [3:0] peripheral_wstrb;
 `ifdef NATIVE_WITH_ETHERNET
   wire eth_tx_clk, eth_delay_clk;
+`ifdef NATIVE_WITH_ETH_DMA
+  axi4_if soc_ddr ();
+  axi4_if eth_dma ();
+  wire eth_ext_wr_valid;
+  wire [63:0] eth_ext_wr_first, eth_ext_wr_last;
+  rapt_axi4_dma_arb eth_ddr_arb (
+      .clk,
+      .reset(reset || !ddr_ready),
+      .m0(soc_ddr),
+      .m1(eth_dma),
+      .out(ddr)
+  );
+`endif
   BUFG eth_tx_buffer (
       .I(eth_tx_raw),
       .O(eth_tx_clk)
@@ -178,6 +191,13 @@ module rapt_rk_top (
       .eth_txd,
       .eth_mdc,
       .eth_mdio
+`ifdef NATIVE_WITH_ETH_DMA
+      ,
+      .dma(eth_dma),
+      .ext_wr_valid_o(eth_ext_wr_valid),
+      .ext_wr_first_o(eth_ext_wr_first),
+      .ext_wr_last_o(eth_ext_wr_last)
+`endif
   );
 `else
   assign peripheral_irq = 0;
@@ -280,7 +300,14 @@ module rapt_rk_top (
       .peripheral_wstrb,
       .peripheral_rdata,
       .peripheral_irq,
+`ifdef NATIVE_WITH_ETH_DMA
+      .ext_wr_valid_i(eth_ext_wr_valid),
+      .ext_wr_first_i(eth_ext_wr_first),
+      .ext_wr_last_i(eth_ext_wr_last),
+      .ddr(soc_ddr)
+`else
       .ddr
+`endif
   );
 `endif
   logic [25:0] heartbeat = 0;

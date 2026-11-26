@@ -226,7 +226,7 @@ class NativeToolsTests(unittest.TestCase):
             out = Path(temp)
             (out / "sources").mkdir()
             for xlen, memory, expected in ((32, "bram", 131072), (32, "ddr", 0x40000000),
-                                           (64, "ddr", 0x80000000)):
+                                           (64, "ddr", 0x100000000)):
                 args = types.SimpleNamespace(xlen=xlen, memory=memory, ram_bytes=131072, clock_mhz=50)
                 values, size = build.write_map(args, out)
                 self.assertEqual(size, expected)
@@ -237,7 +237,7 @@ class NativeToolsTests(unittest.TestCase):
                 tree = (out / "native.dts").read_text()
                 self.assertIn("timebase-frequency = <1000000>", tree)
                 self.assertIn("interrupts = <1>", tree)
-                self.assertIn(f"0x{expected:x}>", tree)
+                self.assertIn(f"0x{expected >> 32:x} 0x{expected & 0xffffffff:x}>", tree)
                 self.assertIn(f'riscv,isa-base = "rv{xlen}i"', tree)
                 self.assertNotIn("rng-seed", tree)
                 # Linux OF fixes the 16550A type: both capacity and TX batch

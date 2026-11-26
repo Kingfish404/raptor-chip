@@ -2306,8 +2306,12 @@ module rapt_rou #(
   // CBOM drains the SQ and cleans its physical block before retirement.
   // ZERO instead uses its committed SQ store descriptor.
   // A successful serializing CBO completion supplies its block offset.
+  // With an inclusive write-back L2, cbo.clean must also push dirty lines
+  // out of L2 to main memory for non-coherent DMA masters.
+  wire head_cbo_clean = commit_uop[0].execute.sys.kind == rapt_pkg::SYS_CBO_CLEAN;
   assign rou_cmu.cbo_inval = commit_fire[0] && !recieved_trap
-      && !rob_entry[h0].trap && head_cbo_inval;
+      && !rob_entry[h0].trap
+      && (head_cbo_inval || (rapt_pkg::L2LinkConfig.cache && head_cbo_clean));
   assign rou_cmu.cbo_block = cbo_block_q;
   assign rou_cmu.flush_pipe = flush_pipe;
   assign rou_cmu.flush_redirect = flush_apply;

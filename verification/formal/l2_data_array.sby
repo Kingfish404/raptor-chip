@@ -1,0 +1,32 @@
+[tasks]
+bmc
+prove
+cover
+
+[options]
+bmc: mode bmc
+bmc: depth 24
+prove: mode prove
+prove: depth 16
+cover: mode cover
+cover: depth 24
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+plugin -i slang
+read_slang --single-unit -DFORMAL -DRAPT_RV64 -I. rapt_pkg.sv rapt_sram_1rw.sv rapt_l2_data_array.sv formal_l2_data_array.sv
+prep -top formal_l2_data_array
+
+[files]
+../../rtl/include/rapt.svh
+../../rtl/include/rapt_types.svh
+../../rtl/include/rapt_fp_ops.svh
+../../rtl/include/npc/rapt_soc.svh
+../../rtl/configs/default-w4-l2/rapt_config.svh
+rapt_sva.svh formal_sva.svh
+../../rtl/rapt_pkg.sv
+../../rtl/sram/rapt_sram_1rw.sv
+../../rtl/uncore/l2cache/rapt_l2_data_array.sv
+formal_l2_data_array.sv

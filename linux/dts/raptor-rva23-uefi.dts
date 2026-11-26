@@ -1,0 +1,48 @@
+/dts-v1/;
+
+/include/ "raptor-rva23-io.dts"
+
+/ {
+	model = "Raptor RVA23S64 UEFI/EBBR SoC";
+
+	aliases {
+		serial0 = &uart0;
+	};
+
+	chosen {
+		/delete-property/ rng-seed;
+		stdout-path = "serial0:115200n8";
+		bootargs = "earlycon=sbi console=ttyS0,115200n8 random.trust_bootloader=on systemd.default_timeout_start_sec=600 systemd.default_device_timeout_sec=1800";
+	};
+
+	reboot {
+		compatible = "syscon-reboot";
+		regmap = <&raptor_finisher>;
+		offset = <0>;
+		value = <0x7777>;
+	};
+
+	memory@80000000 {
+		reg = <0x00 0x80000000 0x00 0x80000000>;
+	};
+
+	soc {
+		uart0: ns16550@10000000 {
+		};
+
+		rtc@101000 {
+			compatible = "google,goldfish-rtc";
+			reg = <0x00 0x00101000 0x00 0x1000>;
+			interrupt-parent = <&plic0>;
+			interrupts = <0x06>;
+		};
+
+		virtio_rng@10003000 {
+			compatible = "virtio,mmio";
+			reg = <0x00 0x10003000 0x00 0x1000>;
+			interrupt-parent = <&plic0>;
+			interrupts = <0x05>;
+			dma-noncoherent;
+		};
+	};
+};

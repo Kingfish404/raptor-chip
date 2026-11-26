@@ -22,10 +22,10 @@ if {$action eq "peripheral-synth"} {
     write_checkpoint -force [file join $out peripheral.dcp]
     # Check the actual synthesized writable memories, not just an RTL attribute.
     if {[llength [get_cells -quiet -hier -filter {REF_NAME =~ RAMB* && NAME =~ *sram*}]] == 0} {
-        error "Native scratch SRAM did not infer block RAM"
+        error "Scratch SRAM did not infer block RAM"
     }
     if {!$with_ddr && [llength [get_cells -quiet -hier -filter {REF_NAME =~ RAMB* && NAME =~ *g_ram*}]] == 0} {
-        error "Native main RAM did not infer block RAM"
+        error "Main RAM did not infer block RAM"
     }
     close_project
     exit 0
@@ -145,7 +145,7 @@ if {$with_ethernet || $with_cm005_bridge} {
     set fh [open [file join $out bus_skew.rpt] w]
     puts $fh $skew_report
     close $fh
-    if {[string first "VIOLATED" $skew_report] >= 0} {error "Native CDC bus skew failed"}
+    if {[string first "VIOLATED" $skew_report] >= 0} {error "CDC bus skew failed"}
 }
 
 # Pulse-width summaries also include PHY min/max skew checks.
@@ -200,7 +200,7 @@ if {$with_cm005_bridge} {
     puts $fh $methodology
     close $fh
     if {[string first "Critical Warning" $methodology] >= 0} {
-        error "Native CM005 clock/methodology checks failed"
+        error "CM005 clock/methodology checks failed"
     }
 }
 write_bitstream -force [file join $out $bitstream]

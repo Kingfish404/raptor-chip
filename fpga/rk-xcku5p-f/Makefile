@@ -1,4 +1,4 @@
-# RK-XCKU5P-F native board build: SoC bitstream and Ubuntu.
+# RK-XCKU5P-F board build: SoC bitstream and Ubuntu.
 # Run `make help` for every target and variable; see README.md for workflows.
 .DEFAULT_GOAL := help
 

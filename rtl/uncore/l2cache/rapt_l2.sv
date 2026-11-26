@@ -149,9 +149,9 @@ module rapt_l2 #(
   // Large directories clear one set per cycle to bound reset unrolling.
   localparam bit BulkSetClear = L2_N_WAYS * (NSets + 1) <= 4000;
   localparam int WayBits = (L2_N_WAYS <= 1) ? 1 : $clog2(L2_N_WAYS);
-  // Medium BOOM uses four 16384 x 64-bit logical data banks:
-  // row={way[2:0],set[9:0],chunk[2]}, bank=chunk[1:0].
-  localparam bit BoomBankedStore = L2_N_WAYS == 8 && L2_LEN == 10
+  // Medium BOOM uses four 64-bit logical data banks (256 KiB @ L2_LEN=9 or
+  // 512 KiB @ L2_LEN=10): row={way[2:0],set[L2_LEN-1:0],chunk[2]}, bank=chunk[1:0].
+  localparam bit BoomBankedStore = L2_N_WAYS == 8 && (L2_LEN == 9 || L2_LEN == 10)
                                 && (LineSize * XLEN == 512) && (XLEN == 32 || XLEN == 64);
   if (L2_N_WAYS < 1 || L2_N_WAYS > 1024 || (L2_N_WAYS & (L2_N_WAYS - 1)) != 0) begin : g_invalid_ways
     $error("L2 ways must be a power of two between 1 and 1024");
@@ -483,7 +483,7 @@ module rapt_l2 #(
     ) && (!BoomBankedStore || (64'(physical) >> (TagLsb + TagBits)) == '0) &&
         (rapt_pkg::addr_in_pmem(
         a
-    ) || (rapt_pkg::PmemBytes < 32'h80000000 && physical >= XLEN'('ha0000000) &&
+    ) || (rapt_pkg::PmemBytes < 64'h80000000 && physical >= XLEN'('ha0000000) &&
           physical < XLEN'('ha2000000)));
   endfunction
   function automatic logic cacheable_line(input logic [XLEN-1:0] a);
@@ -617,7 +617,7 @@ module rapt_l2 #(
   logic r_burst_fill;
 
   function automatic logic d_client_read_id(input logic [ID_W-1:0] id);
-    return id == ID_W'(2) || (ID_W >= 4 && (id & ID_W'('hc)) == ID_W'('h8));
+    return id == ID_W'(2) || (ID_W >= 4 && (id & ID_W'('h8)) == ID_W'('h8));
   endfunction
   // Hit lookup uses the saved read address.
   logic [IndexBits-1:0] r_idx_q;
@@ -778,6 +778,7 @@ module rapt_l2 #(
   logic r_selected_resident;
   logic r_lookup_killed;
   logic l2_sram_wblock;
+  logic legacy_sram_stale;
   logic boom_bank_read_ready;
   logic boom_bank_sourcec_ready;
   logic [XLEN-1:0] boom_bank_sourcec_word;
@@ -1646,28 +1647,41 @@ module rapt_l2 #(
       && cacheable_line(
       axi_s.araddr
   ) && |axi_s.arcache[3:2];
+  // Bypass and no-allocate reads may enter R_BYPASS_WAIT, which waits for
+  // !ms_busy. Completed MSHRs require rs == R_IDLE to install/retire, so hold
+  // non-allocating ARs in R_IDLE until all in-flight MSHRs have drained.
+  logic ar_allocatable;
+  assign ar_allocatable = cacheable_line(axi_s.araddr) && |axi_s.arcache[3:2];
   assign axi_s.arready = ms_ar_common_ready && (!ms_done_any || ms_secondary_release_admit)
       && (ms_secondary_match ? ms_secondary_request_valid && ms_secondary_request_ready
                              : !ms_ar_conflict && !ms_id_conflict
-                                 && (!BoomBankedStore || !cacheable_line(
-      axi_s.araddr
-  ) || !(|axi_s.arcache[3:2]) || ms_free));
+                                 && (!BoomBankedStore || (ar_allocatable ? ms_free : !ms_busy)));
   // Master-side AR (issued during R_MISS_AR or R_BYPASS_AR).
+  // Hold MSHR ownership once advertised on axi_m.ar* until ARREADY completes
+  // the handshake, preventing a later blocking miss from preempting mid-stall.
   logic            m_arvalid;
   logic [XLEN-1:0] m_araddr;
   logic [     7:0] m_arlen;
   logic [     2:0] m_arsize;
   logic [     1:0] m_arburst;
   logic [     3:0] m_arcache;
+  logic            ar_hold_ms_q;
+  logic            sel_m_ar;
 
-  assign ms_arready = axi_m.arready && !m_arvalid;
+  assign sel_m_ar = m_arvalid && !(ar_hold_ms_q && ms_arvalid);
+  always_ff @(posedge clock) begin
+    if (reset) ar_hold_ms_q <= 1'b0;
+    else ar_hold_ms_q <= ms_arvalid && !sel_m_ar && !axi_m.arready;
+  end
+
+  assign ms_arready = axi_m.arready && !sel_m_ar;
   assign axi_m.arvalid = m_arvalid || ms_arvalid;
-  assign axi_m.araddr = m_arvalid ? m_araddr : ms_araddr;
-  assign axi_m.arid = m_arvalid ? m_arid : ms_arid;
-  assign axi_m.arlen = m_arvalid ? m_arlen : ms_arlen;
-  assign axi_m.arsize = m_arvalid ? m_arsize : ms_arsize;
-  assign axi_m.arburst = m_arvalid ? m_arburst : ms_arburst;
-  assign axi_m.arcache = m_arvalid ? m_arcache : ms_arcache;
+  assign axi_m.araddr = sel_m_ar ? m_araddr : ms_araddr;
+  assign axi_m.arid = sel_m_ar ? m_arid : ms_arid;
+  assign axi_m.arlen = sel_m_ar ? m_arlen : ms_arlen;
+  assign axi_m.arsize = sel_m_ar ? m_arsize : ms_arsize;
+  assign axi_m.arburst = sel_m_ar ? m_arburst : ms_arburst;
+  assign axi_m.arcache = sel_m_ar ? m_arcache : ms_arcache;
   // SinkD backpressure and the directory write queue gate blocking refill R.
   assign blocking_last_dir_ready = !BoomBankedStore || !axi_m.rlast
       || (dir_write_ready && !dir_write_valid);
@@ -2059,12 +2073,13 @@ module rapt_l2 #(
       r_lookup_killed <= 1'b1;
   end
   // BOOM banks permit separate-bank read/write; legacy banks serialize.
-  // A same-bank store during R_HIT stalls one cycle to refresh read data.
+  // A 1RW write on the prior or current cycle stalls R_HIT to refresh rdata.
   assign l2_sram_wblock = BoomBankedStore
                           ? (rs == R_EVICT_READ ? !boom_bank_sourcec_ready : !boom_bank_read_ready)
-                          : cache_install || w_cache_word_write;
+                          : cache_install || w_cache_word_write || legacy_sram_stale;
   generate
     if (BoomBankedStore) begin : g_boom_banked_store
+      assign legacy_sram_stale = 1'b0;
       logic unused_source_c_result_valid;
       logic [511:0] read_line_data, install_line_data;
       logic [63:0] priority_data, store_data, sink_d_data;
@@ -2129,7 +2144,9 @@ module rapt_l2 #(
         assign sink_d_data = {2{axi_m.rdata}};
         assign sink_d_mask = bank_sinkd_word[0] ? 8'hf0 : 8'h0f;
       end
-      rapt_l2_data_array u_data_array (
+      rapt_l2_data_array #(
+          .SetBits(IndexBits)
+      ) u_data_array (
           .sram_ctrl_i(sram_ctrl_i),
           .clock,
           .reset,
@@ -2202,13 +2219,27 @@ module rapt_l2 #(
       end
     end else begin : g_legacy_banked_store
       logic [IndexBits-1:0] data_sram_raddr;
+      logic [IndexBits-1:0] legacy_rdata_idx_q;
+      logic legacy_rdata_valid_q;
       logic r_hit_beat_fire;
-      assign r_hit_beat_fire = (rs == R_HIT) && r_hit_q && (!rs_rvalid || axi_s.rready);
+      assign legacy_sram_stale = (rs == R_HIT) && r_hit_q
+          && (!legacy_rdata_valid_q || legacy_rdata_idx_q != r_idx_q);
+      assign r_hit_beat_fire = (rs == R_HIT) && r_hit_q && !l2_sram_wblock
+          && (!rs_rvalid || axi_s.rready);
       assign data_sram_raddr =
           ms_replay_issue ? ms_replay_payload[ID_W+IndexLsb+:IndexBits]
           : (rs == R_IDLE && axi_s.arvalid && axi_s.arready
               && ar_cache_lookup) ? axi_s.araddr[IndexMsb:IndexLsb] :
           (r_hit_beat_fire && (r_len != 8'd0)) ? r_next_addr[IndexMsb:IndexLsb] : r_idx_q;
+      always_ff @(posedge clock) begin
+        if (reset || cache_install || w_cache_word_write) begin
+          legacy_rdata_valid_q <= 1'b0;
+          legacy_rdata_idx_q   <= '0;
+        end else begin
+          legacy_rdata_valid_q <= 1'b1;
+          legacy_rdata_idx_q   <= data_sram_raddr;
+        end
+      end
       assign boom_bank_read_ready = 1'b1;
       assign boom_bank_read_result_valid = 1'b0;
       assign boom_bank_sourcec_ready = 1'b1;
@@ -2269,8 +2300,7 @@ module rapt_l2 #(
   assign burst_forward_pop_valid = BoomBankedStore && burst_active && !burst_allocate
       && !burst_aw_pending && !burst_w_done && burst_input_started
       && put_list_valid[burst_put_list] && axi_m.wvalid && axi_m.wready;
-  assign put_pop_list = burst_put_pop_valid || burst_forward_pop_valid
-      ? burst_put_list : wbuf[d_rptr].put_list;
+  assign put_pop_list = burst_active ? burst_put_list : wbuf[d_rptr].put_list;
   assign put_pop_valid = burst_put_pop_valid || burst_forward_pop_valid
       || (BoomBankedStore && !burst_active && wbuf[d_rptr].busy && wbuf[d_rptr].has_w
           && ((ws == W_IDLE && (rs == R_STORE_DONE || rs == R_STORE_ERROR
@@ -2544,7 +2574,7 @@ module rapt_l2 #(
           || blocking_refill_invalidate ? 2'b00
       : dir_write_clients ? 2'b10 : 2'b11;
   // Only L1D is a probe-capable BOOM client. Its ordinary read ID is 2;
-  // MSHR refills use IDs 8..11. Preserve ownership on local store hits.
+  // MSHR refills use IDs 8..15. Preserve ownership on local store hits.
   assign dir_write_clients = release_dir_write_fire ? 1'b0
       : hit_probe_commit ? 1'b0
       : cache_install ? (!r_burst_fill && d_client_read_id(
@@ -2810,7 +2840,7 @@ module rapt_l2 #(
       .request_size_i(outer_ar_data.size),
       .request_burst_i(outer_ar_data.burst),
       .request_cache_i(outer_ar_data.cache),
-      .arready_i(axi_m.arready),
+      .arready_i(axi_m.arready && sel_m_ar),
       .arvalid_o(m_arvalid),
       .araddr_o(m_araddr),
       .arid_o(m_arid),
@@ -3784,6 +3814,10 @@ module rapt_l2 #(
         burst_active <= 0;
     end
   end
+  logic aw_is_cacheable, aw_is_cacheable_line, w_snoop_is_cacheable_line;
+  assign aw_is_cacheable = cacheable(axi_s.awaddr);
+  assign aw_is_cacheable_line = cacheable_line(axi_s.awaddr);
+  assign w_snoop_is_cacheable_line = cacheable_line(w_snoop_addr);
   // ---- Combined capture + drain FSM ----
   always_ff @(posedge clock) begin
     if (reset) begin
@@ -3904,11 +3938,9 @@ module rapt_l2 #(
         wbuf[aw_wptr].len <= axi_s.awlen;
         wbuf[aw_wptr].burst <= axi_s.awburst;
         wbuf[aw_wptr].cache <= axi_s.awcache;
-        wbuf[aw_wptr].posted <= cacheable(axi_s.awaddr) && axi_s.awcache[0] && |axi_s.awcache[3:2];
+        wbuf[aw_wptr].posted <= aw_is_cacheable && axi_s.awcache[0] && |axi_s.awcache[3:2];
         wbuf[aw_wptr].forward_scalar <= BoomBankedStore && !axi_s.awcache[0]
-            && |axi_s.awcache[3:2] && cacheable_line(
-            axi_s.awaddr
-        );
+            && |axi_s.awcache[3:2] && aw_is_cacheable_line;
         wbuf[aw_wptr].local_hit <= 1'b0;
         wbuf[aw_wptr].local_miss <= 1'b0;
         wbuf[aw_wptr].lookup_ready <= !dir_aw_read_fire;
@@ -3930,9 +3962,8 @@ module rapt_l2 #(
         wbuf[w_wptr].wstrb <= axi_s.wstrb;
         wbuf[w_wptr].wlast <= axi_s.wlast;
         wbuf[w_wptr].local_hit <= BoomBankedStore && w_hit_update && wbuf[w_wptr].posted;
-        wbuf[w_wptr].local_miss <= BoomBankedStore && wbuf[w_wptr].posted && cacheable_line(
-            w_snoop_addr
-        ) && !w_hit_update;
+        wbuf[w_wptr].local_miss <= BoomBankedStore && wbuf[w_wptr].posted
+            && w_snoop_is_cacheable_line && !w_hit_update;
         if (axi_s.wlast) begin
           wbuf[w_wptr].has_w <= 1'b1;
           wbuf[w_wptr].rsp_slot <= b_wptr;
@@ -3941,9 +3972,8 @@ module rapt_l2 #(
           // the refill; forwarded non-cacheable writes wait for downstream B.
           b_id_q[b_wptr] <= wbuf[w_wptr].id;
           b_resp_q[b_wptr] <= 2'b00;
-          b_ready_q[b_wptr] <= wbuf[w_wptr].posted && !(BoomBankedStore && cacheable_line(
-              w_snoop_addr
-          ) && !w_hit_update);
+          b_ready_q[b_wptr] <= wbuf[w_wptr].posted
+              && !(BoomBankedStore && w_snoop_is_cacheable_line && !w_hit_update);
           b_wptr <= (b_wptr == WbufPtrW'(WbufDepth - 1)) ? '0 : (b_wptr + 1'b1);
         end
       end

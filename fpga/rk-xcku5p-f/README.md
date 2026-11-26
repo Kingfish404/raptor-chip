@@ -50,11 +50,12 @@ build, then requires exactly one matching FPGA on JTAG unless `HW_TARGET`
 selects one. Programming is volatile; it does not write configuration flash or
 automatically rebuild stale outputs.
 
-## Ubuntu 24.04 NFS root
+## Ubuntu 26.10 (RVA23) NFS root
 
 The shared [Ubuntu workflow](../common/UBUNTU.md) provides kernel/rootfs
 preparation, TFTP or UART loading, NFS boot and CoreMark/Embench tools. Board
-`ubuntu-*` targets default to RV64 `middle-cache`, 50 MHz, DDR4 and onboard
+`ubuntu-*` targets default to RV64 `default` (RVA23U64/RVA23S64), 50 MHz (with
+`CLOCK_MHZ=75` also timing-closed for `default`), DDR4 and onboard
 Ethernet. The controller's [register ABI](ETHERNET.md) and physical interface
 are board-specific; the Linux driver is under
 [`fpga/common/linux`](../common/linux/).
@@ -62,7 +63,7 @@ are board-specific; the Linux driver is under
 For physical Ethernet checks, use `scripts/ethernet_synth.tcl` and
 `scripts/ethernet_route.tcl`; the latter routes only the MAC at the board pins.
 `scripts/test_ethernet.py --vivado-bin /path/to/Vivado/bin` also runs the AMD
-receive primitive test at −1, 0 and +1 ns input skew. Full board builds additionally
+receive primitive test at -1, 0 and +1 ns input skew. Full board builds additionally
 check Gray-bus skew, routed setup/hold, missing timing constraints and DRC before
 creating a loadable result.
 
@@ -115,10 +116,10 @@ and BIOS ARP exchange must succeed before TFTP can start.
 | `RAPT_CONFIG` | `small` | CPU preset from `rtl/configs/` |
 | `MEMORY` | `ddr` | `ddr` or `bram` main RAM |
 | `CLOCK_MHZ` | `50` | CPU clock target: `25`, `50` or `100` MHz |
-| `RAM_BYTES` | `131072` | BRAM main RAM size; power of two, 16 KiB–1 MiB |
+| `RAM_BYTES` | `131072` | BRAM main RAM size; power of two, 16 KiB-1 MiB |
 | `USE_RESET_BUTTON` | `0` | Set to `1` to enable the active-low reset button |
 | `DDR_PART` | `MT40A512M16LY-075` | MIG memory-part selection; see board details below |
-| `JOBS` | `4` | Tool parallelism, 1–32 |
+| `JOBS` | `4` | Tool parallelism, 1-32 |
 | `CROSS` | `riscv64-unknown-elf-` | Cross-toolchain prefix |
 | `VIVADO` | `vivado` | Vivado executable |
 | `PYTHON` | `python3` | Python executable used by Make |
@@ -146,7 +147,7 @@ new `build`; an accepted refresh retains the original implementation manifest.
 | Reference clock | 200 MHz differential, T24/U24, DIFF_SSTL12 |
 | UART RX/TX | AD13/AC14, FT2232, LVCMOS33, 115200 8N1 |
 | Optional reset | KEY1, K9, active low; disabled by default |
-| LEDs 0–3 | H9/J9/G11/H11: reset released, DDR ready, heartbeat, writeback error |
+| LEDs 0-3 | H9/J9/G11/H11: reset released, DDR ready, heartbeat, writeback error |
 | Fan | G9, active high, continuously enabled |
 | DDR4 data interface | Two x16 devices, 32-bit bus, 2 GiB physical memory; 256-bit MIG AXI interface |
 | Onboard Ethernet (LiteX) | RTL8211F-CG RGMII, 1.8 V I/O, 1000 Mb/s; MDIO on L19/M19 |

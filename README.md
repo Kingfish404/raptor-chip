@@ -4,7 +4,7 @@
 
 [![ISA](https://img.shields.io/badge/ISA-RV32%2FRV64%20%2B%20V%201.0-192f60?style=flat&logo=riscv&logoColor=white)](./docs/README.md#isa-scope) [![RVA23S64](https://img.shields.io/badge/RV64-RVA23S64-660874?style=flat)](./docs/README.md#rva23s64-support) [![marchID](https://img.shields.io/badge/marchID-0x32-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](https://github.com/riscv/riscv-isa-manual) [![Privilege](https://img.shields.io/badge/Priv-M%2FS%2FU%20%2B%20Sv32%2FSv39%20%2B%20PMP-660874?longCache=true&style=flat&colorA=192f60&colorB=660874)](./docs/uarch.md) [![FPGA](https://img.shields.io/badge/FPGA-LiteX-192f60?longCache=true&style=flat&colorA=192f60&colorB=660874)](./fpga/) [![License](https://img.shields.io/github/license/Kingfish404/raptor-chip?label=License&longCache=true&style=flat&logo=apache&logoColor=white&colorA=192f60&colorB=660874)](./LICENSE)
 
-> It is possible to invent a single machine which can be used to compute any computable sequence. — Alan Turing, 1936
+> It is possible to invent a single machine which can be used to compute any computable sequence. -- Alan Turing, 1936
 
 Raptor is a configurable **RV32/RV64 superscalar, out-of-order RISC-V core** with
 register renaming, precise in-order retirement, TAGE prediction, scalar floating
@@ -46,19 +46,20 @@ Bus Interface: AXI4, XLEN-bit data/addr containers, 4-bit ID; up to 8 burst-capa
                writebacks retain their data and complete only on the corresponding B response.
 Addresses: 32-bit physical by default in both modes; RV64 RAPT_PADDR_BITS=32..38.
            RV64 stores PCs in 40 bits and sign-extends to XLEN; the PMA map stays 32-bit.
-Default uarch: decode / rename / dispatch / commit = 2; 2 integer ALU ports, ROB=32,
-               ALQ=8, BRQ=8, MDQ=4, FPQ=8, IOQ=8, SQ=16, 6 completion ports,
-               16 branch checkpoints, integer PRF=64, committed FPR=32 x 64-bit.
-Prediction: TAGE + 128-entry BTB + 16-entry RAS.
-Caches: L1I/L1D = 16 KiB each, 4-way, 64 B lines; L1D write-back, 4 MSHRs,
-        2 writeback buffers. ITLB=16; DTLB=64 (2-way, load/store replicas);
-        shared L2 TLB=256. No L2 cache in default; default-l2 enables 512 KiB / 8 ways.
+Default uarch: decode / rename / dispatch / commit = 2 (direct prefix dispatch);
+               2 integer ALU ports, ROB=32, ALQ=8, BRQ=8, MDQ=4, FPQ=8, IOQ=8, SQ=16,
+               6 completion ports, 16 branch checkpoints, integer PRF=64, FPR=32 x 64-bit.
+Prediction: TAGE + 512-entry 4-way BTB + 32-entry ITT + 32-entry loop predictor + 16-entry RAS.
+Caches: L1I/L1D = 16 KiB each, 4-way, 64 B lines; L1I hit-under-prefetch + 8-entry FDIP;
+        L1D write-back, 8 MSHRs, 2 writeback buffers, degree-2 IP-stride prefetcher.
+        ITLB=16; DTLB=64 (2-way, load/store replicas); shared L2 TLB=512 (4-way).
+        No L2 cache in default; default-l2 enables 512 KiB / 8 ways.
 
 Verification: RISCOF / ACT4, scalar, vector and guest-mode difftest, RVFI and SVA.
 ```
 
 Scalar F/D/Zfhmin operations use an out-of-order FPQ and ROB-backed FP renaming.
-The 32 × 64-bit architectural FPR bank updates at retirement. Vector instructions
+The 32 x 64-bit architectural FPR bank updates at retirement. Vector instructions
 issue through the integer system path and execute under ROB-head ownership.
 The VPU shares translation, protection and L1D with the scalar pipeline and
 reports precise traps with `vstart` for restart. See the [VPU manual](./docs/vpu.md).
@@ -69,21 +70,22 @@ Selected benchmark results for the configurations below. FPGA runs use a 50 MHz 
 
 | Environment | Preset / XLEN | DMIPS/MHz | CM/MHz | Embench-IoT | SPECrate2017 (INT/FP / GHz) | SPECrate2026 (INT/FP / GHz) |
 | --- | --- | ---: | ---: | --- | ---: | ---: |
-| Bare-metal sim | default / RV32 | 1.96–2.42 | 5.9034 | 2.0746x | — | — |
-| Bare-metal sim | default / RV64 | 2.11–2.68 | 5.6709 | 2.1351x | — | — |
-| Bare-metal sim | default-w4 / RV64 | 2.47–3.56 | 7.0576 | 2.6607x | — | — |
-| Linux sim | default / RV32 | 1.30–1.65 | 4.3829 | 1.4902x | — | — |
-| Linux sim | default / RV64 | 1.53–2.30 | 3.4082 | 1.6952x | 0.54 / 0.44 | 0.25 / 0.26 |
-| Linux sim | default-w4 / RV64 | 1.64–2.41 | 3.7935 | 1.8387x | 0.58 / 0.50 | 0.29 / 0.26 |
-| FPGA Linux, KU5P | default / RV64 | 1.34–1.93 | 3.3514 | 1.0477x | — | — |
-| FPGA Linux, KU15P | default-w4 / RV64 | 1.46–2.16 | 3.9803 | 1.2319x | — | — |
+| Bare-metal sim | default / RV32 | 1.82-2.29 | 5.8889 | 2.0069x | - | - |
+| Bare-metal sim | default / RV64 | 1.99-2.55 | 5.6685 | 2.0362x | - | - |
+| Bare-metal sim | default-w4 / RV64 | 2.46-3.31 | 7.1016 | 2.6969x | - | - |
+| Linux sim | default / RV32 | 1.29-1.62 | 4.3148 | 1.4714x | - | - |
+| Linux sim | default / RV64 | 1.52-2.15 | 3.3654 | 1.6573x | 0.54 / 0.44 | 0.24 / 0.23 |
+| Linux sim | default-w4 / RV64 | 1.66-2.43 | 3.8553 | 1.9116x | 0.58 / 0.46 | 0.29 / 0.24 |
+| FPGA Linux, KU5P | default / RV64 | 1.34-1.93 | 3.3514 | 1.0477x | 0.21 / 0.16 | - |
+| FPGA Linux, KU15P | default-w4 / RV64 | 1.46-2.16 | 3.9803 | 1.2319x | 0.23 / 0.17 | - |
 
 All figures are measured directly on RTL (Verilator or FPGA; no architectural models).
 DMIPS/MHz reports strict (`-O3 -fno-inline`) to standard (`-O3 -fno-inline-functions`) with
 `-mno-strict-align`; Embench-IoT is the 19-workload geomean vs KU5P (50 MHz scaling); KU15P
 (`default-w4 / RV64`) scores 2 / 2 (SC/MC, 1 hart) in Geekbench 5.4.1 Preview. SPEC CPU
-2017/2026 scores use RTL Linux SimPoint (`-O2 -march=rv64gc`; not official SPEC submissions) —
-see [Performance Evaluation](./docs/performance.md) for details.
+2017/2026 scores (`-O2 -march=rv64gc`; not official SPEC submissions) use RTL Linux SimPoint
+in simulation and `test`-set IPC on no-L2 DDR4 FPGA -- see
+[Performance Evaluation](./docs/performance.md) for details.
 
 ## Microarchitecture
 
@@ -97,12 +99,12 @@ flowchart TB
     direction TB
     subgraph PIPE["Instruction pipeline"]
       direction TB
-      subgraph FE["rapt_frontend · decode 2"]
+      subgraph FE["rapt_frontend | decode 2"]
         direction LR
         subgraph BPU["BPU"]
           direction TB
           TAGE["TAGE DIRP<br/>1024 bimodal + 3 x 1024 tagged<br/>history 8 / 16 / 64<br/>2nd branch side query"]
-          BTB["BTB 128<br/>2-way"]
+          BTB["BTB 512 | 4-way<br/>ITT 32 | Loop 32"]
           RAS["RAS 16"]
           HIST["GHR / PHR"]
           TAGE ~~~ BTB & RAS & HIST
@@ -114,27 +116,27 @@ flowchart TB
         IFU --> FQU --> IDU
         IDU -. resteer .-> IFU
       end
-      subgraph BE["rapt_backend · rename / dispatch / commit 2 / 2 / 2"]
+      subgraph BE["rapt_backend | rename / dispatch / commit 2 / 2 / 2"]
         direction TB
         subgraph ORD["Rename and dispatch"]
           direction LR
-          RNU["RNU · RNQ 8 · rename_pipe 4<br/>MAP / RAT / free bitmap<br/>16 branch checkpoints"]
+          RNU["RNU | RNQ 8 | rename_pipe 4<br/>MAP / RAT / free bitmap<br/>16 branch checkpoints"]
           OPS["Operand stage 2"]
-          ROU["ROU · UOQ 8 · ROB 32<br/>operand spill 16<br/>dispatch window 12 lanes"]
+          ROU["ROU | UOQ 8 | ROB 32<br/>direct prefix dispatch"]
           DPU{{"DPU 2<br/>capacity-aware router"}}
           RNU --> OPS --> ROU --> DPU
         end
         ALQ["ALQ 8<br/>ALU0 + CSR / system<br/>ALU1"]
         BRQ["BRQ 8<br/>branch unit"]
         MDQ["MDQ 4<br/>pipelined MUL<br/>iterative DIV"]
-        FPQ["FPQ 8 · FEU<br/>F / D / Zfhmin"]
-        VPU["VPU · V 1.0<br/>VLEN 128 · ELEN 64<br/>ROB-head authorization"]
-        LSU["LSU · IOQ 8<br/>unified SQ 16"]
-        CPL["Completion x6 · N+4<br/>completion register"]
+        FPQ["FPQ 8 | FEU<br/>F / D / Zfhmin"]
+        VPU["VPU | V 1.0<br/>VLEN 128 | ELEN 64<br/>ROB-head authorization"]
+        LSU["LSU | IOQ 8 | dual-AGU<br/>unified SQ 16"]
+        CPL["Completion x6 | N+4<br/>completion register"]
         PRF["Integer PRF 64<br/>4R / 6W"]
         FPR["FP result file<br/>committed FPR 32 x 64"]
         CMU["CMU<br/>in-order commit 2"]
-        CSR["CSR · M / S / U<br/>traps · Sv32 / Sv39 · PMP"]
+        CSR["CSR | M / S / U<br/>traps | Sv32 / Sv39 | PMP"]
         ORD --> ALQ & BRQ & MDQ & FPQ & LSU
         ALQ -->|vector issue| VPU
         ALQ & BRQ & MDQ & FPQ & LSU --> CPL
@@ -142,28 +144,28 @@ flowchart TB
         CPL -->|wakeup + writeback| ORD
         CPL -->|writeback| PRF & FPR
         ORD <-->|operand read| PRF & FPR
-        ORD <-->|"ROU → ROB head<br/>CMU → RNU retire / free mappings"| CMU
+        ORD <-->|"ROU -> ROB head<br/>CMU -> RNU retire / free mappings"| CMU
         ORD -. ROU: store commit .-> LSU
         CPL ~~~ CMU
         ALQ --- CSR
       end
-      FE <-->|"IDU → RNU<br/>BRQ recovery<br/>CMU flush / redirect / BPU training"| BE
+      FE <-->|"IDU -> RNU<br/>BRQ recovery<br/>CMU flush / redirect / BPU training"| BE
     end
     subgraph MEM["rapt_memory"]
       direction LR
       subgraph IMEM["I-side"]
-        L1I["L1I 16 KiB · 4-way · 64 B<br/>banked SRAM<br/>sequential pre-read"]
+        L1I["L1I 16 KiB | 4-way | 64 B<br/>hit-under-PF | 8-entry FDIP<br/>sequential pre-read"]
         ITLB["ITLB 16<br/>fully associative"]
         IPTW["IPTW<br/>Sv32 / Sv39"]
       end
       subgraph DMEM["D-side"]
-        L1D["L1D 16 KiB · 4-way · 64 B<br/>VIPT · write-back<br/>4 MSHRs · 2 writeback buffers"]
-        DTLB["DTLB 64 · 2-way<br/>load / store replicas"]
-        DPTW["DPTW<br/>Sv32 / Sv39 · Svade"]
+        L1D["L1D 16 KiB | 4-way | 64 B<br/>VIPT | write-back | deg-2 PF<br/>8 MSHRs | 2 writeback buffers"]
+        DTLB["DTLB 64 | 2-way<br/>load / store replicas"]
+        DPTW["DPTW<br/>Sv32 / Sv39 | Svade"]
       end
-      L2TLB["Shared L2 TLB 256<br/>direct-mapped"]
-      PMPC["PMP x8 · TOR / NAPOT · 4 KiB<br/>fetch / load-store / PTW checks"]
-      BUS["rapt_bus · request IDs<br/>D / PTW > MSHR > L1I"]
+      L2TLB["Shared L2 TLB 512<br/>4-way"]
+      PMPC["PMP x8 | TOR / NAPOT | 4 KiB<br/>fetch / load-store / PTW checks"]
+      BUS["rapt_bus | request IDs<br/>D / PTW > MSHR > L1I"]
       L1I --- ITLB
       L1D --- DTLB
       ITLB & DTLB -. miss .-> L2TLB
@@ -172,15 +174,15 @@ flowchart TB
       PMPC -.-> L1I & L1D & IPTW & DPTW
       L1I & L1D & IPTW & DPTW --> BUS
     end
-    PIPE <-->|"IFU ↔ L1I · LSU ↔ L1D<br/>CSR → PMP / satp"| MEM
+    PIPE <-->|"IFU <-> L1I | LSU <-> L1D<br/>CSR -> PMP / satp"| MEM
     VPU <-->|"translated data access"| L1D
   end
-  subgraph CLU["rapt · cluster interconnect"]
+  subgraph CLU["rapt | cluster interconnect"]
     direction LR
-    subgraph L2S["rapt_l2_subsystem · always present"]
+    subgraph L2S["rapt_l2_subsystem | always present"]
       direction LR
       AXIM["AXI4 master<br/>up to 8 reads"]
-      L2["L2 · default: management only<br/>default-l2: 512 KiB · 8-way"]
+      L2["L2 | default: management only<br/>default-l2: 512 KiB | 8-way"]
       RBUF["AXI R buffer<br/>default-l2 only"]
       AXIM --> L2 --> RBUF
     end
@@ -194,7 +196,7 @@ flowchart TB
     DBG -->|SBA| ARB
     RTR --> CLINT & PLIC & EXT
   end
-  CORE <-->|"rapt_bus ↔ l2_client_if<br/>CLINT / PLIC → CSR interrupts<br/>DM ↔ halt / GPR access"| CLU
+  CORE <-->|"rapt_bus <-> l2_client_if<br/>CLINT / PLIC -> CSR interrupts<br/>DM <-> halt / GPR access"| CLU
 ```
 
 ## Setup & Quick Start
@@ -431,7 +433,7 @@ See [Linux Kernel](./docs/linux_kernel.md)
 
 ## Reference
 
-- [Specifications – RISC-V International](https://riscv.org/technical/specifications/)
+- [Specifications - RISC-V International](https://riscv.org/technical/specifications/)
 - [riscv/riscv-isa-manual: RISC-V Instruction Set Manual](https://github.com/riscv/riscv-isa-manual)
 - [riscv-software-src/riscv-unified-db: Machine-readable database of the RISC-V specification, and tools to generate various views](https://github.com/riscv-software-src/riscv-unified-db)
 - ["一生一芯"](https://rapt.oscc.cc/)

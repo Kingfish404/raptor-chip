@@ -32,7 +32,8 @@ module rapt_ieu_pipe_alu_csr #(
   // a compact fence descriptor; rd remains x0 and cannot update the PRF.
   assign sfence_result = XLEN'({sfence_noncanonical, iss.op2[8:0], iss.op1[SfenceVpnBits+11:12]});
   rapt_ieu_alu #(
-      .XLEN(XLEN)
+      .XLEN(XLEN),
+      .EnableClmul(!rapt_pkg::MdqHandlesClmul)
   ) gen_alu (
       .s1(iss.op1),
       .s2(iss.op2),

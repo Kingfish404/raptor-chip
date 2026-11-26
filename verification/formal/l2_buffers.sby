@@ -1,0 +1,60 @@
+[tasks]
+put_bmc
+put_prove
+put_cover
+rel_bmc
+rel_prove
+rel_cover
+sec_bmc
+sec_prove
+sec_cover
+
+[options]
+put_bmc: mode bmc
+put_bmc: depth 20
+put_prove: mode prove
+put_prove: depth 14
+put_cover: mode cover
+put_cover: depth 16
+rel_bmc: mode bmc
+rel_bmc: depth 20
+rel_prove: mode prove
+rel_prove: depth 14
+rel_cover: mode cover
+rel_cover: depth 16
+sec_bmc: mode bmc
+sec_bmc: depth 20
+sec_prove: mode prove
+sec_prove: depth 14
+sec_cover: mode cover
+sec_cover: depth 16
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+plugin -i slang
+put_bmc: read_slang --single-unit --top formal_l2_put_buffer -DFORMAL rapt_l2_put_buffer.sv rapt_l2_release_buffer.sv rapt_l2_secondary_buffer.sv formal_l2_buffers.sv
+put_prove: read_slang --single-unit --top formal_l2_put_buffer -DFORMAL rapt_l2_put_buffer.sv rapt_l2_release_buffer.sv rapt_l2_secondary_buffer.sv formal_l2_buffers.sv
+put_cover: read_slang --single-unit --top formal_l2_put_buffer -DFORMAL rapt_l2_put_buffer.sv rapt_l2_release_buffer.sv rapt_l2_secondary_buffer.sv formal_l2_buffers.sv
+rel_bmc: read_slang --single-unit --top formal_l2_release_buffer -DFORMAL rapt_l2_put_buffer.sv rapt_l2_release_buffer.sv rapt_l2_secondary_buffer.sv formal_l2_buffers.sv
+rel_prove: read_slang --single-unit --top formal_l2_release_buffer -DFORMAL rapt_l2_put_buffer.sv rapt_l2_release_buffer.sv rapt_l2_secondary_buffer.sv formal_l2_buffers.sv
+rel_cover: read_slang --single-unit --top formal_l2_release_buffer -DFORMAL rapt_l2_put_buffer.sv rapt_l2_release_buffer.sv rapt_l2_secondary_buffer.sv formal_l2_buffers.sv
+sec_bmc: read_slang --single-unit --top formal_l2_secondary_buffer -DFORMAL rapt_l2_put_buffer.sv rapt_l2_release_buffer.sv rapt_l2_secondary_buffer.sv formal_l2_buffers.sv
+sec_prove: read_slang --single-unit --top formal_l2_secondary_buffer -DFORMAL rapt_l2_put_buffer.sv rapt_l2_release_buffer.sv rapt_l2_secondary_buffer.sv formal_l2_buffers.sv
+sec_cover: read_slang --single-unit --top formal_l2_secondary_buffer -DFORMAL rapt_l2_put_buffer.sv rapt_l2_release_buffer.sv rapt_l2_secondary_buffer.sv formal_l2_buffers.sv
+put_bmc: prep -top formal_l2_put_buffer
+put_prove: prep -top formal_l2_put_buffer
+put_cover: prep -top formal_l2_put_buffer
+rel_bmc: prep -top formal_l2_release_buffer
+rel_prove: prep -top formal_l2_release_buffer
+rel_cover: prep -top formal_l2_release_buffer
+sec_bmc: prep -top formal_l2_secondary_buffer
+sec_prove: prep -top formal_l2_secondary_buffer
+sec_cover: prep -top formal_l2_secondary_buffer
+
+[files]
+../../rtl/uncore/l2cache/rapt_l2_put_buffer.sv
+../../rtl/uncore/l2cache/rapt_l2_release_buffer.sv
+../../rtl/uncore/l2cache/rapt_l2_secondary_buffer.sv
+formal_l2_buffers.sv

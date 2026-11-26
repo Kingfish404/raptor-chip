@@ -11,7 +11,7 @@ V 1.0 and virtual memory. The default RV64 configuration enables the
 [RVA23U64](#rva23u64-support) user profile and the
 [RVA23S64](#rva23s64-support) supervisor profile with hardware guest translation.
 
-[Get started](./getting-started.md) · [Read the microarchitecture](./uarch.md) · [Explore the pipeline](./explore.md)
+[Get started](./getting-started.md) | [Read the microarchitecture](./uarch.md) | [Explore the pipeline](./explore.md)
 
 ## Default core
 
@@ -23,15 +23,15 @@ Values below describe `rtl/configs/default/rapt_config.svh` and the integrated
 | Pipeline | Decode / rename / dispatch / commit: 2 each; 2 integer issue ports |
 | In-flight state | 32-entry ROB, 64 integer physical registers, 16 branch checkpoints |
 | Execution queues | ALQ 8, BRQ 8, MDQ 4, FPQ 8, IOQ 8; unified store queue 16 |
-| Floating point | F/D/Zfhmin and RV64 Zfa; ROB-backed speculative results; 32 × 64-bit committed FPRs |
+| Floating point | F/D/Zfhmin and RV64 Zfa; ROB-backed speculative results; 32 x 64-bit committed FPRs |
 | Vector | V 1.0, 32 registers, VLEN=128, ELEN=64; ROB-head authorization and precise restart |
 | Completion | 6 registered endpoints; the VPU shares the integer system port |
-| Prediction | TAGE: 1024 bimodal + 3 × 1024 tagged; 512-entry four-way BTB; RAS 16 |
-| L1 caches | 16 KiB each, four-way, 64-byte lines; L1I next-line prefetcher; L1D write-back, 4 MSHRs, 2 writeback buffers, 16-entry IP-stride prefetcher |
+| Prediction | TAGE: 1024 bimodal + 3 x 1024 tagged; 512-entry four-way BTB; 32-entry ITT; 32-entry loop predictor; RAS 16 |
+| L1 caches | 16 KiB each, four-way, 64-byte lines; L1I hit-under-prefetch + 8-entry FDIP; L1D write-back, 8 MSHRs, 2 writeback buffers, degree-2 IP-stride prefetcher |
 | Translation | ITLB 16, fully associative; DTLB 64, two-way, replicated for load/store; shared L2 TLB 512 (four-way) |
 | Core boundary | `l2_client_if` to the always-present cluster-level `rapt_l2_subsystem` |
 | L2 cache | Disabled; `default-l2` enables 512 KiB, eight-way inclusive write-back |
-| Addresses | Physical: 32 bits by default; RV64 allows 32–38. RV64 stored PC: 40 bits |
+| Addresses | Physical: 32 bits by default; RV64 allows 32-38. RV64 stored PC: 40 bits |
 | Platform | M/S/U, HS/VS/VU on RV64, Sv32/Bare or Sv39/Bare, Sv39x4 for guests, 8 usable PMP entries |
 | Interrupts / debug | CLINT; PLIC with 31 sources and M/S contexts; Debug Module / JTAG DTM bring-up path |
 | Bus | Cluster AXI4, XLEN-bit data/address containers, 4-bit ID, up to 8 reads; buffered writebacks wait for B |
@@ -185,6 +185,6 @@ animation cycle and playback state.
 | `synth/`, `layout/` | Module synthesis, STA, FPGA OOC estimates, and physical design |
 | `fpga/`, `linux/` | Board integration and boot tooling |
 
-[Source repository](https://github.com/Kingfish404/raptor-chip) ·
-[Apache 2.0](https://github.com/Kingfish404/raptor-chip/blob/master/LICENSE) ·
+[Source repository](https://github.com/Kingfish404/raptor-chip) |
+[Apache 2.0](https://github.com/Kingfish404/raptor-chip/blob/master/LICENSE) |
 [Third-party notices](https://github.com/Kingfish404/raptor-chip/blob/master/NOTICE)

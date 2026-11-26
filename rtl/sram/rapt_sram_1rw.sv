@@ -27,7 +27,8 @@ module rapt_sram_1rw #(
     parameter int ADDR_WIDTH = 7,
     parameter int DATA_WIDTH = 32,
     parameter int INST_ID    = 0,  // Compatibility parameter; instance API is stable
-    parameter bit USE_BWE = 0  // Enable byte write enables
+    parameter bit USE_BWE = 0,  // Enable byte write enables
+    parameter bit PREFER_URAM = 0  // Hint FPGA UltraRAM for large 64b+ banks
 ) (
     input  rapt_pkg::sram_ctrl_t                    sram_ctrl_i,
     input  logic                  clock,
@@ -413,11 +414,23 @@ module rapt_sram_1rw #(
   // ============================================================
   /* verilator lint_off UNUSEDPARAM */
   localparam int InstanceIdUnused = INST_ID;
+  localparam bit PreferUramUnused = PREFER_URAM;
   /* verilator lint_on UNUSEDPARAM */
   wire unused_sram_ctrl = ^sram_ctrl_i;
-  logic [DATA_WIDTH-1:0] mem[DEPTH];
+  // Standard synchronous-read template recognized by FPGA BRAM/URAM and ASIC
+  // memory inference flows. Keeping the data register inside the memory
+  // process avoids an asynchronous array read after a registered address.
+  (* ram_style = PREFER_URAM ? "ultra" : "auto" *) logic [DATA_WIDTH-1:0] mem[DEPTH];
+`ifdef FORMAL_L2_FAST_WIPE
+  generate
+    if (INST_ID >= 400 && INST_ID < 416) begin : g_formal_dir_zero
+      initial begin
+        for (int idx = 0; idx < DEPTH; idx++) mem[idx] = '0;
+      end
+    end
+  endgenerate
+`endif
 
-  // Synchronous write with optional byte enables
   generate
     if (USE_BWE) begin : g_write_bwe
       always_ff @(posedge clock) begin
@@ -434,9 +447,6 @@ module rapt_sram_1rw #(
     end
   endgenerate
 
-  // Standard synchronous-read template recognized by FPGA BRAM and ASIC
-  // memory inference flows. Keeping the data register inside the memory
-  // process avoids an asynchronous array read after a registered address.
   always_ff @(posedge clock) begin
     if (en && !wen) rdata <= mem[addr];
   end

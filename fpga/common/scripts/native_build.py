@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reproducible native FPGA builds."""
+"""Reproducible Raptor FPGA builds."""
 import argparse
 import fcntl
 import hashlib
@@ -67,7 +67,7 @@ def run(command, *, cwd=None, log=None):
 def write_reports(out, failed=False):
     """Keep an offline HTML dashboard and a short resource summary with each run."""
     command = [sys.executable, COMMON / "scripts/vivado_reports_index.py", out,
-               "--title", f"Native FPGA reports - {BOARD.name} / {out.name}"]
+               "--title", f"FPGA reports - {BOARD.name} / {out.name}"]
     if failed:
         command.append("--build-failed")
     run(command)
@@ -89,6 +89,8 @@ def configuration(args):
         "xlen", "preset", "memory", "clock_mhz", "ram_bytes", "reset_button", "ddr_part", "cross", "ethernet"
     )}
     result["vector"] = getattr(args, "vector", 0)
+    if getattr(args, "eth_dma", 0):
+        result["eth_dma"] = 1
     if getattr(args, "vector_device_test", False):
         result["vector_device_test"] = True
     if PROFILE.get("cm005_bridge"):
@@ -156,18 +158,22 @@ def write_map(args, out):
         values[name + "Base"] = regions[source]["base"]
         if "size" in regions[source]:
             values[name + "Bytes"] = regions[source]["size"]
-    # RV32 uses the existing 1 GiB Linux profile, RV64 maps the full 2 GiB.
+    # RV32 uses the 1 GiB Linux profile; RV64 maps the board's full DDR (2 GiB KU5P / 4 GiB KU15P).
     profile = json.loads((REPO / "rtl/configs/memory_map.json").read_text())["profiles"]["ku15p_mig"]
-    values["DdrBytes"] = int(profile["rv32_linux_size" if args.xlen == 32 else "ram_size"], 0)
+    if args.xlen == 32:
+        values["DdrBytes"] = int(profile["rv32_linux_size"], 0)
+    else:
+        values["DdrBytes"] = int(PROFILE.get("ddr_bytes", profile["ram_size"]), 0)
     (out / "sources/native_map.sv").write_text("package rapt_native_map_pkg;\n" + "".join(
         f"  localparam longint unsigned {name} = 64'h{value:x};\n" for name, value in values.items()
     ) + "endpackage\n")
     ram_bytes = args.ram_bytes if args.memory == "bram" else values["DdrBytes"]
+    ram_suffix = "ull" if ram_bytes >= (1 << 32) else "u"
     divisor = (args.clock_mhz * 1_000_000 + 115200 * 8) // (115200 * 16)
     (out / "native_map.h").write_text(
         f'#define NATIVE_BOARD_STRING "{PROFILE["banner"]}"\n'
         f"#define UART_BASE 0x{values['UartBase']:x}u\n"
-        f"#define RAM_BASE 0x{values['RamBase']:x}u\n#define RAM_BYTES 0x{ram_bytes:x}u\n"
+        f"#define RAM_BASE 0x{values['RamBase']:x}u\n#define RAM_BYTES 0x{ram_bytes:x}{ram_suffix}\n"
         f"#define UART_DIVISOR {divisor}u\n#define NATIVE_XLEN_STRING \"{args.xlen}\"\n"
     )
     (out / "boot.ld").write_text(f"""OUTPUT_ARCH(riscv)
@@ -222,21 +228,24 @@ def device_tree(args, out, ram_bytes):
     reg = region_map()
     io_soc = bool(getattr(args, "virtio_net", 0) or getattr(args, "qemu_bridge", 0))
     ethernet = ""
-    # With the I/O SoC, the stream bridge owns the native MAC; Linux must not bind it.
+    # With the I/O SoC, the stream bridge owns the board MAC; Linux must not bind it.
     if getattr(args, "ethernet", 0) and not io_soc:
-        ethernet = '''
-        ethernet@18000000 {
-            compatible = "raptor,native-ethernet-v1";
+        eth_dma = bool(getattr(args, "eth_dma", 0))
+        eth_compat = "raptor,ethernet-v2" if eth_dma else "raptor,ethernet-v1"
+        eth_dma_prop = "\n            dma-noncoherent;" if eth_dma else ""
+        ethernet = f'''
+        ethernet@18000000 {{
+            compatible = "{eth_compat}";{eth_dma_prop}
             reg = <0 0x18000000 0 0x10000>;
             interrupt-parent = <&plic>; interrupts = <2>;
             local-mac-address = [02 52 41 50 05 01];
             phy-mode = "rgmii-txid";
             phy-handle = <&eth_phy>;
-            mdio {
+            mdio {{
                 #address-cells = <1>; #size-cells = <0>;
-                eth_phy: ethernet-phy@1 { reg = <1>; };
-            };
-        };
+                eth_phy: ethernet-phy@1 {{ reg = <1>; }};
+            }};
+        }};
 '''
     if getattr(args, "cm005_bridge", 0):
         ethernet = '''
@@ -249,8 +258,23 @@ def device_tree(args, out, ram_bytes):
         layout = PROFILE["cm005_cpu_ethernet"]
         base = {key: int(layout[key], 0) for key in ("phy_base", "csr_base", "buffer_base")}
         mac = layout["mac"].replace(":", " ")
-        buffer_bytes = (layout["rx_slots"] + layout["tx_slots"]) * layout["slot_size"]
-        ethernet += f'''
+        if getattr(args, "eth_dma", 0):
+            ethernet += f'''
+        ethernet@{base['csr_base']:x} {{
+            compatible = "raptor,ethernet-v2";
+            dma-noncoherent;
+            reg = <0 0x{base['csr_base']:x} 0 0x1000>;
+            interrupt-parent = <&plic>; interrupts = <2>;
+            local-mac-address = [{mac}];
+            fixed-link {{
+                speed = <1000>;
+                full-duplex;
+            }};
+        }};
+'''
+        else:
+            buffer_bytes = (layout["rx_slots"] + layout["tx_slots"]) * layout["slot_size"]
+            ethernet += f'''
         ethernet@{base['csr_base']:x} {{
             compatible = "litex,liteeth";
             reg = <0 0x{base['csr_base']:x} 0 0x100>,
@@ -362,7 +386,7 @@ def device_tree(args, out, ram_bytes):
         }};
     }};
     memory@{reg['main_ram']['base']:x} {{ device_type = "memory";
-        reg = <0 0x{reg['main_ram']['base']:x} 0 0x{ram_bytes:x}>; }};
+        reg = <0x{reg['main_ram']['base'] >> 32:x} 0x{reg['main_ram']['base'] & 0xffffffff:x} 0x{ram_bytes >> 32:x} 0x{ram_bytes & 0xffffffff:x}>; }};
 {root_clocks}    soc {{
         #address-cells = <2>; #size-cells = <2>; compatible = "simple-bus"; ranges;{soc_dma_prop}
         clint@{reg['clint']['base']:x} {{ compatible = "riscv,clint0";
@@ -435,9 +459,16 @@ def prepare(args, out):
     firmware(args, out, values)
     device_tree(args, out, ram_bytes)
     mtime_mhz = 10 if args.sampling else 1
+    pmem_flag = (
+        f"-DRAPT_PMEM_MB={ram_bytes >> 20}"
+        if ram_bytes >= (1 << 32) else f"-DRAPT_PMEM_BYTES={ram_bytes}"
+    )
+    paddr_flag = " -DRAPT_PADDR_BITS=34" if (
+        args.xlen == 64 and values["RamBase"] + ram_bytes > (1 << 32)
+    ) else ""
     flags = ("-DRAPT_RV64 " if args.xlen == 64 else "") + (
         f"-DRAPT_FPGA_DSP=1 -DRAPT_FPGA_LUTRAM=1 -DRAPT_CORE_CLOCK_MHZ={args.clock_mhz} "
-        f"-DRAPT_MTIME_FREQ_MHZ={mtime_mhz} -DRAPT_PMEM_BYTES={ram_bytes}"
+        f"-DRAPT_MTIME_FREQ_MHZ={mtime_mhz} {pmem_flag}{paddr_flag}"
     )
     if args.sampling:
         flags += " -DRAPT_SAMPLING"
@@ -473,7 +504,7 @@ def prepare(args, out):
             "--sys-clk-freq", str(args.clock_mhz * 1_000_000),
         ]
         if args.cm005_ethernet:
-            command += ["--with-cpu-ethernet"]
+            command += ["--cpu-eth-stream" if getattr(args, "eth_dma", 0) else "--with-cpu-ethernet"]
         run(command,
             log=out / "cm005-generation.log")
         for path in generated.iterdir():
@@ -497,6 +528,8 @@ def prepare(args, out):
         config += "`define NATIVE_VECTOR_DEVICE_TEST\n"
     if args.ethernet:
         config += "`define NATIVE_WITH_ETHERNET\n"
+    if getattr(args, "eth_dma", 0):
+        config += "`define NATIVE_WITH_ETH_DMA\n"
     if args.cm005_bridge:
         config += "`define NATIVE_WITH_CM005_BRIDGE\n"
     if args.sampling:
@@ -514,8 +547,11 @@ def prepare(args, out):
         names += ["rapt_sample_window.sv", "rapt_sample_bridge.sv"]
     else:
         names += ["rapt_axi4_dma_arb.sv", "rapt_eth_rqio_mux.sv",
-                  "rapt_virtio_mmio_net.sv", "rapt_qemu_io_bridge.sv",
-                  "rapt_native_io_bus.sv", "rapt_native_io_soc.sv"]
+                  "rapt_goldfish_rtc.sv", "rapt_virtio_mmio_net.sv",
+                  "rapt_qemu_io_bridge.sv", "rapt_native_io_bus.sv",
+                  "rapt_native_io_soc.sv"]
+    if getattr(args, "eth_dma", 0):
+        names.append("rapt_eth_axi_dma.sv")
     names.append("rapt_native_soc.sv")
     (sources / "soc_sources.sv").write_text("".join(f'`include "{name}"\n' for name in names))
     eth_names = ["rgmii_lfsr.sv", "axis_gmii_rx.sv", "axis_gmii_tx.sv", "eth_mac_1g.sv",
@@ -648,7 +684,9 @@ def main():
     parser.add_argument("--ram-bytes", type=int, default=131072)
     parser.add_argument("--reset-button", type=int, choices=(0, 1), default=0)
     parser.add_argument("--ethernet", type=int, choices=(0, 1), default=0,
-                        help="enable native gigabit Ethernet on supported boards")
+                        help="enable gigabit Ethernet on supported boards")
+    parser.add_argument("--eth-dma", type=int, choices=(0, 1), default=0,
+                        help="enable 64-bit AXI4-Master Ethernet Ring DMA (ABI v2)")
     parser.add_argument("--virtio-net", type=int, choices=(0, 1), default=0,
                         help="expose hardware Split-Virtqueue AXI4-DMA virtio-mmio NIC")
     parser.add_argument("--qemu-bridge", type=int, choices=(0, 1), default=0,
@@ -662,7 +700,7 @@ def main():
     parser.add_argument("--cm005-bridge", type=int, choices=(0, 1), default=PROFILE.get("cm005_bridge", 0),
                         help="retain independent CM005 A/B forwarding on CU08 (50 MHz)")
     parser.add_argument("--cm005-ethernet", type=int, choices=(0, 1), default=0,
-                        help="attach the native CPU to CM005 while retaining A/B forwarding")
+                        help="attach the CPU to CM005 while retaining A/B forwarding")
     parser.add_argument("--bridge-python", default=str(REPO / "fpga/litex/.venv/bin/python"),
                         help="Python environment for the pinned CM005 Migen/LiteEth generator")
     parser.add_argument("--ddr-part", default=PROFILE["ddr_part"])
@@ -684,7 +722,7 @@ def main():
     if args.sampling and args.clock_mhz % 10:
         parser.error("sampling requires an integer 10 MHz timer divider; use 50 or 100 MHz")
     if args.ethernet and not PROFILE.get("ethernet"):
-        parser.error("native Ethernet is not supported by this board")
+        parser.error("onboard Ethernet is not supported by this board")
     if args.cm005_bridge and not PROFILE.get("cm005_bridge"):
         parser.error("CM005 forwarding is not supported by this board")
     if args.cm005_ethernet and not (args.cm005_bridge and PROFILE.get("cm005_cpu_ethernet")):
@@ -693,7 +731,7 @@ def main():
         parser.error("CM005 forwarding currently requires CLOCK_MHZ in {50, 75}; disable it explicitly for other clocks")
     if (args.virtio_net or args.qemu_bridge) and (args.sampling or args.cm005_bridge or
                                                   not args.ethernet):
-        parser.error("--virtio-net/--qemu-bridge share the native MAC: they require --ethernet 1 "
+        parser.error("--virtio-net/--qemu-bridge share the board MAC: they require --ethernet 1 "
                      "without sampling or CM005 forwarding")
     if args.jobs <= 0 or args.jobs > 32:
         parser.error("jobs must be between 1 and 32")
@@ -727,7 +765,7 @@ def main():
                 verilator(args, out, "rapt_native_io_soc")
         elif args.action == "test":
             run([sys.executable, "-m", "unittest", "discover", "-s", COMMON / "tests", "-p", "test_*.py", "-v"])
-            for top in ("tb_native_bus", "tb_native_uart",
+            for top in ("tb_native_bus", "tb_native_uart", "tb_goldfish_rtc",
                         "tb_virtio_mmio_net", "tb_qemu_io_bridge"):
                 verilator(args, out, top, COMMON / "tests" / (top + ".sv"), binary=True)
         elif args.action == "sim":

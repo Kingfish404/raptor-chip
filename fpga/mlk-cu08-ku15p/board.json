@@ -6,9 +6,10 @@
   "ddr_clock_port": "clk100_ddr_p",
   "reference_hz": 100000000,
   "ddr_part": "MT40A512M16LY-075",
+  "ddr_bytes": "0x100000000",
   "ddr_rtl": "rapt_cu08_ddr.sv",
-  "compatible": "raptor,cu08-native",
-  "model": "Raptor native MLK-CU08-KU15P",
+  "compatible": "raptor,cu08",
+  "model": "Raptor MLK-CU08-KU15P",
   "banner": "CU08",
   "cm005_bridge": 1,
   "cm005_cpu_ethernet": {

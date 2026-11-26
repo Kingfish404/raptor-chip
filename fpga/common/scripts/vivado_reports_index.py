@@ -34,16 +34,16 @@ class Report:
 
 
 REPORT_KINDS: tuple[ReportKind, ...] = (
-    ReportKind("Timing Summary (native routed)", "Timing", "Native post-route timing summary", ("timing_summary.rpt",)),
-    ReportKind("Timing Summary (native synth)", "Timing", "Native post-synthesis timing summary", ("synth_timing.rpt",)),
-    ReportKind("Peripheral Timing", "Timing", "Native peripheral-only synthesis timing", ("peripheral_timing.rpt",)),
+    ReportKind("Timing Summary (routed)", "Timing", "Post-route timing summary", ("timing_summary.rpt",)),
+    ReportKind("Timing Summary (synth)", "Timing", "Post-synthesis timing summary", ("synth_timing.rpt",)),
+    ReportKind("Peripheral Timing", "Timing", "Peripheral-only synthesis timing", ("peripheral_timing.rpt",)),
     ReportKind("Timing Summary", "Timing", "Post-route setup, hold, and pulse-width summary", ("*_timing.rpt",)),
     ReportKind("Timing Summary (synth)", "Timing", "Post-synthesis timing summary", ("*_timing_synth.rpt",)),
-    ReportKind("Utilization (native routed)", "Utilization", "Native post-route resource utilization", ("utilization_summary.rpt",)),
-    ReportKind("Utilization (native synth)", "Utilization", "Native post-synthesis resource utilization", ("synth_utilization_summary.rpt",)),
-    ReportKind("Utilization Hierarchy (native routed)", "Utilization", "Native post-route resource hierarchy", ("utilization.rpt",)),
-    ReportKind("Utilization Hierarchy (native synth)", "Utilization", "Native post-synthesis resource hierarchy", ("synth_utilization.rpt",)),
-    ReportKind("Peripheral Utilization", "Utilization", "Native peripheral-only synthesis resources", ("peripheral_utilization.rpt",)),
+    ReportKind("Utilization (routed)", "Utilization", "Post-route resource utilization", ("utilization_summary.rpt",)),
+    ReportKind("Utilization (synth)", "Utilization", "Post-synthesis resource utilization", ("synth_utilization_summary.rpt",)),
+    ReportKind("Utilization Hierarchy (routed)", "Utilization", "Post-route resource hierarchy", ("utilization.rpt",)),
+    ReportKind("Utilization Hierarchy (synth)", "Utilization", "Post-synthesis resource hierarchy", ("synth_utilization.rpt",)),
+    ReportKind("Peripheral Utilization", "Utilization", "Peripheral-only synthesis resources", ("peripheral_utilization.rpt",)),
     ReportKind("Utilization (place)", "Utilization", "Post-place resource utilization", ("*_utilization_place.rpt",)),
     ReportKind("Utilization Hierarchy (place)", "Utilization", "Post-place hierarchical utilization", ("*_utilization_hierarchical_place.rpt",)),
     ReportKind("Utilization (synth)", "Utilization", "Post-synthesis resource utilization", ("*_utilization_synth.rpt",)),
@@ -198,7 +198,7 @@ def parse_utilization(report_text: str) -> dict[str, dict[str, str]]:
 
 
 def parse_hierarchy_utilization(report_text: str) -> dict[str, dict[str, str]]:
-    """Older native reports have only a hierarchy table and no device capacity."""
+    """Older reports have only a hierarchy table and no device capacity."""
     lines = report_text.splitlines()
     for index, line in enumerate(lines):
         if not line.startswith("|") or "Instance" not in line or "Total LUTs" not in line:
@@ -371,12 +371,12 @@ def render_overview(reports: list[Report], gateware_dir: Path) -> str:
         for label, report in (("Resources", utilization_report), ("Timing", timing_report))
         if report is not None
     )
-    native_unvalidated = (gateware_dir / "manifest.json").exists() and not (gateware_dir / "result.json").exists()
+    unvalidated = (gateware_dir / "manifest.json").exists() and not (gateware_dir / "result.json").exists()
     incomplete = ("" if routed_timing else
                   '<p class="notice">No post-route timing report is available. '
                   'These partial results do not establish a completed build or timing closure.</p>')
-    if native_unvalidated:
-        incomplete += ('<p class="notice">No validated native result stamp is present. '
+    if unvalidated:
+        incomplete += ('<p class="notice">No validated build result stamp is present. '
                        'Existing bitstreams and reports do not establish a current loadable build.</p>')
 
     clock_rows = []
@@ -544,9 +544,9 @@ def render_readme(title: str, gateware_dir: Path, reports: list[Report],
     if build_failed:
         status = "Build failed; reports and bitstream files may belong to an earlier attempt."
     elif manifest is not None:
-        status = ("Native result stamp present; source identity is checked when loading."
+        status = ("Build result stamp present; source identity is checked when loading."
                   if (gateware_dir / "result.json").exists()
-                  else "No validated native build stamp; files are not confirmed loadable for these sources.")
+                  else "No validated build stamp; files are not confirmed loadable for these sources.")
     elif (gateware_dir.parent / ".bitstream_stamp").exists() and bitstreams:
         status = "LiteX bitstream stamp present."
     else:
@@ -586,7 +586,7 @@ def render_readme(title: str, gateware_dir: Path, reports: list[Report],
                     util = utilization_text(item["util"])
                     text.append(f"| {label} | {item['used']} | {item['available']} | {util} |\n")
             if all(item["available"] == "—" for item in values.values()):
-                text.append("\nThis older native hierarchy report has no device-capacity columns; "
+                text.append("\nThis older hierarchy report has no device-capacity columns; "
                             "its Total LUTs and FFs are shown in the CLB rows.\n")
         else:
             text.append("Resource totals could not be parsed from this report.\n")

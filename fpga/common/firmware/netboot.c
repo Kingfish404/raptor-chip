@@ -1,10 +1,24 @@
-/* Native Ethernet RAM loader: polled Ethernet, ARP/IPv4 and bounded TFTP reads. */
+/* Ethernet RAM loader: polled Ethernet, ARP/IPv4 and bounded TFTP reads. */
 #include <stdint.h>
 #include "netboot_config.h"
 
+#ifndef NETBOOT_ETH_DMA
+#define NETBOOT_ETH_DMA 0
+#endif
+#ifndef NETBOOT_DMA_BASE
+#define NETBOOT_DMA_BASE 0x18000000u
+#endif
+#ifndef NETBOOT_DMA_FIXED_LINK
+#define NETBOOT_DMA_FIXED_LINK 0
+#endif
+#if NETBOOT_ETH_DMA
+#define REG(n) (*(volatile uint32_t *)(uintptr_t)(NETBOOT_DMA_BASE + (n)))
+#else
 #define REG(n) (*(volatile uint32_t *)(uintptr_t)(0x18000000u + (n)))
+#endif
 #define UART ((volatile uint8_t *)(uintptr_t)0x10000000u)
-static uint8_t rx[1536], tx[1536];
+static uint8_t rx[1536] __attribute__((aligned(64)));
+static uint8_t tx[1536] __attribute__((aligned(64)));
 static const uint8_t mac[6] = {NETBOOT_MAC};
 static uint8_t peer[6];
 static uint32_t crc_table[256];
@@ -38,7 +52,7 @@ static void fail(const char *s) __attribute__((noreturn));
 static void fail(const char *s)
 {
     say("NETBOOT ERROR: "); say(s); say("\r\n");
-    say("Returning to native ROM\r\n");
+    say("Returning to ROM\r\n");
     ethernet_stop();
     while (!(UART[5] & 0x40)) {}
     boot_jump(0x20000000u, 0);
@@ -55,7 +69,7 @@ static uint32_t ticks(void)
     return v;
 }
 
-#if !NETBOOT_LITEETH
+#if !NETBOOT_LITEETH && !(NETBOOT_ETH_DMA && NETBOOT_DMA_FIXED_LINK)
 static void delay(unsigned us)
 {
     uint32_t t = ticks();
@@ -77,7 +91,7 @@ static unsigned checksum(const uint8_t *p, unsigned n)
     while (s >> 16) s = (s & 65535) + (s >> 16);
     return (~s) & 65535;
 }
-#if !NETBOOT_LITEETH
+#if !NETBOOT_LITEETH && !(NETBOOT_ETH_DMA && NETBOOT_DMA_FIXED_LINK)
 static void mdio_bit(unsigned b)
 {
     REG(0x40) = 2 | (b ? 4 : 0); delay(1);
@@ -113,6 +127,79 @@ static unsigned phy_read(unsigned reg)
     mdio_get(); REG(0x40) = 0;
     return bad ? 65535 : v;
 }
+#endif
+#if NETBOOT_ETH_DMA
+#define DMA_RX_SLOTS 4u
+static uint8_t rx_ring[DMA_RX_SLOTS][1536] __attribute__((aligned(64)));
+static unsigned rx_cons;
+static void dma_cbo_inval(const void *p, unsigned n)
+{
+    uintptr_t a = (uintptr_t)p & ~(uintptr_t)63;
+    uintptr_t end = (uintptr_t)p + n;
+    for (; a < end; a += 64)
+        __asm__ volatile ("cbo.inval 0(%0)" :: "r"(a) : "memory");
+    __asm__ volatile ("fence rw,rw" ::: "memory");
+}
+static void dma_cbo_flush(const void *p, unsigned n)
+{
+    uintptr_t a = (uintptr_t)p & ~(uintptr_t)63;
+    uintptr_t end = (uintptr_t)p + n;
+    for (; a < end; a += 64)
+        __asm__ volatile ("cbo.flush 0(%0)" :: "r"(a) : "memory");
+    __asm__ volatile ("fence rw,rw" ::: "memory");
+}
+static void dma_cbo_clean(const void *p, unsigned n)
+{
+    uintptr_t a = (uintptr_t)p & ~(uintptr_t)63;
+    uintptr_t end = (uintptr_t)p + n;
+    for (; a < end; a += 64)
+        __asm__ volatile ("cbo.flush 0(%0)" :: "r"(a) : "memory");
+    __asm__ volatile ("fence rw,rw" ::: "memory");
+}
+static void dma_post_rx(unsigned slot)
+{
+    uintptr_t addr = (uintptr_t)rx_ring[slot];
+    dma_cbo_flush(rx_ring[slot], sizeof(rx_ring[slot]));
+    REG(0x80) = (uint32_t)addr;
+    REG(0x84) = (uint32_t)((uint64_t)addr >> 32);
+    REG(0x88) = 1;
+}
+static void transmit(unsigned n)
+{
+    uint32_t t = ticks();
+    while (!(REG(0x0c) & 2))
+        if ((uint32_t)(ticks() - t) > 2000000) fail("TX timeout");
+    dma_cbo_clean(tx, n);
+    uintptr_t addr = (uintptr_t)tx;
+    REG(0xa0) = (uint32_t)addr;
+    REG(0xa4) = (uint32_t)((uint64_t)addr >> 32);
+    REG(0xa8) = n;
+    t = ticks();
+    while (!REG(0xac))
+        if ((uint32_t)(ticks() - t) > 2000000) fail("TX done timeout");
+    REG(0xac) = 1;
+}
+static unsigned receive(void)
+{
+    unsigned n = REG(0x8c) & 65535u;
+    if (!n) return 0;
+    REG(0x8c) = 1;
+    unsigned slot = rx_cons;
+    rx_cons = (rx_cons + 1u) & (DMA_RX_SLOTS - 1u);
+    if (n <= sizeof(rx)) {
+        dma_cbo_inval(rx_ring[slot], n);
+        copy(rx, rx_ring[slot], n);
+    } else {
+        n = 0;
+    }
+    dma_post_rx(slot);
+    return n;
+}
+static void ethernet_stop(void)
+{
+    REG(8) = 0;
+}
+#elif !NETBOOT_LITEETH
 static void transmit(unsigned n)
 {
     uint32_t t = ticks();
@@ -303,7 +390,7 @@ static void download(const char *name, uintptr_t address, unsigned size, uint32_
 }
 void boot_main(void)
 {
-    say("\r\nRaptor native TFTP loader\r\n");
+    say("\r\nRaptor TFTP loader\r\n");
 #if NETBOOT_LITEETH
     ethernet_stop();
     /* CPU-local virtual PHY: never reset either CM005 physical link. */
@@ -312,8 +399,13 @@ void boot_main(void)
     MAC_REG(0x30) = 1;
     uint32_t start;
 #else
+#if NETBOOT_ETH_DMA
+    if (REG(0) != 0x524e4554 || REG(4) != 2) fail("Ethernet DMA ABI");
+#else
     if (REG(0) != 0x524e4554 || REG(4) != 1) fail("Ethernet ABI");
+#endif
     REG(0x10) = 0; REG(8) = 0;
+#if !(NETBOOT_ETH_DMA && NETBOOT_DMA_FIXED_LINK)
     phy_write(31, 0);
     uint32_t phy_id = (uint32_t)phy_read(2) << 16 | phy_read(3);
     say("PHY ID "); hex(phy_id); say("\r\n");
@@ -333,11 +425,27 @@ void boot_main(void)
         if ((uint32_t)(ticks() - start) > 15000000) fail("PHY link timeout");
         delay(10000);
     }
+#else
+    uint32_t start = ticks();
+#endif
+#if NETBOOT_ETH_DMA
+    REG(8) = 3;
+    while (!(REG(0x0c) & 4))
+        if ((uint32_t)(ticks() - start) > 16000000) fail("MAC clock timeout");
+    rx_cons = 0;
+    for (unsigned i = 0; i < DMA_RX_SLOTS; i++) dma_post_rx(i);
+#if NETBOOT_DMA_FIXED_LINK
+    say("DMA fixed-link ready\r\n");
+#else
+    say("DMA link ready; BMCR="); hex(phy_read(0)); say(" BMSR="); hex(phy_read(1)); say("\r\n");
+#endif
+#else
     REG(8) = 1;
     while (!(REG(0x0c) & 4))
         if ((uint32_t)(ticks() - start) > 16000000) fail("MAC clock timeout");
     say("Link ready; BMCR="); hex(phy_read(0)); say(" ANAR="); hex(phy_read(4));
     say(" CTRL1000="); hex(phy_read(9)); say(" BMSR="); hex(phy_read(1)); say("\r\n");
+#endif
 #endif
     say("ARP\r\n");
     static const uint8_t broadcast[6] = {255,255,255,255,255,255};
@@ -345,8 +453,11 @@ void boot_main(void)
         if (attempt == 20) {
 #if !NETBOOT_LITEETH
             say("MAC status="); hex(REG(0x0c)); say(" rx="); hex(REG(0x28));
-            say(" errors="); hex(REG(0x2c)); say(" tx="); hex(REG(0x34));
-            say(" phy="); hex(phy_read(1)); say("\r\n");
+            say(" drop="); hex(REG(0x30)); say(" tx="); hex(REG(0x34));
+#if !(NETBOOT_ETH_DMA && NETBOOT_DMA_FIXED_LINK)
+            say(" phy="); hex(phy_read(1));
+#endif
+            say("\r\n");
 #endif
             fail("ARP timeout");
         }
@@ -361,6 +472,9 @@ void boot_main(void)
     }
     download("fw_payload.bin", 0x80000000u, FIRMWARE_SIZE, FIRMWARE_CRC, 49152);
     download("runtime.dtb", 0x8fff0000u, DTB_SIZE, DTB_CRC, 49153);
+#ifdef INITRD_SIZE
+    download("initrd.img", (uintptr_t)INITRD_ADDRESS, INITRD_SIZE, INITRD_CRC, 49154);
+#endif
 #if NETBOOT_LITEETH
     start = ticks();
     while (MAC_REG(0x20))

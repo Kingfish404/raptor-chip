@@ -19,7 +19,31 @@ from litex.gen import LiteXContext, LiteXModule
 from litex.build.generic_platform import Pins, Subsignal
 from litex.soc.interconnect.csr import CSRStatus, CSRStorage, GenericBank
 
+from litex.soc.interconnect import stream
+from liteeth.common import eth_phy_description
 from cm005_bridge import add_cm005_forwarder
+
+
+class NativeCPUStreamStub(LiteXModule):
+    """Direct 32-bit CM005 switch stream stub for external AXI4 Ring DMA."""
+    def __init__(self, cpu_stream):
+        self.sink = stream.Endpoint(eth_phy_description(32))
+        self.source = stream.Endpoint(eth_phy_description(32))
+        keep_sys = Signal()
+        self.sync += keep_sys.eq(0)
+        self.comb += [
+            cpu_stream.rx_data.eq(self.sink.data),
+            cpu_stream.rx_last_be.eq(self.sink.last_be),
+            cpu_stream.rx_valid.eq(self.sink.valid),
+            cpu_stream.rx_last.eq(self.sink.last),
+            self.sink.ready.eq(cpu_stream.rx_ready),
+            self.source.data.eq(cpu_stream.tx_data),
+            self.source.last_be.eq(cpu_stream.tx_last_be),
+            self.source.valid.eq(cpu_stream.tx_valid),
+            self.source.last.eq(cpu_stream.tx_last),
+            self.source.error.eq(0),
+            cpu_stream.tx_ready.eq(self.source.ready),
+        ]
 from cm005_switch import CPUFrameMAC, CPUSegmentPHY
 from ku15p_soc import _CRG
 from mlk_cu08_ku15p import BOARD
@@ -133,7 +157,7 @@ class NativeCPUFrameMAC(LiteXModule):
 
 
 class NativeCM005Bridge(LiteXModule):
-    def __init__(self, platform, cpu_ethernet=False, sys_clk_freq=50_000_000):
+    def __init__(self, platform, cpu_ethernet=False, cpu_eth_stream=False, sys_clk_freq=50_000_000):
         platform.add_extension([('native', 0,
             Subsignal('clk', Pins(1)), Subsignal('reset', Pins(1)),
             Subsignal('rd', Pins(1)), Subsignal('wr', Pins(1)),
@@ -145,7 +169,16 @@ class NativeCM005Bridge(LiteXModule):
                         cm005_oversample=True, cm005_tx_split=True, cm005_tx_dual=True,
                         external_sys=(bus.clk, bus.reset))
         cpu_mac = None
-        if cpu_ethernet:
+        if cpu_eth_stream:
+            platform.add_extension([('cpu', 0,
+                Subsignal('rx_data', Pins(32)), Subsignal('rx_last_be', Pins(4)),
+                Subsignal('rx_valid', Pins(1)), Subsignal('rx_last', Pins(1)),
+                Subsignal('rx_ready', Pins(1)),
+                Subsignal('tx_data', Pins(32)), Subsignal('tx_last_be', Pins(4)),
+                Subsignal('tx_valid', Pins(1)), Subsignal('tx_last', Pins(1)),
+                Subsignal('tx_ready', Pins(1)))])
+            self.cpu_mac = cpu_mac = NativeCPUStreamStub(platform.request('cpu'))
+        elif cpu_ethernet:
             profile = json.loads((REPO / 'fpga/mlk-cu08-ku15p/board.json').read_text())
             self.cpu_mac = cpu_mac = NativeCPUFrameMAC(profile['cm005_cpu_ethernet'])
         add_cm005_forwarder(self, platform, cpu_mac=cpu_mac)
@@ -153,7 +186,7 @@ class NativeCM005Bridge(LiteXModule):
         self.version = CSRStatus(32, name='bridge_version', reset=1)
         descriptions = [('identity', [self.ident, self.version])]
         for name in ('phy_a', 'phy_b', 'mac_a', 'mac_b', 'a_to_b', 'b_to_a'):
-            if cpu_ethernet and name in ('a_to_b', 'b_to_a'):
+            if (cpu_ethernet or cpu_eth_stream) and name in ('a_to_b', 'b_to_a'):
                 module = getattr(self.cm005_switch, 'q0_to_1' if name == 'a_to_b' else 'q1_to_0')
             else:
                 module = getattr(self, name)
@@ -161,7 +194,7 @@ class NativeCM005Bridge(LiteXModule):
             for csr in csrs:
                 csr.name = name + '_' + csr.name
             descriptions.append((name, csrs))
-        if cpu_ethernet:
+        if cpu_ethernet and not cpu_eth_stream:
             legacy = native_bus()
             self.native_csrs = NativeCSRBank(descriptions, legacy)
             for target in (legacy, cpu_mac.bus):
@@ -241,10 +274,11 @@ def check_dependency_origins():
             raise RuntimeError(f'Unfingerprinted dependency {name}: {filename}')
 
 
-def generate(output, cpu_ethernet=False, sys_clk_freq=50_000_000):
+def generate(output, cpu_ethernet=False, cpu_eth_stream=False, sys_clk_freq=50_000_000):
     output.mkdir(parents=True, exist_ok=True)
     platform = BOARD.platform()
-    dut = NativeCM005Bridge(platform, cpu_ethernet, sys_clk_freq=sys_clk_freq)
+    dut = NativeCM005Bridge(platform, cpu_ethernet, cpu_eth_stream=cpu_eth_stream,
+                            sys_clk_freq=sys_clk_freq)
     # This standalone module has no SoC context. Suppress the hierarchy comment:
     # it can retain a prior SoC and its blackbox order depends on object IDs.
     previous_top = LiteXContext.top
@@ -265,7 +299,7 @@ def generate(output, cpu_ethernet=False, sys_clk_freq=50_000_000):
     for line in xdc.splitlines():
         if not line.strip() or line.lstrip().startswith('#'):
             continue
-        if re.search(r'get_ports\s+\{?(?:clk100|cpu_resetn|native_)', line):
+        if re.search(r'get_ports\s+\{?(?:clk100|cpu_resetn|native_|cpu_rx_|cpu_tx_)', line):
             continue
         if '[current_design]' in line:
             continue
@@ -300,7 +334,7 @@ def generate(output, cpu_ethernet=False, sys_clk_freq=50_000_000):
     aperture = Path(__file__).parent / 'scripts/check_cm005_aperture.tcl'
     (output / 'cm005_aperture.tcl').write_text(scoped(aperture.read_text()))
     registers = {'base': '0x18000000', 'version': 1, 'registers': dut.native_csrs.registers}
-    if cpu_ethernet:
+    if cpu_ethernet and not cpu_eth_stream:
         registers['cpu_ethernet'] = dict(dut.cpu_mac.layout,
             registers=dut.cpu_mac.mac_csrs.registers, phy_registers=dut.cpu_mac.phy_csrs.registers)
     (output / 'cm005_registers.json').write_text(json.dumps(registers, indent=2) + '\n')
@@ -317,6 +351,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--with-cpu-ethernet', action='store_true')
+    parser.add_argument('--cpu-eth-stream', action='store_true')
     parser.add_argument('--sys-clk-freq', type=int, default=50_000_000)
     args = parser.parse_args()
-    generate(args.output.resolve(), args.with_cpu_ethernet, sys_clk_freq=args.sys_clk_freq)
+    generate(args.output.resolve(), args.with_cpu_ethernet,
+             cpu_eth_stream=args.cpu_eth_stream, sys_clk_freq=args.sys_clk_freq)

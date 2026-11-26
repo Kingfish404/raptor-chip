@@ -9,6 +9,7 @@ RAPT_USE_SRAM_MACRO # Physical SRAM flow; absent selects behavioral storage.
 RAPT_SRAM_CTRL_RESET # Preset macro control reset; absent selects the safe zero default.
 RAPT_YSYXSOC # Alternate SoC integration selected by its build.
 RAPT_PMEM_BYTES # Platform override; rapt_pkg supplies the default PmemBytes value.
+RAPT_PMEM_MB # Quote-free platform override in MiB; rapt_pkg derives PmemBytes from it.
 RAPT_FETCH_LOOKAHEAD # Preset-selected fetch lookahead; absent disables it.
 RAPT_FETCH_WIDE # Preset-selected wide instruction window; absent selects the narrow window.
 RAPT_LSU_HUM # Preset-selected hit-under-miss path; absent disables it.

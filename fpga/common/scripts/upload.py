@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Upload native Raptor images over a POSIX UART (Python standard library only)."""
+"""Upload Raptor images over a POSIX UART (Python standard library only)."""
 import argparse
 import os
 from pathlib import Path

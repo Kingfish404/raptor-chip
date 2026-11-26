@@ -19,7 +19,7 @@ FPGA = Path(__file__).resolve().parents[2]
 
 class UbuntuTests(unittest.TestCase):
     def test_board_network_profiles_and_default_preset(self):
-        for board, driver, address in (("rk-xcku5p-f", "native", "192.168.50.88"),
+        for board, driver, address in (("rk-xcku5p-f", "raptor", "192.168.50.88"),
                                        ("mlk-cu08-ku15p", "liteeth", "192.168.50.90")):
             ubuntu.configure(FPGA / board)
             self.assertEqual(ubuntu.network_profile()["driver"], driver)
@@ -40,19 +40,22 @@ class UbuntuTests(unittest.TestCase):
                        "CONFIG_VIRTIO_MMIO=y", "CONFIG_VIRTIO_BLK=y", "CONFIG_VIRTIO_NET=y",
                        "CONFIG_PCI=y", "CONFIG_PCI_HOST_GENERIC=y", "CONFIG_BLK_DEV_NVME=y",
                        "CONFIG_MMC=y", "CONFIG_MMC_SDHCI=y",
-                       "CONFIG_MMC_SDHCI_OF_ARASAN=y", "CONFIG_MMC_SDHCI_PCI=y"):
+                       "CONFIG_MMC_SDHCI_OF_ARASAN=y", "CONFIG_MMC_SDHCI_PCI=y",
+                       "CONFIG_OVERLAY_FS=y", "CONFIG_SQUASHFS=y", "CONFIG_SQUASHFS_LZ4=y",
+                       "CONFIG_MTD=y", "CONFIG_MTD_BLOCK=y", "CONFIG_MTD_PHRAM=y"):
             self.assertIn(option, lines)
         self.assertNotIn("# CONFIG_VIRTUALIZATION is not set", lines)
         self.assertNotIn("# CONFIG_KVM is not set", lines)
         self.assertNotIn("# CONFIG_PCI is not set", lines)
         self.assertNotIn("# CONFIG_MMC is not set", lines)
+        self.assertNotIn("# CONFIG_MTD is not set", lines)
 
     def test_kernel_reuse_checks_driver_and_word_pio_provenance(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             config = root / "kernel.config"
-            config.write_text("CONFIG_RAPTOR_NATIVE_ETH=y\nCONFIG_LITEX_LITEETH=y\n")
-            record = {"schema": "raptor-native-ubuntu-kernel-v1", "inputs": {"driver": {}},
+            config.write_text("CONFIG_RAPTOR_ETH=y\nCONFIG_LITEX_LITEETH=y\n")
+            record = {"schema": "raptor-ubuntu-kernel-v1", "inputs": {"driver": {}},
                       "files": {"kernel.config": ubuntu.sha(config)}}
             ubuntu.save(root / "manifest.json", record)
             args = SimpleNamespace(kernel_dir=root)
@@ -107,8 +110,126 @@ class UbuntuTests(unittest.TestCase):
         for dev in ("/dev/vda", "/dev/nvme0n1", "/dev/mmcblk0"):
             cmd = ubuntu.bootargs(SimpleNamespace(root_device=dev))
             self.assertIn(f"root={dev}", cmd)
+        cmd = ubuntu.bootargs(SimpleNamespace(root_device="ramroot", rootfs=Path("/srv/raptor"),
+                                              server="192.168.50.1"))
+        self.assertIn("rdinit=/sbin/init", cmd)
+        self.assertIn("ip=dhcp", cmd)
+        self.assertNotIn("root=/dev/nfs", cmd)
+        sqsh_cmd = ubuntu.bootargs(SimpleNamespace(root_device="squashfs",
+                                                   rootfs=Path("/srv/raptor"),
+                                                   server="192.168.50.1"))
+        self.assertIn("rdinit=/init", sqsh_cmd)
+        self.assertNotIn("systemd.unit=", sqsh_cmd)
+        min_cmd = ubuntu.bootargs(SimpleNamespace(root_device="squashfs",
+                                                  systemd_target="minimal",
+                                                  rootfs=Path("/srv/raptor"),
+                                                  server="192.168.50.1"))
+        self.assertIn("rdinit=/init", min_cmd)
+        self.assertIn("systemd.unit=raptor-minimal.target", min_cmd)
+        with self.assertRaisesRegex(RuntimeError, "unsupported systemd target"):
+            ubuntu.bootargs(SimpleNamespace(root_device="squashfs", systemd_target="custom",
+                                            rootfs=Path("/srv/raptor"), server="192.168.50.1"))
         with self.assertRaisesRegex(RuntimeError, "unsupported block root"):
             ubuntu.bootargs(SimpleNamespace(root_device="/dev/sda1 rw init=/bin/sh"))
+
+    def test_ramroot_fstab_and_initrd_packaging(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "rootfs"
+            (root / "etc").mkdir(parents=True)
+            (root / "usr/share/doc/pkg").mkdir(parents=True)
+            (root / "usr/share/doc/pkg/README").write_text("pruned")
+            (root / "sbin").mkdir(parents=True)
+            (root / "sbin/init").write_text("#!/bin/sh\n")
+            ubuntu.save(root / ".raptor-rootfs.json", {"schema": "v1"})
+            out = Path(temp) / "initrd.img"
+            ubuntu.build_ramroot(root, out, "192.168.50.1", root)
+            self.assertTrue(out.is_file())
+            self.assertGreater(out.stat().st_size, 0)
+            # Original rootfs must remain untouched
+            self.assertTrue((root / "usr/share/doc/pkg/README").is_file())
+            fstab = ubuntu.ramroot_fstab("192.168.50.1", root)
+            self.assertIn("/mnt/host nfs", fstab)
+            self.assertIn("x-systemd.automount", fstab)
+
+    def test_squashfs_packaging_preserves_full_rootfs(self):
+        if ubuntu.shutil.which("mksquashfs") is None:
+            self.skipTest("mksquashfs not installed")
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "rootfs"
+            (root / "etc/ssh/sshd_config.d").mkdir(parents=True)
+            (root / "etc/fstab").write_text("# old\n")
+            (root / "usr/sbin").mkdir(parents=True)
+            (root / "usr/share/doc/pkg").mkdir(parents=True)
+            (root / "usr/share/doc/pkg/README").write_text("kept")
+            (root / "mnt").mkdir(parents=True)
+            ubuntu.save(root / ".raptor-rootfs.json", {"schema": "v1"})
+            out = Path(temp) / "ubuntu.sqsh"
+            ubuntu.build_squashfs(root, out, "192.168.50.1", root, use_sudo=False)
+            self.assertTrue(out.is_file())
+            self.assertEqual(out.read_bytes()[:4], b"hsqs")
+            self.assertTrue((root / "usr/share/doc/pkg/README").is_file())
+            if ubuntu.shutil.which("riscv64-linux-gnu-gcc") is not None:
+                cpio_gz = Path(temp) / "initramfs.cpio.gz"
+                cpio_sz = ubuntu.build_switchroot_initramfs(cpio_gz, "riscv64-linux-gnu-")
+                self.assertGreater(cpio_sz, 0)
+                self.assertLess(cpio_sz, ubuntu.PHRAM_OFFSET)
+                combined = Path(temp) / "combined.img"
+                packed_cpio, packed_sqsh = ubuntu.pack_combined_squashfs_initrd(
+                    cpio_gz, out, combined)
+                found_cpio, found_sqsh = ubuntu.inspect_combined_squashfs_initrd(combined)
+                self.assertEqual((packed_cpio, packed_sqsh), (found_cpio, found_sqsh))
+
+    def test_runtime_dtb_stamps_epoch_proxy_and_mirror(self):
+        if ubuntu.shutil.which("dtc") is None or ubuntu.shutil.which("fdtget") is None:
+            self.skipTest("dtc/fdtget not installed")
+        with tempfile.TemporaryDirectory() as temp:
+            dts = Path(temp) / "test.dts"
+            dtb = Path(temp) / "runtime.dtb"
+            dts.write_text("/dts-v1/;\n/ {\n\tchosen {\n\t};\n};\n")
+            ubuntu.run(["dtc", "-I", "dts", "-O", "dtb", "-o", str(dtb), str(dts)])
+            ubuntu.stamp_runtime_dtb(
+                dtb,
+                host_epoch=0x0000000067456789,
+                http_proxy="http://192.168.50.1:7890",
+                apt_mirror="http://mirrors.example.org/ubuntu-ports",
+            )
+            epoch_cells = ubuntu.subprocess.check_output(
+                ["fdtget", "-t", "x", str(dtb), "/chosen", "raptor,host-epoch"], text=True
+            ).split()
+            self.assertEqual(epoch_cells, ["0", "67456789"])
+            proxy = ubuntu.subprocess.check_output(
+                ["fdtget", "-t", "s", str(dtb), "/chosen", "raptor,http-proxy"], text=True
+            ).strip()
+            self.assertEqual(proxy, "http://192.168.50.1:7890")
+            mirror = ubuntu.subprocess.check_output(
+                ["fdtget", "-t", "s", str(dtb), "/chosen", "raptor,apt-mirror"], text=True
+            ).strip()
+            self.assertEqual(mirror, "http://mirrors.example.org/ubuntu-ports/")
+            with self.assertRaisesRegex(RuntimeError, "invalid HTTP proxy"):
+                ubuntu.stamp_runtime_dtb(dtb, http_proxy="http://bad\"quote")
+
+    def test_localhost_proxy_relay_forwards_bytes(self):
+        import socket
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as upstream:
+            upstream.bind(("127.0.0.1", 0))
+            upstream.listen(1)
+            up_port = upstream.getsockname()[1]
+
+            def serve_once():
+                conn, _ = upstream.accept()
+                with conn:
+                    req = conn.recv(64)
+                    conn.sendall(b"OK:" + req)
+
+            worker = ubuntu.threading.Thread(target=serve_once, daemon=True)
+            worker.start()
+            with ubuntu.board_proxy_context(f"http://127.0.0.1:{up_port}", "127.0.0.1") as url:
+                relay_port = int(url.rsplit(":", 1)[1])
+                with socket.create_connection(("127.0.0.1", relay_port), timeout=3.0) as client:
+                    client.sendall(b"PING")
+                    self.assertEqual(client.recv(64), b"OK:PING")
+            worker.join(timeout=2.0)
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux termios2")
     def test_exact_upload_baud_and_console_restore(self):

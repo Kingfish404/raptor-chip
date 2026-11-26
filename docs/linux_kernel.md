@@ -64,7 +64,7 @@ the matching kernel configuration and device tree.
 | RV64 Linux          | Sv39 host translation; H and Sv39x4 for guests | NPC kernel-entry check, NEMU Linux boot and KVM probe |
 | RV32/RV64 hard-float | `*gc` DTB + Buildroot F/D payload    | NPC targets are wired; payloads are built separately  |
 | RV32/RV64 FPGA | LiteX BIOS + MIG DDR4 + OpenSBI/Linux | Ethernet/TFTP netboot targets for KU15P and KU5P |
-| Native FPGA Ubuntu | RV64 native KU5P and CU08-KU15P SoCs | `ubuntu-*` targets with TFTP and an NFS root |
+| FPGA Ubuntu | RV64 KU5P and CU08-KU15P SoCs | `ubuntu-*` targets with TFTP and an NFS root |
 | RV64 xv6 smoke path | Sv39 PTW/TLB + Svade (software-managed A/D) | Available via `app/tinyos` helpers               |
 
 See [linux/README.md](https://github.com/Kingfish404/raptor-chip/blob/master/linux/README.md) and [app/tinyos/README.md](https://github.com/Kingfish404/raptor-chip/blob/master/app/tinyos/README.md) for the lower-level payload and xv6/egos helpers.
@@ -86,16 +86,18 @@ throughout. KU15P CU08 defaults to `default`; KU5P RK defaults to `small`, so
 select a vector-enabled preset explicitly for RVV on KU5P.
 [LiteX netboot workflow](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/litex/NETBOOT.md)
 
-### Ubuntu on native FPGA SoCs
+<a id="ubuntu-on-native-fpga-socs"></a>
 
-The native KU5P and CU08-KU15P `ubuntu-*` targets build a board kernel,
+### Ubuntu on FPGA SoCs
+
+The KU5P and CU08-KU15P `ubuntu-*` targets build a board kernel,
 OpenSBI payload and device tree for the RV64 `default` preset. The on-board
 loader fetches the firmware and DTB over TFTP. Linux mounts its Ubuntu root
-over NFS. Use the native guide to prepare the kernel and root filesystem,
+over NFS. Use the guide below to prepare the kernel and root filesystem,
 serve the bundle and load the matching bitstream.
-[Native Ubuntu workflow](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/common/UBUNTU.md)
+[Ubuntu workflow](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/common/UBUNTU.md)
 
-The native I/O options provide a VirtIO-MMIO NIC with non-coherent DMA
+The FPGA I/O options provide a VirtIO-MMIO NIC with non-coherent DMA
 and a bridge to host-backed VirtIO block, SDHCI and PCIe/NVMe devices.
 Use the Ethernet transport on the board. NPC can connect to the same host
 bridge through a local Unix socket.
@@ -119,7 +121,7 @@ program. Include it as `/rva23-check` in the netboot initramfs and add
 scalar instructions, cache-block operations and pointer masking in U-mode.
 Successful completion prints `RVA23_LINUX_PASS`.
 
-The November 19, 2026 integration run passed this probe on the native
+The November 19, 2026 integration run passed this probe on the
 MLK-CU08-KU15P target with RV64, `default`, DDR4 and a 50 MHz core. BIOS
 loaded Linux over TFTP. For a new board run, record the bitstream and DTB
 identities with the boot log.

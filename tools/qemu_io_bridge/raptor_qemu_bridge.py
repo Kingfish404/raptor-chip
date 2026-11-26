@@ -287,19 +287,221 @@ def _write_backing(buf: bytearray, offset: int, data: bytes) -> bool:
     return True
 
 
+class VirtioRngMmio:
+    """OASIS VirtIO 1.2 Modern (VERSION=2, DEVICE_ID=4) virtio-mmio RNG."""
+
+    MAGIC_VAL = 0x74726976
+    VERSION_VAL = 2
+    DEVICE_ID_VAL = 4
+    VENDOR_ID_VAL = 0x52415054
+
+    def __init__(self, entropy_fn: Callable[[int], bytes] = os.urandom) -> None:
+        self.entropy_fn = entropy_fn
+        self.feat_sel = 0
+        self.drv_sel = 0
+        self.qsel = 0
+        self.status = 0
+        self.int_status = 0
+        self.q = _VirtioQueue()
+
+    def irq_active(self) -> bool:
+        return self.int_status != 0
+
+    def _reset(self) -> None:
+        self.feat_sel = 0
+        self.drv_sel = 0
+        self.qsel = 0
+        self.status = 0
+        self.int_status = 0
+        self.q = _VirtioQueue()
+
+    def _push_used(self, head: int, length: int, dma: DmaRequester) -> None:
+        q = self.q
+        qnum = q.num if q.num else 256
+        slot = q.used_idx % qnum
+        dma.dma_write(q.device + 4 + slot * 8, struct.pack("<II", head, length))
+        q.used_idx = (q.used_idx + 1) & 0xFFFF
+        dma.dma_write(q.device + 2, struct.pack("<H", q.used_idx))
+
+    def _read_chain(self, head: int, dma: DmaRequester) -> list[tuple[int, int, int]]:
+        q = self.q
+        chain: list[tuple[int, int, int]] = []
+        idx = head
+        for _ in range(256):
+            raw = dma.dma_read(q.desc + idx * 16, 16)
+            addr, length, flags, nxt = struct.unpack("<QIHH", raw)
+            chain.append((addr, length, flags))
+            if not (flags & 1):
+                break
+            idx = nxt
+        return chain
+
+    def _process_queue(self, dma: DmaRequester) -> None:
+        q = self.q
+        if not q.ready or not (self.status & 4):
+            return
+        qnum = q.num if q.num else 256
+        _, avail_idx = struct.unpack("<HH", dma.dma_read(q.driver, 4))
+        while q.last_avail != avail_idx:
+            slot = q.last_avail % qnum
+            (head,) = struct.unpack("<H", dma.dma_read(q.driver + 4 + slot * 2, 2))
+            q.last_avail = (q.last_avail + 1) & 0xFFFF
+            chain = self._read_chain(head, dma)
+            written = 0
+            for addr, length, flags in chain:
+                if (flags & 2) and length > 0:
+                    payload = self.entropy_fn(length)
+                    dma.dma_write(addr, payload)
+                    written += len(payload)
+            self._push_used(head, written, dma)
+            self.int_status |= 1
+
+    def access(self, offset: int, is_write: bool, wdata: int, dma: DmaRequester) -> int:
+        aligned = offset & ~3
+        w32 = (wdata >> 32) & 0xFFFF_FFFF if (offset & 4) else (wdata & 0xFFFF_FFFF)
+        if not is_write:
+            r32 = {
+                0x000: self.MAGIC_VAL,
+                0x004: self.VERSION_VAL,
+                0x008: self.DEVICE_ID_VAL,
+                0x00C: self.VENDOR_ID_VAL,
+                # Bit 32 = VIRTIO_F_VERSION_1, bit 33 = VIRTIO_F_ACCESS_PLATFORM
+                0x010: 0x0000_0003 if self.feat_sel == 1 else 0,
+                0x034: 256 if self.qsel == 0 else 0,
+                0x044: self.q.ready if self.qsel == 0 else 0,
+                0x060: self.int_status,
+                0x070: self.status,
+            }.get(aligned, 0)
+            return (r32 << 32) if (offset & 4) else r32
+
+        if aligned == 0x014:
+            self.feat_sel = w32
+        elif aligned == 0x024:
+            self.drv_sel = w32
+        elif aligned == 0x030:
+            self.qsel = w32
+        elif aligned == 0x038 and self.qsel == 0:
+            self.q.num = w32 & 0xFFFF
+        elif aligned == 0x044 and self.qsel == 0:
+            self.q.ready = w32 & 1
+        elif aligned == 0x050:
+            if w32 == 0:
+                self._process_queue(dma)
+        elif aligned == 0x064:
+            self.int_status &= ~w32
+        elif aligned == 0x070:
+            if w32 == 0:
+                self._reset()
+            else:
+                self.status = w32 & 0xFF
+        elif aligned == 0x080 and self.qsel == 0:
+            self.q.desc = (self.q.desc & ~0xFFFF_FFFF) | w32
+        elif aligned == 0x084 and self.qsel == 0:
+            self.q.desc = (self.q.desc & 0xFFFF_FFFF) | (w32 << 32)
+        elif aligned == 0x090 and self.qsel == 0:
+            self.q.driver = (self.q.driver & ~0xFFFF_FFFF) | w32
+        elif aligned == 0x094 and self.qsel == 0:
+            self.q.driver = (self.q.driver & 0xFFFF_FFFF) | (w32 << 32)
+        elif aligned == 0x0A0 and self.qsel == 0:
+            self.q.device = (self.q.device & ~0xFFFF_FFFF) | w32
+        elif aligned == 0x0A4 and self.qsel == 0:
+            self.q.device = (self.q.device & 0xFFFF_FFFF) | (w32 << 32)
+        return 0
+
+
+class GoldfishRtcMmio:
+    """Google Goldfish RTC (`google,goldfish-rtc`) MMIO register model."""
+
+    def __init__(self, clock_ns: Callable[[], int] = time.monotonic_ns,
+                 initial_time_ns: int | None = None) -> None:
+        self._clock_ns = clock_ns
+        start_wall = time.time_ns() if initial_time_ns is None else initial_time_ns
+        self.time_offset_ns = start_wall - self._clock_ns()
+        self.time_high_latch = 0
+        self.alarm_ns = 0
+        self.alarm_armed = False
+        self.irq_enabled = False
+        self.irq_pending = False
+
+    def now_ns(self) -> int:
+        return (self._clock_ns() + self.time_offset_ns) & 0xFFFF_FFFF_FFFF_FFFF
+
+    def _check_alarm(self) -> None:
+        if self.alarm_armed and self.now_ns() >= self.alarm_ns:
+            self.alarm_armed = False
+            self.irq_pending = True
+
+    def irq_active(self) -> bool:
+        self._check_alarm()
+        return self.irq_pending and self.irq_enabled
+
+    def access(self, offset: int, is_write: bool, wdata: int) -> int:
+        aligned = offset & ~3
+        w32 = (wdata >> 32) & 0xFFFF_FFFF if (offset & 4) else (wdata & 0xFFFF_FFFF)
+        self._check_alarm()
+
+        if not is_write:
+            if aligned == 0x00:
+                now = self.now_ns()
+                self.time_high_latch = (now >> 32) & 0xFFFF_FFFF
+                r32 = now & 0xFFFF_FFFF
+            elif aligned == 0x04:
+                r32 = self.time_high_latch
+            elif aligned == 0x08:
+                r32 = self.alarm_ns & 0xFFFF_FFFF
+            elif aligned == 0x0C:
+                r32 = (self.alarm_ns >> 32) & 0xFFFF_FFFF
+            elif aligned == 0x10:
+                r32 = 1 if self.irq_enabled else 0
+            elif aligned == 0x18:
+                r32 = 1 if self.alarm_armed else 0
+            else:
+                r32 = 0
+            return (r32 << 32) if (offset & 4) else r32
+
+        if aligned == 0x00:
+            cur = self.now_ns()
+            new_time = (cur & ~0xFFFF_FFFF) | w32
+            self.time_offset_ns = new_time - self._clock_ns()
+        elif aligned == 0x04:
+            cur = self.now_ns()
+            new_time = (w32 << 32) | (cur & 0xFFFF_FFFF)
+            self.time_offset_ns = new_time - self._clock_ns()
+        elif aligned == 0x08:
+            self.alarm_ns = (self.alarm_ns & ~0xFFFF_FFFF) | w32
+            self.alarm_armed = True
+            self._check_alarm()
+        elif aligned == 0x0C:
+            self.alarm_ns = (self.alarm_ns & 0xFFFF_FFFF) | (w32 << 32)
+        elif aligned == 0x10:
+            self.irq_enabled = bool(w32 & 1)
+        elif aligned == 0x14:
+            self.alarm_armed = False
+        elif aligned == 0x1C:
+            self.irq_pending = False
+        return 0
+
+
 class BuiltinBackend:
-    """Standards-compliant VirtIO-Blk, VirtIO-Net, SDHCI, and PCIe + NVMe 1.4."""
+    """Standards-compliant VirtIO-Blk/Net/RNG, Goldfish RTC, SDHCI, and PCIe + NVMe 1.4."""
 
     def __init__(self, disk_path: Path | None = None, sdhci_path: Path | None = None,
                  nvme_path: Path | None = None, blk_irq: int = 3, net_irq: int = 2,
-                 sdhci_irq: int = 4, nvme_irq: int = 11) -> None:
+                 sdhci_irq: int = 4, rng_irq: int = 5, rtc_irq: int = 6,
+                 nvme_irq: int = 11) -> None:
         self.disk = bytearray(disk_path.read_bytes()) if disk_path else bytearray(4 * 1024 * 1024)
         self.sd = bytearray(sdhci_path.read_bytes()) if sdhci_path else bytearray(4 * 1024 * 1024)
         self.nvme = bytearray(nvme_path.read_bytes()) if nvme_path else bytearray(8 * 1024 * 1024)
         self.blk_irq = blk_irq
         self.net_irq = net_irq
         self.sdhci_irq = sdhci_irq
+        self.rng_irq = rng_irq
+        self.rtc_irq = rtc_irq
         self.nvme_irq = nvme_irq
+
+        # VirtIO-RNG (0x1000_3000) & Goldfish RTC (0x0010_1000)
+        self.virtio_rng = VirtioRngMmio()
+        self.goldfish_rtc = GoldfishRtcMmio()
 
         # VirtIO-Blk (0x1000_1000)
         self.blk_feat_sel = 0
@@ -355,6 +557,10 @@ class BuiltinBackend:
         sd_sig = struct.unpack_from("<I", self.sdhci_regs, 0x38)[0]
         if sd_stat & sd_sig:
             mask |= 1 << self.sdhci_irq
+        if self.virtio_rng.irq_active():
+            mask |= 1 << self.rng_irq
+        if self.goldfish_rtc.irq_active():
+            mask |= 1 << self.rtc_irq
         if self.nvme_int_active and (self.nvme_intms & 1) == 0 and (self.pci_cmd & 0x400) == 0:
             mask |= 1 << self.nvme_irq
         return mask
@@ -1017,13 +1223,19 @@ class BuiltinBackend:
 
     def mmio_access(self, addr: int, size: int, is_write: bool, wstrb: int,
                     wdata: int, dma: DmaRequester) -> tuple[int, int]:
+        if 0x0010_1000 <= addr < 0x0010_2000:
+            val = self.goldfish_rtc.access(addr - 0x0010_1000, is_write, wdata)
+            return 0, val
         if 0x1000_1000 <= addr < 0x1000_2000:
             val = self._handle_virtio(False, addr - 0x1000_1000, is_write, size, wdata, dma)
             return 0, val
         if 0x1000_2000 <= addr < 0x1000_3000:
             val = self._handle_virtio(True, addr - 0x1000_2000, is_write, size, wdata, dma)
             return 0, val
-        if 0x1000_3000 <= addr < 0x1000_9000:
+        if 0x1000_3000 <= addr < 0x1000_4000:
+            val = self.virtio_rng.access(addr - 0x1000_3000, is_write, wdata, dma)
+            return 0, val
+        if 0x1000_4000 <= addr < 0x1000_9000:
             return 0, 0
         if 0x4200_0000 <= addr < 0x4200_1000:
             val = self._handle_sdhci(addr - 0x4200_0000, is_write, wstrb, wdata, dma)

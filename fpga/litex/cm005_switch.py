@@ -16,14 +16,15 @@ from cm005_bridge_queue import EthernetFrameQueue
 
 
 class CM005Switch(LiteXModule):
-    def __init__(self, slots=8):
+    def __init__(self, slots=8, cpu_rx_slots=32):
         self.sinks = [stream.Endpoint(eth_phy_description(32)) for _ in range(3)]
         self.sources = [stream.Endpoint(eth_phy_description(32)) for _ in range(3)]
         queues = {}
         for origin in range(3):
             destinations = [d for d in range(3) if d != origin]
             for destination in destinations:
-                queue = EthernetFrameQueue(slots=slots)
+                depth = cpu_rx_slots if destination == 2 else slots
+                queue = EthernetFrameQueue(slots=depth)
                 setattr(self, f"q{origin}_to_{destination}", queue)
                 queues[origin, destination] = queue
             # Both writers accept/drop whole frames. Their only stalls are

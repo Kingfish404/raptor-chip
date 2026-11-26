@@ -21,6 +21,11 @@ module rapt_native_soc #(
     output logic [3:0] peripheral_wstrb,
     input logic [31:0] peripheral_rdata,
     input logic peripheral_irq,
+`ifdef NATIVE_WITH_ETH_DMA
+    input logic ext_wr_valid_i,
+    input logic [XLEN-1:0] ext_wr_first_i,
+    input logic [XLEN-1:0] ext_wr_last_i,
+`endif
 `ifdef RAPT_SAMPLING
     axi4_if.slave replay,
 `endif
@@ -67,10 +72,17 @@ module rapt_native_soc #(
 `endif
       .core_reset_o(),
       .writeback_error_o(writeback_error),
+`ifdef NATIVE_WITH_ETH_DMA
+      .external_write_valid_i(ext_wr_valid_i),
+      .external_write_pending_i(1'b0),
+      .external_write_first_i(ext_wr_first_i),
+      .external_write_last_i(ext_wr_last_i),
+`else
       .external_write_valid_i(1'b0),
       .external_write_pending_i(1'b0),
       .external_write_first_i('0),
       .external_write_last_i('0),
+`endif
       .io_interrupt(1'b0),
       .ext_irq_i(core_irq),
       .jtag_trst_n(1'b0),

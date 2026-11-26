@@ -1,0 +1,45 @@
+[tasks]
+bypass_prove
+bypass_cover
+evict_prove
+evict_cover
+hit_prove
+hit_cover
+
+[options]
+bypass_prove: mode prove
+bypass_prove: depth 12
+bypass_cover: mode cover
+bypass_cover: depth 12
+evict_prove: mode prove
+evict_prove: depth 16
+evict_cover: mode cover
+evict_cover: depth 16
+hit_prove: mode prove
+hit_prove: depth 14
+hit_cover: mode cover
+hit_cover: depth 14
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+plugin -i slang
+bypass_prove: read_slang --single-unit --top formal_l2_bypass_ctrl -DFORMAL rapt_l2_bypass_ctrl.sv rapt_l2_evict_ctrl.sv rapt_l2_hit_ctrl.sv formal_l2_ctrls.sv
+bypass_cover: read_slang --single-unit --top formal_l2_bypass_ctrl -DFORMAL rapt_l2_bypass_ctrl.sv rapt_l2_evict_ctrl.sv rapt_l2_hit_ctrl.sv formal_l2_ctrls.sv
+evict_prove: read_slang --single-unit --top formal_l2_evict_ctrl -DFORMAL rapt_l2_bypass_ctrl.sv rapt_l2_evict_ctrl.sv rapt_l2_hit_ctrl.sv formal_l2_ctrls.sv
+evict_cover: read_slang --single-unit --top formal_l2_evict_ctrl -DFORMAL rapt_l2_bypass_ctrl.sv rapt_l2_evict_ctrl.sv rapt_l2_hit_ctrl.sv formal_l2_ctrls.sv
+hit_prove: read_slang --single-unit --top formal_l2_hit_ctrl -DFORMAL rapt_l2_bypass_ctrl.sv rapt_l2_evict_ctrl.sv rapt_l2_hit_ctrl.sv formal_l2_ctrls.sv
+hit_cover: read_slang --single-unit --top formal_l2_hit_ctrl -DFORMAL rapt_l2_bypass_ctrl.sv rapt_l2_evict_ctrl.sv rapt_l2_hit_ctrl.sv formal_l2_ctrls.sv
+bypass_prove: prep -top formal_l2_bypass_ctrl
+bypass_cover: prep -top formal_l2_bypass_ctrl
+evict_prove: prep -top formal_l2_evict_ctrl
+evict_cover: prep -top formal_l2_evict_ctrl
+hit_prove: prep -top formal_l2_hit_ctrl
+hit_cover: prep -top formal_l2_hit_ctrl
+
+[files]
+../../rtl/uncore/l2cache/rapt_l2_bypass_ctrl.sv
+../../rtl/uncore/l2cache/rapt_l2_evict_ctrl.sv
+../../rtl/uncore/l2cache/rapt_l2_hit_ctrl.sv
+formal_l2_ctrls.sv

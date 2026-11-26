@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* Native RK Ethernet packet SRAM ABI v1. All I/O is aligned 32-bit PIO.
- * No device accesses cached DDR, so no DMA/coherency contract is required.
+/* Raptor Ethernet driver supporting both:
+ * - ABI v1: 32-bit packet SRAM PIO (no DMA required)
+ * - ABI v2: 64-bit AXI4-Master RX/TX Ring DMA (uses standard Linux DMA API;
+ *           set dma-noncoherent in DT when the SoC relies on Zicbom CMO)
  */
+#include <linux/dma-mapping.h>
 #include <linux/etherdevice.h>
 #include <linux/ethtool.h>
 #include <linux/interrupt.h>
@@ -27,10 +30,24 @@
 #define RN_TX_LENGTH      0x20
 #define RN_MDIO_CONTROL   0x40
 #define RN_MDIO_INPUT     0x44
+#define RN_DMA_CAPS       0x48
+#define RN_RX_ADDR_LO     0x80
+#define RN_RX_ADDR_HI     0x84
+#define RN_RX_PUSH        0x88
+#define RN_RX_COMP        0x8c
+#define RN_TX_ADDR_LO     0xa0
+#define RN_TX_ADDR_HI     0xa4
+#define RN_TX_PUSH        0xa8
+#define RN_TX_COMP        0xac
 #define RN_TX_BUFFER      0x2000
 #define RN_RX_BUFFER      0x4000
 #define RN_SLOT_BYTES     2048
 #define RN_MAX_FRAME      1536
+#define RN_DMA_MAX_RING   64
+#define RN_DMA_BUF_SIZE   2048
+#define RN_RING_CAP       0x48
+#define RN_CTRL_ENABLE    BIT(0)
+#define RN_CTRL_DMA       BIT(1)
 #define RN_IRQ_RX         BIT(0)
 #define RN_IRQ_TX         BIT(1)
 #define RN_TX_READY       BIT(1)
@@ -38,6 +55,7 @@
 
 struct rn_priv {
 	struct net_device *ndev;
+	struct device *dev;
 	void __iomem *base;
 	struct napi_struct napi;
 	struct mdiobb_ctrl mdio;
@@ -49,6 +67,19 @@ struct rn_priv {
 	u32 irq_mask;
 	unsigned int tx_length;
 	bool running;
+	bool dma_mode;
+	unsigned int ring_size;
+	unsigned int ring_mask;
+	size_t pool_bytes;
+	unsigned int rx_prod;
+	unsigned int rx_cons;
+	unsigned int tx_prod;
+	unsigned int tx_cons;
+	u8 *rx_pool;
+	dma_addr_t rx_pool_dma;
+	u8 *tx_pool;
+	dma_addr_t tx_pool_dma;
+	unsigned int tx_len[RN_DMA_MAX_RING];
 	u8 tx_buffer[RN_MAX_FRAME];
 };
 
@@ -100,12 +131,124 @@ static const struct mdiobb_ops rn_mdio_ops = {
 	.get_mdio_data = rn_get_mdio_data,
 };
 
+static void rn_dma_refill_rx(struct rn_priv *p)
+{
+	while (p->rx_prod - p->rx_cons < p->ring_size - 1) {
+		unsigned int idx = p->rx_prod & p->ring_mask;
+		dma_addr_t dma = p->rx_pool_dma + idx * RN_DMA_BUF_SIZE;
+
+		rn_write(p, RN_RX_ADDR_LO, lower_32_bits(dma));
+		rn_write(p, RN_RX_ADDR_HI, upper_32_bits(dma));
+		rn_write(p, RN_RX_PUSH, 1);
+		p->rx_prod++;
+	}
+}
+
+static void rn_dma_reclaim_tx(struct rn_priv *p)
+{
+	u32 comp = rn_read(p, RN_TX_COMP);
+	unsigned int i;
+
+	if (!comp)
+		return;
+	if (comp > p->tx_prod - p->tx_cons)
+		comp = p->tx_prod - p->tx_cons;
+	for (i = 0; i < comp; i++) {
+		unsigned int idx = p->tx_cons & p->ring_mask;
+
+		p->ndev->stats.tx_packets++;
+		p->ndev->stats.tx_bytes += p->tx_len[idx];
+		p->tx_len[idx] = 0;
+		p->tx_cons++;
+	}
+	rn_write(p, RN_TX_COMP, comp);
+	if (p->tx_prod - p->tx_cons < p->ring_size - 1) {
+		if (p->irq_mask & RN_IRQ_TX) {
+			p->irq_mask &= ~RN_IRQ_TX;
+			rn_write(p, RN_IRQ_MASK, p->irq_mask);
+		}
+		netif_wake_queue(p->ndev);
+	}
+}
+
+static void rn_dma_reset_rings(struct rn_priv *p)
+{
+	p->rx_prod = 0;
+	p->rx_cons = 0;
+	p->tx_prod = 0;
+	p->tx_cons = 0;
+}
+
+static int rn_dma_poll(struct napi_struct *napi, int budget)
+{
+	struct rn_priv *p = container_of(napi, struct rn_priv, napi);
+	struct net_device *ndev = p->ndev;
+	unsigned long flags;
+	int done = 0;
+
+	while (done < budget) {
+		u32 len = rn_read(p, RN_RX_COMP) & 0xffff;
+		unsigned int idx;
+		struct sk_buff *skb;
+		dma_addr_t dma;
+		u8 *buf;
+
+		if (!len || p->rx_cons == p->rx_prod)
+			break;
+		idx = p->rx_cons & p->ring_mask;
+		dma = p->rx_pool_dma + idx * RN_DMA_BUF_SIZE;
+		buf = p->rx_pool + idx * RN_DMA_BUF_SIZE;
+		p->rx_cons++;
+		rn_write(p, RN_RX_COMP, 1);
+
+		if (unlikely(len < ETH_ZLEN || len > RN_MAX_FRAME)) {
+			spin_lock_irqsave(&p->lock, flags);
+			ndev->stats.rx_errors++;
+			spin_unlock_irqrestore(&p->lock, flags);
+			done++;
+			continue;
+		}
+		/* Single invalidate before CPU read; CPU never writes rx_pool. */
+		dma_sync_single_for_cpu(p->dev, dma, len, DMA_FROM_DEVICE);
+		skb = napi_alloc_skb(napi, len);
+		if (unlikely(!skb)) {
+			spin_lock_irqsave(&p->lock, flags);
+			ndev->stats.rx_dropped++;
+			spin_unlock_irqrestore(&p->lock, flags);
+			done++;
+			continue;
+		}
+		memcpy(skb_put(skb, len), buf, len);
+		skb->protocol = eth_type_trans(skb, ndev);
+		spin_lock_irqsave(&p->lock, flags);
+		ndev->stats.rx_packets++;
+		ndev->stats.rx_bytes += len;
+		spin_unlock_irqrestore(&p->lock, flags);
+		napi_gro_receive(napi, skb);
+		done++;
+	}
+	rn_dma_refill_rx(p);
+	spin_lock_irqsave(&p->lock, flags);
+	rn_dma_reclaim_tx(p);
+	spin_unlock_irqrestore(&p->lock, flags);
+	if (done < budget && napi_complete_done(napi, done)) {
+		spin_lock_irqsave(&p->lock, flags);
+		p->irq_mask |= RN_IRQ_RX;
+		rn_write(p, RN_IRQ_MASK, p->irq_mask);
+		spin_unlock_irqrestore(&p->lock, flags);
+	}
+	return done;
+}
+
 static int rn_poll(struct napi_struct *napi, int budget)
 {
 	struct rn_priv *p = container_of(napi, struct rn_priv, napi);
 	struct net_device *ndev = p->ndev;
 	unsigned long flags;
 	int done = 0;
+
+	if (p->dma_mode)
+		return rn_dma_poll(napi, budget);
 
 	while (done < budget) {
 		u32 desc = rn_read(p, RN_RX_DESC);
@@ -184,7 +327,9 @@ static irqreturn_t rn_irq(int irq, void *opaque)
 	}
 	if (status & RN_IRQ_TX) {
 		rn_write(p, RN_IRQ_STATUS, RN_IRQ_TX);
-		if (p->tx_length) {
+		if (p->dma_mode) {
+			rn_dma_reclaim_tx(p);
+		} else if (p->tx_length) {
 			ndev->stats.tx_packets++;
 			ndev->stats.tx_bytes += p->tx_length;
 			p->tx_length = 0;
@@ -200,11 +345,66 @@ static irqreturn_t rn_irq(int irq, void *opaque)
 	return IRQ_HANDLED;
 }
 
+static netdev_tx_t rn_dma_xmit(struct sk_buff *skb, struct net_device *ndev)
+{
+	struct rn_priv *p = netdev_priv(ndev);
+	unsigned long flags;
+	unsigned int len = skb->len;
+	unsigned int idx;
+	dma_addr_t dma;
+	u8 *buf;
+
+	if (unlikely(len < ETH_HLEN || len > RN_MAX_FRAME)) {
+		spin_lock_irqsave(&p->lock, flags);
+		ndev->stats.tx_dropped++;
+		spin_unlock_irqrestore(&p->lock, flags);
+		dev_kfree_skb_any(skb);
+		return NETDEV_TX_OK;
+	}
+	spin_lock_irqsave(&p->lock, flags);
+	rn_dma_reclaim_tx(p);
+	if (unlikely(p->tx_prod - p->tx_cons >= p->ring_size - 1 ||
+		     !(rn_read(p, RN_STATUS) & RN_CLOCKS_READY))) {
+		p->irq_mask |= RN_IRQ_TX;
+		rn_write(p, RN_IRQ_MASK, p->irq_mask);
+		netif_stop_queue(ndev);
+		spin_unlock_irqrestore(&p->lock, flags);
+		return NETDEV_TX_BUSY;
+	}
+	idx = p->tx_prod & p->ring_mask;
+	buf = p->tx_pool + idx * RN_DMA_BUF_SIZE;
+	dma = p->tx_pool_dma + idx * RN_DMA_BUF_SIZE;
+	if (unlikely(skb_copy_bits(skb, 0, buf, len))) {
+		ndev->stats.tx_dropped++;
+		spin_unlock_irqrestore(&p->lock, flags);
+		dev_kfree_skb_any(skb);
+		return NETDEV_TX_OK;
+	}
+	dma_sync_single_for_device(p->dev, dma, len, DMA_TO_DEVICE);
+	p->tx_len[idx] = len;
+	p->tx_prod++;
+	if (p->tx_prod - p->tx_cons >= p->ring_size - 1) {
+		p->irq_mask |= RN_IRQ_TX;
+		rn_write(p, RN_IRQ_MASK, p->irq_mask);
+		netif_stop_queue(ndev);
+	}
+	netif_trans_update(ndev);
+	rn_write(p, RN_TX_ADDR_LO, lower_32_bits(dma));
+	rn_write(p, RN_TX_ADDR_HI, upper_32_bits(dma));
+	rn_write(p, RN_TX_PUSH, len);
+	spin_unlock_irqrestore(&p->lock, flags);
+	dev_consume_skb_any(skb);
+	return NETDEV_TX_OK;
+}
+
 static netdev_tx_t rn_xmit(struct sk_buff *skb, struct net_device *ndev)
 {
 	struct rn_priv *p = netdev_priv(ndev);
 	unsigned long flags;
 	unsigned int i, len = skb->len;
+
+	if (p->dma_mode)
+		return rn_dma_xmit(skb, ndev);
 
 	if (unlikely(len < ETH_HLEN || len > RN_MAX_FRAME ||
 		     skb_copy_bits(skb, 0, p->tx_buffer, len))) {
@@ -256,7 +456,9 @@ static void rn_quiesce(struct rn_priv *p)
 	p->irq_mask = 0;
 	rn_write(p, RN_IRQ_MASK, 0);
 	rn_write(p, RN_CONTROL, 0);
-	if (p->tx_length) {
+	if (p->dma_mode) {
+		rn_dma_reset_rings(p);
+	} else if (p->tx_length) {
 		p->ndev->stats.tx_errors++;
 		p->ndev->stats.tx_dropped++;
 		p->tx_length = 0;
@@ -266,10 +468,12 @@ static void rn_quiesce(struct rn_priv *p)
 
 static void rn_start(struct rn_priv *p)
 {
-	rn_write(p, RN_CONTROL, 1);
+	rn_write(p, RN_CONTROL, p->dma_mode ? (RN_CTRL_ENABLE | RN_CTRL_DMA) : RN_CTRL_ENABLE);
 	rn_write(p, RN_IRQ_STATUS, RN_IRQ_TX);
+	if (p->dma_mode)
+		rn_dma_refill_rx(p);
 	napi_enable(&p->napi);
-	p->irq_mask = RN_IRQ_RX | RN_IRQ_TX;
+	p->irq_mask = p->dma_mode ? RN_IRQ_RX : (RN_IRQ_RX | RN_IRQ_TX);
 	rn_write(p, RN_IRQ_MASK, p->irq_mask);
 	enable_irq(p->ndev->irq);
 	netif_wake_queue(p->ndev);
@@ -414,52 +618,96 @@ static int rn_probe(struct platform_device *pdev)
 	SET_NETDEV_DEV(ndev, dev);
 	p = netdev_priv(ndev);
 	p->ndev = ndev;
+	p->dev = dev;
 	spin_lock_init(&p->lock);
 	mutex_init(&p->lifecycle);
 	INIT_WORK(&p->reset_work, rn_reset_work);
 	p->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(p->base))
 		return PTR_ERR(p->base);
-	if (rn_read(p, RN_ID) != 0x524e4554 || rn_read(p, RN_VERSION) != 1)
-		return dev_err_probe(dev, -ENODEV, "native Ethernet ABI mismatch\n");
+	if (rn_read(p, RN_ID) != 0x524e4554)
+		return dev_err_probe(dev, -ENODEV, "Raptor Ethernet ID mismatch\n");
+	ret = rn_read(p, RN_VERSION);
+	if (ret != 1 && ret != 2)
+		return dev_err_probe(dev, -ENODEV, "Raptor Ethernet ABI mismatch (%d)\n", ret);
+	p->dma_mode = (ret == 2);
+	if (p->dma_mode) {
+		u32 cap = rn_read(p, RN_RING_CAP) & 0xffff;
+
+		if (cap < 16 || cap > RN_DMA_MAX_RING || (cap & (cap - 1)))
+			cap = 16;
+		p->ring_size = cap;
+		p->ring_mask = cap - 1;
+		p->pool_bytes = (size_t)cap * RN_DMA_BUF_SIZE;
+		ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(64));
+		if (ret)
+			return dev_err_probe(dev, ret, "cannot set 64-bit DMA mask\n");
+		p->rx_pool = devm_kmalloc(dev, p->pool_bytes, GFP_KERNEL);
+		p->tx_pool = devm_kmalloc(dev, p->pool_bytes, GFP_KERNEL);
+		if (!p->rx_pool || !p->tx_pool)
+			return -ENOMEM;
+		p->rx_pool_dma = dma_map_single(dev, p->rx_pool, p->pool_bytes,
+						DMA_FROM_DEVICE);
+		if (dma_mapping_error(dev, p->rx_pool_dma))
+			return -ENOMEM;
+		p->tx_pool_dma = dma_map_single(dev, p->tx_pool, p->pool_bytes,
+						DMA_TO_DEVICE);
+		if (dma_mapping_error(dev, p->tx_pool_dma)) {
+			dma_unmap_single(dev, p->rx_pool_dma, p->pool_bytes,
+					 DMA_FROM_DEVICE);
+			return -ENOMEM;
+		}
+	}
 	rn_write(p, RN_IRQ_MASK, 0);
 	rn_write(p, RN_CONTROL, 0);
 	rn_write(p, RN_MDIO_CONTROL, 0);
 	ndev->irq = platform_get_irq(pdev, 0);
 	if (ndev->irq < 0)
 		return ndev->irq;
-	ret = of_get_phy_mode(dev->of_node, &interface);
-	if (ret || interface != PHY_INTERFACE_MODE_RGMII_TXID)
-		return dev_err_probe(dev, -EINVAL, "requires rgmii-txid PHY mode\n");
 	ret = of_get_ethdev_address(dev->of_node, ndev);
 	if (ret == -EPROBE_DEFER)
 		return ret;
 	if (ret)
 		eth_hw_addr_random(ndev);
-	p->mdio.ops = &rn_mdio_ops;
-	p->mii = alloc_mdio_bitbang(&p->mdio);
-	if (!p->mii)
-		return -ENOMEM;
-	p->mii->name = "Raptor native MDIO";
-	p->mii->parent = dev;
-	snprintf(p->mii->id, MII_BUS_ID_SIZE, "%s-mii", dev_name(dev));
-	mdio_node = of_get_child_by_name(dev->of_node, "mdio");
-	if (!mdio_node) {
-		ret = -EINVAL;
-		goto free_mii;
-	}
-	ret = of_mdiobus_register(p->mii, mdio_node);
-	of_node_put(mdio_node);
-	if (ret) {
-		dev_err_probe(dev, ret, "cannot register native MDIO bus\n");
-		goto free_mii;
-	}
-	phy_node = of_parse_phandle(dev->of_node, "phy-handle", 0);
-	ndev->phydev = of_phy_connect(ndev, phy_node, rn_adjust_link, 0, interface);
-	of_node_put(phy_node);
-	if (!ndev->phydev) {
-		ret = -ENODEV;
-		goto unregister_mii;
+	if (of_phy_is_fixed_link(dev->of_node)) {
+		ret = of_phy_register_fixed_link(dev->of_node);
+		if (ret)
+			return dev_err_probe(dev, ret, "cannot register fixed-link PHY\n");
+		interface = PHY_INTERFACE_MODE_GMII;
+		ndev->phydev = of_phy_connect(ndev, dev->of_node, rn_adjust_link, 0, interface);
+		if (!ndev->phydev) {
+			of_phy_deregister_fixed_link(dev->of_node);
+			return -ENODEV;
+		}
+	} else {
+		ret = of_get_phy_mode(dev->of_node, &interface);
+		if (ret || interface != PHY_INTERFACE_MODE_RGMII_TXID)
+			return dev_err_probe(dev, -EINVAL, "requires rgmii-txid PHY mode\n");
+		p->mdio.ops = &rn_mdio_ops;
+		p->mii = alloc_mdio_bitbang(&p->mdio);
+		if (!p->mii)
+			return -ENOMEM;
+		p->mii->name = "Raptor MDIO";
+		p->mii->parent = dev;
+		snprintf(p->mii->id, MII_BUS_ID_SIZE, "%s-mii", dev_name(dev));
+		mdio_node = of_get_child_by_name(dev->of_node, "mdio");
+		if (!mdio_node) {
+			ret = -EINVAL;
+			goto free_mii;
+		}
+		ret = of_mdiobus_register(p->mii, mdio_node);
+		of_node_put(mdio_node);
+		if (ret) {
+			dev_err_probe(dev, ret, "cannot register MDIO bus\n");
+			goto free_mii;
+		}
+		phy_node = of_parse_phandle(dev->of_node, "phy-handle", 0);
+		ndev->phydev = of_phy_connect(ndev, phy_node, rn_adjust_link, 0, interface);
+		of_node_put(phy_node);
+		if (!ndev->phydev) {
+			ret = -ENODEV;
+			goto unregister_mii;
+		}
 	}
 	phy_set_max_speed(ndev->phydev, SPEED_1000);
 	phy_remove_link_mode(ndev->phydev, ETHTOOL_LINK_MODE_10baseT_Half_BIT);
@@ -483,16 +731,26 @@ static int rn_probe(struct platform_device *pdev)
 	if (ret)
 		goto delete_napi;
 	platform_set_drvdata(pdev, ndev);
-	dev_info(dev, "native packet SRAM Ethernet, %pM, 1000baseT full duplex\n", ndev->dev_addr);
+	dev_info(dev, "Raptor %s Ethernet, %pM, 1000baseT full duplex\n",
+		 p->dma_mode ? "AXI4 Ring DMA (ABI v2)" : "packet SRAM PIO (ABI v1)",
+		 ndev->dev_addr);
 	return 0;
 
 delete_napi:
 	netif_napi_del(&p->napi);
 	phy_disconnect(ndev->phydev);
+	if (of_phy_is_fixed_link(dev->of_node))
+		of_phy_deregister_fixed_link(dev->of_node);
 unregister_mii:
-	mdiobus_unregister(p->mii);
+	if (p->mii)
+		mdiobus_unregister(p->mii);
 free_mii:
-	free_mdio_bitbang(p->mii);
+	if (p->mii)
+		free_mdio_bitbang(p->mii);
+	if (p->dma_mode) {
+		dma_unmap_single(dev, p->tx_pool_dma, p->pool_bytes, DMA_TO_DEVICE);
+		dma_unmap_single(dev, p->rx_pool_dma, p->pool_bytes, DMA_FROM_DEVICE);
+	}
 	return ret;
 }
 
@@ -505,12 +763,23 @@ static void rn_remove(struct platform_device *pdev)
 	cancel_work_sync(&p->reset_work);
 	netif_napi_del(&p->napi);
 	phy_disconnect(ndev->phydev);
-	mdiobus_unregister(p->mii);
-	free_mdio_bitbang(p->mii);
+	if (of_phy_is_fixed_link(pdev->dev.of_node))
+		of_phy_deregister_fixed_link(pdev->dev.of_node);
+	if (p->mii) {
+		mdiobus_unregister(p->mii);
+		free_mdio_bitbang(p->mii);
+	}
+	if (p->dma_mode) {
+		dma_unmap_single(&pdev->dev, p->tx_pool_dma, p->pool_bytes, DMA_TO_DEVICE);
+		dma_unmap_single(&pdev->dev, p->rx_pool_dma, p->pool_bytes, DMA_FROM_DEVICE);
+	}
 }
 
 static const struct of_device_id rn_of_match[] = {
+	{ .compatible = "raptor,ethernet-v1" },
+	{ .compatible = "raptor,ethernet-v2" },
 	{ .compatible = "raptor,native-ethernet-v1" },
+	{ .compatible = "raptor,native-ethernet-v2" },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, rn_of_match);
@@ -519,11 +788,11 @@ static struct platform_driver rn_driver = {
 	.probe = rn_probe,
 	.remove = rn_remove,
 	.driver = {
-		.name = "raptor-native-eth",
+		.name = "raptor-eth",
 		.of_match_table = rn_of_match,
 	},
 };
 module_platform_driver(rn_driver);
 
-MODULE_DESCRIPTION("Raptor native Ethernet packet SRAM driver");
+MODULE_DESCRIPTION("Raptor Ethernet controller driver");
 MODULE_LICENSE("GPL");

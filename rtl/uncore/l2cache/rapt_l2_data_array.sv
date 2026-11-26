@@ -1,54 +1,56 @@
-// L2 data array: four 16384 x 64 single-port SRAM banks.
-// bank=chunk[1:0], row={way[2:0],set[9:0],chunk[2]}.
+// L2 data array: four single-port SRAM banks (depth = 2^(SetBits+4) x 64b).
+// bank=chunk[1:0], row={way[2:0],set[SetBits-1:0],chunk[2]}.
 // Bank priority is SinkC > SourceC > live SinkD > buffered line write
 // > SourceD-write > SourceD-read. A displaced buffered beat retries.
-module rapt_l2_data_array (
+module rapt_l2_data_array #(
+    parameter int SetBits = 10
+) (
     input rapt_pkg::sram_ctrl_t sram_ctrl_i,
     input logic clock,
     input logic reset,
     input logic read_valid,
     input logic read_all_chunks,
     output logic read_ready,
-    input logic [9:0] read_set,
+    input logic [SetBits-1:0] read_set,
     input logic [2:0] read_way,
     input logic [2:0] read_chunk,
     output logic read_result_valid,
     output logic [511:0] read_line_data,
     input logic source_c_read_valid,
     output logic source_c_read_ready,
-    input logic [9:0] source_c_read_set,
+    input logic [SetBits-1:0] source_c_read_set,
     input logic [2:0] source_c_read_way,
     input logic [2:0] source_c_read_chunk,
     output logic source_c_result_valid,
     output logic [63:0] source_c_read_data,
     input logic sink_d_write_valid,
     output logic sink_d_write_ready,
-    input logic [9:0] sink_d_write_set,
+    input logic [SetBits-1:0] sink_d_write_set,
     input logic [2:0] sink_d_write_way,
     input logic [2:0] sink_d_write_chunk,
     input logic [63:0] sink_d_write_data,
     input logic [7:0] sink_d_write_mask,
     input logic write_line_valid,
     output logic write_line_busy,
-    input logic [9:0] write_line_set,
+    input logic [SetBits-1:0] write_line_set,
     input logic [2:0] write_line_way,
     input logic [511:0] write_line_data,
     input logic priority_write_valid,
-    input logic [9:0] priority_write_set,
+    input logic [SetBits-1:0] priority_write_set,
     input logic [2:0] priority_write_way,
     input logic [2:0] priority_write_chunk,
     input logic [63:0] priority_write_data,
     input logic [7:0] priority_write_mask,
     input logic write_word_valid,
     output logic write_word_ready,
-    input logic [9:0] write_word_set,
+    input logic [SetBits-1:0] write_word_set,
     input logic [2:0] write_word_way,
     input logic [2:0] write_word_chunk,
     input logic [63:0] write_word_data,
     input logic [7:0] write_word_mask
 );
   logic line_active, read_pending, read_first_pending, read_full_q;
-  logic [9:0] line_set_q;
+  logic [SetBits-1:0] line_set_q;
   logic [2:0] line_way_q;
   logic [2:0] line_chunk_q;
   logic [1:0] line_chunk;
@@ -58,9 +60,10 @@ module rapt_l2_data_array (
   logic [63:0] bank_rdata[4];
   logic line_issue;
   logic read_no_conflict, scalar_fire, full_start, full_finish;
-  logic [13:0] line_row, priority_row, word_row, read_row, source_c_row, sink_d_row;
+  logic [SetBits+3:0] line_row, priority_row, word_row, read_row, source_c_row, sink_d_row;
   logic source_c_fire;
   logic [1:0] source_c_chunk_q;
+  logic [63:0] source_c_hold_q;
 
   assign line_issue = write_line_valid || line_active;
   assign line_chunk = line_active ? line_chunk_q[1:0] : 2'd0;
@@ -83,7 +86,8 @@ module rapt_l2_data_array (
   assign source_c_read_ready = !(priority_write_valid
                                  && priority_write_chunk[1:0] == source_c_read_chunk[1:0]);
   assign source_c_fire = source_c_read_valid && source_c_read_ready;
-  assign source_c_read_data = bank_rdata[source_c_chunk_q];
+  assign source_c_read_data = source_c_result_valid ? bank_rdata[source_c_chunk_q]
+                                                    : source_c_hold_q;
   assign sink_d_write_ready = !(priority_write_valid
                                 && priority_write_chunk[1:0] == sink_d_write_chunk[1:0])
       && !(source_c_read_valid && source_c_read_chunk[1:0] == sink_d_write_chunk[1:0]);
@@ -131,6 +135,7 @@ module rapt_l2_data_array (
     end else begin
       source_c_result_valid <= source_c_fire;
       if (source_c_fire) source_c_chunk_q <= source_c_read_chunk[1:0];
+      if (source_c_result_valid) source_c_hold_q <= bank_rdata[source_c_chunk_q];
       if (write_line_valid) begin
         line_set_q   <= write_line_set;
         line_way_q   <= write_line_way;
@@ -172,10 +177,11 @@ module rapt_l2_data_array (
         ? (line_chunk_q[2] ? line_data_q[256+bank*64+:64] : line_data_q[bank*64+:64])
         : write_line_data[bank*64+:64];
     rapt_sram_1rw #(
-        .ADDR_WIDTH(14),
+        .ADDR_WIDTH(SetBits + 4),
         .DATA_WIDTH(64),
         .INST_ID(200 + bank),
-        .USE_BWE(1)
+        .USE_BWE(1),
+        .PREFER_URAM(1)
     ) u_data_sram (
         .sram_ctrl_i(sram_ctrl_i),
         .clock,

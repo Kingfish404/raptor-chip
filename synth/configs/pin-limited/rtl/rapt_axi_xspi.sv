@@ -32,6 +32,7 @@ module rapt_axi_xspi #(
     input logic [7:0] dq_i
 );
   localparam int Bytes = XLEN / 8;
+  localparam int CtrlLane = int'(CtrlAddr % Bytes);
   localparam int SramCtrlLane = int'(SramCtrlAddr % Bytes);
   localparam logic [XLEN-1:2] SramCtrlWord = (XLEN - 2)'(SramCtrlAddr >> 2);
   localparam logic [7:0] CmdRead = 8'ha1;
@@ -169,7 +170,7 @@ module rapt_axi_xspi #(
             size_q <= axi.awsize;
             burst_q <= axi.awburst;
             cache_q <= axi.awcache;
-            state_q <= (32'(axi.awaddr) == CtrlAddr || aw_sram_ctrl) ? CTRL_WRITE : HEADER;
+            state_q <= (axi.awaddr == XLEN'(CtrlAddr) || aw_sram_ctrl) ? CTRL_WRITE : HEADER;
             if (aw_sram_ctrl && (axi.awaddr[1:0] != 0 || axi.awsize != 3'd2 || axi.awlen != 0))
               resp_q <= 2'b10;
           end else if (axi.arvalid && axi.arready) begin
@@ -182,8 +183,8 @@ module rapt_axi_xspi #(
             burst_q <= axi.arburst;
             cache_q <= axi.arcache;
             data_q <= ar_sram_ctrl ? (XLEN'(sram_ctrl_o) << (8 * SramCtrlLane))
-                : XLEN'(half_period_q);
-            state_q <= (32'(axi.araddr) == CtrlAddr || ar_sram_ctrl) ? CTRL_READ : HEADER;
+                : (XLEN'(half_period_q) << (8 * CtrlLane));
+            state_q <= (axi.araddr == XLEN'(CtrlAddr) || ar_sram_ctrl) ? CTRL_READ : HEADER;
             if (ar_sram_ctrl && (axi.araddr[1:0] != 0 || axi.arsize != 3'd2 || axi.arlen != 0))
               resp_q <= 2'b10;
           end
@@ -252,7 +253,8 @@ module rapt_axi_xspi #(
               if (axi.wstrb[SramCtrlLane+1])
                 sram_ctrl_o[15:8] <= {1'b0, axi.wdata[8*(SramCtrlLane+1)+:7]};
             end
-          end else if (axi.wstrb[0] && axi.wdata[3:0] >= 4'd2) half_period_q <= axi.wdata[3:0];
+          end else if (axi.wstrb[CtrlLane] && axi.wdata[8*CtrlLane+:4] >= 4'd2)
+            half_period_q <= axi.wdata[8*CtrlLane+:4];
           if (axi.wlast) state_q <= CTRL_RESP;
         end
         CTRL_READ:

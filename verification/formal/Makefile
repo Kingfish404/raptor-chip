@@ -509,3 +509,30 @@ ifetch-word-atomic: ## Prove aligned instruction-word assembly integrity in RV32
 NPC_RESPONSE_OUTPUT ?= $(RAPTOR_HOME)/build/rva22s64/npc-response-stability
 npc-response-stability: ## Prove NPC R/B holds and test real watchdog-duration stalls in RV32/RV64
 	python3 "$(RAPTOR_HOME)/verification/scripts/npc_response_stability_check.py" --output "$(NPC_RESPONSE_OUTPUT)"
+
+.PHONY: l2-ctrls l2-buffers l2-directory l2-data-array l2-refill-mshrs l2-mshr-frontend l2-top l2-all
+l2-ctrls: ## Prove L2 bypass/evict/hit phase controllers
+	$(SBY_RUN) -f --prefix "$(FORMAL_RESULTS_DIR)/l2_ctrls" l2_ctrls.sby
+
+l2-buffers: ## Prove L2 put, release, and secondary list buffers
+	$(SBY_RUN) -f --prefix "$(FORMAL_RESULTS_DIR)/l2_buffers" l2_buffers.sby
+
+l2-directory: ## Prove L2 directory wipe, lookup, bypass, scan, and clear equivalence
+	$(SBY_RUN) -f --prefix "$(FORMAL_RESULTS_DIR)/l2_directory" l2_directory.sby
+
+l2-data-array: ## Check L2 data array SourceC stall stability and bank priority
+	$(SBY_RUN) -f --prefix "$(FORMAL_RESULTS_DIR)/l2_data_array" l2_data_array.sby
+
+l2-refill-mshrs: ## Check L2 refill MSHR AR stability and interleaved beat capture
+	$(SBY_RUN) -f --prefix "$(FORMAL_RESULTS_DIR)/l2_refill_mshrs" l2_refill_mshrs.sby
+
+l2-mshr-frontend: ## Check L2 MSHR scheduler mutual exclusion and preemption stalls
+	$(SBY_RUN) -f --prefix "$(FORMAL_RESULTS_DIR)/l2_mshr_frontend" l2_mshr_frontend.sby
+
+l2-top: ## Check full rapt_l2 AXI4 protocol, deadlock-freedom, and coherence
+	$(SBY_RUN) -f --prefix "$(FORMAL_RESULTS_DIR)/l2_top" l2_top.sby
+
+L2_TARGETS := l2-ctrls l2-buffers l2-directory l2-data-array \
+              l2-refill-mshrs l2-mshr-frontend l2-top
+
+l2-all: $(L2_TARGETS) ## Run full L2 formal verification suite

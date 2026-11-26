@@ -1,4 +1,4 @@
-// DMA-capable native SoC interconnect supporting local virtio-mmio NIC,
+// DMA-capable Raptor SoC interconnect supporting local virtio-mmio NIC,
 // remote FPGA-to-QEMU I/O + DMA bridge (VirtIO-Blk / VirtIO-Net / SDHCI /
 // PCIe ECAM + NVMe), non-coherent DMA arbitration onto BRAM or DDR4, and
 // architectural LR/SC reservation invalidation via external_write_* signals.
@@ -18,6 +18,7 @@ module rapt_native_io_bus #(
     input logic uart_rx,
     output logic uart_tx,
     output logic uart_irq,
+    output logic rtc_irq,
     // Legacy board peripheral window (0x1800_0000)
     output logic peripheral_rd,
     output logic peripheral_wr,
@@ -69,6 +70,7 @@ module rapt_native_io_bus #(
     Sram,
     Ram,
     Uart,
+    Rtc,
     Ddr,
     Peripheral,
     VirtioNet,
@@ -122,7 +124,7 @@ module rapt_native_io_bus #(
   logic [3:0] rid_q, wid_q, rcache_q, wcache_q;
   logic [XLEN-1:0] wdata_hold_q;
   logic [Bytes-1:0] wstrb_hold_q;
-  logic [XLEN-1:0] rdata_mux, rom_q, sram_q, ram_q, uart_q, io_rdata_q;
+  logic [XLEN-1:0] rdata_mux, rom_q, sram_q, ram_q, uart_q, rtc_q, io_rdata_q;
   logic [1:0] rresp_q, bresp_q;
   logic io_req_pulsed_q;
 
@@ -152,6 +154,7 @@ module rapt_native_io_bus #(
     if (a >= RomBase && a < RomBase + RomBytes) return Rom;
     if (a >= SramBase && a < SramBase + SramBytes) return Sram;
     if (a >= UartBase && a < UartBase + 64'd8) return Uart;
+    if (a >= 64'h0010_1000 && a < 64'h0010_2000) return Rtc;
     if (WithLocalVirtioNet && a >= 64'h1000_2000 && a < 64'h1000_3000) return VirtioNet;
     if (WithQemuBridge && ((a >= 64'h1000_1000 && a < 64'h1000_9000)
                         || (a >= 64'h4100_0000 && a < 64'h6000_0000)))
@@ -176,6 +179,7 @@ module rapt_native_io_bus #(
         ) != dest || last_addr[XLEN-1:12] != addr[XLEN-1:12])
       return Bad;
     if (dest == Uart && (len != 8'd0 || size != 3'd0)) return Bad;
+    if (dest == Rtc && (len != 8'd0 || size != 3'd2 || addr[1:0] != 2'd0)) return Bad;
     if (dest == Peripheral && (len != 8'd0 || size != 3'd2 || addr[1:0] != 2'd0)) return Bad;
     if ((dest == VirtioNet || dest == IoBridge) && len != 8'd0) return Bad;
     if ((dest == VirtioNet || dest == IoBridge) && ((addr & ((XLEN'(1) << size) - 1'b1)) != '0))
@@ -206,10 +210,11 @@ module rapt_native_io_bus #(
 
   assign cpu.awready = !reset && (ws_q == WIdle) && !cpu_write_blocked;
   wire uart_rd = (rs_q == RIssue) && (rt_q == Uart);
+  wire rtc_rd  = (rs_q == RIssue) && (rt_q == Rtc);
   wire ram_write_collision = (wt_q == Ram) && (dma_rs_q == DmaRRam || dma_ws_q == DmaWRamW);
   assign cpu.wready = (ws_q == WData)
       && ((wt_q == Ddr) ? (ddr.wready && dma_ws_q != DmaWDdrW)
-                        : (!uart_rd && !ram_write_collision));
+                        : (!uart_rd && !rtc_rd && !ram_write_collision));
   assign cpu.bid    = wid_q;
   assign cpu.bresp  = bresp_q;
   assign cpu.bvalid = (ws_q == WReply);
@@ -327,6 +332,26 @@ module rapt_native_io_bus #(
       .rdata(uart_rdata)
   );
 
+  // Local Goldfish RTC (0x0010_1000..0x0010_1fff)
+  logic [4:0] rtc_addr;
+  logic [31:0] rtc_wdata, rtc_rdata;
+  wire rtc_wr = (ws_q == WData) && (wt_q == Rtc) && cpu.wvalid && cpu.wready;
+  assign rtc_addr  = rtc_rd ? ra_q[4:0] : wa_q[4:0];
+  assign rtc_wdata = 32'(cpu.wdata >> (8 * wa_q[ByteBits-1:0]));
+
+  rapt_goldfish_rtc #(
+      .ClockHz(ClockHz)
+  ) u_rtc (
+      .clk(clk),
+      .reset(reset),
+      .rd_i(rtc_rd),
+      .wr_i(rtc_wr),
+      .addr_i(rtc_addr),
+      .wdata_i(rtc_wdata),
+      .rdata_o(rtc_rdata),
+      .irq_o(rtc_irq)
+  );
+
   // Variable-latency VirtioNet & IoBridge MMIO signals
   wire [63:0] wdata64_aligned = (XLEN == 64)
       ? 64'(wdata_hold_q)
@@ -365,6 +390,7 @@ module rapt_native_io_bus #(
       Sram:       rdata_mux = sram_q;
       Ram:        rdata_mux = ram_q;
       Uart:       rdata_mux = uart_q;
+      Rtc:        rdata_mux = rtc_q;
       Peripheral: rdata_mux = XLEN'(peripheral_rdata) << (8 * ra_q[ByteBits-1:0]);
       VirtioNet,
       IoBridge:   rdata_mux = io_rdata_q;
@@ -375,6 +401,7 @@ module rapt_native_io_bus #(
   always_ff @(posedge clk) begin
     if (rs_q == RIssue && rt_q == Rom) rom_q <= rom[ra_q[$clog2(RomBytes)-1:ByteBits]];
     if (rs_q == RIssue && rt_q == Uart) uart_q <= XLEN'(uart_rdata) << (8 * ra_q[ByteBits-1:0]);
+    if (rs_q == RIssue && rt_q == Rtc) rtc_q <= XLEN'(rtc_rdata) << (8 * ra_q[ByteBits-1:0]);
   end
 
   always_ff @(posedge clk) begin

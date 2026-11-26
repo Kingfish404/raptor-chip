@@ -1,0 +1,65 @@
+[tasks]
+boom_rv64_coherence
+boom_rv64_proto
+boom_rv64_err
+boom_rv64_cover
+boom_rv32_coherence
+legacy_rv64_coherence
+legacy_rv32_coherence
+
+[options]
+boom_rv64_coherence: mode bmc
+boom_rv64_coherence: depth 28
+boom_rv64_proto: mode bmc
+boom_rv64_proto: depth 36
+boom_rv64_err: mode bmc
+boom_rv64_err: depth 28
+boom_rv64_cover: mode cover
+boom_rv64_cover: depth 26
+boom_rv32_coherence: mode bmc
+boom_rv32_coherence: depth 24
+legacy_rv64_coherence: mode bmc
+legacy_rv64_coherence: depth 28
+legacy_rv32_coherence: mode bmc
+legacy_rv32_coherence: depth 24
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+plugin -i slang
+boom_rv64_coherence: read_slang --single-unit -DFORMAL -DFORMAL_L2_FAST_WIPE -DRAPT_RV64 -DRAPT_L2_EN -DRAPT_L2_LEN=9 -DRAPT_L2_N_WAYS=8 -DRAPT_L2_LINE_LEN=3 -GCHECK_COHERENCE=1 -GALLOW_OUTER_ERR=0 -I. rapt_pkg.sv rapt_sram_1rw.sv rapt_l2_bypass_ctrl.sv rapt_l2_data_array.sv rapt_l2_directory.sv rapt_l2_evict_ctrl.sv rapt_l2_hit_ctrl.sv rapt_l2_mshr_frontend.sv rapt_l2_mshr_scheduler.sv rapt_l2_put_buffer.sv rapt_l2_refill_ctrl.sv rapt_l2_refill_mshrs.sv rapt_l2_release_buffer.sv rapt_l2_secondary_buffer.sv rapt_l2.sv formal_l2_top.sv
+boom_rv64_proto: read_slang --single-unit -DFORMAL -DFORMAL_L2_FAST_WIPE -DRAPT_RV64 -DRAPT_L2_EN -DRAPT_L2_LEN=9 -DRAPT_L2_N_WAYS=8 -DRAPT_L2_LINE_LEN=3 -GCHECK_COHERENCE=0 -GALLOW_OUTER_ERR=1 -I. rapt_pkg.sv rapt_sram_1rw.sv rapt_l2_bypass_ctrl.sv rapt_l2_data_array.sv rapt_l2_directory.sv rapt_l2_evict_ctrl.sv rapt_l2_hit_ctrl.sv rapt_l2_mshr_frontend.sv rapt_l2_mshr_scheduler.sv rapt_l2_put_buffer.sv rapt_l2_refill_ctrl.sv rapt_l2_refill_mshrs.sv rapt_l2_release_buffer.sv rapt_l2_secondary_buffer.sv rapt_l2.sv formal_l2_top.sv
+boom_rv64_err: read_slang --single-unit -DFORMAL -DFORMAL_L2_FAST_WIPE -DRAPT_RV64 -DRAPT_L2_EN -DRAPT_L2_LEN=9 -DRAPT_L2_N_WAYS=8 -DRAPT_L2_LINE_LEN=3 -GCHECK_COHERENCE=1 -GALLOW_OUTER_ERR=1 -I. rapt_pkg.sv rapt_sram_1rw.sv rapt_l2_bypass_ctrl.sv rapt_l2_data_array.sv rapt_l2_directory.sv rapt_l2_evict_ctrl.sv rapt_l2_hit_ctrl.sv rapt_l2_mshr_frontend.sv rapt_l2_mshr_scheduler.sv rapt_l2_put_buffer.sv rapt_l2_refill_ctrl.sv rapt_l2_refill_mshrs.sv rapt_l2_release_buffer.sv rapt_l2_secondary_buffer.sv rapt_l2.sv formal_l2_top.sv
+boom_rv64_cover: read_slang --single-unit -DFORMAL -DFORMAL_L2_FAST_WIPE -DRAPT_RV64 -DRAPT_L2_EN -DRAPT_L2_LEN=9 -DRAPT_L2_N_WAYS=8 -DRAPT_L2_LINE_LEN=3 -GCHECK_COHERENCE=1 -GALLOW_OUTER_ERR=0 -I. rapt_pkg.sv rapt_sram_1rw.sv rapt_l2_bypass_ctrl.sv rapt_l2_data_array.sv rapt_l2_directory.sv rapt_l2_evict_ctrl.sv rapt_l2_hit_ctrl.sv rapt_l2_mshr_frontend.sv rapt_l2_mshr_scheduler.sv rapt_l2_put_buffer.sv rapt_l2_refill_ctrl.sv rapt_l2_refill_mshrs.sv rapt_l2_release_buffer.sv rapt_l2_secondary_buffer.sv rapt_l2.sv formal_l2_top.sv
+boom_rv32_coherence: read_slang --single-unit -DFORMAL -DFORMAL_L2_FAST_WIPE -DRAPT_L2_EN -DRAPT_L2_LEN=10 -DRAPT_L2_N_WAYS=8 -DRAPT_L2_LINE_LEN=4 -GCHECK_COHERENCE=1 -GALLOW_OUTER_ERR=0 -I. rapt_pkg.sv rapt_sram_1rw.sv rapt_l2_bypass_ctrl.sv rapt_l2_data_array.sv rapt_l2_directory.sv rapt_l2_evict_ctrl.sv rapt_l2_hit_ctrl.sv rapt_l2_mshr_frontend.sv rapt_l2_mshr_scheduler.sv rapt_l2_put_buffer.sv rapt_l2_refill_ctrl.sv rapt_l2_refill_mshrs.sv rapt_l2_release_buffer.sv rapt_l2_secondary_buffer.sv rapt_l2.sv formal_l2_top.sv
+legacy_rv64_coherence: read_slang --single-unit -DFORMAL -DRAPT_RV64 -DRAPT_L2_EN -DRAPT_L2_LEN=2 -DRAPT_L2_N_WAYS=2 -DRAPT_L2_LINE_LEN=2 -GCHECK_COHERENCE=1 -GALLOW_OUTER_ERR=0 -I. rapt_pkg.sv rapt_sram_1rw.sv rapt_l2_bypass_ctrl.sv rapt_l2_data_array.sv rapt_l2_directory.sv rapt_l2_evict_ctrl.sv rapt_l2_hit_ctrl.sv rapt_l2_mshr_frontend.sv rapt_l2_mshr_scheduler.sv rapt_l2_put_buffer.sv rapt_l2_refill_ctrl.sv rapt_l2_refill_mshrs.sv rapt_l2_release_buffer.sv rapt_l2_secondary_buffer.sv rapt_l2.sv formal_l2_top.sv
+legacy_rv32_coherence: read_slang --single-unit -DFORMAL -DRAPT_L2_EN -DRAPT_L2_LEN=2 -DRAPT_L2_N_WAYS=2 -DRAPT_L2_LINE_LEN=2 -GCHECK_COHERENCE=1 -GALLOW_OUTER_ERR=0 -I. rapt_pkg.sv rapt_sram_1rw.sv rapt_l2_bypass_ctrl.sv rapt_l2_data_array.sv rapt_l2_directory.sv rapt_l2_evict_ctrl.sv rapt_l2_hit_ctrl.sv rapt_l2_mshr_frontend.sv rapt_l2_mshr_scheduler.sv rapt_l2_put_buffer.sv rapt_l2_refill_ctrl.sv rapt_l2_refill_mshrs.sv rapt_l2_release_buffer.sv rapt_l2_secondary_buffer.sv rapt_l2.sv formal_l2_top.sv
+prep -top formal_l2_top
+memory_map t:$mem_v2 n:*u_data_sram* %d n:*u_directory* %d
+opt_clean
+
+[files]
+../../rtl/include/rapt.svh
+../../rtl/include/rapt_types.svh
+../../rtl/include/rapt_fp_ops.svh
+../../rtl/include/rapt_soc_if.svh
+../../rtl/include/npc/rapt_soc.svh
+../../rtl/configs/default-w4-l2/rapt_config.svh
+rapt_sva.svh formal_sva.svh
+../../rtl/rapt_pkg.sv
+../../rtl/sram/rapt_sram_1rw.sv
+../../rtl/uncore/l2cache/rapt_l2_bypass_ctrl.sv
+../../rtl/uncore/l2cache/rapt_l2_data_array.sv
+../../rtl/uncore/l2cache/rapt_l2_directory.sv
+../../rtl/uncore/l2cache/rapt_l2_evict_ctrl.sv
+../../rtl/uncore/l2cache/rapt_l2_hit_ctrl.sv
+../../rtl/uncore/l2cache/rapt_l2_mshr_frontend.sv
+../../rtl/uncore/l2cache/rapt_l2_mshr_scheduler.sv
+../../rtl/uncore/l2cache/rapt_l2_put_buffer.sv
+../../rtl/uncore/l2cache/rapt_l2_refill_ctrl.sv
+../../rtl/uncore/l2cache/rapt_l2_refill_mshrs.sv
+../../rtl/uncore/l2cache/rapt_l2_release_buffer.sv
+../../rtl/uncore/l2cache/rapt_l2_secondary_buffer.sv
+../../rtl/uncore/l2cache/rapt_l2.sv
+formal_l2_top.sv

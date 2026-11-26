@@ -1,4 +1,4 @@
-// Gigabit-only native RK Ethernet. TX is independent of the PHY's RX clock,
+// Gigabit-only RK Ethernet. TX is independent of the PHY's RX clock,
 // so MDIO autonegotiation cannot deadlock waiting for a transmitted clock.
 module rapt_rk_ethernet (
     input wire clk,
@@ -21,6 +21,12 @@ module rapt_rk_ethernet (
     eth_tx_ctl,
     output wire [3:0] eth_txd,
     output wire eth_mdc,
+`ifdef NATIVE_WITH_ETH_DMA
+    axi4_if.master dma,
+    output wire ext_wr_valid_o,
+    output wire [63:0] ext_wr_first_o,
+    output wire [63:0] ext_wr_last_o,
+`endif
     inout wire eth_mdio
 );
   wire rx_input, rx_fb, rx_raw, rx_clk, rx_locked;
@@ -112,6 +118,113 @@ module rapt_rk_ethernet (
   wire [7:0] rx_data, tx_data, gmii_rxd, gmii_txd;
   wire rx_valid, rx_last, rx_error, rx_bad_fcs, tx_valid, tx_ready, tx_last;
   wire gmii_rx_dv, gmii_rx_er, gmii_tx_en, gmii_tx_er;
+`ifdef NATIVE_WITH_ETH_DMA
+  wire [7:0] dma_rx_data, dma_tx_data;
+  wire dma_rx_valid, dma_rx_last, dma_rx_error, dma_rx_ready;
+  wire dma_tx_valid, dma_tx_last, dma_tx_ready;
+  wire [9:0] rx_cdc_out;
+  wire [8:0] tx_cdc_out;
+  wire rx_cdc_ready;
+
+  rapt_eth_async_fifo #(
+      .Width(10),
+      .Depth(2048)
+  ) rx_cdc (
+      .wr_clk(rx_clk),
+      .wr_rst(rx_reset),
+      .wr_data({rx_error || rx_bad_fcs, rx_last, rx_data}),
+      .wr_valid(rx_valid),
+      .wr_ready(rx_cdc_ready),
+      .rd_clk(clk),
+      .rd_rst(queue_reset),
+      .rd_data(rx_cdc_out),
+      .rd_valid(dma_rx_valid),
+      .rd_ready(dma_rx_ready)
+  );
+  assign dma_rx_error = rx_cdc_out[9];
+  assign dma_rx_last  = rx_cdc_out[8];
+  assign dma_rx_data  = rx_cdc_out[7:0];
+
+  rapt_eth_async_fifo #(
+      .Width(9),
+      .Depth(2048)
+  ) tx_cdc (
+      .wr_clk(clk),
+      .wr_rst(queue_reset),
+      .wr_data({dma_tx_last, dma_tx_data}),
+      .wr_valid(dma_tx_valid),
+      .wr_ready(dma_tx_ready),
+      .rd_clk(tx_clk),
+      .rd_rst(tx_reset),
+      .rd_data(tx_cdc_out),
+      .rd_valid(tx_valid),
+      .rd_ready(tx_ready)
+  );
+  assign tx_last = tx_cdc_out[8];
+  assign tx_data = tx_cdc_out[7:0];
+
+  rapt_eth_axi_dma #(
+      .RxFcsBytes(4)
+  ) dma_packets (
+      .clk,
+      .reset,
+      .clocks_ready(ready_sync[2]),
+      .rd,
+      .wr,
+      .raddr,
+      .waddr,
+      .wdata,
+      .wstrb,
+      .rdata,
+      .irq,
+      .enabled,
+      .mdio_control,
+      .mdio_input,
+      .mac_rx_data(dma_rx_data),
+      .mac_rx_valid(dma_rx_valid),
+      .mac_rx_last(dma_rx_last),
+      .mac_rx_error(dma_rx_error),
+      .mac_rx_ready(dma_rx_ready),
+      .mac_tx_data(dma_tx_data),
+      .mac_tx_valid(dma_tx_valid),
+      .mac_tx_last(dma_tx_last),
+      .mac_tx_ready(dma_tx_ready),
+      .m_axi_awid(dma.awid),
+      .m_axi_awaddr(dma.awaddr),
+      .m_axi_awlen(dma.awlen),
+      .m_axi_awsize(dma.awsize),
+      .m_axi_awburst(dma.awburst),
+      .m_axi_awcache(dma.awcache),
+      .m_axi_awvalid(dma.awvalid),
+      .m_axi_awready(dma.awready),
+      .m_axi_wdata(dma.wdata),
+      .m_axi_wstrb(dma.wstrb),
+      .m_axi_wlast(dma.wlast),
+      .m_axi_wvalid(dma.wvalid),
+      .m_axi_wready(dma.wready),
+      .m_axi_bid(dma.bid),
+      .m_axi_bresp(dma.bresp),
+      .m_axi_bvalid(dma.bvalid),
+      .m_axi_bready(dma.bready),
+      .m_axi_arid(dma.arid),
+      .m_axi_araddr(dma.araddr),
+      .m_axi_arlen(dma.arlen),
+      .m_axi_arsize(dma.arsize),
+      .m_axi_arburst(dma.arburst),
+      .m_axi_arcache(dma.arcache),
+      .m_axi_arvalid(dma.arvalid),
+      .m_axi_arready(dma.arready),
+      .m_axi_rid(dma.rid),
+      .m_axi_rdata(dma.rdata),
+      .m_axi_rresp(dma.rresp),
+      .m_axi_rlast(dma.rlast),
+      .m_axi_rvalid(dma.rvalid),
+      .m_axi_rready(dma.rready),
+      .ext_wr_valid_o(ext_wr_valid_o),
+      .ext_wr_first_o(ext_wr_first_o),
+      .ext_wr_last_o(ext_wr_last_o)
+  );
+`else
   rapt_native_eth #(
       .RxFcsBytes(4)
   ) packets (
@@ -143,6 +256,7 @@ module rapt_rk_ethernet (
       .tx_last,
       .tx_ready
   );
+`endif
   rapt_rk_rgmii_rx receive (
       .clk(rx_clk),
       .reset(rx_reset),

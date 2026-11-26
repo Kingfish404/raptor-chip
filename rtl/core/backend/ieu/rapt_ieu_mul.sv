@@ -13,7 +13,7 @@ module rapt_ieu_mul #(
     input logic [(1 << TAG_W)-1:0] cancel_tags,
     input [XLEN-1:0] in_a,
     input [XLEN-1:0] in_b,
-    input [4:0] in_op,
+    input [5:0] in_op,
     input in_word,  // RV64 W-variant: operate on lower 32 bits, sign-extend result
     input [TAG_W-1:0] in_tag,
     input in_valid,
@@ -44,7 +44,7 @@ module rapt_ieu_mul #(
 
   // ---------------- DIV path (serial) ----------------
   logic [XLEN-1:0] div_s1, div_s2;
-  logic [               4:0] div_op;
+  logic [               5:0] div_op;
   logic                      div_word;
   logic [         TAG_W-1:0] div_tag;
 
@@ -122,7 +122,8 @@ module rapt_ieu_mul #(
   // ---------------- MUL path (pipelined) ----------------
   // Stage 1: operand latch
   logic [XLEN-1:0] m1_s1, m1_s2;
-  logic [       4:0] m1_op;
+  logic [       5:0] m1_op;
+  logic              m1_clmul_rev;
   logic              m1_word;
   logic [ TAG_W-1:0] m1_tag;
   logic              m1_v;
@@ -183,6 +184,38 @@ module rapt_ieu_mul #(
     assign mul_full = product;
   end
 
+  // Half-width XLEN-bit polynomial XOR tree for Zbc CLMUL/CLMULH/CLMULR:
+  //   CLMULR(a, b) = rev(CLMUL(rev(a), rev(b)))
+  //   CLMULH(a, b) = CLMULR(a, b) >> 1
+  // Halves partial-product AND/XOR count vs a full 2*XLEN tree while keeping
+  // m1_s1/m1_s2 untouched for DSP AREG/BREG packing.
+  logic [XLEN-1:0] clmul_a, clmul_b, clmul_rev_out;
+  always_comb begin
+    for (int i = 0; i < XLEN; i++) begin
+      clmul_a[i] = m1_clmul_rev ? m1_s1[XLEN-1-i] : m1_s1[i];
+      clmul_b[i] = m1_clmul_rev ? m1_s2[XLEN-1-i] : m1_s2[i];
+    end
+  end
+
+  localparam int ClmulLeaves = 1 << $clog2(XLEN);
+  wire [XLEN-1:0] clmul_tree[2*ClmulLeaves];
+  for (genvar bit_idx = 0; bit_idx < ClmulLeaves; bit_idx++) begin : g_clmul_leaf
+    if (bit_idx < XLEN) begin : g_bit
+      assign clmul_tree[ClmulLeaves+bit_idx] = {XLEN{clmul_b[bit_idx]}} & (clmul_a << bit_idx);
+    end else begin : g_pad
+      assign clmul_tree[ClmulLeaves+bit_idx] = '0;
+    end
+  end
+  for (genvar node = 1; node < ClmulLeaves; node++) begin : g_clmul_xor
+    assign clmul_tree[node] = clmul_tree[2*node] ^ clmul_tree[2*node+1];
+  end
+
+  always_comb begin
+    for (int i = 0; i < XLEN; i++) begin
+      clmul_rev_out[i] = clmul_tree[1][XLEN-1-i];
+    end
+  end
+
   logic [XLEN-1:0] mul_r_comb;
   always_comb begin
     unique case (m1_op)
@@ -198,6 +231,9 @@ module rapt_ieu_mul #(
       `RAPT_ALU_MULH__,
       `RAPT_ALU_MULHSU,
       `RAPT_ALU_MULHU_: begin mul_r_comb = mul_full[2*XLEN-1:XLEN]; end
+      `RAPT_ALU_CLMUL:  begin mul_r_comb = clmul_tree[1]; end
+      `RAPT_ALU_CLMULH: begin mul_r_comb = {1'b0, clmul_rev_out[XLEN-1:1]}; end
+      `RAPT_ALU_CLMULR: begin mul_r_comb = clmul_rev_out; end
                default: begin mul_r_comb = '0; end
       // verilog_format: on
     endcase
@@ -239,12 +275,13 @@ module rapt_ieu_mul #(
   always_ff @(posedge clock) begin
     // ===== MUL stage-1 load =====
     if (accept_mul) begin
-      m1_s1   <= in_a;
-      m1_s2   <= in_b;
-      m1_op   <= in_op;
-      m1_word <= in_word;
-      m1_tag  <= in_tag;
-      m1_v    <= 1'b1;
+      m1_s1        <= in_a;
+      m1_s2        <= in_b;
+      m1_op        <= in_op;
+      m1_clmul_rev <= (in_op == `RAPT_ALU_CLMULH || in_op == `RAPT_ALU_CLMULR);
+      m1_word      <= in_word;
+      m1_tag       <= in_tag;
+      m1_v         <= 1'b1;
     end else begin
       m1_v <= 1'b0;
     end

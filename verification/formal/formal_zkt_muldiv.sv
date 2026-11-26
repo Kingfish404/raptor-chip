@@ -9,7 +9,7 @@ module formal_zkt_muldiv (
     reset,
     flush,
     in_valid,
-    input [4:0] in_op,
+    input [5:0] in_op,
     input in_word,
     input [7:0] in_tag,
     input [`RAPT_XLEN-1:0] a0,
@@ -23,7 +23,9 @@ module formal_zkt_muldiv (
   wire is_div = in_op == `RAPT_ALU_DIV___ || in_op == `RAPT_ALU_DIVU__
       || in_op == `RAPT_ALU_REM___ || in_op == `RAPT_ALU_REMU__;
   wire is_mul = in_op == `RAPT_ALU_MUL___ || in_op == `RAPT_ALU_MULH__
-      || in_op == `RAPT_ALU_MULHSU || in_op == `RAPT_ALU_MULHU_;
+      || in_op == `RAPT_ALU_MULHSU || in_op == `RAPT_ALU_MULHU_
+      || in_op == `RAPT_ALU_CLMUL || in_op == `RAPT_ALU_CLMULH
+      || in_op == `RAPT_ALU_CLMULR;
   rapt_ieu_mul #(
       .XLEN(X),
       .TAG_W(8)

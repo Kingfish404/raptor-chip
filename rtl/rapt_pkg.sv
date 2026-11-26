@@ -206,8 +206,9 @@ package rapt_pkg;
   localparam bit L2StoreWriteBack = 1'b0;
 `endif
 `ifdef RAPT_L2_EN
-  // Victim releases use the BOOM-layout 512 KiB, 64-byte-line directory.
-  localparam bit L2VictimRelease = `RAPT_L2_N_WAYS == 8 && `RAPT_L2_LEN == 10
+  // Victim releases use the BOOM-layout 256/512 KiB, 64-byte-line directory.
+  localparam bit L2VictimRelease = `RAPT_L2_N_WAYS == 8
+      && (`RAPT_L2_LEN == 9 || `RAPT_L2_LEN == 10)
       && `RAPT_CACHE_LINE_BYTES == 64
       && (1 << `RAPT_L2_LINE_LEN) * `RAPT_XLEN == 512;
   // The L2 cache owns write ordering; clients wait for every B response.
@@ -644,9 +645,26 @@ package rapt_pkg;
     arch_reg_t rs1, rs2;
   } decoded_slot_t;
 
+`ifdef RAPT_M_EXTENSION
+`ifdef RAPT_M_FAST
+  localparam bit MdqHandlesClmul = 1'b1;
+`else
+  localparam bit MdqHandlesClmul = 1'b0;
+`endif
+`else
+  localparam bit MdqHandlesClmul = 1'b0;
+`endif
+
+  function automatic logic alu_is_clmul(input logic [5:0] op);
+    return (op == `RAPT_ALU_CLMUL) || (op == `RAPT_ALU_CLMULH) || (op == `RAPT_ALU_CLMULR);
+  endfunction
+
   /* verilator lint_off UNUSEDSIGNAL */
   function automatic logic uop_is_mdq(input rapt_pkg::uop_t u);
-    return (u.execute.int_op.alu[5:4] == 2'b01)
+    logic is_mdq_op;
+    is_mdq_op = (u.execute.int_op.alu[5:4] == 2'b01) ||
+        (MdqHandlesClmul && alu_is_clmul(u.execute.int_op.alu));
+    return is_mdq_op
         && !u.execute.memory.store && !u.execute.memory.load && !u.execute.memory.atomic
         && !u.execute.sys.valid && !u.trap && !u.execute.sys.ecall && !u.execute.sys.ebreak
         && !u.execute.sys.mret && !u.execute.sys.sret && !u.execute.sys.fence_i
@@ -742,7 +760,7 @@ package rapt_pkg;
   // system port. Keep this capability separate from serializing CSR semantics.
   function automatic logic alu_requires_system_port(input logic [5:0] op);
     return (op == `RAPT_ALU_CLZ_) || (op == `RAPT_ALU_CTZ_) || (op == `RAPT_ALU_CPOP)
-        || (op == `RAPT_ALU_CLMUL) || (op == `RAPT_ALU_CLMULH) || (op == `RAPT_ALU_CLMULR);
+        || (!MdqHandlesClmul && alu_is_clmul(op));
   endfunction
 
   // Decode policy is centralized here, not replicated by queues or router.
@@ -830,10 +848,12 @@ package rapt_pkg;
   localparam logic [31:0] SramBase  = 32'h0f000000;
   localparam logic [31:0] SramBytes = 32'h00002000;
   // Platform override; NPC and other boards retain their 256 MiB PMEM map.
-`ifdef RAPT_PMEM_BYTES
-  localparam logic [31:0] PmemBytes = `RAPT_PMEM_BYTES;
+`ifdef RAPT_PMEM_MB
+  localparam logic [63:0] PmemBytes = 64'(unsigned'(`RAPT_PMEM_MB)) << 20;
+`elsif RAPT_PMEM_BYTES
+  localparam logic [63:0] PmemBytes = 64'(unsigned'(`RAPT_PMEM_BYTES));
 `else
-  localparam logic [31:0] PmemBytes = 32'h10000000;
+  localparam logic [63:0] PmemBytes = 64'h10000000;
 `endif
   localparam logic [63:0] PmemEnd = 64'h80000000 + 64'(PmemBytes);
   // One physical-region table. Endpoints are exclusive and wide enough for
@@ -852,7 +872,7 @@ package rapt_pkg;
   localparam int PmaRegionCount = 14;
   // Preserve the established mapped/cacheable reduction order. The constant
   // interval union below accepts unsorted rows; MMIO uses ascending bounds.
-  localparam bit LegacySdramEnabled = PmemBytes < 32'h80000000;
+  localparam bit LegacySdramEnabled = PmemBytes < 64'h80000000;
   // verilog_format: off
   localparam pma_region_t PmaRegions[PmaRegionCount] = '{
       // finisher
@@ -882,10 +902,12 @@ package rapt_pkg;
   };
   // verilog_format: on
 
+  localparam int PmaAddrW = `RAPT_PADDR_BITS;
+
   function automatic logic pma_regions_valid();
     for (int r = 0; r < PmaRegionCount; r++) begin
       if (PmaRegions[r].base_addr >= PmaRegions[r].end_addr
-          || PmaRegions[r].end_addr > 64'h100000000)
+          || PmaRegions[r].end_addr > (64'd1 << PmaAddrW))
         return 1'b0;
       // Writable is mapped minus readonly, so overlapping rows must agree.
       for (int q = 0; q < r; q++) begin
@@ -906,8 +928,8 @@ package rapt_pkg;
   localparam bit PmaRegionsValid = pma_regions_valid();
 
   typedef struct packed {
-    logic [31:0] base_addr;
-    logic [32:0] end_addr;
+    logic [PmaAddrW-1:0] base_addr;
+    logic [PmaAddrW:0] end_addr;
     logic pmem;
   } pma_interval_t;
   typedef struct packed {
@@ -949,7 +971,7 @@ package rapt_pkg;
             prior = 1'b1;
         end
         if (!prior) begin
-          ranges.intervals[ranges.count] = '{32'(lo), 33'(hi), pmem};
+          ranges.intervals[ranges.count] = '{PmaAddrW'(lo), (PmaAddrW + 1)'(hi), pmem};
           ranges.count++;
         end
       end
@@ -977,14 +999,15 @@ package rapt_pkg;
   };
   localparam pma_ranges_t PmaReadonlyRanges = pma_ranges(PmaMapped, PmaWritable);
 
-  function automatic logic pma_in_ranges(input logic [31:0] addr, input pma_ranges_t ranges,
+  function automatic logic pma_in_ranges(input logic [PmaAddrW-1:0] addr, input pma_ranges_t ranges,
                                          input logic upper_valid);
     logic hit;
     pma_in_ranges = 1'b0;
     for (int r = 0; r < PmaRegionCount; r++) begin
       if (r < ranges.count) begin
         hit = addr >= ranges.intervals[r].base_addr
-            && (ranges.intervals[r].end_addr[32] || addr < ranges.intervals[r].end_addr[31:0]);
+            && (ranges.intervals[r].end_addr[PmaAddrW]
+                || addr < ranges.intervals[r].end_addr[PmaAddrW-1:0]);
         // Preserve the nested addr_in_pmem upper-half guard used by the
         // legacy mapped/cacheable decode, including its sharing with PMEM checks.
         if (ranges.intervals[r].pmem) hit = upper_valid && hit;
@@ -995,7 +1018,7 @@ package rapt_pkg;
 
   // Upper-half policy belongs to the caller: device-width capability has
   // always inspected the canonical low address even for invalid upper bits.
-  function automatic logic pma_has_attr(input logic [31:0] addr, input pma_attr_t attr,
+  function automatic logic pma_has_attr(input logic [PmaAddrW-1:0] addr, input pma_attr_t attr,
                                         input logic upper_valid);
     case (attr)
       PmaMapped: return pma_in_ranges(addr, PmaAttrRanges[0], upper_valid);
@@ -1015,18 +1038,21 @@ package rapt_pkg;
   endfunction
 
   function automatic logic [XLENPkg-1:0] canonical_addr(input logic [XLENPkg-1:0] addr);
-    return (XLENPkg == 64) ? XLENPkg'({32'b0, addr[31:0]}) : addr;
+    if (XLENPkg == 64) begin
+      if (PmaAddrW == 32) return XLENPkg'({32'b0, addr[31:0]});
+      return XLENPkg'(addr[PmaAddrW-1:0]);
+    end
+    return addr;
   endfunction
 
-  // The implemented physical map is 32-bit. RV64 code may present those
-  // addresses either zero-extended or with an all-ones upper half (for
-  // example, an address materialised by a sign-extending LUI). Do not simply
-  // truncate any other upper half: doing so can turn an invalid speculative
-  // address such as 0x00000002_8014572c into a real PMEM request.
+  // The implemented physical map spans PmaAddrW bits. RV64 code may present
+  // addresses either zero-extended (within PmaAddrW) or with an all-ones
+  // upper 32-bit half (from sign-extending LUI). Do not truncate arbitrary
+  // upper bits into valid PMEM requests.
   function automatic logic addr_upper_valid(input logic [XLENPkg-1:0] addr);
     logic [XLENPkg-1:0] zero_extended;
     logic [XLENPkg-1:0] ones_extended;
-    zero_extended = XLENPkg'({32'h0000_0000, addr[31:0]});
+    zero_extended = XLENPkg'(addr[PmaAddrW-1:0]);
     ones_extended = XLENPkg'({32'hffff_ffff, addr[31:0]});
     return (addr == zero_extended) || (addr == ones_extended);
   endfunction
@@ -1035,15 +1061,18 @@ package rapt_pkg;
   // Merge those aliases before tags/PMP/forwarding, but preserve invalid
   // upper bits so the PMA check cannot turn an invalid address into memory.
   function automatic logic [XLENPkg-1:0] canonical_paddr(input logic [XLENPkg-1:0] addr);
+    if (XLENPkg == 64 && PmaAddrW > 32 && addr == XLENPkg'({32'hffff_ffff, addr[31:0]}))
+      return XLENPkg'({32'h0000_0000, addr[31:0]});
     return addr_upper_valid(addr) ? canonical_addr(addr) : addr;
   endfunction
 
   function automatic logic addr_in_pmem(input logic [XLENPkg-1:0] addr);
-    return addr_upper_valid(addr) && pma_has_attr(addr[31:0], PmaPmem, 1'b1);
+    return addr_upper_valid(addr) && pma_has_attr(addr[PmaAddrW-1:0], PmaPmem, 1'b1);
   endfunction
 
   function automatic logic addr_cacheable(input logic [XLENPkg-1:0] addr);
-    return addr_upper_valid(addr) && pma_has_attr(addr[31:0], PmaCacheable, addr_upper_valid(addr));
+    return addr_upper_valid(addr) &&
+        pma_has_attr(addr[PmaAddrW-1:0], PmaCacheable, addr_upper_valid(addr));
   endfunction
 
   // True when base + any signed 12-bit immediate stays inside cacheable PMEM.
@@ -1102,7 +1131,8 @@ package rapt_pkg;
   // are unmapped and must raise an access-fault trap to mimic sail /
   // real-hardware bus-error behaviour.
   function automatic logic addr_mapped(input logic [XLENPkg-1:0] addr);
-    return addr_upper_valid(addr) && pma_has_attr(addr[31:0], PmaMapped, addr_upper_valid(addr));
+    return addr_upper_valid(addr) &&
+        pma_has_attr(addr[PmaAddrW-1:0], PmaMapped, addr_upper_valid(addr));
   endfunction
 
   // Device PMA is independent of page-based cache/order overrides. Physical
@@ -1117,11 +1147,9 @@ package rapt_pkg;
   // Other device widths retain their existing policy pending region audit.
   function automatic logic addr_device_width_capable(input logic [XLENPkg-1:0] addr,
                                                      input logic [3:0] original_size_m1);
-    logic [31:0] a;
-    a = 32'(canonical_addr(addr));
-    return !pma_has_attr(
-        a[31:0], PmaPlicWidth32, 1'b1
-    ) || (original_size_m1 == 4'd3 && a[1:0] == 2'b00);
+    logic [PmaAddrW-1:0] a;
+    a = PmaAddrW'(canonical_addr(addr));
+    return !pma_has_attr(a, PmaPlicWidth32, 1'b1) || (original_size_m1 == 4'd3 && a[1:0] == 2'b00);
   endfunction
 
   // ROM and the memory-mapped flash image are physically read-only.
@@ -1132,9 +1160,9 @@ package rapt_pkg;
     writable = addr_mapped(addr);
     for (int r = 0; r < PmaRegionCount; r++) begin
       if (r < PmaReadonlyRanges.count)
-        writable = writable && !(addr[31:0] >= PmaReadonlyRanges.intervals[r].base_addr
-            && (PmaReadonlyRanges.intervals[r].end_addr[32]
-                || addr[31:0] < PmaReadonlyRanges.intervals[r].end_addr[31:0]));
+        writable = writable && !(addr[PmaAddrW-1:0] >= PmaReadonlyRanges.intervals[r].base_addr
+            && (PmaReadonlyRanges.intervals[r].end_addr[PmaAddrW]
+                || addr[PmaAddrW-1:0] < PmaReadonlyRanges.intervals[r].end_addr[PmaAddrW-1:0]));
     end
     return writable;
   endfunction
@@ -1211,7 +1239,7 @@ package rapt_pkg;
 
   // MMIO regions for difftest skip (not modelled in reference ISS)
   function automatic logic addr_mmio(input logic [XLENPkg-1:0] addr);
-    return addr_upper_valid(addr) && pma_has_attr(addr[31:0], PmaMmioSkip, 1'b1);
+    return addr_upper_valid(addr) && pma_has_attr(addr[PmaAddrW-1:0], PmaMmioSkip, 1'b1);
   endfunction
 
   // Zero-tag operand encoding used when decode emits selectors instead of

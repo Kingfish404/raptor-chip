@@ -176,7 +176,8 @@ module rapt_l2_mshr_scheduler #(
 
 `ifndef SYNTHESIS
   always_ff @(posedge clock) begin
-    if (!reset && request_valid) assert ($onehot(request_prio));
+    if (!reset && request_valid)
+      assert (request_prio != 3'b000 && (request_prio & (request_prio - 3'b001)) == 3'b000);
   end
 `endif
 endmodule

@@ -77,6 +77,8 @@ class PaddrConfigTest(unittest.TestCase):
             for xlen in (32, 64):
                 if xlen == 64 and preset.parent.name.startswith("chip32-"):
                     continue
+                if xlen == 32 and preset.parent.name.startswith("chip64-"):
+                    continue
                 command = [sys.executable, str(SCRIPT), "--features", "--config",
                            str(preset.parent), "--hdl", str(ROOT / "rtl"), "--"]
                 if xlen == 64:
@@ -84,7 +86,8 @@ class PaddrConfigTest(unittest.TestCase):
                 with self.subTest(preset=preset.parent.name, xlen=xlen):
                     result = subprocess.run(command, capture_output=True, text=True, check=True)
                     fields = result.stdout.split()
-                    expected = preset.parent.name.startswith("default") or preset.parent.name == "large"
+                    expected = (preset.parent.name.startswith(("default", "chip64-"))
+                                or preset.parent.name == "large")
                     self.assertEqual(list(map(int, fields[2:6])), [int(expected), 128, 64, 2])
                     required = {"b", "h", "zawrs", "zfa", "ssnpm", "smnpm", "svnapot",
                                 "sscofpmf", "smstateen", "ssstateen", "shgatpa", "svvptc",

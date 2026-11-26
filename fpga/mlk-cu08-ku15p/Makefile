@@ -1,4 +1,4 @@
-# MLK-CU08-KU15P native board build: SoC bitstream and Ubuntu.
+# MLK-CU08-KU15P board build: SoC bitstream and Ubuntu.
 # Run `make help` for every target and variable; see README.md for workflows.
 .DEFAULT_GOAL := help
 

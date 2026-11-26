@@ -1,0 +1,24 @@
+[tasks]
+bmc
+prove
+cover
+
+[options]
+bmc: mode bmc
+bmc: depth 24
+prove: mode prove
+prove: depth 14
+cover: mode cover
+cover: depth 20
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+plugin -i slang
+read_slang --single-unit -DFORMAL rapt_l2_refill_mshrs.sv formal_l2_refill_mshrs.sv
+prep -top formal_l2_refill_mshrs
+
+[files]
+../../rtl/uncore/l2cache/rapt_l2_refill_mshrs.sv
+formal_l2_refill_mshrs.sv

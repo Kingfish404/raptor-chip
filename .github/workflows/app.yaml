@@ -448,7 +448,11 @@ jobs:
           for config_header in rtl/configs/*/rapt_config.svh; do
             config=${config_header%/rapt_config.svh}
             config=${config##*/}
-            make pack RAPT_CONFIG="$config"
+            if grep -q 'is RV64 only' "$config_header"; then
+              make pack RAPT_CONFIG="$config" VFLAGS="-DRAPT_RV64"
+            else
+              make pack RAPT_CONFIG="$config"
+            fi
           done
       - name: Collect release artifacts
         run: |

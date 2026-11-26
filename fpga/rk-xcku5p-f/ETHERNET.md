@@ -2,7 +2,8 @@
 
 The RK Ethernet controller occupies `0x18000000..0x1800ffff`, inside the CPU's
 uncached peripheral PMA. This address is a platform choice; the device
-tree identifies the interface as `raptor,native-ethernet-v1`. The bus accepts
+tree identifies the interface as `raptor,ethernet-v1` (ABI v1) or
+`raptor,ethernet-v2` (ABI v2 DMA). The bus accepts
 aligned, single-beat 32-bit accesses and preserves the appropriate RV64 byte
 lanes. Registers require all four write strobes; packet RAM supports byte
 strobes. Unsupported AXI widths, alignment and bursts return DECERR.

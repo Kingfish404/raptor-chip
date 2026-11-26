@@ -1,0 +1,26 @@
+[tasks]
+bmc
+prove
+cover
+
+[options]
+bmc: mode bmc
+bmc: depth 20
+prove: mode prove
+prove: depth 12
+cover: mode cover
+cover: depth 16
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+plugin -i slang
+read_slang --single-unit -DFORMAL rapt_l2_secondary_buffer.sv rapt_l2_mshr_scheduler.sv rapt_l2_mshr_frontend.sv formal_l2_mshr_frontend.sv
+prep -top formal_l2_mshr_frontend
+
+[files]
+../../rtl/uncore/l2cache/rapt_l2_secondary_buffer.sv
+../../rtl/uncore/l2cache/rapt_l2_mshr_scheduler.sv
+../../rtl/uncore/l2cache/rapt_l2_mshr_frontend.sv
+formal_l2_mshr_frontend.sv

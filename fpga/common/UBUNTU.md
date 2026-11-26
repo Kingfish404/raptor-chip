@@ -13,7 +13,7 @@ On RK-XCKU5P-F, the Ethernet controller uses eight 2 KiB receive slots and one
 2 KiB transmit buffer at `0x18000000`, PLIC interrupt 2, and a local MAC address
 `02:52:41:50:05:01`. CPU accesses are aligned 32-bit PIO into uncached packet
 SRAM. It does not DMA into cached DDR. Linux uses the included
-[`raptor_native_eth.c`](linux/raptor_native_eth.c) driver, NAPI, and the upstream
+[`raptor_eth.c`](linux/raptor_eth.c) driver, NAPI, and the upstream
 RTL8211F PHY driver. The link supports **1000BASE-T full duplex**; `rgmii-txid`
 enables PHY TX delay and disables PHY RX delay. See [the register ABI](../rk-xcku5p-f/ETHERNET.md).
 
@@ -207,7 +207,7 @@ the KU15P flow has no default authorized key. Its loader address defaults to
 DHCP for its distinct MAC. Keep each board's `UBUNTU_OUTPUT`, rootfs, JTAG ID,
 UART and runtime NFS export separate.
 
-`UBUNTU_NATIVE_BUILD=/path/to/board-build` selects a copied implementation
+`UBUNTU_BOARD_BUILD=/path/to/board-build` selects a copied implementation
 manifest and DTB. Their board, preset, clock, networking configuration and DTB
 hash must match the request. `UBUNTU_KERNEL_DIR=/path/to/kernel-artifacts`
 reuses a manifest-verified kernel; KU15P additionally requires built-in LiteEth

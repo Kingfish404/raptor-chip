@@ -74,6 +74,7 @@ module tb_virtio_mmio_net;
       .uart_rx(1'b1),
       .uart_tx(),
       .uart_irq(),
+      .rtc_irq(),
       .peripheral_rd(),
       .peripheral_wr(),
       .peripheral_raddr(),

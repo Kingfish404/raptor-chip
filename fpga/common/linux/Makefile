@@ -1,1 +1,1 @@
-obj-$(CONFIG_RAPTOR_NATIVE_ETH) += raptor_native_eth.o
+obj-$(CONFIG_RAPTOR_ETH) += raptor_eth.o

@@ -72,12 +72,18 @@ VSRCS := $(PKG_SRC) $(RTL_REST) $(TB_SRC)
 
 
 # The rnp interface (and its axi2rnp/rnp2axi adapters) is hardwired 32-bit
-# (rnp_mdata/rnp_cdata are 32 bits, arsize is fixed at 2). The tapeout chip is
-# therefore RV32 only; an RV64 core cannot drive 64-bit accesses through it.
-ISA64 ?= 0
+# (rnp_mdata/rnp_cdata are 32 bits, arsize is fixed at 2). The RNP testbench
+# targets are therefore RV32 only; the AXI/octal-link chip targets support
+# both RV32 and RV64 (XLEN=64 / ISA64=1).
+XLEN ?= 32
+ISA64 ?= $(if $(filter 64,$(XLEN)),1,0)
 ifeq ($(ISA64),1)
-$(error ISA64=1 is not supported: the single-word rnp interface is 32-bit \
-(RV32 only). Use the AXI-based sim flow for RV64.)
+XLEN := 64
+DEFINES += RAPT_RV64
+ifneq ($(filter-out verilator-chip verilator-chip-build verilator-chip-smoke clean,$(or $(MAKECMDGOALS),help)),)
+$(error ISA64=1 is not supported on RNP targets: the single-word rnp interface \
+is 32-bit (RV32 only). Use verilator-chip* or the AXI-based sim flow for RV64.)
+endif
 endif
 
 # Common plusargs assembled from variables.
@@ -132,7 +138,12 @@ help:
 # -----------------------------------------------------------------------------
 VERILATOR ?= verilator
 VERILATOR_JOBS ?= 2
+VL_TOOL_VERSION := $(shell $(VERILATOR) --version 2>/dev/null)
+# Verilator 5.040 hits V3DfgBreakCycles on unpacked array slices in rapt_lsu_ioq.
+VL_DFG_WORKAROUND := $(if $(findstring Verilator 5.040,$(VL_TOOL_VERSION)),\
+	-fno-dfg-break-cycles,)
 VL_FLAGS  := --binary -j $(VERILATOR_JOBS) --timing --top-module $(TOP) \
+	$(VL_DFG_WORKAROUND) \
 	-Wno-fatal \
 	-Wno-WIDTHEXPAND -Wno-WIDTHTRUNC -Wno-UNUSED -Wno-DECLFILENAME \
 	-Wno-PINMISSING -Wno-CASEINCOMPLETE -Wno-UNOPTFLAT -Wno-LATCH \
@@ -141,7 +152,6 @@ VL_FLAGS  := --binary -j $(VERILATOR_JOBS) --timing --top-module $(TOP) \
 ifneq ($(filter-out 0,$(WAVE)),)
 VL_FLAGS += --trace-fst
 endif
-VL_TOOL_VERSION := $(shell $(VERILATOR) --version 2>/dev/null)
 VL_BUILD_OPTIONS := $(VL_TOOL_VERSION) $(VL_FLAGS) $(DEFINES) $(INCDIRS)
 _vl_quote = '$(subst ','"'"',$(1))'
 VL_BUILD_KEY := $(shell python3 $(RAPTOR_HOME)/sim/scripts/build_cache.py fingerprint \
@@ -166,17 +176,18 @@ verilator: verilator-build ## Compile and run the RTL testbench under Verilator
 # preset is still a useful default for the pin-level harness, whereas this
 # regression deliberately requires a configuration with more than one commit
 # slot and proves that a non-first slot reaches the testbench monitor.
-SMOKE_IMG ?= $(RAPTOR_HOME)/abstract-machine/app/am-kernels/tests/cpu-tests/build/dummy-riscv32-npc.bin
-# Build the RV32 boot ROM here, as sim does under its BUILD_DIR, rather than
+SMOKE_IMG ?= $(RAPTOR_HOME)/abstract-machine/app/am-kernels/tests/cpu-tests/build/dummy-riscv$(XLEN)-npc.bin
+# Build the boot ROM here, as sim does under its BUILD_DIR, rather than
 # reading a legacy in-source artifact that a clean checkout does not have.
-SMOKE_MROM_DIR := $(abspath build/mrom/rv32-spike-rv32ima)
+SMOKE_MROM_DT := $(if $(filter 1,$(ISA64)),spike-rv64ima.dts,spike-rv32ima.dts)
+SMOKE_MROM_DIR := $(abspath build/mrom/rv$(XLEN)-$(basename $(SMOKE_MROM_DT)))
 SMOKE_MROM ?= $(SMOKE_MROM_DIR)/mrom-data.bin
 SMOKE_LOG := $(VL_MDIR)/smoke.log
 
 $(SMOKE_MROM_DIR)/mrom-data.bin: $(RAPTOR_HOME)/sim/csrc/mem/mrom-data/Makefile \
-		$(RAPTOR_HOME)/sim/csrc/mem/mrom-data/rom.c $(RAPTOR_HOME)/linux/dts/spike-rv32ima.dts
+		$(RAPTOR_HOME)/sim/csrc/mem/mrom-data/rom.c $(RAPTOR_HOME)/linux/dts/$(SMOKE_MROM_DT)
 	+$(MAKE) -C $(RAPTOR_HOME)/sim/csrc/mem/mrom-data BUILD_DIR=$(SMOKE_MROM_DIR) \
-		ISA64=0 DT_SOURCE=spike-rv32ima.dts
+		ISA64=$(ISA64) DT_SOURCE=$(SMOKE_MROM_DT)
 
 .PHONY: verilator-middle-smoke _verilator-middle-smoke
 verilator-middle-smoke: ## Build middle and require GOOD TRAP plus a non-first commit slot
@@ -199,11 +210,23 @@ _verilator-middle-smoke: $(SMOKE_MROM)
 CHIP_TOP := rapt_tb_chip
 CHIP_TB := $(TB_DIR)/rapt_tb_mem.sv $(TB_DIR)/rapt_tb_chip.sv \
 	$(RAPTOR_HOME)/fpga/common/rtl/rapt_xspi_target.sv
-CHIP_RTL := $(PKG_SRC) $(filter-out $(SIM_RTL)/wrap_rnp_soc.sv,$(RTL_REST)) \
+CHIP_RTL := $(PKG_SRC) $(filter-out $(SIM_RTL)/wrap_rnp.sv $(SIM_RTL)/wrap_rnp_soc.sv,$(RTL_REST)) \
 	$(sort $(wildcard $(CHIP_RTL_DIR)/*.sv))
 CHIP_VL_FLAGS := $(filter-out --top-module $(TOP),$(VL_FLAGS)) --top-module $(CHIP_TOP)
 CHIP_MDIR := $(VL_BUILD_ROOT)/vl-chip-$(RAPT_CONFIG)-$(VL_BUILD_KEY)
 CHIP_SMOKE_LOG := $(CHIP_MDIR)/smoke.log
+CHIP_SMOKE_DIR := $(abspath $(VL_BUILD_ROOT)/chip-smoke-rv$(XLEN))
+CHIP_SMOKE_BIN := $(CHIP_SMOKE_DIR)/chip_smoke.bin
+CHIP_SMOKE_MARCH := $(if $(filter 1,$(ISA64)),rv64i,rv32i)
+CHIP_SMOKE_MABI := $(if $(filter 1,$(ISA64)),lp64,ilp32)
+CHIP_SMOKE_IMG := $(if $(wildcard $(SMOKE_IMG)),$(SMOKE_IMG),$(CHIP_SMOKE_BIN))
+
+$(CHIP_SMOKE_BIN): $(TB_DIR)/tests/chip_smoke.S
+	mkdir -p $(CHIP_SMOKE_DIR)
+	$(CROSS_COMPILE)gcc -march=$(CHIP_SMOKE_MARCH) -mabi=$(CHIP_SMOKE_MABI) \
+		-nostdlib -nostartfiles -Wl,-Ttext=0x80000000 \
+		-o $(CHIP_SMOKE_DIR)/chip_smoke.elf $<
+	$(CROSS_COMPILE)objcopy -O binary $(CHIP_SMOKE_DIR)/chip_smoke.elf $@
 
 .PHONY: verilator-chip-build verilator-chip verilator-chip-smoke
 verilator-chip-build: ## Compile the pad-level chip bench under Verilator
@@ -217,9 +240,9 @@ verilator-chip-build: ## Compile the pad-level chip bench under Verilator
 verilator-chip: verilator-chip-build ## Run a program on the pad-level chip bench
 	$(abspath $(CHIP_MDIR))/$(CHIP_TOP) $(PLUSARGS)
 
-verilator-chip-smoke: $(SMOKE_MROM) verilator-chip-build ## Boot over the link and read IDCODE
-	test -f "$(SMOKE_IMG)"
-	$(abspath $(CHIP_MDIR))/$(CHIP_TOP) +IMG=$(abspath $(SMOKE_IMG)) +MROM=$(abspath $(SMOKE_MROM)) \
+verilator-chip-smoke: $(SMOKE_MROM) $(CHIP_SMOKE_IMG) verilator-chip-build ## Boot over the link and read IDCODE
+	test -f "$(CHIP_SMOKE_IMG)"
+	$(abspath $(CHIP_MDIR))/$(CHIP_TOP) +IMG=$(abspath $(CHIP_SMOKE_IMG)) +MROM=$(abspath $(SMOKE_MROM)) \
 		+MAX_CYCLES=2000000 +JTAG_IDCODE >$(CHIP_SMOKE_LOG)
 	grep -q "GOOD TRAP" $(CHIP_SMOKE_LOG)
 	grep -q "JTAG IDCODE" $(CHIP_SMOKE_LOG)

@@ -22,6 +22,8 @@ extern VerilatedContext *contextp;
 #define FINISHER_PASS 0x5555
 #define FINISHER_FAIL 0x3333
 #define FINISHER_RESET 0x7777
+#define GOLDFISH_RTC_BASE 0x00101000u
+#define GOLDFISH_RTC_SIZE 0x1000u
 
 #define CLINT_BASE 0x02000000u
 #define CLINT_SIZE 0x000c0000u
@@ -33,8 +35,10 @@ extern VerilatedContext *contextp;
 #define VIRTIO_BLK_SIZE 0x1000u
 #define VIRTIO_NET_BASE 0x10002000u
 #define VIRTIO_NET_SIZE 0x1000u
-#define VIRTIO_EXTRA_BASE 0x10003000u
-#define VIRTIO_EXTRA_SIZE 0x6000u
+#define VIRTIO_RNG_BASE 0x10003000u
+#define VIRTIO_RNG_SIZE 0x1000u
+#define VIRTIO_EXTRA_BASE 0x10004000u
+#define VIRTIO_EXTRA_SIZE 0x5000u
 #define QEMU_SDHCI_PCI_ECAM_BASE 0x30008000u
 #define QEMU_SDHCI_PCI_ECAM_SIZE 0x1000u
 #define QEMU_SDHCI_BASE 0x40000000u
@@ -217,6 +221,46 @@ static void virtio_net_handle(paddr_t addr, word_t wdata, char wmask, bool is_wr
   }
 }
 
+static void virtio_rng_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data)
+{
+  if (qemu_io_bridge_active()) {
+    mmio_qemu_bridge_handle(addr, wdata, wmask, is_write, data);
+    return;
+  }
+  void mmio_virtio_rng_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data);
+  if (!is_write) {
+    mmio_virtio_rng_handle(addr - VIRTIO_RNG_BASE, wdata, 0, false, data);
+    return;
+  }
+  for (unsigned i = 0; i < sizeof(word_t);) {
+    unsigned count = 4u - ((addr + i) & 3u);
+    uint8_t mask = ((uint8_t)wmask >> i) & ((1u << count) - 1u);
+    if (mask) mmio_virtio_rng_handle(addr - VIRTIO_RNG_BASE + i,
+                                     wdata >> (8*i), (char)mask, true, nullptr);
+    i += count;
+  }
+}
+
+static void goldfish_rtc_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data)
+{
+  if (qemu_io_bridge_active()) {
+    mmio_qemu_bridge_handle(addr, wdata, wmask, is_write, data);
+    return;
+  }
+  void mmio_goldfish_rtc_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data);
+  if (!is_write) {
+    mmio_goldfish_rtc_handle(addr - GOLDFISH_RTC_BASE, wdata, 0, false, data);
+    return;
+  }
+  for (unsigned i = 0; i < sizeof(word_t);) {
+    unsigned count = 4u - ((addr + i) & 3u);
+    uint8_t mask = ((uint8_t)wmask >> i) & ((1u << count) - 1u);
+    if (mask) mmio_goldfish_rtc_handle(addr - GOLDFISH_RTC_BASE + i,
+                                       wdata >> (8*i), (char)mask, true, nullptr);
+    i += count;
+  }
+}
+
 static void virtio_extra_handle(paddr_t addr, word_t wdata, char wmask, bool is_write, word_t *data)
 {
   if (qemu_io_bridge_active()) {
@@ -278,11 +322,13 @@ static void litex_uart_hw_handle(paddr_t addr, word_t wdata, char wmask, bool is
 
 static mmio_map_t mmio_maps[] = {
     {"finisher", FINISHER_BASE, FINISHER_SIZE, "SiFive test / syscon poweroff", true, finisher_handle},
+    {"goldfish-rtc", GOLDFISH_RTC_BASE, GOLDFISH_RTC_SIZE, "Google Goldfish RTC", true, goldfish_rtc_handle},
     {"clint", CLINT_BASE, CLINT_SIZE, "QEMU virt CLINT sink", false, NULL},
     {"plic", PLIC_BASE, PLIC_SIZE, "QEMU virt PLIC sink", false, NULL},
     {"serial_ns16550", NS16550_BASE, NS16550_SIZE, "QEMU virt NS16550 UART", false, serial_handle},
     {"virtio-blk", VIRTIO_BLK_BASE, VIRTIO_BLK_SIZE, "QEMU virtio-mmio block device", true, virtio_blk_handle},
     {"virtio-net", VIRTIO_NET_BASE, VIRTIO_NET_SIZE, "QEMU virtio-mmio network device", true, virtio_net_handle},
+    {"virtio-rng", VIRTIO_RNG_BASE, VIRTIO_RNG_SIZE, "QEMU virtio-mmio entropy source (RNG)", true, virtio_rng_handle},
     {"virtio-extra", VIRTIO_EXTRA_BASE, VIRTIO_EXTRA_SIZE, "QEMU virtio-mmio extra slots",
      true, virtio_extra_handle},
     {"sdhci-pci-ecam", QEMU_SDHCI_PCI_ECAM_BASE, QEMU_SDHCI_PCI_ECAM_SIZE, "QEMU SDHCI PCI ECAM stub", true, sdhci_handle},

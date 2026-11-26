@@ -126,8 +126,7 @@ module tb_native_boot;
     $readmemh(payload_file, payload);
     repeat (20) @(negedge clk);
     reset = 0;
-    expect_string($sformatf(
-                  "Raptor native %s RV%0d\r\nRAPT ready\r\n", `NATIVE_BOARD_STRING, `RAPT_XLEN));
+    expect_string($sformatf("Raptor %s RV%0d\r\nRAPT ready\r\n", `NATIVE_BOARD_STRING, `RAPT_XLEN));
     // Invalid destination and corrupted transport checksum must be rejected.
     header(1, 'h20000000, 1);
     expect_byte("E");
@@ -149,12 +148,12 @@ module tb_native_boot;
     header(2, 'h80000000, 0);
     expect_byte("K");
     expect_string("NATIVE PAYLOAD PASS\r\n");
-    $display("PASS native CPU boot RV%0d DDR=%0d: ROM, upload, CRC, RAM test, fence.i, payload",
+    $display("PASS CPU boot RV%0d DDR=%0d: ROM, upload, CRC, RAM test, fence.i, payload",
              `RAPT_XLEN, `NATIVE_DDR);
     $finish;
   end
   initial begin
     repeat (20_000_000) @(posedge clk);
-    $fatal(1, "native boot watchdog");
+    $fatal(1, "boot watchdog");
   end
 endmodule

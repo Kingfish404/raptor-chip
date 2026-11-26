@@ -6,27 +6,28 @@ permalink: /performance.html
 # Current Performance Evaluation
 
 This living document records performance evaluation results for the **current
-Raptor RTL (`046c95621`: FE/BE/LSU tuning, 64-entry ROB / 96 PRF / 12–16 RS on
-`default*`, L1I/L1D prefetchers, 512-entry 4-way BTB, 512/1024-entry 4-way L2
-TLB) and aligned gem5 O3 performance model**.
+Raptor RTL (`b2caaa2ad`: direct prefix dispatch, 32-entry ITT + loop predictor,
+8-MSHR L1D, dual-AGU, L1I FDIP, 3-ALU on `default-w4`, 75 MHz KU5P timing cuts)
+and aligned gem5 O3 performance model (`046c95621` 6-preset sweep)**.
 Historical commit-by-commit logs live in
 [Performance Iterations](./perf-iterations.md); this page is updated in place
 as the microarchitecture evolves.
 
 ## Target Presets & Evaluation Setup
 
-All presets target RV64GC(V) with a 16-entry SQ, 2-cycle pipelined MUL, 1 FPU
-pipe, 1 LSU port, 16-entry RAS, same-4KB-page L1I next-line prefetcher, and
-16-entry same-4KB-page L1D IP-stride prefetcher (`rapt_l1d_stride_pf`):
+All `default*` presets target RV64GC(V) with a 16-entry SQ, 2-cycle pipelined
+MUL, 1 FPU pipe, decoupled Load/Store AGU, 16-entry RAS, 32-entry ITT, 32-entry
+loop predictor, L1I hit-under-prefetch + 8-entry FDIP, and degree-2 16-entry
+L1D IP-stride prefetcher (`rapt_l1d_stride_pf`):
 
-| Preset | Width (F/D/R/C) | ROB / PRF | ALQ / BRQ / IOQ | BTB | L2 TLB | L1I | L1D (MSHRs) | L2 |
-|---|---|---|---|---:|---:|---|---|---|
-| `default` | 2 / 2 / 2 / 2 | 64 / 96 | 12 / 8 / 8 | 512 (4w) | 512 (4w) | 16 KiB, 4w | 16 KiB, 4w (4) | None |
-| `default-w3` | 3 / 3 / 3 / 3 | 64 / 96 | 12 / 12 / 16 | 512 (4w) | 1024 (4w) | 16 KiB, 4w | 16 KiB, 4w (4) | None |
-| `default-w4` | 4 / 4 / 4 / 4 | 64 / 96 | 16 / 12 / 16 | 512 (4w) | 1024 (4w) | 16 KiB, 4w | 16 KiB, 4w (4) | None |
-| `default-cache` | 2 / 2 / 2 / 2 | 32 / 64 | 8 / 8 / 8 | 128 (2w) | 256 (1w) | 128 KiB, 2w | 128 KiB, 32w (4) | None |
-| `default-w4-cache` | 4 / 4 / 4 / 4 | 32 / 64 | 12 / 12 / 16 | 512 (4w) | 1024 (4w) | 128 KiB, 2w | 128 KiB, 32w (4) | None |
-| `default-l2` | 2 / 2 / 2 / 2 | 32 / 64 | 8 / 8 / 8 | 128 (2w) | 256 (1w) | 16 KiB, 4w | 16 KiB, 4w (4) | 512 KiB, 8w |
+| Preset | Width (F/D/R/C) | ALU Ports | ROB / PRF | ALQ / BRQ / IOQ | BTB | L2 TLB | L1I | L1D (MSHRs) | L2 |
+|---|---|---:|---|---|---:|---:|---|---|---|
+| `default` | 2 / 2 / 2 / 2 | 2 | 32 / 64 | 8 / 8 / 8 | 512 (4w) | 512 (4w) | 16 KiB, 4w | 16 KiB, 4w (8) | None |
+| `default-w3` | 3 / 3 / 3 / 3 | 2 | 64 / 96 | 12 / 12 / 16 | 512 (4w) | 1024 (4w) | 16 KiB, 4w | 16 KiB, 4w (8) | None |
+| `default-w4` | 4 / 4 / 4 / 4 | 3 | 64 / 96 | 16 / 12 / 16 | 512 (4w) | 1024 (4w) | 16 KiB, 4w | 16 KiB, 4w (8) | None |
+| `default-cache` | 2 / 2 / 2 / 2 | 2 | 32 / 64 | 8 / 8 / 8 | 128 (2w) | 256 (1w) | 128 KiB, 2w | 128 KiB, 32w (4) | None |
+| `default-w4-cache` | 4 / 4 / 4 / 4 | 2 | 32 / 64 | 12 / 12 / 16 | 512 (4w) | 1024 (4w) | 128 KiB, 2w | 128 KiB, 32w (4) | None |
+| `default-l2` | 2 / 2 / 2 / 2 | 2 | 32 / 64 | 8 / 8 / 8 | 128 (2w) | 256 (1w) | 16 KiB, 4w | 16 KiB, 4w (4) | 512 KiB, 8w |
 
 - **Evaluation engines**:
   1. **gem5 25.1 O3 SE** (`sim/gsim/raptor_se.py --rtl-execution-resources`,
@@ -39,7 +40,7 @@ pipe, 1 LSU port, 16-entry RAS, same-4KB-page L1I next-line prefetcher, and
      and `default-cache` on `ccc3fb3cf`).
   4. **FPGA replay / Ubuntu NFS netboot** (`fpga/mlk-cu08-ku15p/`,
      `verification/performance/fpga_replay.py`).
-- **Workload coverage**: **90 benchmarks** across 4 suites — CoreMark (1/1),
+- **Workload coverage**: **90 benchmarks** across 4 suites -- CoreMark (1/1),
   Embench-IoT (17/19 ok in RV64 SE), **SPEC CPU 2017 full rate (23/23: 10/10
   INT + 13/13 FP)**, and **SPEC CPU 2026 (49/52: 25/26 Rate + 24/26 Speed)**;
   compiled with GCC/G++/GFortran 13.3 (`-O2 -march=rv64gc -mabi=lp64d -static`).
@@ -69,11 +70,11 @@ four Level-1 categories:
 | **CoreMark/MHz** (gem5, ROI) | **5.361** | **6.162** | **6.323** | **5.393** | **6.146** | **5.194** |
 | **Embench-IoT (17)** Geomean IPC | **1.480** | **1.759** | **1.848** | **1.477** | **1.829** | **1.434** |
 | **SPEC CPU 2017 (23/23 @ 50M)** Geomean IPC | **0.840** | **0.928** | **0.949** | **0.945** | **1.204** | **0.834** |
-| — SPEC 2017 INT (10/10) Geomean IPC | 0.983 | 1.103 | 1.131 | 1.011 | **1.297** | 0.919 |
-| — SPEC 2017 FP (13/13) Geomean IPC | 0.744 | 0.812 | 0.829 | 0.897 | **1.137** | 0.774 |
+| - SPEC 2017 INT (10/10) Geomean IPC | 0.983 | 1.103 | 1.131 | 1.011 | **1.297** | 0.919 |
+| - SPEC 2017 FP (13/13) Geomean IPC | 0.744 | 0.812 | 0.829 | 0.897 | **1.137** | 0.774 |
 | **SPEC CPU 2026 (49/52 @ 50M)** Geomean IPC | **0.931** | **1.027** | **1.052** | **1.015** | **1.263** | **0.928** |
-| — SPEC 2026 Rate (25/26) Geomean IPC | 0.923 | 1.021 | 1.045 | 1.042 | **1.307** | 0.953 |
-| — SPEC 2026 Speed (24/26) Geomean IPC | 0.940 | 1.033 | 1.059 | 0.988 | **1.219** | 0.902 |
+| - SPEC 2026 Rate (25/26) Geomean IPC | 0.923 | 1.021 | 1.045 | 1.042 | **1.307** | 0.953 |
+| - SPEC 2026 Speed (24/26) Geomean IPC | 0.940 | 1.033 | 1.059 | 0.988 | **1.219** | 0.902 |
 | **Est. SPECrate2017_int / GHz** (10/10) | **~0.765** | **~0.858** | **~0.880** | **~0.787** | **~1.009** | **~0.715** |
 | **Est. SPECrate2017_fp / GHz** (13/13) | **~0.476** | **~0.520** | **~0.530** | **~0.574** | **~0.727** | **~0.495** |
 
@@ -95,21 +96,21 @@ four Level-1 categories:
 | SPEC CPU 2026 (49) | `default-l2` | 2 | 51.3% | 9.4% | 13.8% | 25.4% |
 
 **Key Top-Down Findings**:
-1. **64-entry ROB / 96 PRF / 12–16 RS + L1 prefetchers + 512-entry 4-way BTB +
+1. **64-entry ROB / 96 PRF / 12-16 RS + L1 prefetchers + 512-entry 4-way BTB +
    FE/BE/LSU tuning** raised `default` Retiring on SPEC 2017 from
-   `37.7% → 47.1%` (+9.4 pp), boosting SPEC 2017 Geomean IPC by **+24.6%**
-   (`0.674 → 0.840`) and SPEC 2026 by **+20.8%** (`0.771 → 0.931`).
+   `37.7% -> 47.1%` (+9.4 pp), boosting SPEC 2017 Geomean IPC by **+24.6%**
+   (`0.674 -> 0.840`) and SPEC 2026 by **+20.8%** (`0.771 -> 0.931`).
 2. **4-wide scaling on `default-w4`**: Even with 16 KiB L1I/L1D and no L2,
    `default-w4` now hits **`6.323` CM/MHz**, **`1.848` Embench GM** (beating
    32-ROB `default-w4-cache`), **`0.949` SPEC 2017** (`~0.880` INT/GHz), and
    **`1.052` SPEC 2026**.
 3. **Next headroom**: Combining the 64-ROB / 96-PRF / 16-RS backend with a
-   larger cache hierarchy (`L1 32–64 KiB + L2 512 KiB`) is expected to push
+   larger cache hierarchy (`L1 32-64 KiB + L2 512 KiB`) is expected to push
    `SPECrate2017_int / GHz` well past **`1.10+`**.
 
 ---
 
-## 3. SPEC CPU 2017 — Full 23/23 Rate Suite (@ 50M Instructions)
+## 3. SPEC CPU 2017 -- Full 23/23 Rate Suite (@ 50M Instructions)
 
 | Benchmark | Class | `default` | `default-w3` | `default-w4` | `default-cache` | `default-w4-cache` | `default-l2` | `default` TMA (Ret / BS / FE / BE %) |
 |---|---|---:|---:|---:|---:|---:|---:|---|
@@ -148,9 +149,9 @@ four Level-1 categories:
 
 | Preset / XLEN | DMIPS / MHz | CoreMark / MHz | CoreMark IPC | CoreMark ROI Cycles (2 iter) | Gain vs Prior Baseline |
 |---|---:|---:|---:|---:|---:|
-| `default` / RV32 | **1.96–2.42** | **5.9034** | 1.4661 | 338,789 | +13.1% (`5.2173`) |
-| `default` / RV64 | **2.11–2.68** | **5.6709** | 1.4876 | 352,675 | +18.8% (`4.7743`) |
-| `default-w4` / RV64 | **2.47–3.56** | **7.0576** | 1.8514 | 283,383 | +26.5% (`5.5781`) |
+| `default` / RV32 | **1.96-2.42** | **5.9034** | 1.4661 | 338,789 | +13.1% (`5.2173`) |
+| `default` / RV64 | **2.11-2.68** | **5.6709** | 1.4876 | 352,675 | +18.8% (`4.7743`) |
+| `default-w4` / RV64 | **2.47-3.56** | **7.0576** | 1.8514 | 283,383 | +26.5% (`5.5781`) |
 
 ### 4.1 Three-Preset RTL SPEC SimPoint (5M-ROI, `kmax=2`, 100% Weight Coverage)
 
@@ -187,26 +188,48 @@ weight coverage across 3/4 passing clusters):
 | `default-w4` | 92.0% | **0.6994** | 17.5 / 0.2 / 2.9 / 79.5 |
 | `default-cache` | 92.0% | **0.6905** | 34.5 / 1.1 / 3.2 / 61.2 |
 
-### 4.4 Real RTL Linux Simulation (CoreMark, Embench-IoT, and 22/23 SPEC CPU 2017)
+### 4.4 Real RTL Simulation (`b2caaa2ad`: Bare-metal, Linux Sim, and SPEC SimPoint)
 
-Using NEMU Linux 6.18.51 checkpoints replayed directly on Verilator RTL with
-Sv32/Sv39 MMU and TLBs active (`sim/gsim/linux_sim_bench.py`, `sim/gsim/spec_simpoint.py`):
+Measured directly on Verilator RTL (`b2caaa2ad`: direct dispatch, loop predictor,
+8-MSHR L1D, dual-AGU, L1I FDIP, and backend/memory timing cuts closing 75 MHz on
+KU5P) for bare-metal (`abstract-machine` / `embench-baremetal`) and NEMU Linux
+6.18.51 checkpoints (`sim/gsim/linux_sim_bench.py`, `sim/gsim/spec_simpoint.py`):
 
-| Preset / XLEN | Linux DMIPS/MHz | Linux CM/MHz | Linux Embench-IoT (vs KU5P) | RTL SPECrate2017 (INT/FP / GHz) | RTL SPECrate2026 (INT/FP / GHz) |
-|---|---:|---:|---:|---:|---:|
-| `default` / RV32 | **1.30–1.65** | **4.3829** | **1.4902x** *(19/19)* | — | — |
-| `default` / RV64 | **1.53–2.30** | **3.4082** | **1.6952x** *(19/19)* | **0.54 / 0.44** *(9/10, 11/13)* | **0.25 / 0.26** *(12/14, 7/12; 22/26 IPC 0.913)* |
-| `default-w4` / RV64 | **1.64–2.41** | **3.7935** | **1.8387x** *(19/19)* | **0.58 / 0.50** *(9/10, 13/13)* | **0.29 / 0.26** *(12/14, 6/12; 21/26 IPC 1.033)* |
+| Environment | Preset / XLEN | DMIPS/MHz | CM/MHz | Embench-IoT (vs KU5P) | RTL SPECrate2017 (INT/FP / GHz) | RTL SPECrate2026 (INT/FP / GHz) |
+|---|---|---:|---:|---:|---:|---:|
+| Bare-metal sim | `default` / RV32 | **1.82-2.29** | **5.8889** | **2.0069x** *(19/19)* | - | - |
+| Bare-metal sim | `default` / RV64 | **1.99-2.55** | **5.6685** | **2.0362x** *(19/19)* | - | - |
+| Bare-metal sim | `default-w4` / RV64 | **2.46-3.31** | **7.1016** | **2.6969x** *(19/19)* | - | - |
+| Linux sim | `default` / RV32 | **1.29-1.62** | **4.3148** | **1.4714x** *(19/19)* | - | - |
+| Linux sim | `default` / RV64 | **1.52-2.15** | **3.3654** | **1.6573x** *(19/19)* | **0.54 / 0.44** *(9/10, 13/13)* | **0.24 / 0.23** *(13/14, 8/12; 25/26 IPC 0.844)* |
+| Linux sim | `default-w4` / RV64 | **1.66-2.43** | **3.8553** | **1.9116x** *(19/19)* | **0.58 / 0.46** *(9/10, 13/13)* | **0.29 / 0.24** *(13/14, 8/12; 25/26 IPC 0.956)* |
+
+Compared to `046c95621`, `default-w4` improves across bare-metal CoreMark (`7.0576 -> 7.1016`),
+bare-metal Embench-IoT (`2.6607x -> 2.6969x`, +1.4%), Linux-sim Dhrystone (`1.64-2.41 -> 1.66-2.43`),
+Linux-sim CoreMark (`3.7935 -> 3.8553`, +1.6%), and Linux-sim Embench-IoT (`1.8387x -> 1.9116x`,
++4.0%), while `default` preserves `0.54 / 0.44` SPECrate2017 alongside 75 MHz KU5P timing closure.
 
 ### 4.5 Live FPGA Hardware Linux (50 MHz Core, 333 MHz DDR4 UI)
 
 Measured directly on KU5P and KU15P boards running Linux over NFS (binaries staged in RAM `/tmp`,
 200k-iteration Dhrystone strict/standard, 2000-iteration official CoreMark, 19/19 Embench-IoT):
 
-| Board | Preset / XLEN | DMIPS/MHz | CoreMark/MHz | Embench-IoT (vs KU5P) |
-|---|---|---:|---:|---:|
-| KU5P | `default` / RV64 | **1.34–1.93** | **3.3514** | **1.0477x** *(19/19)* |
-| KU15P | `default-w4` / RV64 | **1.46–2.16** | **3.9803** | **1.2319x** *(19/19)* |
+| Board | Preset / XLEN | DMIPS/MHz | CoreMark/MHz | Embench-IoT (vs KU5P) | SPECrate2017 (INT/FP / GHz) |
+|---|---|---:|---:|---:|---:|
+| KU5P | `default` / RV64 | **1.34-1.93** | **3.3514** | **1.0477x** *(19/19)* | **0.21 / 0.16** *(23/23 `test` IPC)* |
+| KU15P | `default-w4` / RV64 | **1.46-2.16** | **3.9803** | **1.2319x** *(19/19)* | **0.23 / 0.17** *(23/23 `test` IPC)* |
+
+Live Ubuntu 26.10 (RVA23) full-workload SPEC CPU 2017 `test` hardware runs on real DDR4 (no L2
+cache) completed **23/23** workloads (`rc=0`) on both boards:
+- **KU5P (`default / RV64`)**: **1.40T instructions** / 4.87T cycles over 27.0h, geomean IPC
+  `0.2533` (INT `0.2644` / FP `0.2451`, aggregate IPC `0.2874`), e.g., `525.x264_r` `0.6286`,
+  `548.exchange2_r` `0.6304`, `541.leela_r` `0.6112`, `557.xz_r` `0.3778`.
+- **KU15P (`default-w4 / RV64`)**: **1.38T instructions** / 4.45T cycles, geomean IPC
+  `0.2761` (INT `0.2938` / FP `0.2633`, aggregate IPC `0.3105`, +9.0% over `default`), e.g.,
+  `525.x264_r` `0.7061`, `548.exchange2_r` `0.6625`, `541.leela_r` `0.6433`, `557.xz_r` `0.4248`.
+Both runs demonstrate full real-hardware Linux + glibc + DDR4 stability while highlighting
+DRAM-bound sensitivity (e.g., `507.cactuBSSN_r` IPC `~0.065`, `549.fotonik3d_r` IPC `~0.104`)
+without an L2 cache.
 
 ---
 
@@ -219,7 +242,7 @@ open-source cores tracked by [riscv100.top](https://riscv100.top/)
 > **Methodology & caveats**:
 > - **ISA & Toolchain**: RV64GC (`-O2 -march=rv64gc -mabi=lp64d -static`,
 >   GCC/G++/GFortran 13.3). Official vendor CoreMark/SPEC submissions typically
->   use `-O3 -flto` or PGO (+10%–25%).
+>   use `-O3 -flto` or PGO (+10%-25%).
 > - **SPECrate2017_int / GHz (10/10)** and **SPECrate2017_fp / GHz (13/13)** are
 >   **estimated** from full 23/23 50M-instruction aligned gem5 SE runs using
 >   official SPEC `refrate` reference times and reference dynamic instruction
@@ -227,22 +250,22 @@ open-source cores tracked by [riscv100.top](https://riscv100.top/)
 
 | Processor | ISA / Arch | Issue Width | CoreMark / MHz | SPECrate2017_int / GHz | SPECrate2017_fp / GHz | Positioning Notes |
 |---|---|---:|---:|---:|---:|---|
-| SiFive Rocket | RV64 In-Order | 1 | 2.3–2.75 | ~0.25–0.35 | ~0.20–0.30 | Scalar 5-stage in-order |
-| ARM Cortex-A55 | ARMv8 In-Order | 2 | 3.0–4.0 | 0.5–0.7 | ~0.45–0.65 | Improved in-order |
-| SiFive U74 | RV64 In-Order | 2 | 4.9–5.7 | 0.7–0.9 | ~0.6–0.8 | Dual-issue app core |
+| SiFive Rocket | RV64 In-Order | 1 | 2.3-2.75 | ~0.25-0.35 | ~0.20-0.30 | Scalar 5-stage in-order |
+| ARM Cortex-A55 | ARMv8 In-Order | 2 | 3.0-4.0 | 0.5-0.7 | ~0.45-0.65 | Improved in-order |
+| SiFive U74 | RV64 In-Order | 2 | 4.9-5.7 | 0.7-0.9 | ~0.6-0.8 | Dual-issue app core |
 | **Raptor `default`** | **RV64 OoO** | **2** | **5.67** *(RTL)* | **~0.77** *(10/10 est.)* | **~0.48** *(13/13 est.)* | 2W, 64 ROB, 16K L1+PF, 512 BTB |
 | **Raptor `default-l2`** | **RV64 OoO** | **2** | **5.19** *(gem5)* | **~0.72** *(10/10 est.)* | **~0.50** *(13/13 est.)* | 2W, 32 ROB, 16K L1+PF, 512K L2 |
 | **Raptor `default-cache`** | **RV64 OoO** | **2** | **5.39** *(gem5)* | **~0.79** *(10/10 est.)* | **~0.57** *(13/13 est.)* | 2W, 32 ROB, 128K L1+PF |
 | **Raptor `default-w3`** | **RV64 OoO** | **3** | **6.16** *(gem5)* | **~0.86** *(10/10 est.)* | **~0.52** *(13/13 est.)* | 3W, 64 ROB, 16K L1+PF, 512 BTB |
-| **Raptor `default-w4`** | **RV64 OoO** | **4** | **7.06** *(RTL)* | **~0.88** *(10/10 est.)* | **~0.53** *(13/13 est.)* | 4W, 64 ROB, 16K L1+PF, 512 BTB |
+| **Raptor `default-w4`** | **RV64 OoO** | **4** | **7.10** *(RTL)* | **~0.88** *(10/10 est.)* | **~0.53** *(13/13 est.)* | 4W, 64 ROB, 16K L1+PF, 512 BTB |
 | **Raptor `default-w4-cache`** | **RV64 OoO** | **4** | **6.15** *(gem5)* | **~1.01** *(10/10 est.)* | **~0.73** *(13/13 est.)* | 4W, 32 ROB, 128K L1+PF, 512 BTB |
-| ARM Cortex-A72 | ARMv8 OoO | 3 | 4.7–5.0 | 1.0–1.2 | ~0.9–1.2 | Classic 3-wide OoO + L2 |
-| XiangShan Yanqihu | RV64 OoO | 6 | 5.3 (-O2) | ~1.0–1.2 | ~1.0–1.3 | 1st-gen XiangShan (-O2) |
-| SonicBOOM (v3) | RV64 OoO | 3–4 | 6.2–6.9 | ~1.0–1.3 | ~0.9–1.2 | Open-source OoO (L1+L2) |
-| XuanTie C910 / C920 | RV64 OoO | 3 | 7.1–7.2+ | 1.2–1.6 | ~1.2–1.7 | Commercial 3W OoO (64K L1+L2) |
-| SiFive P550 | RV64 OoO | 3 | 8.0+ | 1.2–1.4 | ~1.2–1.5 | Commercial 3W OoO (32K L1+256K L2) |
-| ARM Cortex-A76 | ARMv8 OoO | 4 | 5.0–6.0+ | ~1.5–1.8 | ~1.6–2.0 | 4W OoO, 128 ROB, 64K L1+512K L2 |
-| XiangShan Nanhu / KMH | RV64 OoO | 6–8 | 7.0–9.0+ | 2.0–2.5+ | ~2.0–2.8+ | Wide open-source OoO (64K L1+1M L2) |
+| ARM Cortex-A72 | ARMv8 OoO | 3 | 4.7-5.0 | 1.0-1.2 | ~0.9-1.2 | Classic 3-wide OoO + L2 |
+| XiangShan Yanqihu | RV64 OoO | 6 | 5.3 (-O2) | ~1.0-1.2 | ~1.0-1.3 | 1st-gen XiangShan (-O2) |
+| SonicBOOM (v3) | RV64 OoO | 3-4 | 6.2-6.9 | ~1.0-1.3 | ~0.9-1.2 | Open-source OoO (L1+L2) |
+| XuanTie C910 / C920 | RV64 OoO | 3 | 7.1-7.2+ | 1.2-1.6 | ~1.2-1.7 | Commercial 3W OoO (64K L1+L2) |
+| SiFive P550 | RV64 OoO | 3 | 8.0+ | 1.2-1.4 | ~1.2-1.5 | Commercial 3W OoO (32K L1+256K L2) |
+| ARM Cortex-A76 | ARMv8 OoO | 4 | 5.0-6.0+ | ~1.5-1.8 | ~1.6-2.0 | 4W OoO, 128 ROB, 64K L1+512K L2 |
+| XiangShan Nanhu / KMH | RV64 OoO | 6-8 | 7.0-9.0+ | 2.0-2.5+ | ~2.0-2.8+ | Wide open-source OoO (64K L1+1M L2) |
 
 ---
 

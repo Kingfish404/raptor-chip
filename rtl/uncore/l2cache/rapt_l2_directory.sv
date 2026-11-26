@@ -119,7 +119,11 @@ module rapt_l2_directory #(
 
   always_ff @(posedge clock) begin
     if (reset) begin
+`ifdef FORMAL_L2_FAST_WIPE
+      wipe_count <= {1'b1, {SetBits{1'b0}}};
+`else
       wipe_count <= '0;
+`endif
       result_valid <= 1'b0;
       scan_result_valid <= 1'b0;
       read_tag_q <= '0;

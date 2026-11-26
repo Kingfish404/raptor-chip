@@ -157,6 +157,123 @@ module rapt_cu08_top (
   logic [31:0] peripheral_wdata, peripheral_rdata;
   logic [3:0] peripheral_wstrb;
 `ifdef NATIVE_WITH_CM005_BRIDGE
+`ifdef NATIVE_WITH_ETH_DMA
+  axi4_if soc_ddr ();
+  axi4_if eth_dma ();
+  wire eth_ext_wr_valid;
+  wire [63:0] eth_ext_wr_first, eth_ext_wr_last;
+  wire [31:0] bridge_rdata, dma_rdata;
+  wire bridge_irq, dma_irq;
+  logic dma_rd_sel;
+  wire [31:0] cm_cpu_rx_data, cm_cpu_tx_data;
+  wire [3:0] cm_cpu_rx_last_be, cm_cpu_tx_last_be;
+  wire cm_cpu_rx_valid, cm_cpu_rx_last, cm_cpu_rx_ready;
+  wire cm_cpu_tx_valid, cm_cpu_tx_last, cm_cpu_tx_ready;
+  wire [7:0] dma_rx_data, dma_tx_data;
+  wire dma_rx_valid, dma_rx_last, dma_rx_ready;
+  wire dma_tx_valid, dma_tx_last, dma_tx_ready;
+  wire dma_enabled;
+
+  always_ff @(posedge clk) begin
+    if (peripheral_rd) dma_rd_sel <= (peripheral_raddr[15:12] == 4'h2);
+  end
+  assign peripheral_rdata = dma_rd_sel ? dma_rdata : bridge_rdata;
+  assign peripheral_irq   = dma_irq;
+
+  rapt_axi4_dma_arb eth_ddr_arb (
+      .clk,
+      .reset(reset || !ddr_ready),
+      .m0(soc_ddr),
+      .m1(eth_dma),
+      .out(ddr)
+  );
+
+  rapt_eth_stream32_adapter cm005_dma_adapt (
+      .clk,
+      .reset(reset || !dma_enabled),
+      .rx32_data(cm_cpu_rx_data),
+      .rx32_last_be(cm_cpu_rx_last_be),
+      .rx32_valid(cm_cpu_rx_valid),
+      .rx32_last(cm_cpu_rx_last),
+      .rx32_ready(cm_cpu_rx_ready),
+      .rx8_data(dma_rx_data),
+      .rx8_valid(dma_rx_valid),
+      .rx8_last(dma_rx_last),
+      .rx8_ready(dma_rx_ready),
+      .tx8_data(dma_tx_data),
+      .tx8_valid(dma_tx_valid),
+      .tx8_last(dma_tx_last),
+      .tx8_ready(dma_tx_ready),
+      .tx32_data(cm_cpu_tx_data),
+      .tx32_last_be(cm_cpu_tx_last_be),
+      .tx32_valid(cm_cpu_tx_valid),
+      .tx32_last(cm_cpu_tx_last),
+      .tx32_ready(cm_cpu_tx_ready)
+  );
+
+  rapt_eth_axi_dma #(
+      .RingDepth(64),
+      .RxFcsBytes(0)
+  ) cu08_eth_dma (
+      .clk,
+      .reset(reset || !ddr_ready),
+      .clocks_ready(1'b1),
+      .rd(peripheral_rd && (peripheral_raddr[15:12] == 4'h2)),
+      .wr(peripheral_wr && (peripheral_waddr[15:12] == 4'h2)),
+      .raddr({4'h0, peripheral_raddr[11:0]}),
+      .waddr({4'h0, peripheral_waddr[11:0]}),
+      .wdata(peripheral_wdata),
+      .wstrb(peripheral_wstrb),
+      .rdata(dma_rdata),
+      .irq(dma_irq),
+      .enabled(dma_enabled),
+      .mdio_control(),
+      .mdio_input(1'b1),
+      .mac_rx_data(dma_rx_data),
+      .mac_rx_valid(dma_rx_valid),
+      .mac_rx_last(dma_rx_last),
+      .mac_rx_error(1'b0),
+      .mac_rx_ready(dma_rx_ready),
+      .mac_tx_data(dma_tx_data),
+      .mac_tx_valid(dma_tx_valid),
+      .mac_tx_last(dma_tx_last),
+      .mac_tx_ready(dma_tx_ready),
+      .m_axi_awid(eth_dma.awid),
+      .m_axi_awaddr(eth_dma.awaddr),
+      .m_axi_awlen(eth_dma.awlen),
+      .m_axi_awsize(eth_dma.awsize),
+      .m_axi_awburst(eth_dma.awburst),
+      .m_axi_awcache(eth_dma.awcache),
+      .m_axi_awvalid(eth_dma.awvalid),
+      .m_axi_awready(eth_dma.awready),
+      .m_axi_wdata(eth_dma.wdata),
+      .m_axi_wstrb(eth_dma.wstrb),
+      .m_axi_wlast(eth_dma.wlast),
+      .m_axi_wvalid(eth_dma.wvalid),
+      .m_axi_wready(eth_dma.wready),
+      .m_axi_bid(eth_dma.bid),
+      .m_axi_bresp(eth_dma.bresp),
+      .m_axi_bvalid(eth_dma.bvalid),
+      .m_axi_bready(eth_dma.bready),
+      .m_axi_arid(eth_dma.arid),
+      .m_axi_araddr(eth_dma.araddr),
+      .m_axi_arlen(eth_dma.arlen),
+      .m_axi_arsize(eth_dma.arsize),
+      .m_axi_arburst(eth_dma.arburst),
+      .m_axi_arcache(eth_dma.arcache),
+      .m_axi_arvalid(eth_dma.arvalid),
+      .m_axi_arready(eth_dma.arready),
+      .m_axi_rid(eth_dma.rid),
+      .m_axi_rdata(eth_dma.rdata),
+      .m_axi_rresp(eth_dma.rresp),
+      .m_axi_rlast(eth_dma.rlast),
+      .m_axi_rvalid(eth_dma.rvalid),
+      .m_axi_rready(eth_dma.rready),
+      .ext_wr_valid_o(eth_ext_wr_valid),
+      .ext_wr_first_o(eth_ext_wr_first),
+      .ext_wr_last_o(eth_ext_wr_last)
+  );
+`endif
   // The forwarder runs before DDR calibration and independently of CPU reset.
   // Its fixed 50 MHz system clock shares the native core PLL; PHY clocks remain
   // local to each CM005 port. Only the board power/reset domain resets it.
@@ -166,6 +283,26 @@ module rapt_cu08_top (
       .cpu_resetn,
       .native_clk(clk),
       .native_reset(reset),
+`ifdef NATIVE_WITH_ETH_DMA
+      .native_rd(peripheral_rd && (peripheral_raddr[15:12] == 4'h0)),
+      .native_wr(peripheral_wr && (peripheral_waddr[15:12] == 4'h0)),
+      .native_raddr(peripheral_raddr),
+      .native_waddr(peripheral_waddr),
+      .native_wdata(peripheral_wdata),
+      .native_wstrb(peripheral_wstrb),
+      .native_rdata(bridge_rdata),
+      .native_irq(bridge_irq),
+      .cpu_rx_data(cm_cpu_rx_data),
+      .cpu_rx_last_be(cm_cpu_rx_last_be),
+      .cpu_rx_valid(cm_cpu_rx_valid),
+      .cpu_rx_last(cm_cpu_rx_last),
+      .cpu_rx_ready(cm_cpu_rx_ready),
+      .cpu_tx_data(cm_cpu_tx_data),
+      .cpu_tx_last_be(cm_cpu_tx_last_be),
+      .cpu_tx_valid(cm_cpu_tx_valid),
+      .cpu_tx_last(cm_cpu_tx_last),
+      .cpu_tx_ready(cm_cpu_tx_ready),
+`else
       .native_rd(peripheral_rd),
       .native_wr(peripheral_wr),
       .native_raddr(peripheral_raddr),
@@ -174,6 +311,7 @@ module rapt_cu08_top (
       .native_wstrb(peripheral_wstrb),
       .native_rdata(peripheral_rdata),
       .native_irq(peripheral_irq),
+`endif
       .cm005_clocks_rx,
       .cm005_clocks_tx,
       .cm005_rx_ctl,
@@ -219,7 +357,14 @@ module rapt_cu08_top (
       .uart_rx(serial_rx),
       .uart_tx(serial_tx),
       .writeback_error,
+`ifdef NATIVE_WITH_ETH_DMA
+      .ext_wr_valid_i(eth_ext_wr_valid),
+      .ext_wr_first_i(eth_ext_wr_first),
+      .ext_wr_last_i(eth_ext_wr_last),
+      .ddr(soc_ddr)
+`else
       .ddr
+`endif
   );
   logic [25:0] heartbeat = 0;
   always_ff @(posedge clk) begin

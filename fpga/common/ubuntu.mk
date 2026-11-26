@@ -9,7 +9,7 @@ UBUNTU_CLIENT ?= 192.168.50.0/24 ## NFS client subnet or a single IPv4/32
 UBUNTU_SSH_KEY ?= ## SSH public key installed for root (empty: no key)
 UBUNTU_CROSS ?= riscv64-linux-gnu- ## Linux toolchain prefix for the kernel
 UBUNTU_KERNEL_DIR ?= ## Reuse a verified kernel artifact directory
-UBUNTU_NATIVE_BUILD ?= ## Board build directory to boot (empty: the matching configuration)
+UBUNTU_BOARD_BUILD ?= $(UBUNTU_NATIVE_BUILD) ## Board build directory to boot (empty: the matching configuration)
 UBUNTU_TRANSPORT ?= ## Boot transport, tftp or uart (empty: board.json)
 UBUNTU_BOOT_IP ?= ## Loader IPv4 address on the server LAN (empty: board.json)
 UBUNTU_TFTP_PORT ?= 6969 ## Host TFTP port
@@ -17,16 +17,16 @@ UBUNTU_UPLOAD_BAUD ?= 312500 ## RAM loader baud; 115200 uploads directly through
 UART_PORT ?= ## Board UART for ubuntu-boot, preferably /dev/serial/by-id/...
 SUDO ?= sudo ## Command that gives ubuntu-rootfs root access
 $(foreach v,UBUNTU_OUTPUT UBUNTU_ROOTFS UBUNTU_SERVER UBUNTU_CLIENT UBUNTU_SSH_KEY UBUNTU_CROSS \
-	UBUNTU_KERNEL_DIR UBUNTU_NATIVE_BUILD UBUNTU_TRANSPORT UBUNTU_BOOT_IP UBUNTU_TFTP_PORT \
+	UBUNTU_KERNEL_DIR UBUNTU_BOARD_BUILD UBUNTU_TRANSPORT UBUNTU_BOOT_IP UBUNTU_TFTP_PORT \
 	UBUNTU_UPLOAD_BAUD UART_PORT SUDO,$(eval $(v) := $(strip $($(v)))))
 
 UBUNTU = $(PYTHON) $(COMMON_DIR)/scripts/ubuntu.py --board '$(BOARD_DIR)' \
 	--output '$(UBUNTU_OUTPUT)' --rootfs '$(UBUNTU_ROOTFS)' \
 	--server '$(UBUNTU_SERVER)' --client '$(UBUNTU_CLIENT)' --cross '$(UBUNTU_CROSS)' \
 	--jobs $(JOBS) --preset '$(RAPT_CONFIG)' --clock-mhz $(CLOCK_MHZ) \
-	--native-build-root '$(BUILD_ROOT)' \
+	--board-build-root '$(BUILD_ROOT)' \
 	$(if $(UBUNTU_KERNEL_DIR),--kernel-dir '$(UBUNTU_KERNEL_DIR)') \
-	$(if $(UBUNTU_NATIVE_BUILD),--native-build '$(UBUNTU_NATIVE_BUILD)') \
+	$(if $(UBUNTU_BOARD_BUILD),--board-build '$(UBUNTU_BOARD_BUILD)') \
 	$(if $(UBUNTU_SSH_KEY),--ssh-key '$(UBUNTU_SSH_KEY)')
 UBUNTU_BOOT_OPTIONS = --port '$(UART_PORT)' --upload-baud $(UBUNTU_UPLOAD_BAUD) \
 	--tftp-port $(UBUNTU_TFTP_PORT) \

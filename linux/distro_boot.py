@@ -262,9 +262,10 @@ def prepare(args):
     require((args.kernel_artifacts / 'manifest.json').is_file(),
             'build an RV64 FPGA-profile kernel first; select it with --kernel-artifacts')
     kernel_record = verify(args.kernel_artifacts)
-    native_ubuntu_kernel = kernel_record.get('schema') == 'raptor-native-ubuntu-kernel-v1'
+    ubuntu_kernel = kernel_record.get('schema') in (
+        'raptor-ubuntu-kernel-v1', 'raptor-native-ubuntu-kernel-v1')
     require((kernel_record.get('bits') == 64 and kernel_record.get('profile') == 'fpga')
-            or native_ubuntu_kernel,
+            or ubuntu_kernel,
             'requires an RV64 external-rootfs kernel artifact directory')
     rva23 = SOURCES[args.distro].get('isa_profile') == 'rva23'
     config = (args.kernel_artifacts / 'kernel.config').read_text()

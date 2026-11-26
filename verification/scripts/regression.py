@@ -149,7 +149,8 @@ def run_step(step, work, timeout):
         stream.flush()
         try:
             with PROCESS_LOCK:
-                proc = subprocess.Popen(step.command, stdout=stream, stderr=subprocess.STDOUT,
+                proc = subprocess.Popen(step.command, stdin=subprocess.DEVNULL,
+                                        stdout=stream, stderr=subprocess.STDOUT,
                                         env=env, start_new_session=True)
                 PROCESSES.add(proc)
                 if CANCELLED.is_set():

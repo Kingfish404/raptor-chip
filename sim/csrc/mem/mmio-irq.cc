@@ -31,12 +31,18 @@ void nsim_plic_raise(uint32_t irq)
 
 bool qemu_io_bridge_active();
 void qemu_io_bridge_poll();
+void goldfish_rtc_poll();
 
 extern "C" void npc_consume_ext_irq_vector(int *rdata)
 {
     static uint32_t poll_div = 0;
-    if (qemu_io_bridge_active() && ((++poll_div & 0xffu) == 0))
-        qemu_io_bridge_poll();
+    if ((++poll_div & 0xffu) == 0)
+    {
+        if (qemu_io_bridge_active())
+            qemu_io_bridge_poll();
+        else
+            goldfish_rtc_poll();
+    }
     if (rdata == nullptr)
         return;
     *rdata = (int)g_ext_irq_pending.exchange(0, std::memory_order_relaxed);

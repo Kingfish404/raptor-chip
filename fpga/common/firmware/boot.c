@@ -40,8 +40,9 @@ static uint32_t crc_byte(uint32_t crc, uint8_t value)
 
 static int ram_range(uint32_t addr, uint32_t count)
 {
-    return count != 0 && addr >= RAM_BASE && count <= RAM_BYTES &&
-           addr - RAM_BASE <= RAM_BYTES - count;
+    uint64_t a = addr, c = count, bytes = (uint64_t)RAM_BYTES;
+    return c != 0 && a >= RAM_BASE && c <= bytes &&
+           a - RAM_BASE <= bytes - c;
 }
 
 static uint32_t word(const uint8_t *p)
@@ -77,7 +78,7 @@ void boot_main(void)
     UART[1] = UART_DIVISOR >> 8;
     UART[3] = 3;
     UART[2] = 6;
-    puts_uart("Raptor native " NATIVE_BOARD_STRING " RV" NATIVE_XLEN_STRING "\r\nRAPT ready\r\n");
+    puts_uart("Raptor " NATIVE_BOARD_STRING " RV" NATIVE_XLEN_STRING "\r\nRAPT ready\r\n");
     for (;;) {
         // Framing resynchronizes on the next RAPT marker after a timeout/error.
         static const char magic[] = "RAPT";

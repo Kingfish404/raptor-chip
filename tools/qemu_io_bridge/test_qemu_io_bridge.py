@@ -13,6 +13,7 @@ import unittest
 
 from raptor_qemu_bridge import (
     BuiltinBackend,
+    GoldfishRtcMmio,
     MAGIC,
     MSG_DMA_READ_REQ,
     MSG_DMA_READ_RESP,
@@ -24,6 +25,7 @@ from raptor_qemu_bridge import (
     QemuQtestBackend,
     RAM_BASE,
     UnixStreamTransport,
+    VirtioRngMmio,
     serve_session,
     slip_decode_frame,
     slip_encode,
@@ -229,6 +231,121 @@ class TestQemuIoBridge(unittest.TestCase):
             fpga.tp.close()
             s_host.close()
             backend.close()
+
+    def test_builtin_virtio_rng_and_goldfish_rtc_over_rqio(self) -> None:
+        s_host, s_fpga = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+        backend = BuiltinBackend()
+        # Use a deterministic entropy generator on a second pass, real os.urandom first.
+        t = threading.Thread(
+            target=serve_session, args=(UnixStreamTransport(s_host), backend), daemon=True
+        )
+        t.start()
+        fpga = SimulatedFpgaClient(s_fpga)
+        try:
+            # 1. VirtIO-RNG (0x1000_3000, IRQ 5)
+            self.assertEqual(fpga.mmio(0x1000_3000, 2, False), 0x74726976)
+            self.assertEqual(fpga.mmio(0x1000_3004, 2, False), 2)
+            self.assertEqual(fpga.mmio(0x1000_3008, 2, False), 4)
+            fpga.mmio(0x1000_3014, 2, True, 1)
+            self.assertEqual(fpga.mmio(0x1000_3010, 2, False), 3)  # VERSION_1 | ACCESS_PLATFORM
+            self.assertEqual(fpga.mmio(0x1000_3034, 2, False), 256)
+
+            desc, avail, used = RAM_BASE + 0x20000, RAM_BASE + 0x21000, RAM_BASE + 0x22000
+            buf0, buf1 = RAM_BASE + 0x23000, RAM_BASE + 0x23100
+            fpga.mmio(0x1000_3030, 2, True, 0)
+            fpga.mmio(0x1000_3038, 2, True, 8)
+            fpga.mmio(0x1000_3080, 2, True, desc & 0xFFFF_FFFF)
+            fpga.mmio(0x1000_3084, 2, True, desc >> 32)
+            fpga.mmio(0x1000_3090, 2, True, avail & 0xFFFF_FFFF)
+            fpga.mmio(0x1000_3094, 2, True, avail >> 32)
+            fpga.mmio(0x1000_30A0, 2, True, used & 0xFFFF_FFFF)
+            fpga.mmio(0x1000_30A4, 2, True, used >> 32)
+            fpga.mmio(0x1000_3044, 2, True, 1)
+            fpga.mmio(0x1000_3070, 2, True, 0x0F)
+
+            # Chained writable descriptors: 32 bytes + 16 bytes = 48 bytes total
+            fpga.ram_write(buf0, b"\x00" * 32)
+            fpga.ram_write(buf1, b"\x00" * 16)
+            fpga.ram_write(desc + 0, struct.pack("<QIHH", buf0, 32, 3, 1))   # NEXT | WRITE
+            fpga.ram_write(desc + 16, struct.pack("<QIHH", buf1, 16, 2, 0))  # WRITE
+            fpga.ram_write(avail, struct.pack("<HHH", 0, 1, 0))
+            fpga.ram_write(used, struct.pack("<HH", 0, 0))
+            fpga.mmio(0x1000_3050, 2, True, 0)
+
+            self.assertTrue(fpga.irq_mask & (1 << 5))
+            self.assertEqual(fpga.mmio(0x1000_3060, 2, False), 1)
+            used_flags, used_idx = struct.unpack("<HH", fpga.ram_read(used, 4))
+            self.assertEqual(used_flags, 0)
+            self.assertEqual(used_idx, 1)
+            used_id, used_len = struct.unpack("<II", fpga.ram_read(used + 4, 8))
+            self.assertEqual(used_id, 0)
+            self.assertEqual(used_len, 48)
+            entropy = fpga.ram_read(buf0, 32) + fpga.ram_read(buf1, 16)
+            self.assertNotEqual(entropy, b"\x00" * 48)
+
+            # Ack IRQ 5 and verify it clears
+            fpga.mmio(0x1000_3064, 2, True, 1)
+            self.assertFalse(fpga.irq_mask & (1 << 5))
+
+            # 2. Goldfish RTC (0x0010_1000, IRQ 6)
+            t_lo = fpga.mmio(0x0010_1000, 2, False)
+            t_hi = fpga.mmio(0x0010_1004, 2, False)
+            wall_ns = (t_hi << 32) | t_lo
+            self.assertGreater(wall_ns, 1_500_000_000_000_000_000)
+
+            # Set time and arm an already-expired alarm -> IRQ 6 asserts
+            fpga.mmio(0x0010_1010, 2, True, 1)  # IRQ_ENABLED = 1
+            fpga.mmio(0x0010_100C, 2, True, t_hi)
+            fpga.mmio(0x0010_1008, 2, True, t_lo)
+            self.assertTrue(fpga.irq_mask & (1 << 6))
+            self.assertEqual(fpga.mmio(0x0010_1018, 2, False), 0)  # alarm fired -> disarmed
+            fpga.mmio(0x0010_101C, 2, True, 1)  # CLEAR_INTERRUPT
+            self.assertFalse(fpga.irq_mask & (1 << 6))
+
+            # Arm a future alarm, verify ALARM_STATUS=1, then CLEAR_ALARM
+            fpga.mmio(0x0010_100C, 2, True, t_hi + 100)
+            fpga.mmio(0x0010_1008, 2, True, 0)
+            self.assertEqual(fpga.mmio(0x0010_1018, 2, False), 1)
+            self.assertFalse(fpga.irq_mask & (1 << 6))
+            fpga.mmio(0x0010_1014, 2, True, 1)  # CLEAR_ALARM
+            self.assertEqual(fpga.mmio(0x0010_1018, 2, False), 0)
+        finally:
+            fpga.tp.close()
+            s_host.close()
+            backend.close()
+
+    def test_goldfish_rtc_atomic_latch_and_alarm_unit(self) -> None:
+        fake_now = [0]
+        rtc = GoldfishRtcMmio(clock_ns=lambda: fake_now[0], initial_time_ns=0x0000_0005_FFFF_FFF0)
+        # Read TIME_LOW before 32-bit wrap
+        lo = rtc.access(0x00, False, 0)
+        # Advance clock past wrap before reading TIME_HIGH
+        fake_now[0] += 0x100
+        hi = (rtc.access(0x04, False, 0) >> 32) & 0xFFFF_FFFF
+        self.assertEqual(lo, 0xFFFF_FFF0)
+        self.assertEqual(hi, 0x0000_0005)
+        # Subsequent read sees wrapped high word
+        lo2 = rtc.access(0x00, False, 0)
+        hi2 = (rtc.access(0x04, False, 0) >> 32) & 0xFFFF_FFFF
+        self.assertEqual(hi2, 0x0000_0006)
+        self.assertEqual(lo2, 0x0000_00F0)
+
+        # Write TIME_HIGH / TIME_LOW and verify alarm fires at exact target
+        rtc.access(0x04, True, 0x0000_0010 << 32)
+        rtc.access(0x00, True, 0x0000_1000)
+        rtc.access(0x10, True, 1)  # IRQ_ENABLED = 1
+        rtc.access(0x0C, True, 0x0000_0010 << 32)
+        rtc.access(0x08, True, 0x0000_1500)
+        self.assertEqual(rtc.access(0x18, False, 0), 1)
+        self.assertFalse(rtc.irq_active())
+        fake_now[0] += 0x4FF
+        self.assertFalse(rtc.irq_active())
+        fake_now[0] += 1
+        self.assertTrue(rtc.irq_active())
+        self.assertEqual(rtc.access(0x18, False, 0), 0)
+        rtc.access(0x1C, True, 1 << 32)  # CLEAR_INTERRUPT at 0x1C (upper 32-bit lane)
+        self.assertFalse(rtc.irq_active())
+        self.assertIsNotNone(VirtioRngMmio())
 
     @unittest.skipUnless(shutil.which("qemu-system-riscv64"), "qemu-system-riscv64 not installed")
     def test_live_qemu_system_riscv64_qtest_backend(self) -> None:

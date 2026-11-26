@@ -2,7 +2,8 @@
 
 module rapt_ieu_alu #(
     parameter int XLEN = `RAPT_XLEN,
-    parameter bit EnableRareOps = 1'b1
+    parameter bit EnableRareOps = 1'b1,
+    parameter bit EnableClmul = 1'b1
 ) (
     input        [XLEN-1:0] s1,
     input        [XLEN-1:0] s2,
@@ -219,10 +220,10 @@ module rapt_ieu_alu #(
       `RAPT_ALU_CZERO_EQZ: begin alu_r = (s2 == '0) ? '0 : s1; end
       `RAPT_ALU_CZERO_NEZ: begin alu_r = (s2 != '0) ? '0 : s1; end
 
-      // Zbc (Carry-less Multiplication)
-      `RAPT_ALU_CLMUL:  begin alu_r = EnableRareOps ? clmul_tree[1][XLEN-1:0] : '0; end
-      `RAPT_ALU_CLMULH: begin alu_r = EnableRareOps ? clmul_tree[1][2*XLEN-1:XLEN] : '0; end
-      `RAPT_ALU_CLMULR: begin alu_r = EnableRareOps ? clmul_tree[1][2*XLEN-2-:XLEN] : '0; end
+      // Zbc (Carry-less Multiplication; routed to MDQ when EnableClmul=0)
+      `RAPT_ALU_CLMUL:  begin alu_r = (EnableRareOps && EnableClmul) ? clmul_tree[1][XLEN-1:0] : '0; end
+      `RAPT_ALU_CLMULH: begin alu_r = (EnableRareOps && EnableClmul) ? clmul_tree[1][2*XLEN-1:XLEN] : '0; end
+      `RAPT_ALU_CLMULR: begin alu_r = (EnableRareOps && EnableClmul) ? clmul_tree[1][2*XLEN-2-:XLEN] : '0; end
       // verilog_format: on
       default: begin
         alu_r = 'h0;

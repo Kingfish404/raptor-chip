@@ -49,10 +49,10 @@ The load row is an aligned, cacheable Bare-mode hit whose base register is ready
 
 | Dependency or event | Cycles |
 | --- | --- |
-| ALU → dependent ALU or branch | 1 (back to back) |
-| Load hit → dependent ALU | 2 |
-| MUL → dependent ALU | 3 |
-| Result → a consumer outside ALQ/BRQ (ROU dispatch bypass, IOQ, MDQ, FEU integer sources) | +1 over the rows above |
+| ALU -> dependent ALU or branch | 1 (back to back) |
+| Load hit -> dependent ALU | 2 |
+| MUL -> dependent ALU | 3 |
+| Result -> a consumer outside ALQ/BRQ (ROU dispatch bypass, IOQ, MDQ, FEU integer sources) | +1 over the rows above |
 | Branch mispredict, from branch execute to target execute | 12 |
 | Unpredicted direct jump, corrected in IDU | 3 bubbles before the target reaches IDU |
 
@@ -85,17 +85,17 @@ under the cluster top `rapt`:
 
 ```text
 rapt (cluster)                 rtl/rapt.sv
-├─ rapt_core (per hart)        rtl/core/
-│  ├─ rapt_frontend            core/frontend/       BPU (branch_predictor/), IFU, FQU, IDU
-│  ├─ rapt_backend             core/backend/        rename/, rob/, dispatch/, issue/,
-│  │                                                regfile/, commit/ (CMU, CSR),
-│  │                                                ieu/, feu/, fpu/, vpu/, lsu/
-│  └─ rapt_memory              core/memory/         icache/, dcache/, mmu/, replacement/,
-│                                                   bus unit; PMP in core/pmp/
-├─ rapt_l2_subsystem           rtl/uncore/          AXI master, budgets, l2cache/ if enabled
-├─ rapt_router                 rtl/uncore/
-├─ CLINT, PLIC                 rtl/uncore/irq/
-└─ DM, DTM, debug arbiter      rtl/uncore/debug/
+|- rapt_core (per hart)        rtl/core/
+|  |- rapt_frontend            core/frontend/       BPU (branch_predictor/), IFU, FQU, IDU
+|  |- rapt_backend             core/backend/        rename/, rob/, dispatch/, issue/,
+|  |                                                regfile/, commit/ (CMU, CSR),
+|  |                                                ieu/, feu/, fpu/, vpu/, lsu/
+|  `- rapt_memory              core/memory/         icache/, dcache/, mmu/, replacement/,
+|                                                   bus unit; PMP in core/pmp/
+|- rapt_l2_subsystem           rtl/uncore/          AXI master, budgets, l2cache/ if enabled
+|- rapt_router                 rtl/uncore/
+|- CLINT, PLIC                 rtl/uncore/irq/
+`- DM, DTM, debug arbiter      rtl/uncore/debug/
 ```
 
 `rtl/common/` and `rtl/sram/` hold shared leaves such as queues, selectors and
@@ -251,7 +251,7 @@ Sstc compares `stimecmp` with CLINT time and `vstimecmp` with guest time
 (`time + htimedelta`). The Sscofpmf path raises a local overflow interrupt
 for `mhpmcounter3` and filters that counter by execution mode.
 Eight PMP entries implement TOR and NAPOT at the default 4 KiB granularity across 16
-architectural CSR slots; slots 8–15 read as zero and ignore writes. NA4 is available only
+architectural CSR slots; slots 8-15 read as zero and ignore writes. NA4 is available only
 with an explicit four-byte-grain configuration. The cluster routes CLINT timer/software
 interrupts and PLIC external interrupts to the core. CLINT supplies `mtime`, `mtimecmp`,
 and `msip`; PLIC has 31 sources and M/S contexts by default. The PLIC window accepts
@@ -276,20 +276,20 @@ depend on the board and build constraints.
 | Item | Default |
 | --- | --- |
 | XLEN | RV32; `-DRAPT_RV64` selects RV64 |
-| Physical address | 32 bits by default in both modes; RV64 `RAPT_PADDR_BITS` supports 32–38 |
+| Physical address | 32 bits by default in both modes; RV64 `RAPT_PADDR_BITS` supports 32-38 |
 | Stored PC | 32 bits (RV32); 40 bits sign-extended to RV64 (`RAPT_PC_FULL_WIDTH` retains 64) |
 | Ordered widths | Decode 2, rename 2, dispatch 2, commit 2 |
 | Integer issue | 2 ports; CSR/system on port 0; 6 completion endpoints (`N+4`) |
 | Fetch | Six-halfword L1I lookahead; no IFU response register |
 | Ordered buffers | FQU 4, RNQ 8, `rename_pipe` 4, operand stage 2, UOQ 8 |
-| Window | ROB 32 (4-bit generation), integer PRF 64, operand spill 16, dispatch window 12 lanes, branch checkpoints 16 |
-| Execution queues | ALQ 8, BRQ 8, MDQ 4, FPQ 8, IOQ 8, unified SQ 16 |
-| Floating point | Renamed F/D/Zfhmin and RV64 Zfa; ROB-backed results; 32 × 64-bit committed FPRs |
+| Window | ROB 32 (4-bit generation), integer PRF 64, direct prefix dispatch, branch checkpoints 16 |
+| Execution queues | ALQ 8, BRQ 8, MDQ 4, FPQ 8, IOQ 8 (decoupled Load/Store AGU, 8-entry store-data cache), unified SQ 16 |
+| Floating point | Renamed F/D/Zfhmin and RV64 Zfa; ROB-backed results; 32 x 64-bit committed FPRs |
 | Vector | V 1.0, VLEN=128, ELEN=64 in both XLENs; single ROB-head owner |
 | RV64 supervisor profile | RVA23S64 with Sha/H, Sv39 and Sv39x4 guest translation |
-| Branch prediction | TAGE (1024 bimodal + 3 x 1024 tagged), side conditional query of the same TAGE, 512-entry four-way BTB, 16-entry RAS |
-| L1I | 16 KiB, four-way, 64 sets, 64-byte lines, 32-byte refill sector, same-4KB-page next-line prefetcher |
-| L1D | 16 KiB, four-way, 64 sets, 64-byte lines, write-back, 4 MSHRs, 2 writeback buffers, 16-entry IP-stride prefetcher, Sv32/Sv39 miss replay |
+| Branch prediction | TAGE (1024 bimodal + 3 x 1024 tagged), side conditional query of the same TAGE, 512-entry four-way BTB, 32-entry ITT, 32-entry loop predictor, 16-entry RAS |
+| L1I | 16 KiB, four-way, 64 sets, 64-byte lines, 32-byte refill sector, hit-under-prefetch, next-line + 8-entry pure-DFF FDIP target prefetcher |
+| L1D | 16 KiB, four-way, 64 sets, 64-byte lines, write-back, 8 MSHRs, 2 writeback buffers, degree-2 16-entry IP-stride prefetcher, Sv32/Sv39 miss replay |
 | TLB | ITLB 16 (fully associative), DTLB 64 (two-way, replicated load/store lookup); shared four-way L2 TLB 512 (`1024` in `default-w3`/`default-w4`) |
 | L2 | No cache: the L2 subsystem only bridges to AXI (`default-l2` adds the cache) |
 | AXI master | In `rapt_l2_subsystem`: 4-bit ID, XLEN-bit data, up to 8 reads; up to 4 eligible cacheable writes without L2; buffered writebacks complete on B |

@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <termios.h>
@@ -188,6 +189,21 @@ static bool serial_read_host_byte(uint8_t *ch)
     for (;;)
     {
         int input_fd = tty_input_fd >= 0 ? tty_input_fd : STDIN_FILENO;
+        // Another process sharing the same open file description (e.g. parallel
+        // simulator runs) may clear O_NONBLOCK on exit. Poll with zero timeout
+        // before reading so serial_tick() can never block.
+        struct pollfd pfd = {input_fd, POLLIN, 0};
+        int ready = poll(&pfd, 1, 0);
+        if (ready == 0)
+            return false;
+        if (ready < 0)
+        {
+            if (errno == EINTR)
+                continue;
+            return false;
+        }
+        if ((pfd.revents & (POLLIN | POLLHUP)) == 0)
+            return false;
         ssize_t nread = read(input_fd, ch, 1);
         if (nread == 1)
         {
