@@ -214,10 +214,10 @@ Linux-sim CoreMark (`3.7935 -> 3.8553`, +1.6%), and Linux-sim Embench-IoT (`1.83
 Measured directly on KU5P and KU15P boards running Linux over NFS (binaries staged in RAM `/tmp`,
 200k-iteration Dhrystone strict/standard, 2000-iteration official CoreMark, 19/19 Embench-IoT):
 
-| Board | Preset / XLEN | DMIPS/MHz | CoreMark/MHz | Embench-IoT (vs KU5P) | SPECrate2017 (INT/FP / GHz) |
-|---|---|---:|---:|---:|---:|
-| KU5P | `default` / RV64 | **1.34-1.93** | **3.3514** | **1.0477x** *(19/19)* | **0.21 / 0.16** *(23/23 `test` IPC)* |
-| KU15P | `default-w4` / RV64 | **1.46-2.16** | **3.9803** | **1.2319x** *(19/19)* | **0.23 / 0.17** *(23/23 `test` IPC)* |
+| Board | Preset / XLEN | DMIPS/MHz | CoreMark/MHz | Embench-IoT (vs KU5P) | SPECrate2017 (INT/FP / GHz) | SPECrate2026 (INT/FP / GHz) |
+|---|---|---:|---:|---:|---:|---:|
+| KU5P | `default` / RV64 | **1.34-1.93** | **3.3514** | **1.0477x** *(19/19)* | **0.21 / 0.16** *(23/23 `test` IPC)* | - |
+| KU15P | `default-w4` / RV64 | **1.46-2.16** | **3.9803** | **1.2319x** *(19/19)* | **0.23 / 0.17** *(23/23 `test` IPC)* | **0.06 / 0.10** *(25/26 `test` IPC)* |
 
 Live Ubuntu 26.10 (RVA23) full-workload SPEC CPU 2017 `test` hardware runs on real DDR4 (no L2
 cache) completed **23/23** workloads (`rc=0`) on both boards:
@@ -227,8 +227,12 @@ cache) completed **23/23** workloads (`rc=0`) on both boards:
 - **KU15P (`default-w4 / RV64`)**: **1.38T instructions** / 4.45T cycles, geomean IPC
   `0.2761` (INT `0.2938` / FP `0.2633`, aggregate IPC `0.3105`, +9.0% over `default`), e.g.,
   `525.x264_r` `0.7061`, `548.exchange2_r` `0.6625`, `541.leela_r` `0.6433`, `557.xz_r` `0.4248`.
-Both runs demonstrate full real-hardware Linux + glibc + DDR4 stability while highlighting
-DRAM-bound sensitivity (e.g., `507.cactuBSSN_r` IPC `~0.065`, `549.fotonik3d_r` IPC `~0.104`)
+- **KU15P SPEC CPU 2026 `test` (`default-w4 / RV64`)**: **25/26** workloads (`rc=0`, **2.74T
+  instructions** / 5.61T cycles over 31.2h, geomean IPC `0.2749`, INT `0.2518` / FP `0.3023`,
+  aggregate IPC `0.4875`), e.g., `772.marian_r` `0.9756` (1.76T insts), `750.sealcrypto_r`
+  `0.9132`, `706.stockfish_r` `0.7277`, `777.zstd_r` `0.5928`, `731.astcenc_r` `0.4911`.
+All runs demonstrate full real-hardware Linux + glibc + DDR4 stability while highlighting
+DRAM-bound sensitivity (e.g., `507.cactuBSSN_r` IPC `~0.065`, `709.cactus_r` IPC `0.0609`)
 without an L2 cache.
 
 ---

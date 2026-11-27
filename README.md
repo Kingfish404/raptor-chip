@@ -77,7 +77,7 @@ Selected benchmark results for the configurations below. FPGA runs use a 50 MHz 
 | Linux sim | default / RV64 | 1.52-2.15 | 3.3654 | 1.6573x | 0.54 / 0.44 | 0.24 / 0.23 |
 | Linux sim | default-w4 / RV64 | 1.66-2.43 | 3.8553 | 1.9116x | 0.58 / 0.46 | 0.29 / 0.24 |
 | FPGA Linux, KU5P | default / RV64 | 1.34-1.93 | 3.3514 | 1.0477x | 0.21 / 0.16 | - |
-| FPGA Linux, KU15P | default-w4 / RV64 | 1.46-2.16 | 3.9803 | 1.2319x | 0.23 / 0.17 | - |
+| FPGA Linux, KU15P | default-w4 / RV64 | 1.46-2.16 | 3.9803 | 1.2319x | 0.23 / 0.17 | 0.06 / 0.10 |
 
 All figures are measured directly on RTL (Verilator or FPGA; no architectural models).
 DMIPS/MHz reports strict (`-O3 -fno-inline`) to standard (`-O3 -fno-inline-functions`) with
