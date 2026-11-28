@@ -408,7 +408,7 @@ STORE_MUTATIONS = {
     'amo-word-compare': ('assign head_amo_less_unsigned = ioq_word[ioq_head]',
                         "assign head_amo_less_unsigned = 1'b0"),
     'sc-result': ('? (reservation_match ? 0 : 1)', '? (reservation_match ? 1 : 0)'),
-    'sc-notification': ('&& (exu_l1d.reservation_blocked || !sc_decision_ready))',
+    'sc-notification': ('&& (sc_reservation_blocked || !sc_decision_ready))',
                         '&& (!sc_decision_ready))'),
 }
 

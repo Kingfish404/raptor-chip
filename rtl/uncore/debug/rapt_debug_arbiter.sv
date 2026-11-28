@@ -1,7 +1,7 @@
 `include "rapt.svh"
 `include "rapt_soc_if.svh"
 
-// Two-master AXI merge. ID 15 belongs exclusively to SBA; all core IDs pass
+// Two-master AXI merge. ID 7 belongs exclusively to SBA; all core IDs pass
 // unchanged. AR arbitration is round-robin per address, AW/W per complete
 // address + data burst. An offered request keeps its owner through stalls.
 // Responses route by ID independently, preserving core outstanding capacity.

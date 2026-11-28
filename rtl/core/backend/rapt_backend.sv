@@ -923,6 +923,7 @@ module rapt_backend #(
   assign exu_l1d.valid = vm_active ? vm_state == VM_TRANSLATE : scalar_mmu.valid;
   assign exu_l1d.misaligned = vm_active ? vm_unaligned : scalar_mmu.misaligned;
   assign exu_l1d.reservation_clear = !vm_active && scalar_mmu.reservation_clear;
+  assign exu_l1d.atomic_lock_req = scalar_mmu.atomic_lock_req;
 `ifdef RAPT_H_EXTENSION
   assign exu_l1d.guest = vm_active ? vm_guest_q : scalar_mmu.guest;
   assign scalar_mmu.gpaddr = exu_l1d.gpaddr;
@@ -936,6 +937,7 @@ module rapt_backend #(
   assign scalar_mmu.reservation_valid = exu_l1d.reservation_valid;
   assign scalar_mmu.reservation_size_m1 = exu_l1d.reservation_size_m1;
   assign scalar_mmu.reservation_blocked = exu_l1d.reservation_blocked;
+  assign scalar_mmu.atomic_lock_stall = vm_active || exu_l1d.atomic_lock_stall;
   assign scalar_mmu.ready = !vm_active && exu_l1d.ready;
 
   `RAPT_SVA_IMPLY(

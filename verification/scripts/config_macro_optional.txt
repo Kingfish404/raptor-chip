@@ -1,6 +1,7 @@
 # Intentional absence is part of these switches' interface, not missing configuration.
 # Direction alternatives are checked as an exactly-one group by the checker.
 RAPT_RV64 # Absent selects RV32; supplied by the build's XLEN flag.
+RAPT_NHARTS # Preset-selected cluster hart count; absent selects single-hart.
 RAPT_RVFI # Formal instrumentation, enabled only by the formal build.
 RAPT_ASSERT_EN # Simulation assertions, supplied by simulation/verification builds.
 RAPT_FORMAL_NATIVE # Opt-in native formal lowering of clocked assertion macros.

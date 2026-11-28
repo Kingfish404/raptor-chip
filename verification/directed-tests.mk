@@ -81,6 +81,21 @@ $(eval $(call XLEN_TEST,l1d-store-pbmt,tb_l1d_store_pbmt,,-d RAPT_ASSERT_EN))
 # Registered retirement-window and SQ-empty equivalence assertions.
 $(eval $(call XLEN_TEST,c1-head-flags,tb_rou_dual_commit,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,clint-strobe,tb_clint_strobe))
+$(eval $(call XLEN_TEST,clint-multihart,tb_clint_multihart))
+$(eval $(call XLEN_TEST,coherence-hub,tb_coherence_hub))
+$(eval $(call XLEN_TEST,dm-multihart,tb_dm_multihart))
+SMP2_BUILD_FLAGS := --build-jobs 8 -fno-dfg-break-cycles -d RAPT_NO_VPU
+SMP4_BUILD_FLAGS := --build-jobs 16 --output-groups 16 -fno-dfg-break-cycles -d RAPT_NO_VPU
+$(eval $(call XLEN_TEST,rapt-smp-smoke,tb_rapt_smp_smoke,,$$(SMP2_BUILD_FLAGS)))
+$(eval $(call XLEN_TEST,rapt-smp-coherence-atomics,tb_rapt_smp_coherence_atomics,,\
+    $$(SMP2_BUILD_FLAGS)))
+$(eval $(call XLEN_TEST,rapt-smp4-stress,tb_rapt_smp4_stress,,$$(SMP4_BUILD_FLAGS)))
+$(eval $(call XLEN_TEST,rapt-smp-coherence-atomics-l2,tb_rapt_smp_coherence_atomics,,\
+    $$(SMP2_BUILD_FLAGS)))
+$(eval $(call XLEN_TEST,rapt-smp4-stress-l2,tb_rapt_smp4_stress,,$$(SMP4_BUILD_FLAGS)))
+$(eval $(call DIRECTED_PRESET,verilator-rapt-smp-coherence-atomics-l2-rv32 \
+    verilator-rapt-smp-coherence-atomics-l2-rv64 verilator-rapt-smp4-stress-l2-rv32 \
+    verilator-rapt-smp4-stress-l2-rv64,default-w4-l2))
 $(eval $(call XLEN_TEST,router-clint-strobe,tb_router_clint_strobe,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,lsu-split-fault,tb_lsu_split_fault,,-d RAPT_ASSERT_EN))
 $(eval $(call XLEN_TEST,ioq-store-snapshot,tb_ioq_store_translation_snapshot,,-d RAPT_ASSERT_EN))

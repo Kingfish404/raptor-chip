@@ -1,0 +1,44 @@
+/dts-v1/;
+
+/include/ "spike-rv64gc.dts"
+
+/ {
+	model = "Raptor RV64GC 2-Core SMP";
+
+	cpus {
+		cpu@1 {
+			device_type = "cpu";
+			reg = <0x01>;
+			status = "okay";
+			compatible = "riscv";
+			riscv,isa = "rv64imafdc_zicsr_zifencei_zicntr";
+			riscv,isa-base = "rv64i";
+			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "zicsr", "zifencei", "zicntr";
+			mmu-type = "riscv,sv39";
+			riscv,pmpregions = <0x10>;
+			riscv,pmpgranularity = <0x04>;
+			clock-frequency = <0x3b9aca00>;
+
+			cpu1_intc: interrupt-controller {
+				#address-cells = <0x02>;
+				#interrupt-cells = <0x01>;
+				interrupt-controller;
+				compatible = "riscv,cpu-intc";
+			};
+		};
+	};
+
+	soc {
+		clint@2000000 {
+			interrupts-extended =
+				<&cpu0_intc 0x03 &cpu0_intc 0x07>,
+				<&cpu1_intc 0x03 &cpu1_intc 0x07>;
+		};
+
+		plic@c000000 {
+			interrupts-extended =
+				<&cpu0_intc 0x0b &cpu0_intc 0x09>,
+				<&cpu1_intc 0x0b &cpu1_intc 0x09>;
+		};
+	};
+};

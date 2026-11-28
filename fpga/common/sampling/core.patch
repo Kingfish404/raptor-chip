@@ -1,6 +1,6 @@
 --- a/rtl/rapt.sv
 +++ b/rtl/rapt.sv
-@@ -48,6 +48,9 @@
+@@ -47,6 +47,9 @@
  ) (
      input rapt_pkg::sram_ctrl_t sram_ctrl_i,
      input clock,
@@ -10,31 +10,31 @@
      output logic writeback_error_o,
      // Asserted only after core AXI traffic drains; retained integrations may
      // use this boundary to apply a boot setting without resetting the DM.
-@@ -188,6 +191,21 @@
+@@ -187,6 +190,21 @@
    logic            dm_dbg_gpr_we;
    logic [     4:0] dm_dbg_gpr_addr;
    logic [XLEN-1:0] dm_dbg_gpr_wdata;
-+  logic core_haltreq;
-+  logic [4:0] core_dbg_gpr_addr;
++  logic            core_haltreq;
++  logic [     4:0] core_dbg_gpr_addr;
 +`ifdef RAPT_SAMPLING
 +  logic sample_debug_quiescent;
 +  always_ff @(posedge clock) begin
 +    sample_debug_quiescent <= !reset && sample.quiescent;
 +  end
-+  assign core_haltreq = dm_haltreq || sample.halt_req;
++  assign core_haltreq = dm_haltreq[0] || sample.halt_req;
 +  // Reuse the committed debug read port for the Linux TLS thread key while
 +  // running/draining. Host GPR selection becomes visible after quiescence.
 +  assign core_dbg_gpr_addr = sample_debug_quiescent ? sample.gpr_addr : 5'd4;
 +`else
-+  assign core_haltreq = dm_haltreq;
++  assign core_haltreq = dm_haltreq[0];
 +  assign core_dbg_gpr_addr = dm_dbg_gpr_addr;
 +`endif
  
-   // Latch even a short ndmreset request. Keep the old core/L2 alive until
-   // every offered/accepted AXI transfer drains, then reset for at least a cycle.
-@@ -254,6 +272,12 @@
- 
-   rapt_clint clint_inst (
+   // Per-hart debug mux buses (hart 0 uses direct wires when NHARTS==1).
+   logic [`RAPT_PC_BITS_OF(XLEN)-1:0] hart_halt_pc     [NHARTS];
+@@ -278,6 +296,12 @@
+       .NHARTS(NHARTS)
+   ) clint_inst (
        .clock(clock),
 +`ifdef RAPT_SAMPLING
 +      .restore_i(sample.restore_fire),
@@ -45,29 +45,29 @@
  
        .clint_bus(clint_bus),
  
-@@ -338,6 +362,9 @@
-       .XLEN(XLEN),
-       .L1dWriteBack(L1dWriteBack)
+@@ -404,6 +428,9 @@
+       .L1dWriteBack(CoreL1dWriteBack),
+       .L2Link(CoreL2Link)
    ) core (
 +`ifdef RAPT_SAMPLING
 +      .sample(sample),
 +`endif
        .sram_ctrl_i(sram_ctrl_i),
-       .writeback_error_o(writeback_error_o),
+       .writeback_error_o(hart_wb_err[0]),
        .external_write_valid_i(external_write_valid_i),
-@@ -389,7 +416,7 @@
-       // Hart 0; multi-core build will replace with a generate index.
+@@ -454,7 +481,7 @@
+ 
        .hart_id_i({XLEN{1'b0}}),
  
--      .dm_haltreq_i (dm_haltreq),
+-      .dm_haltreq_i (dm_haltreq[0]),
 +      .dm_haltreq_i (core_haltreq),
-       .debug        (debug),
-       .halted_o     (dm_halted),
-       .halt_pc_o    (dm_halt_pc),
-@@ -397,12 +424,16 @@
+       .debug        (hart0_debug),
+       .halted_o     (dm_halted[0]),
+       .halt_pc_o    (hart_halt_pc[0]),
+@@ -462,12 +489,16 @@
  
-       .dbg_gpr_rdata_o(dm_dbg_gpr_rdata),
-       .dbg_gpr_we_i   (dm_dbg_gpr_we),
+       .dbg_gpr_rdata_o(hart_dbg_gpr_rdata[0]),
+       .dbg_gpr_we_i   (hart_dbg_gpr_we[0]),
 -      .dbg_gpr_addr_i (dm_dbg_gpr_addr),
 +      .dbg_gpr_addr_i (core_dbg_gpr_addr),
        .dbg_gpr_wdata_i(dm_dbg_gpr_wdata),
@@ -76,12 +76,12 @@
    );
  
 +`ifdef RAPT_SAMPLING
-+  assign sample.gpr_data = dm_dbg_gpr_rdata;
++  assign sample.gpr_data = hart_dbg_gpr_rdata[0];
 +`endif
 +
-   assign dm_resumereq_unused = dm_resumereq;
- 
- 
+   if (NHARTS == 1) begin : g_single_hart_link
+     assign l2_sub_client.rd_req_valid        = core_l2.rd_req_valid;
+     assign l2_sub_client.rd_req_id           = core_l2.rd_req_id;
 --- a/rtl/core/rapt_core.sv
 +++ b/rtl/core/rapt_core.sv
 @@ -19,6 +19,9 @@
@@ -135,7 +135,7 @@
        .writeback_done(cache_writeback_done),
        .writeback_drain(cache_writeback_drain),
        .writeback_clean(cache_writeback_clean),
-@@ -296,10 +317,10 @@
+@@ -295,10 +316,10 @@
        .writeback_idle_o(unused_writeback_idle),
        .writeback_done_o(cache_writeback_done),
        .stores_empty_i(sq_empty),
@@ -162,7 +162,7 @@
      input rapt_pkg::sram_ctrl_t sram_ctrl_i,
      input logic writeback_done,
      output logic writeback_drain,
-@@ -122,6 +125,21 @@
+@@ -124,6 +127,21 @@
    rou_cmu_if rou_cmu ();  // Commit
  
    rou_csr_if rou_csr ();
@@ -184,7 +184,7 @@
  
    dpu_iq_if disp_alq ();
    dpu_iq_if #(.RS_SIZE(rapt_pkg::BranchQueueEntries)) disp_brq ();
-@@ -1650,6 +1668,9 @@
+@@ -1683,6 +1701,9 @@
  
    rapt_csr csrs (
        .clock  (clock),
@@ -219,7 +219,7 @@
    for (genvar i = 0; i < 64; i++) begin : g_csr_view
      if (i == int'(MISA___)) begin : g_misa
        assign csr[i] = XLEN'(rapt_pkg::Misa);
-@@ -1360,7 +1369,21 @@
+@@ -1478,7 +1487,21 @@
            end
          end
        end
@@ -244,8 +244,8 @@
  
 --- a/rtl/uncore/irq/rapt_clint.sv
 +++ b/rtl/uncore/irq/rapt_clint.sv
-@@ -20,6 +20,12 @@
-     parameter int MTIME_DIV = `RAPT_MTIME_DIV
+@@ -21,6 +21,12 @@
+     parameter int NHARTS = 1
  ) (
      input clock,
 +`ifdef RAPT_SAMPLING
@@ -257,15 +257,15 @@
  
      clint_bus_if.slave clint_bus,
  
-@@ -98,6 +104,14 @@
+@@ -147,6 +153,14 @@
+           msip_reg[h] <= ((h & 1) != 0) ? register_wdata[32] : register_wdata[0];
+         end
        end
-       if (clint_bus.wvalid && clint_bus.awaddr == (`RAPT_CLINT_MSIP) && clint_bus.wstrb[0])
-         msip_reg <= clint_bus.wdata[0];
 +`ifdef RAPT_SAMPLING
 +      if (restore_i) begin
 +        mtime <= restore_time_i;
-+        mtimecmp <= restore_timecmp_i;
-+        msip_reg <= restore_msip_i;
++        mtimecmp_arr[0] <= restore_timecmp_i;
++        msip_reg[0] <= restore_msip_i;
 +        mtime_div_cnt <= '0;
 +      end
 +`endif

@@ -16,8 +16,9 @@ interface rapt_debug_if #(
   logic [2:0] cause;
   logic [1:0] prv;
   logic fetch_block;
+  logic [3:0] hartsel;
   modport dm(
-      output enable, step, stepie, ebreak, resume_valid, resume_pc,
+      output enable, step, stepie, ebreak, resume_valid, resume_pc, hartsel,
       input resume_ack, cause, prv
   );
   modport hart(

@@ -47,9 +47,13 @@ TOP_l2tlb := rapt_l2tlb
 CLOCK_fp_registers := clock
 CLOCK_l2tlb := clock
 
-# Cluster debug leaves (outside MODULE=core).
-MODULES += dm debug_arbiter
+# Cluster debug and uncore leaves (outside MODULE=core).
+MODULES += dm debug_arbiter coherence_hub clint
 TOP_dm := rapt_dm
 TOP_debug_arbiter := rapt_debug_arbiter
+TOP_coherence_hub := rapt_coherence_hub
+TOP_clint := rapt_clint
 CLOCK_dm := clock
 CLOCK_debug_arbiter := clock
+CLOCK_coherence_hub := clock
+CLOCK_clint := clock

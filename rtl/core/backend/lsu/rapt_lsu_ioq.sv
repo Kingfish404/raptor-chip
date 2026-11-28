@@ -104,7 +104,7 @@ module rapt_lsu_ioq #(
 
 
   logic [IOQLen-1:0] wake_next_idx;
-  logic [XLEN-1:0] wake_next_addr;
+  logic [XLEN-1:0] wake_next_addr, wake_next_raw_addr;
   logic wake_next_req_valid, wake_next_fold_valid;
 
   logic [IOQ_SIZE-1:0] forward_candidate;
@@ -638,13 +638,36 @@ module rapt_lsu_ioq #(
   logic head_zero_pma_fault;
   logic head_data_pma_fault, head_data_pma_fault_hi;
   logic [3:0] store_bare_fault_offset;
+  logic atomic_sq_drain_q;
+  wire head_is_atomic_non_lr = ioq_valid[ioq_head] && ioq_atom[ioq_head]
+      && (ioq_alu[ioq_head] != `RAPT_ATO_LR__);
+  // Only request the cluster atomic lock once the AMO/SC is non-speculative at
+  // ROB head; otherwise a speculative AMO behind a spin-wait load/branch can
+  // hold the cluster lock and block the remote hart's unlock write (deadlock).
+  wire head_needs_atomic_lock = head_is_atomic_non_lr && ioq_at_rob_head;
+  wire head_is_amo_rw_early = head_is_atomic_non_lr
+      && (ioq_alu[ioq_head] != `RAPT_ATO_SC__);
+  assign exu_l1d.atomic_lock_req = head_needs_atomic_lock || (atomic_sq_drain_q && exu_lsu.sq_busy);
+  always_ff @(posedge clock) begin
+    if (reset) begin
+      atomic_sq_drain_q <= 1'b0;
+    end else if (wb_accept && sq_store_payload.valid && sq_store_payload.wen
+                 && head_is_atomic_non_lr) begin
+      atomic_sq_drain_q <= 1'b1;
+    end else if (atomic_sq_drain_q && !exu_lsu.sq_busy) begin
+      atomic_sq_drain_q <= 1'b0;
+    end
+  end
+
   assign head_is_atomic_ready = ioq_valid[ioq_head] && ioq_atom[ioq_head]
       && head_integer_ready
       && ioq_addr_ready[ioq_head]
       && !ioq_complete[ioq_head]
       && head_store_addr_valid_q
-      // AMO reads follow a successful write-side translation/PMP check.
+      // AMO reads follow a successful write-side translation/PMP check and
+      // acquire the cluster atomic lock with an empty local SQ.
       && (!ioq_wen[ioq_head] || (head_store_check_valid_q && !head_store_check_fault_q))
+      && (!head_is_amo_rw_early || (!exu_l1d.atomic_lock_stall && !exu_lsu.sq_busy))
       && ioq_base_ready[ioq_head] && ioq_data_ready[ioq_head];
 
   logic [XLEN-1:0] load_req_sel_addr;
@@ -757,7 +780,8 @@ module rapt_lsu_ioq #(
       end
     end
     assign wake_next_idx = (|eligible) ? request_idx : ioq_head;
-    assign wake_next_addr = data_address(request_base + XLEN'($signed(request_imm)));
+    assign wake_next_raw_addr = request_base + XLEN'($signed(request_imm));
+    assign wake_next_addr = data_address(wake_next_raw_addr);
     wire [XLEN-1:0] forward_addr[1];
     wire [1:0] forward_span[1];
     wire [IOQ_SIZE-1:0] forward_overlap[1];
@@ -1292,6 +1316,7 @@ module rapt_lsu_ioq #(
       && sc_paddr >= exu_l1d.reservation
       && ({1'b0, sc_paddr} + (XLEN+1)'(sc_size_m1))
           <= ({1'b0, exu_l1d.reservation} + (XLEN+1)'(exu_l1d.reservation_size_m1));
+  wire sc_reservation_blocked = exu_l1d.reservation_blocked || exu_l1d.atomic_lock_stall;
   if (1'b1) begin : g_sc_decision_stage
     logic valid_q, match_q;
     logic [IOQLen-1:0] head_q;
@@ -1299,11 +1324,11 @@ module rapt_lsu_ioq #(
         && ioq_data_ready[ioq_head] && !ioq_mmu_en[ioq_head]
         && head_store_check_valid_q;
     // Atomics only execute at the head, so a younger LR cannot replace this
-    // reservation. External write notifications block completion immediately
-    // and discard the sampled decision. Resample after their invalidations
-    // have drained, even when SQ backpressure kept this SC at the head.
+    // reservation. External write notifications and cluster atomic-lock stalls
+    // block completion immediately and discard the sampled decision. Resample
+    // after invalidations drain and the cluster atomic lock is granted.
     always_ff @(posedge clock) begin
-      if (completion_kill || ioq_valid_found || exu_l1d.reservation_blocked) begin
+      if (completion_kill || ioq_valid_found || sc_reservation_blocked) begin
         valid_q <= 1'b0;
       end else begin
         valid_q <= address_ready;
@@ -1317,7 +1342,7 @@ module rapt_lsu_ioq #(
     assign reservation_match = match_q;
     `RAPT_SVA_IMPLY(clock, completion_kill, IOQ_SC_DECISION_CURRENT, head_is_sc && ioq_valid_found,
                     sc_decision_ready && reservation_match == reservation_match_live)
-    `RAPT_SVA_NEXT(clock, completion_kill, IOQ_SC_NOTIFICATION_RECHECK, exu_l1d.reservation_blocked,
+    `RAPT_SVA_NEXT(clock, completion_kill, IOQ_SC_NOTIFICATION_RECHECK, sc_reservation_blocked,
                    !valid_q)
   end
 
@@ -1845,7 +1870,7 @@ module rapt_lsu_ioq #(
       && (ioq_ren[ioq_head] ? head_load_done : ioq_mmu_en[ioq_head] == 0);
   assign head_atomic_ready = head_common_ready
       && !(ioq_alu[ioq_head] == `RAPT_ATO_SC__
-          && (exu_l1d.reservation_blocked || !sc_decision_ready))
+          && (sc_reservation_blocked || !sc_decision_ready))
       && (ioq_ren[ioq_head] ? (head_load_done || (head_is_amo_rw && head_store_fault))
           : ioq_mmu_en[ioq_head] == 0);
   assign ioq_valid_found = ioq_atom[ioq_head] ? head_atomic_ready : head_nonatomic_ready;
@@ -1860,7 +1885,7 @@ module rapt_lsu_ioq #(
   // memory. Notifications invalidate the sampled SC decision on the next
   // edge, while actual handoff and completion are blocked immediately.
   assign sq_handoff_valid = !completion_kill && sq_forward_pending
-      && !(head_is_sc && exu_l1d.reservation_blocked);
+      && !(head_is_sc && sc_reservation_blocked);
   assign sq_forward_pending = ioq_valid[ioq_head]
       && ioq_wen[ioq_head]
       && head_fpr_ready && head_integer_ready
@@ -1989,8 +2014,9 @@ module rapt_lsu_ioq #(
     assign dispatch_stable_addr[s] = data_address(
         offset == '0 ? dispatch[s].stable_op1 : address_sum);
     assign alloc_addr_valid[s] = !LateOperands ? (alloc_pr1[s] == '0)
-        : (int_source_regs[s][0] == '0 || dispatch[s].stable_op1_valid
-           || wb_hit(dispatch[s].pr1));
+        : (alloc_pr1[s] == '0
+           && (int_source_regs[s][0] == '0 || dispatch[s].stable_op1_valid
+               || wb_hit(dispatch[s].pr1)));
     // Disable allocation-edge PRF port stealing to break the 22ns
     // rob_head -> disp.accept -> PRF -> 64b adder -> address_bank path.
     assign alloc_base_ready[s] = 1'b0;
@@ -2107,7 +2133,7 @@ module rapt_lsu_ioq #(
         .needs_data(integer_data_required),
         .relay_valid(wake_next_fold_valid),
         .relay_index(wake_next_idx),
-        .relay_addr(wake_next_addr),
+        .relay_addr(wake_next_raw_addr),
         .base_source(late_base_source),
         .data_source(late_data_source),
         .read_address(operand_read_address),
@@ -2139,7 +2165,7 @@ module rapt_lsu_ioq #(
         end
         if (RegisterAddresses) begin
           if (ioq_prepare_sel[i]) ioq_vj[i] <= ioq_prepare_addr[i];
-          if (wake_next_fold_valid && wake_next_idx == IOQLen'(i)) ioq_vj[i] <= wake_next_addr;
+          if (wake_next_fold_valid && wake_next_idx == IOQLen'(i)) ioq_vj[i] <= wake_next_raw_addr;
         end
       end
     end

@@ -64,7 +64,8 @@ module rapt_l2 #(
     parameter int L2_LEN = `RAPT_L2_LEN,
     parameter int L2_LINE_LEN = `RAPT_L2_LINE_LEN,
     parameter int L2_N_WAYS = `RAPT_L2_N_WAYS,
-    parameter int PADDR_BITS = `RAPT_PADDR_BITS
+    parameter int PADDR_BITS = `RAPT_PADDR_BITS,
+    parameter bit Inclusive = 1'b1
 ) (
     /* verilator lint_off UNUSEDSIGNAL */
     input rapt_pkg::sram_ctrl_t sram_ctrl_i,
@@ -617,7 +618,7 @@ module rapt_l2 #(
   logic r_burst_fill;
 
   function automatic logic d_client_read_id(input logic [ID_W-1:0] id);
-    return id == ID_W'(2) || (ID_W >= 4 && (id & ID_W'('h8)) == ID_W'('h8));
+    return Inclusive && (id == ID_W'(2) || (ID_W >= 4 && (id & ID_W'('h8)) == ID_W'('h8)));
   endfunction
   // Hit lookup uses the saved read address.
   logic [IndexBits-1:0] r_idx_q;

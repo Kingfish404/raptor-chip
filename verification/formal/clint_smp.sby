@@ -1,0 +1,50 @@
+[tasks]
+bmc_rv64_smp2
+bmc_rv64_smp4
+bmc_rv32_smp2
+bmc_rv32_smp4
+prove_rv64_smp2
+prove_rv64_smp4
+cover_rv64_smp4
+
+[options]
+bmc_rv64_smp2: mode bmc
+bmc_rv64_smp2: depth 20
+bmc_rv64_smp4: mode bmc
+bmc_rv64_smp4: depth 20
+bmc_rv32_smp2: mode bmc
+bmc_rv32_smp2: depth 20
+bmc_rv32_smp4: mode bmc
+bmc_rv32_smp4: depth 20
+prove_rv64_smp2: mode prove
+prove_rv64_smp2: depth 8
+prove_rv64_smp4: mode prove
+prove_rv64_smp4: depth 8
+cover_rv64_smp4: mode cover
+cover_rv64_smp4: depth 12
+
+[engines]
+smtbmc --nopresat bitwuzla
+
+[script]
+plugin -i slang
+bmc_rv64_smp2: read_slang --single-unit -DFORMAL -DRAPT_RV64 --top formal_clint_smp -G XLEN=64 -G NHARTS=2 -G MTIME_DIV=3 formal_clint_smp.sv rapt_clint.sv
+bmc_rv64_smp4: read_slang --single-unit -DFORMAL -DRAPT_RV64 --top formal_clint_smp -G XLEN=64 -G NHARTS=4 -G MTIME_DIV=3 formal_clint_smp.sv rapt_clint.sv
+bmc_rv32_smp2: read_slang --single-unit -DFORMAL --top formal_clint_smp -G XLEN=32 -G NHARTS=2 -G MTIME_DIV=3 formal_clint_smp.sv rapt_clint.sv
+bmc_rv32_smp4: read_slang --single-unit -DFORMAL --top formal_clint_smp -G XLEN=32 -G NHARTS=4 -G MTIME_DIV=3 formal_clint_smp.sv rapt_clint.sv
+prove_rv64_smp2: read_slang --single-unit -DFORMAL -DRAPT_RV64 --top formal_clint_smp -G XLEN=64 -G NHARTS=2 -G MTIME_DIV=1 formal_clint_smp.sv rapt_clint.sv
+prove_rv64_smp4: read_slang --single-unit -DFORMAL -DRAPT_RV64 --top formal_clint_smp -G XLEN=64 -G NHARTS=4 -G MTIME_DIV=1 formal_clint_smp.sv rapt_clint.sv
+cover_rv64_smp4: read_slang --single-unit -DFORMAL -DRAPT_RV64 --top formal_clint_smp -G XLEN=64 -G NHARTS=4 -G MTIME_DIV=1 formal_clint_smp.sv rapt_clint.sv
+prep -top formal_clint_smp
+memory_map
+opt -fast
+
+[files]
+rapt_soc_if.svh ../../rtl/include/rapt_soc_if.svh
+formal_clint_smp.sv
+rapt_clint.sv ../../rtl/uncore/irq/rapt_clint.sv
+rapt.svh ../../rtl/include/rapt.svh
+rapt_config.svh ../../rtl/configs/formal/rapt_config.svh
+rapt_sva.svh ../../rtl/include/rapt_sva.svh
+rapt_fp_ops.svh ../../rtl/include/rapt_fp_ops.svh
+rapt_soc.svh ../../rtl/include/npc/rapt_soc.svh

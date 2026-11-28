@@ -6,10 +6,15 @@
 // verilator lint_off PINCONNECTEMPTY
 // verilator lint_off DECLFILENAME
 // verilator lint_off UNUSEDSIGNAL
+`ifndef RAPT_NHARTS
+`define RAPT_NHARTS 1
+`endif
+
 module raptSoC #(
     parameter int XLEN = `RAPT_XLEN,
     parameter bit L1dWriteBack = `RAPT_L1D_WRITEBACK,
-    parameter int ReadOutstanding = 8
+    parameter int ReadOutstanding = 8,
+    parameter int NHARTS = `RAPT_NHARTS
 ) (
     input  clock,
     output logic writeback_error_o,
@@ -189,7 +194,8 @@ module raptSoC #(
   end
 
   rapt #(
-      .L1dWriteBack(L1dWriteBack)
+      .L1dWriteBack(L1dWriteBack),
+      .NHARTS      (NHARTS)
   ) cpu (
       .sram_ctrl_i      (rapt_pkg::SramCtrlReset),
       .core_reset_o(),

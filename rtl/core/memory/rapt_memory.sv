@@ -259,4 +259,6 @@ module rapt_memory #(
   assign l2_client.wr_rsp_ready = memory_link.wr_rsp_ready;
   assign l2_client.cbo_inval = cmu_bcast.cbo_inval;
   assign l2_client.cbo_block = cmu_bcast.cbo_block;
+  assign l2_client.atomic_lock_req = exu_l1d.atomic_lock_req;
+  assign exu_l1d.atomic_lock_stall = l2_client.atomic_lock_stall;
 endmodule

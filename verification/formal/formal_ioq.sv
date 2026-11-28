@@ -266,20 +266,36 @@ module formal_ioq_owner (
         if (dut.ioq_addr_prepared[e]) begin
           prepared_source_ready : assert (dut.ioq_pr1[e] == '0);
         end
-        if (dut.ioq_addr_prepared[e] && dut.ioq_pr1[e] == '0)
-          prepared_address_value : assert (dut.ioq_eff_addr[e] == expected_source_address);
+        if (dut.ioq_addr_prepared[e] && dut.ioq_pr1[e] == '0) begin
+          prepared_address_value :
+          assert (dut.ioq_vj[e] == expected_source_address
+              && dut.ioq_eff_addr[e] == dut.data_address(
+              expected_source_address
+          ));
+        end
       end
     end
   end
-  for (genvar c = 0; c < 2; c++) begin : g_cached_source
-    wire [I-1:0] owner_index = dut.g_late_operands.operands.cache_owner[c];
-    always_ff @(posedge clock) begin
-      if (past_valid && dut.g_late_operands.operands.cache_valid[c]) begin
-        cached_source_live : assert (live[owner_index] && dut.integer_data_required[owner_index]);
-        cached_source_ready : assert (read_source_tag[owner_index][1] == '0);
-        cached_source_value :
-        assert (dut.g_late_operands.operands.cache_data[c] == read_source_value[owner_index][1]);
+  logic all_cached_live, all_cached_ready, all_cached_match;
+  always_comb begin
+    all_cached_live  = 1'b1;
+    all_cached_ready = 1'b1;
+    all_cached_match = 1'b1;
+    for (int c = 0; c < 8; c++) begin
+      if (dut.g_late_operands.operands.cache_valid[c]) begin
+        automatic logic [I-1:0] owner_idx = dut.g_late_operands.operands.cache_owner[c];
+        all_cached_live &= live[owner_idx] && dut.integer_data_required[owner_idx];
+        all_cached_ready &= (read_source_tag[owner_idx][1] == '0);
+        all_cached_match &=
+            (dut.g_late_operands.operands.cache_data[c] == read_source_value[owner_idx][1]);
       end
+    end
+  end
+  always_ff @(posedge clock) begin
+    if (past_valid && |dut.g_late_operands.operands.cache_valid) begin
+      cached_source_live : assert (all_cached_live);
+      cached_source_ready : assert (all_cached_ready);
+      cached_source_value : assert (all_cached_match);
     end
   end
 `endif
@@ -712,9 +728,9 @@ module formal_ioq_store (
       + (X+1)'(exu_l1d.reservation_size_m1);
   wire sampled_match = exu_l1d.reservation_valid && sc_address >= exu_l1d.reservation
       && sc_last <= reservation_last;
+  wire sc_blocked = exu_l1d.reservation_blocked || exu_l1d.atomic_lock_stall;
   always_ff @(posedge clock) begin
-    if (reset || cmu_bcast.flush_pipe || base.dut.ioq_valid_found || exu_l1d.reservation_blocked)
-      sc_valid <= 0;
+    if (reset || cmu_bcast.flush_pipe || base.dut.ioq_valid_found || sc_blocked) sc_valid <= 0;
     else begin
       sc_valid <= sc_sample;
       if (sc_sample) begin
@@ -794,8 +810,7 @@ module formal_ioq_store (
       if (base.result.valid && !base.dut.early_bcast_select && !base.result.trap
           && atomic_op[head]) begin
         if (opcode[head] == `RAPT_ATO_SC__) begin
-          sc_decision_present :
-          assert (sc_valid && sc_head == head && !exu_l1d.reservation_blocked);
+          sc_decision_present : assert (sc_valid && sc_head == head && !sc_blocked);
           sc_result : assert (base.result.result == (sc_match ? X'(0) : X'(1)));
           sc_write_enable : assert (base.result.wen == sc_match);
           sc_clear : assert (exu_l1d.reservation_clear);
@@ -803,7 +818,7 @@ module formal_ioq_store (
           amo_old_value : assert (base.result.result == base.response_data[head]);
         end
       end
-      if (sc_head_owned && exu_l1d.reservation_blocked) begin
+      if (sc_head_owned && sc_blocked) begin
         sc_notification_blocks : assert (!base.result.valid && !base.dut.sq_handoff_valid);
       end
     end

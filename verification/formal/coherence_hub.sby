@@ -1,0 +1,63 @@
+[tasks]
+bmc_rv64_smp2_l16 bmc rv64_smp2_l16
+bmc_rv64_smp2_l64 bmc rv64_smp2_l64
+bmc_rv64_smp4_l16 bmc rv64_smp4_l16
+bmc_rv64_smp4_l64 bmc rv64_smp4_l64
+bmc_rv32_smp2_l16 bmc rv32_smp2_l16
+bmc_rv32_smp4_l64 bmc rv32_smp4_l64
+prove_rv64_smp2_l16 prove rv64_smp2_l16
+prove_rv64_smp2_l64 prove rv64_smp2_l64
+prove_rv64_smp4_l16 prove rv64_smp4_l16
+prove_rv32_smp2_l16 prove rv32_smp2_l16
+cover_rv64_smp2_l16 cover rv64_smp2_l16
+cover_rv64_smp4_l16 cover rv64_smp4_l16
+cover_rv64_smp2_l64 cover rv64_smp2_l64
+prove_rv64_smp2_l16_l2o6 prove rv64_smp2_l16_l2o6
+cover_rv64_smp2_l16_l2o6 cover rv64_smp2_l16_l2o6
+
+[options]
+bmc:
+mode bmc
+depth 30
+--
+prove:
+mode prove
+depth 10
+--
+cover:
+mode cover
+depth 32
+--
+
+[engines]
+smtbmc bitwuzla
+
+[script]
+plugin -i slang
+rv64_smp2_l16:
+read_slang --single-unit -DFORMAL -DRAPT_RV64 -I../../../../rtl/configs/small -I../../../../rtl/include -I../../../../rtl/include/dpic_mock -I../../../../rtl/include/npc -GNHARTS=2 ../../../../rtl/rapt_pkg.sv ../../../../rtl/uncore/rapt_coherence_hub.sv formal_coherence_hub.sv
+--
+rv64_smp2_l64:
+read_slang --single-unit -DFORMAL -DRAPT_RV64 -I../../../../rtl/configs/default -I../../../../rtl/include -I../../../../rtl/include/dpic_mock -I../../../../rtl/include/npc -GNHARTS=2 ../../../../rtl/rapt_pkg.sv ../../../../rtl/uncore/rapt_coherence_hub.sv formal_coherence_hub.sv
+--
+rv64_smp4_l16:
+read_slang --single-unit -DFORMAL -DRAPT_RV64 -I../../../../rtl/configs/small -I../../../../rtl/include -I../../../../rtl/include/dpic_mock -I../../../../rtl/include/npc -GNHARTS=4 -GCboFifoDepth=2 ../../../../rtl/rapt_pkg.sv ../../../../rtl/uncore/rapt_coherence_hub.sv formal_coherence_hub.sv
+--
+rv64_smp4_l64:
+read_slang --single-unit -DFORMAL -DRAPT_RV64 -I../../../../rtl/configs/default -I../../../../rtl/include -I../../../../rtl/include/dpic_mock -I../../../../rtl/include/npc -GNHARTS=4 -GCboFifoDepth=2 ../../../../rtl/rapt_pkg.sv ../../../../rtl/uncore/rapt_coherence_hub.sv formal_coherence_hub.sv
+--
+rv32_smp2_l16:
+read_slang --single-unit -DFORMAL -I../../../../rtl/configs/small -I../../../../rtl/include -I../../../../rtl/include/dpic_mock -I../../../../rtl/include/npc -GNHARTS=2 ../../../../rtl/rapt_pkg.sv ../../../../rtl/uncore/rapt_coherence_hub.sv formal_coherence_hub.sv
+--
+rv32_smp4_l64:
+read_slang --single-unit -DFORMAL -I../../../../rtl/configs/default -I../../../../rtl/include -I../../../../rtl/include/dpic_mock -I../../../../rtl/include/npc -GNHARTS=4 -GCboFifoDepth=2 ../../../../rtl/rapt_pkg.sv ../../../../rtl/uncore/rapt_coherence_hub.sv formal_coherence_hub.sv
+--
+rv64_smp2_l16_l2o6:
+read_slang --single-unit -DFORMAL -DRAPT_RV64 -I../../../../rtl/configs/small -I../../../../rtl/include -I../../../../rtl/include/dpic_mock -I../../../../rtl/include/npc -GNHARTS=2 -GL2LineOffset=6 ../../../../rtl/rapt_pkg.sv ../../../../rtl/uncore/rapt_coherence_hub.sv formal_coherence_hub.sv
+--
+prep -top formal_coherence_hub
+memory_map
+opt -fast
+
+[files]
+formal_coherence_hub.sv

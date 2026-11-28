@@ -72,6 +72,7 @@ module rapt_l2_subsystem #(
   assign client.wr_rsp_id = memory_link.wr_rsp_id;
   assign client.wr_rsp_error = memory_link.wr_rsp_error;
   assign memory_link.wr_rsp_ready = client.wr_rsp_ready;
+  assign client.atomic_lock_stall = 1'b0;
 
   rapt_axi_master #(
       .XLEN(XLEN),
@@ -86,7 +87,10 @@ module rapt_l2_subsystem #(
       .axi(l2_axi)
   );
 
-  rapt_l2 l2 (
+  rapt_l2 #(
+      .XLEN(XLEN),
+      .Inclusive(L2Link.inclusive)
+  ) l2 (
       .sram_ctrl_i(sram_ctrl_i),
       .clock(clock),
       .reset(reset),

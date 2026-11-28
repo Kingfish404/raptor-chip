@@ -352,8 +352,46 @@ formal_plru: check-tools ## Prove 2/4/8-way PLRU selection and state updates
 formal_clint: check-tools ## Qualify CLINT byte lanes and timer/interrupt state
 	$(call run-native-contract,clint,FORMAL_CLINT)
 
+.PHONY: formal_clint_smp formal_plic_smp formal_coherence_hub formal_l1d_smp_probe
+formal_clint_smp: check-tools ## Prove multi-hart (NHARTS=2/4) CLINT registers and IRQs
+	$(SBY_RUN) -f -j $(FORMAL_JOBS) clint_smp.sby
+
 formal_plic: check-tools ## Prove RV32/RV64 PLIC arbitration, contexts and gateway lifecycle
 	$(SBY_RUN) -f plic.sby
+
+formal_plic_smp: check-tools ## Prove multi-hart PLIC (NCTX=4/8, NDEV=3/31) arbitration
+	$(SBY_RUN) -f -j $(FORMAL_JOBS) plic_smp.sby
+
+formal_coherence_hub: check-tools ## Prove SMP coherence hub invariants (NHARTS=2/4, 16B/64B)
+	$(SBY_RUN) -f -j $(FORMAL_JOBS) coherence_hub.sby
+
+L1D_SMP_PROBE_SRCS := $(RAPTOR_HOME)/rtl/rapt_pkg.sv \
+	$(shell find $(RAPTOR_HOME)/rtl/common $(RAPTOR_HOME)/rtl/sram \
+		$(RAPTOR_HOME)/rtl/core/pmp $(RAPTOR_HOME)/rtl/core/memory/dcache \
+		$(RAPTOR_HOME)/rtl/core/memory/mmu $(RAPTOR_HOME)/rtl/core/memory/replacement \
+		-name "*.sv" | sort) \
+	$(RAPTOR_HOME)/rtl/core/memory/rapt_bus.sv \
+	$(RAPTOR_HOME)/verification/formal/formal_l1d_smp_probe.sv
+L1D_SMP_PROBE_INC := -I$(RAPTOR_HOME)/rtl/configs/default-w4 \
+	-I$(RAPTOR_HOME)/rtl/include -I$(RAPTOR_HOME)/rtl/include/npc \
+	-I$(RAPTOR_HOME)/rtl/include/dpic_mock -I$(RAPTOR_HOME)/verification/xsim
+
+build/l1d_smp_probe_rv64.sv: $(L1D_SMP_PROBE_SRCS) $(FORMAL_BUS_HEADERS)
+	@mkdir -p $(@D)
+	cd $(RAPTOR_HOME) && verilator -E -P -DSYNTHESIS -DRAPT_RV64 -DRAPT_L1D_MSHRS=0 \
+		-DRAPT_L1D_TARGETED_COHERENCE=0 $(L1D_SMP_PROBE_INC) \
+		$(L1D_SMP_PROBE_SRCS) > $(CURDIR)/$@
+
+build/l1d_smp_probe_rv32.sv: $(L1D_SMP_PROBE_SRCS) $(FORMAL_BUS_HEADERS)
+	@mkdir -p $(@D)
+	cd $(RAPTOR_HOME) && verilator -E -P -DSYNTHESIS -DRAPT_L1D_MSHRS=0 \
+		-DRAPT_L1D_TARGETED_COHERENCE=0 $(L1D_SMP_PROBE_INC) \
+		$(L1D_SMP_PROBE_SRCS) > $(CURDIR)/$@
+
+L1D_SMP_PROBE_DEPS := check-tools build/l1d_smp_probe_rv64.sv build/l1d_smp_probe_rv32.sv
+formal_l1d_smp_probe: $(L1D_SMP_PROBE_DEPS) ## Prove L1D+bus probe progress and LR/refill safety
+	$(SBY_RUN) -f -j $(FORMAL_JOBS) l1d_smp_probe.sby \
+		bmc_rv64_wt bmc_rv32_wt bmc_rv64_wb bmc_rv32_wb cover_rv64_wt cover_rv64_wb
 
 formal_dtm: check-tools ## Prove single-clock JTAG TAP and DMI transport behavior
 	$(SBY_RUN) -f dtm.sby

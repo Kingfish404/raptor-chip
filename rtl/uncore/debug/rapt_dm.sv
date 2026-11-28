@@ -61,7 +61,8 @@
 // dmi_resp is hardwired to OK.
 module rapt_dm #(
     parameter int XLEN = `RAPT_XLEN,
-    parameter int PAddrBits = `RAPT_PADDR_BITS
+    parameter int PAddrBits = `RAPT_PADDR_BITS,
+    parameter int NHARTS = 1
 ) (
     input logic clock,
     input logic reset,
@@ -74,9 +75,9 @@ module rapt_dm #(
     output logic [31:0] dmi_rdata,
     output logic [ 1:0] dmi_resp,
 
-    // Halted status from the core (level: 1 = ROB drained while haltreq
-    // asserted). Drives dmstatus.allhalted/anyhalted.
-    input logic                       halted_i,
+    // Halted status from the core(s) (level: 1 = ROB drained while haltreq
+    // asserted). Drives dmstatus.allhalted/anyhalted and haltsum0.
+    input logic [NHARTS-1:0]          halted_i,
     input logic                       hart_reset_i,
     input logic                       hart_unavailable_i,
     // Resume PC at the halt boundary (= npc of the youngest committed
@@ -87,9 +88,9 @@ module rapt_dm #(
     rapt_debug_if.dm            debug,
 
     // Halt/resume/reset request lines to the cluster.
-    output logic haltreq_o,
-    output logic resumereq_o,
-    output logic ndmreset_o,
+    output logic [NHARTS-1:0] haltreq_o,
+    output logic [NHARTS-1:0] resumereq_o,
+    output logic              ndmreset_o,
 
     // Debug GPR bus to the core (committed view + write port). Caller-side
     // (rapt_prf) must hold halted_i before honouring `dbg_gpr_we_o`.
@@ -145,28 +146,47 @@ module rapt_dm #(
   localparam logic [6:0] AddrSbaddress1 = 7'h3a;
   localparam logic [6:0] AddrSbdata0 = 7'h3c;
   localparam logic [6:0] AddrSbdata1 = 7'h3d;
+  localparam logic [6:0] AddrHaltsum0 = 7'h40;
+
+  localparam int HartIdxW = (NHARTS <= 1) ? 1 : $clog2(NHARTS);
 
   // ----------------------------------------------------------
   // State
   // ----------------------------------------------------------
+  logic [3:0] hartsel_q;
+  wire [3:0] hartsel_eff = (NHARTS > 1) ? hartsel_q : 4'd0;
+  wire hartsel_valid = (int'(hartsel_eff) < NHARTS);
+  wire [HartIdxW-1:0] hartsel_idx = hartsel_valid ? hartsel_eff[HartIdxW-1:0] : '0;
+  wire halted_sel = hartsel_valid && halted_i[hartsel_idx];
+
+  logic [NHARTS-1:0] haltreq_vec_q;
+  logic [NHARTS-1:0] dm_halt_vec_q;
+  logic [NHARTS-1:0] halted_prev_vec_q;
+  logic [NHARTS-1:0] resumereq_vec_q;
+  logic [NHARTS-1:0] resume_pending_vec_q;
+  logic [NHARTS-1:0] resumeack_vec_q;
+  logic [NHARTS-1:0] havereset_vec_q;
+  logic [NHARTS-1:0] resethaltreq_vec_q;
+  logic [NHARTS-1:0] reset_halt_vec_q;
+
   logic havereset_q;
-  logic resethaltreq_q, reset_halt_q;
+  logic reset_halt_q;
   logic dmactive_q;
   logic ndmreset_q;
   logic haltreq_q;
-  logic resumereq_q;
   // Sticky acknowledgement of the hart's applied resume redirect.
   logic resumeack_q;
-  // Sticky halted state inside the DM. Per Debug Spec 1.0 Sec.3.5: once a
-  // hart enters Debug Mode it stays halted independent of haltreq, until
-  // a resumereq (or, equivalently here, dret in a real Debug Mode FSM).
-  // Because we don't yet have a real Debug Mode FSM, we keep haltreq_o
-  // asserted to the core whenever this bit is set, which forces the
-  // ROU dispatch gate to keep blocking. Set when halted_i pulses high;
-  // cleared only after the requested resume redirect is acknowledged.
-  logic dm_halt_state_q;
   logic halted_prev_q;
   logic resume_pending_q;
+
+  // Bind single-hart aliases to the currently selected hart so existing
+  // single-hart logic and SVA remain clean and concise.
+  assign havereset_q      = hartsel_valid ? havereset_vec_q[hartsel_idx] : 1'b0;
+  assign reset_halt_q     = hartsel_valid ? reset_halt_vec_q[hartsel_idx] : 1'b0;
+  assign haltreq_q        = hartsel_valid ? haltreq_vec_q[hartsel_idx] : 1'b0;
+  assign resumeack_q      = hartsel_valid ? resumeack_vec_q[hartsel_idx] : 1'b0;
+  assign halted_prev_q    = hartsel_valid ? halted_prev_vec_q[hartsel_idx] : 1'b0;
+  assign resume_pending_q = hartsel_valid ? resume_pending_vec_q[hartsel_idx] : 1'b0;
   logic [31:0] data0_q, data1_q;
   logic [XLEN-1:0] abstract_wdata;
   logic            cmd_size_supported;
@@ -264,8 +284,12 @@ module rapt_dm #(
   logic cmd_halt_err;  // not halted -> cmderr=4
   // Abstract transfers require the actual drained hart, with no redirect in
   // flight. A sticky request alone does not make architectural state accessible.
+  logic [NHARTS-1:0] halted_eff_vec;
+  for (genvar h = 0; h < NHARTS; h++) begin : g_halted_eff
+    assign halted_eff_vec[h] = halted_i[h] && !hart_unavailable_i && !resume_pending_vec_q[h];
+  end
   logic halted_eff;
-  assign halted_eff = halted_i && !hart_unavailable_i && !resume_pending_q;
+  assign halted_eff = hartsel_valid && halted_eff_vec[hartsel_idx];
 
   assign cmd_write_now   = dmactive_q && dmi_req && dmi_wr
                          && (dmi_addr == AddrCommand)
@@ -287,64 +311,73 @@ module rapt_dm #(
   // ----------------------------------------------------------
   always_ff @(posedge clock) begin
     if (reset) begin
-      dmactive_q       <= 1'b0;
-      resethaltreq_q   <= 1'b0;
-      reset_halt_q     <= 1'b0;
-      ndmreset_q       <= 1'b0;
-      haltreq_q        <= 1'b0;
-      resumereq_q      <= 1'b0;
-      resumeack_q      <= 1'b0;
-      dm_halt_state_q  <= 1'b0;
-      halted_prev_q    <= 1'b0;
-      resume_pending_q <= 1'b0;
-      data0_q          <= '0;
-      data1_q          <= '0;
-      cmderr_q         <= 3'd0;
-      dcsr_q           <= 32'h4000_0000;  // xdebugver=4, all else 0
-      dpc_q            <= '0;
-      dscratch0_q      <= '0;
-      dscratch1_q      <= '0;
-      step_pending_q   <= 1'b0;
+      dmactive_q           <= 1'b0;
+      hartsel_q            <= '0;
+      resethaltreq_vec_q   <= '0;
+      reset_halt_vec_q     <= '0;
+      ndmreset_q           <= 1'b0;
+      haltreq_vec_q        <= '0;
+      resumereq_vec_q      <= '0;
+      resumeack_vec_q      <= '0;
+      dm_halt_vec_q        <= '0;
+      halted_prev_vec_q    <= '0;
+      resume_pending_vec_q <= '0;
+      data0_q              <= '0;
+      data1_q              <= '0;
+      cmderr_q             <= 3'd0;
+      dcsr_q               <= 32'h4000_0000;  // xdebugver=4, all else 0
+      dpc_q                <= '0;
+      dscratch0_q          <= '0;
+      dscratch1_q          <= '0;
+      step_pending_q       <= 1'b0;
     end else if (!dmactive_q) begin
       // dmactive=0 holds DM in reset except for dmactive itself.
-      resethaltreq_q   <= 1'b0;
-      reset_halt_q     <= 1'b0;
-      ndmreset_q       <= 1'b0;
-      haltreq_q        <= 1'b0;
-      resumereq_q      <= 1'b0;
-      resumeack_q      <= 1'b0;
-      dm_halt_state_q  <= 1'b0;
-      halted_prev_q    <= 1'b0;
-      resume_pending_q <= 1'b0;
-      data0_q          <= '0;
-      data1_q          <= '0;
-      cmderr_q         <= 3'd0;
-      step_pending_q   <= 1'b0;
+      hartsel_q            <= '0;
+      resethaltreq_vec_q   <= '0;
+      reset_halt_vec_q     <= '0;
+      ndmreset_q           <= 1'b0;
+      haltreq_vec_q        <= '0;
+      resumereq_vec_q      <= '0;
+      resumeack_vec_q      <= '0;
+      dm_halt_vec_q        <= '0;
+      halted_prev_vec_q    <= '0;
+      resume_pending_vec_q <= '0;
+      data0_q              <= '0;
+      data1_q              <= '0;
+      cmderr_q             <= 3'd0;
+      step_pending_q       <= 1'b0;
       // dcsr/dpc/dscratch are NOT cleared by dmactive=0 per spec; only by
       // hard reset.
       if (dmi_req && dmi_wr && dmi_addr == AddrDmcontrol) begin
         dmactive_q <= dmi_wdata[0];
       end
     end else begin
-      halted_prev_q <= halted_i && !hart_unavailable_i;
+      for (int h = 0; h < NHARTS; h++) begin
+        halted_prev_vec_q[h] <= halted_i[h] && !hart_unavailable_i;
+      end
       // Per-DMI-write side-effects.
       if (dmi_req && dmi_wr) begin
         unique case (dmi_addr)
           AddrDmcontrol: begin
-            dmactive_q  <= dmi_wdata[0];
-            ndmreset_q  <= dmi_wdata[1];
-            resumereq_q <= dmi_wdata[30];
-            haltreq_q   <= dmi_wdata[31];
-            if (dmi_wdata[2]) resethaltreq_q <= 1'b0;
-            if (dmi_wdata[3]) resethaltreq_q <= 1'b1;
-            // Per spec: writing haltreq=1 clears resumeack; writing
-            // resumereq=1 (with haltreq=0) starts a fresh ack window.
-            if (dmi_wdata[31]) begin
-              resumeack_q <= 1'b0;
-              // An explicit halt must also stop a step stalled before retirement.
-              step_pending_q <= 1'b0;
+            automatic logic [3:0] next_sel = (NHARTS > 1)
+                ? (4'(dmi_wdata[19:16]) & ((4'd1 << HartIdxW) - 4'd1)) : 4'd0;
+            automatic logic next_sel_valid = (int'(next_sel) < NHARTS);
+            automatic logic [HartIdxW-1:0] target_h = next_sel_valid
+                ? next_sel[HartIdxW-1:0] : '0;
+            dmactive_q <= dmi_wdata[0];
+            ndmreset_q <= dmi_wdata[1];
+            if (!(|resume_pending_vec_q)) hartsel_q <= next_sel;
+            if (next_sel_valid) begin
+              resumereq_vec_q[target_h] <= dmi_wdata[30];
+              haltreq_vec_q[target_h]   <= dmi_wdata[31];
+              if (dmi_wdata[2]) resethaltreq_vec_q[target_h] <= 1'b0;
+              if (dmi_wdata[3]) resethaltreq_vec_q[target_h] <= 1'b1;
+              if (dmi_wdata[31]) begin
+                resumeack_vec_q[target_h] <= 1'b0;
+                step_pending_q <= 1'b0;
+              end
+              if (dmi_wdata[30] && !dmi_wdata[31]) resumeack_vec_q[target_h] <= 1'b0;
             end
-            if (dmi_wdata[30] && !dmi_wdata[31]) resumeack_q <= 1'b0;
           end
           AddrData0: data0_q <= dmi_wdata;
           AddrData1: if (XLEN == 64) data1_q <= dmi_wdata;
@@ -382,43 +415,44 @@ module rapt_dm #(
         end
       end
 
-      // Latch resume-ack only after the hart applies the requested redirect;
-      // independent of DMI write activity.
-      if (resume_pending_q && debug.resume_ack) begin
-        resumeack_q <= 1'b1;
-        resume_pending_q <= 1'b0;
-        dm_halt_state_q <= 1'b0;
-        reset_halt_q <= 1'b0;
-        step_pending_q <= dcsr_q[2];
+      // Latch resume-ack only after the selected hart applies the requested redirect.
+      if (hartsel_valid && resume_pending_vec_q[hartsel_idx] && debug.resume_ack) begin
+        resumeack_vec_q[hartsel_idx]      <= 1'b1;
+        resume_pending_vec_q[hartsel_idx] <= 1'b0;
+        dm_halt_vec_q[hartsel_idx]        <= 1'b0;
+        reset_halt_vec_q[hartsel_idx]     <= 1'b0;
+        step_pending_q                    <= dcsr_q[2];
       end
 
-      // Sticky DM halt state: latch on any halted_i pulse so the abstract
-      // command path keeps working after host deasserts haltreq, and the
-      // core stays halted (haltreq_o stays high) until a resumereq write.
-      if (halted_i && !halted_prev_q && !hart_unavailable_i) begin
-        dm_halt_state_q <= 1'b1;
-        reset_halt_q <= 1'b0;
+      // Sticky DM halt state per hart.
+      for (int h = 0; h < NHARTS; h++) begin
+        if (halted_i[h] && !halted_prev_vec_q[h] && !hart_unavailable_i) begin
+          dm_halt_vec_q[h]    <= 1'b1;
+          reset_halt_vec_q[h] <= 1'b0;
+        end
       end
-      // On the rising edge of halted_i (entering halt), capture the
-      // resume PC into dpc so OpenOCD/GDB can read it back.
-      if (halted_i && !halted_prev_q && !hart_unavailable_i) begin
+      // Capture resume PC into dpc on the selected hart's halt entry.
+      if (halted_sel && !halted_prev_q && !hart_unavailable_i && !resume_pending_q) begin
         if (!(cmd_accept && cmd_transfer && cmd_write && cmd_is_dpc)) dpc_q <= halt_pc_i[XLEN-1:1];
         dcsr_q[8:6] <= reset_halt_q && !haltreq_q ? 3'd5 : debug.cause;
         dcsr_q[1:0] <= debug.prv;
         step_pending_q <= 1'b0;
       end
-      if (dmi_req && dmi_wr && dmi_addr == AddrDmcontrol
-          && dmi_wdata[30] && !dmi_wdata[31] && halted_eff) begin
-        // Keep the hart halted until its DPC redirect has been applied.
-        resume_pending_q <= 1'b1;
+      if (dmi_req && dmi_wr && dmi_addr == AddrDmcontrol && dmi_wdata[30] && !dmi_wdata[31]) begin
+        automatic
+        logic [3:0]
+        next_sel = (NHARTS > 1) ? (4'(dmi_wdata[19:16]) & ((4'd1 << HartIdxW) - 4'd1)) : 4'd0;
+        if (int'(next_sel) < NHARTS && halted_eff_vec[next_sel[HartIdxW-1:0]]) begin
+          resume_pending_vec_q[next_sel[HartIdxW-1:0]] <= 1'b1;
+        end
       end
       if (hart_reset_i) begin
-        dm_halt_state_q <= 1'b0;
-        resumeack_q <= 1'b0;
-        step_pending_q <= 1'b0;
-        halted_prev_q <= 1'b0;
-        resume_pending_q <= 1'b0;
-        reset_halt_q <= resethaltreq_q;
+        dm_halt_vec_q        <= '0;
+        resumeack_vec_q      <= '0;
+        step_pending_q       <= 1'b0;
+        halted_prev_vec_q    <= '0;
+        resume_pending_vec_q <= '0;
+        reset_halt_vec_q     <= resethaltreq_vec_q;
       end
     end
   end
@@ -600,18 +634,26 @@ module rapt_dm #(
   //   [17]    allresumeack  = resumeack_q
   always_comb begin
     dmstatus_val = 32'h0000_00a3;  // version=3, authenticated, hasresethaltreq
-    dmstatus_val[9:8] = {2{halted_eff}};
-    dmstatus_val[11:10] = {2{!halted_eff && !hart_unavailable_i}};
-    dmstatus_val[13:12] = {2{hart_unavailable_i}};
-    dmstatus_val[17:16] = {2{resumeack_q && !hart_unavailable_i}};
-    dmstatus_val[19:18] = {2{havereset_q}};
+    if (!hartsel_valid) begin
+      dmstatus_val[15:14] = 2'b11;  // anynonexistent, allnonexistent
+    end else begin
+      dmstatus_val[9:8]   = {2{halted_eff}};
+      dmstatus_val[11:10] = {2{!halted_eff && !hart_unavailable_i}};
+      dmstatus_val[13:12] = {2{hart_unavailable_i}};
+      dmstatus_val[17:16] = {2{resumeack_q && !hart_unavailable_i}};
+      dmstatus_val[19:18] = {2{havereset_q}};
+    end
     dmstatus_val[24] = ndmreset_q || hart_unavailable_i;
   end
 
   always_ff @(posedge clock) begin
-    if (reset || hart_reset_i) havereset_q <= 1'b1;
-    else if (dmactive_q && dmi_req && dmi_wr && dmi_addr == AddrDmcontrol && dmi_wdata[28])
-      havereset_q <= 1'b0;
+    if (reset || hart_reset_i) havereset_vec_q <= '1;
+    else if (dmactive_q && dmi_req && dmi_wr && dmi_addr == AddrDmcontrol && dmi_wdata[28]) begin
+      automatic
+      logic [3:0]
+      next_sel = (NHARTS > 1) ? (4'(dmi_wdata[19:16]) & ((4'd1 << HartIdxW) - 4'd1)) : 4'd0;
+      if (int'(next_sel) < NHARTS) havereset_vec_q[next_sel[HartIdxW-1:0]] <= 1'b0;
+    end
   end
 
   logic [31:0] dmcontrol_rd;
@@ -620,10 +662,16 @@ module rapt_dm #(
   assign dmcontrol_rd = {
     1'b0,  // [31] haltreq: WARZ
     1'b0,  // [30] resumereq: W1
-    28'b0,  // [29:2] omitted (hartreset, hasel, hartsel, etc. = 0)
+    4'b0,  // [29:26] hartreset, ackhavereset, hasel = 0
+    6'b0,  // [25:20] hartsello[9:4] = 0
+    hartsel_eff,  // [19:16] hartsello[3:0]
+    14'b0,  // [15:2] hartselhi, resethaltreq = 0
     ndmreset_q,  // [1]
     dmactive_q  // [0]
   };
+
+  logic [31:0] haltsum0_rd;
+  assign haltsum0_rd = {{(32 - NHARTS) {1'b0}}, halted_eff_vec};
 
   logic [31:0] abstractcs_rd;
   // [3:0] datacount=XLEN/32, [10:8] cmderr, [12] busy=0, [28:24] progbufsize=0
@@ -644,6 +692,7 @@ module rapt_dm #(
       AddrSbaddress1: dmi_rdata = 32'(sbaddress_q >> 32);
       AddrSbdata0:    dmi_rdata = sbdata_q[31:0];
       AddrSbdata1:    dmi_rdata = XLEN == 64 ? 32'(sbdata_q >> 32) : '0;
+      AddrHaltsum0:   dmi_rdata = haltsum0_rd;
       default:        dmi_rdata = '0;
     endcase
   end
@@ -651,8 +700,11 @@ module rapt_dm #(
   assign dmi_resp = 2'b00;  // always OK
   // A pending step never suppresses an explicit halt request. Release halt
   // only after the resume redirect has been acknowledged by the hart.
-  assign haltreq_o = (haltreq_q | dm_halt_state_q | reset_halt_q | resume_pending_q) & dmactive_q;
-  assign resumereq_o = resumereq_q & dmactive_q;
+  for (genvar h = 0; h < NHARTS; h++) begin : g_hart_req_out
+    assign haltreq_o[h] = (haltreq_vec_q[h] | dm_halt_vec_q[h]
+        | reset_halt_vec_q[h] | resume_pending_vec_q[h]) & dmactive_q;
+    assign resumereq_o[h] = resumereq_vec_q[h] & dmactive_q;
+  end
   assign ndmreset_o = ndmreset_q & dmactive_q;
   assign debug.enable = dmactive_q;
   assign debug.step = step_pending_q && dmactive_q;
@@ -660,6 +712,7 @@ module rapt_dm #(
   assign debug.ebreak = dmactive_q ? {dcsr_q[15], dcsr_q[13:12]} : '0;
   assign debug.resume_valid = resume_pending_q && dmactive_q && !hart_unavailable_i;
   assign debug.resume_pc = PcBits'(dpc_value);
+  assign debug.hartsel = hartsel_eff;
 
   `RAPT_SVA_NEXT(clock, reset || !dmactive_q || hart_unavailable_i, DM_RESUME_STABLE,
                  debug.resume_valid && !debug.resume_ack, debug.resume_valid && $stable

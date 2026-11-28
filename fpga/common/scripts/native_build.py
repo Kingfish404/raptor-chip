@@ -32,6 +32,14 @@ def resolve_vector(args):
         raise ValueError("V requires a preset with the scalar F and D extensions")
     args.vector = int(enabled)
     args.rva23u64 = args.xlen == 64 and enabled and not preset.get("RAPT_NO_RVA23U64")
+    nharts = getattr(args, "nharts", "auto")
+    if nharts in (None, "auto"):
+        args.nharts = int(preset.get("RAPT_NHARTS", 1))
+    else:
+        try:
+            args.nharts = int(nharts)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid nharts {nharts!r}") from exc
 
 
 def configure(board):
@@ -91,6 +99,8 @@ def configuration(args):
     result["vector"] = getattr(args, "vector", 0)
     if getattr(args, "eth_dma", 0):
         result["eth_dma"] = 1
+    if getattr(args, "nharts", 1) > 1:
+        result["nharts"] = args.nharts
     if getattr(args, "vector_device_test", False):
         result["vector_device_test"] = True
     if PROFILE.get("cm005_bridge"):
@@ -206,6 +216,8 @@ def firmware(args, out, values):
              "-Wextra", "-Wl,--build-id=none", "-Wl,--no-relax"]
     if getattr(args, "sampling", False):
         flags.append("-DNATIVE_SAMPLING")
+    if getattr(args, "nharts", 1) > 1:
+        flags.append(f"-DNATIVE_NHARTS={args.nharts}")
     run([args.cross + "gcc", *flags, "-I", out, "-T", out / "boot.ld",
          COMMON / "firmware/start.S", COMMON / "firmware/boot.c", "-o", out / "boot.elf"])
     run([args.cross + "objcopy", "-O", "binary", out / "boot.elf", out / "boot.bin"])
@@ -359,6 +371,45 @@ def device_tree(args, out, ram_bytes):
     extensions = ", ".join(f'"{extension}"' for extension in (*base[4:], *suffixes))
     cache_block_sizes = "".join(f"            riscv,{name}-block-size = <64>;\n"
                                 for name in ("cbom", "cbop", "cboz")) if profile else ""
+    nharts = getattr(args, "nharts", 1)
+    if nharts == 1:
+        cpu_nodes = f"""        cpu@0 {{
+            device_type = "cpu"; reg = <0>; status = "okay"; compatible = "riscv";
+            riscv,isa = "{isa}";
+            riscv,isa-base = "rv{args.xlen}i";
+            riscv,isa-extensions = {extensions};
+{cache_block_sizes}            mmu-type = "riscv,sv{'32' if args.xlen == 32 else '39'}";
+            clock-frequency = <{args.clock_mhz * 1_000_000}>;
+            cpu_intc: interrupt-controller {{
+                #address-cells = <0>; #interrupt-cells = <1>;
+                interrupt-controller; compatible = "riscv,cpu-intc";
+            }};
+        }};"""
+        clint_irqs = "<&cpu_intc 3 &cpu_intc 7>"
+        plic_irqs = "<&cpu_intc 11 &cpu_intc 9>"
+    else:
+        cpu_list = []
+        clint_entries = []
+        plic_entries = []
+        for h in range(nharts):
+            lbl = f"cpu{h}_intc"
+            cpu_list.append(f"""        cpu@{h} {{
+            device_type = "cpu"; reg = <{h}>; status = "okay"; compatible = "riscv";
+            riscv,isa = "{isa}";
+            riscv,isa-base = "rv{args.xlen}i";
+            riscv,isa-extensions = {extensions};
+{cache_block_sizes}            mmu-type = "riscv,sv{'32' if args.xlen == 32 else '39'}";
+            clock-frequency = <{args.clock_mhz * 1_000_000}>;
+            {lbl}: interrupt-controller {{
+                #address-cells = <0>; #interrupt-cells = <1>;
+                interrupt-controller; compatible = "riscv,cpu-intc";
+            }};
+        }};""")
+            clint_entries.append(f"&{lbl} 3 &{lbl} 7")
+            plic_entries.append(f"&{lbl} 11 &{lbl} 9")
+        cpu_nodes = "\n".join(cpu_list)
+        clint_irqs = "<" + " ".join(clint_entries) + ">"
+        plic_irqs = "<" + " ".join(plic_entries) + ">"
     text = f"""/dts-v1/;
 / {{
     #address-cells = <2>;
@@ -372,29 +423,18 @@ def device_tree(args, out, ram_bytes):
         #address-cells = <1>;
         #size-cells = <0>;
         timebase-frequency = <{10000000 if getattr(args, 'sampling', False) else 1000000}>;
-        cpu@0 {{
-            device_type = "cpu"; reg = <0>; status = "okay"; compatible = "riscv";
-            riscv,isa = "{isa}";
-            riscv,isa-base = "rv{args.xlen}i";
-            riscv,isa-extensions = {extensions};
-{cache_block_sizes}            mmu-type = "riscv,sv{'32' if args.xlen == 32 else '39'}";
-            clock-frequency = <{args.clock_mhz * 1_000_000}>;
-            cpu_intc: interrupt-controller {{
-                #address-cells = <0>; #interrupt-cells = <1>;
-                interrupt-controller; compatible = "riscv,cpu-intc";
-            }};
-        }};
+{cpu_nodes}
     }};
     memory@{reg['main_ram']['base']:x} {{ device_type = "memory";
         reg = <0x{reg['main_ram']['base'] >> 32:x} 0x{reg['main_ram']['base'] & 0xffffffff:x} 0x{ram_bytes >> 32:x} 0x{ram_bytes & 0xffffffff:x}>; }};
 {root_clocks}    soc {{
         #address-cells = <2>; #size-cells = <2>; compatible = "simple-bus"; ranges;{soc_dma_prop}
         clint@{reg['clint']['base']:x} {{ compatible = "riscv,clint0";
-            reg = <{cells('clint')}>; interrupts-extended = <&cpu_intc 3 &cpu_intc 7>; }};
+            reg = <{cells('clint')}>; interrupts-extended = {clint_irqs}; }};
         plic: interrupt-controller@{reg['plic']['base']:x} {{
             compatible = "riscv,plic0"; reg = <{cells('plic')}>;
             #address-cells = <0>; #interrupt-cells = <1>; interrupt-controller;
-            interrupts-extended = <&cpu_intc 11 &cpu_intc 9>; riscv,ndev = <31>;
+            interrupts-extended = {plic_irqs}; riscv,ndev = <31>;
         }};
         uart: serial@{reg['ns16550']['base']:x} {{ compatible = "ns16550a";
             reg = <{cells('ns16550')}>; clock-frequency = <{args.clock_mhz * 1_000_000}>;
@@ -476,6 +516,8 @@ def prepare(args, out):
         flags += " -DRAPT_V_EXTENSION"
     else:
         flags += " -DRAPT_NO_VPU"
+    if getattr(args, "nharts", 1) > 1:
+        flags += f" -DRAPT_NHARTS={args.nharts}"
     cache = args.build_root / "rtl-cache"
     if args.sampling:
         with sampling_sources(REPO) as (shadow, receipt):
@@ -540,6 +582,8 @@ def prepare(args, out):
             f"`define NATIVE_LOCAL_VIRTIO_NET {int(getattr(args, 'virtio_net', 0))}\n"
             f"`define NATIVE_QEMU_BRIDGE {int(getattr(args, 'qemu_bridge', 0))}\n"
         )
+    if getattr(args, "nharts", 1) > 1:
+        config += f"`define RAPT_NHARTS {args.nharts}\n"
     (sources / "native_config.svh").write_text(config)
     names = ["native_config.svh", "rapt_pack.sv", "native_map.sv",
              "rapt_native_uart.sv", "rapt_native_bus.sv"]
@@ -678,6 +722,8 @@ def main():
         ),
     )
     parser.add_argument("--xlen", type=int, choices=(32, 64), default=64)
+    parser.add_argument("--nharts", default="auto",
+                        help="number of coherent harts in the cluster (auto follows preset, or 1-16)")
     parser.add_argument("--preset", default="small")
     parser.add_argument("--memory", choices=("bram", "ddr"), default=PROFILE.get("default_memory", "bram"))
     parser.add_argument("--clock-mhz", type=int, choices=(25, 50, 75, 100), default=50)
@@ -733,6 +779,8 @@ def main():
                                                   not args.ethernet):
         parser.error("--virtio-net/--qemu-bridge share the board MAC: they require --ethernet 1 "
                      "without sampling or CM005 forwarding")
+    if args.nharts < 1 or args.nharts > 16:
+        parser.error("nharts must be between 1 and 16")
     if args.jobs <= 0 or args.jobs > 32:
         parser.error("jobs must be between 1 and 32")
     if args.ram_bytes < 16384 or args.ram_bytes > 1048576 or args.ram_bytes & (args.ram_bytes - 1):
@@ -741,7 +789,9 @@ def main():
         parser.error("invalid preset name")
     args.build_root = args.build_root.resolve()
     suffix = hashlib.sha256(json.dumps(configuration(args), sort_keys=True).encode()).hexdigest()[:10]
-    out = args.build_root / f"rv{args.xlen}-{args.preset}-{args.memory}-{args.clock_mhz}MHz-{suffix}"
+    smp_tag = (f"-smp{args.nharts}"
+               if args.nharts > 1 and not args.preset.endswith(f"-smp{args.nharts}") else "")
+    out = args.build_root / f"rv{args.xlen}-{args.preset}{smp_tag}-{args.memory}-{args.clock_mhz}MHz-{suffix}"
     if args.action == "info":
         print(json.dumps({"configuration": configuration(args), "output": str(out)}, indent=2))
         return

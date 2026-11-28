@@ -120,7 +120,7 @@ module rapt_l1d #(
   logic load_page_fault_q;
   logic [XLEN-1:0] perm_base_addr;
   // Shared state used by MSHR eligibility and invalidation below.
-  logic fence_clear_busy;
+  logic fence_clear_busy, mshr_clear_all;
   logic refill_safe, refill_pmp_uniform;
   logic l1d_atomic_lock;
   logic l1d_orig_misaligned;
@@ -176,7 +176,7 @@ module rapt_l1d #(
       && (L1dLineOffset <= 12);
   assign legacy_rvalid = l1d_bus.rvalid && !l1d_bus.r_mshr;
   assign legacy_rready = l1d_bus.rready && !l1d_bus.ar_mshr;
-  assign mshr_invalidate = cmu_bcast.flush_pipe || fence_clear_busy || external_write_valid_i;
+  assign mshr_invalidate = cmu_bcast.flush_pipe || mshr_clear_all || external_write_valid_i;
   assign mshr_rsp_valid = l1d_bus.rvalid && l1d_bus.r_mshr;
   assign mshr_invalidate_line = (!MergeStores && lsu_l1d.wvalid && !mshr_busy) || mshr_evict_valid;
   // Only requests which can replay as a whole may release LSU ownership.
@@ -407,6 +407,8 @@ module rapt_l1d #(
         && 32'(s) == 32'(l1d_bus.posted_error_addr[L1D_LEN+L1dLineOffset-1:L1dLineOffset]));
   end
   assign fence_clear_busy = cmu_bcast.cbo_inval || probe_valid_i || |fence_clear_set;
+  assign mshr_clear_all = cmu_bcast.cbo_inval || (L2Inclusive && probe_valid_i)
+      || |fence_clear_set;
   // The L2 holds its probe until the exact physical line has been cleared by
   // the tag array. The registered response prevents an early replacement.
   always_ff @(posedge clock) begin
@@ -491,17 +493,21 @@ module rapt_l1d #(
         && {1'b0, external_write_first_i} <= ({1'b0, first} + (XLEN+1)'(size_m1))
         && external_write_last_i >= first;
   endfunction
-  assign external_hits_reservation = reservation_valid && external_overlap(
-      reservation, reservation_size_m1
+  localparam int ProbeLineOffW = $clog2(`RAPT_CACHE_LINE_BYTES);
+  function automatic logic probe_overlap(input logic [XLEN-1:0] first);
+    return probe_valid_i && (probe_addr_i[XLEN-1:ProbeLineOffW] == first[XLEN-1:ProbeLineOffW]);
+  endfunction
+  assign external_hits_reservation = reservation_valid && (
+      external_overlap(reservation, reservation_size_m1)
+      || probe_overlap(reservation)
   );
   // Translation has not produced a PA during PTWAIT. Poison that in-flight
   // LR conservatively; subsequent hot-TLB attempts use physical overlap.
   assign external_hits_lr = l1d_atomic_lock
-      && ((l1d_state == PTWAIT && external_write_valid_i)
+      && ((l1d_state == PTWAIT && (external_write_valid_i || probe_valid_i))
         || ((l1d_state == LD_CHECK || l1d_state == LD_A || l1d_state == LD_D)
-          && external_overlap(
-      l1d_addr, l1d_ralu[1:0] == 2'b11 ? 4'd7 : 4'd3
-  )));
+          && (external_overlap(l1d_addr, l1d_ralu[1:0] == 2'b11 ? 4'd7 : 4'd3)
+              || probe_overlap(l1d_addr))));
 
 
   // PTW instance signals
@@ -587,7 +593,8 @@ module rapt_l1d #(
   // A completed refill buffer is also a readable copy. Voluntary Release
   // relinquishes that copy along with the array, or an L2 write could leave
   // a stale replay buffer after the directory no longer lists this client.
-  assign mshr_evict_valid = release_clearing || local_cbo_line_clear || target_clear;
+  assign mshr_evict_valid = release_clearing || (!L2Inclusive && probe_valid_i)
+      || local_cbo_line_clear || target_clear;
   assign mshr_evict_addr = XLEN'({line_clear_tag, line_clear_set, {L1dLineOffset{1'b0}}});
   logic [XLEN-1:0] wb_addr, wb_data;
   localparam int DataChunks = L1D_LINE_SIZE * XLEN / 64;
@@ -650,11 +657,13 @@ module rapt_l1d #(
   wire wb_global_compat_store = lsu_l1d.wvalid && (!cacheable_w || lsu_l1d.wzero);
   wire wb_global_compat_load = l1d_state == LD_A && !load_perm_denied_q
       && (!cacheable_r || l1d_atomic_lock);
-  assign wb_global_request = !probe_valid_i && (writeback_drain || |fence_clear_set
+  wire wb_global_pending = writeback_drain || |fence_clear_set
       || (lsu_l1d.wvalid && lsu_l1d.wzero)
       || (!TargetedCoherence && !L2Inclusive && cmu_bcast.cbo_inval)
-      || ((L2Inclusive || !TargetedCoherence) && (writeback_cbo || coherent_request || coherent_write
-          || ptw_arvalid || wb_global_compat_store || wb_global_compat_load)));
+      || ((L2Inclusive || !TargetedCoherence)
+          && (writeback_cbo || coherent_request || coherent_write
+              || ptw_arvalid || wb_global_compat_store || wb_global_compat_load));
+  assign wb_global_request = !probe_valid_i && wb_global_pending;
   assign target_cbo = TargetedCoherence && writeback_cbo && !cbo_done_q;
   assign target_store = lsu_l1d.wvalid && !cacheable_w && rapt_pkg::addr_cacheable(lsu_l1d.waddr);
   assign target_load = l1d_state == LD_A && !load_perm_denied_q && !vector_probe
@@ -734,14 +743,19 @@ module rapt_l1d #(
       || target_dirty_request || (target_request && wb_busy)
       || wb_state != WB_IDLE || writeback_error
       || (update_dirty && l1d_update));
-  assign wb_hold = probe_wb_hold
+  wire wb_probe_dirty_hold = probe_valid_i && (probe_dirty_request || target_request);
+  wire wb_ordinary_dirty_hold = WriteBack && dirty_any
+      && (wb_probe_dirty_hold || wb_global_pending || wb_victim_request
+          || wb_store_victim || store_resident_dirty || wb_fill_victim);
+  assign wb_hold = probe_wb_hold || wb_ordinary_dirty_hold
       || (WriteBack && L2Release && (wb_victim_request || wb_store_victim || wb_fill_victim));
   // Only the load victim (or a store-fill victim during store_fill_window)
   // can be requested in LD_A. Express that state contract before the shared
   // tag probe so store selection cannot reach a load's retry/miss response.
   assign load_miss_wb_hold = WriteBack
-      && ((dirty_any && (probe_valid_i ? probe_dirty_request
-          : (wb_global_request || load_victim_request || wb_fill_victim)))
+      && ((dirty_any
+              && (wb_probe_dirty_hold || wb_global_pending || load_victim_request
+                  || wb_fill_victim))
           || (wb_busy && (L2Inclusive || probe_valid_i || wb_global_request || !mshr_eligible))
           || target_dirty_request || (target_request && wb_busy)
       || wb_state != WB_IDLE || writeback_error
@@ -1041,7 +1055,11 @@ module rapt_l1d #(
   end
 
   // Data-array ownership includes SRAM geometry and read-valid tracking.
+  // Gate SRAM writes with the exact same clear/probe conditions as u_tags so
+  // a concurrent invalidation can never overwrite a live victim line's data
+  // while leaving its old tag valid.
   wire [DataBanks-1:0] sram_bank_valid;
+  wire data_write_blocked = wb_blocked || (|fence_clear_set && !wb_hold) || line_clearing;
   logic [L1D_LEN-1:0] sram_read_idx_r;
   logic [L1D_LINE_LEN-1:0] sram_read_word_r;
   rapt_l1d_data #(
@@ -1059,7 +1077,7 @@ module rapt_l1d #(
       .read_line(sram_read_line),
       .read_way(wb_way),
       .write_valid(l1d_update && l1d_valid_u),
-      .write_blocked(wb_blocked),
+      .write_blocked(data_write_blocked),
       .write_addr(l1d_data_idx),
       .write_word(l1d_data_off),
       .write_way(l1d_way),
@@ -1571,7 +1589,7 @@ module rapt_l1d #(
   // the same-cycle load response. Other users retain the complete wb_hold.
   logic load_hit_wb_hold;
   assign load_hit_wb_hold = WriteBack
-      && ((dirty_any && (probe_valid_i ? probe_dirty_request : wb_global_request))
+      && ((dirty_any && (wb_probe_dirty_hold || wb_global_pending))
           || (wb_busy && (L2Inclusive || probe_valid_i || wb_global_request
               || !mshr_eligible))
           || target_dirty_request || (target_request && wb_busy)
@@ -1926,7 +1944,10 @@ module rapt_l1d #(
   assign l1d_bus.wzero = !wb_valid && lsu_l1d.wzero;
   // An inclusive L2 must record the D client before a buffered refill can
   // become resident/dirty in L1. No-allocate would bypass that directory mark.
-  assign l1d_bus.noallocate = mshr_select ? !L2Inclusive : ptw_arvalid || !refill_safe;
+  // Write-through L1Ds hold no dirty state and still allocate in a shared L2.
+  assign l1d_bus.noallocate = mshr_select
+      ? !(L2Inclusive || (L2Cache && !WriteBack))
+      : ptw_arvalid || !refill_safe;
   assign l1d_bus.arlen = (mshr_select || (!ptw_arvalid && line_read_request)) ? 8'(L1D_LINE_SIZE-1) : 8'd0;
   // A line install (the last legacy refill beat or an MSHR fill) becomes
   // visible to hit_w one cycle after its update is queued. A store to that
@@ -2013,10 +2034,25 @@ module rapt_l1d #(
   assign exu_l1d.reservation = reservation;
   assign exu_l1d.reservation_size_m1 = reservation_size_m1;
   assign exu_l1d.reservation_valid = reservation_valid && !external_hits_reservation;
-  assign exu_l1d.reservation_blocked = external_write_pending_i || external_write_valid_i;
+  assign exu_l1d.reservation_blocked = external_write_pending_i || external_write_valid_i
+      || probe_valid_i;
   always_ff @(posedge clock) begin
     if (reset || l1d_state == IDLE) lr_interfered <= 1'b0;
     else if (external_hits_lr) lr_interfered <= 1'b1;
+  end
+  // A back-invalidation probe or external/CBO invalidation arriving while a
+  // non-MSHR load refill is in flight means the returning bus beats may be
+  // older than the remote write. Still return the demand beat, but do not
+  // install the stale line into L1D after the probe has already completed.
+  logic ld_refill_poison_q;
+  always_ff @(posedge clock) begin
+    if (reset || l1d_state == IDLE) begin
+      ld_refill_poison_q <= 1'b0;
+    end else if ((l1d_state == LD_A || l1d_state == LD_D) && (probe_overlap(
+            l1d_addr
+        ) || external_write_valid_i || cmu_bcast.cbo_inval || |fence_clear_set)) begin
+      ld_refill_poison_q <= 1'b1;
+    end
   end
   // Ready denotes a completed translation, not permission to issue a store.
   // Its structural state is independent of the TLB and permission result;
@@ -2503,7 +2539,8 @@ module rapt_l1d #(
         if (L1D_N_WAYS == 2) d_replace_bit[mshr_fill_idx] <= ~d_replace_bit[mshr_fill_idx];
       end else if (l1d_state == LD_D) begin
         if ((refill_line || lsu_l1d.rvalid) && legacy_rvalid && !l1d_bus.rerr
-            && !load_killed && !cmu_bcast.flush_pipe) begin
+            && !load_killed && !cmu_bcast.flush_pipe && !ld_refill_poison_q
+            && !external_write_valid_i) begin
           // The BOOM-layout L2 does not allocate a scalar read marked
           // noallocate. Keep the L1 inclusive by installing only full-line
           // refills; the scalar response still completes the demand.
@@ -2540,6 +2577,11 @@ module rapt_l1d #(
                  l1d_update && l1d_valid_u)
   `RAPT_SVA_NEXT(clock, reset, L1D_WB_CAPTURE_LINE_VALID,
                  WriteBack && wb_state == WB_CAPTURE && !wb_line_valid, wb_state == WB_CAPTURE)
+  logic sva_data_we, sva_tag_we;
+  assign sva_data_we = l1d_update && l1d_valid_u && !data_write_blocked;
+  assign sva_tag_we  = l1d_update && l1d_valid_u && !wb_blocked
+      && !(|fence_clear_set && !wb_hold) && !line_clearing;
+  `RAPT_SVA(clock, reset, L1D_DATA_TAG_WRITE_SYNC, sva_data_we == sva_tag_we)
 `endif
   `RAPT_SVA_IMPLY(clock, reset, L1D_MMIO_READ_REQUIRES_ORDER,
                   legacy_arvalid && !l1d_bus.ar_ptw && !cacheable_r, lsu_l1d.ordered)

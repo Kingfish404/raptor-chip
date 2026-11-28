@@ -63,6 +63,11 @@ def build_rows(macros: Dict[str, Dict[str, str]], names: List[str]) -> List[List
         return macros[name]
 
     rows.append([
+        "Cluster harts (NHARTS)",
+        *[str(as_int(col(n), "RAPT_NHARTS", 1)) for n in names],
+    ])
+
+    rows.append([
         "L1I (S x W x CL)",
         *[l1_geometry(col(n), "RAPT_L1I") for n in names],
     ])

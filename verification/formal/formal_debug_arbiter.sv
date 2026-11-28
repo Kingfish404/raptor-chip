@@ -31,6 +31,7 @@ module formal_debug_arbiter #(
       .merged_axi
   );
   logic past_valid = 0;
+  localparam logic [3:0] SbaId = 4'd7;
   localparam int CountBits = $clog2(Capacity + 1);
   logic [CountBits-1:0] reads;
   logic [$clog2(WriteCapacity+1)-1:0] writes;
@@ -41,8 +42,8 @@ module formal_debug_arbiter #(
   wire bus_ar_fire = merged_axi.arvalid && merged_axi.arready;
   wire bus_aw_fire = merged_axi.awvalid && merged_axi.awready;
   wire bus_w_fire = merged_axi.wvalid && merged_axi.wready && merged_axi.wlast;
-  wire current_read_sb = merged_axi.arid == 15;
-  wire current_write_sb = merged_axi.awid == 15;
+  wire current_read_sb = merged_axi.arid == SbaId;
+  wire current_write_sb = merged_axi.awid == SbaId;
   logic held_read, held_read_sb, held_write, held_write_sb;
   logic aw_seen, w_seen, last_read_sb;
   wire write_active = held_write || merged_axi.awvalid;
@@ -64,10 +65,10 @@ module formal_debug_arbiter #(
       w_seen <= 0;
       last_read_sb <= 0;
     end else begin
-      if (core_axi.arvalid) assume (core_axi.arid != 15);
-      if (core_axi.awvalid) assume (core_axi.awid != 15);
-      if (merged_axi.rvalid && merged_axi.rid != 15) assume (reads != 0);
-      if (merged_axi.bvalid && merged_axi.bid != 15) assume (writes != 0);
+      if (core_axi.arvalid) assume (core_axi.arid != SbaId);
+      if (core_axi.awvalid) assume (core_axi.awid != SbaId);
+      if (merged_axi.rvalid && merged_axi.rid != SbaId) assume (reads != 0);
+      if (merged_axi.bvalid && merged_axi.bid != SbaId) assume (writes != 0);
       if (ar_fire && !r_fire) assume (reads < Capacity);
       if (aw_fire && !b_fire) assume (writes < WriteCapacity);
       case ({
@@ -182,17 +183,17 @@ module formal_debug_arbiter #(
     `RAPT_SVA(clock, reset, ARBITER_B_PAYLOAD, b_payload == {merged_axi.bid, merged_axi.bresp})
   end
   `RAPT_SVA(clock, reset, ARBITER_R_ROUTE,
-            core_axi.rvalid == (merged_axi.rvalid && merged_axi.rid != 15))
+            core_axi.rvalid == (merged_axi.rvalid && merged_axi.rid != SbaId))
   `RAPT_SVA(clock, reset, ARBITER_SB_R_ROUTE,
-            sb_axi.rvalid == (merged_axi.rvalid && merged_axi.rid == 15))
+            sb_axi.rvalid == (merged_axi.rvalid && merged_axi.rid == SbaId))
   `RAPT_SVA(clock, reset, ARBITER_B_ROUTE,
-            core_axi.bvalid == (merged_axi.bvalid && merged_axi.bid != 15))
+            core_axi.bvalid == (merged_axi.bvalid && merged_axi.bid != SbaId))
   `RAPT_SVA(clock, reset, ARBITER_SB_B_ROUTE,
-            sb_axi.bvalid == (merged_axi.bvalid && merged_axi.bid == 15))
+            sb_axi.bvalid == (merged_axi.bvalid && merged_axi.bid == SbaId))
   `RAPT_SVA(clock, reset, ARBITER_R_BACKPRESSURE,
-            merged_axi.rready == (merged_axi.rid == 15 ? sb_axi.rready : core_axi.rready))
+            merged_axi.rready == (merged_axi.rid == SbaId ? sb_axi.rready : core_axi.rready))
   `RAPT_SVA(clock, reset, ARBITER_B_BACKPRESSURE,
-            merged_axi.bready == (merged_axi.bid == 15 ? sb_axi.bready : core_axi.bready))
+            merged_axi.bready == (merged_axi.bid == SbaId ? sb_axi.bready : core_axi.bready))
   `RAPT_COVER(clock, reset, ARBITER_DRAIN_READ, core_block && reads != 0 && r_fire)
   `RAPT_COVER(clock, reset, ARBITER_DRAIN_WRITE, core_block && writes != 0 && b_fire)
   `RAPT_COVER(clock, reset, ARBITER_W_BEFORE_AW, held_write && w_seen && !aw_seen)

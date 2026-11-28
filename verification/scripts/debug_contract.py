@@ -21,8 +21,8 @@ TARGETS = {
 }
 MUTATIONS = {
     'dm': [
-        ('halt', 'haltreq_q | dm_halt_state_q | reset_halt_q | resume_pending_q',
-         'dm_halt_state_q | reset_halt_q | resume_pending_q'),
+        ('halt', 'haltreq_vec_q[h] | dm_halt_vec_q[h]',
+         'dm_halt_vec_q[h]'),
         ('dpc', 'dpc_q <= halt_pc_i[XLEN-1:1];', "dpc_q <= '0;"),
         ('drain', 'reset || (!dmactive_q && !sb_busy)', 'reset || !dmactive_q'),
         ('busy', "if (sb_busy && (sb_address_write || sb_data_access)) sbbusyerror_q <= 1'b1;",
@@ -54,7 +54,7 @@ ASSUMPTIONS = {
     'dm': ['First sampled edge resets', 'Hart reset implies unavailable',
            'Availability returns only after reset', 'A pending resume retains the halted hart'],
     'arbiter': ['First sampled edge resets', 'AXI sources preserve stalled requests',
-                'Core addresses reserve ID 15 for SBA', 'Core responses have accepted addresses',
+                'Core addresses reserve ID 7 for SBA', 'Core responses have accepted addresses',
                 'Core outstanding requests stay within the selected credit limits'],
     'step': ['First sampled edge resets', 'DM step implies enable',
              'Completion inputs pass the same ownership guard as the retirement harness'],
@@ -169,8 +169,9 @@ def main():
                 + f'-I{directory} -I{ROOT}/rtl/configs/{preset} -I{ROOT}/rtl/include '
                 + f'-I{ROOT}/rtl/include/npc -I{ROOT}/rtl/include/dpic_mock '
                 + f'--top {top} ' + ' '.join(map(str, rtl + [harness])))
-        script = (read + f'\nprep -top {top} -flatten\nasync2sync\nchformal -lower\n'
-                  'check -assert\nselect -assert-any t:$assert\n'
+        script = (read + f'\nprep -top {top} -flatten\nasync2sync\n'
+                  + ('memory_map\nopt\n' if block == 'step' else '')
+                  + 'chformal -lower\ncheck -assert\nselect -assert-any t:$assert\n'
                   'select -assert-any t:$cover\nselect -assert-none A:blackbox=1\n')
         proof_depth = 4 if block == 'step' and not mutation else args.depth
         config = ('[tasks]\nprove\n' + ('' if mutation else 'cover\n')

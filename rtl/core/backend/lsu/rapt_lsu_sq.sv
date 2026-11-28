@@ -191,6 +191,7 @@ module rapt_lsu_sq #(
     if (reset) sq_empty_q <= 1'b1;
   end
   assign rou_lsu.sq_empty = sq_empty_q;
+  assign exu_lsu.sq_busy  = !sq_empty_q;
   `RAPT_SVA(clock, reset, SQ_EMPTY_BOUNDARY_EQUIVALENT, sq_empty_q == sq_all_empty)
 
   // Predict the resident head after this edge. The SQ keeps ownership until

@@ -104,13 +104,14 @@ module rapt_l1d_mshr #(
   // but cannot select a different refill address in the consumer's cycle.
   logic fill_pending;
   logic [Entries-1:0] fill_candidate;
+  wire any_inflight = |(valid & ~done);
   always_comb begin
     store_match = 1'b0;
     store_pending = 1'b0;
     lookup_store_match = 1'b0;
     for (int i = 0; i < Entries; i++) begin
       kill_line[i] = (invalidate_line && tag[i] == invalidate_addr[Xlen-1:OffsetBits])
-          || (StoreMerge && store_valid && installed[i]
+          || ((StoreMerge ? installed[i] : !any_inflight) && store_valid
               && tag[i] == store_addr[Xlen-1:OffsetBits]);
       store_hit[i] = StoreMerge && valid[i] && !killed[i] && !installed[i]
           && tag[i] == store_addr[Xlen-1:OffsetBits];
@@ -212,7 +213,7 @@ module rapt_l1d_mshr #(
       Xlen/8
   )]] && !invalidate && !invalidate_line;
   always_comb begin
-    busy = |(valid & ~done);
+    busy = any_inflight;
     lookup_ready = lookup_valid && !cache_hit && lookup_buffered;
     lookup_error = lookup_ready && errors[IdBits'(match_id)][lookup_addr[OffsetBits-1:$clog2(Xlen/8)]];
     lookup_data = data[IdBits'(match_id)][lookup_addr[OffsetBits-1:$clog2(Xlen/8)]];

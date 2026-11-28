@@ -1,0 +1,41 @@
+[tasks]
+bmc_rv64_wt bmc rv64 rv64_wt
+bmc_rv32_wt bmc rv32 rv32_wt
+bmc_rv64_wb bmc rv64 rv64_wb
+bmc_rv32_wb bmc rv32 rv32_wb
+cover_rv64_wt cover rv64 rv64_wt
+cover_rv64_wb cover rv64 rv64_wb
+prove_rv64_wt prove rv64 rv64_wt
+prove_rv64_wb prove rv64 rv64_wb
+
+[options]
+bmc:
+mode bmc
+depth 52
+--
+cover:
+mode cover
+depth 44
+--
+prove:
+mode prove
+depth 52
+--
+
+[engines]
+bmc: abc bmc3
+cover: smtbmc --unroll bitwuzla
+prove: abc pdr
+
+[script]
+plugin -i slang
+rv64_wt: read_slang --single-unit --top formal_l1d_smp_probe -G WriteBack=0 l1d_smp_probe_rv64.sv
+rv32_wt: read_slang --single-unit --top formal_l1d_smp_probe -G WriteBack=0 l1d_smp_probe_rv32.sv
+rv64_wb: read_slang --single-unit --top formal_l1d_smp_probe -G WriteBack=1 l1d_smp_probe_rv64.sv
+rv32_wb: read_slang --single-unit --top formal_l1d_smp_probe -G WriteBack=1 l1d_smp_probe_rv32.sv
+prep -top formal_l1d_smp_probe
+opt -fast
+
+[files]
+rv64: l1d_smp_probe_rv64.sv build/l1d_smp_probe_rv64.sv
+rv32: l1d_smp_probe_rv32.sv build/l1d_smp_probe_rv32.sv

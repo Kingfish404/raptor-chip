@@ -1,0 +1,56 @@
+/dts-v1/;
+
+/include/ "raptor-rva23-io.dts"
+
+/ {
+	model = "Raptor RVA23S64 2-Core SMP SoC";
+
+	cpus {
+		cpu@1 {
+			device_type = "cpu";
+			reg = <0x01>;
+			status = "okay";
+			compatible = "riscv";
+			riscv,isa = "rv64imafdcvh_zicbom_zicbop_zicboz_zicntr_zicond_zicsr_zifencei_zihintntl_zihintpause_zihpm_zimop_za64rs_zawrs_zfa_zfbfmin_zca_zcb_zcd_zcmop_zba_zbb_zbc_zbs_zvbb_zvfbfmin_zvfbfwma_zvfhmin_zvkt_svinval_svnapot_svpbmt_sstc_sscofpmf_supm";
+			riscv,isa-base = "rv64i";
+			riscv,isa-extensions =
+				"i", "m", "a", "f", "d", "c", "v", "h",
+				"zicbom", "zicbop", "zicboz", "zicntr", "zicond",
+				"zicsr", "zifencei", "zihintntl", "zihintpause",
+				"zihpm", "zimop", "za64rs", "zaamo", "zalrsc",
+				"zawrs", "zfa", "zfbfmin", "zca", "zcb", "zcd",
+				"zcmop", "zba", "zbb", "zbc", "zbs", "zvbb",
+				"zvfbfmin", "zvfbfwma", "zvfhmin", "zvkt",
+				"svinval", "svnapot", "svpbmt", "sstc",
+				"sscofpmf", "supm", "ssnpm", "smnpm", "smstateen";
+			riscv,cbom-block-size = <64>;
+			riscv,cbop-block-size = <64>;
+			riscv,cboz-block-size = <64>;
+			mmu-type = "riscv,sv39";
+			riscv,pmpregions = <0x10>;
+			riscv,pmpgranularity = <0x04>;
+			clock-frequency = <0x3b9aca00>;
+
+			cpu1_intc: interrupt-controller {
+				#address-cells = <0x02>;
+				#interrupt-cells = <0x01>;
+				interrupt-controller;
+				compatible = "riscv,cpu-intc";
+			};
+		};
+	};
+
+	soc {
+		clint@2000000 {
+			interrupts-extended =
+				<&cpu0_intc 0x03 &cpu0_intc 0x07>,
+				<&cpu1_intc 0x03 &cpu1_intc 0x07>;
+		};
+
+		plic@c000000 {
+			interrupts-extended =
+				<&cpu0_intc 0x0b &cpu0_intc 0x09>,
+				<&cpu1_intc 0x0b &cpu1_intc 0x09>;
+		};
+	};
+};

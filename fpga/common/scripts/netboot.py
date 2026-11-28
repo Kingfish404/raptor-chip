@@ -103,10 +103,17 @@ SECTIONS {
     march = f"rv{xlen}imac_zicsr_zifencei"
     if is_dma:
         march += "_zicbom"
+    nharts = sum(
+        1 for name in subprocess.check_output(
+            ["fdtget", "-l", "/dev/stdin", "/cpus"], input=dtb
+        ).decode().splitlines()
+        if name.startswith("cpu@")
+    )
+    extra = [f"-DNATIVE_NHARTS={nharts}"] if nharts > 1 else []
     subprocess.run([cross + "gcc", f"-march={march}", f"-mabi={abi}", "-mcmodel=medany",
                     "-O2", "-ffreestanding", "-fno-builtin", "-fno-stack-protector", "-msmall-data-limit=0",
                     "-nostdlib", "-Wall", "-Wextra", "-Werror", "-Wl,--build-id=none", "-Wl,--no-relax",
-                    "-I", str(directory), "-T", str(directory / "loader.ld"),
+                    *extra, "-I", str(directory), "-T", str(directory / "loader.ld"),
                     str(COMMON / "firmware/start.S"), str(COMMON / "firmware/netboot.c"),
                     "-o", str(directory / "loader.elf")], check=True)
     binary = directory / "loader.bin"

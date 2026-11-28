@@ -171,6 +171,8 @@ def native_contract(name, *, dividers=None):
             property_map=dict(
                 functional='Independent byte-address register model, divider phase and ticks, '
                            'and interrupt levels',
+                ordering='Single-cycle ordered register updates and simultaneous tick/write '
+                         'precedence across hart slots',
                 ownership='All byte strobes, unaligned register offsets and unmapped reads; '
                           'time writes preserve untouched pre-edge bytes when a tick coincides',
                 reset='Time, compare, software interrupt and divider reset together; '
@@ -188,11 +190,11 @@ def native_contract(name, *, dividers=None):
                       'delivery are composition obligations.',
             mutations=[
                 ('byte-offset',
-                 "assign register_wdata = 64'(clint_bus.wdata) << {clint_bus.awaddr[2:0],3'b000};",
-                 "assign register_wdata = 64'(clint_bus.wdata);", {}, {}, 6),
-                ('timer-boundary', 'assign clint_bus.timer_int = (mtime >= mtimecmp);',
-                 'assign clint_bus.timer_int = (mtime > mtimecmp);', {}, {}, 5),
-                ('software-strobe', ' && clint_bus.wstrb[0])', ')', {}, {}, 3),
+                 "assign register_wdata  = 64'(clint_bus.wdata) << {clint_bus.awaddr[2:0], 3'b000};",
+                 "assign register_wdata  = 64'(clint_bus.wdata);", {}, {}, 6),
+                ('timer-boundary', 'assign clint_bus.timer_int[h] = (mtime >= mtimecmp_arr[h]);',
+                 'assign clint_bus.timer_int[h] = (mtime > mtimecmp_arr[h]);', {}, {}, 5),
+                ('software-strobe', ' && register_wstrb[MsipByte];', ';', {}, {}, 3),
             ])
     property_map = {
         'functional': 'The complete correct conjunction and every active producer assertion',

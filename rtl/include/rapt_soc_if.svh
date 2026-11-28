@@ -220,6 +220,9 @@ interface l2_client_if #(
   logic              writeback_pending;
   logic              cbo_inval;
   logic [XLEN-1:6]   cbo_block;
+  // Cluster atomic serialization handshake (multi-hart AMO / SC).
+  logic              atomic_lock_req;
+  logic              atomic_lock_stall;
 
   modport client(
       output rd_req_valid, rd_req_id, rd_req_addr, rd_req_size, rd_req_len, rd_req_burst,
@@ -239,7 +242,8 @@ interface l2_client_if #(
       output release_valid, release_addr, release_data, release_has_data, release_mask,
       output release_last,
       input release_ready, release_ack,
-      output writeback_pending, cbo_inval, cbo_block
+      output writeback_pending, cbo_inval, cbo_block, atomic_lock_req,
+      input atomic_lock_stall
   );
 
   modport manager(
@@ -260,24 +264,26 @@ interface l2_client_if #(
       input release_valid, release_addr, release_data, release_has_data, release_mask,
       input release_last,
       output release_ready, release_ack,
-      input writeback_pending, cbo_inval, cbo_block
+      input writeback_pending, cbo_inval, cbo_block, atomic_lock_req,
+      output atomic_lock_stall
   );
 endinterface
 
 interface clint_bus_if #(
-    parameter int XLEN = `RAPT_XLEN
+    parameter int XLEN   = `RAPT_XLEN,
+    parameter int NHARTS = 1
 );
-  logic [XLEN-1:0] araddr;
-  logic [XLEN-1:0] rdata;
+  logic [XLEN-1:0]   araddr;
+  logic [XLEN-1:0]   rdata;
 
-  logic [XLEN-1:0] awaddr;
-  logic [XLEN-1:0] wdata;
+  logic [XLEN-1:0]   awaddr;
+  logic [XLEN-1:0]   wdata;
   logic [XLEN/8-1:0] wstrb;
-  logic            wvalid;
+  logic              wvalid;
 
-  logic            timer_int;
-  logic            sw_int;
-  logic [63:0]     mtime_value;
+  logic [NHARTS-1:0] timer_int;
+  logic [NHARTS-1:0] sw_int;
+  logic [63:0]       mtime_value;
 
   modport master(
       output araddr,

@@ -62,7 +62,7 @@ module formal_debug_reset #(
       RESET_COVER_DRAIN : cover (waiting && !core_bus_idle && !core_reset);
       RESET_COVER_ACTIVE : cover (core_reset);
       RESET_COVER_SHORT_PULSE : cover (waiting && !request && core_reset);
-      RESET_COVER_SBA : cover (core_reset && merged_axi.arvalid && merged_axi.arid == 15);
+      RESET_COVER_SBA : cover (core_reset && merged_axi.arvalid && merged_axi.arid == 4'd7);
     end
   end
 endmodule

@@ -1,6 +1,10 @@
 .section .text.start, "ax"
 .global _start
 _start:
+#if defined(NATIVE_NHARTS) && NATIVE_NHARTS > 1
+    csrr t0, mhartid
+    bnez t0, 3f
+#endif
 #ifdef NATIVE_VECTOR_TEST
     # The vector build checks real integer and FP64 arithmetic through main RAM.
     li t0, 0x2200

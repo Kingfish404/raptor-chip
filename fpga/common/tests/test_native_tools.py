@@ -39,6 +39,23 @@ class NativeToolsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "requires.*F and D"):
             build.resolve_vector(args)
 
+    def test_smp_preset_sets_default_nharts_and_allows_override(self):
+        for preset, expected in (("default", 1), ("default-smp2", 2),
+                                 ("small-smp2", 2), ("middle-smp4", 4)):
+            command = [sys.executable, str(FPGA / "common/scripts/native_build.py"),
+                       "info", "--board", str(FPGA / "mlk-cu08-ku15p"),
+                       "--preset", preset, "--cm005-bridge", "0"]
+            result = subprocess.run(command, text=True, capture_output=True, check=True)
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["configuration"].get("nharts", 1), expected)
+            self.assertNotIn(f"-smp{expected}-smp{expected}", payload["output"])
+        override = [sys.executable, str(FPGA / "common/scripts/native_build.py"),
+                    "info", "--board", str(FPGA / "mlk-cu08-ku15p"),
+                    "--preset", "default-smp2", "--nharts", "4", "--cm005-bridge", "0"]
+        result = subprocess.run(override, text=True, capture_output=True, check=True)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["configuration"]["nharts"], 4)
+
     def test_sampling_clock_has_an_exact_integer_timer_divider(self):
         for clock, sampling, valid in ((25, True, False), (50, True, True),
                                        (100, True, True), (25, False, True)):

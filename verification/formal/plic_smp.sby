@@ -1,0 +1,53 @@
+[tasks]
+rv32_smp2
+rv64_smp2
+rv32_smp4
+rv64_smp4
+rv64_smp2_full
+rv64_smp4_full
+cover_smp2
+cover_smp4
+
+[options]
+rv32_smp2: mode prove
+rv32_smp2: depth 4
+rv64_smp2: mode prove
+rv64_smp2: depth 4
+rv32_smp4: mode prove
+rv32_smp4: depth 4
+rv64_smp4: mode prove
+rv64_smp4: depth 4
+rv64_smp2_full: mode prove
+rv64_smp2_full: depth 4
+rv64_smp4_full: mode prove
+rv64_smp4_full: depth 4
+cover_smp2: mode cover
+cover_smp2: depth 16
+cover_smp4: mode cover
+cover_smp4: depth 16
+
+[engines]
+smtbmc --nopresat bitwuzla
+
+[script]
+plugin -i slang
+rv32_smp2: read_slang --single-unit -DFORMAL --top formal_plic -G XLEN=32 -G NCTX=4 perip_formal_if.sv formal_plic.sv rapt_plic.sv
+rv64_smp2: read_slang --single-unit -DFORMAL -DRAPT_RV64 --top formal_plic -G XLEN=64 -G NCTX=4 perip_formal_if.sv formal_plic.sv rapt_plic.sv
+rv32_smp4: read_slang --single-unit -DFORMAL --top formal_plic -G XLEN=32 -G NCTX=8 perip_formal_if.sv formal_plic.sv rapt_plic.sv
+rv64_smp4: read_slang --single-unit -DFORMAL -DRAPT_RV64 --top formal_plic -G XLEN=64 -G NCTX=8 perip_formal_if.sv formal_plic.sv rapt_plic.sv
+rv64_smp2_full: read_slang --single-unit -DFORMAL -DRAPT_RV64 --top formal_plic -G XLEN=64 -G NDEV=31 -G NCTX=4 perip_formal_if.sv formal_plic.sv rapt_plic.sv
+rv64_smp4_full: read_slang --single-unit -DFORMAL -DRAPT_RV64 --top formal_plic -G XLEN=64 -G NDEV=31 -G NCTX=8 perip_formal_if.sv formal_plic.sv rapt_plic.sv
+cover_smp2: read_slang --single-unit -DFORMAL -DRAPT_RV64 --top formal_plic -G XLEN=64 -G NCTX=4 perip_formal_if.sv formal_plic.sv rapt_plic.sv
+cover_smp4: read_slang --single-unit -DFORMAL -DRAPT_RV64 --top formal_plic -G XLEN=64 -G NCTX=8 perip_formal_if.sv formal_plic.sv rapt_plic.sv
+prep -top formal_plic
+
+[files]
+perip_formal_if.sv
+rapt_soc_if.svh
+formal_plic.sv
+rapt_plic.sv ../../rtl/uncore/irq/rapt_plic.sv
+rapt.svh ../../rtl/include/rapt.svh
+rapt_config.svh ../../rtl/configs/formal/rapt_config.svh
+rapt_sva.svh ../../rtl/include/rapt_sva.svh
+rapt_fp_ops.svh ../../rtl/include/rapt_fp_ops.svh
+rapt_soc.svh ../../rtl/include/npc/rapt_soc.svh
