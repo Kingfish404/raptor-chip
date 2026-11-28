@@ -1,18 +1,23 @@
-# Ubuntu 26.10 (RVA23) NFS root
+# Ubuntu 26.10, Debian 13, and Alpine 3.24 on Raptor FPGA
 
-The `ubuntu-*` targets use each board's SystemVerilog SoC. Shared
-code, Linux sources and benchmark tools live under `fpga/common/`; board
-profiles select the physical NIC, MAC address, loader IP and hostname. The boot chain is
-boot ROM → small RAM TFTP loader → OpenSBI/Linux → Ethernet → Ubuntu
-`/sbin/init` (systemd) on an NFS root. The default is RV64 `default` (RVA23U64/RVA23S64),
-50 MHz, 2 GiB DDR4, a 1 MHz CLINT timebase and a 115200-baud Linux console.
+The `ubuntu-*`, `debian-*`, and `alpine-*` targets use each board's SystemVerilog SoC.
+Shared code, Linux sources, and benchmark tools live under `fpga/common/`; board
+profiles select the physical NIC, MAC address, loader IP, and hostname. The boot chain is
+boot ROM → small RAM TFTP loader → OpenSBI/Linux → Ethernet → distribution `/sbin/init`
+(`systemd` for Ubuntu 26.10 / Debian 13 `Trixie`, `OpenRC` + `BusyBox` + `musl` for
+Alpine 3.24) over persistent NFS, DDR4 `squashfs` (`OverlayFS`), DDR4 `ramroot`, or
+VirtIO/NVMe/SDHCI block storage. The default preset is RV64 `default` (RVA23U64/RVA23S64;
+Debian 13 and Alpine 3.24 are RV64GC and also run on non-vector presets such as `small`
+and `middle`), 50 MHz, 2 GiB DDR4, a 1 MHz CLINT timebase, and a 115200-baud console.
 The kernel builds directly from upstream mainline Linux `7.3.5` (`defconfig` plus
-[`ubuntu.config`](linux/ubuntu.config) and the board Ethernet driver).
+[`distro.config`](linux/distro.config) and the board Ethernet driver), and is shared
+automatically across Ubuntu, Debian, and Alpine builds.
 
 On RK-XCKU5P-F, the Ethernet controller uses eight 2 KiB receive slots and one
 2 KiB transmit buffer at `0x18000000`, PLIC interrupt 2, and a local MAC address
-`02:52:41:50:05:01`. CPU accesses are aligned 32-bit PIO into uncached packet
-SRAM. It does not DMA into cached DDR. Linux uses the included
+`02:52:41:50:05:01`. By default (`--eth-dma 0`, ABI v1), CPU accesses use aligned
+32-bit PIO into uncached packet SRAM; passing `--eth-dma 1` enables ABI v2
+(`rapt_eth_axi_dma.sv`) with 64-bit AXI4 Ring DMA into DDR4. Linux uses the included
 [`raptor_eth.c`](linux/raptor_eth.c) driver, NAPI, and the upstream
 RTL8211F PHY driver. The link supports **1000BASE-T full duplex**; `rgmii-txid`
 enables PHY TX delay and disables PHY RX delay. See [the register ABI](../rk-xcku5p-f/ETHERNET.md).
@@ -52,6 +57,20 @@ make -C fpga/rk-xcku5p-f ubuntu-serve
 make -C fpga/rk-xcku5p-f ubuntu-load HW_TARGET='*/<KU5P-JTAG-ID>'
 make -C fpga/rk-xcku5p-f ubuntu-boot \
   UART_PORT='/dev/serial/by-id/<KU5P-UART>'
+
+# Equivalent targets exist for Debian 13 (debian-*) and Alpine 3.24 (alpine-*),
+# including *-apps to pre-install static RV64 app/ benchmarks under /opt/raptor:
+make -C fpga/rk-xcku5p-f debian-rootfs debian-apps debian-bundle debian-check
+make -C fpga/rk-xcku5p-f alpine-rootfs alpine-apps alpine-bundle alpine-check
+
+# Lightweight multi-hart SMP verification uses Alpine 3.24 + DDR4 SquashFS by default
+# (SMP_RAPT_CONFIG defaults to default-smp2 on KU15P and small-smp2 on KU5P, with
+# /usr/local/bin/raptor-smp-check pre-installed):
+make -C fpga/mlk-cu08-ku15p alpine-smp-bitstream
+make -C fpga/mlk-cu08-ku15p alpine-smp-rootfs alpine-smp-bundle alpine-smp-check
+make -C fpga/mlk-cu08-ku15p alpine-smp-load HW_TARGET='*/<KU15P-JTAG-ID>'
+make -C fpga/mlk-cu08-ku15p alpine-smp-boot \
+  UART_PORT='/dev/serial/by-id/<KU15P-UART>'
 ```
 
 `ubuntu-rootfs` uses sudo to preserve the official Ubuntu file ownership and
@@ -110,23 +129,38 @@ hardware or service dependencies.
 DNS uses the configured server directly through `/etc/resolv.conf` and the
 distribution's `files dns` NSS configuration; `systemd-resolved` is masked.
 
-The boards have no battery-backed RTC. Before using apt or TLS after
-a reset, confirm that network time synchronization has completed. If necessary,
-set the board's clock from a host with correct time, for example:
+The SoC instantiates a volatile `rapt_goldfish_rtc` (`0x00101000`, PLIC IRQ 6),
+and `distro.py boot` stamps `/chosen/raptor,host-epoch` (plus optional
+`--http-proxy` / `UBUNTU_HTTP_PROXY` and `--apt-mirror` / `UBUNTU_APT_MIRROR`
+settings) into the temporary DTB for early `raptor-boot-env` synchronization
+(`systemd` unit on Ubuntu/Debian, `OpenRC` boot script on Alpine). When a proxy
+URL is passed (or relayed from `127.0.0.1` via `distro.py proxy`), `raptor-boot-env`
+configures `/etc/profile.d/raptor-proxy.sh`, `/etc/apt/apt.conf.d/98-raptor-proxy.conf`,
+and `/etc/ssh/sshd_config.d/98-raptor-proxy.conf` (`SetEnv`), so serial logins,
+interactive SSH sessions, and non-interactive `ssh root@<ip> 'apk add ...'` /
+`apt-get` commands all inherit internet proxy access automatically. NFSv3 root
+mounts include `nolock` so `apk` and `dpkg` database locks work locally without
+requiring `rpcbind`/`rpc.statd`. Because the boards have no battery-backed RTC
+across standalone resets, if booting without `distro.py boot` or NTP, set the
+board's clock from a host with correct time before using `apk`, `apt`, or TLS:
 
 ```sh
 ssh root@192.168.50.88 "date -u -s '@$(date +%s)'"
 ```
 
-For a userspace check, run these commands in the board's serial or SSH shell:
+For a userspace and package-persistence check on Ubuntu/Debian (`apt-get`) or
+Alpine (`apk`), run these commands in the board's serial or SSH shell:
 
 ```sh
-systemctl is-active multi-user.target ssh.service systemd-networkd.service
-systemctl --failed
+# Ubuntu 26.10 / Debian 13:
+systemctl is-active ssh.service
 apt-get --error-on=any update
 apt-get install -y --no-install-recommends hello
-hello
-printf 'Raptor Ubuntu\n' > /root/persistence-check.txt
+
+# Alpine 3.24 (persistent over NFS when booted with UBUNTU_ROOT_DEVICE=nfs):
+apk update && apk add curl htop
+curl -sSI https://alpinelinux.org | head -n 5
+printf 'Raptor Linux\n' > /root/persistence-check.txt
 sync
 ```
 
@@ -144,10 +178,10 @@ rejected rather than overwritten.
 
 The boot bundle contains a kernel with the board's Ethernet driver and NFS client
 built in, an empty embedded initramfs, OpenSBI `fw_payload.bin`, and a board DTB with
-`root=/dev/nfs ... init=/sbin/init`. Each boot injects fresh host entropy into a
-temporary DTB. By default the ROM receives only a small TFTP loader at
-`0x8f000000`; firmware and DTB travel over Ethernet with 1024-byte TFTP
-blocks, retries and whole-file size/CRC checks. The host serves only those two
+`root=/dev/nfs ... init=/sbin/init`. Each boot injects fresh host entropy and
+`/chosen/raptor,host-epoch` into a temporary DTB. By default the ROM receives only
+a small TFTP loader at `0x8f000000`; firmware and DTB travel over Ethernet with
+1024-byte TFTP blocks, retries and whole-file size/CRC checks. The host serves only those two
 files on `UBUNTU_SERVER:UBUNTU_TFTP_PORT` (default UDP 6969), using ephemeral
 transfer ports. Reserve `UBUNTU_BOOT_IP` (default `192.168.50.88`) for this MAC on
 the same LAN; Linux subsequently obtains its address by DHCP. The existing NFS
@@ -225,26 +259,59 @@ fpga/litex/.venv/bin/python -m unittest discover \
 
 ## Standard DMA Block Devices, `virtio-mmio` NIC, and QEMU I/O Bridge
 
-[`ubuntu.config`](linux/ubuntu.config) also builds in upstream mainline drivers for:
+[`distro.config`](linux/distro.config) also builds in upstream mainline drivers for:
 
 - **VirtIO-MMIO v2** (`CONFIG_VIRTIO_MMIO=y`, `CONFIG_VIRTIO_BLK=y`, `CONFIG_VIRTIO_NET=y`)
 - **SDHCI / MMC** (`CONFIG_MMC=y`, `CONFIG_MMC_SDHCI_OF_ARASAN=y`, `CONFIG_MMC_SDHCI_PCI=y`)
 - **PCIe Generic ECAM + NVMe 1.4** (`CONFIG_PCI_HOST_GENERIC=y`, `CONFIG_BLK_DEV_NVME=y`)
 
-When `native_build.py` or `ubuntu.py` is invoked with `--virtio-net 1` and/or
+When `native_build.py` or `distro.py` is invoked with `--virtio-net 1` and/or
 `--qemu-bridge 1`, [`rapt_native_io_soc.sv`](rtl/rapt_native_io_soc.sv) instantiates:
 
 1. [`rapt_virtio_mmio_net.sv`](rtl/rapt_virtio_mmio_net.sv) at `0x10002000` (PLIC IRQ 2),
    an OASIS VirtIO 1.2 Modern (`VERSION=2`) NIC with a hardware Split-Virtqueue
    RX/TX AXI4-DMA engine advertising `VIRTIO_F_ACCESS_PLATFORM` (bit 33).
 2. [`rapt_qemu_io_bridge.sv`](rtl/rapt_qemu_io_bridge.sv), forwarding `VirtIO-Blk`
-   (`0x10001000`), `SDHCI` (`0x42000000`), and `PCIe ECAM + NVMe` (`0x41000000` /
-   `0x50000000`) MMIO, PLIC IRQs, and non-coherent AXI4-DMA over L2 Ethernet
-   (EtherType `0x88B5`, shared with `virtio-net` via [`rapt_eth_rqio_mux.sv`](rtl/rapt_eth_rqio_mux.sv))
-   or SLIP+CRC16 serial fallback to [`raptor_qemu_bridge.py`](../../tools/qemu_io_bridge/raptor_qemu_bridge.py).
+   (`0x10001000`), `VirtIO-RNG` (`0x10003000`), `SDHCI` (`0x42000000`), and
+   `PCIe ECAM + NVMe` (`0x41000000` / `0x50000000`) MMIO, PLIC IRQs, and
+   non-coherent AXI4-DMA over L2 Ethernet (EtherType `0x88B5`, shared with
+   `virtio-net` via [`rapt_eth_rqio_mux.sv`](rtl/rapt_eth_rqio_mux.sv)) or
+   SLIP+CRC16 serial fallback to
+   [`raptor_qemu_bridge.py`](../../tools/qemu_io_bridge/raptor_qemu_bridge.py).
 
 Non-coherent DMA uses standard upstream Linux `dma-noncoherent;` DT properties
 with RVA23 `Zicbom` + `Svpbmt` cache maintenance and drives `external_write_*`
 into `rapt` for LR/SC reservation invalidation, requiring zero kernel patches.
-Pass `--root-device /dev/vda`, `/dev/nvme0n1`, or `/dev/mmcblk0` to `ubuntu.py`
-to boot Ubuntu 26.10 directly from a local ext4 block device instead of NFS.
+Pass `--root-device /dev/vda`, `/dev/nvme0n1`, or `/dev/mmcblk0` to `distro.py`
+to boot Ubuntu 26.10, Debian 13, or Alpine 3.24 from a local ext4 block device,
+`--root-device ramroot` or `squashfs` for in-DDR rootfs images, and
+`--systemd-target minimal` for fast serial/SSH startup (`raptor-minimal.target`).
+
+## 5-OS Footprint, SSH Interactivity, and Microbenchmark Comparison (50 MHz KU15P)
+
+Controlled measurements on MLK-CU08-KU15P (`rv64-default-w4` @ 50 MHz, no L2,
+`rapt_native_io_soc` with `VirtIO-Net`, 5 trials per SSH metric):
+
+| OS (`riscv64`) | Init & Libc | Idle RAM | Cold SSH | Warm SSH (`ControlMaster`) | `fork+exec` (`/bin/true`) | CoreMark (`CM/MHz` / IPC) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| **Alpine 3.24.4** | `OpenRC` + `musl` | **13.5 MiB** | **16.46 s** | **1.12 s** | **294.5 ms** | 2.90 / 0.932 |
+| **NetBSD 11.1** | `rc.d` + BSD `libc` | **23.3 MiB** | **18.97 s** | 2.66 s | 842.5 ms | **3.18 / 1.086** |
+| **FreeBSD 15.0** | `rc.d` + BSD `libc` | 51.9 MiB | 35.82 s | 4.28 s | 826.4 ms | 1.74 / 0.736 (Clang) |
+| **Debian 13** | `systemd 257` + `glibc 2.41` | 58.7 MiB | 80.70 s | **2.47 s** | **509.1 ms** | 2.89 / 0.928 |
+| **Ubuntu 26.10** | `systemd` + `glibc 2.42` | 70.9 MiB | 93.19 s | 6.25 s | 3,178.4 ms | 2.82 / 0.909 |
+
+- **Cold SSH latency**: OpenSSH 10 spawns separate `sshd-session` and `sshd-auth`
+  helpers per connection. On Debian 13 and Ubuntu 26.10, dynamic linking across
+  12-22 shared libraries (`libcrypto`, `libkrb5`, `libpam`, `libselinux`,
+  `libwtmpdb`) plus `pam_systemd` session setup dominates 50 MHz cold logins.
+  Alpine (`musl` + BusyBox `ash`, no PAM) and NetBSD complete cold handshakes
+  **4.9-5.7x faster**.
+- **Warm SSH and shell `fork+exec`**: Ubuntu 26.10 ships ~11 MiB Rust `uutils`
+  coreutils binaries, raising `/usr/bin/true` `fork+exec` to `3.18 s`. Debian 13
+  retains compact C GNU coreutils (`509 ms`, **6.2x faster**), and Alpine's
+  cache-hot `musl` + BusyBox reaches **`294.5 ms`** (**10.8x faster**) with
+  **`1.12 s`** multiplexed SSH round-trip latency.
+- **Recommended FPGA daily driver**: Use **Alpine 3.24** (over persistent NFS or
+  `ramroot`) or **NetBSD 11.1** for responsive interactive SSH and low-noise
+  microarchitectural benchmarking (`/opt/raptor/bin`), and pair any 50 MHz board
+  with `ControlMaster auto` in `~/.ssh/config`.

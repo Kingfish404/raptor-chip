@@ -73,8 +73,19 @@ void portable_init(core_portable *p, int *argc, char *argv[])
   (void)argc;
   (void)argv;
 
+#ifdef __GLIBC__
+  printf("CoreMark: RISC-V Linux userspace port (rv%d, glibc)\n",
+         (int)(sizeof(void *) * 8));
+#elif defined(__FreeBSD__)
+  printf("CoreMark: RISC-V FreeBSD userspace port (rv%d, libc)\n",
+         (int)(sizeof(void *) * 8));
+#elif defined(__NetBSD__)
+  printf("CoreMark: RISC-V NetBSD userspace port (rv%d, libc)\n",
+         (int)(sizeof(void *) * 8));
+#else
   printf("CoreMark: NPC pk userspace port (rv%d, newlib)\n",
          (int)(sizeof(void *) * 8));
+#endif
   printf("Iterations: %d\n", ITERATIONS);
   printf("CoreMark timer Hz : %llu\n", (unsigned long long)EE_TICKS_PER_SEC);
 }

@@ -4,7 +4,8 @@
 // DMA sync), VIRTIO_NET_F_MAC (5), and VIRTIO_NET_F_STATUS (16).
 module rapt_virtio_mmio_net #(
     parameter int XLEN = `RAPT_XLEN,
-    parameter logic [47:0] LocalMac = 48'h0105_5041_5202  // 02:52:41:50:05:01 LE
+    parameter logic [47:0] LocalMac = 48'h0105_5041_5202,  // 02:52:41:50:05:01 LE
+    parameter bit FilterUnicast = 1'b0
 ) (
     input logic clk,
     input logic reset,
@@ -262,6 +263,11 @@ module rapt_virtio_mmio_net #(
         if (!rx_drop_q && rx_cap_len_q < 12'(MaxFrame)) begin
           rx_pkt_buf[rx_cap_len_q[10:0]] <= rx_axis_tdata_i;
           rx_cap_len_q <= rx_cap_len_q + 12'd1;
+          if (FilterUnicast && rx_cap_len_q == 12'd5 && !rx_pkt_buf[0][0]
+              && {rx_axis_tdata_i, rx_pkt_buf[4], rx_pkt_buf[3],
+                  rx_pkt_buf[2], rx_pkt_buf[1], rx_pkt_buf[0]} != LocalMac) begin
+            rx_drop_q <= 1'b1;
+          end
         end else begin
           rx_drop_q <= 1'b1;
         end

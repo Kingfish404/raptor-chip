@@ -11,20 +11,20 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import fast_upload
-import ubuntu
+import distro as ubuntu
 from unittest.mock import patch
 
 FPGA = Path(__file__).resolve().parents[2]
 
 
-class UbuntuTests(unittest.TestCase):
+class DistroTests(unittest.TestCase):
     def test_board_network_profiles_and_default_preset(self):
         for board, driver, address in (("rk-xcku5p-f", "raptor", "192.168.50.88"),
                                        ("mlk-cu08-ku15p", "liteeth", "192.168.50.90")):
             ubuntu.configure(FPGA / board)
             self.assertEqual(ubuntu.network_profile()["driver"], driver)
             self.assertEqual(ubuntu.PROFILE["ubuntu"]["boot_ip"], address)
-            with patch.object(sys, "argv", ["ubuntu.py", "kernel"]), \
+            with patch.object(sys, "argv", ["distro.py", "kernel"]), \
                     patch.object(ubuntu, "kernel") as kernel:
                 ubuntu.main()
                 self.assertEqual(kernel.call_args.args[0].preset, "default")
@@ -33,7 +33,7 @@ class UbuntuTests(unittest.TestCase):
         source = ubuntu.json.loads((ubuntu.COMMON / "linux/kernel-source.json").read_text())
         self.assertRegex(source["version"], r"^\d+\.\d+\.\d+$")
         self.assertGreaterEqual(int(source["version"].split(".")[0]), 7)
-        lines = (ubuntu.COMMON / "linux/ubuntu.config").read_text().splitlines()
+        lines = (ubuntu.COMMON / "linux/distro.config").read_text().splitlines()
         for option in ("CONFIG_RISCV_ISA_V=y", "CONFIG_RISCV_ISA_SUPM=y",
                        "CONFIG_RISCV_ISA_SVNAPOT=y", "CONFIG_RISCV_ISA_SVPBMT=y",
                        "CONFIG_VIRTUALIZATION=y", "CONFIG_KVM=y",
@@ -208,6 +208,90 @@ class UbuntuTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "invalid HTTP proxy"):
                 ubuntu.stamp_runtime_dtb(dtb, http_proxy="http://bad\"quote")
 
+    def test_boot_env_enables_user_perf_counters_and_apps_path(self):
+        self.assertIn("perf_user_access", ubuntu.RAPTOR_BOOT_ENV_SH)
+        self.assertIn("debian.list", ubuntu.RAPTOR_BOOT_ENV_SH)
+        self.assertIn("/etc/apk/repositories", ubuntu.RAPTOR_BOOT_ENV_SH)
+        self.assertIn("kernel.perf_user_access = 2", ubuntu.PERF_SYSCTL_CONF)
+        self.assertIn("/opt/raptor/bin", ubuntu.RAPTOR_APPS_PROFILE_SH)
+
+    def test_debian_and_alpine_ramroot_squashfs_and_make_targets(self):
+        alpine_cmd = ubuntu.bootargs(SimpleNamespace(
+            distro="alpine", root_device="squashfs", systemd_target="minimal",
+            rootfs=Path("/srv/alpine"), server="192.168.50.1"))
+        self.assertIn("rdinit=/init", alpine_cmd)
+        self.assertNotIn("systemd.unit=", alpine_cmd)
+        debian_cmd = ubuntu.bootargs(SimpleNamespace(
+            distro="debian", root_device="squashfs", systemd_target="minimal",
+            rootfs=Path("/srv/debian"), server="192.168.50.1"))
+        self.assertIn("systemd.unit=raptor-minimal.target", debian_cmd)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp) / "alpine-rootfs"
+            (root / "sbin").mkdir(parents=True)
+            (root / "sbin/openrc").write_text("#!/bin/sh\n")
+            (root / "sbin/init").write_text("#!/bin/sh\n")
+            (root / "etc/ssh/sshd_config.d").mkdir(parents=True)
+            ubuntu.save(root / ".raptor-rootfs.json", {"schema": "v1", "distro": "alpine"})
+            self.assertTrue(ubuntu.is_openrc_rootfs(root))
+            fstab = ubuntu.ramroot_fstab("192.168.50.1", root, openrc=True)
+            self.assertIn("noauto,nolock", fstab)
+            self.assertNotIn("x-systemd.automount", fstab)
+            initrd = Path(temp) / "alpine-initrd.img"
+            ubuntu.build_ramroot(root, initrd, "192.168.50.1", root)
+            self.assertGreater(initrd.stat().st_size, 0)
+            if ubuntu.shutil.which("mksquashfs") is not None:
+                sqsh = Path(temp) / "alpine.sqsh"
+                ubuntu.build_squashfs(root, sqsh, "192.168.50.1", root, use_sudo=False)
+                self.assertEqual(sqsh.read_bytes()[:4], b"hsqs")
+        for board, smp_preset in (("mlk-cu08-ku15p", "default-smp2"),
+                                  ("rk-xcku5p-f", "small-smp2")):
+            for target, expected in (("debian-rootfs", "--distro 'debian'"),
+                                     ("alpine-rootfs", "--distro 'alpine'"),
+                                     ("debian-info", "native_build.py"),
+                                     ("alpine-info", "native_build.py"),
+                                     ("alpine-smp-info", f"--preset {smp_preset}"),
+                                     ("alpine-smp-bundle", f"--preset '{smp_preset}'")):
+                dry = ubuntu.subprocess.check_output(
+                    ["make", "-n", "-C", str(FPGA / board), target], text=True)
+                self.assertIn(expected, dry)
+            smp_bundle_dry = ubuntu.subprocess.check_output(
+                ["make", "-n", "-C", str(FPGA / board), "alpine-smp-bundle"], text=True)
+            self.assertIn("--distro 'alpine'", smp_bundle_dry)
+            self.assertIn("--root-device 'squashfs'", smp_bundle_dry)
+            smp_boot_dry = ubuntu.subprocess.check_output(
+                ["make", "-n", "-C", str(FPGA / board), "alpine-smp-boot",
+                 "UART_PORT=/dev/ttyUSB0", "UBUNTU_MAC=02:52:41:50:15:02"],
+                text=True)
+            self.assertIn("--mac '02:52:41:50:15:02'", smp_boot_dry)
+
+    def test_runtime_dtb_mac_override(self):
+        clean_mac, octets = ubuntu.parse_unicast_mac("02:52:41:50:15:02")
+        self.assertEqual(clean_mac, "02:52:41:50:15:02")
+        self.assertEqual(octets, bytes.fromhex("025241501502"))
+        with self.assertRaises(RuntimeError):
+            ubuntu.parse_unicast_mac("03:52:41:50:15:02")
+        with tempfile.TemporaryDirectory() as tmp:
+            dts = Path(tmp) / "board.dts"
+            dtb = Path(tmp) / "board.dtb"
+            dts.write_text(
+                "/dts-v1/;\n/ {\n"
+                "  chosen {};\n"
+                "  soc {\n"
+                "    ethernet@18002000 {\n"
+                "      local-mac-address = [02 52 41 50 15 01];\n"
+                "    };\n"
+                "  };\n};\n"
+            )
+            ubuntu.subprocess.run(["dtc", "-I", "dts", "-O", "dtb", "-o", str(dtb), str(dts)],
+                                  check=True)
+            ubuntu.stamp_runtime_dtb(dtb, host_epoch=1700000000,
+                                     mac_override="02:52:41:50:15:02",
+                                     eth_node="/soc/ethernet@18002000")
+            stamped = ubuntu.subprocess.check_output(
+                ["fdtget", "-t", "bx", str(dtb), "/soc/ethernet@18002000", "local-mac-address"],
+                text=True).strip()
+            self.assertEqual(stamped, "2 52 41 50 15 2")
+
     def test_localhost_proxy_relay_forwards_bytes(self):
         import socket
 
@@ -230,6 +314,19 @@ class UbuntuTests(unittest.TestCase):
                     client.sendall(b"PING")
                     self.assertEqual(client.recv(64), b"OK:PING")
             worker.join(timeout=2.0)
+
+    def test_nfs_nolock_and_sshd_proxy_setenv(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "rootfs"
+            root.mkdir()
+            args = ubuntu.argparse.Namespace(
+                root_device="nfs", server="192.168.50.1", rootfs=root,
+                systemd_target="default", distro="alpine",
+            )
+            bargs = ubuntu.bootargs(args)
+            self.assertIn(",vers=3,tcp,nolock,rsize=32768,wsize=32768 ", bargs)
+        self.assertIn("98-raptor-proxy.conf", ubuntu.RAPTOR_BOOT_ENV_SH)
+        self.assertIn("SetEnv http_proxy=", ubuntu.RAPTOR_BOOT_ENV_SH)
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux termios2")
     def test_exact_upload_baud_and_console_restore(self):

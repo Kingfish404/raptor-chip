@@ -1,4 +1,4 @@
-# MLK-CU08-KU15P board build: SoC bitstream and Ubuntu.
+# MLK-CU08-KU15P board build: SoC bitstream and Linux distributions.
 # Run `make help` for every target and variable; see README.md for workflows.
 .DEFAULT_GOAL := help
 
@@ -10,7 +10,7 @@ BOARD_OPTIONS = --cm005-bridge $(CM005_BRIDGE) --cm005-ethernet $(CM005_ETHERNET
 	$(if $(BRIDGE_PYTHON),--bridge-python '$(BRIDGE_PYTHON)')
 
 include ../common/board.mk
-include ../common/ubuntu.mk
+include ../common/distro.mk
 
 # Ubuntu uses the CM005 LiteEth NIC.
 $(UBUNTU_BITSTREAM_TARGETS): override CM005_BRIDGE := 1

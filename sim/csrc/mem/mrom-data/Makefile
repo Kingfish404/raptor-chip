@@ -67,7 +67,10 @@ $(BUILD_DIR)/dtb.c: $(DT_SOURCE_PATH) $(ISA_DTB_TOOL) Makefile ## Generate DTB C
 	  dtb_tmp="$(BUILD_DIR)/.raptor.dtb.$$$$"; \
 	  c_tmp="$@.$$$$"; \
 	  trap 'rm -f "$$dtb_tmp" "$$c_tmp"' EXIT HUP INT TERM; \
-	  dtc $(DT_SOURCE_PATH) -o "$$dtb_tmp"; \
+	  case "$(DT_SOURCE_PATH)" in \
+	    *.dtb) cp "$(DT_SOURCE_PATH)" "$$dtb_tmp" ;; \
+	    *) dtc -i "$(DTS_DIR)" "$(DT_SOURCE_PATH)" -o "$$dtb_tmp" ;; \
+	  esac; \
 	  if [ -n "$(DT_ISA_EXTENSIONS)" ]; then \
 	    python3 "$(ISA_DTB_TOOL)" --update-dtb "$$dtb_tmp" -- $(DT_ISA_EXTENSIONS); \
 	  fi; \

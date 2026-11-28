@@ -4,7 +4,7 @@ include $(APP_HOME)/common.mk
 CXX := $(CROSS_COMPILE)g++
 
 MICROBENCH_SRC := $(abspath $(APP_HOME)/../abstract-machine/app/am-kernels/benchmarks/microbench/src)
-BUILD_DIR := $(APP_HOME)/build/rv$(XLEN)/microbench
+BUILD_DIR := $(APP_OUT_ROOT)/microbench
 TARGET := $(BUILD_DIR)/microbench.elf
 
 SRCS := $(shell find $(MICROBENCH_SRC) -type f \( -name '*.c' -o -name '*.cc' \)) se_main.c

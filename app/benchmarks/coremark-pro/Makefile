@@ -20,7 +20,7 @@ CMP_WORKLOADS ?= $(WORKLOADS)
 ifneq ($(filter-out $(WORKLOADS),$(CMP_WORKLOADS)),)
 $(error Unknown CMP_WORKLOADS: $(filter-out $(WORKLOADS),$(CMP_WORKLOADS)))
 endif
-BUILD_DIR := $(APP_HOME)/build/rv$(XLEN)/coremark-pro/$(MODE)
+BUILD_DIR := $(APP_OUT_ROOT)/coremark-pro/$(MODE)
 CONFIG_STAMP := $(BUILD_DIR)/.build-config
 HEADER_FLAGS := $(if $(_PICOLIBC_SPECS),--specs=picolibc.specs,)
 export CMP_CC := $(CC)
@@ -45,13 +45,16 @@ LINK_SCRIPT := $(PORT_DIR)/link.ld
 else ifeq ($(MODE),pk)
 PORT_SRCS += $(if $(_PICOLIBC_IO),pk_io.c pk_heap.c,)
 LINK_SCRIPT := $(PORT_DIR)/pk.ld
+else ifeq ($(MODE),linux)
+LINK_SCRIPT :=
 else
-$(error MODE must be pk or baremetal)
+$(error MODE must be pk, linux, or baremetal)
 endif
 comma := ,
 export CMP_LDFLAGS := $(HEADER_FLAGS) -march=$(ARCH) -mabi=$(ABI) -mcmodel=medany \
-    -static $(if $(_PICOLIBC_SPECS),-nostartfiles,) -T$(LINK_SCRIPT) \
-    -Wl,--gc-sections -Wl,--no-relax -Wl,--wrap=main -Wl,-u,_start \
+    -static $(if $(_PICOLIBC_SPECS),-nostartfiles,) \
+    $(if $(LINK_SCRIPT),-T$(LINK_SCRIPT) -Wl$(comma)-u$(comma)_start,) \
+    -Wl,--gc-sections -Wl,--no-relax -Wl,--wrap=main \
     $(if $(_PICOLIBC_SPECS),-Wl$(comma)-u$(comma)sbrk,)
 export CMP_PORT_OBJS := $(addprefix $(BUILD_DIR)/port/,$(addsuffix .o,$(basename $(PORT_SRCS))))
 PORT_INCLUDES := -I$(PORT_DIR) -I$(COREMARK_PRO_DIR)/mith/include -I$(COREMARK_PRO_DIR)/mith/al/include

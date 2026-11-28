@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ubuntu RVA23 preparation and boot for Raptor FPGA board profiles."""
+"""Ubuntu, Debian, and Alpine preparation and boot for Raptor FPGA board profiles."""
 import argparse
 import asyncio
 import contextlib
@@ -26,7 +26,14 @@ COMMON = Path(__file__).resolve().parents[1]
 REPO = COMMON.parents[1]
 sys.path.insert(0, str(REPO / "linux"))
 from build_linux import opensbi, opensbi_fingerprint
-from distro_boot import SOURCES, download
+from distro_boot import (
+    ALPINE_REPOSITORIES,
+    SOURCES,
+    download,
+    download_packages,
+    extract_partition,
+    populate_alpine_tree,
+)
 
 BOARD = PROFILE = None
 
@@ -57,6 +64,10 @@ def network_profile(board_cfg=None):
     driver = PROFILE["ubuntu"]["network_driver"]
     if driver == "native":
         driver = "raptor"
+    if board_cfg and (board_cfg.get("virtio_net") or board_cfg.get("qemu_bridge")):
+        mac = (PROFILE["cm005_cpu_ethernet"]["mac"]
+               if driver == "liteeth" else "02:52:41:50:05:01")
+        return {"driver": "virtio_net", "mac": mac, "virtio_base": "0x10002000"}
     if board_cfg and board_cfg.get("eth_dma"):
         if driver == "liteeth":
             cm = PROFILE["cm005_cpu_ethernet"]
@@ -132,7 +143,7 @@ def configure_kernel(tree, obj, args):
             "KBUILD_BUILD_TIMESTAMP=1970-01-01 00:00:00 +0000", "KBUILD_BUILD_VERSION=1"]
     run(make + ["defconfig"])
     command = [tree / "scripts/config", "--file", obj / ".config"]
-    for line in (COMMON / "linux/ubuntu.config").read_text().splitlines():
+    for line in (COMMON / "linux/distro.config").read_text().splitlines():
         setting = re.fullmatch(r"CONFIG_(\w+)=(.*)", line)
         disabled = re.fullmatch(r"# CONFIG_(\w+) is not set", line)
         if setting:
@@ -194,7 +205,17 @@ def kernel(args):
                     "prebuilt LiteEth kernel lacks the 32-bit packet PIO patch")
         return directory
     inputs = kernel_inputs(args)
-    directory = args.output / "kernels" / digest(inputs)[:20]
+    key = digest(inputs)[:20]
+    directory = args.output / "kernels" / key
+    dist_dirs = ("ubuntu", "alpine", "debian")
+    candidates = [BOARD / "build" / d / "kernels" / key for d in dist_dirs]
+    candidates += [p / "build" / d / "kernels" / key
+                   for p in sorted(COMMON.parent.iterdir()) if p.is_dir()
+                   for d in dist_dirs]
+    for shared in candidates:
+        if shared != directory and (shared / "manifest.json").exists():
+            if verify(shared)["inputs"] == inputs:
+                return shared
     with locked(directory):
         if (directory / "manifest.json").exists():
             require(verify(directory)["inputs"] == inputs, "kernel inputs changed")
@@ -252,38 +273,45 @@ def kernel(args):
 
 
 def board_directory(args):
+    req_nharts = getattr(args, "nharts", "auto") or "auto"
+    req_vector = getattr(args, "vector", "auto") or "auto"
     if args.board_build:
         directory = args.board_build
     else:
         command = [sys.executable, Path(__file__).with_name("native_build.py"), "--board", BOARD,
-                   "--xlen", "64", "--memory", "ddr",
+                   "--xlen", "64", "--memory", "ddr", "--nharts", str(req_nharts),
                    "--preset", args.preset, "--clock-mhz", str(args.clock_mhz),
-                   "--build-root", args.board_build_root]
-        io_soc = getattr(args, "virtio_net", 0) or getattr(args, "qemu_bridge", 0)
+                   "--vector", str(req_vector), "--build-root", args.board_build_root]
         if getattr(args, "eth_dma", 0):
             command += ["--eth-dma", "1"]
-        if PROFILE["ubuntu"]["network_driver"] == "liteeth" and not io_soc:
+        if PROFILE["ubuntu"]["network_driver"] == "liteeth":
             command += ["--cm005-bridge", "1", "--cm005-ethernet", "1"]
         else:
-            # The virtio-mmio NIC and the QEMU bridge share the board MAC.
             command += ["--ethernet", "1"]
-            if getattr(args, "virtio_net", 0):
-                command += ["--virtio-net", "1"]
-            if getattr(args, "qemu_bridge", 0):
-                command += ["--qemu-bridge", "1"]
+        if getattr(args, "virtio_net", 0):
+            command += ["--virtio-net", "1"]
+        if getattr(args, "qemu_bridge", 0):
+            command += ["--qemu-bridge", "1"]
         info = json.loads(subprocess.check_output(list(map(str, command + ["info"])), text=True))
         directory = Path(info["output"])
         if not (directory / "manifest.json").exists():
             run(command + ["prepare"])
     manifest = json.loads((directory / "manifest.json").read_text())
     config = manifest["configuration"]
-    require((config["xlen"], config["memory"]) == (64, "ddr"), "Ubuntu requires RV64 DDR")
-    require(config.get("vector") == 1,
-            "Ubuntu RVA23 requires an RVA23/V-enabled preset (for example default)")
+    distro = getattr(args, "distro", "ubuntu") or "ubuntu"
+    require((config["xlen"], config["memory"]) == (64, "ddr"), f"{distro} requires RV64 DDR")
+    if SOURCES[distro].get("isa_profile") == "rva23":
+        require(config.get("vector") == 1,
+                f"{distro} RVA23 requires an RVA23/V-enabled preset (for example default)")
+    if str(req_vector) != "auto":
+        require(int(config.get("vector", 0)) == int(req_vector),
+                f"board build vector={config.get('vector')} differs from requested {req_vector}")
+    if str(req_nharts) != "auto":
+        require(int(config.get("nharts", 1)) == int(req_nharts),
+                f"board build nharts={config.get('nharts', 1)} differs from requested {req_nharts}")
     require((config["preset"], config["clock_mhz"]) == (args.preset, args.clock_mhz),
-            "board build preset/clock differs from the Ubuntu request")
-    io_soc = config.get("virtio_net") or config.get("qemu_bridge")
-    if PROFILE["ubuntu"]["network_driver"] == "liteeth" and not io_soc:
+            f"board build preset/clock differs from the {distro} request")
+    if PROFILE["ubuntu"]["network_driver"] == "liteeth":
         require(config.get("cm005_bridge") == 1 and config.get("cm005_ethernet") == 1,
                 "Ubuntu requires the CM005 CPU NIC and A/B forwarding")
     else:
@@ -309,69 +337,112 @@ def validate_nfs_path(path):
     return root
 
 
-def ramroot_fstab(server, host_export):
+def is_openrc_rootfs(path):
+    root = Path(path)
+    return (root / "sbin/openrc").is_file() and not (root / "usr/lib/systemd/systemd").is_file()
+
+
+def ramroot_fstab(server, host_export, *, openrc=False):
     ip = str(ipaddress.IPv4Address(server))
     export = validate_nfs_path(host_export)
+    opts = ("vers=3,tcp,rsize=32768,wsize=32768,noauto,nolock"
+            if openrc else
+            "vers=3,tcp,rsize=32768,wsize=32768,_netdev,nofail,x-systemd.automount")
     return (
         "# RAM-resident rootfs (loaded into DDR4); host NFS mounted only at /mnt/host.\n"
         "tmpfs /tmp tmpfs mode=1777,nosuid,nodev 0 0\n"
-        f"{ip}:{export} /mnt/host nfs vers=3,tcp,rsize=32768,wsize=32768,"
-        "_netdev,nofail,x-systemd.automount 0 0\n"
+        f"{ip}:{export} /mnt/host nfs {opts} 0 0\n"
     )
 
 
-def build_ramroot(rootfs_dir, output_initrd, server, host_export):
-    """Package a prepared Ubuntu rootfs into a gzip-compressed newc cpio initrd.img.
+def build_smp_check(output_bin, cross="riscv64-linux-gnu-"):
+    cc = shutil.which(cross + "gcc") or shutil.which("riscv64-linux-gnu-gcc")
+    src = REPO / "linux/distro-boot/smp_check.c"
+    if cc is None or not src.is_file():
+        return None
+    output_bin.parent.mkdir(parents=True, exist_ok=True)
+    run([cc, "-O2", "-static", "-pthread", "-march=rv64gc", "-mabi=lp64d",
+         str(src), "-o", str(output_bin)])
+    output_bin.chmod(0o755)
+    return output_bin
 
-    Leaves the source rootfs untouched; strips docs/manpages/apt caches in a staging
-    copy and installs /mnt/host NFS automount in /etc/fstab so / runs purely in DDR4.
+
+def build_ramroot(rootfs_dir, output_initrd, server, host_export, *, use_sudo=False):
+    """Package a prepared Ubuntu/Debian/Alpine rootfs into a gzip-compressed cpio initrd.img.
+
+    Leaves the source rootfs untouched; strips docs/manpages/package caches in a staging
+    copy and installs /mnt/host NFS mount config in /etc/fstab so / runs purely in DDR4.
     """
     src = Path(rootfs_dir).resolve()
-    require(has_rootfs_marker(src), "prepare the Ubuntu rootfs first")
-    fstab_text = ramroot_fstab(server, host_export)
+    require(has_rootfs_marker(src), "prepare the rootfs first")
+    openrc = is_openrc_rootfs(src)
+    fstab_text = ramroot_fstab(server, host_export, openrc=openrc)
+    sudo = ["sudo", "-n"] if (use_sudo and os.geteuid() != 0) else []
     with tempfile.TemporaryDirectory(prefix=".ramroot-stage-", dir=output_initrd.parent) as temp:
         stage = Path(temp) / "root"
-        run(["cp", "-a", "--reflink=auto", str(src), str(stage)])
-        for prune in ("var/cache/apt/archives", "var/lib/apt/lists",
-                      "usr/share/doc", "usr/share/man", "usr/share/info",
-                      "usr/share/locale", "usr/share/i18n",
-                      "usr/share/python-babel-localedata", "usr/share/vim",
-                      "usr/share/fwupd", "usr/share/perl",
-                      "usr/lib/snapd", "usr/lib/python3", "usr/lib/cargo"):
-            target = stage / prune
-            if target.is_dir():
-                shutil.rmtree(target)
-                target.mkdir(parents=True, exist_ok=True)
-        for pydir in (stage / "usr/lib").glob("python3.*"):
-            if pydir.is_dir():
-                shutil.rmtree(pydir)
-        (stage / "mnt/host").mkdir(parents=True, exist_ok=True)
-        (stage / "var/lib/man-db/auto-update").unlink(missing_ok=True)
-        overlay_file(stage, "etc/fstab", fstab_text)
-        overlay_file(stage, "etc/apt/apt.conf.d/95-raptor-fast.conf", FAST_APT_CONF)
-        overlay_file(stage, "etc/apt/apt.conf.d/99needrestart",
-                     "// Disabled by the Raptor FPGA profile.\n")
-        gai_src = stage / "etc/gai.conf"
-        gai_text = gai_src.read_text() if gai_src.is_file() else ""
-        if GAI_IPV4_CONF.strip() not in gai_text:
-            gai_text = gai_text.rstrip("\n") + ("\n" if gai_text else "") + GAI_IPV4_CONF
-        overlay_file(stage, "etc/gai.conf", gai_text)
-        overlay_file(stage, "etc/systemd/system/raptor-boot-env.service", RAPTOR_BOOT_ENV_SERVICE)
-        overlay_link(stage, "etc/systemd/system/sysinit.target.wants/raptor-boot-env.service",
-                     "/etc/systemd/system/raptor-boot-env.service")
-        overlay_file(stage, "usr/local/sbin/raptor-boot-env", RAPTOR_BOOT_ENV_SH, 0o755)
-        tmp_img = output_initrd.with_suffix(".img.tmp")
-        find_proc = subprocess.Popen(["find", ".", "-print0"], cwd=stage, stdout=subprocess.PIPE)
-        cpio_proc = subprocess.Popen(
-            ["cpio", "--null", "-o", "--format=newc", "--quiet"],
-            cwd=stage, stdin=find_proc.stdout, stdout=subprocess.PIPE)
-        find_proc.stdout.close()
-        with tmp_img.open("wb") as out_f:
-            gzip_proc = subprocess.Popen(["gzip", "-1"], stdin=cpio_proc.stdout, stdout=out_f)
-            cpio_proc.stdout.close()
-            require(gzip_proc.wait() == 0 and cpio_proc.wait() == 0 and find_proc.wait() == 0,
-                    "failed to build ramroot initrd.img")
-        tmp_img.replace(output_initrd)
+        try:
+            run(sudo + ["cp", "-a", "--reflink=auto", str(src), str(stage)])
+            if sudo:
+                run(sudo + ["chown", "-R", f"{os.getuid()}:{os.getgid()}", str(stage)])
+                run(["chmod", "-R", "u+rwX", str(stage)])
+            for prune in ("var/cache/apt/archives", "var/lib/apt/lists", "var/cache/apk",
+                          "usr/share/doc", "usr/share/man", "usr/share/info",
+                          "usr/share/locale", "usr/share/i18n",
+                          "usr/share/python-babel-localedata", "usr/share/vim",
+                          "usr/share/fwupd", "usr/share/perl",
+                          "usr/lib/snapd", "usr/lib/python3"):
+                target = stage / prune
+                if target.is_dir():
+                    shutil.rmtree(target)
+                    target.mkdir(parents=True, exist_ok=True)
+            for pydir in (stage / "usr/lib").glob("python3.*"):
+                if pydir.is_dir():
+                    shutil.rmtree(pydir)
+            (stage / "mnt/host").mkdir(parents=True, exist_ok=True)
+            (stage / "var/lib/man-db/auto-update").unlink(missing_ok=True)
+            overlay_file(stage, "etc/fstab", fstab_text)
+            overlay_file(stage, "usr/local/sbin/raptor-boot-env", RAPTOR_BOOT_ENV_SH, 0o755)
+            overlay_file(stage, "etc/sysctl.d/90-raptor-perf.conf", PERF_SYSCTL_CONF)
+            overlay_file(stage, "etc/profile.d/raptor-apps.sh", RAPTOR_APPS_PROFILE_SH)
+            build_smp_check(stage / "usr/local/bin/raptor-smp-check")
+            if openrc:
+                overlay_file(stage, "etc/ssh/sshd_config.d/01-raptor-timeout.conf",
+                             FAST_SSH_CONF_ALPINE)
+                overlay_file(stage, "etc/init.d/raptor-boot-env", ALPINE_BOOT_ENV_INITD, 0o755)
+                overlay_link(stage, "etc/runlevels/boot/raptor-boot-env",
+                             "/etc/init.d/raptor-boot-env")
+            else:
+                overlay_file(stage, "etc/apt/apt.conf.d/95-raptor-fast.conf", FAST_APT_CONF)
+                overlay_file(stage, "etc/apt/apt.conf.d/99needrestart",
+                             "// Disabled by the Raptor FPGA profile.\n")
+                gai_src = stage / "etc/gai.conf"
+                gai_text = gai_src.read_text() if gai_src.is_file() else ""
+                if GAI_IPV4_CONF.strip() not in gai_text:
+                    gai_text = gai_text.rstrip("\n") + ("\n" if gai_text else "") + GAI_IPV4_CONF
+                overlay_file(stage, "etc/gai.conf", gai_text)
+                overlay_file(stage, "etc/systemd/system/raptor-boot-env.service",
+                             RAPTOR_BOOT_ENV_SERVICE)
+                overlay_link(
+                    stage, "etc/systemd/system/sysinit.target.wants/raptor-boot-env.service",
+                    "/etc/systemd/system/raptor-boot-env.service")
+            tmp_img = output_initrd.with_suffix(".img.tmp")
+            find_proc = subprocess.Popen(["find", ".", "-print0"], cwd=stage,
+                                         stdout=subprocess.PIPE)
+            cpio_cmd = ["cpio", "--null", "-o", "--format=newc", "--quiet"]
+            if sudo:
+                cpio_cmd += ["-R", "0:0"]
+            cpio_proc = subprocess.Popen(
+                cpio_cmd, cwd=stage, stdin=find_proc.stdout, stdout=subprocess.PIPE)
+            find_proc.stdout.close()
+            with tmp_img.open("wb") as out_f:
+                gzip_proc = subprocess.Popen(["gzip", "-1"], stdin=cpio_proc.stdout, stdout=out_f)
+                cpio_proc.stdout.close()
+                require(gzip_proc.wait() == 0 and cpio_proc.wait() == 0 and find_proc.wait() == 0,
+                        "failed to build ramroot initrd.img")
+            tmp_img.replace(output_initrd)
+        finally:
+            if sudo and stage.exists():
+                subprocess.run(sudo + ["rm", "-rf", str(stage)], check=False)
     return output_initrd
 
 
@@ -391,6 +462,10 @@ static void sync_dt_epoch(void)
 {
     if (mount("proc", "/proc", "proc", 0, NULL) < 0 && errno != EBUSY)
         return;
+    if (mount("sysfs", "/sys", "sysfs", 0, NULL) < 0 && errno != EBUSY) {
+        umount("/proc");
+        return;
+    }
     int fd = open("/proc/device-tree/chosen/raptor,host-epoch", O_RDONLY);
     if (fd >= 0) {
         uint8_t buf[8];
@@ -405,6 +480,7 @@ static void sync_dt_epoch(void)
         }
         close(fd);
     }
+    umount("/sys");
     umount("/proc");
 }
 
@@ -510,14 +586,23 @@ set -eu
 CHOSEN=/proc/device-tree/chosen
 APT_PROXY=/etc/apt/apt.conf.d/98-raptor-proxy.conf
 PROF_PROXY=/etc/profile.d/raptor-proxy.sh
-SOURCES=/etc/apt/sources.list.d/ubuntu.sources
+SSHD_PROXY=/etc/ssh/sshd_config.d/98-raptor-proxy.conf
+UBUNTU_SOURCES=/etc/apt/sources.list.d/ubuntu.sources
+DEBIAN_MIRROR_LIST=/etc/apt/mirrors/debian.list
+DEBIAN_SOURCES=/etc/apt/sources.list.d/debian.sources
+ALPINE_REPOS=/etc/apk/repositories
 
 if [ -f "$CHOSEN/raptor,host-epoch" ]; then
-    sec=$(od -An -tu8 --endian=big "$CHOSEN/raptor,host-epoch" 2>/dev/null | tr -d ' \\n' || true)
+    hex=$(od -An -tx1 "$CHOSEN/raptor,host-epoch" 2>/dev/null | tr -d ' \\n\\t' || true)
     now=$(date +%s 2>/dev/null || echo 0)
-    case "$sec" in
-        ''|*[!0-9]*) ;;
-        *) [ "$sec" -gt "$now" ] && date -u -s "@$sec" >/dev/null 2>&1 || true ;;
+    case "$hex" in
+        [0-9a-fA-F][0-9a-fA-F]*)
+            sec=$((0x$hex))
+            if [ "$sec" -gt "$now" ]; then
+                date -u -s "@$sec" >/dev/null 2>&1 \\
+                    || date -u -D '%s' -s "$sec" >/dev/null 2>&1 || true
+            fi
+            ;;
     esac
 fi
 
@@ -532,27 +617,82 @@ read_url() {
 
 proxy=$(read_url "$CHOSEN/raptor,http-proxy")
 if [ -n "$proxy" ]; then
-    mkdir -p /etc/apt/apt.conf.d /etc/profile.d
-    {
-        printf 'Acquire::http::Proxy "%s";\\n' "$proxy"
-        printf 'Acquire::https::Proxy "%s";\\n' "$proxy"
-    } > "$APT_PROXY"
+    mkdir -p /etc/profile.d
+    if [ -d /etc/apt ]; then
+        mkdir -p /etc/apt/apt.conf.d
+        {
+            printf 'Acquire::http::Proxy "%s";\\n' "$proxy"
+            printf 'Acquire::https::Proxy "%s";\\n' "$proxy"
+        } > "$APT_PROXY"
+    fi
     cat > "$PROF_PROXY" <<EOF
 export http_proxy="$proxy" https_proxy="$proxy"
 export HTTP_PROXY="$proxy" HTTPS_PROXY="$proxy"
 export no_proxy="localhost,127.0.0.1,192.168.50.0/24"
 export NO_PROXY="localhost,127.0.0.1,192.168.50.0/24"
 EOF
+    if [ -d /etc/ssh/sshd_config.d ]; then
+        noproxy="localhost,127.0.0.1,192.168.50.0/24"
+        rpath="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/raptor/bin"
+        printf 'SetEnv http_proxy=%s https_proxy=%s HTTP_PROXY=%s HTTPS_PROXY=%s ' \\
+            "$proxy" "$proxy" "$proxy" "$proxy" > "$SSHD_PROXY"
+        printf 'no_proxy=%s NO_PROXY=%s PATH=%s\\n' "$noproxy" "$noproxy" "$rpath" >> "$SSHD_PROXY"
+    fi
 else
-    rm -f "$APT_PROXY" "$PROF_PROXY"
+    rm -f "$APT_PROXY" "$PROF_PROXY" "$SSHD_PROXY"
 fi
 
 mirror=$(read_url "$CHOSEN/raptor,apt-mirror")
-if [ -n "$mirror" ] && [ -f "$SOURCES" ]; then
+if [ -n "$mirror" ]; then
     mirror="${mirror%/}/"
-    sed -i "s|^URIs:[[:space:]].*|URIs: $mirror|" "$SOURCES"
+    if [ -f "$UBUNTU_SOURCES" ]; then
+        sed -i "s|^URIs:[[:space:]].*|URIs: $mirror|" "$UBUNTU_SOURCES"
+    elif [ -f "$DEBIAN_MIRROR_LIST" ]; then
+        printf '%s\\n' "$mirror" > "$DEBIAN_MIRROR_LIST"
+    elif [ -f "$DEBIAN_SOURCES" ]; then
+        sed -i "1,/^$/s|^URIs:[[:space:]].*|URIs: $mirror|" "$DEBIAN_SOURCES"
+    elif [ -f "$ALPINE_REPOS" ]; then
+        sed -i "s|^https\\?://[^/]*/alpine/|$mirror|" "$ALPINE_REPOS"
+    fi
+fi
+
+if [ -x /sbin/openrc ] && [ -d /sys/class/net/eth0 ]; then
+    ip link set lo up 2>/dev/null || true
+    if ! ip -4 addr show dev eth0 2>/dev/null | grep -q 'inet '; then
+        ip link set eth0 up 2>/dev/null || true
+        udhcpc -i eth0 -n -q >/dev/null 2>&1 || true
+    fi
+fi
+
+if [ -w /proc/sys/kernel/perf_user_access ]; then
+    echo 2 > /proc/sys/kernel/perf_user_access || true
 fi
 """
+
+ALPINE_BOOT_ENV_INITD = """\
+#!/sbin/openrc-run
+description="Raptor Device-Tree Clock, Proxy, Network, and Perf CSR Sync"
+
+depend() {
+    need localmount
+    before sshd
+}
+
+start() {
+    ebegin "Applying Raptor DTB boot environment"
+    /bin/sh /usr/local/sbin/raptor-boot-env
+    eend $?
+}
+"""
+
+PERF_SYSCTL_CONF = "kernel.perf_user_access = 2\n"
+
+RAPTOR_APPS_PROFILE_SH = (
+    'case ":$PATH:" in\n'
+    '    *:/opt/raptor/bin:*) ;;\n'
+    '    *) [ -d /opt/raptor/bin ] && export PATH="$PATH:/opt/raptor/bin" ;;\n'
+    'esac\n'
+)
 
 RAPTOR_MINIMAL_SSH_CONF = (
     "[Unit]\n"
@@ -570,6 +710,13 @@ RAPTOR_MINIMAL_KEYGEN_CONF = (
     "Before=shutdown.target\n"
 )
 
+RAPTOR_NO_SECCOMP_CONF = (
+    "[Service]\n"
+    "SystemCallFilter=\n"
+    "WatchdogSec=0\n"
+    "TimeoutStartSec=10min\n"
+)
+
 FAST_SSH_CONF = (
     "LoginGraceTime 600\n"
     "MaxStartups 64:30:128\n"
@@ -578,6 +725,8 @@ FAST_SSH_CONF = (
     "KexAlgorithms curve25519-sha256\n"
     "Ciphers chacha20-poly1305@openssh.com,aes128-ctr,aes128-gcm@openssh.com\n"
 )
+
+FAST_SSH_CONF_ALPINE = FAST_SSH_CONF.replace("GSSAPIAuthentication no\n", "")
 
 FAST_APT_CONF = (
     'Acquire::ForceIPv4 "true";\n'
@@ -623,86 +772,142 @@ def build_switchroot_initramfs(output_cpio_gz, cross="riscv64-linux-gnu-"):
 
 
 def build_squashfs(rootfs_dir, output_sqsh, server, host_export, *, use_sudo=False):
-    """Package a full, unmodified Ubuntu rootfs into an LZ4-HC SquashFS image.
-
-    Injects /etc/fstab (/mnt/host NFS automount), /etc/systemd/system/raptor-minimal.target,
-    and fast OpenSSH settings via mksquashfs pseudo-files without modifying or
-    pruning the source rootfs.
-    """
+    """Package a full, unmodified Ubuntu/Debian/Alpine rootfs into an LZ4-HC SquashFS image."""
     src = Path(rootfs_dir).resolve()
-    require(has_rootfs_marker(src), "prepare the Ubuntu rootfs first")
+    require(has_rootfs_marker(src), "prepare the rootfs first")
     mksq = shutil.which("mksquashfs")
     require(mksq is not None, "install squashfs-tools (mksquashfs) for --root-device squashfs")
-    fstab_text = ramroot_fstab(server, host_export)
+    openrc = is_openrc_rootfs(src)
+    fstab_text = ramroot_fstab(server, host_export, openrc=openrc)
     with tempfile.TemporaryDirectory(prefix=".sqsh-stage-", dir=output_sqsh.parent) as temp:
         tmp_dir = Path(temp)
-        target_file = tmp_dir / "raptor-minimal.target"
-        console_file = tmp_dir / "raptor-console.service"
-        boot_env_svc = tmp_dir / "raptor-boot-env.service"
         boot_env_py = tmp_dir / "raptor-boot-env"
         fstab_file = tmp_dir / "fstab"
         ssh_file = tmp_dir / "02-raptor-fast-ssh.conf"
-        apt_file = tmp_dir / "95-raptor-fast.conf"
-        needrestart_file = tmp_dir / "99needrestart"
-        gai_file = tmp_dir / "gai.conf"
-        ssh_dropin = tmp_dir / "02-raptor-fast-ssh-unit.conf"
-        keygen_dropin = tmp_dir / "02-raptor-fast-keygen.conf"
+        perf_sysctl = tmp_dir / "90-raptor-perf.conf"
+        apps_profile = tmp_dir / "raptor-apps.sh"
         exclude_file = tmp_dir / "exclude.txt"
         pseudo_file = tmp_dir / "pseudo.txt"
-        target_file.write_text(RAPTOR_MINIMAL_TARGET)
-        console_file.write_text(RAPTOR_CONSOLE_SERVICE)
-        boot_env_svc.write_text(RAPTOR_BOOT_ENV_SERVICE)
         boot_env_py.write_text(RAPTOR_BOOT_ENV_SH)
         fstab_file.write_text(fstab_text)
-        ssh_file.write_text(FAST_SSH_CONF)
-        apt_file.write_text(FAST_APT_CONF)
-        needrestart_file.write_text("// Disabled by the Raptor FPGA profile.\n")
-        gai_src = src / "etc/gai.conf"
-        existing_gai = gai_src.read_text() if gai_src.is_file() else ""
-        if GAI_IPV4_CONF.strip() not in existing_gai:
-            sep = "\n" if existing_gai else ""
-            existing_gai = existing_gai.rstrip("\n") + sep + GAI_IPV4_CONF
-        gai_file.write_text(existing_gai)
-        ssh_dropin.write_text(RAPTOR_MINIMAL_SSH_CONF)
-        keygen_dropin.write_text(RAPTOR_MINIMAL_KEYGEN_CONF)
-        exclude_file.write_text(
-            "etc/fstab\n"
-            "etc/gai.conf\n"
-            "etc/apt/apt.conf.d/95-raptor-fast.conf\n"
-            "etc/apt/apt.conf.d/99needrestart\n"
-            "etc/systemd/system/raptor-minimal.target\n"
-            "etc/systemd/system/raptor-console.service\n"
-            "etc/systemd/system/raptor-boot-env.service\n"
-            "usr/local/sbin/raptor-boot-env\n"
-            "var/lib/man-db/auto-update\n"
-        )
-        pseudo_file.write_text(
-            "/etc/apt d 755 0 0\n"
-            "/etc/apt/apt.conf.d d 755 0 0\n"
-            "/etc/systemd d 755 0 0\n"
-            "/etc/systemd/system d 755 0 0\n"
-            "/etc/systemd/system/sysinit.target.wants d 755 0 0\n"
-            "/etc/systemd/system/ssh.service.d d 755 0 0\n"
-            "/etc/systemd/system/sshd-keygen.service.d d 755 0 0\n"
-            "/usr/local d 755 0 0\n"
-            "/usr/local/sbin d 755 0 0\n"
-            f"/etc/systemd/system/raptor-minimal.target f 644 0 0 cat {target_file}\n"
-            f"/etc/systemd/system/raptor-console.service f 644 0 0 cat {console_file}\n"
-            f"/etc/systemd/system/raptor-boot-env.service f 644 0 0 cat {boot_env_svc}\n"
-            "/etc/systemd/system/sysinit.target.wants/raptor-boot-env.service "
-            "s 777 0 0 /etc/systemd/system/raptor-boot-env.service\n"
-            f"/usr/local/sbin/raptor-boot-env f 755 0 0 cat {boot_env_py}\n"
-            "/etc/systemd/system/ssh.service.d/02-raptor-fast.conf "
-            f"f 644 0 0 cat {ssh_dropin}\n"
-            "/etc/systemd/system/sshd-keygen.service.d/02-raptor-fast.conf "
-            f"f 644 0 0 cat {keygen_dropin}\n"
-            f"/etc/fstab f 644 0 0 cat {fstab_file}\n"
-            f"/etc/gai.conf f 644 0 0 cat {gai_file}\n"
-            f"/etc/apt/apt.conf.d/95-raptor-fast.conf f 644 0 0 cat {apt_file}\n"
-            f"/etc/apt/apt.conf.d/99needrestart f 644 0 0 cat {needrestart_file}\n"
-            f"/etc/ssh/sshd_config.d/02-raptor-fast-ssh.conf f 644 0 0 cat {ssh_file}\n"
-            "/mnt/host d 755 0 0\n"
-        )
+        ssh_file.write_text(FAST_SSH_CONF_ALPINE if openrc else FAST_SSH_CONF)
+        perf_sysctl.write_text(PERF_SYSCTL_CONF)
+        apps_profile.write_text(RAPTOR_APPS_PROFILE_SH)
+        if openrc:
+            openrc_initd = tmp_dir / "raptor-boot-env.initd"
+            openrc_initd.write_text(ALPINE_BOOT_ENV_INITD)
+            smp_bin = build_smp_check(tmp_dir / "raptor-smp-check")
+            smp_exclude = "usr/local/bin/raptor-smp-check\n" if smp_bin else ""
+            smp_pseudo = (
+                "/usr/local/bin d 755 0 0\n"
+                f"/usr/local/bin/raptor-smp-check f 755 0 0 cat {smp_bin}\n"
+            ) if smp_bin else ""
+            exclude_file.write_text(
+                "etc/fstab\n"
+                "etc/sysctl.d/90-raptor-perf.conf\n"
+                "etc/profile.d/raptor-apps.sh\n"
+                "etc/ssh/sshd_config.d/01-raptor-timeout.conf\n"
+                "etc/ssh/sshd_config.d/02-raptor-fast-ssh.conf\n"
+                "etc/init.d/raptor-boot-env\n"
+                "etc/runlevels/boot/raptor-boot-env\n"
+                "usr/local/sbin/raptor-boot-env\n" + smp_exclude
+            )
+            pseudo_file.write_text(
+                "/etc/sysctl.d d 755 0 0\n"
+                "/etc/profile.d d 755 0 0\n"
+                "/etc/init.d d 755 0 0\n"
+                "/etc/runlevels d 755 0 0\n"
+                "/etc/runlevels/boot d 755 0 0\n"
+                "/etc/ssh d 755 0 0\n"
+                "/etc/ssh/sshd_config.d d 755 0 0\n"
+                "/usr/local d 755 0 0\n"
+                "/usr/local/sbin d 755 0 0\n" + smp_pseudo +
+                f"/etc/init.d/raptor-boot-env f 755 0 0 cat {openrc_initd}\n"
+                "/etc/runlevels/boot/raptor-boot-env s 777 0 0 /etc/init.d/raptor-boot-env\n"
+                f"/usr/local/sbin/raptor-boot-env f 755 0 0 cat {boot_env_py}\n"
+                f"/etc/fstab f 644 0 0 cat {fstab_file}\n"
+                f"/etc/sysctl.d/90-raptor-perf.conf f 644 0 0 cat {perf_sysctl}\n"
+                f"/etc/profile.d/raptor-apps.sh f 644 0 0 cat {apps_profile}\n"
+                f"/etc/ssh/sshd_config.d/02-raptor-fast-ssh.conf f 644 0 0 cat {ssh_file}\n"
+                "/mnt/host d 755 0 0\n"
+            )
+        else:
+            target_file = tmp_dir / "raptor-minimal.target"
+            console_file = tmp_dir / "raptor-console.service"
+            boot_env_svc = tmp_dir / "raptor-boot-env.service"
+            apt_file = tmp_dir / "95-raptor-fast.conf"
+            needrestart_file = tmp_dir / "99needrestart"
+            gai_file = tmp_dir / "gai.conf"
+            ssh_dropin = tmp_dir / "02-raptor-fast-ssh-unit.conf"
+            keygen_dropin = tmp_dir / "02-raptor-fast-keygen.conf"
+            noseccomp_dropin = tmp_dir / "02-raptor-no-seccomp.conf"
+            target_file.write_text(RAPTOR_MINIMAL_TARGET)
+            console_file.write_text(RAPTOR_CONSOLE_SERVICE)
+            boot_env_svc.write_text(RAPTOR_BOOT_ENV_SERVICE)
+            apt_file.write_text(FAST_APT_CONF)
+            needrestart_file.write_text("// Disabled by the Raptor FPGA profile.\n")
+            gai_src = src / "etc/gai.conf"
+            existing_gai = gai_src.read_text() if gai_src.is_file() else ""
+            if GAI_IPV4_CONF.strip() not in existing_gai:
+                sep = "\n" if existing_gai else ""
+                existing_gai = existing_gai.rstrip("\n") + sep + GAI_IPV4_CONF
+            gai_file.write_text(existing_gai)
+            ssh_dropin.write_text(RAPTOR_MINIMAL_SSH_CONF)
+            keygen_dropin.write_text(RAPTOR_MINIMAL_KEYGEN_CONF)
+            noseccomp_dropin.write_text(RAPTOR_NO_SECCOMP_CONF)
+            exclude_file.write_text(
+                "etc/fstab\n"
+                "etc/gai.conf\n"
+                "etc/apt/apt.conf.d/95-raptor-fast.conf\n"
+                "etc/apt/apt.conf.d/99needrestart\n"
+                "etc/sysctl.d/90-raptor-perf.conf\n"
+                "etc/profile.d/raptor-apps.sh\n"
+                "etc/systemd/system/raptor-minimal.target\n"
+                "etc/systemd/system/raptor-console.service\n"
+                "etc/systemd/system/raptor-boot-env.service\n"
+                "usr/local/sbin/raptor-boot-env\n"
+                "var/lib/man-db/auto-update\n"
+            )
+            pseudo_file.write_text(
+                "/etc/apt d 755 0 0\n"
+                "/etc/apt/apt.conf.d d 755 0 0\n"
+                "/etc/sysctl.d d 755 0 0\n"
+                "/etc/profile.d d 755 0 0\n"
+                "/etc/systemd d 755 0 0\n"
+                "/etc/systemd/system d 755 0 0\n"
+                "/etc/systemd/system/sysinit.target.wants d 755 0 0\n"
+                "/etc/systemd/system/ssh.service.d d 755 0 0\n"
+                "/etc/systemd/system/sshd-keygen.service.d d 755 0 0\n"
+                "/etc/systemd/system/systemd-journald.service.d d 755 0 0\n"
+                "/etc/systemd/system/systemd-udevd.service.d d 755 0 0\n"
+                "/etc/systemd/system/systemd-networkd.service.d d 755 0 0\n"
+                "/usr/local d 755 0 0\n"
+                "/usr/local/sbin d 755 0 0\n"
+                f"/etc/systemd/system/raptor-minimal.target f 644 0 0 cat {target_file}\n"
+                f"/etc/systemd/system/raptor-console.service f 644 0 0 cat {console_file}\n"
+                f"/etc/systemd/system/raptor-boot-env.service f 644 0 0 cat {boot_env_svc}\n"
+                "/etc/systemd/system/sysinit.target.wants/raptor-boot-env.service "
+                "s 777 0 0 /etc/systemd/system/raptor-boot-env.service\n"
+                f"/usr/local/sbin/raptor-boot-env f 755 0 0 cat {boot_env_py}\n"
+                "/etc/systemd/system/ssh.service.d/02-raptor-fast.conf "
+                f"f 644 0 0 cat {ssh_dropin}\n"
+                "/etc/systemd/system/sshd-keygen.service.d/02-raptor-fast.conf "
+                f"f 644 0 0 cat {keygen_dropin}\n"
+                "/etc/systemd/system/systemd-journald.service.d/02-raptor-fast.conf "
+                f"f 644 0 0 cat {noseccomp_dropin}\n"
+                "/etc/systemd/system/systemd-udevd.service.d/02-raptor-fast.conf "
+                f"f 644 0 0 cat {noseccomp_dropin}\n"
+                "/etc/systemd/system/systemd-networkd.service.d/02-raptor-fast.conf "
+                f"f 644 0 0 cat {noseccomp_dropin}\n"
+                f"/etc/fstab f 644 0 0 cat {fstab_file}\n"
+                f"/etc/gai.conf f 644 0 0 cat {gai_file}\n"
+                f"/etc/apt/apt.conf.d/95-raptor-fast.conf f 644 0 0 cat {apt_file}\n"
+                f"/etc/apt/apt.conf.d/99needrestart f 644 0 0 cat {needrestart_file}\n"
+                f"/etc/sysctl.d/90-raptor-perf.conf f 644 0 0 cat {perf_sysctl}\n"
+                f"/etc/profile.d/raptor-apps.sh f 644 0 0 cat {apps_profile}\n"
+                f"/etc/ssh/sshd_config.d/02-raptor-fast-ssh.conf f 644 0 0 cat {ssh_file}\n"
+                "/mnt/host d 755 0 0\n"
+            )
         tmp_img = output_sqsh.with_suffix(".sqsh.tmp")
         if tmp_img.exists():
             tmp_img.unlink()
@@ -777,10 +982,12 @@ def inject_phram_dtb(dtb_path, sqsh_size, phram_addr=INITRD_ADDRESS + PHRAM_OFFS
 
 def bootargs(args):
     root_dev = getattr(args, "root_device", "nfs") or "nfs"
+    distro = getattr(args, "distro", "ubuntu") or "ubuntu"
     systemd_target = getattr(args, "systemd_target", "default") or "default"
     require(systemd_target in ("default", "minimal"),
             "unsupported systemd target: " + str(systemd_target))
-    unit_arg = " systemd.unit=raptor-minimal.target" if systemd_target == "minimal" else ""
+    unit_arg = (" systemd.unit=raptor-minimal.target"
+                if systemd_target == "minimal" and distro != "alpine" else "")
     if root_dev == "squashfs":
         ipaddress.IPv4Address(args.server)
         validate_nfs_path(getattr(args, "host_nfs", None) or args.rootfs)
@@ -801,9 +1008,34 @@ def bootargs(args):
     server = str(ipaddress.IPv4Address(args.server))
     root = validate_nfs_path(args.rootfs)
     return (f"console=ttyS0,115200 earlycon=sbi root=/dev/nfs "
-            f"nfsroot={server}:{root},vers=3,tcp,rsize=32768,wsize=32768 "
+            f"nfsroot={server}:{root},vers=3,tcp,nolock,rsize=32768,wsize=32768 "
             "rw ip=dhcp init=/sbin/init net.ifnames=0 random.trust_bootloader=on "
             "unaligned_scalar_speed=fast unaligned_vector_speed=fast" + unit_arg)
+
+
+def prune_unused_io_dtb(dtb_path, root_dev):
+    """Strip unmapped legacy rtc@101000 and unused RQIO nodes in standalone boots."""
+    dts = subprocess.check_output(["dtc", "-I", "dtb", "-O", "dts", str(dtb_path)],
+                                  text=True, stderr=subprocess.DEVNULL)
+    changed = False
+    patterns = [r"\n\s*rtc@101000\s*\{.*?\n\s*\};"]
+    if root_dev in ("nfs", "ramroot", "squashfs"):
+        patterns += [
+            r"\n\s*virtio_mmio@10001000\s*\{.*?\n\s*\};",
+            r"\n\s*virtio_mmio@10003000\s*\{.*?\n\s*\};",
+            r"\n\s*sdhci@42000000\s*\{.*?\n\s*\};",
+            r"\n\s*pci@41000000\s*\{.*?\n\s*\};",
+        ]
+    for pat in patterns:
+        new_dts, count = re.subn(pat, "", dts, flags=re.S)
+        if count:
+            dts = new_dts
+            changed = True
+    if changed:
+        with tempfile.TemporaryDirectory(prefix=".prune-dts-", dir=dtb_path.parent) as temp:
+            dts_file = Path(temp) / "ubuntu.dts"
+            dts_file.write_text(dts)
+            run(["dtc", "-I", "dts", "-O", "dtb", "-o", str(dtb_path), str(dts_file)])
 
 
 def bundle(args):
@@ -815,6 +1047,7 @@ def bundle(args):
         for name in ("Image", "fw_payload.bin", "kernel.config"):
             shutil.copyfile(built / name, output / name)
         shutil.copyfile(board_dir / "native.dtb", output / "ubuntu.dtb")
+        prune_unused_io_dtb(output / "ubuntu.dtb", root_dev)
         run(["fdtput", "-t", "s", output / "ubuntu.dtb", "/chosen", "bootargs", bootargs(args)])
         bundle_files = ["Image", "fw_payload.bin", "kernel.config", "ubuntu.dtb"]
         extra = {}
@@ -862,7 +1095,7 @@ def bundle(args):
                 shutil.copyfile(args.initrd, initrd_out)
             else:
                 host_export = getattr(args, "host_nfs", None) or args.rootfs
-                build_ramroot(args.rootfs, initrd_out, args.server, host_export)
+                build_ramroot(args.rootfs, initrd_out, args.server, host_export, use_sudo=True)
             initrd_size = initrd_out.stat().st_size
             initrd_end = INITRD_ADDRESS + initrd_size
             run(["fdtput", "-t", "x", output / "ubuntu.dtb", "/chosen", "linux,initrd-start",
@@ -872,13 +1105,14 @@ def bundle(args):
             bundle_files.append("initrd.img")
             extra["initrd_address"] = hex(INITRD_ADDRESS)
             extra["initrd_size"] = initrd_size
+        distro = getattr(args, "distro", "ubuntu") or "ubuntu"
         save(output / "manifest.json", {
-            "schema": "raptor-ubuntu-bundle-v1", "kernel": verify(built),
+            "schema": "raptor-ubuntu-bundle-v1", "distro": distro, "kernel": verify(built),
             "board_manifest": str(board_dir / "manifest.json"),
             "board_identity": manifest["sha256"],
             "board_configuration": manifest["configuration"], "rootfs": str(args.rootfs),
             "board": BOARD.name, "network": network_profile(manifest["configuration"]),
-            "rootfs_source": SOURCES["ubuntu"], "bootargs": bootargs(args), "board_validated": False,
+            "rootfs_source": SOURCES[distro], "bootargs": bootargs(args), "board_validated": False,
             "payload_address": "0x80000000", "dtb_address": "0x8fff0000",
             **extra,
             "files": {name: sha(output / name) for name in bundle_files},
@@ -961,6 +1195,12 @@ def board_services(tree):
     overlay_link(tree, "etc/systemd/system/sysinit.target.wants/raptor-boot-env.service",
                  "/etc/systemd/system/raptor-boot-env.service")
     overlay_file(tree, "usr/local/sbin/raptor-boot-env", RAPTOR_BOOT_ENV_SH, 0o755)
+    overlay_file(tree, "etc/sysctl.d/90-raptor-perf.conf", PERF_SYSCTL_CONF)
+    overlay_file(tree, "etc/profile.d/raptor-apps.sh", RAPTOR_APPS_PROFILE_SH)
+    overlay_file(tree, "etc/systemd/system/ssh.service.d/02-raptor-fast.conf",
+                 RAPTOR_MINIMAL_SSH_CONF)
+    overlay_file(tree, "etc/systemd/system/sshd-keygen.service.d/02-raptor-fast.conf",
+                 RAPTOR_MINIMAL_KEYGEN_CONF)
     # Keep SSH handshakes fast on 50-100 MHz FPGA cores: avoid post-quantum KEX,
     # reverse DNS lookups, and GSSAPI while preserving PAM / Ubuntu MOTD.
     overlay_file(tree, "etc/ssh/sshd_config.d/01-raptor-timeout.conf", FAST_SSH_CONF)
@@ -995,6 +1235,9 @@ def board_services(tree):
                  "systemd-machine-id-commit", "systemd-binfmt", "systemd-udev-settle"):
         overlay_file(tree, "etc/systemd/system/" + unit + ".service.d/raptor.conf",
                      "[Service]\nTimeoutStartSec=10min\n")
+    for unit in ("systemd-journald", "systemd-udevd", "systemd-networkd"):
+        overlay_file(tree, "etc/systemd/system/" + unit + ".service.d/raptor.conf",
+                     RAPTOR_NO_SECCOMP_CONF)
     # The cloud tarball already contains a cache newer than /usr, but lacks
     # /etc/.updated. Avoid an unnecessary scan of every library over NFS on
     # first boot. A missing cache or newer /usr still runs the vendor command;
@@ -1033,7 +1276,7 @@ def board_services(tree):
         # FPGA bitstreams are loaded through JTAG, not fwupd devices.
         "fwupd.service", "fwupd-refresh.service", "fwupd-refresh.timer",
         # resolv.conf points directly to the configured server; NSS uses dns.
-        "systemd-resolved.service",
+        "systemd-resolved.service", "grub-common.service", "networking.service",
     }
     for unit in (tree / "usr/lib/systemd/system").iterdir():
         if unit.suffix in (".service", ".socket", ".timer") and unit.name.startswith(
@@ -1043,8 +1286,69 @@ def board_services(tree):
         overlay_link(tree, "etc/systemd/system/" + unit, "/dev/null")
 
 
+def extract_debian_rootfs(archive, stage):
+    """Extract official Debian GPT raw-disk tar.xz into stage directory."""
+    with tempfile.TemporaryDirectory(prefix=".debian-disk-", dir=stage.parent) as temp:
+        tmp_dir = Path(temp)
+        fmt = SOURCES["debian"]["format"]
+        if fmt == "qcow2":
+            raw = tmp_dir / "disk.raw"
+            run(["qemu-img", "convert", "-O", "raw", archive, raw])
+        else:
+            run(["tar", "--sparse", "--extract", "--file", archive, "--directory", tmp_dir,
+                 "disk.raw"])
+            raw = tmp_dir / "disk.raw"
+        ext4 = tmp_dir / "rootfs.ext4"
+        extract_partition(raw, ext4)
+        raw.unlink()
+        mnt = tmp_dir / "mnt"
+        mnt.mkdir()
+        run(["mount", "-o", "loop,ro", str(ext4), str(mnt)])
+        try:
+            run(["cp", "-a", str(mnt) + "/.", str(stage) + "/"])
+        finally:
+            run(["umount", str(mnt)])
+
+
+def alpine_board_services(stage, args):
+    hostname = PROFILE["ubuntu"]["hostname"]
+    overlay_file(stage, "etc/fstab", "# The kernel mounts the rootfs.\n"
+                 "tmpfs /tmp tmpfs mode=1777,nosuid,nodev 0 0\n")
+    overlay_file(stage, "etc/hostname", hostname + "\n")
+    overlay_file(stage, "etc/hosts", f"127.0.0.1 localhost\n127.0.1.1 {hostname}\n::1 localhost\n")
+    overlay_file(stage, "etc/resolv.conf", "nameserver " + args.server + "\n")
+    overlay_file(stage, "etc/apk/repositories", ALPINE_REPOSITORIES)
+    overlay_file(stage, "usr/local/sbin/raptor-autologin",
+                 "#!/bin/sh\nexec /bin/login -f root\n", 0o755)
+    overlay_file(stage, "etc/inittab",
+                 "::sysinit:/sbin/openrc sysinit\n"
+                 "::sysinit:/sbin/openrc boot\n"
+                 "::wait:/sbin/openrc default\n"
+                 "ttyS0::respawn:/sbin/getty -n -l /usr/local/sbin/raptor-autologin "
+                 "115200 ttyS0 vt100\n"
+                 "::ctrlaltdel:/sbin/reboot\n"
+                 "::shutdown:/sbin/openrc shutdown\n")
+    overlay_file(stage, "usr/local/sbin/raptor-boot-env", RAPTOR_BOOT_ENV_SH, 0o755)
+    overlay_file(stage, "etc/init.d/raptor-boot-env", ALPINE_BOOT_ENV_INITD, 0o755)
+    overlay_file(stage, "etc/sysctl.d/90-raptor-perf.conf", PERF_SYSCTL_CONF)
+    overlay_file(stage, "etc/profile.d/raptor-apps.sh", RAPTOR_APPS_PROFILE_SH)
+    overlay_file(stage, "etc/ssh/sshd_config.d/01-raptor-timeout.conf", FAST_SSH_CONF_ALPINE)
+    build_smp_check(stage / "usr/local/bin/raptor-smp-check", args.cross)
+    runlevels = {
+        "sysinit": ("devfs", "dmesg", "mdev"),
+        "boot": ("bootmisc", "hostname", "sysctl", "urandom", "raptor-boot-env"),
+        "default": ("sshd", "local"),
+        "shutdown": ("killprocs", "mount-ro", "savecache"),
+    }
+    for lvl, svcs in runlevels.items():
+        for svc in svcs:
+            overlay_link(stage, f"etc/runlevels/{lvl}/{svc}", f"/etc/init.d/{svc}")
+
+
 def rootfs(args):
-    require(os.geteuid() == 0, "rootfs extraction requires sudo to preserve Ubuntu ownership and modes")
+    distro = getattr(args, "distro", "ubuntu") or "ubuntu"
+    require(os.geteuid() == 0,
+            f"rootfs extraction requires sudo to preserve {distro} ownership and modes")
     require(not args.rootfs.is_symlink(), "rootfs destination cannot be a symlink")
     root = args.rootfs.resolve()
     key = args.ssh_key.read_text().strip() if args.ssh_key else ""
@@ -1052,78 +1356,120 @@ def rootfs(args):
         require("\n" not in key and len(key.split()) >= 2 and
                 key.split()[0] in ("ssh-ed25519", "ssh-rsa", "ecdsa-sha2-nistp256"),
                 "expected one SSH public key")
-    inputs = {"source": SOURCES["ubuntu"], "server": str(ipaddress.IPv4Address(args.server)),
-              "board": BOARD.name, "hostname": PROFILE["ubuntu"]["hostname"],
-              "ssh_public_key_sha256": hashlib.sha256(key.encode()).hexdigest() if key else None,
-              "overlay": digest([inspect.getsource(f) for f in
-                                 (rootfs, overlay_file, overlay_link, board_services)])}
+    core_inputs = {
+        "source": SOURCES[distro],
+        "server": str(ipaddress.IPv4Address(args.server)),
+        "board": BOARD.name,
+        "hostname": PROFILE["ubuntu"]["hostname"],
+        "ssh_public_key_sha256": hashlib.sha256(key.encode()).hexdigest() if key else None,
+    }
+    inputs = {
+        **core_inputs,
+        "overlay": digest([inspect.getsource(f) for f in
+                           (rootfs, overlay_file, overlay_link, board_services,
+                            alpine_board_services)]),
+    }
     marker = root / ".raptor-rootfs.json"
     legacy_marker = root / ".raptor-native-rootfs.json"
     if root.exists():
         active_marker = marker if marker.is_file() else legacy_marker
-        require(active_marker.is_file() and json.loads(active_marker.read_text())["inputs"] == inputs,
+        require(active_marker.is_file(),
+                "existing directory is not a Raptor rootfs; select a new --rootfs directory")
+        saved_inputs = json.loads(active_marker.read_text()).get("inputs", {})
+        require(all(saved_inputs.get(k) == v for k, v in core_inputs.items()),
                 "existing rootfs has different inputs; select a new --rootfs directory")
-        print("UBUNTU_ROOTFS=" + str(root), flush=True)
+        print(f"{distro.upper().replace('-', '_')}_ROOTFS=" + str(root), flush=True)
         return root
-    archive = download("ubuntu", args.downloads)
+    archive = download(distro, args.downloads)
+    parent_existed = root.parent.exists()
     root.parent.mkdir(parents=True, exist_ok=True)
-    # Validate archive member names before a privileged system-tar extraction.
-    with tarfile.open(archive) as content:
-        for member in content:
-            require(not Path(member.name).is_absolute() and ".." not in Path(member.name).parts,
-                    "unsafe archive member: " + member.name)
-    stage = Path(tempfile.mkdtemp(prefix=".ubuntu-rootfs-", dir=root.parent))
+    if not parent_existed and "SUDO_UID" in os.environ and "SUDO_GID" in os.environ:
+        os.chown(root.parent, int(os.environ["SUDO_UID"]), int(os.environ["SUDO_GID"]))
+    fmt = SOURCES[distro]["format"]
+    if fmt == "tar":
+        with tarfile.open(archive) as content:
+            for member in content:
+                require(not Path(member.name).is_absolute() and ".." not in Path(member.name).parts,
+                        "unsafe archive member: " + member.name)
+    stage = Path(tempfile.mkdtemp(prefix=f".{distro}-rootfs-", dir=root.parent))
     try:
-        run(["tar", "--extract", "--file", archive, "--directory", stage, "--numeric-owner",
-             "--same-owner", "--xattrs", "--xattrs-include=*", "--acls", "--delay-directory-restore"])
-        release = (stage / "usr/lib/os-release").read_text()
-        expected = f'VERSION_ID="{SOURCES["ubuntu"]["release"]}"\n'
-        require('ID=ubuntu\n' in release and expected in release,
-                "unexpected Ubuntu root filesystem release")
-        require((stage / "usr/lib/systemd/systemd").is_file(), "Ubuntu systemd is missing")
-        overlay_file(stage, "etc/fstab", "# The kernel mounts the NFS root.\n"
-                     "tmpfs /tmp tmpfs mode=1777,nosuid,nodev 0 0\n")
-        overlay_file(stage, "etc/hostname", PROFILE["ubuntu"]["hostname"] + "\n")
-        overlay_file(stage, "etc/hosts", "127.0.0.1 localhost\n127.0.1.1 "
-                     + PROFILE["ubuntu"]["hostname"] + "\n::1 localhost\n")
-        overlay_file(stage, "etc/resolv.conf", "nameserver " + args.server + "\n")
-        overlay_file(stage, "etc/cloud/cloud-init.disabled", "NFS root provisioned by ubuntu.py\n")
-        overlay_file(stage, "etc/machine-id", "")
-        overlay_file(stage, "etc/systemd/network/10-raptor.network",
-                     "[Match]\nName=eth0\n\n[Network]\nDHCP=ipv4\nKeepConfiguration=yes\n"
-                     "LinkLocalAddressing=no\nIPv6AcceptRA=no\n\n[DHCPv4]\nUseMTU=no\n")
-        overlay_link(stage, "etc/systemd/system/multi-user.target.wants/systemd-networkd.service",
-                     "/usr/lib/systemd/system/systemd-networkd.service")
-        overlay_link(stage, "etc/systemd/system/default.target",
-                     "/usr/lib/systemd/system/multi-user.target")
-        overlay_file(stage, "etc/systemd/system/serial-getty@ttyS0.service.d/raptor.conf",
-                     "[Service]\nExecStart=\nExecStart=-/usr/sbin/agetty --autologin root "
-                     "--noclear --keep-baud 115200,38400,9600 - $TERM\n")
-        overlay_file(stage, "etc/systemd/journald.conf.d/raptor.conf",
-                     "[Journal]\nStorage=volatile\nRuntimeMaxUse=16M\n")
-        board_services(stage)
-        # Generate this rootfs's unique host keys on the provisioning host;
-        # RSA generation on the 50 MHz board otherwise dominates first boot.
-        # -A preserves existing keys. The service also repairs missing keys.
-        run(["ssh-keygen", "-q", "-A", "-f", stage])
-        overlay_file(stage, "etc/systemd/system/ssh.service.d/raptor.conf",
-                     "[Service]\nExecStartPre=\nExecStartPre=/usr/bin/ssh-keygen -A\n"
-                     "ExecStartPre=/usr/sbin/sshd -t\n")
+        os_id = SOURCES[distro].get("os_id", distro)
+        expected_ver = SOURCES[distro]["release"]
+        if distro == "alpine":
+            packages = download_packages(distro, args.downloads)
+            populate_alpine_tree(archive, packages, stage, preserve_owner=True)
+            release = (stage / "etc/os-release").read_text()
+            require(f"ID={os_id}\n" in release and f"VERSION_ID={expected_ver}\n" in release,
+                    "unexpected Alpine root filesystem release")
+            require((stage / "sbin/openrc").is_file() and (stage / "usr/sbin/sshd").is_file(),
+                    "Alpine OpenRC or sshd is missing")
+            alpine_board_services(stage, args)
+            run(["ssh-keygen", "-q", "-A", "-f", stage])
+        else:
+            if fmt in ("raw-tar", "qcow2"):
+                extract_debian_rootfs(archive, stage)
+            else:
+                run(["tar", "--extract", "--file", archive, "--directory", stage,
+                     "--numeric-owner", "--same-owner", "--xattrs", "--xattrs-include=*",
+                     "--acls", "--delay-directory-restore"])
+            release = (stage / "usr/lib/os-release").read_text()
+            expected = f'VERSION_ID="{expected_ver}"\n'
+            require(f"ID={os_id}\n" in release and expected in release,
+                    f"unexpected {distro} root filesystem release")
+            require((stage / "usr/lib/systemd/systemd").is_file(),
+                    f"{distro} systemd is missing")
+            require((stage / "usr/sbin/sshd").is_file(),
+                    f"{distro} openssh-server is missing")
+            overlay_file(stage, "etc/fstab", "# The kernel mounts the NFS root.\n"
+                         "tmpfs /tmp tmpfs mode=1777,nosuid,nodev 0 0\n")
+            overlay_file(stage, "etc/hostname", PROFILE["ubuntu"]["hostname"] + "\n")
+            overlay_file(stage, "etc/hosts", "127.0.0.1 localhost\n127.0.1.1 "
+                         + PROFILE["ubuntu"]["hostname"] + "\n::1 localhost\n")
+            overlay_file(stage, "etc/resolv.conf", "nameserver " + args.server + "\n")
+            overlay_file(stage, "etc/cloud/cloud-init.disabled",
+                         "NFS root provisioned by distro.py\n")
+            overlay_file(stage, "etc/machine-id", "")
+            overlay_file(stage, "etc/systemd/network/10-raptor.network",
+                         "[Match]\nName=eth0\n\n[Network]\nDHCP=ipv4\nKeepConfiguration=yes\n"
+                         "LinkLocalAddressing=no\nIPv6AcceptRA=no\n\n[DHCPv4]\nUseMTU=no\n")
+            overlay_link(stage,
+                         "etc/systemd/system/multi-user.target.wants/systemd-networkd.service",
+                         "/usr/lib/systemd/system/systemd-networkd.service")
+            overlay_link(stage, "etc/systemd/system/default.target",
+                         "/usr/lib/systemd/system/multi-user.target")
+            overlay_file(stage, "etc/systemd/system/serial-getty@ttyS0.service.d/raptor.conf",
+                         "[Service]\nExecStart=\nExecStart=-/usr/sbin/agetty --autologin root "
+                         "--noclear --keep-baud 115200,38400,9600 - $TERM\n")
+            overlay_file(stage, "etc/systemd/journald.conf.d/raptor.conf",
+                         "[Journal]\nStorage=volatile\nRuntimeMaxUse=16M\n")
+            board_services(stage)
+            run(["ssh-keygen", "-q", "-A", "-f", stage])
+            overlay_file(stage, "etc/systemd/system/ssh.service.d/raptor.conf",
+                         "[Service]\nExecStartPre=\n"
+                         "ExecStartPre=/bin/sh -c 'test -s /etc/ssh/ssh_host_ed25519_key || "
+                         "/usr/bin/ssh-keygen -A'\n")
         if key:
             overlay_file(stage, "root/.ssh/authorized_keys", key + "\n", 0o600)
             (stage / "root/.ssh").chmod(0o700)
             overlay_file(stage, "etc/ssh/sshd_config.d/00-raptor.conf",
                          "PermitRootLogin prohibit-password\nPasswordAuthentication no\n")
-        save(stage / marker.name, {"schema": "raptor-ubuntu-rootfs-v1", "inputs": inputs,
-                                   "persistent": True, "serial_root_autologin": True})
+        save(stage / marker.name, {
+            "schema": "raptor-ubuntu-rootfs-v1", "distro": distro, "inputs": inputs,
+            "persistent": True, "serial_root_autologin": True,
+        })
         stage.chmod(0o755)
         stage.rename(root)
     except BaseException:
-        # Keep the incomplete extraction for diagnosis; never delete a live NFS root.
         print("Incomplete rootfs retained at " + str(stage), file=sys.stderr)
         raise
-    print("UBUNTU_ROOTFS=" + str(root), flush=True)
+    print(f"{distro.upper().replace('-', '_')}_ROOTFS=" + str(root), flush=True)
     return root
+
+
+def apps(args):
+    root = args.rootfs.resolve()
+    require(has_rootfs_marker(root), "prepare the rootfs first")
+    run(["make", "-C", REPO / "app", "fpga-ubuntu-install", f"UBUNTU_ROOTFS={root}"])
 
 
 def serve(args, remove=False):
@@ -1315,7 +1661,17 @@ def board_proxy_context(proxy_url, server_ip):
         yield clean
 
 
-def stamp_runtime_dtb(dtb, *, host_epoch=None, http_proxy=None, apt_mirror=None):
+def parse_unicast_mac(mac_text):
+    require(bool(re.fullmatch(r"[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}", mac_text)),
+            f"invalid MAC address: {mac_text!r}")
+    octets = bytes.fromhex(mac_text.replace(":", ""))
+    require(len(octets) == 6 and not (octets[0] & 1),
+            f"a unicast six-byte MAC address is required: {mac_text!r}")
+    return ":".join(f"{b:02x}" for b in octets), octets
+
+
+def stamp_runtime_dtb(dtb, *, host_epoch=None, http_proxy=None, apt_mirror=None,
+                      mac_override=None, eth_node=None):
     subprocess.run(["fdtput", "-t", "bx", str(dtb), "/chosen", "rng-seed",
                     *[f"{b:02x}" for b in os.urandom(64)]], check=True)
     epoch = int(time.time()) if host_epoch is None else int(host_epoch)
@@ -1332,6 +1688,11 @@ def stamp_runtime_dtb(dtb, *, host_epoch=None, http_proxy=None, apt_mirror=None)
             clean_mirror += "/"
         subprocess.run(["fdtput", "-t", "s", str(dtb), "/chosen", "raptor,apt-mirror",
                         clean_mirror], check=True)
+    if mac_override:
+        _, octets = parse_unicast_mac(mac_override)
+        node = eth_node or PROFILE["ubuntu"]["ethernet_node"]
+        subprocess.run(["fdtput", "-t", "bx", str(dtb), node, "local-mac-address",
+                        *[f"{b:02x}" for b in octets]], check=True)
 
 
 def proxy_command(args):
@@ -1357,22 +1718,28 @@ def boot(args):
          board_proxy_context(getattr(args, "http_proxy", None), args.server) as guest_proxy:
         dtb = Path(temporary) / "runtime.dtb"
         shutil.copyfile(directory / "ubuntu.dtb", dtb)
-        stamp_runtime_dtb(dtb, http_proxy=guest_proxy,
-                          apt_mirror=getattr(args, "apt_mirror", None))
-        save(args.output / "last-boot.json", {"runtime_dtb_sha256": sha(dtb),
-             "bundle_manifest_sha256": sha(directory / "manifest.json"), "port": args.port})
-        initrd = (directory / "initrd.img") if "initrd.img" in verify(directory)["files"] else None
         record = verify(directory)
         board_cfg = record.get("board_configuration") or record["native_configuration"]
+        net = dict(network_profile(board_cfg))
+        mac_override = getattr(args, "mac", None)
+        if mac_override:
+            clean_mac, _ = parse_unicast_mac(mac_override)
+            net["mac"] = clean_mac
+        eth_node = None if (board_cfg.get("virtio_net") or board_cfg.get("qemu_bridge")) else (
+            PROFILE["ubuntu"]["ethernet_node"])
+        stamp_runtime_dtb(dtb, http_proxy=guest_proxy,
+                          apt_mirror=getattr(args, "apt_mirror", None),
+                          mac_override=mac_override if eth_node else None,
+                          eth_node=eth_node)
+        save(args.output / "last-boot.json", {"runtime_dtb_sha256": sha(dtb),
+             "bundle_manifest_sha256": sha(directory / "manifest.json"), "port": args.port})
+        initrd = (directory / "initrd.img") if "initrd.img" in record["files"] else None
         if args.transport == "tftp":
-            # The I/O SoC's stream bridge owns the MAC that the TFTP loader drives.
-            require(not (board_cfg.get("virtio_net") or board_cfg.get("qemu_bridge")),
-                    "the virtio-net/QEMU bridge SoC boots with --transport uart")
             import netboot
             netboot.upload(args.port, directory / "fw_payload.bin", dtb, Path(temporary),
                            args.server, args.boot_ip, args.tftp_port,
                            wait_ready=args.wait_ready, console=args.console,
-                           network=network_profile(board_cfg), initrd=initrd)
+                           network=net, initrd=initrd)
             return
         if args.upload_baud != 115200:
             import fast_upload
@@ -1395,9 +1762,11 @@ def boot(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, parents=[board_parser()])
     parser.add_argument("action",
-                        choices=("kernel", "rootfs", "bundle", "check", "serve", "unserve",
-                                 "proxy", "boot"))
-    parser.add_argument("--output", type=Path, default=BOARD / "build/ubuntu")
+                        choices=("kernel", "rootfs", "apps", "bundle", "check", "serve",
+                                 "unserve", "proxy", "boot"))
+    parser.add_argument("--distro", choices=tuple(SOURCES), default="ubuntu",
+                        help="distribution profile (ubuntu, ubuntu-lts, debian, alpine)")
+    parser.add_argument("--output", type=Path, help="output directory (default: build/<distro>)")
     parser.add_argument("--rootfs", type=Path, help="persistent NFS tree (default OUTPUT/rootfs)")
     parser.add_argument("--kernel-cache", type=Path, default=REPO / "linux/build/netboot-kernels")
     parser.add_argument("--kernel-dir", type=Path, help="reuse a verified kernel artifact directory")
@@ -1413,6 +1782,10 @@ def main():
     parser.add_argument("--native-build-root", dest="board_build_root", type=Path,
                         help=argparse.SUPPRESS)
     parser.add_argument("--preset", default="default")
+    parser.add_argument("--nharts", default="auto",
+                        help="number of coherent harts in the cluster (auto or 1-16)")
+    parser.add_argument("--vector", default="auto", choices=("auto", "0", "1"),
+                        help="V extension override (auto follows preset, 0 disables, 1 enables)")
     parser.add_argument("--clock-mhz", type=int, choices=(25, 50, 75, 100), default=50)
     parser.add_argument("--root-device", default="nfs",
                         choices=("nfs", "ramroot", "squashfs", *ALLOWED_BLOCK_ROOTS),
@@ -1440,6 +1813,8 @@ def main():
     parser.add_argument("--transport", choices=("tftp", "uart"), default=PROFILE["ubuntu"]["transport"])
     parser.add_argument("--boot-ip", default=PROFILE["ubuntu"]["boot_ip"],
                         help="reserved loader IPv4 address on the server LAN; Linux uses DHCP")
+    parser.add_argument("--mac",
+                        help="optional unicast MAC override for multi-board LAN isolation")
     parser.add_argument("--tftp-port", type=int, default=6969)
     parser.add_argument("--upload-baud", type=int, default=312500,
                         help="RAM loader rate; use 115200 to upload directly through the ROM")
@@ -1447,7 +1822,7 @@ def main():
     parser.add_argument("--console", action="store_true")
     args = parser.parse_args()
     require(1 <= args.jobs <= 32, "jobs must be between 1 and 32")
-    args.output = args.output.resolve()
+    args.output = (args.output or (BOARD / "build" / args.distro)).resolve()
     args.rootfs = args.rootfs.absolute() if args.rootfs else args.output / "rootfs"
     if args.board_build:
         args.board_build = args.board_build.resolve()
@@ -1455,6 +1830,8 @@ def main():
         print("UBUNTU_KERNEL=" + str(kernel(args)))
     elif args.action == "rootfs":
         rootfs(args)
+    elif args.action == "apps":
+        apps(args)
     elif args.action == "bundle":
         bundle(args)
     elif args.action == "check":

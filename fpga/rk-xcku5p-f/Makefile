@@ -1,14 +1,15 @@
-# RK-XCKU5P-F board build: SoC bitstream and Ubuntu.
+# RK-XCKU5P-F board build: SoC bitstream and Linux distributions.
 # Run `make help` for every target and variable; see README.md for workflows.
 .DEFAULT_GOAL := help
 
 WITH_ETHERNET ?= 0 ## Add the onboard RGMII gigabit Ethernet MAC (0|1)
+SMP_RAPT_CONFIG ?= small-smp2 ## Default multi-hart Alpine SMP preset on KU5P (RV64GC, 64% LUTs)
 UBUNTU_SSH_KEY ?= $(CURDIR)/keys/ubuntu-test.pub ## SSH public key installed for root
 BOARD_VARIABLES := WITH_ETHERNET
 BOARD_OPTIONS = --ethernet $(WITH_ETHERNET)
 
 include ../common/board.mk
-include ../common/ubuntu.mk
+include ../common/distro.mk
 
 # Ubuntu uses the onboard Ethernet MAC.
 $(UBUNTU_BITSTREAM_TARGETS): override WITH_ETHERNET := 1

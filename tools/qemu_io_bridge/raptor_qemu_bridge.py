@@ -101,6 +101,10 @@ class Transport:
     def recv_msg(self) -> bytes | None:
         raise NotImplementedError
 
+    def recv_msg_timeout(self, timeout_sec: float) -> bytes | None:
+        _ = timeout_sec
+        return self.recv_msg()
+
     def send_msg(self, payload: bytes) -> None:
         raise NotImplementedError
 
@@ -169,6 +173,73 @@ class RawEthernetTransport(Transport):
         self.sock.close()
 
 
+class UdpTransport(Transport):
+    """Unprivileged IPv4/UDP RQIO transport (works without root/CAP_NET_RAW)."""
+
+    HELLO_PKT = MAGIC + bytes([PROTO_VER, 0x00, 0x00, 0x00, 0x00, 0x00])
+
+    def __init__(self, bind_host: str = "192.168.50.1", bind_port: int = 9885,
+                 peer_host: str = "192.168.50.93", peer_port: int = 9885) -> None:
+        self.peer = (peer_host, peer_port)
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4 * 1024 * 1024)
+        except OSError:
+            pass
+        self.sock.bind((bind_host, bind_port))
+        self.last_hello = 0.0
+        self.last_rx = 0.0
+        self._msg_confirm = getattr(socket, "MSG_CONFIRM", 0)
+        self._send_hello()
+
+    def _send_hello(self) -> None:
+        try:
+            self.sock.sendto(self.HELLO_PKT, self.peer)
+            self.last_hello = time.monotonic()
+        except OSError:
+            pass
+
+    def recv_msg(self) -> bytes | None:
+        while True:
+            self.sock.settimeout(0.5)
+            try:
+                data, sender = self.sock.recvfrom(2048)
+            except socket.timeout:
+                self._send_hello()
+                continue
+            if sender[0] == self.peer[0]:
+                self.peer = sender
+                self.last_rx = time.monotonic()
+            if len(data) >= 8:
+                return data
+
+    def recv_msg_timeout(self, timeout_sec: float) -> bytes | None:
+        deadline = time.monotonic() + timeout_sec
+        while True:
+            rem = deadline - time.monotonic()
+            if rem <= 0:
+                return b""
+            self.sock.settimeout(rem)
+            try:
+                data, sender = self.sock.recvfrom(2048)
+            except socket.timeout:
+                return b""
+            if sender[0] == self.peer[0]:
+                self.peer = sender
+                self.last_rx = time.monotonic()
+            if len(data) >= 8:
+                return data
+
+    def send_msg(self, payload: bytes) -> None:
+        flags = self._msg_confirm if (time.monotonic() - self.last_rx) < 5.0 else 0
+        self.sock.sendto(payload, flags, self.peer)
+
+    def close(self) -> None:
+        self.sock.close()
+
+
 class SlipFdTransport(Transport):
     """SLIP + CRC16 byte-stream transport over a serial TTY / PTY / pipe."""
 
@@ -216,6 +287,33 @@ class DmaRequester:
         self.transport = transport
         self.seq = 1
 
+    def _exchange(self, req: bytes, expected_type: int, seq: int) -> bytes:
+        for attempt in range(80):
+            try:
+                self.transport.send_msg(req)
+            except OSError:
+                time.sleep(0.05)
+                continue
+            wait_s = 0.05 if attempt < 8 else 0.25
+            deadline = time.monotonic() + wait_s
+            while True:
+                rem = deadline - time.monotonic()
+                if rem <= 0:
+                    break
+                resp = self.transport.recv_msg_timeout(rem)
+                if resp is None:
+                    raise RuntimeError(f"EOF waiting for DMA response type=0x{expected_type:02x}")
+                if resp == b"":
+                    break
+                if len(resp) < 12:
+                    continue
+                magic, ver, mtype, rseq = struct.unpack("<2sBBH", resp[:6])
+                if magic != MAGIC or ver != PROTO_VER:
+                    continue
+                if mtype == expected_type and rseq == seq:
+                    return resp
+        raise RuntimeError(f"timeout waiting for DMA response type=0x{expected_type:02x} seq={seq}")
+
     def dma_read(self, addr: int, length: int) -> bytes:
         out = bytearray()
         offset = 0
@@ -226,13 +324,8 @@ class DmaRequester:
             req = struct.pack(
                 "<2sBBHHQ", MAGIC, PROTO_VER, MSG_DMA_READ_REQ, seq, chunk, addr + offset
             )
-            self.transport.send_msg(req)
-            resp = self.transport.recv_msg()
-            if resp is None or len(resp) < 12:
-                raise RuntimeError("EOF waiting for MSG_DMA_READ_RESP")
-            magic, ver, mtype, rseq, rlen, status = struct.unpack("<2sBBHHB3x", resp[:12])
-            if magic != MAGIC or ver != PROTO_VER or mtype != MSG_DMA_READ_RESP or rseq != seq:
-                raise RuntimeError(f"unexpected DMA read response type={mtype} seq={rseq}")
+            resp = self._exchange(req, MSG_DMA_READ_RESP, seq)
+            _magic, _ver, _mtype, _rseq, rlen, status = struct.unpack("<2sBBHHB3x", resp[:12])
             if status != 0:
                 raise RuntimeError(f"FPGA DMA read error at 0x{addr + offset:x}")
             out.extend(resp[12:12 + rlen])
@@ -249,13 +342,8 @@ class DmaRequester:
             hdr = struct.pack(
                 "<2sBBHHQ", MAGIC, PROTO_VER, MSG_DMA_WRITE_REQ, seq, len(chunk), addr + offset
             )
-            self.transport.send_msg(hdr + chunk)
-            resp = self.transport.recv_msg()
-            if resp is None or len(resp) < 12:
-                raise RuntimeError("EOF waiting for MSG_DMA_WRITE_RESP")
-            magic, ver, mtype, rseq, _rlen, status = struct.unpack("<2sBBHHB3x", resp[:12])
-            if magic != MAGIC or ver != PROTO_VER or mtype != MSG_DMA_WRITE_RESP or rseq != seq:
-                raise RuntimeError(f"unexpected DMA write response type={mtype} seq={rseq}")
+            resp = self._exchange(hdr + chunk, MSG_DMA_WRITE_RESP, seq)
+            _magic, _ver, _mtype, _rseq, _rlen, status = struct.unpack("<2sBBHHB3x", resp[:12])
             if status != 0:
                 raise RuntimeError(f"FPGA DMA write error at 0x{addr + offset:x}")
             offset += len(chunk)
@@ -485,13 +573,29 @@ class GoldfishRtcMmio:
 class BuiltinBackend:
     """Standards-compliant VirtIO-Blk/Net/RNG, Goldfish RTC, SDHCI, and PCIe + NVMe 1.4."""
 
+    def _open_backing(self, path: Path | None, default_bytes: int,
+                      snapshot: bool) -> bytearray | mmap.mmap:
+        if path is None:
+            return bytearray(default_bytes)
+        size = path.stat().st_size
+        if size == 0:
+            return bytearray(default_bytes)
+        fh = path.open("rb" if snapshot else "r+b")
+        self._open_files.append(fh)
+        acc = mmap.ACCESS_COPY if snapshot else mmap.ACCESS_WRITE
+        mm = mmap.mmap(fh.fileno(), 0, access=acc)
+        self._open_mmaps.append(mm)
+        return mm
+
     def __init__(self, disk_path: Path | None = None, sdhci_path: Path | None = None,
                  nvme_path: Path | None = None, blk_irq: int = 3, net_irq: int = 2,
                  sdhci_irq: int = 4, rng_irq: int = 5, rtc_irq: int = 6,
-                 nvme_irq: int = 11) -> None:
-        self.disk = bytearray(disk_path.read_bytes()) if disk_path else bytearray(4 * 1024 * 1024)
-        self.sd = bytearray(sdhci_path.read_bytes()) if sdhci_path else bytearray(4 * 1024 * 1024)
-        self.nvme = bytearray(nvme_path.read_bytes()) if nvme_path else bytearray(8 * 1024 * 1024)
+                 nvme_irq: int = 11, snapshot: bool = False) -> None:
+        self._open_files: list[object] = []
+        self._open_mmaps: list[mmap.mmap] = []
+        self.disk = self._open_backing(disk_path, 4 * 1024 * 1024, snapshot)
+        self.sd = self._open_backing(sdhci_path, 4 * 1024 * 1024, snapshot)
+        self.nvme = self._open_backing(nvme_path, 8 * 1024 * 1024, snapshot)
         self.blk_irq = blk_irq
         self.net_irq = net_irq
         self.sdhci_irq = sdhci_irq
@@ -506,6 +610,7 @@ class BuiltinBackend:
         # VirtIO-Blk (0x1000_1000)
         self.blk_feat_sel = 0
         self.blk_drv_sel = 0
+        self.blk_qsel = 0
         self.blk_status = 0
         self.blk_int = 0
         self.blk_q = _VirtioQueue()
@@ -733,8 +838,8 @@ class BuiltinBackend:
                     0x008: 2,
                     0x00C: 0x52415054,
                     0x010: 0x0000_0006 if self.blk_feat_sel == 0 else (0x0000_0003 if self.blk_feat_sel == 1 else 0),
-                    0x034: 256,
-                    0x044: q.ready,
+                    0x034: 256 if self.blk_qsel == 0 else 0,
+                    0x044: q.ready if self.blk_qsel == 0 else 0,
                     0x060: self.blk_int,
                     0x070: self.blk_status,
                 }.get(aligned, 0)
@@ -743,32 +848,36 @@ class BuiltinBackend:
                 self.blk_feat_sel = w32
             elif aligned == 0x024:
                 self.blk_drv_sel = w32
-            elif aligned == 0x038:
+            elif aligned == 0x030:
+                self.blk_qsel = w32
+            elif aligned == 0x038 and self.blk_qsel == 0:
                 q.num = w32 & 0xFFFF
-            elif aligned == 0x044:
+            elif aligned == 0x044 and self.blk_qsel == 0:
                 q.ready = w32 & 1
             elif aligned == 0x050:
-                self._process_virtio_blk(dma)
+                if w32 == 0:
+                    self._process_virtio_blk(dma)
             elif aligned == 0x064:
                 self.blk_int &= ~w32
             elif aligned == 0x070:
                 if w32 == 0:
+                    self.blk_qsel = 0
                     self.blk_status = 0
                     self.blk_int = 0
                     self.blk_q = _VirtioQueue()
                 else:
                     self.blk_status = w32 & 0xFF
-            elif aligned == 0x080:
+            elif aligned == 0x080 and self.blk_qsel == 0:
                 q.desc = (q.desc & ~0xFFFF_FFFF) | w32
-            elif aligned == 0x084:
+            elif aligned == 0x084 and self.blk_qsel == 0:
                 q.desc = (q.desc & 0xFFFF_FFFF) | (w32 << 32)
-            elif aligned == 0x090:
+            elif aligned == 0x090 and self.blk_qsel == 0:
                 q.driver = (q.driver & ~0xFFFF_FFFF) | w32
-            elif aligned == 0x094:
+            elif aligned == 0x094 and self.blk_qsel == 0:
                 q.driver = (q.driver & 0xFFFF_FFFF) | (w32 << 32)
-            elif aligned == 0x0A0:
+            elif aligned == 0x0A0 and self.blk_qsel == 0:
                 q.device = (q.device & ~0xFFFF_FFFF) | w32
-            elif aligned == 0x0A4:
+            elif aligned == 0x0A4 and self.blk_qsel == 0:
                 q.device = (q.device & 0xFFFF_FFFF) | (w32 << 32)
             return 0
 
@@ -1235,7 +1344,10 @@ class BuiltinBackend:
         if 0x1000_3000 <= addr < 0x1000_4000:
             val = self.virtio_rng.access(addr - 0x1000_3000, is_write, wdata, dma)
             return 0, val
-        if 0x1000_4000 <= addr < 0x1000_9000:
+        if 0x1000_4000 <= addr < 0x1000_5000:
+            val = self.goldfish_rtc.access(addr - 0x1000_4000, is_write, wdata)
+            return 0, val
+        if 0x1000_5000 <= addr < 0x1000_9000:
             return 0, 0
         if 0x4200_0000 <= addr < 0x4200_1000:
             val = self._handle_sdhci(addr - 0x4200_0000, is_write, wstrb, wdata, dma)
@@ -1251,7 +1363,19 @@ class BuiltinBackend:
         return 1, 0
 
     def close(self) -> None:
-        pass
+        for mm in self._open_mmaps:
+            try:
+                mm.flush()
+            except (BufferError, ValueError, OSError):
+                pass
+            mm.close()
+        self._open_mmaps.clear()
+        for fh in self._open_files:
+            try:
+                fh.close()  # type: ignore[attr-defined]
+            except OSError:
+                pass
+        self._open_files.clear()
 
 
 class QemuQtestBackend:
@@ -1831,6 +1955,9 @@ _loop_end:
 def serve_session(transport: Transport, backend: BuiltinBackend | QemuQtestBackend,
                   on_step: Callable[[], None] | None = None) -> None:
     dma = DmaRequester(transport)
+    last_req_key: tuple[int, int, int, int, int] | None = None
+    last_resp: bytes = b""
+    last_time = 0.0
     while True:
         msg = transport.recv_msg()
         if msg is None:
@@ -1839,6 +1966,11 @@ def serve_session(transport: Transport, backend: BuiltinBackend | QemuQtestBacke
             continue
         magic, ver, mtype, seq, op, wstrb, addr, wdata = struct.unpack("<2sBBHBB I Q", msg[:20])
         if magic != MAGIC or ver != PROTO_VER or mtype != MSG_MMIO_REQ:
+            continue
+        req_key = (seq, op, wstrb, addr, wdata)
+        now = time.monotonic()
+        if req_key == last_req_key and (now - last_time) < 2.0:
+            transport.send_msg(last_resp)
             continue
         is_write = bool(op & 1)
         size = (op >> 1) & 3
@@ -1854,22 +1986,38 @@ def serve_session(transport: Transport, backend: BuiltinBackend | QemuQtestBacke
             backend.irq_mask() & 0xFFFF_FFFF,
             rdata & 0xFFFF_FFFF_FFFF_FFFF,
         )
+        last_req_key = req_key
+        last_resp = resp
+        last_time = time.monotonic()
         transport.send_msg(resp)
         if on_step is not None:
             on_step()
 
 
+def _parse_host_port(spec: str, default_port: int = 9885) -> tuple[str, int]:
+    if ":" in spec:
+        host, port_s = spec.rsplit(":", 1)
+        return host, int(port_s)
+    return spec, default_port
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--transport", choices=("unix", "raw-eth", "serial"), default="unix")
+    parser.add_argument("--transport", choices=("unix", "raw-eth", "udp", "serial"), default="unix")
     parser.add_argument("--socket", type=Path, help="Unix domain socket path (--transport unix)")
     parser.add_argument("--iface", default="eth0", help="Host NIC (--transport raw-eth)")
+    parser.add_argument("--udp-bind", default="192.168.50.1:9885",
+                        help="Host UDP bind addr:port (--transport udp)")
+    parser.add_argument("--udp-peer", default="192.168.50.93:9885",
+                        help="FPGA UDP peer addr:port (--transport udp)")
     parser.add_argument("--device", help="Serial TTY/PTY device (--transport serial)")
     parser.add_argument("--backend", choices=("builtin", "qemu"), default="builtin")
     parser.add_argument("--qemu-bin", default="qemu-system-riscv64")
     parser.add_argument("--disk", type=Path, help="VirtIO-Blk raw disk image")
     parser.add_argument("--sdhci", type=Path, help="SDHCI raw SD card image")
     parser.add_argument("--nvme", type=Path, help="NVMe raw namespace image")
+    parser.add_argument("--snapshot", action="store_true",
+                        help="Map disk images copy-on-write in RAM without modifying files")
     parser.add_argument("--ram-mb", type=int, default=1024, help="Guest RAM aperture in MiB")
     parser.add_argument("--blk-irq", type=int, default=3, help="PLIC IRQ for VirtIO-Blk")
     args = parser.parse_args()
@@ -1890,6 +2038,7 @@ def main() -> int:
             sdhci_path=args.sdhci,
             nvme_path=args.nvme,
             blk_irq=args.blk_irq,
+            snapshot=args.snapshot,
         )
 
     try:
@@ -1905,6 +2054,10 @@ def main() -> int:
             tp: Transport = UnixStreamTransport(conn)
         elif args.transport == "raw-eth":
             tp = RawEthernetTransport(args.iface)
+        elif args.transport == "udp":
+            b_host, b_port = _parse_host_port(args.udp_bind)
+            p_host, p_port = _parse_host_port(args.udp_peer)
+            tp = UdpTransport(b_host, b_port, p_host, p_port)
         else:
             if not args.device:
                 parser.error("--device is required for --transport serial")

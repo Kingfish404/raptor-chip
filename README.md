@@ -69,23 +69,23 @@ reports precise traps with `vstart` for restart. See the [VPU manual](./docs/vpu
 
 Selected benchmark results for the configurations below. FPGA run Linux with a 50 MHz core and 333 MHz DDR4 UI. BM means bare-metal.
 
-| SW & HW Environment | Preset Config / XLEN | DMIPS/MHz | CM/MHz | Embench-IoT | SPECrate2017 (INT/FP / GHz) | SPECrate2026 (INT/FP / GHz) |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| BM sim | default/RV32 | 1.82-2.29 | 5.8889 | 2.0069x | - | - |
-| BM sim | default/RV64 | 1.99-2.55 | 5.6685 | 2.0362x | - | - |
-| BM sim | default-w4/RV64 | 2.46-3.31 | 7.1016 | 2.6969x | - | - |
-| Linux sim | default/RV32 | 1.29-1.62 | 4.3148 | 1.4714x | - | - |
-| Linux sim | default/RV64 | 1.52-2.15 | 3.3654 | 1.6573x | 0.54/0.44 | 0.24/0.23 |
-| Linux sim | default-w4/RV64 | 1.66-2.43 | 3.8553 | 1.9116x | 0.58/0.46 | 0.29/0.24 |
-| FPGA, KU5P | default/RV64 | 1.34-1.93 | 3.3514 | 1.0477x | 0.21/0.16 | 0.05/0.10 |
-| FPGA, KU15P | default-w4/RV64 | 1.46-2.16 | 3.9803 | 1.2319x | 0.23/0.17 | 0.06/0.10 |
+| SW & HW Environment | Preset Config / XLEN | DMIPS/MHz | CM/MHz | Embench-IoT | SPECrate 2006/2017/2026 ((INT/FP)/GHz) |
+| --- | --- | ---: | ---: | ---: | ---: |
+| BM sim | default/RV32 | 1.82-2.29 | 5.8889 | 2.0069x | - |
+| BM sim | default/RV64 | 1.99-2.55 | 5.6685 | 2.0362x | - |
+| BM sim | default-w4/RV64 | 2.46-3.31 | 7.1016 | 2.6969x | - |
+| Linux sim | default/RV32 | 1.29-1.62 | 4.3148 | 1.4714x | - |
+| Linux sim | default/RV64 | 1.52-2.15 | 3.3654 | 1.6573x | -, 0.54/0.44, 0.24/0.23 |
+| Linux sim | default-w4/RV64 | 1.66-2.43 | 3.8553 | 1.9116x | -, 0.58/0.46, 0.29/0.24 |
+| FPGA, KU5P | default/RV64 | 1.34-1.93 | 3.3514 | 1.0477x | -, 0.21/0.16, 0.05/0.10 |
+| FPGA, KU15P | default-w4/RV64 | 1.46-2.16 | 3.9803 | 1.2319x | -, 0.23/0.17, 0.06/0.10 |
 
 All figures are measured directly on RTL (Verilator or FPGA; no architectural models).
 DMIPS/MHz reports strict (`-O3 -fno-inline`) to standard (`-O3 -fno-inline-functions`) with
 `-mno-strict-align`; Embench-IoT is the 19-workload geomean vs KU5P (50 MHz scaling); KU15P
 (`default-w4 / RV64`) scores 2 / 2 (SC/MC, 1 hart) in Geekbench 5.4.1 Preview. SPEC CPU
-2017/2026 scores (`-O2 -march=rv64gc`; not official SPEC submissions) use RTL Linux SimPoint
-in simulation and `test`-set IPC on no-L2 DDR4 FPGA -- see
+2006/2017/2026 scores (`-O2 -march=rv64gc`; not official SPEC submissions) use RTL Linux
+SimPoint in simulation and `test`-set IPC on no-L2 DDR4 FPGA -- see
 [Performance Evaluation](./docs/performance.md) for details.
 
 ### PPA
@@ -459,4 +459,4 @@ See [Linux Kernel](./docs/linux_kernel.md)
 - [Specifications - RISC-V International](https://riscv.org/technical/specifications/)
 - [riscv/riscv-isa-manual: RISC-V Instruction Set Manual](https://github.com/riscv/riscv-isa-manual)
 - [riscv-software-src/riscv-unified-db: Machine-readable database of the RISC-V specification, and tools to generate various views](https://github.com/riscv-software-src/riscv-unified-db)
-- ["一生一芯"](https://rapt.oscc.cc/)
+- ["一生一芯"](https://ysyx.oscc.cc/)

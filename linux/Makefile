@@ -314,26 +314,60 @@ run-rv32-sim run-rv64-sim: ## Build and boot on RTL sim using existing GC config
 run-rv32-nemu run-rv64-nemu: ## Build and boot on NEMU using existing GC configuration targets
 	$(MAKE) -C $(RAPTOR_HOME) linux-boot-nemu$(_linux_bits)gc LINUX_RV$(_linux_bits)GC_PAYLOAD="$(LINUX_OUTPUT)/fw_payload.bin"
 
-DISTRO_BOOT ?= debian
 DISTRO_HARTS ?= 1
+DISTRO_BOOT ?= $(if $(filter 1,$(DISTRO_HARTS)),debian,alpine)
 DISTRO_NEMU_BACKEND ?= rr
 DISTRO_NEMU_CLOCK_DIV ?= 16
-DISTRO_WORK ?= $(LINUX_BUILD_DIR)/distro-boot$(if $(filter 1,$(DISTRO_HARTS)),,-smp$(DISTRO_HARTS))$(if $(filter threaded,$(DISTRO_NEMU_BACKEND)),-threaded,)
-DISTRO_KERNEL ?= $(LINUX_BUILD_DIR)/raptor/$(LINUX_BUILD_VERSION)/rv64-debian-fpga
+_distro_smp_tag = $(if $(filter 1,$(DISTRO_HARTS)),,-smp$(DISTRO_HARTS))
+_distro_thr_tag = $(if $(filter threaded,$(DISTRO_NEMU_BACKEND)),-threaded,)
+DISTRO_WORK ?= $(LINUX_BUILD_DIR)/distro-boot$(_distro_smp_tag)$(_distro_thr_tag)
+DISTRO_KERNEL ?=
+_distro_kernel_arg = $(if $(strip $(DISTRO_KERNEL)),--kernel-artifacts "$(DISTRO_KERNEL)",)
 DISTRO_ENGINE ?= nemu
+DISTRO_SIM_PRESET ?= auto
+DISTRO_SIM_MILESTONE ?= Run /sbin/init as init process
 DISTRO_TIMEOUT ?= 3600
-.PHONY: nemu-distro-download nemu-distro-prepare nemu-distro-check nemu-distro-run
-nemu-distro-download: ## Download/check pinned official Debian or Ubuntu riscv64 image (DISTRO_BOOT=debian/ubuntu)
+SMP_HARTS ?= 2
+.PHONY: nemu-distro-download nemu-distro-prepare nemu-distro-check nemu-distro-run \
+	distro-download distro-prepare distro-check distro-run \
+	sim-distro-smoke sim-distro-check sim-distro-run \
+	smp-prepare smp-check smp-run sim-smp-smoke sim-smp-check sim-smp-run
+nemu-distro-download: ## Download/check pinned Debian, Alpine, or Ubuntu image
 	$(LINUX_PYTHON) $(LINUX_HOME)/distro_boot.py download --distro $(DISTRO_BOOT)
-nemu-distro-prepare: ## Prepare official systemd root disk, firmware and private NEMU build
+nemu-distro-prepare: ## Prepare official root disk, firmware, and private NEMU build
 	$(LINUX_PYTHON) $(LINUX_HOME)/distro_boot.py prepare --distro $(DISTRO_BOOT) \
-		--work "$(DISTRO_WORK)" --kernel-artifacts "$(DISTRO_KERNEL)" --harts $(DISTRO_HARTS) \
+		--work "$(DISTRO_WORK)" $(_distro_kernel_arg) --harts $(DISTRO_HARTS) \
 		--nemu-backend $(DISTRO_NEMU_BACKEND) --nemu-clock-div $(DISTRO_NEMU_CLOCK_DIV)
-nemu-distro-check: ## Verify systemd multi-user boot on NEMU (DISTRO_ENGINE=qemu for a control run)
+nemu-distro-check: ## Verify multi-user boot on NEMU, RTL sim, or QEMU (DISTRO_ENGINE=nemu/sim/qemu)
 	$(LINUX_PYTHON) $(LINUX_HOME)/distro_boot.py check --distro $(DISTRO_BOOT) \
-		--work "$(DISTRO_WORK)" --engine $(DISTRO_ENGINE) --timeout $(DISTRO_TIMEOUT) \
-		--nemu-backend $(DISTRO_NEMU_BACKEND) --nemu-clock-div $(DISTRO_NEMU_CLOCK_DIV)
-nemu-distro-run: ## Interactive official distro serial console; disables automatic acceptance shutdown
+		--work "$(DISTRO_WORK)" --engine $(DISTRO_ENGINE) --sim-preset $(DISTRO_SIM_PRESET) \
+		--timeout $(DISTRO_TIMEOUT) --nemu-backend $(DISTRO_NEMU_BACKEND) \
+		--nemu-clock-div $(DISTRO_NEMU_CLOCK_DIV)
+nemu-distro-run: ## Interactive official distro serial console on NEMU, RTL sim, or QEMU
 	$(LINUX_PYTHON) $(LINUX_HOME)/distro_boot.py run --distro $(DISTRO_BOOT) \
-		--work "$(DISTRO_WORK)" --engine $(DISTRO_ENGINE) \
+		--work "$(DISTRO_WORK)" --engine $(DISTRO_ENGINE) --sim-preset $(DISTRO_SIM_PRESET) \
 		--nemu-backend $(DISTRO_NEMU_BACKEND) --nemu-clock-div $(DISTRO_NEMU_CLOCK_DIV)
+distro-download: nemu-distro-download
+distro-prepare: nemu-distro-prepare
+distro-check: nemu-distro-check
+distro-run: nemu-distro-run
+sim-distro-smoke: ## Boot official Debian/Alpine/Ubuntu on RTL sim to /sbin/init rootfs handoff
+	$(LINUX_PYTHON) $(LINUX_HOME)/distro_boot.py check --distro $(DISTRO_BOOT) \
+		--work "$(DISTRO_WORK)" --engine sim --sim-preset $(DISTRO_SIM_PRESET) \
+		--sim-milestone "$(DISTRO_SIM_MILESTONE)" --timeout $(DISTRO_TIMEOUT)
+sim-distro-check: ## Verify official Debian/Alpine/Ubuntu full boot on Verilator RTL sim
+	$(MAKE) nemu-distro-check DISTRO_ENGINE=sim
+sim-distro-run: ## Interactive official Debian/Alpine/Ubuntu serial console on Verilator RTL sim
+	$(MAKE) nemu-distro-run DISTRO_ENGINE=sim
+smp-prepare: ## Prepare multi-hart Alpine Linux SMP disk, DTB, and NEMU (SMP_HARTS=2..16)
+	$(MAKE) distro-prepare DISTRO_BOOT=alpine DISTRO_HARTS=$(SMP_HARTS)
+smp-check: ## Verify multi-hart Alpine Linux SMP boot and raptor-smp-check (nemu/sim/qemu)
+	$(MAKE) distro-check DISTRO_BOOT=alpine DISTRO_HARTS=$(SMP_HARTS)
+smp-run: ## Interactive multi-hart Alpine Linux SMP console (DISTRO_ENGINE=nemu/sim/qemu)
+	$(MAKE) distro-run DISTRO_BOOT=alpine DISTRO_HARTS=$(SMP_HARTS)
+sim-smp-smoke: ## Fast multi-hart Alpine Linux SMP boot on Verilator RTL sim to OpenRC/init
+	$(MAKE) sim-distro-smoke DISTRO_BOOT=alpine DISTRO_HARTS=$(SMP_HARTS)
+sim-smp-check: ## Full multi-hart Alpine Linux SMP acceptance on Verilator RTL sim
+	$(MAKE) sim-distro-check DISTRO_BOOT=alpine DISTRO_HARTS=$(SMP_HARTS)
+sim-smp-run: ## Interactive multi-hart Alpine Linux SMP console on Verilator RTL sim
+	$(MAKE) sim-distro-run DISTRO_BOOT=alpine DISTRO_HARTS=$(SMP_HARTS)

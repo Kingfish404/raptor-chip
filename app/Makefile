@@ -438,7 +438,7 @@ LLM_VARS = LLM_OP_ITERS=$(LLM_OP_ITERS) \
            LLM_TRAIN_STEPS=$(LLM_TRAIN_STEPS) \
            RLLMBENCH_TIMEBASE_HZ=$(RLLMBENCH_TIMEBASE_HZ)
 LLM_PROFILE_TAG = ops$(LLM_OP_ITERS)-gen$(LLM_GEN_TOKENS)x$(LLM_INFER_REPEATS)-train$(LLM_TRAIN_STEPS)
-LLM_BUILD_DIR = $(APP_HOME)/build/rv$(XLEN)/benchmarks/llm/$(LLM_PROFILE_TAG)
+LLM_BUILD_DIR = $(APP_OUT_ROOT)/benchmarks/llm/$(LLM_PROFILE_TAG)
 LLM_LOG_DIR = $(LLM_BUILD_DIR)/logs/$(RLLMBENCH_BACKEND)
 LLM_REPORT_DIR = $(LLM_BUILD_DIR)/reports
 LLM_REPORT_MD = $(LLM_REPORT_DIR)/rllmbench-$(RLLMBENCH_BACKEND).md
@@ -532,7 +532,7 @@ AGENT_VARS = AGENT_TOOL_ITERS=$(AGENT_TOOL_ITERS) \
              AGENT_RAG_QUERIES=$(AGENT_RAG_QUERIES) \
              AGENT_FLOW_TURNS=$(AGENT_FLOW_TURNS) \
              RAGENTBENCH_TIMEBASE_HZ=$(RAGENTBENCH_TIMEBASE_HZ)
-AGENT_BUILD_DIR := $(APP_HOME)/build/rv$(XLEN)/benchmarks/agent
+AGENT_BUILD_DIR = $(APP_OUT_ROOT)/benchmarks/agent
 AGENT_LOG_DIR = $(AGENT_BUILD_DIR)/logs/$(RAGENTBENCH_BACKEND)
 AGENT_REPORT_DIR := $(AGENT_BUILD_DIR)/reports
 AGENT_REPORT_MD = $(AGENT_REPORT_DIR)/ragentbench-$(RAGENTBENCH_BACKEND).md
@@ -645,7 +645,7 @@ isa-tests-nemu: isa-tests-build ## Build and run all ISA tests on NEMU via pk
 # Memory subsystem tests
 # ============================================================================
 MEMORY_BUILD_SUFFIX := $(if $(strip $(MEMTEST_WORDS)),-words$(MEMTEST_WORDS),)
-MEMORY_BUILD_DIR := $(APP_HOME)/build/rv$(XLEN)/tests/memory$(MEMORY_BUILD_SUFFIX)
+MEMORY_BUILD_DIR := $(APP_OUT_ROOT)/tests/memory$(MEMORY_BUILD_SUFFIX)
 
 memory-tests-build: ## Build memory tests
 	@$(MAKE) $(Q) -C $(APP_HOME)/tests/memory build MEMTEST_WORDS="$(MEMTEST_WORDS)"
@@ -677,19 +677,26 @@ algo-tests-nemu: algo-tests-build ## Build and run all algorithm tests on NEMU v
 # ============================================================================
 SECURITY_SIM_FAST ?= 0
 SECURITY_BUILD_SUFFIX := $(if $(filter 1,$(SECURITY_SIM_FAST)),-sim-fast,)
-SECURITY_BUILD_DIR := $(APP_HOME)/build/rv$(XLEN)/tests/security$(SECURITY_BUILD_SUFFIX)
+SECURITY_BUILD_DIR := $(APP_OUT_ROOT)/security$(SECURITY_BUILD_SUFFIX)
 
 security-tests-build: ## Build security / side-channel tests
-	@$(MAKE) $(Q) -C $(APP_HOME)/tests/security build SECURITY_SIM_FAST=$(SECURITY_SIM_FAST)
+	@$(MAKE) $(Q) -C $(APP_HOME)/security build SECURITY_SIM_FAST=$(SECURITY_SIM_FAST)
 
 SECURITY_TESTS := cache-timing fence-timing bpu-collision \
-                  spectre-v1 spectre-v2 spec-store-bypass
+                  spectre-v1 spectre-v2 spectre-v3-meltdown spectre-v4 \
+                  spectre-v5 spectre-bhi spectre-bse spec-store-bypass \
+                  l2-residue tlb-residue spectre-v2-xctx \
+                  prime-probe flush-reload ghostcache
 
 security-tests-sim: security-tests-build ## Build and run all security tests on NPC/sim via pk
 	$(call _pk_run_suite_with,Security tests,npc,pk-run,$(SECURITY_BUILD_DIR),$(SECURITY_TESTS))
 
 security-tests-nemu: security-tests-build ## Build and run all security tests on NEMU via pk
 	$(call _pk_run_suite_with,Security tests,nemu,nemu-run,$(SECURITY_BUILD_DIR),$(SECURITY_TESTS))
+
+security-tests-report: security-tests-build ## Run security suite and print hardening matrix
+	@$(PYTHON) $(APP_HOME)/security/run_suite.py \
+		--build-dir "$(SECURITY_BUILD_DIR)" $(if $(filter 1,$(SC_STRICT)),--strict,)
 
 # ============================================================================
 # All tests
@@ -752,6 +759,81 @@ coremark-pro-nemu64:
 .PHONY: coremark-pro-rv32 coremark-pro-rv64 coremark-pro-nemu32 coremark-pro-nemu64
 
 # ============================================================================
+# Linux RV64 userspace build & FPGA Ubuntu rootfs installation
+# ============================================================================
+LINUX_CROSS_COMPILE ?= riscv64-linux-gnu-## RV64 glibc toolchain prefix for Linux ELFs
+LINUX_OUT_ROOT := $(APP_HOME)/build/linux-rv64
+LINUX_SUBMAKE_VARS = ISA64=1 APP_LINUX=1 CROSS_COMPILE=$(LINUX_CROSS_COMPILE)
+UBUNTU_BOARD ?= fpga/mlk-cu08-ku15p## Target FPGA board directory for Linux rootfs
+UBUNTU_ROOTFS ?= $(RAPTOR_HOME)/$(UBUNTU_BOARD)/build/ubuntu/rootfs## Ubuntu rootfs path
+DEBIAN_ROOTFS ?= $(RAPTOR_HOME)/$(UBUNTU_BOARD)/build/debian/rootfs## Debian rootfs path
+ALPINE_ROOTFS ?= $(RAPTOR_HOME)/$(UBUNTU_BOARD)/build/alpine/rootfs## Alpine rootfs path
+FPGA_TIMEBASE_HZ ?= 1000000## FPGA CLINT rdtime frequency in Hz
+FPGA_CORE_CLOCK_MHZ ?= 50## FPGA core clock in MHz for benchmark reports
+COREMARK_LINUX_ITERS ?= 3000## Official >=10s CoreMark iterations on 50 MHz FPGA
+COREMARK_QUICK_ITERS ?= 200## Quick ~1s CoreMark smoke iterations on 50 MHz FPGA
+LLM_LINUX_OP_ITERS ?= 128## FPGA Linux RLLMBench operator iterations
+LLM_LINUX_GEN_TOKENS ?= 16## FPGA Linux RLLMBench generated tokens (<=16)
+LLM_LINUX_INFER_REPEATS ?= 8## FPGA Linux RLLMBench inference outer repeats
+LLM_LINUX_TRAIN_STEPS ?= 32## FPGA Linux RLLMBench training steps
+_LLM_LINUX_GEN_TAG = gen$(LLM_LINUX_GEN_TOKENS)x$(LLM_LINUX_INFER_REPEATS)
+LLM_LINUX_PROFILE = ops$(LLM_LINUX_OP_ITERS)-$(_LLM_LINUX_GEN_TAG)-train$(LLM_LINUX_TRAIN_STEPS)
+AGENT_LINUX_TOOL_ITERS ?= 128## FPGA Linux RAgentBench tool iterations
+AGENT_LINUX_RAG_QUERIES ?= 64## FPGA Linux RAgentBench RAG queries
+AGENT_LINUX_FLOW_TURNS ?= 64## FPGA Linux RAgentBench workflow turns
+UBUNTU_BENCH_DIR := $(RAPTOR_HOME)/fpga/common/tests/ubuntu_bench
+LINUX_MEMPROBE_ELF := $(LINUX_OUT_ROOT)/memprobe/memprobe.elf
+LINUX_ARCH := rv64imafdc_zicntr_zicond_zicsr_zifencei_zcb_zba_zbb_zbc_zbs
+
+$(LINUX_MEMPROBE_ELF): $(UBUNTU_BENCH_DIR)/memory_probe.c \
+	$(UBUNTU_BENCH_DIR)/profile.c $(UBUNTU_BENCH_DIR)/profile.h
+	@mkdir -p $(dir $@)
+	$(LINUX_CROSS_COMPILE)gcc -march=$(LINUX_ARCH) -mabi=lp64d -mcmodel=medany \
+		-O2 -Wall -g -static -I$(UBUNTU_BENCH_DIR) \
+		$(UBUNTU_BENCH_DIR)/memory_probe.c $(UBUNTU_BENCH_DIR)/profile.c -o $@
+
+linux-build: $(LINUX_MEMPROBE_ELF) ## Build all user-mode suites as static RV64 Linux ELFs
+	+@$(MAKE) $(Q) -C $(APP_HOME) $(LINUX_SUBMAKE_VARS) \
+		tests-build demos-build embench-build microbench-build
+	+@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/coremark $(LINUX_SUBMAKE_VARS) \
+		COREMARK_OPTIM_CFLAGS="-DHAS_FLOAT=1" \
+		ITERATIONS=$(COREMARK_LINUX_ITERS) COREMARK_TIMEBASE_HZ=$(FPGA_TIMEBASE_HZ) build
+	+@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/coremark $(LINUX_SUBMAKE_VARS) \
+		BUILD_DIR=$(LINUX_OUT_ROOT)/coremark-quick COREMARK_OPTIM_CFLAGS="-DHAS_FLOAT=1" \
+		ITERATIONS=$(COREMARK_QUICK_ITERS) COREMARK_TIMEBASE_HZ=$(FPGA_TIMEBASE_HZ) build
+	+@$(MAKE) $(Q) -C $(CMP_HOME) $(LINUX_SUBMAKE_VARS) \
+		MODE=linux CMP_ITERATIONS=1 CMP_TIMEBASE_HZ=$(FPGA_TIMEBASE_HZ) build
+	+@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/llm $(LINUX_SUBMAKE_VARS) \
+		LLM_OP_ITERS=$(LLM_LINUX_OP_ITERS) LLM_GEN_TOKENS=$(LLM_LINUX_GEN_TOKENS) \
+		LLM_INFER_REPEATS=$(LLM_LINUX_INFER_REPEATS) LLM_TRAIN_STEPS=$(LLM_LINUX_TRAIN_STEPS) \
+		RLLMBENCH_TIMEBASE_HZ=$(FPGA_TIMEBASE_HZ) \
+		RLLMBENCH_CORE_CLOCK_MHZ=$(FPGA_CORE_CLOCK_MHZ) build
+	+@$(MAKE) $(Q) -C $(APP_HOME)/benchmarks/agent $(LINUX_SUBMAKE_VARS) \
+		AGENT_TOOL_ITERS=$(AGENT_LINUX_TOOL_ITERS) \
+		AGENT_RAG_QUERIES=$(AGENT_LINUX_RAG_QUERIES) \
+		AGENT_FLOW_TURNS=$(AGENT_LINUX_FLOW_TURNS) \
+		RAGENTBENCH_TIMEBASE_HZ=$(FPGA_TIMEBASE_HZ) \
+		RAGENTBENCH_CORE_CLOCK_MHZ=$(FPGA_CORE_CLOCK_MHZ) build
+
+fpga-ubuntu-install: linux-build ## Build and install RV64 Linux app/ suites into UBUNTU_ROOTFS
+	@$(PYTHON) $(APP_HOME)/lib/install_distro_apps.py \
+		--build-root "$(LINUX_OUT_ROOT)" \
+		--rootfs "$(UBUNTU_ROOTFS)" \
+		--llm-profile "$(LLM_LINUX_PROFILE)"
+
+fpga-debian-install: linux-build ## Build and install RV64 Linux app/ suites into DEBIAN_ROOTFS
+	@$(PYTHON) $(APP_HOME)/lib/install_distro_apps.py \
+		--build-root "$(LINUX_OUT_ROOT)" \
+		--rootfs "$(DEBIAN_ROOTFS)" \
+		--llm-profile "$(LLM_LINUX_PROFILE)"
+
+fpga-alpine-install: linux-build ## Build and install RV64 Linux app/ suites into ALPINE_ROOTFS
+	@$(PYTHON) $(APP_HOME)/lib/install_distro_apps.py \
+		--build-root "$(LINUX_OUT_ROOT)" \
+		--rootfs "$(ALPINE_ROOTFS)" \
+		--llm-profile "$(LLM_LINUX_PROFILE)"
+
+# ============================================================================
 # Clean
 # ============================================================================
 clean: ## Clean all build artifacts
@@ -776,6 +858,8 @@ clean: ## Clean all build artifacts
 		memory-tests-build memory-tests-sim memory-tests-nemu \
 		algo-tests-build algo-tests-sim algo-tests-nemu \
 		security-tests-build security-tests-sim security-tests-nemu \
+		security-tests-report \
 		tests-build tests-sim tests-nemu \
 		demos-build demos-sim demos-nemu \
+		linux-build fpga-ubuntu-install fpga-debian-install fpga-alpine-install \
         all clean

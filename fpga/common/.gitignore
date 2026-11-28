@@ -11,6 +11,6 @@
 # Versioned FPGA-only RTL instrumentation, not generated run artifacts.
 !/sampling/*.patch
 !/board.mk
-!/ubuntu.mk
-!/UBUNTU.md
+!/distro.mk
+!/DISTRO.md
 __pycache__/

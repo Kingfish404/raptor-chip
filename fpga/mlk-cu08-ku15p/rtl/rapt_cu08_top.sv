@@ -157,7 +157,38 @@ module rapt_cu08_top (
   logic [31:0] peripheral_wdata, peripheral_rdata;
   logic [3:0] peripheral_wstrb;
 `ifdef NATIVE_WITH_CM005_BRIDGE
-`ifdef NATIVE_WITH_ETH_DMA
+`ifdef NATIVE_WITH_IO_SOC
+  wire [31:0] cm_cpu_rx_data, cm_cpu_tx_data;
+  wire [3:0] cm_cpu_rx_last_be, cm_cpu_tx_last_be;
+  wire cm_cpu_rx_valid, cm_cpu_rx_last, cm_cpu_rx_ready;
+  wire cm_cpu_tx_valid, cm_cpu_tx_last, cm_cpu_tx_ready;
+  wire [7:0] io_eth_rx_data, io_eth_tx_data;
+  wire io_eth_rx_valid, io_eth_rx_last, io_eth_rx_ready;
+  wire io_eth_tx_valid, io_eth_tx_last, io_eth_tx_ready;
+
+  rapt_eth_stream32_adapter cm005_io_adapt (
+      .clk,
+      .reset(reset || !ddr_ready),
+      .rx32_data(cm_cpu_rx_data),
+      .rx32_last_be(cm_cpu_rx_last_be),
+      .rx32_valid(cm_cpu_rx_valid),
+      .rx32_last(cm_cpu_rx_last),
+      .rx32_ready(cm_cpu_rx_ready),
+      .rx8_data(io_eth_rx_data),
+      .rx8_valid(io_eth_rx_valid),
+      .rx8_last(io_eth_rx_last),
+      .rx8_ready(io_eth_rx_ready),
+      .tx8_data(io_eth_tx_data),
+      .tx8_valid(io_eth_tx_valid),
+      .tx8_last(io_eth_tx_last),
+      .tx8_ready(io_eth_tx_ready),
+      .tx32_data(cm_cpu_tx_data),
+      .tx32_last_be(cm_cpu_tx_last_be),
+      .tx32_valid(cm_cpu_tx_valid),
+      .tx32_last(cm_cpu_tx_last),
+      .tx32_ready(cm_cpu_tx_ready)
+  );
+`elsif NATIVE_WITH_ETH_DMA
   axi4_if soc_ddr ();
   axi4_if eth_dma ();
   wire eth_ext_wr_valid;
@@ -283,7 +314,26 @@ module rapt_cu08_top (
       .cpu_resetn,
       .native_clk(clk),
       .native_reset(reset),
-`ifdef NATIVE_WITH_ETH_DMA
+`ifdef NATIVE_WITH_IO_SOC
+      .native_rd(peripheral_rd),
+      .native_wr(peripheral_wr),
+      .native_raddr(peripheral_raddr),
+      .native_waddr(peripheral_waddr),
+      .native_wdata(peripheral_wdata),
+      .native_wstrb(peripheral_wstrb),
+      .native_rdata(peripheral_rdata),
+      .native_irq(peripheral_irq),
+      .cpu_rx_data(cm_cpu_rx_data),
+      .cpu_rx_last_be(cm_cpu_rx_last_be),
+      .cpu_rx_valid(cm_cpu_rx_valid),
+      .cpu_rx_last(cm_cpu_rx_last),
+      .cpu_rx_ready(cm_cpu_rx_ready),
+      .cpu_tx_data(cm_cpu_tx_data),
+      .cpu_tx_last_be(cm_cpu_tx_last_be),
+      .cpu_tx_valid(cm_cpu_tx_valid),
+      .cpu_tx_last(cm_cpu_tx_last),
+      .cpu_tx_ready(cm_cpu_tx_ready),
+`elsif NATIVE_WITH_ETH_DMA
       .native_rd(peripheral_rd && (peripheral_raddr[15:12] == 4'h0)),
       .native_wr(peripheral_wr && (peripheral_waddr[15:12] == 4'h0)),
       .native_raddr(peripheral_raddr),
@@ -334,6 +384,55 @@ module rapt_cu08_top (
   assign peripheral_rdata = '0;
   assign peripheral_irq = 1'b0;
 `endif
+`ifdef NATIVE_WITH_IO_SOC
+  rapt_native_io_soc #(
+      .WithDdr(`NATIVE_DDR),
+      .WithPeripheral(`NATIVE_CM005_BRIDGE),
+      .WithLocalVirtioNet(`NATIVE_LOCAL_VIRTIO_NET),
+      .WithQemuBridge(`NATIVE_QEMU_BRIDGE),
+      .CoherentDma(1'b1),
+      .RqioUdpMode(1'b1),
+      .FilterUnicast(1'b1),
+      .LocalMac(48'h0115_5041_5202),
+      .BridgeMac(48'h0215_5041_5202),
+      .BridgeIp(32'hc0a8_325d),
+      .HostIp(32'hc0a8_3201),
+      .RamBytes(`NATIVE_RAM_BYTES),
+      .ClockHz(ClockHz),
+      .RomFile(`NATIVE_ROM_FILE)
+  ) soc (
+      .clk(clk),
+      .reset(reset || !ddr_ready),
+      .uart_rx(serial_rx),
+      .uart_tx(serial_tx),
+      .writeback_error(writeback_error),
+      .peripheral_rd(peripheral_rd),
+      .peripheral_wr(peripheral_wr),
+      .peripheral_raddr(peripheral_raddr),
+      .peripheral_waddr(peripheral_waddr),
+      .peripheral_wdata(peripheral_wdata),
+      .peripheral_wstrb(peripheral_wstrb),
+      .peripheral_rdata(peripheral_rdata),
+      .peripheral_irq(peripheral_irq),
+      .eth_link_up_i(locked),
+      .eth_rx_data_i(io_eth_rx_data),
+      .eth_rx_valid_i(io_eth_rx_valid),
+      .eth_rx_last_i(io_eth_rx_last),
+      .eth_rx_ready_o(io_eth_rx_ready),
+      .eth_tx_data_o(io_eth_tx_data),
+      .eth_tx_valid_o(io_eth_tx_valid),
+      .eth_tx_last_o(io_eth_tx_last),
+      .eth_tx_ready_i(io_eth_tx_ready),
+      .bridge_use_slip_i(1'b0),
+      .slip_rx_data_i(8'h00),
+      .slip_rx_valid_i(1'b0),
+      .slip_rx_ready_o(),
+      .slip_tx_data_o(),
+      .slip_tx_valid_o(),
+      .slip_tx_ready_i(1'b1),
+      .ddr(ddr)
+  );
+`else
   rapt_native_soc #(
       .WithDdr(`NATIVE_DDR),
       .WithPeripheral(`NATIVE_CM005_BRIDGE),
@@ -366,6 +465,7 @@ module rapt_cu08_top (
       .ddr
 `endif
   );
+`endif
   logic [25:0] heartbeat = 0;
   always_ff @(posedge clk) begin
     if (reset) heartbeat <= 0;

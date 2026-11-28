@@ -50,14 +50,17 @@ build, then requires exactly one matching FPGA on JTAG unless `HW_TARGET`
 selects one. Programming is volatile; it does not write configuration flash or
 automatically rebuild stale outputs.
 
-## Ubuntu 26.10 (RVA23) NFS root
+## Ubuntu 26.10, Debian 13, and Alpine 3.24
 
-The shared [Ubuntu workflow](../common/UBUNTU.md) provides kernel/rootfs
-preparation, TFTP or UART loading, NFS boot and CoreMark/Embench tools. Board
-`ubuntu-*` targets default to RV64 `default` (RVA23U64/RVA23S64), 50 MHz (with
-`CLOCK_MHZ=75` also timing-closed for `default`), DDR4 and onboard
-Ethernet. The controller's [register ABI](ETHERNET.md) and physical interface
-are board-specific; the Linux driver is under
+The shared [Linux distribution workflow](../common/DISTRO.md) provides kernel/rootfs
+preparation, TFTP or UART loading, NFS or DDR4 `squashfs`/`ramroot` boot, and static RV64
+`app/` benchmark installation (`*-apps`). Board `ubuntu-*`, `debian-*`, and `alpine-*`
+targets default to RV64 `default`, 50 MHz (with `CLOCK_MHZ=75` also timing-closed for
+`default`), DDR4, and onboard Ethernet (`debian-*` and `alpine-*` also support non-vector
+RV64 presets such as `RAPT_CONFIG=small`). Pass `UBUNTU_HTTP_PROXY=http://192.168.50.1:7890`
+at `*-boot` time to propagate HTTP/HTTPS proxy settings automatically to `apk`, `apt`,
+and SSH sessions. The controller's [register ABI](ETHERNET.md)
+and physical interface are board-specific; the Linux driver is under
 [`fpga/common/linux`](../common/linux/).
 
 For physical Ethernet checks, use `scripts/ethernet_synth.tcl` and

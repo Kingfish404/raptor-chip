@@ -43,7 +43,7 @@ NATIVE_BUILD = $(PYTHON) $(COMMON_DIR)/scripts/native_build.py --board '$(BOARD_
 
 help: ## Show targets and variables
 	@awk -f $(COMMON_DIR)/scripts/make_help.awk \
-		$(COMMON_DIR)/board.mk $(COMMON_DIR)/ubuntu.mk $(BOARD_MAKEFILE)
+		$(COMMON_DIR)/board.mk $(COMMON_DIR)/distro.mk $(BOARD_MAKEFILE)
 
 # ============================================================================
 # SoC (build steps regenerate their sources first)

@@ -11,7 +11,7 @@ include $(APP_HOME)/common.mk
 
 # ---- Directories ----
 EMBENCH_DIR := $(APP_HOME)/build/src/embench-iot
-BUILD_DIR   := $(APP_HOME)/build/rv$(XLEN)/embench
+BUILD_DIR   := $(APP_OUT_ROOT)/embench
 BARE_BUILD_DIR := $(APP_HOME)/build/rv$(XLEN)/embench-baremetal
 CONFIG_STAMP := $(BUILD_DIR)/.build-config
 BARE_CONFIG_STAMP := $(BARE_BUILD_DIR)/.build-config

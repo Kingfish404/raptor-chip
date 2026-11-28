@@ -1,0 +1,7 @@
+# FreeBSD downloaded upstream images and FPGA/QEMU working directories.
+build/
+*.xz
+*.raw
+*.img
+*.log
+*.elf

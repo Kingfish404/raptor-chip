@@ -10,18 +10,26 @@ include $(RAPTOR_HOME)/verification/benchmark-options.mk
 
 # ---- Toolchain auto-detection ----
 # app/ needs a libc-capable toolchain (newlib or glibc), NOT bare-metal riscv64-elf-.
-# Always auto-detect; ignore inherited CROSS_COMPILE if it's bare-metal.
+# Set APP_LINUX=1 (or CROSS_COMPILE=riscv64-linux-gnu-) for Linux userspace ELFs.
+APP_LINUX ?= $(if $(findstring linux-gnu,$(CROSS_COMPILE)),1,0)
 _NEED_DETECT := 0
 ifeq ($(origin CROSS_COMPILE),undefined)
   _NEED_DETECT := 1
 else ifeq ($(CROSS_COMPILE),riscv64-elf-)
   _NEED_DETECT := 1
+else ifeq ($(APP_LINUX),1)
+  ifeq ($(findstring linux,$(CROSS_COMPILE)),)
+    _NEED_DETECT := 1
+  endif
 endif
 ifeq ($(_NEED_DETECT),1)
-  ifneq ($(shell which riscv64-unknown-elf-gcc 2>/dev/null),)
+  ifeq ($(APP_LINUX),1)
+    CROSS_COMPILE := riscv64-linux-gnu-
+  else ifneq ($(shell which riscv64-unknown-elf-gcc 2>/dev/null),)
     CROSS_COMPILE := riscv64-unknown-elf-
   else ifneq ($(shell which riscv64-linux-gnu-gcc 2>/dev/null),)
     CROSS_COMPILE := riscv64-linux-gnu-
+    APP_LINUX := 1
   else
     $(warning No RISC-V toolchain with libc found. Run: make -C app setup)
     CROSS_COMPILE := riscv64-unknown-elf-
@@ -35,11 +43,14 @@ SIZE    := $(CROSS_COMPILE)size
 # Use picolibc for headers/libc but NOT its bare-metal crt0 (pk_io.c provides
 # a pk-compatible _start instead).  -T pk-user.ld suppresses picolibc.ld
 # (which places code at 0x80000000, conflicting with pk's memory).
+# Linux userspace builds (APP_LINUX=1) link directly against glibc instead.
 _PICOLIBC_SPECS :=
 _PICOLIBC_IO    :=
+ifeq ($(APP_LINUX),0)
 ifeq ($(shell uname),Linux)
   _PICOLIBC_SPECS := --specs=picolibc.specs -nostartfiles -T$(APP_HOME)/lib/pk-user.ld
   _PICOLIBC_IO    := $(APP_HOME)/lib/pk_io.c
+endif
 endif
 
 # ---- Architecture ----
@@ -58,13 +69,18 @@ else
   VFLAGS :=
 endif
 
-# Benchmarks that exercise hardware floating point opt in before including this
-# file. Keep the other applications' existing integer ABI unchanged.
+# Benchmarks that exercise hardware floating point (and glibc lp64d Linux builds)
+# opt in before or here. Keep pk integer applications' existing ABI unchanged.
+ifeq ($(APP_LINUX),1)
+  APP_ENABLE_FP := 1
+endif
 APP_ENABLE_FP ?= 0
 ifeq ($(APP_ENABLE_FP),1)
   ARCH := $(PK_ARCH)
   ABI := $(if $(filter 64,$(XLEN)),lp64d,ilp32d)
 endif
+
+APP_OUT_ROOT ?= $(APP_HOME)/build/$(if $(filter 1,$(APP_LINUX)),linux-rv$(XLEN),rv$(XLEN))
 
 # ---- Build helpers ----
 Q     := --no-print-directory
@@ -90,13 +106,13 @@ endif
 ifneq ($(strip $(APP_SUITE)),)
 .DEFAULT_GOAL := build
 APP_SOURCE_DIR := $(APP_HOME)/$(APP_SUITE)
-BUILD_DIR := $(APP_HOME)/build/rv$(XLEN)/$(APP_SUITE)$(APP_BUILD_SUFFIX)
+BUILD_DIR := $(APP_OUT_ROOT)/$(APP_SUITE)$(APP_BUILD_SUFFIX)
 CFLAGS := $(CFLAGS_COMMON) $(APP_EXTRA_CFLAGS)
 SRCS := $(wildcard $(APP_SOURCE_DIR)/*.c)
 ELFS := $(patsubst $(APP_SOURCE_DIR)/%.c,$(BUILD_DIR)/%.elf,$(SRCS))
 $(BUILD_DIR)/.build-args: APP_BUILD_COMMAND = $(CC) $(CFLAGS)
 $(ELFS): $(BUILD_DIR)/.build-args $(wildcard $(APP_SOURCE_DIR)/*.h) \
-	$(APP_HOME)/lib/raptor_platform.h $(APP_HOME)/lib/pk-user.ld
+	$(APP_HOME)/lib/raptor_platform.h $(if $(_PICOLIBC_SPECS),$(APP_HOME)/lib/pk-user.ld,)
 $(BUILD_DIR)/%.elf: $(APP_SOURCE_DIR)/%.c $(_PICOLIBC_IO)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $< $(_PICOLIBC_IO) -o $@

@@ -24,6 +24,7 @@ from raptor_qemu_bridge import (
     PROTO_VER,
     QemuQtestBackend,
     RAM_BASE,
+    UdpTransport,
     UnixStreamTransport,
     VirtioRngMmio,
     serve_session,
@@ -449,6 +450,73 @@ class TestQemuIoBridge(unittest.TestCase):
                 fpga.tp.close()
                 s_host.close()
                 backend.close()
+
+    def test_udp_transport_blk_qsel_mmap_snapshot_and_dedup(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            disk_file = Path(td) / "test.raw"
+            disk_file.write_bytes(b"\x11" * (64 * 1024))
+
+            # 1. Snapshot mode leaves underlying file untouched on write
+            snap_be = BuiltinBackend(disk_path=disk_file, snapshot=True)
+            try:
+                snap_be.disk[0:4] = b"SNAP"
+                self.assertEqual(bytes(snap_be.disk[0:4]), b"SNAP")
+            finally:
+                snap_be.close()
+            self.assertEqual(disk_file.read_bytes()[0:4], b"\x11\x11\x11\x11")
+
+            # 2. Persistent mmap mode flushes changes to disk_file
+            rw_be = BuiltinBackend(disk_path=disk_file, snapshot=False)
+            fpga_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            fpga_sock.bind(("127.0.0.1", 0))
+            fpga_port = fpga_sock.getsockname()[1]
+
+            host_tp = UdpTransport("127.0.0.1", 0, "127.0.0.1", fpga_port)
+            host_port = host_tp.sock.getsockname()[1]
+
+            t = threading.Thread(
+                target=serve_session, args=(host_tp, rw_be), daemon=True
+            )
+            t.start()
+            try:
+                fpga_sock.settimeout(2.0)
+                # Drain initial HELLO_PKT
+                hello, _ = fpga_sock.recvfrom(2048)
+                self.assertEqual(hello[:4], b"RQ\x01\x00")
+
+                def udp_mmio(seq: int, addr: int, size: int, is_w: bool, wdata: int = 0) -> int:
+                    lane_off = addr & 7
+                    nbytes = 1 << size
+                    op = (size << 1) | (1 if is_w else 0)
+                    wstrb = (((1 << nbytes) - 1) << lane_off) if is_w else 0
+                    shifted = (wdata << (lane_off * 8)) & 0xFFFF_FFFF_FFFF_FFFF
+                    req = struct.pack(
+                        "<2sBBHBB I Q", MAGIC, PROTO_VER, MSG_MMIO_REQ,
+                        seq, op, wstrb, addr, shifted
+                    )
+                    fpga_sock.sendto(req, ("127.0.0.1", host_port))
+                    while True:
+                        pkt, _ = fpga_sock.recvfrom(2048)
+                        if len(pkt) >= 20 and pkt[3] == MSG_MMIO_RESP:
+                            _, _, _, rseq, st, _, _, rdata = struct.unpack("<2sBBHBB I Q", pkt[:20])
+                            if rseq == seq:
+                                self.assertEqual(st, 0)
+                                return (rdata >> (lane_off * 8)) & ((1 << (nbytes * 8)) - 1)
+
+                # VirtIO-Blk queue_sel=0 -> QueueNumMax=256, queue_sel=1 -> 0
+                udp_mmio(10, 0x1000_1030, 2, True, 0)
+                self.assertEqual(udp_mmio(11, 0x1000_1034, 2, False), 256)
+                udp_mmio(12, 0x1000_1030, 2, True, 1)
+                self.assertEqual(udp_mmio(13, 0x1000_1034, 2, False), 0)
+
+                # Retransmitting identical seq=13 returns cached response cleanly
+                self.assertEqual(udp_mmio(13, 0x1000_1034, 2, False), 0)
+                rw_be.disk[0:4] = b"PERS"
+            finally:
+                fpga_sock.close()
+                host_tp.close()
+                rw_be.close()
+            self.assertEqual(disk_file.read_bytes()[0:4], b"PERS")
 
 
 if __name__ == "__main__":

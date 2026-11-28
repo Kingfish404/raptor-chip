@@ -9,21 +9,25 @@ This directory provides the Linux build entry points for Raptor. The base kernel
 
 This release does not provide RV32 Alpine/Debian packages; the build entry points reject those combinations. The workflow reuses distribution root filesystems and rebuilds the kernel and firmware for Raptor; it does not rebuild Alpine/Debian package repositories in this project. Userspace uses BusyBox init; services that require systemd/OpenRC need separate integration.
 
-## Official Debian / Ubuntu on NEMU (systemd)
+## Official Debian / Alpine / Ubuntu on NEMU and RTL `sim`
 
-`distro_boot.py` provides a separate full-distribution path: official Debian 13
-nocloud and Ubuntu 24.04 LTS riscv64 userspace, with the distribution's own
-`/sbin/init` and systemd. It does not use the BusyBox-init conversion described
-above. Ubuntu 24.04 is selected for the RV64GC baseline; this is not support for
-Ubuntu 25.10+ and its RVA23 baseline.
+`distro_boot.py` provides a full-distribution path: official Debian 13 `Trixie`
+(`RV64GC`), Alpine Linux 3.24 (`RV64GC`, `musl` + `OpenRC`), and Ubuntu 26.10 /
+Ubuntu 26.04 LTS riscv64 userspace (`RVA23`), running each distribution's own
+`/sbin/init` (`systemd` or `OpenRC`) on NEMU (`DISTRO_ENGINE=nemu`), the Verilator
+RTL simulator (`DISTRO_ENGINE=sim` / `sim-distro-check`), or QEMU (`DISTRO_ENGINE=qemu`).
+For RVA23 UEFI U-Boot cloud-image inspection, configuration, and bundling
+(`linux/dts/raptor-rva23-uefi.dts`), see `linux/uboot_efi.py`.
 
-Pinned sources are Debian build `20261001-2618` (SHA512) and Ubuntu build
-`20260926` (SHA256), obtained from the official HTTPS image sites. Their source
-URLs and checksums are in `distro_boot.py`. The platform uses an upstream Linux
-kernel built by this repository, not the cloud image's distribution kernel or
-its modules. The initially validated kernel artifact is Linux 6.18.51 with
-VirtIO block/network, ext4, devtmpfs, RV64 floating point and systemd prerequisites
-built in. The artifact manifest is checked before use.
+Pinned sources are Debian 13 build `20261123-2671` (SHA512, `DISTRO_BOOT=debian`),
+Alpine Linux `3.24.4` build `20261105` (SHA256, `DISTRO_BOOT=alpine`), Ubuntu 26.10
+build `20261105` (SHA256, `DISTRO_BOOT=ubuntu`), and Ubuntu 26.04 LTS build `20261108`
+(SHA256, `DISTRO_BOOT=ubuntu-lts`), obtained from the official HTTPS image sites.
+Their source URLs and checksums are in `distro_boot.py`. The platform uses an
+upstream Linux kernel built by this repository, not the cloud image's
+distribution kernel or its modules. The initially validated kernel artifact is
+Linux 6.18.51 with VirtIO block/network, ext4, devtmpfs, RV64 floating point/vector
+and systemd prerequisites built in. The artifact manifest is checked before use.
 
 The prepared environment uses 1 GiB RAM, NS16550 UART, CLINT/PLIC, VirtIO
 block/network/RNG, and a syscon poweroff mapping to NEMU's finisher. OpenSBI is
@@ -51,13 +55,19 @@ With the existing kernel artifacts, run from the repository root:
 ```sh
 make -C linux nemu-distro-prepare DISTRO_BOOT=debian
 make -C linux nemu-distro-check DISTRO_BOOT=debian
+make -C linux nemu-distro-prepare DISTRO_BOOT=alpine
+make -C linux nemu-distro-check DISTRO_BOOT=alpine
+make -C linux sim-distro-smoke DISTRO_BOOT=alpine DISTRO_SIM_MILESTONE="OpenRC "
+make -C linux sim-distro-run   DISTRO_BOOT=alpine
 make -C linux nemu-distro-prepare DISTRO_BOOT=ubuntu
 make -C linux nemu-distro-check DISTRO_BOOT=ubuntu
 
 # Independent control run, using the same kernel and rootfs without changing it:
+make -C linux distro-smoke DISTRO_BOOT=alpine
 make -C linux nemu-distro-check DISTRO_BOOT=debian DISTRO_ENGINE=qemu
 
 # Interactive serial root console, without the acceptance timer's shutdown:
+make -C linux nemu-distro-run DISTRO_BOOT=alpine
 make -C linux nemu-distro-run DISTRO_BOOT=debian
 make -C linux nemu-distro-run DISTRO_BOOT=ubuntu
 ```
@@ -108,30 +118,48 @@ and their manifests remain volatile; persistent storage has a separate
 
 ## Building and validation
 
-### NEMU multi-hart distribution boot
+### Multi-hart SMP distribution boot (Alpine Linux default)
 
-Set `DISTRO_HARTS=2` or `4` when preparing and running a distribution. The default
-is still one hart. Each count uses a separate directory:
-`build/distro-boot-smp2/<distro>` or `build/distro-boot-smp4/<distro>`; existing
-single-hart artifacts are not rewritten.
+Set `DISTRO_HARTS=2` or `4` (or use `smp-prepare`, `smp-check`, `sim-smp-smoke`,
+and `sim-smp-check`) when preparing and running a multi-hart system. Multi-hart
+runs default to **Alpine Linux 3.24** (`DISTRO_BOOT=alpine`, `musl` + `OpenRC` +
+`BusyBox` on a compact 256 MiB ext4 root disk), which avoids heavy `systemd`
+coldplug overhead and boots on both scalar RV64GC SMP presets (`small-smp2`,
+`middle-smp2`, `middle-smp4`) and RVA23 SMP presets (`default-smp2`,
+`default-l2-smp2`, `default-w3-smp2`, `default-w4-l2-smp2`). Override
+`DISTRO_BOOT=debian` or `DISTRO_BOOT=ubuntu` when testing glibc/`systemd` SMP.
+Each hart count uses a separate directory (`build/distro-boot-smp2/<distro>` or
+`build/distro-boot-smp4/<distro>`); single-hart artifacts are not rewritten.
 
 ```sh
-make -C linux nemu-distro-prepare DISTRO_BOOT=debian DISTRO_HARTS=2
-make -C linux nemu-distro-check DISTRO_BOOT=debian DISTRO_HARTS=2
-make -C linux nemu-distro-prepare DISTRO_BOOT=debian DISTRO_HARTS=4
-make -C linux nemu-distro-check DISTRO_BOOT=debian DISTRO_HARTS=4
-make -C linux nemu-distro-run DISTRO_BOOT=debian DISTRO_HARTS=4
+# 2-hart and 4-hart Alpine Linux SMP on NEMU:
+make -C linux smp-prepare SMP_HARTS=2
+make -C linux smp-check SMP_HARTS=2
+make -C linux smp-prepare SMP_HARTS=4
+make -C linux smp-check SMP_HARTS=4
+make -C linux smp-run SMP_HARTS=4
+
+# Multi-hart Alpine Linux SMP on Verilator RTL sim (auto-selects default-smp2 / middle-smp4,
+# or pass DISTRO_SIM_PRESET=small-smp2 for fastest scalar RTL regression):
+make -C linux sim-smp-smoke SMP_HARTS=2 DISTRO_SIM_PRESET=small-smp2
+make -C linux sim-smp-check SMP_HARTS=2 DISTRO_SIM_PRESET=small-smp2
+make -C linux sim-smp-smoke SMP_HARTS=2 DISTRO_SIM_PRESET=default-smp2
+make -C linux sim-smp-smoke SMP_HARTS=4 DISTRO_SIM_PRESET=middle-smp4
 ```
 
 The manifest records the hart count, and `check`/`run` use that recorded value
-for both NEMU and the optional `DISTRO_ENGINE=qemu` control. Preparation checks
-the kernel's SMP/CPU capacity, builds NEMU with both runtime-selectable backends, and generates
-matching CPU, CLINT and PLIC DTB topology. The guest acceptance program checks
-the exact online CPU count, pins a pthread to each CPU, and exercises shared AMO
-and LR/SC counters plus independent floating-point state. A boot is accepted
-only after `RAPTOR_SMP_PASS harts=N ...`, the existing distribution checks, and
-clean poweroff. The default `DISTRO_NEMU_BACKEND=rr` uses one host thread.
-Select `DISTRO_NEMU_BACKEND=threaded` for one pthread per hart:
+across NEMU, Verilator RTL `sim`, and the optional `DISTRO_ENGINE=qemu` control.
+Preparation checks the kernel's SMP/CPU capacity, builds NEMU with both
+runtime-selectable backends, and generates matching CPU, CLINT, and PLIC DTB
+topology. On Verilator RTL `sim`, `distro_boot.py` verifies that `--sim-preset`
+matches the manifest's `RAPT_NHARTS` and selects `raptor-rv64gc-io.dts` for
+scalar RV64GC presets or `raptor-rva23-io.dts` for RVA23 presets. The guest
+acceptance program checks the exact online CPU count, pins a pthread to each CPU,
+and exercises shared AMO and LR/SC counters plus independent floating-point
+state. A full boot is accepted only after `RAPTOR_SMP_PASS harts=N ...`, the
+distribution checks, and clean poweroff. The default `DISTRO_NEMU_BACKEND=rr`
+uses one host thread. Select `DISTRO_NEMU_BACKEND=threaded` for one pthread per
+hart:
 
 ```sh
 make -C linux nemu-distro-prepare DISTRO_HARTS=4 DISTRO_NEMU_BACKEND=threaded
@@ -139,26 +167,24 @@ make -C linux nemu-distro-check DISTRO_HARTS=4 DISTRO_NEMU_BACKEND=threaded
 make -C linux nemu-distro-run DISTRO_HARTS=4 DISTRO_NEMU_BACKEND=threaded
 ```
 
-The default threaded directory is `build/distro-boot-smp4-threaded/debian`.
-Use `DISTRO_HARTS=2` for two harts or `DISTRO_BOOT=ubuntu` for Ubuntu.
+The default threaded directory is `build/distro-boot-smp4-threaded/alpine`.
+Use `DISTRO_HARTS=2` for two harts, or pass `DISTRO_BOOT=debian` /
+`DISTRO_BOOT=ubuntu` to run other distributions.
 `DISTRO_NEMU_CLOCK_DIV=16` controls guest time relative to monotonic host time;
 the default slows guest time by 16 to accommodate interpreter throughput.
 Backend and clock selection are runtime options, recorded in boot receipts.
 To switch an already prepared, current NEMU image without rebuilding, supply
 its existing `DISTRO_WORK` explicitly and select the other backend. The CPU
 count remains tied to its prepared DTB and guest acceptance configuration.
-This is functional emulation, not an FPGA multicore result or timing model.
 CPU hotplug is outside this validation scope. Store run logs, timings and
 investigation notes in ignored build directories rather than this guide.
 
-To validate the prepared default directories:
+To validate the prepared multi-hart Alpine directories (plus optional Debian/Ubuntu):
 
 ```sh
-for distro in debian ubuntu; do
-  for harts in 2 4; do
-    make -C linux nemu-distro-check DISTRO_BOOT="$distro" DISTRO_HARTS="$harts" \
-      DISTRO_NEMU_BACKEND=threaded DISTRO_NEMU_CLOCK_DIV=16 DISTRO_TIMEOUT=3600 || exit
-  done
+for harts in 2 4; do
+  make -C linux smp-check SMP_HARTS="$harts" \
+    DISTRO_NEMU_BACKEND=threaded DISTRO_NEMU_CLOCK_DIV=16 DISTRO_TIMEOUT=3600 || exit
 done
 ```
 

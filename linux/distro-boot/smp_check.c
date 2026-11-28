@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-enum { Iterations = 2000, MaxHarts = 4 };
+enum { Iterations = 2000, MaxHarts = 16 };
 static pthread_barrier_t barrier;
 static _Atomic unsigned amo_counter;
 static _Atomic unsigned cas_counter;

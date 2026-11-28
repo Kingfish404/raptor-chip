@@ -7,7 +7,12 @@ module rapt_qemu_io_bridge #(
     parameter int XLEN = `RAPT_XLEN,
     parameter logic [47:0] LocalMac = 48'h0105_5041_5202,  // 02:52:41:50:05:01 LE
     parameter logic [47:0] DefaultHostMac = 48'hffff_ffff_ffff,
-    parameter logic [15:0] RqioEtherType = 16'h88b5
+    parameter logic [15:0] RqioEtherType = 16'h88b5,
+    parameter bit UdpMode = 1'b0,
+    parameter logic [31:0] BridgeIp = 32'hc0a8_325d,       // 192.168.50.93 BE
+    parameter logic [31:0] HostIp = 32'hc0a8_3201,         // 192.168.50.1 BE
+    parameter logic [15:0] RqioUdpPort = 16'd9885,
+    parameter int MmioRetryCycles = 16_777_216
 ) (
     input logic clk,
     input logic reset,
@@ -76,22 +81,53 @@ module rapt_qemu_io_bridge #(
     return c;
   endfunction
 
-  function automatic logic [7:0] l2_hdr_byte(input logic [3:0] idx, input logic [47:0] dst_mac);
+  function automatic logic [7:0] eth_hdr_byte(input logic [5:0] idx, input logic [47:0] dst_mac,
+                                              input logic [15:0] ip_len, input logic [15:0] ip_csum,
+                                              input logic [15:0] udp_len);
+    logic [15:0] etype;
+    etype = UdpMode ? 16'h0800 : RqioEtherType;
     case (idx)
-      4'd0:  return dst_mac[7:0];
-      4'd1:  return dst_mac[15:8];
-      4'd2:  return dst_mac[23:16];
-      4'd3:  return dst_mac[31:24];
-      4'd4:  return dst_mac[39:32];
-      4'd5:  return dst_mac[47:40];
-      4'd6:  return LocalMac[7:0];
-      4'd7:  return LocalMac[15:8];
-      4'd8:  return LocalMac[23:16];
-      4'd9:  return LocalMac[31:24];
-      4'd10: return LocalMac[39:32];
-      4'd11: return LocalMac[47:40];
-      4'd12: return RqioEtherType[15:8];
-      default: return RqioEtherType[7:0];
+      6'd0:  return dst_mac[7:0];
+      6'd1:  return dst_mac[15:8];
+      6'd2:  return dst_mac[23:16];
+      6'd3:  return dst_mac[31:24];
+      6'd4:  return dst_mac[39:32];
+      6'd5:  return dst_mac[47:40];
+      6'd6:  return LocalMac[7:0];
+      6'd7:  return LocalMac[15:8];
+      6'd8:  return LocalMac[23:16];
+      6'd9:  return LocalMac[31:24];
+      6'd10: return LocalMac[39:32];
+      6'd11: return LocalMac[47:40];
+      6'd12: return etype[15:8];
+      6'd13: return etype[7:0];
+      6'd14: return 8'h45;
+      6'd15: return 8'h00;
+      6'd16: return ip_len[15:8];
+      6'd17: return ip_len[7:0];
+      6'd18: return 8'h00;
+      6'd19: return 8'h00;
+      6'd20: return 8'h40;
+      6'd21: return 8'h00;
+      6'd22: return 8'd64;
+      6'd23: return 8'd17;
+      6'd24: return ip_csum[15:8];
+      6'd25: return ip_csum[7:0];
+      6'd26: return BridgeIp[31:24];
+      6'd27: return BridgeIp[23:16];
+      6'd28: return BridgeIp[15:8];
+      6'd29: return BridgeIp[7:0];
+      6'd30: return HostIp[31:24];
+      6'd31: return HostIp[23:16];
+      6'd32: return HostIp[15:8];
+      6'd33: return HostIp[7:0];
+      6'd34: return RqioUdpPort[15:8];
+      6'd35: return RqioUdpPort[7:0];
+      6'd36: return RqioUdpPort[15:8];
+      6'd37: return RqioUdpPort[7:0];
+      6'd38: return udp_len[15:8];
+      6'd39: return udp_len[7:0];
+      default: return 8'h00;
     endcase
   endfunction
 
@@ -180,12 +216,22 @@ module rapt_qemu_io_bridge #(
   // tx_start is registered: the sender still reads tx_buf in the cycle it is seen.
   wire tx_idle = (tx_st_q == TxIdle) && !tx_start;
   logic [8:0] tx_msg_len, tx_msg_len_q, tx_pos_q;
-  logic [3:0] tx_hdr_idx_q;
+  logic [5:0] tx_hdr_idx_q;
   logic tx_esc_second_q;
   logic [15:0] tx_crc_q;
 
-  wire [8:0] eth_pad_payload_len = (tx_msg_len_q < 9'd46) ? 9'd46 : tx_msg_len_q;
+  localparam logic [5:0] TxHdrLast = UdpMode ? 6'd41 : 6'd13;
+  localparam logic [8:0] MinPayloadPad = UdpMode ? 9'd18 : 9'd46;
+  wire [8:0] eth_pad_payload_len = (tx_msg_len_q < MinPayloadPad) ? MinPayloadPad : tx_msg_len_q;
   wire [7:0] cur_tx_payload_b = (tx_pos_q < tx_msg_len_q) ? tx_buf[tx_pos_q] : 8'h00;
+
+  wire [15:0] tx_udp_len = 16'd8 + {7'b0, tx_msg_len_q};
+  wire [15:0] tx_ip_len  = 16'd28 + {7'b0, tx_msg_len_q};
+  wire [19:0] ip_sum20 = 20'h04500 + {4'b0, tx_ip_len} + 20'h04000 + 20'h04011
+                       + {4'b0, BridgeIp[31:16]} + {4'b0, BridgeIp[15:0]}
+                       + {4'b0, HostIp[31:16]} + {4'b0, HostIp[15:0]};
+  wire [16:0] ip_sum17 = {1'b0, ip_sum20[15:0]} + {13'b0, ip_sum20[19:16]};
+  wire [15:0] tx_ip_csum = ~(ip_sum17[15:0] + {15'b0, ip_sum17[16]});
 
   logic [7:0] slip_raw_b;
   always_comb begin
@@ -197,8 +243,9 @@ module rapt_qemu_io_bridge #(
   wire [7:0] slip_esc_second_b = (slip_raw_b == SlipEnd) ? SlipEscEnd : SlipEscEsc;
 
   assign eth_tx_valid_o = !reset && (tx_st_q == TxEthHdr || tx_st_q == TxEthPayload);
-  assign eth_tx_data_o  = (tx_st_q == TxEthHdr) ? l2_hdr_byte(tx_hdr_idx_q, DefaultHostMac)
-                                                : cur_tx_payload_b;
+  assign eth_tx_data_o  = (tx_st_q == TxEthHdr)
+      ? eth_hdr_byte(tx_hdr_idx_q, DefaultHostMac, tx_ip_len, tx_ip_csum, tx_udp_len)
+      : cur_tx_payload_b;
   assign eth_tx_last_o  = (tx_st_q == TxEthPayload) && (tx_pos_q + 9'd1 >= eth_pad_payload_len);
 
   assign slip_tx_valid_o = !reset && (tx_st_q == TxSlipStartEnd || tx_st_q == TxSlipBody
@@ -236,8 +283,8 @@ module rapt_qemu_io_bridge #(
         end
         TxEthHdr: begin
           if (eth_tx_ready_i) begin
-            if (tx_hdr_idx_q == 4'd13) tx_st_q <= TxEthPayload;
-            else tx_hdr_idx_q <= tx_hdr_idx_q + 4'd1;
+            if (tx_hdr_idx_q == TxHdrLast) tx_st_q <= TxEthPayload;
+            else tx_hdr_idx_q <= tx_hdr_idx_q + 6'd1;
           end
         end
         TxEthPayload: begin
@@ -287,14 +334,16 @@ module rapt_qemu_io_bridge #(
     end
   end
 
-  // Main Bridge Control + Concurrent AXI4 DMA Engine
+  // Main Bridge Control + Concurrent AXI4 DMA Engine (word-packed beats)
   typedef enum logic [3:0] {
     BrIdle,
     BrPrepMmioTx,
     BrSendMmioTx,
     BrDmaReadAr,
     BrDmaReadR,
+    BrDmaReadPack,
     BrPrepDmaReadTx,
+    BrDmaWritePack,
     BrDmaWriteAw,
     BrDmaWriteW,
     BrDmaWriteB,
@@ -306,11 +355,14 @@ module rapt_qemu_io_bridge #(
   logic [15:0] mmio_seq_q, dma_seq_q;
   logic [63:0] mmio_rdata_q;
   logic [31:0] irq_mask_q;
+  logic [24:0] mmio_retry_cnt_q;
 
-  logic [63:0] dma_cur_addr_q;
+  logic [63:0] dma_cur_addr_q, dma_wr_base_q;
   logic [15:0] dma_total_len_q, dma_idx_q;
   logic dma_err_q;
   logic [4:0] build_idx_q;
+  logic [XLEN-1:0] dma_rd_word_q, dma_wr_word_q;
+  logic [Bytes-1:0] dma_wr_strb_q;
 
   assign mmio_ready_o = mmio_done_q;
   assign mmio_rdata_o = mmio_rdata_q;
@@ -321,25 +373,25 @@ module rapt_qemu_io_bridge #(
   wire [7:0] wr_data_byte = rx_buf[9'd16 + dma_idx_q[8:0]];
 
   assign dma.arvalid = !reset && (br_st_q == BrDmaReadAr);
-  assign dma.araddr  = XLEN'(dma_cur_addr_q);
+  assign dma.araddr  = XLEN'(dma_cur_addr_q & ~64'(Bytes - 1));
   assign dma.arid    = 4'd2;
   assign dma.arlen   = 8'd0;
-  assign dma.arsize  = 3'd0;
+  assign dma.arsize  = 3'(ByteBits);
   assign dma.arburst = 2'b01;
   assign dma.arcache = 4'b0010;
   assign dma.rready  = !reset && (br_st_q == BrDmaReadR);
 
   assign dma.awvalid = !reset && (br_st_q == BrDmaWriteAw);
-  assign dma.awaddr  = XLEN'(dma_cur_addr_q);
+  assign dma.awaddr  = XLEN'(dma_wr_base_q);
   assign dma.awid    = 4'd2;
   assign dma.awlen   = 8'd0;
-  assign dma.awsize  = 3'd0;
+  assign dma.awsize  = 3'(ByteBits);
   assign dma.awburst = 2'b01;
   assign dma.awcache = 4'b0010;
 
   assign dma.wvalid  = !reset && (br_st_q == BrDmaWriteW);
-  assign dma.wdata   = XLEN'(wr_data_byte) << (int'(wr_lane) * 8);
-  assign dma.wstrb   = Bytes'(1) << wr_lane;
+  assign dma.wdata   = dma_wr_word_q;
+  assign dma.wstrb   = dma_wr_strb_q;
   assign dma.wlast   = 1'b1;
   assign dma.bready  = !reset && (br_st_q == BrDmaWriteB);
 
@@ -363,11 +415,16 @@ module rapt_qemu_io_bridge #(
       dma_seq_q <= '0;
       mmio_rdata_q <= '0;
       irq_mask_q <= '0;
+      mmio_retry_cnt_q <= '0;
       dma_cur_addr_q <= '0;
+      dma_wr_base_q <= '0;
       dma_total_len_q <= '0;
       dma_idx_q <= '0;
       dma_err_q <= 1'b0;
       build_idx_q <= '0;
+      dma_rd_word_q <= '0;
+      dma_wr_word_q <= '0;
+      dma_wr_strb_q <= '0;
       rx_msg_ack <= 1'b0;
       tx_start <= 1'b0;
       tx_msg_len <= '0;
@@ -375,6 +432,9 @@ module rapt_qemu_io_bridge #(
       rx_msg_ack <= 1'b0;
       tx_start <= 1'b0;
       if (mmio_done_q) mmio_done_q <= 1'b0;
+      if (!mmio_inflight_q || br_st_q != BrIdle) mmio_retry_cnt_q <= '0;
+      else if (mmio_retry_cnt_q < 25'(MmioRetryCycles))
+        mmio_retry_cnt_q <= mmio_retry_cnt_q + 25'd1;
 
       case (br_st_q)
         BrIdle: begin
@@ -404,6 +464,7 @@ module rapt_qemu_io_bridge #(
               automatic
               logic [15:0]
               clen = (rx_dma_len > 16'(MaxDmaChunk)) ? 16'(MaxDmaChunk) : rx_dma_len;
+              mmio_retry_cnt_q <= '0;
               dma_seq_q <= rx_seq;
               dma_cur_addr_q <= rx_dma_addr;
               dma_total_len_q <= clen;
@@ -420,8 +481,12 @@ module rapt_qemu_io_bridge #(
               automatic
               logic [15:0]
               clen = (rx_dma_len > 16'(MaxDmaChunk)) ? 16'(MaxDmaChunk) : rx_dma_len;
+              mmio_retry_cnt_q <= '0;
               dma_seq_q <= rx_seq;
               dma_cur_addr_q <= rx_dma_addr;
+              dma_wr_base_q <= rx_dma_addr & ~64'(Bytes - 1);
+              dma_wr_word_q <= '0;
+              dma_wr_strb_q <= '0;
               dma_total_len_q <= clen;
               dma_idx_q <= '0;
               dma_err_q <= 1'b0;
@@ -430,13 +495,19 @@ module rapt_qemu_io_bridge #(
                 build_idx_q <= '0;
                 br_st_q <= BrPrepDmaWriteTx;
               end else begin
-                br_st_q <= BrDmaWriteAw;
+                br_st_q <= BrDmaWritePack;
               end
             end else if (rx_type != MsgDmaReadReq && rx_type != MsgDmaWriteReq) begin
               rx_msg_ack <= 1'b1;
             end
           end else if (mmio_valid_i && !mmio_inflight_q && !mmio_done_q && tx_idle) begin
             mmio_inflight_q <= 1'b1;
+            mmio_retry_cnt_q <= '0;
+            build_idx_q <= '0;
+            br_st_q <= BrPrepMmioTx;
+          end else if (mmio_valid_i && mmio_inflight_q && tx_idle
+                       && mmio_retry_cnt_q >= 25'(MmioRetryCycles)) begin
+            mmio_retry_cnt_q <= '0;
             build_idx_q <= '0;
             br_st_q <= BrPrepMmioTx;
           end
@@ -486,6 +557,7 @@ module rapt_qemu_io_bridge #(
         BrDmaReadR: begin
           if (dma.rvalid) begin
             automatic logic [ByteBits-1:0] rlane = dma_cur_addr_q[ByteBits-1:0];
+            dma_rd_word_q <= dma.rdata;
             tx_buf[9'd12+dma_idx_q[8:0]] <= 8'(dma.rdata >> (int'(rlane) * 8));
             if (dma.rresp != 2'b00) dma_err_q <= 1'b1;
             if (dma_idx_q + 16'd1 >= dma_total_len_q) begin
@@ -494,8 +566,22 @@ module rapt_qemu_io_bridge #(
             end else begin
               dma_idx_q <= dma_idx_q + 16'd1;
               dma_cur_addr_q <= dma_cur_addr_q + 64'd1;
-              br_st_q <= BrDmaReadAr;
+              if (rlane == ByteBits'(Bytes - 1)) br_st_q <= BrDmaReadAr;
+              else br_st_q <= BrDmaReadPack;
             end
+          end
+        end
+
+        BrDmaReadPack: begin
+          automatic logic [ByteBits-1:0] rlane = dma_cur_addr_q[ByteBits-1:0];
+          tx_buf[9'd12+dma_idx_q[8:0]] <= 8'(dma_rd_word_q >> (int'(rlane) * 8));
+          if (dma_idx_q + 16'd1 >= dma_total_len_q) begin
+            build_idx_q <= '0;
+            br_st_q <= BrPrepDmaReadTx;
+          end else begin
+            dma_idx_q <= dma_idx_q + 16'd1;
+            dma_cur_addr_q <= dma_cur_addr_q + 64'd1;
+            if (rlane == ByteBits'(Bytes - 1)) br_st_q <= BrDmaReadAr;
           end
         end
 
@@ -523,6 +609,22 @@ module rapt_qemu_io_bridge #(
           end
         end
 
+        BrDmaWritePack: begin
+          automatic logic [XLEN-1:0] next_w;
+          automatic logic [Bytes-1:0] next_s;
+          next_w = dma_wr_word_q
+                 | (XLEN'(wr_data_byte) << (int'(wr_lane) * 8));
+          next_s = dma_wr_strb_q | (Bytes'(1) << wr_lane);
+          dma_wr_word_q <= next_w;
+          dma_wr_strb_q <= next_s;
+          if (wr_lane == ByteBits'(Bytes - 1) || (dma_idx_q + 16'd1 >= dma_total_len_q)) begin
+            br_st_q <= BrDmaWriteAw;
+          end else begin
+            dma_idx_q <= dma_idx_q + 16'd1;
+            dma_cur_addr_q <= dma_cur_addr_q + 64'd1;
+          end
+        end
+
         BrDmaWriteAw: begin
           if (dma.awready) br_st_q <= BrDmaWriteW;
         end
@@ -533,6 +635,8 @@ module rapt_qemu_io_bridge #(
 
         BrDmaWriteB: begin
           if (dma.bvalid) begin
+            dma_wr_word_q <= '0;
+            dma_wr_strb_q <= '0;
             if (dma.bresp != 2'b00) dma_err_q <= 1'b1;
             if (dma_idx_q + 16'd1 >= dma_total_len_q) begin
               rx_msg_ack <= 1'b1;
@@ -541,7 +645,8 @@ module rapt_qemu_io_bridge #(
             end else begin
               dma_idx_q <= dma_idx_q + 16'd1;
               dma_cur_addr_q <= dma_cur_addr_q + 64'd1;
-              br_st_q <= BrDmaWriteAw;
+              dma_wr_base_q <= (dma_cur_addr_q + 64'd1) & ~64'(Bytes - 1);
+              br_st_q <= BrDmaWritePack;
             end
           end
         end

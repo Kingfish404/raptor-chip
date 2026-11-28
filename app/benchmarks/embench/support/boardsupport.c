@@ -12,8 +12,13 @@ static clock_t stop_time_val;
 
 void initialise_board(void)
 {
+#ifdef __GLIBC__
+  printf("Embench-IoT: RISC-V Linux glibc (rv%d)\n",
+         (int)(sizeof(void *) * 8));
+#else
   printf("Embench-IoT: NPC pk+newlib (rv%d)\n",
          (int)(sizeof(void *) * 8));
+#endif
 }
 
 void start_trigger(void)

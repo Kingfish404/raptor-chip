@@ -9,7 +9,7 @@ include $(APP_HOME)/common.mk
 
 # ---- Directories ----
 COREMARK_DIR := $(APP_HOME)/../abstract-machine/app/am-kernels/benchmarks/coremark_eembc/src
-BUILD_DIR    := $(APP_HOME)/build/rv$(XLEN)/coremark
+BUILD_DIR    ?= $(APP_OUT_ROOT)/coremark
 PORTME_DIR   := $(_THIS_DIR)portme
 
 # ---- CoreMark config ----
@@ -53,7 +53,7 @@ $(BUILD_DIR)/%.o: $(COREMARK_DIR)/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -MMD -MP -c $(COREMARK_DIR)/$*.c -o $@
 
-$(ELF): $(OBJS) $(_PICOLIBC_IO) $(APP_HOME)/lib/pk-user.ld
+$(ELF): $(OBJS) $(_PICOLIBC_IO) $(if $(_PICOLIBC_SPECS),$(APP_HOME)/lib/pk-user.ld,)
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(OBJS) $(_PICOLIBC_IO) -o $@
 	@$(SIZE) $@

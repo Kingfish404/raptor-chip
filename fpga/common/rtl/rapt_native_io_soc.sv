@@ -7,6 +7,14 @@ module rapt_native_io_soc #(
     parameter bit WithPeripheral = 0,
     parameter bit WithLocalVirtioNet = 1,
     parameter bit WithQemuBridge = 1,
+    parameter bit CoherentDma = 1'b1,
+    parameter bit RqioUdpMode = 1'b0,
+    parameter bit FilterUnicast = 1'b0,
+    parameter logic [47:0] LocalMac = 48'h0105_5041_5202,
+    parameter logic [47:0] BridgeMac = 48'h0215_5041_5202,
+    parameter logic [31:0] BridgeIp = 32'hc0a8_325d,
+    parameter logic [31:0] HostIp = 32'hc0a8_3201,
+    parameter logic [15:0] RqioUdpPort = 16'd9885,
     parameter int RamBytes = 131072,
     parameter int ClockHz = 50_000_000,
     parameter string RomFile = "boot.hex"
@@ -91,8 +99,11 @@ module rapt_native_io_soc #(
   assign core_irq[6] = rtc_irq | (WithQemuBridge ? bridge_irq_mask[6] : 1'b0);
   assign core_irq[31:7] = WithQemuBridge ? bridge_irq_mask[31:7] : 25'b0;
 
+  localparam bit SocL1dWriteBack = rapt_pkg::L2LinkConfig.cache ? 1'b1 : !CoherentDma;
+
   rapt #(
-      .XLEN(XLEN)
+      .XLEN(XLEN),
+      .L1dWriteBack(SocL1dWriteBack)
   ) core (
       .sram_ctrl_i(rapt_pkg::SramCtrlReset),
       .clock(clk),
@@ -143,7 +154,12 @@ module rapt_native_io_soc #(
       .io_master_bready(cpu.bready)
   );
 
-  rapt_eth_rqio_mux u_eth_mux (
+  rapt_eth_rqio_mux #(
+      .UdpMode(RqioUdpMode),
+      .BridgeMac(BridgeMac),
+      .BridgeIp(BridgeIp),
+      .RqioUdpPort(RqioUdpPort)
+  ) u_eth_mux (
       .clk(clk),
       .reset(reset),
       .mac_rx_data_i(eth_rx_data_i),
@@ -174,7 +190,9 @@ module rapt_native_io_soc #(
 
   if (WithLocalVirtioNet) begin : g_virtio_net
     rapt_virtio_mmio_net #(
-        .XLEN(XLEN)
+        .XLEN(XLEN),
+        .LocalMac(LocalMac),
+        .FilterUnicast(FilterUnicast)
     ) u_vnet (
         .clk(clk),
         .reset(reset),
@@ -232,7 +250,12 @@ module rapt_native_io_soc #(
 
   if (WithQemuBridge) begin : g_qemu_bridge
     rapt_qemu_io_bridge #(
-        .XLEN(XLEN)
+        .XLEN(XLEN),
+        .LocalMac(RqioUdpMode ? BridgeMac : LocalMac),
+        .UdpMode(RqioUdpMode),
+        .BridgeIp(BridgeIp),
+        .HostIp(HostIp),
+        .RqioUdpPort(RqioUdpPort)
     ) u_bridge (
         .clk(clk),
         .reset(reset),

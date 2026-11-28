@@ -5,6 +5,12 @@
 #ifndef NETBOOT_ETH_DMA
 #define NETBOOT_ETH_DMA 0
 #endif
+#ifndef NETBOOT_VIRTIO_NET
+#define NETBOOT_VIRTIO_NET 0
+#endif
+#ifndef NETBOOT_VNET_BASE
+#define NETBOOT_VNET_BASE 0x10002000u
+#endif
 #ifndef NETBOOT_DMA_BASE
 #define NETBOOT_DMA_BASE 0x18000000u
 #endif
@@ -69,7 +75,7 @@ static uint32_t ticks(void)
     return v;
 }
 
-#if !NETBOOT_LITEETH && !(NETBOOT_ETH_DMA && NETBOOT_DMA_FIXED_LINK)
+#if !NETBOOT_LITEETH && !NETBOOT_VIRTIO_NET && !(NETBOOT_ETH_DMA && NETBOOT_DMA_FIXED_LINK)
 static void delay(unsigned us)
 {
     uint32_t t = ticks();
@@ -91,7 +97,7 @@ static unsigned checksum(const uint8_t *p, unsigned n)
     while (s >> 16) s = (s & 65535) + (s >> 16);
     return (~s) & 65535;
 }
-#if !NETBOOT_LITEETH && !(NETBOOT_ETH_DMA && NETBOOT_DMA_FIXED_LINK)
+#if !NETBOOT_LITEETH && !NETBOOT_VIRTIO_NET && !(NETBOOT_ETH_DMA && NETBOOT_DMA_FIXED_LINK)
 static void mdio_bit(unsigned b)
 {
     REG(0x40) = 2 | (b ? 4 : 0); delay(1);
@@ -128,7 +134,145 @@ static unsigned phy_read(unsigned reg)
     return bad ? 65535 : v;
 }
 #endif
-#if NETBOOT_ETH_DMA
+#if NETBOOT_VIRTIO_NET
+#define VNET_REG(n) (*(volatile uint32_t *)(uintptr_t)(NETBOOT_VNET_BASE + (n)))
+#define VNET_RX_NUM 4u
+#define VNET_TX_NUM 2u
+#define VNET_HDR_LEN 12u
+struct vq_desc {
+    uint64_t addr;
+    uint32_t len;
+    uint16_t flags;
+    uint16_t next;
+} __attribute__((aligned(16)));
+struct vq_avail_rx {
+    uint16_t flags;
+    uint16_t idx;
+    uint16_t ring[VNET_RX_NUM];
+    uint16_t event;
+} __attribute__((aligned(4)));
+struct vq_used_rx {
+    uint16_t flags;
+    uint16_t idx;
+    struct { uint32_t id; uint32_t len; } ring[VNET_RX_NUM];
+    uint16_t event;
+} __attribute__((aligned(4)));
+struct vq_avail_tx {
+    uint16_t flags;
+    uint16_t idx;
+    uint16_t ring[VNET_TX_NUM];
+    uint16_t event;
+} __attribute__((aligned(4)));
+struct vq_used_tx {
+    uint16_t flags;
+    uint16_t idx;
+    struct { uint32_t id; uint32_t len; } ring[VNET_TX_NUM];
+    uint16_t event;
+} __attribute__((aligned(4)));
+
+static struct vq_desc vnet_rx_desc[VNET_RX_NUM];
+static volatile struct vq_avail_rx vnet_rx_avail;
+static volatile struct vq_used_rx vnet_rx_used;
+static struct vq_desc vnet_tx_desc[VNET_TX_NUM];
+static volatile struct vq_avail_tx vnet_tx_avail;
+static volatile struct vq_used_tx vnet_tx_used;
+static uint8_t vnet_rx_buf[VNET_RX_NUM][1568] __attribute__((aligned(64)));
+static uint8_t vnet_tx_buf[1568] __attribute__((aligned(64)));
+static uint16_t vnet_rx_avail_idx, vnet_rx_last_used, vnet_tx_avail_idx;
+
+static void vnet_set_qaddr(uint32_t off, const volatile void *p)
+{
+    uint64_t a = (uint64_t)(uintptr_t)p;
+    VNET_REG(off) = (uint32_t)a;
+    VNET_REG(off + 4u) = (uint32_t)(a >> 32);
+}
+static void vnet_init(void)
+{
+    if (VNET_REG(0x000) != 0x74726976u || VNET_REG(0x004) != 2u || VNET_REG(0x008) != 1u)
+        fail("VirtIO-Net ABI");
+    VNET_REG(0x070) = 0u;
+    VNET_REG(0x070) = 3u;
+    VNET_REG(0x024) = 0u;
+    VNET_REG(0x020) = (1u << 5);
+    VNET_REG(0x024) = 1u;
+    VNET_REG(0x020) = 1u;
+    VNET_REG(0x070) = 11u;
+    for (unsigned i = 0; i < VNET_RX_NUM; i++) {
+        vnet_rx_desc[i].addr = (uint64_t)(uintptr_t)vnet_rx_buf[i];
+        vnet_rx_desc[i].len = VNET_HDR_LEN + 1536u;
+        vnet_rx_desc[i].flags = 2u;
+        vnet_rx_desc[i].next = 0u;
+        vnet_rx_avail.ring[i] = (uint16_t)i;
+    }
+    vnet_rx_avail_idx = VNET_RX_NUM;
+    vnet_rx_last_used = 0u;
+    vnet_tx_avail_idx = 0u;
+    vnet_rx_avail.idx = VNET_RX_NUM;
+    vnet_rx_used.idx = 0u;
+    vnet_tx_avail.idx = 0u;
+    vnet_tx_used.idx = 0u;
+    __asm__ volatile ("fence rw,rw" ::: "memory");
+    VNET_REG(0x030) = 0u;
+    VNET_REG(0x038) = VNET_RX_NUM;
+    vnet_set_qaddr(0x080u, vnet_rx_desc);
+    vnet_set_qaddr(0x090u, &vnet_rx_avail);
+    vnet_set_qaddr(0x0a0u, &vnet_rx_used);
+    VNET_REG(0x044) = 1u;
+    VNET_REG(0x030) = 1u;
+    VNET_REG(0x038) = VNET_TX_NUM;
+    vnet_set_qaddr(0x080u, vnet_tx_desc);
+    vnet_set_qaddr(0x090u, &vnet_tx_avail);
+    vnet_set_qaddr(0x0a0u, &vnet_tx_used);
+    VNET_REG(0x044) = 1u;
+    VNET_REG(0x070) = 15u;
+    __asm__ volatile ("fence rw,rw" ::: "memory");
+    VNET_REG(0x050) = 0u;
+}
+static void transmit(unsigned n)
+{
+    for (unsigned i = 0; i < VNET_HDR_LEN; i++) vnet_tx_buf[i] = 0;
+    copy(vnet_tx_buf + VNET_HDR_LEN, tx, n);
+    unsigned slot = vnet_tx_avail_idx & (VNET_TX_NUM - 1u);
+    vnet_tx_desc[slot].addr = (uint64_t)(uintptr_t)vnet_tx_buf;
+    vnet_tx_desc[slot].len = VNET_HDR_LEN + n;
+    vnet_tx_desc[slot].flags = 0u;
+    vnet_tx_desc[slot].next = 0u;
+    vnet_tx_avail.ring[slot] = (uint16_t)slot;
+    __asm__ volatile ("fence rw,rw" ::: "memory");
+    vnet_tx_avail_idx = (uint16_t)(vnet_tx_avail_idx + 1u);
+    vnet_tx_avail.idx = vnet_tx_avail_idx;
+    __asm__ volatile ("fence rw,rw" ::: "memory");
+    VNET_REG(0x050) = 1u;
+    uint32_t t = ticks();
+    while (vnet_tx_used.idx != vnet_tx_avail_idx)
+        if ((uint32_t)(ticks() - t) > 2000000u) fail("VirtIO TX timeout");
+}
+static unsigned receive(void)
+{
+    __asm__ volatile ("fence rw,rw" ::: "memory");
+    if (vnet_rx_used.idx == vnet_rx_last_used) return 0u;
+    unsigned uslot = vnet_rx_last_used & (VNET_RX_NUM - 1u);
+    unsigned id = vnet_rx_used.ring[uslot].id & (VNET_RX_NUM - 1u);
+    unsigned total = vnet_rx_used.ring[uslot].len;
+    vnet_rx_last_used = (uint16_t)(vnet_rx_last_used + 1u);
+    unsigned n = (total > VNET_HDR_LEN && total - VNET_HDR_LEN <= sizeof(rx))
+                 ? (total - VNET_HDR_LEN) : 0u;
+    if (n) copy(rx, vnet_rx_buf[id] + VNET_HDR_LEN, n);
+    unsigned aslot = vnet_rx_avail_idx & (VNET_RX_NUM - 1u);
+    vnet_rx_avail.ring[aslot] = (uint16_t)id;
+    __asm__ volatile ("fence rw,rw" ::: "memory");
+    vnet_rx_avail_idx = (uint16_t)(vnet_rx_avail_idx + 1u);
+    vnet_rx_avail.idx = vnet_rx_avail_idx;
+    __asm__ volatile ("fence rw,rw" ::: "memory");
+    VNET_REG(0x050) = 0u;
+    return n;
+}
+static void ethernet_stop(void)
+{
+    VNET_REG(0x070) = 0u;
+    __asm__ volatile ("fence rw,rw" ::: "memory");
+}
+#elif NETBOOT_ETH_DMA
 #define DMA_RX_SLOTS 4u
 static uint8_t rx_ring[DMA_RX_SLOTS][1536] __attribute__((aligned(64)));
 static unsigned rx_cons;
@@ -391,7 +535,11 @@ static void download(const char *name, uintptr_t address, unsigned size, uint32_
 void boot_main(void)
 {
     say("\r\nRaptor TFTP loader\r\n");
-#if NETBOOT_LITEETH
+#if NETBOOT_VIRTIO_NET
+    vnet_init();
+    say("VirtIO-Net ready\r\n");
+    uint32_t start = ticks();
+#elif NETBOOT_LITEETH
     ethernet_stop();
     /* CPU-local virtual PHY: never reset either CM005 physical link. */
     if (MAC_REG(0x38) != 1) fail("LiteEth framing ABI");
@@ -451,7 +599,7 @@ void boot_main(void)
     static const uint8_t broadcast[6] = {255,255,255,255,255,255};
     for (unsigned attempt = 0; !peer[0] && !peer[1] && !peer[2] && !peer[3] && !peer[4] && !peer[5]; attempt++) {
         if (attempt == 20) {
-#if !NETBOOT_LITEETH
+#if !NETBOOT_LITEETH && !NETBOOT_VIRTIO_NET
             say("MAC status="); hex(REG(0x0c)); say(" rx="); hex(REG(0x28));
             say(" drop="); hex(REG(0x30)); say(" tx="); hex(REG(0x34));
 #if !(NETBOOT_ETH_DMA && NETBOOT_DMA_FIXED_LINK)

@@ -154,7 +154,8 @@ module rapt_native_io_bus #(
     if (a >= RomBase && a < RomBase + RomBytes) return Rom;
     if (a >= SramBase && a < SramBase + SramBytes) return Sram;
     if (a >= UartBase && a < UartBase + 64'd8) return Uart;
-    if (a >= 64'h0010_1000 && a < 64'h0010_2000) return Rtc;
+    if ((a >= 64'h0010_1000 && a < 64'h0010_2000) || (a >= 64'h1000_9000 && a < 64'h1000_a000))
+      return Rtc;
     if (WithLocalVirtioNet && a >= 64'h1000_2000 && a < 64'h1000_3000) return VirtioNet;
     if (WithQemuBridge && ((a >= 64'h1000_1000 && a < 64'h1000_9000)
                         || (a >= 64'h4100_0000 && a < 64'h6000_0000)))
@@ -212,12 +213,19 @@ module rapt_native_io_bus #(
   wire uart_rd = (rs_q == RIssue) && (rt_q == Uart);
   wire rtc_rd  = (rs_q == RIssue) && (rt_q == Rtc);
   wire ram_write_collision = (wt_q == Ram) && (dma_rs_q == DmaRRam || dma_ws_q == DmaWRamW);
+  logic ext_wr_valid_q;
+  logic [2:0] ext_wr_cooldown_q, cpu_b_cooldown_q;
+  logic [XLEN-1:0] ext_wr_first_q, ext_wr_last_q;
+  wire dma_commit_beat = ((dma_ws_q == DmaWRamW) && dma_w_valid_t_q && dma.wvalid && dma.wready)
+                      || ((dma_ws_q == DmaWDdrW) && dma_w_valid_t_q && dma.wvalid && dma.wready);
+
   assign cpu.wready = (ws_q == WData)
       && ((wt_q == Ddr) ? (ddr.wready && dma_ws_q != DmaWDdrW)
                         : (!uart_rd && !rtc_rd && !ram_write_collision));
   assign cpu.bid    = wid_q;
   assign cpu.bresp  = bresp_q;
-  assign cpu.bvalid = (ws_q == WReply);
+  assign cpu.bvalid = (ws_q == WReply) && (dma_ws_q == DmaWIdle)
+                    && !dma_commit_beat && (ext_wr_cooldown_q == 3'd0);
 
   // Arbitrate DDR4 port between CPU (when rt_q/wt_q == Ddr) and DMA (dma_rs_q/dma_ws_q)
   // Note: when CPU is parked in RIoWait or WIoWait, rs_q != RIssue/RDdr and ws_q != WAddr/WData,
@@ -267,6 +275,7 @@ module rapt_native_io_bus #(
                     || (dma_rs_q == DmaRDdrR && (!dma_r_valid_t_q || ddr.rvalid));
 
   assign dma.awready = !reset && (dma_ws_q == DmaWIdle)
+                    && (ws_q != WReply) && (cpu_b_cooldown_q == 3'd0)
                     && !(ws_q == WAddr && wt_q == Ddr)
                     && !(ws_q == WData && wt_q == Ddr)
                     && !(ws_q == WDdrB);
@@ -276,11 +285,8 @@ module rapt_native_io_bus #(
   assign dma.bresp   = dma_bresp_q;
   assign dma.bvalid  = (dma_ws_q == DmaWRamB) || (dma_ws_q == DmaWDdrB && !dma_w_valid_t_q);
 
-  // Report external DMA writes to rapt core so matching L1D LR reservations clear
-  logic ext_wr_valid_q;
-  logic [XLEN-1:0] ext_wr_first_q, ext_wr_last_q;
-  wire dma_commit_beat = ((dma_ws_q == DmaWRamW) && dma_w_valid_t_q && dma.wvalid && dma.wready)
-                      || ((dma_ws_q == DmaWDdrW) && dma_w_valid_t_q && dma.wvalid && dma.wready);
+  // Report external DMA writes to rapt core so matching L1D LR reservations and
+  // write-through clean cache lines clear without colliding with CPU B responses.
   assign external_write_valid_o   = ext_wr_valid_q;
   assign external_write_pending_o = (dma_ws_q != DmaWIdle);
   assign external_write_first_o   = ext_wr_first_q;
@@ -288,11 +294,17 @@ module rapt_native_io_bus #(
 
   always_ff @(posedge clk) begin
     if (reset) begin
-      ext_wr_valid_q <= 1'b0;
-      ext_wr_first_q <= '0;
-      ext_wr_last_q  <= '0;
+      ext_wr_valid_q    <= 1'b0;
+      ext_wr_cooldown_q <= 3'd0;
+      cpu_b_cooldown_q  <= 3'd0;
+      ext_wr_first_q    <= '0;
+      ext_wr_last_q     <= '0;
     end else begin
       ext_wr_valid_q <= dma_commit_beat && (dma.wstrb != '0);
+      if (dma_commit_beat && (dma.wstrb != '0)) ext_wr_cooldown_q <= 3'd4;
+      else if (ext_wr_cooldown_q != 3'd0) ext_wr_cooldown_q <= ext_wr_cooldown_q - 3'd1;
+      if (cpu.bvalid && cpu.bready) cpu_b_cooldown_q <= 3'd4;
+      else if (cpu_b_cooldown_q != 3'd0) cpu_b_cooldown_q <= cpu_b_cooldown_q - 3'd1;
       if (dma_commit_beat) begin
         automatic logic [XLEN-1:0] base_w = dma_wa_q & ~XLEN'(Bytes - 1);
         ext_wr_first_q <= base_w;

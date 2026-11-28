@@ -9,14 +9,21 @@ to upstream `qemu-system-riscv64` (or the self-contained `builtin` device model)
 
 | Device | Raptor Physical Address | Size | PLIC IRQ (FPGA / Sim) |
 | --- | --- | --- | --- |
+| `Goldfish RTC` (`google,goldfish-rtc`) | `0x00101000` | `4 KiB` | `6` / `6` |
 | `VirtIO-Blk` (`virtio,mmio` v2) | `0x10001000` | `4 KiB` | `3` / `1` |
 | `VirtIO-Net` (`virtio,mmio` v2) | `0x10002000` | `4 KiB` | `2` / `2` |
+| `VirtIO-RNG` (`virtio,mmio` v2) | `0x10003000` | `4 KiB` | `5` / `5` |
 | `PCIe ECAM` (`pci-host-ecam-generic`) | `0x41000000` | `16 MiB` | INTx `11..14` |
 | `SDHCI` (`arasan,sdhci-8.9a` v3.00) | `0x42000000` | `4 KiB` | `4` / `4` |
 | `PCIe 32-bit MMIO` (`NVMe` BAR0) | `0x50000000` | `256 MiB` | `11` (`INTA`) |
 
 ## Transports & Backends
 
+- `--transport udp --udp-bind 192.168.50.1:9885 --udp-peer 192.168.50.93:9885`:
+  Unprivileged IPv4/UDP RQIO tunnel (requires **no `sudo` or `CAP_NET_RAW`**).
+  Multiplexed in hardware alongside guest `VirtIO-Net` traffic by
+  `rapt_eth_rqio_mux.sv` (`UdpMode=1`, hardware ARP responder + IPv4/UDP header
+  offload).
 - `--transport raw-eth --iface <host-nic>`: L2 raw Ethernet tunnel using IEEE
   local experimental EtherType `0x88B5`. Multiplexed alongside guest Ethernet
   traffic on the same physical RJ45 port by `rapt_eth_rqio_mux.sv`.
@@ -24,12 +31,20 @@ to upstream `qemu-system-riscv64` (or the self-contained `builtin` device model)
   byte-stream fallback over UART/JTAG-UART.
 - `--transport unix --socket /tmp/raptor-rqio.sock`: Local Unix stream socket
   for Verilator simulation (`--qemu-io-socket=/tmp/raptor-rqio.sock`).
+- `--backend builtin`: Self-contained OASIS VirtIO 1.2 (`VirtIO-Blk`,
+  `VirtIO-Net`, `VirtIO-RNG`), Goldfish RTC, SDHCI v3.00 (SDMA + ADMA2), and
+  PCIe ECAM + NVMe 1.4 backend with zero-copy `mmap` disk backing (persistent
+  `MAP_SHARED` by default, or copy-on-write `--snapshot` to boot unmodified
+  upstream `.img`/`.raw` OS images without touching disk files).
 - `--backend qemu`: Spawns stock `qemu-system-riscv64 -machine virt` with a
   self-relocating RV64I shared-memory proxy stub (`memory-backend-file,share=on`),
   forwarding MMIO, PLIC pending interrupts, and VirtIO/NVMe DMA descriptors
   directly to QEMU's upstream `virtio-blk-device`, `nvme`, and `sdhci-pci`.
-- `--backend builtin`: Self-contained OASIS VirtIO 1.2 (`VirtIO-Blk`,
-  `VirtIO-Net`), SDHCI v3.00 (SDMA + ADMA2), and PCIe ECAM + NVMe 1.4 backend.
+
+`os_image_boot.py` wraps `raptor_qemu_bridge.py` (`--transport udp`) +
+`fpga/common/scripts/netboot.py` (`VirtIO-Net` TFTP) + `OpenSBI + U-Boot UEFI`
+to boot unmodified upstream FreeBSD (`app/freebsd/`) and NetBSD (`app/netbsd/`)
+`.img`/`.raw` disk images directly on Raptor FPGA boards.
 
 ## Usage Examples
 

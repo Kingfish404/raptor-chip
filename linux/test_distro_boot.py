@@ -8,7 +8,19 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from distro_boot import build_dtb, build_nemu, check, download, extract_partition, ext4_partition, HOME, SOURCES, verdict
+from distro_boot import (
+    build_dtb,
+    build_nemu,
+    check,
+    download,
+    extract_partition,
+    ext4_partition,
+    HOME,
+    resolve_sim_preset,
+    rtl_preset_info,
+    SOURCES,
+    verdict,
+)
 
 
 class DistroBootTest(unittest.TestCase):
@@ -185,6 +197,89 @@ class DistroBootTest(unittest.TestCase):
             self.assertEqual(len(flags), 1)
             self.assertTrue(flags[0].startswith(
                 'CFLAGS_BUILD=-O1 -g -fsanitize=thread -fno-omit-frame-pointer'))
+
+    def test_alpine_and_debian_sources_and_sim_engine_launch(self):
+        self.assertEqual(SOURCES['debian']['release'], '13')
+        self.assertEqual(SOURCES['debian']['build'], '20261123-2671')
+        self.assertEqual(SOURCES['alpine']['release'], '3.24.4')
+        alpine_log = (b'RAPTOR_DISTRO_ID=alpine VERSION_ID=3.24.4\n'
+                      b'RAPTOR_FP_PASS\nRAPTOR_DISTRO_CHECK_PASS\nreboot: Power down\n')
+        self.assertTrue(verdict(alpine_log, 0, 'alpine'))
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / 'alpine'
+            directory.mkdir()
+            sim_bin = directory / 'fake-npc-sim'
+            sim_bin.write_text('#!/bin/sh\n')
+            mrom_bin = directory / 'mrom-data.bin'
+            mrom_bin.write_bytes(b'mrom')
+            (directory / 'manifest.json').write_text(json.dumps({
+                'source': SOURCES['alpine'], 'files': {}, 'nemu': '/unused/nemu',
+                'nemu_sha256': 'other', 'harts': 1}))
+            args = SimpleNamespace(work=Path(temporary), distro='alpine', action='check',
+                                   engine='sim', sim_preset='default', sim_binary=sim_bin,
+                                   nemu_backend='rr', nemu_clock_div=16)
+            with patch('distro_boot.sha', return_value='digest'), \
+                    patch('distro_boot.prepare_sim_mrom', return_value=mrom_bin), \
+                    patch('distro_boot.subprocess.Popen', side_effect=FileNotFoundError) as launch:
+                with self.assertRaises(FileNotFoundError):
+                    check(args)
+            command = launch.call_args.args[0]
+            self.assertEqual(command[0], str(sim_bin))
+            self.assertIn('--disk=' + str(directory / 'rootfs.ext4'), command)
+            self.assertIn('--virtio-net', command)
+            self.assertIn(str(mrom_bin), command)
+
+    def test_multihart_alpine_sim_presets_dtb_and_make_defaults(self):
+        self.assertEqual(resolve_sim_preset('auto', 1), 'default')
+        self.assertEqual(resolve_sim_preset('auto', 2), 'default-smp2')
+        self.assertEqual(resolve_sim_preset('auto', 4), 'middle-smp4')
+        self.assertEqual(rtl_preset_info('small-smp2'),
+                         {'nharts': 2, 'vector': False, 'rva23': False})
+        self.assertEqual(rtl_preset_info('middle-smp4'),
+                         {'nharts': 4, 'vector': False, 'rva23': False})
+        self.assertEqual(rtl_preset_info('default-smp2'),
+                         {'nharts': 2, 'vector': True, 'rva23': True})
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / 'alpine'
+            directory.mkdir()
+            sim_dtb = directory / 'sim-small-smp2.dtb'
+            build_dtb(directory, 2, source_name='raptor-rv64gc-io.dts', output_dtb=sim_dtb)
+            cpus = subprocess.check_output(['fdtget', '-l', sim_dtb, '/cpus'], text=True).split()
+            self.assertEqual(cpus, ['cpu@0', 'cpu@1'])
+            isa = subprocess.check_output(
+                ['fdtget', '-t', 's', sim_dtb, '/cpus/cpu@1', 'riscv,isa'], text=True).strip()
+            self.assertNotIn('v', isa.split('_')[0][4:])
+            sim_bin = directory / 'fake-smp2-sim'
+            sim_bin.write_text('#!/bin/sh\n')
+            mrom_bin = directory / 'mrom-smp2.bin'
+            mrom_bin.write_bytes(b'mrom')
+            (directory / 'manifest.json').write_text(json.dumps({
+                'source': SOURCES['alpine'], 'files': {}, 'nemu': '/unused/nemu',
+                'nemu_sha256': 'other', 'harts': 2}))
+            bad_args = SimpleNamespace(work=Path(temporary), distro='alpine', action='check',
+                                       engine='sim', sim_preset='default', sim_binary=sim_bin,
+                                       nemu_backend='rr', nemu_clock_div=16)
+            with patch('distro_boot.sha', return_value='digest'):
+                with self.assertRaisesRegex(ValueError, 'manifest requires 2'):
+                    check(bad_args)
+            ok_args = SimpleNamespace(work=Path(temporary), distro='alpine', action='check',
+                                      engine='sim', sim_preset='small-smp2', sim_binary=sim_bin,
+                                      nemu_backend='rr', nemu_clock_div=16)
+            with patch('distro_boot.sha', return_value='digest'), \
+                    patch('distro_boot.prepare_sim_mrom', return_value=mrom_bin) as prep_mrom, \
+                    patch('distro_boot.subprocess.Popen', side_effect=FileNotFoundError):
+                with self.assertRaises(FileNotFoundError):
+                    check(ok_args)
+            self.assertEqual(prep_mrom.call_args.kwargs['harts'], 2)
+            self.assertEqual(prep_mrom.call_args.kwargs['preset'], 'small-smp2')
+        dry_smp = subprocess.check_output(
+            ['make', '-n', '-C', str(HOME), 'distro-prepare', 'DISTRO_HARTS=2'], text=True)
+        self.assertIn('--distro alpine', dry_smp)
+        self.assertIn('--harts 2', dry_smp)
+        dry_sim_smp = subprocess.check_output(
+            ['make', '-n', '-C', str(HOME), 'sim-smp-check', 'SMP_HARTS=4'], text=True)
+        self.assertIn('DISTRO_BOOT=alpine', dry_sim_smp)
+        self.assertIn('DISTRO_HARTS=4', dry_sim_smp)
 
 
 if __name__ == '__main__':

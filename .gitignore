@@ -19,6 +19,7 @@
 !/app/netbsd/.gitignore
 !/app/netbsd/patches/
 !/app/netbsd/patches/**
+!/app/freebsd/.gitignore
 !raptor-chip.code-workspace
 !env.sh
 !setup.sh

@@ -55,11 +55,35 @@ NETBSD_OPENSBI_RV32_QEMU_BIOS ?= $(NETBSD_OPENSBI_RV32_QEMU_DIR)/platform/generi
 NETBSD_OPENSBI_RV64_QEMU_DIR ?= $(NETBSD_BUILD_DIR)/opensbi-rv64-qemu
 NETBSD_OPENSBI_RV64_QEMU_BIOS ?= $(NETBSD_OPENSBI_RV64_QEMU_DIR)/platform/generic/firmware/fw_dynamic.bin
 NETBSD_NEMU_ROM_DIR ?= $(RAPTOR_HOME)/nemu/src/memory/rom
+PYTHON              ?= python3
+NETBSD_BINARY_MIRROR ?= https://nycdn.netbsd.org/pub/NetBSD-daily/netbsd-11/latest/riscv-riscv64/binary
+NETBSD_DL_DIR       ?= $(NETBSD_BUILD_DIR)/downloads
+NETBSD_DL_IMG_GZ    := $(NETBSD_DL_DIR)/riscv64.img.gz
+NETBSD_DL_IMG       := $(NETBSD_DL_DIR)/riscv64.img
+NETBSD_DL_KERN_GZ   := $(NETBSD_DL_DIR)/netbsd-GENERIC64.gz
+NETBSD_DL_KERN      := $(NETBSD_DL_DIR)/netbsd-GENERIC64
+NETBSD_DL_KERN_BIN  := $(NETBSD_DL_DIR)/netbsd-GENERIC64.bin
+NETBSD_FPGA_IMG     ?= $(NETBSD_BUILD_DIR)/fpga/netbsd-riscv64.img
+NETBSD_FPGA_WORK    ?= $(NETBSD_BUILD_DIR)/fpga-work
+OS_BOOT_TOOL        := $(RAPTOR_HOME)/tools/qemu_io_bridge/os_image_boot.py
+QEMU_RV64_CPU       ?= rv64,zba=true,zbb=true,zbc=true,zbs=true,zicbom=true,zicboz=true,svpbmt=true,sstc=false,v=true
+FPGA_BOARD          ?= $(RAPTOR_HOME)/fpga/mlk-cu08-ku15p
+FPGA_Board_DTS      := $(FPGA_BOARD)/build/rv64-default-w4-ddr-50MHz-*/native.dts
+FPGA_IO_DTS         := $(firstword $(shell grep -l "virtio_mmio@10001000" $(FPGA_Board_DTS) 2>/dev/null))
+FPGA_DTB            ?= $(patsubst %/native.dts,%/native.dtb,$(FPGA_IO_DTS))
+FPGA_PORT           ?= /dev/ttyUSB0
+FPGA_SERVER         ?= 192.168.50.1
+FPGA_LOADER         ?= 192.168.50.92
+FPGA_BRIDGE         ?= 192.168.50.93
+FPGA_MAC            ?= 02:52:41:50:15:01
+NETBSD_DIRECT_KERNEL ?= 1
 
 .PHONY: help check check-images fetch list-arch tools tools-rv32 tools-rv64 \
 	build-rv32 build-rv64 rv32 rv64 sim-payload-rv32 sim-payload-rv64 \
 	opensbi-rv32-qemu opensbi-rv64-qemu nemu-prepare-rv32 nemu-prepare-rv64 \
-	nemu-run-rv32 nemu-run-rv64 sim-run-rv32 sim-run-rv64 qemu-rv32 qemu-rv64 clean
+	nemu-run-rv32 nemu-run-rv64 sim-run-rv32 sim-run-rv64 qemu-rv32 qemu-rv64 \
+	fetch-image-rv64 prepare-fpga-rv64 qemu-image-pristine-rv64 qemu-image-rv64 \
+	fpga-boot-pristine-rv64 fpga-boot-rv64 clean
 
 help: ## Show NetBSD build targets
 	@echo "Usage: make <target> [VAR=value ...]"
@@ -84,6 +108,12 @@ help: ## Show NetBSD build targets
 	@echo "  sim-run-rv64   Build and run the RTL simulator (RV64) with NetBSD"
 	@echo "  qemu-rv32   Run NetBSD RV32 under QEMU"
 	@echo "  qemu-rv64   Run NetBSD RV64 under QEMU"
+	@echo "  fetch-image-rv64         Download official NetBSD 11 RV64 riscv64.img.gz + GENERIC64"
+	@echo "  prepare-fpga-rv64        Provision cloned riscv64.img with SSH & microbenchmarks"
+	@echo "  qemu-image-pristine-rv64 Boot unmodified official riscv64.img via U-Boot UEFI in QEMU"
+	@echo "  qemu-image-rv64          Boot SSH-provisioned NetBSD image in QEMU (:2226 -> :22)"
+	@echo "  fpga-boot-pristine-rv64  Boot unmodified official riscv64.img directly on FPGA"
+	@echo "  fpga-boot-rv64           Boot SSH + microbenchmark NetBSD image on FPGA"
 	@echo
 	@echo "Network: export http_proxy=http://localhost:9091 https_proxy=http://localhost:9091"
 
@@ -205,15 +235,17 @@ rv32: build-rv32 ## Alias for the RV32 release build
 rv64: build-rv64 ## Alias for the RV64 release build
 
 
+NETBSD_OBJCOPY_BSS  := --set-section-flags .bss=alloc,load,contents --set-section-flags .sbss=alloc,load,contents
+
 $(NETBSD_RV32_KERNEL_BIN): $(NETBSD_RV32_KERNEL_GZ)
 	@mkdir -p $(dir $@)
 	gzip -dc $< > $(NETBSD_RV32_KERNEL)
-	$(NETBSD_OBJCOPY) -O binary $(NETBSD_RV32_KERNEL) $@
+	$(NETBSD_OBJCOPY) -O binary $(NETBSD_OBJCOPY_BSS) $(NETBSD_RV32_KERNEL) $@
 
 $(NETBSD_RV64_KERNEL_BIN): $(NETBSD_RV64_KERNEL_GZ)
 	@mkdir -p $(dir $@)
 	gzip -dc $< > $(NETBSD_RV64_KERNEL)
-	$(NETBSD_OBJCOPY) -O binary $(NETBSD_RV64_KERNEL) $@
+	$(NETBSD_OBJCOPY) -O binary $(NETBSD_OBJCOPY_BSS) $(NETBSD_RV64_KERNEL) $@
 
 $(NETBSD_RV32_DTB): $(NETBSD_RV32_DTS)
 	@mkdir -p $(dir $@)
@@ -324,7 +356,88 @@ qemu-rv64: opensbi-rv64-qemu ## Build prerequisites and run NetBSD RV64 under QE
 	@test -f $(NETBSD_RV64_KERNEL_GZ) || { echo "error: missing $(NETBSD_RV64_KERNEL_GZ); run make build-rv64 first"; exit 1; }
 	@test -f $(NETBSD_RV64_DISK_GZ) || { echo "error: missing $(NETBSD_RV64_DISK_GZ); run make build-rv64 first"; exit 1; }
 	gzip -dkf $(NETBSD_RV64_KERNEL_GZ) $(NETBSD_RV64_DISK_GZ)
-	exec qemu-system-riscv64 -M virt -m 4G -bios $(NETBSD_OPENSBI_RV64_QEMU_BIOS) -kernel $(NETBSD_RV64_KERNEL) -drive if=none,file=$(NETBSD_RV64_DISK),id=hd0,format=raw -device virtio-blk-device,drive=hd0 -device virtio-rng-device -netdev type=user,id=net0 -device virtio-net-device,netdev=net0,mac=00:11:22:33:44:55 -append "root=dk1" -nographic
+	exec qemu-system-riscv64 -M virt -m 4G \
+		-bios $(NETBSD_OPENSBI_RV64_QEMU_BIOS) -kernel $(NETBSD_RV64_KERNEL) \
+		-drive if=none,file=$(NETBSD_RV64_DISK),id=hd0,format=raw \
+		-device virtio-blk-device,drive=hd0 -device virtio-rng-device \
+		-netdev type=user,id=net0 \
+		-device virtio-net-device,netdev=net0,mac=00:11:22:33:44:55 \
+		-append "root=dk1" -nographic
+
+$(NETBSD_DL_IMG_GZ):
+	@mkdir -p $(NETBSD_DL_DIR)
+	/usr/bin/curl --http1.1 -L --fail --retry 8 --retry-all-errors \
+		-C - -o $@ $(NETBSD_BINARY_MIRROR)/gzimg/riscv64.img.gz
+
+$(NETBSD_DL_KERN_GZ):
+	@mkdir -p $(NETBSD_DL_DIR)
+	/usr/bin/curl --http1.1 -L --fail --retry 8 --retry-all-errors \
+		-C - -o $@ $(NETBSD_BINARY_MIRROR)/kernel/netbsd-GENERIC64.gz
+
+$(NETBSD_DL_IMG): $(NETBSD_DL_IMG_GZ)
+	gzip -dkf $(NETBSD_DL_IMG_GZ)
+
+$(NETBSD_DL_KERN): $(NETBSD_DL_KERN_GZ)
+	gzip -dkf $(NETBSD_DL_KERN_GZ)
+
+$(NETBSD_DL_KERN_BIN): $(NETBSD_DL_KERN)
+	$(NETBSD_OBJCOPY) -O binary $(NETBSD_OBJCOPY_BSS) $(NETBSD_DL_KERN) $@
+
+fetch-image-rv64: $(NETBSD_DL_IMG) $(NETBSD_DL_KERN_BIN) ## Download official NetBSD 11 RV64 image
+	@echo "NetBSD RV64 image: $(NETBSD_DL_IMG)"
+	@echo "NetBSD RV64 kernel: $(NETBSD_DL_KERN)"
+
+$(NETBSD_FPGA_IMG): $(NETBSD_DL_IMG) $(NETBSD_DL_KERN)
+	$(PYTHON) $(OS_BOOT_TOOL) provision \
+		--os netbsd \
+		--src $(NETBSD_DL_IMG) \
+		--dst $(NETBSD_FPGA_IMG) \
+		--kernel $(NETBSD_DL_KERN) \
+		--work-dir $(NETBSD_FPGA_WORK)
+
+prepare-fpga-rv64: $(NETBSD_FPGA_IMG) ## Provision NetBSD RV64 image with SSH & microbenchmarks
+
+qemu-image-pristine-rv64: $(NETBSD_DL_IMG) ## Boot unmodified official riscv64.img via U-Boot UEFI
+	$(PYTHON) $(OS_BOOT_TOOL) firmware --work-dir $(NETBSD_FPGA_WORK) --jobs $(NPROC)
+	exec qemu-system-riscv64 -M virt -cpu $(QEMU_RV64_CPU) -smp 2 -m 4G \
+		-nographic -global virtio-mmio.force-legacy=false -snapshot \
+		-bios $(NETBSD_FPGA_WORK)/opensbi-u-boot/platform/generic/firmware/fw_dynamic.bin \
+		-kernel $(NETBSD_FPGA_WORK)/uboot/usr/lib/u-boot/qemu-riscv64_smode/u-boot.bin \
+		-drive file=$(NETBSD_DL_IMG),format=raw,if=none,id=hd0 \
+		-device virtio-blk-device,drive=hd0 -device virtio-rng-device \
+		-netdev user,id=net0,hostfwd=tcp::2226-:22 \
+		-device virtio-net-device,netdev=net0,mac=$(FPGA_MAC)
+
+qemu-image-rv64: $(NETBSD_FPGA_IMG) ## Boot SSH-provisioned NetBSD RV64 image in QEMU
+	$(PYTHON) $(OS_BOOT_TOOL) firmware --work-dir $(NETBSD_FPGA_WORK) --jobs $(NPROC)
+	exec qemu-system-riscv64 -M virt -cpu $(QEMU_RV64_CPU) -smp 2 -m 4G \
+		-nographic -global virtio-mmio.force-legacy=false \
+		-bios $(NETBSD_FPGA_WORK)/opensbi-u-boot/platform/generic/firmware/fw_dynamic.bin \
+		-kernel $(NETBSD_DL_KERN) -append "root=dk1" \
+		-drive file=$(NETBSD_FPGA_IMG),format=raw,if=none,id=hd0 \
+		-device virtio-blk-device,drive=hd0 -device virtio-rng-device \
+		-netdev user,id=net0,hostfwd=tcp::2226-:22 \
+		-device virtio-net-device,netdev=net0,mac=$(FPGA_MAC)
+
+fpga-boot-pristine-rv64: $(NETBSD_DL_IMG) ## Boot unmodified official riscv64.img on FPGA (COW)
+	@test -n "$(FPGA_DTB)" || { echo "error: set FPGA_DTB=/path/to/native.dtb"; exit 1; }
+	$(PYTHON) $(OS_BOOT_TOOL) fpga-boot \
+		--board $(FPGA_BOARD) --dtb $(FPGA_DTB) --disk $(NETBSD_DL_IMG) \
+		--work-dir $(NETBSD_FPGA_WORK) --port $(FPGA_PORT) \
+		--server $(FPGA_SERVER) --loader-ip $(FPGA_LOADER) \
+		--bridge-ip $(FPGA_BRIDGE) --mac $(FPGA_MAC) \
+		--snapshot --keep-alive
+
+NETBSD_FPGA_KERN_ARGS = $(if $(filter 1,$(NETBSD_DIRECT_KERNEL)),--kernel $(NETBSD_DL_KERN_BIN) --bootargs "root=dk1",)
+
+fpga-boot-rv64: $(NETBSD_FPGA_IMG) $(NETBSD_DL_KERN_BIN) ## Boot SSH-provisioned NetBSD on FPGA
+	@test -n "$(FPGA_DTB)" || { echo "error: set FPGA_DTB=/path/to/native.dtb"; exit 1; }
+	$(PYTHON) $(OS_BOOT_TOOL) fpga-boot \
+		--board $(FPGA_BOARD) --dtb $(FPGA_DTB) --disk $(NETBSD_FPGA_IMG) \
+		--work-dir $(NETBSD_FPGA_WORK) --port $(FPGA_PORT) \
+		--server $(FPGA_SERVER) --loader-ip $(FPGA_LOADER) \
+		--bridge-ip $(FPGA_BRIDGE) --mac $(FPGA_MAC) \
+		$(NETBSD_FPGA_KERN_ARGS) --keep-alive
 
 clean: ## Remove NetBSD source and build artifacts
 	rm -rf $(NETBSD_SRC_DIR) $(NETBSD_BUILD_DIR)

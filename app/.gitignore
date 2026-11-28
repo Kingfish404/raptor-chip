@@ -8,7 +8,13 @@
 !tinyos/README.md
 !tinyos/patches/**
 !tinyos/scripts/**
+!netbsd/Makefile
+!netbsd/README.md
+!netbsd/patches/**
+!freebsd/Makefile
+!freebsd/README.md
 !*.mk
+!*.py
 
 tinyos/egos-2000/
 tinyos/xv6-riscv/

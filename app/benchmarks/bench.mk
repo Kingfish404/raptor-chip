@@ -2,7 +2,7 @@
 APP_HOME := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/..)
 include $(APP_HOME)/common.mk
 BENCH_DIR := $(APP_HOME)/benchmarks/$(APP_BENCHMARK)
-BUILD_DIR := $(APP_HOME)/build/rv$(XLEN)/benchmarks/$(APP_BENCHMARK)$(BENCH_SUBDIR)
+BUILD_DIR := $(APP_OUT_ROOT)/benchmarks/$(APP_BENCHMARK)$(BENCH_SUBDIR)
 LITEX_BUILD_DIR := $(APP_HOME)/build/rv32/benchmarks/$(APP_BENCHMARK)-litex$(BENCH_SUBDIR)
 NATIVE_BUILD_DIR := $(APP_HOME)/build/native/benchmarks/$(APP_BENCHMARK)$(BENCH_SUBDIR)
 NATIVE_LOG_DIR := $(NATIVE_BUILD_DIR)/logs/native
@@ -50,7 +50,7 @@ $(NATIVE_BUILD_DIR)/.build-args: APP_BUILD_COMMAND = $(HOST_CC) $(NATIVE_CFLAGS)
 	$(NATIVE_DEFINES) $(NATIVE_LDFLAGS) $(BENCH_MODE_SIGNATURE)
 define BENCH_BUILD_RULE
 $(BUILD_DIR)/$(APP_BENCHMARK)-$(1).elf: $(SRC) $(PORT_HDR) $(_PICOLIBC_IO) \
-	$(APP_HOME)/lib/pk-user.ld $(BUILD_DIR)/.build-args
+	$(if $(_PICOLIBC_SPECS),$(APP_HOME)/lib/pk-user.ld,) $(BUILD_DIR)/.build-args
 	@mkdir -p $$(dir $$@)
 	$$(CC) $$(CFLAGS) -D$(BENCH_DEFINE_PREFIX)_BENCH_MODE=$$(MODE_$(1)) \
 		$$(SRC) $$(_PICOLIBC_IO) -o $$@

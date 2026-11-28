@@ -62,15 +62,23 @@ def build(directory, firmware, dtb, server, client, port, cross="riscv64-unknown
                    f"#define INITRD_SIZE {len(initrd)}u\n"
                    f"#define INITRD_CRC {zlib.crc32(initrd)}u\n")
     network = network or {"driver": "raptor", "mac": "02:52:41:50:05:01"}
-    if network["driver"] not in ("raptor", "raptor_dma", "native", "native_dma", "liteeth"):
+    if network["driver"] not in (
+        "raptor", "raptor_dma", "native", "native_dma", "liteeth", "virtio_net"
+    ):
         raise ValueError("unsupported TFTP Ethernet backend")
     is_dma = network["driver"] in ("raptor_dma", "native_dma")
+    is_vnet = network["driver"] == "virtio_net"
     mac = bytes.fromhex(network["mac"].replace(":", ""))
     if len(mac) != 6 or mac[0] & 1:
         raise ValueError("a unicast six-byte loader MAC is required")
     config += "#define NETBOOT_MAC " + ", ".join(str(value) for value in mac) + "\n"
     config += f'#define NETBOOT_LITEETH {int(network["driver"] == "liteeth")}\n'
     config += f"#define NETBOOT_ETH_DMA {int(is_dma)}\n"
+    config += f"#define NETBOOT_VIRTIO_NET {int(is_vnet)}\n"
+    if is_vnet:
+        vnet_base = network.get("vnet_base", 0x10002000)
+        vnet_base = int(vnet_base, 0) if isinstance(vnet_base, str) else int(vnet_base)
+        config += f"#define NETBOOT_VNET_BASE {vnet_base}u\n"
     if is_dma:
         dma_base = network.get("dma_base", 0x18000000)
         dma_base = int(dma_base, 0) if isinstance(dma_base, str) else int(dma_base)
@@ -86,7 +94,7 @@ def build(directory, firmware, dtb, server, client, port, cross="riscv64-unknown
 ENTRY(_start)
 MEMORY {
   rom (rx) : ORIGIN = 0x8f000000, LENGTH = 64K
-  sram (rw) : ORIGIN = 0x8f010000, LENGTH = 32K
+  sram (rw) : ORIGIN = 0x8f010000, LENGTH = 64K
 }
 SECTIONS {
   .text : { KEEP(*(.text.start)) *(.text*) *(.rodata*) *(.srodata*) } > rom

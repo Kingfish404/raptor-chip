@@ -394,6 +394,37 @@ CLB LUTs (`201-246` FFs, 0 BRAM) for 2 harts and `2,311` CLB LUTs (`294` FFs,
 0 BRAM, `0.44%` of `xcku15p`) for 4 harts, keeping cluster area nearly linear
 in `NHARTS`.
 
+### 6.5 Guest OS Footprint, SSH Interactivity & Microbenchmark Comparison (KU15P @ 50 MHz)
+
+Controlled hardware measurements across five mainline RISC-V operating systems on
+the identical MLK-CU08-KU15P `rv64-default-w4` SoC (50 MHz, 4-wide OoO, no L2,
+`rapt_native_io_soc` + `VirtIO-Net`):
+
+| Guest OS (`riscv64`) | Init & Userspace | Idle RAM | `PID 1` / `sshd` RSS | Cold SSH | Warm SSH (`ControlMaster`) | `fork+exec` (`/bin/true`) | CoreMark (`CM/MHz` / IPC) | `memprobe` L1D / 1 MiB |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| **Alpine 3.24.4** | `OpenRC` + `musl` + `BusyBox` | **13.5 MiB** | **0.88 / 3.43 MiB** | **16.46 s** | **1.12 s** | **294.5 ms** | 2.90 / 0.932 | 4.09 / 40.26 cyc |
+| **NetBSD 11.1** | `rc.d` + BSD `libc` (`ash`) | **23.3 MiB** | ~1.0 / ~4.2 MiB | **18.97 s** | 2.66 s | 842.5 ms | **3.18 / 1.086** | **3.11 / 36.03 cyc** |
+| **FreeBSD 15.0-RELEASE** | `rc.d` + BSD `libc` (LLVM 19) | 51.9 MiB | 1.04 / 5.31 MiB | 35.82 s | 4.28 s | 826.4 ms | 1.74 / 0.736 | 3.89 / 39.80 cyc |
+| **Debian 13 (`20261123`)** | `systemd 257` + `glibc 2.41` | 58.7 MiB | 11.92 / 6.45 MiB | 80.70 s | **2.47 s** | **509.1 ms** | 2.89 / 0.928 | 4.04 / 40.89 cyc |
+| **Ubuntu 26.10** | `systemd` + `glibc 2.42` + `uutils` | 70.9 MiB | 13.40 / 6.42 MiB | 93.19 s | 6.25 s | 3,178.4 ms | 2.82 / 0.909 | 4.10 / 41.00 cyc |
+
+- **Cold SSH (`16.5 s` on Alpine vs `80.7-93.2 s` on Debian/Ubuntu)**: OpenSSH 10
+  executes separate `sshd-session` and `sshd-auth` helpers per login. On `glibc` +
+  `systemd` distributions, loading 12-22 shared libraries (`libcrypto`, `libkrb5`,
+  `libpam`, `libselinux`, `libwtmpdb`) and `pam_systemd` session registration
+  dominates 50 MHz cold logins, whereas Alpine (`musl` + BusyBox, no PAM) and
+  NetBSD finish **4.9-5.7x faster**.
+- **Warm SSH & `fork+exec` (`295 ms` on Alpine and `509 ms` on Debian vs `3,178 ms`
+  on Ubuntu 26.10)**: Ubuntu 26.10 replaces GNU coreutils with ~11 MiB Rust `uutils`
+  PIE binaries, penalizing every shell command spawn on small-cache 50 MHz cores;
+  Debian 13's C GNU coreutils is **6.2x faster** and Alpine's cache-hot BusyBox is
+  **10.8x faster** (`1.12 s` warm SSH round-trip).
+- **Microbenchmark noise**: All five OSes report identical hardware L1D hit/miss
+  timings (`16 / 73-74` cycles) and `fence` overhead (`20` cycles); NetBSD 11.1
+  (18 total processes) and Alpine 3.24 (`13.5 MiB` used RAM) exhibit the lowest
+  background OS scheduler and TLB/I-cache perturbation (`3.11-4.09` cycles/load on
+  1-16 KiB L1D pointer chasing).
+
 ---
 
 ## 7. Reproducing These Results (Integrated Repo Tooling)

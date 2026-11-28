@@ -266,7 +266,7 @@ def device_tree(args, out, ram_bytes):
             reg = <0 0x18000000 0 0x1000>;
         };
 '''
-    if getattr(args, "cm005_ethernet", 0):
+    if getattr(args, "cm005_ethernet", 0) and not io_soc:
         layout = PROFILE["cm005_cpu_ethernet"]
         base = {key: int(layout[key], 0) for key in ("phy_base", "csr_base", "buffer_base")}
         mac = layout["mac"].replace(":", " ")
@@ -300,17 +300,29 @@ def device_tree(args, out, ram_bytes):
             litex,slot-size = <{layout['slot_size']}>;
         }};
 '''
-    soc_dma_prop = " dma-noncoherent;" if io_soc else ""
+    preset_name = getattr(args, "preset", "small")
+    preset_cfg = (parse_rapt_config(REPO / "rtl/configs" / preset_name / "rapt_config.svh",
+                                    args.xlen == 64)
+                  if io_soc else {})
+    has_l2 = bool(preset_cfg.get("RAPT_L2_EN"))
+    io_noncoherent = io_soc and has_l2
+    soc_dma_prop = " dma-noncoherent;" if io_noncoherent else ""
+    io_dma_prop = "\n            dma-noncoherent;" if io_noncoherent else ""
     io_dts = ""
     if io_soc:
-        io_dts += """
-        virtio_mmio@10002000 {
+        io_dts += f"""
+        rtc@10009000 {{
+            compatible = "google,goldfish-rtc";
+            reg = <0 0x10009000 0 0x1000>;
+            interrupt-parent = <&plic>;
+            interrupts = <6>;
+        }};
+        virtio_mmio@10002000 {{
             compatible = "virtio,mmio";
             reg = <0 0x10002000 0 0x1000>;
             interrupt-parent = <&plic>;
-            interrupts = <2>;
-            dma-noncoherent;
-        };
+            interrupts = <2>;{io_dma_prop}
+        }};
 """
     if getattr(args, "qemu_bridge", 0):
         root_clocks = """    clocks {
@@ -321,41 +333,44 @@ def device_tree(args, out, ram_bytes):
         };
     };
 """
-        io_dts += """
-        virtio_mmio@10001000 {
+        io_dts += f"""
+        virtio_mmio@10001000 {{
             compatible = "virtio,mmio";
             reg = <0 0x10001000 0 0x1000>;
             interrupt-parent = <&plic>;
-            interrupts = <3>;
-            dma-noncoherent;
-        };
-        sdhci@42000000 {
+            interrupts = <3>;{io_dma_prop}
+        }};
+        virtio_mmio@10003000 {{
+            compatible = "virtio,mmio";
+            reg = <0 0x10003000 0 0x1000>;
+            interrupt-parent = <&plic>;
+            interrupts = <5>;{io_dma_prop}
+        }};
+        sdhci@42000000 {{
             compatible = "arasan,sdhci-8.9a", "generic-sdhci";
             reg = <0 0x42000000 0 0x1000>;
             interrupt-parent = <&plic>;
             interrupts = <4>;
             clocks = <&sdhci_clk>, <&sdhci_clk>;
             clock-names = "clk_xin", "clk_ahb";
-            clock-frequency = <50000000>;
-            dma-noncoherent;
-        };
-        pci@41000000 {
+            clock-frequency = <50000000>;{io_dma_prop}
+        }};
+        pci@41000000 {{
             compatible = "pci-host-ecam-generic";
             device_type = "pci";
             #address-cells = <3>;
             #size-cells = <2>;
             #interrupt-cells = <1>;
-            bus-range = <0x00 0x0f>;
+            bus-range = <0x00 0x00>;
             reg = <0 0x41000000 0 0x01000000>;
-            ranges = <0x02000000 0x0 0x50000000 0x0 0x50000000 0x0 0x10000000>;
-            dma-noncoherent;
+            ranges = <0x02000000 0x0 0x50000000 0x0 0x50000000 0x0 0x10000000>;{io_dma_prop}
             interrupt-map-mask = <0x0 0x0 0x0 0x7>;
             interrupt-map =
                 <0x0 0x0 0x0 0x1 &plic 11>,
                 <0x0 0x0 0x0 0x2 &plic 12>,
                 <0x0 0x0 0x0 0x3 &plic 13>,
                 <0x0 0x0 0x0 0x4 &plic 14>;
-        };
+        }};
 """
     else:
         root_clocks = ""
@@ -538,6 +553,7 @@ def prepare(args, out):
         for path in (BOARD / "vendor/ethernet").glob("*"):
             if path.is_file():
                 shutil.copyfile(path, sources / path.name)
+    io_soc = bool(getattr(args, "virtio_net", 0) or getattr(args, "qemu_bridge", 0))
     if args.cm005_bridge:
         generated = out / "cm005-generated"
         command = [
@@ -546,7 +562,8 @@ def prepare(args, out):
             "--sys-clk-freq", str(args.clock_mhz * 1_000_000),
         ]
         if args.cm005_ethernet:
-            command += ["--cpu-eth-stream" if getattr(args, "eth_dma", 0) else "--with-cpu-ethernet"]
+            use_stream = bool(getattr(args, "eth_dma", 0) or io_soc)
+            command += ["--cpu-eth-stream" if use_stream else "--with-cpu-ethernet"]
         run(command,
             log=out / "cm005-generation.log")
         for path in generated.iterdir():
@@ -594,7 +611,7 @@ def prepare(args, out):
                   "rapt_goldfish_rtc.sv", "rapt_virtio_mmio_net.sv",
                   "rapt_qemu_io_bridge.sv", "rapt_native_io_bus.sv",
                   "rapt_native_io_soc.sv"]
-    if getattr(args, "eth_dma", 0):
+    if getattr(args, "eth_dma", 0) or (io_soc and args.cm005_ethernet):
         names.append("rapt_eth_axi_dma.sv")
     names.append("rapt_native_soc.sv")
     (sources / "soc_sources.sv").write_text("".join(f'`include "{name}"\n' for name in names))
@@ -775,10 +792,15 @@ def main():
         parser.error("CM005 CPU Ethernet requires this board's CM005 forwarder")
     if args.cm005_bridge and args.clock_mhz not in (50, 75):
         parser.error("CM005 forwarding currently requires CLOCK_MHZ in {50, 75}; disable it explicitly for other clocks")
-    if (args.virtio_net or args.qemu_bridge) and (args.sampling or args.cm005_bridge or
-                                                  not args.ethernet):
-        parser.error("--virtio-net/--qemu-bridge share the board MAC: they require --ethernet 1 "
-                     "without sampling or CM005 forwarding")
+    if args.virtio_net or args.qemu_bridge:
+        if args.sampling or args.eth_dma:
+            parser.error("--virtio-net/--qemu-bridge cannot be combined with sampling or --eth-dma")
+        if PROFILE.get("cm005_bridge"):
+            if not (args.cm005_bridge and args.cm005_ethernet):
+                parser.error("--virtio-net/--qemu-bridge on CU08 require --cm005-bridge 1 "
+                             "and --cm005-ethernet 1")
+        elif not args.ethernet:
+            parser.error("--virtio-net/--qemu-bridge require --ethernet 1")
     if args.nharts < 1 or args.nharts > 16:
         parser.error("nharts must be between 1 and 16")
     if args.jobs <= 0 or args.jobs > 32:

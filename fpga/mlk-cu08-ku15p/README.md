@@ -76,25 +76,33 @@ For the LiteX BIOS and DDR4/CM005 Ethernet netboot profile, run
 `make -C fpga/litex FPGA_BOARD=mlk_cu08_ku15p fpga-netboot-rv64-build`. See the
 [netboot workflow](../litex/NETBOOT.md#fixed-cu08-and-rk-end-to-end-targets).
 
-## Ubuntu 26.10 (RVA23) NFS root
+## Linux (Ubuntu 26.10 / Debian 13 / Alpine 3.24) and BSD (NetBSD 11 / FreeBSD 15)
 
-Follow the [shared Ubuntu workflow](../common/UBUNTU.md). `ubuntu-bitstream`
-defaults to RV64 `default` (RVA23U64/RVA23S64), DDR4, 50 MHz, `CM005_BRIDGE=1` and
-`CM005_ETHERNET=1`. The CPU uses the Linux LiteEth ABI on a virtual third
-CM005 port. CPU queue congestion and virtual-PHY reset do not block/reset the
-A/B forwarding path. The loader MAC/IP are distinct from KU5P; prepare a
-separate NFS root and reserve the board's loader address.
+Follow the [shared Linux distribution workflow](../common/DISTRO.md). `ubuntu-bitstream`,
+`debian-bitstream`, and `alpine-bitstream` default to RV64 `default`, DDR4, 50 MHz,
+`CM005_BRIDGE=1` and `CM005_ETHERNET=1`. The CPU uses the Linux LiteEth ABI (or
+`ETH_DMA=1` AXI4 Ring DMA) on a virtual third CM005 port; CPU queue congestion and
+virtual-PHY reset do not block or reset the A↔B forwarding path.
 
 ```sh
-make -C fpga/mlk-cu08-ku15p ubuntu-test
-make -C fpga/mlk-cu08-ku15p ubuntu-bitstream
-make -C fpga/mlk-cu08-ku15p ubuntu-kernel JOBS=8
-make -C fpga/mlk-cu08-ku15p ubuntu-rootfs UBUNTU_SSH_KEY=/path/to/your.pub
-make -C fpga/mlk-cu08-ku15p ubuntu-bundle ubuntu-check
-make -C fpga/mlk-cu08-ku15p ubuntu-serve
-# Reprogram only after work depending on this board's A/B bridge has finished.
-make -C fpga/mlk-cu08-ku15p ubuntu-load HW_TARGET='*/<KU15P-JTAG-ID>'
-make -C fpga/mlk-cu08-ku15p ubuntu-boot UART_PORT='/dev/serial/by-id/<KU15P-UART>'
+# Persistent NFS Alpine 3.24 (fastest 50 MHz SSH interactivity + apk persistence):
+make -C fpga/mlk-cu08-ku15p alpine-kernel JOBS=8
+make -C fpga/mlk-cu08-ku15p alpine-rootfs UBUNTU_SSH_KEY=/path/to/your.pub
+make -C fpga/mlk-cu08-ku15p alpine-apps alpine-bundle alpine-check
+make -C fpga/mlk-cu08-ku15p alpine-serve
+make -C fpga/mlk-cu08-ku15p alpine-load HW_TARGET='*/<KU15P-JTAG-ID>'
+make -C fpga/mlk-cu08-ku15p alpine-boot UART_PORT='/dev/serial/by-id/<KU15P-UART>' \
+  UBUNTU_HTTP_PROXY=http://192.168.50.1:7890
+
+# Equivalent persistent NFS or DDR4 ramroot workflows for Ubuntu 26.10 and Debian 13:
+make -C fpga/mlk-cu08-ku15p ubuntu-rootfs ubuntu-apps ubuntu-bundle ubuntu-check ubuntu-serve
+make -C fpga/mlk-cu08-ku15p debian-rootfs debian-apps debian-bundle debian-check debian-serve
+
+# Unmodified upstream NetBSD 11.1 and FreeBSD 15.0-RELEASE .img boot (VirtIO + UEFI):
+make -C app/netbsd fetch-image-rv64 prepare-fpga-rv64 fpga-boot-rv64 \
+  FPGA_PORT='/dev/serial/by-id/<KU15P-UART>'
+make -C app/freebsd fetch prepare-fpga fpga-boot \
+  FPGA_PORT='/dev/serial/by-id/<KU15P-UART>'
 ```
 
 ## Configuration and outputs

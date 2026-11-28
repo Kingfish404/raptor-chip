@@ -50,9 +50,11 @@ For RVV, select `default`, `default-*`, `large` or RV64 `chip64-rva23`. Use the 
 for the chosen preset and board. The board build options are in the
 [FPGA guide](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/README.md).
 
-The KU5P and CU08-KU15P SoCs provide an RV64 Ubuntu flow over TFTP
-and NFS. Optional I/O adds a VirtIO-MMIO NIC and host-backed block
-devices. See [Ubuntu on FPGA SoCs](./linux_kernel.md#ubuntu-on-fpga-socs).
+The KU5P and CU08-KU15P SoCs provide RV64 **Alpine 3.24**, **Debian 13**, and
+**Ubuntu 26.10** flows over TFTP with persistent NFS, DDR4 `ramroot`/`squashfs`, or
+block roots, plus unmodified upstream **NetBSD 11.1** (`app/netbsd/`) and
+**FreeBSD 15.0-RELEASE** (`app/freebsd/`) `.img` boot over the VirtIO/UEFI bridge.
+See [Linux and OS Boot](./linux_kernel.md#ubuntu-on-native-fpga-socs).
 
 ## ASIC Flow
 
