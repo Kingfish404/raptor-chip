@@ -29,6 +29,14 @@ module rapt_fpu_prefix_adder #(
 );
 `ifdef RAPT_FPGA_DSP
   localparam bit FpgaCarry = `RAPT_FPGA_DSP;
+`elsif VERILATOR
+`ifndef SYNTHESIS
+  // Behavioral fixed-width addition is bit-exact with the prefix tree and
+  // avoids per-cycle bit-level prefix evaluation in Verilator simulation.
+  localparam bit FpgaCarry = 1'b1;
+`else
+  localparam bit FpgaCarry = 1'b0;
+`endif
 `else
   localparam bit FpgaCarry = 1'b0;
 `endif

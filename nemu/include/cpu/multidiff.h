@@ -25,6 +25,19 @@ bool nemu_uart_reset_state(void) __attribute__((weak));
 bool nemu_plic_reset_state(void) __attribute__((weak));
 void nemu_md_timer_update(void) __attribute__((weak));
 
+#ifdef CONFIG_ISA_riscv
+extern bool nemu_md_enabled;
+extern bool nemu_md_clint;
+static inline bool multidiff_active(void)
+{
+  return nemu_md_enabled;
+}
+
+static inline bool multidiff_clint_active(void)
+{
+  return nemu_md_enabled && nemu_md_clint;
+}
+#else
 static inline bool multidiff_active(void)
 {
   return nemu_md_active && nemu_md_active();
@@ -34,6 +47,7 @@ static inline bool multidiff_clint_active(void)
 {
   return nemu_md_clint_active && nemu_md_clint_active();
 }
+#endif
 
 static inline bool multidiff_plic_active(void)
 {

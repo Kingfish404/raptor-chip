@@ -62,7 +62,7 @@ uint64_t cpu_thread_time_us(void)
   return cpu_thread_wall_us() / nemu_thread_clock_div;
 }
 
-void cpu_bus_lock(void)
+void cpu_bus_lock_slow(void)
 {
   if (nemu_threaded && bus_depth++ == 0)
   {
@@ -71,7 +71,7 @@ void cpu_bus_lock(void)
   }
 }
 
-void cpu_bus_unlock(void)
+void cpu_bus_unlock_slow(void)
 {
   if (nemu_threaded)
   {
@@ -84,12 +84,12 @@ void cpu_bus_unlock(void)
   }
 }
 
-void cpu_bus_unwind(void)
+void cpu_bus_unwind_slow(void)
 {
   if (nemu_threaded && bus_depth)
   {
     bus_depth = 1;
-    cpu_bus_unlock();
+    cpu_bus_unlock_slow();
   }
 }
 

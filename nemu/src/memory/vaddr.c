@@ -15,7 +15,10 @@
 
 #include <setjmp.h>
 #include <isa.h>
+#include <cpu/cpu.h>
 #include <cpu/thread.h>
+#include <cpu/multidiff.h>
+#include <memory/host.h>
 #include <memory/paddr.h>
 #include <memory/tlb.h>
 #include <memory/trap.h>
@@ -32,6 +35,7 @@ bool pmp_check(paddr_t addr, int size, uint32_t priv,
 extern NEMU_TLS word_t pmp_last_fault_addr;
 
 NEMU_TLS word_t g_vaddr = 0;
+NEMU_TLS uint8_t vaddr_last_ifetch_pbmt = 0;
 
 /* The Raptor 32-bit platform accepts both zero and all-ones upper halves
  * in Bare mode. Preserve other upper bits for PMA rejection, and never
@@ -125,8 +129,10 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
   if (len == 4 && (addr & 2))
   {
     const word_t first = vaddr_ifetch(addr, 2);
+    const uint8_t pbmt_lo = vaddr_last_ifetch_pbmt;
     if ((first & 3) != 3) return first;
     const word_t second = vaddr_ifetch(addr + 2, 2);
+    vaddr_last_ifetch_pbmt = pbmt_lo | vaddr_last_ifetch_pbmt;
     g_vaddr = addr;
     return first | (second << 16);
   }
@@ -149,6 +155,7 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
         cause = MCA_INS_ACC_FAU;
         nemu_memory_longjmp(22);
       }
+      vaddr_last_ifetch_pbmt = pbmt;
       return paddr_read(paddr, len);
     }
     paddr = isa_mmu_translate_attrs(addr, len, MEM_TYPE_IFETCH, &pbmt);
@@ -168,6 +175,7 @@ word_t vaddr_ifetch(vaddr_t addr, int len)
     cause = MCA_INS_ACC_FAU;
     nemu_memory_longjmp(22);
   }
+  vaddr_last_ifetch_pbmt = pbmt;
   return paddr_read(paddr, len);
 }
 
@@ -325,11 +333,45 @@ void vaddr_check_store(vaddr_t addr, int len)
   else checked_data_address(addr, len, true);
 }
 
+/* Compute a direct host-pointer addend when an entire 4 KiB physical page is
+ * normal RAM (PBMT==0, no MMIO/ROM) and passes PMP for the requested access
+ * mode. Any privilege, SATP, MSTATUS or PMP update calls soft_tlb_flush(). */
+static inline uintptr_t soft_tlb_compute_addend(
+    vaddr_t addr, paddr_t paddr, uint8_t pbmt, bool store)
+{
+  if (pbmt != 0) return 0;
+  paddr_t ppn = paddr & ~((paddr_t)PAGE_MASK);
+  if (!paddr_is_ram_span(ppn, PAGE_SIZE)) return 0;
+  if (pmp_check(ppn, PAGE_SIZE, pmp_effective_priv_ls(), !store, store, false))
+    return 0;
+  return (uintptr_t)guest_to_host(ppn) - (uintptr_t)(addr & ~((vaddr_t)PAGE_MASK));
+}
+
 /* Keep original width/alignment across RV32 FLD pieces without widening
  * each piece's PMP footprint or reading a device during validation. */
 word_t vaddr_read_piece(vaddr_t addr, int len, int original_len, bool original_misaligned)
 {
   addr = riscv_pointer_mask(addr);
+  /* Unified fast path for both Bare and Sv32/Sv39 RAM loads: a valid
+   * host_addend guarantees the full 4 KiB page is normal PMA RAM and passes
+   * PMP for the current privilege/MPRV state. */
+  if (likely(!mem_trace && !subsystem_mem_trace && !multidiff_active()
+             && ((addr & PAGE_MASK) <= (vaddr_t)(PAGE_SIZE - len))))
+  {
+    vaddr_t vpn = addr >> PAGE_SHIFT;
+    const soft_tlb_entry_t *e = &soft_tlb_load[vpn & SOFT_TLB_MASK];
+    if (likely(e->vpn == vpn && e->epoch == soft_tlb_epoch && e->host_addend != 0))
+    {
+      word_t data = host_read((void *)(e->host_addend + (uintptr_t)addr), len);
+#ifdef CONFIG_TARGET_SHARE
+      cpu.rvaddr = addr;
+      cpu.rlen = len;
+      cpu.rpaddr = e->ppn | (addr & PAGE_MASK);
+      cpu.rdata = data;
+#endif
+      return data;
+    }
+  }
   g_vaddr = addr;
   cpu.rvaddr = addr;
   cpu.rlen = len;
@@ -370,10 +412,6 @@ word_t vaddr_read_piece(vaddr_t addr, int len, int original_len, bool original_m
       check_data_pma(paddr, len, false);
       if (pmp_check(paddr, len, pmp_effective_priv_ls(), true, false, false))
       {
-        if (!mmu_on)
-        {
-          g_vaddr = addr + (pmp_last_fault_addr - paddr);
-        }
         cause = MCA_LOA_ACC_FAU;
         nemu_memory_longjmp(23);
       }
@@ -382,7 +420,8 @@ word_t vaddr_read_piece(vaddr_t addr, int len, int original_len, bool original_m
       return subsystem_log_read(addr, len, cpu.rdata);
     }
     paddr = isa_mmu_translate_attrs(addr, len, MEM_TYPE_READ, &pbmt);
-    soft_tlb_refill_attrs(soft_tlb_load, addr, paddr, pbmt);
+    uintptr_t addend = soft_tlb_compute_addend(addr, paddr, pbmt, false);
+    soft_tlb_refill_full(soft_tlb_load, addr, paddr, pbmt, addend);
   }
   check_data_type(paddr, pbmt, original_misaligned, false, original_len);
   check_data_pma(paddr, len, false);
@@ -394,6 +433,12 @@ word_t vaddr_read_piece(vaddr_t addr, int len, int original_len, bool original_m
     }
     cause = MCA_LOA_ACC_FAU;
     nemu_memory_longjmp(23);
+  }
+  if (!mmu_on)
+  {
+    uintptr_t addend = soft_tlb_compute_addend(addr, paddr, 0, false);
+    if (addend != 0)
+      soft_tlb_refill_full(soft_tlb_load, addr, paddr, 0, addend);
   }
   cpu.rpaddr = paddr;
   cpu.rdata = paddr_read(paddr, len);
@@ -408,6 +453,30 @@ word_t vaddr_read(vaddr_t addr, int len)
 static void vaddr_write_unlocked(vaddr_t addr, int len, word_t data)
 {
   addr = riscv_pointer_mask(addr);
+  if (likely(!mem_trace && !subsystem_mem_trace && !multidiff_active() && !nemu_threaded
+             && ((addr & PAGE_MASK) <= (vaddr_t)(PAGE_SIZE - len))))
+  {
+    vaddr_t vpn = addr >> PAGE_SHIFT;
+    const soft_tlb_entry_t *e = &soft_tlb_store[vpn & SOFT_TLB_MASK];
+    if (likely(e->vpn == vpn && e->epoch == soft_tlb_epoch && e->host_addend != 0))
+    {
+      paddr_t pa = e->ppn | (addr & PAGE_MASK);
+#ifdef CONFIG_TARGET_SHARE
+      cpu.vwaddr = addr;
+      cpu.pwaddr = pa;
+      cpu.wdata = data;
+      cpu.len = len;
+#endif
+      IFDEF(NEMU_HAS_SMP, if (unlikely(nemu_nr_harts > 1)) cpu_invalidate_reservations(pa, len));
+      host_write((void *)(e->host_addend + (uintptr_t)addr), len, data);
+      if (unlikely(cpu.reservation_bytes != 0) && ((cpu.reservation & ~(word_t)3) == (pa & ~(paddr_t)3)))
+      {
+        cpu.reservation = 0;
+        cpu.reservation_bytes = 0;
+      }
+      return;
+    }
+  }
   g_vaddr = addr;
   cpu.vwaddr = addr;
   cpu.wdata = data;
@@ -449,10 +518,6 @@ static void vaddr_write_unlocked(vaddr_t addr, int len, word_t data)
       check_data_pma(paddr, len, true);
       if (pmp_check(paddr, len, pmp_effective_priv_ls(), false, true, false))
       {
-        if (!mmu_on)
-        {
-          g_vaddr = addr + (pmp_last_fault_addr - paddr);
-        }
         cause = MCA_STO_ACC_FAU;
         nemu_memory_longjmp(24);
       }
@@ -467,7 +532,8 @@ static void vaddr_write_unlocked(vaddr_t addr, int len, word_t data)
       return;
     }
     paddr = isa_mmu_translate_attrs(addr, len, MEM_TYPE_WRITE, &pbmt);
-    soft_tlb_refill_attrs(soft_tlb_store, addr, paddr, pbmt);
+    uintptr_t addend = soft_tlb_compute_addend(addr, paddr, pbmt, true);
+    soft_tlb_refill_full(soft_tlb_store, addr, paddr, pbmt, addend);
   }
   check_data_type(paddr, pbmt, (addr & (len - 1)) != 0, true, len);
   check_data_pma(paddr, len, true);
@@ -479,6 +545,12 @@ static void vaddr_write_unlocked(vaddr_t addr, int len, word_t data)
     }
     cause = MCA_STO_ACC_FAU;
     nemu_memory_longjmp(24);
+  }
+  if (!mmu_on)
+  {
+    uintptr_t addend = soft_tlb_compute_addend(addr, paddr, 0, true);
+    if (addend != 0)
+      soft_tlb_refill_full(soft_tlb_store, addr, paddr, 0, addend);
   }
   cpu.pwaddr = paddr;
   paddr_write(paddr, len, data);

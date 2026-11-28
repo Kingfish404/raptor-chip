@@ -327,6 +327,7 @@ DISTRO_ENGINE ?= nemu
 DISTRO_SIM_PRESET ?= auto
 DISTRO_SIM_MILESTONE ?= Run /sbin/init as init process
 DISTRO_TIMEOUT ?= 3600
+SIM_DISTRO_TIMEOUT ?= $(if $(filter command line,$(origin DISTRO_TIMEOUT)),$(DISTRO_TIMEOUT),10800)
 SMP_HARTS ?= 2
 .PHONY: nemu-distro-download nemu-distro-prepare nemu-distro-check nemu-distro-run \
 	distro-download distro-prepare distro-check distro-run \
@@ -354,7 +355,7 @@ distro-run: nemu-distro-run
 sim-distro-smoke: ## Boot official Debian/Alpine/Ubuntu on RTL sim to /sbin/init rootfs handoff
 	$(LINUX_PYTHON) $(LINUX_HOME)/distro_boot.py check --distro $(DISTRO_BOOT) \
 		--work "$(DISTRO_WORK)" --engine sim --sim-preset $(DISTRO_SIM_PRESET) \
-		--sim-milestone "$(DISTRO_SIM_MILESTONE)" --timeout $(DISTRO_TIMEOUT)
+		--sim-milestone "$(DISTRO_SIM_MILESTONE)" --timeout $(SIM_DISTRO_TIMEOUT)
 sim-distro-check: ## Verify official Debian/Alpine/Ubuntu full boot on Verilator RTL sim
 	$(MAKE) nemu-distro-check DISTRO_ENGINE=sim
 sim-distro-run: ## Interactive official Debian/Alpine/Ubuntu serial console on Verilator RTL sim

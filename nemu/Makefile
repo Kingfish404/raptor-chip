@@ -68,6 +68,17 @@ ifneq ($(CONFIG_CC),)
 CC = $(call remove_quote,$(CONFIG_CC))
 endif
 CFLAGS_BUILD += $(call remove_quote,$(CONFIG_CC_OPT))
+ifeq ($(or $(CONFIG_CC_DEBUG),$(CONFIG_CC_ASAN),$(CONFIG_CC_O0),$(CONFIG_TARGET_AM)),)
+CFLAGS_BUILD += -O3 -flto=auto -march=native
+endif
+NEMU_PGO ?=
+NEMU_PGO_DIR ?= /tmp/raptor-nemu-pgo
+ifeq ($(NEMU_PGO),gen)
+CFLAGS_BUILD += -fprofile-generate=$(NEMU_PGO_DIR)
+endif
+ifeq ($(NEMU_PGO),use)
+CFLAGS_BUILD += -fprofile-use=$(NEMU_PGO_DIR) -fprofile-correction -Wno-missing-profile
+endif
 CFLAGS_BUILD += $(if $(CONFIG_CC_LTO),-flto,)
 CFLAGS_BUILD += $(if $(CONFIG_CC_DEBUG),-Og -ggdb3,)
 CFLAGS_BUILD += $(if $(CONFIG_CC_ASAN),-fsanitize=address,)

@@ -26,6 +26,18 @@ PMUState pmu;
 word_t start_timer = 0;
 word_t g_timer = 0;
 
+static bool g_pmu_detail = []() {
+  const char *v = std::getenv("RAPTOR_PMU_VERBOSE");
+  return v != nullptr && std::string(v) == "1";
+}();
+static bool g_pmu_minimal = []() {
+  const char *v = std::getenv("NSIM_PMU_MINIMAL");
+  return v != nullptr && std::string(v) == "1";
+}();
+
+void pmu_set_detail(bool enable) { g_pmu_detail = enable; }
+void pmu_set_minimal(bool enable) { g_pmu_minimal = enable; }
+
 struct PMUSamplerState
 {
   bool branch_recovery_active;
@@ -120,6 +132,7 @@ static bool l1d_tag_ready(Top *, ...)
 // after eval can miss a one-cycle handshake when valid drops on that edge.
 void perf_capture_axi_before_edge()
 {
+  if (g_pmu_minimal) return;
   axi_cycle_sample = {};
 #if !defined(RAPT_SOC) && !defined(CONFIG_wrapBus)
   if (VERILOG_RESET) return;
@@ -469,6 +482,7 @@ void perf_sample_per_cycle()
     return;
   }
   pmu.active_cycle++;
+  if (g_pmu_minimal) return;
   axi_metrics.sample(axi_cycle_sample);
   const unsigned wb_state = VERILOG_CPU(memory_subsystem__DOT__l1d_cache__DOT__wb_state);
   if (wb_state < l1d_writeback.state.size()) ++l1d_writeback.state[wb_state];
@@ -562,29 +576,32 @@ void perf_sample_per_cycle()
     const bool jal = VERILOG_BACKEND(cmu__DOT__jen_slots)[slot];
     const bool jalr = VERILOG_BACKEND(cmu__DOT__jren_slots)[slot];
     const bool mispredict = VERILOG_BACKEND(cmu__DOT__mispredict_slots)[slot];
-    if (conditional || jal || jalr)
+    if (g_pmu_detail)
     {
-      const word_t pc = VERILOG_BACKEND(cmu__DOT__rpc_slots)[slot];
-      auto &hotspot = branch_hotspots[pc];
-      ++hotspot.total;
-      hotspot.misses += mispredict;
-      hotspot.conditional += conditional;
-      hotspot.jal += jal && !jalr;
-      hotspot.jalr += jalr;
-      hotspot.inst = VERILOG_BACKEND(cmu__DOT__inst_slots)[slot];
-      ++hotspot.targets[VERILOG_BACKEND(cmu__DOT__npc_slots)[slot]];
-    }
-    if (conditional)
-    {
-      const word_t pc = VERILOG_BACKEND(cmu__DOT__rpc_slots)[slot];
-      const word_t npc = VERILOG_BACKEND(cmu__DOT__npc_slots)[slot];
-      const uint32_t inst = VERILOG_BACKEND(cmu__DOT__inst_slots)[slot];
-      const uint32_t immediate_bits = ((inst >> 31) << 12) | (((inst >> 7) & 1) << 11)
-          | (((inst >> 25) & 0x3f) << 5) | (((inst >> 8) & 0xf) << 1);
-      const int64_t immediate = static_cast<int16_t>(immediate_bits << 3) >> 3;
-      const bool taken = npc == pc + immediate;
-      for (auto &predictor : shadow_predictors)
-        sample_shadow_predictor(predictor, pc, taken, mispredict);
+      if (conditional || jal || jalr)
+      {
+        const word_t pc = VERILOG_BACKEND(cmu__DOT__rpc_slots)[slot];
+        auto &hotspot = branch_hotspots[pc];
+        ++hotspot.total;
+        hotspot.misses += mispredict;
+        hotspot.conditional += conditional;
+        hotspot.jal += jal && !jalr;
+        hotspot.jalr += jalr;
+        hotspot.inst = VERILOG_BACKEND(cmu__DOT__inst_slots)[slot];
+        ++hotspot.targets[VERILOG_BACKEND(cmu__DOT__npc_slots)[slot]];
+      }
+      if (conditional)
+      {
+        const word_t pc = VERILOG_BACKEND(cmu__DOT__rpc_slots)[slot];
+        const word_t npc = VERILOG_BACKEND(cmu__DOT__npc_slots)[slot];
+        const uint32_t inst = VERILOG_BACKEND(cmu__DOT__inst_slots)[slot];
+        const uint32_t immediate_bits = ((inst >> 31) << 12) | (((inst >> 7) & 1) << 11)
+            | (((inst >> 25) & 0x3f) << 5) | (((inst >> 8) & 0xf) << 1);
+        const int64_t immediate = static_cast<int16_t>(immediate_bits << 3) >> 3;
+        const bool taken = npc == pc + immediate;
+        for (auto &predictor : shadow_predictors)
+          sample_shadow_predictor(predictor, pc, taken, mispredict);
+      }
     }
     sample_branch(true, VERILOG_BACKEND(cmu__DOT__ben_slots)[slot],
                   VERILOG_BACKEND(cmu__DOT__jen_slots)[slot],
@@ -969,6 +986,7 @@ void perf_sample_per_inst(uint32_t inst)
     return;
   }
   pmu.instr_cnt++;
+  if (g_pmu_minimal) return;
   uint32_t opcode = inst & 0x7f;
   switch (opcode)
   {

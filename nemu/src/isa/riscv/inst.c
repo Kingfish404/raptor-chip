@@ -1906,52 +1906,627 @@ void nemu_memory_longjmp(int value)
   nemu_longjmp(exec_jmp_override ? *exec_jmp_override : exec_jmp_buf, value);
 }
 
-int isa_exec_once(Decode *s)
+extern NEMU_TLS uint8_t vaddr_last_ifetch_pbmt;
+NEMU_TLS vaddr_t fast_batch_pc = 0;
+NEMU_TLS uint64_t fast_batch_done = 0;
+NEMU_TLS bool fast_batch_active = false;
+
+static void icache_predecode(icache_entry_t *e, uint32_t inst)
+{
+  uint32_t opcode = inst & 0x7fu;
+  uint8_t rd = (uint8_t)((inst >> 7) & 0x1fu);
+  uint8_t funct3 = (uint8_t)((inst >> 12) & 0x7u);
+  uint8_t rs1 = (uint8_t)((inst >> 15) & 0x1fu);
+  uint8_t rs2 = (uint8_t)((inst >> 20) & 0x1fu);
+  uint8_t funct7 = (uint8_t)(inst >> 25);
+  e->rd = rd;
+  e->rs1 = rs1;
+  e->rs2 = rs2;
+  e->imm = 0;
+  e->op = IC_OP_FALLBACK;
+
+  switch (opcode)
+  {
+  case 0x37: // LUI
+    e->imm = (int32_t)(inst & 0xfffff000u);
+    e->op = IC_OP_LUI;
+    break;
+  case 0x17: // AUIPC
+    e->imm = (int32_t)(inst & 0xfffff000u);
+    e->op = IC_OP_AUIPC;
+    break;
+  case 0x6f: // JAL
+  {
+    uint32_t imm = (((inst >> 31) & 1u) << 20) | (((inst >> 12) & 0xffu) << 12) |
+                   (((inst >> 20) & 1u) << 11) | (((inst >> 21) & 0x3ffu) << 1);
+    e->imm = (int32_t)(imm << 11) >> 11;
+    e->op = IC_OP_JAL;
+    break;
+  }
+  case 0x67: // JALR
+    if (funct3 == 0)
+    {
+      e->imm = (int32_t)inst >> 20;
+      e->op = IC_OP_JALR;
+    }
+    break;
+  case 0x63: // BRANCH
+  {
+    uint32_t imm = (((inst >> 31) & 1u) << 12) | (((inst >> 7) & 1u) << 11) |
+                   (((inst >> 25) & 0x3fu) << 5) | (((inst >> 8) & 0xfu) << 1);
+    e->imm = (int32_t)(imm << 19) >> 19;
+    static const uint8_t br_ops[8] = {
+        IC_OP_BEQ, IC_OP_BNE, IC_OP_FALLBACK, IC_OP_FALLBACK,
+        IC_OP_BLT, IC_OP_BGE, IC_OP_BLTU, IC_OP_BGEU};
+    e->op = br_ops[funct3];
+    break;
+  }
+  case 0x03: // LOAD
+  {
+    e->imm = (int32_t)inst >> 20;
+    static const uint8_t ld_ops[8] = {
+        IC_OP_LB, IC_OP_LH, IC_OP_LW,
+#ifdef CONFIG_RV64
+        IC_OP_LD,
+#else
+        IC_OP_FALLBACK,
+#endif
+        IC_OP_LBU, IC_OP_LHU,
+#ifdef CONFIG_RV64
+        IC_OP_LWU,
+#else
+        IC_OP_FALLBACK,
+#endif
+        IC_OP_FALLBACK};
+    e->op = ld_ops[funct3];
+    break;
+  }
+  case 0x23: // STORE
+  {
+    uint32_t imm = ((inst >> 25) << 5) | ((inst >> 7) & 0x1fu);
+    e->imm = (int32_t)(imm << 20) >> 20;
+    static const uint8_t st_ops[8] = {
+        IC_OP_SB, IC_OP_SH, IC_OP_SW,
+#ifdef CONFIG_RV64
+        IC_OP_SD,
+#else
+        IC_OP_FALLBACK,
+#endif
+        IC_OP_FALLBACK, IC_OP_FALLBACK, IC_OP_FALLBACK, IC_OP_FALLBACK};
+    e->op = st_ops[funct3];
+    break;
+  }
+  case 0x13: // OP-IMM
+    e->imm = (int32_t)inst >> 20;
+    switch (funct3)
+    {
+    case 0: e->op = IC_OP_ADDI; break;
+    case 2: e->op = IC_OP_SLTI; break;
+    case 3: e->op = IC_OP_SLTIU; break;
+    case 4: e->op = IC_OP_XORI; break;
+    case 6: e->op = IC_OP_ORI; break;
+    case 7: e->op = IC_OP_ANDI; break;
+    case 1:
+#ifdef CONFIG_RV64
+      if ((inst >> 26) == 0x00) { e->imm = (int32_t)((inst >> 20) & 0x3fu); e->op = IC_OP_SLLI; }
+#else
+      if (funct7 == 0x00) { e->imm = (int32_t)((inst >> 20) & 0x1fu); e->op = IC_OP_SLLI; }
+#endif
+      break;
+    case 5:
+#ifdef CONFIG_RV64
+      if ((inst >> 26) == 0x00) { e->imm = (int32_t)((inst >> 20) & 0x3fu); e->op = IC_OP_SRLI; }
+      else if ((inst >> 26) == 0x10) { e->imm = (int32_t)((inst >> 20) & 0x3fu); e->op = IC_OP_SRAI; }
+#else
+      if (funct7 == 0x00) { e->imm = (int32_t)((inst >> 20) & 0x1fu); e->op = IC_OP_SRLI; }
+      else if (funct7 == 0x20) { e->imm = (int32_t)((inst >> 20) & 0x1fu); e->op = IC_OP_SRAI; }
+#endif
+      break;
+    }
+    break;
+#ifdef CONFIG_RV64
+  case 0x1b: // OP-IMM-32
+    e->imm = (int32_t)inst >> 20;
+    if (funct3 == 0) e->op = IC_OP_ADDIW;
+    else if (funct3 == 1 && funct7 == 0x00) { e->imm = (int32_t)((inst >> 20) & 0x1fu); e->op = IC_OP_SLLIW; }
+    else if (funct3 == 5 && funct7 == 0x00) { e->imm = (int32_t)((inst >> 20) & 0x1fu); e->op = IC_OP_SRLIW; }
+    else if (funct3 == 5 && funct7 == 0x20) { e->imm = (int32_t)((inst >> 20) & 0x1fu); e->op = IC_OP_SRAIW; }
+    break;
+#endif
+  case 0x33: // OP
+    if (funct7 == 0x00)
+    {
+      static const uint8_t op00[8] = {
+          IC_OP_ADD, IC_OP_SLL, IC_OP_SLT, IC_OP_SLTU,
+          IC_OP_XOR, IC_OP_SRL, IC_OP_OR, IC_OP_AND};
+      e->op = op00[funct3];
+    }
+    else if (funct7 == 0x20)
+    {
+      if (funct3 == 0) e->op = IC_OP_SUB;
+      else if (funct3 == 5) e->op = IC_OP_SRA;
+    }
+    else if (funct7 == 0x01 && funct3 == 0)
+    {
+      e->op = IC_OP_MUL;
+    }
+    break;
+#ifdef CONFIG_RV64
+  case 0x3b: // OP-32
+    if (funct7 == 0x00)
+    {
+      if (funct3 == 0) e->op = IC_OP_ADDW;
+      else if (funct3 == 1) e->op = IC_OP_SLLW;
+      else if (funct3 == 5) e->op = IC_OP_SRLW;
+    }
+    else if (funct7 == 0x20)
+    {
+      if (funct3 == 0) e->op = IC_OP_SUBW;
+      else if (funct3 == 5) e->op = IC_OP_SRAW;
+    }
+    else if (funct7 == 0x01 && funct3 == 0)
+    {
+      e->op = IC_OP_MULW;
+    }
+    break;
+#endif
+  default:
+    break;
+  }
+}
+
+uint64_t isa_exec_fast_batch(uint64_t limit)
+{
+  static const void *const dispatch[IC_OP_COUNT] = {
+      [IC_OP_FALLBACK] = &&L_EXIT,
+      [IC_OP_LUI]   = &&L_LUI,   [IC_OP_AUIPC] = &&L_AUIPC,
+      [IC_OP_JAL]   = &&L_JAL,   [IC_OP_JALR]  = &&L_JALR,
+      [IC_OP_BEQ]   = &&L_BEQ,   [IC_OP_BNE]   = &&L_BNE,
+      [IC_OP_BLT]   = &&L_BLT,   [IC_OP_BGE]   = &&L_BGE,
+      [IC_OP_BLTU]  = &&L_BLTU,  [IC_OP_BGEU]  = &&L_BGEU,
+      [IC_OP_LB]    = &&L_LB,    [IC_OP_LH]    = &&L_LH,
+      [IC_OP_LW]    = &&L_LW,    [IC_OP_LBU]   = &&L_LBU,
+      [IC_OP_LHU]   = &&L_LHU,   [IC_OP_LWU]   = &&L_LWU,
+      [IC_OP_LD]    = &&L_LD,
+      [IC_OP_SB]    = &&L_SB,    [IC_OP_SH]    = &&L_SH,
+      [IC_OP_SW]    = &&L_SW,    [IC_OP_SD]    = &&L_SD,
+      [IC_OP_ADDI]  = &&L_ADDI,  [IC_OP_SLTI]  = &&L_SLTI,
+      [IC_OP_SLTIU] = &&L_SLTIU, [IC_OP_XORI]  = &&L_XORI,
+      [IC_OP_ORI]   = &&L_ORI,   [IC_OP_ANDI]  = &&L_ANDI,
+      [IC_OP_SLLI]  = &&L_SLLI,  [IC_OP_SRLI]  = &&L_SRLI,
+      [IC_OP_SRAI]  = &&L_SRAI,
+      [IC_OP_ADDIW] = &&L_ADDIW, [IC_OP_SLLIW] = &&L_SLLIW,
+      [IC_OP_SRLIW] = &&L_SRLIW, [IC_OP_SRAIW] = &&L_SRAIW,
+      [IC_OP_ADD]   = &&L_ADD,   [IC_OP_SUB]   = &&L_SUB,
+      [IC_OP_SLL]   = &&L_SLL,   [IC_OP_SLT]   = &&L_SLT,
+      [IC_OP_SLTU]  = &&L_SLTU,  [IC_OP_XOR]   = &&L_XOR,
+      [IC_OP_SRL]   = &&L_SRL,   [IC_OP_SRA]   = &&L_SRA,
+      [IC_OP_OR]    = &&L_OR,    [IC_OP_AND]   = &&L_AND,
+      [IC_OP_ADDW]  = &&L_ADDW,  [IC_OP_SUBW]  = &&L_SUBW,
+      [IC_OP_SLLW]  = &&L_SLLW,  [IC_OP_SRLW]  = &&L_SRLW,
+      [IC_OP_SRAW]  = &&L_SRAW,
+      [IC_OP_MUL]   = &&L_MUL,   [IC_OP_MULW]  = &&L_MULW,
+  };
+
+  vaddr_t pc = cpu.pc;
+  const uint32_t epoch = icache_epoch;
+  uint64_t batch = 0;
+  const icache_entry_t *e;
+
+  fast_batch_active = true;
+
+#define FAST_DISPATCH() \
+  do { \
+    e = icache_slot(pc); \
+    if (likely(e->pc == pc && e->epoch == epoch && e->op != IC_OP_FALLBACK)) \
+      goto *dispatch[e->op]; \
+    goto L_EXIT; \
+  } while (0)
+
+#define FAST_NEXT() \
+  do { \
+    batch++; \
+    if (likely(batch < limit)) { FAST_DISPATCH(); } \
+    goto L_EXIT; \
+  } while (0)
+
+#define WR(reg, val) do { if (likely((reg) != 0)) cpu.gpr[(reg)] = (val); } while (0)
+#define FAST_MEM_PREP() do { fast_batch_pc = pc; fast_batch_done = batch; cpu.cpc = pc; } while (0)
+
+  if (limit == 0) goto L_EXIT;
+  FAST_DISPATCH();
+
+L_LUI:
+  WR(e->rd, (word_t)(sword_t)e->imm);
+  pc += e->ilen;
+  FAST_NEXT();
+L_AUIPC:
+  WR(e->rd, pc + (word_t)(sword_t)e->imm);
+  pc += e->ilen;
+  FAST_NEXT();
+L_JAL:
+  WR(e->rd, pc + e->ilen);
+  pc = riscv_legalize_pc((pc + (word_t)(sword_t)e->imm) & ~(word_t)1);
+  FAST_NEXT();
+L_JALR:
+{
+  word_t target = (cpu.gpr[e->rs1] + (word_t)(sword_t)e->imm) & ~(word_t)1;
+  WR(e->rd, pc + e->ilen);
+  pc = riscv_legalize_pc(target);
+  FAST_NEXT();
+}
+L_BEQ:
+  pc = (cpu.gpr[e->rs1] == cpu.gpr[e->rs2]) ? riscv_legalize_pc(pc + (word_t)(sword_t)e->imm) : (pc + e->ilen);
+  FAST_NEXT();
+L_BNE:
+  pc = (cpu.gpr[e->rs1] != cpu.gpr[e->rs2]) ? riscv_legalize_pc(pc + (word_t)(sword_t)e->imm) : (pc + e->ilen);
+  FAST_NEXT();
+L_BLT:
+  pc = ((sword_t)cpu.gpr[e->rs1] < (sword_t)cpu.gpr[e->rs2]) ? riscv_legalize_pc(pc + (word_t)(sword_t)e->imm) : (pc + e->ilen);
+  FAST_NEXT();
+L_BGE:
+  pc = ((sword_t)cpu.gpr[e->rs1] >= (sword_t)cpu.gpr[e->rs2]) ? riscv_legalize_pc(pc + (word_t)(sword_t)e->imm) : (pc + e->ilen);
+  FAST_NEXT();
+L_BLTU:
+  pc = (cpu.gpr[e->rs1] < cpu.gpr[e->rs2]) ? riscv_legalize_pc(pc + (word_t)(sword_t)e->imm) : (pc + e->ilen);
+  FAST_NEXT();
+L_BGEU:
+  pc = (cpu.gpr[e->rs1] >= cpu.gpr[e->rs2]) ? riscv_legalize_pc(pc + (word_t)(sword_t)e->imm) : (pc + e->ilen);
+  FAST_NEXT();
+
+L_LB:
+  FAST_MEM_PREP();
+  WR(e->rd, (word_t)(sword_t)(int8_t)vaddr_read(cpu.gpr[e->rs1] + (word_t)(sword_t)e->imm, 1));
+  pc += e->ilen;
+  FAST_NEXT();
+L_LH:
+  FAST_MEM_PREP();
+  WR(e->rd, (word_t)(sword_t)(int16_t)vaddr_read(cpu.gpr[e->rs1] + (word_t)(sword_t)e->imm, 2));
+  pc += e->ilen;
+  FAST_NEXT();
+L_LW:
+  FAST_MEM_PREP();
+  WR(e->rd, (word_t)(sword_t)(int32_t)vaddr_read(cpu.gpr[e->rs1] + (word_t)(sword_t)e->imm, 4));
+  pc += e->ilen;
+  FAST_NEXT();
+L_LBU:
+  FAST_MEM_PREP();
+  WR(e->rd, vaddr_read(cpu.gpr[e->rs1] + (word_t)(sword_t)e->imm, 1));
+  pc += e->ilen;
+  FAST_NEXT();
+L_LHU:
+  FAST_MEM_PREP();
+  WR(e->rd, vaddr_read(cpu.gpr[e->rs1] + (word_t)(sword_t)e->imm, 2));
+  pc += e->ilen;
+  FAST_NEXT();
+L_LWU:
+#ifdef CONFIG_RV64
+  FAST_MEM_PREP();
+  WR(e->rd, vaddr_read(cpu.gpr[e->rs1] + (word_t)(sword_t)e->imm, 4));
+  pc += e->ilen;
+  FAST_NEXT();
+#else
+  goto L_EXIT;
+#endif
+L_LD:
+#ifdef CONFIG_RV64
+  FAST_MEM_PREP();
+  WR(e->rd, vaddr_read(cpu.gpr[e->rs1] + (word_t)(sword_t)e->imm, 8));
+  pc += e->ilen;
+  FAST_NEXT();
+#else
+  goto L_EXIT;
+#endif
+
+L_SB:
+  FAST_MEM_PREP();
+  vaddr_write(cpu.gpr[e->rs1] + (word_t)(sword_t)e->imm, 1, cpu.gpr[e->rs2]);
+  pc += e->ilen;
+  FAST_NEXT();
+L_SH:
+  FAST_MEM_PREP();
+  vaddr_write(cpu.gpr[e->rs1] + (word_t)(sword_t)e->imm, 2, cpu.gpr[e->rs2]);
+  pc += e->ilen;
+  FAST_NEXT();
+L_SW:
+  FAST_MEM_PREP();
+  vaddr_write(cpu.gpr[e->rs1] + (word_t)(sword_t)e->imm, 4, cpu.gpr[e->rs2]);
+  pc += e->ilen;
+  FAST_NEXT();
+L_SD:
+#ifdef CONFIG_RV64
+  FAST_MEM_PREP();
+  vaddr_write(cpu.gpr[e->rs1] + (word_t)(sword_t)e->imm, 8, cpu.gpr[e->rs2]);
+  pc += e->ilen;
+  FAST_NEXT();
+#else
+  goto L_EXIT;
+#endif
+
+L_ADDI:
+  WR(e->rd, cpu.gpr[e->rs1] + (word_t)(sword_t)e->imm);
+  pc += e->ilen;
+  FAST_NEXT();
+L_SLTI:
+  WR(e->rd, (sword_t)cpu.gpr[e->rs1] < (sword_t)e->imm);
+  pc += e->ilen;
+  FAST_NEXT();
+L_SLTIU:
+  WR(e->rd, cpu.gpr[e->rs1] < (word_t)(sword_t)e->imm);
+  pc += e->ilen;
+  FAST_NEXT();
+L_XORI:
+  WR(e->rd, cpu.gpr[e->rs1] ^ (word_t)(sword_t)e->imm);
+  pc += e->ilen;
+  FAST_NEXT();
+L_ORI:
+  WR(e->rd, cpu.gpr[e->rs1] | (word_t)(sword_t)e->imm);
+  pc += e->ilen;
+  FAST_NEXT();
+L_ANDI:
+  WR(e->rd, cpu.gpr[e->rs1] & (word_t)(sword_t)e->imm);
+  pc += e->ilen;
+  FAST_NEXT();
+L_SLLI:
+  WR(e->rd, cpu.gpr[e->rs1] << (unsigned)e->imm);
+  pc += e->ilen;
+  FAST_NEXT();
+L_SRLI:
+  WR(e->rd, cpu.gpr[e->rs1] >> (unsigned)e->imm);
+  pc += e->ilen;
+  FAST_NEXT();
+L_SRAI:
+  WR(e->rd, (word_t)((sword_t)cpu.gpr[e->rs1] >> (unsigned)e->imm));
+  pc += e->ilen;
+  FAST_NEXT();
+
+L_ADDIW:
+#ifdef CONFIG_RV64
+  WR(e->rd, (word_t)(int64_t)(int32_t)((uint32_t)cpu.gpr[e->rs1] + (uint32_t)e->imm));
+  pc += e->ilen;
+  FAST_NEXT();
+#else
+  goto L_EXIT;
+#endif
+L_SLLIW:
+#ifdef CONFIG_RV64
+  WR(e->rd, (word_t)(int64_t)(int32_t)((uint32_t)cpu.gpr[e->rs1] << (unsigned)e->imm));
+  pc += e->ilen;
+  FAST_NEXT();
+#else
+  goto L_EXIT;
+#endif
+L_SRLIW:
+#ifdef CONFIG_RV64
+  WR(e->rd, (word_t)(int64_t)(int32_t)((uint32_t)cpu.gpr[e->rs1] >> (unsigned)e->imm));
+  pc += e->ilen;
+  FAST_NEXT();
+#else
+  goto L_EXIT;
+#endif
+L_SRAIW:
+#ifdef CONFIG_RV64
+  WR(e->rd, (word_t)(int64_t)((int32_t)cpu.gpr[e->rs1] >> (unsigned)e->imm));
+  pc += e->ilen;
+  FAST_NEXT();
+#else
+  goto L_EXIT;
+#endif
+
+L_ADD:
+  WR(e->rd, cpu.gpr[e->rs1] + cpu.gpr[e->rs2]);
+  pc += e->ilen;
+  FAST_NEXT();
+L_SUB:
+  WR(e->rd, cpu.gpr[e->rs1] - cpu.gpr[e->rs2]);
+  pc += e->ilen;
+  FAST_NEXT();
+L_SLL:
+#ifdef CONFIG_RV64
+  WR(e->rd, cpu.gpr[e->rs1] << (cpu.gpr[e->rs2] & 0x3fu));
+#else
+  WR(e->rd, cpu.gpr[e->rs1] << (cpu.gpr[e->rs2] & 0x1fu));
+#endif
+  pc += e->ilen;
+  FAST_NEXT();
+L_SLT:
+  WR(e->rd, (sword_t)cpu.gpr[e->rs1] < (sword_t)cpu.gpr[e->rs2]);
+  pc += e->ilen;
+  FAST_NEXT();
+L_SLTU:
+  WR(e->rd, cpu.gpr[e->rs1] < cpu.gpr[e->rs2]);
+  pc += e->ilen;
+  FAST_NEXT();
+L_XOR:
+  WR(e->rd, cpu.gpr[e->rs1] ^ cpu.gpr[e->rs2]);
+  pc += e->ilen;
+  FAST_NEXT();
+L_SRL:
+#ifdef CONFIG_RV64
+  WR(e->rd, cpu.gpr[e->rs1] >> (cpu.gpr[e->rs2] & 0x3fu));
+#else
+  WR(e->rd, cpu.gpr[e->rs1] >> (cpu.gpr[e->rs2] & 0x1fu));
+#endif
+  pc += e->ilen;
+  FAST_NEXT();
+L_SRA:
+#ifdef CONFIG_RV64
+  WR(e->rd, (word_t)((sword_t)cpu.gpr[e->rs1] >> (cpu.gpr[e->rs2] & 0x3fu)));
+#else
+  WR(e->rd, (word_t)((sword_t)cpu.gpr[e->rs1] >> (cpu.gpr[e->rs2] & 0x1fu)));
+#endif
+  pc += e->ilen;
+  FAST_NEXT();
+L_OR:
+  WR(e->rd, cpu.gpr[e->rs1] | cpu.gpr[e->rs2]);
+  pc += e->ilen;
+  FAST_NEXT();
+L_AND:
+  WR(e->rd, cpu.gpr[e->rs1] & cpu.gpr[e->rs2]);
+  pc += e->ilen;
+  FAST_NEXT();
+
+L_ADDW:
+#ifdef CONFIG_RV64
+  WR(e->rd, (word_t)(int64_t)(int32_t)((uint32_t)cpu.gpr[e->rs1] + (uint32_t)cpu.gpr[e->rs2]));
+  pc += e->ilen;
+  FAST_NEXT();
+#else
+  goto L_EXIT;
+#endif
+L_SUBW:
+#ifdef CONFIG_RV64
+  WR(e->rd, (word_t)(int64_t)(int32_t)((uint32_t)cpu.gpr[e->rs1] - (uint32_t)cpu.gpr[e->rs2]));
+  pc += e->ilen;
+  FAST_NEXT();
+#else
+  goto L_EXIT;
+#endif
+L_SLLW:
+#ifdef CONFIG_RV64
+  WR(e->rd, (word_t)(int64_t)(int32_t)((uint32_t)cpu.gpr[e->rs1] << (cpu.gpr[e->rs2] & 0x1fu)));
+  pc += e->ilen;
+  FAST_NEXT();
+#else
+  goto L_EXIT;
+#endif
+L_SRLW:
+#ifdef CONFIG_RV64
+  WR(e->rd, (word_t)(int64_t)(int32_t)((uint32_t)cpu.gpr[e->rs1] >> (cpu.gpr[e->rs2] & 0x1fu)));
+  pc += e->ilen;
+  FAST_NEXT();
+#else
+  goto L_EXIT;
+#endif
+L_SRAW:
+#ifdef CONFIG_RV64
+  WR(e->rd, (word_t)(int64_t)((int32_t)cpu.gpr[e->rs1] >> (cpu.gpr[e->rs2] & 0x1fu)));
+  pc += e->ilen;
+  FAST_NEXT();
+#else
+  goto L_EXIT;
+#endif
+L_MUL:
+  WR(e->rd, cpu.gpr[e->rs1] * cpu.gpr[e->rs2]);
+  pc += e->ilen;
+  FAST_NEXT();
+L_MULW:
+#ifdef CONFIG_RV64
+  WR(e->rd, (word_t)(int64_t)(int32_t)((uint32_t)cpu.gpr[e->rs1] * (uint32_t)cpu.gpr[e->rs2]));
+  pc += e->ilen;
+  FAST_NEXT();
+#else
+  goto L_EXIT;
+#endif
+
+#undef FAST_MEM_PREP
+#undef WR
+#undef FAST_NEXT
+#undef FAST_DISPATCH
+
+L_EXIT:
+  fast_batch_active = false;
+  cpu.pc = pc;
+  if (batch != 0)
+  {
+#ifndef CONFIG_RV64
+    word_t old_mc = CSR(CSR_MCYCLE);
+    word_t old_mi = CSR(CSR_MINSTRET);
+    CSR(CSR_MCYCLE) += (word_t)batch;
+    CSR(CSR_MINSTRET) += (word_t)batch;
+    if (CSR(CSR_MCYCLE) < old_mc) CSR(CSR_MCYCLEH)++;
+    if (CSR(CSR_MINSTRET) < old_mi) CSR(CSR_MINSTRETH)++;
+#else
+    CSR(CSR_MCYCLE) += batch;
+    CSR(CSR_MINSTRET) += batch;
+#endif
+  }
+  return batch;
+}
+
+void isa_fast_batch_commit_counters(uint64_t count)
+{
+  if (count == 0) return;
+#ifndef CONFIG_RV64
+  word_t old_mc = CSR(CSR_MCYCLE);
+  word_t old_mi = CSR(CSR_MINSTRET);
+  CSR(CSR_MCYCLE) += (word_t)count;
+  CSR(CSR_MINSTRET) += (word_t)count;
+  if (CSR(CSR_MCYCLE) < old_mc) CSR(CSR_MCYCLEH)++;
+  if (CSR(CSR_MINSTRET) < old_mi) CSR(CSR_MINSTRETH)++;
+#else
+  CSR(CSR_MCYCLE) += count;
+  CSR(CSR_MINSTRET) += count;
+#endif
+}
+
+void isa_fast_timer_tick(uint64_t guest_inst)
+{
+#if !defined(CONFIG_TARGET_SHARE)
+#if defined(CONFIG_TIMER_CYCLE)
+  uint64_t ticks = guest_inst / 100;
+#else
+  (void)guest_inst;
+  uint64_t ticks = get_time() * 10;
+#endif
+  CSR(CSR_TIME) = (word_t)ticks;
+#ifndef CONFIG_RV64
+  CSR(CSR_TIMEH) = (uint32_t)(ticks >> 32);
+#endif
+  clint_update_mip();
+#else
+  (void)guest_inst;
+#endif
+}
+
+int isa_exec_once_core(Decode *s)
 {
   cpu.instruction_trapped = false;
   cpu.last_csr_wr = 0;
-  /* One longjmp target per instruction: fetch and decode faults share the
-   * same trap entry, so a second _setjmp() only adds hot-path overhead. */
-  int jmp_value = nemu_setjmp(exec_jmp_buf);
-  if (jmp_value)
-  {
-    cpu_bus_unwind();
-    s->pc = isa_raise_intr(cause, s->pc);
-    s->isa.inst = 0x13; // addi x0, x0, 0; a.k.a. NOP
-    return 0;
-  }
-  /* Conservatively bypass decoded-instruction caching while PBMT can be
-   * active. A cached decode must not elide reads from an NC/IO mapping.
-   * This also covers mixed-type pages within one fetched instruction. */
-#ifdef CONFIG_ISA64
-  const bool cache_decode = (cpu.sr[CSR_MENVCFG] & (1ull << 62)) == 0;
-#else
-  const bool cache_decode = true;
-#endif
   icache_entry_t *e = icache_slot(s->pc);
-  if (cache_decode && icache_hit(e, s->pc))
+  bool cache_fill_ok = false;
+  if (likely(icache_hit(e, s->pc)))
   {
     s->isa.inst = e->inst;
     s->snpc = s->pc + e->ilen;
   }
   else
   {
+    vaddr_last_ifetch_pbmt = 0;
     s->isa.inst = inst_fetch(&s->snpc, 4); // advances snpc to pc+4
+    // Only cache normal PMA memory fetches (PBMT==0); never elide NC/IO reads.
+    cache_fill_ok = (vaddr_last_ifetch_pbmt == 0);
   }
   cpu.inst = s->isa.inst;
-  if (nemu_md_instruction && !nemu_md_instruction(s->isa.inst)) return 0;
+  if (unlikely(nemu_md_instruction && !nemu_md_instruction(s->isa.inst))) return 0;
 
   vaddr_t fill_pc = s->pc; // decode_exec will clobber s->pc <- dnpc
   const uint32_t fetch_epoch = icache_epoch;
   const bool atomic_instruction = (s->isa.inst & 0x7f) == 0x2f;
-  if (atomic_instruction) cpu_bus_lock();
+  if (unlikely(atomic_instruction)) cpu_bus_lock();
   int ret = decode_exec(s);
-  if (atomic_instruction) cpu_bus_unlock();
+  if (unlikely(atomic_instruction)) cpu_bus_unlock();
   // A CSR write, xRET, trap or fence can invalidate the context that
   // authorized this fetch. Never resurrect its decode in the new epoch.
-  if (cache_decode && fetch_epoch == icache_epoch && !icache_hit(e, fill_pc))
+  if (unlikely(cache_fill_ok) && fetch_epoch == icache_epoch)
   {
     icache_fill(e, fill_pc, s->isa.inst, (uint16_t)(s->snpc - fill_pc));
+    icache_predecode(e, s->isa.inst);
   }
   return ret;
+}
+
+int isa_exec_once(Decode *s)
+{
+  /* One longjmp target per instruction: fetch and decode faults share the
+   * same trap entry, so a second _setjmp() only adds hot-path overhead. */
+  int jmp_value = nemu_setjmp(exec_jmp_buf);
+  if (unlikely(jmp_value))
+  {
+    cpu_bus_unwind();
+    s->pc = isa_raise_intr(cause, s->pc);
+    s->isa.inst = 0x13; // addi x0, x0, 0; a.k.a. NOP
+    return 0;
+  }
+  return isa_exec_once_core(s);
 }

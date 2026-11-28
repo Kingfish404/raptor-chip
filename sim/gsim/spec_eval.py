@@ -101,6 +101,8 @@ def discover_benchmarks(
     """Return [(bench_name, run_dir, exe_path, argv), ...] for built benchmarks."""
     cpu_dir = spec_root / "benchspec" / "CPU"
     if not cpu_dir.is_dir():
+        cpu_dir = spec_root / "benchspec" / "CPU2006"
+    if not cpu_dir.is_dir():
         raise FileNotFoundError(f"SPEC CPU directory not found: {cpu_dir}")
     out: list[tuple[str, Path, Path, list[str]]] = []
     for bench_dir in sorted(cpu_dir.iterdir()):
@@ -205,7 +207,11 @@ def main(argv: list[str] | None = None) -> int:
                     help="Output directory outside the source tree")
     ap.add_argument("--label", default="raptor-rv64-static",
                     help="SPEC config label used during runcpu --action=setup")
-    ap.add_argument("--size", default="test", choices=("test", "train", "refrate", "refspeed"))
+    ap.add_argument(
+        "--size",
+        default="test",
+        choices=("test", "train", "ref", "refrate", "refspeed"),
+    )
     ap.add_argument("--benches", default="",
                     help="Comma-separated benchmark names (empty = all discovered)")
     ap.add_argument("--preset", default="default",

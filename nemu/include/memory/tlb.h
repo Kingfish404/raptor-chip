@@ -11,7 +11,7 @@
 #include <common.h>
 #include <memory/vaddr.h>
 
-/* 256 entries per TLB: power-of-two, direct-mapped by VPN */
+/* 256 entries per TLB: power-of-two, direct-mapped by VPN (matches journal ABI) */
 #define SOFT_TLB_BITS 8
 #define SOFT_TLB_ENTRIES (1u << SOFT_TLB_BITS)
 #define SOFT_TLB_MASK (SOFT_TLB_ENTRIES - 1)
@@ -21,10 +21,11 @@
 
 typedef struct
 {
-  vaddr_t vpn;    /* virtual page number (vaddr >> PAGE_SHIFT), acts as tag */
-  paddr_t ppn;    /* physical page base  (paddr with offset=0)              */
-  uint8_t pbmt; /* leaf type travels with this translation */
-  uint32_t epoch; /* version stamp; entry valid iff epoch == soft_tlb_epoch */
+  vaddr_t vpn;         /* virtual page number (vaddr >> PAGE_SHIFT), acts as tag */
+  paddr_t ppn;         /* physical page base  (paddr with offset=0)              */
+  uintptr_t host_addend; /* (uintptr_t)host_page - (vpn << PAGE_SHIFT) if direct RAM+PMP ok, else 0 */
+  uint32_t epoch;      /* version stamp; entry valid iff epoch == soft_tlb_epoch */
+  uint8_t pbmt;        /* leaf type travels with this translation */
 } soft_tlb_entry_t;
 
 /* Three separate TLBs: mirrors Spike's design for permission separation */
@@ -61,15 +62,22 @@ static inline bool soft_tlb_lookup_attrs(
   return false;
 }
 
-static inline void soft_tlb_refill_attrs(
-    soft_tlb_entry_t *tlb, vaddr_t vaddr, paddr_t paddr, uint8_t pbmt)
+static inline void soft_tlb_refill_full(
+    soft_tlb_entry_t *tlb, vaddr_t vaddr, paddr_t paddr, uint8_t pbmt, uintptr_t host_addend)
 {
   vaddr_t vpn = vaddr >> PAGE_SHIFT;
   unsigned idx = vpn & SOFT_TLB_MASK;
   tlb[idx].vpn = vpn;
   tlb[idx].ppn = paddr & ~((paddr_t)PAGE_MASK);
+  tlb[idx].host_addend = host_addend;
   tlb[idx].pbmt = pbmt;
   tlb[idx].epoch = soft_tlb_epoch;
+}
+
+static inline void soft_tlb_refill_attrs(
+    soft_tlb_entry_t *tlb, vaddr_t vaddr, paddr_t paddr, uint8_t pbmt)
+{
+  soft_tlb_refill_full(tlb, vaddr, paddr, pbmt, 0);
 }
 
 /* Compatibility for PA-only clients; new access paths use typed entries. */

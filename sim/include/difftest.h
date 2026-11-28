@@ -13,6 +13,8 @@ void difftest_apply_store_error();
 bool difftest_is_enabled();
 
 void difftest_checkpoint_resync();
+void difftest_set_batch_size(uint32_t batch);
+void difftest_flush_batch(vaddr_t pc);
 
 void difftest_step(vaddr_t pc, uint32_t retire_count = 1, bool commit_trap = false);
 

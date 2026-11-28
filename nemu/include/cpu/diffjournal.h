@@ -35,6 +35,7 @@ extern int nemu_journal_fd;
 extern uint64_t nemu_journal_max_bytes;
 extern uint64_t nemu_journal_progress_interval;
 extern bool nemu_journal_limit_explicit;
+extern bool nemu_journal_active;
 static inline bool nemu_journal_requested(void)
 {
   return nemu_journal_path || nemu_journal_fd >= 0;

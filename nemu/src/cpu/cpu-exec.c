@@ -24,8 +24,10 @@
 #include <cpu/diffjournal.h>
 #include <isa.h>
 #include <locale.h>
+#include <setjmp.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <memory/trap.h>
 
 /* The assembly code of instructions executed is only output to the screen
  * when the number of instructions executed is less than this value.
@@ -370,12 +372,212 @@ void nemu_md_exec_one(void)
 }
 #endif
 
+extern NEMU_TLS jmp_buf exec_jmp_buf;
+extern NEMU_TLS vaddr_t fast_batch_pc;
+extern NEMU_TLS uint64_t fast_batch_done;
+extern NEMU_TLS bool fast_batch_active;
+extern int isa_exec_once_core(Decode *s);
+extern uint64_t isa_exec_fast_batch(uint64_t limit);
+extern void isa_fast_batch_commit_counters(uint64_t count);
+extern void isa_fast_timer_tick(uint64_t guest_inst);
+
+static void execute_fast(uint64_t n)
+{
+  Decode s;
+  uint32_t volatile slow_countdown = 65536u;
+  uint64_t save_countdown = 100000000ULL;
+  uint64_t volatile rem = n;
+  if (unlikely(nemu_setjmp(exec_jmp_buf) != 0))
+  {
+    cpu_bus_unwind();
+    if (fast_batch_active)
+    {
+      fast_batch_active = false;
+      uint64_t done = fast_batch_done;
+      if (done != 0)
+      {
+        isa_fast_batch_commit_counters(done);
+        g_nr_guest_inst += done;
+        executed_instructions += done;
+        rem -= done;
+        slow_countdown = (slow_countdown > done) ? (slow_countdown - (uint32_t)done) : 1u;
+      }
+      s.pc = fast_batch_pc;
+    }
+    s.pc = isa_raise_intr(cause, s.pc);
+    s.isa.inst = 0x13;
+#ifdef CONFIG_ITRACE
+    iringbuf[iringhead] = s;
+    iringhead = (iringhead + 1) & (MAX_IRING_SIZE - 1);
+    iringbuf[iringhead].logbuf[0] = '\0';
+#endif
+    cpu.pc = s.pc;
+    cpu.inst = s.isa.inst;
+    g_nr_guest_inst++;
+    executed_instructions++;
+    if (rem > 0) rem--;
+    if (nemu_state.state != NEMU_RUNNING) return;
+  }
+  uint64_t left = rem;
+  uint32_t sc = slow_countdown;
+  while (left > 0)
+  {
+    if (unlikely(riscv_intr_may_pending()))
+    {
+      word_t intr = isa_query_intr();
+      if (intr != INTR_EMPTY)
+      {
+        cpu.pc = isa_raise_intr(intr, cpu.pc);
+      }
+    }
+#if !defined(CONFIG_ITRACE) && !defined(CONFIG_TARGET_SHARE)
+    {
+      /* Run direct-threaded decoded-op batch up to the next 1024-inst timer
+       * boundary, slow_countdown, or remaining instruction limit. */
+      uint64_t to_timer = 1024u - (g_nr_guest_inst & 1023u);
+      uint64_t limit = left < sc ? left : sc;
+      if (to_timer < limit) limit = to_timer;
+      rem = left;
+      slow_countdown = sc;
+      uint64_t done = isa_exec_fast_batch(limit);
+      if (done != 0)
+      {
+        g_nr_guest_inst += done;
+        executed_instructions += done;
+        left -= done;
+        sc -= (uint32_t)done;
+        if ((g_nr_guest_inst & 1023u) == 0)
+          isa_fast_timer_tick(g_nr_guest_inst);
+        if (sc == 0)
+        {
+          sc = 65536u;
+          IFDEF(CONFIG_DEVICE, device_update_slow());
+          if (save_countdown <= 65536u)
+          {
+            save_countdown = 100000000ULL;
+            const char *directory = getenv("NEMU_STATUS_DIR");
+            const char *home = getenv("NEMU_HOME");
+            if (directory || home)
+            {
+              char fallback[512];
+              if (!directory)
+              {
+                snprintf(fallback, sizeof(fallback), "%s/build", home);
+                directory = fallback;
+              }
+              char path[1024];
+              snprintf(path, sizeof(path), "%s/nemu-status.log", directory);
+              nemu_save_status_to_file(path);
+              snprintf(path, sizeof(path), "%s/nemu-uarch_state.json", directory);
+              nemu_save_uarch_state(path);
+            }
+          }
+          else
+          {
+            save_countdown -= 65536u;
+          }
+        }
+        if (left == 0) break;
+        if (done == limit) continue;
+      }
+    }
+#endif
+    vaddr_t pc = cpu.pc;
+    cpu.cpc = pc;
+    s.pc = pc;
+    s.snpc = pc;
+    s.epc = pc;
+    rem = left;
+    slow_countdown = sc;
+    isa_exec_once_core(&s);
+#ifdef CONFIG_ITRACE
+    iringbuf[iringhead] = s;
+    iringhead = (iringhead + 1) & (MAX_IRING_SIZE - 1);
+    iringbuf[iringhead].logbuf[0] = '\0';
+#endif
+    cpu.pc = s.pc;
+    cpu.inst = s.isa.inst;
+    g_nr_guest_inst++;
+    executed_instructions++;
+    left--;
+    if (unlikely(nemu_state.state != NEMU_RUNNING))
+      break;
+    if (unlikely(--sc == 0))
+    {
+      sc = 65536u;
+      IFDEF(CONFIG_DEVICE, device_update_slow());
+      if (save_countdown <= 65536u)
+      {
+        save_countdown = 100000000ULL;
+        const char *directory = getenv("NEMU_STATUS_DIR");
+        const char *home = getenv("NEMU_HOME");
+        if (directory || home)
+        {
+          char fallback[512];
+          if (!directory)
+          {
+            snprintf(fallback, sizeof(fallback), "%s/build", home);
+            directory = fallback;
+          }
+          char path[1024];
+          snprintf(path, sizeof(path), "%s/nemu-status.log", directory);
+          nemu_save_status_to_file(path);
+          snprintf(path, sizeof(path), "%s/nemu-uarch_state.json", directory);
+          nemu_save_uarch_state(path);
+        }
+      }
+      else
+      {
+        save_countdown -= 65536u;
+      }
+    }
+  }
+}
+
 static void execute(uint64_t n)
 {
   // Debug options are fixed for this execution request. Avoid environment
   // lookups in the hot instruction loop, including when diagnostics are off.
   const bool pc_debug = getenv("NEMU_PC_DEBUG") != NULL;
   const bool itrace_at = pc_debug && getenv("NEMU_ITRACE_AT") != NULL;
+  if (!nemu_threaded && !subsystem_trace_checked)
+  {
+    const char *prefix = getenv("RAPT_SUBSYSTEM_TRACE_PREFIX");
+    subsystem_trace_checked = true;
+    if (prefix != NULL && prefix[0] != '\0')
+    {
+      char path[4096];
+      int len = snprintf(path, sizeof(path), "%s.inst", prefix);
+      Assert(len > 0 && (size_t)len < sizeof(path), "Subsystem trace path too long");
+      subsystem_inst_trace = fopen(path, "w");
+      Assert(subsystem_inst_trace != NULL, "Cannot open '%s'", path);
+      len = snprintf(path, sizeof(path), "%s.mem", prefix);
+      Assert(len > 0 && (size_t)len < sizeof(path), "Subsystem trace path too long");
+      subsystem_mem_trace = fopen(path, "w");
+      Assert(subsystem_mem_trace != NULL, "Cannot open '%s'", path);
+    }
+  }
+  bool can_fast = !pc_debug && !g_print_step && !boot_from_flash
+      && subsystem_inst_trace == NULL && !nemu_bbv_enabled && !nemu_sample_enabled
+      && !nemu_threaded && !multidiff_active();
+#ifdef NEMU_HAS_SMP
+  can_fast = can_fast && (nemu_nr_harts == 1) && !nemu_multidiff_requested
+      && !nemu_journal_active;
+#endif
+#ifdef CONFIG_DIFFTEST
+  can_fast = can_fast && !difftest_ref_loaded;
+#endif
+#ifdef CONFIG_WATCHPOINT
+  can_fast = can_fast && !wp_present;
+#endif
+#ifdef CONFIG_ITRACE_COND
+  can_fast = can_fast && !log_enable();
+#endif
+  if (likely(can_fast))
+  {
+    execute_fast(n);
+    return;
+  }
   Decode s;
   for (; n > 0; n--)
   {
@@ -383,21 +585,21 @@ static void execute(uint64_t n)
 #ifdef NEMU_HAS_SMP
     if (!nemu_threaded && (nemu_nr_harts > 1 || (nemu_hart_waiting[nemu_hartid] && multidiff_clint_active())) && !cpu_schedule())
       break;
-    if (!nemu_multidiff_begin()) break;
+    if (unlikely(nemu_multidiff_requested) && !nemu_multidiff_begin()) break;
 #endif
 #ifdef NEMU_HAS_THREADS
     if (nemu_threaded && ((g_nr_guest_inst & 1023) == 0 || nemu_hart_waiting[nemu_hartid]))
       if (!cpu_thread_poll())
         break;
 #endif
-    IFDEF(NEMU_HAS_SMP, if (!nemu_journal_begin()) break;);
+    IFDEF(NEMU_HAS_SMP, if (unlikely(nemu_journal_active) && !nemu_journal_begin()) break;);
     word_t intr = INTR_EMPTY;
     if (riscv_intr_may_pending())
     {
       intr = isa_query_intr();
       if (intr != INTR_EMPTY)
       {
-        IFDEF(NEMU_HAS_SMP, if (!nemu_journal_interrupt(intr)) break;);
+        IFDEF(NEMU_HAS_SMP, if (unlikely(nemu_journal_active) && !nemu_journal_interrupt(intr)) break;);
         // Log("nemu: intr %x at pc = " FMT_WORD, intr, cpu.pc);
         cpu.pc = isa_raise_intr(intr, cpu.pc);
         /* ref_difftest_raise_intr is only resolved when a --diff reference
@@ -408,8 +610,8 @@ static void execute(uint64_t n)
       }
     }
     exec_once(&s, cpu.pc);
-    IFDEF(NEMU_HAS_SMP, nemu_multidiff_finish());
-    IFDEF(NEMU_HAS_SMP, nemu_journal_end());
+    IFDEF(NEMU_HAS_SMP, if (unlikely(nemu_multidiff_requested)) nemu_multidiff_finish());
+    IFDEF(NEMU_HAS_SMP, if (unlikely(nemu_journal_active)) nemu_journal_end());
 
     g_nr_guest_inst++;
     if (pc_debug && !nemu_threaded)

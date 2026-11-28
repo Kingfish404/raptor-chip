@@ -404,7 +404,11 @@ module rapt_l1d #(
         // A failed posted store already updated a resident copy at acceptance.
         // Drop that set; write-through lines hold no other dirty state.
         || (!WriteBack && l1d_bus.posted_error
-        && 32'(s) == 32'(l1d_bus.posted_error_addr[L1D_LEN+L1dLineOffset-1:L1dLineOffset]));
+        && 32'(s) == 32'(l1d_bus.posted_error_addr[L1D_LEN+L1dLineOffset-1:L1dLineOffset]))
+        || (!WriteBack && external_write_valid_i
+        && (external_write_first_i[XLEN-1:L1dLineOffset]
+                != external_write_last_i[XLEN-1:L1dLineOffset]
+            || 32'(s) == 32'(external_write_first_i[L1D_LEN+L1dLineOffset-1:L1dLineOffset])));
   end
   assign fence_clear_busy = cmu_bcast.cbo_inval || probe_valid_i || |fence_clear_set;
   assign mshr_clear_all = cmu_bcast.cbo_inval || (L2Inclusive && probe_valid_i)

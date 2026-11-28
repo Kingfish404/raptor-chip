@@ -79,6 +79,7 @@ def main():
         parser.add_argument("--" + name, required=True, type=Path)
     parser.add_argument("--asset", action="append", default=[], help="SOURCE=relative-name")
     parser.add_argument("--arg", action="append", default=[])
+    parser.add_argument("--stdin", default=None, help="relative /work file redirected to stdin")
     parser.add_argument("--ram-mib", type=int, default=2048)
     parser.add_argument("--compression", choices=("none", "gzip"), default="none",
                         help="uncompressed initramfs avoids functional-model decompression work")
@@ -110,6 +111,10 @@ def main():
             invocation = ["/work/" + PurePosixPath(interpreter).name,
                           "--library-path", "/work", "/work/program", *args.arg]
         command = shlex.join(invocation)
+        if args.stdin:
+            if Path(args.stdin).is_absolute() or ".." in PurePosixPath(args.stdin).parts:
+                raise ValueError("invalid --stdin path")
+            command += " < " + shlex.quote(args.stdin)
         files["init"] = ("#!/bin/sh\nexport PATH=/sbin:/bin:/usr/sbin:/usr/bin\n"
                          "mount -t proc proc /proc\nmount -t sysfs sysfs /sys\n"
                          "mount -t devtmpfs devtmpfs /dev\n"

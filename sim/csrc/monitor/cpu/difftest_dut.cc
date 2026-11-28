@@ -95,6 +95,12 @@ static void sync_vector_reference()
 static bool is_skip_ref = false;
 static bool should_diff_mem = false;
 static int skip_dut_nr_inst = 0;
+static uint32_t difftest_batch_size = 1;
+static uint32_t difftest_batch_pending = 0;
+void difftest_set_batch_size(uint32_t batch)
+{
+  difftest_batch_size = batch > 0 ? batch : 1;
+}
 // When `-d <ref.so>` is not supplied, the simulator runs without comparing
 // against a reference. This is useful for coverage / pk-based workloads that
 // exercise paths the current REF doesn't model identically (e.g. Sv32 paging,
@@ -163,6 +169,7 @@ void difftest_checkpoint_resync()
   is_skip_ref = false;
   should_diff_mem = false;
   skip_dut_nr_inst = 0;
+  difftest_batch_pending = 0;
   Log("checkpoint: resynchronized difftest REF from restored DUT state");
 }
 
@@ -730,6 +737,28 @@ static void restore_post_exec_ip()
   }
 }
 
+void difftest_flush_batch(vaddr_t pc)
+{
+  if (!difftest_enabled || difftest_batch_pending == 0)
+    return;
+  uint32_t count = difftest_batch_pending;
+  difftest_batch_pending = 0;
+  NPCState ref_r;
+  ref_difftest_exec(count);
+  difftest_apply_store_error();
+  ref_difftest_regcpy(&ref_r, DIFFTEST_TO_DUT);
+  if (ref_r.skip)
+  {
+    ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
+    sync_vector_reference();
+    sync_hypervisor_reference();
+  }
+  else
+  {
+    checkregs(&ref_r, pc);
+  }
+}
+
 void difftest_step(vaddr_t pc, uint32_t retire_count, bool commit_trap)
 {
   if (!difftest_enabled)
@@ -765,6 +794,8 @@ void difftest_step(vaddr_t pc, uint32_t retire_count, bool commit_trap)
 
   if (skip_dut_nr_inst > 0)
   {
+    if (difftest_batch_pending > 0)
+      difftest_flush_batch(pc);
     skip_dut_nr_inst--;
     should_diff_mem = false;
     return;
@@ -772,6 +803,7 @@ void difftest_step(vaddr_t pc, uint32_t retire_count, bool commit_trap)
 
   if (is_skip_ref)
   {
+    difftest_batch_pending = 0;
     ref_difftest_regcpy(&npc, DIFFTEST_TO_REF);
     sync_vector_reference();
     sync_hypervisor_reference();
@@ -790,6 +822,11 @@ void difftest_step(vaddr_t pc, uint32_t retire_count, bool commit_trap)
   const uint32_t dut_rd = (dut_inst >> 7) & 0x1f;
   if (dut_is_sc && npc.gpr[dut_rd] != 0)
   {
+    if (difftest_batch_pending > 0)
+    {
+      ref_difftest_exec(difftest_batch_pending);
+      difftest_batch_pending = 0;
+    }
     if (ref_difftest_clear_reservation != NULL)
       ref_difftest_clear_reservation();
     else
@@ -806,6 +843,22 @@ void difftest_step(vaddr_t pc, uint32_t retire_count, bool commit_trap)
   // Group stepping belongs after reset/checkpoint/MMIO skip handling. No
   // intermediate retirement may execute REF before its state is synchronized.
   const bool ip_resync = sync_pre_exec_ip_read(retire_count, commit_trap);
+  // Batch mode (--difftest-batch=K): defer full register copy/comparison for
+  // ordinary non-trapping, non-store-diff commits until K instructions accrue.
+  if (difftest_batch_size > 1 && !commit_trap && !ip_resync && !should_diff_mem
+      && !store_error_queued && (dut_inst & 0x7f) != 0x73)
+  {
+    difftest_batch_pending += retire_count;
+    if (difftest_batch_pending < difftest_batch_size)
+      return;
+    retire_count = difftest_batch_pending;
+    difftest_batch_pending = 0;
+  }
+  else if (difftest_batch_pending > 0)
+  {
+    retire_count += difftest_batch_pending;
+    difftest_batch_pending = 0;
+  }
   ref_difftest_exec(retire_count);
   if (ip_resync)
     restore_post_exec_ip();

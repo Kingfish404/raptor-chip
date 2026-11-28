@@ -9,9 +9,12 @@ extern bool nemu_threaded;
 extern unsigned nemu_thread_clock_div;
 extern unsigned nemu_stop_hart;
 extern NEMU_TLS bool nemu_worker;
-void cpu_bus_lock(void);
-void cpu_bus_unlock(void);
-void cpu_bus_unwind(void);
+void cpu_bus_lock_slow(void);
+void cpu_bus_unlock_slow(void);
+void cpu_bus_unwind_slow(void);
+static inline void cpu_bus_lock(void) { if (unlikely(nemu_threaded)) cpu_bus_lock_slow(); }
+static inline void cpu_bus_unlock(void) { if (unlikely(nemu_threaded)) cpu_bus_unlock_slow(); }
+static inline void cpu_bus_unwind(void) { if (unlikely(nemu_threaded)) cpu_bus_unwind_slow(); }
 void cpu_thread_wake(void);
 bool cpu_thread_poll(void);
 void cpu_threads_run(void (*execute)(uint64_t));

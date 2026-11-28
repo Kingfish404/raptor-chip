@@ -109,6 +109,13 @@ def run_benchmark(
                 cmd += ["--asset", asset]
             for arg in argv:
                 cmd.append(f"--arg={arg}")
+            stdin_path = spec_eval.parse_speccmds_stdin(run_dir)
+            if stdin_path is not None:
+                try:
+                    rel_stdin = stdin_path.relative_to(run_dir.resolve()).as_posix()
+                except ValueError:
+                    rel_stdin = stdin_path.name
+                cmd.append(f"--stdin={rel_stdin}")
             _run_step(cmd, bdir / "01-workload.log", timeout=300)
 
         # 2. NEMU BBV profiling (optional inline checkpoint grid if >0)

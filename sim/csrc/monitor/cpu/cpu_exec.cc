@@ -561,44 +561,28 @@ void cpu_exec(uint64_t n)
         goto skip_difftest_block;
       }
       // Mirror the DUT's effective hardware-owned mip bits into REF before
-      // stepping, so CSR reads stay consistent across DUT/REF.
+      // stepping, only when the observed levels change (incremental sync).
       {
         extern void (*ref_difftest_set_meip)(uint8_t);
         extern void (*ref_difftest_set_msip)(uint8_t);
         extern void (*ref_difftest_set_mtip)(uint8_t);
-        // NEMU's shared-library configuration has no self-driven CLINT.
-        // Keep its hardware-owned pending bits aligned with mip_eff.  This is
-        // also needed on the commit immediately after a CLINT write: the RTL
-        // device register changes at the clock edge, after the MMIO operation
-        // itself was marked as a skipped reference access.
+        static uint8_t prev_msip = 0xff, prev_mtip = 0xff, prev_meip = 0xff;
+        static uint8_t prev_seip = 0xff, prev_stip = 0xff;
         if (npc.mip____ != NULL)
         {
           word_t dut_mip = *npc.mip____;
-          if (ref_difftest_set_msip)
-            ref_difftest_set_msip((dut_mip >> 3) & 1u);
-          if (ref_difftest_set_mtip)
-            ref_difftest_set_mtip((dut_mip >> 7) & 1u);
-          if (ref_difftest_set_meip)
-            ref_difftest_set_meip((dut_mip >> 11) & 1u);
+          uint8_t msip = (dut_mip >> 3) & 1u;
+          uint8_t mtip = (dut_mip >> 7) & 1u;
+          uint8_t meip = (dut_mip >> 11) & 1u;
+          if (ref_difftest_set_msip && msip != prev_msip) { prev_msip = msip; ref_difftest_set_msip(msip); }
+          if (ref_difftest_set_mtip && mtip != prev_mtip) { prev_mtip = mtip; ref_difftest_set_mtip(mtip); }
+          if (ref_difftest_set_meip && meip != prev_meip) { prev_meip = meip; ref_difftest_set_meip(meip); }
         }
-        // Mirror the DUT's Sstc-driven supervisor timer pending bit (sip.STIP,
-        // bit 5) into REF's mip when Sstc is enabled (menvcfg.STCE=1). In that
-        // mode STIP is hardware-controlled in the DUT from the stimecmp
-        // comparator (read-only to software), but the REF build defines
-        // CONFIG_TARGET_SHARE so its CLINT never self-drives STIP -- it would
-        // otherwise stay 0 and diverge from the DUT during the pending window
-        // before the interrupt is taken (e.g. while sstatus.SIE=0 in early
-        // boot). With STCE=0, STIP is software-managed and replayed normally,
-        // so we leave it to the regular CSR comparison.
         {
           extern void (*ref_difftest_set_stip)(uint8_t);
           extern void (*ref_difftest_set_seip)(uint8_t);
-          // Preserve the distinction between the controller level E and the
-          // software SEIP bit B. CSRRS/CSRRC read B|E but only update B.
-          // Observe the driving PLIC flop for hart 0. Verilator can retain an
-          // unused public core input shadow without updating it after reset.
-          if (ref_difftest_set_seip)
-            ref_difftest_set_seip(VERILOG_PLIC(seip_q) & 1u);
+          uint8_t cur_seip = VERILOG_PLIC(seip_q) & 1u;
+          if (ref_difftest_set_seip && cur_seip != prev_seip) { prev_seip = cur_seip; ref_difftest_set_seip(cur_seip); }
 #ifdef CONFIG_ISA64
           bool stce = npc.menvcfg != NULL && (((uint64_t)*npc.menvcfg >> 63) & 1u);
 #else
@@ -607,7 +591,7 @@ void cpu_exec(uint64_t n)
           if (ref_difftest_set_stip && stce)
           {
             uint8_t dut_stip = (*npc.mip____ >> 5) & 1u;
-            ref_difftest_set_stip(dut_stip);
+            if (dut_stip != prev_stip) { prev_stip = dut_stip; ref_difftest_set_stip(dut_stip); }
           }
           extern const NemuDiffHypervisorAPI *hypervisor_reference;
           if (hypervisor_reference != nullptr &&
@@ -664,6 +648,7 @@ void cpu_exec(uint64_t n)
         uint8_t cur_recieved_trap = *(uint8_t *)&VERILOG_ROU(recieved_trap);
         if (cur_recieved_trap)
         {
+          difftest_flush_batch(*npc.rpc);
           // Use the registered trap_cause from RTL: it carries the proper
           // interrupt cause (MSI/MTI for M-mode CLINT, or SSI/STI/SEI for
           // S-mode delegated interrupts). Forwarding it directly avoids the
@@ -710,6 +695,10 @@ void cpu_exec(uint64_t n)
     // simulator.  Use -m / --maximum to bound execution length explicitly.
   }
   serial_sample_milestones(progress_cycle, milestone_insts, true);
+#ifdef CONFIG_DIFFTEST
+  if (npc.state != NPC_ABORT)
+    difftest_flush_batch(*npc.rpc);
+#endif
   if (!sample_window_finish(npc.state != NPC_ABORT)) npc.state = NPC_ABORT;
   g_timer += get_time() - now;
 

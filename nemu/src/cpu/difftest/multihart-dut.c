@@ -121,9 +121,8 @@ static bool compare_words(const char *field, const uint64_t *actual, const uint6
   return true;
 }
 
-void nemu_multidiff_finish(void)
+static __attribute__((noinline)) void nemu_multidiff_finish_slow(void)
 {
-  if (!nemu_multidiff_requested) return;
   if (nemu_md_frame.error) {
     mismatch("unsupported-event-or-overflow", 0, nemu_md_frame.error, 0);
     return;
@@ -181,6 +180,12 @@ void nemu_multidiff_finish(void)
   }
   sequence++;
   seen_harts |= 1u << nemu_hartid;
+}
+
+void nemu_multidiff_finish(void)
+{
+  if (likely(!nemu_multidiff_requested)) return;
+  nemu_multidiff_finish_slow();
 }
 
 void nemu_multidiff_report(void)

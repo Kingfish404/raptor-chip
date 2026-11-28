@@ -34,6 +34,7 @@ int nemu_journal_fd = -1;
 uint64_t nemu_journal_max_bytes = 256ull << 20;
 uint64_t nemu_journal_progress_interval;
 bool nemu_journal_limit_explicit;
+bool nemu_journal_active;
 static FILE *journal;
 static char journal_buffer[NEMU_JOURNAL_BUFFER_BYTES];
 static struct sigaction previous_sigpipe;
@@ -563,6 +564,7 @@ void nemu_journal_init(void)
   if (failed) exit(EXIT_FAILURE);
   nemu_md_enabled = true;
   printf("NEMU_JOURNAL enabled harts=%u backend=%s\n", nemu_nr_harts, nemu_threaded ? "threaded" : "rr");
+  nemu_journal_active = true;
 }
 
 bool nemu_journal_begin(void)
@@ -604,9 +606,11 @@ bool nemu_journal_interrupt(word_t cause)
   return ready;
 }
 
-void nemu_journal_end(void)
+/* Keep the ~96 KiB diff-state/record stack frame out of the fast return path
+ * so -fstack-clash-protection never probes 24 stack pages per guest instruction
+ * when journaling is disabled. */
+static __attribute__((noinline)) void nemu_journal_end_slow(void)
 {
-  if (!journal || !executing) return;
   cpu_bus_lock();
   NemuDiffState state;
   nemu_md_capture(&state);
@@ -647,9 +651,16 @@ void nemu_journal_end(void)
   cpu_bus_unlock();
 }
 
+void nemu_journal_end(void)
+{
+  if (likely(!journal || !executing)) return;
+  nemu_journal_end_slow();
+}
+
 void nemu_journal_close(void)
 {
   if (!journal) return;
+  nemu_journal_active = false;
   if (nemu_state.state == NEMU_END && input_next != input_count) fail("unconsumed PLIC input schedule");
   if (nemu_state.state == NEMU_END && uart_input_next != uart_input_count) fail("unconsumed UART input schedule");
   if (nemu_state.state == NEMU_END && nemu_md_net &&

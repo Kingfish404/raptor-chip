@@ -228,6 +228,9 @@ static void usage(const char *prog)
   printf("      --nvme=FILE          load FILE as PCIe NVMe 1.4 namespace image\n");
   printf("      --virtio-net         enable standard virtio-mmio v2 DMA network card\n");
   printf("      --qemu-io-socket=SOCK connect MMIO/IRQ/DMA to raptor_qemu_bridge.py\n");
+  printf("      --pmu-detail         enable shadow BPU & branch-hotspot PMU sampling\n");
+  printf("      --pmu-minimal        count cycles/instructions only (skip per-cycle PMU probes)\n");
+  printf("      --difftest-batch=N   compare architectural state every N retired instructions\n");
   printf("      --serial-lf-to-cr    translate host LF input to CR for CR-terminated monitors\n");
   printf("      --serial-exit-on=TEXT exit successfully after TEXT appears on serial TX\n");
   printf("      --serial-milestone=TEXT report first TX occurrence with cycle/inst counts (repeatable)\n");
@@ -291,6 +294,9 @@ static int parse_args(int argc, char *argv[])
       {"nvme", required_argument, NULL, 287},
       {"virtio-net", no_argument, NULL, 288},
       {"qemu-io-socket", required_argument, NULL, 289},
+      {"pmu-detail", no_argument, NULL, 290},
+      {"pmu-minimal", no_argument, NULL, 291},
+      {"difftest-batch", required_argument, NULL, 292},
       {0, 0, NULL, 0},
   };
   int o;
@@ -545,6 +551,21 @@ static int parse_args(int argc, char *argv[])
       }
       diff_isa_mask = mask;
       diff_isa_mask_set = true;
+      break;
+    }
+    case 290: {
+      void pmu_set_detail(bool enable);
+      pmu_set_detail(true);
+      break;
+    }
+    case 291: {
+      void pmu_set_minimal(bool enable);
+      pmu_set_minimal(true);
+      break;
+    }
+    case 292: {
+      uint64_t batch = strtoull(optarg, NULL, 0);
+      difftest_set_batch_size(batch > 0 ? (uint32_t)batch : 1u);
       break;
     }
     case 1:

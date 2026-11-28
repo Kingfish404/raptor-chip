@@ -12,8 +12,9 @@
 /**
  * default-w4-l2 preset: 4-wide decode/rename/dispatch/commit core (3 integer
  * issue ports, ROB 64, PHY 96, 8 L1D MSHRs, write-back L1D) paired with a
- * 512 KiB 8-way inclusive write-back unified L2 cache (1024 sets x 8 ways x
- * 64 B lines). Intended as the flagship KU15P Linux/application configuration.
+ * 256 KiB 8-way inclusive write-back unified L2 cache (512 sets x 8 ways x
+ * 64 B lines, RAPT_L2_LEN 9). Intended as the flagship KU15P Linux/application
+ * configuration.
  *
  * Capacities and fast paths remain overrideable for performance and physical
  * cost comparisons.
