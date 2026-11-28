@@ -7,23 +7,23 @@ permalink: /performance.html
 
 This living document records performance evaluation results for the **current
 Raptor RTL (`b2caaa2ad`: direct prefix dispatch, 32-entry ITT + loop predictor,
-8-MSHR L1D, dual-AGU, L1I FDIP, 3-ALU on `default-w4`, 75 MHz KU5P timing cuts)
-and aligned gem5 O3 performance model (`046c95621` 6-preset sweep)**.
-Historical commit-by-commit logs live in
+8-MSHR L1D on `default-w4` [4 on `default`], dual-AGU, L1I FDIP, 3-ALU on
+`default-w4`, 75 MHz KU5P timing cuts) and aligned gem5 O3 performance model
+(`046c95621` 6-preset sweep)**. Historical commit-by-commit logs live in
 [Performance Iterations](./perf-iterations.md); this page is updated in place
 as the microarchitecture evolves.
 
 ## Target Presets & Evaluation Setup
 
 All `default*` presets target RV64GC(V) with a 16-entry SQ, 2-cycle pipelined
-MUL, 1 FPU pipe, decoupled Load/Store AGU, 16-entry RAS, 32-entry ITT, 32-entry
-loop predictor, L1I hit-under-prefetch + 8-entry FDIP, and degree-2 16-entry
-L1D IP-stride prefetcher (`rapt_l1d_stride_pf`):
+MUL, 1 FPU pipe, decoupled Load/Store AGU, 16-entry RAS (4 in `default-l2`),
+32-entry ITT, 32-entry loop predictor, L1I hit-under-prefetch + 8-entry FDIP,
+and degree-2 16-entry L1D IP-stride prefetcher (`rapt_l1d_stride_pf`):
 
 | Preset | Width (F/D/R/C) | ALU Ports | ROB / PRF | ALQ / BRQ / IOQ | BTB | L2 TLB | L1I | L1D (MSHRs) | L2 |
 |---|---|---:|---|---|---:|---:|---|---|---|
-| `default` | 2 / 2 / 2 / 2 | 2 | 32 / 64 | 8 / 8 / 8 | 512 (4w) | 512 (4w) | 16 KiB, 4w | 16 KiB, 4w (8) | None |
-| `default-w3` | 3 / 3 / 3 / 3 | 2 | 64 / 96 | 12 / 12 / 16 | 512 (4w) | 1024 (4w) | 16 KiB, 4w | 16 KiB, 4w (8) | None |
+| `default` | 2 / 2 / 2 / 2 | 2 | 32 / 64 | 8 / 8 / 8 | 512 (4w) | 512 (4w) | 16 KiB, 4w | 16 KiB, 4w (4) | None |
+| `default-w3` | 3 / 3 / 3 / 3 | 2 | 64 / 96 | 12 / 12 / 16 | 512 (4w) | 1024 (4w) | 16 KiB, 4w | 16 KiB, 4w (4) | None |
 | `default-w4` | 4 / 4 / 4 / 4 | 3 | 64 / 96 | 16 / 12 / 16 | 512 (4w) | 1024 (4w) | 16 KiB, 4w | 16 KiB, 4w (8) | None |
 | `default-cache` | 2 / 2 / 2 / 2 | 2 | 32 / 64 | 8 / 8 / 8 | 128 (2w) | 256 (1w) | 128 KiB, 2w | 128 KiB, 32w (4) | None |
 | `default-w4-cache` | 4 / 4 / 4 / 4 | 2 | 32 / 64 | 12 / 12 / 16 | 512 (4w) | 1024 (4w) | 128 KiB, 2w | 128 KiB, 32w (4) | None |
@@ -191,9 +191,10 @@ weight coverage across 3/4 passing clusters):
 ### 4.4 Real RTL Simulation (`b2caaa2ad`: Bare-metal, Linux Sim, and SPEC SimPoint)
 
 Measured directly on Verilator RTL (`b2caaa2ad`: direct dispatch, loop predictor,
-8-MSHR L1D, dual-AGU, L1I FDIP, and backend/memory timing cuts closing 75 MHz on
-KU5P) for bare-metal (`abstract-machine` / `embench-baremetal`) and NEMU Linux
-6.18.51 checkpoints (`sim/gsim/linux_sim_bench.py`, `sim/gsim/spec_simpoint.py`):
+8-MSHR L1D on `default-w4` [4 on `default`], dual-AGU, L1I FDIP, and backend/memory
+timing cuts closing 75 MHz on KU5P) for bare-metal (`abstract-machine` /
+`embench-baremetal`) and NEMU Linux 6.18.51 checkpoints (`sim/gsim/linux_sim_bench.py`,
+`sim/gsim/spec_simpoint.py`):
 
 | Environment | Preset / XLEN | DMIPS/MHz | CM/MHz | Embench-IoT (vs KU5P) | RTL SPECrate2017 (INT/FP / GHz) | RTL SPECrate2026 (INT/FP / GHz) |
 |---|---|---:|---:|---:|---:|---:|
@@ -216,7 +217,7 @@ Measured directly on KU5P and KU15P boards running Linux over NFS (binaries stag
 
 | Board | Preset / XLEN | DMIPS/MHz | CoreMark/MHz | Embench-IoT (vs KU5P) | SPECrate2017 (INT/FP / GHz) | SPECrate2026 (INT/FP / GHz) |
 |---|---|---:|---:|---:|---:|---:|
-| KU5P | `default` / RV64 | **1.34-1.93** | **3.3514** | **1.0477x** *(19/19)* | **0.21 / 0.16** *(23/23 `test` IPC)* | - |
+| KU5P | `default` / RV64 | **1.34-1.93** | **3.3514** | **1.0477x** *(19/19)* | **0.21 / 0.16** *(23/23 `test` IPC)* | **0.05 / 0.10** *(23/26 in progress: 12/14 INT, 7/12 FP)* |
 | KU15P | `default-w4` / RV64 | **1.46-2.16** | **3.9803** | **1.2319x** *(19/19)* | **0.23 / 0.17** *(23/23 `test` IPC)* | **0.06 / 0.10** *(25/26 `test` IPC)* |
 
 Live Ubuntu 26.10 (RVA23) full-workload SPEC CPU 2017 `test` hardware runs on real DDR4 (no L2
@@ -231,6 +232,12 @@ cache) completed **23/23** workloads (`rc=0`) on both boards:
   instructions** / 5.61T cycles over 31.2h, geomean IPC `0.2749`, INT `0.2518` / FP `0.3023`,
   aggregate IPC `0.4875`), e.g., `772.marian_r` `0.9756` (1.76T insts), `750.sealcrypto_r`
   `0.9132`, `706.stockfish_r` `0.7277`, `777.zstd_r` `0.5928`, `731.astcenc_r` `0.4911`.
+- **KU5P SPEC CPU 2026 `test` (`default / RV64`, live run in progress)**: **23/26** workloads
+  completed so far (**22/23 `rc=0`**, **0.96T instructions** / 3.92T cycles over 21.8h, geomean
+  IPC `0.2396`, aggregate IPC `0.2454`), e.g., `706.stockfish_r` `0.6501`, `750.sealcrypto_r`
+  `0.6488`, `731.astcenc_r` `0.4493`, `729.abc_r` `0.4350`, `765.roms_r` `0.4128` (current
+  19-workload scored subset `0.05 / 0.10`; final 3 workloads `772.marian_r`, `777.zstd_r`,
+  `782.lbm_r` executing on hardware).
 All runs demonstrate full real-hardware Linux + glibc + DDR4 stability while highlighting
 DRAM-bound sensitivity (e.g., `507.cactuBSSN_r` IPC `~0.065`, `709.cactus_r` IPC `0.0609`)
 without an L2 cache.
@@ -257,7 +264,7 @@ open-source cores tracked by [riscv100.top](https://riscv100.top/)
 | SiFive Rocket | RV64 In-Order | 1 | 2.3-2.75 | ~0.25-0.35 | ~0.20-0.30 | Scalar 5-stage in-order |
 | ARM Cortex-A55 | ARMv8 In-Order | 2 | 3.0-4.0 | 0.5-0.7 | ~0.45-0.65 | Improved in-order |
 | SiFive U74 | RV64 In-Order | 2 | 4.9-5.7 | 0.7-0.9 | ~0.6-0.8 | Dual-issue app core |
-| **Raptor `default`** | **RV64 OoO** | **2** | **5.67** *(RTL)* | **~0.77** *(10/10 est.)* | **~0.48** *(13/13 est.)* | 2W, 64 ROB, 16K L1+PF, 512 BTB |
+| **Raptor `default`** | **RV64 OoO** | **2** | **5.67** *(RTL)* | **~0.77** *(10/10 est.)* | **~0.48** *(13/13 est.)* | 2W, 32 ROB, 16K L1+PF, 512 BTB |
 | **Raptor `default-l2`** | **RV64 OoO** | **2** | **5.19** *(gem5)* | **~0.72** *(10/10 est.)* | **~0.50** *(13/13 est.)* | 2W, 32 ROB, 16K L1+PF, 512K L2 |
 | **Raptor `default-cache`** | **RV64 OoO** | **2** | **5.39** *(gem5)* | **~0.79** *(10/10 est.)* | **~0.57** *(13/13 est.)* | 2W, 32 ROB, 128K L1+PF |
 | **Raptor `default-w3`** | **RV64 OoO** | **3** | **6.16** *(gem5)* | **~0.86** *(10/10 est.)* | **~0.52** *(13/13 est.)* | 3W, 64 ROB, 16K L1+PF, 512 BTB |
@@ -273,7 +280,123 @@ open-source cores tracked by [riscv100.top](https://riscv100.top/)
 
 ---
 
-## 6. Reproducing These Results (Integrated Repo Tooling)
+## 6. PPA: Open-PDK STA and FPGA Implementation
+
+### 6.1 Methodology, Boundary & Open-PDK Corners
+
+Whole-cluster ASIC PPA is evaluated continuously in GitHub Actions
+(`.github/workflows/sta.yaml`) and locally via `make sta`, synthesizing the full
+`rapt` cluster (`rapt_core` + L1s + `rapt_l2_subsystem` + CLINT + PLIC + DM/DTM)
+with `Yosys` (`yosys-slang` native SystemVerilog frontend) and `OpenSTA` under
+`MEMORY=sram` (1RW cache/predictor arrays mapped to OpenRAM behavioral Liberty
+stubs):
+
+- **Open PDK libraries & gate-equivalent (`NAND2`) normalization**:
+  - **ASAP7 (`asap7`)**: 7 nm predictive FinFET RVT TT (`0.7 V`, `NAND2 = 0.08748 um^2`).
+  - **NanGate45 (`nangate45`)**: 45 nm FreePDK45 open cell library (`1.1 V`, `NAND2 = 0.798 um^2`).
+  - **SKY130HD (`sky130hd`)**: 130 nm SkyWater `sky130_fd_sc_hd__tt_025C_1v80`
+    (`1.8 V`, `NAND2 = 5.004 um^2`).
+- **Constraints & scope caveats**: Pre-layout synthesis uses an ideal clock
+  network without wire parasitics or clock-tree synthesis (CTS), and `2.0 ns`
+  external I/O delay (`50 MHz` / `20 ns` target on RV32 `asap7` and `nangate45`;
+  `25 MHz` / `40 ns` target on RV64 and `sky130hd`). Consequently:
+  1. **Overall vs. Reg-to-Reg Fmax**: Overall `Fmax` includes `jtag_trst_n` and
+     `reset` input-to-flop paths; internal register-to-register `Fmax` is
+     substantially higher (e.g., `307.39 MHz` vs `230.59 MHz` on `small/RV32`
+     ASAP7, and `150.76 MHz` vs `120.26 MHz` on `default/RV32` NanGate45).
+  2. **SKY130HD pre-CTS fanout cap (`32.65 MHz`)**: Without pre-CTS buffer-tree
+     insertion, a high-fanout unbuffered control flip-flop (`sky130_fd_sc_hd__dfxtp_1`)
+     extrapolates to `25.20 ns` `CLK->Q` + `5.43 ns` setup (`30.63 ns` min
+     period = `32.65 MHz`).
+  3. **Power**: Vectorless OpenSTA activity propagation evaluated at each job's
+     target clock (`50 MHz` or `25 MHz`), so RV64 (`25 MHz`) switching/internal
+     power is evaluated at half the toggle frequency of RV32 (`50 MHz`) on
+     ASAP7 and NanGate45.
+
+### 6.2 Multi-PDK & Multi-Config Whole-Cluster STA (`rapt`, `MEMORY=sram`)
+
+| Config / XLEN | Commit | PDK | Target | Overall Fmax | Reg2Reg Fmax | Area (`um^2`) | Area (`kGE`) | Cells (Seq %) | Power: Total (Int / Sw / Leak `mW`) |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|
+| `small` / RV32 | `208295c39` | `asap7` | 50 MHz | **230.59 MHz** | **307.39 MHz** | 99,511 | 1,138 | 621,337 (21.9%) | **4.36** (3.98 / 0.25 / 0.12) |
+| `small` / RV32 | `208295c39` | `nangate45` | 50 MHz | **213.59 MHz** | **225.43 MHz** | 927,396 | 1,162 | 576,793 (29.2%) | **42.7** (21.3 / 0.40 / 20.9) |
+| `small` / RV32 | `208295c39` | `sky130hd` | 25 MHz | **32.65 MHz** | **32.65 MHz** | 4,630,248 | 925 | 420,512 (37.6%) | **71.6** (70.5 / 1.14 / 0.002) |
+| `small` / RV64 | `208295c39` | `asap7` | 25 MHz | **210.47 MHz** | **273.33 MHz** | 116,537 | 1,332 | 738,823 (20.8%) | **2.41** (2.17 / 0.10 / 0.14) |
+| `small` / RV64 | `208295c39` | `nangate45` | 25 MHz | **176.68 MHz** | **221.32 MHz** | 1,099,188 | 1,377 | 704,014 (27.4%) | **36.9** (11.9 / 0.26 / 24.8) |
+| `small` / RV64 | `208295c39` | `sky130hd` | 25 MHz | **32.65 MHz** | **32.65 MHz** | 5,593,609 | 1,118 | 525,735 (34.5%) | **79.5** (78.2 / 1.32 / 0.002) |
+| `default` / RV32 *(no-VPU)* | `8272b1d1` | `asap7` | 50 MHz | **213.00 MHz** | - | 85,421 | 976 | 547,898 | **14.3** |
+| `default` / RV32 *(no-VPU)* | `8272b1d1` | `nangate45` | 50 MHz | **159.29 MHz** | - | 788,767 | 988 | 531,739 | **63.4** |
+| `default` / RV32 *(no-VPU)* | `8272b1d1` | `sky130hd` | 25 MHz | **36.21 MHz** | - | 4,362,351 | 872 | 465,995 | **38.7** |
+| `default` / RV64 *(no-VPU)* | `8272b1d1` | `asap7` | 25 MHz | **176.92 MHz** | - | 114,311 | 1,307 | 765,181 | **24.7** |
+| `default` / RV64 *(no-VPU)* | `8272b1d1` | `nangate45` | 25 MHz | **127.75 MHz** | - | 1,095,510 | 1,373 | 740,239 | **102.0** |
+| `default` / RV64 *(no-VPU)* | `8272b1d1` | `sky130hd` | 25 MHz | **30.30 MHz** | - | 6,103,994 | 1,220 | 642,968 | **137.0** |
+| `default` / RV32 *(V 1.0 + 16K L1s)* | `b67143875` | `nangate45` | 50 MHz | **120.26 MHz** | **150.76 MHz** | 4,814,790 | 6,034 | *(incl. 38 SRAMs, 21.7% seq)* | **518.0** (286 / 143 / 89.3) |
+
+> **Preset note**: Starting at `f82c2e86` (`2026-09-06`), `.github/workflows/sta.yaml`
+> runs the 6-way `{rv32, rv64} x {asap7, nangate45, sky130hd}` matrix on
+> `RAPT_CONFIG=small` (single-issue + F/D + V-capable cluster, 512 B/256 B L1s,
+> 8 SRAM macros) to stay within GitHub-hosted runner timeouts; `8272b1d1` is the
+> final 6-way CI run on `RAPT_CONFIG=default` prior to RVV 1.0 integration, and
+> `b67143875` records full-cluster `default/RV32` STA with `VLEN=128` VPU,
+> 512-entry 4-way BTB, 3x1024 TAGE, and 16 KiB L1I/L1D (38 OpenRAM 1RW macros =
+> `1.018 mm^2` placeholder macro area + `3.797 mm^2` standard cells).
+
+### 6.3 GitHub Actions CI PPA Evolution Across Architectural Milestones
+
+Key checkpoints from `.github/workflows/sta.yaml` (`Fmax [MHz] / Area [kGE] / Power [mW]`):
+
+| Date | Commit | Preset & Architectural Milestone | NG45 RV32 | NG45 RV64 | ASAP7 RV32 | ASAP7 RV64 | SKY130 RV64 |
+|---|---|---|---|---|---|---|---|
+| 2026-08-28 | `f7b8a974` | `default`: scalar F/D support | 83.4 / 989k / 61.4 | 85.1 / 1363k / 109.0 | 105.6 / 829k / 32.7 | 80.9 / 1138k / 28.3 | 21.1 / 1166k / 111.0 |
+| 2026-09-01 | `8272b1d1` | `default`: split `dpu + ieu + feu + lsu` | 159.3 / 988k / 63.4 | 127.8 / 1373k / 102.0 | 213.0 / 976k / 14.3 | 176.9 / 1307k / 24.7 | 30.3 / 1220k / 137.0 |
+| 2026-09-09 | `4461e114` | `small`: RVA22S64 + initial VPU | 176.5 / 929k / 45.8 | 161.9 / 1362k / 69.9 | 214.7 / 906k / 8.4 | 187.2 / 1264k / 37.3 | 34.0 / 1184k / 202.0 |
+| 2026-10-12 | `b1c67604` | `small`: out-of-order F/D (`FPQ`) | 150.7 / 1229k / 52.8 | 146.3 / 1857k / 70.0 | 172.2 / 1214k / 4.7 | 173.3 / 1747k / 9.2 | 37.1 / 1543k / 226.0 |
+| 2026-10-30 | `ea75a432` | `small`: L1D diagonal banks + backend PPA | 173.5 / 1122k / 43.7 | 172.1 / 1373k / 38.5 | 256.5 / 1110k / 4.8 | 256.4 / 1321k / 2.8 | 32.7 / 1127k / 84.6 |
+| 2026-11-18 | `347b5593` | `small`: integrated RVV 1.0 (`ELEN=64`) | 170.8 / 1086k / 42.1 | 171.8 / 1332k / 36.5 | 233.6 / 1079k / 4.1 | 233.3 / 1290k / 2.3 | 32.7 / 1083k / 79.8 |
+| 2026-11-21 | `ef54215d` | `small`: RVA23S64 (H, Sv39x4, Svnapot) | 173.0 / 1088k / 41.6 | 172.0 / 1330k / 37.5 | 234.4 / 1088k / 4.2 | 232.3 / 1284k / 2.4 | 32.7 / 1084k / 79.9 |
+| 2026-11-22 | `dcfe5b1a` | `small`: zero-pragma routability + LVT | 171.1 / 1086k / 42.4 | 172.0 / 1322k / 37.0 | 235.1 / 1086k / 4.1 | 233.3 / 1277k / 2.3 | 32.7 / 1088k / 79.2 |
+| 2026-11-22 | `046c9562` | `small`: FE/BE/LSU tuning + L1 prefetchers | 151.0 / 1076k / 39.4 | 142.4 / 1295k / 34.9 | 199.6 / 1079k / 4.1 | 186.3 / 1264k / 2.1 | 32.7 / 1059k / 74.3 |
+| 2026-11-23 | `b6714387` | `small`: BE/MEM timing cuts (`+41%` RV64 Fmax) | 220.2 / 1108k / 40.8 | 200.7 / 1338k / 35.9 | 231.3 / 1102k / 4.3 | 228.8 / 1299k / 2.6 | 32.7 / 1088k / 76.5 |
+| 2026-11-23 | `b2caaa2a` | `small`: direct dispatch + loop + 8-MSHR | 206.7 / 1151k / 43.1 | 170.0 / 1385k / 38.1 | 230.1 / 1143k / 4.3 | 213.9 / 1335k / 2.3 | 32.7 / 1130k / 79.5 |
+| 2026-11-27 | `59cd43b0` | `small`: L2 coherence + 2-cyc CLMUL split | 210.0 / 1151k / 43.9 | 172.0 / 1369k / 38.2 | 230.4 / 1145k / 4.4 | 224.6 / 1326k / 2.3 | 32.7 / 1117k / 79.9 |
+| 2026-11-28 | `208295c3` | `small`: multi-hart SMP cluster (`NHARTS=1` bypass) | 213.6 / 1162k / 42.7 | 176.7 / 1377k / 36.9 | 230.6 / 1138k / 4.4 | 210.5 / 1332k / 2.4 | 32.7 / 1118k / 79.5 |
+
+### 6.4 Multi-Config Routed FPGA Implementation (`Vivado 2026.1`)
+
+To complement `small`/`default` ASIC STA with full multi-preset scaling on
+current RTL (including RVV 1.0, RVA23S64, DDR3/DDR4 MIG, and Ethernet/CM005),
+the table below records routed Vivado implementation results across presets and
+boards:
+
+| Board (`Part`) | Preset / XLEN | Rev | Target | SoC LUT (%) | `rapt` Cluster LUT / FF | SoC BRAM36 / URAM / DSP | Routed WNS |
+|---|---|---|---:|---:|---:|---:|---:|
+| Arty A7-100T (`xc7a100t`) | `chip32-small` / RV32 | `08a4fdba` | 20 MHz | 36,118 (57.0%) | - | 31.5 / 0 / 4 | +1.223 ns |
+| Arty A7-100T (`xc7a100t`) | `small` / RV32 | `08a4fdba` | 20 MHz | 57,573 (90.8%) | - | 31.5 / 0 / 13 | +0.884 ns |
+| Arty A7-100T (`xc7a100t`) | `chip32-dff` / RV32 | `08a4fdba` | 20 MHz | 60,761 (95.8%) | - | 39.5 / 0 / 13 | +0.892 ns |
+| RK-XCKU5P-F (`xcku5p`) | `small` / RV64 | `a14a6712` | 75 MHz | 109,849 (50.6%) | 94,930 / 31,383 | 61 / 0 / 41 | +0.082 ns |
+| RK-XCKU5P-F (`xcku5p`) | `small-smp2` *(2-hart, no-V)* / RV64 | `4ee01768` | 75 MHz | 139,553 (64.3%) | 125,582 / 40,991 | 57.5 / 0 / 53 | +0.240 ns |
+| RK-XCKU5P-F (`xcku5p`) | `middle` / RV64 | `a14a6712` | 75 MHz | 142,830 (65.8%) | 127,908 / 37,387 | 62.5 / 0 / 41 | +0.084 ns |
+| RK-XCKU5P-F (`xcku5p`) | `small-cache` / RV64 | `a14a6712` | 75 MHz | 164,909 (76.0%) | 149,981 / 45,509 | 91 / 8 / 41 | +0.027 ns |
+| RK-XCKU5P-F (`xcku5p`) | `default` / RV64 | `b2caaa2a` | 50 MHz | 181,583 (83.7%) | 170,444 / 53,421 | 84.5 / 0 / 41 | +0.084 ns |
+| RK-XCKU5P-F (`xcku5p`) | `default` / RV64 | `b2caaa2a` | 75 MHz | 183,554 (84.6%) | 173,108 / 53,610 | 84.5 / 0 / 41 | +0.084 ns |
+| RK-XCKU5P-F (`xcku5p`) | `middle-cache` / RV64 | `a14a6712` | 75 MHz | 194,040 (89.4%) | 178,995 / 48,345 | 92.5 / 8 / 41 | +0.003 ns |
+| RK-XCKU5P-F (`xcku5p`) | `small-smp2` *(2-hart RVA23+Eth)* / RV64 | `a9069d08` | 50 MHz | 206,946 (95.4%) | 192,063 / 62,402 | 66 / 0 / 79 | +0.084 ns |
+| MLK-CU08-KU15P (`xcku15p`) | `default` / RV64 | `b2caaa2a` | 50 MHz | 189,066 (36.2%) | 169,539 / 53,409 | 98 / 6 / 41 | +0.012 ns |
+| MLK-CU08-KU15P (`xcku15p`) | `default` / RV64 | `590963bf` | 75 MHz | 195,320 (37.4%) | 173,654 / 53,743 | 98 / 6 / 41 | +0.006 ns |
+| MLK-CU08-KU15P (`xcku15p`) | `default-w3` / RV64 | `4476652a` | 50 MHz | 221,628 (42.4%) | - | 99.5 / 6 / 41 | +0.016 ns |
+| MLK-CU08-KU15P (`xcku15p`) | `default-smp2` *(2-hart, no-V)* / RV64 | `1d26af6e` | 50 MHz | 267,904 (51.3%) | 248,825 / 77,549 | 112.5 / 0 / 53 | +0.122 ns |
+| MLK-CU08-KU15P (`xcku15p`) | `default-w4` / RV64 | `a14a6712` | 50 MHz | 301,726 (57.7%) | 279,961 / 71,213 | 104 / 6 / 41 | +0.016 ns |
+| MLK-CU08-KU15P (`xcku15p`) | `default-w4-l2` / RV64 | `21c234a3` | 50 MHz | 311,272 (59.6%) | 290,070 / 80,992 | 134.5 / 12 / 41 | +0.012 ns |
+| MLK-CU08-KU15P (`xcku15p`) | `default-smp2` *(2-hart RVA23)* / RV64 | `208295c3` | 50 MHz | 343,739 (65.8%) | 322,727 / 102,675 | 155.5 / 4 / 79 | +0.012 ns |
+| MLK-CU08-KU15P (`xcku15p`) | `middle-smp4` *(4-hart, no-V)* / RV64 | `a9069d08` | 50 MHz | 380,741 (72.8%) | 361,720 / 100,933 | 77.5 / 0 / 103 | +0.045 ns |
+
+In multi-hart SMP builds (`NHARTS >= 2`), `rapt_coherence_hub` adds `1,004-1,435`
+CLB LUTs (`201-246` FFs, 0 BRAM) for 2 harts and `2,311` CLB LUTs (`294` FFs,
+0 BRAM, `0.44%` of `xcku15p`) for 4 harts, keeping cluster area nearly linear
+in `NHARTS`.
+
+---
+
+## 7. Reproducing These Results (Integrated Repo Tooling)
 
 ```bash
 # 0. Verify config mapping, TMA, SPEC discovery, and reporting unit tests
@@ -299,4 +422,10 @@ make -C sim/gsim spec-simpoint SPEC_ROOT=<SPEC_ROOT> \
 # 4. Aggregate multi-preset gem5 TMA, estimated SPECrate2017/GHz, and RTL PMU TMA
 make -C sim/gsim perf-report EVAL_ROOT=<EVAL_OUT> \
     EVAL_PRESETS="default,default-w3,default-w4,default-cache,default-w4-cache,default-l2"
+
+# 5. Whole-cluster Open-PDK STA (ASAP7 / NanGate45 / SKY130HD) and module PPA
+make sta RAPT_CONFIG=small STA_PLATFORM=asap7 CLK_FREQ_MHZ=50
+make sta RAPT_CONFIG=small STA_PLATFORM=nangate45 CLK_FREQ_MHZ=25 VFLAGS="-DRAPT_RV64"
+make sta RAPT_CONFIG=small STA_PLATFORM=sky130hd CLK_FREQ_MHZ=25 VFLAGS="-DRAPT_RV64"
+make -C synth ppa-all-pdks MODULE=core RAPT_CONFIG=default CLK_FREQ_MHZ=100 SRAM_MODE=macro
 ```

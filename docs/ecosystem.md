@@ -46,7 +46,7 @@ VLEN of 128 bits.
 Root `make fpga-synth` and `make fpga-build` select CU08-KU15P by default;
 use `FPGA_BOARD=rk-xcku5p-f` for RK. For Linux over Ethernet on either board,
 follow the [netboot instructions](./linux_kernel.md#fpga-netboot).
-For RVV, select `default`, `default-*` or `large`. Use the routed timing report
+For RVV, select `default`, `default-*`, `large` or RV64 `chip64-rva23`. Use the routed timing report
 for the chosen preset and board. The board build options are in the
 [FPGA guide](https://github.com/Kingfish404/raptor-chip/blob/master/fpga/README.md).
 
@@ -83,8 +83,9 @@ with each timing or area measurement.
 The default physical address width is 32 bits for both XLEN modes. RV64 permits
 `RAPT_PADDR_BITS=32..38` (`default-pa38` selects 38); RV32 requires 32. The
 architectural Sv39 PPN encoding stays intact, and unsupported addresses fault
-before cache lookup can alias. RV64 stores PCs/fetch targets in 40 bits and
-sign-extends them to XLEN; `RAPT_PC_FULL_WIDTH` retains full-width storage.
+before cache lookup can alias. RV64 stores PCs/fetch targets in 64 bits when H
+is enabled (default RVA23S64), or in 40 bits sign-extended to XLEN when H is off
+unless `RAPT_PC_FULL_WIDTH` is set.
 These storage choices do not enlarge the platform PMA windows below.
 
 [`rtl/configs/memory_map.json`](https://github.com/Kingfish404/raptor-chip/blob/master/rtl/configs/memory_map.json) records the shared 32-bit physical addresses and the main RAM
@@ -124,12 +125,17 @@ remain separate from simulator checks.
 | Device             | Range                       |
 | ------------------ | --------------------------- |
 | Finisher           | `0x0010_0000 - 0x0010_0fff` |
+| Goldfish RTC       | `0x0010_1000 - 0x0010_1fff` |
 | CLINT              | `0x0200_0000 - 0x020b_ffff` |
 | PLIC               | `0x0c00_0000 - 0x0cff_ffff` |
 | SRAM               | `0x0f00_0000 - 0x0f00_1fff` |
 | UART / peripherals | `0x1000_0000 - 0x1001_1fff` |
+| LiteX CSR          | `0x1100_0000 - 0x11ff_ffff` |
+| LiteEth / Ethernet | `0x1800_0000 - 0x18ff_ffff` |
 | MROM               | `0x2000_0000 - 0x2000_ffff` |
+| VGA                | `0x2100_0000 - 0x211f_ffff` |
 | Flash              | `0x3000_0000 - 0x3fff_ffff` |
+| PCIe / SDHCI       | `0x4100_0000 - 0x5fff_ffff` |
 | PMEM (main memory) | `0x8000_0000 - 0x8fff_ffff` |
 | SDRAM              | `0xa000_0000 - 0xa1ff_ffff` |
 

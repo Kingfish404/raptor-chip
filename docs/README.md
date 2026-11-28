@@ -27,11 +27,11 @@ Values below describe `rtl/configs/default/rapt_config.svh` and the integrated
 | Vector | V 1.0, 32 registers, VLEN=128, ELEN=64; ROB-head authorization and precise restart |
 | Completion | 6 registered endpoints; the VPU shares the integer system port |
 | Prediction | TAGE: 1024 bimodal + 3 x 1024 tagged; 512-entry four-way BTB; 32-entry ITT; 32-entry loop predictor; RAS 16 |
-| L1 caches | 16 KiB each, four-way, 64-byte lines; L1I hit-under-prefetch + 8-entry FDIP; L1D write-back, 8 MSHRs, 2 writeback buffers, degree-2 IP-stride prefetcher |
+| L1 caches | 16 KiB each, four-way, 64-byte lines; L1I hit-under-prefetch + 8-entry FDIP; L1D write-back, 4 MSHRs (8 in `default-w4`), 2 writeback buffers, degree-2 IP-stride prefetcher |
 | Translation | ITLB 16, fully associative; DTLB 64, two-way, replicated for load/store; shared L2 TLB 512 (four-way) |
-| Core boundary | `l2_client_if` to the always-present cluster-level `rapt_l2_subsystem` |
-| L2 cache | Disabled; `default-l2` enables 512 KiB, eight-way inclusive write-back |
-| Addresses | Physical: 32 bits by default; RV64 allows 32-38. RV64 stored PC: 40 bits |
+| Core boundary | `l2_client_if` (via `rapt_coherence_hub` when `NHARTS >= 2`) to the always-present `rapt_l2_subsystem` |
+| L2 cache | Disabled; `default-l2` / `default-l2-smp2` / `chip64-rva23` enable 512 KiB (`default-w4-l2`: 256 KiB), eight-way write-back (non-inclusive when `NHARTS > 1`) |
+| Addresses | Physical: 32 bits by default; RV64 allows 32-38. RV64 stored PC: 64 bits with H enabled (40 bits when H is off) |
 | Platform | M/S/U, HS/VS/VU on RV64, Sv32/Bare or Sv39/Bare, Sv39x4 for guests, 8 usable PMP entries |
 | Interrupts / debug | CLINT; PLIC with 31 sources and M/S contexts; Debug Module / JTAG DTM bring-up path |
 | Bus | Cluster AXI4, XLEN-bit data/address containers, 4-bit ID, up to 8 reads; buffered writebacks wait for B |
@@ -59,8 +59,8 @@ entries. `RAPT_SFENCE_SELECTIVE=0` selects full invalidation.
 
 | RTL presets | RV32 | RV64 |
 | --- | --- | --- |
-| `default`, `default-*`, `large` | V 1.0 | RVA23U64 and RVA23S64, including V 1.0 and H |
-| `small`, `small-cache`, `middle`, `middle-cache`, `formal` | Vector off by default | Vector off by default |
+| `default`, `default-*` (incl. `*-smp2`), `large`, `chip64-rva23` | V 1.0 (`chip64-rva23` is RV64-only) | RVA23U64 and RVA23S64, including V 1.0 and H |
+| `small`, `small-cache`, `small-smp2`, `middle`, `middle-cache`, `middle-smp2`, `middle-smp4`, `formal` | Vector off by default | Vector off by default |
 | `chip32-*` | Vector off by default | RV32-only presets |
 
 The integrated [VPU](./vpu.md) uses VLEN=128 and ELEN=64 by default in both XLEN
@@ -104,7 +104,7 @@ interface. See [Linux boot and user-mode validation](./linux_kernel.md#rva23u64-
 
 ## RVA23S64 support
 
-RV64 `default`, `default-*` and `large` enable the supervisor profile on top
+RV64 `default`, `default-*`, `large` and `chip64-rva23` enable the supervisor profile on top
 of RVA23U64. The profile requires privileged architecture version 1.13 and
 the Sha hypervisor facilities. [RISC-V RVA23S64 profile][rva23s64-spec]
 

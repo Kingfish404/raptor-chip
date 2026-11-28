@@ -40,10 +40,11 @@ make -C fpga/mlk-cu08-ku15p info XLEN=64 MEMORY=bram CM005_BRIDGE=0
 make -C fpga/mlk-cu08-ku15p load XLEN=64 MEMORY=bram CM005_BRIDGE=0
 ```
 
-`VECTOR=auto` follows the preset: `default`, `default-*` and `large` enable
-V 1.0 with VLEN=128 and ELEN=64. `VECTOR=0` disables V; `VECTOR=1` enables it
-on an F/D-capable preset. Firmware, packed RTL and device-tree ISA use the same
-resolved setting. The boot payload includes a vector smoke test when V is on.
+`VECTOR=auto` follows the preset: `default`, `default-*`, `large` and
+`chip64-rva23` enable V 1.0 with VLEN=128 and ELEN=64. `VECTOR=0` disables V;
+`VECTOR=1` enables it on an F/D-capable preset. Firmware, packed RTL and
+device-tree ISA use the same resolved setting. The boot payload includes a vector
+smoke test when V is on.
 `VECTOR_DEVICE_TEST=1` explicitly adds the synthetic MMIO fault peripheral for
 verification; normal builds omit it. Keep the same options for every command.
 
@@ -75,10 +76,10 @@ For the LiteX BIOS and DDR4/CM005 Ethernet netboot profile, run
 `make -C fpga/litex FPGA_BOARD=mlk_cu08_ku15p fpga-netboot-rv64-build`. See the
 [netboot workflow](../litex/NETBOOT.md#fixed-cu08-and-rk-end-to-end-targets).
 
-## Ubuntu 24.04 NFS root
+## Ubuntu 26.10 (RVA23) NFS root
 
 Follow the [shared Ubuntu workflow](../common/UBUNTU.md). `ubuntu-bitstream`
-defaults to RV64 `middle-cache`, DDR4, 50 MHz, `CM005_BRIDGE=1` and
+defaults to RV64 `default` (RVA23U64/RVA23S64), DDR4, 50 MHz, `CM005_BRIDGE=1` and
 `CM005_ETHERNET=1`. The CPU uses the Linux LiteEth ABI on a virtual third
 CM005 port. CPU queue congestion and virtual-PHY reset do not block/reset the
 A/B forwarding path. The loader MAC/IP are distinct from KU5P; prepare a
@@ -103,9 +104,9 @@ make -C fpga/mlk-cu08-ku15p ubuntu-boot UART_PORT='/dev/serial/by-id/<KU15P-UART
 | `XLEN` | `64` | `32` or `64` |
 | `RAPT_CONFIG` | `small` | CPU preset from `rtl/configs/` |
 | `MEMORY` | `ddr` | `bram` or `ddr` main RAM |
-| `CM005_BRIDGE` | `1` | CM005 A↔B forwarding; requires `CLOCK_MHZ=50` |
+| `CM005_BRIDGE` | `1` | CM005 A↔B forwarding; requires `CLOCK_MHZ=50` or `75` |
 | `CM005_ETHERNET` | `0` | Add the CPU NIC; enabled by `ubuntu-bitstream` |
-| `CLOCK_MHZ` | `50` | CPU clock target: `25`, `50` or `100` MHz |
+| `CLOCK_MHZ` | `50` | CPU clock target: `25`, `50`, `75` or `100` MHz |
 | `RAM_BYTES` | `131072` | BRAM main RAM size; power of two, 16 KiB–1 MiB |
 | `USE_RESET_BUTTON` | `0` | Set to `1` to enable the active-low reset button |
 | `DDR_PART` | `MT40A512M16LY-075` | MIG memory-part selection; see board details below |
@@ -181,8 +182,9 @@ Addresses are generated from `rtl/configs/memory_map.json`:
 
 | Region | Base address | Size / behavior |
 |---|---|---|
+| Goldfish RTC | `0x00101000` | 4 KiB wall-clock RTC; PLIC source 6 |
 | CLINT | `0x02000000` | Cluster timer; 1 MHz `mtime` |
-| PLIC | `0x0c000000` | Interrupt controller; UART source 1 |
+| PLIC | `0x0c000000` | Interrupt controller; UART source 1, CM005 NIC source 2 |
 | Scratch SRAM | `0x0f000000` | 8 KiB; includes the ROM monitor's stack |
 | UART | `0x10000000` | Byte-spaced 8250 registers, 115200 baud, 8N1 |
 | CM005 diagnostics | `0x18000000` | 64 KiB MMIO window when enabled; generated register map |

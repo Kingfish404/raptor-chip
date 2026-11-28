@@ -27,7 +27,7 @@ The RV64 supervisor profile adds Sha/H guest execution, Svnapot mappings,
 supervisor and virtual-supervisor timers (Sstc), and counter overflow and
 privilege filtering (Sscofpmf). Both XLENs support Svade and Svinval.
 
-`default`, `default-*` and `large` enable V 1.0 in both XLEN modes with
+`default`, `default-*`, `large` and RV64 `chip64-rva23` enable V 1.0 with
 **VLEN=128 and ELEN=64**. The other presets leave V off by default.
 `RAPT_NO_RVA23S64` selects the RV64 user profile with the baseline supervisor
 configuration. `RAPT_NO_RVA23U64` selects baseline V, and `RAPT_NO_VPU`
@@ -38,22 +38,23 @@ Core:       raptor-falcon (M/S/U, with HS/VS/VU in the RV64 hypervisor configura
 PMP:        8 usable entries, TOR / NAPOT, 4 KiB granularity, L-bit lockable
 Interrupts: CLINT (mtime, mtimecmp, msip) + PLIC (31 sources, M/S contexts)
 
-Core boundary: l2_client_if to the cluster-level rapt_l2_subsystem (always present).
+Core boundary: l2_client_if via rapt_coherence_hub (snoop coherence for NHARTS >= 2;
+               zero-overhead bypass when NHARTS = 1) to cluster-level rapt_l2_subsystem.
 Bus Interface: AXI4, XLEN-bit data/addr containers, 4-bit ID; up to 8 burst-capable reads.
                Writes use independent AW/W handshakes: single-beat stores and dirty-line words,
                multi-beat Zicboz CBO.ZERO. Without L2, RAPT_POSTED_WRITES bounds cacheable writes
                in flight (default 4). Write-through stores may complete at bus capture; buffered
                writebacks retain their data and complete only on the corresponding B response.
 Addresses: 32-bit physical by default in both modes; RV64 RAPT_PADDR_BITS=32..38.
-           RV64 stores PCs in 40 bits and sign-extends to XLEN; the PMA map stays 32-bit.
+           RV64 stores PCs in 64 bits with H enabled (40 bits sign-extended when H is off).
 Default uarch: decode / rename / dispatch / commit = 2 (direct prefix dispatch);
                2 integer ALU ports, ROB=32, ALQ=8, BRQ=8, MDQ=4, FPQ=8, IOQ=8, SQ=16,
                6 completion ports, 16 branch checkpoints, integer PRF=64, FPR=32 x 64-bit.
 Prediction: TAGE + 512-entry 4-way BTB + 32-entry ITT + 32-entry loop predictor + 16-entry RAS.
 Caches: L1I/L1D = 16 KiB each, 4-way, 64 B lines; L1I hit-under-prefetch + 8-entry FDIP;
-        L1D write-back, 8 MSHRs, 2 writeback buffers, degree-2 IP-stride prefetcher.
+        L1D write-back, 4 MSHRs (8 in default-w4), 2 writeback buffers, degree-2 IP-stride prefetcher.
         ITLB=16; DTLB=64 (2-way, load/store replicas); shared L2 TLB=512 (4-way).
-        No L2 cache in default; default-l2 enables 512 KiB / 8 ways.
+        No L2 cache in default; default-l2 / chip64-rva23 enable 512 KiB (default-w4-l2: 256 KiB), 8 ways.
 
 Verification: RISCOF / ACT4, scalar, vector and guest-mode difftest, RVFI and SVA.
 ```
@@ -66,18 +67,18 @@ reports precise traps with `vstart` for restart. See the [VPU manual](./docs/vpu
 
 ## Performance
 
-Selected benchmark results for the configurations below. FPGA runs use a 50 MHz core and 333 MHz DDR4 UI.
+Selected benchmark results for the configurations below. FPGA run Linux with a 50 MHz core and 333 MHz DDR4 UI. BM means bare-metal.
 
-| Environment | Preset / XLEN | DMIPS/MHz | CM/MHz | Embench-IoT | SPECrate2017 (INT/FP / GHz) | SPECrate2026 (INT/FP / GHz) |
-| --- | --- | ---: | ---: | --- | ---: | ---: |
-| Bare-metal sim | default / RV32 | 1.82-2.29 | 5.8889 | 2.0069x | - | - |
-| Bare-metal sim | default / RV64 | 1.99-2.55 | 5.6685 | 2.0362x | - | - |
-| Bare-metal sim | default-w4 / RV64 | 2.46-3.31 | 7.1016 | 2.6969x | - | - |
-| Linux sim | default / RV32 | 1.29-1.62 | 4.3148 | 1.4714x | - | - |
-| Linux sim | default / RV64 | 1.52-2.15 | 3.3654 | 1.6573x | 0.54 / 0.44 | 0.24 / 0.23 |
-| Linux sim | default-w4 / RV64 | 1.66-2.43 | 3.8553 | 1.9116x | 0.58 / 0.46 | 0.29 / 0.24 |
-| FPGA Linux, KU5P | default / RV64 | 1.34-1.93 | 3.3514 | 1.0477x | 0.21 / 0.16 | - |
-| FPGA Linux, KU15P | default-w4 / RV64 | 1.46-2.16 | 3.9803 | 1.2319x | 0.23 / 0.17 | 0.06 / 0.10 |
+| SW & HW Environment | Preset Config / XLEN | DMIPS/MHz | CM/MHz | Embench-IoT | SPECrate2017 (INT/FP / GHz) | SPECrate2026 (INT/FP / GHz) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| BM sim | default/RV32 | 1.82-2.29 | 5.8889 | 2.0069x | - | - |
+| BM sim | default/RV64 | 1.99-2.55 | 5.6685 | 2.0362x | - | - |
+| BM sim | default-w4/RV64 | 2.46-3.31 | 7.1016 | 2.6969x | - | - |
+| Linux sim | default/RV32 | 1.29-1.62 | 4.3148 | 1.4714x | - | - |
+| Linux sim | default/RV64 | 1.52-2.15 | 3.3654 | 1.6573x | 0.54/0.44 | 0.24/0.23 |
+| Linux sim | default-w4/RV64 | 1.66-2.43 | 3.8553 | 1.9116x | 0.58/0.46 | 0.29/0.24 |
+| FPGA, KU5P | default/RV64 | 1.34-1.93 | 3.3514 | 1.0477x | 0.21/0.16 | 0.05/0.10 |
+| FPGA, KU15P | default-w4/RV64 | 1.46-2.16 | 3.9803 | 1.2319x | 0.23/0.17 | 0.06/0.10 |
 
 All figures are measured directly on RTL (Verilator or FPGA; no architectural models).
 DMIPS/MHz reports strict (`-O3 -fno-inline`) to standard (`-O3 -fno-inline-functions`) with
@@ -86,6 +87,28 @@ DMIPS/MHz reports strict (`-O3 -fno-inline`) to standard (`-O3 -fno-inline-funct
 2017/2026 scores (`-O2 -march=rv64gc`; not official SPEC submissions) use RTL Linux SimPoint
 in simulation and `test`-set IPC on no-L2 DDR4 FPGA -- see
 [Performance Evaluation](./docs/performance.md) for details.
+
+### PPA
+
+Open-PDK pre-layout synthesis and STA on the `rapt` cluster (`Yosys + Slang + OpenSTA`,
+`MEMORY=sram`; each PDK column reports `Fmax [MHz] / Area [mm^2] / Power [mW]`):
+
+| Preset/XLEN | Rev | ASAP7 (7nm) | NanGate45 (45nm) | SKY130HD (130nm) |
+| --- | --- | ---: | ---: | ---: |
+| small/RV32 | 208295c | 230.6 / 0.100 / 4.36 | 213.6 / 0.927 / 42.7 | 32.7 / 4.630 / 71.6 |
+| small/RV64 | 208295c | 210.5 / 0.117 / 2.41 | 176.7 / 1.099 / 36.9 | 32.7 / 5.594 / 79.5 |
+| default/RV32 (no-V) | 8272b1d | 213.0 / 0.085 / 14.3 | 159.3 / 0.789 / 63.4 | 36.2 / 4.362 / 38.7 |
+| default/RV64 (no-V) | 8272b1d | 176.9 / 0.114 / 24.7 | 127.8 / 1.096 / 102.0 | 30.3 / 6.104 / 137.0 |
+| default/RV32 | b671438 | - | 120.3 / 4.815 / 518.0 | - |
+
+Fmax includes external I/O delays (`50 MHz` target on RV32 ASAP7/NanGate45, `25 MHz` on RV64
+and SKY130HD); register-to-register Fmax reaches `307.4 / 273.3 MHz` on `small` ASAP7
+(RV32/RV64) and `150.8 MHz` on `default/RV32` NanGate45. Routed Vivado FPGA SoCs close timing
+from `36.1k` LUT (`chip32-small/RV32`, Arty A7 @ 20 MHz) and `109.8k` / `183.6k` LUT (`small` /
+`default` RV64, KU5P @ 75 MHz) to `301.7k` / `311.3k` LUT (`default-w4` / `default-w4-l2` RV64,
+KU15P @ 50 MHz) and coherent multi-hart `small-smp2` (`139.6k` / `206.9k`, KU5P), `default-smp2`
+(`343.7k`, KU15P) and 4-hart `middle-smp4` (`380.7k`, KU15P) -- see
+[PPA Details](./docs/performance.md#6-ppa-open-pdk-sta-and-fpga-implementation).
 
 ## Microarchitecture
 
@@ -159,7 +182,7 @@ flowchart TB
         IPTW["IPTW<br/>Sv32 / Sv39"]
       end
       subgraph DMEM["D-side"]
-        L1D["L1D 16 KiB | 4-way | 64 B<br/>VIPT | write-back | deg-2 PF<br/>8 MSHRs | 2 writeback buffers"]
+        L1D["L1D 16 KiB | 4-way | 64 B<br/>VIPT | write-back | deg-2 PF<br/>4 MSHRs | 2 writeback buffers"]
         DTLB["DTLB 64 | 2-way<br/>load / store replicas"]
         DPTW["DPTW<br/>Sv32 / Sv39 | Svade"]
       end
@@ -182,8 +205,8 @@ flowchart TB
     subgraph L2S["rapt_l2_subsystem | always present"]
       direction LR
       AXIM["AXI4 master<br/>up to 8 reads"]
-      L2["L2 | default: management only<br/>default-l2: 512 KiB | 8-way"]
-      RBUF["AXI R buffer<br/>default-l2 only"]
+      L2["L2 | default: management only<br/>default-l2: 512 KiB | default-w4-l2: 256 KiB"]
+      RBUF["AXI R buffer<br/>with L2 enabled"]
       AXIM --> L2 --> RBUF
     end
     ARB["Debug arbiter"]
@@ -357,8 +380,8 @@ then `make fpga-netboot-rv32-load`. Replace `rv32` with `rv64` for RV64. These p
 targets use the same Ethernet/CPU settings and isolated output directories; see
 the linked guide for prerequisites, payload paths and TFTP setup.
 
-The native KU5P and CU08-KU15P SoCs also provide an RV64 Ubuntu workflow with
-TFTP boot and an NFS root. See the [Ubuntu netboot guide](./docs/linux_kernel.md#ubuntu-on-native-fpga-socs).
+The KU5P and CU08-KU15P SoCs also provide an RV64 Ubuntu workflow with
+TFTP boot and an NFS root. See the [Ubuntu netboot guide](./docs/linux_kernel.md#ubuntu-on-fpga-socs).
 
 ```shell
 # --- LiteX SoC ---

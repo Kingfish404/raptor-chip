@@ -115,7 +115,7 @@ and BIOS ARP exchange must succeed before TFTP can start.
 | `XLEN` | `64` | `32` or `64` |
 | `RAPT_CONFIG` | `small` | CPU preset from `rtl/configs/` |
 | `MEMORY` | `ddr` | `ddr` or `bram` main RAM |
-| `CLOCK_MHZ` | `50` | CPU clock target: `25`, `50` or `100` MHz |
+| `CLOCK_MHZ` | `50` | CPU clock target: `25`, `50`, `75` or `100` MHz |
 | `RAM_BYTES` | `131072` | BRAM main RAM size; power of two, 16 KiB-1 MiB |
 | `USE_RESET_BUTTON` | `0` | Set to `1` to enable the active-low reset button |
 | `DDR_PART` | `MT40A512M16LY-075` | MIG memory-part selection; see board details below |
@@ -187,10 +187,12 @@ Addresses are generated from `rtl/configs/memory_map.json`:
 
 | Region | Base address | Size / behavior |
 |---|---|---|
+| Goldfish RTC | `0x00101000` | 4 KiB wall-clock RTC; PLIC source 6 |
 | CLINT | `0x02000000` | Cluster timer; 1 MHz `mtime` |
-| PLIC | `0x0c000000` | Interrupt controller; UART source 1 |
+| PLIC | `0x0c000000` | Interrupt controller; UART source 1, Ethernet source 2 |
 | Scratch SRAM | `0x0f000000` | 8 KiB; includes the ROM monitor's stack |
 | UART | `0x10000000` | Byte-spaced 8250 registers, 115200 baud, 8N1 |
+| Ethernet | `0x18000000` | 64 KiB MMIO + packet SRAM when enabled (`ETHERNET.md`) |
 | Boot ROM / reset vector | `0x20000000` | 64 KiB, initialized from `boot.hex` |
 | Main RAM | `0x80000000` | `RAM_BYTES` in BRAM mode; 1 GiB RV32 / 2 GiB RV64 in DDR mode |
 

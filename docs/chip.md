@@ -17,7 +17,7 @@ here is technology-neutral.
 ```text
 rapt_chip_pads   rapt_pad_in / rapt_pad_out / rapt_pad_bidi around every signal pin
 └─ rapt_chip     reset, interrupt and JTAG synchronizers, DIAG divider
-   ├─ rapt            cluster: core, L1s, CLINT, PLIC, Debug Module, DTM
+   ├─ rapt            cluster: core, L1s, rapt_l2_subsystem, CLINT, PLIC, DM, DTM
    ├─ rapt_chip_boot      retained boot control and reset ROM
    └─ rapt_chip_backend   exclusive AXI/pin ownership
       ├─ rapt_axi_xspi    octal bridge, local link and SRAM control registers
@@ -40,9 +40,11 @@ low-end FPGAs. `RAPT_NO_FPU` removes the FEU, clears F and D in MISA, keeps
 `mstatus.FS` Off, and traps every FP instruction and FP CSR access as illegal;
 `make -C sim/tb verilator-chip-no-fpu` checks that contract.
 
-The three `chip32-*` presets are scalar RV32 builds. For vector memory faults
-through this link in simulation, select the `default` preset in the
-[xSPI vector tests](https://github.com/Kingfish404/raptor-chip/blob/master/verification/subsystem/README.md#integrated-vector-programs).
+The three `chip32-*` presets are scalar RV32 builds; `chip64-rva23`
+(`rtl/configs/chip64-rva23`) provides an RV64 RVA23U64/RVA23S64 macro-SRAM
+preset with V 1.0, H, 16 KiB L1s, and a 512 KiB 8-way L2 cache. For vector
+memory faults through this link in simulation, select `default` or `chip64-rva23`
+in the [xSPI vector tests](https://github.com/Kingfish404/raptor-chip/blob/master/verification/subsystem/README.md#integrated-vector-programs).
 
 ## Pins
 
@@ -204,9 +206,10 @@ uses AXI byte lanes 4 through 7.
 
 The registered word drives every SRAM wrapper through explicit ports. Behavioral
 memories ignore it; macro implementations receive it on their `ctrl` port.
-`RAPT_SRAM_CTRL_RESET` supplies the safe default: `16'h0608` for both chip32
-presets and zero for presets without an override. External chip reset restores
-this value; `ndmreset` preserves the register along with the link bridge.
+`RAPT_SRAM_CTRL_RESET` supplies the safe default: `16'h0608` for
+`chip32-middle-16k`, `chip32-small`, and `chip64-rva23`, and zero for presets
+without an override. External chip reset restores this value; `ndmreset`
+preserves the register along with the link bridge.
 
 Software must change the word only while caches are idle, for example from
 uncached code with caches disabled or after a fence has drained cache activity.

@@ -50,12 +50,14 @@ four-way); `large` has 32 KiB L1I (one-way) and 8 KiB L1D (two-way).
 
 The model uses the larger derived line size as gem5's global line size for
 historical unequal-line presets. L1I defaults to one MSHR (blocking refill) and
-L1D defaults to `max(1, RAPT_L1D_MSHRS)` (four on `default`/`large`, one on
-`small`/`middle`). Explicit `--mshrs=N` overrides both caches; `L1I.mshr_size`
-and `L1D.mshr_size` override each independently. `RAPT_L1I_REFILL_WORDS`
-(32 B sectors) has no cache-level analogue here: gem5 refills full lines.
-Presets that define `RAPT_L2_EN` (`default-l2` 512 KiB 8-way, `large` 128 KiB
-1-way) automatically instantiate the shared L2 unless `--no-l2` is passed.
+L1D defaults to `max(1, RAPT_L1D_MSHRS)` (eight on `default-w4`/`default-w4-l2`,
+four on `default`/`large`, one on `small`/`middle`). Explicit `--mshrs=N`
+overrides both caches; `L1I.mshr_size` and `L1D.mshr_size` override each
+independently. `RAPT_L1I_REFILL_WORDS` (32 B sectors) has no cache-level
+analogue here: gem5 refills full lines. Presets that define `RAPT_L2_EN`
+(`default-l2` and `chip64-rva23` 512 KiB 8-way, `default-w4-l2` 256 KiB 8-way,
+`large` 128 KiB 1-way) automatically instantiate the shared L2 unless `--no-l2`
+is passed.
 
 The gem5 FP register count is a modeling choice. RTL uses ROB-backed FP
 renaming and speculative results plus a committed 32 × 64-bit FPR bank; it
@@ -151,7 +153,7 @@ Each run lands in `raptor-chip/sim/build/gsim/<bench>-<preset>[.<json>]-rv$XLEN[
 
 `make sweep BENCH=<bench>` additionally writes `raptor-chip/sim/build/gsim/results/sweep-<bench>-rv$XLEN.csv` aggregating every preset×CPU combo. To regenerate the summaries from existing `stats.txt` without re-running gem5: `make summary OUTDIR=<dir>` or `make aggregate BENCH=<bench>`.
 
-`make bp-study` writes one CSV per selected workload under `sim/build/gsim/results/bp-study-<bench>-rv32.csv`; by default this includes CoreMark and the SE-compatible MicroBench port. `rtl-tage` is the current Raptor-equivalent direction predictor: a 256-entry bimodal base and three 128-entry tagged tables. `same-budget-gshare` uses the same normalized direction-predictor budget, separating algorithm benefit from capacity. `practical-tage-sc` uses gem5's fixed 8 KiB TAGE-SC-L implementation; the fixed 64 KiB `upper-tage-sc` model is a deliberately impractical ceiling for this RTL, useful for bounding the benefit of direction-prediction accuracy.
+`make bp-study` writes one CSV per selected workload under `sim/build/gsim/results/bp-study-<bench>-rv32.csv`; by default this includes CoreMark and the SE-compatible MicroBench port. `rtl-tage` follows the preset's Raptor TAGE geometry (`default`: 1024-entry bimodal base and three 1024-entry tagged tables; compact presets such as `middle`/`default-l2`: 256-entry base and three 128-entry tagged tables). `same-budget-gshare` uses the same normalized direction-predictor budget, separating algorithm benefit from capacity. `practical-tage-sc` uses gem5's fixed 8 KiB TAGE-SC-L implementation; the fixed 64 KiB `upper-tage-sc` model is a deliberately impractical ceiling for this RTL, useful for bounding the benefit of direction-prediction accuracy.
 
 ## Direct gem5 invocation
 
@@ -170,7 +172,7 @@ Useful flags:
 
 * `--config-svh <path>` — point at a custom `rapt_config.svh` (skips `--preset`).
 * `--cpu timing|atomic` — in-order timing / functional no-cache baselines for triage.
-* `--no-l2` / `--with-l2` — override the preset's `RAPT_L2_EN` setting (`default-l2` and `large` enable L2 automatically; other presets connect L1s directly to membus).
+* `--no-l2` / `--with-l2` — override the preset's `RAPT_L2_EN` setting (`default-l2`, `default-w4-l2`, `chip64-rva23`, and `large` enable L2 automatically; other presets connect L1s directly to membus).
 * `--rtl-execution-resources` — use the configured integer-ALU port count, one MULDIV unit (2-cycle pipelined MUL when `RAPT_M_FAST=1`), one FPU pipe, and one load/store request port. The Make wrapper enables it with `RTL_EXEC=1` by default; direct script use is opt-in. Set `RTL_EXEC=0` to compare against gem5's broader FUPool.
 * `--rtl-split-iq` (Make: `SPLIT_IQ=1`) — partition gem5's issue queue into domain-specific `IQUnit`s mirroring `rapt_backend.sv` (`ALQ+BRQ`, `MDQ`, `IOQ`, `FPQ`).
 * `--fetch-queue-size N` — override gem5's per-thread fetch queue depth (defaults to `RAPT_RIQ_SIZE`). A small value helps quantify frontend-buffer decoupling separately from `fetchWidth`.

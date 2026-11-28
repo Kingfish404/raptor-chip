@@ -26,7 +26,7 @@ Run `make -C fpga/<board> help` for targets and variables, for example
 `make fpga-<target> FPGA_BOARD=<board>` runs the same target (CU08 by default)
 and uses the board's preset unless `RAPT_CONFIG` is given. CU08 and RK default
 to RV64, preset `small`, DDR4 and 50 MHz; CU08 also
-defaults to `CM005_BRIDGE=1`, which requires 50 MHz. In `fpga/litex`,
+defaults to `CM005_BRIDGE=1`, which requires 50 or 75 MHz. In `fpga/litex`,
 `fpga-netboot-rv32-build` and `fpga-netboot-rv64-build` select the CU08 LiteX
 netboot profile by default; pass `FPGA_BOARD=rk_xcku5p_f` for RK.
 

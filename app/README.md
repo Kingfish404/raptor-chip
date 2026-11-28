@@ -66,10 +66,12 @@ app/
 │   └── hello/        #   Minimal hello world
 ├── demos/            # Interactive demo programs
 ├── benchmarks/       # Performance benchmarks
+│   ├── agent/        #   RAgentBench agentic/tool-use kernel benchmarks
 │   ├── coremark/     #   CoreMark (sources from AM am-kernels; prepare with root setup)
 │   ├── coremark-pro/ #   Pinned upstream suite, Raptor MITH port, workload reports
 │   ├── embench/      #   Embench-IoT (auto-cloned)
-│   └── llm/          #   Fixed-point LLM operator/infer/train benchmarks
+│   ├── llm/          #   Fixed-point LLM operator/infer/train benchmarks
+│   └── pipeline/     #   Focused pipeline microbenchmarks
 ├── lib/              # Picolibc I/O stubs (Linux toolchain only)
 ├── pk/               # riscv-pk proxy kernel (for running on NPC)
 └── build/            # Build outputs (rv32/ or rv64/)

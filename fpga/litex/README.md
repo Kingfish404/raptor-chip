@@ -1,6 +1,6 @@
 # Raptor LiteX SoC Integration
 
-LiteX SoC integration for the [Raptor](../../) dual-issue out-of-order RISC-V core.
+LiteX SoC integration for the [Raptor](../../) configurable RV32/RV64 out-of-order RISC-V core.
 
 ## Quick Start
 
@@ -65,7 +65,7 @@ The RK-XCKU5P-F V1.2 has a separate LiteX profile using its onboard RTL8211F
 RGMII PHY and 2 GiB DDR4 MIG. Use
 `make fpga-netboot-rv64-build FPGA_BOARD=rk_xcku5p_f` (or `rv32`), then the
 matching `info`, `load`, `serve`, and `test` targets. The fixed profile defaults
-to the `small` CPU preset. See the [RK board guide](../rk-xcku5p-f/README.md#litex-soc-separate-flow)
+to the `small` CPU preset. See the [RK board guide](../rk-xcku5p-f/README.md#litex-bios-and-netboot)
 and [netboot workflow](NETBOOT.md) for the full command sequence and host setup.
 The RV64 `small` profile completed Vivado 2025.2 routing at 50 MHz: WNS was
 +0.118 ns, WHS was +0.005 ns, and there were no failing setup or hold endpoints.
@@ -561,7 +561,7 @@ make fpga-build VARIANT=linux64 FPGA_BOARD=mlk_cu08_ku15p RAPT_CONFIG=default
 | Variant   | Use Case                |
 | --------- | ----------------------- |
 | `linux32` | RV32 Linux/OpenSBI boot |
-| `linux64` | RV64 experiments        |
+| `linux64` | RV64 Linux/OpenSBI boot |
 
 Use `make linux32` or `make linux64` for simulation. For FPGA, use the explicit commands such as `make linux-fpga-rv32-build` and `make linux-fpga-rv64-build`.
 
@@ -623,11 +623,11 @@ RLLMBench uses `rdtime` by default and reports `score_per_sec` from physical sec
 ## Architecture
 
 ```
-+--------------------------------------------+
-|  Raptor Core (rapt.sv)                     |
-|  +- Dual-issue OoO, RV32IMAC + Zb*         |
-|  \- AXI4 Master (32-bit addr, 32-bit data) |
-+---------+----------------------------------+
++---------------------------------------------------+
+|  Raptor Core (rapt.sv)                            |
+|  +- Configurable OoO, RV32/RV64 IMAFDC+V+H+Zb*    |
+|  \- AXI4 Master (32..38-bit addr, XLEN-bit data)  |
++---------+-----------------------------------------+
           | AXI4 Full
           v
 +--------------------------------------------+

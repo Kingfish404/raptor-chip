@@ -67,7 +67,7 @@ make run-rv32 VFLAGS="-DRAPT_RV64" ARGS="-b -n"
 
 ### Run vector code
 
-The `default`, `default-*` and `large` presets enable V 1.0 on RV32 and RV64.
+The `default`, `default-*`, `large` and RV64 `chip64-rva23` presets enable V 1.0.
 Compile a bare-metal vector program for `rv32gcv` / `ilp32d` or
 `rv64gcv` / `lp64d` and use the matching NPC target. The whole-core smoke
 target builds its own program and memory-fault cases.

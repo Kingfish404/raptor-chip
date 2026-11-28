@@ -36,8 +36,9 @@ RTL development dependencies.
 | Integrated V | `make -C verification/subsystem vector-system-smoke` | MMU, interrupts, restart and device faults |
 | Core programs | `rva2{2,3}s64-directed`, `sigtest` | CSR, H/MMU, PMP/PMA, atomics and FP |
 | Core differential fuzzing | `fuzz`, `riscv-dv`, `cascade-fuzz` | Generated programs with independent references |
+| L2 coherence fuzzing | `make -C verification/l2_fuzz` | Multi-agent randomized L1/L2 coherence, victim release, and refill races |
 | Architecture compliance | `riscof`, `riscof-classic` | ACT4/Sail self-checking ELFs and classic RISCOF signatures |
-| Formal | `formal`, `formal-scope`, `formal-signoff` | Safety properties and scoped proof evidence |
+| Formal | `formal`, `formal-scope`, `formal-signoff` | Core, debug, and L2 (`l2_top`, MSHR, directory, data/buffers) proofs |
 | UVM | `uvm`, `uvm-chip-regress` | Module scoreboards and whole-chip AXI, interrupts, debug and faults |
 | Debug | `jtag-selftest` | DTM/DM compliance and OpenOCD smoke checks |
 | NEMU | `nemu-{unit,isa,multihart}-check` | Reference ISA, VM, devices and replay |
@@ -244,10 +245,20 @@ each injected RTL fault must fail an assertion and produce a counterexample.
 The DM checks include precise halt capture, held resume, SBA stalls, malformed
 responses, bus errors, byte strobes, busy access, autoincrement and deactivation
 while a transfer drains. Its responder needs no fairness assumption. Arbiter
-proofs assume legal stalled AXI sources, reserved SBA ID 15, bounded core credits
+proofs assume legal stalled AXI sources, reserved SBA ID 7, bounded core credits
 and responses following accepted addresses; they check ownership, response
 routing, backpressure and idle accounting. These producer obligations still need
 composition with the actual core, SBA and router.
+
+SymbiYosys L2 and SMP formal specifications under `verification/formal/`
+(`l2_top`, `l2_mshr_frontend`, `l2_refill_mshrs`, `l2_directory`,
+`l2_data_array`, `l2_buffers`, `l2_ctrls`, `coherence_hub`, `l1d_smp_probe`,
+`clint_smp`, and `plic_smp`) check MSHR uniqueness, directory/1RW SRAM hazard
+freedom, non-inclusive victim release ordering, refill data integrity, cross-hart
+snoop probe/dirty-intervention serialization, and multi-hart interrupt routing,
+paired with the randomized multi-agent Verilator L2 coherence fuzzer in
+`verification/l2_fuzz/` and 2-hart/4-hart cluster coherence/atomics stress benches
+(`tb_rapt_smp_smoke`, `tb_rapt_smp_coherence_atomics`, `tb_rapt_smp4_stress`).
 
 The step check reuses the complete production ROU wrapper and checks admission
 capture, single-lane entry, token preservation, fetch blocking, interrupt masking

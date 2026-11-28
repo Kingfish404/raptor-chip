@@ -2,14 +2,14 @@
 
 From the repository root, `make run-rv32` and `make run-rv64` configure, build, and run the built-in smoke program with difftest. Use `IMG=/absolute/path.bin` for another program. `DIFFTEST=1` is the default and selects `o2_difftest_defconfig`; `DIFFTEST=0` selects `o2_defconfig` and disables the runtime reference. An explicit `NPC_DEFCONFIG` overrides the profile choice.
 
-With `--diff`, `--diff-isa=MASK` opts the NEMU reference into Svnapot (bit 0), Zawrs (bit 1), and Zfa (bit 2); the default mask is zero. For example, `--diff-isa=0x4` enables Zfa. The simulator rejects other extension bits and missing reference negotiation; V/H and extensions with additional CSR state need RTL state export and comparison first. This option does not enable an extension in RTL: use it only when the selected RTL preset implements the feature.
+With `--diff`, `--diff-isa=MASK` opts the NEMU reference into Svnapot (bit 0), Zawrs (bit 1), and Zfa (bit 2); the default mask is zero. For example, `--diff-isa=0x4` enables Zfa. V 1.0 and H guest/VS CSR state export and NEMU sidecar DiffTest are supported when configured in RTL; the simulator rejects other experimental extension bits or missing reference negotiation. This option does not enable an extension in RTL: use it only when the selected RTL preset implements the feature.
 
 `--tohost=ADDRESS` optionally observes an 8-byte-aligned HTIF exit mailbox within RAM.
 It reads the mailbox after actual memory writes, including byte enables and RV32 split writes.
 Device/command zero with value 1 passes; other odd exit values fail independently of `a0`.
 Zero, even values and other HTIF device messages do not exit. This is an exit-only adapter,
 not a general HTIF console or syscall implementation. It is disabled unless requested.
-Use the [upstream riscv-tests runner](../verification/README.md#upstream-isa-tests-and-riscv-dv) to obtain the symbol
+Use the [upstream riscv-tests runner](../verification/README.md#external-generators-and-model-checking) to obtain the symbol
 address from the ELF and run the unmodified tests with matched reference settings.
 
 ## Independent builds

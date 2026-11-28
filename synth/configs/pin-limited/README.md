@@ -25,8 +25,9 @@ fpga/arty-a7-t100/                  FPGA validation platform
 Compile all of the configuration's RTL files together with the processor sources
 under `rtl/`, with `rtl/rapt_pkg.sv` first. Select the core and memory geometry
 using the existing presets in `rtl/configs/`: `chip32-middle-16k`, `chip32-dff`,
-or `chip32-small` for the Arty build. These presets configure the processor;
-this directory defines its pin and board integration.
+or `chip32-small` for RV32 Arty/chip builds, or `chip64-rva23` for RV64 RVA23
+builds. These presets configure the processor; this directory defines its pin
+and board integration.
 
 The same elaborated chip contains both backends. Chip reset selects the small
 on-chip ROM and Flash XIP. IRQ is PLIC source 1 in both modes. The retained

@@ -1,17 +1,17 @@
-# Ethernet controller ABI v1
+# Ethernet controller ABI (v1 PIO / v2 DMA)
 
 The RK Ethernet controller occupies `0x18000000..0x1800ffff`, inside the CPU's
 uncached peripheral PMA. This address is a platform choice; the device
-tree identifies the interface as `raptor,ethernet-v1` (ABI v1) or
-`raptor,ethernet-v2` (ABI v2 DMA). The bus accepts
-aligned, single-beat 32-bit accesses and preserves the appropriate RV64 byte
-lanes. Registers require all four write strobes; packet RAM supports byte
+tree identifies the interface as `raptor,ethernet-v1` (ABI v1 PIO) or
+`raptor,ethernet-v2` (ABI v2 AXI4 Ring DMA, enabled with `--eth-dma 1`). The bus
+accepts aligned, single-beat 32-bit accesses and preserves the appropriate RV64
+byte lanes. Registers require all four write strobes; packet RAM supports byte
 strobes. Unsupported AXI widths, alignment and bursts return DECERR.
 
 | Offset | Register | Behavior |
 | --- | --- | --- |
 | `0x00` | ID | `0x524e4554` (`RNET`) |
-| `0x04` | Version | `1` |
+| `0x04` | Version | `1` (PIO) or `2` (PIO + 64-bit AXI4 Ring DMA) |
 | `0x08` | Control | Bit 0 enables packet queues/MAC; MDIO remains accessible when disabled |
 | `0x0c` | Status | Bit 0 RX pending, bit 1 TX ready, bit 2 PHY/MAC clocks ready |
 | `0x10` | IRQ mask | Bit 0 RX, bit 1 TX |
@@ -45,7 +45,11 @@ TX software writes the entire buffer before committing its length. A toggle
 handshake transfers ownership to the 125 MHz MAC and back to the CPU. SRAM reads
 are synchronous with lookahead; AXI-stream data remains stable under backpressure.
 Completion can precede the final wire FCS/IFG; the MAC backpressures the next
-packet until it can accept it. No DMA or cache maintenance is involved.
+packet until it can accept it. In ABI v1 (`--eth-dma 0`, default), no DMA or
+cache maintenance is involved; when `--eth-dma 1` enables ABI v2
+(`rapt_eth_axi_dma.sv`), 16-entry RX/TX descriptor rings at `0x100..0x12c` stream
+64-bit AXI4 bursts directly to/from DDR4 with standard Linux `dma-noncoherent`
+(`Zicbom` + `Svpbmt`) maintenance.
 
 Disabling the controller or losing its clocks clears packet ownership and
 hardware counters. Reset asserts asynchronously and releases locally in each
